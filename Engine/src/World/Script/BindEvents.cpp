@@ -421,7 +421,8 @@ namespace World
 			std::string error;
 			if (!snapshot.Callback.Call(arguments.data(), arguments.size(), nullptr, &error))
 			{
-				ScriptEngine::FaultScriptInstance(snapshot.OwnerEntity, snapshot.OwnerGeneration, phase, error);
+				if (Log::GetCoreLogger())
+					WLD_CORE_ERROR("[Lua] event callback '{0}' failed: {1}", snapshot.Name, error);
 				DropOwnerSubscriptions(snapshot.OwnerEntity, snapshot.OwnerGeneration);
 			}
 		}

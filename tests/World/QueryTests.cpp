@@ -239,13 +239,12 @@ int main()
 			pipeScene.OnUpdateRuntime(0.016f);
 
 			const auto& timings = pipeScene.GetFrameSystemTimings();
-			CHECK(timings.size() == 6);
+			CHECK(timings.size() == 5);
 			CHECK(timings[0].Name == "physics-2d");
 			CHECK(timings[1].Name == "physics-3d");
 			CHECK(timings[2].Name == "movement-system");
-			CHECK(timings[3].Name == "scene-update");
-			CHECK(timings[4].Name == "transform-system");
-			CHECK(timings[5].Name == "camera-system");
+			CHECK(timings[3].Name == "transform-system");
+			CHECK(timings[4].Name == "camera-system");
 		}
 
 		// ========================================================
@@ -302,8 +301,8 @@ int main()
 			CHECK(systemScene.GetRegistry().get<TransformComponent>(testEnt).Location.x == 11.0f);
 
 			const auto& timings = systemScene.GetFrameSystemTimings();
-			CHECK(timings.size() == 7);
-			CHECK(timings[6].Name == "CustomTestSystem");
+			CHECK(timings.size() == 6);
+			CHECK(timings[5].Name == "CustomTestSystem");
 		}
 
 		// ========================================================

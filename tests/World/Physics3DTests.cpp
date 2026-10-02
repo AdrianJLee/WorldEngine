@@ -295,7 +295,7 @@ namespace
 		CHECK(scene->IsPhysics2DRunning());
 		CHECK(scene->IsPhysics3DRunning());
 		for (int frame = 0; frame < 60; ++frame)
-			scene->OnScriptUpdate(Timestep(kFixedStep));   // 2D/3D 同一条固定步路径
+			scene->OnUpdateRuntime(Timestep(kFixedStep));   // 2D/3D 同一条固定步路径
 
 		const b2Vec2 position2D = b2Body_GetPosition(faller2D.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
 		glm::vec3 position3D { 0.0f };
@@ -369,7 +369,7 @@ namespace
 		});
 		hooked->OnRuntimeStart();
 		for (int frame = 0; frame < 150; ++frame)
-			hooked->OnScriptUpdate(Timestep(kFixedStep));
+			hooked->OnUpdateRuntime(Timestep(kFixedStep));
 		hooked->OnRuntimeStop();
 		std::printf("[info] scene hook events=%d pairMatched=%d\n", hookEvents, hookPairMatched ? 1 : 0);
 		CHECK(hookEvents >= 1);

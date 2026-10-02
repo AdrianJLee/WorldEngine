@@ -91,7 +91,6 @@ namespace World
 	// W3a-A1:组件字段代理(Entity:GetComponent 的返回值;Kind → Lua 映射表见 Script/BindComponentAccess.h)。
 	WLD_API bool RegisterComponentProxyBinding(ScriptBindingContext& bindings, std::string* error);
 
-	struct LuauScriptComponent;
 	class ScriptEngine
 	{
 	public:
@@ -113,6 +112,9 @@ namespace World
 		// Pure ECS: 自动扫描并加载项目系统脚本 (assets/scripts/systems/*.luau 与 *.lua)
 		static std::size_t LoadSystemScripts(Scene& scene, const std::filesystem::path& systemsDir);
 		static std::size_t LoadSystemScripts(Scene& scene);
+
+		// UI 阶段兼容占位 (纯 ECS 脚本通过 WUI / System 渲染)
+		static std::size_t DrawScriptUi(Scene&, Wui::WuiContext&) { return 0; }
 
 		static void DefineMathType();
 		static void RegisterMathTypes();
@@ -137,34 +139,7 @@ namespace World
 		//   * 注解与脚本表值类型不符、未知注解类型 → 跳过该字段 + 一条诊断(沿用旧口径)。
 		// 结果按(路径 + 内容指纹 + VM 是否可用)做单槽缓存 → 检视器可以每次绘制都调。
 		// 路径为空 / 读不到脚本 → false + error;此时 out 清空。
-		static bool DescribeScriptDeclarations(const std::string& scriptPath,
-			std::vector<ScriptProperties::Declaration>& out,
-			std::vector<std::string>* diagnostics = nullptr, std::string* error = nullptr);
 
-		// 编辑态即时同步的唯一入口:按脚本路径取声明 → 同步组件属性表
-		// (保留同名同类型的已有值;新字段/未设字段按默认值处理;声明里没有的旧属性丢弃 + 诊断)。
-		// 同时刷新 BehaviorRegistry 里的 Luau 行为描述(旧编辑态预览路径的落点,随死代码一起搬到这里)。
-		// 失败时组件原样不动并返回 false(error 说明原因;诊断追加到 diagnostics,可为 null)。
-		static bool SyncScriptDeclarations(LuauScriptComponent& script,
-			std::vector<std::string>* diagnostics = nullptr, std::string* error = nullptr);
-		// 核心：处理单个实体的脚本实例化和每帧更新
-		static void OnCreateScript(LuauScriptComponent& scriptComponent, Entity entity);
-		static void OnUpdateScript(LuauScriptComponent& scriptComponent, Timestep ts);
-		static void OnDestroyScript(LuauScriptComponent& scriptComponent);
-
-		// ---- P2 W3c:脚本 UI 的宿主入口(UI 阶段每帧一次) ----
-		// 遍历场景里"已运行且带 OnUI 回调"的 LuauScriptComponent,逐个建立当前 UI 上下文
-		// (ui.* 读取的 WuiContext + 脚本逻辑路径前缀)并调用 OnUI(self)。
-		// 单个脚本回调出错只把该实例置 Faulted(ReportLuaError),其它实例继续绘制;
-		// 返回本帧出错的脚本数(0 = 全部成功)。
-		static std::size_t DrawScriptUi(Scene& scene, Wui::WuiContext& context);
-
-		// ---- P2 W4:事件/计时器的实例收口 ----
-		// 事件/计时器回调(由 Script/BindEvents 的桥层驱动)失败时把该实例置 Faulted,
-		// 与 OnUpdate 失败同一落点(State=Faulted + LastError);generation 不匹配
-		// (已热重载/已重建)或实例无效时静默忽略。
-		static void FaultScriptInstance(Entity entity, uint64_t generation, const char* phase,
-			const std::string& error);
 
 		// 方便获取全局状态（W1b 起返回 Luau VM 门面；未初始化时抛 logic_error）
 		static LuauVm& GetState();
@@ -176,25 +151,10 @@ namespace World
 		static BehaviorRegistry& Behaviors();
 		// 幂等登记/刷新一个 Luau 行为（字段来自组件的属性表；路径为空 → false + error）。
 		// 同模块 id 描述一致 → 直接返回 true；描述变化（脚本编辑/热重载）→ Replace 刷新。
-		static bool EnsureLuaBehavior(LuauScriptComponent& script, std::string* error = nullptr);
 		// 幂等登记/刷新 schema 注册表里全部 Category==Script 的 C++ 行为；
 		// 返回已登记/已确认的模块数，失败项写入 errors（可为 null）。
 		static std::size_t EnsureSchemaBehaviors(const Schema::SchemaRegistry& schemas,
 			std::vector<std::string>* errors = nullptr);
-
-		// ---- P2 W5:L2 脚本热重载(引擎侧)----
-		// 重新加载组件当前脚本并**整体交换**实例引用(环境/脚本表/四个回调)与属性表,
-		// 属性按"活表 > 场景保存值(同名+同类型) > 新脚本默认值"迁移(见 Script/HotReload.h),
-		// 成功后 Runtime.Generation 进入热重载域并刷新
-		// BehaviorRegistry 描述;任一步失败都保留旧版本,只写 ReloadDiagnostic。
-		//   - 成功:ReloadDiagnostic 清空;diagnostics(可空)收迁移警告(类型变化/字段删除);
-		//   - 失败:ReloadDiagnostic 与 diagnostics 都是可读诊断(含脚本路径,编译器给了行号时
-		//     行号原样保留);State 不会被置 Faulted,旧引用不会被清;
-		//   - 拒绝:Runtime.State ∈ {Creating, Destroying}、没有活动实例(Runtime.State != Running
-		//     或无脚本表/环境引用)、
-		//     或 RuntimeEntity 所属场景不在安全点(Scene::CanApplyScriptReload()==false)。
-		// 宿主应在帧边界调用;引擎在能取到场景时会再校验一次安全点。
-		static bool ReloadScript(LuauScriptComponent& component, std::string* diagnostics = nullptr);
 
 		// ---- P2 W6:沙箱预算旋钮 ----
 		// 进程内默认策略(Init 时下发到 VM;不随 Shutdown 复位)。0 = 该维度不限;

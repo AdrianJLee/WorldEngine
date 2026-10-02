@@ -63,9 +63,7 @@ namespace World::Modules
 		else
 			out.RollbackPath = rollback.string();
 
-		// 2) 旧实例收 OnDestroy(配置态保留),再卸载模块(schema + 行为描述 + FreeLibrary)。
-		if (scene)
-			out.InstancesDrained = scene->DrainNativeScriptInstances();
+		// 2) 卸载模块(schema + FreeLibrary)。
 		std::string error;
 		out.Status = context.Modules().Unload(GameModuleId, context, &error);
 		if (out.Status != ModuleManager::Status::Ok)
@@ -74,8 +72,7 @@ namespace World::Modules
 			return false;
 		}
 		out.ModuleUnloaded = true;
-		out.Message = "Game module unloaded: " + std::to_string(out.InstancesDrained)
-			+ " instance(s) drained, file can be rebuilt";
+		out.Message = "Game module unloaded, file can be rebuilt";
 		return true;
 	}
 
@@ -109,10 +106,7 @@ namespace World::Modules
 		{
 			if (const WeModule* module = context.Modules().FindById(GameModuleId))
 				out.AbiVersion = module->AbiVersion;
-			if (scene)
-				out.InstancesRestored = scene->RestoreNativeScriptInstances(&out.Diagnostics);
-			out.Message = "Game module loaded: " + std::to_string(out.InstancesRestored)
-				+ " instance(s) pending";
+			out.Message = "Game module loaded";
 			return true;
 		}
 
@@ -134,8 +128,6 @@ namespace World::Modules
 		out.RollbackPath = rollback.string();
 		if (const WeModule* module = context.Modules().FindById(GameModuleId))
 			out.AbiVersion = module->AbiVersion;
-		if (scene)
-			out.InstancesRestored = scene->RestoreNativeScriptInstances(&out.Diagnostics);
 		out.Message += "; rolled back to the previous module copy";
 		return false;   // 重载本身失败(旧行为已恢复,由编辑器显示诊断)
 	}

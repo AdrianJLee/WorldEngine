@@ -10,7 +10,31 @@
 
 namespace World
 {
-	// 2026-09-26 脚本组件重写:属性表(`std::vector<ScriptProperty>`)的**唯一维护点**。
+	enum class ScriptPropertyCollection : uint8_t
+	{
+		None = 0,
+		Struct,
+		Array,
+		Map,
+	};
+
+	struct ScriptProperty
+	{
+		std::string Name;
+		Schema::Kind Type = Schema::Kind::None;
+		Schema::Value Value;
+		std::string Doc;
+		std::string TypeName;
+		std::vector<ScriptProperty> Children;
+		bool ReadOnly = false;
+		ScriptPropertyCollection Collection = ScriptPropertyCollection::None;
+		Schema::Kind ElementKind = Schema::Kind::None;
+		Schema::Kind KeyKind = Schema::Kind::String;
+		Schema::Value Default;
+		bool ShapeFromScene = false;
+	};
+
+	// 2026-09-26 脚本属性维护层。
 	//
 	// 为什么单独一层:C++ 脚本的字段来自 schema 反射,Luau 脚本的字段来自 `---@field` 注解,
 	// 但两者进检视器 / 进存档 / 参与热重载迁移时用的是**同一份模型**。规则集中在这里:

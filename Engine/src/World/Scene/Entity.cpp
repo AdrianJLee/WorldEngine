@@ -78,9 +78,6 @@ namespace World
 		if (m_Scene->IsPendingRemoval(m_EntityHandle, component)) return Reject(reason, "Component removal has not been committed yet");
 		const bool exists = HasComponent(component);
 		if (exists && !replace) return Reject(reason, "Entity already has this component");
-		const bool script = component == entt::type_id<CppScriptComponent>().hash() || component == entt::type_id<LuauScriptComponent>().hash();
-		if (m_Scene->IsActive() && exists && script)
-			return Reject(reason, "Stop the scene or remove the old script before replacing its configuration");
 		const bool physics = component == entt::type_id<RigidBody2DComponent>().hash() ||
 			component == entt::type_id<BoxCollider2DComponent>().hash() || component == entt::type_id<CircleCollider2DComponent>().hash();
 		// W3f 例外:脚本生命周期回调内新增刚性体/碰撞体允许同步提交并立即补建 Box2D 刚体

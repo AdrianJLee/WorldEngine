@@ -255,7 +255,7 @@ namespace World::Schema
 	// 脚本工厂绑定(2026-09-26 重写):schema 里 Category==Script 的类型 = 一个工厂,
 	// 由桥接文件生成(见 ComponentSchemaBridge.h 的 MakeScriptBinding<T>())。
 	//
-	// 旧口径是 `Bind(void* nativeScript)`,把函数指针写进 CppScriptComponent —— 那让"组件数据"
+	// 旧口径是 `Bind(void* nativeScript)`,把函数指针写进 Script —— 那让"组件数据"
 	// 与"只能由 C++ 现场填的绑定"混在一起。现在组件只存 ScriptName,实例化时按名字查这里的工厂。
 	// 生命周期回调全部可选:脚本类不继承任何基类,只按需提供同名方法
 	// (OnCreate(Entity) / OnCreate() / OnUpdate(Timestep) / OnDestroy(Entity) / OnDestroy()),

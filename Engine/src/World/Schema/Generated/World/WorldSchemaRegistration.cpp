@@ -21,8 +21,6 @@ const TypeSchema& WeSchemaOf_CameraComponent();
 const TypeSchema& WeSchemaOf_DirectionalLightComponent();
 const TypeSchema& WeSchemaOf_PointLightComponent();
 const TypeSchema& WeSchemaOf_AmbientLightComponent();
-const TypeSchema& WeSchemaOf_CppScriptComponent();
-const TypeSchema& WeSchemaOf_LuauScriptComponent();
 const TypeSchema& WeSchemaOf_RigidBody2DComponent();
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent();
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent();
@@ -1632,120 +1630,6 @@ struct GeneratedAccess<World::AmbientLightComponent>
 };
 
 template <>
-struct GeneratedAccess<World::CppScriptComponent>
-{
-    static Value Get_ScriptName(const void* instance)
-    {
-        const World::CppScriptComponent* self = static_cast<const World::CppScriptComponent*>(instance);
-        return Value(self->ScriptName);
-    }
-    static void Set_ScriptName(void* instance, const Value& value)
-    {
-        World::CppScriptComponent* self = static_cast<World::CppScriptComponent*>(instance);
-        self->ScriptName = std::get<std::string>(value);
-    }
-    static const FieldSchema& Field_ScriptName()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x8630F8D44DDBC3B8ull },
-            "ScriptName",
-            Kind::String,
-            &Get_ScriptName,
-            &Set_ScriptName,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Registered C++ script id (schema name), e.g. Game::ExampleScript.", false, "", {  }, "", std::nullopt },
-            Value(std::string()),
-        };
-        return schema;
-    }
-    static const StorageBinding& StorageBindingOf()
-    {
-        static const StorageBinding binding = MakeComponentStorage<World::CppScriptComponent>();
-        return binding;
-    }
-    static const TypeSchema& WeSchema()
-    {
-        static const TypeSchema schema = {
-            TypeId{ "World::CppScriptComponent" },
-            "CppScriptComponent",
-            WE_SCHEMA_ABI_VERSION,
-            sizeof(World::CppScriptComponent),
-            TypeCategory::Component,
-            {
-                Field_ScriptName(),
-            },
-            &StorageBindingOf(),
-            nullptr,
-            "Scripting",
-            "C++ behavior attached to the entity: ScriptName selects a registered script and the property list is saved with the scene and applied when Play starts.",
-            false,
-        };
-        return schema;
-    }
-};
-
-template <>
-struct GeneratedAccess<World::LuauScriptComponent>
-{
-    static Value Get_ScriptPath(const void* instance)
-    {
-        const World::LuauScriptComponent* self = static_cast<const World::LuauScriptComponent*>(instance);
-        return Value(self->ScriptPath);
-    }
-    static void Set_ScriptPath(void* instance, const Value& value)
-    {
-        World::LuauScriptComponent* self = static_cast<World::LuauScriptComponent*>(instance);
-        self->ScriptPath = std::get<std::string>(value);
-    }
-    static const FieldSchema& Field_ScriptPath()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xD4A11DAEAAD6C7C6ull },
-            "ScriptPath",
-            Kind::String,
-            &Get_ScriptPath,
-            &Set_ScriptPath,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Luau script asset (.luau/.lua) relative to the project content root, e.g. scripts/Player.luau.", false, "Script", {  }, "", std::nullopt },
-            Value(std::string()),
-        };
-        return schema;
-    }
-    static const StorageBinding& StorageBindingOf()
-    {
-        static const StorageBinding binding = MakeComponentStorage<World::LuauScriptComponent>();
-        return binding;
-    }
-    static const TypeSchema& WeSchema()
-    {
-        static const TypeSchema schema = {
-            TypeId{ "World::LuauScriptComponent" },
-            "LuauScriptComponent",
-            WE_SCHEMA_ABI_VERSION,
-            sizeof(World::LuauScriptComponent),
-            TypeCategory::Component,
-            {
-                Field_ScriptPath(),
-            },
-            &StorageBindingOf(),
-            nullptr,
-            "Scripting",
-            "Luau script attached to the entity: ScriptPath points at a .luau/.lua asset under the project content root; properties come from the script's ---@field declarations.",
-            false,
-        };
-        return schema;
-    }
-};
-
-template <>
 struct GeneratedAccess<World::RigidBody2DComponent>
 {
     static Value Get_Type(const void* instance)
@@ -3249,8 +3133,6 @@ const TypeSchema& WeSchemaOf_CameraComponent() { return GeneratedAccess<World::C
 const TypeSchema& WeSchemaOf_DirectionalLightComponent() { return GeneratedAccess<World::DirectionalLightComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PointLightComponent() { return GeneratedAccess<World::PointLightComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_AmbientLightComponent() { return GeneratedAccess<World::AmbientLightComponent>::WeSchema(); }
-const TypeSchema& WeSchemaOf_CppScriptComponent() { return GeneratedAccess<World::CppScriptComponent>::WeSchema(); }
-const TypeSchema& WeSchemaOf_LuauScriptComponent() { return GeneratedAccess<World::LuauScriptComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_RigidBody2DComponent() { return GeneratedAccess<World::RigidBody2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent() { return GeneratedAccess<World::BoxCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent() { return GeneratedAccess<World::CircleCollider2DComponent>::WeSchema(); }
@@ -3287,8 +3169,6 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_DirectionalLightComponent(),
 			WeSchemaOf_PointLightComponent(),
 			WeSchemaOf_AmbientLightComponent(),
-			WeSchemaOf_CppScriptComponent(),
-			WeSchemaOf_LuauScriptComponent(),
 			WeSchemaOf_RigidBody2DComponent(),
 			WeSchemaOf_BoxCollider2DComponent(),
 			WeSchemaOf_CircleCollider2DComponent(),

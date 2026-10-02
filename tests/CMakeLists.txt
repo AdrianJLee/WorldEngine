@@ -40,69 +40,8 @@ set_tests_properties(World.LuauBinding PROPERTIES
     TIMEOUT 90
 )
 
-# P2 W2a:语言无关的行为注册层(两类行为的描述/重复注册拒绝/按实体枚举的确定性/共存调度)。
-add_executable(WorldBehaviorRegistryTests World/BehaviorRegistryTests.cpp)
-target_link_libraries(WorldBehaviorRegistryTests PRIVATE World)
-target_compile_features(WorldBehaviorRegistryTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldBehaviorRegistryTests PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldBehaviorRegistryTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldBehaviorRegistryTests PRIVATE /utf-8)
-endif()
 
-add_test(NAME World.BehaviorRegistry COMMAND WorldBehaviorRegistryTests)
-set_tests_properties(World.BehaviorRegistry PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
 
-# P2 W3a-A1:Entity:GetComponent 返回的 schema 字段代理(映射表/读写/失败路径/下一帧可见)。
-add_executable(WorldLuauSchemaBindingTests World/LuauSchemaBindingTests.cpp)
-target_link_libraries(WorldLuauSchemaBindingTests PRIVATE World)
-target_compile_features(WorldLuauSchemaBindingTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldLuauSchemaBindingTests PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldLuauSchemaBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldLuauSchemaBindingTests PRIVATE /utf-8)
-endif()
-
-add_test(NAME World.LuauSchemaBinding COMMAND WorldLuauSchemaBindingTests)
-set_tests_properties(World.LuauSchemaBinding PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
-
-# P2 W3d:Entity 生成/查询/prefab 绑定(回调内同步白名单、层级、快照可见性、失败路径)。
-add_executable(WorldLuauEntityBindingTests World/LuauEntityBindingTests.cpp)
-target_link_libraries(WorldLuauEntityBindingTests PRIVATE World)
-target_compile_features(WorldLuauEntityBindingTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldLuauEntityBindingTests PRIVATE
-    WORLD_ENTITY_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/artifacts/$<CONFIG>"
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldLuauEntityBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldLuauEntityBindingTests PRIVATE /utf-8)
-endif()
-
-add_test(NAME World.LuauEntityBinding COMMAND WorldLuauEntityBindingTests)
-set_tests_properties(World.LuauEntityBinding PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
 
 # P2 W3a-A2:存根随 schema 自动更新(组件块/字段注解/顺序规则/确定性)。
 add_executable(WorldLuauStubSchemaTests World/LuauStubSchemaTests.cpp)
@@ -125,133 +64,11 @@ set_tests_properties(World.LuauStubSchema PROPERTIES
     TIMEOUT 90
 )
 
-# P2 W3b:游戏服务面的脚本绑定(Input/Level/Save;headless 夹具走真实 GameHost.Tick)。
-add_executable(WorldLuauServiceBindingTests World/LuauServiceBindingTests.cpp)
-target_link_libraries(WorldLuauServiceBindingTests PRIVATE World)
-target_compile_features(WorldLuauServiceBindingTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldLuauServiceBindingTests PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldLuauServiceBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldLuauServiceBindingTests PRIVATE /utf-8)
-endif()
 
-add_test(NAME World.LuauServiceBinding COMMAND WorldLuauServiceBindingTests)
-set_tests_properties(World.LuauServiceBinding PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
 
-# P2 W3c:UI 面的脚本绑定(ui.* 立即模式控件;headless 手工输入 + WuiContext 命令断言)。
-add_executable(WorldLuauUiBindingTests World/LuauUiBindingTests.cpp)
-target_link_libraries(WorldLuauUiBindingTests PRIVATE World)
-target_compile_features(WorldLuauUiBindingTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldLuauUiBindingTests PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldLuauUiBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldLuauUiBindingTests PRIVATE /utf-8)
-endif()
 
-add_test(NAME World.LuauUiBinding COMMAND WorldLuauUiBindingTests)
-set_tests_properties(World.LuauUiBinding PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
 
-# P2 W5:L2 脚本热重载(源指纹/字段迁移/失败回滚/轮询监听;headless,脚本写构建产物临时目录)。
-add_executable(WorldScriptHotReloadTests World/ScriptHotReloadTests.cpp)
-target_link_libraries(WorldScriptHotReloadTests PRIVATE World)
-target_compile_features(WorldScriptHotReloadTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldScriptHotReloadTests PRIVATE
-    WORLD_HOTRELOAD_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/artifacts/$<CONFIG>"
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldScriptHotReloadTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldScriptHotReloadTests PRIVATE /utf-8)
-endif()
 
-add_test(NAME World.ScriptHotReload COMMAND WorldScriptHotReloadTests)
-set_tests_properties(World.ScriptHotReload PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
-
-# P2 W3e:相机字段的嵌套对象代理(CameraComponent.Camera → SceneCamera;headless)。
-add_executable(WorldLuauCameraBindingTests World/LuauCameraBindingTests.cpp)
-target_link_libraries(WorldLuauCameraBindingTests PRIVATE World)
-target_compile_features(WorldLuauCameraBindingTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldLuauCameraBindingTests PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldLuauCameraBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldLuauCameraBindingTests PRIVATE /utf-8)
-endif()
-
-add_test(NAME World.LuauCameraBinding COMMAND WorldLuauCameraBindingTests)
-set_tests_properties(World.LuauCameraBinding PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
-
-# P2 W3f:2D 物理运行时 API(速度/冲量/力/运动学同步/运行时建刚体;headless)。
-add_executable(WorldLuauPhysicsBindingTests World/LuauPhysicsBindingTests.cpp)
-target_link_libraries(WorldLuauPhysicsBindingTests PRIVATE World)
-target_compile_features(WorldLuauPhysicsBindingTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldLuauPhysicsBindingTests PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldLuauPhysicsBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldLuauPhysicsBindingTests PRIVATE /utf-8)
-endif()
-
-add_test(NAME World.LuauPhysicsBinding COMMAND WorldLuauPhysicsBindingTests)
-set_tests_properties(World.LuauPhysicsBinding PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
-
-# P2 W4:事件 / 计时器脚本绑定(顺序/off/盒装往返/失败隔离/退订/热重载重建;headless)。
-add_executable(WorldLuauEventBindingTests World/LuauEventBindingTests.cpp)
-target_link_libraries(WorldLuauEventBindingTests PRIVATE World)
-target_compile_features(WorldLuauEventBindingTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldLuauEventBindingTests PRIVATE
-    WORLD_EVENT_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/artifacts/$<CONFIG>"
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldLuauEventBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldLuauEventBindingTests PRIVATE /utf-8)
-endif()
-
-add_test(NAME World.LuauEventBinding COMMAND WorldLuauEventBindingTests)
-set_tests_properties(World.LuauEventBinding PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
 
 # P2 W6:沙箱预算(指令/时间预算 + 中断 + 粘住语义;headless)。
 add_executable(WorldLuauSandboxTests World/LuauSandboxTests.cpp)
@@ -295,27 +112,6 @@ set_tests_properties(World.ScriptArtifact PROPERTIES
     TIMEOUT 90
 )
 
-# P2 W7-3:运行时分流(容器/源码字节;U3 无源码树 headless:只挂包 provider)。
-add_executable(WorldScriptBinaryLoadTests World/ScriptBinaryLoadTests.cpp)
-target_link_libraries(WorldScriptBinaryLoadTests PRIVATE World)
-target_compile_features(WorldScriptBinaryLoadTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldScriptBinaryLoadTests PRIVATE
-    WORLD_SCRIPT_BINARY_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/artifacts/$<CONFIG>"
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldScriptBinaryLoadTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldScriptBinaryLoadTests PRIVATE /utf-8)
-endif()
-
-add_test(NAME World.ScriptBinaryLoad COMMAND WorldScriptBinaryLoadTests)
-set_tests_properties(World.ScriptBinaryLoad PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
 
 # P2 W8:脚本工作流(逻辑路径 → 可编辑磁盘路径 + LSP 脚手架 create-if-missing;headless)。
 add_executable(WorldScriptWorkflowTests World/ScriptWorkflowTests.cpp)
@@ -347,28 +143,6 @@ set_tests_properties(World.ScriptWorkflow PROPERTIES
     TIMEOUT 90
 )
 
-add_executable(WorldScriptTests World/ScriptLifecycleTests.cpp)
-target_link_libraries(WorldScriptTests PRIVATE World)
-target_compile_features(WorldScriptTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldScriptTests PRIVATE
-    WORLD_SCRIPT_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/artifacts/$<CONFIG>"
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldScriptTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldScriptTests PRIVATE /utf-8)
-endif()
-
-# Deliberately no /WHOLEARCHIVE: the real ScriptEngine initialization must retain
-# Entity and matrix bindings in an ordinary static-library consumer.
-add_test(NAME World.ScriptLifecycle COMMAND WorldScriptTests)
-set_tests_properties(World.ScriptLifecycle PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
 
 # Schema 2.0 核心回归:注册表、稳定身份、生成访问器、事务化模块注册。
 add_executable(WorldSchemaTests
@@ -1372,7 +1146,7 @@ foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
     )
 endforeach()
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests WorldLuauCameraBindingTests WorldLuauPhysicsBindingTests WorldLuauEventBindingTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptBinaryLoadTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

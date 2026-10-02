@@ -12,6 +12,7 @@
 
 #include "World/Core/Export.h"
 #include "World/Scene/Components.h"
+#include "World/Script/ScriptProperties.h"
 
 #include <cstddef>
 #include <cstdint>

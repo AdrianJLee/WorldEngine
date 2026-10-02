@@ -6,7 +6,6 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneCamera.h"
 #include "World/Scene/TransformSystem.h"
-#include "World/Script/ScriptRef.h"
 #include "World/Renderer/Texture.h"
 #include "World/Schema/Schema.h"
 #include "World/Schema/BuiltinAssetOps.h"
@@ -341,141 +340,7 @@ namespace World
 		WE_SCHEMA_END
 	};
 
-	enum class ScriptInstanceState { Pending, Creating, Running, Destroying, Stopped, Faulted };
 
-	// 两个脚本组件共用的运行期状态。**不进存档**:Play/Simulate 期间它才有效,
-	// Generation 用于"回调执行期间实例被重建/销毁"的失效判定(T02 语义,2026-09-26 重写保留)。
-	struct ScriptRuntimeState
-	{
-		ScriptInstanceState State = ScriptInstanceState::Pending;
-		std::string LastError;
-		uint64_t Generation = 0;
-		bool CreateEntered = false;
-		// 实例创建时从 schema 工厂表捕获的生命周期槽位:行为随**实例**走,工厂被注销/热重载
-		// 之后释放路径仍能收到配对的 OnDestroy(与旧 ScriptableEntity 虚函数面同语义)。
-		// 创建槽位只在创建时用一次,不留存;Create/Destroy 仍按当前注册表实时查。
-		void (*OnUpdate)(void* instance, float deltaSeconds) = nullptr;
-		void (*OnDestroy)(void* instance, void* rawEntity) = nullptr;
-	};
-
-	// C 期(数组/映射,2026-09-26):脚本属性的**集合形态**。
-	//   None   = 叶子(标量 / 字符串 / Vec2/3/4),Type = 叶子的 schema 类型;
-	//   Struct = `---@class` 结构化表(现状;Type == Object,TypeName = 类名或裸 table 的 "table");
-	//   Array  = `---@field Scores {number}`(Children 顺序 = 下标 1..n,Name = 下标字符串);
-	//   Map    = `---@field Config {string: number}`(Children = 键值行,Name = 键)。
-	// 容器属性的 Type 一律是 Schema::Kind::Object(值在 Children 里,Value 保持 monostate),
-	// 由 Collection + ElementKind/KeyKind 描述元素与键。
-	// CPPT-6(2026-09-28)起 **C++ 脚本字段也用这一份模型**:schema-compiler 的
-	// `WE_FIELD(Name, Array|Map, Of(T))` 在 Schema::FieldSchema 上带 Collection/ElementKind/
-	// KeyKind,`ScriptProperties::SyncFromSchema` 1:1 映射成同形属性行 —— 检视器、存档、热重载
-	// 迁移两条前端共用一份表示;**仍然不新增 Schema::Kind**(容器是形状,不是类型)。
-	enum class ScriptPropertyCollection : uint8_t
-	{
-		None = 0,
-		Struct,
-		Array,
-		Map,
-	};
-
-	// 脚本属性:两种前端(C++ / Luau)**同一份表示** —— 编辑器、存档、热重载迁移都只用这一种模型。
-	// Type = schema 值类型(Float / Int32 / Bool / String …);Value = 当前值(缺省时用脚本声明的默认值)。
-	struct ScriptProperty
-	{
-		std::string Name;
-		Schema::Kind Type = Schema::Kind::None;
-		Schema::Value Value;
-		// 脚本里声明的说明(注解 `---@field Speed number 移动速度` 的第三段 / C++ 的 `Doc("…")`)。
-		// **由脚本派生**:不进存档、不参与比较;检视器只用它做行悬停与读屏提示。
-		std::string Doc;
-		// B 期(嵌套 `---@class` 结构化表,2026-09-26):
-		//   Type == Schema::Kind::Object 时:TypeName = 声明的类型名(类名,或裸 table 的 "table"),
-		//     Children = 子字段(顺序 = 注解声明顺序,递归同构);
-		//   ReadOnly == true:裸 table(没有 `---@field` 子字段)→ 检视器只画一行摘要,不进存档;
-		//   叶子属性(标量/字符串/Vec2/3/4):TypeName 为空、Children 为空。
-		std::string TypeName;
-		std::vector<ScriptProperty> Children;
-		bool ReadOnly = false;
-		// C 期:集合形态与元素/键类型(**只追加在尾部** —— 既有 `ScriptProperty{name, type, value}`
-		// 聚合初始化保持有效)。ElementKind = 数组元素类型 / 映射值类型(元素本身是集合时 = Object,
-		// 由子项各自的 Collection 描述);KeyKind = 映射键类型(默认 String,仅 Map 使用)。
-		ScriptPropertyCollection Collection = ScriptPropertyCollection::None;
-		Schema::Kind ElementKind = Schema::Kind::None;
-		Schema::Kind KeyKind = Schema::Kind::String;
-		// D1(2026-09-27 用户口径:复位 = 回到"未设"):脚本/schema 声明的默认值。
-		// **只用于展示与 Play 兜底,不写进场景** —— `Value` 仍是编辑器/存档认定的当前值,
-		// 但"这条属性要不要进场景"由 `ScriptProperties::IsSceneRecorded` 判定:
-		// Value 未设(monostate)或与 Default 相同 → 视为未设,整条不写;
-		// Default 为 monostate = 声明没有给出默认值(此时 Value 就是场景自己的值)。
-		// 每次 SyncFromDeclarations/SyncFromSchema 刷新;不进存档(Doc 同样由脚本派生)。
-		Schema::Value Default;
-		// D2(2026-09-27 用户口径:集合形状跨进程以场景为准):读档时**场景里真的写了**
-		// 这个数组/映射(有 `Value:` 节点,含空 seq/map)→ true。只有此时合并才保留场景的
-		// 元素个数/键名(声明只按名字补默认值与说明);否则容器形状用声明的默认形状重建。
-		// 由 SceneSerializer 读档置位,合并时原样继承,不进存档。
-		bool ShapeFromScene = false;
-	};
-
-	// C++ 脚本引用组件(纯数据)。**逻辑不在组件里**:组件只保存"用哪个已注册脚本 +
-	// 一组属性值",真正的代码在脚本类型自己的普通方法里(OnCreate/OnUpdate/OnDestroy,
-	// 不再是虚函数面 —— 旧 OOP 基类 ScriptableEntity 已整体删除)。
-	//
-	// ScriptName = schema 里 Category==Script 的类型全名(如 "Game::ExampleScript")。
-	// 实例化按名字走 **schema 的脚本绑定(工厂表)**,组件自己不再持函数指针 ⇒
-	// 存档往返、预制体克隆、AI 通道读写都与"这个组件是不是 C++ 代码建出来的"无关。
-	// 生命周期方法由 MakeScriptBinding<T>() 在编译期探测后填表,没有的槽位就是空。
-	// Instance 是运行期句柄(与 RigidBody2DComponent::RuntimeBodyId 同类),只在 Play/Simulate 期间有效。
-	struct CppScriptComponent
-	{
-		std::string ScriptName;
-		std::vector<ScriptProperty> Properties;
-		ScriptRuntimeState Runtime;
-		void* Instance = nullptr;
-
-		WE_SCHEMA_BODY(World, CppScriptComponent, Component)
-			WE_SCHEMA_META(Category("Scripting"),
-				Doc("C++ behavior attached to the entity: ScriptName selects a registered script and the property list is saved with the scene and applied when Play starts."))
-			WE_FIELD(ScriptName, String,
-				Doc("Registered C++ script id (schema name), e.g. Game::ExampleScript."));
-		WE_SCHEMA_END
-	};
-
-	// Luau 脚本组件(原 LuaScriptComponent;2026-09-26 重写)。
-	//
-	// ScriptPath = 内容根相对逻辑路径(如 scripts/Player.luau);Properties 来自脚本里的
-	// `---@field Name Type` 声明 + 场景里保存的当前值。
-	// 运行期引用(环境 / 脚本表 / 四个回调)不进 schema、不序列化,由 ScriptEngine 在加载期重建。
-	struct LuauScriptComponent
-	{
-		std::string ScriptPath;
-		std::vector<ScriptProperty> Properties;
-
-		// 每实体独立的 Luau environment(防变量冲突)与四个生命周期回调(W5 热重载整体交换)。
-		ScriptTableRef LuaEnv;
-		ScriptTableRef ScriptTable;
-		ScriptFunctionRef OnCreateFunc;
-		ScriptFunctionRef OnUpdateFunc;
-		ScriptFunctionRef OnDestroyFunc;
-		ScriptFunctionRef OnUiFunc;
-
-		// W5:热重载用的源指纹(优先内容哈希,退化为 mtime+size)与最近一次重载诊断。
-		// 运行期状态,不进 schema、不参与序列化;克隆配置时只带指纹(源文件身份)。
-		uint64_t SourceFingerprint = 0;
-		std::string ReloadDiagnostic;
-
-		ScriptRuntimeState Runtime;
-		Entity RuntimeEntity;
-
-		LuauScriptComponent() = default;
-		LuauScriptComponent(const LuauScriptComponent&) = default;
-		LuauScriptComponent(const std::string& path) : ScriptPath(path) {}
-
-		WE_SCHEMA_BODY(World, LuauScriptComponent, Component)
-			WE_SCHEMA_META(Category("Scripting"),
-				Doc("Luau script attached to the entity: ScriptPath points at a .luau/.lua asset under the project content root; properties come from the script's ---@field declarations."))
-			WE_FIELD(ScriptPath, String, Asset("Script"),
-				Doc("Luau script asset (.luau/.lua) relative to the project content root, e.g. scripts/Player.luau."));
-		WE_SCHEMA_END
-	};
 
 	struct RigidBody2DComponent
 	{
@@ -683,7 +548,5 @@ namespace World
 	};
 
 	// 组件配置克隆特化(剔除运行态)。
-	CppScriptComponent CloneComponentConfiguration(const CppScriptComponent& source);
-	LuauScriptComponent CloneComponentConfiguration(const LuauScriptComponent& source);
 	RigidBody2DComponent CloneComponentConfiguration(const RigidBody2DComponent& source);
 }

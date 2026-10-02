@@ -129,9 +129,6 @@ namespace World
 		void OnRuntimeStop();
 		void OnSimulationStart();
 		void OnSimulationStop();
-		void OnScriptStart();
-		void OnScriptUpdate(Timestep ts);
-		void OnScriptDestroy();
 
 		bool IsActive() const { return m_State != SceneState::Stopped; }
 		bool IsRunning() const { return m_State == SceneState::Running; }
@@ -216,16 +213,6 @@ namespace World
 		// W5:脚本热重载只允许在安全点提交——不在脚本回调内、不在结构提交点内、
 		// 也不在 Stop 流程中。宿主(编辑器/Runtime)应在帧边界调用,并以此判定是否可重载。
 		bool CanApplyScriptReload() const;
-		// CPPT-2(T5b 模块级热重载):卸载 Game 模块前的实例编排 —— 每个 CppScriptComponent
-		// 收一次 OnDestroy(仍可读到的配置态 ScriptName + Properties 原样保留),State=Stopped;
-		// 返回真的收过实例(= 原本 Running/Faulted/CreateEntered/持实例)的组件数。
-		// 加载新模块后调用 RestoreNativeScriptInstances():按新 schema 迁移属性(同名同类型保值),
-		// 清实例句柄并置回 Pending —— 下一安全点由既有 pending 机制调 OnCreate。
-		// CPPT-2(FIX1):diagnostics 非空时收集每个组件的迁移诊断(类型变化 / 字段被删 / 新增字段
-		// 各一条,含实体与字段名;同名同类型保值不产生诊断),供 GameModuleReloadResult 上报。
-		// 两者都必须与 CanApplyScriptReload() 同一安全点语义(宿主在帧边界调用)。
-		std::size_t DrainNativeScriptInstances();
-		std::size_t RestoreNativeScriptInstances(std::vector<std::string>* diagnostics = nullptr);
 		// Accepted commands execute once at a safe point; callbacks enqueue the next batch.
 		bool DeferStructuralChange(std::function<void(Scene&)> command);
 		void FlushStructuralChanges();
@@ -318,12 +305,6 @@ namespace World
 		void DestroyEntityNow(entt::entity entity);
 		void RemoveComponentNow(entt::entity entity, entt::id_type component);
 		void InvokeCallback(const ScriptSource& source, const std::function<void()>& callback);
-		void StartPendingScripts();
-		void UpdateScriptSnapshot(Timestep ts, const std::vector<entt::entity>& native, const std::vector<entt::entity>& lua);
-		void BeginScriptUpdateSnapshot();
-		void EndScriptUpdateSnapshot();
-		void DestroyNativeScript(entt::entity entity, bool faulted = false);
-		void DestroyLuaScript(entt::entity entity, bool faulted = false);
 		void FaultSource(const ScriptSource& source, const std::string& error);
 		void StopScene();
 		void OnPhysics2DStart();
@@ -349,9 +330,6 @@ namespace World
 		bool m_Committing = false;
 		unsigned m_CallbackDepth = 0;
 		unsigned m_ScriptWriteDepth = 0;
-		bool m_ScriptUpdateSnapshotActive = false;
-		std::unordered_set<entt::entity> m_ScriptUpdateSnapshot;
-		uint64_t m_NextGeneration = 0;
 		ScriptSource m_CallbackSource;
 		std::vector<StructuralChange> m_Changes;
 		std::unordered_set<entt::entity> m_PendingDestroy;

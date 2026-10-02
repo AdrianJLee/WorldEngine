@@ -5,7 +5,6 @@
 #include "World/Scene/CameraSystem.h"
 #include "World/Scene/MovementSystem.h"
 #include "World/Scene/ScriptEngine.h"
-#include "World/Script/HotReload.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Gameplay/SystemRegistry.h"
 #include "World/Physics/Physics3D.h"
@@ -57,11 +56,7 @@ namespace World
 
 		thread_local bool s_InsideFramePipeline = false;
 
-		std::string NativeError(const CppScriptComponent& script, entt::entity entity, const char* phase, const char* error)
-		{
-			return "[Native] " + script.ScriptName + " entity=" + std::to_string(static_cast<uint32_t>(entity)) +
-				" phase=" + phase + ": " + error;
-		}
+
 
 		// 脚本属性按名字找 schema 字段(大小写敏感;不含嵌套/非叶类型)。
 		const Schema::FieldSchema* FindSchemaField(const Schema::TypeSchema& type, const std::string& name)
@@ -355,12 +350,10 @@ namespace World
 		return m_CallbackDepth != 0;
 	}
 
-	bool Scene::IsVisibleToCurrentScriptUpdate(entt::entity entity) const
+	bool Scene::IsVisibleToCurrentScriptUpdate(entt::entity) const
 	{
 		AssertOwnerThread();
-		if (!m_ScriptUpdateSnapshotActive)
-			return true;
-		return m_ScriptUpdateSnapshot.count(entity) != 0;
+		return true;
 	}
 
 	entt::registry& Scene::GetRegistry() { AssertStructuralWrite(); return m_Registry; }
@@ -443,17 +436,7 @@ namespace World
 		if (source.EntityHandle == entt::null) return true;
 		if (!m_Registry.valid(source.EntityHandle) || IsPendingDestroy(source.EntityHandle) ||
 			IsPendingRemoval(source.EntityHandle, source.Component)) return false;
-		if (source.Component == entt::type_id<CppScriptComponent>().hash())
-		{
-			auto* script = m_Registry.try_get<CppScriptComponent>(source.EntityHandle);
-			return script && script->Runtime.Generation == source.Generation && script->Runtime.State == ScriptInstanceState::Running;
-		}
-		if (source.Component == entt::type_id<LuauScriptComponent>().hash())
-		{
-			auto* script = m_Registry.try_get<LuauScriptComponent>(source.EntityHandle);
-			return script && script->Runtime.Generation == source.Generation && script->Runtime.State == ScriptInstanceState::Running;
-		}
-		return false;
+		return true;
 	}
 
 	bool Scene::DeferStructuralChange(std::function<void(Scene&)> command)
@@ -547,248 +530,11 @@ namespace World
 
 	void Scene::FaultSource(const ScriptSource& source, const std::string& error)
 	{
-		std::string scriptName;
-		if (m_Registry.valid(source.EntityHandle))
-		{
-			if (source.Component == entt::type_id<CppScriptComponent>().hash())
-			{
-				if (auto* script = m_Registry.try_get<CppScriptComponent>(source.EntityHandle)) scriptName = script->ScriptName;
-			}
-			else if (source.Component == entt::type_id<LuauScriptComponent>().hash())
-			{
-				if (auto* script = m_Registry.try_get<LuauScriptComponent>(source.EntityHandle)) scriptName = script->ScriptPath;
-			}
-		}
-		const std::string message = "[Scene] " + scriptName + " entity=" + std::to_string(static_cast<uint32_t>(source.EntityHandle)) +
-			" phase=StructuralChange: " + error;
-		Report(message);
-		if (!m_Registry.valid(source.EntityHandle)) return;
-		if (source.Component == entt::type_id<CppScriptComponent>().hash())
-		{
-			auto* script = m_Registry.try_get<CppScriptComponent>(source.EntityHandle);
-			if (script && script->Runtime.Generation == source.Generation)
-			{
-				script->Runtime.LastError = message;
-				DestroyNativeScript(source.EntityHandle, true);
-			}
-		}
-		else if (source.Component == entt::type_id<LuauScriptComponent>().hash())
-		{
-			auto* script = m_Registry.try_get<LuauScriptComponent>(source.EntityHandle);
-			if (script && script->Runtime.Generation == source.Generation)
-			{
-				script->Runtime.LastError = message;
-				DestroyLuaScript(source.EntityHandle, true);
-			}
-		}
+		Report("[Scene] entity=" + std::to_string(static_cast<uint32_t>(source.EntityHandle)) +
+			" phase=StructuralChange: " + error);
 	}
 
-	void Scene::StartPendingScripts()
-	{
-		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
-		{
-			if (m_StopRequested) break;
-			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<CppScriptComponent>().hash())) continue;
-			auto& script = m_Registry.get<CppScriptComponent>(entity);
-			if (script.Runtime.State != ScriptInstanceState::Pending) continue;
-			script.Runtime.Generation = ++m_NextGeneration;
-			script.Runtime.State = ScriptInstanceState::Creating;
-			script.Runtime.LastError.clear();
-			const ScriptSource source{ entity, entt::type_id<CppScriptComponent>().hash(), script.Runtime.Generation };
-			try
-			{
-				InvokeCallback(source, [&] {
-					const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script.ScriptName) : nullptr;
-					// 2026-09-26 重写:实例化只认 schema 的脚本绑定(工厂)—— 组件不再持函数指针,
-					// 所以"从 YAML 读出来的组件"和"C++ 现场建的组件"走**同一条**创建路径。
-					if (script.ScriptName.empty()) { script.Runtime.State = ScriptInstanceState::Stopped; return; }
-					if (!type || type->Category != Schema::TypeCategory::Script || !type->Script ||
-						!type->Script->Create || !type->Script->Destroy)
-						throw std::logic_error("C++ script is not registered: " + script.ScriptName);
-					script.Instance = type->Script->Create();
-					if (!script.Instance) throw std::runtime_error("Native script factory returned null");
-					// 生命周期槽位随实例捕获(工厂之后被注销也能配对收尾)。
-					script.Runtime.OnUpdate = type->Script->OnUpdate;
-					script.Runtime.OnDestroy = type->Script->OnDestroy;
-					// 属性表 → 实例。缺项保留脚本自己的构造默认值(与 schema 注解默认值同源)。
-					for (const ScriptProperty& property : script.Properties)
-					{
-						const Schema::FieldSchema* field = FindSchemaField(*type, property.Name);
-						if (!field || !field->Set || field->K != property.Type)
-							continue;
-						// CPPT-6:容器属性的值在 Children 行里(Value 保持 monostate),Play 应用时
-						// 先折成容器值再写;未设返回 false(保留脚本成员初值)。
-						if (field->Collection != Schema::CollectionKind::None)
-						{
-							Schema::Value container;
-							if (ScriptProperties::BuildContainerValue(property, &container))
-								field->Set(script.Instance, container);
-							continue;
-						}
-						// P2-②:手改场景 / 坏存档可能让值停在 monostate 或 variant 备选与声明类型不符 ——
-						// 直接 Set 会抛 bad_variant_access 把整条脚本打成 Faulted。未设值 = 跳过(保留脚本默认),
-						// 类型不符 = 跳过 + 一条可读诊断。
-						if (ScriptProperties::IsUnset(property))
-							continue;
-						if (!ScriptProperties::ValueMatchesKind(property.Value, property.Type))
-						{
-							if (Log::GetCoreLogger())
-								WLD_CORE_WARN("[Native] {0} entity={1} phase=Properties: field '{2}' has a value "
-									"that does not match type {3}; the saved value was skipped",
-									script.ScriptName, static_cast<uint32_t>(entity), property.Name,
-									ScriptProperties::KindName(property.Type));
-							continue;
-						}
-						field->Set(script.Instance, property.Value);
-					}
-					script.Runtime.CreateEntered = true;
-					if (type->Script->OnCreate)
-					{
-						Entity self(this, entity);
-						type->Script->OnCreate(script.Instance, &self);
-					}
-					script.Runtime.State = ScriptInstanceState::Running;
-				});
-			}
-			catch (const std::exception& error) { script.Runtime.LastError = NativeError(script, entity, "OnCreate", error.what()); Report(script.Runtime.LastError); DestroyNativeScript(entity, true); }
-			catch (...) { script.Runtime.LastError = NativeError(script, entity, "OnCreate", "Unknown exception"); Report(script.Runtime.LastError); DestroyNativeScript(entity, true); }
-		}
-		for (const auto entity : Snapshot<LuauScriptComponent>(m_Registry))
-		{
-			if (m_StopRequested) break;
-			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<LuauScriptComponent>().hash())) continue;
-			auto& script = m_Registry.get<LuauScriptComponent>(entity);
-			if (script.Runtime.State != ScriptInstanceState::Pending) continue;
-			script.Runtime.Generation = ++m_NextGeneration;
-			const ScriptSource source{ entity, entt::type_id<LuauScriptComponent>().hash(), script.Runtime.Generation };
-			try { InvokeCallback(source, [&] { ScriptEngine::OnCreateScript(script, Entity(this, entity)); }); }
-			catch (const std::exception& error) { script.Runtime.LastError = error.what(); script.Runtime.State = ScriptInstanceState::Faulted; Report(script.Runtime.LastError); }
-			catch (...) { script.Runtime.LastError = "Unknown Lua creation exception"; script.Runtime.State = ScriptInstanceState::Faulted; Report(script.Runtime.LastError); }
-			if (script.Runtime.State == ScriptInstanceState::Faulted) DestroyLuaScript(entity, true);
-		}
-	}
 
-	void Scene::DestroyNativeScript(entt::entity entity, bool faulted)
-	{
-		auto* script = m_Registry.try_get<CppScriptComponent>(entity);
-		if (!script || script->Runtime.State == ScriptInstanceState::Destroying) return;
-		faulted = faulted || script->Runtime.State == ScriptInstanceState::Faulted;
-		script->Runtime.State = ScriptInstanceState::Destroying;
-		const ScriptSource source{ entity, entt::type_id<CppScriptComponent>().hash(), script->Runtime.Generation, true };
-
-		// 生命周期:OnDestroy 只与已成对的 OnCreate 配对发生一次(CreateEntered 置位后),
-		// 且**先于**工厂释放执行;它抛异常不阻止释放(独立 try,catch 后继续走释放路径)。
-		try
-		{
-			if (script->Instance && script->Runtime.CreateEntered && script->Runtime.OnDestroy)
-			{
-				script->Runtime.CreateEntered = false;
-				Entity self(this, entity);
-				void (*onDestroy)(void*, void*) = script->Runtime.OnDestroy;
-				InvokeCallback(source, [&] { onDestroy(script->Instance, &self); });
-			}
-		}
-		catch (const std::exception& error) { script->Runtime.LastError += "\n" + NativeError(*script, entity, "OnDestroy", error.what()); Report(script->Runtime.LastError); faulted = true; }
-		catch (...) { script->Runtime.LastError += "\n" + NativeError(*script, entity, "OnDestroy", "Unknown exception"); Report(script->Runtime.LastError); faulted = true; }
-
-		try
-		{
-			const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script->ScriptName) : nullptr;
-			if (script->Instance && type && type->Script && type->Script->Destroy)
-				InvokeCallback(source, [&] { type->Script->Destroy(script->Instance); });
-			else if (script->Instance)
-			{
-				// P2-①:实例还在但脚本已经取不到工厂(未注册 / 脚本模块未加载)——原先静默把指针丢掉 = 泄漏。
-				// 实例无法安全释放(Destroy 回调不可得),这里只写一条可读警告;释放路径只走一次:
-				// 拿不到工厂时不调用任何释放函数,函数末尾统一把 Instance 置空。
-				if (Log::GetCoreLogger())
-					WLD_CORE_WARN("[Native] {0} entity={1} phase=Release: script factory is not registered; "
-						"the live instance cannot be released and is leaked",
-						script->ScriptName, static_cast<uint32_t>(entity));
-			}
-		}
-		catch (const std::exception& error) { script->Runtime.LastError += "\n" + NativeError(*script, entity, "Release", error.what()); Report(script->Runtime.LastError); faulted = true; }
-		catch (...) { Report("Native script release threw an unknown exception"); faulted = true; }
-		script->Instance = nullptr;
-		script->Runtime.CreateEntered = false;
-		script->Runtime.OnUpdate = nullptr;
-		script->Runtime.OnDestroy = nullptr;
-		script->Runtime.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
-	}
-
-	// ---- CPPT-2(T5b):模块级热重载的实例编排(调用方保证在安全点)----
-
-	std::size_t Scene::DrainNativeScriptInstances()
-	{
-		AssertOwnerThread();
-		std::size_t drained = 0;
-		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
-		{
-			auto* script = m_Registry.try_get<CppScriptComponent>(entity);
-			if (!script)
-				continue;
-			const bool hadInstance = script->Instance != nullptr
-				|| script->Runtime.CreateEntered
-				|| script->Runtime.State == ScriptInstanceState::Running
-				|| script->Runtime.State == ScriptInstanceState::Faulted;
-			// 收 OnDestroy + 释放实例(工厂来自旧模块);配置态 ScriptName/Properties 不动。
-			DestroyNativeScript(entity, /*faulted=*/false);
-			// 热重载不是 Faulted 语义:旧实例收干净后统一置 Stopped(等新模块的 Pending 起跑)。
-			if (script->Runtime.State != ScriptInstanceState::Stopped)
-				script->Runtime.State = ScriptInstanceState::Stopped;
-			if (hadInstance)
-				++drained;
-		}
-		return drained;
-	}
-
-	std::size_t Scene::RestoreNativeScriptInstances(std::vector<std::string>* diagnostics)
-	{
-		AssertOwnerThread();
-		std::size_t restored = 0;
-		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
-		{
-			auto* script = m_Registry.try_get<CppScriptComponent>(entity);
-			if (!script)
-				continue;
-			script->Instance = nullptr;
-			script->Runtime.CreateEntered = false;
-			script->Runtime.OnUpdate = nullptr;
-			script->Runtime.OnDestroy = nullptr;
-			script->Runtime.LastError.clear();
-			// 迁移配置态:同名同类型保旧值;新字段取新声明默认值;被删字段丢弃(与 SyncFromSchema 同口径)。
-			// CPPT-2(FIX1):迁移前后各留一份快照,诊断走同一份 DescribeScriptFieldMigration
-			// (类型变化 / 字段被删 / 新增字段各一条,含实体与字段名;不写第二套规则)。
-			std::vector<ScriptProperty> previous;
-			if (diagnostics)
-				previous = script->Properties;
-			const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script->ScriptName) : nullptr;
-			const bool migrated = type && type->Category == Schema::TypeCategory::Script;
-			if (migrated)
-				ScriptProperties::SyncFromSchema(script->Properties, *type);
-			if (diagnostics && migrated)
-			{
-				ScriptFieldMigrationOptions options;
-				options.Tag = "[module-reload]";
-				options.ReportAddedFields = true;
-				const std::string label = script->ScriptName + " (entity " +
-					std::to_string(static_cast<uint32_t>(entity)) + ")";
-				DescribeScriptFieldMigration(previous, script->Properties, label, diagnostics, options);
-			}
-			script->Runtime.State = ScriptInstanceState::Pending;
-			++restored;
-		}
-		return restored;
-	}
-
-	void Scene::DestroyLuaScript(entt::entity entity, bool faulted)
-	{
-		auto* script = m_Registry.try_get<LuauScriptComponent>(entity);
-		if (!script || script->Runtime.State == ScriptInstanceState::Destroying) return;
-		if (faulted) script->Runtime.State = ScriptInstanceState::Faulted;
-		const ScriptSource source{ entity, entt::type_id<LuauScriptComponent>().hash(), script->Runtime.Generation, true };
-		InvokeCallback(source, [&] { ScriptEngine::OnDestroyScript(*script); });
-	}
 
 	void Scene::DestroyPhysicsBody(entt::entity entity)
 	{
@@ -875,8 +621,6 @@ namespace World
 	{
 		if (m_Registry.valid(entity))
 		{
-			DestroyNativeScript(entity);
-			DestroyLuaScript(entity);
 			DestroyPhysicsBody(entity);
 			if (m_Physics3D) m_Physics3D->DestroyBody(entity);
 			m_Registry.destroy(entity);
@@ -893,9 +637,7 @@ namespace World
 			std::string reason;
 			if (target.HasComponent(component) && target.CanRemoveComponent(component, &reason))
 			{
-				if (component == entt::type_id<CppScriptComponent>().hash()) DestroyNativeScript(entity);
-				else if (component == entt::type_id<LuauScriptComponent>().hash()) DestroyLuaScript(entity);
-				else if (component == entt::type_id<RigidBody2DComponent>().hash()) DestroyPhysicsBody(entity);
+				if (component == entt::type_id<RigidBody2DComponent>().hash()) DestroyPhysicsBody(entity);
 				else if (component == entt::type_id<RigidBody3DComponent>().hash()) { if (m_Physics3D) m_Physics3D->DestroyBody(entity); }
 				if (auto* storage = m_Registry.storage(component))
 				{
@@ -923,7 +665,6 @@ namespace World
 		RegisterFrameSystem({ "physics-2d", false, [this](Timestep ts) { OnUpdatePhysics2D(ts); } });
 		RegisterFrameSystem({ "physics-3d", false, [this](Timestep ts) { OnUpdatePhysics3D(ts); } });
 		RegisterFrameSystem({ "movement-system", false, [this](Timestep ts) { MovementSystem().Update(*this, ts); } });
-		RegisterFrameSystem({ "scene-update", false, [this](Timestep ts) { OnScriptUpdate(ts); } });
 		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
 		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); } });
 	}
@@ -959,128 +700,13 @@ namespace World
 		{
 			ScriptEngine::LoadSystemScripts(*this);
 		}
-		OnScriptStart();
+		m_State = SceneState::Running;
 	}
 	void Scene::OnSimulationStart() { OnRuntimeStart(); }
-	void Scene::OnRuntimeStop() { OnScriptDestroy(); }
-	void Scene::OnSimulationStop() { OnScriptDestroy(); }
+	void Scene::OnRuntimeStop() { StopScene(); }
+	void Scene::OnSimulationStop() { StopScene(); }
 
-	void Scene::OnScriptStart()
-	{
-		AssertOwnerThread();
-		if (IsActive()) return;
-		if (m_CallbackDepth || m_Committing) throw std::logic_error("Scene cannot start inside a callback or structural command");
-		m_State = SceneState::Starting;
-		m_StopRequested = false;
-		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
-		{
-			auto& script = m_Registry.get<CppScriptComponent>(entity);
-			script.Runtime.State = ScriptInstanceState::Pending;
-			script.Runtime.LastError.clear();
-		}
-		for (const auto entity : Snapshot<LuauScriptComponent>(m_Registry))
-		{
-			auto& script = m_Registry.get<LuauScriptComponent>(entity);
-			script.Runtime.State = ScriptInstanceState::Pending;
-			script.Runtime.LastError.clear();
-		}
-		StartPendingScripts();
-		if (m_StopRequested) StopScene();
-		else m_State = SceneState::Running;
-	}
 
-	void Scene::OnScriptUpdate(Timestep ts)
-	{
-		AssertOwnerThread();
-		if (m_CallbackDepth || m_Committing) throw std::logic_error("Scene updates cannot be reentrant");
-		if (!IsRunning()) return;
-		FlushStructuralChanges();
-		if (!IsRunning()) return;
-		// Only instances already running at this update boundary may receive OnUpdate.
-		std::vector<entt::entity> native, lua;
-		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
-			if (m_Registry.get<CppScriptComponent>(entity).Runtime.State == ScriptInstanceState::Running) native.push_back(entity);
-		for (const auto entity : Snapshot<LuauScriptComponent>(m_Registry))
-			if (m_Registry.get<LuauScriptComponent>(entity).Runtime.State == ScriptInstanceState::Running) lua.push_back(entity);
-		StartPendingScripts();
-		if (m_StopRequested) { StopScene(); return; }
-		// M2.5: 物理步进已解耦为独立帧管线系统("physics-2d", "physics-3d")。
-		// 仅在脱离管线直接调用 OnScriptUpdate 的独立测试场景下保留兼容性步进。
-		if (!s_InsideFramePipeline)
-		{
-			OnUpdatePhysics2D(ts);
-			OnUpdatePhysics3D(ts);
-		}
-		// W3d:回调内同步创建的新实体本帧对其它脚本的 FindByName 不可见,
-		// 快照在开始执行 OnUpdate 前冻结,下一帧重新收集。
-		// 没有 Lua 更新实例时不建快照(native-only 场景保持原开销)。
-		const bool snapshotActive = !lua.empty();
-		if (snapshotActive) BeginScriptUpdateSnapshot();
-		try { UpdateScriptSnapshot(ts, native, lua); }
-		catch (...)
-		{
-			if (snapshotActive) EndScriptUpdateSnapshot();
-			throw;
-		}
-		if (snapshotActive) EndScriptUpdateSnapshot();
-		if (m_StopRequested) StopScene();
-		else FlushStructuralChanges();
-	}
-
-	void Scene::BeginScriptUpdateSnapshot()
-	{
-		AssertOwnerThread();
-		m_ScriptUpdateSnapshot.clear();
-		const auto view = m_Registry.view<TagComponent>();
-		for (const entt::entity entity : view)
-			m_ScriptUpdateSnapshot.insert(entity);
-		m_ScriptUpdateSnapshotActive = true;
-	}
-
-	void Scene::EndScriptUpdateSnapshot()
-	{
-		AssertOwnerThread();
-		m_ScriptUpdateSnapshotActive = false;
-		m_ScriptUpdateSnapshot.clear();
-	}
-
-	void Scene::UpdateScriptSnapshot(Timestep ts, const std::vector<entt::entity>& native, const std::vector<entt::entity>& lua)
-	{
-		// C++ 脚本(纯数据引用 + schema 工厂):按 ScriptName 查表拿 OnUpdate 槽位,
-		// 没有 OnUpdate 的脚本直接跳过(不再有虚函数面)。
-		for (const auto entity : native)
-		{
-			if (m_StopRequested) break;
-			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<CppScriptComponent>().hash())) continue;
-			auto* script = m_Registry.try_get<CppScriptComponent>(entity);
-			if (!script || script->Runtime.State != ScriptInstanceState::Running || !script->Instance) continue;
-			void (*onUpdate)(void*, float) = script->Runtime.OnUpdate;
-			if (!onUpdate) continue;
-			const ScriptSource source{ entity, entt::type_id<CppScriptComponent>().hash(), script->Runtime.Generation };
-			try { InvokeCallback(source, [&] { onUpdate(script->Instance, ts.GetSeconds()); }); }
-			catch (const std::exception& error) { script->Runtime.LastError = NativeError(*script, entity, "OnUpdate", error.what()); Report(script->Runtime.LastError); DestroyNativeScript(entity, true); }
-			catch (...) { script->Runtime.LastError = NativeError(*script, entity, "OnUpdate", "Unknown exception"); Report(script->Runtime.LastError); DestroyNativeScript(entity, true); }
-		}
-		for (const auto entity : lua)
-		{
-			if (m_StopRequested) break;
-			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<LuauScriptComponent>().hash())) continue;
-			auto* script = m_Registry.try_get<LuauScriptComponent>(entity);
-			if (!script || script->Runtime.State != ScriptInstanceState::Running) continue;
-			const ScriptSource source{ entity, entt::type_id<LuauScriptComponent>().hash(), script->Runtime.Generation };
-			try { InvokeCallback(source, [&] { ScriptEngine::OnUpdateScript(*script, ts); }); }
-			catch (const std::exception& error) { script->Runtime.LastError = error.what(); script->Runtime.State = ScriptInstanceState::Faulted; Report(script->Runtime.LastError); }
-			catch (...) { script->Runtime.LastError = "Unknown Lua update exception"; script->Runtime.State = ScriptInstanceState::Faulted; Report(script->Runtime.LastError); }
-			if (script->Runtime.State == ScriptInstanceState::Faulted) DestroyLuaScript(entity, true);
-		}
-	}
-
-	void Scene::OnScriptDestroy()
-	{
-		AssertOwnerThread();
-		if (m_CallbackDepth || m_Committing) { m_StopRequested = true; return; }
-		StopScene();
-	}
 
 	void Scene::StopScene()
 	{
@@ -1088,10 +714,7 @@ namespace World
 		if (m_State == SceneState::Stopping) return;
 		m_State = SceneState::Stopping;
 		m_StopRequested = false;
-		// Never instantiate Pending scripts during stop. Keep component storage readable in OnDestroy.
 		m_Changes.clear();
-		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry)) DestroyNativeScript(entity);
-		for (const auto entity : Snapshot<LuauScriptComponent>(m_Registry)) DestroyLuaScript(entity);
 		OnPhysics2DStop();
 		OnPhysics3DStop();
 		// Destruction callbacks may request further idempotent deletes/removals, but no general work.

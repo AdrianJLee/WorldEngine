@@ -16,9 +16,9 @@ namespace World
 	{
 		// Lua 行为的模块/字段 id 命名空间。字段 id 与 schema-compiler 的
 		// Fnv1a64("<Module>::<Type>.<FieldName>") 是同一条派生规则,只是把 Lua 行为
-		// 视作 World::LuauScriptComponent 上的字段;不引入第二套哈希。
+		// 视作 World::Script 上的字段;不引入第二套哈希。
 		constexpr const char* kLuaModulePrefix = "Lua:";
-		constexpr const char* kLuaFieldScope = "World::LuauScriptComponent.";
+		constexpr const char* kLuaFieldScope = "World::Script.";
 
 		void SetError(std::string* error, std::string message)
 		{
@@ -179,80 +179,11 @@ namespace World
 		return desc;
 	}
 
-	BehaviorDesc BehaviorRegistry::MakeLuaDesc(const LuauScriptComponent& script)
+
+
+	std::vector<const BehaviorDesc*> BehaviorRegistry::DescribeEntity(const Scene&, entt::entity) const
 	{
-		BehaviorDesc desc;
-		desc.ModuleId = LuaModuleId(script.ScriptPath);
-		desc.DisplayName = script.ScriptPath;
-		desc.Language = BehaviorLanguage::Luau;
-		desc.Fields.reserve(script.Properties.size());
-		for (const ScriptProperty& property : script.Properties)
-		{
-			if (!ScriptProperties::IsPropertyKind(property.Type))
-				continue;
-			desc.Fields.push_back(BehaviorFieldDesc{ LuaFieldId(property.Name), property.Name, property.Type });
-		}
-		SortFields(desc.Fields);
-		desc.Lifecycle = kExistingFrontendSlots;
-		return desc;
-	}
-
-	bool BehaviorRegistry::RegisterNative(const Schema::TypeSchema& type, std::string* error)
-	{
-		if (type.Category != Schema::TypeCategory::Script)
-		{
-			SetError(error, "type '" + type.Id.Name + "' is not a script behavior (category is not Script)");
-			return false;
-		}
-		return Register(MakeNativeDesc(type), error);
-	}
-
-	bool BehaviorRegistry::RegisterLua(const LuauScriptComponent& script, std::string* error)
-	{
-		if (script.ScriptPath.empty())
-		{
-			SetError(error, "lua behavior requires a non-empty script path");
-			return false;
-		}
-		return Register(MakeLuaDesc(script), error);
-	}
-
-	std::vector<const BehaviorDesc*> BehaviorRegistry::DescribeEntity(const Scene& scene, entt::entity entity) const
-	{
-		std::vector<const BehaviorDesc*> result;
-		const entt::registry& registry = scene.GetRegistry();
-		if (!registry.valid(entity)) return result;
-
-		if (const CppScriptComponent* native = registry.try_get<CppScriptComponent>(entity))
-		{
-			if (!native->ScriptName.empty())
-			{
-				// 先按模块 id 全名直查(宿主显式登记),否则走与 Scene::StartPendingScripts
-				// 相同的解析路径:用组件里的 ScriptName 从场景的 schema 注册表取类型。
-				const BehaviorDesc* desc = Find(native->ScriptName);
-				if (!desc)
-				{
-					const Schema::TypeSchema* type = scene.GetContext().Schemas().Find(native->ScriptName);
-					if (type) desc = Find(NativeModuleId(*type));
-				}
-				if (desc) result.push_back(desc);
-			}
-		}
-
-		if (const LuauScriptComponent* lua = registry.try_get<LuauScriptComponent>(entity))
-		{
-			if (!lua->ScriptPath.empty())
-			{
-				if (const BehaviorDesc* desc = Find(LuaModuleId(lua->ScriptPath)))
-					result.push_back(desc);
-			}
-		}
-
-		std::sort(result.begin(), result.end(), [](const BehaviorDesc* left, const BehaviorDesc* right)
-		{
-			return left->ModuleId < right->ModuleId;
-		});
-		return result;
+		return {};
 	}
 
 	std::vector<const BehaviorDesc*> BehaviorRegistry::DescribeEntity(const Entity& entity) const
