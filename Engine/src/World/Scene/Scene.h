@@ -101,6 +101,9 @@ namespace World
 			double Milliseconds = 0.0;
 		};
 		void RegisterFrameSystem(FrameSystem system);
+		// Pure ECS:撤销一个具名帧系统(系统脚本热重载/替换用)。不存在返回 false。
+		bool UnregisterFrameSystem(const std::string& name);
+		bool HasFrameSystem(const std::string& name) const;
 		void RunFrameSystems(Timestep ts);
 		void EnsureDefaultFrameSystems();
 

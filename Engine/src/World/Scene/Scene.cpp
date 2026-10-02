@@ -232,6 +232,29 @@ namespace World
 		m_FrameSystemDefinitions.push_back(std::move(system));
 	}
 
+	bool Scene::HasFrameSystem(const std::string& name) const
+	{
+		for (const FrameSystem& existing : m_FrameSystemDefinitions)
+			if (existing.Name == name)
+				return true;
+		return false;
+	}
+
+	bool Scene::UnregisterFrameSystem(const std::string& name)
+	{
+		AssertOwnerThread();
+		if (name.empty())
+			return false;
+		const auto found = std::find_if(m_FrameSystemDefinitions.begin(), m_FrameSystemDefinitions.end(),
+			[&name](const FrameSystem& existing) { return existing.Name == name; });
+		if (found == m_FrameSystemDefinitions.end())
+			return false;
+		m_FrameSystemDefinitions.erase(found);
+		if (m_FrameSystems)
+			m_FrameSystems->Unregister(name);
+		return true;
+	}
+
 	// W5-3:帧系统调度统一走 Gameplay::SystemRegistry
 	// (阶段/同阶段依赖/并行安全并行派发/逐系统耗时),Scene 只保留面向宿主的薄封装。
 	void Scene::RunFrameSystems(Timestep ts)
@@ -672,6 +695,9 @@ namespace World
 	void Scene::OnUpdateRuntime(Timestep ts)
 	{
 		EnsureDefaultFrameSystems();
+		// Pure ECS:系统脚本热重载 —— 每帧轮询 scripts/systems/,变化过的文件整份重跑。
+		if (ScriptEngine::IsInitialized())
+			ScriptEngine::PollSystemScriptReload(*this, ts.GetSeconds());
 		RunFrameSystems(ts);
 	}
 
@@ -715,6 +741,9 @@ namespace World
 		m_State = SceneState::Stopping;
 		m_StopRequested = false;
 		m_Changes.clear();
+		// Pure ECS:场景停止时撤销系统脚本注册的帧系统,下一次启动重新装载。
+		if (ScriptEngine::IsInitialized())
+			ScriptEngine::UnloadSystemScripts(*this);
 		OnPhysics2DStop();
 		OnPhysics3DStop();
 		// Destruction callbacks may request further idempotent deletes/removals, but no general work.

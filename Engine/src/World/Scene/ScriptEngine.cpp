@@ -16,6 +16,7 @@
 #include "World/Script/PluginScriptLibrary.h"
 #include "World/Script/Sandbox.h"
 #include "World/Script/ScriptBindingContext.h"
+#include "World/Script/ScriptFileWatch.h"
 #include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Utils/Paths.h"
@@ -49,6 +50,28 @@ namespace World
 		WorldContext* s_ContentContext = nullptr;
 		// Pure ECS: 全局活动场景指针（不拥有；ShutdownInternal 清空）
 		Scene* s_ActiveScene = nullptr;
+
+		// Pure ECS: 系统脚本归属表 —— 一个系统脚本文件注册了哪些具名系统。
+		// 热重载时按这份表精确撤销该系统脚本注册的系统,再整份重跑。
+		struct SystemScriptRecord
+		{
+			std::string LogicalPath;
+			std::vector<std::string> SystemNames;
+		};
+		std::vector<SystemScriptRecord> s_SystemScripts;
+		// 当前正在执行的系统脚本逻辑路径(空 = 不在加载系统脚本)。
+		// ecs:AddSystem 用它把系统名归属到发起它的那份系统脚本。
+		std::string s_LoadingSystemScript;
+		// 系统脚本目录的轮询监听(懒建立;ShutdownInternal 释放)。
+		std::unique_ptr<ScriptFileWatch> s_SystemWatch;
+
+		SystemScriptRecord* FindSystemScriptRecord(const std::string& logicalPath)
+		{
+			for (SystemScriptRecord& record : s_SystemScripts)
+				if (record.LogicalPath == logicalPath)
+					return &record;
+			return nullptr;
+		}
 		// W6:引擎默认预算(指令 1e6;时间关)。LuauVm 层保持 0 = 不限,
 		// 避免改变 World.LuauVm / World.LuauBinding 的既有语义。
 		Sandbox::Policy s_SandboxPolicy{ 1000000, 0 };
@@ -1432,6 +1455,9 @@ namespace World
 				s_Vm->Shutdown();
 			s_Vm.reset();
 			s_ActiveScene = nullptr;
+			s_SystemScripts.clear();
+			s_LoadingSystemScript.clear();
+			s_SystemWatch.reset();
 			s_OwnerThread = {};
 		}
 	}
@@ -1454,47 +1480,144 @@ namespace World
 		return s_ActiveScene;
 	}
 
+	// 系统脚本目录 → 逻辑路径前缀(<内容根>/scripts/systems → "scripts/systems/")。
+	// 逻辑路径是 VFS/磁盘的统一寻址口径(ResolveScriptSource / 热重载指纹都用它)。
+	static std::string SystemScriptPrefix(const std::filesystem::path& systemsDir)
+	{
+		const std::string leaf = systemsDir.filename().string();
+		const std::string parent = systemsDir.parent_path().filename().string();
+		if (parent.empty())
+			return leaf + "/";
+		return parent + "/" + leaf + "/";
+	}
+
+	static bool IsSystemScriptFile(const std::filesystem::directory_entry& entry)
+	{
+		if (!entry.is_regular_file())
+			return false;
+		const std::string ext = entry.path().extension().string();
+		return ext == ".luau" || ext == ".lua";
+	}
+
+	void ScriptEngine::NoteScriptSystem(const std::string& systemName)
+	{
+		if (s_LoadingSystemScript.empty() || systemName.empty())
+			return;
+		SystemScriptRecord* record = FindSystemScriptRecord(s_LoadingSystemScript);
+		if (!record)
+		{
+			s_SystemScripts.push_back(SystemScriptRecord{ s_LoadingSystemScript, {} });
+			record = &s_SystemScripts.back();
+		}
+		record->SystemNames.push_back(systemName);
+	}
+
+	std::size_t ScriptEngine::ReloadSystemScript(Scene& scene, const std::string& logicalPath)
+	{
+		if (!IsInitialized() || logicalPath.empty())
+			return 0;
+
+		SetActiveScene(&scene);
+
+		// 1) 撤销这份系统脚本上次注册的系统(先拷一份名字,避免边遍历边改容器)。
+		if (SystemScriptRecord* existing = FindSystemScriptRecord(logicalPath))
+		{
+			const std::vector<std::string> names = existing->SystemNames;
+			existing->SystemNames.clear();
+			for (const std::string& systemName : names)
+				scene.UnregisterFrameSystem(systemName);
+		}
+
+		// 2) 读源(VFS 优先、磁盘回退,与其余脚本读取同一语义)。
+		std::string source;
+		std::string readError;
+		if (!ResolveScriptSource(logicalPath, source, &readError) || source.empty())
+		{
+			if (Log::GetCoreLogger())
+				WLD_CORE_ERROR("[Luau System Loader] cannot read '{}': {}", logicalPath, readError);
+			return 0;
+		}
+
+		// 3) 整份重跑;期间的 ecs:AddSystem 经 s_LoadingSystemScript 归属到本文件。
+		s_LoadingSystemScript = logicalPath;
+		std::string error;
+		const bool ok = s_Vm->RunString(source, logicalPath.c_str(), &error);
+		s_LoadingSystemScript.clear();
+
+		const SystemScriptRecord* record = FindSystemScriptRecord(logicalPath);
+		const std::size_t systems = record ? record->SystemNames.size() : 0;
+		if (!ok)
+		{
+			if (Log::GetCoreLogger())
+				WLD_CORE_ERROR("[Luau System Loader] '{}' failed: {}", logicalPath, error);
+			return 0;
+		}
+		if (Log::GetCoreLogger())
+			WLD_CORE_INFO("[Luau System Loader] '{}' -> {} system(s)", logicalPath, systems);
+		return systems;
+	}
+
+	std::size_t ScriptEngine::UnloadSystemScripts(Scene& scene)
+	{
+		std::size_t removed = 0;
+		for (const SystemScriptRecord& record : s_SystemScripts)
+			for (const std::string& systemName : record.SystemNames)
+				if (scene.UnregisterFrameSystem(systemName))
+					++removed;
+		s_SystemScripts.clear();
+		s_LoadingSystemScript.clear();
+		return removed;
+	}
+
 	std::size_t ScriptEngine::LoadSystemScripts(Scene& scene, const std::filesystem::path& systemsDir)
 	{
 		if (!IsInitialized() || !std::filesystem::exists(systemsDir) || !std::filesystem::is_directory(systemsDir))
 			return 0;
 
 		SetActiveScene(&scene);
-		std::size_t loaded = 0;
-
+		const std::string prefix = SystemScriptPrefix(systemsDir);
+		std::size_t systems = 0;
 		for (const auto& entry : std::filesystem::directory_iterator(systemsDir))
 		{
-			if (!entry.is_regular_file())
+			if (!IsSystemScriptFile(entry))
 				continue;
-			const auto ext = entry.path().extension().string();
-			if (ext != ".luau" && ext != ".lua")
-				continue;
-
-			const std::string content = ReadScriptSource(entry.path().string());
-			if (content.empty())
-				continue;
-
-			std::string error;
-			const std::string chunkName = entry.path().filename().string();
-			if (!s_Vm->RunString(content, chunkName.c_str(), &error))
-			{
-				if (Log::GetCoreLogger())
-					WLD_CORE_ERROR("[Luau System Loader] failed to load system script '{}': {}", chunkName, error);
-			}
-			else
-			{
-				if (Log::GetCoreLogger())
-					WLD_CORE_INFO("[Luau System Loader] loaded system script: {}", chunkName);
-				++loaded;
-			}
+			systems += ReloadSystemScript(scene, prefix + entry.path().filename().string());
 		}
-		return loaded;
+		return systems;
 	}
 
 	std::size_t ScriptEngine::LoadSystemScripts(Scene& scene)
 	{
-		const std::filesystem::path defaultDir = World::Paths::AssetRoot() / "scripts/systems";
-		return LoadSystemScripts(scene, defaultDir);
+		return LoadSystemScripts(scene, World::Paths::AssetRoot() / "scripts/systems");
+	}
+
+	std::size_t ScriptEngine::PollSystemScriptReload(Scene& scene, double deltaSeconds)
+	{
+		if (!IsInitialized())
+			return 0;
+		const std::filesystem::path dir = World::Paths::AssetRoot() / "scripts/systems";
+		if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir))
+			return 0;
+
+		if (!s_SystemWatch)
+			s_SystemWatch = std::make_unique<ScriptFileWatch>();
+		const std::string prefix = SystemScriptPrefix(dir);
+		for (const auto& entry : std::filesystem::directory_iterator(dir))
+		{
+			if (!IsSystemScriptFile(entry))
+				continue;
+			const std::string logical = prefix + entry.path().filename().string();
+			if (!s_SystemWatch->IsWatched(logical))
+				s_SystemWatch->Watch(logical);   // 新文件:建基线,本帧不算变化
+		}
+
+		std::size_t processed = 0;
+		for (const std::string& changed : s_SystemWatch->Poll(deltaSeconds))
+		{
+			ReloadSystemScript(scene, changed);
+			++processed;
+		}
+		return processed;
 	}
 
 	void ScriptEngine::Init()
@@ -1732,6 +1855,12 @@ namespace World
 		const ScriptServiceBinding* eventTables = ScriptEventBindings(&eventCount);
 		for (std::size_t index = 0; index < eventCount; ++index)
 			serviceList.push_back(&eventTables[index]);
+		// Pure ECS:`ecs` / `world` 表与 events/timers 同属"全局只读表",走同一条存根渲染链路
+		// (描述表在 BindECS.cpp,注册循环与存根共用同一份)。
+		std::size_t ecsCount = 0;
+		const ScriptServiceBinding* ecsTables = ScriptEcsBindings(&ecsCount);
+		for (std::size_t index = 0; index < ecsCount; ++index)
+			serviceList.push_back(&ecsTables[index]);
 		// T4:插件脚本函数库块追加在既有全部块之后(顺序 = 命名空间升序、组内 (插件 id, 函数名);
 		// 零插件 = 空列表 ⇒ 存根与入库夹具逐字节一致)。
 		if (!LuaStubGenerator::Generate(path, LuaReflectionRegistry::GetTable(), components, serviceList,

@@ -413,6 +413,59 @@ function timers:every(seconds, fn, count) end
 ---@return boolean
 function timers:cancel(handle) end
 
+-- Global service table 'ecs': read-only; there is no runtime constructor.
+---Read-only pure-ECS table (also exposed as "world"): queries, systems, entity lifecycle and component observers.
+---@class ecs
+ecs = {}
+
+---Build a query over the listed component types; the result has :Each(fn) and :Count().
+---@param components table Array of registered component type names, e.g. { "TransformComponent", "VelocityComponent" }.
+---@return table
+function ecs:Query(components) end
+
+---Register a named system on the active scene; idempotent (a repeated name replaces the previous system).
+---@param name string System name; re-registering the same name replaces the previous system.
+---@param fn function Called once per frame with dt in seconds.
+---@param phase string? Pipeline phase; defaults to "Update". The legacy (name, phase, fn) order is also accepted.
+---@return boolean
+function ecs:AddSystem(name, fn, phase) end
+
+---Unregister a named system; false when no such system is registered.
+---@param name string System name previously passed to ecs:AddSystem.
+---@return boolean
+function ecs:RemoveSystem(name) end
+
+---Create an entity (Tag + UUID) in the active scene and return its handle.
+---@param name string? Optional entity name; defaults to "Empty Entity".
+---@return Entity
+function ecs:CreateEntity(name) end
+
+---Queue an entity for destruction at the next safe point.
+---@param entity userdata Entity to destroy; queued, committed at the next safe point.
+---@return boolean
+function ecs:DestroyEntity(entity) end
+
+---Number of live entities in the active scene.
+---@return number
+function ecs:EntityCount() end
+
+---Observe component additions; returns a handle for ecs:Off.
+---@param component string Registered component type name to observe.
+---@param fn function Called with the entity whenever the component is added.
+---@return number
+function ecs:OnAdd(component, fn) end
+
+---Observe component removals; returns a handle for ecs:Off.
+---@param component string Registered component type name to observe.
+---@param fn function Called with the entity whenever the component is removed.
+---@return number
+function ecs:OnRemove(component, fn) end
+
+---Cancel an observer handle; false when the handle is unknown.
+---@param handle number Observer handle returned by ecs:OnAdd / ecs:OnRemove.
+---@return boolean
+function ecs:Off(handle) end
+
 -- Global script UI table 'ui': read-only; there is no runtime constructor.
 ---Immediate-mode script UI table; draw calls are rebuilt every frame and there is no long-lived callback registration.
 ---@class ui

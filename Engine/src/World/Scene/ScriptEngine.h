@@ -109,9 +109,20 @@ namespace World
 		static void SetActiveScene(Scene* scene);
 		static Scene* GetActiveScene();
 
-		// Pure ECS: 自动扫描并加载项目系统脚本 (assets/scripts/systems/*.luau 与 *.lua)
+		// Pure ECS: 项目系统脚本(scripts/systems/*.luau|*.lua)——
+		// 脚本内用 ecs:AddSystem 把系统注册进当前场景的帧管线。
+		// 加载 = 整份重跑:同名系统先撤销再注册,因此**重复调用是幂等的**。
 		static std::size_t LoadSystemScripts(Scene& scene, const std::filesystem::path& systemsDir);
 		static std::size_t LoadSystemScripts(Scene& scene);
+		// 撤销全部系统脚本注册过的系统(场景停止/换场景用)。返回撤销的系统数。
+		static std::size_t UnloadSystemScripts(Scene& scene);
+		// 单份系统脚本热重载:撤销该文件上次注册的系统 → 重读 → 整份重跑。
+		static std::size_t ReloadSystemScript(Scene& scene, const std::string& logicalPath);
+		// 宿主每帧驱动:轮询系统脚本目录,把稳定变化过的文件逐份热重载。返回处理过的文件数。
+		static std::size_t PollSystemScriptReload(Scene& scene, double deltaSeconds);
+		// ecs:AddSystem 成功后由绑定层调用:把系统名归属到"当前正在执行的系统脚本"名下。
+		// 不在加载系统脚本时是 no-op(宿主手写 ecs:AddSystem 的系统不参与脚本热重载)。
+		static void NoteScriptSystem(const std::string& systemName);
 
 		// UI 阶段兼容占位 (纯 ECS 脚本通过 WUI / System 渲染)
 		static std::size_t DrawScriptUi(Scene&, Wui::WuiContext&) { return 0; }

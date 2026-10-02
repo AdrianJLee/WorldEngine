@@ -16,6 +16,7 @@
 #include "World/Core/WorldContext.h"
 #include "World/Scene/LuaStubGenerator.h"
 #include "World/Script/HotReload.h"
+#include "World/Script/BindECS.h"
 #include "World/Script/BindEvents.h"
 #include "World/Script/BindServices.h"
 #include "World/Script/BindUI.h"
@@ -244,6 +245,12 @@ namespace
 		const ScriptServiceBinding* eventTables = ScriptEventBindings(&eventCount);
 		for (std::size_t index = 0; index < eventCount; ++index)
 			serviceList.push_back(&eventTables[index]);
+		// Pure ECS:`ecs` / `world` 表与 events/timers 同一条渲染链路(描述表在 BindECS.cpp)。
+		std::size_t ecsCount = 0;
+		const ScriptServiceBinding* ecsTables = ScriptEcsBindings(&ecsCount);
+		for (std::size_t index = 0; index < ecsCount; ++index)
+			serviceList.push_back(&ecsTables[index]);
+
 		std::size_t uiCount = 0;
 		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);
 		std::vector<const ScriptServiceBinding*> uiList;

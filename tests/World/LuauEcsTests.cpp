@@ -399,6 +399,50 @@ int main()
 			)", "TestEcsObservers");
 		}
 
+		// =====================================================================
+		// 7. 系统注册的幂等性 / ecs:RemoveSystem / 系统脚本加载器幂等
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			const auto countSystem = [&scene](const std::string& name)
+			{
+				for (const auto& timing : scene.GetFrameSystemTimings())
+					if (timing.Name == name)
+						return true;
+				return false;
+			};
+
+			// 7.1 ecs:AddSystem 幂等:同名重复注册不抛错(同一场景二次启动/热重载都要能跑)。
+			RUN_OK(R"(
+				local ticks = 0
+				local function noop(dt) ticks = ticks + 1 end
+				ecs:AddSystem("IdempotentSystem", "Update", noop)
+				ecs:AddSystem("IdempotentSystem", "Update", noop)
+				assert(ecs:EntityCount() >= 0, "scene query still works after re-register")
+			)", "TestAddSystemIdempotent");
+			scene.OnUpdateRuntime(0.016f);
+			CHECK(countSystem("IdempotentSystem"));
+
+			// 7.2 ecs:RemoveSystem:撤销后可再注册;撤销不存在的名字返回 false。
+			RUN_OK(R"(
+				assert(ecs:RemoveSystem("IdempotentSystem") == true, "RemoveSystem of a live system returns true")
+				assert(ecs:RemoveSystem("IdempotentSystem") == false, "RemoveSystem of a missing system returns false")
+				local okBad = pcall(function() ecs:RemoveSystem("") end)
+				assert(not okBad, "RemoveSystem with an empty name must fail")
+			)", "TestRemoveSystem");
+
+			// 7.3 加载器幂等:同一目录跑两遍,系统集合不重复、不抛错。
+			ScriptEngine::UnloadSystemScripts(scene);
+			ScriptEngine::LoadSystemScripts(scene);
+			scene.OnUpdateRuntime(0.016f);
+			const std::size_t firstPass = scene.GetFrameSystemTimings().size();
+			ScriptEngine::LoadSystemScripts(scene);
+			scene.OnUpdateRuntime(0.016f);
+			CHECK(scene.GetFrameSystemTimings().size() == firstPass);
+		}
+
 		ScriptEngine::Shutdown();
 		std::puts("World.LuauEcs: all tests passed!");
 		return 0;

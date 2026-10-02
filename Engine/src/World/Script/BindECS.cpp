@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Script/BindECS.h"
+#include "World/Script/BindServices.h"
 
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
@@ -30,8 +31,9 @@ namespace World
 		// -------------------------------------------------------------------------
 		// ecs:Query(componentNames) 实现
 		// -------------------------------------------------------------------------
-		ScriptValue QueryImpl(ScriptBindingContext& bindings, const ScriptValue* args, std::size_t count)
+		ScriptValue QueryImpl(const ScriptValue* args, std::size_t count)
 		{
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
 			std::size_t startIndex = 0;
 			if (count >= 1 && args[0].IsTable())
 			{
@@ -267,7 +269,7 @@ namespace World
 		// -------------------------------------------------------------------------
 		// ecs:AddSystem(name, [phase,] updateFn) 实现
 		// -------------------------------------------------------------------------
-		ScriptValue AddSystemImpl(ScriptBindingContext&, const ScriptValue* args, std::size_t count)
+		ScriptValue AddSystemImpl(const ScriptValue* args, std::size_t count)
 		{
 			std::size_t startIndex = 0;
 			if (count >= 1 && args[0].IsTable())
@@ -283,26 +285,22 @@ namespace World
 			if (!args[startIndex].AsString(&name) || name.empty())
 				throw std::logic_error("ecs:AddSystem: system name must be a non-empty string");
 
+			// 规范形式 (name, fn [, phase]);兼容旧顺序 (name, phase, fn)。
 			std::string phase = "Update";
 			ScriptFunctionRef updateFn;
 
-			if (remaining == 2)
+			if (args[startIndex + 1].IsFunction())
 			{
 				if (!args[startIndex + 1].AsFunction(&updateFn) || !updateFn.IsValid())
 					throw std::logic_error("ecs:AddSystem: expected a function for system update");
+				if (remaining >= 3 && !args[startIndex + 2].IsNil())
+					args[startIndex + 2].AsString(&phase);
 			}
 			else
 			{
-				if (args[startIndex + 1].IsFunction())
-				{
-					args[startIndex + 1].AsFunction(&updateFn);
-				}
-				else
-				{
-					args[startIndex + 1].AsString(&phase);
-					if (!args[startIndex + 2].AsFunction(&updateFn) || !updateFn.IsValid())
-						throw std::logic_error("ecs:AddSystem: expected a function for system update");
-				}
+				args[startIndex + 1].AsString(&phase);
+				if (remaining < 3 || !args[startIndex + 2].AsFunction(&updateFn) || !updateFn.IsValid())
+					throw std::logic_error("ecs:AddSystem: expected a function for system update");
 			}
 
 			if (!updateFn.IsValid())
@@ -313,6 +311,10 @@ namespace World
 				throw std::logic_error("ecs:AddSystem requires an active scene");
 
 			activeScene->EnsureDefaultFrameSystems();
+
+			// 幂等:同名系统先撤销再注册 —— 同一场景二次 OnRuntimeStart、以及系统脚本
+			// 热重载都是"整份重跑",不该因为重名抛错。
+			activeScene->UnregisterFrameSystem(name);
 
 			activeScene->RegisterFrameSystem({
 				name,
@@ -330,14 +332,41 @@ namespace World
 				}
 			});
 
+			// 归属到当前正在执行的系统脚本(不在加载系统脚本时是 no-op)。
+			ScriptEngine::NoteScriptSystem(name);
+
 			return ScriptValue::Boolean(true);
+		}
+
+		// -------------------------------------------------------------------------
+		// ecs:RemoveSystem(name) 实现
+		// -------------------------------------------------------------------------
+		ScriptValue RemoveSystemImpl(const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+				startIndex = 1;
+
+			if (count <= startIndex)
+				throw std::logic_error("ecs:RemoveSystem expects (name)");
+
+			std::string name;
+			if (!args[startIndex].AsString(&name) || name.empty())
+				throw std::logic_error("ecs:RemoveSystem: system name must be a non-empty string");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:RemoveSystem requires an active scene");
+
+			return ScriptValue::Boolean(activeScene->UnregisterFrameSystem(name));
 		}
 
 		// -------------------------------------------------------------------------
 		// ecs:CreateEntity([name]) 实现
 		// -------------------------------------------------------------------------
-		ScriptValue CreateEntityImpl(ScriptBindingContext& bindings, const ScriptValue* args, std::size_t count)
+		ScriptValue CreateEntityImpl(const ScriptValue* args, std::size_t count)
 		{
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
 			std::size_t startIndex = 0;
 			if (count >= 1 && args[0].IsTable())
 			{
@@ -362,8 +391,9 @@ namespace World
 		// -------------------------------------------------------------------------
 		// ecs:DestroyEntity(entity) 实现
 		// -------------------------------------------------------------------------
-		ScriptValue DestroyEntityImpl(ScriptBindingContext& bindings, const ScriptValue* args, std::size_t count)
+		ScriptValue DestroyEntityImpl(const ScriptValue* args, std::size_t count)
 		{
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
 			std::size_t startIndex = 0;
 			if (count >= 1 && args[0].IsTable())
 			{
@@ -392,7 +422,7 @@ namespace World
 		// -------------------------------------------------------------------------
 		// ecs:EntityCount() 实现
 		// -------------------------------------------------------------------------
-		ScriptValue EntityCountImpl(ScriptBindingContext&, const ScriptValue*, std::size_t)
+		ScriptValue EntityCountImpl(const ScriptValue*, std::size_t)
 		{
 			Scene* activeScene = ScriptEngine::GetActiveScene();
 			if (!activeScene)
@@ -413,7 +443,7 @@ namespace World
 		// -------------------------------------------------------------------------
 		// ecs:OnAdd(componentName, fn) 实现
 		// -------------------------------------------------------------------------
-		ScriptValue OnAddImpl(ScriptBindingContext&, const ScriptValue* args, std::size_t count)
+		ScriptValue OnAddImpl(const ScriptValue* args, std::size_t count)
 		{
 			std::size_t startIndex = 0;
 			if (count >= 1 && args[0].IsTable())
@@ -468,7 +498,7 @@ namespace World
 		// -------------------------------------------------------------------------
 		// ecs:OnRemove(componentName, fn) 实现
 		// -------------------------------------------------------------------------
-		ScriptValue OnRemoveImpl(ScriptBindingContext&, const ScriptValue* args, std::size_t count)
+		ScriptValue OnRemoveImpl(const ScriptValue* args, std::size_t count)
 		{
 			std::size_t startIndex = 0;
 			if (count >= 1 && args[0].IsTable())
@@ -523,7 +553,7 @@ namespace World
 		// -------------------------------------------------------------------------
 		// ecs:Off(handle) 实现
 		// -------------------------------------------------------------------------
-		ScriptValue OffImpl(ScriptBindingContext&, const ScriptValue* args, std::size_t count)
+		ScriptValue OffImpl(const ScriptValue* args, std::size_t count)
 		{
 			std::size_t startIndex = 0;
 			if (count >= 1 && args[0].IsTable())
@@ -546,6 +576,67 @@ namespace World
 			activeScene->RemoveComponentObserver(observerId);
 			return ScriptValue::Boolean(true);
 		}
+	}
+
+	// ecs 面 API 的唯一描述表:运行时注册循环与 LuaStubGenerator 的存根渲染共用同一份
+	// (与 GameplayServiceBindings / ScriptEventBindings / ScriptUiBindings 同一条链路)。
+	const ScriptServiceBinding* ScriptEcsBindings(std::size_t* count)
+	{
+		static const ScriptServiceParam queryParams[] = {
+			{ "components", "table", ScriptServiceArgType::Table, true, "Array of registered component type names, e.g. { \"TransformComponent\", \"VelocityComponent\" }." },
+		};
+		static const ScriptServiceParam addSystemParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "System name; re-registering the same name replaces the previous system." },
+			{ "fn", "function", ScriptServiceArgType::None, true, "Called once per frame with dt in seconds." },
+			{ "phase", "string", ScriptServiceArgType::String, false, "Pipeline phase; defaults to \"Update\". The legacy (name, phase, fn) order is also accepted." },
+		};
+		static const ScriptServiceParam removeSystemParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "System name previously passed to ecs:AddSystem." },
+		};
+		static const ScriptServiceParam createEntityParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, false, "Optional entity name; defaults to \"Empty Entity\"." },
+		};
+		static const ScriptServiceParam destroyEntityParams[] = {
+			{ "entity", "userdata", ScriptServiceArgType::None, true, "Entity to destroy; queued, committed at the next safe point." },
+		};
+		static const ScriptServiceParam onAddParams[] = {
+			{ "component", "string", ScriptServiceArgType::String, true, "Registered component type name to observe." },
+			{ "fn", "function", ScriptServiceArgType::None, true, "Called with the entity whenever the component is added." },
+		};
+		static const ScriptServiceParam onRemoveParams[] = {
+			{ "component", "string", ScriptServiceArgType::String, true, "Registered component type name to observe." },
+			{ "fn", "function", ScriptServiceArgType::None, true, "Called with the entity whenever the component is removed." },
+		};
+		static const ScriptServiceParam offParams[] = {
+			{ "handle", "number", ScriptServiceArgType::Number, true, "Observer handle returned by ecs:OnAdd / ecs:OnRemove." },
+		};
+		static const ScriptServiceMethod methods[] = {
+			{ "Query", &QueryImpl, queryParams, 1, 1, "table",
+				"Build a query over the listed component types; the result has :Each(fn) and :Count()." },
+			{ "AddSystem", &AddSystemImpl, addSystemParams, 3, 3, "boolean",
+				"Register a named system on the active scene; idempotent (a repeated name replaces the previous system)." },
+			{ "RemoveSystem", &RemoveSystemImpl, removeSystemParams, 1, 1, "boolean",
+				"Unregister a named system; false when no such system is registered." },
+			{ "CreateEntity", &CreateEntityImpl, createEntityParams, 1, 1, "Entity",
+				"Create an entity (Tag + UUID) in the active scene and return its handle." },
+			{ "DestroyEntity", &DestroyEntityImpl, destroyEntityParams, 1, 1, "boolean",
+				"Queue an entity for destruction at the next safe point." },
+			{ "EntityCount", &EntityCountImpl, nullptr, 0, 0, "number",
+				"Number of live entities in the active scene." },
+			{ "OnAdd", &OnAddImpl, onAddParams, 2, 2, "number",
+				"Observe component additions; returns a handle for ecs:Off." },
+			{ "OnRemove", &OnRemoveImpl, onRemoveParams, 2, 2, "number",
+				"Observe component removals; returns a handle for ecs:Off." },
+			{ "Off", &OffImpl, offParams, 1, 1, "boolean",
+				"Cancel an observer handle; false when the handle is unknown." },
+		};
+		static const ScriptServiceBinding tables[] = {
+			{ "ecs", "Read-only pure-ECS table (also exposed as \"world\"): queries, systems, entity lifecycle and component observers.",
+				methods, sizeof(methods) / sizeof(methods[0]) },
+		};
+		if (count)
+			*count = sizeof(tables) / sizeof(tables[0]);
+		return tables;
 	}
 
 	bool RegisterEcsBindings(ScriptBindingContext& bindings, std::string* error)
@@ -576,84 +667,27 @@ namespace World
 			return false;
 		}
 
-		if (!ecsTable.SetField("Query", bindings.CreateFunction("ecs:Query",
-			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
-			{
-				return QueryImpl(bindings, args, count);
-			})))
+		// 表驱动注册:与 ScriptEcsBindings() 共用同一份描述(名字 + 实现 + 存根签名)。
+		std::size_t methodCount = 0;
+		const ScriptServiceBinding* ecsDescriptor = ScriptEcsBindings(&methodCount);
+		if (!ecsDescriptor || ecsDescriptor->MethodCount == 0)
 		{
-			if (error) *error = "failed to bind ecs.Query";
+			if (error) *error = "the ecs binding descriptor is empty";
 			return false;
 		}
-
-		if (!ecsTable.SetField("AddSystem", bindings.CreateFunction("ecs:AddSystem",
-			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
-			{
-				return AddSystemImpl(bindings, args, count);
-			})))
+		for (std::size_t index = 0; index < ecsDescriptor->MethodCount; ++index)
 		{
-			if (error) *error = "failed to bind ecs.AddSystem";
-			return false;
-		}
-
-		if (!ecsTable.SetField("CreateEntity", bindings.CreateFunction("ecs:CreateEntity",
-			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
+			const ScriptServiceMethod& method = ecsDescriptor->Methods[index];
+			if (!method.Name || !method.Function || !method.Name[0])
 			{
-				return CreateEntityImpl(bindings, args, count);
-			})))
-		{
-			if (error) *error = "failed to bind ecs.CreateEntity";
-			return false;
-		}
-
-		if (!ecsTable.SetField("DestroyEntity", bindings.CreateFunction("ecs:DestroyEntity",
-			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
+				if (error) *error = "the ecs binding descriptor has an invalid entry";
+				return false;
+			}
+			if (!ecsTable.SetField(method.Name, bindings.CreateFunction(method.Name, method.Function)))
 			{
-				return DestroyEntityImpl(bindings, args, count);
-			})))
-		{
-			if (error) *error = "failed to bind ecs.DestroyEntity";
-			return false;
-		}
-
-		if (!ecsTable.SetField("EntityCount", bindings.CreateFunction("ecs:EntityCount",
-			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
-			{
-				return EntityCountImpl(bindings, args, count);
-			})))
-		{
-			if (error) *error = "failed to bind ecs.EntityCount";
-			return false;
-		}
-
-		if (!ecsTable.SetField("OnAdd", bindings.CreateFunction("ecs:OnAdd",
-			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
-			{
-				return OnAddImpl(bindings, args, count);
-			})))
-		{
-			if (error) *error = "failed to bind ecs.OnAdd";
-			return false;
-		}
-
-		if (!ecsTable.SetField("OnRemove", bindings.CreateFunction("ecs:OnRemove",
-			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
-			{
-				return OnRemoveImpl(bindings, args, count);
-			})))
-		{
-			if (error) *error = "failed to bind ecs.OnRemove";
-			return false;
-		}
-
-		if (!ecsTable.SetField("Off", bindings.CreateFunction("ecs:Off",
-			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
-			{
-				return OffImpl(bindings, args, count);
-			})))
-		{
-			if (error) *error = "failed to bind ecs.Off";
-			return false;
+				if (error) *error = std::string("failed to bind ecs.") + method.Name;
+				return false;
+			}
 		}
 
 		// Read-only metatable protection
