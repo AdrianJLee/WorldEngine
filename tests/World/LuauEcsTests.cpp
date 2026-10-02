@@ -10,9 +10,12 @@
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Script/ScriptValue.h"
+#include "World/Utils/Paths.h"
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 
@@ -714,6 +717,150 @@ int main()
 				CHECK(timing.Name != "BadPhaseType");
 				CHECK(timing.Name != "BadThird");
 			}
+		}
+
+		// =====================================================================
+		// 13. T13:scripts/lib 受限加载通道 ecs:RequireLib
+		//     (正例/缓存/跨 chunk 缓存/内容热重载/逃逸与非法名/循环依赖/沙箱不变/失败不入缓存)
+		// =====================================================================
+		{
+			const std::filesystem::path contentRoot = std::filesystem::temp_directory_path() /
+				("worldengine-luau-ecs-lib-" + std::to_string(static_cast<unsigned long long>(GetCurrentProcessId())));
+			std::error_code removeError;
+			std::filesystem::remove_all(contentRoot, removeError);
+
+			const auto writeLib = [](const std::filesystem::path& path, const std::string& text)
+			{
+				std::error_code ignored;
+				std::filesystem::create_directories(path.parent_path(), ignored);
+				std::ofstream file(path, std::ios::binary | std::ios::out | std::ios::trunc);
+				file << text;
+			};
+
+			const std::filesystem::path libRoot = contentRoot / "scripts" / "lib";
+			writeLib(libRoot / "util" / "math.luau",
+				"local M = { kind = 'luau' }\n"
+				"M.stamp = tostring({})\n"
+				"function M.add(a, b) return a + b end\n"
+				"return M\n");
+			// .luau 优先的对照:同名的 .lua 必须被忽略
+			writeLib(libRoot / "util" / "math.lua", "return { kind = 'lua-shadow' }\n");
+			writeLib(libRoot / "fallback.lua", "return { kind = 'lua' }\n");
+			writeLib(libRoot / "sandbox_probe.luau",
+				"return { io = io, os = os, require = require, load = load, dofile = dofile,\n"
+				"         loadstring = loadstring, loadfile = loadfile, package = package, debug = debug,\n"
+				"         ecsTable = ecs }\n");
+			writeLib(libRoot / "broken.luau", "return { this is not lua\n");
+			writeLib(libRoot / "reloadme.luau", "return { n = 1 }\n");
+			writeLib(libRoot / "cycle_a.luau", "local b = ecs:RequireLib('cycle_b')\nreturn { b = b }\n");
+			writeLib(libRoot / "cycle_b.luau", "local a = ecs:RequireLib('cycle_a')\nreturn { a = a }\n");
+			// 目录而非文件:候选 scripts/lib/adirlib.luau 的位置放一个目录
+			std::error_code directoryError;
+			std::filesystem::create_directories(libRoot / "adirlib.luau", directoryError);
+
+			World::Paths::SetAssetRootOverride(contentRoot);
+			struct ContentRootScope
+			{
+				std::filesystem::path Root;
+				~ContentRootScope()
+				{
+					World::Paths::SetAssetRootOverride(std::filesystem::path());
+					std::error_code ignored;
+					std::filesystem::remove_all(Root, ignored);
+				}
+			} contentRootScope{ contentRoot };
+
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			RUN_OK(R"(
+				-- 正例:.luau 优先(同名 .lua 被忽略)、返回值可用
+				local math = ecs:RequireLib("util/math")
+				assert(type(math) == "table", "RequireLib must return the module table")
+				assert(math.kind == "luau", "the .luau library must win over the same-named .lua")
+				assert(math.add(2, 3) == 5, "module functions must work")
+				assert(type(math.stamp) == "string", "module must stamp its execution")
+
+				-- 模块语义:第二次调用返回同一个值(同一份 stamp ⇒ 模块体只执行一次)
+				local again = ecs:RequireLib("util/math")
+				assert(again == math, "second call must return the same table")
+				assert(again.stamp == math.stamp, "module body must execute only once")
+
+				-- 点调用(无 self)与 world 别名共享同一份缓存
+				assert(ecs.RequireLib("util/math") == math, "dot call must hit the same cache entry")
+				assert(world:RequireLib("util/math") == math, "world alias must share the cache")
+
+				-- .lua 回退(只有 .lua 时)
+				local fallback = ecs:RequireLib("fallback")
+				assert(fallback.kind == "lua", ".lua fallback must resolve")
+
+				-- 跨调用保留状态:下一段 chunk 靠它证明缓存是同一张表
+				math.marker = "kept"
+			)", "TestRequireLibPositive");
+
+			RUN_OK(R"(
+				local math = ecs:RequireLib("util/math")
+				assert(math.marker == "kept", "cache must survive across chunks: same table, not re-executed")
+			)", "TestRequireLibCrossChunkCache");
+
+			RUN_OK(R"(
+				assert(ecs:RequireLib("reloadme").n == 1, "library must load")
+			)", "TestRequireLibReloadBefore");
+			writeLib(libRoot / "reloadme.luau", "return { n = 2 }\n");
+			RUN_OK(R"(
+				local reloaded = ecs:RequireLib("reloadme")
+				assert(reloaded.n == 2, "changed library content must re-execute on the next RequireLib")
+			)", "TestRequireLibContentHashReload");
+
+			RUN_OK(R"(
+				local probe = ecs:RequireLib("sandbox_probe")
+				assert(probe.io == nil, "io must stay nil inside a library")
+				assert(probe.os == nil, "os must stay nil inside a library")
+				assert(probe.require == nil, "require must stay nil inside a library")
+				assert(probe.load == nil, "load must stay nil inside a library")
+				assert(probe.dofile == nil, "dofile must stay nil inside a library")
+				assert(probe.loadstring == nil, "loadstring must stay nil inside a library")
+				assert(probe.loadfile == nil, "loadfile must stay nil inside a library")
+				assert(probe.package == nil, "package must stay nil inside a library")
+				assert(probe.debug == nil, "debug must stay nil inside a library")
+				assert(type(probe.ecsTable) == "table", "library must run under the same sandbox globals")
+			)", "TestRequireLibSandboxUnchanged");
+
+			RUN_OK(R"(
+				local function mustFail(name, label, needle)
+					local ok, err = pcall(function() return ecs:RequireLib(name) end)
+					assert(not ok, label .. " must fail")
+					assert(type(err) == "string" and #err > 0, label .. " must have a readable error")
+					if needle then
+						assert(string.find(err, needle, 1, true) ~= nil, label .. " error must mention '" .. needle .. "': " .. err)
+					end
+					return err
+				end
+
+				mustFail("../outside", "escape path", "../outside")
+				mustFail("/abs/math", "absolute path")
+				mustFail("C:/math", "drive letter")
+				mustFail("util\\math", "backslash escape", "backslash")
+				mustFail("util/math.txt", "non-luau/lua extension", ".luau")
+				local missing = mustFail("does/not/exist", "missing library", "does/not/exist")
+				assert(string.find(missing, "scripts/lib/", 1, true) ~= nil, "missing error must name the attempted location")
+				mustFail("adirlib", "directory instead of file", "adirlib")
+				mustFail("cycle_a", "circular dependency", "circular")
+
+				-- 循环报错后不许把"加载中"状态留在栈里:再次调用仍是同一个可读错误
+				mustFail("cycle_a", "circular dependency after failure", "circular")
+			)", "TestRequireLibRejectionsAndCycle");
+
+			RUN_OK(R"(
+				local okBroken, brokenErr = pcall(function() return ecs:RequireLib("broken") end)
+				assert(not okBroken, "a broken library must fail")
+				assert(type(brokenErr) == "string" and #brokenErr > 0, "broken library error must be readable")
+			)", "TestRequireLibFailureNotCachedBefore");
+			writeLib(libRoot / "broken.luau", "return { fixed = true }\n");
+			RUN_OK(R"(
+				local fixed = ecs:RequireLib("broken")
+				assert(fixed.fixed == true, "fixing the file must let the same session load it: failures are not cached")
+			)", "TestRequireLibFailureNotCachedAfter");
 		}
 
 		ScriptEngine::Shutdown();

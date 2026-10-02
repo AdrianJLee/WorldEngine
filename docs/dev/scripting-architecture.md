@@ -11,7 +11,7 @@
 | --- | --- | --- | --- |
 | **组件** | 纯数据（POD）+ 标签 | C++ 头文件,`WE_SCHEMA_BODY` 反射 | 实体通过 `AddComponent` 装配;属性面板/存档/预制体走这一份 |
 | **系统** | 逻辑 | C++ `World::ISystem`,或 Luau `scripts/systems/*.luau` | 场景帧管线（`SystemRegistry`） |
-| **脚本库** | 纯函数/配置表 | `<内容根>/scripts/lib/*.luau` | 由系统脚本**复制/粘贴**进来复用;**不会被自动加载** |
+| **脚本库** | 纯函数/配置表 | `<内容根>/scripts/lib/*.luau` | 系统脚本用 `ecs:RequireLib("util/math")` 装载(同路径只执行一次,内容变了重跑);**不会自动加载** |
 
 **硬规则:Luau 不能定义组件类型。** 组件类型只由 C++ 的 schema 反射定义。
 
@@ -23,12 +23,14 @@
 **Lua 侧的类型安全由共享库兜底**:需要 Lua 视野里的"结构"时,在 `scripts/lib/` 里声明
 `---@class` 注解表,系统脚本引用它拿补全 —— 它只是注解,不参与存储与序列化。
 
-**边界(2026-10-02 实测校正)**:沙箱**故意**把 `require` / `load` / `io` / `package` 等
-全局置空(`Engine/src/World/Script/LuauVm.cpp` 的 `kForbiddenGlobals`),所以 `scripts/lib/`
-里的文件**运行时不会被装载、也不能被 `require`** —— 它是"放可复用源码 + 注解"的地方,
-目前靠**复制**进系统脚本使用。只有 `<内容根>/scripts/systems/*.luau` 会在场景启动时自动执行。
-(是否给库文件加一条受限的加载通道,是一个会扩大脚本可见沙箱面的新决定,尚未定;
-编辑器「新建 Lua …」的「脚本库」类型只负责把文件放对位置。)
+**边界(2026-10-02,PECS-T13 起)**:Lua 的 `require`/`load`/`io`/`os`/`package`/`debug` 等全局
+**故意**保持置空(`Engine/src/World/Script/LuauVm.cpp` 的 `kForbiddenGlobals`);库文件的
+装载走**专用通道** `ecs:RequireLib(name)` —— 名字是相对 `scripts/lib/` 的逻辑路径
+(`BuildScriptLibCandidates`:无扩展名 ⇒ 依次试 `.luau`/`.lua`;已带 `.luau`/`.lua` ⇒ 视作完整
+相对路径;带**其它**扩展名 ⇒ 可读拒绝),
+规范化的逃逸防护复用 `Vfs::Normalize`(同 `ResolveScriptDiskPath`),执行前做
+"落在 `scripts/lib/` 之下"的前缀比较;按路径缓存(内容哈希变化重跑)、循环依赖报错、
+库文件跑在**同一份沙箱全局**下。只有 `<内容根>/scripts/systems/*.luau` 会在场景启动时自动执行。
 
 ## 2. 组件:纯数据
 

@@ -18,6 +18,7 @@
 #include "World/Script/ScriptFileWatch.h"
 #include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptRef.h"
+#include "World/Script/ScriptValue.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiContext.h"
 
@@ -63,6 +64,241 @@ namespace World
 		std::string s_LoadingSystemScript;
 		// 系统脚本目录的轮询监听(懒建立;ShutdownInternal 释放)。
 		std::unique_ptr<ScriptFileWatch> s_SystemWatch;
+
+		// -------------------------------------------------------------------------
+		// T13:受限库加载通道(ecs:RequireLib)—— 模块缓存 + 路径解析。
+		// 缓存项带库源文本的内容指纹:同一路径只执行一次(模块语义),内容变化后
+		// 下一次 RequireLib 重新执行(与系统脚本热重载同一套 FNV-1a64 口径);
+		// 失败不入缓存;命中"正在加载"集合 ⇒ 循环依赖,报可读错误而不是递归。
+		// -------------------------------------------------------------------------
+		struct ScriptLibCacheEntry
+		{
+			ScriptValue Value;
+			uint64_t Fingerprint = 0;
+		};
+		std::unordered_map<std::string, ScriptLibCacheEntry> s_ScriptLibCache;
+		// 正在加载中的库逻辑路径(按加载顺序;报循环错误时给出加载栈)。
+		std::vector<std::string> s_ScriptLibLoading;
+
+		// 库的固定子树(逻辑路径口径:相对内容根、POSIX 分隔、无尾 '/';
+		// 与 SystemScriptPrefix() 对 <内容根>/scripts/lib 的输出同源)。
+		constexpr const char* kScriptLibPrefix = "scripts/lib/";
+
+		// 大小写不敏感的前缀比较(与仓库其它逻辑路径判定同口径)。
+		bool HasPrefixIgnoreCase(const std::string& text, const char* prefix)
+		{
+			std::size_t length = 0;
+			while (prefix[length] != '\0')
+				++length;
+			if (text.size() < length)
+				return false;
+			for (std::size_t index = 0; index < length; ++index)
+			{
+				const char left = text[index];
+				const char right = prefix[index];
+				const char lowerLeft = (left >= 'A' && left <= 'Z') ? static_cast<char>(left - 'A' + 'a') : left;
+				const char lowerRight = (right >= 'A' && right <= 'Z') ? static_cast<char>(right - 'A' + 'a') : right;
+				if (lowerLeft != lowerRight)
+					return false;
+			}
+			return true;
+		}
+
+		bool EndsWithText(const std::string& text, const char* suffix)
+		{
+			std::size_t length = 0;
+			while (suffix[length] != '\0')
+				++length;
+			return text.size() >= length && text.compare(text.size() - length, length, suffix) == 0;
+		}
+
+		std::string JoinQuoted(const std::vector<std::string>& values)
+		{
+			std::string joined;
+			for (const std::string& value : values)
+			{
+				if (!joined.empty())
+					joined += ", ";
+				joined += "'";
+				joined += value;
+				joined += "'";
+			}
+			return joined;
+		}
+
+		// 库名 → 候选逻辑路径(相对 scripts/lib/,带扩展名;.luau 优先、.lua 回退)。
+		// 名字非法(空 / 反斜杠 / 逃逸 / 绝对路径 / 盘符 / 非 .luau|.lua 扩展名)⇒ false + 可读 error。
+		// 逃逸防护复用 Vfs::Normalize(与 ResolveScriptDiskPath 同一条守卫),不另造一套;
+		// 规范化后再做一次"落在 scripts/lib/ 之下"的大小写不敏感前缀比较(双保险)。
+		bool BuildScriptLibCandidates(const std::string& name, std::vector<std::string>& candidates,
+			std::string* error)
+		{
+			candidates.clear();
+			if (name.empty())
+			{
+				if (error) *error = "ecs:RequireLib: library name must be a non-empty string";
+				return false;
+			}
+			// 反斜杠一律拒绝:Vfs::Normalize 会把 '\' 折叠成 '/',那是"悄悄接受";
+			// 库名与逻辑路径统一用 '/' 分段。
+			if (name.find('\\') != std::string::npos)
+			{
+				if (error)
+					*error = "ecs:RequireLib('" + name +
+						"'): library name must use '/' separators (backslashes are rejected)";
+				return false;
+			}
+
+			Vfs::Path normalized;
+			std::error_code normalizeError;
+			if (!Vfs::Normalize(name, normalized, normalizeError))
+			{
+				if (error)
+					*error = "ecs:RequireLib('" + name +
+						"'): invalid library name (absolute paths, drive letters and '.'/'..' segments are rejected)";
+				return false;
+			}
+
+			// 扩展名口径:已带 .luau/.lua 视作完整相对路径;带其它扩展名直接拒绝
+			// (与 IsSystemScriptFile 的"只认 .luau/.lua"同一口径)。
+			const std::size_t slash = normalized.rfind('/');
+			const std::string leaf = (slash == std::string::npos) ? normalized : normalized.substr(slash + 1);
+			std::vector<std::string> names;
+			if (EndsWithText(leaf, ".luau") || EndsWithText(leaf, ".lua"))
+			{
+				names.push_back(normalized);
+			}
+			else if (leaf.find('.') != std::string::npos)
+			{
+				if (error)
+					*error = "ecs:RequireLib('" + name + "'): only .luau/.lua library files are supported";
+				return false;
+			}
+			else
+			{
+				names.push_back(normalized + ".luau");
+				names.push_back(normalized + ".lua");
+			}
+
+			const std::size_t prefixLength = std::string(kScriptLibPrefix).size();
+			for (const std::string& candidate : names)
+			{
+				const std::string logical = std::string(kScriptLibPrefix) + candidate;
+				if (logical.size() <= prefixLength || !HasPrefixIgnoreCase(logical, kScriptLibPrefix))
+				{
+					if (error)
+						*error = "ecs:RequireLib('" + name + "'): resolved path escapes scripts/lib/";
+					return false;
+				}
+				candidates.push_back(logical);
+			}
+			return true;
+		}
+
+		// 库源执行:与系统脚本同一口径 —— 空 environment = 线程全局(被沙箱冻结/置空的全局),
+		// 因此库拿不到 io/os/require/load 等任何禁用全局,也没有新的特权入口。
+		bool RunScriptLibChunk(const std::string& logicalPath, const std::string& source,
+			ScriptValue& out, std::string* error)
+		{
+			ScriptFunctionRef function = s_Vm->LoadChunk(std::string_view(source), logicalPath.c_str(),
+				ScriptTableRef(), error);
+			if (!function.IsValid())
+			{
+				if (error && !error->empty())
+					*error = "ecs:RequireLib('" + logicalPath + "'): " + *error;
+				return false;
+			}
+
+			ScriptValue result;
+			std::string callError;
+			if (!function.Call(nullptr, 0, &result, &callError))
+			{
+				if (error)
+					*error = "ecs:RequireLib('" + logicalPath + "'): " + callError;
+				return false;
+			}
+			out = result;
+			return true;
+		}
+
+		// 受限库加载:解析 → 循环检测 → 内容指纹缓存 → 同一沙箱执行 → 入缓存。
+		bool LoadScriptLib(const std::string& name, ScriptValue& out, std::string* error)
+		{
+			if (!s_Vm)
+			{
+				if (error) *error = "ecs:RequireLib: the Luau VM is not initialized";
+				return false;
+			}
+
+			std::vector<std::string> candidates;
+			if (!BuildScriptLibCandidates(name, candidates, error))
+				return false;
+
+			// 读源:VFS 优先、磁盘回退(与系统脚本 ResolveScriptSource 同一条链),
+			// 目录/不存在/读取失败都由这条链给可读错误。
+			std::string logicalPath;
+			std::string source;
+			std::string readError;
+			for (const std::string& candidate : candidates)
+			{
+				if (ResolveScriptSource(candidate, source, &readError) && !source.empty())
+				{
+					logicalPath = candidate;
+					break;
+				}
+			}
+			if (logicalPath.empty())
+			{
+				// 读不到 ⇒ 失败不入缓存(用户修好文件后再调用必须能成功);
+				// 顺手丢掉候选名的旧缓存项,避免"删掉后同名重建"命中陈旧值。
+				for (const std::string& candidate : candidates)
+					s_ScriptLibCache.erase(candidate);
+				if (error)
+					*error = "ecs:RequireLib('" + name + "'): cannot read library under <content>/scripts/lib/ (tried " +
+						JoinQuoted(candidates) + "): " + readError;
+				return false;
+			}
+
+			// 循环依赖:该库正在加载中(直接或间接自引用)⇒ 可读错误,不递归、不栈溢出。
+			if (std::find(s_ScriptLibLoading.begin(), s_ScriptLibLoading.end(), logicalPath) != s_ScriptLibLoading.end())
+			{
+				if (error)
+					*error = "ecs:RequireLib('" + name + "'): circular dependency detected while loading '" +
+						logicalPath + "' (loading stack: " + JoinQuoted(s_ScriptLibLoading) + ")";
+				return false;
+			}
+
+			// 模块语义:同一路径只执行一次;内容指纹一致 ⇒ 直接返回同一值。
+			const uint64_t fingerprint = FingerprintScriptText(source);
+			const auto cached = s_ScriptLibCache.find(logicalPath);
+			if (cached != s_ScriptLibCache.end() && cached->second.Fingerprint == fingerprint)
+			{
+				out = cached->second.Value;
+				if (error) error->clear();
+				return true;
+			}
+			s_ScriptLibCache.erase(logicalPath);   // 内容变了(或没缓存)→ 丢掉旧值,重新执行
+
+			s_ScriptLibLoading.push_back(logicalPath);
+			struct LoadingScope
+			{
+				std::vector<std::string>& Stack;
+				~LoadingScope() { Stack.pop_back(); }
+			} loadingScope{ s_ScriptLibLoading };
+
+			ScriptValue value;
+			std::string loadError;
+			if (!RunScriptLibChunk(logicalPath, source, value, &loadError))
+			{
+				if (error) *error = loadError;
+				return false;   // 失败不入缓存
+			}
+
+			out = value;
+			s_ScriptLibCache[logicalPath] = ScriptLibCacheEntry{ value, fingerprint };
+			if (error) error->clear();
+			return true;
+		}
 
 		SystemScriptRecord* FindSystemScriptRecord(const std::string& logicalPath)
 		{
@@ -1456,6 +1692,9 @@ namespace World
 			s_ActiveScene = nullptr;
 			s_SystemScripts.clear();
 			s_LoadingSystemScript.clear();
+			// T13:库缓存/加载栈在 VM 关闭前清空(引用在 VM 关闭后一律失效)。
+			s_ScriptLibCache.clear();
+			s_ScriptLibLoading.clear();
 			s_SystemWatch.reset();
 			s_OwnerThread = {};
 		}
@@ -1565,6 +1804,9 @@ namespace World
 					++removed;
 		s_SystemScripts.clear();
 		s_LoadingSystemScript.clear();
+		// T13:系统脚本全部卸载(场景停止/换场景)⇒ 库模块缓存一并作废,
+		// 下次加载库时重新执行(与"系统脚本整份重跑"同一生命周期口径)。
+		s_ScriptLibCache.clear();
 		return removed;
 	}
 
@@ -1617,6 +1859,13 @@ namespace World
 			++processed;
 		}
 		return processed;
+	}
+
+	// T13:受限库加载通道入口(ecs:RequireLib;实现见本文件 LoadScriptLib)。
+	bool ScriptEngine::RequireScriptLib(const std::string& name, ScriptValue& out, std::string* error)
+	{
+		AssertOwnerThread();
+		return LoadScriptLib(name, out, error);
 	}
 
 	void ScriptEngine::Init()

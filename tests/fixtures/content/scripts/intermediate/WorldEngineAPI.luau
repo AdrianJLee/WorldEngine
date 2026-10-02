@@ -467,6 +467,11 @@ function ecs:OnRemove(component, fn) end
 ---@return boolean
 function ecs:Off(handle) end
 
+---Load a library module from <content root>/scripts/lib/ inside the same sandbox (no io/os/require/load); the module body runs once per path and the returned value is cached (content changes re-run it); rejects absolute paths, drive letters, '.'/'..' segments, backslashes and non-.luau/.lua names.
+---@param name string Library path relative to the content root's scripts/lib/, without extension and using '/' separators (e.g. "util/math"); .luau is preferred and .lua is the fallback.
+---@return any
+function ecs:RequireLib(name) end
+
 -- Global script UI table 'ui': read-only; there is no runtime constructor.
 ---Immediate-mode script UI table; draw calls are rebuilt every frame and there is no long-lived callback registration.
 ---@class ui

@@ -5,6 +5,9 @@
 
 一句话分层:
 
+> **"系统要挂在实体上吗?我只想让它管某些实体怎么写?"** → 见
+> [实体与系统](entities-and-systems.md)(标签组件 + 查询,含从"给实体挂脚本"的迁移对照表)。
+
 - **组件**是纯数据,用 **C++** 的 `WE_SCHEMA_BODY` 定义（见 [扩展引擎](../projects/README.md)）。
 - **逻辑**写成**系统**:C++ 派生 `World::ISystem`,或 Luau 写成系统脚本。
 - **Luau 不能定义组件类型** —— 类型与字段只有 C++ schema 一份。
@@ -45,6 +48,7 @@ end, "Update")
 | `ecs:EntityCount()` | 当前存活实体数 |
 | `ecs:OnAdd(comp, fn)` / `ecs:OnRemove(comp, fn)` | 观察组件增删,返回句柄 |
 | `ecs:Off(handle)` | 取消观察者 |
+| `ecs:RequireLib("util/math")` | 装载 `scripts/lib/` 下的库(同路径只执行一次;沙箱不放开 `io`/`os`/`require`) |
 
 `:Each` 的回调签名是 `(entity, 组件代理...)`,组件代理按 `Query` 里列出的组件顺序传入,
 可以直接读写字段（例如 `transform.Location.x = ...`）。

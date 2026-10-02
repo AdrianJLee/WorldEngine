@@ -14,6 +14,7 @@ namespace World
 {
 	class LuauVm;
 	class ScriptBindingContext;
+	class ScriptValue;
 	class WorldContext;
 
 	namespace Schema { class SchemaRegistry; }
@@ -122,6 +123,17 @@ namespace World
 		// ecs:AddSystem 成功后由绑定层调用:把系统名归属到"当前正在执行的系统脚本"名下。
 		// 不在加载系统脚本时是 no-op(宿主手写 ecs:AddSystem 的系统不参与脚本热重载)。
 		static void NoteScriptSystem(const std::string& systemName);
+
+		// T13:受限库加载通道(ecs:RequireLib 的引擎侧入口)。
+		// 名字 = 相对 <内容根>/scripts/lib/ 的逻辑路径(可含斜杠分段;不带扩展名,
+		// 按 .luau 优先、.lua 回退,与 IsSystemScriptFile 同口径);只在该子树内解析 ——
+		// 绝对路径/盘符/'.'/'..' 段/反斜杠/其它扩展名一律可读错误(复用 Vfs::Normalize)。
+		// 模块语义:同一路径只执行一次(命中缓存返回同一值);失败不入缓存;
+		// 命中"正在加载"集合 ⇒ 循环依赖可读错误(不递归、不栈溢出);
+		// 库在与系统脚本**同一份沙箱全局**下执行(io/os/require/load 等仍为 nil)。
+		// 库源内容变化后,下一次调用重新执行(内容哈希,与系统脚本热重载同一口径)。
+		// out = 库 `return` 的值;失败返回 false 并把可读原因写进 error。
+		static bool RequireScriptLib(const std::string& name, ScriptValue& out, std::string* error = nullptr);
 
 		// UI 阶段兼容占位 (纯 ECS 脚本通过 WUI / System 渲染)
 		static std::size_t DrawScriptUi(Scene&, Wui::WuiContext&) { return 0; }

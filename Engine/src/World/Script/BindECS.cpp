@@ -825,6 +825,31 @@ namespace World
 			activeScene->RemoveComponentObserver(observerId);
 			return ScriptValue::Boolean(true);
 		}
+
+		// -------------------------------------------------------------------------
+		// ecs:RequireLib(name) 实现 —— scripts/lib/ 受限加载通道的绑定入口。
+		// 路径守卫 / 模块缓存 / 循环检测 / 同一沙箱执行都在 ScriptEngine::RequireScriptLib
+		// (Scene/ScriptEngine.cpp);这里只做参数校验与"失败 ⇒ 可读 Lua error"的转换。
+		// -------------------------------------------------------------------------
+		ScriptValue RequireLibImpl(const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+				startIndex = 1;   // 冒号调用:args[0] 是 ecs/world 表(self)
+
+			if (count <= startIndex)
+				throw std::logic_error("ecs:RequireLib expects (name)");
+
+			std::string name;
+			if (!args[startIndex].AsString(&name))
+				throw std::logic_error("ecs:RequireLib expects a library name string");
+
+			ScriptValue value;
+			std::string error;
+			if (!ScriptEngine::RequireScriptLib(name, value, &error))
+				throw std::logic_error(error.empty() ? ("ecs:RequireLib('" + name + "') failed") : error);
+			return value;
+		}
 	}
 
 	// ecs 面 API 的唯一描述表:运行时注册循环与 LuaStubGenerator 的存根渲染共用同一份
@@ -860,6 +885,9 @@ namespace World
 		static const ScriptServiceParam offParams[] = {
 			{ "handle", "number", ScriptServiceArgType::Number, true, "Observer handle returned by ecs:OnAdd / ecs:OnRemove." },
 		};
+		static const ScriptServiceParam requireLibParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "Library path relative to the content root's scripts/lib/, without extension and using '/' separators (e.g. \"util/math\"); .luau is preferred and .lua is the fallback." },
+		};
 		static const ScriptServiceMethod methods[] = {
 			{ "Query", &QueryImpl, queryParams, 2, 2, "table",
 				"Build a query over the listed component types, optionally excluding entities that carry the components named in options.without; the result has :Each(fn) and :Count()." },
@@ -879,6 +907,8 @@ namespace World
 				"Observe component removals; returns a handle for ecs:Off." },
 			{ "Off", &OffImpl, offParams, 1, 1, "boolean",
 				"Cancel an observer handle; false when the handle is unknown." },
+			{ "RequireLib", &RequireLibImpl, requireLibParams, 1, 1, "any",
+				"Load a library module from <content root>/scripts/lib/ inside the same sandbox (no io/os/require/load); the module body runs once per path and the returned value is cached (content changes re-run it); rejects absolute paths, drive letters, '.'/'..' segments, backslashes and non-.luau/.lua names." },
 		};
 		static const ScriptServiceBinding tables[] = {
 			{ "ecs", "Read-only pure-ECS table (also exposed as \"world\"): queries, systems, entity lifecycle and component observers.",
