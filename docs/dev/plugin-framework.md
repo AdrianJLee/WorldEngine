@@ -74,7 +74,7 @@ Create 按钮在这些校验不过时禁用并给可读原因。
 | --- | --- | --- | --- | --- |
 | `empty` | Empty Plugin | (空) | none | 最小可加载插件 |
 | `library` | C++ Library Plugin | `cxx.exports` | none | 导出函数表(`<短名>.ping` 示例) |
-| `asset-type` | Asset Type Plugin | `asset.type`, `asset.importer` | none | 新资产类型 + 导入器(蓝本:`plugins/hello-import`) |
+| `asset-type` | Asset Type Plugin | `asset.type`, `asset.importer` | none | 新资产类型 + 导入器(蓝本:`templates/plugin-asset-type/**`;真 DLL 加载的夹具在 `tests/fixtures/plugins/hello-import`) |
 | `editor-ui` | Editor Extension Plugin | `editor.panel`, `editor.command` | **t3b** | 面板/命令;注册面未就绪,生成可编译骨架 + TODO |
 | `component` | Component Plugin | `scene.component` | **t2b** | 组件 schema;同上 |
 | `lua-lib` | Lua Library Plugin | `script.library` | **t4** | 脚本库;同上 |
@@ -104,7 +104,7 @@ Scaffold(pluginsRoot, request)                    // 校验 → 临时目录 →
 
 插件**不链接 World** —— 只 `target_include_directories(... "${WLD_ENGINE_ROOT}/Engine/src")`
 拿公共 ABI 头,与第三方插件的边界一致。模板的 `CMakeLists.txt` 与
-`plugins/hello-import/CMakeLists.txt` 同款:
+`templates/plugin-asset-type/CMakeLists.txt` 同款:
 
 ```cmake
 add_library(WePlugin_<目录名> SHARED src/plugin.cpp)
@@ -386,7 +386,7 @@ struct WeComponentDesc {
 
 ```yaml
 plugins:
-  enabled: [engine.hello-import, com.example.core]   # 显式启用(引擎插件需要在这里出现才随包)
+  enabled: [com.example.core, engine.hello-import]   # 显式启用(引擎插件需要在这里出现才随包)
   shipped: [com.example.core, engine.hello-import]   # cook 写入发行清单的随包插件(依赖拓扑序)
   tolerate_missing: [com.example.optional]           # 引用缺件的唯一例外(降级为 ERROR + 摘要计数)
 ```
@@ -553,7 +553,7 @@ load/unload 账本零增长 + 条目数不增长"。
   `HostEngineVersion()` 是唯一读取点);不在插件层复制第二份版本号。
 - 清单 `engine:` 只接受 `">=X.Y"` 形态(或省略 = 不限制)。语义比较 = **宿主 `major.minor` ≥ 声明值**;
   `plugin.info` 输出宿主 `hostEngineVersion`,每个条目输出 `engineSatisfied`(空清单字段 = `true`)。
-- 自带清单与事实源已对齐:`plugins/hello-import` 与 6 个 `templates/plugin-*/plugin.we.yaml` 声明 `>=2.0`,
+- 自带清单与事实源已对齐:`tests/fixtures/plugins/hello-import` 与 6 个 `templates/plugin-*/plugin.we.yaml` 声明 `>=2.0`,
   宿主事实源也是 `2.0.0`;约束不满足(例:`>=99.0`)⇒ **干净拒绝**并给可读诊断(见下一段)。
 - **PLUG-CLEAN-2 更新(2026-09-30)**:宿主版本事实源已提升为
   `project(World VERSION 2.0.0)`(与自带清单的 `>=2.0` 对齐);`engine:` 约束不满足 ⇒ **硬拒绝**

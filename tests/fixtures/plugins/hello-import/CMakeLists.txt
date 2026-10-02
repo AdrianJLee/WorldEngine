@@ -1,6 +1,11 @@
-# PLUG-T2 引擎插件示例的构建(由根 CMakeLists.txt 的可选 plugins/** 收集加入)。
+# PLUG-T2 示例插件的构建。**这是测试夹具,不是随引擎分发的插件**:
+# 它原先住在 <引擎根>/plugins/hello-import,会被根 CMakeLists 的 plugins/** 收集、
+# 也会被编辑器的插件发现扫到 ⇒ 每个编辑器会话都会加载它,右键「新建」里就多一条
+# "Hello File"(用户 2026-10-02 报的噪音)。示例插件的价值是覆盖测试,所以搬到这里:
+# 由 tests/CMakeLists.txt 显式 add_subdirectory 加进来,发布/编辑器都看不到它。
+# 面向用户的"资产类型插件"蓝本是 templates/plugin-asset-type/**。
 #
-# 边界:示例插件**不链接 World** —— 只依赖公共 ABI 头 WePluginApi.h,和真实第三方插件
+# 边界:夹具插件**不链接 World** —— 只依赖公共 ABI 头 WePluginApi.h,和真实第三方插件
 # 的边界一致(宿主通过 DynamicLibrary 取 WePluginQuery 符号)。
 add_library(WePlugin_hello-import SHARED src/HelloImport.cpp)
 

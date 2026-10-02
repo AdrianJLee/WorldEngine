@@ -1419,35 +1419,18 @@ namespace World
 				std::filesystem::path created;
 				return CreateSceneAsset(dir, error, &created);
 			});
-		// Script:从 templates/WorldScript.lua 复制(与 Scripts 面板"新建脚本"同一份模板),
-		// 随后在脚本编辑器里打开 —— 脚本面板不动文档,没有上面那条顾虑。
-		// 注意:只有落在 scripts/systems/ 下的脚本会被场景启动时自动加载。
-		add("script", "Script", ".lua", 30, false,
+		// PECS-T11:Lua 只有**一个**入口 —— 旧 `Script`(落右键目录、`.lua`,在 assets/ 根
+		// 新建就永远不会被加载)与 T9 的 `Lua System`(固定 scripts/systems/)合并成
+		// 「Lua Script…」:点它打开宿主**同一个**「新建 Lua …」向导(系统 / 脚本库 / 空
+		// 在向导里选),落点/模板/扩展名全由向导保证,面板不再自己写盘。
+		// 面板渲染期拿不到安全的模态打开点 ⇒ 只置标记,宿主在帧边界取走(与 C++ 的
+		// `RequestNewCppScript()` 同一件事,只是那条走 PanelHost 虚函数、这里走帧边界标记)。
+		add("script", "Lua Script…", ".luau", 30, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{
-				std::filesystem::path created;
-				if (!CreateScriptAsset(dir, error, &created))
-					return false;
-				std::error_code relativeError;
-				const std::filesystem::path relative =
-					std::filesystem::relative(created, m_Model.Root, relativeError);
-				m_Host.OpenScriptEditor(relativeError ? created.generic_string() : relative.generic_string());
-				return true;
-			});
-		// PECS-T9:Lua System —— 与 Script 同一份磁盘模板/编辑器路径,唯一差别是落点**固定**
-		// `<内容根>/scripts/systems/`(忽略右键所在目录):只有这个目录下的脚本会被场景启动时
-		// 自动加载,这正是本类型存在的意义(在 assets/ 根新建普通 Script 永远不会被加载)。
-		add("luau-system", "Lua System", ".luau", 31, false,
-			[this](const std::filesystem::path& dir, std::string* error)
-			{
-				(void)dir;   // 忽略所在目录:固定落 scripts/systems/
-				std::filesystem::path created;
-				if (!CreateLuaSystemAsset(error, &created))
-					return false;
-				std::error_code relativeError;
-				const std::filesystem::path relative =
-					std::filesystem::relative(created, m_Model.ContentRoot, relativeError);
-				m_Host.OpenScriptEditor(relativeError ? created.generic_string() : relative.generic_string());
+				(void)dir;     // 落点由向导按类型决定(scripts/systems|lib|/),与右键目录无关
+				(void)error;   // 需要项目/内容根时由向导给可读提示,这里不拦
+				m_PendingLuaWizard = true;
 				return true;
 			});
 	}
@@ -1459,7 +1442,7 @@ namespace World
 		m_AssetTypesRegistered = false;
 		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
 		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
-		for (const char* id : { "folder", "material", "shader", "scene", "script", "luau-system" })
+		for (const char* id : { "folder", "material", "shader", "scene", "script" })
 			registry.Unregister(id);
 	}
 
@@ -1564,111 +1547,13 @@ namespace World
 		return true;
 	}
 
-	bool ContentBrowserPanel::CreateScriptAsset(const std::filesystem::path& dir, std::string* error,
-		std::filesystem::path* outPath)
+	// PECS-T11:合并后的「Lua Script…」入口只排队 —— 宿主在帧边界取走标记并打开
+	// 同一个「新建 Lua …」向导(见 EditorShell::OnRender 的帧边界分支)。
+	bool ContentBrowserPanel::ConsumePendingLuaWizardRequest()
 	{
-		// 与 Scripts 面板"从模板新建"同一份磁盘模板;模板缺失时退回最小骨架(不阻断新建)。
-		const std::filesystem::path target = MakeUniqueAssetPath(dir, "script", ".lua");
-		const std::filesystem::path templatePath = m_Model.Root / "scripts" / "templates" / "WorldScript.lua";
-		std::error_code templateError;
-		if (std::filesystem::is_regular_file(templatePath, templateError))
-		{
-			std::error_code copyError;
-			std::filesystem::copy_file(templatePath, target, std::filesystem::copy_options::none, copyError);
-			if (copyError)
-			{
-				WLD_CORE_ERROR("Could not create script: {0}", copyError.message());
-				if (error) *error = copyError.message();
-				return false;
-			}
-		}
-		else
-		{
-			std::ofstream out(target, std::ios::binary | std::ios::trunc);
-			if (!out.is_open())
-			{
-				if (error) *error = "could not write " + target.string();
-				return false;
-			}
-			out << "-- System script: put it under scripts/systems/ to be auto-loaded on play.\n"
-				"local query = ecs:Query({ \"TransformComponent\", \"VelocityComponent\" })\n\n"
-				"ecs:AddSystem(\"NewSystem\", \"Update\", function(dt)\n"
-				"    query:Each(function(entity, transform, velocity)\n"
-				"        transform.Location.x = transform.Location.x + velocity.Linear.x * dt\n"
-				"    end)\n"
-				"end)\n";
-		}
-		SelectCreated(target, "new-script");
-		if (outPath) *outPath = target;
-		return true;
-	}
-
-	// PECS-T9:Lua System 的落点**固定**为 <内容根>/scripts/systems/ —— 忽略传入目录(右键位置),
-	// 因为只有这个目录下的脚本会被场景启动时自动加载。名字按既有去重规则自动编号,绝不覆盖。
-	bool ContentBrowserPanel::CreateLuaSystemAsset(std::string* error, std::filesystem::path* outPath)
-	{
-		const std::filesystem::path contentRoot = m_Model.ContentRoot;
-		if (contentRoot.empty())
-		{
-			if (error) *error = "no content root (open or create a project first)";
+		if (!m_PendingLuaWizard)
 			return false;
-		}
-		const std::filesystem::path systemsDir = contentRoot / "scripts" / "systems";
-		std::error_code dirError;
-		if (!std::filesystem::is_directory(systemsDir, dirError))
-		{
-			dirError.clear();
-			std::filesystem::create_directories(systemsDir, dirError);
-			if (dirError || !std::filesystem::is_directory(systemsDir))
-			{
-				if (error) *error = "could not create " + systemsDir.string()
-					+ (dirError ? (" (" + dirError.message() + ")") : std::string());
-				return false;
-			}
-		}
-
-		const std::filesystem::path target = MakeUniqueAssetPath(systemsDir, "system", ".luau");
-		// 与 Scripts 面板"从模板新建"、Script 资产同一份磁盘模板;模板缺失时退回最小骨架。
-		const std::filesystem::path templatePath = contentRoot / "scripts" / "templates" / "WorldScript.lua";
-		std::error_code templateError;
-		if (std::filesystem::is_regular_file(templatePath, templateError))
-		{
-			std::error_code copyError;
-			std::filesystem::copy_file(templatePath, target, std::filesystem::copy_options::none, copyError);
-			if (copyError)
-			{
-				WLD_CORE_ERROR("Could not create Lua system: {0}", copyError.message());
-				if (error) *error = copyError.message();
-				return false;
-			}
-		}
-		else
-		{
-			// 内置骨架 = 模板的系统脚本形态,签名用**规范顺序** ecs:AddSystem(名字, 函数, 阶段)。
-			std::ofstream out(target, std::ios::binary | std::ios::trunc);
-			if (!out.is_open())
-			{
-				if (error) *error = "could not write " + target.string();
-				return false;
-			}
-			out << "-- Lua system script: lives under scripts/systems/ and is auto-loaded on play.\n"
-				"local query = ecs:Query({ \"TransformComponent\", \"VelocityComponent\" })\n\n"
-				"ecs:AddSystem(\"NewSystem\", function(dt)\n"
-				"    query:Each(function(entity, transform, velocity)\n"
-				"        transform.Location.x = transform.Location.x + velocity.Linear.x * dt\n"
-				"    end)\n"
-				"end, \"Update\")\n";
-		}
-
-		// 目标固定不在当前目录 ⇒ 走 SelectAsset(先导航过去再选中),用户原地就能看到新文件。
-		std::error_code relativeError;
-		const std::filesystem::path relative =
-			std::filesystem::relative(target, contentRoot, relativeError);
-		if (!relativeError && !relative.empty())
-			SelectAsset(relative.generic_string(), "new-luau-system");
-		else
-			SelectCreated(target, "new-luau-system");
-		if (outPath) *outPath = target;
+		m_PendingLuaWizard = false;
 		return true;
 	}
 
@@ -4391,7 +4276,12 @@ namespace World
 				case EditorAssetKind::TextureSource:
 					slice.TypeLabel = Wui::Tr("asset.file.texture_source", "Texture source");
 					break;
-				case EditorAssetKind::Script: slice.TypeLabel = Wui::Tr("asset.file.script", "Script"); break;
+				case EditorAssetKind::Script:
+					// PECS-T11:Lua 类型列按**目录**给名(systems/ → Lua System,lib/ → Lua Library,
+					// 其余 → Lua Script);名字与本地化 key 由 DescribeAssetType 按路径给出。
+					slice.TypeLabel = Wui::Tr(type.LocalizationKey ? type.LocalizationKey : "asset.file.script",
+						type.Name);
+					break;
 				// CPPSRC-1:项目层 C++ 源码(内容根里一般不出现,项目源码根下是主角)。
 				case EditorAssetKind::CppHeader:
 					slice.TypeLabel = Wui::Tr("asset.file.cpp_header", "C++ Header");

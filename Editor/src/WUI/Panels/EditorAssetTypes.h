@@ -44,6 +44,10 @@ namespace World
 	{
 		EditorAssetKind Kind = EditorAssetKind::Unknown;
 		const char* Name = "File";
+		// PECS-T11:类型列的本地化 key(非空时优先于 Kind 的固定 key)。目前只有 Lua 按**目录**
+		// 分流(systems/ → Lua System,lib/ → Lua Library,其余 → Lua Script),所以名字与 key
+		// 由 DescribeAssetType 一起给出;其它类型保持 nullptr,由内容浏览器按 Kind 映射。
+		const char* LocalizationKey = nullptr;
 	};
 
 	inline std::string LowerExtension(const std::filesystem::path& path)
@@ -52,6 +56,34 @@ namespace World
 		std::transform(extension.begin(), extension.end(), extension.begin(),
 			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 		return extension;
+	}
+
+	// PECS-T11:`.luau`/`.lua` 的类型列按**目录**给名 —— 与「新建 Lua …」向导的三类对齐:
+	// `<内容根>/scripts/systems/**` → Lua System(Play 自动装载),
+	// `<内容根>/scripts/lib/**`     → Lua Library(不自动加载),
+	// 其余                          → Lua Script。
+	// 只认"`…/scripts/<systems|lib>/<file>`"这个最后三段形态,内容根以外的同名目录不会误判。
+	// 返回:0 = 普通脚本,1 = systems/,2 = lib/。
+	inline int LuaScriptFlavor(const std::filesystem::path& path)
+	{
+		auto iterator = path.end();
+		if (iterator == path.begin())
+			return 0;
+		--iterator;                          // 文件名
+		if (iterator == path.begin())
+			return 0;
+		--iterator;                          // 直接父目录(systems / lib / …)
+		const std::string parent = iterator->string();
+		if (iterator == path.begin())
+			return 0;
+		--iterator;                          // 祖父目录,必须恰好是 scripts
+		if (iterator->string() != "scripts")
+			return 0;
+		if (parent == "systems")
+			return 1;
+		if (parent == "lib")
+			return 2;
+		return 0;
 	}
 
 	inline EditorAssetType DescribeAssetType(const std::filesystem::path& path, bool isDirectory)
@@ -83,7 +115,15 @@ namespace World
 			|| extension == ".bmp")
 			return { EditorAssetKind::TextureSource, "Texture Source" };
 		if (extension == ".lua" || extension == ".luau")
-			return { EditorAssetKind::Script, "Script" };
+		{
+			// PECS-T11:同一扩展名按目录分三种显示名(与向导的 系统 / 脚本库 / 空 对齐)。
+			const int flavor = LuaScriptFlavor(path);
+			if (flavor == 1)
+				return { EditorAssetKind::Script, "Lua System", "asset.file.lua_system" };
+			if (flavor == 2)
+				return { EditorAssetKind::Script, "Lua Library", "asset.file.lua_library" };
+			return { EditorAssetKind::Script, "Lua Script", "asset.file.lua_script" };
+		}
 		// CPPSRC-1:项目层 C++ 源码(类型名走 Wui::Tr("asset.file.cpp_header" / "asset.file.cpp_source"),
 		// 这里的 Name 只作英文兜底/日志用)。
 		if (extension == ".h" || extension == ".hpp" || extension == ".inl")

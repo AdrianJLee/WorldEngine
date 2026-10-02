@@ -164,6 +164,10 @@ namespace World
 		// 与"新建材质/场景/脚本"同一条选中通道(SelectCreated),但会先把列表导航到目标所在目录,
 		// 让用户/脚本立刻看到它 —— 创建预制体成功后由宿主调用。
 		bool SelectAsset(const std::string& logicalPath, const char* op);
+		// PECS-T11:内容浏览器的「新建 ▶ Lua 脚本…」= 打开宿主**同一个**「新建 Lua …」向导
+		// (类型/落点全在向导里选)。面板渲染期只置标记;宿主在帧边界取走它并打开模态。
+		// 返回 true 表示这次取走了一个待处理请求(取走即清)。
+		bool ConsumePendingLuaWizardRequest();
 
 		// ---- U25-M2:E 写材质的工作流 ----
 		// "新建材质"向导(Window ▸ New Material… 与内容浏览器 New ▸ Material… 共用这一条):
@@ -195,7 +199,7 @@ namespace World
 		// 返回新建目录路径;创建失败返回空路径。
 		std::filesystem::path CreateFolderIn(Wui::WuiContext& ctx, const std::filesystem::path& parentDir);
 		// ---- P4-UX16:"新建资产"注册表 ----
-		// 默认类型(Folder / Material / Shader / Scene / Script / Lua System)只注册一次;
+		// 默认类型(Folder / Material / Shader / Scene / Lua Script)只注册一次;
 		// 菜单/右键菜单/快捷键全部读同一张表 —— 以后加类型不再改这里的 UI 代码。
 		void RegisterDefaultAssetTypes();
 		void UnregisterDefaultAssetTypes();
@@ -206,12 +210,8 @@ namespace World
 			std::filesystem::path* outPath);
 		bool CreateSceneAsset(const std::filesystem::path& dir, std::string* error,
 			std::filesystem::path* outPath);
-		bool CreateScriptAsset(const std::filesystem::path& dir, std::string* error,
-			std::filesystem::path* outPath);
-		// PECS-T9:Lua System 资产 —— 落点**固定** `<内容根>/scripts/systems/`(忽略右键所在目录,
-		// 只有这里会被场景启动时自动加载);名字自动去重(与 script 同一套),模板
-		// `<内容根>/scripts/templates/WorldScript.lua`,缺失时用内置骨架。
-		bool CreateLuaSystemAsset(std::string* error, std::filesystem::path* outPath);
+		// PECS-T11:旧的 `CreateScriptAsset`(落当前目录、`.lua`)/ `CreateLuaSystemAsset`
+		// (固定在 scripts/systems/)已删除 —— Lua 的创建统一由宿主的「新建 Lua …」向导完成。
 		// "New ▶" 子菜单:画行 / 画展开的类型列表(工具条 `…` 与内容区空白右键共用)。
 		// owner = 1(工具条菜单)/ 2(空白右键菜单);0 = 未展开。同一时刻只可能开一个菜单。
 		bool RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId rowId, const Wui::WuiRect& row,
@@ -420,6 +420,8 @@ namespace World
 		// OnShortcut 在渲染之外触发 → 只排队,真正的动作在下一帧的 OnRender 里做(那时有 ctx)。
 		// 1 = 打开"新建"列表,2 = 直接新建文件夹。
 		int m_PendingNewShortcut = 0;
+		// PECS-T11:合并后的「Lua Script…」资产类型在渲染期只置这个标记,宿主帧边界取走并开向导。
+		bool m_PendingLuaWizard = false;
 		// 注册表登记状态:析构时必须反注册,否则回调会指向已销毁的面板。
 		bool m_AssetTypesRegistered = false;
 		std::vector<std::shared_ptr<Wui::WuiButton>> m_CrumbButtons;

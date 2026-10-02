@@ -232,9 +232,9 @@ namespace World
 
 		Wui::PanelBackground(ctx, rect, { 0.10f, 0.105f, 0.115f, 1.0f });
 
-		// ---- 顶部:New System Script(名字自动生成 scripts/systems/script_<n>.lua,不依赖文本输入)----
+		// ---- 顶部:New System Script(名字自动生成 scripts/systems/script_<n>.luau,不依赖文本输入)----
 		// 落点本来就是对的(只有 scripts/systems/ 会被场景启动时自动加载),这里只是把"它建的是
-		// 系统脚本"这件事在 UI 上说清楚;要**命名**或落到别处用「文件 ▶ 新建 Lua 系统…」向导。
+		// 系统脚本"这件事在 UI 上说清楚;要**命名**或落到别处用「文件 ▶ 新建 Lua …」向导。
 		float y = rect.Y + 6.0f;
 		const Wui::WuiRect newRect { rect.X + 10.0f, y, 116.0f, 24.0f };
 		if (Wui::Button(ctx, Wui::HashId("scripts.new"), newRect,
@@ -291,7 +291,7 @@ namespace World
 			(void)Wui::EmptyState(ctx, emptyRect, std::string(),
 				Wui::Tr("panel.scripts.empty.title", "No scripts yet"),
 				Wui::Tr("panel.scripts.empty.hint",
-					"Use File ▶ New Lua System… for a Luau system under scripts/systems/, or File ▶ New C++ … "
+					"Use File ▶ New Lua … for a Luau system under scripts/systems/, or File ▶ New C++ … "
 					"to add C++ sources under <project>/src/."),
 				std::string(), 0, theme);
 			drawStatusLine();

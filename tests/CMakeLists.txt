@@ -1101,8 +1101,10 @@ target_compile_definitions(WorldPluginTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
     NOMINMAX
     WE_PLUGIN_TEST_DLL_DIR="$<TARGET_FILE_DIR:WorldPluginTests>"
-    # T2a:示例引擎插件目录(用例 ④ 直接读真实清单,验证"包形态 + 清单"可被 Discover 解析)。
-    WE_PLUGIN_EXAMPLE_DIR="${CMAKE_SOURCE_DIR}/plugins/hello-import"
+    # T2a:示例插件夹具目录(用例 ④ 直接读真实清单,验证"包形态 + 清单"可被 Discover 解析)。
+    # 2026-10-02:从 <引擎根>/plugins/hello-import 搬到这里 —— 放在 plugins/ 下会被编辑器
+    # 每次启动都加载,并在右键「新建」里多出 "Hello File"。
+    WE_PLUGIN_EXAMPLE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/plugins/hello-import"
 )
 if(WIN32)
     target_compile_definitions(WorldPluginTests PRIVATE WLD_PLATFORM_WINDOWS)
@@ -1119,6 +1121,10 @@ set_tests_properties(World.Plugins PROPERTIES
 
 # T2a:引擎示例插件(plugins/hello-import)在配置期可见时,测试做**真实加载**(不只是清单解析):
 # 显式依赖保证 DLL 先于测试产出;路径用生成表达式取,不依赖 VS 多配置的输出层级。
+# 2026-10-02:夹具不在引擎的 plugins/** glob 里,所以这里显式把它加进来构建 ——
+# 真 DLL 覆盖(资产类型/导入器/导出表/卸载回收)保持不变。
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/plugins/hello-import"
+    "${CMAKE_CURRENT_BINARY_DIR}/fixture-plugins/hello-import")
 if(TARGET WePlugin_hello-import)
     add_dependencies(WorldPluginTests WePlugin_hello-import)
     target_compile_definitions(WorldPluginTests PRIVATE
