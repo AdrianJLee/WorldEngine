@@ -14,7 +14,7 @@ namespace World
 	//   ① 磁盘脚本:扫 <当前内容根>/scripts(0.5s 节流,排除 intermediate/),按逻辑路径
 	//      排序,每行主按钮"在引擎内打开"(W9-2:EditorShell::OpenScriptEditor,默认附加到
 	//      主窗口)+ 次按钮 External(系统默认程序打开)+ 顶部 New(从 templates/WorldScript.lua
-	//      复制成 scripts/script_<n>.lua,磁盘冲突递增、不覆盖);
+	//      复制成 scripts/systems/script_<n>.lua,磁盘冲突递增、不覆盖;落在这里才会被自动加载);
 	//   ② 项目源码:展示 <项目根>/src/** 源码入口。
 	//
 	// 第二段"项目源码"(PROJ-8/T1 起;**CPPSRC-1 改为一行入口**):

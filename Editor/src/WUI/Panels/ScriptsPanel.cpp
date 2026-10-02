@@ -232,7 +232,7 @@ namespace World
 
 		Wui::PanelBackground(ctx, rect, { 0.10f, 0.105f, 0.115f, 1.0f });
 
-		// ---- 顶部:New(名字自动生成 scripts/script_<n>.lua,不依赖文本输入)----
+		// ---- 顶部:New(名字自动生成 scripts/systems/script_<n>.lua,不依赖文本输入)----
 		float y = rect.Y + 6.0f;
 		const Wui::WuiRect newRect { rect.X + 10.0f, y, 116.0f, 24.0f };
 		if (Wui::Button(ctx, Wui::HashId("scripts.new"), newRect, "New Script", theme))
@@ -251,7 +251,7 @@ namespace World
 			}
 		}
 		Wui::Label(ctx, { rect.X + 136.0f, y + 4.0f },
-			"disk scripts; New copies templates/WorldScript.lua", theme.TextMuted, 12.0f);
+			"disk scripts; New creates one under scripts/systems/ (auto-loaded on play)", theme.TextMuted, 12.0f);
 		y += 30.0f;
 
 		// ---- 底部状态行(也是无障碍节点,便于 AI 断言动作结果);空状态分支与正常分支共用 ----

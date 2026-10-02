@@ -1421,6 +1421,7 @@ namespace World
 			});
 		// Script:从 templates/WorldScript.lua 复制(与 Scripts 面板"新建脚本"同一份模板),
 		// 随后在脚本编辑器里打开 —— 脚本面板不动文档,没有上面那条顾虑。
+		// 注意:只有落在 scripts/systems/ 下的脚本会被场景启动时自动加载。
 		add("script", "Script", ".lua", 30, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{
@@ -1573,10 +1574,13 @@ namespace World
 				if (error) *error = "could not write " + target.string();
 				return false;
 			}
-			out << "---@class NewScript : WorldScript\nlocal NewScript = {}\n\n"
-				"function NewScript:OnCreate()\nend\n\n"
-				"function NewScript:OnUpdate(dt)\nend\n\n"
-				"function NewScript:OnDestroy()\nend\n\nreturn NewScript\n";
+			out << "-- System script: put it under scripts/systems/ to be auto-loaded on play.\n"
+				"local query = ecs:Query({ \"TransformComponent\", \"VelocityComponent\" })\n\n"
+				"ecs:AddSystem(\"NewSystem\", \"Update\", function(dt)\n"
+				"    query:Each(function(entity, transform, velocity)\n"
+				"        transform.Location.x = transform.Location.x + velocity.Linear.x * dt\n"
+				"    end)\n"
+				"end)\n";
 		}
 		SelectCreated(target, "new-script");
 		if (outPath) *outPath = target;

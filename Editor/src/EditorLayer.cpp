@@ -3686,9 +3686,10 @@ namespace World
 			report("script template not found: " + templatePath.string());
 			return false;
 		}
+		// 落点 = scripts/systems/ —— 只有这个目录下的脚本会被场景启动时自动加载执行。
 		for (int index = 1; index <= 10000; ++index)
 		{
-			const std::string logicalPath = "scripts/script_" + std::to_string(index) + ".lua";
+			const std::string logicalPath = "scripts/systems/script_" + std::to_string(index) + ".lua";
 			const std::filesystem::path target = contentRoot / std::filesystem::path(logicalPath);
 			std::error_code existsError;
 			if (std::filesystem::exists(target, existsError))
@@ -3699,7 +3700,7 @@ namespace World
 			if (!copyError)
 			{
 				outLogicalPath = logicalPath;
-				report("created " + logicalPath + " (from templates/WorldScript.lua)");
+				report("created " + logicalPath + " (from templates/WorldScript.lua; auto-loaded under scripts/systems/)");
 				WLD_CORE_INFO("[scripts-panel] created script '{0}' from template", logicalPath);
 				return true;
 			}
@@ -3708,7 +3709,7 @@ namespace World
 			report("create failed for " + target.string() + ": " + copyError.message());
 			return false;
 		}
-		report("could not find a free scripts/script_<n>.lua name under " + contentRoot.string());
+		report("could not find a free scripts/systems/script_<n>.lua name under " + contentRoot.string());
 		return false;
 	}
 

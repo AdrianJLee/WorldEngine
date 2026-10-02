@@ -192,7 +192,7 @@ namespace World
 			if (message) *message = "scripts panel open is not wired to a host";
 			return false;
 		}
-		// 从 scripts/templates/WorldScript.lua 复制出 scripts/script_<n>.lua(磁盘冲突递增、永不覆盖);
+		// 从 scripts/templates/WorldScript.lua 复制出 scripts/systems/script_<n>.lua(磁盘冲突递增、永不覆盖);
 		// 成功时 outLogicalPath = 新脚本的逻辑路径,并把提示写进 message。
 		virtual bool ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message = nullptr)
 		{

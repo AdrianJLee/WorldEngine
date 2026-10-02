@@ -241,7 +241,7 @@ namespace World
 		// 环境变量 `WLD_VS_DRYRUN=1` = 只打日志、不真启动 VS(探针钩子,不弹窗不抢焦点)。
 		// 环境变量 `WLD_VSOPEN_PROBE=<abs path>` = 启动时走一次本函数(自动化断言用)。
 		bool OpenInVisualStudio(const std::filesystem::path& absPath, std::string* message = nullptr);
-		// 从 scripts/templates/WorldScript.lua 复制出 scripts/script_<n>.lua(冲突递增、永不覆盖)。
+		// 从 scripts/templates/WorldScript.lua 复制出 scripts/systems/script_<n>.lua(冲突递增、永不覆盖;落在这里才会被自动加载)。
 		bool ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message = nullptr);
 
 		// ---- CPPT-3:Game 模块(`Game.dll`)热重载(编辑器入口;契约 = plan CPPT-2 §6.1 T5b)----
