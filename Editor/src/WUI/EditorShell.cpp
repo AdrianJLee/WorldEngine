@@ -8,6 +8,7 @@
 #include "../EditorLayer.h"
 #include "../Project/ProjectLauncher.h"
 #include "../Project/ProjectScaffolder.h"
+#include "../Project/GameProjectSource.h"
 
 #include "World/Core/Application.h"
 #include "World/Core/Asset/ProjectManifest.h"
@@ -1547,6 +1548,8 @@ namespace World
 			|| m_PrefabPendingAction != PrefabPendingAction::None
 			// CPPT-6-ED-NEWSCRIPT:"新建 C++ 组件"模态同样封锁下层命中。
 			|| m_NewCppScriptOpen
+			// PECS-T9:"新建 Lua 系统"模态同样封锁下层命中。
+			|| m_NewLuaSystemOpen
 			// PROJ-1/T1:"新建项目"模态(名称/位置/模板/落盘)同样封锁下层命中。
 			|| m_NewProjectOpen
 			// PLUG-AUTH-1:"新建插件"模态(目标/模板/名称/ID/落盘)同样封锁下层命中。
@@ -4065,14 +4068,18 @@ namespace World
 		Wui::EndModalFrame(ctx);
 	}
 
-	// ---- CPPT-6-ED-NEWSCRIPT:File ▸ New C++ Component… ----
+	// ---- CPPT-6-ED-NEWSCRIPT + PECS-T8:File ▸ New C++ …(组件 / 系统同一个向导)----
 	//
-	// 与内容浏览器的新建材质 / 新建着色器向导同一套交互骨架(名称 + 实时落点 + 行内错误 +
-	// Enter 确认 / Esc 取消),差别只有两点:
-	//   * 落点在**当前项目层**(`<项目根>/src/Components/<Name>.h`,PROJ-8/T1;不在内容根里);
+	// 与内容浏览器的新建材质 / 新建着色器向导同一套交互骨架(类型 + 名称 + 实时落点 + 行内错误 +
+	// Enter 确认 / Esc 取消),差别只有三点:
+	//   * 第一步选**类型**(组件默认 / 系统),落点随类型变:
+	//     组件 = `<项目根>/src/Components/<Name>.h`(PROJ-8/T1),系统 = `<项目根>/src/Systems/<Name>.h`;
+	//   * 系统类型会把 include + Attach/Detach 登记自动写进 `<项目根>/src/GameProject.cpp`
+	//     (GameProjectSource.cpp 的纯文本工具;幂等、认不出结构就一个字节都不写);
 	//   * 创建后**外部 Visual Studio** 打开(CPPT-7:内置脚本编辑器只服务 Lua/Luau)。
-	// 模板是纯 ECS 组件(纯数据 + WE_FIELD 反射;逻辑归 src/Systems/ 的系统),
-	// 语法与示例项目模板的 `src/Components/SampleDataComponent.h` 一致,随项目构建进 Game.dll。
+	// 组件模板是纯 ECS 组件(纯数据 + WE_FIELD 反射),语法与示例项目模板的
+	// `src/Components/SampleDataComponent.h` 一致,随项目构建进 Game.dll;系统模板见
+	// GameProjectSource.cpp 的 GameProjectSystemHeaderSource。
 	namespace
 	{
 		// 名称 → 文件名:去掉用户可能顺手输入的 `.h` 后缀与首尾空白(与内容浏览器同名口径)。
@@ -4106,6 +4113,74 @@ namespace World
 					return false;
 			}
 			return true;
+		}
+
+		// PECS-T8:「新建 C++ …」向导的类型(Combo 的选项串就是它的 a11y value)。
+		constexpr int kCppScriptKindComponent = 0;
+		constexpr int kCppScriptKindSystem = 1;
+		const char* const kCppScriptKindComponentTerm = "Component";
+		const char* const kCppScriptKindSystemTerm = "System";
+
+		// 相对**项目根**的落点:回显 / 行内错误 / 操作日志统一走这一份口径。
+		std::string CppScriptRelativePath(bool isSystem, const std::string& name)
+		{
+			return (isSystem ? "src/Systems/" : "src/Components/") + name + ".h";
+		}
+
+		// ---- PECS-T9:File ▸ New Lua System… ----
+
+		// 系统名 → 文件名:剥掉 `.luau` / `.lua` 后缀与首尾空白(与 CppScriptBaseName 同口径)。
+		std::string LuaSystemBaseName(const std::string& text)
+		{
+			std::string name = text;
+			while (!name.empty() && (name.front() == ' ' || name.front() == '\t'))
+				name.erase(name.begin());
+			while (!name.empty() && (name.back() == ' ' || name.back() == '\t'))
+				name.pop_back();
+			for (const char* suffix : { ".luau", ".lua" })
+			{
+				const size_t length = std::strlen(suffix);
+				if (name.size() > length && name.compare(name.size() - length, length, suffix) == 0)
+				{
+					name.erase(name.size() - length);
+					break;
+				}
+			}
+			return name;
+		}
+
+		// 资产文件名合法性(Windows 口径,与内容浏览器的资产命名同一套):非空、不是 '.'/'..'、
+		// 不含 `\ / : * ? " < > |`、不以点或空格结尾。空串由调用方先给"不能为空"。
+		bool IsValidLuaScriptFileName(const std::string& name)
+		{
+			if (name.empty() || name == "." || name == "..")
+				return false;
+			for (const char character : name)
+			{
+				if (character == '\\' || character == '/' || character == ':' || character == '*'
+					|| character == '?' || character == '"' || character == '<' || character == '>'
+					|| character == '|')
+					return false;
+			}
+			return name.back() != '.' && name.back() != ' ';
+		}
+
+		// 模板缺失时的内置骨架 = 磁盘模板的系统脚本形态,签名用**规范顺序**
+		// `ecs:AddSystem(名字, 函数, 阶段)`(旧顺序仍兼容,但新生成的骨架不该示范旧写法)。
+		std::string NewLuaSystemTemplateSource()
+		{
+			std::string source;
+			source += "-- 新建系统脚本模板。\n";
+			source += "-- 放到 <内容根>/scripts/systems/ 下才会被自动加载 —— 场景启动时整份执行一次,\n";
+			source += "-- 之后每帧按你注册的阶段调用。\n\n";
+			source += "local query = ecs:Query({ \"TransformComponent\", \"VelocityComponent\" })\n\n";
+			source += "-- 规范签名是 (名字, 函数 [, 阶段]);阶段省略 = \"Update\"。\n";
+			source += "ecs:AddSystem(\"NewSystem\", function(dt)\n";
+			source += "    query:Each(function(entity, transform, velocity)\n";
+			source += "        transform.Location.x = transform.Location.x + velocity.Linear.x * dt\n";
+			source += "    end)\n";
+			source += "end, \"Update\")\n";
+			return source;
 		}
 
 		// 模板正文:头注释(组件 = 纯数据 / 逻辑写在 src/Systems/ / 构建后重载 C++ 模块)+ 标量
@@ -4193,13 +4268,19 @@ namespace World
 
 	std::filesystem::path EditorShell::NewCppScriptTargetPath() const
 	{
-		// PROJ-8/T1:落点在**当前项目层** —— `<项目根>/src/Components/<Name>.h`(项目根取运行期
-		// World::Paths::ProjectDir(),与进程 CWD 无关)。引擎里的 `Game/src` 只剩模块骨架,
-		// 用户的 C++ 组件源码属于项目:项目 CMake 的 schema 发现 glob 恰好是
-		// `<项目根>/src/Components/*.h`,随项目构建进 Game.dll。
+		// PROJ-8/T1 + PECS-T8:落点在**当前项目层**(项目根取运行期 World::Paths::ProjectDir(),
+		// 与进程 CWD 无关)。引擎里的 `Game/src` 只剩模块骨架,用户的 C++ 组件/系统源码属于项目:
+		//   * 组件 → `<项目根>/src/Components/<Name>.h`(项目 CMake 的 schema 发现 glob 恰好是
+		//     `<项目根>/src/Components/*.h`,随项目构建进 Game.dll);
+		//   * 系统 → `<项目根>/src/Systems/<Name>.h`(header-only,由 GameProject.cpp include)。
 		// 没有当前项目时 CurrentProjectRoot() 为空 → 调用方先给可读提示,不会走到写盘。
-		return CurrentProjectRoot() / "src" / "Components"
+		return CurrentProjectRoot() / "src" / (NewCppScriptIsSystem() ? "Systems" : "Components")
 			/ (CppScriptBaseName(m_NewCppScriptName) + ".h");
+	}
+
+	bool EditorShell::NewCppScriptIsSystem() const
+	{
+		return m_NewCppScriptKind == kCppScriptKindSystem;
 	}
 
 	std::string EditorShell::NewCppScriptNameError() const
@@ -4220,7 +4301,7 @@ namespace World
 		if (std::filesystem::exists(NewCppScriptTargetPath(), existsError))
 		{
 			// 落点回显 = 相对**项目根**(与项目源码视图的行标签同一口径)。
-			const std::string relative = "src/Components/" + name + ".h";
+			const std::string relative = CppScriptRelativePath(NewCppScriptIsSystem(), name);
 			return Wui::TrFormat("modal.newscript.name.exists",
 				"A file with this name already exists: {path}", { { "path", relative } });
 		}
@@ -4243,6 +4324,8 @@ namespace World
 		}
 		m_NewCppScriptOpen = true;
 		m_NewCppScriptOpenedFrame = static_cast<uint32_t>(ctx.Frame());
+		// PECS-T8:每次打开都回到默认类型 = 组件(既有自动化"点开向导 → 输名字 → Create"行为不变)。
+		m_NewCppScriptKind = kCppScriptKindComponent;
 		m_NewCppScriptName = "MyComponent";
 		m_NewCppScriptFailure.clear();
 		m_NewCppScriptFailureFor.clear();
@@ -4253,6 +4336,7 @@ namespace World
 
 	bool EditorShell::CreateNewCppScript(Wui::WuiContext& ctx)
 	{
+		const bool isSystem = NewCppScriptIsSystem();
 		const std::string name = CppScriptBaseName(m_NewCppScriptName);
 		const std::string nameError = NewCppScriptNameError();
 		if (!nameError.empty())
@@ -4288,7 +4372,7 @@ namespace World
 			}
 			else
 			{
-				out << NewCppScriptTemplateSource(name);
+				out << (isSystem ? Editor::GameProjectSystemHeaderSource(name) : NewCppScriptTemplateSource(name));
 				out.close();
 				std::error_code renameError;
 				std::filesystem::rename(temporary, target, renameError);
@@ -4325,7 +4409,13 @@ namespace World
 		const std::filesystem::path manifest =
 			target.parent_path().parent_path() / "Generated" / "Game.manifest";
 		std::error_code manifestFileError;
-		if (!std::filesystem::is_regular_file(manifest, manifestFileError))
+		// PECS-T8:系统头文件不声明 schema 类型 ⇒ 不碰类型账本(登记不存在的类型会让重建 Game 被拒)。
+		if (isSystem)
+		{
+			WLD_CORE_INFO("[new-cpp-script] system '{0}' declares no schema types; type ledger untouched",
+				name);
+		}
+		else if (!std::filesystem::is_regular_file(manifest, manifestFileError))
 		{
 			WLD_CORE_WARN("[new-cpp-script] type ledger not found ({0}); "
 				"skipping registration of {1}, {1}Data, {1}Mode", manifest.string(), name);
@@ -4385,7 +4475,7 @@ namespace World
 		}
 
 		// 落点/提示口径 = 相对**项目根**(项目源码视图的同一口径)。
-		const std::string relative = "src/Components/" + name + ".h";
+		const std::string relative = CppScriptRelativePath(isSystem, name);
 		// 操作日志:与内容浏览器的新建资产(browser.new-shader)同一条口径。
 		ctx.RecordOp("script", "new-cpp", name, relative);
 		WLD_CORE_INFO("[new-cpp-script] created '{0}'", target.string());
@@ -4393,11 +4483,40 @@ namespace World
 		// (与内容浏览器双击脚本相同的安全点;EditorShell::OpenScriptEditorNow 按扩展名分流),
 		// 内置脚本编辑器只服务 Lua/Luau。
 		OpenScriptEditor(target.generic_string());
-		// 状态栏提示:编辑器不内置编译器 —— 显式告诉用户"用 VS 构建这个项目,再重载 C++ 模块"。
-		PushNotice(Wui::TrFormat("notice.newscript.created",
-			"Created {path} — build this project with Visual Studio (output under {project}/build), "
-			"then use File ▶ Build & Reload C++ Module.",
-			{ { "path", relative }, { "project", CurrentProjectRoot().generic_string() } }));
+		if (!isSystem)
+		{
+			// 状态栏提示:编辑器不内置编译器 —— 显式告诉用户"用 VS 构建这个项目,再重载 C++ 模块"。
+			PushNotice(Wui::TrFormat("notice.newscript.created",
+				"Created {path} — build this project with Visual Studio (output under {project}/build), "
+				"then use File ▶ Build & Reload C++ Module.",
+				{ { "path", relative }, { "project", CurrentProjectRoot().generic_string() } }));
+			return true;
+		}
+
+		// PECS-T8:系统类型额外把 include + 成对的两行登记进 <项目根>/src/GameProject.cpp。
+		// 三种结果都要如实告诉用户 —— 尤其"头文件已落盘但没登记"绝不能静默(那正是本任务要消除的坑)。
+		const Editor::GameProjectSystemRegistration registration =
+			Editor::RegisterProjectSystem(CurrentProjectRoot(), name);
+		if (!registration.Ok)
+		{
+			PushNotice(Wui::TrFormat("notice.newscript.register_failed",
+				"Created {path}, but it could not be registered in GameProject.cpp: {error} — add one "
+				"line inside AttachProjectSystems and one inside DetachProjectSystems manually.",
+				{ { "path", relative }, { "error", registration.Error } }));
+			WLD_CORE_WARN("[new-cpp-script] register failed: {0}", registration.Error);
+			return true;
+		}
+		if (registration.AlreadyRegistered)
+		{
+			PushNotice(Wui::TrFormat("notice.newscript.register_already",
+				"Created {path}; this system is already registered in GameProject.cpp.",
+				{ { "path", relative } }));
+			return true;
+		}
+		PushNotice(Wui::TrFormat("notice.newscript.registered",
+			"Created {path} and registered it in GameProject.cpp (attached when the runtime starts, "
+			"detached when it stops).",
+			{ { "path", relative } }));
 		return true;
 	}
 
@@ -4415,8 +4534,8 @@ namespace World
 		bool escapePressed = false;
 		Wui::ModalFrameDesc frameDesc;
 		frameDesc.Id = modalId;
-		frameDesc.Title = Wui::Tr("modal.newscript.title", "New C++ Component");
-		frameDesc.Size = { 560.0f, 236.0f };
+		frameDesc.Title = Wui::Tr("modal.newscript.title", "New C++ …");
+		frameDesc.Size = { 560.0f, 286.0f };
 		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
 		{
 			// 模态被别的路径接管/收口:同步清掉宿主状态,避免状态与真实模态脱节。
@@ -4431,10 +4550,24 @@ namespace World
 		const Wui::WuiId nameId = Wui::HashId("script.new.name");
 		const Wui::WuiId okId = Wui::HashId("script.new.ok");
 		const Wui::WuiId cancelId = Wui::HashId("script.new.cancel");
+		const Wui::WuiId kindId = Wui::HashId("script.new.kind");
 		const bool justOpened = ctx.Frame() == m_NewCppScriptOpenedFrame;
 
-		// ---- 名称(标识符校验 + 重名拒绝都走同一条行内错误)----
+		// ---- 类型:组件(默认)/ 系统 —— 同一个向导两个落点(PECS-T8)----
+		// Combo 把**当前选项串**原样登记成 a11y value ⇒ `script.new.kind` 的值就是 "Component"/"System",
+		// 自动化按它断言;选项串保持英文术语(与面板里其它 Combo 的口径一致)。
 		float cursorY = frame.Y + 46.0f;
+		const std::string kindLabel = Wui::Tr("modal.newscript.kind", "Kind");
+		Wui::Label(ctx, { labelX, cursorY + 5.0f }, kindLabel, m_Theme.TextMuted, 13.0f);
+		int kindIndex = NewCppScriptIsSystem() ? kCppScriptKindSystem : kCppScriptKindComponent;
+		const std::vector<std::string> kindOptions { kCppScriptKindComponentTerm, kCppScriptKindSystemTerm };
+		const Wui::WuiRect kindRect { fieldX, cursorY, fieldW + suffixW, 24.0f };
+		if (Wui::Combo(ctx, kindId, kindRect, kindLabel, kindOptions, kindIndex, m_Theme))
+			m_NewCppScriptKind = kindIndex;
+		cursorY += 34.0f;
+		const bool isSystem = NewCppScriptIsSystem();
+
+		// ---- 名称(标识符校验 + 重名拒绝都走同一条行内错误)----
 		const std::string nameLabel = Wui::Tr("modal.newscript.name", "Name");
 		Wui::Label(ctx, { labelX, cursorY + 5.0f }, nameLabel, m_Theme.TextMuted, 13.0f);
 		const Wui::WuiRect nameRect { fieldX, cursorY, fieldW, 24.0f };
@@ -4448,7 +4581,9 @@ namespace World
 		const std::string inlineError = nameError.empty() ? m_NewCppScriptFailure : nameError;
 		Wui::TextFieldA11y nameA11y;
 		nameA11y.Label = nameLabel;
-		nameA11y.Placeholder = Wui::Tr("modal.newscript.name.placeholder", "Component name (valid C++ identifier)");
+		nameA11y.Placeholder = isSystem
+			? Wui::Tr("modal.newscript.name.placeholder.system", "System name (valid C++ identifier)")
+			: Wui::Tr("modal.newscript.name.placeholder", "Component name (valid C++ identifier)");
 		// Enter 提交判定必须在**控件绘制前**取焦点:TextFieldCore 在回车那一帧会 `SetFocus(0)`
 		// (提交即交出焦点),画完再读 ctx.Focus() 已经不是本字段(实测:回车点了不建文件)。
 		const bool nameFocused = ctx.Focus() == nameId;
@@ -4459,7 +4594,7 @@ namespace World
 		cursorY += 46.0f;
 
 		// ---- 实时落点回显(相对当前项目根;绝对路径进节点 Tooltip)----
-		const std::string relative = "src/Components/" + CppScriptBaseName(m_NewCppScriptName) + ".h";
+		const std::string relative = CppScriptRelativePath(isSystem, CppScriptBaseName(m_NewCppScriptName));
 		const std::string targetLabel = Wui::Tr("modal.newscript.target", "Will create");
 		Wui::Label(ctx, { labelX, cursorY + 3.0f }, targetLabel, m_Theme.TextMuted, 12.0f);
 		Wui::Label(ctx, { fieldX, cursorY + 1.0f }, relative, m_Theme.Text, 13.0f);
@@ -4482,9 +4617,14 @@ namespace World
 
 		// ---- 生效步骤提示(用 VS 构建项目 → 重载 C++ 模块;编辑器不内置编译器)----
 		Wui::Label(ctx, { labelX, cursorY + 2.0f },
-			Wui::Tr("modal.newscript.hint",
-				"Build this project with Visual Studio (output under <project>/build), "
-				"then File ▶ Build & Reload C++ Module."),
+			isSystem
+				? Wui::Tr("modal.newscript.hint.system",
+					"The system is registered in <project>/src/GameProject.cpp automatically (attached when "
+					"the runtime starts, detached when it stops). Build this project with Visual Studio "
+					"(output under <project>/build), then File ▶ Build & Reload C++ Module.")
+				: Wui::Tr("modal.newscript.hint",
+					"Build this project with Visual Studio (output under <project>/build), "
+					"then File ▶ Build & Reload C++ Module."),
 			m_Theme.TextMuted, 12.0f);
 
 		// ---- 底部按钮(名称不合法/重名时创建按钮禁用并带原因)----
@@ -4517,6 +4657,282 @@ namespace World
 		}
 		Wui::EndModalFrame(ctx);
 		// 创建成功:操作日志/提示/打开编辑器都在 CreateNewCppScript 里完成(单一出口)。
+		(void)created;
+	}
+
+	// ---- PECS-T9:File ▸ New Lua System…(Lua 系统创建向导;与 T8 的 C++ 向导同源)----
+	// 落点 = `<内容根>/scripts/systems/<Name>.luau` —— 只有这个目录下的脚本会被场景启动时
+	// 自动加载。模板优先磁盘上的 `scripts/templates/WorldScript.lua`(与 Scripts 面板/内容
+	// 浏览器同一份),缺失时用内置骨架(规范签名 `ecs:AddSystem(名字, 函数, 阶段)`)。
+	std::filesystem::path EditorShell::NewLuaSystemTargetPath() const
+	{
+		// PECS-T9:落点 = `<内容根>/scripts/systems/<Name>.luau`(内容根取运行期
+		// World::Paths::AssetRoot(),与进程 CWD 无关)。只有这个目录下的脚本会被场景启动时
+		// 自动加载 —— 这正是"新建 Lua 系统"要保证的事(内容浏览器里普通 Script 落在右键目录,
+		// 在 assets/ 根新建就永远不会被加载)。
+		return World::Paths::AssetRoot() / "scripts" / "systems"
+			/ (LuaSystemBaseName(m_NewLuaSystemName) + ".luau");
+	}
+
+	std::string EditorShell::NewLuaSystemNameError() const
+	{
+		// 没有当前项目 / 没有内容根时先给"先打开或新建项目"这条可读原因,不再去拼一个相对路径
+		// (那会按 CWD 误判"已存在")。
+		if (CurrentProjectRoot().empty())
+			return Wui::Tr("modal.newlua.no_project",
+				"No project is open — open or create a project in the launcher first.");
+		if (World::Paths::AssetRoot().empty())
+			return Wui::Tr("modal.newlua.no_content_root",
+				"The project has no content root — expected <project>/assets.");
+		const std::string name = LuaSystemBaseName(m_NewLuaSystemName);
+		if (name.empty())
+			return Wui::Tr("modal.newlua.name.empty", "Name cannot be empty");
+		if (!IsValidLuaScriptFileName(name))
+			return Wui::Tr("modal.newlua.name.invalid",
+				"Name cannot contain \\ / : * ? \" < > | and cannot end with a dot or a space");
+		std::error_code existsError;
+		if (std::filesystem::exists(NewLuaSystemTargetPath(), existsError))
+		{
+			const std::string relative = "scripts/systems/" + name + ".luau";
+			return Wui::TrFormat("modal.newlua.name.exists",
+				"A file with this name already exists: {path}", { { "path", relative } });
+		}
+		return {};
+	}
+
+	void EditorShell::OpenNewLuaSystemModal(Wui::WuiContext& ctx)
+	{
+		// 没有当前项目时不打开一个写不了盘的模态 —— 给一条可读提示,并把这次意图记进操作日志
+		// (与 T8 的「新建 C++ …」向导同口径,方便自动化断言"点过但被拦下")。
+		if (CurrentProjectRoot().empty() || World::Paths::AssetRoot().empty())
+		{
+			PushNotice(Wui::Tr("notice.newlua.no_project",
+				"No project is open — open or create a project in the launcher first, "
+				"then create Lua systems."));
+			ctx.RecordOp("script", "new-lua-no-project", m_NewLuaSystemName, "");
+			WLD_CORE_WARN("[new-lua-system] rejected: no current project");
+			return;
+		}
+		m_NewLuaSystemOpen = true;
+		m_NewLuaSystemOpenedFrame = static_cast<uint32_t>(ctx.Frame());
+		m_NewLuaSystemName = "MySystem";
+		m_NewLuaSystemFailure.clear();
+		m_NewLuaSystemFailureFor.clear();
+		ctx.SetModal(Wui::HashId("modal.newlua"));
+		ctx.SetFocus(Wui::HashId("lua.new.name"));
+		ctx.RecordOp("script", "new-lua-ask", m_NewLuaSystemName, "scripts/systems");
+	}
+
+	bool EditorShell::CreateNewLuaSystem(Wui::WuiContext& ctx)
+	{
+		const std::string name = LuaSystemBaseName(m_NewLuaSystemName);
+		const std::string nameError = NewLuaSystemNameError();
+		if (!nameError.empty())
+		{
+			// 模态里已经画过行内错误;这条分支只是拒绝"绕过按钮的第二次调用"。
+			m_NewLuaSystemFailure = nameError;
+			m_NewLuaSystemFailureFor = NewLuaSystemTargetPath().string();
+			return false;
+		}
+
+		const std::filesystem::path target = NewLuaSystemTargetPath();
+		const std::filesystem::path parent = target.parent_path();
+		std::error_code folderError;
+		if (!std::filesystem::is_directory(parent, folderError))
+			std::filesystem::create_directories(parent, folderError);
+
+		std::string error;
+		bool wrote = false;
+		if (folderError)
+		{
+			error = Wui::Tr("modal.newlua.folder_failed", "Could not create the folder: ")
+				+ parent.string();
+		}
+		else
+		{
+			// 模板优先:`<内容根>/scripts/templates/WorldScript.lua` 逐字节复制(与 Scripts 面板/
+			// 内容浏览器同一份磁盘模板);缺失时写内置骨架。失败不留半成品。
+			const std::filesystem::path templatePath =
+				World::Paths::AssetRoot() / "scripts" / "templates" / "WorldScript.lua";
+			std::error_code templateError;
+			if (std::filesystem::is_regular_file(templatePath, templateError))
+			{
+				std::error_code copyError;
+				std::filesystem::copy_file(templatePath, target,
+					std::filesystem::copy_options::none, copyError);
+				if (copyError)
+				{
+					error = Wui::Tr("modal.newlua.write_failed", "Could not write the file: ")
+						+ target.string() + " (" + copyError.message() + ")";
+				}
+				else
+				{
+					wrote = true;
+				}
+			}
+			else
+			{
+				const std::filesystem::path temporary = parent / (target.filename().string() + ".tmp-write");
+				std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+				if (!out.is_open())
+				{
+					error = Wui::Tr("modal.newlua.write_failed", "Could not write the file: ")
+						+ temporary.string();
+				}
+				else
+				{
+					out << NewLuaSystemTemplateSource();
+					out.close();
+					std::error_code renameError;
+					std::filesystem::rename(temporary, target, renameError);
+					if (renameError)
+					{
+						std::error_code cleanupError;
+						std::filesystem::remove(temporary, cleanupError);
+						error = Wui::Tr("modal.newlua.write_failed", "Could not write the file: ")
+							+ target.string() + " (" + renameError.message() + ")";
+					}
+					else
+					{
+						wrote = true;
+					}
+				}
+			}
+		}
+		if (!wrote)
+		{
+			m_NewLuaSystemFailure = error;
+			m_NewLuaSystemFailureFor = target.string();
+			WLD_CORE_WARN("[new-lua-system] write failed: {0}", error);
+			return false;
+		}
+
+		// 落点/提示口径 = 相对**内容根**(脚本编辑器的逻辑路径同一口径)。
+		const std::string relative = "scripts/systems/" + name + ".luau";
+		ctx.RecordOp("script", "new-lua", name, relative);
+		WLD_CORE_INFO("[new-lua-system] created '{0}'", target.string());
+		// 脚本编辑器接受**相对内容根的逻辑路径**(内置编辑器服务 Lua/Luau;与内容浏览器双击同一路径)。
+		OpenScriptEditor(relative);
+		PushNotice(Wui::TrFormat("notice.newlua.created",
+			"Created {path} — it loads automatically when you press Play (scripts/systems/).",
+			{ { "path", relative } }));
+		return true;
+	}
+
+	void EditorShell::DrawNewLuaSystemModal(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiId modalId = Wui::HashId("modal.newlua");
+		if (m_NewLuaSystemOpen)
+			ctx.SetModal(modalId);
+		else if (ctx.Modal() == modalId)
+			ctx.ClearModal();
+		if (!m_NewLuaSystemOpen)
+			return;
+
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("modal.newlua.title", "New Lua System");
+		frameDesc.Size = { 560.0f, 236.0f };
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
+		{
+			// 模态被别的路径接管/收口:同步清掉宿主状态,避免状态与真实模态脱节。
+			m_NewLuaSystemOpen = false;
+			return;
+		}
+
+		const float labelX = frame.X + 16.0f;
+		const float fieldX = frame.X + 130.0f;
+		const float suffixW = 30.0f;
+		const float fieldW = frame.W - 146.0f - suffixW - 16.0f;
+		const Wui::WuiId nameId = Wui::HashId("lua.new.name");
+		const Wui::WuiId okId = Wui::HashId("lua.new.ok");
+		const Wui::WuiId cancelId = Wui::HashId("lua.new.cancel");
+		const bool justOpened = ctx.Frame() == m_NewLuaSystemOpenedFrame;
+
+		// ---- 名称(空/非法文件名/重名都走同一条行内错误)----
+		float cursorY = frame.Y + 46.0f;
+		const std::string nameLabel = Wui::Tr("modal.newlua.name", "Name");
+		Wui::Label(ctx, { labelX, cursorY + 5.0f }, nameLabel, m_Theme.TextMuted, 13.0f);
+		const Wui::WuiRect nameRect { fieldX, cursorY, fieldW, 24.0f };
+		// 写盘失败原因只对"同一个落点"有效:名字一改就作废(与 T8 向导同口径)。
+		if (!m_NewLuaSystemFailure.empty() && m_NewLuaSystemFailureFor != NewLuaSystemTargetPath().string())
+		{
+			m_NewLuaSystemFailure.clear();
+			m_NewLuaSystemFailureFor.clear();
+		}
+		const std::string nameError = NewLuaSystemNameError();
+		const std::string inlineError = nameError.empty() ? m_NewLuaSystemFailure : nameError;
+		Wui::TextFieldA11y nameA11y;
+		nameA11y.Label = nameLabel;
+		nameA11y.Placeholder = Wui::Tr("modal.newlua.name.placeholder", "System name (used as the file name)");
+		// Enter 提交判定必须在**控件绘制前**取焦点(与 T8 向导同一条实测纪律)。
+		const bool nameFocused = ctx.Focus() == nameId;
+		const bool submitted = Wui::TextFieldEx(ctx, nameId, nameRect, m_NewLuaSystemName, m_Theme,
+			inlineError, &nameA11y);
+		Wui::Label(ctx, { nameRect.X + nameRect.W + 8.0f, cursorY + 6.0f }, ".luau", m_Theme.TextMuted, 13.0f);
+		cursorY += 46.0f;
+
+		// ---- 实时落点回显(相对内容根;绝对路径进节点 Tooltip)----
+		const std::string relative = "scripts/systems/" + LuaSystemBaseName(m_NewLuaSystemName) + ".luau";
+		const std::string targetLabel = Wui::Tr("modal.newlua.target", "Will create");
+		Wui::Label(ctx, { labelX, cursorY + 3.0f }, targetLabel, m_Theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { fieldX, cursorY + 1.0f }, relative, m_Theme.Text, 13.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("lua.new.target");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = "shell";
+			node.Kind = "text";
+			node.Label = targetLabel;
+			node.Value = relative;
+			node.Tooltip = NewLuaSystemTargetPath().generic_string();
+			node.Rect = { fieldX, cursorY - 3.0f, fieldW + suffixW, 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		cursorY += 24.0f;
+
+		// ---- 生效步骤提示(脚本系统不走编译;Play 时自动加载)----
+		Wui::Label(ctx, { labelX, cursorY + 2.0f },
+			Wui::Tr("modal.newlua.hint",
+				"Saved under scripts/systems/ — it is loaded automatically when you press Play, "
+				"no build step needed."),
+			m_Theme.TextMuted, 12.0f);
+
+		// ---- 底部按钮(名称非法/重名时创建按钮禁用并带原因)----
+		const bool canCreate = nameError.empty();
+		const Wui::ModalResult footerResult = Wui::ModalFooter(ctx, frame,
+			Wui::Tr("modal.newlua.ok", "Create"),
+			Wui::Tr("modal.newlua.cancel", "Cancel"),
+			okId, cancelId, canCreate, m_Theme);
+
+		bool closeRequested = false;
+		bool created = false;
+		if ((footerResult == Wui::ModalResult::Confirm || (submitted && nameFocused && !justOpened))
+			&& canCreate)
+		{
+			created = CreateNewLuaSystem(ctx);
+			closeRequested = created;
+		}
+		else if (footerResult == Wui::ModalResult::Cancel || escapePressed)
+		{
+			ctx.RecordOp("script", "new-lua-cancel", LuaSystemBaseName(m_NewLuaSystemName), relative);
+			closeRequested = true;
+		}
+
+		if (closeRequested)
+		{
+			m_NewLuaSystemOpen = false;
+			m_NewLuaSystemFailure.clear();
+			m_NewLuaSystemFailureFor.clear();
+			ctx.ClearModal();
+		}
+		Wui::EndModalFrame(ctx);
+		// 创建成功:操作日志/提示/打开编辑器都在 CreateNewLuaSystem 里完成(单一出口)。
 		(void)created;
 	}
 
@@ -5866,6 +6282,7 @@ namespace World
 		const Wui::WuiId modalId = Wui::HashId("modal.project_launcher");
 		// 其它模态在前时让位(启动期最可能的来源是错误框);它们收口后启动器会回到前台。
 		const bool blockedByOtherModal = m_NewProjectOpen || m_NewPluginOpen || m_NewCppScriptOpen
+			|| m_NewLuaSystemOpen
 			|| m_ImportModalOpen ||
 			m_PrefabPendingAction != PrefabPendingAction::None || m_Editor.ShowUnsavedModal() ||
 			m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress();
@@ -7434,18 +7851,30 @@ namespace World
 		}
 		fileEntries.push_back({ Wui::Tr("menu.file.import", "Import glTF..."), false,
 			[this] { m_Editor.ImportModelDialog(); } });
-		fileEntries.push_back({ Wui::Tr("menu.file.new_cpp_script", "New C++ Component…"), false,
+		// PECS-T8:组件/系统共用同一个「新建 C++ …」向导(id 与既有自动化口径保持不变)。
+		fileEntries.push_back({ Wui::Tr("menu.file.new_cpp_script", "New C++ …"), false,
 				[this]
 				{
 					if (m_Ctx)
 						OpenNewCppScriptModal(*m_Ctx);
 				}, false,
 				Wui::Tr("menu.file.new_cpp_script.tooltip",
-					"Create a pure-ECS C++ component (data-only struct) under <project>/src/Components/ "
-					"(scalar/enum/struct/Array/Map samples) and open it in Visual Studio. Put logic in "
-					"<project>/src/Systems/ and register it in <project>/src/GameProject.cpp; build the "
-					"project, then use File ▶ Build & Reload C++ Module to load it."),
+					"Create a pure-ECS C++ component (data-only struct, src/Components/) or system "
+					"(logic, src/Systems/; automatically registered in <project>/src/GameProject.cpp) and "
+					"open it in Visual Studio. Build the project, then use File ▶ Build & Reload C++ Module "
+					"to load it."),
 				Wui::HashId("menu.file.new_cpp_script") });
+		// PECS-T9:Lua 系统创建向导(落 <内容根>/scripts/systems/,Play 时自动加载;不需要编译)。
+		fileEntries.push_back({ Wui::Tr("menu.file.new_lua_system", "New Lua System…"), false,
+				[this]
+				{
+					if (m_Ctx)
+						OpenNewLuaSystemModal(*m_Ctx);
+				}, false,
+				Wui::Tr("menu.file.new_lua_system.tooltip",
+					"Create a Luau system script under <content>/scripts/systems/ (the only folder that is "
+					"auto-loaded on Play) and open it in the built-in script editor. No build step needed."),
+				Wui::HashId("menu.file.new_lua_system") });
 		// CPPSRC-1(用户 2026-09-29「c++脚本要像 asset 资产一样在编辑器里展示」):
 		// 项目 C++ 的唯一展示面 = 内容浏览器的 `Project C++` 根 —— 这一项不再打开 Scripts 面板
 		// 的列表段,而是把内容浏览器切到源码根(同一套网格/列表/类型列/搜索)。
@@ -7794,6 +8223,9 @@ namespace World
 
 		// ---- CPPT-6-ED-NEWSCRIPT:新建 C++ 组件(窗口级模态) ----
 		DrawNewCppScriptModal(ctx);
+
+		// ---- PECS-T9:新建 Lua 系统(窗口级模态;与上面同源但是独立模态) ----
+		DrawNewLuaSystemModal(ctx);
 
 		// ---- PROJ-1/T1:新建项目(窗口级模态;成功态换成两个动作按钮) ----
 		DrawNewProjectModal(ctx);

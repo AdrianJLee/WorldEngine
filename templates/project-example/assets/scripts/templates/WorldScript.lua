@@ -5,13 +5,14 @@
 
 local query = ecs:Query({ "TransformComponent", "VelocityComponent" })
 
-ecs:AddSystem("NewSystem", "Update", function(dt)
+-- 规范签名是 (名字, 函数 [, 阶段]);阶段省略 = "Update"。
+ecs:AddSystem("NewSystem", function(dt)
     query:Each(function(entity, transform, velocity)
         transform.Location.x = transform.Location.x + velocity.Linear.x * dt
         transform.Location.y = transform.Location.y + velocity.Linear.y * dt
         transform.Location.z = transform.Location.z + velocity.Linear.z * dt
     end)
-end)
+end, "Update")
 
 -- 需要"某个组件出现/消失时做一次事",用观察者代替轮询:
 -- ecs:OnAdd("DeadTag", function(entity) print("died", entity:GetName()) end)

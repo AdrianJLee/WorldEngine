@@ -23,13 +23,14 @@
 -- assets/scripts/systems/player_movement.luau
 local movement = ecs:Query({ "TransformComponent", "VelocityComponent" })
 
-ecs:AddSystem("PlayerMovementSystem", "Update", function(dt)
+-- 规范签名 = (名字, 函数 [, 阶段]);阶段省略 = "Update"。
+ecs:AddSystem("PlayerMovementSystem", function(dt)
     movement:Each(function(entity, transform, velocity)
         local direction = vec3.new(1.0, 0.0, 0.0)
         transform.Location.x = transform.Location.x + velocity.Linear.x * dt
         print(entity:GetID(), direction:length())
     end)
-end)
+end, "Update")
 ```
 
 在 `movement:Each(` 的回调里,`transform` / `velocity` 是**组件代理**,字段带补全;

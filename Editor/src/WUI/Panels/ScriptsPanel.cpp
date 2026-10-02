@@ -232,10 +232,13 @@ namespace World
 
 		Wui::PanelBackground(ctx, rect, { 0.10f, 0.105f, 0.115f, 1.0f });
 
-		// ---- 顶部:New(名字自动生成 scripts/systems/script_<n>.lua,不依赖文本输入)----
+		// ---- 顶部:New System Script(名字自动生成 scripts/systems/script_<n>.lua,不依赖文本输入)----
+		// 落点本来就是对的(只有 scripts/systems/ 会被场景启动时自动加载),这里只是把"它建的是
+		// 系统脚本"这件事在 UI 上说清楚;要**命名**或落到别处用「文件 ▶ 新建 Lua 系统…」向导。
 		float y = rect.Y + 6.0f;
 		const Wui::WuiRect newRect { rect.X + 10.0f, y, 116.0f, 24.0f };
-		if (Wui::Button(ctx, Wui::HashId("scripts.new"), newRect, "New Script", theme))
+		if (Wui::Button(ctx, Wui::HashId("scripts.new"), newRect,
+				Wui::Tr("panel.scripts.new", "New System Script"), theme))
 		{
 			std::string created;
 			std::string message;
@@ -251,7 +254,9 @@ namespace World
 			}
 		}
 		Wui::Label(ctx, { rect.X + 136.0f, y + 4.0f },
-			"disk scripts; New creates one under scripts/systems/ (auto-loaded on play)", theme.TextMuted, 12.0f);
+			Wui::Tr("panel.scripts.new.hint",
+				"disk scripts; New creates one under scripts/systems/ (auto-loaded on play)"),
+			theme.TextMuted, 12.0f);
 		y += 30.0f;
 
 		// ---- 底部状态行(也是无障碍节点,便于 AI 断言动作结果);空状态分支与正常分支共用 ----
@@ -286,7 +291,7 @@ namespace World
 			(void)Wui::EmptyState(ctx, emptyRect, std::string(),
 				Wui::Tr("panel.scripts.empty.title", "No scripts yet"),
 				Wui::Tr("panel.scripts.empty.hint",
-					"Create a .luau script in the Content Browser, or use File ▶ New C++ Component… "
+					"Use File ▶ New Lua System… for a Luau system under scripts/systems/, or File ▶ New C++ … "
 					"to add C++ sources under <project>/src/."),
 				std::string(), 0, theme);
 			drawStatusLine();
@@ -340,7 +345,7 @@ namespace World
 				// 空态给出下一步 + 解析后的 <项目>/src 绝对路径(提示"文件放哪儿")。
 				Wui::Label(ctx, { rect.X + 12.0f, y + 1.0f },
 					TruncateUtf8(Wui::Tr("panel.scripts.project_sources.empty",
-						"No C++ sources yet — use File ▶ New C++ Component… or drop files into <project>/src/."), 110),
+						"No C++ sources yet — use File ▶ New C++ … or drop files into <project>/src/."), 110),
 					theme.TextMuted, 12.0f);
 				Wui::Label(ctx, { rect.X + 12.0f, y + kProjectRowHeight + 1.0f },
 					TruncateUtf8(sourceRoot, 110), theme.TextMuted, 11.0f);

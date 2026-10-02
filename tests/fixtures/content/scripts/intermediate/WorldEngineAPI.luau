@@ -418,15 +418,16 @@ function timers:cancel(handle) end
 ---@class ecs
 ecs = {}
 
----Build a query over the listed component types; the result has :Each(fn) and :Count().
+---Build a query over the listed component types, optionally excluding entities that carry the components named in options.without; the result has :Each(fn) and :Count().
 ---@param components table Array of registered component type names, e.g. { "TransformComponent", "VelocityComponent" }.
+---@param options table? Optional options table; only 'without' is recognized: { without = { "DeadTag" } } excludes entities that carry those components.
 ---@return table
-function ecs:Query(components) end
+function ecs:Query(components, options) end
 
----Register a named system on the active scene; idempotent (a repeated name replaces the previous system).
+---Register a named system on the active scene at an optional pipeline phase with optional same-phase ordering dependencies (options table: phase, after); idempotent (a repeated name replaces the previous system).
 ---@param name string System name; re-registering the same name replaces the previous system.
 ---@param fn function Called once per frame with dt in seconds.
----@param phase string? Pipeline phase; defaults to "Update". The legacy (name, phase, fn) order is also accepted.
+---@param phase string|table? Pipeline phase name (PreFixed/Fixed/Update/Late/PreRender; defaults to "Update"), or an options table { phase = "Late", after = { "OtherSystem" } }. The legacy (name, phase, fn) order is also accepted.
 ---@return boolean
 function ecs:AddSystem(name, fn, phase) end
 

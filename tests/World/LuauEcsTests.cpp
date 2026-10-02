@@ -190,6 +190,87 @@ int main()
 		}
 
 		// =====================================================================
+		// 4b. ecs:Query 排除过滤 (第二参数选项表 without)
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			Entity alive = scene.CreateEntityShell("Alive");
+			alive.AddComponent<TransformComponent>();
+
+			Entity dead = scene.CreateEntityShell("Dead");
+			dead.AddComponent<TransformComponent>();
+			dead.AddComponent<VelocityComponent>();
+
+			RUN_OK(R"(
+				-- 旧行为不变:单参数查询仍然命中全部
+				local all = ecs:Query({"TransformComponent"})
+				assert(all:Count() == 2, "single-argument query must still match all 2 entities")
+
+				-- without 排除带 VelocityComponent 的实体
+				local aliveOnly = ecs:Query({"TransformComponent"}, { without = {"VelocityComponent"} })
+				assert(aliveOnly:Count() == 1, "without must exclude the entity carrying VelocityComponent")
+
+				local visited = 0
+				aliveOnly:Each(function(entity, transform)
+					visited = visited + 1
+					assert(entity:GetName() == "Alive", "only the Alive entity must remain")
+					assert(transform ~= nil, "transform proxy must not be nil")
+				end)
+				assert(visited == 1, "Each must visit exactly one entity after exclusion")
+
+				-- world 别名与字符串组件名同样支持
+				local aliasCount = world:Query("TransformComponent", { without = {"VelocityComponent"} }):Count()
+				assert(aliasCount == 1, "world alias with string component and without must exclude")
+
+				-- 冒号 + 连续的字符串组件名(旧形态)
+				local multiString = ecs:Query("TransformComponent", "VelocityComponent"):Count()
+				assert(multiString == 1, "colon call with multiple string component names must work")
+
+				-- 点调用(无 self):数组形态与"数组 + 选项表"都必须正常
+				local dotCount = ecs.Query({"TransformComponent"}):Count()
+				assert(dotCount == 2, "dot call without self must match both entities")
+
+				local dotOptions = ecs.Query({"TransformComponent"}, { without = {"VelocityComponent"} }):Count()
+				assert(dotOptions == 1, "dot call with options table must exclude")
+
+				local dotAlias = world.Query({"TransformComponent"}, { without = {"VelocityComponent"} }):Count()
+				assert(dotAlias == 1, "world dot call with options table must exclude")
+			)", "TestQueryWithout");
+
+			RUN_OK(R"(
+				-- without 里的未注册组件名必须报可读错误(消息里带该名字)
+				local okUnknown, unknownErr = pcall(function()
+					ecs:Query({"TransformComponent"}, { without = {"NoSuchComponentXYZ"} })
+				end)
+				assert(not okUnknown, "without with an unregistered component must fail")
+				assert(string.find(unknownErr, "NoSuchComponentXYZ", 1, true) ~= nil,
+					"error must name the unknown component: " .. tostring(unknownErr))
+
+				-- 选项表未知键必须报可读错误(消息里列出合法键)
+				local okUnknownKey, keyErr = pcall(function()
+					ecs:Query({"TransformComponent"}, { wtihout = {"VelocityComponent"} })
+				end)
+				assert(not okUnknownKey, "unknown option key must fail")
+				assert(string.find(keyErr, "unknown option key", 1, true) ~= nil,
+					"error must mention the unknown option key: " .. tostring(keyErr))
+
+				-- without 的值必须是数组
+				local okBadWithout = pcall(function()
+					ecs:Query({"TransformComponent"}, { without = 5 })
+				end)
+				assert(not okBadWithout, "without must be an array of names")
+
+				-- 选项位置不能是数字(字符串/表都算组件名,故用数字触发)
+				local okBadOptions = pcall(function()
+					ecs:Query({"TransformComponent"}, 5)
+				end)
+				assert(not okBadOptions, "options argument must be a table")
+			)", "TestQueryWithoutErrors");
+		}
+
+		// =====================================================================
 		// 5. ecs:AddSystem 注册系统并在 Scene::OnUpdateRuntime 时被回调
 		// =====================================================================
 		{
@@ -441,6 +522,198 @@ int main()
 			ScriptEngine::LoadSystemScripts(scene);
 			scene.OnUpdateRuntime(0.016f);
 			CHECK(scene.GetFrameSystemTimings().size() == firstPass);
+		}
+
+		// =====================================================================
+		// 9. ecs:AddSystem 三种调用形态兼容矩阵(旧行为不回归 + 表形态新能力)
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			Entity probe = scene.CreateEntityShell("CallFormProbe");
+			probe.AddComponent<VelocityComponent>();
+
+			const auto countTiming = [&scene](const std::string& wanted)
+			{
+				std::size_t found = 0;
+				for (const auto& timing : scene.GetFrameSystemTimings())
+					if (timing.Name == wanted)
+						++found;
+				return found;
+			};
+
+			RUN_OK(R"(
+				-- 形态 1:(name, fn) —— phase 默认 Update
+				ecs:AddSystem("CompatTwoArg", function(dt)
+					local q = ecs:Query({"VelocityComponent"})
+					q:Each(function(entity, v) v.Linear = vec3.new(v.Linear.x + 1.0, 0.0, 0.0) end)
+				end)
+
+				-- 形态 2:(name, fn, "Update") —— 字符串 phase
+				ecs:AddSystem("CompatStringPhase", function(dt)
+					local q = ecs:Query({"VelocityComponent"})
+					q:Each(function(entity, v) v.Linear = vec3.new(v.Linear.x + 2.0, 0.0, 0.0) end)
+				end, "Update")
+
+				-- 形态 3:(name, "Update", fn) —— 最旧参数序
+				ecs:AddSystem("CompatLegacyOrder", "Update", function(dt)
+					local q = ecs:Query({"VelocityComponent"})
+					q:Each(function(entity, v) v.Linear = vec3.new(v.Linear.x + 4.0, 0.0, 0.0) end)
+				end)
+
+				-- 幂等替换对表形态同样成立:同名再注册一次不产生第二份系统
+				ecs:AddSystem("CompatTableIdempotent", function(dt) end, { phase = "Late" })
+				ecs:AddSystem("CompatTableIdempotent", function(dt) end, { phase = "Late" })
+			)", "TestAddSystemCallForms");
+
+			scene.OnUpdateRuntime(Timestep(0.016f));
+
+			// 三种形态都真的注册并执行了(三个写入累积:1 + 2 + 4)
+			CHECK(ApproxEqual(probe.GetComponent<VelocityComponent>().Linear.x, 7.0f));
+			CHECK(countTiming("CompatTwoArg") == 1u);
+			CHECK(countTiming("CompatStringPhase") == 1u);
+			CHECK(countTiming("CompatLegacyOrder") == 1u);
+			CHECK(countTiming("CompatTableIdempotent") == 1u);
+		}
+
+		// =====================================================================
+		// 10. ecs:AddSystem 表形态:phase = "Late" 真的在 Late 阶段执行
+		//     (此前 RunFrameSystems 只跑 Update ⇒ 非 Update 阶段的系统永不执行)
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			Entity probe = scene.CreateEntityShell("PhaseProbe");
+			probe.AddComponent<VelocityComponent>();
+
+			const auto hasTiming = [&scene](const std::string& wanted)
+			{
+				for (const auto& timing : scene.GetFrameSystemTimings())
+					if (timing.Name == wanted)
+						return true;
+				return false;
+			};
+
+			RUN_OK(R"(
+				ecs:AddSystem("UpdateWriter", function(dt)
+					local q = ecs:Query({"VelocityComponent"})
+					q:Each(function(entity, v) v.Linear = vec3.new(1.0, 0.0, 0.0) end)
+				end, { phase = "Update" })
+
+				ecs:AddSystem("LateWriter", function(dt)
+					local q = ecs:Query({"VelocityComponent"})
+					q:Each(function(entity, v) v.Linear = vec3.new(2.0, 0.0, 0.0) end)
+				end, { phase = "Late" })
+			)", "TestAddSystemPhaseTable");
+
+			scene.OnUpdateRuntime(Timestep(0.016f));
+
+			// 最终值来自 LateWriter:Late 阶段确实执行了,且排在 Update 之后
+			// (若 Late 不执行 → 1.0;若 Late 抢在 Update 之前 → 1.0)。
+			CHECK(ApproxEqual(probe.GetComponent<VelocityComponent>().Linear.x, 2.0f));
+			CHECK(hasTiming("UpdateWriter"));
+			CHECK(hasTiming("LateWriter"));
+		}
+
+		// =====================================================================
+		// 11. ecs:AddSystem after 真的纠正同阶段执行顺序(注册顺序与期望顺序相反)
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			Entity probe = scene.CreateEntityShell("OrderProbe");
+			probe.AddComponent<VelocityComponent>();
+
+			RUN_OK(R"(
+				-- 先注册声明 after OrderB 的 OrderA:After 生效 ⇒ OrderB 先跑,最终值是 OrderA 的 1.0;
+				-- 若 After 被忽略 ⇒ OrderA 先跑、OrderB 后写 2.0。
+				ecs:AddSystem("OrderA", function(dt)
+					local q = ecs:Query({"VelocityComponent"})
+					q:Each(function(entity, v) v.Linear = vec3.new(1.0, 0.0, 0.0) end)
+				end, { phase = "Update", after = { "OrderB" } })
+
+				ecs:AddSystem("OrderB", function(dt)
+					local q = ecs:Query({"VelocityComponent"})
+					q:Each(function(entity, v) v.Linear = vec3.new(2.0, 0.0, 0.0) end)
+				end, { phase = "Update" })
+			)", "TestAddSystemAfterOrder");
+
+			scene.OnUpdateRuntime(Timestep(0.016f));
+			CHECK(ApproxEqual(probe.GetComponent<VelocityComponent>().Linear.x, 1.0f));
+		}
+
+		// =====================================================================
+		// 12. ecs:AddSystem 表形态的错误处理(非法 phase / 未知键 / after 类型)
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			RUN_OK(R"(
+				local noop = function(dt) end
+
+				-- 非法 phase(表形态):消息里要能看出合法取值
+				local okPhase, phaseErr = pcall(function()
+					ecs:AddSystem("BadPhase", noop, { phase = "Nope" })
+				end)
+				assert(not okPhase, "illegal phase must fail")
+				assert(string.find(phaseErr, "Nope", 1, true) ~= nil, "error must name the bad phase")
+				assert(string.find(phaseErr, "PreRender", 1, true) ~= nil, "error must list the legal phases")
+
+				-- 非法 phase(字符串形态)
+				local okPhaseString = pcall(function() ecs:AddSystem("BadPhaseString", noop, "Nope") end)
+				assert(not okPhaseString, "illegal phase string must fail")
+
+				-- 非法 phase(最旧参数序)
+				local okPhaseLegacy = pcall(function() ecs:AddSystem("BadPhaseLegacy", "Nope", noop) end)
+				assert(not okPhaseLegacy, "illegal legacy phase must fail")
+
+				-- 选项表未知键
+				local okKey, keyErr = pcall(function()
+					ecs:AddSystem("BadKey", noop, { phaze = "Late" })
+				end)
+				assert(not okKey, "unknown option key must fail")
+				assert(string.find(keyErr, "unknown option key", 1, true) ~= nil, "error must mention the unknown key")
+
+				-- after 元素不是字符串
+				local okAfterType = pcall(function()
+					ecs:AddSystem("BadAfterType", noop, { phase = "Update", after = { 123 } })
+				end)
+				assert(not okAfterType, "after elements must be strings")
+
+				-- after 不是数组
+				local okAfterShape = pcall(function()
+					ecs:AddSystem("BadAfterShape", noop, { after = 5 })
+				end)
+				assert(not okAfterShape, "after must be an array")
+
+				-- phase 不是字符串
+				local okPhaseType = pcall(function()
+					ecs:AddSystem("BadPhaseType", noop, { phase = 5 })
+				end)
+				assert(not okPhaseType, "phase must be a string")
+
+				-- 第三参数既不是字符串也不是表
+				local okThirdType = pcall(function() ecs:AddSystem("BadThird", noop, 5) end)
+				assert(not okThirdType, "third argument must be a phase string or an options table")
+			)", "TestAddSystemOptionsErrors");
+
+			// 报错的注册一个都不许落地
+			scene.OnUpdateRuntime(Timestep(0.016f));
+			for (const auto& timing : scene.GetFrameSystemTimings())
+			{
+				CHECK(timing.Name != "BadPhase");
+				CHECK(timing.Name != "BadPhaseString");
+				CHECK(timing.Name != "BadPhaseLegacy");
+				CHECK(timing.Name != "BadKey");
+				CHECK(timing.Name != "BadAfterType");
+				CHECK(timing.Name != "BadAfterShape");
+				CHECK(timing.Name != "BadPhaseType");
+				CHECK(timing.Name != "BadThird");
+			}
 		}
 
 		ScriptEngine::Shutdown();

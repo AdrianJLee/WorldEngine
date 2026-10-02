@@ -83,22 +83,30 @@ Game 模块在 `Register(context)` 里把这一对回调登记进 `WorldContext`
 -- <内容根>/scripts/systems/player_movement.luau
 local q = ecs:Query({ "TransformComponent", "VelocityComponent" })
 
-ecs:AddSystem("LuauPlayerMovementSystem", "Update", function(dt)
+ecs:AddSystem("LuauPlayerMovementSystem", function(dt)
     q:Each(function(entity, transform, velocity)
         transform.Location.x = transform.Location.x + velocity.Linear.x * dt
     end)
-end)
+end, "Update")
 ```
 
 加载时机:`Scene::OnRuntimeStart()` → `ScriptEngine::LoadSystemScripts(scene)`。编辑器 Play、
 编辑器 Simulate、独立 Runtime 走同一条路径。
+
+**阶段与顺序依赖真的生效**:`Scene::RunFrameSystems` 每帧按
+`PreFixed → Fixed → Update → Late → PreRender` **依次跑满五个阶段**,同阶段内按
+`After` 做拓扑排序 —— 所以 `ISystem::Phase()` / `After()` 与 Lua 的
+`{ phase = …, after = { … } }` 都能决定执行时机(2026-10-02 之前这两条在 Scene 宿主路径上
+没有接线:注册被硬编码成 `Update`、派发也只跑 `Update`,非 `Update` 阶段的系统**永不执行**)。
 
 ### `ecs` 全局表（也是 `world`）
 
 | 方法 | 作用 |
 | --- | --- |
 | `ecs:Query({ "CompA", "CompB" })` | 建查询;结果有 `:Each(fn)` 与 `:Count()` |
+| `ecs:Query({ "CompA" }, { without = { "DeadTag" } })` | 排除过滤(对应 C++ 的 `Query::Without<...>`);未知键/未注册名报可读错误 |
 | `ecs:AddSystem(name, fn [, phase])` | 注册具名系统;**幂等**（同名先撤销再注册） |
+| `ecs:AddSystem(name, fn, { phase = "Late", after = { "Other" } })` | 阶段 + 同阶段顺序依赖(落到 `SystemDesc::After`) |
 | `ecs:RemoveSystem(name)` | 撤销具名系统 |
 | `ecs:CreateEntity([name])` | 建实体（Tag + UUID） |
 | `ecs:DestroyEntity(entity)` | 排队销毁（安全点提交） |

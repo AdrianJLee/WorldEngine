@@ -93,6 +93,14 @@ namespace World
 			std::string Name;
 			bool ParallelSafe = false;
 			std::function<void(Timestep)> Update;
+			// PURE-ECS:系统阶段与同阶段顺序依赖。此前 FrameSystem 只有 {Name, ParallelSafe, Update},
+			// 注册时被硬编码进 `SystemPhase::Update`,而 RunFrameSystems 也只跑 Update ⇒
+			// `ISystem::Phase()` / `After()` **全仓没有任何调用点**(阶段与顺序依赖在引擎里
+			// 实际不生效,只有 SystemRegistry 自己支持)。这里把它们打通。
+			// 位置固定在 `Update` 之后:既有调用方写的 3 元素聚合初始化 `{名字, 并行, 函数}`
+			// 因此逐字节不变,新字段走默认值。
+			Gameplay::SystemPhase Phase = Gameplay::SystemPhase::Update;
+			std::vector<std::string> After;
 		};
 		struct FrameSystemTiming
 		{
@@ -121,7 +129,9 @@ namespace World
 				[this, sys = std::shared_ptr<ISystem>(std::move(system))](Timestep ts)
 				{
 					sys->Update(*this, ts);
-				}
+				},
+				ref.Phase(),
+				ref.After()
 			});
 			return ref;
 		}

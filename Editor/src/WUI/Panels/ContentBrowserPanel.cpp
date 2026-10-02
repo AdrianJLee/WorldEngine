@@ -1434,6 +1434,22 @@ namespace World
 				m_Host.OpenScriptEditor(relativeError ? created.generic_string() : relative.generic_string());
 				return true;
 			});
+		// PECS-T9:Lua System —— 与 Script 同一份磁盘模板/编辑器路径,唯一差别是落点**固定**
+		// `<内容根>/scripts/systems/`(忽略右键所在目录):只有这个目录下的脚本会被场景启动时
+		// 自动加载,这正是本类型存在的意义(在 assets/ 根新建普通 Script 永远不会被加载)。
+		add("luau-system", "Lua System", ".luau", 31, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				(void)dir;   // 忽略所在目录:固定落 scripts/systems/
+				std::filesystem::path created;
+				if (!CreateLuaSystemAsset(error, &created))
+					return false;
+				std::error_code relativeError;
+				const std::filesystem::path relative =
+					std::filesystem::relative(created, m_Model.ContentRoot, relativeError);
+				m_Host.OpenScriptEditor(relativeError ? created.generic_string() : relative.generic_string());
+				return true;
+			});
 	}
 
 	void ContentBrowserPanel::UnregisterDefaultAssetTypes()
@@ -1443,7 +1459,7 @@ namespace World
 		m_AssetTypesRegistered = false;
 		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
 		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
-		for (const char* id : { "folder", "material", "shader", "scene", "script" })
+		for (const char* id : { "folder", "material", "shader", "scene", "script", "luau-system" })
 			registry.Unregister(id);
 	}
 
@@ -1583,6 +1599,75 @@ namespace World
 				"end)\n";
 		}
 		SelectCreated(target, "new-script");
+		if (outPath) *outPath = target;
+		return true;
+	}
+
+	// PECS-T9:Lua System 的落点**固定**为 <内容根>/scripts/systems/ —— 忽略传入目录(右键位置),
+	// 因为只有这个目录下的脚本会被场景启动时自动加载。名字按既有去重规则自动编号,绝不覆盖。
+	bool ContentBrowserPanel::CreateLuaSystemAsset(std::string* error, std::filesystem::path* outPath)
+	{
+		const std::filesystem::path contentRoot = m_Model.ContentRoot;
+		if (contentRoot.empty())
+		{
+			if (error) *error = "no content root (open or create a project first)";
+			return false;
+		}
+		const std::filesystem::path systemsDir = contentRoot / "scripts" / "systems";
+		std::error_code dirError;
+		if (!std::filesystem::is_directory(systemsDir, dirError))
+		{
+			dirError.clear();
+			std::filesystem::create_directories(systemsDir, dirError);
+			if (dirError || !std::filesystem::is_directory(systemsDir))
+			{
+				if (error) *error = "could not create " + systemsDir.string()
+					+ (dirError ? (" (" + dirError.message() + ")") : std::string());
+				return false;
+			}
+		}
+
+		const std::filesystem::path target = MakeUniqueAssetPath(systemsDir, "system", ".luau");
+		// 与 Scripts 面板"从模板新建"、Script 资产同一份磁盘模板;模板缺失时退回最小骨架。
+		const std::filesystem::path templatePath = contentRoot / "scripts" / "templates" / "WorldScript.lua";
+		std::error_code templateError;
+		if (std::filesystem::is_regular_file(templatePath, templateError))
+		{
+			std::error_code copyError;
+			std::filesystem::copy_file(templatePath, target, std::filesystem::copy_options::none, copyError);
+			if (copyError)
+			{
+				WLD_CORE_ERROR("Could not create Lua system: {0}", copyError.message());
+				if (error) *error = copyError.message();
+				return false;
+			}
+		}
+		else
+		{
+			// 内置骨架 = 模板的系统脚本形态,签名用**规范顺序** ecs:AddSystem(名字, 函数, 阶段)。
+			std::ofstream out(target, std::ios::binary | std::ios::trunc);
+			if (!out.is_open())
+			{
+				if (error) *error = "could not write " + target.string();
+				return false;
+			}
+			out << "-- Lua system script: lives under scripts/systems/ and is auto-loaded on play.\n"
+				"local query = ecs:Query({ \"TransformComponent\", \"VelocityComponent\" })\n\n"
+				"ecs:AddSystem(\"NewSystem\", function(dt)\n"
+				"    query:Each(function(entity, transform, velocity)\n"
+				"        transform.Location.x = transform.Location.x + velocity.Linear.x * dt\n"
+				"    end)\n"
+				"end, \"Update\")\n";
+		}
+
+		// 目标固定不在当前目录 ⇒ 走 SelectAsset(先导航过去再选中),用户原地就能看到新文件。
+		std::error_code relativeError;
+		const std::filesystem::path relative =
+			std::filesystem::relative(target, contentRoot, relativeError);
+		if (!relativeError && !relative.empty())
+			SelectAsset(relative.generic_string(), "new-luau-system");
+		else
+			SelectCreated(target, "new-luau-system");
 		if (outPath) *outPath = target;
 		return true;
 	}
@@ -4063,7 +4148,7 @@ namespace World
 			{
 				// CPPSRC-1:源码根下"新建"只有 C++ 组件一条(材质/场景/脚本/文件夹都是内容根语义);
 				// 走宿主同一个向导(File ▸ 新建 C++ 组件…),不再展开资产类型清单。
-				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ Component…");
+				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ …");
 				if (Wui::MenuItem(ctx, Wui::HashId("browser.toolbar.menu.newcpp"), newRow, newCppLabel, true, theme))
 				{
 					m_Host.RequestNewCppScript();
@@ -4758,7 +4843,7 @@ namespace World
 			{
 				// CPPSRC-1:源码根下空白右键只有"新建 C++ 组件…"(资产类型都不适用);
 				// 走宿主同一个向导(File ▸ 新建 C++ 组件…)。
-				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ Component…");
+				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ …");
 				if (MenuItem(ctx, Wui::HashId("browser.blank.new.cpp"), newRow, newCppLabel, true, theme))
 					m_Host.RequestNewCppScript();
 			}
@@ -4899,7 +4984,7 @@ namespace World
 						"C++ sources are built by CMake — rename or delete them in Visual Studio or File Explorer."));
 				else if (!m_Host.RequestNewCppScript())
 					NotifyAssetFailure(Wui::Tr("panel.content_browser.new_cpp.unavailable",
-						"Open a project first — the New C++ Component wizard writes into <project>/src/Components."));
+						"Open a project first — the New C++ … wizard writes into <project>/src/."));
 			}
 			else if (m_Model.Scope == BrowserRootScope::ProjectPlugins)
 			{
@@ -4922,4 +5007,3 @@ namespace World
 		}
 	}
 }
-

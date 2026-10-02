@@ -29,6 +29,8 @@
 
 #include "Generated/Game/GameSchemaRegistration.h"
 
+#include <fstream>
+
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -224,11 +226,15 @@ namespace
 	// LuaReflectionRegistry + 服务/UI/事件描述表渲染存根。这里复现同一组输入:
 	// 本目标额外编译 Game 的生成式 schema 注册源(见 tests/CMakeLists.txt),
 	// 于是"启动编辑器不会重写存根"在 headless 里等价为"渲染结果 == 入库文件"。
-	void CommittedStubMatchesEditorRendering()
+	//
+	// 渲染入口单独抽出来:漂移门禁与 `--write-stub`(重生成)共用**同一份**输入,
+	// 所以"重生成过的文件必然过门禁",不存在两份实现漂移的余地。
+	std::string RenderStubWithEditorInputs()
 	{
 		WorldContext& context = TestContext();
 		// 与 GameAPI.cpp 的模块初始化同一条注册入口(Game 的 schema 模块)。
-		CHECK(World::Schema::RegisterGameSchemaModule(context.Schemas()));
+		if (!World::Schema::RegisterGameSchemaModule(context.Schemas()))
+			throw std::runtime_error("could not register the Game schema module for stub rendering");
 
 		const std::vector<const Schema::TypeSchema*> components =
 			context.Schemas().List(Schema::TypeCategory::Component);
@@ -261,8 +267,22 @@ namespace
 		std::string rendered, error;
 		CHECK(LuaStubGenerator::Render(LuaReflectionRegistry::GetTable(), components, serviceList, uiList,
 			rendered, error));
+		World::Schema::UnregisterGameSchemaModule(context.Schemas());
+		return rendered;
+	}
 
-		const fs::path committed = fs::path(WLD_TEST_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.luau";
+	fs::path CommittedStubPath()
+	{
+		return fs::path(WLD_TEST_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.luau";
+	}
+
+	void CommittedStubMatchesEditorRendering()
+	{
+		WorldContext& context = TestContext();
+		(void)context;
+		const std::string rendered = RenderStubWithEditorInputs();
+
+		const fs::path committed = CommittedStubPath();
 		CHECK(fs::is_regular_file(committed));
 		// 漂移门禁:逐字节一致(比较前统一 CRLF→LF —— 仓库走 core.autocrlf 时工作树可能是 CRLF,
 		// 那是行尾差异不是内容漂移;2026-09-23 实测过该误报,见 docs/dev/file-norms.md §R3)。
@@ -285,7 +305,34 @@ namespace
 
 		// 旧文件名不得回归:入库制品只有 .luau 一份。
 		CHECK(!fs::exists(fs::path(WLD_TEST_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.lua"));
-		World::Schema::UnregisterGameSchemaModule(context.Schemas());
+	}
+
+	// `--write-stub`:把**同一份**渲染结果写回入库文件(唯一的重生成入口 ——
+	// 手改生成物没有意义,而编辑器那条路径要求真有项目与 Game.dll,CI/无人值守下跑不了)。
+	// 正常测试运行**永不**写盘:只有显式带这个参数才会走到这里。
+	int WriteCommittedStub()
+	{
+		const fs::path committed = CommittedStubPath();
+		const std::string rendered = RenderStubWithEditorInputs();
+		const std::string previous = fs::is_regular_file(committed) ? ReadText(committed) : std::string();
+		std::error_code ec;
+		fs::create_directories(committed.parent_path(), ec);
+		std::ofstream out(committed, std::ios::binary | std::ios::trunc);
+		if (!out.is_open())
+		{
+			std::fprintf(stderr, "--write-stub: cannot write %s\n", committed.string().c_str());
+			return 1;
+		}
+		out << rendered;
+		out.close();
+		if (!out.good())
+		{
+			std::fprintf(stderr, "--write-stub: write failed: %s\n", committed.string().c_str());
+			return 1;
+		}
+		std::printf("--write-stub: %s %s (%zu bytes)\n",
+			previous == rendered ? "unchanged" : "updated", committed.string().c_str(), rendered.size());
+		return 0;
 	}
 
 	// ---- W9.7:语法检查 + 轻量格式化 ----
@@ -385,7 +432,7 @@ namespace
 	}
 }
 
-int main()
+int main(int argc, char** argv)
 {
 	try
 	{
@@ -395,11 +442,19 @@ int main()
 		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		World::ScriptEngine::Init();
-		const int failures = RunAll();
+		bool writeStub = false;
+		for (int index = 1; index < argc; ++index)
+		{
+			const std::string argument = argv[index] ? argv[index] : "";
+			if (argument == "--write-stub")
+				writeStub = true;
+		}
+		const int failures = writeStub ? WriteCommittedStub() : RunAll();
 		World::ScriptEngine::Shutdown();
 		if (failures == 0)
 		{
-			std::printf("World.ScriptWorkflow: all checks passed\n");
+			if (!writeStub)
+				std::printf("World.ScriptWorkflow: all checks passed\n");
 			return 0;
 		}
 		std::fprintf(stderr, "World.ScriptWorkflow: %d group(s) failed\n", failures);

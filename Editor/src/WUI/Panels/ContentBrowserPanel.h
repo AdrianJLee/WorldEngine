@@ -195,8 +195,8 @@ namespace World
 		// 返回新建目录路径;创建失败返回空路径。
 		std::filesystem::path CreateFolderIn(Wui::WuiContext& ctx, const std::filesystem::path& parentDir);
 		// ---- P4-UX16:"新建资产"注册表 ----
-		// 默认四类(Folder / Material / Scene / Script)只注册一次;菜单/右键菜单/快捷键
-		// 全部读同一张表 —— 以后加类型不再改这里的 UI 代码。
+		// 默认类型(Folder / Material / Shader / Scene / Script / Lua System)只注册一次;
+		// 菜单/右键菜单/快捷键全部读同一张表 —— 以后加类型不再改这里的 UI 代码。
 		void RegisterDefaultAssetTypes();
 		void UnregisterDefaultAssetTypes();
 		// 按类型 id 在当前目录创建(菜单与快捷键共用的唯一入口);失败写 error。
@@ -208,6 +208,10 @@ namespace World
 			std::filesystem::path* outPath);
 		bool CreateScriptAsset(const std::filesystem::path& dir, std::string* error,
 			std::filesystem::path* outPath);
+		// PECS-T9:Lua System 资产 —— 落点**固定** `<内容根>/scripts/systems/`(忽略右键所在目录,
+		// 只有这里会被场景启动时自动加载);名字自动去重(与 script 同一套),模板
+		// `<内容根>/scripts/templates/WorldScript.lua`,缺失时用内置骨架。
+		bool CreateLuaSystemAsset(std::string* error, std::filesystem::path* outPath);
 		// "New ▶" 子菜单:画行 / 画展开的类型列表(工具条 `…` 与内容区空白右键共用)。
 		// owner = 1(工具条菜单)/ 2(空白右键菜单);0 = 未展开。同一时刻只可能开一个菜单。
 		bool RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId rowId, const Wui::WuiRect& row,

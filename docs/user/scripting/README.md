@@ -19,13 +19,13 @@
 -- <内容根>/scripts/systems/player_movement.luau
 local movement = ecs:Query({ "TransformComponent", "VelocityComponent" })
 
-ecs:AddSystem("PlayerMovementSystem", "Update", function(dt)
+ecs:AddSystem("PlayerMovementSystem", function(dt)
     movement:Each(function(entity, transform, velocity)
         transform.Location.x = transform.Location.x + velocity.Linear.x * dt
         transform.Location.y = transform.Location.y + velocity.Linear.y * dt
         transform.Location.z = transform.Location.z + velocity.Linear.z * dt
     end)
-end)
+end, "Update")
 ```
 
 - 脚本可以直接是"脚本本体",不需要返回 table;`return` 一个 table 也没有副作用。
@@ -36,7 +36,9 @@ end)
 | 调用 | 作用 |
 | --- | --- |
 | `ecs:Query({ "CompA", "CompB" })` | 建查询,结果有 `:Each(fn)` 与 `:Count()` |
+| `ecs:Query({ "CompA" }, { without = { "DeadTag" } })` | 排除过滤:带 `without` 里任一组件的实体不参与 |
 | `ecs:AddSystem(name, fn [, phase])` | 注册具名系统;同名先撤销再注册（**幂等**） |
+| `ecs:AddSystem(name, fn, { phase = "Late", after = { "Other" } })` | 指定阶段 + 同阶段顺序依赖 |
 | `ecs:RemoveSystem(name)` | 撤销系统,不存在返回 `false` |
 | `ecs:CreateEntity([name])` | 建实体 |
 | `ecs:DestroyEntity(entity)` | 排队销毁(下一个安全点提交) |
@@ -47,7 +49,16 @@ end)
 `:Each` 的回调签名是 `(entity, 组件代理...)`,组件代理按 `Query` 里列出的组件顺序传入,
 可以直接读写字段（例如 `transform.Location.x = ...`）。
 
-**阶段**:`phase` 省略时是 `"Update"`。完整顺序是 `PreFixed → Fixed → Update → Late → PreRender`。
+**阶段**:`phase` 省略时是 `"Update"`。完整顺序是 `PreFixed → Fixed → Update → Late → PreRender`
+—— 引擎**每帧按这五个阶段依次跑一遍**,所以写在非 `Update` 阶段的系统真的在那一刻执行。
+
+**顺序依赖**:`after = { "OtherSystem" }` 表示"本系统排在 `OtherSystem` 之后"(同阶段内生效)。
+依赖的系统不存在时会**跳过本系统并记一条警告**,不会静默乱序 —— 名字要与对方 `AddSystem`
+的第一个参数逐字一致。
+
+**排除过滤**:`without` 里写"有这个组件就不要"的组件名;想表达"有 A 没有 B"就写
+`ecs:Query({ "A" }, { without = { "B" } })`。选项表里出现未知键、或 `without` 里写了
+未注册的组件名,都会报可读错误(不静默忽略)。
 
 **幂等**:`AddSystem` 对同名系统先撤销再注册,所以"同一场景二次启动"或"系统脚本热重载"
 都是整份重跑,不会因为重名报错。

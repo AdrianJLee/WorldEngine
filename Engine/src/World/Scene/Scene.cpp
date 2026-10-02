@@ -224,8 +224,10 @@ namespace World
 			m_FrameSystems = std::make_unique<Gameplay::SystemRegistry>();
 		Gameplay::SystemDesc desc;
 		desc.Name = system.Name;
-		desc.Phase = Gameplay::SystemPhase::Update;
+		// PURE-ECS:阶段与顺序依赖来自注册方(默认 Update/无依赖),不再硬编码。
+		desc.Phase = system.Phase;
 		desc.ParallelSafe = system.ParallelSafe;
+		desc.After = system.After;
 		Gameplay::SystemRegistry::UpdateFn update = std::move(system.Update);
 		if (!m_FrameSystems->Register(desc, std::move(update)))
 			throw std::invalid_argument("Scene frame system '" + desc.Name + "' rejected: " + m_FrameSystems->GetLastError());
@@ -270,9 +272,15 @@ namespace World
 			~PipelineScopeGuard() { s_InsideFramePipeline = false; }
 		} guard;
 
-		m_FrameSystems->RunPhase(Gameplay::SystemPhase::Update, ts);
-		for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
-			m_FrameSystemTimings.push_back({ timing.Name, timing.ParallelSafe, timing.Milliseconds });
+		// PURE-ECS:按阶段顺序跑满 5 个阶段。此前只跑 Update ⇒ 注册在任何其它阶段的系统
+		// **永远不会执行**(ISystem::Phase() 等于没有效果)。同阶段内的顺序依赖由
+		// SystemRegistry 的 After 拓扑排序负责。耗时按阶段累积(RunPhase 每次会清自己的列表)。
+		for (int phase = 0; phase < static_cast<int>(Gameplay::SystemPhase::Count); ++phase)
+		{
+			m_FrameSystems->RunPhase(static_cast<Gameplay::SystemPhase>(phase), ts);
+			for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
+				m_FrameSystemTimings.push_back({ timing.Name, timing.ParallelSafe, timing.Milliseconds });
+		}
 	}
 	const char* Scene::GetFrameSystemStatsDescription(const Scene& scene)
 	{

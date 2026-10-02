@@ -7,6 +7,7 @@
 #include "World/Scene/Query.h"
 #include <cmath>
 
+#include <algorithm>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -46,6 +47,26 @@ namespace
 
 		int UpdateCount = 0;
 		float LastDt = 0.0f;
+	};
+
+	// PURE-ECS:阶段与同阶段顺序依赖必须**真的生效**。此前 Scene::FrameSystem 只有
+	// {Name, ParallelSafe, Update},注册时被硬编码成 SystemPhase::Update,RunFrameSystems
+	// 也只跑 Update ⇒ `ISystem::Phase()` / `After()` 全仓没有任何调用点(等于死 API)。
+	class PhaseProbeSystem : public World::ISystem
+	{
+	public:
+		PhaseProbeSystem(std::string name, World::Gameplay::SystemPhase phase,
+			std::vector<std::string> after, std::vector<std::string>* log)
+			: m_Name(std::move(name)), m_Phase(phase), m_After(std::move(after)), m_Log(log) {}
+		std::string_view Name() const override { return m_Name; }
+		World::Gameplay::SystemPhase Phase() const override { return m_Phase; }
+		std::vector<std::string> After() const override { return m_After; }
+		void Update(World::Scene&, World::Timestep) override { m_Log->push_back(m_Name); }
+	private:
+		std::string m_Name;
+		World::Gameplay::SystemPhase m_Phase;
+		std::vector<std::string> m_After;
+		std::vector<std::string>* m_Log;
 	};
 }
 
@@ -303,6 +324,45 @@ int main()
 			const auto& timings = systemScene.GetFrameSystemTimings();
 			CHECK(timings.size() == 6);
 			CHECK(timings[5].Name == "CustomTestSystem");
+		}
+
+		// ========================================================
+		// 11b. ISystem 的 Phase / After 真的影响调度(PURE-ECS 修复回归)
+		//   修复前:注册被硬编码进 Update 阶段、RunFrameSystems 只跑 Update ⇒
+		//   非 Update 阶段的系统**永不执行**,After 也不起作用。
+		// ========================================================
+		{
+			Scene phaseScene(context);
+			std::vector<std::string> log;
+			// 注册顺序故意与期望执行顺序相反:After 依赖必须把它纠正过来。
+			phaseScene.RegisterSystem<PhaseProbeSystem>("SecondSystem",
+				Gameplay::SystemPhase::Update, std::vector<std::string> { "FirstSystem" }, &log);
+			phaseScene.RegisterSystem<PhaseProbeSystem>("FirstSystem",
+				Gameplay::SystemPhase::Update, std::vector<std::string> {}, &log);
+			// 非 Update 阶段的系统:修复前 **一次都不会跑**。
+			phaseScene.RegisterSystem<PhaseProbeSystem>("LateSystem",
+				Gameplay::SystemPhase::Late, std::vector<std::string> {}, &log);
+			phaseScene.RegisterSystem<PhaseProbeSystem>("PreFixedSystem",
+				Gameplay::SystemPhase::PreFixed, std::vector<std::string> {}, &log);
+
+			phaseScene.OnUpdateRuntime(0.016f);
+
+			CHECK(log.size() == 4);
+			// 阶段顺序:PreFixed 先于 Update,Update 先于 Late。
+			CHECK(log[0] == "PreFixedSystem");
+			// 同阶段内:FirstSystem 在 SecondSystem 之前(After 依赖生效)。
+			const auto firstAt = std::find(log.begin(), log.end(), "FirstSystem");
+			const auto secondAt = std::find(log.begin(), log.end(), "SecondSystem");
+			CHECK(firstAt != log.end() && secondAt != log.end() && firstAt < secondAt);
+			CHECK(log[3] == "LateSystem");
+
+			// 每个阶段都进耗时表(读面板按它列系统)。
+			const auto& phaseTimings = phaseScene.GetFrameSystemTimings();
+			CHECK(phaseTimings.size() == 4 + 5);   // 4 个探针 + 5 个引擎内置
+			bool sawLate = false;
+			for (const auto& timing : phaseTimings)
+				sawLate = sawLate || timing.Name == "LateSystem";
+			CHECK(sawLate);
 		}
 
 		// ========================================================

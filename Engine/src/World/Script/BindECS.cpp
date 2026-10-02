@@ -4,6 +4,7 @@
 
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
+#include "World/Gameplay/SystemRegistry.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/LuaType/LuaTypeHelpers.h"
@@ -11,12 +12,14 @@
 #include "World/Scene/ScriptEngine.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/BindComponentAccess.h"
+#include "World/Script/LuauHeaders.h"
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Script/ScriptValue.h"
 
 #include <cstddef>
+#include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -28,52 +31,210 @@ namespace World
 	{
 		using LuaTypeDetail::NewUserdataOf;
 
+		// 系统阶段名 → 枚举。合法取值与 SystemPhaseName() 的输出**逐字一致**(大小写敏感):
+		// 这里遍历枚举取值比对,而不是另抄一份字符串,保证与单一事实源不漂移。
+		bool ParseSystemPhase(const std::string& name, Gameplay::SystemPhase* out)
+		{
+			for (int index = 0; index < static_cast<int>(Gameplay::SystemPhase::Count); ++index)
+			{
+				const auto phase = static_cast<Gameplay::SystemPhase>(index);
+				const char* phaseName = Gameplay::SystemPhaseName(phase);
+				if (phaseName && name == phaseName)
+				{
+					if (out)
+						*out = phase;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		std::string LegalSystemPhaseList()
+		{
+			std::string list;
+			for (int index = 0; index < static_cast<int>(Gameplay::SystemPhase::Count); ++index)
+			{
+				if (!list.empty())
+					list += ", ";
+				list += "'";
+				list += Gameplay::SystemPhaseName(static_cast<Gameplay::SystemPhase>(index));
+				list += "'";
+			}
+			return list;
+		}
+
+		Gameplay::SystemPhase RequireSystemPhase(const std::string& systemName, const ScriptValue& value)
+		{
+			std::string phaseName;
+			if (!value.IsString() || !value.AsString(&phaseName) || phaseName.empty())
+				throw std::logic_error("ecs:AddSystem('" + systemName + "'): phase must be a non-empty string");
+			Gameplay::SystemPhase phase = Gameplay::SystemPhase::Update;
+			if (!ParseSystemPhase(phaseName, &phase))
+				throw std::logic_error("ecs:AddSystem('" + systemName + "'): unknown phase '" + phaseName +
+					"'; valid phases are " + LegalSystemPhaseList());
+			return phase;
+		}
+
+		// after 只接受字符串数组;依赖是否存在交由 SystemRegistry::RunPhase 判定
+		// (缺失依赖 = 跳过该系统 + 记警告),绑定层不另立更严的存在性校验。
+		std::vector<std::string> RequireAfterSystems(const std::string& systemName, const ScriptValue& value)
+		{
+			std::vector<std::string> after;
+			if (value.IsNil())
+				return after;
+
+			ScriptTableRef table;
+			if (!value.IsTable() || !value.AsTable(&table) || !table.IsValid())
+				throw std::logic_error("ecs:AddSystem('" + systemName +
+					"'): option 'after' must be an array of system name strings");
+
+			for (const ScriptValue& item : table.GetArray())
+			{
+				std::string dependency;
+				if (!item.AsString(&dependency) || dependency.empty())
+					throw std::logic_error("ecs:AddSystem('" + systemName +
+						"'): option 'after' elements must be non-empty system name strings");
+				after.push_back(std::move(dependency));
+			}
+			return after;
+		}
+
+		// 选项表的未知键校验:ScriptTableRef 只暴露字段读写、不枚举键,这里用 Lua 表遍历。
+		// 只接受白名单键(含数组下标在内的其它键一律拒绝),报错时列出合法键,不静默忽略。
+		void RejectUnknownOptionKeys(const ScriptTableRef& table, std::initializer_list<const char*> allowedKeys,
+			const char* api)
+		{
+			lua_State* state = table.State();
+			if (!state || !table.Push(state))
+				throw std::logic_error(std::string(api) + ": options table is not valid");
+
+			lua_pushnil(state);
+			while (lua_next(state, -2) != 0)
+			{
+				// 栈: table, key, value
+				bool known = false;
+				if (lua_type(state, -2) == LUA_TSTRING)
+				{
+					const char* key = lua_tostring(state, -2);
+					if (key)
+					{
+						for (const char* allowed : allowedKeys)
+						{
+							if (std::string(key) == allowed)
+							{
+								known = true;
+								break;
+							}
+						}
+					}
+				}
+
+				if (!known)
+				{
+					std::string allowedList;
+					for (const char* allowed : allowedKeys)
+					{
+						if (!allowedList.empty())
+							allowedList += ", ";
+						allowedList += "'";
+						allowedList += allowed;
+						allowedList += "'";
+					}
+					lua_pop(state, 2);   // value + table
+					throw std::logic_error(std::string(api) + ": unknown option key (allowed: " + allowedList + ")");
+				}
+
+				lua_pop(state, 1);       // 弹出 value,保留 key 供 lua_next 继续
+			}
+			lua_pop(state, 1);           // 弹出 options table
+		}
+
 		// -------------------------------------------------------------------------
-		// ecs:Query(componentNames) 实现
+		// ecs:Query(componentNames [, options]) 实现
 		// -------------------------------------------------------------------------
 		ScriptValue QueryImpl(const ScriptValue* args, std::size_t count)
 		{
 			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
-			std::size_t startIndex = 0;
+
+			// 参数形态(按**内容**判 self,不按参数个数):
+			//   ecs:Query({...})                      冒号调用 ⇒ args[0] 是 ecs 表(self),组件列表 = args[1]
+			//   ecs:Query({...}, { without = {...} }) 同上,选项表 = args[2]
+			//   ecs.Query({...}) / ecs.Query({...}, {...})  点调用 ⇒ args[0] 就是组件列表
+			//   ecs:Query("A", "B")                   冒号调用 + 连续字符串组件名
+			//   ecs:Query("A", { without = {...} })   冒号调用 + 字符串组件名 + 选项表
+			// 判据:`ecs`/`world` 表的字段是命名的 ⇒ GetArray() 为空;组件列表有字符串数组元素。
+			std::size_t index = 0;
 			if (count >= 1 && args[0].IsTable())
 			{
-				if (count >= 2)
-					startIndex = 1;
-				else
-					startIndex = 0;
+				ScriptTableRef first;
+				if (args[0].AsTable(&first) && first.IsValid() && first.GetArray().empty())
+					index = 1;   // 无数组元素的表 = ecs/world 表(self)
 			}
 
+			// 组件名阶段(必填):连续的字符串 / 字符串数组都算组件名。
+			// 遇到"没有数组部分的表"即视为选项表,组件名阶段结束。
 			std::vector<std::string> componentNames;
-			for (std::size_t i = startIndex; i < count; ++i)
+			for (; index < count; ++index)
 			{
-				if (args[i].IsString())
+				const ScriptValue& arg = args[index];
+				if (arg.IsString())
 				{
 					std::string name;
-					args[i].AsString(&name);
+					arg.AsString(&name);
 					if (!name.empty())
 						componentNames.push_back(std::move(name));
+					continue;
 				}
-				else if (args[i].IsTable())
-				{
-					ScriptTableRef table;
-					if (args[i].AsTable(&table) && table.IsValid())
-					{
-						std::vector<ScriptValue> arr = table.GetArray();
-						for (const auto& item : arr)
-						{
-							std::string name;
-							if (item.AsString(&name) && !name.empty())
-								componentNames.push_back(std::move(name));
-							else
-								throw std::logic_error("ecs:Query: array elements must be component name strings");
-						}
-					}
-				}
-				else
-				{
+				if (!arg.IsTable())
 					throw std::logic_error("ecs:Query: argument must be a table or string of component names");
+
+				ScriptTableRef table;
+				if (!arg.AsTable(&table) || !table.IsValid())
+					throw std::logic_error("ecs:Query: argument must be a table or string of component names");
+
+				std::vector<ScriptValue> arr = table.GetArray();
+				if (arr.empty())
+					break;   // 无数组部分 ⇒ 选项表,交给下面的选项阶段
+
+				for (const ScriptValue& item : arr)
+				{
+					std::string name;
+					if (item.AsString(&name) && !name.empty())
+						componentNames.push_back(std::move(name));
+					else
+						throw std::logic_error("ecs:Query: array elements must be component name strings");
 				}
 			}
+
+			// 选项表阶段(可选,最多一个):目前只认 `without`(排除过滤);未知键报可读错误。
+			std::vector<std::string> withoutNames;
+			if (index < count)
+			{
+				ScriptTableRef options;
+				if (!args[index].IsTable() || !args[index].AsTable(&options) || !options.IsValid())
+					throw std::logic_error("ecs:Query: options must be a table");
+				++index;
+
+				RejectUnknownOptionKeys(options, { "without" }, "ecs:Query");
+
+				ScriptValue withoutValue = options.GetField("without");
+				if (!withoutValue.IsNil())
+				{
+					ScriptTableRef withoutTable;
+					if (!withoutValue.IsTable() || !withoutValue.AsTable(&withoutTable) || !withoutTable.IsValid())
+						throw std::logic_error("ecs:Query: option 'without' must be an array of component name strings");
+					for (const ScriptValue& item : withoutTable.GetArray())
+					{
+						std::string name;
+						if (item.AsString(&name) && !name.empty())
+							withoutNames.push_back(std::move(name));
+						else
+							throw std::logic_error("ecs:Query: option 'without' elements must be component name strings");
+					}
+				}
+			}
+			if (index < count)
+				throw std::logic_error("ecs:Query: too many arguments");
 
 			if (componentNames.empty())
 				throw std::logic_error("ecs:Query requires at least one component name");
@@ -93,6 +254,17 @@ namespace World
 				schemas.push_back(type);
 			}
 
+			// 排除集合与包含集合同一口径:未注册/非组件/无存储的名字都报可读错误。
+			std::vector<const Schema::TypeSchema*> excludeSchemas;
+			excludeSchemas.reserve(withoutNames.size());
+			for (const auto& name : withoutNames)
+			{
+				const Schema::TypeSchema* type = schemaRegistry.Find(name);
+				if (!type || type->Category != Schema::TypeCategory::Component || !type->Storage)
+					throw std::logic_error("ecs:Query: '" + name + "' is not a registered component type");
+				excludeSchemas.push_back(type);
+			}
+
 			LuauVm* vm = bindings.Vm();
 			if (!vm)
 				throw std::logic_error("ecs:Query: Luau VM is not valid");
@@ -103,7 +275,7 @@ namespace World
 
 			// Method: Each(callback)
 			queryTable.SetField("Each", bindings.CreateFunction("Query:Each",
-				[schemas](const ScriptValue* eachArgs, std::size_t eachCount) -> ScriptValue
+				[schemas, excludeSchemas](const ScriptValue* eachArgs, std::size_t eachCount) -> ScriptValue
 				{
 					ScriptFunctionRef callback;
 					if (eachCount >= 2 && eachArgs[1].AsFunction(&callback))
@@ -137,6 +309,16 @@ namespace World
 						storages.push_back(storage);
 					}
 
+					// 排除集合:存储不存在或为空 ⇒ 没有任何实体带该组件,无需过滤。
+					std::vector<entt::sparse_set*> excludeStorages;
+					excludeStorages.reserve(excludeSchemas.size());
+					for (const auto* schema : excludeSchemas)
+					{
+						auto* storage = registry.storage(schema->Storage->ComponentId);
+						if (storage && !storage->empty())
+							excludeStorages.push_back(storage);
+					}
+
 					std::size_t minIdx = 0;
 					std::size_t minSize = storages[0]->size();
 					for (std::size_t i = 1; i < storages.size(); ++i)
@@ -167,7 +349,19 @@ namespace World
 								break;
 							}
 						}
-						if (matchesAll)
+						if (!matchesAll)
+							continue;
+
+						bool excluded = false;
+						for (entt::sparse_set* excludeStorage : excludeStorages)
+						{
+							if (excludeStorage->contains(entity))
+							{
+								excluded = true;
+								break;
+							}
+						}
+						if (!excluded)
 							matches.push_back(entity);
 					}
 
@@ -202,7 +396,7 @@ namespace World
 
 			// Method: Count()
 			queryTable.SetField("Count", bindings.CreateFunction("Query:Count",
-				[schemas](const ScriptValue*, std::size_t) -> ScriptValue
+				[schemas, excludeSchemas](const ScriptValue*, std::size_t) -> ScriptValue
 				{
 					Scene* scene = ScriptEngine::GetActiveScene();
 					if (!scene)
@@ -218,6 +412,15 @@ namespace World
 						if (!storage || storage->empty())
 							return ScriptValue::Number(0.0);
 						storages.push_back(storage);
+					}
+
+					std::vector<entt::sparse_set*> excludeStorages;
+					excludeStorages.reserve(excludeSchemas.size());
+					for (const auto* schema : excludeSchemas)
+					{
+						auto* storage = registry.storage(schema->Storage->ComponentId);
+						if (storage && !storage->empty())
+							excludeStorages.push_back(storage);
 					}
 
 					std::size_t minIdx = 0;
@@ -249,7 +452,19 @@ namespace World
 								break;
 							}
 						}
-						if (matchesAll)
+						if (!matchesAll)
+							continue;
+
+						bool excluded = false;
+						for (entt::sparse_set* excludeStorage : excludeStorages)
+						{
+							if (excludeStorage->contains(entity))
+							{
+								excluded = true;
+								break;
+							}
+						}
+						if (!excluded)
 							countMatches += 1.0;
 					}
 
@@ -267,7 +482,11 @@ namespace World
 		}
 
 		// -------------------------------------------------------------------------
-		// ecs:AddSystem(name, [phase,] updateFn) 实现
+		// ecs:AddSystem(name, fn [, phase | options]) 实现
+		//   (name, fn)                                     —— phase 默认 "Update"
+		//   (name, fn, "Late")                             —— 字符串 phase
+		//   (name, fn, { phase = "Late", after = { "X" } }) —— 表形态(新)
+		//   (name, "Update", fn)                           —— 最旧参数序,继续兼容
 		// -------------------------------------------------------------------------
 		ScriptValue AddSystemImpl(const ScriptValue* args, std::size_t count)
 		{
@@ -279,26 +498,54 @@ namespace World
 
 			std::size_t remaining = count - startIndex;
 			if (remaining < 2)
-				throw std::logic_error("ecs:AddSystem expects (name, [phase,] updateFn)");
+				throw std::logic_error("ecs:AddSystem expects (name, fn [, phase | options])");
 
 			std::string name;
 			if (!args[startIndex].AsString(&name) || name.empty())
 				throw std::logic_error("ecs:AddSystem: system name must be a non-empty string");
 
-			// 规范形式 (name, fn [, phase]);兼容旧顺序 (name, phase, fn)。
-			std::string phase = "Update";
+			Gameplay::SystemPhase phase = Gameplay::SystemPhase::Update;
+			std::vector<std::string> after;
 			ScriptFunctionRef updateFn;
 
 			if (args[startIndex + 1].IsFunction())
 			{
 				if (!args[startIndex + 1].AsFunction(&updateFn) || !updateFn.IsValid())
 					throw std::logic_error("ecs:AddSystem: expected a function for system update");
+
 				if (remaining >= 3 && !args[startIndex + 2].IsNil())
-					args[startIndex + 2].AsString(&phase);
+				{
+					const ScriptValue& spec = args[startIndex + 2];
+					if (spec.IsString())
+					{
+						phase = RequireSystemPhase(name, spec);
+					}
+					else if (spec.IsTable())
+					{
+						ScriptTableRef options;
+						if (!spec.AsTable(&options) || !options.IsValid())
+							throw std::logic_error("ecs:AddSystem('" + name + "'): options table is not valid");
+						RejectUnknownOptionKeys(options, { "phase", "after" }, "ecs:AddSystem");
+
+						const ScriptValue phaseValue = options.GetField("phase");
+						if (!phaseValue.IsNil())
+							phase = RequireSystemPhase(name, phaseValue);
+						after = RequireAfterSystems(name, options.GetField("after"));
+					}
+					else
+					{
+						throw std::logic_error("ecs:AddSystem('" + name +
+							"'): third argument must be a phase string or an options table { phase = ..., after = { ... } }");
+					}
+				}
 			}
 			else
 			{
-				args[startIndex + 1].AsString(&phase);
+				// 最旧参数序 (name, phase, fn):phase 仍只接受字符串。
+				if (!args[startIndex + 1].IsString())
+					throw std::logic_error("ecs:AddSystem('" + name +
+						"'): expected a function for system update, or the legacy (name, phase, fn) order with a phase string");
+				phase = RequireSystemPhase(name, args[startIndex + 1]);
 				if (remaining < 3 || !args[startIndex + 2].AsFunction(&updateFn) || !updateFn.IsValid())
 					throw std::logic_error("ecs:AddSystem: expected a function for system update");
 			}
@@ -329,7 +576,9 @@ namespace World
 						if (Log::GetCoreLogger())
 							WLD_CORE_ERROR("[Luau ECS System '{}'] update error: {}", name, callError);
 					}
-				}
+				},
+				phase,
+				std::move(after)
 			});
 
 			// 归属到当前正在执行的系统脚本(不在加载系统脚本时是 no-op)。
@@ -584,11 +833,12 @@ namespace World
 	{
 		static const ScriptServiceParam queryParams[] = {
 			{ "components", "table", ScriptServiceArgType::Table, true, "Array of registered component type names, e.g. { \"TransformComponent\", \"VelocityComponent\" }." },
+			{ "options", "table", ScriptServiceArgType::Table, false, "Optional options table; only 'without' is recognized: { without = { \"DeadTag\" } } excludes entities that carry those components." },
 		};
 		static const ScriptServiceParam addSystemParams[] = {
 			{ "name", "string", ScriptServiceArgType::String, true, "System name; re-registering the same name replaces the previous system." },
 			{ "fn", "function", ScriptServiceArgType::None, true, "Called once per frame with dt in seconds." },
-			{ "phase", "string", ScriptServiceArgType::String, false, "Pipeline phase; defaults to \"Update\". The legacy (name, phase, fn) order is also accepted." },
+			{ "phase", "string|table", ScriptServiceArgType::String | ScriptServiceArgType::Table, false, "Pipeline phase name (PreFixed/Fixed/Update/Late/PreRender; defaults to \"Update\"), or an options table { phase = \"Late\", after = { \"OtherSystem\" } }. The legacy (name, phase, fn) order is also accepted." },
 		};
 		static const ScriptServiceParam removeSystemParams[] = {
 			{ "name", "string", ScriptServiceArgType::String, true, "System name previously passed to ecs:AddSystem." },
@@ -611,10 +861,10 @@ namespace World
 			{ "handle", "number", ScriptServiceArgType::Number, true, "Observer handle returned by ecs:OnAdd / ecs:OnRemove." },
 		};
 		static const ScriptServiceMethod methods[] = {
-			{ "Query", &QueryImpl, queryParams, 1, 1, "table",
-				"Build a query over the listed component types; the result has :Each(fn) and :Count()." },
+			{ "Query", &QueryImpl, queryParams, 2, 2, "table",
+				"Build a query over the listed component types, optionally excluding entities that carry the components named in options.without; the result has :Each(fn) and :Count()." },
 			{ "AddSystem", &AddSystemImpl, addSystemParams, 3, 3, "boolean",
-				"Register a named system on the active scene; idempotent (a repeated name replaces the previous system)." },
+				"Register a named system on the active scene at an optional pipeline phase with optional same-phase ordering dependencies (options table: phase, after); idempotent (a repeated name replaces the previous system)." },
 			{ "RemoveSystem", &RemoveSystemImpl, removeSystemParams, 1, 1, "boolean",
 				"Unregister a named system; false when no such system is registered." },
 			{ "CreateEntity", &CreateEntityImpl, createEntityParams, 1, 1, "Entity",

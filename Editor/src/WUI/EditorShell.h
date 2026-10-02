@@ -384,25 +384,52 @@ namespace World
 		// D10-15:DrawModals 里另外四个模态(unsaved/error/cooking/projectsettings)也走同一套
 		// BeginModalFrame + ModalButtons/ModalFooter,并由同一组 Begin/EndModalInputBlock 挡输入。
 		void RenderImportDestinationModal(Wui::WuiContext& ctx);
-		// ---- CPPT-6-ED-NEWSCRIPT:File ▸ New C++ Component… ----
-		// 菜单入口 → 名称模态(合法 C++ 标识符 + 不重名,行内错误)→ 写
-		// **当前项目** `<项目根>/src/Components/<Name>.h` 模板(PROJ-8/T1)→ 外部 Visual Studio
-		// 打开(帧边界;内置编辑器只服务 Lua/Luau)+ 状态栏提示"用 VS 构建这个项目,再重载
-		// C++ 模块";没有当前项目时不打开模态,直接给可读提示。操作日志与新建资产同口径。
+		// ---- CPPT-6-ED-NEWSCRIPT + PECS-T8:File ▸ New C++ …(组件 / 系统同一个向导)----
+		// 菜单/内容浏览器入口 → 类型(组件默认 / 系统)+ 名称模态(合法 C++ 标识符 + 不重名,行内错误)
+		// → 写**当前项目**模板:
+		//   * 组件 → `<项目根>/src/Components/<Name>.h`(PROJ-8/T1,模板与行为逐字节不变);
+		//   * 系统 → `<项目根>/src/Systems/<Name>.h`,并把配套的 include + Attach/Detach 登记
+		//     自动写进 `<项目根>/src/GameProject.cpp`(WriteFileAtomically 的纯文本工具;
+		//     幂等、认不出结构就一个字节都不写)。
+		// 之后外部 Visual Studio 打开(帧边界;内置编辑器只服务 Lua/Luau)+ 状态栏提示;
+		// 没有当前项目时不打开模态,直接给可读提示。操作日志与新建资产同口径。
 		void OpenNewCppScriptModal(Wui::WuiContext& ctx);
 		void DrawNewCppScriptModal(Wui::WuiContext& ctx);
 		// 名称校验:没有项目 / 空 / 非法标识符 / 目标已存在 → 可读原因;空串 = 通过。
 		std::string NewCppScriptNameError() const;
-		// 目标绝对路径:`<当前项目根>/src/Components/<Name>.h`(没有项目时为空路径的拼接)。
+		// 目标绝对路径:组件 = `<当前项目根>/src/Components/<Name>.h`,
+		// 系统 = `<当前项目根>/src/Systems/<Name>.h`(没有项目时为空路径的拼接)。
 		std::filesystem::path NewCppScriptTargetPath() const;
-		// 写模板 + (项目类型账本存在时)登记类型 + 外部 VS 打开 + 状态栏提示 + 操作日志;
-		// 失败写 m_NewCppScriptFailure 并返回 false。
+		// 当前类型是否是"系统"(组件 = false)。类型下标见 m_NewCppScriptKind。
+		bool NewCppScriptIsSystem() const;
+		// 写模板 + (组件且项目类型账本存在时)登记类型 + (系统时)登记 GameProject.cpp +
+		// 外部 VS 打开 + 状态栏提示 + 操作日志;失败写 m_NewCppScriptFailure 并返回 false。
 		bool CreateNewCppScript(Wui::WuiContext& ctx);
 		bool m_NewCppScriptOpen = false;
 		uint32_t m_NewCppScriptOpenedFrame = 0;
 		std::string m_NewCppScriptName;
+		int m_NewCppScriptKind = 0;              // 0 = 组件(默认,既有自动化行为不变),1 = 系统
 		std::string m_NewCppScriptFailure;      // 写盘失败原因(落点变化时清)
 		std::string m_NewCppScriptFailureFor;   // 上面的原因对应的落点(变了就作废)
+
+		// ---- PECS-T9:File ▸ New Lua System…(与 T8 那个 C++ 向导同源,但是**另一个**模态)----
+		// 为什么另开而不是复用:`modal.newscript` 的落点/模板/校验类型全都不同(这里是
+		// `<内容根>/scripts/systems/<Name>.luau` + Lua 文件名规则),复用会把两套状态搅在一起。
+		// 骨架与 T8 一致:名称输入 + 实时落点回显 + 行内错误 + Enter/Esc,创建后在脚本编辑器里打开。
+		void OpenNewLuaSystemModal(Wui::WuiContext& ctx);
+		void DrawNewLuaSystemModal(Wui::WuiContext& ctx);
+		// 名称校验:没有项目 / 没有内容根 / 空 / 非法文件名 / 目标已存在 → 可读原因;空串 = 通过。
+		std::string NewLuaSystemNameError() const;
+		// 目标绝对路径:`<内容根>/scripts/systems/<Name>.luau`。
+		std::filesystem::path NewLuaSystemTargetPath() const;
+		// 写模板(优先 <内容根>/scripts/templates/WorldScript.lua,缺失时内置骨架)+
+		// 脚本编辑器打开 + 状态栏提示 + 操作日志;失败写 m_NewLuaSystemFailure 并返回 false。
+		bool CreateNewLuaSystem(Wui::WuiContext& ctx);
+		bool m_NewLuaSystemOpen = false;
+		uint32_t m_NewLuaSystemOpenedFrame = 0;
+		std::string m_NewLuaSystemName;
+		std::string m_NewLuaSystemFailure;      // 写盘失败原因(落点变化时清)
+		std::string m_NewLuaSystemFailureFor;   // 上面的原因对应的落点(变了就作废)
 
 		// ---- PROJ-1/T1 + PROJ-7/T2:File ▸ New Project…(任意位置新建标准项目)----
 		// 菜单入口 → 模态(项目名 + 位置 + Browse… + **模板选择** + 实时落点 + 行内错误)→
