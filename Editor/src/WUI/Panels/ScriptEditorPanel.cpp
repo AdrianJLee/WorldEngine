@@ -387,7 +387,6 @@ namespace World
 		m_ExternalConflict = false;
 		SetStatus(Wui::Tr("panel.script.status.saved", "Saved ") + m_LogicalPath, false);
 		WLD_CORE_INFO("[script-editor] saved '{0}' ({1} bytes)", m_LogicalPath, m_Buffer.Text().size());
-		ReloadSceneInstances(host);
 	}
 
 	void ScriptEditorPanel::ApplyFormat()
@@ -435,52 +434,6 @@ namespace World
 		m_ExternalConflict = false;
 		SetStatus(Wui::Tr("panel.script.status.reloaded",
 			"Reloaded from disk (undo history reset)"), false);
-	}
-
-	void ScriptEditorPanel::ReloadSceneInstances(PanelHost& host)
-	{
-		if (host.IsReadOnlyMode())
-			return; // Play/Simulate 不触发
-		Ref<Scene> scene = host.GetActiveScene();
-		if (!scene)
-			return;
-		// 只读枚举必须走 const Scene::GetRegistry():Play/Simulate 下活动场景的非 const 入口会断言。
-		const Scene& sceneRef = *scene;
-		const entt::registry& registry = sceneRef.GetRegistry();
-		int matched = 0;
-		int failed = 0;
-		std::string lastError;
-		for (const entt::entity handle : registry.view<LuauScriptComponent>())
-		{
-			const LuauScriptComponent& script = registry.get<LuauScriptComponent>(handle);
-			if (script.ScriptPath.empty() || !SameLogicalPath(script.ScriptPath, m_LogicalPath))
-				continue;
-			++matched;
-			std::string message;
-			if (!host.ScriptsReloadInstance(handle, &message))
-			{
-				++failed;
-				lastError = message;
-			}
-		}
-		if (matched == 0)
-		{
-			SetStatus(Wui::Tr("panel.script.status.saved_no_instances", "Saved ") + m_LogicalPath
-				+ Wui::Tr("panel.script.status.no_instances_suffix",
-					" (the current scene has no instances using this script)"), false);
-			return;
-		}
-		if (failed > 0)
-		{
-			SetStatus(Wui::Tr("panel.script.status.saved_reload_failed", "Saved, but ")
-				+ std::to_string(failed) + "/" + std::to_string(matched)
-				+ Wui::Tr("panel.script.status.reload_failed_suffix", " instances failed to reload: ")
-				+ lastError, true);
-			return;
-		}
-		SetStatus(Wui::Tr("panel.script.status.saved_hot_reloaded", "Saved and hot-reloaded ")
-			+ std::to_string(matched)
-			+ Wui::Tr("panel.script.status.instances_suffix", " scene instance(s)"), false);
 	}
 
 	bool ScriptEditorPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)

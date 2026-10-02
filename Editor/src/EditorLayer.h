@@ -22,7 +22,6 @@
 namespace World
 {
 	// P2 W5b:脚本热重载只按引用操作组件(完整定义在 Scene/Components.h)。
-	struct LuauScriptComponent;
 	// PLUG-T3:插件管理器(定义在 World/Plugins/PluginManager.h;这里只前置声明 ——
 	// 析构在 .cpp 定义,unique_ptr 的删除器能看到完整类型)。
 	namespace Plugins { class PluginManager; }
@@ -218,8 +217,7 @@ namespace World
 		//     ScriptPath),交给 Scene 既有的 pending 机制在下一个安全点重新实例化 —— 也就是
 		//     "把脚本写坏 → 改好 → Reload 救回来";
 		//   - Creating/Destroying:拒绝(不打断生命周期)。
-		// scene 只用于把"编辑态场景不跑脚本"写进 message,可为 null。
-		static bool ReloadLuauScriptComponent(LuauScriptComponent& script, Scene* scene, std::string* message = nullptr);
+
 
 		// ---- P2 W8:Scripts 面板的宿主能力(EditorShell 作为 PanelHost 转发到这里)----
 		// 重载指定实体的脚本:组件查找走 Entity 的组件指针入口(Play/Simulate 下也不触发

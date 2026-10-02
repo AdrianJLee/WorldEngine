@@ -18,7 +18,6 @@ namespace World
 	{
 		// 行的动作按钮(Reload/Open 共用)与"底部状态行"的尺寸约定。
 		constexpr float kRowButtonHeight = 22.0f;
-		constexpr float kSceneRowHeight = 46.0f;
 		constexpr float kDiskRowHeight = 24.0f;
 		constexpr float kProjectRowHeight = 24.0f;
 		constexpr float kDiskHeaderHeight = 24.0f;
@@ -44,19 +43,7 @@ namespace World
 			return text.substr(0, cut) + "…";
 		}
 
-		const char* ScriptStateText(ScriptInstanceState state)
-		{
-			switch (state)
-			{
-				case ScriptInstanceState::Pending: return "Pending";
-				case ScriptInstanceState::Creating: return "Creating";
-				case ScriptInstanceState::Running: return "Running";
-				case ScriptInstanceState::Destroying: return "Destroying";
-				case ScriptInstanceState::Stopped: return "Stopped";
-				case ScriptInstanceState::Faulted: return "Faulted";
-				default: return "?";
-			}
-		}
+
 
 		// 登记一个"只读"的无障碍节点(行/状态行):AI 能读到,但 ui.invoke 不会去点它。
 		void RegisterReadonlyNode(Wui::WuiId id, const char* kind, const std::string& label,
@@ -264,71 +251,8 @@ namespace World
 			}
 		}
 		Wui::Label(ctx, { rect.X + 136.0f, y + 4.0f },
-			"scene + disk scripts; New copies templates/WorldScript.lua", theme.TextMuted, 12.0f);
+			"disk scripts; New copies templates/WorldScript.lua", theme.TextMuted, 12.0f);
 		y += 30.0f;
-
-		// ---- 场景脚本段 ----
-		struct SceneRow
-		{
-			entt::entity Handle {};
-			std::string Tag;
-			std::string Language;     // "Luau" / "C++"(CPPT-3:两个脚本组件都进表)
-			bool Luau = false;        // 只有 Luau 行支持实例热重载(C++ 走模块级 module.reload)
-			std::string Path;
-			std::string State;
-			std::string Diagnostic;
-		};
-		std::vector<SceneRow> sceneRows;
-		if (Ref<Scene> scene = host.GetActiveScene())
-		{
-			// 只读枚举必须走 const Scene::GetRegistry():Play/Simulate 下活动场景的非 const
-			// 入口会触发"结构写禁令"断言。
-			const Scene& sceneRef = *scene;
-			const entt::registry& registry = sceneRef.GetRegistry();
-			for (const entt::entity handle : registry.view<LuauScriptComponent>())
-			{
-				const LuauScriptComponent& script = registry.get<LuauScriptComponent>(handle);
-				SceneRow row;
-				row.Handle = handle;
-				row.Luau = true;
-				row.Language = "Luau";
-				if (const TagComponent* tag = registry.try_get<TagComponent>(handle))
-					row.Tag = tag->Tag;
-				if (row.Tag.empty())
-					row.Tag = "Entity " + std::to_string(static_cast<uint32_t>(handle));
-				row.Path = script.ScriptPath.empty() ? std::string("(no script path)") : script.ScriptPath;
-				// 2026-09-26 重写:运行态收进 `Runtime`(State/LastError),重载诊断仍在组件上。
-				row.State = ScriptStateText(script.Runtime.State);
-				row.Diagnostic = !script.ReloadDiagnostic.empty()
-					? script.ReloadDiagnostic : script.Runtime.LastError;
-				sceneRows.push_back(std::move(row));
-			}
-			// CPPT-3:C++ 脚本组件也进场景表(状态/类型名可读;实例重载不支持,提示走模块重载)。
-			for (const entt::entity handle : registry.view<CppScriptComponent>())
-			{
-				const CppScriptComponent& script = registry.get<CppScriptComponent>(handle);
-				SceneRow row;
-				row.Handle = handle;
-				row.Luau = false;
-				row.Language = "C++";
-				if (const TagComponent* tag = registry.try_get<TagComponent>(handle))
-					row.Tag = tag->Tag;
-				if (row.Tag.empty())
-					row.Tag = "Entity " + std::to_string(static_cast<uint32_t>(handle));
-				row.Path = script.ScriptName.empty() ? std::string("(no script type)") : script.ScriptName;
-				row.State = ScriptStateText(script.Runtime.State);
-				row.Diagnostic = script.Runtime.LastError;
-				sceneRows.push_back(std::move(row));
-			}
-			std::sort(sceneRows.begin(), sceneRows.end(),
-				[](const SceneRow& left, const SceneRow& right)
-				{
-					if (left.Tag != right.Tag)
-						return left.Tag < right.Tag;
-					// 同一实体同时挂 Luau + C++:Luau 行在前(与检视器的"两个组件各自一段"一致)。
-					return left.Luau && !right.Luau;
-				});
-		}
 
 		// ---- 底部状态行(也是无障碍节点,便于 AI 断言动作结果);空状态分支与正常分支共用 ----
 		const auto drawStatusLine = [&]()
@@ -341,7 +265,6 @@ namespace World
 		};
 
 		// ---- PROJ-8/T1:没有当前项目(启动器/未打开项目)时整页给一条可读提示 ----
-		// 场景脚本在启动器进程里也不存在(没挂载场景),三段都没有可展示的事实。
 		if (!m_HasProject)
 		{
 			const Wui::WuiRect emptyRect { rect.X + 8.0f, y, std::max(0.0f, rect.W - 16.0f),
@@ -355,10 +278,8 @@ namespace World
 			return;
 		}
 
-		// ---- U2d:场景、项目源码、磁盘脚本三者都空 → 统一空状态 ----
-		// 工具栏与底部状态行保持原样;有任一脚本/源码时下面三段按 PROJ-11 的
-		// "项目源码优先预留空间"预算绘制。
-		if (sceneRows.empty() && m_ProjectSources.empty() && m_DiskScripts.empty())
+		// ---- U2d:项目源码与磁盘脚本都空 → 统一空状态 ----
+		if (m_ProjectSources.empty() && m_DiskScripts.empty())
 		{
 			const Wui::WuiRect emptyRect { rect.X + 8.0f, y, std::max(0.0f, rect.W - 16.0f),
 				std::max(0.0f, rect.Y + rect.H - kStatusReserve - y - 8.0f) };
@@ -372,95 +293,7 @@ namespace World
 			return;
 		}
 
-		const std::string sceneHeader = "Scene Scripts (" + std::to_string(sceneRows.size()) + ")";
-
 		const float listBottom = rect.Y + rect.H - kStatusReserve;
-		const float listHeight = std::max(0.0f, listBottom - y);
-
-		// CPPSRC-1:项目源码段现在固定三件(段头 + 一行入口按钮 + 一行路径/空态说明),
-		// 不再按文件数预留行数 —— 文件列表本体在内容浏览器的「项目 C++」根里。
-		const bool projectExpanded = !m_ProjectSourcesCollapsed;
-		const float projectReserve = kSectionGap + kDiskHeaderHeight
-			+ (projectExpanded ? (kProjectRowHeight + 6.0f + 16.0f) : 0.0f);
-		const float diskReserve = kSectionGap + kDiskHeaderHeight
-			+ (m_DiskScripts.empty() ? 0.0f : kDiskRowHeight);
-		const float sceneLimit = std::min(listBottom,
-			std::max(y + 22.0f, listBottom - projectReserve - diskReserve));
-
-		Wui::SectionHeader(ctx, { rect.X + 8.0f, y, rect.W - 16.0f, 20.0f }, sceneHeader, theme.Accent, theme);
-		y += 22.0f;
-
-		// 场景段仍拿 40% 的偏好预算,但上限被 sceneLimit 夹住 —— 项目源码/磁盘段的
-		// 预留空间不会被它吃掉。逐行再按 sceneLimit 硬夹一次。
-		const float sceneBudget = std::min(listHeight * 0.40f, std::max(0.0f, sceneLimit - y));
-		const std::size_t maxSceneRows = std::max<std::size_t>(1,
-			static_cast<std::size_t>(sceneBudget / kSceneRowHeight));
-		const std::size_t visibleSceneRows = std::min(sceneRows.size(), maxSceneRows);
-		std::size_t drawnSceneRows = 0;
-		for (std::size_t index = 0; index < visibleSceneRows; ++index)
-		{
-			if (y + kSceneRowHeight > sceneLimit + 0.5f)
-				break;
-			const SceneRow& row = sceneRows[index];
-			const Wui::WuiRect rowRect { rect.X + 8.0f, y, rect.W - 16.0f, kSceneRowHeight - 4.0f };
-			Wui::PanelBackground(ctx, rowRect, theme.PanelHeader);
-
-			std::string detail = row.State;
-			if (!row.Diagnostic.empty())
-				detail += " | " + row.Diagnostic;
-			RegisterReadonlyNode(Wui::HashId(("scripts.scene." + std::to_string(index)).c_str()),
-				"list-item", row.Tag, detail, rowRect);
-
-			Wui::Label(ctx, { rowRect.X + 8.0f, rowRect.Y + 4.0f },
-				row.Tag + "  [" + row.Language + " · " + row.State + "]", theme.Text, 13.0f);
-			std::string line = row.Path;
-			if (!row.Diagnostic.empty())
-				line += "  -  " + row.Diagnostic;
-			Wui::Label(ctx, { rowRect.X + 8.0f, rowRect.Y + 23.0f },
-				TruncateUtf8(line, 92), theme.TextMuted, 12.0f);
-
-			const Wui::WuiRect reloadRect {
-				rowRect.X + rowRect.W - 72.0f, rowRect.Y + 6.0f, 66.0f, kRowButtonHeight };
-			if (row.Luau)
-			{
-				if (Wui::Button(ctx, Wui::HashId(("scripts.reload." + std::to_string(index)).c_str()),
-					reloadRect, "Reload", theme))
-				{
-					std::string message;
-					const bool ok = host.ScriptsReloadInstance(row.Handle, &message);
-					SetStatus("reload: " + (message.empty() ? (ok ? std::string("queued") : std::string("failed")) : message), !ok);
-				}
-			}
-			else
-			{
-				// C++ 实例重载不支持(代码在 Game.dll 里):给指路文案,不画一个按不动的假按钮。
-				Wui::Label(ctx, { rowRect.X + rowRect.W - 236.0f, rowRect.Y + 8.0f },
-					Wui::Tr("panel.scripts.cpp_module_hint",
-					"instance reload: not supported (use File ▶ Build & Reload C++ Module)"),
-					theme.TextMuted, 11.0f);
-			}
-			y += kSceneRowHeight;
-			++drawnSceneRows;
-		}
-		if (sceneRows.size() > drawnSceneRows)
-		{
-			if (y + 16.0f <= sceneLimit + 0.5f)
-			{
-				Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(sceneRows.size() - drawnSceneRows)
-					+ " more scene script(s); enlarge the window to see them", theme.TextMuted, 12.0f);
-				y += 16.0f;
-			}
-		}
-		if (sceneRows.empty())
-		{
-			if (y + 18.0f <= sceneLimit + 0.5f)
-			{
-				Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f },
-					Wui::Tr("panel.scripts.scene_empty", "current scene has no script components"),
-					theme.TextMuted, 12.0f);
-				y += 18.0f;
-			}
-		}
 
 		// ---- 项目源码段(PROJ-8/T1:当前项目 `<项目根>/src/**` 的 .h/.cpp;
 		// PROJ-11/T1:段头可折叠(默认展开)+ 有源码时保证 ≥3 行可见 + File ▸ 项目源码… 高亮)----

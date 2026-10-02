@@ -178,8 +178,7 @@ namespace World
 			if (message) *message = "prefab unpack is not wired to a host";
 			return false;
 		}
-		// 重载一个场景脚本实例。实现必须复用 EditorLayer::ReloadLuauScriptComponent ——
-		// 与属性面板 Reload 按钮、帧边界轮询、AI script.reload 同一条入口,面板不自己编排重载。
+		// 脚本实例重载占位(旧单实体脚本机制已废弃，保留接口兼容)。
 		virtual bool ScriptsReloadInstance(entt::entity handle, std::string* message = nullptr)
 		{
 			(void)handle;

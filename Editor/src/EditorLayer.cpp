@@ -3388,110 +3388,14 @@ namespace World
 		return result.IsValid() && !m_ActiveScene->IsPendingDestroy(result) ? result : Entity{};
 	}
 
-	// ---- P2 W5b:脚本热重载(编辑器侧接线)----
-
-	namespace
-	{
-		const char* ScriptStateText(ScriptInstanceState state)
-		{
-			switch (state)
-			{
-				case ScriptInstanceState::Pending: return "Pending";
-				case ScriptInstanceState::Creating: return "Creating";
-				case ScriptInstanceState::Running: return "Running";
-				case ScriptInstanceState::Destroying: return "Destroying";
-				case ScriptInstanceState::Stopped: return "Stopped";
-				case ScriptInstanceState::Faulted: return "Faulted";
-				default: return "?";
-			}
-		}
-	}
-
-	bool EditorLayer::ReloadLuauScriptComponent(LuauScriptComponent& script, Scene* scene, std::string* message)
-	{
-		auto report = [message](const std::string& text)
-		{
-			if (message)
-				*message = text;
-		};
-		if (script.ScriptPath.empty())
-		{
-			report("script path is empty");
-			return false;
-		}
-		if (script.Runtime.State == ScriptInstanceState::Creating
-			|| script.Runtime.State == ScriptInstanceState::Destroying)
-		{
-			report(std::string("script is ") + ScriptStateText(script.Runtime.State)
-				+ "; retry at a frame boundary");
-			return false;
-		}
-		// 2026-09-26 重写:旧的双轨加载标记已删除 —— "有活动实例"的等价口径就是 State==Running。
-		if (script.Runtime.State == ScriptInstanceState::Running)
-		{
-			// 有活动实例:走引擎热重载。失败保留旧版本继续跑(W5a 语义),原因写进组件诊断。
-			std::string diagnostics;
-			if (ScriptEngine::ReloadScript(script, &diagnostics))
-			{
-				report(diagnostics.empty() ? "reloaded" : ("reloaded with diagnostics: " + diagnostics));
-				return true;
-			}
-			report(script.ReloadDiagnostic.empty() ? "reload failed" : script.ReloadDiagnostic);
-			return false;
-		}
-		// 没有可重载的活动实例(Faulted / Stopped / Pending):复位 Pending,让 Scene 既有的
-		// pending 机制在下一个安全点重新实例化。保留 Properties 与 ScriptPath(属性值与脚本
-		// 身份),这样"脚本写坏 → 改好 → Reload"能把 Faulted 的实例救回来;运行态(含旧错误)
-		// 清干净,重新实例化时由引擎重填。
-		const ScriptInstanceState before = script.Runtime.State;
-		script.Runtime.State = ScriptInstanceState::Pending;
-		script.Runtime.LastError.clear();
-		const bool sceneRunning = scene && scene->IsRunning();
-		if (before == ScriptInstanceState::Faulted)
-			report("reset to Pending for rebuild");
-		else if (before == ScriptInstanceState::Pending)
-			report(sceneRunning
-				? "already pending; the scene will instantiate it on the next update"
-				: "queued for rebuild (scene is not playing; the script loads when you press Play)");
-		else
-			report("reset to Pending for rebuild");
-		return true;
-	}
-
 	// ---- P2 W8:Scripts 面板的宿主能力 ----
 
 	bool EditorLayer::ScriptsReloadInstance(entt::entity handle, std::string* message)
 	{
-		auto report = [message](const std::string& text)
-		{
-			if (message)
-				*message = text;
-		};
-		if (!m_ActiveScene)
-		{
-			report("no active scene");
-			return false;
-		}
-		if (m_ActiveScene->IsPendingDestroy(handle))
-		{
-			report("entity is pending destroy");
-			return false;
-		}
-		// Play/Simulate 下活动场景不能用非 const GetRegistry()(断言):与帧边界轮询一样,
-		// 走 Entity 的组件指针入口拿到可变组件。
-		Entity entity(m_ActiveScene.get(), handle);
-		auto* script = static_cast<LuauScriptComponent*>(
-			entity.GetComponent(entt::type_id<LuauScriptComponent>().hash()));
-		if (!script)
-		{
-			report("entity has no Lua script component");
-			return false;
-		}
-		const bool ok = ReloadLuauScriptComponent(*script, m_ActiveScene.get(), message);
-		WLD_CORE_INFO("[scripts-panel] reload script (handle={0}): {1} ({2})",
-			static_cast<uint32_t>(handle), ok ? "applied" : "rejected",
-			message ? *message : std::string());
-		return ok;
+		(void)handle;
+		if (message)
+			*message = "scene script instance reload is deprecated in pure ECS";
+		return false;
 	}
 
 	bool EditorLayer::ScriptsOpenExternal(const std::string& logicalPath, std::string* message)
@@ -3810,99 +3714,7 @@ namespace World
 
 	void EditorLayer::PollScriptHotReload(float deltaSeconds)
 	{
-		// 目标场景:编辑态轮询文档场景;Play/Simulate 轮询正在跑的那个场景。
-		Ref<Scene> target = (m_SceneState == SceneState::Edit)
-			? m_Document.GetScene()
-			: (m_RuntimeScene ? m_RuntimeScene : m_ActiveScene);
-		if (!target)
-		{
-			m_ScriptWatch.Clear();
-			m_WatchedScriptPaths.clear();
-			m_PendingScriptReloads.clear();
-			m_ScriptWatchScene = nullptr;
-			return;
-		}
-		if (m_ScriptWatchScene != target.get())
-		{
-			// 换场景(进入/退出 Play、开关文档)必须重建基线:旧场景的路径与未决变化不再适用。
-			m_ScriptWatch.Clear();
-			m_WatchedScriptPaths.clear();
-			m_PendingScriptReloads.clear();
-			m_ScriptWatchScene = target.get();
-		}
-
-		// 只读枚举必须走 const registry:Play/Simulate 下活动场景的非 const GetRegistry()
-		// 会触发"活动场景禁止结构写"断言。
-		const Scene& scene = *target;
-		const entt::registry& registry = scene.GetRegistry();
-		std::vector<std::string> paths;
-		for (const entt::entity handle : registry.view<LuauScriptComponent>())
-		{
-			if (scene.IsPendingDestroy(handle))
-				continue;
-			const auto& script = registry.get<LuauScriptComponent>(handle);
-			if (!script.ScriptPath.empty())
-				paths.push_back(script.ScriptPath);
-		}
-		std::sort(paths.begin(), paths.end());
-		paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
-
-		// 监听集合同步:新路径建立基线(首次登记不产生变化),已消失的路径解绑。
-		// Watch() 重复调用会重置基线,所以只对未登记的路径调用。
-		for (const std::string& path : paths)
-			if (std::find(m_WatchedScriptPaths.begin(), m_WatchedScriptPaths.end(), path) == m_WatchedScriptPaths.end())
-			{
-				m_ScriptWatch.Watch(path);
-				m_WatchedScriptPaths.push_back(path);
-			}
-		for (auto it = m_WatchedScriptPaths.begin(); it != m_WatchedScriptPaths.end();)
-		{
-			if (std::find(paths.begin(), paths.end(), *it) == paths.end())
-			{
-				m_ScriptWatch.Unwatch(*it);
-				it = m_WatchedScriptPaths.erase(it);
-			}
-			else
-				++it;
-		}
-
-		// 已确认的变化先进未决集合:安全点不满足时顺延到下一帧,不丢变化。
-		for (const std::string& changed : m_ScriptWatch.Poll(static_cast<double>(deltaSeconds)))
-			if (std::find(m_PendingScriptReloads.begin(), m_PendingScriptReloads.end(), changed) == m_PendingScriptReloads.end())
-				m_PendingScriptReloads.push_back(changed);
-		if (m_PendingScriptReloads.empty())
-			return;
-		if (!scene.CanApplyScriptReload())
-			return;   // 回调内/结构提交点内/停止流程中:下一帧再试
-
-		std::vector<std::string> pending;
-		pending.swap(m_PendingScriptReloads);
-		for (const std::string& path : pending)
-		{
-			bool matched = false;
-			for (const entt::entity handle : registry.view<LuauScriptComponent>())
-			{
-				if (scene.IsPendingDestroy(handle))
-					continue;
-				const auto& probe = registry.get<LuauScriptComponent>(handle);
-				if (probe.ScriptPath != path)
-					continue;
-				matched = true;
-				// 可变组件引用:运行中的场景不能用非 const GetRegistry()(断言),走 Entity 的
-				// 组件指针入口 —— 与属性面板读组件实例是同一条路径。
-				Entity entity(target.get(), handle);
-				auto* script = static_cast<LuauScriptComponent*>(
-					entity.GetComponent(entt::type_id<LuauScriptComponent>().hash()));
-				if (!script)
-					continue;
-				std::string message;
-				const bool ok = ReloadLuauScriptComponent(*script, target.get(), &message);
-				WLD_CORE_INFO("[hot-reload] {0} script '{1}' (handle={2}): {3}",
-					ok ? "applied" : "rejected", path, static_cast<uint32_t>(handle), message);
-			}
-			if (!matched)
-				WLD_CORE_INFO("[hot-reload] changed script '{0}' is no longer used by the current scene; dropped", path);
-		}
+		(void)deltaSeconds;
 	}
 
 	std::string EditorLayer::CurrentDocumentLogicalPath() const
