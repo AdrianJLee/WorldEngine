@@ -15,6 +15,7 @@
 #include "World/Scene/ISystem.h"
 #include "World/Scene/Query.h"
 #include "World/Scene/Scene.h"
+#include "World/Scene/TransformSystem.h"
 
 #include <string_view>
 
@@ -40,7 +41,7 @@ namespace World::Game
 }
 ```
 
-2. 在 `src/GameProject.cpp` 的 `AttachProjectSystems` 里挂上:
+2. 在 `src/GameProject.cpp` 顶部 `#include "Systems/MySystem.h"`,再在 `AttachProjectSystems` 里挂上:
 
 ```cpp
 void AttachProjectSystems(Scene& scene) { scene.RegisterSystem<MySystem>(); }
