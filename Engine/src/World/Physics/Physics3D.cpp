@@ -4,6 +4,7 @@
 #include "World/Core/Asset/WModelIO.h"
 #include "World/Core/PhysicsSettings.h"
 #include "World/Core/Log.h"
+#include "World/Physics/PhysicsEvents.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
 
@@ -41,9 +42,12 @@ namespace World
 {
 	namespace
 	{
-		// 单层过滤:所有 3D 物体在同一 object layer / broadphase layer,全部互相碰撞
-		// (分层碰撞按需再引入,不在 D6 范围)。
-		constexpr JPH::ObjectLayer kObjectLayer = 0;
+		// P5:per-body (Layer,Mask) 碰撞过滤。Jolt 的 ObjectLayerPairFilter 只拿得到 ObjectLayer
+		// 序号,所以按"(Layer,Mask) 唯一组合 ↔ ObjectLayer 序号"的注册表实现(见 Impl::RegisterPair):
+		//     ShouldCollide(a, b) = (MaskA & LayerB) != 0 && (MaskB & LayerA) != 0
+		// broadphase 层只做分片与命名(ObjectLayer % kBroadPhaseLayerCount);真正决定"能不能碰"
+		// 的永远是 ObjectLayerPairFilter,所以 ObjectVsBroadPhaseLayerFilter 必须保守(见下)。
+		constexpr JPH::uint kBroadPhaseLayerCount = 8;
 		constexpr JPH::uint kMaxBodies = 4096;
 		constexpr JPH::uint kMaxBodyPairs = 2048;
 		constexpr JPH::uint kMaxContactConstraints = 2048;
@@ -57,6 +61,13 @@ namespace World
 		std::string EntityLabel(entt::entity entity)
 		{
 			return std::to_string(static_cast<uint32_t>(entity));
+		}
+
+		// P5:实体句柄 ↔ Jolt 刚体 userData 的既有约定(body userData = 实体索引本体,不做 ±1 偏移;
+		// Jolt 用 uint64 userData,不存在 2D 侧 PackEntityUserData 那种 nullptr 歧义)。
+		entt::entity EntityFromBodyUserData(const JPH::Body& body)
+		{
+			return static_cast<entt::entity>(static_cast<uint32_t>(body.GetUserData()));
 		}
 
 		// Jolt 全局运行时(默认分配器 + Factory + 类型注册)按引用计数共享:
@@ -331,49 +342,98 @@ namespace World
 
 	struct Physics3DWorld::Impl
 	{
-		// 单层 broadphase / object layer 过滤(全部互相碰撞)。
+		// P5:(Layer,Mask) 唯一组合 ↔ ObjectLayer 序号。Jolt 的 filter 只看到序号,所以过滤语义
+		// 必须在"注册表 + filter"里自己实现(语义 = (MaskA & LayerB) != 0 && (MaskB & LayerA) != 0)。
+		struct PairEntry
+		{
+			uint32_t Layer;
+			uint32_t Mask;
+		};
+
+		// broadphase 层 = ObjectLayer % kBroadPhaseLayerCount:只为分片与调试命名,不承担过滤语义。
 		struct BroadPhaseLayerInterfaceImpl final : public JPH::BroadPhaseLayerInterface
 		{
-			JPH::uint GetNumBroadPhaseLayers() const override { return 1; }
-			JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer) const override { return JPH::BroadPhaseLayer(0); }
+			JPH::uint GetNumBroadPhaseLayers() const override { return kBroadPhaseLayerCount; }
+			JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer inObjectLayer) const override
+			{
+				return JPH::BroadPhaseLayer(static_cast<JPH::BroadPhaseLayer::Type>(inObjectLayer % kBroadPhaseLayerCount));
+			}
 		#if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
-			const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer) const override { return "Default"; }
+			const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer inBroadPhaseLayer) const override
+			{
+				static const char* const kNames[kBroadPhaseLayerCount] = {
+					"ObjectShard0", "ObjectShard1", "ObjectShard2", "ObjectShard3",
+					"ObjectShard4", "ObjectShard5", "ObjectShard6", "ObjectShard7",
+				};
+				const JPH::BroadPhaseLayer::Type index = static_cast<JPH::BroadPhaseLayer::Type>(inBroadPhaseLayer);
+				return index < kBroadPhaseLayerCount ? kNames[index] : "InvalidObjectShard";
+			}
 		#endif
 		};
 
+		// Jolt 的 FindCollidingPairs 只对"通过 ObjectVsBroadPhaseLayerFilter 的 broadphase 层"发起查询,
+		// 所以这里必须保守:只要该层里存在任一能跟 inObjectLayer 配对的注册组合就返回 true,
+		// 精确判定交给 ObjectLayerPairFilter —— 否则 (MaskA & LayerB) 允许但分片序号不同的配对会被漏掉。
 		struct ObjectVsBroadPhaseLayerFilterImpl final : public JPH::ObjectVsBroadPhaseLayerFilter
 		{
+			explicit ObjectVsBroadPhaseLayerFilterImpl(const std::vector<PairEntry>* entries) : m_Entries(entries) {}
+
+			bool ShouldCollide(JPH::ObjectLayer inObjectLayer, JPH::BroadPhaseLayer inBroadPhaseLayer) const override
+			{
+				if (inObjectLayer >= m_Entries->size()) return false;
+				const PairEntry& layer = (*m_Entries)[inObjectLayer];
+				const size_t shard = static_cast<size_t>(static_cast<JPH::BroadPhaseLayer::Type>(inBroadPhaseLayer));
+				for (size_t index = shard; index < m_Entries->size(); index += kBroadPhaseLayerCount)
+					if (((*m_Entries)[index].Mask & layer.Layer) != 0)
+						return true;
+				return false;
+			}
+
+			const std::vector<PairEntry>* m_Entries = nullptr;
 		};
 
+		// 精确语义:(MaskA & LayerB) != 0 && (MaskB & LayerA) != 0(与 2D Box2D 口径一致)。
 		struct ObjectLayerPairFilterImpl final : public JPH::ObjectLayerPairFilter
 		{
+			explicit ObjectLayerPairFilterImpl(const std::vector<PairEntry>* entries) : m_Entries(entries) {}
+
+			bool ShouldCollide(JPH::ObjectLayer inLayer1, JPH::ObjectLayer inLayer2) const override
+			{
+				if (inLayer1 >= m_Entries->size() || inLayer2 >= m_Entries->size()) return false;
+				const PairEntry& entry1 = (*m_Entries)[inLayer1];
+				const PairEntry& entry2 = (*m_Entries)[inLayer2];
+				return (entry1.Mask & entry2.Layer) != 0 && (entry2.Mask & entry1.Layer) != 0;
+			}
+
+			const std::vector<PairEntry>* m_Entries = nullptr;
 		};
 
-		// 接触监听:新增接触直接用 Body::GetUserData()(实体句柄);移除接触时 body 已被销毁/锁住,
-		// 按文档不能读 body,所以查本模块自己的 BodyID → 实体映射。
+		// 接触监听:Jolt 的三个回调(Added / Persisted / Removed)都接。
+		//  * Added/Persisted 能读 body 与流形 ⇒ 解析实体 + 几何量;
+		//  * Removed 只有 SubShapeIDPair(拿不到流形,且 Jolt 文档禁止读 body)⇒ 查本模块的
+		//    BodyID → 实体 与 BodyID → IsSensor 副本,几何量一律为零;
+		//  * 回调发生在 PhysicsSystem::Update 内部(不能改物理状态,也不能直接入场景队列),
+		//    所以只推进 pending 缓冲,Step 里 Update 返回后按序 flush(顺序确定 ⇒ 可复现)。
 		class ContactListenerImpl final : public JPH::ContactListener
 		{
 		public:
 			explicit ContactListenerImpl(Impl& impl) : m_Impl(impl) {}
 
-			void OnContactAdded(const JPH::Body& inBody1, const JPH::Body& inBody2, const JPH::ContactManifold&, JPH::ContactSettings&) override
+			void OnContactAdded(const JPH::Body& inBody1, const JPH::Body& inBody2,
+				const JPH::ContactManifold& inManifold, JPH::ContactSettings&) override
 			{
-				m_Impl.EmitContact(true,
-					static_cast<entt::entity>(static_cast<uint32_t>(inBody1.GetUserData())),
-					static_cast<entt::entity>(static_cast<uint32_t>(inBody2.GetUserData())));
+				m_Impl.PushContactEvent(inBody1, inBody2, inManifold, Physics::ContactPhase::Begin);
+			}
+
+			void OnContactPersisted(const JPH::Body& inBody1, const JPH::Body& inBody2,
+				const JPH::ContactManifold& inManifold, JPH::ContactSettings&) override
+			{
+				m_Impl.PushContactEvent(inBody1, inBody2, inManifold, Physics::ContactPhase::Persist);
 			}
 
 			void OnContactRemoved(const JPH::SubShapeIDPair& inSubShapePair) override
 			{
-				const auto find = [this](const JPH::BodyID& bodyId)
-				{
-					const auto it = m_Impl.m_BodyEntities.find(bodyId.GetIndexAndSequenceNumber());
-					return it == m_Impl.m_BodyEntities.end() ? entt::null : it->second;
-				};
-				const entt::entity entityA = find(inSubShapePair.GetBody1ID());
-				const entt::entity entityB = find(inSubShapePair.GetBody2ID());
-				if (entityA == entt::null || entityB == entt::null) return;
-				m_Impl.EmitContact(false, entityA, entityB);
+				m_Impl.PushContactEnd(inSubShapePair);
 			}
 
 		private:
@@ -412,9 +472,13 @@ namespace World
 					throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) + " shape creation failed: " +
 						std::string(shapeResult.GetError().c_str()));
 
+				// P5:per-body 过滤 —— (Layer,Mask) 唯一组合注册成 ObjectLayer;传感器是刚体级开关,
+				// 用 BodyCreationSettings::mIsSensor 一次性带上(不额外调 BodyInterface::SetIsSensor)。
 				JPH::BodyCreationSettings settings(shapeResult.Get(), ToJoltPosition(transform->Location),
-					ToJoltQuat(transform->RotationQuat), ToJoltMotionType(rigidBody.Type), kObjectLayer);
+					ToJoltQuat(transform->RotationQuat), ToJoltMotionType(rigidBody.Type),
+					RegisterPair(rigidBody.Layer, rigidBody.Mask));
 				settings.mUserData = static_cast<JPH::uint64>(static_cast<uint32_t>(entity));
+				settings.mIsSensor = rigidBody.IsSensor;
 				settings.mFriction = std::max(0.0f, rigidBody.Friction);
 				settings.mRestitution = std::max(0.0f, rigidBody.Restitution);
 				settings.mLinearDamping = std::max(0.0f, rigidBody.LinearDamping);
@@ -432,6 +496,7 @@ namespace World
 						" (out of bodies or invalid settings)");
 				m_Bodies.emplace(entity, bodyId);
 				m_BodyEntities.emplace(bodyId.GetIndexAndSequenceNumber(), entity);
+				m_BodySensors.emplace(bodyId.GetIndexAndSequenceNumber(), rigidBody.IsSensor);
 			}
 		}
 
@@ -446,6 +511,9 @@ namespace World
 			}
 			m_Bodies.clear();
 			m_BodyEntities.clear();
+			m_BodySensors.clear();
+			m_PendingContacts.clear();
+			m_PendingTriggers.clear();
 			m_Scene = nullptr;
 		}
 
@@ -454,7 +522,12 @@ namespace World
 			// 只读遍历必须走 const 重载:活动场景的非 const GetRegistry 会触发结构写断言。
 			const entt::registry& registry = static_cast<const Scene&>(*m_Scene).GetRegistry();
 			PushKinematicTransforms(registry);
+			// 上一次 Update 抛异常时可能留下半截事件;先清空,保证 flush 的永远是本次 Update 的事实。
+			m_PendingContacts.clear();
+			m_PendingTriggers.clear();
 			m_System.Update(deltaSeconds, /*inCollisionSteps=*/1, &m_TempAllocator, &m_JobSystem);
+			// 回调只推进 pending 缓冲;Update 返回后在这里按序 flush(= Jolt 回调顺序 ⇒ 可复现)。
+			FlushEvents();
 		}
 
 		void SyncTransforms(Scene& scene)
@@ -477,6 +550,7 @@ namespace World
 			JPH::BodyInterface& bodyInterface = m_System.GetBodyInterface();
 			if (bodyInterface.IsAdded(it->second)) bodyInterface.RemoveBody(it->second);
 			m_BodyEntities.erase(it->second.GetIndexAndSequenceNumber());
+			m_BodySensors.erase(it->second.GetIndexAndSequenceNumber());
 			bodyInterface.DestroyBody(it->second);
 			m_Bodies.erase(it);
 		}
@@ -527,9 +601,104 @@ namespace World
 			return true;
 		}
 
-		void EmitContact(bool added, entt::entity entityA, entt::entity entityB)
+		// P5:(Layer,Mask) 唯一组合 ↔ ObjectLayer 序号(组合键 = (layer << 32) | mask)。
+		// 注册表在 Impl 构造时就已存在(地址稳定);filter 持有它的指针,所以 PhysicsSystem::Init
+		// 之后新增的组合也照样被看到 —— Init 在 ctor 里,body 直到 Start 才逐个注册。
+		JPH::ObjectLayer RegisterPair(uint32_t layer, uint32_t mask)
 		{
-			m_Owner.EmitContact(added, entityA, entityB);
+			const uint64_t key = (static_cast<uint64_t>(layer) << 32) | static_cast<uint64_t>(mask);
+			const auto found = m_PairToObjectLayer.find(key);
+			if (found != m_PairToObjectLayer.end()) return found->second;
+			if (m_PairEntries.size() >= static_cast<size_t>(JPH::cObjectLayerInvalid))
+			{
+				// JPH_OBJECT_LAYER_BITS == 16 时 ObjectLayer 只有 65535 个;真实场景远达不到。
+				WLD_CORE_WARN("[Physics3D] more than 65535 distinct (Layer, Mask) pairs; falling back to object layer 0");
+				return 0;
+			}
+			const JPH::ObjectLayer objectLayer = static_cast<JPH::ObjectLayer>(m_PairEntries.size());
+			m_PairEntries.push_back(PairEntry { layer, mask });
+			m_PairToObjectLayer.emplace(key, objectLayer);
+			return objectLayer;
+		}
+
+		entt::entity FindEntity(const JPH::BodyID& bodyId) const
+		{
+			const auto it = m_BodyEntities.find(bodyId.GetIndexAndSequenceNumber());
+			return it == m_BodyEntities.end() ? entt::null : it->second;
+		}
+
+		bool IsSensorBody(const JPH::BodyID& bodyId) const
+		{
+			const auto it = m_BodySensors.find(bodyId.GetIndexAndSequenceNumber());
+			return it != m_BodySensors.end() && it->second;
+		}
+
+		// Jolt 接触回调只把事实推进 pending 缓冲(回调顺序 = 事件顺序);Step 里 Update 返回后 flush。
+		void PushContactEvent(const JPH::Body& inBody1, const JPH::Body& inBody2,
+			const JPH::ContactManifold& inManifold, Physics::ContactPhase phase)
+		{
+			const entt::entity entityA = EntityFromBodyUserData(inBody1);
+			const entt::entity entityB = EntityFromBodyUserData(inBody2);
+
+			// Jolt 的传感器是**刚体级**:任一刚体 IsSensor ⇒ 事实走 TriggerEvent(无碰撞响应)。
+			// 两个都是 sensor 时 SensorEntity 取 body1,保证同一配对下顺序确定。
+			if (inBody1.IsSensor() || inBody2.IsSensor())
+			{
+				Physics::TriggerEvent event;
+				event.SensorEntity = inBody1.IsSensor() ? entityA : entityB;
+				event.OtherEntity = inBody1.IsSensor() ? entityB : entityA;
+				event.Phase = phase;
+				m_PendingTriggers.push_back(event);
+				return;
+			}
+
+			Physics::ContactEvent event;
+			event.EntityA = entityA;
+			event.EntityB = entityB;
+			event.Phase = phase;
+			// Jolt 口径:ContactManifold::mWorldSpaceNormal = "direction to move body 2 out of
+			// collision" ⇒ 语义为 body1 → body2,与契约 A→B(A = body1)同向,直接照抄。
+			event.Normal = ToGlm(inManifold.mWorldSpaceNormal);
+			// 第一个接触点取 shape 1 表面(世界系;与 2D b2Manifold 的接触点口径对齐)。
+			if (!inManifold.mRelativeContactPointsOn1.empty())
+				event.Point = ToGlm(inManifold.GetWorldSpaceContactPointOn1(0));
+			// mPenetrationDepth 已是本流形全部接触点的最大值;负值 = 推测接触(speculative),不夹取。
+			event.PenetrationDepth = inManifold.mPenetrationDepth;
+			m_PendingContacts.push_back(event);
+		}
+
+		void PushContactEnd(const JPH::SubShapeIDPair& inSubShapePair)
+		{
+			const entt::entity entityA = FindEntity(inSubShapePair.GetBody1ID());
+			const entt::entity entityB = FindEntity(inSubShapePair.GetBody2ID());
+			if (entityA == entt::null || entityB == entt::null) return;
+
+			// OnContactRemoved 拿不到流形,且 Jolt 文档禁止在这里读 body ⇒ 用 Start 时存的
+			// BodyID → IsSensor 副本分流;几何量一律为零(契约:End 无几何)。
+			const bool sensorA = IsSensorBody(inSubShapePair.GetBody1ID());
+			if (sensorA || IsSensorBody(inSubShapePair.GetBody2ID()))
+			{
+				Physics::TriggerEvent event;
+				event.SensorEntity = sensorA ? entityA : entityB;
+				event.OtherEntity = sensorA ? entityB : entityA;
+				event.Phase = Physics::ContactPhase::End;
+				m_PendingTriggers.push_back(event);
+				return;
+			}
+
+			Physics::ContactEvent event;
+			event.EntityA = entityA;
+			event.EntityB = entityB;
+			event.Phase = Physics::ContactPhase::End;
+			m_PendingContacts.push_back(event);
+		}
+
+		void FlushEvents()
+		{
+			for (const Physics::ContactEvent& event : m_PendingContacts) m_Owner.EmitContactEvent(event);
+			for (const Physics::TriggerEvent& event : m_PendingTriggers) m_Owner.EmitTriggerEvent(event);
+			m_PendingContacts.clear();
+			m_PendingTriggers.clear();
 		}
 
 	private:
@@ -554,16 +723,22 @@ namespace World
 
 	public:
 		Physics3DWorld& m_Owner;
+		// P5 过滤注册表:必须在两个 filter 成员之前声明(filter 初始化时取它的地址)。
+		std::vector<PairEntry> m_PairEntries;
+		std::unordered_map<uint64_t, JPH::ObjectLayer> m_PairToObjectLayer;
 		JPH::PhysicsSystem m_System;
 		JPH::TempAllocatorImpl m_TempAllocator { kTempAllocatorBytes };
 		JPH::JobSystemSingleThreaded m_JobSystem { kMaxJobs };
 		BroadPhaseLayerInterfaceImpl m_BroadPhaseLayers;
-		ObjectVsBroadPhaseLayerFilterImpl m_ObjectVsBroadPhaseFilter;
-		ObjectLayerPairFilterImpl m_ObjectLayerPairFilter;
+		ObjectVsBroadPhaseLayerFilterImpl m_ObjectVsBroadPhaseFilter { &m_PairEntries };
+		ObjectLayerPairFilterImpl m_ObjectLayerPairFilter { &m_PairEntries };
 		ContactListenerImpl m_ContactListener { *this };
 		Scene* m_Scene = nullptr;
 		std::unordered_map<entt::entity, JPH::BodyID> m_Bodies;
 		std::unordered_map<uint32_t, entt::entity> m_BodyEntities;
+		std::unordered_map<uint32_t, bool> m_BodySensors;
+		std::vector<Physics::ContactEvent> m_PendingContacts;
+		std::vector<Physics::TriggerEvent> m_PendingTriggers;
 	};
 
 	Physics3DWorld::Physics3DWorld() = default;
@@ -707,17 +882,22 @@ namespace World
 		m_Impl->SyncTransforms(*m_Impl->m_Scene);
 	}
 
-	void Physics3DWorld::SetContactCallback(std::function<void(bool added, entt::entity entityA, entt::entity entityB)> callback)
+	void Physics3DWorld::SetContactCallback(std::function<void(const Physics::ContactEvent&)> callback)
 	{
 		m_ContactCallback = std::move(callback);
 	}
 
-	void Physics3DWorld::EmitContact(bool added, entt::entity entityA, entt::entity entityB) const
+	void Physics3DWorld::SetTriggerCallback(std::function<void(const Physics::TriggerEvent&)> callback)
+	{
+		m_TriggerCallback = std::move(callback);
+	}
+
+	void Physics3DWorld::EmitContactEvent(const Physics::ContactEvent& event) const
 	{
 		if (!m_ContactCallback) return;
 		try
 		{
-			m_ContactCallback(added, entityA, entityB);
+			m_ContactCallback(event);
 		}
 		catch (const std::exception& exception)
 		{
@@ -726,6 +906,23 @@ namespace World
 		catch (...)
 		{
 			WLD_CORE_ERROR("[Physics3D] contact callback failed: unknown exception");
+		}
+	}
+
+	void Physics3DWorld::EmitTriggerEvent(const Physics::TriggerEvent& event) const
+	{
+		if (!m_TriggerCallback) return;
+		try
+		{
+			m_TriggerCallback(event);
+		}
+		catch (const std::exception& exception)
+		{
+			WLD_CORE_ERROR("[Physics3D] trigger callback failed: {0}", exception.what());
+		}
+		catch (...)
+		{
+			WLD_CORE_ERROR("[Physics3D] trigger callback failed: unknown exception");
 		}
 	}
 

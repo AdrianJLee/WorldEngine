@@ -5,6 +5,7 @@
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/SystemRegistry.h"
+#include "World/Physics/PhysicsEvents.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/LuaType/LuaTypeHelpers.h"
@@ -690,6 +691,258 @@ namespace World
 		}
 
 		// -------------------------------------------------------------------------
+		// P5:物理事件(ecs:OnContact / ecs:OnTrigger)
+		//
+		// 物理事实由**固定步长阶段**产出到 Scene 的事件队列,可变阶段(Update/Late/PreRender)
+		// 每帧读一次(队列由 RunFixedFrameSystems / RunFrameSystems 每帧恰好清空一次)。
+		// 绑定层用**脚本层自己注册的帧系统** `lua-physics-events`(Late 阶段)做每帧派发 ——
+		// 不需要给 Scene.cpp 加钩子(与 ecs:AddSystem 同一条 RegisterFrameSystem 通道)。
+		//
+		// 生命周期与既有 ecs:OnAdd/OnRemove 观察者一致:订阅保存在脚本层,只有 ecs:Off
+		// 显式注销;系统脚本热重载是"整份重跑",重跑时再次订阅就会新增一条(与 OnAdd 同口径);
+		// VM Shutdown 后 ScriptFunctionRef 自动失效(IsValid()==false),不会访问已关闭的 registry。
+		//
+		// 句柄全局唯一且与 Scene 的组件观察者 id 用不相交区段(见 kPhysicsEventHandleBase),
+		// 所以单个 ecs:Off 能同时注销两类句柄且不会误伤。
+		constexpr const char* kPhysicsEventSystemName = "lua-physics-events";
+		constexpr std::uint64_t kPhysicsEventHandleBase = 1ull << 40;   // < 2^53,Lua number 可精确表示
+
+		struct PhysicsEventSubscription
+		{
+			std::uint64_t Id = 0;
+			bool Trigger = false;             // false = ContactEvent,true = TriggerEvent
+			ScriptFunctionRef Callback;
+		};
+
+		struct PhysicsEventDispatchState
+		{
+			// 只在帧系统存活期间被访问:State 由该场景的帧系统 lambda 以 shared_ptr 持有,
+			// 场景销毁 ⇒ 帧系统销毁 ⇒ State 释放,OwnerScene 不会悬垂。
+			Scene* OwnerScene = nullptr;
+			std::vector<PhysicsEventSubscription> Subscriptions;
+		};
+
+		std::vector<std::weak_ptr<PhysicsEventDispatchState>>& PhysicsEventStates()
+		{
+			static std::vector<std::weak_ptr<PhysicsEventDispatchState>> states;
+			return states;
+		}
+
+		std::uint64_t NextPhysicsEventHandle()
+		{
+			static std::uint64_t next = kPhysicsEventHandleBase;
+			return ++next;
+		}
+
+		const char* ContactPhaseToLua(Physics::ContactPhase phase)
+		{
+			switch (phase)
+			{
+				case Physics::ContactPhase::Begin: return "Begin";
+				case Physics::ContactPhase::Persist: return "Persist";
+				case Physics::ContactPhase::End: return "End";
+			}
+			return "Begin";
+		}
+
+		ScriptValue BoxEntityForScene(Scene& scene, entt::entity handle)
+		{
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			return NewUserdataOf(bindings, "Entity", Entity(&scene, handle));
+		}
+
+		ScriptValue BoxVector3(const glm::vec3& value)
+		{
+			ScriptTableRef table = ScriptEngine::GetState().CreateTable();
+			table.SetField("x", ScriptValue::Number(static_cast<double>(value.x)));
+			table.SetField("y", ScriptValue::Number(static_cast<double>(value.y)));
+			table.SetField("z", ScriptValue::Number(static_cast<double>(value.z)));
+			return table.ToValue();
+		}
+
+		void ReportPhysicsCallbackError(const char* api, const std::string& error)
+		{
+			if (Log::GetCoreLogger())
+				WLD_CORE_ERROR("[Luau ECS {}] callback error: {}", api, error);
+		}
+
+		// 单条事件的隔离派发:构造载荷 + 保护调用;失败只记录,不打断其它订阅者、不打断帧。
+		void DispatchContactToLua(const ScriptFunctionRef& callback, Scene& scene, const Physics::ContactEvent& event)
+		{
+			try
+			{
+				ScriptTableRef payload = ScriptEngine::GetState().CreateTable();
+				payload.SetField("a", BoxEntityForScene(scene, event.EntityA));
+				payload.SetField("b", BoxEntityForScene(scene, event.EntityB));
+				payload.SetField("phase", ScriptValue::String(ContactPhaseToLua(event.Phase)));
+				payload.SetField("point", BoxVector3(event.Point));
+				payload.SetField("normal", BoxVector3(event.Normal));
+				payload.SetField("depth", ScriptValue::Number(static_cast<double>(event.PenetrationDepth)));
+
+				const ScriptValue callArgs[] = { payload.ToValue() };
+				ScriptValue result;
+				std::string callError;
+				if (!callback.Call(callArgs, 1, &result, &callError))
+					ReportPhysicsCallbackError("OnContact", callError);
+			}
+			catch (const std::exception& error)
+			{
+				ReportPhysicsCallbackError("OnContact", error.what());
+			}
+			catch (...)
+			{
+				ReportPhysicsCallbackError("OnContact", "unknown exception");
+			}
+		}
+
+		void DispatchTriggerToLua(const ScriptFunctionRef& callback, Scene& scene, const Physics::TriggerEvent& event)
+		{
+			try
+			{
+				ScriptTableRef payload = ScriptEngine::GetState().CreateTable();
+				payload.SetField("sensor", BoxEntityForScene(scene, event.SensorEntity));
+				payload.SetField("other", BoxEntityForScene(scene, event.OtherEntity));
+				payload.SetField("phase", ScriptValue::String(ContactPhaseToLua(event.Phase)));
+
+				const ScriptValue callArgs[] = { payload.ToValue() };
+				ScriptValue result;
+				std::string callError;
+				if (!callback.Call(callArgs, 1, &result, &callError))
+					ReportPhysicsCallbackError("OnTrigger", callError);
+			}
+			catch (const std::exception& error)
+			{
+				ReportPhysicsCallbackError("OnTrigger", error.what());
+			}
+			catch (...)
+			{
+				ReportPhysicsCallbackError("OnTrigger", "unknown exception");
+			}
+		}
+
+		// 每帧一次(Late 阶段):按事件在队列里的顺序派发 —— 确定性来自"物理产出顺序"。
+		void DispatchPhysicsEventsToLua(Scene& scene, PhysicsEventDispatchState& state)
+		{
+			if (!ScriptEngine::IsInitialized())
+				return;
+			const std::vector<Physics::ContactEvent>& contacts = scene.GetContactEvents();
+			const std::vector<Physics::TriggerEvent>& triggers = scene.GetTriggerEvents();
+			if (state.Subscriptions.empty() || (contacts.empty() && triggers.empty()))
+				return;
+
+			// 快照:回调里再 OnContact/Off 不会破坏本次遍历(与 Scene::NotifyComponentAdded 同口径)。
+			struct Subscriber
+			{
+				ScriptFunctionRef Callback;
+				bool Trigger = false;
+			};
+			std::vector<Subscriber> subscribers;
+			subscribers.reserve(state.Subscriptions.size());
+			for (const PhysicsEventSubscription& subscription : state.Subscriptions)
+			{
+				if (!subscription.Callback.IsValid())
+					continue;
+				subscribers.push_back({ subscription.Callback, subscription.Trigger });
+			}
+
+			for (const Physics::ContactEvent& event : contacts)
+				for (const Subscriber& subscriber : subscribers)
+					if (!subscriber.Trigger)
+						DispatchContactToLua(subscriber.Callback, scene, event);
+
+			for (const Physics::TriggerEvent& event : triggers)
+				for (const Subscriber& subscriber : subscribers)
+					if (subscriber.Trigger)
+						DispatchTriggerToLua(subscriber.Callback, scene, event);
+		}
+
+		PhysicsEventDispatchState& EnsurePhysicsEventDispatch(Scene& scene)
+		{
+			std::vector<std::weak_ptr<PhysicsEventDispatchState>>& states = PhysicsEventStates();
+			for (auto it = states.begin(); it != states.end();)
+			{
+				std::shared_ptr<PhysicsEventDispatchState> live = it->lock();
+				if (!live)
+				{
+					it = states.erase(it);   // 场景已销毁:顺手清掉失效登记
+					continue;
+				}
+				if (live->OwnerScene == &scene)
+					return *live;
+				++it;
+			}
+
+			std::shared_ptr<PhysicsEventDispatchState> state = std::make_shared<PhysicsEventDispatchState>();
+			state->OwnerScene = &scene;
+			if (!scene.HasFrameSystem(kPhysicsEventSystemName))
+			{
+				Scene* target = &scene;
+				std::shared_ptr<PhysicsEventDispatchState> captured = state;
+				scene.RegisterFrameSystem({
+					kPhysicsEventSystemName,
+					false,
+					[target, captured](Timestep) { DispatchPhysicsEventsToLua(*target, *captured); },
+					Gameplay::SystemPhase::Late,
+					{}
+				});
+			}
+			states.push_back(state);
+			return *state;
+		}
+
+		bool RemovePhysicsEventSubscription(std::uint64_t handle)
+		{
+			if (handle < kPhysicsEventHandleBase)
+				return false;
+			for (const std::weak_ptr<PhysicsEventDispatchState>& weak : PhysicsEventStates())
+			{
+				std::shared_ptr<PhysicsEventDispatchState> state = weak.lock();
+				if (!state)
+					continue;
+				const auto found = std::remove_if(state->Subscriptions.begin(), state->Subscriptions.end(),
+					[handle](const PhysicsEventSubscription& subscription) { return subscription.Id == handle; });
+				if (found == state->Subscriptions.end())
+					continue;
+				state->Subscriptions.erase(found, state->Subscriptions.end());
+				return true;
+			}
+			return false;
+		}
+
+		ScriptValue SubscribePhysicsEventsImpl(const ScriptValue* args, std::size_t count, bool trigger, const char* api)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+				startIndex = 1;   // 冒号调用:args[0] 是 ecs/world 表(self)
+
+			if (count <= startIndex)
+				throw std::logic_error(std::string(api) + " expects (fn)");
+
+			ScriptFunctionRef fn;
+			if (!args[startIndex].AsFunction(&fn) || !fn.IsValid())
+				throw std::logic_error(std::string(api) + ": callback must be a valid function");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error(std::string(api) + " requires an active scene");
+
+			PhysicsEventDispatchState& state = EnsurePhysicsEventDispatch(*activeScene);
+			const std::uint64_t handle = NextPhysicsEventHandle();
+			state.Subscriptions.push_back({ handle, trigger, fn });
+			return ScriptValue::Number(static_cast<double>(handle));
+		}
+
+		ScriptValue OnContactImpl(const ScriptValue* args, std::size_t count)
+		{
+			return SubscribePhysicsEventsImpl(args, count, false, "ecs:OnContact");
+		}
+
+		ScriptValue OnTriggerImpl(const ScriptValue* args, std::size_t count)
+		{
+			return SubscribePhysicsEventsImpl(args, count, true, "ecs:OnTrigger");
+		}
+
+		// -------------------------------------------------------------------------
 		// ecs:OnAdd(componentName, fn) 实现
 		// -------------------------------------------------------------------------
 		ScriptValue OnAddImpl(const ScriptValue* args, std::size_t count)
@@ -821,8 +1074,13 @@ namespace World
 			if (!activeScene)
 				throw std::logic_error("ecs:Off requires an active scene");
 
-			const uint64_t observerId = static_cast<uint64_t>(handleNum);
-			activeScene->RemoveComponentObserver(observerId);
+			// P5:物理事件订阅句柄走独立区段(见 kPhysicsEventHandleBase);先查它,
+			// 命中就不再落回组件观察者。两个区段不相交,Off 不需要知道调用方来源。
+			const uint64_t handleId = static_cast<uint64_t>(handleNum);
+			if (RemovePhysicsEventSubscription(handleId))
+				return ScriptValue::Boolean(true);
+
+			activeScene->RemoveComponentObserver(handleId);
 			return ScriptValue::Boolean(true);
 		}
 
@@ -883,7 +1141,13 @@ namespace World
 			{ "fn", "function", ScriptServiceArgType::None, true, "Called with the entity whenever the component is removed." },
 		};
 		static const ScriptServiceParam offParams[] = {
-			{ "handle", "number", ScriptServiceArgType::Number, true, "Observer handle returned by ecs:OnAdd / ecs:OnRemove." },
+			{ "handle", "number", ScriptServiceArgType::Number, true, "Handle returned by ecs:OnAdd / ecs:OnRemove / ecs:OnContact / ecs:OnTrigger." },
+		};
+		static const ScriptServiceParam onContactParams[] = {
+			{ "fn", "function", ScriptServiceArgType::None, true, "Called once per contact event of the current frame with a table { a, b, phase, point, normal, depth }." },
+		};
+		static const ScriptServiceParam onTriggerParams[] = {
+			{ "fn", "function", ScriptServiceArgType::None, true, "Called once per sensor/trigger event of the current frame with a table { sensor, other, phase }." },
 		};
 		static const ScriptServiceParam requireLibParams[] = {
 			{ "name", "string", ScriptServiceArgType::String, true, "Library path relative to the content root's scripts/lib/, without extension and using '/' separators (e.g. \"util/math\"); .luau is preferred and .lua is the fallback." },
@@ -905,13 +1169,17 @@ namespace World
 				"Observe component additions; returns a handle for ecs:Off." },
 			{ "OnRemove", &OnRemoveImpl, onRemoveParams, 2, 2, "number",
 				"Observe component removals; returns a handle for ecs:Off." },
+			{ "OnContact", &OnContactImpl, onContactParams, 1, 1, "number",
+				"Subscribe to this frame's contact events; called once per event with { a, b, phase, point, normal, depth }. Events are produced in the fixed step and read once per frame, so call it from a variable-phase system; returns a handle for ecs:Off." },
+			{ "OnTrigger", &OnTriggerImpl, onTriggerParams, 1, 1, "number",
+				"Subscribe to this frame's sensor/trigger events; called once per event with { sensor, other, phase }; returns a handle for ecs:Off." },
 			{ "Off", &OffImpl, offParams, 1, 1, "boolean",
-				"Cancel an observer handle; false when the handle is unknown." },
+				"Cancel a handle from OnAdd / OnRemove / OnContact / OnTrigger; false when the handle is unknown." },
 			{ "RequireLib", &RequireLibImpl, requireLibParams, 1, 1, "any",
 				"Load a library module from <content root>/scripts/lib/ inside the same sandbox (no io/os/require/load); the module body runs once per path and the returned value is cached (content changes re-run it); rejects absolute paths, drive letters, '.'/'..' segments, backslashes and non-.luau/.lua names." },
 		};
 		static const ScriptServiceBinding tables[] = {
-			{ "ecs", "Read-only pure-ECS table (also exposed as \"world\"): queries, systems, entity lifecycle and component observers.",
+			{ "ecs", "Read-only pure-ECS table (also exposed as \"world\"): queries, systems, entity lifecycle, component observers and physics events.",
 				methods, sizeof(methods) / sizeof(methods[0]) },
 		};
 		if (count)

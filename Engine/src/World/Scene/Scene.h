@@ -4,6 +4,7 @@
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/PrefabTypes.h"
 #include "World/Renderer/EditorCamera.h"
+#include "World/Physics/PhysicsEvents.h"
 #include "World/Renderer/RenderExtract.h"
 #include "World/Scene/ISystem.h"
 #include "World/Scene/Query.h"
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -204,9 +206,17 @@ namespace World
 		// 未启动时返回 nullptr;编辑器调试绘制(WLD_PHYSICS_DEBUG)从这里取世界。
 		Physics3DWorld* GetPhysics3DWorld() { return m_Physics3D.get(); }
 		const Physics3DWorld* GetPhysics3DWorld() const { return m_Physics3D.get(); }
-		// 3D 接触事件的引擎侧钩子(脚本面 events:emit 接线留后续);回调里不得增删钩子表。
-		void AddPhysics3DContactCallback(std::function<void(bool added, entt::entity entityA, entt::entity entityB)> callback);
-		void ClearPhysics3DContactCallbacks();
+		// ---- P5:物理事实 = ECS 一等公民(场景事件队列) ----
+		// 产出:物理系统在**固定步长阶段**把后端(Box2D / Jolt)的事件翻译成下面两种事件;
+		// 消费:任意系统在可变阶段(Update / Late / PreRender)读 `GetContactEvents()` / `GetTriggerEvents()`。
+		// 清空:每帧恰好一次 —— 本帧首个固定步入口清空;若本帧没有固定步,则由可变阶段入口清空
+		//      (见 RunFixedFrameSystems / RunFrameSystems 的 m_FrameTimingsBegun 分支)。
+		// 契约:同一固定步输入 ⇒ 事件序列(类型/配对/阶段/顺序)**逐字节可复现**。
+		void EnqueueContactEvent(const Physics::ContactEvent& event);
+		void EnqueueTriggerEvent(const Physics::TriggerEvent& event);
+		const std::vector<Physics::ContactEvent>& GetContactEvents() const { return m_ContactEvents; }
+		const std::vector<Physics::TriggerEvent>& GetTriggerEvents() const { return m_TriggerEvents; }
+		void ClearPhysicsEvents();
 		// Physics3DWorld::SyncTransforms 的写口:只在位姿变化时写 TransformComponent
 		// (避免每帧标脏/打断层级);Static 由调用方过滤;PendingDestroy/PendingRemoval 跳过。
 		// 返回是否真的写了。
@@ -334,6 +344,8 @@ namespace World
 		bool m_RenderExtractDone = false;
 		// 一帧的耗时表由**先跑的那个阶段集合**清空(固定先于可变),帧末重置。见 RunFrameSystems。
 		bool m_FrameTimingsBegun = false;
+		// P5:本帧是否已有固定步跑过 —— 决定物理事件在[本帧第一个固定步]清空,还是由可变阶段入口清空。
+		bool m_PhysicsEventsBegun = false;
 		// 抽取缓冲与它的生产者。缓冲用 unique_ptr:FrameExtract 的完整定义在
 		// Renderer/FrameExtract.h,本头文件只前向声明(析构在 Scene.cpp 里定义)。
 		std::unique_ptr<FrameExtract> m_RenderExtract;
@@ -395,7 +407,12 @@ namespace World
 		b2WorldId m_PhysicsWorldId = b2_nullWorldId;
 		// P1b D6:opaque 3D 物理世界(Physics3D.h 不暴露 Jolt;unique_ptr 的删除由 Scene.cpp 承担)。
 		std::unique_ptr<Physics3DWorld> m_Physics3D;
-		std::vector<std::function<void(bool added, entt::entity entityA, entt::entity entityB)>> m_Physics3DContactCallbacks;
+		// P5:本帧的物理事件(固定步产出 → 可变阶段消费)。见 EnqueueContactEvent / ClearPhysicsEvents。
+		std::vector<Physics::ContactEvent> m_ContactEvents;
+		std::vector<Physics::TriggerEvent> m_TriggerEvents;
+		// P5:2D 传感器重叠的"仍然在重叠"集合(Box2D 不把传感器重叠当接触,b2Body_GetContactData
+		// 拿不到,所以 Persist 由场景自己维护)。键 = PackEntityPair(有序实体对);OnPhysics2DStop 清空。
+		std::set<std::uint64_t> m_SensorOverlaps2D;
 		// 上次反序列化时未能识别的组件节点（按实体 UUID 保存原始 YAML 片段），供保存时回写，避免缺插件静默丢数据。
 		std::unordered_map<UUID, std::string> m_UnknownComponentNodes;
 		// P4-U13b:prefab 实例注册表(随 `.wd` 的 Prefabs: 块读写)。

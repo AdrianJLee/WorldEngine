@@ -1643,6 +1643,26 @@ struct GeneratedAccess<World::RigidBody2DComponent>
         World::RigidBody2DComponent* self = static_cast<World::RigidBody2DComponent*>(instance);
         self->FixedRotation = std::get<bool>(value);
     }
+    static Value Get_Layer(const void* instance)
+    {
+        const World::RigidBody2DComponent* self = static_cast<const World::RigidBody2DComponent*>(instance);
+        return Value(self->Layer);
+    }
+    static void Set_Layer(void* instance, const Value& value)
+    {
+        World::RigidBody2DComponent* self = static_cast<World::RigidBody2DComponent*>(instance);
+        self->Layer = std::get<uint32_t>(value);
+    }
+    static Value Get_Mask(const void* instance)
+    {
+        const World::RigidBody2DComponent* self = static_cast<const World::RigidBody2DComponent*>(instance);
+        return Value(self->Mask);
+    }
+    static void Set_Mask(void* instance, const Value& value)
+    {
+        World::RigidBody2DComponent* self = static_cast<World::RigidBody2DComponent*>(instance);
+        self->Mask = std::get<uint32_t>(value);
+    }
     static const FieldSchema& Field_Type()
     {
         static const FieldSchema schema = {
@@ -1679,6 +1699,42 @@ struct GeneratedAccess<World::RigidBody2DComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_Layer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x87BEF134E2BF2C58ull },
+            "Layer",
+            Kind::UInt32,
+            &Get_Layer,
+            &Set_Layer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Collision category bits of this body. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Mask()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFE911F4439A81473ull },
+            "Mask",
+            Kind::UInt32,
+            &Get_Mask,
+            &Set_Mask,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Collision category bits this body accepts. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::RigidBody2DComponent>();
@@ -1695,6 +1751,8 @@ struct GeneratedAccess<World::RigidBody2DComponent>
             {
                 Field_Type(),
                 Field_FixedRotation(),
+                Field_Layer(),
+                Field_Mask(),
             },
             &StorageBindingOf(),
             "Physics/2D",
@@ -1767,6 +1825,16 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
     {
         World::BoxCollider2DComponent* self = static_cast<World::BoxCollider2DComponent*>(instance);
         self->ShowCollider = std::get<bool>(value);
+    }
+    static Value Get_IsSensor(const void* instance)
+    {
+        const World::BoxCollider2DComponent* self = static_cast<const World::BoxCollider2DComponent*>(instance);
+        return Value(self->IsSensor);
+    }
+    static void Set_IsSensor(void* instance, const Value& value)
+    {
+        World::BoxCollider2DComponent* self = static_cast<World::BoxCollider2DComponent*>(instance);
+        self->IsSensor = std::get<bool>(value);
     }
     static const FieldSchema& Field_Offset()
     {
@@ -1876,6 +1944,24 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_IsSensor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4F04E445ADB386AFull },
+            "IsSensor",
+            Kind::Bool,
+            &Get_IsSensor,
+            &Set_IsSensor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Sensor: report overlaps as trigger events but never block or bounce against other bodies.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::BoxCollider2DComponent>();
@@ -1896,6 +1982,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
                 Field_Friction(),
                 Field_Restitution(),
                 Field_ShowCollider(),
+                Field_IsSensor(),
             },
             &StorageBindingOf(),
             "Physics/2D",
@@ -1968,6 +2055,16 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
     {
         World::CircleCollider2DComponent* self = static_cast<World::CircleCollider2DComponent*>(instance);
         self->ShowCollider = std::get<bool>(value);
+    }
+    static Value Get_IsSensor(const void* instance)
+    {
+        const World::CircleCollider2DComponent* self = static_cast<const World::CircleCollider2DComponent*>(instance);
+        return Value(self->IsSensor);
+    }
+    static void Set_IsSensor(void* instance, const Value& value)
+    {
+        World::CircleCollider2DComponent* self = static_cast<World::CircleCollider2DComponent*>(instance);
+        self->IsSensor = std::get<bool>(value);
     }
     static const FieldSchema& Field_Offset()
     {
@@ -2077,6 +2174,24 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_IsSensor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE5966969386F482Cull },
+            "IsSensor",
+            Kind::Bool,
+            &Get_IsSensor,
+            &Set_IsSensor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Sensor: report overlaps as trigger events but never block or bounce against other bodies.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::CircleCollider2DComponent>();
@@ -2097,6 +2212,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
                 Field_Friction(),
                 Field_Restitution(),
                 Field_ShowCollider(),
+                Field_IsSensor(),
             },
             &StorageBindingOf(),
             "Physics/2D",
@@ -2183,6 +2299,36 @@ struct GeneratedAccess<World::RigidBody3DComponent>
     {
         World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
         self->UseGravity = std::get<bool>(value);
+    }
+    static Value Get_Layer(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->Layer);
+    }
+    static void Set_Layer(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->Layer = std::get<uint32_t>(value);
+    }
+    static Value Get_Mask(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->Mask);
+    }
+    static void Set_Mask(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->Mask = std::get<uint32_t>(value);
+    }
+    static Value Get_IsSensor(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->IsSensor);
+    }
+    static void Set_IsSensor(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->IsSensor = std::get<bool>(value);
     }
     static const FieldSchema& Field_Type()
     {
@@ -2310,6 +2456,60 @@ struct GeneratedAccess<World::RigidBody3DComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_Layer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x881CF555E46F845Full },
+            "Layer",
+            Kind::UInt32,
+            &Get_Layer,
+            &Set_Layer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Collision category bits of this body. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Mask()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1A5EEB338FB5083Aull },
+            "Mask",
+            Kind::UInt32,
+            &Get_Mask,
+            &Set_Mask,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Collision category bits this body accepts. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IsSensor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC9C438F47000A3E0ull },
+            "IsSensor",
+            Kind::Bool,
+            &Get_IsSensor,
+            &Set_IsSensor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Sensor: the whole body reports overlaps as trigger events but never blocks or bounces (Jolt sensors are body-wide).", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::RigidBody3DComponent>();
@@ -2331,6 +2531,9 @@ struct GeneratedAccess<World::RigidBody3DComponent>
                 Field_Friction(),
                 Field_Restitution(),
                 Field_UseGravity(),
+                Field_Layer(),
+                Field_Mask(),
+                Field_IsSensor(),
             },
             &StorageBindingOf(),
             "Physics/3D",

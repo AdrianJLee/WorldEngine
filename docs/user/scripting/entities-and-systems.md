@@ -109,6 +109,54 @@ end)
 | "每个实体不同的行为参数" | 参数放**组件字段**,系统读字段 |
 | 运行中"打开/关闭"某个行为 | 加/删那个标签组件(`AddComponent` / `RemoveComponent`) |
 
+## 物理事件:接触与触发器
+
+碰撞与传感器重叠也是"每帧一次的事实",用 `ecs:OnContact` / `ecs:OnTrigger` 订阅。
+**在固定步长阶段**,物理步进把本帧的接触/重叠写进场景队列;**在可变阶段**(Update /
+Late / PreRender),你的回调被逐条调用 —— 所以看到的是**本帧**的事件,与帧率无关。
+
+```lua
+-- <内容根>/scripts/systems/contact_fx.luau
+
+-- 接触:两个实体的碰撞(有碰撞响应)
+local contactHandle = ecs:OnContact(function(event)
+    -- event.a / event.b 是两个 Entity(与查询、OnAdd 给的实体同一种)
+    -- event.phase: "Begin" | "Persist" | "End"
+    -- event.point / event.normal: { x = …, y = …, z = … }
+    -- event.depth: 穿透深度(number)
+    if event.phase == "Begin" then
+        print("碰到一起:", event.a, event.b)
+    end
+end)
+
+-- 触发器:传感器重叠(只上报事实,不产生碰撞响应)
+local triggerHandle = ecs:OnTrigger(function(event)
+    -- event.sensor: 挂传感器的实体;event.other: 与它重叠的实体
+    print("trigger", event.sensor, event.other, event.phase)
+end)
+
+-- 不需要了就注销(和组件观察者共用同一个 ecs:Off)
+-- ecs:Off(contactHandle)
+-- ecs:Off(triggerHandle)
+```
+
+要点:
+
+- **每帧一次、在可变阶段读**:一帧里固定步可能跑 0..N 次,但事件队列**每帧恰好清空一次**,
+  回调拿到的永远是本帧产出的事件。系统脚本加载时注册即可,不用自己轮询。
+- **`phase` 三种值**:`"Begin"`(本帧开始接触/进入)、`"Persist"`(持续接触)、`"End"`(本帧分离)。
+  `"End"` 时几何量一律为零(`point = { x = 0, y = 0, z = 0 }`、`depth = 0`)。
+- **接触 ≠ 触发**:`OnContact` 收的是实体接触(会挡住彼此);`OnTrigger` 收的是**传感器**
+  (2D 在 BoxCollider2D / CircleCollider2D 上,3D 在 RigidBody3D 上)的重叠,不产生任何碰撞响应
+  —— 穿过就穿过了。
+- **2D 与 3D 的语义差异**:2D 的传感器是**逐 shape**,3D 的传感器是**逐刚体**(Jolt 原生模型);
+  `Begin` / `Persist` / `End` 两侧都提供。
+- **顺序与隔离**:同一帧按事件在队列里的顺序派发(确定性);某个回调报错只记一条日志,
+  不会打断其它订阅者,也不会打断帧。
+- **句柄生命周期**与 `ecs:OnAdd` / `ecs:OnRemove` 一致:只有 `ecs:Off(handle)` 显式注销。
+  系统脚本热重载是"整份重跑",重跑时再次注册就会多一条订阅(与 `OnAdd` 同一口径),
+  所以在脚本里注册一次就好,不要每帧重复注册。
+
 ## 系统自己的生命周期
 
 系统活在一次**运行时**内(编辑器 Play/Simulate、独立 Runtime 各一次):

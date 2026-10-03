@@ -105,12 +105,25 @@ namespace World
 			bodyDef.rotation = b2MakeRot(transform->Rotation.z);
 			bodyDef.motionLocks.angularZ = rb->FixedRotation;
 			rb->RuntimeBodyId = b2CreateBody(worldId, &bodyDef);
+			// P5:每个 shape 统一挂 (a) 碰撞过滤(Box2D b2Filter 口径,取自刚体的 Layer/Mask)、
+			// (b) 传感器开关、(c) 事件开关 —— Box2D 的 enableContactEvents / enableSensorEvents
+			// **默认是 false**,不显式打开就永远收不到任何事件;(d) 实体句柄(供事件反查)。
+			const auto PrepareShape = [&](b2ShapeDef& shapeDef, bool isSensor)
+			{
+				shapeDef.filter.categoryBits = rb->Layer;
+				shapeDef.filter.maskBits = rb->Mask;
+				shapeDef.isSensor = isSensor;
+				shapeDef.enableContactEvents = true;
+				shapeDef.enableSensorEvents = true;
+				shapeDef.userData = Physics::PackEntityUserData(entity);
+			};
 			if (const auto* box = registry.try_get<BoxCollider2DComponent>(entity))
 			{
 				b2ShapeDef shapeDef = b2DefaultShapeDef();
 				shapeDef.density = box->Density;
 				shapeDef.material.friction = box->Friction;
 				shapeDef.material.restitution = box->Restitution;
+				PrepareShape(shapeDef, box->IsSensor);
 				b2Polygon polygon = b2MakeOffsetBox(transform->Scale.x * box->Size.x, transform->Scale.y * box->Size.y,
 					{ box->Offset.x, box->Offset.y }, b2MakeRot(0.0f));
 				b2CreatePolygonShape(rb->RuntimeBodyId, &shapeDef, &polygon);
@@ -124,9 +137,162 @@ namespace World
 				shapeDef.density = circle->Density;
 				shapeDef.material.friction = circle->Friction;
 				shapeDef.material.restitution = circle->Restitution;
+				PrepareShape(shapeDef, circle->IsSensor);
 				b2CreateCircleShape(rb->RuntimeBodyId, &shapeDef, &shape);
 			}
 			return true;
+		}
+
+		// ---- P5:把 Box2D 的事实翻译成 ECS 事件 ----
+		//
+		// Box2D 原生只给 begin/end(b2World_GetContactEvents / b2World_GetSensorEvents),
+		// **没有 persist** —— 这里用"每步枚举当前接触、减去本步 begin"补齐,让 2D/3D 对外是
+		// 同一套 Begin/Persist/End 语义。
+		//
+		// 只做翻译,不做策略:事件顺序由 Box2D 的数组顺序 + registry 遍历顺序决定,
+		// 同一固定步输入下**确定**(可复现)。事件里的实体句柄来自 shape 的 userData,
+		// shape 已销毁(End 事件里可能出现)则跳过 —— 不做悬垂反查。
+		uint64_t PackEntityPair(entt::entity a, entt::entity b)
+		{
+			const uint32_t x = entt::to_integral(a);
+			const uint32_t y = entt::to_integral(b);
+			return (static_cast<uint64_t>(std::min(x, y)) << 32) | std::max(x, y);
+		}
+
+		entt::entity ResolveShapeEntity(b2ShapeId shape)
+		{
+			if (!b2Shape_IsValid(shape)) return entt::null;
+			return Physics::UnpackEntityUserData(b2Shape_GetUserData(shape));
+		}
+
+		// 从 b2ContactData 的流形里取"世界系法线 / 首个接触点 / 最大穿透深度"。
+		void FillContactGeometry(const b2Manifold& manifold, Physics::ContactEvent& event)
+		{
+			event.Normal = glm::vec3(manifold.normal.x, manifold.normal.y, 0.0f);
+			float deepest = 0.0f;
+			for (int point = 0; point < manifold.pointCount && point < 2; ++point)
+			{
+				const b2ManifoldPoint& manifoldPoint = manifold.points[point];
+				if (point == 0)
+					event.Point = glm::vec3(manifoldPoint.clipPoint.x, manifoldPoint.clipPoint.y, 0.0f);
+				deepest = std::max(deepest, -manifoldPoint.separation);
+			}
+			event.PenetrationDepth = std::max(0.0f, deepest);
+		}
+
+		void HarvestPhysics2DEvents(b2WorldId world, entt::registry& registry,
+			std::vector<Physics::ContactEvent>& outContacts, std::vector<Physics::TriggerEvent>& outTriggers,
+			std::set<uint64_t>& sensorOverlaps)
+		{
+			if (!b2World_IsValid(world)) return;
+
+			std::unordered_set<uint64_t> beganContacts;
+			std::unordered_set<uint64_t> beganTriggers;
+
+			const b2ContactEvents contactEvents = b2World_GetContactEvents(world);
+			for (int index = 0; index < contactEvents.beginCount; ++index)
+			{
+				const b2ContactBeginTouchEvent& source = contactEvents.beginEvents[index];
+				// 传感器接触由 sensor 事件通道负责,避免同一事实报两遍。
+				if (b2Shape_IsSensor(source.shapeIdA) || b2Shape_IsSensor(source.shapeIdB)) continue;
+				const entt::entity entityA = ResolveShapeEntity(source.shapeIdA);
+				const entt::entity entityB = ResolveShapeEntity(source.shapeIdB);
+				if (entityA == entt::null || entityB == entt::null) continue;
+				Physics::ContactEvent event;
+				event.EntityA = entityA;
+				event.EntityB = entityB;
+				event.Phase = Physics::ContactPhase::Begin;
+				if (b2Contact_IsValid(source.contactId))
+					FillContactGeometry(b2Contact_GetData(source.contactId).manifold, event);
+				beganContacts.insert(PackEntityPair(entityA, entityB));
+				outContacts.push_back(event);
+			}
+			for (int index = 0; index < contactEvents.endCount; ++index)
+			{
+				const b2ContactEndTouchEvent& source = contactEvents.endEvents[index];
+				const entt::entity entityA = ResolveShapeEntity(source.shapeIdA);
+				const entt::entity entityB = ResolveShapeEntity(source.shapeIdB);
+				if (entityA == entt::null || entityB == entt::null) continue;
+				Physics::ContactEvent event;
+				event.EntityA = entityA;
+				event.EntityB = entityB;
+				event.Phase = Physics::ContactPhase::End;   // 流形此时已不可靠 ⇒ 几何量保持为零
+				outContacts.push_back(event);
+			}
+
+			const b2SensorEvents sensorEvents = b2World_GetSensorEvents(world);
+			for (int index = 0; index < sensorEvents.beginCount; ++index)
+			{
+				const b2SensorBeginTouchEvent& source = sensorEvents.beginEvents[index];
+				const entt::entity sensor = ResolveShapeEntity(source.sensorShapeId);
+				const entt::entity visitor = ResolveShapeEntity(source.visitorShapeId);
+				if (sensor == entt::null || visitor == entt::null) continue;
+				Physics::TriggerEvent event;
+				event.SensorEntity = sensor;
+				event.OtherEntity = visitor;
+				event.Phase = Physics::ContactPhase::Begin;
+				const uint64_t beginKey = PackEntityPair(sensor, visitor);
+				beganTriggers.insert(beginKey);
+				sensorOverlaps.insert(beginKey);   // Persist 的事实源:仍在重叠的配对
+				outTriggers.push_back(event);
+			}
+			for (int index = 0; index < sensorEvents.endCount; ++index)
+			{
+				const b2SensorEndTouchEvent& source = sensorEvents.endEvents[index];
+				const entt::entity sensor = ResolveShapeEntity(source.sensorShapeId);
+				const entt::entity visitor = ResolveShapeEntity(source.visitorShapeId);
+				if (sensor == entt::null || visitor == entt::null) continue;
+				Physics::TriggerEvent event;
+				event.SensorEntity = sensor;
+				event.OtherEntity = visitor;
+				event.Phase = Physics::ContactPhase::End;
+				sensorOverlaps.erase(PackEntityPair(sensor, visitor));
+				outTriggers.push_back(event);
+			}
+
+			// Persist(传感器):Box2D **不把传感器重叠算作接触** —— b2Body_GetContactData 枚举不到,
+			// 所以这里用场景自己维护的"仍在重叠"集合补齐。顺序取有序集合 ⇒ 同一固定步输入下确定。
+			for (const uint64_t key : sensorOverlaps)
+			{
+				if (beganTriggers.count(key)) continue;   // 本步刚 Begin 的,不重复报 Persist
+				const entt::entity sensor = static_cast<entt::entity>(key >> 32);
+				const entt::entity visitor = static_cast<entt::entity>(key & 0xFFFFFFFFu);
+				Physics::TriggerEvent event;
+				event.SensorEntity = sensor;
+				event.OtherEntity = visitor;
+				event.Phase = Physics::ContactPhase::Persist;
+				outTriggers.push_back(event);
+			}
+
+			// Persist:本步仍在接触、但不是本步 Begin 的配对。两个刚体都会枚举到同一条接触 ⇒ 去重。
+			std::unordered_set<uint64_t> persistedContacts;
+			for (const entt::entity entity : registry.view<RigidBody2DComponent>())
+			{
+				const RigidBody2DComponent& rigidBody = registry.get<RigidBody2DComponent>(entity);
+				if (!b2Body_IsValid(rigidBody.RuntimeBodyId)) continue;
+				const int capacity = b2Body_GetContactCapacity(rigidBody.RuntimeBodyId);
+				if (capacity <= 0) continue;
+				std::vector<b2ContactData> contacts(static_cast<std::size_t>(capacity));
+				const int count = b2Body_GetContactData(rigidBody.RuntimeBodyId, contacts.data(), capacity);
+				for (int index = 0; index < count; ++index)
+				{
+					const b2ContactData& data = contacts[index];
+					const entt::entity entityA = ResolveShapeEntity(data.shapeIdA);
+					const entt::entity entityB = ResolveShapeEntity(data.shapeIdB);
+					if (entityA == entt::null || entityB == entt::null) continue;
+					const bool sensorA = b2Shape_IsValid(data.shapeIdA) && b2Shape_IsSensor(data.shapeIdA);
+					const bool sensorB = b2Shape_IsValid(data.shapeIdB) && b2Shape_IsSensor(data.shapeIdB);
+					if (sensorA || sensorB) continue;   // 传感器重叠不在这里(见上面 sensorOverlaps 通道)
+					const uint64_t key = PackEntityPair(entityA, entityB);
+					if (beganContacts.count(key) || !persistedContacts.insert(key).second) continue;
+					Physics::ContactEvent event;
+					event.EntityA = entityA;
+					event.EntityB = entityB;
+					event.Phase = Physics::ContactPhase::Persist;
+					FillContactGeometry(data.manifold, event);
+					outContacts.push_back(event);
+				}
+			}
 		}
 
 	}
@@ -277,8 +443,15 @@ namespace World
 			m_FrameSystemTimings.clear();
 			m_FrameTimingsBegun = true;
 		}
+		// P5:本帧一个固定步都没跑 ⇒ 本帧不可能有新物理事件,把上一帧的清掉(读到的永远是"本帧的")。
+		if (!m_PhysicsEventsBegun)
+			ClearPhysicsEvents();
 		if (!m_FrameSystems)
+		{
+			m_FrameTimingsBegun = false;
+			m_PhysicsEventsBegun = false;
 			return;
+		}
 
 		s_InsideFramePipeline = true;
 		struct PipelineScopeGuard
@@ -297,6 +470,25 @@ namespace World
 				m_FrameSystemTimings.push_back({ timing.Name, timing.ParallelSafe, timing.Milliseconds });
 		}
 		m_FrameTimingsBegun = false;   // 本帧结束:下一帧重新开始收集
+		m_PhysicsEventsBegun = false;  // 本帧结束:下一帧的固定步重新清空物理事件
+	}
+
+	// ---- P5:物理事实 → ECS 事件队列 ----
+	// 产出在固定步长阶段(物理系统),消费在可变阶段(任意系统)。见 Scene.h 的契约说明。
+	void Scene::EnqueueContactEvent(const Physics::ContactEvent& event)
+	{
+		m_ContactEvents.push_back(event);
+	}
+
+	void Scene::EnqueueTriggerEvent(const Physics::TriggerEvent& event)
+	{
+		m_TriggerEvents.push_back(event);
+	}
+
+	void Scene::ClearPhysicsEvents()
+	{
+		m_ContactEvents.clear();
+		m_TriggerEvents.clear();
 	}
 
 	// ---- 固定步长阶段(工业口径)----
@@ -309,6 +501,12 @@ namespace World
 		{
 			m_FrameSystemTimings.clear();
 			m_FrameTimingsBegun = true;
+		}
+		// P5:本帧的第一个固定步 ⇒ 物理事件从这里开始累积(一帧 0..N 步只清一次)。
+		if (!m_PhysicsEventsBegun)
+		{
+			ClearPhysicsEvents();
+			m_PhysicsEventsBegun = true;
 		}
 		if (!m_FrameSystems)
 			return;
@@ -1018,6 +1216,9 @@ namespace World
 	{
 		if (!b2World_IsValid(m_PhysicsWorldId)) return;
 		b2World_Step(m_PhysicsWorldId, ts.GetSeconds(), 4);
+		// P5:步进结束后立刻把 Box2D 的 begin/end/persist 翻译进场景事件队列
+		// (队列在"本帧第一个固定步"清空,由 RunFixedFrameSystems 负责)。
+		HarvestPhysics2DEvents(m_PhysicsWorldId, m_Registry, m_ContactEvents, m_TriggerEvents, m_SensorOverlaps2D);
 		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 		{
 			if (IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<RigidBody2DComponent>().hash())) continue;
@@ -1038,24 +1239,12 @@ namespace World
 	{
 		if (b2World_IsValid(m_PhysicsWorldId)) b2DestroyWorld(m_PhysicsWorldId);
 		m_PhysicsWorldId = b2_nullWorldId;
+		m_SensorOverlaps2D.clear();   // 世界没了,重叠状态不能跨运行存活
 		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 			m_Registry.get<RigidBody2DComponent>(entity).RuntimeBodyId = b2_nullBodyId;
 	}
 
 	// ---- P1b D6:3D 物理(Jolt) ----
-	void Scene::AddPhysics3DContactCallback(std::function<void(bool added, entt::entity entityA, entt::entity entityB)> callback)
-	{
-		AssertOwnerThread();
-		if (!callback) throw std::invalid_argument("Physics3D contact callback must be callable");
-		m_Physics3DContactCallbacks.push_back(std::move(callback));
-	}
-
-	void Scene::ClearPhysics3DContactCallbacks()
-	{
-		AssertOwnerThread();
-		m_Physics3DContactCallbacks.clear();
-	}
-
 	bool Scene::SyncPhysics3DTransform(entt::entity entity, const glm::vec3& location, const glm::quat& rotation)
 	{
 		AssertOwnerThread();
@@ -1079,18 +1268,10 @@ namespace World
 	{
 		if (m_Physics3D) return;
 		auto world = std::make_unique<Physics3DWorld>();
-		// 引擎侧钩子表:物理步进里的回调只做转发,钩子抛异常不能带走物理步进。
-		world->SetContactCallback([this](bool added, entt::entity entityA, entt::entity entityB)
-		{
-			for (std::size_t index = 0; index < m_Physics3DContactCallbacks.size(); ++index)
-			{
-				const auto& hook = m_Physics3DContactCallbacks[index];
-				if (!hook) continue;
-				try { hook(added, entityA, entityB); }
-				catch (const std::exception& error) { Report(std::string("[Physics3D] contact hook failed: ") + error.what()); }
-				catch (...) { Report("[Physics3D] contact hook failed: unknown exception"); }
-			}
-		});
+		// P5:物理步进里的回调只做"翻译进事件队列"这一件事 —— 事件在固定步长阶段产出、
+		// 由可变阶段的系统读取。队列操作本身不回调用户代码,所以不会把异常带进物理步进。
+		world->SetContactCallback([this](const Physics::ContactEvent& event) { EnqueueContactEvent(event); });
+		world->SetTriggerCallback([this](const Physics::TriggerEvent& event) { EnqueueTriggerEvent(event); });
 		world->Start(*this);
 		m_Physics3D = std::move(world);
 	}

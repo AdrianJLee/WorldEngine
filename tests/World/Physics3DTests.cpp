@@ -9,6 +9,7 @@
 #include "World/Core/Asset/WModelIO.h"
 #include "World/Core/WorldContext.h"
 #include "World/Physics/Physics3D.h"
+#include "World/Physics/PhysicsEvents.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
@@ -332,51 +333,59 @@ namespace
 		const entt::entity fallerHandle = faller;
 
 		Physics3DWorld world;
-		int added = 0;
-		int removed = 0;
+		int began = 0;
+		int persisted = 0;
+		int ended = 0;
 		bool pairMatched = false;
-		world.SetContactCallback([&](bool isAdded, entt::entity entityA, entt::entity entityB)
+		world.SetContactCallback([&](const Physics::ContactEvent& event)
 		{
-			if (isAdded)
+			switch (event.Phase)
 			{
-				++added;
-				if ((entityA == groundHandle && entityB == fallerHandle) || (entityA == fallerHandle && entityB == groundHandle))
-					pairMatched = true;
+				case Physics::ContactPhase::Begin: ++began; break;
+				case Physics::ContactPhase::Persist: ++persisted; break;
+				case Physics::ContactPhase::End: ++ended; break;
 			}
-			else
-			{
-				++removed;
-			}
+			if (event.Phase == Physics::ContactPhase::Begin &&
+				((event.EntityA == groundHandle && event.EntityB == fallerHandle) ||
+				 (event.EntityA == fallerHandle && event.EntityB == groundHandle)))
+				pairMatched = true;
 		});
 		world.Start(*scene);
 		StepWorld(world, 150);
-		std::printf("[info] contact: added=%d removed=%d pairMatched=%d\n", added, removed, pairMatched ? 1 : 0);
-		CHECK(added >= 1);
+		std::printf("[info] contact: begin=%d persist=%d end=%d pairMatched=%d\n", began, persisted, ended, pairMatched ? 1 : 0);
+		CHECK(began >= 1);
+		CHECK(persisted >= 1);
 		CHECK(pairMatched);
 		world.Stop();
 
-		// Scene 转发:同一布局走 Scene::AddPhysics3DContactCallback + OnScriptUpdate。
+		// P5:场景侧 —— 物理事实直接进场景事件队列,可变阶段可读(不再有裸回调表)。
 		Ref<Scene> hooked = CreateTestScene();
 		Entity groundHook = AddBox(*hooked, "Ground", { 0.0f, -0.5f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 5.0f, 0.5f, 5.0f });
 		Entity fallerHook = AddBox(*hooked, "Faller", { 0.0f, 2.0f, 0.0f }, RigidBody3DComponent::MotionType::Dynamic, { 0.5f, 0.5f, 0.5f });
 		const entt::entity groundHookHandle = groundHook;
 		const entt::entity fallerHookHandle = fallerHook;
-		int hookEvents = 0;
-		bool hookPairMatched = false;
-		hooked->AddPhysics3DContactCallback([&](bool isAdded, entt::entity entityA, entt::entity entityB)
-		{
-			if (!isAdded) return;
-			++hookEvents;
-			if ((entityA == groundHookHandle && entityB == fallerHookHandle) || (entityA == fallerHookHandle && entityB == groundHookHandle))
-				hookPairMatched = true;
-		});
 		hooked->OnRuntimeStart();
+		int sceneBegan = 0;
+		int scenePersisted = 0;
+		bool scenePairMatched = false;
 		for (int frame = 0; frame < 150; ++frame)
-			hooked->OnFixedUpdate(Timestep(kFixedStep));   // 同上:物理走固定步长回调
+		{
+			hooked->OnFixedUpdate(Timestep(kFixedStep));   // 物理走固定步长回调
+			for (const Physics::ContactEvent& event : hooked->GetContactEvents())
+			{
+				if (event.Phase == Physics::ContactPhase::Begin) ++sceneBegan;
+				if (event.Phase == Physics::ContactPhase::Persist) ++scenePersisted;
+				if (event.Phase == Physics::ContactPhase::Begin &&
+					((event.EntityA == groundHookHandle && event.EntityB == fallerHookHandle) ||
+					 (event.EntityA == fallerHookHandle && event.EntityB == groundHookHandle)))
+					scenePairMatched = true;
+			}
+		}
 		hooked->OnRuntimeStop();
-		std::printf("[info] scene hook events=%d pairMatched=%d\n", hookEvents, hookPairMatched ? 1 : 0);
-		CHECK(hookEvents >= 1);
-		CHECK(hookPairMatched);
+		std::printf("[info] scene events: begin=%d persist=%d pairMatched=%d\n", sceneBegan, scenePersisted, scenePairMatched ? 1 : 0);
+		CHECK(sceneBegan >= 1);
+		CHECK(scenePersisted >= 1);
+		CHECK(scenePairMatched);
 		CHECK(!hooked->IsPhysics3DRunning());
 	}
 
@@ -575,7 +584,7 @@ int main()
 			{ "kinematic body follows TransformComponent", KinematicFollowsTransform },
 			{ "convex hull from .wmodel + StaticTriangles requires static", ConvexHullFromWModel },
 			{ "2D and 3D physics coexist without interference", Physics2DAnd3DCoexist },
-			{ "contact callback fires on landing (world + Scene hook)", ContactCallbackFiresOnLanding },
+			{ "contact events fire on landing (world callback + Scene queue)", ContactCallbackFiresOnLanding },
 			{ "CollectDebugLines covers box/sphere/capsule", DebugLinesCoverAllColliders },
 			{ "2D+3D on one entity is rejected at runtime", DualPhysicsOnSameEntityIsRejected },
 		};

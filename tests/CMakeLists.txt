@@ -635,6 +635,27 @@ set_tests_properties(World.Physics3D PROPERTIES
     TIMEOUT 120
 )
 
+# P5:物理 ↔ ECS 事件与过滤(2D Box2D / 3D Jolt 两侧:接触/触发/层掩码/确定性)。
+add_executable(WorldPhysicsEventsTests World/PhysicsEventsTests.cpp)
+target_link_libraries(WorldPhysicsEventsTests PRIVATE World)
+target_compile_features(WorldPhysicsEventsTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldPhysicsEventsTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldPhysicsEventsTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldPhysicsEventsTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.PhysicsEvents COMMAND WorldPhysicsEventsTests)
+set_tests_properties(World.PhysicsEvents PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
+
 # P2a W7:输入映射资产 + InputService(动作/轴/多玩家/边沿判定)。
 add_executable(WorldInputTests World/InputTests.cpp)
 target_link_libraries(WorldInputTests PRIVATE World)

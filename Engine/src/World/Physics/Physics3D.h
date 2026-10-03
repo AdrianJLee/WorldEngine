@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Physics/PhysicsEvents.h"
 
 #include <entt.hpp>
 #include <glm/glm.hpp>
@@ -26,6 +27,9 @@ namespace World
 	//
 	// 边界与约定:
 	//  - pimpl:Jolt 头文件**只**出现在 Physics3D.cpp;本头与 Scene.h 都不 include Jolt;
+	//  - P5 事件/过滤:接触/触发事件按固定步产出、Step 返回后按序 flush(不在 Jolt 回调里直接入队);
+	//    PhysicsEvents.h(不含 Jolt)是本模块唯一新增的物理头;per-body (Layer,Mask) 过滤在 .cpp 内
+	//    映射成 Jolt ObjectLayer;传感器是刚体级开关。
 	//  - 单线程 job system(不引引擎 JobSystem 依赖);所有入口必须在场景 owner 线程调用;
 	//  - 世界只在 Start(Scene&) → Stop() 之间存在;未启动时 Step/SyncTransforms/CollectDebugLines
 	//    抛可读 std::logic_error(与 2D 物理"不静默"约定一致);
@@ -67,9 +71,17 @@ namespace World
 		// (避免每帧标脏/打断层级);Static 不写。
 		void SyncTransforms();
 
-		// 接触事件:added=true → OnContactAdded,added=false → OnContactRemoved;
-		// 参数是实体句柄(Jolt 的 body1/body2 顺序,body1 ID 更小)。可在 Start 前设置。
-		void SetContactCallback(std::function<void(bool added, entt::entity entityA, entt::entity entityB)> callback);
+		// ---- P5:物理事实回调(Step 内部按序 flush;不在 Jolt 接触回调里直接调用) ----
+		// 实体接触事件(非传感器)。参数已解析成实体句柄:
+		//   EntityA/EntityB = Jolt 的 body1/body2(该配对在 Jolt 侧保证 body1 ID < body2 ID),
+		//   Normal 指向 A → B(与 Jolt ContactManifold::mWorldSpaceNormal 同向),
+		//   Point = 第一个接触点的世界坐标,PenetrationDepth = 本流形最大值;
+		//   End 阶段(OnContactRemoved)拿不到流形 ⇒ Point/Normal 为零、PenetrationDepth = 0。
+		// 可在 Start 前设置;回调抛出的异常被捕获并记日志(不会破坏 Step)。
+		void SetContactCallback(std::function<void(const Physics::ContactEvent&)> callback);
+		// 传感器/触发器事件(刚体 RigidBody3DComponent::IsSensor)。Jolt 对 sensor 同样回调接触监听器,
+		// 这里按 IsSensor 分流;两个刚体都是 sensor 时 SensorEntity 取 body1(顺序确定)。可在 Start 前设置。
+		void SetTriggerCallback(std::function<void(const Physics::TriggerEvent&)> callback);
 
 		// 调试绘制(世界空间线段):box = 12 棱;sphere = 3 圆;capsule = 2 圆 + 4 条侧线;
 		// MeshCollider3D 不产线(凸包/三角网格线框不在 D6 范围)。outLines 会被清空。
@@ -86,9 +98,11 @@ namespace World
 		struct Impl;
 
 		void RequireStarted(const char* operation) const;
-		void EmitContact(bool added, entt::entity entityA, entt::entity entityB) const;
+		void EmitContactEvent(const Physics::ContactEvent& event) const;
+		void EmitTriggerEvent(const Physics::TriggerEvent& event) const;
 
 		std::unique_ptr<Impl> m_Impl;
-		std::function<void(bool added, entt::entity entityA, entt::entity entityB)> m_ContactCallback;
+		std::function<void(const Physics::ContactEvent&)> m_ContactCallback;
+		std::function<void(const Physics::TriggerEvent&)> m_TriggerCallback;
 	};
 }

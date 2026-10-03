@@ -49,7 +49,8 @@ end, "Update")
 | `ecs:DestroyEntity(entity)` | 排队销毁(下一个安全点提交) |
 | `ecs:EntityCount()` | 当前存活实体数 |
 | `ecs:OnAdd(comp, fn)` / `ecs:OnRemove(comp, fn)` | 观察组件增删,返回句柄 |
-| `ecs:Off(handle)` | 取消观察者 |
+| `ecs:OnContact(fn)` / `ecs:OnTrigger(fn)` | 订阅本帧的接触 / 传感器事件(可变阶段每帧一次),返回句柄;见[物理事件](entities-and-systems.md#物理事件接触与触发器) |
+| `ecs:Off(handle)` | 取消观察者或物理事件订阅 |
 | `ecs:RequireLib("util/math")` | 装载 `scripts/lib/` 下的库(同路径只执行一次;沙箱不放开 `io`/`os`/`require`) |
 
 `:Each` 的回调签名是 `(entity, 组件代理...)`,组件代理按 `Query` 里列出的组件顺序传入,

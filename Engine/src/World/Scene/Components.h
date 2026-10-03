@@ -357,6 +357,10 @@ namespace World
 		BodyType Type = BodyType::Static;
 		b2BodyId RuntimeBodyId = b2_nullBodyId;
 		bool FixedRotation = false;
+		// P5 碰撞过滤(Box2D b2Filter 口径):Layer = 本体的类别位,Mask = 允许与本体碰撞的类别位。
+		// 两个形变体必须**互相**通过 (LayerA & MaskB) && (LayerB & MaskA) 才会产生接触/事件。
+		std::uint32_t Layer = 1u;
+		std::uint32_t Mask = 0xFFFFFFFFu;
 
 		WE_SCHEMA_BODY(World, RigidBody2DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/2D"),
@@ -365,6 +369,10 @@ namespace World
 				Doc("Static never moves, Dynamic is driven by forces/gravity, Kinematic moves only through code."));
 			WE_FIELD(FixedRotation, Bool,
 				Doc("Lock the angular degree of freedom so collisions cannot rotate the body."));
+			WE_FIELD(Layer, UInt32,
+				Doc("Collision category bits of this body. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero."));
+			WE_FIELD(Mask, UInt32,
+				Doc("Collision category bits this body accepts. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero."));
 		WE_SCHEMA_END
 	};
 
@@ -376,6 +384,8 @@ namespace World
 		float Friction = 0.5f;
 		float Restitution = 0.2f;
 		bool ShowCollider = true;
+		// P5:传感器 = 只发 TriggerEvent、不产生碰撞响应(Box2D 逐 shape 的 isSensor)。
+		bool IsSensor = false;
 
 		WE_SCHEMA_BODY(World, BoxCollider2DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/2D"),
@@ -392,6 +402,8 @@ namespace World
 				Doc("Bounciness: 0 = no bounce, 1 = perfectly elastic."));
 			WE_FIELD(ShowCollider, Bool,
 				Doc("Draw the Box2D debug outline for this collider while simulating."));
+			WE_FIELD(IsSensor, Bool,
+				Doc("Sensor: report overlaps as trigger events but never block or bounce against other bodies."));
 		WE_SCHEMA_END
 	};
 
@@ -403,6 +415,8 @@ namespace World
 		float Friction = 0.5f;
 		float Restitution = 0.2f;
 		bool ShowCollider = true;
+		// P5:传感器 = 只发 TriggerEvent、不产生碰撞响应(Box2D 逐 shape 的 isSensor)。
+		bool IsSensor = false;
 
 		WE_SCHEMA_BODY(World, CircleCollider2DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/2D"),
@@ -419,6 +433,8 @@ namespace World
 				Doc("Bounciness: 0 = no bounce, 1 = perfectly elastic."));
 			WE_FIELD(ShowCollider, Bool,
 				Doc("Draw the Box2D debug outline for this collider while simulating."));
+			WE_FIELD(IsSensor, Bool,
+				Doc("Sensor: report overlaps as trigger events but never block or bounce against other bodies."));
 		WE_SCHEMA_END
 	};
 
@@ -448,6 +464,13 @@ namespace World
 		float Friction = 0.5f;
 		float Restitution = 0.2f;
 		bool UseGravity = true;
+		// P5 碰撞过滤(Jolt ObjectLayer 口径):Layer = 本体的类别位,Mask = 允许与本体碰撞的类别位。
+		// 两个刚体必须**互相**通过 (LayerA & MaskB) && (LayerB & MaskA) 才会产生接触/事件。
+		std::uint32_t Layer = 1u;
+		std::uint32_t Mask = 0xFFFFFFFFu;
+		// P5 传感器:Jolt 的传感器是**刚体级**(整刚体只发 TriggerEvent、不产生碰撞响应)。
+		// 与 2D 的"逐 shape"语义不同 —— 见 docs/dev/scripting-architecture.md。
+		bool IsSensor = false;
 
 		WE_SCHEMA_BODY(World, RigidBody3DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/3D"),
@@ -466,6 +489,12 @@ namespace World
 				Doc("Bounciness: 0 = no bounce, 1 = perfectly elastic."));
 			WE_FIELD(UseGravity, Bool, Id(0x5242334447525654),
 				Doc("Apply the scene gravity to this body (see Project Settings ▶ Physics)."));
+			WE_FIELD(Layer, UInt32,
+				Doc("Collision category bits of this body. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero."));
+			WE_FIELD(Mask, UInt32,
+				Doc("Collision category bits this body accepts. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero."));
+			WE_FIELD(IsSensor, Bool,
+				Doc("Sensor: the whole body reports overlaps as trigger events but never blocks or bounces (Jolt sensors are body-wide)."));
 		WE_SCHEMA_END
 	};
 

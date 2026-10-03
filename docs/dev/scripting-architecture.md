@@ -138,9 +138,21 @@ Play/Simulate 走帧系统,**编辑态不跑帧系统**,由渲染前兜底跑同
 | `ecs:DestroyEntity(entity)` | 排队销毁（安全点提交） |
 | `ecs:EntityCount()` | 存活实体数 |
 | `ecs:OnAdd(comp, fn)` / `ecs:OnRemove(comp, fn)` / `ecs:Off(handle)` | 响应式组件观察者 |
+| `ecs:OnContact(fn)` / `ecs:OnTrigger(fn)` | 本帧接触 / 传感器事件(载荷为表,见下);返回句柄,同样交给 `ecs:Off` |
 
 表的**唯一描述源**在 `Engine/src/World/Script/BindECS.h` 的 `ScriptEcsBindings()`;
 运行时注册循环与 Lua 存根渲染共用它,两侧不会漂移。
+
+**物理事件(Lua 面)**:`Scene::GetContactEvents()` / `GetTriggerEvents()` 是"固定步产出、
+每帧恰好清空一次"的队列(`RunFixedFrameSystems` / `RunFrameSystems`)。绑定层在脚本侧注册
+帧系统 `lua-physics-events`(**Late** 阶段)做每帧派发 —— 不给 `Scene.cpp` 加钩子
+(与 `ecs:AddSystem` 同一条 `Scene::RegisterFrameSystem` 通道)。回调载荷:接触
+`{ a, b, phase, point = {x,y,z}, normal = {x,y,z}, depth }`,触发 `{ sensor, other, phase }`;
+实体用与 `ecs` 面一致的 **Entity userdata**。同一帧按事件在队列里的顺序派发(确定性),
+单个回调报错只记日志、不打断其它订阅者。**2D 与 3D 的语义差异**:2D 的传感器是**逐 shape**
+(`BoxCollider2D` / `CircleCollider2D`),3D 的传感器是**逐刚体**(Jolt 原生模型);
+`Begin` / `Persist` / `End` 两侧都提供。句柄生命周期与组件观察者一致:只有 `ecs:Off` 显式
+注销,系统脚本热重载是整份重跑(再次订阅即多一条,与 `OnAdd` 同口径)。
 
 ### 需要"每个实体一段逻辑"时
 

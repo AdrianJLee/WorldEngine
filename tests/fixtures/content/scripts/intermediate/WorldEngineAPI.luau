@@ -414,7 +414,7 @@ function timers:every(seconds, fn, count) end
 function timers:cancel(handle) end
 
 -- Global service table 'ecs': read-only; there is no runtime constructor.
----Read-only pure-ECS table (also exposed as "world"): queries, systems, entity lifecycle and component observers.
+---Read-only pure-ECS table (also exposed as "world"): queries, systems, entity lifecycle, component observers and physics events.
 ---@class ecs
 ecs = {}
 
@@ -462,8 +462,18 @@ function ecs:OnAdd(component, fn) end
 ---@return number
 function ecs:OnRemove(component, fn) end
 
----Cancel an observer handle; false when the handle is unknown.
----@param handle number Observer handle returned by ecs:OnAdd / ecs:OnRemove.
+---Subscribe to this frame's contact events; called once per event with { a, b, phase, point, normal, depth }. Events are produced in the fixed step and read once per frame, so call it from a variable-phase system; returns a handle for ecs:Off.
+---@param fn function Called once per contact event of the current frame with a table { a, b, phase, point, normal, depth }.
+---@return number
+function ecs:OnContact(fn) end
+
+---Subscribe to this frame's sensor/trigger events; called once per event with { sensor, other, phase }; returns a handle for ecs:Off.
+---@param fn function Called once per sensor/trigger event of the current frame with a table { sensor, other, phase }.
+---@return number
+function ecs:OnTrigger(fn) end
+
+---Cancel a handle from OnAdd / OnRemove / OnContact / OnTrigger; false when the handle is unknown.
+---@param handle number Handle returned by ecs:OnAdd / ecs:OnRemove / ecs:OnContact / ecs:OnTrigger.
 ---@return boolean
 function ecs:Off(handle) end
 
@@ -591,6 +601,7 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@class BoxCollider2DComponent
 ---@field Friction number
 ---@field ShowCollider boolean
+---@field IsSensor boolean
 ---@field Density number
 ---@field Size vec2
 ---@field Offset vec2
@@ -620,6 +631,7 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Friction number
 ---@field Offset vec2
 ---@field Density number
+---@field IsSensor boolean
 ---@field ShowCollider boolean
 
 -- Component fields are exposed through Entity:GetComponent("CircleRendererComponent"); there is no runtime global named CircleRendererComponent.
@@ -662,10 +674,13 @@ function ui:columns(x, y, w, h, count, gap) end
 -- Component fields are exposed through Entity:GetComponent("RigidBody2DComponent"); there is no runtime global named RigidBody2DComponent.
 ---@class RigidBody2DComponent
 ---@field FixedRotation boolean
+---@field Layer number
 ---@field Type number
+---@field Mask number
 
 -- Component fields are exposed through Entity:GetComponent("RigidBody3DComponent"); there is no runtime global named RigidBody3DComponent.
 ---@class RigidBody3DComponent
+---@field Mask number
 ---@field AngularDamping number
 ---@field Friction number
 ---@field UseGravity boolean
@@ -673,6 +688,8 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Mass number
 ---@field Restitution number
 ---@field Type number
+---@field Layer number
+---@field IsSensor boolean
 
 -- Component fields are exposed through Entity:GetComponent("SampleDataComponent"); there is no runtime global named SampleDataComponent.
 ---@class SampleDataComponent

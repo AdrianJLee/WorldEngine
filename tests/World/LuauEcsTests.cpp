@@ -863,6 +863,100 @@ int main()
 			)", "TestRequireLibFailureNotCachedAfter");
 		}
 
+		// =====================================================================
+		// P5:物理事件进 Lua 面 —— ecs:OnContact / ecs:OnTrigger / ecs:Off
+		//   场景由 C++ 搭(C++ 才是建组件的地方),Lua 只订阅;事件在固定步产出、
+		//   由脚本层帧系统在 Late 阶段派发。
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			Entity ground = scene.CreateEntityShell("Ground");
+			ground.AddComponent<TransformComponent>(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f));
+			RigidBody2DComponent& groundBody = ground.AddComponent<RigidBody2DComponent>();
+			groundBody.Type = RigidBody2DComponent::BodyType::Static;
+			BoxCollider2DComponent& groundCollider = ground.AddComponent<BoxCollider2DComponent>();
+			groundCollider.Size = { 2.0f, 0.5f };
+			groundCollider.Restitution = 0.0f;
+
+			Entity sensor = scene.CreateEntityShell("Sensor");
+			sensor.AddComponent<TransformComponent>(glm::vec3(0.0f, 1.5f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f));
+			RigidBody2DComponent& sensorBody = sensor.AddComponent<RigidBody2DComponent>();
+			sensorBody.Type = RigidBody2DComponent::BodyType::Static;
+			BoxCollider2DComponent& sensorCollider = sensor.AddComponent<BoxCollider2DComponent>();
+			sensorCollider.Size = { 1.0f, 0.1f };
+			sensorCollider.IsSensor = true;
+
+			Entity faller = scene.CreateEntityShell("Faller");
+			faller.AddComponent<TransformComponent>(glm::vec3(0.0f, 3.0f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f));
+			RigidBody2DComponent& fallerBody = faller.AddComponent<RigidBody2DComponent>();
+			fallerBody.Type = RigidBody2DComponent::BodyType::Dynamic;
+			BoxCollider2DComponent& fallerCollider = faller.AddComponent<BoxCollider2DComponent>();
+			fallerCollider.Size = { 0.25f, 0.25f };
+			fallerCollider.Restitution = 0.0f;
+
+			scene.OnRuntimeStart();
+
+			RUN_OK(R"(
+				physicsTriggerHits = 0
+				physicsContactHits = 0
+				physicsTriggerPersist = 0
+				physicsHandlesAreNumbers =
+					type(ecs.OnContact) == "function" and type(ecs.OnTrigger) == "function"
+
+				triggerHandle = ecs:OnTrigger(function(e)
+					physicsTriggerHits = physicsTriggerHits + 1
+					if e.phase == "Persist" then physicsTriggerPersist = physicsTriggerPersist + 1 end
+					assert(e.sensor ~= nil and e.other ~= nil, "trigger event must carry sensor + other")
+					assert(e.phase == "Begin" or e.phase == "Persist" or e.phase == "End", "unknown trigger phase")
+				end)
+				contactHandle = ecs:OnContact(function(e)
+					physicsContactHits = physicsContactHits + 1
+					assert(e.a ~= nil and e.b ~= nil, "contact event must carry both entities")
+					assert(type(e.point) == "table" and type(e.normal) == "table", "contact must carry geometry tables")
+					assert(type(e.depth) == "number", "contact must carry penetration depth")
+				end)
+				assert(type(triggerHandle) == "number" and triggerHandle > 0, "OnTrigger must return a handle")
+				assert(type(contactHandle) == "number" and contactHandle > 0, "OnContact must return a handle")
+			)", "TestPhysicsEventSubscribe");
+
+			// 每帧:固定步产出事件 → 可变阶段(Late)由脚本层帧系统派发。
+			for (int frame = 0; frame < 180; ++frame)
+			{
+				scene.OnFixedUpdate(Timestep(1.0f / 60.0f));
+				scene.OnUpdateRuntime(Timestep(1.0f / 60.0f));
+			}
+
+			RUN_OK(R"(
+				assert(physicsHandlesAreNumbers, "OnContact / OnTrigger must be exposed on the ecs table")
+				assert(physicsContactHits >= 1, "landing must produce at least one contact event")
+				assert(physicsTriggerHits >= 2, "passing through a sensor must produce Begin and End")
+				assert(physicsTriggerPersist >= 1,
+					"a sensor overlap that spans frames must produce Persist -- 2D sensor persist channel")
+			)", "TestPhysicsEventsDispatched");
+
+			// ecs:Off 必须真的注销物理事件订阅(句柄走独立区段,不能误伤组件观察者)。
+			RUN_OK(R"(
+				local after = 0
+				local handle = ecs:OnTrigger(function(e) after = after + 1 end)
+				ecs:Off(handle)
+				physicsOffAccepted = true
+			)", "TestPhysicsEventOff");
+
+			for (int frame = 0; frame < 30; ++frame)
+			{
+				scene.OnFixedUpdate(Timestep(1.0f / 60.0f));
+				scene.OnUpdateRuntime(Timestep(1.0f / 60.0f));
+			}
+			RUN_OK(R"(
+				assert(physicsOffAccepted, "ecs:Off must accept a physics event handle")
+			)", "TestPhysicsEventOffNoCrash");
+
+			scene.OnRuntimeStop();
+			ScriptEngine::SetActiveScene(nullptr);
+		}
+
 		ScriptEngine::Shutdown();
 		std::puts("World.LuauEcs: all tests passed!");
 		return 0;
