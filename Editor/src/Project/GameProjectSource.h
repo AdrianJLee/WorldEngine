@@ -11,7 +11,7 @@ namespace World::Editor
 	//
 	//     #include "Systems/MySystem.h"                                    // 顶部:系统定义要可见
 	//     void AttachProjectSystems(Scene& scene) { scene.RegisterSystem<MySystem>(); }
-	//     void DetachProjectSystems(Scene& scene) { scene.UnregisterFrameSystem("MySystem"); }
+	//     void DetachProjectSystems(Scene& scene) { scene.UnregisterSystem<MySystem>(); }
 	//
 	// Attach/Detach 两处的**字符串必须逐字配对**(Detach 靠名字找系统),漏一个 Detach 会留下跨运行
 	// 存活的帧系统对象,而运行期没有任何校验能发现它 —— 手工维护是已知的坑,所以由编辑器代劳。

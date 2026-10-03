@@ -4237,14 +4237,21 @@ namespace World
 			std::string source;
 			source += "-- 新建系统脚本模板。\n";
 			source += "-- 放到 <内容根>/scripts/systems/ 下才会被自动加载 —— 场景启动时整份执行一次,\n";
-			source += "-- 之后每帧按你注册的阶段调用。\n\n";
-			source += "local query = ecs:Query({ \"TransformComponent\", \"VelocityComponent\" })\n\n";
-			source += "-- 规范签名是 (名字, 函数 [, 阶段]);阶段省略 = \"Update\"。\n";
-			source += "ecs:AddSystem(\"NewSystem\", function(dt)\n";
-			source += "    query:Each(function(entity, transform, velocity)\n";
+			source += "-- 之后每帧按你注册的阶段调用。\n";
+			source += "-- 提示来自编辑器生成的 assets/scripts/intermediate/WorldEngineAPI.luau。\n\n";
+			source += "-- 支持使用 Comp 常量表避免手写字符串:Comp.Transform 等价于 \"TransformComponent\"\n";
+			source += "local query = ecs:Query({ Comp.Transform, Comp.Velocity })\n\n";
+			source += "-- 规范签名是 (名字, 函数 [, 阶段]);阶段可直接使用 Phase 枚举(如 Phase.Update)。\n";
+			source += "-- 也支持单表配置形态: ecs:AddSystem({ name = \"NewSystem\", update = function(dt: number) ... end, phase = Phase.Update })\n";
+			source += "ecs:AddSystem(\"NewSystem\", function(dt: number)\n";
+			source += "    query:Each(function(entity: Entity, transform: any, velocity: any)\n";
 			source += "        transform.Location.x = transform.Location.x + velocity.Linear.x * dt\n";
+			source += "        transform.Location.y = transform.Location.y + velocity.Linear.y * dt\n";
+			source += "        transform.Location.z = transform.Location.z + velocity.Linear.z * dt\n";
 			source += "    end)\n";
-			source += "end, \"Update\")\n";
+			source += "end, Phase.Update)\n\n";
+			source += "-- 需要\"某个组件出现/消失时做一次事\",用观察者代替轮询:\n";
+			source += "-- ecs:OnAdd(Comp.Tag, function(entity: Entity) print(\"tag added\", entity:GetName()) end)\n";
 			return source;
 		}
 
@@ -4346,7 +4353,7 @@ namespace World
 			source += "\t//    编辑器属性面板按 WE_FIELD 的声明自动画控件。\n";
 			source += "\t// ② 逻辑写在 <项目根>/src/Systems/ 的系统里,并在 <项目根>/src/GameProject.cpp 里挂载:\n";
 			source += "\t//    AttachProjectSystems 里 scene.RegisterSystem<...>();\n";
-			source += "\t//    DetachProjectSystems 里 scene.UnregisterFrameSystem(\"...\")。\n";
+			source += "\t//    DetachProjectSystems 里 scene.UnregisterSystem<...>();\n";
 			source += "\t//    系统只活在一次运行时内(Play 启停各一次)。\n";
 			source += "\t// ③ 构建项目后回编辑器执行「文件 ▶ 重载 C++ 模块」加载新组件。\n";
 			source += "\t//\n";

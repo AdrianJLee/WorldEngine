@@ -316,7 +316,7 @@ namespace World::Editor
 			"// 的起点:\n"
 			"//   1) 在 src/Systems/ 写一个 World::ISystem(一页教程见 src/Systems/README.md);\n"
 			"//   2) 在这里 #include \"Systems/MySystem.h\",Attach 里 scene.RegisterSystem<MySystem>(),\n"
-			"//      Detach 里 scene.UnregisterFrameSystem(\"MySystem\")(字符串必须与 Name() 逐字相同);\n"
+			"//      Detach 里 scene.UnregisterSystem<MySystem>()(类型安全对称,无需手写字符串);\n"
 			"//   3) 项目根构建:build.cmd → 编辑器 `文件 ▸ 重载 C++ 模块` → Play。\n"
 			"//\n"
 			"// 引擎在 Scene::OnRuntimeStart 末尾调 Attach、OnRuntimeStop 开头调 Detach:系统只活在一次\n"
@@ -334,7 +334,7 @@ namespace World::Editor
 			"	{\n"
 			"		(void)scene;\n"
 			"		// 与 Attach 一一对应。示例:\n"
-			"		// scene.UnregisterFrameSystem(\"MySystem\");\n"
+			"		// scene.UnregisterSystem<MySystem>();\n"
 			"	}\n"
 			"}\n";
 	}
@@ -416,7 +416,8 @@ namespace World::Editor
 		// 三处登记点(与模板/文档里的写法逐字一致)。
 		const std::string includeLine = "#include \"Systems/" + systemName + ".h\"";
 		const std::string attachLine = "scene.RegisterSystem<" + systemName + ">();";
-		const std::string detachLine = "scene.UnregisterFrameSystem(\"" + systemName + "\");";
+		const std::string detachLine = "scene.UnregisterSystem<" + systemName + ">();";
+		const std::string legacyDetachLine = "scene.UnregisterFrameSystem(\"" + systemName + "\");";
 
 		const std::vector<CodeContext> contexts = ComputeCodeContexts(text);
 		const std::string attachMarker = "void AttachProjectSystems(";
@@ -448,7 +449,8 @@ namespace World::Editor
 		// **只在真代码里**判定(模板里的示例注释不算已登记)。
 		const bool includePresent = ContainsInCode(text, contexts, 0, text.size(), includeLine);
 		const bool attachPresent = ContainsInCode(text, contexts, attachOpen, attachClose + 1, attachLine);
-		const bool detachPresent = ContainsInCode(text, contexts, detachOpen, detachClose + 1, detachLine);
+		const bool detachPresent = ContainsInCode(text, contexts, detachOpen, detachClose + 1, detachLine)
+			|| ContainsInCode(text, contexts, detachOpen, detachClose + 1, legacyDetachLine);
 		if (attachPresent && detachPresent)
 		{
 			result.Ok = true;

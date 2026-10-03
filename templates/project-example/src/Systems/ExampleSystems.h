@@ -27,7 +27,7 @@ namespace World::Game
 	//   3) ParallelSafe():true = 无共享可变状态、可与其它系统并行;false = 主线程独占
 	//      (示例用 false,与 Lua 系统脚本、物理一致;要开并行先确认不碰共享数据);
 	//   4) 在 src/GameProject.cpp 的 Attach 里 scene.RegisterSystem<T>(),
-	//      在 Detach 里 scene.UnregisterFrameSystem(与 Name() 逐字相同的字符串)。
+	//      在 Detach 里 scene.UnregisterSystem<T>()(类型安全对称,无需手写字符串)。
 	// ============================================================================
 
 	// 查询引擎已有的两个组件(Transform + Velocity),把"会动"的实体绕 Z 轴转起来 —— 一件在

@@ -26,7 +26,7 @@
 ```cpp
 // src/GameProject.cpp
 void AttachProjectSystems(Scene& scene) { scene.RegisterSystem<MySystem>(); }
-void DetachProjectSystems(Scene& scene) { scene.UnregisterFrameSystem("MySystem"); }  // 与 Name() 逐字相同
+void DetachProjectSystems(Scene& scene) { scene.UnregisterSystem<MySystem>(); }  // 与 Name() 逐字相同
 ```
 
 引擎在 `Scene::OnRuntimeStart` 末尾调 Attach、`OnRuntimeStop` 开头调 Detach(编辑器

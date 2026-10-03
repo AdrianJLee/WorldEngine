@@ -50,7 +50,7 @@ void AttachProjectSystems(Scene& scene) { scene.RegisterSystem<MySystem>(); }
 3. 在 `DetachProjectSystems` 里摘掉(**字符串与 `Name()` 逐字相同**):
 
 ```cpp
-void DetachProjectSystems(Scene& scene) { scene.UnregisterFrameSystem("MySystem"); }
+void DetachProjectSystems(Scene& scene) { scene.UnregisterSystem<MySystem>(); }
 ```
 
 4. 在项目根构建:`build.cmd`
