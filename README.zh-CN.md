@@ -10,7 +10,7 @@
 
 | 模块 | 产物 | 职责 |
 | --- | --- | --- |
-| `World/` | `WorldRuntime.dll` | 引擎核心:应用与内存、作业、VFS 与资产、渲染 RHI(OpenGL / Vulkan)、场景与反射 schema、WUI 框架、脚本运行时(Luau) |
+| `Engine/` | `WorldRuntime.dll`(CMake 目标 `World`) | 引擎核心:应用与内存、作业、VFS 与资产、渲染 RHI(OpenGL / Vulkan)、场景与反射 schema、WUI 框架、脚本运行时(Luau) |
 | `Game/` | `Game.dll` | 游戏逻辑。独立 DLL,通过**显式注册接口**接入引擎,不复制引擎单例 |
 | `Editor/` | `Editor.exe` | 编辑器宿主:视口、场景层级、属性、内容浏览器、材质 / 模型 / Prefab 面板、Play |
 | `Runtime/` | `Runtime.exe` | 游戏运行宿主:加载项目清单与内容,不含编辑器 UI |

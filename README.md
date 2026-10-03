@@ -11,7 +11,7 @@ C++17 + CMake, with third-party dependencies locked into the repository (`vendor
 
 | Module | Artifact | Responsibility |
 | --- | --- | --- |
-| `World/` | `WorldRuntime.dll` | Engine core: application and memory, jobs, VFS and assets, rendering RHI (OpenGL / Vulkan), scene and reflection schema, WUI framework, scripting runtime (Luau) |
+| `Engine/` | `WorldRuntime.dll` (CMake target `World`) | Engine core: application and memory, jobs, VFS and assets, rendering RHI (OpenGL / Vulkan), scene and reflection schema, WUI framework, scripting runtime (Luau) |
 | `Game/` | `Game.dll` | Game logic. A separate DLL that plugs into the engine through **explicit registration interfaces**; it never duplicates engine singletons |
 | `Editor/` | `Editor.exe` | Editor host: viewport, scene hierarchy, properties, content browser, material / model / prefab panels, Play |
 | `Runtime/` | `Runtime.exe` | Game host: loads the project manifest and content, no editor UI |

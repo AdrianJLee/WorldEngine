@@ -15,11 +15,19 @@
 
 根目录**只允许**下列条目;新增根级文件/目录需要评审记录:
 
+**入库**(仓库跟踪):
+
 ```
-.github/  .gitignore  .gitmodules  AGENTS.md  CMakeLists.txt  README.md
-build/    docs/       Editor/      Game/      Runtime/       tests/
-tools/    vendor/     World/
+.gitattributes  .gitignore  .gitmodules  CMakeLists.txt  CMakeSettings.json
+LICENSE         README.md   README.zh-CN.md  .luarc.json
+docs/   Editor/  Engine/   Game/       Launcher/  plugins/  projects/
+Runtime/  templates/  tests/  third_party/  vendor/
 ```
+
+**忽略**(按 §9 不入库,可整体删除):`build/ .github/ .vs/ .codex/ AGENTS.md local/ tmp/ tools/`。
+
+**目录名 ≠ 模块名**:引擎目录是 `Engine/`;CMake 目标 `World`、命名空间 `World::`、
+产物 `WorldRuntime.dll` 是公开契约,有意与此不同(见 §3 与 [`project-layout.md`](project-layout.md) §1)。
 
 - **禁止**在根目录新建游离的过程目录(如 `scratch/`、`tmp/`、`reports/`):一律进 `tools/agents/**`。
 - 根级新增"项目内容/示例项目"目录前先读 §7(资产根规则)。
@@ -28,18 +36,26 @@ tools/    vendor/     World/
 
 | 目录 | 放什么 | 不放什么 | 入库 |
 | --- | --- | --- | --- |
-| `Engine/src/World/**` | 引擎库(+namespace `World`);`RHI/`、`Renderer/`、`WUI/`、`Scene/`、`Schema/` 等 | 任何宿主/编辑器专用代码 | 是 |
-| `Engine/src/Platform/**` | 平台层(窗口/输入/系统工具)。**注意**:`Platform/OpenGL/**` 是旧渲染抽象,与新 `RHI/OpenGL/**` 并存,属于历史包袱(见 §10.2) | 新功能 | 是 |
+| `Engine/src/World/**` | 引擎实现与私有头(命名空间 `World::*`,include 走 `World/...`)。一级分区:`Core/ Asset/ RHI/ Renderer/ Scene/ Script/ Gameplay/ WUI/ Schema/ Physics/ Plugins/ Modules/ Platform/ Events/ Settings/ Utils/ Math/ Debug/` | 任何宿主/编辑器专用代码 | 是 |
+| `Engine/src/World/Renderer/Legacy/**` | **冻结的旧渲染栈**:`Gfx/`(Buffer/Shader/Texture/VertexArray/Framebuffer/RenderPass/CommandBuffer/UniformBuffer*/RendererAPI/RenderCommand/GraphicsContext/PipelineStateObject/DescriptorSet/SubTexture2D)+ `OpenGL/`(旧 GL 后端,原 `Platform/OpenGL/`)。约定:只修不扩,逐步并入 `RHI/` | 新功能、新后端 | 是 |
+| `Engine/src/World/RHI/**` | 渲染后端抽象(`Rhi*` 合同)+ `OpenGL/`、`Vulkan/` 实现 | 场景/玩法逻辑 | 是 |
+| `Engine/src/World/Platform/**` | 真平台层:`Windows/`(窗口/输入/系统工具/DLL 装载) | 渲染实现 | 是 |
+| `Engine/src/World/Script/**` | 脚本系统:`Vm/`(Luau VM/沙箱/值/引用)、`Bindings/`(`Bind*`)、`Runtime/`(ScriptEngine/热重载/存根/脚本属性)、`LuaType/`、`Tooling/`(Luau 高亮/补全/格式化) | 编辑器面板与宿主逻辑 | 是 |
+| `Engine/generators/<名>/` | 构建期生成器(如 `schema-compiler`) | 产品运行时代码 | 是 |
 | `third_party/<name>/` | 编进 `WorldRuntime.dll` 的第三方**源码**(见 `vendor/README.md`) | CLI 工具、预编译库 | submodule 优先 |
-| `Editor/src/**` | 编辑器宿主与面板;`WUI/Panels/**` 一文件一面板 | 引擎能力(应下沉到 `World/**`) | 是 |
+| `Editor/src/**` | 编辑器宿主:`App/`(EditorApp/EditorLayer/EditorStartup)、`Core/`(Preferences/Cooker/Resources)、`Integrations/`(VS/着色器热重载)、`WUI/{Shell,Panels,Language,Common}/`;`Panels/**` 一文件一面板 | 引擎能力(应下沉到 `Engine/src/World/**`) | 是 |
 | `Editor/assets/**` | 编辑器自带资源(本地化、图标、字体) | 项目内容、生成物 | 是 |
-| `Game/` | 默认示例项目与 gameplay DLL(`project.we.yaml` + `assets/**` + `src/**`) | 引擎代码 | 是(生成物除外) |
+| `Game/` | gameplay DLL 源码入口(`src/GameAPI.*`、`src/GameLayer.*`、`src/Components/**`、`src/Generated/**`) | 引擎代码、项目内容(内容根在 `projects/<名>/`) | 是(生成物除外) |
+| `Launcher/` | 项目侧小启动器(`WeEdit.exe` / `WePlay.exe`),零引擎依赖 | 引擎/业务逻辑 | 是 |
+| `projects/<名>/` | 项目内容根:`project.we.yaml` + `assets/**` | 引擎/宿主代码 | 是(生成物除外) |
+| `templates/**` | 项目/插件脚手架模板 | 运行时代码 | 是 |
+| `plugins/**` | 示例插件与插件文档 | 引擎实现 | 是 |
 | `Runtime/` | 运行宿主(无编辑器启动游戏) | 业务逻辑 | 是 |
 | `tests/**` | 每个领域一个可执行测试(ctest 名 `World.<Domain>`) | 夹具资产(应放 `projects/<名>/assets/**` 或临时目录) | 是 |
 | `docs/user/**` `docs/dev/**` | 公开文档:用户手册 / 开发者文档 | 内部过程记录(走 `tools/agents/**`)、私有知识(走 `WorldEngine-docs`) | 是 |
 | `tools/agents/**` | 过程层 + 工具面:`tasks/ dispatch/ reports/ scratch/ tmp/ archive/ skills/ multi-agent/ fonts/` | 任何"项目运行需要"的文件 | 见 §9 |
 | `vendor/` | 外部工具与记录(见 `vendor/README.md`) | 参与编译的源码(那属于 `third_party/**`) | 见 `vendor/README.md` |
-| `build/**` | 全部构建产物、日志、中间缓存 | 源码、文档 | 否 |
+| `build/**` `local/**` `tmp/**` | 构建产物 / 本机状态 / 临时文件 | 源码、文档 | 否 |
 
 ## 4. 第三方内容
 
@@ -67,9 +83,13 @@ tools/    vendor/     World/
 ## 6. 文件规模与拆分
 
 - 一文件一主题;**超过 ~60KB 需要在评审里说明**,超过 ~100KB 必须给出拆分计划。
-- 当前超标(2026-09-23 实测):`MaterialEditorPanel.cpp` 267KB、`EditorShell.cpp` 192KB、
-  `ContentBrowserPanel.cpp` 159KB、`WuiWidgets.cpp` 132KB、`PropertiesPanel.cpp` 115KB、
-  `Renderer3D.cpp` 102KB。
+- 当前超标(2026-10-03 实测,>100KB 必须给拆分计划):
+  `Editor/src/WUI/Shell/EditorShell.cpp` 392KB、`Editor/src/WUI/Panels/MaterialEditorPanel.cpp` 337KB、
+  `Editor/src/WUI/Panels/ContentBrowserPanel.cpp` 217KB、`Editor/src/WUI/Panels/PropertiesPanel.cpp` 205KB、
+  `Engine/src/World/WUI/WuiWidgets.cpp` 193KB、`Editor/src/App/EditorLayer.cpp` 178KB、
+  `Engine/src/World/WUI/WuiComponentRegistry.cpp` 149KB、`Editor/src/WUI/Panels/WidgetGalleryPanel.cpp` 126KB、
+  `Engine/src/World/Renderer/Renderer3D.cpp` 115KB、`Editor/src/WUI/Panels/TextureSettingsPanel.cpp` 108KB、
+  `Engine/src/World/Plugins/PluginManager.cpp` 105KB、`Engine/src/World/WUI/WuiCodeEditor.cpp` 104KB。
 - 拆分口径建议按"子视图/模式"切(例:材质编辑器 = 预览 / 参数区 / 代码区 / 诊断区 / 工作流动作)。
 
 ## 7. 资产根规则
@@ -146,13 +166,15 @@ tools/    vendor/     World/
 
 ## 11. 已知结构性问题(记录,不在 v0.1 修)
 
-1. 引擎代码有两个 include 根:`Engine/src/World/**` 与 `Engine/src/Platform/**`(后者含 `Windows/` 与旧
-   `OpenGL/`)。约定:新代码只进 `Engine/src/World/**`。
-2. `Platform/OpenGL/**`(旧渲染抽象,仍被 `Renderer/Buffer.cpp` 等 include)与 `RHI/OpenGL/**`(新后端)
-   并存:动 GL 前先确认改的是哪一层;目标是旧层冻结并逐步迁入 RHI。
-3. `Editor/` 里存在被忽略的 in-source 构建残留(`Editor.vcxproj*`);构建永远在 `build/**` 里做。
-4. `Game/` 同时承担"默认示例项目内容"与"gameplay DLL"两重身份,后续拆成项目建设议单列。
-5. `tests/**` 54 个可执行缺"改动面 → 该跑哪套"的机器可读映射,建议 `tests/SUITES.md`。
+1. ✅ 已解决(2026-10-03):**只有一个 include 根** `Engine/src`(include 第一段 `World/`);
+   `Platform/OpenGL/**` 已并入 `Renderer/Legacy/OpenGL/**`,`Platform/` 只留 `Windows/`。
+2. ✅ 已解决(2026-10-03):旧渲染栈收拢到 `Engine/src/World/Renderer/Legacy/{Gfx,OpenGL}/**` 并**冻结**;
+   新代码只进 `RHI/**`、`Renderer/**` 根与 `Renderer/Texture/**`。见 `project-layout.md` §2。
+3. ✅ 已解决:`Editor/` 已无 in-source 构建残留;构建一律在 `build/**` 里做。
+4. ✅ 已解决:`Game/` 只留 gameplay DLL 源码,项目内容根在 `projects/<名>/`(PROJECT-8)。
+5. `tests/**` **55** 个可执行缺"改动面 → 该跑哪套"的机器可读映射,建议 `tests/SUITES.md`。
+6. 单文件 >100KB 的拆分(上表)仍是待办,**单列任务**,不与本次目录整理混做。
+7. 全仓 `.gitattributes` 行尾统一(R3)仍未做;本次目录整理已复现"文件被 git 标 LF→CRLF"的告警。
 
 ### 待决(需用户定,2026-09-23)
 

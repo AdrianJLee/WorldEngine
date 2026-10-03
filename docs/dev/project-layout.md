@@ -32,21 +32,45 @@
 
 ```
 Engine/
-  src/World/**            实现与私有头(命名空间 World::*;include 走 World/...)
-    Platform/**           平台层(窗口/输入/系统;唯一 include 根)
-    RHI/**                新渲染后端抽象(OpenGL/Vulkan)
-    Renderer/**           渲染器/材质/后处理
-    WUI/**                自研 UI 工具包
+  src/World/**            引擎实现与私有头(命名空间 World::*;include 走 World/...)
+    Core/                 应用骨架(Application/Layer/Input/Timestep/UUID/Log/Window/WorldContext)
+      Memory/ Thread/ Vfs/
+    Asset/                资产域(ProjectManifest/ProjectMount/GltfImporter/WModelIO/CookPipeline/
+                          ModelImportSettings/ScriptArtifact/BuiltinImporters/AssetTypeRegistry)
+    RHI/                  渲染后端抽象(合同 Rhi*)+ OpenGL/ + Vulkan/
+    Renderer/             活的高层渲染:Renderer2D/3D、SceneRenderer、Material*、Mesh、Skinning、
+                          AnimationSystem、Camera/EditorCamera*、RenderSettings、AssetHotReload
+      Texture/            纹理资产与管线(Texture/TextureData/SubTexture2D/TextureCompiler/
+                          TextureImportSettings/TextureArtifact/MaterialTextureCache)
+      Legacy/Gfx/         冻结的旧 GFX 抽象(Buffer/Shader/VertexArray/Framebuffer/RenderPass/
+                          CommandBuffer/UniformBuffer*/RendererAPI/RenderCommand/GraphicsContext/
+                          PipelineStateObject/DescriptorSet/SubTexture2D…)
+      Legacy/OpenGL/      冻结的旧 GL 后端(原 Platform/OpenGL)
+    Scene/                ECS 核心(Entity/Components/Scene/Query/Hierarchy/ISystem/SceneSerializer/
+                          SceneCamera)+ Systems/(Camera/Movement/Transform)
+    Script/               脚本系统
+      Vm/                  Luau VM、沙箱、ScriptValue/ScriptRef、LuauHeaders
+      Bindings/            BindECS/BindEvents/BindServices/BindUI/BindComponentAccess
+      Runtime/             ScriptEngine、LuaStubGenerator、HotReload、ScriptFileWatch、
+                          ScriptProperties、PluginScriptLibrary
+      LuaType/             Vec2/Vec3/Vec4/Mat3/Mat4/Entity 的 Lua 类型绑定
+      Tooling/             Luau 高亮/补全/格式化/语法(编辑器语言工具)
+    Gameplay/              Runtime/(GameApp/GameHost/GameFlow/SystemRegistry)、
+                          Framework/(Level*/SaveService/InputMap/Behavior/EventBus)、
+                          Prefab/(Prefab*/ModelInstance)
+    WUI/                  自研 UI 工具包(Widgets/** 基础控件)
     Schema/Generated/**   生成的反射注册(入库,标"不要手改")
+    Physics/  Platform/Windows/  Plugins/  Modules/  Events/  Settings/  Utils/  Math/  Debug/
   generators/<名>/        构建期生成器(如 schema-compiler)
-  assets/{shaders,textures}/**  跟库发运的运行时资源
-  vendor/  →  见 third_party/(迁移已把依赖挪到仓库根)
+  assets/{shaders,localization}/**  跟库发运的运行时资源
 ```
 
-- **一个 target 一个 include 根**:`Engine/src`;include 第一段 = `World/`(命名空间)。目录 `Engine/`
-  是模块名,命名空间 `World::` 与产物名 `WorldRuntime.dll` 是**公开契约**,有意与此不同。
-- 旧层 `src/World/Renderer/Legacy/OpenGL/**`(Renderer-era)与新 `src/World/RHI/OpenGL/**`(RHI)并存:
-  动 GL 前先确认改哪一层;目标是旧层冻结并逐步并入 RHI。
+- **一个 target 一个 include 根**:`Engine/src`;include 第一段 = `World/`。目录 `Engine/` 是模块名,
+  命名空间 `World::` 与产物名 `WorldRuntime.dll` 是**公开契约**,有意与此不同。
+- **旧渲染栈已冻结**(2026-10-03 分类整理):`Renderer/Legacy/{Gfx,OpenGL}/**` 只修不扩,
+  新代码走 `RHI/**`(后端合同)与 `Renderer/**` 根(高层渲染器);动 GL 前先确认改哪一层。
+- `Editor/src` 同为"一个 include 根":Editor 内部头按 `Editor/src` 下的规范路径引用
+  (`App/…`、`Core/…`、`Integrations/…`、`WUI/{Shell,Panels,Language,Common}/…`)。
 
 ### 运行要求:OpenGL = 4.6 core
 
@@ -96,3 +120,4 @@ Engine/
 | 7 | `tests/` 按模块分域 | ✅ 已交付(54/54,ctest 名单 0 差异) |
 | 8 | `Game/` 内容 → `projects/default/`(DLL 只留 `src/`) | ✅ 已交付(54/54、冒烟 OK、机检 exit 0 无 WARN) |
 | 9 | 机检脚本 `tools/agents/check-layout.ps1` | ✅ 随本页提交 |
+| 10 | 源码分类整理:`Engine/src/World/**` 一级域分层(`Core/Asset→Asset`、`Platform/OpenGL→Renderer/Legacy`、`Scene↔Script`、`Gameplay` 三分);`Editor/src` 四分区 + include 根统一 | ✅ 已交付(2026-10-03:ALL_BUILD 0 error、ctest 55/55、`check-layout.ps1` exit 0) |
