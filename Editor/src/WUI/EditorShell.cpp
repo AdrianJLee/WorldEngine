@@ -4505,14 +4505,32 @@ namespace World
 		}
 
 		// `GameProject.cpp` 里是否已登记名为 <Name> 的系统(与 GameProjectSource 写出的两行同口径)。
+		// 必须忽略注释行,避免骨架/模板里的示例注释 (如 // scene.RegisterSystem<MySystem>();) 误拦截新系统创建。
 		bool TextRegistersSystem(const std::string& text, const std::string& name)
 		{
-			return text.find("UnregisterFrameSystem(\"" + name + "\")") != std::string::npos
-				|| text.find("RegisterSystem<" + name + ">(") != std::string::npos;
+			size_t pos = 0;
+			while (pos < text.size())
+			{
+				const size_t nextPos = text.find('\n', pos);
+				std::string_view line = (nextPos == std::string::npos)
+					? std::string_view(text).substr(pos)
+					: std::string_view(text).substr(pos, nextPos - pos);
+				pos = (nextPos == std::string::npos) ? text.size() : nextPos + 1;
+
+				while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
+					line.remove_prefix(1);
+
+				if (line.rfind("//", 0) == 0 || line.rfind("/*", 0) == 0 || line.rfind("*", 0) == 0)
+					continue;
+
+				if (line.find("UnregisterSystem<" + name + ">") != std::string_view::npos
+					|| line.find("UnregisterFrameSystem(\"" + name + "\")") != std::string_view::npos
+					|| line.find("RegisterSystem<" + name + ">(") != std::string_view::npos)
+					return true;
+			}
+			return false;
 		}
 
-		// PECS-T11(任务 A):「空」类型的正文 —— 只有 `#pragma once` + 一段说明注释:
-		// 不写 namespace、不给示例;不参与 schema 发现(不在 Components/)、不自动登记。
 		std::string NewCppEmptyTemplateSource(const std::string& name)
 		{
 			std::string source;
@@ -5180,6 +5198,16 @@ namespace World
 		const std::string relative = LuaScriptRelativePath(kind, name);
 		ctx.RecordOp("script", "new-lua", name, relative);
 		WLD_CORE_INFO("[new-lua-system] created '{0}'", target.string());
+		// 如果面板此前已在注册表中(例如启动时从布局恢复、但当时磁盘文件尚不存在),刷新从磁盘载入
+		const std::string panelId = std::string(kScriptPanelPrefix) + relative;
+		const auto foundPanel = m_PanelRegistry.find(panelId);
+		if (foundPanel != m_PanelRegistry.end() && foundPanel->second)
+		{
+			if (auto* scriptPanel = dynamic_cast<ScriptEditorPanel*>(foundPanel->second.get()))
+			{
+				scriptPanel->LoadFromDisk();
+			}
+		}
 		// 脚本编辑器接受**相对内容根的逻辑路径**(内置编辑器服务 Lua/Luau;与内容浏览器双击同一路径)。
 		OpenScriptEditor(relative);
 		if (kind == kLuaScriptKindLibrary)
@@ -7478,6 +7506,18 @@ namespace World
 		}
 		const std::string panelId = std::string(kScriptPanelPrefix) + normalized;
 		EnsureScriptPanelFromId(panelId);
+
+		// 如果面板已存在但先前处于未成功读取磁盘(!IsDiskBacked),重新从磁盘加载一次
+		const auto found = m_PanelRegistry.find(panelId);
+		if (found != m_PanelRegistry.end() && found->second)
+		{
+			if (auto* scriptPanel = dynamic_cast<ScriptEditorPanel*>(found->second.get()))
+			{
+				if (!scriptPanel->IsDiskBacked())
+					scriptPanel->LoadFromDisk();
+			}
+		}
+
 		if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panelId) != m_AttachedPanels.end())
 		{
 			m_ActiveWindowTag = panelId; // 已打开:重复打开只是激活该标签

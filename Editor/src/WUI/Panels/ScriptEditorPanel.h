@@ -44,10 +44,10 @@ namespace World
 		const std::string& LogicalPath() const { return m_LogicalPath; }
 		bool IsDiskBacked() const { return m_DiskBacked; }
 		const std::string& StatusText() const { return m_Status; }
-
-	private:
 		// 打开/重新解析并载入磁盘内容(SetText 会重置撤销历史与脏标记)。
 		void LoadFromDisk();
+
+	private:
 		// 0.5s 节流:磁盘内容指纹变化检测(自动重载 / Reload+Keep 提示)。
 		void PollExternalChange();
 		// 保存:临时文件 + 原子替换 + MarkSaved + 场景实例热重载。

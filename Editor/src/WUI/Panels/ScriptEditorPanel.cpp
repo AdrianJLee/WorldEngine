@@ -291,12 +291,22 @@ namespace World
 
 	void ScriptEditorPanel::PollExternalChange()
 	{
-		if (!m_DiskBacked)
-			return;
 		const double now = NowSeconds();
 		if (now < m_NextDiskCheck)
 			return;
 		m_NextDiskCheck = now + 0.5;
+
+		if (!m_DiskBacked)
+		{
+			// 若先前未在磁盘上找到文件(例如会话恢复或创建中途),
+			// 每 0.5s 探测一次文件是否已在磁盘上生成;一旦落盘自动重新载入。
+			std::filesystem::path resolved;
+			if (ResolveScriptDiskPath(m_LogicalPath, resolved, nullptr))
+			{
+				LoadFromDisk();
+			}
+			return;
+		}
 
 		std::string diskText;
 		std::string error;
