@@ -534,9 +534,11 @@ namespace World
 				}
 				// 层级实体用求解后的世界矩阵:直接提交本地矩阵会让子实体不跟随父实体
 				// (实测"移动父项子项不动")。世界矩阵由本轮统一求解(见上方 UpdateWorldTransforms)。
-				const glm::mat4* modelMatrix = &transform.Transform;
+				const glm::mat4* modelMatrix = nullptr;
 				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
 					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				else
+					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
 
 				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
 
@@ -631,9 +633,11 @@ namespace World
 							+ "': " + error + "(回退到 Color/材质槽)");
 				}
 				// 层级实体用求解后的世界矩阵(与静态路径同一约定)。
-				const glm::mat4* modelMatrix = &transform.Transform;
+				const glm::mat4* modelMatrix = nullptr;
 				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
 					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				else
+					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
 				// AnimationSystem::Update 当帧算好的调色板;nullptr = 本帧取不到(读失败/非蒙皮)。
 				const std::vector<glm::mat4>* palette = AnimationSystem::GetPalette(entity);
 
@@ -1219,7 +1223,7 @@ namespace World
 		{
 			if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
 				return world->Matrix;
-			return transform.Transform;
+			return m_ActiveScene->m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
 		};
 		{
 			auto group = m_ActiveScene->m_Registry.group<TransformComponent>(entt::get<SpriteComponent>);
@@ -1270,7 +1274,7 @@ namespace World
 				std::vector<glm::mat4> transforms(count);
 				std::vector<std::array<glm::vec3, 4>> positions(count);
 				for (size_t i = 0; i < count; i++)
-					transforms[i] = view.get<TransformComponent>(entities[i]).Transform;
+					transforms[i] = spriteMatrixOf(entities[i], view.get<TransformComponent>(entities[i]));
 				JobSystem::ParallelFor(static_cast<uint32_t>(count), 32, [&](uint32_t i)
 				{
 					Renderer2D::ComputeCirclePositions(transforms[i], positions[i].data());
@@ -1288,7 +1292,7 @@ namespace World
 				{
 					auto& transform = view.get<TransformComponent>(entity);
 					const auto& circle = view.get<CircleRendererComponent>(entity);
-					Renderer2D::DrawCircleCore(transform.Transform, circle.Color, circle.Thickness,
+					Renderer2D::DrawCircleCore(spriteMatrixOf(entity, transform), circle.Color, circle.Thickness,
 						circle.Fade, static_cast<uint32_t>(entity));
 				}
 			}
@@ -1305,7 +1309,7 @@ namespace World
 			if (!circleCollider.ShowCollider)
 				continue;
 			glm::mat4 colliderTransform = glm::translate(glm::mat4(1.0f), transform.Location)
-				* glm::rotate(glm::mat4(1.0f), transform.Rotation.z, glm::vec3(0.0f, 0.0f, 1.0f))
+				* glm::mat4_cast(transform.Rotation)
 				* glm::translate(glm::mat4(1.0f), glm::vec3(circleCollider.Offset.x, circleCollider.Offset.y, 0.0f))
 				* glm::scale(glm::mat4(1.0f), glm::vec3(transform.Scale.x * circleCollider.Radius * 2.0f,
 					transform.Scale.y * circleCollider.Radius * 2.0f, 1.0f));

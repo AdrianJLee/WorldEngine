@@ -507,7 +507,7 @@ Wui::GizmoCamera EditorShell::GetGizmoCamera() const{
 				if (cameraEntity.IsValid() && cameraEntity.HasComponent<CameraComponent>() &&
 					cameraEntity.HasComponent<TransformComponent>())
 				{
-					glm::mat4 world = cameraEntity.GetComponent<TransformComponent>().Transform;
+					glm::mat4 world = cameraEntity.GetComponent<TransformComponent>().GetLocalMatrix();
 					if (cameraEntity.HasComponent<WorldTransformComponent>())
 						world = cameraEntity.GetComponent<WorldTransformComponent>().Matrix;
 					const Camera& playCamera = cameraEntity.GetComponent<CameraComponent>().Camera;
@@ -525,7 +525,7 @@ Wui::GizmoCamera EditorShell::GetGizmoCamera() const{
 					if (selected.IsValid() && selected.GetScene() == scene.get() &&
 						selected.HasComponent<TransformComponent>())
 					{
-						glm::mat4 selectedWorld = selected.GetComponent<TransformComponent>().Transform;
+						glm::mat4 selectedWorld = selected.GetComponent<TransformComponent>().GetLocalMatrix();
 						if (selected.HasComponent<WorldTransformComponent>())
 							selectedWorld = selected.GetComponent<WorldTransformComponent>().Matrix;
 						camera.Distance = std::max(0.1f, glm::length(camera.Position - glm::vec3(selectedWorld[3])));

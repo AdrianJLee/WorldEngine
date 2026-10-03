@@ -772,7 +772,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 				!cameraEntity.HasComponent<CameraComponent>() || !cameraEntity.HasComponent<TransformComponent>())
 				return;
 			renderCamera = &cameraEntity.GetComponent<CameraComponent>().Camera;
-			renderCameraTransform = cameraEntity.GetComponent<TransformComponent>().Transform;
+			renderCameraTransform = cameraEntity.GetComponent<TransformComponent>().GetLocalMatrix();
 		}
 
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);

@@ -37,6 +37,26 @@ int main()
 		Scene scene(context);
 		auto& registry = scene.GetRegistry();
 
+		// 0. TransformComponent POD 48B 紧凑布局与脏标记契约断言
+		{
+			static_assert(sizeof(TransformComponent) == 48, "TransformComponent must be exactly 48 bytes");
+			static_assert(std::is_trivially_copyable_v<TransformComponent>, "TransformComponent must be trivially copyable");
+			CHECK(sizeof(TransformComponent) == 48);
+
+			TransformComponent tc;
+			CHECK(tc.IsDirty());
+			tc.ClearDirty();
+			CHECK(!tc.IsDirty());
+			tc.SetLocation(glm::vec3(1.0f, 2.0f, 3.0f));
+			CHECK(tc.IsDirty());
+
+			// Compose2D 快速通道断言
+			const glm::mat4 m2d = TransformSystem::Compose2D(10.0f, 20.0f, 0.0f, 2.0f, 3.0f, 0.0f);
+			CHECK(NearVec(glm::vec3(m2d[3]), glm::vec3(10.0f, 20.0f, 0.0f)));
+			CHECK(NearVec(glm::vec3(m2d[0]), glm::vec3(2.0f, 0.0f, 0.0f)));
+			CHECK(NearVec(glm::vec3(m2d[1]), glm::vec3(0.0f, 3.0f, 0.0f)));
+		}
+
 		const entt::entity parent = registry.create();
 		registry.emplace<UUIDComponent>(parent, UUID());
 		registry.emplace<TagComponent>(parent, "Parent");
@@ -72,7 +92,7 @@ int main()
 			Hierarchy::UpdateWorldTransforms(registry);
 			// 只断言层级契约:子世界矩阵 == 父世界矩阵 * 子局部矩阵(与局部矩阵的 T/R/S 约定无关)。
 			const glm::mat4 expected = registry.get<WorldTransformComponent>(parent).Matrix *
-				registry.get<TransformComponent>(child).Transform;
+				registry.get<TransformComponent>(child).GetLocalMatrix();
 			const glm::vec3 childWorld = glm::vec3(registry.get<WorldTransformComponent>(child).Matrix[3]);
 			CHECK(NearVec(childWorld, glm::vec3(expected[3]), 1e-4f));
 			// 旋转确实被父节点影响:子节点世界位置不再等于其局部位置。
@@ -103,7 +123,7 @@ int main()
 			CHECK(Hierarchy::GetDepth(registry, child) == 2);
 			Hierarchy::UpdateWorldTransforms(registry);
 			const glm::mat4 grandExpected = registry.get<WorldTransformComponent>(parent).Matrix *
-				registry.get<TransformComponent>(child).Transform;
+				registry.get<TransformComponent>(child).GetLocalMatrix();
 			const glm::vec3 grandChild = glm::vec3(registry.get<WorldTransformComponent>(child).Matrix[3]);
 			CHECK(NearVec(grandChild, glm::vec3(grandExpected[3]), 1e-4f));
 		}
@@ -117,7 +137,7 @@ int main()
 			// 解挂后 parent 成为根:其世界矩阵回到局部;child 仍跟随 parent(契约:父矩阵 * 子局部)。
 			const glm::vec3 childWorld = glm::vec3(registry.get<WorldTransformComponent>(child).Matrix[3]);
 			const glm::mat4 detachExpected = registry.get<WorldTransformComponent>(parent).Matrix *
-				registry.get<TransformComponent>(child).Transform;
+				registry.get<TransformComponent>(child).GetLocalMatrix();
 			CHECK(NearVec(childWorld, glm::vec3(detachExpected[3]), 1e-4f));
 			const glm::vec3 parentWorld = glm::vec3(registry.get<WorldTransformComponent>(parent).Matrix[3]);
 			CHECK(NearVec(parentWorld, glm::vec3(1.0f, 0.0f, 0.0f), 1e-4f));
@@ -157,7 +177,7 @@ int main()
 			CHECK(loadedParentHierarchy.Children[0] == loadedChild);
 			// 读档后世界矩阵已求解:父世界 = 自身(此时已解挂),子世界 = 父世界 * 子局部。
 			const glm::mat4 expected = loadedRegistry.get<WorldTransformComponent>(loadedParent).Matrix *
-				loadedRegistry.get<TransformComponent>(loadedChild).Transform;
+				loadedRegistry.get<TransformComponent>(loadedChild).GetLocalMatrix();
 			const glm::vec3 loadedChildWorld =
 				glm::vec3(loadedRegistry.get<WorldTransformComponent>(loadedChild).Matrix[3]);
 			CHECK(NearVec(loadedChildWorld, glm::vec3(expected[3]), 1e-3f));

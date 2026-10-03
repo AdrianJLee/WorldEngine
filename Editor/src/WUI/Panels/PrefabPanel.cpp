@@ -608,7 +608,7 @@ namespace World
 			lines.push_back("Tag: " + tag->Tag);
 		if (const auto* transform = registry.try_get<TransformComponent>(handle))
 			lines.push_back("Transform: T(" + FormatVec3(transform->Location) + ")  R("
-				+ FormatVec3(transform->Rotation) + ")  S(" + FormatVec3(transform->Scale) + ")");
+				+ FormatVec3(transform->GetEulerAngles()) + ")  S(" + FormatVec3(transform->Scale) + ")");
 		if (const auto* mesh = registry.try_get<MeshRendererComponent>(handle))
 			lines.push_back("MeshRenderer: Primitive=" + (mesh->Primitive.empty() ? std::string("(none)") : mesh->Primitive)
 				+ "  MeshPath=" + (mesh->MeshPath.empty() ? std::string("(none)") : mesh->MeshPath)
@@ -713,7 +713,7 @@ namespace World
 				return reject("entity has no such component");
 			glm::vec3 target;
 			if (field == "Location") target = transform->Location;
-			else if (field == "Rotation") target = transform->Rotation;
+			else if (field == "Rotation") target = transform->GetEulerAngles();
 			else if (field == "Scale") target = transform->Scale;
 			else return reject("field is not editable");
 			if (axis == "x" || axis == "y" || axis == "z")
@@ -1178,7 +1178,7 @@ namespace World
 					if (!transform)
 						continue;
 					// 世界矩阵优先(层级下的子物体);没有缓存时退回局部矩阵(近似取景足够)。
-					glm::mat4 matrix = transform->Transform;
+					glm::mat4 matrix = transform->GetLocalMatrix();
 					if (const auto* world = registry.try_get<WorldTransformComponent>(handle))
 						matrix = world->Matrix;
 					const glm::vec3 position { matrix[3] };
@@ -1636,7 +1636,7 @@ namespace World
 				MarkDirty();
 				changed = false;
 			}
-			glm::vec3 rotation = transform->Rotation;
+			glm::vec3 rotation = transform->GetEulerAngles();
 			y += DrawVec3Row(ctx, x, y, width, "prefab.field.TransformComponent.Rotation",
 				Wui::Tr("panel.prefab.field.rotation", "Rotation"),
 				Wui::Tr("panel.prefab.field.rotation.tooltip",

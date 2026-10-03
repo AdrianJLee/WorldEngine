@@ -178,17 +178,7 @@ struct GeneratedAccess<World::TransformComponent>
     static void Set_Rotation(void* instance, const Value& value)
     {
         World::TransformComponent* self = static_cast<World::TransformComponent*>(instance);
-        self->Rotation = std::get<glm::vec3>(value);
-    }
-    static Value Get_RotationQuat(const void* instance)
-    {
-        const World::TransformComponent* self = static_cast<const World::TransformComponent*>(instance);
-        return Value(self->RotationQuat);
-    }
-    static void Set_RotationQuat(void* instance, const Value& value)
-    {
-        World::TransformComponent* self = static_cast<World::TransformComponent*>(instance);
-        self->RotationQuat = std::get<glm::quat>(value);
+        self->Rotation = std::get<glm::quat>(value);
     }
     static Value Get_Scale(const void* instance)
     {
@@ -199,16 +189,6 @@ struct GeneratedAccess<World::TransformComponent>
     {
         World::TransformComponent* self = static_cast<World::TransformComponent*>(instance);
         self->Scale = std::get<glm::vec3>(value);
-    }
-    static Value Get_Transform(const void* instance)
-    {
-        const World::TransformComponent* self = static_cast<const World::TransformComponent*>(instance);
-        return Value(self->Transform);
-    }
-    static void Set_Transform(void* instance, const Value& value)
-    {
-        World::TransformComponent* self = static_cast<World::TransformComponent*>(instance);
-        self->Transform = std::get<glm::mat4>(value);
     }
     static const FieldSchema& Field_Location()
     {
@@ -233,7 +213,7 @@ struct GeneratedAccess<World::TransformComponent>
         static const FieldSchema schema = {
             FieldId{ 0x96A725CE613E48E8ull },
             "Rotation",
-            Kind::Vec3,
+            Kind::Quat,
             &Get_Rotation,
             &Set_Rotation,
             nullptr,
@@ -241,25 +221,7 @@ struct GeneratedAccess<World::TransformComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, false, "Local rotation in degrees (Euler XYZ); the engine stores the equivalent quaternion.", false, "", {  }, "", std::nullopt },
-            Value(glm::vec3(0.0f)),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_RotationQuat()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x85F2B4692992D97Full },
-            "RotationQuat",
-            Kind::Quat,
-            &Get_RotationQuat,
-            &Set_RotationQuat,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, true, "", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, false, "Local rotation stored as quaternion.", false, "", {  }, "", std::nullopt },
             Value(glm::quat(1.0f, 0.0f, 0.0f, 0.0f)),
         };
         return schema;
@@ -282,24 +244,6 @@ struct GeneratedAccess<World::TransformComponent>
         };
         return schema;
     }
-    static const FieldSchema& Field_Transform()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x5EC0505B74B8FDC2ull },
-            "Transform",
-            Kind::Mat4,
-            &Get_Transform,
-            &Set_Transform,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, true, "", false, "", {  }, "", std::nullopt },
-            Value(glm::mat4(1.0f)),
-        };
-        return schema;
-    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::TransformComponent>();
@@ -316,13 +260,11 @@ struct GeneratedAccess<World::TransformComponent>
             {
                 Field_Location(),
                 Field_Rotation(),
-                Field_RotationQuat(),
                 Field_Scale(),
-                Field_Transform(),
             },
             &StorageBindingOf(),
             "Scene",
-            "Local translation/rotation/scale of the entity; RotationQuat and the cached Transform matrix are derived runtime state (Transient, never serialized).",
+            "Local translation/rotation/scale of the entity; 48-byte compact POD.",
             true,
         };
         return schema;

@@ -149,7 +149,7 @@ namespace World
 			b2BodyDef bodyDef = b2DefaultBodyDef();
 			bodyDef.type = toBox2DType(rb->Type);
 			bodyDef.position = { transform->Location.x, transform->Location.y };
-			bodyDef.rotation = b2MakeRot(transform->Rotation.z);
+			bodyDef.rotation = b2MakeRot(transform->GetEulerAngles().z);
 			bodyDef.motionLocks.angularZ = rb->FixedRotation;
 			bodyDef.isBullet = rb->Ccd;   // P7:CCD(高速小物体不隧穿)
 			rb->RuntimeBodyId = b2CreateBody(worldId, &bodyDef);
@@ -783,7 +783,7 @@ namespace World
 			// 渲染矩阵的权威来源与抽取侧一致:有 WorldTransformComponent 用它(层级求解结果),
 			// 否则回退到实体自己的 TransformComponent。
 			if (const auto* world = m_Registry.try_get<WorldTransformComponent>(entity)) state.PreviousMatrix = world->Matrix;
-			else if (const auto* transform = m_Registry.try_get<TransformComponent>(entity)) state.PreviousMatrix = transform->Transform;
+			else if (const auto* transform = m_Registry.try_get<TransformComponent>(entity)) state.PreviousMatrix = transform->GetLocalMatrix();
 			state.Valid = true;
 		}
 	}
@@ -1231,7 +1231,7 @@ namespace World
 		auto* transform = m_Registry.try_get<TransformComponent>(entity);
 		if (!transform)
 			throw std::logic_error("Entity:SyncPhysicsBody requires a TransformComponent");
-		b2Body_SetTransform(bodyId, { transform->Location.x, transform->Location.y }, b2MakeRot(transform->Rotation.z));
+		b2Body_SetTransform(bodyId, { transform->Location.x, transform->Location.y }, b2MakeRot(transform->GetEulerAngles().z));
 		b2Body_SetAwake(bodyId, true);
 	}
 
@@ -1626,8 +1626,10 @@ namespace World
 				continue;
 			}
 			const b2Transform body = b2Body_GetTransform(rb.RuntimeBodyId);
-			transform->SetTransform({ body.p.x, body.p.y, transform->Location.z },
-				{ transform->Rotation.x, transform->Rotation.y, b2Rot_GetAngle(body.q) }, transform->Scale);
+			transform->Location.x = body.p.x;
+			transform->Location.y = body.p.y;
+			transform->Rotation = glm::angleAxis(b2Rot_GetAngle(body.q), glm::vec3(0.0f, 0.0f, 1.0f));
+			transform->Flags |= (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
 		}
 	}
 
@@ -1653,12 +1655,11 @@ namespace World
 		// 位姿变化才写:位置用绝对容差、旋转用四元数点积(避免浮点噪声导致每帧重算 Transform 矩阵、
 		// 打断层级/标脏)。
 		const bool locationChanged = glm::distance(transform->Location, location) > 1e-4f;
-		const bool rotationChanged = std::fabs(glm::dot(transform->RotationQuat, rotation)) < 1.0f - 1e-4f;
+		const bool rotationChanged = std::fabs(glm::dot(transform->Rotation, rotation)) < 1.0f - 1e-4f;
 		if (!locationChanged && !rotationChanged) return false;
 		transform->Location = location;
-		transform->RotationQuat = rotation;
-		transform->Rotation = glm::eulerAngles(rotation);
-		transform->RecalculateTransform();
+		transform->Rotation = rotation;
+		transform->Flags |= (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
 		return true;
 	}
 

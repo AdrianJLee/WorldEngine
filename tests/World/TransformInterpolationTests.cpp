@@ -118,7 +118,7 @@ namespace
 				scene->OnUpdateRuntime(Timestep(kFixedStep));
 			}
 			const b2Vec2 position = b2Body_GetPosition(box.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
-			const glm::mat4 transform = box.GetComponent<TransformComponent>().Transform;
+			const glm::mat4 transform = box.GetComponent<TransformComponent>().GetLocalMatrix();
 			scene->OnRuntimeStop();
 			return { glm::vec2(position.x, position.y), transform };
 		};

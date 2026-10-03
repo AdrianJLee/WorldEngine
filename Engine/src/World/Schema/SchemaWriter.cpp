@@ -292,7 +292,22 @@ namespace World::Schema
 			case Kind::UVec2: return Guard([&] { glm::uvec2 v; v.x = node[0].as<uint32_t>(); v.y = node[1].as<uint32_t>(); *outValue = Value(v); });
 			case Kind::UVec3: return Guard([&] { glm::uvec3 v; v.x = node[0].as<uint32_t>(); v.y = node[1].as<uint32_t>(); v.z = node[2].as<uint32_t>(); *outValue = Value(v); });
 			case Kind::UVec4: return Guard([&] { glm::uvec4 v; v.x = node[0].as<uint32_t>(); v.y = node[1].as<uint32_t>(); v.z = node[2].as<uint32_t>(); v.w = node[3].as<uint32_t>(); *outValue = Value(v); });
-			case Kind::Quat: return Guard([&] { glm::quat v; v.x = node[0].as<float>(); v.y = node[1].as<float>(); v.z = node[2].as<float>(); v.w = node[3].as<float>(); *outValue = Value(v); });
+			case Kind::Quat: return Guard([&] {
+				if (node.size() == 3)
+				{
+					const glm::vec3 euler(node[0].as<float>(), node[1].as<float>(), node[2].as<float>());
+					*outValue = Value(glm::quat(euler));
+				}
+				else
+				{
+					glm::quat v;
+					v.x = node[0].as<float>();
+					v.y = node[1].as<float>();
+					v.z = node[2].as<float>();
+					v.w = node.size() > 3 ? node[3].as<float>() : 1.0f;
+					*outValue = Value(v);
+				}
+			});
 			case Kind::Mat3: return Guard([&] { glm::mat3 v; for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) v[i][j] = node[i * 3 + j].as<float>(); *outValue = Value(v); });
 			case Kind::Mat4: return Guard([&] { glm::mat4 v; for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) v[i][j] = node[i * 4 + j].as<float>(); *outValue = Value(v); });
 			case Kind::String: return Guard([&] { *outValue = Value(node.as<std::string>()); });

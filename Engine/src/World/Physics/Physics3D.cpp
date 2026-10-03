@@ -141,7 +141,7 @@ namespace World
 		bool ComponentPoseDiffers(const TransformComponent& transform, const JPH::RVec3& position, const JPH::Quat& rotation)
 		{
 			if (glm::distance(transform.Location, ToGlm(position)) > kLocationEpsilon) return true;
-			return std::fabs(glm::dot(transform.RotationQuat, ToGlmQuat(rotation))) < 1.0f - kRotationEpsilon;
+			return std::fabs(glm::dot(transform.Rotation, ToGlmQuat(rotation))) < 1.0f - kRotationEpsilon;
 		}
 
 		float MaxComponent(const glm::vec3& value)
@@ -483,7 +483,7 @@ namespace World
 				// P5:per-body 过滤 —— (Layer,Mask) 唯一组合注册成 ObjectLayer;传感器是刚体级开关,
 				// 用 BodyCreationSettings::mIsSensor 一次性带上(不额外调 BodyInterface::SetIsSensor)。
 				JPH::BodyCreationSettings settings(shapeResult.Get(), ToJoltPosition(transform->Location),
-					ToJoltQuat(transform->RotationQuat), ToJoltMotionType(rigidBody.Type),
+					ToJoltQuat(transform->Rotation), ToJoltMotionType(rigidBody.Type),
 					RegisterPair(rigidBody.Layer, rigidBody.Mask));
 				settings.mUserData = static_cast<JPH::uint64>(static_cast<uint32_t>(entity));
 				settings.mIsSensor = rigidBody.IsSensor;
@@ -981,7 +981,7 @@ namespace World
 				bodyInterface.GetPositionAndRotation(bodyId, position, rotation);
 				if (!ComponentPoseDiffers(*transform, position, rotation)) continue;
 				bodyInterface.SetPositionAndRotation(bodyId, ToJoltPosition(transform->Location),
-					ToJoltQuat(transform->RotationQuat), JPH::EActivation::Activate);
+					ToJoltQuat(transform->Rotation), JPH::EActivation::Activate);
 			}
 		}
 

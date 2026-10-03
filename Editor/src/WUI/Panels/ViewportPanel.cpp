@@ -90,7 +90,7 @@ namespace World
 			if (const auto* world = registry.try_get<WorldTransformComponent>(handle))
 				return world->Matrix;
 			if (const auto* transform = registry.try_get<TransformComponent>(handle))
-				return transform->Transform;
+				return transform->GetLocalMatrix();
 			return glm::mat4(1.0f);
 		}
 
@@ -503,7 +503,7 @@ namespace World
 					if (static_cast<entt::entity>(selectedCamera) != handle)
 						continue;   // 只画选中的那台相机
 					const SceneCamera& camera = frustumRegistry.get<CameraComponent>(handle).Camera;
-					glm::mat4 world = frustumRegistry.get<TransformComponent>(handle).Transform;
+					glm::mat4 world = frustumRegistry.get<TransformComponent>(handle).GetLocalMatrix();
 					if (const auto* worldTransform = frustumRegistry.try_get<WorldTransformComponent>(handle))
 						world = worldTransform->Matrix;
 					// 相机看向 -Z(与 glm::perspective / glm::ortho 的约定一致)。
@@ -710,7 +710,7 @@ namespace World
 						// 建刚体/形状(见 Scene.cpp 的 b2MakeOffsetBox 与 Physics3D.cpp:415),所以轮廓也走本地矩阵;
 						// 用世界矩阵在"有父级"的实体上会和真实碰撞体错位。
 						const glm::mat4 world = registry.try_get<TransformComponent>(handle)
-							? registry.get<TransformComponent>(handle).Transform : glm::mat4(1.0f);
+							? registry.get<TransformComponent>(handle).GetLocalMatrix() : glm::mat4(1.0f);
 						const Wui::WuiColor color = isSelected ? colliderSelected : colliderColor;
 						const float thickness = isSelected ? 1.8f : 1.1f;
 						bool drew = false;
@@ -817,7 +817,7 @@ namespace World
 			selected.HasComponent<TransformComponent>() && m_Host.HasRenderedScene())
 		{
 			const Wui::GizmoCamera gizmoCamera = m_Host.GetGizmoCamera();
-			glm::mat4 world = selected.GetComponent<TransformComponent>().Transform;
+			glm::mat4 world = selected.GetComponent<TransformComponent>().GetLocalMatrix();
 			if (selected.HasComponent<WorldTransformComponent>())
 				world = selected.GetComponent<WorldTransformComponent>().Matrix;
 			const bool plane = selected.GetComponent<MeshRendererComponent>().Primitive == "plane";

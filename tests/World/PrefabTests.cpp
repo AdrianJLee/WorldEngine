@@ -412,7 +412,7 @@ int main()
 			CHECK(targetRegistry.get<TagComponent>(instanceRoot).Tag == "Instance Tag");
 			const auto& followedTransform = targetRegistry.get<TransformComponent>(instanceRoot);
 			CHECK(glm::length(followedTransform.Location - glm::vec3(7.0f, 0.0f, 0.0f)) < 1e-5f);
-			CHECK(glm::length(glm::vec3(followedTransform.Transform[3]) - glm::vec3(7.0f, 0.0f, 0.0f)) < 1e-4f);
+			CHECK(glm::length(glm::vec3(followedTransform.GetLocalMatrix()[3]) - glm::vec3(7.0f, 0.0f, 0.0f)) < 1e-4f);
 			CHECK(GetOverrideCount(record) == 2);
 			CHECK(HasOverride(record, instanceRoot));
 			CHECK(record.Root == instanceRoot);

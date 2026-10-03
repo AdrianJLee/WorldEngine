@@ -24,10 +24,9 @@ namespace World
 				if (glm::length2(vel.Angular) > 0.0f)
 				{
 					const glm::quat rotDelta = glm::quat(vel.Angular * delta);
-					transform.RotationQuat = glm::normalize(rotDelta * transform.RotationQuat);
-					transform.Rotation = glm::eulerAngles(transform.RotationQuat);
+					transform.Rotation = glm::normalize(rotDelta * transform.Rotation);
 				}
-				TransformSystem::Recalculate(transform);
+				transform.Flags |= (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
 			});
 	}
 }

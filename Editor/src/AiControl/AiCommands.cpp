@@ -1589,7 +1589,7 @@ namespace World
 			if (const auto* transform = registry.try_get<TransformComponent>(handle))
 			{
 				const glm::vec3 location = transform->Location;
-				const glm::vec3 rotation = transform->Rotation;
+				const glm::vec3 rotation = transform->GetEulerAngles();
 				const glm::vec3 scale = transform->Scale;
 				out << ",\"location\":[" << location.x << "," << location.y << "," << location.z << "]"
 					<< ",\"rotation\":[" << rotation.x << "," << rotation.y << "," << rotation.z << "]"

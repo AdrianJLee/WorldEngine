@@ -56,8 +56,7 @@ namespace World::Gameplay
 
 			TransformComponent transform;
 			transform.Location = node.Translation;
-			transform.RotationQuat = node.Rotation;
-			transform.Rotation = glm::eulerAngles(node.Rotation);
+			transform.Rotation = node.Rotation;
 			transform.Scale = node.Scale;
 			transform.RecalculateTransform();
 			registry.emplace_or_replace<TransformComponent>(handle, transform);

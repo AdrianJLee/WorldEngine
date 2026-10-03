@@ -765,10 +765,8 @@ function ui:columns(x, y, w, h, count, gap) end
 
 -- Component fields are exposed through Entity:GetComponent("TransformComponent"); there is no runtime global named TransformComponent.
 ---@class TransformComponent
----@field Transform mat4 transient
 ---@field Scale vec3
----@field RotationQuat unknown no script mapping for schema kind 'Quat'; transient
----@field Rotation vec3
+---@field Rotation unknown no script mapping for schema kind 'Quat'
 ---@field Location vec3
 
 -- Component fields are exposed through Entity:GetComponent("UUIDComponent"); there is no runtime global named UUIDComponent.

@@ -89,7 +89,7 @@ float PropertiesPanel::DrawTransformInspector(Wui::WuiContext& ctx, const Wui::W
 			DrawReadOnlyRow(ctx, PropPath(typeName, "Location"), ComponentRect(rect, 0, 20),
 				locationLabel, FormatFloatText(transform.Location.x, 2) + ", "
 					+ FormatFloatText(transform.Location.y, 2) + ", " + FormatFloatText(transform.Location.z, 2), theme);
-			const glm::vec3 degrees = glm::degrees(transform.Rotation);
+			const glm::vec3 degrees = glm::degrees(transform.GetEulerAngles());
 			DrawReadOnlyRow(ctx, PropPath(typeName, "Rotation"), ComponentRect(rect, 1, 20),
 				rotationLabel, FormatFloatText(degrees.x, 2) + ", " + FormatFloatText(degrees.y, 2) + ", "
 					+ FormatFloatText(degrees.z, 2), theme);
@@ -100,8 +100,8 @@ float PropertiesPanel::DrawTransformInspector(Wui::WuiContext& ctx, const Wui::W
 		}
 
 		bool changed = false;
-		// Rotation 面板按度数显示;写回统一走 SetTransform(同步 RotationQuat 与矩阵)。
-		glm::vec3 rotationDegrees = glm::degrees(transform.Rotation);
+		// Rotation 面板按度数显示;写回统一走 SetTransform(同步四元数与状态)。
+		glm::vec3 rotationDegrees = glm::degrees(transform.GetEulerAngles());
 		// 逐行取"这一行是否被编辑":覆盖登记要精确到 Location/Rotation/Scale,
 		// 不能只记"Transform 动过"(否则覆盖计数与实际改动对不上)。
 		// 行高由库件的横排/竖排决定(窄控件列竖排 = 3 倍行高),下一行用上一行的返回值累加;

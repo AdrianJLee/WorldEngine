@@ -12,6 +12,10 @@ namespace World::Hierarchy
 	{
 		// 循环保护:深度超过该阈值即视为非法层级(与 SetParent 的环路检测形成双保险)。
 		constexpr uint32_t kMaxDepth = 512;
+
+		// 线程局部复用缓冲:消除 UpdateWorldTransforms 逐帧堆内存分配
+		thread_local std::vector<entt::entity> s_Roots;
+		thread_local std::vector<std::pair<entt::entity, glm::mat4>> s_Stack;
 	}
 
 	bool IsAncestorOf(const entt::registry& registry, entt::entity ancestor, entt::entity node)
@@ -133,44 +137,44 @@ namespace World::Hierarchy
 
 	uint32_t UpdateWorldTransforms(entt::registry& registry)
 	{
-		// 先收集根节点(无父或父已失效),再逐个先序遍历。
-		std::vector<entt::entity> roots;
+		s_Roots.clear();
 		auto view = registry.view<TransformComponent>();
 		for (const entt::entity entity : view)
 		{
 			const auto* hierarchy = registry.try_get<HierarchyComponent>(entity);
 			if (!hierarchy || hierarchy->Parent == entt::null || !registry.valid(hierarchy->Parent))
-				roots.push_back(entity);
+				s_Roots.push_back(entity);
 		}
 
 		uint32_t solved = 0;
-		// 用显式栈做先序,避免深层级递归爆栈;父矩阵先算好再压子节点。
-		std::vector<std::pair<entt::entity, glm::mat4>> stack;
-		stack.reserve(roots.size());
-		for (const entt::entity root : roots)
-			stack.emplace_back(root, glm::mat4(1.0f));
+		s_Stack.clear();
+		s_Stack.reserve(s_Roots.size() * 2);
+		for (const entt::entity root : s_Roots)
+			s_Stack.emplace_back(root, glm::mat4(1.0f));
 
-		while (!stack.empty())
+		while (!s_Stack.empty())
 		{
-			const auto [entity, parentWorld] = stack.back();
-			stack.pop_back();
+			const auto [entity, parentWorld] = s_Stack.back();
+			s_Stack.pop_back();
 			if (!registry.valid(entity))
 				continue;
 
-			const auto* transform = registry.try_get<TransformComponent>(entity);
+			auto* transform = registry.try_get<TransformComponent>(entity);
 			if (!transform)
 				continue;
 
 			auto* hierarchy = registry.try_get<HierarchyComponent>(entity);
 			const bool inherit = !hierarchy || hierarchy->InheritTransform;
-			const glm::mat4 world = inherit ? parentWorld * transform->Transform : transform->Transform;
+			const glm::mat4 local = TransformSystem::Compose(transform->Location, transform->Rotation, transform->Scale);
+			const glm::mat4 world = inherit ? parentWorld * local : local;
 			registry.get_or_emplace<WorldTransformComponent>(entity).Matrix = world;
+			transform->Flags &= ~(TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
 			solved++;
 
 			if (hierarchy)
 				for (const entt::entity child : hierarchy->Children)
 					if (registry.valid(child))
-						stack.emplace_back(child, world);
+						s_Stack.emplace_back(child, world);
 		}
 		return solved;
 	}

@@ -929,7 +929,7 @@ bool EditorLayer::OnKeyPressed(KeyPressedEvent& e){
 
 
 glm::mat4 EditorLayer::EntityWorldMatrix(Entity entity){
-		glm::mat4 world = entity.GetComponent<TransformComponent>().Transform;
+		glm::mat4 world = entity.GetComponent<TransformComponent>().GetLocalMatrix();
 		if (entity.HasComponent<WorldTransformComponent>())
 			world = entity.GetComponent<WorldTransformComponent>().Matrix;
 		return world;

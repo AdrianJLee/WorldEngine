@@ -108,7 +108,7 @@ namespace World::Wui
 			{ 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }
 		};
 		{
-			const glm::mat3 basis = glm::mat3(transform.Transform);
+			const glm::mat3 basis = glm::mat3_cast(transform.Rotation);
 			for (int i = 0; i < 3; ++i)
 			{
 				const float length = glm::length(basis[i]);
@@ -312,13 +312,13 @@ namespace World::Wui
 					startAxisScreen[i] = axisScreen[i];
 				startLocation = transform.Location;
 				startScale = transform.Scale;
-				startEuler = transform.Rotation;
+				startEuler = transform.GetEulerAngles();
 				startPointerAngle = std::atan2(mouse.y - startCenter.y, mouse.x - startCenter.x);
 				rotateSign = (activeAxis >= 0 && activeAxis < 3
 					&& glm::dot(axisWorld[activeAxis], -camera.Forward) > 0.0f) ? -1.0f : 1.0f;
 				if (operation == GizmoOperation::Rotate && activeAxis >= 0 && activeAxis < 3)
 				{
-					startRotationQuat = transform.RotationQuat;
+					startRotationQuat = transform.Rotation;
 					glm::vec3 rayOrigin {}, rayDirection {}, hit {};
 					if (screenRay(mouse, &rayOrigin, &rayDirection)
 						&& intersectPlane(rayOrigin, rayDirection, startLocation, axisWorld[activeAxis], &hit))

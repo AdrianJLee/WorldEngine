@@ -254,8 +254,8 @@ namespace
 			cursor = position;
 		}
 		CHECK(transform.find("---@field Location vec3") != std::string::npos);
-		CHECK(transform.find("---@field Transform mat4 transient") != std::string::npos);
-		CHECK(transform.find("---@field RotationQuat unknown no script mapping for schema kind 'Quat'; transient") != std::string::npos);
+		CHECK(transform.find("---@field Scale vec3") != std::string::npos);
+		CHECK(transform.find("---@field Rotation unknown no script mapping for schema kind 'Quat'") != std::string::npos);
 
 		// 身份字段(Object(UUID))与未映射嵌套结构(Object(SceneCamera))的真实形态。
 		CHECK(BlockOf(stub, "UUIDComponent") == "---@class UUIDComponent\n---@field ID string read-only\n");

@@ -58,46 +58,64 @@ namespace World
 	struct TransformComponent
 	{
 		glm::vec3 Location { 0.0f, 0.0f, 0.0f };
-		glm::vec3 Rotation { 0.0f, 0.0f, 0.0f };
-		glm::quat RotationQuat { 1.0f, 0.0f, 0.0f, 0.0f };
+		uint32_t Flags { TransformFlags::DirtyLocal | TransformFlags::DirtyWorld };
+		glm::quat Rotation { 1.0f, 0.0f, 0.0f, 0.0f };
 		glm::vec3 Scale { 1.0f, 1.0f, 1.0f };
-		glm::mat4 Transform { 1.0f };
+		float _Padding { 0.0f };
 
 		TransformComponent() = default;
 		TransformComponent(const glm::mat4& transform) { TransformSystem::SetTransform(*this, transform); }
-		TransformComponent(const glm::vec3& location, const glm::vec3& rotation = glm::vec3 { 0.0f, 0.0f, 0.0f }, const glm::vec3& scale = glm::vec3 { 1.0f, 1.0f, 1.0f })
+		TransformComponent(const glm::vec3& location, const glm::vec3& rotationEuler = glm::vec3 { 0.0f }, const glm::vec3& scale = glm::vec3 { 1.0f })
+		{
+			TransformSystem::SetTransform(*this, location, rotationEuler, scale);
+		}
+		TransformComponent(const glm::vec3& location, const glm::quat& rotation, const glm::vec3& scale = glm::vec3 { 1.0f })
 		{
 			TransformSystem::SetTransform(*this, location, rotation, scale);
 		}
 
-		// 变换解算与设置统一委托给 TransformSystem
+		// 变换解算与设置统一委托给 TransformSystem (轻量置脏)
 		void SetLocation(const glm::vec3& location) { TransformSystem::SetLocation(*this, location); }
-		void SetRotation(const glm::vec3& rotation) { TransformSystem::SetRotation(*this, rotation); }
+		void SetRotation(const glm::vec3& rotationEuler) { TransformSystem::SetRotation(*this, rotationEuler); }
+		void SetRotation(const glm::quat& rotation) { TransformSystem::SetRotation(*this, rotation); }
+		void SetRotationQuat(const glm::quat& rotationQuat) { TransformSystem::SetRotationQuat(*this, rotationQuat); }
 		void SetScale(const glm::vec3& scale) { TransformSystem::SetScale(*this, scale); }
-		void SetTransform(const glm::vec3& location, const glm::vec3& rotation, const glm::vec3& scale)
+		void SetTransform(const glm::vec3& location, const glm::vec3& rotationEuler, const glm::vec3& scale)
+		{
+			TransformSystem::SetTransform(*this, location, rotationEuler, scale);
+		}
+		void SetTransform(const glm::vec3& location, const glm::quat& rotation, const glm::vec3& scale)
 		{
 			TransformSystem::SetTransform(*this, location, rotation, scale);
 		}
 		void SetTransform(const glm::mat4& transform) { TransformSystem::SetTransform(*this, transform); }
-		void SetRotationQuat(const glm::quat& rotationQuat) { TransformSystem::SetRotationQuat(*this, rotationQuat); }
 		void RecalculateTransform() { TransformSystem::Recalculate(*this); }
 
-		operator const glm::mat4&() const { return Transform; }
+		// 局部变换矩阵与欧拉角便捷访问
+		glm::mat4 GetLocalMatrix() const { return TransformSystem::Compose(Location, Rotation, Scale); }
+		glm::mat4 GetTransform() const { return GetLocalMatrix(); }
+		operator glm::mat4() const { return GetLocalMatrix(); }
+		glm::vec3 GetEulerAngles() const { return TransformSystem::ToEulerRadians(Rotation); }
+
+		// 脏标记管理
+		bool IsDirty() const { return (Flags & (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld)) != 0; }
+		void SetDirty() { Flags |= (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld); }
+		void ClearDirty() { Flags &= ~(TransformFlags::DirtyLocal | TransformFlags::DirtyWorld); }
 
 		WE_SCHEMA_BODY(World, TransformComponent, Component)
 			WE_SCHEMA_META(Category("Scene"),
 				Core(),
-				Doc("Local translation/rotation/scale of the entity; RotationQuat and the cached Transform matrix are derived runtime state (Transient, never serialized)."))
+				Doc("Local translation/rotation/scale of the entity; 48-byte compact POD."))
 			WE_FIELD(Location, Vec3, Group("Transform"),
 				Doc("Local position in the parent's space (world units)."));
-			WE_FIELD(Rotation, Vec3, Group("Transform"),
-				Doc("Local rotation in degrees (Euler XYZ); the engine stores the equivalent quaternion."));
-			WE_FIELD(RotationQuat, Quat, Transient, Group("Transform"));
+			WE_FIELD(Rotation, Quat, Group("Transform"),
+				Doc("Local rotation stored as quaternion."));
 			WE_FIELD(Scale, Vec3, Group("Transform"),
 				Doc("Local scale per axis; 1,1,1 = unscaled, negative values mirror."));
-			WE_FIELD(Transform, Mat4, Transient, Group("Transform"));
 		WE_SCHEMA_END
 	};
+	static_assert(sizeof(TransformComponent) == 48, "TransformComponent must be 48 bytes");
+	static_assert(std::is_trivially_copyable_v<TransformComponent>, "TransformComponent must be trivially copyable");
 
 	// Pure ECS: 速度组件 (用于 MovementSystem 驱动实体线速度与角速度位移)
 	struct VelocityComponent
