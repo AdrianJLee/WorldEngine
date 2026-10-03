@@ -83,14 +83,11 @@ Runtime/  templates/  tests/  third_party/  vendor/
 ## 6. 文件规模与拆分
 
 - 一文件一主题;**超过 ~60KB 需要在评审里说明**,超过 ~100KB 必须给出拆分计划。
-- 当前超标(2026-10-03 实测,>100KB 必须给拆分计划):
-  `Editor/src/WUI/Shell/EditorShell.cpp` 392KB、`Editor/src/WUI/Panels/MaterialEditorPanel.cpp` 337KB、
-  `Editor/src/WUI/Panels/ContentBrowserPanel.cpp` 217KB、`Editor/src/WUI/Panels/PropertiesPanel.cpp` 205KB、
-  `Engine/src/World/WUI/WuiWidgets.cpp` 193KB、`Editor/src/App/EditorLayer.cpp` 178KB、
-  `Engine/src/World/WUI/WuiComponentRegistry.cpp` 149KB、`Editor/src/WUI/Panels/WidgetGalleryPanel.cpp` 126KB、
-  `Engine/src/World/Renderer/Renderer3D.cpp` 115KB、`Editor/src/WUI/Panels/TextureSettingsPanel.cpp` 108KB、
-  `Engine/src/World/Plugins/PluginManager.cpp` 105KB、`Engine/src/World/WUI/WuiCodeEditor.cpp` 104KB。
-- 拆分口径建议按"子视图/模式"切(例:材质编辑器 = 预览 / 参数区 / 代码区 / 诊断区 / 工作流动作)。
+- 历史超标已全部收口(2026-10-03 工业级真 TU 拆分,全仓非生成源文件 100% 降至 <100KB):
+  12 个历史 >100KB 源文件均已按工业标准拆出独立部件 TU 并配置私有内部头 `<Base>_Internal.h`,
+  函数体全仓严格唯一样单例不劈裂、匿名命名空间按文件改名 `<Base>Detail` 防 ODR 冲突、默认参数严格剥离。
+  生成物 `Engine/src/World/Schema/Generated/World/WorldSchemaRegistration.cpp` (134KB) 豁免。
+- 拆分口径按"子视图/模式"切(例:材质编辑器 = 预览 / 参数区 / 代码区 / 诊断区 / 工作流动作)。
 
 ## 7. 资产根规则
 
@@ -173,7 +170,7 @@ Runtime/  templates/  tests/  third_party/  vendor/
 3. ✅ 已解决:`Editor/` 已无 in-source 构建残留;构建一律在 `build/**` 里做。
 4. ✅ 已解决:`Game/` 只留 gameplay DLL 源码,项目内容根在 `projects/<名>/`(PROJECT-8)。
 5. `tests/**` **55** 个可执行缺"改动面 → 该跑哪套"的机器可读映射,建议 `tests/SUITES.md`。
-6. 单文件 >100KB 的拆分(上表)仍是待办,**单列任务**,不与本次目录整理混做。
+6. ✅ 已解决(2026-10-03):单文件 >100KB 的拆分已完成真 TU 拆分(12 个超标源文件各单独提交验证,全仓源文件均已 <100KB,见知识库决策 0006)。
 7. 全仓 `.gitattributes` 行尾统一(R3)仍未做;本次目录整理已复现"文件被 git 标 LF→CRLF"的告警。
 
 ### 待决(需用户定,2026-09-23)
