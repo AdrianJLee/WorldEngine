@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "Instrumentor.h"
+#include "World/Debug/Instrumentor.h"
 
 namespace World
 {

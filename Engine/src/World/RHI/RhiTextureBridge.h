@@ -1,7 +1,7 @@
 #pragma once
 
 #include "World/RHI/RhiDevice.h"
-#include "World/Renderer/Texture.h"
+#include "World/Renderer/Texture/Texture.h"
 
 namespace World::Rhi
 {

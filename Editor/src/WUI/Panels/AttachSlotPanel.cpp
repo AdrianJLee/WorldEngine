@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "AttachSlotPanel.h"
+#include "WUI/Panels/AttachSlotPanel.h"
 
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"

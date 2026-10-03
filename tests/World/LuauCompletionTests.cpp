@@ -3,7 +3,7 @@
 // ui./entity:Get/self./文件符号/未知接收者的查询、前缀+子串+大小写+排序+截断、
 // 合成存根的 base 继承与 doc/type、畸形输入容错、1000 次 Query 的耗时。
 
-#include "World/Script/LuauCompletion.h"
+#include "World/Script/Tooling/LuauCompletion.h"
 
 #include <chrono>
 #include <cstdio>

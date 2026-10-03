@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include "World/Core/Export.h"
-#include "World/Renderer/RendererAPI.h"
+#include "World/Renderer/Legacy/Gfx/RendererAPI.h"
 #include "World/RHI/Rhi.h"
 
 #include <cstdint>

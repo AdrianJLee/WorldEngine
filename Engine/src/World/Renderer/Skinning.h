@@ -3,7 +3,7 @@
 // D5c-3a:CPU 蒙皮/动画数学(纯函数:无 RHI 设备、无场景依赖,headless 可断言)。
 // 运行时(D5c-3)只是把这里算出的调色板搬进 SSBO;数学口径以本文件为准。
 
-#include "World/Core/Asset/WModelIO.h"
+#include "World/Asset/WModelIO.h"
 #include "World/Core/Export.h"
 
 #include <glm/glm.hpp>

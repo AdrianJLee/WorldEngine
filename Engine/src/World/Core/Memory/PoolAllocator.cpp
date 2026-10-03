@@ -1,6 +1,6 @@
 ﻿#include "wldpch.h"
-#include "PoolAllocator.h"
-#include "MemoryTracker.h"
+#include "World/Core/Memory/PoolAllocator.h"
+#include "World/Core/Memory/MemoryTracker.h"
 namespace World
 {
 	namespace

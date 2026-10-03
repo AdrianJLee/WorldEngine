@@ -8,7 +8,7 @@
 //   ⑤ 每帧清空:本帧没有固定步 ⇒ 读到的物理事件为空
 #include "wldpch.h"
 #include "World/Core/WorldContext.h"
-#include "World/Gameplay/GameApp.h"
+#include "World/Gameplay/Runtime/GameApp.h"
 #include "World/Physics/Physics3D.h"
 #include "World/Physics/PhysicsEvents.h"
 #include "World/Scene/Components.h"

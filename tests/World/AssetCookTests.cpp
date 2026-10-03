@@ -1,12 +1,12 @@
-#include "World/Core/Asset/BuiltinImporters.h"
-#include "World/Core/Asset/CookPipeline.h"
-#include "World/Core/Asset/ProjectManifest.h"
-#include "World/Core/Asset/ScriptArtifact.h"
+#include "World/Asset/BuiltinImporters.h"
+#include "World/Asset/CookPipeline.h"
+#include "World/Asset/ProjectManifest.h"
+#include "World/Asset/ScriptArtifact.h"
 #include "World/Core/Log.h"
 #include "World/Core/Vfs/PackageProvider.h"
-#include "World/Script/LuauVm.h"
-#include "World/Script/ScriptRef.h"
-#include "World/Script/ScriptValue.h"
+#include "World/Script/Vm/LuauVm.h"
+#include "World/Script/Vm/ScriptRef.h"
+#include "World/Script/Vm/ScriptValue.h"
 
 #include <chrono>
 #include <cstring>

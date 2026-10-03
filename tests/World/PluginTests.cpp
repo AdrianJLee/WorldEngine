@@ -8,10 +8,10 @@
 //   * 插件侧证据(Register/Unregister 确实被调用)走宿主 WeHostApi::Log → World 核心日志,
 //     用 World::Log::RecentLines 取回(所以 main 先 Log::Init());
 //   * 每个用例独立临时目录 + 独立 PluginManager;失败路径逐条断言可读诊断。
-#include "World/Core/Asset/AssetTypeRegistry.h"
-#include "World/Core/Asset/BuiltinImporters.h"
-#include "World/Core/Asset/CookPipeline.h"
-#include "World/Core/Asset/ProjectManifest.h"
+#include "World/Asset/AssetTypeRegistry.h"
+#include "World/Asset/BuiltinImporters.h"
+#include "World/Asset/CookPipeline.h"
+#include "World/Asset/ProjectManifest.h"
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
 #include "World/Plugins/PluginManager.h"
@@ -22,12 +22,12 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/SceneSerializer.h"
-#include "World/Scene/LuaStubGenerator.h"
-#include "World/Scene/ScriptEngine.h"
-#include "World/Script/BindServices.h"
-#include "World/Script/LuauVm.h"
-#include "World/Script/PluginScriptLibrary.h"
-#include "World/Script/ScriptValue.h"
+#include "World/Script/Runtime/LuaStubGenerator.h"
+#include "World/Script/Runtime/ScriptEngine.h"
+#include "World/Script/Bindings/BindServices.h"
+#include "World/Script/Vm/LuauVm.h"
+#include "World/Script/Runtime/PluginScriptLibrary.h"
+#include "World/Script/Vm/ScriptValue.h"
 
 // T2b:测试插件与单测共用的组件布局夹具(两侧各自编译一份;插件不链接 World)。
 #include "../plugins/PluginComponentFixture.h"

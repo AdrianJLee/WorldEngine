@@ -1,20 +1,20 @@
 #include "wldpch.h"
-#include "PropertiesPanel.h"
-#include "EditorAssetCatalog.h"
+#include "WUI/Panels/PropertiesPanel.h"
+#include "WUI/Common/EditorAssetCatalog.h"
 
 // P2 W5b:Reload 按钮要复用 EditorLayer 的热重载入口(与帧边界轮询、AI 通道 script.reload
 // 同一条语义)。PanelHost 是跨任务冻结的窄接口,本包文件边界内不能扩展它,因此只 include。
-#include "../../EditorLayer.h"
+#include "App/EditorLayer.h"
 
 #include "World/Core/KeyCodes.h"
-#include "World/Core/Asset/ScriptArtifact.h"
-#include "World/Core/Asset/ProjectManifest.h"
-#include "World/Gameplay/Prefab.h"
+#include "World/Asset/ScriptArtifact.h"
+#include "World/Asset/ProjectManifest.h"
+#include "World/Gameplay/Prefab/Prefab.h"
 // 2026-09-26 脚本组件重写:属性表(`ScriptProperty`)的唯一维护点(注解/schema 声明 → 属性表)。
-#include "World/Script/ScriptProperties.h"
+#include "World/Script/Runtime/ScriptProperties.h"
 // 2026-09-26 SCRIPT-V6:声明的权威解析在引擎侧(名字/类型/Doc/**脚本里的默认值**)——
 // 编辑器只调 `ScriptEngine::SyncScriptDeclarations`,不再自己扫注解。
-#include "World/Scene/ScriptEngine.h"
+#include "World/Script/Runtime/ScriptEngine.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "EditorPanel.h"
-#include "EditorAssetTypes.h"
+#include "WUI/Common/EditorPanel.h"
+#include "WUI/Common/EditorAssetTypes.h"
 // M4-TEX P4:纹理资产的设置检查器(内容浏览器双击 `.wtex` / 右键菜单)与它的共享判定
 // (源图徽标、重烘、请求通道)都在这条头文件里 —— 面板之间只走这一份口径。
-#include "TextureSettingsPanel.h"
-#include "World/Core/Asset/AssetTypeRegistry.h"
+#include "WUI/Panels/TextureSettingsPanel.h"
+#include "World/Asset/AssetTypeRegistry.h"
 #include "World/Renderer/Material.h"
-#include "World/Renderer/Texture.h"
+#include "World/Renderer/Texture/Texture.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/Utils/Paths.h"
 

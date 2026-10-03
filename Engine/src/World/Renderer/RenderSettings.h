@@ -1,6 +1,6 @@
 #pragma once
 
-#include "World/Core/Asset/ProjectManifest.h"
+#include "World/Asset/ProjectManifest.h"
 
 namespace World
 {

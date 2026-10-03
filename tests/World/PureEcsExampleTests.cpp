@@ -16,8 +16,8 @@
 #include "World/Scene/ISystem.h"
 #include "World/Scene/Query.h"
 #include "World/Scene/Scene.h"
-#include "World/Scene/ScriptEngine.h"
-#include "World/Script/LuauVm.h"
+#include "World/Script/Runtime/ScriptEngine.h"
+#include "World/Script/Vm/LuauVm.h"
 
 #include <cmath>
 #include <cstdio>

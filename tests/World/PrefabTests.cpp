@@ -1,7 +1,7 @@
 // P2a W4:Prefab 子树实例化(深拷贝 + UUID 重发 + 层级重建 + 挂到目标父节点)。
 #include "World/Core/Core.h"
 #include "World/Core/WorldContext.h"
-#include "World/Gameplay/Prefab.h"
+#include "World/Gameplay/Prefab/Prefab.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/Scene.h"

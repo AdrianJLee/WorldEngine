@@ -1,14 +1,14 @@
 #pragma once
 
-#include "EditorPanel.h"
+#include "WUI/Common/EditorPanel.h"
 
 // HOTR-P2-T5:就地重烘 `<主名>.wtexc` 的实现已提取到 Editor/src/Texture/TextureArtifactBaker.*,
 // 本头文件继续转发声明(ContentBrowserPanel 等既有调用方 include 本头即可,调用点不变)。
-#include "../../Texture/TextureArtifactBaker.h"
+#include "Texture/TextureArtifactBaker.h"
 
 #include "World/RHI/Rhi.h"
-#include "World/Renderer/TextureArtifact.h"
-#include "World/Renderer/TextureImportSettings.h"
+#include "World/Renderer/Texture/TextureArtifact.h"
+#include "World/Renderer/Texture/TextureImportSettings.h"
 
 #include <condition_variable>
 #include <cstdint>

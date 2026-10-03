@@ -1,6 +1,6 @@
 #include "wldpch.h"
 #include "World/Renderer/RenderSettings.h"
-#include "World/Core/PhysicsSettings.h"
+#include "World/Physics/PhysicsSettings.h"
 #include "World/Renderer/Renderer.h"
 
 #include <algorithm>

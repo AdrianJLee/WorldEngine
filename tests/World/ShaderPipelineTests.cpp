@@ -3,7 +3,7 @@
 #include "World/Core/Log.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Renderer.h"
-#include "World/Renderer/RendererAPI.h"
+#include "World/Renderer/Legacy/Gfx/RendererAPI.h"
 #include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/ShaderUtils.h"
 

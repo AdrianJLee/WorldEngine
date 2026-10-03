@@ -23,7 +23,7 @@
 
 | 步骤 | 位置 |
 | --- | --- |
-| 注册类型名、扩展名、创建方式 | `Engine/src/World/Core/Asset/AssetTypeRegistry.h/.cpp` |
+| 注册类型名、扩展名、创建方式 | `Engine/src/World/Asset/AssetTypeRegistry.h/.cpp` |
 | 内容浏览器显示与筛选 | `Editor/src/WUI/Panels/ContentBrowserPanel.*` |
 | 参考测试 | `tests/World/AssetTypeRegistryTests.cpp`(注册 / 覆盖 / 反注册 / 排序 / 落盘) |
 

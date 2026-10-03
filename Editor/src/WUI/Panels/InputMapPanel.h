@@ -1,7 +1,7 @@
 #pragma once
 
-#include "EditorPanel.h"
-#include "World/Gameplay/InputMap.h"
+#include "WUI/Common/EditorPanel.h"
+#include "World/Gameplay/Framework/InputMap.h"
 
 #include <filesystem>
 #include <string>

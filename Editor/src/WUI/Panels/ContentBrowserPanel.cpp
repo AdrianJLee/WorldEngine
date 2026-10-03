@@ -1,9 +1,9 @@
 #include "wldpch.h"
-#include "ContentBrowserPanel.h"
-#include "EditorAssetCatalog.h"
-#include "EditorAssetTypes.h"
-#include "../EditorShell.h"
-#include "../../EditorResources.h"
+#include "WUI/Panels/ContentBrowserPanel.h"
+#include "WUI/Common/EditorAssetCatalog.h"
+#include "WUI/Common/EditorAssetTypes.h"
+#include "WUI/Shell/EditorShell.h"
+#include "Core/EditorResources.h"
 
 #include "World/Core/KeyCodes.h"
 #include "World/Core/Application.h"
@@ -14,13 +14,13 @@
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/Widgets/WuiModal.h"
-#include "World/Renderer/Texture.h"
+#include "World/Renderer/Texture/Texture.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
 // M4-S2/Slang-B1:Material Shader(`.slang`)的起始代码取自内核的 MaterialSurfaceCompiler
 // (不在这里再抄一份表面函数骨架);契约注释头由 ShaderContractHeader() 提供。
 #include "World/Renderer/MaterialSurface.h"
-#include "World/Renderer/TextureCompiler.h"
+#include "World/Renderer/Texture/TextureCompiler.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/SceneSerializer.h"
 

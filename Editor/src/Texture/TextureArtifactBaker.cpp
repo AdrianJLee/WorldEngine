@@ -1,12 +1,12 @@
 #include "wldpch.h"
-#include "TextureArtifactBaker.h"
+#include "Texture/TextureArtifactBaker.h"
 
 // 资产读取的**唯一口径**(容器 / 旧式自动区分)与渲染设置解析都在面板模块里,
 // 本文件只调用、不复制它的解析实现(避免"第二套读法")。
-#include "../WUI/Panels/TextureSettingsPanel.h"
+#include "WUI/Panels/TextureSettingsPanel.h"
 
-#include "World/Renderer/MaterialTextureCache.h"
-#include "World/Renderer/TextureCompiler.h"
+#include "World/Renderer/Texture/MaterialTextureCache.h"
+#include "World/Renderer/Texture/TextureCompiler.h"
 
 #include <fstream>
 #include <vector>

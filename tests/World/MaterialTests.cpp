@@ -2,8 +2,8 @@
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialSurface.h"
-#include "World/Renderer/MaterialTextureCache.h"
-#include "World/Renderer/TextureData.h"
+#include "World/Renderer/Texture/MaterialTextureCache.h"
+#include "World/Renderer/Texture/TextureData.h"
 #include "World/Utils/Paths.h"
 
 #include <algorithm>

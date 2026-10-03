@@ -136,7 +136,7 @@ tools/    vendor/     World/
 
 - 全量替换**活引用**:`AGENTS.md`、skill 的 SKILL.md 与脚本自引用、multi-agent 协议正文、
   `.codex/agents/*.toml` 指针、三处代码注释(`Editor/src/AiControl/AiControlServer.h`、
-  `Engine/src/World/WUI/WuiWidgets.cpp`、`Engine/src/World/Script/Sandbox.h`)、私有库
+  `Engine/src/World/WUI/WuiWidgets.cpp`、`Engine/src/World/Script/Vm/Sandbox.h`)、私有库
   (`scripts/export-state.ps1`、`knowledge/00-KNOWLEDGE.md`、`generated/STATE.md`、`workflow/**`)。
 - **历史记录不改**:`tools/agents/dispatch/{archive,reports}/**`、`tasks/**` 里的旧路径保持原样,
   在新 `README.md` 注明"2026-09-23 前的记录可能引用 `tools/codex/`"。

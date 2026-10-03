@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ViewportHost.h"
+#include "WUI/Common/ViewportHost.h"
 #include "World/Scene/Components.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiWidget.h"

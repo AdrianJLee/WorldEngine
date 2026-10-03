@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "ScriptsPanel.h"
+#include "WUI/Panels/ScriptsPanel.h"
 
 #include "World/Scene/Components.h"
 #include "World/Utils/Paths.h"

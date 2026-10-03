@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "GameProjectSource.h"
+#include "Project/GameProjectSource.h"
 
 #include <algorithm>
 #include <fstream>
@@ -349,7 +349,7 @@ namespace World::Editor
 			"#include \"World/Scene/ISystem.h\"\n"
 			"#include \"World/Scene/Query.h\"\n"
 			"#include \"World/Scene/Scene.h\"\n"
-			"#include \"World/Scene/TransformSystem.h\"\n"
+			"#include \"World/Scene/Systems/TransformSystem.h\"\n"
 			"\n"
 			"#include <string_view>\n"
 			"\n"

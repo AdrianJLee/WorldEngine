@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "PluginScaffolder.h"
+#include "Project/PluginScaffolder.h"
 
-#include "ProjectScaffolder.h"
+#include "Project/ProjectScaffolder.h"
 
 #include "World/Plugins/PluginManifest.h"
 #include "World/WUI/WuiJson.h"

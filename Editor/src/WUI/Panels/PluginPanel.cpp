@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "PluginPanel.h"
+#include "WUI/Panels/PluginPanel.h"
 
-#include "../EditorShell.h"
+#include "WUI/Shell/EditorShell.h"
 
 namespace World
 {

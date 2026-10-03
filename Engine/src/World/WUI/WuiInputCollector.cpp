@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "WuiInputCollector.h"
+#include "World/WUI/WuiInputCollector.h"
 
 #include "World/Core/KeyCodes.h"
 

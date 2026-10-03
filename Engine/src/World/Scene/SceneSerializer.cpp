@@ -1,12 +1,12 @@
 #include "wldpch.h"
-#include "SceneSerializer.h"
+#include "World/Scene/SceneSerializer.h"
 
 #include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
-#include "World/Scene/ScriptEngine.h"
+#include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Core/UUID.h"
-#include "World/Gameplay/PrefabTypes.h"
+#include "World/Gameplay/Prefab/PrefabTypes.h"
 #include "World/Schema/SchemaWriter.h"
 
 #include <algorithm>

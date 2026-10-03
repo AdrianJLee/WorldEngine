@@ -1,6 +1,6 @@
 ﻿#include "wldpch.h"
-#include "StackAllocator.h"
-#include "MemoryTracker.h"
+#include "World/Core/Memory/StackAllocator.h"
+#include "World/Core/Memory/MemoryTracker.h"
 namespace World
 {
 	StackAllocator::StackAllocator(size_t size, void* start, const char* debugName, bool isEphemeral)

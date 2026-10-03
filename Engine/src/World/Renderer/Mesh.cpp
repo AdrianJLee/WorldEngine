@@ -1,7 +1,7 @@
 #include "wldpch.h"
 #include "World/Renderer/Mesh.h"
 
-#include "World/Core/Asset/WModelIO.h"
+#include "World/Asset/WModelIO.h"
 
 #include <glm/glm.hpp>
 

@@ -1,8 +1,8 @@
 #include "wldpch.h"
-#include "OpenGLDescriptorSet.h"
-#include "OpenGLBuffer.h"
-#include "OpenGLTexture.h"
-#include "OpenGLSampler.h"
+#include "World/RHI/OpenGL/OpenGLDescriptorSet.h"
+#include "World/RHI/OpenGL/OpenGLBuffer.h"
+#include "World/RHI/OpenGL/OpenGLTexture.h"
+#include "World/RHI/OpenGL/OpenGLSampler.h"
 
 namespace World::Rhi::OpenGL
 {

@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "PluginComponentStorage.h"
+#include "World/Plugins/PluginComponentStorage.h"
 
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"

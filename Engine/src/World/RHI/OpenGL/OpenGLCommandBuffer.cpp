@@ -1,12 +1,12 @@
 #include "wldpch.h"
-#include "OpenGLCommandBuffer.h"
-#include "OpenGLHelpers.h"
-#include "OpenGLBuffer.h"
-#include "OpenGLDescriptorSet.h"
-#include "OpenGLPipeline.h"
-#include "OpenGLQueryPool.h"
-#include "OpenGLRenderPass.h"
-#include "OpenGLTexture.h"
+#include "World/RHI/OpenGL/OpenGLCommandBuffer.h"
+#include "World/RHI/OpenGL/OpenGLHelpers.h"
+#include "World/RHI/OpenGL/OpenGLBuffer.h"
+#include "World/RHI/OpenGL/OpenGLDescriptorSet.h"
+#include "World/RHI/OpenGL/OpenGLPipeline.h"
+#include "World/RHI/OpenGL/OpenGLQueryPool.h"
+#include "World/RHI/OpenGL/OpenGLRenderPass.h"
+#include "World/RHI/OpenGL/OpenGLTexture.h"
 
 #include <algorithm>
 

@@ -1,6 +1,6 @@
 ﻿#include "wldpch.h"
-#include "MemoryTracker.h"
-#include "Memory.h"
+#include "World/Core/Memory/MemoryTracker.h"
+#include "World/Core/Memory/Memory.h"
 namespace World
 {
 	MemoryTracker& MemoryTracker::Get()

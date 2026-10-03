@@ -1,6 +1,6 @@
 #include "wldpch.h"
-#include "ModelPreviewPanel.h"
-#include "ViewportPanel.h"
+#include "WUI/Panels/ModelPreviewPanel.h"
+#include "WUI/Panels/ViewportPanel.h"
 
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/ProjectionConventions.h"
@@ -9,7 +9,7 @@
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/AssetHotReload.h"
-#include "World/Core/Asset/GltfImporter.h"
+#include "World/Asset/GltfImporter.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiLocalization.h"

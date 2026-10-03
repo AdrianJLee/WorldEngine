@@ -10,11 +10,11 @@
 #include "World/Core/WorldContext.h"
 #include "World/Schema/Schema.h"
 #include "World/Schema/SchemaRegistry.h"
-#include "World/Scene/LuaStubGenerator.h"
-#include "World/Scene/ScriptEngine.h"
-#include "World/Script/BindComponentAccess.h"
-#include "World/Script/BindServices.h"
-#include "World/Script/BindUI.h"
+#include "World/Script/Runtime/LuaStubGenerator.h"
+#include "World/Script/Runtime/ScriptEngine.h"
+#include "World/Script/Bindings/BindComponentAccess.h"
+#include "World/Script/Bindings/BindServices.h"
+#include "World/Script/Bindings/BindUI.h"
 
 #include <cstdio>
 #include <filesystem>

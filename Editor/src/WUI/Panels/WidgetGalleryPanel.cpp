@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "WidgetGalleryPanel.h"
+#include "WUI/Panels/WidgetGalleryPanel.h"
 
-#include "../../EditorPreferences.h"
+#include "Core/EditorPreferences.h"
 
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiAccessibility.h"

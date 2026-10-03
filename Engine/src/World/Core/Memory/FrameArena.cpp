@@ -1,8 +1,8 @@
 #include "wldpch.h"
-#include "FrameArena.h"
+#include "World/Core/Memory/FrameArena.h"
 
-#include "LinearAllocator.h"
-#include "MemoryTracker.h"
+#include "World/Core/Memory/LinearAllocator.h"
+#include "World/Core/Memory/MemoryTracker.h"
 
 #include <algorithm>
 #include <cstring>

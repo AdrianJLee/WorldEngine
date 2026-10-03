@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include "World/Core/Export.h"
 #include "World/RHI/Rhi.h"
-#include "World/Renderer/SubTexture2D.h"
+#include "World/Renderer/Texture/SubTexture2D.h"
 #include "World/Renderer/EditorCamera.h"
 #include "World/Scene/Components.h"
 

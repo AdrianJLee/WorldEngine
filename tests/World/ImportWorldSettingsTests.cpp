@@ -9,9 +9,9 @@
 //      - 写了 physics_gravity / physics_debug → 往返读回一致;
 //      - 非法值(非有限重力)不吞:落到"未覆盖",并保留另一项。
 #include "wldpch.h"
-#include "World/Core/Asset/ModelImportSettings.h"
-#include "World/Core/Asset/ProjectManifest.h"
-#include "World/Core/Asset/WModelIO.h"
+#include "World/Asset/ModelImportSettings.h"
+#include "World/Asset/ProjectManifest.h"
+#include "World/Asset/WModelIO.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/SceneSerializer.h"

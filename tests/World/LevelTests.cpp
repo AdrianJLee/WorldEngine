@@ -1,7 +1,7 @@
 // P2a W2:关卡清单(levels.welevel)与关卡服务(加载状态机/场景栈)。
 #include "World/Core/WorldContext.h"
-#include "World/Gameplay/LevelList.h"
-#include "World/Gameplay/LevelService.h"
+#include "World/Gameplay/Framework/LevelList.h"
+#include "World/Gameplay/Framework/LevelService.h"
 #include "World/Scene/Scene.h"
 
 #include <cstdio>

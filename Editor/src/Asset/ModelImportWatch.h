@@ -1,6 +1,6 @@
 #pragma once
 
-#include "World/Core/Asset/ModelImportSettings.h"
+#include "World/Asset/ModelImportSettings.h"
 
 #include <condition_variable>
 #include <cstdint>

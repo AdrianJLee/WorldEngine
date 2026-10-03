@@ -1,0 +1,600 @@
+#include "wldpch.h"
+#include "WUI/Shell/FloatWindowHost.h"
+
+#include "World/Core/Application.h"
+#include "World/Events/ApplicationEvent.h"
+#include "World/Events/KeyEvent.h"
+#include "World/Events/MouseEvent.h"
+#include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiScriptedInput.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+
+namespace World
+{
+	FloatWindowHost::FloatWindowHost(std::string panel, std::string title, const Wui::WuiRect& screenRect, Callbacks callbacks)
+		: m_Panel(std::move(panel)), m_Title(std::move(title)), m_Callbacks(std::move(callbacks))
+	{
+		m_Panels.push_back(m_Panel);
+		m_Active = 0;
+		WindowProps props(m_Title,
+			static_cast<uint32_t>(std::max(240.0f, screenRect.W)),
+			static_cast<uint32_t>(std::max(160.0f, screenRect.H)),
+			true /* 无边框:标题栏由 WUI 绘制,顶部即标签/附加区域 */);
+		Window* main = Application::HasInstance() ? &Application::Get().GetWindow() : nullptr;
+		m_Window = Window::CreateAuxiliary(props, main);
+		if (!m_Window)
+			return;
+		m_Window->SetPosition(static_cast<int>(screenRect.X), static_cast<int>(screenRect.Y));
+		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(FloatWindowHost::OnEvent));
+		WLD_CORE_INFO("[float] independent window created: {0} ({1}x{2})", m_Panel,
+			m_Window->GetWidth(), m_Window->GetHeight());
+		// 创建附加窗口会切换当前 GL 上下文,恢复主窗口的上下文。
+		if (main)
+			main->MakeCurrent();
+
+		m_Backend.UseLocalInput({ static_cast<float>(m_Window->GetWidth()), static_cast<float>(m_Window->GetHeight()) });
+		m_Backend.SetCursorWindow(m_Window->GetNativeWindow());
+		// MAT-UI8:本窗口 WUI 上下文接系统剪贴板(单行文本框的 Ctrl+C/X/V)。
+		// 浮窗与主窗口读写的都是同一份 OS 剪贴板,窗口之间复制粘贴因此天然互通。
+		m_Context.GetClipboard = [this](std::string& out)
+		{
+			if (!m_Window)
+				return false;
+			out = m_Window->GetClipboardText();
+			return !out.empty();
+		};
+		m_Context.SetClipboard = [this](std::string_view text)
+		{
+			if (!m_Window)
+				return false;
+			m_Window->SetClipboardText(std::string(text));
+			return true;
+		};
+		const bool skipTarget = std::getenv("WLD_FLOAT_NO_TARGET") != nullptr;
+		if (!skipTarget && Renderer::GetBackendName() == "vulkan")
+		{
+			PresentTargetDesc desc;
+			desc.NativeWindow = m_Window->GetNativeWindow();
+			desc.Width = m_Window->GetWidth();
+			desc.Height = m_Window->GetHeight();
+			desc.DebugName = "Float:" + m_Panel;
+			m_Target = Renderer::CreatePresentTarget(desc);
+		}
+	}
+
+	FloatWindowHost::~FloatWindowHost()
+	{
+		// 先断开事件回调:GLFW 在销毁窗口时会派发消息,若回调仍指向正在析构的
+		// 本对象(或其成员),会造成访问违例。
+		if (m_Window)
+			m_Window->SetEventCallback(Window::EventCallbackFn {});
+		// 释放顺序(实测退出崩溃 0xC0000005 的根因):
+		//   ① 本窗口的 WUI 后端持有 RHI 资源,并注册了 Renderer 的设备释放钩子;
+		//   ② 成员析构发生在析构函数体之后,即"OS 窗口(及其 GL 上下文)已销毁"之后,
+		//      此时释放资源会在无当前上下文的条件下调用 glDelete*(GL),或让
+		//      Renderer::Shutdown 调用指向已释放对象的钩子(Vulkan/GL 均可触发);
+		//   ③ 因此必须在窗口存活、且其上下文为当前时先释放后端资源。
+		if (m_Window)
+		{
+			m_Window->MakeCurrent();
+			m_Backend.ReleaseDeviceResources();
+		}
+		// 诊断开关:WLD_FLOAT_LEAK_TARGET 跳过呈现目标销毁,用于区分
+		// "交换链销毁"与"窗口销毁"两类崩溃来源。
+		if (m_Target && !std::getenv("WLD_FLOAT_LEAK_TARGET"))
+			Renderer::DestroyPresentTarget(m_Target);
+		m_Target = nullptr;
+		delete m_Window;
+		m_Window = nullptr;
+		// 恢复主窗口上下文:退出路径上 Renderer::Shutdown 还会用当前上下文销毁 GL 资源,
+		// 若停在刚销毁的附加窗口上,就会重演"设备资源在无上下文时释放"的崩溃。
+		if (Application::HasInstance())
+			Application::Get().GetWindow().MakeCurrent();
+	}
+
+	bool FloatWindowHost::Render()
+	{
+		if (!m_Window)
+			return false;
+		if (m_Hidden)
+			return true; // 已隐藏(复用中):不渲染、不处理输入
+		if (std::getenv("WLD_FLOAT_NO_RENDER"))
+			return true; // 诊断:只创建窗口,不渲染内容
+		if (m_Window->ShouldClose())
+			return false;
+		const glm::vec2 size { static_cast<float>(m_Window->GetWidth()), static_cast<float>(m_Window->GetHeight()) };
+		if (size.x < 8.0f || size.y < 8.0f)
+			return true; // 最小化/尚未布局
+		// 若系统左键已释放(可能释放在别的窗口),清除"本窗口按下"标志。
+		if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000))
+			m_PressSeenInWindow = false;
+
+		// 关键:面板内容(Renderer3D 预览通道、相机预览等)必须跑在**主窗口的 GL 上下文**里。
+		// RHI 管线/VAO 是主上下文创建并共享给所有窗口的,而 VAO 不随窗口共享上下文共享:
+		// 之前这里依赖"上一个窗口留下的当前上下文",于是**第二个及以后的独立窗口**会拿到
+		// 别的窗口的上下文 → 预览通道的绘制被静默丢弃(只剩清屏色,用户实测);
+		// 附加到主窗口时面板在主窗口里渲染,所以看起来正常。
+		Window* mainWindow = Application::HasInstance() ? &Application::Get().GetWindow() : nullptr;
+		if (mainWindow && mainWindow != m_Window)
+			mainWindow->MakeCurrent();
+
+		m_Backend.SetViewportSize(size);
+		Wui::WuiInputState input;
+		if (!m_Backend.BeginFrame(input))
+			return true;
+		// AI 无障碍:本窗口的节点重新登记 + 注入脚本点击(与真实鼠标同一条输入路径)。
+		const std::string windowKey = "float:" + m_Panel;
+		Wui::WuiAccessibility::Get().BeginFrame(windowKey, { size.x, size.y });
+		m_Context.SetWindowKey(windowKey);
+		Wui::WuiScriptedInput::Get().Apply(windowKey, input);
+		m_Context.BeginFrame(input);
+		RenderTabBar(m_Context, { 0.0f, 0.0f, size.x, size.y });
+		// P4-UX4:独立窗口里的悬停提示(同一套控件/主题)。
+		Wui::DrawTooltip(m_Context, m_Callbacks.Theme);
+		m_Context.EndFrame();
+
+		if (m_Target)
+			Renderer::ResizePresentTarget(m_Target, static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y));
+		m_Window->MakeCurrent();
+		if (Renderer::BeginFramePresent(m_Target))
+		{
+			m_Backend.Render(m_Context.Commands(), m_Context.OverlayCommands());
+			// AI 控制通道的整窗抓图:必须在 UI 提交之后、呈现(→Present 布局转换)之前执行。
+			Renderer::FlushPresentCaptures();
+			Renderer::EndFramePresent(m_Target);
+		}
+		m_Backend.EndFrame(m_Context.Cursor());
+		// 开发验证:读回独立窗口的默认帧缓冲(WLD_CAPTURE_FLOAT=<路径前缀>)。
+		if (const char* capturePrefix = std::getenv("WLD_CAPTURE_FLOAT"))
+		{
+			static int frameCount = 0;
+			if (++frameCount == 120)
+				Renderer::CaptureDefaultFramebuffer(std::string(capturePrefix) + m_Panel + ".ppm",
+					static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y));
+		}
+		CaptureScreenSequence(size.x, size.y);
+		m_Window->SwapBuffers();
+		return true;
+	}
+
+	void FloatWindowHost::SetClientSize(uint32_t width, uint32_t height)
+	{
+		if (!m_Window)
+			return;
+		m_Window->SetSize(width, height);
+	}
+
+	void FloatWindowHost::CaptureScreenSequence(float width, float height)
+	{
+		// 与主窗口同一个开关(WLD_SCREEN_CAPTURE_DIR/_START/_EVERY/_COUNT):把**独立窗口**
+		// 的最终画面也连续抓成 PPM,否则"材质预览窗口在闪"这类问题在抓图里完全看不到。
+		static const char* dir = std::getenv("WLD_SCREEN_CAPTURE_DIR");
+		if (!dir || !*dir)
+			return;
+		static int every = std::getenv("WLD_SCREEN_CAPTURE_EVERY") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_EVERY")) : 1;
+		static int start = std::getenv("WLD_SCREEN_CAPTURE_START") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_START")) : 0;
+		static int count = std::getenv("WLD_SCREEN_CAPTURE_COUNT") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_COUNT")) : 60;
+		if (every <= 0)
+			every = 1;
+		++m_CaptureFrame;
+		if (m_CaptureFrame < start || m_CaptureWritten >= count || (m_CaptureFrame - start) % every != 0)
+			return;
+		// 面板 id 含 ':'/'/' 等路径字符,文件名里统一替换(否则会写进不存在的子目录)。
+		std::string stem;
+		stem.reserve(m_Panel.size());
+		for (char c : m_Panel)
+			stem += (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_') ? c : '_';
+		const std::string path = std::string(dir) + "/float-" + stem + "-" + std::to_string(m_CaptureWritten) + ".ppm";
+		Renderer::CaptureDefaultFramebuffer(path, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+		++m_CaptureWritten;
+	}
+
+	Wui::WuiRect FloatWindowHost::ScreenRect() const
+	{
+		Wui::WuiRect rect { 0, 0, 480, 320 };
+		if (!m_Window)
+			return rect;
+		int x = 0, y = 0;
+		m_Window->GetPosition(&x, &y);
+		rect.X = static_cast<float>(x);
+		rect.Y = static_cast<float>(y);
+		rect.W = static_cast<float>(m_Window->GetWidth());
+		rect.H = static_cast<float>(m_Window->GetHeight());
+		return rect;
+	}
+
+	void FloatWindowHost::SetScreenPosition(float x, float y)
+	{
+		if (m_Window)
+			m_Window->SetPosition(static_cast<int>(x), static_cast<int>(y));
+	}
+
+	// 渲染后端切换:同一个 HWND 上 GL 上下文与 Vulkan 表面无法可靠共存,
+	// 独立窗口也必须按新后端重建(位置/尺寸/可见性保留)。
+	void FloatWindowHost::RecreateWindow()
+	{
+		if (!m_Window)
+			return;
+
+		int x = 0, y = 0;
+		m_Window->GetPosition(&x, &y);
+		const uint32_t width = std::max(240u, m_Window->GetWidth());
+		const uint32_t height = std::max(160u, m_Window->GetHeight());
+		const bool visible = !m_Hidden;
+
+		if (m_Target)
+		{
+			Renderer::DestroyPresentTarget(m_Target);
+			m_Target = nullptr;
+		}
+		// 同一顺序要求:重建窗口前也要在本窗口的上下文里先放掉后端资源
+		// (新建窗口后 EnsureResources 会按需重建)。
+		m_Window->MakeCurrent();
+		m_Backend.ReleaseDeviceResources();
+		m_Window->SetEventCallback(Window::EventCallbackFn {});
+		delete m_Window;
+		m_Window = nullptr;
+
+		WindowProps props(m_Title, width, height, true);
+		Window* main = Application::HasInstance() ? &Application::Get().GetWindow() : nullptr;
+		m_Window = Window::CreateAuxiliary(props, main);
+		if (!m_Window)
+			return;
+		m_Window->SetPosition(x, y);
+		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(FloatWindowHost::OnEvent));
+		if (!visible)
+			m_Window->SetVisible(false);
+		if (main)
+			main->MakeCurrent();
+
+		m_Backend.SetCursorWindow(m_Window->GetNativeWindow());
+		m_Backend.SetViewportSize({ static_cast<float>(m_Window->GetWidth()),
+			static_cast<float>(m_Window->GetHeight()) });
+		if (Renderer::GetBackendName() == "vulkan")
+		{
+			PresentTargetDesc desc;
+			desc.NativeWindow = m_Window->GetNativeWindow();
+			desc.Width = m_Window->GetWidth();
+			desc.Height = m_Window->GetHeight();
+			desc.DebugName = "Float:" + m_Panel;
+			m_Target = Renderer::CreatePresentTarget(desc);
+		}
+		WLD_CORE_INFO("[float] independent window recreated for backend '{0}': {1}",
+			Renderer::GetBackendName(), m_Panel);
+	}
+
+	void FloatWindowHost::SetHidden(bool hidden)
+	{
+		m_Hidden = hidden;
+		// W9-2:隐藏窗口不再渲染,它的文本焦点登记不会被 BeginFrame 清掉(WuiTextFocus 只按
+		// "正在渲染的上下文"重建)。不摘掉的话,在独立窗口里聚焦过脚本编辑器再关掉窗口,
+		// EditorLayer::OnKeyPressed 会认为"文本焦点一直活跃" → 引擎全局快捷键(Ctrl+S/Q/W/E/R、
+		// F5-F7…)全部被吞掉。隐藏 = 该窗口的键盘上下文不再成立,这里显式清掉。
+		if (hidden)
+		{
+			Wui::WuiTextFocus::Get().BeginContextFrame(&m_Context);
+			// P4-UX7:隐藏 = 不再渲染 → 该窗口上一帧登记的无障碍节点必须丢掉,
+			// 否则 ui.tree 会一直显示幽灵行,ui.invoke 还会把点击投给这个已经看不见的窗口
+			// (实测:挂靠到主窗口后,点"分类"会落到隐藏窗口的旧矩形上,主窗口那份纹丝不动)。
+			Wui::WuiAccessibility::Get().ClearWindow("float:" + m_Panel);
+		}
+		if (!m_Window)
+			return;
+		m_PressSeenInWindow = false;
+		m_TabPressArmed = false;
+		m_PressedTab.clear();
+		if (hidden)
+		{
+			m_Window->SetVisible(false);
+		}
+		else
+		{
+			m_Window->SetShouldClose(false);
+			m_Window->SetVisible(true);
+		}
+	}
+
+	void FloatWindowHost::Focus()
+	{
+		if (m_Window)
+			m_Window->Focus();
+	}
+
+	void FloatWindowHost::ShowWithoutActivation()
+	{
+		m_Hidden = false;
+		if (!m_Window)
+			return;
+		m_Window->SetShouldClose(false);
+		m_Window->SetVisibleNoActivate(true);
+	}
+
+	bool FloatWindowHost::IsFocused() const
+	{
+		if (!m_Window || m_Hidden)
+			return false;
+		return m_Window->IsFocused();
+	}
+
+	// ---- 窗口内的面板集合(标签栏模型) ----
+
+	const std::string& FloatWindowHost::ActivePanel() const
+	{
+		static const std::string empty;
+		return m_Active < m_Panels.size() ? m_Panels[m_Active] : empty;
+	}
+
+	bool FloatWindowHost::Contains(const std::string& panel) const
+	{
+		return std::find(m_Panels.begin(), m_Panels.end(), panel) != m_Panels.end();
+	}
+
+	bool FloatWindowHost::AddPanel(const std::string& panel, bool activate)
+	{
+		if (panel.empty() || Contains(panel))
+			return false;
+		m_Panels.push_back(panel);
+		if (activate)
+			m_Active = m_Panels.size() - 1;
+		WLD_CORE_INFO("[float] panel '{0}' added to independent window '{1}' ({2} tabs)",
+			panel, m_Panel, m_Panels.size());
+		return true;
+	}
+
+	bool FloatWindowHost::RemovePanel(const std::string& panel)
+	{
+		auto it = std::find(m_Panels.begin(), m_Panels.end(), panel);
+		if (it == m_Panels.end())
+			return false;
+		const size_t index = static_cast<size_t>(it - m_Panels.begin());
+		m_Panels.erase(it);
+		// 活动索引:删除位置之前的面板左移,删除的若是活动标签则顺延到后一个;
+		// 删掉最后一个时回退到末尾,窗口为空时归零。
+		if (m_Panels.empty())
+			m_Active = 0;
+		else if (index < m_Active)
+			--m_Active;
+		else if (m_Active >= m_Panels.size())
+			m_Active = m_Panels.size() - 1;
+		WLD_CORE_INFO("[float] panel '{0}' removed from independent window '{1}' ({2} tabs left)",
+			panel, m_Panel, m_Panels.size());
+		return true;
+	}
+
+	bool FloatWindowHost::MovePanelTo(const std::string& panel, size_t index)
+	{
+		auto it = std::find(m_Panels.begin(), m_Panels.end(), panel);
+		if (it == m_Panels.end() || m_Panels.empty())
+			return false;
+		const bool wasActive = ActivePanel() == panel;
+		const size_t from = static_cast<size_t>(it - m_Panels.begin());
+		const size_t target = std::min(index, m_Panels.size() - 1);
+		if (from == target)
+			return true;
+		m_Panels.erase(it);
+		m_Panels.insert(m_Panels.begin() + static_cast<std::ptrdiff_t>(target), panel);
+		if (wasActive)
+			m_Active = target;
+		else if (from < m_Active && target >= m_Active)
+			--m_Active;
+		else if (from > m_Active && target <= m_Active)
+			++m_Active;
+		return true;
+	}
+
+	bool FloatWindowHost::ActivatePanel(const std::string& panel)
+	{
+		auto it = std::find(m_Panels.begin(), m_Panels.end(), panel);
+		if (it == m_Panels.end())
+			return false;
+		m_Active = static_cast<size_t>(it - m_Panels.begin());
+		return true;
+	}
+
+	std::string FloatWindowHost::TakeCloseRequest()
+	{
+		std::string request = std::move(m_CloseRequest);
+		m_CloseRequest.clear();
+		return request;
+	}
+
+	std::string FloatWindowHost::TakePendingTabDrag()
+	{
+		std::string request = std::move(m_PendingTabDrag);
+		m_PendingTabDrag.clear();
+		return request;
+	}
+
+	glm::vec2 FloatWindowHost::TakePendingTabDragGrab() const
+	{
+		// 面板的 MousePos 是"设计单位"(整块 UI 按 UiScale 缩放),而窗口位置/光标都是物理像素。
+		return m_TabDragGrab * Wui::UiScale();
+	}
+
+	std::string FloatWindowHost::TitleOf(const std::string& panel) const
+	{
+		return m_Callbacks.Title ? m_Callbacks.Title(panel) : panel;
+	}
+
+	// 每个独立窗口自己的菜单栏(左下角 ☰):关闭本窗口 / 挂靠回主窗口。
+	void FloatWindowHost::RenderWindowMenu(Wui::WuiContext& ctx, const Wui::WuiRect& bar)
+	{
+		const Wui::WuiTheme& theme = m_Callbacks.Theme;
+		const Wui::WuiId menuId = Wui::HashId("float.window.menu");
+		const std::string panel = ActivePanel();
+		Wui::Label(ctx, { bar.X + 6.0f, bar.Y + 4.0f }, "M",
+			m_MenuOpen || ctx.IsHovered(bar) ? theme.Text : theme.TextMuted, 13.0f);
+		if (ctx.IsClicked(bar))
+		{
+			m_MenuOpen = !m_MenuOpen;
+			if (m_MenuOpen)
+				ctx.OpenPopup(menuId);
+			else
+				ctx.ClosePopup(menuId);
+		}
+		if (!m_MenuOpen)
+			return;
+
+		const Wui::WuiRect panelRect { bar.X, bar.Y + bar.H + 2.0f, 160.0f, 2 * 22.0f + 8.0f };
+		ctx.PushOverlay();
+		Wui::DrawPanelSurface(ctx, panelRect, theme);
+		// P4-U7:本窗口菜单的覆盖层矩形 → 下一帧窗口内容(标签栏/面板正文)不会吃掉它上面的点击。
+		ctx.RegisterOverlayRect(panelRect);
+		// 挂靠只对"独立窗口"面板开放:停靠形态的临时浮动不提供该入口。
+		const bool canAttach = !m_Callbacks.CanAttach || m_Callbacks.CanAttach(panel);
+		if (Wui::MenuItem(ctx, Wui::HashId("float.window.menu.dock"),
+			{ panelRect.X + 4.0f, panelRect.Y + 4.0f, panelRect.W - 8.0f, 22.0f }, "Attach to Top Bar", canAttach, theme))
+		{
+			m_MenuOpen = false;
+			ctx.CloseAllPopups();
+			if (m_Callbacks.DockToMain)
+				m_Callbacks.DockToMain(panel);
+		}
+		if (Wui::MenuItem(ctx, Wui::HashId("float.window.menu.close"),
+			{ panelRect.X + 4.0f, panelRect.Y + 26.0f, panelRect.W - 8.0f, 22.0f }, "Close Window", true, theme))
+		{
+			m_MenuOpen = false;
+			ctx.CloseAllPopups();
+			if (m_Callbacks.CloseWindow)
+				m_Callbacks.CloseWindow(panel);
+		}
+		ctx.ClosePopupsOnOutsideClick({ menuId }, panelRect);
+		ctx.PopOverlay();
+	}
+
+	// 标签栏(高度 24):点击切换活动面板,x 关闭只登记请求,由 EditorShell 统一处理
+	// (窗口计数/布局记录属于外壳状态,容器不直接改动)。
+	void FloatWindowHost::RenderTabBar(Wui::WuiContext& ctx, const Wui::WuiRect& area)
+	{
+		const Wui::WuiTheme& theme = m_Callbacks.Theme;
+		constexpr float tabH = 24.0f;
+
+		// ---- 标签栏(浏览器式):附加目标 + 切换/关闭标签 ----
+		// 菜单栏为空时不占位:标签栏直接在最顶部(窗口顶栏 = 标签栏)。
+		const float tabTop = area.Y;
+		Wui::PanelBackground(ctx, { area.X, tabTop, area.W, tabH }, theme.PanelHeader);
+		// 放置目标高亮:其他窗口的标签正被拖到本窗口上方。
+		if (m_TabDropHighlight)
+			Wui::PanelBackground(ctx, { area.X, tabTop, area.W, tabH }, { 0.3f, 0.5f, 0.9f, 0.55f });
+
+		std::string closeRequest;
+		float lastTabEnd = area.X + 4.0f;
+		if (!m_Panels.empty())
+		{
+			// 与主窗口停靠标签栏共用同一组件(WuiChrome::DockTabBar)。
+			std::vector<Wui::DockTab> tabs;
+			tabs.reserve(m_Panels.size());
+			for (size_t i = 0; i < m_Panels.size(); ++i)
+				tabs.push_back({ Wui::HashId(("float.tab." + m_Panels[i]).c_str()), TitleOf(m_Panels[i]), i == m_Active });
+			const Wui::DockTabBarResult bar = Wui::DockTabBar(ctx,
+				{ area.X, tabTop, std::max(0.0f, area.W - 102.0f), tabH }, tabs, theme);
+			if (bar.Clicked >= 0)
+				m_Active = static_cast<size_t>(bar.Clicked);
+			if (bar.Closed >= 0)
+				closeRequest = m_Panels[static_cast<size_t>(bar.Closed)];
+			// 按下标签(非关闭键):记录起点,移动超阈值后发起跨窗口拖拽。
+			if (!m_TabDragActive && m_PressSeenInWindow && bar.DragStart >= 0
+				&& ctx.Input().MouseClicked[0])
+			{
+				m_TabPressArmed = true;
+				m_PressedTab = m_Panels[static_cast<size_t>(bar.DragStart)];
+				m_TabPressPos = ctx.Input().MousePos;
+				m_TabDragGrab = ctx.Input().MousePos;
+				POINT global { 0, 0 };
+				GetCursorPos(&global);
+				m_TabPressGlobal = { static_cast<float>(global.x), static_cast<float>(global.y) };
+				m_TabPressGlobalValid = true;
+			}
+			const float width = std::min(150.0f,
+				std::max(1.0f, (area.W - 8.0f) / static_cast<float>(m_Panels.size())));
+			lastTabEnd = area.X + 4.0f + width * static_cast<float>(m_Panels.size());
+		}
+
+		// 标准窗口控制(最小化/最大化/关闭)位于标签栏最右侧;其余空白拖动移动窗口。
+		const Wui::WindowControl control = Wui::WindowControls(ctx,
+			{ area.X + area.W - 102.0f, tabTop, 102.0f, tabH }, theme, m_Window->IsMaximized());
+		if (control == Wui::WindowControl::Minimize)
+			m_Window->Minimize();
+		else if (control == Wui::WindowControl::Maximize)
+			m_Window->MaximizeOrRestore();
+		else if (control == Wui::WindowControl::Close)
+			m_Window->SetShouldClose(true);
+		else if (!m_TabDragActive && ctx.Input().MouseClicked[0] && m_PressSeenInWindow
+			&& ctx.IsHovered({ lastTabEnd, tabTop,
+				std::max(0.0f, area.W - lastTabEnd - 110.0f), tabH }))
+		{
+			// 空白区与标签统一:走同一条"按住即跟随 + 实时高亮目标"的自定义拖拽。
+			m_PressedTab = m_Panels.empty() ? std::string() : m_Panels.front();
+			m_TabPressArmed = true;
+			m_TabPressPos = ctx.Input().MousePos;
+			m_TabDragGrab = ctx.Input().MousePos;
+			POINT global { 0, 0 };
+			GetCursorPos(&global);
+			m_TabPressGlobal = { static_cast<float>(global.x), static_cast<float>(global.y) };
+			m_TabPressGlobalValid = true;
+		}
+
+		// 拖拽阈值:按下后移动超过 4px 即发起一次跨窗口拖拽请求。
+		if (m_TabPressArmed)
+		{
+			if (!ctx.Input().MouseDown[0])
+			{
+				m_TabPressArmed = false;
+				m_PressedTab.clear();
+			}
+			else
+			{
+				// 阈值按**全局光标位移**判断,而不是窗口内相对位移:拖动窗口时鼠标很快会移出
+				// 本窗口(窗口还没跟上来),那时窗口收不到 mousemove —— 只按相对位移判会让
+				// "向上/向外拖"永远启动不了(实测 E 步骤与用户反馈的"甩一下没反应")。
+				float moved = glm::length(ctx.Input().MousePos - m_TabPressPos);
+				if (m_TabPressGlobalValid)
+				{
+					POINT global { 0, 0 };
+					GetCursorPos(&global);
+					moved = std::max(moved, glm::length(glm::vec2(
+						static_cast<float>(global.x), static_cast<float>(global.y)) - m_TabPressGlobal));
+				}
+				if (moved > 3.0f)
+				{
+					m_TabPressArmed = false;
+					// 越过阈值:交给外壳进入"系统移动循环"(见 EditorShell::PerformIndependentWindowDrag)
+					// —— 窗口跟随由系统按输入频率负责,与渲染帧率无关。
+					m_PendingTabDrag = m_PressedTab;
+					if (m_Callbacks.TabDragStart)
+						m_Callbacks.TabDragStart(m_PressedTab);
+					m_PressedTab.clear();
+				}
+			}
+		}
+
+		const Wui::WuiRect content { area.X, tabTop + tabH, area.W, std::max(0.0f, area.H - tabH) };
+		if (!m_Panels.empty() && m_Callbacks.Content)
+			m_Callbacks.Content(ctx, content, ActivePanel());
+		if (!closeRequest.empty())
+			m_CloseRequest = closeRequest;
+	}
+
+	void FloatWindowHost::OnEvent(Event& e)
+	{
+		EventDispatcher dispatcher(e);
+		dispatcher.Dispatch<KeyPressedEvent>([&](KeyPressedEvent& ev)
+			{ m_Backend.LocalKey(static_cast<uint32_t>(ev.GetKeyCode()), true, ev.GetRepeatCount() > 0); return false; });
+		dispatcher.Dispatch<KeyReleasedEvent>([&](KeyReleasedEvent& ev)
+			{ m_Backend.LocalKey(static_cast<uint32_t>(ev.GetKeyCode()), false, false); return false; });
+		dispatcher.Dispatch<KeyTypedEvent>([&](KeyTypedEvent& ev)
+			{ m_Backend.LocalChar(static_cast<uint32_t>(ev.GetKeyCode())); return false; });
+		dispatcher.Dispatch<MouseButtonPressedEvent>([&](MouseButtonPressedEvent& ev)
+			{ m_PressSeenInWindow = true; m_Backend.LocalMouseButton(ev.GetMouseButton(), true); return false; });
+		dispatcher.Dispatch<MouseButtonReleasedEvent>([&](MouseButtonReleasedEvent& ev)
+			{ m_Backend.LocalMouseButton(ev.GetMouseButton(), false); m_PressSeenInWindow = false; return false; });
+		dispatcher.Dispatch<MouseMovedEvent>([&](MouseMovedEvent& ev)
+			{ m_Backend.LocalMouseMove(ev.GetX(), ev.GetY()); return false; });
+		dispatcher.Dispatch<MouseScrolledEvent>([&](MouseScrolledEvent& ev)
+			{ m_Backend.LocalMouseScroll(ev.GetXOffset(), ev.GetYOffset()); return false; });
+	}
+}

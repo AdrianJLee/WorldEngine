@@ -6,14 +6,14 @@
 //   ⑦ 接触回调(箱落地触发 added)         ⑧ DebugLines 线段数        ⑨ 同实体双物理拒绝
 // 外加脚手架基线段:RigidBody2DComponent 仍在(共存用例依赖它)。
 #include "wldpch.h"
-#include "World/Core/Asset/WModelIO.h"
+#include "World/Asset/WModelIO.h"
 #include "World/Core/WorldContext.h"
 #include "World/Physics/Physics3D.h"
 #include "World/Physics/PhysicsEvents.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
-#include "World/Gameplay/GameApp.h"
+#include "World/Gameplay/Runtime/GameApp.h"
 
 #include <box2d/box2d.h>
 

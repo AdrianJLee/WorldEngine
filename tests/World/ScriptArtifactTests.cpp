@@ -17,13 +17,13 @@
 //   0 magic "WSL1" | 4 containerVersion | 6 flags | 8 reserved | 10 luauBytecodeVersion
 //   12 sourceFnv1a64 | 20 payloadCrc32 | 24 headerCrc32 | 28 payload
 
-#include "World/Core/Asset/ScriptArtifact.h"
+#include "World/Asset/ScriptArtifact.h"
 #include "World/Core/Core.h"
 #include "World/Core/Log.h"
 #include "World/Core/Vfs/Crc32.h"
-#include "World/Script/LuauVm.h"
-#include "World/Script/ScriptRef.h"
-#include "World/Script/ScriptValue.h"
+#include "World/Script/Vm/LuauVm.h"
+#include "World/Script/Vm/ScriptRef.h"
+#include "World/Script/Vm/ScriptValue.h"
 
 #include <cstdint>
 #include <cstdio>

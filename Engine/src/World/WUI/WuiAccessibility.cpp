@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "WuiAccessibility.h"
+#include "World/WUI/WuiAccessibility.h"
 
 #include <algorithm>
 #include <sstream>

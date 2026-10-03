@@ -1,11 +1,11 @@
 #include "wldpch.h"
-#include "WindowsWindow.h"
+#include "World/Platform/Windows/WindowsWindow.h"
 
 #include "World/Events/KeyEvent.h"
 #include "World/Events/MouseEvent.h"
 #include "World/Events/ApplicationEvent.h"
 
-#include "World/Platform/OpenGL/OpenGLContext.h"
+#include "World/Renderer/Legacy/OpenGL/OpenGLContext.h"
 #include "World/Renderer/Renderer.h"
 
 #define GLFW_EXPOSE_NATIVE_WIN32

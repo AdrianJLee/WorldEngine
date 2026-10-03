@@ -1,14 +1,14 @@
 #include "wldpch.h"
-#include "TextureImportWatch.h"
+#include "Texture/TextureImportWatch.h"
 
-#include "TextureArtifactBaker.h"
+#include "Texture/TextureArtifactBaker.h"
 
 // 资产读取 / 源解析的**唯一口径**(容器 / 旧式自动区分)在面板模块里,本文件只调用。
-#include "../WUI/Panels/TextureSettingsPanel.h"
+#include "WUI/Panels/TextureSettingsPanel.h"
 
 #include "World/Core/Sha256.h"
 #include "World/Renderer/MaterialLibrary.h"
-#include "World/Renderer/TextureCompiler.h"
+#include "World/Renderer/Texture/TextureCompiler.h"
 #include "World/Utils/Paths.h"
 
 #include <algorithm>

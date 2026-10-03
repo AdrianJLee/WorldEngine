@@ -1,14 +1,14 @@
 #include "wldpch.h"
-#include "ProjectScaffolder.h"
+#include "Project/ProjectScaffolder.h"
 
-#include "World/Core/Asset/ProjectManifest.h"
+#include "World/Asset/ProjectManifest.h"
 #include "World/Core/Core.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneSerializer.h"
-#include "World/Script/HotReload.h"
+#include "World/Script/Runtime/HotReload.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
 

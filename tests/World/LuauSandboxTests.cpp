@@ -11,10 +11,10 @@
 
 #include "World/Core/Core.h"
 #include "World/Core/Log.h"
-#include "World/Script/LuauVm.h"
-#include "World/Script/Sandbox.h"
-#include "World/Script/ScriptBindingContext.h"
-#include "World/Script/ScriptValue.h"
+#include "World/Script/Vm/LuauVm.h"
+#include "World/Script/Vm/Sandbox.h"
+#include "World/Script/Vm/ScriptBindingContext.h"
+#include "World/Script/Vm/ScriptValue.h"
 
 #include <chrono>
 #include <cstdint>

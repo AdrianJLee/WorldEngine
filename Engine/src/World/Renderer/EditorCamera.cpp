@@ -1,5 +1,5 @@
 ﻿#include "wldpch.h"
-#include "EditorCamera.h"
+#include "World/Renderer/EditorCamera.h"
 
 #include "World/Core/Input.h"
 #include "World/Core/KeyCodes.h"

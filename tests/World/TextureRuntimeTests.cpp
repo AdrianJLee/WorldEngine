@@ -6,10 +6,10 @@
 
 #include "World/Core/Core.h"
 #include "World/Renderer/MaterialSurface.h"
-#include "World/Renderer/TextureArtifact.h"
-#include "World/Renderer/TextureCompiler.h"
-#include "World/Renderer/TextureData.h"
-#include "World/Renderer/TextureImportSettings.h"
+#include "World/Renderer/Texture/TextureArtifact.h"
+#include "World/Renderer/Texture/TextureCompiler.h"
+#include "World/Renderer/Texture/TextureData.h"
+#include "World/Renderer/Texture/TextureImportSettings.h"
 
 #include <chrono>
 #include <algorithm>

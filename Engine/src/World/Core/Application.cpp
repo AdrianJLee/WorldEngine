@@ -1,15 +1,15 @@
 ﻿#include "wldpch.h"
-#include "Application.h"
+#include "World/Core/Application.h"
 
 #include "World/Core/Log.h"
 #include "World/Core/Timestep.h"
-#include "World/Core/Asset/ProjectMount.h"
+#include "World/Asset/ProjectMount.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Memory/MemoryTracker.h"
 #include "World/Events/KeyEvent.h"
 #include "World/Events/MouseEvent.h"
-#include "World/Scene/ScriptEngine.h"
+#include "World/Script/Runtime/ScriptEngine.h"
 #include "World/WUI/WuiRhiBackend.h"
 
 #include <GLFW/glfw3.h>

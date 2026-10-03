@@ -10,8 +10,8 @@
 //   7. GameApp 接线:固定步内 Timers.Advance 先于 FixedUpdate/系统,帧末 DispatchPending
 //      在 Update 之后;暂停时计时器冻结但事件仍投递。
 #include "World/Core/Timestep.h"
-#include "World/Gameplay/EventBus.h"
-#include "World/Gameplay/GameApp.h"
+#include "World/Gameplay/Framework/EventBus.h"
+#include "World/Gameplay/Runtime/GameApp.h"
 
 #include <cmath>
 #include <cstdio>

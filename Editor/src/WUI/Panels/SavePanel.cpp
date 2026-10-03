@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "SavePanel.h"
+#include "WUI/Panels/SavePanel.h"
 
-#include "World/Gameplay/SaveService.h"
+#include "World/Gameplay/Framework/SaveService.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 

@@ -1,6 +1,6 @@
 #pragma once
-#include "Allocator.h"
-#include "FrameArena.h"
+#include "World/Core/Memory/Allocator.h"
+#include "World/Core/Memory/FrameArena.h"
 
 namespace World
 {

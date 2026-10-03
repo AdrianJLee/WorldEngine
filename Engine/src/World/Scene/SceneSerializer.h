@@ -1,5 +1,5 @@
 ﻿#pragma once
-#include "Scene.h"
+#include "World/Scene/Scene.h"
 #include <string>
 
 namespace World

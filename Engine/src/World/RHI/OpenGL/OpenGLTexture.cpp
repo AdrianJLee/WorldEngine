@@ -1,6 +1,6 @@
 #include "wldpch.h"
-#include "OpenGLTexture.h"
-#include "OpenGLHelpers.h"
+#include "World/RHI/OpenGL/OpenGLTexture.h"
+#include "World/RHI/OpenGL/OpenGLHelpers.h"
 
 namespace World::Rhi::OpenGL
 {

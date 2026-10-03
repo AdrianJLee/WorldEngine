@@ -1,8 +1,8 @@
 #include "wldpch.h"
-#include "ModelImportWatch.h"
+#include "Asset/ModelImportWatch.h"
 
-#include "World/Core/Asset/GltfImporter.h"
-#include "World/Core/Asset/WModelIO.h"
+#include "World/Asset/GltfImporter.h"
+#include "World/Asset/WModelIO.h"
 #include "World/Core/Sha256.h"
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/Mesh.h"

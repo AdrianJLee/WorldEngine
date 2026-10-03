@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "ProjectLauncher.h"
+#include "Project/ProjectLauncher.h"
 
-#include "World/Core/Asset/ProjectManifest.h"
+#include "World/Asset/ProjectManifest.h"
 #include "World/Core/Log.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiJson.h"

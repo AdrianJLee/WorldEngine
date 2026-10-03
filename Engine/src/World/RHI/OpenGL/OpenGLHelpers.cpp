@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "OpenGLHelpers.h"
+#include "World/RHI/OpenGL/OpenGLHelpers.h"
 
 // S3TC 为扩展枚举;glad 未声明,值来自 EXT_texture_compression_s3tc。
 #ifndef GL_COMPRESSED_RGBA_S3TC_DXT1_EXT

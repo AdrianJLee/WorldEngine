@@ -4,7 +4,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneSerializer.h"
-#include "World/Script/ScriptProperties.h"
+#include "World/Script/Runtime/ScriptProperties.h"
 #include "schema/FixtureTypes.h"
 #include "schema/Generated/TestKit/TestKitSchemaRegistration.h"
 

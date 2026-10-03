@@ -1,6 +1,6 @@
 ﻿#include "GameLayer.h"
 #include "World/Renderer/SceneRenderer.h"
-#include "World/Renderer/RenderCommand.h"
+#include "World/Renderer/Legacy/Gfx/RenderCommand.h"
 
 namespace World
 {

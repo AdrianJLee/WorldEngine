@@ -1,13 +1,13 @@
 #include "wldpch.h"
-#include "PrefabPanel.h"
-#include "ViewportPanel.h"
+#include "WUI/Panels/PrefabPanel.h"
+#include "WUI/Panels/ViewportPanel.h"
 
-#include "EditorAssetCatalog.h"
+#include "WUI/Common/EditorAssetCatalog.h"
 
 #include "World/Core/Application.h"
 #include "World/Core/KeyCodes.h"
-#include "World/Gameplay/Prefab.h"
-#include "World/Gameplay/PrefabTypes.h"
+#include "World/Gameplay/Prefab/Prefab.h"
+#include "World/Gameplay/Prefab/PrefabTypes.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Utils/Paths.h"
 #include "World/Renderer/Renderer.h"

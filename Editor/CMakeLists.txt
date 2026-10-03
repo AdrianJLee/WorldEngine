@@ -28,6 +28,13 @@ file(GLOB_RECURSE EDITOR_SOURCES
 )
 target_sources(Editor PRIVATE ${EDITOR_SOURCES})
 
+# 与 Engine 的"一个 target 一个 include 根"同口径:Editor 内部头文件按
+# Editor/src 下的规范路径引用(如 "WUI/Panels/X.h"、"App/EditorLayer.h"),
+# 不再依赖 include 时相对当前文件的 ../ 形式(2026-10-03 源码分类整理)。
+target_include_directories(Editor PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
 target_link_libraries(Editor PRIVATE 
     World
     # AI 控制通道(TCP 回环,JSON 行协议):winsock2。

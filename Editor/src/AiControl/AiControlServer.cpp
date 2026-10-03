@@ -3,7 +3,7 @@
 #include <ws2tcpip.h>
 
 #include "wldpch.h"
-#include "AiControlServer.h"
+#include "AiControl/AiControlServer.h"
 
 #include <chrono>
 #include <cstdarg>

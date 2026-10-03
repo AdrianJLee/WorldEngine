@@ -24,7 +24,7 @@
 `---@class` 注解表,系统脚本引用它拿补全 —— 它只是注解,不参与存储与序列化。
 
 **边界(2026-10-02,PECS-T13 起)**:Lua 的 `require`/`load`/`io`/`os`/`package`/`debug` 等全局
-**故意**保持置空(`Engine/src/World/Script/LuauVm.cpp` 的 `kForbiddenGlobals`);库文件的
+**故意**保持置空(`Engine/src/World/Script/Vm/LuauVm.cpp` 的 `kForbiddenGlobals`);库文件的
 装载走**专用通道** `ecs:RequireLib(name)` —— 名字是相对 `scripts/lib/` 的逻辑路径
 (`BuildScriptLibCandidates`:无扩展名 ⇒ 依次试 `.luau`/`.lua`;已带 `.luau`/`.lua` ⇒ 视作完整
 相对路径;带**其它**扩展名 ⇒ 可读拒绝),
@@ -140,7 +140,7 @@ Play/Simulate 走帧系统,**编辑态不跑帧系统**,由渲染前兜底跑同
 | `ecs:OnAdd(comp, fn)` / `ecs:OnRemove(comp, fn)` / `ecs:Off(handle)` | 响应式组件观察者 |
 | `ecs:OnContact(fn)` / `ecs:OnTrigger(fn)` | 本帧接触 / 传感器事件(载荷为表,见下);返回句柄,同样交给 `ecs:Off` |
 
-表的**唯一描述源**在 `Engine/src/World/Script/BindECS.h` 的 `ScriptEcsBindings()`;
+表的**唯一描述源**在 `Engine/src/World/Script/Bindings/BindECS.h` 的 `ScriptEcsBindings()`;
 运行时注册循环与 Lua 存根渲染共用它,两侧不会漂移。
 
 **物理事件(Lua 面)**:`Scene::GetContactEvents()` / `GetTriggerEvents()` 是"固定步产出、

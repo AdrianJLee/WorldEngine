@@ -1,6 +1,6 @@
 // P2a W5:SystemRegistry 的阶段派发、同阶段顺序依赖、注册校验与耗时统计。
 #include "World/Core/Thread/JobSystem.h"
-#include "World/Gameplay/SystemRegistry.h"
+#include "World/Gameplay/Runtime/SystemRegistry.h"
 
 #include <chrono>
 #include <cstdio>

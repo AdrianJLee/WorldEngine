@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "Event.h"
+#include "World/Events/Event.h"
 
 namespace World
 {

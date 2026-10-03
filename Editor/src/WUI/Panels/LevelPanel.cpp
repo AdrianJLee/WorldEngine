@@ -1,8 +1,8 @@
 #include "wldpch.h"
-#include "LevelPanel.h"
+#include "WUI/Panels/LevelPanel.h"
 
-#include "World/Core/Asset/ProjectManifest.h"
-#include "World/Gameplay/LevelList.h"
+#include "World/Asset/ProjectManifest.h"
+#include "World/Gameplay/Framework/LevelList.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 

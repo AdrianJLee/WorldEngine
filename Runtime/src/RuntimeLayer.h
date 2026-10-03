@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include "World.h"
-#include "World/Gameplay/GameHost.h"
+#include "World/Gameplay/Runtime/GameHost.h"
 
 #include <memory>
 
@@ -11,7 +11,7 @@ namespace World
 		class PluginManager;
 	}
 
-	// W1:宿主收敛——场景加载/更新/渲染统一走 Gameplay::GameHost(见 World/Gameplay/GameHost.h)。
+	// W1:宿主收敛——场景加载/更新/渲染统一走 Gameplay::GameHost(见 World/Gameplay/Runtime/GameHost.h)。
 	class RuntimeLayer : public Layer
 	{
 	public:

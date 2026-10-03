@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "Log.h"
+#include "World/Core/Log.h"
 
 #include "spdlog/sinks/base_sink.h"
 #include "spdlog/sinks/rotating_file_sink.h"

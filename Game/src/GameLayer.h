@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include "GameAPI.h"
 #include "World.h"
-#include "World/Gameplay/GameHost.h"
+#include "World/Gameplay/Runtime/GameHost.h"
 
 namespace World
 {

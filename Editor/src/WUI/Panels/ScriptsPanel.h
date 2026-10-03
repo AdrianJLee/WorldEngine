@@ -1,6 +1,6 @@
 #pragma once
 
-#include "EditorPanel.h"
+#include "WUI/Common/EditorPanel.h"
 
 #include <filesystem>
 #include <string>

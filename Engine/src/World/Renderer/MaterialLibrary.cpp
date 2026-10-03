@@ -5,7 +5,7 @@
 #include "World/Core/Log.h"
 #include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/MaterialSurfaceRuntime.h"
-#include "World/Renderer/MaterialTextureCache.h"
+#include "World/Renderer/Texture/MaterialTextureCache.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Utils/Paths.h"
 

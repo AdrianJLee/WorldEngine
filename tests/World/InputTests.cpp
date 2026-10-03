@@ -1,5 +1,5 @@
 // P2a W7:输入映射资产 + InputService(动作/轴/多玩家槽位/边沿判定)。
-#include "World/Gameplay/InputMap.h"
+#include "World/Gameplay/Framework/InputMap.h"
 
 #include <cstdio>
 #include <filesystem>

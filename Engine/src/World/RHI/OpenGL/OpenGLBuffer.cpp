@@ -1,6 +1,6 @@
 #include "wldpch.h"
-#include "OpenGLBuffer.h"
-#include "OpenGLHelpers.h"
+#include "World/RHI/OpenGL/OpenGLBuffer.h"
+#include "World/RHI/OpenGL/OpenGLHelpers.h"
 
 #include <cstring>
 

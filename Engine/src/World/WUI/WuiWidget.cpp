@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "WuiWidget.h"
+#include "World/WUI/WuiWidget.h"
 
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiAccessibility.h"

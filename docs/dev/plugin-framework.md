@@ -298,7 +298,7 @@ struct WeScriptCallApi      { StructSize, AbiVersion, UserData, ArgCount,
 
 ### 运行时绑定与回收
 
-- 唯一账本在 `Engine/src/World/Script/PluginScriptLibrary.h`(运行时绑定与存根渲染**共用
+- 唯一账本在 `Engine/src/World/Script/Runtime/PluginScriptLibrary.h`(运行时绑定与存根渲染**共用
   同一份描述**)。`ScriptEngine::Init` 把账本里的函数统一绑进 VM;VM 已初始化时,
   `RegisterScriptFunction` **立即绑定**(绑定失败 = 干净拒绝,不入账本)。
 - 卸载 / `Register` 返回 false / `Register` 抛异常 / 管理器析构四条路径都会把该插件的函数

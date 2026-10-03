@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "InputMapPanel.h"
+#include "WUI/Panels/InputMapPanel.h"
 
-#include "World/Core/Asset/ProjectManifest.h"
+#include "World/Asset/ProjectManifest.h"
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"

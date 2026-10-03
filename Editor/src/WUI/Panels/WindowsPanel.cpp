@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "WindowsPanel.h"
+#include "WUI/Panels/WindowsPanel.h"
 
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"

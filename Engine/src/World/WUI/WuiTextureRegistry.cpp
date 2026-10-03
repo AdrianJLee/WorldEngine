@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "WuiTextureRegistry.h"
+#include "World/WUI/WuiTextureRegistry.h"
 
 #include "World/Renderer/Renderer.h"
 #include "World/RHI/RhiTextureBridge.h"

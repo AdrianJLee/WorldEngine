@@ -1,4 +1,4 @@
-#include "EditorHotReloadHost.h"
+#include "HotReload/EditorHotReloadHost.h"
 
 #include <cstdlib>
 #include <string>

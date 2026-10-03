@@ -1,7 +1,7 @@
 #pragma once
 
-#include "World/Renderer/TextureArtifact.h"
-#include "World/Renderer/TextureImportSettings.h"
+#include "World/Renderer/Texture/TextureArtifact.h"
+#include "World/Renderer/Texture/TextureImportSettings.h"
 
 #include <cstdint>
 #include <filesystem>

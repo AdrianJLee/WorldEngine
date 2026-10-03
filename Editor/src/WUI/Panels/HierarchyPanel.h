@@ -1,8 +1,8 @@
 #pragma once
 
-#include "EditorPanel.h"
+#include "WUI/Common/EditorPanel.h"
 #include "World/WUI/WuiWidget.h"
-#include "World/Gameplay/Prefab.h"
+#include "World/Gameplay/Prefab/Prefab.h"
 
 #include <memory>
 #include <string>

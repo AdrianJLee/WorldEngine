@@ -1,8 +1,8 @@
 #pragma once
 
-#include "EditorPanel.h"
-#include "../SettingsUi.h"
-#include "World/Core/Asset/ProjectManifest.h"
+#include "WUI/Common/EditorPanel.h"
+#include "WUI/Shell/SettingsUi.h"
+#include "World/Asset/ProjectManifest.h"
 
 #include <string>
 #include <vector>

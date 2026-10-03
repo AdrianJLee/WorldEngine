@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "WuiChrome.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include "World/WUI/WuiAccessibility.h"
 #include "World/Core/KeyCodes.h"

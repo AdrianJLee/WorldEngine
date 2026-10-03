@@ -1,11 +1,11 @@
 #include "wldpch.h"
-#include "WuiRhiBackend.h"
+#include "World/WUI/WuiRhiBackend.h"
 
 #include "World/Core/Application.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/ShaderUtils.h"
 #include "World/RHI/RhiTextureBridge.h"
-#include "WuiTextureRegistry.h"
+#include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/WuiWidgets.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION

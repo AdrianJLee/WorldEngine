@@ -7,7 +7,7 @@
 
 #include "World/Core/Core.h"
 #include "World/Core/Log.h"
-#include "World/Script/LuauVm.h"
+#include "World/Script/Vm/LuauVm.h"
 
 #include <cstdio>
 #include <stdexcept>

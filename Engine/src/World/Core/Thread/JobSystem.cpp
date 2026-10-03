@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "JobSystem.h"
+#include "World/Core/Thread/JobSystem.h"
 
-#include "JobQueue.h"
+#include "World/Core/Thread/JobQueue.h"
 
 #include <algorithm>
 #include <cstdlib>

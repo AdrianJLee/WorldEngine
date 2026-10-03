@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "OpenGLSync.h"
+#include "World/RHI/OpenGL/OpenGLSync.h"
 
 namespace World::Rhi::OpenGL
 {

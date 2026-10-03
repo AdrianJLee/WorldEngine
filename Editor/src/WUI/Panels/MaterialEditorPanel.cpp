@@ -1,15 +1,15 @@
 #include "wldpch.h"
-#include "MaterialEditorPanel.h"
-#include "SlangFormat.h"
-#include "EditorAssetCatalog.h"
+#include "WUI/Panels/MaterialEditorPanel.h"
+#include "WUI/Language/SlangFormat.h"
+#include "WUI/Common/EditorAssetCatalog.h"
 // M4-TEX-P6a:`ResolveTextureSourceLogical`(资产 → 源图)与设置读盘与纹理设置面板**同一份口径**,
 // 不在材质面板里再抄一遍解析规则(那边是唯一实现)。
-#include "TextureSettingsPanel.h"
-#include "ViewportPanel.h"
-#include "../../EditorPreferences.h"
+#include "WUI/Panels/TextureSettingsPanel.h"
+#include "WUI/Panels/ViewportPanel.h"
+#include "Core/EditorPreferences.h"
 // M4-TEX-P11:纹理引用的扫描 / 现场判定 / 徽标 / "源图 → 单文件容器"导入的唯一实现
 // (概念归属表 texture-ref 的数据侧;面板不再自己维护候选表与判定)。
-#include "../TextureRefCatalog.h"
+#include "WUI/Common/TextureRefCatalog.h"
 
 #include "World/Core/KeyCodes.h"
 #include "World/Core/Application.h"
@@ -18,7 +18,7 @@
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/RenderSettings.h"
 // M4-TEX-P6a:`IsTextureAssetPath` / `LoadTextureImportSettings`(资产引用与源图引用共用一套判定)。
-#include "World/Renderer/TextureImportSettings.h"
+#include "World/Renderer/Texture/TextureImportSettings.h"
 // M4-S2:代码形态的"按需编译"走 M4-S1 的编译入口(结构化诊断 + 用户源行列号)。
 #include "World/Renderer/MaterialSurface.h"
 // M4-S3:编译产物装配成管线(Install 必须在渲染线程 = 本面板的 UI 帧内调用)。

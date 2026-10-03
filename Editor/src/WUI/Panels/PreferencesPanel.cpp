@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "PreferencesPanel.h"
+#include "WUI/Panels/PreferencesPanel.h"
 
-#include "../../EditorPreferences.h"
+#include "Core/EditorPreferences.h"
 #include "World/Settings/SettingsRegistry.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"

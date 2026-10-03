@@ -7,7 +7,7 @@
 //   ④ alpha 来源:GameApp 的累加器余量换算正确(固定步整数倍 ⇒ 0;半步 ⇒ 0.5)。
 #include "wldpch.h"
 #include "World/Core/WorldContext.h"
-#include "World/Gameplay/GameApp.h"
+#include "World/Gameplay/Runtime/GameApp.h"
 #include "World/Physics/PhysicsEvents.h"
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Scene/Components.h"

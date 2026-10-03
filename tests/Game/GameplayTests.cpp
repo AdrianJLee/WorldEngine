@@ -1,8 +1,8 @@
 // P2a W1 回归:会话(GameApp)、流程(GameFlow)与宿主粘合层(GameHost)。
 // 不依赖窗口/GPU:GameHost 在无 Application 时自持 WorldContext,渲染器可缺省。
-#include "World/Gameplay/GameApp.h"
-#include "World/Gameplay/GameFlow.h"
-#include "World/Gameplay/GameHost.h"
+#include "World/Gameplay/Runtime/GameApp.h"
+#include "World/Gameplay/Runtime/GameFlow.h"
+#include "World/Gameplay/Runtime/GameHost.h"
 
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Scene.h"

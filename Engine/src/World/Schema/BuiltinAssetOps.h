@@ -4,7 +4,7 @@
 // 以路径字符串作为边界值。
 
 #include "World/Core/Core.h"
-#include "World/Renderer/Texture.h"
+#include "World/Renderer/Texture/Texture.h"
 #include "World/Schema/Schema.h"
 
 namespace World::Schema

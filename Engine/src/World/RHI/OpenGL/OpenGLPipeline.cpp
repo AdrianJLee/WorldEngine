@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "OpenGLPipeline.h"
-#include "OpenGLDevice.h"
-#include "OpenGLHelpers.h"
+#include "World/RHI/OpenGL/OpenGLPipeline.h"
+#include "World/RHI/OpenGL/OpenGLDevice.h"
+#include "World/RHI/OpenGL/OpenGLHelpers.h"
 
 #include "World/RHI/RhiShader.h"
 

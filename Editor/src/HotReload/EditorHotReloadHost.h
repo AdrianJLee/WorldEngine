@@ -1,9 +1,9 @@
 #pragma once
 
-#include "../Asset/ModelImportWatch.h"
-#include "../EngineShaderHotReload.h"
-#include "../ShaderHotReload.h"
-#include "../Texture/TextureImportWatch.h"
+#include "Asset/ModelImportWatch.h"
+#include "Integrations/EngineShaderHotReload.h"
+#include "Integrations/ShaderHotReload.h"
+#include "Texture/TextureImportWatch.h"
 
 #include <cstddef>
 #include <string>

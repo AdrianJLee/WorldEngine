@@ -1,6 +1,6 @@
 #include "wldpch.h"
-#include "OpenGLRenderPass.h"
-#include "OpenGLTexture.h"
+#include "World/RHI/OpenGL/OpenGLRenderPass.h"
+#include "World/RHI/OpenGL/OpenGLTexture.h"
 
 #include <glad/glad.h>
 

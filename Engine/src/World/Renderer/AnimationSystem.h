@@ -9,7 +9,7 @@
 //     → World::BuildJointMatrices 得调色板(jointWorld 按 skin.JointNodes[j] 索引)
 // 结果按实体缓存在系统里,SceneRenderer 当帧用 GetPalette 取走交给 Renderer3D::SubmitSkinned。
 
-#include "World/Core/Asset/WModelIO.h"
+#include "World/Asset/WModelIO.h"
 #include "World/Core/Export.h"
 
 #include <entt.hpp>

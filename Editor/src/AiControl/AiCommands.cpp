@@ -1,6 +1,6 @@
 #include "wldpch.h"
 
-#include "../EditorLayer.h"
+#include "App/EditorLayer.h"
 
 #include "World/Core/Log.h"
 #include "World/Plugins/PluginManager.h"
@@ -9,7 +9,7 @@
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Scene/Components.h"
 #include "World/Schema/SchemaRegistry.h"
-#include "World/Script/ScriptProperties.h"
+#include "World/Script/Runtime/ScriptProperties.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/Utils/Paths.h"

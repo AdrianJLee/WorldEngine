@@ -1,8 +1,8 @@
 #pragma once
 
-#include "EditorPanel.h"
-#include "SlangCompletion.h"
-#include "SlangHighlight.h"
+#include "WUI/Common/EditorPanel.h"
+#include "WUI/Language/SlangCompletion.h"
+#include "WUI/Language/SlangHighlight.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialParams.h"

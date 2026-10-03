@@ -2,7 +2,7 @@
 // 绘制走 WuiDrawKind::Quad(任意四边形):斜线/箭头/圆环都能正确成形,
 // 不再用轴对齐矩形近似(那样斜轴会画成斜边包围盒)。
 #include "wldpch.h"
-#include "WuiGizmo.h"
+#include "World/WUI/WuiGizmo.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 

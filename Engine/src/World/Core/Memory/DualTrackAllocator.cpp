@@ -1,6 +1,6 @@
 ﻿#include "wldpch.h"
-#include "DualTrackAllocator.h"
-#include "LinearAllocator.h"
+#include "World/Core/Memory/DualTrackAllocator.h"
+#include "World/Core/Memory/LinearAllocator.h"
 namespace World
 {
 	DualTrackAllocator::DualTrackAllocator(const char* debugName, size_t pageSize)

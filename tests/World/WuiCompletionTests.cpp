@@ -8,8 +8,8 @@
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiTextBuffer.h"
 #include "World/Core/KeyCodes.h"
-#include "World/Script/LuauHighlighter.h"
-#include "World/Script/LuauCompletion.h"
+#include "World/Script/Tooling/LuauHighlighter.h"
+#include "World/Script/Tooling/LuauCompletion.h"
 
 #include <chrono>
 #include <cstdio>

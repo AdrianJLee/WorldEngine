@@ -1,6 +1,6 @@
 ﻿#include "wldpch.h"
-#include "Allocator.h"
-#include "MemoryTracker.h"
+#include "World/Core/Memory/Allocator.h"
+#include "World/Core/Memory/MemoryTracker.h"
 namespace World
 {
 	Allocator::Allocator(size_t size, void* start, const char* debugName, AllocatorType type, bool isEphemeral)

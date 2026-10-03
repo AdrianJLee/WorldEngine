@@ -2,7 +2,7 @@
 
 #include "World/RHI/Rhi.h"
 #include "World/Renderer/EditorCamera.h"
-#include "World/Renderer/Framebuffer.h"
+#include "World/Renderer/Legacy/Gfx/Framebuffer.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Scene/Scene.h"

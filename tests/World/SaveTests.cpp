@@ -1,7 +1,7 @@
 // P2a W8:存档服务(槽位/全局块/场景块往返、版本迁移、坏档保护)。
 #include "World/Core/WorldContext.h"
-#include "World/Gameplay/GameApp.h"
-#include "World/Gameplay/SaveService.h"
+#include "World/Gameplay/Runtime/GameApp.h"
+#include "World/Gameplay/Framework/SaveService.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Hierarchy.h"

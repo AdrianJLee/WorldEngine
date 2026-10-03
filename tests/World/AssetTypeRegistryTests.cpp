@@ -1,4 +1,4 @@
-// P4-UX16:"新建资产"类型注册表(World/Core/Asset/AssetTypeRegistry)headless 单测。
+// P4-UX16:"新建资产"类型注册表(World/Asset/AssetTypeRegistry)headless 单测。
 //
 // 这条单测对应验收口径的最后一句:「注册一个假的测试类型 → 菜单里自动多一项且能创建;
 // 删掉注册 → 菜单项消失(**零 UI 改动**)」。菜单本身在 Editor 里,这里断言菜单**数据源**:
@@ -6,7 +6,7 @@
 //   2. Sorted():文件夹恒第一 → SortOrder 升序 → Id 字典序(确定性,与注册顺序无关);
 //   3. Create 回调真的被调用、真的落盘(在临时目录里),失败时 error 可读;
 //   4. 注册表是进程内单例:同一个 Get() 实例(Editor 与 World 侧看到同一张表)。
-#include "World/Core/Asset/AssetTypeRegistry.h"
+#include "World/Asset/AssetTypeRegistry.h"
 
 #include <cstdio>
 #include <filesystem>

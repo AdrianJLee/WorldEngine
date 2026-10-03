@@ -1,7 +1,7 @@
 // P2a W10-1(D3):最小 C++ IBehavior 示例 —— 固定步长下让实体沿 Y 轴上下浮动。
 // 这份文件同时是"行为接口怎么用"的活文档:C++ 与 Luau 行为实现同一组生命周期(P2a §3.5)。
 #include "World/Core/WorldContext.h"
-#include "World/Gameplay/Behavior.h"
+#include "World/Gameplay/Framework/Behavior.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"

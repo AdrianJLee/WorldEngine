@@ -1,6 +1,6 @@
 #include "wldpch.h"
-#include "VulkanUploadRing.h"
-#include "VulkanDevice.h"
+#include "World/RHI/Vulkan/VulkanUploadRing.h"
+#include "World/RHI/Vulkan/VulkanDevice.h"
 
 #include <algorithm>
 #include <cstdlib>

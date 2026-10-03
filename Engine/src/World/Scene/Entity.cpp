@@ -1,5 +1,5 @@
 ﻿#include "wldpch.h"
-#include "Entity.h"
+#include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
 
 namespace World

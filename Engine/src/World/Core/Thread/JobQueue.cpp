@@ -1,6 +1,6 @@
 ﻿#include "wldpch.h"
-#include "JobQueue.h"
-#include "Thread.h"
+#include "World/Core/Thread/JobQueue.h"
+#include "World/Core/Thread/Thread.h"
 
 namespace World
 {

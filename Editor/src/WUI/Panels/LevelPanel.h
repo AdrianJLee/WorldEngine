@@ -1,7 +1,7 @@
 #pragma once
 
-#include "EditorPanel.h"
-#include "World/Gameplay/LevelList.h"
+#include "WUI/Common/EditorPanel.h"
+#include "World/Gameplay/Framework/LevelList.h"
 
 namespace World
 {

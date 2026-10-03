@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "WuiControls.h"
+#include "World/WUI/Widgets/WuiControls.h"
 
 #include "World/WUI/WuiWidgets.h"
 

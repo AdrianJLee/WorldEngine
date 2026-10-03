@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "OpenGLQueryPool.h"
+#include "World/RHI/OpenGL/OpenGLQueryPool.h"
 
 namespace World::Rhi::OpenGL
 {

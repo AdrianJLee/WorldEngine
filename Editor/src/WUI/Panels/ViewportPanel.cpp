@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "ViewportPanel.h"
+#include "WUI/Panels/ViewportPanel.h"
 
 #include "World/WUI/WuiGizmo.h"
 #include "World/WUI/WuiWidget.h"
@@ -9,7 +9,7 @@
 #include "World/Physics/Physics3D.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
-#include "../../EditorPreferences.h"
+#include "Core/EditorPreferences.h"
 
 namespace World
 {

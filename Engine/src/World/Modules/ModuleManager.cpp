@@ -2,7 +2,7 @@
 #include "World/Modules/ModuleManager.h"
 #include "World/Core/WorldContext.h"
 #include "World/Schema/SchemaRegistry.h"
-#include "World/Scene/ScriptEngine.h"
+#include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Utils/DynamicLibrary.h"
 
 #include <algorithm>

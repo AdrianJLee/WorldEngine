@@ -45,7 +45,7 @@ Engine/
 
 - **一个 target 一个 include 根**:`Engine/src`;include 第一段 = `World/`(命名空间)。目录 `Engine/`
   是模块名,命名空间 `World::` 与产物名 `WorldRuntime.dll` 是**公开契约**,有意与此不同。
-- 旧层 `src/World/Platform/OpenGL/**`(Renderer-era)与新 `src/World/RHI/OpenGL/**`(RHI)并存:
+- 旧层 `src/World/Renderer/Legacy/OpenGL/**`(Renderer-era)与新 `src/World/RHI/OpenGL/**`(RHI)并存:
   动 GL 前先确认改哪一层;目标是旧层冻结并逐步并入 RHI。
 
 ### 运行要求:OpenGL = 4.6 core

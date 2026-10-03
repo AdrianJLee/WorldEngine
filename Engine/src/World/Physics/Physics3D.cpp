@@ -1,8 +1,8 @@
 #include "wldpch.h"
 #include "World/Physics/Physics3D.h"
 
-#include "World/Core/Asset/WModelIO.h"
-#include "World/Core/PhysicsSettings.h"
+#include "World/Asset/WModelIO.h"
+#include "World/Physics/PhysicsSettings.h"
 #include "World/Core/Log.h"
 #include "World/Physics/PhysicsEvents.h"
 #include "World/Scene/Components.h"

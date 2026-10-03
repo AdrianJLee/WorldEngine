@@ -1,4 +1,4 @@
-#include "EditorDocument.h"
+#include "Document/EditorDocument.h"
 
 #include "World/Core/Log.h"
 #include "World/Scene/SceneSerializer.h"

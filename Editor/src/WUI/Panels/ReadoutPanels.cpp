@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "ReadoutPanels.h"
+#include "WUI/Panels/ReadoutPanels.h"
 
 #include "World/Core/Memory/MemoryTracker.h"
 #include "World/Renderer/Renderer2D.h"

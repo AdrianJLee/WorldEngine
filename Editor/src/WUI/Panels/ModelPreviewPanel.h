@@ -1,8 +1,8 @@
 #pragma once
 
-#include "EditorPanel.h"
-#include "World/Core/Asset/ModelImportSettings.h"
-#include "World/Core/Asset/WModelIO.h"
+#include "WUI/Common/EditorPanel.h"
+#include "World/Asset/ModelImportSettings.h"
+#include "World/Asset/WModelIO.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/Renderer.h"

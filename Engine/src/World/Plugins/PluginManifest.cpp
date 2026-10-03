@@ -13,7 +13,7 @@ namespace World::Plugins
 {
 	namespace
 	{
-		// ---- YAML 字段读取(写法照 World/Core/Asset/ProjectManifest.cpp)------------
+		// ---- YAML 字段读取(写法照 World/Asset/ProjectManifest.cpp)------------
 
 		bool ReadString(const YAML::Node& node, const char* key, std::string* out, std::string* error)
 		{

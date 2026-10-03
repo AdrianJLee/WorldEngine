@@ -2,9 +2,9 @@
 
 #include "World/Core/Core.h"
 #include "World/Core/Sha256.h"
-#include "World/Renderer/TextureArtifact.h"
-#include "World/Renderer/TextureCompiler.h"
-#include "World/Renderer/TextureImportSettings.h"
+#include "World/Renderer/Texture/TextureArtifact.h"
+#include "World/Renderer/Texture/TextureCompiler.h"
+#include "World/Renderer/Texture/TextureImportSettings.h"
 
 #include <chrono>
 #include <cstdint>

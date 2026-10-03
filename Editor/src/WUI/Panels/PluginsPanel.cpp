@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "PluginsPanel.h"
+#include "WUI/Panels/PluginsPanel.h"
 
-#include "../EditorShell.h"
+#include "WUI/Shell/EditorShell.h"
 
 #include "World/Plugins/PluginManager.h"
 #include "World/WUI/WuiAccessibility.h"

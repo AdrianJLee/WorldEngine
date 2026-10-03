@@ -4,7 +4,7 @@
 
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/MaterialLibrary.h"
-#include "World/Renderer/MaterialTextureCache.h"
+#include "World/Renderer/Texture/MaterialTextureCache.h"
 #include "World/Renderer/MaterialSurfaceRuntime.h"
 #include "World/Renderer/MaterialSurfaceRuntimeInternal.h"
 #include "World/RHI/Vulkan/VulkanResources.h"

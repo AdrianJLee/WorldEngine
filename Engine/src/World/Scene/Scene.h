@@ -2,7 +2,7 @@
 #include "World/Core/Timestep.h"
 #include "World/Core/UUID.h"
 #include "World/Core/WorldContext.h"
-#include "World/Gameplay/PrefabTypes.h"
+#include "World/Gameplay/Prefab/PrefabTypes.h"
 #include "World/Renderer/EditorCamera.h"
 #include "World/Physics/PhysicsEvents.h"
 #include "World/Renderer/RenderExtract.h"

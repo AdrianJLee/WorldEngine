@@ -1,10 +1,10 @@
 #include "wldpch.h"
 #include "World/Plugins/PluginManager.h"
-#include "World/Core/Asset/AssetTypeRegistry.h"
+#include "World/Asset/AssetTypeRegistry.h"
 #include "World/Core/WorldContext.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Scene/Scene.h"
-#include "World/Script/PluginScriptLibrary.h"
+#include "World/Script/Runtime/PluginScriptLibrary.h"
 #include "World/WUI/WuiLocalization.h"
 
 #include <algorithm>

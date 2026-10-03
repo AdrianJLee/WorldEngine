@@ -2,7 +2,7 @@
 
 #include "World/Core/Export.h"
 #include "World/Core/Timestep.h"
-#include "World/Gameplay/SystemRegistry.h"
+#include "World/Gameplay/Runtime/SystemRegistry.h"
 #include <string_view>
 #include <string>
 #include <vector>

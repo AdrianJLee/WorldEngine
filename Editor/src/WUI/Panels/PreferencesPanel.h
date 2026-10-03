@@ -1,7 +1,7 @@
 #pragma once
 
-#include "EditorPanel.h"
-#include "../SettingsUi.h"
+#include "WUI/Common/EditorPanel.h"
+#include "WUI/Shell/SettingsUi.h"
 
 #include <array>
 #include <string>

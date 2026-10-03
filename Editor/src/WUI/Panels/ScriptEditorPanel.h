@@ -1,9 +1,9 @@
 #pragma once
 
-#include "EditorPanel.h"
+#include "WUI/Common/EditorPanel.h"
 
-#include "World/Script/LuauCompletion.h"
-#include "World/Script/LuauHighlighter.h"
+#include "World/Script/Tooling/LuauCompletion.h"
+#include "World/Script/Tooling/LuauHighlighter.h"
 #include "World/WUI/WuiCodeEditor.h"
 #include "World/WUI/WuiTextBuffer.h"
 

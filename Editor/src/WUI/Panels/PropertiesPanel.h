@@ -1,8 +1,8 @@
 #pragma once
 
-#include "EditorPanel.h"
+#include "WUI/Common/EditorPanel.h"
 #include "World/Scene/Components.h"
-#include "World/Script/ScriptProperties.h"
+#include "World/Script/Runtime/ScriptProperties.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
 

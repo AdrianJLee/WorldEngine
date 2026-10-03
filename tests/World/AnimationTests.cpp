@@ -9,7 +9,7 @@
 
 #include "World/Renderer/AnimationSystem.h"
 
-#include "World/Core/Asset/WModelIO.h"
+#include "World/Asset/WModelIO.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"

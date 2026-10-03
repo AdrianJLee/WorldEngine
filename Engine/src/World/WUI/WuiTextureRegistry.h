@@ -1,7 +1,7 @@
 #pragma once
 
 #include "World/RHI/Rhi.h"
-#include "World/Renderer/Texture.h"
+#include "World/Renderer/Texture/Texture.h"
 
 #include <cstdint>
 #include <unordered_map>

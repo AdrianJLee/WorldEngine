@@ -1,6 +1,6 @@
 #pragma once
 
-#include "World/Core/Asset/AssetImporter.h"
+#include "World/Asset/AssetImporter.h"
 #include "World/Plugins/PluginManifest.h"
 #include "World/Plugins/PluginHostServices.h"
 #include "World/Plugins/PluginComponentStorage.h"
@@ -183,7 +183,7 @@ namespace World::Plugins
 		int RenderEditorPanel(const std::string& panelId) const;
 
 		// ---- T4:脚本函数库(插件经 WeHostApi::RegisterScriptFunction 注册的全局函数)----
-		// 账本 + 运行时绑定 + 存根渲染的唯一事实源在 World/Script/PluginScriptLibrary.h;
+		// 账本 + 运行时绑定 + 存根渲染的唯一事实源在 World/Script/Runtime/PluginScriptLibrary.h;
 		// 这里只暴露"本管理器已加载插件"的可观测快照(确定性顺序 = 条目顺序 + 注册顺序)。
 		struct PluginScriptFunction
 		{

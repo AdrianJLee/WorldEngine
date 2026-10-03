@@ -208,7 +208,7 @@ namespace World::Rhi
 	// 资源屏障:GL 后端可降级为 no-op,合同语义仍要求正确排序。
 	struct ResourceBarrier
 	{
-		// 必须写全限定名:RHI 头经常与旧渲染器的 World::Texture(World/Renderer/Texture.h)
+		// 必须写全限定名:RHI 头经常与旧渲染器的 World::Texture(World/Renderer/Texture/Texture.h)
 		// 同处一个翻译单元,裸 "Texture" 会被外层命名空间解析成旧类型(实测报错)。
 		Handle<Rhi::Texture> Texture;
 		Handle<Rhi::Buffer> Buffer;

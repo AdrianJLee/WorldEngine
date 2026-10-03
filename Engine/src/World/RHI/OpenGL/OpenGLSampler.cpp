@@ -1,6 +1,6 @@
 #include "wldpch.h"
-#include "OpenGLSampler.h"
-#include "OpenGLHelpers.h"
+#include "World/RHI/OpenGL/OpenGLSampler.h"
+#include "World/RHI/OpenGL/OpenGLHelpers.h"
 
 #include <glm/gtc/type_ptr.hpp>
 

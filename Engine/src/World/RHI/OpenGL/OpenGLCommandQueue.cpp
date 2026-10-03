@@ -1,7 +1,7 @@
 #include "wldpch.h"
-#include "OpenGLCommandQueue.h"
-#include "OpenGLCommandBuffer.h"
-#include "OpenGLSync.h"
+#include "World/RHI/OpenGL/OpenGLCommandQueue.h"
+#include "World/RHI/OpenGL/OpenGLCommandBuffer.h"
+#include "World/RHI/OpenGL/OpenGLSync.h"
 
 #include <glad/glad.h>
 

@@ -1,5 +1,5 @@
 #include "wldpch.h"
-#include "SceneRenderer.h"
+#include "World/Renderer/SceneRenderer.h"
 
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
@@ -14,7 +14,7 @@
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
-#include "World/Scene/TransformSystem.h"
+#include "World/Scene/Systems/TransformSystem.h"
 #include "World/RHI/RhiTextureBridge.h"
 #include "World/Core/Thread/JobSystem.h"
 

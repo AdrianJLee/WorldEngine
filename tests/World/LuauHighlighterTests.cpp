@@ -3,8 +3,8 @@
 // 行注释、长括号字符串(含跨行与多等号)、跨行块注释(含多等号)、中文串字节边界、
 // 缓存命中/失效与跨行状态传播、10k 行 token 化耗时。
 
-#include "World/Script/LuauCompletion.h"
-#include "World/Script/LuauHighlighter.h"
+#include "World/Script/Tooling/LuauCompletion.h"
+#include "World/Script/Tooling/LuauHighlighter.h"
 #include "World/WUI/WuiTextBuffer.h"
 
 #include <chrono>

@@ -1,8 +1,8 @@
 #include "wldpch.h"
-#include "SettingsPanel.h"
+#include "WUI/Panels/SettingsPanel.h"
 
-#include "../SettingsUi.h"
-#include "World/Core/PhysicsSettings.h"
+#include "WUI/Shell/SettingsUi.h"
+#include "World/Physics/PhysicsSettings.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"

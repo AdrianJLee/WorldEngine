@@ -1,6 +1,6 @@
 // P1b D8a2:项目渲染设置(project.we.yaml 的 `rendering:` 区块 + 运行时生效值)。
 // 覆盖:缺省、解析、写盘往返、非法值拒绝、环境变量覆盖优先级。
-#include "World/Core/Asset/ProjectManifest.h"
+#include "World/Asset/ProjectManifest.h"
 #include "World/Renderer/RenderSettings.h"
 
 #include <cstdlib>
