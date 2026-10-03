@@ -84,12 +84,14 @@ namespace
 		// OnRuntimeStart 在跑钩子前已 EnsureDefaultFrameSystems():证明 Attach 位于"末尾"。
 		g_BuiltinFrameSystemsReadyAtAttach = scene.HasFrameSystem("physics-2d") && scene.HasFrameSystem("camera-system");
 		scene.RegisterSystem<ProbeSystem>();
+		CHECK(scene.HasSystem<ProbeSystem>());
 	}
 
 	void TimingDetach(Scene& scene)
 	{
 		++g_TimingDetachCalls;
-		CHECK(scene.UnregisterFrameSystem(ProbeSystem::kName));
+		CHECK(scene.UnregisterSystem<ProbeSystem>());
+		CHECK(!scene.HasSystem<ProbeSystem>());
 	}
 
 	// ---- 场景 2:登记顺序 / 逆序撤销 ----
@@ -138,6 +140,7 @@ int main()
 			CHECK(g_TimingAttachCalls == 0);
 			CHECK(g_TimingDetachCalls == 0);
 			CHECK(!scene.HasFrameSystem(ProbeSystem::kName));
+			CHECK(!scene.HasSystem<ProbeSystem>());
 
 			scene.OnRuntimeStart();
 			CHECK(g_TimingAttachCalls == 1);

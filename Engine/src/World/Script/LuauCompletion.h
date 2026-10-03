@@ -53,6 +53,8 @@ namespace World
 		// W9.8:函数/方法的参数名(`---@param` 顺序,已去掉 self)。接受补全时插入
 		// `name(p1, p2)` 并选中第一个参数。
 		std::vector<std::string> Params;
+		// 函数/方法的形参类型列表(`---@param` 顺序,与 Params 一一对应)
+		std::vector<std::string> ParamTypes;
 
 		enum class Kind : uint8_t
 		{

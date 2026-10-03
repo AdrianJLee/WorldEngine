@@ -549,6 +549,34 @@ namespace World
 		// W3a-A2:组件块追加在既有 Lua 类型块之后(既有块内容与顺序不变),组件之间按短名升序。
 		for (const auto& [name, component] : sortedComponents)
 			if (!WriteComponentBlock(rendered, *component, knownTypes, error)) return false;
+
+		if (!sortedComponents.empty())
+		{
+			rendered << "---Pure-ECS component name lookup table; provides autocomplete for ecs:Query / entity:GetComponent.\n"
+				<< "---@class Comp\n";
+			for (const auto& [compName, component] : sortedComponents)
+			{
+				rendered << "---@field " << compName << " string Registered component type name \"" << compName << "\".\n";
+				if (compName.size() > 9 && compName.substr(compName.size() - 9) == "Component")
+				{
+					const std::string shortName = compName.substr(0, compName.size() - 9);
+					rendered << "---@field " << shortName << " string Short alias for \"" << compName << "\".\n";
+				}
+			}
+			rendered << "Comp = {}\n\n"
+				<< "---Alias for Comp.\n"
+				<< "---@class Components\n"
+				<< "Components = Comp\n\n"
+				<< "---Pure-ECS frame pipeline phases.\n"
+				<< "---@class Phase\n"
+				<< "---@field PreFixed string Fixed simulation phase (PreFixed).\n"
+				<< "---@field Fixed string Fixed simulation phase (Fixed).\n"
+				<< "---@field Update string Variable-rate logic phase (Update).\n"
+				<< "---@field Late string Late variable-rate phase (Late).\n"
+				<< "---@field PreRender string Pre-render phase (PreRender).\n"
+				<< "Phase = {}\n\n";
+		}
+
 		if (sortedTypes.count("Entity"))
 		{
 			rendered << "---Annotation-only shape of a script table; there is no WorldScript runtime global or constructor.\n"

@@ -82,6 +82,27 @@ int main()
 				assert(not okWriteEcs, "writing to ecs must fail")
 				local okWriteWorld = pcall(function() world.NewField = 456 end)
 				assert(not okWriteWorld, "writing to world must fail")
+
+				-- Comp / Components 常量表验证
+				assert(type(Comp) == "table", "Comp must be a table")
+				assert(type(Components) == "table", "Components must be a table")
+				assert(Comp == Components, "Comp and Components must be the same table")
+				assert(Comp.Transform == "TransformComponent", "Comp.Transform must map to TransformComponent")
+				assert(Comp.TransformComponent == "TransformComponent", "Comp.TransformComponent must map to TransformComponent")
+				assert(Comp.Velocity == "VelocityComponent", "Comp.Velocity must map to VelocityComponent")
+				assert(Comp.Camera == "CameraComponent", "Comp.Camera must map to CameraComponent")
+				local okWriteComp = pcall(function() Comp.NewComp = "test" end)
+				assert(not okWriteComp, "writing to Comp must fail")
+
+				-- Phase 阶段枚举验证
+				assert(type(Phase) == "table", "Phase must be a table")
+				assert(Phase.PreFixed == "PreFixed", "Phase.PreFixed must be PreFixed")
+				assert(Phase.Fixed == "Fixed", "Phase.Fixed must be Fixed")
+				assert(Phase.Update == "Update", "Phase.Update must be Update")
+				assert(Phase.Late == "Late", "Phase.Late must be Late")
+				assert(Phase.PreRender == "PreRender", "Phase.PreRender must be PreRender")
+				local okWritePhase = pcall(function() Phase.NewPhase = "test" end)
+				assert(not okWritePhase, "writing to Phase must fail")
 			)", "TestEcsGlobals");
 		}
 
@@ -646,6 +667,35 @@ int main()
 
 			scene.OnUpdateRuntime(Timestep(0.016f));
 			CHECK(ApproxEqual(probe.GetComponent<VelocityComponent>().Linear.x, 1.0f));
+		}
+
+		// =====================================================================
+		// 11b. Comp 常量表与 AddSystem 单表配置形态验证
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			Entity mover = scene.CreateEntityShell("CompMover");
+			auto& transform = mover.AddComponent<TransformComponent>();
+			transform.Location = glm::vec3(0.0f, 0.0f, 0.0f);
+
+			RUN_OK(R"(
+				local ok1 = ecs:AddSystem({
+					name = "CompMoverSystem",
+					phase = Phase.Update,
+					update = function(dt)
+						local q = ecs:Query({ Comp.Transform })
+						q:Each(function(entity, t)
+							t.Location = t.Location + vec3.new(5.0 * dt, 0.0, 0.0)
+						end)
+					end
+				})
+				assert(ok1 == true, "AddSystem with table must return true")
+			)", "TestCompAndTableAddSystem");
+
+			scene.OnUpdateRuntime(Timestep(0.2f));
+			CHECK(ApproxEqual(mover.GetComponent<TransformComponent>().Location.x, 1.0f));
 		}
 
 		// =====================================================================

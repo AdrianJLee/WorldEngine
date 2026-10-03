@@ -758,6 +758,69 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Linear vec3
 ---@field Angular vec3
 
+---Pure-ECS component name lookup table; provides autocomplete for ecs:Query / entity:GetComponent.
+---@class Comp
+---@field AmbientLightComponent string Registered component type name "AmbientLightComponent".
+---@field AmbientLight string Short alias for "AmbientLightComponent".
+---@field BoxCollider2DComponent string Registered component type name "BoxCollider2DComponent".
+---@field BoxCollider2D string Short alias for "BoxCollider2DComponent".
+---@field BoxCollider3DComponent string Registered component type name "BoxCollider3DComponent".
+---@field BoxCollider3D string Short alias for "BoxCollider3DComponent".
+---@field CameraComponent string Registered component type name "CameraComponent".
+---@field Camera string Short alias for "CameraComponent".
+---@field CapsuleCollider3DComponent string Registered component type name "CapsuleCollider3DComponent".
+---@field CapsuleCollider3D string Short alias for "CapsuleCollider3DComponent".
+---@field CircleCollider2DComponent string Registered component type name "CircleCollider2DComponent".
+---@field CircleCollider2D string Short alias for "CircleCollider2DComponent".
+---@field CircleRendererComponent string Registered component type name "CircleRendererComponent".
+---@field CircleRenderer string Short alias for "CircleRendererComponent".
+---@field DirectionalLightComponent string Registered component type name "DirectionalLightComponent".
+---@field DirectionalLight string Short alias for "DirectionalLightComponent".
+---@field HierarchyComponent string Registered component type name "HierarchyComponent".
+---@field Hierarchy string Short alias for "HierarchyComponent".
+---@field JointComponent string Registered component type name "JointComponent".
+---@field Joint string Short alias for "JointComponent".
+---@field MeshCollider3DComponent string Registered component type name "MeshCollider3DComponent".
+---@field MeshCollider3D string Short alias for "MeshCollider3DComponent".
+---@field MeshRendererComponent string Registered component type name "MeshRendererComponent".
+---@field MeshRenderer string Short alias for "MeshRendererComponent".
+---@field PointLightComponent string Registered component type name "PointLightComponent".
+---@field PointLight string Short alias for "PointLightComponent".
+---@field RigidBody2DComponent string Registered component type name "RigidBody2DComponent".
+---@field RigidBody2D string Short alias for "RigidBody2DComponent".
+---@field RigidBody3DComponent string Registered component type name "RigidBody3DComponent".
+---@field RigidBody3D string Short alias for "RigidBody3DComponent".
+---@field SampleDataComponent string Registered component type name "SampleDataComponent".
+---@field SampleData string Short alias for "SampleDataComponent".
+---@field SkinnedMeshRendererComponent string Registered component type name "SkinnedMeshRendererComponent".
+---@field SkinnedMeshRenderer string Short alias for "SkinnedMeshRendererComponent".
+---@field SphereCollider3DComponent string Registered component type name "SphereCollider3DComponent".
+---@field SphereCollider3D string Short alias for "SphereCollider3DComponent".
+---@field SpriteComponent string Registered component type name "SpriteComponent".
+---@field Sprite string Short alias for "SpriteComponent".
+---@field TagComponent string Registered component type name "TagComponent".
+---@field Tag string Short alias for "TagComponent".
+---@field TransformComponent string Registered component type name "TransformComponent".
+---@field Transform string Short alias for "TransformComponent".
+---@field UUIDComponent string Registered component type name "UUIDComponent".
+---@field UUID string Short alias for "UUIDComponent".
+---@field VelocityComponent string Registered component type name "VelocityComponent".
+---@field Velocity string Short alias for "VelocityComponent".
+Comp = {}
+
+---Alias for Comp.
+---@class Components
+Components = Comp
+
+---Pure-ECS frame pipeline phases.
+---@class Phase
+---@field PreFixed string Fixed simulation phase (PreFixed).
+---@field Fixed string Fixed simulation phase (Fixed).
+---@field Update string Variable-rate logic phase (Update).
+---@field Late string Late variable-rate phase (Late).
+---@field PreRender string Pre-render phase (PreRender).
+Phase = {}
+
 ---Annotation-only shape of a script table; there is no WorldScript runtime global or constructor.
 ---@class WorldScript
 ---@field entity Entity Entity owning this script instance.

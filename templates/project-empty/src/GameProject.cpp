@@ -4,7 +4,7 @@
 // 的起点:
 //   1) 在 src/Systems/ 写一个 World::ISystem(一页教程见 src/Systems/README.md);
 //   2) 在这里 #include "Systems/MySystem.h",Attach 里 scene.RegisterSystem<MySystem>(),
-//      Detach 里 scene.UnregisterFrameSystem("MySystem")(字符串必须与 Name() 逐字相同);
+//      Detach 里 scene.UnregisterSystem<MySystem>()(类型安全对称,无需手写字符串);
 //   3) 项目根构建:build.cmd → 编辑器 `文件 ▸ 重载 C++ 模块` → Play。
 //
 // 引擎在 Scene::OnRuntimeStart 末尾调 Attach、OnRuntimeStop 开头调 Detach:系统只活在一次
@@ -22,6 +22,6 @@ namespace World::Game
 	{
 		(void)scene;
 		// 与 Attach 一一对应。示例:
-		// scene.UnregisterFrameSystem("MySystem");
+		// scene.UnregisterSystem<MySystem>();
 	}
 }

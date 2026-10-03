@@ -695,14 +695,21 @@ namespace World
 				return m_Completion.Describe(linePrefix, word, out);
 			};
 		}
+		// 状态 ID 按脚本逻辑路径区分:每个 Tab 独立保留自己的滚动位置、光标选区与查找状态,
+		// 避免切 Tab 时不同长度脚本互相覆盖甚至把 ScrollY clamp 重置为 0。
+		const Wui::WuiId editorStateId =
+			Wui::HashId(("script.editor:" + m_LogicalPath).c_str());
+		if (ctx.Focus() == Wui::HashId("script.editor"))
+			ctx.SetFocus(editorStateId);
+
 		const Wui::WuiCodeEditorResult result =
-			Wui::CodeEditor(ctx, Wui::HashId("script.editor"), editorRect, m_Buffer, options);
+			Wui::CodeEditor(ctx, editorStateId, editorRect, m_Buffer, options);
 		// P1c-a(72c9ca2)起 WuiCodeEditor 自己也会登记一个同 id、kind=code-editor 的本体节点,
 		// 把上面面板登记的 kind=editor 节点顶掉(Register 同 id 以最后一次为准);而 AI 通道
 		// ui.type 的 kind 闸门只认 editor / text-field —— 脚本编辑器因此按 id 注入文本会被拒。
 		// VEC-A6:与 MaterialEditorPanel 同一条做法,在 CodeEditor 之后重登记面板自己的节点 ——
 		// kind=editor(可注入)、label/value 与 P1c-a 之前一致,focused 反映真实焦点。
-		editorNode.Focused = ctx.Focus() == Wui::HashId("script.editor");
+		editorNode.Focused = (ctx.Focus() == editorStateId || ctx.Focus() == Wui::HashId("script.editor"));
 		accessibility.Register(editorNode);
 		if (result.SaveRequested)
 			ApplySave(host);

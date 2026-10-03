@@ -20,6 +20,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <typeindex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -104,6 +105,7 @@ namespace World
 			// 因此逐字节不变,新字段走默认值。
 			Gameplay::SystemPhase Phase = Gameplay::SystemPhase::Update;
 			std::vector<std::string> After;
+			std::type_index TypeIndex = std::type_index(typeid(void));
 		};
 		struct FrameSystemTiming
 		{
@@ -114,7 +116,9 @@ namespace World
 		void RegisterFrameSystem(FrameSystem system);
 		// Pure ECS:撤销一个具名帧系统(系统脚本热重载/替换用)。不存在返回 false。
 		bool UnregisterFrameSystem(const std::string& name);
+		bool UnregisterSystemByType(std::type_index type);
 		bool HasFrameSystem(const std::string& name) const;
+		bool HasSystemByType(std::type_index type) const;
 		void RunFrameSystems(Timestep ts);
 		// PURE-ECS(工业口径):**固定步长**阶段(PreFixed + Fixed)。物理与移动在这里推进 ——
 		// 它们必须跑固定 dt 才有确定性(同真实时间、不同帧率 ⇒ 同结果);表现层(transform/
@@ -167,9 +171,24 @@ namespace World
 					sys->Update(*this, ts);
 				},
 				ref.Phase(),
-				ref.After()
+				ref.After(),
+				std::type_index(typeid(T))
 			});
 			return ref;
+		}
+
+		template<typename T>
+		bool UnregisterSystem()
+		{
+			static_assert(std::is_base_of_v<ISystem, T>, "T must derive from World::ISystem");
+			return UnregisterSystemByType(std::type_index(typeid(T)));
+		}
+
+		template<typename T>
+		bool HasSystem() const
+		{
+			static_assert(std::is_base_of_v<ISystem, T>, "T must derive from World::ISystem");
+			return HasSystemByType(std::type_index(typeid(T)));
 		}
 		const std::vector<FrameSystemTiming>& GetFrameSystemTimings() const { return m_FrameSystemTimings; }
 		static const char* GetFrameSystemStatsDescription(const Scene& scene);

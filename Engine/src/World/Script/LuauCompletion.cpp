@@ -634,6 +634,7 @@ namespace World
 		std::string blockDoc;
 		std::string blockReturn;
 		std::vector<std::string> blockParams;   // W9.8:---@param 顺序(去 self)
+		std::vector<std::string> blockParamTypes;
 		std::size_t currentClass = kNone;
 
 		auto resetBlock = [&]()
@@ -643,6 +644,7 @@ namespace World
 			blockDoc.clear();
 			blockReturn.clear();
 			blockParams.clear();
+			blockParamTypes.clear();
 		};
 
 		auto ensureClass = [&](std::string_view name, std::string_view base) -> std::size_t
@@ -693,7 +695,8 @@ namespace World
 
 		auto addMember = [&](std::size_t classIndex, std::string_view name, std::string_view type,
 			std::string_view doc, LuauCompletionItem::KindType kind,
-			const std::vector<std::string>& params = {})
+			const std::vector<std::string>& params = {},
+			const std::vector<std::string>& paramTypes = {})
 		{
 			ClassInfo& info = m_StubClasses[classIndex];
 			for (const LuauCompletionItem& member : info.Members)
@@ -704,6 +707,7 @@ namespace World
 			item.Type.assign(type);
 			item.Doc.assign(doc);
 			item.Params = params;
+			item.ParamTypes = paramTypes;
 			item.Kind = kind;
 			info.Members.push_back(std::move(item));
 		};
@@ -768,8 +772,15 @@ namespace World
 					{
 						// W9.8:参数名进补全项,接受时插 `name(p1, p2)` 并选中第一个参数。
 						const std::string_view name = FirstWord(rest);
+						const std::string_view afterName = Trim(rest.substr(name.size()));
+						std::string_view type = FirstWord(afterName);
+						if (!type.empty() && type.back() == '?')
+							type.remove_suffix(1);
 						if (!name.empty() && name != "self" && name != "...")
+						{
 							blockParams.emplace_back(name);
+							blockParamTypes.emplace_back(type);
+						}
 					}
 					// @overload/@operator/@meta 与未知 tag:忽略,不打断注释块
 				}
@@ -803,8 +814,10 @@ namespace World
 						const std::string_view method =
 							rest.substr(ownerEnd + 1, methodEnd - (ownerEnd + 1));
 						if (!method.empty())
+						{
 							addMember(ensureClass(owner, std::string_view()), method, blockReturn,
-								blockDoc, LuauCompletionItem::KindType::Method, blockParams);
+								blockDoc, LuauCompletionItem::KindType::Method, blockParams, blockParamTypes);
+						}
 					}
 				}
 				else
@@ -1837,14 +1850,40 @@ namespace World
 		// D3:名字命中但没有类型/文档的项(文件内符号的默认形态)先留作兜底 ——
 		// 下面的类型推断能给同一个名字补上类型时优先用它;补不上再原样返回(旧行为)。
 		LuauCompletionItem untyped;
-		const auto matchExactName = [&items, &untyped, word, &out]() -> bool
+		auto enrichMethodType = [](LuauCompletionItem& item)
+		{
+			if (item.Kind == LuauCompletionItem::KindType::Method && !item.Params.empty())
+			{
+				std::string sig = "fun(";
+				for (std::size_t i = 0; i < item.Params.size(); ++i)
+				{
+					if (i > 0) sig += ", ";
+					sig += item.Params[i];
+					if (i < item.ParamTypes.size() && !item.ParamTypes[i].empty())
+					{
+						sig += ": ";
+						sig += item.ParamTypes[i];
+					}
+				}
+				sig += ")";
+				if (!item.Type.empty())
+				{
+					sig += ": ";
+					sig += item.Type;
+				}
+				item.Type = std::move(sig);
+			}
+		};
+
+		const auto matchExactName = [&items, &untyped, word, &out, &enrichMethodType]() -> bool
 		{
 			for (const LuauCompletionItem& item : items)
 				if (item.Name == word)
 				{
-					if (!item.Type.empty() || !item.Doc.empty())
+					if (!item.Type.empty() || !item.Doc.empty() || !item.Params.empty())
 					{
 						out = item;
+						enrichMethodType(out);
 						return true;
 					}
 					if (untyped.Name.empty())
@@ -2026,9 +2065,10 @@ namespace World
 		for (const LuauCompletionItem& item : items)
 			if (EqualsIgnoreCase(item.Name, word))
 			{
-				if (!item.Type.empty() || !item.Doc.empty())
+				if (!item.Type.empty() || !item.Doc.empty() || !item.Params.empty())
 				{
 					out = item;
+					enrichMethodType(out);
 					return true;
 				}
 				if (untyped.Name.empty())
@@ -2038,6 +2078,7 @@ namespace World
 		if (!untyped.Name.empty())
 		{
 			out = untyped;
+			enrichMethodType(out);
 			return true;
 		}
 		return false;

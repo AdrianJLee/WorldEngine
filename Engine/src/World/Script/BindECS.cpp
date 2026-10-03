@@ -498,57 +498,86 @@ namespace World
 			}
 
 			std::size_t remaining = count - startIndex;
-			if (remaining < 2)
-				throw std::logic_error("ecs:AddSystem expects (name, fn [, phase | options])");
+			if (remaining < 1)
+				throw std::logic_error("ecs:AddSystem expects (name, fn [, phase | options]) or a table { name, fn/update, phase, after }");
 
 			std::string name;
-			if (!args[startIndex].AsString(&name) || name.empty())
-				throw std::logic_error("ecs:AddSystem: system name must be a non-empty string");
-
 			Gameplay::SystemPhase phase = Gameplay::SystemPhase::Update;
 			std::vector<std::string> after;
 			ScriptFunctionRef updateFn;
 
-			if (args[startIndex + 1].IsFunction())
+			if (remaining == 1 && args[startIndex].IsTable())
 			{
-				if (!args[startIndex + 1].AsFunction(&updateFn) || !updateFn.IsValid())
-					throw std::logic_error("ecs:AddSystem: expected a function for system update");
+				ScriptTableRef config;
+				if (!args[startIndex].AsTable(&config) || !config.IsValid())
+					throw std::logic_error("ecs:AddSystem: configuration table is not valid");
+				RejectUnknownOptionKeys(config, { "name", "fn", "update", "phase", "after" }, "ecs:AddSystem");
 
-				if (remaining >= 3 && !args[startIndex + 2].IsNil())
-				{
-					const ScriptValue& spec = args[startIndex + 2];
-					if (spec.IsString())
-					{
-						phase = RequireSystemPhase(name, spec);
-					}
-					else if (spec.IsTable())
-					{
-						ScriptTableRef options;
-						if (!spec.AsTable(&options) || !options.IsValid())
-							throw std::logic_error("ecs:AddSystem('" + name + "'): options table is not valid");
-						RejectUnknownOptionKeys(options, { "phase", "after" }, "ecs:AddSystem");
+				const ScriptValue nameVal = config.GetField("name");
+				if (!nameVal.AsString(&name) || name.empty())
+					throw std::logic_error("ecs:AddSystem: table must contain a non-empty 'name' string");
 
-						const ScriptValue phaseValue = options.GetField("phase");
-						if (!phaseValue.IsNil())
-							phase = RequireSystemPhase(name, phaseValue);
-						after = RequireAfterSystems(name, options.GetField("after"));
-					}
-					else
-					{
-						throw std::logic_error("ecs:AddSystem('" + name +
-							"'): third argument must be a phase string or an options table { phase = ..., after = { ... } }");
-					}
-				}
+				ScriptValue fnVal = config.GetField("fn");
+				if (fnVal.IsNil())
+					fnVal = config.GetField("update");
+				if (!fnVal.IsFunction() || !fnVal.AsFunction(&updateFn) || !updateFn.IsValid())
+					throw std::logic_error("ecs:AddSystem('" + name + "'): expected 'fn' or 'update' function in table");
+
+				const ScriptValue phaseVal = config.GetField("phase");
+				if (!phaseVal.IsNil())
+					phase = RequireSystemPhase(name, phaseVal);
+
+				after = RequireAfterSystems(name, config.GetField("after"));
 			}
 			else
 			{
-				// 最旧参数序 (name, phase, fn):phase 仍只接受字符串。
-				if (!args[startIndex + 1].IsString())
-					throw std::logic_error("ecs:AddSystem('" + name +
-						"'): expected a function for system update, or the legacy (name, phase, fn) order with a phase string");
-				phase = RequireSystemPhase(name, args[startIndex + 1]);
-				if (remaining < 3 || !args[startIndex + 2].AsFunction(&updateFn) || !updateFn.IsValid())
-					throw std::logic_error("ecs:AddSystem: expected a function for system update");
+				if (remaining < 2)
+					throw std::logic_error("ecs:AddSystem expects (name, fn [, phase | options])");
+
+				if (!args[startIndex].AsString(&name) || name.empty())
+					throw std::logic_error("ecs:AddSystem: system name must be a non-empty string");
+
+				if (args[startIndex + 1].IsFunction())
+				{
+					if (!args[startIndex + 1].AsFunction(&updateFn) || !updateFn.IsValid())
+						throw std::logic_error("ecs:AddSystem: expected a function for system update");
+
+					if (remaining >= 3 && !args[startIndex + 2].IsNil())
+					{
+						const ScriptValue& spec = args[startIndex + 2];
+						if (spec.IsString())
+						{
+							phase = RequireSystemPhase(name, spec);
+						}
+						else if (spec.IsTable())
+						{
+							ScriptTableRef options;
+							if (!spec.AsTable(&options) || !options.IsValid())
+								throw std::logic_error("ecs:AddSystem('" + name + "'): options table is not valid");
+							RejectUnknownOptionKeys(options, { "phase", "after" }, "ecs:AddSystem");
+
+							const ScriptValue phaseValue = options.GetField("phase");
+							if (!phaseValue.IsNil())
+								phase = RequireSystemPhase(name, phaseValue);
+							after = RequireAfterSystems(name, options.GetField("after"));
+						}
+						else
+						{
+							throw std::logic_error("ecs:AddSystem('" + name +
+								"'): third argument must be a phase string or an options table { phase = ..., after = { ... } }");
+						}
+					}
+				}
+				else
+				{
+					// 最旧参数序 (name, phase, fn):phase 仍只接受字符串。
+					if (!args[startIndex + 1].IsString())
+						throw std::logic_error("ecs:AddSystem('" + name +
+							"'): expected a function for system update, or the legacy (name, phase, fn) order with a phase string");
+					phase = RequireSystemPhase(name, args[startIndex + 1]);
+					if (remaining < 3 || !args[startIndex + 2].AsFunction(&updateFn) || !updateFn.IsValid())
+						throw std::logic_error("ecs:AddSystem: expected a function for system update");
+				}
 			}
 
 			if (!updateFn.IsValid())
@@ -1260,6 +1289,102 @@ namespace World
 		{
 			if (error) *error = "failed to set global 'world'";
 			return false;
+		}
+
+		// Comp & Components: 组件名常量表 (Comp.Transform -> "TransformComponent")
+		ScriptTableRef compTable = vm->CreateTable();
+		if (compTable.IsValid())
+		{
+			struct CompPair { const char* ShortName; const char* FullName; };
+			static const CompPair kBuiltins[] = {
+				{ "Transform", "TransformComponent" },
+				{ "TransformComponent", "TransformComponent" },
+				{ "Velocity", "VelocityComponent" },
+				{ "VelocityComponent", "VelocityComponent" },
+				{ "Camera", "CameraComponent" },
+				{ "CameraComponent", "CameraComponent" },
+				{ "MeshRenderer", "MeshRendererComponent" },
+				{ "MeshRendererComponent", "MeshRendererComponent" },
+				{ "SpriteRenderer", "SpriteRendererComponent" },
+				{ "SpriteRendererComponent", "SpriteRendererComponent" },
+				{ "Circle", "CircleComponent" },
+				{ "CircleComponent", "CircleComponent" },
+				{ "Hierarchy", "HierarchyComponent" },
+				{ "HierarchyComponent", "HierarchyComponent" },
+				{ "Tag", "TagComponent" },
+				{ "TagComponent", "TagComponent" },
+				{ "RigidBody2D", "RigidBody2DComponent" },
+				{ "RigidBody2DComponent", "RigidBody2DComponent" },
+				{ "BoxCollider2D", "BoxCollider2DComponent" },
+				{ "BoxCollider2DComponent", "BoxCollider2DComponent" },
+				{ "CircleCollider2D", "CircleCollider2DComponent" },
+				{ "CircleCollider2DComponent", "CircleCollider2DComponent" },
+			};
+			for (const auto& pair : kBuiltins)
+			{
+				compTable.SetField(pair.ShortName, ScriptValue::String(pair.FullName));
+			}
+
+			compTable.SetMetaField("__index", bindings.CreateFunction("Comp.__index",
+				[](const ScriptValue* metaArgs, std::size_t metaCount) -> ScriptValue
+				{
+					if (metaCount < 2 || !metaArgs[1].IsString())
+						return ScriptValue::Nil();
+					std::string key;
+					metaArgs[1].AsString(&key);
+					if (key.empty())
+						return ScriptValue::Nil();
+
+					Scene* scene = ScriptEngine::GetActiveScene();
+					if (scene)
+					{
+						auto& schemas = scene->GetContext().Schemas();
+						const Schema::TypeSchema* schema = schemas.Find(key);
+						if (schema && schema->Category == Schema::TypeCategory::Component)
+							return ScriptValue::String(schema->Id.Name);
+						schema = schemas.Find(key + "Component");
+						if (schema && schema->Category == Schema::TypeCategory::Component)
+							return ScriptValue::String(schema->Id.Name);
+					}
+					if (key.size() > 9 && key.substr(key.size() - 9) == "Component")
+						return ScriptValue::String(key);
+					return ScriptValue::String(key + "Component");
+				}));
+
+			compTable.SetMetaField("__newindex", bindings.CreateFunction("Comp.__newindex",
+				[](const ScriptValue*, std::size_t) -> ScriptValue
+				{
+					throw std::logic_error("Comp/Components table is read-only");
+				}));
+
+			if (!vm->SetGlobal("Comp", compTable.ToValue()) || !vm->SetGlobal("Components", compTable.ToValue()))
+			{
+				if (error) *error = "failed to set global 'Comp'";
+				return false;
+			}
+		}
+
+		// Phase: 阶段常量表 (Phase.Update -> "Update")
+		ScriptTableRef phaseTable = vm->CreateTable();
+		if (phaseTable.IsValid())
+		{
+			phaseTable.SetField("PreFixed", ScriptValue::String("PreFixed"));
+			phaseTable.SetField("Fixed", ScriptValue::String("Fixed"));
+			phaseTable.SetField("Update", ScriptValue::String("Update"));
+			phaseTable.SetField("Late", ScriptValue::String("Late"));
+			phaseTable.SetField("PreRender", ScriptValue::String("PreRender"));
+
+			phaseTable.SetMetaField("__newindex", bindings.CreateFunction("Phase.__newindex",
+				[](const ScriptValue*, std::size_t) -> ScriptValue
+				{
+					throw std::logic_error("Phase table is read-only");
+				}));
+
+			if (!vm->SetGlobal("Phase", phaseTable.ToValue()))
+			{
+				if (error) *error = "failed to set global 'Phase'";
+				return false;
+			}
 		}
 
 		if (error) error->clear();

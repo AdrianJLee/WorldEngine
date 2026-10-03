@@ -504,6 +504,40 @@ namespace World
 		return true;
 	}
 
+	bool Scene::UnregisterSystemByType(std::type_index type)
+	{
+		AssertOwnerThread();
+		if (type == std::type_index(typeid(void)))
+			return false;
+		const auto found = std::find_if(m_FrameSystemDefinitions.begin(), m_FrameSystemDefinitions.end(),
+			[&type](const FrameSystem& existing) {
+				return existing.TypeIndex == type
+					|| (existing.TypeIndex != std::type_index(typeid(void))
+						&& std::string_view(existing.TypeIndex.name()) == std::string_view(type.name()));
+			});
+		if (found == m_FrameSystemDefinitions.end())
+			return false;
+		const std::string name = found->Name;
+		m_FrameSystemDefinitions.erase(found);
+		if (m_FrameSystems)
+			m_FrameSystems->Unregister(name);
+		return true;
+	}
+
+	bool Scene::HasSystemByType(std::type_index type) const
+	{
+		if (type == std::type_index(typeid(void)))
+			return false;
+		for (const FrameSystem& existing : m_FrameSystemDefinitions)
+		{
+			if (existing.TypeIndex == type
+				|| (existing.TypeIndex != std::type_index(typeid(void))
+					&& std::string_view(existing.TypeIndex.name()) == std::string_view(type.name())))
+				return true;
+		}
+		return false;
+	}
+
 	// W5-3:帧系统调度统一走 Gameplay::SystemRegistry
 	// (阶段/同阶段依赖/并行安全并行派发/逐系统耗时),Scene 只保留面向宿主的薄封装。
 	void Scene::RunFrameSystems(Timestep ts)

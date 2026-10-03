@@ -631,6 +631,58 @@ int main()
 			CHECK(buffer.Text() == big);
 		}
 
+		// ---- 11. 多 Tab 编辑器状态隔离(独立 ID 避免滚动位置互相覆盖与清零) ----
+		{
+			WuiContext ctx;
+			WuiTextBuffer bufferA;
+			std::string linesA;
+			for (int i = 0; i < 200; ++i)
+				linesA += "line " + std::to_string(i) + "\n";
+			bufferA.SetText(linesA);
+
+			WuiTextBuffer bufferB;
+			bufferB.SetText("short line 1\nshort line 2\n");
+
+			const WuiRect editorRect { 0, 0, 400, 200 };
+			WuiCodeEditorOptions options;
+
+			const WuiId idA = HashId("script.editor:scripts/A.lua");
+			const WuiId idB = HashId("script.editor:scripts/B.lua");
+
+			// 帧 1: 打开 A,光标定位到第 100 行触发跟随滚动
+			bufferA.SetCaret(bufferA.Text().size() / 2, false);
+			WuiInputState inputA;
+			ctx.BeginFrame(inputA);
+			CodeEditor(ctx, idA, editorRect, bufferA, options);
+			ctx.EndFrame();
+
+			struct EditorStateProbe { float ScrollY; };
+			const auto& stateA1 = ctx.Persist<EditorStateProbe>(idA, {});
+			CHECK(stateA1.ScrollY > 50.0f);
+			const float savedScrollA = stateA1.ScrollY;
+
+			// 帧 2: 切换到 Tab B (短文件) 并渲染
+			WuiInputState inputB;
+			ctx.BeginFrame(inputB);
+			CodeEditor(ctx, idB, editorRect, bufferB, options);
+			ctx.EndFrame();
+
+			const auto& stateB = ctx.Persist<EditorStateProbe>(idB, {});
+			CHECK(stateB.ScrollY == 0.0f);
+
+			// 检查 Tab A 的持久化状态完好无损,未被 Tab B 冲掉或夹断
+			const auto& stateA2 = ctx.Persist<EditorStateProbe>(idA, {});
+			CHECK(stateA2.ScrollY == savedScrollA);
+
+			// 帧 3: 切回 Tab A 渲染,ScrollY 仍然保持
+			ctx.BeginFrame(WuiInputState{});
+			CodeEditor(ctx, idA, editorRect, bufferA, options);
+			ctx.EndFrame();
+
+			const auto& stateA3 = ctx.Persist<EditorStateProbe>(idA, {});
+			CHECK(stateA3.ScrollY == savedScrollA);
+		}
+
 		ClearFakeMeasure();
 		std::printf("World.WuiTextBuffer: all checks passed\n");
 		return 0;
