@@ -1007,6 +1007,113 @@ int main()
 			ScriptEngine::SetActiveScene(nullptr);
 		}
 
+				// =====================================================================
+		// 14. ECS 拓扑扩展验证: Startup / Teardown / Interval / Condition / OnChange / Zero-GC
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			RUN_OK(R"(
+				startupRan = 0
+				teardownRan = 0
+				ecs:AddStartupSystem("InitLevel", function()
+					startupRan = startupRan + 1
+					local e = ecs:CreateEntity("SpawnedInStartup")
+					e:AddComponent(Comp.Transform)
+				end)
+
+				ecs:AddTeardownSystem("CleanupLevel", function()
+					teardownRan = teardownRan + 1
+				end)
+			)", "TestStartupTeardownRegister");
+
+			CHECK(!scene.IsRunning());
+			scene.OnRuntimeStart();
+			CHECK(scene.IsRunning());
+
+			RUN_OK(R"(
+				assert(startupRan == 1, "Startup system must run exactly once on scene start")
+				assert(teardownRan == 0, "Teardown system must not run while scene is active")
+			)", "TestStartupRan");
+
+			// Interval 节流与 Condition 门禁验证
+			RUN_OK(R"(
+				intervalTicks = 0
+				gatedTicks = 0
+				gateOpen = false
+
+				ecs:AddSystem({
+					name = "IntervalSys",
+					interval = 0.1, -- 10Hz
+					update = function(dt)
+						intervalTicks = intervalTicks + 1
+					end
+				})
+
+				ecs:AddSystem({
+					name = "GatedSys",
+					condition = function() return gateOpen end,
+					update = function(dt)
+						gatedTicks = gatedTicks + 1
+					end
+				})
+			)", "TestIntervalAndConditionRegister");
+
+			// 推进 5 帧,每帧 0.02s (总计 0.1s -> IntervalSys 触发 1 次; GatedSys gateOpen=false 不触发)
+			for (int i = 0; i < 5; ++i)
+				scene.OnUpdateRuntime(Timestep(0.02f));
+
+			RUN_OK(R"(
+				assert(intervalTicks == 1, "Interval system must trigger once after 0.1s")
+				assert(gatedTicks == 0, "Gated system must not run when condition is false")
+				gateOpen = true
+			)", "TestInterval1");
+
+			scene.OnUpdateRuntime(Timestep(0.02f));
+			RUN_OK(R"(
+				assert(gatedTicks == 1, "Gated system must run when condition becomes true")
+			)", "TestGated1");
+
+			// OnChange 反应式变更监听验证 (数据写入触发观察者)
+			RUN_OK(R"(
+				changedHits = 0
+				local changeHandle = ecs:OnChange(Comp.Transform, function(entity, t)
+					changedHits = changedHits + 1
+				end)
+				assert(type(changeHandle) == "number", "OnChange must return observer handle")
+
+				local query = ecs:Query({ Comp.Transform })
+				query:Each(function(entity, t)
+					t.Location = vec3.new(42.0, 0.0, 0.0) -- 触发字段数据写入
+				end)
+				assert(changedHits >= 1, "Writing field must trigger OnChange observer")
+			)", "TestOnChange");
+
+			// 零 GC 享元代理复用验证 (collectgarbage count 净增长为 0)
+			RUN_OK(R"(
+				local query = ecs:Query({ Comp.Transform })
+				local memBefore = gcinfo()
+				for iter = 1, 10 do
+					query:Each(function(entity, t)
+						local loc = t.Location.x
+					end)
+				end
+				local memAfter = gcinfo()
+				-- 允许微量 VM 栈临时波动 (< 1KB),绝不随实体/迭代数线性膨胀
+				assert(memAfter - memBefore < 2.0, "Zero-GC flyweight pooling must prevent heap allocations in Each")
+			)", "TestZeroGcEach");
+
+			scene.OnRuntimeStop();
+			CHECK(!scene.IsRunning());
+
+			RUN_OK(R"(
+				assert(teardownRan == 1, "Teardown system must run exactly once on scene stop")
+			)", "TestTeardownRan");
+
+			ScriptEngine::SetActiveScene(nullptr);
+		}
+
 		ScriptEngine::Shutdown();
 		std::puts("World.LuauEcs: all tests passed!");
 		return 0;

@@ -74,10 +74,10 @@ namespace World::Gameplay
 			[&name](const Entry& entry) { return entry.Desc.Name == name; });
 		if (it == m_Systems.end())
 			return false;
-		// 依赖它的系统必须先注销,否则会留下悬挂依赖。
+		// 正在被其它系统依赖的系统不允许注销,防悬垂依赖。
 		for (const Entry& entry : m_Systems)
-			for (const std::string& dependency : entry.Desc.After)
-				if (dependency == name)
+			for (const std::string& after : entry.Desc.After)
+				if (after == name)
 				{
 					m_LastError = "system '" + entry.Desc.Name + "' still depends on '" + name + "'";
 					return false;
@@ -99,10 +99,8 @@ namespace World::Gameplay
 		m_Timings.clear();
 		m_LastError.clear();
 
-		// 收集该阶段系统,按注册序号稳定排序,再做一次"按依赖重排"(注册时已保证依赖先注册,
-		// 因此这里只需按 After 约束做稳定冒泡式调整,规模小、成本可忽略)。
-		std::vector<const Entry*> phaseEntries;
-		for (const Entry& entry : m_Systems)
+		std::vector<Entry*> phaseEntries;
+		for (Entry& entry : m_Systems)
 			if (entry.Desc.Phase == phase)
 				phaseEntries.push_back(&entry);
 		std::sort(phaseEntries.begin(), phaseEntries.end(),
@@ -111,20 +109,24 @@ namespace World::Gameplay
 		for (size_t i = 0; i < phaseEntries.size(); ++i)
 			for (size_t j = i + 1; j < phaseEntries.size(); ++j)
 			{
-				// 靠前 i 声明"必须在靠后 j 之后"→ 说明顺序反了,交换。
 				const auto& after = phaseEntries[i]->Desc.After;
 				if (std::find(after.begin(), after.end(), phaseEntries[j]->Desc.Name) != after.end())
 					std::swap(phaseEntries[i], phaseEntries[j]);
 			}
 
 		uint32_t executed = 0;
-		// 依赖检查与筛选:并行安全系统之间声明为相互独立,可并发;其余按拓扑顺序串行。
-		std::vector<const Entry*> parallelEntries;
-		std::vector<const Entry*> serialEntries;
-		for (const Entry* entry : phaseEntries)
+		std::vector<Entry*> parallelEntries;
+		std::vector<Entry*> serialEntries;
+		for (Entry* entry : phaseEntries)
 		{
 			if (!entry->Update)
 				continue;
+
+			// 1. 条件门禁:返回 false 则本轮跳过
+			if (entry->Desc.Condition && !entry->Desc.Condition())
+				continue;
+
+			// 2. 依赖检查
 			bool dependenciesSatisfied = true;
 			for (const std::string& dependency : entry->Desc.After)
 			{
@@ -138,6 +140,15 @@ namespace World::Gameplay
 			}
 			if (!dependenciesSatisfied)
 				continue;
+
+			// 3. 定时节流调度:如果定义了 Interval > 0
+			if (entry->Desc.Interval > 0.0f)
+			{
+				entry->Accumulator += dt.GetSeconds();
+				if (entry->Accumulator + 1e-4f < entry->Desc.Interval)
+					continue;
+			}
+
 			(entry->Desc.ParallelSafe ? parallelEntries : serialEntries).push_back(entry);
 		}
 
@@ -151,8 +162,7 @@ namespace World::Gameplay
 			m_Timings.push_back(std::move(timing));
 		};
 
-		// 并行安全系统:交给 JobSystem 并发执行(相互独立由 ParallelSafe 声明保证),
-		// 主线程参与等待/帮忙执行;耗时按系统分别回收到 durations。
+		// 并行安全系统:交给 JobSystem 并发执行
 		if (!parallelEntries.empty())
 		{
 			std::vector<double> durations(parallelEntries.size(), 0.0);
@@ -160,7 +170,7 @@ namespace World::Gameplay
 			{
 				struct Payload
 				{
-					const Entry* Target;
+					Entry* Target;
 					Timestep Dt;
 					double* Out;
 				};
@@ -168,8 +178,10 @@ namespace World::Gameplay
 				JobCounter counter;
 				for (size_t i = 0; i < parallelEntries.size(); ++i)
 				{
+					Entry* entry = parallelEntries[i];
+					const float stepDt = (entry->Desc.Interval > 0.0f) ? entry->Accumulator : dt.GetSeconds();
 					JobDecl job;
-					job.Emplace(Payload { parallelEntries[i], dt, &durations[i] });
+					job.Emplace(Payload { entry, Timestep(stepDt), &durations[i] });
 					job.Entry = [](void* data)
 					{
 						auto* payload = static_cast<Payload*>(data);
@@ -182,15 +194,25 @@ namespace World::Gameplay
 					JobSystem::Kick(std::move(job));
 				}
 				JobSystem::Wait(&counter);
+
+				for (size_t i = 0; i < parallelEntries.size(); ++i)
+				{
+					if (parallelEntries[i]->Desc.Interval > 0.0f)
+						parallelEntries[i]->Accumulator = std::max(0.0f, parallelEntries[i]->Accumulator - parallelEntries[i]->Desc.Interval);
+				}
 			}
 			else
 			{
 				for (size_t i = 0; i < parallelEntries.size(); ++i)
 				{
+					Entry* entry = parallelEntries[i];
+					const float stepDt = (entry->Desc.Interval > 0.0f) ? entry->Accumulator : dt.GetSeconds();
 					const auto begin = std::chrono::steady_clock::now();
-					parallelEntries[i]->Update(dt);
+					entry->Update(Timestep(stepDt));
 					const auto end = std::chrono::steady_clock::now();
 					durations[i] = std::chrono::duration<double, std::milli>(end - begin).count();
+					if (entry->Desc.Interval > 0.0f)
+						entry->Accumulator = std::max(0.0f, entry->Accumulator - entry->Desc.Interval);
 				}
 			}
 			for (size_t i = 0; i < parallelEntries.size(); ++i)
@@ -200,16 +222,21 @@ namespace World::Gameplay
 			}
 		}
 
-		for (const Entry* entry : serialEntries)
+		// 串行系统执行
+		for (Entry* entry : serialEntries)
 		{
+			const float stepDt = (entry->Desc.Interval > 0.0f) ? entry->Accumulator : dt.GetSeconds();
 			const auto begin = std::chrono::steady_clock::now();
-			entry->Update(dt);
+			entry->Update(Timestep(stepDt));
 			const auto end = std::chrono::steady_clock::now();
+			if (entry->Desc.Interval > 0.0f)
+				entry->Accumulator = std::max(0.0f, entry->Accumulator - entry->Desc.Interval);
 			pushTiming(entry, std::chrono::duration<double, std::milli>(end - begin).count());
 			executed++;
 		}
+
 		if (executed > 0)
-			m_RunCount++;
+			++m_RunCount;
 		return executed;
 	}
 }

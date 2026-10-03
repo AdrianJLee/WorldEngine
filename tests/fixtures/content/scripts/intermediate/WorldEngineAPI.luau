@@ -462,6 +462,24 @@ function ecs:OnAdd(component, fn) end
 ---@return number
 function ecs:OnRemove(component, fn) end
 
+---Observe component data changes; returns a handle for ecs:Off.
+---@param component string Registered component type name to observe.
+---@param fn function Called with (entity, component) whenever the component data changes.
+---@return number
+function ecs:OnChange(component, fn) end
+
+---Register a startup system that runs once when the active scene starts running.
+---@param name string System name.
+---@param fn function Called on the corresponding lifecycle event.
+---@return boolean
+function ecs:AddStartupSystem(name, fn) end
+
+---Register a teardown system that runs once when the active scene stops running.
+---@param name string System name.
+---@param fn function Called on the corresponding lifecycle event.
+---@return boolean
+function ecs:AddTeardownSystem(name, fn) end
+
 ---Subscribe to this frame's contact events; called once per event with { a, b, phase, point, normal, depth }. Events are produced in the fixed step and read once per frame, so call it from a variable-phase system; returns a handle for ecs:Off.
 ---@param fn function Called once per contact event of the current frame with a table { a, b, phase, point, normal, depth }.
 ---@return number

@@ -50,6 +50,10 @@ namespace World
 	WLD_API ScriptValue MakeComponentProxy(ScriptBindingContext& bindings,
 		const Entity& entity, const Schema::TypeSchema& type);
 
+	// 零 GC 享元代理复用:在迭代循环中就地更新代理所属实体,消除每实体每次遍历的 Userdata 堆分配
+	WLD_API bool UpdateComponentProxyEntity(ScriptBindingContext& bindings,
+		const ScriptValue& proxyValue, const Entity& newOwner);
+
 	// ---- W3a-A2:存根注解辅助(只追加) ----
 	// LuaStubGenerator 渲染 `---@field <Name> <LuaType> <Note>` 时使用本结构。
 	// LuaType 只从 DescribeScriptField 这一张表派生,不新开第二份 Kind → Lua 类型映射;

@@ -3,6 +3,7 @@
 
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
+#include "World/Scene/Scene.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Script/ScriptBindingContext.h"
 
@@ -328,6 +329,10 @@ namespace World
 			field->Set(resolved.Instance, value);
 			// 派生状态按"叶实例的类型"刷新:组件根写入传组件实例,嵌套写入传嵌套实例。
 			NotifyComponentFieldsChanged(*resolved.Type, resolved.Instance);
+			if (resolved.OwnerScene && resolved.Proxy && resolved.Proxy->ComponentId != 0)
+			{
+				resolved.OwnerScene->NotifyComponentChanged(resolved.Proxy->Owner, resolved.Proxy->ComponentId);
+			}
 			return ScriptValue::Nil();
 		}
 
@@ -602,6 +607,16 @@ namespace World
 			throw std::logic_error("ComponentProxy: failed to allocate the component proxy userdata");
 		new (target) ComponentProxy(std::move(payload));
 		return value;
+	}
+
+	bool UpdateComponentProxyEntity(ScriptBindingContext& bindings,
+		const ScriptValue& proxyValue, const Entity& newOwner)
+	{
+		ComponentProxy* proxy = nullptr;
+		if (!bindings.Unwrap<ComponentProxy>(ComponentProxyLuaTypeName, proxyValue, &proxy) || !proxy)
+			return false;
+		proxy->Owner = newOwner;
+		return true;
 	}
 
 	// W3a-A2:存根注解 —— 类型走 DescribeScriptField(唯一映射表),标注只描述脚本侧读写规则:

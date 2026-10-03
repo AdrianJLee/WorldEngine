@@ -106,7 +106,38 @@ namespace World
 			Gameplay::SystemPhase Phase = Gameplay::SystemPhase::Update;
 			std::vector<std::string> After;
 			std::type_index TypeIndex = std::type_index(typeid(void));
+			float Interval = 0.0f;
+			std::function<bool()> Condition = nullptr;
+			SystemKind Kind = SystemKind::Pipeline;
 		};
+
+		struct LifecycleSystem
+		{
+			std::string Name;
+			std::function<void(Scene&)> Action;
+			std::type_index TypeIndex = std::type_index(typeid(void));
+		};
+
+		void RegisterStartupSystem(LifecycleSystem system);
+		void RegisterTeardownSystem(LifecycleSystem system);
+		void RunStartupSystems();
+		void RunTeardownSystems();
+
+		uint64_t CurrentWorldTick() const { return m_WorldTick; }
+		void AdvanceWorldTick() { ++m_WorldTick; }
+		void MarkComponentChanged(entt::id_type componentId);
+		uint64_t GetComponentChangeTick(entt::id_type componentId) const;
+
+		template<typename T>
+		void MarkChanged() { MarkComponentChanged(entt::type_hash<T>::value()); }
+
+		template<typename T>
+		uint64_t GetChangeTick() const { return GetComponentChangeTick(entt::type_hash<T>::value()); }
+
+		using ComponentChangeObserverFn = std::function<void(Entity)>;
+		uint64_t AddComponentChangeObserver(entt::id_type componentId, ComponentChangeObserverFn fn);
+		bool RemoveComponentChangeObserver(uint64_t handle);
+		void NotifyComponentChanged(Entity entity, entt::id_type componentId);
 		struct FrameSystemTiming
 		{
 			std::string Name;
@@ -162,6 +193,31 @@ namespace World
 			auto system = std::make_unique<T>(std::forward<Args>(args)...);
 			T& ref = *system;
 
+			if (ref.Kind() == SystemKind::Startup)
+			{
+				RegisterStartupSystem({
+					std::string(ref.Name()),
+					[sys = std::shared_ptr<ISystem>(std::move(system))](Scene& scene)
+					{
+						sys->Update(scene, Timestep(0.0f));
+					},
+					std::type_index(typeid(T))
+				});
+				return ref;
+			}
+			if (ref.Kind() == SystemKind::Teardown)
+			{
+				RegisterTeardownSystem({
+					std::string(ref.Name()),
+					[sys = std::shared_ptr<ISystem>(std::move(system))](Scene& scene)
+					{
+						sys->Update(scene, Timestep(0.0f));
+					},
+					std::type_index(typeid(T))
+				});
+				return ref;
+			}
+
 			EnsureDefaultFrameSystems();
 			RegisterFrameSystem({
 				std::string(ref.Name()),
@@ -172,7 +228,10 @@ namespace World
 				},
 				ref.Phase(),
 				ref.After(),
-				std::type_index(typeid(T))
+				std::type_index(typeid(T)),
+				ref.Interval(),
+				[this, sysPtr = &ref]() { return sysPtr->ShouldRun(*this); },
+				ref.Kind()
 			});
 			return ref;
 		}
@@ -462,5 +521,18 @@ namespace World
 		// Pure ECS M3.6: 响应式组件观察者注册表
 		uint64_t m_NextObserverId = 0;
 		std::vector<ComponentObserverEntry> m_ComponentObservers;
+
+		// ECS 拓扑扩展: 生命周期系统与变更检测
+		std::vector<LifecycleSystem> m_StartupSystems;
+		std::vector<LifecycleSystem> m_TeardownSystems;
+		uint64_t m_WorldTick = 0;
+		std::unordered_map<entt::id_type, uint64_t> m_ComponentVersions;
+		struct ComponentChangeObserverEntry
+		{
+			uint64_t Handle = 0;
+			entt::id_type ComponentId = 0;
+			ComponentChangeObserverFn Callback;
+		};
+		std::vector<ComponentChangeObserverEntry> m_ComponentChangeObservers;
 	};
 }

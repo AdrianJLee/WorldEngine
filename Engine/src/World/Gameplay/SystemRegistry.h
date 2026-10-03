@@ -30,6 +30,8 @@ namespace World::Gameplay
 		SystemPhase Phase = SystemPhase::Update;
 		bool ParallelSafe = false;        // 声明"只读写自己独占的数据";调度器据此决定是否并行派发
 		std::vector<std::string> After;   // 同阶段内顺序依赖:本系统排在这些系统之后
+		float Interval = 0.0f;            // 0 = 每步推进; > 0 = 定时间隔节流推进(秒)
+		std::function<bool()> Condition;  // 条件门禁谓词:返回 false 则跳过本轮执行
 	};
 
 	struct SystemTiming
@@ -68,6 +70,7 @@ namespace World::Gameplay
 			SystemDesc Desc;
 			UpdateFn Update;
 			size_t Order = 0;
+			float Accumulator = 0.0f;
 		};
 
 		std::vector<Entry> m_Systems;

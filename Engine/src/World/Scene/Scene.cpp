@@ -475,6 +475,8 @@ namespace World
 		desc.Phase = system.Phase;
 		desc.ParallelSafe = system.ParallelSafe;
 		desc.After = system.After;
+		desc.Interval = system.Interval;
+		desc.Condition = system.Condition;
 		Gameplay::SystemRegistry::UpdateFn update = std::move(system.Update);
 		if (!m_FrameSystems->Register(desc, std::move(update)))
 			throw std::invalid_argument("Scene frame system '" + desc.Name + "' rejected: " + m_FrameSystems->GetLastError());
@@ -509,12 +511,33 @@ namespace World
 		AssertOwnerThread();
 		if (type == std::type_index(typeid(void)))
 			return false;
+
+		const auto isMatching = [&type](std::type_index itemType) {
+			return itemType == type
+				|| (itemType != std::type_index(typeid(void))
+					&& std::string_view(itemType.name()) == std::string_view(type.name()));
+		};
+
+		// 检查 Startup
+		const auto sFound = std::find_if(m_StartupSystems.begin(), m_StartupSystems.end(),
+			[&isMatching](const LifecycleSystem& item) { return isMatching(item.TypeIndex); });
+		if (sFound != m_StartupSystems.end())
+		{
+			m_StartupSystems.erase(sFound);
+			return true;
+		}
+
+		// 检查 Teardown
+		const auto tFound = std::find_if(m_TeardownSystems.begin(), m_TeardownSystems.end(),
+			[&isMatching](const LifecycleSystem& item) { return isMatching(item.TypeIndex); });
+		if (tFound != m_TeardownSystems.end())
+		{
+			m_TeardownSystems.erase(tFound);
+			return true;
+		}
+
 		const auto found = std::find_if(m_FrameSystemDefinitions.begin(), m_FrameSystemDefinitions.end(),
-			[&type](const FrameSystem& existing) {
-				return existing.TypeIndex == type
-					|| (existing.TypeIndex != std::type_index(typeid(void))
-						&& std::string_view(existing.TypeIndex.name()) == std::string_view(type.name()));
-			});
+			[&isMatching](const FrameSystem& existing) { return isMatching(existing.TypeIndex); });
 		if (found == m_FrameSystemDefinitions.end())
 			return false;
 		const std::string name = found->Name;
@@ -528,14 +551,103 @@ namespace World
 	{
 		if (type == std::type_index(typeid(void)))
 			return false;
+
+		const auto isMatching = [&type](std::type_index itemType) {
+			return itemType == type
+				|| (itemType != std::type_index(typeid(void))
+					&& std::string_view(itemType.name()) == std::string_view(type.name()));
+		};
+
+		for (const auto& item : m_StartupSystems)
+			if (isMatching(item.TypeIndex)) return true;
+		for (const auto& item : m_TeardownSystems)
+			if (isMatching(item.TypeIndex)) return true;
+
 		for (const FrameSystem& existing : m_FrameSystemDefinitions)
 		{
-			if (existing.TypeIndex == type
-				|| (existing.TypeIndex != std::type_index(typeid(void))
-					&& std::string_view(existing.TypeIndex.name()) == std::string_view(type.name())))
+			if (isMatching(existing.TypeIndex))
 				return true;
 		}
 		return false;
+	}
+
+	void Scene::RegisterStartupSystem(LifecycleSystem system)
+	{
+		AssertOwnerThread();
+		m_StartupSystems.push_back(std::move(system));
+	}
+
+	void Scene::RegisterTeardownSystem(LifecycleSystem system)
+	{
+		AssertOwnerThread();
+		m_TeardownSystems.push_back(std::move(system));
+	}
+
+	void Scene::RunStartupSystems()
+	{
+		AssertOwnerThread();
+		const bool wasCommitting = m_Committing;
+		m_Committing = true;
+		for (const auto& sys : m_StartupSystems)
+		{
+			if (sys.Action)
+				sys.Action(*this);
+		}
+		m_Committing = wasCommitting;
+		FlushStructuralChanges();
+	}
+
+	void Scene::RunTeardownSystems()
+	{
+		AssertOwnerThread();
+		const bool wasCommitting = m_Committing;
+		m_Committing = true;
+		for (const auto& sys : m_TeardownSystems)
+		{
+			if (sys.Action)
+				sys.Action(*this);
+		}
+		m_Committing = wasCommitting;
+	}
+
+	void Scene::MarkComponentChanged(entt::id_type componentId)
+	{
+		m_ComponentVersions[componentId] = m_WorldTick;
+	}
+
+	uint64_t Scene::GetComponentChangeTick(entt::id_type componentId) const
+	{
+		const auto it = m_ComponentVersions.find(componentId);
+		return it != m_ComponentVersions.end() ? it->second : 0;
+	}
+
+	uint64_t Scene::AddComponentChangeObserver(entt::id_type componentId, ComponentChangeObserverFn fn)
+	{
+		AssertOwnerThread();
+		uint64_t handle = ++m_NextObserverId;
+		m_ComponentChangeObservers.push_back({ handle, componentId, std::move(fn) });
+		return handle;
+	}
+
+	bool Scene::RemoveComponentChangeObserver(uint64_t handle)
+	{
+		AssertOwnerThread();
+		const auto it = std::find_if(m_ComponentChangeObservers.begin(), m_ComponentChangeObservers.end(),
+			[handle](const ComponentChangeObserverEntry& entry) { return entry.Handle == handle; });
+		if (it == m_ComponentChangeObservers.end())
+			return false;
+		m_ComponentChangeObservers.erase(it);
+		return true;
+	}
+
+	void Scene::NotifyComponentChanged(Entity entity, entt::id_type componentId)
+	{
+		MarkComponentChanged(componentId);
+		for (const auto& entry : m_ComponentChangeObservers)
+		{
+			if (entry.ComponentId == componentId && entry.Callback)
+				entry.Callback(entity);
+		}
 	}
 
 	// W5-3:帧系统调度统一走 Gameplay::SystemRegistry
@@ -543,6 +655,7 @@ namespace World
 	void Scene::RunFrameSystems(Timestep ts)
 	{
 		AssertOwnerThread();
+		AdvanceWorldTick();
 		// 一帧的耗时表:谁先跑谁清(固定阶段先于可变阶段,见 OnFixedUpdate)。帧末复位。
 		if (!m_FrameTimingsBegun)
 		{
@@ -1232,6 +1345,7 @@ namespace World
 		if (ScriptEngine::IsInitialized())
 			ScriptEngine::PollSystemScriptReload(*this, ts.GetSeconds());
 		RunFrameSystems(ts);
+		FlushStructuralChanges();
 	}
 
 	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera&)
@@ -1282,6 +1396,7 @@ namespace World
 		// 与 Lua 系统脚本同一时机、同一个 SystemRegistry。契约见 WorldContext.h。
 		m_Context->RunSceneAttachHooks(*this);
 		m_State = SceneState::Running;
+		RunStartupSystems();
 	}
 	void Scene::OnSimulationStart() { OnRuntimeStart(); }
 	void Scene::OnRuntimeStop() { StopScene(); }
@@ -1296,7 +1411,10 @@ namespace World
 		// PURE-ECS:模块登记的场景系统先撤销(与 RunSceneAttachHooks 对称);只在真的从
 		// 运行态停下来时跑,重复 StopScene 不重复 Detach。
 		if (m_State == SceneState::Running)
+		{
+			RunTeardownSystems();
 			m_Context->RunSceneDetachHooks(*this);
+		}
 		m_State = SceneState::Stopping;
 		m_StopRequested = false;
 		m_Changes.clear();

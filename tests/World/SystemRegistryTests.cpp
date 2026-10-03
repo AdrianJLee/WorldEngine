@@ -138,6 +138,55 @@ int main()
 			std::printf("World.Systems: parallel phase best of 3 = %.2f ms (overlap=%s)\n",
 				bestElapsedMs, overlapped ? "true" : "false");
 		}
+				// 6. 定时间隔节流:设置 Interval > 0 时按周期推进,未达间隔直接跳过。
+		{
+			SystemRegistry throttled;
+			int runCount = 0;
+			float totalAccumulatedDt = 0.0f;
+			SystemDesc desc;
+			desc.Name = "throttled";
+			desc.Phase = SystemPhase::Update;
+			desc.Interval = 0.2f; // 每 0.2s 推进一次 (5Hz)
+			CHECK(throttled.Register(desc, [&runCount, &totalAccumulatedDt](World::Timestep dt) {
+				++runCount;
+				totalAccumulatedDt += dt.GetSeconds();
+			}));
+
+			// 模拟 1.0 秒,单步 dt = 0.05s (共 20 步)
+			for (int step = 0; step < 20; ++step)
+			{
+				throttled.RunPhase(SystemPhase::Update, World::Timestep(0.05f));
+			}
+			// 1.0 秒 / 0.2 秒 = 精确执行 5 次!
+			CHECK(runCount == 5);
+			CHECK(std::abs(totalAccumulatedDt - 1.0f) < 0.01f);
+		}
+
+		// 7. 条件门禁:Condition 返回 false 时本轮直接跳过,返回 true 时正常执行。
+		{
+			SystemRegistry gated;
+			bool allowRun = false;
+			int executionCount = 0;
+			SystemDesc desc;
+			desc.Name = "gated";
+			desc.Phase = SystemPhase::Update;
+			desc.Condition = [&allowRun]() { return allowRun; };
+			CHECK(gated.Register(desc, [&executionCount](World::Timestep) {
+				++executionCount;
+			}));
+
+			CHECK(gated.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 0);
+			CHECK(executionCount == 0);
+
+			allowRun = true;
+			CHECK(gated.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 1);
+			CHECK(executionCount == 1);
+
+			allowRun = false;
+			CHECK(gated.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 0);
+			CHECK(executionCount == 1);
+		}
+
 		World::JobSystem::Shutdown();
 		std::printf("World.Systems: all checks passed\n");
 		return 0;

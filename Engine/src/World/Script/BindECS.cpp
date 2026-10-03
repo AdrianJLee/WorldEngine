@@ -209,6 +209,7 @@ namespace World
 
 			// 选项表阶段(可选,最多一个):目前只认 `without`(排除过滤);未知键报可读错误。
 			std::vector<std::string> withoutNames;
+			std::vector<std::string> changedNames;
 			if (index < count)
 			{
 				ScriptTableRef options;
@@ -216,7 +217,7 @@ namespace World
 					throw std::logic_error("ecs:Query: options must be a table");
 				++index;
 
-				RejectUnknownOptionKeys(options, { "without" }, "ecs:Query");
+				RejectUnknownOptionKeys(options, { "without", "changed" }, "ecs:Query");
 
 				ScriptValue withoutValue = options.GetField("without");
 				if (!withoutValue.IsNil())
@@ -231,6 +232,22 @@ namespace World
 							withoutNames.push_back(std::move(name));
 						else
 							throw std::logic_error("ecs:Query: option 'without' elements must be component name strings");
+					}
+				}
+
+				ScriptValue changedValue = options.GetField("changed");
+				if (!changedValue.IsNil())
+				{
+					ScriptTableRef changedTable;
+					if (!changedValue.IsTable() || !changedValue.AsTable(&changedTable) || !changedTable.IsValid())
+						throw std::logic_error("ecs:Query: option 'changed' must be an array of component name strings");
+					for (const ScriptValue& item : changedTable.GetArray())
+					{
+						std::string name;
+						if (item.AsString(&name) && !name.empty())
+							changedNames.push_back(std::move(name));
+						else
+							throw std::logic_error("ecs:Query: option 'changed' elements must be component name strings");
 					}
 				}
 			}
@@ -274,9 +291,21 @@ namespace World
 			if (!queryTable.IsValid())
 				throw std::logic_error("ecs:Query: failed to create query table");
 
+			std::vector<const Schema::TypeSchema*> changedSchemas;
+			changedSchemas.reserve(changedNames.size());
+			for (const auto& name : changedNames)
+			{
+				const Schema::TypeSchema* type = schemaRegistry.Find(name);
+				if (!type || type->Category != Schema::TypeCategory::Component || !type->Storage)
+					throw std::logic_error("ecs:Query: '" + name + "' is not a registered component type in changed list");
+				changedSchemas.push_back(type);
+			}
+
+			auto lastQueryTick = std::make_shared<uint64_t>(0);
+
 			// Method: Each(callback)
 			queryTable.SetField("Each", bindings.CreateFunction("Query:Each",
-				[schemas, excludeSchemas](const ScriptValue* eachArgs, std::size_t eachCount) -> ScriptValue
+				[schemas, excludeSchemas, changedSchemas, lastQueryTick](const ScriptValue* eachArgs, std::size_t eachCount) -> ScriptValue
 				{
 					ScriptFunctionRef callback;
 					if (eachCount >= 2 && eachArgs[1].AsFunction(&callback))
@@ -297,25 +326,25 @@ namespace World
 					if (!scene)
 						throw std::logic_error("Query:Each requires an active scene");
 
-					auto& registry = scene->GetRegistry();
+					const auto& registry = static_cast<const Scene*>(scene)->GetRegistry();
 					ScriptBindingContext& context = ScriptEngine::GetBindingContext();
 
-					std::vector<entt::sparse_set*> storages;
+					std::vector<const entt::sparse_set*> storages;
 					storages.reserve(schemas.size());
 					for (const auto* schema : schemas)
 					{
-						auto* storage = registry.storage(schema->Storage->ComponentId);
+						const auto* storage = registry.storage(schema->Storage->ComponentId);
 						if (!storage || storage->empty())
 							return ScriptValue::Nil();
 						storages.push_back(storage);
 					}
 
 					// 排除集合:存储不存在或为空 ⇒ 没有任何实体带该组件,无需过滤。
-					std::vector<entt::sparse_set*> excludeStorages;
+					std::vector<const entt::sparse_set*> excludeStorages;
 					excludeStorages.reserve(excludeSchemas.size());
 					for (const auto* schema : excludeSchemas)
 					{
-						auto* storage = registry.storage(schema->Storage->ComponentId);
+						const auto* storage = registry.storage(schema->Storage->ComponentId);
 						if (storage && !storage->empty())
 							excludeStorages.push_back(storage);
 					}
@@ -331,7 +360,7 @@ namespace World
 						}
 					}
 
-					entt::sparse_set* leadStorage = storages[minIdx];
+					const entt::sparse_set* leadStorage = storages[minIdx];
 					std::vector<entt::entity> matches;
 					matches.reserve(minSize);
 					for (auto it = leadStorage->begin(); it != leadStorage->end(); ++it)
@@ -354,7 +383,7 @@ namespace World
 							continue;
 
 						bool excluded = false;
-						for (entt::sparse_set* excludeStorage : excludeStorages)
+						for (const entt::sparse_set* excludeStorage : excludeStorages)
 						{
 							if (excludeStorage->contains(entity))
 							{
@@ -366,6 +395,32 @@ namespace World
 							matches.push_back(entity);
 					}
 
+					// 变更检测:若配置了 changed 且上轮查询后无目标组件变动,O(1) 整块跳过
+					if (!changedSchemas.empty() && *lastQueryTick > 0)
+					{
+						bool anyChanged = false;
+						for (const auto* cs : changedSchemas)
+						{
+							if (scene->GetComponentChangeTick(cs->Storage->ComponentId) >= *lastQueryTick)
+							{
+								anyChanged = true;
+								break;
+							}
+						}
+						if (!anyChanged)
+							return ScriptValue::Nil();
+					}
+					*lastQueryTick = scene->CurrentWorldTick();
+
+					// 零 GC 享元代理复用:在循环外分配单套实参与组件代理,循环内就地更新载荷
+					std::vector<ScriptValue> callArgs;
+					callArgs.reserve(1 + schemas.size());
+					callArgs.push_back(NewUserdataOf(context, "Entity", Entity()));
+					for (const auto* schema : schemas)
+					{
+						callArgs.push_back(MakeComponentProxy(context, Entity(), *schema));
+					}
+
 					for (entt::entity entity : matches)
 					{
 						if (!registry.valid(entity) || scene->IsPendingDestroy(entity))
@@ -375,13 +430,13 @@ namespace World
 						if (!entityHandle.IsValid())
 							continue;
 
-						std::vector<ScriptValue> callArgs;
-						callArgs.reserve(1 + schemas.size());
-						callArgs.push_back(NewUserdataOf(context, "Entity", entityHandle));
+						Entity* entPtr = nullptr;
+						if (context.Unwrap<Entity>("Entity", callArgs[0], &entPtr) && entPtr)
+							*entPtr = entityHandle;
 
-						for (const auto* schema : schemas)
+						for (std::size_t i = 0; i < schemas.size(); ++i)
 						{
-							callArgs.push_back(MakeComponentProxy(context, entityHandle, *schema));
+							UpdateComponentProxyEntity(context, callArgs[1 + i], entityHandle);
 						}
 
 						ScriptValue result;
@@ -403,23 +458,23 @@ namespace World
 					if (!scene)
 						throw std::logic_error("Query:Count requires an active scene");
 
-					auto& registry = scene->GetRegistry();
+					const auto& registry = static_cast<const Scene*>(scene)->GetRegistry();
 
-					std::vector<entt::sparse_set*> storages;
+					std::vector<const entt::sparse_set*> storages;
 					storages.reserve(schemas.size());
 					for (const auto* schema : schemas)
 					{
-						auto* storage = registry.storage(schema->Storage->ComponentId);
+						const auto* storage = registry.storage(schema->Storage->ComponentId);
 						if (!storage || storage->empty())
 							return ScriptValue::Number(0.0);
 						storages.push_back(storage);
 					}
 
-					std::vector<entt::sparse_set*> excludeStorages;
+					std::vector<const entt::sparse_set*> excludeStorages;
 					excludeStorages.reserve(excludeSchemas.size());
 					for (const auto* schema : excludeSchemas)
 					{
-						auto* storage = registry.storage(schema->Storage->ComponentId);
+						const auto* storage = registry.storage(schema->Storage->ComponentId);
 						if (storage && !storage->empty())
 							excludeStorages.push_back(storage);
 					}
@@ -435,7 +490,7 @@ namespace World
 						}
 					}
 
-					entt::sparse_set* leadStorage = storages[minIdx];
+					const entt::sparse_set* leadStorage = storages[minIdx];
 					double countMatches = 0.0;
 					for (auto it = leadStorage->begin(); it != leadStorage->end(); ++it)
 					{
@@ -457,7 +512,7 @@ namespace World
 							continue;
 
 						bool excluded = false;
-						for (entt::sparse_set* excludeStorage : excludeStorages)
+						for (const entt::sparse_set* excludeStorage : excludeStorages)
 						{
 							if (excludeStorage->contains(entity))
 							{
@@ -504,6 +559,8 @@ namespace World
 			std::string name;
 			Gameplay::SystemPhase phase = Gameplay::SystemPhase::Update;
 			std::vector<std::string> after;
+			float interval = 0.0f;
+			std::function<bool()> condition = nullptr;
 			ScriptFunctionRef updateFn;
 
 			if (remaining == 1 && args[startIndex].IsTable())
@@ -511,7 +568,7 @@ namespace World
 				ScriptTableRef config;
 				if (!args[startIndex].AsTable(&config) || !config.IsValid())
 					throw std::logic_error("ecs:AddSystem: configuration table is not valid");
-				RejectUnknownOptionKeys(config, { "name", "fn", "update", "phase", "after" }, "ecs:AddSystem");
+				RejectUnknownOptionKeys(config, { "name", "fn", "update", "phase", "after", "interval", "condition" }, "ecs:AddSystem");
 
 				const ScriptValue nameVal = config.GetField("name");
 				if (!nameVal.AsString(&name) || name.empty())
@@ -528,6 +585,33 @@ namespace World
 					phase = RequireSystemPhase(name, phaseVal);
 
 				after = RequireAfterSystems(name, config.GetField("after"));
+
+				const ScriptValue intervalVal = config.GetField("interval");
+				if (intervalVal.IsNumber())
+				{
+					double dInt = 0.0;
+					intervalVal.AsNumber(&dInt);
+					interval = static_cast<float>(dInt);
+				}
+
+				const ScriptValue condVal = config.GetField("condition");
+				if (condVal.IsFunction())
+				{
+					ScriptFunctionRef condFn;
+					if (condVal.AsFunction(&condFn) && condFn.IsValid())
+					{
+						condition = [condFn]() mutable -> bool
+						{
+							ScriptValue res;
+							std::string err;
+							if (!condFn.Call(nullptr, 0, &res, &err))
+								return false;
+							bool ok = true;
+							if (res.IsBoolean()) res.AsBool(&ok);
+							return ok;
+						};
+					}
+				}
 			}
 			else
 			{
@@ -554,12 +638,39 @@ namespace World
 							ScriptTableRef options;
 							if (!spec.AsTable(&options) || !options.IsValid())
 								throw std::logic_error("ecs:AddSystem('" + name + "'): options table is not valid");
-							RejectUnknownOptionKeys(options, { "phase", "after" }, "ecs:AddSystem");
+							RejectUnknownOptionKeys(options, { "phase", "after", "interval", "condition" }, "ecs:AddSystem");
 
 							const ScriptValue phaseValue = options.GetField("phase");
 							if (!phaseValue.IsNil())
 								phase = RequireSystemPhase(name, phaseValue);
 							after = RequireAfterSystems(name, options.GetField("after"));
+
+							const ScriptValue intervalVal = options.GetField("interval");
+							if (intervalVal.IsNumber())
+							{
+								double dInt = 0.0;
+								intervalVal.AsNumber(&dInt);
+								interval = static_cast<float>(dInt);
+							}
+
+							const ScriptValue condVal = options.GetField("condition");
+							if (condVal.IsFunction())
+							{
+								ScriptFunctionRef condFn;
+								if (condVal.AsFunction(&condFn) && condFn.IsValid())
+								{
+									condition = [condFn]() mutable -> bool
+									{
+										ScriptValue res;
+										std::string err;
+										if (!condFn.Call(nullptr, 0, &res, &err))
+											return false;
+										bool ok = true;
+										if (res.IsBoolean()) res.AsBool(&ok);
+										return ok;
+									};
+								}
+							}
 						}
 						else
 						{
@@ -608,13 +719,155 @@ namespace World
 					}
 				},
 				phase,
-				std::move(after)
+				std::move(after),
+				std::type_index(typeid(void)),
+				interval,
+				std::move(condition)
 			});
 
 			// 归属到当前正在执行的系统脚本(不在加载系统脚本时是 no-op)。
 			ScriptEngine::NoteScriptSystem(name);
 
 			return ScriptValue::Boolean(true);
+		}
+
+		// -------------------------------------------------------------------------
+		// ecs:AddStartupSystem(name, fn) 实现
+		// -------------------------------------------------------------------------
+		ScriptValue AddStartupSystemImpl(const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+				startIndex = 1;
+
+			std::size_t remaining = count - startIndex;
+			if (remaining < 2)
+				throw std::logic_error("ecs:AddStartupSystem expects (name, fn)");
+
+			std::string name;
+			if (!args[startIndex].AsString(&name) || name.empty())
+				throw std::logic_error("ecs:AddStartupSystem: system name must be a non-empty string");
+
+			ScriptFunctionRef fn;
+			if (!args[startIndex + 1].AsFunction(&fn) || !fn.IsValid())
+				throw std::logic_error("ecs:AddStartupSystem: expected a function");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:AddStartupSystem requires an active scene");
+
+			activeScene->RegisterStartupSystem({
+				name,
+				[fn, name](Scene&)
+				{
+					ScriptValue res;
+					std::string err;
+					if (!fn.Call(nullptr, 0, &res, &err))
+					{
+						if (Log::GetCoreLogger())
+							WLD_CORE_ERROR("[Luau ECS StartupSystem('{}')] failed: {}", name, err);
+					}
+				}
+			});
+			ScriptEngine::NoteScriptSystem(name);
+			return ScriptValue::Boolean(true);
+		}
+
+		// -------------------------------------------------------------------------
+		// ecs:AddTeardownSystem(name, fn) 实现
+		// -------------------------------------------------------------------------
+		ScriptValue AddTeardownSystemImpl(const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+				startIndex = 1;
+
+			std::size_t remaining = count - startIndex;
+			if (remaining < 2)
+				throw std::logic_error("ecs:AddTeardownSystem expects (name, fn)");
+
+			std::string name;
+			if (!args[startIndex].AsString(&name) || name.empty())
+				throw std::logic_error("ecs:AddTeardownSystem: system name must be a non-empty string");
+
+			ScriptFunctionRef fn;
+			if (!args[startIndex + 1].AsFunction(&fn) || !fn.IsValid())
+				throw std::logic_error("ecs:AddTeardownSystem: expected a function");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:AddTeardownSystem requires an active scene");
+
+			activeScene->RegisterTeardownSystem({
+				name,
+				[fn, name](Scene&)
+				{
+					ScriptValue res;
+					std::string err;
+					if (!fn.Call(nullptr, 0, &res, &err))
+					{
+						if (Log::GetCoreLogger())
+							WLD_CORE_ERROR("[Luau ECS TeardownSystem('{}')] failed: {}", name, err);
+					}
+				}
+			});
+			ScriptEngine::NoteScriptSystem(name);
+			return ScriptValue::Boolean(true);
+		}
+
+		// -------------------------------------------------------------------------
+		// ecs:OnChange(componentName, fn) 实现
+		// -------------------------------------------------------------------------
+		ScriptValue OnChangeImpl(const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+				startIndex = 1;
+
+			std::size_t remaining = count - startIndex;
+			if (remaining < 2)
+				throw std::logic_error("ecs:OnChange expects (componentName, callbackFn)");
+
+			std::string compName;
+			if (!args[startIndex].AsString(&compName) || compName.empty())
+				throw std::logic_error("ecs:OnChange: component name must be a non-empty string");
+
+			ScriptFunctionRef fn;
+			if (!args[startIndex + 1].AsFunction(&fn) || !fn.IsValid())
+				throw std::logic_error("ecs:OnChange: callback must be a valid function");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:OnChange requires an active scene");
+
+			auto& schemaRegistry = activeScene->GetContext().Schemas();
+			const Schema::TypeSchema* schema = schemaRegistry.Find(compName);
+			if (!schema || schema->Category != Schema::TypeCategory::Component || !schema->Storage)
+				throw std::logic_error("ecs:OnChange: '" + compName + "' is not a registered component type");
+
+			const entt::id_type componentId = schema->Storage->ComponentId;
+			const uint64_t handle = activeScene->AddComponentChangeObserver(
+				componentId,
+				[fn, compName, schema](Entity entity)
+				{
+					if (!entity.IsValid())
+						return;
+
+					ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+					const ScriptValue callArgs[] = {
+						NewUserdataOf(context, "Entity", entity),
+						MakeComponentProxy(context, entity, *schema)
+					};
+					ScriptValue result;
+					std::string callError;
+					if (!fn.Call(callArgs, 2, &result, &callError))
+					{
+						if (Log::GetCoreLogger())
+							WLD_CORE_ERROR("[Luau ECS OnChange('{}')] callback error: {}", compName, callError);
+					}
+				});
+
+			return ScriptValue::Number(static_cast<double>(handle));
 		}
 
 		// -------------------------------------------------------------------------
@@ -708,12 +961,16 @@ namespace World
 				throw std::logic_error("ecs:EntityCount requires an active scene");
 
 			double entityCount = 0.0;
-			const auto& entityStorage = activeScene->GetRegistry().storage<entt::entity>();
-			for (auto it = entityStorage.begin(); it != entityStorage.end(); ++it)
+			const auto& registry = static_cast<const Scene*>(activeScene)->GetRegistry();
+			const auto* entityStorage = registry.storage<entt::entity>();
+			if (entityStorage)
 			{
-				entt::entity entity = *it;
-				if (activeScene->GetRegistry().valid(entity) && !activeScene->IsPendingDestroy(entity))
-					entityCount += 1.0;
+				for (auto it = entityStorage->begin(); it != entityStorage->end(); ++it)
+				{
+					entt::entity entity = *it;
+					if (registry.valid(entity) && !activeScene->IsPendingDestroy(entity))
+						entityCount += 1.0;
+				}
 			}
 
 			return ScriptValue::Number(entityCount);
@@ -1169,6 +1426,14 @@ namespace World
 			{ "component", "string", ScriptServiceArgType::String, true, "Registered component type name to observe." },
 			{ "fn", "function", ScriptServiceArgType::None, true, "Called with the entity whenever the component is removed." },
 		};
+		static const ScriptServiceParam onChangeParams[] = {
+			{ "component", "string", ScriptServiceArgType::String, true, "Registered component type name to observe." },
+			{ "fn", "function", ScriptServiceArgType::None, true, "Called with (entity, component) whenever the component data changes." },
+		};
+		static const ScriptServiceParam addLifecycleSystemParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "System name." },
+			{ "fn", "function", ScriptServiceArgType::None, true, "Called on the corresponding lifecycle event." },
+		};
 		static const ScriptServiceParam offParams[] = {
 			{ "handle", "number", ScriptServiceArgType::Number, true, "Handle returned by ecs:OnAdd / ecs:OnRemove / ecs:OnContact / ecs:OnTrigger." },
 		};
@@ -1198,6 +1463,12 @@ namespace World
 				"Observe component additions; returns a handle for ecs:Off." },
 			{ "OnRemove", &OnRemoveImpl, onRemoveParams, 2, 2, "number",
 				"Observe component removals; returns a handle for ecs:Off." },
+			{ "OnChange", &OnChangeImpl, onChangeParams, 2, 2, "number",
+				"Observe component data changes; returns a handle for ecs:Off." },
+			{ "AddStartupSystem", &AddStartupSystemImpl, addLifecycleSystemParams, 2, 2, "boolean",
+				"Register a startup system that runs once when the active scene starts running." },
+			{ "AddTeardownSystem", &AddTeardownSystemImpl, addLifecycleSystemParams, 2, 2, "boolean",
+				"Register a teardown system that runs once when the active scene stops running." },
 			{ "OnContact", &OnContactImpl, onContactParams, 1, 1, "number",
 				"Subscribe to this frame's contact events; called once per event with { a, b, phase, point, normal, depth }. Events are produced in the fixed step and read once per frame, so call it from a variable-phase system; returns a handle for ecs:Off." },
 			{ "OnTrigger", &OnTriggerImpl, onTriggerParams, 1, 1, "number",
