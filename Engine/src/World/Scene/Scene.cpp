@@ -32,6 +32,53 @@ namespace World
 			const entt::registry* Registry = nullptr;
 		};
 
+		struct SceneSlotEntry
+		{
+			const Scene* Owner = nullptr;
+			uint16_t Generation = 1;
+		};
+
+		constexpr std::size_t kMaxSceneSlots = 256;
+		std::mutex g_SceneSlotMutex;
+		SceneSlotEntry g_SceneSlots[kMaxSceneSlots]{};
+
+		std::pair<uint16_t, uint16_t> AllocateSceneSlot(const Scene* scene)
+		{
+			std::lock_guard<std::mutex> lock(g_SceneSlotMutex);
+			for (std::size_t i = 1; i < kMaxSceneSlots; ++i)
+			{
+				if (g_SceneSlots[i].Owner == nullptr)
+				{
+					g_SceneSlots[i].Owner = scene;
+					if (g_SceneSlots[i].Generation == 0)
+						g_SceneSlots[i].Generation = 1;
+					return { static_cast<uint16_t>(i), g_SceneSlots[i].Generation };
+				}
+			}
+			return { 0, 0 };
+		}
+
+		void ReleaseSceneSlot(uint16_t slot, const Scene* scene)
+		{
+			if (slot == 0 || slot >= kMaxSceneSlots)
+				return;
+			std::lock_guard<std::mutex> lock(g_SceneSlotMutex);
+			if (g_SceneSlots[slot].Owner == scene)
+			{
+				g_SceneSlots[slot].Owner = nullptr;
+				g_SceneSlots[slot].Generation++;
+				if (g_SceneSlots[slot].Generation == 0)
+					g_SceneSlots[slot].Generation = 1;
+			}
+		}
+
+		bool CheckSceneSlotAlive(const Scene* scene, uint16_t slot, uint16_t generation) noexcept
+		{
+			if (!scene || slot == 0 || slot >= kMaxSceneSlots)
+				return false;
+			return g_SceneSlots[slot].Owner == scene && g_SceneSlots[slot].Generation == generation;
+		}
+
 		std::mutex g_LiveScenesMutex;
 		std::vector<LiveSceneEntry> g_LiveScenes;
 
@@ -371,6 +418,9 @@ namespace World
 
 	Scene::Scene(WorldContext& context) : m_Context(&context), m_OwnerThread(std::this_thread::get_id())
 	{
+		const auto [slot, gen] = AllocateSceneSlot(this);
+		m_SceneSlot = slot;
+		m_SceneGeneration = gen;
 		RegisterLiveScene(this, m_Context, &m_Registry);
 	}
 
@@ -390,8 +440,29 @@ namespace World
 			std::terminate();
 		}
 		StopScene();
-		m_Lifetime.reset();
+		ReleaseSceneSlot(m_SceneSlot, this);
 		UnregisterLiveScene(&m_Registry);
+	}
+
+	bool Scene::IsSceneAlive(const Scene* scene, uint16_t slot, uint16_t generation) noexcept
+	{
+		return CheckSceneSlotAlive(scene, slot, generation);
+	}
+
+	Entity Scene::CreateRawEntity()
+	{
+		AssertStructuralWrite();
+		return Entity(this, m_Registry.create());
+	}
+
+	void Scene::CreateEntities(std::size_t count, std::vector<Entity>& out)
+	{
+		AssertStructuralWrite();
+		out.reserve(out.size() + count);
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			out.emplace_back(this, m_Registry.create());
+		}
 	}
 
 	std::size_t Scene::CountLiveComponentInstances(entt::id_type componentId,
@@ -950,7 +1021,7 @@ namespace World
 	bool Scene::IsPendingDestroy(entt::entity entity) const
 	{
 		AssertOwnerThread();
-		return m_PendingDestroy.count(entity) != 0;
+		return m_Registry.valid(entity) && m_Registry.all_of<PendingDestroyTag>(entity);
 	}
 
 	bool Scene::IsPendingRemoval(entt::entity entity, entt::id_type component) const
@@ -985,7 +1056,8 @@ namespace World
 	void Scene::RequestDestroy(entt::entity entity)
 	{
 		AssertOwnerThread();
-		if (!m_Registry.valid(entity) || !m_PendingDestroy.insert(entity).second) return;
+		if (!m_Registry.valid(entity) || m_Registry.all_of<PendingDestroyTag>(entity)) return;
+		m_Registry.emplace<PendingDestroyTag>(entity);
 		m_Changes.push_back({ ChangeKind::DestroyEntity, {}, {}, entity });
 		if (!IsActive() && !m_CallbackDepth && !m_Committing) FlushStructuralChanges();
 	}
@@ -1202,7 +1274,6 @@ namespace World
 			if (m_Physics3D) { m_Physics3D->DestroyJoints(entity); m_Physics3D->DestroyBody(entity); }
 			m_Registry.destroy(entity);
 		}
-		m_PendingDestroy.erase(entity);
 		m_PendingRemove.erase(entity);
 	}
 
@@ -1424,9 +1495,11 @@ namespace World
 		OnPhysics2DStop();
 		OnPhysics3DStop();
 		// Destruction callbacks may request further idempotent deletes/removals, but no general work.
-		while (!m_PendingDestroy.empty() || !m_PendingRemove.empty())
+		while (m_Registry.view<PendingDestroyTag>().size() != 0 || !m_PendingRemove.empty())
 		{
-			const auto destroys = m_PendingDestroy;
+			std::vector<entt::entity> destroys;
+			for (const auto entity : m_Registry.view<PendingDestroyTag>())
+				destroys.push_back(entity);
 			for (const auto entity : destroys) DestroyEntityNow(entity);
 			const auto removals = m_PendingRemove;
 			for (const auto& [entity, components] : removals)

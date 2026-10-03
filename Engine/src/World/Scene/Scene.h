@@ -33,6 +33,9 @@ namespace World
 	namespace Gameplay { class SaveService; }   // P2a W8:存档服务需要只读遍历 registry
 	enum class SceneState { Stopped, Starting, Running, Stopping };
 
+	// 零内存开销的挂起销毁标签组件:替代过去的 std::unordered_set<entt::entity>
+	struct PendingDestroyTag {};
+
 	class Scene
 	{
 	private:
@@ -52,6 +55,15 @@ namespace World
 		~Scene();
 		Scene(const Scene&) = delete;
 		Scene& operator=(const Scene&) = delete;
+
+		// 场景世代槽位检测:取代原 std::weak_ptr 原子控制块,实现 16 字节平凡拷贝 Entity 句柄
+		static bool IsSceneAlive(const Scene* scene, uint16_t slot, uint16_t generation) noexcept;
+		uint16_t GetSceneSlot() const noexcept { return m_SceneSlot; }
+		uint16_t GetSceneGeneration() const noexcept { return m_SceneGeneration; }
+
+		// M2: 轻量匿名实体与批量创建通道
+		Entity CreateRawEntity();
+		void CreateEntities(std::size_t count, std::vector<Entity>& out);
 
 		// P4-U4:场景级(World)设置 —— 存进 `.wd` 头部的 `World:` 块。
 		// 口径:只放"引擎**已经有实现**、但过去只能靠环境变量/项目清单"的 knob;
@@ -490,7 +502,8 @@ namespace World
 
 		entt::registry m_Registry;
 		WorldContext* m_Context = nullptr;
-		std::shared_ptr<const uint8_t> m_Lifetime = std::make_shared<const uint8_t>(0);
+		uint16_t m_SceneSlot = 0;
+		uint16_t m_SceneGeneration = 0;
 		std::thread::id m_OwnerThread;
 		SceneState m_State = SceneState::Stopped;
 		bool m_StopRequested = false;
@@ -499,7 +512,6 @@ namespace World
 		unsigned m_ScriptWriteDepth = 0;
 		ScriptSource m_CallbackSource;
 		std::vector<StructuralChange> m_Changes;
-		std::unordered_set<entt::entity> m_PendingDestroy;
 		std::unordered_map<entt::entity, std::unordered_set<entt::id_type>> m_PendingRemove;
 		uint32_t m_ViewportWidth = 0, m_ViewportHeight = 0;
 		b2WorldId m_PhysicsWorldId = b2_nullWorldId;

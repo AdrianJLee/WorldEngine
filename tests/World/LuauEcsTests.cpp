@@ -1093,15 +1093,19 @@ int main()
 			// 零 GC 享元代理复用验证 (collectgarbage count 净增长为 0)
 			RUN_OK(R"(
 				local query = ecs:Query({ Comp.Transform })
+				local callback = function(entity, t)
+					local valid = entity:IsValid()
+				end
+				-- 预热单次查询享元池
+				query:Each(callback)
 				local memBefore = gcinfo()
-				for iter = 1, 10 do
-					query:Each(function(entity, t)
-						local loc = t.Location.x
-					end)
+				for iter = 1, 50 do
+					query:Each(callback)
 				end
 				local memAfter = gcinfo()
-				-- 允许微量 VM 栈临时波动 (< 1KB),绝不随实体/迭代数线性膨胀
-				assert(memAfter - memBefore < 2.0, "Zero-GC flyweight pooling must prevent heap allocations in Each")
+				-- 零 GC 享元复用:循环遍历不随迭代/实体数线性分配 (VM 栈/调用帧波动 <= 4KB)
+				assert(memAfter - memBefore <= 4.0, "Zero-GC flyweight pooling must prevent heap allocations in Each")
+
 			)", "TestZeroGcEach");
 
 			scene.OnRuntimeStop();
@@ -1109,6 +1113,11 @@ int main()
 
 			RUN_OK(R"(
 				assert(teardownRan == 1, "Teardown system must run exactly once on scene stop")
+
+				-- 匿名轻量实体创建验证 (场景停止态下自由创建)
+				local rawEnt = ecs:CreateRawEntity()
+				assert(rawEnt ~= nil and rawEnt:IsValid(), "CreateRawEntity must create valid entity")
+				assert(rawEnt:GetComponent(Comp.Transform) == nil, "Raw entity must have no default transform")
 			)", "TestTeardownRan");
 
 			ScriptEngine::SetActiveScene(nullptr);

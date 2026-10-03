@@ -302,10 +302,11 @@ namespace World
 			}
 
 			auto lastQueryTick = std::make_shared<uint64_t>(0);
+			auto pooledCallArgs = std::make_shared<std::vector<ScriptValue>>();
 
 			// Method: Each(callback)
 			queryTable.SetField("Each", bindings.CreateFunction("Query:Each",
-				[schemas, excludeSchemas, changedSchemas, lastQueryTick](const ScriptValue* eachArgs, std::size_t eachCount) -> ScriptValue
+				[schemas, excludeSchemas, changedSchemas, lastQueryTick, pooledCallArgs](const ScriptValue* eachArgs, std::size_t eachCount) -> ScriptValue
 				{
 					ScriptFunctionRef callback;
 					if (eachCount >= 2 && eachArgs[1].AsFunction(&callback))
@@ -412,14 +413,17 @@ namespace World
 					}
 					*lastQueryTick = scene->CurrentWorldTick();
 
-					// 零 GC 享元代理复用:在循环外分配单套实参与组件代理,循环内就地更新载荷
-					std::vector<ScriptValue> callArgs;
-					callArgs.reserve(1 + schemas.size());
-					callArgs.push_back(NewUserdataOf(context, "Entity", Entity()));
-					for (const auto* schema : schemas)
+					// 零 GC 享元代理复用:在查询对象生命周期内仅分配单套实参与组件代理,循环内外就地更新载荷
+					if (pooledCallArgs->empty())
 					{
-						callArgs.push_back(MakeComponentProxy(context, Entity(), *schema));
+						pooledCallArgs->reserve(1 + schemas.size());
+						pooledCallArgs->push_back(NewUserdataOf(context, "Entity", Entity()));
+						for (const auto* schema : schemas)
+						{
+							pooledCallArgs->push_back(MakeComponentProxy(context, Entity(), *schema));
+						}
 					}
+					auto& callArgs = *pooledCallArgs;
 
 					for (entt::entity entity : matches)
 					{
@@ -917,6 +921,20 @@ namespace World
 				throw std::logic_error("ecs:CreateEntity requires an active scene");
 
 			Entity entity = Entity::CreateEntity(activeScene, name);
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
+		// -------------------------------------------------------------------------
+		// ecs:CreateRawEntity() 实现 (零 Tag / 零 UUID 的轻量匿名实体)
+		// -------------------------------------------------------------------------
+		ScriptValue CreateRawEntityImpl(const ScriptValue*, std::size_t)
+		{
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateRawEntity requires an active scene");
+
+			Entity entity = activeScene->CreateRawEntity();
 			return NewUserdataOf(bindings, "Entity", entity);
 		}
 
@@ -1455,6 +1473,8 @@ namespace World
 				"Unregister a named system; false when no such system is registered." },
 			{ "CreateEntity", &CreateEntityImpl, createEntityParams, 1, 1, "Entity",
 				"Create an entity (Tag + UUID) in the active scene and return its handle." },
+			{ "CreateRawEntity", &CreateRawEntityImpl, nullptr, 0, 0, "Entity",
+				"Create a lightweight anonymous entity (no Tag, no UUID) in the active scene and return its handle." },
 			{ "DestroyEntity", &DestroyEntityImpl, destroyEntityParams, 1, 1, "boolean",
 				"Queue an entity for destruction at the next safe point." },
 			{ "EntityCount", &EntityCountImpl, nullptr, 0, 0, "number",

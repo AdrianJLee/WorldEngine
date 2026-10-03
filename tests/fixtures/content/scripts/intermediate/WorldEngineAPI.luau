@@ -441,6 +441,10 @@ function ecs:RemoveSystem(name) end
 ---@return Entity
 function ecs:CreateEntity(name) end
 
+---Create a lightweight anonymous entity (no Tag, no UUID) in the active scene and return its handle.
+---@return Entity
+function ecs:CreateRawEntity() end
+
 ---Queue an entity for destruction at the next safe point.
 ---@param entity userdata Entity to destroy; queued, committed at the next safe point.
 ---@return boolean

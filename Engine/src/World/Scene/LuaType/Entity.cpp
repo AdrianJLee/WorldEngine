@@ -469,8 +469,8 @@ namespace World
 			desc.UserdataSize = sizeof(Entity);
 			desc.Methods = methods;
 			desc.MethodCount = sizeof(methods) / sizeof(methods[0]);
-			// Entity 里有 std::weak_ptr 生命周期令牌:必须登记析构,否则每次 GC 都泄漏控制块。
-			desc.Destructor = [](void* data) { static_cast<Entity*>(data)->~Entity(); };
+			// Entity 现在是 16 字节平凡析构类型(Trivially Destructible),不再需要终结器,大幅释放 Luau GC 压力
+			desc.Destructor = nullptr;
 
 			std::string error;
 			if (!bindings.RegisterUserType(desc, &error))

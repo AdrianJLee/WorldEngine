@@ -39,13 +39,24 @@ namespace World
 		scene->RequestDestroy(entity.m_EntityHandle);
 	}
 
+	Entity Entity::CreateRaw(Scene* scene)
+	{
+		if (!scene) throw std::logic_error("Cannot create an entity without a scene");
+		scene->AssertStructuralWrite();
+		return Entity(scene, scene->m_Registry.create());
+	}
+
 	Entity::Entity(Scene* scene, entt::entity handle)
-		: m_EntityHandle(handle), m_Scene(scene), m_Lifetime(scene ? scene->m_Lifetime : std::weak_ptr<const uint8_t> {})
+		: m_EntityHandle(handle)
+		, m_SceneSlot(scene ? scene->GetSceneSlot() : 0)
+		, m_SceneGeneration(scene ? scene->GetSceneGeneration() : 0)
+		, m_Scene(scene)
 	{}
 
 	bool Entity::IsValid() const
 	{
-		if (!m_Scene || m_EntityHandle == entt::null || m_Lifetime.expired()) return false;
+		if (!m_Scene || m_EntityHandle == entt::null) return false;
+		if (!Scene::IsSceneAlive(m_Scene, m_SceneSlot, m_SceneGeneration)) return false;
 		m_Scene->AssertOwnerThread();
 		return m_Scene->m_Registry.valid(m_EntityHandle);
 	}

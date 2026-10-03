@@ -12,6 +12,7 @@ namespace World
 	{
 	public:
 		static Entity CreateEntity(Scene* scene, const std::string& name = "Empty Entity", const UUID& id = UUID());
+		static Entity CreateRaw(Scene* scene);
 		static void DestroyEntity(Scene* scene, Entity entity);
 		Entity() = default;
 		Entity(Scene* scene, entt::entity handle);
@@ -102,8 +103,10 @@ namespace World
 		operator uint32_t() const { return static_cast<uint32_t>(m_EntityHandle); }
 		bool operator==(const Entity& other) const
 		{
-			return m_EntityHandle == other.m_EntityHandle && m_Scene == other.m_Scene &&
-				!m_Lifetime.owner_before(other.m_Lifetime) && !other.m_Lifetime.owner_before(m_Lifetime);
+			return m_EntityHandle == other.m_EntityHandle &&
+			       m_Scene == other.m_Scene &&
+			       m_SceneSlot == other.m_SceneSlot &&
+			       m_SceneGeneration == other.m_SceneGeneration;
 		}
 		bool operator!=(const Entity& other) const { return !(*this == other); }
 		Scene* GetScene() const { RequireValid(); return m_Scene; }
@@ -113,7 +116,12 @@ namespace World
 		bool CheckAdd(entt::id_type component, bool replace, bool requireDependencies, std::string* reason) const;
 		void RequireCanAdd(entt::id_type component, bool replace) const;
 		entt::entity m_EntityHandle = entt::null;
+		uint16_t m_SceneSlot = 0;
+		uint16_t m_SceneGeneration = 0;
 		Scene* m_Scene = nullptr;
-		std::weak_ptr<const uint8_t> m_Lifetime;
 	};
+
+	static_assert(sizeof(Entity) == 16, "Entity must be exactly 16 bytes");
+	static_assert(std::is_trivially_copyable_v<Entity>, "Entity must be trivially copyable");
+	static_assert(std::is_trivially_destructible_v<Entity>, "Entity must be trivially destructible");
 }

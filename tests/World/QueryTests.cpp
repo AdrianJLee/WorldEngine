@@ -441,6 +441,53 @@ int main()
 			CHECK(mover.GetComponent<TransformComponent>().Location.z == 3.0f);
 		}
 
+		// ========================================================
+		// 14. Entity 轻量化、平凡拷贝、CreateRaw 与安全判活验证
+		// ========================================================
+		{
+			static_assert(sizeof(Entity) == 16, "Entity must be exactly 16 bytes");
+			static_assert(std::is_trivially_copyable_v<Entity>, "Entity must be trivially copyable");
+			static_assert(std::is_trivially_destructible_v<Entity>, "Entity must be trivially destructible");
+
+			Entity danglingEntity;
+			{
+				auto tempScene = std::make_unique<Scene>(context);
+				Entity raw = Entity::CreateRaw(tempScene.get());
+				CHECK(raw.IsValid());
+				CHECK(!raw.HasComponent<TagComponent>());
+				CHECK(!raw.HasComponent<UUIDComponent>());
+
+				// 批量创建
+				std::vector<Entity> batch;
+				tempScene->CreateEntities(100, batch);
+				CHECK(batch.size() == 100);
+				for (const auto& e : batch)
+				{
+					CHECK(e.IsValid());
+				}
+
+				// 在非运行态下 DestroyEntity 立即生效
+				Entity raw2 = Entity::CreateRaw(tempScene.get());
+				tempScene->DestroyEntity(raw2);
+				CHECK(!raw2.IsValid());
+
+				// 在运行态下 DestroyEntity 延迟挂起 (PendingDestroyTag)
+				Entity live = Entity::CreateRaw(tempScene.get());
+				tempScene->OnRuntimeStart();
+				tempScene->DestroyEntity(live);
+				CHECK(tempScene->IsPendingDestroy(live));
+				tempScene->FlushStructuralChanges();
+				CHECK(!live.IsValid());
+				tempScene->OnRuntimeStop();
+
+				danglingEntity = raw;
+				CHECK(danglingEntity.IsValid());
+			}
+
+			// 场景析构后，Entity 句柄必须在 O(1) 且无内存非法访问下安全返回 false
+			CHECK(!danglingEntity.IsValid());
+		}
+
 		std::puts("WorldQueryTests passed all assertions!");
 		return 0;
 	}
