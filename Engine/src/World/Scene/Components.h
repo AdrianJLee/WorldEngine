@@ -357,6 +357,8 @@ namespace World
 		BodyType Type = BodyType::Static;
 		b2BodyId RuntimeBodyId = b2_nullBodyId;
 		bool FixedRotation = false;
+		// P7:连续碰撞检测(Box2D b2BodyDef.isBullet)—— 高速小物体不会隧穿。
+		bool Ccd = false;
 		// P5 碰撞过滤(Box2D b2Filter 口径):Layer = 本体的类别位,Mask = 允许与本体碰撞的类别位。
 		// 两个形变体必须**互相**通过 (LayerA & MaskB) && (LayerB & MaskA) 才会产生接触/事件。
 		std::uint32_t Layer = 1u;
@@ -373,6 +375,8 @@ namespace World
 				Doc("Collision category bits of this body. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero."));
 			WE_FIELD(Mask, UInt32,
 				Doc("Collision category bits this body accepts. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero."));
+			WE_FIELD(Ccd, Bool,
+				Doc("Continuous collision detection: sweep this fast body so it cannot tunnel through thin geometry."));
 		WE_SCHEMA_END
 	};
 
@@ -464,6 +468,8 @@ namespace World
 		float Friction = 0.5f;
 		float Restitution = 0.2f;
 		bool UseGravity = true;
+		// P7:连续碰撞检测(Jolt EMotionQuality::LinearCast)—— 高速小物体不会隧穿。
+		bool Ccd = false;
 		// P5 碰撞过滤(Jolt ObjectLayer 口径):Layer = 本体的类别位,Mask = 允许与本体碰撞的类别位。
 		// 两个刚体必须**互相**通过 (LayerA & MaskB) && (LayerB & MaskA) 才会产生接触/事件。
 		std::uint32_t Layer = 1u;
@@ -495,6 +501,8 @@ namespace World
 				Doc("Collision category bits this body accepts. Two bodies interact only when (LayerA and MaskB) and (LayerB and MaskA) are both non-zero."));
 			WE_FIELD(IsSensor, Bool,
 				Doc("Sensor: the whole body reports overlaps as trigger events but never blocks or bounces (Jolt sensors are body-wide)."));
+			WE_FIELD(Ccd, Bool,
+				Doc("Continuous collision detection: sweep this fast body so it cannot tunnel through thin geometry."));
 		WE_SCHEMA_END
 	};
 
@@ -545,6 +553,62 @@ namespace World
 				Doc("Half height of the cylinder segment (excludes the hemisphere caps)."));
 			WE_FIELD(Offset, Vec3, Id(0x4333444F46465354),
 				Doc("Shape centre offset in local units (not scaled by the entity transform)."));
+		WE_SCHEMA_END
+	};
+
+	// P7:关节/约束(两个刚体之间)。
+	//
+	// 归属:关节写在**主实体**上,`Connected` 指向另一个实体;两侧必须是同一后端
+	// (主实体挂 RigidBody2DComponent ⇒ Box2D 关节;挂 RigidBody3DComponent ⇒ Jolt 约束)。
+	// 两个实体各自挂一份、互相引用同一个 Connected 会重复建关节 —— 校验期拒绝。
+	//
+	// 局部连接点:`AnchorSelf` 在主实体局部空间,`AnchorOther` 在对方实体局部空间
+	// (2D 用 x/y,z 忽略;3D 用 xyz)。`Axis` 是 Hinge 的旋转轴(主实体局部空间)。
+	struct JointComponent
+	{
+		enum class JointKind
+		{
+			Fixed = 0, Distance, Hinge
+		};
+		WE_ENUM_SCHEMA(World, JointKind, Int32)
+			WE_ENUM_VALUE(Fixed);
+			WE_ENUM_VALUE(Distance);
+			WE_ENUM_VALUE(Hinge);
+		WE_ENUM_END
+
+		entt::entity Connected = entt::null;
+		JointKind Type = JointKind::Fixed;
+		glm::vec3 AnchorSelf { 0.0f };
+		glm::vec3 AnchorOther { 0.0f };
+		// Hinge 的旋转轴(主实体局部空间,无需归一化)。
+		glm::vec3 Axis { 0.0f, 1.0f, 0.0f };
+		// Distance:允许的距离区间;< 0 = 用启动时两锚点之间的实际距离。
+		float MinDistance = -1.0f;
+		float MaxDistance = -1.0f;
+		// 关节连接的两体之间是否仍然允许碰撞(默认否,与 Unity / Box2D 默认一致)。
+		bool EnableCollision = false;
+		// 2D 运行态句柄(非 schema 字段,不入档):世界只在运行期存在。
+		b2JointId RuntimeJointId = b2_nullJointId;
+
+		WE_SCHEMA_BODY(World, JointComponent, Component)
+			WE_SCHEMA_META(Category("Physics"),
+				Doc("Constraint between this entity and another body. Fixed welds the two frames, Distance keeps them within a range, Hinge allows rotation around Axis only."))
+			WE_FIELD(Connected, UInt64, Entity32,
+				Doc("The other body of the joint. Both entities must use the same physics backend (2D or 3D)."));
+			WE_FIELD(Type, Enum, Of(JointKind),
+				Doc("Fixed = rigid weld, Distance = keep a distance range, Hinge = rotation around Axis only."));
+			WE_FIELD(AnchorSelf, Vec3,
+				Doc("Joint anchor in this entity's local space."));
+			WE_FIELD(AnchorOther, Vec3,
+				Doc("Joint anchor in the connected entity's local space."));
+			WE_FIELD(Axis, Vec3,
+				Doc("Hinge rotation axis in this entity's local space (ignored by Fixed and Distance)."));
+			WE_FIELD(MinDistance, Float,
+				Doc("Distance joints: minimum allowed separation; negative = derived from the anchors at start."));
+			WE_FIELD(MaxDistance, Float,
+				Doc("Distance joints: maximum allowed separation; negative = derived from the anchors at start."));
+			WE_FIELD(EnableCollision, Bool,
+				Doc("Allow the two connected bodies to collide with each other (off by default)."));
 		WE_SCHEMA_END
 	};
 

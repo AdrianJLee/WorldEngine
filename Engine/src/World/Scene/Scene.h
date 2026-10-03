@@ -198,6 +198,13 @@ namespace World
 		// 运行时建刚体:AddComponent 的 schema 存储绑定只写入组件数据,Box2D 刚体由这里补建
 		// (与 OnPhysics2DStart 同一套形状/质量创建逻辑);世界未启动 → 只保留组件配置。
 		void EnsurePhysicsBody(entt::entity entity);
+		// ---- P7:关节(约束)运行时接口 ----
+		// 与刚体同一生命周期:世界只在 OnRuntimeStart/OnSimulationStart → OnRuntimeStop 之间存在。
+		// 2D 走 Box2D 关节,3D 走 Jolt 约束;两侧都必须是同一后端的刚体。
+		void EnsurePhysicsJoint(entt::entity entity);
+		void DestroyPhysicsJoint(entt::entity entity);
+		// 某实体被销毁时,把其它实体指向它的关节一起拆掉(否则后端会留悬垂 pair)。
+		void DestroyJointsReferencing(entt::entity entity);
 		// ---- P1b D6:3D 物理(Jolt)运行时接口 ----
 		// 与 2D 相同的生命周期:世界只在 OnRuntimeStart/OnSimulationStart → OnRuntimeStop 之间存在。
 		// 同一实体同时挂 2D 与 3D 物理组件 → OnRuntimeStart 抛可读 std::logic_error(整场景拒绝启动,

@@ -16,8 +16,11 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
+#include <Jolt/Physics/Body/MotionQuality.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
+#include <Jolt/Physics/Collision/CollisionGroup.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/GroupFilterTable.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
@@ -25,6 +28,11 @@
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
+#include <Jolt/Physics/Constraints/Constraint.h>
+#include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/Constraints/FixedConstraint.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/TwoBodyConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Geometry/IndexedTriangle.h>
 #include <Jolt/Math/Float3.h>
@@ -479,6 +487,8 @@ namespace World
 					RegisterPair(rigidBody.Layer, rigidBody.Mask));
 				settings.mUserData = static_cast<JPH::uint64>(static_cast<uint32_t>(entity));
 				settings.mIsSensor = rigidBody.IsSensor;
+				// P7 CCD:RigidBody3DComponent::Ccd ⇒ Jolt 运动质量档(Discrete / LinearCast)。
+				settings.mMotionQuality = rigidBody.Ccd ? JPH::EMotionQuality::LinearCast : JPH::EMotionQuality::Discrete;
 				settings.mFriction = std::max(0.0f, rigidBody.Friction);
 				settings.mRestitution = std::max(0.0f, rigidBody.Restitution);
 				settings.mLinearDamping = std::max(0.0f, rigidBody.LinearDamping);
@@ -498,10 +508,22 @@ namespace World
 				m_BodyEntities.emplace(bodyId.GetIndexAndSequenceNumber(), entity);
 				m_BodySensors.emplace(bodyId.GetIndexAndSequenceNumber(), rigidBody.IsSensor);
 			}
+
+			// P7:EnableCollision == false 的关节要禁用两体碰撞。Jolt 没有每约束的 collide-connected
+			// 开关,只能用 GroupFilterTable(见 CreateJoint)。子组数 = 刚体数;真正参与"禁碰"关节的
+			// 刚体在 CreateJoint 时才惰性分配唯一 SubGroupID(总数不会超过这里的子组数)。
+			m_JointSubGroups.clear();
+			m_FreeJointSubGroups.clear();
+			m_NextJointSubGroup = 0;
+			m_JointSubGroupCapacity = static_cast<JPH::uint>(m_Bodies.size());
+			m_JointCollisionFilter = new JPH::GroupFilterTable(m_JointSubGroupCapacity);
 		}
 
 		void Stop()
 		{
+			// 先解全部约束:既清掉悬垂 Constraint*,也避免移除仍被约束引用的刚体(Jolt 不允许)。
+			DestroyAllJoints();
+			m_JointCollisionFilter = nullptr;
 			JPH::BodyInterface& bodyInterface = m_System.GetBodyInterface();
 			for (const auto& [entity, bodyId] : m_Bodies)
 			{
@@ -512,6 +534,8 @@ namespace World
 			m_Bodies.clear();
 			m_BodyEntities.clear();
 			m_BodySensors.clear();
+			m_JointSubGroups.clear();
+			m_JointRecords.clear();
 			m_PendingContacts.clear();
 			m_PendingTriggers.clear();
 			m_Scene = nullptr;
@@ -545,6 +569,8 @@ namespace World
 
 		void DestroyBody(entt::entity entity)
 		{
+			// 先解该实体参与的约束,否则 Jolt 不允许移除仍被约束引用的刚体。
+			DestroyJoints(entity);
 			const auto it = m_Bodies.find(entity);
 			if (it == m_Bodies.end()) return;
 			JPH::BodyInterface& bodyInterface = m_System.GetBodyInterface();
@@ -553,6 +579,144 @@ namespace World
 			m_BodySensors.erase(it->second.GetIndexAndSequenceNumber());
 			bodyInterface.DestroyBody(it->second);
 			m_Bodies.erase(it);
+		}
+
+		void CreateJoint(entt::entity owner, entt::entity other, int kind,
+			const glm::vec3& anchorSelf, const glm::vec3& anchorOther, const glm::vec3& axis,
+			float minDistance, float maxDistance, bool enableCollision)
+		{
+			if (owner == other)
+				throw std::logic_error("Physics3DWorld::CreateJoint requires two different entities");
+
+			const auto ownerIt = m_Bodies.find(owner);
+			if (ownerIt == m_Bodies.end())
+				throw std::logic_error("Physics3DWorld::CreateJoint: entity " + EntityLabel(owner) +
+					" has no 3D rigid body in this world");
+			const auto otherIt = m_Bodies.find(other);
+			if (otherIt == m_Bodies.end())
+				throw std::logic_error("Physics3DWorld::CreateJoint: entity " + EntityLabel(other) +
+					" has no 3D rigid body in this world");
+
+			JPH::Body* body1 = m_System.GetBodyLockInterfaceNoLock().TryGetBody(ownerIt->second);
+			JPH::Body* body2 = m_System.GetBodyLockInterfaceNoLock().TryGetBody(otherIt->second);
+			if (body1 == nullptr || body2 == nullptr)
+				throw std::logic_error("Physics3DWorld::CreateJoint: Jolt body lookup failed");
+
+			JPH::RVec3 position1;
+			JPH::RVec3 position2;
+			JPH::Quat rotation1;
+			JPH::Quat rotation2;
+			JPH::BodyInterface& bodyInterface = m_System.GetBodyInterface();
+			bodyInterface.GetPositionAndRotation(ownerIt->second, position1, rotation1);
+			bodyInterface.GetPositionAndRotation(otherIt->second, position2, rotation2);
+
+			// 局部 → 世界:锚点/轴按 JointComponent 约定写在实体局部空间,而 Jolt 在
+			// EConstraintSpace::WorldSpace 下要世界量,所以用刚体当前世界位姿(权威)换算:
+			//   worldPoint = bodyPosition + bodyRotation * localPoint
+			// 参考系也用**各自**刚体的世界旋转来旋转同一个局部系 ⇒ 相对姿态被记进约束(不会出现
+			// "创建即对齐/弹跳")。
+			const JPH::RVec3 worldPoint1 = position1 + rotation1 * ToJoltVec3(anchorSelf);
+			const JPH::RVec3 worldPoint2 = position2 + rotation2 * ToJoltVec3(anchorOther);
+
+			JPH::Ref<JPH::TwoBodyConstraintSettings> settings;
+			switch (kind)
+			{
+			case 0: // Fixed
+			{
+				JPH::FixedConstraintSettings* fixed = new JPH::FixedConstraintSettings();
+				fixed->mSpace = JPH::EConstraintSpace::WorldSpace;
+				fixed->mAutoDetectPoint = false;
+				fixed->mPoint1 = worldPoint1;
+				fixed->mPoint2 = worldPoint2;
+				fixed->mAxisX1 = rotation1 * JPH::Vec3::sAxisX();
+				fixed->mAxisY1 = rotation1 * JPH::Vec3::sAxisY();
+				fixed->mAxisX2 = rotation2 * JPH::Vec3::sAxisX();
+				fixed->mAxisY2 = rotation2 * JPH::Vec3::sAxisY();
+				settings = fixed;
+				break;
+			}
+			case 1: // Distance
+			{
+				JPH::DistanceConstraintSettings* distance = new JPH::DistanceConstraintSettings();
+				distance->mSpace = JPH::EConstraintSpace::WorldSpace;
+				distance->mPoint1 = worldPoint1;
+				distance->mPoint2 = worldPoint2;
+				// < 0 原样传:Jolt 用两锚点实际距离(仅 WorldSpace 生效),不自己猜数值。
+				distance->mMinDistance = minDistance;
+				distance->mMaxDistance = maxDistance;
+				settings = distance;
+				break;
+			}
+			case 2: // Hinge
+			{
+				const JPH::Vec3 axisLocal = ToJoltVec3(axis);
+				if (axisLocal.LengthSq() < 1e-12f)
+					throw std::logic_error("Physics3DWorld::CreateJoint: hinge axis must be non-zero");
+				// 与轴垂直的法线轴(局部空间);轴接近 X 时退到 Y,避免 cross 退化。
+				const JPH::Vec3 helper = std::abs(axisLocal.GetX()) < 0.9f ? JPH::Vec3::sAxisX() : JPH::Vec3::sAxisY();
+				const JPH::Vec3 normalLocal = axisLocal.Cross(helper).Normalized();
+
+				JPH::HingeConstraintSettings* hinge = new JPH::HingeConstraintSettings();
+				hinge->mSpace = JPH::EConstraintSpace::WorldSpace;
+				hinge->mPoint1 = worldPoint1;
+				hinge->mPoint2 = worldPoint2;
+				hinge->mHingeAxis1 = (rotation1 * axisLocal).Normalized();
+				hinge->mHingeAxis2 = (rotation2 * axisLocal).Normalized();
+				hinge->mNormalAxis1 = (rotation1 * normalLocal).Normalized();
+				hinge->mNormalAxis2 = (rotation2 * normalLocal).Normalized();
+				settings = hinge;
+				break;
+			}
+			default:
+				throw std::logic_error("Physics3DWorld::CreateJoint: unknown joint kind " + std::to_string(kind));
+			}
+
+			JPH::TwoBodyConstraint* constraint = settings->Create(*body1, *body2);
+			if (constraint == nullptr)
+				throw std::logic_error("Physics3DWorld::CreateJoint: Jolt failed to create the constraint");
+			// 所有权:AddConstraint 把约束存进 Array<Ref<Constraint>>(AddRef);记录里再持一份 Ref。
+			// 销毁时 RemoveConstraint + 释放记录的 Ref ⇒ 引用计数归零自动 delete,不手动 delete。
+			m_System.AddConstraint(constraint);
+
+			JointRecord record;
+			record.Owner = owner;
+			record.Other = other;
+			record.Constraint = constraint;
+
+			if (!enableCollision)
+			{
+				// Jolt 没有每约束的 collide-connected 开关(ConstraintSettings::mEnabled 只是
+				// "约束是否生效");禁用两体碰撞要用 GroupFilterTable(见 EnsureJointSubGroup)。
+				const JPH::CollisionGroup::SubGroupID subOwner = EnsureJointSubGroup(owner);
+				const JPH::CollisionGroup::SubGroupID subOther = EnsureJointSubGroup(other);
+				if (m_JointCollisionFilter != nullptr
+					&& subOwner != JPH::CollisionGroup::cInvalidSubGroup
+					&& subOther != JPH::CollisionGroup::cInvalidSubGroup)
+				{
+					m_JointCollisionFilter->DisableCollision(subOwner, subOther);
+					record.CollisionDisabled = true;
+				}
+			}
+
+			m_JointRecords.push_back(std::move(record));
+		}
+
+		void DestroyJoints(entt::entity entity)
+		{
+			for (auto it = m_JointRecords.begin(); it != m_JointRecords.end(); )
+			{
+				if (it->Owner != entity && it->Other != entity) { ++it; continue; }
+				ReleaseJointRecord(*it);
+				it = m_JointRecords.erase(it);
+			}
+			ResetUnusedJointCollisionGroups();
+		}
+
+		void DestroyAllJoints()
+		{
+			for (JointRecord& record : m_JointRecords) ReleaseJointRecord(record);
+			m_JointRecords.clear();
+			ResetUnusedJointCollisionGroups();
 		}
 
 		void CollectDebugLines(std::vector<DebugLine>& outLines) const
@@ -587,6 +751,13 @@ namespace World
 						capsule->HalfHeight * uniformScale, capsule->Offset);
 				}
 			}
+		}
+
+		bool GetBodyMotionQualityIsLinearCast(entt::entity entity) const
+		{
+			const auto found = m_Bodies.find(entity);
+			if (found == m_Bodies.end()) return false;
+			return m_System.GetBodyInterface().GetMotionQuality(found->second) == JPH::EMotionQuality::LinearCast;
 		}
 
 		bool TryGetBodyTransform(entt::entity entity, glm::vec3* outLocation, glm::quat* outRotation) const
@@ -702,6 +873,99 @@ namespace World
 		}
 
 	private:
+		// P7:一条关节的 Jolt 句柄 + 该书否禁用了两体碰撞。Constraint 由 PhysicsSystem 以
+		// Array<Ref<Constraint>> 持有(AddConstraint 会 AddRef),这里再持一份 ⇒ 释放记录的 Ref
+		// 后引用计数归零自动 delete(约束是 RefTarget,不手动 delete)。
+		struct JointRecord
+		{
+			entt::entity Owner = entt::null;
+			entt::entity Other = entt::null;
+			JPH::Ref<JPH::Constraint> Constraint;
+			bool CollisionDisabled = false;
+		};
+
+		// P7:给参与"禁碰"关节的刚体惰性分配唯一 SubGroupID,并挂进世界共享的 GroupFilterTable
+		// (GroupID 固定 0,不同 entity 靠 SubGroupID 区分)。号优先从空位表复用,否则用递增计数器;
+		// 上界 = Start 时的刚体数(表容量),因此永远不会访问表外行。
+		JPH::CollisionGroup::SubGroupID EnsureJointSubGroup(entt::entity entity)
+		{
+			if (m_JointCollisionFilter == nullptr) return JPH::CollisionGroup::cInvalidSubGroup;
+
+			auto found = m_JointSubGroups.find(entity);
+			if (found == m_JointSubGroups.end())
+			{
+				JPH::CollisionGroup::SubGroupID sub = JPH::CollisionGroup::cInvalidSubGroup;
+				if (!m_FreeJointSubGroups.empty())
+				{
+					sub = m_FreeJointSubGroups.back();
+					m_FreeJointSubGroups.pop_back();
+				}
+				else if (m_NextJointSubGroup < m_JointSubGroupCapacity)
+				{
+					sub = static_cast<JPH::CollisionGroup::SubGroupID>(m_NextJointSubGroup++);
+				}
+				if (sub == JPH::CollisionGroup::cInvalidSubGroup)
+				{
+					WLD_CORE_WARN("[Physics3D] joint collision subgroup table is full ({0} bodies); EnableCollision=false is ignored for entity {1}",
+						m_JointSubGroupCapacity, EntityLabel(entity));
+					return sub;
+				}
+				found = m_JointSubGroups.emplace(entity, sub).first;
+			}
+
+			const auto bodyIt = m_Bodies.find(entity);
+			if (bodyIt == m_Bodies.end()) return JPH::CollisionGroup::cInvalidSubGroup;
+			m_System.GetBodyInterface().SetCollisionGroup(bodyIt->second,
+				JPH::CollisionGroup(m_JointCollisionFilter.GetPtr(), /*inGroupID=*/0, found->second));
+			return found->second;
+		}
+
+		// 同一对实体上还有没有**别的**关节仍禁用碰撞(重复关节时不能提前恢复)。
+		bool IsCollisionStillDisabled(entt::entity owner, entt::entity other, const JointRecord* except) const
+		{
+			for (const JointRecord& record : m_JointRecords)
+			{
+				if (&record == except || !record.CollisionDisabled) continue;
+				if ((record.Owner == owner && record.Other == other) || (record.Owner == other && record.Other == owner))
+					return true;
+			}
+			return false;
+		}
+
+		void ReleaseJointRecord(JointRecord& record)
+		{
+			if (record.CollisionDisabled && m_JointCollisionFilter != nullptr
+				&& !IsCollisionStillDisabled(record.Owner, record.Other, &record))
+			{
+				const auto subOwner = m_JointSubGroups.find(record.Owner);
+				const auto subOther = m_JointSubGroups.find(record.Other);
+				if (subOwner != m_JointSubGroups.end() && subOther != m_JointSubGroups.end())
+					m_JointCollisionFilter->EnableCollision(subOwner->second, subOther->second);
+			}
+			if (record.Constraint != nullptr)
+				m_System.RemoveConstraint(record.Constraint);
+			record.Constraint = nullptr;
+			record.CollisionDisabled = false;
+		}
+
+		// 不再参与任何关节的刚体恢复默认碰撞组(无过滤 ⇒ 与其它刚体正常碰撞),并回收子组号。
+		void ResetUnusedJointCollisionGroups()
+		{
+			JPH::BodyInterface& bodyInterface = m_System.GetBodyInterface();
+			for (auto it = m_JointSubGroups.begin(); it != m_JointSubGroups.end(); )
+			{
+				bool used = false;
+				for (const JointRecord& record : m_JointRecords)
+					if (record.Owner == it->first || record.Other == it->first) { used = true; break; }
+				if (used) { ++it; continue; }
+				const auto bodyIt = m_Bodies.find(it->first);
+				if (bodyIt != m_Bodies.end())
+					bodyInterface.SetCollisionGroup(bodyIt->second, JPH::CollisionGroup());
+				m_FreeJointSubGroups.push_back(it->second);
+				it = m_JointSubGroups.erase(it);
+			}
+		}
+
 		// Kinematic 跟随 Transform:位姿与组件不同才推给 Jolt(避免每帧广播相位/唤醒)。
 		void PushKinematicTransforms(const entt::registry& registry)
 		{
@@ -739,6 +1003,14 @@ namespace World
 		std::unordered_map<uint32_t, bool> m_BodySensors;
 		std::vector<Physics::ContactEvent> m_PendingContacts;
 		std::vector<Physics::TriggerEvent> m_PendingTriggers;
+		std::vector<JointRecord> m_JointRecords;
+		// entity → GroupFilterTable 的 SubGroupID(只给"有 EnableCollision == false 关节"的刚体分配)。
+		std::unordered_map<entt::entity, JPH::CollisionGroup::SubGroupID> m_JointSubGroups;
+		JPH::Ref<JPH::GroupFilterTable> m_JointCollisionFilter;
+		// 子组号分配器:优先复用已释放的号,否则用递增计数器;上界 = Start 时的刚体数(表容量)。
+		std::vector<JPH::CollisionGroup::SubGroupID> m_FreeJointSubGroups;
+		JPH::uint m_JointSubGroupCapacity = 0;
+		JPH::uint m_NextJointSubGroup = 0;
 	};
 
 	Physics3DWorld::Physics3DWorld() = default;
@@ -797,6 +1069,20 @@ namespace World
 			if (!rigidBody || rigidBody->Type != RigidBody3DComponent::MotionType::Static)
 				return reject("entity " + EntityLabel(entity) +
 					" MeshCollider3D StaticTriangles requires a Static rigid body (Jolt mesh shapes are static-only)");
+		}
+
+		// P7:两个实体互相引用(A.Connected == B 且 B.Connected == A)会重复建同一关节 —— 配置错误,
+		// 拒绝启动;单向引用是正常用法。
+		const auto jointComponents = registry.view<JointComponent>();
+		for (const entt::entity jointEntity : jointComponents)
+		{
+			const JointComponent& joint = jointComponents.get<JointComponent>(jointEntity);
+			if (joint.Connected == entt::null || joint.Connected == jointEntity) continue;
+			const JointComponent* other = registry.try_get<JointComponent>(joint.Connected);
+			if (other != nullptr && other->Connected == jointEntity)
+				return reject("entities " + EntityLabel(jointEntity) + " and " + EntityLabel(joint.Connected) +
+					" mutually reference each other via JointComponent.Connected; author the joint on exactly one "
+					"of the two bodies (mutual references would create the same constraint twice)");
 		}
 
 		try
@@ -938,9 +1224,35 @@ namespace World
 		m_Impl->DestroyBody(entity);
 	}
 
+	void Physics3DWorld::CreateJoint(entt::entity owner, entt::entity other, int kind,
+		const glm::vec3& anchorSelf, const glm::vec3& anchorOther, const glm::vec3& axis,
+		float minDistance, float maxDistance, bool enableCollision)
+	{
+		RequireStarted("CreateJoint");
+		m_Impl->CreateJoint(owner, other, kind, anchorSelf, anchorOther, axis, minDistance, maxDistance, enableCollision);
+	}
+
+	void Physics3DWorld::DestroyJoints(entt::entity entity)
+	{
+		if (!m_Impl) return;
+		m_Impl->DestroyJoints(entity);
+	}
+
+	void Physics3DWorld::DestroyAllJoints()
+	{
+		if (!m_Impl) return;
+		m_Impl->DestroyAllJoints();
+	}
+
 	bool Physics3DWorld::TryGetBodyTransform(entt::entity entity, glm::vec3* outLocation, glm::quat* outRotation) const
 	{
 		if (!m_Impl) return false;
 		return m_Impl->TryGetBodyTransform(entity, outLocation, outRotation);
+	}
+
+	bool Physics3DWorld::GetBodyMotionQualityIsLinearCast(entt::entity entity) const
+	{
+		if (!m_Impl) return false;
+		return m_Impl->GetBodyMotionQualityIsLinearCast(entity);
 	}
 }

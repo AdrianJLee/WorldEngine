@@ -34,6 +34,8 @@ namespace World
 	//  - 世界只在 Start(Scene&) → Stop() 之间存在;未启动时 Step/SyncTransforms/CollectDebugLines
 	//    抛可读 std::logic_error(与 2D 物理"不静默"约定一致);
 	//  - 实体句柄 ↔ Jolt 刚体的映射留在本模块内部(组件里没有 Jolt 运行态字段);
+	//  - P7 约束:关节的 Jolt 句柄与"被禁用碰撞"的配对集合也留在本模块内部;DestroyJoints /
+	//    DestroyAllJoints 负责释放(不能把悬垂 Constraint* 留给 Stop);
 	//  - 位姿权威:Static 由 TransformComponent 决定;Kinematic 每步前跟随 TransformComponent;
 	//    Dynamic/Kinematic 每步后写回 TransformComponent(只在位姿变化时写)。
 	class WLD_API Physics3DWorld
@@ -91,8 +93,27 @@ namespace World
 		// 没有该实体的刚体时是 no-op;世界未启动时也是 no-op。
 		void DestroyBody(entt::entity entity);
 
+		// ---- P7:关节/约束(Jolt 2 体约束) ----
+		// 建约束:owner/other 都必须是本世界里**已建好的**刚体,否则抛可读 std::logic_error
+		// (不静默)。kind:0 = Fixed / 1 = Distance / 2 = Hinge(与 JointComponent::JointKind 数值对齐)。
+		// anchorSelf/anchorOther 是两实体**局部空间**的连接点,axis 是 Hinge 轴(主实体局部空间);
+		// 内部用刚体当前世界位姿换算到世界系(Jolt EConstraintSpace::WorldSpace)。
+		// minDistance/maxDistance < 0 ⇒ 原样交给 Jolt(它用两锚点实际距离);仅 Distance 使用。
+		// enableCollision == false(默认)时两体间的碰撞被禁用 —— Jolt 没有每约束的 collide-connected
+		// 开关,内部用 GroupFilterTable 实现(见 .cpp)。
+		void CreateJoint(entt::entity owner, entt::entity other, int kind,
+			const glm::vec3& anchorSelf, const glm::vec3& anchorOther, const glm::vec3& axis,
+			float minDistance, float maxDistance, bool enableCollision);
+		// 销毁某实体参与的全部约束(销毁实体 / 移除 JointComponent 时由 Scene 调用);无则 no-op。
+		void DestroyJoints(entt::entity entity);
+		// 销毁全部约束(Stop() 里随世界一起);可重复调用。
+		void DestroyAllJoints();
+
 		// 测试 / 调试入口:取实体对应刚体的 Jolt 权威世界位姿;没有刚体返回 false。
 		bool TryGetBodyTransform(entt::entity entity, glm::vec3* outLocation, glm::quat* outRotation) const;
+		// P7 测试入口:`RigidBody3DComponent::Ccd` 是否真的落到 Jolt 的 LinearCast 档位
+		// (读回后端,而不是只看组件字段)。没有该实体的刚体返回 false。
+		bool GetBodyMotionQualityIsLinearCast(entt::entity entity) const;
 
 	private:
 		struct Impl;

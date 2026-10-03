@@ -652,6 +652,17 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Parent number
 ---@field InheritTransform boolean
 
+-- Component fields are exposed through Entity:GetComponent("JointComponent"); there is no runtime global named JointComponent.
+---@class JointComponent
+---@field MaxDistance number
+---@field MinDistance number
+---@field AnchorOther vec3
+---@field EnableCollision boolean
+---@field Connected number
+---@field Type number
+---@field Axis vec3
+---@field AnchorSelf vec3
+
 -- Component fields are exposed through Entity:GetComponent("MeshCollider3DComponent"); there is no runtime global named MeshCollider3DComponent.
 ---@class MeshCollider3DComponent
 ---@field Mode number
@@ -675,6 +686,7 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@class RigidBody2DComponent
 ---@field FixedRotation boolean
 ---@field Layer number
+---@field Ccd boolean
 ---@field Type number
 ---@field Mask number
 
@@ -689,6 +701,7 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Restitution number
 ---@field Type number
 ---@field Layer number
+---@field Ccd boolean
 ---@field IsSensor boolean
 
 -- Component fields are exposed through Entity:GetComponent("SampleDataComponent"); there is no runtime global named SampleDataComponent.

@@ -28,10 +28,12 @@ const TypeSchema& WeSchemaOf_RigidBody3DComponent();
 const TypeSchema& WeSchemaOf_BoxCollider3DComponent();
 const TypeSchema& WeSchemaOf_SphereCollider3DComponent();
 const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent();
+const TypeSchema& WeSchemaOf_JointComponent();
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_SceneCamera();
 const EnumSchema& WeEnumSchemaOf_BodyType();
+const EnumSchema& WeEnumSchemaOf_JointKind();
 const EnumSchema& WeEnumSchemaOf_ProjectionType();
 const EnumSchema& WeEnumSchemaOf_MotionType();
 const EnumSchema& WeEnumSchemaOf_ColliderMode();
@@ -1663,6 +1665,16 @@ struct GeneratedAccess<World::RigidBody2DComponent>
         World::RigidBody2DComponent* self = static_cast<World::RigidBody2DComponent*>(instance);
         self->Mask = std::get<uint32_t>(value);
     }
+    static Value Get_Ccd(const void* instance)
+    {
+        const World::RigidBody2DComponent* self = static_cast<const World::RigidBody2DComponent*>(instance);
+        return Value(self->Ccd);
+    }
+    static void Set_Ccd(void* instance, const Value& value)
+    {
+        World::RigidBody2DComponent* self = static_cast<World::RigidBody2DComponent*>(instance);
+        self->Ccd = std::get<bool>(value);
+    }
     static const FieldSchema& Field_Type()
     {
         static const FieldSchema schema = {
@@ -1735,6 +1747,24 @@ struct GeneratedAccess<World::RigidBody2DComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_Ccd()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE78BE0E9AF3237ABull },
+            "Ccd",
+            Kind::Bool,
+            &Get_Ccd,
+            &Set_Ccd,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Continuous collision detection: sweep this fast body so it cannot tunnel through thin geometry.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::RigidBody2DComponent>();
@@ -1753,6 +1783,7 @@ struct GeneratedAccess<World::RigidBody2DComponent>
                 Field_FixedRotation(),
                 Field_Layer(),
                 Field_Mask(),
+                Field_Ccd(),
             },
             &StorageBindingOf(),
             "Physics/2D",
@@ -2330,6 +2361,16 @@ struct GeneratedAccess<World::RigidBody3DComponent>
         World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
         self->IsSensor = std::get<bool>(value);
     }
+    static Value Get_Ccd(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->Ccd);
+    }
+    static void Set_Ccd(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->Ccd = std::get<bool>(value);
+    }
     static const FieldSchema& Field_Type()
     {
         static const FieldSchema schema = {
@@ -2510,6 +2551,24 @@ struct GeneratedAccess<World::RigidBody3DComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_Ccd()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x995D73B5B1580DCCull },
+            "Ccd",
+            Kind::Bool,
+            &Get_Ccd,
+            &Set_Ccd,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Continuous collision detection: sweep this fast body so it cannot tunnel through thin geometry.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::RigidBody3DComponent>();
@@ -2534,6 +2593,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
                 Field_Layer(),
                 Field_Mask(),
                 Field_IsSensor(),
+                Field_Ccd(),
             },
             &StorageBindingOf(),
             "Physics/3D",
@@ -2822,6 +2882,271 @@ struct GeneratedAccess<World::CapsuleCollider3DComponent>
             &StorageBindingOf(),
             "Physics/3D",
             "Capsule along the entity's local Y axis: HalfHeight is the cylinder half height excluding the two hemisphere caps.",
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::JointComponent>
+{
+    static Value Get_Connected(const void* instance)
+    {
+        const World::JointComponent* self = static_cast<const World::JointComponent*>(instance);
+        return Value(static_cast<uint64_t>(static_cast<uint32_t>(self->Connected)));
+    }
+    static void Set_Connected(void* instance, const Value& value)
+    {
+        World::JointComponent* self = static_cast<World::JointComponent*>(instance);
+        const uint64_t raw = std::get<uint64_t>(value);
+        self->Connected = raw == static_cast<uint64_t>(entt::null)
+            ? entt::null : static_cast<entt::entity>(static_cast<uint32_t>(raw));
+    }
+    static Value Get_Type(const void* instance)
+    {
+        const World::JointComponent* self = static_cast<const World::JointComponent*>(instance);
+        return Value(static_cast<int64_t>(self->Type));
+    }
+    static void Set_Type(void* instance, const Value& value)
+    {
+        World::JointComponent* self = static_cast<World::JointComponent*>(instance);
+        self->Type = static_cast<World::JointComponent::JointKind>(std::get<int64_t>(value));
+    }
+    static const EnumSchema* GetEnum_Type()
+    {
+        return &WeEnumSchemaOf_JointKind();
+    }
+    static Value Get_AnchorSelf(const void* instance)
+    {
+        const World::JointComponent* self = static_cast<const World::JointComponent*>(instance);
+        return Value(self->AnchorSelf);
+    }
+    static void Set_AnchorSelf(void* instance, const Value& value)
+    {
+        World::JointComponent* self = static_cast<World::JointComponent*>(instance);
+        self->AnchorSelf = std::get<glm::vec3>(value);
+    }
+    static Value Get_AnchorOther(const void* instance)
+    {
+        const World::JointComponent* self = static_cast<const World::JointComponent*>(instance);
+        return Value(self->AnchorOther);
+    }
+    static void Set_AnchorOther(void* instance, const Value& value)
+    {
+        World::JointComponent* self = static_cast<World::JointComponent*>(instance);
+        self->AnchorOther = std::get<glm::vec3>(value);
+    }
+    static Value Get_Axis(const void* instance)
+    {
+        const World::JointComponent* self = static_cast<const World::JointComponent*>(instance);
+        return Value(self->Axis);
+    }
+    static void Set_Axis(void* instance, const Value& value)
+    {
+        World::JointComponent* self = static_cast<World::JointComponent*>(instance);
+        self->Axis = std::get<glm::vec3>(value);
+    }
+    static Value Get_MinDistance(const void* instance)
+    {
+        const World::JointComponent* self = static_cast<const World::JointComponent*>(instance);
+        return Value(self->MinDistance);
+    }
+    static void Set_MinDistance(void* instance, const Value& value)
+    {
+        World::JointComponent* self = static_cast<World::JointComponent*>(instance);
+        self->MinDistance = std::get<float>(value);
+    }
+    static Value Get_MaxDistance(const void* instance)
+    {
+        const World::JointComponent* self = static_cast<const World::JointComponent*>(instance);
+        return Value(self->MaxDistance);
+    }
+    static void Set_MaxDistance(void* instance, const Value& value)
+    {
+        World::JointComponent* self = static_cast<World::JointComponent*>(instance);
+        self->MaxDistance = std::get<float>(value);
+    }
+    static Value Get_EnableCollision(const void* instance)
+    {
+        const World::JointComponent* self = static_cast<const World::JointComponent*>(instance);
+        return Value(self->EnableCollision);
+    }
+    static void Set_EnableCollision(void* instance, const Value& value)
+    {
+        World::JointComponent* self = static_cast<World::JointComponent*>(instance);
+        self->EnableCollision = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Connected()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC87DF16BE1BC9D59ull },
+            "Connected",
+            Kind::UInt64,
+            &Get_Connected,
+            &Set_Connected,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "The other body of the joint. Both entities must use the same physics backend (2D or 3D).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(static_cast<uint32_t>(entt::null))),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Type()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD394F9563E60B65Aull },
+            "Type",
+            Kind::Enum,
+            &Get_Type,
+            &Set_Type,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_Type,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Fixed = rigid weld, Distance = keep a distance range, Hinge = rotation around Axis only.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<int64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorSelf()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFE47D2172D8BB5A5ull },
+            "AnchorSelf",
+            Kind::Vec3,
+            &Get_AnchorSelf,
+            &Set_AnchorSelf,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Joint anchor in this entity's local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorOther()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4617BB484780A5B7ull },
+            "AnchorOther",
+            Kind::Vec3,
+            &Get_AnchorOther,
+            &Set_AnchorOther,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Joint anchor in the connected entity's local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Axis()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF5B860C697DBE63Full },
+            "Axis",
+            Kind::Vec3,
+            &Get_Axis,
+            &Set_Axis,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Hinge rotation axis in this entity's local space (ignored by Fixed and Distance).", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MinDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x31F7BCE7D2F7F995ull },
+            "MinDistance",
+            Kind::Float,
+            &Get_MinDistance,
+            &Set_MinDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Distance joints: minimum allowed separation; negative = derived from the anchors at start.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1BE7B022C7664C17ull },
+            "MaxDistance",
+            Kind::Float,
+            &Get_MaxDistance,
+            &Set_MaxDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Distance joints: maximum allowed separation; negative = derived from the anchors at start.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableCollision()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8903415C4674AF13ull },
+            "EnableCollision",
+            Kind::Bool,
+            &Get_EnableCollision,
+            &Set_EnableCollision,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Allow the two connected bodies to collide with each other (off by default).", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::JointComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::JointComponent" },
+            "JointComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::JointComponent),
+            TypeCategory::Component,
+            {
+                Field_Connected(),
+                Field_Type(),
+                Field_AnchorSelf(),
+                Field_AnchorOther(),
+                Field_Axis(),
+                Field_MinDistance(),
+                Field_MaxDistance(),
+                Field_EnableCollision(),
+            },
+            &StorageBindingOf(),
+            "Physics",
+            "Constraint between this entity and another body. Fixed welds the two frames, Distance keeps them within a range, Hinge allows rotation around Axis only.",
             false,
         };
         return schema;
@@ -3246,6 +3571,25 @@ struct GeneratedEnum<World::RigidBody2DComponent::BodyType>
 };
 
 template <>
+struct GeneratedEnum<World::JointComponent::JointKind>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "JointKind",
+            true,
+            4,
+            {
+                { "Fixed", static_cast<int64_t>(World::JointComponent::JointKind::Fixed) },
+                { "Distance", static_cast<int64_t>(World::JointComponent::JointKind::Distance) },
+                { "Hinge", static_cast<int64_t>(World::JointComponent::JointKind::Hinge) },
+            },
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedEnum<World::SceneCamera::ProjectionType>
 {
     static const EnumSchema& WeEnumSchema()
@@ -3320,10 +3664,12 @@ const TypeSchema& WeSchemaOf_RigidBody3DComponent() { return GeneratedAccess<Wor
 const TypeSchema& WeSchemaOf_BoxCollider3DComponent() { return GeneratedAccess<World::BoxCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SphereCollider3DComponent() { return GeneratedAccess<World::SphereCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent() { return GeneratedAccess<World::CapsuleCollider3DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_JointComponent() { return GeneratedAccess<World::JointComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent() { return GeneratedAccess<World::MeshCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SceneCamera() { return GeneratedAccess<World::SceneCamera>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_BodyType() { return GeneratedEnum<World::RigidBody2DComponent::BodyType>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_JointKind() { return GeneratedEnum<World::JointComponent::JointKind>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::SceneCamera::ProjectionType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_MotionType() { return GeneratedEnum<World::RigidBody3DComponent::MotionType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>::WeEnumSchema(); }
@@ -3332,6 +3678,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 	{
 		bool ok = true;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_BodyType()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_JointKind()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ProjectionType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_MotionType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ColliderMode()) != SchemaRegistry::Status::Ok) ok = false;
@@ -3356,6 +3703,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_BoxCollider3DComponent(),
 			WeSchemaOf_SphereCollider3DComponent(),
 			WeSchemaOf_CapsuleCollider3DComponent(),
+			WeSchemaOf_JointComponent(),
 			WeSchemaOf_MeshCollider3DComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_SceneCamera(),

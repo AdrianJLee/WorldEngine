@@ -79,8 +79,9 @@ namespace World
 		const bool exists = HasComponent(component);
 		if (exists && !replace) return Reject(reason, "Entity already has this component");
 		const bool physics = component == entt::type_id<RigidBody2DComponent>().hash() ||
-			component == entt::type_id<BoxCollider2DComponent>().hash() || component == entt::type_id<CircleCollider2DComponent>().hash();
-		// W3f 例外:脚本生命周期回调内新增刚性体/碰撞体允许同步提交并立即补建 Box2D 刚体
+			component == entt::type_id<BoxCollider2DComponent>().hash() || component == entt::type_id<CircleCollider2DComponent>().hash() ||
+			component == entt::type_id<JointComponent>().hash();
+		// W3f 例外:脚本生命周期回调内新增刚性体/碰撞体/关节允许同步提交并立即补建后端对象
 		// (与 W3d 纯数据组件同一条 ScriptWriteScope 白名单路径);其它活动场景入口保持既有拒绝。
 		const bool physicsRuntimeAdd = physics && m_Scene->IsActive() &&
 			(m_Scene->IsInsideScriptCallback() || m_Scene->IsInsideScriptWriteScope());
@@ -124,7 +125,8 @@ namespace World
 		RequireValid();
 		const bool physicsComponent = componentId == entt::type_id<RigidBody2DComponent>().hash() ||
 			componentId == entt::type_id<BoxCollider2DComponent>().hash() ||
-			componentId == entt::type_id<CircleCollider2DComponent>().hash();
+			componentId == entt::type_id<CircleCollider2DComponent>().hash() ||
+			componentId == entt::type_id<JointComponent>().hash();
 		std::string reason;
 		if (!CheckAdd(componentId, false, true, &reason)) throw std::logic_error(reason);
 		const Schema::TypeSchema* schema = FindComponentSchema(m_Scene, componentId);
@@ -149,7 +151,10 @@ namespace World
 		const bool physicsRuntimeAdd = physicsComponent && m_Scene->IsActive();
 		if (physicsRuntimeAdd && !m_Scene->IsInsideScriptCallback() && !m_Scene->IsInsideScriptWriteScope())
 			throw std::logic_error("Adding physics components at runtime is only allowed inside script callbacks or an explicit script write scope");
-		if (physicsRuntimeAdd && componentId != entt::type_id<RigidBody2DComponent>().hash())
+		// 关节可以指向 3D 刚体 ⇒ 不套用"必须先有 RigidBody2DComponent"的前置(它自己的后端由
+		// Scene::EnsurePhysicsJoint 按实体挂的是 2D 还是 3D 刚体决定)。
+		if (physicsRuntimeAdd && componentId != entt::type_id<RigidBody2DComponent>().hash() &&
+			componentId != entt::type_id<JointComponent>().hash())
 		{
 			const Schema::TypeSchema* bodySchema = FindComponentSchema(m_Scene, entt::type_id<RigidBody2DComponent>().hash());
 			auto* bodyStorage = bodySchema && bodySchema->Storage
@@ -166,6 +171,7 @@ namespace World
 			if (data) componentStorage->push(m_EntityHandle, data);
 			else schema->Storage->Add(static_cast<void*>(this));
 			m_Scene->EnsurePhysicsBody(m_EntityHandle);
+			m_Scene->EnsurePhysicsJoint(m_EntityHandle);
 			m_Scene->NotifyComponentAdded(*this, componentId);
 			return;
 		}

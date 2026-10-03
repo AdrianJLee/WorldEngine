@@ -656,6 +656,27 @@ set_tests_properties(World.PhysicsEvents PROPERTIES
     TIMEOUT 120
 )
 
+# P7:关节(Fixed/Distance/Hinge)+ CCD(2D Box2D / 3D Jolt)。
+add_executable(WorldPhysicsJointTests World/PhysicsJointTests.cpp)
+target_link_libraries(WorldPhysicsJointTests PRIVATE World)
+target_compile_features(WorldPhysicsJointTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldPhysicsJointTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldPhysicsJointTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldPhysicsJointTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.PhysicsJoints COMMAND WorldPhysicsJointTests)
+set_tests_properties(World.PhysicsJoints PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
+
 # P2a W7:输入映射资产 + InputService(动作/轴/多玩家/边沿判定)。
 add_executable(WorldInputTests World/InputTests.cpp)
 target_link_libraries(WorldInputTests PRIVATE World)
