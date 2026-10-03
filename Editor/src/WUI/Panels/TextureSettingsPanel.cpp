@@ -1,62 +1,20 @@
-#include "wldpch.h"
-#include "WUI/Panels/TextureSettingsPanel.h"
-
-#include "WUI/Common/EditorAssetTypes.h"
-
-#include "World/Core/Sha256.h"
-#include "World/RHI/RhiDevice.h"
-#include "World/Renderer/Texture/MaterialTextureCache.h"
-#include "World/Renderer/Renderer.h"
-#include "World/Renderer/Texture/TextureCompiler.h"
-#include "World/Renderer/Texture/TextureData.h"
-#include "World/Utils/Paths.h"
-#include "World/WUI/WuiAccessibility.h"
-#include "World/WUI/WuiLocalization.h"
-#include "World/WUI/WuiTextureRegistry.h"
-#include "World/WUI/WuiWidgets.h"
-#include "World/WUI/Widgets/WuiChrome.h"
-#include "World/WUI/Widgets/WuiModal.h"
-
-#include <algorithm>
-#include <cctype>
-#include <chrono>
-#include <cmath>
-#include <cstdio>
-#include <cstring>
-#include <fstream>
-#include <iterator>
-#include <shellapi.h>
-#include <vector>
-
-#pragma comment(lib, "shell32.lib")
+#include "TextureSettingsPanel_Internal.h"
 
 namespace World
 {
-	namespace
-	{
-		// 源图扩展名(与 TextureCompiler::BakeDirectory 的候选顺序一致)。
-		const char* const kSourceCandidates[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp" };
 
-		// M4-TEX P5 预览口径:
-		//   * 源图**解码一次**;长边超过 kPreviewSourceMaxEdge 时当场落一次(之后每次改设置都从这份
-		//     像素重采样,不再回磁盘/解码器);
-		//   * 草稿纹理再压到 kDraftPreviewMaxEdge(即时路径必须便宜;状态行标注 "capped",
-		//     真产物烘完就换成全分辨率的产物纹理);
-		//   * 需要真编码的改动(compression / mips / usage / 尺寸…)走 kPreviewBakeDebounceSeconds 防抖,
-		//     在**工作线程**里跑 `TextureCompiler::BakeFile`。
-		constexpr uint32_t kPreviewSourceMaxEdge = 2048;
-		constexpr uint32_t kDraftPreviewMaxEdge = 1024;
-		constexpr double kPreviewBakeDebounceSeconds = 0.35;
-		constexpr float kMaxZoomFactor = 32.0f;
+using namespace TextureSettingsPanelDetail;
 
-		double WallClockSeconds()
-		{
+namespace TextureSettingsPanelDetail
+{
+
+double WallClockSeconds(){
 			return std::chrono::duration<double>(
 				std::chrono::steady_clock::now().time_since_epoch()).count();
 		}
 
-		std::string TrimAscii(const std::string& text)
-		{
+
+std::string TrimAscii(const std::string& text){
 			const auto notSpace = [](unsigned char character) { return std::isspace(character) == 0; };
 			std::string trimmed = text;
 			trimmed.erase(trimmed.begin(), std::find_if(trimmed.begin(), trimmed.end(), notSpace));
@@ -64,9 +22,8 @@ namespace World
 			return trimmed;
 		}
 
-		bool ReadFileBytes(const std::filesystem::path& path, std::vector<uint8_t>& out,
-			std::string& error)
-		{
+
+bool ReadFileBytes(const std::filesystem::path& path, std::vector<uint8_t>& out, std::string& error){
 			std::ifstream input(path, std::ios::binary);
 			if (!input.is_open())
 			{
@@ -77,10 +34,9 @@ namespace World
 			return true;
 		}
 
+
 		// 与 TextureCompiler 的写盘口径一致:临时文件 + 原子替换(失败则先删再换一次)。
-		bool WriteFileBytesAtomic(const std::filesystem::path& path, const std::vector<uint8_t>& bytes,
-			std::string& error)
-		{
+bool WriteFileBytesAtomic(const std::filesystem::path& path, const std::vector<uint8_t>& bytes, std::string& error){
 			std::error_code directoryError;
 			if (!path.parent_path().empty())
 				std::filesystem::create_directories(path.parent_path(), directoryError);
@@ -114,17 +70,15 @@ namespace World
 			return true;
 		}
 
-		bool WriteTextFileAtomic(const std::filesystem::path& path, const std::string& text,
-			std::string& error)
-		{
+
+bool WriteTextFileAtomic(const std::filesystem::path& path, const std::string& text, std::string& error){
 			const std::vector<uint8_t> bytes(text.begin(), text.end());
 			return WriteFileBytesAtomic(path, bytes, error);
 		}
 
+
 		// 面板自己的宽度裁剪(与其它面板同口径:超宽补 '…')。
-		std::string EllipsizeToWidth(const Wui::WuiContext& ctx, std::string_view text, float maxWidth,
-			float fontSize)
-		{
+std::string EllipsizeToWidth(const Wui::WuiContext& ctx, std::string_view text, float maxWidth, float fontSize){
 			if (maxWidth <= 0.0f || text.empty())
 				return std::string();
 			if (ctx.MeasureTextWidth(text, fontSize) <= maxWidth)
@@ -141,18 +95,18 @@ namespace World
 			return std::string();
 		}
 
-		std::string UpperAscii(std::string text)
-		{
+
+std::string UpperAscii(std::string text){
 			std::transform(text.begin(), text.end(), text.begin(),
 				[](unsigned char c) { return static_cast<char>(std::toupper(c)); });
 			return text;
 		}
 
+
 		// 在资源管理器中定位一个文件(与内容浏览器 OpenInExplorer 同一口径:/select 选中该项,
 		// 而不是打开文件)。项目里没有共享 helper(ContentBrowserPanel 的那份是私有成员),
 		// 这里保留同一套 6 行调用,行为逐字一致。
-		void RevealPathInExplorer(const std::filesystem::path& path)
-		{
+void RevealPathInExplorer(const std::filesystem::path& path){
 			if (path.empty())
 				return;
 			const std::wstring parameters = L"/select,\"" + std::filesystem::absolute(path).wstring() + L"\"";
@@ -163,249 +117,16 @@ namespace World
 					reinterpret_cast<intptr_t>(result));
 		}
 
-		// ---- 预览图像处理:与 TextureCompiler 的缩放口径一致(线性空间平均),压缩交给 GPU ----
-
-		inline uint8_t ToLinearByte(uint8_t value)
-		{
-			const float linear = std::pow(static_cast<float>(value) / 255.0f, 2.2f);
-			return static_cast<uint8_t>(std::lround(std::clamp(linear, 0.0f, 1.0f) * 255.0f));
-		}
-
-		inline uint8_t ToSrgbByte(uint8_t value)
-		{
-			const float srgb = std::pow(static_cast<float>(value) / 255.0f, 1.0f / 2.2f);
-			return static_cast<uint8_t>(std::lround(std::clamp(srgb, 0.0f, 1.0f) * 255.0f));
-		}
-
-		// 盒式降采样(2x2 → 1);srgb=true 时先转线性再平均(避免缩小后整体变暗)。
-		// 与 TextureCompiler.cpp 的 DownsampleBox 逐字段同口径。
-		void DownsampleBox2x(const std::vector<uint8_t>& source, uint32_t sourceWidth, uint32_t sourceHeight,
-			bool srgb, std::vector<uint8_t>& out, uint32_t& outWidth, uint32_t& outHeight)
-		{
-			outWidth = std::max(1u, sourceWidth / 2);
-			outHeight = std::max(1u, sourceHeight / 2);
-			out.assign(static_cast<size_t>(outWidth) * outHeight * 4u, 0);
-			for (uint32_t y = 0; y < outHeight; ++y)
-			{
-				for (uint32_t x = 0; x < outWidth; ++x)
-				{
-					uint32_t accumulators[4] = { 0, 0, 0, 0 };
-					uint32_t samples = 0;
-					for (uint32_t dy = 0; dy < 2; ++dy)
-					{
-						const uint32_t sourceY = std::min(sourceHeight - 1, y * 2 + dy);
-						for (uint32_t dx = 0; dx < 2; ++dx)
-						{
-							const uint32_t sourceX = std::min(sourceWidth - 1, x * 2 + dx);
-							const uint8_t* texel = source.data()
-								+ (static_cast<size_t>(sourceY) * sourceWidth + sourceX) * 4u;
-							for (int channel = 0; channel < 4; ++channel)
-							{
-								const uint8_t value = srgb && channel < 3 ? ToLinearByte(texel[channel])
-									: texel[channel];
-								accumulators[channel] += value;
-							}
-							++samples;
-						}
-					}
-					uint8_t* target = out.data() + (static_cast<size_t>(y) * outWidth + x) * 4u;
-					for (int channel = 0; channel < 4; ++channel)
-					{
-						const uint8_t averaged = static_cast<uint8_t>(
-							(accumulators[channel] + samples / 2) / samples);
-						target[channel] = srgb && channel < 3 ? ToSrgbByte(averaged) : averaged;
-					}
-				}
-			}
-		}
-
-		// 等比缩放到"最长边 = maxEdge"(maxEdge = 0 或未超限时原样返回)。逐级 2x 盒式 +
-		// 最后一步最近邻补齐 —— 与 TextureCompiler::ResizeToMaxSize 同一口径(预览与产物尺寸一致)。
-		std::vector<uint8_t> ResampleToMaxEdge(const std::vector<uint8_t>& source, uint32_t sourceWidth,
-			uint32_t sourceHeight, uint32_t maxEdge, bool srgb, uint32_t& outWidth, uint32_t& outHeight)
-		{
-			outWidth = sourceWidth;
-			outHeight = sourceHeight;
-			if (maxEdge == 0 || std::max(sourceWidth, sourceHeight) <= maxEdge
-				|| sourceWidth == 0 || sourceHeight == 0)
-				return source;
-			const double scale = static_cast<double>(maxEdge)
-				/ static_cast<double>(std::max(sourceWidth, sourceHeight));
-			const uint32_t targetWidth = std::max(1u, static_cast<uint32_t>(std::floor(sourceWidth * scale)));
-			const uint32_t targetHeight = std::max(1u, static_cast<uint32_t>(std::floor(sourceHeight * scale)));
-
-			std::vector<uint8_t> current = source;
-			uint32_t width = sourceWidth;
-			uint32_t height = sourceHeight;
-			while (width / 2 >= targetWidth && height / 2 >= targetHeight && (width > 1 || height > 1))
-			{
-				std::vector<uint8_t> next;
-				uint32_t nextWidth = 0;
-				uint32_t nextHeight = 0;
-				DownsampleBox2x(current, width, height, srgb, next, nextWidth, nextHeight);
-				current.swap(next);
-				width = nextWidth;
-				height = nextHeight;
-			}
-			if (width != targetWidth || height != targetHeight)
-			{
-				std::vector<uint8_t> resized(static_cast<size_t>(targetWidth) * targetHeight * 4u, 0);
-				for (uint32_t y = 0; y < targetHeight; ++y)
-				{
-					const uint32_t sourceY = std::min(height - 1,
-						static_cast<uint32_t>(static_cast<uint64_t>(y) * height / targetHeight));
-					for (uint32_t x = 0; x < targetWidth; ++x)
-					{
-						const uint32_t sourceX = std::min(width - 1,
-							static_cast<uint32_t>(static_cast<uint64_t>(x) * width / targetWidth));
-						std::memcpy(resized.data() + (static_cast<size_t>(y) * targetWidth + x) * 4u,
-							current.data() + (static_cast<size_t>(sourceY) * width + sourceX) * 4u, 4u);
-					}
-				}
-				current.swap(resized);
-				width = targetWidth;
-				height = targetHeight;
-			}
-			outWidth = width;
-			outHeight = height;
-			return current;
-		}
-
-		void FlipRowsInPlace(std::vector<uint8_t>& pixels, uint32_t width, uint32_t height)
-		{
-			const size_t rowBytes = static_cast<size_t>(width) * 4u;
-			if (rowBytes == 0 || height < 2 || pixels.size() < rowBytes * height)
-				return;
-			std::vector<uint8_t> scratch(rowBytes);
-			for (uint32_t row = 0; row < height / 2; ++row)
-			{
-				uint8_t* top = pixels.data() + static_cast<size_t>(row) * rowBytes;
-				uint8_t* bottom = pixels.data() + static_cast<size_t>(height - 1u - row) * rowBytes;
-				std::memcpy(scratch.data(), top, rowBytes);
-				std::memcpy(top, bottom, rowBytes);
-				std::memcpy(bottom, scratch.data(), rowBytes);
-			}
-		}
-
-		void PremultiplyAlphaInPlace(std::vector<uint8_t>& pixels)
-		{
-			for (size_t offset = 0; offset + 3 < pixels.size(); offset += 4)
-			{
-				const uint32_t alpha = pixels[offset + 3];
-				for (int channel = 0; channel < 3; ++channel)
-					pixels[offset + static_cast<size_t>(channel)] = static_cast<uint8_t>(
-						(pixels[offset + static_cast<size_t>(channel)] * alpha + 127) / 255);
-			}
-		}
-
-		// 通道开关:channel 0 = RGB(原样);1..4 = R/G/B/A 单通道 → 灰度(不透明)。
-		void ApplyChannelMask(std::vector<uint8_t>& pixels, int channel)
-		{
-			if (channel <= 0)
-				return;
-			const size_t index = static_cast<size_t>(channel - 1);
-			for (size_t offset = 0; offset + 3 < pixels.size(); offset += 4)
-			{
-				const uint8_t value = pixels[offset + index];
-				pixels[offset + 0] = value;
-				pixels[offset + 1] = value;
-				pixels[offset + 2] = value;
-				pixels[offset + 3] = 255;
-			}
-		}
-
-		// 产物块格式 → 预览用的 RHI 格式。**一律 UNORM**:WUI 与交换链都是非 sRGB 通道,
-		// 预览要显示"文件里存的字节"(sRGB 是采样期解码,不改变像素内容);用 _SRGB 变体会让
-		// 整个预览偏暗,也与图标/材质缩略图的显示口径不一致。压缩块本身与 sRGB 变体完全相同。
-		Rhi::Format PreviewDisplayFormat(TextureBlockFormat format)
-		{
-			switch (format)
-			{
-				case TextureBlockFormat::Rgba8: return Rhi::Format::R8G8B8A8_UNORM;
-				case TextureBlockFormat::Bc7: return Rhi::Format::BC7_UNORM;
-				case TextureBlockFormat::Bc5: return Rhi::Format::BC5_UNORM;
-				case TextureBlockFormat::Bc4: return Rhi::Format::BC4_UNORM;
-				case TextureBlockFormat::Bc1: return Rhi::Format::BC1_UNORM;
-				case TextureBlockFormat::Bc3: return Rhi::Format::BC3_UNORM;
-				default: return Rhi::Format::Undefined;   // Rgba16f 等暂无上传路径
-			}
-		}
-
-		const char* PreviewChannelCode(int channel)
-		{
-			switch (channel)
-			{
-				case 1: return "r";
-				case 2: return "g";
-				case 3: return "b";
-				case 4: return "a";
-				default: return "rgb";
-			}
-		}
-
-		const char* PreviewStateCode(int state)
-		{
-			switch (state)
-			{
-				case 1: return "pending";
-				case 2: return "encoding";
-				case 3: return "baked";
-				case 4: return "failed";
-				default: return "idle";
-			}
-		}
-
-		// 产物落点(与内核 `TextureCompiler::BakeDirectory` / `TextureData` 的查找口径一致):
-		// 契约名 = `<同目录>/<源图主名>.wtexc`(2026-09-25 起产物名里不再带源图扩展名,
-		// 见 tools/agents/dispatch/we_editor.md 的"命名口径")。
-		std::filesystem::path ArtifactPathForSource(const std::filesystem::path& sourceFile)
-		{
-			return sourceFile.parent_path() / (sourceFile.stem().string() + ".wtexc");
-		}
-
-		// 容错候选:旧命名 `<源图全名>.wtexc`(内核 lookup 的第二候选)。编辑器只在契约名
-		// 缺失时读它;`.wtexc` 不是资产,内容浏览器里一律不显示。
-		std::filesystem::path LegacyArtifactPathForSource(const std::filesystem::path& sourceFile)
-		{
-			return std::filesystem::path(sourceFile.string() + ".wtexc");
-		}
-
-		// 预览缩放的统一口径:`Factor` 是"相对 fit"的倍率(跨草稿/产物换尺寸时取景不跳)。
-		// 绝对范围 = [min(fit, 1), max(fit, 32)] —— 小图能退到 1:1(而不是被拉满到 fit),
-		// 大图不会比 fit 更小(fit 本来就把整张装进预览)。
-		struct PreviewZoomRange
-		{
-			float Fit = 1.0f;     // fit 的绝对倍率(屏幕像素 / 纹素)
-			float MinFactor = 1.0f;
-			float MaxFactor = 1.0f;
-		};
-
-		PreviewZoomRange PreviewZoomFor(const Wui::WuiRect& rect, uint32_t width, uint32_t height)
-		{
-			PreviewZoomRange range;
-			if (width == 0 || height == 0 || rect.W <= 1.0f || rect.H <= 1.0f)
-				return range;
-			const float textureW = static_cast<float>(width);
-			const float textureH = static_cast<float>(height);
-			range.Fit = std::min(rect.W / textureW, rect.H / textureH);
-			const float minZoom = std::min(range.Fit, 1.0f);
-			const float maxZoom = std::max(range.Fit, kMaxZoomFactor);
-			range.MinFactor = range.Fit > 0.0f ? minZoom / range.Fit : 1.0f;
-			range.MaxFactor = range.Fit > 0.0f ? maxZoom / range.Fit : 1.0f;
-			return range;
-		}
-	}
-
-	namespace Editor
-	{
-		TextureSettingsRequests& TextureSettingsRequests::Get()
-		{
+}
+namespace Editor
+{
+TextureSettingsRequests& TextureSettingsRequests::Get(){
 			static TextureSettingsRequests requests;
 			return requests;
 		}
 
-		void TextureSettingsRequests::Request(const std::string& logicalPath, Kind kind)
-		{
+
+void TextureSettingsRequests::Request(const std::string& logicalPath, Kind kind){
 			if (logicalPath.empty())
 				return;
 			m_Logical = logicalPath;
@@ -413,8 +134,8 @@ namespace World
 			m_Pending = true;
 		}
 
-		bool TextureSettingsRequests::Take(std::string& outLogicalPath, Kind& outKind)
-		{
+
+bool TextureSettingsRequests::Take(std::string& outLogicalPath, Kind& outKind){
 			if (!m_Pending)
 				return false;
 			outLogicalPath = m_Logical;
@@ -424,9 +145,9 @@ namespace World
 			return true;
 		}
 
+
 		// `.wtex` 资产的逻辑路径规范化:传进来的可能是源图(按同主名换算成资产)。空 = 不是纹理路径。
-		std::string AssetLogicalForTexturePath(const std::string& logicalPath)
-		{
+std::string AssetLogicalForTexturePath(const std::string& logicalPath){
 			if (IsTextureAssetPath(logicalPath))
 				return logicalPath;
 			if (TextureCompiler::IsTextureSourceExtension(LowerExtension(logicalPath)))
@@ -434,10 +155,9 @@ namespace World
 			return {};
 		}
 
+
 		// `source:` 文本 → 逻辑路径(与烘焙器同一口径:内容根相对、不许绝对路径 / '..'、扩展名受支持)。
-		bool ResolveDeclaredSource(const std::string& declaredText, std::string& outLogical,
-			std::string& outError)
-		{
+bool ResolveDeclaredSource(const std::string& declaredText, std::string& outLogical, std::string& outError){
 			outLogical.clear();
 			outError.clear();
 			const std::filesystem::path declared(declaredText);
@@ -459,12 +179,11 @@ namespace World
 			return true;
 		}
 
+
 		// M4-TEX P9:`.wtex` 一律按**资产文件**读(`LoadTextureAssetFile` 自动区分容器 / 旧式)。
 		// 旧口径(整份文件当 YAML 解析)会把容器里的二进制 payload 当 YAML 读 → 报错 →
 		// 校验区误报 "no source image"(实测 `textures/quadrants.wtex`)。
-		TextureAssetDocument LoadTextureAssetDocument(const std::filesystem::path& contentRoot,
-			const std::string& logicalPath)
-		{
+TextureAssetDocument LoadTextureAssetDocument(const std::filesystem::path& contentRoot, const std::string& logicalPath){
 			TextureAssetDocument document;
 			const std::string assetLogical = AssetLogicalForTexturePath(logicalPath);
 			if (assetLogical.empty())
@@ -493,9 +212,8 @@ namespace World
 			return document;
 		}
 
-		bool ResolveTextureSource(const std::filesystem::path& contentRoot, const std::string& logicalPath,
-			const TextureImportSettings& settings, TextureSourceResolution& out)
-		{
+
+bool ResolveTextureSource(const std::filesystem::path& contentRoot, const std::string& logicalPath, const TextureImportSettings& settings, TextureSourceResolution& out){
 			out = TextureSourceResolution {};
 			if (logicalPath.empty())
 			{
@@ -573,11 +291,9 @@ namespace World
 			return true;
 		}
 
+
 		// 兼容入口:调用方只关心"字节从哪来"时给逻辑路径(容器 = 资产自身)。
-		bool ResolveTextureSourceLogical(const std::filesystem::path& contentRoot,
-			const std::string& logicalPath, const TextureImportSettings& settings,
-			std::string& outSourceLogical, std::string& outError)
-		{
+bool ResolveTextureSourceLogical(const std::filesystem::path& contentRoot, const std::string& logicalPath, const TextureImportSettings& settings, std::string& outSourceLogical, std::string& outError){
 			TextureSourceResolution resolution;
 			if (!ResolveTextureSource(contentRoot, logicalPath, settings, resolution))
 			{
@@ -590,9 +306,8 @@ namespace World
 			return true;
 		}
 
-		bool ValidateTextureSourceText(const std::filesystem::path& contentRoot, const std::string& text,
-			std::string& outError)
-		{
+
+bool ValidateTextureSourceText(const std::filesystem::path& contentRoot, const std::string& text, std::string& outError){
 			outError.clear();
 			const std::string trimmed = TrimAscii(text);
 			if (trimmed.empty())
@@ -624,9 +339,8 @@ namespace World
 			return true;
 		}
 
-		TextureArtifactStatus InspectTextureArtifact(const std::filesystem::path& contentRoot,
-			const std::string& sourceLogical, const TextureImportSettings* settingsOverride)
-		{
+
+TextureArtifactStatus InspectTextureArtifact(const std::filesystem::path& contentRoot, const std::string& sourceLogical, const TextureImportSettings* settingsOverride){
 			TextureArtifactStatus status;
 			status.SourceLogical = sourceLogical;
 			if (sourceLogical.empty())
@@ -721,9 +435,8 @@ namespace World
 			return status;
 		}
 
-		bool CreateTextureAssetForSource(const std::filesystem::path& contentRoot,
-			const std::string& sourceLogical, std::string* outAssetLogical, std::string& outError)
-		{
+
+bool CreateTextureAssetForSource(const std::filesystem::path& contentRoot, const std::string& sourceLogical, std::string* outAssetLogical, std::string& outError){
 			outError.clear();
 			if (outAssetLogical)
 				outAssetLogical->clear();
@@ -771,10 +484,8 @@ namespace World
 			return true;
 		}
 
-		bool EnsureTextureAssetForSource(const std::filesystem::path& contentRoot,
-			const std::string& sourceLogical, std::string* outAssetLogical, bool* outCreated,
-			std::string& outError)
-		{
+
+bool EnsureTextureAssetForSource(const std::filesystem::path& contentRoot, const std::string& sourceLogical, std::string* outAssetLogical, bool* outCreated, std::string& outError){
 			outError.clear();
 			const std::string assetLogical = TextureAssetPathForSource(sourceLogical);
 			if (assetLogical.empty() || !IsTextureAssetPath(assetLogical))
@@ -801,18 +512,19 @@ namespace World
 			return true;
 		}
 
-	}
+}
 
-	TextureSettingsPanel::TextureSettingsPanel()
-	{
+	// ---- 面板核心实现 ----
+
+TextureSettingsPanel::TextureSettingsPanel(){
 		m_ContentRoot = World::Paths::AssetRoot();
 		// 需要真编码的预览烘培在**工作线程**里跑(与 MaterialEditorPanel 的着色器编译线程同一套
 		// 请求/结果/停止口径):UI 帧只做派发与上传,BC7 4K 也不会卡住编辑器。
 		m_BakeThread = std::thread([this] { PreviewBakeWorkerLoop(); });
 	}
 
-	TextureSettingsPanel::~TextureSettingsPanel()
-	{
+
+TextureSettingsPanel::~TextureSettingsPanel(){
 		// 先收工作线程(它只写自己的结果槽,析构前必须确认它已退出)。
 		{
 			std::lock_guard<std::mutex> lock(m_BakeMutex);
@@ -824,35 +536,35 @@ namespace World
 		InvalidatePreviewTextures();
 	}
 
-	void TextureSettingsPanel::EnsureContentRoot()
-	{
+
+void TextureSettingsPanel::EnsureContentRoot(){
 		if (m_ContentRoot.empty())
 			m_ContentRoot = World::Paths::AssetRoot();
 	}
 
-	std::string TextureSettingsPanel::AssetAbsolutePath() const
-	{
+
+std::string TextureSettingsPanel::AssetAbsolutePath() const{
 		if (m_AssetLogical.empty())
 			return std::string();
 		return (m_ContentRoot / m_AssetLogical).string();
 	}
 
-	std::string TextureSettingsPanel::SourceAbsolutePath() const
-	{
+
+std::string TextureSettingsPanel::SourceAbsolutePath() const{
 		if (m_SourceLogical.empty())
 			return std::string();
 		return (m_ContentRoot / m_SourceLogical).string();
 	}
 
-	std::string TextureSettingsPanel::ArtifactAbsolutePath() const
-	{
+
+std::string TextureSettingsPanel::ArtifactAbsolutePath() const{
 		const std::string source = SourceAbsolutePath();
 		return source.empty() ? std::string()
 			: ArtifactPathForSource(std::filesystem::path(source)).string();
 	}
 
-	void TextureSettingsPanel::RequestOpenAsset(const std::string& logicalPath, bool resetConfirm)
-	{
+
+void TextureSettingsPanel::RequestOpenAsset(const std::string& logicalPath, bool resetConfirm){
 		EnsureContentRoot();
 		std::string normalized = logicalPath;
 		std::replace(normalized.begin(), normalized.end(), '\\', '/');
@@ -915,8 +627,8 @@ namespace World
 			resetConfirm ? " (reset confirm)" : "");
 	}
 
-	void TextureSettingsPanel::ReloadFromDisk(bool keepStatus)
-	{
+
+void TextureSettingsPanel::ReloadFromDisk(bool keepStatus){
 		EnsureContentRoot();
 		m_LoadError.clear();
 		m_DiskChanged = false;
@@ -1003,8 +715,8 @@ namespace World
 		RefreshArtifactState();
 	}
 
-	void TextureSettingsPanel::RefreshArtifactState(bool force)
-	{
+
+void TextureSettingsPanel::RefreshArtifactState(bool force){
 		if (m_SourceLogical.empty())
 			return;
 		// 指纹:(源图 / `.wtex` / `.wtexc`) 的 mtime + 内存设置 hash。三项都没动 = 复用上一次判定
@@ -1043,15 +755,15 @@ namespace World
 			m_Dirty ? &m_Settings : nullptr);
 	}
 
-	void TextureSettingsPanel::TouchPreviewRevision()
-	{
+
+void TextureSettingsPanel::TouchPreviewRevision(){
 		++m_PreviewRevision;
 		m_BakeDueSeconds = 0.0;   // 下一帧按新的时间戳重排防抖
 		m_DraftDirty = true;
 	}
 
-	void TextureSettingsPanel::MarkSettingsDirty(const char* field)
-	{
+
+void TextureSettingsPanel::MarkSettingsDirty(const char* field){
 		m_Dirty = true;
 		RefreshArtifactState();
 		TouchPreviewRevision();
@@ -1059,9 +771,8 @@ namespace World
 			m_Ctx->RecordOp("texture", "edit", m_AssetLogical, field ? field : "");
 	}
 
-	bool TextureSettingsPanel::CurrentSourceBytes(std::vector<uint8_t>& outBytes,
-		std::string& outAbsoluteSource, bool& outEmbedded) const
-	{
+
+bool TextureSettingsPanel::CurrentSourceBytes(std::vector<uint8_t>& outBytes, std::string& outAbsoluteSource, bool& outEmbedded) const{
 		outBytes.clear();
 		outAbsoluteSource.clear();
 		outEmbedded = false;
@@ -1078,8 +789,8 @@ namespace World
 		return true;
 	}
 
-	void TextureSettingsPanel::RefreshPreviewSource()
-	{
+
+void TextureSettingsPanel::RefreshPreviewSource(){
 		// 字节来源(唯一口径):容器 = 内嵌 payload(版本 = `.wtex` 自己的 mtime);
 		// 旧式 = 外部源图(版本 = 源图 mtime)。
 		const bool embedded = m_Container && !m_Payload.empty();
@@ -1131,8 +842,8 @@ namespace World
 		TouchPreviewRevision();
 	}
 
-	void TextureSettingsPanel::PublishPreviewSlot(PreviewSlot& target, const PreviewSlot& incoming)
-	{
+
+void TextureSettingsPanel::PublishPreviewSlot(PreviewSlot& target, const PreviewSlot& incoming){
 		if (!incoming.Texture)
 		{
 			ReleasePreviewSlot(target);
@@ -1167,8 +878,8 @@ namespace World
 		target = next;
 	}
 
-	void TextureSettingsPanel::ReleasePreviewSlot(PreviewSlot& slot)
-	{
+
+void TextureSettingsPanel::ReleasePreviewSlot(PreviewSlot& slot){
 		if (slot.Id != 0)
 		{
 			Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
@@ -1183,16 +894,16 @@ namespace World
 		slot = PreviewSlot {};
 	}
 
-	void TextureSettingsPanel::InvalidatePreviewTextures()
-	{
+
+void TextureSettingsPanel::InvalidatePreviewTextures(){
 		ReleasePreviewSlot(m_Draft);
 		ReleasePreviewSlot(m_ArtifactPreview);
 		ReleasePreviewSlot(m_Shown);
 		m_DraftDirty = true;
 	}
 
-	void TextureSettingsPanel::EnsureDraftPreview()
-	{
+
+void TextureSettingsPanel::EnsureDraftPreview(){
 		if (!m_DraftDirty)
 			return;
 		m_DraftDirty = false;
@@ -1233,9 +944,8 @@ namespace World
 		UploadRgba8Draft(pixels, actualWidth, actualHeight, capped);
 	}
 
-	void TextureSettingsPanel::UploadRgba8Draft(const std::vector<uint8_t>& pixels, uint32_t width,
-		uint32_t height, bool capped)
-	{
+
+void TextureSettingsPanel::UploadRgba8Draft(const std::vector<uint8_t>& pixels, uint32_t width, uint32_t height, bool capped){
 		Rhi::Device* device = Renderer::GetDevice().get();
 		const uint64_t expected = static_cast<uint64_t>(width) * height * 4u;
 		if (!device || width == 0 || height == 0 || pixels.size() < expected)
@@ -1273,8 +983,8 @@ namespace World
 		PublishPreviewSlot(m_Draft, incoming);
 	}
 
-	bool TextureSettingsPanel::UploadArtifactPreview(const std::vector<uint8_t>& bytes, uint64_t revision)
-	{
+
+bool TextureSettingsPanel::UploadArtifactPreview(const std::vector<uint8_t>& bytes, uint64_t revision){
 		TextureArtifactHeader header;
 		std::string error;
 		if (!ParseTextureArtifact(bytes, header, error))
@@ -1346,8 +1056,8 @@ namespace World
 		return true;
 	}
 
-	bool TextureSettingsPanel::UploadArtifactFromDisk()
-	{
+
+bool TextureSettingsPanel::UploadArtifactFromDisk(){
 		const std::string artifactPath = ArtifactAbsolutePath();
 		if (artifactPath.empty())
 			return false;
@@ -1358,8 +1068,8 @@ namespace World
 		return UploadArtifactPreview(bytes, m_PreviewRevision);
 	}
 
-	void TextureSettingsPanel::DispatchPreviewBake()
-	{
+
+void TextureSettingsPanel::DispatchPreviewBake(){
 		std::vector<uint8_t> bytes;
 		std::string absoluteSource;
 		bool embedded = false;
@@ -1381,8 +1091,8 @@ namespace World
 			m_SourceLogical, embedded ? " (embedded)" : "", m_SourceWidth, m_SourceHeight);
 	}
 
-	void TextureSettingsPanel::PreviewBakeWorkerLoop()
-	{
+
+void TextureSettingsPanel::PreviewBakeWorkerLoop(){
 		for (;;)
 		{
 			PreviewBakeRequest request;
@@ -1419,8 +1129,8 @@ namespace World
 		}
 	}
 
-	void TextureSettingsPanel::PumpPreviewBake()
-	{
+
+void TextureSettingsPanel::PumpPreviewBake(){
 		const double now = WallClockSeconds();
 		// 本帧有没有可烘的字节(容器 = 内嵌 payload;旧式 = 外部源图)。
 		std::vector<uint8_t> sourceBytes;
@@ -1515,8 +1225,8 @@ namespace World
 			m_PreviewState = PreviewState::Pending;
 	}
 
-	void TextureSettingsPanel::SelectShownPreview()
-	{
+
+void TextureSettingsPanel::SelectShownPreview(){
 		// 合成视图优先显示**当前设置**烘出来的产物(压缩效果可见);产物没跟上(刚改设置/烘失败/
 		// 设备重建)或看单通道时,回落到 CPU 草稿 —— 任何时刻都有一张可看的图(不会变黑)。
 		const bool artifactCurrent = m_ArtifactPreview.Valid
@@ -1526,8 +1236,8 @@ namespace World
 		m_Shown = artifactCurrent ? m_ArtifactPreview : m_Draft;
 	}
 
-	std::string TextureSettingsPanel::PreviewSummary() const
-	{
+
+std::string TextureSettingsPanel::PreviewSummary() const{
 		if (!m_Shown.Valid)
 			return Wui::Tr("panel.texture.preview.unavailable", "Preview unavailable");
 		char buffer[64] = {};
@@ -1544,8 +1254,8 @@ namespace World
 				{ "zoom", buffer } });
 	}
 
-	std::string TextureSettingsPanel::PreviewStateText() const
-	{
+
+std::string TextureSettingsPanel::PreviewStateText() const{
 		switch (m_PreviewState)
 		{
 			case PreviewState::Pending:
@@ -1565,8 +1275,8 @@ namespace World
 		}
 	}
 
-	std::string TextureSettingsPanel::ArtifactSummary() const
-	{
+
+std::string TextureSettingsPanel::ArtifactSummary() const{
 		if (m_Artifact.State == Editor::TextureArtifactState::NoSource)
 			return Wui::Tr("panel.texture.status.no_source", "Source image not found");
 		if (m_Artifact.State == Editor::TextureArtifactState::Invalid)
@@ -1590,14 +1300,14 @@ namespace World
 			"needs re-bake (source or settings changed)");
 	}
 
-	float TextureSettingsPanel::FieldRowHeight(const Wui::WuiTheme& theme) const
-	{
+
+float TextureSettingsPanel::FieldRowHeight(const Wui::WuiTheme& theme) const{
 		// 窄列口径:标签行 + 控件行(标签行里文本垂直居中)。
 		return theme.ControlHeight + theme.ControlHeight + theme.PadSmall;
 	}
 
-	void TextureSettingsPanel::SyncWithDisk(const Wui::WuiContext& ctx)
-	{
+
+void TextureSettingsPanel::SyncWithDisk(const Wui::WuiContext& ctx){
 		if (m_AssetLogical.empty())
 			return;
 		EnsureContentRoot();
@@ -1628,8 +1338,8 @@ namespace World
 		}
 	}
 
-	void TextureSettingsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
-	{
+
+void TextureSettingsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host){
 		m_Ctx = &ctx;
 		EnsureContentRoot();
 		const Wui::WuiTheme& theme = host.Theme();
@@ -1708,9 +1418,8 @@ namespace World
 		m_RenderedOnce = true;
 	}
 
-	void TextureSettingsPanel::DrawHeader(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		PanelHost& host, const Wui::WuiRect& rect, float& y)
-	{
+
+void TextureSettingsPanel::DrawHeader(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, PanelHost& host, const Wui::WuiRect& rect, float& y){
 		(void)host;
 		const float x = rect.X + theme.Pad;
 		const float width = std::max(0.0f, rect.W - theme.Pad * 2.0f);
@@ -1782,9 +1491,8 @@ namespace World
 		}
 	}
 
-	void TextureSettingsPanel::DrawPreviewArea(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		PanelHost& host, const Wui::WuiRect& rect)
-	{
+
+void TextureSettingsPanel::DrawPreviewArea(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, PanelHost& host, const Wui::WuiRect& rect){
 		(void)host;
 		if (rect.W <= 8.0f || rect.H <= 8.0f)
 			return;
@@ -1884,9 +1592,8 @@ namespace World
 		DrawPreviewStatus(ctx, theme, statusRect, statusY);
 	}
 
-	void TextureSettingsPanel::DrawPreviewImage(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		const Wui::WuiRect& rect)
-	{
+
+void TextureSettingsPanel::DrawPreviewImage(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const Wui::WuiRect& rect){
 		Wui::DrawPanelSurface(ctx, rect, theme);
 		if (rect.W <= 8.0f || rect.H <= 8.0f)
 			return;
@@ -2005,9 +1712,8 @@ namespace World
 		}
 	}
 
-	void TextureSettingsPanel::DrawPreviewStatus(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		const Wui::WuiRect& rect, float& y)
-	{
+
+void TextureSettingsPanel::DrawPreviewStatus(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const Wui::WuiRect& rect, float& y){
 		const float x = rect.X;
 		const float width = std::max(0.0f, rect.W);
 		Wui::Label(ctx, { x, y }, EllipsizeToWidth(ctx, PreviewSummary(), width, theme.FontSizeSmall),
@@ -2053,9 +1759,8 @@ namespace World
 				theme.TextDisabled, theme.FontSizeCaption);
 	}
 
-	void TextureSettingsPanel::DrawPropertiesColumn(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		PanelHost& host, const Wui::WuiRect& rect)
-	{
+
+void TextureSettingsPanel::DrawPropertiesColumn(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, PanelHost& host, const Wui::WuiRect& rect){
 		(void)host;
 		if (rect.W <= 8.0f || rect.H <= 8.0f)
 			return;
@@ -2073,9 +1778,8 @@ namespace World
 		Wui::EndScrollArea(ctx);
 	}
 
-	float TextureSettingsPanel::DrawSourceRow(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		const Wui::WuiRect& rect, float y)
-	{
+
+float TextureSettingsPanel::DrawSourceRow(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const Wui::WuiRect& rect, float y){
 		const float x = rect.X;
 		const float width = rect.W;
 		// 标签行:左标签 + 右"在资源管理器中显示"(按钮宽度随列宽收窄,窄列也能点)。
@@ -2219,9 +1923,10 @@ namespace World
 		return y;
 	}
 
-	float TextureSettingsPanel::DrawFields(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		const Wui::WuiRect& rect, float y)
-	{
+
+	// ---- 字段绘制与面板操作 ----
+
+float TextureSettingsPanel::DrawFields(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const Wui::WuiRect& rect, float y){
 		const float rowH = FieldRowHeight(theme);
 		const float x = rect.X;
 		const float width = rect.W;
@@ -2489,340 +2194,4 @@ namespace World
 		return y;
 	}
 
-	float TextureSettingsPanel::DrawStatusLine(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		const Wui::WuiRect& rect, float y)
-	{
-		const float x = rect.X;
-		const float width = std::max(0.0f, rect.W);
-		Wui::Label(ctx, { x, y }, EllipsizeToWidth(ctx, ArtifactSummary(), width, theme.FontSizeSmall),
-			m_Artifact.State == Editor::TextureArtifactState::Fresh ? theme.Text : theme.Warning,
-			theme.FontSizeSmall);
-		y += theme.FontSizeSmall + 3.0f;
-
-		if (m_Dirty)
-		{
-			Wui::Label(ctx, { x, y },
-				EllipsizeToWidth(ctx,
-					Wui::Tr("panel.texture.status.dirty",
-						"Edited — Apply saves the .wtex and re-bakes the artifact."),
-					width, theme.FontSizeSmall),
-				theme.Accent, theme.FontSizeSmall);
-			y += theme.FontSizeSmall + 3.0f;
-		}
-		if (m_DiskChanged)
-		{
-			Wui::Label(ctx, { x, y },
-				EllipsizeToWidth(ctx,
-					Wui::Tr("panel.texture.status.disk_changed",
-						"The .wtex changed on disk — close and reopen this panel to reload it (your edits "
-						"were kept)."),
-					width, theme.FontSizeSmall),
-				theme.Warning, theme.FontSizeSmall);
-			y += theme.FontSizeSmall + 3.0f;
-		}
-		if (!m_Status.empty())
-		{
-			Wui::Label(ctx, { x, y },
-				EllipsizeToWidth(ctx, m_Status, width, theme.FontSizeSmall),
-				m_StatusIsError ? theme.Danger : theme.Success, theme.FontSizeSmall);
-			y += theme.FontSizeSmall + 3.0f;
-		}
-		return y;
-	}
-
-	void TextureSettingsPanel::DrawActions(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		PanelHost& host, const Wui::WuiRect& rect)
-	{
-		(void)host;
-		Wui::DrawPanelSurface(ctx, rect, theme);
-		const float gap = theme.PadSmall;
-		const float buttonH = rect.H - theme.Pad * 2.0f;
-		const float buttonW = std::max(70.0f, (rect.W - theme.Pad * 2.0f - gap * 2.0f) / 3.0f);
-		const float buttonY = rect.Y + theme.Pad;
-		const Wui::WuiRect applyRect { rect.X + theme.Pad, buttonY, buttonW, buttonH };
-		const Wui::WuiRect reimportRect { applyRect.X + buttonW + gap, buttonY, buttonW, buttonH };
-		const Wui::WuiRect resetRect { reimportRect.X + buttonW + gap, buttonY,
-			std::max(60.0f, rect.W - theme.Pad * 2.0f - (buttonW + gap) * 2.0f), buttonH };
-		if (Wui::ButtonEx(ctx, Wui::HashId("texture.apply"), applyRect,
-				Wui::Tr("panel.texture.apply", "Apply"), theme, true, true,
-				Wui::Tr("panel.texture.apply.tooltip",
-					"Save the .wtex asset and re-bake <stem>.wtexc in the content root (the live artifact "
-					"the running game reads), then flush the material texture cache.")))
-			SaveAndBake(false);
-		if (Wui::ButtonEx(ctx, Wui::HashId("texture.reimport"), reimportRect,
-				Wui::Tr("panel.texture.reimport", "Reimport"), theme, true, false,
-				Wui::Tr("panel.texture.reimport.tooltip",
-					"Force a re-bake from the current settings (same as Apply, ignoring the up-to-date "
-					"short-circuit).")))
-			SaveAndBake(true);
-		if (Wui::ButtonEx(ctx, Wui::HashId("texture.reset"), resetRect,
-				Wui::Tr("panel.texture.reset", "Reset to Defaults"), theme, m_AssetFileExists, false,
-				m_AssetFileExists
-					? Wui::Tr("panel.texture.reset.tooltip",
-						"Delete this .wtex asset: the source image goes back to the engine defaults "
-						"(usage = color). The artifact is re-baked with those defaults.")
-					: Wui::Tr("panel.texture.reset.tooltip.none",
-						"Nothing to reset: this asset has no .wtex file (defaults are already in effect).")))
-		{
-			m_ResetConfirmOpen = true;
-			ctx.SetModal(Wui::HashId("texture.reset.modal"));
-			host.SetPanelModalOwner(Id());
-			ctx.RecordOp("texture", "reset-ask", m_AssetLogical, "confirm delete .wtex");
-		}
-	}
-
-	void TextureSettingsPanel::SaveAndBake(bool force)
-	{
-		if (m_AssetLogical.empty())
-			return;
-		EnsureContentRoot();
-
-		// 导入源(可选)先在**这里**校验:非法 / 不存在 → 行内错误 + 不落盘(不改 .wtex、不重烘)。
-		// M4-TEX P9:容器不依赖它(留空 = 用内嵌 payload);旧式文件(没有 payload)才必须有源图。
-		const std::string trimmedSource = TrimAscii(m_SourceBuffer);
-		std::string sourceTextError;
-		if (!Editor::ValidateTextureSourceText(m_ContentRoot, trimmedSource, sourceTextError))
-		{
-			m_SourceError = sourceTextError;
-			m_Status = Wui::TrFormat("panel.texture.status.source_invalid",
-				"Cannot apply: fix the source path first ({detail})",
-				{ { "detail", sourceTextError } });
-			m_StatusIsError = true;
-			if (m_Ctx)
-				m_Ctx->RecordOp("texture", "apply-rejected", m_AssetLogical, sourceTextError);
-			return;
-		}
-		m_SourceError.clear();
-		const bool sourceChanged = m_Settings.Source != trimmedSource;
-		m_Settings.Source = trimmedSource;
-		m_SourceBuffer = trimmedSource;
-		if (sourceChanged)
-			TouchPreviewRevision();
-
-		// 1) 定 payload(一张纹理 = 一个文件 = 设置头 + 内嵌源字节):
-		//    * 已有容器 payload → **逐字节保持**(只改设置不碰 payload);
-		//    * 导入源这一行被改过(或还没有 payload)→ 用该文件的原始字节(同一张图重导入 = 同字节);
-		//    * 两者都没有 → 没有可内嵌的源,给可读错误(不再写旧式文件)。
-		std::vector<uint8_t> payload = m_Payload;
-		const bool sourceEdited = trimmedSource != m_LoadedSourceText;
-		if (!trimmedSource.empty() && (payload.empty() || sourceEdited))
-		{
-			const std::filesystem::path imported = m_ContentRoot / std::filesystem::path(trimmedSource);
-			std::vector<uint8_t> bytes;
-			std::string readError;
-			if (!ReadFileBytes(imported, bytes, readError) || bytes.empty())
-			{
-				m_Status = Wui::TrFormat("panel.texture.status.import_failed",
-					"Cannot import '{path}': {detail}",
-					{ { "path", trimmedSource }, { "detail", readError.empty()
-							? std::string("empty file") : readError } });
-				m_StatusIsError = true;
-				m_SourceError = readError;
-				if (m_Ctx)
-					m_Ctx->RecordOp("texture", "apply-failed", m_AssetLogical, readError);
-				return;
-			}
-			payload = std::move(bytes);
-		}
-		if (payload.empty())
-		{
-			m_Status = Wui::Tr("panel.texture.status.no_bytes",
-				"Cannot apply: this asset has no embedded source bytes yet — set an import source "
-				"(.png/.jpg/.jpeg/.tga/.bmp) or re-import the image, then Apply again.");
-			m_StatusIsError = true;
-			if (m_Ctx)
-				m_Ctx->RecordOp("texture", "apply-rejected", m_AssetLogical, "no embedded payload");
-			return;
-		}
-
-		// 2) 保存资产 = **单文件容器**(头 + `---payload` + 源字节;原子替换)。
-		std::string writeError;
-		TextureAssetFile container;
-		container.Settings = m_Settings;
-		container.Payload = payload;
-		if (!SaveTextureAssetFile(std::filesystem::path(AssetAbsolutePath()), container, writeError))
-		{
-			m_Status = Wui::TrFormat("panel.texture.status.save_failed", "Cannot save the asset: {detail}",
-				{ { "detail", writeError } });
-			m_StatusIsError = true;
-			if (m_Ctx)
-				m_Ctx->RecordOp("texture", "apply-failed", m_AssetLogical, writeError);
-			return;
-		}
-		m_Payload = std::move(payload);
-		m_Container = true;
-		m_LegacyAsset = false;
-		m_LoadedSourceText = trimmedSource;
-		// 字节来源 = 资产自身(容器);外部源图只是可选的导入源。
-		m_SourceLogical = m_AssetLogical;
-		m_AssetFileExists = true;
-		m_Dirty = false;
-		m_DiskChanged = false;
-		if (const std::filesystem::path assetFile = AssetAbsolutePath(); !assetFile.empty())
-		{
-			std::error_code stampError;
-			const std::filesystem::file_time_type stamp =
-				std::filesystem::last_write_time(assetFile, stampError);
-			m_AssetStampValid = !stampError;
-			if (!stampError)
-				m_AssetStamp = stamp;
-		}
-
-		// 3) 就地重烘 `<主名>.wtexc`(内容根)+ 失效材质贴图缓存。
-		std::string bakeError;
-		if (!Editor::BakeTextureArtifactNow(m_ContentRoot, m_AssetLogical, m_Settings, bakeError))
-		{
-			m_Status = Wui::TrFormat("panel.texture.status.bake_failed", "Bake failed: {detail}",
-				{ { "detail", bakeError } });
-			m_StatusIsError = true;
-			if (m_Ctx)
-				m_Ctx->RecordOp("texture", "bake-failed", m_AssetLogical, bakeError);
-			RefreshArtifactState(true);
-			return;
-		}
-		m_Status = Wui::TrFormat("panel.texture.status.applied",
-			"Saved {asset} and baked {artifact}", { { "asset", m_AssetLogical },
-				{ "artifact", std::filesystem::path(ArtifactAbsolutePath()).filename().generic_string() } });
-		m_StatusIsError = false;
-		// 形态说明 + 盘上的可选导入源(容器本身不依赖它)。
-		Editor::TextureSourceResolution resolution;
-		m_ImportSourceLogical.clear();
-		if (Editor::ResolveTextureSource(m_ContentRoot, m_AssetLogical, m_Settings, resolution))
-			m_ImportSourceLogical = resolution.ImportSourceLogical;
-		m_AssetFormNote = Wui::TrFormat("panel.texture.form.container",
-			"Single-file asset: {bytes} bytes embedded; the import source is optional.",
-			{ { "bytes", std::to_string(m_Payload.size()) } });
-		RefreshArtifactState(true);
-		// 3) 刚写出的产物直接当预览(不必等防抖的第二次烘)。
-		if (UploadArtifactFromDisk())
-		{
-			m_BakedRevision = m_PreviewRevision;
-			m_PreviewState = PreviewState::Baked;
-			m_PreviewDetail.clear();
-		}
-		if (m_Ctx)
-			m_Ctx->RecordOp("texture", force ? "reimport" : "apply", m_AssetLogical,
-				TextureBlockFormatName(m_Artifact.Header.Format));
-	}
-
-	void TextureSettingsPanel::ResetAssetToDefaults()
-	{
-		if (m_AssetLogical.empty())
-			return;
-		EnsureContentRoot();
-		const std::filesystem::path assetFile = AssetAbsolutePath();
-		std::error_code removeError;
-		const bool removed = std::filesystem::remove(assetFile, removeError);
-		m_Settings = TextureImportSettings {};
-		m_Payload.clear();
-		m_Container = false;
-		m_LegacyAsset = false;
-		m_ImportSourceLogical.clear();
-		m_AssetFormNote.clear();
-		m_SourceBuffer.clear();
-		m_LoadedSourceText.clear();
-		m_SourceError.clear();
-		m_AssetFileExists = false;
-		m_AssetStampValid = false;
-		m_Dirty = false;
-		m_DiskChanged = false;
-		if (!removed && removeError)
-		{
-			m_Status = Wui::TrFormat("panel.texture.status.reset_failed", "Cannot delete the asset: {detail}",
-				{ { "detail", removeError.message() } });
-			m_StatusIsError = true;
-			return;
-		}
-		TouchPreviewRevision();
-		std::string resolveError;
-		std::string source;
-		if (!Editor::ResolveTextureSourceLogical(m_ContentRoot, m_AssetLogical, m_Settings, source,
-				resolveError))
-		{
-			m_SourceLogical.clear();
-			m_Status = Wui::TrFormat("panel.texture.status.reset_no_source",
-				"Deleted the asset, but no source image: {detail}", { { "detail", resolveError } });
-			m_StatusIsError = true;
-			RefreshArtifactState(true);
-			return;
-		}
-		m_SourceLogical = source;
-		std::string bakeError;
-		if (!Editor::BakeTextureArtifactNow(m_ContentRoot, m_SourceLogical, m_Settings, bakeError))
-		{
-			m_Status = Wui::TrFormat("panel.texture.status.bake_failed", "Bake failed: {detail}",
-				{ { "detail", bakeError } });
-			m_StatusIsError = true;
-			RefreshArtifactState(true);
-			return;
-		}
-		m_Status = Wui::TrFormat("panel.texture.status.reset",
-			"Deleted {asset}: the source is back to the default settings and was re-baked.",
-			{ { "asset", m_AssetLogical } });
-		m_StatusIsError = false;
-		RefreshArtifactState(true);
-		if (UploadArtifactFromDisk())
-		{
-			m_BakedRevision = m_PreviewRevision;
-			m_PreviewState = PreviewState::Baked;
-			m_PreviewDetail.clear();
-		}
-		if (m_Ctx)
-			m_Ctx->RecordOp("texture", "reset", m_AssetLogical, "deleted .wtex + rebaked defaults");
-	}
-
-	void TextureSettingsPanel::DrawResetConfirmModal(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		PanelHost& host)
-	{
-		const Wui::WuiId modalId = Wui::HashId("texture.reset.modal");
-		Wui::ModalFrameDesc frameDesc;
-		frameDesc.Id = modalId;
-		frameDesc.Title = Wui::Tr("panel.texture.reset.title", "Reset to default settings?");
-		frameDesc.Size = { 520.0f, 210.0f };
-		Wui::WuiRect frame;
-		bool escapePressed = false;
-		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
-		{
-			m_ResetConfirmOpen = false;
-			host.SetPanelModalOwner(std::string());
-			return;
-		}
-		const float x = frame.X + 16.0f;
-		const float width = frame.W - 32.0f;
-		Wui::Label(ctx, { x, frame.Y + 52.0f },
-			EllipsizeToWidth(ctx,
-				Wui::TrFormat("panel.texture.reset.body", "Delete {asset}?",
-					{ { "asset", m_AssetLogical } }),
-				width, 14.0f),
-			theme.Text, 14.0f);
-		Wui::Label(ctx, { x, frame.Y + 78.0f },
-			EllipsizeToWidth(ctx,
-				Wui::Tr("panel.texture.reset.body2",
-					"The source image keeps working with the engine defaults (usage = color, BC7); the "
-					"artifact is re-baked and the material texture cache is flushed."),
-				width, 12.0f),
-			theme.TextMuted, 12.0f);
-		const Wui::ModalResult result = Wui::ModalFooter(ctx, frame,
-			Wui::Tr("panel.texture.reset.confirm", "Delete .wtex"),
-			Wui::Tr("panel.texture.reset.cancel", "Cancel"),
-			Wui::HashId("texture.reset.ok"), Wui::HashId("texture.reset.cancel"), true, theme);
-		const bool confirmed = result == Wui::ModalResult::Confirm;
-		const bool cancelled = result == Wui::ModalResult::Cancel || escapePressed;
-		if (confirmed || cancelled)
-			m_ResetConfirmOpen = false;
-		Wui::EndModalFrame(ctx);
-		if (confirmed)
-		{
-			if (ctx.Modal() == modalId)
-				ctx.ClearModal();
-			host.SetPanelModalOwner(std::string());
-			ResetAssetToDefaults();
-		}
-		else if (cancelled)
-		{
-			if (ctx.Modal() == modalId)
-				ctx.ClearModal();
-			host.SetPanelModalOwner(std::string());
-		}
-	}
 }
