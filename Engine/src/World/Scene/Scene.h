@@ -201,6 +201,16 @@ namespace World
 		// ---- P7:关节(约束)运行时接口 ----
 		// 与刚体同一生命周期:世界只在 OnRuntimeStart/OnSimulationStart → OnRuntimeStop 之间存在。
 		// 2D 走 Box2D 关节,3D 走 Jolt 约束;两侧都必须是同一后端的刚体。
+		// ---- P6:固定步长 → 渲染插值(仅表现层) ----
+		// 关闭时(默认)渲染走原路径:draw.Model 直指注册表里的权威矩阵,像素逐字节不变。
+		// 开启后由宿主每可变帧推一个 alpha(见 GameApp::LastFixedStepAlpha)。
+		void SetPhysicsInterpolationEnabled(bool enabled) { m_PhysicsInterpolationEnabled = enabled; }
+		bool IsPhysicsInterpolationEnabled() const { return m_PhysicsInterpolationEnabled; }
+		void SetFixedStepAlpha(float alpha);
+		float FixedStepAlpha() const { return m_FixedStepAlpha; }
+		// 物理系统在 Step **之前**调用:把当前渲染矩阵记成"上一固定步"样本(插值起点)。
+		void RecordPhysicsInterpolationState();
+
 		void EnsurePhysicsJoint(entt::entity entity);
 		void DestroyPhysicsJoint(entt::entity entity);
 		// 某实体被销毁时,把其它实体指向它的关节一起拆掉(否则后端会留悬垂 pair)。
@@ -353,6 +363,9 @@ namespace World
 		bool m_FrameTimingsBegun = false;
 		// P5:本帧是否已有固定步跑过 —— 决定物理事件在[本帧第一个固定步]清空,还是由可变阶段入口清空。
 		bool m_PhysicsEventsBegun = false;
+		// P6:渲染插值开关(默认关)与宿主推来的插值系数。
+		bool m_PhysicsInterpolationEnabled = false;
+		float m_FixedStepAlpha = 0.0f;
 		// 抽取缓冲与它的生产者。缓冲用 unique_ptr:FrameExtract 的完整定义在
 		// Renderer/FrameExtract.h,本头文件只前向声明(析构在 Scene.cpp 里定义)。
 		std::unique_ptr<FrameExtract> m_RenderExtract;

@@ -11,6 +11,7 @@
 #include "World/Renderer/FrustumCull.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/FrameExtract.h"
+#include "World/Renderer/TransformInterpolation.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/TransformSystem.h"
@@ -464,6 +465,24 @@ namespace World
 		// 动画已由 animation-system 按同一步长推进过。
 		(void)deltaSeconds;
 		FrameExtract& extract = scene.RenderExtract();
+		// P6:插值缓冲必须 reserve 到位 —— draw.Model 会指向它的元素,中途重分配会让
+		// 先取到的指针全部失效。每个物理实体最多贡献 1 个插值矩阵(同一实体的各 submesh 共用)。
+		extract.InterpolatedModels.clear();
+		const bool interpolatePhysics = scene.IsPhysicsInterpolationEnabled();
+		const float interpolationAlpha = scene.FixedStepAlpha();
+		if (interpolatePhysics)
+			extract.InterpolatedModels.reserve(
+				scene.m_Registry.view<RigidBody2DComponent>().size() +
+				scene.m_Registry.view<RigidBody3DComponent>().size() + 8);
+		// 开启插值时把 draw.Model 换成插值后的矩阵(指针稳定:见上面的 reserve);关闭时原样返回。
+		const auto resolveRenderMatrix = [&](entt::entity entity, const glm::mat4* authoritative) -> const glm::mat4*
+		{
+			if (!interpolatePhysics) return authoritative;
+			const auto* state = scene.m_Registry.try_get<PhysicsInterpolationState>(entity);
+			if (state == nullptr || !state->Valid) return authoritative;
+			extract.InterpolatedModels.push_back(InterpolateRigidTransform(state->PreviousMatrix, *authoritative, interpolationAlpha));
+			return &extract.InterpolatedModels.back();
+		};
 		// ---- 3D 网格收集(D2c/D3) ----
 		// 收集前移到阴影通道之前:方向光阴影的正交矩阵要覆盖本帧所有网格实体的世界包围盒。
 		// 有 MaterialPath 时走材质(贴图/粗糙度/透明),否则沿用 Color 常量色(旧行为)。
@@ -519,11 +538,13 @@ namespace World
 				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
 					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
 
+				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
+
 				const auto makeDraw = [&](uint32_t submeshIndex, const Ref<Material>& material)
 				{
 					FrameMeshDraw draw;
 					draw.Entity = entity;
-					draw.Model = modelMatrix;
+					draw.Model = renderMatrix;
 					draw.MeshAsset = mesh;
 					draw.SubmeshIndex = submeshIndex;
 					draw.MaterialAsset = material;
@@ -616,11 +637,13 @@ namespace World
 				// AnimationSystem::Update 当帧算好的调色板;nullptr = 本帧取不到(读失败/非蒙皮)。
 				const std::vector<glm::mat4>* palette = AnimationSystem::GetPalette(entity);
 
+				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
+
 				const auto makeSkinnedDraw = [&](uint32_t submeshIndex, const Ref<Material>& material)
 				{
 					FrameMeshDraw draw;
 					draw.Entity = entity;
-					draw.Model = modelMatrix;
+					draw.Model = renderMatrix;
 					draw.MeshAsset = mesh;
 					draw.SubmeshIndex = submeshIndex;
 					draw.MaterialAsset = material;

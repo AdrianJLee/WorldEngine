@@ -80,7 +80,12 @@ namespace World::Gameplay
 			[this](Timestep ts)
 			{
 				if (m_Scene && m_RuntimeStarted)
+				{
+					// P6:把本帧的固定步长余量(0..1)交给场景,渲染抽取用它在上一个固定步位姿与
+					// 本帧位姿之间插值 —— 只影响渲染,权威模拟数据不动(高刷屏上的运动更平滑)。
+					m_Scene->SetFixedStepAlpha(GameApp::Get().LastFixedStepAlpha());
 					m_Scene->OnUpdateRuntime(ts);
+				}
 			},
 			GameApp::PhaseCallback());
 
@@ -252,6 +257,9 @@ namespace World::Gameplay
 
 	void GameHost::SetScene(const Ref<Scene>& scene, bool startRuntime)
 	{
+		// P6:宿主接管的场景开启固定步长 → 渲染插值(只影响表现层;alpha 每可变帧由上面的回调推)。
+		if (scene)
+			scene->SetPhysicsInterpolationEnabled(true);
 		StopRuntime();
 		m_Scene = scene;
 		m_LoadedPath.clear();

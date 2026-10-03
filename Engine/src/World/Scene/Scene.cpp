@@ -545,6 +545,31 @@ namespace World
 		m_PhysicsEventsBegun = false;  // 本帧结束:下一帧的固定步重新清空物理事件
 	}
 
+	// ---- P6:固定步长 → 渲染插值(仅表现层) ----
+	void Scene::SetFixedStepAlpha(float alpha)
+	{
+		m_FixedStepAlpha = std::clamp(alpha, 0.0f, 1.0f);
+	}
+
+	void Scene::RecordPhysicsInterpolationState()
+	{
+		if (!m_PhysicsInterpolationEnabled) return;
+
+		// 只**更新**已有状态,不做结构写 —— 本函数在固定步阶段(帧管线内)被调用,
+		// 而运行态的结构写是受保护的。状态的创建放在两处非帧内的点:
+		//   * OnRuntimeStart(所有物理实体);
+		//   * EnsurePhysicsBody(运行时 AddComponent 补建刚体的提交点,新实体当帧补上)。
+		for (const entt::entity entity : m_Registry.view<PhysicsInterpolationState>())
+		{
+			auto& state = m_Registry.get<PhysicsInterpolationState>(entity);
+			// 渲染矩阵的权威来源与抽取侧一致:有 WorldTransformComponent 用它(层级求解结果),
+			// 否则回退到实体自己的 TransformComponent。
+			if (const auto* world = m_Registry.try_get<WorldTransformComponent>(entity)) state.PreviousMatrix = world->Matrix;
+			else if (const auto* transform = m_Registry.try_get<TransformComponent>(entity)) state.PreviousMatrix = transform->Transform;
+			state.Valid = true;
+		}
+	}
+
 	// ---- P5:物理事实 → ECS 事件队列 ----
 	// 产出在固定步长阶段(物理系统),消费在可变阶段(任意系统)。见 Scene.h 的契约说明。
 	void Scene::EnqueueContactEvent(const Physics::ContactEvent& event)
@@ -996,6 +1021,9 @@ namespace World
 		if (!m_Registry.valid(entity)) return;
 		auto* rigidBody = m_Registry.try_get<RigidBody2DComponent>(entity);
 		if (!rigidBody) return;
+		// P6:运行时补建刚体 ⇒ 同步补插值状态(本方法是结构提交点,允许结构写)。
+		if (m_PhysicsInterpolationEnabled && !m_Registry.all_of<PhysicsInterpolationState>(entity))
+			m_Registry.emplace<PhysicsInterpolationState>(entity);
 		if (!b2World_IsValid(m_PhysicsWorldId))
 		{
 			// 世界未启动:AddComponent 只落组件配置;下一次 OnRuntimeStart 会照配置建刚体。
@@ -1201,6 +1229,16 @@ namespace World
 			m_Registry.get<JointComponent>(entity).RuntimeJointId = b2_nullJointId;
 			EnsurePhysicsJoint(entity);
 		}
+		// P6:为物理实体预建插值状态(结构写只允许在非运行态 / 提交点做;这里 m_State 还是 Stopped)。
+		if (m_PhysicsInterpolationEnabled)
+		{
+			for (const auto entity : m_Registry.view<RigidBody2DComponent>())
+				if (!m_Registry.all_of<PhysicsInterpolationState>(entity))
+					m_Registry.emplace<PhysicsInterpolationState>(entity);
+			for (const auto entity : m_Registry.view<RigidBody3DComponent>())
+				if (!m_Registry.all_of<PhysicsInterpolationState>(entity))
+					m_Registry.emplace<PhysicsInterpolationState>(entity);
+		}
 		EnsureDefaultFrameSystems();
 		if (ScriptEngine::IsInitialized())
 		{
@@ -1346,6 +1384,8 @@ namespace World
 	void Scene::OnUpdatePhysics2D(Timestep ts)
 	{
 		if (!b2World_IsValid(m_PhysicsWorldId)) return;
+		// P6:步进前先记下"上一固定步"的渲染矩阵(插值起点)。
+		RecordPhysicsInterpolationState();
 		b2World_Step(m_PhysicsWorldId, ts.GetSeconds(), 4);
 		// P5:步进结束后立刻把 Box2D 的 begin/end/persist 翻译进场景事件队列
 		// (队列在"本帧第一个固定步"清空,由 RunFixedFrameSystems 负责)。
@@ -1412,6 +1452,8 @@ namespace World
 	void Scene::OnUpdatePhysics3D(Timestep ts)
 	{
 		if (!m_Physics3D) return;
+		// P6:步进前先记下"上一固定步"的渲染矩阵(插值起点)。
+		RecordPhysicsInterpolationState();
 		m_Physics3D->Step(ts.GetSeconds());
 		m_Physics3D->SyncTransforms();
 	}

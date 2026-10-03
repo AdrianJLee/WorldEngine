@@ -84,6 +84,9 @@ namespace World::Gameplay
 		// 固定步长阶段每次调用的步长(秒),供物理/确定性逻辑使用。
 		double FixedStepSeconds() const { return m_FixedStepSeconds; }
 		uint32_t LastFixedSteps() const { return m_LastFixedSteps; }
+		// P6:本帧"余量 / 固定步" = 固定步长插值系数(0..1)。表现层用它在上一个固定步位姿与
+		// 本帧位姿之间插值,**只影响渲染,不动权威模拟数据**(Unity Rigidbody.interpolation 同一口径)。
+		float LastFixedStepAlpha() const { return m_LastFixedStepAlpha; }
 		uint64_t FrameNumber() const { return m_FrameNumber; }
 
 		void SetPaused(bool paused) { m_Paused = paused; }
@@ -107,6 +110,8 @@ namespace World::Gameplay
 		double m_FixedStepSeconds = 1.0 / 60.0;
 		double m_Accumulator = 0.0;
 		uint32_t m_LastFixedSteps = 0;
+		// P6:见 LastFixedStepAlpha()。
+		float m_LastFixedStepAlpha = 0.0f;
 		uint64_t m_FrameNumber = 0;
 		bool m_Paused = false;
 		PhaseCallback m_FixedUpdate;

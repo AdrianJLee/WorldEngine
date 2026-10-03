@@ -185,6 +185,18 @@ namespace World
 		glm::mat4 Matrix { 1.0f };
 	};
 
+	// P6:固定步长 → 渲染插值的内部状态。
+	//
+	// **非 schema**:不入 .wd、不进属性面板、不参与序列化(与 WorldTransformComponent 同口径)。
+	// 只由物理系统(步进前记录)与渲染抽取(写 Model 时读取)使用:
+	//   * PreviousMatrix = 上一固定步开始时该实体的渲染矩阵;
+	//   * Valid = 是否已有可用的上一帧样本(新建实体第一帧为 false,不插值)。
+	struct PhysicsInterpolationState
+	{
+		glm::mat4 PreviousMatrix { 1.0f };
+		bool Valid = false;
+	};
+
 	// Primitive:内置网格名("cube"/"plane");MeshPath 预留给 glTF 导入的模型资产(D5),
 	// 届时 Primitive 会升级为资产引用,这里的字段 id 保持不变以便存档迁移。
 	struct MeshRendererComponent

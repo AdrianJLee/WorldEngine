@@ -146,6 +146,11 @@ namespace World::Gameplay
 				m_Accumulator = std::min(m_Accumulator, m_FixedStepSeconds);
 			m_FramePhases.push_back({ "FixedUpdate", ElapsedMilliseconds(start) });
 		}
+		// P6:本帧余量占固定步的比例 ⇒ 渲染插值系数。固定步块之后算(此时 m_Accumulator 是本帧
+		// 真正剩下的部分步);暂停且不跑固定步时余量没有意义,置 0。
+		m_LastFixedStepAlpha = (fixedRuns && m_FixedStepSeconds > 0.0)
+			? static_cast<float>(std::clamp(m_Accumulator / m_FixedStepSeconds, 0.0, 1.0))
+			: 0.0f;
 
 		// 3. 可变步长阶段(暂停时不推进:表现层与权威模拟一起停)。
 		if (variableRuns)

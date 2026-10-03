@@ -42,6 +42,10 @@ namespace World
 		// 灯光(方向光/点光/环境光已折算成 Renderer3D 的 uniform);**尚未**应用阴影矩阵与
 		// `rendering.shadows` 开关 —— 那两步在提交侧(依赖本帧全部 draw 的包围盒与后端约定)。
 		LightRig Lights;
+		// P6:插值后的渲染矩阵(仅物理插值开启时非空)。
+		// `FrameMeshDraw::Model` 可能指向这里的元素 ⇒ 抽取期间必须 reserve 到位,不能中途重分配。
+		// 与 Draws 同样的生命周期:抽取(PreRender)→ 提交(同帧稍后)之间有效。
+		std::vector<glm::mat4> InterpolatedModels;
 		// 全部 draw 的世界包围盒并集(方向光阴影的正交矩阵要覆盖它)。HasBounds=false = 无网格。
 		glm::vec3 BoundsMin { 0.0f };
 		glm::vec3 BoundsMax { 0.0f };
@@ -50,6 +54,7 @@ namespace World
 		void Clear()
 		{
 			Draws.clear();
+			InterpolatedModels.clear();
 			Lights = LightRig {};
 			BoundsMin = glm::vec3(0.0f);
 			BoundsMax = glm::vec3(0.0f);

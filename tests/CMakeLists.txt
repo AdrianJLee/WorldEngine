@@ -677,6 +677,27 @@ set_tests_properties(World.PhysicsJoints PROPERTIES
     TIMEOUT 120
 )
 
+# P6:固定步长 → 渲染插值(数学 / 权威不动 / 状态记录 / alpha 来源)。
+add_executable(WorldTransformInterpolationTests World/TransformInterpolationTests.cpp)
+target_link_libraries(WorldTransformInterpolationTests PRIVATE World)
+target_compile_features(WorldTransformInterpolationTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldTransformInterpolationTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldTransformInterpolationTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldTransformInterpolationTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.TransformInterpolation COMMAND WorldTransformInterpolationTests)
+set_tests_properties(World.TransformInterpolation PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
+
 # P2a W7:输入映射资产 + InputService(动作/轴/多玩家/边沿判定)。
 add_executable(WorldInputTests World/InputTests.cpp)
 target_link_libraries(WorldInputTests PRIVATE World)
