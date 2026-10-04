@@ -5,6 +5,7 @@
 #include "World/Renderer/Skinning.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
+#include "World/Core/Thread/JobSystem.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -91,6 +92,9 @@ namespace World
 				return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 			return value / length;
 		}
+
+		// 调色板并行阈值:骨架/节点数都不大的单实体算一遍很快,规模不够时串行更省。
+		constexpr size_t kParallelAnimationThreshold = 32;
 	}
 
 	void AnimationSystem::Update(Scene& scene, float deltaSeconds)
@@ -105,6 +109,22 @@ namespace World
 		// 与 ScriptEngine::DrawScriptUi 写 State/LastError 是同一套口径,不增删实体/组件。
 		const entt::registry& registry = static_cast<const Scene&>(scene).GetRegistry();
 		const auto view = registry.view<SkinnedMeshRendererComponent>();
+		// ---- 阶段 1(串行):解析模型/clip 并推进 Time ----
+		// 必须单线程:这段触碰共享状态(ModelCache / FailedModels / WarnOnce)且写组件的
+		// Time 字段。调色板计算是纯函数,留到阶段 2 并行(见函数末尾)。
+		struct PaletteJob
+		{
+			entt::entity Entity = entt::null;
+			const Asset::WModelData* Model = nullptr;
+			uint32_t SkinIndex = 0;
+			const Asset::WModelAnimation* Animation = nullptr;
+			float Time = 0.0f;
+		};
+		std::vector<PaletteJob> jobs;
+		// view 是默认(single-pack)策略 ⇒ 不给 size_hint;按存储大小保守预留即可
+		// (registry.storage<T>() 返回的是指针;预大不预小只是一次性容量)。
+		if (const auto* storage = registry.storage<SkinnedMeshRendererComponent>())
+			jobs.reserve(storage->size());
 		for (const entt::entity entity : view)
 		{
 			const SkinnedMeshRendererComponent* probe = registry.try_get<SkinnedMeshRendererComponent>(entity);
@@ -154,11 +174,44 @@ namespace World
 					component.Playing, component.Loop, animation.Duration);
 			}
 
-			std::vector<glm::mat4> palette = ComputePalette(model, static_cast<uint32_t>(skinIndex),
-				animation, component.Time);
-			if (!palette.empty())
-				palettes.emplace(entity, std::move(palette));
+			// 只登记工作项;真正的调色板计算留到阶段 2(纯函数,可并行)。
+			PaletteJob job;
+			job.Entity = entity;
+			job.Model = &model;
+			job.SkinIndex = static_cast<uint32_t>(skinIndex);
+			job.Animation = clip;
+			job.Time = component.Time;
+			jobs.push_back(job);
 		}
+
+		// ---- 阶段 2(可并行):调色板计算只读 model/clip、只写自己的结果槽 ----
+		// 阶段 1 已完成全部模型加载 ⇒ 这里 ModelCache 不再插入,持有的指针全程有效;
+		// ComputePalette 不碰任何共享容器,故可安全并行。
+		static const Asset::WModelAnimation kNoAnimationForJobs;
+		std::vector<std::vector<glm::mat4>> results(jobs.size());
+		if (jobs.size() >= kParallelAnimationThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
+		{
+			JobSystem::ParallelFor(static_cast<uint32_t>(jobs.size()), 1, [&](uint32_t index)
+			{
+				const PaletteJob& job = jobs[index];
+				results[index] = ComputePalette(*job.Model, job.SkinIndex,
+					job.Animation != nullptr ? *job.Animation : kNoAnimationForJobs, job.Time);
+			});
+		}
+		else
+		{
+			for (size_t index = 0; index < jobs.size(); ++index)
+			{
+				const PaletteJob& job = jobs[index];
+				results[index] = ComputePalette(*job.Model, job.SkinIndex,
+					job.Animation != nullptr ? *job.Animation : kNoAnimationForJobs, job.Time);
+			}
+		}
+
+		// ---- 阶段 3(串行):按阶段 1 的实体顺序插表,结果集与串行版一致 ----
+		for (size_t index = 0; index < jobs.size(); ++index)
+			if (!results[index].empty())
+				palettes.emplace(jobs[index].Entity, std::move(results[index]));
 	}
 
 	const std::vector<glm::mat4>* AnimationSystem::GetPalette(entt::entity entity)

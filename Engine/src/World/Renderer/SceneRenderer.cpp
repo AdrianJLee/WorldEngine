@@ -17,6 +17,7 @@
 #include "World/Scene/Systems/TransformSystem.h"
 #include "World/RHI/RhiTextureBridge.h"
 #include "World/Core/Thread/JobSystem.h"
+#include "World/Core/Memory/FrameArena.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -29,6 +30,14 @@
 
 namespace World
 {
+	namespace
+	{
+		// 并行阈值:低于此规模时串行更快(调度/缓存开销 > 收益)。实测口径见
+		// docs 的 job-system 契约;两个阈值都只影响"是否并行",不影响结果。
+		constexpr size_t kParallelCullThreshold = 256;     // 逐 draw 视锥判定
+		constexpr size_t kParallelBoundsThreshold = 512;   // 阴影包围盒归约
+	}
+
 	uint32_t SceneRenderer::FrameSlot() const
 	{
 		return static_cast<uint32_t>(Renderer::FrameSlot());
@@ -782,12 +791,38 @@ namespace World
 		{
 			const auto cullStart = std::chrono::steady_clock::now();
 			const FrustumPlanes cameraFrustum = ExtractFrustumPlanes(viewProjection);
-			for (uint32_t index = 0; index < draws.size(); ++index)
+			// D8a 并行化:逐 draw 的视锥判定是**纯函数**(只读 draws/相机、写自己那一格),
+			// 大场景时按掩码并行判定,再按**原索引顺序**串行压缩 ⇒ visibleDraws 的顺序与
+			// 串行版本逐元素相同(绘制顺序/像素结果不变)。
+			const size_t drawCount = draws.size();
+			visibleDraws.reserve(drawCount);
+			if (!cullingEnabled)
 			{
-				const FrameMeshDraw& draw = draws[index];
-				if (!cullingEnabled
-					|| AabbInFrustum(cameraFrustum, draw.WorldMin, draw.WorldMax))
+				for (uint32_t index = 0; index < drawCount; ++index)
 					visibleDraws.push_back(index);
+			}
+			else if (drawCount >= kParallelCullThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
+			{
+				// 帧内临时缓冲走 FrameArena:帧末统一回卷,不产生堆分配/不增加 GC 压力。
+				auto* visibleMask = static_cast<std::uint8_t*>(
+					FrameArena::Get().Allocate(drawCount, alignof(std::uint8_t)));
+				JobSystem::ParallelFor(static_cast<uint32_t>(drawCount), 64, [&](uint32_t index)
+				{
+					visibleMask[index] = AabbInFrustum(cameraFrustum, draws[index].WorldMin,
+						draws[index].WorldMax) ? 1u : 0u;
+				});
+				for (uint32_t index = 0; index < drawCount; ++index)
+					if (visibleMask[index] != 0u)
+						visibleDraws.push_back(index);
+			}
+			else
+			{
+				for (uint32_t index = 0; index < drawCount; ++index)
+				{
+					const FrameMeshDraw& draw = draws[index];
+					if (AabbInFrustum(cameraFrustum, draw.WorldMin, draw.WorldMax))
+						visibleDraws.push_back(index);
+				}
 			}
 			cullMilliseconds = std::chrono::duration<double, std::milli>(
 				std::chrono::steady_clock::now() - cullStart).count();
@@ -811,11 +846,45 @@ namespace World
 		{
 			glm::vec3 boundsMin { FLT_MAX, FLT_MAX, FLT_MAX };
 			glm::vec3 boundsMax { -FLT_MAX, -FLT_MAX, -FLT_MAX };
-			for (const FrameMeshDraw& draw : draws)
+			// D8a:直接用收集期算好的世界 AABB(逐子网格,更紧)。
+			// 归约可并行:min/max 满足结合律且**精确可交换**(无浮点累加误差),
+			// 故分块并行后串行合并的结果与串行归约**逐位相同** ⇒ 阴影矩阵不变、像素不变。
+			const size_t boundsCount = draws.size();
+			const uint32_t workerCount = JobSystem::WorkerCount();
+			if (boundsCount >= kParallelBoundsThreshold && workerCount > 1 && JobSystem::IsRunning() &&
+				JobSystem::ParallelAllowed())
 			{
-				// D8a:直接用收集期算好的世界 AABB(逐子网格,更紧)。
-				boundsMin = glm::min(boundsMin, draw.WorldMin);
-				boundsMax = glm::max(boundsMax, draw.WorldMax);
+				const uint32_t chunkCount = static_cast<uint32_t>(
+					std::min<size_t>(boundsCount, static_cast<size_t>(workerCount) * 4u));
+				std::vector<glm::vec3> chunkMin(chunkCount, glm::vec3(FLT_MAX));
+				std::vector<glm::vec3> chunkMax(chunkCount, glm::vec3(-FLT_MAX));
+				JobSystem::ParallelFor(chunkCount, 1, [&](uint32_t chunk)
+				{
+					const size_t begin = boundsCount * chunk / chunkCount;
+					const size_t end = boundsCount * (chunk + 1) / chunkCount;
+					glm::vec3 localMin(FLT_MAX);
+					glm::vec3 localMax(-FLT_MAX);
+					for (size_t index = begin; index < end; ++index)
+					{
+						localMin = glm::min(localMin, draws[index].WorldMin);
+						localMax = glm::max(localMax, draws[index].WorldMax);
+					}
+					chunkMin[chunk] = localMin;
+					chunkMax[chunk] = localMax;
+				});
+				for (uint32_t chunk = 0; chunk < chunkCount; ++chunk)
+				{
+					boundsMin = glm::min(boundsMin, chunkMin[chunk]);
+					boundsMax = glm::max(boundsMax, chunkMax[chunk]);
+				}
+			}
+			else
+			{
+				for (const FrameMeshDraw& draw : draws)
+				{
+					boundsMin = glm::min(boundsMin, draw.WorldMin);
+					boundsMax = glm::max(boundsMax, draw.WorldMax);
+				}
 			}
 			const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
 			const float radius = std::max(0.5f, glm::length((boundsMax - boundsMin) * 0.5f));
@@ -1231,7 +1300,7 @@ namespace World
 			for (auto entity : group)
 				entities.push_back(entity);
 			const size_t count = entities.size();
-			if (count >= kParallelPrepThreshold && JobSystem::IsRunning())
+			if (count >= kParallelPrepThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
 			{
 				std::vector<glm::mat4> transforms(count);
 				std::vector<std::array<glm::vec3, 4>> positions(count);
@@ -1269,7 +1338,7 @@ namespace World
 			for (auto entity : view)
 				entities.push_back(entity);
 			const size_t count = entities.size();
-			if (count >= kParallelPrepThreshold && JobSystem::IsRunning())
+			if (count >= kParallelPrepThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
 			{
 				std::vector<glm::mat4> transforms(count);
 				std::vector<std::array<glm::vec3, 4>> positions(count);
