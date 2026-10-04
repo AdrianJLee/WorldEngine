@@ -296,7 +296,7 @@ int main()
 			for (auto handle : loaded->GetRegistry().view<TagComponent>())
 			{
 				Entity loadedEntity(loaded.get(), handle);
-				if (loadedEntity.GetComponent<TagComponent>().Tag != "RoundTrip")
+				if (StringPool::Get().NameOf(loadedEntity.GetComponent<TagComponent>().Tag) != "RoundTrip")
 					continue;
 				found = true;
 				const auto& transform = loadedEntity.GetComponent<TransformComponent>();

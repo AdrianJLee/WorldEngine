@@ -1,5 +1,6 @@
 #pragma once
 
+#include "World/Core/StringPool.h"
 #include "World/Core/UUID.h"
 #include "World/Core/Memory/Memory.h"
 #include "World/Scene/Entity.h"
@@ -39,16 +40,20 @@ namespace World
 
 	struct TagComponent
 	{
-		std::string Tag;
+		// 实体名 = **驻留名字标识**(NameId,4B POD),不是 std::string:
+		// 组件因此平凡可拷贝(复制实体/Prefab 实例化是 memcpy),也不再有堆分配。
+		// 名字不是身份(允许重名);人类可读文本经 StringPool::NameOf 取回。
+		NameId Tag;
 
 		TagComponent() = default;
-		TagComponent(const std::string& tag) : Tag(tag) {}
+		// 便捷构造:边界字符串 → 驻留名字(调用方显式给字符串时才付驻留成本)。
+		explicit TagComponent(const std::string& tag) : Tag(StringPool::Get().InternName(tag)) {}
 
 		WE_SCHEMA_BODY(World, TagComponent, Component)
 			WE_SCHEMA_META(Category("Scene"),
 				Core(),
 				Doc("Human-readable entity label used by the hierarchy, the AI command channel and log messages; not an identifier."))
-			WE_FIELD(Tag, String);
+			WE_FIELD(Tag, Name);
 		WE_SCHEMA_END
 	};
 
@@ -307,7 +312,8 @@ namespace World
 		AssetRef Mesh;
 		int32_t MeshIndex = 0;
 		AssetRef Material;
-		std::string AnimationClip;
+		// clip 名 = 驻留名字(在模型的若干条 clip 里查名字,天然是有界集合)。
+		NameId AnimationClip;
 		bool Playing = true;
 		float Speed = 1.0f;
 		bool Loop = true;
@@ -321,7 +327,7 @@ namespace World
 			WE_FIELD(MeshIndex, Int32, Id(0x534B4D4553484958), Default(0));
 			WE_FIELD(Material, Asset, Id(0x534B4D4154505448), Of("Material"),
 				Doc("Material asset (.wmat); empty = the model's own material slots."));
-			WE_FIELD(AnimationClip, String, Id(0x534B414E494D434C),
+			WE_FIELD(AnimationClip, Name, Id(0x534B414E494D434C),
 				Doc("Clip name inside the model; empty = play the first clip."));
 			WE_FIELD(Playing, Bool, Id(0x534B504C4159494E), Default(true),
 				Doc("Play the clip automatically."));

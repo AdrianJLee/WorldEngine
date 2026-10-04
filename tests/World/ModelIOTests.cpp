@@ -660,7 +660,7 @@ namespace
 		entt::entity grandchildEntity = entt::null;
 		for (const entt::entity handle : registry.view<TagComponent>())
 		{
-			const std::string& name = registry.get<TagComponent>(handle).Tag;
+			const std::string& name = StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag);
 			if (name == "Root") rootEntity = handle;
 			else if (name == "Child") childEntity = handle;
 			else if (name == "Grandchild") grandchildEntity = handle;

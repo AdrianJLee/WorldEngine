@@ -61,19 +61,12 @@ namespace World
 		bool operator!=(const MaterialDesc& other) const { return !(*this == other); }
 	};
 
-	// ---- M3:材质实例(.wmat = 覆盖字段 + 父级引用)----
+	// ---- 材质资产(.wmat = 资产身份 + 覆盖字段 + 父级引用 + Shader/Params)----
 	//
-	// 格式版本:
-	//  - 1 = M3 之前的老写法:逐字段全写;缺字段 = 引擎内置默认(逐字段行为与老代码一致);
-	//  - 2 = 材质实例:Parent + 只写覆盖字段(缺字段 = 从父级继承;没有父级 = 引擎内置默认)。
-	//        M4-S2 起 v2 还承载 `Shader:`(表面函数引用)与 `Params:`(参数覆盖);
-	//        v1 没有这两个键,所以带它们的文件一律按 v2 写出。
-	// 读接受 1..2,读到更高版本直接失败(不猜、不降级);写出用哪个版本见
-	// MaterialIO::DocumentFormatVersion(全字段 + 无父级仍然写 1,保证老文件逐字节不变)。
-	constexpr uint32_t kMaterialFormatVersionLegacy = 1;
-	constexpr uint32_t kMaterialFormatVersionOverrides = 2;   // 覆盖字段 + Parent
-	constexpr uint32_t kMaterialFormatVersionWithIdentity = 3; // 再加 AssetId
-	constexpr uint32_t kMaterialFormatVersionMax = kMaterialFormatVersionWithIdentity;
+	// 只有一个格式版本(2026-10-04 起不再做旧格式兼容):
+	//   * `FormatVersion: 3` 恒写;读到任何其它版本直接失败(不猜、不降级、不迁移);
+	//   * `AssetId:` 是**必备**字段(资产稳定身份,见 Core/AssetId.h)—— 保存时缺则补齐并写回。
+	constexpr uint32_t kMaterialFormatVersion = 3;
 
 	// 材质的可继承字段。顺序 = .wmat 的书写顺序(与 MaterialDesc 的成员顺序一致)。
 	// Name 也是可继承字段:未覆盖时跟随父级(资产身份始终是文件路径,不是 Name)。
@@ -127,7 +120,7 @@ namespace World
 	//  - 老文件(v1、逐字段全写)解析出来的 Overridden = 全部字段,合并结果与 M3 前逐字段一致。
 	struct WLD_API MaterialDocument
 	{
-		uint32_t FormatVersion = kMaterialFormatVersionMax;
+		uint32_t FormatVersion = kMaterialFormatVersion;
 		std::string ParentPath;
 		MaterialDesc Values;
 		MaterialFieldSet Overridden;
@@ -192,8 +185,6 @@ namespace World
 		// 父级不可用时的可读原因(空 = 没有退化)。
 		const std::string& ParentWarning() const { return m_ParentWarning; }
 
-		// 本实例当前写出会用哪个 .wmat 版本(1 = 老的全字段写法;2 = 覆盖字段 + Parent)。
-		uint32_t GetFormatVersion() const;
 
 		// ---- M4-S2:shader 引用 + 注解参数 ----
 		//
@@ -298,7 +289,7 @@ namespace World
 	namespace MaterialIO
 	{
 		// 支持的最高版本(读到更高版本直接失败,不猜、不降级)。老名字保留给既有调用点。
-		constexpr uint32_t kFormatVersion = kMaterialFormatVersionMax;
+		constexpr uint32_t kFormatVersion = kMaterialFormatVersion;
 
 		// 引擎内置默认材质(没有父级时的合并基底;= MaterialDesc 的默认构造值)。
 		WLD_API const MaterialDesc& DefaultMaterialDesc();
@@ -318,8 +309,6 @@ namespace World
 		// 合并:覆盖字段 → 父级解析结果(parentDesc == nullptr 时用引擎内置默认)。
 		WLD_API MaterialDesc MergeDocument(const MaterialDocument& document, const MaterialDesc* parentDesc);
 
-		// 文档写出的版本:没有父级 + 全部字段都有覆盖 = 1(与 M3 前的文件逐字节一致);否则 2。
-		WLD_API uint32_t DocumentFormatVersion(const MaterialDocument& document);
 
 		// 解析 .wmat 文本为**单文件视角**的 MaterialDesc(覆盖字段叠在引擎默认上)。
 		// 注意:这里不读盘、不解析父级链 —— 带 Parent 的文件要走 MaterialLibrary::Load /
@@ -330,10 +319,11 @@ namespace World
 		//  - SerializeDocument:只写覆盖字段 + Parent + Shader + Params(逐字节确定;
 		//    paramDecls 给参数值的 YAML 形态:已知类型 → 数字/序列/字符串,
 		//    未知类型(shader 读不到)→ 按标量文本写,值文本原样保留);
-		//  - Serialize(desc):老写法的全字段文本,与 M3 前逐字节一致(导入器/新建模板继续用它)。
 		WLD_API std::string SerializeDocument(const MaterialDocument& document,
 			const std::vector<MaterialParamDecl>* paramDecls = nullptr);
-		WLD_API std::string Serialize(const MaterialDesc& desc);
+		// 由**完整描述**建一份材质资产文本(全字段 = 覆盖,无父级)。identity 是必填的资产身份:
+		// 导入器按"目标逻辑路径"确定性派生(可复现 + 去重可用),编辑器向导按新建资产分配。
+		WLD_API std::string Serialize(const MaterialDesc& desc, AssetId identity);
 		// U23:保存回读校验的比较口径(旧行为是 `verify != desc` 逐位相等)。
 		//  - 浮点字段(BaseColor / Metallic / Roughness / Emissive)按 |a-b| <= tolerance 比较:
 		//    写出文本的十进制表示不再把"拖一下滑杆"的正常值判成写入校验失败;

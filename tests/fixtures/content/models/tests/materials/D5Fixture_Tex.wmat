@@ -1,5 +1,6 @@
 # WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。
-FormatVersion: 1
+FormatVersion: 3
+AssetId: 0x5577E8DAB7C3597A
 Name: "Tex"
 BaseColor: [1, 1, 1, 1]
 Metallic: 0

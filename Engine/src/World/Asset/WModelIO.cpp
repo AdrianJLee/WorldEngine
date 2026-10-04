@@ -368,14 +368,7 @@ namespace World::Asset::WModelIO
 
 			uint32_t version = 0;
 			reader.ReadU32(version, "version");
-			if (version >= 1u && version <= 3u)
-			{
-				// v1–v3 没有 v4 的 skin/animations 区块 —— 一律拒绝,不做"尽力解析"。
-				error = ".wmodel version " + std::to_string(version)
-					+ " is no longer supported (v4 adds skin/animation blocks); "
-					"please re-import the source asset (请重新导入)";
-				return false;
-			}
+			// 单一版本:任何其它版本(含历史版本)一律拒绝,不做"尽力解析"、不做迁移。
 			if (version != kFormatVersion)
 			{
 				error = "unsupported .wmodel version " + std::to_string(version)

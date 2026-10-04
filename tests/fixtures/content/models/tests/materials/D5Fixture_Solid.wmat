@@ -1,5 +1,6 @@
 # WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。
-FormatVersion: 1
+FormatVersion: 3
+AssetId: 0xED7CE351FD66CE74
 Name: "Solid"
 BaseColor: [0.53252053, 0.7297401, 1, 1]
 Metallic: 0.2

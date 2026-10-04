@@ -6,6 +6,7 @@
 //   3. 边界:无 skin / 越界 skin → 空调色板;空 clip(无通道)→ 绑定姿态(不崩);
 //   4. Update:真实 .wmodel 读盘 + Time 写回 + 按实体缓存调色板 + 坏路径/未知 clip 不崩。
 #include "wldpch.h"
+#include "World/Core/StringPool.h"
 
 #include "World/Renderer/AnimationSystem.h"
 
@@ -227,7 +228,7 @@ namespace
 		const entt::entity entity = scene.GetRegistry().create();
 		SkinnedMeshRendererComponent component;
 		component.Mesh.Path = StringPool::Get().InternPath(modelFile.string());   // 绝对路径:ReadFile 的候选路径都会命中它
-		component.AnimationClip = "Move";
+		component.AnimationClip = StringPool::Get().InternName("Move");
 		component.Speed = 2.0f;
 		scene.GetRegistry().emplace<SkinnedMeshRendererComponent>(entity, component);
 
@@ -257,7 +258,7 @@ namespace
 
 		// 未知 clip:不推 Time、按绑定姿态出调色板(非空),不崩。
 		scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).Playing = true;
-		scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).AnimationClip = "NoSuchClip";
+		scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).AnimationClip = StringPool::Get().InternName("NoSuchClip");
 		AnimationSystem::Update(scene, 0.5f);
 		CHECK(Nearly(scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).Time, 0.0f));
 		CHECK(AnimationSystem::GetPalette(entity) != nullptr);

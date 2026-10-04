@@ -335,18 +335,6 @@ namespace World
 		MarkDirty(true);
 	}
 
-	uint32_t Material::GetFormatVersion() const
-	{
-		// v3:有资产身份的文件必须是 v3(v1/v2 都没有 `AssetId:` 键)。
-		if (m_Identity.IsValid())
-			return kMaterialFormatVersionWithIdentity;
-		// 只有"没有父级 + 全字段都写了"才回到老写法(与 M3 前的文件逐字节一致);
-		// 其它情况都是"覆盖字段 + Parent"的 v2。M4-S2:带 Shader/Params 的文件也必须是 v2。
-		return (m_ParentPath.empty() && m_Overrides.All() && !m_HasShaderOverride
-				&& m_ParamOverrides.empty())
-			? kMaterialFormatVersionLegacy
-			: kMaterialFormatVersionOverrides;
-	}
 
 	void Material::RecomputeParamWarnings()
 	{
@@ -586,10 +574,11 @@ namespace World
 				if (error) *error = result.Error;
 				return result;
 			}
-			if (version == 0 || version > kFormatVersion)
+			if (version != kFormatVersion)
 			{
 				result.Error = "不支持的材质格式版本 " + std::to_string(version)
-					+ "(本引擎支持 1.." + std::to_string(kFormatVersion) + ")";
+					+ "(本引擎只支持 " + std::to_string(kFormatVersion)
+					+ ";旧版本不再兼容,请重新导入或重建该材质)";
 				if (error) *error = result.Error;
 				return result;
 			}
@@ -604,17 +593,19 @@ namespace World
 				{
 					out.ParentPath = NormalizePath(root["Parent"].as<std::string>());
 				}
-				if (root["AssetId"])
+				// AssetId 是**必备**字段(2026-10-04 起不做旧格式兼容):
+				// 没有身份的材质无法参与"改名不断链",所以宁可拒绝也不静默降级。
+				if (!root["AssetId"])
 				{
-					const std::string identityText = root["AssetId"].as<std::string>();
-					AssetId identity;
-					if (!ParseAssetId(identityText, &identity))
-					{
-						result.Error = "AssetId 不是合法的十六进制身份: " + identityText;
-						if (error) *error = result.Error;
-						return result;
-					}
-					out.Identity = identity;
+					result.Error = "材质缺少 AssetId(资产稳定身份);请重新导入或在编辑器中重新保存该材质";
+					if (error) *error = result.Error;
+					return result;
+				}
+				if (!ParseAssetId(root["AssetId"].as<std::string>(), &out.Identity))
+				{
+					result.Error = "AssetId 不是合法的十六进制身份: " + root["AssetId"].as<std::string>();
+					if (error) *error = result.Error;
+					return result;
 				}
 				if (root["Shader"])
 				{
@@ -753,18 +744,6 @@ namespace World
 			return merged;
 		}
 
-		uint32_t DocumentFormatVersion(const MaterialDocument& document)
-		{
-			// v3:带资产身份的文件必须是 v3(v1/v2 都没有 `AssetId:` 键)。
-			if (document.Identity.IsValid())
-				return kMaterialFormatVersionMax;
-			// 老写法的唯一判据:没有父级 + 全部字段都写出 → 与 M3 前的文件逐字节一致。
-			// 只写部分字段的文件必须是 v2(否则"缺字段 = 引擎默认"会与"覆盖字段"混淆)。
-			// M4-S2:带 Shader / Params 的文件也只能是 v2(v1 没有这两个键)。
-			return (document.ParentPath.empty() && document.Overridden.All()
-					&& !document.HasShader && document.Params.empty())
-				? kMaterialFormatVersionLegacy : kMaterialFormatVersionOverrides;
-		}
 
 		MaterialLoadResult Parse(const std::string& text, MaterialDesc& out, std::string* error)
 		{
@@ -795,19 +774,15 @@ namespace World
 		std::string SerializeDocument(const MaterialDocument& document,
 			const std::vector<MaterialParamDecl>* paramDecls)
 		{
-			const uint32_t version = DocumentFormatVersion(document);
+			// 不变量:落盘的 .wmat 一定有合法身份(所有入口都在序列化前分配)。
+			// 开发期直接炸出来,避免静默产出一份"读不回来"的文件。
+			WLD_CORE_ASSERT(document.Identity.IsValid(),
+				"MaterialIO::SerializeDocument requires an assigned AssetId");
 			std::ostringstream out;
-			if (version == kMaterialFormatVersionLegacy || document.Identity.IsValid())
-			{
-				// 老写法保持 M3 前的头注释:写出字节与 M3 前完全一致。
-				// v3(带身份)也写这行注释 —— 老材质首次补身份时不会丢掉文件头说明;
-				// v2(覆盖字段 + Parent,无身份)保持无注释,字节不变。
-				out << "# WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。\n";
-			}
-			out << "FormatVersion: " << version << "\n";
-			// v3:资产稳定身份(仅在已分配时写;v1/v2 老文件因此逐字节不变)。
-			if (document.Identity.IsValid())
-				out << "AssetId: " << FormatAssetId(document.Identity) << "\n";
+			out << "# WorldEngine 材质资产。颜色为 sRGB 空间取值。\n";
+			out << "FormatVersion: " << kMaterialFormatVersion << "\n";
+			// 资产稳定身份:恒写。缺失(手写/外来文件)时写 0,由保存路径补齐后覆盖。
+			out << "AssetId: " << FormatAssetId(document.Identity) << "\n";
 			if (!document.ParentPath.empty())
 				out << "Parent: " << FormatLogicalPath(document.ParentPath) << "\n";
 			if (document.HasShader)
@@ -840,14 +815,13 @@ namespace World
 			return out.str();
 		}
 
-		std::string Serialize(const MaterialDesc& desc)
+		std::string Serialize(const MaterialDesc& desc, AssetId identity)
 		{
-			// 老口径:全字段 + (没有父级)→ v1,与 M3 前的 Serialize 逐字节一致。
-			// 导入器 / 新建模板 / 既有测试都走这里,行为不变。
+			// 由完整描述建资产:无父级 + 全字段覆盖(缺字段语义由 MergeDocument 与引擎默认对齐)。
 			MaterialDocument document;
+			document.Identity = identity;
 			document.Values = desc;
 			document.Overridden = MaterialFieldSet::Everything();
-			// M4-S2:带了 shader 的材质不能用 v1 写出(v1 没有 Shader 键,会静默丢引用)。
 			document.HasShader = !desc.ShaderPath.empty();
 			return SerializeDocument(document);
 		}

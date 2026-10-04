@@ -161,7 +161,7 @@ namespace World
 			if (skinIndex < 0 || static_cast<size_t>(skinIndex) >= model.Skins.size())
 				continue;   // 非蒙皮网格:SceneRenderer 按网格顶点布局回退静态路径(不产生调色板)
 
-			const Asset::WModelAnimation* clip = SelectClip(model, component.AnimationClip, StringPool::Get().PathOf(key));
+			const Asset::WModelAnimation* clip = SelectClip(model, StringPool::Get().NameOf(component.AnimationClip), StringPool::Get().PathOf(key));
 			static const Asset::WModelAnimation kNoAnimation;
 			const Asset::WModelAnimation& animation = clip ? *clip : kNoAnimation;
 			if (clip)

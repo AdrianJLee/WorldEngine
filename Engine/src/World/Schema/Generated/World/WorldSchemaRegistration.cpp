@@ -108,19 +108,19 @@ struct GeneratedAccess<World::TagComponent>
     static Value Get_Tag(const void* instance)
     {
         const World::TagComponent* self = static_cast<const World::TagComponent*>(instance);
-        return Value(self->Tag);
+        return Value(NameOps<std::remove_reference_t<decltype(self->Tag)>>::GetName(self->Tag));
     }
     static void Set_Tag(void* instance, const Value& value)
     {
         World::TagComponent* self = static_cast<World::TagComponent*>(instance);
-        self->Tag = std::get<std::string>(value);
+        NameOps<std::remove_reference_t<decltype(self->Tag)>>::SetName(self->Tag, std::get<std::string>(value));
     }
     static const FieldSchema& Field_Tag()
     {
         static const FieldSchema schema = {
             FieldId{ 0x864CFEC520BA41E6ull },
             "Tag",
-            Kind::String,
+            Kind::Name,
             &Get_Tag,
             &Set_Tag,
             nullptr,
@@ -129,7 +129,7 @@ struct GeneratedAccess<World::TagComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(std::string()),
+            Value(),
         };
         return schema;
     }
@@ -868,12 +868,12 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
     static Value Get_AnimationClip(const void* instance)
     {
         const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(self->AnimationClip);
+        return Value(NameOps<std::remove_reference_t<decltype(self->AnimationClip)>>::GetName(self->AnimationClip));
     }
     static void Set_AnimationClip(void* instance, const Value& value)
     {
         World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        self->AnimationClip = std::get<std::string>(value);
+        NameOps<std::remove_reference_t<decltype(self->AnimationClip)>>::SetName(self->AnimationClip, std::get<std::string>(value));
     }
     static Value Get_Playing(const void* instance)
     {
@@ -988,7 +988,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
         static const FieldSchema schema = {
             FieldId{ 0x534B414E494D434Cull },
             "AnimationClip",
-            Kind::String,
+            Kind::Name,
             &Get_AnimationClip,
             &Set_AnimationClip,
             nullptr,
@@ -997,7 +997,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Clip name inside the model; empty = play the first clip.", false, "", {  }, "", std::nullopt },
-            Value(std::string()),
+            Value(),
         };
         return schema;
     }

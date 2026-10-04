@@ -39,6 +39,12 @@ namespace World
 		"MeshRendererComponent must stay trivially copyable (no heap members)");
 	static_assert(sizeof(MeshRendererComponent) <= 64,
 		"MeshRendererComponent must fit one cache line");
-	static_assert(sizeof(SkinnedMeshRendererComponent) <= sizeof(std::string) + 64,
-		"SkinnedMeshRendererComponent must hold at most one owning string (AnimationClip) plus a 64B POD tail");
+	// T6b(2026-10-04):名字字段(NameId)也是驻留 POD ⇒ TagComponent 从此平凡可拷贝(4 字节)。
+	// 这是组件契约的最后一块:此前 Tag 的 std::string 让它无法参与 memcpy 级的复制/Prefab 实例化。
+	static_assert(sizeof(TagComponent) == 4, "TagComponent must be exactly one NameId (4 bytes)");
+	static_assert(std::is_trivially_copyable_v<TagComponent>, "TagComponent must stay trivially copyable");
+	static_assert(std::is_trivially_copyable_v<SkinnedMeshRendererComponent>,
+		"SkinnedMeshRendererComponent must stay trivially copyable (no heap members)");
+	static_assert(sizeof(SkinnedMeshRendererComponent) <= 64,
+		"SkinnedMeshRendererComponent must fit one cache line (two AssetRef + one NameId + scalars)");
 }

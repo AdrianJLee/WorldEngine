@@ -83,6 +83,9 @@ namespace World::Schema
 		UVec2, UVec3, UVec4,
 		Quat, Mat3, Mat4,
 		String,
+		// Name = 驻留名字标识(NameId,4B POD):边界仍是字符串,内存里是进程内驻留 id。
+		// 与 String 的区别只在**存储形态**(标识符 vs 缓冲区),在 Lua/面板/序列化边界与 String 同形。
+		Name,
 		Enum,
 		Asset,
 		Object,
@@ -322,6 +325,11 @@ namespace World::Schema
 	// 资产字段操作:以路径字符串作为边界值。每个资产类型提供一个特化。
 	template <typename AssetRef>
 	struct AssetOps;
+
+	// 名字字段操作:以字符串作为边界值,内存里是驻留 NameId(见 Core/StringPool.h)。
+	// 与 AssetOps 同形:字段类型换实现不需要改生成器。
+	template <typename NameRef>
+	struct NameOps;
 
 	// ---- CPPT-6:通用字段/结构读写(叶 / 枚举 / 资产 / 命名 struct / 容器,递归同构)----
 	// SchemaWriter/SchemaReader 与 schema-compiler 生成的容器访问器共用这一份实现,

@@ -421,7 +421,7 @@ void EditorLayer::OnAttach(){
 			const auto& registry = static_cast<const Scene*>(m_ActiveScene.get())->GetRegistry();
 			for (const entt::entity handle : registry.view<TagComponent>())
 			{
-				const std::string& tag = registry.get<TagComponent>(handle).Tag;
+				const std::string& tag = StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag);
 				if (tag == "Sprite A")
 					parent = Entity(m_ActiveScene.get(), handle);
 				else if (tag == "Sprite B")

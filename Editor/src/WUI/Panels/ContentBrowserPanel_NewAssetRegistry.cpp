@@ -167,7 +167,7 @@ bool ContentBrowserPanel::CreateMaterialAsset(const std::filesystem::path& dir, 
 		MaterialDesc desc;
 		desc.Name = target.stem().string();
 		std::string localError;
-		if (!MaterialIO::WriteFileText(target.generic_string(), MaterialIO::Serialize(desc), &localError))
+		if (!MaterialIO::WriteFileText(target.generic_string(), MaterialIO::Serialize(desc, GenerateAssetId()), &localError))
 		{
 			WLD_CORE_ERROR("Could not create material: {0}", localError);
 			if (error) *error = localError;

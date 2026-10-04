@@ -1,5 +1,6 @@
 // Pure ECS M2: 现代 Query DSL 与系统管线统一测试
 #include "World/Core/WorldContext.h"
+#include "World/Core/StringPool.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Entity.h"
@@ -155,7 +156,7 @@ int main()
 			q.Each([&visitedCount, e2, e3](entt::entity entity, TransformComponent& transform, TagComponent& tag) {
 				(void)transform;
 				CHECK(entity == e2 || entity == e3);
-				CHECK(tag.Tag == "Entity2" || tag.Tag == "Entity3");
+				CHECK(StringPool::Get().NameOf(tag.Tag) == "Entity2" || StringPool::Get().NameOf(tag.Tag) == "Entity3");
 				++visitedCount;
 			});
 			CHECK(visitedCount == 2);

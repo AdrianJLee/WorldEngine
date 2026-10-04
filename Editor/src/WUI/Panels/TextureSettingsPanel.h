@@ -342,7 +342,7 @@ namespace World
 		void TouchPreviewRevision();
 		void MarkSettingsDirty(const char* field);
 		// Apply / Reimport 共用的唯一落盘 + 重烘路径(force = 忽略"没有变化"的短路)。
-		void SaveAndBake(bool force);
+		void SaveAndBake(bool force, PanelHost& host);
 		void ResetAssetToDefaults();
 		// 状态行文本。
 		std::string ArtifactSummary() const;

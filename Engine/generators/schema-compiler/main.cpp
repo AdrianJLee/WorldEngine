@@ -501,7 +501,7 @@ namespace
 		static const std::set<std::string> kinds = {
 			"Bool", "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64",
 			"Float", "Double", "Vec2", "Vec3", "Vec4", "IVec2", "IVec3", "IVec4",
-			"UVec2", "UVec3", "UVec4", "Quat", "Mat3", "Mat4", "String", "Enum", "Asset", "Object"
+			"UVec2", "UVec3", "UVec4", "Quat", "Mat3", "Mat4", "String", "Name", "Enum", "Asset", "Object"
 		};
 		return kinds;
 	}
@@ -531,6 +531,7 @@ namespace
 			{ "UVec2", "glm::uvec2" }, { "UVec3", "glm::uvec3" }, { "UVec4", "glm::uvec4" },
 			{ "Quat", "glm::quat" }, { "Mat3", "glm::mat3" }, { "Mat4", "glm::mat4" },
 			{ "String", "std::string" },
+			{ "Name", "World::NameId" },
 		};
 		return types.at(kind);
 	}
@@ -1047,6 +1048,16 @@ namespace
 			out << "    static const TypeSchema* GetNested_" << field.Name << "()\n";
 			out << "    {\n        return &WeSchemaOf_" << ShortName(nested) << "();\n    }\n";
 			}
+			else if (field.Kind == "Name")
+			{
+				// 名字字段:边界字符串 ↔ 驻留 NameId(NameOps)。与 Asset 同形,名字不是身份 ⇒ 无身份通道。
+				out << "    static Value Get_" << field.Name << "(const void* instance)\n";
+				out << "    {\n        const " << qualified << "* self = static_cast<const " << qualified << "*>(instance);\n";
+				out << "        return Value(NameOps<std::remove_reference_t<decltype(self->" << field.Name << ")>>::GetName(self->" << field.Name << "));\n    }\n";
+				out << "    static void Set_" << field.Name << "(void* instance, const Value& value)\n";
+				out << "    {\n        " << qualified << "* self = static_cast<" << qualified << "*>(instance);\n";
+				out << "        NameOps<std::remove_reference_t<decltype(self->" << field.Name << ")>>::SetName(self->" << field.Name << ", std::get<std::string>(value));\n    }\n";
+			}
 			else if (field.Kind == "Asset")
 			{
 				out << "    static Value Get_" << field.Name << "(const void* instance)\n";
@@ -1117,6 +1128,13 @@ namespace
 				out << "            nullptr,\n            nullptr,\n            nullptr,\n";
 				out << "            &GetEnum_" << field.Name << ",\n            nullptr,\n";
 			}
+			else if (field.Kind == "Name")
+			{
+				out << "            &Get_" << field.Name << ",\n";
+				out << "            &Set_" << field.Name << ",\n";
+				out << "            nullptr,\n            nullptr,\n            nullptr,\n            nullptr,\n";
+				out << "            nullptr,\n";
+			}
 			else if (field.Kind == "Asset")
 			{
 				const std::string assetName = options.Of.value_or("");
@@ -1142,10 +1160,10 @@ namespace
 					? "Value(static_cast<" + signedType + ">(" + options.DefaultExpr.value() + "))"
 					: "Value(static_cast<" + signedType + ">(0))";
 			}
-			else if (field.Kind == "Object" || field.Kind == "Asset")
+			else if (field.Kind == "Object" || field.Kind == "Asset" || field.Kind == "Name")
 			{
 				if (options.DefaultExpr.has_value())
-					Fail(decl.File, field.Pos, "Default is not supported on Object/Asset fields");
+					Fail(decl.File, field.Pos, "Default is not supported on Object/Asset/Name fields");
 				def = "Value()";
 			}
 			else
@@ -1513,6 +1531,8 @@ int main(int argc, char** argv)
 				{
 					if (!options.Of.has_value())
 						Fail(decl.File, field.Pos, "field '" + field.Name + "' of kind " + field.Kind + " requires Of(...)");
+					if (field.Kind == "Name")
+						Fail(decl.File, field.Pos, "field '" + field.Name + "' of kind Name cannot be a container element/key (no container field uses it)");
 				}
 				else if (options.Of.has_value())
 				{

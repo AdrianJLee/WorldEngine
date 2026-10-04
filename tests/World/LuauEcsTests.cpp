@@ -1,5 +1,6 @@
 // Pure ECS M3: Luau 纯 ECS 绑定测试 (ecs / world 全局表、Query DSL、AddSystem、EntityCount)
 #include "wldpch.h"
+#include "World/Core/StringPool.h"
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Components.h"

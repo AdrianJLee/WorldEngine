@@ -22,10 +22,6 @@ namespace World
 	namespace
 	{
 
-		bool IsLeafKind(Schema::Kind kind)
-		{
-			return kind != Schema::Kind::Object && kind != Schema::Kind::Asset && kind != Schema::Kind::None;
-		}
 
 		// P4-U13b:存档里的实体身份一律是 UUIDComponent 的 UUID,不是 entt 句柄
 		// (句柄带注册表状态,跨会话无意义)。句柄无效/没有 UUIDComponent → false。
@@ -311,11 +307,12 @@ namespace World
 		}
 
 		YAML::Node data = YAML::Load(yamlData);
-		const int formatVersion = data["FormatVersion"] ? data["FormatVersion"].as<int>() : 1;
-		if (formatVersion < 1 || formatVersion > 2)
+		// 单一版本(2026-10-04 起不做旧格式兼容):缺失或不为 2 一律拒绝,不猜、不迁移。
+		const int formatVersion = data["FormatVersion"] ? data["FormatVersion"].as<int>() : 0;
+		if (formatVersion != 2)
 		{
-			WLD_CORE_ERROR("Unsupported scene format version '{0}' in '{1}'", formatVersion, filepath);
-			m_LastError = "Unsupported scene format version in '" + filepath + "'";
+			WLD_CORE_ERROR("Unsupported scene format version '{0}' in '{1}' (expected 2)", formatVersion, filepath);
+			m_LastError = "Unsupported scene format version in '" + filepath + "' (expected 2)";
 			return false;
 		}
 		if (!data["Scene"])

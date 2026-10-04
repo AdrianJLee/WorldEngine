@@ -972,7 +972,7 @@ std::string EditorLayer::CameraPreviewLabel() const{
 			return {};   // 空串 = 当前没有相机预览(面板据此隐藏小窗)
 		if (cameraEntity.HasComponent<TagComponent>())
 		{
-			const std::string& tag = cameraEntity.GetComponent<TagComponent>().Tag;
+			const std::string& tag = StringPool::Get().NameOf(cameraEntity.GetComponent<TagComponent>().Tag);
 			if (!tag.empty())
 				return tag;
 		}

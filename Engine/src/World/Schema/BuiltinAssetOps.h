@@ -43,6 +43,22 @@ namespace World::Schema
 		}
 	};
 
+	// 名字字段:边界(序列化/面板/Luau)是字符串,内存里是 4B 驻留 NameId。
+	// 名字**不是身份**(同名不要求唯一),所以没有 AssetRef 那样的身份通道。
+	template <>
+	struct NameOps<World::NameId>
+	{
+		static std::string GetName(World::NameId id)
+		{
+			return std::string(World::StringPool::Get().NameOf(id));
+		}
+
+		static void SetName(World::NameId& id, const std::string& name)
+		{
+			id = name.empty() ? World::NameId() : World::StringPool::Get().InternName(name);
+		}
+	};
+
 	template <>
 	struct AssetOps<World::PathId>
 	{

@@ -29,7 +29,16 @@ namespace
 	}
 #define CHECK(expression) Check(static_cast<bool>(expression), #expression, __LINE__)
 
-	const char* kSample = R"(FormatVersion: 1
+	using World::AssetId;
+	using World::FormatAssetId;
+
+	// .wmat 只有一个格式版本(3)且 AssetId 是必备字段(2026-10-04 起不做旧格式兼容)。
+	// 测试统一用这个固定身份构造合法文本,保证可预测、可逐字节比较。
+	const AssetId kWmatId { 0x000000000000A11ull };
+	std::string WmatHeader() { return "FormatVersion: 3\nAssetId: " + FormatAssetId(kWmatId) + "\n"; }
+
+	const char* kSample = R"(FormatVersion: 3
+AssetId: 0x0000000000000A11
 Name: "Steel"
 BaseColor: [0.8, 0.7, 0.6, 1.0]
 Metallic: 1.0
@@ -80,10 +89,20 @@ int main()
 			CHECK(!result.Error.empty());
 		}
 
+		// 2b. 旧格式不再兼容:版本 1/2 与"缺 AssetId"都必须被拒绝(不猜、不迁移)。
+		{
+			MaterialDesc desc;
+			std::string error;
+			CHECK(!MaterialIO::Parse("FormatVersion: 1\nName: \"x\"\n", desc, &error).Success);
+			CHECK(!MaterialIO::Parse("FormatVersion: 2\nName: \"x\"\n", desc, &error).Success);
+			CHECK(!MaterialIO::Parse("FormatVersion: 3\nName: \"x\"\n", desc, &error).Success);   // 缺 AssetId
+			CHECK(!error.empty());
+		}
+
 		// 3. 缺省值:最小文件也能得到确定默认值。
 		{
 			MaterialDesc desc;
-			CHECK(MaterialIO::Parse("FormatVersion: 1\n", desc, nullptr).Success);
+			CHECK(MaterialIO::Parse(WmatHeader() + "", desc, nullptr).Success);
 			CHECK(desc.BaseColor == glm::vec4(1.0f));
 			CHECK(desc.Roughness == 0.5f);
 			CHECK(desc.BlendMode == MaterialBlendMode::Opaque);
@@ -95,7 +114,7 @@ int main()
 			MaterialDesc desc;
 			std::string error;
 			const auto result = MaterialIO::Parse(
-				"FormatVersion: 1\nMetallic: 5.0\nRoughness: 0.0\nBlendMode: Weird\n", desc, &error);
+				WmatHeader() + "Metallic: 5.0\nRoughness: 0.0\nBlendMode: Weird\n", desc, &error);
 			CHECK(result.Success);
 			CHECK(desc.Metallic == 1.0f);
 			CHECK(desc.Roughness > 0.0f);
@@ -107,7 +126,7 @@ int main()
 		{
 			MaterialDesc first;
 			CHECK(MaterialIO::Parse(kSample, first, nullptr).Success);
-			const std::string text = MaterialIO::Serialize(first);
+			const std::string text = MaterialIO::Serialize(first, kWmatId);
 			MaterialDesc second;
 			CHECK(MaterialIO::Parse(text, second, nullptr).Success);
 			CHECK(first == second);
@@ -119,7 +138,7 @@ int main()
 			desc.Name = "Quote \"Test\"";
 			desc.AlbedoTexture = "textures/a b.png";
 			MaterialDesc roundTrip;
-			CHECK(MaterialIO::Parse(MaterialIO::Serialize(desc), roundTrip, nullptr).Success);
+			CHECK(MaterialIO::Parse(MaterialIO::Serialize(desc, kWmatId), roundTrip, nullptr).Success);
 			CHECK(roundTrip.Name == desc.Name);
 			CHECK(roundTrip.AlbedoTexture == desc.AlbedoTexture);
 		}
@@ -179,7 +198,7 @@ int main()
 					MaterialDesc desc;
 					desc.Name = "Steel2";
 					return desc;
-				}());
+				}(), kWmatId);
 			}
 			CHECK(library.Reload(relative, &error));
 			CHECK(loaded->GetDesc().Name == "Steel2");
@@ -295,7 +314,7 @@ int main()
 			desc.Roughness = 0.1f;
 			{
 				std::ofstream file(full, std::ios::binary | std::ios::trunc);
-				file << MaterialIO::Serialize(desc);
+				file << MaterialIO::Serialize(desc, kWmatId);
 			}
 
 			MaterialLibrary& library = MaterialLibrary::Get();
@@ -314,7 +333,7 @@ int main()
 			const auto originalTime = std::filesystem::last_write_time(full);
 			{
 				std::ofstream file(full, std::ios::binary | std::ios::trunc);
-				file << MaterialIO::Serialize(desc);
+				file << MaterialIO::Serialize(desc, kWmatId);
 			}
 			std::filesystem::last_write_time(full, originalTime, ec);
 			CHECK(!ec);
@@ -361,13 +380,13 @@ int main()
 			dirtyDesc.Name = "DirtyBase";
 			{
 				std::ofstream file(dirtyFull, std::ios::binary | std::ios::trunc);
-				file << MaterialIO::Serialize(dirtyDesc);
+				file << MaterialIO::Serialize(dirtyDesc, kWmatId);
 			}
 			MaterialDesc brokenDesc;
 			brokenDesc.Name = "BrokenBase";
 			{
 				std::ofstream file(brokenFull, std::ios::binary | std::ios::trunc);
-				file << MaterialIO::Serialize(brokenDesc);
+				file << MaterialIO::Serialize(brokenDesc, kWmatId);
 			}
 
 			MaterialLibrary& library = MaterialLibrary::Get();
@@ -384,11 +403,11 @@ int main()
 			brokenDesc.Name = "DiskBroken";
 			{
 				std::ofstream file(dirtyFull, std::ios::binary | std::ios::trunc);
-				file << MaterialIO::Serialize(dirtyDesc);
+				file << MaterialIO::Serialize(dirtyDesc, kWmatId);
 			}
 			{
 				std::ofstream file(brokenFull, std::ios::binary | std::ios::trunc);
-				file << MaterialIO::Serialize(brokenDesc);
+				file << MaterialIO::Serialize(brokenDesc, kWmatId);
 			}
 			dirty->SetRoughness(0.33f);
 			dirty->MarkDirty(true);
@@ -438,7 +457,7 @@ int main()
 			desc.Name = "MtimeProbe";
 			{
 				std::ofstream file(full, std::ios::binary | std::ios::trunc);
-				file << MaterialIO::Serialize(desc);
+				file << MaterialIO::Serialize(desc, kWmatId);
 			}
 
 			MaterialLibrary& library = MaterialLibrary::Get();
@@ -450,7 +469,7 @@ int main()
 			desc.Roughness = 0.42f;
 			{
 				std::ofstream file(full, std::ios::binary | std::ios::trunc);
-				file << MaterialIO::Serialize(desc);
+				file << MaterialIO::Serialize(desc, kWmatId);
 			}
 			CHECK(library.IsFileNewer(*material));    // 修复后:磁盘时间戳真的比 m_FileTime 新
 
@@ -555,7 +574,7 @@ int main()
 			// 旧格式写出的 6 位小数文本回读后差 ~4e-7:容差内 → 等价(保存不再被判失败)。
 			MaterialDesc truncated;
 			CHECK(MaterialIO::Parse(
-				"FormatVersion: 1\nName: \"Tolerance\"\nBaseColor: [0.333333, 0.25, 0.5, 1.0]\n"
+				WmatHeader() + "Name: \"Tolerance\"\nBaseColor: [0.333333, 0.25, 0.5, 1.0]\n"
 				"Metallic: 0.5\nRoughness: 0.499716\nEmissive: [0.1, 0.2, 0.3]\n"
 				"AlbedoTexture: \"textures/Icon.png\"\nNormalTexture: \"\"\n"
 				"BlendMode: Transparent\nDoubleSided: true\n",
@@ -607,7 +626,7 @@ int main()
 			good.Name = "GoodBase";
 			{
 				std::ofstream file(full, std::ios::binary | std::ios::trunc);
-				file << MaterialIO::Serialize(good);
+				file << MaterialIO::Serialize(good, kWmatId);
 			}
 			MaterialLibrary& library = MaterialLibrary::Get();
 			Ref<Material> material = library.Load(relative, nullptr);
@@ -618,14 +637,14 @@ int main()
 			MaterialDesc parsed;
 			CHECK(!MaterialIO::Parse("this is not a valid material\n", parsed, nullptr).Success);
 			// ② 字段类型写坏也要失败。
-			CHECK(!MaterialIO::Parse("FormatVersion: 1\nMetallic: \"high\"\n", parsed, nullptr).Success);
+			CHECK(!MaterialIO::Parse(WmatHeader() + "Metallic: \"high\"\n", parsed, nullptr).Success);
 			// ③ 不支持的版本要失败(不猜、不降级)。
 			CHECK(!MaterialIO::Parse("FormatVersion: 99\nName: \"x\"\n", parsed, nullptr).Success);
 
 			// ④ 库侧:坏文件 Reload 失败且不覆盖内存态(旧 desc 保留、仍可继续编辑)。
 			{
 				std::ofstream file(full, std::ios::binary | std::ios::trunc);
-				file << "FormatVersion: 1\nMetallic: \"high\"\n";
+				file << WmatHeader() + "Metallic: \"high\"\n";
 			}
 			std::string error;
 			CHECK(!library.Reload(relative, &error));
@@ -680,12 +699,12 @@ int main()
 			// 17. 解析优先级:本文件覆盖 → 父级(递归)→ 引擎内置默认(缺省 Parent 即默认)。
 			{
 				writeText("m3_grandparent.wmat",
-					"FormatVersion: 2\nName: \"Grand\"\nBaseColor: [0.25, 0.5, 0.75, 1]\nRoughness: 0.75\n");
+					WmatHeader() + "Name: \"Grand\"\nBaseColor: [0.25, 0.5, 0.75, 1]\nRoughness: 0.75\n");
 				writeText("m3_parent.wmat",
-					"FormatVersion: 2\nParent: material_m3_tmp/m3_grandparent.wmat\n"
+					WmatHeader() + "Parent: material_m3_tmp/m3_grandparent.wmat\n"
 					"Name: \"Parent\"\nMetallic: 0.2\n");
 				writeText("m3_child.wmat",
-					"FormatVersion: 2\nParent: material_m3_tmp/m3_parent.wmat\n"
+					WmatHeader() + "Parent: material_m3_tmp/m3_parent.wmat\n"
 					"Name: \"Child\"\nMetallic: 0.9\nAlbedoTexture: \"textures/Icon.png\"\n");
 
 				Ref<Material> child = library.Load(relative("m3_child.wmat"), &error);
@@ -716,10 +735,10 @@ int main()
 				CHECK(!child->HasOverride(MaterialField::Roughness));
 				CHECK(!child->HasOverride(MaterialField::BaseColor));
 				CHECK(child->OverrideCount() == 3);
-				CHECK(child->GetFormatVersion() == 2);
+				CHECK(child->Identity() == kWmatId);   // 版本只有一个:3
 
 				// 缺省 Parent = 引擎内置默认(用户确认的语义)。
-				writeText("m3_rootless.wmat", "FormatVersion: 2\nMetallic: 0.4\n");
+				writeText("m3_rootless.wmat", WmatHeader() + "Metallic: 0.4\n");
 				Ref<Material> rootless = library.Load(relative("m3_rootless.wmat"), nullptr);
 				CHECK(rootless != nullptr);
 				CHECK(rootless->ParentPath().empty());
@@ -735,7 +754,7 @@ int main()
 
 			// 18. 写盘只写覆盖字段 + Parent(逐字节);Save As 变体 = Parent 指向当前材质。
 			{
-				writeText("m3_writeparent.wmat", "FormatVersion: 2\nName: \"WriteParent\"\nRoughness: 0.6\n");
+				writeText("m3_writeparent.wmat", WmatHeader() + "Name: \"WriteParent\"\nRoughness: 0.6\n");
 
 				Ref<Material> instance = library.CreateInstance(relative("m3_writeparent.wmat"),
 					"WriteChild", &error);
@@ -787,7 +806,7 @@ int main()
 				library.Shutdown();
 			}
 
-			// 19. 老 .wmat(v1 全字段)逐字节不变:Load → Save 的磁盘字节 == M3 前的写出。
+			// 19. 全字段材质(无父级、全字段覆盖)的写出与往返。
 			{
 				MaterialDesc legacy;
 				legacy.Name = "Legacy";
@@ -799,19 +818,19 @@ int main()
 				legacy.NormalTexture = "textures/quadrants.png";
 				legacy.BlendMode = MaterialBlendMode::Transparent;
 				legacy.DoubleSided = true;
-				const std::string legacyText = MaterialIO::Serialize(legacy);
+				const std::string legacyText = MaterialIO::Serialize(legacy, kWmatId);
 				CHECK(legacyText.rfind("# WorldEngine 材质资产", 0) == 0);
-				CHECK(legacyText.find("FormatVersion: 1\n") != std::string::npos);
+				CHECK(legacyText.find(WmatHeader() + "") != std::string::npos);
 				CHECK(legacyText.find("Parent:") == std::string::npos);
 				CHECK(legacyText.find("BaseColor: [0.2, 0.4, 0.6, 1]\n") != std::string::npos);
 
-				// 老文件解析出来 = 全部字段都是覆盖(所以合并结果与 M3 前逐字段一致)。
+				// 解析回来 = 全部字段都是覆盖(所以"缺字段"不会悄悄退回引擎默认)。
 				MaterialDocument document;
 				CHECK(MaterialIO::ParseDocument(legacyText, document, nullptr).Success);
 				CHECK(document.Overridden.All());
 				CHECK(document.Overridden.Count() == static_cast<int>(kMaterialFieldCount));
 				CHECK(document.ParentPath.empty());
-				CHECK(MaterialIO::DocumentFormatVersion(document) == 1);
+				CHECK(document.Identity == kWmatId);
 				CHECK(MaterialIO::SerializeDocument(document) == legacyText);   // 逐字节往返
 				CHECK(MaterialIO::MergeDocument(document, nullptr) == legacy);
 
@@ -820,18 +839,18 @@ int main()
 				CHECK(loaded != nullptr);
 				CHECK(error.empty());
 				CHECK(loaded->GetDesc() == legacy);
-				CHECK(loaded->GetFormatVersion() == 1);   // 文件里没有身份 ⇒ 仍是 v1 全字段形态
+				CHECK(loaded->Identity() == kWmatId);   // 身份随文件走,不因加载/保存而改变
 				CHECK(loaded->OverrideCount() == static_cast<int>(kMaterialFieldCount));
 				CHECK(loaded->ParentPath().empty());
 				CHECK(loaded->ResolvedParent() == nullptr);
 				CHECK(library.Save(loaded, relative("m3_legacy.wmat"), &error));
 				CHECK(error.empty());
-				// v3(2026-10-04):首次保存补齐资产稳定身份 ⇒ 文件升到 v3 并多一行 AssetId;
-				// 全字段 + 无 Parent 的形态与 v1 逐行一致(只多了版本号与身份两处)。
+				// 原样保存:身份保持、字节逐行不变(全字段 + 无 Parent)。
 				const std::string resaved = readText("m3_legacy.wmat");
 				CHECK(resaved.rfind("# WorldEngine 材质资产", 0) == 0);
 				CHECK(resaved.find("FormatVersion: 3\n") != std::string::npos);
-				CHECK(resaved.find("\nAssetId: 0x") != std::string::npos);
+				CHECK(resaved.find("AssetId: " + FormatAssetId(kWmatId) + "\n") != std::string::npos);
+				CHECK(resaved == legacyText);
 				CHECK(resaved.find("BaseColor: [0.2, 0.4, 0.6, 1]\n") != std::string::npos);
 				CHECK(resaved.find("Parent:") == std::string::npos);
 				library.Shutdown();
@@ -840,7 +859,7 @@ int main()
 			// 20. 父级缺失/坏 → 退化成引擎默认 + 可读警告,子材质仍可用。
 			{
 				writeText("m3_orphan.wmat",
-					"FormatVersion: 2\nParent: material_m3_tmp/__missing_parent__.wmat\n"
+					WmatHeader() + "Parent: material_m3_tmp/__missing_parent__.wmat\n"
 					"Name: \"Orphan\"\nMetallic: 0.4\n");
 				Ref<Material> orphan = library.Load(relative("m3_orphan.wmat"), &error);
 				CHECK(orphan != nullptr);
@@ -857,7 +876,7 @@ int main()
 				// 父级存在但解析不了:同口径(退化 + 警告,不失败)。
 				writeText("m3_broken_parent.wmat", "this is not a material\n");
 				writeText("m3_broken_child.wmat",
-					"FormatVersion: 2\nParent: material_m3_tmp/m3_broken_parent.wmat\nMetallic: 0.3\n");
+					WmatHeader() + "Parent: material_m3_tmp/m3_broken_parent.wmat\nMetallic: 0.3\n");
 				Ref<Material> brokenChild = library.Load(relative("m3_broken_child.wmat"), &error);
 				CHECK(brokenChild != nullptr);
 				CHECK(!error.empty());
@@ -869,14 +888,14 @@ int main()
 
 			// 21. 父级循环引用 → 拒绝 + 可读链路(含环上每个路径);深度上限 8 级。
 			{
-				writeText("m3_cycle_a.wmat", "FormatVersion: 2\nParent: material_m3_tmp/m3_cycle_b.wmat\n");
-				writeText("m3_cycle_b.wmat", "FormatVersion: 2\nParent: material_m3_tmp/m3_cycle_a.wmat\n");
+				writeText("m3_cycle_a.wmat", WmatHeader() + "Parent: material_m3_tmp/m3_cycle_b.wmat\n");
+				writeText("m3_cycle_b.wmat", WmatHeader() + "Parent: material_m3_tmp/m3_cycle_a.wmat\n");
 				CHECK(library.Load(relative("m3_cycle_a.wmat"), &error) == nullptr);
 				CHECK(error.find("循环") != std::string::npos);
 				CHECK(error.find("m3_cycle_a.wmat") != std::string::npos);
 				CHECK(error.find("m3_cycle_b.wmat") != std::string::npos);
 				// 自引用同样是循环(不会栈溢出 / 死循环)。
-				writeText("m3_selfcycle.wmat", "FormatVersion: 2\nParent: material_m3_tmp/m3_selfcycle.wmat\n");
+				writeText("m3_selfcycle.wmat", WmatHeader() + "Parent: material_m3_tmp/m3_selfcycle.wmat\n");
 				CHECK(library.Load(relative("m3_selfcycle.wmat"), &error) == nullptr);
 				CHECK(error.find("循环") != std::string::npos);
 				CHECK(error.find("m3_selfcycle.wmat") != std::string::npos);
@@ -884,7 +903,7 @@ int main()
 				// 深度:8 级父级允许,9 级拒绝(可读错误,不崩)。
 				const auto writeChain = [&writeText](int level)
 				{
-					std::string text = "FormatVersion: 2\n";
+					std::string text = WmatHeader() + "";
 					if (level > 0)
 						text += "Parent: material_m3_tmp/m3_depth_" + std::to_string(level - 1) + ".wmat\n";
 					text += "Metallic: 0.5\n";
@@ -906,7 +925,7 @@ int main()
 			// 22. RevertField:回父级值 + 覆盖位消失(文件里那一行也消失,逐字节比对)。
 			{
 				writeText("m3_revert_parent.wmat",
-					"FormatVersion: 2\nName: \"RevertParent\"\nMetallic: 0.2\nRoughness: 0.8\n");
+					WmatHeader() + "Name: \"RevertParent\"\nMetallic: 0.2\nRoughness: 0.8\n");
 				Ref<Material> child = library.CreateInstance(relative("m3_revert_parent.wmat"),
 					"RevertChild", &error);
 				CHECK(child != nullptr);
@@ -947,10 +966,10 @@ int main()
 			// 23. 指纹:子材质 = 本文件内容 ⊕ 解析后父级链(父改 → 子失效;子文件一字不动)。
 			{
 				const std::string parentOriginal =
-					"FormatVersion: 2\nName: \"FpParent\"\nMetallic: 0.1\nRoughness: 0.5\n";
+					WmatHeader() + "Name: \"FpParent\"\nMetallic: 0.1\nRoughness: 0.5\n";
 				writeText("m3_fp_parent.wmat", parentOriginal);
 				writeText("m3_fp_child.wmat",
-					"FormatVersion: 2\nParent: material_m3_tmp/m3_fp_parent.wmat\nName: \"FpChild\"\n");
+					WmatHeader() + "Parent: material_m3_tmp/m3_fp_parent.wmat\nName: \"FpChild\"\n");
 
 				const AssetFingerprint childBefore = FingerprintAsset(relative("m3_fp_child.wmat"), &error);
 				CHECK(childBefore.Exists);
@@ -960,7 +979,7 @@ int main()
 				const AssetFingerprint parentBefore = FingerprintAsset(relative("m3_fp_parent.wmat"), nullptr);
 
 				writeText("m3_fp_parent.wmat",
-					"FormatVersion: 2\nName: \"FpParent\"\nMetallic: 0.65\nRoughness: 0.5\n");
+					WmatHeader() + "Name: \"FpParent\"\nMetallic: 0.65\nRoughness: 0.5\n");
 				const AssetFingerprint childAfter = FingerprintAsset(relative("m3_fp_child.wmat"), &error);
 				CHECK(childAfter.Exists);
 				CHECK(childAfter.Value != childBefore.Value);
@@ -979,9 +998,9 @@ int main()
 			// 24. 父级改动经热重载链传播:子材质原地更新(同一性保持、Revision 前进);
 			//     dirty 子材质只报告、绝不覆盖未保存修改。
 			{
-				writeText("m3_hot_parent.wmat", "FormatVersion: 2\nName: \"HotParent\"\nRoughness: 0.5\n");
+				writeText("m3_hot_parent.wmat", WmatHeader() + "Name: \"HotParent\"\nRoughness: 0.5\n");
 				writeText("m3_hot_child.wmat",
-					"FormatVersion: 2\nParent: material_m3_tmp/m3_hot_parent.wmat\nName: \"HotChild\"\n");
+					WmatHeader() + "Parent: material_m3_tmp/m3_hot_parent.wmat\nName: \"HotChild\"\n");
 				library.Shutdown();
 				library.PollAssetChanges(0.0, AssetHotReloadReport {});   // 清掉上一批的监听集合
 				Ref<Material> child = library.Load(relative("m3_hot_child.wmat"), nullptr);
@@ -992,7 +1011,7 @@ int main()
 				const uint32_t childRevision = child->GetRevision();
 				library.PollAssetChanges(0.0, AssetHotReloadReport {});   // 建立基线(首次登记不报告)
 
-				writeText("m3_hot_parent.wmat", "FormatVersion: 2\nName: \"HotParent\"\nRoughness: 0.9\n");
+				writeText("m3_hot_parent.wmat", WmatHeader() + "Name: \"HotParent\"\nRoughness: 0.9\n");
 				AssetHotReloadReport report;
 				library.PollAssetChanges(0.05, report);
 				CHECK(report.ReloadedMaterials.empty());                  // 0.05s < debounce
@@ -1010,7 +1029,7 @@ int main()
 				child->MarkDirty(true);
 				const std::string inMemoryName = child->GetDesc().Name;
 				library.PollAssetChanges(0.0, AssetHotReloadReport {});
-				writeText("m3_hot_parent.wmat", "FormatVersion: 2\nName: \"HotParent\"\nRoughness: 0.15\n");
+				writeText("m3_hot_parent.wmat", WmatHeader() + "Name: \"HotParent\"\nRoughness: 0.15\n");
 				library.PollAssetChanges(0.05, AssetHotReloadReport {});
 				report = AssetHotReloadReport {};
 				library.PollAssetChanges(0.5, report);
@@ -1471,7 +1490,7 @@ int main()
 					"    return surface;\n"
 					"}\n");
 				writeText("mat_base.wmat",
-					"FormatVersion: 2\n"
+					WmatHeader() + ""
 					"Shader: material_m4s2_tmp/glass.slang\n"
 					"Name: \"Glass\"\n"
 					"Params:\n"
@@ -1509,7 +1528,7 @@ int main()
 
 				// 未声明参数:载入不算失败,给可读警告,值保留在文件里。
 				writeText("mat_undeclared.wmat",
-					"FormatVersion: 2\n"
+					WmatHeader() + ""
 					"Shader: material_m4s2_tmp/glass.slang\n"
 					"Params:\n"
 					"  Nope: 1\n");
@@ -1526,7 +1545,7 @@ int main()
 
 				// 值类型不符:也不失败,警告里带原因,写回时原样保留。
 				writeText("mat_badvalue.wmat",
-					"FormatVersion: 2\n"
+					WmatHeader() + ""
 					"Shader: material_m4s2_tmp/glass.slang\n"
 					"Params:\n"
 					"  Roughness: 0.5, 0.5\n");
@@ -1540,7 +1559,7 @@ int main()
 
 				// shader 读不到:材质仍可用,警告指出 shader,参数默认值不可用。
 				writeText("mat_missing_shader.wmat",
-					"FormatVersion: 2\n"
+					WmatHeader() + ""
 					"Shader: material_m4s2_tmp/__missing__.slang\n"
 					"Params:\n"
 					"  Roughness: 0.3\n");
@@ -1554,7 +1573,7 @@ int main()
 				// 注解坏的 shader:同样只给警告,不拖垮材质。
 				writeText("broken.slang", "//! param Float3 X = 1\n");
 				writeText("mat_broken_shader.wmat",
-					"FormatVersion: 2\n"
+					WmatHeader() + ""
 					"Shader: material_m4s2_tmp/broken.slang\n");
 				std::string brokenWarning;
 				Ref<Material> broken = library.Load(relative("mat_broken_shader.wmat"), &brokenWarning);
@@ -1566,7 +1585,7 @@ int main()
 				// `Shader: *.hlsl` 引用**没有**任何兼容/迁移提示,只剩通用的
 				// "读不到那份源"警告(参数表空,覆盖值保留)。新写路径只有 `.slang`。
 				writeText("mat_hlslext_shader.wmat",
-					"FormatVersion: 2\n"
+					WmatHeader() + ""
 					"Shader: material_m4s2_tmp/hlslext_glass.hlsl\n"
 					"Params:\n"
 					"  Roughness: 0.1\n");
@@ -1590,13 +1609,13 @@ int main()
 
 				// 父级继承:Shader 与注解表跟随父级,参数生效值 = 本文件 > 父级 > shader 默认。
 				writeText("mat_parent.wmat",
-					"FormatVersion: 2\n"
+					WmatHeader() + ""
 					"Shader: material_m4s2_tmp/glass.slang\n"
 					"Name: \"Parent\"\n"
 					"Params:\n"
 					"  Roughness: 0.5\n");
 				writeText("mat_child.wmat",
-					"FormatVersion: 2\n"
+					WmatHeader() + ""
 					"Parent: material_m4s2_tmp/mat_parent.wmat\n"
 					"Name: \"Child\"\n"
 					"Params:\n"
@@ -1674,7 +1693,7 @@ int main()
 						"    return surface;\n"
 						"}\n");
 					writeText("m4s3_probe.wmat",
-						"FormatVersion: 2\n"
+						WmatHeader() + ""
 						"Shader: material_m4s2_tmp/m4s3_probe.slang\n"
 						"Name: \"Probe\"\n"
 						"Params:\n"
@@ -1781,7 +1800,7 @@ int main()
 					"    return surface;\n"
 					"}\n");
 				writeText("m4s3_lib_probe.wmat",
-					"FormatVersion: 2\n"
+					WmatHeader() + ""
 					"Shader: material_m4s2_tmp/m4s3_lib_probe.slang\n"
 					"Name: \"LibProbe\"\n");
 

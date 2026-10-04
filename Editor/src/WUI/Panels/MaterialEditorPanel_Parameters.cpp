@@ -892,7 +892,7 @@ float MaterialEditorPanel::DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRe
 			}
 			else if (plan.Key == std::string("format"))
 				plan.Value = Wui::Tr("panel.material.value.format", "FormatVersion ")
-					+ std::to_string(m_Material->GetFormatVersion());
+					+ (m_Material->Identity().IsValid() ? FormatAssetId(m_Material->Identity()) : std::string("(unassigned)"));
 			else if (plan.Key == std::string("revision"))
 				plan.Value = Wui::Tr("panel.material.value.revision", "Revision ")
 					+ std::to_string(m_Material->GetRevision());

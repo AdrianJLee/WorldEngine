@@ -1,4 +1,5 @@
 #include "EditorShell_Internal.h"
+#include "World/Asset/AssetCatalog.h"
 
 namespace World
 {
@@ -582,6 +583,14 @@ void EditorShell::RecreateIndependentWindows(){
 
 
 	// ---- PanelHost ----
+
+void EditorShell::RefreshAssetCatalog(const std::string& logicalPath)
+{
+	if (logicalPath.empty())
+		return;
+	if (Ref<Scene> scene = m_Editor.GetActiveScene())
+		::World::RefreshAssetCatalog(scene->GetContext(), logicalPath);
+}
 
 Ref<Scene> EditorShell::GetActiveScene(){
 		return m_Editor.GetActiveScene();

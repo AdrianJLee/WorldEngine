@@ -247,6 +247,7 @@ namespace World
 		bool AssignMaterialToSelection(const std::string& logicalPath, Entity* outEntity,
 			std::string* outPreviousPath, std::string* message = nullptr) override;
 		// 撤销赋值 / Extract 赋回:把指定实体的 MaterialPath 写成给定值。
+		void RefreshAssetCatalog(const std::string& logicalPath) override;
 		bool SetEntityMaterialPath(Entity entity, const std::string& materialPath,
 			std::string* message = nullptr) override;
 		// 打开内容浏览器面板的"新建材质"向导(Window 菜单与材质面板的 Extract 共用这一条)。

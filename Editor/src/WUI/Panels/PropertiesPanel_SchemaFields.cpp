@@ -683,6 +683,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 					break;
 				}
 				case Schema::Kind::String:
+				case Schema::Kind::Name:   // 名字 = 自由文本行(与 String 同形)
 				case Schema::Kind::Asset:
 				{
 					const std::string current = std::get<std::string>(value);

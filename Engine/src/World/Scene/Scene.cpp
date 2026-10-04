@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Core/StringPool.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Systems/TransformSystem.h"
@@ -1809,7 +1810,9 @@ namespace World
 		if (!entity.IsValid() || entity.GetScene() != this || IsPendingDestroy(entity)) return;
 		if (IsActive() && (entity.HasComponent<RigidBody2DComponent>() || entity.HasComponent<BoxCollider2DComponent>() || entity.HasComponent<CircleCollider2DComponent>()))
 			throw std::logic_error("Duplicating physics components requires a stopped scene");
-		const std::string name = entity.HasComponent<TagComponent>() ? entity.GetComponent<TagComponent>().Tag : "Empty Entity";
+		// 实体名走池:NameId → 池内文本(复制出来的实体用同一个驻留名字,不重新驻留)。
+		const std::string name = entity.HasComponent<TagComponent>()
+			? StringPool::Get().NameOf(entity.GetComponent<TagComponent>().Tag) : std::string("Empty Entity");
 		Entity copy = Entity::CreateEntity(this, name);
 		if (entity.HasComponent<TransformComponent>()) copy.AddComponent<TransformComponent>(entity.GetComponent<TransformComponent>());
 		for (const Schema::TypeSchema* schema : m_Context->Schemas().List(Schema::TypeCategory::Component))
@@ -1833,7 +1836,8 @@ namespace World
 		{
 			const auto id = other->m_Registry.get<UUIDComponent>(entity).ID;
 			const auto* tag = other->m_Registry.try_get<TagComponent>(entity);
-			entityMap[id] = Entity::CreateEntity(newScene.get(), tag ? tag->Tag : "Empty Entity", id);
+			entityMap[id] = Entity::CreateEntity(newScene.get(),
+				tag ? StringPool::Get().NameOf(tag->Tag) : std::string("Empty Entity"), id);
 		}
 		for (const Schema::TypeSchema* schema : other->m_Context->Schemas().List(Schema::TypeCategory::Component))
 		{

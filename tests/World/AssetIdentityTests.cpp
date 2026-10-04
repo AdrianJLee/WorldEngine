@@ -201,6 +201,45 @@ namespace
 		CHECK(catalog.Skipped() == 1u);
 	}
 
+
+	// ---- 3b. 增量刷新:保存即登记 / 改名即跟随 / 删除即撤销 ----
+	void IncrementalRefresh(const std::filesystem::path& root)
+	{
+		const AssetId identity { 0x1AC0000000000001ull };
+
+		// 目录一开始是空的(文件还没写出)。
+		AssetCatalog catalog;
+		CHECK(catalog.Scan(root.string()) == 0u);
+
+		// 写出资产 → RefreshPath 单个文件登记(不重扫)。
+		const std::filesystem::path first = root / "materials" / "fresh.wmat";
+		const std::string logicalFirst = std::filesystem::relative(first, root).generic_string();
+		{
+			World::MaterialDocument document;
+			document.Identity = identity;
+			document.Overridden = World::MaterialFieldSet::Everything();
+			document.Values.Name = "Fresh";
+			WriteText(first, World::MaterialIO::SerializeDocument(document, nullptr));
+		}
+		catalog.RefreshPath(first, root.string());
+		CHECK(catalog.FindPath(identity) == StringPool::Get().InternPath(logicalFirst));
+
+		// 改名 → 旧路径 RefreshPath 撤销登记、新路径 RefreshPath 登记 ⇒ 身份指向新路径。
+		const std::filesystem::path second = root / "materials" / "renamed.wmat";
+		const std::string logicalSecond = std::filesystem::relative(second, root).generic_string();
+		std::filesystem::rename(first, second);
+		catalog.RefreshPath(first, root.string());
+		catalog.RefreshPath(second, root.string());
+		CHECK(catalog.FindPath(identity) == StringPool::Get().InternPath(logicalSecond));
+		CHECK(catalog.Size() == 1u);
+
+		// 删除 → RefreshPath 撤销登记(不留悬垂映射)。
+		std::filesystem::remove(second);
+		catalog.RefreshPath(second, root.string());
+		CHECK(!catalog.FindPath(identity).IsValid());
+		CHECK(catalog.Size() == 0u);
+	}
+
 	// ---- 4b. 端到端:路径"存在但文件已不在"时按身份找回(真正的改名场景)----
 	void RenameRecoveryThroughRegistry(const std::filesystem::path& root)
 	{
@@ -289,6 +328,7 @@ int main()
 		TextureCarriesIdentity();
 		CatalogAndRenameRecovery(root / "catalog");
 		CatalogIgnoresUnidentifiedAssets(root / "catalog");
+		IncrementalRefresh(root / "incremental");
 		RenameRecoveryThroughRegistry(root / "rename");
 		ComponentIdentityChannel();
 		std::filesystem::remove_all(root, ignored);

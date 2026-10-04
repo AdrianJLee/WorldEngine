@@ -1,5 +1,6 @@
 // P2a W4:Prefab 子树实例化(深拷贝 + UUID 重发 + 层级重建 + 挂到目标父节点)。
 #include "World/Core/Core.h"
+#include "World/Core/StringPool.h"
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/Prefab/Prefab.h"
 #include "World/Scene/Components.h"
@@ -103,7 +104,7 @@ int main()
 		CHECK(instanceChildren.size() == 1);
 		const entt::entity instanceChild = instanceChildren[0];
 		CHECK(destinationRegistry.get<HierarchyComponent>(instanceChild).Parent == instanceRootHandle);
-		CHECK(destinationRegistry.get<TagComponent>(instanceChild).Tag == "Prefab Child");
+		CHECK(StringPool::Get().NameOf(destinationRegistry.get<TagComponent>(instanceChild).Tag) == "Prefab Child");
 		// Host(10,0,0) + Root(1,2,3) + Child(0,1,0) → 子节点世界位置 (11,3,3)。
 		const glm::vec3 childWorld =
 			glm::vec3(destinationRegistry.get<WorldTransformComponent>(instanceChild).Matrix[3]);
@@ -112,7 +113,7 @@ int main()
 		// 4. 未参与子树的实体不被复制。
 		size_t notInPrefab = 0;
 		for (const auto entity : destinationRegistry.view<TagComponent>())
-			if (destinationRegistry.get<TagComponent>(entity).Tag == "Not In Prefab")
+			if (StringPool::Get().NameOf(destinationRegistry.get<TagComponent>(entity).Tag) == "Not In Prefab")
 				notInPrefab++;
 		CHECK(notInPrefab == 0);
 
@@ -146,11 +147,11 @@ int main()
 			CHECK(fromFile.EntityCount == 2);
 
 			const entt::entity fileRoot = static_cast<entt::entity>(fromFile.Root);
-			CHECK(loadedRegistry.get<TagComponent>(fileRoot).Tag == "Prefab Root");
+			CHECK(StringPool::Get().NameOf(loadedRegistry.get<TagComponent>(fileRoot).Tag) == "Prefab Root");
 			CHECK(loadedRegistry.get<HierarchyComponent>(fileRoot).Parent == host2);
 			const auto& fileChildren = Hierarchy::ChildrenOf(loadedRegistry, fileRoot);
 			CHECK(fileChildren.size() == 1);
-			CHECK(loadedRegistry.get<TagComponent>(fileChildren[0]).Tag == "Prefab Child");
+			CHECK(StringPool::Get().NameOf(loadedRegistry.get<TagComponent>(fileChildren[0]).Tag) == "Prefab Child");
 			// Host2(-5,0,0) + Root(1,2,3) + Child(0,1,0) = (-4,3,3)
 			const glm::vec3 fileChildWorld =
 				glm::vec3(loadedRegistry.get<WorldTransformComponent>(fileChildren[0]).Matrix[3]);
@@ -180,7 +181,7 @@ int main()
 			CHECK(!HasOverride(record, instanceRoot));
 
 			// 模拟属性面板改动:改 Tag 与 MeshRenderer 颜色并登记覆盖。
-			targetRegistry.get<TagComponent>(instanceRoot).Tag = "Edited Tag";
+			targetRegistry.get<TagComponent>(instanceRoot).Tag = StringPool::Get().InternName("Edited Tag");
 			targetRegistry.get<MeshRendererComponent>(instanceRoot).Color = { 1.0f, 0.0f, 0.0f, 1.0f };
 			MarkOverride(record, instanceRoot, "TagComponent.Tag");
 			MarkOverride(record, instanceRoot, "MeshRendererComponent.Color");
@@ -190,7 +191,7 @@ int main()
 
 			// 回滚:Tag 与颜色回到 prefab 原值,覆盖记录被清空。
 			CHECK(RevertInstance(record, target));
-			CHECK(targetRegistry.get<TagComponent>(instanceRoot).Tag == "Prefab Root");
+			CHECK(StringPool::Get().NameOf(targetRegistry.get<TagComponent>(instanceRoot).Tag) == "Prefab Root");
 			CHECK(std::fabs(targetRegistry.get<MeshRendererComponent>(instanceRoot).Color.z - 0.9f) < 1e-5f);
 			CHECK(!HasOverride(record, instanceRoot));
 			CHECK(GetOverrideCount(record) == 0);
@@ -218,7 +219,7 @@ int main()
 			record.Root = instanceRoot;
 			CHECK(CanRevert(record, target));
 
-			targetRegistry.get<TagComponent>(instanceRoot).Tag = "Edited Before Unpack";
+			targetRegistry.get<TagComponent>(instanceRoot).Tag = StringPool::Get().InternName("Edited Before Unpack");
 			MarkOverride(record, instanceRoot, "TagComponent.Tag");
 			CHECK(GetOverrideCount(record) == 1);
 
@@ -228,7 +229,7 @@ int main()
 			CHECK(!CanRevert(record, target));
 			CHECK(!RevertInstance(record, target));                  // 断链后回滚安全失败
 			// 断链不影响实体本身:编辑过的值仍在。
-			CHECK(targetRegistry.get<TagComponent>(instanceRoot).Tag == "Edited Before Unpack");
+			CHECK(StringPool::Get().NameOf(targetRegistry.get<TagComponent>(instanceRoot).Tag) == "Edited Before Unpack");
 			CHECK(Hierarchy::ChildrenOf(targetRegistry, instanceRoot).size() == 1);
 
 			// 空记录断链也要安全返回 false。
@@ -391,24 +392,24 @@ int main()
 			CHECK(record.IsValid());
 
 			// 模拟属性面板:改实例 Tag 与位移并登记覆盖(字段串 = "<schema.DisplayName>.<字段>")。
-			targetRegistry.get<TagComponent>(instanceRoot).Tag = "Instance Tag";
+			targetRegistry.get<TagComponent>(instanceRoot).Tag = StringPool::Get().InternName("Instance Tag");
 			targetRegistry.get<TransformComponent>(instanceRoot).SetLocation(glm::vec3(7.0f, 0.0f, 0.0f));
 			MarkOverride(record, instanceRoot, "TagComponent.Tag");
 			MarkOverride(record, instanceRoot, "TransformComponent.Location");
 
 			// 盘上改 prefab:根 Tag/位移/颜色与子节点位移都换新值。
-			sourceRegistry.get<TagComponent>(root).Tag = "Prefab Tag v2";
+			sourceRegistry.get<TagComponent>(root).Tag = StringPool::Get().InternName("Prefab Tag v2");
 			sourceRegistry.get<TransformComponent>(root).SetLocation(glm::vec3(4.0f, 5.0f, 6.0f));
 			sourceRegistry.get<MeshRendererComponent>(root).Color = { 0.1f, 0.2f, 0.3f, 1.0f };
 			sourceRegistry.get<TransformComponent>(child).SetLocation(glm::vec3(0.0f, 5.0f, 0.0f));
 			CHECK(SaveFromScene(source, Entity(&source, root), prefabPath, &error));
-			CHECK(error.empty());
+			if (!error.empty()) throw std::runtime_error("SaveFromScene: " + error);
 
 			CHECK(ApplyPrefabChanges(record, target, &error));
-			CHECK(error.empty());
+			if (!error.empty()) throw std::runtime_error("ApplyPrefabChanges: " + error);
 			// (b) 被覆盖的字段保持实例当前值,且派生缓存(Transform 矩阵)同步到覆盖值;
 			//     覆盖记录未被清空、实体句柄未被重建。
-			CHECK(targetRegistry.get<TagComponent>(instanceRoot).Tag == "Instance Tag");
+			CHECK(StringPool::Get().NameOf(targetRegistry.get<TagComponent>(instanceRoot).Tag) == "Instance Tag");
 			const auto& followedTransform = targetRegistry.get<TransformComponent>(instanceRoot);
 			CHECK(glm::length(followedTransform.Location - glm::vec3(7.0f, 0.0f, 0.0f)) < 1e-5f);
 			CHECK(glm::length(glm::vec3(followedTransform.GetLocalMatrix()[3]) - glm::vec3(7.0f, 0.0f, 0.0f)) < 1e-4f);
@@ -428,10 +429,10 @@ int main()
 
 			// 解析不了的字段:跳过并记 error 文本,其它字段照旧跟随(整体仍成功)。
 			MarkOverride(record, instanceRoot, "TransformComponent.NoSuchField");
-			targetRegistry.get<TagComponent>(instanceRoot).Tag = "Instance Tag 2";
+			targetRegistry.get<TagComponent>(instanceRoot).Tag = StringPool::Get().InternName("Instance Tag 2");
 			CHECK(ApplyPrefabChanges(record, target, &error));
 			CHECK(!error.empty());
-			CHECK(targetRegistry.get<TagComponent>(instanceRoot).Tag == "Instance Tag 2");
+			CHECK(StringPool::Get().NameOf(targetRegistry.get<TagComponent>(instanceRoot).Tag) == "Instance Tag 2");
 			CHECK(glm::length(targetRegistry.get<TransformComponent>(instanceRoot).Location
 				- glm::vec3(7.0f, 0.0f, 0.0f)) < 1e-5f);
 			CHECK(std::fabs(targetRegistry.get<MeshRendererComponent>(instanceRoot).Color.g - 0.2f) < 1e-5f);
@@ -445,7 +446,7 @@ int main()
 			CHECK(!ApplyPrefabChanges(mismatch, target, &error));
 			CHECK(!error.empty());
 			CHECK(GetOverrideCount(mismatch) == 3);
-			CHECK(targetRegistry.get<TagComponent>(instanceRoot).Tag == "Instance Tag 2");
+			CHECK(StringPool::Get().NameOf(targetRegistry.get<TagComponent>(instanceRoot).Tag) == "Instance Tag 2");
 			CHECK(glm::length(targetRegistry.get<TransformComponent>(instanceRoot).Location
 				- glm::vec3(7.0f, 0.0f, 0.0f)) < 1e-5f);
 			CHECK(std::fabs(targetRegistry.get<MeshRendererComponent>(instanceRoot).Color.g - 0.2f) < 1e-5f);
@@ -490,7 +491,7 @@ int main()
 			entt::entity instanceB = entt::null;
 			for (const entt::entity childEntity : treeChildren)
 			{
-				const std::string& tag = treeTargetRegistry.get<TagComponent>(childEntity).Tag;
+				const std::string& tag = StringPool::Get().NameOf(treeTargetRegistry.get<TagComponent>(childEntity).Tag);
 				if (tag == "Tree A")
 					instanceA = childEntity;
 				else if (tag == "Tree B")
@@ -498,7 +499,7 @@ int main()
 			}
 			CHECK(instanceA != entt::null);
 			CHECK(instanceB != entt::null);
-			CHECK(treeTargetRegistry.get<TagComponent>(instanceA).Tag == "Tree A");
+			CHECK(StringPool::Get().NameOf(treeTargetRegistry.get<TagComponent>(instanceA).Tag) == "Tree A");
 			CHECK(Hierarchy::SetParent(treeTargetRegistry, instanceA, instanceB));   // 实体数不变,层级变了
 
 			PrefabInstanceRecord treeRecord;
@@ -507,12 +508,12 @@ int main()
 			CHECK(!ApplyPrefabChanges(treeRecord, treeTarget, &error));
 			CHECK(!error.empty());
 			CHECK(treeTargetRegistry.get<HierarchyComponent>(instanceA).Parent == instanceB);
-			CHECK(treeTargetRegistry.get<TagComponent>(instanceA).Tag == "Tree A");
-			CHECK(treeTargetRegistry.get<TagComponent>(instanceB).Tag == "Tree B");
-			CHECK(treeTargetRegistry.get<TagComponent>(treeInstanceRoot).Tag == "Tree Root");
+			CHECK(StringPool::Get().NameOf(treeTargetRegistry.get<TagComponent>(instanceA).Tag) == "Tree A");
+			CHECK(StringPool::Get().NameOf(treeTargetRegistry.get<TagComponent>(instanceB).Tag) == "Tree B");
+			CHECK(StringPool::Get().NameOf(treeTargetRegistry.get<TagComponent>(treeInstanceRoot).Tag) == "Tree Root");
 
 			// 收尾:还原 source 夹具,删除临时文件(与既有小节同一口径)。
-			sourceRegistry.get<TagComponent>(root).Tag = "Prefab Root";
+			sourceRegistry.get<TagComponent>(root).Tag = StringPool::Get().InternName("Prefab Root");
 			sourceRegistry.get<TransformComponent>(root).SetLocation(glm::vec3(1.0f, 2.0f, 3.0f));
 			sourceRegistry.get<MeshRendererComponent>(root).Color = { 0.2f, 0.6f, 0.9f, 1.0f };
 			sourceRegistry.get<TransformComponent>(child).SetLocation(glm::vec3(0.0f, 1.0f, 0.0f));

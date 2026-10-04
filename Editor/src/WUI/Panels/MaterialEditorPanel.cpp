@@ -869,7 +869,7 @@ float MaterialEditorPanel::DrawHeader(Wui::WuiContext& ctx, const Wui::WuiRect& 
 				action.Enabled, action.Primary, theme))
 			{
 				if (actionId == "material.save")
-					SaveCurrent();
+					SaveCurrent(host);
 				else if (actionId == "material.saveas")
 					OpenSaveAsModal(ctx, host);
 				else if (actionId == "material.assign")

@@ -740,7 +740,7 @@ void EditorShell::DrawStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& rect){
 		Entity selected = GetSelectedEntity();
 		left += "   |   " + std::string(Wui::Tr("status.selection", "Selection")) + ": ";
 		if (selected && selected.HasComponent<TagComponent>())
-			left += selected.GetComponent<TagComponent>().Tag;
+			left += StringPool::Get().NameOf(selected.GetComponent<TagComponent>().Tag);
 		else
 			left += Wui::Tr("status.selection.none", "none");
 		if (!m_ActiveWindowTag.empty())

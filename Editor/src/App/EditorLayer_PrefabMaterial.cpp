@@ -1,4 +1,5 @@
 #include "EditorLayer_Internal.h"
+#include "World/Core/StringPool.h"
 
 namespace World
 {
@@ -315,7 +316,7 @@ bool EditorLayer::AssignMaterialToEntity(Entity entity, const std::string& logic
 		if (changed)
 			MarkDocumentDirty();
 		const auto* tag = registry.try_get<TagComponent>(handle);
-		const std::string name = tag ? tag->Tag : std::string("(unnamed)");
+		const std::string name = tag ? StringPool::Get().NameOf(tag->Tag) : std::string("(unnamed)");
 		WLD_CORE_INFO("[material-ui] assign '{0}' -> entity {1} ('{2}'){3}", normalized,
 			static_cast<uint32_t>(handle), name, changed ? "" : " (unchanged)");
 		m_WuiContext.RecordOp("material", "assign", normalized, "entity=" + std::to_string(static_cast<uint32_t>(handle)));

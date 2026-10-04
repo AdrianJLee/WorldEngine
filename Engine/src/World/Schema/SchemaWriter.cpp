@@ -320,7 +320,9 @@ namespace World::Schema
 					return Guard([&] { *outValue = Value(node.as<int64_t>()); });
 				return Guard([&] { *outValue = Value(node.as<uint64_t>()); });
 			}
-			case Kind::Asset: return Guard([&] { *outValue = Value(node.as<std::string>()); });
+			case Kind::Asset:
+			case Kind::Name:   // 名字字段的边界同样是字符串(内存里是驻留 NameId)
+				return Guard([&] { *outValue = Value(node.as<std::string>()); });
 			default: return false;
 		}
 	}

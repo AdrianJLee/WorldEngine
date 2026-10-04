@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Core/StringPool.h"
 
 #include "App/EditorLayer.h"
 
@@ -948,7 +949,7 @@ namespace World
 				if (!first)
 					out << ",";
 				first = false;
-				const std::string& tag = registry.get<TagComponent>(handle).Tag;
+				const std::string& tag = StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag);
 				const uint32_t id = static_cast<uint32_t>(handle);
 				out << "{\"handle\":" << id << ",\"name\":\"" << JsonEscape(tag) << "\"";
 				if (handle == static_cast<entt::entity>(m_SelectedEntity))
@@ -1509,7 +1510,7 @@ namespace World
 						out << ",";
 					first = false;
 					out << "{\"handle\":" << static_cast<uint32_t>(handle)
-						<< ",\"name\":\"" << JsonEscape(registry.get<TagComponent>(handle).Tag) << "\""
+						<< ",\"name\":\"" << JsonEscape(StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag)) << "\""
 						<< ",\"selected\":" << (handle == static_cast<entt::entity>(m_SelectedEntity) ? "true" : "false")
 						<< "}";
 				}
@@ -1535,7 +1536,7 @@ namespace World
 			{
 				auto& registry = m_ActiveScene->GetRegistry();
 				for (auto handle : registry.view<TagComponent>())
-					if (registry.get<TagComponent>(handle).Tag == arg("name"))
+					if (StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == arg("name"))
 					{
 						target = Entity(m_ActiveScene.get(), handle);
 						break;
@@ -1568,7 +1569,7 @@ namespace World
 				const Scene& scene = *m_ActiveScene;
 				const entt::registry& registry = scene.GetRegistry();
 				for (auto handle : registry.view<TagComponent>())
-					if (registry.get<TagComponent>(handle).Tag == arg("name"))
+					if (StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == arg("name"))
 					{
 						target = Entity(m_ActiveScene.get(), handle);
 						break;
@@ -1585,7 +1586,7 @@ namespace World
 			std::ostringstream out;
 			out << "{\"handle\":" << static_cast<uint32_t>(handle);
 			if (const auto* tag = registry.try_get<TagComponent>(handle))
-				out << ",\"name\":\"" << JsonEscape(tag->Tag) << "\"";
+				out << ",\"name\":\"" << JsonEscape(StringPool::Get().NameOf(tag->Tag)) << "\"";
 			if (const auto* transform = registry.try_get<TransformComponent>(handle))
 			{
 				const glm::vec3 location = transform->Location;
@@ -1685,7 +1686,7 @@ namespace World
 				auto& registry = m_ActiveScene->GetRegistry();
 				target = Entity {};
 				for (auto handle : registry.view<TagComponent>())
-					if (registry.get<TagComponent>(handle).Tag == arg("name"))
+					if (StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == arg("name"))
 					{
 						target = Entity(m_ActiveScene.get(), handle);
 						break;
@@ -1704,7 +1705,7 @@ namespace World
 			{
 				if (auto* tag = registry.try_get<TagComponent>(handle))
 				{
-					tag->Tag = value;
+					tag->Tag = StringPool::Get().InternName(value);
 					MarkDocumentDirty();
 					result = "Tag='" + value + "'";
 					return true;

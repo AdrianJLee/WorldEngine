@@ -141,7 +141,7 @@ void ContentBrowserPanel::OpenNewMaterialModal(Wui::WuiContext& ctx, bool fromSe
 					}
 				}
 				if (selected.HasComponent<TagComponent>())
-					entityName = selected.GetComponent<TagComponent>().Tag;
+					entityName = StringPool::Get().NameOf(selected.GetComponent<TagComponent>().Tag);
 			}
 			defaultName = SanitizeAssetName(entityName);
 			if (defaultName.empty())
@@ -467,7 +467,7 @@ void ContentBrowserPanel::DrawNewMaterialModal(Wui::WuiContext& ctx){
 				// 与 M3 前新建的 .wmat 逐字节一致)。
 				const MaterialDesc desc = MaterialDescForTemplate(templateIndex, base, m_NewMaterialSeed);
 				// 绝对路径:MaterialIO 只认"内容根/<path>",相对路径不保证落在内容根里(CreateMaterialAsset 记的坑)。
-				wrote = MaterialIO::WriteFileText(absolute, MaterialIO::Serialize(desc), &error);
+				wrote = MaterialIO::WriteFileText(absolute, MaterialIO::Serialize(desc, GenerateAssetId()), &error);
 			}
 			else
 			{

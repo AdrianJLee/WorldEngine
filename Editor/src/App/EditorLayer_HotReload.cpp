@@ -1,4 +1,5 @@
 #include "EditorLayer_Internal.h"
+#include "World/Asset/AssetCatalog.h"
 
 namespace World
 {
@@ -551,6 +552,15 @@ bool EditorLayer::ImportModelFile(const std::string& sourcePath, std::string* me
 		// D5c-4b 收尾:导入/重导后清进程级动画模型缓存(AnimationSystem 按 MeshPath 缓存
 		// WModelData;不清会让"改了源 → 重导 → 动画还是旧的")。
 		AnimationSystem::ClearCache();
+		// 导入产出的 .wmodel/.wmat 立刻进资产目录 —— 不重扫内容根,只登记这一批文件。
+		// 之后即使有人改名/移动它们,"按身份找回"也已经能命中。
+		if (m_ActiveScene)
+		{
+			WorldContext& context = m_ActiveScene->GetContext();
+			World::RefreshAssetCatalog(context, logicalModel);
+			for (const std::string& material : imported.MaterialPaths)
+				World::RefreshAssetCatalog(context, material);
+		}
 		WLD_CORE_INFO("[model] {0}", text);
 		return true;
 	}

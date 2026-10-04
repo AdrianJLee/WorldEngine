@@ -4,13 +4,18 @@
 #include "World/Core/Export.h"
 #include "World/Core/StringPool.h"
 
+#include "World/Core/Export.h"
+
 #include <cstddef>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace World
 {
+	class WorldContext;
+
 	// ---------------------------------------------------------------------------
 	// 资产目录(L1 层,2026-10-04,contract.asset-identity-and-strings)。
 	//
@@ -37,6 +42,10 @@ namespace World
 
 		// 登记/更新一个资产(编辑器保存、导入产出后调用)。
 		void Register(const std::string& logicalPath, AssetId identity);
+		// **增量刷新单个文件**:编辑器保存/导入产出后调用它,比全量 Scan 便宜得多。
+		// 语义与 Scan 逐项一致(读不出身份或文件已不在 ⇒ 撤销该路径的登记),
+		// 保证"目录 = 磁盘上的事实"在增量路径上同样成立。
+		void RefreshPath(const std::filesystem::path& absolute, const std::string& contentRootAbsolute);
 		// 路径内容变化(改名/删除):清掉该路径的登记。
 		void Unregister(const std::string& logicalPath);
 
@@ -56,4 +65,14 @@ namespace World
 		std::unordered_map<PathId, AssetId> m_ByPath;
 		std::size_t m_Skipped = 0;
 	};
+
+	// ---- 世界上下文便捷入口(唯一一处知道"内容根在哪"的地方)----
+	//
+	// 内联进 SceneRenderer 与编辑器会各写一遍"取 AssetRoot + 全量扫一次"的逻辑,那种重复
+	// 迟早会漂移(内容根换了、扫描语义改了,只改一处)。所以收在这里。
+	//
+	// Ensure:没有目录就建一个并**全量扫一次**(首次进入某个世界会话);
+	// Refresh:把刚写出的资产登记进目录(编辑器保存/导入产出后调用;没有目录就先建)。
+	WLD_API AssetCatalog& EnsureAssetCatalog(WorldContext& context);
+	WLD_API void RefreshAssetCatalog(WorldContext& context, const std::string& logicalPath);
 }

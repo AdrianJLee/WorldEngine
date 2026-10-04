@@ -180,7 +180,7 @@ namespace World::Plugins
 		WeComponentKindUVec2, WeComponentKindUVec3, WeComponentKindUVec4,
 		WeComponentKindQuat, WeComponentKindMat3, WeComponentKindMat4,
 		// 以下类型 T2b 不支持注册(声明在这里只为与 Schema::Kind 对齐值):
-		WeComponentKindString, WeComponentKindEnum, WeComponentKindAsset, WeComponentKindObject,
+		WeComponentKindString, WeComponentKindName, WeComponentKindEnum, WeComponentKindAsset, WeComponentKindObject,
 	};
 
 	// 字段的编辑期提示(只影响属性面板怎么显示,不进序列化);未知位 = 忽略(前向兼容)。

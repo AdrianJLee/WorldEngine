@@ -1,5 +1,6 @@
 # WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。
-FormatVersion: 1
+FormatVersion: 3
+AssetId: 0x48A8E2582675064F
 Name: "Satin Blue"
 BaseColor: [0.2, 0.45, 0.95, 1]
 Metallic: 0.0

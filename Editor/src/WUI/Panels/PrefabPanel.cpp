@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Core/StringPool.h"
 #include "WUI/Panels/PrefabPanel.h"
 #include "WUI/Panels/ViewportPanel.h"
 
@@ -580,8 +581,8 @@ namespace World
 			const auto* tag = registry.try_get<TagComponent>(handle);
 			EntityRow row;
 			row.Handle = handle;
-			row.Name = (tag && !tag->Tag.empty())
-				? tag->Tag : ("Entity " + std::to_string(static_cast<uint32_t>(handle)));
+			row.Name = (tag && !StringPool::Get().NameOf(tag->Tag).empty())
+				? StringPool::Get().NameOf(tag->Tag) : ("Entity " + std::to_string(static_cast<uint32_t>(handle)));
 			row.ComponentCount = componentCount(handle);
 			row.Depth = depth;
 			m_Rows.push_back(std::move(row));
@@ -606,7 +607,7 @@ namespace World
 		// 只读摘要:组件名 + 关键字段。没列进来的组件仍按 schema 名字列一行(树行数/组件数
 		// 与摘要能对上),但这一层不暴露可写控件。
 		if (const auto* tag = registry.try_get<TagComponent>(handle))
-			lines.push_back("Tag: " + tag->Tag);
+			lines.push_back("Tag: " + StringPool::Get().NameOf(tag->Tag));
 		if (const auto* transform = registry.try_get<TransformComponent>(handle))
 			lines.push_back("Transform: T(" + FormatVec3(transform->Location) + ")  R("
 				+ FormatVec3(transform->GetEulerAngles()) + ")  S(" + FormatVec3(transform->Scale) + ")");
@@ -642,7 +643,7 @@ namespace World
 			return lines;
 
 		if (const auto* tag = registry.try_get<TagComponent>(handle))
-			lines.push_back("Tag: " + tag->Tag);
+			lines.push_back("Tag: " + StringPool::Get().NameOf(tag->Tag));
 		if (const auto* sprite = registry.try_get<SpriteComponent>(handle))
 			lines.push_back("Sprite: TilingFactor=" + FormatFloat(sprite->TilingFactor, 2));
 		if (const auto* skinned = registry.try_get<SkinnedMeshRendererComponent>(handle))
@@ -878,8 +879,8 @@ namespace World
 			InstanceRow row;
 			row.Handle = record.Root;
 			const auto* tag = registry.try_get<TagComponent>(record.Root);
-			row.Name = (tag && !tag->Tag.empty())
-				? tag->Tag : ("Entity " + std::to_string(static_cast<uint32_t>(record.Root)));
+			row.Name = (tag && !StringPool::Get().NameOf(tag->Tag).empty())
+				? StringPool::Get().NameOf(tag->Tag) : ("Entity " + std::to_string(static_cast<uint32_t>(record.Root)));
 			m_Instances.push_back(std::move(row));
 		}
 	}

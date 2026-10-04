@@ -935,9 +935,14 @@ namespace World::Asset
 				fileName += "_" + std::to_string(count);
 			++count;
 			// D10:同内容材质复用。序列化提到这里(去重要哈希字节),产物阶段直接复用这份字节。
-			const std::string text = MaterialIO::Serialize(desc);
+			// 提议路径(去重前):既是材质的默认落点,也是身份派生用的稳定键。
+			const std::string materialProposedPath = modelDirectory + "materials/" + fileName + ".wmat";
+			// 材质身份按**目标逻辑路径**确定性派生 —— 重新导入得到同一份字节,
+			// 同内容去重(FindReusableFile)也才能命中。
+			const AssetId materialIdentity { Fnv1a64AssetIdentity(materialProposedPath) };
+			const std::string text = MaterialIO::Serialize(desc, materialIdentity);
 			std::vector<uint8_t> bytes(text.begin(), text.end());
-			std::string materialPath = modelDirectory + "materials/" + fileName + ".wmat";
+			std::string materialPath = materialProposedPath;
 			if (settings.ReuseMaterials)
 			{
 				const std::string reused = FindReusableFile(dedupRoot, materialLookupDirs, ".wmat", bytes);

@@ -736,7 +736,7 @@ void MaterialEditorPanel::CapturePreviewTextureSequence(){
 	}
 
 
-void MaterialEditorPanel::SaveCurrent(){
+void MaterialEditorPanel::SaveCurrent(PanelHost& host){
 		if (!m_Material)
 			return;
 		// 新建材质走内容浏览器(Create → New Material);这里只保存已落盘的材质。
@@ -769,6 +769,8 @@ void MaterialEditorPanel::SaveCurrent(){
 		}
 		m_Path = m_Material->GetPath();
 		SetMaterialPathForPanel(m_Path);
+		// 刚落盘的 .wmat 进资产目录:改名/移动后按身份找回立刻可用(增量,不重扫)。
+		host.RefreshAssetCatalog(m_Path);
 		RefreshMaterialPickIndex();
 		// 保存 = 磁盘与内存一致:校验缓存要重算(缺贴图可能刚补上)。
 		m_ValidationRevision = 0;

@@ -605,7 +605,7 @@ namespace World
 		void SetFieldToDefault(const std::string& key);
 		void ResetAllMaterialFields();
 		void RefreshValidation(double now);
-		void SaveCurrent();
+		void SaveCurrent(PanelHost& host);
 		void RefreshCatalog();
 		// 材质名下拉的选中下标(下标表 = m_MaterialPaths)。
 		void RefreshMaterialPickIndex();

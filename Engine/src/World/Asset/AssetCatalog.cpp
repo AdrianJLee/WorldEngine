@@ -2,6 +2,9 @@
 
 #include "World/Asset/AssetCatalog.h"
 
+#include "World/Core/WorldContext.h"
+#include "World/Utils/Paths.h"
+
 #include "World/Asset/WModelIO.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/Texture/TextureImportSettings.h"
@@ -27,7 +30,11 @@ namespace World
 			return buffer;
 		}
 
-		std::string LowerExtension(const std::filesystem::path& path)
+		// 从**单个资产文件**读它的稳定身份(不存在/不认的扩展名/读不出 ⇒ false)。
+	// Scan 与 RefreshPath 共用这一份,保证"全量扫描"与"增量刷新"判定完全一致。
+	bool ReadIdentityFromFile(const std::filesystem::path& absolute, AssetId* out);
+
+	std::string LowerExtension(const std::filesystem::path& path)
 		{
 			std::string extension = path.extension().generic_string();
 			std::transform(extension.begin(), extension.end(), extension.begin(),
@@ -64,6 +71,28 @@ namespace World
 			}
 			return false;
 		}
+	// 从**单个资产文件**读它的稳定身份(不存在/不认的扩展名/读不出 ⇒ false)。
+	// Scan 与 RefreshPath 共用这一份,保证"全量扫描"与"增量刷新"判定完全一致。
+	bool ReadIdentityFromFile(const std::filesystem::path& absolute, AssetId* out)
+	{
+		const std::string extension = LowerExtension(absolute);
+		if (extension == ".wmodel")
+		{
+			Asset::WModelData::MetaData meta;
+			std::string metaError;
+			if (!Asset::WModelIO::ReadMeta(absolute.string(), meta, &metaError))
+				return false;
+			if (!meta.Valid || !meta.Identity.IsValid())
+				return false;
+			*out = meta.Identity;
+			return true;
+		}
+		if (extension != ".wmat" && extension != ".wtex")
+			return false;
+		// 头部 8KiB 足够覆盖资产头(设置行都在最前面)。
+		return IdentityFromHeadText(ReadHeadText(absolute, 8192), out);
+	}
+
 	}
 
 	bool AssetCatalog::IsIdentifiedAssetPath(const std::string& logicalPath)
@@ -161,23 +190,7 @@ namespace World
 				continue;
 
 			AssetId identity;
-			bool ok = false;
-			if (extension == ".wmodel")
-			{
-				Asset::WModelData::MetaData meta;
-				std::string metaError;
-				ok = Asset::WModelIO::ReadMeta(absolute.string(), meta, &metaError)
-					&& meta.Valid && meta.Identity.IsValid();
-				if (ok)
-					identity = meta.Identity;
-			}
-			else
-			{
-				// 头部 8KiB 足够覆盖资产头(设置行都在最前面);读不到身份就跳过。
-				ok = IdentityFromHeadText(ReadHeadText(absolute, 8192), &identity);
-			}
-
-			if (!ok)
+			if (!ReadIdentityFromFile(absolute, &identity))
 			{
 				++m_Skipped;
 				continue;
@@ -186,5 +199,53 @@ namespace World
 			++registered;
 		}
 		return registered;
+	}
+	void AssetCatalog::RefreshPath(const std::filesystem::path& absolute, const std::string& contentRootAbsolute)
+	{
+		if (contentRootAbsolute.empty())
+			return;
+		std::error_code relativeError;
+		const std::string logical = std::filesystem::relative(
+			absolute, std::filesystem::path(contentRootAbsolute), relativeError).generic_string();
+		if (relativeError || logical.empty())
+			return;
+
+		std::error_code existsError;
+		if (!std::filesystem::exists(absolute, existsError))
+		{
+			// 文件已经不在了(改名/删除走了旧路径):撤销登记,不留悬垂映射。
+			Unregister(logical);
+			return;
+		}
+
+		AssetId identity;
+		if (!ReadIdentityFromFile(absolute, &identity))
+		{
+			// 读不出身份(还没补身份的旧资产 / 非资产文件):同样撤销旧登记,
+			// 让"目录 = 磁盘上的事实"这条不变式在增量路径上继续成立。
+			Unregister(logical);
+			return;
+		}
+		Register(logical, identity);
+	}
+
+	AssetCatalog& EnsureAssetCatalog(WorldContext& context)
+	{
+		if (AssetCatalog* existing = context.Resources().TryGet<AssetCatalog>())
+			return *existing;
+		AssetCatalog& catalog = context.Resources().Emplace<AssetCatalog>();
+		const std::string root = Paths::AssetRoot().string();
+		const std::size_t identified = catalog.Scan(root);
+		WLD_CORE_INFO("[asset] 资产目录已建立: {0} 项(跳过 {1}) ← {2}", identified, catalog.Skipped(), root);
+		return catalog;
+	}
+
+	void RefreshAssetCatalog(WorldContext& context, const std::string& logicalPath)
+	{
+		if (logicalPath.empty())
+			return;
+		AssetCatalog& catalog = EnsureAssetCatalog(context);
+		const std::filesystem::path root = Paths::AssetRoot();
+		catalog.RefreshPath(root / std::filesystem::path(logicalPath), root.string());
 	}
 }

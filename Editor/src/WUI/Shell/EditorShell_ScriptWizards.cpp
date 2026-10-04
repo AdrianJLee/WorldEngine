@@ -1,4 +1,5 @@
 #include "EditorShell_Internal.h"
+#include "World/Core/StringPool.h"
 
 namespace World
 {

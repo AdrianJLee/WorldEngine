@@ -62,13 +62,13 @@ void TextureSettingsPanel::DrawActions(Wui::WuiContext& ctx, const Wui::WuiTheme
 				Wui::Tr("panel.texture.apply.tooltip",
 					"Save the .wtex asset and re-bake <stem>.wtexc in the content root (the live artifact "
 					"the running game reads), then flush the material texture cache.")))
-			SaveAndBake(false);
+			SaveAndBake(false, host);
 		if (Wui::ButtonEx(ctx, Wui::HashId("texture.reimport"), reimportRect,
 				Wui::Tr("panel.texture.reimport", "Reimport"), theme, true, false,
 				Wui::Tr("panel.texture.reimport.tooltip",
 					"Force a re-bake from the current settings (same as Apply, ignoring the up-to-date "
 					"short-circuit).")))
-			SaveAndBake(true);
+			SaveAndBake(true, host);
 		if (Wui::ButtonEx(ctx, Wui::HashId("texture.reset"), resetRect,
 				Wui::Tr("panel.texture.reset", "Reset to Defaults"), theme, m_AssetFileExists, false,
 				m_AssetFileExists
@@ -86,7 +86,7 @@ void TextureSettingsPanel::DrawActions(Wui::WuiContext& ctx, const Wui::WuiTheme
 	}
 
 
-void TextureSettingsPanel::SaveAndBake(bool force){
+void TextureSettingsPanel::SaveAndBake(bool force, PanelHost& host){
 		if (m_AssetLogical.empty())
 			return;
 		EnsureContentRoot();
@@ -163,6 +163,8 @@ void TextureSettingsPanel::SaveAndBake(bool force){
 				m_Ctx->RecordOp("texture", "apply-failed", m_AssetLogical, writeError);
 			return;
 		}
+		// 刚落盘的 .wtex 进资产目录(增量刷新,不重扫内容根)。
+		host.RefreshAssetCatalog(m_AssetLogical);
 		m_Payload = std::move(payload);
 		m_Container = true;
 		m_LegacyAsset = false;

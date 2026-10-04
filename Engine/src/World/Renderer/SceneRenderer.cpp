@@ -447,16 +447,9 @@ namespace World
 			m_AssetRegistry = &context.Resources().Get<AssetRegistry>();
 			// 目录服务(可选):把世界上下文交给驻留层,让"路径失效 → 按身份找回"可用。
 			m_AssetRegistry->BindContext(&context);
-			// 资产目录(L1):**每次世界会话扫描一次**内容根,建立"身份 ↔ 当前路径"。
-			// 这是"资产改名/移动之后引用不断链"生效的前提;不扫描时 Resolve* 退化为只按路径。
-			if (!context.Resources().Has<AssetCatalog>())
-			{
-				AssetCatalog& catalog = context.Resources().Emplace<AssetCatalog>();
-				const std::string root = World::Paths::AssetRoot().string();
-				const std::size_t identified = catalog.Scan(root);
-				WLD_CORE_INFO("[asset] 资产目录已建立: {0} 项(跳过 {1}) ← {2}",
-					identified, catalog.Skipped(), root);
-			}
+			// 资产目录(L1):首次进入该世界会话时建立(共享入口保证只有一处知道内容根)。
+			AssetCatalog& catalog = EnsureAssetCatalog(context);
+			(void)catalog;
 			const uint64_t frame = m_AssetRegistry->BeginFrame();
 			// 帧边界回收(低频):超期未用的资产在这里真正让出 GPU 资源。
 			if (frame % (AssetRegistry::kResidentIdleFrames / 2) == 1)

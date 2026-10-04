@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Core/StringPool.h"
 #include "WUI/Panels/HierarchyPanel.h"
 #include "WUI/Common/EditorAssetCatalog.h"
 
@@ -140,7 +141,7 @@ namespace World
 		const auto labelOf = [&registry](entt::entity handle) -> std::string
 		{
 			if (const auto* tag = registry.try_get<TagComponent>(handle))
-				return tag->Tag.empty() ? "Empty Entity" : tag->Tag;
+				return StringPool::Get().NameOf(tag->Tag).empty() ? "Empty Entity" : StringPool::Get().NameOf(tag->Tag);
 			return "Empty Entity";
 		};
 		std::vector<entt::entity> roots;
@@ -889,7 +890,7 @@ namespace World
 		// 默认名称 = 实体 Tag(空 Tag 用 "Prefab")。Tag 里的非法字符不在这里偷偷改写 ——
 		// 让用户看见原因,而不是拿到一个不明所以的文件名。
 		std::string name = root.HasComponent<TagComponent>()
-			? root.GetComponent<TagComponent>().Tag : std::string();
+			? StringPool::Get().NameOf(root.GetComponent<TagComponent>().Tag) : std::string();
 		if (name.empty())
 			name = "Prefab";
 		m_CreateName = name;

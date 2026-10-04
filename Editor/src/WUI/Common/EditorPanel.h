@@ -240,6 +240,11 @@ namespace World
 			return false;
 		}
 		// 把指定实体的 MaterialPath 写成 materialPath(撤销"本次赋值"与 Extract 赋回共用)。
+		// 资产文件刚被写出/改名/删除(编辑器保存、导入产出、重命名后):
+		// 刷新资产目录,**立刻**让"路径失效 → 按身份找回"看到新路径。
+		// 默认空实现:不持有场景的宿主(测试/无头面板)不需要。
+		virtual void RefreshAssetCatalog(const std::string& logicalPath) { (void)logicalPath; }
+
 		virtual bool SetEntityMaterialPath(Entity entity, const std::string& materialPath,
 			std::string* message = nullptr)
 		{

@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Core/StringPool.h"
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
@@ -201,7 +202,8 @@ namespace World
 						const entt::id_type tagId = entt::type_id<TagComponent>().hash();
 						if (!entity->HasComponent(tagId))
 							throw std::logic_error("Entity:GetName requires a TagComponent");
-						return ScriptValue::String(static_cast<TagComponent*>(entity->GetComponent(tagId))->Tag);
+						return ScriptValue::String(StringPool::Get().NameOf(
+							static_cast<TagComponent*>(entity->GetComponent(tagId))->Tag));
 					} },
 				{ "SetName", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 					{
@@ -212,7 +214,7 @@ namespace World
 						const entt::id_type tagId = entt::type_id<TagComponent>().hash();
 						if (!entity->HasComponent(tagId))
 							throw std::logic_error("Entity:SetName requires a TagComponent");
-						static_cast<TagComponent*>(entity->GetComponent(tagId))->Tag = name;
+						static_cast<TagComponent*>(entity->GetComponent(tagId))->Tag = StringPool::Get().InternName(name);
 						return ScriptValue::Nil();
 					} },
 				{ "CreateChild", [](const ScriptValue* args, std::size_t count) -> ScriptValue
@@ -314,7 +316,7 @@ namespace World
 						{
 							if (!scene->IsVisibleToCurrentScriptUpdate(handle))
 								continue;
-							if (registry.get<TagComponent>(handle).Tag == name)
+							if (StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == name)
 								return NewUserdataOf(context, "Entity", Entity(scene, handle));
 						}
 						return ScriptValue::Nil();
