@@ -220,12 +220,14 @@ int main()
 			SystemDesc a;
 			a.Name = "decl-a";
 			a.Phase = SystemPhase::Update;
+			a.ParallelSafe = true;
 			a.Reads = { kShared };
 			a.Writes = { kWriteA };
 			a.AccessDeclared = true;
 			SystemDesc b;
 			b.Name = "decl-b";
 			b.Phase = SystemPhase::Update;
+			b.ParallelSafe = true;
 			b.Reads = { kShared };
 			b.Writes = { kWriteB };
 			b.AccessDeclared = true;
@@ -262,11 +264,13 @@ int main()
 			SystemDesc writer;
 			writer.Name = "zzz-writer";      // 名字靠后,但先注册
 			writer.Phase = SystemPhase::Update;
+			writer.ParallelSafe = true;      // 声明可并行;串行必须由**数据冲突**推出
 			writer.Writes = { kComponent };
 			writer.AccessDeclared = true;
 			SystemDesc reader;
 			reader.Name = "aaa-reader";      // 名字靠前,但后注册
 			reader.Phase = SystemPhase::Update;
+			reader.ParallelSafe = true;
 			reader.Reads = { kComponent };
 			reader.AccessDeclared = true;
 
@@ -331,6 +335,7 @@ int main()
 			SystemDesc r1;
 			r1.Name = "read-1";
 			r1.Phase = SystemPhase::Update;
+			r1.ParallelSafe = true;
 			r1.Reads = { kReadOnly };
 			r1.AccessDeclared = true;
 			SystemDesc r2 = r1;
@@ -356,6 +361,7 @@ int main()
 			SystemDesc w1;
 			w1.Name = "write-1";
 			w1.Phase = SystemPhase::Update;
+			w1.ParallelSafe = true;
 			w1.Writes = { kReadOnly };
 			w1.AccessDeclared = true;
 			SystemDesc w2 = w1;
@@ -374,6 +380,45 @@ int main()
 			}));
 			CHECK(writeWrite.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 2);
 			CHECK(!overlappedWW.load());
+		}
+
+		// 12. 并行权限守卫:读写集完全不冲突,但任一方 ParallelSafe=false ⇒ 仍必须串行。
+		//     这条守的是"仅主线程可用"的资源(典型:Luau VM 的脚本系统)—— 声明数据依赖
+		//     只说明"哪些数据",不说明"能不能离线线程跑";缺权限一律串行。
+		{
+			SystemRegistry permissionGuard;
+			constexpr entt::id_type kOnlyA = 500;
+			constexpr entt::id_type kOnlyB = 501;
+			std::atomic<int> active { 0 };
+			std::atomic<bool> overlapped { false };
+
+			SystemDesc granted;
+			granted.Name = "granted";
+			granted.Phase = SystemPhase::Update;
+			granted.ParallelSafe = true;
+			granted.Writes = { kOnlyA };
+			granted.AccessDeclared = true;
+			SystemDesc mainThreadOnly;
+			mainThreadOnly.Name = "main-thread-only";
+			mainThreadOnly.Phase = SystemPhase::Update;
+			mainThreadOnly.ParallelSafe = false;   // 权限未授予(与 Lua 系统同口径)
+			mainThreadOnly.Writes = { kOnlyB };    // 与 granted 完全不冲突
+			mainThreadOnly.AccessDeclared = true;
+
+			CHECK(permissionGuard.Register(granted, [&](World::Timestep)
+			{
+				active.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(active, overlapped);
+				active.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(permissionGuard.Register(mainThreadOnly, [&](World::Timestep)
+			{
+				active.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(active, overlapped);
+				active.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(permissionGuard.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 2);
+			CHECK(!overlapped.load());   // 无数据冲突 != 可并行:缺 ParallelSafe 一律串行
 		}
 
 		World::JobSystem::Shutdown();

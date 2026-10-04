@@ -24,8 +24,15 @@ namespace World::Gameplay
 		// - 任一方未声明:退化为 legacy 语义 —— 双方都显式 ParallelSafe 才可同批(保守串行)。
 		bool ParallelCompatible(const SystemDesc& a, const SystemDesc& b)
 		{
+			// 并发派发的两个前提必须**同时**成立:
+			//   1) 双方都声明"可以离线线程执行"(ParallelSafe)—— 这是**权限**;
+			//   2) 读写集不冲突(声明过的才判)—— 这是**正确性**。
+			// 只声明数据依赖不等于可以并行:漏写 ParallelSafe(默认 false)的系统必须保持串行 ——
+			// 否则主线程专用资源(典型:Luau VM / 只在主线程持有的句柄)会被放到工作线程上执行。
+			if (!a.ParallelSafe || !b.ParallelSafe)
+				return false;
 			if (!a.AccessDeclared || !b.AccessDeclared)
-				return a.ParallelSafe && b.ParallelSafe;
+				return true;   // 双方都声明可并行,但没有读写集 ⇒ 沿用 legacy 的"信任"口径
 
 			for (entt::id_type write : a.Writes)
 				if (ContainsId(b.Writes, write) || ContainsId(b.Reads, write))
