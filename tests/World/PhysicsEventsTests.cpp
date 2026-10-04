@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -182,7 +183,7 @@ namespace
 		// 传感器绝不产生实体接触事件
 		CHECK(CountContactPhase(*scene, fallerHandle, sensorHandle, Physics::ContactPhase::Begin) == 0);
 		// 自由穿透:没有被传感器挡住
-		const b2Vec2 position = b2Body_GetPosition(faller.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
+		const b2Vec2 position = b2Body_GetPosition(scene->GetPhysicsBody2D(faller));
 		CHECK(position.y < 1.0f);
 
 		scene->OnRuntimeStop();
@@ -200,7 +201,7 @@ namespace
 			scene->OnRuntimeStart();
 			StepFixed(*scene, 120);
 			CHECK(CountContactPhase(*scene, box, ground, Physics::ContactPhase::Begin) == 0);
-			const b2Vec2 position = b2Body_GetPosition(box.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
+			const b2Vec2 position = b2Body_GetPosition(scene->GetPhysicsBody2D(box));
 			CHECK(position.y < 0.5f);   // 穿过去了(没有碰撞响应)
 			scene->OnRuntimeStop();
 		}
@@ -367,6 +368,57 @@ namespace
 		const std::string at30 = run(30, 1.0f / 30.0f);   // 同一段真实时间
 		CHECK(at60 == at30);
 	}
+
+	// WP3 回归(PECS 1.1):DuplicateEntity 曾走 CloneComponentConfiguration,只复制
+	// Type/FixedRotation ⇒ Ccd / Layer / Mask(后加的字段)静默丢失。句柄下沉后组件是纯数据、
+	// 整体拷贝:过滤与 CCD 必须跟着副本走;运行态 body/joint 句柄必须按实体各自建、绝不复用。
+	void DuplicateKeeps2DBodyConfiguration()
+	{
+		Ref<Scene> scene = CreateTestScene();
+
+		Entity anchor = AddEntityAt(*scene, "Anchor", { 0.0f, 5.0f, 0.0f });
+		anchor.AddComponent<RigidBody2DComponent>().Type = RigidBody2DComponent::BodyType::Static;
+
+		Entity box = AddBox2D(*scene, "Box", { 1.0f, 5.0f, 0.0f }, RigidBody2DComponent::BodyType::Dynamic,
+			{ 0.25f, 0.25f }, /*layer=*/4u, /*mask=*/2u);
+		box.GetComponent<RigidBody2DComponent>().Ccd = true;
+		JointComponent& joint = box.AddComponent<JointComponent>();
+		joint.Connected = anchor;
+		joint.Type = JointComponent::JointKind::Distance;
+
+		const entt::registry& before = static_cast<const Scene&>(*scene).GetRegistry();
+		std::vector<entt::entity> known;
+		for (const entt::entity handle : before.view<RigidBody2DComponent>())
+			known.push_back(handle);
+
+		scene->DuplicateEntity(box);
+
+		const entt::registry& after = static_cast<const Scene&>(*scene).GetRegistry();
+		entt::entity copy = entt::null;
+		for (const entt::entity handle : after.view<RigidBody2DComponent>())
+			if (std::find(known.begin(), known.end(), handle) == known.end())
+				copy = handle;
+		CHECK(copy != entt::null);
+
+		const RigidBody2DComponent& copyBody = after.get<RigidBody2DComponent>(copy);
+		CHECK(copyBody.Ccd == true);        // 改前:false(被 CloneComponentConfiguration 丢掉)
+		CHECK(copyBody.Layer == 4u);        // 改前:1u
+		CHECK(copyBody.Mask == 2u);         // 改前:0xFFFFFFFFu
+		CHECK(after.all_of<JointComponent>(copy));
+
+		// 运行态:句柄按实体各自建,源与副本互不共享。
+		scene->OnRuntimeStart();
+		const b2BodyId sourceBody = scene->GetPhysicsBody2D(box);
+		const b2BodyId copyBodyId = scene->GetPhysicsBody2D(copy);
+		CHECK(b2Body_IsValid(sourceBody) && b2Body_IsValid(copyBodyId));
+		CHECK(std::memcmp(&sourceBody, &copyBodyId, sizeof(b2BodyId)) != 0);
+
+		const b2JointId sourceJoint = scene->GetPhysicsJoint2D(box);
+		const b2JointId copyJoint = scene->GetPhysicsJoint2D(copy);
+		CHECK(b2Joint_IsValid(sourceJoint) && b2Joint_IsValid(copyJoint));
+		CHECK(std::memcmp(&sourceJoint, &copyJoint, sizeof(b2JointId)) != 0);
+		scene->OnRuntimeStop();
+	}
 }
 
 int main()
@@ -383,6 +435,7 @@ int main()
 			{ "event sequence is deterministic for a fixed step script", EventSequenceIsDeterministic },
 			{ "physics events are cleared for frames with no fixed step", EventsAreClearedBetweenFrames },
 			{ "event sequence is frame-rate independent (GameApp driven)", EventSequenceIsFrameRateIndependent },
+			{ "duplicate keeps 2D filter/CCD + per-entity handles (WP3)", DuplicateKeeps2DBodyConfiguration },
 		};
 		int failures = 0;
 		for (const auto& [name, test] : tests)

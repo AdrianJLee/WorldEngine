@@ -38,7 +38,7 @@ namespace World::Schema
 		{
 			auto* dst = static_cast<World::Entity*>(rawDst);
 			auto* src = static_cast<World::Entity*>(rawSrc);
-			dst->AddOrReplaceComponent<T>(World::CloneComponentConfiguration(src->GetComponent<T>()));
+			dst->AddOrReplaceComponent<T>(src->GetComponent<T>());
 		};
 		binding.CopyAll = [](void* rawDstRegistry, void* rawSrcRegistry, const void* rawEntityMap)
 		{
@@ -50,7 +50,7 @@ namespace World::Schema
 				const World::UUID entityId = GetEntityUUID(srcRegistry, entity);
 				const auto it = entityMap.find(entityId);
 				if (it != entityMap.end())
-					dstRegistry.emplace_or_replace<T>(it->second, World::CloneComponentConfiguration(srcRegistry.get<T>(entity)));
+					dstRegistry.emplace_or_replace<T>(it->second, srcRegistry.get<T>(entity));
 			}
 		};
 		return binding;

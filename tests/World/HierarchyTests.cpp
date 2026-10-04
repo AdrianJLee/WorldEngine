@@ -132,7 +132,7 @@ int main()
 		{
 			Hierarchy::ClearParent(registry, parent);
 			CHECK(registry.get<HierarchyComponent>(parent).Parent == entt::null);
-			CHECK(registry.get<HierarchyComponent>(other).Children.empty());
+			CHECK(Hierarchy::ChildrenOf(registry, other).empty());
 			Hierarchy::UpdateWorldTransforms(registry);
 			// 解挂后 parent 成为根:其世界矩阵回到局部;child 仍跟随 parent(契约:父矩阵 * 子局部)。
 			const glm::vec3 childWorld = glm::vec3(registry.get<WorldTransformComponent>(child).Matrix[3]);
@@ -172,9 +172,9 @@ int main()
 			CHECK(loadedParent != entt::null);
 			CHECK(loadedChild != entt::null);
 			CHECK(loadedRegistry.get<HierarchyComponent>(loadedChild).Parent == loadedParent);
-			const auto& loadedParentHierarchy = loadedRegistry.get<HierarchyComponent>(loadedParent);
-			CHECK(loadedParentHierarchy.Children.size() == 1);
-			CHECK(loadedParentHierarchy.Children[0] == loadedChild);
+			const auto& loadedChildren = Hierarchy::ChildrenOf(loadedRegistry, loadedParent);
+			CHECK(loadedChildren.size() == 1);
+			CHECK(loadedChildren[0] == loadedChild);
 			// 读档后世界矩阵已求解:父世界 = 自身(此时已解挂),子世界 = 父世界 * 子局部。
 			const glm::mat4 expected = loadedRegistry.get<WorldTransformComponent>(loadedParent).Matrix *
 				loadedRegistry.get<TransformComponent>(loadedChild).GetLocalMatrix();

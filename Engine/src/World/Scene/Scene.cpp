@@ -123,13 +123,28 @@ namespace World
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("{0}", error);
 		}
 
+		// WP3:2D runtime handle lookup. Handles never live in components, so every reader goes
+		// through these two helpers; a missing entry means "no live Box2D object".
+		b2BodyId FindBody2D(const std::unordered_map<entt::entity, b2BodyId>& bodies, entt::entity entity)
+		{
+			const auto it = bodies.find(entity);
+			return it == bodies.end() ? b2_nullBodyId : it->second;
+		}
+
+		b2JointId FindJoint2D(const std::unordered_map<entt::entity, b2JointId>& joints, entt::entity entity)
+		{
+			const auto it = joints.find(entity);
+			return it == joints.end() ? b2_nullJointId : it->second;
+		}
+
 		// W3f:刚体创建的唯一实现(世界启动与运行时 AddComponent 共用)。
 		// 形状/质量折算与 OnPhysics2DStart 的既有口径一致:位置/旋转取 Transform,尺寸乘 Scale。
-		bool BuildRuntimeBody(b2WorldId worldId, entt::registry& registry, entt::entity entity)
+		bool BuildRuntimeBody(b2WorldId worldId, entt::registry& registry,
+			std::unordered_map<entt::entity, b2BodyId>& bodies, entt::entity entity)
 		{
 			if (!b2World_IsValid(worldId)) return false;
 			auto* rb = registry.try_get<RigidBody2DComponent>(entity);
-			if (!rb || b2Body_IsValid(rb->RuntimeBodyId)) return false;
+			if (!rb || b2Body_IsValid(FindBody2D(bodies, entity))) return false;
 			auto toBox2DType = [](RigidBody2DComponent::BodyType type)
 			{
 				switch (type)
@@ -152,7 +167,8 @@ namespace World
 			bodyDef.rotation = b2MakeRot(transform->GetEulerAngles().z);
 			bodyDef.motionLocks.angularZ = rb->FixedRotation;
 			bodyDef.isBullet = rb->Ccd;   // P7:CCD(高速小物体不隧穿)
-			rb->RuntimeBodyId = b2CreateBody(worldId, &bodyDef);
+			const b2BodyId body = b2CreateBody(worldId, &bodyDef);
+			bodies[entity] = body;
 			// P5:每个 shape 统一挂 (a) 碰撞过滤(Box2D b2Filter 口径,取自刚体的 Layer/Mask)、
 			// (b) 传感器开关、(c) 事件开关 —— Box2D 的 enableContactEvents / enableSensorEvents
 			// **默认是 false**,不显式打开就永远收不到任何事件;(d) 实体句柄(供事件反查)。
@@ -174,7 +190,7 @@ namespace World
 				PrepareShape(shapeDef, box->IsSensor);
 				b2Polygon polygon = b2MakeOffsetBox(transform->Scale.x * box->Size.x, transform->Scale.y * box->Size.y,
 					{ box->Offset.x, box->Offset.y }, b2MakeRot(0.0f));
-				b2CreatePolygonShape(rb->RuntimeBodyId, &shapeDef, &polygon);
+				b2CreatePolygonShape(body, &shapeDef, &polygon);
 			}
 			if (const auto* circle = registry.try_get<CircleCollider2DComponent>(entity))
 			{
@@ -186,7 +202,7 @@ namespace World
 				shapeDef.material.friction = circle->Friction;
 				shapeDef.material.restitution = circle->Restitution;
 				PrepareShape(shapeDef, circle->IsSensor);
-				b2CreateCircleShape(rb->RuntimeBodyId, &shapeDef, &shape);
+				b2CreateCircleShape(body, &shapeDef, &shape);
 			}
 			return true;
 		}
@@ -196,18 +212,18 @@ namespace World
 		// 局部锚点用 b2JointDef::localFrameA/B(b2Transform 的 p 即局部连接点,旋转留单位),
 		// Box2D 自己按刚体当前位姿换算 —— 与 3D 侧"局部→世界"的算法语义一致。
 		// 两个实体都必须已经有活刚体;任一缺失 ⇒ 返回 false 交给调用方报可读错误。
-		bool BuildRuntimeJoint(b2WorldId worldId, entt::registry& registry, entt::entity owner)
+		b2JointId BuildRuntimeJoint(b2WorldId worldId, entt::registry& registry,
+			const std::unordered_map<entt::entity, b2BodyId>& bodies, entt::entity owner)
 		{
-			if (!b2World_IsValid(worldId)) return false;
+			if (!b2World_IsValid(worldId)) return b2_nullJointId;
 			auto* joint = registry.try_get<JointComponent>(owner);
-			if (!joint || b2Joint_IsValid(joint->RuntimeJointId)) return false;
+			if (!joint) return b2_nullJointId;
 
 			const entt::entity other = joint->Connected;
-			if (!registry.valid(other) || other == owner) return false;
-			auto* ownerBody = registry.try_get<RigidBody2DComponent>(owner);
-			auto* otherBody = registry.try_get<RigidBody2DComponent>(other);
-			if (!ownerBody || !otherBody) return false;
-			if (!b2Body_IsValid(ownerBody->RuntimeBodyId) || !b2Body_IsValid(otherBody->RuntimeBodyId)) return false;
+			if (!registry.valid(other) || other == owner) return b2_nullJointId;
+			const b2BodyId ownerBodyId = FindBody2D(bodies, owner);
+			const b2BodyId otherBodyId = FindBody2D(bodies, other);
+			if (!b2Body_IsValid(ownerBodyId) || !b2Body_IsValid(otherBodyId)) return b2_nullJointId;
 
 			b2Transform localA = b2Transform { { joint->AnchorSelf.x, joint->AnchorSelf.y }, b2Rot_identity };
 			b2Transform localB = b2Transform { { joint->AnchorOther.x, joint->AnchorOther.y }, b2Rot_identity };
@@ -217,8 +233,8 @@ namespace World
 				case JointComponent::JointKind::Fixed:
 				{
 					b2WeldJointDef def = b2DefaultWeldJointDef();
-					def.base.bodyIdA = ownerBody->RuntimeBodyId;
-					def.base.bodyIdB = otherBody->RuntimeBodyId;
+					def.base.bodyIdA = ownerBodyId;
+					def.base.bodyIdB = otherBodyId;
 					def.base.localFrameA = localA;
 					def.base.localFrameB = localB;
 					created = b2CreateWeldJoint(worldId, &def);
@@ -227,8 +243,8 @@ namespace World
 				case JointComponent::JointKind::Distance:
 				{
 					b2DistanceJointDef def = b2DefaultDistanceJointDef();
-					def.base.bodyIdA = ownerBody->RuntimeBodyId;
-					def.base.bodyIdB = otherBody->RuntimeBodyId;
+					def.base.bodyIdA = ownerBodyId;
+					def.base.bodyIdB = otherBodyId;
 					def.base.localFrameA = localA;
 					def.base.localFrameB = localB;
 					if (joint->MinDistance >= 0.0f && joint->MaxDistance >= joint->MinDistance)
@@ -239,8 +255,8 @@ namespace World
 					}
 					// length 由 Box2D 按 localFrameA/B 的初始世界距离推导(默认 1.0 是占位);
 					// 这里显式留 < 0 时交给 Box2D 的默认行为不可靠,所以按两刚体当前位姿算一次。
-					const b2Vec2 worldA = b2Body_GetWorldPoint(ownerBody->RuntimeBodyId, { joint->AnchorSelf.x, joint->AnchorSelf.y });
-					const b2Vec2 worldB = b2Body_GetWorldPoint(otherBody->RuntimeBodyId, { joint->AnchorOther.x, joint->AnchorOther.y });
+					const b2Vec2 worldA = b2Body_GetWorldPoint(ownerBodyId, { joint->AnchorSelf.x, joint->AnchorSelf.y });
+					const b2Vec2 worldB = b2Body_GetWorldPoint(otherBodyId, { joint->AnchorOther.x, joint->AnchorOther.y });
 					def.length = b2Distance(worldA, worldB);
 					created = b2CreateDistanceJoint(worldId, &def);
 					break;
@@ -248,18 +264,17 @@ namespace World
 				case JointComponent::JointKind::Hinge:
 				{
 					b2RevoluteJointDef def = b2DefaultRevoluteJointDef();
-					def.base.bodyIdA = ownerBody->RuntimeBodyId;
-					def.base.bodyIdB = otherBody->RuntimeBodyId;
+					def.base.bodyIdA = ownerBodyId;
+					def.base.bodyIdB = otherBodyId;
 					def.base.localFrameA = localA;
 					def.base.localFrameB = localB;
 					created = b2CreateRevoluteJoint(worldId, &def);
 					break;
 				}
 			}
-			if (!b2Joint_IsValid(created)) return false;
+			if (!b2Joint_IsValid(created)) return b2_nullJointId;
 			b2Joint_SetCollideConnected(created, joint->EnableCollision);
-			joint->RuntimeJointId = created;
-			return true;
+			return created;
 		}
 
 		// ---- P5:把 Box2D 的事实翻译成 ECS 事件 ----
@@ -300,6 +315,7 @@ namespace World
 		}
 
 		void HarvestPhysics2DEvents(b2WorldId world, entt::registry& registry,
+			const std::unordered_map<entt::entity, b2BodyId>& bodies,
 			std::vector<Physics::ContactEvent>& outContacts, std::vector<Physics::TriggerEvent>& outTriggers,
 			std::set<uint64_t>& sensorOverlaps)
 		{
@@ -387,12 +403,12 @@ namespace World
 			std::unordered_set<uint64_t> persistedContacts;
 			for (const entt::entity entity : registry.view<RigidBody2DComponent>())
 			{
-				const RigidBody2DComponent& rigidBody = registry.get<RigidBody2DComponent>(entity);
-				if (!b2Body_IsValid(rigidBody.RuntimeBodyId)) continue;
-				const int capacity = b2Body_GetContactCapacity(rigidBody.RuntimeBodyId);
+				const b2BodyId body = FindBody2D(bodies, entity);
+				if (!b2Body_IsValid(body)) continue;
+				const int capacity = b2Body_GetContactCapacity(body);
 				if (capacity <= 0) continue;
 				std::vector<b2ContactData> contacts(static_cast<std::size_t>(capacity));
-				const int count = b2Body_GetContactData(rigidBody.RuntimeBodyId, contacts.data(), capacity);
+				const int count = b2Body_GetContactData(body, contacts.data(), capacity);
 				for (int index = 0; index < count; ++index)
 				{
 					const b2ContactData& data = contacts[index];
@@ -1138,10 +1154,11 @@ namespace World
 
 	void Scene::DestroyPhysicsJoint(entt::entity entity)
 	{
-		auto* joint = m_Registry.try_get<JointComponent>(entity);
-		if (!joint) return;
-		const b2JointId jointId = joint->RuntimeJointId;
-		joint->RuntimeJointId = b2_nullJointId;   // 先断引用再销毁(重入/失败都不留悬垂)
+		if (!m_Registry.try_get<JointComponent>(entity)) return;
+		const auto it = m_PhysicsJoints2D.find(entity);
+		if (it == m_PhysicsJoints2D.end()) return;
+		const b2JointId jointId = it->second;
+		m_PhysicsJoints2D.erase(it);   // 先断引用再销毁(重入/失败都不留悬垂)
 		if (b2Joint_IsValid(jointId)) b2DestroyJoint(jointId, true);
 	}
 
@@ -1158,6 +1175,8 @@ namespace World
 		if (!m_Registry.valid(entity)) return;
 		auto* joint = m_Registry.try_get<JointComponent>(entity);
 		if (!joint) return;
+		// 已经建好(重复调用):与旧 BuildRuntimeJoint 的早退守卫同义。
+		if (b2Joint_IsValid(FindJoint2D(m_PhysicsJoints2D, entity))) return;
 
 		const bool has3D = m_Registry.all_of<RigidBody3DComponent>(entity);
 		if (m_Physics3D && has3D)
@@ -1173,20 +1192,25 @@ namespace World
 			return;
 		}
 
-		if (!b2World_IsValid(m_PhysicsWorldId)) { joint->RuntimeJointId = b2_nullJointId; return; }
-		if (BuildRuntimeJoint(m_PhysicsWorldId, m_Registry, entity)) return;
-		// 目标还没就绪(对方没有活刚体/组件还没挂全):留空句柄,下一次 Start 或补挂时再建。
-		if (!b2Joint_IsValid(joint->RuntimeJointId))
-			joint->RuntimeJointId = b2_nullJointId;
+		if (!b2World_IsValid(m_PhysicsWorldId))
+		{
+			m_PhysicsJoints2D.erase(entity);
+			return;
+		}
+		const b2JointId created = BuildRuntimeJoint(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, entity);
+		// 目标还没就绪(对方没有活刚体/组件还没挂全):留空,下一次 Start 或补挂时再建。
+		if (b2Joint_IsValid(created)) m_PhysicsJoints2D[entity] = created;
+		else m_PhysicsJoints2D.erase(entity);
 	}
 
 	void Scene::DestroyPhysicsBody(entt::entity entity)
 	{
-		auto* body = m_Registry.try_get<RigidBody2DComponent>(entity);
-		if (!body) return;
-		b2BodyId bodyId = body->RuntimeBodyId;
-		// 先把组件切到"无刚体"状态,再销毁 Box2D 刚体(失败/重入都不会留下悬垂句柄)。
-		body->RuntimeBodyId = b2_nullBodyId;
+		if (!m_Registry.try_get<RigidBody2DComponent>(entity)) return;
+		const auto it = m_PhysicsBodies2D.find(entity);
+		if (it == m_PhysicsBodies2D.end()) return;
+		const b2BodyId bodyId = it->second;
+		// 先把引用摘掉,再销毁 Box2D 刚体(失败/重入都不会留下悬垂句柄)。
+		m_PhysicsBodies2D.erase(it);
 		if (b2Body_IsValid(bodyId)) b2DestroyBody(bodyId);
 	}
 
@@ -1215,11 +1239,21 @@ namespace World
 			return Fail("requires a 2D rigid body; this entity has no RigidBody2DComponent");
 		if (!b2World_IsValid(m_PhysicsWorldId))
 			return Fail("requires a running 2D physics world; start the runtime (Scene:OnRuntimeStart) first");
-		const RigidBody2DComponent& rigidBody = m_Registry.get<RigidBody2DComponent>(entity);
-		if (!b2Body_IsValid(rigidBody.RuntimeBodyId))
+		const b2BodyId bodyId2D = FindBody2D(m_PhysicsBodies2D, entity);
+		if (!b2Body_IsValid(bodyId2D))
 			return Fail("has a RigidBody2DComponent but no live Box2D body; the component was not added to the running world");
-		if (bodyId) *bodyId = rigidBody.RuntimeBodyId;
+		if (bodyId) *bodyId = bodyId2D;
 		return true;
+	}
+
+	b2BodyId Scene::GetPhysicsBody2D(entt::entity entity) const
+	{
+		return FindBody2D(m_PhysicsBodies2D, entity);
+	}
+
+	b2JointId Scene::GetPhysicsJoint2D(entt::entity entity) const
+	{
+		return FindJoint2D(m_PhysicsJoints2D, entity);
 	}
 
 	void Scene::SyncPhysicsBodyFromTransform(entt::entity entity)
@@ -1246,13 +1280,14 @@ namespace World
 		if (!b2World_IsValid(m_PhysicsWorldId))
 		{
 			// 世界未启动:AddComponent 只落组件配置;下一次 OnRuntimeStart 会照配置建刚体。
-			rigidBody->RuntimeBodyId = b2_nullBodyId;
+			m_PhysicsBodies2D.erase(entity);
 			return;
 		}
-		if (BuildRuntimeBody(m_PhysicsWorldId, m_Registry, entity)) return;
+		if (BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, entity)) return;
 		// 已存在的刚体:组件是唯一事实源,类型在脚本侧改过后同步给 Box2D
 		// (含 shape 的质量/惯量重算)。Transform 保持 Box2D 的权威状态,不在这里回推。
-		if (!b2Body_IsValid(rigidBody->RuntimeBodyId)) return;
+		const b2BodyId bodyId = FindBody2D(m_PhysicsBodies2D, entity);
+		if (!b2Body_IsValid(bodyId)) return;
 		b2BodyType box2dType = b2_staticBody;
 		switch (rigidBody->Type)
 		{
@@ -1260,8 +1295,8 @@ namespace World
 			case RigidBody2DComponent::BodyType::Dynamic: box2dType = b2_dynamicBody; break;
 			case RigidBody2DComponent::BodyType::Kinematic: box2dType = b2_kinematicBody; break;
 		}
-		if (b2Body_GetType(rigidBody->RuntimeBodyId) != box2dType)
-			b2Body_SetType(rigidBody->RuntimeBodyId, box2dType);
+		if (b2Body_GetType(bodyId) != box2dType)
+			b2Body_SetType(bodyId, box2dType);
 	}
 
 	void Scene::DestroyEntityNow(entt::entity entity)
@@ -1445,7 +1480,6 @@ namespace World
 		// 顺序按 registry 遍历 ⇒ 同一存档输入下确定。
 		for (const auto entity : m_Registry.view<JointComponent>())
 		{
-			m_Registry.get<JointComponent>(entity).RuntimeJointId = b2_nullJointId;
 			EnsurePhysicsJoint(entity);
 		}
 		// P6:为物理实体预建插值状态(结构写只允许在非运行态 / 提交点做;这里 m_State 还是 Stopped)。
@@ -1597,12 +1631,12 @@ namespace World
 		worldDef.gravity = { 0.0f, -9.8f };
 		worldDef.restitutionThreshold = 0.5f;
 		m_PhysicsWorldId = b2CreateWorld(&worldDef);
+		m_PhysicsBodies2D.clear();
+		m_PhysicsJoints2D.clear();
 		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 		{
-			auto& rb = m_Registry.get<RigidBody2DComponent>(entity);
-			rb.RuntimeBodyId = b2_nullBodyId;
 			// W3f:创建逻辑抽到 BuildRuntimeBody,与运行时 AddComponent 补建共用同一套形状/质量口径。
-			BuildRuntimeBody(m_PhysicsWorldId, m_Registry, entity);
+			BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, entity);
 		}
 	}
 
@@ -1614,18 +1648,18 @@ namespace World
 		b2World_Step(m_PhysicsWorldId, ts.GetSeconds(), 4);
 		// P5:步进结束后立刻把 Box2D 的 begin/end/persist 翻译进场景事件队列
 		// (队列在"本帧第一个固定步"清空,由 RunFixedFrameSystems 负责)。
-		HarvestPhysics2DEvents(m_PhysicsWorldId, m_Registry, m_ContactEvents, m_TriggerEvents, m_SensorOverlaps2D);
+		HarvestPhysics2DEvents(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_ContactEvents, m_TriggerEvents, m_SensorOverlaps2D);
 		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 		{
 			if (IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<RigidBody2DComponent>().hash())) continue;
-			auto& rb = m_Registry.get<RigidBody2DComponent>(entity);
+			const b2BodyId bodyId = FindBody2D(m_PhysicsBodies2D, entity);
 			auto* transform = m_Registry.try_get<TransformComponent>(entity);
-			if (!transform || !b2Body_IsValid(rb.RuntimeBodyId))
+			if (!transform || !b2Body_IsValid(bodyId))
 			{
 				Report("[Physics] Skipping invalid body or missing Transform entity=" + std::to_string(static_cast<uint32_t>(entity)));
 				continue;
 			}
-			const b2Transform body = b2Body_GetTransform(rb.RuntimeBodyId);
+			const b2Transform body = b2Body_GetTransform(bodyId);
 			transform->Location.x = body.p.x;
 			transform->Location.y = body.p.y;
 			transform->Rotation = glm::angleAxis(b2Rot_GetAngle(body.q), glm::vec3(0.0f, 0.0f, 1.0f));
@@ -1635,13 +1669,11 @@ namespace World
 
 	void Scene::OnPhysics2DStop()
 	{
-		for (const auto entity : m_Registry.view<JointComponent>())
-			m_Registry.get<JointComponent>(entity).RuntimeJointId = b2_nullJointId;
+		m_PhysicsJoints2D.clear();
 		if (b2World_IsValid(m_PhysicsWorldId)) b2DestroyWorld(m_PhysicsWorldId);
 		m_PhysicsWorldId = b2_nullWorldId;
 		m_SensorOverlaps2D.clear();   // 世界没了,重叠状态不能跨运行存活
-		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
-			m_Registry.get<RigidBody2DComponent>(entity).RuntimeBodyId = b2_nullBodyId;
+		m_PhysicsBodies2D.clear();
 	}
 
 	// ---- P1b D6:3D 物理(Jolt) ----

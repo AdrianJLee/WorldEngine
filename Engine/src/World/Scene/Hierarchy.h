@@ -14,6 +14,20 @@ namespace World
 	//    并做一次浅层循环保护(非法环只警告并跳过,不会死循环)。
 	namespace Hierarchy
 	{
+		// WP2:子列表已从 HierarchyComponent 拆到非 schema 的 HierarchyChildrenComponent。
+		// ChildrenOf 只读(绝不创建组件);MutableChildren 是写路径入口。
+		inline const std::vector<entt::entity>& ChildrenOf(const entt::registry& registry, entt::entity entity)
+		{
+			static const std::vector<entt::entity> empty;
+			const auto* children = registry.try_get<HierarchyChildrenComponent>(entity);
+			return children ? children->Children : empty;
+		}
+
+		inline std::vector<entt::entity>& MutableChildren(entt::registry& registry, entt::entity entity)
+		{
+			return registry.get_or_emplace<HierarchyChildrenComponent>(entity).Children;
+		}
+
 		WLD_API bool SetParent(entt::registry& registry, entt::entity child, entt::entity parent);
 		// 设父并把 child 插入 parent 的子节点列表指定位置(同级重排用);index 会被夹到合法范围。
 		WLD_API bool InsertChild(entt::registry& registry, entt::entity child, entt::entity parent,

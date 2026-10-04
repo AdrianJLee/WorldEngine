@@ -418,10 +418,7 @@ namespace World
 		// 层级:Parent 已随字段读入,Children 不入库,这里按 Parent 重建反向索引;
 		// 之后求解一次世界矩阵(P2a W3b)。
 		for (const auto entity : registry.view<HierarchyComponent>())
-		{
-			auto& hierarchy = registry.get<HierarchyComponent>(entity);
-			hierarchy.Children.clear();
-		}
+			registry.remove<HierarchyChildrenComponent>(entity);
 		std::vector<entt::entity> childrenToLink;
 		for (const auto entity : registry.view<HierarchyComponent>())
 		{
@@ -431,9 +428,9 @@ namespace World
 		}
 		for (const entt::entity child : childrenToLink)
 		{
-			auto& parentHierarchy = registry.get_or_emplace<HierarchyComponent>(
-				registry.get<HierarchyComponent>(child).Parent);
-			parentHierarchy.Children.push_back(child);
+			const entt::entity parent = registry.get<HierarchyComponent>(child).Parent;
+			registry.get_or_emplace<HierarchyComponent>(parent);
+			Hierarchy::MutableChildren(registry, parent).push_back(child);
 		}
 		Hierarchy::UpdateWorldTransforms(registry);
 

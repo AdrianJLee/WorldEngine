@@ -99,7 +99,7 @@ int main()
 		// 3. 层级重建:实例根挂在 Host 下,子节点仍在实例根下,且世界矩阵按新父求解。
 		const entt::entity instanceRootHandle = static_cast<entt::entity>(instance.Root);
 		CHECK(destinationRegistry.get<HierarchyComponent>(instanceRootHandle).Parent == host);
-		const auto& instanceChildren = destinationRegistry.get<HierarchyComponent>(instanceRootHandle).Children;
+		const auto& instanceChildren = Hierarchy::ChildrenOf(destinationRegistry, instanceRootHandle);
 		CHECK(instanceChildren.size() == 1);
 		const entt::entity instanceChild = instanceChildren[0];
 		CHECK(destinationRegistry.get<HierarchyComponent>(instanceChild).Parent == instanceRootHandle);
@@ -148,7 +148,7 @@ int main()
 			const entt::entity fileRoot = static_cast<entt::entity>(fromFile.Root);
 			CHECK(loadedRegistry.get<TagComponent>(fileRoot).Tag == "Prefab Root");
 			CHECK(loadedRegistry.get<HierarchyComponent>(fileRoot).Parent == host2);
-			const auto& fileChildren = loadedRegistry.get<HierarchyComponent>(fileRoot).Children;
+			const auto& fileChildren = Hierarchy::ChildrenOf(loadedRegistry, fileRoot);
 			CHECK(fileChildren.size() == 1);
 			CHECK(loadedRegistry.get<TagComponent>(fileChildren[0]).Tag == "Prefab Child");
 			// Host2(-5,0,0) + Root(1,2,3) + Child(0,1,0) = (-4,3,3)
@@ -229,7 +229,7 @@ int main()
 			CHECK(!RevertInstance(record, target));                  // 断链后回滚安全失败
 			// 断链不影响实体本身:编辑过的值仍在。
 			CHECK(targetRegistry.get<TagComponent>(instanceRoot).Tag == "Edited Before Unpack");
-			CHECK(targetRegistry.get<HierarchyComponent>(instanceRoot).Children.size() == 1);
+			CHECK(Hierarchy::ChildrenOf(targetRegistry, instanceRoot).size() == 1);
 
 			// 空记录断链也要安全返回 false。
 			PrefabInstanceRecord empty;
@@ -383,8 +383,7 @@ int main()
 			CHECK(instance.IsValid());
 			const entt::entity instanceRoot = static_cast<entt::entity>(instance.Root);
 			auto& targetRegistry = target.GetRegistry();
-			const entt::entity instanceChild =
-				targetRegistry.get<HierarchyComponent>(instanceRoot).Children[0];
+			const entt::entity instanceChild = Hierarchy::ChildrenOf(targetRegistry, instanceRoot)[0];
 
 			PrefabInstanceRecord record;
 			record.PrefabPath = prefabPath.string();
@@ -416,7 +415,7 @@ int main()
 			CHECK(GetOverrideCount(record) == 2);
 			CHECK(HasOverride(record, instanceRoot));
 			CHECK(record.Root == instanceRoot);
-			CHECK(targetRegistry.get<HierarchyComponent>(instanceRoot).Children.size() == 1);
+			CHECK(Hierarchy::ChildrenOf(targetRegistry, instanceRoot).size() == 1);
 			// (a) 未覆盖字段跟随盘上新值:颜色、子节点位移、父节点旋转/缩放。
 			const auto& followedMesh = targetRegistry.get<MeshRendererComponent>(instanceRoot);
 			CHECK(std::fabs(followedMesh.Color.r - 0.1f) < 1e-5f);
@@ -450,7 +449,7 @@ int main()
 			CHECK(glm::length(targetRegistry.get<TransformComponent>(instanceRoot).Location
 				- glm::vec3(7.0f, 0.0f, 0.0f)) < 1e-5f);
 			CHECK(std::fabs(targetRegistry.get<MeshRendererComponent>(instanceRoot).Color.g - 0.2f) < 1e-5f);
-			CHECK(targetRegistry.get<HierarchyComponent>(instanceRoot).Children.size() == 1);
+			CHECK(Hierarchy::ChildrenOf(targetRegistry, instanceRoot).size() == 1);
 
 			// 来源为空 / 实例根失效:安全失败,同样不动任何实体。
 			PrefabInstanceRecord empty;
@@ -483,8 +482,7 @@ int main()
 			CHECK(treeInstance.EntityCount == 3);
 			const entt::entity treeInstanceRoot = static_cast<entt::entity>(treeInstance.Root);
 			auto& treeTargetRegistry = treeTarget.GetRegistry();
-			const auto& treeChildren =
-				treeTargetRegistry.get<HierarchyComponent>(treeInstanceRoot).Children;
+			const auto& treeChildren = Hierarchy::ChildrenOf(treeTargetRegistry, treeInstanceRoot);
 			CHECK(treeChildren.size() == 2);
 			// 注意:读档重建 Children 的顺序 = enTT view 顺序(与创建序相反,既有行为),
 			// 这里按 Tag 查找,不依赖兄弟顺序(顺序问题见任务方案的"待办")。

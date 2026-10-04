@@ -70,21 +70,19 @@ namespace World::Hierarchy
 		}
 
 		HierarchyComponent& hierarchy = registry.get_or_emplace<HierarchyComponent>(child);
-		if (hierarchy.Parent != entt::null)
+		if (hierarchy.Parent != entt::null && registry.valid(hierarchy.Parent))
 		{
-			if (auto* oldParent = registry.try_get<HierarchyComponent>(hierarchy.Parent))
-				oldParent->Children.erase(
-					std::remove(oldParent->Children.begin(), oldParent->Children.end(), child),
-					oldParent->Children.end());
+			auto& oldChildren = MutableChildren(registry, hierarchy.Parent);
+			oldChildren.erase(std::remove(oldChildren.begin(), oldChildren.end(), child), oldChildren.end());
 		}
 
 		hierarchy.Parent = parent;
 		if (parent != entt::null)
 		{
-			HierarchyComponent& parentHierarchy = registry.get_or_emplace<HierarchyComponent>(parent);
-			if (std::find(parentHierarchy.Children.begin(), parentHierarchy.Children.end(), child) ==
-				parentHierarchy.Children.end())
-				parentHierarchy.Children.push_back(child);
+			registry.get_or_emplace<HierarchyComponent>(parent);
+			auto& parentChildren = MutableChildren(registry, parent);
+			if (std::find(parentChildren.begin(), parentChildren.end(), child) == parentChildren.end())
+				parentChildren.push_back(child);
 		}
 		registry.get_or_emplace<WorldTransformComponent>(child);
 		return true;
@@ -100,11 +98,9 @@ namespace World::Hierarchy
 		const auto* hierarchy = registry.try_get<HierarchyComponent>(child);
 		if (!hierarchy || hierarchy->Parent == entt::null)
 			return -1;
-		const auto* parent = registry.try_get<HierarchyComponent>(hierarchy->Parent);
-		if (!parent)
-			return -1;
-		for (size_t i = 0; i < parent->Children.size(); ++i)
-			if (parent->Children[i] == child)
+		const auto& children = ChildrenOf(registry, hierarchy->Parent);
+		for (size_t i = 0; i < children.size(); ++i)
+			if (children[i] == child)
 				return static_cast<int32_t>(i);
 		return -1;
 	}
@@ -119,7 +115,7 @@ namespace World::Hierarchy
 		auto* parentHierarchy = registry.try_get<HierarchyComponent>(parent);
 		if (!parentHierarchy)
 			return true;
-		auto& children = parentHierarchy->Children;
+		auto& children = MutableChildren(registry, parent);
 		const auto it = std::find(children.begin(), children.end(), child);
 		if (it == children.end())
 			return true;
@@ -163,7 +159,7 @@ namespace World::Hierarchy
 			if (!transform)
 				continue;
 
-			auto* hierarchy = registry.try_get<HierarchyComponent>(entity);
+			const auto* hierarchy = registry.try_get<HierarchyComponent>(entity);
 			const bool inherit = !hierarchy || hierarchy->InheritTransform;
 			const glm::mat4 local = TransformSystem::Compose(transform->Location, transform->Rotation, transform->Scale);
 			const glm::mat4 world = inherit ? parentWorld * local : local;
@@ -171,10 +167,9 @@ namespace World::Hierarchy
 			transform->Flags &= ~(TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
 			solved++;
 
-			if (hierarchy)
-				for (const entt::entity child : hierarchy->Children)
-					if (registry.valid(child))
-						s_Stack.emplace_back(child, world);
+			for (const entt::entity child : ChildrenOf(registry, entity))
+				if (registry.valid(child))
+					s_Stack.emplace_back(child, world);
 		}
 		return solved;
 	}

@@ -31,16 +31,9 @@ namespace World::Gameplay
 			CopyComponentIfPresent<CircleRendererComponent>(source, destination, from, to);
 			CopyComponentIfPresent<MeshRendererComponent>(source, destination, from, to);
 			CopyComponentIfPresent<CameraComponent>(source, destination, from, to);
-			// 物理组件的配置要带过去,但**运行时句柄不能跨场景共享**:
-			// b2BodyId 属于创建它的物理世界,直接拷贝会让两个场景持有同一个 body,
-			// 退出时的物理销毁路径就会重复销毁 -> 崩溃。这里复制配置并把句柄置空,
-			// 由目标场景在自己的物理世界启动时重新创建 body。
-			if (const auto* body = source.try_get<RigidBody2DComponent>(from))
-			{
-				RigidBody2DComponent copy = *body;
-				copy.RuntimeBodyId = b2_nullBodyId;
-				destination.emplace_or_replace<RigidBody2DComponent>(to, copy);
-			}
+			// WP3(PECS 1.1):2D 运行态句柄已下沉到 Scene 内部表,组件是纯配置 ⇒
+			// 与其它组件同一条整体拷贝路径,副本不会带出源场景的 body 句柄。
+			CopyComponentIfPresent<RigidBody2DComponent>(source, destination, from, to);
 			CopyComponentIfPresent<BoxCollider2DComponent>(source, destination, from, to);
 			CopyComponentIfPresent<CircleCollider2DComponent>(source, destination, from, to);
 		}
@@ -66,7 +59,7 @@ namespace World::Gameplay
 
 				if (!hierarchy)
 					continue;
-				std::vector<entt::entity> children = hierarchy->Children;
+				std::vector<entt::entity> children = Hierarchy::ChildrenOf(registry, current);
 				std::reverse(children.begin(), children.end());   // 栈序 → 保持源顺序
 				for (const entt::entity child : children)
 					stack.push_back(child);

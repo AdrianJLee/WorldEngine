@@ -134,9 +134,8 @@ uint32_t CountPrefabSubtreeEntities(const Scene& scene, entt::entity root){
 				if (!registry.valid(current) || !seen.insert(static_cast<uint32_t>(current)).second)
 					continue;
 				++count;
-				if (const auto* hierarchy = registry.try_get<HierarchyComponent>(current))
-					for (const entt::entity child : hierarchy->Children)
-						pending.push_back(child);
+				for (const entt::entity child : Hierarchy::ChildrenOf(registry, current))
+					pending.push_back(child);
 			}
 			return count;
 		}

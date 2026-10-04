@@ -108,10 +108,12 @@ namespace World
 			if (!scene.IsPhysics2DRunning())
 				throw std::logic_error(std::string("Entity:") + operation +
 					" requires a running 2D physics world; start the runtime first");
-			if (!b2Body_IsValid(body->RuntimeBodyId))
+			// WP3:句柄不在组件里,走场景的运行态查询(世界已确认在跑)。
+			const b2BodyId bodyId = entity.GetScene()->GetPhysicsBody2D(static_cast<entt::entity>(entity));
+			if (!b2Body_IsValid(bodyId))
 				throw std::logic_error(std::string("Entity:") + operation +
 					" has a RigidBody2DComponent but no live Box2D body; this entity was not added to the running world");
-			return body->RuntimeBodyId;
+			return bodyId;
 		}
 
 		glm::vec2 RequireVec2(const ScriptValue* args, std::size_t count, const char* operation, std::size_t index)
@@ -286,17 +288,16 @@ namespace World
 						const entt::id_type hierarchyId = entt::type_id<HierarchyComponent>().hash();
 						if (entity->HasComponent(hierarchyId))
 						{
-							const auto* hierarchy = static_cast<const HierarchyComponent*>(entity->GetComponent(hierarchyId));
 							std::size_t index = 1;
-							if (hierarchy)
+							const entt::registry& registry =
+								static_cast<const Scene&>(*entity->GetScene()).GetRegistry();
+							for (const entt::entity childHandle :
+								Hierarchy::ChildrenOf(registry, static_cast<entt::entity>(*entity)))
 							{
-								for (const entt::entity childHandle : hierarchy->Children)
-								{
-									Entity child(entity->GetScene(), childHandle);
-									if (!child.IsValid())
-										continue;
-									children.SetArrayElement(index++, NewUserdataOf(context, "Entity", child));
-								}
+								Entity child(entity->GetScene(), childHandle);
+								if (!child.IsValid())
+									continue;
+								children.SetArrayElement(index++, NewUserdataOf(context, "Entity", child));
 							}
 						}
 						return children.ToValue();

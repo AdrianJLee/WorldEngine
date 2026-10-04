@@ -5,6 +5,7 @@
 #include "World/Schema/Schema.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Hierarchy.h"
 
 #include <memory>
 #include <unordered_set>
@@ -24,10 +25,10 @@ namespace World::Gameplay
 				if (!registry.valid(current))
 					continue;
 				out.push_back(current);
-				const auto* hierarchy = registry.try_get<HierarchyComponent>(current);
-				if (!hierarchy)
+				if (!registry.any_of<HierarchyComponent>(current))
 					continue;
-				for (auto it = hierarchy->Children.rbegin(); it != hierarchy->Children.rend(); ++it)
+				const auto& children = Hierarchy::ChildrenOf(registry, current);
+				for (auto it = children.rbegin(); it != children.rend(); ++it)
 					stack.push_back(*it);
 			}
 		}
@@ -49,13 +50,8 @@ namespace World::Gameplay
 			RestoreComponentIfPresent<CircleRendererComponent>(source, destination, from, to);
 			RestoreComponentIfPresent<MeshRendererComponent>(source, destination, from, to);
 			RestoreComponentIfPresent<CameraComponent>(source, destination, from, to);
-			// 同 Prefab.cpp:物理运行时句柄属于各自的物理世界,回滚时也置空重建。
-			if (const auto* body = source.try_get<RigidBody2DComponent>(from))
-			{
-				RigidBody2DComponent copy = *body;
-				copy.RuntimeBodyId = b2_nullBodyId;
-				destination.emplace_or_replace<RigidBody2DComponent>(to, copy);
-			}
+			// WP3(PECS 1.1):句柄不落组件 ⇒ 与其它组件同一条整体回滚路径。
+			RestoreComponentIfPresent<RigidBody2DComponent>(source, destination, from, to);
 			RestoreComponentIfPresent<BoxCollider2DComponent>(source, destination, from, to);
 			RestoreComponentIfPresent<CircleCollider2DComponent>(source, destination, from, to);
 		}

@@ -282,6 +282,10 @@ namespace World
 		bool IsPhysics2DRunning() const;
 		// 按实体拿运行中的 Box2D 刚体;没有刚体组件/世界未启动/刚体无效 → false + 可读 error。
 		bool TryGetPhysicsBody(entt::entity entity, b2BodyId* bodyId, std::string* error = nullptr);
+		// WP3(PECS 1.1):2D 运行态句柄不落组件,这里给出无错误的直查入口(引擎内部/脚本绑定/测试用)。
+		// 没有刚体或世界未启动 → b2_nullBodyId / b2_nullJointId;需要可读原因时用上面的 TryGetPhysicsBody。
+		b2BodyId GetPhysicsBody2D(entt::entity entity) const;
+		b2JointId GetPhysicsJoint2D(entt::entity entity) const;
 		// 运动学/静态同步:把当前 Transform 推给 Box2D 刚体(teleport + 唤醒)。
 		// 要求世界已启动且有有效刚体;否则抛可读错误。
 		void SyncPhysicsBodyFromTransform(entt::entity entity);
@@ -515,6 +519,11 @@ namespace World
 		std::unordered_map<entt::entity, std::unordered_set<entt::id_type>> m_PendingRemove;
 		uint32_t m_ViewportWidth = 0, m_ViewportHeight = 0;
 		b2WorldId m_PhysicsWorldId = b2_nullWorldId;
+		// WP3(PECS 1.1):2D runtime handles live here, not inside the components -- the same shape as
+		// 3D (Physics3DWorld::Impl::m_Bodies / m_JointRecords). Entries exist only while the world runs;
+		// destroying the entity / removing the component / stopping the world erases them.
+		std::unordered_map<entt::entity, b2BodyId> m_PhysicsBodies2D;
+		std::unordered_map<entt::entity, b2JointId> m_PhysicsJoints2D;
 		// P1b D6:opaque 3D 物理世界(Physics3D.h 不暴露 Jolt;unique_ptr 的删除由 Scene.cpp 承担)。
 		std::unique_ptr<Physics3DWorld> m_Physics3D;
 		// P5:本帧的物理事件(固定步产出 → 可变阶段消费)。见 EnqueueContactEvent / ClearPhysicsEvents。

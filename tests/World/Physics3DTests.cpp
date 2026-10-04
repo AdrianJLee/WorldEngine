@@ -301,7 +301,7 @@ namespace
 			// 可变阶段(表现层)每帧仍跑一次,与宿主(GameHost)同序。
 			scene->OnFixedUpdate(Timestep(kFixedStep));
 
-		const b2Vec2 position2D = b2Body_GetPosition(faller2D.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
+		const b2Vec2 position2D = b2Body_GetPosition(scene->GetPhysicsBody2D(faller2D));
 		glm::vec3 position3D { 0.0f };
 		CHECK(scene->GetPhysics3DWorld() != nullptr);
 		CHECK(scene->GetPhysics3DWorld()->TryGetBodyTransform(faller3D, &position3D, nullptr));
@@ -569,7 +569,7 @@ int main()
 					app.Tick(Timestep(frameSeconds));
 				Gameplay::GameApp::Shutdown();
 
-				const b2Vec2 position = b2Body_GetPosition(faller.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
+				const b2Vec2 position = b2Body_GetPosition(scene->GetPhysicsBody2D(faller));
 				height[run] = position.y;
 				scene->OnRuntimeStop();
 			}

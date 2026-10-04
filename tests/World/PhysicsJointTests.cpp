@@ -108,7 +108,7 @@ namespace
 			scene.GetPhysics3DWorld()->TryGetBodyTransform(entity, &position, nullptr);
 			return position;
 		}
-		const b2Vec2 position = b2Body_GetPosition(entity.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
+		const b2Vec2 position = b2Body_GetPosition(scene.GetPhysicsBody2D(entity));
 		return glm::vec3(position.x, position.y, 0.0f);
 	}
 
@@ -122,14 +122,14 @@ namespace
 		AddJoint(*scene, anchor, rider, JointComponent::JointKind::Fixed);
 		scene->OnRuntimeStart();
 		// 判别性:给 anchor 一个侧向速度 —— 没焊住的话 rider 不会被带走。
-		const b2BodyId anchorBody = anchor.GetComponent<RigidBody2DComponent>().RuntimeBodyId;
+		const b2BodyId anchorBody = scene->GetPhysicsBody2D(anchor);
 		b2Body_SetLinearVelocity(anchorBody, { 4.0f, 0.0f });
 		b2Body_SetAwake(anchorBody, true);
 		StepFixed(*scene, 45);
 
 		const glm::vec3 anchorPosition = BodyPosition(*scene, anchor);
 		const glm::vec3 riderPosition = BodyPosition(*scene, rider);
-		const b2Vec2 riderVelocity = b2Body_GetLinearVelocity(rider.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
+		const b2Vec2 riderVelocity = b2Body_GetLinearVelocity(scene->GetPhysicsBody2D(rider));
 		std::printf("[info] 2D fixed: anchor=(%.4f, %.4f) rider=(%.4f, %.4f) separation=%.4f rider.vx=%.4f\n",
 			anchorPosition.x, anchorPosition.y, riderPosition.x, riderPosition.y,
 			glm::length(riderPosition - anchorPosition), riderVelocity.x);
@@ -286,7 +286,7 @@ namespace
 
 			scene->OnRuntimeStart();
 
-			const bool bulletFlag = b2Body_IsBullet(bullet.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
+			const bool bulletFlag = b2Body_IsBullet(scene->GetPhysicsBody2D(bullet));
 
 			scene->OnRuntimeStop();
 

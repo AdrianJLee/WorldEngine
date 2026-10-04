@@ -37,8 +37,10 @@
 - 一个组件 = 一个 `WE_SCHEMA_BODY(World|Game, Name, Component)` 的 C++ struct,只放字段。
 - 引擎不提供任何"带逻辑的组件"。旧的两条路（`ScriptableEntity` 虚函数面、
   `CppScriptComponent` / `LuauScriptComponent` 单实体脚本）**已整体删除**。
-- 运行时状态（句柄、缓存）可以留在组件里,但要标 `Transient`（不进存档）,
-  并在系统里重建 —— 参考 `RigidBody2DComponent::RuntimeBodyId`。
+- 运行时状态（句柄、缓存）**不放进组件**:组件保持平凡可拷贝,句柄住在系统/场景的内部表里
+  —— 参考 2D 物理的 `Scene::m_PhysicsBodies2D` / `m_PhysicsJoints2D`（与 3D 的
+  `Physics3DWorld::Impl::m_Bodies` 同构）。纯缓存若要复用 ECS 存储,用非 schema 组件
+  （如 `WorldTransformComponent` / `PhysicsInterpolationState`）。
 - 标签组件就是零字节 struct（`struct DeadTag {};`）,给查询当过滤条件。
 
 ## 3. 系统:C++ 与 Luau 平权

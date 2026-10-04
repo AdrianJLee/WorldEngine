@@ -206,7 +206,7 @@ namespace World::Gameplay
 					if (const auto parent = uuidByHandle.find(hierarchy.Parent); parent != uuidByHandle.end())
 						out << YAML::Key << "Parent" << YAML::Value << static_cast<uint64_t>(parent->second);
 				out << YAML::Key << "Children" << YAML::Value << YAML::BeginSeq;
-				for (const entt::entity child : hierarchy.Children)
+				for (const entt::entity child : Hierarchy::ChildrenOf(registry, handle))
 					if (const auto found = uuidByHandle.find(child); found != uuidByHandle.end())
 						out << static_cast<uint64_t>(found->second);
 				out << YAML::EndSeq << YAML::EndMap;

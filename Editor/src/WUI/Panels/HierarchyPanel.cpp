@@ -169,14 +169,13 @@ namespace World
 			prefabTips.push_back(activeRecord ? PrefabRowTooltip(*activeRecord, ownRecord != nullptr)
 				: std::string());
 
-			const auto* hierarchy = registry.try_get<HierarchyComponent>(handle);
-			if (!hierarchy)
+			if (!registry.any_of<HierarchyComponent>(handle))
 				return;
 			// 折叠节点不展开子节点(但仍显示自身)。
 			if (m_Collapsed.find(static_cast<uint32_t>(handle)) != m_Collapsed.end())
 				return;
-			// 子节点顺序即 HierarchyComponent::Children 的顺序(同级重排会改它),不再按名字排序。
-			for (const entt::entity child : hierarchy->Children)
+			// 子节点顺序即 HierarchyChildrenComponent 的顺序(同级重排会改它),不再按名字排序。
+			for (const entt::entity child : Hierarchy::ChildrenOf(registry, handle))
 				if (registry.valid(child))
 					visit(child, depth + 1, activeRecord);
 		};
@@ -238,8 +237,7 @@ namespace World
 				const bool prefabRow = index < prefabRoles.size() && prefabRoles[index] != 0;
 				row->Indent = static_cast<float>(depth) * 14.0f + (prefabRow ? kPrefabMarkerSlot : 0.0f);
 				// 折叠标记直接放进文本(避免额外的行内热区绘制):有子节点显示 +/-。
-				const auto* hierarchy = registry.try_get<HierarchyComponent>(entity);
-				const bool hasChildren = hierarchy && !hierarchy->Children.empty();
+				const bool hasChildren = !Hierarchy::ChildrenOf(registry, entity).empty();
 				const bool collapsed = m_Collapsed.find(static_cast<uint32_t>(static_cast<entt::entity>(entity)))
 					!= m_Collapsed.end();
 				row->Text = std::string(hasChildren ? (collapsed ? "+ " : "- ") : "  ") + labelOf(entity);
@@ -517,8 +515,7 @@ namespace World
 		for (size_t i = 0; i < m_Rows.size(); ++i)
 		{
 			const Entity entity = m_RowEntities[i];
-			const auto* hierarchy = registry.try_get<HierarchyComponent>(entity);
-			if (!hierarchy || hierarchy->Children.empty())
+			if (Hierarchy::ChildrenOf(registry, entity).empty())
 				continue;
 			const Wui::WuiRect rowRect = m_Rows[i]->Rect();
 			const Wui::WuiRect toggle { rowRect.X + m_Rows[i]->Indent, rowRect.Y, 16.0f, rowRect.H };

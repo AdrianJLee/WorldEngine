@@ -21,10 +21,6 @@
 
 namespace World
 {
-	// 复制组件时只保留"编辑配置",剔除运行态。默认整体复制;有运行态的组件提供特化。
-	template <typename T>
-	T CloneComponentConfiguration(const T& source) { return source; }
-
 	struct UUIDComponent
 	{
 		UUID ID;
@@ -182,12 +178,11 @@ namespace World
 	struct HierarchyComponent
 	{
 		entt::entity Parent = entt::null;
-		std::vector<entt::entity> Children;
 		bool InheritTransform = true;
 
 		WE_SCHEMA_BODY(World, HierarchyComponent, Component)
 			WE_SCHEMA_META(Category("Scene"),
-				Doc("Parent link plus whether the parent transform is inherited; Children is a runtime cache rebuilt from Parent after loading."))
+				Doc("Parent link plus whether the parent transform is inherited. The runtime child list lives in the non-schema HierarchyChildrenComponent."))
 			// P2 W3a:字段 id 显式钉住(schema-compiler 的公式值会改写这两个 id,
 			// 而它们已经写进存档;显式 Id 让生成物与既有存档迁移语义一致,--check 门禁才可能为绿)。
 			// Entity32:Parent 在 C++ 侧是 entt::entity(32 位句柄),schema 存 64 位整数。
@@ -196,6 +191,14 @@ namespace World
 			WE_FIELD(InheritTransform, Bool, Id(0x4849455241524332), Default(true),
 				Doc("When on, this entity's world transform is parent world x local; off = ignore the parent transform."));
 		WE_SCHEMA_END
+	};
+
+	// WP2(PECS 1.1):运行期子列表缓存。**非 schema**(不入 .wd、不进属性面板、不参与 schema 复制),
+	// 读档后由 SceneSerializer 按 Parent 重建,写路径由 Hierarchy::SetParent / InsertChild 维护。
+	// 拆出来是为了让 HierarchyComponent 保持平凡可拷贝(原 struct 内嵌 std::vector 会带 24B 堆指针)。
+	struct HierarchyChildrenComponent
+	{
+		std::vector<entt::entity> Children;
 	};
 
 	struct WorldTransformComponent
@@ -385,7 +388,9 @@ namespace World
 		WE_ENUM_END
 
 		BodyType Type = BodyType::Static;
-		b2BodyId RuntimeBodyId = b2_nullBodyId;
+		// WP3(PECS 1.1):running-state b2BodyId lives in the Scene-internal table
+		// (same shape as 3D's Physics3DWorld::Impl::m_Bodies). The component keeps only
+		// schema fields, so copies/prefab instances can never carry another entity's handle.
 		bool FixedRotation = false;
 		// P7:连续碰撞检测(Box2D b2BodyDef.isBullet)—— 高速小物体不会隧穿。
 		bool Ccd = false;
@@ -617,8 +622,7 @@ namespace World
 		float MaxDistance = -1.0f;
 		// 关节连接的两体之间是否仍然允许碰撞(默认否,与 Unity / Box2D 默认一致)。
 		bool EnableCollision = false;
-		// 2D 运行态句柄(非 schema 字段,不入档):世界只在运行期存在。
-		b2JointId RuntimeJointId = b2_nullJointId;
+		// WP3:the 2D b2JointId lives in the Scene-internal table; the component keeps only schema fields.
 
 		WE_SCHEMA_BODY(World, JointComponent, Component)
 			WE_SCHEMA_META(Category("Physics"),
@@ -670,6 +674,4 @@ namespace World
 		WE_SCHEMA_END
 	};
 
-	// 组件配置克隆特化(剔除运行态)。
-	RigidBody2DComponent CloneComponentConfiguration(const RigidBody2DComponent& source);
 }
