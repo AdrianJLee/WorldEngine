@@ -29,9 +29,10 @@ namespace World::Gameplay
 	public:
 		// 帧首采样:把 InputService 的动作/轴 + 平台鼠标位置折算成 Scene::InputSnapshot。
 		// mousePosition 由宿主在**有窗口**时传入(无窗口的 headless 宿主传 {0,0});
-		// 鼠标增量由本服务按"上一可变帧位置"求差。
+		// 鼠标增量由本服务按"上一可变帧位置"求差;
+		// scrollDelta 由宿主从平台滚轮累积读入(无窗口宿主传 {0,0}),写入快照的 ScrollDelta。
 		static const Scene::InputSnapshot& Sample(Scene& scene, const InputService& service,
-			glm::vec2 mousePosition = glm::vec2(0.0f));
+			glm::vec2 mousePosition = glm::vec2(0.0f), glm::vec2 scrollDelta = glm::vec2(0.0f));
 
 		// 丢弃某场景的边沿/鼠标缓存并清空快照(场景停止/换场景时调用):
 		// 运行结束后不应再能读到上一场运行的输入;不调用只会多留一份可判活的缓存。

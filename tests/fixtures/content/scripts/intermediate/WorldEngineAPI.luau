@@ -287,6 +287,10 @@ function Input:Axis(axis, player) end
 ---@return integer
 function Input:PlayerCount() end
 
+---Vertical wheel delta for this frame; 0 when there is no wheel input.
+---@return number
+function Input:Scroll() end
+
 -- Global service table 'Level': read-only; there is no runtime constructor.
 ---Read-only level/flow service table; scene handles and host callbacks are not exposed.
 ---@class Level

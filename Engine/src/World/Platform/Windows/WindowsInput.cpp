@@ -35,4 +35,28 @@ namespace World
 		auto [x, y] = GetMousePosition();
 		return y;
 	}
+
+	namespace
+	{
+		// 滚轮增量累积器(仅主线程读写:事件分发与帧采样都在主线程)。
+		float s_ScrollX = 0.0f;
+		float s_ScrollY = 0.0f;
+	}
+
+	void Input::AccumulateScroll(float xOffset, float yOffset)
+	{
+		s_ScrollX += xOffset;
+		s_ScrollY += yOffset;
+	}
+
+	std::pair<float, float> Input::GetScrollDelta()
+	{
+		return { s_ScrollX, s_ScrollY };
+	}
+
+	void Input::ResetScrollDelta()
+	{
+		s_ScrollX = 0.0f;
+		s_ScrollY = 0.0f;
+	}
 }

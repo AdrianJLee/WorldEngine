@@ -348,13 +348,17 @@ namespace World::Gameplay
 		if (m_Scene && m_RuntimeStarted)
 		{
 			glm::vec2 mousePosition(0.0f);
+			glm::vec2 scrollDelta(0.0f);
 			if (Application::HasInstance())
 			{
 				// 无窗口宿主(测试/专用服务器)绝不轮询平台鼠标(与上面的按键喂入同一守卫)。
 				const auto position = Input::GetMousePosition();
 				mousePosition = glm::vec2(position.first, position.second);
+				// WP5:滚轮同样只在有窗口时读平台累积值。
+				const auto scroll = Input::GetScrollDelta();
+				scrollDelta = glm::vec2(scroll.first, scroll.second);
 			}
-			Gameplay::InputSystem::Sample(*m_Scene, GameApp::Get().Input(), mousePosition);
+			Gameplay::InputSystem::Sample(*m_Scene, GameApp::Get().Input(), mousePosition, scrollDelta);
 		}
 		GameApp::Get().Tick(frameTime);
 		// W7-6/P2 W3b:帧末把"当前按下"滚成"上一帧按下",下一帧的 Pressed/Released 才有真实边沿。

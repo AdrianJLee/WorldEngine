@@ -2,6 +2,7 @@
 #include "World/Core/Application.h"
 
 #include "World/Core/Log.h"
+#include "World/Core/Input.h"
 #include "World/Core/Timestep.h"
 #include "World/Asset/ProjectMount.h"
 #include "World/Renderer/Renderer.h"
@@ -175,6 +176,9 @@ namespace World
 						layer->OnUiFrame();
 					}
 				}
+				// WP5:本帧滚轮已被玩法输入采样消费(采样在层更新的 OnUpdate 里),
+				// 清掉累积值;平台轮询(OnUpdate)随后只累积下一帧的增量。
+				Input::ResetScrollDelta();
 				tracePhase("Renderer::EndFramePresent");
 				Renderer::EndFramePresent();
 				tracePhase("Renderer::EndFrame");
@@ -211,7 +215,12 @@ namespace World
 		dispatcher.Dispatch<MouseMovedEvent>([](MouseMovedEvent& ev)
 			{ Wui::WuiRhiBackend::FeedMouseMove(ev.GetX(), ev.GetY()); return false; });
 		dispatcher.Dispatch<MouseScrolledEvent>([](MouseScrolledEvent& ev)
-			{ Wui::WuiRhiBackend::FeedMouseScroll(ev.GetXOffset(), ev.GetYOffset()); return false; });
+			{
+				Wui::WuiRhiBackend::FeedMouseScroll(ev.GetXOffset(), ev.GetYOffset());
+				// WP5:同一份平台事件也喂给玩法输入(滚轮此前只到 UI,游戏侧读不到)。
+				Input::AccumulateScroll(ev.GetXOffset(), ev.GetYOffset());
+				return false;
+			});
 
 		dispatcher.Dispatch<WindowResizeEvent>(WLD_BIND_EVENT_FN(Application::OnWindowResize));
 		for (auto it = m_LayerStack.end(); it != m_LayerStack.begin(); )

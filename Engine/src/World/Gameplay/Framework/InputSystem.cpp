@@ -54,7 +54,8 @@ namespace World::Gameplay
 		}
 	}
 
-	const SceneSnapshot& InputSystem::Sample(Scene& scene, const InputService& service, glm::vec2 mousePosition)
+	const SceneSnapshot& InputSystem::Sample(Scene& scene, const InputService& service, glm::vec2 mousePosition,
+		glm::vec2 scrollDelta)
 	{
 		SceneInputState& state = Ensure(scene);
 		const Gameplay::InputSnapshot& source = service.GetSnapshot();
@@ -69,8 +70,8 @@ namespace World::Gameplay
 		snapshot.MouseDelta = (firstSample || !state.HasPreviousMouse)
 			? glm::vec2(0.0f)
 			: (mousePosition - state.PreviousMouse);
-		// 平台层(World::Input)目前没有滚轮读数;字段保留给宿主/平台扩展,固定为 0。
-		snapshot.ScrollDelta = 0.0f;
+		// 垂直滚轮增量(宿主从平台事件累积传入;无窗口宿主恒 0)。
+		snapshot.ScrollDelta = scrollDelta.y;
 		snapshot.SampledFrame = scene.GetTime().FrameCount;
 		snapshot.Valid = true;
 		scene.SetInputSnapshot(std::move(snapshot));

@@ -241,6 +241,17 @@ namespace World
 			return ScriptValue::Number(static_cast<double>(players));
 		}
 
+		// WP5:滚轮增量读的是**场景快照**(不是平台实时值)⇒ 同一可变帧内固定步循环
+		// 读到的滚轮逐位相同,与按键/轴/鼠标的确定性口径一致。
+		ScriptValue InputScrollImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[5], count, 0);
+			float scroll = 0.0f;
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				scroll = scene->GetInputSnapshot().ScrollDelta;
+			return ScriptValue::Number(static_cast<double>(scroll));
+		}
+
 		// ---- WP5:Time(只读帧时间服务;推进全在引擎侧,脚本没有写入口) ----
 
 		// 无活动场景时返回 0 而不是抛错(与 Input 无会话时返回 false/0 的容错口径一致)。
@@ -603,6 +614,11 @@ namespace World
 				return InputPlayerCountImpl(args, count);
 			}, nullptr, 0, 0, "integer",
 				"Number of configured player slots." },
+			{ "Scroll", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputScrollImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Vertical wheel delta for this frame; 0 when there is no wheel input." },
 		};
 
 		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。
@@ -746,7 +762,7 @@ namespace World
 				"Last save/load error; empty when the last operation succeeded." },
 		};
 		static const ScriptServiceBinding services[] = {
-			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, 5 },
+			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, 6 },
 			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, 9 },
 			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, 7 },
 			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, 6 },

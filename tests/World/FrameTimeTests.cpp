@@ -132,8 +132,10 @@ int main()
 			input.SetKeyState(0, InputDevice::Key, 32, true);   // Jump
 			input.SetKeyState(0, InputDevice::Key, 68, true);   // MoveRight
 			input.BuildSnapshot(0);                             // 宿主:原始状态 -> 动作/轴
-			InputSystem::Sample(scene, input, glm::vec2(10.0f, 20.0f));   // 帧首恰好一次
+			// 帧首恰好一次;滚轮随平台累积值一起传入(非零,证明它真的进了快照)。
+			InputSystem::Sample(scene, input, glm::vec2(10.0f, 20.0f), glm::vec2(0.0f, 3.5f));
 			CHECK(InputSystem::GetSampleCount(scene) == 1);
+			CHECK(scene.GetInputSnapshot().ScrollDelta == 3.5f);
 
 			std::vector<std::string> digests;
 			std::vector<bool> pressedPerStep;
