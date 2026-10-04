@@ -264,14 +264,16 @@ int main()
 
 			const auto& timings = pipeScene.GetFrameSystemTimings();
 			// 顺序 = 固定阶段(Fixed)在前 → 可变阶段(Update→Late→PreRender)。
-			CHECK(timings.size() == 7);
-			CHECK(timings[0].Name == "physics-2d");
-			CHECK(timings[1].Name == "physics-3d");
-			CHECK(timings[2].Name == "movement-system");
-			CHECK(timings[3].Name == "transform-system");
-			CHECK(timings[4].Name == "camera-system");
-			CHECK(timings[5].Name == "animation-system");   // PreRender
-			CHECK(timings[6].Name == "render-extract");     // 抽取排在动画之后(要拿当帧调色板)
+			// WP5:固定阶段现在以 PreFixed 的 `timer-system` 开头(时间服务推进)。
+			CHECK(timings.size() == 8);
+			CHECK(timings[0].Name == "timer-system");       // PreFixed
+			CHECK(timings[1].Name == "physics-2d");
+			CHECK(timings[2].Name == "physics-3d");
+			CHECK(timings[3].Name == "movement-system");
+			CHECK(timings[4].Name == "transform-system");
+			CHECK(timings[5].Name == "camera-system");
+			CHECK(timings[6].Name == "animation-system");   // PreRender
+			CHECK(timings[7].Name == "render-extract");     // 抽取排在动画之后(要拿当帧调色板)
 		}
 
 		// ========================================================
@@ -330,8 +332,9 @@ int main()
 
 			const auto& timings = systemScene.GetFrameSystemTimings();
 			// 7 个内置 + 自定义;CustomTestSystem 在 Update 阶段 ⇒ 排在内置的表现层之前
-			CHECK(timings.size() == 8);
-			CHECK(timings[5].Name == "CustomTestSystem");
+			// WP5:内置 8 个(含 PreFixed 的 timer-system)+ 自定义。
+			CHECK(timings.size() == 9);
+			CHECK(timings[6].Name == "CustomTestSystem");
 		}
 
 		// ========================================================
@@ -368,7 +371,7 @@ int main()
 
 			// 每个阶段都进耗时表(读面板按它列系统)。
 			const auto& phaseTimings = phaseScene.GetFrameSystemTimings();
-			CHECK(phaseTimings.size() == 4 + 7);   // 4 个探针 + 7 个引擎内置
+			CHECK(phaseTimings.size() == 4 + 8);   // 4 个探针 + 8 个引擎内置(含 PreFixed 的 timer-system)
 			bool sawLate = false;
 			for (const auto& timing : phaseTimings)
 				sawLate = sawLate || timing.Name == "LateSystem";

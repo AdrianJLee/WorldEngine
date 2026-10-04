@@ -11,10 +11,10 @@ namespace World
 {
 	class ScriptTableRef;
 
-	// P2 W3b:游戏服务面的脚本绑定(Input / Level / Save)。
+	// P2 W3b:游戏服务面的脚本绑定(Input / Level / Save)+ WP5 的只读 Time。
 	//
 	// 设计要点:
-	//   - 三个**只读全局表**(与既有 Entity/vec3 惯例一致);表本身不可脚本构造、不可改写;
+	//   - 四个**只读全局表**(与既有 Entity/vec3 惯例一致);表本身不可脚本构造、不可改写;
 	//   - 方法体每次调用懒查 Gameplay::GameApp::TryGet(),不缓存会话指针
 	//     (ScriptEngine 先于 GameApp 创建;headless 夹具也可能只有一方);
 	//   - 只暴露查询/请求类 API:喂入类(SetKeyState/EndFrame/BuildSnapshot/SetMap)、
@@ -61,7 +61,7 @@ namespace World
 		const char* Description = nullptr;
 	};
 
-	// 一个只读全局服务表(Input/Level/Save)。
+	// 一个只读全局服务表(Input/Level/Save/Time)。
 	struct ScriptServiceBinding
 	{
 		const char* Name = nullptr;
@@ -70,7 +70,7 @@ namespace World
 		std::size_t MethodCount = 0;
 	};
 
-	// 运行时注册 Input/Level/Save 三个全局表。注册失败(重复注册/名字被占用)返回 false + error。
+	// 运行时注册 Input/Level/Save/Time 四个全局表。注册失败(重复注册/名字被占用)返回 false + error。
 	WLD_API bool RegisterGameplayServiceBindings(ScriptBindingContext& bindings, std::string* error = nullptr);
 
 	// 服务面 API 的唯一描述表:运行时注册与 LuaStubGenerator 的存根渲染共用同一份,

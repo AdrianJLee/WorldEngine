@@ -718,6 +718,27 @@ set_tests_properties(World.Input PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 60
 )
+# WP5:帧首输入采样(InputSystem)+ 场景时间服务(TimerSystem)的反假验收
+# (确定性/一次采样/计时语义/Lua Time 读数)。
+add_executable(WorldFrameTimeTests World/FrameTimeTests.cpp)
+target_link_libraries(WorldFrameTimeTests PRIVATE World)
+target_compile_features(WorldFrameTimeTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldFrameTimeTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldFrameTimeTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldFrameTimeTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.FrameTime COMMAND WorldFrameTimeTests)
+set_tests_properties(World.FrameTime PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
 # P2a W4:Prefab 子树实例化(深拷贝/UUID 重发/层级重建)。
 add_executable(WorldPrefabTests World/PrefabTests.cpp)
 target_link_libraries(WorldPrefabTests PRIVATE World)
@@ -1253,6 +1274,15 @@ foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
         VERBATIM
     )
 endforeach()
+
+# WP5:FrameTime 测试与上面的测试目标同一口径 —— WorldRuntime.dll 必须在 exe 旁边。
+add_custom_command(TARGET WorldFrameTimeTests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:World>"
+        "$<TARGET_FILE_DIR:WorldFrameTimeTests>"
+    COMMENT "Copying WorldRuntime.dll next to WorldFrameTimeTests.exe"
+    VERBATIM
+)
 
 foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD

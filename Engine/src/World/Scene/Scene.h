@@ -163,10 +163,52 @@ namespace World
 			std::string Name;
 			bool ParallelSafe = false;
 			double Milliseconds = 0.0;
+			Gameplay::SystemPhase Phase = Gameplay::SystemPhase::Update;
+			std::string Owner = "Builtin";
+			bool Enabled = true;
+		};
+
+		// WP5:场景级时间服务。工业口径:
+		//  - ElapsedSeconds 只在运行态累积,暂停(RunFixedWhenPaused=false)时不涨;
+		//  - DeltaSeconds = 本可变帧的 dt(可被 TimeScale 缩放),FixedDeltaSeconds = 固定步长;
+		//  - FrameCount / FixedStepCount 由宿主驱动递增。
+		struct FrameTimeService
+		{
+			double ElapsedSeconds = 0.0;
+			float DeltaSeconds = 0.0f;
+			float UnscaledDeltaSeconds = 0.0f;
+			float FixedDeltaSeconds = 1.0f / 60.0f;
+			uint64_t FrameCount = 0;
+			uint64_t FixedStepCount = 0;
+			float TimeScale = 1.0f;
+		};
+
+		// WP5:一帧的输入快照。**帧首采样一次**、PreFixed/Fixed 只消费 —— 同一可变帧内
+		// 跑 0..N 个固定步时,每个固定步看到的输入逐位相同(保 P4/P5 的确定性口径)。
+		struct InputSnapshot
+		{
+			std::unordered_map<std::string, bool> Buttons;   // 动作名 → 是否按下
+			std::unordered_map<std::string, float> Axes;     // 动作名 → 轴值 [-1,1]
+			glm::vec2 MousePosition { 0.0f };
+			glm::vec2 MouseDelta { 0.0f };
+			float ScrollDelta = 0.0f;
+			uint64_t SampledFrame = 0;
+			bool Valid = false;
 		};
 		void RegisterFrameSystem(FrameSystem system);
 		// Pure ECS:撤销一个具名帧系统(系统脚本热重载/替换用)。不存在返回 false。
 		bool UnregisterFrameSystem(const std::string& name);
+		// WP6:启用/禁用具名帧系统(false = 留在册、面板可见,但本轮不执行)。名字不存在返回 false。
+		bool SetFrameSystemEnabled(const std::string& name, bool enabled);
+		bool IsFrameSystemEnabled(const std::string& name) const;
+		// WP6:设置归属标签(Builtin / Project:<类型> / Lua:<脚本> / Plugin:<名>)。名字不存在返回 false。
+		bool SetFrameSystemOwner(const std::string& name, std::string owner);
+		// WP5:时间服务(只读查询;推进由宿主/引擎内部走 MutableTime)与输入快照
+		// (宿主每**可变帧**采样一次,固定步只消费 —— 保确定性)。
+		const FrameTimeService& GetTime() const { return m_TimeService; }
+		FrameTimeService& MutableTime() { return m_TimeService; }
+		void SetInputSnapshot(InputSnapshot snapshot) { m_InputSnapshot = std::move(snapshot); }
+		const InputSnapshot& GetInputSnapshot() const { return m_InputSnapshot; }
 		bool UnregisterSystemByType(std::type_index type);
 		bool HasFrameSystem(const std::string& name) const;
 		bool HasSystemByType(std::type_index type) const;
@@ -527,6 +569,9 @@ namespace World
 		std::unique_ptr<Gameplay::SystemRegistry> m_FrameSystems;
 		std::vector<FrameSystem> m_FrameSystemDefinitions;
 		std::vector<FrameSystemTiming> m_FrameSystemTimings;
+		// WP5:时间服务与输入快照(见公开段的 FrameTimeService / InputSnapshot)。
+		FrameTimeService m_TimeService;
+		InputSnapshot m_InputSnapshot;
 
 		entt::registry m_Registry;
 		WorldContext* m_Context = nullptr;

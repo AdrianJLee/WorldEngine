@@ -241,6 +241,57 @@ namespace World
 			return ScriptValue::Number(static_cast<double>(players));
 		}
 
+		// ---- WP5:Time(只读帧时间服务;推进全在引擎侧,脚本没有写入口) ----
+
+		// 无活动场景时返回 0 而不是抛错(与 Input 无会话时返回 false/0 的容错口径一致)。
+		const Scene::FrameTimeService* ActiveTimeService()
+		{
+			Scene* scene = ScriptEngine::GetActiveScene();
+			return scene ? &scene->GetTime() : nullptr;
+		}
+
+		ScriptValue TimeElapsedImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[0], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? time->ElapsedSeconds : 0.0);
+		}
+
+		ScriptValue TimeDeltaImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[1], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? static_cast<double>(time->DeltaSeconds) : 0.0);
+		}
+
+		ScriptValue TimeFixedDeltaImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[2], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? static_cast<double>(time->FixedDeltaSeconds) : 0.0);
+		}
+
+		ScriptValue TimeFrameCountImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[3], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? ToLuaNumber(time->FrameCount) : 0.0);
+		}
+
+		ScriptValue TimeFixedStepCountImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[4], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? ToLuaNumber(time->FixedStepCount) : 0.0);
+		}
+
+		ScriptValue TimeScaleImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[5], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? static_cast<double>(time->TimeScale) : 0.0);
+		}
+
 		ScriptValue LevelRequestImpl(const ScriptValue* args, std::size_t count)
 		{
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[0];
@@ -554,6 +605,40 @@ namespace World
 				"Number of configured player slots." },
 		};
 
+		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。
+		static const ScriptServiceMethod timeMethods[] = {
+			{ "Elapsed", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeElapsedImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Seconds elapsed in the running session; frozen while the session is paused." },
+			{ "Delta", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeDeltaImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Variable-frame delta in seconds, already scaled by TimeScale." },
+			{ "FixedDelta", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeFixedDeltaImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Fixed simulation step in seconds; never scaled by TimeScale." },
+			{ "FrameCount", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeFrameCountImpl(args, count);
+			}, nullptr, 0, 0, "integer",
+				"Number of variable frames advanced so far." },
+			{ "FixedStepCount", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeFixedStepCountImpl(args, count);
+			}, nullptr, 0, 0, "integer",
+				"Number of fixed simulation steps advanced so far." },
+			{ "TimeScale", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeScaleImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Current time scale applied to Delta; 1 = real time." },
+		};
+
 		static const ScriptServiceParam levelRequest[] = {
 			{ "id", "string", ScriptServiceArgType::String, true, "Level id from the level list." },
 			{ "additive", "boolean", ScriptServiceArgType::Boolean, false, "Push the level on top of the current stack instead of replacing it." },
@@ -664,6 +749,7 @@ namespace World
 			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, 5 },
 			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, 9 },
 			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, 7 },
+			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, 6 },
 		};
 		if (count)
 			*count = sizeof(services) / sizeof(services[0]);

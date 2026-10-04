@@ -369,6 +369,35 @@ function Save:GetGlobal(key) end
 ---@return string
 function Save:LastError() end
 
+-- Global service table 'Time': read-only; there is no runtime constructor.
+---Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.
+---@class Time
+Time = {}
+
+---Seconds elapsed in the running session; frozen while the session is paused.
+---@return number
+function Time:Elapsed() end
+
+---Variable-frame delta in seconds, already scaled by TimeScale.
+---@return number
+function Time:Delta() end
+
+---Fixed simulation step in seconds; never scaled by TimeScale.
+---@return number
+function Time:FixedDelta() end
+
+---Number of variable frames advanced so far.
+---@return integer
+function Time:FrameCount() end
+
+---Number of fixed simulation steps advanced so far.
+---@return integer
+function Time:FixedStepCount() end
+
+---Current time scale applied to Delta; 1 = real time.
+---@return number
+function Time:TimeScale() end
+
 -- Global service table 'events': read-only; there is no runtime constructor.
 ---Read-only event table; subscriptions belong to the calling script instance.
 ---@class events

@@ -2,6 +2,8 @@
 #include "World/Core/Input.h"
 #include "World/Physics/PhysicsSettings.h"
 #include "World/Gameplay/Framework/InputMap.h"
+#include "World/Gameplay/Framework/InputSystem.h"
+#include "World/Gameplay/Framework/TimerSystem.h"
 
 #include "World/Core/Application.h"
 #include "World/Core/Log.h"
@@ -275,6 +277,10 @@ namespace World::Gameplay
 		if (!m_Scene || m_RuntimeStarted)
 			return;
 
+		// WP5:把会话的固定步长下发给场景时间服务 —— 第一个固定步之前 GetTime().FixedDeltaSeconds
+		// 就应该是本会话真正的步长,而不是结构体默认值(项目可覆盖 FixedStepHz)。
+		if (GameApp* app = GameApp::TryGet())
+			Gameplay::TimerSystem::SetFixedDeltaSeconds(*m_Scene, static_cast<float>(app->FixedStepSeconds()));
 		m_Scene->OnRuntimeStart();
 		m_RuntimeStarted = true;
 	}
@@ -296,6 +302,9 @@ namespace World::Gameplay
 			return;
 
 		m_Scene->OnRuntimeStop();
+		// WP5:运行结束丢掉该场景的输入边沿/鼠标缓存(下次 StartRuntime 从干净状态开始,
+		// 也避免编辑器反复 Play/Stop 时按场景地址累积条目)。
+		Gameplay::InputSystem::Forget(*m_Scene);
 		m_RuntimeStarted = false;
 	}
 
@@ -333,6 +342,20 @@ namespace World::Gameplay
 
 		// W2:推进排队的关卡加载(读盘 → 反序列化 → 激活;激活时进度回调会把场景交给宿主)。
 		GameApp::Get().Levels().Pump();
+		// WP5:帧首采样**一次**(可变帧开头、固定步循环之前 —— Tick 内是 Fixed(0..N) → Update)。
+		// 同一可变帧内的每个固定步读到的都是这份快照 ⇒ PreFixed/Fixed 只消费、不采样,保 P4/P5 确定性。
+		// 放在 Pump 之后:本帧刚激活的场景也能在同一帧拿到快照。
+		if (m_Scene && m_RuntimeStarted)
+		{
+			glm::vec2 mousePosition(0.0f);
+			if (Application::HasInstance())
+			{
+				// 无窗口宿主(测试/专用服务器)绝不轮询平台鼠标(与上面的按键喂入同一守卫)。
+				const auto position = Input::GetMousePosition();
+				mousePosition = glm::vec2(position.first, position.second);
+			}
+			Gameplay::InputSystem::Sample(*m_Scene, GameApp::Get().Input(), mousePosition);
+		}
 		GameApp::Get().Tick(frameTime);
 		// W7-6/P2 W3b:帧末把"当前按下"滚成"上一帧按下",下一帧的 Pressed/Released 才有真实边沿。
 		// 必须在本帧脚本/玩法读取之后调用,否则同一帧内刚按下的键会被立刻滚走。

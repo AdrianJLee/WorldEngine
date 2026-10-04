@@ -9,6 +9,7 @@
 #include "World/Renderer/FrameExtract.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Gameplay/Runtime/SystemRegistry.h"
+#include "World/Gameplay/Framework/TimerSystem.h"
 #include "World/Physics/Physics3D.h"
 #include <box2d/box2d.h>
 #include <algorithm>
@@ -779,6 +780,8 @@ namespace World
 	{
 		AssertOwnerThread();
 		AdvanceWorldTick();
+		// WP5:可变帧时间推进(TimeScale 只缩放 DeltaSeconds,不改固定步长;暂停时宿主不调本函数)。
+		Gameplay::TimerSystem::BeginVariableFrame(*this, ts);
 		// 一帧的耗时表:谁先跑谁清(固定阶段先于可变阶段,见 OnFixedUpdate)。帧末复位。
 		if (!m_FrameTimingsBegun)
 		{
@@ -873,6 +876,10 @@ namespace World
 	void Scene::RunFixedFrameSystems(Timestep fixedDt)
 	{
 		AssertOwnerThread();
+		// WP5:固定步时间服务由 PreFixed 阶段的 `timer-system` 推进;它被禁用/未注册时这里兜底,
+		// 保证 GetTime() 不依赖某个可选系统的开关状态(默认路径仍是单写者,不重复计数)。
+		if (!m_FrameSystems || !m_FrameSystems->IsEnabled(Gameplay::TimerSystem::kSystemName))
+			Gameplay::TimerSystem::AdvanceFixedStep(*this, fixedDt);
 		if (!m_FrameTimingsBegun)
 		{
 			m_FrameSystemTimings.clear();
@@ -1469,6 +1476,9 @@ namespace World
 	{
 		if (!m_FrameSystemDefinitions.empty())
 			return;
+		// WP5:PreFixed 阶段此前是空的。固定步时间服务(步长/计数)由这个内置系统推进,
+		// Owner 显式标 Builtin,便于 SystemsPanel/自动化断言系统归属。
+		RegisterFrameSystem(Gameplay::TimerSystem::MakePreFixedSystem(*this));
 		// PURE-ECS(工业口径):**物理与移动跑固定步长**(`Fixed` 阶段)。
 		// 此前它们注册在默认的 `Update` 阶段、拿的是可变帧时间 ⇒ 同一段真实时间在不同帧率下
 		// 结果不同(物理不可复现)。引擎的累加器(GameApp 的 m_Accumulator / MaxFixedStepsPerFrame)

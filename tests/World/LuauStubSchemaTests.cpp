@@ -291,7 +291,7 @@ namespace
 		const ScriptServiceBinding* services = GameplayServiceBindings(&serviceCount);
 		std::size_t uiCount = 0;
 		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);
-		CHECK(serviceCount == 3);
+		CHECK(serviceCount == 4);   // Input / Level / Save + WP5 的只读 Time
 		CHECK(uiCount == 1);
 
 		std::vector<const ScriptServiceBinding*> serviceList;
