@@ -361,8 +361,8 @@ namespace World::Editor
 					Entity camera = Entity::CreateEntity(scene.get(), "Camera3D");
 					camera.AddComponent<TransformComponent>(glm::vec3 { 0.0f, 1.0f, 5.0f });
 					CameraComponent cameraComponent;
-					cameraComponent.Camera.SetProjectionType(SceneCamera::ProjectionType::Perspective);
-					cameraComponent.Camera.SetPerspectiveFarClip(200.0f);
+					cameraComponent.Camera.m_ProjectionType = CameraSettings::ProjectionType::Perspective;
+					cameraComponent.Camera.m_PerspectiveFarClip = 200.0f;
 					cameraComponent.Primary = true;
 					camera.AddComponent<CameraComponent>(cameraComponent);
 

@@ -1492,6 +1492,11 @@ namespace World
 				if (!m_Registry.all_of<PhysicsInterpolationState>(entity))
 					m_Registry.emplace<PhysicsInterpolationState>(entity);
 		}
+		// PECS(相机):进入 Running 之前为所有相机预建帧数据视图(结构写只允许在非运行态/提交点做)。
+		// 视图书里 Valid=false ⇒ 第 5 条隐患(FixedAspectRatio 相机读档后按默认投影渲染)在
+		// 本帧第一次 EnsureView 无条件重算时被修掉。
+		for (const auto entity : m_Registry.view<CameraComponent>())
+			EnsureCameraView(entity);
 		EnsureDefaultFrameSystems();
 		if (ScriptEngine::IsInitialized())
 		{
@@ -1549,12 +1554,36 @@ namespace World
 		AssertOwnerThread();
 		m_ViewportWidth = width;
 		m_ViewportHeight = height;
+		// PECS(相机):编辑态下相机帧数据视图可能还没建,这里按"结构写只允许在非运行态"
+		// 的既有口径懒创建;运行态的视图已在 OnRuntimeStart 预建。
+		if (!IsActive())
+			for (const auto entity : m_Registry.view<CameraComponent>())
+				EnsureCameraView(entity);
 		CameraSystem::UpdateAllCameras(m_Registry, width, height);
+	}
+
+	void Scene::EnsureCameraView(entt::entity entity)
+	{
+		if (!m_Registry.valid(entity)) return;
+		if (!m_Registry.all_of<CameraComponent>(entity)) return;
+		if (!m_Registry.all_of<CameraViewComponent>(entity))
+			m_Registry.emplace<CameraViewComponent>(entity);
+	}
+
+	const Camera& Scene::GetCameraView(entt::entity entity)
+	{
+		AssertOwnerThread();
+		// 编辑态(非运行态)允许懒创建;运行态的结构写受保护,视图由提交点预建。
+		if (!IsActive())
+			EnsureCameraView(entity);
+		return CameraSystem::EnsureView(m_Registry, entity, m_ViewportWidth, m_ViewportHeight);
 	}
 
 	Entity Scene::GetPrimaryCameraEntity()
 	{
 		AssertOwnerThread();
+		// 场景语义:跳过 pending 销毁/移除的实体继续找下一台 Primary(CameraSystem 的纯 registry
+		// 版本没有这层语义,所以这里保留自己的循环 —— 多 Primary 且首台 pending 时行为不同)。
 		for (const auto entity : m_Registry.view<CameraComponent, TransformComponent>())
 			if (!IsPendingDestroy(entity) && !IsPendingRemoval(entity, entt::type_id<CameraComponent>().hash()) &&
 				m_Registry.get<CameraComponent>(entity).Primary) return Entity(this, entity);
@@ -1744,6 +1773,9 @@ namespace World
 	void Scene::NotifyComponentAdded(Entity entity, entt::id_type componentId)
 	{
 		AssertOwnerThread();
+		// PECS(相机):相机组件提交后同步补建帧数据视图(与 2D 刚体 EnsurePhysicsBody 同一提交点口径)。
+		if (componentId == entt::type_id<CameraComponent>().hash())
+			EnsureCameraView(static_cast<entt::entity>(entity));
 		std::vector<std::function<void(Entity)>> callbacks;
 		callbacks.reserve(m_ComponentObservers.size());
 		for (const auto& observer : m_ComponentObservers)

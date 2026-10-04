@@ -257,7 +257,7 @@ namespace
 		CHECK(transform.find("---@field Scale vec3") != std::string::npos);
 		CHECK(transform.find("---@field Rotation unknown no script mapping for schema kind 'Quat'") != std::string::npos);
 
-		// 身份字段(Object(UUID))与未映射嵌套结构(Object(SceneCamera))的真实形态。
+		// 身份字段(Object(UUID))与未映射嵌套结构(Object(CameraSettings))的真实形态。
 		CHECK(BlockOf(stub, "UUIDComponent") == "---@class UUIDComponent\n---@field ID string read-only\n");
 		CHECK(BlockOf(stub, "CameraComponent").find(
 			"---@field Camera unknown no script mapping for schema kind 'Object'") != std::string::npos);

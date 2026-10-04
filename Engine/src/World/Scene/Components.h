@@ -6,6 +6,7 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneCamera.h"
 #include "World/Scene/Systems/TransformSystem.h"
+#include "World/Renderer/Camera.h"
 #include "World/Renderer/Texture/Texture.h"
 #include "World/Schema/Schema.h"
 #include "World/Schema/BuiltinAssetOps.h"
@@ -289,25 +290,34 @@ namespace World
 
 	struct CameraComponent
 	{
-		CameraComponent() = default;
-		CameraComponent(const SceneCamera& sceneCamera, bool primary = false)
-			: Camera(sceneCamera), Primary(primary)
-		{
-		}
-
-		SceneCamera Camera;
+		CameraSettings Camera;
 		bool Primary = true;
 		bool FixedAspectRatio = false;
 
 		WE_SCHEMA_BODY(World, CameraComponent, Component)
 			WE_SCHEMA_META(Category("Scene"),
 				Doc("Scene camera settings plus Primary (the camera Play and the runtime render through); FixedAspectRatio keeps the projection from following the viewport size."))
-			WE_FIELD(Camera, Object, Of(SceneCamera));
+			WE_FIELD(Camera, Object, Of(CameraSettings));
 			WE_FIELD(Primary, Bool,
 				Doc("The scene renders through the first primary camera in Play and in the runtime."));
 			WE_FIELD(FixedAspectRatio, Bool,
 				Doc("Keep the projection aspect from the editor instead of following the viewport/window size."));
 		WE_SCHEMA_END
+	};
+
+	// PECS(相机组件数据导向化):投影矩阵这类派生量不进组件,改由 CameraSystem 按
+	// (CameraSettings 参数, 有效宽高比, 视口尺寸)指纹脏标记缓存到本组件。
+	//
+	// **非 schema**:不入 .wd、不进属性面板、不参与序列化(与 WorldTransformComponent 同口径)。
+	// 由 Scene 在结构提交点预建(OnRuntimeStart / 组件新增),运行期只更新字段值。
+	struct CameraViewComponent
+	{
+		Camera View { glm::mat4(1.0f) };   // 帧数据:只含投影矩阵
+		CameraSettings LastParams {};        // 指纹:上次算投影时用的(已钳制)参数
+		float LastAspectRatio = 1.0f;
+		uint32_t LastViewportWidth = 0;
+		uint32_t LastViewportHeight = 0;
+		bool Valid = false;
 	};
 
 	// P1b D4:灯光组件(前向渲染,每帧打包进全局 set0 的灯光 UBO)。

@@ -21,9 +21,9 @@ struct World::CapsuleCollider3DComponent
 struct World::JointComponent
 struct World::MeshCollider3DComponent
 struct World::UUID
-struct World::SceneCamera
+struct World::CameraSettings
 enum World::RigidBody2DComponent::BodyType
 enum World::JointComponent::JointKind
-enum World::SceneCamera::ProjectionType
+enum World::CameraSettings::ProjectionType
 enum World::RigidBody3DComponent::MotionType
 enum World::MeshCollider3DComponent::ColliderMode

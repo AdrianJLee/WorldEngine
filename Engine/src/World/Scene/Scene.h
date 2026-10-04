@@ -387,6 +387,12 @@ namespace World
 		void AssertOwnerThread() const;
 
 		Entity GetPrimaryCameraEntity();
+		// ---- PECS(相机):组件只存权威参数,投影矩阵由 CameraSystem 按指纹缓存 ----
+		// 结构提交点补建相机帧数据视图(与 EnsurePhysicsBody 同语义:运行态 AddComponent
+		// 之后新实体当帧补上)。非相机实体/缺组件是安全的 no-op。
+		void EnsureCameraView(entt::entity entity);
+		// 取该实体的帧相机数据(投影矩阵)。编辑态允许懒创建视图;运行态只更新(结构写受保护)。
+		const Camera& GetCameraView(entt::entity entity);
 		WorldContext& GetContext() { return *m_Context; }
 		const WorldContext& GetContext() const { return *m_Context; }
 		// ---- PLUG-T2c:活实例查询(插件组件存储的卸载前置检查)----

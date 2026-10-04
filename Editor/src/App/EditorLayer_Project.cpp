@@ -957,7 +957,8 @@ void EditorLayer::RenderCameraPreview(){
 			return;
 		// 与主视口完全同一条提交路径(同一套 SceneRenderer/管线/相机数据),因此
 		// "预览分辨率 = 视口分辨率"时,预览图就是该相机看到的画面(验收用的等式)。
-		const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
+		// PECS(相机):组件只存参数,投影矩阵走 CameraSystem 的指纹缓存(编辑态读时懒建视图)。
+		const Camera& camera = m_ActiveScene->GetCameraView(static_cast<entt::entity>(cameraEntity));
 		const glm::mat4 world = EntityWorldMatrix(cameraEntity);
 		m_PreviewRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
 		m_PreviewRenderer->SubmitScene(camera, world);

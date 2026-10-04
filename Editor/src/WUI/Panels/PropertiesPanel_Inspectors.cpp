@@ -133,7 +133,7 @@ float PropertiesPanel::DrawTransformInspector(Wui::WuiContext& ctx, const Wui::W
 
 float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields){
 		const Wui::WuiTheme& theme = m_Host.Theme();
-		// CameraComponent 的 schema 字段:Primary / FixedAspectRatio / Camera(Object Of SceneCamera)。
+		// CameraComponent 的 schema 字段:Primary / FixedAspectRatio / Camera(Object Of CameraSettings)。
 		const Schema::FieldSchema* primaryField = nullptr;
 		const Schema::FieldSchema* fixedField = nullptr;
 		const Schema::FieldSchema* cameraField = nullptr;
@@ -147,7 +147,7 @@ float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiR
 		const Schema::TypeSchema* cameraSchema = cameraField && cameraField->GetNested ? cameraField->GetNested() : nullptr;
 		if (!primaryField || !fixedField || !cameraInstance || !cameraSchema)
 			return 0;
-		auto* camera = static_cast<SceneCamera*>(cameraInstance);
+		auto* camera = static_cast<CameraSettings*>(cameraInstance);
 
 		const std::string& typeName = schema.DisplayName;
 		const std::string& cameraType = cameraSchema->DisplayName;
@@ -233,7 +233,7 @@ float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiR
 		const std::string projectionId = PropPath(cameraType, "ProjectionType");
 		const Wui::WuiRect projectionRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 		const Wui::LocalizedLabel projectionLabel = Wui::TrLabel("panel.properties.camera.projection", "Projection");
-		SceneCamera::ProjectionType projection = camera->GetProjectionType();
+		CameraSettings::ProjectionType projection = camera->m_ProjectionType;
 		if (projectionField && projectionField->GetEnum && projectionField->Set && writable)
 		{
 			const Schema::EnumSchema* enumSchema = projectionField->GetEnum();
@@ -256,7 +256,7 @@ float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiR
 			if (Wui::Combo(ctx, Wui::HashId(projectionId.c_str()), comboRect, "", names, selected, theme))
 			{
 				projectionField->Set(cameraInstance, Schema::Value(enumSchema->Values[selected].second));
-				projection = camera->GetProjectionType();
+				projection = camera->m_ProjectionType;
 				changed = true;
 				markField(cameraType + ".ProjectionType");
 			}
@@ -267,26 +267,27 @@ float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiR
 		else
 		{
 			DrawReadOnlyRow(ctx, projectionId, projectionRow, projectionLabel,
-				CameraProjectionLabel(projection == SceneCamera::ProjectionType::Perspective ? "Perspective" : "Orthographic"),
+				CameraProjectionLabel(projection == CameraSettings::ProjectionType::Perspective ? "Perspective" : "Orthographic"),
 				theme);
 		}
 		y += kRowHeight;
 
-		// 按当前投影类型只显示对应参数(迁移前语义),全部经 SceneCamera setter 提交。
-		if (projection == SceneCamera::ProjectionType::Perspective)
+		// 按当前投影类型只显示对应参数(迁移前语义),直接写 CameraSettings 字段提交;
+		// 投影矩阵由 CameraSystem 按参数指纹自动重算,写入者不需要补算。
+		if (projection == CameraSettings::ProjectionType::Perspective)
 		{
-			float fov = camera->GetPerspectiveFOV();
+			float fov = camera->m_PerspectiveFOV;
 			const Wui::WuiRect fovRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool fovChanged = DrawFloatRow(ctx, PropPath(cameraType, "Perspective.FOV"),
 				fovRow, Wui::TrLabel("panel.properties.camera.fov", "FOV"), fov, 1.0f, -1.0f, theme, reachable(fovRow));
 			y += kRowHeight;
-			float nearClip = camera->GetPerspectiveNearClip();
+			float nearClip = camera->m_PerspectiveNearClip;
 			const Wui::WuiRect nearRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool nearChanged = DrawFloatRow(ctx, PropPath(cameraType, "Perspective.NearClip"),
 				nearRow, Wui::TrLabel("panel.properties.camera.near_clip", "NearClip"), nearClip, 1.0f, -1.0f, theme,
 				reachable(nearRow));
 			y += kRowHeight;
-			float farClip = camera->GetPerspectiveFarClip();
+			float farClip = camera->m_PerspectiveFarClip;
 			const Wui::WuiRect farRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool farChanged = DrawFloatRow(ctx, PropPath(cameraType, "Perspective.FarClip"),
 				farRow, Wui::TrLabel("panel.properties.camera.far_clip", "FarClip"), farClip, 1.0f, -1.0f, theme,
@@ -294,37 +295,37 @@ float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiR
 			y += kRowHeight;
 			if (fovChanged)
 			{
-				camera->SetPerspectiveFOV(fov);
+				camera->m_PerspectiveFOV = fov;
 				changed = true;
 				markField(cameraType + ".Perspective.FOV");
 			}
 			if (nearChanged)
 			{
-				camera->SetPerspectiveNearClip(nearClip);
+				camera->m_PerspectiveNearClip = nearClip;
 				changed = true;
 				markField(cameraType + ".Perspective.NearClip");
 			}
 			if (farChanged)
 			{
-				camera->SetPerspectiveFarClip(farClip);
+				camera->m_PerspectiveFarClip = farClip;
 				changed = true;
 				markField(cameraType + ".Perspective.FarClip");
 			}
 		}
 		else
 		{
-			float zoom = camera->GetOrthographicZoom();
+			float zoom = camera->m_OrthographicZoom;
 			const Wui::WuiRect zoomRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool zoomChanged = DrawFloatRow(ctx, PropPath(cameraType, "Orthographic.Zoom"),
 				zoomRow, Wui::TrLabel("panel.properties.camera.zoom", "Zoom"), zoom, 1.0f, -1.0f, theme, reachable(zoomRow));
 			y += kRowHeight;
-			float nearClip = camera->GetOrthographicNearClip();
+			float nearClip = camera->m_OrthographicNearClip;
 			const Wui::WuiRect nearRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool nearChanged = DrawFloatRow(ctx, PropPath(cameraType, "Orthographic.NearClip"),
 				nearRow, Wui::TrLabel("panel.properties.camera.near_clip", "NearClip"), nearClip, 1.0f, -1.0f, theme,
 				reachable(nearRow));
 			y += kRowHeight;
-			float farClip = camera->GetOrthographicFarClip();
+			float farClip = camera->m_OrthographicFarClip;
 			const Wui::WuiRect farRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool farChanged = DrawFloatRow(ctx, PropPath(cameraType, "Orthographic.FarClip"),
 				farRow, Wui::TrLabel("panel.properties.camera.far_clip", "FarClip"), farClip, 1.0f, -1.0f, theme,
@@ -332,19 +333,19 @@ float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiR
 			y += kRowHeight;
 			if (zoomChanged)
 			{
-				camera->SetOrthographicZoom(zoom);
+				camera->m_OrthographicZoom = zoom;
 				changed = true;
 				markField(cameraType + ".Orthographic.Zoom");
 			}
 			if (nearChanged)
 			{
-				camera->SetOrthographicNearClip(nearClip);
+				camera->m_OrthographicNearClip = nearClip;
 				changed = true;
 				markField(cameraType + ".Orthographic.NearClip");
 			}
 			if (farChanged)
 			{
-				camera->SetOrthographicFarClip(farClip);
+				camera->m_OrthographicFarClip = farClip;
 				changed = true;
 				markField(cameraType + ".Orthographic.FarClip");
 			}

@@ -31,7 +31,7 @@ const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent();
 const TypeSchema& WeSchemaOf_JointComponent();
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent();
 const TypeSchema& WeSchemaOf_UUID();
-const TypeSchema& WeSchemaOf_SceneCamera();
+const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_BodyType();
 const EnumSchema& WeEnumSchemaOf_JointKind();
 const EnumSchema& WeEnumSchemaOf_ProjectionType();
@@ -1095,7 +1095,7 @@ struct GeneratedAccess<World::HierarchyComponent>
             },
             &StorageBindingOf(),
             "Scene",
-            "Parent link plus whether the parent transform is inherited; Children is a runtime cache rebuilt from Parent after loading.",
+            "Parent link plus whether the parent transform is inherited. The runtime child list lives in the non-schema HierarchyChildrenComponent.",
             false,
         };
         return schema;
@@ -1115,7 +1115,7 @@ struct GeneratedAccess<World::CameraComponent>
     }
     static const TypeSchema* GetNested_Camera()
     {
-        return &WeSchemaOf_SceneCamera();
+        return &WeSchemaOf_CameraSettings();
     }
     static Value Get_Primary(const void* instance)
     {
@@ -3236,17 +3236,17 @@ struct GeneratedAccess<World::UUID>
 };
 
 template <>
-struct GeneratedAccess<World::SceneCamera>
+struct GeneratedAccess<World::CameraSettings>
 {
     static Value Get_m_ProjectionType(const void* instance)
     {
-        const World::SceneCamera* self = static_cast<const World::SceneCamera*>(instance);
+        const World::CameraSettings* self = static_cast<const World::CameraSettings*>(instance);
         return Value(static_cast<int64_t>(self->m_ProjectionType));
     }
     static void Set_m_ProjectionType(void* instance, const Value& value)
     {
-        World::SceneCamera* self = static_cast<World::SceneCamera*>(instance);
-        self->m_ProjectionType = static_cast<World::SceneCamera::ProjectionType>(std::get<int64_t>(value));
+        World::CameraSettings* self = static_cast<World::CameraSettings*>(instance);
+        self->m_ProjectionType = static_cast<World::CameraSettings::ProjectionType>(std::get<int64_t>(value));
     }
     static const EnumSchema* GetEnum_m_ProjectionType()
     {
@@ -3254,78 +3254,78 @@ struct GeneratedAccess<World::SceneCamera>
     }
     static Value Get_m_AspectRatio(const void* instance)
     {
-        const World::SceneCamera* self = static_cast<const World::SceneCamera*>(instance);
+        const World::CameraSettings* self = static_cast<const World::CameraSettings*>(instance);
         return Value(self->m_AspectRatio);
     }
     static void Set_m_AspectRatio(void* instance, const Value& value)
     {
-        World::SceneCamera* self = static_cast<World::SceneCamera*>(instance);
+        World::CameraSettings* self = static_cast<World::CameraSettings*>(instance);
         self->m_AspectRatio = std::get<float>(value);
     }
     static Value Get_m_OrthographicZoom(const void* instance)
     {
-        const World::SceneCamera* self = static_cast<const World::SceneCamera*>(instance);
+        const World::CameraSettings* self = static_cast<const World::CameraSettings*>(instance);
         return Value(self->m_OrthographicZoom);
     }
     static void Set_m_OrthographicZoom(void* instance, const Value& value)
     {
-        World::SceneCamera* self = static_cast<World::SceneCamera*>(instance);
+        World::CameraSettings* self = static_cast<World::CameraSettings*>(instance);
         self->m_OrthographicZoom = std::get<float>(value);
     }
     static Value Get_m_OrthographicNearClip(const void* instance)
     {
-        const World::SceneCamera* self = static_cast<const World::SceneCamera*>(instance);
+        const World::CameraSettings* self = static_cast<const World::CameraSettings*>(instance);
         return Value(self->m_OrthographicNearClip);
     }
     static void Set_m_OrthographicNearClip(void* instance, const Value& value)
     {
-        World::SceneCamera* self = static_cast<World::SceneCamera*>(instance);
+        World::CameraSettings* self = static_cast<World::CameraSettings*>(instance);
         self->m_OrthographicNearClip = std::get<float>(value);
     }
     static Value Get_m_OrthographicFarClip(const void* instance)
     {
-        const World::SceneCamera* self = static_cast<const World::SceneCamera*>(instance);
+        const World::CameraSettings* self = static_cast<const World::CameraSettings*>(instance);
         return Value(self->m_OrthographicFarClip);
     }
     static void Set_m_OrthographicFarClip(void* instance, const Value& value)
     {
-        World::SceneCamera* self = static_cast<World::SceneCamera*>(instance);
+        World::CameraSettings* self = static_cast<World::CameraSettings*>(instance);
         self->m_OrthographicFarClip = std::get<float>(value);
     }
     static Value Get_m_PerspectiveFOV(const void* instance)
     {
-        const World::SceneCamera* self = static_cast<const World::SceneCamera*>(instance);
+        const World::CameraSettings* self = static_cast<const World::CameraSettings*>(instance);
         return Value(self->m_PerspectiveFOV);
     }
     static void Set_m_PerspectiveFOV(void* instance, const Value& value)
     {
-        World::SceneCamera* self = static_cast<World::SceneCamera*>(instance);
+        World::CameraSettings* self = static_cast<World::CameraSettings*>(instance);
         self->m_PerspectiveFOV = std::get<float>(value);
     }
     static Value Get_m_PerspectiveNearClip(const void* instance)
     {
-        const World::SceneCamera* self = static_cast<const World::SceneCamera*>(instance);
+        const World::CameraSettings* self = static_cast<const World::CameraSettings*>(instance);
         return Value(self->m_PerspectiveNearClip);
     }
     static void Set_m_PerspectiveNearClip(void* instance, const Value& value)
     {
-        World::SceneCamera* self = static_cast<World::SceneCamera*>(instance);
+        World::CameraSettings* self = static_cast<World::CameraSettings*>(instance);
         self->m_PerspectiveNearClip = std::get<float>(value);
     }
     static Value Get_m_PerspectiveFarClip(const void* instance)
     {
-        const World::SceneCamera* self = static_cast<const World::SceneCamera*>(instance);
+        const World::CameraSettings* self = static_cast<const World::CameraSettings*>(instance);
         return Value(self->m_PerspectiveFarClip);
     }
     static void Set_m_PerspectiveFarClip(void* instance, const Value& value)
     {
-        World::SceneCamera* self = static_cast<World::SceneCamera*>(instance);
+        World::CameraSettings* self = static_cast<World::CameraSettings*>(instance);
         self->m_PerspectiveFarClip = std::get<float>(value);
     }
     static const FieldSchema& Field_m_ProjectionType()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x73F7B2EB9D6DF521ull },
+            FieldId{ 0xD2F4B4FFB7FCA7E8ull },
             "m_ProjectionType",
             Kind::Enum,
             &Get_m_ProjectionType,
@@ -3343,7 +3343,7 @@ struct GeneratedAccess<World::SceneCamera>
     static const FieldSchema& Field_m_AspectRatio()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x92BE49998A70999Full },
+            FieldId{ 0xEE150E618FFCDC38ull },
             "m_AspectRatio",
             Kind::Float,
             &Get_m_AspectRatio,
@@ -3361,7 +3361,7 @@ struct GeneratedAccess<World::SceneCamera>
     static const FieldSchema& Field_m_OrthographicZoom()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x462D3939F9042239ull },
+            FieldId{ 0x68E33DE617008CF4ull },
             "m_OrthographicZoom",
             Kind::Float,
             &Get_m_OrthographicZoom,
@@ -3379,7 +3379,7 @@ struct GeneratedAccess<World::SceneCamera>
     static const FieldSchema& Field_m_OrthographicNearClip()
     {
         static const FieldSchema schema = {
-            FieldId{ 0xF94DD5B61257F5DAull },
+            FieldId{ 0xFB6B9E73AC66E4F3ull },
             "m_OrthographicNearClip",
             Kind::Float,
             &Get_m_OrthographicNearClip,
@@ -3397,7 +3397,7 @@ struct GeneratedAccess<World::SceneCamera>
     static const FieldSchema& Field_m_OrthographicFarClip()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x6E5CC7C54D37D989ull },
+            FieldId{ 0x32F6169204C01556ull },
             "m_OrthographicFarClip",
             Kind::Float,
             &Get_m_OrthographicFarClip,
@@ -3415,7 +3415,7 @@ struct GeneratedAccess<World::SceneCamera>
     static const FieldSchema& Field_m_PerspectiveFOV()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x50A08F4C69127449ull },
+            FieldId{ 0xE874958ED547894Cull },
             "m_PerspectiveFOV",
             Kind::Float,
             &Get_m_PerspectiveFOV,
@@ -3433,7 +3433,7 @@ struct GeneratedAccess<World::SceneCamera>
     static const FieldSchema& Field_m_PerspectiveNearClip()
     {
         static const FieldSchema schema = {
-            FieldId{ 0xD46748028C8314AEull },
+            FieldId{ 0xA47C8D6532B1C259ull },
             "m_PerspectiveNearClip",
             Kind::Float,
             &Get_m_PerspectiveNearClip,
@@ -3451,7 +3451,7 @@ struct GeneratedAccess<World::SceneCamera>
     static const FieldSchema& Field_m_PerspectiveFarClip()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x256B44C43126AB3Dull },
+            FieldId{ 0x6934640FA6D0C7C8ull },
             "m_PerspectiveFarClip",
             Kind::Float,
             &Get_m_PerspectiveFarClip,
@@ -3469,10 +3469,10 @@ struct GeneratedAccess<World::SceneCamera>
     static const TypeSchema& WeSchema()
     {
         static const TypeSchema schema = {
-            TypeId{ "World::SceneCamera" },
-            "SceneCamera",
+            TypeId{ "World::CameraSettings" },
+            "CameraSettings",
             WE_SCHEMA_ABI_VERSION,
-            sizeof(World::SceneCamera),
+            sizeof(World::CameraSettings),
             TypeCategory::Struct,
             {
                 Field_m_ProjectionType(),
@@ -3532,7 +3532,7 @@ struct GeneratedEnum<World::JointComponent::JointKind>
 };
 
 template <>
-struct GeneratedEnum<World::SceneCamera::ProjectionType>
+struct GeneratedEnum<World::CameraSettings::ProjectionType>
 {
     static const EnumSchema& WeEnumSchema()
     {
@@ -3541,8 +3541,8 @@ struct GeneratedEnum<World::SceneCamera::ProjectionType>
             true,
             4,
             {
-                { "Perspective", static_cast<int64_t>(World::SceneCamera::ProjectionType::Perspective) },
-                { "Orthographic", static_cast<int64_t>(World::SceneCamera::ProjectionType::Orthographic) },
+                { "Perspective", static_cast<int64_t>(World::CameraSettings::ProjectionType::Perspective) },
+                { "Orthographic", static_cast<int64_t>(World::CameraSettings::ProjectionType::Orthographic) },
             },
         };
         return schema;
@@ -3609,10 +3609,10 @@ const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent() { return GeneratedAcce
 const TypeSchema& WeSchemaOf_JointComponent() { return GeneratedAccess<World::JointComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent() { return GeneratedAccess<World::MeshCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
-const TypeSchema& WeSchemaOf_SceneCamera() { return GeneratedAccess<World::SceneCamera>::WeSchema(); }
+const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_BodyType() { return GeneratedEnum<World::RigidBody2DComponent::BodyType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_JointKind() { return GeneratedEnum<World::JointComponent::JointKind>::WeEnumSchema(); }
-const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::SceneCamera::ProjectionType>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::CameraSettings::ProjectionType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_MotionType() { return GeneratedEnum<World::RigidBody3DComponent::MotionType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>::WeEnumSchema(); }
 
@@ -3648,7 +3648,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_JointComponent(),
 			WeSchemaOf_MeshCollider3DComponent(),
 			WeSchemaOf_UUID(),
-			WeSchemaOf_SceneCamera(),
+			WeSchemaOf_CameraSettings(),
 		};
 		if (registry.RegisterModule(kModule, schemas) != SchemaRegistry::Status::Ok) ok = false;
 		if (!ok)

@@ -502,28 +502,33 @@ namespace World
 				{
 					if (static_cast<entt::entity>(selectedCamera) != handle)
 						continue;   // 只画选中的那台相机
-					const SceneCamera& camera = frustumRegistry.get<CameraComponent>(handle).Camera;
+					// PECS(相机):直接读权威参数字段;有效宽高比优先取 CameraSystem 缓存下来的
+					// LastAspectRatio(与投影/拾取同一口径),没有缓存时回退到参数里的值。
+					const CameraSettings& camera = frustumRegistry.get<CameraComponent>(handle).Camera;
+					const auto* cameraView = frustumRegistry.try_get<CameraViewComponent>(handle);
+					const float aspectRatio = (cameraView && cameraView->Valid)
+						? cameraView->LastAspectRatio : camera.m_AspectRatio;
 					glm::mat4 world = frustumRegistry.get<TransformComponent>(handle).GetLocalMatrix();
 					if (const auto* worldTransform = frustumRegistry.try_get<WorldTransformComponent>(handle))
 						world = worldTransform->Matrix;
 					// 相机看向 -Z(与 glm::perspective / glm::ortho 的约定一致)。
 					float hNear = 0.0f, wNear = 0.0f, hFar = 0.0f, wFar = 0.0f, zNear = 0.0f, zFar = 0.0f;
-					if (camera.GetProjectionType() == SceneCamera::ProjectionType::Perspective)
+					if (camera.m_ProjectionType == CameraSettings::ProjectionType::Perspective)
 					{
-						const float tanHalf = std::tan(glm::radians(camera.GetPerspectiveFOV()) * 0.5f);
-						zNear = -camera.GetPerspectiveNearClip();
-						zFar = -camera.GetPerspectiveFarClip();
+						const float tanHalf = std::tan(glm::radians(camera.m_PerspectiveFOV) * 0.5f);
+						zNear = -camera.m_PerspectiveNearClip;
+						zFar = -camera.m_PerspectiveFarClip;
 						hNear = tanHalf * std::abs(zNear);
-						wNear = hNear * camera.GetAspectRatio();
+						wNear = hNear * aspectRatio;
 						hFar = tanHalf * std::abs(zFar);
-						wFar = hFar * camera.GetAspectRatio();
+						wFar = hFar * aspectRatio;
 					}
 					else
 					{
-						zNear = -camera.GetOrthographicNearClip();
-						zFar = -camera.GetOrthographicFarClip();
-						hNear = hFar = camera.GetOrthographicZoom();
-						wNear = wFar = camera.GetOrthographicZoom() * camera.GetAspectRatio();
+						zNear = -camera.m_OrthographicNearClip;
+						zFar = -camera.m_OrthographicFarClip;
+						hNear = hFar = camera.m_OrthographicZoom;
+						wNear = wFar = camera.m_OrthographicZoom * aspectRatio;
 					}
 					const glm::vec3 corners[8] = {
 						{ -wNear, -hNear, zNear }, { wNear, -hNear, zNear }, { wNear, hNear, zNear }, { -wNear, hNear, zNear },

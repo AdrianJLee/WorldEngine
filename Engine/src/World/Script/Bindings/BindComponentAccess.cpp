@@ -22,7 +22,7 @@ namespace World
 {
 	namespace
 	{
-		// W3e:嵌套对象字段代理的最大深度(字段段数)。SceneCamera 这类一层嵌套远低于上限;
+		// W3e:嵌套对象字段代理的最大深度(字段段数)。CameraSettings 这类一层嵌套远低于上限;
 		// 上限存在的意义是给"自引用/环形嵌套"一个确定的可读错误,而不是无限递归。
 		constexpr std::size_t kMaxNestedProxyDepth = 4;
 
@@ -246,15 +246,14 @@ namespace World
 		// 字段写入后的派生状态刷新。与 PropertiesPanel::DrawComponentInspector 的既有约定一致:
 		// TransformComponent 的 Transform 矩阵是派生缓存(Hierarchy.cpp 用 transform->Transform 计算
 		// 世界矩阵),只改 Location/Rotation/Scale 必须重算,否则层次与渲染仍读到旧矩阵。
-		// W3e:CameraComponent.Camera(SceneCamera 嵌套结构)的投影矩阵同样要在字段写入后重算,
-		// 所以这里按"叶实例的类型"判定 —— 嵌套写入时传的就是解析后的 SceneCamera 实例。
+		// PECS(相机):CameraComponent.Camera(CameraSettings)不再自带投影缓存 —— 投影由
+		// CameraSystem 按"参数指纹"自动重算,写入者不需要补算(漏调用在结构上不可能发生),
+		// 因此这里不再有相机分支。
 		// 遗留:这是按类型名的表;后续应把 PostSet/OnChanged 钩子放进 schema,见 W3a-1 报告。
 		void NotifyComponentFieldsChanged(const Schema::TypeSchema& leafType, void* leafInstance)
 		{
 			if (leafType.Id.Name == "World::TransformComponent")
 				static_cast<TransformComponent*>(leafInstance)->RecalculateTransform();
-			else if (leafType.Id.Name == "World::SceneCamera")
-				static_cast<SceneCamera*>(leafInstance)->ApplyEdit();
 		}
 
 		ScriptValue ComponentProxyIndex(const ScriptValue* args, std::size_t argCount)

@@ -510,7 +510,7 @@ Wui::GizmoCamera EditorShell::GetGizmoCamera() const{
 					glm::mat4 world = cameraEntity.GetComponent<TransformComponent>().GetLocalMatrix();
 					if (cameraEntity.HasComponent<WorldTransformComponent>())
 						world = cameraEntity.GetComponent<WorldTransformComponent>().Matrix;
-					const Camera& playCamera = cameraEntity.GetComponent<CameraComponent>().Camera;
+					const Camera& playCamera = scene->GetCameraView(static_cast<entt::entity>(cameraEntity));
 					camera.ViewProjection = playCamera.GetProjectionMatrix() * glm::inverse(world);
 					camera.Position = glm::vec3(world[3]);
 					// 与 EditorCamera3D 同约定:Forward = 看向场景内的方向(相机局部 -Z)。

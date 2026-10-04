@@ -1,12 +1,20 @@
 // P1b D1:3D 相机与射线数学基线(纯 glm,无窗口/无设备)。
+#include "World/Core/Core.h"
+#include "World/Core/WorldContext.h"
 #include "World/Renderer/CameraRay.h"
 #include "World/Renderer/EditorCamera3D.h"
 #include "World/Renderer/ProjectionConventions.h"
+#include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
+#include "World/Scene/Scene.h"
+#include "World/Scene/SceneSerializer.h"
+#include "World/Scene/Systems/CameraSystem.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 
@@ -190,6 +198,130 @@ int main()
 
 			const Ray away { { 0.0f, 1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } };
 			CHECK(!IntersectPlane(away, { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, nullptr));
+		}
+
+		// 7. 相机组件数据导向化(PECS)反假通过用例。
+		//    A) FixedAspectRatio=true + 非默认 FOV/投影类型,经 .wd 往返后投影必须按读回参数重建;
+		//       改动前 SceneCamera 的 m_ProjectionMatrix 保持默认构造值(且 FixedAspectRatio 时
+		//       SetViewportSize 直接跳过)⇒ 此断言失败。
+		//    B) 参数不变时连续刷新 0 次重算;参数变化时恰好 1 次(投影指纹脏标记)。
+		{
+			const std::filesystem::path root = std::filesystem::temp_directory_path() / "we-camera-pod-tests";
+			std::filesystem::remove_all(root);
+			std::filesystem::create_directories(root);
+			const std::filesystem::path scenePath = root / "camera_pod.wd";
+
+			{
+				WorldContext context;
+				Ref<Scene> scene = CreateRef<Scene>(context);
+				Entity entity = Entity::CreateEntity(scene.get(), "Camera");
+				CameraComponent cameraComponent;
+				cameraComponent.Camera.m_ProjectionType = CameraSettings::ProjectionType::Perspective;
+				cameraComponent.Camera.m_PerspectiveFOV = 63.0f;
+				cameraComponent.Camera.m_PerspectiveNearClip = 0.25f;
+				cameraComponent.Camera.m_PerspectiveFarClip = 250.0f;
+				cameraComponent.FixedAspectRatio = true;
+				cameraComponent.Primary = true;
+				entity.AddComponent<CameraComponent>(cameraComponent);
+
+				SceneSerializer serializer(scene);
+				if (!serializer.Serialize(scenePath.string()))
+					throw std::runtime_error(std::string("camera pod test: serialize failed: ") + serializer.GetLastError());
+			}
+
+			WorldContext loadedContext;
+			Ref<Scene> loaded = CreateRef<Scene>(loadedContext);
+			{
+				SceneSerializer serializer(loaded);
+				if (!serializer.Deserialize(scenePath.string()))
+					throw std::runtime_error(std::string("camera pod test: deserialize failed: ") + serializer.GetLastError());
+			}
+
+			const entt::registry& loadedRegistry = static_cast<const Scene*>(loaded.get())->GetRegistry();
+			entt::entity handle = entt::null;
+			for (const entt::entity candidate : loadedRegistry.view<CameraComponent>())
+			{
+				handle = candidate;
+				break;
+			}
+			CHECK(handle != entt::null);
+			const CameraComponent& restored = loadedRegistry.get<CameraComponent>(handle);
+			CHECK(restored.FixedAspectRatio);
+			CHECK(restored.Camera.m_ProjectionType == CameraSettings::ProjectionType::Perspective);
+			CHECK(std::fabs(restored.Camera.m_PerspectiveFOV - 63.0f) < 1e-4f);
+			// m_AspectRatio 是 Transient(不入档)⇒ 读回是默认 1.0;FixedAspectRatio 相机以它为准。
+			CHECK(std::fabs(restored.Camera.m_AspectRatio - 1.0f) < 1e-6f);
+
+			const Camera& restoredView = loaded->GetCameraView(handle);
+			const glm::mat4 expected = glm::perspective(glm::radians(63.0f), 1.0f, 0.25f, 250.0f);
+			const glm::mat4& actual = restoredView.GetProjectionMatrix();
+			for (int column = 0; column < 4; ++column)
+				for (int row = 0; row < 4; ++row)
+					CHECK(std::fabs(actual[column][row] - expected[column][row]) < 1e-6f);
+
+			// 旧嵌套写法兼容:直接读入仓库既有的 .wd(相机仍是 Camera: { m_* } 形态)。
+			WorldContext legacyContext;
+			Ref<Scene> legacy = CreateRef<Scene>(legacyContext);
+			{
+				SceneSerializer serializer(legacy);
+				if (!serializer.Deserialize("templates/project-example/assets/scenes/3DTest.wd"))
+					throw std::runtime_error(std::string("camera pod test: legacy .wd load failed: ") + serializer.GetLastError());
+			}
+			const entt::registry& legacyRegistry = static_cast<const Scene*>(legacy.get())->GetRegistry();
+			entt::entity legacyHandle = entt::null;
+			for (const entt::entity candidate : legacyRegistry.view<CameraComponent>())
+			{
+				legacyHandle = candidate;
+				break;
+			}
+			CHECK(legacyHandle != entt::null);
+			const CameraComponent& legacyCamera = legacyRegistry.get<CameraComponent>(legacyHandle);
+			CHECK(legacyCamera.Camera.m_ProjectionType == CameraSettings::ProjectionType::Perspective);
+			CHECK(std::fabs(legacyCamera.Camera.m_PerspectiveFarClip - 200.0f) < 1e-4f);
+			CHECK(legacyCamera.Primary);
+			legacy->EnsureCameraView(legacyHandle);
+			const glm::mat4 legacyProjection =
+				CameraSystem::EnsureView(legacy->GetRegistry(), legacyHandle, 1280, 720).GetProjectionMatrix();
+			const glm::mat4 legacyExpected = glm::perspective(glm::radians(legacyCamera.Camera.m_PerspectiveFOV),
+				1280.0f / 720.0f, legacyCamera.Camera.m_PerspectiveNearClip, legacyCamera.Camera.m_PerspectiveFarClip);
+			for (int column = 0; column < 4; ++column)
+				for (int row = 0; row < 4; ++row)
+					CHECK(std::fabs(legacyProjection[column][row] - legacyExpected[column][row]) < 1e-6f);
+
+			// B) 指纹缓存:视图只在结构提交点建立,UpdateAllCameras 绝不凭空创建。
+			WorldContext cacheContext;
+			Ref<Scene> cacheScene = CreateRef<Scene>(cacheContext);
+			Entity cacheEntity = Entity::CreateEntity(cacheScene.get(), "CacheCamera");
+			CameraComponent cacheComponent;
+			cacheComponent.Camera.m_ProjectionType = CameraSettings::ProjectionType::Perspective;
+			cacheComponent.Camera.m_PerspectiveFOV = 50.0f;
+			cacheEntity.AddComponent<CameraComponent>(cacheComponent);
+			const entt::entity cacheHandle = static_cast<entt::entity>(cacheEntity);
+
+			entt::registry& cacheRegistry = cacheScene->GetRegistry();
+			CameraSystem::UpdateAllCameras(cacheRegistry, 1280, 720);
+			CHECK(cacheRegistry.try_get<CameraViewComponent>(cacheHandle) == nullptr);
+
+			const uint64_t beforeFirst = CameraSystem::ProjectionRebuildCount();
+			cacheScene->EnsureCameraView(cacheHandle);   // 结构提交点建视图(与运行态路径一致)
+			const glm::mat4 firstProjection =
+				CameraSystem::EnsureView(cacheRegistry, cacheHandle, 1280, 720).GetProjectionMatrix();
+			CHECK(CameraSystem::ProjectionRebuildCount() == beforeFirst + 1);   // Valid=false ⇒ 无条件重算 1 次
+			const float expectedFocal = 1.0f / std::tan(glm::radians(50.0f) * 0.5f);
+			CHECK(std::fabs(firstProjection[1][1] - expectedFocal) < 1e-5f);
+
+			auto* cacheView = cacheRegistry.try_get<CameraViewComponent>(cacheHandle);
+			CHECK(cacheView != nullptr && cacheView->Valid);
+			cacheView->View = Camera(glm::mat4(0.0f));   // 破坏缓存:只有真的重算才会覆盖它
+			const uint64_t beforeLoop = CameraSystem::ProjectionRebuildCount();
+			for (int i = 0; i < 64; ++i)
+				CameraSystem::UpdateAllCameras(cacheRegistry, 1280, 720);
+			CHECK(CameraSystem::ProjectionRebuildCount() == beforeLoop);            // 参数不变 ⇒ 0 次
+			CHECK(std::fabs(cacheView->View.GetProjectionMatrix()[0][0]) < 1e-9f);  // 哨兵未被覆盖
+
+			cacheRegistry.get<CameraComponent>(cacheHandle).Camera.m_PerspectiveFOV = 70.0f;
+			CameraSystem::UpdateAllCameras(cacheRegistry, 1280, 720);
+			CHECK(CameraSystem::ProjectionRebuildCount() == beforeLoop + 1);        // 参数变 ⇒ 恰好 1 次
 		}
 
 		std::printf("World.Camera3D: all checks passed\n");

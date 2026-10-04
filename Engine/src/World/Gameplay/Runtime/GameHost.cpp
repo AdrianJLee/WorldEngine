@@ -18,9 +18,10 @@ namespace World::Gameplay
 	namespace
 	{
 		// 运行期脚本可能删掉相机实体或相机组件,所以每帧重新取,不做缓存。
-		bool ResolvePrimaryCamera(const Ref<Scene>& scene, CameraComponent*& camera, TransformComponent*& transform)
+		// 只返回实体句柄:帧相机数据(投影矩阵)由 Scene::GetCameraView 按指纹缓存产出。
+		bool ResolvePrimaryCamera(const Ref<Scene>& scene, entt::entity& camera, TransformComponent*& transform)
 		{
-			camera = nullptr;
+			camera = entt::null;
 			transform = nullptr;
 			if (!scene)
 				return false;
@@ -29,7 +30,7 @@ namespace World::Gameplay
 			if (!entity || !entity.HasComponent<CameraComponent>() || !entity.HasComponent<TransformComponent>())
 				return false;
 
-			camera = &entity.GetComponent<CameraComponent>();
+			camera = static_cast<entt::entity>(entity);
 			transform = &entity.GetComponent<TransformComponent>();
 			return true;
 		}
@@ -349,7 +350,7 @@ namespace World::Gameplay
 		if (!m_Scene || !m_SceneRenderer || !m_RuntimeStarted)
 			return;
 
-		CameraComponent* camera = nullptr;
+		entt::entity camera = entt::null;
 		TransformComponent* transform = nullptr;
 		if (!ResolvePrimaryCamera(m_Scene, camera, transform))
 			return;
@@ -358,7 +359,8 @@ namespace World::Gameplay
 		// D5c-4a:骨骼动画步长(与编辑器同一口径:推进组件 Time)。
 		m_SceneRenderer->SetDeltaSeconds(m_LastTickSeconds);
 		const glm::mat4 camMatrix = transform->GetLocalMatrix();
-		m_SceneRenderer->SubmitScene(camera->Camera, camMatrix);
+		const Camera& cameraView = m_Scene->GetCameraView(camera);
+		m_SceneRenderer->SubmitScene(cameraView, camMatrix);
 		m_SceneRenderer->EndScene();
 
 		// 诊断(WLD_TRACE_HOST=1):确认"每帧都在提交"以及相机矩阵是否退化 ——
@@ -369,7 +371,7 @@ namespace World::Gameplay
 			++calls;
 			if (calls <= 4 || calls % 120 == 0)
 			{
-				const glm::mat4& projection = camera->Camera.GetProjectionMatrix();
+				const glm::mat4& projection = cameraView.GetProjectionMatrix();
 				WLD_CORE_INFO("[host] SubmitSceneRender call#{0} renderer={9} target={1}x{2} projDiag=({3},{4},{5}) camPos=({6},{7},{8})",
 					calls, m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight(),
 					projection[0][0], projection[1][1], projection[2][2],

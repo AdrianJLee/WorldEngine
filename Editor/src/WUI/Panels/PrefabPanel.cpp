@@ -13,6 +13,7 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/SceneSerializer.h"
+#include "World/Scene/Systems/CameraSystem.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
@@ -619,9 +620,9 @@ namespace World
 				+ "  MaterialPath=" + (skinned->MaterialPath.empty() ? std::string("(none)") : skinned->MaterialPath));
 		if (const auto* camera = registry.try_get<CameraComponent>(handle))
 		{
-			const bool perspective = camera->Camera.GetProjectionType() == SceneCamera::ProjectionType::Perspective;
+			const bool perspective = camera->Camera.m_ProjectionType == CameraSettings::ProjectionType::Perspective;
 			lines.push_back(std::string("Camera: Projection=") + (perspective ? "Perspective" : "Orthographic")
-				+ "  Fov=" + FormatFloat(camera->Camera.GetPerspectiveFOV(), 1)
+				+ "  Fov=" + FormatFloat(camera->Camera.m_PerspectiveFOV, 1)
 				+ "  Primary=" + (camera->Primary ? "yes" : "no"));
 		}
 		if (const auto* sprite = registry.try_get<SpriteComponent>(handle))
@@ -757,9 +758,9 @@ namespace World
 			float scalar = 0.0f;
 			if (!parseScalar(&scalar))
 				return reject("value is not a number");
-			if (field == "Fov") camera->Camera.SetPerspectiveFOV(scalar);
-			else if (field == "NearClip") camera->Camera.SetPerspectiveNearClip(scalar);
-			else if (field == "FarClip") camera->Camera.SetPerspectiveFarClip(scalar);
+			if (field == "Fov") camera->Camera.m_PerspectiveFOV = scalar;
+			else if (field == "NearClip") camera->Camera.m_PerspectiveNearClip = scalar;
+			else if (field == "FarClip") camera->Camera.m_PerspectiveFarClip = scalar;
 			else return reject("field is not editable");
 		}
 		else if (component == kDirectionalLightComponent || component == kPointLightComponent
@@ -1254,13 +1255,15 @@ namespace World
 			m_Focus.y + distance * std::sin(m_OrbitPitch),
 			m_Focus.z + distance * std::cos(m_OrbitPitch) * std::cos(m_OrbitYaw) };
 		const glm::mat4 view = glm::lookAt(eye, m_Focus, glm::vec3(0.0f, 1.0f, 0.0f));
-		SceneCamera camera;
-		camera.SetProjectionType(SceneCamera::ProjectionType::Perspective);
+		CameraSettings cameraSettings;
+		cameraSettings.m_ProjectionType = CameraSettings::ProjectionType::Perspective;
+		cameraSettings.m_PerspectiveFOV = 40.0f;
+		cameraSettings.m_PerspectiveNearClip = std::max(0.01f, distance * 0.01f);
+		cameraSettings.m_PerspectiveFarClip = distance * 4.0f + 100.0f;
 		// 相机宽高比 = 离屏目标宽高比 = 预览区宽高比 → 物体在预览区里不会被拉扁。
-		camera.SetViewportSize(m_PreviewTargetW, m_PreviewTargetH);
-		camera.SetPerspectiveFOV(40.0f);
-		camera.SetPerspectiveNearClip(std::max(0.01f, distance * 0.01f));
-		camera.SetPerspectiveFarClip(distance * 4.0f + 100.0f);
+		const float previewAspect = m_PreviewTargetH
+			? static_cast<float>(m_PreviewTargetW) / static_cast<float>(m_PreviewTargetH) : 1.0f;
+		const Camera camera(CameraSystem::ComputeProjection(cameraSettings, previewAspect));
 		// 与视口/相机预览同一条提交路径(SceneRenderer):prefab 里的网格/材质走引擎自己的加载。
 		SceneRendererOptions options;
 		options.ShowGrid = false;
@@ -1745,7 +1748,7 @@ namespace World
 				Wui::Tr("panel.prefab.section.camera", "Camera"), theme.Accent, theme, 13.0f);
 			y += 20.0f;
 			bool changed = false;
-			float fov = camera->Camera.GetPerspectiveFOV();
+			float fov = camera->Camera.m_PerspectiveFOV;
 			y += DrawScalarRow(ctx, x, y, width, "prefab.field.CameraComponent.Fov",
 				Wui::Tr("panel.prefab.field.fov", "Fov"),
 				Wui::Tr("panel.prefab.field.fov.tooltip",
@@ -1753,11 +1756,11 @@ namespace World
 				fov, 0.5f, 1.0f, 179.0f, theme, changed);
 			if (changed)
 			{
-				camera->Camera.SetPerspectiveFOV(fov);
+				camera->Camera.m_PerspectiveFOV = fov;
 				MarkDirty();
 				changed = false;
 			}
-			float nearClip = camera->Camera.GetPerspectiveNearClip();
+			float nearClip = camera->Camera.m_PerspectiveNearClip;
 			y += DrawScalarRow(ctx, x, y, width, "prefab.field.CameraComponent.NearClip",
 				Wui::Tr("panel.prefab.field.near_clip", "Near Clip"),
 				Wui::Tr("panel.prefab.field.near_clip.tooltip",
@@ -1765,11 +1768,11 @@ namespace World
 				nearClip, 0.01f, 0.001f, 1000.0f, theme, changed);
 			if (changed)
 			{
-				camera->Camera.SetPerspectiveNearClip(nearClip);
+				camera->Camera.m_PerspectiveNearClip = nearClip;
 				MarkDirty();
 				changed = false;
 			}
-			float farClip = camera->Camera.GetPerspectiveFarClip();
+			float farClip = camera->Camera.m_PerspectiveFarClip;
 			y += DrawScalarRow(ctx, x, y, width, "prefab.field.CameraComponent.FarClip",
 				Wui::Tr("panel.prefab.field.far_clip", "Far Clip"),
 				Wui::Tr("panel.prefab.field.far_clip.tooltip",
@@ -1777,7 +1780,7 @@ namespace World
 				farClip, 1.0f, 0.01f, 100000.0f, theme, changed);
 			if (changed)
 			{
-				camera->Camera.SetPerspectiveFarClip(farClip);
+				camera->Camera.m_PerspectiveFarClip = farClip;
 				MarkDirty();
 			}
 			y += 6.0f;

@@ -1,9 +1,9 @@
 -- W3e headless fixture: camera fields live behind a nested Object field
--- (CameraComponent.Camera -> SceneCamera). The proxy is read/written through the
+-- (CameraComponent.Camera -> CameraSettings). The proxy is read/written through the
 -- same schema-driven field proxy as the component root; every access re-checks the
 -- entity/component/type chain. Modes are selected by the C++ harness through the
 -- TEST_CameraProbeMode global (shared VM), phases through TEST_LuaPhase.
--- 字段名与 schema 一致(SceneCamera 的私有成员带 m_ 前缀,与 PropertiesPanel/存根同名)。
+-- 字段名与 schema 一致(CameraSettings 的成员带 m_ 前缀,与 PropertiesPanel/存根同名)。
 ---@class CameraProbe : WorldScript
 local CameraProbe = {}
 

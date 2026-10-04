@@ -701,7 +701,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 
 
 		WLD_PROFILE_SCOPE("Renderer Clear");
-		Camera* renderCamera = &m_EditorCamera;
+		const Camera* renderCamera = &m_EditorCamera;
 		glm::mat4 renderCameraTransform = m_EditorCamera.GetTransform();
 		// D7-1a:3D 模式用 EditorCamera3D 的投影/视图(P1b D1 的相机),沿用同一个提交接口。
 		Camera viewportCamera3D { m_EditorCamera3D.GetProjectionMatrix(false) };
@@ -771,7 +771,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 			if (!cameraEntity.IsValid() || m_ActiveScene->IsPendingDestroy(cameraEntity) ||
 				!cameraEntity.HasComponent<CameraComponent>() || !cameraEntity.HasComponent<TransformComponent>())
 				return;
-			renderCamera = &cameraEntity.GetComponent<CameraComponent>().Camera;
+			renderCamera = &m_ActiveScene->GetCameraView(static_cast<entt::entity>(cameraEntity));
 			renderCameraTransform = cameraEntity.GetComponent<TransformComponent>().GetLocalMatrix();
 		}
 
