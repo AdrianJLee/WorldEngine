@@ -89,8 +89,21 @@ namespace World::Vfs
 		return true;
 	}
 
+	size_t Vfs::MountCount() const
+	{
+		std::shared_lock<std::shared_mutex> lock(m_Mutex);
+		return m_Mounts.size();
+	}
+
+	void Vfs::Clear()
+	{
+		std::unique_lock<std::shared_mutex> lock(m_Mutex);
+		m_Mounts.clear();
+	}
+
 	MountId Vfs::Mount(std::string id, ProviderPtr provider, int priority)
 	{
+		std::unique_lock<std::shared_mutex> lock(m_Mutex);
 		if (id.empty() || !provider)
 		{
 			if (Log::GetCoreLogger())
@@ -120,6 +133,7 @@ namespace World::Vfs
 
 	bool Vfs::Unmount(MountId id)
 	{
+		std::unique_lock<std::shared_mutex> lock(m_Mutex);
 		const auto it = std::find_if(m_Mounts.begin(), m_Mounts.end(),
 			[id](const MountEntry& mount) { return mount.id == id; });
 		if (it == m_Mounts.end())
@@ -151,7 +165,8 @@ namespace World::Vfs
 		return nullptr;
 	}
 
-	bool Vfs::Resolve(const Path& path, StatInfo& out, std::error_code& ec) const
+	// 无锁实现:调用方必须已持有(共享)锁。public 入口只负责加锁后转发。
+	bool Vfs::ResolveUnlocked(const Path& path, StatInfo& out, std::error_code& ec) const
 	{
 		out = StatInfo{};
 		ec.clear();
@@ -171,12 +186,19 @@ namespace World::Vfs
 		return true;
 	}
 
+	bool Vfs::Resolve(const Path& path, StatInfo& out, std::error_code& ec) const
+	{
+		std::shared_lock<std::shared_mutex> lock(m_Mutex);
+		return ResolveUnlocked(path, out, ec);
+	}
+
 	bool Vfs::Read(const Path& path, std::vector<uint8_t>& out, std::error_code& ec) const
 	{
+		std::shared_lock<std::shared_mutex> lock(m_Mutex);
 		out.clear();
 
 		StatInfo stat;
-		if (!Resolve(path, stat, ec))
+		if (!ResolveUnlocked(path, stat, ec))   // 已持共享锁:走无锁实现
 			return false;
 
 		const auto mount = std::find_if(m_Mounts.begin(), m_Mounts.end(),
@@ -199,8 +221,9 @@ namespace World::Vfs
 
 	bool Vfs::Exists(const Path& path) const
 	{
+		std::shared_lock<std::shared_mutex> lock(m_Mutex);
 		StatInfo stat;
 		std::error_code ec;
-		return Stat(path, stat, ec);
+		return ResolveUnlocked(path, stat, ec);   // Stat == Resolve;同样走无锁实现
 	}
 }

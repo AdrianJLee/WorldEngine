@@ -772,12 +772,13 @@ void EditorLayer::RegisterUiTextures(){
 			m_SceneTextureId = registry.Register(m_SceneRenderer->GetColorTexture());
 		if (m_PreviewRenderer && m_PreviewRenderer->GetColorTexture())
 			m_PreviewTextureId = registry.Register(m_PreviewRenderer->GetColorTexture());
-		const Ref<Texture2D> icons[8] = {
+		// 图标也走唯一的 GPU 驻留:一次解码、一份显存、一个登记入口(不再有 GL 侧副本)。
+		const Rhi::Handle<Rhi::Texture> icons[8] = {
 			m_IconPlay, m_IconStop, m_IconPause, m_IconContinue,
 			m_IconSimulate, m_IconSimulateStop, m_IconSimulatePause, m_IconSimulateContinue,
 		};
 		for (int i = 0; i < 8; ++i)
-			m_IconIds[i] = registry.RegisterTexture2D(icons[i]);
+			m_IconIds[i] = registry.Register(icons[i]);
 		m_UiTextureGeneration = registry.Generation();
 	}
 
@@ -809,22 +810,6 @@ void EditorLayer::TogglePause(){
 				app->SetPaused(m_ScenePaused);
 		}
 	}
-
-
-Ref<Texture2D> EditorLayer::GetIcon(int index) const{
-		switch (index)
-		{
-			case 1: return m_IconStop;
-			case 2: return m_IconPause;
-			case 3: return m_IconContinue;
-			case 4: return m_IconSimulate;
-			case 5: return m_IconSimulateStop;
-			case 6: return m_IconSimulatePause;
-			case 7: return m_IconSimulateContinue;
-			default: return m_IconPlay;
-		}
-	}
-
 
 void EditorLayer::SetViewportState(bool focused, bool hovered, glm::vec2 size, glm::vec2 bounds[2]){
 		m_ViewportFocused = focused;

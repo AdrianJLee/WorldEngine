@@ -5,7 +5,7 @@
 
 #include "World/Core/Sha256.h"
 #include "World/RHI/RhiDevice.h"
-#include "World/Renderer/Texture/MaterialTextureCache.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Texture/TextureCompiler.h"
 #include "World/Renderer/Texture/TextureData.h"

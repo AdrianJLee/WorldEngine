@@ -1,7 +1,7 @@
 #pragma once
 
 #include "World/RHI/Rhi.h"
-#include "World/Renderer/Texture/Texture.h"
+#include "World/RHI/Rhi.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -18,7 +18,6 @@ namespace World::Wui
 		~WuiTextureRegistry();
 
 		uint64_t Register(const Rhi::Handle<Rhi::Texture>& texture);
-		uint64_t RegisterTexture2D(const Ref<Texture2D>& texture);
 		void Update(uint64_t id, const Rhi::Handle<Rhi::Texture>& texture);
 		Rhi::Handle<Rhi::Texture> Resolve(uint64_t id);
 		void Clear();
@@ -34,7 +33,6 @@ namespace World::Wui
 		struct Entry
 		{
 			Rhi::Handle<Rhi::Texture> Texture;
-			Ref<Texture2D> Source;
 		};
 		uint64_t m_NextId = 1;
 		uint32_t m_Generation = 0;

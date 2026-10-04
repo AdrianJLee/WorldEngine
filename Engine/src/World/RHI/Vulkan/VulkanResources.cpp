@@ -367,7 +367,7 @@ namespace World::Rhi::Vulkan
 
 	bool VulkanTexture::UsesAsyncUploadRing() const
 	{
-		// 与 RhiTexture.h / MaterialTextureCache 的说明配套:
+		// 与 RhiTexture.h / TextureLibrary 的说明配套:
 		//   * 材质贴图(可能活动帧中途替换)与多 mip 纹理默认走**同步**上传(低频);
 		//   * 诊断开关:WLD_TEX_SYNC_UPLOAD=1 全部同步;WLD_TEX_RING_UPLOAD=1 强制走环(压测/复现)。
 		static const bool forceSyncUpload = std::getenv("WLD_TEX_SYNC_UPLOAD") != nullptr;

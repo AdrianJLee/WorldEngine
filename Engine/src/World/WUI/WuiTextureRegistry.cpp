@@ -2,7 +2,6 @@
 #include "World/WUI/WuiTextureRegistry.h"
 
 #include "World/Renderer/Renderer.h"
-#include "World/RHI/RhiTextureBridge.h"
 
 namespace World::Wui
 {
@@ -31,18 +30,8 @@ namespace World::Wui
 		if (existing != m_TextureIds.end())
 			return existing->second;
 		const uint64_t id = m_NextId++;
-		m_Textures[id] = { texture, nullptr };
+		m_Textures[id] = { texture };
 		m_TextureIds[texture.get()] = id;
-		++m_ContentRevision;
-		return id;
-	}
-
-	uint64_t WuiTextureRegistry::RegisterTexture2D(const Ref<Texture2D>& texture)
-	{
-		if (!texture)
-			return 0;
-		const uint64_t id = m_NextId++;
-		m_Textures[id] = { nullptr, texture };
 		++m_ContentRevision;
 		return id;
 	}
@@ -59,7 +48,6 @@ namespace World::Wui
 		if (it->second.Texture)
 			m_TextureIds.erase(it->second.Texture.get());
 		it->second.Texture = texture;
-		it->second.Source = nullptr;
 		if (texture)
 			m_TextureIds[texture.get()] = id;
 		++m_ContentRevision;
@@ -72,14 +60,9 @@ namespace World::Wui
 		const auto it = m_Textures.find(id);
 		if (it == m_Textures.end())
 			return nullptr;
-		if (it->second.Texture)
-			return it->second.Texture;
-		if (it->second.Source && Renderer::GetDevice())
-		{
-			it->second.Texture = Rhi::WrapTexture2D(Renderer::GetDevice(), it->second.Source);
-			return it->second.Texture;
-		}
-		return nullptr;
+		// 所有纹理在登记时就已经是 GPU 句柄(唯一驻留在 TextureLibrary);
+		// 这里不再有"GL 纹理 → RHI 桥接"这一步(那一步在 Vulkan 下要读回整张图)。
+		return it->second.Texture;
 	}
 
 	void WuiTextureRegistry::Clear()

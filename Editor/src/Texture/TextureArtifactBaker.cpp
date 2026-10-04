@@ -5,7 +5,7 @@
 // 本文件只调用、不复制它的解析实现(避免"第二套读法")。
 #include "WUI/Panels/TextureSettingsPanel.h"
 
-#include "World/Renderer/Texture/MaterialTextureCache.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Renderer/Texture/TextureCompiler.h"
 
 #include <fstream>
@@ -94,11 +94,11 @@ namespace World
 				WLD_CORE_INFO("[texture] removed legacy artifact copy: {0}",
 					legacyArtifact.filename().generic_string());
 			// 材质贴图缓存按**逻辑路径**失效:下一次 Get 重新读盘(命中新产物)。
-			MaterialTextureCache::Get().Invalidate(sourceLogical);
+			TextureLibrary::Get().Invalidate(sourceLogical);
 			// 同一份纹理可能被"资产引用"与"源图引用"两种写法引用:两条缓冲键都失效。
 			const std::string assetLogical = TextureAssetPathForSource(sourceLogical);
 			if (assetLogical != sourceLogical)
-				MaterialTextureCache::Get().Invalidate(assetLogical);
+				TextureLibrary::Get().Invalidate(assetLogical);
 			else
 			{
 				const std::filesystem::path asset(sourceLogical);
@@ -108,7 +108,7 @@ namespace World
 						(asset.parent_path() / (asset.stem().string() + extension)).generic_string();
 					std::error_code siblingError;
 					if (std::filesystem::is_regular_file(contentRoot / sibling, siblingError))
-						MaterialTextureCache::Get().Invalidate(sibling);
+						TextureLibrary::Get().Invalidate(sibling);
 				}
 			}
 			WLD_CORE_INFO("[texture] baked {0} -> {1} ({2}, {3}x{4}, {5} mips)", sourceLogical,

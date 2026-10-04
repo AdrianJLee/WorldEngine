@@ -14,7 +14,8 @@
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/Widgets/WuiModal.h"
-#include "World/Renderer/Texture/Texture.h"
+#include "World/RHI/Rhi.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
 // M4-S2/Slang-B1:Material Shader(`.slang`)的起始代码取自内核的 MaterialSurfaceCompiler

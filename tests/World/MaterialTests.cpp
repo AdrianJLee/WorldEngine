@@ -2,7 +2,7 @@
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialSurface.h"
-#include "World/Renderer/Texture/MaterialTextureCache.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Renderer/Texture/TextureData.h"
 #include "World/Utils/Paths.h"
 
@@ -493,9 +493,9 @@ int main()
 			CHECK(missing.Pixels.size() == 4);
 		}
 
-		// 13. W5-L1:MaterialTextureCache::Invalidate 在无设备环境下安全 no-op(不崩、不误清)。
+		// 13. W5-L1:TextureLibrary::Invalidate 在无设备环境下安全 no-op(不崩、不误清)。
 		{
-			MaterialTextureCache& cache = MaterialTextureCache::Get();
+			TextureLibrary& cache = TextureLibrary::Get();
 			cache.Invalidate(std::string());                  // 空路径拒绝
 			cache.Invalidate("textures/Icon.png");            // 未命中:安全
 			cache.Invalidate("material_hotreload_tmp/none.png");

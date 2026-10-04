@@ -68,26 +68,29 @@ namespace World
 		return mesh;
 	}
 
-	Ref<Texture2D> AssetRegistry::ResolveTexture(const AssetRef& asset, std::string* error)
+	Rhi::Handle<Rhi::Texture> AssetRegistry::ResolveTexture(const AssetRef& asset, std::string* error)
 	{
+		// 纹理走与网格同一条"先按路径、失败再按身份找回"的顺序(改名不断链)。
+		// 返回 RHI 句柄:GPU 纹理只有一份驻留(TextureLibrary),不再有 GL/RHI 两套。
 		PathId path = asset.Path;
-		Ref<Texture2D> texture;
+		Rhi::Handle<Rhi::Texture> texture;
 		if (path.IsValid())
 		{
 			Touch(path, Kind::Texture);
-			texture = TextureLibrary::Get().Load(path, error);
+			texture = TextureLibrary::Get().Get(path, /*srgb*/ true);
 		}
 		if (!texture)
 		{
 			if (const PathId remapped = RemapByIdentity(asset, "texture"); remapped.IsValid() && remapped != path)
 			{
 				Touch(remapped, Kind::Texture);
-				texture = TextureLibrary::Get().Load(remapped, error);
+				texture = TextureLibrary::Get().Get(remapped, /*srgb*/ true);
 				path = remapped;
 			}
 		}
+		// 纹理的失败是"兜底成 1x1 白",句柄非空 ⇒ 这里只对"路径本来就无效"报错。
 		if (!texture && error && error->empty())
-			*error = path.IsValid() ? "纹理加载失败 '" + StringPool::Get().PathOf(path) + "'" : "path is empty";
+			*error = path.IsValid() ? "纹理不可用 '" + StringPool::Get().PathOf(path) + "'" : "path is empty";
 		return texture;
 	}
 

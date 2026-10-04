@@ -120,7 +120,7 @@ namespace World
 		//    读取/解析失败:FailedMaterials(保留旧内存态,详见 GetLoadWarning);
 		//  - M3:材质指纹含父级链(见 FingerprintAsset),所以父级改动会让子材质一起变化;
 		//    同一轮按"父级先、子级后"重载,链式继承当轮就能生效;
-		//  - 贴图内容变化:MaterialTextureCache::Invalidate(path) + 引用它的材质
+		//  - 贴图内容变化:TextureLibrary::Invalidate(path) + 引用它的材质
 		//    InvalidateTextures() → InvalidatedTextures(旧句柄按 Renderer::QueueRelease 延迟释放);
 		//  - 环境开关:WLD_ASSET_HOTRELOAD=0 整体关闭(不建立、不推进监听);
 		//    WLD_ASSET_HOTRELOAD_TRACE=1 打 [asset-hot-reload] 日志。
@@ -128,7 +128,7 @@ namespace World
 
 		// HOTR-P2C:贴图**产物被重烘**(`.wtexc` 内容变、`.wtex` 本身可能没变)时,让引用该贴图的
 		// 材质 Revision 前进 —— 与 PollAssetChanges 里"贴图内容变化"同一套失效口径
-		// (MaterialTextureCache::Invalidate 由调用方负责;这里只做材质侧失效)。
+		// (TextureLibrary::Invalidate 由调用方负责;这里只做材质侧失效)。
 		// 调用方:编辑器 TextureImportWatch 的重烘提交(主线程帧边界)。返回失效的材质数。
 		std::size_t InvalidateTextureDependents(const std::string& texturePath);
 

@@ -252,7 +252,7 @@ void Renderer3D::InvalidateMaterialCache(){
 		GetState().MaterialCache.clear();
 		// M4-S3:表面材质的描述符集引用材质贴图缓存里的贴图,一起失效(下一帧重建)。
 		GetState().SurfaceCache.clear();
-		MaterialTextureCache::Get().Clear();
+		TextureLibrary::Get().Clear();
 	}
 
 

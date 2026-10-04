@@ -6,7 +6,7 @@
 #include "World/Core/Log.h"
 #include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/MaterialSurfaceRuntime.h"
-#include "World/Renderer/Texture/MaterialTextureCache.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Utils/Paths.h"
 
@@ -838,7 +838,7 @@ namespace World
 				const std::string normalized = MaterialLibrary::NormalizePath(path);
 				// 清 s:/l: 两份;旧句柄由缓存内部按 Renderer::QueueRelease 延迟释放
 				// (GL 立即、Vulkan 三帧/fence 后;无设备时安全 no-op)。
-				MaterialTextureCache::Get().Invalidate(normalized);
+				TextureLibrary::Get().Invalidate(normalized);   // 全局唯一纹理驻留
 			}
 
 			for (const auto& [key, material] : m_Cache)

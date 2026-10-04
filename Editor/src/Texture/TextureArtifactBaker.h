@@ -21,7 +21,7 @@ namespace World
 		//
 		// 线程纪律(与 TextureSettingsPanel 的后台预览烘焙同一套口径):
 		//   - 编码(`TextureCompiler::BakeBytes/BakeFile`)是纯 CPU,**可在工作线程**跑;
-		//   - 写盘 + `MaterialTextureCache::Invalidate` + 日志只在**主线程**执行(提交入口)。
+		//   - 写盘 + `TextureLibrary::Invalidate` + 日志只在**主线程**执行(提交入口)。
 
 		// 一步到位(面板用,主线程):读源字节 → 编码 → 写 `<同目录>/<主名>.wtexc` + 失效材质贴图缓存。
 		//

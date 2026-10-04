@@ -3,6 +3,7 @@
 #include "World/Asset/ScenePrefetch.h"
 
 #include "World/Asset/AsyncLoader.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
@@ -42,8 +43,15 @@ namespace World
 			request(registry.get<SkinnedMeshRendererComponent>(entity).Mesh);
 		for (const entt::entity entity : registry.view<MeshCollider3DComponent>())
 			request(registry.get<MeshCollider3DComponent>(entity).Mesh);
+		// 精灵纹理:唯一驻留已收口到 TextureLibrary,同样先登记异步解码(主线程上传)。
 		for (const entt::entity entity : registry.view<SpriteComponent>())
-			request(registry.get<SpriteComponent>(entity).Texture);
+		{
+			const AssetRef& texture = registry.get<SpriteComponent>(entity).Texture;
+			if (!texture.HasPath())
+				continue;
+			TextureLibrary::Get().RequestAsync(texture.Path, /*srgb*/ true);
+			++result.Requested;
+		}
 
 		return result;
 	}

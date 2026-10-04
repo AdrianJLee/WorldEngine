@@ -29,7 +29,7 @@ namespace World
 		//   * **稳定窗口**:变化内容连续稳定 kStableSeconds 秒后才入队(期间再变则重启计时);
 		//   * **2s 重扫**:发现新增 / 被删除的 `.wtex`(首次登记 = 建立基线,不重烘);
 		//   * **主线程不做重编码**:编码在工作线程(`TextureCompiler::BakeBytes/BakeFile`,纯 CPU);
-		//     写盘 + `MaterialTextureCache::Invalidate` + 日志只在主线程帧边界的 Pump 里做;
+		//     写盘 + `TextureLibrary::Invalidate` + 日志只在主线程帧边界的 Pump 里做;
 		//   * **绝不写 `.wtex`**:本服务只写派生产物(`.wtexc`),用户/面板的未保存编辑永远不被覆盖
 		//     (面板的 SyncWithDisk 仍按它自己的口径给出"磁盘已变、未覆盖"的提示)。
 		//

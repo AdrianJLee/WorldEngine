@@ -229,7 +229,7 @@ void Renderer3D::Shutdown(){
 		state.MaterialCache.clear();
 		// 材质贴图缓存持有 RHI 纹理句柄:必须在设备销毁前放掉,否则退出时
 		// vkDestroyDevice 会报 "VkImage has not been destroyed"(实测 20+ 条 VUID)。
-		MaterialTextureCache::Get().Clear();
+		TextureLibrary::Get().Clear();
 		state.Pipeline = nullptr;
 		state.TransparentPipeline = nullptr;
 		// D8b-2:实例化管线与实例缓冲也要在设备销毁前放掉。

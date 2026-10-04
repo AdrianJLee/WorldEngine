@@ -187,7 +187,6 @@ namespace World
 		void SetGizmoOperation(Wui::GizmoOperation operation) { m_CurrentGizmoOperation = operation; }
 		Wui::GizmoOperation GetGizmoOperation() const { return m_CurrentGizmoOperation; }
 		Entity PickEntityAt(glm::vec2 viewportLocal) { return GetEntityAtMousePosition(viewportLocal); }
-		Ref<Texture2D> GetIcon(int index) const;
 		uint64_t GetIconId(int index) const;
 		// 旧式纹理纪元:窗口/上下文重建后自增,面板据此重载自己的 GL 图标。
 		uint32_t TextureEpoch() const { return m_TextureEpoch; }
@@ -497,15 +496,15 @@ namespace World
 		Wui::GizmoOperation m_CurrentGizmoOperation = Wui::GizmoOperation::None;
 
 
-		Ref<Texture2D> m_IconPlay, m_IconStop;
-		Ref<Texture2D> m_IconPause, m_IconContinue;
+		Rhi::Handle<Rhi::Texture> m_IconPlay, m_IconStop;
+		Rhi::Handle<Rhi::Texture> m_IconPause, m_IconContinue;
 
 
 		SceneState m_SceneState = SceneState::Edit;
 		bool m_ScenePaused = false;
 
-		Ref<Texture2D> m_IconSimulate, m_IconSimulateStop;
-		Ref<Texture2D> m_IconSimulatePause, m_IconSimulateContinue;
+		Rhi::Handle<Rhi::Texture> m_IconSimulate, m_IconSimulateStop;
+		Rhi::Handle<Rhi::Texture> m_IconSimulatePause, m_IconSimulateContinue;
 
 		bool m_ShowCookingProgress = false;    // 是否显示打包弹窗
 		std::atomic<bool> m_CookingFinished = false; // 打包是否完成

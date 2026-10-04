@@ -261,7 +261,7 @@ void MaterialEditorPanel::RefreshValidation(double now){
 void MaterialEditorPanel::ReleaseGpuResources(bool defer){
 		if (defer)
 		{
-			// 帧在飞:把旧句柄搬到延迟释放队列(与 MaterialTextureCache::Invalidate /
+			// 帧在飞:把旧句柄搬到延迟释放队列(与 TextureLibrary::Invalidate /
 			// SceneRenderer::OnResize 同一条路径)。GL 立即执行,Vulkan 等帧栅栏。
 			std::array<Rhi::Handle<Rhi::CommandBuffer>, Renderer::FramesInFlight> commands {};
 			for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)

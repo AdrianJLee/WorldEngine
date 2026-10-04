@@ -2,6 +2,7 @@
 
 #include "World/Asset/AsyncLoader.h"
 #include "World/Asset/ScenePrefetch.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Core/Input.h"
 #include "World/Physics/PhysicsSettings.h"
 #include "World/Gameplay/Framework/InputMap.h"
@@ -401,6 +402,8 @@ namespace World::Gameplay
 			return;
 		if (AsyncLoader* loader = m_Scene->GetContext().Resources().TryGet<AsyncLoader>())
 			loader->PumpCompletions();
+		// 纹理驻留是进程级的:提交点同样在帧首(与网格一致,且不依赖场景渲染被调用)。
+		TextureLibrary::Get().PumpCompletions();
 	}
 
 	std::size_t GameHost::PendingAssetLoads() const
@@ -408,7 +411,7 @@ namespace World::Gameplay
 		if (!m_Scene)
 			return 0;
 		const AsyncLoader* loader = m_Scene->GetContext().Resources().TryGet<AsyncLoader>();
-		return loader ? loader->PendingCount() : 0;
+		return (loader ? loader->PendingCount() : 0) + TextureLibrary::Get().PendingCount();
 	}
 
 	std::string GameHost::DescribeAssetLoads() const
@@ -416,7 +419,11 @@ namespace World::Gameplay
 		if (!m_Scene)
 			return {};
 		const AsyncLoader* loader = m_Scene->GetContext().Resources().TryGet<AsyncLoader>();
-		return loader ? loader->Describe() : std::string();
+		std::string mesh = loader ? loader->Describe() : std::string();
+		const std::string textures = TextureLibrary::Get().DescribeLoads();
+		if (!mesh.empty() && !textures.empty())
+			return mesh + "  texture[" + textures + "]";
+		return mesh.empty() ? textures : mesh;
 	}
 
 	void GameHost::SubmitSceneRender()

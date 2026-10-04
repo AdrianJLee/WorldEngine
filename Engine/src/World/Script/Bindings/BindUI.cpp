@@ -1,8 +1,10 @@
 #include "wldpch.h"
+
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Script/Bindings/BindUI.h"
 
 #include "World/Renderer/Renderer.h"
-#include "World/Renderer/Texture/Texture.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Script/Bindings/BindServices.h"
 #include "World/Script/Vm/LuauVm.h"
@@ -232,7 +234,6 @@ namespace World
 
 		struct UiTextureEntry
 		{
-			Ref<Texture2D> Source;
 			uint64_t Id = 0;
 			uint32_t Generation = 0;
 		};
@@ -251,20 +252,18 @@ namespace World
 
 			Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 			UiTextureEntry& entry = UiTextureCache()[path];
-			// 设备重建(WuiTextureRegistry::Clear → Generation 变化)后旧 GL 纹理已失效,
-			// 必须重新创建,而不是把旧 Source 重新登记。
+			// 设备重建(WuiTextureRegistry::Clear → Generation 变化)后旧句柄已失效:
+			// 重新向 TextureLibrary 取(它自己也按设备失效重建),再登记一次。
 			if (entry.Generation != registry.Generation())
-			{
-				entry.Source = nullptr;
 				entry.Id = 0;
-			}
-			if (!entry.Source)
-				entry.Source = Texture2D::Create(path);
-			if (!entry.Source)
-				throw std::logic_error("ui.image could not create a texture for '" + path + "'");
 			if (entry.Id == 0)
 			{
-				entry.Id = registry.RegisterTexture2D(entry.Source);
+				// 唯一的 GPU 纹理驻留:与材质贴图/2D 精灵共用同一份,不在这里再建一份。
+				const Rhi::Handle<Rhi::Texture> texture =
+					TextureLibrary::Get().Get(path, /*srgb*/ true);
+				if (!texture)
+					throw std::logic_error("ui.image could not create a texture for '" + path + "'");
+				entry.Id = registry.Register(texture);
 				entry.Generation = registry.Generation();
 			}
 			return entry.Id;

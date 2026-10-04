@@ -417,14 +417,14 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 		}
 		// VEC-H6:编辑器图标资产 PNG → `.wtex` 单文件容器(payload = 原 PNG 字节,外观不变)。
 		if (!m_DirIcon)
-			m_DirIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/DirectoryIcon.wtex"));
+			m_DirIcon = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/ContentBrowser/DirectoryIcon.wtex"), /*srgb*/ true);
 		if (!m_FileIcon)
-			m_FileIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/FileIcon.wtex"));
+			m_FileIcon = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/ContentBrowser/FileIcon.wtex"), /*srgb*/ true);
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (registry.Generation() != m_IconGeneration)
 		{
-			m_DirIconId = registry.RegisterTexture2D(m_DirIcon);
-			m_FileIconId = registry.RegisterTexture2D(m_FileIcon);
+			m_DirIconId = registry.Register(m_DirIcon);
+			m_FileIconId = registry.Register(m_FileIcon);
 			m_IconGeneration = registry.Generation();
 		}
 

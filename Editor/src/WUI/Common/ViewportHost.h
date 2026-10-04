@@ -4,7 +4,8 @@
 
 #include "World/Renderer/EditorCamera.h"
 #include "World/Renderer/SceneRenderer.h"
-#include "World/Renderer/Texture/Texture.h"
+#include "World/RHI/Rhi.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/WUI/WuiGizmo.h"
 
 namespace World
@@ -24,7 +25,6 @@ namespace World
 		virtual void TogglePlay() = 0;
 		virtual void ToggleSimulate() = 0;
 		virtual void TogglePause() = 0;
-		virtual Ref<Texture2D> GetIcon(int index) const = 0;
 		virtual uint64_t GetIconId(int index) const = 0;
 		virtual uint64_t GetSceneTextureId() const = 0;
 		// 相机可视化:预览小窗(用场景相机渲染的 PiP)与视锥显示开关。

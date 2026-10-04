@@ -7,7 +7,8 @@
 #include "WUI/Panels/TextureSettingsPanel.h"
 #include "World/Asset/AssetTypeRegistry.h"
 #include "World/Renderer/Material.h"
-#include "World/Renderer/Texture/Texture.h"
+#include "World/RHI/Rhi.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/Utils/Paths.h"
 
@@ -402,8 +403,8 @@ namespace World
 		std::filesystem::path m_TreeRenameTarget;
 		// D10:根文件夹行只自动展开一次(用户手动折叠后不再被强制展开)。
 		bool m_RootRowSeeded = false;
-		Ref<Texture2D> m_DirIcon;
-		Ref<Texture2D> m_FileIcon;
+		Rhi::Handle<Rhi::Texture> m_DirIcon;
+		Rhi::Handle<Rhi::Texture> m_FileIcon;
 		uint64_t m_DirIconId = 0;
 		uint64_t m_FileIconId = 0;
 		uint32_t m_IconGeneration = ~0u;

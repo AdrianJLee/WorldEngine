@@ -87,7 +87,7 @@ namespace World
 		// 没有(无宿主的单元测试、BeginScene 之前的调用)则退回直连加载函数。
 		Ref<Mesh> ResolveMeshAsset(const AssetRef& asset, std::string* error);
 		Ref<Material> ResolveMaterialAsset(const AssetRef& asset, std::string* error);
-		Ref<Texture2D> ResolveTextureAsset(const AssetRef& asset);
+		Rhi::Handle<Rhi::Texture> ResolveTextureAsset(const AssetRef& asset);
 
 	private:
 		Rhi::Handle<Rhi::Device> m_Device;

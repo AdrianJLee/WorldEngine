@@ -1004,12 +1004,6 @@ void EditorShell::ToggleSimulate(){ m_Editor.ToggleSimulate(); }
 
 void EditorShell::TogglePause(){ m_Editor.TogglePause(); }
 
-
-Ref<Texture2D> EditorShell::GetIcon(int index) const{
-		return m_Editor.GetIcon(index);
-	}
-
-
 uint64_t EditorShell::GetIconId(int index) const{
 		return m_Editor.GetIconId(index);
 	}

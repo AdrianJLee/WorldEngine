@@ -4,7 +4,7 @@
 #include "World/Core/AssetRef.h"
 #include "World/Core/StringPool.h"
 #include "World/Renderer/Mesh.h"
-#include "World/Renderer/Texture/Texture.h"
+#include "World/RHI/Rhi.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -50,7 +50,7 @@ namespace World
 		// 收**组件形态的引用**(AssetRef):路径失效时按稳定身份查 `AssetCatalog` 找回 ——
 		// 这就是"资产改名/移动之后引用不断链"的落地点。
 		Ref<Mesh> ResolveMesh(const AssetRef& asset, std::string* error = nullptr);
-		Ref<Texture2D> ResolveTexture(const AssetRef& asset, std::string* error = nullptr);
+		Rhi::Handle<Rhi::Texture> ResolveTexture(const AssetRef& asset, std::string* error = nullptr);
 		// 材质:走 MaterialLibrary(见上面的边界说明),但仍在此处记账,便于诊断/未来接管。
 		Ref<class Material> ResolveMaterial(const AssetRef& asset, std::string* error = nullptr);
 

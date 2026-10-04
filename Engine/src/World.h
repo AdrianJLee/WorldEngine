@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 //	For use by World applications
 
@@ -37,8 +37,6 @@
 #include "World/Renderer/Legacy/Gfx/Framebuffer.h"
 #include "World/Renderer/Legacy/Gfx/Shader.h"
 #include "World/Renderer/Legacy/Gfx/VertexArray.h"
-#include "World/Renderer/Texture/Texture.h"
-#include "World/Renderer/Texture/SubTexture2D.h"
 
 #include "World/Utils/PlatformUtils.h"
 //	Entry Point

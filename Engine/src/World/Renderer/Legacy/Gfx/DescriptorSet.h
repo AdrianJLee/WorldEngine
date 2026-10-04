@@ -1,6 +1,5 @@
-﻿#pragma once
+#pragma once
 #include "World/Renderer/Legacy/Gfx/UniformBufferSet.h"
-#include "World/Renderer/Texture/Texture.h"
 
 #include <map>
 
@@ -89,14 +88,10 @@ namespace World
 
 		Ref<UniformBufferSet> GetUniformBufferSet(uint32_t binding);
 
-		void SetTexture(uint32_t binding, Ref<Texture2D> texture);
-		void SetTextures(uint32_t binding, const std::array<Ref<Texture2D>, 32>& textures);
-
 		void Bind(uint32_t frameIndex);
 	private:
 		// <binding, UniformBufferSet>
 		std::map<uint32_t, Ref<UniformBufferSet>> m_UniformBuffers;
 
-		std::map<uint32_t, std::vector<Ref<Texture2D>>> m_Textures;
 	};
 }

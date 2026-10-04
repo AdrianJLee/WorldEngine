@@ -101,7 +101,6 @@ namespace World
 		void TogglePlay() override;
 		void ToggleSimulate() override;
 		void TogglePause() override;
-		Ref<Texture2D> GetIcon(int index) const override;
 		uint64_t GetIconId(int index) const override;
 		uint32_t TextureEpoch() const override;
 		uint64_t GetSceneTextureId() const override;

@@ -8,7 +8,6 @@
 #include "World/Renderer/RenderSettings.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
-#include "World/RHI/RhiTextureBridge.h"
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/WUI/WuiScriptedInput.h"

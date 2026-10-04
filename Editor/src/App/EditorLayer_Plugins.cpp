@@ -1,5 +1,7 @@
 #include "EditorLayer_Internal.h"
 
+#include "World/Renderer/Texture/TextureLibrary.h"
+
 #include "World/Asset/AsyncLoader.h"
 #include "World/Asset/ScenePrefetch.h"
 
@@ -524,17 +526,17 @@ void EditorLayer::LoadIconTextures(){
 		// 一律走 EditorResourcePath 拼绝对路径(见 EditorResources.h)。
 		// VEC-H6:资产形态 PNG → 引擎单文件容器 `.wtex`(PNG 字节内嵌为 payload,不重编码);
 		// `TextureData::LoadTextureData` 的容器分支解码同一份字节 ⇒ 图标外观逐字节不变。
-		m_IconPlay = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Play.wtex"));
+		m_IconPlay = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/Icon_Play.wtex"), /*srgb*/ true);
 
-		m_IconStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Stop.wtex"));
+		m_IconStop = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/Icon_Stop.wtex"), /*srgb*/ true);
 
-		m_IconPause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Pause.wtex"));
-		m_IconContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Continue.wtex"));
+		m_IconPause = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/Icon_Pause.wtex"), /*srgb*/ true);
+		m_IconContinue = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/Icon_Continue.wtex"), /*srgb*/ true);
 
-		m_IconSimulate = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStart.wtex"));
-		m_IconSimulateStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStop.wtex"));
-		m_IconSimulatePause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulatePause.wtex"));
-		m_IconSimulateContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateContinue.wtex"));
+		m_IconSimulate = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/Icon_SimulateStart.wtex"), /*srgb*/ true);
+		m_IconSimulateStop = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/Icon_SimulateStop.wtex"), /*srgb*/ true);
+		m_IconSimulatePause = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/Icon_SimulatePause.wtex"), /*srgb*/ true);
+		m_IconSimulateContinue = TextureLibrary::Get().Get(EditorResourcePath("assets/icons/Icon_SimulateContinue.wtex"), /*srgb*/ true);
 	}
 
 

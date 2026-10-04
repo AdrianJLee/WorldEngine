@@ -7,7 +7,6 @@
 #include "World/Scene/SceneCamera.h"
 #include "World/Scene/Systems/TransformSystem.h"
 #include "World/Renderer/Camera.h"
-#include "World/Renderer/Texture/Texture.h"
 #include "World/Schema/Schema.h"
 #include "World/Schema/BuiltinAssetOps.h"
 

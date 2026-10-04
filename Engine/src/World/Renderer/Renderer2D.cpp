@@ -5,7 +5,6 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/ShaderUtils.h"
-#include "World/RHI/RhiTextureBridge.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -193,7 +192,8 @@ namespace World
 			Rhi::Handle<Rhi::DescriptorSet> TextureDescriptorSet;
 			Rhi::Handle<Rhi::DescriptorSetLayout> TextureLayout;
 			std::array<Rhi::Handle<Rhi::Texture>, MaxTextureSlots> Textures;
-			std::array<Ref<Texture2D>, MaxTextureSlots> SourceTextures;
+			// 已绑定的 GPU 纹理句柄(用于去重:同一张贴图在本帧只占一个槽位)。
+			std::array<Rhi::Handle<Rhi::Texture>, MaxTextureSlots> SourceTextures;
 			uint32_t TextureSlotIndex = 1;
 
 			glm::vec4 VertexPositions[4] =
@@ -547,7 +547,7 @@ namespace World
 		flushBatch(s_Data.Circles);
 	}
 
-	void Renderer2D::DrawQuadCore(const glm::mat4& transform, const Ref<Texture2D>& texture,
+	void Renderer2D::DrawQuadCore(const glm::mat4& transform, const Rhi::Handle<Rhi::Texture>& texture,
 		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
 	{
 		WLD_PROFILE_FUNCTION();
@@ -569,7 +569,7 @@ namespace World
 	}
 
 	// 批次状态机部分(纹理槽/批缓冲指针):必须在主线程按原顺序执行。
-	void Renderer2D::DrawQuadPositions(const glm::vec3 positions[4], const Ref<Texture2D>& texture,
+	void Renderer2D::DrawQuadPositions(const glm::vec3 positions[4], const Rhi::Handle<Rhi::Texture>& texture,
 		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
 	{
 		WLD_PROFILE_FUNCTION();
@@ -579,11 +579,12 @@ namespace World
 		constexpr glm::vec2 defaultTexCoords[] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
 		const glm::vec2* actualTexCoords = texCoords ? texCoords : defaultTexCoords;
 
+		// 纹理已经是 GPU 句柄(唯一驻留在 TextureLibrary),这里只做"本帧是否有同槽"的去重。
 		float textureIndex = 0.0f;
 		if (texture)
 		{
 			for (uint32_t i = 1; i < s_Data.TextureSlotIndex; i++)
-				if (s_Data.SourceTextures[i] && *s_Data.SourceTextures[i] == *texture)
+				if (s_Data.SourceTextures[i].get() == texture.get())
 				{
 					textureIndex = static_cast<float>(i);
 					break;
@@ -593,8 +594,7 @@ namespace World
 				if (s_Data.TextureSlotIndex >= MaxTextureSlots)
 					NextBatch();
 				textureIndex = static_cast<float>(s_Data.TextureSlotIndex);
-				s_Data.Textures[s_Data.TextureSlotIndex] =
-					Rhi::WrapTexture2D(Renderer::GetDevice(), texture);
+				s_Data.Textures[s_Data.TextureSlotIndex] = texture;
 				s_Data.SourceTextures[s_Data.TextureSlotIndex] = texture;
 				s_Data.TextureSlotIndex++;
 			}
@@ -687,31 +687,17 @@ namespace World
 			nullptr, color, nullptr, 1.0f, -1);
 	}
 
-	void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const Ref<Texture2D>& texture, float tilingFactor)
+	void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const Rhi::Handle<Rhi::Texture>& texture, float tilingFactor)
 	{
 		DrawQuad(glm::vec3(position, 0.0f), size, texture, tilingFactor);
 	}
 
-	void Renderer2D::DrawQuad(const glm::vec3& position, const glm::vec2& size, const Ref<Texture2D>& texture, float tilingFactor)
+	void Renderer2D::DrawQuad(const glm::vec3& position, const glm::vec2& size, const Rhi::Handle<Rhi::Texture>& texture, float tilingFactor)
 	{
 		DrawQuadCore(glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f }),
 			texture, glm::vec4(1.0f), nullptr, tilingFactor, -1);
 	}
-
-	void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const Ref<SubTexture2D>& subtexture, float tilingFactor)
-	{
-		DrawQuad(glm::vec3(position, 0.0f), size, subtexture, tilingFactor);
-	}
-
-	void Renderer2D::DrawQuad(const glm::vec3& position, const glm::vec2& size, const Ref<SubTexture2D>& subtexture, float tilingFactor)
-	{
-		WLD_PROFILE_FUNCTION();
-		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
-			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
-		DrawQuadCore(transform, subtexture->GetTexture(), { 1, 1, 1, 1 }, subtexture->GetTexCoords(), tilingFactor, -1);
-	}
-
-	void Renderer2D::DrawQuad(const glm::mat4& transform, const Ref<Texture2D>& texture,
+	void Renderer2D::DrawQuad(const glm::mat4& transform, const Rhi::Handle<Rhi::Texture>& texture,
 		float tilingFactor, const glm::vec4& tintColor)
 	{
 		DrawQuadCore(transform, texture, tintColor, nullptr, tilingFactor, -1);
@@ -732,13 +718,13 @@ namespace World
 	}
 
 	void Renderer2D::DrawRotatedQuad(const glm::vec2& position, const glm::vec2& size, float rotation,
-		const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
+		const Rhi::Handle<Rhi::Texture>& texture, float tilingFactor, const glm::vec4& tintColor)
 	{
 		DrawRotatedQuad(glm::vec3(position, 0.0f), size, rotation, texture, tilingFactor, tintColor);
 	}
 
 	void Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation,
-		const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
+		const Rhi::Handle<Rhi::Texture>& texture, float tilingFactor, const glm::vec4& tintColor)
 	{
 		WLD_PROFILE_FUNCTION();
 		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
@@ -746,23 +732,6 @@ namespace World
 			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
 		DrawQuadCore(transform, texture, tintColor, nullptr, tilingFactor, -1);
 	}
-
-	void Renderer2D::DrawRotatedQuad(const glm::vec2& position, const glm::vec2& size, float rotation,
-		const Ref<SubTexture2D>& subtexture, float tilingFactor, const glm::vec4& tintColor)
-	{
-		DrawRotatedQuad(glm::vec3(position, 0.0f), size, rotation, subtexture, tilingFactor, tintColor);
-	}
-
-	void Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation,
-		const Ref<SubTexture2D>& subtexture, float tilingFactor, const glm::vec4& tintColor)
-	{
-		WLD_PROFILE_FUNCTION();
-		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
-			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
-			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
-		DrawQuadCore(transform, subtexture->GetTexture(), tintColor, subtexture->GetTexCoords(), tilingFactor, -1);
-	}
-
 	void Renderer2D::DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, float rotation)
 	{
 		WLD_PROFILE_FUNCTION();

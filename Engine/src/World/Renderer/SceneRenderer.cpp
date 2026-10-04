@@ -1,6 +1,8 @@
 #include "wldpch.h"
 #include "World/Renderer/SceneRenderer.h"
 
+#include "World/RHI/RhiFramebufferBridge.h"
+
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
@@ -20,7 +22,6 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/Systems/TransformSystem.h"
-#include "World/RHI/RhiTextureBridge.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Memory/FrameArena.h"
 
@@ -455,6 +456,9 @@ namespace World
 				const std::size_t committed = loader->PumpCompletions();
 				(void)committed;
 			}
+			// 纹理异步解码的提交点(同一位置:命令缓冲录制之前)。纹理驻留是进程级的,
+			// 不随世界上下文走,但提交时机必须同样在主线程的这一段。
+			TextureLibrary::Get().PumpCompletions();
 			// 资产目录(L1):首次进入该世界会话时建立(共享入口保证只有一处知道内容根)。
 			AssetCatalog& catalog = EnsureAssetCatalog(context);
 			(void)catalog;
@@ -1349,11 +1353,13 @@ namespace World
 		return MaterialLibrary::Get().Load(asset.Path, error);
 	}
 
-	Ref<Texture2D> SceneRenderer::ResolveTextureAsset(const AssetRef& asset)
+	Rhi::Handle<Rhi::Texture> SceneRenderer::ResolveTextureAsset(const AssetRef& asset)
 	{
+		// 精灵贴图与 3D 材质贴图现在共用**同一个** GPU 驻留(TextureLibrary):
+		// 同一张贴图只解码一次、只占一份显存(收口前是 GL/RHI 两份,且 Vulkan 下每帧读回)。
 		if (m_AssetRegistry)
 			return m_AssetRegistry->ResolveTexture(asset);
-		return TextureLibrary::Get().Load(asset.Path);
+		return TextureLibrary::Get().Get(asset.Path, /*srgb*/ true);
 	}
 
 	void SceneRenderer::RenderGeometry(const Camera&, const glm::mat4&)
