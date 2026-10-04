@@ -6,6 +6,7 @@
 
 #include "World/Asset/ModelImportSettings.h"
 #include "World/Asset/WModelIO.h"
+#include "World/Core/AssetId.h"
 #include "World/Core/Log.h"
 #include "World/Renderer/Material.h"
 
@@ -26,6 +27,22 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace
+{
+	// 首份 .wmodel 的资产身份派生:FNV-1a64("asset:" + 相对内容根的目标逻辑路径)。
+	// 确定性(可复现导入),不同路径不撞 id;保证非零,不与"未分配"混淆。
+	uint64_t Fnv1a64AssetIdentity(const std::string& logicalPath)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		const std::string seed = "asset:" + logicalPath;
+		for (const char c : seed)
+		{
+			hash ^= static_cast<uint64_t>(static_cast<unsigned char>(c));
+			hash *= 1099511628211ull;
+		}
+		return hash == 0ull ? 1ull : hash;
+	}
+}
 namespace World::Asset
 {
 	namespace
@@ -1335,6 +1352,26 @@ namespace World::Asset
 		model.Meta.SourcePath = metadata.SourceLogicalPath;
 		// P4-U11:完整导入设置写进资产(资产自描述,不再依赖源旁边的 .wimport)。
 		model.Meta.HasSettings = true;
+		// v6:资产稳定身份。**重新导入必须沿用既有产物里的 id** —— 否则每次改设置都会换身份,
+		// "改名不断链"就失效了。内容根未知(纯内存导入)时现生成一个。
+		model.Meta.Identity = AssetId {};
+		if (!metadata.ContentRootAbsolute.empty())
+		{
+			const std::filesystem::path existing = std::filesystem::path(metadata.ContentRootAbsolute)
+				/ std::filesystem::path(modelRelative);
+			WModelData::MetaData previous;
+			std::string previousError;
+			if (WModelIO::ReadMeta(existing.string(), previous, &previousError)
+				&& previous.Valid && previous.Identity.IsValid())
+				model.Meta.Identity = previous.Identity;
+		}
+		if (!model.Meta.Identity.IsValid())
+		{
+			// 首次分配必须是**确定性的**:同源 + 同落点 = 同一份字节(可复现导入,也让
+			// "内核字节 == ImportFile 落盘字节"这条契约继续成立)。之后身份由文件自身携带,
+			// 改名/移动都不再改变它 —— 这正是"改名不断链"依赖的性质。
+			model.Meta.Identity = AssetId { Fnv1a64AssetIdentity(modelRelative) };
+		}
 		model.Meta.Settings = metadata.Settings;
 		if (model.Meta.UpAxis > 1u)
 			return fail("glTF import failed: invalid upAxis metadata value "

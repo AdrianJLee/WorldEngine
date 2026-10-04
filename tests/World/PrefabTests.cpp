@@ -58,7 +58,7 @@ int main()
 		sourceRegistry.emplace<TagComponent>(root, "Prefab Root");
 		sourceRegistry.emplace<TransformComponent>(root, TransformComponent(glm::vec3(1.0f, 2.0f, 3.0f)));
 		MeshRendererComponent mesh;
-		mesh.Primitive = "cube";
+		mesh.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
 		mesh.Color = { 0.2f, 0.6f, 0.9f, 1.0f };
 		sourceRegistry.emplace<MeshRendererComponent>(root, mesh);
 
@@ -90,7 +90,7 @@ int main()
 		// 2. 组件值被复制,但 UUID 必须重新生成(不与源共享身份)。
 		const auto instanceMesh = destinationRegistry.get<MeshRendererComponent>(
 			static_cast<entt::entity>(instance.Root));
-		CHECK(instanceMesh.Primitive == "cube");
+		CHECK(instanceMesh.Primitive == MeshRendererComponent::PrimitiveShape::Cube);
 		CHECK(std::fabs(instanceMesh.Color.z - 0.9f) < 1e-5f);
 		const UUID sourceUuid = sourceRegistry.get<UUIDComponent>(root).ID;
 		const UUID instanceUuid = destinationRegistry.get<UUIDComponent>(static_cast<entt::entity>(instance.Root)).ID;

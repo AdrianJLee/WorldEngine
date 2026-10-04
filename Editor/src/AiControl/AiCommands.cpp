@@ -1596,8 +1596,8 @@ namespace World
 					<< ",\"scale\":[" << scale.x << "," << scale.y << "," << scale.z << "]";
 			}
 			if (const auto* mesh = registry.try_get<MeshRendererComponent>(handle))
-				out << ",\"primitive\":\"" << JsonEscape(mesh->Primitive) << "\""
-					<< ",\"material\":\"" << JsonEscape(mesh->MaterialPath) << "\""
+				out << ",\"primitive\":\"" << PrimitiveShapeName(mesh->Primitive) << "\""
+					<< ",\"material\":\"" << JsonEscape(StringPool::Get().PathOf(mesh->Material.Path)) << "\""
 					<< ",\"color\":[" << mesh->Color.r << "," << mesh->Color.g << ","
 					<< mesh->Color.b << "," << mesh->Color.a << "]";
 			// PLUG-CLEAN-1:任意 schema 组件(含插件组件 blob)的**字段读取**。
@@ -1735,16 +1735,20 @@ namespace World
 			{
 				if (property == "Material")
 				{
-					mesh->MaterialPath = value;
+					mesh->Material = AssetRef { value.empty() ? PathId() : StringPool::Get().InternPath(value), AssetId() };
 					MarkDocumentDirty();
 					result = "Material='" + value + "'";
 					return true;
 				}
 				if (property == "Primitive")
 				{
-					mesh->Primitive = value;
+					if (!ParsePrimitiveShape(value, &mesh->Primitive))
+					{
+						error = "Primitive must be Cube/Sphere/Plane or 0/1/2";
+						return false;
+					}
 					MarkDocumentDirty();
-					result = "Primitive='" + value + "'";
+					result = std::string("Primitive='") + PrimitiveShapeName(mesh->Primitive) + "'";
 					return true;
 				}
 				if (property == "Color")

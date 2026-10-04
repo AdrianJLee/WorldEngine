@@ -2,6 +2,8 @@
 #include "World/Renderer/Mesh.h"
 
 #include "World/Asset/WModelIO.h"
+#include "World/Core/StringPool.h"
+#include "World/Renderer/Renderer3D.h"
 
 #include <glm/glm.hpp>
 
@@ -54,12 +56,12 @@ namespace World
 			}
 		}
 
-		// .wmodel 进程内缓存(键 = 规范化路径)。不导出:生命周期与进程一致,
+		// .wmodel 进程内缓存(键 = 驻留路径 id:同一路径的所有写法归一后同键,免去每帧字符串归一化+哈希)。不导出:生命周期与进程一致,
 		// Renderer3D 的 GPU 缓冲缓存按 Mesh 指针做键,因此 MeshGpu 里持有 Owner Ref,
 		// 保证"缓存被清空后新 Mesh 复用同一地址"不会命中旧 GPU 资源。
-		std::unordered_map<std::string, Ref<Mesh>>& WModelCache()
+		std::unordered_map<PathId, Ref<Mesh>>& WModelCache()
 		{
-			static std::unordered_map<std::string, Ref<Mesh>> cache;
+			static std::unordered_map<PathId, Ref<Mesh>> cache;
 			return cache;
 		}
 	}
@@ -154,7 +156,7 @@ namespace World
 			return nullptr;
 		}
 
-		const std::string key = std::filesystem::path(path).lexically_normal().generic_string();
+		const PathId key = StringPool::Get().InternPath(path);
 		auto& cache = WModelCache();
 		const auto cached = cache.find(key);
 		if (cached != cache.end())
@@ -255,6 +257,39 @@ namespace World
 		return result;
 	}
 
+	Ref<Mesh> Mesh::LoadWModel(PathId path, std::string* error)
+	{
+		if (!path.IsValid())
+		{
+			if (error) *error = "path is empty";
+			return nullptr;
+		}
+
+		auto& cache = WModelCache();
+		const auto cached = cache.find(path);
+		if (cached != cache.end())
+		{
+			if (error) error->clear();
+			return cached->second;
+		}
+
+		// 缓存未命中才是冷路径:物化成逻辑路径去读盘;读成功后会以同一个 PathId 入缓存。
+		return LoadWModel(StringPool::Get().PathOf(path), error);
+	}
+	bool Mesh::EvictWModel(PathId path)
+	{
+		auto& cache = WModelCache();
+		const auto found = cache.find(path);
+		if (found == cache.end())
+			return false;
+
+		Ref<Mesh> victim = std::move(found->second);
+		cache.erase(found);
+		// GPU 侧 MeshGpu 持有 Owner 强引用 ⇒ 不清 GPU 条目的话缓冲永远释放不掉。
+		// PurgeMeshGpu 内部走 Renderer::QueueRelease,避免释放仍在飞命令缓冲引用的句柄。
+		Renderer3D::PurgeMeshGpu(victim.get());
+		return true;
+	}
 	void Mesh::ClearWModelCache()
 	{
 		WModelCache().clear();

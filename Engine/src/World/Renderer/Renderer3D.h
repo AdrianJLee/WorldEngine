@@ -137,6 +137,9 @@ namespace World
 		// 投影者提交(用独立的槽位区,不消耗主通道的对象序号);返回分配的槽位。
 		static uint32_t SubmitShadow(const Ref<Mesh>& mesh, const glm::mat4& transform);
 		static void EndShadowPass();
+		// 资产驻留层(LRU)回收该 Mesh 时调用:把它的 GPU 缓冲条目交给延迟释放队列。
+		// 必须在**主线程**调用;句柄不会被立刻销毁(Vulkan 在飞命令缓冲可能仍引用)。
+		static void PurgeMeshGpu(const Mesh* mesh);
 
 		// 自建 set0 的调用方(材质预览等)必须把这两个写(binding 2 = 灯光 UBO,
 		// binding 3 = 阴影贴图)**和相机写(binding 0)放在同一次 set->Update 里**:

@@ -18,7 +18,7 @@ namespace World::Gameplay
 	};
 
 	// 每个节点建一个实体:Tag = 节点名(空名用 "Node <i>")、Transform = 节点 TRS;
-	// 引用 mesh 的节点挂 MeshRendererComponent{ MeshPath = modelPath, MeshIndex = 节点 mesh 下标 }。
+	// 引用 mesh 的节点挂 MeshRendererComponent{ Mesh = 驻留 PathId(modelPath), MeshIndex = 节点 mesh 下标 }。
 	// 父节点先建、随后按节点下标连层级(glTF 允许节点乱序;环会被 .wmodel 解析拒绝)。
 	// parent 有效时把所有根节点挂到它下面。
 	// 返回建出的实体数;**0 = 失败**(读盘/解析错误写进 error)。

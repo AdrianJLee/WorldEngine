@@ -45,10 +45,10 @@ Entities:
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     World::MeshRendererComponent:
-      Primitive: cube
+      Primitive: 0
       Color: [0.300000012, 0.330000013, 0.379999995, 1]
-      MeshPath: ""
-      MaterialPath: ""
+      Mesh: ""
+      Material: ""
       MeshIndex: 0
     World::RigidBody3DComponent:
       Type: 0
@@ -71,10 +71,10 @@ Entities:
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     World::MeshRendererComponent:
-      Primitive: cube
+      Primitive: 0
       Color: [0.850000024, 0.550000012, 0.25, 1]
-      MeshPath: ""
-      MaterialPath: ""
+      Mesh: ""
+      Material: ""
       MeshIndex: 0
     World::RigidBody3DComponent:
       Type: 2

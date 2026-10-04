@@ -1,6 +1,7 @@
 #include "wldpch.h"
 
 #include "World/Renderer/Material.h"
+#include "World/Core/AssetId.h"
 
 #include "World/Core/Application.h"
 #include "World/Renderer/MaterialLibrary.h"
@@ -336,12 +337,15 @@ namespace World
 
 	uint32_t Material::GetFormatVersion() const
 	{
+		// v3:有资产身份的文件必须是 v3(v1/v2 都没有 `AssetId:` 键)。
+		if (m_Identity.IsValid())
+			return kMaterialFormatVersionWithIdentity;
 		// 只有"没有父级 + 全字段都写了"才回到老写法(与 M3 前的文件逐字节一致);
-		// 其它情况都是材质实例格式。M4-S2:带 Shader/Params 的文件也必须是 v2。
+		// 其它情况都是"覆盖字段 + Parent"的 v2。M4-S2:带 Shader/Params 的文件也必须是 v2。
 		return (m_ParentPath.empty() && m_Overrides.All() && !m_HasShaderOverride
 				&& m_ParamOverrides.empty())
 			? kMaterialFormatVersionLegacy
-			: kMaterialFormatVersionMax;
+			: kMaterialFormatVersionOverrides;
 	}
 
 	void Material::RecomputeParamWarnings()
@@ -600,6 +604,18 @@ namespace World
 				{
 					out.ParentPath = NormalizePath(root["Parent"].as<std::string>());
 				}
+				if (root["AssetId"])
+				{
+					const std::string identityText = root["AssetId"].as<std::string>();
+					AssetId identity;
+					if (!ParseAssetId(identityText, &identity))
+					{
+						result.Error = "AssetId 不是合法的十六进制身份: " + identityText;
+						if (error) *error = result.Error;
+						return result;
+					}
+					out.Identity = identity;
+				}
 				if (root["Shader"])
 				{
 					out.Values.ShaderPath = NormalizePath(root["Shader"].as<std::string>());
@@ -739,12 +755,15 @@ namespace World
 
 		uint32_t DocumentFormatVersion(const MaterialDocument& document)
 		{
+			// v3:带资产身份的文件必须是 v3(v1/v2 都没有 `AssetId:` 键)。
+			if (document.Identity.IsValid())
+				return kMaterialFormatVersionMax;
 			// 老写法的唯一判据:没有父级 + 全部字段都写出 → 与 M3 前的文件逐字节一致。
 			// 只写部分字段的文件必须是 v2(否则"缺字段 = 引擎默认"会与"覆盖字段"混淆)。
 			// M4-S2:带 Shader / Params 的文件也只能是 v2(v1 没有这两个键)。
 			return (document.ParentPath.empty() && document.Overridden.All()
 					&& !document.HasShader && document.Params.empty())
-				? kMaterialFormatVersionLegacy : kMaterialFormatVersionMax;
+				? kMaterialFormatVersionLegacy : kMaterialFormatVersionOverrides;
 		}
 
 		MaterialLoadResult Parse(const std::string& text, MaterialDesc& out, std::string* error)
@@ -778,12 +797,17 @@ namespace World
 		{
 			const uint32_t version = DocumentFormatVersion(document);
 			std::ostringstream out;
-			if (version == kMaterialFormatVersionLegacy)
+			if (version == kMaterialFormatVersionLegacy || document.Identity.IsValid())
 			{
-				// 老写法保持 M3 前的头注释 + 全字段,写出字节与今天完全一致。
+				// 老写法保持 M3 前的头注释:写出字节与 M3 前完全一致。
+				// v3(带身份)也写这行注释 —— 老材质首次补身份时不会丢掉文件头说明;
+				// v2(覆盖字段 + Parent,无身份)保持无注释,字节不变。
 				out << "# WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。\n";
 			}
 			out << "FormatVersion: " << version << "\n";
+			// v3:资产稳定身份(仅在已分配时写;v1/v2 老文件因此逐字节不变)。
+			if (document.Identity.IsValid())
+				out << "AssetId: " << FormatAssetId(document.Identity) << "\n";
 			if (!document.ParentPath.empty())
 				out << "Parent: " << FormatLogicalPath(document.ParentPath) << "\n";
 			if (document.HasShader)

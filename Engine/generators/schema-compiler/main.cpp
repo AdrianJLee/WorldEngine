@@ -1055,6 +1055,13 @@ namespace
 				out << "    static void Set_" << field.Name << "(void* instance, const Value& value)\n";
 				out << "    {\n        " << qualified << "* self = static_cast<" << qualified << "*>(instance);\n";
 				out << "        AssetOps<std::remove_reference_t<decltype(self->" << field.Name << ")>>::SetPath(self->" << field.Name << ", std::get<std::string>(value));\n    }\n";
+				// 资产稳定身份通道(追加在尾部):序列化器据此把 AssetId 与路径一起持久化。
+				out << "    static uint64_t GetAssetIdentity_" << field.Name << "(const void* instance)\n";
+				out << "    {\n        const " << qualified << "* self = static_cast<const " << qualified << "*>(instance);\n";
+				out << "        return AssetOps<std::remove_reference_t<decltype(self->" << field.Name << ")>>::GetIdentity(self->" << field.Name << ");\n    }\n";
+				out << "    static void SetAssetIdentity_" << field.Name << "(void* instance, uint64_t identity)\n";
+				out << "    {\n        " << qualified << "* self = static_cast<" << qualified << "*>(instance);\n";
+				out << "        AssetOps<std::remove_reference_t<decltype(self->" << field.Name << ")>>::SetIdentity(self->" << field.Name << ", identity);\n    }\n";
 			}
 			else
 			{
@@ -1151,6 +1158,16 @@ namespace
 					def = options.DefaultExpr.has_value() ? "Value(" + options.DefaultExpr.value() + ")" : DefaultValue(field.Kind);
 			}
 			out << "            " << def << ",\n";
+			// 容器尾部槽位:加上追加在 FieldSchema 尾部的两个身份函数指针(仅资产叶字段非空)。
+			if (field.Kind == "Asset")
+			{
+				out << "            CollectionKind::None,\n";
+				out << "            Kind::None,\n";
+				out << "            Kind::String,\n";
+				out << "            nullptr,\n            nullptr,\n";
+				out << "            &GetAssetIdentity_" << field.Name << ",\n";
+				out << "            &SetAssetIdentity_" << field.Name << ",\n";
+			}
 			out << "        };\n        return schema;\n    }\n";
 		}
 		if (decl.Category == "Component")

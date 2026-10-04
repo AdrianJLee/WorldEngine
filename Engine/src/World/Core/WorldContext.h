@@ -3,6 +3,7 @@
 #include "World/Modules/ModuleManager.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Core/Vfs/Vfs.h"
+#include "World/Core/ResourceTable.h"
 
 #include <vector>
 
@@ -25,6 +26,16 @@ namespace World
 		const Modules::ModuleManager& Modules() const { return m_Modules; }
 		World::Vfs::Vfs& Vfs() { return m_Vfs; }
 		const World::Vfs::Vfs& Vfs() const { return m_Vfs; }
+
+		// ---- 世界级单例的正式归属 ----
+		// 引擎的可扩展状态分两层:
+		//   * 上面的显式成员(类型固定、永远存在):Vfs / Schemas / Modules;
+		//   * Resources() 是开放登记表(世界级服务:资产目录、驻留注册表、作业统计…):
+		//     服务在初始化时 Emplace,系统经 `scene.GetContext().Resources()` 取。
+		// 用显式表而不是 entt `ctx()` —— registry 会被整体复制,而世界单例必须不被复制
+		// (见 Core/ResourceTable.h 的契约)。
+		ResourceTable& Resources() { return m_Resources; }
+		const ResourceTable& Resources() const { return m_Resources; }
 
 		// ---- PURE-ECS:场景系统挂载钩子 ----
 		// 模块在 `WeModule::Register(context)` 里登记一对回调,引擎在**每次场景进入/离开运行时**
@@ -61,5 +72,6 @@ namespace World
 		Schema::SchemaRegistry m_Schemas;
 		Modules::ModuleManager m_Modules;
 		std::vector<SceneSystemsHook> m_SceneSystemsHooks;
+		ResourceTable m_Resources;
 	};
 }

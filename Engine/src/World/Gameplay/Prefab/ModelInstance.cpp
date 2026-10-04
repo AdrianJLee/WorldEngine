@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Core/StringPool.h"
 #include "World/Gameplay/Prefab/ModelInstance.h"
 
 #include "World/Renderer/Mesh.h"
@@ -29,7 +30,7 @@ namespace World::Gameplay
 			registry.emplace_or_replace<TagComponent>(handle, mesh->GetDesc().DebugName);
 			registry.emplace_or_replace<TransformComponent>(handle, TransformComponent());
 			MeshRendererComponent renderer;
-			renderer.MeshPath = modelPath;
+			renderer.Mesh.Path = StringPool::Get().InternPath(modelPath);
 			renderer.MeshIndex = 0;
 			registry.emplace_or_replace<MeshRendererComponent>(handle, renderer);
 			if (parent != entt::null && registry.valid(parent))
@@ -64,7 +65,7 @@ namespace World::Gameplay
 			if (node.MeshIndex >= 0)
 			{
 				MeshRendererComponent renderer;
-				renderer.MeshPath = modelPath;
+				renderer.Mesh.Path = StringPool::Get().InternPath(modelPath);
 				renderer.MeshIndex = node.MeshIndex;
 				registry.emplace_or_replace<MeshRendererComponent>(handle, renderer);
 			}

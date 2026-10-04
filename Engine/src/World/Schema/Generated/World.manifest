@@ -22,6 +22,7 @@ struct World::JointComponent
 struct World::MeshCollider3DComponent
 struct World::UUID
 struct World::CameraSettings
+enum World::MeshRendererComponent::PrimitiveShape
 enum World::RigidBody2DComponent::BodyType
 enum World::JointComponent::JointKind
 enum World::CameraSettings::ProjectionType

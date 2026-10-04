@@ -1,6 +1,7 @@
 #include "wldpch.h"
 
 #include "World/Renderer/Texture/TextureImportSettings.h"
+#include "World/Core/AssetId.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -107,7 +108,7 @@ namespace World
 				{ "usage", true }, { "srgb", true }, { "compression", true },
 				{ "mipmaps", true }, { "mip_filter", true }, { "max_size", true },
 				{ "wrap", true }, { "filter", true }, { "anisotropy", true },
-				{ "premultiply_alpha", true }, { "flip_y", true },
+				{ "premultiply_alpha", true }, { "flip_y", true }, { "assetid", true },
 			};
 			return fields;
 		}
@@ -186,7 +187,16 @@ namespace World
 				error = key + ": expected a scalar value";
 				return false;
 			}
-			if (key == "source")
+			if (key == "assetid")
+			{
+				// 资产稳定身份(见 Core/AssetId.h)。非法文本 = 报错,不静默当成"未分配"。
+				if (!ParseAssetId(value.as<std::string>(), &out.Identity))
+				{
+					error = "assetid: expects a hex identity like 0x0123456789ABCDEF";
+					return false;
+				}
+			}
+			else if (key == "source")
 			{
 				out.Source = value.as<std::string>();
 				if (out.Source.empty())
@@ -274,6 +284,10 @@ namespace World
 		out << "# then re-bake (cook / live preview). Delete this file to fall back to defaults.\n";
 		if (!Source.empty())
 			out << "# source: content-root relative path of the image (default = sibling with same stem).\n";
+		if (Identity.IsValid())
+			out << "# assetid: stable asset identity; survives rename/move (do not edit by hand).\n";
+		if (Identity.IsValid())
+			out << "assetid: " << FormatAssetId(Identity) << "\n";
 		if (!Source.empty())
 			out << "source: \"" << Source << "\"\n";
 		out << "usage: " << TextureUsageName(Usage) << "\n";
@@ -519,10 +533,13 @@ namespace World
 		return true;
 	}
 
-	bool SaveTextureAssetFile(const std::filesystem::path& path, const TextureAssetFile& asset,
+	bool SaveTextureAssetFile(const std::filesystem::path& path, TextureAssetFile& asset,
 		std::string& error)
 	{
 		error.clear();
+		// 资产稳定身份:没有就分配一次并写回调用方 —— 单调且不可重复分配。
+		if (!asset.Settings.Identity.IsValid())
+			asset.Settings.Identity = GenerateAssetId();
 		if (asset.Payload.empty())
 		{
 			error = "texture asset payload is empty (a .wtex container must embed the source bytes)";

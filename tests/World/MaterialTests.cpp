@@ -752,10 +752,14 @@ int main()
 				CHECK(!instance->IsDirty());
 
 				const std::string text = readText("m3_writechild.wmat");
-				CHECK(text == "FormatVersion: 2\n"
-					"Parent: material_m3_tmp/m3_writeparent.wmat\n"
-					"Name: \"WriteChild\"\n"
-					"Metallic: 0.9\n");
+				// v3(2026-10-04):保存时补齐**资产稳定身份**,所以版本是 3 且多一行 AssetId;
+				// 其余内容(覆盖字段 + Parent)与 v2 逐字节一致。
+				CHECK(text.rfind("# WorldEngine 材质资产", 0) == 0);   // v3 也保留文件头注释
+				CHECK(text.find("FormatVersion: 3\n") != std::string::npos);
+				CHECK(text.find("\nParent: material_m3_tmp/m3_writeparent.wmat\n") != std::string::npos);
+				CHECK(text.find("\nName: \"WriteChild\"\n") != std::string::npos);
+				CHECK(text.find("\nMetallic: 0.9\n") != std::string::npos);
+				CHECK(text.find("\nAssetId: 0x") != std::string::npos);
 				CHECK(text.find("Roughness") == std::string::npos);
 				CHECK(text.find("BaseColor") == std::string::npos);
 				CHECK(text.find("BlendMode") == std::string::npos);
@@ -775,9 +779,11 @@ int main()
 				CHECK(variant->GetDesc().Metallic == 0.9f);        // 从父级(子材质)解析出来的值
 				CHECK(variant->GetDesc().Roughness == 0.6f);
 				CHECK(library.Save(variant, relative("m3_writevariant.wmat"), &error));
-				CHECK(readText("m3_writevariant.wmat") == "FormatVersion: 2\n"
-					"Parent: material_m3_tmp/m3_writechild.wmat\n"
-					"Name: \"WriteVariant\"\n");
+				const std::string variantText = readText("m3_writevariant.wmat");
+				CHECK(variantText.find("FormatVersion: 3\n") != std::string::npos);
+				CHECK(variantText.find("\nParent: material_m3_tmp/m3_writechild.wmat\n") != std::string::npos);
+				CHECK(variantText.find("\nName: \"WriteVariant\"\n") != std::string::npos);
+				CHECK(variantText.find("\nAssetId: 0x") != std::string::npos);
 				library.Shutdown();
 			}
 
@@ -814,13 +820,20 @@ int main()
 				CHECK(loaded != nullptr);
 				CHECK(error.empty());
 				CHECK(loaded->GetDesc() == legacy);
-				CHECK(loaded->GetFormatVersion() == 1);
+				CHECK(loaded->GetFormatVersion() == 1);   // 文件里没有身份 ⇒ 仍是 v1 全字段形态
 				CHECK(loaded->OverrideCount() == static_cast<int>(kMaterialFieldCount));
 				CHECK(loaded->ParentPath().empty());
 				CHECK(loaded->ResolvedParent() == nullptr);
 				CHECK(library.Save(loaded, relative("m3_legacy.wmat"), &error));
 				CHECK(error.empty());
-				CHECK(readText("m3_legacy.wmat") == legacyText);   // 未改动 → 逐字节不变
+				// v3(2026-10-04):首次保存补齐资产稳定身份 ⇒ 文件升到 v3 并多一行 AssetId;
+				// 全字段 + 无 Parent 的形态与 v1 逐行一致(只多了版本号与身份两处)。
+				const std::string resaved = readText("m3_legacy.wmat");
+				CHECK(resaved.rfind("# WorldEngine 材质资产", 0) == 0);
+				CHECK(resaved.find("FormatVersion: 3\n") != std::string::npos);
+				CHECK(resaved.find("\nAssetId: 0x") != std::string::npos);
+				CHECK(resaved.find("BaseColor: [0.2, 0.4, 0.6, 1]\n") != std::string::npos);
+				CHECK(resaved.find("Parent:") == std::string::npos);
 				library.Shutdown();
 			}
 
@@ -914,9 +927,14 @@ int main()
 				CHECK(child->IsDirty());
 				CHECK(library.Save(child, relative("m3_revert_child.wmat"), &error));
 				CHECK(!child->IsDirty());
-				CHECK(readText("m3_revert_child.wmat") == "FormatVersion: 2\n"
-					"Parent: material_m3_tmp/m3_revert_parent.wmat\n"
-					"Name: \"RevertChild\"\n");
+				{
+					// v3:保存时补齐资产身份 ⇒ 版本 3 + AssetId 行;覆盖字段与 Parent 与 v2 一致。
+					const std::string reverted = readText("m3_revert_child.wmat");
+					CHECK(reverted.find("FormatVersion: 3\n") != std::string::npos);
+					CHECK(reverted.find("\nAssetId: 0x") != std::string::npos);
+					CHECK(reverted.find("\nParent: material_m3_tmp/m3_revert_parent.wmat\n") != std::string::npos);
+					CHECK(reverted.find("\nName: \"RevertChild\"\n") != std::string::npos);
+				}
 				// 重开确认:读回就是父级值(不是"把父级值写进文件")。
 				library.Shutdown();
 				Ref<Material> reopened = library.Load(relative("m3_revert_child.wmat"), &error);
@@ -1599,11 +1617,13 @@ int main()
 				// 27. 保存只写覆盖项(逐行断言):未覆盖的字段/参数一行都不出现。
 				CHECK(library.Save(child, relative("mat_child_saved.wmat"), &error));
 				const std::string saved = readText("mat_child_saved.wmat");
-				CHECK(saved == "FormatVersion: 2\n"
-					"Parent: material_m4s2_tmp/mat_parent.wmat\n"
-					"Name: \"Child\"\n"
-					"Params:\n"
-					"  Tint: [0.25, 0.25, 0.25, 1]\n");
+				// v3(2026-10-04):保存补齐资产身份 ⇒ 版本 3 + AssetId 行;覆盖项集合与 v2 一致。
+				CHECK(saved.find("FormatVersion: 3\n") != std::string::npos);
+				CHECK(saved.find("\nAssetId: 0x") != std::string::npos);
+				CHECK(saved.find("\nParent: material_m4s2_tmp/mat_parent.wmat\n") != std::string::npos);
+				CHECK(saved.find("\nName: \"Child\"\n") != std::string::npos);
+				CHECK(saved.find("\nParams:\n") != std::string::npos);
+				CHECK(saved.find("\n  Tint: [0.25, 0.25, 0.25, 1]\n") != std::string::npos);
 				CHECK(saved.find("Shader:") == std::string::npos);        // 没覆盖 → 不写(继承父级)
 				CHECK(saved.find("Roughness") == std::string::npos);
 				CHECK(saved.find("Metallic") == std::string::npos);
@@ -1612,7 +1632,7 @@ int main()
 				material->SetParamOverride("Steps", "5");
 				CHECK(library.Save(material, relative("mat_base_saved.wmat"), &error));
 				const std::string savedBase = readText("mat_base_saved.wmat");
-				CHECK(savedBase.find("FormatVersion: 2\n") == 0);
+				CHECK(savedBase.find("FormatVersion: 3\n") != std::string::npos);
 				CHECK(savedBase.find("Shader: material_m4s2_tmp/glass.slang\n") != std::string::npos);
 				CHECK(savedBase.find("  Roughness: 0.75\n") != std::string::npos);
 				CHECK(savedBase.find("  Albedo: \"textures/Icon.png\"\n") != std::string::npos);

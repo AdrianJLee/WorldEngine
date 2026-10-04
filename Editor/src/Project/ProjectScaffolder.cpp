@@ -375,7 +375,7 @@ namespace World::Editor
 					Entity cube = Entity::CreateEntity(scene.get(), "Cube");
 					cube.AddComponent<TransformComponent>(glm::vec3 { 0.0f, 0.0f, 0.0f });
 					MeshRendererComponent cubeRenderer;
-					cubeRenderer.Primitive = "cube";
+					cubeRenderer.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
 					cubeRenderer.Color = glm::vec4 { 0.82f, 0.82f, 0.86f, 1.0f };
 					cube.AddComponent<MeshRendererComponent>(cubeRenderer);
 				}

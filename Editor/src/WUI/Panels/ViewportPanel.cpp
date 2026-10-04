@@ -825,7 +825,7 @@ namespace World
 			glm::mat4 world = selected.GetComponent<TransformComponent>().GetLocalMatrix();
 			if (selected.HasComponent<WorldTransformComponent>())
 				world = selected.GetComponent<WorldTransformComponent>().Matrix;
-			const bool plane = selected.GetComponent<MeshRendererComponent>().Primitive == "plane";
+			const bool plane = selected.GetComponent<MeshRendererComponent>().Primitive == MeshRendererComponent::PrimitiveShape::Plane;
 
 			// 单位网格角点:bit0 = X、bit1 = Y、bit2 = Z;plane 只有 y = 0 的一层(z/x 四角)。
 			// 保留**裁剪空间**坐标:大物体(例如地面平面)的角点会跑到相机后面,直接丢角点会让

@@ -32,6 +32,7 @@ const TypeSchema& WeSchemaOf_JointComponent();
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
+const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
 const EnumSchema& WeEnumSchemaOf_BodyType();
 const EnumSchema& WeEnumSchemaOf_JointKind();
 const EnumSchema& WeEnumSchemaOf_ProjectionType();
@@ -379,6 +380,16 @@ struct GeneratedAccess<World::SpriteComponent>
         World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
         AssetOps<std::remove_reference_t<decltype(self->Texture)>>::SetPath(self->Texture, std::get<std::string>(value));
     }
+    static uint64_t GetAssetIdentity_Texture(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Texture)>>::GetIdentity(self->Texture);
+    }
+    static void SetAssetIdentity_Texture(void* instance, uint64_t identity)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Texture)>>::SetIdentity(self->Texture, identity);
+    }
     static Value Get_TilingFactor(const void* instance)
     {
         const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
@@ -422,6 +433,13 @@ struct GeneratedAccess<World::SpriteComponent>
             "Texture2D",
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
             Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_Texture,
+            &SetAssetIdentity_Texture,
         };
         return schema;
     }
@@ -590,12 +608,16 @@ struct GeneratedAccess<World::MeshRendererComponent>
     static Value Get_Primitive(const void* instance)
     {
         const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
-        return Value(self->Primitive);
+        return Value(static_cast<int64_t>(self->Primitive));
     }
     static void Set_Primitive(void* instance, const Value& value)
     {
         World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
-        self->Primitive = std::get<std::string>(value);
+        self->Primitive = static_cast<World::MeshRendererComponent::PrimitiveShape>(std::get<int64_t>(value));
+    }
+    static const EnumSchema* GetEnum_Primitive()
+    {
+        return &WeEnumSchemaOf_PrimitiveShape();
     }
     static Value Get_Color(const void* instance)
     {
@@ -607,25 +629,45 @@ struct GeneratedAccess<World::MeshRendererComponent>
         World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
         self->Color = std::get<glm::vec4>(value);
     }
-    static Value Get_MeshPath(const void* instance)
+    static Value Get_Mesh(const void* instance)
     {
         const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
-        return Value(self->MeshPath);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::GetPath(self->Mesh));
     }
-    static void Set_MeshPath(void* instance, const Value& value)
+    static void Set_Mesh(void* instance, const Value& value)
     {
         World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
-        self->MeshPath = std::get<std::string>(value);
+        AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::SetPath(self->Mesh, std::get<std::string>(value));
     }
-    static Value Get_MaterialPath(const void* instance)
+    static uint64_t GetAssetIdentity_Mesh(const void* instance)
     {
         const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
-        return Value(self->MaterialPath);
+        return AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::GetIdentity(self->Mesh);
     }
-    static void Set_MaterialPath(void* instance, const Value& value)
+    static void SetAssetIdentity_Mesh(void* instance, uint64_t identity)
     {
         World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
-        self->MaterialPath = std::get<std::string>(value);
+        AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::SetIdentity(self->Mesh, identity);
+    }
+    static Value Get_Material(const void* instance)
+    {
+        const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Material)>>::GetPath(self->Material));
+    }
+    static void Set_Material(void* instance, const Value& value)
+    {
+        World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Material)>>::SetPath(self->Material, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_Material(const void* instance)
+    {
+        const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Material)>>::GetIdentity(self->Material);
+    }
+    static void SetAssetIdentity_Material(void* instance, uint64_t identity)
+    {
+        World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Material)>>::SetIdentity(self->Material, identity);
     }
     static Value Get_MeshIndex(const void* instance)
     {
@@ -642,16 +684,16 @@ struct GeneratedAccess<World::MeshRendererComponent>
         static const FieldSchema schema = {
             FieldId{ 0x4D4553485052494Dull },
             "Primitive",
-            Kind::String,
+            Kind::Enum,
             &Get_Primitive,
             &Set_Primitive,
             nullptr,
             nullptr,
             nullptr,
+            &GetEnum_Primitive,
             nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Built-in primitive used when MeshPath is empty.", false, "", { "cube", "sphere", "plane" }, "", std::nullopt },
-            Value(std::string()),
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Built-in primitive used when Mesh is empty.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<int64_t>(0)),
         };
         return schema;
     }
@@ -668,44 +710,58 @@ struct GeneratedAccess<World::MeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Base color used when MaterialPath is empty.", true, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Base color used when Material is empty.", true, "", {  }, "", std::nullopt },
             Value(glm::vec4(0.0f)),
         };
         return schema;
     }
-    static const FieldSchema& Field_MeshPath()
+    static const FieldSchema& Field_Mesh()
     {
         static const FieldSchema schema = {
             FieldId{ 0x4D45534850415448ull },
-            "MeshPath",
+            "Mesh",
+            Kind::Asset,
+            &Get_Mesh,
+            &Set_Mesh,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Model",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Imported model asset (.wmodel, path relative to the project content root); empty = use Primitive. glTF/GLB are import sources only: import them first and reference the produced .wmodel.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
             Kind::String,
-            &Get_MeshPath,
-            &Set_MeshPath,
             nullptr,
             nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Imported model asset (.wmodel, path relative to the project content root); empty = use Primitive. glTF/GLB are import sources only: import them first and reference the produced .wmodel.", false, "Model", {  }, "", std::nullopt },
-            Value(std::string()),
+            &GetAssetIdentity_Mesh,
+            &SetAssetIdentity_Mesh,
         };
         return schema;
     }
-    static const FieldSchema& Field_MaterialPath()
+    static const FieldSchema& Field_Material()
     {
         static const FieldSchema schema = {
             FieldId{ 0x4D4154455249414Cull },
-            "MaterialPath",
+            "Material",
+            Kind::Asset,
+            &Get_Material,
+            &Set_Material,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Material",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Material asset (.wmat); overrides Color and the model's own material slots when set.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
             Kind::String,
-            &Get_MaterialPath,
-            &Set_MaterialPath,
             nullptr,
             nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Material asset (.wmat); overrides Color and the model's own material slots when set.", false, "Material", {  }, "", std::nullopt },
-            Value(std::string()),
+            &GetAssetIdentity_Material,
+            &SetAssetIdentity_Material,
         };
         return schema;
     }
@@ -743,13 +799,13 @@ struct GeneratedAccess<World::MeshRendererComponent>
             {
                 Field_Primitive(),
                 Field_Color(),
-                Field_MeshPath(),
-                Field_MaterialPath(),
+                Field_Mesh(),
+                Field_Material(),
                 Field_MeshIndex(),
             },
             &StorageBindingOf(),
             "Rendering/Mesh",
-            "Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty MaterialPath shades with Color.",
+            "Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty Material shades with Color.",
             false,
         };
         return schema;
@@ -759,15 +815,25 @@ struct GeneratedAccess<World::MeshRendererComponent>
 template <>
 struct GeneratedAccess<World::SkinnedMeshRendererComponent>
 {
-    static Value Get_MeshPath(const void* instance)
+    static Value Get_Mesh(const void* instance)
     {
         const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(self->MeshPath);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::GetPath(self->Mesh));
     }
-    static void Set_MeshPath(void* instance, const Value& value)
+    static void Set_Mesh(void* instance, const Value& value)
     {
         World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        self->MeshPath = std::get<std::string>(value);
+        AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::SetPath(self->Mesh, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_Mesh(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::GetIdentity(self->Mesh);
+    }
+    static void SetAssetIdentity_Mesh(void* instance, uint64_t identity)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::SetIdentity(self->Mesh, identity);
     }
     static Value Get_MeshIndex(const void* instance)
     {
@@ -779,15 +845,25 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
         World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
         self->MeshIndex = std::get<int32_t>(value);
     }
-    static Value Get_MaterialPath(const void* instance)
+    static Value Get_Material(const void* instance)
     {
         const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(self->MaterialPath);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Material)>>::GetPath(self->Material));
     }
-    static void Set_MaterialPath(void* instance, const Value& value)
+    static void Set_Material(void* instance, const Value& value)
     {
         World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        self->MaterialPath = std::get<std::string>(value);
+        AssetOps<std::remove_reference_t<decltype(self->Material)>>::SetPath(self->Material, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_Material(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Material)>>::GetIdentity(self->Material);
+    }
+    static void SetAssetIdentity_Material(void* instance, uint64_t identity)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Material)>>::SetIdentity(self->Material, identity);
     }
     static Value Get_AnimationClip(const void* instance)
     {
@@ -839,21 +915,28 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
         World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
         self->Time = std::get<float>(value);
     }
-    static const FieldSchema& Field_MeshPath()
+    static const FieldSchema& Field_Mesh()
     {
         static const FieldSchema schema = {
             FieldId{ 0x534B4D4553485041ull },
-            "MeshPath",
+            "Mesh",
+            Kind::Asset,
+            &Get_Mesh,
+            &Set_Mesh,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Model",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Skinned model asset (.wmodel); required — this component draws nothing without it.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
             Kind::String,
-            &Get_MeshPath,
-            &Set_MeshPath,
             nullptr,
             nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Skinned model asset (.wmodel); required — this component draws nothing without it.", false, "Model", {  }, "", std::nullopt },
-            Value(std::string()),
+            &GetAssetIdentity_Mesh,
+            &SetAssetIdentity_Mesh,
         };
         return schema;
     }
@@ -875,21 +958,28 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
         };
         return schema;
     }
-    static const FieldSchema& Field_MaterialPath()
+    static const FieldSchema& Field_Material()
     {
         static const FieldSchema schema = {
             FieldId{ 0x534B4D4154505448ull },
-            "MaterialPath",
+            "Material",
+            Kind::Asset,
+            &Get_Material,
+            &Set_Material,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Material",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Material asset (.wmat); empty = the model's own material slots.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
             Kind::String,
-            &Get_MaterialPath,
-            &Set_MaterialPath,
             nullptr,
             nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Material asset (.wmat); empty = the model's own material slots.", false, "Material", {  }, "", std::nullopt },
-            Value(std::string()),
+            &GetAssetIdentity_Material,
+            &SetAssetIdentity_Material,
         };
         return schema;
     }
@@ -997,9 +1087,9 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             sizeof(World::SkinnedMeshRendererComponent),
             TypeCategory::Component,
             {
-                Field_MeshPath(),
+                Field_Mesh(),
                 Field_MeshIndex(),
-                Field_MaterialPath(),
+                Field_Material(),
                 Field_AnimationClip(),
                 Field_Playing(),
                 Field_Speed(),
@@ -3112,15 +3202,25 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
     {
         return &WeEnumSchemaOf_ColliderMode();
     }
-    static Value Get_MeshPath(const void* instance)
+    static Value Get_Mesh(const void* instance)
     {
         const World::MeshCollider3DComponent* self = static_cast<const World::MeshCollider3DComponent*>(instance);
-        return Value(self->MeshPath);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::GetPath(self->Mesh));
     }
-    static void Set_MeshPath(void* instance, const Value& value)
+    static void Set_Mesh(void* instance, const Value& value)
     {
         World::MeshCollider3DComponent* self = static_cast<World::MeshCollider3DComponent*>(instance);
-        self->MeshPath = std::get<std::string>(value);
+        AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::SetPath(self->Mesh, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_Mesh(const void* instance)
+    {
+        const World::MeshCollider3DComponent* self = static_cast<const World::MeshCollider3DComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::GetIdentity(self->Mesh);
+    }
+    static void SetAssetIdentity_Mesh(void* instance, uint64_t identity)
+    {
+        World::MeshCollider3DComponent* self = static_cast<World::MeshCollider3DComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Mesh)>>::SetIdentity(self->Mesh, identity);
     }
     static const FieldSchema& Field_Mode()
     {
@@ -3140,21 +3240,28 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
         };
         return schema;
     }
-    static const FieldSchema& Field_MeshPath()
+    static const FieldSchema& Field_Mesh()
     {
         static const FieldSchema schema = {
             FieldId{ 0x4D33445041544830ull },
-            "MeshPath",
+            "Mesh",
+            Kind::Asset,
+            &Get_Mesh,
+            &Set_Mesh,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Model",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Collision model asset (.wmodel); empty = reuse the MeshRenderer mesh on the same entity. glTF/GLB sources must be imported to .wmodel first.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
             Kind::String,
-            &Get_MeshPath,
-            &Set_MeshPath,
             nullptr,
             nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Collision model asset (.wmodel); empty = reuse the MeshRenderer mesh on the same entity. glTF/GLB sources must be imported to .wmodel first.", false, "Model", {  }, "", std::nullopt },
-            Value(std::string()),
+            &GetAssetIdentity_Mesh,
+            &SetAssetIdentity_Mesh,
         };
         return schema;
     }
@@ -3173,11 +3280,11 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
             TypeCategory::Component,
             {
                 Field_Mode(),
-                Field_MeshPath(),
+                Field_Mesh(),
             },
             &StorageBindingOf(),
             "Physics/3D",
-            "Mesh-derived collision: an empty MeshPath uses the entity's MeshRenderer mesh, StaticTriangles only works on Static bodies, and the editor draws no outline for it.",
+            "Mesh-derived collision: an empty Mesh uses the entity's MeshRenderer mesh, StaticTriangles only works on Static bodies, and the editor draws no outline for it.",
             false,
         };
         return schema;
@@ -3494,6 +3601,25 @@ struct GeneratedAccess<World::CameraSettings>
 };
 
 template <>
+struct GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "PrimitiveShape",
+            true,
+            4,
+            {
+                { "Cube", static_cast<int64_t>(World::MeshRendererComponent::PrimitiveShape::Cube) },
+                { "Sphere", static_cast<int64_t>(World::MeshRendererComponent::PrimitiveShape::Sphere) },
+                { "Plane", static_cast<int64_t>(World::MeshRendererComponent::PrimitiveShape::Plane) },
+            },
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedEnum<World::RigidBody2DComponent::BodyType>
 {
     static const EnumSchema& WeEnumSchema()
@@ -3610,6 +3736,7 @@ const TypeSchema& WeSchemaOf_JointComponent() { return GeneratedAccess<World::Jo
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent() { return GeneratedAccess<World::MeshCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
+const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_BodyType() { return GeneratedEnum<World::RigidBody2DComponent::BodyType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_JointKind() { return GeneratedEnum<World::JointComponent::JointKind>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::CameraSettings::ProjectionType>::WeEnumSchema(); }
@@ -3619,6 +3746,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 	bool RegisterWorldSchemaModule(SchemaRegistry& registry)
 	{
 		bool ok = true;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_PrimitiveShape()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_BodyType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_JointKind()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ProjectionType()) != SchemaRegistry::Status::Ok) ok = false;

@@ -226,7 +226,7 @@ namespace
 
 		const entt::entity entity = scene.GetRegistry().create();
 		SkinnedMeshRendererComponent component;
-		component.MeshPath = modelFile.string();   // 绝对路径:ReadFile 的候选路径都会命中它
+		component.Mesh.Path = StringPool::Get().InternPath(modelFile.string());   // 绝对路径:ReadFile 的候选路径都会命中它
 		component.AnimationClip = "Move";
 		component.Speed = 2.0f;
 		scene.GetRegistry().emplace<SkinnedMeshRendererComponent>(entity, component);
@@ -265,7 +265,7 @@ namespace
 		// 坏路径:读失败 → 跳过该实体(不崩、Time 不动、没有调色板);失败路径不逐帧重试。
 		const entt::entity broken = scene.GetRegistry().create();
 		SkinnedMeshRendererComponent brokenComponent;
-		brokenComponent.MeshPath = (root / "missing.wmodel").string();
+		brokenComponent.Mesh.Path = StringPool::Get().InternPath((root / "missing.wmodel").string());
 		brokenComponent.Time = 0.25f;
 		scene.GetRegistry().emplace<SkinnedMeshRendererComponent>(broken, brokenComponent);
 		AnimationSystem::Update(scene, 0.5f);

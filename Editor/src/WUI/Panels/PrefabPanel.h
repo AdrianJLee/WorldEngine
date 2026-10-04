@@ -143,7 +143,7 @@ namespace World
 		// 一行资产路径(标签 + 可搜索资产下拉,选项来自 EditorAssetCatalog;"(none)" = 清空)。
 		float DrawAssetRow(Wui::WuiContext& ctx, float x, float y, float width, const char* idText,
 			const std::string& label, const std::string& tooltip, const std::string& assetType,
-			std::string& value, const Wui::WuiTheme& theme, bool& changed);
+			AssetRef& value, const Wui::WuiTheme& theme, bool& changed);
 		// 右侧第一段的总高度估算(滚动区内容高度要在绘制前给出)。
 		float EstimateEditorHeight() const;
 

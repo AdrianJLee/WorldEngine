@@ -721,15 +721,15 @@ function ui:columns(x, y, w, h, count, gap) end
 -- Component fields are exposed through Entity:GetComponent("MeshCollider3DComponent"); there is no runtime global named MeshCollider3DComponent.
 ---@class MeshCollider3DComponent
 ---@field Mode number
----@field MeshPath string
+---@field Mesh string
 
 -- Component fields are exposed through Entity:GetComponent("MeshRendererComponent"); there is no runtime global named MeshRendererComponent.
 ---@class MeshRendererComponent
----@field MaterialPath string
+---@field Material string
 ---@field Color vec4
 ---@field MeshIndex number
----@field MeshPath string
----@field Primitive string
+---@field Mesh string
+---@field Primitive number
 
 -- Component fields are exposed through Entity:GetComponent("PointLightComponent"); there is no runtime global named PointLightComponent.
 ---@class PointLightComponent
@@ -774,9 +774,9 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@class SkinnedMeshRendererComponent
 ---@field AnimationClip string
 ---@field Loop boolean
----@field MaterialPath string
+---@field Material string
 ---@field MeshIndex number
----@field MeshPath string
+---@field Mesh string
 ---@field Playing boolean
 ---@field Speed number
 ---@field Time number

@@ -285,7 +285,7 @@ bool EditorLayer::CreatePrefabFromSelection(Entity root, const std::string& logi
 	// ---- U25-M2:材质工作流:把材质接回场景(编辑器侧唯一写入口)----
 	//
 	// 与 AI 通道 `scene.set ... Material` / 属性面板用的是**同一个字段**
-	// (MeshRendererComponent.MaterialPath,相对内容根):场景存档、渲染器与"撤销本次赋值"
+	// (MeshRendererComponent.Material,相对内容根的驻留 PathId):场景存档、渲染器与"撤销本次赋值"
 	// 因此天然一致。面板不自己改组件,只通过 PanelHost 调这一条。
 bool EditorLayer::AssignMaterialToEntity(Entity entity, const std::string& logicalPath, std::string* message, std::string* outPreviousPath){
 		if (message)
@@ -309,9 +309,9 @@ bool EditorLayer::AssignMaterialToEntity(Entity entity, const std::string& logic
 			return false;
 		}
 		const std::string normalized = MaterialLibrary::NormalizePath(logicalPath);
-		const std::string previous = mesh->MaterialPath;
+		const std::string previous = StringPool::Get().PathOf(mesh->Material.Path);
 		const bool changed = previous != normalized;
-		mesh->MaterialPath = normalized;
+		// 手改路径 ⇒ 身份作废(按路径重新解析);保存/导入时再补齐身份。
 		if (changed)
 			MarkDocumentDirty();
 		const auto* tag = registry.try_get<TagComponent>(handle);

@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Core/StringPool.h"
 #include "World/Physics/Physics3D.h"
 
 #include "World/Asset/WModelIO.h"
@@ -197,11 +198,11 @@ namespace World
 					" CapsuleCollider3D HalfHeight must be non-negative and finite");
 		}
 
-		std::string ResolveMeshColliderPath(const entt::registry& registry, entt::entity entity, const MeshCollider3DComponent& collider)
+		PathId ResolveMeshColliderMesh(const entt::registry& registry, entt::entity entity, const MeshCollider3DComponent& collider)
 		{
-			if (!collider.MeshPath.empty()) return collider.MeshPath;
+			if (collider.Mesh.HasPath()) return collider.Mesh.Path;
 			if (const auto* renderer = registry.try_get<MeshRendererComponent>(entity))
-				if (!renderer->MeshPath.empty()) return renderer->MeshPath;
+				if (renderer->Mesh.HasPath()) return renderer->Mesh.Path;
 			return {};
 		}
 
@@ -230,10 +231,10 @@ namespace World
 			}
 			if (const auto* mesh = registry.try_get<MeshCollider3DComponent>(entity))
 			{
-				const std::string path = ResolveMeshColliderPath(registry, entity, *mesh);
+				const std::string path = StringPool::Get().PathOf(ResolveMeshColliderMesh(registry, entity, *mesh));
 				if (path.empty())
 					throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) +
-						" MeshCollider3D has no mesh: set MeshPath or add a MeshRendererComponent with a .wmodel path");
+						" MeshCollider3D has no mesh: set Mesh or add a MeshRendererComponent with a .wmodel asset");
 
 				Asset::WModelData model;
 				std::string error;

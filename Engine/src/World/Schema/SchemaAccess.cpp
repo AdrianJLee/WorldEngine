@@ -1,5 +1,6 @@
 #include "wldpch.h"
 
+#include "World/Core/AssetId.h"
 #include "World/Schema/Schema.h"
 
 // CPPT-6:字段/结构的通用读写(叶 / 枚举 / 资产 / 命名 struct / 容器,递归同构)。
@@ -45,6 +46,14 @@ namespace World::Schema
 			if (child.Meta.Transient)
 				continue;
 			fields.emplace(child.Name, ReadSchemaField(child, instance));
+			// 资产稳定身份:与路径并列写一个 `<字段名>Id` 兄弟键(.wd 里人可读、读回时一起恢复)。
+			// 只在已分配身份时写 —— 未分配不产生噪音键。
+			if (child.K == Kind::Asset && child.GetAssetIdentity)
+			{
+				const uint64_t identity = child.GetAssetIdentity(instance);
+				if (identity != 0)
+					fields.emplace(child.Name + "Id", Value(FormatAssetId(AssetId { identity })));
+			}
 		}
 		return Value(std::move(fields));
 	}
@@ -91,6 +100,18 @@ namespace World::Schema
 			if (found == fields->end() || std::holds_alternative<std::monostate>(found->second))
 				continue;   // 未设子字段:保留实例/脚本自己的成员初值
 			anyWritten = WriteSchemaField(child, instance, found->second) || anyWritten;
+			// 资产身份与路径一起恢复(键不存在 = 老文件/未分配 ⇒ 保持实例原值)。
+			if (child.K == Kind::Asset && child.SetAssetIdentity)
+			{
+				const auto identity = fields->find(child.Name + "Id");
+				if (identity != fields->end())
+				{
+					const std::string* text = std::get_if<std::string>(&identity->second);
+					AssetId parsed;
+					if (text && ParseAssetId(*text, &parsed))
+						child.SetAssetIdentity(instance, parsed.Value);
+				}
+			}
 		}
 		return anyWritten;
 	}

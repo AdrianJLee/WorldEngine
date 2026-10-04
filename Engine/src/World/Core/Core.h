@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <memory>
 #include <filesystem>
@@ -42,6 +42,24 @@
 
 namespace World
 {
+	// ---------------------------------------------------------------------------
+	// 所有权契约(2026-10-04,见知识库 decisions/0007-ownership-and-handles)
+	//
+	// 引擎只保留**一个**共享所有权词汇类型:`Ref<T>` = std::shared_ptr<T>。
+	// 它命名的生命周期是:「**无确定性单一所有者的运行时资源**」—— GPU buffer /
+	// texture / material / mesh / 运行时服务句柄。
+	//
+	// 硬约束:
+	//   * 禁止把 `Ref<T>` 放进 schema 组件:组件只放 POD(值、或 POD 引用/句柄)。
+	//     组件必须平凡可拷贝 ⇒ 任何堆持有对象(shared_ptr/string/vector)都不许进。
+	//   * 实体/资产这类"可失效引用"用**世代校验的 POD 句柄**(Entity、AssetId、
+	//     PathId/NameId),不用 `weak_ptr` —— weak_ptr 是 16B + 原子控制块跳转 +
+	//     不可平凡拷贝,结构上进不了组件。
+	//   * 独占所有权直接用 `std::unique_ptr`,不给它起别名:别名不增加任何保证。
+	//
+	// `CreateRef` 是**唯一**的 Ref 分配收口点,保留它是为了将来能挂分配器/存活标签,
+	// 不要在业务代码里直接 `std::make_shared`。
+	// ---------------------------------------------------------------------------
 	template<typename T>
 	using Ref = std::shared_ptr<T>;
 
@@ -51,24 +69,5 @@ namespace World
 	constexpr Ref<T> CreateRef(Args&&... args)
 	{
 		return std::make_shared<T>(std::forward<Args>(args)...);
-	}
-
-
-	template<typename T>
-	using WeakRef = std::weak_ptr<T>;
-
-	template<typename T, typename... Args>
-	constexpr WeakRef<T> CreateWeakRef(Args&&... args)
-	{
-		return std::weak_ptr<T>(std::forward<Args>(args)...);
-	}
-
-
-	template<typename T>
-	using Scope = std::unique_ptr<T>;
-	template<typename T, typename... Args>
-	constexpr Scope<T> CreateScope(Args&&... args)
-	{
-		return std::make_unique<T>(std::forward<Args>(args)...);
 	}
 }

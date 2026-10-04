@@ -23,4 +23,22 @@ namespace World
 	static_assert(std::is_trivially_copyable_v<CameraSettings>, "CameraSettings must stay trivially copyable (pure parameters)");
 	static_assert(std::is_trivially_copyable_v<CameraComponent>, "CameraComponent must stay trivially copyable (no derived cache)");
 	static_assert(sizeof(CameraComponent) <= 64, "CameraComponent must stay within one cache line");
+
+	// PECS 1.2(2026-10-04):资产引用 = 驻留 PathId(4B POD),不再是 std::string。
+	// 这一层锁死两件事:(1) PathId 本身必须是 4B 平凡类型;(2) 只含资产引用 + POD 的组件
+	// 必须回到平凡可拷贝 —— 否则"复制实体 / 实例化 Prefab / 场景克隆"又会走堆深拷贝。
+	static_assert(sizeof(PathId) == 4, "PathId must stay a 4-byte POD handle");
+	static_assert(std::is_trivially_copyable_v<PathId>, "PathId must stay trivially copyable");
+	static_assert(std::is_trivially_copyable_v<MeshCollider3DComponent>,
+		"MeshCollider3DComponent must stay trivially copyable (ColliderMode + PathId only)");
+	// MeshRendererComponent 现在**没有任何字符串**:Primitive 已枚举化,资产引用是 PathId ⇒ 平凡可拷贝。
+	// SkinnedMeshRendererComponent 还留一个 AnimationClip 名字字符串(T6b 走驻留 NameId)。
+	// 棘轮:上限 = 一个持有型字符串(AnimationClip)+ 64B POD 尾巴(两个 AssetRef 各 16B +
+	// MeshIndex/Playing/Speed/Loop/Time)。改回字符串资产引用或往组件里塞堆对象都会编译失败。
+	static_assert(std::is_trivially_copyable_v<MeshRendererComponent>,
+		"MeshRendererComponent must stay trivially copyable (no heap members)");
+	static_assert(sizeof(MeshRendererComponent) <= 64,
+		"MeshRendererComponent must fit one cache line");
+	static_assert(sizeof(SkinnedMeshRendererComponent) <= sizeof(std::string) + 64,
+		"SkinnedMeshRendererComponent must hold at most one owning string (AnimationClip) plus a 64B POD tail");
 }

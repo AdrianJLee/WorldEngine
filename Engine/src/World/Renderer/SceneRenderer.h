@@ -5,6 +5,7 @@
 #include "World/Renderer/Legacy/Gfx/Framebuffer.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Mesh.h"
+#include "World/Renderer/AssetRegistry.h"
 #include "World/Scene/Scene.h"
 
 #include <glm/glm.hpp>
@@ -82,6 +83,11 @@ namespace World
 		void RenderDebug(const Camera& camera, const glm::mat4& cameraTransform);
 		// D5:网格/材质资产加载失败只警告一次(按路径去重),避免逐帧刷屏。
 		void WarnOnce(const std::string& key, const std::string& message);
+		// L2 驻留层入口。世界资源表存在时经 AssetRegistry 解析(记账 + 可回收);
+		// 没有(无宿主的单元测试、BeginScene 之前的调用)则退回直连加载函数。
+		Ref<Mesh> ResolveMeshAsset(const AssetRef& asset, std::string* error);
+		Ref<Material> ResolveMaterialAsset(const AssetRef& asset, std::string* error);
+		Ref<Texture2D> ResolveTextureAsset(const AssetRef& asset);
 
 	private:
 		Rhi::Handle<Rhi::Device> m_Device;
@@ -142,6 +148,8 @@ namespace World
 		Ref<Mesh> m_DebugCube;
 		Ref<Mesh> m_DebugPlane;
 		Ref<Mesh> m_DebugSphere;   // D3:sphere 原语的共享网格(材质预览/半球体实体)
+		// L2 资产驻留层(WorldContext::Resources() 里的世界级服务;BeginScene 惰性登记并缓存指针)。
+		AssetRegistry* m_AssetRegistry = nullptr;
 		std::unordered_set<std::string> m_WarnedPaths;
 	};
 }

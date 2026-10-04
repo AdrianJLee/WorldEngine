@@ -3,6 +3,7 @@
 #include "World/Core/Export.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/AssetHotReload.h"
+#include "World/Core/StringPool.h"
 
 #include <cstddef>
 #include <string>
@@ -36,6 +37,8 @@ namespace World
 		// 成功但带警告(字段夹紧 / 父级退化)时 error 里是可读警告,不是失败。
 		// 命中缓存时直接返回同一实例(不重新读盘)。
 		Ref<Material> Load(const std::string& path, std::string* error = nullptr);
+		// 驻留路径 id 版本:省掉每次调用的路径归一化(热路径用)。空 id => nullptr。
+		Ref<Material> Load(PathId path, std::string* error = nullptr);
 
 		// 新建未落盘材质(路径为空,IsDirty = true):没有父级,只有 Name 是覆盖字段
 		// (其余字段继承引擎内置默认)。老调用点(整份 SetDesc)行为不变。

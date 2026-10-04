@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Asset/WModelIO.h"
+#include "World/Core/AssetId.h"
 
 #include "World/Core/Application.h"
 #include "World/Utils/Paths.h"
@@ -21,7 +22,8 @@ namespace World::Asset::WModelIO
 		constexpr uint64_t kHeaderSize = 4u + 12u * 4u;
 		// meta: sourceFingerprint(u64) + importerVersion(u32) + settingsHash(u64) +
 		//       upAxis(u8) + scale(f32) + reserved(u32);全部显式小端字节,无 C++ 结构体填充。
-		constexpr uint64_t kMetaSize = 8u + 4u + 8u + 1u + 4u + 4u;
+		// v6:尾部恒有 assetId(u64)。
+		constexpr uint64_t kMetaSize = 8u + 4u + 8u + 1u + 4u + 4u + 8u;
 		// 各区块的"最小字节数":计数保护用(声明计数大于文件本身 → 先拒绝再分配)。
 		constexpr uint64_t kMinSkinBytes = 4u + 4u;            // nameLength + jointCount(关节可为空)
 		constexpr uint64_t kMinAnimationBytes = 4u + 4u + 4u;  // nameLength + duration + channelCount
@@ -245,7 +247,7 @@ namespace World::Asset::WModelIO
 			}
 		};
 
-		// v5 meta 区块(header 之后):源身份 + 完整导入设置。ParseImpl 与 ParseMetaOnly 共用。
+		// v6 meta 区块(header 之后):源身份 + 完整导入设置。ParseImpl 与 ParseMetaOnly 共用。
 		// 返回 false 时 error 已填好可读原因。
 		bool ReadMetaBlock(Reader& reader, WModelData::MetaData& meta, std::string& error)
 		{
@@ -288,50 +290,58 @@ namespace World::Asset::WModelIO
 				error = "invalid meta.hasSettings " + std::to_string(hasSettings) + " (expected 0 or 1)";
 				return false;
 			}
-			if (hasSettings == 0u)
-				return true;
-			meta.HasSettings = true;
-			ModelImportSettings& settings = meta.Settings;
-			uint8_t flags[6] = {};
-			uint8_t reuseTextures = 0;
-			uint32_t sharedFolderLength = 0;
-			if (!reader.ReadF32(settings.Scale, "meta.settings.scale")
-				|| !reader.ReadU8(settings.UpAxis, "meta.settings.upAxis")
-				|| !reader.ReadU8(flags[0], "meta.settings.exportMaterials")
-				|| !reader.ReadU8(flags[1], "meta.settings.exportTextures")
-				|| !reader.ReadU8(flags[2], "meta.settings.importAnimations")
-				|| !reader.ReadU8(flags[3], "meta.settings.importSkins")
-				|| !reader.ReadF32(settings.AnimationSampleRate, "meta.settings.animationSampleRate")
-				|| !reader.ReadU8(flags[4], "meta.settings.generateNormals")
-				|| !reader.ReadU8(flags[5], "meta.settings.reuseMaterials")
-				|| !reader.ReadU8(reuseTextures, "meta.settings.reuseTextures")
-				|| !reader.ReadU32(sharedFolderLength, "meta.settings.sharedFolderLength")
-				|| !reader.ReadString(settings.SharedMaterialFolder, sharedFolderLength,
-					"meta.settings.sharedMaterialFolder"))
+			// v5 设置块是可选的;v6 的 assetId 恒有,所以这里不能提前 return。
+			if (hasSettings == 1u)
+				{
+				meta.HasSettings = true;
+				ModelImportSettings& settings = meta.Settings;
+				uint8_t flags[6] = {};
+				uint8_t reuseTextures = 0;
+				uint32_t sharedFolderLength = 0;
+				if (!reader.ReadF32(settings.Scale, "meta.settings.scale")
+					|| !reader.ReadU8(settings.UpAxis, "meta.settings.upAxis")
+					|| !reader.ReadU8(flags[0], "meta.settings.exportMaterials")
+					|| !reader.ReadU8(flags[1], "meta.settings.exportTextures")
+					|| !reader.ReadU8(flags[2], "meta.settings.importAnimations")
+					|| !reader.ReadU8(flags[3], "meta.settings.importSkins")
+					|| !reader.ReadF32(settings.AnimationSampleRate, "meta.settings.animationSampleRate")
+					|| !reader.ReadU8(flags[4], "meta.settings.generateNormals")
+					|| !reader.ReadU8(flags[5], "meta.settings.reuseMaterials")
+					|| !reader.ReadU8(reuseTextures, "meta.settings.reuseTextures")
+					|| !reader.ReadU32(sharedFolderLength, "meta.settings.sharedFolderLength")
+					|| !reader.ReadString(settings.SharedMaterialFolder, sharedFolderLength,
+						"meta.settings.sharedMaterialFolder"))
+				{
+					error = reader.Error;
+					return false;
+				}
+				settings.ExportMaterials = flags[0] != 0;
+				settings.ExportTextures = flags[1] != 0;
+				settings.ImportAnimations = flags[2] != 0;
+				settings.ImportSkins = flags[3] != 0;
+				settings.GenerateNormals = flags[4] != 0;
+				settings.ReuseMaterials = flags[5] != 0;
+				settings.ReuseTextures = reuseTextures != 0;
+				if (settings.UpAxis > 1u)
+				{
+					error = "invalid meta.settings.upAxis " + std::to_string(settings.UpAxis) + " (expected 0 or 1)";
+					return false;
+				}
+				if (!std::isfinite(settings.Scale) || settings.Scale <= 0.0f)
+				{
+					error = "invalid meta.settings.scale (expected a positive finite number)";
+					return false;
+				}
+				if (!std::isfinite(settings.AnimationSampleRate) || settings.AnimationSampleRate <= 0.0f)
+				{
+					error = "invalid meta.settings.animationSampleRate (expected a positive finite number)";
+					return false;
+				}
+			}   // hasSettings == 1
+			// v6:资产稳定身份(恒有;0 = 未分配)。
+			if (!reader.ReadU64(meta.Identity.Value, "meta.assetId"))
 			{
 				error = reader.Error;
-				return false;
-			}
-			settings.ExportMaterials = flags[0] != 0;
-			settings.ExportTextures = flags[1] != 0;
-			settings.ImportAnimations = flags[2] != 0;
-			settings.ImportSkins = flags[3] != 0;
-			settings.GenerateNormals = flags[4] != 0;
-			settings.ReuseMaterials = flags[5] != 0;
-			settings.ReuseTextures = reuseTextures != 0;
-			if (settings.UpAxis > 1u)
-			{
-				error = "invalid meta.settings.upAxis " + std::to_string(settings.UpAxis) + " (expected 0 or 1)";
-				return false;
-			}
-			if (!std::isfinite(settings.Scale) || settings.Scale <= 0.0f)
-			{
-				error = "invalid meta.settings.scale (expected a positive finite number)";
-				return false;
-			}
-			if (!std::isfinite(settings.AnimationSampleRate) || settings.AnimationSampleRate <= 0.0f)
-			{
-				error = "invalid meta.settings.animationSampleRate (expected a positive finite number)";
 				return false;
 			}
 			return true;
@@ -342,7 +352,7 @@ namespace World::Asset::WModelIO
 			out = WModelData {};
 			if (bytes == nullptr || size < kHeaderSize)
 			{
-				error = "truncated: file is smaller than the .wmodel v5 header";
+				error = "truncated: file is smaller than the .wmodel v6 header";
 				return false;
 			}
 
@@ -369,7 +379,8 @@ namespace World::Asset::WModelIO
 			if (version != kFormatVersion)
 			{
 				error = "unsupported .wmodel version " + std::to_string(version)
-					+ " (this build reads version " + std::to_string(kFormatVersion) + ")";
+					+ " (this build reads version " + std::to_string(kFormatVersion)
+					+ "); please re-import the source asset (请重新导入)";
 				return false;
 			}
 
@@ -413,7 +424,7 @@ namespace World::Asset::WModelIO
 			}
 			if (size < kHeaderSize + kMetaSize)
 			{
-				error = "truncated: file is smaller than the .wmodel v5 meta block";
+				error = "truncated: file is smaller than the .wmodel v6 meta block";
 				return false;
 			}
 
@@ -1026,6 +1037,8 @@ namespace World::Asset::WModelIO
 			AppendU8(out, settings.ReuseTextures ? 1u : 0u);
 			AppendString(out, settings.SharedMaterialFolder);
 		}
+		// v6:资产稳定身份(恒写;0 = 尚未分配)。
+		AppendU64(out, data.Meta.Identity.Value);
 		AppendVec3(out, data.Bounds.Min);
 		AppendVec3(out, data.Bounds.Max);
 
@@ -1161,7 +1174,7 @@ namespace World::Asset::WModelIO
 		{
 			// 契约:meta 必须由导入器写入(源指纹/导入器版本/设置哈希);手写数据不得绕过。
 			if (error)
-				*error = "refusing to write .wmodel v5 without a valid meta block "
+				*error = "refusing to write .wmodel v6 without a valid meta block "
 					"(importer must set sourceFingerprint/importerVersion/settingsHash)";
 			return false;
 		}
@@ -1170,14 +1183,14 @@ namespace World::Asset::WModelIO
 		if (GetVertexStride(data.VertexLayoutId) == 0u)
 		{
 			if (error)
-				*error = "refusing to write .wmodel v5: unsupported vertex layout id "
+				*error = "refusing to write .wmodel v6: unsupported vertex layout id "
 					+ std::to_string(data.VertexLayoutId);
 			return false;
 		}
 		if (data.VertexLayoutId == kVertexLayoutSkinned && data.SkinVertices.size() != data.Vertices.size())
 		{
 			if (error)
-				*error = "refusing to write .wmodel v5: vertex layout "
+				*error = "refusing to write .wmodel v6: vertex layout "
 					+ std::to_string(kVertexLayoutSkinned) + " needs one joints/weights record per vertex (vertices = "
 					+ std::to_string(data.Vertices.size()) + ", skin records = "
 					+ std::to_string(data.SkinVertices.size()) + ")";
@@ -1186,7 +1199,7 @@ namespace World::Asset::WModelIO
 		if (data.VertexLayoutId == kVertexLayoutStandard && !data.SkinVertices.empty())
 		{
 			if (error)
-				*error = "refusing to write .wmodel v5: vertex layout " + std::to_string(kVertexLayoutStandard)
+				*error = "refusing to write .wmodel v6: vertex layout " + std::to_string(kVertexLayoutStandard)
 					+ " does not carry joints/weights (skin records = "
 					+ std::to_string(data.SkinVertices.size()) + ")";
 			return false;
@@ -1202,7 +1215,7 @@ namespace World::Asset::WModelIO
 				|| skin.BindScales.size() != jointCount)
 			{
 				if (error)
-					*error = "refusing to write .wmodel v5: skin " + std::to_string(index)
+					*error = "refusing to write .wmodel v6: skin " + std::to_string(index)
 						+ " joint arrays have different lengths (jointCount = " + std::to_string(jointCount)
 						+ ", JointNodes = " + std::to_string(skin.JointNodes.size()) + ")";
 				return false;
@@ -1215,7 +1228,7 @@ namespace World::Asset::WModelIO
 			if (skinIndex < -1 || skinIndex >= static_cast<int64_t>(data.Skins.size()))
 			{
 				if (error)
-					*error = "refusing to write .wmodel v5: mesh " + std::to_string(index)
+					*error = "refusing to write .wmodel v6: mesh " + std::to_string(index)
 						+ " references unknown skin " + std::to_string(skinIndex)
 						+ " (Skins[] length = " + std::to_string(data.Skins.size()) + ")";
 				return false;

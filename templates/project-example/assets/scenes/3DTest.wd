@@ -31,9 +31,9 @@ Entities:
       Rotation: [0, 0, 0]
       Scale: [12, 1, 12]
     World::MeshRendererComponent:
-      Primitive: plane
+      Primitive: 2
       Color: [0.340000004, 0.360000014, 0.400000006, 1]
-      MeshPath: ""
+      Mesh: ""
   - World::UUIDComponent:
       ID:
         m_UUID: 900000000000000003
@@ -44,9 +44,9 @@ Entities:
       Rotation: [0, 35, 0]
       Scale: [1, 1, 1]
     World::MeshRendererComponent:
-      Primitive: cube
+      Primitive: 0
       Color: [1, 0.550000012, 0.119999997, 1]
-      MeshPath: ""
+      Mesh: ""
   - World::UUIDComponent:
       ID:
         m_UUID: 900000000000000004
@@ -57,9 +57,9 @@ Entities:
       Rotation: [0, 0, 0]
       Scale: [1.60000002, 1.60000002, 1.60000002]
     World::MeshRendererComponent:
-      Primitive: cube
+      Primitive: 0
       Color: [0.25, 0.850000024, 0.349999994, 1]
-      MeshPath: ""
+      Mesh: ""
   - World::UUIDComponent:
       ID:
         m_UUID: 900000000000000005
@@ -70,9 +70,9 @@ Entities:
       Rotation: [0, -20, 0]
       Scale: [1, 1, 1]
     World::MeshRendererComponent:
-      Primitive: cube
+      Primitive: 0
       Color: [0.25, 0.550000012, 0.949999988, 1]
-      MeshPath: ""
+      Mesh: ""
   - World::UUIDComponent:
       ID:
         m_UUID: 900000000000000006
@@ -83,9 +83,9 @@ Entities:
       Rotation: [18, 12, 0]
       Scale: [0.699999988, 0.699999988, 0.699999988]
     World::MeshRendererComponent:
-      Primitive: cube
+      Primitive: 0
       Color: [0.899999976, 0.25, 0.349999994, 1]
-      MeshPath: ""
+      Mesh: ""
   - World::UUIDComponent:
       ID:
         m_UUID: 900000000000000007
@@ -96,10 +96,10 @@ Entities:
       Rotation: [0, 35, 0]
       Scale: [1.8, 1.8, 1.8]
     World::MeshRendererComponent:
-      Primitive: cube
+      Primitive: 0
       Color: [1, 1, 1, 1]
-      MeshPath: ""
-      MaterialPath: "materials/quadrants.wmat"
+      Mesh: ""
+      Material: "materials/quadrants.wmat"
   - World::UUIDComponent:
       ID:
         m_UUID: 900000000000000008
@@ -110,10 +110,10 @@ Entities:
       Rotation: [0, 0, 0]
       Scale: [2.2, 2.2, 2.2]
     World::MeshRendererComponent:
-      Primitive: cube
+      Primitive: 0
       Color: [1, 1, 1, 1]
-      MeshPath: ""
-      MaterialPath: "materials/glass_red.wmat"
+      Mesh: ""
+      Material: "materials/glass_red.wmat"
   - World::UUIDComponent:
       ID:
         m_UUID: 900000000000000009
@@ -124,7 +124,7 @@ Entities:
       Rotation: [0, -15, 0]
       Scale: [1.2, 1.2, 1.2]
     World::MeshRendererComponent:
-      Primitive: cube
+      Primitive: 0
       Color: [1, 1, 1, 1]
-      MeshPath: ""
-      MaterialPath: "materials/satin_blue.wmat"
+      Mesh: ""
+      Material: "materials/satin_blue.wmat"

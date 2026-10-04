@@ -7,6 +7,10 @@
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Mesh.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
+#include "World/Asset/AssetCatalog.h"
+#include "World/Utils/Paths.h"
+#include "World/Renderer/AssetRegistry.h"
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/FrustumCull.h"
 #include "World/Renderer/RenderSettings.h"
@@ -432,6 +436,32 @@ namespace World
 		ApplyRenderScale();
 		m_ActiveScene = scene;
 		m_Options = options;
+		// L2 资产驻留层:惰性登记到世界资源表(渲染域在消费点登记自己的世界级服务),
+		// 然后推进帧号 —— Resolve*/CollectGarbage 的记账都以这一帧号为准。
+		m_AssetRegistry = nullptr;
+		if (m_ActiveScene)
+		{
+			WorldContext& context = m_ActiveScene->GetContext();
+			if (!context.Resources().Has<AssetRegistry>())
+				context.Resources().Emplace<AssetRegistry>();
+			m_AssetRegistry = &context.Resources().Get<AssetRegistry>();
+			// 目录服务(可选):把世界上下文交给驻留层,让"路径失效 → 按身份找回"可用。
+			m_AssetRegistry->BindContext(&context);
+			// 资产目录(L1):**每次世界会话扫描一次**内容根,建立"身份 ↔ 当前路径"。
+			// 这是"资产改名/移动之后引用不断链"生效的前提;不扫描时 Resolve* 退化为只按路径。
+			if (!context.Resources().Has<AssetCatalog>())
+			{
+				AssetCatalog& catalog = context.Resources().Emplace<AssetCatalog>();
+				const std::string root = World::Paths::AssetRoot().string();
+				const std::size_t identified = catalog.Scan(root);
+				WLD_CORE_INFO("[asset] 资产目录已建立: {0} 项(跳过 {1}) ← {2}",
+					identified, catalog.Skipped(), root);
+			}
+			const uint64_t frame = m_AssetRegistry->BeginFrame();
+			// 帧边界回收(低频):超期未用的资产在这里真正让出 GPU 资源。
+			if (frame % (AssetRegistry::kResidentIdleFrames / 2) == 1)
+				m_AssetRegistry->CollectGarbage();
+		}
 		// PURE-ECS:把抽取宿主装到场景上。**跨帧保持**(EndScene 不摘)—— 下一帧的
 		// `render-extract` 帧系统要在渲染之前就抽好;每帧摘掉会让它在 Play 里永远空转。
 		// 换场景时先把旧的摘掉;场景析构会回调 OnExtractSceneDestroyed;Shutdown 兜底。
@@ -490,7 +520,7 @@ namespace World
 		};
 		// ---- 3D 网格收集(D2c/D3) ----
 		// 收集前移到阴影通道之前:方向光阴影的正交矩阵要覆盖本帧所有网格实体的世界包围盒。
-		// 有 MaterialPath 时走材质(贴图/粗糙度/透明),否则沿用 Color 常量色(旧行为)。
+		// 有 Material 时走材质(贴图/粗糙度/透明),否则沿用 Color 常量色(旧行为)。
 		{
 			auto meshView = scene.m_Registry.view<TransformComponent, MeshRendererComponent>();
 			for (auto entity : meshView)
@@ -501,22 +531,24 @@ namespace World
 					continue;
 				const auto& [transform, meshComponent] =
 					meshView.get<TransformComponent, MeshRendererComponent>(entity);
-				// D5:MeshPath 指向 .wmodel 时优先加载(进程内缓存);坏文件/读不到时回退到
-				// 内置 primitive 并只警告一次,不阻断整帧渲染。
+				// D5:Mesh 指向 .wmodel 时优先加载(进程内缓存);坏文件/读不到时回退到
+				// 内置 primitive 并只警告一次,不阻断整帧渲染。PathId 直达缓存键,热路径不物化字符串。
 				Ref<Mesh> mesh;
-				if (!meshComponent.MeshPath.empty())
+				if (meshComponent.Mesh.HasPath() || meshComponent.Mesh.Identity.IsValid())
 				{
 					std::string meshError;
-					mesh = Mesh::LoadWModel(meshComponent.MeshPath, &meshError);
+					mesh = ResolveMeshAsset(meshComponent.Mesh, &meshError);
 					if (!mesh)
-						WarnOnce(meshComponent.MeshPath, "网格加载失败 '" + meshComponent.MeshPath + "': "
-							+ meshError + "(回退到 Primitive)");
+					{
+						const std::string& meshPath = StringPool::Get().PathOf(meshComponent.Mesh.Path);
+						WarnOnce(meshPath, "网格加载失败 '" + meshPath + "': " + meshError + "(回退到 Primitive)");
+					}
 				}
 				if (!mesh)
 				{
 					// D3:支持 sphere 原语(材质预览用;编辑器中也可直接摆球)。
-					const bool plane = meshComponent.Primitive == "plane";
-					const bool sphere = meshComponent.Primitive == "sphere";
+					const bool plane = meshComponent.Primitive == MeshRendererComponent::PrimitiveShape::Plane;
+					const bool sphere = meshComponent.Primitive == MeshRendererComponent::PrimitiveShape::Sphere;
 					Ref<Mesh>& primitive = plane ? m_DebugPlane : (sphere ? m_DebugSphere : m_DebugCube);
 					if (!primitive)
 						primitive = plane ? Mesh::CreateUnitPlane(1.0f)
@@ -529,13 +561,15 @@ namespace World
 				// 实体级材质:非空 = **覆盖**该网格全部 submesh 的材质槽。
 				// 加载失败(路径写错/文件坏)时回退到 Color/材质槽路径,不阻断整帧渲染。
 				Ref<Material> overrideMaterial;
-				if (!meshComponent.MaterialPath.empty())
+				if (meshComponent.Material.HasPath() || meshComponent.Material.Identity.IsValid())
 				{
 					std::string error;
-					overrideMaterial = MaterialLibrary::Get().Load(meshComponent.MaterialPath, &error);
+					overrideMaterial = ResolveMaterialAsset(meshComponent.Material, &error);
 					if (!overrideMaterial)
-						WarnOnce(meshComponent.MaterialPath, "材质加载失败 '" + meshComponent.MaterialPath
-							+ "': " + error + "(回退到 Color/材质槽)");
+					{
+						const std::string& materialPath = StringPool::Get().PathOf(meshComponent.Material.Path);
+						WarnOnce(materialPath, "材质加载失败 '" + materialPath + "': " + error + "(回退到 Color/材质槽)");
+					}
 				}
 				// 层级实体用求解后的世界矩阵:直接提交本地矩阵会让子实体不跟随父实体
 				// (实测"移动父项子项不动")。世界矩阵由本轮统一求解(见上方 UpdateWorldTransforms)。
@@ -589,7 +623,8 @@ namespace World
 							if (slot >= 0 && static_cast<size_t>(slot) < slots.size() && !slots[slot].empty())
 							{
 								std::string slotError;
-								material = MaterialLibrary::Get().Load(slots[slot], &slotError);
+								const AssetRef slotAsset { StringPool::Get().InternPath(slots[slot]), AssetId() };
+								material = ResolveMaterialAsset(slotAsset, &slotError);
 								if (!material)
 									WarnOnce(slots[slot], "材质槽加载失败 '" + slots[slot] + "': " + slotError);
 							}
@@ -613,29 +648,32 @@ namespace World
 			{
 				const auto& [transform, skinned] =
 					skinnedView.get<TransformComponent, SkinnedMeshRendererComponent>(entity);
-				if (skinned.MeshPath.empty())
+				if (!skinned.Mesh.HasPath() && !skinned.Mesh.Identity.IsValid())
 				{
 					WarnOnce("skinned-path:" + std::to_string(static_cast<uint32_t>(entity)),
-						"蒙皮网格缺少 MeshPath(实体 " + std::to_string(static_cast<uint32_t>(entity))
+						"蒙皮网格缺少 Mesh(实体 " + std::to_string(static_cast<uint32_t>(entity))
 							+ "):跳过该实体的绘制");
 					continue;
 				}
 				std::string meshError;
-				Ref<Mesh> mesh = Mesh::LoadWModel(skinned.MeshPath, &meshError);
+				Ref<Mesh> mesh = ResolveMeshAsset(skinned.Mesh, &meshError);
 				if (!mesh)
 				{
-					WarnOnce(skinned.MeshPath, "网格加载失败 '" + skinned.MeshPath + "': " + meshError);
+					const std::string& meshPath = StringPool::Get().PathOf(skinned.Mesh.Path);
+					WarnOnce(meshPath, "网格加载失败 '" + meshPath + "': " + meshError);
 					continue;
 				}
 				// 实体级材质:非空 = 覆盖该网格全部 submesh 的材质槽(与静态路径同语义)。
 				Ref<Material> overrideMaterial;
-				if (!skinned.MaterialPath.empty())
+				if (skinned.Material.HasPath() || skinned.Material.Identity.IsValid())
 				{
 					std::string error;
-					overrideMaterial = MaterialLibrary::Get().Load(skinned.MaterialPath, &error);
+					overrideMaterial = ResolveMaterialAsset(skinned.Material, &error);
 					if (!overrideMaterial)
-						WarnOnce(skinned.MaterialPath, "材质加载失败 '" + skinned.MaterialPath
-							+ "': " + error + "(回退到 Color/材质槽)");
+					{
+						const std::string& materialPath = StringPool::Get().PathOf(skinned.Material.Path);
+						WarnOnce(materialPath, "材质加载失败 '" + materialPath + "': " + error + "(回退到 Color/材质槽)");
+					}
 				}
 				// 层级实体用求解后的世界矩阵(与静态路径同一约定)。
 				const glm::mat4* modelMatrix = nullptr;
@@ -691,7 +729,8 @@ namespace World
 							if (slot >= 0 && static_cast<size_t>(slot) < slots.size() && !slots[slot].empty())
 							{
 								std::string slotError;
-								material = MaterialLibrary::Get().Load(slots[slot], &slotError);
+								const AssetRef slotAsset { StringPool::Get().InternPath(slots[slot]), AssetId() };
+								material = ResolveMaterialAsset(slotAsset, &slotError);
 								if (!material)
 									WarnOnce(slots[slot], "材质槽加载失败 '" + slots[slot] + "': " + slotError);
 							}
@@ -1295,6 +1334,27 @@ namespace World
 			return &world->Matrix;
 		return &localMatrix;
 	}
+	Ref<Mesh> SceneRenderer::ResolveMeshAsset(const AssetRef& asset, std::string* error)
+	{
+		if (m_AssetRegistry)
+			return m_AssetRegistry->ResolveMesh(asset, error);
+		return Mesh::LoadWModel(asset.Path, error);
+	}
+
+	Ref<Material> SceneRenderer::ResolveMaterialAsset(const AssetRef& asset, std::string* error)
+	{
+		if (m_AssetRegistry)
+			return m_AssetRegistry->ResolveMaterial(asset, error);
+		return MaterialLibrary::Get().Load(asset.Path, error);
+	}
+
+	Ref<Texture2D> SceneRenderer::ResolveTextureAsset(const AssetRef& asset)
+	{
+		if (m_AssetRegistry)
+			return m_AssetRegistry->ResolveTexture(asset);
+		return TextureLibrary::Get().Load(asset.Path);
+	}
+
 	void SceneRenderer::RenderGeometry(const Camera&, const glm::mat4&)
 	{
 		// B3:每实体的顶点变换(纯数学,不触碰批次状态机)按阈值并行;
@@ -1310,6 +1370,11 @@ namespace World
 			const TransformComponent& transform) -> const glm::mat4*
 		{
 			return ResolveSpriteRenderMatrix(*m_ActiveScene, entity, transform.GetLocalMatrix());
+		};
+		// 精灵纹理:组件只存驻留 PathId,这里按 id 从 TextureLibrary O(1) 取回(同路径 = 同实例)。
+		const auto spriteTextureOf = [this](const SpriteComponent& sprite)
+		{
+			return ResolveTextureAsset(sprite.Texture);
 		};
 		{
 			auto group = m_ActiveScene->m_Registry.group<TransformComponent>(entt::get<SpriteComponent>);
@@ -1335,7 +1400,7 @@ namespace World
 				for (size_t i = 0; i < count; i++)
 				{
 					auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entities[i]);
-					Renderer2D::DrawQuadPositions(positions[i].data(), sprite.Texture, sprite.Color,
+					Renderer2D::DrawQuadPositions(positions[i].data(), spriteTextureOf(sprite), sprite.Color,
 						nullptr, sprite.TilingFactor, static_cast<uint32_t>(entities[i]));
 				}
 			}
@@ -1344,7 +1409,7 @@ namespace World
 				for (auto entity : entities)
 				{
 					auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
-					Renderer2D::DrawQuadCore(*spriteMatrixOf(entity, transform), sprite.Texture, sprite.Color, nullptr,
+					Renderer2D::DrawQuadCore(*spriteMatrixOf(entity, transform), spriteTextureOf(sprite), sprite.Color, nullptr,
 						sprite.TilingFactor, static_cast<uint32_t>(entity));
 				}
 			}

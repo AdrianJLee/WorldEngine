@@ -252,7 +252,7 @@ namespace
 		body.Restitution = 0.0f;
 		MeshCollider3DComponent& collider = hull.AddComponent<MeshCollider3DComponent>();
 		collider.Mode = MeshCollider3DComponent::ColliderMode::ConvexHull;
-		collider.MeshPath = modelPath.string();
+		collider.Mesh = AssetRef { StringPool::Get().InternPath(modelPath.string()), AssetId() };
 
 		Physics3DWorld world;
 		world.Start(*scene);
@@ -271,7 +271,7 @@ namespace
 		badBody.Type = RigidBody3DComponent::MotionType::Dynamic;
 		MeshCollider3DComponent& triangles = bad.AddComponent<MeshCollider3DComponent>();
 		triangles.Mode = MeshCollider3DComponent::ColliderMode::StaticTriangles;
-		triangles.MeshPath = modelPath.string();
+		triangles.Mesh = AssetRef { StringPool::Get().InternPath(modelPath.string()), AssetId() };
 		CHECK(!Physics3DWorld::ValidateScene(*invalid, &error));
 		CHECK(error.find("StaticTriangles") != std::string::npos);
 		CHECK(error.find("Static") != std::string::npos);

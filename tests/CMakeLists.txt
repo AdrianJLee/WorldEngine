@@ -1,4 +1,4 @@
-﻿# P2 W1:Luau 运行时封装(沙箱/错误定位),headless 可跑。
+# P2 W1:Luau 运行时封装(沙箱/错误定位),headless 可跑。
 add_executable(WorldLuauVmTests World/LuauVmTests.cpp)
 target_link_libraries(WorldLuauVmTests PRIVATE World)
 target_compile_features(WorldLuauVmTests PRIVATE cxx_std_17)
@@ -1132,6 +1132,72 @@ set_tests_properties(Game.SchemaDrift PROPERTIES
     TIMEOUT 60
 )
 
+
+
+
+# T4(2026-10-04):资产稳定身份(AssetId)+ 目录 + 改名不断链 + 组件身份通道。
+add_executable(WorldAssetIdentityTests World/AssetIdentityTests.cpp)
+target_link_libraries(WorldAssetIdentityTests PRIVATE World)
+target_compile_features(WorldAssetIdentityTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldAssetIdentityTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldAssetIdentityTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldAssetIdentityTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.AssetIdentity COMMAND WorldAssetIdentityTests)
+set_tests_properties(World.AssetIdentity PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
+# PECS 1.3(2026-10-04):L2 资产驻留层 + 显式世界资源表(记账/回收/Pin/归属)。
+add_executable(WorldAssetRegistryTests World/AssetRegistryTests.cpp)
+target_link_libraries(WorldAssetRegistryTests PRIVATE World)
+target_compile_features(WorldAssetRegistryTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldAssetRegistryTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldAssetRegistryTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldAssetRegistryTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.AssetRegistry COMMAND WorldAssetRegistryTests)
+set_tests_properties(World.AssetRegistry PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
+# PECS 1.2(2026-10-04):驻留字符串池(PathId/NameId)——资产定位符与名字标识的 4B POD 化。
+add_executable(WorldStringPoolTests World/StringPoolTests.cpp)
+target_link_libraries(WorldStringPoolTests PRIVATE World)
+target_compile_features(WorldStringPoolTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldStringPoolTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldStringPoolTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldStringPoolTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.StringPool COMMAND WorldStringPoolTests)
+set_tests_properties(World.StringPool PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P4-UX16:"新建资产"类型注册表(注册/覆盖/反注册/排序/Create 落盘;菜单数据源)。
 add_executable(WorldAssetTypeRegistryTests World/AssetTypeRegistryTests.cpp)
 target_link_libraries(WorldAssetTypeRegistryTests PRIVATE World)
@@ -1284,7 +1350,7 @@ add_custom_command(TARGET WorldFrameTimeTests POST_BUILD
     VERBATIM
 )
 
-foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

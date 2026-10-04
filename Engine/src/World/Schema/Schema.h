@@ -288,6 +288,12 @@ namespace World::Schema
 		Kind KeyKind = Kind::String;
 		const char* ElementTypeName = nullptr;
 		const TypeSchema* (*GetElementNested)() = nullptr;
+		// ---- 资产稳定身份通道(2026-10-04,同样追加在尾部)----
+		// Kind==Asset 时有效:组件字段是 AssetRef(路径 + 身份),但序列化器只认 FieldSchema,
+		// 这里给它一对函数指针,使它在不认识具体字段类型的前提下也能读写身份(见 Core/AssetRef.h)。
+		// 返回 0 = 未分配 ⇒ 写端不写该键。容器里的资产元素暂不走这条通道(当前无此字段)。
+		uint64_t (*GetAssetIdentity)(const void*) = nullptr;
+		void (*SetAssetIdentity)(void*, uint64_t identity) = nullptr;
 	};
 
 	struct TypeSchema

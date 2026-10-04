@@ -1,5 +1,6 @@
 #pragma once
 
+#include "World/Core/AssetId.h"
 #include "World/Core/Export.h"
 
 #include <cstdint>
@@ -62,6 +63,9 @@ namespace World
 		uint32_t Anisotropy = 4;              // 1..16(运行时再按设备上限 clamp)
 		bool PremultiplyAlpha = false;
 		bool FlipY = false;                   // 内容贴图默认不翻转(UV 原点左上)
+		// 资产稳定身份(0 = 未分配;首次创建/导入时分配并写进 .wtex 头)。
+		// 与 source: 同一份文件,不引入旁路 —— 见 Core/AssetId.h 与 contract.asset-identity-and-strings。
+		AssetId Identity;
 
 		// 解析 YAML(JSON 是 YAML 子集)。未知字段 = 错误(不静默丢设置);空文本 = 默认值。
 		static bool Parse(const std::string& text, TextureImportSettings& out, std::string& error);
@@ -113,7 +117,8 @@ namespace World
 	WLD_API bool LoadTextureAssetFile(const std::filesystem::path& path, TextureAssetFile& out,
 		std::string& error);
 	// 写:头 + `---payload` + payload;原子替换(临时文件 + rename)。
-	WLD_API bool SaveTextureAssetFile(const std::filesystem::path& path, const TextureAssetFile& asset,
+	// asset 是 in/out:没有资产身份时在此分配并写回调用方(保证"同一资产恒同一身份")。
+	WLD_API bool SaveTextureAssetFile(const std::filesystem::path& path, TextureAssetFile& asset,
 		std::string& error);
 
 	// 磁盘读写(由调用方给绝对路径:烘焙器用内容根拼,编辑器面板同理)。

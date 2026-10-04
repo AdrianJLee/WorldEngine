@@ -1,6 +1,7 @@
 #include "wldpch.h"
 
 #include "World/Renderer/MaterialLibrary.h"
+#include "World/Core/AssetId.h"
 
 #include "World/Core/Log.h"
 #include "World/Renderer/MaterialSurface.h"
@@ -281,6 +282,7 @@ namespace World
 		material->m_Overrides = document.Overridden;
 		material->m_HasShaderOverride = document.HasShader;
 		material->m_ParamOverrides = document.Params;
+		material->m_Identity = document.Identity;   // v3:资产身份随文件走
 		material->m_Parent = parent;
 		material->m_ParentWarning = parentError;
 		material->m_FileTime = FileWriteTime(key);
@@ -332,6 +334,9 @@ namespace World
 		target.m_ParamOverrides = source.m_ParamOverrides;
 		target.m_ParamDecls = source.m_ParamDecls;
 		target.m_ParamWarnings = source.m_ParamWarnings;
+		// v3:身份随内容一起接管(重新加载不改变资产身份)。
+		if (source.m_Identity.IsValid())
+			target.m_Identity = source.m_Identity;
 		target.m_ShaderWarning = source.m_ShaderWarning;
 		target.m_Parent = source.m_Parent;
 		target.m_ParentWarning = source.m_ParentWarning;
@@ -481,6 +486,15 @@ namespace World
 		return report;
 	}
 
+	Ref<Material> MaterialLibrary::Load(PathId path, std::string* error)
+	{
+		if (!path.IsValid())
+		{
+			if (error) *error = "path is empty";
+			return nullptr;
+		}
+		return Load(StringPool::Get().PathOf(path), error);
+	}
 	Ref<Material> MaterialLibrary::Load(const std::string& path, std::string* error)
 	{
 		Resolution resolution = Resolve(path);
@@ -576,6 +590,10 @@ namespace World
 		document.Overridden = material->m_Overrides;
 		document.HasShader = material->m_HasShaderOverride;
 		document.Params = material->m_ParamOverrides;
+		// v3:资产稳定身份 —— 没有就现分配一个并**记住**(下次保存不再变)。
+		if (!material->m_Identity.IsValid())
+			material->m_Identity = GenerateAssetId();
+		document.Identity = material->m_Identity;
 		const std::string text = MaterialIO::SerializeDocument(document, &material->m_ParamDecls);
 		if (!MaterialIO::WriteFileText(key, text, error))
 			return false;
@@ -592,6 +610,7 @@ namespace World
 			|| verifyDocument.ParentPath != document.ParentPath
 			|| verifyDocument.Overridden != document.Overridden
 			|| verifyDocument.HasShader != document.HasShader
+			|| verifyDocument.Identity != document.Identity
 			// 没写 `Shader:` 时文档里的路径是**继承来的**(不落盘),不参与回读比较。
 			|| (document.HasShader && verifyDocument.Values.ShaderPath != document.Values.ShaderPath)
 			|| !ParamOverridesEquivalent(verifyDocument.Params, document.Params, material->m_ParamDecls)

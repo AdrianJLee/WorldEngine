@@ -423,9 +423,9 @@ namespace World
 		const auto* entities = registry.storage<entt::entity>();
 		if (!entities)
 			return;
-		const auto check = [this](const std::string& path) -> bool
+		const auto check = [this](AssetRef asset) -> bool
 		{
-			if (path.empty() || AssetPathExists(path))
+			const std::string& path = StringPool::Get().PathOf(asset.Path);
 				return false;
 			m_AssetWarning = std::string(Wui::Tr("panel.prefab.status.asset_missing",
 				"Warning: asset path not found in the content root: ")) + path;
@@ -435,12 +435,12 @@ namespace World
 		{
 			if (const auto* mesh = registry.try_get<MeshRendererComponent>(handle))
 			{
-				if (check(mesh->MeshPath) || check(mesh->MaterialPath))
+				if (check(mesh->Mesh) || check(mesh->Material))
 					return;
 			}
 			if (const auto* skinned = registry.try_get<SkinnedMeshRendererComponent>(handle))
 			{
-				if (check(skinned->MeshPath) || check(skinned->MaterialPath))
+				if (check(skinned->Mesh) || check(skinned->Material))
 					return;
 			}
 		}
@@ -611,13 +611,13 @@ namespace World
 			lines.push_back("Transform: T(" + FormatVec3(transform->Location) + ")  R("
 				+ FormatVec3(transform->GetEulerAngles()) + ")  S(" + FormatVec3(transform->Scale) + ")");
 		if (const auto* mesh = registry.try_get<MeshRendererComponent>(handle))
-			lines.push_back("MeshRenderer: Primitive=" + (mesh->Primitive.empty() ? std::string("(none)") : mesh->Primitive)
-				+ "  MeshPath=" + (mesh->MeshPath.empty() ? std::string("(none)") : mesh->MeshPath)
-				+ "  MaterialPath=" + (mesh->MaterialPath.empty() ? std::string("(none)") : mesh->MaterialPath));
+			lines.push_back("MeshRenderer: Primitive=" + std::string(PrimitiveShapeName(mesh->Primitive))
+				+ "  Mesh=" + (mesh->Mesh.HasPath() ? StringPool::Get().PathOf(mesh->Mesh.Path) : std::string("(none)"))
+				+ "  Material=" + (mesh->Material.HasPath() ? StringPool::Get().PathOf(mesh->Material.Path) : std::string("(none)")));
 		if (const auto* skinned = registry.try_get<SkinnedMeshRendererComponent>(handle))
-			lines.push_back("SkinnedMeshRenderer: MeshPath="
-				+ (skinned->MeshPath.empty() ? std::string("(none)") : skinned->MeshPath)
-				+ "  MaterialPath=" + (skinned->MaterialPath.empty() ? std::string("(none)") : skinned->MaterialPath));
+			lines.push_back("SkinnedMeshRenderer: Mesh="
+				+ (skinned->Mesh.HasPath() ? StringPool::Get().PathOf(skinned->Mesh.Path) : std::string("(none)"))
+				+ "  Material=" + (skinned->Material.HasPath() ? StringPool::Get().PathOf(skinned->Material.Path) : std::string("(none)")));
 		if (const auto* camera = registry.try_get<CameraComponent>(handle))
 		{
 			const bool perspective = camera->Camera.m_ProjectionType == CameraSettings::ProjectionType::Perspective;
@@ -646,9 +646,9 @@ namespace World
 		if (const auto* sprite = registry.try_get<SpriteComponent>(handle))
 			lines.push_back("Sprite: TilingFactor=" + FormatFloat(sprite->TilingFactor, 2));
 		if (const auto* skinned = registry.try_get<SkinnedMeshRendererComponent>(handle))
-			lines.push_back("SkinnedMeshRenderer: MeshPath="
-				+ (skinned->MeshPath.empty() ? std::string("(none)") : skinned->MeshPath)
-				+ "  MaterialPath=" + (skinned->MaterialPath.empty() ? std::string("(none)") : skinned->MaterialPath));
+			lines.push_back("SkinnedMeshRenderer: Mesh="
+				+ (skinned->Mesh.HasPath() ? StringPool::Get().PathOf(skinned->Mesh.Path) : std::string("(none)"))
+				+ "  Material=" + (skinned->Material.HasPath() ? StringPool::Get().PathOf(skinned->Material.Path) : std::string("(none)")));
 
 		// 其余带 schema 的组件(物理/脚本/碰撞体…)按短名列一行,至少让用户知道它在这个实体上
 		// (这一层不暴露可写控件,所以不做字段级摘要)。
@@ -737,9 +737,10 @@ namespace World
 			auto* mesh = registry.try_get<MeshRendererComponent>(handle);
 			if (!mesh)
 				return reject("entity has no such component");
-			if (field == "Primitive") mesh->Primitive = value;
-			else if (field == "MeshPath") mesh->MeshPath = value;
-			else if (field == "MaterialPath") mesh->MaterialPath = value;
+			if (field == "Primitive") { if (!ParsePrimitiveShape(value, &mesh->Primitive)) return reject("Primitive must be Cube/Sphere/Plane or 0/1/2"); }
+			// 手改路径 = 按路径重新解析:旧身份不再适用(见 Core/AssetRef.h)。
+			else if (field == "MeshPath") mesh->Mesh = AssetRef { value.empty() ? PathId() : StringPool::Get().InternPath(value), AssetId() };
+			else if (field == "MaterialPath") mesh->Material = AssetRef { value.empty() ? PathId() : StringPool::Get().InternPath(value), AssetId() };
 			else if (field == "MeshIndex")
 			{
 				float scalar = 0.0f;
@@ -832,9 +833,10 @@ namespace World
 		if (!m_Staging)
 			return assets;
 		const entt::registry& registry = m_Staging->GetRegistry();
-		const auto add = [&assets](const std::string& path)
+		const auto add = [&assets](AssetRef asset)
 		{
-			if (path.empty())
+			const std::string& path = StringPool::Get().PathOf(asset.Path);
+			if (!asset.HasPath() || path.empty())
 				return;
 			if (std::find(assets.begin(), assets.end(), path) == assets.end())
 				assets.push_back(path);
@@ -846,13 +848,13 @@ namespace World
 		{
 			if (const auto* mesh = registry.try_get<MeshRendererComponent>(handle))
 			{
-				add(mesh->MeshPath);
-				add(mesh->MaterialPath);
+				add(mesh->Mesh);
+				add(mesh->Material);
 			}
 			if (const auto* skinned = registry.try_get<SkinnedMeshRendererComponent>(handle))
 			{
-				add(skinned->MeshPath);
-				add(skinned->MaterialPath);
+				add(skinned->Mesh);
+				add(skinned->Material);
 			}
 		}
 		std::sort(assets.begin(), assets.end());
@@ -1492,7 +1494,7 @@ namespace World
 
 	float PrefabPanel::DrawAssetRow(Wui::WuiContext& ctx, float x, float y, float width, const char* idText,
 		const std::string& label, const std::string& tooltip, const std::string& assetType,
-		std::string& value, const Wui::WuiTheme& theme, bool& changed)
+		AssetRef& value, const Wui::WuiTheme& theme, bool& changed)
 	{
 		const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
 		Wui::Label(ctx, { x, y + 3.0f }, TruncateUtf8(label, 48), theme.TextMuted, 12.0f);
@@ -1502,24 +1504,30 @@ namespace World
 		options.reserve(paths.size() + 2);
 		options.push_back(Wui::Tr("panel.prefab.asset_none", "(none)"));
 		options.insert(options.end(), paths.begin(), paths.end());
+		const std::string current = StringPool::Get().PathOf(value.Path);
 		int selected = 0;
-		const auto found = std::find(paths.begin(), paths.end(), value);
+		const auto found = std::find(paths.begin(), paths.end(), current);
 		if (found != paths.end())
 			selected = static_cast<int>(found - paths.begin()) + 1;
-		else if (!value.empty())
+		else if (!current.empty())
 		{
 			// 当前值不在扫描结果里(路径写错 / 资产还没建):照样显示,不假装它是"(none)"。
-			options.push_back(value);
+			options.push_back(current);
 			selected = static_cast<int>(options.size()) - 1;
 		}
 		const int beforePick = selected;
 		if (Wui::SearchableCombo(ctx, Wui::HashId(idText), ctrl, "", options, selected, theme)
 			&& selected != beforePick)
 		{
-			value = selected <= 0 ? std::string() : options[static_cast<std::size_t>(selected)];
+			const std::string picked = selected <= 0 ? std::string() : options[static_cast<std::size_t>(selected)];
+			const PathId next = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+			// 手改路径 ⇒ 身份作废(按路径重新解析);不变则保留身份。
+			if (next != value.Path)
+				value.Identity = AssetId();
+			value.Path = next;
 			changed = true;
 		}
-		RegisterNode(Wui::HashId(idText), "searchable-combo", ctrl, label, value, true, tooltip, true);
+		RegisterNode(Wui::HashId(idText), "searchable-combo", ctrl, label, StringPool::Get().PathOf(value.Path), true, tooltip, true);
 		Wui::Tooltip(ctx, ctrl, tooltip);
 		return kFieldRowHeight;
 	}
@@ -1666,20 +1674,19 @@ namespace World
 			y += 6.0f;
 		}
 
-		// ---- MeshRenderer:Primitive / MeshPath / MaterialPath / MeshIndex ----
+		// ---- MeshRenderer:Primitive / Mesh / Material / MeshIndex ----
 		if (auto* mesh = registry.try_get<MeshRendererComponent>(handle))
 		{
 			Wui::SectionHeader(ctx, { x, y, width, 18.0f },
 				Wui::Tr("panel.prefab.section.mesh", "Mesh Renderer"), theme.Accent, theme, 13.0f);
 			y += 20.0f;
 			bool changed = false;
-			// Primitive:固定集合用下拉(schema 的 Choices 同一份取值);当前值不在集合里也照样显示。
+			// Primitive:固定三值枚举 → 下拉(名字来自 PrimitiveShapeName,边界字符串只此一处)。
 			{
-				std::vector<std::string> options { "cube", "sphere", "plane" };
-				if (std::find(options.begin(), options.end(), mesh->Primitive) == options.end())
-					options.push_back(mesh->Primitive);
-				int selected = static_cast<int>(std::find(options.begin(), options.end(), mesh->Primitive)
-					- options.begin());
+				const std::vector<std::string> options { "Cube", "Sphere", "Plane" };
+				int selected = static_cast<int>(mesh->Primitive);
+				if (selected < 0 || selected >= static_cast<int>(options.size()))
+					selected = 0;
 				const int beforePick = selected;
 				const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
 				Wui::Label(ctx, { x, y + 3.0f },
@@ -1688,11 +1695,11 @@ namespace World
 				if (Wui::Combo(ctx, Wui::HashId("prefab.field.MeshRendererComponent.Primitive"), ctrl, "",
 					options, selected, theme) && selected != beforePick)
 				{
-					mesh->Primitive = options[static_cast<std::size_t>(selected)];
+					mesh->Primitive = static_cast<MeshRendererComponent::PrimitiveShape>(selected);
 					changed = true;
 				}
 				RegisterNode(Wui::HashId("prefab.field.MeshRendererComponent.Primitive"), "combo", ctrl,
-					Wui::Tr("panel.prefab.field.primitive", "Primitive"), mesh->Primitive, true,
+					Wui::Tr("panel.prefab.field.primitive", "Primitive"), PrimitiveShapeName(mesh->Primitive), true,
 					Wui::Tr("panel.prefab.field.primitive.tooltip",
 						"Built-in primitive used when Mesh Path is empty (cube / sphere / plane)."),
 					true);
@@ -1704,12 +1711,12 @@ namespace World
 				Wui::Tr("panel.prefab.field.mesh_path", "Mesh Path"),
 				Wui::Tr("panel.prefab.field.mesh_path.tooltip",
 					"Imported model asset (.wmodel) relative to the project content root; empty = use Primitive. glTF/GLB must be imported first."),
-				"Model", mesh->MeshPath, theme, changed);
+				"Model", mesh->Mesh, theme, changed);
 			y += DrawAssetRow(ctx, x, y, width, "prefab.field.MeshRendererComponent.MaterialPath",
 				Wui::Tr("panel.prefab.field.material_path", "Material Path"),
 				Wui::Tr("panel.prefab.field.material_path.tooltip",
 					"Material asset (.wmat); overrides the entity Color and the model's own material slots."),
-				"Material", mesh->MaterialPath, theme, changed);
+				"Material", mesh->Material, theme, changed);
 			{
 				const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
 				Wui::Label(ctx, { x, y + 3.0f },

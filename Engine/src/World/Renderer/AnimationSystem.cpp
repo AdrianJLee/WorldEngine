@@ -1,6 +1,7 @@
 #include "wldpch.h"
 
 #include "World/Renderer/AnimationSystem.h"
+#include "World/Core/StringPool.h"
 
 #include "World/Renderer/Skinning.h"
 #include "World/Scene/Components.h"
@@ -24,9 +25,9 @@ namespace World
 	namespace
 	{
 		// 进程级静态状态(同一宿主里的所有 SceneRenderer 共用同一份;Update 每帧重建调色板表)。
-		std::unordered_map<std::string, Asset::WModelData>& ModelCache()
+		std::unordered_map<PathId, Asset::WModelData>& ModelCache()
 		{
-			static std::unordered_map<std::string, Asset::WModelData> cache;
+			static std::unordered_map<PathId, Asset::WModelData> cache;
 			return cache;
 		}
 
@@ -37,9 +38,9 @@ namespace World
 		}
 
 		// 读失败的路径不再逐帧重试(磁盘别再被刷屏);ClearCache 后可以重试。
-		std::unordered_set<std::string>& FailedModels()
+		std::unordered_set<PathId>& FailedModels()
 		{
-			static std::unordered_set<std::string> failed;
+			static std::unordered_set<PathId> failed;
 			return failed;
 		}
 
@@ -55,11 +56,6 @@ namespace World
 				WLD_CORE_WARN("{0}", message);
 		}
 
-		// 缓存键用规范化路径(与 Mesh 的 .wmodel 缓存同一口径)。
-		std::string ModelKey(const std::string& path)
-		{
-			return std::filesystem::path(path).lexically_normal().generic_string();
-		}
 
 		// 与 SceneRenderer 的 MeshIndex 语义一致:越界(资产被替换/手填)回退 mesh 0。
 		uint32_t SelectMeshIndex(const Asset::WModelData& model, int32_t requested)
@@ -131,15 +127,15 @@ namespace World
 			if (!probe)
 				continue;
 			SkinnedMeshRendererComponent& component = const_cast<SkinnedMeshRendererComponent&>(*probe);
-			if (component.MeshPath.empty())
+			if (!component.Mesh.HasPath())
 			{
 				WarnOnce("anim-path:" + std::to_string(static_cast<uint32_t>(entity)),
-					"SkinnedMeshRendererComponent 缺少 MeshPath(实体 " + std::to_string(static_cast<uint32_t>(entity))
+					"SkinnedMeshRendererComponent 缺少 Mesh(实体 " + std::to_string(static_cast<uint32_t>(entity))
 						+ "):跳过骨骼动画");
 				continue;
 			}
 
-			const std::string key = ModelKey(component.MeshPath);
+			const PathId key = component.Mesh.Path;
 			auto cached = ModelCache().find(key);
 			if (cached == ModelCache().end())
 			{
@@ -147,10 +143,10 @@ namespace World
 					continue;
 				Asset::WModelData data;
 				std::string error;
-				if (!Asset::WModelIO::ReadFile(component.MeshPath, data, &error))
+				if (!Asset::WModelIO::ReadFile(StringPool::Get().PathOf(component.Mesh.Path), data, &error))
 				{
 					FailedModels().insert(key);
-					WarnOnce("anim-model:" + key, "骨骼动画模型读取失败 '" + component.MeshPath + "': "
+					WarnOnce(StringPool::Get().PathOf(key), "骨骼动画模型读取失败 '" + StringPool::Get().PathOf(component.Mesh.Path) + "': "
 						+ error + "(跳过该实体的骨骼动画)");
 					continue;
 				}
@@ -165,7 +161,7 @@ namespace World
 			if (skinIndex < 0 || static_cast<size_t>(skinIndex) >= model.Skins.size())
 				continue;   // 非蒙皮网格:SceneRenderer 按网格顶点布局回退静态路径(不产生调色板)
 
-			const Asset::WModelAnimation* clip = SelectClip(model, component.AnimationClip, key);
+			const Asset::WModelAnimation* clip = SelectClip(model, component.AnimationClip, StringPool::Get().PathOf(key));
 			static const Asset::WModelAnimation kNoAnimation;
 			const Asset::WModelAnimation& animation = clip ? *clip : kNoAnimation;
 			if (clip)

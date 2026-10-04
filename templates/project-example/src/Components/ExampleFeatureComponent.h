@@ -70,7 +70,8 @@ namespace World
 		bool Enabled = true;
 		std::string Label = "WorldEngine Example";
 		ExampleMode Mode = ExampleMode::Patrol;
-		Ref<Texture2D> Icon;
+		// 资产引用 = 驻留 PathId(4B POD);解析由 AssetRegistry/TextureLibrary 在渲染时完成。
+		PathId Icon;
 		// vec3 可编辑(三个数值分量);IVec3/Mat4 是只读摘要(见上面的注释口径)。
 		glm::vec3 SpawnPoint { 0.0f, 1.0f, 0.0f };
 		glm::ivec3 GridCell { 0, 0, 0 };
@@ -102,7 +103,7 @@ namespace World
 			WE_FIELD(Mode, Enum, Of(ExampleMode),
 				Doc("Enum sample: WE_ENUM_SCHEMA(Game, ExampleMode, Int32) turns this into a dropdown; the scene stores the integer value."));
 			WE_FIELD(Icon, Asset, Of("Texture2D"),
-				Doc("Asset sample: searchable asset dropdown (catalog-driven); the scene stores the logical asset path."));
+				Doc("Asset sample: searchable asset dropdown (catalog-driven); the scene stores the logical asset path while the component holds a 4-byte resident PathId."));
 			// ---- vec3 可编辑 + 只读摘要 ----
 			WE_FIELD(SpawnPoint, Vec3,
 				Doc("Editable vec3 sample: three numeric components edited together."));

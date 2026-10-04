@@ -128,12 +128,12 @@ void ContentBrowserPanel::OpenNewMaterialModal(Wui::WuiContext& ctx, bool fromSe
 				const entt::entity handle = static_cast<entt::entity>(selected);
 				if (const auto* mesh = registry.try_get<MeshRendererComponent>(handle))
 				{
-					if (!mesh->MaterialPath.empty())
+					if (mesh->Material.HasPath())
 					{
 						std::string loadError;
-						if (const Ref<Material> source = MaterialLibrary::Get().Load(mesh->MaterialPath, &loadError))
+						if (const Ref<Material> source = MaterialLibrary::Get().Load(mesh->Material.Path, &loadError))
 							m_NewMaterialSeed = source->GetDesc();
-						defaultFolder = std::filesystem::path(mesh->MaterialPath).parent_path().generic_string();
+						defaultFolder = std::filesystem::path(StringPool::Get().PathOf(mesh->Material.Path)).parent_path().generic_string();
 					}
 					else
 					{

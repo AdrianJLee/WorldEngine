@@ -186,6 +186,27 @@ uint32_t Renderer3D::ReloadShaders(std::string* error){
 	}
 
 
+void Renderer3D::PurgeMeshGpu(const Mesh* mesh)
+{
+	if (!mesh)
+		return;
+	State& state = GetState();
+	const auto found = state.MeshCache.find(mesh);
+	if (found == state.MeshCache.end())
+		return;
+
+	// 先移出容器的所有权,再交给延迟释放:释放发生在"该帧槽位下一次开始前",
+	// 那时在飞命令缓冲一定已经完成(与材质/管线热重载同一套纪律)。
+	MeshGpu gpu = std::move(found->second);
+	state.MeshCache.erase(found);
+	Renderer::QueueRelease([gpu]() mutable
+	{
+		gpu.VertexBuffer = nullptr;
+		gpu.IndexBuffer = nullptr;
+		gpu.Owner.reset();
+	});
+}
+
 void Renderer3D::Shutdown(){
 		State& state = GetState();
 		for (auto& slot : state.ObjectUniformBuffers)

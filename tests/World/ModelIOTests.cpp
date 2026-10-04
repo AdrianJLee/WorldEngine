@@ -637,7 +637,7 @@ namespace
 		fs::remove_all(root);
 	}
 
-	// 4b.节点树实例化:3 个节点 → 3 个实体,Tag/TRS/MeshPath/MeshIndex/层级与世界矩阵正确。
+	// 4b.节点树实例化:3 个节点 → 3 个实体,Tag/TRS/Mesh/MeshIndex/层级与世界矩阵正确。
 	void ModelInstanceBuildsNodeTree()
 	{
 		static WorldContext context;
@@ -668,7 +668,7 @@ namespace
 		CHECK(rootEntity != entt::null && childEntity != entt::null && grandchildEntity != entt::null);
 		CHECK(!registry.all_of<MeshRendererComponent>(rootEntity));
 		const MeshRendererComponent& childRenderer = registry.get<MeshRendererComponent>(childEntity);
-		CHECK(childRenderer.MeshPath == wmodelPath);
+		CHECK(StringPool::Get().PathOf(childRenderer.Mesh.Path) == StringPool::Get().NormalizePath(wmodelPath));
 		CHECK(childRenderer.MeshIndex == 0);
 		CHECK(registry.get<MeshRendererComponent>(grandchildEntity).MeshIndex == 0);
 		CHECK(registry.get<HierarchyComponent>(rootEntity).Parent == entt::null);
@@ -1050,7 +1050,7 @@ namespace
 			registry.emplace<TagComponent>(handle, "Model");
 			registry.emplace<TransformComponent>(handle);
 			MeshRendererComponent renderer;
-			renderer.MeshPath = "models/D5Fixture.wmodel";
+			renderer.Mesh = AssetRef { StringPool::Get().InternPath("models/D5Fixture.wmodel"), AssetId() };
 			renderer.MeshIndex = 3;
 			registry.emplace<MeshRendererComponent>(handle, renderer);
 		}
@@ -1069,7 +1069,7 @@ namespace
 			CHECK(view.size() == 1u);
 			const MeshRendererComponent& restored = registry.get<MeshRendererComponent>(*view.begin());
 			CHECK(restored.MeshIndex == 3);
-			CHECK(restored.MeshPath == "models/D5Fixture.wmodel");
+			CHECK(StringPool::Get().PathOf(restored.Mesh.Path) == "models/D5Fixture.wmodel");
 		}
 		fs::remove_all(root);
 

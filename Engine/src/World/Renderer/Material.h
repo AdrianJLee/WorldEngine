@@ -1,5 +1,6 @@
 #pragma once
 
+#include "World/Core/AssetId.h"
 #include "World/Core/Export.h"
 #include "World/Core/Core.h"
 #include "World/Renderer/MaterialParams.h"
@@ -70,7 +71,9 @@ namespace World
 	// 读接受 1..2,读到更高版本直接失败(不猜、不降级);写出用哪个版本见
 	// MaterialIO::DocumentFormatVersion(全字段 + 无父级仍然写 1,保证老文件逐字节不变)。
 	constexpr uint32_t kMaterialFormatVersionLegacy = 1;
-	constexpr uint32_t kMaterialFormatVersionMax = 2;
+	constexpr uint32_t kMaterialFormatVersionOverrides = 2;   // 覆盖字段 + Parent
+	constexpr uint32_t kMaterialFormatVersionWithIdentity = 3; // 再加 AssetId
+	constexpr uint32_t kMaterialFormatVersionMax = kMaterialFormatVersionWithIdentity;
 
 	// 材质的可继承字段。顺序 = .wmat 的书写顺序(与 MaterialDesc 的成员顺序一致)。
 	// Name 也是可继承字段:未覆盖时跟随父级(资产身份始终是文件路径,不是 Name)。
@@ -132,6 +135,9 @@ namespace World
 		bool HasShader = false;
 		// M4-S2:本文件写的参数覆盖(文件顺序);值文本见 MaterialParams.h。
 		std::vector<MaterialParamOverride> Params;
+		// v3:跨会话稳定的资产身份(0 = 未分配;首次保存时由 MaterialLibrary 补齐并写回)。
+		// 它是"材质改名/移动之后引用不断链"的唯一依据。
+		AssetId Identity;
 	};
 
 	struct WLD_API MaterialLoadResult;
@@ -151,6 +157,8 @@ namespace World
 		MaterialDesc& GetMutableDesc() { return m_Desc; }
 		const std::string& GetPath() const { return m_Path; }
 		uint32_t GetRevision() const { return m_Revision; }
+		// v3:资产稳定身份(0 = 尚未分配;首次保存时由 MaterialLibrary 补齐并落盘)。
+		AssetId Identity() const { return m_Identity; }
 
 		// 参数写入统一走这里:Revision 自增 → 渲染侧缓存失效。
 		// 逐字段比较:变了的值按"用户显式写入"记进覆盖集(M3),保存时才会写进文件。
@@ -268,6 +276,7 @@ namespace World
 		std::vector<MaterialParamDecl> m_ParamDecls;   // M4-S2:shader 注解参数表(可能继承父级)
 		std::vector<std::string> m_ParamWarnings;      // M4-S2:未声明参数 / 值类型不符
 		std::string m_ShaderWarning;                   // M4-S2:shader 读不到 / 注解解析失败
+		AssetId m_Identity;          // v3:资产稳定身份(见 Core/AssetId.h)
 		Ref<Material> m_Parent;      // M3:解析到的父级实例(共享所有权;nullptr = 引擎默认/退化)
 		std::string m_ParentWarning; // M3:父级不可用的可读原因
 		std::string m_SurfaceKeyOverride;  // M4-S3:表面管线键覆盖(不序列化;预览材质用)

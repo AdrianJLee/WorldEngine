@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Core/StringPool.h"
 #include "World/RHI/RhiPipeline.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -110,8 +111,14 @@ namespace World
 		// 同一路径永远返回同一个 Ref<Mesh>(每个实体重复提交不会重复读盘/重复上传 GPU 缓冲)。
 		// 失败(坏 magic/版本/截断/越界/坏包围盒)返回 nullptr,error 给可读原因,绝不"尽力解析"。
 		static Ref<Mesh> LoadWModel(const std::string& path, std::string* error = nullptr);
+		// 驻留路径 id 直达缓存键的版本:热路径(Renderer/AnimationSystem)用这个,不物化字符串。
+		// 未命中时才 InternPath->PathOf 去读盘;两条重载共享同一份缓存(键 = PathId)。
+		static Ref<Mesh> LoadWModel(PathId path, std::string* error = nullptr);
 		// 清空进程内缓存(重新导入/热重载后调用);已经取出的 Ref 仍然有效。
 		static void ClearWModelCache();
+		// 释放该路径的驻留:**同时**清掉 GPU 侧条目(否则顶点/索引缓冲仍被强引用不会释放)。
+		// 由 AssetRegistry 的 LRU 回收调用;取出的 Ref 仍然有效(延迟释放)。
+		static bool EvictWModel(PathId path);
 
 		// 子网格/节点树访问器:HasSubmeshes() == false 时按"整网格 + 单材质"提交(内置 cube/plane/sphere)。
 		bool HasSubmeshes() const { return !m_Submeshes.empty(); }

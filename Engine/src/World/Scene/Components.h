@@ -12,6 +12,7 @@
 
 #include <any>
 #include <box2d/id.h>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <glm/glm.hpp>
@@ -133,10 +134,12 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	// 2D 精灵:纹理引用也是**驻留 PathId**(不是 Ref<Texture2D>)——运行态对象不进组件,
+	// 解析由 TextureLibrary(键 = PathId,进程内驻留)在渲染时 O(1) 完成。
 	struct SpriteComponent
 	{
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
-		Ref<Texture2D> Texture;
+		AssetRef Texture;
 		float TilingFactor = 1.0f;
 
 		SpriteComponent() = default;
@@ -221,49 +224,89 @@ namespace World
 		bool Valid = false;
 	};
 
-	// Primitive:内置网格名("cube"/"plane");MeshPath 预留给 glTF 导入的模型资产(D5),
-	// 届时 Primitive 会升级为资产引用,这里的字段 id 保持不变以便存档迁移。
+	// Mesh 指向导入的模型资产(D5);Mesh 为空时用下面的内置图元 Primitive。
+	// 2026-10-04:组件内**不再有任何字符串/堆持有对象** —— 资产定位符 = 驻留 PathId(4B),
+	// 内置图元 = 固定三值枚举,因此组件平凡可拷贝(复制/Prefab 实例化 = memcpy),
+	// 热路径也不再做每帧字符串归一化(见 Core/StringPool.h 与 contract.asset-identity-and-strings)。
 	struct MeshRendererComponent
 	{
-		std::string Primitive = "cube";
+		// 内置网格形状:固定三值集合 ⇒ 枚举(标识符是值,不是缓冲区)。Mesh 非空时忽略。
+		enum class PrimitiveShape
+		{
+			Cube = 0, Sphere, Plane
+		};
+		WE_ENUM_SCHEMA(World, PrimitiveShape, Int32)
+			WE_ENUM_VALUE(Cube);
+			WE_ENUM_VALUE(Sphere);
+			WE_ENUM_VALUE(Plane);
+		WE_ENUM_END
+
+		PrimitiveShape Primitive = PrimitiveShape::Cube;
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
-		std::string MeshPath;
+		AssetRef Mesh;
 		// D3:材质资产路径(相对项目内容根,形如 materials/steel.wmat)。
 		// 空 = 旧行为:用上面的 Color 直接作为基色。
-		std::string MaterialPath;
+		AssetRef Material;
 		// D5:.wmodel 有节点树时,选择"第几个 mesh"(节点引用 mesh 下标);
 		// 内置 primitive(cube/plane/sphere)与无 submesh 的网格忽略该字段。
 		int32_t MeshIndex = 0;
 
 		WE_SCHEMA_BODY(World, MeshRendererComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Mesh"),
-				Doc("Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty MaterialPath shades with Color."))
+				Doc("Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty Material shades with Color."))
 			// 同上:四个字段 id 已随存档/材质资产落盘(D2c/D3 期间手写),显式钉住。
-			WE_FIELD(Primitive, String, Id(0x4D4553485052494D), Choices("cube", "sphere", "plane"),
-				Doc("Built-in primitive used when MeshPath is empty."));
+			WE_FIELD(Primitive, Enum, Id(0x4D4553485052494D), Of(PrimitiveShape),
+				Doc("Built-in primitive used when Mesh is empty."));
 			WE_FIELD(Color, Vec4, Id(0x4D455348434F4C52), Color(),
-				Doc("Base color used when MaterialPath is empty."));
-			WE_FIELD(MeshPath, String, Id(0x4D45534850415448), Asset("Model"),
+				Doc("Base color used when Material is empty."));
+			WE_FIELD(Mesh, Asset, Id(0x4D45534850415448), Of("Model"),
 				Doc("Imported model asset (.wmodel, path relative to the project content root); empty = use Primitive. glTF/GLB are import sources only: import them first and reference the produced .wmodel."));
-			WE_FIELD(MaterialPath, String, Id(0x4D4154455249414C), Asset("Material"),
+			WE_FIELD(Material, Asset, Id(0x4D4154455249414C), Of("Material"),
 				Doc("Material asset (.wmat); overrides Color and the model's own material slots when set."));
 			// D5:字段 id 显式钉住("MESHINDX"),默认 0;.wmodel 节点树选择 mesh 用。
 			WE_FIELD(MeshIndex, Int32, Id(0x4D455348494E4458), Default(0));
 		WE_SCHEMA_END
 	};
 
+	// 内置图元的**边界字符串**(属性面板 / AI 通道 / 暂存文档文本编辑共用一份,避免各自硬编码)。
+	// 内存里恒为枚举;字符串只在 IO/UI 边界出现(见 contract.asset-identity-and-strings)。
+	inline const char* PrimitiveShapeName(MeshRendererComponent::PrimitiveShape shape)
+	{
+		switch (shape)
+		{
+			case MeshRendererComponent::PrimitiveShape::Cube:   return "Cube";
+			case MeshRendererComponent::PrimitiveShape::Sphere: return "Sphere";
+			case MeshRendererComponent::PrimitiveShape::Plane:  return "Plane";
+		}
+		return "Cube";
+	}
+
+	// 接受枚举名("Cube"/"Sphere"/"Plane",大小写不敏感)或十进制下标;失败返回 false 且不改 out。
+	inline bool ParsePrimitiveShape(const std::string& text, MeshRendererComponent::PrimitiveShape* out)
+	{
+		if (!out) return false;
+		std::string lower;
+		lower.reserve(text.size());
+		for (char c : text)
+			lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+		if (lower == "cube" || lower == "0")   { *out = MeshRendererComponent::PrimitiveShape::Cube;   return true; }
+		if (lower == "sphere" || lower == "1") { *out = MeshRendererComponent::PrimitiveShape::Sphere; return true; }
+		if (lower == "plane" || lower == "2")  { *out = MeshRendererComponent::PrimitiveShape::Plane;  return true; }
+		return false;
+	}
+
 	// P1b D5c-4a:蒙皮网格渲染组件(骨骼动画)。
 	// 路径语义与 MeshRendererComponent 一致:.wmodel 是**相对内容根**的逻辑路径
 	// (如 models/rock.wmodel),MeshIndex 选择模型里的第几个 mesh(该 mesh 的 SkinIndex
-	// 决定用哪套骨架);MaterialPath 空 = 走模型的材质槽/Color 回退。
+	// 决定用哪套骨架);Material 空 = 走模型的材质槽/Color 回退。
 	// AnimationClip 空 = 第 0 条 clip;Time 是动画系统每帧写入的运行态(允许进 schema,
 	// Play/Simulate 下由 AnimationSystem 写,属性面板只读)。
 	// 字段 id 全部显式钉住("SK…" ASCII):一旦写进 .wd 存档就不能再改,否则旧场景迁移语义漂移。
 	struct SkinnedMeshRendererComponent
 	{
-		std::string MeshPath;
+		AssetRef Mesh;
 		int32_t MeshIndex = 0;
-		std::string MaterialPath;
+		AssetRef Material;
 		std::string AnimationClip;
 		bool Playing = true;
 		float Speed = 1.0f;
@@ -273,10 +316,10 @@ namespace World
 		WE_SCHEMA_BODY(World, SkinnedMeshRendererComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Mesh"),
 				Doc("Skeleton-driven mesh: an empty AnimationClip plays the first clip and Time is written by the animation system (read-only under Play)."))
-			WE_FIELD(MeshPath, String, Id(0x534B4D4553485041), Asset("Model"),
+			WE_FIELD(Mesh, Asset, Id(0x534B4D4553485041), Of("Model"),
 				Doc("Skinned model asset (.wmodel); required — this component draws nothing without it."));
 			WE_FIELD(MeshIndex, Int32, Id(0x534B4D4553484958), Default(0));
-			WE_FIELD(MaterialPath, String, Id(0x534B4D4154505448), Asset("Material"),
+			WE_FIELD(Material, Asset, Id(0x534B4D4154505448), Of("Material"),
 				Doc("Material asset (.wmat); empty = the model's own material slots."));
 			WE_FIELD(AnimationClip, String, Id(0x534B414E494D434C),
 				Doc("Clip name inside the model; empty = play the first clip."));
@@ -658,7 +701,7 @@ namespace World
 		WE_SCHEMA_END
 	};
 
-	// 网格碰撞:MeshPath 空 = 用同实体 MeshRendererComponent.MeshPath(相对内容根的 .wmodel 路径);
+	// 网格碰撞:Mesh 空 = 用同实体 MeshRendererComponent.Mesh(相对内容根的 .wmodel 路径);
 	// ConvexHull 可挂 Static/Kinematic/Dynamic,StaticTriangles 只允许 Static 刚体(运行时拒绝)。
 	struct MeshCollider3DComponent
 	{
@@ -674,14 +717,14 @@ namespace World
 		WE_ENUM_END
 
 		ColliderMode Mode = ColliderMode::ConvexHull;
-		std::string MeshPath;
+		AssetRef Mesh;
 
 		WE_SCHEMA_BODY(World, MeshCollider3DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/3D"),
-				Doc("Mesh-derived collision: an empty MeshPath uses the entity's MeshRenderer mesh, StaticTriangles only works on Static bodies, and the editor draws no outline for it."))
+				Doc("Mesh-derived collision: an empty Mesh uses the entity's MeshRenderer mesh, StaticTriangles only works on Static bodies, and the editor draws no outline for it."))
 			WE_FIELD(Mode, Enum, Id(0x4D33444D4F444530), Of(ColliderMode),
 				Doc("ConvexHull works on every body type; StaticTriangles is only allowed on Static bodies."));
-			WE_FIELD(MeshPath, String, Id(0x4D33445041544830), Asset("Model"),
+			WE_FIELD(Mesh, Asset, Id(0x4D33445041544830), Of("Model"),
 				Doc("Collision model asset (.wmodel); empty = reuse the MeshRenderer mesh on the same entity. glTF/GLB sources must be imported to .wmodel first."));
 		WE_SCHEMA_END
 	};

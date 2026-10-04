@@ -1,5 +1,6 @@
 #pragma once
 
+#include "World/Core/AssetId.h"
 #include "World/Core/Export.h"
 #include "World/Asset/ModelImportSettings.h"
 
@@ -12,7 +13,7 @@
 
 namespace World::Asset
 {
-	// .wmodel v5(P4-U11)—— glTF 导入产出的 CPU 侧模型资产(不可变)。
+	// .wmodel v6 —— glTF 导入产出的 CPU 侧模型资产(不可变)。
 	// GPU 资源由 Renderer3D 首次提交时创建,本文件与加载器**不依赖 RHI 设备**,可 headless 使用。
 	//
 	// 顶点布局两种:
@@ -21,10 +22,11 @@ namespace World::Asset
 	// 法线缺失时由导入器按面法线补齐。
 	namespace WModelIO
 	{
+		// v6:meta 尾部带**资产稳定身份** `AssetId`(改写/移动不断链的依据,见 Core/AssetId.h)。
 		// v5:P4-U11 起 meta 里带**完整导入设置**(ModelImportSettings)—— 资产自描述,
 		// 不再依赖源旁边的 `.wimport` 旁路文件。
 		// v1–v4 一律拒绝并提示"请重新导入"(旧文件没有这些区块的读写口径,不做"尽力解析")。
-		constexpr uint32_t kFormatVersion = 5;
+		constexpr uint32_t kFormatVersion = 6;
 		constexpr uint32_t kVertexLayoutStandard = 1;
 		constexpr uint32_t kVertexLayoutSkinned = 2;
 		// 每个 skin 的关节数上限(与 D5c-3 骨骼调色板 ≤128 关节的约定一致)。
@@ -151,6 +153,9 @@ namespace World::Asset
 			// 手写/外来产物 —— 导入器总是写 true。
 			bool HasSettings = false;
 			ModelImportSettings Settings;
+			// v6:跨会话稳定的资产身份(0 = 未分配;老资产第一次读取时由编辑器/导入器补齐)。
+			// 重新导入/改设置**必须**沿用既有值 —— 它是"改名不断链"的唯一依据。
+			AssetId Identity;
 		};
 		MetaData Meta;
 
@@ -172,9 +177,9 @@ namespace World::Asset
 		std::vector<WModelAnimation> Animations;
 	};
 
-	// .wmodel v4 读写。格式是小端、版本化且**严格**的:
+	// .wmodel v6 读写。格式是小端、版本化且**严格**的:
 	//  - 未知 magic / 未知版本 / 截断 / 越界引用一律返回可读错误,绝不"尽力解析";
-	//  - v1–v3 **不再兼容**:读到旧版本返回"请重新导入"的可读错误(重导会写出 v4);
+	//  - 旧版本(v1–v5)**不再兼容**:读到旧版本返回"请重新导入"的可读错误(重导会写出 v6);
 	//  - 每个 skin 的关节数上限 kMaxJointsPerSkin = 128(超出给可读错误)。
 	//  - Serialize 确定性:同一份数据结构两次序列化逐字节相同(无时间戳、无填充差异)。
 	//
@@ -187,7 +192,8 @@ namespace World::Asset
 	//        [settings{scale(f32) / upAxis(u8) / exportMaterials(u8) / exportTextures(u8) /
 	//                  importAnimations(u8) / importSkins(u8) / animationSampleRate(f32) /
 	//                  generateNormals(u8) / reuseMaterials(u8) / reuseTextures(u8) /
-	//                  sharedMaterialFolder(长度前缀字符串)}]  ← v5,hasSettings=1 时才有}
+	//                  sharedMaterialFolder(长度前缀字符串)}]  ← v5,hasSettings=1 时才有 /
+	//        assetId(u64,资产稳定身份)  ← v6,恒有}
 	//   Bounds{min,max} → Submeshes[] → Meshes[] → Nodes[] → MaterialSlots[] →
 	//   Skins[] → Animations[] →
 	//   VertexData(vertexCount × stride:布局 1 = 32B,布局 2 = 64B) → Indices(u32 × indexCount)
