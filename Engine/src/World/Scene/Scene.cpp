@@ -564,10 +564,46 @@ namespace World
 		desc.After = system.After;
 		desc.Interval = system.Interval;
 		desc.Condition = system.Condition;
+		desc.Owner = system.Owner;
+		// WP4:声明式读写集透传给调度器(相位内冲突判定)。
+		desc.Reads = std::move(system.Reads);
+		desc.Writes = std::move(system.Writes);
+		desc.AccessDeclared = system.AccessDeclared;
 		Gameplay::SystemRegistry::UpdateFn update = std::move(system.Update);
 		if (!m_FrameSystems->Register(desc, std::move(update)))
 			throw std::invalid_argument("Scene frame system '" + desc.Name + "' rejected: " + m_FrameSystems->GetLastError());
 		m_FrameSystemDefinitions.push_back(std::move(system));
+	}
+
+	bool Scene::SetFrameSystemEnabled(const std::string& name, bool enabled)
+	{
+		AssertOwnerThread();
+		if (!m_FrameSystems)
+			return false;
+		return m_FrameSystems->SetEnabled(name, enabled);
+	}
+
+	bool Scene::IsFrameSystemEnabled(const std::string& name) const
+	{
+		if (!m_FrameSystems)
+			return false;
+		return m_FrameSystems->IsEnabled(name);
+	}
+
+	bool Scene::SetFrameSystemOwner(const std::string& name, std::string owner)
+	{
+		AssertOwnerThread();
+		for (FrameSystem& existing : m_FrameSystemDefinitions)
+		{
+			if (existing.Name == name)
+			{
+				existing.Owner = owner;
+				break;
+			}
+		}
+		if (!m_FrameSystems)
+			return false;
+		return m_FrameSystems->SetOwner(name, std::move(owner));
 	}
 
 	bool Scene::HasFrameSystem(const std::string& name) const
@@ -773,7 +809,16 @@ namespace World
 		{
 			m_FrameSystems->RunPhase(static_cast<Gameplay::SystemPhase>(phase), ts);
 			for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
-				m_FrameSystemTimings.push_back({ timing.Name, timing.ParallelSafe, timing.Milliseconds });
+			{
+				FrameSystemTiming entry;
+				entry.Name = timing.Name;
+				entry.ParallelSafe = timing.ParallelSafe;
+				entry.Milliseconds = timing.Milliseconds;
+				entry.Phase = timing.Phase;
+				entry.Owner = timing.Owner;
+				entry.Enabled = timing.Enabled;
+				m_FrameSystemTimings.push_back(std::move(entry));
+			}
 		}
 		m_FrameTimingsBegun = false;   // 本帧结束:下一帧重新开始收集
 		m_PhysicsEventsBegun = false;  // 本帧结束:下一帧的固定步重新清空物理事件
@@ -853,7 +898,16 @@ namespace World
 		{
 			m_FrameSystems->RunPhase(static_cast<Gameplay::SystemPhase>(phase), fixedDt);
 			for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
-				m_FrameSystemTimings.push_back({ timing.Name, timing.ParallelSafe, timing.Milliseconds });
+			{
+				FrameSystemTiming entry;
+				entry.Name = timing.Name;
+				entry.ParallelSafe = timing.ParallelSafe;
+				entry.Milliseconds = timing.Milliseconds;
+				entry.Phase = timing.Phase;
+				entry.Owner = timing.Owner;
+				entry.Enabled = timing.Enabled;
+				m_FrameSystemTimings.push_back(std::move(entry));
+			}
 		}
 	}
 

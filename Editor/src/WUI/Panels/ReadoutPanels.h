@@ -4,6 +4,8 @@
 #include "World/WUI/WuiWidget.h"
 
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace World
 {
@@ -30,6 +32,10 @@ namespace World
 	private:
 		std::shared_ptr<Wui::WuiBox> m_Root;
 		std::vector<std::shared_ptr<Wui::WuiLabel>> m_Lines;
+		// WP6:每行一个启用勾选框(值存 unique_ptr<bool> 以获得稳定地址,交给 WuiCheckbox::Value)。
+		std::vector<std::unique_ptr<bool>> m_Toggles;
+		std::vector<std::string> m_ToggleNames;
+		std::vector<std::shared_ptr<Wui::WuiBox>> m_Rows;
 	};
 
 	class MemoryPanel final : public EditorPanel

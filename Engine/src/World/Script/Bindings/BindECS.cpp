@@ -728,6 +728,8 @@ namespace World
 				interval,
 				std::move(condition)
 			});
+			// WP6:脚本系统标归属(面板显示 Lua:<系统名>)。
+			activeScene->SetFrameSystemOwner(name, "Lua:" + name);
 
 			// 归属到当前正在执行的系统脚本(不在加载系统脚本时是 no-op)。
 			ScriptEngine::NoteScriptSystem(name);
@@ -1189,6 +1191,7 @@ namespace World
 					Gameplay::SystemPhase::Late,
 					{}
 				});
+				scene.SetFrameSystemOwner(kPhysicsEventSystemName, "Lua:physics-events");
 			}
 			states.push_back(state);
 			return *state;

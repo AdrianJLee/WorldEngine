@@ -114,6 +114,20 @@ end, "Update")
 `movement-system`(以上 **`Fixed`** —— 固定步长)、`transform-system` / `camera-system`(`Update`)、
 `animation-system` / `render-extract`(`PreRender`,抽取声明 `After(animation-system)`)。
 
+**声明式并行调度(2026-10-04)**:同阶段内不再靠手写 `ParallelSafe` 布尔猜"是否并行安全",
+而是**声明读写集**。C++ 系统派生 `ISystem` 时覆写 `DeclareAccess(SystemAccess&)`
+(`access.Read/Write(entt::type_id<T>().hash())`),或直接填 `SystemDesc::Reads/Writes`
+登记组件类型 id;调过 `Read/Write` 即 `AccessDeclared = true`。调度器先按 `After` 做拓扑序,
+再贪心切**批次**:与当前批次内所有系统都**无冲突**才能同批 —— 写-写、读-写/写-读即冲突,
+读-读不冲突,只有读写集不相交才交给 `JobSystem` 并发;批间严格保序(前一批全部结束才起下一批),
+所以 `After` 与隐式写依赖始终是硬顺序。**未声明读写集的系统按保守口径处理**:退化为串行,
+并沿用旧的 `ParallelSafe` 开关(双方都显式 `ParallelSafe` 才可同批)。`Condition` 为 false
+的系统不进批,`Enabled=false` 的系统仍在册、写 0 ms 耗时但不执行。
+**收益边界**:引擎内置的 7 个系统是一条链式数据流(`physics-2d/3d → movement`、
+`transform → camera`、`animation → render-extract`),阶段与 `After` 几乎把它们串成一条线,
+实际可并行度很低;声明式 DAG 的主要受益方是**用户系统与 Lua 系统** —— 它们之间互不依赖、
+读写集通常不相交,声明后才能真正并行。
+
 **固定步长(工业口径)**:物理(Box2D / Jolt 两侧)与移动跑 `Fixed` 阶段,**dt 恒为
 `1/FixedStepHz`** —— 由 `GameApp` 的累加器决定"这一帧跑 0..N 步",宿主(`GameHost`)只负责
 把固定回调接到 `Scene::OnFixedUpdate`。⇒ **同一段真实时间,不管帧率多少,模拟结果一致**

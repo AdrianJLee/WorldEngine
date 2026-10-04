@@ -11,6 +11,8 @@
 #include <box2d/id.h>
 #include <entt.hpp>
 #include <functional>
+#include <string>
+#include <vector>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <cmath>
@@ -121,6 +123,12 @@ namespace World
 			float Interval = 0.0f;
 			std::function<bool()> Condition = nullptr;
 			SystemKind Kind = SystemKind::Pipeline;
+			// WP6:归属标签(系统面板显示"系统来自谁")。Builtin / Project:<类型> / Lua:<脚本> / Plugin:<名>。
+			std::string Owner = "Builtin";
+			// WP4:声明式读写集(相位内无冲突自动并行);AccessDeclared=false ⇒ 保守串行 + 尊重 ParallelSafe。
+			std::vector<entt::id_type> Reads;
+			std::vector<entt::id_type> Writes;
+			bool AccessDeclared = false;
 		};
 
 		struct LifecycleSystem
@@ -231,7 +239,10 @@ namespace World
 			}
 
 			EnsureDefaultFrameSystems();
-			RegisterFrameSystem({
+			// WP4:把系统的声明式读写集带进帧系统描述 —— 相位内无冲突就自动并行派发。
+			SystemAccess access;
+			ref.DeclareAccess(access);
+			FrameSystem frameSystem {
 				std::string(ref.Name()),
 				ref.ParallelSafe(),
 				[this, sys = std::shared_ptr<ISystem>(std::move(system))](Timestep ts)
@@ -244,7 +255,14 @@ namespace World
 				ref.Interval(),
 				[this, sysPtr = &ref]() { return sysPtr->ShouldRun(*this); },
 				ref.Kind()
-			});
+			};
+			frameSystem.Reads = std::move(access.Reads);
+			frameSystem.Writes = std::move(access.Writes);
+			frameSystem.AccessDeclared = access.Declared || ref.AccessDeclared();
+			RegisterFrameSystem(std::move(frameSystem));
+			// WP6:项目层 C++ 系统标归属(面板显示 Project:<类型名>)。
+			const std::string systemName(ref.Name());
+			SetFrameSystemOwner(systemName, "Project:" + systemName);
 			return ref;
 		}
 

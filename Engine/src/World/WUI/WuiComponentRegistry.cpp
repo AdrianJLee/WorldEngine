@@ -820,6 +820,18 @@ void RegisterBuiltins(){
 				{ PropText("label", "Select all"), PropBool("mixed"), PropBool("disabled") },
 				&ShowCheckboxMixed));
 
+			// WP6:保留模式形态(`Wui::WuiCheckbox` 挂在 WuiBox 树上,`Value` 指向外部 bool),
+			// 与立即模式 `checkbox` 同一套绘制 —— 面板(如 Systems Pipeline 的逐系统开关)用它。
+			WuiComponentRegistry::Register(Desc(
+				"checkbox.persistent", "WuiCheckbox", "Checkbox (Persistent)", "Inputs", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidget.h",
+				"role=checkbox(保留模式:Value 是外部 bool 的地址,调用方负责回写);绘制与立即模式 checkbox 同一份实现",
+				"showcase 首选 168x24;16x16 方块 + 24px 起画文字;H 同上",
+				ShellIds("checkbox"),
+				StateList({ "default", "checked", "unchecked", "disabled" }),
+				{ PropText("label", "Enabled"), PropBool("checked") },
+				&ShowCheckbox));
+
 			WuiComponentRegistry::Register(Desc(
 				"slider.float", "SliderFloat", "Slider", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",

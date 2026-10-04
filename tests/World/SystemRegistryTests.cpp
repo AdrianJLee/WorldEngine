@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <atomic>
 #include <thread>
 #include <stdexcept>
 #include <string>
@@ -185,6 +186,194 @@ int main()
 			allowRun = false;
 			CHECK(gated.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 0);
 			CHECK(executionCount == 1);
+		}
+
+		// ---- WP4 声明式并行调度:并发/保序/保守三条反假通过用例 ----
+
+		// 等待另一个系统同时进入(有上限,避免串行时死等)。返回是否观察到重叠。
+		const auto awaitOverlap = [](std::atomic<int>& inFlight)
+		{
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
+			while (inFlight.load(std::memory_order_acquire) < 2)
+			{
+				if (std::chrono::steady_clock::now() >= deadline)
+					return false;
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+			return true;
+		};
+		const auto probeOverlap = [&awaitOverlap](std::atomic<int>& inFlight, std::atomic<bool>& overlapped)
+		{
+			if (awaitOverlap(inFlight))
+				overlapped.store(true);
+		};
+
+		// 8. A 并行:两个声明了不相交读写集的系统必须真并发(区间重叠,而非"结果正确")。
+		{
+			SystemRegistry dag;
+			constexpr entt::id_type kShared = 100;
+			constexpr entt::id_type kWriteA = 101;
+			constexpr entt::id_type kWriteB = 102;
+			std::atomic<int> active { 0 };
+			std::atomic<bool> overlapped { false };
+
+			SystemDesc a;
+			a.Name = "decl-a";
+			a.Phase = SystemPhase::Update;
+			a.Reads = { kShared };
+			a.Writes = { kWriteA };
+			a.AccessDeclared = true;
+			SystemDesc b;
+			b.Name = "decl-b";
+			b.Phase = SystemPhase::Update;
+			b.Reads = { kShared };
+			b.Writes = { kWriteB };
+			b.AccessDeclared = true;
+
+			int ranA = 0, ranB = 0;
+			CHECK(dag.Register(a, [&](World::Timestep)
+			{
+				active.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(active, overlapped);
+				++ranA;
+				active.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(dag.Register(b, [&](World::Timestep)
+			{
+				active.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(active, overlapped);
+				++ranB;
+				active.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(dag.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 2);
+			CHECK(ranA == 1 && ranB == 1);
+			CHECK(overlapped.load());                       // 串行执行时永远观察不到重叠
+			CHECK(dag.GetLastTimings().size() == 2);
+		}
+
+		// 9. B 保序:读写同一组件(写-读冲突)必须严格串行且按注册序(与名字字典序无关)。
+		{
+			SystemRegistry conflicting;
+			constexpr entt::id_type kComponent = 200;
+			std::atomic<int> active { 0 };
+			std::atomic<bool> overlapped { false };
+			std::vector<std::string> sequence;
+
+			SystemDesc writer;
+			writer.Name = "zzz-writer";      // 名字靠后,但先注册
+			writer.Phase = SystemPhase::Update;
+			writer.Writes = { kComponent };
+			writer.AccessDeclared = true;
+			SystemDesc reader;
+			reader.Name = "aaa-reader";      // 名字靠前,但后注册
+			reader.Phase = SystemPhase::Update;
+			reader.Reads = { kComponent };
+			reader.AccessDeclared = true;
+
+			CHECK(conflicting.Register(writer, [&](World::Timestep)
+			{
+				active.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(active, overlapped);
+				sequence.push_back("zzz-writer");
+				active.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(conflicting.Register(reader, [&](World::Timestep)
+			{
+				active.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(active, overlapped);
+				sequence.push_back("aaa-reader");
+				active.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(conflicting.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 2);
+			CHECK(!overlapped.load());
+			CHECK(sequence.size() == 2 && sequence[0] == "zzz-writer" && sequence[1] == "aaa-reader");
+		}
+
+		// 10. C 未声明保守:未声明(且未 ParallelSafe)+ 已声明 ⇒ 保守串行,不并发。
+		{
+			SystemRegistry conservative;
+			constexpr entt::id_type kComp = 300;
+			std::atomic<int> active { 0 };
+			std::atomic<bool> overlapped { false };
+
+			SystemDesc declared;
+			declared.Name = "declared";
+			declared.Phase = SystemPhase::Update;
+			declared.Reads = { kComp };
+			declared.AccessDeclared = true;
+			SystemDesc legacy;
+			legacy.Name = "legacy-undeclared";
+			legacy.Phase = SystemPhase::Update;   // ParallelSafe=false 且未声明
+
+			CHECK(conservative.Register(declared, [&](World::Timestep)
+			{
+				active.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(active, overlapped);
+				active.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(conservative.Register(legacy, [&](World::Timestep)
+			{
+				active.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(active, overlapped);
+				active.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(conservative.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 2);
+			CHECK(!overlapped.load());
+		}
+
+		// 11. 冲突判定细则:同组件"读-读"不算冲突(可并发);"写-写"冲突(串行)。
+		{
+			constexpr entt::id_type kReadOnly = 400;
+
+			SystemRegistry readRead;
+			std::atomic<int> activeRR { 0 };
+			std::atomic<bool> overlappedRR { false };
+			SystemDesc r1;
+			r1.Name = "read-1";
+			r1.Phase = SystemPhase::Update;
+			r1.Reads = { kReadOnly };
+			r1.AccessDeclared = true;
+			SystemDesc r2 = r1;
+			r2.Name = "read-2";
+			CHECK(readRead.Register(r1, [&](World::Timestep)
+			{
+				activeRR.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(activeRR, overlappedRR);
+				activeRR.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(readRead.Register(r2, [&](World::Timestep)
+			{
+				activeRR.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(activeRR, overlappedRR);
+				activeRR.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(readRead.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 2);
+			CHECK(overlappedRR.load());
+
+			SystemRegistry writeWrite;
+			std::atomic<int> activeWW { 0 };
+			std::atomic<bool> overlappedWW { false };
+			SystemDesc w1;
+			w1.Name = "write-1";
+			w1.Phase = SystemPhase::Update;
+			w1.Writes = { kReadOnly };
+			w1.AccessDeclared = true;
+			SystemDesc w2 = w1;
+			w2.Name = "write-2";
+			CHECK(writeWrite.Register(w1, [&](World::Timestep)
+			{
+				activeWW.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(activeWW, overlappedWW);
+				activeWW.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(writeWrite.Register(w2, [&](World::Timestep)
+			{
+				activeWW.fetch_add(1, std::memory_order_acq_rel);
+				probeOverlap(activeWW, overlappedWW);
+				activeWW.fetch_sub(1, std::memory_order_acq_rel);
+			}));
+			CHECK(writeWrite.RunPhase(SystemPhase::Update, World::Timestep(0.016f)) == 2);
+			CHECK(!overlappedWW.load());
 		}
 
 		World::JobSystem::Shutdown();

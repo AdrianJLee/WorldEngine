@@ -178,12 +178,37 @@ namespace World
 					m_Root->Invalidate();
 					m_Lines.clear();
 					m_Lines.reserve(requiredLines);
+					m_Toggles.clear();
+					m_ToggleNames.clear();
+					m_Rows.clear();
+					const size_t systemRows = timings.size();
 					for (size_t i = 0; i < requiredLines; ++i)
 					{
-						auto label = std::make_shared<Wui::WuiLabel>();
-						label->FontSize = 14;
-						m_Root->Add(label);
-						m_Lines.push_back(label);
+						if (i >= 2 && i < 2 + systemRows)
+						{
+							auto rowBox = std::make_shared<Wui::WuiBox>();
+							rowBox->Direction = Wui::WuiDirection::Row;
+							rowBox->Gap = 6;
+							auto toggle = std::make_unique<bool>(true);
+							auto check = std::make_shared<Wui::WuiCheckbox>();
+							check->Value = toggle.get();
+							rowBox->Add(check);
+							auto label = std::make_shared<Wui::WuiLabel>();
+							label->FontSize = 14;
+							rowBox->Add(label);
+							m_Root->Add(rowBox);
+							m_Rows.push_back(rowBox);
+							m_Toggles.push_back(std::move(toggle));
+							m_ToggleNames.emplace_back();
+							m_Lines.push_back(label);
+						}
+						else
+						{
+							auto label = std::make_shared<Wui::WuiLabel>();
+							label->FontSize = 14;
+							m_Root->Add(label);
+							m_Lines.push_back(label);
+						}
 					}
 				}
 
@@ -194,15 +219,38 @@ namespace World
 				m_Lines[1]->Color = { 1.0f, 1.0f, 1.0f, 1.0f };
 
 				double totalMs = 0.0;
+				size_t disabledCount = 0;
 				for (size_t i = 0; i < timings.size(); ++i)
 				{
 					const auto& timing = timings[i];
 					totalMs += timing.Milliseconds;
+					if (!timing.Enabled)
+						++disabledCount;
+
+					// WP6:把勾选框与场景的真实启用态对齐;用户改了勾选框就写回(scene 是运行态
+					// 唯一权威,面板只做视图)。SetFrameSystemEnabled 幂等。
+					if (i < m_Toggles.size() && scene && m_Toggles[i])
+					{
+						if (m_ToggleNames[i] != timing.Name)
+						{
+							// 首次绑定:勾选框取场景的真实启用态。
+							m_ToggleNames[i] = timing.Name;
+							*m_Toggles[i] = scene->IsFrameSystemEnabled(timing.Name);
+						}
+						else if (*m_Toggles[i] != scene->IsFrameSystemEnabled(timing.Name))
+						{
+							// 用户改了勾选框 ⇒ 写回场景(面板只做视图)。
+							scene->SetFrameSystemEnabled(timing.Name, *m_Toggles[i]);
+						}
+					}
 
 					char buffer[256];
-					std::snprintf(buffer, sizeof(buffer), "[%s] (%s) - %.3f ms",
+					std::snprintf(buffer, sizeof(buffer), "[%s] %s: %s (%s)%s - %.3f ms",
+						Gameplay::SystemPhaseName(timing.Phase),
+						timing.Owner.c_str(),
 						timing.Name.c_str(),
 						timing.ParallelSafe ? "Parallel" : "Main Thread",
+						timing.Enabled ? "" : " (off)",
 						timing.Milliseconds);
 
 					m_Lines[2 + i]->Text = buffer;
@@ -222,7 +270,9 @@ namespace World
 					node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 					node.Kind = "status";
 					node.Label = "systems pipeline";
-					node.Value = "count=" + std::to_string(timings.size()) + " totalMs=" + std::to_string(totalMs);
+					node.Value = "count=" + std::to_string(timings.size()) +
+						" disabled=" + std::to_string(disabledCount) +
+						" totalMs=" + std::to_string(totalMs);
 					node.Rect = { rect.X + 8.0f, rect.Y + 8.0f, rect.W - 16.0f, 16.0f };
 					node.Interactive = false;
 					Wui::WuiAccessibility::Get().Register(node);

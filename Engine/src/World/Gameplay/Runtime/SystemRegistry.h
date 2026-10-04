@@ -3,6 +3,8 @@
 #include "World/Core/Export.h"
 #include "World/Core/Timestep.h"
 
+#include <entt.hpp>
+
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -32,6 +34,16 @@ namespace World::Gameplay
 		std::vector<std::string> After;   // 同阶段内顺序依赖:本系统排在这些系统之后
 		float Interval = 0.0f;            // 0 = 每步推进; > 0 = 定时间隔节流推进(秒)
 		std::function<bool()> Condition;  // 条件门禁谓词:返回 false 则跳过本轮执行
+		// 归属(面板显示"系统来自谁")。内置 = Builtin;项目 C++ = Project:<类型名>;
+		// Lua = Lua:<脚本路径>;插件 = Plugin:<名>。
+		std::string Owner = "Builtin";
+		// 启用开关:false = 仍在册(面板可见、可重新启用)但本轮不执行。
+		bool Enabled = true;
+		// 声明式并行:声明本系统会读/写哪些组件类型(entt::id_type)。
+		// AccessDeclared = false 表示未声明 ⇒ 冲突判定退化为"保守串行 + 尊重 ParallelSafe"。
+		std::vector<entt::id_type> Reads;
+		std::vector<entt::id_type> Writes;
+		bool AccessDeclared = false;
 	};
 
 	struct SystemTiming
@@ -40,6 +52,8 @@ namespace World::Gameplay
 		SystemPhase Phase = SystemPhase::Update;
 		bool ParallelSafe = false;
 		double Milliseconds = 0.0;
+		std::string Owner = "Builtin";
+		bool Enabled = true;
 	};
 
 	// 系统注册表:具名系统 + 阶段 + 同阶段顺序依赖 + 并行标记 + 逐系统耗时。
@@ -59,6 +73,12 @@ namespace World::Gameplay
 
 		// 执行某一阶段的全部系统;返回实际执行数量(0 表示该阶段无系统或被拒绝)。
 		uint32_t RunPhase(SystemPhase phase, Timestep dt);
+
+		// 启用/禁用(具名)。false = 留在册内但不执行;名字不存在返回 false。
+		bool SetEnabled(const std::string& name, bool enabled);
+		bool IsEnabled(const std::string& name) const;
+		// 归属标签(面板显示)。名字不存在返回 false。
+		bool SetOwner(const std::string& name, std::string owner);
 
 		const std::vector<SystemTiming>& GetLastTimings() const { return m_Timings; }
 		uint64_t GetRunCount() const { return m_RunCount; }

@@ -13,6 +13,28 @@ namespace World::Gameplay
 	namespace
 	{
 		constexpr size_t kPhaseCount = static_cast<size_t>(SystemPhase::Count);
+
+		bool ContainsId(const std::vector<entt::id_type>& ids, entt::id_type id)
+		{
+			return std::find(ids.begin(), ids.end(), id) != ids.end();
+		}
+
+		// 两个系统能否进同一批次并行执行:
+		// - 双方都已声明读写集:无冲突 ⟺ Write ∩ (Read ∪ Write) 为空(读-读不冲突);
+		// - 任一方未声明:退化为 legacy 语义 —— 双方都显式 ParallelSafe 才可同批(保守串行)。
+		bool ParallelCompatible(const SystemDesc& a, const SystemDesc& b)
+		{
+			if (!a.AccessDeclared || !b.AccessDeclared)
+				return a.ParallelSafe && b.ParallelSafe;
+
+			for (entt::id_type write : a.Writes)
+				if (ContainsId(b.Writes, write) || ContainsId(b.Reads, write))
+					return false;
+			for (entt::id_type read : a.Reads)
+				if (ContainsId(b.Writes, read))
+					return false;
+			return true;
+		}
 	}
 
 	const char* SystemPhaseName(SystemPhase phase)
@@ -32,6 +54,38 @@ namespace World::Gameplay
 	{
 		return std::any_of(m_Systems.begin(), m_Systems.end(),
 			[&name](const Entry& entry) { return entry.Desc.Name == name; });
+	}
+
+	bool SystemRegistry::SetEnabled(const std::string& name, bool enabled)
+	{
+		for (Entry& entry : m_Systems)
+		{
+			if (entry.Desc.Name != name)
+				continue;
+			entry.Desc.Enabled = enabled;
+			return true;   // 名字存在即成功(重复设置幂等)
+		}
+		return false;
+	}
+
+	bool SystemRegistry::IsEnabled(const std::string& name) const
+	{
+		for (const Entry& entry : m_Systems)
+			if (entry.Desc.Name == name)
+				return entry.Desc.Enabled;
+		return false;
+	}
+
+	bool SystemRegistry::SetOwner(const std::string& name, std::string owner)
+	{
+		for (Entry& entry : m_Systems)
+		{
+			if (entry.Desc.Name != name)
+				continue;
+			entry.Desc.Owner = std::move(owner);
+			return true;
+		}
+		return false;
 	}
 
 	bool SystemRegistry::Register(const SystemDesc& desc, UpdateFn update)
@@ -114,19 +168,26 @@ namespace World::Gameplay
 					std::swap(phaseEntries[i], phaseEntries[j]);
 			}
 
-		uint32_t executed = 0;
-		std::vector<Entry*> parallelEntries;
-		std::vector<Entry*> serialEntries;
+		// 1. 按拓扑序生成执行计划:批次(批内可并行、批间严格保序)+ 耗时顺序表。
+		//    Enabled=false:保留在册,写 timing(0 ms),不执行、不进批;
+		//    Condition=false / 依赖缺失 / Interval 未到:跳过执行且不占批次。
+		std::vector<std::vector<Entry*>> batches;
+		std::vector<Entry*> timingOrder;
 		for (Entry* entry : phaseEntries)
 		{
+			if (!entry->Desc.Enabled)
+			{
+				timingOrder.push_back(entry);
+				continue;
+			}
 			if (!entry->Update)
 				continue;
 
-			// 1. 条件门禁:返回 false 则本轮跳过
+			// 条件门禁:返回 false 则本轮跳过
 			if (entry->Desc.Condition && !entry->Desc.Condition())
 				continue;
 
-			// 2. 依赖检查
+			// 依赖检查
 			bool dependenciesSatisfied = true;
 			for (const std::string& dependency : entry->Desc.After)
 			{
@@ -141,7 +202,7 @@ namespace World::Gameplay
 			if (!dependenciesSatisfied)
 				continue;
 
-			// 3. 定时节流调度:如果定义了 Interval > 0
+			// 定时节流调度:如果定义了 Interval > 0
 			if (entry->Desc.Interval > 0.0f)
 			{
 				entry->Accumulator += dt.GetSeconds();
@@ -149,7 +210,21 @@ namespace World::Gameplay
 					continue;
 			}
 
-			(entry->Desc.ParallelSafe ? parallelEntries : serialEntries).push_back(entry);
+			// 相位内分批:与当前批次内所有系统都无冲突才能同批,否则另起一批。
+			if (batches.empty())
+			{
+				batches.emplace_back();
+			}
+			else
+			{
+				const auto& current = batches.back();
+				const bool compatible = std::all_of(current.begin(), current.end(),
+					[entry](const Entry* member) { return ParallelCompatible(member->Desc, entry->Desc); });
+				if (!compatible)
+					batches.emplace_back();
+			}
+			batches.back().push_back(entry);
+			timingOrder.push_back(entry);
 		}
 
 		const auto pushTiming = [this, phase](const Entry* entry, double milliseconds)
@@ -159,14 +234,18 @@ namespace World::Gameplay
 			timing.Phase = phase;
 			timing.ParallelSafe = entry->Desc.ParallelSafe;
 			timing.Milliseconds = milliseconds;
+			timing.Owner = entry->Desc.Owner;
+			timing.Enabled = entry->Desc.Enabled;
 			m_Timings.push_back(std::move(timing));
 		};
 
-		// 并行安全系统:交给 JobSystem 并发执行
-		if (!parallelEntries.empty())
+		// 2. 批间严格保序:前一批全部结束才起下一批,保证 After 与隐式写依赖不被破坏。
+		//    批内 size >= 2 且 JobSystem 运行时走 Kick/Wait 并发,否则串行执行该批次。
+		std::unordered_map<Entry*, double> durations;
+		uint32_t executed = 0;
+		for (std::vector<Entry*>& batch : batches)
 		{
-			std::vector<double> durations(parallelEntries.size(), 0.0);
-			if (JobSystem::IsRunning() && parallelEntries.size() > 1)
+			if (batch.size() >= 2 && JobSystem::IsRunning())
 			{
 				struct Payload
 				{
@@ -175,13 +254,14 @@ namespace World::Gameplay
 					double* Out;
 				};
 
+				std::vector<double> batchDurations(batch.size(), 0.0);
 				JobCounter counter;
-				for (size_t i = 0; i < parallelEntries.size(); ++i)
+				for (size_t i = 0; i < batch.size(); ++i)
 				{
-					Entry* entry = parallelEntries[i];
+					Entry* entry = batch[i];
 					const float stepDt = (entry->Desc.Interval > 0.0f) ? entry->Accumulator : dt.GetSeconds();
 					JobDecl job;
-					job.Emplace(Payload { entry, Timestep(stepDt), &durations[i] });
+					job.Emplace(Payload { entry, Timestep(stepDt), &batchDurations[i] });
 					job.Entry = [](void* data)
 					{
 						auto* payload = static_cast<Payload*>(data);
@@ -195,44 +275,36 @@ namespace World::Gameplay
 				}
 				JobSystem::Wait(&counter);
 
-				for (size_t i = 0; i < parallelEntries.size(); ++i)
+				for (size_t i = 0; i < batch.size(); ++i)
 				{
-					if (parallelEntries[i]->Desc.Interval > 0.0f)
-						parallelEntries[i]->Accumulator = std::max(0.0f, parallelEntries[i]->Accumulator - parallelEntries[i]->Desc.Interval);
+					Entry* entry = batch[i];
+					if (entry->Desc.Interval > 0.0f)
+						entry->Accumulator = std::max(0.0f, entry->Accumulator - entry->Desc.Interval);
+					durations[entry] = batchDurations[i];
+					executed++;
 				}
 			}
 			else
 			{
-				for (size_t i = 0; i < parallelEntries.size(); ++i)
+				for (Entry* entry : batch)
 				{
-					Entry* entry = parallelEntries[i];
 					const float stepDt = (entry->Desc.Interval > 0.0f) ? entry->Accumulator : dt.GetSeconds();
 					const auto begin = std::chrono::steady_clock::now();
 					entry->Update(Timestep(stepDt));
 					const auto end = std::chrono::steady_clock::now();
-					durations[i] = std::chrono::duration<double, std::milli>(end - begin).count();
 					if (entry->Desc.Interval > 0.0f)
 						entry->Accumulator = std::max(0.0f, entry->Accumulator - entry->Desc.Interval);
+					durations[entry] = std::chrono::duration<double, std::milli>(end - begin).count();
+					executed++;
 				}
-			}
-			for (size_t i = 0; i < parallelEntries.size(); ++i)
-			{
-				pushTiming(parallelEntries[i], durations[i]);
-				executed++;
 			}
 		}
 
-		// 串行系统执行
-		for (Entry* entry : serialEntries)
+		// 3. 耗时表始终按注册/拓扑序输出(面板依赖次序);未执行者 0 ms。
+		for (Entry* entry : timingOrder)
 		{
-			const float stepDt = (entry->Desc.Interval > 0.0f) ? entry->Accumulator : dt.GetSeconds();
-			const auto begin = std::chrono::steady_clock::now();
-			entry->Update(Timestep(stepDt));
-			const auto end = std::chrono::steady_clock::now();
-			if (entry->Desc.Interval > 0.0f)
-				entry->Accumulator = std::max(0.0f, entry->Accumulator - entry->Desc.Interval);
-			pushTiming(entry, std::chrono::duration<double, std::milli>(end - begin).count());
-			executed++;
+			const auto it = durations.find(entry);
+			pushTiming(entry, it == durations.end() ? 0.0 : it->second);
 		}
 
 		if (executed > 0)
