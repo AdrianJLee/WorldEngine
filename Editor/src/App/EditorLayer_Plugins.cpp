@@ -1,5 +1,8 @@
 #include "EditorLayer_Internal.h"
 
+#include "World/Asset/AsyncLoader.h"
+#include "World/Asset/ScenePrefetch.h"
+
 namespace World
 {
 
@@ -1327,11 +1330,34 @@ void EditorLayer::DoOpenScene(const std::filesystem::path& path){
 		}
 		SetSceneState(SceneState::Edit);
 		UpdateSceneContext(m_Document.GetScene());
+		// T5c:打开即把场景要用的资产交给后台解析(状态栏显示进度)。
+		// 编辑器**不**因此停渲染:视口走同步解析路径,先到的资产先出现 —— 打开大场景时
+		// 主线程不再被"逐个读盘+解析"一次性占满。
+		{
+			const ScenePrefetchResult prefetch = PrefetchSceneAssets(
+				m_Document.GetScene()->GetContext(), *m_Document.GetScene());
+			WLD_CORE_INFO("[load] scene '{0}': assets prefetched={1} already-known={2} ({3})",
+				path.string(), prefetch.Requested, prefetch.AlreadyKnown, DescribeAssetLoads());
+		}
 		// W5-L1:重开/打开成功即用磁盘内容重建外部改动基线(并清掉提示)。
 		RebaselineExternalSceneWatch();
 		// HOTR-P2-T5:自动重开这一条路径才恢复选择/相机(普通打开/新建/启动场景 = no-op)。
 		RestoreSceneReopenSnapshot();
 	}
+
+std::size_t EditorLayer::PendingAssetLoads() const{
+	if (!m_ActiveScene)
+		return 0;
+	const AsyncLoader* loader = m_ActiveScene->GetContext().Resources().TryGet<AsyncLoader>();
+	return loader ? loader->PendingCount() : 0;
+}
+
+std::string EditorLayer::DescribeAssetLoads() const{
+	if (!m_ActiveScene)
+		return {};
+	const AsyncLoader* loader = m_ActiveScene->GetContext().Resources().TryGet<AsyncLoader>();
+	return loader ? loader->Describe() : std::string();
+}
 
 bool EditorLayer::SaveScene(){
 		// P4-U13:prefab 会话里 Ctrl+S = 写回那个 .wprefab(而不是场景)。

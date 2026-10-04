@@ -212,6 +212,10 @@ namespace World::Asset
 		WLD_API std::vector<uint8_t> Serialize(const WModelData& data);
 		WLD_API bool Parse(const uint8_t* bytes, size_t size, WModelData& out, std::string* error);
 		WLD_API bool WriteFile(const std::string& path, const WModelData& data, std::string* error);
+		// 只取字节(不做解析):异步加载器在工作线程用它读盘。
+		// 复用与 ReadFile/ReadMeta **同一份** VFS → 内容根 的解析顺序,不复制第二份候选逻辑。
+		WLD_API bool ReadRawBytes(const std::string& path, std::vector<uint8_t>& out, std::string* error);
+
 		WLD_API bool ReadFile(const std::string& path, WModelData& out, std::string* error);
 		// P4-U11:只解析 header + meta(几何不读,GPU/内存都不碰)。编辑器与 cook 判断
 		// "这份 .wmodel 是不是这个源的产物 / 用了什么导入设置"时用它,不必加载整个模型。

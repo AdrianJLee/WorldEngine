@@ -12,6 +12,8 @@
 
 namespace World
 {
+	namespace Asset { struct WModelData; }
+
 	// 网格顶点布局:直接复用 RHI 的属性/绑定描述,管线与网格共用同一份声明。
 	struct MeshVertexLayout
 	{
@@ -114,6 +116,15 @@ namespace World
 		// 驻留路径 id 直达缓存键的版本:热路径(Renderer/AnimationSystem)用这个,不物化字符串。
 		// 未命中时才 InternPath->PathOf 去读盘;两条重载共享同一份缓存(键 = PathId)。
 		static Ref<Mesh> LoadWModel(PathId path, std::string* error = nullptr);
+		// **纯 CPU 构造**(无 IO、无缓存、无 RHI):异步加载的工作线程与同步路径共用这一份。
+		// 逐字节一致性因此是结构性的 —— 两条路径不可能造出不同的 Mesh。
+		// data 按值收(RVO/移动),debugPath 只用于命名(诊断/GPU 缓冲名),失败返回 nullptr。
+		static Ref<Mesh> BuildFromWModel(Asset::WModelData data, const std::string& debugPath,
+			std::string* error = nullptr);
+		// 主线程提交:把**已经建好**的 Mesh 放进进程内缓存(键 = 驻留路径 id)。
+		// 该键已有条目时不覆盖(缓存优先),返回 false。只有主线程可以调用。
+		static bool AdoptWModel(PathId path, Ref<Mesh> mesh);
+
 		// 清空进程内缓存(重新导入/热重载后调用);已经取出的 Ref 仍然有效。
 		static void ClearWModelCache();
 		// 释放该路径的驻留:**同时**清掉 GPU 侧条目(否则顶点/索引缓冲仍被强引用不会释放)。

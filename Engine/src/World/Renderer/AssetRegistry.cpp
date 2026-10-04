@@ -4,6 +4,7 @@
 
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Asset/AssetCatalog.h"
+#include "World/Asset/AsyncLoader.h"
 #include "World/Core/WorldContext.h"
 #include "World/Renderer/Texture/TextureLibrary.h"
 
@@ -206,5 +207,33 @@ namespace World
 				+ (m_Pinned.count(path) ? " pinned" : ""));
 		}
 		return lines;
+	}
+
+	bool AssetRegistry::PrefetchMesh(const AssetRef& asset)
+	{
+		if (!m_Context || !asset.HasPath())
+			return false;
+		if (!m_Context->Resources().Has<AsyncLoader>())
+			m_Context->Resources().Emplace<AsyncLoader>();
+		AsyncLoader& loader = m_Context->Resources().Get<AsyncLoader>();
+		// 已驻留的不用再排(下次 Resolve 直接命中);其余交给加载器(幂等)。
+		loader.RequestMesh(asset.Path);
+		return true;
+	}
+
+	std::size_t AssetRegistry::PendingLoadCount() const
+	{
+		if (!m_Context)
+			return 0;
+		const AsyncLoader* loader = m_Context->Resources().TryGet<AsyncLoader>();
+		return loader ? loader->PendingCount() : 0;
+	}
+
+	std::string AssetRegistry::DescribeLoads() const
+	{
+		if (!m_Context)
+			return {};
+		const AsyncLoader* loader = m_Context->Resources().TryGet<AsyncLoader>();
+		return loader ? loader->Describe() : std::string();
 	}
 }

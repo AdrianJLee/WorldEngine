@@ -1,4 +1,4 @@
-﻿#include "RuntimeLayer.h"
+#include "RuntimeLayer.h"
 #include "GameHud.h"
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/Log.h"
@@ -274,6 +274,10 @@ namespace World
 			const Scene* activeScene = m_Host.GetScene().get();
 			const size_t entityCount = activeScene ? activeScene->GetRegistry().view<UUIDComponent>().size() : 0;
 			DrawGameHud(wuiContext, entityCount);
+			// T5c 流式加载界面:资产还在后台解析时覆盖在最上层(真实进度,不是假动画)。
+			// 顺序在 HUD 之后 = 加载期间盖住 HUD,解析完自然消失 —— 不需要"关掉加载界面"的状态机。
+			if (const std::size_t pending = m_Host.PendingAssetLoads(); pending > 0)
+				DrawLoadingOverlay(wuiContext, pending, 0, m_Host.DescribeAssetLoads());
 			wuiContext.EndFrame();
 			wuiBackend.Render(wuiContext.Commands(), wuiContext.OverlayCommands());
 			// 整窗抓图:UI 通道已提交、→Present 尚未执行 —— 与 EditorLayer 同一调用点

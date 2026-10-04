@@ -1,4 +1,7 @@
 #include "World/Gameplay/Runtime/GameHost.h"
+
+#include "World/Asset/AsyncLoader.h"
+#include "World/Asset/ScenePrefetch.h"
 #include "World/Core/Input.h"
 #include "World/Physics/PhysicsSettings.h"
 #include "World/Gameplay/Framework/InputMap.h"
@@ -235,6 +238,12 @@ namespace World::Gameplay
 		m_Scene = scene;
 		m_LoadedPath = scenePath;
 		ApplyViewportToScene();
+		// T5c:反序列化一结束就把场景需要的资产交给后台解析 —— 首帧的同步加载退化为缓存命中。
+		{
+			const ScenePrefetchResult prefetch = PrefetchSceneAssets(*context, *m_Scene);
+			WLD_CORE_INFO("[load] '{0}': assets prefetched={1} already-known={2} ({3})",
+				scenePath, prefetch.Requested, prefetch.AlreadyKnown, DescribeAssetLoads());
+		}
 
 		bool hasCamera = false;
 		{
@@ -340,6 +349,10 @@ namespace World::Gameplay
 			input.BuildSnapshot(0);
 		}
 
+		// T5c:帧首提交后台解析结果。必须在**任何**可能提前 return 的分支之前,
+		// 否则"加载未完成 ⇒ 跳过渲染 ⇒ 不提交 ⇒ 永远加载未完成"会自锁。
+		PumpAssetLoads();
+
 		// W2:推进排队的关卡加载(读盘 → 反序列化 → 激活;激活时进度回调会把场景交给宿主)。
 		GameApp::Get().Levels().Pump();
 		// WP5:帧首采样**一次**(可变帧开头、固定步循环之前 —— Tick 内是 Fixed(0..N) → Update)。
@@ -367,8 +380,43 @@ namespace World::Gameplay
 
 		// D5c-4a:缓存本帧秒数给 SubmitSceneRender 用(骨骼动画步长)。
 		m_LastTickSeconds = frameTime.GetSeconds();
+		// 流式加载未完成时**不提交场景**:避免半加载场景一帧一个样地"跳变"(pop-in)。
+		// 宿主(见 RuntimeLayer)在这段时间画加载界面;headless 宿主只是少跑几帧渲染。
+		if (const std::size_t pending = PendingAssetLoads(); pending > 0)
+		{
+			// 节流日志:卡住时能在日志里看出来(每 ~120 帧一次)。
+			static uint64_t loadingFrame = 0;
+			if (++loadingFrame % 120 == 1)
+				WLD_CORE_INFO("[load] streaming: {0} asset(s) pending ({1})",
+					pending, DescribeAssetLoads());
+			return;
+		}
 		if (render)
 			SubmitSceneRender();
+	}
+
+	void GameHost::PumpAssetLoads()
+	{
+		if (!m_Scene)
+			return;
+		if (AsyncLoader* loader = m_Scene->GetContext().Resources().TryGet<AsyncLoader>())
+			loader->PumpCompletions();
+	}
+
+	std::size_t GameHost::PendingAssetLoads() const
+	{
+		if (!m_Scene)
+			return 0;
+		const AsyncLoader* loader = m_Scene->GetContext().Resources().TryGet<AsyncLoader>();
+		return loader ? loader->PendingCount() : 0;
+	}
+
+	std::string GameHost::DescribeAssetLoads() const
+	{
+		if (!m_Scene)
+			return {};
+		const AsyncLoader* loader = m_Scene->GetContext().Resources().TryGet<AsyncLoader>();
+		return loader ? loader->Describe() : std::string();
 	}
 
 	void GameHost::SubmitSceneRender()

@@ -9,6 +9,7 @@
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Asset/AssetCatalog.h"
+#include "World/Asset/AsyncLoader.h"
 #include "World/Utils/Paths.h"
 #include "World/Renderer/AssetRegistry.h"
 #include "World/Renderer/ProjectionConventions.h"
@@ -447,6 +448,13 @@ namespace World
 			m_AssetRegistry = &context.Resources().Get<AssetRegistry>();
 			// 目录服务(可选):把世界上下文交给驻留层,让"路径失效 → 按身份找回"可用。
 			m_AssetRegistry->BindContext(&context);
+			// T5c 主线程提交点:把工作线程算完的 CPU 侧网格交给 Mesh 的进程内缓存。
+			// 必须在**命令缓冲录制之前**(本函数即该位置)—— 之后本帧的 Resolve 就能命中。
+			if (AsyncLoader* loader = context.Resources().TryGet<AsyncLoader>())
+			{
+				const std::size_t committed = loader->PumpCompletions();
+				(void)committed;
+			}
 			// 资产目录(L1):首次进入该世界会话时建立(共享入口保证只有一处知道内容根)。
 			AssetCatalog& catalog = EnsureAssetCatalog(context);
 			(void)catalog;

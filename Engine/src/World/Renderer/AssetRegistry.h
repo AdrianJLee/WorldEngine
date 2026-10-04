@@ -54,6 +54,15 @@ namespace World
 		// 材质:走 MaterialLibrary(见上面的边界说明),但仍在此处记账,便于诊断/未来接管。
 		Ref<class Material> ResolveMaterial(const AssetRef& asset, std::string* error = nullptr);
 
+		// ---- T5c:异步预取 ----
+		// 只**登记**异步加载,不阻塞、不返回资产:调用方随后按正常路径 Resolve*(命中即用)。
+		// 幂等;返回 false = 路径为空 / 没有可用的加载器。
+		bool PrefetchMesh(const AssetRef& asset);
+		// 是否有在飞的后台加载(加载界面据此决定是否继续等)。
+		std::size_t PendingLoadCount() const;
+		// 加载进度摘要("loaded=N pending=M failed=K");没有加载器时空串。
+		std::string DescribeLoads() const;
+
 		// 绑定世界上下文:之后"路径失效 → 按身份查目录找回"才可用(不绑定 = 只用路径)。
 		void BindContext(WorldContext* context) { m_Context = context; }
 

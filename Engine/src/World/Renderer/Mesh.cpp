@@ -148,33 +148,13 @@ namespace World
 	{
 	}
 
-	Ref<Mesh> Mesh::LoadWModel(const std::string& path, std::string* error)
+	Ref<Mesh> Mesh::BuildFromWModel(Asset::WModelData data, const std::string& debugPath, std::string* error)
 	{
-		if (path.empty())
-		{
-			if (error) *error = "path is empty";
-			return nullptr;
-		}
-
-		const PathId key = StringPool::Get().InternPath(path);
-		auto& cache = WModelCache();
-		const auto cached = cache.find(key);
-		if (cached != cache.end())
-		{
-			if (error) error->clear();
-			return cached->second;
-		}
-
-		Asset::WModelData data;
-		std::string loadError;
-		if (!Asset::WModelIO::ReadFile(path, data, &loadError))
-		{
-			if (error) *error = loadError;
-			return nullptr;
-		}
+		// **纯 CPU**:无 IO、无缓存、无 RHI。同步 LoadWModel 与异步工作线程共用这一份,
+		// 所以"异步结果 == 同步结果"是结构性的而不是靠约定去对。
 		if (data.Vertices.empty() || data.Indices.empty())
 		{
-			if (error) *error = "'" + path + "': .wmodel has no geometry";
+			if (error) *error = ".wmodel has no geometry";
 			return nullptr;
 		}
 		// 包围盒健全性:格式里存了 min/max,坏值(反向/NaN)会让阴影正交矩阵与后续剔除失真,
@@ -188,12 +168,12 @@ namespace World
 			|| data.Bounds.Min.y > data.Bounds.Max.y
 			|| data.Bounds.Min.z > data.Bounds.Max.z)
 		{
-			if (error) *error = "'" + path + "': .wmodel has invalid bounds";
+			if (error) *error = ".wmodel has invalid bounds";
 			return nullptr;
 		}
 
 		MeshDesc desc;
-		desc.DebugName = std::filesystem::path(path).stem().string();
+		desc.DebugName = std::filesystem::path(debugPath).stem().string();
 		desc.VertexLayoutId = data.VertexLayoutId;
 		if (data.VertexLayoutId == kVertexLayoutSkinned)
 		{
@@ -201,7 +181,7 @@ namespace World
 			// 这里再挡一次,避免手工构造的 WModelData 越界读。
 			if (data.SkinVertices.size() != data.Vertices.size())
 			{
-				if (error) *error = "'" + path + "': skinned .wmodel has mismatched joints/weights count";
+				if (error) *error = "skinned .wmodel has mismatched joints/weights count";
 				return nullptr;
 			}
 			desc.Layout = MakeSkinnedLayout();
@@ -229,7 +209,7 @@ namespace World
 		Ref<Mesh> mesh = Create(desc);
 		if (!mesh)
 		{
-			if (error) *error = "'" + path + "': .wmodel geometry is invalid (index out of range)";
+			if (error) *error = ".wmodel geometry is invalid (index out of range)";
 			return nullptr;
 		}
 
@@ -250,10 +230,54 @@ namespace World
 
 		// 文件里的包围盒即资产契约(导入器按几何算出);Create 已按顶点重算一遍,
 		// 这里用文件值覆盖,保持 .wmodel 的"存什么读什么"语义。
-		Ref<Mesh> result(new Mesh(std::move(desc), MeshBounds { data.Bounds.Min, data.Bounds.Max },
-			std::move(submeshes), std::move(ranges), std::move(nodes), data.MaterialSlots));
-		cache.emplace(key, result);
 		if (error) error->clear();
+		return Ref<Mesh>(new Mesh(std::move(desc), MeshBounds { data.Bounds.Min, data.Bounds.Max },
+			std::move(submeshes), std::move(ranges), std::move(nodes), std::move(data.MaterialSlots)));
+	}
+
+	bool Mesh::AdoptWModel(PathId path, Ref<Mesh> mesh)
+	{
+		if (!path.IsValid() || !mesh)
+			return false;
+		auto& cache = WModelCache();
+		if (cache.find(path) != cache.end())
+			return false;   // 缓存优先:已有条目时不覆盖(可能与更早的强引用不一致)
+		cache.emplace(path, std::move(mesh));
+		return true;
+	}
+
+	Ref<Mesh> Mesh::LoadWModel(const std::string& path, std::string* error)
+	{
+		if (path.empty())
+		{
+			if (error) *error = "path is empty";
+			return nullptr;
+		}
+
+		const PathId key = StringPool::Get().InternPath(path);
+		auto& cache = WModelCache();
+		const auto cached = cache.find(key);
+		if (cached != cache.end())
+		{
+			if (error) error->clear();
+			return cached->second;
+		}
+
+		Asset::WModelData data;
+		std::string loadError;
+		if (!Asset::WModelIO::ReadFile(path, data, &loadError))
+		{
+			if (error) *error = loadError;
+			return nullptr;
+		}
+
+		Ref<Mesh> result = BuildFromWModel(std::move(data), path, error);
+		if (!result)
+		{
+			if (error) *error = "'" + path + "': " + *error;
+			return nullptr;
+		}
+		cache.emplace(key, result);
 		return result;
 	}
 

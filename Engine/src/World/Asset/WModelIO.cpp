@@ -1273,6 +1273,12 @@ namespace World::Asset::WModelIO
 		return true;
 	}
 
+	bool ReadRawBytes(const std::string& path, std::vector<uint8_t>& out, std::string* error)
+	{
+		// 直接转发给匿名命名空间里的 ReadBytes(唯一一份解析顺序)。
+		return ReadBytes(path, out, error);
+	}
+
 	bool ReadFile(const std::string& path, WModelData& out, std::string* error)
 	{
 		std::vector<uint8_t> bytes;

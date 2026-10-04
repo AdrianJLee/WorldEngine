@@ -747,10 +747,15 @@ void EditorShell::DrawStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& rect){
 			left += "   |   " + std::string(Wui::Tr("status.view", "View")) + ": " + PanelTitle(m_ActiveWindowTag);
 
 		const float fps = ctx.Input().FPS;
-		char right[96] = {};
+		char right[160] = {};
 		std::snprintf(right, sizeof(right), "%s   %.1f FPS (%.1f ms)", Renderer::GetBackendName().c_str(),
 			static_cast<double>(fps), fps > 0.0f ? 1000.0 / static_cast<double>(fps) : 0.0);
-		const std::string rightText = right;
+		std::string rightText = right;
+		// T5c:场景资产的流式加载进度。只在真的有在飞加载时出现(静默态不占位),
+		// 并落进下面的 `shell.status` 无障碍值 —— 探针/AI 通道可直接断言,不依赖像素。
+		if (const std::size_t pending = m_Editor.PendingAssetLoads(); pending > 0)
+			rightText = std::string(Wui::Tr("status.assets.loading", "loading assets")) + ": "
+				+ std::to_string(pending) + "   " + rightText;
 		const float rightWidth = ctx.MeasureTextWidth(rightText, 12.0f);
 		const float textY = rect.Y + (rect.H - 14.0f) * 0.5f;
 		Wui::Label(ctx, { rect.X + 10.0f, textY }, left, m_Theme.TextMuted, 12.0f);

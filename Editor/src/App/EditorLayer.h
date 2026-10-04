@@ -1,4 +1,6 @@
 #pragma once
+
+#include <cstddef>
 #include "World.h"
 #include "World/Gameplay/Runtime/GameHost.h"
 #include "World/Events/KeyEvent.h"
@@ -145,6 +147,10 @@ namespace World
 
 		// ---- WUI 面板访问(W2) ----
 		Ref<Scene> GetActiveScene() const { return m_ActiveScene; }
+		// T5c:场景资产的流式加载进度(状态栏据此显示 "assets: N pending")。
+		// 0 = 全部就绪;编辑器不因此停渲染(视口用同步解析路径,先到的资产先出现)。
+		std::size_t PendingAssetLoads() const;
+		std::string DescribeAssetLoads() const;
 		EditorDocument& GetDocument() { return m_Document; }
 		Entity GetSelectedEntity() const { return m_SelectedEntity; }
 		void SetSelectedEntity(Entity entity) { m_SelectedEntity = entity; }

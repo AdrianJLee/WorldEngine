@@ -6,6 +6,7 @@
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Scene/Scene.h"
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -52,6 +53,15 @@ namespace World::Gameplay
 		bool IsRuntimeStarted() const { return m_RuntimeStarted; }
 
 	Ref<Scene> GetScene() const { return m_Scene; }
+
+		// ---- T5c:异步资产加载 ----
+		// 后台反序列化在**帧首**提交。不能只依赖 SceneRenderer::BeginScene:加载未完成时宿主会
+		// 跳过场景渲染,提交点若寄生在渲染里就会死锁(不渲染 ⇒ 不提交 ⇒ 永远 pending)。
+		void PumpAssetLoads();
+		// 还在飞的资产数:>0 = 关卡仍在流式加载(宿主据此画加载界面 / 跳过场景渲染)。
+		std::size_t PendingAssetLoads() const;
+		// 进度摘要("loaded=N pending=M failed=K")。
+		std::string DescribeAssetLoads() const;
 
 	private:
 		void SubmitSceneRender();
