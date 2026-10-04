@@ -1,10 +1,10 @@
-﻿#include "World/Core/WorldContext.h"
+#include "World/Core/WorldContext.h"
 #include "World/Core/Log.h"
 #include "World/Schema/Schema.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneSerializer.h"
-#include "World/Script/Runtime/ScriptProperties.h"
+#include "World/Script/Runtime/ComponentPropertyModel.h"
 #include "schema/FixtureTypes.h"
 #include "schema/Generated/TestKit/TestKitSchemaRegistration.h"
 
@@ -323,8 +323,8 @@ int main()
 				CHECK(!std::holds_alternative<std::monostate>(field.Default));
 				// 只读摘要 Kind(IVec*/UVec*/Quat/Mat*)不在 ValueMatchesKind 的放行集合里(面板没有行控件),
 				// 它们的精确备选由下面的逐条 holds_alternative 断言钉住。
-				if (!ScriptProperties::IsSummaryKind(field.K))
-					CHECK(ScriptProperties::ValueMatchesKind(field.Default, field.K));
+				if (!ComponentPropertyModel::IsSummaryKind(field.K))
+					CHECK(ComponentPropertyModel::ValueMatchesKind(field.Default, field.K));
 			}
 			// 每个 kind 的零值都必须是**它自己那一支**(旧口径下 Float=double、整数族=int ⇒ 全假)。
 			CHECK(std::holds_alternative<bool>(FindField(*kinds, "BoolValue")->Default));
@@ -359,7 +359,7 @@ int main()
 			CHECK(inner != nullptr && inner->GetNested != nullptr);
 			const FieldSchema* nestedHealth = FindField(*inner->GetNested(), "Health");
 			CHECK(nestedHealth != nullptr && nestedHealth->K == Kind::Float);
-			CHECK(ScriptProperties::ValueMatchesKind(nestedHealth->Default, Kind::Float));
+			CHECK(ComponentPropertyModel::ValueMatchesKind(nestedHealth->Default, Kind::Float));
 		}
 
 		std::printf("World.Schema: all checks passed\n");

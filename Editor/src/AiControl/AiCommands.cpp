@@ -9,7 +9,7 @@
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Scene/Components.h"
 #include "World/Schema/SchemaRegistry.h"
-#include "World/Script/Runtime/ScriptProperties.h"
+#include "World/Script/Runtime/ComponentPropertyModel.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/Utils/Paths.h"

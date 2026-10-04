@@ -16,7 +16,7 @@
 #include "World/Script/Vm/Sandbox.h"
 #include "World/Script/Vm/ScriptBindingContext.h"
 #include "World/Script/Runtime/ScriptFileWatch.h"
-#include "World/Script/Runtime/ScriptProperties.h"
+#include "World/Script/Runtime/ComponentPropertyModel.h"
 #include "World/Script/Vm/ScriptRef.h"
 #include "World/Script/Vm/ScriptValue.h"
 #include "World/Utils/Paths.h"
@@ -329,7 +329,7 @@ namespace World
 			std::string Path;
 			uint64_t Fingerprint = 0;
 			bool VmAvailable = false;
-			std::vector<ScriptProperties::Declaration> Declarations;
+			std::vector<ComponentPropertyModel::Declaration> Declarations;
 			std::vector<std::string> Diagnostics;
 		};
 		DeclarationCache s_DeclarationCache;
@@ -508,7 +508,7 @@ namespace World
 					continue;
 				if (std::any_of(schema.begin(), schema.end(),
 						[&annotation](const auto& item) { return item.Name == annotation.Name; }))
-					continue;   // 重复声明以第一次为准(与 ScriptProperties::SyncFromDeclarations 同口径)
+					continue;   // 重复声明以第一次为准(与 ComponentPropertyModel::SyncFromDeclarations 同口径)
 				schema.push_back(std::move(annotation));
 			}
 			return schema;
@@ -540,7 +540,7 @@ namespace World
 			ClassList Classes;
 		};
 
-		constexpr int kMaxObjectDepth = 4;      // 与 ScriptProperties 的护栏同口径(plan v2 §B)
+		constexpr int kMaxObjectDepth = 4;      // 与 ComponentPropertyModel 的护栏同口径(plan v2 §B)
 		constexpr size_t kMaxObjectFields = 64;
 		// C 期:注解里的集合嵌套层数上限 —— `{number}`/`{string: number}` = 1 层,`{{number}}` = 2 层;
 		// 再深(如 `{{{number}}}`)→ 解析失败 → 只读摘要 + 诊断(不静默、不无限展开)。
@@ -978,9 +978,9 @@ namespace World
 		// C 期:连续整数键 1..n 的表 → Array(元素同型才可编辑;异质/不连续/混合/空表 → 只读摘要 + 诊断)。
 		bool InferDeclarationFromValueInternal(const ScriptValue& value, const std::string& name, int depth,
 			const std::string& scriptPath, std::vector<std::string>* diagnostics,
-			ScriptProperties::Declaration& out)
+			ComponentPropertyModel::Declaration& out)
 		{
-			out = ScriptProperties::Declaration {};
+			out = ComponentPropertyModel::Declaration {};
 			out.Name = name;
 			const Schema::Kind kind = InferKindFromValueInternal(value);
 			if (kind != Schema::Kind::None)
@@ -998,7 +998,7 @@ namespace World
 					diagnostics->push_back("[script] " + scriptPath + ": field '" + name + "' " + detail);
 			};
 			// 只读摘要:看得到、不进存档(裸 table / 空表 / 不支持的键形态 / 超护栏共用)。
-			const auto summary = [&](const std::string& detail, ScriptPropertyCollection collection)
+			const auto summary = [&](const std::string& detail, PropertyCollection collection)
 			{
 				out.Type = Schema::Kind::Object;
 				out.Collection = collection;
@@ -1014,24 +1014,24 @@ namespace World
 			if (shape == TableShape::Empty)
 			{
 				summary("is an empty table; the field is shown read-only",
-					ScriptPropertyCollection::Struct);
+					PropertyCollection::Struct);
 				return true;
 			}
 			if (shape == TableShape::Opaque)
 			{
 				summary("has non-consecutive numeric keys or mixes numeric and string keys; "
-					"the field is shown read-only", ScriptPropertyCollection::Struct);
+					"the field is shown read-only", PropertyCollection::Struct);
 				return true;
 			}
 			if (shape == TableShape::StringKeys)
 			{
 				out.Type = Schema::Kind::Object;
-				out.Collection = ScriptPropertyCollection::Struct;
+				out.Collection = PropertyCollection::Struct;
 				out.TypeName = "table";
 				if (depth >= kMaxObjectDepth)
 				{
 					summary("nests deeper than the supported " + std::to_string(kMaxObjectDepth) +
-						" levels; the field is shown read-only", ScriptPropertyCollection::Struct);
+						" levels; the field is shown read-only", PropertyCollection::Struct);
 					return true;
 				}
 				const std::vector<std::string> childNames = CollectOwnFieldNames(nested);
@@ -1043,7 +1043,7 @@ namespace World
 					if (out.Fields.size() >= kMaxObjectFields)
 						break;
 					visited.insert(child);
-					ScriptProperties::Declaration field;
+					ComponentPropertyModel::Declaration field;
 					if (InferDeclarationFromValueInternal(nested.GetField(child.c_str()), child, depth + 1,
 							scriptPath, diagnostics, field))
 						out.Fields.push_back(std::move(field));
@@ -1052,7 +1052,7 @@ namespace World
 				{
 					// 只有下划线/entity 一类被跳过的键 → 与空表同一落点(只读摘要)。
 					summary("has no exposable fields; the field is shown read-only",
-						ScriptPropertyCollection::Struct);
+						PropertyCollection::Struct);
 				}
 				return true;
 			}
@@ -1060,18 +1060,18 @@ namespace World
 			// ArrayLike:连续整数键 1..n。元素同型(数值 Int32/Float 之间按 Float 提升)才可编辑;
 			// 元素本身是表 → 递归推断(元组/嵌套数组);异质 → 只读摘要 + 诊断。
 			out.Type = Schema::Kind::Object;
-			out.Collection = ScriptPropertyCollection::Array;
+			out.Collection = PropertyCollection::Array;
 			out.TypeName = "array";
 			if (depth >= kMaxObjectDepth)
 			{
 				summary("nests deeper than the supported " + std::to_string(kMaxObjectDepth) +
-					" levels; the field is shown read-only", ScriptPropertyCollection::Array);
+					" levels; the field is shown read-only", PropertyCollection::Array);
 				return true;
 			}
 			if (elements.size() > kMaxObjectFields)
 			{
 				summary("has more than " + std::to_string(kMaxObjectFields) +
-					" elements; the field is shown read-only", ScriptPropertyCollection::Array);
+					" elements; the field is shown read-only", PropertyCollection::Array);
 				return true;
 			}
 			std::size_t tableElements = 0;
@@ -1112,7 +1112,7 @@ namespace World
 			if (heterogeneous)
 			{
 				summary("looks like an array but its elements have different value types; "
-					"the field is shown read-only", ScriptPropertyCollection::Array);
+					"the field is shown read-only", PropertyCollection::Array);
 				return true;
 			}
 			if (tableElements == elements.size())
@@ -1121,12 +1121,12 @@ namespace World
 				out.ElementKind = Schema::Kind::Object;
 				for (std::size_t index = 0; index < elements.size(); ++index)
 				{
-					ScriptProperties::Declaration element;
+					ComponentPropertyModel::Declaration element;
 					if (!InferDeclarationFromValueInternal(elements[index], std::to_string(index + 1),
 							depth + 1, scriptPath, diagnostics, element) || element.ReadOnly)
 					{
 						summary("is an array of tables that could not be inferred element by element; "
-							"the field is shown read-only", ScriptPropertyCollection::Array);
+							"the field is shown read-only", PropertyCollection::Array);
 						return true;
 					}
 					out.Fields.push_back(std::move(element));
@@ -1136,13 +1136,13 @@ namespace World
 			out.ElementKind = elementKind;
 			for (std::size_t index = 0; index < elements.size(); ++index)
 			{
-				ScriptProperties::Declaration element;
+				ComponentPropertyModel::Declaration element;
 				element.Name = std::to_string(index + 1);   // 数组行名 = 下标字符串(1 起)
 				element.Type = elementKind;
 				if (!ReadPropertyValueInternal(elements[index], elementKind, &element.Default))
 				{
 					summary("looks like an array but its elements have different value types; "
-						"the field is shown read-only", ScriptPropertyCollection::Array);
+						"the field is shown read-only", PropertyCollection::Array);
 					return true;
 				}
 				out.Fields.push_back(std::move(element));
@@ -1159,7 +1159,7 @@ namespace World
 			BadShape,          // 表形态读不出来(不连续 / 混合键 / 嵌套超护栏 / 元素异质)
 		};
 
-		std::vector<ScriptProperties::Declaration> BuildDeclarations(const ScriptTableRef& table,
+		std::vector<ComponentPropertyModel::Declaration> BuildDeclarations(const ScriptTableRef& table,
 			const ScriptAnnotations& annotations, const std::string& scriptPath, std::vector<std::string>* diagnostics)
 		{
 			const std::vector<std::string> names = CollectOwnFieldNames(table);
@@ -1172,16 +1172,16 @@ namespace World
 			// 叶子沿用老口径(固定映射 + 从脚本表读默认值);容器 = 数组/映射(元素/键值行递归);
 			// `---@class` = B 期结构化表(子字段按注解顺序递归,坏子字段跳过)。
 			std::function<ValueBuild(const TypeExpression&, const ScriptValue&, bool, int,
-				std::vector<std::string>&, const std::string&, ScriptProperties::Declaration&, std::string&)> buildValue;
+				std::vector<std::string>&, const std::string&, ComponentPropertyModel::Declaration&, std::string&)> buildValue;
 			// 一条注解字段 → 一条声明(Name/Doc + 诊断)。
 			std::function<void(const FieldAnnotation&, const ScriptTableRef&, const std::vector<std::string>&,
-				int, std::vector<std::string>&, ScriptProperties::Declaration&)> buildOne;
+				int, std::vector<std::string>&, ComponentPropertyModel::Declaration&)> buildOne;
 
 			buildValue = [&](const TypeExpression& type, const ScriptValue& value, bool hasValue, int depth,
 				std::vector<std::string>& classStack, const std::string& fieldPath,
-				ScriptProperties::Declaration& out, std::string& reason) -> ValueBuild
+				ComponentPropertyModel::Declaration& out, std::string& reason) -> ValueBuild
 			{
-				out = ScriptProperties::Declaration {};
+				out = ComponentPropertyModel::Declaration {};
 				const bool usableValue = hasValue && !value.IsNil();
 				if (!type.IsContainer)
 				{
@@ -1203,7 +1203,7 @@ namespace World
 						// 只读摘要(看得到、不进存档),诊断由推断函数给出。
 						if (usableValue)
 						{
-							ScriptProperties::Declaration inferred;
+							ComponentPropertyModel::Declaration inferred;
 							if (InferDeclarationFromValueInternal(value, fieldPath, depth, scriptPath,
 									diagnostics, inferred) && !inferred.ReadOnly)
 							{
@@ -1214,7 +1214,7 @@ namespace World
 							}
 						}
 						out.Type = Schema::Kind::Object;
-						out.Collection = ScriptPropertyCollection::Struct;
+						out.Collection = PropertyCollection::Struct;
 						out.TypeName = "table";
 						out.ReadOnly = true;
 						return ValueBuild::Ok;
@@ -1226,7 +1226,7 @@ namespace World
 						return ValueBuild::UnsupportedType;
 					}
 					out.Type = Schema::Kind::Object;
-					out.Collection = ScriptPropertyCollection::Struct;
+					out.Collection = PropertyCollection::Struct;
 					out.TypeName = nested->Name;
 					if (depth >= kMaxObjectDepth)
 					{
@@ -1258,7 +1258,7 @@ namespace World
 						if (out.Fields.size() >= kMaxObjectFields)
 							break;   // 单层子字段上限(护栏)
 						nestedVisited.insert(child.Name);
-						ScriptProperties::Declaration childDeclaration;
+						ComponentPropertyModel::Declaration childDeclaration;
 						buildOne(child, nestedTable, nestedNames, depth + 1, classStack, childDeclaration);
 						if (childDeclaration.Type == Schema::Kind::None)
 							continue;
@@ -1271,7 +1271,7 @@ namespace World
 				// ---- C 期:数组 / 映射 ----
 				const bool map = type.Arguments.size() == 2;
 				out.Type = Schema::Kind::Object;
-				out.Collection = map ? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+				out.Collection = map ? PropertyCollection::Map : PropertyCollection::Array;
 				out.TypeName = map ? "map" : "array";
 				const TypeExpression& element = type.Arguments.back();
 				if (map)
@@ -1326,7 +1326,7 @@ namespace World
 							reason = "the map has more than " + std::to_string(kMaxObjectFields) + " entries";
 							return ValueBuild::BadShape;
 						}
-						ScriptProperties::Declaration child;
+						ComponentPropertyModel::Declaration child;
 						if (elementKind == Schema::Kind::Object)
 						{
 							std::string nestedReason;
@@ -1368,7 +1368,7 @@ namespace World
 				}
 				for (std::size_t index = 0; index < elements.size(); ++index)
 				{
-					ScriptProperties::Declaration child;
+					ComponentPropertyModel::Declaration child;
 					if (elementKind == Schema::Kind::Object)
 					{
 						std::string nestedReason;
@@ -1397,9 +1397,9 @@ namespace World
 
 			buildOne = [&](const FieldAnnotation& annotation, const ScriptTableRef& ownerTable,
 				const std::vector<std::string>& ownerNames, int depth, std::vector<std::string>& classStack,
-				ScriptProperties::Declaration& out)
+				ComponentPropertyModel::Declaration& out)
 			{
-				out = ScriptProperties::Declaration {};
+				out = ComponentPropertyModel::Declaration {};
 				out.Name = annotation.Name;
 				out.Doc = annotation.Doc;
 				// 只读**自有字段**(rawget 口径):`__index` 继承/错误元表不能在这里被触发
@@ -1416,7 +1416,7 @@ namespace World
 							"' declares unsupported type '" + annotation.TypeName + "' (" + parseError +
 							"); the field is shown read-only");
 					out.Type = Schema::Kind::Object;
-					out.Collection = ScriptPropertyCollection::Struct;
+					out.Collection = PropertyCollection::Struct;
 					out.TypeName = "table";
 					out.ReadOnly = true;
 					return;
@@ -1459,12 +1459,12 @@ namespace World
 					diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name + detail +
 						"; the field is shown read-only");
 				}
-				out = ScriptProperties::Declaration {};
+				out = ComponentPropertyModel::Declaration {};
 				out.Name = annotation.Name;
 				out.Doc = annotation.Doc;
 				out.Type = Schema::Kind::Object;
 				out.Collection = expression.Arguments.size() == 2
-					? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+					? PropertyCollection::Map : PropertyCollection::Array;
 				out.TypeName = "table";
 				out.ReadOnly = true;
 			};
@@ -1472,7 +1472,7 @@ namespace World
 			// 注解字段:按注解顺序(先声明先显示);重复声明以第一次为准。
 			const auto buildList = [&](const ScriptTableRef& ownerTable, const AnnotationList& list, int depth,
 				std::vector<std::string>& classStack, std::unordered_set<std::string>& visited,
-				std::vector<ScriptProperties::Declaration>& out)
+				std::vector<ComponentPropertyModel::Declaration>& out)
 			{
 				const std::vector<std::string> ownerNames = CollectOwnFieldNames(ownerTable);
 				for (const FieldAnnotation& annotation : list)
@@ -1482,7 +1482,7 @@ namespace World
 					if (out.size() >= kMaxObjectFields)
 						break;   // 单层子字段上限(护栏)
 					visited.insert(annotation.Name);
-					ScriptProperties::Declaration declaration;
+					ComponentPropertyModel::Declaration declaration;
 					buildOne(annotation, ownerTable, ownerNames, depth, classStack, declaration);
 					if (declaration.Type == Schema::Kind::None)
 						continue;
@@ -1490,7 +1490,7 @@ namespace World
 				}
 			};
 
-			std::vector<ScriptProperties::Declaration> declared;
+			std::vector<ComponentPropertyModel::Declaration> declared;
 			std::unordered_set<std::string> visited;
 			std::vector<std::string> classStack;
 			// 表里没有声明的字段:声明仍成立,默认值保持 monostate(未设)—— 绝不写类型零值。
@@ -1501,7 +1501,7 @@ namespace World
 					continue;
 				visited.insert(name);
 				const ScriptValue value = table.GetField(name.c_str());
-				ScriptProperties::Declaration declaration;
+				ComponentPropertyModel::Declaration declaration;
 				if (!InferDeclarationFromValueInternal(value, name, 0, scriptPath, diagnostics, declaration))
 					continue;
 				declared.push_back(std::move(declaration));
@@ -1512,7 +1512,7 @@ namespace World
 		// 新脚本 → 属性表同步(Luau 的所有加载路径唯一的入口):
 		//   1. 声明表 = 注解顺序 → 表序(含 Doc 与脚本里的默认值,见 BuildDeclarations);
 		//   2. liveTable(只有热重载传)里同名同类型的自有值覆盖旧值(运行期 self.X=... 的真实状态);
-		//   3. ScriptProperties::SyncFromDeclarations 合并:同名同类型保留旧值(场景保存值 /
+		//   3. ComponentPropertyModel::SyncFromDeclarations 合并:同名同类型保留旧值(场景保存值 /
 		//      编辑器改过的值),新字段/类型变化取声明里的默认值或保持"未设"。
 		// 优先级:活表 > 场景保存值 > 脚本默认值(NULL 保持未设,绝不写零值)。
 
@@ -1586,7 +1586,7 @@ namespace World
 		//   * Struct:子字段按名字写(未设的子字段跳过);
 		//   * Array:Lua 数组 1..n(第一个未设元素之后的元素不写 —— 数组不能有洞);
 		//   * Map:键按 KeyKind 写(字符串键 / 数字键)。
-		ScriptValue BuildPropertyScriptValue(const ScriptProperty& property)
+		ScriptValue BuildPropertyScriptValue(const PropertyNode& property)
 		{
 			if (!s_Vm)
 				return ScriptValue::Nil();
@@ -1600,9 +1600,9 @@ namespace World
 			if (!table.IsValid())
 				return ScriptValue::Nil();
 			bool wrote = false;
-			if (property.Collection == ScriptPropertyCollection::Map)
+			if (property.Collection == PropertyCollection::Map)
 			{
-				for (const ScriptProperty& child : property.Children)
+				for (const PropertyNode& child : property.Children)
 				{
 					const ScriptValue childValue = BuildPropertyScriptValue(child);
 					if (childValue.IsNil())
@@ -1611,10 +1611,10 @@ namespace World
 					wrote = true;
 				}
 			}
-			else if (property.Collection == ScriptPropertyCollection::Array)
+			else if (property.Collection == PropertyCollection::Array)
 			{
 				std::size_t index = 0;
-				for (const ScriptProperty& child : property.Children)
+				for (const PropertyNode& child : property.Children)
 				{
 					const ScriptValue childValue = BuildPropertyScriptValue(child);
 					if (childValue.IsNil())
@@ -1626,7 +1626,7 @@ namespace World
 			}
 			else
 			{
-				for (const ScriptProperty& child : property.Children)
+				for (const PropertyNode& child : property.Children)
 				{
 					const ScriptValue childValue = BuildPropertyScriptValue(child);
 					if (childValue.IsNil())

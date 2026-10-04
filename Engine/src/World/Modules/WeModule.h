@@ -14,11 +14,11 @@ namespace World::Modules
 	// 2 = 2026-09-26 脚本组件重写:`Schema::ScriptBinding` 从 `{ void(*Bind)(void*) }` 变成
 	//     `{ Create, Destroy }` + 组件类型改名 ⇒ 旧 Game.dll 必须被**干净拒绝**,不能按旧形状解释
 	//     (旧 DLL 的 Bind 会被当 Create 调用)。宿主侧改成等值校验(见 ModuleManager.cpp)。
-	// B 期(2026-09-26):`ScriptProperty` 增加递归子字段(TypeName/Children/ReadOnly)⇒ 组件布局变化,
+	// B 期(2026-09-26):`PropertyNode` 增加递归子字段(TypeName/Children/ReadOnly)⇒ 组件布局变化,
 	// 旧 Game.dll 与新媒体混用会在属性表上读出错误布局 —— 升版让宿主干净拒绝旧模块。
-	// C 期(2026-09-26 同一天):`ScriptProperty` 再增加集合形态(Collection/ElementKind/KeyKind)⇒
+	// C 期(2026-09-26 同一天):`PropertyNode` 再增加集合形态(Collection/ElementKind/KeyKind)⇒
 	// 布局再次变化,旧 Game.dll 必须被干净拒绝(与 2→3 同一理由)。
-	// D 期(2026-09-27):`ScriptProperty` 又增加"声明默认值"(Default)与"集合形状归场景"
+	// D 期(2026-09-27):`PropertyNode` 又增加"声明默认值"(Default)与"集合形状归场景"
 	// (ShapeFromScene)两个尾部字段 ⇒ 布局再次变化(旧 Game.dll 会按旧布局读属性表),
 	// 同一条理由再升一版让宿主干净拒绝旧模块。
 	// CPPT-2(2026-09-27,D-B 模块级热重载):`Schema::FieldMetadata` 尾部追加 Unit/Step

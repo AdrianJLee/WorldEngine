@@ -1,13 +1,13 @@
 #include "wldpch.h"
 
-#include "World/Script/Runtime/ScriptProperties.h"
+#include "World/Script/Runtime/ComponentPropertyModel.h"
 
 #include <algorithm>
 #include <unordered_map>
 
 namespace World
 {
-	namespace ScriptProperties
+	namespace ComponentPropertyModel
 	{
 		const char* KindName(Schema::Kind kind)
 		{
@@ -127,14 +127,14 @@ namespace World
 			}
 		}
 
-		const char* CollectionName(ScriptPropertyCollection collection)
+		const char* CollectionName(PropertyCollection collection)
 		{
 			switch (collection)
 			{
-				case ScriptPropertyCollection::Struct: return "Struct";
-				case ScriptPropertyCollection::Array: return "Array";
-				case ScriptPropertyCollection::Map: return "Map";
-				case ScriptPropertyCollection::None:
+				case PropertyCollection::Struct: return "Struct";
+				case PropertyCollection::Array: return "Array";
+				case PropertyCollection::Map: return "Map";
+				case PropertyCollection::None:
 				default: return "None";
 			}
 		}
@@ -148,15 +148,15 @@ namespace World
 			// C 期:上一轮的属性与新声明是不是"同一形状"(同名同类型才保值)。
 			// Object 还要比集合形态与元素/键类型:数组元素类型变了(或 Struct↔Array 变了)必须回新默认值,
 			// 不能拿旧值按新形状解释。
-			bool SameShape(const ScriptProperty& property, const Declaration& declaration)
+			bool SameShape(const PropertyNode& property, const Declaration& declaration)
 			{
 				if (property.Type != declaration.Type)
 					return false;
 				if (property.Collection != declaration.Collection)
 					return false;
-				if (declaration.Collection == ScriptPropertyCollection::Array)
+				if (declaration.Collection == PropertyCollection::Array)
 					return property.ElementKind == declaration.ElementKind;
-				if (declaration.Collection == ScriptPropertyCollection::Map)
+				if (declaration.Collection == PropertyCollection::Map)
 					return property.KeyKind == declaration.KeyKind &&
 						property.ElementKind == declaration.ElementKind;
 				return true;
@@ -177,16 +177,16 @@ namespace World
 			// 叶子:同名同类型旧值优先(D1:未设/仍是旧默认值 → 换成新默认值,但不落盘);
 			// Object:Value 保持 monostate,子字段按名字/类型递归对齐,声明里消失的子字段丢弃
 			// (与"脚本即事实源"同口径);数组/映射见 D2 的形状归属。
-			void ApplyInto(std::vector<ScriptProperty>& out, const std::vector<Declaration>& declarations,
-				const std::vector<ScriptProperty>& previous, int depth);
-			void AdoptSceneRows(std::vector<ScriptProperty>& out,
-				const std::vector<ScriptProperty>& sceneRows,
+			void ApplyInto(std::vector<PropertyNode>& out, const std::vector<Declaration>& declarations,
+				const std::vector<PropertyNode>& previous, int depth);
+			void AdoptSceneRows(std::vector<PropertyNode>& out,
+				const std::vector<PropertyNode>& sceneRows,
 				const std::vector<Declaration>& declaredRows, int depth);
 
 			// D1:一条叶子属性按声明刷新 —— 场景记录过的值优先;未设/仍等于上次默认值 → 换成新默认值
 			// (展示值跟着脚本走;要不要落盘由 IsSceneRecorded 判定)。old 为空 = 新字段 → 只用默认值展示。
-			void ApplyLeafInto(ScriptProperty& property, const Declaration& declaration,
-				const ScriptProperty* old)
+			void ApplyLeafInto(PropertyNode& property, const Declaration& declaration,
+				const PropertyNode* old)
 			{
 				// 先取出旧值/旧默认值:RefreshSceneRow 会传 `&row`(property 与 old 同一对象),
 				// 直接读写同一 variant 会在覆盖 Default 之后拿到新默认值。
@@ -211,7 +211,7 @@ namespace World
 
 			// D2:一条**场景行**(数组元素 / 映射键值行)→ 按声明刷新。行名/顺序/子行以场景为准,
 			// 声明按行名补说明/类型/默认值;类型不兼容的行按"场景独有"处理(不拿旧值按新形状解释)。
-			void RefreshSceneRow(ScriptProperty& row, const Declaration& declaration, int depth)
+			void RefreshSceneRow(PropertyNode& row, const Declaration& declaration, int depth)
 			{
 				row.Type = declaration.Type;
 				row.Doc = declaration.Doc;
@@ -222,12 +222,12 @@ namespace World
 				row.ReadOnly = declaration.ReadOnly;
 				if (depth >= kMaxObjectDepth)
 					return;   // 超护栏:场景行原样保留,不再深挖
-				if (declaration.Collection == ScriptPropertyCollection::Array ||
-					declaration.Collection == ScriptPropertyCollection::Map)
+				if (declaration.Collection == PropertyCollection::Array ||
+					declaration.Collection == PropertyCollection::Map)
 				{
 					if (declaration.FieldsUnknown)
 						return;   // 元素行读不出来:场景子行原样保留
-					const std::vector<ScriptProperty> nested = row.Children;
+					const std::vector<PropertyNode> nested = row.Children;
 					if (row.ShapeFromScene)
 						AdoptSceneRows(row.Children, nested, declaration.Fields, depth + 1);
 					else
@@ -240,7 +240,7 @@ namespace World
 				if (declaration.Type == Schema::Kind::Object)
 				{
 					// 元素/键值是结构化表:字段以声明为准(按名字对齐,值保留)。
-					const std::vector<ScriptProperty> nested = row.Children;
+					const std::vector<PropertyNode> nested = row.Children;
 					row.Children.clear();
 					if (declaration.Fields.empty())
 					{
@@ -255,13 +255,13 @@ namespace World
 
 			// D2:场景形状的子行 —— 行集合以场景为准(顺序/名字/值),声明按名字补默认值与说明。
 			// 场景独有的行(编辑器 `+` 出来的 / 声明里删掉的键)没有声明默认值:值就是场景的。
-			void AdoptSceneRows(std::vector<ScriptProperty>& out,
-				const std::vector<ScriptProperty>& sceneRows,
+			void AdoptSceneRows(std::vector<PropertyNode>& out,
+				const std::vector<PropertyNode>& sceneRows,
 				const std::vector<Declaration>& declaredRows, int depth)
 			{
 				out.clear();
 				out.reserve(sceneRows.size());
-				for (const ScriptProperty& sceneRow : sceneRows)
+				for (const PropertyNode& sceneRow : sceneRows)
 				{
 					const Declaration* declaration = nullptr;
 					for (const Declaration& candidate : declaredRows)
@@ -272,7 +272,7 @@ namespace World
 							break;
 						}
 					}
-					ScriptProperty row = sceneRow;
+					PropertyNode row = sceneRow;
 					if (declaration)
 					{
 						RefreshSceneRow(row, *declaration, depth);
@@ -280,22 +280,22 @@ namespace World
 					else
 					{
 						row.Default = Schema::Value {};   // 场景独有:没有声明默认值 → 值一定落盘
-						if (row.Collection != ScriptPropertyCollection::None)
+						if (row.Collection != PropertyCollection::None)
 							row.ShapeFromScene = true;    // 递归层同理:子行以场景为准
 					}
 					out.push_back(std::move(row));
 				}
 			}
 
-			void ApplyInto(std::vector<ScriptProperty>& out, const std::vector<Declaration>& declarations,
-				const std::vector<ScriptProperty>& previous, int depth)
+			void ApplyInto(std::vector<PropertyNode>& out, const std::vector<Declaration>& declarations,
+				const std::vector<PropertyNode>& previous, int depth)
 			{
-				std::unordered_map<std::string, const ScriptProperty*> previousByName;
+				std::unordered_map<std::string, const PropertyNode*> previousByName;
 				previousByName.reserve(previous.size());
-				for (const ScriptProperty& property : previous)
+				for (const PropertyNode& property : previous)
 					previousByName.emplace(property.Name, &property);
 
-				static const std::vector<ScriptProperty> kNoChildren;
+				static const std::vector<PropertyNode> kNoChildren;
 				static const std::vector<Declaration> kNoDeclarations;
 
 				out.clear();
@@ -305,12 +305,12 @@ namespace World
 					if (!IsPropertyKind(declaration.Type) && !IsSummaryKind(declaration.Type))
 						continue;
 					if (std::any_of(out.begin(), out.end(),
-							[&declaration](const ScriptProperty& item) { return item.Name == declaration.Name; }))
+							[&declaration](const PropertyNode& item) { return item.Name == declaration.Name; }))
 						continue;   // 重复声明以第一次为准(与注解解析同口径)
 					if (out.size() >= kMaxObjectFields)
 						break;      // 护栏:单层子字段上限(超出部分不展开,由上层出诊断)
 
-					ScriptProperty property;
+					PropertyNode property;
 					property.Name = declaration.Name;
 					property.Type = declaration.Type;
 					property.Doc = declaration.Doc;
@@ -321,7 +321,7 @@ namespace World
 					property.ReadOnly = declaration.ReadOnly;
 
 					const auto found = previousByName.find(declaration.Name);
-					const ScriptProperty* old = (found != previousByName.end()
+					const PropertyNode* old = (found != previousByName.end()
 						&& SameShape(*found->second, declaration)) ? found->second : nullptr;
 
 					if (!IsPropertyKind(declaration.Type))
@@ -332,8 +332,8 @@ namespace World
 						out.push_back(std::move(property));
 						continue;
 					}
-					if (declaration.Collection == ScriptPropertyCollection::Array ||
-						declaration.Collection == ScriptPropertyCollection::Map)
+					if (declaration.Collection == PropertyCollection::Array ||
+						declaration.Collection == PropertyCollection::Map)
 					{
 						// C 期:数组/映射 —— 空数组/空映射仍是**可编辑**的(加元素/加键),
 						// 只有声明自己标了 ReadOnly(元素类型不支持 / 推断失败 / 超护栏)才降级摘要。
@@ -377,9 +377,9 @@ namespace World
 				}
 			}
 
-			void Apply(std::vector<ScriptProperty>& properties, const std::vector<Declaration>& declarations)
+			void Apply(std::vector<PropertyNode>& properties, const std::vector<Declaration>& declarations)
 			{
-				std::vector<ScriptProperty> next;
+				std::vector<PropertyNode> next;
 				ApplyInto(next, declarations, properties, 0);
 				properties = std::move(next);
 			}
@@ -389,14 +389,14 @@ namespace World
 			// "字段名 → Value" 的 map(递归);嵌套集合(命名 struct 再套容器)递归折。
 			// CPPT-6-FIX2:结构化表的判定只看 **Type==Object**(Collection 为 None 或 Struct 同义),
 			// 两种读回路径(元素行 / 嵌套 struct 字段)折出同一份 ValueMap。
-			Schema::Value ElementValueOf(const ScriptProperty& row);
+			Schema::Value ElementValueOf(const PropertyNode& row);
 
-			Schema::Value FoldContainer(const ScriptProperty& container)
+			Schema::Value FoldContainer(const PropertyNode& container)
 			{
-				if (container.Collection == ScriptPropertyCollection::Map)
+				if (container.Collection == PropertyCollection::Map)
 				{
 					Schema::ValueMap fields;
-					for (const ScriptProperty& row : container.Children)
+					for (const PropertyNode& row : container.Children)
 					{
 						if (row.ReadOnly)
 							continue;
@@ -406,16 +406,16 @@ namespace World
 				}
 				Schema::ValueList items;
 				items.reserve(container.Children.size());
-				for (const ScriptProperty& row : container.Children)
+				for (const PropertyNode& row : container.Children)
 					items.push_back(ElementValueOf(row));
 				return Schema::Value(std::move(items));
 			}
 
-			Schema::Value ElementValueOf(const ScriptProperty& row)
+			Schema::Value ElementValueOf(const PropertyNode& row)
 			{
 				// 容器行(数组/映射)递归折成 ValueList / ValueMap。
-				if (row.Collection == ScriptPropertyCollection::Array ||
-					row.Collection == ScriptPropertyCollection::Map)
+				if (row.Collection == PropertyCollection::Array ||
+					row.Collection == PropertyCollection::Map)
 					return FoldContainer(row);
 				// CPPT-6-FIX2:结构化表的**唯一** schema 值形态是"字段名 → Value"的 map
 				// (读回的元素行 Collection=None、嵌套 struct 字段 Collection=Struct,两者同形;
@@ -425,7 +425,7 @@ namespace World
 				if (row.Type == Schema::Kind::Object)
 				{
 					Schema::ValueMap fields;
-					for (const ScriptProperty& child : row.Children)
+					for (const PropertyNode& child : row.Children)
 					{
 						if (child.ReadOnly)
 							continue;
@@ -462,7 +462,7 @@ namespace World
 					if (field.Collection != Schema::CollectionKind::None)
 					{
 						declaration.Collection = field.Collection == Schema::CollectionKind::Map
-							? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+							? PropertyCollection::Map : PropertyCollection::Array;
 						declaration.ElementKind = field.ElementKind;
 						declaration.KeyKind = field.KeyKind;
 						if (field.ElementTypeName)
@@ -499,7 +499,7 @@ namespace World
 						const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
 						if (!nested)
 							continue;                      // 拿不到嵌套 schema:不进属性表(不静默展开成空表)
-						declaration.Collection = ScriptPropertyCollection::Struct;   // C 期:结构化表(不是数组/映射)
+						declaration.Collection = PropertyCollection::Struct;   // C 期:结构化表(不是数组/映射)
 						declaration.TypeName = nested->Id.Name;
 						AppendSchemaDeclarations(declaration.Fields, *nested, depth + 1);
 					}
@@ -534,7 +534,7 @@ namespace World
 			}
 		}
 
-		void SyncFromSchema(std::vector<ScriptProperty>& properties, const Schema::TypeSchema& type)
+		void SyncFromSchema(std::vector<PropertyNode>& properties, const Schema::TypeSchema& type)
 		{
 			std::vector<Declaration> declared;
 			AppendSchemaDeclarations(declared, type, 0);
@@ -543,12 +543,12 @@ namespace World
 
 		// CPPT-6:容器属性的 Play 应用值(见头文件契约)。"设过"的判据与序列化同源:
 		// 场景记录过任一行(IsSceneRecorded)或场景写过这个容器的形状(ShapeFromScene,含空容器)。
-		bool BuildContainerValue(const ScriptProperty& property, Schema::Value* outValue)
+		bool BuildContainerValue(const PropertyNode& property, Schema::Value* outValue)
 		{
 			// 只有数组/映射有"容器值";Struct 行(结构化表)不是容器,不在这里折。
 			if (!outValue || property.ReadOnly ||
-				(property.Collection != ScriptPropertyCollection::Array &&
-					property.Collection != ScriptPropertyCollection::Map))
+				(property.Collection != PropertyCollection::Array &&
+					property.Collection != PropertyCollection::Map))
 				return false;
 			if (!IsSceneRecorded(property) && !property.ShapeFromScene)
 				return false;
@@ -558,23 +558,23 @@ namespace World
 
 		// PURE-ECS:无条件折叠(见头文件契约)。判据与 BuildContainerValue 的守卫一致,只是去掉
 		// "IsSceneRecorded / ShapeFromScene" 那一段 —— 纯 ECS 组件字段的值来自实例本身。
-		bool FoldContainerRows(const ScriptProperty& property, Schema::Value* outValue)
+		bool FoldContainerRows(const PropertyNode& property, Schema::Value* outValue)
 		{
 			if (!outValue || property.ReadOnly ||
-				(property.Collection != ScriptPropertyCollection::Array &&
-					property.Collection != ScriptPropertyCollection::Map))
+				(property.Collection != PropertyCollection::Array &&
+					property.Collection != PropertyCollection::Map))
 				return false;
 			*outValue = FoldContainer(property);
 			return true;
 		}
 
-		void SyncFromDeclarations(std::vector<ScriptProperty>& properties,
+		void SyncFromDeclarations(std::vector<PropertyNode>& properties,
 			const std::vector<Declaration>& declarations)
 		{
 			Apply(properties, declarations);
 		}
 
-		void SyncFromDeclarations(std::vector<ScriptProperty>& properties,
+		void SyncFromDeclarations(std::vector<PropertyNode>& properties,
 			const std::vector<std::pair<std::string, Schema::Kind>>& declarations)
 		{
 			std::vector<Declaration> declared;
@@ -591,7 +591,7 @@ namespace World
 			Apply(properties, declared);
 		}
 
-		bool IsUnset(const ScriptProperty& property)
+		bool IsUnset(const PropertyNode& property)
 		{
 			return std::holds_alternative<std::monostate>(property.Value);
 		}
@@ -634,7 +634,7 @@ namespace World
 		}
 
 		// D1:这条叶子当前值是不是"声明默认值"(Default 为 monostate = 声明没给默认值 → false)。
-		bool IsDefaultValue(const ScriptProperty& property)
+		bool IsDefaultValue(const PropertyNode& property)
 		{
 			if (std::holds_alternative<std::monostate>(property.Default))
 				return false;
@@ -642,18 +642,18 @@ namespace World
 		}
 
 		// D1/D2:"这条属性在场景里真的记录过" —— 序列化只写它为 true 的(容器另见 ShapeFromScene)。
-		bool IsSceneRecorded(const ScriptProperty& property)
+		bool IsSceneRecorded(const PropertyNode& property)
 		{
 			if (property.ReadOnly)
 				return false;   // 只读摘要(裸 table / 降级):看得到、不进存档
-			if (property.Collection == ScriptPropertyCollection::None)
+			if (property.Collection == PropertyCollection::None)
 			{
 				if (std::holds_alternative<std::monostate>(property.Value))
 					return false;   // 未设(monostate):场景里不写这个字段
 				return !IsDefaultValue(property);
 			}
 			return std::any_of(property.Children.begin(), property.Children.end(),
-				[](const ScriptProperty& child) { return IsSceneRecorded(child); });
+				[](const PropertyNode& child) { return IsSceneRecorded(child); });
 		}
 
 		bool ValueMatchesKind(const Schema::Value& value, Schema::Kind kind)
@@ -690,17 +690,17 @@ namespace World
 			}
 		}
 
-		ScriptProperty* Find(std::vector<ScriptProperty>& properties, const std::string& name)
+		PropertyNode* Find(std::vector<PropertyNode>& properties, const std::string& name)
 		{
 			const auto found = std::find_if(properties.begin(), properties.end(),
-				[&name](const ScriptProperty& property) { return property.Name == name; });
+				[&name](const PropertyNode& property) { return property.Name == name; });
 			return found == properties.end() ? nullptr : &*found;
 		}
 
-		const ScriptProperty* Find(const std::vector<ScriptProperty>& properties, const std::string& name)
+		const PropertyNode* Find(const std::vector<PropertyNode>& properties, const std::string& name)
 		{
 			const auto found = std::find_if(properties.begin(), properties.end(),
-				[&name](const ScriptProperty& property) { return property.Name == name; });
+				[&name](const PropertyNode& property) { return property.Name == name; });
 			return found == properties.end() ? nullptr : &*found;
 		}
 	}

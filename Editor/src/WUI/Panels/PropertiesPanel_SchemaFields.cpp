@@ -15,7 +15,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 		// ---- PURE-ECS:本帧从 arena 水合出的原生容器节点 ----
 		// BuildScriptTableSchema 通过 `arena.Owners[]` 直接引用它们(绘制期间指针必须稳定)。折回 Value / 写回在**容器自己那一层**
 		// (元素增删改都发生在那里,只有那一层知道 `changed`)。
-		std::deque<ScriptProperty> plainNodes;
+		std::deque<PropertyNode> plainNodes;
 		// VEC-H2:标签列宽来自库件(与 PropertyRow/PropertyGroupHeader 共用同一条口径),
 		// 同一面板传同一值 ⇒ 标签列竖向对齐;面板不再自己算 0.45 倍。
 		const float labelWidth = Wui::PropertyRowLabelWidth(rect);
@@ -56,7 +56,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 					"Remove this element from the collection (the scene stores the list)"), true, theme))
 				pendingEraseName = rowName;
 		};
-		// SCRIPT-V2:脚本属性行的说明 = 脚本自己的注释(`ScriptProperty::Doc`,由调用方带进
+		// SCRIPT-V2:脚本属性行的说明 = 脚本自己的注释(`PropertyNode::Doc`,由调用方带进
 		// `FieldSchema.Meta.Doc`)—— **不**回落 schema 的 `schema.field.<Name>.doc`;没写说明就回落
 		// 类型文案(VEC-C2 / v4 §1),不假装有文档。普通 schema 字段行为不变(仍走 schema 本地化表)。
 		const auto fieldDocFor = [&](const Schema::FieldSchema& candidate)
@@ -72,7 +72,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 		// VEC-H6:当前行的声明节点(名字路径 = m_ScriptRowPath + 行名)。声明读不出来 = nullptr ——
 		// 复位可见性退化成"只看值/Default",不猜形状。
 		const auto scriptRowDeclaration = [this](const std::string& rowName)
-			-> const ScriptProperties::Declaration*
+			-> const ComponentPropertyModel::Declaration*
 		{
 			if (!m_ScriptDeclarationsValid)
 				return nullptr;
@@ -89,7 +89,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 			const Wui::WuiId rowNodeId = Wui::HashId(rowIdText.c_str());
 			// VEC-C2 / VEC-F2:**单项** `↺` 复位(叶子 / 数组元素 / 映射值行)。`modified` 语义 =
 			// "编辑态可复位":Play/只读态用同一 rect 画禁用占位(库件两态共用同一几何,行布局零位移)。
-			// 点中后只把**这一行**清成"未设" —— 显示由 `ScriptPropertyDisplayValue` 回落脚本默认值,
+			// 点中后只把**这一行**清成"未设" —— 显示由 `PropertyNodeDisplayValue` 回落脚本默认值,
 			// 存档按 D1 判定"未设不写";不再触发整表重同步(那会把同一集合的增删按声明重建 =
 			// 用户反馈的"点一个元素把整个集合都复原了")。
 			const Wui::WuiId resetId = Wui::HashId((rowIdText + ".reset").c_str());
@@ -98,16 +98,16 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 			// 避免对着纯 ECS 组件说"脚本"。
 			const std::string resetLabel = m_PlainContainerRows
 				? Wui::Tr("panel.properties.plain_row_reset", "Reset this item to its declared default")
-				: Wui::Tr("panel.properties.script_reset", "Reset this item to the script default");
+				: Wui::Tr("panel.properties.component_reset", "Reset this item to the script default");
 			const std::string resetDoc = resetEnabled
-				? Wui::Tr("panel.properties.script_reset.tooltip", ScriptItemResetDoc())
-				: Wui::Tr("panel.properties.script_readonly_notice",
+				? Wui::Tr("panel.properties.component_reset.tooltip", ScriptItemResetDoc())
+				: Wui::Tr("panel.properties.component_readonly_notice",
 					"Play/Simulate: script properties are read-only (pause or stop to edit)");
 			// VEC-H6:`↺` 只在"当前值/形状 != 脚本声明默认"时出现(用户口径:一致时不画,不是禁用态)。
-			// 合成路径(编辑态 + Luau 只读)拿得到 ScriptProperty;Play 里的 C++ 实例走真实结构体指针,
+			// 合成路径(编辑态 + Luau 只读)拿得到 PropertyNode;Play 里的 C++ 实例走真实结构体指针,
 			// 没有 Value/Default 可比 —— 保持既有"画禁用占位 + 理由"的口径(判据不可用时不去猜)。
 			const size_t fieldIndex = static_cast<size_t>(&field - schema.Fields.data());
-			const ScriptProperty* scriptRow = (scriptPropertyRow && m_ScriptInspectingScriptRows)
+			const PropertyNode* scriptRow = (scriptPropertyRow && m_ScriptInspectingScriptRows)
 				? ScriptRowModel(schema, instance, fieldIndex, m_ScriptInspectingScriptRows) : nullptr;
 			const bool resetModified = scriptRow
 				? ScriptRowModified(*scriptRow, scriptRowDeclaration(field.Name)) : true;
@@ -170,7 +170,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 				if (plainContainerField)
 				{
 					plainNodes.push_back(HydratePlainContainer(field, field.Get(instance), m_ContainerElementSchemas));
-					ScriptProperty& containerNode = plainNodes.back();
+					PropertyNode& containerNode = plainNodes.back();
 					containerNode.Name = field.Name;
 					nestedInstance = &containerNode;
 					// 合成器只对外给「字段」入口(MakeScriptTableField),容器需要的嵌套节点从它的
@@ -253,7 +253,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 				// **单击即复原**(二次确认已删除),且只在集合偏离默认时出现(见 head.ResetModified)。
 				// 只读/Play 画禁用占位并给只读理由(与叶子行同一套 disabled hint 口径)。
 				const bool headResetDrawn = scriptPropertyRow && nested != nullptr && nestedInstance != nullptr;
-				// `nestedInstance` 只有在合成属性表路径上才是 `ScriptProperty*`(Play 里 C++ 实例走真实
+				// `nestedInstance` 只有在合成属性表路径上才是 `PropertyNode*`(Play 里 C++ 实例走真实
 				// 结构体指针)→ 形态/复位只对合成路径成立;Play 那一路只画禁用占位。
 				const bool headScriptRow = headResetDrawn && m_ScriptInspectingScriptRows;
 				// PURE-ECS:原生容器行同样走合成节点(值就是组件字段),但它没有"脚本声明的默认形状"
@@ -262,13 +262,13 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 				const bool headResettable = headScriptRow && !m_ReadOnly && !field.Meta.ReadOnly;
 				// 集合头 `↺` 的 id 契约:`properties.<组件>.<属性>.reset`(与单项同一字符串,
 				// 差别只在落点:集合头落在容器行,单项落在元素/键值行)。
-				ScriptPropertyCollection headKind = ScriptPropertyCollection::Struct;
+				PropertyCollection headKind = PropertyCollection::Struct;
 				if (headScriptRow || headPlainRow)
-					headKind = static_cast<const ScriptProperty*>(nestedInstance)->Collection;
+					headKind = static_cast<const PropertyNode*>(nestedInstance)->Collection;
 				const std::string headLabel = ScriptCollectionHeadResetLabel(headKind);
 				const std::string headDoc = headResettable
 					? std::string(ScriptCollectionHeadResetDoc())
-					: Wui::Tr("panel.properties.script_readonly_notice",
+					: Wui::Tr("panel.properties.component_readonly_notice",
 						"Play/Simulate: script properties are read-only (pause or stop to edit)");
 				Wui::PropertyGroupHeaderDesc head;
 				head.Label = label.Text;
@@ -279,7 +279,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 				// VEC-H4:集合头右侧常驻"当前条数"(数组/映射/结构化表都算),折叠时也知道里面有几项。
 				if ((headScriptRow || headPlainRow) && !field.Meta.ReadOnly)
 				{
-					const size_t childCount = static_cast<const ScriptProperty*>(nestedInstance)->Children.size();
+					const size_t childCount = static_cast<const PropertyNode*>(nestedInstance)->Children.size();
 					head.Trailing = Wui::Tr("panel.properties.collection_count", "{n} item(s)");
 					const std::string marker = "{n}";
 					const size_t at = head.Trailing.find(marker);
@@ -305,7 +305,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 				if (header.ResetClicked && headResettable && !headPlainRow)
 				{
 					// VEC-H6:记下请求,等本组件画完再落地(同一帧后面的子行仍按旧 schema 画)。
-					m_PendingCollectionReset = static_cast<ScriptProperty*>(nestedInstance);
+					m_PendingCollectionReset = static_cast<PropertyNode*>(nestedInstance);
 					m_PendingCollectionResetLuau = m_ScriptInspectingLuau;
 					m_PendingCollectionResetPath = m_ScriptRowPath;
 					m_PendingCollectionResetPath.push_back(field.Name);
@@ -322,18 +322,18 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 					{
 						// PURE-ECS:元素自身是容器(命名 struct 里的嵌套 Array/Map)分两种来源 ——
 						// ① 节点在合成 arena 里(脚本行 / 原生容器的子节点),形态由 `Collections[]` 给出;
-						// ② 原生容器路径下,元素自己的 `ScriptProperty` 直接带 `Collection`(水合时从声明抄的),
+						// ② 原生容器路径下,元素自己的 `PropertyNode` 直接带 `Collection`(水合时从声明抄的),
 						//    `Collections[]` 对它也命中,所以上一条已经覆盖 —— 这里只在 arena 未命中时兜底。
-						ScriptPropertyCollection nestedCollection = ScriptTableCollectionOf(nested);
+						PropertyCollection nestedCollection = ScriptTableCollectionOf(nested);
 						// 兜底只对**合成节点**做(arena 里有它的 owner)。原生指针(Play 里的真实
-						// 结构体)不在 arena 里 → 这里绝不强转成 ScriptProperty*,与 ScriptRowModel 同一条防线。
-						if (nestedCollection == ScriptPropertyCollection::None)
-							if (const ScriptProperty* owner = ScriptTableNodeOwner(nested))
+						// 结构体)不在 arena 里 → 这里绝不强转成 PropertyNode*,与 ScriptRowModel 同一条防线。
+						if (nestedCollection == PropertyCollection::None)
+							if (const PropertyNode* owner = ScriptTableNodeOwner(nested))
 								nestedCollection = owner->Collection;
-						if (nestedCollection == ScriptPropertyCollection::Array
-							|| nestedCollection == ScriptPropertyCollection::Map)
+						if (nestedCollection == PropertyCollection::Array
+							|| nestedCollection == PropertyCollection::Map)
 						{
-							nestedRows.Container = static_cast<ScriptProperty*>(nestedInstance);
+							nestedRows.Container = static_cast<PropertyNode*>(nestedInstance);
 							nestedRows.Kind = nestedCollection;
 							nestedRows.IdText = idText;
 							nestedRows.Writable = !m_ReadOnly;
@@ -384,10 +384,10 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 					const std::string reason = m_ReadOnly
 						? Wui::Tr("panel.properties.readonly_notice",
 							"Play/Simulate running: read-only (pause or exit to edit)")
-						: (scriptPropertyRow && ScriptProperties::IsSummaryKind(field.K)
+						: (scriptPropertyRow && ComponentPropertyModel::IsSummaryKind(field.K)
 							// CPPT-3:IVec*/UVec*/Quat/Mat* —— 面板没有行控件;值不进属性表/不进存档,
 							// 这里给"为什么只读"的可读理由(禁用必须能解释原因)。
-							? Wui::Tr("panel.properties.script_summary_readonly",
+							? Wui::Tr("panel.properties.component_summary_readonly",
 								"This field type has no editor control yet — shown as a read-only "
 								"summary and not saved here")
 							: Wui::Tr("panel.properties.field_core_readonly",
@@ -835,7 +835,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 		// 后面的行读到错元素。删除按**行名**(数组 = 下标字符串,映射 = 键)定位,数组删完重排 1..n。
 		if (collectionWritable)
 		{
-			ScriptProperty& container = *collectionRows->Container;
+			PropertyNode& container = *collectionRows->Container;
 			// CPPT-6-ED-COLLECTIONS:空容器的元素模板要吃 schema(命名 struct 的子字段从哪来)。
 			// 注册表从当前正在画的脚本组件所属场景取;**只有 C++ 脚本属性行走它**
 			// (Luau 的元素形状来自注解声明,传 nullptr = 保持既有的空容器回落)。
@@ -876,7 +876,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 					emptyDesc, theme);
 				y += kRowHeight;
 			}
-			if (collectionRows->Kind == ScriptPropertyCollection::Map && adding)
+			if (collectionRows->Kind == PropertyCollection::Map && adding)
 			{
 				// 映射 `+`:先给一个**键名文本输入**,回车建行(空键 / 重名忽略;Esc 取消)。
 				const Wui::WuiRect keyRect { rect.X, rect.Y + y + (kRowHeight - 20.0f) * 0.5f,
@@ -892,7 +892,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 				{
 					if (!keyText.empty() && !CollectionKeyTaken(container, keyText))
 					{
-						ScriptProperty child = MakeCollectionElement(container, collectionElementSchemas,
+						PropertyNode child = MakeCollectionElement(container, collectionElementSchemas,
 						collectionRows->PlainRows);
 						child.Name = keyText;
 						container.Children.push_back(std::move(child));
@@ -915,16 +915,16 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 				// 追加行:`+` 与元素行的 `-` 同一条行外动作槽(CollectionActionColumnWidth)。
 				const Wui::WuiRect addButton { rect.X + rect.W + 2.0f,
 					rect.Y + y, kRowHeight, kRowHeight };
-				const std::string addDoc = collectionRows->Kind == ScriptPropertyCollection::Map
+				const std::string addDoc = collectionRows->Kind == PropertyCollection::Map
 					? Wui::Tr("panel.properties.collection_add_map.tooltip",
 						"Add a key/value row (the key name is typed next)")
 					: Wui::Tr("panel.properties.collection_append.tooltip", "Append one element to the list");
 				if (Wui::CollectionActionButton(ctx, Wui::HashId((collectionRows->IdText + ".add").c_str()),
 					addButton, "+", addDoc, true, theme, false))
 				{
-					if (collectionRows->Kind == ScriptPropertyCollection::Array)
+					if (collectionRows->Kind == PropertyCollection::Array)
 					{
-						ScriptProperty child = MakeCollectionElement(container, collectionElementSchemas,
+						PropertyNode child = MakeCollectionElement(container, collectionElementSchemas,
 						collectionRows->PlainRows);
 						child.Name = std::to_string(container.Children.size() + 1);
 						container.Children.push_back(std::move(child));
@@ -944,13 +944,13 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 			if (!pendingEraseName.empty())
 			{
 				const auto found = std::find_if(container.Children.begin(), container.Children.end(),
-					[&pendingEraseName](const ScriptProperty& child) { return child.Name == pendingEraseName; });
+					[&pendingEraseName](const PropertyNode& child) { return child.Name == pendingEraseName; });
 				if (found != container.Children.end())
 				{
 					WLD_CORE_INFO("[script-ui] collection remove: {0}.{1}[{2}]", typeName, container.Name,
 						pendingEraseName);
 					container.Children.erase(found);
-					if (collectionRows->Kind == ScriptPropertyCollection::Array)
+					if (collectionRows->Kind == PropertyCollection::Array)
 						RenumberArrayChildren(container);
 					markContainerChanged();
 				}
@@ -967,7 +967,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 			&& collectionRows->WriteField && collectionRows->WriteField->Set && collectionRows->WriteInstance)
 		{
 			Schema::Value folded;
-			if (ScriptProperties::FoldContainerRows(*collectionRows->Container, &folded))
+			if (ComponentPropertyModel::FoldContainerRows(*collectionRows->Container, &folded))
 				collectionRows->WriteField->Set(collectionRows->WriteInstance, folded);
 		}
 

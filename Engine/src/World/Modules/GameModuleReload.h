@@ -6,7 +6,7 @@
 //   * 重载单位 = 整个 Game 模块;重载后**组件 schema** 与**项目系统**(`AttachProjectSystems`)
 //     都换成新 DLL 里的那一份:卸载旧 DLL → 加载/注册新 DLL。组件是纯数据,实体上的字段值
 //     由 Scene 自己持有,不随 DLL 交换而丢;系统只在一次运行时内存在 ⇒ 重载后**下次 Play** 才生效;
-//   * 安全点 = `scene->CanApplyScriptReload()`(无回调/结构提交/写窗口/停止中) **且**
+//   * 安全点 = `scene->CanApplyModuleReload()`(无回调/结构提交/写窗口/停止中) **且**
 //     同一 WorldContext 下没有 Running 场景(模块登记过场景系统钩子时)—— 否则运行中的场景
 //     会持有指向已卸载 DLL 的帧系统函数指针;拒绝时 Status=NotSafePoint + 可读 Message;
 //   * 不迁移 = 系统的 C++ 成员可变状态、事件/计时器订阅、以实例指针为键的外部注册 ——
@@ -57,7 +57,7 @@ namespace World::Modules
 		// 模块 id 与 Game/src/GameAPI.cpp 的 WeModule::Id 一致。
 		static constexpr const char* GameModuleId = "game";
 
-		// 安全点判定 = scene->CanApplyScriptReload()(无回调/结构提交/写窗口/停止中);
+		// 安全点判定 = scene->CanApplyModuleReload()(无回调/结构提交/写窗口/停止中);
 		// scene 为空 = 编辑态无场景(只做模块交换,不动实例)。
 		static bool Unload(WorldContext& context, Scene* scene, GameModuleReloadResult* result = nullptr);
 		// 当前必须没有 Game 模块;失败(ABI/入口/注册)自动回滚到回滚副本。

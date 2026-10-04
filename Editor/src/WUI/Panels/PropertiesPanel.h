@@ -2,7 +2,7 @@
 
 #include "WUI/Common/EditorPanel.h"
 #include "World/Scene/Components.h"
-#include "World/Script/Runtime/ScriptProperties.h"
+#include "World/Script/Runtime/ComponentPropertyModel.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
 
@@ -41,15 +41,15 @@ namespace World
 
 		// ---- VEC-C2:数组/映射行上下文(只有脚本属性行的容器会带)----
 		//
-		// `Container` = 容器自身的 `ScriptProperty`(元素行要能直接增删 `Children`);
+		// `Container` = 容器自身的 `PropertyNode`(元素行要能直接增删 `Children`);
 		// `IdText` = 容器行的无障碍 id(`properties.<组件>.<属性>`),`.add` / `.remove.<下标|键>`
 		// 由它派生;`Writable` = 编辑态(Play/只读态只画禁用占位,不画增删)。
 		// **只对脚本合成路径生效**:`ScriptTableCollectionOf` 只在合成 arena 里查得到集合形态,
 		// 普通 schema 的 Object 字段(Play 里 C++ 实例的嵌套结构)拿不到上下文,增删路径不误走。
 		struct ScriptCollectionRows
 		{
-			ScriptProperty* Container = nullptr;
-			ScriptPropertyCollection Kind = ScriptPropertyCollection::None;
+			PropertyNode* Container = nullptr;
+			PropertyCollection Kind = PropertyCollection::None;
 			std::string IdText;
 			bool Writable = false;
 			// PURE-ECS:这一层是**原生组件**的容器行(值就是 C++ 结构体里的容器)。
@@ -93,13 +93,13 @@ namespace World
 		//
 		// 用户口径(VEC-H6,2026-09-27):① 两级 `↺` 都只在"当前值/形状 != 脚本声明默认"时**出现**
 		// (一致时不画 —— 不是禁用态);② 集合头复原**单击即落地**,删除上一轮的二次确认模态。
-		// 复原按**名字路径**做(顶层属性名 → 逐层子行名):声明同步会整体重建属性表,`ScriptProperty*`
+		// 复原按**名字路径**做(顶层属性名 → 逐层子行名):声明同步会整体重建属性表,`PropertyNode*`
 		// 会失效;映射键原样是一段,不按 '.' 拆串。
 		// 当前正在绘制的脚本组件(集合头 `↺` 复原时带上实体/组件/语言)。
 		Entity m_ScriptInspectingEntity;
 		uint32_t m_ScriptInspectingComponentId = 0;
 		bool m_ScriptInspectingLuau = false;
-		// true = 当前属性表来自组件的 `ScriptProperty` 合成路径(false = Play 里 C++ 实例的真实结构体)。
+		// true = 当前属性表来自组件的 `PropertyNode` 合成路径(false = Play 里 C++ 实例的真实结构体)。
 		bool m_ScriptInspectingScriptRows = false;
 		std::string m_ScriptInspectingComponentName;   // schema.DisplayName(prefab 覆盖登记用)
 		// 当前绘制位置的**容器路径**(行路径 = 它 + 字段名);只有脚本属性行的递归维护它。
@@ -109,7 +109,7 @@ namespace World
 		// 纯 ECS 起组件是纯数据,容器字段直接挂在 C++ 结构体上(生成访问器装箱成
 		// `Schema::ValueList`/`ValueMap`,字段的 `GetNested` 为空)。旧的集合编辑 UI 只服务
 		// 脚本属性路径(那条路径随单实体脚本一起死了),所以这里把容器字段接到同一套行机制上:
-		// 每帧从**实例值**水合出 `ScriptProperty` 行模型 → 复用脚本行的渲染(分组头 / 元素行 /
+		// 每帧从**实例值**水合出 `PropertyNode` 行模型 → 复用脚本行的渲染(分组头 / 元素行 /
 		// `+` / `-` / 映射键输入)→ 变更时折回 `Schema::Value` 写进结构体字段。
 		//
 		// true = 当前正在画的这一层就是原生容器行(叶子行的 `↺`/集合行判据据此走"声明默认"口径)。
@@ -119,16 +119,16 @@ namespace World
 		const Schema::SchemaRegistry* m_ContainerElementSchemas = nullptr;
 		// 本帧当前脚本组件的注解/schema 声明(只有 Luau 有):集合头的"形状是否偏离默认"判定要按
 		// 声明的默认形状比较;每帧在 DrawScriptComponentInspector 开头刷新,离开该函数即失效(不再引用)。
-		std::vector<ScriptProperties::Declaration> m_ScriptDeclarations;
+		std::vector<ComponentPropertyModel::Declaration> m_ScriptDeclarations;
 		bool m_ScriptDeclarationsValid = false;
 		// VEC-H6:集合头 `↺` 的落地**推迟到本属性画完** —— 点头部那一帧后面还要按旧合成 schema 递归画
 		// 子行;立刻重建容器会让"schema(旧形状) vs Children(新形状)"错位一帧(与元素增删同一套延后口径)。
-		ScriptProperty* m_PendingCollectionReset = nullptr;
+		PropertyNode* m_PendingCollectionReset = nullptr;
 		bool m_PendingCollectionResetLuau = false;
 		std::vector<std::string> m_PendingCollectionResetPath;
 		// 集合头 `↺` 单击即落地(无二次确认):Luau 按**单条声明**重建这一条(默认形状 + 默认值);
 		// C++ 结构化表递归回默认值。container 就是本帧正在画的那个容器(合成路径下指针稳定)。
-		void ApplyScriptCollectionReset(Wui::WuiContext& ctx, ScriptProperty& container, bool luau,
+		void ApplyScriptCollectionReset(Wui::WuiContext& ctx, PropertyNode& container, bool luau,
 			const std::vector<std::string>& path);
 		// VEC-F2:单项 `↺` 的落地 —— Luau 按名字路径把该行对齐到脚本**当前声明**的默认值
 		// (Value 清成"未设" + Default 刷新):面板 `+`/`-` 只重排行名,旧 Default 会挂在改名后的行上,

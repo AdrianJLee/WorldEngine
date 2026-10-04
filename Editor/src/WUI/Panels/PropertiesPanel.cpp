@@ -192,7 +192,7 @@ std::string FormatReadOnlyValue(const Schema::FieldSchema& field, const Schema::
 			// CPPT-3:没有行控件的数学类型(IVec*/UVec*/Quat/Mat*)→ 只读摘要显示类型名。
 			// 这些值不进属性表/不进存档(引擎侧同步成 ReadOnly 摘要行),显示 "(0, 0, 0)" 一类
 			// 伪值会误导 —— 与 Luau 裸 table 的 `table` 摘要同一口径。
-			if (ScriptProperties::IsSummaryKind(field.K))
+			if (ComponentPropertyModel::IsSummaryKind(field.K))
 				return ScriptLeafTypeText(field.K);
 			return FormatValueByVariant(value);
 		}
@@ -357,13 +357,13 @@ void DrawReadOnlyRow(Wui::WuiContext& ctx, const std::string& idText, const Wui:
 
 		// ---- 2026-09-26 脚本组件重写:统一脚本检视器的三个数据侧小工具 ----
 		//
-		// `ScriptProperty::Value` 的类型编码必须与 schema 一致
+		// `PropertyNode::Value` 的类型编码必须与 schema 一致
 		// (Bool→bool、Int*→对应宽度、Float→float、Double→double、String→string、
 		//  Vec2/3/4→glm::vec2/3/4):属性行复用 `DrawSchemaFields`,那里按 Kind 直接
 		// `std::get<T>(value)`,值停在 monostate(刚声明还没填值 / 手改过的场景缺 Value)
 		// 会抛 std::bad_variant_access —— 向量行必须在下面补零值兜底,否则 A 期放行
 		// Vec2/3/4 后脚本属性里"声明了但没值"的向量行会直接崩面板。
-Schema::Value DefaultScriptPropertyValue(Schema::Kind kind){
+Schema::Value DefaultPropertyValue(Schema::Kind kind){
 			switch (kind)
 			{
 				case Schema::Kind::Bool: return Schema::Value(false);
@@ -395,14 +395,14 @@ Schema::Value DefaultScriptPropertyValue(Schema::Kind kind){
 				case Schema::Kind::Enum: return Schema::Value(static_cast<int64_t>(0));
 				case Schema::Kind::Asset: return Schema::Value(std::string());
 				// B 期:结构化表的值在 `Children` 里,`Value` 保持空表(monostate)——
-				// 与 `ScriptProperties::ValueMatchesKind` 同一口径,不往 variant 里塞表数据。
+				// 与 `ComponentPropertyModel::ValueMatchesKind` 同一口径,不往 variant 里塞表数据。
 				case Schema::Kind::Object: return Schema::Value();
 				default: return Schema::Value();
 			}
 		}
 
 
-bool ScriptPropertyValueMatchesType(const ScriptProperty& property){
+bool PropertyNodeValueMatchesType(const PropertyNode& property){
 			switch (property.Type)
 			{
 				case Schema::Kind::Bool: return std::holds_alternative<bool>(property.Value);
@@ -443,35 +443,35 @@ bool ScriptPropertyValueMatchesType(const ScriptProperty& property){
 		// 画属性行用的**展示值**:值没设(monostate)或类型不匹配时给该类型的规范零值(**不写回**组件)。
 		//
 		// 为什么不能写回:审查 P1-1 / 用户反馈④ —— "未设"必须保持未设,编辑期把它写成 0 会随场景落盘;
-		// 真实默认值来自脚本本体,由引擎侧的属性入口填进 `ScriptProperty.Value`(到了这里自然显示真值)。
+		// 真实默认值来自脚本本体,由引擎侧的属性入口填进 `PropertyNode.Value`(到了这里自然显示真值)。
 		//
 		// VEC-F2:单项 `↺` 现在只把该行清成"未设"(不再触发整表重同步)—— 展示值必须自己回落到
-		// 声明默认值 `ScriptProperty::Default`,否则复位会让该行瞬间显示成 0(与 D1 的
+		// 声明默认值 `PropertyNode::Default`,否则复位会让该行瞬间显示成 0(与 D1 的
 		// "未设 = 显示脚本默认值、存档不写"口径不一致)。同样是**只读回退**,不写回组件。
-Schema::Value ScriptPropertyDisplayValue(const ScriptProperty& property){
+Schema::Value PropertyNodeDisplayValue(const PropertyNode& property){
 			if (std::holds_alternative<std::monostate>(property.Value)
-				&& ScriptProperties::ValueMatchesKind(property.Default, property.Type))
+				&& ComponentPropertyModel::ValueMatchesKind(property.Default, property.Type))
 				return property.Default;
-			return ScriptPropertyValueMatchesType(property)
-				? property.Value : DefaultScriptPropertyValue(property.Type);
+			return PropertyNodeValueMatchesType(property)
+				? property.Value : DefaultPropertyValue(property.Type);
 		}
 
 
-		// VEC-H4:**行展示值** = `ScriptPropertyDisplayValue`,但"存的值类型与声明不符"时返回
+		// VEC-H4:**行展示值** = `PropertyNodeDisplayValue`,但"存的值类型与声明不符"时返回
 		// 空表(monostate),让行落到 `—` 占位(反模式 4:多值/不可用时不许显示伪零)。
 		// 判据只看"真的存了值且类型不符";`Value` 本身为空(未设)+ 默认值不可用仍是旧行为(显示零值,
 		// 可编辑、可写盘)—— A 期验收的 Ghost 行(retro 25/25)因此逐条不变。
-Schema::Value ScriptPropertyDisplayValueForRow(const ScriptProperty& property){
+Schema::Value PropertyNodeDisplayValueForRow(const PropertyNode& property){
 			if (!std::holds_alternative<std::monostate>(property.Value)
-				&& !ScriptPropertyValueMatchesType(property))
+				&& !PropertyNodeValueMatchesType(property))
 				return Schema::Value();
-			return ScriptPropertyDisplayValue(property);
+			return PropertyNodeDisplayValue(property);
 		}
 
 
 		// ---- VEC-C2:脚本属性行的**类型文案**(方案 v4 §1)----
 		//
-		// 脚本属性行没有注解说明(`ScriptProperty::Doc` 为空)时,行悬停/读屏回落成类型文案
+		// 脚本属性行没有注解说明(`PropertyNode::Doc` 为空)时,行悬停/读屏回落成类型文案
 		// (`number/string/boolean/vec3/table/struct/array/map`),不再给英文兜底
 		// "No description for this field"。类型名是脚本作者写的标识符(`---@field Speed number`),
 		// 与脚本字段名同一条口径:**不过本地化目录**(不查 `schema.field.*`,也不进目录)。
@@ -508,11 +508,11 @@ std::string ScriptLeafTypeText(Schema::Kind kind){
 		}
 
 
-std::string ScriptPropertyTypeText(const ScriptProperty& property){
+std::string PropertyNodeTypeText(const PropertyNode& property){
 			switch (property.Collection)
 			{
-				case ScriptPropertyCollection::Array: return "array";
-				case ScriptPropertyCollection::Map: return "map";
+				case PropertyCollection::Array: return "array";
+				case PropertyCollection::Map: return "map";
 				default: break;
 			}
 			if (property.Type == Schema::Kind::Object)
@@ -532,11 +532,11 @@ std::string ScriptPropertyTypeText(const ScriptProperty& property){
 
 		// 数组/映射即使**一个元素都没有**也可以展开(底部有 `+` 加元素/键);结构化表没有子字段时
 		// 才是只读摘要(裸 table)。两处判据(顶层行 / 嵌套子行)共用这一份,避免口径分叉。
-bool ScriptPropertyExpandable(const ScriptProperty& property){
+bool PropertyNodeExpandable(const PropertyNode& property){
 			if (property.ReadOnly)
 				return false;
-			if (property.Collection == ScriptPropertyCollection::Array
-				|| property.Collection == ScriptPropertyCollection::Map)
+			if (property.Collection == PropertyCollection::Array
+				|| property.Collection == PropertyCollection::Map)
 				return true;
 			return !property.Children.empty();
 		}
@@ -592,23 +592,23 @@ ScriptEnumGetter ScriptEnumAccessorFor(const Schema::SchemaRegistry& schemas, co
 
 		// 合成节点 → 集合形态。指针不在 arena 范围内(普通 schema 节点)= None:数组/映射的
 		// 增删路径只对脚本合成 schema 生效,不会走到 Play 里 C++ 实例的嵌套结构上。
-ScriptPropertyCollection ScriptTableCollectionOf(const Schema::TypeSchema* node){
+PropertyCollection ScriptTableCollectionOf(const Schema::TypeSchema* node){
 			if (!node)
-				return ScriptPropertyCollection::None;
+				return PropertyCollection::None;
 			ScriptTableSchemaArena& arena = ScriptTableArena();
 			// 用地址比较(不同对象之间的指针序在标准里未定义;地址转整数后比较是确定的)。
 			const uintptr_t address = reinterpret_cast<uintptr_t>(node);
 			const uintptr_t begin = reinterpret_cast<uintptr_t>(arena.Nodes.data());
 			const uintptr_t end = reinterpret_cast<uintptr_t>(arena.Nodes.data() + arena.Used);
 			if (address < begin || address >= end)
-				return ScriptPropertyCollection::None;
+				return PropertyCollection::None;
 			return arena.Collections[static_cast<size_t>(node - arena.Nodes.data())];
 		}
 
 
-		// VEC-H6:arena 节点 → 它描述的 `ScriptProperty`。返回 nullptr = 该节点不在 arena
+		// VEC-H6:arena 节点 → 它描述的 `PropertyNode`。返回 nullptr = 该节点不在 arena
 		// (顶层字段行的合成 schema —— 那时 instance 就是这条属性本身,见 ScriptRowModel)。
-const ScriptProperty* ScriptTableNodeOwner(const Schema::TypeSchema* node){
+const PropertyNode* ScriptTableNodeOwner(const Schema::TypeSchema* node){
 			if (!node)
 				return nullptr;
 			ScriptTableSchemaArena& arena = ScriptTableArena();
@@ -621,19 +621,19 @@ const ScriptProperty* ScriptTableNodeOwner(const Schema::TypeSchema* node){
 		}
 
 
-		// VEC-H6:当前正在画的行(合成脚本表)对应哪一条 `ScriptProperty`。
+		// VEC-H6:当前正在画的行(合成脚本表)对应哪一条 `PropertyNode`。
 		//  · 嵌套节点:instance = 父属性 → 行 = 父->Children[fieldIndex](与节点 Fields 同序);
 		//  · 顶层行:合成 schema 不在 arena 里,instance 就是那条属性本身。
 		// 调用方必须已确认这是合成路径(m_ScriptInspectingScriptRows)—— Play 里 C++ 实例走真实
-		// 结构体指针,cast 成 ScriptProperty* 是未定义行为。
-const ScriptProperty* ScriptRowModel(const Schema::TypeSchema& node, const void* instance, size_t fieldIndex, bool scriptRows){
-			if (const ScriptProperty* owner = ScriptTableNodeOwner(&node))
+		// 结构体指针,cast 成 PropertyNode* 是未定义行为。
+const PropertyNode* ScriptRowModel(const Schema::TypeSchema& node, const void* instance, size_t fieldIndex, bool scriptRows){
+			if (const PropertyNode* owner = ScriptTableNodeOwner(&node))
 				return fieldIndex < owner->Children.size() ? &owner->Children[fieldIndex] : nullptr;
 			// 顶层脚本行:instance 就是那条属性本身 —— **只对脚本合成路径成立**。
 			// PURE-ECS 起原生组件的容器行也走 arena(`ScriptTableNodeOwner` 命中上一条分支),
-			// 所以这里必须把"instance 强转成 ScriptProperty*"限制在脚本路径,避免把真实
+			// 所以这里必须把"instance 强转成 PropertyNode*"限制在脚本路径,避免把真实
 			// C++ 结构体指针当属性读(未定义行为)。
-			return scriptRows ? static_cast<const ScriptProperty*>(instance) : nullptr;
+			return scriptRows ? static_cast<const PropertyNode*>(instance) : nullptr;
 		}
 
 
@@ -641,17 +641,17 @@ const ScriptProperty* ScriptRowModel(const Schema::TypeSchema& node, const void*
 		//  · 未设(monostate)→ 面板显示的就是默认值 ⇒ 一致(不出现 ↺);
 		//  · 声明没给默认值(Default 也是 monostate)→ 有值即偏离;
 		//  · 都有值 → ValuesEqual 逐字段比(浮点按位相等,不做容差)。
-bool ScriptLeafRowModified(const ScriptProperty& row){
-			if (ScriptProperties::IsUnset(row))
+bool ScriptLeafRowModified(const PropertyNode& row){
+			if (ComponentPropertyModel::IsUnset(row))
 				return false;
 			if (std::holds_alternative<std::monostate>(row.Default))
 				return true;
-			return !ScriptProperties::ValuesEqual(row.Value, row.Default);
+			return !ComponentPropertyModel::ValuesEqual(row.Value, row.Default);
 		}
 
 
-const ScriptProperties::Declaration* FindDeclarationField( const ScriptProperties::Declaration& parent, const std::string& name){
-			for (const ScriptProperties::Declaration& field : parent.Fields)
+const ComponentPropertyModel::Declaration* FindDeclarationField( const ComponentPropertyModel::Declaration& parent, const std::string& name){
+			for (const ComponentPropertyModel::Declaration& field : parent.Fields)
 				if (field.Name == name)
 					return &field;
 			return nullptr;
@@ -662,15 +662,15 @@ const ScriptProperties::Declaration* FindDeclarationField( const ScriptPropertie
 		// 容器 = 任一子行偏离 **或** 形状偏离:数组/映射的默认形状 = 声明里的元素/键行(顺序 + 行名);
 		// 结构体的形状由声明决定(合并时按声明重建),只需递归看值。
 		// declaration 可空(场景独有行 / 声明读不出来)→ 退化成"只看值",不猜形状。
-bool ScriptRowModified(const ScriptProperty& row, const ScriptProperties::Declaration* declaration){
+bool ScriptRowModified(const PropertyNode& row, const ComponentPropertyModel::Declaration* declaration){
 			const bool container = row.Type == Schema::Kind::Object
-				|| row.Collection == ScriptPropertyCollection::Array
-				|| row.Collection == ScriptPropertyCollection::Map;
+				|| row.Collection == PropertyCollection::Array
+				|| row.Collection == PropertyCollection::Map;
 			if (!container)
 				return ScriptLeafRowModified(row);
 			if (declaration && !declaration->FieldsUnknown && !declaration->ReadOnly
-				&& (row.Collection == ScriptPropertyCollection::Array
-					|| row.Collection == ScriptPropertyCollection::Map))
+				&& (row.Collection == PropertyCollection::Array
+					|| row.Collection == PropertyCollection::Map))
 			{
 				// 形状:元素个数/键数或行名序列与声明的默认形状不同 = 改过(增/删/改键)。
 				if (row.Children.size() != declaration->Fields.size())
@@ -679,7 +679,7 @@ bool ScriptRowModified(const ScriptProperty& row, const ScriptProperties::Declar
 					if (row.Children[index].Name != declaration->Fields[index].Name)
 						return true;
 			}
-			for (const ScriptProperty& child : row.Children)
+			for (const PropertyNode& child : row.Children)
 				if (ScriptRowModified(child, declaration ? FindDeclarationField(*declaration, child.Name) : nullptr))
 					return true;
 			return false;
@@ -693,7 +693,7 @@ bool ScriptRowModified(const ScriptProperty& row, const ScriptProperties::Declar
 		// struct 元素 = 没有子字段的裸 table(只读摘要)。这里按 schema/节点形状补一份元素模板:
 		// 子字段的名字/类型/说明/初值齐全,空容器 `+` 直接得到可编辑行。
 		//
-		// 形状口径(与引擎 `ScriptProperties::ElementValueOf` / `Schema::ReadStructValue` 对齐):
+		// 形状口径(与引擎 `ComponentPropertyModel::ElementValueOf` / `Schema::ReadStructValue` 对齐):
 		//   * 命名 struct 元素 = Type=Object + **Collection=None** + Children(字段名 → 值):
 		//     `ElementValueOf` 的 Object 分支按字段名折成 ValueMap,而 `Collection=Struct` 会折成
 		//     ValueList —— `ReadStructValue` 只吃 ValueMap(CPPT-6 元素值契约)。
@@ -702,7 +702,7 @@ bool ScriptRowModified(const ScriptProperty& row, const ScriptProperties::Declar
 		//   * 叶子初值 = schema 声明的 `Default`(类型不符/未声明 → 类型零值),`Default` 留空
 		//     (monostate):这一行算"场景自己的值",保存/重开由场景形状保留(C++ 容器没有声明形状)。
 Schema::Value CollectionElementLeafSeed(const Schema::FieldSchema& field){
-			if (ScriptProperties::ValueMatchesKind(field.Default, field.K))
+			if (ComponentPropertyModel::ValueMatchesKind(field.Default, field.K))
 				return field.Default;
 			if (field.K == Schema::Kind::Enum)
 			{
@@ -711,20 +711,20 @@ Schema::Value CollectionElementLeafSeed(const Schema::FieldSchema& field){
 				if (enumSchema && !enumSchema->IsSigned)
 					return Schema::Value(static_cast<uint64_t>(0));
 			}
-			return DefaultScriptPropertyValue(field.K);
+			return DefaultPropertyValue(field.K);
 		}
 
 
-void AppendCollectionElementFields(std::vector<ScriptProperty>& out, const Schema::TypeSchema& type, int depth){
+void AppendCollectionElementFields(std::vector<PropertyNode>& out, const Schema::TypeSchema& type, int depth){
 			if (depth > kScriptTableMaxDepth)
 				return;
 			for (const Schema::FieldSchema& field : type.Fields)
 			{
-				if (!ScriptProperties::IsPropertyKind(field.K) && !ScriptProperties::IsSummaryKind(field.K))
+				if (!ComponentPropertyModel::IsPropertyKind(field.K) && !ComponentPropertyModel::IsSummaryKind(field.K))
 					continue;
 				if (out.size() >= kScriptTableMaxChildren)
 					return;   // 护栏与合成 arena 同量级(模板建得出,就画得出来)
-				ScriptProperty row;
+				PropertyNode row;
 				row.Name = field.Name;
 				row.Type = field.K;
 				row.Doc = field.Meta.Doc;
@@ -733,7 +733,7 @@ void AppendCollectionElementFields(std::vector<ScriptProperty>& out, const Schem
 					// 命名 struct 里再套容器:建**空容器行**(形状来自 schema),元素由用户再加。
 					row.Type = Schema::Kind::Object;
 					row.Collection = field.Collection == Schema::CollectionKind::Map
-						? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+						? PropertyCollection::Map : PropertyCollection::Array;
 					row.ElementKind = field.ElementKind;
 					row.KeyKind = field.KeyKind;
 					if (field.ElementKind == Schema::Kind::Object)
@@ -753,7 +753,7 @@ void AppendCollectionElementFields(std::vector<ScriptProperty>& out, const Schem
 					}
 					else if (field.ElementKind == Schema::Kind::Asset)
 						row.TypeName = field.AssetTypeName ? field.AssetTypeName : "";
-					else if (ScriptProperties::IsSummaryKind(field.ElementKind))
+					else if (ComponentPropertyModel::IsSummaryKind(field.ElementKind))
 						row.ReadOnly = true;
 				}
 				else if (field.K == Schema::Kind::Object)
@@ -761,7 +761,7 @@ void AppendCollectionElementFields(std::vector<ScriptProperty>& out, const Schem
 					const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
 					if (!nested)
 						continue;   // 引擎口径:嵌套 schema 拿不到的 Object 不进属性表
-					row.Collection = ScriptPropertyCollection::Struct;
+					row.Collection = PropertyCollection::Struct;
 					row.TypeName = nested->Id.Name;
 					AppendCollectionElementFields(row.Children, *nested, depth + 1);
 					if (row.Children.empty())
@@ -779,7 +779,7 @@ void AppendCollectionElementFields(std::vector<ScriptProperty>& out, const Schem
 					}
 					else if (field.K == Schema::Kind::Asset)
 						row.TypeName = field.AssetTypeName ? field.AssetTypeName : "";
-					else if (ScriptProperties::IsSummaryKind(field.K))
+					else if (ComponentPropertyModel::IsSummaryKind(field.K))
 						row.ReadOnly = true;
 					row.Value = CollectionElementLeafSeed(field);
 				}
@@ -788,12 +788,12 @@ void AppendCollectionElementFields(std::vector<ScriptProperty>& out, const Schem
 		}
 
 
-ScriptProperty MakeCollectionElement(const ScriptProperty& container, const Schema::SchemaRegistry* schemas, bool plainRows){
-			ScriptProperty child;
+PropertyNode MakeCollectionElement(const PropertyNode& container, const Schema::SchemaRegistry* schemas, bool plainRows){
+			PropertyNode child;
 			child.Type = container.ElementKind;
 			if (!container.Children.empty())
 			{
-				const ScriptProperty& model = container.Children.back();
+				const PropertyNode& model = container.Children.back();
 				child.Type = model.Type;
 				child.TypeName = model.TypeName;
 				child.Collection = model.Collection;
@@ -825,20 +825,20 @@ ScriptProperty MakeCollectionElement(const ScriptProperty& container, const Sche
 			// Object 行(结构化表 / 命名 struct 元素)的值是 Children,Value 保持上面定好的形态;
 			// 叶子行才回落类型零值。
 			if (child.Type != Schema::Kind::Object)
-				child.Value = DefaultScriptPropertyValue(child.Type);
+				child.Value = DefaultPropertyValue(child.Type);
 			return child;
 		}
 
 
-bool CollectionKeyTaken(const ScriptProperty& container, const std::string& key){
+bool CollectionKeyTaken(const PropertyNode& container, const std::string& key){
 			return std::any_of(container.Children.begin(), container.Children.end(),
-				[&key](const ScriptProperty& child) { return child.Name == key; });
+				[&key](const PropertyNode& child) { return child.Name == key; });
 		}
 
 
 		// 数组行名 = 下标字符串 1..n:删掉中间元素后重排,让行 id / 存档顺序 / 脚本写回(`1..n`)
 		// 共用同一份下标口径。
-void RenumberArrayChildren(ScriptProperty& container){
+void RenumberArrayChildren(PropertyNode& container){
 			for (size_t index = 0; index < container.Children.size(); ++index)
 				container.Children[index].Name = std::to_string(index + 1);
 		}
@@ -846,7 +846,7 @@ void RenumberArrayChildren(ScriptProperty& container){
 
 		// ---- VEC-F2:两级复原的公共口径 ----
 		//
-		// 单项 `↺` = 把该行清成"未设"(monostate):显示走 `ScriptPropertyDisplayValue` 回落
+		// 单项 `↺` = 把该行清成"未设"(monostate):显示走 `PropertyNodeDisplayValue` 回落
 		// 声明默认值,存档按 D1 判定"未设 → 整条不写"。**不触发任何整表重同步** ——
 		// 旧实现在复位后强制 `SyncScriptDeclarations`,会把同一集合里用户刚做的增删(形状)按声明重建,
 		// 表现就是"点一个元素的 `↺`,整个集合都回去了"。
@@ -855,10 +855,10 @@ void RenumberArrayChildren(ScriptProperty& container){
 		// (默认形状 + 默认值,其它集合/其它属性一律不动);C++ 结构化表没有数组/映射
 		// (增删只存在于脚本侧),递归把叶子清成默认值即可。
 		// 按"名字路径"解析一条脚本属性(名字逐段比较:映射键里的 '.' 不会被拆成两段)。
-ScriptProperty* ResolveScriptRowPath(std::vector<ScriptProperty>& properties, const std::vector<std::string>& path, size_t index ){
+PropertyNode* ResolveScriptRowPath(std::vector<PropertyNode>& properties, const std::vector<std::string>& path, size_t index ){
 			if (index >= path.size())
 				return nullptr;
-			for (ScriptProperty& property : properties)
+			for (PropertyNode& property : properties)
 			{
 				if (property.Name != path[index])
 					continue;
@@ -870,10 +870,10 @@ ScriptProperty* ResolveScriptRowPath(std::vector<ScriptProperty>& properties, co
 		}
 
 
-const ScriptProperties::Declaration* ResolveDeclarationPath( const std::vector<ScriptProperties::Declaration>& declarations, const std::vector<std::string>& path, size_t index ){
+const ComponentPropertyModel::Declaration* ResolveDeclarationPath( const std::vector<ComponentPropertyModel::Declaration>& declarations, const std::vector<std::string>& path, size_t index ){
 			if (index >= path.size())
 				return nullptr;
-			for (const ScriptProperties::Declaration& declaration : declarations)
+			for (const ComponentPropertyModel::Declaration& declaration : declarations)
 			{
 				if (declaration.Name != path[index])
 					continue;
@@ -888,13 +888,13 @@ const ScriptProperties::Declaration* ResolveDeclarationPath( const std::vector<S
 		// 把一条属性子树里的每个**叶子**清成声明默认值(容器递归;容器自身没有 Value)。
 		// 用于 C++ 结构化表(形状由 schema 决定)与"声明的默认形状读不出来"时的 Luau 兜底:
 		// 形状保持,值全部回到默认 —— 不猜一个可能不存在的默认形状。
-void ResetScriptRowValues(ScriptProperty& row){
+void ResetScriptRowValues(PropertyNode& row){
 			const bool container = row.Type == Schema::Kind::Object
-				|| row.Collection == ScriptPropertyCollection::Array
-				|| row.Collection == ScriptPropertyCollection::Map;
+				|| row.Collection == PropertyCollection::Array
+				|| row.Collection == PropertyCollection::Map;
 			if (container)
 			{
-				for (ScriptProperty& child : row.Children)
+				for (PropertyNode& child : row.Children)
 					ResetScriptRowValues(child);
 				return;
 			}
@@ -915,11 +915,11 @@ std::string ScriptRowPathText(const std::vector<std::string>& path){
 
 
 		// 集合头 `↺` 的按钮文案按集合形态分(数组 / 映射 / 结构化表)—— 与单项 `↺` 一眼可分。
-std::string ScriptCollectionHeadResetLabel(ScriptPropertyCollection collection){
+std::string ScriptCollectionHeadResetLabel(PropertyCollection collection){
 			switch (collection)
 			{
-				case ScriptPropertyCollection::Array: return "Reset the whole array";
-				case ScriptPropertyCollection::Map: return "Reset the whole map";
+				case PropertyCollection::Array: return "Reset the whole array";
+				case PropertyCollection::Map: return "Reset the whole map";
 				default: return "Reset the whole struct";
 			}
 		}
@@ -951,7 +951,7 @@ const void* ScriptTableIdentityPtrConst(const void* instance){ return instance; 
 		// CPPT7R-T1(C2):`declared` = 声明**这一行**的 `FieldSchema`(顶层 = 脚本/组件 schema 里的
 		// 那条字段;结构体成员 = 结构体 schema 里的那条字段)—— 容器的 Range/Unit/Step 描述的是
 		// **元素**,靠它透传给元素行(见下面的 elementRow 块)。
-size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string& idPath, size_t depth, const Schema::SchemaRegistry* schemas, const Schema::FieldSchema* declared ){
+size_t BuildScriptTableSchema(const PropertyNode& property, const std::string& idPath, size_t depth, const Schema::SchemaRegistry* schemas, const Schema::FieldSchema* declared ){
 			ScriptTableSchemaArena& arena = ScriptTableArena();
 			if (depth > kScriptTableMaxDepth || arena.Used >= kScriptTableMaxNodes)
 				return kScriptTableNoNode;
@@ -966,7 +966,7 @@ size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string&
 			arena.Owners[nodeIndex] = &property;
 			for (size_t index = 0; index < childCount; ++index)
 			{
-				const ScriptProperty& child = property.Children[index];
+				const PropertyNode& child = property.Children[index];
 				Schema::FieldSchema field;
 				field.Name = child.Name;
 				field.K = child.Type;
@@ -986,19 +986,19 @@ size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string&
 				{
 					field.Meta.AssetType = child.TypeName;
 				}
-				else if (ScriptProperties::IsSummaryKind(child.Type))
+				else if (ComponentPropertyModel::IsSummaryKind(child.Type))
 				{
 					field.Meta.ReadOnly = true;
 				}
 				// CPPT7R-T1(C2):容器**元素行**吃父字段的编辑元数据(Range/Unit/Step)。引擎的
-				// `ScriptProperty` 只带 Doc/ReadOnly/TypeName(注解不进属性表/不进存档),
+				// `PropertyNode` 只带 Doc/ReadOnly/TypeName(注解不进属性表/不进存档),
 				// 元素行又是面板按父字段的 Children 合成的 ⇒ 元数据只能从声明里透传。
 				// 口径 = 与叶子行逐字段一致(未声明范围就不夹取、没有范围+单位就保持 DragFloat,
 				// 见本文件 Float/Int 分支):**不新增行为,只补齐缺的那一份声明**。
 				// 结构化表元素(Object)不在这一层吃父元数据:它的子字段各自有 schema 声明。
 				const bool elementRow = child.Type != Schema::Kind::Object
-					&& (property.Collection == ScriptPropertyCollection::Array
-						|| property.Collection == ScriptPropertyCollection::Map);
+					&& (property.Collection == PropertyCollection::Array
+						|| property.Collection == PropertyCollection::Map);
 				if (declared && elementRow)
 				{
 					field.Meta.Min = declared->Meta.Min;
@@ -1012,11 +1012,11 @@ size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string&
 					// 面板侧与 DrawSchemaFields 的 scriptPropertyRow 摘要分支同一判据)。
 					// VEC-C2:类型文案(含 `struct`/`array`/`map`)也走 Meta.DisplayName —— 没有注解
 					// 说明时行悬停用它回落(v4 §1);空数组/空映射仍可展开(子行只有底部 `+`)。
-					field.Meta.DisplayName = ScriptPropertyTypeText(child);
+					field.Meta.DisplayName = PropertyNodeTypeText(child);
 					// 结构体成员是**声明行**:名字在父结构体的 schema 里查得到那份 FieldSchema
 					// ⇒ 往下传,使"结构体里的容器"的元素同样吃到元数据(递归透传)。
 					const Schema::FieldSchema* childDeclared = nullptr;
-					if (schemas && property.Collection == ScriptPropertyCollection::Struct
+					if (schemas && property.Collection == PropertyCollection::Struct
 						&& !property.TypeName.empty())
 					{
 						if (const Schema::TypeSchema* owner = schemas->Find(property.TypeName))
@@ -1027,7 +1027,7 @@ size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string&
 									break;
 								}
 					}
-					const size_t childNode = ScriptPropertyExpandable(child)
+					const size_t childNode = PropertyNodeExpandable(child)
 						? BuildScriptTableSchema(child, idPath + "." + child.Name, depth + 1, schemas, childDeclared)
 						: kScriptTableNoNode;
 					if (childNode == kScriptTableNoNode)
@@ -1058,15 +1058,15 @@ size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string&
 		// 所以拿不到 N 时只写类型名 `table`。
 		// CPPT7R-T1(C2):`declared` = 容器字段自己的 FieldSchema(顶层调用方从脚本/组件 schema 查),
 		// 它带着 Range/Unit/Step —— 合成元素行时透传(见 BuildScriptTableSchema 的 elementRow 块)。
-Schema::FieldSchema MakeScriptTableField(const ScriptProperty& property, const std::string& idPath, const Schema::SchemaRegistry* schemas, const Schema::FieldSchema* declared ){
+Schema::FieldSchema MakeScriptTableField(const PropertyNode& property, const std::string& idPath, const Schema::SchemaRegistry* schemas, const Schema::FieldSchema* declared ){
 			Schema::FieldSchema field;
 			field.Name = property.Name;
 			field.K = Schema::Kind::Object;
 			field.Meta.Doc = property.Doc;
 			// VEC-C2:类型文案(裸 table → `table`;只读数组/映射 → `array`/`map`;可展开结构 → `struct`)
 			// —— 摘要行文本与"没有注解说明"时的行悬停回落共用它(v4 §1)。
-			field.Meta.DisplayName = ScriptPropertyTypeText(property);
-			if (!ScriptPropertyExpandable(property))
+			field.Meta.DisplayName = PropertyNodeTypeText(property);
+			if (!PropertyNodeExpandable(property))
 				return field;
 			const size_t nodeIndex = BuildScriptTableSchema(property, idPath, 1, schemas, declared);
 			if (nodeIndex == kScriptTableNoNode)
@@ -1089,7 +1089,7 @@ const Schema::TypeSchema* FindNamedStructSchema(const Schema::SchemaRegistry* sc
 
 		// 原生路径:给一个命名 struct 元素(还没有子行)按 schema 补出可编辑子行并记下默认种子。
 		// `Value` 保持 monostate:折叠时 `ElementValueOf` 对 Object 行按 `Children` 折成 ValueMap。
-void HydratePlainStructElement(ScriptProperty& element, const Schema::SchemaRegistry* schemas){
+void HydratePlainStructElement(PropertyNode& element, const Schema::SchemaRegistry* schemas){
 			if (element.Type != Schema::Kind::Object || !element.Children.empty() || element.ReadOnly)
 				return;
 			const Schema::TypeSchema* elementSchema = FindNamedStructSchema(schemas, element.TypeName);
@@ -1103,10 +1103,10 @@ void HydratePlainStructElement(ScriptProperty& element, const Schema::SchemaRegi
 
 
 		// 声明种子同时记成行默认值:`↺` 的语义 = 回到这个种子(原生容器没有别的"默认"可回落)。
-void CapturePlainRowDefaults(ScriptProperty& row){
+void CapturePlainRowDefaults(PropertyNode& row){
 			if (row.Type == Schema::Kind::Object)
 			{
-				for (ScriptProperty& child : row.Children)
+				for (PropertyNode& child : row.Children)
 					CapturePlainRowDefaults(child);
 				return;
 			}
@@ -1117,14 +1117,14 @@ void CapturePlainRowDefaults(ScriptProperty& row){
 
 		// 命名 struct 元素的子行:形状从元素 schema 取(声明种子 → 默认值),值从实例的
 		// ValueMap 覆盖(键缺失 = 保留声明种子,面板不会显示"未设")。
-void HydrateStructElementChildren(ScriptProperty& row, const Schema::TypeSchema& nested, const Schema::Value& value, int depth, const Schema::SchemaRegistry* schemas){
+void HydrateStructElementChildren(PropertyNode& row, const Schema::TypeSchema& nested, const Schema::Value& value, int depth, const Schema::SchemaRegistry* schemas){
 			AppendCollectionElementFields(row.Children, nested, depth);
-			for (ScriptProperty& child : row.Children)
+			for (PropertyNode& child : row.Children)
 				CapturePlainRowDefaults(child);
 			const Schema::ValueMap* map = std::get_if<Schema::ValueMap>(&value);
 			if (!map)
 				return;
-			for (ScriptProperty& child : row.Children)
+			for (PropertyNode& child : row.Children)
 			{
 				const Schema::ValueMap::const_iterator found = map->find(child.Name);
 				if (found == map->end())
@@ -1146,13 +1146,13 @@ void HydrateStructElementChildren(ScriptProperty& row, const Schema::TypeSchema&
 
 		// 一个容器字段(Array/Map)从实例值水合出行模型。形状 = 实例里的元素(空容器 = 没有行,
 		// 面板给"暂无元素 + `+`");元素类型/说明/编辑元数据 = 字段声明 + 元素 schema。
-ScriptProperty HydratePlainContainer(const Schema::FieldSchema& field, const Schema::Value& value, const Schema::SchemaRegistry* schemas){
-			ScriptProperty container;
+PropertyNode HydratePlainContainer(const Schema::FieldSchema& field, const Schema::Value& value, const Schema::SchemaRegistry* schemas){
+			PropertyNode container;
 			container.Name = field.Name;
 			container.Type = Schema::Kind::Object;
 			container.Doc = field.Meta.Doc;
 			container.Collection = field.Collection == Schema::CollectionKind::Map
-				? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+				? PropertyCollection::Map : PropertyCollection::Array;
 			container.ElementKind = field.ElementKind;
 			container.KeyKind = field.KeyKind;
 			if (field.ElementTypeName)
@@ -1172,7 +1172,7 @@ ScriptProperty HydratePlainContainer(const Schema::FieldSchema& field, const Sch
 			{
 				container.ReadOnly = true;   // 元素 schema 拿不到:只读摘要(与引擎声明同一条降级)
 			}
-			else if (ScriptProperties::IsSummaryKind(container.ElementKind))
+			else if (ComponentPropertyModel::IsSummaryKind(container.ElementKind))
 			{
 				container.ReadOnly = true;   // 面板没有行控件
 			}
@@ -1181,7 +1181,7 @@ ScriptProperty HydratePlainContainer(const Schema::FieldSchema& field, const Sch
 			// 的 elementRow 分支透传给元素行 —— 与旧脚本路径逐字段一致。
 			const auto makeElement = [&](const Schema::Value& elementValue, const std::string& name, int depth)
 			{
-				ScriptProperty child;
+				PropertyNode child;
 				child.Name = name;
 				child.Type = container.ElementKind;
 				child.TypeName = container.TypeName;
@@ -1191,8 +1191,8 @@ ScriptProperty HydratePlainContainer(const Schema::FieldSchema& field, const Sch
 				else
 					child.Value = elementValue;
 				CapturePlainRowDefaults(child);
-				if (child.Type != Schema::Kind::Object && !ScriptPropertyValueMatchesType(child))
-					child.Value = DefaultScriptPropertyValue(child.Type);   // 存值类型不符 → 声明零值
+				if (child.Type != Schema::Kind::Object && !PropertyNodeValueMatchesType(child))
+					child.Value = DefaultPropertyValue(child.Type);   // 存值类型不符 → 声明零值
 				return child;
 			};
 
@@ -1226,7 +1226,7 @@ const Schema::FieldSchema* FindScriptSchemaField(const Schema::TypeSchema& schem
 
 		// ---- VEC-C2:脚本声明签名(编辑态同步的门)----
 		//
-		// 为什么需要门:引擎的合并**在集合形状上以脚本声明为准**(`ScriptProperties::ApplyInto`:
+		// 为什么需要门:引擎的合并**在集合形状上以脚本声明为准**(`ComponentPropertyModel::ApplyInto`:
 		// 数组/映射的子行按声明的名字重建),而面板的 `+`/`-`(方案 v3 §4 / v4 §3 的验收)改的是
 		// 组件里的 `Children` —— 每帧无条件重合并会把面板刚做的增删还原回去。声明签名不变时跳过
 		// 合并 ⇒ 值/形状以组件(场景)为准;脚本一改(内容指纹变 → 签名变)照旧整体重建,
@@ -1234,20 +1234,20 @@ const Schema::FieldSchema* FindScriptSchemaField(const Schema::TypeSchema& schem
 		//
 		// 签名含:顺序 / 名字 / 类型 / 集合形态 / 元素与键类型 / 只读标记 / 元素行是否未知 /
 		// 说明(改注释也要跟着刷新)/ 默认值(脚本表初值改了,没改过的字段要回新初值)。
-void AppendDeclarationSignature(std::string& out, const std::vector<ScriptProperties::Declaration>& declarations, int depth){
+void AppendDeclarationSignature(std::string& out, const std::vector<ComponentPropertyModel::Declaration>& declarations, int depth){
 			if (depth > 6)
 				return;
-			for (const ScriptProperties::Declaration& declaration : declarations)
+			for (const ComponentPropertyModel::Declaration& declaration : declarations)
 			{
 				out += declaration.Name;
 				out += '|';
-				out += ScriptProperties::KindName(declaration.Type);
+				out += ComponentPropertyModel::KindName(declaration.Type);
 				out += '|';
-				out += ScriptProperties::CollectionName(declaration.Collection);
+				out += ComponentPropertyModel::CollectionName(declaration.Collection);
 				out += '|';
-				out += ScriptProperties::KindName(declaration.ElementKind);
+				out += ComponentPropertyModel::KindName(declaration.ElementKind);
 				out += '|';
-				out += ScriptProperties::KindName(declaration.KeyKind);
+				out += ComponentPropertyModel::KindName(declaration.KeyKind);
 				out += declaration.ReadOnly ? "|ro" : "";
 				out += declaration.FieldsUnknown ? "|unknown" : "";
 				out += '|';
@@ -1261,7 +1261,7 @@ void AppendDeclarationSignature(std::string& out, const std::vector<ScriptProper
 		}
 
 
-std::string ScriptDeclarationSignature(const std::vector<ScriptProperties::Declaration>& declarations){
+std::string ScriptDeclarationSignature(const std::vector<ComponentPropertyModel::Declaration>& declarations){
 			std::string out;
 			AppendDeclarationSignature(out, declarations, 0);
 			return out;
@@ -1554,22 +1554,22 @@ void PropertiesPanel::DrawRemoveComponentConfirm(Wui::WuiContext& ctx, Entity en
 	// schema 看不到)→ 清 `Children` + 丢掉形状归属;非容器的结构化表形状由 schema 决定 → 递归清值。
 	// container 是本帧正在画的那个容器(合成路径下指针在本次绘制内稳定);path = 该容器的完整名字路径
 	// (调用方在请求时记下 —— 本函数是**延后**落地的,那时 m_ScriptRowPath 已经变了)。
-void PropertiesPanel::ApplyScriptCollectionReset(Wui::WuiContext& ctx, ScriptProperty& container, bool luau, const std::vector<std::string>& path){
+void PropertiesPanel::ApplyScriptCollectionReset(Wui::WuiContext& ctx, PropertyNode& container, bool luau, const std::vector<std::string>& path){
 		if (m_ReadOnly || container.ReadOnly)
 			return;
 		if (luau)
 		{
-			const ScriptProperties::Declaration* declaration = m_ScriptDeclarationsValid
+			const ComponentPropertyModel::Declaration* declaration = m_ScriptDeclarationsValid
 				? ResolveDeclarationPath(m_ScriptDeclarations, path) : nullptr;
 			if (declaration && !declaration->FieldsUnknown && !declaration->ReadOnly)
 			{
 				// seed 与目标同形(名字/类型对齐),但子行清空 + 形状归属清零:
 				// 合并后 = 声明的默认形状 + 每行的默认值(全"未设" ⇒ 存档整条不写)。
-				ScriptProperty seed = container;
+				PropertyNode seed = container;
 				seed.Children.clear();
 				seed.ShapeFromScene = false;
-				std::vector<ScriptProperty> next { std::move(seed) };
-				ScriptProperties::SyncFromDeclarations(next, { *declaration });
+				std::vector<PropertyNode> next { std::move(seed) };
+				ComponentPropertyModel::SyncFromDeclarations(next, { *declaration });
 				if (!next.empty() && next[0].Name == container.Name)
 				{
 					container = std::move(next[0]);
@@ -1590,8 +1590,8 @@ void PropertiesPanel::ApplyScriptCollectionReset(Wui::WuiContext& ctx, ScriptPro
 			// 清掉面板加的增删 + 丢掉"形状来自场景"的归属:复位后这条容器不再是"场景记录过",
 			// 存档跟着不写,Play 时脚本成员初值生效(与 D1"未设不覆盖"同口径);下一帧
 			// `ScriptRowModified` 回到未偏离 → 集合头 `↺` 自动消失。
-			if (container.Collection == ScriptPropertyCollection::Array
-				|| container.Collection == ScriptPropertyCollection::Map)
+			if (container.Collection == PropertyCollection::Array
+				|| container.Collection == PropertyCollection::Map)
 			{
 				container.Children.clear();
 				container.ShapeFromScene = false;

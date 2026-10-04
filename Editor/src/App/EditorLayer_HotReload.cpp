@@ -646,7 +646,7 @@ void EditorLayer::PollAssetHotReload(float deltaSeconds){
 	// 口径(方案 P2 细化设计,P2-b):
 	//   * 监听集合 = 当前**文档场景** PrefabInstances() 里的来源路径(每帧同步:新引用 Watch、
 	//     消失的引用 Unwatch);Play/Simulate 的活动场景是运行时副本,不跟随;
-	//   * 变化经 AssetFileWatch 150ms 消抖后进入未决集合,只在 CanApplyScriptReload()
+	//   * 变化经 AssetFileWatch 150ms 消抖后进入未决集合,只在 CanApplyModuleReload()
 	//     的安全点消费(ApplyPrefabChanges 会改实体组件;与脚本热重载同一安全点口径),
 	//     不安全时顺延到下一帧,不丢;
 	//   * 每个被引用实例单独调用 Gameplay::ApplyPrefabChanges:false = 该实例未改(记 failed,
@@ -703,7 +703,7 @@ void EditorLayer::ApplyPendingPrefabChanges(){
 		Scene* scene = m_ActiveScene.get();
 		if (scene == nullptr || m_SceneState != SceneState::Edit || scene != m_Document.GetScene().get())
 			return;   // Play/Simulate / 无文档:不消费(回到编辑态后按新基线重新登记)
-		if (!scene->CanApplyScriptReload())
+		if (!scene->CanApplyModuleReload())
 			return;   // 不安全点(脚本回调/结构提交中):顺延,下一帧再试
 
 		std::vector<std::string> pending;

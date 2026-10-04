@@ -1,7 +1,7 @@
-﻿#pragma once
+#pragma once
 #include "World/Core/Export.h"
 #include "World/Script/Vm/Sandbox.h"
-#include "World/Script/Runtime/ScriptProperties.h"
+#include "World/Script/Runtime/ComponentPropertyModel.h"
 #include "World/Scene/Scene.h"
 #include <algorithm>
 #include <cstddef>

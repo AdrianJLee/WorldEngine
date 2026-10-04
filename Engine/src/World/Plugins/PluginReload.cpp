@@ -327,7 +327,7 @@ namespace World::Plugins
 			out.Message = "plugin is not loaded: " + id;
 			return Status::NotLoaded;
 		}
-		if (scene && !scene->CanApplyScriptReload())
+		if (scene && !scene->CanApplyModuleReload())
 		{
 			out.Message = "not at a script reload safe point (inside a callback, structural commit or stop); try again at the frame boundary";
 			return Status::NotSafePoint;
@@ -514,7 +514,7 @@ namespace World::Plugins
 				+ " (run reload again to unload it first)";
 			return Status::AlreadyLoaded;
 		}
-		if (scene && !scene->CanApplyScriptReload())
+		if (scene && !scene->CanApplyModuleReload())
 		{
 			out.Message = "not at a script reload safe point (inside a callback, structural commit or stop); try again at the frame boundary";
 			return Status::NotSafePoint;

@@ -2,7 +2,7 @@
 #include "World/Script/Runtime/HotReload.h"
 
 #include "World/Core/Application.h"
-#include "World/Script/Runtime/ScriptProperties.h"
+#include "World/Script/Runtime/ComponentPropertyModel.h"
 #include "World/Utils/Paths.h"
 
 #include <algorithm>

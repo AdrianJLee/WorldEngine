@@ -50,7 +50,7 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 	// ---- 2026-09-26 脚本组件重写:统一脚本检视器(两个脚本组件共用)----
 	//
 	// 布局:脚本引用行 → 状态行(State + LastError,Luau 再加 ReloadDiagnostic)→ 属性表
-	//      (每个 `ScriptProperty` 一行)→ 动作行(Luau 的 Reload,id 保持 `lua.reload`)。
+	//      (每个 `PropertyNode` 一行)→ 动作行(Luau 的 Reload,id 保持 `lua.reload`)。
 	//
 	// 三条硬口径(方案 v2 §3 + 派工单):
 	//   ① **编辑态不实例化脚本**:属性直接读写组件里的 `Properties`;不建 VM、不跑 OnCreate、

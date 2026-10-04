@@ -20,7 +20,7 @@ namespace World::Modules
 
 		// PURE-ECS:模块的 `WeModule::Register` 可以登记"场景系统挂载钩子"
 		// (WorldContext::AddSceneSystemsHook),Attach 挂上的帧系统函数指针就在这个 DLL 里。
-		// 运行中的场景一旦失去 DLL ⇒ 下一帧调用跳进已卸载内存。Scene::CanApplyScriptReload
+		// 运行中的场景一旦失去 DLL ⇒ 下一帧调用跳进已卸载内存。Scene::CanApplyModuleReload
 		// 只挡"回调内/结构提交点内/停止中"(它必须放行 Play 期间的 Lua 系统脚本热重载),
 		// 所以模块卸载/重载这条路径要自己再加一个安全点:同一 WorldContext 下不得有 Running 场景。
 		// 只有"真的登记过钩子"的上下文才受这条限制 —— 没有 `src/GameProject.cpp` 的项目
@@ -57,7 +57,7 @@ namespace World::Modules
 		GameModuleReloadResult& out = result ? *result : local;
 		out = GameModuleReloadResult {};
 
-		if (scene && !scene->CanApplyScriptReload())
+		if (scene && !scene->CanApplyModuleReload())
 		{
 			out.Status = ModuleManager::Status::NotSafePoint;
 			out.Message = "not at a script reload safe point (inside a callback, structural commit or stop)";
@@ -120,7 +120,7 @@ namespace World::Modules
 			out.Message = "Game module is already loaded";
 			return false;
 		}
-		if (scene && !scene->CanApplyScriptReload())
+		if (scene && !scene->CanApplyModuleReload())
 		{
 			out.Status = ModuleManager::Status::NotSafePoint;
 			out.Message = "not at a script reload safe point (inside a callback, structural commit or stop)";

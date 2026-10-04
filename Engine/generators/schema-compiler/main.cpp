@@ -536,7 +536,7 @@ namespace
 	}
 
 	// CPPT-6-FIX2:类型零值必须是**这个 kind 自己那一支** variant 备选(与编辑器的
-	// DefaultScriptPropertyValue / ScriptProperties::ValueMatchesKind 同一份口径)。
+	// DefaultPropertyValue / ComponentPropertyModel::ValueMatchesKind 同一份口径)。
 	// 旧实现把 Float 写成 `Value(0.0)`(double)、整数族写成 `Value(0)`(int):非 Script 类别
 	// (Struct/Component 的字段)的声明默认值因此类型不符 —— 嵌套 struct 的 Float 子字段在检视器里
 	// 判"值与声明类型不符",只画 `—` 且不可编辑(Stats.Health 实测)。
@@ -996,8 +996,8 @@ namespace
 		out << "            Kind::" << element.Kind << ",\n";
 		out << "            " << (field.Kind == "Map" ? "Kind::String" : "Kind::None") << ",\n";
 		if (element.Kind == "Object")
-			// 元素类型名与 TypeSchema::Id.Name 同形(Module::Type)—— ScriptProperties 用它
-			// 填 ScriptProperty::TypeName,与 GetElementNested() 的 Id.Name 保持一致。
+			// 元素类型名与 TypeSchema::Id.Name 同形(Module::Type)—— ComponentPropertyModel 用它
+			// 填 PropertyNode::TypeName,与 GetElementNested() 的 Id.Name 保持一致。
 			out << "            \"" << decl.Module << "::" << ShortName(element.Struct) << "\",\n";
 		else if (element.Kind == "Enum")
 			out << "            \"" << element.Enum << "\",\n";

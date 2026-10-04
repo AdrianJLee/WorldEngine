@@ -52,7 +52,7 @@ Engine/
       Vm/                  Luau VM、沙箱、ScriptValue/ScriptRef、LuauHeaders
       Bindings/            BindECS/BindEvents/BindServices/BindUI/BindComponentAccess
       Runtime/             ScriptEngine、LuaStubGenerator、HotReload、ScriptFileWatch、
-                          ScriptProperties、PluginScriptLibrary
+                          ComponentPropertyModel、PluginScriptLibrary
       LuaType/             Vec2/Vec3/Vec4/Mat3/Mat4/Entity 的 Lua 类型绑定
       Tooling/             Luau 高亮/补全/格式化/语法(编辑器语言工具)
     Gameplay/              Runtime/(GameApp/GameHost/GameFlow/SystemRegistry)、

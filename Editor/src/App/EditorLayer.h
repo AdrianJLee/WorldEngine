@@ -372,7 +372,7 @@ namespace World
 		// HOTR-P2-T6:当前**文档场景**里 prefab 实例引用的 `.wprefab` 外部改动 → 帧边界安全点
 		// 逐实例跟随(150ms 消抖,仅编辑态;override 保留由 ApplyPrefabChanges 负责)。
 		void PollPrefabHotReload(float deltaSeconds);
-		// 未决 prefab 变化在安全点(CanApplyScriptReload)消费;不安全点顺延到下一帧,不丢。
+		// 未决 prefab 变化在安全点(CanApplyModuleReload)消费;不安全点顺延到下一帧,不丢。
 		void ApplyPendingPrefabChanges();
 		// 用当前文档路径重建场景监听基线(打开/保存/重开成功后调用;换路径时也清提示)。
 		void RebaselineExternalSceneWatch();
@@ -557,7 +557,7 @@ namespace World
 		std::string m_WatchedSceneLogicalPath;
 		// HOTR-P2-T6:场景内 prefab 实例引用的 `.wprefab` 监听(150ms)与未决变化。
 		// 监听集合每帧与 PrefabInstances() 的来源路径同步(新引用 Watch、消失的 Unwatch);
-		// 变化先进入未决集合,只在 CanApplyScriptReload() 的安全点消费(ApplyPrefabChanges
+		// 变化先进入未决集合,只在 CanApplyModuleReload() 的安全点消费(ApplyPrefabChanges
 		// 会改实体组件,与脚本热重载同一安全点口径)。
 		AssetFileWatch m_PrefabWatch;
 		std::vector<std::string> m_PendingPrefabReloads;

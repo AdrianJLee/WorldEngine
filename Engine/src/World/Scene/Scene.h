@@ -376,7 +376,7 @@ namespace World
 		};
 		// W5:脚本热重载只允许在安全点提交——不在脚本回调内、不在结构提交点内、
 		// 也不在 Stop 流程中。宿主(编辑器/Runtime)应在帧边界调用,并以此判定是否可重载。
-		bool CanApplyScriptReload() const;
+		bool CanApplyModuleReload() const;
 		// Accepted commands execute once at a safe point; callbacks enqueue the next batch.
 		bool DeferStructuralChange(std::function<void(Scene&)> command);
 		void FlushStructuralChanges();

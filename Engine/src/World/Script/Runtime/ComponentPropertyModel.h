@@ -10,7 +10,7 @@
 
 namespace World
 {
-	enum class ScriptPropertyCollection : uint8_t
+	enum class PropertyCollection : uint8_t
 	{
 		None = 0,
 		Struct,
@@ -18,16 +18,16 @@ namespace World
 		Map,
 	};
 
-	struct ScriptProperty
+	struct PropertyNode
 	{
 		std::string Name;
 		Schema::Kind Type = Schema::Kind::None;
 		Schema::Value Value;
 		std::string Doc;
 		std::string TypeName;
-		std::vector<ScriptProperty> Children;
+		std::vector<PropertyNode> Children;
 		bool ReadOnly = false;
-		ScriptPropertyCollection Collection = ScriptPropertyCollection::None;
+		PropertyCollection Collection = PropertyCollection::None;
 		Schema::Kind ElementKind = Schema::Kind::None;
 		Schema::Kind KeyKind = Schema::Kind::String;
 		Schema::Value Default;
@@ -45,7 +45,7 @@ namespace World
 	//     **嵌套 `---@class` 结构化表**(Fields 递归同构;没有子字段的裸 table = ReadOnly 摘要行);
 	//     C 期起还表示**数组/映射**(Collection 区分 Struct/Array/Map,见 Declaration 的字段);
 	//     其它类型不参与"脚本属性"。
-	namespace ScriptProperties
+	namespace ComponentPropertyModel
 	{
 		// V1(2026-09-26 用户反馈):一条脚本属性声明 —— 名字 / schema 类型 / 注解说明 / 脚本里的默认值。
 		// 顺序 = 声明顺序(注解顺序 → 脚本表顺序)。
@@ -64,7 +64,7 @@ namespace World
 			// Name = 下标字符串,Default = 脚本表里的初值);Map: Fields = 键值行(Name = 键)。
 			// ReadOnly = true 表示这一条只做只读摘要(裸 table / 元素类型不支持 / 推断失败 / 超护栏):
 			// 检视器只画一行,不进存档。Struct 的裸 table 也走这一条。
-			ScriptPropertyCollection Collection = ScriptPropertyCollection::None;
+			PropertyCollection Collection = PropertyCollection::None;
 			Schema::Kind ElementKind = Schema::Kind::None;
 			Schema::Kind KeyKind = Schema::Kind::String;
 			bool ReadOnly = false;
@@ -85,30 +85,30 @@ namespace World
 		WLD_API const char* KindName(Schema::Kind kind);
 		WLD_API Schema::Kind KindFromName(const std::string& name);
 		// C 期:集合形态的可读名(None/Struct/Array/Map)—— 存档的 `Type: Array|Map` 与诊断共用。
-		WLD_API const char* CollectionName(ScriptPropertyCollection collection);
+		WLD_API const char* CollectionName(PropertyCollection collection);
 
 		// 按 schema 类型(C++ 脚本)同步:fields 里每个叶子字段 → 一条属性。
-		WLD_API void SyncFromSchema(std::vector<ScriptProperty>& properties, const Schema::TypeSchema& type);
+		WLD_API void SyncFromSchema(std::vector<PropertyNode>& properties, const Schema::TypeSchema& type);
 
 		// V1:按完整声明(名字 / 类型 / 说明 / 默认值)同步。规则:
 		//   * 顺序 = 声明顺序;Doc 每次刷新(脚本里的说明改了就跟着走);
 		//   * 同名同类型 → 保留已有值(场景保存值 / 编辑器改过的值优先;未设仍是未设);
-		//   * D1(2026-09-27):声明里的默认值**只材料化到 `ScriptProperty::Value` 供展示/
+		//   * D1(2026-09-27):声明里的默认值**只材料化到 `PropertyNode::Value` 供展示/
 		//     Play 兜底**,`Default` 记下声明值;序列化按"Value 未设或与 Default 相同 = 未设"
 		//     整条跳过(改脚本默认值后老场景跟着变)。没有默认值 → 保持 monostate(未设),
 		//     **绝不写类型零值**(审查 P1-1);
 		//   * D2:数组/映射的形状在 `ShapeFromScene`(读档时场景真的写了这个容器)时以场景为准,
 		//     声明只按行名补说明/默认值与缺省行;否则用声明的默认形状重建;
 		//   * 声明里没有的旧属性丢弃。
-		WLD_API void SyncFromDeclarations(std::vector<ScriptProperty>& properties,
+		WLD_API void SyncFromDeclarations(std::vector<PropertyNode>& properties,
 			const std::vector<Declaration>& declarations);
 
 		// 兼容重载(无 doc / 无默认值):等价于每条声明 Doc 为空、Default 为 monostate。
-		WLD_API void SyncFromDeclarations(std::vector<ScriptProperty>& properties,
+		WLD_API void SyncFromDeclarations(std::vector<PropertyNode>& properties,
 			const std::vector<std::pair<std::string, Schema::Kind>>& declarations);
 
 		// 未设值(monostate)判定:检视器/写入路径用它区分"没有值"与"值为 0"。
-		WLD_API bool IsUnset(const ScriptProperty& property);
+		WLD_API bool IsUnset(const PropertyNode& property);
 
 		// D1(2026-09-27 用户口径:复位 = 回到"未设",默认值只用于展示/Play 兜底):
 		//   * 声明默认值相同判定(浮点按位相等:同一个值同一条路径写进去,不需要容差);
@@ -118,8 +118,8 @@ namespace World
 		//       容器:任一行被记录 → true(数组/映射的**形状 + 值**一起进存档;
 		//             ReadOnly 的只读摘要永不进存档)。
 		WLD_API bool ValuesEqual(const Schema::Value& left, const Schema::Value& right);
-		WLD_API bool IsDefaultValue(const ScriptProperty& property);
-		WLD_API bool IsSceneRecorded(const ScriptProperty& property);
+		WLD_API bool IsDefaultValue(const PropertyNode& property);
+		WLD_API bool IsSceneRecorded(const PropertyNode& property);
 
 		// 值的 variant 备选是否**正好**是 kind 对应的那一支(手改场景 / 坏存档的防线;
 		// monostate 不算匹配 —— 未设值请先用 IsUnset 判定)。
@@ -132,15 +132,15 @@ namespace World
 		//   * 未设的元素/子字段以 monostate 原样传出(生成的拆箱对未设/类型不符回落到类型零值,
 		//     不会抛 bad_variant_access);
 		//   * 非容器属性 → false(outValue 不动)。
-		WLD_API bool BuildContainerValue(const ScriptProperty& property, Schema::Value* outValue);
+		WLD_API bool BuildContainerValue(const PropertyNode& property, Schema::Value* outValue);
 
 		// PURE-ECS:把容器行**无条件**折成 schema 容器值(ValueList / ValueMap;命名 struct 元素 =
 		// "字段名 → Value" 的 ValueMap)。与 `BuildContainerValue` 的唯一差别是不做"场景是否记录过"
 		// 的判定 —— 调用方是"值就是实例本身"的纯 ECS 组件字段(形状/值即权威,没有"未设"概念)。
 		// 返回 false = 不是可折叠的容器(非 Array/Map 或 ReadOnly)。
-		WLD_API bool FoldContainerRows(const ScriptProperty& property, Schema::Value* outValue);
+		WLD_API bool FoldContainerRows(const PropertyNode& property, Schema::Value* outValue);
 
-		WLD_API ScriptProperty* Find(std::vector<ScriptProperty>& properties, const std::string& name);
-		WLD_API const ScriptProperty* Find(const std::vector<ScriptProperty>& properties, const std::string& name);
+		WLD_API PropertyNode* Find(std::vector<PropertyNode>& properties, const std::string& name);
+		WLD_API const PropertyNode* Find(const std::vector<PropertyNode>& properties, const std::string& name);
 	}
 }

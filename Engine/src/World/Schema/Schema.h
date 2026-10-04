@@ -96,7 +96,7 @@ namespace World::Schema
 	};
 
 	// 容器**形状**(CPPT-6):容器不是新的 Kind,而是字段/属性的形状修饰 —— 与脚本属性层的
-	// `ScriptPropertyCollection`(Components.h)同构,`ScriptProperties::SyncFromSchema` 按 1:1 映射。
+	// `PropertyCollection`(Components.h)同构,`ComponentPropertyModel::SyncFromSchema` 按 1:1 映射。
 	//   Array = std::vector<ElementKind>(数组;行 = 元素,Name = 下标字符串 1..n);
 	//   Map   = std::map<std::string, ElementKind>(映射;键固定字符串,行名 = 键)。
 	// 元素/键类型里只有"命名 struct"需要名字 + 嵌套 schema(见 FieldSchema 的
