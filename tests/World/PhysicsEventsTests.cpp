@@ -495,6 +495,39 @@ namespace
 	}
 }
 
+	// 粒度**契约**:事件是**实体对级** —— 一个多 collider 实体与地面接触,Begin 恰好一条
+	// (2D 用多个 b2Shape;3D 用 compound 多 sub-shape)。这条同时防止将来出现"同一实体对
+	// 每步多条 Begin"(3D 的 Jolt 回调是逐 sub-shape 的,天然有重复风险)。
+	void MultiColliderEventCount2D()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity ground = AddBox2D(*scene, "Ground", { 0.0f, 0.0f, 0.0f }, RigidBody2DComponent::BodyType::Static, { 4.0f, 0.5f });
+		Entity box = AddBox2D(*scene, "Box", { 0.0f, 1.0f, 0.0f }, RigidBody2DComponent::BodyType::Dynamic, { 0.25f, 0.25f });
+		// 同一实体再挂一个圆形 collider ⇒ 该实体有 2 个 shape。
+		box.AddComponent<CircleCollider2DComponent>().Radius = 0.3f;
+		scene->OnRuntimeStart();
+		StepFixed(*scene, 120);
+		const int begins = CountContactPhase(*scene, box, ground, Physics::ContactPhase::Begin);
+		std::printf("[info] 2D multi-collider: Begin events for one entity pair = %d\n", begins);
+		CHECK(begins == 1);
+		scene->OnRuntimeStop();
+	}
+
+	void MultiColliderEventCount3D()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity ground = AddBox3D(*scene, "Ground", { 0.0f, 0.0f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 5.0f, 0.5f, 5.0f });
+		Entity box = AddBox3D(*scene, "Box", { 0.0f, 1.0f, 0.0f }, RigidBody3DComponent::MotionType::Dynamic, { 0.25f, 0.25f, 0.25f });
+		// 同一实体再挂一个球 collider ⇒ compound shape 有 2 个 sub-shape。
+		box.AddComponent<SphereCollider3DComponent>().Radius = 0.3f;
+		scene->OnRuntimeStart();
+		StepFixed(*scene, 120);
+		const int begins = CountContactPhase(*scene, box, ground, Physics::ContactPhase::Begin);
+		std::printf("[info] 3D multi-collider: Begin events for one entity pair = %d\n", begins);
+		CHECK(begins == 1);
+		scene->OnRuntimeStop();
+	}
+
 int main()
 {
 	try
@@ -511,6 +544,8 @@ int main()
 			{ "event sequence is frame-rate independent (GameApp driven)", EventSequenceIsFrameRateIndependent },
 			{ "duplicate keeps 2D filter/CCD + per-entity handles (WP3)", DuplicateKeeps2DBodyConfiguration },
 			{ "2D: runtime Layer/Mask change takes effect", RuntimeFilterChangeTakesEffect2D },
+			{ "2D multi-collider: one Begin per entity pair", MultiColliderEventCount2D },
+			{ "3D multi-collider: one Begin per entity pair", MultiColliderEventCount3D },
 			{ "2D: End event when a touching entity is destroyed", EndEventOnDestroyedBody2D },
 			{ "3D: End event when a touching entity is destroyed", EndEventOnDestroyedBody3D },
 		};
