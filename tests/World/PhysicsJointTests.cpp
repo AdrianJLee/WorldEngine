@@ -266,11 +266,12 @@ namespace
 		scene->OnRuntimeStop();
 	}
 
-	// ⑤ CCD(2D):`Ccd` 必须真的落到 Box2D 的 isBullet 上(两档都断言,防止只写不读)。
-
-	//   附注(如实记录,不假装 CCD 的功劳):Box2D v3 的 speculative contact 在
-	//   "300 m/s 打 0.04 m 薄墙" 这个场景里**即使非 bullet 也会拦下**(实测两档同值) ——
-	//   所以这里只断言标志接线,不把"没穿过去"算作 CCD 的收益。
+	// ⑤ CCD(2D):两件事分开验 ——
+	//   (a) `Ccd` 真的落到 Box2D 的 isBullet(两档都断言,防止只写不读);
+	//   (b) CCD 的**行为收益**:按 Box2D v3 文档,isBullet 的连续检测针对
+	//       "dynamic and kinematic bodies"(third_party/box2d/include/box2d/types.h:223-237),
+	//       所以对照组必须是"高速弹体 打 **动态** 薄板" —— 打静态墙在 v3 里即使非 bullet 也会
+	//       被 speculative contact 拦下(旧用例就是撞在这上面,得到"两档同值"的假阴性)。
 
 	void CcdFlagReachesBox2D()
 
@@ -304,6 +305,39 @@ namespace
 
 		CHECK(!withoutCcd);
 
+	}
+
+	// ⑤b CCD 行为收益(2D):高速弹体打**动态**薄板 —— v3 的 bullet 连续检测针对
+	// dynamic/kinematic 目标,这个场景才能体现差异。如实记录实测值(不预设结论)。
+	void CcdStopsDynamicVehicle2D()
+	{
+		// 返回弹体最终 x(1s 后)。x 大 = 几乎不受阻(穿过去);x 小 = 撞上并失速。
+		const auto run = [](bool ccd) -> float
+		{
+			Ref<Scene> scene = CreateTestScene();
+			// 薄板:动态、可被撞飞(不是静态墙)。
+			Entity plate = AddBox2D(*scene, "Plate", { 0.0f, 0.0f, 0.0f },
+				RigidBody2DComponent::BodyType::Dynamic, { 0.02f, 1.0f });
+			// 弹体:高速、小尺寸。
+			Entity bullet = AddBox2D(*scene, "Bullet", { -8.0f, 0.0f, 0.0f },
+				RigidBody2DComponent::BodyType::Dynamic, { 0.05f, 0.05f }, ccd);
+			scene->OnRuntimeStart();
+			b2BodyId bulletBody = scene->GetPhysicsBody2D(bullet);
+			b2Body_SetLinearVelocity(bulletBody, { 400.0f, 0.0f });
+			StepFixed(*scene, 60);   // 1s:足够穿过 x=0
+			const b2Vec2 position = b2Body_GetPosition(bulletBody);
+			scene->OnRuntimeStop();
+			return position.x;
+		};
+		const float withCcd = run(true);
+		const float withoutCcd = run(false);
+		std::printf("[info] 2D ccd vs dynamic plate (1s @400m/s): withCcd x=%.4f | withoutCcd x=%.4f\n",
+			static_cast<double>(withCcd), static_cast<double>(withoutCcd));
+		// 实测口径(2026-10-04):withCcd≈35.8(撞上并失速)、withoutCcd≈392(几乎不受阻 ⇒ 穿过去了)
+		// ⇒ 关掉 CCD 的弹体穿过动态薄板;开 CCD 的被拦下。这才是 isBullet 的行为收益。
+		CHECK(withoutCcd > 300.0f);          // 无 CCD:1s 内几乎无阻碍(穿过去)
+		CHECK(withCcd < 100.0f);             // 有 CCD:明显失速(被拦下)
+		CHECK(withCcd < withoutCcd * 0.5f);  // 两档必须可判别
 	}
 
 
@@ -345,6 +379,7 @@ int main()
 			{ "3D distance joint keeps range", DistanceJoint3DKeepsRange },
 			{ "3D hinge joint holds the bob", HingeJoint3DHoldsBob },
 			{ "2D CCD flag reaches Box2D isBullet (both directions)", CcdFlagReachesBox2D },
+			{ "2D CCD behaviour vs dynamic plate", CcdStopsDynamicVehicle2D },
 			{ "3D CCD sets LinearCast and does not change low speed simulation", CcdFlag3DDoesNotChangeLowSpeedSimulation },
 		};
 		int failures = 0;

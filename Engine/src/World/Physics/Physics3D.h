@@ -119,6 +119,9 @@ namespace World
 		// P7 测试入口:`RigidBody3DComponent::Ccd` 是否真的落到 Jolt 的 LinearCast 档位
 		// (读回后端,而不是只看组件字段)。没有该实体的刚体返回 false。
 		bool GetBodyMotionQualityIsLinearCast(entt::entity entity) const;
+		// P5:运行时改 Layer/Mask ⇒ 重新映射 ObjectLayer 并应用到刚体。
+		// 不调用则过滤**静默不生效**(建体时只注册过一次)。刚体不存在时是 no-op。
+		void RefreshBodyFilter(entt::entity entity);
 
 	private:
 		struct Impl;

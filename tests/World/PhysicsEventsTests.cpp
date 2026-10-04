@@ -419,6 +419,80 @@ namespace
 		CHECK(std::memcmp(&sourceJoint, &copyJoint, sizeof(b2JointId)) != 0);
 		scene->OnRuntimeStop();
 	}
+
+	// P5:运行时改 Layer/Mask 必须**立即生效**(旧实现只在建体时写一次 ⇒ 静默 no-op)。
+	// 流程:先让两体正常碰撞,再改成互斥掩码,后续步进必须不再产生接触事件。
+	void RuntimeFilterChangeTakesEffect2D()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity ground = AddBox2D(*scene, "Ground", { 0.0f, 0.0f, 0.0f }, RigidBody2DComponent::BodyType::Static,
+			{ 2.0f, 0.5f }, /*layer=*/1u, /*mask=*/1u);
+		Entity box = AddBox2D(*scene, "Box", { 0.0f, 3.0f, 0.0f }, RigidBody2DComponent::BodyType::Dynamic,
+			{ 0.25f, 0.25f }, /*layer=*/1u, /*mask=*/1u);
+		scene->OnRuntimeStart();
+		StepFixed(*scene, 120);
+		CHECK(CountContactPhase(*scene, box, ground, Physics::ContactPhase::Begin) == 1);   // 基线:能碰
+
+		// 运行时改成互斥(1 vs 2):改后必须立刻不再产生接触。
+		box.GetComponent<RigidBody2DComponent>().Mask = 2u;
+		ground.GetComponent<RigidBody2DComponent>().Layer = 4u;
+		const b2Vec2 before = b2Body_GetPosition(scene->GetPhysicsBody2D(box));
+
+		// 把箱子抬起来再放开:若能穿过地面 ⇒ 过滤确实生效;若仍被挡住 ⇒ 过滤没生效。
+		b2Body_SetTransform(scene->GetPhysicsBody2D(box), { 0.0f, 3.0f }, b2Rot_identity);
+		b2Body_SetLinearVelocity(scene->GetPhysicsBody2D(box), { 0.0f, 0.0f });
+		StepFixed(*scene, 120);
+		const b2Vec2 after = b2Body_GetPosition(scene->GetPhysicsBody2D(box));
+		std::printf("[info] 2D runtime filter change: before.y=%.4f after.y=%.4f (穿地 ⇒ y 明显为负)\n",
+			static_cast<double>(before.y), static_cast<double>(after.y));
+		CHECK(after.y < -1.0f);   // 穿过去了 ⇒ 新掩码生效
+		scene->OnRuntimeStop();
+	}
+
+	// P5:销毁"接触中的实体"时,存活方是否收到 End?
+	// 工业口径:订阅者按 Begin/Persist 维护集合、End 清理;丢 End ⇒ 集合里留悬挂条目。
+	// 这条用例先**实测**后端行为(2D Box2D / 3D Jolt 各一条),再决定是否需要引擎补发。
+	void EndEventOnDestroyedBody2D()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity ground = AddBox2D(*scene, "Ground", { 0.0f, 0.0f, 0.0f }, RigidBody2DComponent::BodyType::Static, { 2.0f, 0.5f });
+		Entity box = AddBox2D(*scene, "Box", { 0.0f, 1.0f, 0.0f }, RigidBody2DComponent::BodyType::Dynamic, { 0.25f, 0.25f });
+		scene->OnRuntimeStart();
+		StepFixed(*scene, 60);   // 落到地面并建立接触
+		CHECK(CountContactPhase(*scene, box, ground, Physics::ContactPhase::Begin) == 1);
+		CHECK(CountContactPhase(*scene, box, ground, Physics::ContactPhase::Persist) >= 1);
+
+		// 销毁接触中的 box。事件队列在**下一个固定步开头**会被清空,所以 2D 的 End
+		// (引擎在 DestroyPhysicsBody 里补发)要在结构变更落盘后立刻观察 ——
+		// 这与消费时序一致:玩家/脚本在可变阶段(本帧 Late/PreRender)读到它。
+		Entity::DestroyEntity(scene.get(), box);
+		scene->FlushStructuralChanges();
+		const int endAfterDestroy = CountContactPhase(*scene, box, ground, Physics::ContactPhase::End);
+		std::printf("[info] 2D destroy-while-touching: End events = %d (0 = 后端/引擎都未补发)\n", endAfterDestroy);
+		// 实测(2026-10-04):Box2D 在 b2DestroyBody 时不发 end 事件 ⇒ 引擎在销毁前补发
+		// (见 Scene::DestroyPhysicsBody)。订阅者据此清理集合,不留悬挂条目。
+		CHECK(endAfterDestroy == 1);
+		scene->OnRuntimeStop();
+	}
+
+	void EndEventOnDestroyedBody3D()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity ground = AddBox3D(*scene, "Ground", { 0.0f, 0.0f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 4.0f, 0.5f, 4.0f });
+		Entity box = AddBox3D(*scene, "Box", { 0.0f, 1.0f, 0.0f }, RigidBody3DComponent::MotionType::Dynamic, { 0.25f, 0.25f, 0.25f });
+		scene->OnRuntimeStart();
+		StepFixed(*scene, 90);
+		CHECK(CountContactPhase(*scene, box, ground, Physics::ContactPhase::Begin) == 1);
+
+		Entity::DestroyEntity(scene.get(), box);
+		StepFixed(*scene, 1);
+		const int endAfterDestroy = CountContactPhase(*scene, box, ground, Physics::ContactPhase::End);
+		std::printf("[info] 3D destroy-while-touching: End events = %d (0 = 后端/引擎都未补发)\n", endAfterDestroy);
+		// 实测(2026-10-04):Jolt 自己会在移除刚体时回调 OnContactRemoved ⇒ 3D 无需补发,
+		// 这里断言"恰好一条",防重复补发导致的重复 End。
+		CHECK(endAfterDestroy == 1);
+		scene->OnRuntimeStop();
+	}
 }
 
 int main()
@@ -436,6 +510,9 @@ int main()
 			{ "physics events are cleared for frames with no fixed step", EventsAreClearedBetweenFrames },
 			{ "event sequence is frame-rate independent (GameApp driven)", EventSequenceIsFrameRateIndependent },
 			{ "duplicate keeps 2D filter/CCD + per-entity handles (WP3)", DuplicateKeeps2DBodyConfiguration },
+			{ "2D: runtime Layer/Mask change takes effect", RuntimeFilterChangeTakesEffect2D },
+			{ "2D: End event when a touching entity is destroyed", EndEventOnDestroyedBody2D },
+			{ "3D: End event when a touching entity is destroyed", EndEventOnDestroyedBody3D },
 		};
 		int failures = 0;
 		for (const auto& [name, test] : tests)

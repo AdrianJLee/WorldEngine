@@ -796,6 +796,27 @@ namespace World
 			return m_System.GetBodyInterface().GetMotionQuality(found->second) == JPH::EMotionQuality::LinearCast;
 		}
 
+		// P5:运行时改 Layer/Mask ⇒ 重映射 ObjectLayer 并应用(否则过滤静默不生效)。
+		void RefreshBodyFilter(entt::entity entity)
+		{
+			const auto found = m_Bodies.find(entity);
+			if (found == m_Bodies.end())
+				return;
+			if (m_Scene == nullptr)
+				return;
+			const entt::registry& registry = static_cast<const Scene&>(*m_Scene).GetRegistry();
+			const auto* rigidBody = registry.try_get<RigidBody3DComponent>(entity);
+			if (rigidBody == nullptr)
+				return;
+			const JPH::ObjectLayer target = RegisterPair(rigidBody->Layer, rigidBody->Mask);
+			JPH::BodyInterface& bodyInterface = m_System.GetBodyInterface();
+			if (bodyInterface.GetObjectLayer(found->second) == target)
+				return;
+			// 注意:改层会让 Jolt 丢弃该刚体的现有接触缓存 —— 这正是"改过滤立即生效"的语义
+			// (旧接触不再满足新掩码),与 Box2D 侧 b2Shape_SetFilter 同口径。
+			bodyInterface.SetObjectLayer(found->second, target);
+		}
+
 		bool TryGetBodyTransform(entt::entity entity, glm::vec3* outLocation, glm::quat* outRotation) const
 		{
 			const auto it = m_Bodies.find(entity);
@@ -1266,6 +1287,12 @@ namespace World
 	{
 		if (!m_Impl) return;
 		m_Impl->DestroyBody(entity);
+	}
+
+	void Physics3DWorld::RefreshBodyFilter(entt::entity entity)
+	{
+		if (!m_Impl) return;
+		m_Impl->RefreshBodyFilter(entity);
 	}
 
 	void Physics3DWorld::CreateJoint(entt::entity owner, entt::entity other, int kind,
