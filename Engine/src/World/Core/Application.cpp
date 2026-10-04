@@ -19,6 +19,18 @@
 namespace World
 {
 	Application* Application::s_Instance = nullptr;
+
+	namespace
+	{
+		// JOBSYS:WLD_JOB_STATS=1 时周期性打印任务系统统计(默认关,零开销)。
+		const bool s_JobStatsEnabled = []
+		{
+			const char* value = std::getenv("WLD_JOB_STATS");
+			return value != nullptr && value[0] != '\0' && value[0] != '0';
+		}();
+		uint64_t s_LastJobStatsStamp = ~0ull;
+	}
+
 	Application& Application::Get()
 	{
 		return *s_Instance;
@@ -30,7 +42,6 @@ namespace World
 
 		WLD_CORE_ASSERT(!s_Instance, "Appliicatiion already exists!");
 		s_Instance = this;
-		m_FrameAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("FrameAllocator", 1024 * 1024 * 10)); // 10 MB
 		m_EngineAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("EngineAllocator", 1024 * 1024 * 50)); // 50 MB
 		// 开发/验证钩子:WLD_WINDOW_SIZE="宽x高" 覆盖主窗口尺寸。编辑器 Play 与打包 Runtime 的
 		// 一致性验收需要两边同分辨率(编辑器的场景目标尺寸由视口面板决定,不是窗口尺寸)。
@@ -102,7 +113,6 @@ namespace World
 		m_LayerStack.DetachAll();
 		// Run the allocator resets while their Lua state and graphics context
 		// are still alive.
-		if (m_FrameAllocator) m_FrameAllocator->Reset();
 		if (m_EngineAllocator) m_EngineAllocator->Reset();
 		FrameArena::Shutdown();
 		// 退出前的泄漏检查:仍有活跃分配的分配器会被点名(便于定位谁没释放)。
@@ -188,10 +198,20 @@ namespace World
 
 			m_Window->OnUpdate();
 
-			// Clean up frame allocator after each frame
-			m_FrameAllocator->Reset();
 			// 帧内临时分配(每线程 arena):工作线程已空闲,统一回卷。
 			FrameArena::ResetAll();
+
+			// JOBSYS:`WLD_JOB_STATS=1` 时每 ~2 秒打一行任务系统统计 —— 用于回答
+			// "并行到底有没有发生"(Executed 不涨 = 没有任何并行路径被触发)。
+			if (s_JobStatsEnabled)
+			{
+				const uint64_t stamp = static_cast<uint64_t>(time) / 2;
+				if (stamp != s_LastJobStatsStamp)
+				{
+					s_LastJobStatsStamp = stamp;
+					WLD_CORE_INFO("[jobs] {0}", JobSystem::DescribeStats());
+				}
+			}
 		}
 		Shutdown();
 	}

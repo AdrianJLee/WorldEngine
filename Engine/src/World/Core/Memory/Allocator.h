@@ -9,9 +9,6 @@ namespace World
 {
 	#pragma region Macro
 
-	#define WLD_NEW(T, allocator, ...) (allocator).New<T>(__VA_ARGS__)
-
-
 	#pragma endregion
 
 
