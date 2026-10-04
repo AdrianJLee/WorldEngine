@@ -12,6 +12,7 @@
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Renderer/FrameExtract.h"
+#include "World/Renderer/SceneRenderer.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
@@ -221,6 +222,47 @@ namespace
 	}
 
 	// ④ alpha 来源:累加器余量换算。	// ④ alpha 来源:累加器余量换算。
+	// ⑥ 2D 精灵/圆形也必须吃插值(与 3D 同口径)。
+	//
+	// 缺口:RenderGeometry 的 spriteMatrixOf 原先只读权威 WorldTransformComponent ⇒
+	// 2D 物理驱动的精灵在非 60Hz 刷新下阶梯抖动(3D 网格路径早已修好)。
+	//
+	// 这条用例直接验**渲染侧解析路径**(不依赖物理时序):手工写入一个已知的"上一局部变换",
+	// 再问 ResolveSpriteRenderMatrix 拿到的是什么。
+	void SpriteResolveUsesInterpolation2D()
+	{
+		Ref<Scene> scene = CreateRef<Scene>(TestContext());
+		scene->SetPhysicsInterpolationEnabled(true);
+
+		Entity sprite = Entity::CreateEntity(scene.get(), "PhysicsSprite");
+		sprite.AddComponent<TransformComponent>(glm::vec3(0.0f, 10.0f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f));
+		sprite.AddComponent<SpriteComponent>();
+		const entt::entity handle = static_cast<entt::entity>(sprite);
+
+		entt::registry& registry = scene->GetRegistry();
+		PhysicsInterpolationState& state = registry.emplace<PhysicsInterpolationState>(handle);
+		state.PreviousLocalMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+		state.Valid = true;
+
+		const glm::mat4 local = registry.get<TransformComponent>(handle).GetLocalMatrix();
+		scene->BeginFrame();
+		scene->EnsureInterpolatedWorldTransforms(0.5f);
+
+		const glm::mat4* resolved = SceneRenderer::ResolveSpriteRenderMatrix(*scene, handle, local);
+		CHECK(resolved != nullptr);
+		// 上一局部 y=0、当前局部 y=10 ⇒ alpha=0.5 的插值结果是 y=5(既不是 0 也不是 10)。
+		std::printf("[info] 2D sprite resolve: y=%.4f (expect 5.0; authoritative=10)\n",
+			static_cast<double>((*resolved)[3][1]));
+		CHECK(std::fabs((*resolved)[3][1] - 5.0f) < 1e-4f);   // 走插值
+		CHECK(std::fabs((*resolved)[3][1] - local[3][1]) > 1.0f);   // 反假:不是直接读权威矩阵
+
+		// 插值关闭 ⇒ 必须回退权威矩阵(零回归路径)。
+		scene->SetPhysicsInterpolationEnabled(false);
+		scene->BeginFrame();
+		const glm::mat4* plain = SceneRenderer::ResolveSpriteRenderMatrix(*scene, handle, local);
+		CHECK(std::fabs((*plain)[3][1] - 10.0f) < 1e-4f);
+	}
+
 	void GameAppAlphaMatchesAccumulatorRemainder()
 	{
 		Gameplay::GameAppDesc desc;
@@ -253,6 +295,7 @@ int main()
 			{ "interpolation does not change authoritative state", InterpolationDoesNotChangeAuthoritativeState },
 			{ "interpolation state recorded only when enabled", InterpolationStateIsRecordedOnlyWhenEnabled },
 			{ "hierarchy: interpolated local composes into child render matrix", HierarchyInterpolationComposesLocals },
+			{ "2D sprite resolve uses physics interpolation", SpriteResolveUsesInterpolation2D },
 			{ "GameApp alpha matches accumulator remainder", GameAppAlphaMatchesAccumulatorRemainder },
 		};
 		int failures = 0;

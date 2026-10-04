@@ -65,6 +65,13 @@ namespace World
 		// 开发验证:把颜色附件读回写 PPM。
 		void CaptureFrame(const std::filesystem::path& path) const;
 
+		// P6:解析 2D 精灵/圆形的渲染世界矩阵。插值开启且该实体(或其祖先)被插值时返回
+		// Scene::EnsureInterpolatedWorldTransforms 算好的插值矩阵;否则返回权威
+		// WorldTransformComponent(缺失时用 localMatrix 兜底)。提成公开静态入口是为了让
+		// "2D 是否吃插值"能被无 GPU 的单元测试直接验证。
+		static const glm::mat4* ResolveSpriteRenderMatrix(const Scene& scene, entt::entity entity,
+			const glm::mat4& localMatrix);
+
 	private:
 		void RecreateTargets(uint32_t width, uint32_t height);
 		// P4-3:把"请求尺寸"按当前 render_scale 换算成渲染目标尺寸,尺寸/倍率变化时才重建;

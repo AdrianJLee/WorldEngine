@@ -1277,6 +1277,24 @@ namespace World
 		}
 	}
 
+	// P6:2D 精灵/圆形的渲染矩阵解析 —— 与 3D 路径同口径地吃物理插值。
+	// 插值开启时,`Scene::EnsureInterpolatedWorldTransforms` 已把"自身或祖先被插值"的实体的
+	// 渲染世界矩阵算进 FrameExtract;这里优先取它,否则回退权威 WorldTransformComponent
+	// (缺失时用 localMatrix —— 与旧 spriteMatrixOf 的兜底一致)。
+	const glm::mat4* SceneRenderer::ResolveSpriteRenderMatrix(const Scene& scene, entt::entity entity,
+		const glm::mat4& localMatrix)
+	{
+		if (scene.IsPhysicsInterpolationEnabled())
+		{
+			const FrameExtract& extract = scene.RenderExtract();
+			const auto found = extract.InterpolatedIndex.find(entity);
+			if (found != extract.InterpolatedIndex.end())
+				return &extract.InterpolatedModels[found->second];
+		}
+		if (const auto* world = scene.GetRegistry().try_get<WorldTransformComponent>(entity))
+			return &world->Matrix;
+		return &localMatrix;
+	}
 	void SceneRenderer::RenderGeometry(const Camera&, const glm::mat4&)
 	{
 		// B3:每实体的顶点变换(纯数学,不触碰批次状态机)按阈值并行;
@@ -1284,11 +1302,14 @@ namespace World
 		constexpr size_t kParallelPrepThreshold = 64;
 		// 2D 精灵也要走层级世界矩阵:子实体跟随父实体。旧实现直接用子实体的**局部**矩阵,
 		// 表现为"移动父项、子项不动"(用户 2026-09-16 反馈,3D 网格路径早已用世界矩阵)。
-		const auto spriteMatrixOf = [this](entt::entity entity, const TransformComponent& transform) -> const glm::mat4&
+		//
+		// P6:2D 与 3D 必须同口径地吃物理插值 —— 插值开启时优先用
+		// Scene::EnsureInterpolatedWorldTransforms 算好的**渲染**世界矩阵(层级合成后的),
+		// 否则 2D 物理驱动的精灵在非 60Hz 刷新下会阶梯抖动(3D 网格路径早已修好)。
+		const auto spriteMatrixOf = [this](entt::entity entity,
+			const TransformComponent& transform) -> const glm::mat4*
 		{
-			if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
-				return world->Matrix;
-			return m_ActiveScene->m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
+			return ResolveSpriteRenderMatrix(*m_ActiveScene, entity, transform.GetLocalMatrix());
 		};
 		{
 			auto group = m_ActiveScene->m_Registry.group<TransformComponent>(entt::get<SpriteComponent>);
@@ -1303,7 +1324,7 @@ namespace World
 				for (size_t i = 0; i < count; i++)
 				{
 					const auto& transform = std::get<0>(group.get<TransformComponent, SpriteComponent>(entities[i]));
-					transforms[i] = spriteMatrixOf(entities[i], transform);
+					transforms[i] = *spriteMatrixOf(entities[i], transform);
 				}
 
 				JobSystem::ParallelFor(static_cast<uint32_t>(count), 32, [&](uint32_t i)
@@ -1323,7 +1344,7 @@ namespace World
 				for (auto entity : entities)
 				{
 					auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
-					Renderer2D::DrawQuadCore(spriteMatrixOf(entity, transform), sprite.Texture, sprite.Color, nullptr,
+					Renderer2D::DrawQuadCore(*spriteMatrixOf(entity, transform), sprite.Texture, sprite.Color, nullptr,
 						sprite.TilingFactor, static_cast<uint32_t>(entity));
 				}
 			}
@@ -1339,7 +1360,7 @@ namespace World
 				std::vector<glm::mat4> transforms(count);
 				std::vector<std::array<glm::vec3, 4>> positions(count);
 				for (size_t i = 0; i < count; i++)
-					transforms[i] = spriteMatrixOf(entities[i], view.get<TransformComponent>(entities[i]));
+					transforms[i] = *spriteMatrixOf(entities[i], view.get<TransformComponent>(entities[i]));
 				JobSystem::ParallelFor(static_cast<uint32_t>(count), 32, [&](uint32_t i)
 				{
 					Renderer2D::ComputeCirclePositions(transforms[i], positions[i].data());
@@ -1357,7 +1378,7 @@ namespace World
 				{
 					auto& transform = view.get<TransformComponent>(entity);
 					const auto& circle = view.get<CircleRendererComponent>(entity);
-					Renderer2D::DrawCircleCore(spriteMatrixOf(entity, transform), circle.Color, circle.Thickness,
+					Renderer2D::DrawCircleCore(*spriteMatrixOf(entity, transform), circle.Color, circle.Thickness,
 						circle.Fade, static_cast<uint32_t>(entity));
 				}
 			}
