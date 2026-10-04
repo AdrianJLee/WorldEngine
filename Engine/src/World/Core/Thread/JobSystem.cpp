@@ -53,6 +53,17 @@ namespace World
 		return s_Running.load(std::memory_order_acquire);
 	}
 
+	bool JobSystem::ParallelAllowed()
+	{
+		// 进程级缓存:环境变量在运行期不变,避免每次调用都 getenv。
+		static const bool allowed = []
+		{
+			const char* value = std::getenv("WLD_NO_PARALLEL");
+			return !(value != nullptr && value[0] != '\0' && value[0] != '0');
+		}();
+		return allowed;
+	}
+
 	uint32_t JobSystem::WorkerCount()
 	{
 		return s_WorkerCount;

@@ -428,12 +428,19 @@ namespace World::Asset
 			};
 		}
 
-		std::vector<ManifestKeyValue> PhysicsKeyValues(const ProjectManifest& manifest)
+		// JOBSYS:`multithreaded` 是否参与文本合并由调用方决定 —— 默认 false **不主动落盘**
+		// (与 `imports:` 同款:不因为"保存了一次设置"就给老清单注入新键,保住 U2e 的
+		// "未改动字段逐字节不变"契约);但文件里已经写了这个键时必须继续参与合并,
+		// 否则用户无法把它改回 false。
+		std::vector<ManifestKeyValue> PhysicsKeyValues(const ProjectManifest& manifest, bool includeMultithreaded)
 		{
-			return {
+			std::vector<ManifestKeyValue> values = {
 				{ "fixed_step_hz", std::to_string(manifest.Physics.FixedStepHz) },
 				{ "gravity", FormatFloatValue(manifest.Physics.Gravity) },
 			};
+			if (includeMultithreaded)
+				values.push_back({ "multithreaded", FormatBoolValue(manifest.Physics.Multithreaded) });
+			return values;
 		}
 
 		// P4-U4:`imports:` 区块(资产导入默认值)。`model.` 前缀是刻意留的:贴图/音频等
@@ -476,10 +483,11 @@ namespace World::Asset
 					"渲染:剔除/阴影/灯光上限/分辨率倍率/MSAA/合批等;括号里是生效时机。",
 					"由「项目设置 ▶ 项目」页读写;手改本文件同样生效。",
 				};
-			if (blockKey == "physics")
-				return {
+		if (blockKey == "physics")
+			return {
 					"物理:固定步长(Hz)与重力(m/s²)。",
 					"单个场景可以在自己的 .wd 头部 World: 块里覆盖重力。",
+					"multithreaded:true = Jolt 接引擎 JobSystem 多线程(要吞吐,不再保证逐位可复现);默认 false。",
 				};
 			if (blockKey == "imports")
 				return {
@@ -561,7 +569,12 @@ namespace World::Asset
 			}
 
 			MergeManifestBlock(lines, edits, appended, "rendering", RenderingKeyValues(manifest), eol);
-			MergeManifestBlock(lines, edits, appended, "physics", PhysicsKeyValues(manifest), eol);
+			// JOBSYS:`multithreaded` 只在显式打开、或文件里已有该键时才合并(见 PhysicsKeyValues)。
+			const size_t physicsBlockStart = FindTopLevelKey(lines, "physics");
+			const bool multithreadedPresent = physicsBlockStart != kNoLine &&
+				FindBlockKey(lines, physicsBlockStart, BlockEnd(lines, physicsBlockStart), "multithreaded") != kNoLine;
+			MergeManifestBlock(lines, edits, appended, "physics",
+				PhysicsKeyValues(manifest, multithreadedPresent || manifest.Physics.Multithreaded), eol);
 			// `imports:` 只在"确实有非默认值"或"文件里已经有这个块"时才合并 ——
 			// 否则保存一次随便什么设置就会给每个项目的清单塞进 11 行默认值。
 			const bool importsPresent = FindTopLevelKey(lines, "imports") != kNoLine;
@@ -754,6 +767,8 @@ namespace World::Asset
 					manifest.Physics.FixedStepHz = physics["fixed_step_hz"].as<uint32_t>(manifest.Physics.FixedStepHz);
 				if (physics["gravity"])
 					manifest.Physics.Gravity = physics["gravity"].as<float>(manifest.Physics.Gravity);
+				if (physics["multithreaded"])
+					manifest.Physics.Multithreaded = physics["multithreaded"].as<bool>(manifest.Physics.Multithreaded);
 			}
 			// P4-U4:`imports:` = 资产导入默认值(当前只有模型导入的字段)。
 			// key 用**扁平点号**(`model.scale`),与 `rendering`/`physics` 一样保持"区块内一级 key",
@@ -893,6 +908,8 @@ namespace World::Asset
 				out << YAML::Comment(comment);
 			out << YAML::Key << "fixed_step_hz" << YAML::Value << copy.Physics.FixedStepHz;
 			out << YAML::Key << "gravity" << YAML::Value << copy.Physics.Gravity;
+			// JOBSYS:与 fixed_step_hz / gravity 同款,全量序列化(新清单)时始终写出来。
+			out << YAML::Key << "multithreaded" << YAML::Value << copy.Physics.Multithreaded;
 			out << YAML::EndMap;
 			// P4-U4:导入默认值(缺省时不写,保持旧清单形态;只有非默认才落盘)。
 			if (ModelImportSettings::Hash(copy.ImportDefaults)

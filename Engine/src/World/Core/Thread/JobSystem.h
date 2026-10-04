@@ -29,6 +29,9 @@ namespace World
 		static void Init(uint32_t threadCount = 0);
 		static void Shutdown();
 		static bool IsRunning();
+		// 并行是否被允许(默认允许)。`WLD_NO_PARALLEL=1` 时恒为 false ⇒ 所有并行路径
+		// 走串行分支。用途:自动化/性能 A/B 基线证明"并行结果与串行逐字节相同"。
+		static bool ParallelAllowed();
 
 		// 提交任务(默认 Normal 优先级)。Counter 非空时会在提交处自增、完成后自减。
 		static void Kick(JobDecl job, JobPriority priority = JobPriority::Normal);

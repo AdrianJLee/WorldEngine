@@ -26,11 +26,13 @@ namespace World
 	// P1b D6:3D 物理(Jolt)引擎侧封装。
 	//
 	// 边界与约定:
-	//  - pimpl:Jolt 头文件**只**出现在 Physics3D.cpp;本头与 Scene.h 都不 include Jolt;
+	//  - pimpl:Jolt 头文件**只**出现在 Physics3D.cpp 与 PhysicsJobSystem.{h,cpp};
+	//    本头与 Scene.h 都不 include Jolt;
 	//  - P5 事件/过滤:接触/触发事件按固定步产出、Step 返回后按序 flush(不在 Jolt 回调里直接入队);
 	//    PhysicsEvents.h(不含 Jolt)是本模块唯一新增的物理头;per-body (Layer,Mask) 过滤在 .cpp 内
 	//    映射成 Jolt ObjectLayer;传感器是刚体级开关。
-	//  - 单线程 job system(不引引擎 JobSystem 依赖);所有入口必须在场景 owner 线程调用;
+	//  - job system:默认单线程(逐位可复现);physics.multithreaded = true 且引擎 JobSystem
+	//    在跑时才接 PhysicsJobSystem(要吞吐,放弃逐位可复现);所有入口必须在场景 owner 线程调用;
 	//  - 世界只在 Start(Scene&) → Stop() 之间存在;未启动时 Step/SyncTransforms/CollectDebugLines
 	//    抛可读 std::logic_error(与 2D 物理"不静默"约定一致);
 	//  - 实体句柄 ↔ Jolt 刚体的映射留在本模块内部(组件里没有 Jolt 运行态字段);
@@ -72,6 +74,9 @@ namespace World
 		// 把 Dynamic/Kinematic 刚体的位姿写回 TransformComponent,只在位姿变化时写
 		// (避免每帧标脏/打断层级);Static 不写。
 		void SyncTransforms();
+		// JOBSYS:当前选路是否走 Jolt 多线程适配器(= physics.multithreaded 且引擎 JobSystem
+		// 可用)。默认 false;测试用它证明 MT 分支真的被选到(不是死代码)。
+		bool IsUsingMultithreadedJobSystem() const;
 
 		// ---- P5:物理事实回调(Step 内部按序 flush;不在 Jolt 接触回调里直接调用) ----
 		// 实体接触事件(非传感器)。参数已解析成实体句柄:

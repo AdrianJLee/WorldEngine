@@ -8,8 +8,10 @@
 #include "wldpch.h"
 #include "World/Asset/WModelIO.h"
 #include "World/Core/WorldContext.h"
+#include "World/Core/Thread/JobSystem.h"
 #include "World/Physics/Physics3D.h"
 #include "World/Physics/PhysicsEvents.h"
+#include "World/Physics/PhysicsSettings.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
@@ -483,6 +485,82 @@ namespace
 		CHECK(!scene->IsPhysics2DRunning());   // 校验在创建任何物理世界之前 → 没有半启动的 2D 世界
 		CHECK(!scene->IsPhysics3DRunning());
 	}
+
+	// JOBSYS(工业化):physics.multithreaded = true 的 Jolt 多线程适配器冒烟 —— 反假通过。
+	//
+	// 意义:证明 MT 分支不是死代码,而不是"跑过了就算":
+	//   * 选路写反 / 适配器引用计数写错 ⇒ 这里会崩、触发 Jolt 断言或产生 NaN;
+	//   * 引擎 JobSystem 的执行计数不增长 ⇒ 说明 Jolt 作业根本没落到引擎线程池里(选路是假的)。
+	// 注意:Jolt 多线程会改变约束求解的作业完成顺序 ⇒ **不做**与单线程的逐位比较,
+	// 只要求结果有限、合理(落地不穿透),并且同一进程内连跑两遍不崩不错乱。
+	void MultithreadedJobSystemIsExercised()
+	{
+		// 引擎线程池不在跑时 IsUsable() 为假、MT 分支不会走 —— 这里显式起一个(用完还原)。
+		const bool jobSystemWasRunning = JobSystem::IsRunning();
+		if (!jobSystemWasRunning)
+			JobSystem::Init(3);
+
+		const Asset::PhysicsSettingsData savedSettings = PhysicsSettings::Get();
+		Asset::PhysicsSettingsData settings = savedSettings;
+		settings.Multithreaded = true;
+		PhysicsSettings::Set(settings);
+
+		// 8 个动态箱 + 静态地面:给 Jolt 足够的 broadphase / narrowphase / solver 作业。
+		const auto dropAndProbe = []
+		{
+			WorldContext localContext;
+			Ref<Scene> scene = CreateRef<Scene>(localContext);
+			AddBox(*scene, "MTGround", { 0.0f, -0.5f, 0.0f },
+				RigidBody3DComponent::MotionType::Static, { 6.0f, 0.5f, 6.0f });
+			std::vector<Entity> fallers;
+			for (int i = 0; i < 8; ++i)
+				fallers.push_back(AddBox(*scene, "MTFaller", { -2.8f + 0.8f * i, 6.0f + 0.2f * i, 0.5f * (i % 3) },
+					RigidBody3DComponent::MotionType::Dynamic, { 0.3f, 0.3f, 0.3f }));
+
+			Physics3DWorld world;
+			world.Start(*scene);
+			for (int step = 0; step < 120; ++step)
+			{
+				world.Step(kFixedStep);
+				world.SyncTransforms();
+			}
+			// 选路断言放在 Step 之后:适配器是首次进入 MT 分支时懒建的。
+			CHECK(world.IsUsingMultithreadedJobSystem());
+			for (Entity faller : fallers)
+			{
+				glm::vec3 position { 0.0f };
+				CHECK(world.TryGetBodyTransform(faller, &position, nullptr));
+				CHECK(std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z));
+				// 地面顶面 y=0,箱半高 0.3 ⇒ 停稳中心 ≈ 0.3(不穿透、也没有 NaN/弹飞)。
+				CHECK(position.y > 0.2f && position.y < 0.5f);
+			}
+			return fallers.size();
+		};
+
+		const JobSystem::Stats before = JobSystem::GetStats();
+		const size_t landedFirst = dropAndProbe();
+		const JobSystem::Stats afterFirst = JobSystem::GetStats();
+		CHECK(landedFirst == 8u);
+
+		// 反假通过:MT 分支真的被选到 ⇒ Jolt 作业经过引擎 JobSystem(worker 执行 + 等待期执行)。
+		// 若选路被写反(恒走单线程),同样这段里这两个计数**完全不动** ⇒ 立即红灯。
+		const uint64_t engineJobsFirst = (afterFirst.Executed - before.Executed) +
+			(afterFirst.ExecutedWhileWaiting - before.ExecutedWhileWaiting);
+		std::printf("[info] MT job system run 1: engine-executed=%llu (worker=%llu waiting=%llu stolen=%llu)\n",
+			static_cast<unsigned long long>(engineJobsFirst),
+			static_cast<unsigned long long>(afterFirst.Executed - before.Executed),
+			static_cast<unsigned long long>(afterFirst.ExecutedWhileWaiting - before.ExecutedWhileWaiting),
+			static_cast<unsigned long long>(afterFirst.Stolen - before.Stolen));
+		CHECK(engineJobsFirst > 0);
+
+		// 同一进程内第二遍 MT:不崩、不错乱(冒烟稳定性)。
+		const size_t landedSecond = dropAndProbe();
+		CHECK(landedSecond == 8u);
+
+		PhysicsSettings::Set(savedSettings);
+		if (!jobSystemWasRunning)
+			JobSystem::Shutdown();
+	}
 }
 
 int main()
@@ -587,6 +665,7 @@ int main()
 			{ "contact events fire on landing (world callback + Scene queue)", ContactCallbackFiresOnLanding },
 			{ "CollectDebugLines covers box/sphere/capsule", DebugLinesCoverAllColliders },
 			{ "2D+3D on one entity is rejected at runtime", DualPhysicsOnSameEntityIsRejected },
+			{ "multithreaded job system is exercised and gated", MultithreadedJobSystemIsExercised },
 		};
 		int failures = 0;
 		for (const auto& [name, test] : tests)

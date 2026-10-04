@@ -2,13 +2,17 @@
 #include "World/Physics/Physics3D.h"
 
 #include "World/Asset/WModelIO.h"
+#include "World/Physics/PhysicsJobSystem.h"
 #include "World/Physics/PhysicsSettings.h"
 #include "World/Core/Log.h"
+#include "World/Core/Thread/JobSystem.h"
 #include "World/Physics/PhysicsEvents.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
 
-// D6 硬约束:Jolt 头文件只允许出现在本 TU(Physics3D.h / Scene.h 都不 include Jolt)。
+// D6 硬约束:Jolt 头文件只允许出现在 3D 物理模块内部 —— 本 TU 与 PhysicsJobSystem.{h,cpp}
+// (JOBSYS:引擎 JobSystem 适配器必须继承 JPH::JobSystemWithBarrier)。Physics3D.h / Scene.h
+// 仍然都不 include Jolt。
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Core/Factory.h>
@@ -40,6 +44,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -61,6 +66,9 @@ namespace World
 		constexpr JPH::uint kMaxContactConstraints = 2048;
 		constexpr JPH::uint kTempAllocatorBytes = 8u * 1024u * 1024u;
 		constexpr JPH::uint kMaxJobs = 1024;
+		// JOBSYS:PhysicsJobSystem 的 barrier 容量(与 Jolt 物理样例的 8 同量级;
+		// PhysicsSystem::Update 一次只用其中一个)。
+		constexpr uint32_t kMaxPhysicsBarriers = 8;
 
 		constexpr float kLocationEpsilon = 1e-4f;
 		constexpr float kRotationEpsilon = 1e-4f;
@@ -538,7 +546,35 @@ namespace World
 			m_JointRecords.clear();
 			m_PendingContacts.clear();
 			m_PendingTriggers.clear();
+			// JOBSYS:世界停下就释放多线程适配器(Jolt 的 barrier 此时都已被归还)。
+			m_JobSystemMulti.reset();
 			m_Scene = nullptr;
+		}
+
+		// JOBSYS:每步按项目清单的 physics.multithreaded 选 job system。默认(false)恒为单线程 ——
+		// 行为与改动前逐字节相同;打开后还要 IsUsable()(引擎 JobSystem 在跑)才真的走多线程,
+		// 否则同样回退单线程。
+		JPH::JobSystem* SelectJobSystem()
+		{
+			if (!PhysicsSettings::Get().Multithreaded)
+				return &m_JobSystem;
+			// 全局串行 A/B 开关:WLD_NO_PARALLEL=1 时连物理也走单线程 ⇒ 可用来做
+			// "并行结果 == 串行结果"的逐字节对照。
+			if (!JobSystem::ParallelAllowed())
+				return &m_JobSystem;
+			// 只在该开关首次为真时建一次(barrier 数组不小),之后每步只做可用性判断。
+			if (!m_JobSystemMulti)
+				m_JobSystemMulti = std::make_unique<PhysicsJobSystem>(kMaxPhysicsBarriers);
+			if (m_JobSystemMulti->IsUsable())
+				return m_JobSystemMulti.get();
+			return &m_JobSystem;
+		}
+
+		// 与 SelectJobSystem() 同口径的只读查询(测试用:证明 MT 分支真的被选到)。
+		bool IsMultithreadedSelected() const
+		{
+			return m_JobSystemMulti != nullptr && m_JobSystemMulti->IsUsable() &&
+				PhysicsSettings::Get().Multithreaded;
 		}
 
 		void Step(float deltaSeconds)
@@ -549,7 +585,7 @@ namespace World
 			// 上一次 Update 抛异常时可能留下半截事件;先清空,保证 flush 的永远是本次 Update 的事实。
 			m_PendingContacts.clear();
 			m_PendingTriggers.clear();
-			m_System.Update(deltaSeconds, /*inCollisionSteps=*/1, &m_TempAllocator, &m_JobSystem);
+			m_System.Update(deltaSeconds, /*inCollisionSteps=*/1, &m_TempAllocator, SelectJobSystem());
 			// 回调只推进 pending 缓冲;Update 返回后在这里按序 flush(= Jolt 回调顺序 ⇒ 可复现)。
 			FlushEvents();
 		}
@@ -993,6 +1029,9 @@ namespace World
 		JPH::PhysicsSystem m_System;
 		JPH::TempAllocatorImpl m_TempAllocator { kTempAllocatorBytes };
 		JPH::JobSystemSingleThreaded m_JobSystem { kMaxJobs };
+		// JOBSYS:physics.multithreaded = true 且引擎 JobSystem 可用时才建(懒建一次)。
+		// 默认恒为空 ⇒ 始终走 m_JobSystem,行为与今天逐字节相同。
+		std::unique_ptr<PhysicsJobSystem> m_JobSystemMulti;
 		BroadPhaseLayerInterfaceImpl m_BroadPhaseLayers;
 		ObjectVsBroadPhaseLayerFilterImpl m_ObjectVsBroadPhaseFilter { &m_PairEntries };
 		ObjectLayerPairFilterImpl m_ObjectLayerPairFilter { &m_PairEntries };
@@ -1166,6 +1205,11 @@ namespace World
 	{
 		RequireStarted("SyncTransforms");
 		m_Impl->SyncTransforms(*m_Impl->m_Scene);
+	}
+
+	bool Physics3DWorld::IsUsingMultithreadedJobSystem() const
+	{
+		return m_Impl != nullptr && m_Impl->IsMultithreadedSelected();
 	}
 
 	void Physics3DWorld::SetContactCallback(std::function<void(const Physics::ContactEvent&)> callback)

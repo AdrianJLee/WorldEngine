@@ -62,6 +62,10 @@ namespace World::Asset
 	{
 		uint32_t FixedStepHz = 60;   // 固定步长频率(1..240)
 		float Gravity = -9.81f;      // 重力加速度(Y 轴,有限值)
+		// JOBSYS:Jolt 物理是否接引擎 JobSystem 多线程(`physics.multithreaded`,默认 false)。
+		// 取舍:多线程改变约束求解的作业完成顺序 ⇒ **不再保证** P4/P5/P6/P7 已交付的
+		// "同真实时间不同帧率逐位相同";要吞吐才打开,要可复现保持关闭(默认)。
+		bool Multithreaded = false;
 	};
 
 	// PLUG-T5:插件打包设置(project.we.yaml 的 `plugins:` 区块)。
