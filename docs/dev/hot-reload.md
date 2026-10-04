@@ -21,7 +21,7 @@
 | Luau 系统脚本（`assets/scripts/systems/*.luau`） | `ScriptFileWatch`：150ms 消抖轮询，内容哈希优先 | 帧边界（`Scene::OnUpdateRuntime` → `ScriptEngine::PollSystemScriptReload`）；**整份重跑**该系统脚本：先按归属表撤销它上次注册的系统，再重读源执行 | 读源/执行失败记日志并保留已撤销状态（下次保存再试） | 只有系统脚本加载作用域内注册的系统参与；宿主手写 `ecs:AddSystem` 的系统不参与；包内脚本只读 |
 | 编辑器本地化（`assets/localization/<lang>/**`） | `EditorApp` 的 `LocalizationHotReloadLayer`：0.5s 节流（路径/大小/mtime） | `ReloadLocalization()` 重扫多层目录，`Generation++`，下一帧换文案 | 缺键回落内联英文；层内重复键记冲突 | 插件组件的显示名不随语言切换刷新（要 `plugin.reload` 或重启） |
 | 材质 `.wmat` | `MaterialLibrary` + `AssetFileWatch`：150ms；指纹含父级链 | clean 材质原地 `Reload`（实例同一性保持，Revision 前进） | dirty → 只报告；解析失败保留旧内存态 | 父级链深度上限 8 |
-| 贴图（材质引用的 Albedo/Normal） | `AssetFileWatch`：500ms；内容哈希 | `MaterialTextureCache::Invalidate` + 引用材质 `InvalidateTextures()`；Vulkan 旧句柄延迟释放 | 坏产物/坏图回退源图；材质贴图上传走**同步路径**（见下） | 只跟踪已加载材质引用的贴图 |
+| 贴图（材质引用的 Albedo/Normal） | `AssetFileWatch`：500ms；内容哈希 | `TextureLibrary::Invalidate` + 引用材质 `InvalidateTextures()`；Vulkan 旧句柄延迟释放 | 坏产物/坏图回退源图；纹理上传走**同步路径**（上传仍须主线程；解码已异步，见 T5c） | 只跟踪已加载材质引用的贴图 |
 | 贴图导入 `.wtex` / 源图 | 编辑器 `TextureImportWatch`：2s 重扫 + 2s 稳定窗口；工作线程烘焙 | 主线程提交写 `<同目录>/<主名>.wtexc` + 缓存失效 + **引用材质失效**；日志 `texture rebaked` | 烘失败只记日志、保留旧产物；不写 `.wtex`、不碰面板内存 | `WLD_TEXTURE_HOTRELOAD=0` 关闭 |
 | 表面材质 `.slang`（材质引用） | `MaterialLibrary`：150ms；编辑器级 `ShaderHotReload`（面板没开也生效） | 工作线程重编译 → 帧边界 `MaterialSurfaceRuntime::Install(<路径键>)`；`shaders/lib/**` 依赖变化映射回根路径 | 编译失败保留旧管线并记首条诊断 | 键分离：面板未保存编辑只走 `<路径>#preview` |
 | 引擎内建 shader（`Engine/assets/shaders/**.slang`） | `EngineShaderHotReload`：150ms，绝对路径轮询 | 帧边界 `Renderer::ReloadShaders()`（2D→3D→WUI；只重建 shader+管线，旧句柄延迟释放） | 任一 owner 失败保留其旧管线，`failed` 计数 + 首条可读原因 | `WLD_SHADER_HOTRELOAD=0` 关闭；打包形态读 cooked `shaders/*.spv` |

@@ -37,7 +37,7 @@ Runtime/  templates/  tests/  third_party/  vendor/
 | 目录 | 放什么 | 不放什么 | 入库 |
 | --- | --- | --- | --- |
 | `Engine/src/World/**` | 引擎实现与私有头(命名空间 `World::*`,include 走 `World/...`)。一级分区:`Core/ Asset/ RHI/ Renderer/ Scene/ Script/ Gameplay/ WUI/ Schema/ Physics/ Plugins/ Modules/ Platform/ Events/ Settings/ Utils/ Math/ Debug/` | 任何宿主/编辑器专用代码 | 是 |
-| `Engine/src/World/Renderer/Legacy/**` | **冻结的旧渲染栈**:`Gfx/`(Buffer/Shader/Texture/VertexArray/Framebuffer/RenderPass/CommandBuffer/UniformBuffer*/RendererAPI/RenderCommand/GraphicsContext/PipelineStateObject/DescriptorSet/SubTexture2D)+ `OpenGL/`(旧 GL 后端,原 `Platform/OpenGL/`)。约定:只修不扩,逐步并入 `RHI/` | 新功能、新后端 | 是 |
+| `Engine/src/World/Renderer/Legacy/**` | **冻结的旧渲染栈**:`Gfx/`(Buffer/Shader/VertexArray/Framebuffer/RenderPass/CommandBuffer/UniformBuffer*/RendererAPI/RenderCommand/GraphicsContext/PipelineStateObject/DescriptorSet)+ `OpenGL/`(旧 GL 后端,原 `Platform/OpenGL/`)。约定:只修不扩,逐步并入 `RHI/` | 新功能、新后端 | 是 |
 | `Engine/src/World/RHI/**` | 渲染后端抽象(`Rhi*` 合同)+ `OpenGL/`、`Vulkan/` 实现 | 场景/玩法逻辑 | 是 |
 | `Engine/src/World/Platform/**` | 真平台层:`Windows/`(窗口/输入/系统工具/DLL 装载) | 渲染实现 | 是 |
 | `Engine/src/World/Script/**` | 脚本系统:`Vm/`(Luau VM/沙箱/值/引用)、`Bindings/`(`Bind*`)、`Runtime/`(ScriptEngine/热重载/存根/脚本属性)、`LuaType/`、`Tooling/`(Luau 高亮/补全/格式化) | 编辑器面板与宿主逻辑 | 是 |

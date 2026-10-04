@@ -159,13 +159,13 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 > 落地实况(2026-09-25,M4-TEX P2):
 > - `World/Renderer/TextureData.*`:`LoadTextureAsset(path)` 返回"是否来自产物 + 头 + 逐 mip 数据"
 >   (`Bytes` + `Header.Mips`);没有/坏产物一律回退源图(`TextureData` 逐字节不变)。
-> - `World/Renderer/MaterialTextureCache.*`:命中产物时按头的格式(Rgba8/Bc7/Bc5/Bc4/Bc1/Bc3)
+> - `World/Renderer/Texture/TextureLibrary.*`:命中产物时按头的格式(Rgba8/Bc7/Bc5/Bc4/Bc1/Bc3)
 >   + `MipLevels` 建纹理、逐级 `SetData(..., mip)`;设备不支持 BC / 建纹理失败 ⇒ 记一条警告 +
 >   回退源图(不崩)。日志行 `[material] texture '<path>': artifact format=… mips=… srgb=…` 就是
 >   "走的产物路径、没有 stb 解码"的证据。
 > - OpenGL 块上传走 `glCompressedTextureSubImage2D`(旧 `SetData` 对块格式没有 `dataFormat` 映射,
 >   会断言);Vulkan 原有 `vkCmdCopyBufferToImage` 已按 mip 支持块格式。
-> - **采样状态(P2b 已接)**:产物命中时 `MaterialTextureCache::GetSampler(path, srgb)` 按产物头的
+> - **采样状态(P2b 已接)**:产物命中时 `TextureLibrary::GetSampler(path, srgb)` 按产物头的
 >   `(wrap, filter, anisotropy)` 建/取 **per-texture 采样器**(按 `Capabilities::MaxSamplerAnisotropy`
 >   clamp,不支持各向异性时退 1);`Renderer3D.cpp` 的三处材质描述符写入改用它。**仅产物命中生效**,
 >   回退 stb 路径继续用共享 sampler(`state.MaterialSampler`)⇒ 老资产行为不变。采样器缓存随设备
@@ -173,7 +173,7 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 >   `[material] per-texture sampler '<path>': wrap=… filter=… aniso=…` 日志。
 > - **BC5 法线重建(P2b 已接两条路径)**:包装层(`MaterialSurface.cpp` 的 PS 模板 +
 >   `WE_NORMAL_TEXTURE_BC5` 开关)与引擎标准着色器(`Renderer3D_Solid.slang` 的 `u_Flags.w`,
->   数据源 = `MaterialTextureCache::IsBc5Artifact`);回退路径恒不解码 BC5,口径见
+>   数据源 = `TextureLibrary::IsBc5Artifact`);回退路径恒不解码 BC5,口径见
 >   `docs/dev/shader-contract.md` 法线段。
 
 ## 8. 编辑器交互(Texture Settings)

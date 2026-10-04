@@ -40,11 +40,11 @@ Engine/
     RHI/                  渲染后端抽象(合同 Rhi*)+ OpenGL/ + Vulkan/
     Renderer/             活的高层渲染:Renderer2D/3D、SceneRenderer、Material*、Mesh、Skinning、
                           AnimationSystem、Camera/EditorCamera*、RenderSettings、AssetHotReload
-      Texture/            纹理资产与管线(Texture/TextureData/SubTexture2D/TextureCompiler/
-                          TextureImportSettings/TextureArtifact/MaterialTextureCache)
+      Texture/            纹理资产与管线(TextureData/TextureCompiler/TextureImportSettings/
+                          TextureArtifact/TextureLibrary)
       Legacy/Gfx/         冻结的旧 GFX 抽象(Buffer/Shader/VertexArray/Framebuffer/RenderPass/
                           CommandBuffer/UniformBuffer*/RendererAPI/RenderCommand/GraphicsContext/
-                          PipelineStateObject/DescriptorSet/SubTexture2D…)
+                          PipelineStateObject/DescriptorSet…)
       Legacy/OpenGL/      冻结的旧 GL 后端(原 Platform/OpenGL)
     Scene/                ECS 核心(Entity/Components/Scene/Query/Hierarchy/ISystem/SceneSerializer/
                           SceneCamera)+ Systems/(Camera/Movement/Transform)

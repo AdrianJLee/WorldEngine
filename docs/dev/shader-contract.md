@@ -135,7 +135,7 @@ GL 口径:描述符绑定单元 = `binding`(**忽略 set**),所以 UBO 单元占
 - **引擎标准着色器**(没有发布表面管线的材质,v1 材质与未接包装层的 v2 材质):
   `Renderer3D_Solid.slang` 的 `u_Flags.y` 分支在采样后看 **`u_Flags.w`** —— 打包点 =
   `Renderer3D.cpp` 的三处 `uniforms.Flags = {…}`(逐物体 / 蒙皮 / 实例化),数据源 =
-  `MaterialTextureCache::IsBc5Artifact(path, srgb=false)`(产物头 `Format == Bc5`)。产物命中即
+  `TextureLibrary::IsBc5Artifact(path, srgb=false)`(产物头 `Format == Bc5`)。产物命中即
   重建;**回退 stb 路径恒 `w=0`**,xyz 解码与旧版逐值相同。诊断覆盖 `WLD_ENGINE_NORMAL_BC5=0`
   可强制关闭(A/B 抓图),与包装层的 `WLD_SURFACE_NORMAL_BC5` 对称。
 - **包装层**(用材质着色器的材质):编译期开关 `WE_NORMAL_TEXTURE_BC5` —— 排列键里带
