@@ -195,6 +195,10 @@ namespace World::Wui
 		WuiInputState& Input() { return m_Input; }
 		const WuiInputState& Input() const { return m_Input; }
 		std::vector<WuiDrawCommand>& Commands() { return m_OverlayDepth > 0 ? m_OverlayCommands : m_Commands; }
+		// 只读主命令流(不含 overlay)。用途:调用方**统计**自己刚产出的命令数
+		// (例如 Widget Gallery 的契约 runner 对比 overlay/主流的增量)——
+		// Commands() 的含义随 overlay 深度变化,统计主流时必须用这个显式入口。
+		const std::vector<WuiDrawCommand>& MainCommands() const { return m_Commands; }
 		const std::vector<WuiDrawCommand>& OverlayCommands() const { return m_OverlayCommands; }
 		// 进入/退出顶层绘制:弹出菜单、模态、tooltip、焦点环等画在普通 UI 之上。
 		// 只影响**绘制顺序**;命中由 RegisterOverlayRect(下一帧的矩形遮挡)+

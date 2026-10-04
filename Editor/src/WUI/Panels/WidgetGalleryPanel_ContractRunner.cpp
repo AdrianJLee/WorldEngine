@@ -1,5 +1,7 @@
 #include "WidgetGalleryPanel_Internal.h"
 
+#include <optional>
+
 namespace World
 {
 
@@ -746,8 +748,9 @@ void WidgetGalleryPanel::DrawCanvasShowcase(Wui::WuiContext& ctx, const Wui::Wui
 		const Wui::WuiRect slot = m_CanvasSlot;
 		const float scale = std::max(0.5f, uiScale);
 		const size_t overlayBefore = ctx.OverlayCommands().size();
-		// overlayStage 时 ctx.Commands() 就是 overlay 命令流,下面取两条增量里的较大者。
-		const size_t mainBefore = ctx.Commands().size();
+		// 主流的增量用只读 MainCommands() 统计(它不随 overlay 深度变化);overlay 增量走
+		// OverlayCommands(),最后取两者里较大者作为"这次 showcase 产出多少条命令"。
+		const size_t mainBefore = ctx.MainCommands().size();
 		// WUI-P1.6b:Play —— runner 先决定这一帧注入什么输入(Edit 恒为不注入)。
 		// 注入只作用于 showcase 这一段:保存/恢复 ctx.Input()(与 Edit 的 PseudoState 同一挂点),
 		// 工作台自己的控件在同一帧看到的仍是真实指针。
@@ -758,15 +761,14 @@ void WidgetGalleryPanel::DrawCanvasShowcase(Wui::WuiContext& ctx, const Wui::Wui
 			savedInput = ctx.Input();
 			injecting = AdvanceInteractionRun(ctx, slot, desc);
 		}
+		// 裁剪走库件 `Wui::ClipScope`(RAII):进口一条 ClipPush、出口一条 ClipPop —— 与手写命令
+		// 逐字段等价(渲染侧只读 ClipPush 的 Rect;旧代码里的 Color 是死字段),面板不再手写绘制命令。
+		// ClipScope 不可移动/拷贝,用 optional 承载"仅 overlayStage 才生效"的生命周期。
+		std::optional<Wui::ClipScope> overlayClip;
 		if (overlayStage)
 		{
 			ctx.PushOverlay();
-			Wui::WuiDrawCommand clipPush;
-			clipPush.Kind = Wui::WuiDrawKind::ClipPush;
-			clipPush.Rect = clipRect;
-			clipPush.Color = theme.PanelBg;
-			ctx.Commands().push_back(clipPush);
-			ctx.PushClipRect(clipRect);
+			overlayClip.emplace(ctx, clipRect);
 		}
 		if (desc.Showcase != nullptr)
 		{
@@ -810,14 +812,11 @@ void WidgetGalleryPanel::DrawCanvasShowcase(Wui::WuiContext& ctx, const Wui::Wui
 			ctx.Input().MouseDown[0] = true;
 		if (overlayStage)
 		{
-			Wui::WuiDrawCommand clipPop;
-			clipPop.Kind = Wui::WuiDrawKind::ClipPop;
-			ctx.Commands().push_back(clipPop);
-			ctx.PopClipRect();
+			overlayClip.reset();   // 先出裁剪域(ClipPop + PopClipRect),再出 overlay
 			ctx.PopOverlay();
 		}
 		const size_t overlayAfter = ctx.OverlayCommands().size();
-		const size_t mainAfter = ctx.Commands().size();
+		const size_t mainAfter = ctx.MainCommands().size();
 		const size_t overlayDelta = overlayAfter >= overlayBefore ? overlayAfter - overlayBefore : 0;
 		const size_t mainDelta = mainAfter >= mainBefore ? mainAfter - mainBefore : 0;
 		m_ShowcaseCommands = std::max(overlayDelta, mainDelta);
