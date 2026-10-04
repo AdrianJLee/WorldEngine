@@ -243,6 +243,10 @@ namespace World
 		// sink 由渲染器在 BeginScene 时装上、EndScene 时摘掉 ⇒ 不存在悬垂指针。
 		void SetRenderExtractSink(IRenderExtractSink* sink);
 		void EnsureRenderExtract(float deltaSeconds);  // 幂等
+		// P6:构建"物理插值"的渲染世界矩阵(仅插值开启时非空)。幂等。
+		// 语义:插值作用在**局部**变换上,然后按层级合成 —— 父子的相对关系在插值后仍成立。
+		// 结果写进 FrameExtract::InterpolatedModels + InterpolatedIndex(draw 只查表)。
+		void EnsureInterpolatedWorldTransforms(float alpha);
 		// 本帧的抽取结果(由 sink 填;渲染器提交时消费)。Scene 持有 ⇒ 主渲染器与预览渲染器
 		// 提交同一场景时看到的是同一份。
 		FrameExtract& RenderExtract();
@@ -352,6 +356,9 @@ namespace World
 		// 运行时建刚体:AddComponent 的 schema 存储绑定只写入组件数据,Box2D 刚体由这里补建
 		// (与 OnPhysics2DStart 同一套形状/质量创建逻辑);世界未启动 → 只保留组件配置。
 		void EnsurePhysicsBody(entt::entity entity);
+		// P5:把组件的 Layer/Mask 同步到物理后端(2D 逐 shape 重设 filter;3D 重映射 ObjectLayer)。
+		// 每固定步对每个刚体做一次整数比较 ⇒ 任何写入路径(脚本/面板/读档)都能生效。
+		void SyncBodyFilter2D(entt::entity entity);
 		// ---- P7:关节(约束)运行时接口 ----
 		// 与刚体同一生命周期:世界只在 OnRuntimeStart/OnSimulationStart → OnRuntimeStop 之间存在。
 		// 2D 走 Box2D 关节,3D 走 Jolt 约束;两侧都必须是同一后端的刚体。
@@ -519,6 +526,7 @@ namespace World
 		bool m_WorldTransformsDone = false;
 		bool m_AnimationDone = false;
 		bool m_RenderExtractDone = false;
+		bool m_InterpolatedWorldsDone = false;
 		// 一帧的耗时表由**先跑的那个阶段集合**清空(固定先于可变),帧末重置。见 RunFrameSystems。
 		bool m_FrameTimingsBegun = false;
 		// P5:本帧是否已有固定步跑过 —— 决定物理事件在[本帧第一个固定步]清空,还是由可变阶段入口清空。
@@ -593,6 +601,9 @@ namespace World
 		// destroying the entity / removing the component / stopping the world erases them.
 		std::unordered_map<entt::entity, b2BodyId> m_PhysicsBodies2D;
 		std::unordered_map<entt::entity, b2JointId> m_PhysicsJoints2D;
+		// P5:建体时用的 (Layer,Mask)(打包成 uint64)。运行时改组件后据此检测变化并
+		// b2Shape_SetFilter —— 否则过滤静默不生效(建体时只写过一次)。
+		std::unordered_map<entt::entity, uint64_t> m_PhysicsFilter2D;
 		// P1b D6:opaque 3D 物理世界(Physics3D.h 不暴露 Jolt;unique_ptr 的删除由 Scene.cpp 承担)。
 		std::unique_ptr<Physics3DWorld> m_Physics3D;
 		// P5:本帧的物理事件(固定步产出 → 可变阶段消费)。见 EnqueueContactEvent / ClearPhysicsEvents。

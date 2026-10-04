@@ -474,23 +474,19 @@ namespace World
 		// 动画已由 animation-system 按同一步长推进过。
 		(void)deltaSeconds;
 		FrameExtract& extract = scene.RenderExtract();
-		// P6:插值缓冲必须 reserve 到位 —— draw.Model 会指向它的元素,中途重分配会让
-		// 先取到的指针全部失效。每个物理实体最多贡献 1 个插值矩阵(同一实体的各 submesh 共用)。
-		extract.InterpolatedModels.clear();
+		// P6:插值缓冲由 Scene::EnsureInterpolatedWorldTransforms 一次算好(层级合成),
+		// draw.Model 指向它的元素 ⇒ 抽取期间不能再往里追加(会重分配,让已取指针失效)。
 		const bool interpolatePhysics = scene.IsPhysicsInterpolationEnabled();
 		const float interpolationAlpha = scene.FixedStepAlpha();
 		if (interpolatePhysics)
-			extract.InterpolatedModels.reserve(
-				scene.m_Registry.view<RigidBody2DComponent>().size() +
-				scene.m_Registry.view<RigidBody3DComponent>().size() + 8);
+			scene.EnsureInterpolatedWorldTransforms(interpolationAlpha);
 		// 开启插值时把 draw.Model 换成插值后的矩阵(指针稳定:见上面的 reserve);关闭时原样返回。
 		const auto resolveRenderMatrix = [&](entt::entity entity, const glm::mat4* authoritative) -> const glm::mat4*
 		{
 			if (!interpolatePhysics) return authoritative;
-			const auto* state = scene.m_Registry.try_get<PhysicsInterpolationState>(entity);
-			if (state == nullptr || !state->Valid) return authoritative;
-			extract.InterpolatedModels.push_back(InterpolateRigidTransform(state->PreviousMatrix, *authoritative, interpolationAlpha));
-			return &extract.InterpolatedModels.back();
+			const auto found = extract.InterpolatedIndex.find(entity);
+			if (found == extract.InterpolatedIndex.end()) return authoritative;
+			return &extract.InterpolatedModels[found->second];
 		};
 		// ---- 3D 网格收集(D2c/D3) ----
 		// 收集前移到阴影通道之前:方向光阴影的正交矩阵要覆盖本帧所有网格实体的世界包围盒。

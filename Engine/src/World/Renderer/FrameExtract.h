@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <entt.hpp>
 #include <glm/glm.hpp>
+#include <unordered_map>
 #include <vector>
 
 namespace World
@@ -46,6 +47,9 @@ namespace World
 		// `FrameMeshDraw::Model` 可能指向这里的元素 ⇒ 抽取期间必须 reserve 到位,不能中途重分配。
 		// 与 Draws 同样的生命周期:抽取(PreRender)→ 提交(同帧稍后)之间有效。
 		std::vector<glm::mat4> InterpolatedModels;
+		// P6:插值后的世界矩阵按**实体**索引(前序层级合成一次算全部,draw 只查表)。
+		// 与 InterpolatedModels 同生命周期;空 = 本帧没有插值(或插值关闭)。
+		std::unordered_map<entt::entity, uint32_t> InterpolatedIndex;
 		// 全部 draw 的世界包围盒并集(方向光阴影的正交矩阵要覆盖它)。HasBounds=false = 无网格。
 		glm::vec3 BoundsMin { 0.0f };
 		glm::vec3 BoundsMax { 0.0f };
@@ -55,6 +59,7 @@ namespace World
 		{
 			Draws.clear();
 			InterpolatedModels.clear();
+			InterpolatedIndex.clear();
 			Lights = LightRig {};
 			BoundsMin = glm::vec3(0.0f);
 			BoundsMax = glm::vec3(0.0f);

@@ -10,6 +10,8 @@
 #include "World/Gameplay/Runtime/GameApp.h"
 #include "World/Physics/PhysicsEvents.h"
 #include "World/Renderer/TransformInterpolation.h"
+#include "World/Scene/Hierarchy.h"
+#include "World/Renderer/FrameExtract.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
@@ -161,7 +163,64 @@ namespace
 		CHECK(disabled == 0);
 	}
 
-	// ④ alpha 来源:累加器余量换算。
+	// ⑤ 层级插值:插值必须作用在**局部**变换上,再由层级合成 ——
+	// 父是刚体(被插值)、子是非物理网格。子实体的渲染矩阵必须等于
+	// Interpolate(父局部) * 子局部;若沿用"父权威世界 * 子局部",子相对父会每固定步跳一次。
+	void HierarchyInterpolationComposesLocals()
+	{
+		Ref<Scene> scene = CreateRef<Scene>(TestContext());
+		scene->SetPhysicsInterpolationEnabled(true);
+
+		Entity parent = Entity::CreateEntity(scene.get(), "PhysicsParent");
+		parent.AddComponent<TransformComponent>(glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f));
+		RigidBody3DComponent& body = parent.AddComponent<RigidBody3DComponent>();
+		body.Type = RigidBody3DComponent::MotionType::Dynamic;
+		parent.AddComponent<BoxCollider3DComponent>().HalfExtents = { 0.5f, 0.5f, 0.5f };
+
+		// 子实体:只有本地偏移,没有刚体(不会自己运动,只跟随父)。
+		Entity child = Entity::CreateEntity(scene.get(), "Child");
+		child.AddComponent<TransformComponent>(glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f));
+		CHECK(Hierarchy::SetParent(scene->GetRegistry(), static_cast<entt::entity>(child),
+			static_cast<entt::entity>(parent)));
+
+		scene->OnRuntimeStart();
+   // 占位(下面用固定步推进,让父体产生"上一固定步"样本)
+		for (int step = 0; step < 20; ++step)
+			scene->OnFixedUpdate(Timestep(kFixedStep));
+
+		// 取父的上一局部与当前局部,以及子的当前局部。
+		const entt::entity parentHandle = static_cast<entt::entity>(parent);
+		const entt::entity childHandle = static_cast<entt::entity>(child);
+		const entt::registry& registry = static_cast<const Scene&>(*scene).GetRegistry();
+		const auto* parentState = registry.try_get<PhysicsInterpolationState>(parentHandle);
+		CHECK(parentState != nullptr && parentState->Valid);
+		const glm::mat4 parentPrevLocal = parentState->PreviousLocalMatrix;
+		const glm::mat4 parentCurLocal = registry.get<TransformComponent>(parentHandle).GetLocalMatrix();
+		const glm::mat4 childLocal = registry.get<TransformComponent>(childHandle).GetLocalMatrix();
+
+		// 让本帧的插值 pass 跑一次(帧内幂等:先 BeginFrame 复位)。
+		scene->BeginFrame();
+		scene->EnsureInterpolatedWorldTransforms(0.5f);
+
+		const FrameExtract& extract = scene->RenderExtract();
+		const auto found = extract.InterpolatedIndex.find(childHandle);
+		CHECK(found != extract.InterpolatedIndex.end());   // 子实体必须拿到插值矩阵
+		const glm::mat4 childRender = extract.InterpolatedModels[found->second];
+
+		const glm::mat4 expected = InterpolateRigidTransform(parentPrevLocal, parentCurLocal, 0.5f) * childLocal;
+		// "旧口径"的对照:父用**权威世界**矩阵(未跑可变阶段时退化为父局部 —— 根实体二者相同)。
+		const auto* parentWorld = registry.try_get<WorldTransformComponent>(parentHandle);
+		const glm::mat4 naive = (parentWorld ? parentWorld->Matrix : parentCurLocal) * childLocal;
+		std::printf("[info] hierarchy interp: child matches composed=%d, differs from naive=%d\n",
+			NearlyEqual(childRender, expected) ? 1 : 0, NearlyEqual(childRender, naive) ? 0 : 1);
+		CHECK(NearlyEqual(childRender, expected));
+		// 反假:若仍用"父权威世界 * 子局部",结果必须与插值结果可判别(否则用例没有判别力)。
+		CHECK(!NearlyEqual(childRender, naive));
+
+		scene->OnRuntimeStop();
+	}
+
+	// ④ alpha 来源:累加器余量换算。	// ④ alpha 来源:累加器余量换算。
 	void GameAppAlphaMatchesAccumulatorRemainder()
 	{
 		Gameplay::GameAppDesc desc;
@@ -193,6 +252,7 @@ int main()
 			{ "interpolation math (endpoints/midpoint/rotation/scale)", InterpolationMathIsCorrect },
 			{ "interpolation does not change authoritative state", InterpolationDoesNotChangeAuthoritativeState },
 			{ "interpolation state recorded only when enabled", InterpolationStateIsRecordedOnlyWhenEnabled },
+			{ "hierarchy: interpolated local composes into child render matrix", HierarchyInterpolationComposesLocals },
 			{ "GameApp alpha matches accumulator remainder", GameAppAlphaMatchesAccumulatorRemainder },
 		};
 		int failures = 0;

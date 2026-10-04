@@ -210,11 +210,14 @@ namespace World
 	//
 	// **非 schema**:不入 .wd、不进属性面板、不参与序列化(与 WorldTransformComponent 同口径)。
 	// 只由物理系统(步进前记录)与渲染抽取(写 Model 时读取)使用:
-	//   * PreviousMatrix = 上一固定步开始时该实体的渲染矩阵;
+	//   * PreviousLocalMatrix = 上一固定步开始时该实体的**局部**变换;
 	//   * Valid = 是否已有可用的上一帧样本(新建实体第一帧为 false,不插值)。
 	struct PhysicsInterpolationState
 	{
-		glm::mat4 PreviousMatrix { 1.0f };
+		// 权威数据是局部变换(Location/Rotation/Scale)⇒ 插值也必须作用在局部分量上,
+		// 再由渲染侧做一次层级合成。若插值世界矩阵,父子的相对关系会在插值后失真
+		// (父被插值、子用权威世界矩阵 ⇒ 子相对父每固定步跳一次)。
+		glm::mat4 PreviousLocalMatrix { 1.0f };
 		bool Valid = false;
 	};
 

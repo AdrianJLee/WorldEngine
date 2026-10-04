@@ -4,6 +4,8 @@
 #include "World/Scene/Systems/TransformSystem.h"
 #include "World/Scene/Systems/CameraSystem.h"
 #include "World/Scene/Systems/MovementSystem.h"
+#include "World/Scene/Hierarchy.h"
+#include "World/Renderer/TransformInterpolation.h"
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/FrameExtract.h"
@@ -141,7 +143,8 @@ namespace World
 		// W3f:刚体创建的唯一实现(世界启动与运行时 AddComponent 共用)。
 		// 形状/质量折算与 OnPhysics2DStart 的既有口径一致:位置/旋转取 Transform,尺寸乘 Scale。
 		bool BuildRuntimeBody(b2WorldId worldId, entt::registry& registry,
-			std::unordered_map<entt::entity, b2BodyId>& bodies, entt::entity entity)
+			std::unordered_map<entt::entity, b2BodyId>& bodies,
+			std::unordered_map<entt::entity, uint64_t>& filters, entt::entity entity)
 		{
 			if (!b2World_IsValid(worldId)) return false;
 			auto* rb = registry.try_get<RigidBody2DComponent>(entity);
@@ -205,6 +208,8 @@ namespace World
 				PrepareShape(shapeDef, circle->IsSensor);
 				b2CreateCircleShape(body, &shapeDef, &shape);
 			}
+			// P5:记下建体时用的 (Layer,Mask) —— 运行时改组件后据此检测变化并 b2Shape_SetFilter。
+			filters[entity] = (static_cast<uint64_t>(rb->Layer) << 32) | static_cast<uint64_t>(rb->Mask);
 			return true;
 		}
 
@@ -844,10 +849,10 @@ namespace World
 		for (const entt::entity entity : m_Registry.view<PhysicsInterpolationState>())
 		{
 			auto& state = m_Registry.get<PhysicsInterpolationState>(entity);
-			// 渲染矩阵的权威来源与抽取侧一致:有 WorldTransformComponent 用它(层级求解结果),
-			// 否则回退到实体自己的 TransformComponent。
-			if (const auto* world = m_Registry.try_get<WorldTransformComponent>(entity)) state.PreviousMatrix = world->Matrix;
-			else if (const auto* transform = m_Registry.try_get<TransformComponent>(entity)) state.PreviousMatrix = transform->GetLocalMatrix();
+			// P6:记**局部**变换(权威分量);世界矩阵由渲染侧用插值后的局部变换做层级合成。
+			// 这样父子的相对关系在插值后仍然成立(旧实现插值世界矩阵 ⇒ 子相对父每步跳一次)。
+			if (const auto* transform = m_Registry.try_get<TransformComponent>(entity))
+				state.PreviousLocalMatrix = transform->GetLocalMatrix();
 			state.Valid = true;
 		}
 	}
@@ -1270,8 +1275,47 @@ namespace World
 		const auto it = m_PhysicsBodies2D.find(entity);
 		if (it == m_PhysicsBodies2D.end()) return;
 		const b2BodyId bodyId = it->second;
+		// P5:销毁"接触/重叠中"的刚体时,存活方必须收到配对的 End。
+		// 实测(tests/World/PhysicsEventsTests.cpp 的 destroy-while-touching):Box2D 在
+		// b2DestroyBody 时**不发** end 事件(3D 的 Jolt 会发)—— 所以这里在销毁前主动补发,
+		// 否则按 Begin/Persist 维护集合的订阅者会留下悬挂条目。
+		if (b2Body_IsValid(bodyId))
+		{
+			const int capacity = b2Body_GetContactCapacity(bodyId);
+			if (capacity > 0)
+			{
+				std::vector<b2ContactData> contacts(static_cast<size_t>(capacity));
+				const int count = b2Body_GetContactData(bodyId, contacts.data(), capacity);
+				for (int index = 0; index < count; ++index)
+				{
+					const b2ContactData& data = contacts[index];
+					const entt::entity entityA = ResolveShapeEntity(data.shapeIdA);
+					const entt::entity entityB = ResolveShapeEntity(data.shapeIdB);
+					if (entityA == entt::null || entityB == entt::null)
+						continue;
+					const bool sensorA = b2Shape_IsValid(data.shapeIdA) && b2Shape_IsSensor(data.shapeIdA);
+					const bool sensorB = b2Shape_IsValid(data.shapeIdB) && b2Shape_IsSensor(data.shapeIdB);
+					if (sensorA || sensorB)
+					{
+						Physics::TriggerEvent event;
+						event.SensorEntity = sensorA ? entityA : entityB;
+						event.OtherEntity = sensorA ? entityB : entityA;
+						event.Phase = Physics::ContactPhase::End;
+						m_TriggerEvents.push_back(event);
+						m_SensorOverlaps2D.erase(PackEntityPair(event.SensorEntity, event.OtherEntity));
+						continue;
+					}
+					Physics::ContactEvent event;
+					event.EntityA = entityA;
+					event.EntityB = entityB;
+					event.Phase = Physics::ContactPhase::End;
+					m_ContactEvents.push_back(event);
+				}
+			}
+		}
 		// 先把引用摘掉,再销毁 Box2D 刚体(失败/重入都不会留下悬垂句柄)。
 		m_PhysicsBodies2D.erase(it);
+		m_PhysicsFilter2D.erase(entity);
 		if (b2Body_IsValid(bodyId)) b2DestroyBody(bodyId);
 	}
 
@@ -1344,7 +1388,7 @@ namespace World
 			m_PhysicsBodies2D.erase(entity);
 			return;
 		}
-		if (BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, entity)) return;
+		if (BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity)) return;
 		// 已存在的刚体:组件是唯一事实源,类型在脚本侧改过后同步给 Box2D
 		// (含 shape 的质量/惯量重算)。Transform 保持 Box2D 的权威状态,不在这里回推。
 		const b2BodyId bodyId = FindBody2D(m_PhysicsBodies2D, entity);
@@ -1358,6 +1402,43 @@ namespace World
 		}
 		if (b2Body_GetType(bodyId) != box2dType)
 			b2Body_SetType(bodyId, box2dType);
+
+		SyncBodyFilter2D(entity);
+
+		// 3D 侧同口径:运行时改 Layer/Mask 需要重映射 ObjectLayer。
+		if (m_Physics3D)
+			m_Physics3D->RefreshBodyFilter(entity);
+	}
+
+	// P5:运行时改 Layer/Mask ⇒ 逐 shape 重设 filter。旧实现只在建体时写一次 ⇒ 之后改组件
+	// **静默不生效**。这里按"组件值 vs 建体时记录"的整数比较做幂等同步;任何写入路径
+	// (脚本/属性面板/读档/复制)都因此生效。
+	void Scene::SyncBodyFilter2D(entt::entity entity)
+	{
+		const auto* rigidBody = m_Registry.try_get<RigidBody2DComponent>(entity);
+		if (rigidBody == nullptr) return;
+		const b2BodyId bodyId = FindBody2D(m_PhysicsBodies2D, entity);
+		if (!b2Body_IsValid(bodyId)) return;
+
+		const uint64_t filter = (static_cast<uint64_t>(rigidBody->Layer) << 32) |
+			static_cast<uint64_t>(rigidBody->Mask);
+		const auto recorded = m_PhysicsFilter2D.find(entity);
+		if (recorded != m_PhysicsFilter2D.end() && recorded->second == filter)
+			return;
+
+		const int shapeCount = b2Body_GetShapeCount(bodyId);
+		if (shapeCount <= 0)
+			return;
+		std::vector<b2ShapeId> shapes(static_cast<size_t>(shapeCount));
+		const int written = b2Body_GetShapes(bodyId, shapes.data(), shapeCount);
+		for (int index = 0; index < written; ++index)
+		{
+			b2Filter shapeFilter = b2Shape_GetFilter(shapes[index]);
+			shapeFilter.categoryBits = rigidBody->Layer;
+			shapeFilter.maskBits = rigidBody->Mask;
+			b2Shape_SetFilter(shapes[index], shapeFilter);
+		}
+		m_PhysicsFilter2D[entity] = filter;
 	}
 
 	void Scene::DestroyEntityNow(entt::entity entity)
@@ -1411,6 +1492,7 @@ namespace World
 		m_WorldTransformsDone = false;
 		m_AnimationDone = false;
 		m_RenderExtractDone = false;
+		m_InterpolatedWorldsDone = false;
 	}
 
 	void Scene::EnsureWorldTransforms()
@@ -1449,6 +1531,73 @@ namespace World
 		// const 重载不惰性创建(不可能返回可写引用);没有缓冲时返回一个空壳。
 		static const FrameExtract kEmpty;
 		return m_RenderExtract ? *m_RenderExtract : kEmpty;
+	}
+
+	// P6:物理插值的**层级**合成。语义(与 Unity Rigidbody.interpolation / Bevy
+	// TransformInterpolation 同口径):
+	//   1) 每个实体的渲染局部变换 = 有插值状态 ? 在"上一固定步的局部"与"当前局部"之间插值
+	//      : 当前局部(未受物理驱动的实体本就不变);
+	//   2) 渲染世界矩阵 = 父渲染世界 * 渲染局部(按 InheritTransform)。
+	// 关键:插值作用在**局部**变换上,所以父子的相对关系在插值后仍然成立 ——
+	// 旧实现插值世界矩阵,子实体用权威世界矩阵,子相对父每固定步跳一次(可见抖动)。
+	// 只有"自身被插值"或"祖先被插值"的实体才需要槽位;其余实体的权威矩阵就是渲染矩阵。
+	void Scene::EnsureInterpolatedWorldTransforms(float alpha)
+	{
+		AssertOwnerThread();
+		if (m_InterpolatedWorldsDone)
+			return;
+		m_InterpolatedWorldsDone = true;
+
+		FrameExtract& extract = RenderExtract();
+		extract.InterpolatedModels.clear();
+		extract.InterpolatedIndex.clear();
+		if (!m_PhysicsInterpolationEnabled)
+			return;
+
+		extract.InterpolatedModels.reserve(m_Registry.view<PhysicsInterpolationState>().size() + 8);
+
+		// 前序遍历(与 Hierarchy::UpdateWorldTransforms 同序):保证父的渲染世界矩阵先算好。
+		struct Frame { entt::entity Entity; glm::mat4 ParentWorld; bool ParentInterpolated; };
+		std::vector<Frame> stack;
+		for (const entt::entity entity : m_Registry.view<TransformComponent>())
+		{
+			const auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity);
+			if (!hierarchy || hierarchy->Parent == entt::null || !m_Registry.valid(hierarchy->Parent))
+				stack.push_back({ entity, glm::mat4(1.0f), false });
+		}
+
+		while (!stack.empty())
+		{
+			const Frame frame = stack.back();
+			stack.pop_back();
+			const entt::entity entity = frame.Entity;
+			const auto* transform = m_Registry.try_get<TransformComponent>(entity);
+			if (!transform)
+				continue;
+
+			const auto* state = m_Registry.try_get<PhysicsInterpolationState>(entity);
+			const bool interpolateSelf = state != nullptr && state->Valid;
+			const glm::mat4 currentLocal = transform->GetLocalMatrix();
+			const glm::mat4 renderLocal = interpolateSelf
+				? InterpolateRigidTransform(state->PreviousLocalMatrix, currentLocal, alpha)
+				: currentLocal;
+
+			const auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity);
+			const bool inherit = !hierarchy || hierarchy->InheritTransform;
+			const glm::mat4 renderWorld = inherit ? frame.ParentWorld * renderLocal : renderLocal;
+
+			// 该实体的渲染矩阵是否与权威世界矩阵不同(需要给 draw 一个替代矩阵)。
+			const bool differs = interpolateSelf || (inherit && frame.ParentInterpolated);
+			if (differs)
+			{
+				extract.InterpolatedIndex.emplace(entity, static_cast<uint32_t>(extract.InterpolatedModels.size()));
+				extract.InterpolatedModels.push_back(renderWorld);
+			}
+
+			for (const entt::entity child : Hierarchy::ChildrenOf(m_Registry, entity))
+				if (m_Registry.valid(child))
+					stack.push_back({ child, renderWorld, differs });
+		}
 	}
 
 	void Scene::EnsureRenderExtract(float deltaSeconds)
@@ -1726,10 +1875,11 @@ namespace World
 		m_PhysicsWorldId = b2CreateWorld(&worldDef);
 		m_PhysicsBodies2D.clear();
 		m_PhysicsJoints2D.clear();
+		m_PhysicsFilter2D.clear();
 		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 		{
 			// W3f:创建逻辑抽到 BuildRuntimeBody,与运行时 AddComponent 补建共用同一套形状/质量口径。
-			BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, entity);
+			BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
 		}
 	}
 
@@ -1738,6 +1888,9 @@ namespace World
 		if (!b2World_IsValid(m_PhysicsWorldId)) return;
 		// P6:步进前先记下"上一固定步"的渲染矩阵(插值起点)。
 		RecordPhysicsInterpolationState();
+		// P5:步进前同步 Layer/Mask(字段可被脚本/面板/读档改,任何写入路径都要生效)。
+		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
+			SyncBodyFilter2D(entity);
 		b2World_Step(m_PhysicsWorldId, ts.GetSeconds(), 4);
 		// P5:步进结束后立刻把 Box2D 的 begin/end/persist 翻译进场景事件队列
 		// (队列在"本帧第一个固定步"清空,由 RunFixedFrameSystems 负责)。
@@ -1767,6 +1920,7 @@ namespace World
 		m_PhysicsWorldId = b2_nullWorldId;
 		m_SensorOverlaps2D.clear();   // 世界没了,重叠状态不能跨运行存活
 		m_PhysicsBodies2D.clear();
+		m_PhysicsFilter2D.clear();
 	}
 
 	// ---- P1b D6:3D 物理(Jolt) ----
@@ -1805,6 +1959,9 @@ namespace World
 		if (!m_Physics3D) return;
 		// P6:步进前先记下"上一固定步"的渲染矩阵(插值起点)。
 		RecordPhysicsInterpolationState();
+		// P5:步进前同步 Layer/Mask(与 2D 同口径:改层立即生效,内部有整数比较做早退)。
+		for (const auto entity : m_Registry.view<RigidBody3DComponent>())
+			m_Physics3D->RefreshBodyFilter(entity);
 		m_Physics3D->Step(ts.GetSeconds());
 		m_Physics3D->SyncTransforms();
 	}
