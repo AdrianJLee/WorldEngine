@@ -50,8 +50,8 @@ namespace
 		{ "World::VelocityComponent",            24 },
 		{ "World::SpriteComponent",              40 },
 		{ "World::CircleRendererComponent",      24 },
-		{ "World::MeshRendererComponent",        64 },
-		{ "World::SkinnedMeshRendererComponent", 64 },
+		{ "World::MeshRendererComponent",        56 },
+		{ "World::SkinnedMeshRendererComponent", 56 },
 		{ "World::HierarchyComponent",            8 },
 		{ "World::CameraComponent",              36 },
 		{ "World::DirectionalLightComponent",    32 },
@@ -134,7 +134,7 @@ int main()
 		const struct { const char* Name; std::size_t Size; const char* Budget; } nonSchema[] = {
 			{ "World::WorldTransformComponent",    sizeof(WorldTransformComponent),    "== 64" },
 			{ "World::CameraViewComponent",        sizeof(CameraViewComponent),        "<= 128 (exempt)" },
-			{ "World::PhysicsInterpolationState",  sizeof(PhysicsInterpolationState),  "<= 72 (exempt; O2)" },
+			{ "World::PhysicsInterpolationState",  sizeof(PhysicsInterpolationState),  "== 44 (O2 landed; no longer exempt)" },
 			{ "World::HierarchyChildrenComponent", sizeof(HierarchyChildrenComponent), "non-trivial by design" },
 		};
 		for (const auto& entry : nonSchema)

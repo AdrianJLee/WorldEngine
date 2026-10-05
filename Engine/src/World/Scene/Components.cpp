@@ -40,6 +40,17 @@ namespace World
 		"MeshRendererComponent must stay trivially copyable (no heap members)");
 	static_assert(sizeof(MeshRendererComponent) <= 64,
 		"MeshRendererComponent must fit one cache line");
+
+
+	// ---- F8 空洞审计的棘轮(标准 §4.8 R2)----
+	// 2026-10-05 用一次性探针审计了全部 22 个 schema 组件的**内部空洞**(实测偏移,非推算):
+	//   * 只有这两个组件的空洞会**真正缩小 stride**(其余组件的空洞被尾部对齐填充吸收,去掉 sizeof 不变);
+	//   * 两者都按 R2 重排(8B 对齐的 AssetRef 先排、4B 标量其次、1B bool 最后)落到 56B。
+	// 这两条断言把"无内部空洞"钉住:若有人插回 4B/1B 字段打断 8B 边界,sizeof 会回到 60/64 ⇒ 编译失败。
+	static_assert(sizeof(MeshRendererComponent) == 56,
+		"MeshRendererComponent must be 56B (hole-free per 4.8 R2); 60/64 here means an interior hole came back");
+	static_assert(sizeof(SkinnedMeshRendererComponent) == 56,
+		"SkinnedMeshRendererComponent must be 56B (hole-free per 4.8 R2); 60/64 here means an interior hole came back");
 	// T6b(2026-10-04):名字字段(NameId)也是驻留 POD ⇒ TagComponent 从此平凡可拷贝(4 字节)。
 	// 这是组件契约的最后一块:此前 Tag 的 std::string 让它无法参与 memcpy 级的复制/Prefab 实例化。
 	static_assert(sizeof(TagComponent) == 4, "TagComponent must be exactly one NameId (4 bytes)");

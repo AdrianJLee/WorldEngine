@@ -259,15 +259,16 @@ namespace World
 			WE_ENUM_VALUE(Plane);
 		WE_ENUM_END
 
+		// §4.8 R2:两个 4B 标量前置 ⇒ Color 与 8B 对齐的 AssetRef 之间不再有 4B 内部空洞。
 		PrimitiveShape Primitive = PrimitiveShape::Cube;
+		// D5:.wmodel 有节点树时,选择"第几个 mesh"(节点引用 mesh 下标);
+		// 内置 primitive(cube/plane/sphere)与无 submesh 的网格忽略该字段。
+		int32_t MeshIndex = 0;
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
 		AssetRef Mesh;
 		// D3:材质资产路径(相对项目内容根,形如 materials/steel.wmat)。
 		// 空 = 旧行为:用上面的 Color 直接作为基色。
 		AssetRef Material;
-		// D5:.wmodel 有节点树时,选择"第几个 mesh"(节点引用 mesh 下标);
-		// 内置 primitive(cube/plane/sphere)与无 submesh 的网格忽略该字段。
-		int32_t MeshIndex = 0;
 
 		WE_SCHEMA_BODY(World, MeshRendererComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Mesh"),
@@ -323,14 +324,14 @@ namespace World
 	struct SkinnedMeshRendererComponent
 	{
 		AssetRef Mesh;
-		int32_t MeshIndex = 0;
 		AssetRef Material;
+		int32_t MeshIndex = 0;
 		// clip 名 = 驻留名字(在模型的若干条 clip 里查名字,天然是有界集合)。
 		NameId AnimationClip;
-		bool Playing = true;
 		float Speed = 1.0f;
-		bool Loop = true;
 		float Time = 0.0f;
+		bool Playing = true;
+		bool Loop = true;
 
 		WE_SCHEMA_BODY(World, SkinnedMeshRendererComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Mesh"),
