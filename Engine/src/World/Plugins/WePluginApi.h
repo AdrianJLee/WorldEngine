@@ -180,7 +180,10 @@ namespace World::Plugins
 		WeComponentKindUVec2, WeComponentKindUVec3, WeComponentKindUVec4,
 		WeComponentKindQuat, WeComponentKindMat3, WeComponentKindMat4,
 		// 以下类型 T2b 不支持注册(声明在这里只为与 Schema::Kind 对齐值):
-		WeComponentKindString, WeComponentKindName, WeComponentKindEnum, WeComponentKindAsset, WeComponentKindObject,
+		WeComponentKindString, WeComponentKindEnum, WeComponentKindAsset, WeComponentKindObject,
+		// 追加式:与 Schema::Kind 同序,新 kind 加在**末尾** —— 往中间插会平移后面所有值,
+		// 那是 ABI 变更(见 PluginManager_Internal.h 的 static_assert 与 Schema::Kind 的说明)。
+		WeComponentKindName, WeComponentKindText,
 	};
 
 	// 字段的编辑期提示(只影响属性面板怎么显示,不进序列化);未知位 = 忽略(前向兼容)。

@@ -329,10 +329,12 @@ World::Schema::ModuleId PluginSchemaModule(const std::string& pluginId);
 		WE_T2B_KIND_ASSERT(WeComponentKindMat3, Mat3);
 		WE_T2B_KIND_ASSERT(WeComponentKindMat4, Mat4);
 		WE_T2B_KIND_ASSERT(WeComponentKindString, String);
-		WE_T2B_KIND_ASSERT(WeComponentKindName, Name);
 		WE_T2B_KIND_ASSERT(WeComponentKindEnum, Enum);
 		WE_T2B_KIND_ASSERT(WeComponentKindAsset, Asset);
 		WE_T2B_KIND_ASSERT(WeComponentKindObject, Object);
+		// 追加式 kind(与 Schema::Kind 末尾同序)。
+		WE_T2B_KIND_ASSERT(WeComponentKindName, Name);
+		WE_T2B_KIND_ASSERT(WeComponentKindText, Text);
 #undef WE_T2B_KIND_ASSERT
 	}
 }

@@ -1023,6 +1023,16 @@ struct GeneratedAccess<World::TestSchema::DefaultKindFixture>
         World::TestSchema::DefaultKindFixture* self = static_cast<World::TestSchema::DefaultKindFixture*>(instance);
         self->StringValue = std::get<std::string>(value);
     }
+    static Value Get_TextValue(const void* instance)
+    {
+        const World::TestSchema::DefaultKindFixture* self = static_cast<const World::TestSchema::DefaultKindFixture*>(instance);
+        return Value(TextOps<std::remove_reference_t<decltype(self->TextValue)>>::GetText(self->TextValue));
+    }
+    static void Set_TextValue(void* instance, const Value& value)
+    {
+        World::TestSchema::DefaultKindFixture* self = static_cast<World::TestSchema::DefaultKindFixture*>(instance);
+        TextOps<std::remove_reference_t<decltype(self->TextValue)>>::SetText(self->TextValue, std::get<std::string>(value));
+    }
     static const FieldSchema& Field_BoolValue()
     {
         static const FieldSchema schema = {
@@ -1455,6 +1465,24 @@ struct GeneratedAccess<World::TestSchema::DefaultKindFixture>
         };
         return schema;
     }
+    static const FieldSchema& Field_TextValue()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x405C2062629DBD0Dull },
+            "TextValue",
+            Kind::Text,
+            &Get_TextValue,
+            &Set_TextValue,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
+            Value(std::string()),
+        };
+        return schema;
+    }
     static const TypeSchema& WeSchema()
     {
         static const TypeSchema schema = {
@@ -1488,6 +1516,7 @@ struct GeneratedAccess<World::TestSchema::DefaultKindFixture>
                 Field_Mat3Value(),
                 Field_Mat4Value(),
                 Field_StringValue(),
+                Field_TextValue(),
             },
             nullptr,
             "",

@@ -10,6 +10,8 @@
 
 #include "World/Core/Core.h"
 #include "World/Core/AssetRef.h"
+#include "World/Core/InlineString.h"
+#include "World/Core/Log.h"
 #include "World/Core/StringPool.h"
 #include "World/Schema/Schema.h"
 
@@ -45,6 +47,27 @@ namespace World::Schema
 
 	// 名字字段:边界(序列化/面板/Luau)是字符串,内存里是 4B 驻留 NameId。
 	// 名字**不是身份**(同名不要求唯一),所以没有 AssetRef 那样的身份通道。
+	// 有界文本:边界(序列化/面板/Luau)是字符串,内存里是 InlineString<N>(无堆 POD)。
+	// 截断必须**可见** —— 装不下时打一条警告(与"mip 链超长按链长 clamp"同一套降级口径),
+	// 否则就是一个静默丢数据的坑。
+	template <std::size_t N>
+	struct TextOps<World::InlineString<N>>
+	{
+		static std::string GetText(const World::InlineString<N>& text)
+		{
+			return std::string(text.View());
+		}
+
+		static void SetText(World::InlineString<N>& text, const std::string& value)
+		{
+			if (!text.Assign(value))
+			{
+				WLD_CORE_WARN("[schema] text field truncated to {0} chars (input was {1})",
+					World::InlineString<N>::Capacity(), value.size());
+			}
+		}
+	};
+
 	template <>
 	struct NameOps<World::NameId>
 	{

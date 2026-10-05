@@ -42,6 +42,7 @@ namespace World
 				case Schema::Kind::Enum: return "Enum";
 				case Schema::Kind::Asset: return "Asset";
 				case Schema::Kind::Name: return "Name";
+				case Schema::Kind::Text: return "Text";
 				case Schema::Kind::Object: return "Object";   // B 期:嵌套 ---@class 结构化表
 				case Schema::Kind::String: return "String";
 				case Schema::Kind::None:
@@ -77,6 +78,7 @@ namespace World
 			if (name == "Enum") return Schema::Kind::Enum;
 			if (name == "Asset") return Schema::Kind::Asset;
 			if (name == "Name") return Schema::Kind::Name;
+			if (name == "Text") return Schema::Kind::Text;
 			if (name == "Object") return Schema::Kind::Object;
 			if (name == "String") return Schema::Kind::String;
 			return Schema::Kind::None;
@@ -103,6 +105,7 @@ namespace World
 				case Schema::Kind::Object:
 				case Schema::Kind::String:
 				case Schema::Kind::Name:
+				case Schema::Kind::Text:
 				case Schema::Kind::Enum:
 				case Schema::Kind::Asset:
 					return true;
@@ -530,6 +533,12 @@ namespace World
 						declaration.TypeName = "String";
 						declaration.Default = field.Default;
 					}
+					else if (field.K == Schema::Kind::Text)
+					{
+						// 有界文本在边界同样是字符串(容量是内存侧的实现细节)。
+						declaration.TypeName = "String";
+						declaration.Default = field.Default;
+					}
 					else if (IsSummaryKind(field.K))
 					{
 						declaration.ReadOnly = true;       // 面板无行控件:只读摘要,不进存档
@@ -691,6 +700,7 @@ namespace World
 						|| std::holds_alternative<Schema::ValueMap>(value);
 				case Schema::Kind::String: return std::holds_alternative<std::string>(value);
 				case Schema::Kind::Name:   // 名字的边界同样是字符串
+				case Schema::Kind::Text:   // 有界文本同理
 					return std::holds_alternative<std::string>(value);
 				// CPPT-2:Enum 存整数(与组件 Enum 字段同一读写器;有符号/无符号按底层类型)、
 				// Asset 存逻辑路径字符串。

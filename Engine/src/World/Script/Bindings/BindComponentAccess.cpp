@@ -81,6 +81,7 @@ namespace World
 			case Schema::Kind::Enum: return "Enum";
 			case Schema::Kind::Asset: return "Asset";
 			case Schema::Kind::Name: return "Name";
+			case Schema::Kind::Text: return "Text";
 			case Schema::Kind::Object: return "Object";
 			}
 			return "Unknown";
@@ -447,6 +448,7 @@ namespace World
 			break;
 		case Schema::Kind::Asset:   // 边界值是资产路径字符串(是否重新加载由资产系统决定)
 		case Schema::Kind::Name:    // 名字同理:脚本侧看到的就是字符串
+		case Schema::Kind::Text:    // 有界文本同理
 			mapping.LuaTypeName = "string";
 			break;
 		case Schema::Kind::Object:
@@ -541,6 +543,7 @@ namespace World
 			return Schema::Value(RequireString(field, value, "a string"));
 		case Schema::Kind::Asset:
 		case Schema::Kind::Name:
+		case Schema::Kind::Text:
 			return Schema::Value(RequireString(field, value, "an asset path string"));
 		case Schema::Kind::Enum:
 		{

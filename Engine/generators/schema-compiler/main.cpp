@@ -501,7 +501,7 @@ namespace
 		static const std::set<std::string> kinds = {
 			"Bool", "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64",
 			"Float", "Double", "Vec2", "Vec3", "Vec4", "IVec2", "IVec3", "IVec4",
-			"UVec2", "UVec3", "UVec4", "Quat", "Mat3", "Mat4", "String", "Name", "Enum", "Asset", "Object"
+			"UVec2", "UVec3", "UVec4", "Quat", "Mat3", "Mat4", "String", "Name", "Text", "Enum", "Asset", "Object"
 		};
 		return kinds;
 	}
@@ -555,6 +555,7 @@ namespace
 		if (kind == "Float") return "Value(0.0f)";
 		if (kind == "Double") return "Value(0.0)";
 		if (kind == "String") return "Value(std::string())";
+		if (kind == "Text") return "Value(std::string())";
 		if (kind == "Vec2") return "Value(glm::vec2(0.0f))";
 		if (kind == "Vec3") return "Value(glm::vec3(0.0f))";
 		if (kind == "Vec4") return "Value(glm::vec4(0.0f))";
@@ -1048,6 +1049,17 @@ namespace
 			out << "    static const TypeSchema* GetNested_" << field.Name << "()\n";
 			out << "    {\n        return &WeSchemaOf_" << ShortName(nested) << "();\n    }\n";
 			}
+			else if (field.Kind == "Text")
+			{
+				// 有界文本:边界字符串 ↔ InlineString<N>(TextOps)。与 Name 同形,但**允许 Default(...)**
+				// (Text 是真正的文本内容,给一个初值是有意义的;Name 是标识符,默认值没意义)。
+				out << "    static Value Get_" << field.Name << "(const void* instance)\n";
+				out << "    {\n        const " << qualified << "* self = static_cast<const " << qualified << "*>(instance);\n";
+				out << "        return Value(TextOps<std::remove_reference_t<decltype(self->" << field.Name << ")>>::GetText(self->" << field.Name << "));\n    }\n";
+				out << "    static void Set_" << field.Name << "(void* instance, const Value& value)\n";
+				out << "    {\n        " << qualified << "* self = static_cast<" << qualified << "*>(instance);\n";
+				out << "        TextOps<std::remove_reference_t<decltype(self->" << field.Name << ")>>::SetText(self->" << field.Name << ", std::get<std::string>(value));\n    }\n";
+			}
 			else if (field.Kind == "Name")
 			{
 				// 名字字段:边界字符串 ↔ 驻留 NameId(NameOps)。与 Asset 同形,名字不是身份 ⇒ 无身份通道。
@@ -1128,6 +1140,13 @@ namespace
 				out << "            nullptr,\n            nullptr,\n            nullptr,\n";
 				out << "            &GetEnum_" << field.Name << ",\n            nullptr,\n";
 			}
+			else if (field.Kind == "Text")
+			{
+				out << "            &Get_" << field.Name << ",\n";
+				out << "            &Set_" << field.Name << ",\n";
+				out << "            nullptr,\n            nullptr,\n            nullptr,\n            nullptr,\n";
+				out << "            nullptr,\n";
+			}
 			else if (field.Kind == "Name")
 			{
 				out << "            &Get_" << field.Name << ",\n";
@@ -1159,6 +1178,14 @@ namespace
 				def = options.DefaultExpr.has_value()
 					? "Value(static_cast<" + signedType + ">(" + options.DefaultExpr.value() + "))"
 					: "Value(static_cast<" + signedType + ">(0))";
+			}
+			else if (field.Kind == "Text")
+			{
+				// 显式包 std::string:裸 `Value("x")` 在 variant 里会被解析成 bool(指针→bool 是
+				// 标准转换,优先于到 std::string 的用户定义转换)—— 那是静默错误。
+				def = options.DefaultExpr.has_value()
+					? "Value(std::string(" + options.DefaultExpr.value() + "))"
+					: "Value(std::string())";
 			}
 			else if (field.Kind == "Object" || field.Kind == "Asset" || field.Kind == "Name")
 			{
@@ -1526,13 +1553,18 @@ int main(int argc, char** argv)
 						Fail(decl.File, field.Pos, "Color() is not supported on container fields ('" + field.Name + "')");
 					if (!options.Choices.empty())
 						Fail(decl.File, field.Pos, "Choices(...) is not supported on container fields ('" + field.Name + "')");
+					// Name / Text 没有容器通道(它们在元素位置会落到 CppType 泛型支路,
+					// 生成出编译不过的代码)。真正要拦的是 **element.Kind** —— 之前这里检查的是
+					// field.Kind,而该分支里 field.Kind 恒为 Array/Map ⇒ 那是一段死校验。
+					if (element.Kind == "Name" || element.Kind == "Text")
+						Fail(decl.File, field.Pos, "field '" + field.Name + "': Of(" + element.Kind +
+							") is not supported as a container element/key (no container field uses it; "
+							"declare it as a plain field)");
 				}
 				else if (field.Kind == "Enum" || field.Kind == "Object" || field.Kind == "Asset")
 				{
 					if (!options.Of.has_value())
 						Fail(decl.File, field.Pos, "field '" + field.Name + "' of kind " + field.Kind + " requires Of(...)");
-					if (field.Kind == "Name")
-						Fail(decl.File, field.Pos, "field '" + field.Name + "' of kind Name cannot be a container element/key (no container field uses it)");
 				}
 				else if (options.Of.has_value())
 				{

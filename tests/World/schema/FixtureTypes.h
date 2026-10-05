@@ -1,5 +1,6 @@
 #pragma once
 
+#include "World/Core/InlineString.h"
 #include "World/Schema/Schema.h"
 
 #include <glm/glm.hpp>
@@ -128,6 +129,8 @@ namespace World::TestSchema
 		glm::mat3 Mat3Value { 1.0f };
 		glm::mat4 Mat4Value { 1.0f };
 		std::string StringValue;
+		// Text = 有界内联文本:无堆、平凡可拷贝(对比上面 StringValue 的 std::string)。
+		World::InlineString<20> TextValue;
 
 		WE_SCHEMA_BODY(TestKit, DefaultKindFixture, Struct)
 			WE_FIELD(BoolValue, Bool);
@@ -154,6 +157,7 @@ namespace World::TestSchema
 			WE_FIELD(Mat3Value, Mat3);
 			WE_FIELD(Mat4Value, Mat4);
 			WE_FIELD(StringValue, String);
+			WE_FIELD(TextValue, Text);
 		WE_SCHEMA_END
 	};
 }

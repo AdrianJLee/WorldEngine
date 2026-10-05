@@ -379,6 +379,7 @@ Schema::Value DefaultPropertyValue(Schema::Kind kind){
 				case Schema::Kind::Double: return Schema::Value(0.0);
 				case Schema::Kind::String: return Schema::Value(std::string());
 				case Schema::Kind::Name: return Schema::Value(std::string());   // 名字的规范零值 = 空名字
+				case Schema::Kind::Text: return Schema::Value(std::string());   // 有界文本的零值 = 空串
 				case Schema::Kind::Vec2: return Schema::Value(glm::vec2(0.0f));
 				case Schema::Kind::Vec3: return Schema::Value(glm::vec3(0.0f));
 				case Schema::Kind::Vec4: return Schema::Value(glm::vec4(0.0f));
@@ -419,6 +420,7 @@ bool PropertyNodeValueMatchesType(const PropertyNode& property){
 				case Schema::Kind::Double: return std::holds_alternative<double>(property.Value);
 				case Schema::Kind::String: return std::holds_alternative<std::string>(property.Value);
 				case Schema::Kind::Name: return std::holds_alternative<std::string>(property.Value);
+				case Schema::Kind::Text: return std::holds_alternative<std::string>(property.Value);
 				case Schema::Kind::Vec2: return std::holds_alternative<glm::vec2>(property.Value);
 				case Schema::Kind::Vec3: return std::holds_alternative<glm::vec3>(property.Value);
 				case Schema::Kind::Vec4: return std::holds_alternative<glm::vec4>(property.Value);
@@ -529,6 +531,8 @@ std::string PropertyNodeTypeText(const PropertyNode& property){
 			if (property.Type == Schema::Kind::Asset)
 			if (property.Type == Schema::Kind::Name)
 				return std::string("name");
+			if (property.Type == Schema::Kind::Text)
+				return std::string("text");
 				return property.TypeName.empty() ? std::string("asset") : property.TypeName;
 			return ScriptLeafTypeText(property.Type);
 		}

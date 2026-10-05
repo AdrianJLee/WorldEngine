@@ -317,7 +317,7 @@ int main()
 		{
 			const TypeSchema* kinds = context.Schemas().Find("TestKit::DefaultKindFixture");
 			CHECK(kinds != nullptr);
-			CHECK(kinds->Fields.size() == 24);   // Bool/整数族/Float/Double/Vec*/IVec*/UVec*/Quat/Mat*/String
+			CHECK(kinds->Fields.size() == 25);   // Bool/整数族/Float/Double/Vec*/IVec*/UVec*/Quat/Mat*/String/Text
 			for (const FieldSchema& field : kinds->Fields)
 			{
 				CHECK(!std::holds_alternative<std::monostate>(field.Default));
@@ -351,6 +351,43 @@ int main()
 			CHECK(std::holds_alternative<glm::mat3>(FindField(*kinds, "Mat3Value")->Default));
 			CHECK(std::holds_alternative<glm::mat4>(FindField(*kinds, "Mat4Value")->Default));
 			CHECK(std::holds_alternative<std::string>(FindField(*kinds, "StringValue")->Default));
+			// Text 的零值同样是"字符串备选"(边界口径与 String 一致,内存侧才是有界 POD)。
+			CHECK(std::holds_alternative<std::string>(FindField(*kinds, "TextValue")->Default));
+
+			// Text 端到端:边界字符串 ↔ InlineString<N>(TextOps),并经通用读写器往返。
+			// 这是新 kind 的关键验收 —— 少了它,"Text 能进 .wd"就只是推断。
+			{
+				const FieldSchema* textField = FindField(*kinds, "TextValue");
+				CHECK(textField != nullptr && textField->K == Kind::Text);
+
+				TestSchema::DefaultKindFixture holder;
+				textField->Set(&holder, Value(std::string("hello text")));
+				CHECK(holder.TextValue.View() == "hello text");
+				CHECK(std::get<std::string>(textField->Get(&holder)) == "hello text");
+
+				// 通用 struct 读写:ReadStructValue → ValueMap → WriteStructValue 还原。
+				const Value written = ReadStructValue(*kinds, &holder);
+				TestSchema::DefaultKindFixture restored;
+				CHECK(WriteStructValue(*kinds, &restored, written));
+				CHECK(restored.TextValue.View() == "hello text");
+				CHECK(std::get<std::string>(textField->Get(&restored)) == "hello text");
+
+				// 超长输入:必须**截断到容量**(InlineString<20> ⇒ 19 字符),且不崩、不留半截。
+				std::string tooLong(64, 'x');
+				textField->Set(&holder, Value(tooLong));
+				CHECK(holder.TextValue.Size() == TestSchema::DefaultKindFixture {}.TextValue.Capacity());
+				CHECK(holder.TextValue.View().size() == 19u);
+				CHECK(holder.TextValue.CStr()[19] == '\0');
+				CHECK(textField->Get(&holder).index() == Value(std::string()).index());
+			}
+
+			// InlineString 的 POD 性:组件能 memcpy 的前提(与 std::string 的关键差别)。
+			static_assert(sizeof(World::InlineString<20>) == 24, "InlineString<20> must be 24 bytes");
+			static_assert(std::is_trivially_copyable_v<World::InlineString<20>>,
+				"InlineString must be trivially copyable");
+			static_assert(std::is_trivially_destructible_v<World::InlineString<20>>,
+				"InlineString must be trivially destructible (no heap)");
+			CHECK(sizeof(World::InlineString<20>) < sizeof(std::string));
 
 			// 嵌套 struct 的 Float 子字段(Stats.Health 的同类):声明默认值可被检视器直接当展示值。
 			const TypeSchema* nestedFixture = context.Schemas().Find("TestKit::NestedFixture");

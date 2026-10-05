@@ -83,12 +83,22 @@ namespace World::Schema
 		UVec2, UVec3, UVec4,
 		Quat, Mat3, Mat4,
 		String,
-		// Name = 驻留名字标识(NameId,4B POD):边界仍是字符串,内存里是进程内驻留 id。
-		// 与 String 的区别只在**存储形态**(标识符 vs 缓冲区),在 Lua/面板/序列化边界与 String 同形。
-		Name,
 		Enum,
 		Asset,
 		Object,
+		// ---- 追加式(append-only):已有 kind 的值永不改变 ----
+		//
+		// 这条纪律是 ABI 要求:插件 ABI 的 `WeComponentKind*` 枚举**按数值镜像**本枚举
+		//(见 Plugins/WePluginApi.h 与 PluginManager_Internal.h 的 static_assert)。
+		// 往中间插一个 kind 会平移后面所有值 ⇒ 那是 ABI 变更。新增一律加在末尾。
+		//
+		// Name = 驻留名字标识(NameId,4B POD):边界仍是字符串,内存里是进程内驻留 id。
+		// 与 String 的区别只在**存储形态**(标识符 vs 缓冲区);Lua/面板/序列化边界与 String 同形。
+		Name,
+		// Text = **有界内联文本**(InlineString<N>,无堆、平凡可拷贝):
+		// String 的问题不是"能不能放文本",而是 std::string 让组件不再平凡可拷贝(堆深拷贝、
+		// 32B+堆)。无界用户文本继续用 String;有界文本(名字/标签串/备注)用 Text。
+		Text,
 	};
 
 	enum class TypeCategory : uint8_t
@@ -330,6 +340,11 @@ namespace World::Schema
 	// 与 AssetOps 同形:字段类型换实现不需要改生成器。
 	template <typename NameRef>
 	struct NameOps;
+
+	// 有界文本字段操作:以字符串作为边界值,内存里是 InlineString<N>(见 Core/InlineString.h)。
+	// 与 AssetOps/NameOps 同形:换存储实现不需要改生成器。
+	template <typename TextRef>
+	struct TextOps;
 
 	// ---- CPPT-6:通用字段/结构读写(叶 / 枚举 / 资产 / 命名 struct / 容器,递归同构)----
 	// SchemaWriter/SchemaReader 与 schema-compiler 生成的容器访问器共用这一份实现,

@@ -22,7 +22,8 @@ namespace World
 	//     面板里展开成可折叠子行,容器元素也能共用同一份模型。
 	//   * 容器(Array/Map):声明成 `WE_FIELD(名字, Array|Map, Of(元素类型), ...)`;
 	//     C++ 成员类型 = `std::vector<元素>` / `std::map<std::string, 元素>`
-	//     (Map 的键固定是 std::string)。元素类型可以是叶子 kind(Float/Vec3/String...)、
+	//     (Map 的键固定是 std::string)。元素类型可以是叶子 kind(Float/Vec3/String...;
+	//     Text 与 Name 没有容器通道)、
 	//     枚举(Of(枚举名))、资产(Of("资产类型"))或已注册的命名 struct。
 	//     容器没有 Default(...):成员初始化是默认形状,面板里加/改过的元素才进存档;
 	//     更深的匿名嵌套(Array<Array<T>>)不支持 —— 用命名 struct 再套容器表达。
@@ -68,7 +69,11 @@ namespace World
 		float Health = 100.0f;
 		float Speed = 1.0f;
 		bool Enabled = true;
-		std::string Label = "WorldEngine Example";
+		// 文本有两种存法,按**是否有界**选:
+		//   String (std::string)      —— 无界用户文本(文本框可输入任意长度)。
+		//   Text   (InlineString<N>)   —— 有界文本:无堆、**平凡可拷贝**(可 memcpy、可进 POD 组件)。
+		// InlineString<20> = 24B(19 字符),比 std::string(32B+堆)更小;装不下时由 TextOps 打警告。
+		InlineString<20> Label = "WorldEngine Example";
 		ExampleMode Mode = ExampleMode::Patrol;
 		// 资产引用 = 驻留 PathId(4B POD);解析由 AssetRegistry/TextureLibrary 在渲染时完成。
 		PathId Icon;
@@ -98,8 +103,9 @@ namespace World
 				Doc("Scalar sample: declared default 1; Step(0.1) sets the drag/keyboard increment."));
 			WE_FIELD(Enabled, Bool, Default(true),
 				Doc("Bool sample: a checkbox row; the declared default is true."));
-			WE_FIELD(Label, String,
-				Doc("String sample: free text row; without Default(...) it starts unset and the member initializer stays in effect."));
+			// Text 是自由文本行(与 String 同形),但内存是有界内联 POD:超长会被截断并打一条警告。
+			WE_FIELD(Label, Text,
+				Doc("Text sample: free text row backed by an inline, heap-free POD string (InlineString<N>); without Default(...) it starts unset and the member initializer stays in effect. Use String instead for unbounded user input."));
 			WE_FIELD(Mode, Enum, Of(ExampleMode),
 				Doc("Enum sample: WE_ENUM_SCHEMA(Game, ExampleMode, Int32) turns this into a dropdown; the scene stores the integer value."));
 			WE_FIELD(Icon, Asset, Of("Texture2D"),

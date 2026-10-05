@@ -322,6 +322,7 @@ namespace World::Schema
 			}
 			case Kind::Asset:
 			case Kind::Name:   // 名字字段的边界同样是字符串(内存里是驻留 NameId)
+			case Kind::Text:   // 有界文本同理(内存里是 InlineString<N>)
 				return Guard([&] { *outValue = Value(node.as<std::string>()); });
 			default: return false;
 		}
