@@ -382,13 +382,32 @@ namespace
 		}
 		const auto endSimd = Clock::now();
 
+		// 变体 C:**渲染器实际走的那条路** —— 分块 + AoS→SoA 取样 + 批量判定。
+		// 只测 batch 函数会漏掉取样开销;把 tiled 也量出来,裁定才贴着真实路径。
+		std::size_t tiledVisible = 0;
+		const auto beginTiled = Clock::now();
+		for (uint32_t r = 0; r < repeats; ++r)
+		{
+			Math::Simd::AabbInFrustumTiled(frustum.Planes, drawCount,
+				[&](std::size_t idx, glm::vec3& outMin, glm::vec3& outMax)
+				{
+					outMin = mins[idx];
+					outMax = maxs[idx];
+				},
+				mask.data());
+			tiledVisible = 0;
+			for (std::size_t k = 0; k < drawCount; ++k)
+				tiledVisible += mask[k];
+		}
+		const auto endTiled = Clock::now();
 		const double elements = static_cast<double>(drawCount) * repeats;
 		const double scalarMs = Millis(beginScalar, endScalar);
 		const double simdMs = Millis(beginSimd, endSimd);
-		std::printf("I. B-axis cull    : scalar %8.2f ms | simd %8.2f ms | %8.3f vs %8.3f ns/draw | ratio scalar/simd=%.3f | visible %zu/%zu\n",
-			scalarMs, simdMs, scalarMs * 1.0e6 / elements, simdMs * 1.0e6 / elements,
-			scalarMs / simdMs, simdVisible, drawCount);
-		g_Sink += static_cast<uint64_t>(scalarVisible + simdVisible);
+		const double tiledMs = Millis(beginTiled, endTiled);
+		std::printf("I. B-axis cull    : scalar %7.2f | simd %7.2f | tiled %7.2f ms | %7.3f / %7.3f / %7.3f ns/draw | scalar/tiled=%.2fx | visible %zu/%zu (%zu tiled)\n",
+			scalarMs, simdMs, tiledMs, scalarMs * 1.0e6 / elements, simdMs * 1.0e6 / elements,
+			tiledMs * 1.0e6 / elements, scalarMs / tiledMs, simdVisible, drawCount, tiledVisible);
+		g_Sink += static_cast<uint64_t>(scalarVisible + simdVisible + tiledVisible);
 	}
 
 	// 用例 D:热字段跨线检查(标准 §4.8 M1)。

@@ -852,30 +852,24 @@ namespace World
 				// 4 对象/lane 按平面循环 ⇒ 指令数约 1/4 且无分支。
 				// 逐 lane 与标量同序 ⇒ **逐位一致**(同一相机/同一帧的可见集合与旧实现完全相同),
 				// 因此这里可以无条件替换,不需要门控。
-				const std::size_t tileCount = (drawCount + kCullTile - 1) / kCullTile;
-
-				// 每个 tile:把 AoS 的 WorldMin/WorldMax gather 成小规模 SoA,再批量判定。
-				// 只在栈上放 tile 大小的缓冲 —— 不做全量 SoA 预转换(那会多一遍内存流量)。
+				// 分块 + 取样 + 判定是 `Math/Simd` 里的**同一份实现**(可被测试直接覆盖,
+				// 而不是在渲染器里另写一份)。这里只提供"怎么从 AoS 的绘制项取样"。
+				const auto getAabb = [&draws](std::size_t i, glm::vec3& outMin, glm::vec3& outMax)
+				{
+					outMin = draws[i].WorldMin;
+					outMax = draws[i].WorldMax;
+				};
+				const std::size_t tileCount = Math::Simd::AabbCullTileCount(drawCount);
 				const auto cullTile = [&](std::size_t tile)
 				{
-					const std::size_t begin = tile * kCullTile;
-					const std::size_t end = (begin + kCullTile < drawCount) ? begin + kCullTile : drawCount;
-					const std::size_t tileSize = end - begin;
-
-					glm::vec3 tileMin[kCullTile];
-					glm::vec3 tileMax[kCullTile];
-					for (std::size_t k = 0; k < tileSize; ++k)
-					{
-						tileMin[k] = draws[begin + k].WorldMin;
-						tileMax[k] = draws[begin + k].WorldMax;
-					}
-					Math::Simd::AabbInFrustumBatch(cameraFrustum.Planes, tileMin, tileMax, tileSize,
-						visibleMask + begin);
+					Math::Simd::AabbInFrustumTile(cameraFrustum.Planes, drawCount, tile, getAabb, visibleMask);
 				};
 
 				if (drawCount >= kParallelCullThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
 				{
-					JobSystem::ParallelFor(static_cast<uint32_t>(tileCount), 1, cullTile);
+					// batchSize = 4 tile = 64 draw/job —— 与改造前的并行粒度**一致**:
+					// 若按 1 tile/job,单 job 只有 16 draw(≈70ns 工作量),调度开销会吃掉批处理的收益。
+					JobSystem::ParallelFor(static_cast<uint32_t>(tileCount), 4, cullTile);
 				}
 				else
 				{

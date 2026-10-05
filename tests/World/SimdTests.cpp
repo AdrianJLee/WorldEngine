@@ -87,6 +87,23 @@ namespace
 		}
 	}
 
+	// 用**渲染器实际走的那条路**跑一遍:分块 + 取样 + 批量(而不是直接调 batch)。
+	// 这是关键 —— 否则测的是"另一条路径",tiling 的越界/取样错误就漏网了。
+	std::vector<std::uint8_t> RunTiled(const FrustumPlanes& frustum,
+		const std::vector<glm::vec3>& mins, const std::vector<glm::vec3>& maxs)
+	{
+		std::vector<std::uint8_t> visible(mins.size(), 0);
+		if (!mins.empty())
+			Math::Simd::AabbInFrustumTiled(frustum.Planes, mins.size(),
+				[&](std::size_t i, glm::vec3& outMin, glm::vec3& outMax)
+				{
+					outMin = mins[i];
+					outMax = maxs[i];
+				},
+				visible.data());
+		return visible;
+	}
+
 	// 用批量 SIMD 跑一遍,返回掩码。
 	std::vector<std::uint8_t> RunBatch(const FrustumPlanes& frustum,
 		const std::vector<glm::vec3>& mins, const std::vector<glm::vec3>& maxs)
@@ -102,6 +119,8 @@ namespace
 		const std::vector<glm::vec3>& mins, const std::vector<glm::vec3>& maxs)
 	{
 		const std::vector<std::uint8_t> batch = RunBatch(frustum, mins, maxs);
+		const std::vector<std::uint8_t> tiled = RunTiled(frustum, mins, maxs);
+
 
 		std::size_t visibleCount = 0;
 		for (std::size_t i = 0; i < mins.size(); ++i)
@@ -110,6 +129,7 @@ namespace
 			const bool authoritative = AabbInFrustum(frustum, mins[i], maxs[i]);
 			CHECK(authoritative == ref);                       // 口径不漂移
 			CHECK(batch[i] == (ref ? 1u : 0u));                // 逐位(逐字节)一致
+			CHECK(tiled[i] == batch[i]);                      // 分块路径与批量路径一致(渲染器走的是分块)
 			visibleCount += batch[i];
 		}
 		std::printf("[info] %s: %zu/%zu visible (%s backend)\n",
@@ -149,11 +169,18 @@ int main()
 			{
 				std::vector<glm::vec3> mins(allMin.begin(), allMin.begin() + static_cast<std::ptrdiff_t>(count));
 				std::vector<glm::vec3> maxs(allMax.begin(), allMax.begin() + static_cast<std::ptrdiff_t>(count));
-				const std::vector<std::uint8_t> batch = RunBatch(frustum, mins, maxs);
+				const std::vector<std::uint8_t> batch = RunTiled(frustum, mins, maxs);   // 渲染器走的是分块路径
 				for (std::size_t i = 0; i < count; ++i)
 					CHECK(batch[i] == (Math::Simd::AabbInFrustumScalar(frustum.Planes, mins[i], maxs[i]) ? 1u : 0u));
 			}
-			std::printf("[info] count sweep (0,1,2,3,4,5,7,8,63): batch == scalar\n");
+			std::printf("[info] count sweep (0,1,2,3,4,5,7,8,63): tiled == scalar; tile-count coverage 0..33 ok\n");
+			// 分块数必须**恰好覆盖**所有对象(越界/漏判都在这条上暴露):
+			for (std::size_t count : { std::size_t { 0 }, std::size_t { 1 }, std::size_t { 15 }, std::size_t { 16 },
+				std::size_t { 17 }, std::size_t { 31 }, std::size_t { 32 }, std::size_t { 33 } })
+			{
+				const std::size_t expected = (count + 15) / 16;
+				CHECK(Math::Simd::AabbCullTileCount(count) == expected);
+			}
 		}
 
 		// 4. 判别力:把一个平面翻转方向,可见集合必须真的改变(否证"两边都全可见"式假通过)。

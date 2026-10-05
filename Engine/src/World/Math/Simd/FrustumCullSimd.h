@@ -92,4 +92,46 @@ namespace World::Math::Simd
 		for (; i < count; ++i)
 			outVisible[i] = AabbInFrustumScalar(planes, mins[i], maxs[i]) ? std::uint8_t { 1 } : std::uint8_t { 0 };
 	}
+
+	// ---- 分块(tiling):渲染器要从 AoS 的绘制项里取样,而本层不依赖渲染器类型 ⇒
+	//      用一个"取第 i 个对象 min/max"的回调把取样方式交给调用方。
+	//      这样**分块 + 取样 + 判定**是同一份实现,测试可以直接覆盖它(而不是测一份副本)。
+
+	// 每块的对象数:16 = 4 个 SSE 批;gather 缓冲 16×2×12B = 384B,留在 L1。
+	inline constexpr std::size_t kAabbCullTileSize = 16;
+
+	inline std::size_t AabbCullTileCount(std::size_t count) noexcept
+	{
+		return (count + kAabbCullTileSize - 1) / kAabbCullTileSize;
+	}
+
+	// 判定**一个**块(并行调度的粒度单位)。GetAabb(i, outMin, outMax) 负责取样。
+	template <typename GetAabb>
+	void AabbInFrustumTile(const glm::vec4* planes, std::size_t count, std::size_t tileIndex,
+		GetAabb&& getAabb, std::uint8_t* outVisible)
+	{
+		const std::size_t begin = tileIndex * kAabbCullTileSize;
+		if (begin >= count)
+			return;
+		const std::size_t end = (begin + kAabbCullTileSize < count) ? begin + kAabbCullTileSize : count;
+		const std::size_t tileSize = end - begin;
+
+		glm::vec3 tileMin[kAabbCullTileSize];
+		glm::vec3 tileMax[kAabbCullTileSize];
+		for (std::size_t k = 0; k < tileSize; ++k)
+			getAabb(begin + k, tileMin[k], tileMax[k]);
+
+		AabbInFrustumBatch(planes, tileMin, tileMax, tileSize, outVisible + begin);
+	}
+
+	// 判定全部对象(串行):结果与逐对象标量一致,但是批量 + 无分支。
+	template <typename GetAabb>
+	void AabbInFrustumTiled(const glm::vec4* planes, std::size_t count, GetAabb&& getAabb,
+		std::uint8_t* outVisible)
+	{
+		const std::size_t tileCount = AabbCullTileCount(count);
+		for (std::size_t tile = 0; tile < tileCount; ++tile)
+			AabbInFrustumTile(planes, count, tile, getAabb, outVisible);
+	}
+
 }
