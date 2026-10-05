@@ -468,6 +468,8 @@ void ContentBrowserPanel::DrawNewMaterialModal(Wui::WuiContext& ctx){
 				const MaterialDesc desc = MaterialDescForTemplate(templateIndex, base, m_NewMaterialSeed);
 				// 绝对路径:MaterialIO 只认"内容根/<path>",相对路径不保证落在内容根里(CreateMaterialAsset 记的坑)。
 				wrote = MaterialIO::WriteFileText(absolute, MaterialIO::Serialize(desc, GenerateAssetId()), &error);
+				if (wrote)
+					NotifyAssetWritten(absolute);
 			}
 			else
 			{

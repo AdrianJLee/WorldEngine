@@ -486,4 +486,15 @@ void ContentBrowserPanel::RenderListSlices(Wui::WuiContext& ctx, const Wui::WuiR
 		Wui::EndScrollArea(ctx);
 	}
 
+	void ContentBrowserPanel::NotifyAssetWritten(const std::filesystem::path& absolute)
+	{
+		// m_Model.Root 就是内容根(见 ContentBrowserPanel.h 的 Model::Root 声明),
+		// 所以"相对它"就是 AssetCatalog 认的逻辑路径。换算失败(不在内容根内)时静默跳过 ——
+		// 那种文件本来也不该进目录。
+		std::error_code ec;
+		const std::filesystem::path relative = std::filesystem::relative(absolute, m_Model.Root, ec);
+		if (ec || relative.empty())
+			return;
+		m_Host.RefreshAssetCatalog(relative.generic_string());
+	}
 }

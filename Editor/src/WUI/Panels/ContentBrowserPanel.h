@@ -206,6 +206,11 @@ namespace World
 		void UnregisterDefaultAssetTypes();
 		// 按类型 id 在当前目录创建(菜单与快捷键共用的唯一入口);失败写 error。
 		bool CreateAssetFromRegistry(const std::string& typeId, std::string* error);
+		// 写盘后把新资产登记进**资产目录**(增量刷新,不重扫内容根)。
+		// 不登记的话:本次世界会话里目录查不到这个新资产 ⇒ 它一被改名/移动,
+		// "按身份找回"就失效(要等重开会话全量扫描)。所有"新建资产"落盘点都必须调。
+		void NotifyAssetWritten(const std::filesystem::path& absolute);
+
 		// 各类型的真正实现(注册表回调指向它们;dir = 目标目录,必须已存在)。
 		bool CreateMaterialAsset(const std::filesystem::path& dir, std::string* error,
 			std::filesystem::path* outPath);

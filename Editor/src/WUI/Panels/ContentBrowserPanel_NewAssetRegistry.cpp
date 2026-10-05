@@ -173,6 +173,7 @@ bool ContentBrowserPanel::CreateMaterialAsset(const std::filesystem::path& dir, 
 			if (error) *error = localError;
 			return false;
 		}
+		NotifyAssetWritten(target);
 		SelectCreated(target, "new-material");
 		if (outPath) *outPath = target;
 		return true;
