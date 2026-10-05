@@ -1234,6 +1234,38 @@ if(MSVC)
     target_compile_options(WorldStringPoolTests PRIVATE /utf-8)
 endif()
 
+# SIMD 规则门禁 E(2026-10-05):手写 intrinsics 只允许出现在 Engine/src/World/Math/Simd/。
+# 标准 docs/dev/performance-and-data-layout.md §6.5.2 S1。理由:让"哪里有 SIMD"可枚举、可审查、
+# 可移植化 —— 一旦散落,新增 ARM64 目标时的回退与封装就无从检查。
+add_test(NAME World.SimdPolicy
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tools/agents/check-simd.ps1"
+        -ProjectRoot "${CMAKE_SOURCE_DIR}")
+set_tests_properties(World.SimdPolicy PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
+
+# SIMD 逐位一致性对照(2026-10-05):批量判定 lane=对象、与标量逐位一致 ⇒ 可默认开启。
+add_executable(WorldSimdTests World/SimdTests.cpp)
+target_link_libraries(WorldSimdTests PRIVATE World)
+target_compile_features(WorldSimdTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldSimdTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldSimdTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldSimdTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Simd COMMAND WorldSimdTests)
+set_tests_properties(World.Simd PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
 # 数据布局基准(2026-10-05):**手动目标,不注册 add_test**。
 # 标准 docs/dev/performance-and-data-layout.md §4.1 Q1 / §6 O0 —— 让"要不要为布局优化"有数字可证伪。
 # 跑法:cmake --build build/x64-Debug --config Debug --target WorldLayoutBenchmarks

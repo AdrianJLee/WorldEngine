@@ -17,6 +17,11 @@
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Systems/TransformSystem.h"
+#include "World/Math/Math.h"
+#include <glm/gtc/matrix_transform.hpp>
+#include "World/Renderer/FrustumCull.h"
+#include "World/Math/Simd/FrustumCullSimd.h"
+#include "World/Math/Math.h"
 
 #include <algorithm>
 #include <chrono>
@@ -263,6 +268,129 @@ namespace
 		g_Sink += static_cast<uint64_t>(acc[0]);
 	}
 
+	// 用例 H(O1):2D quad 顶点变换 —— 手写 SSE vs glm。
+	//
+	// 这是标准 §6.5 / §6.5.7 里对现存实现的裁定实验。手写版逐分量 `_mm_set1_ps` 广播去
+	// 处理**单个** vec4(既不是 SoA 也不是批量),而 glm 在 x64 上本身就是 SSE2 ⇒ 预期手写版
+	// 没有优势,还多了 `_mm_storeu_ps` 到临时数组再逐元素拷贝的 store-forwarding 惩罚。
+	// 结论由数字定:无收益就删掉手写版、统一走 glm(单一实现)。
+	void CaseH_QuadTransformHandrolledVsGlm(std::size_t quadCount, uint32_t repeats)
+	{
+		std::vector<glm::mat4> transforms(quadCount);
+		for (std::size_t i = 0; i < quadCount; ++i)
+			transforms[i] = glm::translate(glm::mat4(1.0f), glm::vec3(static_cast<float>(i) * 0.01f, 0.0f, 0.0f))
+				* glm::rotate(glm::mat4(1.0f), static_cast<float>(i) * 0.001f, glm::vec3(0.0f, 0.0f, 1.0f));
+
+		// 单位性:quad 的 4 个角(与 Renderer2D::s_Data.VertexPositions 同形)。
+		const glm::vec4 corners[4] = {
+			{ -0.5f, -0.5f, 0.0f, 1.0f }, { 0.5f, -0.5f, 0.0f, 1.0f },
+			{ 0.5f, 0.5f, 0.0f, 1.0f }, { -0.5f, 0.5f, 0.0f, 1.0f } };
+
+		// 输出必须真正被消费,否则编译器可能把整段循环删掉。
+		double checksum = 0.0;
+
+		const auto beginHand = Clock::now();
+		for (uint32_t r = 0; r < repeats; ++r)
+			for (std::size_t i = 0; i < quadCount; ++i)
+			{
+				glm::vec3 out[4];
+				World::Math::MultiplyMat4ByVec4_SIMD_x4(transforms[i], corners, out);
+				checksum += static_cast<double>(out[0].x) + static_cast<double>(out[2].y);
+			}
+		const auto endHand = Clock::now();
+
+		const auto beginGlm = Clock::now();
+		for (uint32_t r = 0; r < repeats; ++r)
+			for (std::size_t i = 0; i < quadCount; ++i)
+			{
+				glm::vec3 out[4];
+				for (int c = 0; c < 4; ++c)
+					out[c] = glm::vec3(transforms[i] * corners[c]);
+				checksum += static_cast<double>(out[0].x) + static_cast<double>(out[2].y);
+			}
+		const auto endGlm = Clock::now();
+
+		// 变体 C(**规则 P0 要求的"先用库表达"**):同样的"矩阵列提升到顶点循环外"结构,
+		// 但用 glm 的 vec4 运算写 —— 与手写版同操作数、同顺序,只是不含 intrinsics。
+		// 若它与手写版打平,则按 §6.5.1 P0 应当保留 glm 版(可移植、无需门禁例外);
+		// 只有它明显更慢时,才轮到"手写 intrinsics"并需要登记理由。
+		const auto beginHoistedGlm = Clock::now();
+		for (uint32_t r = 0; r < repeats; ++r)
+			for (std::size_t i = 0; i < quadCount; ++i)
+			{
+				const glm::mat4& m = transforms[i];
+				const glm::vec4 c0(m[0]), c1(m[1]), c2(m[2]), c3(m[3]);
+				glm::vec3 out[4];
+				for (int c = 0; c < 4; ++c)
+				{
+					const glm::vec4 v = corners[c];
+					out[c] = glm::vec3(c0 * v.x + c1 * v.y + c2 * v.z + c3 * v.w);
+				}
+				checksum += static_cast<double>(out[0].x) + static_cast<double>(out[2].y);
+			}
+		const auto endHoistedGlm = Clock::now();
+
+		const double hoistedGlmMs = Millis(beginHoistedGlm, endHoistedGlm);
+		const double handMs = Millis(beginHand, endHand);
+		const double glmMs = Millis(beginGlm, endGlm);
+		const double elements = static_cast<double>(quadCount) * repeats;
+		std::printf("H. O1 quad xform  : hand %8.2f | glm %8.2f | glm-hoisted %8.2f ms | %7.3f / %7.3f / %7.3f ns/quad | hand/hoisted=%.3f\n",
+			handMs, glmMs, hoistedGlmMs, handMs * 1.0e6 / elements, glmMs * 1.0e6 / elements,
+			hoistedGlmMs * 1.0e6 / elements, handMs / hoistedGlmMs);
+		g_Sink += static_cast<uint64_t>(checksum);
+	}
+
+	// 用例 I(B 轴):视锥剔除 —— 逐对象标量 vs 4 对象/lane 批处理 SIMD。
+	// 这是标准 §6.5.0 **B 轴**的裁定实验:标量版每平面可能早退(6 次/对象分支压力),
+	// 批处理版按平面循环、无分支。
+	void CaseI_FrustumCullScalarVsSimd(std::size_t drawCount, uint32_t repeats)
+	{
+		using namespace World;
+		const glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		const glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 100.0f);
+		const FrustumPlanes frustum = ExtractFrustumPlanes(proj * view);
+
+		std::mt19937 rng(4242u);
+		std::uniform_real_distribution<float> pos(-8.0f, 8.0f);
+		std::uniform_real_distribution<float> ext(0.05f, 1.5f);
+		std::vector<glm::vec3> mins(drawCount), maxs(drawCount);
+		for (std::size_t i = 0; i < drawCount; ++i)
+		{
+			mins[i] = glm::vec3(pos(rng), pos(rng), pos(rng));
+			maxs[i] = mins[i] + glm::vec3(ext(rng), ext(rng), ext(rng));
+		}
+		std::vector<std::uint8_t> mask(drawCount, 0);
+
+		std::size_t scalarVisible = 0;
+		const auto beginScalar = Clock::now();
+		for (uint32_t r = 0; r < repeats; ++r)
+		{
+			scalarVisible = 0;
+			for (std::size_t i = 0; i < drawCount; ++i)
+				scalarVisible += AabbInFrustum(frustum, mins[i], maxs[i]) ? 1u : 0u;
+		}
+		const auto endScalar = Clock::now();
+
+		std::size_t simdVisible = 0;
+		const auto beginSimd = Clock::now();
+		for (uint32_t r = 0; r < repeats; ++r)
+		{
+			Math::Simd::AabbInFrustumBatch(frustum.Planes, mins.data(), maxs.data(), drawCount, mask.data());
+			simdVisible = 0;
+			for (std::size_t i = 0; i < drawCount; ++i)
+				simdVisible += mask[i];
+		}
+		const auto endSimd = Clock::now();
+
+		const double elements = static_cast<double>(drawCount) * repeats;
+		const double scalarMs = Millis(beginScalar, endScalar);
+		const double simdMs = Millis(beginSimd, endSimd);
+		std::printf("I. B-axis cull    : scalar %8.2f ms | simd %8.2f ms | %8.3f vs %8.3f ns/draw | ratio scalar/simd=%.3f | visible %zu/%zu\n",
+			scalarMs, simdMs, scalarMs * 1.0e6 / elements, simdMs * 1.0e6 / elements,
+			scalarMs / simdMs, simdVisible, drawCount);
+		g_Sink += static_cast<uint64_t>(scalarVisible + simdVisible);
+	}
+
 	// 用例 D:热字段跨线检查(标准 §4.8 M1)。
 	// 列出组件里"每帧读写"字段的偏移与所在 cache line,以及是否跨越线边界。
 	void CaseD_HotFieldCrossLine()
@@ -311,6 +439,10 @@ int main(int argc, char** argv)
 	RunMatMul<AlignedMat4>("align16", count, repeats);
 	std::printf("   alignof(glm::mat4)=%zu (当前 = packed;GLM_FORCE_ALIGNED_GENTYPES 会把它抬到 16)\n", alignof(glm::mat4));
 	std::printf("\n");
+	std::printf("\n");
+	CaseH_QuadTransformHandrolledVsGlm(static_cast<std::size_t>(1) << 12, 8u);
+	std::printf("\n");
+	CaseI_FrustumCullScalarVsSimd(static_cast<std::size_t>(1) << 14, 16u);
 	CaseD_HotFieldCrossLine();
 
 	std::printf("\nchecksum=%llu (must be non-zero; prevents dead-code elimination)\n",

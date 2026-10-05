@@ -16,6 +16,7 @@
 #include "World/Renderer/AssetRegistry.h"
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/FrustumCull.h"
+#include "World/Math/Simd/FrustumCullSimd.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/FrameExtract.h"
 #include "World/Renderer/TransformInterpolation.h"
@@ -42,6 +43,7 @@ namespace World
 		// docs 的 job-system 契约;两个阈值都只影响"是否并行",不影响结果。
 		constexpr size_t kParallelCullThreshold = 256;     // 逐 draw 视锥判定
 		constexpr size_t kParallelBoundsThreshold = 512;   // 阴影包围盒归约
+		constexpr size_t kCullTile = 16;                   // 视锥剔除:16 对象/tile = 4 个 SSE 批(B 轴 SIMD)
 	}
 
 	uint32_t SceneRenderer::FrameSlot() const
@@ -830,39 +832,61 @@ namespace World
 		double cullMilliseconds = 0.0;
 		{
 			const auto cullStart = std::chrono::steady_clock::now();
-			const FrustumPlanes cameraFrustum = ExtractFrustumPlanes(viewProjection);
-			// D8a 并行化:逐 draw 的视锥判定是**纯函数**(只读 draws/相机、写自己那一格),
-			// 大场景时按掩码并行判定,再按**原索引顺序**串行压缩 ⇒ visibleDraws 的顺序与
-			// 串行版本逐元素相同(绘制顺序/像素结果不变)。
 			const size_t drawCount = draws.size();
-			visibleDraws.reserve(drawCount);
+			const FrustumPlanes cameraFrustum = ExtractFrustumPlanes(viewProjection);
+			// D8a 并行化 + B 轴 SIMD(标准 §6.5.0 / §6.5.7):逐 draw 判定是**纯函数**
+			// (只读 draws/相机、写自己那一格)。按掩码判定(大场景走 JobSystem,批处理 SIMD),
+			// 再按**原索引顺序**串行压缩 ⇒ visibleDraws 与逐对象标量版逐元素相同
+			// (绘制顺序/像素结果不变)。
+			// 帧内临时缓冲走 FrameArena:帧末统一回卷,不产生堆分配/不增加 GC 压力。
+			auto* visibleMask = static_cast<std::uint8_t*>(FrameArena::Get().Allocate(drawCount, alignof(std::uint8_t)));
 			if (!cullingEnabled)
 			{
 				for (uint32_t index = 0; index < drawCount; ++index)
 					visibleDraws.push_back(index);
 			}
-			else if (drawCount >= kParallelCullThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
+			else
 			{
-				// 帧内临时缓冲走 FrameArena:帧末统一回卷,不产生堆分配/不增加 GC 压力。
-				auto* visibleMask = static_cast<std::uint8_t*>(
-					FrameArena::Get().Allocate(drawCount, alignof(std::uint8_t)));
-				JobSystem::ParallelFor(static_cast<uint32_t>(drawCount), 64, [&](uint32_t index)
+				// B 轴优化(标准 §6.5.0 / §6.5.7):把逐对象标量判定换成**跨对象批处理 SIMD**。
+				// 逐对象标量版对 6 个平面各可能早退 ⇒ 6 次/对象的分支预测压力(大多可见时从不早退);
+				// 4 对象/lane 按平面循环 ⇒ 指令数约 1/4 且无分支。
+				// 逐 lane 与标量同序 ⇒ **逐位一致**(同一相机/同一帧的可见集合与旧实现完全相同),
+				// 因此这里可以无条件替换,不需要门控。
+				const std::size_t tileCount = (drawCount + kCullTile - 1) / kCullTile;
+
+				// 每个 tile:把 AoS 的 WorldMin/WorldMax gather 成小规模 SoA,再批量判定。
+				// 只在栈上放 tile 大小的缓冲 —— 不做全量 SoA 预转换(那会多一遍内存流量)。
+				const auto cullTile = [&](std::size_t tile)
 				{
-					visibleMask[index] = AabbInFrustum(cameraFrustum, draws[index].WorldMin,
-						draws[index].WorldMax) ? 1u : 0u;
-				});
+					const std::size_t begin = tile * kCullTile;
+					const std::size_t end = (begin + kCullTile < drawCount) ? begin + kCullTile : drawCount;
+					const std::size_t tileSize = end - begin;
+
+					glm::vec3 tileMin[kCullTile];
+					glm::vec3 tileMax[kCullTile];
+					for (std::size_t k = 0; k < tileSize; ++k)
+					{
+						tileMin[k] = draws[begin + k].WorldMin;
+						tileMax[k] = draws[begin + k].WorldMax;
+					}
+					Math::Simd::AabbInFrustumBatch(cameraFrustum.Planes, tileMin, tileMax, tileSize,
+						visibleMask + begin);
+				};
+
+				if (drawCount >= kParallelCullThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
+				{
+					JobSystem::ParallelFor(static_cast<uint32_t>(tileCount), 1, cullTile);
+				}
+				else
+				{
+					for (std::size_t tile = 0; tile < tileCount; ++tile)
+						cullTile(tile);
+				}
+
+				// 按原索引顺序串行压缩 ⇒ visibleDraws 的顺序与旧实现逐元素相同(绘制顺序/像素不变)。
 				for (uint32_t index = 0; index < drawCount; ++index)
 					if (visibleMask[index] != 0u)
 						visibleDraws.push_back(index);
-			}
-			else
-			{
-				for (uint32_t index = 0; index < drawCount; ++index)
-				{
-					const FrameMeshDraw& draw = draws[index];
-					if (AabbInFrustum(cameraFrustum, draw.WorldMin, draw.WorldMax))
-						visibleDraws.push_back(index);
-				}
 			}
 			cullMilliseconds = std::chrono::duration<double, std::milli>(
 				std::chrono::steady_clock::now() - cullStart).count();
