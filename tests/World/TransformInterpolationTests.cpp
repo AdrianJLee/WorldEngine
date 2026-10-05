@@ -195,8 +195,8 @@ namespace
 		const entt::registry& registry = static_cast<const Scene&>(*scene).GetRegistry();
 		const auto* parentState = registry.try_get<PhysicsInterpolationState>(parentHandle);
 		CHECK(parentState != nullptr && parentState->Valid);
-		const glm::mat4 parentPrevLocal = parentState->PreviousLocalMatrix;
-		const glm::mat4 parentCurLocal = registry.get<TransformComponent>(parentHandle).GetLocalMatrix();
+		const TransformComponent& parentTransform = registry.get<TransformComponent>(parentHandle);
+		const glm::mat4 parentCurLocal = parentTransform.GetLocalMatrix();
 		const glm::mat4 childLocal = registry.get<TransformComponent>(childHandle).GetLocalMatrix();
 
 		// 让本帧的插值 pass 跑一次(帧内幂等:先 BeginFrame 复位)。
@@ -208,7 +208,9 @@ namespace
 		CHECK(found != extract.InterpolatedIndex.end());   // 子实体必须拿到插值矩阵
 		const glm::mat4 childRender = extract.InterpolatedModels[found->second];
 
-		const glm::mat4 expected = InterpolateRigidTransform(parentPrevLocal, parentCurLocal, 0.5f) * childLocal;
+		const glm::mat4 expected = InterpolateRigidTransform(parentState->PreviousLocation,
+			parentState->PreviousRotation, parentState->PreviousScale, parentTransform.Location,
+			parentTransform.Rotation, parentTransform.Scale, 0.5f) * childLocal;
 		// "旧口径"的对照:父用**权威世界**矩阵(未跑可变阶段时退化为父局部 —— 根实体二者相同)。
 		const auto* parentWorld = registry.try_get<WorldTransformComponent>(parentHandle);
 		const glm::mat4 naive = (parentWorld ? parentWorld->Matrix : parentCurLocal) * childLocal;
@@ -241,7 +243,10 @@ namespace
 
 		entt::registry& registry = scene->GetRegistry();
 		PhysicsInterpolationState& state = registry.emplace<PhysicsInterpolationState>(handle);
-		state.PreviousLocalMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+		// O2:存上一帧的权威 TRS(这里只动位置,旋转/缩放保持 identity)。
+		state.PreviousLocation = glm::vec3(0.0f, 0.0f, 0.0f);
+		state.PreviousRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+		state.PreviousScale = glm::vec3(1.0f);
 		state.Valid = true;
 
 		const glm::mat4 local = registry.get<TransformComponent>(handle).GetLocalMatrix();

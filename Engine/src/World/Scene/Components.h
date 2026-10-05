@@ -217,16 +217,30 @@ namespace World
 	//
 	// **非 schema**:不入 .wd、不进属性面板、不参与序列化(与 WorldTransformComponent 同口径)。
 	// 只由物理系统(步进前记录)与渲染抽取(写 Model 时读取)使用:
-	//   * PreviousLocalMatrix = 上一固定步开始时该实体的**局部**变换;
-	//   * Valid = 是否已有可用的上一帧样本(新建实体第一帧为 false,不插值)。
+	//   * `PreviousLocation/Rotation/Scale` = 上一固定步开始时该实体的**局部 TRS**
+	//     (权威分量,不是派生矩阵 —— 见下面 O2 的说明);
+	//   * `Valid` = 是否已有可用的上一帧样本(新建实体第一帧为 false,不插值)。
+	//
+	// 为什么存 TRS 而不是局部矩阵(2026-10-05,O2,基准见标准 §6):
+	//   1. **消费者要的就是 TRS**:`InterpolateRigidTransform` 必须先 normalize 矩阵的三列、
+	//      `quat_cast` 回四元数、取列长当缩放,才能 slerp —— 存矩阵等于"合成了又拆开"。
+	//      直接存 TRS 让这条路一次往返都不做。
+	//   2. **生产者本来就有 TRS**:`TransformComponent` 的权威数据就是 Location/Rotation/Scale;
+	//      存矩阵要在固定步里多算一次 Compose。改存 TRS 后写侧只做 40B 拷贝。
+	//   3. **装进单条 cache line**:44B ≤ 64B(原矩阵版 68B 跨两条线)。实测基准(标准 §6.3):
+	//      遍历 68B 状态 1.435 ns/元素 vs 44B 状态 0.589 ns/元素。
+	//   4. **语义不变**:插值仍在局部分量上做(父子相对关系不会失真),端点与 slerp 口径与
+	//      旧实现一致;少的只是 Compose→Decompose 的浮点往返,因此不会更差。
 	struct PhysicsInterpolationState
 	{
-		// 权威数据是局部变换(Location/Rotation/Scale)⇒ 插值也必须作用在局部分量上,
-		// 再由渲染侧做一次层级合成。若插值世界矩阵,父子的相对关系会在插值后失真
-		// (父被插值、子用权威世界矩阵 ⇒ 子相对父每固定步跳一次)。
-		glm::mat4 PreviousLocalMatrix { 1.0f };
+		glm::vec3 PreviousLocation { 0.0f };
+		glm::quat PreviousRotation { 1.0f, 0.0f, 0.0f, 0.0f };
+		glm::vec3 PreviousScale { 1.0f };
 		bool Valid = false;
 	};
+	// 布局棘轮:必须装进单条 cache line(改宽即编译失败,见 ComponentLayoutBudget.h)。
+	static_assert(sizeof(PhysicsInterpolationState) == 44,
+		"PhysicsInterpolationState must stay 44B (TRS + Valid) so it fits one cache line");
 
 	// Mesh 指向导入的模型资产(D5);Mesh 为空时用下面的内置图元 Primitive。
 	// 2026-10-04:组件内**不再有任何字符串/堆持有对象** —— 资产定位符 = 驻留 PathId(4B),

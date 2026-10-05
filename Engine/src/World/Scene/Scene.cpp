@@ -852,8 +852,14 @@ namespace World
 			auto& state = m_Registry.get<PhysicsInterpolationState>(entity);
 			// P6:记**局部**变换(权威分量);世界矩阵由渲染侧用插值后的局部变换做层级合成。
 			// 这样父子的相对关系在插值后仍然成立(旧实现插值世界矩阵 ⇒ 子相对父每步跳一次)。
+			// O2(2026-10-05):直接拷权威 TRS,不再 Compose 成矩阵存 —— 消费者要的就是 TRS,
+			// 存矩阵等于"合成了又拆开"(见 PhysicsInterpolationState 说明与标准 §6.3)。
 			if (const auto* transform = m_Registry.try_get<TransformComponent>(entity))
-				state.PreviousLocalMatrix = transform->GetLocalMatrix();
+			{
+				state.PreviousLocation = transform->Location;
+				state.PreviousRotation = transform->Rotation;
+				state.PreviousScale = transform->Scale;
+			}
 			state.Valid = true;
 		}
 	}
@@ -1580,7 +1586,8 @@ namespace World
 			const bool interpolateSelf = state != nullptr && state->Valid;
 			const glm::mat4 currentLocal = transform->GetLocalMatrix();
 			const glm::mat4 renderLocal = interpolateSelf
-				? InterpolateRigidTransform(state->PreviousLocalMatrix, currentLocal, alpha)
+				? InterpolateRigidTransform(state->PreviousLocation, state->PreviousRotation,
+					state->PreviousScale, transform->Location, transform->Rotation, transform->Scale, alpha)
 				: currentLocal;
 
 			const auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity);

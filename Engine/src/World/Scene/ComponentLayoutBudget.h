@@ -35,12 +35,11 @@ namespace World
 	template <>
 	struct ComponentLayoutExempt<CameraViewComponent> : std::true_type {};
 
-	// 2) PhysicsInterpolationState:68B(64B 上一帧局部矩阵 + Valid)。
-	//    物理体数量可能 ≥1000,Q1 未定 ⇒ 登记豁免并列为优化候选(O2:改存分解后的
-	//    Location/RotationQuat/Scale = 44B 可回到单条 cache line,但需实测帧时间占比)。
-	//    复核:2026-11-05(与基准结论一起裁决)。
-	template <>
-	struct ComponentLayoutExempt<PhysicsInterpolationState> : std::true_type {};
+	// 2) PhysicsInterpolationState:44B(TRS + Valid)⇒ **不需要豁免**,已在 §4.4 预算内。
+	//    O2 于 2026-10-05 裁决并落地(原 68B 矩阵版;实测基准见标准 §6.3):
+	//    遍历 68B 状态 1.435 ns/元素 vs 44B 状态 0.589 ns/元素。
+	//    改存 TRS 同时省掉写侧一次 Compose 与读侧每帧两次矩阵分解。
+	//    尺寸棘轮在 Components.h(static_assert == 44)。
 
 	// 3) HierarchyChildrenComponent:内嵌 std::vector(**有意非平凡**)。
 	//    它是运行期子列表缓存,不入 .wd、不进属性面板、不参与 schema 复制与 Prefab 实例化
@@ -56,5 +55,4 @@ namespace World
 
 	// 豁免项仍钉住"当前实测值",防止悄悄膨胀(超预算可以,但必须是同一个已知数字)。
 	static_assert(sizeof(CameraViewComponent) <= 128, "CameraViewComponent grew past its registered exemption (112B); re-review the budget");
-	static_assert(sizeof(PhysicsInterpolationState) <= 72, "PhysicsInterpolationState grew past its registered exemption (68B); re-review O2");
 }

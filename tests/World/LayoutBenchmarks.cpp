@@ -37,6 +37,15 @@ namespace
 		return std::chrono::duration<double, std::milli>(b - a).count();
 	}
 
+	// 编译期架构标签:同源 O3 对照靠它区分两个目标(SSE2 基线 vs /arch:AVX2)。
+#if defined(__AVX2__)
+	constexpr const char* kArchLabel = "AVX2";
+#elif defined(__AVX__)
+	constexpr const char* kArchLabel = "AVX";
+#else
+	constexpr const char* kArchLabel = "SSE2";
+#endif
+
 	volatile uint64_t g_Sink = 0;
 
 	// 用例 A:伪共享探针。
@@ -145,6 +154,115 @@ namespace
 		g_Sink += static_cast<uint64_t>(acc);
 	}
 
+	// ================= O2 / O3 / O4 的实测用例(标准 §6) =================
+
+	// 用例 E(O2):物理插值状态 **改前 68B(整矩阵 + bool)** vs **改后 44B(权威 TRS)**。
+	// O2 已于 2026-10-05 落地(44B);这里保留 68B 变体作为"改前"对照,让这条裁决可复跑复现,
+	// 68B = mat4(64) + bool(1) + 3B 填充;44B = vec3(12) + quat(16) + vec3(12) + bool(1) + 3B 填充。
+	// 68B 跨两条 cache line,44B 装进一条 —— 这才是 O2 的真正价值,不是"省 24B"。
+	struct Interp68
+	{
+		glm::mat4 PreviousLocalMatrix { 1.0f };
+		bool Valid = false;
+	};
+	static_assert(sizeof(Interp68) == 68, "Interp68 must mirror PhysicsInterpolationState (68B)");
+
+	struct Interp44
+	{
+		glm::vec3 PreviousLocation { 0.0f };
+		glm::quat PreviousRotation { 1.0f, 0.0f, 0.0f, 0.0f };
+		glm::vec3 PreviousScale { 1.0f };
+		bool Valid = false;
+	};
+	static_assert(sizeof(Interp44) == 44, "Interp44 must be the decomposed 44B candidate");
+
+	// 每元素读**自己的**首字段(offset 0):这才是"遍历一遍插值状态"的诚实口径 ——
+	// 读元素内的固定偏移会踩到相邻元素(44B 步长下 offset 48 属于下一个元素),那是探针错误。
+	// 差异因此纯粹来自 stride ⇒ cache line 数:68B = 1.062 线/元素,44B = 0.688 线/元素。
+	template <typename T>
+	void RunInterpRead(const char* label, std::size_t count, uint32_t repeats)
+	{
+		std::vector<T> data(count);
+		for (std::size_t i = 0; i < count; ++i)
+			reinterpret_cast<float*>(&data[i])[0] = static_cast<float>(i);
+
+		const auto begin = Clock::now();
+		float acc = 0.0f;
+		for (uint32_t r = 0; r < repeats; ++r)
+			for (std::size_t i = 0; i < count; ++i)
+				acc += reinterpret_cast<const float*>(&data[i])[0];
+		const auto end = Clock::now();
+
+		const double ms = Millis(begin, end);
+		const double elements = static_cast<double>(count) * repeats;
+		std::printf("E. O2 %-12s : %8.2f ms | %8.3f ns/elem | %.3f lines/elem (stride %zuB)\n",
+			label, ms, ms * 1.0e6 / elements,
+			static_cast<double>(sizeof(T)) / 64.0, sizeof(T));
+		g_Sink += static_cast<uint64_t>(acc);
+	}
+
+	// 用例 F(O3):热变换数学(TRS → 矩阵),量 /arch:AVX2 的实际差距。
+	// 同一份源码编两次(见 CMake:WorldLayoutBenchmarksAvx2),只有 /arch 不同。
+	void CaseF_TransformMath(std::size_t count, uint32_t repeats)
+	{
+		std::vector<glm::vec3> loc(count), scl(count);
+		std::vector<glm::quat> rot(count);
+		std::vector<glm::mat4> out(count);
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			loc[i] = glm::vec3(static_cast<float>(i), 0.0f, 0.0f);
+			scl[i] = glm::vec3(1.0f);
+			rot[i] = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+		}
+
+		const auto begin = Clock::now();
+		for (uint32_t r = 0; r < repeats; ++r)
+			for (std::size_t i = 0; i < count; ++i)
+				out[i] = World::TransformSystem::Compose(loc[i], rot[i], scl[i]);
+		const auto end = Clock::now();
+
+		const double ms = Millis(begin, end);
+		const double elements = static_cast<double>(count) * repeats;
+		std::printf("F. O3 compose[%s] : %8.2f ms | %8.3f ns/elem\n",
+			kArchLabel, ms, ms * 1.0e6 / elements);
+		g_Sink += static_cast<uint64_t>(out[0][0][0]);
+	}
+
+	// 用例 G(O4):对齐的 mat4 加载是否更快。
+	// 现状 alignof(glm::mat4) 见输出;GLM_FORCE_ALIGNED_GENTYPES 会把它抬到 16。
+	// 对照:packed(alignof 4)vs alignas(16) 的 64B 矩阵数组做同一段乘法。
+	struct PackedMat4 { float M[16]; };
+	static_assert(sizeof(PackedMat4) == 64, "PackedMat4 = 16 floats");
+	struct alignas(16) AlignedMat4 { float M[16]; };
+	static_assert(sizeof(AlignedMat4) == 64 && alignof(AlignedMat4) == 16, "AlignedMat4 must be 16B aligned");
+
+	template <typename M>
+	void RunMatMul(const char* label, std::size_t count, uint32_t repeats)
+	{
+		std::vector<M> data(count);
+		for (std::size_t i = 0; i < count; ++i)
+			for (int k = 0; k < 16; ++k)
+				data[i].M[k] = static_cast<float>(k) + static_cast<float>(i);
+
+		std::vector<float> acc(count, 0.0f);
+		const auto begin = Clock::now();
+		for (uint32_t r = 0; r < repeats; ++r)
+			for (std::size_t i = 0; i < count; ++i)
+			{
+				float sum = 0.0f;
+				for (int k = 0; k < 16; ++k)
+					sum += data[i].M[k] * data[i].M[(k + 1) & 15];
+				acc[i] += sum;
+			}
+		const auto end = Clock::now();
+
+		const double ms = Millis(begin, end);
+		const double elements = static_cast<double>(count) * repeats;
+		std::printf("G. O4 %-12s : %8.2f ms | %8.3f ns/elem | alignof=%zu\n",
+			label, ms, ms * 1.0e6 / elements, alignof(M));
+		g_Sink += static_cast<uint64_t>(acc[0]);
+	}
+
 	// 用例 D:热字段跨线检查(标准 §4.8 M1)。
 	// 列出组件里"每帧读写"字段的偏移与所在 cache line,以及是否跨越线边界。
 	void CaseD_HotFieldCrossLine()
@@ -182,6 +300,16 @@ int main(int argc, char** argv)
 	std::printf("\n");
 	RunRandom<Packed48>("48B", count, repeats, 1234u);
 	RunRandom<Padded64>("64B-pad", count, repeats, 1234u);
+	std::printf("\n");
+	std::printf("\n");
+	RunInterpRead<Interp68>("68B (mat4)", count, repeats);
+	RunInterpRead<Interp44>("44B (TRS)", count, repeats);
+	std::printf("\n");
+	CaseF_TransformMath(count, repeats);
+	std::printf("\n");
+	RunMatMul<PackedMat4>("packed(4)", count, repeats);
+	RunMatMul<AlignedMat4>("align16", count, repeats);
+	std::printf("   alignof(glm::mat4)=%zu (当前 = packed;GLM_FORCE_ALIGNED_GENTYPES 会把它抬到 16)\n", alignof(glm::mat4));
 	std::printf("\n");
 	CaseD_HotFieldCrossLine();
 

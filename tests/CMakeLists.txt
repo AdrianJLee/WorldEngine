@@ -1237,6 +1237,22 @@ endif()
 # 数据布局基准(2026-10-05):**手动目标,不注册 add_test**。
 # 标准 docs/dev/performance-and-data-layout.md §4.1 Q1 / §6 O0 —— 让"要不要为布局优化"有数字可证伪。
 # 跑法:cmake --build build/x64-Debug --config Debug --target WorldLayoutBenchmarks
+# O3(/arch:AVX2)的同源对照:同一份 .cpp,只多一个 /arch:AVX2 —— 这样"AVX2 有没有用"
+# 是同一台机器、同一天、同一份源码下的 A/B,不是跨机器对比。只对 MSVC 生效。
+if (MSVC)
+    add_executable(WorldLayoutBenchmarksAvx2 World/LayoutBenchmarks.cpp)
+    target_link_libraries(WorldLayoutBenchmarksAvx2 PRIVATE World)
+    target_compile_features(WorldLayoutBenchmarksAvx2 PRIVATE cxx_std_17)
+    target_compile_definitions(WorldLayoutBenchmarksAvx2 PRIVATE
+        _CRT_SECURE_NO_WARNINGS
+        NOMINMAX
+    )
+    if(WIN32)
+        target_compile_definitions(WorldLayoutBenchmarksAvx2 PRIVATE WLD_PLATFORM_WINDOWS)
+    endif()
+    target_compile_options(WorldLayoutBenchmarksAvx2 PRIVATE /utf-8 /arch:AVX2)
+endif()
+
 add_executable(WorldLayoutBenchmarks World/LayoutBenchmarks.cpp)
 target_link_libraries(WorldLayoutBenchmarks PRIVATE World)
 target_compile_features(WorldLayoutBenchmarks PRIVATE cxx_std_17)

@@ -12,6 +12,7 @@
 //   * alpha ∈ [0,1]:0 = 上一固定步,1 = 当前位姿。
 
 #include "World/Core/Export.h"
+#include "World/Scene/Systems/TransformSystem.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -27,6 +28,36 @@ namespace World
 		const float length = glm::length(column);
 		if (length > 1e-8f) return column / length;
 		return glm::vec3(index == 0 ? 1.0f : 0.0f, index == 1 ? 1.0f : 0.0f, index == 2 ? 1.0f : 0.0f);
+	}
+
+	// ---- TRS 原生入口(推荐;2026-10-05 O2) ----
+	//
+	// 上面那个矩阵版**每一步都在做无用功**:它先 normalize 矩阵三列、`quat_cast` 回四元数、
+	// 取列长当缩放 —— 而调用方手里本来就有 TRS(`TransformComponent` 的权威分量、
+	// `PhysicsInterpolationState` 存的上一步 TRS)。直接吃 TRS 就省掉这一整趟往返。
+	//
+	// 口径与矩阵版**完全一致**:
+	//   * alpha ≤ 0 ⇒ 上一固定步的完整位姿(含**上一步的**缩放,与矩阵版返回 previous 等价);
+	//   * alpha ≥ 1 ⇒ 当前位姿;
+	//   * 0 < alpha < 1 ⇒ 位置线性混合、旋转 slerp、缩放取 current(物理步不改缩放)。
+	inline glm::mat4 InterpolateRigidTransform(const glm::vec3& previousLocation,
+		const glm::quat& previousRotation, const glm::vec3& previousScale,
+		const glm::vec3& currentLocation, const glm::quat& currentRotation,
+		const glm::vec3& currentScale, float alpha)
+	{
+		if (alpha <= 0.0f)
+			return TransformSystem::Compose(previousLocation, previousRotation, previousScale);
+		if (alpha >= 1.0f)
+			return TransformSystem::Compose(currentLocation, currentRotation, currentScale);
+
+		const glm::quat rotation = glm::slerp(previousRotation, currentRotation, alpha);
+		const glm::vec3 position = glm::mix(previousLocation, currentLocation, alpha);
+
+		glm::mat4 result = glm::translate(glm::mat4(1.0f), position) * glm::mat4_cast(rotation);
+		result[0] *= currentScale.x;
+		result[1] *= currentScale.y;
+		result[2] *= currentScale.z;
+		return result;
 	}
 
 	inline glm::mat4 InterpolateRigidTransform(const glm::mat4& previous, const glm::mat4& current, float alpha)
