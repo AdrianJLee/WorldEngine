@@ -10,6 +10,7 @@
 //      否则上面的"一致"可能只是"两边都全可见"的假通过。
 #include "World/Math/Simd/FrustumCullSimd.h"
 #include "World/Renderer/FrustumCull.h"
+#include "World/Math/Simd/Mat4xVec4Batch.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -87,6 +88,58 @@ namespace
 		}
 	}
 
+	// mat4 × 4×vec4 的关键问题:**SIMD 与 glm 的浮点结果是否逐位相同?**
+	//
+	// 这决定"能不能把 2D 的三处顶点变换统一到同一份实现"而不动像素:
+	//   * 逐位相同 ⇒ 统一是**纯重构**,像素不可能变;
+	//   * 只差 ULP ⇒ 统一会改像素,必须先跑像素基线才能动。
+	// 同时暴露一个实现细节:glm 的 `mat4 * vec4` 是**从左到右**累加
+	// (`((m0*v0 + m1*v1) + m2*v2) + m3*v3`),而 SIMD 版若要逐位一致就必须同序 ——
+	// 这正是本用例要钉住的契约。
+	void CheckMat4BatchMatchesGlmBits()
+	{
+		std::mt19937 rng(20261005u);
+		std::uniform_real_distribution<float> dist(-50.0f, 50.0f);
+		const glm::vec4 corners[4] = {
+			{ -0.5f, -0.5f, 0.0f, 1.0f }, { 0.5f, -0.5f, 0.0f, 1.0f },
+			{ 0.5f, 0.5f, 0.0f, 1.0f }, { -0.5f, 0.5f, 0.0f, 1.0f } };
+
+		std::size_t differences = 0;
+		constexpr int kCases = 2000;
+		for (int c = 0; c < kCases; ++c)
+		{
+			glm::mat4 transform(1.0f);
+			for (int column = 0; column < 4; ++column)
+				for (int row = 0; row < 4; ++row)
+					transform[column][row] = dist(rng);
+
+			glm::vec3 simdOut[4];
+			Math::Simd::MultiplyMat4ByVec4Batch4(transform, corners, simdOut);
+
+			for (int i = 0; i < 4; ++i)
+			{
+				const glm::vec3 glmOut(transform * corners[i]);
+				for (int component = 0; component < 3; ++component)
+				{
+					std::uint32_t a = 0, b = 0;
+					std::memcpy(&a, &simdOut[i][component], sizeof(a));
+					std::memcpy(&b, &glmOut[component], sizeof(b));
+					if (a != b)
+					{
+						if (c < 3 && differences < 6)
+							std::printf("[diag] case=%d corner=%d comp=%d simd=%.9g glm=%.9g\n",
+								c, i, component, static_cast<double>(simdOut[i][component]),
+								static_cast<double>(glmOut[component]));
+						++differences;
+					}
+				}
+			}
+		}
+		std::printf("[info] mat4 batch vs glm: %d cases x 4 corners x 3 components, bit-differences=%zu\n",
+			kCases, differences);
+		CHECK(differences == 0);   // 逐位契约:统一实现不得改变任何像素
+	}
+
 	// 用**渲染器实际走的那条路**跑一遍:分块 + 取样 + 批量(而不是直接调 batch)。
 	// 这是关键 —— 否则测的是"另一条路径",tiling 的越界/取样错误就漏网了。
 	std::vector<std::uint8_t> RunTiled(const FrustumPlanes& frustum,
@@ -143,6 +196,8 @@ int main()
 	try
 	{
 		const FrustumPlanes frustum = MakeCameraFrustum();
+
+		CheckMat4BatchMatchesGlmBits();
 
 		// 1. 大样本随机。
 		{

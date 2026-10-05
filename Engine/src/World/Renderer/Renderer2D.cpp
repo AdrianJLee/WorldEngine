@@ -557,6 +557,12 @@ namespace World
 	}
 
 	// 只做"每实体独立"的顶点变换:可在工作线程调用(只读 s_Data.VertexPositions)。
+	//
+	// 2D 的三处顶点变换(quad / circle / rect)**只有这一份实现**(标准 §6.5.1 P0/P1):
+	// 之前 circle 与 rect 各写了一遍 glm 循环,和这里的批量核重复。
+	// 统一是**纯重构**而非优化:批量核与 `glm::mat4 * glm::vec4` **逐位相同**
+	// (由 `World.Simd` 钉住:2000 随机矩阵 × 4 角 × 3 分量,bit-differences=0),
+	// 所以像素不可能变化。名字里的 `_SIMD_x4` 是历史命名:非 x86-64 目标下它就是标量回退。
 	void Renderer2D::ComputeQuadPositions(const glm::mat4& transform, glm::vec3 outPositions[4])
 	{
 		Math::MultiplyMat4ByVec4_SIMD_x4(transform, s_Data.VertexPositions, outPositions);
@@ -564,10 +570,9 @@ namespace World
 
 	void Renderer2D::ComputeCirclePositions(const glm::mat4& transform, glm::vec3 outPositions[4])
 	{
-		for (uint32_t i = 0; i < 4; i++)
-			outPositions[i] = glm::vec3(transform * s_Data.VertexPositions[i]);
+		// 与 quad 同一次顶点变换(圆的四个包围盒角),走同一份实现。
+		ComputeQuadPositions(transform, outPositions);
 	}
-
 	// 批次状态机部分(纹理槽/批缓冲指针):必须在主线程按原顺序执行。
 	void Renderer2D::DrawQuadPositions(const glm::vec3 positions[4], const Rhi::Handle<Rhi::Texture>& texture,
 		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
@@ -665,11 +670,9 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 		glm::vec3 vertices[4];
+		ComputeQuadPositions(transform, vertices);   // 与 quad/circle 同一份顶点变换
 		for (uint32_t i = 0; i < 4; i++)
-		{
-			vertices[i] = transform * s_Data.VertexPositions[i];
 			vertices[i].z = 0.0f;
-		}
 		DrawLineCore(vertices[0], vertices[1], color, entityID);
 		DrawLineCore(vertices[1], vertices[2], color, entityID);
 		DrawLineCore(vertices[2], vertices[3], color, entityID);
