@@ -142,9 +142,11 @@ namespace World
 	Mesh::Mesh(MeshDesc desc, MeshBounds bounds) : m_Desc(std::move(desc)), m_Bounds(bounds) {}
 
 	Mesh::Mesh(MeshDesc desc, MeshBounds bounds, std::vector<MeshSubmesh> submeshes,
-		std::vector<MeshRange> meshes, std::vector<MeshNode> nodes, std::vector<std::string> materialSlots)
+		std::vector<MeshRange> meshes, std::vector<MeshNode> nodes, std::vector<std::string> materialSlots,
+		Ref<const Asset::WModelData> skinSource)
 		: m_Desc(std::move(desc)), m_Bounds(bounds), m_Submeshes(std::move(submeshes)),
-		m_Meshes(std::move(meshes)), m_Nodes(std::move(nodes)), m_MaterialSlots(std::move(materialSlots))
+		m_Meshes(std::move(meshes)), m_Nodes(std::move(nodes)), m_MaterialSlots(std::move(materialSlots)),
+		m_SkinSource(std::move(skinSource))
 	{
 	}
 
@@ -204,7 +206,13 @@ namespace World
 			desc.VertexData.resize(data.Vertices.size() * sizeof(StandardVertex));
 			std::memcpy(desc.VertexData.data(), data.Vertices.data(), desc.VertexData.size());
 		}
-		desc.Indices = std::move(data.Indices);
+		// 蒙皮模型要连源数据一起保留(见 GetSkinSourceData):索引只能复制;
+		// 非蒙皮仍走 move,不为静态模型多付一次索引拷贝。
+		const bool keepSource = data.VertexLayoutId == kVertexLayoutSkinned;
+		if (keepSource)
+			desc.Indices = data.Indices;
+		else
+			desc.Indices = std::move(data.Indices);
 
 		Ref<Mesh> mesh = Create(desc);
 		if (!mesh)
@@ -230,9 +238,18 @@ namespace World
 
 		// 文件里的包围盒即资产契约(导入器按几何算出);Create 已按顶点重算一遍,
 		// 这里用文件值覆盖,保持 .wmodel 的"存什么读什么"语义。
+		// 先把还要用的值取出来:一旦 data 被移进 skinSource,`std::move(data.MaterialSlots)`
+		// 与 `data.Bounds` 就会读到 moved-from 的对象(而且构造参数的求值顺序未定义)。
+		const MeshBounds bounds { data.Bounds.Min, data.Bounds.Max };
+		std::vector<std::string> materialSlots = std::move(data.MaterialSlots);
+		Ref<const Asset::WModelData> skinSource;
+		if (keepSource)
+			skinSource = CreateRef<const Asset::WModelData>(std::move(data));
+
 		if (error) error->clear();
-		return Ref<Mesh>(new Mesh(std::move(desc), MeshBounds { data.Bounds.Min, data.Bounds.Max },
-			std::move(submeshes), std::move(ranges), std::move(nodes), std::move(data.MaterialSlots)));
+		return Ref<Mesh>(new Mesh(std::move(desc), bounds,
+			std::move(submeshes), std::move(ranges), std::move(nodes), std::move(materialSlots),
+			std::move(skinSource)));
 	}
 
 	bool Mesh::AdoptWModel(PathId path, Ref<Mesh> mesh)

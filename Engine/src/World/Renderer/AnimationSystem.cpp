@@ -3,6 +3,7 @@
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Core/StringPool.h"
 
+#include "World/Renderer/Mesh.h"
 #include "World/Renderer/Skinning.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
@@ -25,12 +26,9 @@ namespace World
 	namespace
 	{
 		// 进程级静态状态(同一宿主里的所有 SceneRenderer 共用同一份;Update 每帧重建调色板表)。
-		std::unordered_map<PathId, Asset::WModelData>& ModelCache()
-		{
-			static std::unordered_map<PathId, Asset::WModelData> cache;
-			return cache;
-		}
-
+		// 注意:**这里没有"模型缓存"** —— .wmodel 的唯一来源是 `Mesh::LoadWModel`
+		//(它保留蒙皮模型的源数据,见 Mesh::GetSkinSourceData)。收口前这里另有一份
+		// `ModelCache`,同一个文件因此被读盘+解析两次。
 		std::unordered_map<entt::entity, std::vector<glm::mat4>>& Palettes()
 		{
 			static std::unordered_map<entt::entity, std::vector<glm::mat4>> palettes;
@@ -110,6 +108,8 @@ namespace World
 		// Time 字段。调色板计算是纯函数,留到阶段 2 并行(见函数末尾)。
 		struct PaletteJob
 		{
+			// 保活:Model/Animation 指向该 Mesh 的源数据内部,阶段 2 可在工作线程读它。
+			Ref<Mesh> MeshAsset;
 			entt::entity Entity = entt::null;
 			const Asset::WModelData* Model = nullptr;
 			uint32_t SkinIndex = 0;
@@ -136,23 +136,23 @@ namespace World
 			}
 
 			const PathId key = component.Mesh.Path;
-			auto cached = ModelCache().find(key);
-			if (cached == ModelCache().end())
+			// 读失败不逐帧重试(磁盘不刷屏);ClearCache 后可重试。
+			if (FailedModels().count(key))
+				continue;
+
+			// 唯一数据来源:Mesh 的 .wmodel 驻留(它保留蒙皮模型源数据)——
+			// 与 SceneRenderer 取网格走的是同一份缓存,同一文件只读盘+解析一次。
+			std::string loadError;
+			Ref<Mesh> mesh = Mesh::LoadWModel(key, &loadError);
+			const Asset::WModelData* modelPtr = mesh ? mesh->GetSkinSourceData() : nullptr;
+			if (!modelPtr)
 			{
-				if (FailedModels().count(key))
-					continue;
-				Asset::WModelData data;
-				std::string error;
-				if (!Asset::WModelIO::ReadFile(StringPool::Get().PathOf(component.Mesh.Path), data, &error))
-				{
-					FailedModels().insert(key);
-					WarnOnce(StringPool::Get().PathOf(key), "骨骼动画模型读取失败 '" + StringPool::Get().PathOf(component.Mesh.Path) + "': "
-						+ error + "(跳过该实体的骨骼动画)");
-					continue;
-				}
-				cached = ModelCache().emplace(key, std::move(data)).first;
+				FailedModels().insert(key);
+				WarnOnce(StringPool::Get().PathOf(key), "骨骼动画模型不可用 '" + StringPool::Get().PathOf(key)
+					+ "': " + loadError + "(跳过该实体的骨骼动画)");
+				continue;
 			}
-			const Asset::WModelData& model = cached->second;
+			const Asset::WModelData& model = *modelPtr;
 
 			// 该组件没有 SkinIndex 字段:骨架由所选 mesh 的 SkinIndex 决定(与 GPU 侧同一映射)。
 			const uint32_t meshIndex = SelectMeshIndex(model, component.MeshIndex);
@@ -173,6 +173,7 @@ namespace World
 			// 只登记工作项;真正的调色板计算留到阶段 2(纯函数,可并行)。
 			PaletteJob job;
 			job.Entity = entity;
+			job.MeshAsset = mesh;   // 保活:阶段 2 并行期间 model/clip 指针必须有效
 			job.Model = &model;
 			job.SkinIndex = static_cast<uint32_t>(skinIndex);
 			job.Animation = clip;
@@ -181,7 +182,7 @@ namespace World
 		}
 
 		// ---- 阶段 2(可并行):调色板计算只读 model/clip、只写自己的结果槽 ----
-		// 阶段 1 已完成全部模型加载 ⇒ 这里 ModelCache 不再插入,持有的指针全程有效;
+		// 阶段 1 已把每个 job 的 MeshAsset 保活(Ref 持有)⇒ model/clip 指针全程有效;
 		// ComputePalette 不碰任何共享容器,故可安全并行。
 		static const Asset::WModelAnimation kNoAnimationForJobs;
 		std::vector<std::vector<glm::mat4>> results(jobs.size());
@@ -340,7 +341,8 @@ namespace World
 
 	void AnimationSystem::ClearCache()
 	{
-		ModelCache().clear();
+		// 这里不再有"模型缓存"要清:.wmodel 的唯一驻留是 Mesh 的进程内缓存,由
+		// Mesh::ClearWModelCache()(重新导入/热重载路径)负责。清掉失败集与警告即可重试。
 		FailedModels().clear();
 		WarnedKeys().clear();
 		Palettes().clear();

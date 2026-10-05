@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Asset/WModelIO.h"   // 蒙皮源数据(GetSkinSourceData)需要完整类型
 #include "World/Core/StringPool.h"
 #include "World/RHI/RhiPipeline.h"
 
@@ -12,8 +13,6 @@
 
 namespace World
 {
-	namespace Asset { struct WModelData; }
-
 	// 网格顶点布局:直接复用 RHI 的属性/绑定描述,管线与网格共用同一份声明。
 	struct MeshVertexLayout
 	{
@@ -139,10 +138,19 @@ namespace World
 		// submesh.MaterialSlot 指向这里的下标;路径相对内容根(如 "materials/rock.wmat")。
 		const std::vector<std::string>& GetMaterialSlots() const { return m_MaterialSlots; }
 
+		// **蒙皮模型的源 .wmodel 数据**(非蒙皮返回 nullptr)。
+		//
+		// 为什么放在 Mesh 上:动画系统需要 Skins/Animations/Nodes,而这些几何之外的数据
+		// 此前由 `AnimationSystem` 用**自己的 ModelCache** 再读一次盘 + 再解析一次 ——
+		// 同一个文件被读两遍、解析两遍。现在只有 Mesh 这一份来源。
+		// 非蒙皮不动它 ⇒ 静态模型零额外保留(它们本来就没有 skins/animations 可留)。
+		const Asset::WModelData* GetSkinSourceData() const { return m_SkinSource.get(); }
+
 	private:
 		explicit Mesh(MeshDesc desc, MeshBounds bounds);
 		Mesh(MeshDesc desc, MeshBounds bounds, std::vector<MeshSubmesh> submeshes,
-			std::vector<MeshRange> meshes, std::vector<MeshNode> nodes, std::vector<std::string> materialSlots);
+			std::vector<MeshRange> meshes, std::vector<MeshNode> nodes, std::vector<std::string> materialSlots,
+			Ref<const Asset::WModelData> skinSource);
 
 		MeshDesc m_Desc;
 		MeshBounds m_Bounds;
@@ -150,5 +158,7 @@ namespace World
 		std::vector<MeshRange> m_Meshes;
 		std::vector<MeshNode> m_Nodes;
 		std::vector<std::string> m_MaterialSlots;
+		// 仅蒙皮模型非空(见 GetSkinSourceData 的说明)。
+		Ref<const Asset::WModelData> m_SkinSource;
 	};
 }
