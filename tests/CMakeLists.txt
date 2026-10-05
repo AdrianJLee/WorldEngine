@@ -1383,21 +1383,28 @@ foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
     )
 endforeach()
 
-# WP5:FrameTime 测试与上面的测试目标同一口径 —— WorldRuntime.dll 必须在 exe 旁边。
-add_custom_command(TARGET WorldFrameTimeTests POST_BUILD
+# WorldRuntime.dll -> 测试 exe 旁:**只拷一次**。
+#
+# 原先每个测试目标各挂一条 POST_BUILD `copy_if_different`,而本文件的所有测试 exe 都在同一目录
+# (全文件无人设 RUNTIME_OUTPUT_DIRECTORY)⇒ ~49 个目标在 `--parallel` 下抢同一个目标文件,
+# 偶发 `Permission denied`(MSB3073,单轮可达 50 条;串行重跑即过)。证据与根因见
+# tools/agents/reports/MAT-UI6b-host-zoom.md 与 knowledge/traps/test-dll-copy-loop.md。
+# 改成单一 custom target + add_dependencies:拷贝只发生一次,顺序由目标级依赖保证,
+# `--parallel` 下不再存在第二个写者。
+#
+# 白名单仍然存在:**新增测试目标必须加进下面那个 foreach**,否则单独构建它时不会先跑
+# 这次拷贝 —— 正是 traps/test-dll-copy-loop.md 记录的"测试加载旧 DLL"陷阱。
+# $<TARGET_FILE:World> 是 target-based generator expression,CMake 会自动建立
+# "先构建 World"的目标级依赖;目标目录用 ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>,
+# 即本目录下测试 exe 的默认输出目录(与每个 $<TARGET_FILE_DIR:...> 相同)。
+add_custom_target(WeCopyRuntimeDllForTests
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:World>"
-        "$<TARGET_FILE_DIR:WorldFrameTimeTests>"
-    COMMENT "Copying WorldRuntime.dll next to WorldFrameTimeTests.exe"
+        "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+    COMMENT "Copying WorldRuntime.dll next to test exes"
     VERBATIM
 )
 
-foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
-    add_custom_command(TARGET ${_we_test_target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:World>"
-            "$<TARGET_FILE_DIR:${_we_test_target}>"
-        COMMENT "Copying WorldRuntime.dll next to ${_we_test_target}.exe"
-        VERBATIM
-    )
+foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
+    add_dependencies(${_we_test_target} WeCopyRuntimeDllForTests)
 endforeach()
