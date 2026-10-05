@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "World/Core/Export.h"
 #include <cmath>
@@ -24,7 +24,15 @@ namespace World
 	class WLD_API TransformSystem
 	{
 	public:
-		// 纯数学辅助函数 (SIMD 向量化加速)
+		// 纯数学辅助函数。
+		//
+		// **这里没有手写 intrinsics** —— 2026-10-05 更正:此处曾写着"(SIMD 向量化加速)",
+		// 但该文件从未有过任何 SIMD 代码,是句假注释(会让人误以为已有基建而跳过评估)。
+		// 事实:`glm::mat4_cast` 等 glm 向量运算在 x64 上本来就走 SSE2(glm 自带后端),
+		// 而**真正的**手写 SIMD 集中在 `Engine/src/World/Math/Simd/`(门禁 E 强制,见标准 §6.5.2 S1)。
+		// 变换组合**不做**批量 SIMD 的理由(标准 §6.5.0 A 轴):每实体读 48B 的 TransformComponent、
+		// 约 50 次浮点运算 ⇒ ≈1 flops/byte,属**内存受限**;SIMD 只把 ALU 时间推向 0,
+		// 总时间由内存流量决定。要提速应改布局/流量,不是加指令级并行。
 		static inline glm::mat4 Compose(const glm::vec3& location, const glm::quat& rotationQuat, const glm::vec3& scale)
 		{
 			glm::mat4 rotationMatrix = glm::mat4_cast(rotationQuat);
