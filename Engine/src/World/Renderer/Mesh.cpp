@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <unordered_map>
@@ -25,6 +26,12 @@ namespace World
 			glm::vec2 TexCoord;
 		};
 		static_assert(sizeof(StandardVertex) == 32, "StandardVertex must stay 32 bytes (stride contract)");
+		// 数据布局门禁 C(标准 docs/dev/performance-and-data-layout.md §4.3 硬规则 1):逐字段偏移。
+		// 顶点属性用 offset/stride 绑定:成员顺序变了而总大小不变(constexpr 断言会放过)时,
+		// 只有逐字段偏移能拦下 —— 表现是法线/UV 读成别的字段,画面静默出错。
+		static_assert(offsetof(StandardVertex, Position) == 0, "StandardVertex.Position at 0");
+		static_assert(offsetof(StandardVertex, Normal) == 12, "StandardVertex.Normal at 12");
+		static_assert(offsetof(StandardVertex, TexCoord) == 24, "StandardVertex.TexCoord at 24");
 
 		// D5c-3b 布局 2 顶点:标准 32B + joints/weights 32B = 64B。
 		// 与 WModelIO::WModelVertex + WModelIO::WModelSkinVertex 逐字段对应(memcpy 逐块拷贝)。
@@ -38,6 +45,10 @@ namespace World
 		};
 		static_assert(sizeof(SkinnedVertex) == 64, "SkinnedVertex must stay 64 bytes (stride contract)");
 		static_assert(offsetof(SkinnedVertex, Joints) == 32, "SkinnedVertex joints must start at byte 32");
+		static_assert(offsetof(SkinnedVertex, Position) == 0, "SkinnedVertex.Position at 0");
+		static_assert(offsetof(SkinnedVertex, Normal) == 12, "SkinnedVertex.Normal at 12");
+		static_assert(offsetof(SkinnedVertex, TexCoord) == 24, "SkinnedVertex.TexCoord at 24");
+		static_assert(offsetof(SkinnedVertex, Weights) == 48, "SkinnedVertex.Weights at 48");
 		// joints+weights 块大小用本地布局表达(不再引用 Asset 侧类型:Mesh.cpp 只依赖自己的
 		// 顶点布局,避免跨模块头文件/PCH 的可见性问题——实测引用 Asset::WModelIO::WModelSkinVertex 编译不过)。
 		static_assert(sizeof(SkinnedVertex) - offsetof(SkinnedVertex, Joints) == 32,

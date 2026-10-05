@@ -1,10 +1,12 @@
 #pragma once
 
+#include "World/Core/RuntimeContract.h"
 #include "World/Modules/ModuleManager.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Core/Vfs/Vfs.h"
 #include "World/Core/ResourceTable.h"
 
+#include <cstddef>
 #include <vector>
 
 namespace World
@@ -61,6 +63,9 @@ namespace World
 		// 丢掉帧系统函数指针"(没有钩子的模块按老语义可随时卸载)。
 		bool HasSceneSystemsHooks() const { return !m_SceneSystemsHooks.empty(); }
 
+		// 数据布局门禁 B(标准 docs/dev/performance-and-data-layout.md §4.3 硬规则 2):成员偏移指纹。
+		// 与 Scene::LayoutFingerprint() 同口径:类外 inline 定义 ⇒ 每个 TU 按自己的头文件计算。
+		static uint64_t LayoutFingerprint();
 	private:
 		struct SceneSystemsHook
 		{
@@ -74,4 +79,20 @@ namespace World
 		std::vector<SceneSystemsHook> m_SceneSystemsHooks;
 		ResourceTable m_Resources;
 	};
+
+}
+
+namespace World
+{
+	inline uint64_t WorldContext::LayoutFingerprint()
+	{
+		uint64_t h = LayoutHash::kOffsetBasis;
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(WorldContext, m_Vfs)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(WorldContext, m_Schemas)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(WorldContext, m_Modules)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(WorldContext, m_SceneSystemsHooks)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(WorldContext, m_Resources)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(sizeof(WorldContext)));
+		return h;
+	}
 }

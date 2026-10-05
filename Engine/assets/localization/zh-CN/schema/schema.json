@@ -166,5 +166,5 @@
   "schema.component.SphereCollider3DComponent.doc": "球形状:Radius 为本地单位,Offset 是本地偏移(不缩放)。",
   "schema.component.CapsuleCollider3DComponent.doc": "沿实体本地 Y 轴的胶囊:HalfHeight 是圆柱段半高(不含两端半球)。",
   "schema.component.MeshCollider3DComponent.doc": "按网格求交的碰撞体:Mesh 为空时用实体 MeshRenderer 的网格;StaticTriangles 只能用于静态刚体;编辑器不画轮廓。",
-  "schema.component.SampleDataComponent.doc": "Game 模块的示例组件(用来验证 schema 驱动编辑):八个字段覆盖 bool/整数/浮点/向量/字符串。"
+  "schema.component.SampleDataComponent.doc": "Game 模块的示例组件(用来验证 schema 驱动编辑):八个字段覆盖 bool/整数/浮点/向量/有界文本。"
 }

@@ -17,8 +17,20 @@ namespace World
 		std::vector<std::thread> s_Workers;
 		JobQueue* s_Queues = nullptr;         // [queueCount][kPriorityCount]
 		uint32_t s_WorkerCount = 0;
-		std::atomic<bool> s_Running { false };
-		std::atomic<int> s_PendingJobs { 0 };  // 已提交未完成(含未开始)的任务数
+		// ---- 数据布局门禁 D:并发写字段独占 cache line(标准 docs/dev/performance-and-data-layout.md
+		// §4.8 M3 伪共享 / R3)。提交侧每个任务写 s_PendingJobs,完成侧每个任务写 s_StatExecuted 与
+		// s_PendingJobs —— 若它们落在同一条 64B 线,该线会在所有核之间来回失效(乒乓)。
+		// 实测(2026-10-05,build/x64-Debug,WorldLayoutBenchmarks 用例 A,4 worker):
+		//   挤在一起:35.72 ms / 60000 task(595.3 ns/task);各自独占:见 tools/agents/dispatch/reports/DL-STD-bench.md(收益在本机噪声内不可分辨,如实记录)。
+		// 代价 = 7 × 64B = 448B 进程级静态内存,换来提交路径不再跨核争同一条线。
+		// R3 的机器可读形式:`ConcurrencyOwned<T>` 把每个并发写字段包成 64B 对齐的类型,
+		// 于是 alignof == 64 是**类型级**事实(而不是只作用于某个变量声明的 alignas),
+		// 数组/成员/静态变量都自动独占 cache line。
+		template <typename T>
+		struct alignas(64) ConcurrencyOwned { T Value; };
+
+		ConcurrencyOwned<std::atomic<bool>> s_Running;
+		ConcurrencyOwned<std::atomic<int>> s_PendingJobs;   // 已提交未完成(含未开始)的任务数
 
 		// 溢出队列:某条线程队列满时接管,保证任务不丢。
 		std::mutex s_OverflowMutex;
@@ -27,14 +39,18 @@ namespace World
 		// 等待/唤醒:提交与完成时通知阻塞中的线程。
 		std::mutex s_WakeMutex;
 		std::condition_variable s_WakeCv;
-		std::atomic<uint32_t> s_WaiterCount { 0 };   // 无等待者时跳过锁与 notify(提交路径上的大头开销)
+		ConcurrencyOwned<std::atomic<uint32_t>> s_WaiterCount;   // 无等待者时跳过锁与 notify(提交路径上的大头开销)
 
-		std::atomic<uint64_t> s_StatExecuted { 0 };
-		std::atomic<uint64_t> s_StatStolen { 0 };
-		std::atomic<uint64_t> s_StatExecutedWhileWaiting { 0 };
-		std::atomic<uint64_t> s_StatOverflowPushes { 0 };
-		std::atomic<uint64_t> s_StatQueueHighWater { 0 };
-		std::atomic<uint64_t> s_StatWaits { 0 };
+		// R3 证据义务:并发写字段必须各自独占一条 cache line。
+		ConcurrencyOwned<std::atomic<uint64_t>> s_StatExecuted;
+		ConcurrencyOwned<std::atomic<uint64_t>> s_StatStolen;
+		ConcurrencyOwned<std::atomic<uint64_t>> s_StatExecutedWhileWaiting;
+		ConcurrencyOwned<std::atomic<uint64_t>> s_StatOverflowPushes;
+		ConcurrencyOwned<std::atomic<uint64_t>> s_StatQueueHighWater;
+		ConcurrencyOwned<std::atomic<uint64_t>> s_StatWaits;
+
+		static_assert(alignof(ConcurrencyOwned<std::atomic<int>>) == 64, "concurrency-owned fields must own a cache line (R3)");
+		static_assert(alignof(ConcurrencyOwned<std::atomic<uint64_t>>) == 64, "concurrency-owned fields must own a cache line (R3)");
 	}
 
 	uint32_t& JobSystem::LocalIndex()
@@ -50,7 +66,7 @@ namespace World
 
 	bool JobSystem::IsRunning()
 	{
-		return s_Running.load(std::memory_order_acquire);
+		return s_Running.Value.load(std::memory_order_acquire);
 	}
 
 	bool JobSystem::ParallelAllowed()
@@ -71,7 +87,7 @@ namespace World
 
 	void JobSystem::Init(uint32_t threadCount)
 	{
-		if (s_Running.load(std::memory_order_acquire))
+		if (s_Running.Value.load(std::memory_order_acquire))
 			return;
 
 		if (threadCount == 0)
@@ -92,8 +108,8 @@ namespace World
 
 		s_WorkerCount = threadCount;
 		s_Queues = new JobQueue[QueueCount() * kPriorityCount];
-		s_Running.store(true, std::memory_order_release);
-		s_PendingJobs.store(0, std::memory_order_relaxed);
+		s_Running.Value.store(true, std::memory_order_release);
+		s_PendingJobs.Value.store(0, std::memory_order_relaxed);
 
 		LocalIndex() = s_WorkerCount;   // 主线程使用最后一条队列
 
@@ -111,7 +127,7 @@ namespace World
 
 	void JobSystem::Shutdown()
 	{
-		if (!s_Running.exchange(false, std::memory_order_acq_rel))
+		if (!s_Running.Value.exchange(false, std::memory_order_acq_rel))
 			return;
 
 		NotifyAll();
@@ -136,7 +152,7 @@ namespace World
 
 	void JobSystem::Kick(JobDecl job, JobPriority priority)
 	{
-		if (!s_Running.load(std::memory_order_acquire))
+		if (!s_Running.Value.load(std::memory_order_acquire))
 		{
 			// 未初始化(或已关闭):同步执行,保持调用方语义。
 			JobDecl local = std::move(job);
@@ -155,15 +171,15 @@ namespace World
 		job.Priority = priority;
 		if (job.Counter)
 			job.Counter->Count.fetch_add(1, std::memory_order_release);
-		s_PendingJobs.fetch_add(1, std::memory_order_acq_rel);
+		s_PendingJobs.Value.fetch_add(1, std::memory_order_acq_rel);
 
 		const uint32_t queueIndex = LocalIndex() * kPriorityCount + static_cast<uint32_t>(priority);
 		if (!s_Queues[queueIndex].Push(job))
 			PushOverflow(job);
 
-		const uint64_t queued = static_cast<uint64_t>(s_PendingJobs.load(std::memory_order_relaxed));
-		uint64_t high = s_StatQueueHighWater.load(std::memory_order_relaxed);
-		while (queued > high && !s_StatQueueHighWater.compare_exchange_weak(high, queued, std::memory_order_relaxed))
+		const uint64_t queued = static_cast<uint64_t>(s_PendingJobs.Value.load(std::memory_order_relaxed));
+		uint64_t high = s_StatQueueHighWater.Value.load(std::memory_order_relaxed);
+		while (queued > high && !s_StatQueueHighWater.Value.compare_exchange_weak(high, queued, std::memory_order_relaxed))
 		{
 		}
 
@@ -175,7 +191,7 @@ namespace World
 		std::lock_guard<std::mutex> lock(s_OverflowMutex);
 		JobDecl moved = std::move(job);
 		s_Overflow.push_back(std::move(moved));
-		s_StatOverflowPushes.fetch_add(1, std::memory_order_relaxed);
+		s_StatOverflowPushes.Value.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	bool JobSystem::TryGetOverflow(JobDecl& outJob)
@@ -226,9 +242,9 @@ namespace World
 		if (job.Entry && !cancelled)
 		{
 			job.Entry(job.Data());
-			s_StatExecuted.fetch_add(1, std::memory_order_relaxed);
+			s_StatExecuted.Value.fetch_add(1, std::memory_order_relaxed);
 			if (whileWaiting)
-				s_StatExecutedWhileWaiting.fetch_add(1, std::memory_order_relaxed);
+				s_StatExecutedWhileWaiting.Value.fetch_add(1, std::memory_order_relaxed);
 		}
 	}
 
@@ -240,13 +256,13 @@ namespace World
 			job.Counter->Count.fetch_sub(1, std::memory_order_acq_rel);
 			job.Counter = nullptr;
 		}
-		s_PendingJobs.fetch_sub(1, std::memory_order_acq_rel);
+		s_PendingJobs.Value.fetch_sub(1, std::memory_order_acq_rel);
 		NotifyAll();
 	}
 
 	void JobSystem::NotifyAll()
 	{
-		if (s_WaiterCount.load(std::memory_order_relaxed) == 0)
+		if (s_WaiterCount.Value.load(std::memory_order_relaxed) == 0)
 			return;   // 没有线程在等:不取锁、不 notify
 		std::lock_guard<std::mutex> lock(s_WakeMutex);
 		s_WakeCv.notify_all();
@@ -256,7 +272,7 @@ namespace World
 	{
 		if (!counter)
 			return;
-		s_StatWaits.fetch_add(1, std::memory_order_relaxed);
+		s_StatWaits.Value.fetch_add(1, std::memory_order_relaxed);
 
 		uint32_t spin = 0;
 		while (!counter->IsComplete())
@@ -266,7 +282,7 @@ namespace World
 			if (TryGetJob(job, stolen))
 			{
 				if (stolen)
-					s_StatStolen.fetch_add(1, std::memory_order_relaxed);
+					s_StatStolen.Value.fetch_add(1, std::memory_order_relaxed);
 				Execute(job, true);
 				Complete(job);
 				continue;
@@ -279,26 +295,26 @@ namespace World
 			}
 
 			std::unique_lock<std::mutex> lock(s_WakeMutex);
-			s_WaiterCount.fetch_add(1, std::memory_order_relaxed);
+			s_WaiterCount.Value.fetch_add(1, std::memory_order_relaxed);
 			s_WakeCv.wait_for(lock, std::chrono::milliseconds(1), [&counter]()
 			{
 				return counter->IsComplete();
 			});
-			s_WaiterCount.fetch_sub(1, std::memory_order_relaxed);
+			s_WaiterCount.Value.fetch_sub(1, std::memory_order_relaxed);
 		}
 	}
 
 	void JobSystem::WaitAll()
 	{
 		uint32_t spin = 0;
-		while (s_PendingJobs.load(std::memory_order_acquire) > 0)
+		while (s_PendingJobs.Value.load(std::memory_order_acquire) > 0)
 		{
 			JobDecl job;
 			bool stolen = false;
 			if (TryGetJob(job, stolen))
 			{
 				if (stolen)
-					s_StatStolen.fetch_add(1, std::memory_order_relaxed);
+					s_StatStolen.Value.fetch_add(1, std::memory_order_relaxed);
 				Execute(job, true);
 				Complete(job);
 				continue;
@@ -309,16 +325,16 @@ namespace World
 				continue;
 			}
 			std::unique_lock<std::mutex> lock(s_WakeMutex);
-			s_WaiterCount.fetch_add(1, std::memory_order_relaxed);
+			s_WaiterCount.Value.fetch_add(1, std::memory_order_relaxed);
 			s_WakeCv.wait_for(lock, std::chrono::milliseconds(1));
-			s_WaiterCount.fetch_sub(1, std::memory_order_relaxed);
+			s_WaiterCount.Value.fetch_sub(1, std::memory_order_relaxed);
 		}
 	}
 
 	void JobSystem::WorkerLoop()
 	{
 		uint32_t spin = 0;
-		while (s_Running.load(std::memory_order_acquire))
+		while (s_Running.Value.load(std::memory_order_acquire))
 		{
 			JobDecl job;
 			bool stolen = false;
@@ -326,7 +342,7 @@ namespace World
 			{
 				spin = 0;
 				if (stolen)
-					s_StatStolen.fetch_add(1, std::memory_order_relaxed);
+					s_StatStolen.Value.fetch_add(1, std::memory_order_relaxed);
 				Execute(job, false);
 				Complete(job);
 				continue;
@@ -340,21 +356,21 @@ namespace World
 			}
 
 			std::unique_lock<std::mutex> lock(s_WakeMutex);
-			s_WaiterCount.fetch_add(1, std::memory_order_relaxed);
+			s_WaiterCount.Value.fetch_add(1, std::memory_order_relaxed);
 			s_WakeCv.wait_for(lock, std::chrono::milliseconds(2));
-			s_WaiterCount.fetch_sub(1, std::memory_order_relaxed);
+			s_WaiterCount.Value.fetch_sub(1, std::memory_order_relaxed);
 		}
 	}
 
 	JobSystem::Stats JobSystem::GetStats()
 	{
 		Stats stats;
-		stats.Executed = s_StatExecuted.load(std::memory_order_relaxed);
-		stats.Stolen = s_StatStolen.load(std::memory_order_relaxed);
-		stats.ExecutedWhileWaiting = s_StatExecutedWhileWaiting.load(std::memory_order_relaxed);
-		stats.OverflowPushes = s_StatOverflowPushes.load(std::memory_order_relaxed);
-		stats.QueueHighWater = s_StatQueueHighWater.load(std::memory_order_relaxed);
-		stats.Waits = s_StatWaits.load(std::memory_order_relaxed);
+		stats.Executed = s_StatExecuted.Value.load(std::memory_order_relaxed);
+		stats.Stolen = s_StatStolen.Value.load(std::memory_order_relaxed);
+		stats.ExecutedWhileWaiting = s_StatExecutedWhileWaiting.Value.load(std::memory_order_relaxed);
+		stats.OverflowPushes = s_StatOverflowPushes.Value.load(std::memory_order_relaxed);
+		stats.QueueHighWater = s_StatQueueHighWater.Value.load(std::memory_order_relaxed);
+		stats.Waits = s_StatWaits.Value.load(std::memory_order_relaxed);
 		return stats;
 	}
 

@@ -135,12 +135,21 @@ namespace World
 		};
 	}
 
-	// 组件里推荐的两个档位(按 sizeof 命名,便于一眼估内存):
-	//   InlineString<20> = 24B(19 字符)  —— 比 std::string(32B)省 8B
-	//   InlineString<28> = 32B(27 字符)  —— 与 std::string 同尺寸,但**无堆且平凡可拷贝**
+	// 组件里推荐的档位(按 sizeof 命名,便于一眼估内存):
+	//   InlineString<12> = 16B(11 字符)  —— 短标签(类型/标签/枚举名);
+	//   InlineString<16> = 20B(15 字符)  —— 短名字(显示名/键名);
+	//   InlineString<20> = 24B(19 字符)  —— 比 std::string(32B)省 8B;
+	//   InlineString<28> = 32B(27 字符)  —— 与 std::string 同尺寸,但**无堆且平凡可拷贝**。
+	using InlineText16 = InlineString<12>;
+	using InlineText20 = InlineString<16>;
 	using InlineText24 = InlineString<20>;
 	using InlineText32 = InlineString<28>;
 
+	// 别名层断言(F5):每个别名都必须真的满足"无堆 / 平凡 / 无填充"。新增别名时一并实例化。
+	static_assert(Detail::InlineStringInvariants<12>::Value, "InlineText16 invariants");
+	static_assert(Detail::InlineStringInvariants<16>::Value, "InlineText20 invariants");
 	static_assert(Detail::InlineStringInvariants<20>::Value, "InlineText24 invariants");
 	static_assert(Detail::InlineStringInvariants<28>::Value, "InlineText32 invariants");
+	static_assert(sizeof(InlineText16) == 16 && sizeof(InlineText20) == 20, "alias sizes must match their names");
+	static_assert(sizeof(InlineText24) == 24 && sizeof(InlineText32) == 32, "alias sizes must match their names");
 }

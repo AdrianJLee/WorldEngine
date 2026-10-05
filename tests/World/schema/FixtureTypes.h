@@ -1,10 +1,12 @@
 #pragma once
 
 #include "World/Core/InlineString.h"
+#include "World/Scene/ComponentLayoutBudget.h"
 #include "World/Schema/Schema.h"
 
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <type_traits>
 #include <map>
 #include <string>
 #include <vector>
@@ -160,4 +162,14 @@ namespace World::TestSchema
 			WE_FIELD(TextValue, Text);
 		WE_SCHEMA_END
 	};
+}
+
+namespace World
+{
+	// 数据布局门禁豁免(标准 docs/dev/performance-and-data-layout.md §4.6)。
+	// `TestSchema::ContainerFixture` **故意**持有容器:它存在的唯一目的就是验证 schema 的
+	// Array/Map 读写与 SceneSerializer 的组件序列化路径,因此天然非平凡、体积也超 64B。
+	// 豁免只在测试夹具上生效(本头文件仅被 tests/ 包含),不进产品二进制。
+	template <>
+	struct ComponentLayoutExempt<TestSchema::ContainerFixture> : std::true_type {};
 }

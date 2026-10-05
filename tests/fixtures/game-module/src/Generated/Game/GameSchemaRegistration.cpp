@@ -79,22 +79,22 @@ struct GeneratedAccess<World::SampleDataComponent>
     static Value Get_DisplayName(const void* instance)
     {
         const World::SampleDataComponent* self = static_cast<const World::SampleDataComponent*>(instance);
-        return Value(self->DisplayName);
+        return Value(TextOps<std::remove_reference_t<decltype(self->DisplayName)>>::GetText(self->DisplayName));
     }
     static void Set_DisplayName(void* instance, const Value& value)
     {
         World::SampleDataComponent* self = static_cast<World::SampleDataComponent*>(instance);
-        self->DisplayName = std::get<std::string>(value);
+        TextOps<std::remove_reference_t<decltype(self->DisplayName)>>::SetText(self->DisplayName, std::get<std::string>(value));
     }
     static Value Get_Tags(const void* instance)
     {
         const World::SampleDataComponent* self = static_cast<const World::SampleDataComponent*>(instance);
-        return Value(self->Tags);
+        return Value(TextOps<std::remove_reference_t<decltype(self->Tags)>>::GetText(self->Tags));
     }
     static void Set_Tags(void* instance, const Value& value)
     {
         World::SampleDataComponent* self = static_cast<World::SampleDataComponent*>(instance);
-        self->Tags = std::get<std::string>(value);
+        TextOps<std::remove_reference_t<decltype(self->Tags)>>::SetText(self->Tags, std::get<std::string>(value));
     }
     static const FieldSchema& Field_Health()
     {
@@ -209,7 +209,7 @@ struct GeneratedAccess<World::SampleDataComponent>
         static const FieldSchema schema = {
             FieldId{ 0xE399210003A6FD03ull },
             "DisplayName",
-            Kind::String,
+            Kind::Text,
             &Get_DisplayName,
             &Set_DisplayName,
             nullptr,
@@ -227,7 +227,7 @@ struct GeneratedAccess<World::SampleDataComponent>
         static const FieldSchema schema = {
             FieldId{ 0x4CE9A33F67773423ull },
             "Tags",
-            Kind::String,
+            Kind::Text,
             &Get_Tags,
             &Set_Tags,
             nullptr,
@@ -265,7 +265,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             },
             &StorageBindingOf(),
             "Project",
-            "Game-module sample component used to exercise schema-driven editing; its eight fields cover bool, integer, float, vector and string kinds.",
+            "Game-module sample component used to exercise schema-driven editing; its eight fields cover bool, integer, float, vector, string and bounded-text kinds.",
             false,
         };
         return schema;

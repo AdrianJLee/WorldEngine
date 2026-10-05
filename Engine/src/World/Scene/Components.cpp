@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/ComponentLayoutBudget.h"
 
 #include <type_traits>
 

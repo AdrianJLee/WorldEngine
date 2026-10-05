@@ -10,6 +10,7 @@
 #include "World/RHI/Vulkan/VulkanResources.h"
 #include "World/Renderer/ShaderUtils.h"
 
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -94,6 +95,25 @@ using namespace Renderer3DDetail;   // 等价于拆分前的文件内匿名命�
 			glm::vec4 EntityId { -1.0f, 0.0f, 0.0f, 0.0f };
 		};
 		static_assert(sizeof(InstanceData) == 96, "InstanceData must match VS_INSTANCE_INPUT (96B)");
+
+		// 数据布局门禁 C(标准 docs/dev/performance-and-data-layout.md §4.3 硬规则 1):逐字段偏移。
+		// 这三个结构体是 CPU/GPU 与顶点属性/UBO 的逐字段契约:顺序变了但总大小不变时,
+		// 只有逐字段断言能拦下(整尺寸断言会放过),表现是着色器读错字段而画面静默出错。
+		static_assert(offsetof(ObjectUniforms, Model) == 0, "ObjectUniforms.Model must stay first (std140)");
+		static_assert(offsetof(ObjectUniforms, BaseColor) == 64, "ObjectUniforms.BaseColor at 64");
+		static_assert(offsetof(ObjectUniforms, MetallicRoughness) == 80, "ObjectUniforms.MetallicRoughness at 80");
+		static_assert(offsetof(ObjectUniforms, Emissive) == 96, "ObjectUniforms.Emissive at 96");
+		static_assert(offsetof(ObjectUniforms, Flags) == 112, "ObjectUniforms.Flags at 112 (x=albedo,y=normal,z=doubleSided,w=BC5)");
+		static_assert(offsetof(ObjectUniforms, EntityId) == 128, "ObjectUniforms.EntityId at 128 (SV_Target1 picking)");
+
+		static_assert(offsetof(BoneUniforms, Bones) == 0, "BoneUniforms.Bones must start at 0 (set1 b3)");
+
+		static_assert(offsetof(InstanceData, Row0) == 0, "InstanceData.Row0 at 0");
+		static_assert(offsetof(InstanceData, Row1) == 16, "InstanceData.Row1 at 16");
+		static_assert(offsetof(InstanceData, Row2) == 32, "InstanceData.Row2 at 32");
+		static_assert(offsetof(InstanceData, Row3) == 48, "InstanceData.Row3 at 48");
+		static_assert(offsetof(InstanceData, Color) == 64, "InstanceData.Color at 64");
+		static_assert(offsetof(InstanceData, EntityId) == 80, "InstanceData.EntityId at 80 (float-carrying, not an integer attribute)");
 
 		// 每帧实例缓冲容量(4096 × 96B ≈ 384KB/帧槽位):超出即拒绝,由调用方回退逐物体路径。
 		constexpr uint32_t kInstanceCapacity = 4096;

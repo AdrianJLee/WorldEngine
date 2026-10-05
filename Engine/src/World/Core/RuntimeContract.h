@@ -21,15 +21,38 @@
 // 覆盖范围与边界(不夸大):
 //   * 抓得住:任何改变 `sizeof(Scene)` / `sizeof(WorldContext)` 的改动 —— 增删数据成员、
 //     改变成员类型大小都算(2026-10-02 的 M8 删了 3 个 Scene 成员,正是这一类);
-//   * 抓不住:不改变尺寸的改动(等大小重排成员、纯虚函数/函数增删),以及只改了某个
-//     成员**内部**布局、而外层尺寸恰好不变的情况;
+//   * 抓得住(2026-10-05 起):等大小的成员**重排**、成员换成等大小的另一类型、成员位移 ——
+//     由"布局指纹"(关键成员的 offsetof + 尺寸混合哈希)发现,不再只靠 sizeof;
+//   * 仍抓不住:函数/纯虚表项增删等与内存布局无关的改动,以及只改了某个成员**内部**
+//     布局、而该成员自身位置与尺寸都不变的情况;
 //   * 也不替代 Game.dll 的 `WE_MODULE_ABI_VERSION` 等值门(那是模块 ABI,另一条通道)。
 namespace World
+
 {
+	// 布局指纹:成员偏移 + 尺寸的混合哈希(FNV-1a)。用途见文件头"覆盖范围"——
+	// `sizeof` 只能抓住"变大/变小",抓不住**等大小的成员重排**(把两个同尺寸成员换位,
+	// 或把成员换成等大小的另一种类型)。指纹把"关键成员的偏移"也钉进契约,于是:
+	//   * 增删成员、改成员类型导致任何偏移位移 ⇒ 指纹变化(与 sizeof 等价或更强);
+	//   * 等大小重排 ⇒ **只**有指纹能发现(这正是加它的理由)。
+	// 有意不覆盖:只在成员**内部**深层的改动(如某容器的节点布局)——那属实现细节,
+	// 不属于宿主直读内存的契约面。
+	namespace LayoutHash
+	{
+		constexpr uint64_t kOffsetBasis = 1469598103934665603ull;
+		constexpr uint64_t kPrime = 1099511628211ull;
+
+		constexpr uint64_t Mix(uint64_t hash, uint64_t value)
+		{
+			return (hash ^ value) * kPrime;
+		}
+	}
 	// hostSceneSize / hostWorldContextSize = 宿主 TU 的 sizeof(...);
+	// hostSceneFingerprint / hostWorldContextFingerprint = 宿主 TU 算出的成员偏移指纹
+	//   (Scene::LayoutFingerprint() / WorldContext::LayoutFingerprint());
 	// hostModuleAbiVersion = 宿主的 World::Modules::WE_MODULE_ABI_VERSION。
 	// 返回 true = 两侧一致;false = 世代不一致(宿主必须停下)。
 	WLD_API bool RuntimeLayoutMatches(uint64_t hostSceneSize, uint64_t hostWorldContextSize,
+		uint64_t hostSceneFingerprint, uint64_t hostWorldContextFingerprint,
 		uint32_t hostModuleAbiVersion);
 }
 
@@ -37,4 +60,5 @@ namespace World
 // 所以传进去的一定是宿主自己看到的布局。需要 Scene / WorldContext / WeModule.h 的完整定义。
 #define WE_RUNTIME_LAYOUT_MATCHES() \
 	::World::RuntimeLayoutMatches(sizeof(::World::Scene), sizeof(::World::WorldContext), \
+		::World::Scene::LayoutFingerprint(), ::World::WorldContext::LayoutFingerprint(), \
 		::World::Modules::WE_MODULE_ABI_VERSION)

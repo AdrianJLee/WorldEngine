@@ -1,6 +1,7 @@
-#pragma once
+﻿#pragma once
 #include "World/Core/Timestep.h"
 #include "World/Core/UUID.h"
+#include "World/Core/RuntimeContract.h"
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/Prefab/PrefabTypes.h"
 #include "World/Renderer/EditorCamera.h"
@@ -9,6 +10,7 @@
 #include "World/Scene/ISystem.h"
 #include "World/Scene/Query.h"
 #include <box2d/id.h>
+#include <cstddef>
 #include <entt.hpp>
 #include <functional>
 #include <string>
@@ -40,6 +42,13 @@ namespace World
 
 	class Scene
 	{
+	public:
+		// 数据布局门禁 B(标准 docs/dev/performance-and-data-layout.md §4.3 硬规则 2):
+		// 成员偏移指纹。类外 inline 定义 ⇒ 每个 TU 用**自己**看到的布局计算,不通过 DLL 调用,
+		// 因此宿主与 WorldRuntime.dll 的指纹不一致就等于"两侧来自不同世代头文件"。
+		// 覆盖:宿主会直读的关键成员(内联访问器涉及的)+ 尺寸;未覆盖:成员内部深层布局。
+		// 定义点在本类右花括号之后(类内定义时 offsetof 面对不完整类型)。
+		static uint64_t LayoutFingerprint();
 	private:
 		// 脚本回调/派发作用域的归属令牌:实体句柄(含版本位)+ 组件 id + 实例 generation。
 		// 生命周期的 InvokeCallback 与 W4 的 ScriptCallbackScope 共用它做判活
@@ -635,5 +644,38 @@ namespace World
 			ComponentChangeObserverFn Callback;
 		};
 		std::vector<ComponentChangeObserverEntry> m_ComponentChangeObservers;
+
 	};
+
+
+	// 有意不放进类体内的 offsetof(类内定义时 Scene 仍是不完整类型):
+	// 这里的定义点已在本类右花括号之后,Scene 是完整类型。
+}
+
+namespace World
+{
+	inline uint64_t Scene::LayoutFingerprint()
+	{
+		uint64_t h = LayoutHash::kOffsetBasis;
+		// 每次混入一个"偏移 + 尺寸对":偏移位移或成员换位都会改变结果。
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_Registry)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_Context)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_SceneSlot)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_SceneGeneration)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_OwnerThread)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_State)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_ViewportWidth)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_ViewportHeight)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_PhysicsWorldId)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_PhysicsBodies2D)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_Physics3D)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_WorldSettings)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_RenderExtract)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_FrameSystems)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_StartupSystems)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_ComponentVersions)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_WorldTick)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(sizeof(Scene)));
+		return h;
+	}
 }

@@ -1234,6 +1234,44 @@ if(MSVC)
     target_compile_options(WorldStringPoolTests PRIVATE /utf-8)
 endif()
 
+# 数据布局基准(2026-10-05):**手动目标,不注册 add_test**。
+# 标准 docs/dev/performance-and-data-layout.md §4.1 Q1 / §6 O0 —— 让"要不要为布局优化"有数字可证伪。
+# 跑法:cmake --build build/x64-Debug --config Debug --target WorldLayoutBenchmarks
+add_executable(WorldLayoutBenchmarks World/LayoutBenchmarks.cpp)
+target_link_libraries(WorldLayoutBenchmarks PRIVATE World)
+target_compile_features(WorldLayoutBenchmarks PRIVATE cxx_std_17)
+target_compile_definitions(WorldLayoutBenchmarks PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldLayoutBenchmarks PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldLayoutBenchmarks PRIVATE /utf-8)
+endif()
+# 数据布局门禁 A(2026-10-05):schema 组件布局枚举 + 64B 预算 + 快照棘轮。
+# 标准:docs/dev/performance-and-data-layout.md §4.2 C1 / §4.4。
+add_executable(WorldComponentLayoutTests World/ComponentLayoutTests.cpp)
+target_link_libraries(WorldComponentLayoutTests PRIVATE World)
+target_compile_features(WorldComponentLayoutTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldComponentLayoutTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldComponentLayoutTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldComponentLayoutTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.ComponentLayout COMMAND WorldComponentLayoutTests)
+set_tests_properties(World.ComponentLayout PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 add_test(NAME World.StringPool COMMAND WorldStringPoolTests)
 set_tests_properties(World.StringPool PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

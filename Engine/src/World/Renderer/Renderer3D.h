@@ -5,6 +5,7 @@
 #include "World/Renderer/Material.h"
 #include "World/Renderer/Mesh.h"
 
+#include <cstddef>
 #include <glm/glm.hpp>
 
 #include <string>
@@ -38,6 +39,18 @@ namespace World
 		Light Lights[8];
 	};
 	static_assert(sizeof(LightUniforms) == 496, "LightUniforms must match Renderer3D_Solid.slang (std140)");
+	// 数据布局门禁 C(标准 docs/dev/performance-and-data-layout.md §4.3 硬规则 1):
+	// 跨边界结构体除了整尺寸,还必须逐字段钉住偏移。整尺寸断言抓不住"成员顺序变了但总大小不变"
+	// —— 那是 std140 与着色器逐字段错位、画面静默出错而 CPU 侧看不出来的情形。
+	static_assert(offsetof(LightUniforms, ShadowViewProjection) == 0, "std140: ShadowViewProjection must stay first");
+	static_assert(offsetof(LightUniforms, ShadowParams) == 64, "std140: ShadowParams at 64");
+	static_assert(offsetof(LightUniforms, Ambient) == 80, "std140: Ambient at 80");
+	static_assert(offsetof(LightUniforms, LightCounts) == 96, "std140: LightCounts at 96");
+	static_assert(offsetof(LightUniforms, Lights) == 112, "std140: Lights[8] at 112 (8 x 48 = 384)");
+	static_assert(sizeof(LightUniforms::Light) == 48, "std140: one Light is 48 bytes (3 x vec4)");
+	static_assert(offsetof(LightUniforms::Light, PositionType) == 0, "std140: Light.PositionType at 0");
+	static_assert(offsetof(LightUniforms::Light, ColorIntensity) == 16, "std140: Light.ColorIntensity at 16");
+	static_assert(offsetof(LightUniforms::Light, DirectionRange) == 32, "std140: Light.DirectionRange at 32");
 
 	// 收集阶段得到的灯光数据(SceneRenderer 从组件填充;打包由 BuildLightRig 完成,
 	// 因此上限/归一化/默认值都是纯函数,可在 headless 测试里直接断言)。

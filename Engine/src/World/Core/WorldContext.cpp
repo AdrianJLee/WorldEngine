@@ -65,11 +65,15 @@ namespace World
 
 	// ---- 宿主/运行期布局契约(契约原文见 RuntimeContract.h)----
 	bool RuntimeLayoutMatches(uint64_t hostSceneSize, uint64_t hostWorldContextSize,
+		uint64_t hostSceneFingerprint, uint64_t hostWorldContextFingerprint,
 		uint32_t hostModuleAbiVersion)
 	{
-		// 这里的 sizeof 取自 **WorldRuntime.dll 自己**的编译单元;宿主传进来的是它自己的。
+		// 这里的取值取自 **WorldRuntime.dll 自己**的编译单元;宿主传进来的是它自己的。
+		// 指纹比较使“等大小的成员重排”也能被拦下(sizeof 单独做不到,见 RuntimeContract.h)。
 		return hostSceneSize == sizeof(Scene)
 			&& hostWorldContextSize == sizeof(WorldContext)
+			&& hostSceneFingerprint == Scene::LayoutFingerprint()
+			&& hostWorldContextFingerprint == WorldContext::LayoutFingerprint()
 			&& hostModuleAbiVersion == Modules::WE_MODULE_ABI_VERSION;
 	}
 }

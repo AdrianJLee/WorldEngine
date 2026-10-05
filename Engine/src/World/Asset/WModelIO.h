@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -48,6 +49,12 @@ namespace World::Asset
 		glm::vec2 TexCoord;
 	};
 	static_assert(sizeof(WModelVertex) == 32, "WModelVertex must match the standard vertex layout (32 bytes)");
+	// 数据布局门禁 C(标准 docs/dev/performance-and-data-layout.md §4.3 硬规则 1)。
+	// 这两个结构体是**磁盘/内存共用**的顶点布局(与 Renderer 侧 StandardVertex/SkinnedVertex
+	// 逐字段对应,靠 memcpy 逐块拷贝):成员顺序变了而总大小不变时,只有逐字段偏移能拦下。
+	static_assert(offsetof(WModelVertex, Position) == 0, "WModelVertex.Position at 0");
+	static_assert(offsetof(WModelVertex, Normal) == 12, "WModelVertex.Normal at 12");
+	static_assert(offsetof(WModelVertex, TexCoord) == 24, "WModelVertex.TexCoord at 24");
 
 	// 顶点布局 id 2:标准 32B 之后追加 joints + weights。关节下标用 float 存(0..127 可精确表示),
 	// 因为 GL 后端的 glVertexArrayAttribFormat 会把整数顶点属性按浮点读(与 D8b-2 实例化同一个坑),
@@ -58,6 +65,8 @@ namespace World::Asset
 		glm::vec4 Weights { 0.0f };
 	};
 	static_assert(sizeof(WModelSkinVertex) == 32, "WModelSkinVertex must be 4 joints + 4 weights (32 bytes)");
+	static_assert(offsetof(WModelSkinVertex, Joints) == 0, "WModelSkinVertex.Joints at 0");
+	static_assert(offsetof(WModelSkinVertex, Weights) == 16, "WModelSkinVertex.Weights at 16");
 
 	struct WModelBounds
 	{
