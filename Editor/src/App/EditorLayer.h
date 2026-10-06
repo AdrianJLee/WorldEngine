@@ -366,6 +366,11 @@ namespace World
 		};
 	private:
 		Entity GetEntityAtMousePosition(glm::vec2 viewportLocal);
+		// M23:面板设计尺寸(WuiContext 视口单位)→ 面板**物理像素**(设计尺寸 × Wui::UiScale())。
+		// `m_ViewportSize` / `m_ViewportBounds` 全程是设计单位(相机平移/拾取/gizmo 都按它),
+		// 只有**交给 SceneRenderer 的请求尺寸**必须是物理像素:渲染目标按请求尺寸拉伸铺满面板,
+		// 请求给设计尺寸会让目标小于显示面、画面被放大(偏软)。100% 内容缩放时 == 原值。
+		glm::vec2 PhysicalViewportSize(glm::vec2 designSize) const;
 		// 预览用相机:选中的相机实体(属于活动场景)优先,否则场景主相机;没有则无效实体。
 		Entity GetPreviewCameraEntity() const;
 		// 用预览相机渲染一份小尺寸画面(相机可视化 PiP)。

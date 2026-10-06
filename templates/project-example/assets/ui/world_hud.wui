@@ -1,0 +1,68 @@
+FormatVersion: 1
+Screen: WorldHud
+Design:
+  Resolution: [1920, 1080]
+  ScaleMode: ScaleWithScreenSize
+  Match: 0.5
+Theme: ui/default
+Tokens:
+  - Id: plate.bg
+    Props:
+      fill: "#14182099"
+  - Id: hp.fill
+    Props:
+      fill: "#3FD46A"
+  - Id: hp.track
+    Props:
+      fill: "#00000066"
+  - Id: label.text
+    Props:
+      fill: "#F2F5F8"
+Parameters:
+  - Name: BossName
+    Type: Text
+    Default: "@world.boss.name"
+Nodes:
+  - Id: root
+    Type: Panel
+    Anchor: { Min: [0, 0], Max: [1, 1], Pivot: [1, 1], Offset: [0, 0], Size: [0, 0] }
+    Layout: { Kind: Absolute }
+    Children:
+      - Id: bossNameplate
+        Type: Panel
+        Props:
+          bg: "$plate.bg"
+          radius: "6"
+          padding: "8 8 8 8"
+        World:
+          Target: "Mesh:Cube Green"
+          Offset: [0, 1.1, 0]
+          KeepOnScreen: true
+        Anchor: { Min: [0.5, 0.5], Max: [0.5, 0.5], Pivot: [0.5, 1], Offset: [0, -8], Size: [240, 64] }
+        Layout: { Kind: Column, Gap: 4, Padding: [8, 6, 8, 6] }
+        Children:
+          - Id: bossName
+            Type: Label
+            Props:
+              text: "@world.boss.name"
+              color: "$label.text"
+              fontSize: "15"
+            Anchor: { Min: [0, 0], Max: [1, 0], Pivot: [0, 0], Size: [0, 20] }
+          - Id: bossHp
+            Type: ProgressBar
+            Props:
+              track: "$hp.track"
+              trackColor: "$hp.track"
+              fill: "$hp.fill"
+              fillColor: "$hp.fill"
+              label: "@world.boss.hp"
+              value: "0.62"
+              max: "1"
+            Anchor: { Min: [0, 0], Max: [1, 0], Pivot: [0, 0], Size: [0, 14] }
+      - Id: hint
+        Type: Label
+        Props:
+          text: "@world.hint"
+          color: "$label.text"
+          fontSize: "13"
+        Anchor: { Min: [0.5, 1], Max: [0.5, 1], Pivot: [0.5, 1], Offset: [0, -16], Size: [420, 20] }

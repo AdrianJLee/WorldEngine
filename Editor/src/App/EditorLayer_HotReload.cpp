@@ -837,7 +837,10 @@ void EditorLayer::UpdateSceneContext(Ref<Scene> scene){
 		m_ActiveScene = scene;
 		if (m_ActiveScene && m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f)
 		{
-			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
+			// M23:与 OnUpdate 的视口重建同口径 —— 场景视口尺寸 = 面板物理像素(设计尺寸 × UiScale),
+			// 与 SceneRenderer 的请求尺寸 / `UiSurface::PhysicalSize` 一致。
+			const glm::vec2 physical = PhysicalViewportSize(m_ViewportSize);
+			m_ActiveScene->OnViewportResize((uint32_t)physical.x, (uint32_t)physical.y);
 		}
 	}
 

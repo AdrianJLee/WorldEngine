@@ -811,6 +811,16 @@ void EditorLayer::TogglePause(){
 		}
 	}
 
+glm::vec2 EditorLayer::PhysicalViewportSize(glm::vec2 designSize) const{
+	// M23:面板设计尺寸(WuiContext 视口单位)→ 物理像素。`m_ViewportSize` / `m_ViewportBounds`
+	// 全程是设计单位(相机平移/拾取/gizmo/世界锚点都按它),只有**交给 SceneRenderer 的请求
+	// 尺寸**必须是物理像素:渲染目标按请求尺寸拉伸铺满面板,请求给设计尺寸会让目标小于显示面、
+	// 画面被放大(偏软)。uiScale 无效时按 1.0 处理,100% 内容缩放时结果 == 原值(逐位相同)。
+	const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+	return designSize * uiScale;
+}
+
+
 void EditorLayer::SetViewportState(bool focused, bool hovered, glm::vec2 size, glm::vec2 bounds[2]){
 		m_ViewportFocused = focused;
 		m_ViewportHovered = hovered;

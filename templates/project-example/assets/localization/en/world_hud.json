@@ -1,0 +1,11 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "project",
+  "$language": "en",
+  "$owns": [
+    "world."
+  ],
+  "world.boss.name": "Stone Warden",
+  "world.boss.hp": "Health",
+  "world.hint": "World-space anchor: the plate stays pinned to the entity"
+}

@@ -624,10 +624,15 @@ void EditorLayer::OnUpdate(Timestep ts){
 				if (m_ViewportSize != size)
 				{
 					m_ViewportSize = size;
+					// M23:SceneRenderer::OnResize 收的是**请求/显示尺寸**(物理像素),渲染目标按它
+					// 拉伸铺满面板。视口面板的设计尺寸(= 物理/UiScale)会让目标小于显示面、被放大
+					// 显示 ⇒ 画面偏软。请求值改取面板物理尺寸(与 `UiSurface::PhysicalSize` 同口径);
+					// 100% 内容缩放(uiScale=1)时与原值逐位相同。
+					const glm::vec2 physical = PhysicalViewportSize(size);
 					if (m_SceneRenderer)
-						m_SceneRenderer->GetTargetFramebuffer()->Resize((uint32_t)size.x, (uint32_t)size.y);
+						m_SceneRenderer->GetTargetFramebuffer()->Resize((uint32_t)physical.x, (uint32_t)physical.y);
 					if (m_ActiveScene)
-						m_ActiveScene->OnViewportResize((uint32_t)size.x, (uint32_t)size.y);
+						m_ActiveScene->OnViewportResize((uint32_t)physical.x, (uint32_t)physical.y);
 				}
 			}
 		}
@@ -1021,15 +1026,18 @@ void EditorLayer::RunPickCheck(){
 			}
 			const int32_t width = static_cast<int32_t>(m_SceneRenderer->GetWidth());
 			const int32_t height = static_cast<int32_t>(m_SceneRenderer->GetHeight());
-			// P4-3:附件 texel 坐标 → 视口局部坐标。上面扫描用的是**渲染目标**像素
+			// P4-3 / M23:附件 texel 坐标 → 视口局部坐标。上面扫描用的是**渲染目标**像素
 			// (GetWidth/GetHeight = 请求尺寸 × rendering.render_scale),而
-			// GetEntityAtMousePosition 收的是视口坐标;render_scale ≠ 1 时两者差一个
-			// "请求尺寸 / 目标尺寸"倍率。倍率 1.0 时两尺寸相等、乘数为 1.0f,
-			// 行为与旧代码逐字节一致(同一条拾取路径)。
-			const float texelToViewportX =
-				static_cast<float>(m_SceneRenderer->GetRequestedWidth()) / static_cast<float>(width);
-			const float texelToViewportY =
-				static_cast<float>(m_SceneRenderer->GetRequestedHeight()) / static_cast<float>(height);
+			// GetEntityAtMousePosition 收的是**设计单位**的视口坐标 —— 它按 目标尺寸/视口跨度 反算
+			// (跨度 = `m_ViewportBounds`,设计单位)。这里必须是那条映射的精确逆:
+			// texel × (视口跨度 / 目标尺寸)。100% 内容缩放且 render_scale=1 时与旧的
+			// "请求尺寸/目标尺寸"逐位一致(同一条拾取路径);M23 起请求尺寸=物理像素,
+			// 继续用请求尺寸会多乘一次 UiScale,故改按设计跨度。
+			const glm::vec2 viewportSpan {
+				m_ViewportBounds[1].x - m_ViewportBounds[0].x,
+				m_ViewportBounds[1].y - m_ViewportBounds[0].y };
+			const float texelToViewportX = viewportSpan.x / static_cast<float>(width);
+			const float texelToViewportY = viewportSpan.y / static_cast<float>(height);
 			// 每个实体取一个"内部"像素(四邻同 id):轮廓边缘 1px 可能因边界效应判空。
 			std::map<int32_t, glm::ivec2> sample;
 			for (int32_t y = 1; y < height - 1 && sample.size() < 64; ++y)
@@ -1264,10 +1272,11 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 		if (m_SceneState == SceneState::Play && !m_ScenePaused)
 		{
 			worldCameraReady = m_PlayHost.GetMainCameraViewProjection(worldViewProjection, worldScreenSize);
-			// M19:`GetMainCameraViewProjection` 返回的是**视口面板的设计尺寸**(视口单位),
-			// 而 `UiHost` 需要物理像素(它会做唯一一次 ÷UiScale)。少这一步换算 ⇒ 世界锚点被
-			// 内容缩放多压一次,整体向面板左上角收 ~1/UiScale(M19b 实测立案)。
-			worldScreenSize *= uiScale;
+			// M23:`GetMainCameraViewProjection` 返回的是 SceneRenderer 的**请求/显示尺寸**;
+			// 自视口改为按物理尺寸请求起(见 OnUpdate 的 PhysicalViewportSize),它就等于
+			// `surface.PhysicalSize` = 面板物理像素,正是 `UiHost` 需要的口径(它会做唯一一次
+			// ÷UiScale)。**不要再乘 UiScale**:M19 曾在"请求=设计尺寸"时补过一次,根因已修,
+			// 保留补偿会双重缩放(世界锚点会整体向面板左上角收 ~1/UiScale)。
 		}
 		else
 		{

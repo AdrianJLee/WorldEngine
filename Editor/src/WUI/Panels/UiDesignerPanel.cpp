@@ -54,6 +54,7 @@ namespace World
 			AnchorPivotX, AnchorPivotY, AnchorOffsetX, AnchorOffsetY,
 			AnchorSizeW, AnchorSizeH,
 			LayoutGap, LayoutPadL, LayoutPadT, LayoutPadR, LayoutPadB,
+			WorldOffsetX, WorldOffsetY, WorldOffsetZ,
 		};
 
 		struct FloatRowDef
@@ -87,6 +88,14 @@ namespace World
 			{ "ui_designer.layout.pad_bottom", "Padding Bottom", "Bottom", FloatField::LayoutPadB },
 		};
 
+		// M24:世界锚点偏移(设计单位;投影点 + Offset)。
+		const FloatRowDef kWorldFloatRows[] =
+		{
+			{ "ui_designer.world.offset_x", "Offset X", "Offset.X", FloatField::WorldOffsetX },
+			{ "ui_designer.world.offset_y", "Offset Y", "Offset.Y", FloatField::WorldOffsetY },
+			{ "ui_designer.world.offset_z", "Offset Z", "Offset.Z", FloatField::WorldOffsetZ },
+		};
+
 		const UI::UiLayoutKind kLayoutKinds[] =
 		{
 			UI::UiLayoutKind::Absolute,
@@ -116,6 +125,9 @@ namespace World
 			case FloatField::LayoutPadT: return &node.Layout.Padding[1];
 			case FloatField::LayoutPadR: return &node.Layout.Padding[2];
 			case FloatField::LayoutPadB: return &node.Layout.Padding[3];
+			case FloatField::WorldOffsetX: return &node.World.Offset.x;
+			case FloatField::WorldOffsetY: return &node.World.Offset.y;
+			case FloatField::WorldOffsetZ: return &node.World.Offset.z;
 			}
 			return nullptr;
 		}
@@ -1023,10 +1035,17 @@ namespace World
 		const float rowHeight = Wui::PropertyRowHeight();
 		const float propertyRows = static_cast<float>(node != nullptr && node->Props.empty() == false
 			? node->Props.size() : 1);
-		float rows = 4.0f;                                  // 四个分组头
+		float rows = 5.0f;                                  // 五个分组头
 		if (m_ShowNodeSection) rows += 2.0f;                // Id / Type
 		if (m_ShowPropsSection) rows += propertyRows;       // 每条属性一行
 		if (m_ShowAnchorSection) rows += 11.0f;             // 10 个数值 + RelativeToSafeArea
+		if (m_ShowWorldSection)
+		{
+			rows += 6.0f;                                   // Enabled + Target + 3×Offset + KeepOnScreen
+			// M24:Enabled=true 且 Target 为空 = ValidateUiDocument 会报错 → 段内多一行可见提示。
+			if (node != nullptr && node->World.Enabled && node->World.Target.empty())
+				rows += 1.0f;
+		}
 		if (m_ShowLayoutSection) rows += 8.0f;              // Kind + Gap + 4×Padding + Columns + RowMajor
 		return rowHeight * rows + 8.0f;
 	}
@@ -1050,6 +1069,9 @@ namespace World
 				ctx.ErasePersist(Wui::HashId(
 					("ui_designer.prop." + node->Id + "." + prop.Name + ".buf").c_str()));
 			}
+			// M24:World.Target 的文本编辑缓冲同样按选中节点重建(否则切回旧节点会回显旧值)。
+			ctx.ErasePersist(Wui::HashId(
+				("ui_designer.world.target." + node->Id + ".buf").c_str()));
 		}
 
 		// M12:没有待提交编辑时,每帧抓一份"本帧起点"节点快照 —— 属性行首次改动时拿它当
@@ -1084,7 +1106,9 @@ namespace World
 			if (result.Toggled)
 				open = !open;
 		};
-		const auto floatRow = [&](const FloatRowDef& def, UI::UiNode& target)
+		// M24:enabled=false 时只画占位(值会保留在模型里,但关掉的 World 段不落盘),
+		// 行内的禁用理由走 Tooltip / a11y,与库件"禁用行第二通道同源"口径一致。
+		const auto floatRow = [&](const FloatRowDef& def, UI::UiNode& target, bool enabled = true)
 		{
 			float* value = FloatFieldPtr(target, def.Field);
 			if (value == nullptr)
@@ -1095,8 +1119,18 @@ namespace World
 			desc.A11yLabel = desc.Label;
 			desc.A11yValue = FormatFloat(*value);
 			desc.LabelWidth = labelWidth;
+			desc.Enabled = enabled;
+			desc.A11yEnabled = enabled;
+			if (!enabled)
+			{
+				desc.FieldPlaceholder = Wui::Tr("panel.ui_designer.world.inactive", "\u2014");
+				desc.Tooltip = Wui::Tr("panel.ui_designer.world.enabled_required",
+					"Turn on World anchor to edit.");
+			}
 			const Wui::PropertyRowResult result =
 				Wui::PropertyRow(ctx, Wui::HashId(def.Key), nextRow(rowHeight), desc, theme);
+			if (!enabled)
+				return;
 			if (Wui::DragFloat(ctx, Wui::HashId((std::string(def.Key) + ".field").c_str()),
 				result.FieldRect, *value, 0.25f, -1000000.0f, 1000000.0f, theme))
 			{
@@ -1196,6 +1230,125 @@ namespace World
 			{
 				m_ScreenDirty = true;
 				NoteNodeEdit(desc.Label);
+			}
+		}
+
+		// ---- World(世界锚点,M24)----
+		// `World:` 块 = 把节点钉在"目标世界位置投影到屏幕后的点"上(UiWorldProjector)。
+		// Enabled=false = 序列化时整块不写(不是写 `Enabled: false`);Target 为空 + Enabled=true
+		// 会被 ValidateUiDocument 判错、且保存出的文档 UiDocumentIO::Parse 读不回来 —— 段内必须先给可见提示。
+		groupHeader("ui_designer.section.world", "World",
+			node->World.Enabled ? Wui::Tr("panel.ui_designer.world.on", "On") : std::string(),
+			m_ShowWorldSection);
+		if (m_ShowWorldSection)
+		{
+			Wui::PropertyRowDesc enabledDesc;
+			enabledDesc.Label = Wui::Tr("ui_designer.world.enabled", "Enabled");
+			enabledDesc.Term = "Enabled";
+			enabledDesc.A11yLabel = enabledDesc.Label;
+			enabledDesc.A11yValue = node->World.Enabled ? "true" : "false";
+			enabledDesc.LabelWidth = labelWidth;
+			const Wui::PropertyRowResult enabledRow = Wui::PropertyRow(ctx,
+				Wui::HashId("ui_designer.world.enabled.row"), nextRow(rowHeight), enabledDesc, theme);
+			if (Wui::Checkbox(ctx, Wui::HashId("ui_designer.world.enabled.field"), enabledRow.FieldRect,
+				std::string(), node->World.Enabled, theme))
+			{
+				m_ScreenDirty = true;
+				NoteNodeEdit(enabledDesc.Label);
+			}
+
+			const bool targetMissing = node->World.Enabled && node->World.Target.empty();
+			const std::string targetWarning = targetMissing
+				? Wui::Tr("panel.ui_designer.world.target_required",
+					"World anchor needs a non-empty Target.")
+				: std::string();
+
+			// Target:文本提交口径与 Props 一致(回车 / 失焦提交,Escape 丢弃)。
+			{
+				const std::string base = "ui_designer.world.target." + node->Id;
+				Wui::PropertyRowDesc targetDesc;
+				targetDesc.Label = Wui::Tr("ui_designer.world.target", "Target");
+				targetDesc.Term = "Target";
+				targetDesc.A11yLabel = targetDesc.Label;
+				targetDesc.A11yValue = targetMissing ? targetWarning : node->World.Target;
+				targetDesc.LabelWidth = labelWidth;
+				targetDesc.Enabled = node->World.Enabled;
+				targetDesc.A11yEnabled = node->World.Enabled;
+				if (node->World.Enabled)
+				{
+					targetDesc.Tooltip = targetWarning;
+				}
+				else
+				{
+					targetDesc.FieldPlaceholder = Wui::Tr("panel.ui_designer.world.inactive", "\u2014");
+					targetDesc.Tooltip = Wui::Tr("panel.ui_designer.world.enabled_required",
+						"Turn on World anchor to edit.");
+				}
+				const Wui::PropertyRowResult targetRow = Wui::PropertyRow(ctx,
+					Wui::HashId((base + ".row").c_str()), nextRow(rowHeight), targetDesc, theme);
+				if (node->World.Enabled)
+				{
+					std::string& buffer = ctx.Persist<std::string>(
+						Wui::HashId((base + ".buf").c_str()), node->World.Target);
+					Wui::TextFieldA11y a11y;
+					a11y.Label = targetDesc.Label;
+					const Wui::WuiId fieldId = Wui::HashId((base + ".field").c_str());
+					bool cancelled = false;
+					const bool committed =
+						Wui::TextField(ctx, fieldId, targetRow.FieldRect, buffer, theme, &cancelled, &a11y);
+					if (cancelled)
+					{
+						buffer = node->World.Target;
+					}
+					else if (committed || (ctx.Focus() != fieldId && buffer != node->World.Target))
+					{
+						if (node->World.Target != buffer)
+						{
+							node->World.Target = buffer;
+							m_ScreenDirty = true;
+							NoteNodeEdit(targetDesc.Label);
+						}
+					}
+				}
+			}
+
+			if (targetMissing)
+			{
+				const Wui::WuiRect hintRow = nextRow(rowHeight);
+				Wui::Label(ctx, glm::vec2 { hintRow.X + 2.0f, hintRow.Y + 4.0f }, targetWarning,
+					theme.Danger, theme.FontSizeSmall);
+			}
+
+			for (const FloatRowDef& def : kWorldFloatRows)
+				floatRow(def, *node, node->World.Enabled);
+
+			Wui::PropertyRowDesc keepDesc;
+			keepDesc.Label = Wui::Tr("ui_designer.world.keep_on_screen", "Keep On Screen");
+			keepDesc.Term = "KeepOnScreen";
+			keepDesc.A11yLabel = keepDesc.Label;
+			keepDesc.A11yValue = node->World.KeepOnScreen ? "true" : "false";
+			keepDesc.LabelWidth = labelWidth;
+			keepDesc.Enabled = node->World.Enabled;
+			keepDesc.A11yEnabled = node->World.Enabled;
+			if (node->World.Enabled)
+			{
+				keepDesc.Tooltip = Wui::Tr("ui_designer.world.keep_on_screen_hint",
+					"Clamp the projected point into the content rect when it leaves the screen.");
+			}
+			else
+			{
+				keepDesc.FieldPlaceholder = Wui::Tr("panel.ui_designer.world.inactive", "\u2014");
+				keepDesc.Tooltip = Wui::Tr("panel.ui_designer.world.enabled_required",
+					"Turn on World anchor to edit.");
+			}
+			const Wui::PropertyRowResult keepRow = Wui::PropertyRow(ctx,
+				Wui::HashId("ui_designer.world.keep_on_screen.row"), nextRow(rowHeight), keepDesc, theme);
+			if (node->World.Enabled && Wui::Checkbox(ctx,
+				Wui::HashId("ui_designer.world.keep_on_screen.field"), keepRow.FieldRect,
+				std::string(), node->World.KeepOnScreen, theme))
+			{
+				m_ScreenDirty = true;
+				NoteNodeEdit(keepDesc.Label);
 			}
 		}
 

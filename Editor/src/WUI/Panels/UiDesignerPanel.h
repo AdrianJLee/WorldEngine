@@ -23,7 +23,8 @@ namespace World
 	//   · 左 = 节点大纲树(按文档层级,显示 Type + Id);
 	//   · 中 = 画布(设计空间线框视图:节点框 + 类型标签 + 安全区虚线 + 选中高亮 +
 	//            锚点标记;拖动选中节点改 Anchor.Offset);
-	//   · 右 = 属性(Node / Props / Anchor / Layout,全部复用 Wui::PropertyRow 一族)。
+	//   · 右 = 属性(Node / Props / Anchor / World / Layout,全部复用 Wui::PropertyRow 一族;
+	//            M24 起 Anchor 段之后是可折叠的 World 世界锚点段)。
 	//
 	// M12(设计器工业化):选中节点画 8 个拖拽手柄(拖角改 Anchor.Size 两轴、拖边改单轴;
 	// Min!=Max 的拉伸节点 Size 是"尺寸增量");Ctrl+Z / Ctrl+Y 走**面板本地** WuiUndoStack
@@ -192,6 +193,8 @@ namespace World
 		bool m_ShowNodeSection = true;
 		bool m_ShowPropsSection = true;
 		bool m_ShowAnchorSection = true;
+		// M24:世界锚点段(Enabled/Target/Offset/KeepOnScreen)。
+		bool m_ShowWorldSection = true;
 		bool m_ShowLayoutSection = true;
 
 		std::filesystem::path m_ContentRoot;
