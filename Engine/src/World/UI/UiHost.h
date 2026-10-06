@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <glm/glm.hpp>
@@ -121,6 +122,10 @@ namespace World
 		// 本帧 UI 命令(router 在 `RouteInput` 里 append)。宿主处理完自行 `ClearCommands()`。
 		const UI::UiCommandQueue& Commands() const { return m_Commands; }
 		void ClearCommands() { m_Commands.Clear(); }
+
+		// M13:宿主预置文本框初值(如从绑定来的当前值)。转发给常驻的 `UiInputRouter`
+		// (`m_Router` 跨帧持有编辑态);编辑中调用立即替换编辑缓冲,否则作为下次进入编辑的初值。
+		void SetEditingText(std::string_view nodeId, std::string text);
 
 		// 平台内容缩放(GLFW `glfwGetWindowContentScale` 取 X 轴);无窗口 / 取值失败 ⇒ 1.0。
 		// M9:填进 `UiSurface.DpiScale`(Runtime 由 `DrawFrame` 的默认面填,编辑器 Play 显式填)。

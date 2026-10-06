@@ -806,6 +806,11 @@ void EditorLayer::SetSceneState(SceneState state){
 			// `assets/ui/*.wui`;都没有 = 静默关闭)。物理面/原点每帧由 OnUiFrame 按视口面板的
 			// 场景矩形设置;节点登记进编辑器同一份无障碍树(panel = 文档 Screen 名)。
 			m_UiHost.Initialize(World::Paths::AssetRoot());
+			// GameUI(M11):世界空间 UI 的默认位置解析器(实体名 → 世界位置)每次 Play 只设一次 ——
+			// `std::function` 不每帧重建;解析器内部按 tick 缓存实体名索引。相机每帧喂(见
+			// DrawPlayModeGameUi)。
+			if (m_UiHost.Enabled())
+				m_UiHost.SetWorldPositionResolver(m_PlayHost.GetWorldPositionResolver());
 		}
 		catch (const std::exception& error)
 		{

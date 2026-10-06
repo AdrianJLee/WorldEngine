@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -35,6 +36,10 @@ namespace World::UI
 		std::string NodeId;
 		std::string Event;    // "Click" / ...
 		std::string Command;  // 文档 `On.{Event}` 的命令;未声明 = 空
+		// M13(仅追加,不动既有字段):事件携带的值。
+		//   * Slider:Change/Commit = 当前数值(格式同 `UiPainter` 的 "%.3f");
+		//   * TextField:Commit = 编辑后的文本(UTF-8);Change 未使用。
+		std::string Value;
 	};
 
 	// 命令队列:宿主每帧清一次,router/绑定/脚本共用同一出口。
@@ -92,12 +97,25 @@ namespace World::UI
 		// ---- 入口 ----
 		// 核心:返回本帧**是否消费了指针**(指针 = 鼠标/触摸)。
 		bool Update(const UiScreen& screen, const Wui::WuiInputState& input);
+		// M13:可写屏幕重载 —— 滚轮命中滚动容器时,落到 `UiScreen::SetScrollOffset`
+		// (偏移是运行态;`SetScrollOffset` 是唯一钳位实现)。只读重载不落地滚动。
+		bool Update(UiScreen& screen, const Wui::WuiInputState& input);
 		// 便捷重载:临时指定命令队列(等同 SetCommandQueue + Update)。
 		bool Update(const UiScreen& screen, const Wui::WuiInputState& input, UiCommandQueue& queue);
+		bool Update(UiScreen& screen, const Wui::WuiInputState& input, UiCommandQueue& queue);
 		// 导航感知:模态/覆盖/调试层打开时只路由最高层(下层页面不可点)。
 		bool Update(const UiNavigator& navigator, const Wui::WuiInputState& input);
 
 		const UiInputFrame& LastFrame() const { return m_Frame; }
+
+		// ---- M13:跨帧交互状态(只读;状态由 router 持有,不每帧重建)----
+		bool IsDragging() const { return m_Dragging; }
+		const std::string& DraggingId() const { return m_DragNodeId; }
+		bool IsEditing() const { return m_Editing; }
+		const std::string& EditingNodeId() const { return m_EditingNodeId; }
+		const std::string& EditingText() const { return m_EditingText; }
+		// 宿主预置文本初值(如从绑定来的当前值)。优先于节点属性;编辑中调用立即生效。
+		void SetEditingText(std::string_view nodeId, std::string text);
 
 		// ---- 焦点(顺序 = 绘制顺序;Tab/Shift+Tab 环绕)----
 		const std::string& FocusedId() const { return m_FocusedId; }
@@ -118,6 +136,8 @@ namespace World::UI
 		static bool IsScrollContainer(const UiNodeInstance& node);
 
 		static const char* ClickEventName() { return "Click"; }
+		static const char* ChangeEventName() { return "Change"; }
+		static const char* CommitEventName() { return "Commit"; }
 
 	private:
 		enum class NavDirection
@@ -128,11 +148,20 @@ namespace World::UI
 			Right,
 		};
 
-		bool Route(const UiScreen& screen, const Wui::WuiInputState& input);
+		// scrollTarget = 可写屏幕(只用于滚轮偏移落地);只读路径传 nullptr。
+		bool Route(const UiScreen& screen, const Wui::WuiInputState& input, UiScreen* scrollTarget);
 		void HandleKeyboard(const UiScreen& screen, const Wui::WuiInputState& input);
+		void HandleEditingKeyboard(const UiScreen& screen, const Wui::WuiInputState& input);
 		const UiNodeInstance* ResolveTarget(const UiScreen& screen, const UiNodeInstance* hit) const;
 		const UiNodeInstance* ResolveScrollContainer(const UiScreen& screen, const UiNodeInstance* hit) const;
 		void EmitClick(const UiNodeInstance& node);
+		void EmitNodeEvent(const UiNodeInstance& node, std::string_view event, std::string value);
+		float SliderValueFromPointer(const UiNodeInstance& node, glm::vec2 designPoint) const;
+		void BeginEditing(const UiNodeInstance& node);
+		void CommitEditing(const UiScreen& screen);
+		void CancelEditing();
+		static bool IsSliderNode(const UiNodeInstance& node);
+		static bool IsTextFieldNode(const UiNodeInstance& node);
 		bool MoveFocusLinear(const UiScreen& screen, int delta);
 		bool MoveFocusGeometric(const UiScreen& screen, NavDirection direction);
 		void SetFocusedInternal(std::string nodeId, UiFocusDomain domain);
@@ -143,5 +172,15 @@ namespace World::UI
 		std::string m_FocusedId;
 		UiFocusDomain m_Domain = UiFocusDomain::Navigation;
 		bool m_ModalBarrier = true;
+
+		// M13:滑条拖拽 / 文本框编辑(跨帧;在 m_Frame 之外).
+		bool m_Dragging = false;
+		std::string m_DragNodeId;
+		bool m_Editing = false;
+		std::string m_EditingNodeId;
+		std::string m_EditingText;
+		std::string m_EditingOriginal;
+		// 宿主经 `SetEditingText` 预置的初值(按稳定 Id);编辑开始时优先使用。
+		std::unordered_map<std::string, std::string> m_TextPresets;
 	};
 }

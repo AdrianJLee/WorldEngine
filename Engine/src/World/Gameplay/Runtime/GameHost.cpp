@@ -11,12 +11,14 @@
 
 #include "World/Core/Application.h"
 #include "World/Core/Log.h"
+#include "World/Core/StringPool.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneSerializer.h"
 
 #include <memory>
+#include <string_view>
 #include <utility>
 
 namespace World::Gameplay
@@ -42,7 +44,16 @@ namespace World::Gameplay
 		}
 	}
 
-	GameHost::GameHost() = default;
+	GameHost::GameHost()
+	{
+		// GameUI(M11):默认世界位置解析器 = 按实体名(`TagComponent::Tag` 的池内文本)取世界位置。
+		// 捕获 `this`:GameHost 必须比持有这份 `std::function` 的 `UiHost` 活得久 —— 两个宿主都满足
+		// (RuntimeLayer / EditorLayer 里 `m_UiHost` 都声明在 `m_Host` / `m_PlayHost` 之后)。
+		m_WorldPositionResolver = [this](std::string_view target, glm::vec3& outWorld)
+		{
+			return ResolveWorldPositionByName(target, outWorld);
+		};
+	}
 
 	GameHost::~GameHost()
 	{
@@ -172,6 +183,7 @@ namespace World::Gameplay
 	{
 		StopRuntime();
 		m_Scene.reset();
+		InvalidateWorldNameIndex();
 		m_SceneRenderer.reset();
 		m_LoadedPath.clear();
 
@@ -237,6 +249,7 @@ namespace World::Gameplay
 
 		StopRuntime();
 		m_Scene = scene;
+		InvalidateWorldNameIndex();
 		m_LoadedPath = scenePath;
 		ApplyViewportToScene();
 		// T5c:反序列化一结束就把场景需要的资产交给后台解析 —— 首帧的同步加载退化为缓存命中。
@@ -275,6 +288,7 @@ namespace World::Gameplay
 			scene->SetPhysicsInterpolationEnabled(true);
 		StopRuntime();
 		m_Scene = scene;
+		InvalidateWorldNameIndex();
 		m_LoadedPath.clear();
 		ApplyViewportToScene();
 
@@ -478,6 +492,113 @@ namespace World::Gameplay
 					static_cast<const void*>(m_SceneRenderer.get()));
 			}
 		}
+	}
+
+	// GameUI(M11):把"本帧要提交渲染的那台主相机"的 ViewProjection 与渲染面显示尺寸交给宿主,
+	// 用于喂 `UiHost::SetWorldCamera`。选相机**复用** SubmitSceneRender 的同一实现
+	// (`ResolvePrimaryCamera`);本方法只读,不改 `SubmitSceneRender` 的既有相机选择语义。
+	bool GameHost::GetMainCameraViewProjection(glm::mat4& outViewProjection, glm::vec2& outScreenSize) const
+	{
+		outViewProjection = glm::mat4(1.0f);
+		outScreenSize = glm::vec2(0.0f);
+
+		entt::entity camera = entt::null;
+		TransformComponent* transform = nullptr;
+		if (!ResolvePrimaryCamera(m_Scene, camera, transform))
+			return false;
+
+		// 渲染面尺寸 = 渲染器的**请求(显示)尺寸**:`rendering.render_scale` 只改内部渲染目标,
+		// 画面始终按请求尺寸拉伸铺满(Runtime = 窗口,编辑器 Play = 视口面板场景矩形),
+		// 与 UiHost 构建 `UiViewport` 时用的 `UiSurface::PhysicalSize` 同口径。
+		glm::vec2 screenSize(0.0f);
+		if (m_SceneRenderer)
+		{
+			screenSize = glm::vec2(static_cast<float>(m_SceneRenderer->GetRequestedWidth()),
+				static_cast<float>(m_SceneRenderer->GetRequestedHeight()));
+		}
+		else if (Application::HasInstance())
+		{
+			screenSize = glm::vec2(static_cast<float>(Application::Get().GetWindow().GetWidth()),
+				static_cast<float>(Application::Get().GetWindow().GetHeight()));
+		}
+		// 尺寸无效时投影没有意义:返回 false 让宿主关掉世界空间,而不是把锚点全映射到 (0,0)。
+		if (!(screenSize.x > 0.0f) || !(screenSize.y > 0.0f))
+			return false;
+
+		// 与 SubmitSceneRender 同式:投影取自 Scene::GetCameraView(CameraSystem 按视口宽高比
+		// 产出的缓存投影矩阵),视图 = inverse(相机世界矩阵)。
+		const glm::mat4 cameraTransform = transform->GetLocalMatrix();
+		const Camera& cameraView = m_Scene->GetCameraView(camera);
+		outViewProjection = cameraView.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		outScreenSize = screenSize;
+		return true;
+	}
+
+	// GameUI(M11):换场景 / 关会话时作废实体名索引 —— 下一 tick 的首次解析会重建。
+	// 缓存本身已按 (场景指针, CurrentWorldTick) 比对;这里再显式作废,消除
+	// "新场景恰好分配到同一地址且 tick 相同"时的陈旧别名(极不可能,代价只是一次 clear)。
+	void GameHost::InvalidateWorldNameIndex() const
+	{
+		m_WorldNameIndex.clear();
+		m_WorldNameIndexScene = nullptr;
+		m_WorldNameIndexTick = 0;
+		m_WorldNameIndexValid = false;
+	}
+
+	// GameUI(M11):默认世界位置解析器 —— 实体名(`TagComponent::Tag`)→ 世界位置。
+	// 缓存口径:实体名索引按 `Scene::CurrentWorldTick()` 失效,每 tick 只线性扫场景一次;
+	// 之后每次解析是 O(1) 查表(不是每帧 O(n*k))。换场景(指针变化)同样整体重建。
+	bool GameHost::ResolveWorldPositionByName(std::string_view target, glm::vec3& outWorld) const
+	{
+		outWorld = glm::vec3(0.0f);
+		if (target.empty())
+			return false;
+
+		const Scene* scene = m_Scene.get();
+		if (scene == nullptr)
+			return false;
+
+		const uint64_t tick = scene->CurrentWorldTick();
+		if (!m_WorldNameIndexValid || m_WorldNameIndexScene != scene || m_WorldNameIndexTick != tick)
+		{
+			m_WorldNameIndex.clear();
+			const entt::registry& registry = scene->GetRegistry();
+			for (const entt::entity entity : registry.view<TagComponent>())
+			{
+				const NameId name = registry.get<TagComponent>(entity).Tag;
+				if (!name.IsValid())
+					continue;
+				const std::string& text = StringPool::Get().NameOf(name);
+				if (text.empty())
+					continue;
+				// 重名取**第一个**(entt 视图遍历顺序稳定);后来的同名实体不覆盖首命中。
+				m_WorldNameIndex.emplace(std::string_view(text), entity);
+			}
+			m_WorldNameIndexScene = scene;
+			m_WorldNameIndexTick = tick;
+			m_WorldNameIndexValid = true;
+		}
+
+		const auto it = m_WorldNameIndex.find(target);
+		if (it == m_WorldNameIndex.end())
+			return false;
+
+		const entt::entity entity = it->second;
+		const entt::registry& registry = scene->GetRegistry();
+		// 本 tick 内实体可能已被销毁:存活检查后回退,绝不返回死句柄的位置。
+		if (!registry.valid(entity))
+			return false;
+		if (const auto* world = registry.try_get<WorldTransformComponent>(entity))
+		{
+			outWorld = glm::vec3(world->Matrix[3][0], world->Matrix[3][1], world->Matrix[3][2]);
+			return true;
+		}
+		if (const auto* transform = registry.try_get<TransformComponent>(entity))
+		{
+			outWorld = transform->Location;
+			return true;
+		}
+		return false;
 	}
 
 	void GameHost::ApplyViewportToScene()

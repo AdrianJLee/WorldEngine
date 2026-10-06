@@ -1223,6 +1223,23 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 		m_UiHost.SetSurface(surface);
 		m_UiHost.SetOrigin(origin);
 
+		// GameUI(M11):世界空间 UI 喂参 —— 相机取 PlayHost 的主相机(与编辑器 Play 视口提交渲染
+		// 用的是同一台:场景主相机实体;选法复用 GameHost::GetMainCameraViewProjection,这里不另写)。
+		// 渲染面尺寸随相机一起给 = 本面板的场景矩形(与上面的 `surface` 同一份尺寸,UiViewport 的
+		// 物理→设计换算因此与世界投影一致)。拿不到相机/渲染面 ⇒ 关闭世界空间:纯屏幕空间行为
+		// 与 f5b7da1 一致。解析器在 SetSceneState 的 Initialize 之后只设一次,不在这里重建。
+		glm::mat4 worldViewProjection(1.0f);
+		glm::vec2 worldScreenSize(0.0f);
+		if (m_PlayHost.GetMainCameraViewProjection(worldViewProjection, worldScreenSize))
+		{
+			m_UiHost.SetWorldSpace(true);
+			m_UiHost.SetWorldCamera({ worldViewProjection, worldScreenSize });
+		}
+		else
+		{
+			m_UiHost.SetWorldSpace(false);
+		}
+
 		// 裁剪到面板矩形:节点锚点/尺寸异常也不会溢到相邻面板上。
 		Wui::ClipScope clip(ctx, panelRect);
 		m_UiHost.DrawFrame(ctx, input);

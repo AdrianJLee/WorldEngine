@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <utility>
 
 namespace World::UI
@@ -52,6 +54,69 @@ namespace World::UI
 		glm::vec2 NodeCenter(const UiNodeInstance& node)
 		{
 			return glm::vec2 { node.Rect.X + node.Rect.W * 0.5f, node.Rect.Y + node.Rect.H * 0.5f };
+		}
+
+		// 与 `UiPainter` 同一值编码协议(颜色/尺寸之外的纯数值属性)。
+		float NumberProp(const UiNodeInstance& node, std::string_view name, float fallback)
+		{
+			const std::string* value = FindProp(node, name);
+			if (value == nullptr || value->empty())
+				return fallback;
+			char* end = nullptr;
+			const float parsed = std::strtof(value->c_str(), &end);
+			return end != value->c_str() ? parsed : fallback;
+		}
+
+		std::string TextProp(const UiNodeInstance& node, std::string_view name, std::string fallback = std::string())
+		{
+			const std::string* value = FindProp(node, name);
+			return value != nullptr ? *value : std::move(fallback);
+		}
+
+		// 与 `UiPainter::PaintSlider` 的无障碍 Value 同一格式(便于脚本/测试直接比对)。
+		std::string FormatNumber(float value)
+		{
+			char buffer[32] = {};
+			std::snprintf(buffer, sizeof(buffer), "%.3f", value);
+			return std::string(buffer);
+		}
+
+		// UTF-32 码点 → UTF-8(非法码点忽略;编辑缓冲以 UTF-8 存,退格按码点删)。
+		void AppendUtf8(std::string& text, uint32_t codepoint)
+		{
+			if (codepoint <= 0x7Fu)
+			{
+				text.push_back(static_cast<char>(codepoint));
+			}
+			else if (codepoint <= 0x7FFu)
+			{
+				text.push_back(static_cast<char>(0xC0u | (codepoint >> 6)));
+				text.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+			}
+			else if (codepoint <= 0xFFFFu)
+			{
+				text.push_back(static_cast<char>(0xE0u | (codepoint >> 12)));
+				text.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3Fu)));
+				text.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+			}
+			else if (codepoint <= 0x10FFFFu)
+			{
+				text.push_back(static_cast<char>(0xF0u | (codepoint >> 18)));
+				text.push_back(static_cast<char>(0x80u | ((codepoint >> 12) & 0x3Fu)));
+				text.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3Fu)));
+				text.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+			}
+		}
+
+		// 删掉最后一个 UTF-8 码点(连同其续字节)。
+		void PopUtf8(std::string& text)
+		{
+			if (text.empty())
+				return;
+			std::size_t index = text.size() - 1;
+			while (index > 0 && (static_cast<unsigned char>(text[index]) & 0xC0u) == 0x80u)
+				--index;
+			text.erase(index);
 		}
 	}
 
@@ -265,16 +330,29 @@ namespace World::UI
 		return nullptr;
 	}
 
-	void UiInputRouter::EmitClick(const UiNodeInstance& node)
+	bool UiInputRouter::IsSliderNode(const UiNodeInstance& node)
+	{
+		const UiNodeTypeDesc* type = UiNodeRegistry::Find(node.Type);
+		return type != nullptr && type->Type == "Slider";
+	}
+
+	bool UiInputRouter::IsTextFieldNode(const UiNodeInstance& node)
+	{
+		const UiNodeTypeDesc* type = UiNodeRegistry::Find(node.Type);
+		return type != nullptr && type->Type == "TextField";
+	}
+
+	void UiInputRouter::EmitNodeEvent(const UiNodeInstance& node, std::string_view event, std::string value)
 	{
 		UiInputCommand command;
 		command.NodeId = node.Id;
-		command.Event = ClickEventName();
+		command.Event = std::string(event);
+		command.Value = std::move(value);
 		if (node.Source != nullptr)
 		{
 			for (const UiCommandDecl& decl : node.Source->On)
 			{
-				if (decl.Event == command.Event)
+				if (std::string_view(decl.Event) == event)
 				{
 					command.Command = decl.Command;
 					break;
@@ -286,6 +364,80 @@ namespace World::UI
 			m_Queue->Push(std::move(command));
 			++m_Frame.CommandsEmitted;
 		}
+	}
+
+	void UiInputRouter::EmitClick(const UiNodeInstance& node)
+	{
+		EmitNodeEvent(node, ClickEventName(), std::string());
+	}
+
+	// 指针在设计空间的位置 → 滑条值。与 `UiPainter::PaintSlider` 同一口径:
+	// fraction = clamp((x - rect.X) / rect.W, 0, 1);value = min + fraction*(max-min);
+	// 有 `step`(>0)时按 step 量化并再钳位到 [min,max]。
+	float UiInputRouter::SliderValueFromPointer(const UiNodeInstance& node, glm::vec2 designPoint) const
+	{
+		const float minValue = NumberProp(node, "min", 0.0f);
+		const float maxValue = NumberProp(node, "max", 1.0f);
+		if (!(node.Rect.W > 0.0f))
+			return minValue;
+
+		const float fraction = std::clamp((designPoint.x - node.Rect.X) / node.Rect.W, 0.0f, 1.0f);
+		float value = minValue + fraction * (maxValue - minValue);
+
+		const float step = NumberProp(node, "step", 0.0f);
+		if (step > 0.0f)
+			value = minValue + std::round((value - minValue) / step) * step;
+
+		const float low = std::min(minValue, maxValue);
+		const float high = std::max(minValue, maxValue);
+		return std::clamp(value, low, high);
+	}
+
+	void UiInputRouter::BeginEditing(const UiNodeInstance& node)
+	{
+		m_Editing = true;
+		m_EditingNodeId = node.Id;
+		// 初值:宿主预置(`SetEditingText`)优先;否则读节点属性(绘制用 `value`,
+		// 派工单口径允许 `text` 作兼容),都没有 = 空。
+		m_EditingOriginal = TextProp(node, "value", TextProp(node, "text"));
+		const auto preset = m_TextPresets.find(node.Id);
+		m_EditingText = preset != m_TextPresets.end() ? preset->second : m_EditingOriginal;
+		SetFocusedInternal(node.Id, UiFocusDomain::Text);
+	}
+
+	void UiInputRouter::CommitEditing(const UiScreen& screen)
+	{
+		if (!m_Editing)
+			return;
+		const std::string nodeId = m_EditingNodeId;
+		const std::string text = m_EditingText;
+		m_Editing = false;
+		m_EditingNodeId.clear();
+		m_EditingText.clear();
+		m_EditingOriginal.clear();
+		m_Domain = UiFocusDomain::Navigation;
+		if (const UiNodeInstance* node = screen.Find(nodeId); node != nullptr)
+			EmitNodeEvent(*node, CommitEventName(), text);
+	}
+
+	void UiInputRouter::CancelEditing()
+	{
+		if (!m_Editing)
+			return;
+		// 放弃 = 回到原值;编辑缓冲保留"原值"供宿主/测试读取,但不产生 Commit。
+		m_EditingText = m_EditingOriginal;
+		m_Editing = false;
+		m_EditingNodeId.clear();
+		m_EditingOriginal.clear();
+		m_Domain = UiFocusDomain::Navigation;
+	}
+
+	void UiInputRouter::SetEditingText(std::string_view nodeId, std::string text)
+	{
+		const std::string key(nodeId);
+		m_TextPresets[key] = text;
+		if (m_Editing && m_EditingNodeId == key)
+			m_EditingText = std::move(text);
 	}
 
 	// ---- 键盘 / 焦点导航 ----
@@ -348,9 +500,43 @@ namespace World::UI
 		}
 	}
 
+	// M13②:文本框编辑态的键盘语义(与"仅文本焦点域"区分:编辑态下 Backspace/Enter/Escape
+	// 生效,方向键/Tab 不导航)。
+	void UiInputRouter::HandleEditingKeyboard(const UiScreen& screen, const Wui::WuiInputState& input)
+	{
+		if (WasTriggered(input, World::Backspace))
+		{
+			PopUtf8(m_EditingText);
+			m_Frame.KeyboardConsumed = true;
+			return;
+		}
+		if (WasTriggered(input, World::Enter) || WasTriggered(input, World::KPEnter))
+		{
+			CommitEditing(screen);   // 值 = 编辑中的文本
+			m_Frame.KeyboardConsumed = true;
+			return;
+		}
+		if (WasTriggered(input, World::Escape))
+		{
+			CancelEditing();         // 放弃 = 回到原值,不产生 Commit
+			m_Frame.KeyboardConsumed = true;
+			return;
+		}
+		if (!input.TextInput.empty())
+		{
+			for (const uint32_t codepoint : input.TextInput)
+				AppendUtf8(m_EditingText, codepoint);
+			m_Frame.KeyboardConsumed = true;
+			return;
+		}
+		// 编辑态:方向键保持"文本域语义"(不归 UI),Tab 被 UI 吃掉但**不导航**。
+		if (WasTriggered(input, World::Tab))
+			m_Frame.KeyboardConsumed = true;
+	}
+
 	// ---- 路由 ----
 
-	bool UiInputRouter::Route(const UiScreen& screen, const Wui::WuiInputState& input)
+	bool UiInputRouter::Route(const UiScreen& screen, const Wui::WuiInputState& input, UiScreen* scrollTarget)
 	{
 		m_Frame = UiInputFrame {};
 		m_Frame.Focus.From = m_FocusedId;
@@ -358,12 +544,78 @@ namespace World::UI
 
 		ValidateFocus(screen);   // 页面切换/禁用后,旧焦点可能已失效
 
+		// 编辑态挂在已消失的节点上(切页 / 热重载)⇒ 静默取消,不留悬空状态。
+		if (m_Editing && screen.Find(m_EditingNodeId) == nullptr)
+			CancelEditing();
+
 		const UiNodeInstance* hit = screen.HitTest(input.MousePos);
+		const UiNodeInstance* target = ResolveTarget(screen, hit);
+		const bool pressed = input.MouseDown[0] || input.MouseClicked[0] || input.MouseDoubleClicked[0];
+		const glm::vec2 designPoint = screen.Viewport().PhysicalToDesign(input.MousePos);
+
+		// ---- M13①:滑条拖拽(跨帧;拖拽期间指针必须消费,玩法不得收到)----
+		if (m_Dragging)
+		{
+			m_Frame.PointerConsumed = true;
+			m_Frame.HitId = m_DragNodeId;
+			const UiNodeInstance* dragNode = screen.Find(m_DragNodeId);
+			const bool released = input.MouseReleased[0] || !input.MouseDown[0];
+			if (dragNode == nullptr || !IsNodeEnabled(*dragNode) || !IsNodeVisible(*dragNode, screen.Viewport()))
+			{
+				m_Dragging = false;   // 节点失效:静默结束(不推 Commit)
+				m_DragNodeId.clear();
+			}
+			else if (released)
+			{
+				EmitNodeEvent(*dragNode, CommitEventName(),
+					FormatNumber(SliderValueFromPointer(*dragNode, designPoint)));
+				m_Dragging = false;
+				m_DragNodeId.clear();
+			}
+			else
+			{
+				// 按住期间每帧一条 Change(与绘制同一套 min/max/step)。
+				EmitNodeEvent(*dragNode, ChangeEventName(),
+					FormatNumber(SliderValueFromPointer(*dragNode, designPoint)));
+			}
+			m_Frame.Focus.To = m_FocusedId;
+			m_Frame.Focus.Changed = m_Frame.Focus.From != m_Frame.Focus.To;
+			return m_Frame.PointerConsumed;
+		}
 
 		if (HasPointerEvent(input))
 		{
-			const UiNodeInstance* target = ResolveTarget(screen, hit);
-			if (target != nullptr)
+			// 按下别处:先提交正在编辑的文本框(重新按下同一个框除外)。
+			if (m_Editing && pressed &&
+				!(target != nullptr && IsTextFieldNode(*target) && target->Id == m_EditingNodeId))
+			{
+				CommitEditing(screen);
+				// 结束编辑的那一次按下由 UI 吃掉:玩法不得因为"点空白退出输入"而同帧拿到这一下。
+				m_Frame.PointerConsumed = true;
+			}
+
+			if (pressed && target != nullptr && IsTextFieldNode(*target) &&
+				IsNodeEnabled(*target) && IsNodeVisible(*target, screen.Viewport()))
+			{
+				// M13②:点聚焦 → 文本焦点域 + 编辑态(不推 Click)。
+				if (!(m_Editing && m_EditingNodeId == target->Id))
+					BeginEditing(*target);
+				m_Frame.PointerConsumed = true;
+				m_Frame.HitId = target->Id;
+			}
+			else if (pressed && target != nullptr && IsSliderNode(*target) &&
+				IsNodeEnabled(*target) && IsNodeVisible(*target, screen.Viewport()))
+			{
+				// M13①:按下落在滑条 = 进入拖拽,立即推一条 Change。
+				m_Dragging = true;
+				m_DragNodeId = target->Id;
+				SetFocusedInternal(target->Id, UiFocusDomain::Navigation);
+				m_Frame.PointerConsumed = true;
+				m_Frame.HitId = target->Id;
+				EmitNodeEvent(*target, ChangeEventName(),
+					FormatNumber(SliderValueFromPointer(*target, designPoint)));
+			}
+			else if (target != nullptr)
 			{
 				m_Frame.PointerConsumed = true;
 				m_Frame.HitId = target->Id;
@@ -374,6 +626,7 @@ namespace World::UI
 			}
 		}
 
+		// ---- M13③:滚轮命中滚动容器 ⇒ 消费 + 偏移落地 ----
 		if (input.Wheel != 0.0f)
 		{
 			const UiNodeInstance* scroller = ResolveScrollContainer(screen, hit);
@@ -381,10 +634,21 @@ namespace World::UI
 			{
 				m_Frame.WheelConsumed = true;
 				m_Frame.WheelTargetId = scroller->Id;
+				if (scrollTarget != nullptr)
+				{
+					// 步长 = `scrollStep`(设计单位,默认 40);钳位是 `SetScrollOffset` 的唯一实现。
+					const float step = NumberProp(*scroller, "scrollStep", 40.0f);
+					glm::vec2 offset = screen.ScrollOffset(scroller->Id);
+					offset.y += -input.Wheel * step;   // 滚轮向下(负)= 内容下移 ⇒ 偏移增
+					scrollTarget->SetScrollOffset(scroller->Id, offset);
+				}
 			}
 		}
 
-		HandleKeyboard(screen, input);
+		if (m_Editing)
+			HandleEditingKeyboard(screen, input);
+		else
+			HandleKeyboard(screen, input);
 
 		m_Frame.Focus.To = m_FocusedId;
 		m_Frame.Focus.Changed = m_Frame.Focus.From != m_Frame.Focus.To;
@@ -393,13 +657,24 @@ namespace World::UI
 
 	bool UiInputRouter::Update(const UiScreen& screen, const Wui::WuiInputState& input)
 	{
-		return Route(screen, input);
+		return Route(screen, input, nullptr);
+	}
+
+	bool UiInputRouter::Update(UiScreen& screen, const Wui::WuiInputState& input)
+	{
+		return Route(screen, input, &screen);
 	}
 
 	bool UiInputRouter::Update(const UiScreen& screen, const Wui::WuiInputState& input, UiCommandQueue& queue)
 	{
 		m_Queue = &queue;
-		return Route(screen, input);
+		return Route(screen, input, nullptr);
+	}
+
+	bool UiInputRouter::Update(UiScreen& screen, const Wui::WuiInputState& input, UiCommandQueue& queue)
+	{
+		m_Queue = &queue;
+		return Route(screen, input, &screen);
 	}
 
 	bool UiInputRouter::Update(const UiNavigator& navigator, const Wui::WuiInputState& input)
@@ -413,7 +688,7 @@ namespace World::UI
 			m_Frame.Focus.To = m_FocusedId;
 			return false;
 		}
-		const bool consumed = Route(*screen, input);
+		const bool consumed = Route(*screen, input, nullptr);   // UiPage::Screen 是 const:不落地滚动偏移
 		// 模态/覆盖/调试层打开:最高层之外的指针一律不穿透(即使没落在控件上)。
 		if (!consumed && blocking && m_ModalBarrier && HasPointerEvent(input))
 		{

@@ -300,4 +300,10 @@ namespace World
 		// 指针(含滚轮)被 UI 消费 ⇒ 玩法本帧不得再收到(contract.ui-runtime §5)。
 		return frame.PointerConsumed || frame.WheelConsumed;
 	}
+
+	void UiHost::SetEditingText(std::string_view nodeId, std::string text)
+	{
+		// 编辑态/初值都在常驻 `m_Router` 里(不随帧重建),这里只转发。
+		m_Router.SetEditingText(nodeId, std::move(text));
+	}
 }

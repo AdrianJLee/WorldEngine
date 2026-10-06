@@ -148,6 +148,11 @@ namespace World
 		// GameUI(M4):把 .wui 驱动的游戏 UI 接到宿主(环境变量 WLD_UI_DOC,否则内容根 assets/ui)。
 		// 两者都取不到 = 静默关闭,不改变今天的行为。
 		m_UiHost.Initialize(desc.ContentRoot);
+		// GameUI(M11):世界空间 UI 的默认位置解析器(实体名 → 世界位置)在这里**只设一次** ——
+		// 它是 `std::function`,每帧重建会有分配;解析器内部按 tick 缓存实体名索引,换场景自己失效。
+		// 每帧只需要喂相机(见 OnUiFrame)。未启用 `.wui` 时本调用可省。
+		if (m_UiHost.Enabled())
+			m_UiHost.SetWorldPositionResolver(m_Host.GetWorldPositionResolver());
 
 		// GameHost 内部:清单中存在同一场景的关卡时走 LevelService(加载状态机/进度),否则退回路径加载。
 		m_Host.LoadLevel(scenePath, true);
@@ -292,6 +297,24 @@ namespace World
 			}
 			// GameUI(M4):真实 .wui 驱动,画在场景贴图/脚本 UI 之后、DrawGameHud 之前(与现有脚本站位一致)。
 			// 未启用时零操作:不推命令、不开无障碍,HUD 与加载遮罩的顺序不变。
+			// GameUI(M11):世界空间 UI 喂参 —— 相机取"本帧要提交渲染的那台主相机"
+			// (GameHost::GetMainCameraViewProjection 与 SubmitSceneRender 同一选相机口径),
+			// 渲染面尺寸随 `SetWorldCamera` 一起给。拿不到相机/渲染面 ⇒ 关闭世界空间:
+			// 纯屏幕空间行为与 f5b7da1 一致。解析器不在这里重设(见 OnAttach)。
+			if (m_UiHost.Enabled())
+			{
+				glm::mat4 worldViewProjection(1.0f);
+				glm::vec2 worldScreenSize(0.0f);
+				if (m_Host.GetMainCameraViewProjection(worldViewProjection, worldScreenSize))
+				{
+					m_UiHost.SetWorldSpace(true);
+					m_UiHost.SetWorldCamera({ worldViewProjection, worldScreenSize });
+				}
+				else
+				{
+					m_UiHost.SetWorldSpace(false);
+				}
+			}
 			m_UiHost.DrawFrame(wuiContext, input);
 			// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
 			// 会触发结构写断言并抛异常。
