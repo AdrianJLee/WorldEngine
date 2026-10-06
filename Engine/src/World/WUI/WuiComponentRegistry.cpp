@@ -1276,6 +1276,29 @@ void RegisterBuiltins(){
 				{ PropFloat("value", 0.0f, 1.0f, 0.01f), PropBool("disabled") },
 				&ShowProgress));
 
+			// M21:WuiPlot 是 ProfilerPanel(帧时间曲线)/ReadoutPanels(内存趋势)用的保留模式控件。
+			// 它与 WuiProgress 走同一条真实绘制路径(建树 → LayoutWidgetTree → WuiPaintContext::Paint);
+			// 样本数组归调用方持有(WuiPlot 只读指针、不拷贝),showcase 自己就是那个调用方。
+			WuiComponentRegistry::Register(Desc(
+				"plot", "WuiPlot", "Plot", "Chrome", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/Widgets/WuiPlot.cpp",
+				"role=无(WuiPlot 不登记 a11y 节点,与 WuiProgress 一样是保留模式控件);外壳锚点 kind=component-root、interactive=false;Samples/Samples2 只读指针归调用方,控件不拷贝;绘制时按像素列做 min/max 抽取",
+				"showcase 首选 240x96;默认折线(Line),bars 态切柱状;MinValue/MaxValue <= 0 时按数据自动定标;WarnThreshold >= 0 画一条告警线",
+				ShellIds("plot"),
+				StateList({ "default", "bars" }),
+				{
+					PropText("style", "Line"),
+					NumberDefault(PropFloat("minValue", 0.0f, 1000.0f, 1.0f), 0.0f),
+					NumberDefault(PropFloat("maxValue", 0.0f, 1000.0f, 1.0f), 0.0f),
+					NumberDefault(PropFloat("warnThreshold", -1.0f, 1000.0f, 1.0f), 16.0f),
+					UnitOf(NumberDefault(PropFloat("minHeight", 40.0f, 320.0f, 1.0f), 96.0f), "px"),
+					PropColor("lineColor", "#4DB3FF", false, "主序列折线颜色(未覆盖 = 控件默认 {0.30,0.70,1.00,1.00})。"),
+					PropColor("fillColor", "#4DB3FF2E", false, "主序列折线下方填充(未覆盖 = 控件默认 {0.30,0.70,1.00,0.18})。"),
+					PropColor("gridColor", "#FFFFFF14", false, "网格线颜色(未覆盖 = 控件默认 {1,1,1,0.08};A <= 0.001 时不画网格)。"),
+					PropColor("thresholdColor", "#FF7359E6", false, "WarnThreshold 告警线颜色(未覆盖 = 控件默认 {1.00,0.45,0.35,0.90})。")
+				},
+				&ShowPlot));
+
 			// ---- P1c-LIB2 渐变填充 / 可折叠分区标题 / 禁用+理由按钮 / 有状态滚动条 + P1c-LIB3 线段原语 ----
 			WuiComponentRegistry::Register(Desc(
 				"gradient", "GradientFill", "Gradient Fill", "Chrome", WuiComponentStatus::Draft,

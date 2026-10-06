@@ -1,5 +1,7 @@
 #include "WuiComponentRegistry_Internal.h"
 
+#include "World/WUI/Widgets/WuiPlot.h"
+
 namespace World::Wui
 {
 
@@ -810,6 +812,59 @@ void ShowProgress(const WuiComponentDraw& draw){
 			LayoutWidgetTree(progress, slot.Rect);
 			WuiPaintContext paint(ctx);
 			progress->Paint(paint);
+		}
+
+
+void ShowPlot(const WuiComponentDraw& draw){
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 240.0f, 96.0f);
+			const WuiId id = BeginShowcase(draw, "plot", "Plot", slot.Rect);
+			(void)id;
+			// 真实控件路径:WuiPlot 是保留模式件,与 ProfilerPanel(帧时间)/ReadoutPanels(内存趋势)
+			// 共用同一条 LayoutWidgetTree + WuiPaintContext::Paint。样本数组归调用方持有
+			// (WuiPlot 只读指针、不拷贝),showcase 这里就是那个调用方 —— 提供一段演示序列。
+			static const float kFrameMs[] = {
+				8.1f, 7.6f, 8.4f, 9.0f, 8.2f, 7.9f, 8.8f, 9.6f, 10.2f, 9.1f, 8.5f, 8.0f,
+				7.7f, 8.3f, 9.4f, 10.8f, 12.1f, 11.4f, 9.9f, 8.9f, 8.1f, 7.8f, 8.6f, 9.2f,
+				10.5f, 13.7f, 16.4f, 14.2f, 11.8f, 10.1f, 9.3f, 8.7f, 8.2f, 7.9f, 8.5f, 9.8f,
+				11.2f, 10.6f, 9.4f, 8.8f, 8.3f, 8.0f, 8.6f, 9.1f, 9.9f, 10.4f, 9.6f, 8.9f };
+			static const float kSecond[] = {
+				5.2f, 5.5f, 5.9f, 6.4f, 7.0f, 7.7f, 8.5f, 9.4f, 10.4f, 11.5f, 12.7f, 12.1f,
+				11.4f, 10.8f, 10.3f, 9.9f, 9.6f, 9.4f, 9.3f, 9.3f, 9.4f, 9.6f, 9.9f, 10.3f,
+				10.8f, 11.4f, 12.1f, 11.6f, 11.0f, 10.5f, 10.1f, 9.8f, 9.6f, 9.5f, 9.5f, 9.6f,
+				9.8f, 10.1f, 10.5f, 11.0f, 11.6f, 12.3f, 11.7f, 11.2f, 10.8f, 10.5f, 10.3f, 10.2f };
+			auto plot = std::make_shared<WuiPlot>();
+			plot->Samples = kFrameMs;
+			plot->SampleCount = sizeof(kFrameMs) / sizeof(kFrameMs[0]);
+			plot->Samples2 = kSecond;
+			plot->SampleCount2 = sizeof(kSecond) / sizeof(kSecond[0]);
+			plot->Style = (draw.State == "bars"
+				|| TrimmedLower(TextProperty(draw, "style", "Line")) == "bars")
+				? WuiPlot::Kind::Bars : WuiPlot::Kind::Line;
+			plot->MinValue = DrivenFloat(ctx, "showcase.plot.minValue", draw, "minValue", 0.0f, 0.0f, 1000.0f);
+			plot->MaxValue = DrivenFloat(ctx, "showcase.plot.maxValue", draw, "maxValue", 0.0f, 0.0f, 1000.0f);
+			plot->WarnThreshold = DrivenFloat(ctx, "showcase.plot.warnThreshold", draw, "warnThreshold",
+				16.0f, -1.0f, 1000.0f);
+			plot->MinHeight = DrivenFloat(ctx, "showcase.plot.minHeight", draw, "minHeight",
+				96.0f, 40.0f, 320.0f) * slot.Scale;
+			const glm::vec4 line = DrivenColor(ctx, "showcase.plot.lineColor", draw, "lineColor",
+				{ 0.30f, 0.70f, 1.00f, 1.00f });
+			plot->LineColor = WuiColor { line.r, line.g, line.b, line.a };
+			const glm::vec4 fill = DrivenColor(ctx, "showcase.plot.fillColor", draw, "fillColor",
+				{ 0.30f, 0.70f, 1.00f, 0.18f });
+			plot->FillColor = WuiColor { fill.r, fill.g, fill.b, fill.a };
+			const glm::vec4 grid = DrivenColor(ctx, "showcase.plot.gridColor", draw, "gridColor",
+				{ 1.00f, 1.00f, 1.00f, 0.08f });
+			plot->GridColor = WuiColor { grid.r, grid.g, grid.b, grid.a };
+			const glm::vec4 warn = DrivenColor(ctx, "showcase.plot.thresholdColor", draw, "thresholdColor",
+				{ 1.00f, 0.45f, 0.35f, 0.90f });
+			plot->ThresholdColor = WuiColor { warn.r, warn.g, warn.b, warn.a };
+			// 参考线:落在量程外的会被控件跳过 —— 这里给两条量程内的 p50/p95 标记。
+			plot->Guides[0] = { 10.0f, { 0.45f, 0.85f, 0.45f, 0.55f } };
+			plot->Guides[1] = { 14.0f, { 0.95f, 0.80f, 0.45f, 0.55f } };
+			plot->GuideCount = 2;
+			PaintRetained(draw, plot, slot.Rect);
 		}
 
 

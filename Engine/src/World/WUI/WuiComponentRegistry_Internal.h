@@ -324,6 +324,8 @@ void ShowEmptyState(const WuiComponentDraw& draw);
 
 void ShowProgress(const WuiComponentDraw& draw);
 
+void ShowPlot(const WuiComponentDraw& draw);
+
 void ShowCodeEditor(const WuiComponentDraw& draw);
 
 void PaintRetained(const WuiComponentDraw& draw, const WuiWidgetPtr& root, const WuiRect& rect);
