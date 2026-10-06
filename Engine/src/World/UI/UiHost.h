@@ -114,6 +114,29 @@ namespace World
 		// 在 `ctx.EndFrame()` 之后调用:第一帧落一次无障碍树(`WLD_UI_A11Y_DUMP`);未启用时零操作。
 		void EndFrame();
 
+		// ---- 热重载(M34)----
+		//
+		// 契约 `contract.ui-runtime` §9:`.wui` 变更 → 重载 → 按稳定 `Id` **迁移运行态**
+		// (栈/焦点/滚动/动画);失败保留上一份可用版本并报可读原因,**不允许半加载界面**。
+		// 本类此前只在 `Initialize` 读一次盘(改文件画面不变 ⇒ 实测报障),这两个入口补上。
+		//
+		// `Reload` 重新读 `m_DocumentPath` → `UiScreen::Build`;`m_Surface` / `m_Origin` /
+		// 世界空间设置不变。解析或构建失败 ⇒ 返回 false + 可读 error,且**不动**现有界面
+		// (`Build` 先校验再改状态,失败时实例树/文档/运行态逐字段保留)。
+		// 成功时按稳定 `Id` 迁移运行态:滚动偏移(`UiScreen::SetScrollOffset` 是唯一钳位实现)
+		// 与 router 焦点(`FocusedId` + 焦点域);`Id` 在新文档里消失的项自然丢弃。
+		bool Reload(std::string* error = nullptr);
+		// 按**文件戳**(大小 + 最后写入时间,与 `AssetHotReload` 的 size|mtime 兜底同口径)
+		// 判脏:变了就 `Reload`。宿主每帧调一次;`m_Enabled == false` 或路径为空时零成本
+		// (**不 stat**)。同一份坏文件只报一次警告(失败也把戳记为已见,文件再次变化才重试)。
+		void PollDocumentChanges();
+		// 最近一次热重载失败的**可读**原因(成功 / 尚未失败 = 空;诊断与 headless 验证用)。
+		const std::string& LastReloadError() const { return m_LastReloadError; }
+
+		// 只读观察口(headless 验证/诊断:实例树、滚动偏移、焦点)。不改任何运行态。
+		const UI::UiScreen& Screen() const { return m_Screen; }
+		const UI::UiInputRouter& InputRouter() const { return m_Router; }
+
 		// ---- 输入路由(M9;宿主在 `OnUpdate`、`m_Host.Tick(...)` 之前调用)----
 		// 命中可交互节点 ⇒ true(宿主据此 `GameHost::SetPointerCaptured(true)`:玩法本帧收不到指针);
 		// 空白 / 不可见 / 禁用 / 未启用(没有 `.wui`)⇒ false,且**零副作用**(不推命令、不改焦点)。
@@ -152,6 +175,15 @@ namespace World
 		// candidate 既可为 `.wui` 文件,也可为目录(取其中字典序第一个 `.wui`);无 → 空路径。
 		static std::filesystem::path FirstUiDocument(const std::filesystem::path& candidate);
 
+		// M34:热重载判脏用的**文件戳**(大小 + 最后写入时间;读不到 = Exists false = 不判脏)。
+		struct DocumentStamp
+		{
+			bool Exists = false;
+			uintmax_t Size = 0;
+			long long Modified = 0;
+		};
+		static DocumentStamp ReadDocumentStamp(const std::filesystem::path& path);
+
 		UI::UiScreen m_Screen;
 		std::filesystem::path m_ContentRoot;
 		std::string m_DocumentPath;
@@ -185,5 +217,9 @@ namespace World
 		bool m_HasBindingRuntime = false;
 		// 绑定求值失败只报一次(避免每帧刷屏;Reset 时复位)。
 		bool m_BindingProblemReported = false;
+		// M34:最近一次看到并已处理的文件戳(失败也写回 ⇒ 同一份坏文件不每帧重试/刷屏)
+		// + 最近一次重载失败的可读原因。
+		DocumentStamp m_DocumentStamp;
+		std::string m_LastReloadError;
 	};
 }

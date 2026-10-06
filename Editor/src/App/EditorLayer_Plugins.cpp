@@ -1326,6 +1326,9 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 				UI::UiBindingContext { bindingScene, Gameplay::GameApp::TryGet() },
 				bindingScene != nullptr ? bindingScene->CurrentWorldTick() : 0);
 		}
+		// GameUI(M34):`.wui` 热重载 —— Play/Simulate 运行中改盘上的文档即生效
+		// (按文件戳判脏;失败保留上一份可用版本并只报一次警告)。未启用时零成本(不 stat)。
+		m_UiHost.PollDocumentChanges();
 		Wui::ClipScope clip(ctx, panelRect);
 		m_UiHost.DrawFrame(ctx, input);
 	}

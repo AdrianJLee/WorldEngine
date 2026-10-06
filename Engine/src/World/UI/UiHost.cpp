@@ -118,6 +118,9 @@ namespace World
 		if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
 			Wui::WuiAccessibility::Get().SetEnabled(true);
 		m_Enabled = true;
+		// M34:热重载的基线文件戳(首次登记不产生"变化")。
+		m_DocumentStamp = ReadDocumentStamp(documentPath);
+		m_LastReloadError.clear();
 
 		WLD_CORE_INFO("[ui] game UI loaded from '{0}' (screen '{1}', {2} nodes, accessibility {3})",
 			m_DocumentPath, m_Screen.Document().Screen, m_Screen.Count(),
@@ -154,6 +157,9 @@ namespace World
 		m_BindingVersion = 0;
 		m_HasBindingRuntime = false;
 		m_BindingProblemReported = false;
+		// M34:热重载基线随文档一起清(下次 Initialize 再建)。
+		m_DocumentStamp = DocumentStamp {};
+		m_LastReloadError.clear();
 		m_Enabled = false;
 	}
 
@@ -292,6 +298,128 @@ namespace World
 			return;
 		}
 		WLD_CORE_INFO("[ui] accessibility dump written ({0} bytes): {1}", json.size(), m_A11yDumpPath);
+	}
+
+	// ---- M34:`.wui` 热重载 ----
+
+	// 文件戳 = 大小 + 最后写入时间(与 `AssetHotReload` 读不到内容时的 size|mtime 兜底同口径)。
+	// 读不到(不存在 / 无权限)= Exists false ⇒ 调用方**不判脏**:界面保留当前这一份,
+	// 绝不因为"文件短暂读不到"把已经画着的界面变成空的。
+	UiHost::DocumentStamp UiHost::ReadDocumentStamp(const std::filesystem::path& path)
+	{
+		std::error_code error;
+		const uintmax_t size = std::filesystem::file_size(path, error);
+		if (error)
+			return DocumentStamp {};
+		const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(path, error);
+		if (error)
+			return DocumentStamp {};
+
+		DocumentStamp stamp;
+		stamp.Exists = true;
+		stamp.Size = size;
+		stamp.Modified = static_cast<long long>(writeTime.time_since_epoch().count());
+		return stamp;
+	}
+
+	bool UiHost::Reload(std::string* error)
+	{
+		const auto fail = [error](const std::string& message) {
+			if (error)
+				*error = message;
+			return false;
+		};
+
+		if (!m_Enabled || m_DocumentPath.empty())
+			return fail("no .wui document is loaded");
+
+		const std::filesystem::path documentPath(m_DocumentPath);
+		const DocumentStamp stampBefore = ReadDocumentStamp(documentPath);
+
+		// 运行态迁移快照(稳定 Id → 值),必须在 `Build` **之前**取:
+		//   * 滚动偏移:唯独存在 `UiScreen` 里(`Build` 会清空),按节点 Id 枚举非零项;
+		//   * 焦点:router 跨帧持有(FocusedId + 焦点域),不在文档里。
+		// 两者都只读:快照失败/为空 ⇒ 迁移就是空操作,不影响"重载本身要成功"这件事。
+		std::vector<std::pair<std::string, glm::vec2>> scrollOffsets;
+		for (const UI::UiNodeInstance& node : m_Screen.Nodes())
+		{
+			const glm::vec2 offset = m_Screen.ScrollOffset(node.Id);
+			if (offset.x != 0.0f || offset.y != 0.0f)
+				scrollOffsets.emplace_back(node.Id, offset);
+		}
+		const std::string focusedId = m_Router.FocusedId();
+		const UI::UiFocusDomain focusDomain = m_Router.FocusDomain();
+
+		UI::UiDocument document;
+		std::string loadError;
+		if (!UI::UiDocumentIO::LoadFile(documentPath, document, &loadError))
+		{
+			// 文件读不动 / 解析失败:旧文档、旧运行态**全部保留**,只记一条可读原因。
+			m_DocumentStamp = stampBefore;   // 这份内容已看过 ⇒ 不每帧重试刷屏
+			m_LastReloadError = loadError.empty()
+				? "cannot read '" + m_DocumentPath + "'" : loadError;
+			return fail(m_LastReloadError);
+		}
+
+		// `Build` 先跑 `ValidateUiDocument` 再改状态:失败返回 false 时 `m_Screen` 逐字段不变
+		// ⇒ 天然"保留上一份可用版本",不存在半加载的实例树。
+		std::string buildError;
+		if (!m_Screen.Build(document, &buildError))
+		{
+			m_DocumentStamp = stampBefore;
+			m_LastReloadError = buildError.empty() ? std::string("cannot build UI screen") : buildError;
+			return fail(m_LastReloadError);
+		}
+
+		// 成功:以**读取之后**的戳作新基线(文件在读取期间又被写 ⇒ 下次轮询立刻再重载一次,幂等)。
+		m_DocumentStamp = ReadDocumentStamp(documentPath);
+		m_LastReloadError.clear();
+
+		// 文档整体换了 ⇒ 绑定表按新文档重建(与 `Initialize` 同一入口);
+		// 绘制/世界空间的"只报一次"标志复位(新文档可能带来新的未知类型或失效锚点)。
+		m_Bindings.Attach(m_Screen);
+		m_Overrides.Clear();
+		m_BindingProblemReported = false;
+		m_PaintProblemReported = false;
+		m_WorldProblemReported = false;
+
+		// 先按**上一次的视口**重排一次:节点矩形与滚动钳位都依赖布局结果,否则迁移落在
+		// 全零矩形上(滚动偏移会被钳成 0)。下一帧 `DrawFrame` 会用当时的物理面重算视口并覆盖
+		// 这里的结果 —— 这一步只是给"运行态迁移"一个正确的基准。
+		if (m_Screen.Viewport().Scale > 0.0f)
+			m_Screen.Layout(m_Screen.Viewport());
+
+		// 运行态迁移:按稳定 `Id` 回填。`SetScrollOffset` 是唯一钳位实现(内容变短 ⇒ 自动收窄);
+		// 新文档里没有的 Id 自然丢弃。焦点同样按 Id 恢复,节点消失 ⇒ 明确清空(不留悬空焦点)。
+		for (const auto& [id, offset] : scrollOffsets)
+			m_Screen.SetScrollOffset(id, offset);
+		if (!focusedId.empty() && !m_Router.SetFocus(m_Screen, focusedId, focusDomain))
+			m_Router.ClearFocus();
+
+		WLD_CORE_INFO("[ui] document reloaded: '{0}' (screen '{1}', {2} nodes, {3} scroll offset(s) kept, focus '{4}')",
+			m_DocumentPath, m_Screen.Document().Screen, m_Screen.Count(), scrollOffsets.size(),
+			m_Router.FocusedId());
+		return true;
+	}
+
+	void UiHost::PollDocumentChanges()
+	{
+		// 零成本守卫:没有 `.wui` / 没有路径时**不 stat**(宿主每帧调,发布路径默认零开销)。
+		if (!m_Enabled || m_DocumentPath.empty())
+			return;
+
+		const DocumentStamp current = ReadDocumentStamp(std::filesystem::path(m_DocumentPath));
+		if (!current.Exists)
+			return;   // 文件暂时读不到 = 不判脏(保留当前界面,等它回来)
+		if (current.Exists == m_DocumentStamp.Exists && current.Size == m_DocumentStamp.Size
+			&& current.Modified == m_DocumentStamp.Modified)
+			return;
+
+		// 戳变 ⇒ 试着重载。失败保留上一份可用版本:`Reload` 已把戳记为"已看过",
+		// 所以同一份坏文件只在这里报一次(写回文件再次变化才重试)。
+		std::string error;
+		if (!Reload(&error))
+			WLD_CORE_WARN("[ui] document reload failed, keeping the previous version: {0}", error);
 	}
 
 	// ---- M9:平台输入组帧 + 输入路由 + DPI ----

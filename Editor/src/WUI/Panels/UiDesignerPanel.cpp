@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <set>
 #include <system_error>
 #include <utility>
@@ -580,6 +581,80 @@ namespace World
 			}
 			return joined;
 		}
+
+		// ---- M35:画布属性可见反馈 ----
+		//
+		// 显示文本与 `UiPainter::Localized` **同口径**(M33 起 `.wui` 支持内联兜底):
+		//   `@key`          —— 本地化 key;缺 key 时回退去掉 `@` 的字面量。
+		//   `@key|兜底文案` —— 缺 key / 缺译文时显示兜底文案,而不是裸键名。
+		//   key 或兜底为空 = 写法非法:原样显示,便于一眼看出写错。
+		std::string LocalizedCanvasText(std::string_view text)
+		{
+			if (!text.empty() && text.front() == '@')
+			{
+				const std::size_t separator = text.find('|');
+				if (separator == std::string_view::npos)
+				{
+					const std::string key(text.substr(1));
+					return Wui::Tr(key, key);
+				}
+				const std::string key(text.substr(1, separator - 1));
+				const std::string fallback(text.substr(separator + 1));
+				if (key.empty() || fallback.empty())
+					return std::string(text);
+				return Wui::Tr(key, fallback);
+			}
+			return std::string(text);
+		}
+
+		// 节点属性值(一次线性查找,无容器构造);未设置返回 nullptr。
+		const std::string* NodePropValue(const UI::UiNodeInstance& node, std::string_view name)
+		{
+			if (node.Source == nullptr)
+				return nullptr;
+			const UI::UiProp* prop = node.Source->FindProp(name);
+			return prop != nullptr ? &prop->Value : nullptr;
+		}
+
+		std::string CanvasNodeText(const UI::UiNodeInstance& node)
+		{
+			static constexpr std::string_view kTextProps[] = { "text", "label", "title" };
+			for (std::string_view name : kTextProps)
+			{
+				const std::string* value = NodePropValue(node, name);
+				if (value != nullptr && !value->empty())
+					return LocalizedCanvasText(*value);
+			}
+			return std::string();
+		}
+
+		bool TryParseNodeColor(const UI::UiNodeInstance& node, std::string_view name, Wui::WuiColor& out)
+		{
+			const std::string* value = NodePropValue(node, name);
+			return value != nullptr && !value->empty() && Wui::ParseComponentColor(*value, out);
+		}
+
+		// 主属性优先,解析失败/未设置时回退次属性(如 `bg` → `bg.default`, `color` → `text.default`)。
+		bool CanvasNodeColor(const UI::UiNodeInstance& node, std::string_view primary,
+			std::string_view secondary, Wui::WuiColor& out)
+		{
+			if (TryParseNodeColor(node, primary, out))
+				return true;
+			return !secondary.empty() && TryParseNodeColor(node, secondary, out);
+		}
+
+		// 字号钳到 8..48(避免画爆框);未设置/非法 = 回退默认字号。
+		float CanvasNodeFontSize(const UI::UiNodeInstance& node, float fallback)
+		{
+			const std::string* value = NodePropValue(node, "fontSize");
+			if (value == nullptr || value->empty())
+				return fallback;
+			char* end = nullptr;
+			const float parsed = std::strtof(value->c_str(), &end);
+			if (end == value->c_str())
+				return fallback;
+			return std::clamp(parsed, 8.0f, 48.0f);
+		}
 	}
 
 	// ---- 文档生命周期 ----
@@ -852,6 +927,14 @@ namespace World
 			CommitNodeEdit();
 		// M12:文本焦点快照 —— 下一帧的 Ctrl+Z/Y 判定要用"上一帧结束时"的状态(W9-2 同口径)。
 		m_TextFocusLatched = Wui::WuiTextFocus::Get().Active();
+
+		// M36:帧末真的落盘 —— 此刻属性面板(在三栏里、工具栏之后)已经渲染过,
+		// 未回车/未失焦的文本缓冲已经在那一遍提交进文档。放在这里就不会丢最后一次编辑。
+		if (m_PendingSave)
+		{
+			m_PendingSave = false;
+			SaveTo(m_Path.empty() ? ResolveInputPath(m_PathBuffer) : m_Path);
+		}
 	}
 
 	void UiDesignerPanel::RenderToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
@@ -934,8 +1017,8 @@ namespace World
 			Wui::Tr("panel.ui_designer.save", "Save"), theme, m_HasDocument, true,
 			Wui::Tr("panel.ui_designer.save.tip", "Write the document back to disk (atomic)")))
 		{
-			const std::filesystem::path path = m_Path.empty() ? ResolveInputPath(m_PathBuffer) : m_Path;
-			SaveTo(path);
+			// M36:延后到帧末 —— 属性面板在工具栏之后渲染,那里才会提交未回车/未失焦的文本缓冲。
+			m_PendingSave = true;
 		}
 		x += buttonWidth + gap;
 
@@ -2490,13 +2573,30 @@ namespace World
 		{
 			const Wui::WuiRect box = NodeBoxPhysical(m_Viewport, node.Rect);
 			const bool selected = (node.Id == m_SelectedId);
-			if (selected)
+
+			// M35:属性可见反馈 —— `bg` / `color` / `text`|`label`|`title` / `fontSize` 直接画进框内,
+			// 让"改了 UI 属性没变化"变成"立刻看得见"。每项只做一次 `FindProp`,不构造容器。
+			// 填充:有 `bg`(或 `bg.default`)就覆盖线框底色,否则沿用选中高亮底色。
+			Wui::WuiColor fill;
+			if (CanvasNodeColor(node, "bg", "bg.default", fill))
+				Wui::PanelBackground(ctx, box, fill, 0.0f);
+			else if (selected)
 				Wui::PanelBackground(ctx, box, theme.Selection, 0.0f);
 			const Wui::WuiColor outline = selected
 				? (dragging ? theme.Warning : theme.Accent) : theme.BorderStrong;
 			Wui::HighlightOutline(ctx, box, outline, 0.0f, selected ? 2.0f : 1.0f);
-			Wui::Label(ctx, glm::vec2 { box.X + 3.0f, box.Y + 2.0f }, node.Type + "  " + node.Id,
-				selected ? theme.Text : theme.TextMuted, theme.FontSizeCaption);
+
+			// 文字色:`color`(或 `text.default`)优先,解析失败回退选中/未选中主题色。
+			Wui::WuiColor textColor;
+			if (!CanvasNodeColor(node, "color", "text.default", textColor))
+				textColor = selected ? theme.Text : theme.TextMuted;
+
+			// 框内文字:优先 `text`/`label`/`title` 的本地化值(`@key` / `@key|兜底`);都没有时退回 `Type  Id`。
+			std::string caption = CanvasNodeText(node);
+			if (caption.empty())
+				caption = node.Type + "  " + node.Id;
+			const float fontSize = CanvasNodeFontSize(node, theme.FontSizeCaption);
+			Wui::Label(ctx, glm::vec2 { box.X + 3.0f, box.Y + 2.0f }, caption, textColor, fontSize);
 		}
 
 		// M12:选中节点的 8 个缩放手柄(拖角改两轴、拖边改单轴;拖动手柄描边用强调色)。
@@ -2596,7 +2696,7 @@ namespace World
 		else if (ctx.WasKeyTriggered(KeyCodes::D))
 			DuplicateSelectedNode();
 		else if (ctx.WasKeyTriggered(KeyCodes::S))
-			SaveTo(m_Path.empty() ? ResolveInputPath(m_PathBuffer) : m_Path);
+			m_PendingSave = true;   // M36:同上,统一在帧末落盘(那时缓冲已提交)
 	}
 
 	// M19:方向键微调 —— 与鼠标拖动共用"整档前像 + 一条撤销记录"的口径(连续微调合并成一条,

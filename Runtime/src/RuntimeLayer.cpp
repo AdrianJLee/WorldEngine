@@ -338,6 +338,9 @@ namespace World
 					m_UiHost.SetWorldSpace(false);
 				}
 			}
+			// GameUI(M34):`.wui` 热重载 —— 按文件戳判脏,变更即重载(失败保留上一份可用版本)。
+			// 未启用 `.wui` 时本调用零成本(不 stat)。
+			m_UiHost.PollDocumentChanges();
 			m_UiHost.DrawFrame(wuiContext, input);
 			// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
 			// 会触发结构写断言并抛异常。
