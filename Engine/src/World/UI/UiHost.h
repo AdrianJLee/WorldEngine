@@ -21,6 +21,9 @@
 
 #include "World/Core/Export.h"
 #include "World/UI/UiInputRouter.h"
+#include "World/UI/UiBinding.h"
+#include "World/UI/UiBindingSources.h"
+#include "World/UI/UiPainter.h"
 #include "World/UI/UiScreen.h"
 #include "World/UI/UiTypes.h"
 #include "World/UI/UiWorldProjector.h"
@@ -123,6 +126,19 @@ namespace World
 		const UI::UiCommandQueue& Commands() const { return m_Commands; }
 		void ClearCommands() { m_Commands.Clear(); }
 
+		// ---- 绑定运行时(M26)----
+		//
+		// 宿主每帧在 `DrawFrame` 之前喂一次:`runtime.Scene` = 当前活动场景(Play/运行态场景,
+		// 不是编辑文档),`version` 通常 = `Scene::CurrentWorldTick()`。`DrawFrame` 在 `Layout`
+		// 之后、`Paint` 之前按该版本求值文档的全部 `Bind:` 条目(同 version 不重复求值),
+		// 求值结果覆盖进运行态属性表再画 —— **不改** `.wui` 文档、不改布局口径。
+		// 未调用 / `.wui` 未启用 ⇒ 不求值,绘制与引入绑定前逐字节一致。
+		void SetBindingRuntime(const UI::UiBindingContext& runtime, uint64_t version);
+		// 文档绑定表(`Bind:` 条目 + 最近一次求值结果;诊断/测试用)。
+		const UI::UiBindingTable& Bindings() const { return m_Bindings; }
+		// 本帧运行态属性覆盖表(绑定求值结果 → 绘制覆盖;诊断/测试用)。
+		const UI::UiPropertyOverrideTable& PropertyOverrides() const { return m_Overrides; }
+
 		// M13:宿主预置文本框初值(如从绑定来的当前值)。转发给常驻的 `UiInputRouter`
 		// (`m_Router` 跨帧持有编辑态);编辑中调用立即替换编辑缓冲,否则作为下次进入编辑的初值。
 		void SetEditingText(std::string_view nodeId, std::string text);
@@ -160,5 +176,14 @@ namespace World
 		// M9:输入路由(焦点状态跨帧持有)+ 本帧命令队列(宿主每帧 ClearCommands)。
 		UI::UiInputRouter m_Router;
 		UI::UiCommandQueue m_Commands;
+		// M26:文档绑定表(Initialize 时 Attach)+ 运行态覆盖表(每帧 Refresh 后重建)
+		// + 宿主每帧喂的运行时数据源与变更检测版本。
+		UI::UiBindingTable m_Bindings;
+		UI::UiPropertyOverrideTable m_Overrides;
+		UI::UiBindingContext m_BindingRuntime;
+		uint64_t m_BindingVersion = 0;
+		bool m_HasBindingRuntime = false;
+		// 绑定求值失败只报一次(避免每帧刷屏;Reset 时复位)。
+		bool m_BindingProblemReported = false;
 	};
 }

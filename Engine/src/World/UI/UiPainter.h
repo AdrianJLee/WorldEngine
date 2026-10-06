@@ -39,6 +39,36 @@
 
 namespace World::UI
 {
+	// ---- M26:运行态属性覆盖表(绑定求值结果 → 绘制前覆盖)----
+	//
+	// 键 = (节点稳定 Id, 属性名)。宿主(引擎里是 `UiHost`)每帧在 `UiBindingTable::Refresh`
+	// 之后填;绘制期读取属性时**优先**取覆盖值(见 `UiPainter.cpp` 的 `ResolvedProp`)。
+	// 覆盖**不改** `.wui` 文档、不改布局口径(`UiScreen::Layout` 不读它),只影响绘制命令与
+	// 无障碍文本 —— 与 `UiBinding` 的"只读表现层"边界一致。
+	struct UiPropertyOverride
+	{
+		std::string NodeId;
+		std::string Property;
+		std::string Value;   // 属性文本协议(与 `UiProp::Value` 同编码)
+	};
+
+	class WLD_API UiPropertyOverrideTable
+	{
+	public:
+		void Clear() { m_Entries.clear(); }
+		// 同键 = 覆盖(不追加第二份);空节点 Id / 空属性名 = 忽略(不静默写入不可查的键)。
+		void Set(std::string nodeId, std::string property, std::string value);
+		// 查覆盖值;无该键 = nullptr(指针在下次 Set/Clear 之前有效)。
+		const std::string* Find(std::string_view nodeId, std::string_view property) const;
+
+		std::size_t Count() const { return m_Entries.size(); }
+		bool Empty() const { return m_Entries.empty(); }
+		const std::vector<UiPropertyOverride>& Entries() const { return m_Entries; }
+
+	private:
+		std::vector<UiPropertyOverride> m_Entries;
+	};
+
 	struct UiPaintOptions
 	{
 		// 无障碍节点归属窗口 key(与宿主 `WuiAccessibility::BeginFrame` 的 key 一致)。
@@ -51,6 +81,9 @@ namespace World::UI
 		int Layer = 0;
 		// 是否登记无障碍节点(控制通道关闭时宿主可传 false)。
 		bool RegisterAccessibility = true;
+		// M26:运行态属性覆盖表(按节点 Id + 属性名);非空 ⇒ 绘制读取属性时优先取覆盖值。
+		// 表由宿主持有并每帧重建;本层只读(不改、不清)。
+		const UiPropertyOverrideTable* Overrides = nullptr;
 	};
 
 	struct UiPaintError

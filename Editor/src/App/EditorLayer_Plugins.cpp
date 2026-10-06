@@ -4,6 +4,8 @@
 
 #include "World/Asset/AsyncLoader.h"
 #include "World/Asset/ScenePrefetch.h"
+#include "World/Gameplay/Runtime/GameApp.h"
+#include "World/UI/UiCommandRouter.h"
 // GameUI(M7b):Play 模式下把游戏 UI 限制在视口面板的场景矩形内(Wui::ClipScope)。
 #include "World/WUI/Widgets/WuiChrome.h"
 
@@ -742,11 +744,26 @@ void EditorLayer::OnUpdate(Timestep ts){
 						const Wui::WuiInputState uiInput = m_UiInputSampler.Sample(
 							glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)));
 						m_PlayHost.SetPointerCaptured(m_UiHost.RouteInput(uiInput));
-						// 命令出口:真实业务命令由项目接;这里只打一条可读日志(不发明新的游戏语义)。
-						for (const UI::UiInputCommand& command : m_UiHost.Commands().Commands())
-							WLD_CORE_INFO("[ui] command node={0} event={1} cmd={2}",
-								command.NodeId, command.Event,
-								command.Command.empty() ? std::string("(none)") : command.Command);
+						// GameUI(M26):命令出口 = `UiCommandRouter` → `EventBus`(`UiCommandEvent`)——
+						// 项目 Lua/C++ 系统订阅它即可响应。编辑器没有 `UiNavigator`(页面栈/模态归项目)
+						// ⇒ navigator 传空,命令只进总线(与 Runtime 同一口径)。
+						if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+						{
+							const UI::UiCommandDispatchResult dispatched =
+								UI::UiCommandRouter::Dispatch(m_UiHost.Commands(), app->Events());
+							// 保留一条 debug 日志(只有真有命令时打,避免每帧刷屏)。
+							if (dispatched.Dispatched > 0)
+								WLD_CORE_TRACE("[ui] {0} command(s) -> UiCommandEvent on the EventBus ({1} navigation)",
+									dispatched.Dispatched, dispatched.Navigations);
+						}
+						else if (!m_UiHost.Commands().Empty())
+						{
+							// 没有会话(理论上 PlayHost::Init 之后不会出现):不静默吞命令。
+							for (const UI::UiInputCommand& command : m_UiHost.Commands().Commands())
+								WLD_CORE_INFO("[ui] command (no GameApp session) node={0} event={1} cmd={2}",
+									command.NodeId, command.Event,
+									command.Command.empty() ? std::string("(none)") : command.Command);
+						}
 						m_UiHost.ClearCommands();
 					}
 					// 与 Runtime 同一条路径:GameApp 驱动阶段回调(GameHost 内注册的 update
@@ -1301,6 +1318,14 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 		}
 
 		// 裁剪到面板矩形:节点锚点/尺寸异常也不会溢到相邻面板上。
+		// GameUI(M26):绑定运行时数据源 —— 场景 = 运行态场景(Play/Simulate 的活动场景),
+		// 版本 = 场景 tick(同 tick 不重复求值)。绑定求值在 `UiHost::DrawFrame` 的 Layout → Paint 之间。
+		{
+			const Scene* bindingScene = m_ActiveScene.get();
+			m_UiHost.SetBindingRuntime(
+				UI::UiBindingContext { bindingScene, Gameplay::GameApp::TryGet() },
+				bindingScene != nullptr ? bindingScene->CurrentWorldTick() : 0);
+		}
 		Wui::ClipScope clip(ctx, panelRect);
 		m_UiHost.DrawFrame(ctx, input);
 	}

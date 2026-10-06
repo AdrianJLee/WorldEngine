@@ -87,9 +87,16 @@ namespace World::UI
 			}
 
 			// Pivot 决定投影点落在节点的哪个位置(默认居中 = 血条/名牌的常见口径)。
+			const Wui::WuiRect before = node.Rect;
 			rect.X = design.x - node.Source->Anchor.Pivot.x * rect.W;
 			rect.Y = design.y - node.Source->Anchor.Pivot.y * rect.H;
 			screen.SetNodeRect(index, rect);
+			// M28:子节点是**相对布局时的父矩形**摆的,父被投影挪走后必须把整棵子树一起搬,
+			// 否则"名牌框钉在实体上、框里的文字还留在原处"(实测 world_hud.wui 就是这样:
+			// 框 y=110、文字 y=243)。位移 = 锚定前后的原点差,纯加法,不改尺寸。
+			const glm::vec2 delta { rect.X - before.X, rect.Y - before.Y };
+			if (delta.x != 0.0f || delta.y != 0.0f)
+				screen.TranslateSubtree(index, delta);
 			result.Anchored++;
 		}
 

@@ -3,12 +3,14 @@
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
+#include "World/Gameplay/Runtime/GameApp.h"
 #include "World/Plugins/PluginManager.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Script/Runtime/ScriptEngine.h"
+#include "World/UI/UiCommandRouter.h"
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiTextureRegistry.h"
@@ -219,11 +221,26 @@ namespace World
 			const Wui::WuiInputState uiInput = m_UiInputSampler.Sample(
 				glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)));
 			m_Host.SetPointerCaptured(m_UiHost.RouteInput(uiInput));
-			// 命令出口:真实业务命令由项目接;这里只打一条可读日志(不发明新的游戏语义)。
-			for (const UI::UiInputCommand& command : m_UiHost.Commands().Commands())
-				WLD_CORE_INFO("[ui] command node={0} event={1} cmd={2}",
-					command.NodeId, command.Event,
-					command.Command.empty() ? std::string("(none)") : command.Command);
+			// GameUI(M26):命令出口 = `UiCommandRouter` → `EventBus`(`UiCommandEvent`)——
+			// 项目 Lua/C++ 系统订阅它即可响应(这才是"UI → 逻辑"的出口),引擎不发明玩法语义。
+			// Runtime 没有 `UiNavigator`(页面栈/模态归项目)⇒ navigator 传空,命令只进总线。
+			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+			{
+				const UI::UiCommandDispatchResult dispatched =
+					UI::UiCommandRouter::Dispatch(m_UiHost.Commands(), app->Events());
+				// 保留一条 debug 日志(只有真有命令时打,避免每帧刷屏)。
+				if (dispatched.Dispatched > 0)
+					WLD_CORE_TRACE("[ui] {0} command(s) -> UiCommandEvent on the EventBus ({1} navigation)",
+						dispatched.Dispatched, dispatched.Navigations);
+			}
+			else if (!m_UiHost.Commands().Empty())
+			{
+				// 没有会话(理论上 GameHost::Init 之后不会出现):保留旧的可读日志,不静默吞命令。
+				for (const UI::UiInputCommand& command : m_UiHost.Commands().Commands())
+					WLD_CORE_INFO("[ui] command (no GameApp session) node={0} event={1} cmd={2}",
+						command.NodeId, command.Event,
+						command.Command.empty() ? std::string("(none)") : command.Command);
+			}
 			m_UiHost.ClearCommands();
 		}
 		// 场景更新(OnUpdateRuntime)+ 主相机提交渲染都在 GameHost 内完成,顺序与改造前一致。
@@ -303,6 +320,12 @@ namespace World
 			// 纯屏幕空间行为与 f5b7da1 一致。解析器不在这里重设(见 OnAttach)。
 			if (m_UiHost.Enabled())
 			{
+				// GameUI(M26):绑定运行时数据源 —— 场景 = 当前运行场景,版本 = 场景 tick
+				// (同 tick 不重复求值)。绑定求值在 `UiHost::DrawFrame` 的 Layout → Paint 之间落地。
+				const Scene* bindingScene = m_Host.GetScene().get();
+				m_UiHost.SetBindingRuntime(
+					UI::UiBindingContext { bindingScene, Gameplay::GameApp::TryGet() },
+					bindingScene != nullptr ? bindingScene->CurrentWorldTick() : 0);
 				glm::mat4 worldViewProjection(1.0f);
 				glm::vec2 worldScreenSize(0.0f);
 				if (m_Host.GetMainCameraViewProjection(worldViewProjection, worldScreenSize))

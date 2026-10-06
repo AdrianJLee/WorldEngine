@@ -92,6 +92,11 @@ namespace World::UI
 			m_Nodes[index].Rect = rect;
 	}
 
+	void UiScreen::TranslateSubtree(std::size_t index, glm::vec2 delta)
+	{
+		TranslateDescendants(index, delta);
+	}
+
 	void UiScreen::PlaceNode(int index, const Wui::WuiRect& rect)
 	{
 		m_Nodes[static_cast<std::size_t>(index)].Rect = rect;

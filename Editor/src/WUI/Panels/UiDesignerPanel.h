@@ -23,8 +23,9 @@ namespace World
 	//   · 左 = 节点大纲树(按文档层级,显示 Type + Id);
 	//   · 中 = 画布(设计空间线框视图:节点框 + 类型标签 + 安全区虚线 + 选中高亮 +
 	//            锚点标记;拖动选中节点改 Anchor.Offset);
-	//   · 右 = 属性(Node / Props / Anchor / World / Layout,全部复用 Wui::PropertyRow 一族;
-	//            M24 起 Anchor 段之后是可折叠的 World 世界锚点段)。
+	//   · 右 = 属性(Node / Props / Anchor / World / Bind / On / Layout,全部复用
+	//           Wui::PropertyRow 一族;M24 起 Anchor 段之后是可折叠的 World 世界锚点段,
+	//           M25 起 World 段之后是可折叠的 Bind(数据绑定)/ On(命令)段)。
 	//
 	// M12(设计器工业化):选中节点画 8 个拖拽手柄(拖角改 Anchor.Size 两轴、拖边改单轴;
 	// Min!=Max 的拉伸节点 Size 是"尺寸增量");Ctrl+Z / Ctrl+Y 走**面板本地** WuiUndoStack
@@ -165,6 +166,10 @@ namespace World
 		std::string m_PendingEditName;
 		World::UI::UiNode m_PendingEditBefore;
 		World::UI::UiNode m_FrameNodeBefore;   // 属性页每帧起点快照(仅在无待提交编辑时维护)
+		// M25:Bind / On 行的编辑缓冲代次。行缓冲按 `下标` 键进 Persist,所以换节点、
+		// 撤销/重载/新建、以及增删行之后必须 ++ 换代 —— 否则删掉中间一行会让后面几行
+		// 回显上一行的文本。控件 id 不含代次(a11y 树里的 id 稳定、可被 AI 通道寻址)。
+		uint64_t m_RowBufferGen = 0;
 
 		// 画布拖动:Move = 改 Anchor.Offset;Resize = 改 Anchor.Size(拖 8 手柄之一)。
 		enum class CanvasDrag { None, Move, Resize };
@@ -195,6 +200,9 @@ namespace World
 		bool m_ShowAnchorSection = true;
 		// M24:世界锚点段(Enabled/Target/Offset/KeepOnScreen)。
 		bool m_ShowWorldSection = true;
+		// M25:数据绑定(Bind)/ 命令(On)段。
+		bool m_ShowBindSection = true;
+		bool m_ShowOnSection = true;
 		bool m_ShowLayoutSection = true;
 
 		std::filesystem::path m_ContentRoot;

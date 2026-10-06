@@ -5,6 +5,7 @@
 #include "World/Core/Application.h"
 #include "World/Core/Input.h"
 #include "World/Core/Window.h"
+#include "World/Gameplay/Runtime/GameApp.h"
 #include "World/UI/UiDocument.h"
 #include "World/UI/UiPainter.h"
 #include "World/UI/UiTypes.h"
@@ -75,6 +76,12 @@ namespace World
 		Shutdown();
 		m_ContentRoot = contentRoot.empty() ? Paths::AssetRoot() : contentRoot;
 
+		// GameUI(M26):绑定解析器注册(宿主 Initialize 时一次;幂等)。`ecs:` 无外部依赖;
+		// `service:` 的只读数据源 = 会话 GameApp —— 编辑器 Play 与 Runtime 都在本调用前建好会话
+		// (`GameHost::Init` / `SetSceneState`),所以这里能拿到;拿不到也注册解析器,
+		// 求值时给"需要活跃会话"的可读 error,而不是含混的"no resolver registered"。
+		UI::RegisterBuiltinBindingSources(Gameplay::GameApp::TryGet());
+
 		const std::filesystem::path documentPath = ResolveDocumentPath();
 		if (documentPath.empty())
 			return;   // 没有 `.wui` = 今天的行为:不加载、不开通道、不推命令。
@@ -97,6 +104,11 @@ namespace World
 		}
 
 		m_DocumentPath = documentPath.string();
+		// GameUI(M26):把文档的全部 `Bind:` 编成扁平表(重复 Initialize = 从头重建)。
+		// 只存节点稳定 Id + 目标属性 + 已解析源,不求值(DrawFrame 按 tick 求值)。
+		m_Bindings.Attach(m_Screen);
+		m_Overrides.Clear();
+		m_BindingProblemReported = false;
 		if (const char* dump = std::getenv("WLD_UI_A11Y_DUMP"))
 			if (dump[0] != '\0')
 				m_A11yDumpPath = dump;
@@ -135,6 +147,13 @@ namespace World
 		m_A11yDumpWritten = false;
 		m_PaintProblemReported = false;
 		m_WorldProblemReported = false;
+		// M26:绑定表/覆盖表随文档一起清;运行时数据源失效(下次 Initialize 再 Attach)。
+		m_Bindings.Reset();
+		m_Overrides.Clear();
+		m_BindingRuntime = UI::UiBindingContext {};
+		m_BindingVersion = 0;
+		m_HasBindingRuntime = false;
+		m_BindingProblemReported = false;
 		m_Enabled = false;
 	}
 
@@ -203,6 +222,29 @@ namespace World
 			}
 		}
 
+		// GameUI(M26):绑定求值 —— `Layout` 之后、`Paint` 之前。版本号 = 宿主喂的场景 tick
+		// (同 tick 不重复求值);求值结果覆盖进运行态属性表,`UiPainter` 读取属性时优先取覆盖值。
+		// 只影响绘制命令 / 无障碍文本,不改文档、不改布局(与 `UiBinding` 的只读边界一致)。
+		if (m_Bindings.Count() > 0 && m_HasBindingRuntime)
+		{
+			m_Bindings.Refresh(UI::UiBindingDataSource { m_BindingVersion, &m_BindingRuntime });
+			m_Overrides.Clear();
+			for (const UI::UiBinding& binding : m_Bindings.Entries())
+			{
+				std::string value;
+				if (m_Bindings.Value(binding.NodeId, binding.Target, value))
+					m_Overrides.Set(binding.NodeId, binding.Target, std::move(value));
+			}
+			if (!m_Bindings.Warnings().empty() && !m_BindingProblemReported)
+			{
+				// 解析器缺失 / 实体或字段缺失:一条可读警告(只报一次,不每帧刷屏)。
+				m_BindingProblemReported = true;
+				const UI::UiBindingWarning& first = m_Bindings.Warnings().front();
+				WLD_CORE_WARN("[ui] binding '{0}' (node '{1}', target '{2}') not resolved: {3}",
+					first.Source, first.NodeId, first.Target, first.Message);
+			}
+		}
+
 		// OwnChannel(Runtime):每帧重建本窗口的无障碍节点:绘制前清上一帧,绘制后节点与画面同源。
 		// SharedChannel(编辑器):宿主的 shell 每帧已 BeginFrame("main"),这里**不能**再清,
 		// 否则会抹掉同窗口的编辑器节点;只登记游戏 UI 节点即可。
@@ -215,6 +257,8 @@ namespace World
 		// 避免落到 shell 当前面板 id。
 		options.PanelId = m_PanelId.empty() ? document.Screen : m_PanelId;
 		options.RegisterAccessibility = true;
+		// M26:绑定求值结果 ⇒ 绘制期覆盖(空表 = 无覆盖,行为与引入绑定前一致)。
+		options.Overrides = &m_Overrides;
 		const UI::UiPaintResult result = UI::UiPainter::Paint(ctx, m_Screen, options);
 		if (!result.Ok() && !m_PaintProblemReported)
 		{
@@ -312,5 +356,14 @@ namespace World
 	{
 		// 编辑态/初值都在常驻 `m_Router` 里(不随帧重建),这里只转发。
 		m_Router.SetEditingText(nodeId, std::move(text));
+	}
+
+	void UiHost::SetBindingRuntime(const UI::UiBindingContext& runtime, uint64_t version)
+	{
+		// 只记数据源与版本:真正的求值在 `DrawFrame` 的 Layout → Paint 之间(见那里的注释)。
+		// `runtime` 里的场景 / 会话指针由宿主保证在本次绘制期间有效(引擎两个宿主每帧重喂)。
+		m_BindingRuntime = runtime;
+		m_BindingVersion = version;
+		m_HasBindingRuntime = true;
 	}
 }

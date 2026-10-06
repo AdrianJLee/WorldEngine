@@ -150,6 +150,75 @@ namespace World
 			return buffer;
 		}
 
+		// ---- M25:Bind / On 段 ----
+		// 行尾动作列(= 字段列右侧的 `-` 删除按钮)与行内两字段共用的几何:两条行都按
+		// 同一个收窄量排,Target/Source(Event/Command)两行的字段列同宽、上下对齐。
+		constexpr float kRowActionWidth = 24.0f;
+		constexpr float kRowActionSize = 20.0f;
+
+		// 空行判据与 `ValidateUiDocument` 逐字同源(空 Target/Source、空 Event/Command
+		// 都会被它拒绝,`UiDocumentIO::Parse` 也会因此读不回来):纯空白不算空 —— 引擎接受,
+		// 面板也按接受处理(不在 UI 里造第二套判据)。
+		bool BindingRowIncomplete(const UI::UiBindingDecl& binding)
+		{
+			return binding.Target.empty() || binding.Source.empty();
+		}
+
+		bool CommandRowIncomplete(const UI::UiCommandDecl& command)
+		{
+			return command.Event.empty() || command.Command.empty();
+		}
+
+		// "格式明显非法"的唯一提示判据:没有 `:` 就不可能有协议前缀(UiBinding::Parse 会按
+		// 未知协议拒绝)。协议是否合法仍以引擎的 Parse 为唯一判据 —— 这里不猜。
+		bool BindingSourceMissesScheme(const UI::UiBindingDecl& binding)
+		{
+			return !binding.Source.empty() && binding.Source.find(':') == std::string::npos;
+		}
+
+		// 段内提示行(0..2 行;空段不提示)。PropertyContentHeight 与 RenderProperties 都调
+		// 这一个函数 ⇒ 预留高度与实际绘制不会错位。
+		std::vector<std::string> BindRowHints(const UI::UiNode& node)
+		{
+			std::vector<std::string> hints;
+			if (node.Bind.empty())
+				return hints;
+			bool incomplete = false;
+			bool missesScheme = false;
+			for (const UI::UiBindingDecl& binding : node.Bind)
+			{
+				incomplete = incomplete || BindingRowIncomplete(binding);
+				missesScheme = missesScheme || BindingSourceMissesScheme(binding);
+			}
+			if (incomplete)
+			{
+				hints.push_back(Wui::Tr("panel.ui_designer.bind.incomplete",
+					"Empty Target/Source rows are not written to disk."));
+			}
+			if (missesScheme)
+			{
+				hints.push_back(Wui::Tr("panel.ui_designer.bind.scheme",
+					"Source needs a protocol prefix (e.g. ecs: / service:)."));
+			}
+			return hints;
+		}
+
+		std::vector<std::string> CommandRowHints(const UI::UiNode& node)
+		{
+			std::vector<std::string> hints;
+			if (node.On.empty())
+				return hints;
+			bool incomplete = false;
+			for (const UI::UiCommandDecl& command : node.On)
+				incomplete = incomplete || CommandRowIncomplete(command);
+			if (incomplete)
+			{
+				hints.push_back(Wui::Tr("panel.ui_designer.on.incomplete",
+					"Empty Event/Command rows are not written to disk."));
+			}
+			return hints;
+		}
+
 		void DashedSegment(Wui::WuiContext& ctx, const glm::vec2& from, const glm::vec2& to,
 			const Wui::WuiColor& color, float thickness)
 		{
@@ -516,8 +585,25 @@ namespace World
 		if (path.has_parent_path())
 			std::filesystem::create_directories(path.parent_path(), error);
 
+		// M25:Bind / On 的空行不写盘 —— ValidateUiDocument(以及 UiDocumentIO::Parse)拒绝
+		// 空 Target/Source/Event/Command 的条目。模型里保留这些"正在编辑"的草稿(UI 段内
+		// 有可见提示),这里只过滤要写出去的那一份副本:文件永远能被 Parse 读回。
+		UI::UiDocument outgoing = m_Document;
+		std::size_t droppedRows = 0;
+		outgoing.ForEachNode([&droppedRows](UI::UiNode& node, const std::string&)
+		{
+			const std::size_t before = node.Bind.size() + node.On.size();
+			node.Bind.erase(std::remove_if(node.Bind.begin(), node.Bind.end(),
+				[](const UI::UiBindingDecl& binding) { return BindingRowIncomplete(binding); }),
+				node.Bind.end());
+			node.On.erase(std::remove_if(node.On.begin(), node.On.end(),
+				[](const UI::UiCommandDecl& command) { return CommandRowIncomplete(command); }),
+				node.On.end());
+			droppedRows += before - (node.Bind.size() + node.On.size());
+		});
+
 		std::string saveError;
-		if (!UI::UiDocumentIO::SaveFile(path, m_Document, &saveError))
+		if (!UI::UiDocumentIO::SaveFile(path, outgoing, &saveError))
 		{
 			m_Status = Wui::Tr("panel.ui_designer.save_failed", "Save failed: ") + saveError;
 			return false;
@@ -526,6 +612,11 @@ namespace World
 		m_PathBuffer = path.string();
 		m_Dirty = false;
 		m_Status = Wui::Tr("panel.ui_designer.saved", "Saved ") + path.filename().string();
+		if (droppedRows > 0)
+		{
+			m_Status += " - " + std::to_string(droppedRows) + " " + Wui::Tr(
+				"panel.ui_designer.saved_dropped", "empty binding/command row(s) not written");
+		}
 		return true;
 	}
 
@@ -1035,7 +1126,7 @@ namespace World
 		const float rowHeight = Wui::PropertyRowHeight();
 		const float propertyRows = static_cast<float>(node != nullptr && node->Props.empty() == false
 			? node->Props.size() : 1);
-		float rows = 5.0f;                                  // 五个分组头
+		float rows = 7.0f;                                  // 七个分组头(Node/Props/Anchor/World/Bind/On/Layout)
 		if (m_ShowNodeSection) rows += 2.0f;                // Id / Type
 		if (m_ShowPropsSection) rows += propertyRows;       // 每条属性一行
 		if (m_ShowAnchorSection) rows += 11.0f;             // 10 个数值 + RelativeToSafeArea
@@ -1045,6 +1136,26 @@ namespace World
 			// M24:Enabled=true 且 Target 为空 = ValidateUiDocument 会报错 → 段内多一行可见提示。
 			if (node != nullptr && node->World.Enabled && node->World.Target.empty())
 				rows += 1.0f;
+		}
+		// M25:Bind / On —— 每条 = 两行(Target+Source / Event+Command)+ 段尾一个 Add 按钮,
+		// 再加提示行(空段一行空态,非空段按 BindRowHints/CommandRowHints 的行数)。
+		if (m_ShowBindSection)
+		{
+			rows += 1.0f;                                   // + Add binding
+			if (node != nullptr)
+			{
+				rows += 2.0f * static_cast<float>(node->Bind.size());
+				rows += node->Bind.empty() ? 1.0f : static_cast<float>(BindRowHints(*node).size());
+			}
+		}
+		if (m_ShowOnSection)
+		{
+			rows += 1.0f;                                   // + Add command
+			if (node != nullptr)
+			{
+				rows += 2.0f * static_cast<float>(node->On.size());
+				rows += node->On.empty() ? 1.0f : static_cast<float>(CommandRowHints(*node).size());
+			}
 		}
 		if (m_ShowLayoutSection) rows += 8.0f;              // Kind + Gap + 4×Padding + Columns + RowMajor
 		return rowHeight * rows + 8.0f;
@@ -1072,6 +1183,9 @@ namespace World
 			// M24:World.Target 的文本编辑缓冲同样按选中节点重建(否则切回旧节点会回显旧值)。
 			ctx.ErasePersist(Wui::HashId(
 				("ui_designer.world.target." + node->Id + ".buf").c_str()));
+			// M25:Bind / On 的行缓冲按下标键 —— 换节点(含撤销/重载/新建/复制后的重选)
+			// 必须整体换代,否则后几行会回显上一个节点的文本。
+			++m_RowBufferGen;
 		}
 
 		// M12:没有待提交编辑时,每帧抓一份"本帧起点"节点快照 —— 属性行首次改动时拿它当
@@ -1136,6 +1250,57 @@ namespace World
 			{
 				m_ScreenDirty = true;
 				NoteNodeEdit(def.Label);
+			}
+		};
+
+		// M25:属性页文本行(Target / Source / Event / Command 共用)。提交口径与 Props 逐字一致:
+		// 回车 / 失焦提交,Escape 丢弃;首次改动经 NoteNodeEdit 记前像,鼠标抬起落一条撤销。
+		// idBase = 稳定控件 id(只含节点 + 行下标 ⇒ a11y 树里的 id 稳定可寻址);
+		// bufferBase = 编辑缓冲键(额外含 m_RowBufferGen,增删行/换节点后整体换代)。
+		const auto textRow = [&](const std::string& idBase, const std::string& bufferBase,
+			const std::string& label, const std::string& a11yLabel, const std::string& placeholder,
+			const std::string& tooltip, const Wui::WuiRect& rowRect, std::string& value)
+		{
+			Wui::PropertyRowDesc desc;
+			desc.Label = label;
+			// 行节点用可见文案,字段节点的 a11y label 才是唯一的那条(如 "Bind 2 Source")——
+			// 这样脚本按 label 找到的是可交互字段,不是标签行。
+			desc.A11yLabel = label;
+			desc.A11yValue = value;
+			// 标签行不是控件(与 Props 行同一口径):可交互的是下面的 text-field 节点,
+			// 避免脚本把"Target"标签行当按钮点。
+			desc.A11yEnabled = false;
+			desc.LabelWidth = labelWidth;
+			desc.Tooltip = tooltip;
+			const Wui::PropertyRowResult row = Wui::PropertyRow(ctx,
+				Wui::HashId((idBase + ".row").c_str()), rowRect, desc, theme);
+			std::string& buffer = ctx.Persist<std::string>(
+				Wui::HashId((bufferBase + ".buf").c_str()), value);
+			Wui::TextFieldA11y a11y;
+			a11y.Label = a11yLabel;
+			a11y.Placeholder = placeholder;
+			const Wui::WuiId fieldId = Wui::HashId((idBase + ".field").c_str());
+			bool cancelled = false;
+			const bool committed = Wui::TextField(ctx, fieldId, row.FieldRect, buffer, theme, &cancelled, &a11y);
+			if (cancelled)
+			{
+				buffer = value;
+			}
+			else if (committed || (ctx.Focus() != fieldId && buffer != value))
+			{
+				if (value != buffer)
+				{
+					value = buffer;
+					m_ScreenDirty = true;
+					NoteNodeEdit(label);
+				}
+			}
+			// TextField 只登记 a11y 占位、不画占位文字(库件口径)—— 空值且未聚焦时补可见提示。
+			if (buffer.empty() && ctx.Focus() != fieldId)
+			{
+				Wui::Label(ctx,
+					glm::vec2 { row.FieldRect.X + 6.0f, row.FieldRect.Y + (row.FieldRect.H - 15.0f) * 0.5f },
+					placeholder, theme.TextMuted, 15.0f);
 			}
 		};
 
@@ -1349,6 +1514,206 @@ namespace World
 			{
 				m_ScreenDirty = true;
 				NoteNodeEdit(keepDesc.Label);
+			}
+		}
+
+		// ---- Bind(数据绑定;M25)----
+		// `Bind:` 块 = "节点属性 ← 数据源"。源协议的唯一判据是引擎的 UiBinding::Parse;
+		// 本段只做文本编辑 + 空行 / 缺 `:` 的可见提示。空 Target/Source 会被
+		// ValidateUiDocument 拒绝 ⇒ 保存时整条不写盘(SaveTo 过滤写盘副本),模型里保留草稿。
+		groupHeader("ui_designer.section.bind", "Bind",
+			"(" + std::to_string(node->Bind.size()) + ")", m_ShowBindSection);
+		if (m_ShowBindSection)
+		{
+			const std::string bindPrefix = Wui::Tr("panel.ui_designer.bind.a11y", "Bind");
+			const std::string targetLabel = Wui::Tr("panel.ui_designer.bind.target", "Target");
+			const std::string sourceLabel = Wui::Tr("panel.ui_designer.bind.source", "Source");
+			int removeBind = -1;
+			for (std::size_t i = 0; i < node->Bind.size(); ++i)
+			{
+				UI::UiBindingDecl& binding = node->Bind[i];
+				const std::string ordinal = std::to_string(i + 1);
+				const std::string idBase = "ui_designer.bind." + node->Id + "." + std::to_string(i);
+				const std::string bufferBase = idBase + ".g" + std::to_string(m_RowBufferGen);
+				const Wui::WuiRect targetRow = nextRow(rowHeight);
+				const Wui::WuiRect sourceRow = nextRow(rowHeight);
+				// 两条行收窄到同一个动作列宽 ⇒ 字段列同宽、上下对齐。
+				const Wui::WuiRect targetField { targetRow.X, targetRow.Y,
+					std::max(0.0f, targetRow.W - kRowActionWidth - 2.0f), targetRow.H };
+				const Wui::WuiRect sourceField { sourceRow.X, sourceRow.Y,
+					std::max(0.0f, sourceRow.W - kRowActionWidth - 2.0f), sourceRow.H };
+				textRow(idBase + ".target", bufferBase + ".target", targetLabel,
+					bindPrefix + " " + ordinal + " " + targetLabel,
+					Wui::Tr("panel.ui_designer.bind.target.hint", "Value"),
+					Wui::Tr("panel.ui_designer.bind.target.tip",
+						"Node property driven by the data source (Bind)."),
+					targetField, binding.Target);
+				textRow(idBase + ".source", bufferBase + ".source", sourceLabel,
+					bindPrefix + " " + ordinal + " " + sourceLabel,
+					Wui::Tr("panel.ui_designer.bind.source.hint", "service:player.hp"),
+					Wui::Tr("panel.ui_designer.bind.source.tip",
+						"Protocols: const: 1 / ecs: 0/Health/Current / script:player.hp / service:level"),
+					sourceField, binding.Source);
+				// 删除按钮在本条第二行(Source)右端;擦除推迟到整段画完之后(见下)。
+				const Wui::WuiRect removeRect { sourceRow.X + sourceRow.W - kRowActionSize,
+					sourceRow.Y + (sourceRow.H - kRowActionSize) * 0.5f, kRowActionSize, kRowActionSize };
+				if (Wui::ButtonEx(ctx, Wui::HashId((idBase + ".remove").c_str()), removeRect, "-", theme,
+					true, false,
+					Wui::Tr("panel.ui_designer.bind.remove_tip", "Remove binding") + " " + ordinal))
+				{
+					removeBind = static_cast<int>(i);
+				}
+			}
+			if (node->Bind.empty())
+			{
+				Wui::Label(ctx, glm::vec2 { inner.X + 2.0f, y + 2.0f },
+					Wui::Tr("panel.ui_designer.bind.empty", "No bindings."),
+					theme.TextMuted, theme.FontSizeSmall);
+				y += rowHeight;
+			}
+			for (const std::string& hint : BindRowHints(*node))
+			{
+				const Wui::WuiRect hintRow = nextRow(rowHeight);
+				Wui::Label(ctx, glm::vec2 { hintRow.X + 2.0f, hintRow.Y + 4.0f }, hint,
+					theme.Warning, theme.FontSizeSmall);
+			}
+			const bool addBind = Wui::ButtonEx(ctx, Wui::HashId("ui_designer.bind.add"),
+				nextRow(rowHeight), Wui::Tr("panel.ui_designer.bind.add", "+ Add binding"), theme,
+				true, false, Wui::Tr("panel.ui_designer.bind.add_tip",
+					"Append an empty binding row; empty rows are not written to disk"));
+			// 增删都在本段画完之后落:本帧前面画过的 TextField 已把失焦提交写进模型,
+			// 行下标/缓冲代次的变化不会吃掉未提交文本(与节点面板"画完再 AddNode"同一口径)。
+			if (removeBind >= 0)
+			{
+				UI::UiBindingDecl& victim = node->Bind[static_cast<std::size_t>(removeBind)];
+				if (victim.Target.empty() && victim.Source.empty())
+				{
+					// 本来就是空行:删它不产生撤销记录(派工口径)。
+					node->Bind.erase(node->Bind.begin() + removeBind);
+					m_ScreenDirty = true;
+					m_Dirty = true;
+					++m_RowBufferGen;
+					m_Status = Wui::Tr("panel.ui_designer.bind.dropped_empty",
+						"Removed an empty binding row (no undo step)");
+				}
+				else
+				{
+					CommitNodeEdit();   // 先收口上一条编辑,让删除自己占一条撤销记录
+					m_FrameNodeBefore = *node;
+					node->Bind.erase(node->Bind.begin() + removeBind);
+					m_ScreenDirty = true;
+					++m_RowBufferGen;
+					NoteNodeEdit(Wui::Tr("panel.ui_designer.bind.remove", "Remove Binding"));
+					m_Status = Wui::Tr("panel.ui_designer.bind.removed", "Removed binding ")
+						+ std::to_string(removeBind + 1);
+				}
+			}
+			if (addBind)
+			{
+				CommitNodeEdit();
+				m_FrameNodeBefore = *node;
+				node->Bind.push_back(UI::UiBindingDecl {});
+				m_ScreenDirty = true;
+				++m_RowBufferGen;
+				NoteNodeEdit(Wui::Tr("panel.ui_designer.bind.add", "+ Add binding"));
+				m_Status = Wui::Tr("panel.ui_designer.bind.added", "Added an empty binding row");
+			}
+		}
+
+		// ---- On(命令;M25)----
+		// `On:` 块 = "事件 → 命令"(如 Click → ui.close)。事件名 / 命令名由运行时消费端判定;
+		// 本段只做文本编辑 + 空行可见提示(空 Event/Command 同样不写盘)。
+		groupHeader("ui_designer.section.on", "On",
+			"(" + std::to_string(node->On.size()) + ")", m_ShowOnSection);
+		if (m_ShowOnSection)
+		{
+			const std::string onPrefix = Wui::Tr("panel.ui_designer.on.a11y", "On");
+			const std::string eventLabel = Wui::Tr("panel.ui_designer.on.event", "Event");
+			const std::string commandLabel = Wui::Tr("panel.ui_designer.on.command", "Command");
+			int removeOn = -1;
+			for (std::size_t i = 0; i < node->On.size(); ++i)
+			{
+				UI::UiCommandDecl& command = node->On[i];
+				const std::string ordinal = std::to_string(i + 1);
+				const std::string idBase = "ui_designer.on." + node->Id + "." + std::to_string(i);
+				const std::string bufferBase = idBase + ".g" + std::to_string(m_RowBufferGen);
+				const Wui::WuiRect eventRow = nextRow(rowHeight);
+				const Wui::WuiRect commandRow = nextRow(rowHeight);
+				const Wui::WuiRect eventField { eventRow.X, eventRow.Y,
+					std::max(0.0f, eventRow.W - kRowActionWidth - 2.0f), eventRow.H };
+				const Wui::WuiRect commandField { commandRow.X, commandRow.Y,
+					std::max(0.0f, commandRow.W - kRowActionWidth - 2.0f), commandRow.H };
+				textRow(idBase + ".event", bufferBase + ".event", eventLabel,
+					onPrefix + " " + ordinal + " " + eventLabel,
+					Wui::Tr("panel.ui_designer.on.event.hint", "Click"),
+					Wui::Tr("panel.ui_designer.on.event.tip",
+						"UI event that triggers the command (e.g. Click)."),
+					eventField, command.Event);
+				textRow(idBase + ".command", bufferBase + ".command", commandLabel,
+					onPrefix + " " + ordinal + " " + commandLabel,
+					Wui::Tr("panel.ui_designer.on.command.hint", "ui.close"),
+					Wui::Tr("panel.ui_designer.on.command.tip",
+						"Command emitted when the event fires (ui.* runs through the host)."),
+					commandField, command.Command);
+				const Wui::WuiRect removeRect { commandRow.X + commandRow.W - kRowActionSize,
+					commandRow.Y + (commandRow.H - kRowActionSize) * 0.5f, kRowActionSize, kRowActionSize };
+				if (Wui::ButtonEx(ctx, Wui::HashId((idBase + ".remove").c_str()), removeRect, "-", theme,
+					true, false,
+					Wui::Tr("panel.ui_designer.on.remove_tip", "Remove command") + " " + ordinal))
+				{
+					removeOn = static_cast<int>(i);
+				}
+			}
+			if (node->On.empty())
+			{
+				Wui::Label(ctx, glm::vec2 { inner.X + 2.0f, y + 2.0f },
+					Wui::Tr("panel.ui_designer.on.empty", "No commands."),
+					theme.TextMuted, theme.FontSizeSmall);
+				y += rowHeight;
+			}
+			for (const std::string& hint : CommandRowHints(*node))
+			{
+				const Wui::WuiRect hintRow = nextRow(rowHeight);
+				Wui::Label(ctx, glm::vec2 { hintRow.X + 2.0f, hintRow.Y + 4.0f }, hint,
+					theme.Warning, theme.FontSizeSmall);
+			}
+			const bool addOn = Wui::ButtonEx(ctx, Wui::HashId("ui_designer.on.add"),
+				nextRow(rowHeight), Wui::Tr("panel.ui_designer.on.add", "+ Add command"), theme,
+				true, false, Wui::Tr("panel.ui_designer.on.add_tip",
+					"Append an empty command row; empty rows are not written to disk"));
+			if (removeOn >= 0)
+			{
+				UI::UiCommandDecl& victim = node->On[static_cast<std::size_t>(removeOn)];
+				if (victim.Event.empty() && victim.Command.empty())
+				{
+					node->On.erase(node->On.begin() + removeOn);
+					m_ScreenDirty = true;
+					m_Dirty = true;
+					++m_RowBufferGen;
+					m_Status = Wui::Tr("panel.ui_designer.on.dropped_empty",
+						"Removed an empty On row (no undo step)");
+				}
+				else
+				{
+					CommitNodeEdit();
+					m_FrameNodeBefore = *node;
+					node->On.erase(node->On.begin() + removeOn);
+					m_ScreenDirty = true;
+					++m_RowBufferGen;
+					NoteNodeEdit(Wui::Tr("panel.ui_designer.on.remove", "Remove Command"));
+					m_Status = Wui::Tr("panel.ui_designer.on.removed", "Removed command ")
+						+ std::to_string(removeOn + 1);
+				}
+			}
+			if (addOn)
+			{
+				CommitNodeEdit();
+				m_FrameNodeBefore = *node;
+				node->On.push_back(UI::UiCommandDecl {});
+				m_ScreenDirty = true;
+				++m_RowBufferGen;
+				NoteNodeEdit(Wui::Tr("panel.ui_designer.on.add", "+ Add command"));
+				m_Status = Wui::Tr("panel.ui_designer.on.added", "Added an empty command row");
 			}
 		}
 

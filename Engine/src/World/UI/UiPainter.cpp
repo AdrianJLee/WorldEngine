@@ -45,7 +45,12 @@ namespace World::UI
 		const std::string* ResolvedProp(const UiNodePaintContext& ctx, std::string_view name,
 			std::string& scratch)
 		{
-			const std::string* raw = FindProp(ctx.Node, name);
+			// M26:运行态覆盖优先 —— 绑定求值结果(键 = 节点稳定 Id + 属性名)先于文档属性;
+			// 覆盖值仍走**本层同一份**令牌解析(与文档属性同口径,`$token` 不泄漏给画面)。
+			const std::string* raw = ctx.Options.Overrides != nullptr
+				? ctx.Options.Overrides->Find(ctx.Node.Id, name) : nullptr;
+			if (raw == nullptr)
+				raw = FindProp(ctx.Node, name);
 			if (raw == nullptr || raw->empty() || !IsUiTokenRef(*raw))
 				return raw;
 			if (ctx.ResolveTokenValue(name, *raw, scratch))
@@ -575,6 +580,36 @@ namespace World::UI
 		add({ "Grid", "listview", "grid", { "GridView", "WuiGrid" }, true, &PaintGrid,
 			{ "columns", "cellW", "cellH", "rowCount", "radius", "bg", "fontSize", "cellColor", "gap" },
 			&GridContentSize });
+	}
+
+	// ---- M26:运行态属性覆盖表 ----
+	//
+	// 覆盖表的**唯一**消费点是绘制期属性读取(见上面的 `ResolvedProp`);这里只实现存储。
+	// 规模 = 每个 `Bind:` 条目一条(文档里的绑定数量级),线性查找足够;不做哈希索引。
+
+	void UiPropertyOverrideTable::Set(std::string nodeId, std::string property, std::string value)
+	{
+		if (nodeId.empty() || property.empty())
+			return;   // 不可查的键:拒绝写入,而不是静默塞进表里
+		for (UiPropertyOverride& entry : m_Entries)
+		{
+			if (entry.NodeId == nodeId && entry.Property == property)
+			{
+				entry.Value = std::move(value);
+				return;
+			}
+		}
+		m_Entries.push_back(UiPropertyOverride { std::move(nodeId), std::move(property), std::move(value) });
+	}
+
+	const std::string* UiPropertyOverrideTable::Find(std::string_view nodeId, std::string_view property) const
+	{
+		for (const UiPropertyOverride& entry : m_Entries)
+		{
+			if (entry.NodeId == nodeId && entry.Property == property)
+				return &entry.Value;
+		}
+		return nullptr;
 	}
 
 	UiPaintResult UiPainter::Paint(Wui::WuiContext& ctx, const UiScreen& screen, const UiPaintOptions& options)
