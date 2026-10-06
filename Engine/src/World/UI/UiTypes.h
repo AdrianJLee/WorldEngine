@@ -145,4 +145,17 @@ namespace World::UI
 	WLD_API std::string MakeStableId(std::string_view parentPath, std::string_view type, std::size_t index);
 	// Id 合法性:非空、无 '/'、无空白、无坐标语义(纯逻辑身份)。
 	WLD_API bool IsValidUiNodeId(std::string_view id);
+
+	// ---- 滚动(工作包 M10;仅追加)----
+	//
+	// 判定口径**必须**与 `UiInputRouter::IsScrollContainer` 完全一致(同一份规则,
+	// 两处由此保持同口径):`scrollable`/`scroll` 为真值,或 `overflow` ∈ {scroll, auto, Scroll}。
+	// 真值集合与 `.wui` 既有 BoolProp 编码一致(1/true/True/yes/on);空串 = 属性缺席。
+	WLD_API bool IsUiPropertyTruthy(std::string_view value);
+	WLD_API bool IsUiScrollContainerProps(std::string_view scrollable, std::string_view scroll,
+		std::string_view overflow);
+
+	// 滚动偏移钳位:offset ∈ [0, max(0, contentSize - containerSize)]。
+	// 内容不溢出(或容器非法)⇒ 恒为 0;见 `contract.ui-runtime` §3 与派工单 M10 口径。
+	WLD_API float ClampUiScrollOffset(float offset, float contentSize, float containerSize);
 }

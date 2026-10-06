@@ -535,6 +535,8 @@ namespace World
 		// 并把节点登记进编辑器同一份无障碍树(window 仍 "main",panel = 文档 Screen 名)。
 		// 无障碍通道归编辑器(AI 控制)管理 —— 见 OnAttach 的 SharedChannel 设置。
 		UiHost m_UiHost;
+		// GameUI(M9):OnUpdate(Play/Simulate)里在 PlayHost::Tick 之前组最小输入态并路由。
+		UiPlatformInputSampler m_UiInputSampler;
 		// PROJ-2/T1:宿主是否给了显式项目(启动器/自动打开最近都要看它)。
 		bool m_ProjectExplicit = false;
 		// PROJ-3/T1:纯启动器模式(见 LauncherBootScope 与 OnAttach 的启动分支)。

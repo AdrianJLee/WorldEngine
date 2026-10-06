@@ -72,6 +72,15 @@ namespace World::Wui
 			[&](const WuiAccessNode& node) { return node.Window == windowKey; }), m_Nodes.end());
 	}
 
+	void WuiAccessibility::ClearPanel(const std::string& windowKey, const std::string& panelId)
+	{
+		// M9:按窗口 + 面板精确清(不改 `ClearWindow` 的既有语义)。"面板"就是登记时
+		// `WuiAccessNode::Panel`(UiPainter 用 options.PanelId / 当前面板 / 页面名填写)。
+		m_Nodes.erase(std::remove_if(m_Nodes.begin(), m_Nodes.end(),
+			[&](const WuiAccessNode& node)
+			{ return node.Window == windowKey && node.Panel == panelId; }), m_Nodes.end());
+	}
+
 	void WuiAccessibility::Register(const WuiAccessNode& node)
 	{
 		if (!m_Enabled || node.Id == 0)

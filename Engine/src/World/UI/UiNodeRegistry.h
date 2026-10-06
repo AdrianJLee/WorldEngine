@@ -23,10 +23,15 @@
 namespace World::UI
 {
 	struct UiNodePaintContext;   // 定义在 UiPainter.h(注册表只存函数指针,不依赖绘制实现)
+	struct UiNodeInstance;       // 定义在 UiScreen.h(同上:只存函数指针,不依赖实例实现)
 
 	// 一件 `.wui` 节点类型的绘制入口。与 `WuiComponentDesc::Showcase` 同口径:
 	// 必须是真实绘制路径(命令进 `WuiContext`),不是复刻 demo。
 	using UiNodePaintFn = void (*)(UiNodePaintContext& context);
+
+	// 滚动内容尺寸(M10):程序化列表/网格的内容不是文档子节点,不能靠"子的包围盒"求内容尺寸,
+	// 由类型自报(设计空间)。返回 false = 不自报,调用方(UiScreen)退回子的包围盒。
+	using UiNodeContentSizeFn = bool (*)(const UiNodeInstance& node, glm::vec2& outSize);
 
 	struct UiNodeTypeDesc
 	{
@@ -39,6 +44,9 @@ namespace World::UI
 		// 本层消费、但组件登记属性表里没有的属性名(如 Panel 的 bg/title)。
 		// 只用于"未知属性"可读提示,不改变绘制语义。
 		std::vector<std::string> ExtraProps;
+		// M10:滚动内容尺寸自报入口(仅对滚动容器有意义);空 = 用子的包围盒。追加在末尾,
+		// 既有聚合初始化不受影响。
+		UiNodeContentSizeFn ContentSize = nullptr;
 	};
 
 	class WLD_API UiNodeRegistry

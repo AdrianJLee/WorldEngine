@@ -52,7 +52,17 @@ namespace World::Gameplay
 		void StopRuntime();
 		bool IsRuntimeStarted() const { return m_RuntimeStarted; }
 
-	Ref<Scene> GetScene() const { return m_Scene; }
+		// GameUI(M9):UI 优先消费输入 —— 宿主在 `Tick` **之前**调用,true = 本帧 UI 吃掉了指针。
+		// 语义(只影响指针,不改其它):
+		//   * 鼠标键位一律按抬起 ⇒ 不产生 Pressed/Released 边沿;
+		//   * 喂给 `InputSystem::Sample` 的 `scrollDelta` 传 {0,0}(UI 吃掉了滚轮,玩法不得滚相机);
+		//   * 鼠标**位置照常**传(相机瞄准可用)。
+		// **消费一次即复位**:`Tick` 读取后立即清回 false;宿主每帧设置,不设置 = 下一帧自动 false,
+		// 捕获状态不会泄漏到后续帧。默认 false ⇒ 关掉 `.wui` 时行为与引入本接口前逐字节一致。
+		void SetPointerCaptured(bool captured) { m_PointerCaptured = captured; }
+		bool IsPointerCaptured() const { return m_PointerCaptured; }
+
+		Ref<Scene> GetScene() const { return m_Scene; }
 
 		// ---- T5c:异步资产加载 ----
 		// 后台反序列化在**帧首**提交。不能只依赖 SceneRenderer::BeginScene:加载未完成时宿主会
@@ -81,5 +91,7 @@ namespace World::Gameplay
 		float m_LastTickSeconds = 0.0f;
 		// 只销毁自己创建的会话:复用他人会话的宿主不应该把会话一起带走。
 		bool m_CreatedSession = false;
+		// M9:本帧 UI 是否吃掉了指针(宿主每帧设置,Tick 消费一次即复位)。
+		bool m_PointerCaptured = false;
 	};
 }

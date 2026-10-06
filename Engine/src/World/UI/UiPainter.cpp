@@ -269,6 +269,238 @@ namespace World::UI
 			ctx.Disabled = disabled;
 			ctx.States = std::string(on ? "checked" : "unchecked") + (disabled ? ",disabled" : "");
 		}
+
+		// ---- M10:商业控件面(滚动 / 滑条 / 复选 / 输入框 / 列表 / 网格)----
+
+		void PaintSlider(UiNodePaintContext& ctx)
+		{
+			const Wui::WuiTheme& theme = ctx.Theme;
+			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			const float minValue = NumberProp(ctx.Node, "min", 0.0f);
+			const float maxValue = NumberProp(ctx.Node, "max", 1.0f);
+			const float raw = NumberProp(ctx.Node, "value", 0.0f);
+			const float span = maxValue - minValue;
+			const float fraction = std::fabs(span) > 1.0e-6f
+				? std::clamp((raw - minValue) / span, 0.0f, 1.0f) : 0.0f;
+			const float radius = ScaledProp(ctx, "radius", 4.0f);
+			const float trackH = std::min(ctx.Rect.H, ScaledProp(ctx, "trackHeight", 4.0f));
+			const float knob = std::min(ctx.Rect.H, ScaledProp(ctx, "knobSize", 14.0f));
+
+			const WuiRect track { ctx.Rect.X, ctx.Rect.Y + (ctx.Rect.H - trackH) * 0.5f, ctx.Rect.W, trackH };
+			AddRect(ctx, track, ColorProp(ctx.Node, "trackColor", theme.ContentBg), radius);
+			if (fraction > 0.0f)
+			{
+				AddRect(ctx, WuiRect { track.X, track.Y, track.W * fraction, track.H },
+					disabled ? theme.TextDisabled : ColorProp(ctx.Node, "fillColor", theme.Accent), radius);
+			}
+			const float knobX = ctx.Rect.X + std::max(0.0f, ctx.Rect.W * fraction - knob * 0.5f);
+			AddRect(ctx, WuiRect { knobX, ctx.Rect.Y + (ctx.Rect.H - knob) * 0.5f, knob, knob },
+				disabled ? theme.TextDisabled : ColorProp(ctx.Node, "knobColor", theme.Text), knob * 0.5f);
+
+			char buffer[32] = {};
+			std::snprintf(buffer, sizeof(buffer), "%.3f", raw);
+			const std::string label = Localized(TextProp(ctx.Node, "label"));
+			// 矩形够高时补文字(标签左、当前值右);紧凑高度只走无障碍 Value,不糊在轨道上。
+			const float font = ScaledProp(ctx, "fontSize", 13.0f);
+			if (ctx.Rect.H >= font * 1.8f)
+			{
+				AddText(ctx, ctx.Rect.X, ctx.Rect.Y, label, theme.Text, font, false);
+				const float valueWidth =
+					ctx.Context.MeasureTextWidth(std::string(buffer), font, Wui::WuiFontFamily::Ui);
+				AddText(ctx, ctx.Rect.X + std::max(ctx.Rect.W - valueWidth, 0.0f), ctx.Rect.Y,
+					buffer, theme.Text, font, false);
+			}
+			ctx.Label = label;
+			ctx.Value = buffer;
+			ctx.Disabled = disabled;
+			ctx.States = disabled ? "disabled" : std::string();
+		}
+
+		void PaintCheckbox(UiNodePaintContext& ctx)
+		{
+			const Wui::WuiTheme& theme = ctx.Theme;
+			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			// 组件登记属性名是 `checked`;`value` 作为兼容别名(与 Toggle 同一编码)。
+			const bool on = BoolProp(ctx.Node, "checked", BoolProp(ctx.Node, "value", false));
+			const float box = ScaledProp(ctx, "boxSize", 16.0f);
+			const float radius = 3.0f * ctx.Scale;
+			const WuiRect boxRect { ctx.Rect.X,
+				ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - box) * 0.5f), box, box };
+			AddRect(ctx, boxRect, disabled ? theme.ContentBg : (on ? theme.Accent : theme.ButtonBg), radius);
+			AddRectOutline(ctx, boxRect, theme.Border, radius, 1.0f);
+			if (on)
+			{
+				// 勾选:内缩方块(纯命令路径,不引入图标资源)。
+				const float inset = box * 0.28f;
+				const float inner = std::max(box - inset * 2.0f, 0.0f);
+				AddRect(ctx, WuiRect { boxRect.X + inset, boxRect.Y + inset, inner, inner },
+					theme.PanelBg, radius * 0.5f);
+			}
+
+			const std::string label = Localized(TextProp(ctx.Node, "label"));
+			const float font = ScaledProp(ctx, "fontSize", 15.0f);
+			const WuiColor color = disabled ? theme.TextDisabled : ColorProp(ctx.Node, "color", theme.Text);
+			AddText(ctx, boxRect.X + box + 8.0f * ctx.Scale,
+				ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - font) * 0.5f), label, color, font, false);
+
+			ctx.Label = label;
+			ctx.Value = on ? std::string("true") : std::string("false");
+			ctx.Disabled = disabled;
+			ctx.States = std::string(on ? "checked" : "unchecked") + (disabled ? ",disabled" : "");
+		}
+
+		void PaintTextField(UiNodePaintContext& ctx)
+		{
+			const Wui::WuiTheme& theme = ctx.Theme;
+			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			const float radius = ScaledProp(ctx, "radius", theme.Radius);
+			AddRect(ctx, ctx.Rect, disabled ? theme.ContentBg : ColorProp(ctx.Node, "bg", theme.ContentBg), radius);
+			AddRectOutline(ctx, ctx.Rect, ColorProp(ctx.Node, "border", theme.Border), radius, 1.0f);
+
+			const std::string label = Localized(TextProp(ctx.Node, "label"));
+			const std::string value = TextProp(ctx.Node, "value");
+			const std::string placeholder = Localized(TextProp(ctx.Node, "placeholder"));
+			const bool empty = value.empty();
+			const std::string shown = empty ? placeholder : value;
+			const float font = ScaledProp(ctx, "fontSize", 15.0f);
+			const float padding = ScaledProp(ctx, "padding", 8.0f);
+			const WuiColor color = disabled ? theme.TextDisabled
+				: (empty ? theme.TextDisabled : ColorProp(ctx.Node, "color", theme.Text));
+			const float y = ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - font) * 0.5f);
+
+			float x = ctx.Rect.X + padding;
+			if (!label.empty())
+			{
+				AddText(ctx, x, y, label, theme.TextDisabled, font, false);
+				x += ctx.Context.MeasureTextWidth(label, font, Wui::WuiFontFamily::Ui) + 6.0f * ctx.Scale;
+			}
+			AddText(ctx, x, y, shown, color, font, false);
+			if (!empty)
+			{
+				const float caretX = x + ctx.Context.MeasureTextWidth(shown, font, Wui::WuiFontFamily::Ui) + 1.0f * ctx.Scale;
+				AddRect(ctx, WuiRect { caretX, ctx.Rect.Y + 4.0f * ctx.Scale, 1.0f * ctx.Scale,
+					std::max(ctx.Rect.H - 8.0f * ctx.Scale, 0.0f) }, theme.Text, 0.0f);
+			}
+
+			ctx.Label = label;
+			ctx.Value = value;
+			ctx.Disabled = disabled;
+			ctx.States = disabled ? "disabled" : std::string();
+		}
+
+		// 程序化列表:行不是文档子节点 ⇒ **虚拟化**:只画可见行(±1 行缓冲)。
+		// 1000 行的命令数与"可见行数"同阶,与总行数无关。
+		void PaintList(UiNodePaintContext& ctx)
+		{
+			const Wui::WuiTheme& theme = ctx.Theme;
+			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			const float radius = ScaledProp(ctx, "radius", theme.Radius);
+			AddRect(ctx, ctx.Rect, ColorProp(ctx.Node, "bg", theme.ContentBg), radius);
+			AddRectOutline(ctx, ctx.Rect, theme.Border, radius, 1.0f);
+
+			const int rows = std::max(0, static_cast<int>(NumberProp(ctx.Node, "rowCount", 0.0f)));
+			const float rowHeight = NumberProp(ctx.Node, "rowHeight", 24.0f) * ctx.Scale;
+			int drawn = 0;
+			if (rows > 0 && rowHeight > 0.0f)
+			{
+				const float offsetY = ctx.Screen.ScrollOffset(ctx.Node.Id).y * ctx.Scale;
+				const int first = std::max(static_cast<int>(std::floor(offsetY / rowHeight)) - 1, 0);
+				const int last = std::min(
+					static_cast<int>(std::ceil((offsetY + ctx.Rect.H) / rowHeight)) + 1, rows - 1);
+				const float font = ScaledProp(ctx, "fontSize", 14.0f);
+				const float padding = ScaledProp(ctx, "padding", 6.0f);
+				const std::string prefix = Localized(TextProp(ctx.Node, "rowPrefix"));
+				const WuiColor rowColorA = ColorProp(ctx.Node, "rowColor", theme.PanelBg);
+				const WuiColor rowColorB = ColorProp(ctx.Node, "rowColorAlt", theme.ContentBg);
+				for (int row = first; row <= last; ++row)
+				{
+					const float y = ctx.Rect.Y + static_cast<float>(row) * rowHeight - offsetY;
+					const WuiRect rowRect { ctx.Rect.X + 1.0f * ctx.Scale, y,
+						std::max(ctx.Rect.W - 2.0f * ctx.Scale, 0.0f), rowHeight };
+					AddRect(ctx, rowRect, (row % 2 == 0) ? rowColorA : rowColorB, 0.0f);
+					AddText(ctx, rowRect.X + padding, y + std::max(0.0f, (rowHeight - font) * 0.5f),
+						prefix + std::to_string(row), theme.Text, font, false);
+					++drawn;
+				}
+			}
+
+			ctx.Label = Localized(TextProp(ctx.Node, "label"));
+			ctx.Value = "items=" + std::to_string(rows) + " visible=" + std::to_string(drawn);
+			ctx.Disabled = disabled;
+			ctx.States = disabled ? "disabled" : std::string();
+		}
+
+		// 程序化网格:同 List,按行带虚拟化(只画可见行 × 全部列)。
+		void PaintGrid(UiNodePaintContext& ctx)
+		{
+			const Wui::WuiTheme& theme = ctx.Theme;
+			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			const float radius = ScaledProp(ctx, "radius", theme.Radius);
+			AddRect(ctx, ctx.Rect, ColorProp(ctx.Node, "bg", theme.ContentBg), radius);
+			AddRectOutline(ctx, ctx.Rect, theme.Border, radius, 1.0f);
+
+			const int columns = std::max(1, static_cast<int>(NumberProp(ctx.Node, "columns", 4.0f)));
+			const int rows = std::max(0, static_cast<int>(NumberProp(ctx.Node, "rowCount", 0.0f)));
+			const float cellW = NumberProp(ctx.Node, "cellW",
+				(ctx.Rect.W / ctx.Scale) / static_cast<float>(columns)) * ctx.Scale;
+			const float cellH = NumberProp(ctx.Node, "cellH", 24.0f) * ctx.Scale;
+			int drawn = 0;
+			if (rows > 0 && cellW > 0.0f && cellH > 0.0f)
+			{
+				const float offsetY = ctx.Screen.ScrollOffset(ctx.Node.Id).y * ctx.Scale;
+				const int first = std::max(static_cast<int>(std::floor(offsetY / cellH)) - 1, 0);
+				const int last = std::min(
+					static_cast<int>(std::ceil((offsetY + ctx.Rect.H) / cellH)) + 1, rows - 1);
+				const float font = ScaledProp(ctx, "fontSize", 13.0f);
+				const float gap = ScaledProp(ctx, "gap", 2.0f);
+				const WuiColor cellColor = ColorProp(ctx.Node, "cellColor", theme.PanelBg);
+				for (int row = first; row <= last; ++row)
+				{
+					const float y = ctx.Rect.Y + static_cast<float>(row) * cellH - offsetY;
+					for (int column = 0; column < columns; ++column)
+					{
+						const WuiRect cell { ctx.Rect.X + static_cast<float>(column) * cellW, y,
+							std::max(cellW - gap, 0.0f), std::max(cellH - gap, 0.0f) };
+						AddRect(ctx, cell, cellColor, 0.0f);
+						AddText(ctx, cell.X + 4.0f * ctx.Scale, cell.Y + std::max(0.0f, (cell.H - font) * 0.5f),
+							std::to_string(row * columns + column), theme.Text, font, false);
+						++drawn;
+					}
+				}
+			}
+
+			ctx.Label = Localized(TextProp(ctx.Node, "label"));
+			ctx.Value = "cells=" + std::to_string(rows * columns) + " visible=" + std::to_string(drawn);
+			ctx.Disabled = disabled;
+			ctx.States = disabled ? "disabled" : std::string();
+		}
+
+		// ---- M10:滚动内容尺寸自报(设计空间)----
+		// 行/格不是文档子节点,UiScreen 量不到内容;由类型按属性自报,偏移钳位才正确。
+
+		bool ListContentSize(const UiNodeInstance& node, glm::vec2& outSize)
+		{
+			const int rows = static_cast<int>(NumberProp(node, "rowCount", 0.0f));
+			const float rowHeight = NumberProp(node, "rowHeight", 24.0f);
+			if (rows <= 0 || !(rowHeight > 0.0f))
+				return false;
+			outSize = glm::vec2 { node.Rect.W, static_cast<float>(rows) * rowHeight };
+			return true;
+		}
+
+		bool GridContentSize(const UiNodeInstance& node, glm::vec2& outSize)
+		{
+			const int columns = std::max(1, static_cast<int>(NumberProp(node, "columns", 4.0f)));
+			const int rows = static_cast<int>(NumberProp(node, "rowCount", 0.0f));
+			if (rows <= 0)
+				return false;
+			const float cellW = NumberProp(node, "cellW", node.Rect.W / static_cast<float>(columns));
+			const float cellH = NumberProp(node, "cellH", 24.0f);
+			if (!(cellW > 0.0f) || !(cellH > 0.0f))
+				return false;
+			outSize = glm::vec2 { cellW * static_cast<float>(columns), cellH * static_cast<float>(rows) };
+			return true;
+		}
 	}
 
 	// 内置类型:`.wui` Type → 既有组件登记 id + 无障碍 role + 绘制入口。
@@ -277,6 +509,10 @@ namespace World::UI
 	void RegisterBuiltinUiNodeTypes()
 	{
 		auto add = [](UiNodeTypeDesc desc) {
+			// M10:滚动容器属性对**所有**类型有效(任何容器节点都能滚动)。统一声明,
+			// 否则 `scrollable`/`overflow` 会被"未知属性"提示刷屏。
+			for (const char* scrollProp : { "scrollable", "scroll", "overflow" })
+				desc.ExtraProps.emplace_back(scrollProp);
 			std::string error;
 			if (!UiNodeRegistry::RegisterType(std::move(desc), &error))
 				WLD_CORE_ERROR("[ui] builtin node type registration failed: {0}", error);
@@ -292,6 +528,22 @@ namespace World::UI
 			&PaintProgressBar, { "fillColor", "trackColor", "radius", "label" } });
 		add({ "Toggle", "toggle", "checkbox", { "WuiToggle" }, true, &PaintToggle,
 			{ "color", "boxSize" } });
+
+		// ---- M10:商业控件面 ----
+		// ComponentId 必须命中 `WuiComponentRegistry::Find`;登记表里没有恰好叫 slider/grid 的 id,
+		// 取最接近的既有登记项(Slider→`slider.float`, List/Grid→`listview`),不另起命名。
+		add({ "Slider", "slider.float", "slider", { "SliderFloat", "WuiSlider" }, true, &PaintSlider,
+			{ "label", "radius", "trackColor", "fillColor", "knobColor", "trackHeight", "knobSize" } });
+		add({ "Checkbox", "checkbox", "checkbox", { "WuiCheckbox", "CheckboxEx" }, true, &PaintCheckbox,
+			{ "boxSize", "color", "fontSize" } });
+		add({ "TextField", "textfield", "text-field", { "WuiTextField", "Input" }, true, &PaintTextField,
+			{ "radius", "bg", "border", "fontSize", "padding", "color" } });
+		add({ "List", "listview", "list", { "ListView", "WuiList" }, true, &PaintList,
+			{ "rowCount", "rowHeight", "radius", "bg", "fontSize", "rowPrefix", "padding",
+				"rowColor", "rowColorAlt" }, &ListContentSize });
+		add({ "Grid", "listview", "grid", { "GridView", "WuiGrid" }, true, &PaintGrid,
+			{ "columns", "cellW", "cellH", "rowCount", "radius", "bg", "fontSize", "cellColor", "gap" },
+			&GridContentSize });
 	}
 
 	UiPaintResult UiPainter::Paint(Wui::WuiContext& ctx, const UiScreen& screen, const UiPaintOptions& options)
@@ -312,10 +564,66 @@ namespace World::UI
 		const bool registerAccessibility =
 			options.RegisterAccessibility && Wui::WuiAccessibility::Get().Enabled();
 
-		for (const UiNodeInstance& node : screen.Nodes())
+		const std::vector<UiNodeInstance>& nodes = screen.Nodes();
+
+		// 每个节点的子树末尾下标(前序 = 连续区间)⇒ 平铺循环里也能成对压/弹滚动裁剪。
+		std::vector<int> subtreeEnd(nodes.size(), 0);
+		for (std::size_t i = nodes.size(); i-- > 0;)
 		{
+			int end = static_cast<int>(i);
+			for (const int child : nodes[i].Children)
+				end = std::max(end, subtreeEnd[static_cast<std::size_t>(child)]);
+			subtreeEnd[i] = end;
+		}
+
+		struct ClipFrame
+		{
+			int End = 0;
+			Wui::WuiRect Rect { 0, 0, 0, 0 };
+		};
+		std::vector<ClipFrame> clips;
+		const auto overlaps = [](const Wui::WuiRect& a, const Wui::WuiRect& b) {
+			return a.X + a.W > b.X && a.X < b.X + b.W && a.Y + a.H > b.Y && a.Y < b.Y + b.H;
+		};
+		const auto clipIntersection = [&clips]() {
+			Wui::WuiRect rect = clips.front().Rect;
+			for (std::size_t c = 1; c < clips.size(); ++c)
+			{
+				const Wui::WuiRect& other = clips[c].Rect;
+				const float x0 = std::max(rect.X, other.X);
+				const float y0 = std::max(rect.Y, other.Y);
+				const float x1 = std::min(rect.X + rect.W, other.X + other.W);
+				const float y1 = std::min(rect.Y + rect.H, other.Y + other.H);
+				rect = Wui::WuiRect { x0, y0, std::max(x1 - x0, 0.0f), std::max(y1 - y0, 0.0f) };
+			}
+			return rect;
+		};
+
+		for (std::size_t i = 0; i < nodes.size(); ++i)
+		{
+			// 已离开的滚动容器:弹裁剪(渲染命令 + 裁剪栈同进同出)。
+			while (!clips.empty() && static_cast<int>(i) > clips.back().End)
+			{
+				ctx.Commands().push_back(Wui::WuiDrawCommand { Wui::WuiDrawKind::ClipPop });
+				ctx.PopClipRect();
+				clips.pop_back();
+				result.Commands += 1;
+			}
+
+			const UiNodeInstance& node = nodes[i];
 			const std::string path = NodePath(screen, node);
 			const UiNodeTypeDesc* type = UiNodeRegistry::Find(node.Type);
+			const Wui::WuiRect physical = viewport.DesignRectToPhysical(node.Rect);
+			const std::size_t before = ctx.Commands().size();
+
+			// 滚动容器:先压裁剪矩形(含容器自身,子节点/程序化行都受它约束),子树画完再弹。
+			if (screen.IsScrollContainer(node))
+			{
+				ctx.Commands().push_back(Wui::WuiDrawCommand { Wui::WuiDrawKind::ClipPush, physical });
+				ctx.PushClipRect(physical);
+				clips.push_back(ClipFrame { subtreeEnd[i], physical });
+			}
+
 			if (type == nullptr)
 			{
 				// 未知类型 = 可读报错 + 跳过(不得静默画空气);同批其它节点继续画。
@@ -323,16 +631,23 @@ namespace World::UI
 				result.Errors.push_back(UiPaintError { path, node.Type,
 					"unknown UI node type '" + node.Type + "' at '" + path +
 					"': not registered in UiNodeRegistry (node skipped, nothing drawn)" });
+				result.Commands += ctx.Commands().size() - before;
+				continue;
+			}
+
+			// 完全落在滚动裁剪之外 ⇒ 不画、不登记(与 `UiScreen::HitTest` 同一裁剪口径)。
+			if (!clips.empty() && !overlaps(clipIntersection(), physical))
+			{
+				result.ClippedNodes++;
+				result.Commands += ctx.Commands().size() - before;
 				continue;
 			}
 
 			UiNodePaintContext paint {
-				ctx, screen, node, *type,
-				viewport.DesignRectToPhysical(node.Rect), viewport.Scale,
+				ctx, screen, node, *type, physical, viewport.Scale,
 				theme, options, path,
 				std::string(), std::string(), std::string(), false, &result.Warnings };
 
-			const std::size_t before = ctx.Commands().size();
 			type->Paint(paint);   // RegisterType 保证非空
 			const std::size_t emitted = ctx.Commands().size() - before;
 			if (emitted > 0)
@@ -379,6 +694,15 @@ namespace World::UI
 				Wui::WuiAccessibility::Get().Register(access);
 				result.AccessNodes++;
 			}
+		}
+
+		// 收尾:弹掉所有未闭合的滚动裁剪(命令流必须 Push/Pop 成对)。
+		while (!clips.empty())
+		{
+			ctx.Commands().push_back(Wui::WuiDrawCommand { Wui::WuiDrawKind::ClipPop });
+			ctx.PopClipRect();
+			clips.pop_back();
+			result.Commands += 1;
 		}
 
 		return result;

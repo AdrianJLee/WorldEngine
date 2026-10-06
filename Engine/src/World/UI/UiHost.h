@@ -20,6 +20,7 @@
 // 宿主行为与引入本类之前逐字节一致。
 
 #include "World/Core/Export.h"
+#include "World/UI/UiInputRouter.h"
 #include "World/UI/UiScreen.h"
 #include "World/UI/UiTypes.h"
 #include "World/UI/UiWorldProjector.h"
@@ -42,8 +43,27 @@ namespace World
 		OwnChannel = 0,
 		// 共享通道(编辑器 Play/Simulate):通道由宿主(编辑器 AI 控制)管理,编辑器 shell 每帧
 		// 已经 `BeginFrame("main", …)`。UiHost 不改开关、不重置窗口,只把游戏 UI 节点登记进
-		// 同一份树(window 键仍由 `m_WindowKey` 决定);Shutdown 只 `ClearWindow(窗口 key)`。
+		// 同一份树(window 键仍由 `m_WindowKey` 决定);Shutdown 只 `ClearPanel(窗口 key, 本片面板)`
+		// 清掉本片登记,不碰同窗口的编辑器节点(M9)。
 		SharedChannel,
+	};
+
+	// GameUI(M9):宿主在 `OnUpdate`(玩法 `Tick` 之前)组一帧**最小** `WuiInputState` 的采样器。
+	//
+	// 为什么需要它:UI 帧拿到的是"事件锁存"后的输入(`WuiInputCollector`),而宿主 `OnUpdate`
+	// 只有 GLFW 轮询(按下/抬起/滚轮累积、鼠标位置)。轮询没有"本帧新按下"的沿,所以这里跨帧
+	// 记住上一帧按键状态,产出 `MouseClicked`(口径与 `WuiInputCollector::BeginFrame` 一致:
+	// 两处读的是同一帧的同一平台状态,只是这里在 UI 帧**之前**读)。
+	//
+	// 坐标:平台鼠标是物理像素,而 UI 布局是设计单位 ⇒ 与 `WuiInputCollector::OnMouseMove`
+	// 一样除以 `Wui::UiScale()`。无窗口(headless)⇒ 返回零状态、零边沿(绝不轮询不存在的窗口)。
+	class WLD_API UiPlatformInputSampler
+	{
+	public:
+		Wui::WuiInputState Sample(glm::vec2 viewportSize);
+
+	private:
+		bool m_PrevDown[3] = { false, false, false };
 	};
 
 	class WLD_API UiHost
@@ -90,6 +110,22 @@ namespace World
 		// 在 `ctx.EndFrame()` 之后调用:第一帧落一次无障碍树(`WLD_UI_A11Y_DUMP`);未启用时零操作。
 		void EndFrame();
 
+		// ---- 输入路由(M9;宿主在 `OnUpdate`、`m_Host.Tick(...)` 之前调用)----
+		// 命中可交互节点 ⇒ true(宿主据此 `GameHost::SetPointerCaptured(true)`:玩法本帧收不到指针);
+		// 空白 / 不可见 / 禁用 / 未启用(没有 `.wui`)⇒ false,且**零副作用**(不推命令、不改焦点)。
+		// 命中用的是**上一帧 UI 帧**已经 `Layout` 过的矩形 —— UiScreen 的矩形在 `DrawFrame` 里由
+		// `Layout` 写入,而宿主每帧顺序是 RouteInput → Tick → DrawFrame,因此本帧路由读到的是上一帧
+		// 的布局。这是"UI 帧之后才有布局"的现实口径,不是缺陷:首帧没有布局 ⇒ 不命中、不吞输入。
+		// 返回值 = UI 是否消费了指针(**含滚轮**:滚轮被滚动容器吃掉时同样为 true)。
+		bool RouteInput(const Wui::WuiInputState& input);
+		// 本帧 UI 命令(router 在 `RouteInput` 里 append)。宿主处理完自行 `ClearCommands()`。
+		const UI::UiCommandQueue& Commands() const { return m_Commands; }
+		void ClearCommands() { m_Commands.Clear(); }
+
+		// 平台内容缩放(GLFW `glfwGetWindowContentScale` 取 X 轴);无窗口 / 取值失败 ⇒ 1.0。
+		// M9:填进 `UiSurface.DpiScale`(Runtime 由 `DrawFrame` 的默认面填,编辑器 Play 显式填)。
+		static float PlatformContentScale();
+
 	private:
 		std::filesystem::path ResolveDocumentPath() const;
 		// candidate 既可为 `.wui` 文件,也可为目录(取其中字典序第一个 `.wui`);无 → 空路径。
@@ -116,5 +152,8 @@ namespace World
 		bool m_PaintProblemReported = false;
 		// 世界空间锚点解析失败只报一次(目标缺失是每帧都会发生的事)。
 		bool m_WorldProblemReported = false;
+		// M9:输入路由(焦点状态跨帧持有)+ 本帧命令队列(宿主每帧 ClearCommands)。
+		UI::UiInputRouter m_Router;
+		UI::UiCommandQueue m_Commands;
 	};
 }

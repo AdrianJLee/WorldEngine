@@ -2,12 +2,17 @@
 #include "World/UI/UiHost.h"
 
 #include "World/Core/Log.h"
+#include "World/Core/Application.h"
+#include "World/Core/Input.h"
+#include "World/Core/Window.h"
 #include "World/UI/UiDocument.h"
 #include "World/UI/UiPainter.h"
 #include "World/UI/UiTypes.h"
 #include "World/UI/UiWorldProjector.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiAccessibility.h"
+
+#include <GLFW/glfw3.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -114,8 +119,13 @@ namespace World
 			if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
 				Wui::WuiAccessibility::Get().SetEnabled(false);
 			else
-				// 共享通道:只清掉本窗口的登记(游戏 UI 节点),不关宿主的无障碍通道。
-				Wui::WuiAccessibility::Get().ClearWindow(m_WindowKey);
+			{
+				// 共享通道:只清掉**本片游戏 UI 的面板节点**,不关宿主的无障碍通道。
+				// 不能用 `ClearWindow`:那会把同窗口("main")的编辑器节点一起清掉,退出 Play 后
+				// `ui.tree` 会读到空树。面板 id 与 DrawFrame 登记时同一表达式(空 = 文档 Screen 名)。
+				const std::string panel = m_PanelId.empty() ? m_Screen.Document().Screen : m_PanelId;
+				Wui::WuiAccessibility::Get().ClearPanel(m_WindowKey, panel);
+			}
 		}
 		m_Screen = UI::UiScreen {};
 		m_DocumentPath.clear();
@@ -151,8 +161,11 @@ namespace World
 			return;
 
 		// 默认(Runtime):`input.ViewportSize` 已是 WUI 的设计单位视口(物理像素 / 平台内容缩放,
-		// 见 WuiRhiBackend::BeginFrame)。`.wui` 的物理面就取它、DPI 系数保持 1.0:平台缩放
-		// 已由 WUI 层的 UiScale() 施加过一次,这里再乘会变成双重缩放。
+		// 见 WuiRhiBackend::BeginFrame);`.wui` 的物理面取它,DPI 系数填**真实平台内容缩放**
+		// (GLFW `glfwGetWindowContentScale`,`UiHost::PlatformContentScale()`;无窗口 ⇒ 1.0)。
+		// M9 已知交互(留给主 agent 复核):WUI 后端把设计单位命令放大到物理像素时还会再乘一次
+		// `Wui::UiScale()`,故高内容缩放屏上 `viewport.Scale` 与 `UiScale()` 会叠加;本任务按
+		// 派工单只做"填真实 DPI",不改 `UiScale()` 的既有语义,也不擅自用 PhysicalSize 抵消。
 		// 宿主显式 SetSurface 时(编辑器 Play)改用它给的子矩形尺寸(同一坐标系单位)。
 		UI::UiSurface surface;
 		if (m_HasSurface)
@@ -160,7 +173,7 @@ namespace World
 		else
 		{
 			surface.PhysicalSize = input.ViewportSize;
-			surface.DpiScale = 1.0f;
+			surface.DpiScale = PlatformContentScale();
 		}
 
 		const UI::UiDocument& document = m_Screen.Document();
@@ -228,5 +241,63 @@ namespace World
 			return;
 		}
 		WLD_CORE_INFO("[ui] accessibility dump written ({0} bytes): {1}", json.size(), m_A11yDumpPath);
+	}
+
+	// ---- M9:平台输入组帧 + 输入路由 + DPI ----
+
+	float UiHost::PlatformContentScale()
+	{
+		if (!Application::HasInstance())
+			return 1.0f;   // headless(测试/工具):没有窗口,不做任何平台查询。
+		void* nativeWindow = Application::Get().GetWindow().GetNativeWindow();
+		if (nativeWindow == nullptr)
+			return 1.0f;
+		float xScale = 0.0f;
+		float yScale = 0.0f;
+		glfwGetWindowContentScale(static_cast<GLFWwindow*>(nativeWindow), &xScale, &yScale);
+		// UI 用单一缩放系数:取 X 轴;异常配置下 Y 轴与 X 轴不一致时仍以 X 为准。
+		(void)yScale;
+		if (!(xScale > 0.0f))
+			return 1.0f;
+		return xScale;
+	}
+
+	Wui::WuiInputState UiPlatformInputSampler::Sample(glm::vec2 viewportSize)
+	{
+		Wui::WuiInputState state;
+		state.ViewportSize = viewportSize;
+		// 无窗口宿主绝不轮询平台(与 GameHost::Tick 同一守卫):返回零状态、零边沿。
+		if (!Application::HasInstance())
+			return state;
+
+		// 与 `WuiInputCollector::OnMouseMove` 同一换算:平台鼠标是物理像素,UI 布局是设计单位。
+		const float scale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+		const auto position = Input::GetMousePosition();
+		state.MousePos = glm::vec2(position.first, position.second) / scale;
+
+		for (int button = 0; button < 3; ++button)
+		{
+			const bool down = Input::IsMouseButtonPressed(button);
+			state.MouseDown[button] = down;
+			// 轮询没有"本帧新按下"的事件锁存 ⇒ 用跨帧比较取沿(口径与 collector 的并集项一致)。
+			state.MouseClicked[button] = down && !m_PrevDown[button];
+			m_PrevDown[button] = down;
+		}
+
+		// 滚轮:与本帧 UI 帧读的是同一份平台累积值(Application 在帧末 ResetScrollDelta)。
+		state.Wheel = Input::GetScrollDelta().second;
+		return state;
+	}
+
+	bool UiHost::RouteInput(const Wui::WuiInputState& input)
+	{
+		if (!m_Enabled)
+			return false;   // 没有 `.wui` = 零副作用:不推命令、不改焦点、不吞输入。
+
+		// 命中用上一帧 `DrawFrame` 里 `Layout` 出来的矩形(见头文件说明)。
+		m_Router.Update(m_Screen, input, m_Commands);
+		const UI::UiInputFrame& frame = m_Router.LastFrame();
+		// 指针(含滚轮)被 UI 消费 ⇒ 玩法本帧不得再收到(contract.ui-runtime §5)。
+		return frame.PointerConsumed || frame.WheelConsumed;
 	}
 }

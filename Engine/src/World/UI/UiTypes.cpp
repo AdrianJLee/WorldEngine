@@ -270,4 +270,30 @@ namespace World::UI
 			spec.Padding[0] == 0.0f && spec.Padding[1] == 0.0f &&
 			spec.Padding[2] == 0.0f && spec.Padding[3] == 0.0f;
 	}
+
+	// ---- 滚动(M10)----
+
+	bool IsUiPropertyTruthy(std::string_view value)
+	{
+		// 与 `UiInputRouter`/`UiPainter` 的 BoolProp 同一真值集合;空串 = 属性缺席。
+		return value == "1" || value == "true" || value == "True" || value == "yes" || value == "on";
+	}
+
+	bool IsUiScrollContainerProps(std::string_view scrollable, std::string_view scroll, std::string_view overflow)
+	{
+		if (!scrollable.empty() && IsUiPropertyTruthy(scrollable))
+			return true;
+		if (!scroll.empty() && IsUiPropertyTruthy(scroll))
+			return true;
+		return overflow == "scroll" || overflow == "auto" || overflow == "Scroll";
+	}
+
+	float ClampUiScrollOffset(float offset, float contentSize, float containerSize)
+	{
+		// NaN/负值一律归零(不产生反向滚动)。
+		if (!(offset > 0.0f))
+			return 0.0f;
+		const float maxOffset = std::max(contentSize - containerSize, 0.0f);
+		return std::min(offset, maxOffset);
+	}
 }

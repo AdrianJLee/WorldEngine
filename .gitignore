@@ -38,6 +38,13 @@ projects/*/assets/models/**/textures/
 # 仓库只存源图 + `.wtex` 资产,不存产物。
 projects/*/assets/**/*.wtexc
 
+# 编辑器把任意项目目录当内容根时会生成这两处(脚本存根 + LSP 配置)。
+# templates/ 下的示例项目在仓库内,验证脚本一旦把内容根指向它就会产生这些文件
+# (2026-10-06 GameUI 验证实测),属生成物、不入库。`tests/fixtures/...` 的同名文件是
+# 夹具,仍然入库 —— 所以规则只针对 templates/。
+templates/*/assets/.luau-lsp/
+templates/*/assets/scripts/intermediate/
+
 # W8:编辑器脚本工作区脚手架(create-if-missing 生成;用户改过的配置不入库即保留)。
 # 上面的 `.vscode` 忽略规则会连带排除父目录;PROJ-7 起引擎内不再有内置项目,
 # 项目里的 `.vscode/`/`.luau-lsp/` 由编辑器在**项目目录**生成(仓库外,不需要放行规则)。

@@ -320,6 +320,11 @@ namespace World::Gameplay
 
 	void GameHost::Tick(Timestep frameTime, bool render)
 	{
+		// GameUI(M9):宿主在 Tick 前 `SetPointerCaptured(...)`;这里**消费一次即复位** ——
+		// 宿主不设置 = 下一帧自动 false,捕获状态不泄漏到后续帧。
+		const bool pointerCaptured = m_PointerCaptured;
+		m_PointerCaptured = false;
+
 		if (!m_Initialized)
 			return;
 
@@ -335,18 +340,26 @@ namespace World::Gameplay
 			// (真实故障:headless 下 Input::IsKeyPressed 走 Application::Get() 空实例 →
 			//  glfwGetKey 拿到野指针,0xC0000005;在"有实例但无真实窗口"时也会把注入状态覆盖成抬起)。
 			const bool hasEngineWindow = Application::HasInstance();
-			if (hasEngineWindow)
-			{
-				for (const Gameplay::InputAction& action : mapInput.Actions())
-					for (const Gameplay::InputBinding& binding : action.Bindings)
+			for (const Gameplay::InputAction& action : mapInput.Actions())
+				for (const Gameplay::InputBinding& binding : action.Bindings)
+				{
+					if (binding.Device == Gameplay::InputDevice::Mouse)
 					{
-						const bool down = binding.Device == Gameplay::InputDevice::Mouse
-							? Input::IsMouseButtonPressed(binding.Code)
-							: (binding.Device == Gameplay::InputDevice::Key
-								? Input::IsKeyPressed(binding.Code) : false);
+						// M9:UI 吃掉指针的那一帧,鼠标键位一律按抬起(不产生 Pressed/Released 边沿);
+						// 只在有窗口或"捕获帧"时写入 —— 无窗口且未捕获时保留调用方喂入的状态
+						// (既有 headless 口径不变)。
+						const bool down = hasEngineWindow && !pointerCaptured
+							&& Input::IsMouseButtonPressed(binding.Code);
+						if (hasEngineWindow || pointerCaptured)
+							input.SetKeyState(0, Gameplay::InputDevice::Mouse, binding.Code, down);
+					}
+					else if (hasEngineWindow)
+					{
+						const bool down = binding.Device == Gameplay::InputDevice::Key
+							&& Input::IsKeyPressed(binding.Code);
 						input.SetKeyState(0, binding.Device, binding.Code, down);
 					}
-			}
+				}
 			input.BuildSnapshot(0);
 		}
 
@@ -369,8 +382,12 @@ namespace World::Gameplay
 				const auto position = Input::GetMousePosition();
 				mousePosition = glm::vec2(position.first, position.second);
 				// WP5:滚轮同样只在有窗口时读平台累积值。
-				const auto scroll = Input::GetScrollDelta();
-				scrollDelta = glm::vec2(scroll.first, scroll.second);
+				// M9:UI 吃掉滚轮的那一帧不传给玩法(相机不得滚动);鼠标位置照常传(瞄准可用)。
+				if (!pointerCaptured)
+				{
+					const auto scroll = Input::GetScrollDelta();
+					scrollDelta = glm::vec2(scroll.first, scroll.second);
+				}
 			}
 			Gameplay::InputSystem::Sample(*m_Scene, GameApp::Get().Input(), mousePosition, scrollDelta);
 		}

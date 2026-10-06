@@ -6,6 +6,7 @@
 #include "World/UI/UiScreen.h"
 
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/WuiUndoStack.h"
 
 #include <filesystem>
 #include <string>
@@ -22,6 +23,11 @@ namespace World
 	//   · 中 = 画布(设计空间线框视图:节点框 + 类型标签 + 安全区虚线 + 选中高亮 +
 	//            锚点标记;拖动选中节点改 Anchor.Offset);
 	//   · 右 = 属性(Node / Props / Anchor / Layout,全部复用 Wui::PropertyRow 一族)。
+	//
+	// M12(设计器工业化):选中节点画 8 个拖拽手柄(拖角改 Anchor.Size 两轴、拖边改单轴;
+	// Min!=Max 的拉伸节点 Size 是"尺寸增量");Ctrl+Z / Ctrl+Y 走**面板本地** WuiUndoStack
+	// (一次拖动 = 一条记录);大纲树支持同父内上移/下移(改 Children 顺序 = 改绘制顺序,
+	// 保存后文档顺序真的变了)。
 	//
 	// 数据流:m_Document 是权威模型 —— UiScreen::Build 复制一份实例树并逐帧 Layout
 	// 给出设计空间矩形;编辑只改 m_Document 并置 m_ScreenDirty,下一帧重建实例树;
@@ -71,6 +77,22 @@ namespace World
 		void DrawAnchorMarkers(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
 			const World::UI::UiNodeInstance& node);
 
+		// ---- M12:撤销/重做 / 手柄缩放 / 层级 ----
+		void HandleShortcuts(Wui::WuiContext& ctx);
+		void UndoDocument();
+		void RedoDocument();
+		void PushDocumentUndo(const std::string& name, const World::UI::UiDocument& before);
+		void RestoreDocument(const World::UI::UiDocument& document);
+		void NoteNodeEdit(const std::string& name);
+		void CommitNodeEdit();
+		void CancelNodeEdit();
+		void CancelDrag();
+		void MoveSelectedNode(int direction);
+		bool CanMoveSelected(int direction) const;
+		bool SelectedNodeBox(Wui::WuiRect& out) const;
+		void DrawResizeHandles(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+			const Wui::WuiRect& box);
+
 		// ---- 模型 ----
 		World::UI::UiDocument m_Document;
 		World::UI::UiScreen m_Screen;
@@ -89,11 +111,31 @@ namespace World
 		std::vector<std::string> m_OutlineIds;
 		float m_OutlineScroll = 0.0f;
 
-		// 画布拖动改 Anchor.Offset 的状态。
-		bool m_DraggingOffset = false;
+		// ---- M12:撤销/重做(面板本地栈;不往 WuiContext / 引擎加全局状态)----
+		// 一条记录 = 一份"整档前像";Undo 恢复前像,Redo 恢复记录时的后像。
+		Wui::WuiUndoStack m_Undo;
+		// 上一帧结束时是否有文本控件持焦点(与 EditorShell 的 W9-2 判定同口径):
+		// 文本焦点在时不抢 Ctrl+Z/Y,让给文本编辑。
+		bool m_TextFocusLatched = false;
+
+		// 属性行编辑合并:首次改动抓节点前像,鼠标抬起(或文本提交)时落成一条记录。
+		bool m_PendingEditValid = false;
+		std::string m_PendingEditNodeId;
+		std::string m_PendingEditName;
+		World::UI::UiNode m_PendingEditBefore;
+		World::UI::UiNode m_FrameNodeBefore;   // 属性页每帧起点快照(仅在无待提交编辑时维护)
+
+		// 画布拖动:Move = 改 Anchor.Offset;Resize = 改 Anchor.Size(拖 8 手柄之一)。
+		enum class CanvasDrag { None, Move, Resize };
+		CanvasDrag m_Drag = CanvasDrag::None;
+		int m_DragHandle = 0;                 // 位掩码(见 UiDesignerPanel.cpp 的 HandleBits)
+		int m_HoverHandle = 0;                // 悬停手柄(仅反馈用)
 		std::string m_DragNodeId;
 		glm::vec2 m_DragStartDesign { 0.0f, 0.0f };
 		glm::vec2 m_DragStartOffset { 0.0f, 0.0f };
+		glm::vec2 m_DragStartSize { 0.0f, 0.0f };
+		World::UI::UiDocument m_DragBefore;   // 拖动起点整档快照(松开落一条撤销)
+		bool m_DragBeforeValid = false;
 
 		// 三栏宽度(像素;Splitter 直接改这两个值)与属性列滚动量。
 		float m_LeftWidth = 210.0f;

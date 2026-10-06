@@ -204,6 +204,23 @@ namespace World
 			}
 		}
 		Renderer2D::ResetStats();
+		// GameUI(M9):UI 优先消费输入 —— 在 GameHost::Tick(玩法帧首采样)之前组一帧**最小**输入态
+		// 并路由;命中 UI 的指针本帧不再进入玩法(contract.ui-runtime §5)。未启用 `.wui` ⇒ 零操作。
+		// 路由用上一帧 UI 帧 Layout 出来的矩形;顺序 RouteInput → Tick → OnUiFrame(DrawFrame)。
+		if (m_UiHost.Enabled())
+		{
+			const uint32_t windowWidth = Application::Get().GetWindow().GetWidth();
+			const uint32_t windowHeight = Application::Get().GetWindow().GetHeight();
+			const Wui::WuiInputState uiInput = m_UiInputSampler.Sample(
+				glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)));
+			m_Host.SetPointerCaptured(m_UiHost.RouteInput(uiInput));
+			// 命令出口:真实业务命令由项目接;这里只打一条可读日志(不发明新的游戏语义)。
+			for (const UI::UiInputCommand& command : m_UiHost.Commands().Commands())
+				WLD_CORE_INFO("[ui] command node={0} event={1} cmd={2}",
+					command.NodeId, command.Event,
+					command.Command.empty() ? std::string("(none)") : command.Command);
+			m_UiHost.ClearCommands();
+		}
 		// 场景更新(OnUpdateRuntime)+ 主相机提交渲染都在 GameHost 内完成,顺序与改造前一致。
 		m_Host.Tick(ts, true);
 

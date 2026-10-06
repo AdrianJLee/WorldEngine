@@ -69,6 +69,10 @@ namespace World::Wui
 		// 节点会一直留在树里 —— ui.tree 出现幽灵行,ui.invoke 会把点击投给已经不存在的窗口。
 		// 与 BeginFrame 的区别:不动"当前窗口/面板"状态,可以在任意时刻调用。
 		void ClearWindow(const std::string& windowKey);
+		// 追加式(M9):只清某个窗口里**归属指定面板**的节点,不动同窗口的其它面板。
+		// 用途:编辑器 Play 退出时清游戏 UI(UiHost::SharedChannel),而**不能**把同窗口的
+		// 编辑器节点一起清掉(`ClearWindow` 会;`ClearPanel` 不会)。`ClearWindow` 语义不变。
+		void ClearPanel(const std::string& windowKey, const std::string& panelId);
 		// 控件绘制时调用(重复 id 以最后一次为准)。
 		void Register(const WuiAccessNode& node);
 

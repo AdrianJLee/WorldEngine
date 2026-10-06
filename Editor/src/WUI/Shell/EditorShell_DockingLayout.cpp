@@ -303,7 +303,11 @@ void EditorShell::OnRender(Wui::WuiContext& ctx){
 		EditorPanel* const focusPanelAtFrameStart = FocusedPanel();
 		const bool scriptEditorFocused = focusPanelAtFrameStart
 			&& std::strncmp(focusPanelAtFrameStart->Id(), kScriptPanelPrefix, std::strlen(kScriptPanelPrefix)) == 0;
-		const bool sceneUndoAllowed = !m_TextFocusLatched && !scriptEditorFocused;
+		// M12(GameUI):UI 设计器有自己的撤销栈(文档前/后像,Ctrl+Z/Y 在面板内处理)。
+		// 焦点在它上面时场景撤销必须让位,否则一次 Ctrl+Z 会同时退掉设计器与场景两步。
+		const bool uiDesignerFocused = focusPanelAtFrameStart
+			&& std::strcmp(focusPanelAtFrameStart->Id(), "ui_designer") == 0;
+		const bool sceneUndoAllowed = !m_TextFocusLatched && !scriptEditorFocused && !uiDesignerFocused;
 		const bool undoKey = sceneUndoAllowed && ctx.Input().Ctrl && !ctx.Input().Shift
 			&& ctx.IsKeyPressed(KeyCodes::Z);
 		const bool redoKey = sceneUndoAllowed && ctx.Input().Ctrl

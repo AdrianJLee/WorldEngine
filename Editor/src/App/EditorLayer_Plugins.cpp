@@ -733,6 +733,23 @@ void EditorLayer::OnUpdate(Timestep ts){
 				case SceneState::Play:
 				case SceneState::Simulate:
 				{
+					// GameUI(M9):UI 优先消费输入 —— 在 PlayHost::Tick(玩法帧首采样)之前组一帧
+					// **最小**输入态并路由(与 Runtime 同一口径);命中 UI 的指针本帧不再进入玩法。
+					// 未加载 `.wui`(m_UiHost 未启用)⇒ 零操作,编辑态/Play 行为不变。
+					if (m_UiHost.Enabled())
+					{
+						const uint32_t windowWidth = Application::Get().GetWindow().GetWidth();
+						const uint32_t windowHeight = Application::Get().GetWindow().GetHeight();
+						const Wui::WuiInputState uiInput = m_UiInputSampler.Sample(
+							glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)));
+						m_PlayHost.SetPointerCaptured(m_UiHost.RouteInput(uiInput));
+						// 命令出口:真实业务命令由项目接;这里只打一条可读日志(不发明新的游戏语义)。
+						for (const UI::UiInputCommand& command : m_UiHost.Commands().Commands())
+							WLD_CORE_INFO("[ui] command node={0} event={1} cmd={2}",
+								command.NodeId, command.Event,
+								command.Command.empty() ? std::string("(none)") : command.Command);
+						m_UiHost.ClearCommands();
+					}
 					// 与 Runtime 同一条路径:GameApp 驱动阶段回调(GameHost 内注册的 update
 					// 会调用场景 OnUpdateRuntime);渲染仍由编辑器视图口统一提交(render=false)。
 					// P2 W4:Simulate 并入同一条会话路径(事件/计时器/输入/关卡随之生效);
@@ -1194,12 +1211,15 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 		if (size.x <= 0.0f || size.y <= 0.0f)
 			return;
 
-		// 物理面 = 场景矩形(设计单位,与 WuiContext 同一坐标系);DPI 系数 1.0 —— 平台缩放
-		// 已由 WUI 层施加过一次(与 RuntimeLayer 同口径)。原点 = 场景矩形左上角,
+		// 物理面 = 场景矩形(设计单位,与 WuiContext 同一坐标系);DPI 系数取**真实平台内容缩放**
+		// (GLFW content scale,无窗口/失败 ⇒ 1.0;M9 前硬编码 1.0)。原点 = 场景矩形左上角,
 		// 于是绘制命令与无障碍矩形都落在视口内。
+		// M9 已知交互(留给主 agent 复核):WUI 后端把设计单位命令放大到物理像素时还会再乘一次
+		// `Wui::UiScale()`,高内容缩放屏上 `viewport.Scale` 与 `UiScale()` 会叠加;本任务按派工单
+		// 只做"填真实 DPI",不改 `UiScale()` 的既有语义,也不擅自用 PhysicalSize 抵消。
 		UI::UiSurface surface;
 		surface.PhysicalSize = size;
-		surface.DpiScale = 1.0f;
+		surface.DpiScale = UiHost::PlatformContentScale();
 		m_UiHost.SetSurface(surface);
 		m_UiHost.SetOrigin(origin);
 

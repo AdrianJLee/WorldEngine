@@ -2,6 +2,7 @@
 #include "WUI/Panels/UiDesignerPanel.h"
 
 #include "World/Asset/ProjectManifest.h"
+#include "World/Core/KeyCodes.h"
 #include "World/UI/UiTypes.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <system_error>
+#include <utility>
 
 namespace World
 {
@@ -157,6 +159,102 @@ namespace World
 				glm::vec2 { center.x, center.y + half }, color, 1.0f);
 		}
 
+		// ---- M12:8 个缩放手柄 ----
+		// 每个手柄由两条边构成(位掩码);AnchorX/Y = 手柄中心在节点矩形内的归一化位置。
+		enum HandleBits
+		{
+			HandleNone = 0,
+			HandleLeft = 1,
+			HandleRight = 2,
+			HandleTop = 4,
+			HandleBottom = 8,
+		};
+
+		struct HandleDef
+		{
+			int Bits;
+			float AnchorX;
+			float AnchorY;
+		};
+
+		constexpr float kHandleSize = 8.0f;
+
+		const HandleDef kHandles[] =
+		{
+			{ HandleLeft | HandleTop,     0.0f, 0.0f },
+			{ HandleRight | HandleTop,    1.0f, 0.0f },
+			{ HandleRight | HandleBottom, 1.0f, 1.0f },
+			{ HandleLeft | HandleBottom,  0.0f, 1.0f },
+			{ HandleLeft,                 0.0f, 0.5f },
+			{ HandleRight,                1.0f, 0.5f },
+			{ HandleTop,                  0.5f, 0.0f },
+			{ HandleBottom,               0.5f, 1.0f },
+		};
+
+		// 画布上节点框的物理矩形:零面积节点(点锚 + Size=0)给一个最小可视盒,否则画布上
+		// 完全看不见、8 个手柄也没有可抓的位置。
+		Wui::WuiRect NodeBoxPhysical(const UI::UiViewport& viewport, const Wui::WuiRect& rect)
+		{
+			Wui::WuiRect box = viewport.DesignRectToPhysical(rect);
+			if (box.W < 3.0f || box.H < 3.0f)
+				box = Wui::WuiRect { box.X, box.Y, 6.0f, 6.0f };
+			return box;
+		}
+
+		Wui::WuiRect HandlePhysicalRect(const Wui::WuiRect& box, const HandleDef& handle)
+		{
+			const float half = kHandleSize * 0.5f;
+			return Wui::WuiRect { box.X + handle.AnchorX * box.W - half,
+				box.Y + handle.AnchorY * box.H - half, kHandleSize, kHandleSize };
+		}
+
+		// 同父内定位节点(上移/下移用)。返回所属兄弟列表与下标。
+		bool LocateSibling(std::vector<UI::UiNode>& nodes, const std::string& id,
+			std::vector<UI::UiNode>** outList, std::size_t* outIndex)
+		{
+			for (std::size_t index = 0; index < nodes.size(); ++index)
+			{
+				if (nodes[index].Id == id)
+				{
+					*outList = &nodes;
+					*outIndex = index;
+					return true;
+				}
+				if (LocateSibling(nodes[index].Children, id, outList, outIndex))
+					return true;
+			}
+			return false;
+		}
+
+		bool LocateSiblingIndex(const std::vector<UI::UiNode>& nodes, const std::string& id,
+			std::size_t* outIndex, std::size_t* outCount)
+		{
+			for (std::size_t index = 0; index < nodes.size(); ++index)
+			{
+				if (nodes[index].Id == id)
+				{
+					*outIndex = index;
+					*outCount = nodes.size();
+					return true;
+				}
+				if (LocateSiblingIndex(nodes[index].Children, id, outIndex, outCount))
+					return true;
+			}
+			return false;
+		}
+
+		UI::UiNode* FindNodeMutable(std::vector<UI::UiNode>& nodes, const std::string& id)
+		{
+			for (UI::UiNode& node : nodes)
+			{
+				if (node.Id == id)
+					return &node;
+				if (UI::UiNode* found = FindNodeMutable(node.Children, id))
+					return found;
+			}
+			return nullptr;
+		}
+
 		// M7a:内容浏览器双击 `.wui` → 本面板的"按路径打开"待办(见头文件 RequestOpenPath)。
 		// 进程内单槽(UI 单线程);登记后由面板下一次渲染取走一次。
 		std::string& PendingOpenPath()
@@ -241,6 +339,10 @@ namespace World
 		m_PathBuffer = path.string();
 		m_SelectedId.clear();
 		m_BufferNodeId.clear();
+		// M12:换文档 = 撤销历史作废(跨文档撤销没有意义),进行中的拖动/编辑也一并收口。
+		m_Undo.Clear();
+		CancelDrag();
+		CancelNodeEdit();
 		m_Collapsed.clear();
 		m_OutlineScroll = 0.0f;
 		m_PropertyScroll = 0.0f;
@@ -318,6 +420,10 @@ namespace World
 		// 同一帧就能看到新文档,而不是等下一帧。
 		ConsumeOpenRequest();
 
+		// M12:面板级快捷键(Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z)。走 ctx 的输入快照 —— 真实键盘与
+		// AI 注入(ui.key)是同一条路径;文本焦点活跃时让位给文本编辑(与 EditorShell W9-2 同口径)。
+		HandleShortcuts(ctx);
+
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, theme.WindowBg, 0.0f);
 
@@ -380,6 +486,12 @@ namespace World
 			Wui::Label(ctx, glm::vec2 { status.X + 8.0f, status.Y + 4.0f }, text,
 				theme.TextMuted, theme.FontSizeSmall);
 		}
+
+		// M12:属性行编辑在鼠标抬起后落一条撤销记录(文本提交时鼠标本就抬起 → 同帧提交)。
+		if (m_PendingEditValid && !ctx.Input().MouseDown[0])
+			CommitNodeEdit();
+		// M12:文本焦点快照 —— 下一帧的 Ctrl+Z/Y 判定要用"上一帧结束时"的状态(W9-2 同口径)。
+		m_TextFocusLatched = Wui::WuiTextFocus::Get().Active();
 	}
 
 	void UiDesignerPanel::RenderToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
@@ -390,10 +502,28 @@ namespace World
 		const float height = std::max(18.0f, rect.H - 8.0f);
 		const float y = rect.Y + 4.0f;
 		constexpr float buttonWidth = 62.0f;
+		constexpr float iconWidth = 30.0f;
 		constexpr float gap = 6.0f;
-		const float buttons = buttonWidth * 3.0f + gap * 3.0f;
+		const float buttons = iconWidth * 2.0f + buttonWidth * 3.0f + gap * 5.0f;
 		const float fieldWidth = std::max(80.0f, rect.W - 12.0f - buttons);
 		float x = rect.X + 6.0f;
+
+		// M12:撤销/重做(与 Ctrl+Z / Ctrl+Y 同一条面板本地栈)。
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.undo"), Wui::WuiRect { x, y, iconWidth, height },
+			Wui::Tr("panel.ui_designer.undo", "Undo"), theme, m_Undo.CanUndo(), false,
+			Wui::Tr("panel.ui_designer.undo.tip", "Undo the last designer edit (Ctrl+Z)")))
+		{
+			UndoDocument();
+		}
+		x += iconWidth + gap;
+
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.redo"), Wui::WuiRect { x, y, iconWidth, height },
+			Wui::Tr("panel.ui_designer.redo", "Redo"), theme, m_Undo.CanRedo(), false,
+			Wui::Tr("panel.ui_designer.redo.tip", "Redo the last undone edit (Ctrl+Y)")))
+		{
+			RedoDocument();
+		}
+		x += iconWidth + gap;
 
 		Wui::TextFieldA11y pathA11y;
 		pathA11y.Label = Wui::Tr("panel.ui_designer.path", "WUI file path");
@@ -441,6 +571,29 @@ namespace World
 		Wui::Label(ctx, glm::vec2 { rect.X + 6.0f, rect.Y + 4.0f },
 			Wui::Tr("panel.ui_designer.outline", "Outline"), theme.TextMuted, theme.FontSizeCaption);
 
+		// M12:同父内上移/下移(改 Children 顺序 = 改绘制顺序;保存后文档顺序真的变了)。
+		{
+			constexpr float headerHeight = 16.0f;
+			constexpr float moveWidth = 24.0f;
+			const float headerY = rect.Y + 1.0f;
+			float buttonX = rect.X + rect.W - 4.0f - moveWidth;
+			if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.outline.down"),
+				Wui::WuiRect { buttonX, headerY, moveWidth, headerHeight },
+				"\xE2\x86\x93", theme, CanMoveSelected(1), false,
+				Wui::Tr("panel.ui_designer.outline.down.tip", "Move node down (later in draw order)")))
+			{
+				MoveSelectedNode(1);
+			}
+			buttonX -= moveWidth + 3.0f;
+			if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.outline.up"),
+				Wui::WuiRect { buttonX, headerY, moveWidth, headerHeight },
+				"\xE2\x86\x91", theme, CanMoveSelected(-1), false,
+				Wui::Tr("panel.ui_designer.outline.up.tip", "Move node up (earlier in draw order)")))
+			{
+				MoveSelectedNode(-1);
+			}
+		}
+
 		const Wui::WuiRect area { rect.X + 2.0f, rect.Y + 18.0f,
 			std::max(0.0f, rect.W - 4.0f), std::max(0.0f, rect.H - 20.0f) };
 
@@ -452,6 +605,7 @@ namespace World
 		const Wui::TreeViewResult result = Wui::TreeView(ctx, area, items, kTreeRowHeight,
 			m_OutlineScroll, theme, Wui::HashId("ui_designer.outline.tree"));
 
+		const std::string selectionBefore = m_SelectedId;
 		const auto nodeIdAt = [&](int index) -> const std::string*
 		{
 			if (index < 0 || static_cast<std::size_t>(index) >= m_OutlineIds.size())
@@ -468,6 +622,8 @@ namespace World
 			m_SelectedId = *id;
 		if (const std::string* id = nodeIdAt(result.KeyMoveTo))
 			m_SelectedId = *id;
+		if (m_SelectedId != selectionBefore)
+			CommitNodeEdit();   // 选中变化前把上一节点的属性编辑落账
 	}
 
 	void UiDesignerPanel::AppendOutlineItems(const std::vector<UI::UiNode>& nodes, int depth,
@@ -525,6 +681,11 @@ namespace World
 			}
 		}
 
+		// M12:没有待提交编辑时,每帧抓一份"本帧起点"节点快照 —— 属性行首次改动时拿它当
+		// 撤销前像。拖动期间只在第一帧抓一次,所以"一次拖动 = 一条记录"。
+		if (node != nullptr && !m_PendingEditValid)
+			m_FrameNodeBefore = *node;
+
 		const float rowHeight = Wui::PropertyRowHeight();
 		const float innerWidth = std::max(0.0f, rect.W - 12.0f);
 		const Wui::WuiRect inner { rect.X + 6.0f, rect.Y + 6.0f, innerWidth, std::max(0.0f, rect.H - 12.0f) };
@@ -569,6 +730,7 @@ namespace World
 				result.FieldRect, *value, 0.25f, -1000000.0f, 1000000.0f, theme))
 			{
 				m_ScreenDirty = true;
+				NoteNodeEdit(def.Label);
 			}
 		};
 
@@ -638,6 +800,7 @@ namespace World
 					{
 						prop.Value = buffer;
 						m_ScreenDirty = true;
+						NoteNodeEdit(prop.Name);
 					}
 				}
 			}
@@ -661,6 +824,7 @@ namespace World
 				std::string(), node->Anchor.RelativeToSafeArea, theme))
 			{
 				m_ScreenDirty = true;
+				NoteNodeEdit(desc.Label);
 			}
 		}
 
@@ -696,6 +860,7 @@ namespace World
 			{
 				node->Layout.Kind = kLayoutKinds[static_cast<std::size_t>(selected)];
 				m_ScreenDirty = true;
+				NoteNodeEdit(kindDesc.Label);
 			}
 
 			for (const FloatRowDef& def : kLayoutFloatRows)
@@ -715,6 +880,7 @@ namespace World
 			{
 				node->Layout.Columns = static_cast<int>(columns);
 				m_ScreenDirty = true;
+				NoteNodeEdit(columnsDesc.Label);
 			}
 
 			Wui::PropertyRowDesc rowMajorDesc;
@@ -728,6 +894,7 @@ namespace World
 				std::string(), node->Layout.RowMajor, theme))
 			{
 				m_ScreenDirty = true;
+				NoteNodeEdit(rowMajorDesc.Label);
 			}
 		}
 
@@ -788,50 +955,138 @@ namespace World
 	void UiDesignerPanel::HandleCanvasInput(Wui::WuiContext& ctx, const Wui::WuiRect& rect)
 	{
 		const Wui::WuiInputState& input = ctx.Input();
-		if (ctx.IsHovered(rect) && ctx.IsClicked(rect, 0))
+		// M12:选中节点的 8 个手柄悬停态(仅反馈用;拖动中不重算)。
+		m_HoverHandle = HandleNone;
+		Wui::WuiRect selectedBox;
+		const bool hasSelectedBox = SelectedNodeBox(selectedBox);
+		if (hasSelectedBox && m_Drag == CanvasDrag::None)
 		{
-			const UI::UiNodeInstance* hit = m_Screen.HitTest(input.MousePos);
-			if (hit != nullptr)
+			for (const HandleDef& handle : kHandles)
 			{
-				m_SelectedId = hit->Id;
-				if (const UI::UiNode* source = m_Document.FindNode(hit->Id))
+				if (ctx.IsHovered(HandlePhysicalRect(selectedBox, handle)))
 				{
-					m_DraggingOffset = true;
-					m_DragNodeId = hit->Id;
-					m_DragStartDesign = m_Viewport.PhysicalToDesign(input.MousePos);
-					m_DragStartOffset = source->Anchor.Offset;
+					m_HoverHandle = handle.Bits;
+					break;
 				}
+			}
+		}
+
+		if (m_Drag == CanvasDrag::None && ctx.IsHovered(rect) && ctx.IsClicked(rect, 0))
+		{
+			// ① 手柄优先:命中 8 手柄之一 → 缩放当前选中节点(不改变选中)。
+			UI::UiNode* node = m_HoverHandle != HandleNone ? MutableSelectedNode() : nullptr;
+			if (node != nullptr)
+			{
+				m_Drag = CanvasDrag::Resize;
+				m_DragHandle = m_HoverHandle;
+				m_DragNodeId = node->Id;
+				m_DragStartDesign = m_Viewport.PhysicalToDesign(input.MousePos);
+				m_DragStartOffset = node->Anchor.Offset;
+				m_DragStartSize = node->Anchor.Size;
+				m_DragBefore = m_Document;
+				m_DragBeforeValid = true;
 			}
 			else
 			{
-				m_SelectedId.clear();
-				m_DraggingOffset = false;
-				m_DragNodeId.clear();
-			}
-		}
-
-		if (m_DraggingOffset && input.MouseDown[0] && !m_DragNodeId.empty())
-		{
-			UI::UiNode* node = MutableSelectedNode();
-			if (node != nullptr && node->Id == m_DragNodeId)
-			{
-				const glm::vec2 design = m_Viewport.PhysicalToDesign(input.MousePos);
-				const glm::vec2 next { m_DragStartOffset.x + (design.x - m_DragStartDesign.x),
-					m_DragStartOffset.y + (design.y - m_DragStartDesign.y) };
-				if (next.x != node->Anchor.Offset.x || next.y != node->Anchor.Offset.y)
+				// ② 否则节点命中 = 选中 + 拖动 Offset;命中空白 = 取消选中。
+				const UI::UiNodeInstance* hit = m_Screen.HitTest(input.MousePos);
+				if (hit != nullptr)
 				{
-					node->Anchor.Offset = next;
-					m_ScreenDirty = true;
-					m_Status = Wui::Tr("panel.ui_designer.drag_offset", "Offset ")
-						+ FormatFloat(node->Anchor.Offset.x) + ", " + FormatFloat(node->Anchor.Offset.y);
+					CommitNodeEdit();
+					m_SelectedId = hit->Id;
+					if (const UI::UiNode* source = m_Document.FindNode(hit->Id))
+					{
+						m_Drag = CanvasDrag::Move;
+						m_DragHandle = HandleNone;
+						m_DragNodeId = hit->Id;
+						m_DragStartDesign = m_Viewport.PhysicalToDesign(input.MousePos);
+						m_DragStartOffset = source->Anchor.Offset;
+						m_DragStartSize = source->Anchor.Size;
+						m_DragBefore = m_Document;
+						m_DragBeforeValid = true;
+					}
+				}
+				else
+				{
+					CommitNodeEdit();
+					m_SelectedId.clear();
+					CancelDrag();
 				}
 			}
 		}
 
-		if (m_DraggingOffset && !input.MouseDown[0])
+		if (m_Drag != CanvasDrag::None && input.MouseDown[0] && !m_DragNodeId.empty())
 		{
-			m_DraggingOffset = false;
-			m_DragNodeId.clear();
+			UI::UiNode* node = FindNodeMutable(m_Document.Nodes, m_DragNodeId);
+			if (node != nullptr)
+			{
+				const glm::vec2 design = m_Viewport.PhysicalToDesign(input.MousePos);
+				const glm::vec2 delta = design - m_DragStartDesign;
+				if (m_Drag == CanvasDrag::Move)
+				{
+					const glm::vec2 next { m_DragStartOffset.x + delta.x, m_DragStartOffset.y + delta.y };
+					if (next.x != node->Anchor.Offset.x || next.y != node->Anchor.Offset.y)
+					{
+						node->Anchor.Offset = next;
+						m_ScreenDirty = true;
+						m_Status = Wui::Tr("panel.ui_designer.drag_offset", "Offset ")
+							+ FormatFloat(next.x) + ", " + FormatFloat(next.y);
+					}
+				}
+				else
+				{
+					// 手柄语义:拖角改 Size 两轴、拖边只改单轴;补偿量 = 按下点起算的设计空间位移。
+					// Min!=Max(拉伸)时 Size 是"尺寸增量"(W = 锚框跨度 + Size),可以为负去收缩;
+					// 点锚定时 Size 就是实际尺寸,钳到 >= 0。
+					glm::vec2 size = m_DragStartSize;
+					if ((m_DragHandle & HandleRight) != 0)
+						size.x = m_DragStartSize.x + delta.x;
+					if ((m_DragHandle & HandleLeft) != 0)
+						size.x = m_DragStartSize.x - delta.x;
+					if ((m_DragHandle & HandleBottom) != 0)
+						size.y = m_DragStartSize.y + delta.y;
+					if ((m_DragHandle & HandleTop) != 0)
+						size.y = m_DragStartSize.y - delta.y;
+
+					const bool corner = (m_DragHandle & (HandleLeft | HandleRight)) != 0
+						&& (m_DragHandle & (HandleTop | HandleBottom)) != 0;
+					if (corner && input.Shift && m_DragStartSize.x != 0.0f && m_DragStartSize.y != 0.0f)
+					{
+						// Shift = 等比:以变化更大的轴为准缩放两轴。
+						const float sx = size.x / m_DragStartSize.x;
+						const float sy = size.y / m_DragStartSize.y;
+						const float scale = std::abs(sx) > std::abs(sy) ? sx : sy;
+						size.x = m_DragStartSize.x * scale;
+						size.y = m_DragStartSize.y * scale;
+					}
+					if (node->Anchor.Min.x == node->Anchor.Max.x)
+						size.x = std::max(size.x, 0.0f);
+					if (node->Anchor.Min.y == node->Anchor.Max.y)
+						size.y = std::max(size.y, 0.0f);
+
+					if (size.x != node->Anchor.Size.x || size.y != node->Anchor.Size.y)
+					{
+						node->Anchor.Size = size;
+						m_ScreenDirty = true;
+						m_Status = Wui::Tr("panel.ui_designer.drag_size", "Size ")
+							+ FormatFloat(size.x) + ", " + FormatFloat(size.y);
+					}
+				}
+			}
+		}
+
+		if (m_Drag != CanvasDrag::None && !input.MouseDown[0])
+		{
+			// 一次拖动 = 一条记录:只有真的改动了文档才入栈(单击选中不入栈)。
+			if (m_DragBeforeValid && !UI::UiDocumentsEquivalent(m_DragBefore, m_Document))
+			{
+				const bool resize = m_Drag == CanvasDrag::Resize;
+				PushDocumentUndo(resize
+					? Wui::Tr("panel.ui_designer.resize", "Resize")
+					: Wui::Tr("panel.ui_designer.move", "Move"),
+					m_DragBefore);
+			}
+			CancelDrag();
 		}
 	}
 
@@ -847,22 +1102,25 @@ namespace World
 		Wui::HighlightOutline(ctx, designRect, theme.Border, 0.0f, 1.0f);
 
 		// 节点框 + 类型标签(线框视图;不画真实控件外观)。
+		// M12:拖动中(移动/缩放)选中框换成警示色,给"正在拖动"的反馈。
+		const bool dragging = m_Drag != CanvasDrag::None;
 		for (const UI::UiNodeInstance& node : m_Screen.Nodes())
 		{
-			Wui::WuiRect box = m_Viewport.DesignRectToPhysical(node.Rect);
+			const Wui::WuiRect box = NodeBoxPhysical(m_Viewport, node.Rect);
 			const bool selected = (node.Id == m_SelectedId);
-			if (box.W < 3.0f || box.H < 3.0f)
-			{
-				// 点锚定 + Size=0 的节点矩形是零面积:给一个小标记,否则画布上完全看不见。
-				box = Wui::WuiRect { box.X, box.Y, 6.0f, 6.0f };
-			}
 			if (selected)
 				Wui::PanelBackground(ctx, box, theme.Selection, 0.0f);
-			Wui::HighlightOutline(ctx, box, selected ? theme.Accent : theme.BorderStrong, 0.0f,
-				selected ? 2.0f : 1.0f);
+			const Wui::WuiColor outline = selected
+				? (dragging ? theme.Warning : theme.Accent) : theme.BorderStrong;
+			Wui::HighlightOutline(ctx, box, outline, 0.0f, selected ? 2.0f : 1.0f);
 			Wui::Label(ctx, glm::vec2 { box.X + 3.0f, box.Y + 2.0f }, node.Type + "  " + node.Id,
 				selected ? theme.Text : theme.TextMuted, theme.FontSizeCaption);
 		}
+
+		// M12:选中节点的 8 个缩放手柄(拖角改两轴、拖边改单轴;拖动手柄描边用强调色)。
+		Wui::WuiRect selectedBox;
+		if (SelectedNodeBox(selectedBox))
+			DrawResizeHandles(ctx, theme, selectedBox);
 
 		// 安全区(虚线)与设计面区分。
 		const Wui::WuiRect safeRect = m_Viewport.DesignRectToPhysical(m_Viewport.ContentRect);
@@ -910,5 +1168,185 @@ namespace World
 			theme.Success, 0.0f);
 		Wui::PanelBackground(ctx, Wui::WuiRect { maxCanvas.x - 2.0f, maxCanvas.y - 2.0f, 4.0f, 4.0f },
 			theme.Warning, 0.0f);
+	}
+
+	// ---- M12:撤销/重做(面板本地 WuiUndoStack)----
+
+	void UiDesignerPanel::HandleShortcuts(Wui::WuiContext& ctx)
+	{
+		if (!m_HasDocument || m_TextFocusLatched)
+			return;
+		const Wui::WuiInputState& input = ctx.Input();
+		if (!input.Ctrl)
+			return;
+		// Ctrl+Z = 撤销;Ctrl+Y / Ctrl+Shift+Z = 重做(与编辑器其它面板同口径)。
+		if (!input.Shift && ctx.WasKeyTriggered(KeyCodes::Z))
+			UndoDocument();
+		else if (ctx.WasKeyTriggered(KeyCodes::Y) || (input.Shift && ctx.WasKeyTriggered(KeyCodes::Z)))
+			RedoDocument();
+	}
+
+	void UiDesignerPanel::UndoDocument()
+	{
+		if (!m_Undo.CanUndo())
+		{
+			m_Status = Wui::Tr("panel.ui_designer.undo_empty", "Nothing to undo");
+			return;
+		}
+		const std::string name = m_Undo.UndoName();
+		if (m_Undo.Undo())
+			m_Status = Wui::Tr("panel.ui_designer.undone", "Undo: ") + name;
+	}
+
+	void UiDesignerPanel::RedoDocument()
+	{
+		if (!m_Undo.CanRedo())
+		{
+			m_Status = Wui::Tr("panel.ui_designer.redo_empty", "Nothing to redo");
+			return;
+		}
+		const std::string name = m_Undo.RedoName();
+		if (m_Undo.Redo())
+			m_Status = Wui::Tr("panel.ui_designer.redone", "Redo: ") + name;
+	}
+
+	void UiDesignerPanel::PushDocumentUndo(const std::string& name, const UI::UiDocument& before)
+	{
+		// 一条记录 = 前像 + 记录时的后像(整档)。面板本地,不往 WuiContext 加全局状态。
+		UI::UiDocument after = m_Document;
+		m_Undo.Push(name,
+			[this, before]() { RestoreDocument(before); },
+			[this, after]() { RestoreDocument(after); });
+	}
+
+	void UiDesignerPanel::RestoreDocument(const UI::UiDocument& document)
+	{
+		CancelDrag();
+		CancelNodeEdit();
+		m_Document = document;
+		m_ScreenDirty = true;
+		m_BufferNodeId.clear();   // 属性文本缓冲按新模型重建
+		if (!m_SelectedId.empty() && m_Document.FindNode(m_SelectedId) == nullptr)
+			m_SelectedId.clear();
+	}
+
+	void UiDesignerPanel::NoteNodeEdit(const std::string& name)
+	{
+		if (m_PendingEditValid)
+			return;   // 一次连续编辑只记第一条(拖动 = 一条记录)
+		// 前像必须是"本次改动之前"的同一节点快照;对不上(不该发生)宁可不记,
+		// 也不能拿一份空/别的节点当撤销前像(会把节点写坏)。
+		if (m_FrameNodeBefore.Id != m_SelectedId)
+			return;
+		m_PendingEditValid = true;
+		m_PendingEditNodeId = m_SelectedId;
+		m_PendingEditBefore = m_FrameNodeBefore;
+		m_PendingEditName = name;
+	}
+
+	void UiDesignerPanel::CommitNodeEdit()
+	{
+		if (!m_PendingEditValid)
+			return;
+		const std::string nodeId = m_PendingEditNodeId;
+		const std::string name = m_PendingEditName;
+		const UI::UiNode before = m_PendingEditBefore;
+		CancelNodeEdit();
+		if (nodeId.empty())
+			return;
+		const UI::UiNode* current = m_Document.FindNode(nodeId);
+		if (current == nullptr)
+			return;
+		// 后像 = 当前文档(节点就是 current);前像 = 当前文档把该节点换回 before。
+		// 拖回原值 / 未真正改动时不落空记录。
+		const UI::UiDocument after = m_Document;
+		UI::UiDocument beforeDoc = m_Document;
+		if (UI::UiNode* slot = FindNodeMutable(beforeDoc.Nodes, nodeId))
+			*slot = before;
+		if (UI::UiDocumentsEquivalent(beforeDoc, after))
+			return;
+		PushDocumentUndo(name.empty() ? Wui::Tr("panel.ui_designer.edit", "Edit") : name, beforeDoc);
+	}
+
+	void UiDesignerPanel::CancelNodeEdit()
+	{
+		m_PendingEditValid = false;
+		m_PendingEditNodeId.clear();
+		m_PendingEditName.clear();
+	}
+
+	void UiDesignerPanel::CancelDrag()
+	{
+		m_Drag = CanvasDrag::None;
+		m_DragHandle = HandleNone;
+		m_HoverHandle = HandleNone;
+		m_DragNodeId.clear();
+		m_DragBeforeValid = false;
+	}
+
+	// ---- M12:同父内上移/下移(改 Children 顺序 = 改绘制顺序)----
+
+	bool UiDesignerPanel::CanMoveSelected(int direction) const
+	{
+		std::size_t index = 0;
+		std::size_t count = 0;
+		if (m_SelectedId.empty() || !LocateSiblingIndex(m_Document.Nodes, m_SelectedId, &index, &count))
+			return false;
+		return direction < 0 ? index > 0 : index + 1 < count;
+	}
+
+	void UiDesignerPanel::MoveSelectedNode(int direction)
+	{
+		if (m_SelectedId.empty())
+			return;
+		std::vector<UI::UiNode>* list = nullptr;
+		std::size_t index = 0;
+		if (!LocateSibling(m_Document.Nodes, m_SelectedId, &list, &index) || list == nullptr)
+			return;
+		if (direction < 0 && index == 0)
+			return;
+		const std::size_t target = direction < 0 ? index - 1 : index + 1;
+		if (target >= list->size())
+			return;
+
+		CommitNodeEdit();
+		const UI::UiDocument before = m_Document;
+		std::swap((*list)[index], (*list)[target]);
+		m_ScreenDirty = true;
+		PushDocumentUndo(direction < 0
+			? Wui::Tr("panel.ui_designer.move_up", "Move Up")
+			: Wui::Tr("panel.ui_designer.move_down", "Move Down"), before);
+		m_Status = direction < 0
+			? Wui::Tr("panel.ui_designer.moved_up", "Moved node up (earlier in draw order)")
+			: Wui::Tr("panel.ui_designer.moved_down", "Moved node down (later in draw order)");
+	}
+
+	// ---- M12:画布手柄 ----
+
+	bool UiDesignerPanel::SelectedNodeBox(Wui::WuiRect& out) const
+	{
+		if (!m_HasDocument || m_SelectedId.empty())
+			return false;
+		const UI::UiNodeInstance* instance = m_Screen.Find(m_SelectedId);
+		if (instance == nullptr)
+			return false;
+		out = NodeBoxPhysical(m_Viewport, instance->Rect);
+		return true;
+	}
+
+	void UiDesignerPanel::DrawResizeHandles(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+		const Wui::WuiRect& box)
+	{
+		for (const HandleDef& handle : kHandles)
+		{
+			const Wui::WuiRect rect = HandlePhysicalRect(box, handle);
+			const bool active = m_Drag == CanvasDrag::Resize && m_DragHandle == handle.Bits;
+			const bool hovered = active || m_HoverHandle == handle.Bits;
+			const Wui::WuiColor fill = active
+				? theme.Accent : (hovered ? theme.ActiveBg : theme.PanelHeader);
+			const Wui::WuiColor border = active || hovered ? theme.Accent : theme.BorderStrong;
+			Wui::PanelBackground(ctx, rect, fill, 0.0f);
+			Wui::HighlightOutline(ctx, rect, border, 0.0f, 1.0f);
+		}
 	}
 }

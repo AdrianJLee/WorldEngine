@@ -1612,6 +1612,55 @@ set_tests_properties(World.UiWorld PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+# World.UiScroll:滚动容器 + 商业控件面(M10)。
+#
+# 口径:`scrollable`/`overflow` 判定与 `UiInputRouter::IsScrollContainer` 同一份规则;
+# 滚动偏移存 `UiScreen` 运行态(按稳定 Id),`UiPainter` 对滚动容器压/弹裁剪矩形,
+# 溢出部分既不画也不命中;List/Grid 虚拟化(1000 行只画可见行)。
+#
+# WorldEngine(EN)
+
+add_executable(WorldUiScrollTests World/UiScrollTests.cpp)
+target_link_libraries(WorldUiScrollTests PRIVATE World)
+target_compile_features(WorldUiScrollTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldUiScrollTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldUiScrollTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldUiScrollTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.UiScroll COMMAND WorldUiScrollTests)
+set_tests_properties(World.UiScroll PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+# GameUI(M9):UI 输入路由闭环(headless)—— GameHost 指针捕获语义 + UiHost::RouteInput 未启用零副作用。
+add_executable(WorldUiPointerGateTests World/UiPointerGateTests.cpp)
+target_link_libraries(WorldUiPointerGateTests PRIVATE World)
+target_compile_features(WorldUiPointerGateTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldUiPointerGateTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldUiPointerGateTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldUiPointerGateTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.UiPointerGate COMMAND WorldUiPointerGateTests)
+set_tests_properties(World.UiPointerGate PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
 # WorldRuntime.dll -> 测试 exe 旁:**只拷一次**。
 #
 # 原先每个测试目标各挂一条 POST_BUILD `copy_if_different`,而本文件的所有测试 exe 都在同一目录
@@ -1634,6 +1683,6 @@ add_custom_target(WeCopyRuntimeDllForTests
     VERBATIM
 )
 
-foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests WorldUiDocumentTests WorldUiPaintTests WorldUiNavInputTests WorldUiBindAnimTests WorldUiWorldTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests WorldUiDocumentTests WorldUiPaintTests WorldUiNavInputTests WorldUiBindAnimTests WorldUiWorldTests WorldUiScrollTests WorldUiPointerGateTests ${_we_optional_test_targets})
     add_dependencies(${_we_test_target} WeCopyRuntimeDllForTests)
 endforeach()

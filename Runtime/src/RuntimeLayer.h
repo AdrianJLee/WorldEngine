@@ -37,6 +37,8 @@ namespace World
 		Ref<SceneRenderer> m_SceneRenderer;
 		// GameUI(M4):.wui 驱动的游戏 UI(加载 + 每帧布局/绘制/无障碍)。未启用时全部空操作。
 		UiHost m_UiHost;
+		// GameUI(M9):OnUpdate 里(Tick 之前)用平台输入组最小状态并路由 —— 跨帧记住按键沿。
+		UiPlatformInputSampler m_UiInputSampler;
 		uint64_t m_SceneTextureId = 0;
 		// PLUG-T5:发行形态的插件管理器(<exe>/bin/plugins/*.dll,按发行清单的 shipped 顺序加载)。
 		std::unique_ptr<Plugins::PluginManager> m_PluginManager;

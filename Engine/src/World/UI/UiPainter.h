@@ -12,6 +12,11 @@
 //   ③ 调用类型的 `Paint` 把命令写进 `WuiContext`;
 //   ④ 把节点登记进 `WuiAccessibility`(窗口坐标 = 物理坐标)。
 //
+// 滚动(M10):`UiScreen::IsScrollContainer` 为真的节点在绘制前压入裁剪矩形(命令流
+//   `ClipPush` + `WuiContext::PushClipRect` 同进同出),其整个子树画完再弹;完全落在
+//   裁剪之外的节点既不画也不登记(`UiPaintResult::ClippedNodes`)—— 与 `UiScreen::HitTest`
+//   的裁剪链同一口径(溢出部分不可见也不可点)。
+//
 // 边界:本层不处理输入/焦点/绑定/动画(M3/M6);不做命中路由 —— `UiScreen::HitTest` 是命中的唯一实现。
 
 #include "World/Core/Export.h"
@@ -92,6 +97,8 @@ namespace World::UI
 		std::size_t SkippedNodes = 0;  // 因未知类型跳过的节点数
 		std::size_t Commands = 0;      // 本次追加到 WuiContext 的命令数
 		std::size_t AccessNodes = 0;   // 登记的无障碍节点数(无障碍关闭时为 0)
+		// M10:完全落在滚动容器裁剪之外、既不画也不登记的节点数(与命中同一裁剪口径)。
+		std::size_t ClippedNodes = 0;
 		std::vector<UiPaintError> Errors;
 		std::vector<UiPaintWarning> Warnings;
 
