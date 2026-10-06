@@ -1,0 +1,81 @@
+# 游戏 UI 示例(GameUI M4):Runtime 的 `.wui` 驱动入口。
+#
+# Runtime 侧解析优先级:环境变量 `WLD_UI_DOC` → 内容根 `assets/ui/*.wui`(字典序第一个)。
+# 本文件要能被 `UiDocumentIO::Parse` 通过(FormatVersion 单一版本、节点 Type 必须已注册)。
+#
+# 显示文本:示例用直写字面量,便于零依赖直接看到画面;真实项目按
+# `contract.ui-document-format` 写 `@key` 走 localization-catalog 三层回退。
+FormatVersion: 1
+Screen: HUD
+Design:
+  Resolution: [1920, 1080]
+  ScaleMode: ScaleWithScreenSize
+  Match: 0.5
+SafeArea:
+  Enabled: false
+Theme: ui/default
+Nodes:
+  - Id: root
+    Type: Panel
+    Props:
+      title: Game HUD (.wui)
+      bg: "#1E232BEE"
+      border: "#3C4450FF"
+      radius: 6
+    Anchor:
+      # 右上角锚定:避开左下角的示例 Game HUD(DrawGameHud 的固定面板)。
+      Min: [1, 0]
+      Max: [1, 0]
+      Pivot: [1, 0]
+      Offset: [-32, 32]
+      Size: [460, 232]
+    Children:
+      - Id: hp_label
+        Type: Label
+        Props:
+          text: Health
+          fontSize: 16
+        Anchor:
+          Min: [0, 0]
+          Max: [0, 0]
+          Pivot: [0, 0]
+          Offset: [20, 52]
+          Size: [300, 24]
+      - Id: hp_bar
+        Type: ProgressBar
+        Props:
+          value: 0.72
+          label: HP
+          radius: 3
+          fillColor: "#4CC38AFF"
+          trackColor: "#2A313AFF"
+        Anchor:
+          Min: [0, 0]
+          Max: [1, 0]
+          Pivot: [0, 0]
+          Offset: [20, 84]
+          Size: [-40, 22]
+      - Id: hint
+        Type: Label
+        Props:
+          text: Authored in .wui - edit to hot reload
+          fontSize: 13
+          color: "#9AA4B2FF"
+        Anchor:
+          Min: [0, 0]
+          Max: [0, 0]
+          Pivot: [0, 0]
+          Offset: [20, 124]
+          Size: [420, 22]
+      - Id: close
+        Type: Button
+        Props:
+          label: Close
+        On:
+          Click: ui.close
+        Anchor:
+          Min: [0, 0]
+          Max: [0, 0]
+          Pivot: [0, 0]
+          Offset: [20, 166]
+          Size: [132, 40]

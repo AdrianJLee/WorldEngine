@@ -145,6 +145,10 @@ namespace World
 		m_Host.Init(desc);
 		m_Host.SetRenderer(m_SceneRenderer);
 
+		// GameUI(M4):把 .wui 驱动的游戏 UI 接到宿主(环境变量 WLD_UI_DOC,否则内容根 assets/ui)。
+		// 两者都取不到 = 静默关闭,不改变今天的行为。
+		m_UiHost.Initialize(desc.ContentRoot);
+
 		// GameHost 内部:清单中存在同一场景的关卡时走 LevelService(加载状态机/进度),否则退回路径加载。
 		m_Host.LoadLevel(scenePath, true);
 	}
@@ -154,6 +158,7 @@ namespace World
 		// 顺序与改造前一致:先停运行时并释放场景,再关闭渲染器。
 		m_Host.StopRuntime();
 		m_Host.Shutdown();
+		m_UiHost.Shutdown();
 		m_SceneTextureId = 0;
 		// PLUG-T5:场景先销毁(插件组件还有活实例时 Unload 会干净拒绝),再卸载插件 ——
 		// 插件回调/组件存储因此在管理器析构前全部回收。
@@ -268,6 +273,9 @@ namespace World
 				if (wuiContext.Commands().size() > commandCountBefore && scriptUiFailures == 0)
 					m_ScriptUiDrawn = true;
 			}
+			// GameUI(M4):真实 .wui 驱动,画在场景贴图/脚本 UI 之后、DrawGameHud 之前(与现有脚本站位一致)。
+			// 未启用时零操作:不推命令、不开无障碍,HUD 与加载遮罩的顺序不变。
+			m_UiHost.DrawFrame(wuiContext, input);
 			// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
 			// 会触发结构写断言并抛异常。
 			const Scene* activeScene = m_Host.GetScene().get();
@@ -278,6 +286,8 @@ namespace World
 			if (const std::size_t pending = m_Host.PendingAssetLoads(); pending > 0)
 				DrawLoadingOverlay(wuiContext, pending, 0, m_Host.DescribeAssetLoads());
 			wuiContext.EndFrame();
+			// GameUI(M4):第一帧 EndFrame 之后落一次无障碍树(WLD_UI_A11Y_DUMP;未启用/未设置则空操作)。
+			m_UiHost.EndFrame();
 			wuiBackend.Render(wuiContext.Commands(), wuiContext.OverlayCommands());
 			// 整窗抓图:UI 通道已提交、→Present 尚未执行 —— 与 EditorLayer 同一调用点
 			// (见 Renderer::FlushPresentCaptures 的说明;提前抓会拍到空白并破坏布局)。

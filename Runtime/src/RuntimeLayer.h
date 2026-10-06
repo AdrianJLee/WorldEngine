@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "World.h"
 #include "World/Gameplay/Runtime/GameHost.h"
+#include "UiHost.h"
 
 #include <memory>
 
@@ -33,6 +34,8 @@ namespace World
 	private:
 		Gameplay::GameHost m_Host;
 		Ref<SceneRenderer> m_SceneRenderer;
+		// GameUI(M4):.wui 驱动的游戏 UI(加载 + 每帧布局/绘制/无障碍)。未启用时全部空操作。
+		UiHost m_UiHost;
 		uint64_t m_SceneTextureId = 0;
 		// PLUG-T5:发行形态的插件管理器(<exe>/bin/plugins/*.dll,按发行清单的 shipped 顺序加载)。
 		std::unique_ptr<Plugins::PluginManager> m_PluginManager;

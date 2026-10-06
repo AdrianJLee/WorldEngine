@@ -1,5 +1,9 @@
 #include "ContentBrowserPanel_Internal.h"
 
+// M7a(GameUI):「新建 UI 文档」写出的 `.wui` 用引擎自己的文档模型 + UiDocumentIO::SaveFile,
+// 而不是在这里手抄一份 YAML 模板(与"新建场景"用 SceneSerializer 同口径:格式演进不两处漂移)。
+#include "World/UI/UiDocument.h"
+
 namespace World
 {
 
@@ -77,6 +81,43 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				std::filesystem::path created;
 				return CreateSceneAsset(dir, error, &created);
 			});
+		// M7a(GameUI):`.wui` 游戏 UI 文档(排序紧跟在场景之后)。只创建 + 选中,
+		// **不自动打开** —— 设计器是单实例面板,打开会替换它当前载入的文档;
+		// 双击该资产才是显式打开(见 ContentBrowserPanel::OpenItem / ui_designer)。
+		add("ui", "UI Document", ".wui", 25, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				// 最小自洽模板:单一 FormatVersion + 命名 Screen + 设计分辨率/缩放 +
+				// 一个撑满父级的 Panel 根(Column 布局)。UiDocumentIO::SaveFile 的产物
+				// 一定过得了 UiDocumentIO::Parse(同一套模型/序列化)。
+				UI::UiDocument document;
+				document.Screen = "HUD";
+				document.Design.Resolution = { 1920.0f, 1080.0f };
+				document.Design.ScaleMode = UI::UiScaleMode::ScaleWithScreenSize;
+				document.Design.Match = 0.5f;
+				UI::UiNode root;
+				root.Id = "root";
+				root.Type = "Panel";
+				root.Anchor.Min = { 0.0f, 0.0f };
+				root.Anchor.Max = { 1.0f, 1.0f };
+				root.Anchor.Pivot = { 0.5f, 0.5f };
+				root.Layout.Kind = UI::UiLayoutKind::Column;
+				root.Layout.Gap = 8.0f;
+				document.Nodes.push_back(root);
+
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "screen", ".wui");
+				std::string localError;
+				if (!UI::UiDocumentIO::SaveFile(target, document, &localError))
+				{
+					WLD_CORE_ERROR("Could not create UI document: {0}", localError);
+					if (error) *error = localError.empty()
+						? ("could not write " + target.string()) : localError;
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-ui-document");
+				return true;
+			});
 		// PECS-T11:Lua 只有**一个**入口 —— 旧 `Script`(落右键目录、`.lua`,在 assets/ 根
 		// 新建就永远不会被加载)与 T9 的 `Lua System`(固定 scripts/systems/)合并成
 		// 「Lua Script…」:点它打开宿主**同一个**「新建 Lua …」向导(系统 / 脚本库 / 空
@@ -100,7 +141,7 @@ void ContentBrowserPanel::UnregisterDefaultAssetTypes(){
 		m_AssetTypesRegistered = false;
 		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
 		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
-		for (const char* id : { "folder", "material", "shader", "scene", "script" })
+		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script" })
 			registry.Unregister(id);
 	}
 

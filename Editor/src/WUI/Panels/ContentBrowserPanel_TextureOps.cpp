@@ -1183,6 +1183,10 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 				case EditorAssetKind::Model: slice.TypeLabel = Wui::Tr("asset.file.model", "Model"); break;
 				case EditorAssetKind::ModelSource:
 					slice.TypeLabel = Wui::Tr("asset.file.model_source", "glTF source (import only)"); break;
+				// M7a(GameUI):`.wui` 游戏 UI 文档 —— 类型列显示 "UI Document" 而不是裸 ".wui"。
+				case EditorAssetKind::UiDocument:
+					slice.TypeLabel = Wui::Tr("asset.file.ui", "UI Document");
+					break;
 				// M4-TEX P4:`.wtex` = 纹理资产(设置 + source:),图片 = 它的源(材质引用源图路径)。
 				case EditorAssetKind::TextureAsset:
 					slice.TypeLabel = Wui::Tr("asset.file.texture", "Texture");

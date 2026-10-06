@@ -158,6 +158,14 @@ namespace World::Wui
 				<< ",\"visible\":" << (node.Visible ? "true" : "false")
 				<< ",\"interactive\":" << (node.Interactive ? "true" : "false")
 				<< ",\"tooltip\":\"" << EscapeJson(node.Tooltip) << "\""
+				// M2/M7:语义角色与稳定路径(既有键序不动,只在末尾追加新键,
+				// 老消费者按名取键不受影响;`ui.tree` 据此可以让 AI 按 role/path 定位)。
+				<< ",\"role\":\"" << EscapeJson(node.Role) << "\""
+				<< ",\"states\":\"" << EscapeJson(node.States) << "\""
+				<< ",\"actions\":\"" << EscapeJson(node.Actions) << "\""
+				<< ",\"path\":\"" << EscapeJson(node.Path) << "\""
+				<< ",\"page\":\"" << EscapeJson(node.Page) << "\""
+				<< ",\"layer\":" << node.Layer
 				<< "}";
 		}
 		out << "]";

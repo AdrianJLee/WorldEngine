@@ -35,8 +35,17 @@ namespace World
 		const char* Title() const override { return "UI Designer"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 
+		// M7a:`.wui` 的"按路径打开"入口(内容浏览器双击 → 本面板)。
+		// 面板按 id 单实例注册(宿主拿得到实例、别的面板拿不到),所以这里用一条
+		// 文件内待办:登记逻辑路径 → 面板渲染时取走一次并 LoadFrom。
+		// 与 Editor::TextureSettingsRequests 同口径 —— 面板间协作走窄通道,不扩 PanelHost 接口。
+		// logicalPath 相对内容根(也接受绝对路径);空字符串 = 清除待办。
+		static void RequestOpenPath(const std::string& logicalPath);
+
 	private:
 		// ---- 文档生命周期 ----
+		// 取走并应用一次"按路径打开"待办(没有待办时什么都不做)。
+		void ConsumeOpenRequest();
 		bool LoadFrom(const std::filesystem::path& path);
 		bool SaveTo(const std::filesystem::path& path);
 		std::filesystem::path ResolveInputPath(const std::string& text);

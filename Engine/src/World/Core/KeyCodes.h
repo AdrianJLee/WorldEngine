@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include <cstdint>
+
 namespace World
 {
 	enum KeyCodes : uint16_t

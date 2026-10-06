@@ -33,6 +33,11 @@ namespace World
 			if (assetType == "Texture" || assetType == "Texture2D") return EditorAssetKind::Texture;
 			if (assetType == "Script") return EditorAssetKind::Script;
 			if (assetType == "Scene") return EditorAssetKind::Scene;
+			// M7a(GameUI):`.wui` 的设计数据资产(单一扩展名)。schema/字段里的类型名
+			// 可写作 "UiDocument"/"UI Document"(宽容匹配,与其它类型同口径)。
+			if (assetType == "UiDocument" || assetType == "UIDocument"
+				|| assetType == "UI Document")
+				return EditorAssetKind::UiDocument;
 			return EditorAssetKind::Unknown;
 		}
 
@@ -65,6 +70,9 @@ namespace World
 					return extension == ".lua" || extension == ".luau";
 				}
 				case EditorAssetKind::Scene: return LowerExtension(path) == ".wd";
+				// M7a(GameUI):`.wui` 不可被场景/字段引用(它不是资产引用,只是编辑器文档),
+				// 所以只按扩展名归类;AssetCatalog::Scan(UiDocument) 仍能列出它们。
+				case EditorAssetKind::UiDocument: return LowerExtension(path) == ".wui";
 				default: return false;
 			}
 		}

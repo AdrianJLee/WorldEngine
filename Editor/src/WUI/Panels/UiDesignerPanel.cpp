@@ -156,9 +156,35 @@ namespace World
 			Wui::LineSegment(ctx, glm::vec2 { center.x, center.y - half },
 				glm::vec2 { center.x, center.y + half }, color, 1.0f);
 		}
+
+		// M7a:内容浏览器双击 `.wui` → 本面板的"按路径打开"待办(见头文件 RequestOpenPath)。
+		// 进程内单槽(UI 单线程);登记后由面板下一次渲染取走一次。
+		std::string& PendingOpenPath()
+		{
+			static std::string pending;
+			return pending;
+		}
 	}
 
 	// ---- 文档生命周期 ----
+
+	void UiDesignerPanel::RequestOpenPath(const std::string& logicalPath)
+	{
+		std::string normalized = logicalPath;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		PendingOpenPath() = normalized;
+	}
+
+	void UiDesignerPanel::ConsumeOpenRequest()
+	{
+		std::string pending = PendingOpenPath();
+		if (pending.empty())
+			return;
+		PendingOpenPath().clear();
+		// 逻辑路径按内容根解析(与工具栏 Open 同一条 ResolveInputPath);解析后 LoadFrom
+		// 负责读盘/报错/更新状态行。载入失败时同样清掉待办(不每帧重试同一条坏路径)。
+		LoadFrom(ResolveInputPath(pending));
+	}
 
 	const std::filesystem::path& UiDesignerPanel::ContentRoot()
 	{
@@ -287,6 +313,10 @@ namespace World
 	{
 		if (!(rect.W > 1.0f) || !(rect.H > 1.0f))
 			return;
+
+		// M7a:先消费内容浏览器排队的"按路径打开"(取走后 LoadFrom),再画工具栏/画布 ——
+		// 同一帧就能看到新文档,而不是等下一帧。
+		ConsumeOpenRequest();
 
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, theme.WindowBg, 0.0f);

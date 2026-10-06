@@ -311,6 +311,31 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 		}
 		if (path.extension() == ".wd")
 			m_Host.OpenScene(path);
+		else if (LowerExtension(path) == ".wui")
+		{
+			// M7a(GameUI):`.wui` 双击 → 打开 `ui_designer` 设计器面板并载入该文档。
+			// 面板是**单实例**(按 id 静态注册),别的面板拿不到它的实例指针;这里走窄通道:
+			// ①先让外壳打开/前置 `ui_designer`(与 Window 菜单 / AI `ui.open` 同一条路径);
+			// ②成功后再把逻辑路径排进面板的"按路径打开"待办,面板渲染时取走并 LoadFrom ——
+			// 不在这里另写一套载入逻辑(避免两处解析口径漂移)。
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			auto* shell = dynamic_cast<EditorShell*>(&m_Host);
+			if (shell && shell->AiActivatePanel("ui_designer", nullptr))
+			{
+				UiDesignerPanel::RequestOpenPath(logical);
+				if (m_Ctx)
+					m_Ctx->RecordOp("browser", "open-ui-document", path.filename().generic_string(),
+						logical);
+			}
+			else
+			{
+				NotifyAssetFailure(Wui::Tr("panel.content_browser.ui_designer_unavailable",
+					"UI Designer is not available in this editor session."));
+			}
+		}
 		else if (LowerExtension(path) == ".wtex")
 		{
 			// M4-TEX P4:纹理**资产**双击 → 打开 Texture Settings(编辑设置 + source:,
