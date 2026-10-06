@@ -475,6 +475,70 @@ namespace World
 				return true;
 			return ToLowerAscii(std::string(haystack)).find(lowerNeedle) != std::string::npos;
 		}
+
+		// M29:属性覆盖值的读写(属性面板按类型登记表出行的基础)。
+		UI::UiProp* FindPropMutable(UI::UiNode& node, std::string_view name)
+		{
+			for (UI::UiProp& prop : node.Props)
+			{
+				if (prop.Name == name)
+					return &prop;
+			}
+			return nullptr;
+		}
+
+		void WritePropOverride(UI::UiNode& node, const std::string& name, const std::string& value)
+		{
+			if (UI::UiProp* existing = FindPropMutable(node, name))
+			{
+				existing->Value = value;
+				return;
+			}
+			node.Props.push_back(UI::UiProp { name, value });
+		}
+
+		bool ClearPropOverride(UI::UiNode& node, const std::string& name)
+		{
+			const auto before = node.Props.size();
+			node.Props.erase(std::remove_if(node.Props.begin(), node.Props.end(),
+				[&name](const UI::UiProp& prop) { return prop.Name == name; }), node.Props.end());
+			return node.Props.size() != before;
+		}
+
+		// 属性面板里一行的"引擎元数据默认值"(没有登记项时用属性文本编码的兜底值)。
+		std::string PropertyDefaultText(const Wui::WuiComponentProperty& meta)
+		{
+			switch (meta.Type)
+			{
+			case Wui::WuiComponentProperty::Kind::Bool:
+				return "false";
+			case Wui::WuiComponentProperty::Kind::Float:
+			case Wui::WuiComponentProperty::Kind::Int:
+				return FormatFloat(meta.DefaultNumber);
+			case Wui::WuiComponentProperty::Kind::Color:
+				return Wui::FormatComponentColor(meta.DefaultColor);
+			case Wui::WuiComponentProperty::Kind::Size2:
+				return Wui::FormatComponentSize(meta.DefaultSize.x, meta.DefaultSize.y);
+			default:
+				return meta.DefaultText;
+			}
+		}
+
+		// 属性组标题的显示名(渲染与高度计算共用一份,避免两边漂移)。
+		std::string PropertyGroupLabel(Wui::WuiComponentPropertyGroup group)
+		{
+			switch (group)
+			{
+			case Wui::WuiComponentPropertyGroup::Style:
+				return Wui::Tr("panel.ui_designer.props.group.style", "Style");
+			case Wui::WuiComponentPropertyGroup::Layout:
+				return Wui::Tr("panel.ui_designer.props.group.layout", "Layout");
+			case Wui::WuiComponentPropertyGroup::Behavior:
+				return Wui::Tr("panel.ui_designer.props.group.behavior", "Behavior");
+			default:
+				return Wui::Tr("panel.ui_designer.props.group.content", "Content");
+			}
+		}
 	}
 
 	// ---- 文档生命周期 ----
@@ -898,11 +962,32 @@ namespace World
 			Wui::Tr("panel.ui_designer.outline", "Outline"), theme.TextMuted, theme.FontSizeCaption);
 
 		// M12:同父内上移/下移(改 Children 顺序 = 改绘制顺序;保存后文档顺序真的变了)。
+		// M29:再加 **缩进 / 提升** 一对(改**层级**)。
+		// 为什么:此前只有 ↑/↓(同父换序)与"拖动重挂父"(鼠标拖动),用户找不到改层级的路
+		// —— 反馈"无法修改控件层级"。现在四个按钮并列,层级改动是一等命令。
 		{
 			constexpr float headerHeight = 16.0f;
-			constexpr float moveWidth = 24.0f;
+			constexpr float moveWidth = 20.0f;
 			const float headerY = rect.Y + 1.0f;
 			float buttonX = rect.X + rect.W - 4.0f - moveWidth;
+			if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.outline.outdent"),
+				Wui::WuiRect { buttonX, headerY, moveWidth, headerHeight },
+				"\xE2\x86\x90", theme, CanOutdentSelected(), false,
+				Wui::Tr("panel.ui_designer.outline.outdent.tip",
+					"Outdent: become the next sibling of the parent (move up one level)")))
+			{
+				OutdentSelectedNode();
+			}
+			buttonX -= moveWidth + 3.0f;
+			if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.outline.indent"),
+				Wui::WuiRect { buttonX, headerY, moveWidth, headerHeight },
+				"\xE2\x86\x92", theme, CanIndentSelected(), false,
+				Wui::Tr("panel.ui_designer.outline.indent.tip",
+					"Indent: become a child of the previous sibling (move down one level)")))
+			{
+				IndentSelectedNode();
+			}
+			buttonX -= moveWidth + 3.0f;
 			if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.outline.down"),
 				Wui::WuiRect { buttonX, headerY, moveWidth, headerHeight },
 				"\xE2\x86\x93", theme, CanMoveSelected(1), false,
@@ -1124,8 +1209,26 @@ namespace World
 	float UiDesignerPanel::PropertyContentHeight(const UI::UiNode* node) const
 	{
 		const float rowHeight = Wui::PropertyRowHeight();
-		const float propertyRows = static_cast<float>(node != nullptr && node->Props.empty() == false
-			? node->Props.size() : 1);
+		// M29:一行一属性 + 每换一个属性组多一个组标题行 —— 与 RenderProperties 共用
+		// `CollectPropertyRows`,两边不会漂移(漂移就是"滚动区高度不对/最后一行的字段点不到")。
+		float propertyRows = 1.0f;
+		if (node != nullptr)
+		{
+			const std::vector<PropertyRowRef> rows = CollectPropertyRows(*node);
+			propertyRows = rows.empty() ? 1.0f : static_cast<float>(rows.size());
+			std::string lastGroup;
+			for (const PropertyRowRef& ref : rows)
+			{
+				if (ref.Meta == nullptr)
+					continue;
+				const std::string groupName = PropertyGroupLabel(ref.Meta->Group);
+				if (groupName != lastGroup)
+				{
+					lastGroup = groupName;
+					propertyRows += 1.0f;   // 组标题行
+				}
+			}
+		}
 		float rows = 7.0f;                                  // 七个分组头(Node/Props/Anchor/World/Bind/On/Layout)
 		if (m_ShowNodeSection) rows += 2.0f;                // Id / Type
 		if (m_ShowPropsSection) rows += propertyRows;       // 每条属性一行
@@ -1159,6 +1262,28 @@ namespace World
 		}
 		if (m_ShowLayoutSection) rows += 8.0f;              // Kind + Gap + 4×Padding + Columns + RowMajor
 		return rowHeight * rows + 8.0f;
+	}
+
+	// M29:属性面板的行来源 —— **类型登记的属性表**在前(按登记顺序,组内即作者顺序),
+	// 文档里多出来的未登记属性跟在后面(仍然可编辑,不因为"没登记"就藏起来)。
+	std::vector<UiDesignerPanel::PropertyRowRef> UiDesignerPanel::CollectPropertyRows(
+		const UI::UiNode& node) const
+	{
+		std::vector<PropertyRowRef> rows;
+		if (const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Component(node.Type))
+		{
+			rows.reserve(component->Properties.size());
+			for (const Wui::WuiComponentProperty& meta : component->Properties)
+				rows.push_back(PropertyRowRef { meta.Name, &meta });
+		}
+		for (const UI::UiProp& prop : node.Props)
+		{
+			const bool declared = std::any_of(rows.begin(), rows.end(),
+				[&prop](const PropertyRowRef& ref) { return ref.Name == prop.Name; });
+			if (!declared)
+				rows.push_back(PropertyRowRef { prop.Name, nullptr });
+		}
+		return rows;
 	}
 
 	void UiDesignerPanel::RenderProperties(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
@@ -1339,39 +1464,185 @@ namespace World
 			if (node->Props.empty())
 			{
 				Wui::Label(ctx, glm::vec2 { inner.X + 2.0f, y + 2.0f },
-					Wui::Tr("panel.ui_designer.no_props", "This node has no properties."),
+					Wui::Tr("panel.ui_designer.no_props", "No properties are declared for this type."),
 					theme.TextMuted, theme.FontSizeSmall);
 				y += rowHeight;
 			}
-			for (UI::UiProp& prop : node->Props)
+			// M29:按**类型登记的属性表**出行(不再只显示文档里已有的覆盖值)。
+			//
+			// 为什么改:此前 Props 段只列 `node->Props`,而新建的节点一个覆盖值都没有 ⇒
+			// Button / Label / Panel 的面板长得一模一样,而且**连 label 都设不了**
+			// (用户原话:"所有控件的属性都是相同的")。现在:类型登记表里的每个属性都出一行,
+			// 有覆盖值就显示覆盖值,没有就显示登记的默认值(灰);编辑即写入覆盖,↺ 清除覆盖。
+			const std::vector<PropertyRowRef> propRows = CollectPropertyRows(*node);
+			std::string lastGroup;
+			for (const PropertyRowRef& ref : propRows)
 			{
-				const std::string base = "ui_designer.prop." + node->Id + "." + prop.Name;
+				const Wui::WuiComponentProperty* meta = ref.Meta;
+				// 分组小标题(只画不折叠:分组属于"展示",不是状态)。
+				if (meta != nullptr)
+				{
+					const std::string groupName = PropertyGroupLabel(meta->Group);
+					if (groupName != lastGroup)
+					{
+						lastGroup = groupName;
+						Wui::Label(ctx, glm::vec2 { inner.X + 2.0f, y + 4.0f }, groupName,
+							theme.TextMuted, theme.FontSizeCaption);
+						y += rowHeight;
+					}
+				}
+
+				const UI::UiProp* current = node->FindProp(ref.Name);
+				const std::string value = current != nullptr
+					? current->Value
+					: (meta != nullptr ? PropertyDefaultText(*meta) : std::string());
+				const bool overridden = current != nullptr;
+				const std::string base = "ui_designer.prop." + node->Id + "." + ref.Name;
+
 				Wui::PropertyRowDesc desc;
-				desc.Label = prop.Name;
-				desc.A11yLabel = prop.Name;
-				desc.A11yEnabled = false;
+				desc.Label = ref.Name;
+				desc.Term = ref.Name;
+				desc.A11yLabel = ref.Name;
+				desc.A11yValue = value;
 				desc.LabelWidth = labelWidth;
+				desc.Enabled = true;
+				desc.Tooltip = meta != nullptr ? meta->Doc : std::string();
+				if (meta != nullptr && !meta->Unit.empty())
+					desc.Tooltip += (desc.Tooltip.empty() ? "" : "\n") + meta->Unit;
+				// ↺ = 清除覆盖值(回到类型默认);只在**有覆盖**时出现(库件的 ResetModified 口径)。
+				desc.ShowReset = true;
+				desc.ResetId = Wui::HashId((base + ".reset").c_str());
+				desc.ResetModified = overridden;
+				desc.ResetEnabled = overridden;
+				desc.ResetTooltip = Wui::Tr("panel.ui_designer.prop.reset",
+					"Clear this override (back to the type default)");
+				// (刻意不设 FieldPlaceholder:未覆盖时也要能**直接编辑**出覆盖值 ——
+				//  占位文本会顶掉字段控件,那样"加一个覆盖"就没法做了。)
 				const Wui::PropertyRowResult rowResult = Wui::PropertyRow(ctx,
 					Wui::HashId((base + ".row").c_str()), nextRow(rowHeight), desc, theme);
-
-				std::string& buffer = ctx.Persist<std::string>(Wui::HashId((base + ".buf").c_str()), prop.Value);
-				Wui::TextFieldA11y a11y;
-				a11y.Label = prop.Name;
-				const Wui::WuiId fieldId = Wui::HashId((base + ".field").c_str());
-				bool cancelled = false;
-				const bool committed = Wui::TextField(ctx, fieldId, rowResult.FieldRect, buffer, theme, &cancelled, &a11y);
-				if (cancelled)
+				if (rowResult.ResetClicked && overridden)
 				{
-					buffer = prop.Value;
+					NoteNodeEdit(ref.Name);
+					ClearPropOverride(*node, ref.Name);
+					m_ScreenDirty = true;
+					continue;   // 本帧不再画字段(下一帧按"未覆盖"重画)
 				}
-				else if (committed || (ctx.Focus() != fieldId && buffer != prop.Value))
+				// ---- 按属性类型给编辑器;任何改动都写成"覆盖值" ----
+				const auto apply = [&](const std::string& text)
 				{
-					if (prop.Value != buffer)
+					if (text == value)
+						return;
+					NoteNodeEdit(ref.Name);
+					WritePropOverride(*node, ref.Name, text);
+					m_ScreenDirty = true;
+				};
+				const Wui::WuiComponentProperty::Kind kind = meta != nullptr
+					? meta->Type : Wui::WuiComponentProperty::Kind::Text;
+				const Wui::WuiId fieldId = Wui::HashId((base + ".field").c_str());
+				switch (kind)
+				{
+				case Wui::WuiComponentProperty::Kind::Bool:
+				{
+					bool checked = value == "1" || value == "true" || value == "True"
+						|| value == "yes" || value == "on";
+					if (Wui::Checkbox(ctx, fieldId, rowResult.FieldRect, std::string(), checked, theme))
+						apply(checked ? "true" : "false");
+					break;
+				}
+				case Wui::WuiComponentProperty::Kind::Float:
+				case Wui::WuiComponentProperty::Kind::Int:
+				{
+					float number = 0.0f;
+					if (!value.empty())
 					{
-						prop.Value = buffer;
-						m_ScreenDirty = true;
-						NoteNodeEdit(prop.Name);
+						try { number = std::stof(value); } catch (...) { number = 0.0f; }
 					}
+					const float minValue = meta != nullptr ? meta->Min : -1000000.0f;
+					const float maxValue = meta != nullptr ? meta->Max : 1000000.0f;
+					const float speed = meta != nullptr ? std::max(meta->Step, 0.001f) : 0.25f;
+					const float step = meta != nullptr ? meta->Step : 1.0f;
+					if (Wui::DragFloat(ctx, fieldId, rowResult.FieldRect, number, speed,
+						minValue, maxValue, theme))
+					{
+						const float snapped = step > 0.0f ? std::round(number / step) * step : number;
+						apply(kind == Wui::WuiComponentProperty::Kind::Int
+							? std::to_string(static_cast<long long>(std::llround(snapped)))
+							: FormatFloat(snapped));
+					}
+					break;
+				}
+				case Wui::WuiComponentProperty::Kind::Color:
+				{
+					Wui::WuiColor parsed;
+					glm::vec4 rgba { 0.0f, 0.0f, 0.0f, 1.0f };
+					if (Wui::ParseComponentColor(value, parsed))
+						rgba = glm::vec4 { parsed.R, parsed.G, parsed.B, parsed.A };
+					if (Wui::ColorField(ctx, fieldId, rowResult.FieldRect, rgba, theme))
+					{
+						Wui::WuiColor out { rgba.r, rgba.g, rgba.b, rgba.a };
+						apply(Wui::FormatComponentColor(out));
+					}
+					break;
+				}
+				case Wui::WuiComponentProperty::Kind::Size2:
+				{
+					float width = 0.0f;
+					float height = 0.0f;
+					if (!Wui::ParseComponentSize(value, width, height))
+					{
+						width = 0.0f;
+						height = 0.0f;
+					}
+					const float half = std::max(20.0f, (rowResult.FieldRect.W - 4.0f) * 0.5f);
+					const Wui::WuiRect leftRect { rowResult.FieldRect.X, rowResult.FieldRect.Y,
+						half, rowResult.FieldRect.H };
+					const Wui::WuiRect rightRect { rowResult.FieldRect.X + half + 4.0f,
+						rowResult.FieldRect.Y, rowResult.FieldRect.W - half - 4.0f, rowResult.FieldRect.H };
+					const bool changedWidth = Wui::DragFloat(ctx,
+						Wui::HashId((base + ".w").c_str()), leftRect, width, 0.5f, 0.0f, 100000.0f, theme);
+					const bool changedHeight = Wui::DragFloat(ctx,
+						Wui::HashId((base + ".h").c_str()), rightRect, height, 0.5f, 0.0f, 100000.0f, theme);
+					if (changedWidth || changedHeight)
+						apply(Wui::FormatComponentSize(width, height));
+					break;
+				}
+				case Wui::WuiComponentProperty::Kind::Enum:
+				{
+					if (meta != nullptr && !meta->Options.empty())
+					{
+						int selected = -1;
+						for (std::size_t i = 0; i < meta->Options.size(); ++i)
+						{
+							if (meta->Options[i] == value)
+							{
+								selected = static_cast<int>(i);
+								break;
+							}
+						}
+						if (Wui::Combo(ctx, fieldId, rowResult.FieldRect, ref.Name,
+							meta->Options, selected, theme, value.empty() ? std::string() : value))
+						{
+							if (selected >= 0 && selected < static_cast<int>(meta->Options.size()))
+								apply(meta->Options[static_cast<std::size_t>(selected)]);
+						}
+					}
+					break;
+				}
+				default:
+				{
+					std::string& buffer = ctx.Persist<std::string>(
+						Wui::HashId((base + ".buf").c_str()), value);
+					Wui::TextFieldA11y a11y;
+					a11y.Label = ref.Name;
+					bool cancelled = false;
+					const bool committed = Wui::TextField(ctx, fieldId, rowResult.FieldRect,
+						buffer, theme, &cancelled, &a11y);
+					if (cancelled)
+						buffer = value;
+					else if (committed || (ctx.Focus() != fieldId && buffer != value))
+						apply(buffer);
+					break;
+				}
 				}
 			}
 		}
@@ -2455,6 +2726,114 @@ namespace World
 		return direction < 0 ? index > 0 : index + 1 < count;
 	}
 
+	// M29:改层级 —— 缩进 = 成为**前一个兄弟**的最后一个子节点。
+	// 没有前一个兄弟(已经是第一个)就没有可挂的父 ⇒ 不可用。
+	bool UiDesignerPanel::CanIndentSelected() const
+	{
+		std::size_t index = 0;
+		std::size_t count = 0;
+		if (m_SelectedId.empty() || !LocateSiblingIndex(m_Document.Nodes, m_SelectedId, &index, &count))
+			return false;
+		return index > 0;
+	}
+
+	// M29:提升 = 成为**父节点的下一个兄弟**;已经在根上(没有父)⇒ 不可用。
+	bool UiDesignerPanel::CanOutdentSelected() const
+	{
+		if (m_SelectedId.empty() || !m_HasDocument)
+			return false;
+		// 根节点没有父,提升不了。
+		std::size_t rootIndex = 0;
+		if (LocateRootIndex(m_Document.Nodes, m_SelectedId, &rootIndex))
+			return false;
+		return m_Document.FindNode(m_SelectedId) != nullptr;
+	}
+
+	void UiDesignerPanel::IndentSelectedNode()
+	{
+		if (!CanIndentSelected())
+		{
+			m_Status = Wui::Tr("panel.ui_designer.indent_blocked",
+				"Indent needs a previous sibling to become the new parent");
+			return;
+		}
+		// 前一个兄弟(同父同层)的 id:把选中节点挂到它下面。
+		std::vector<UI::UiNode>* list = nullptr;
+		NodeLocation location;
+		if (!LocateNode(m_Document.Nodes, m_SelectedId, std::string(), location)
+			|| location.List == nullptr || location.Index == 0)
+			return;
+		list = location.List;
+		const std::size_t index = location.Index;
+		const std::string newParent = (*list)[index - 1].Id;
+		ReparentSelected(newParent);
+	}
+
+	void UiDesignerPanel::OutdentSelectedNode()
+	{
+		if (!CanOutdentSelected())
+		{
+			m_Status = Wui::Tr("panel.ui_designer.outdent_blocked",
+				"Outdent needs a parent node (root nodes cannot be outdented)");
+			return;
+		}
+		// 找父节点:遍历时记录"谁的 Children 里有它"。
+		UI::UiNode* parent = nullptr;
+		std::function<void(std::vector<UI::UiNode>&)> findParent = [&](std::vector<UI::UiNode>& nodes)
+		{
+			for (UI::UiNode& node : nodes)
+			{
+				if (parent != nullptr)
+					return;
+				const bool isParent = std::any_of(node.Children.begin(), node.Children.end(),
+					[this](const UI::UiNode& child) { return child.Id == m_SelectedId; });
+				if (isParent)
+				{
+					parent = &node;
+					return;
+				}
+				findParent(node.Children);
+			}
+		};
+		findParent(m_Document.Nodes);
+		if (parent == nullptr)
+			return;
+		const std::string parentId = parent->Id;
+
+		// 提升 = 插到父节点**之后**(同层),所以先记下父的父与其下标。
+		std::vector<UI::UiNode>* grandList = &m_Document.Nodes;
+		std::size_t parentIndex = 0;
+		{
+			NodeLocation parentLocation;
+			if (LocateNode(m_Document.Nodes, parentId, std::string(), parentLocation)
+				&& parentLocation.List != nullptr)
+			{
+				grandList = parentLocation.List;
+				parentIndex = parentLocation.Index;
+			}
+		}
+
+		const UI::UiDocument before = m_Document;
+		UI::UiNode moved;
+		{
+			const UI::UiNode* source = m_Document.FindNode(m_SelectedId);
+			if (source == nullptr)
+				return;
+			moved = *source;
+		}
+		NodeLocation location;
+		if (!LocateNode(m_Document.Nodes, m_SelectedId, std::string(), location)
+			|| location.List == nullptr)
+			return;
+		location.List->erase(location.List->begin() + static_cast<std::ptrdiff_t>(location.Index));
+		grandList->insert(grandList->begin() + static_cast<std::ptrdiff_t>(parentIndex + 1),
+			std::move(moved));
+		m_ScreenDirty = true;
+		m_Dirty = true;
+		PushDocumentUndo(Wui::Tr("panel.ui_designer.outdent", "Outdent"), before);
+		m_Status = Wui::Tr("panel.ui_designer.outdented", "Outdented (moved up one level)");
+	}
+
 	void UiDesignerPanel::MoveSelectedNode(int direction)
 	{
 		if (m_SelectedId.empty())
@@ -2714,15 +3093,44 @@ namespace World
 		}
 		CommitNodeEdit();
 
-		// 选中节点存在 -> 挂到它的 Children 末尾;没有选中 -> 作为新的根节点。
+		// M29:插入位置按**选中节点是不是容器**决定(判据取自组件登记表的 Category,
+		// 不是写死的类型名单):
+		//   * 选中 = 容器(Panel / Box / Grid / List / ScrollArea …)⇒ 挂到它的 Children 末尾;
+		//   * 选中 = 叶子(Label / Button / Image …)⇒ 加为它的**下一个兄弟**;
+		//   * 没有选中 ⇒ 作为新的根节点。
+		//
+		// 为什么:此前一律"挂到选中节点的 Children",于是连点三次 Add 会得到
+		// `Label#1 → Label#0 → Label#2` 这种三层链 —— 既不是用户意图,也难管理。
 		std::vector<UI::UiNode>* targetList = &m_Document.Nodes;
 		std::string parentPath;
+		std::size_t insertIndex = m_Document.Nodes.size();
 		if (!m_SelectedId.empty())
 		{
 			if (UI::UiNode* parent = FindNodeMutable(m_Document.Nodes, m_SelectedId))
 			{
-				targetList = &parent->Children;
-				parentPath = FindNodePath(m_Document, m_SelectedId);
+				const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Component(parent->Type);
+				const bool isContainer = component != nullptr && component->Category == "Containers";
+				if (isContainer)
+				{
+					targetList = &parent->Children;
+					parentPath = FindNodePath(m_Document, m_SelectedId);
+					insertIndex = targetList->size();
+				}
+				else
+				{
+					// 叶子:插到它自己后面(同层)。找到"谁的 Children 里有它"。
+					NodeLocation location;
+					if (LocateNode(m_Document.Nodes, m_SelectedId, std::string(), location)
+						&& location.List != nullptr)
+					{
+						targetList = location.List;
+						insertIndex = location.Index + 1;
+						parentPath = FindNodePath(m_Document, m_SelectedId);
+						const std::size_t lastDot = parentPath.rfind('.');
+						parentPath = lastDot == std::string::npos
+							? std::string() : parentPath.substr(0, lastDot);
+					}
+				}
 			}
 		}
 
@@ -2739,7 +3147,8 @@ namespace World
 		node.Anchor.Offset = glm::vec2 { 24.0f, 24.0f };
 		node.Anchor.Size = glm::vec2 { 240.0f, 48.0f };
 		const std::string newId = node.Id;
-		targetList->push_back(std::move(node));
+		insertIndex = std::min(insertIndex, targetList->size());
+		targetList->insert(targetList->begin() + static_cast<std::ptrdiff_t>(insertIndex), std::move(node));
 
 		m_SelectedId = newId;
 		m_BufferNodeId.clear();

@@ -6,6 +6,7 @@
 #include "World/UI/UiScreen.h"
 
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/WuiComponentRegistry.h"
 #include "World/WUI/WuiUndoStack.h"
 
 #include <filesystem>
@@ -103,6 +104,22 @@ namespace World
 		void CancelNodeEdit();
 		void CancelDrag();
 		void MoveSelectedNode(int direction);
+		// M29:改层级(不是同父内换序):
+		//   Indent  = 成为**前一个兄弟**的最后一个子节点(缩进一级);
+		//   Outdent = 成为**父节点的下一个兄弟**(提升一级;已是根则不做)。
+		// 与拖动重挂父共用 ReparentSelected / 环检测与撤销口径。
+		bool CanIndentSelected() const;
+		bool CanOutdentSelected() const;
+		void IndentSelectedNode();
+		void OutdentSelectedNode();
+		// M29:属性面板按**类型登记的属性表**取行(而不是只显示文档里已有的覆盖值)。
+		// 返回的 `Meta` 为 null = 该属性是文档里的额外/未登记属性(仍可编辑)。
+		struct PropertyRowRef
+		{
+			std::string Name;
+			const Wui::WuiComponentProperty* Meta = nullptr;
+		};
+		std::vector<PropertyRowRef> CollectPropertyRows(const World::UI::UiNode& node) const;
 		// M20:大纲行拖动 = 重新挂父(拖到行上 = 成为其子节点;拖到空白 = 移到根)。
 		void ReparentSelected(const std::string& newParentId);
 		// M20:多选(Ctrl+Click 加选);多数编辑操作作用在"主选中"上,删除/复制作用在整组。
