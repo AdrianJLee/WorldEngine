@@ -53,6 +53,19 @@ namespace World::UI
 			return true;
 		}
 
+		bool ReadVec3(const YAML::Node& map, const char* key, glm::vec3& out, const std::string& path, ParseCtx& ctx)
+		{
+			const YAML::Node node = map[key];
+			if (!node)
+				return true;
+			if (!node.IsSequence() || node.size() != 3)
+				return ctx.Fail(path + ": '" + key + "' must be a 3-number sequence");
+			out.x = node[0].as<float>();
+			out.y = node[1].as<float>();
+			out.z = node[2].as<float>();
+			return true;
+		}
+
 		bool ReadScalarMap(const YAML::Node& map, const char* key,
 			std::vector<UiProp>& out, const std::string& path, ParseCtx& ctx)
 		{
@@ -207,6 +220,24 @@ namespace World::UI
 					out.Layout.RowMajor = rowMajor.as<bool>();
 			}
 
+			if (const YAML::Node world = node["World"])
+			{
+				if (!world.IsMap())
+					return ctx.Fail(path + ": 'World' must be a map");
+				out.World.Enabled = true;
+				if (const YAML::Node target = world["Target"])
+				{
+					if (!target.IsScalar())
+						return ctx.Fail(path + ": World.Target must be a string");
+					out.World.Target = target.Scalar();
+				}
+				if (out.World.Target.empty())
+					return ctx.Fail(path + ": World anchor needs a non-empty 'Target'");
+				if (!ReadVec3(world, "Offset", out.World.Offset, path, ctx)) return false;
+				if (const YAML::Node keep = world["KeepOnScreen"])
+					out.World.KeepOnScreen = keep.as<bool>();
+			}
+
 			return ParseChildren(node, path, out.Children, ctx);
 		}
 
@@ -220,6 +251,12 @@ namespace World::UI
 		{
 			out << YAML::Key << key << YAML::Value
 				<< YAML::Flow << YAML::BeginSeq << v.x << v.y << YAML::EndSeq;
+		}
+
+		void EmitVec3(YAML::Emitter& out, const char* key, const glm::vec3& v)
+		{
+			out << YAML::Key << key << YAML::Value
+				<< YAML::Flow << YAML::BeginSeq << v.x << v.y << v.z << YAML::EndSeq;
 		}
 
 		void EmitNode(YAML::Emitter& out, const UiNode& node)
@@ -261,6 +298,16 @@ namespace World::UI
 					out << YAML::Key << "Columns" << YAML::Value << node.Layout.Columns;
 				if (node.Layout.Kind == UiLayoutKind::Flex)
 					out << YAML::Key << "RowMajor" << YAML::Value << node.Layout.RowMajor;
+				out << YAML::EndMap;
+			}
+
+			if (node.World.Enabled)
+			{
+				out << YAML::Key << "World" << YAML::Value << YAML::BeginMap;
+				out << YAML::Key << "Target" << YAML::Value << node.World.Target;
+				EmitVec3(out, "Offset", node.World.Offset);
+				if (node.World.KeepOnScreen)
+					out << YAML::Key << "KeepOnScreen" << YAML::Value << true;
 				out << YAML::EndMap;
 			}
 

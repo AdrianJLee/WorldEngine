@@ -65,8 +65,19 @@ namespace World::UI
 		glm::vec2 Pivot { 0.5f, 0.5f };
 		glm::vec2 Offset { 0.0f, 0.0f };
 		glm::vec2 Size { 0.0f, 0.0f };
-		// true = 不相对父矩形,而相对视口内容矩形(已扣安全区)锚定。
-		bool RelativeToSafeArea = false;
+	// true = 不相对父矩形,而相对视口内容矩形(已扣安全区)锚定。
+	bool RelativeToSafeArea = false;
+};
+
+	// 世界空间锚点(M8):节点钉在"目标的世界位置投影到屏幕后的点"上。
+	// 默认关闭 = 纯屏幕空间;开启后 `Anchor` 仍是同一套五元组,只是"父矩形"换成了
+	// "以投影点为中心、尺寸为节点自身布局结果的矩形"(见 UiWorldProjector.h)。
+	struct UiWorldAnchor
+	{
+		bool Enabled = false;
+		std::string Target;                 // 宿主解析用的目标名(实体名/路径;空 = 非法)
+		glm::vec3 Offset { 0.0f, 0.0f, 0.0f };
+		bool KeepOnScreen = false;          // true = 投影点在屏幕外时钳到内容矩形内
 	};
 
 	// 宿主每帧提供的物理面信息。

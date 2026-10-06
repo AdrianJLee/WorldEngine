@@ -117,6 +117,8 @@ namespace World::UI
 			}
 			if (node.Layout.Columns < 1)
 				report(path, "Layout.Columns must be >= 1");
+			if (node.World.Enabled && node.World.Target.empty())
+				report(path, "World anchor needs a non-empty Target");
 		});
 
 		return ok;
@@ -164,6 +166,9 @@ namespace World::UI
 			if (a.Id != b.Id || a.Type != b.Type || !PropsEq(a.Props, b.Props) || !AnchorEq(a.Anchor, b.Anchor) ||
 				!LayoutEq(a.Layout, b.Layout) || a.Bind.size() != b.Bind.size() || a.On.size() != b.On.size() ||
 				a.Children.size() != b.Children.size())
+				return false;
+			if (a.World.Enabled != b.World.Enabled || a.World.Target != b.World.Target ||
+				a.World.Offset != b.World.Offset || a.World.KeepOnScreen != b.World.KeepOnScreen)
 				return false;
 			for (std::size_t i = 0; i < a.Bind.size(); ++i)
 			{

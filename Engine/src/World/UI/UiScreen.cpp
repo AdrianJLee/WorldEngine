@@ -76,6 +76,12 @@ namespace World::UI
 		return node ? node->Rect : Wui::WuiRect { 0, 0, 0, 0 };
 	}
 
+	void UiScreen::SetNodeRect(std::size_t index, const Wui::WuiRect& rect)
+	{
+		if (index < m_Nodes.size())
+			m_Nodes[index].Rect = rect;
+	}
+
 	void UiScreen::PlaceNode(int index, const Wui::WuiRect& rect)
 	{
 		m_Nodes[static_cast<std::size_t>(index)].Rect = rect;

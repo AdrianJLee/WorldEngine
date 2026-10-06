@@ -47,6 +47,10 @@ namespace World::UI
 		const UiNodeInstance* Find(std::string_view id) const;
 		Wui::WuiRect RectOf(std::string_view id) const;
 
+		// 世界空间锚定(M8)用:`ApplyWorldAnchors` 覆盖个别节点的矩形。
+		// 这是**表现态**的局部改写,不改变文档、不影响其它节点。
+		void SetNodeRect(std::size_t index, const Wui::WuiRect& rect);
+
 		// 命中:物理坐标 → 最上层命中节点(后序 = 绘制顺序最后者胜);未命中 → nullptr。
 		const UiNodeInstance* HitTest(glm::vec2 physicalPoint) const;
 

@@ -53,6 +53,7 @@ namespace World::UI
 		std::vector<UiProp> Props;
 		UiAnchor Anchor;
 		UiLayoutSpec Layout;
+		UiWorldAnchor World;   // 世界空间锚点(M8);Enabled=false = 纯屏幕空间
 		std::vector<UiBindingDecl> Bind;
 		std::vector<UiCommandDecl> On;
 		std::vector<UiNode> Children;

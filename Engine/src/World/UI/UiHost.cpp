@@ -5,6 +5,7 @@
 #include "World/UI/UiDocument.h"
 #include "World/UI/UiPainter.h"
 #include "World/UI/UiTypes.h"
+#include "World/UI/UiWorldProjector.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiAccessibility.h"
 
@@ -123,6 +124,7 @@ namespace World
 		m_Origin = glm::vec2 { 0.0f, 0.0f };
 		m_A11yDumpWritten = false;
 		m_PaintProblemReported = false;
+		m_WorldProblemReported = false;
 		m_Enabled = false;
 	}
 
@@ -167,6 +169,19 @@ namespace World
 		viewport.PhysicalOrigin = m_Origin;
 		if (!m_Screen.Layout(viewport))
 			return;
+
+		// M8:世界空间锚点 —— 把带 `World` 的节点重新定位到"目标投影点"。
+		// 纯屏幕空间的文档(没有 `World` 块)在这里是零成本:没有任何节点命中,结果全为零。
+		if (m_WorldSpaceEnabled)
+		{
+			const UI::UiWorldResult world = UI::ApplyWorldAnchors(
+				m_Screen, viewport, m_WorldCamera, m_WorldResolver);
+			if (!world.Warnings.empty() && !m_WorldProblemReported)
+			{
+				m_WorldProblemReported = true;
+				WLD_CORE_WARN("[ui] world-space anchor: {0}", world.Warnings.front());
+			}
+		}
 
 		// OwnChannel(Runtime):每帧重建本窗口的无障碍节点:绘制前清上一帧,绘制后节点与画面同源。
 		// SharedChannel(编辑器):宿主的 shell 每帧已 BeginFrame("main"),这里**不能**再清,

@@ -22,6 +22,7 @@
 #include "World/Core/Export.h"
 #include "World/UI/UiScreen.h"
 #include "World/UI/UiTypes.h"
+#include "World/UI/UiWorldProjector.h"
 #include "World/WUI/WuiContext.h"
 
 #include <cstdint>
@@ -72,6 +73,18 @@ namespace World
 		// 回到"整面 = input.ViewportSize、原点 (0,0)"的 Runtime 口径。
 		void ClearSurface();
 
+		// ---- 世界空间 UI(M8;默认关闭)----
+		// 开启后,`Layout` 之后会对带 `World` 锚点的节点调 `ApplyWorldAnchors`:
+		// 位置 = 目标世界坐标经 `camera` 投影到屏幕,再按节点 Pivot 摆放。纯屏幕空间的节点不受影响。
+		// 相机每帧喂(`SetWorldCamera`),目标位置由宿主经 `SetWorldPositionResolver` 提供。
+		void SetWorldSpace(bool enabled) { m_WorldSpaceEnabled = enabled; }
+		bool WorldSpaceEnabled() const { return m_WorldSpaceEnabled; }
+		void SetWorldCamera(const UI::UiWorldCamera& camera) { m_WorldCamera = camera; }
+		void SetWorldPositionResolver(UI::UiWorldPositionResolver resolver)
+		{
+			m_WorldResolver = std::move(resolver);
+		}
+
 		// 在宿主 `ctx.BeginFrame(input)` 之后、宿主覆盖层之前调用;未启用时零操作。
 		void DrawFrame(Wui::WuiContext& ctx, const Wui::WuiInputState& input);
 		// 在 `ctx.EndFrame()` 之后调用:第一帧落一次无障碍树(`WLD_UI_A11Y_DUMP`);未启用时零操作。
@@ -94,9 +107,14 @@ namespace World
 		glm::vec2 m_Origin { 0.0f, 0.0f };
 		bool m_HasSurface = false;
 		UiHostAccessibilityMode m_A11yMode = UiHostAccessibilityMode::OwnChannel;
+		bool m_WorldSpaceEnabled = false;
+		UI::UiWorldCamera m_WorldCamera;
+		UI::UiWorldPositionResolver m_WorldResolver;
 		bool m_Enabled = false;
 		bool m_A11yDumpWritten = false;
 		// 绘制期未知类型 / 提示只报一次,避免每帧刷屏。
 		bool m_PaintProblemReported = false;
+		// 世界空间锚点解析失败只报一次(目标缺失是每帧都会发生的事)。
+		bool m_WorldProblemReported = false;
 	};
 }
