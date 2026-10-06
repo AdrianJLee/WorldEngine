@@ -712,15 +712,9 @@ void EditorLayer::OnUpdate(Timestep ts){
 
 
 		WLD_TRACE_SCOPE("Renderer Clear");
-		const Camera* renderCamera = &m_EditorCamera;
-		glm::mat4 renderCameraTransform = m_EditorCamera.GetTransform();
-		// D7-1a:3D 模式用 EditorCamera3D 的投影/视图(P1b D1 的相机),沿用同一个提交接口。
-		Camera viewportCamera3D { m_EditorCamera3D.GetProjectionMatrix(false) };
-		if (m_Viewport3D)
-		{
-			renderCamera = &viewportCamera3D;
-			renderCameraTransform = glm::inverse(m_EditorCamera3D.GetViewMatrix());
-		}
+		// D7-1a:视口相机(2D = m_EditorCamera / 3D = m_EditorCamera3D)与 Play 场景主相机的
+		// 选择**延后到本函数末尾的 switch 之后**(唯一入口 `ResolveViewportSceneCamera`)。
+		// 故意不在 Tick 之前解析:Play 的 Tick 可能换/删主相机实体,提前拿到的会是悬垂引用。
 
 
 		{
@@ -792,16 +786,14 @@ void EditorLayer::OnUpdate(Timestep ts){
 		else if (!selectedEntity.HasComponent<TransformComponent>())
 			selectedEntity = {}; // Keep Inspector selection, but omit the renderer's outline.
 
-		// No component reference survives Scene update or its structural flush.
-		if (m_SceneState == SceneState::Play && !m_ScenePaused)
-		{
-			Entity cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
-			if (!cameraEntity.IsValid() || m_ActiveScene->IsPendingDestroy(cameraEntity) ||
-				!cameraEntity.HasComponent<CameraComponent>() || !cameraEntity.HasComponent<TransformComponent>())
-				return;
-			renderCamera = &m_ActiveScene->GetCameraView(static_cast<entt::entity>(cameraEntity));
-			renderCameraTransform = cameraEntity.GetComponent<TransformComponent>().GetLocalMatrix();
-		}
+		// 本帧视口相机(选法唯一,GameUI 世界锚点同源 —— 见 `ResolveViewportSceneCamera`):
+		//   Play 运行中 = Play 场景主相机实体;Edit / Simulate / Play-暂停 = 编辑器视口相机。
+		const ViewportSceneCamera viewportCamera = ResolveViewportSceneCamera();
+		// Play 运行中但没有有效主相机实体 ⇒ 本帧不提交场景渲染(与既有行为一致)。
+		if (viewportCamera.CameraPtr == nullptr)
+			return;
+		const Camera* renderCamera = viewportCamera.CameraPtr;
+		const glm::mat4 renderCameraTransform = viewportCamera.Transform;
 
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
 		// D5c-4a:骨骼动画步长(编辑态也推进,便于在视口里直接看动画;Play 时同一口径)。
@@ -1191,6 +1183,37 @@ void EditorLayer::OnUiFrame(){
 	}
 
 
+EditorLayer::ViewportSceneCamera EditorLayer::ResolveViewportSceneCamera(){
+		// 默认 = 编辑器视口相机(Edit / Simulate / Play-暂停 三种状态视口都用它):
+		//   2D 档 = `m_EditorCamera`;3D 档 = `m_EditorCamera3D` 的投影 + `inverse(视图矩阵)`。
+		ViewportSceneCamera result;
+		if (m_Viewport3D)
+		{
+			m_ViewportCamera3D = Camera { m_EditorCamera3D.GetProjectionMatrix(false) };
+			result.CameraPtr = &m_ViewportCamera3D;
+			result.Transform = glm::inverse(m_EditorCamera3D.GetViewMatrix());
+		}
+		else
+		{
+			result.CameraPtr = &m_EditorCamera;
+			result.Transform = m_EditorCamera.GetTransform();
+		}
+
+		// Play **运行中**视口画的是 Play 场景主相机实体;Play-暂停不切换(画面仍是编辑器相机)。
+		// 选法与 `GameHost::SubmitSceneRender` 的 `ResolvePrimaryCamera` 同源。
+		if (m_SceneState == SceneState::Play && !m_ScenePaused && m_ActiveScene)
+		{
+			Entity cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
+			if (!cameraEntity.IsValid() || m_ActiveScene->IsPendingDestroy(cameraEntity) ||
+				!cameraEntity.HasComponent<CameraComponent>() || !cameraEntity.HasComponent<TransformComponent>())
+				return {};   // nullptr = Play 运行中但没有可用主相机
+			result.CameraPtr = &m_ActiveScene->GetCameraView(static_cast<entt::entity>(cameraEntity));
+			result.Transform = cameraEntity.GetComponent<TransformComponent>().GetLocalMatrix();
+		}
+		return result;
+	}
+
+
 void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputState& input){
 		// 非 Play/Simulate,或没有加载到 `.wui`(Initialize 未启用)= 零操作:编辑态行为不变。
 		if (!m_UiHost.Enabled())
@@ -1223,14 +1246,33 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 		m_UiHost.SetSurface(surface);
 		m_UiHost.SetOrigin(origin);
 
-		// GameUI(M11):世界空间 UI 喂参 —— 相机取 PlayHost 的主相机(与编辑器 Play 视口提交渲染
-		// 用的是同一台:场景主相机实体;选法复用 GameHost::GetMainCameraViewProjection,这里不另写)。
+		// GameUI(M17):世界锚点必须跟着**本帧视口实际用的那台相机**,否则 Simulate / Play-暂停
+		// (视口画的是编辑器相机)时血条/名牌会与世界位置错位。规则与 `OnUpdate` 提交
+		// `SceneRenderer` 的相机选择**同源**(唯一入口 `ResolveViewportSceneCamera`,此处不另写一套):
+		//   - Play 运行中:Play 场景主相机(读 PlayHost,与 `GameHost::SubmitSceneRender` 同口径);
+		//   - Simulate / Play-暂停:编辑器视口相机(与视口画面同一台)。
 		// 渲染面尺寸随相机一起给 = 本面板的场景矩形(与上面的 `surface` 同一份尺寸,UiViewport 的
-		// 物理→设计换算因此与世界投影一致)。拿不到相机/渲染面 ⇒ 关闭世界空间:纯屏幕空间行为
-		// 与 f5b7da1 一致。解析器在 SetSceneState 的 Initialize 之后只设一次,不在这里重建。
+		// 物理→设计换算因此与世界投影一致)。拿不到相机/渲染面 ⇒ 关闭世界空间(宁可不画,不画错位)。
+		// 解析器在 SetSceneState 的 Initialize 之后只设一次,不在这里重建。
 		glm::mat4 worldViewProjection(1.0f);
 		glm::vec2 worldScreenSize(0.0f);
-		if (m_PlayHost.GetMainCameraViewProjection(worldViewProjection, worldScreenSize))
+		bool worldCameraReady = false;
+		if (m_SceneState == SceneState::Play && !m_ScenePaused)
+		{
+			worldCameraReady = m_PlayHost.GetMainCameraViewProjection(worldViewProjection, worldScreenSize);
+		}
+		else
+		{
+			const ViewportSceneCamera viewportCamera = ResolveViewportSceneCamera();
+			if (viewportCamera.CameraPtr != nullptr)
+			{
+				worldViewProjection = viewportCamera.CameraPtr->GetProjectionMatrix() *
+					glm::inverse(viewportCamera.Transform);
+				worldScreenSize = size;
+				worldCameraReady = worldScreenSize.x > 0.0f && worldScreenSize.y > 0.0f;
+			}
+		}
+		if (worldCameraReady)
 		{
 			m_UiHost.SetWorldSpace(true);
 			m_UiHost.SetWorldCamera({ worldViewProjection, worldScreenSize });

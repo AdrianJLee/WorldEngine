@@ -3,6 +3,8 @@
 
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/KeyCodes.h"
+#include "World/Utils/Paths.h"
+#include "World/UI/UiNodeRegistry.h"
 #include "World/UI/UiTypes.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -11,6 +13,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <set>
 #include <system_error>
 #include <utility>
 
@@ -18,7 +21,23 @@ namespace World
 {
 	namespace
 	{
-		constexpr float kToolbarHeight = 34.0f;
+		// ---- M16:工具栏排队 ----
+		// 一排 26px 控件;宽度够时只有一排(工具栏高 34),排不下就把 New/Add/Delete/Duplicate
+		// 换到第二排(高 62)。换行阈值 = 单排所需最小宽度,由下面的部件宽度算出:
+		// 左右边距 12 + 撤销/重做 2×30 + 路径框 120 + Open/Reload/Save/New 4×62 + Add 132
+		// + Delete 70 + Duplicate 84 + 9 个 6px 间隙 = 780。
+		constexpr float kToolbarRowHeight = 26.0f;
+		constexpr float kToolbarPadY = 4.0f;
+		constexpr float kToolbarRowGap = 2.0f;
+		constexpr float kToolbarHeightSingle = 34.0f;
+		constexpr float kToolbarHeightDouble = 62.0f;
+		constexpr float kToolbarSingleRowMinWidth = 780.0f;
+
+		float ToolbarNeededHeight(float panelWidth)
+		{
+			return panelWidth >= kToolbarSingleRowMinWidth ? kToolbarHeightSingle : kToolbarHeightDouble;
+		}
+
 		constexpr float kSplitterWidth = 5.0f;
 		constexpr float kColumnPad = 6.0f;
 		constexpr float kStatusHeight = 20.0f;
@@ -255,6 +274,93 @@ namespace World
 			return nullptr;
 		}
 
+		// ---- M16:节点定位 / 唯一 Id / 深拷贝重发 Id ----
+
+		// 节点定位:所属 Children 列表(根 = &document.Nodes)、下标与**父路径**。
+		// 父路径只在这里沿树累积 —— Id 里可以含 '.'(MakeStableId 的产物),
+		// 不能靠字符串反推父路径。
+		struct NodeLocation
+		{
+			std::vector<UI::UiNode>* List = nullptr;
+			std::size_t Index = 0;
+			std::string ParentPath;
+		};
+
+		bool LocateNode(std::vector<UI::UiNode>& nodes, const std::string& id,
+			const std::string& parentPath, NodeLocation& out)
+		{
+			for (std::size_t index = 0; index < nodes.size(); ++index)
+			{
+				if (nodes[index].Id == id)
+				{
+					out.List = &nodes;
+					out.Index = index;
+					out.ParentPath = parentPath;
+					return true;
+				}
+				const std::string path = parentPath.empty()
+					? nodes[index].Id : (parentPath + "." + nodes[index].Id);
+				if (LocateNode(nodes[index].Children, id, path, out))
+					return true;
+			}
+			return false;
+		}
+
+		// 该 Id 是否是**根列表**里的节点(只扫第一层;节点 Id 文档内唯一,无需递归)。
+		bool LocateRootIndex(const std::vector<UI::UiNode>& nodes, const std::string& id,
+			std::size_t* outIndex)
+		{
+			for (std::size_t index = 0; index < nodes.size(); ++index)
+			{
+				if (nodes[index].Id == id)
+				{
+					if (outIndex != nullptr)
+						*outIndex = index;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// 稳定 Id 生成(MakeStableId 口径);撞上文档已有 Id 或本轮已分配的 Id 时序号 +1 重试。
+		std::string MakeUniqueNodeId(const UI::UiDocument& document,
+			const std::set<std::string>& reserved, const std::string& parentPath,
+			const std::string& type, std::size_t index)
+		{
+			std::size_t probe = index;
+			std::string id = UI::MakeStableId(parentPath, type, probe);
+			while (document.FindNode(id) != nullptr || reserved.find(id) != reserved.end())
+			{
+				++probe;
+				id = UI::MakeStableId(parentPath, type, probe);
+			}
+			return id;
+		}
+
+		// 复制子树:整棵子树重新发 Id(唯一,文档内不重复),父路径逐层累积。
+		void RegenerateSubtreeIds(const UI::UiDocument& document, std::set<std::string>& reserved,
+			UI::UiNode& node, const std::string& parentPath, std::size_t index)
+		{
+			node.Id = MakeUniqueNodeId(document, reserved, parentPath, node.Type, index);
+			node.IdWasGenerated = false;
+			reserved.insert(node.Id);
+			const std::string path = parentPath.empty() ? node.Id : (parentPath + "." + node.Id);
+			for (std::size_t child = 0; child < node.Children.size(); ++child)
+				RegenerateSubtreeIds(document, reserved, node.Children[child], path, child);
+		}
+
+		// 节点在文档里的路径(空 = 没找到)。
+		std::string FindNodePath(const UI::UiDocument& document, const std::string& id)
+		{
+			std::string path;
+			document.ForEachNode([&](const UI::UiNode& node, const std::string& nodePath)
+				{
+					if (path.empty() && node.Id == id)
+						path = nodePath;
+				});
+			return path;
+		}
+
 		// M7a:内容浏览器双击 `.wui` → 本面板的"按路径打开"待办(见头文件 RequestOpenPath)。
 		// 进程内单槽(UI 单线程);登记后由面板下一次渲染取走一次。
 		std::string& PendingOpenPath()
@@ -289,14 +395,19 @@ namespace World
 		if (!m_ContentRootResolved)
 		{
 			m_ContentRootResolved = true;
-			std::error_code error;
-			std::filesystem::path manifestPath;
-			if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(error), &manifestPath))
+			// 内容根 = **编辑器当前打开的项目**的内容根,与引擎其余部分同一口径:
+			// `Paths::AssetRoot()` 已经处理了 `--project` / `WLD_PROJECT_DIR` / `projects/<名>`
+			// 与"standard 清单的 content_root"四种来源。
+			//
+			// 为什么不能从 `current_path()` 反查清单(实测踩过):编辑器从仓库根启动 + 用
+			// `WLD_PROJECT_DIR` 指定项目时,`current_path()` 是**仓库根**,那里没有清单 ——
+			// 于是内容根解析失败,面板把 `assets/ui/untitled.wui` 落到了**引擎仓库**里
+			// (用户的 .wui 会被写进 engine 仓库,而不是他的项目)。
+			m_ContentRoot = World::Paths::AssetRoot();
+			if (m_ContentRoot.empty())
 			{
-				World::Asset::ProjectManifest manifest;
-				std::string loadError;
-				if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &loadError))
-					m_ContentRoot = manifest.ResolveContentRoot(manifestPath);
+				std::error_code error;
+				m_ContentRoot = std::filesystem::current_path(error);
 			}
 		}
 		return m_ContentRoot;
@@ -346,8 +457,10 @@ namespace World
 		m_Collapsed.clear();
 		m_OutlineScroll = 0.0f;
 		m_PropertyScroll = 0.0f;
+		m_RecentScroll = 0.0f;
 		m_HasDocument = true;
 		m_ScreenDirty = true;
+		m_Dirty = false;
 		RebuildScreen();
 		m_Status = Wui::Tr("panel.ui_designer.loaded", "Loaded ") + path.filename().string()
 			+ " (" + std::to_string(m_Document.NodeCount()) + " nodes)";
@@ -373,6 +486,7 @@ namespace World
 		}
 		m_Path = path;
 		m_PathBuffer = path.string();
+		m_Dirty = false;
 		m_Status = Wui::Tr("panel.ui_designer.saved", "Saved ") + path.filename().string();
 		return true;
 	}
@@ -427,7 +541,8 @@ namespace World
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, theme.WindowBg, 0.0f);
 
-		const float toolbarHeight = std::min(kToolbarHeight, rect.H);
+		// M16:工具栏高度随宽度变化(够宽一排,排不下换两排);画布/状态行按同一结果切分。
+		const float toolbarHeight = std::min(ToolbarNeededHeight(rect.W), rect.H);
 		const float statusHeight = rect.H > 120.0f ? kStatusHeight : 0.0f;
 		RenderToolbar(ctx, Wui::WuiRect { rect.X, rect.Y, rect.W, toolbarHeight }, host);
 
@@ -480,7 +595,8 @@ namespace World
 			if (text.empty())
 			{
 				text = m_HasDocument
-					? m_Path.filename().string() + "  ·  " + std::to_string(m_Document.NodeCount()) + " nodes"
+					? (m_Dirty ? std::string("* ") : std::string()) + m_Path.filename().string()
+						+ "  ·  " + std::to_string(m_Document.NodeCount()) + " nodes"
 					: Wui::Tr("panel.ui_designer.status_idle", "No document open");
 			}
 			Wui::Label(ctx, glm::vec2 { status.X + 8.0f, status.Y + 4.0f }, text,
@@ -499,17 +615,26 @@ namespace World
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, theme.PanelHeader, 0.0f);
 
-		const float height = std::max(18.0f, rect.H - 8.0f);
-		const float y = rect.Y + 4.0f;
-		constexpr float buttonWidth = 62.0f;
 		constexpr float iconWidth = 30.0f;
+		constexpr float buttonWidth = 62.0f;
+		constexpr float addWidth = 132.0f;
+		constexpr float deleteWidth = 70.0f;
+		constexpr float duplicateWidth = 84.0f;
 		constexpr float gap = 6.0f;
-		const float buttons = iconWidth * 2.0f + buttonWidth * 3.0f + gap * 5.0f;
-		const float fieldWidth = std::max(80.0f, rect.W - 12.0f - buttons);
-		float x = rect.X + 6.0f;
+
+		const float height = kToolbarRowHeight;
+		const float left = rect.X + 6.0f;
+		const float right = rect.X + rect.W - 6.0f;
+		const float row1Y = rect.Y + kToolbarPadY;
+		// M16:排不下就把 New/Add/Delete/Duplicate 换到第二排(工具栏高度由
+		// ToolbarNeededHeight 按同一阈值先算好,两边不会错位)。
+		const bool twoRows = rect.W < kToolbarSingleRowMinWidth;
+		const float row2Y = row1Y + (twoRows ? height + kToolbarRowGap : 0.0f);
+
+		float x = left;
 
 		// M12:撤销/重做(与 Ctrl+Z / Ctrl+Y 同一条面板本地栈)。
-		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.undo"), Wui::WuiRect { x, y, iconWidth, height },
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.undo"), Wui::WuiRect { x, row1Y, iconWidth, height },
 			Wui::Tr("panel.ui_designer.undo", "Undo"), theme, m_Undo.CanUndo(), false,
 			Wui::Tr("panel.ui_designer.undo.tip", "Undo the last designer edit (Ctrl+Z)")))
 		{
@@ -517,7 +642,7 @@ namespace World
 		}
 		x += iconWidth + gap;
 
-		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.redo"), Wui::WuiRect { x, y, iconWidth, height },
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.redo"), Wui::WuiRect { x, row1Y, iconWidth, height },
 			Wui::Tr("panel.ui_designer.redo", "Redo"), theme, m_Undo.CanRedo(), false,
 			Wui::Tr("panel.ui_designer.redo.tip", "Redo the last undone edit (Ctrl+Y)")))
 		{
@@ -525,14 +650,21 @@ namespace World
 		}
 		x += iconWidth + gap;
 
+		// 行 1 尾部固定项:Open / Reload / Save(+ 单排时的 New / Add / Delete / Duplicate)。
+		float tailWidth = gap + buttonWidth * 3.0f + gap * 2.0f;
+		if (!twoRows)
+			tailWidth += gap + buttonWidth + gap + addWidth + gap + deleteWidth + gap + duplicateWidth;
+		// 路径框拿走剩余宽度;面板极窄时钳到 80(后面的部件被画到边界外 = 截断,不互相叠)。
+		const float fieldWidth = std::max(80.0f, right - x - tailWidth);
+
 		Wui::TextFieldA11y pathA11y;
 		pathA11y.Label = Wui::Tr("panel.ui_designer.path", "WUI file path");
 		pathA11y.Placeholder = "assets/ui/hud.wui";
 		Wui::TextField(ctx, Wui::HashId("ui_designer.path.field"),
-			Wui::WuiRect { x, y, fieldWidth, height }, m_PathBuffer, theme, nullptr, &pathA11y);
+			Wui::WuiRect { x, row1Y, fieldWidth, height }, m_PathBuffer, theme, nullptr, &pathA11y);
 		x += fieldWidth + gap;
 
-		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.open"), Wui::WuiRect { x, y, buttonWidth, height },
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.open"), Wui::WuiRect { x, row1Y, buttonWidth, height },
 			Wui::Tr("panel.ui_designer.open", "Open"), theme, true, false,
 			Wui::Tr("panel.ui_designer.open.tip", "Load the .wui document at this path")))
 		{
@@ -544,7 +676,7 @@ namespace World
 		}
 		x += buttonWidth + gap;
 
-		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.reload"), Wui::WuiRect { x, y, buttonWidth, height },
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.reload"), Wui::WuiRect { x, row1Y, buttonWidth, height },
 			Wui::Tr("panel.ui_designer.reload", "Reload"), theme, true, false,
 			Wui::Tr("panel.ui_designer.reload.tip", "Discard in-memory edits and re-read the file from disk")))
 		{
@@ -555,12 +687,70 @@ namespace World
 		}
 		x += buttonWidth + gap;
 
-		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.save"), Wui::WuiRect { x, y, buttonWidth, height },
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.save"), Wui::WuiRect { x, row1Y, buttonWidth, height },
 			Wui::Tr("panel.ui_designer.save", "Save"), theme, m_HasDocument, true,
 			Wui::Tr("panel.ui_designer.save.tip", "Write the document back to disk (atomic)")))
 		{
 			const std::filesystem::path path = m_Path.empty() ? ResolveInputPath(m_PathBuffer) : m_Path;
 			SaveTo(path);
+		}
+		x += buttonWidth + gap;
+
+		// ---- M16:New / Add / Delete / Duplicate(单排接在 Save 后;排不下换到第二排)----
+		float editX = twoRows ? left : x;
+		const float editY = twoRows ? row2Y : row1Y;
+
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.new"),
+			Wui::WuiRect { editX, editY, buttonWidth, height },
+			Wui::Tr("panel.ui_designer.new", "New"), theme, true, false,
+			Wui::Tr("panel.ui_designer.new.tip",
+				"Create a minimal document (Panel + Label); uses the path box, else <content-root>/ui/untitled.wui")))
+		{
+			CreateNewDocument();
+		}
+		editX += buttonWidth + gap;
+
+		// 类型来自 UI::UiNodeRegistry::All()(唯一事实源:新登记的类型自动出现在下拉里)。
+		std::vector<std::string> typeOptions;
+		for (const UI::UiNodeTypeDesc& desc : UI::UiNodeRegistry::All())
+			typeOptions.push_back(desc.Type);
+		if (!typeOptions.empty())
+		{
+			if (m_AddTypeIndex < 0 || m_AddTypeIndex >= static_cast<int>(typeOptions.size()))
+				m_AddTypeIndex = 0;
+			int picked = m_AddTypeIndex;
+			const std::string addLabel = Wui::Tr("panel.ui_designer.add", "Add");
+			if (Wui::Combo(ctx, Wui::HashId("ui_designer.add"),
+				Wui::WuiRect { editX, editY, addWidth, height }, addLabel, typeOptions, picked, theme))
+			{
+				m_AddTypeIndex = std::clamp(picked, 0, static_cast<int>(typeOptions.size()) - 1);
+				AddNode(typeOptions[static_cast<std::size_t>(m_AddTypeIndex)]);
+			}
+		}
+		editX += addWidth + gap;
+
+		const bool canDelete = CanDeleteSelected();
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.delete"),
+			Wui::WuiRect { editX, editY, deleteWidth, height },
+			Wui::Tr("panel.ui_designer.delete", "Delete"), theme, canDelete, false,
+			canDelete
+				? Wui::Tr("panel.ui_designer.delete.tip", "Remove the selected node (and its children)")
+				: Wui::Tr("panel.ui_designer.delete.disabled",
+					"Select a node first; the last root node cannot be deleted")))
+		{
+			DeleteSelectedNode();
+		}
+		editX += deleteWidth + gap;
+
+		const bool canDuplicate = CanDuplicateSelected();
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.duplicate"),
+			Wui::WuiRect { editX, editY, duplicateWidth, height },
+			Wui::Tr("panel.ui_designer.duplicate", "Duplicate"), theme, canDuplicate, false,
+			canDuplicate
+				? Wui::Tr("panel.ui_designer.duplicate.tip", "Deep-copy the selected subtree and select the copy")
+				: Wui::Tr("panel.ui_designer.duplicate.disabled", "Select a node first")))
+		{
+			DuplicateSelectedNode();
 		}
 	}
 
@@ -910,11 +1100,9 @@ namespace World
 
 		if (!m_HasDocument)
 		{
-			Wui::EmptyState(ctx, rect, std::string(),
-				Wui::Tr("panel.ui_designer.no_document", "No UI document open"),
-				Wui::Tr("panel.ui_designer.no_document_hint",
-					"Type a .wui path in the toolbar and press Open."),
-				std::string(), 0, theme);
+			// M16:空态不再是"去工具栏打字"这一条死路 —— 直接列出内容根里扫到的 .wui
+			// (每条一个按钮,点一条即 LoadFrom);一条都没有就提示用工具栏 New 新建。
+			RenderDocumentBrowser(ctx, rect, host);
 			return;
 		}
 
@@ -1085,6 +1273,7 @@ namespace World
 					? Wui::Tr("panel.ui_designer.resize", "Resize")
 					: Wui::Tr("panel.ui_designer.move", "Move"),
 					m_DragBefore);
+				m_Dirty = true;
 			}
 			CancelDrag();
 		}
@@ -1225,6 +1414,7 @@ namespace World
 		CancelNodeEdit();
 		m_Document = document;
 		m_ScreenDirty = true;
+		m_Dirty = true;
 		m_BufferNodeId.clear();   // 属性文本缓冲按新模型重建
 		if (!m_SelectedId.empty() && m_Document.FindNode(m_SelectedId) == nullptr)
 			m_SelectedId.clear();
@@ -1266,6 +1456,7 @@ namespace World
 		if (UI::UiDocumentsEquivalent(beforeDoc, after))
 			return;
 		PushDocumentUndo(name.empty() ? Wui::Tr("panel.ui_designer.edit", "Edit") : name, beforeDoc);
+		m_Dirty = true;
 	}
 
 	void UiDesignerPanel::CancelNodeEdit()
@@ -1313,12 +1504,338 @@ namespace World
 		const UI::UiDocument before = m_Document;
 		std::swap((*list)[index], (*list)[target]);
 		m_ScreenDirty = true;
+		m_Dirty = true;
 		PushDocumentUndo(direction < 0
 			? Wui::Tr("panel.ui_designer.move_up", "Move Up")
 			: Wui::Tr("panel.ui_designer.move_down", "Move Down"), before);
 		m_Status = direction < 0
 			? Wui::Tr("panel.ui_designer.moved_up", "Moved node up (earlier in draw order)")
 			: Wui::Tr("panel.ui_designer.moved_down", "Moved node down (later in draw order)");
+	}
+
+	// ---- M16:空态文档浏览 / 节点增删复制 ----
+
+	void UiDesignerPanel::ScanRecentDocuments()
+	{
+		m_RecentScanned = true;
+		m_RecentDocuments.clear();
+		m_RecentScroll = 0.0f;
+
+		std::error_code error;
+		std::filesystem::path root = ContentRoot();
+		if (root.empty())
+		{
+			root = std::filesystem::current_path(error);
+			error.clear();
+		}
+		if (root.empty())
+			return;
+
+		// 优先扫 <内容根>/ui;这个目录不存在才退回 <内容根> 全树(带访问量上限,
+		// 无内容根时不会把 build 目录整棵扫穿)。
+		//
+		// 口径:`ContentRoot()` = `Paths::AssetRoot()` = 项目的**内容根**(即 `assets/`),
+		// 所以 UI 目录是 `<内容根>/ui`,不是 `<内容根>/assets/ui`(后者会拼成 assets/assets)。
+		const std::filesystem::path uiDirectory = root / "ui";
+		const std::filesystem::path scanRoot =
+			std::filesystem::is_directory(uiDirectory, error) && !error ? uiDirectory : root;
+
+		constexpr std::size_t kRecentLimit = 50;
+		constexpr std::size_t kCollectLimit = 200;
+		constexpr std::size_t kVisitLimit = 20000;
+
+		std::vector<std::filesystem::path> found;
+		std::size_t visited = 0;
+		std::filesystem::recursive_directory_iterator iterator(scanRoot,
+			std::filesystem::directory_options::skip_permission_denied, error);
+		const std::filesystem::recursive_directory_iterator finish;
+		while (iterator != finish && visited < kVisitLimit && found.size() < kCollectLimit)
+		{
+			++visited;
+			std::error_code fileError;
+			if (iterator->is_regular_file(fileError) && !fileError)
+			{
+				std::string extension = iterator->path().extension().string();
+				std::transform(extension.begin(), extension.end(), extension.begin(),
+					[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+				if (extension == UI::kUiDocumentExtension)
+					found.push_back(iterator->path());
+			}
+			iterator.increment(error);
+			if (error)
+				break;   // 遍历出错:拿到已扫到的就够(不抛异常)
+		}
+
+		std::sort(found.begin(), found.end());
+		if (found.size() > kRecentLimit)
+			found.resize(kRecentLimit);
+
+		for (const std::filesystem::path& absolute : found)
+		{
+			std::error_code relativeError;
+			const std::filesystem::path relative = std::filesystem::relative(absolute, root, relativeError);
+			RecentDocument entry;
+			entry.Path = absolute;
+			entry.RelativePath = (relativeError ? absolute.filename() : relative).generic_string();
+			m_RecentDocuments.push_back(std::move(entry));
+		}
+	}
+
+	void UiDesignerPanel::RenderDocumentBrowser(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		if (!m_RecentScanned)
+			ScanRecentDocuments();
+
+		const bool hasFiles = !m_RecentDocuments.empty();
+		const std::string title = Wui::Tr("panel.ui_designer.no_document", "No UI document open");
+		const std::string hint = hasFiles
+			? Wui::Tr("panel.ui_designer.no_document_hint_browse",
+				"Pick a .wui found in the content root below, or press New to start a blank one.")
+			: Wui::Tr("panel.ui_designer.no_document_hint_none",
+				"No .wui found under the content root - press New to create one.");
+
+		const float headerHeight = std::min(std::max(96.0f, rect.H * 0.38f), rect.H);
+		Wui::EmptyState(ctx, Wui::WuiRect { rect.X, rect.Y, rect.W, headerHeight }, std::string(),
+			title, hint, std::string(), 0, theme);
+
+		if (!hasFiles)
+			return;
+
+		const Wui::WuiRect listRect { rect.X + 10.0f, rect.Y + headerHeight + 4.0f,
+			std::max(0.0f, rect.W - 20.0f), std::max(0.0f, rect.H - headerHeight - 14.0f) };
+		if (!(listRect.H > 8.0f) || !(listRect.W > 40.0f))
+			return;
+
+		constexpr float rowHeight = 24.0f;
+		constexpr float rowGap = 2.0f;
+		const float contentHeight = static_cast<float>(m_RecentDocuments.size()) * (rowHeight + rowGap);
+		Wui::BeginScrollArea(ctx, listRect, contentHeight, m_RecentScroll, theme,
+			Wui::HashId("ui_designer.recent.scroll"));
+		float rowY = listRect.Y - m_RecentScroll;
+		for (std::size_t index = 0; index < m_RecentDocuments.size(); ++index)
+		{
+			const RecentDocument& entry = m_RecentDocuments[index];
+			const Wui::WuiRect row { listRect.X, rowY, listRect.W, rowHeight };
+			// a11y id 形如 ui_designer.recent.<n>(n = 按路径排序后的下标);按钮文案带相对路径。
+			const Wui::WuiId id = Wui::HashId(("ui_designer.recent." + std::to_string(index)).c_str());
+			const std::string label = Wui::Tr("panel.ui_designer.open", "Open") + " " + entry.RelativePath;
+			if (Wui::ActionButton(ctx, id, row, label, theme, true,
+				Wui::Tr("panel.ui_designer.recent.tip", "Load this .wui document")))
+			{
+				LoadFrom(entry.Path);
+			}
+			rowY += rowHeight + rowGap;
+		}
+		Wui::EndScrollArea(ctx);
+	}
+
+	bool UiDesignerPanel::CreateNewDocument()
+	{
+		std::error_code error;
+		std::filesystem::path target = ResolveInputPath(m_PathBuffer);
+		if (target.empty())
+		{
+			// 路径框为空:落 <内容根>/ui/untitled.wui;已存在则加 -1、-2 后缀。
+			// (`<内容根>` 已经是项目的 `assets/`;再加一层 `assets/` 会拼成 assets/assets。)
+			std::filesystem::path root = ContentRoot();
+			if (root.empty())
+				root = std::filesystem::current_path(error);
+			if (root.empty())
+			{
+				m_Status = Wui::Tr("panel.ui_designer.new_no_root",
+					"Cannot resolve a content root for the new document");
+				return false;
+			}
+			const std::filesystem::path directory = root / "ui";
+			target = directory / "untitled.wui";
+			for (int suffix = 1; suffix < 10000 && std::filesystem::exists(target, error); ++suffix)
+				target = directory / ("untitled-" + std::to_string(suffix) + ".wui");
+		}
+		else if (!target.has_extension())
+		{
+			target += UI::kUiDocumentExtension;
+		}
+
+		// 最小可用文档:Panel 根 1920x1080 铺满 + 一个 Label 子节点。
+		UI::UiDocument document;
+		std::string screenName;
+		for (const char c : target.stem().string())
+		{
+			if (std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_' || c == '-')
+				screenName.push_back(c);
+		}
+		document.Screen = screenName.empty() ? std::string("Screen") : screenName;
+		document.Design.Resolution = glm::vec2 { 1920.0f, 1080.0f };
+
+		UI::UiNode root;
+		root.Id = "root";
+		root.Type = "Panel";
+		root.Anchor.Min = glm::vec2 { 0.0f, 0.0f };
+		root.Anchor.Max = glm::vec2 { 1.0f, 1.0f };
+		root.Anchor.Pivot = glm::vec2 { 0.5f, 0.5f };
+		root.Anchor.Offset = glm::vec2 { 0.0f, 0.0f };
+		root.Anchor.Size = glm::vec2 { 0.0f, 0.0f };
+
+		UI::UiNode label;
+		label.Type = "Label";
+		label.Id = UI::MakeStableId(root.Id, label.Type, 0);
+		label.Props.push_back(UI::UiProp { "text", "Label" });
+		label.Anchor.Min = glm::vec2 { 0.0f, 0.0f };
+		label.Anchor.Max = glm::vec2 { 0.0f, 0.0f };
+		label.Anchor.Pivot = glm::vec2 { 0.0f, 0.0f };
+		label.Anchor.Offset = glm::vec2 { 40.0f, 40.0f };
+		label.Anchor.Size = glm::vec2 { 240.0f, 40.0f };
+		root.Children.push_back(std::move(label));
+		document.Nodes.push_back(std::move(root));
+
+		m_Document = std::move(document);
+		m_Path = target;
+		m_PathBuffer = target.string();
+		// 根节点默认选中:画布上立刻有选择框/手柄,属性栏也不再是空的。
+		m_SelectedId = m_Document.Nodes.empty() ? std::string() : m_Document.Nodes.front().Id;
+		m_BufferNodeId.clear();
+		m_Undo.Clear();          // 换文档 = 撤销历史作废(与 LoadFrom 同口径)
+		CancelDrag();
+		CancelNodeEdit();
+		m_Collapsed.clear();
+		m_OutlineScroll = 0.0f;
+		m_PropertyScroll = 0.0f;
+		m_RecentScroll = 0.0f;
+		m_HasDocument = true;
+		m_ScreenDirty = true;
+		m_Dirty = true;          // 还没落盘:状态行显示未保存,Save 按钮可用
+		RebuildScreen();
+		m_Status = Wui::Tr("panel.ui_designer.new_unsaved", "New (unsaved): ")
+			+ target.filename().string()
+			+ Wui::Tr("panel.ui_designer.new_unsaved_hint", " - press Save to write it");
+		return true;
+	}
+
+	bool UiDesignerPanel::AddNode(const std::string& type)
+	{
+		if (type.empty())
+			return false;
+		if (!m_HasDocument)
+		{
+			m_Status = Wui::Tr("panel.ui_designer.need_document",
+				"Open or create a document first (New)");
+			return false;
+		}
+		if (UI::UiNodeRegistry::Find(type) == nullptr)
+		{
+			m_Status = Wui::Tr("panel.ui_designer.unknown_type", "Unknown node type: ") + type;
+			return false;
+		}
+		CommitNodeEdit();
+
+		// 选中节点存在 -> 挂到它的 Children 末尾;没有选中 -> 作为新的根节点。
+		std::vector<UI::UiNode>* targetList = &m_Document.Nodes;
+		std::string parentPath;
+		if (!m_SelectedId.empty())
+		{
+			if (UI::UiNode* parent = FindNodeMutable(m_Document.Nodes, m_SelectedId))
+			{
+				targetList = &parent->Children;
+				parentPath = FindNodePath(m_Document, m_SelectedId);
+			}
+		}
+
+		const UI::UiDocument before = m_Document;
+		std::set<std::string> reserved;
+		UI::UiNode node;
+		node.Type = type;
+		node.Id = MakeUniqueNodeId(m_Document, reserved, parentPath, type, targetList->size());
+		node.IdWasGenerated = false;
+		// 默认锚点:父矩形左上角一个 240x48 的固定盒子(容器布局会覆盖,不影响)。
+		node.Anchor.Min = glm::vec2 { 0.0f, 0.0f };
+		node.Anchor.Max = glm::vec2 { 0.0f, 0.0f };
+		node.Anchor.Pivot = glm::vec2 { 0.0f, 0.0f };
+		node.Anchor.Offset = glm::vec2 { 24.0f, 24.0f };
+		node.Anchor.Size = glm::vec2 { 240.0f, 48.0f };
+		const std::string newId = node.Id;
+		targetList->push_back(std::move(node));
+
+		m_SelectedId = newId;
+		m_BufferNodeId.clear();
+		m_ScreenDirty = true;
+		m_Dirty = true;
+		PushDocumentUndo(Wui::Tr("panel.ui_designer.add_node", "Add Node"), before);
+		m_Status = Wui::Tr("panel.ui_designer.added", "Added ") + newId;
+		return true;
+	}
+
+	void UiDesignerPanel::DeleteSelectedNode()
+	{
+		if (!CanDeleteSelected())
+		{
+			m_Status = Wui::Tr("panel.ui_designer.delete_blocked",
+				"Select a node first; the last root node cannot be deleted");
+			return;
+		}
+		CommitNodeEdit();
+
+		NodeLocation location;
+		if (!LocateNode(m_Document.Nodes, m_SelectedId, std::string(), location)
+			|| location.List == nullptr)
+			return;
+		const UI::UiDocument before = m_Document;
+		const std::string removedId = m_SelectedId;
+		location.List->erase(location.List->begin() + static_cast<std::ptrdiff_t>(location.Index));
+		CancelDrag();
+		CancelNodeEdit();
+		m_SelectedId.clear();
+		m_ScreenDirty = true;
+		m_Dirty = true;
+		PushDocumentUndo(Wui::Tr("panel.ui_designer.delete_node", "Delete Node"), before);
+		m_Status = Wui::Tr("panel.ui_designer.deleted", "Deleted ") + removedId;
+	}
+
+	void UiDesignerPanel::DuplicateSelectedNode()
+	{
+		if (!CanDuplicateSelected())
+		{
+			m_Status = Wui::Tr("panel.ui_designer.duplicate_blocked", "Select a node first");
+			return;
+		}
+		CommitNodeEdit();
+
+		NodeLocation location;
+		if (!LocateNode(m_Document.Nodes, m_SelectedId, std::string(), location)
+			|| location.List == nullptr)
+			return;
+		const UI::UiDocument before = m_Document;
+
+		// 深拷贝整棵子树(值语义),再给子树里每个节点重发唯一 Id。
+		UI::UiNode copy = (*location.List)[location.Index];
+		std::set<std::string> reserved;
+		RegenerateSubtreeIds(m_Document, reserved, copy, location.ParentPath, location.Index + 1);
+		const std::string copyId = copy.Id;
+		location.List->insert(
+			location.List->begin() + static_cast<std::ptrdiff_t>(location.Index + 1), std::move(copy));
+
+		m_SelectedId = copyId;
+		m_BufferNodeId.clear();
+		m_ScreenDirty = true;
+		m_Dirty = true;
+		PushDocumentUndo(Wui::Tr("panel.ui_designer.duplicate_node", "Duplicate Node"), before);
+		m_Status = Wui::Tr("panel.ui_designer.duplicated", "Duplicated to ") + copyId;
+	}
+
+	bool UiDesignerPanel::CanDeleteSelected() const
+	{
+		if (!CanDuplicateSelected())
+			return false;
+		std::size_t rootIndex = 0;
+		// 最后一个根节点删掉就是空文档:这一步禁用并给理由(tooltip)。
+		return !(LocateRootIndex(m_Document.Nodes, m_SelectedId, &rootIndex)
+			&& m_Document.Nodes.size() <= 1);
+	}
+
+	bool UiDesignerPanel::CanDuplicateSelected() const
+	{
+		return m_HasDocument && !m_SelectedId.empty()
+			&& m_Document.FindNode(m_SelectedId) != nullptr;
 	}
 
 	// ---- M12:画布手柄 ----

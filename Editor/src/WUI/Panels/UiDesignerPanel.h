@@ -93,6 +93,18 @@ namespace World
 		void DrawResizeHandles(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
 			const Wui::WuiRect& box);
 
+		// ---- M16:空态文档浏览 / 节点增删复制 ----
+		// 没有文档时画布空态列出内容根里扫到的 `.wui`(点一条即 LoadFrom);有文档时工具栏
+		// 提供 New / Add(类型来自 UI::UiNodeRegistry::All())/ Delete / Duplicate。
+		void ScanRecentDocuments();
+		void RenderDocumentBrowser(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		bool CreateNewDocument();
+		bool AddNode(const std::string& type);
+		void DeleteSelectedNode();
+		void DuplicateSelectedNode();
+		bool CanDeleteSelected() const;
+		bool CanDuplicateSelected() const;
+
 		// ---- 模型 ----
 		World::UI::UiDocument m_Document;
 		World::UI::UiScreen m_Screen;
@@ -150,5 +162,20 @@ namespace World
 
 		std::filesystem::path m_ContentRoot;
 		bool m_ContentRootResolved = false;
+
+		// ---- M16:空态文档浏览 / 节点增删复制 ----
+		// 没有文档时列出的候选(按路径排序,上限 50;一次扫描后缓存)。
+		struct RecentDocument
+		{
+			std::string RelativePath;    // 相对内容根(按钮文案用)
+			std::filesystem::path Path;  // 绝对路径(LoadFrom 用)
+		};
+		std::vector<RecentDocument> m_RecentDocuments;
+		bool m_RecentScanned = false;
+		float m_RecentScroll = 0.0f;
+		// Add 下拉的当前项(Wui::Combo 的 selected 由调用方持有;越界时每帧回落到 0)。
+		int m_AddTypeIndex = 0;
+		// 未保存标记:新建 / 任何文档改动置位,LoadFrom / SaveTo 清除(状态行显示)。
+		bool m_Dirty = false;
 	};
 }

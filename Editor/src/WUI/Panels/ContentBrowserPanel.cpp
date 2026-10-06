@@ -249,14 +249,17 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 			// 图标:悬停时绕自身中心轻微放大,名称/信息的基线不动。
 			const float iconSize = kSliceIconSize * (hovered ? kSliceHoverIconScale : 1.0f);
 			const uint64_t icon = slice.IsDir ? m_DirIconId : m_FileIconId;
+			// M18(GameUI):网格图标染色表 —— `.slang` 代码蓝、`.wui` 紫罗兰;其余类型保持原色(白),
+			// 即"没有专属 tint 的类型"逐字段不变(`.wd`/`.wmat`/`.wmodel`/`.wprefab` 等)。
+			const Wui::WuiColor iconTint = slice.Kind == EditorAssetKind::Shader ? kShaderIconTint
+				: (slice.Kind == EditorAssetKind::UiDocument ? kUiIconTint
+					: Wui::WuiColor { 1, 1, 1, 1 });
 			if (icon != 0)
 				// W3.6:染色图标走库件 `Wui::Icon`(命令逐字段等价:矩形/uv/tint 都不变;
 				// 保留 icon != 0 守卫 ⇒ 不改变"无图不画"的既有行为,空图兜底不在这条路径上)。
 				Wui::Icon(ctx, { cell.X + cell.W * 0.5f - iconSize * 0.5f,
 						cell.Y + gap - (iconSize - kSliceIconSize) * 0.5f, iconSize, iconSize },
-					icon, { 0, 1, 1, -1 },
-					slice.Kind == EditorAssetKind::Shader
-						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 }, theme);
+					icon, { 0, 1, 1, -1 }, iconTint, theme);
 
 			// Slang-B1:着色器的常驻类型徽标(与 prefab 徽标同一套画法;代码蓝底)。
 			if (slice.Kind == EditorAssetKind::Shader)
@@ -283,6 +286,18 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 				// W3.6:同上,prefab 徽标(Accent 底 + 白字)也走 `Wui::Badge`。
 				Wui::Badge(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH }, badge.Text,
 					theme.Accent, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
+			}
+
+			// M18(GameUI):`.wui` 游戏 UI 文档 —— 与 `.wprefab`/`.slang` 同做法:一枚常驻类型徽标
+			// (自带配色)+ 图标染色,网格里一眼可辨;类型名复用**已存在**的本地化键 `asset.file.ui`。
+			if (slice.Kind == EditorAssetKind::UiDocument)
+			{
+				const Wui::LocalizedLabel badge = Wui::TrLabel("asset.file.ui", "UI Document");
+				const float badgeSize = infoSize;
+				const float badgeW = ctx.MeasureTextWidth(badge.Text, badgeSize) + theme.PadSmall * 2.0f;
+				const float badgeH = badgeSize + 4.0f;
+				Wui::Badge(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH }, badge.Text,
+					kUiBadgeFill, kUiBadgeText, theme, badgeSize);
 			}
 
 			// CPPSRC-1:项目源码根下的 `Generated/**`(构建生成物)挂一枚常驻徽标 ——
@@ -347,11 +362,13 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 				? Wui::Tr("panel.content_browser.slice.folder", "Folder")
 				// glTF/GLB 用"导入源"而不是裸扩展名:它们在网格视图里必须一眼看出不是可引用资产。
 				// prefab / 着色器同理:显示类型名而不是 ".wprefab" / ".slang"。
+				// M18(GameUI):`.wui` 同款 —— 显示 "UI Document" 而不是裸 ".wui"。
 				// CPPSRC-1:项目源码根下的 C++ 文件同样给类型名(网格里就是"C++ 头文件/源文件",
 				// 而不是裸 ".h/.cpp")—— 与列表模式的类型列同一口径。
 				: ((slice.Extension == ".gltf" || slice.Extension == ".glb" || slice.Extension == ".wprefab"
 						|| slice.Extension == ".slang" || slice.Kind == EditorAssetKind::CppHeader
-						|| slice.Kind == EditorAssetKind::CppSource || slice.PluginManifest)
+						|| slice.Kind == EditorAssetKind::CppSource || slice.PluginManifest
+						|| slice.Kind == EditorAssetKind::UiDocument)
 					? slice.TypeLabel
 					: (slice.Extension.empty() ? slice.TypeLabel : slice.Extension)) + " · "
 					+ FormatBytes(static_cast<size_t>(bytes));

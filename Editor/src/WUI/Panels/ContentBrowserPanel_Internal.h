@@ -92,6 +92,13 @@ std::string RenameErrorFor(const std::filesystem::path& target, const std::strin
 		constexpr Wui::WuiColor kShaderIconTint { 0.62f, 0.80f, 1.00f, 1.00f };
 		constexpr Wui::WuiColor kShaderBadgeFill { 0.20f, 0.42f, 0.78f, 1.00f };
 		constexpr Wui::WuiColor kShaderBadgeText { 0.93f, 0.96f, 1.00f, 1.00f };
+		// ---- M18(GameUI):`.wui` 游戏 UI 文档在网格里的**独立标识** ----
+		// 照 `.slang`(Slang-B1)同一套口径:图标整体染色 + 左上角常驻类型徽标;不新增裸绘制、
+		// 不新增图标资源。类型名走**已存在**的本地化键 `asset.file.ui`(zh-CN 与英文兜底都在)。
+		// 颜色自成一档:与 prefab 的 Accent 蓝、slang 的代码蓝都不撞色。
+		constexpr Wui::WuiColor kUiIconTint { 0.78f, 0.70f, 1.00f, 1.00f };
+		constexpr Wui::WuiColor kUiBadgeFill { 0.44f, 0.28f, 0.78f, 1.00f };
+		constexpr Wui::WuiColor kUiBadgeText { 0.95f, 0.93f, 1.00f, 1.00f };
 Wui::WuiColor MixColor(const Wui::WuiColor& from, const Wui::WuiColor& to, float amount);
 
 std::string LowerAscii(std::string text);

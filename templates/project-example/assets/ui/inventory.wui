@@ -1,0 +1,202 @@
+# 真实游戏 UI 样板(GameUI M17):背包/装备界面。
+#
+# 这份文档是"商业级演示 + 端到端夹具":节点类型/令牌/布局容器/锚点/滚动虚拟化/命令/
+# 本地化都走 `.wui` 的正式能力,不做任何测试专用分支。
+#
+# 由 `UiDocumentIO::Parse` 加载(Runtime:`WLD_UI_DOC=<本项目>/assets/ui/inventory.wui`)。
+# 验证:`tools/agents/skills/worldengine-dev/scripts/verify-gameui.ps1` 的 inventory 用例。
+FormatVersion: 1
+Screen: Inventory
+Design:
+  Resolution: [1920, 1080]
+  ScaleMode: ScaleWithScreenSize
+  Match: 0.5
+SafeArea:
+  Enabled: true
+  Insets: [24, 24, 24, 24]
+Theme: ui/default
+
+# 主题令牌(M14):节点用 `$id` 引用,不写字面颜色。
+Tokens:
+  - Id: surface
+    Props:
+      bg: "#141A22F2"
+  - Id: surface_alt
+    Props:
+      bg: "#1E2632FF"
+  - Id: text
+    Props:
+      color: "#E9EEF7FF"
+  - Id: text_dim
+    Props:
+      color: "#97A3B6FF"
+  - Id: accent
+    Props:
+      bg: "#3D7BFFFF"
+  - Id: danger
+    Props:
+      bg: "#D8555AFF"
+
+Nodes:
+  # 铺满:相对内容矩形(已扣安全区)拉伸。
+  - Id: root
+    Type: Panel
+    Props: { bg: $surface, border: "#2A3340FF", radius: 10 }
+    Anchor: { Min: [0, 0], Max: [1, 1], Offset: [0, 0], Size: [0, 0] }
+    Layout: { Kind: Absolute }
+    Children:
+      # ---- 顶栏(Row 布局容器)----
+      - Id: header
+        Type: Panel
+        Props: { bg: $surface_alt, radius: 8 }
+        Anchor: { Min: [0, 0], Max: [1, 0], Offset: [32, 28], Size: [-64, 92] }
+        Layout: { Kind: Row, Gap: 12, Padding: [24, 18, 24, 18] }
+        Children:
+          - Id: title_label
+            Type: Label
+            Props: { text: "@inventory.title", color: $text, fontSize: 26, bold: true }
+          - Id: capacity_bar
+            Type: ProgressBar
+            Props:
+              value: 0.62
+              label: "@inventory.capacity"
+              fillColor: $accent
+              trackColor: $surface_alt
+              radius: 4
+          - Id: gold_label
+            Type: Label
+            Props: { text: "@inventory.gold", color: $text_dim, fontSize: 20 }
+
+      # ---- 主体(Column 布局容器)----
+      - Id: body
+        Type: Panel
+        Props: { bg: $surface_alt, radius: 8 }
+        Anchor: { Min: [0, 0], Max: [0.66, 1], Offset: [32, 140], Size: [-48, -260] }
+        Layout: { Kind: Column, Gap: 12, Padding: [24, 16, 24, 16] }
+        Children:
+          # 子槽位内再锚定到顶部固定高度(容器槽位 + 锚点的组合)。
+          - Id: tab_row
+            Type: Panel
+            Props: { bg: $surface, radius: 6 }
+            Anchor: { Min: [0, 0], Max: [1, 0], Offset: [0, 0], Size: [0, 56] }
+            Layout: { Kind: Row, Gap: 8, Padding: [8, 8, 8, 8] }
+            Children:
+              - Id: tab_all
+                Type: Button
+                Props: { label: "@inventory.tab.all", bg: $accent }
+                On: { Click: inventory.tab.all }
+              - Id: tab_weapon
+                Type: Button
+                Props: { label: "@inventory.tab.weapon" }
+                On: { Click: inventory.tab.weapon }
+              - Id: tab_material
+                Type: Button
+                Props: { label: "@inventory.tab.material" }
+                On: { Click: inventory.tab.material }
+          # 滚动列表:32 行,内容高度 > 容器 ⇒ 触发虚拟化(只画可见行)。
+          - Id: items_list
+            Type: List
+            Props:
+              scrollable: true
+              rowCount: 32
+              rowHeight: 38
+              rowPrefix: "@inventory.row"
+              bg: $surface
+              radius: 6
+              fontSize: 14
+
+      # ---- 右侧详情(贴角锚点)----
+      - Id: detail
+        Type: Panel
+        Props: { bg: $surface_alt, border: "#2A3340FF", radius: 8 }
+        Anchor: { Min: [0.66, 0], Max: [1, 0], Pivot: [0, 0], Offset: [16, 140], Size: [-32, 420] }
+        Layout: { Kind: Absolute }
+        Children:
+          - Id: detail_title
+            Type: Label
+            Props: { text: "@inventory.detail.title", color: $text, fontSize: 22, bold: true }
+            Anchor: { Min: [0, 0], Max: [1, 0], Offset: [20, 16], Size: [-40, 30] }
+          - Id: detail_icon
+            Type: Image
+            Props: { radius: 8, label: "@inventory.detail.icon" }
+            Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [20, 58], Size: [120, 120] }
+          - Id: rarity_label
+            Type: Label
+            Props: { text: "@inventory.detail.rarity", color: $accent, fontSize: 18 }
+            Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [156, 62], Size: [220, 26] }
+          - Id: detail_desc
+            Type: Label
+            Props: { text: "@inventory.detail.desc", color: $text_dim, fontSize: 15 }
+            Anchor: { Min: [0, 0], Max: [1, 0], Offset: [20, 192], Size: [-40, 64] }
+          - Id: durability_bar
+            Type: ProgressBar
+            Props:
+              value: 0.78
+              label: "@inventory.detail.durability"
+              fillColor: $accent
+              trackColor: $surface
+              radius: 4
+            Anchor: { Min: [0, 0], Max: [1, 0], Offset: [20, 268], Size: [-40, 22] }
+          - Id: weight_bar
+            Type: ProgressBar
+            Props:
+              value: 0.41
+              label: "@inventory.detail.weight"
+              fillColor: $danger
+              trackColor: $surface
+              radius: 4
+            Anchor: { Min: [0, 0], Max: [1, 0], Offset: [20, 306], Size: [-40, 22] }
+          - Id: detail_hint
+            Type: Label
+            Props: { text: "@inventory.detail.hint", color: $text_dim, fontSize: 13 }
+            Anchor: { Min: [0, 0], Max: [1, 0], Offset: [20, 344], Size: [-40, 24] }
+
+      # ---- 右侧属性面板(Grid 布局容器,3 列 × 2 行)----
+      - Id: stats_grid
+        Type: Panel
+        Props: { bg: $surface_alt, radius: 8 }
+        Anchor: { Min: [0.66, 0], Max: [1, 0], Pivot: [0, 0], Offset: [16, 576], Size: [-32, 384] }
+        Layout: { Kind: Grid, Columns: 3, Gap: 10, Padding: [12, 12, 12, 12] }
+        Children:
+          - Id: stat_hp
+            Type: Label
+            Props: { text: "@inventory.stat.hp", color: $text, fontSize: 16 }
+          - Id: stat_atk
+            Type: Label
+            Props: { text: "@inventory.stat.atk", color: $text, fontSize: 16 }
+          - Id: stat_def
+            Type: Label
+            Props: { text: "@inventory.stat.def", color: $text, fontSize: 16 }
+          - Id: stat_crit
+            Type: Label
+            Props: { text: "@inventory.stat.crit", color: $text, fontSize: 16 }
+          - Id: stat_speed
+            Type: Label
+            Props: { text: "@inventory.stat.speed", color: $text, fontSize: 16 }
+          - Id: stat_luck
+            Type: Label
+            Props: { text: "@inventory.stat.luck", color: $text, fontSize: 16 }
+
+      # ---- 底栏(Row 布局容器 + 贴底居中锚点)----
+      - Id: footer
+        Type: Panel
+        Props: { bg: $surface_alt, radius: 8 }
+        Anchor: { Min: [0, 1], Max: [1, 1], Pivot: [0, 1], Offset: [32, -28], Size: [-64, 84] }
+        Layout: { Kind: Row, Gap: 16, Padding: [24, 14, 24, 14] }
+        Children:
+          - Id: equip_button
+            Type: Button
+            Props: { label: "@inventory.equip", bg: $accent, radius: 6 }
+            On: { Click: inventory.equip }
+          - Id: drop_button
+            Type: Button
+            Props: { label: "@inventory.drop", bg: $danger, radius: 6 }
+            On: { Click: inventory.drop }
+          - Id: close_button
+            Type: Button
+            Props: { label: "@inventory.close", radius: 6 }
+            On: { Click: ui.close }
+          - Id: version_label
+            Type: Label
+            Props: { text: "@inventory.version", color: $text_dim, fontSize: 13 }
+            Anchor: { Min: [0.5, 1], Max: [0.5, 1], Pivot: [0.5, 1], Offset: [0, 0], Size: [180, 22] }

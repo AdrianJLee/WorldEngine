@@ -96,6 +96,33 @@ namespace World::Editor
 			return first == "build" || first == "projects" || first == "tmp"
 				|| first == "local" || first == "scratch" || first == "archive";
 		}
+
+		// 用户 2026-10-06:"项目模版不要显示在启动器中"。
+		//
+		// 最近项目列表只收**用户的**项目。两类路径不是用户项目,却会自己跑进来:
+		//   * 引擎自带模板 `<repo>/templates/**` —— 它们是"新建项目"的素材,不是可打开的项目;
+		//   * 仓库内的一次性目录(`build/` / `local/` / `tmp/` / `scratch/` / `archive/` 下的)——
+		//     验证脚本与构建产物会把它们当项目打开,于是它们出现在最近列表里,
+		//     看上去和真项目一模一样。
+		// `projects/**` 是刻意放行的例外:仓库文档里写明它是"想把项目放进仓库"时的容器。
+		// 仓库**外**的路径一律允许(用户自己的项目都住在那儿)。
+		bool IsRecentIneligible(const std::filesystem::path& root)
+		{
+			const std::string key = NormalizedKey(root);
+			const std::string repoKey = NormalizedKey(std::filesystem::path(std::string(WLD_REPO_ROOT)));
+			if (repoKey.empty() || key.rfind(repoKey + "/", 0) != 0)
+				return false;
+
+			const std::string relativeKey = key.substr(repoKey.size() + 1);
+			const size_t slash = relativeKey.find('/');
+			const std::string first = relativeKey.substr(0,
+				slash == std::string::npos ? relativeKey.size() : slash);
+			if (first == "templates")
+				return true;
+			if (first == "projects")
+				return false;
+			return IsDisposableRepoSubpath(relativeKey);
+		}
 	}
 
 	std::filesystem::path ProjectLauncher::StorePath()
@@ -204,6 +231,13 @@ namespace World::Editor
 			entry.LastOpened = item.Find("lastOpened") ? item.Find("lastOpened")->AsString() : std::string();
 			if (entry.Path.empty())
 				continue;
+			// 用户 2026-10-06:模板/一次性目录不进最近列表(读时过滤 ⇒ 历史里已经混进去的
+			// 条目也立刻从启动器消失,不必等下一次写盘自愈)。见 IsRecentIneligible。
+			if (IsRecentIneligible(std::filesystem::u8path(entry.Path)))
+			{
+				WLD_CORE_INFO("[project] dropping non-project path from recent list: {0}", entry.Path);
+				continue;
+			}
 			if (entry.Name.empty())
 				entry.Name = DisplayName(std::filesystem::u8path(entry.Path));
 			entries.push_back(std::move(entry));
@@ -315,6 +349,14 @@ namespace World::Editor
 
 		std::vector<RecentProjectEntry> entries = LoadRaw();
 		const std::string key = NormalizedKey(root);
+		// 用户 2026-10-06("项目模版不要显示在启动器中"):模板 / 仓库内一次性目录根本不写进
+		// 最近列表。静默忽略并记一条 info(不是错误:用户从模板目录开编辑器是合法动作)。
+		if (IsRecentIneligible(root))
+		{
+			WLD_CORE_INFO("[project] not recording '{0}' as a recent project "
+				"(engine templates and repo scratch dirs are not user projects)", root.u8string());
+			return true;
+		}
 		entries.erase(std::remove_if(entries.begin(), entries.end(),
 			[&key](const RecentProjectEntry& entry)
 			{

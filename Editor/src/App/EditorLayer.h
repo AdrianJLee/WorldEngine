@@ -373,6 +373,21 @@ namespace World
 		// 相机实体的世界矩阵(优先 WorldTransformComponent)。
 		static glm::mat4 EntityWorldMatrix(Entity entity);
 
+		// GameUI(M17):本帧视口场景渲染实际使用的那台相机 + 其世界矩阵。选法只有这一处,
+		// `OnUpdate`(提交 SceneRenderer)与 `DrawPlayModeGameUi`(世界空间锚点)都读它,
+		// 不再各写一套 —— 这是 Simulate / Play-暂停 下世界锚点会错位的根因修复。
+		//   - Edit / Simulate / Play-暂停:编辑器视口相机(2D = `m_EditorCamera`;
+		//     3D = `m_EditorCamera3D` 的投影 + `inverse(视图矩阵)`,与 OnUpdate 的 3D 档一致);
+		//   - Play 运行中:Play 场景主相机实体(与 `GameHost::SubmitSceneRender` 同源)。
+		// `CameraPtr == nullptr` = Play 运行中但没有有效主相机实体:调用方据此跳过本帧场景渲染
+		// (OnUpdate 既有行为)或关闭世界空间(宁可不画,也不画错位)。
+		struct ViewportSceneCamera
+		{
+			const Camera* CameraPtr = nullptr;
+			glm::mat4 Transform { 1.0f };
+		};
+		ViewportSceneCamera ResolveViewportSceneCamera();
+
 		void SetSceneState(SceneState state);
 		void UpdateSceneContext(Ref<Scene> scene);
 		// P2 W5b:每帧在帧边界轮询脚本文件监听(编辑态=文档场景,Play/Simulate=正在跑的场景),
@@ -483,6 +498,9 @@ namespace World
 
 		EditorCamera m_EditorCamera;
 		EditorCamera3D m_EditorCamera3D;
+		// GameUI(M17):3D 档视口相机的临时 `Camera`(投影每帧从 `m_EditorCamera3D` 重建)。
+		// `ResolveViewportSceneCamera` 返回的指针必须活到本帧提交渲染/喂世界相机。
+		Camera m_ViewportCamera3D;
 		bool m_Viewport3D = false;
 		enum class Viewport3DDrag { None, Orbit, Pan };
 		Viewport3DDrag m_Viewport3DDragging = Viewport3DDrag::None;

@@ -1,0 +1,32 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "project",
+  "$language": "en",
+  "$owns": [
+    "inventory."
+  ],
+  "inventory.title": "Inventory",
+  "inventory.capacity": "Load",
+  "inventory.gold": "Gold 12,480",
+  "inventory.tab.all": "All",
+  "inventory.tab.weapon": "Weapons",
+  "inventory.tab.material": "Materials",
+  "inventory.row": "Item",
+  "inventory.detail.title": "Fine Steel Longsword",
+  "inventory.detail.icon": "Item icon",
+  "inventory.detail.rarity": "Epic - One-handed",
+  "inventory.detail.desc": "Forged from fine steel; slashes carry a little fire damage.\nEquipping raises attack and crit.",
+  "inventory.detail.durability": "Durability",
+  "inventory.detail.weight": "Weight",
+  "inventory.detail.hint": "Right-click to equip / drag to sort",
+  "inventory.equip": "Equip",
+  "inventory.drop": "Drop",
+  "inventory.close": "Close",
+  "inventory.version": "Inventory v1.0",
+  "inventory.stat.hp": "Health",
+  "inventory.stat.atk": "Attack",
+  "inventory.stat.def": "Defense",
+  "inventory.stat.crit": "Crit",
+  "inventory.stat.speed": "Speed",
+  "inventory.stat.luck": "Luck"
+}
