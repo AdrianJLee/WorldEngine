@@ -65,6 +65,9 @@ namespace World
 		// ---- 分段渲染 ----
 		void RenderToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void RenderOutline(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// M20:节点面板(替代"Add"下拉)—— 搜索 + 按分类分组的类型按钮,单击即插入。
+		// 放左栏下半:常驻可见、一次点击命中,不用先展开弹层再选(用户反馈下拉不便)。
+		void RenderNodePalette(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void RenderCanvas(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void RenderProperties(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void AppendOutlineItems(const std::vector<World::UI::UiNode>& nodes, int depth,
@@ -98,6 +101,13 @@ namespace World
 		void CancelNodeEdit();
 		void CancelDrag();
 		void MoveSelectedNode(int direction);
+		// M20:大纲行拖动 = 重新挂父(拖到行上 = 成为其子节点;拖到空白 = 移到根)。
+		void ReparentSelected(const std::string& newParentId);
+		// M20:多选(Ctrl+Click 加选);多数编辑操作作用在"主选中"上,删除/复制作用在整组。
+		bool IsSelected(const std::string& nodeId) const;
+		void ToggleSelected(const std::string& nodeId);
+		void ClearSelection();
+		std::vector<std::string> EffectiveSelection() const;
 		bool CanMoveSelected(int direction) const;
 		bool SelectedNodeBox(Wui::WuiRect& out) const;
 		void DrawResizeHandles(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
@@ -126,6 +136,14 @@ namespace World
 		std::string m_PathBuffer;
 		std::string m_Status;
 		std::string m_SelectedId;
+		// M20:多选(不含主选中本身);顺序 = 加选顺序。
+		std::vector<std::string> m_SelectedIds;
+		std::string m_PaletteSearch;
+		float m_PaletteScroll = 0.0f;
+		// M20:大纲拖拽重挂父(按下时记起点,松开时按落点行决定新父)。
+		bool m_OutlineDragActive = false;
+		std::string m_OutlineDragId;
+		glm::vec2 m_OutlineDragStart { 0.0f, 0.0f };
 		std::string m_BufferNodeId;
 
 		// 大纲:折叠记录(键 = 节点 Id;默认展开)与行 -> 节点 Id 的映射。
@@ -191,7 +209,7 @@ namespace World
 		uint64_t m_RecentScanFrame = 0;
 		float m_RecentScroll = 0.0f;
 		// Add 下拉的当前项(Wui::Combo 的 selected 由调用方持有;越界时每帧回落到 0)。
-		int m_AddTypeIndex = 0;
+		// (M20:原来的 Add 下拉下标已随下拉一起移除 —— 类型选择改在节点面板里。)
 		// 未保存标记:新建 / 任何文档改动置位,LoadFrom / SaveTo 清除(状态行显示)。
 		bool m_Dirty = false;
 	};

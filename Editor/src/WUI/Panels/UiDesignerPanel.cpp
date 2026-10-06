@@ -328,12 +328,19 @@ namespace World
 			const std::set<std::string>& reserved, const std::string& parentPath,
 			const std::string& type, std::size_t index)
 		{
+			// M20:Id 只取 `Type#序号`,**不嵌父路径**。
+			//
+			// 为什么:Id 是"文档内唯一"的标识,路径由遍历时的 `父.子` 拼出来(见
+			// `UiDocument::ForEachNode`)。若 Id 里已经含父路径,拼出的路径就会重复一段 ——
+			// 实测三层嵌套会得到 `root.root.Grid#1.Image#0` 这种名字,越长越糟。
+			// 唯一性由下面的探测循环保证(document + 本轮 reserved),不依赖路径前缀。
+			(void)parentPath;
 			std::size_t probe = index;
-			std::string id = UI::MakeStableId(parentPath, type, probe);
+			std::string id = UI::MakeStableId(std::string(), type, probe);
 			while (document.FindNode(id) != nullptr || reserved.find(id) != reserved.end())
 			{
 				++probe;
-				id = UI::MakeStableId(parentPath, type, probe);
+				id = UI::MakeStableId(std::string(), type, probe);
 			}
 			return id;
 		}
@@ -368,6 +375,24 @@ namespace World
 		{
 			static std::string pending;
 			return pending;
+		}
+
+		// M20:节点面板的搜索用(大小写不敏感的子串匹配)。
+		std::string ToLowerAscii(std::string text)
+		{
+			for (char& c : text)
+			{
+				if (c >= 'A' && c <= 'Z')
+					c = static_cast<char>(c - 'A' + 'a');
+			}
+			return text;
+		}
+
+		bool ContainsNoCase(std::string_view haystack, const std::string& lowerNeedle)
+		{
+			if (lowerNeedle.empty())
+				return true;
+			return ToLowerAscii(std::string(haystack)).find(lowerNeedle) != std::string::npos;
 		}
 	}
 
@@ -567,7 +592,15 @@ namespace World
 			const float columnTop = body.Y + kColumnPad;
 			const float columnHeight = std::max(0.0f, body.H - kColumnPad * 2.0f);
 			float x = body.X + kColumnPad;
-			const Wui::WuiRect outlineRect { x, columnTop, leftWidth, columnHeight };
+			// M20:左栏拆成"大纲(上) + 节点面板(下)"。节点面板常驻可见 —— 这就是替代
+			// "Add"下拉的交互:类型按钮一眼看全、一次点击命中,不用先展开弹层再选。
+			// 高度取左栏的 42%(下限 140、上限 320);左栏太矮时只留大纲。
+			const float paletteHeight = columnHeight > 260.0f
+				? std::clamp(columnHeight * 0.42f, 140.0f, 320.0f) : 0.0f;
+			const Wui::WuiRect outlineRect { x, columnTop, leftWidth,
+				std::max(0.0f, columnHeight - paletteHeight) };
+			const Wui::WuiRect paletteRect { x, columnTop + outlineRect.H + 4.0f, leftWidth,
+				std::max(0.0f, paletteHeight - 4.0f) };
 			x += leftWidth;
 			const Wui::WuiRect leftSplitter { x, columnTop, kSplitterWidth, columnHeight };
 			x += kSplitterWidth;
@@ -578,6 +611,8 @@ namespace World
 			const Wui::WuiRect propertiesRect { x, columnTop, rightWidth, columnHeight };
 
 			RenderOutline(ctx, outlineRect, host);
+			if (paletteRect.H > 0.0f)
+				RenderNodePalette(ctx, paletteRect, host);
 			RenderCanvas(ctx, canvasRect, host);
 			RenderProperties(ctx, propertiesRect, host);
 
@@ -618,7 +653,6 @@ namespace World
 
 		constexpr float iconWidth = 30.0f;
 		constexpr float buttonWidth = 62.0f;
-		constexpr float addWidth = 132.0f;
 		constexpr float deleteWidth = 70.0f;
 		constexpr float duplicateWidth = 84.0f;
 		constexpr float gap = 6.0f;
@@ -651,10 +685,10 @@ namespace World
 		}
 		x += iconWidth + gap;
 
-		// 行 1 尾部固定项:Open / Reload / Save / Fit(+ 单排时的 New / Add / Delete / Duplicate)。
+		// 行 1 尾部固定项:Open / Reload / Save / Fit(+ 单排时的 New / Delete / Duplicate)。
 		float tailWidth = gap + buttonWidth * 4.0f + gap * 3.0f;
 		if (!twoRows)
-			tailWidth += gap + buttonWidth + gap + addWidth + gap + deleteWidth + gap + duplicateWidth;
+			tailWidth += gap + buttonWidth + gap + deleteWidth + gap + duplicateWidth;
 		// 路径框拿走剩余宽度;面板极窄时钳到 80(后面的部件被画到边界外 = 截断,不互相叠)。
 		const float fieldWidth = std::max(80.0f, right - x - tailWidth);
 
@@ -724,27 +758,9 @@ namespace World
 		}
 		editX += buttonWidth + gap;
 
-		// 类型来自 UI::UiNodeRegistry::All()(唯一事实源:新登记的类型自动出现在下拉里)。
-		std::vector<std::string> typeOptions;
-		for (const UI::UiNodeTypeDesc& desc : UI::UiNodeRegistry::All())
-			typeOptions.push_back(desc.Type);
-		if (!typeOptions.empty())
-		{
-			if (m_AddTypeIndex < 0 || m_AddTypeIndex >= static_cast<int>(typeOptions.size()))
-				m_AddTypeIndex = 0;
-			int picked = m_AddTypeIndex;
-			const std::string addLabel = Wui::Tr("panel.ui_designer.add", "Add");
-			// M19:触发器固定显示 "Add"(M19a 给 Combo 加的 displayText 尾参)——
-			// 否则它只会画上次选的类型名,用户看不出这是个"添加节点"入口。
-			if (Wui::Combo(ctx, Wui::HashId("ui_designer.add"),
-				Wui::WuiRect { editX, editY, addWidth, height }, addLabel, typeOptions, picked, theme,
-				addLabel))
-			{
-				m_AddTypeIndex = std::clamp(picked, 0, static_cast<int>(typeOptions.size()) - 1);
-				AddNode(typeOptions[static_cast<std::size_t>(m_AddTypeIndex)]);
-			}
-		}
-		editX += addWidth + gap;
+		// M20:原来的"Add"下拉已换成左栏的**节点面板**(搜索 + 类型网格 + 单击即插入)——
+		// 用户反馈"下拉框选 UI 控件着实不便"。这里不再放快捷按钮:工具栏宽度有限,
+		// 一排类型按钮会把 Delete/Duplicate 挤出面板(实测在默认 1000px 面板上真的出界)。
 
 		const bool canDelete = CanDeleteSelected();
 		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.delete"),
@@ -824,13 +840,161 @@ namespace World
 		if (const std::string* id = nodeIdAt(result.KeyToggleExpand))
 			m_Collapsed[*id] = !IsCollapsed(*id);
 		if (const std::string* id = nodeIdAt(result.Clicked))
-			m_SelectedId = *id;
+		{
+			// M20:Ctrl+Click = 加选/取消加选(多选);普通点击 = 单选并清空加选。
+			if (ctx.Input().Ctrl)
+				ToggleSelected(*id);
+			else
+			{
+				m_SelectedId = *id;
+				m_SelectedIds.clear();
+			}
+			// M20:按下即武装"拖动重挂父"(位移超过阈值才算拖动,单纯点击不受影响)。
+			m_OutlineDragActive = false;
+			m_OutlineDragId = *id;
+			m_OutlineDragStart = ctx.Input().MousePos;
+		}
 		if (const std::string* id = nodeIdAt(result.KeyActivate))
+		{
 			m_SelectedId = *id;
+			m_SelectedIds.clear();
+		}
 		if (const std::string* id = nodeIdAt(result.KeyMoveTo))
+		{
 			m_SelectedId = *id;
+			m_SelectedIds.clear();
+		}
 		if (m_SelectedId != selectionBefore)
 			CommitNodeEdit();   // 选中变化前把上一节点的属性编辑落账
+
+		// ---- M20:大纲行拖动 = 重新挂父 ----
+		// 阈值 4px(与 WuiContext 的拖拽判定同口径),避免把"点一下"误判成拖动;
+		// 松开时按落点所在行决定新父:落在某行上 = 成为它的子节点,落在空白 = 移到根。
+		const Wui::WuiInputState& input = ctx.Input();
+		if (!m_OutlineDragId.empty() && input.MouseDown[0])
+		{
+			if (!m_OutlineDragActive &&
+				glm::distance(input.MousePos, m_OutlineDragStart) > 4.0f)
+				m_OutlineDragActive = true;
+		}
+		if (!m_OutlineDragId.empty() && !input.MouseDown[0])
+		{
+			if (m_OutlineDragActive)
+			{
+				const int hoveredRow = static_cast<int>(
+					std::floor((input.MousePos.y - (area.Y - m_OutlineScroll)) / kTreeRowHeight));
+				const std::string* dropTarget = nodeIdAt(hoveredRow);
+				// 落点必须是**视口内**的行(滚出去的行不算)。
+				const bool inside = input.MousePos.x >= area.X && input.MousePos.x <= area.X + area.W &&
+					input.MousePos.y >= area.Y && input.MousePos.y <= area.Y + area.H;
+				const std::string dragId = m_OutlineDragId;
+				m_OutlineDragActive = false;
+				m_OutlineDragId.clear();
+				if (inside && dropTarget != nullptr && *dropTarget != dragId)
+				{
+					const std::string parent = *dropTarget;
+					m_SelectedId = dragId;
+					ReparentSelected(parent);
+				}
+			}
+			else
+			{
+				m_OutlineDragActive = false;
+				m_OutlineDragId.clear();
+			}
+		}
+	}
+
+	// ---- M20:节点面板(替代"Add"下拉)----
+	//
+	// 用户反馈"下拉框选 UI 控件着实不便":下拉要两步(展开弹层 → 选条目)、弹层盖住画布、
+	// 11 种类型平铺一列且没有分类/搜索。这里改成**常驻面板**:
+	//   `Wui::TextField` 搜索(按类型名或分类名过滤)+ **两列网格**的类型按钮,单击即插入
+	//   (插到当前选中节点下;没有选中则作为新的根节点)。
+	// 为什么是两列网格而不是"分类标题 + 单列":单列 11 种类型要滚两屏,而面板下半只有 ~190px;
+	// 两列一次看全。(类型按分类排序 ⇒ 同类相邻,分组感仍在;分类名进按钮 tooltip。)
+	// 类型列表来自 `UI::UiNodeRegistry::All()`(唯一事实源,新登记的类型自动出现,不用改这里)。
+	void UiDesignerPanel::RenderNodePalette(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		Wui::PanelBackground(ctx, rect, theme.PanelBg, 2.0f);
+
+		constexpr float pad = 6.0f;
+		Wui::Label(ctx, glm::vec2 { rect.X + pad, rect.Y + 3.0f },
+			Wui::Tr("panel.ui_designer.palette", "Add node"), theme.TextMuted, theme.FontSizeCaption);
+
+		const float searchY = rect.Y + 18.0f;
+		const Wui::WuiRect searchRect { rect.X + pad, searchY,
+			std::max(40.0f, rect.W - pad * 2.0f), 20.0f };
+		Wui::TextFieldA11y searchA11y;
+		searchA11y.Label = Wui::Tr("panel.ui_designer.palette.search", "Search node types");
+		searchA11y.Placeholder = Wui::Tr("panel.ui_designer.palette.hint", "Search types\u2026");
+		Wui::TextField(ctx, Wui::HashId("ui_designer.palette.search"), searchRect, m_PaletteSearch,
+			theme, nullptr, &searchA11y);
+
+		// 组装(分类 + 过滤),再按"分类连续块"渲染 —— 同名分类只出现一次标题。
+		const std::string needle = ToLowerAscii(m_PaletteSearch);
+		std::vector<std::pair<std::string, std::string>> entries;   // { Category, Type }
+		for (const UI::UiNodeTypeDesc& desc : UI::UiNodeRegistry::All())
+		{
+			std::string category = Wui::Tr("panel.ui_designer.palette.other", "Other");
+			if (const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Component(desc.Type))
+			{
+				if (!component->Category.empty())
+					category = component->Category;
+			}
+			if (!ContainsNoCase(desc.Type, needle) && !ContainsNoCase(category, needle))
+				continue;
+			entries.emplace_back(category, desc.Type);
+		}
+		std::stable_sort(entries.begin(), entries.end(),
+			[](const auto& a, const auto& b) { return a.first < b.first; });
+
+		const Wui::WuiRect listRect { rect.X + pad, searchY + 24.0f,
+			std::max(40.0f, rect.W - pad * 2.0f),
+			std::max(0.0f, rect.Y + rect.H - (searchY + 24.0f) - pad) };
+		if (listRect.H < 12.0f)
+			return;
+
+		constexpr float rowHeight = 21.0f;
+		constexpr float columnGap = 3.0f;
+		const float cellWidth = std::max(40.0f, (listRect.W - columnGap) * 0.5f);
+		const std::size_t rows = (entries.size() + 1) / 2;
+		const float contentHeight = entries.empty()
+			? 20.0f : (static_cast<float>(rows) * (rowHeight + 1.0f));
+
+		Wui::BeginScrollArea(ctx, listRect, contentHeight, m_PaletteScroll, theme,
+			Wui::HashId("ui_designer.palette.scroll"));
+		float y = listRect.Y - m_PaletteScroll;
+		std::string addType;
+		for (std::size_t i = 0; i < entries.size(); ++i)
+		{
+			const std::size_t column = i % 2;
+			const float cellX = listRect.X + static_cast<float>(column) * (cellWidth + columnGap);
+			const Wui::WuiRect cell { cellX, y, cellWidth, rowHeight };
+			if (column == 1)
+				y += rowHeight + 1.0f;   // 每行两格:格子放完才推进行
+			if (!ctx.ClipAllows(cell))
+				continue;   // 滚出视口的行不画也不登记(与属性页滚动区同一口径)
+			if (Wui::ButtonEx(ctx,
+				Wui::HashId(("ui_designer.palette.add." + entries[i].second).c_str()),
+				cell, entries[i].second, theme, true, false,
+				entries[i].first + " \xC2\xB7 " + entries[i].second))
+			{
+				addType = entries[i].second;
+			}
+		}
+		if (entries.empty())
+		{
+			Wui::Label(ctx, glm::vec2 { listRect.X + 2.0f, y + 2.0f },
+				Wui::Tr("panel.ui_designer.palette.none", "No matching type"),
+				theme.TextDisabled, theme.FontSizeCaption);
+		}
+		Wui::EndScrollArea(ctx);
+
+		// 在滚动区之后再加(避免改文档导致本帧的行与命中不一致)。
+		if (!addType.empty())
+			AddNode(addType);
 	}
 
 	void UiDesignerPanel::AppendOutlineItems(const std::vector<UI::UiNode>& nodes, int depth,
@@ -1653,6 +1817,117 @@ namespace World
 
 	// ---- M12:同父内上移/下移(改 Children 顺序 = 改绘制顺序)----
 
+	// ---- M20:多选 ----
+	// `m_SelectedId` 是"主选中"(属性页/手柄/方向键作用在它上);`m_SelectedIds` 是额外的加选项。
+	// 删除/复制作用在整组(见 EffectiveSelection)。多选不做"成套属性编辑" —— 那是另一套模型。
+	bool UiDesignerPanel::IsSelected(const std::string& nodeId) const
+	{
+		if (nodeId == m_SelectedId)
+			return true;
+		return std::find(m_SelectedIds.begin(), m_SelectedIds.end(), nodeId) != m_SelectedIds.end();
+	}
+
+	void UiDesignerPanel::ToggleSelected(const std::string& nodeId)
+	{
+		const auto found = std::find(m_SelectedIds.begin(), m_SelectedIds.end(), nodeId);
+		if (found != m_SelectedIds.end())
+		{
+			m_SelectedIds.erase(found);
+			return;
+		}
+		if (nodeId == m_SelectedId)
+			return;   // 主选中不能被"加选"变成重复项
+		m_SelectedIds.push_back(nodeId);
+	}
+
+	void UiDesignerPanel::ClearSelection()
+	{
+		m_SelectedId.clear();
+		m_SelectedIds.clear();
+	}
+
+	std::vector<std::string> UiDesignerPanel::EffectiveSelection() const
+	{
+		std::vector<std::string> ids;
+		if (!m_SelectedId.empty())
+			ids.push_back(m_SelectedId);
+		for (const std::string& id : m_SelectedIds)
+		{
+			if (m_Document.FindNode(id) != nullptr)
+				ids.push_back(id);
+		}
+		return ids;
+	}
+
+	// M20:大纲拖动 = 重新挂父。守卫与"上移/下移"同一口径:
+	//   * 不能挂到自己或自己的后代(会成环);
+	//   * 目标父节点必须存在;
+	//   * 已经在该父下 ⇒ 什么都不做(不入撤销栈)。
+	void UiDesignerPanel::ReparentSelected(const std::string& newParentId)
+	{
+		if (m_SelectedId.empty() || newParentId.empty() || m_SelectedId == newParentId)
+			return;
+		if (FindNodeMutable(m_Document.Nodes, newParentId) == nullptr)
+			return;
+
+		// 环检测:新父是"被拖节点的后代"时就拒绝(否则树会被切断成不可达的循环)。
+		if (const UI::UiNode* dragged = m_Document.FindNode(m_SelectedId))
+		{
+			bool isDescendant = false;
+			std::function<void(const UI::UiNode&)> scan = [&](const UI::UiNode& node)
+			{
+				for (const UI::UiNode& child : node.Children)
+				{
+					if (child.Id == newParentId)
+						isDescendant = true;
+					scan(child);
+				}
+			};
+			scan(*dragged);
+			if (isDescendant)
+			{
+				m_Status = Wui::Tr("panel.ui_designer.reparent_cycle",
+					"Cannot drop a node onto its own descendant");
+				return;
+			}
+		}
+
+		// 已经是该父的子节点 ⇒ 无操作(不产生撤销记录)。
+		if (const UI::UiNode* parent = m_Document.FindNode(newParentId))
+		{
+			const bool alreadyChild = std::any_of(parent->Children.begin(), parent->Children.end(),
+				[this](const UI::UiNode& child) { return child.Id == m_SelectedId; });
+			if (alreadyChild)
+				return;
+		}
+
+		UI::UiNode copy;
+		{
+			const UI::UiNode* dragged = m_Document.FindNode(m_SelectedId);
+			if (dragged == nullptr)
+				return;
+			copy = *dragged;
+		}
+
+		const UI::UiDocument before = m_Document;
+		// 从原位置摘掉(根或某个 Children)。
+		NodeLocation location;
+		if (LocateNode(m_Document.Nodes, m_SelectedId, std::string(), location) && location.List != nullptr)
+			location.List->erase(location.List->begin() + static_cast<std::ptrdiff_t>(location.Index));
+		// 挂到新父下(重新取指针:上面的 erase 可能让之前的指针失效)。
+		UI::UiNode* target = FindNodeMutable(m_Document.Nodes, newParentId);
+		if (target == nullptr)
+		{
+			m_Document = before;   // 极端情况:回滚,不留下"节点消失"的中间态
+			return;
+		}
+		target->Children.push_back(std::move(copy));
+		m_ScreenDirty = true;
+		m_Dirty = true;
+		PushDocumentUndo(Wui::Tr("panel.ui_designer.reparent", "Reparent"), before);
+		m_Status = Wui::Tr("panel.ui_designer.reparented", "Moved under ") + newParentId;
+	}
+
 	bool UiDesignerPanel::CanMoveSelected(int direction) const
 	{
 		std::size_t index = 0;
@@ -1967,20 +2242,33 @@ namespace World
 		}
 		CommitNodeEdit();
 
-		NodeLocation location;
-		if (!LocateNode(m_Document.Nodes, m_SelectedId, std::string(), location)
-			|| location.List == nullptr)
+		// M20:多选时删除整组(`EffectiveSelection()` 已过滤掉不存在的 id)。
+		// 逐个查位置再删:每次 erase 都会让上一次的下标失效,所以每删一个都重新定位。
+		const std::vector<std::string> victims = EffectiveSelection();
+		if (victims.empty())
 			return;
 		const UI::UiDocument before = m_Document;
-		const std::string removedId = m_SelectedId;
-		location.List->erase(location.List->begin() + static_cast<std::ptrdiff_t>(location.Index));
+		std::size_t removed = 0;
+		for (const std::string& id : victims)
+		{
+			// 父节点也在删除集合里时,子节点会随父一起消失 ⇒ 重定位失败就跳过(已删过)。
+			NodeLocation location;
+			if (!LocateNode(m_Document.Nodes, id, std::string(), location) || location.List == nullptr)
+				continue;
+			// 最后一个根节点不能删(与 CanDeleteSelected 同一守卫)。
+			if (location.List == &m_Document.Nodes && m_Document.Nodes.size() <= 1)
+				continue;
+			location.List->erase(location.List->begin() + static_cast<std::ptrdiff_t>(location.Index));
+			++removed;
+		}
 		CancelDrag();
 		CancelNodeEdit();
-		m_SelectedId.clear();
+		ClearSelection();
 		m_ScreenDirty = true;
 		m_Dirty = true;
 		PushDocumentUndo(Wui::Tr("panel.ui_designer.delete_node", "Delete Node"), before);
-		m_Status = Wui::Tr("panel.ui_designer.deleted", "Deleted ") + removedId;
+		m_Status = Wui::Tr("panel.ui_designer.deleted", "Deleted ") +
+			(removed == 1 ? victims.front() : (std::to_string(removed) + " nodes"));
 	}
 
 	// M19:对齐参考线 —— 拖动/缩放时,选中框的左/中/右、上/中/下与**父框**(没有父则视口内容矩形)
