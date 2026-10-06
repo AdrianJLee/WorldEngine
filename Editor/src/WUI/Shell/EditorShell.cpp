@@ -243,6 +243,8 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		m_PanelRegistry.emplace("material", std::make_unique<MaterialEditorPanel>());
 		m_PanelRegistry.emplace("texture_settings", std::make_unique<TextureSettingsPanel>());
 		m_PanelRegistry.emplace("scripts", std::make_unique<ScriptsPanel>());
+		// M5:GameUI 可视化设计器(config 表已声明 ui_designer;这里登记实例)。
+		m_PanelRegistry.emplace("ui_designer", std::make_unique<UiDesignerPanel>());
 		// PLUG-T3:插件管理器面板(数据/动作都走 EditorShell → EditorLayer;项目形态才注册)。
 		if (!m_LauncherMode)
 			m_PanelRegistry.emplace("plugins", std::make_unique<PluginsPanel>(*this));

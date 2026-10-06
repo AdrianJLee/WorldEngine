@@ -31,6 +31,23 @@ namespace World::Wui
 		// 节点的中心是否落在窗口客户区之内。看不见的控件不允许被脚本点击
 		// (否则会出现"AI 能点到用户点不到的东西",掩盖真实的布局问题)。
 		bool Visible = true;
+
+		// ---- GameUI(M2):节点语义扩展(**全部追加在末尾** + 默认值,保持既有聚合初始化兼容)----
+		// 契约:`contract.ui-runtime` §8 —— 每个可见交互节点要能回答"它是什么角色、什么状态、
+		// 能做什么、在页面/层级的哪个位置"。这些字段只描述,不改变命中与输入路径。
+
+		// 语义角色("button"/"text"/"img"/"progressbar"/"group"/"checkbox"/...)。
+		std::string Role;
+		// 状态集(逗号分隔,如 "checked,disabled");空 = 无特殊状态。
+		std::string States;
+		// 可执行动作(逗号分隔,如 "click,type");空 = 静态件。
+		std::string Actions;
+		// 稳定节点路径(`.wui` 的 "父.子" 口径,如 "root.hp");与坐标/索引无关。
+		std::string Path;
+		// 所属页面(导航层);空 = 未知/单页。
+		std::string Page;
+		// 层级(页面栈/模态叠加深度;0 = 常态页面)。
+		int Layer = 0;
 	};
 
 	// UI 无障碍树:让 AI 能"像读 DOM 一样"找到控件,而不是靠猜坐标。

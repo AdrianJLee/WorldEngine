@@ -1502,6 +1502,48 @@ foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
     )
 endforeach()
 
+# GameUI(M0):`.wui` 文档格式 + 版本门禁 + 锚点/缩放/安全区/命中 + 实例树布局。
+add_executable(WorldUiDocumentTests World/UiDocumentTests.cpp)
+target_link_libraries(WorldUiDocumentTests PRIVATE World)
+target_compile_features(WorldUiDocumentTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldUiDocumentTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldUiDocumentTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldUiDocumentTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.UiDocument COMMAND WorldUiDocumentTests)
+set_tests_properties(World.UiDocument PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+# GameUI(M2):节点类型注册表 + `.wui` 绘制进 WuiContext + 无障碍节点登记(headless)。
+add_executable(WorldUiPaintTests World/UiPaintTests.cpp)
+target_link_libraries(WorldUiPaintTests PRIVATE World)
+target_compile_features(WorldUiPaintTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldUiPaintTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldUiPaintTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldUiPaintTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.UiPaint COMMAND WorldUiPaintTests)
+set_tests_properties(World.UiPaint PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
 # WorldRuntime.dll -> 测试 exe 旁:**只拷一次**。
 #
 # 原先每个测试目标各挂一条 POST_BUILD `copy_if_different`,而本文件的所有测试 exe 都在同一目录
@@ -1524,6 +1566,6 @@ add_custom_target(WeCopyRuntimeDllForTests
     VERBATIM
 )
 
-foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests WorldUiDocumentTests WorldUiPaintTests ${_we_optional_test_targets})
     add_dependencies(${_we_test_target} WeCopyRuntimeDllForTests)
 endforeach()

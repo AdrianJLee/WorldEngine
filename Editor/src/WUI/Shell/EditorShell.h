@@ -18,6 +18,7 @@
 #include "WUI/Panels/AttachSlotPanel.h"
 #include "WUI/Panels/PluginsPanel.h"
 #include "WUI/Panels/PluginPanel.h"
+#include "WUI/Panels/UiDesignerPanel.h"
 #include "WUI/Shell/PluginEditorHost.h"
 #include "WUI/Shell/FloatWindowHost.h"
 #include "Project/ProjectLauncher.h"
