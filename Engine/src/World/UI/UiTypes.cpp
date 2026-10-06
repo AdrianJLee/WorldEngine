@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 namespace World::UI
 {
@@ -295,5 +297,96 @@ namespace World::UI
 			return 0.0f;
 		const float maxOffset = std::max(contentSize - containerSize, 0.0f);
 		return std::min(offset, maxOffset);
+	}
+
+	// ---- 主题令牌与样式继承(M14;仅追加)----
+
+	std::string FormatUiTokenChain(const std::vector<std::string>& chain)
+	{
+		std::string text;
+		for (std::size_t i = 0; i < chain.size(); ++i)
+		{
+			if (i > 0)
+				text += " -> ";
+			text += kUiTokenPrefix;
+			text += chain[i];
+		}
+		return text;
+	}
+
+	bool IsUiTokenRef(std::string_view value)
+	{
+		return !UiTokenRefId(value).empty();
+	}
+
+	std::string_view UiTokenRefId(std::string_view value)
+	{
+		if (value.size() < 2 || value.front() != kUiTokenPrefix)
+			return std::string_view();
+		return Trim(value.substr(1));
+	}
+
+	UiTokenResult ResolveUiTokenValue(std::string_view value, std::string_view propName,
+		const UiTokenFinder& find, int maxDepth)
+	{
+		UiTokenResult result;
+
+		if (!IsUiTokenRef(value))
+		{
+			// 字面值原样返回:没有令牌引用的旧文档逐字节行为不变。
+			result.Value.assign(value);
+			result.Ok = true;
+			return result;
+		}
+
+		result.WasToken = true;
+		const int limit = maxDepth > 0 ? maxDepth : 32;
+		std::vector<std::string> chain;
+		std::string current(value);
+
+		for (int depth = 0;; ++depth)
+		{
+			const std::string_view id = UiTokenRefId(current);
+			if (id.empty())
+			{
+				result.Error = "invalid token reference '" + current + "' (expected '$name')";
+				return result;
+			}
+			if (std::find(chain.begin(), chain.end(), std::string(id)) != chain.end())
+			{
+				// 环:把闭环完整打印出来(如 $a -> $b -> $a)。
+				chain.emplace_back(id);
+				result.Chain = FormatUiTokenChain(chain);
+				result.Error = "token cycle: " + result.Chain;
+				return result;
+			}
+			if (depth >= limit)
+			{
+				result.Chain = FormatUiTokenChain(chain);
+				result.Error = "token reference chain too deep (> " + std::to_string(limit) + "): " + result.Chain;
+				return result;
+			}
+
+			chain.emplace_back(id);
+			const std::string* next = find ? find(id, propName) : nullptr;
+			if (next == nullptr)
+			{
+				result.Chain = FormatUiTokenChain(chain);
+				result.Error = "undefined UI token '$" + std::string(id) + "'";
+				if (!propName.empty())
+					result.Error += " (no value for property '" + std::string(propName) + "')";
+				if (chain.size() > 1)
+					result.Error += "; referenced from " + result.Chain;
+				return result;
+			}
+			current = *next;
+			if (!IsUiTokenRef(current))
+			{
+				result.Chain = FormatUiTokenChain(chain);
+				result.Value = current;
+				result.Ok = true;
+				return result;
+			}
+		}
 	}
 }

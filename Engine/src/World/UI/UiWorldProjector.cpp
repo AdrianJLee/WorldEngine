@@ -73,7 +73,10 @@ namespace World::UI
 			}
 
 			// 物理像素 → 设计单位:与绘制/命中同一映射(`UiViewport::PhysicalToDesign`)。
-			glm::vec2 design = viewport.PhysicalToDesign(screenPoint);
+			// M15 修正:`screenPoint` 是**相对渲染面左上角**的坐标,而视口映射的原点在
+			// `PhysicalOrigin`(编辑器 Play 的面板矩形非 0)⇒ 先加回原点再映射,否则会被
+			// 多减一次原点(实测:面板原点上世界锚点整体偏移)。
+			glm::vec2 design = viewport.PhysicalToDesign(screenPoint + viewport.PhysicalOrigin);
 
 			Wui::WuiRect rect = node.Rect;   // 尺寸取自本帧布局结果
 			if (anchor.KeepOnScreen)

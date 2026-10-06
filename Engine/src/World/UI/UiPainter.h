@@ -18,6 +18,12 @@
 //   的裁剪链同一口径(溢出部分不可见也不可点)。
 //
 // 边界:本层不处理输入/焦点/绑定/动画(M3/M6);不做命中路由 —— `UiScreen::HitTest` 是命中的唯一实现。
+//
+// 主题令牌(M14):节点属性值形如 `$tokenId` 时在**本层**解析(`Tokens` 优先 / `Styles` 回退,
+//   允许多级引用,检测环);非令牌值走原路径(零拷贝,旧文档行为不变)。未定义 / 环 / 引用非法
+//   ⇒ 记一条可读错误(`UiPaintResult::Errors`,不阻断绘制)且该属性按"未设置"处理(用调用方默认值)。
+//   登记进无障碍的 `Label`/`Value` 是**解析后**的文本(`$` 绝不泄漏给 AI/读屏)。
+//   布局不解析令牌 —— `UiScreen::Layout` 只读数值属性;口径见 `UiTypes.h`。
 
 #include "World/Core/Export.h"
 #include "World/UI/UiNodeRegistry.h"
@@ -89,6 +95,55 @@ namespace World::UI
 			if (Warnings != nullptr)
 				Warnings->push_back(UiPaintWarning { Path, std::move(message) });
 		}
+
+		// ---- M14:主题令牌(解析在本层做,引擎内唯一一处)----
+		//
+		// `Document` = 令牌表来源(`Tokens` 优先 / `Styles` 回退;空 = 无令牌表);
+		// `TokenErrors` = 解析失败出口(可读错误)。
+		const UiDocument* Document = nullptr;
+		std::vector<UiPaintError>* TokenErrors = nullptr;
+
+		// 令牌表查询;`Document` 为空 = 无令牌表(一切照字面值)。
+		const std::string* FindToken(std::string_view tokenId, std::string_view propName) const
+		{
+			return Document != nullptr ? FindUiToken(*Document, tokenId, propName) : nullptr;
+		}
+
+		// 解析一个属性值:非令牌值 = 原样;令牌值 = 沿链解析(多级 + 环检测)。
+		// 解析失败 ⇒ 记一条可读错误并返回 false —— 调用方**必须**用默认值(按"未设置"处理,
+		// 不得当成空串/0)。同 (节点, 属性, 消息) 只记一次,避免每帧重复刷屏。
+		bool ResolveTokenValue(std::string_view propName, std::string_view value, std::string& out) const
+		{
+			const UiTokenResult resolved = ResolveUiTokenValue(value, propName,
+				[this](std::string_view tokenId, std::string_view name)
+				{
+					return FindToken(tokenId, name);
+				});
+			if (resolved.Ok)
+			{
+				out = resolved.Value;
+				return true;
+			}
+
+			if (TokenErrors != nullptr)
+			{
+				const std::string message = "property '" + std::string(propName) + "': " +
+					(resolved.Error.empty() ? std::string("invalid token reference") : resolved.Error) +
+					" (property treated as unset)";
+				bool reported = false;
+				for (const UiPaintError& existing : *TokenErrors)
+				{
+					if (existing.Path == Path && existing.Message == message)
+					{
+						reported = true;
+						break;
+					}
+				}
+				if (!reported)
+					TokenErrors->push_back(UiPaintError { Path, Type.Type, message });
+			}
+			return false;
+		}
 	};
 
 	struct UiPaintResult
@@ -99,9 +154,11 @@ namespace World::UI
 		std::size_t AccessNodes = 0;   // 登记的无障碍节点数(无障碍关闭时为 0)
 		// M10:完全落在滚动容器裁剪之外、既不画也不登记的节点数(与命中同一裁剪口径)。
 		std::size_t ClippedNodes = 0;
+		// 可读错误:未知类型(节点被跳过)/ 未解析的令牌(节点照画,仅该属性按"未设置"处理)。
 		std::vector<UiPaintError> Errors;
 		std::vector<UiPaintWarning> Warnings;
 
+		// 无错误(未知类型或未解析令牌);未解析令牌不影响其它属性/节点与绘制。
 		bool Ok() const { return Errors.empty(); }
 	};
 

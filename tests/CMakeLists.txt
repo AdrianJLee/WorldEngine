@@ -1683,6 +1683,29 @@ set_tests_properties(World.UiInputInteract PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+# GameUI(M14):主题令牌与换肤(headless)—— 令牌解析 / 多级引用 / 环 / 未定义 + 绘制颜色 + 无障碍文本。
+# 注:按派工单要求只追加目标与 add_test,不改动文件末尾的 WeCopyRuntimeDllForTests 白名单 foreach。
+add_executable(WorldUiThemeTests World/UiThemeTests.cpp)
+target_link_libraries(WorldUiThemeTests PRIVATE World)
+target_compile_features(WorldUiThemeTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldUiThemeTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldUiThemeTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldUiThemeTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.UiTheme COMMAND WorldUiThemeTests)
+set_tests_properties(World.UiTheme PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
 # WorldRuntime.dll -> 测试 exe 旁:**只拷一次**。
 #
 # 原先每个测试目标各挂一条 POST_BUILD `copy_if_different`,而本文件的所有测试 exe 都在同一目录
@@ -1705,6 +1728,6 @@ add_custom_target(WeCopyRuntimeDllForTests
     VERBATIM
 )
 
-foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests WorldUiDocumentTests WorldUiPaintTests WorldUiNavInputTests WorldUiBindAnimTests WorldUiWorldTests WorldUiScrollTests WorldUiPointerGateTests WorldUiInputInteractTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests WorldUiDocumentTests WorldUiPaintTests WorldUiNavInputTests WorldUiBindAnimTests WorldUiWorldTests WorldUiScrollTests WorldUiPointerGateTests WorldUiInputInteractTests WorldUiThemeTests ${_we_optional_test_targets})
     add_dependencies(${_we_test_target} WeCopyRuntimeDllForTests)
 endforeach()

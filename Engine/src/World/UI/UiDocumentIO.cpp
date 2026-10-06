@@ -444,6 +444,27 @@ namespace World::UI
 				}
 			}
 
+			// M14:文档级主题令牌(追加键;缺失 = 旧文档,行为不变)。与 `Styles` 同形。
+			if (const YAML::Node tokens = root["Tokens"])
+			{
+				if (!tokens.IsSequence())
+					return ctx.Fail("'Tokens' must be a sequence");
+				std::size_t index = 0;
+				for (const YAML::Node& item : tokens)
+				{
+					UiStyleDef def;
+					const std::string path = "Tokens[" + std::to_string(index) + "]";
+					if (!item.IsMap())
+						return ctx.Fail(path + ": each token must be a map");
+					if (const YAML::Node id = item["Id"])
+						def.Id = id.as<std::string>();
+					if (!ReadScalarMap(item, "Props", def.Props, path, ctx))
+						return false;
+					out.Tokens.push_back(std::move(def));
+					++index;
+				}
+			}
+
 			const YAML::Node nodes = root["Nodes"];
 			if (!nodes)
 				return ctx.Fail("'Nodes' is required (may be an empty sequence)");
@@ -544,6 +565,25 @@ namespace World::UI
 		{
 			out << YAML::Key << "Styles" << YAML::Value << YAML::BeginSeq;
 			for (const UiStyleDef& def : doc.Styles)
+			{
+				out << YAML::BeginMap;
+				out << YAML::Key << "Id" << YAML::Value << def.Id;
+				if (!def.Props.empty())
+				{
+					out << YAML::Key << "Props" << YAML::Value << YAML::BeginMap;
+					for (const UiProp& prop : def.Props)
+						out << YAML::Key << prop.Name << YAML::Value << prop.Value;
+					out << YAML::EndMap;
+				}
+				out << YAML::EndMap;
+			}
+			out << YAML::EndSeq;
+		}
+
+		if (!doc.Tokens.empty())
+		{
+			out << YAML::Key << "Tokens" << YAML::Value << YAML::BeginSeq;
+			for (const UiStyleDef& def : doc.Tokens)
 			{
 				out << YAML::BeginMap;
 				out << YAML::Key << "Id" << YAML::Value << def.Id;

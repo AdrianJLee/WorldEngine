@@ -27,20 +27,6 @@ namespace World::UI
 			return prop != nullptr ? &prop->Value : nullptr;
 		}
 
-		std::string TextProp(const UiNodeInstance& node, std::string_view name, std::string fallback = std::string())
-		{
-			const std::string* value = FindProp(node, name);
-			return value != nullptr ? *value : std::move(fallback);
-		}
-
-		bool BoolProp(const UiNodeInstance& node, std::string_view name, bool fallback)
-		{
-			const std::string* value = FindProp(node, name);
-			if (value == nullptr || value->empty())
-				return fallback;
-			return *value == "1" || *value == "true" || *value == "True" || *value == "yes" || *value == "on";
-		}
-
 		float NumberProp(const UiNodeInstance& node, std::string_view name, float fallback)
 		{
 			const std::string* value = FindProp(node, name);
@@ -51,9 +37,54 @@ namespace World::UI
 			return end != value->c_str() ? parsed : fallback;
 		}
 
-		WuiColor ColorProp(const UiNodeInstance& node, std::string_view name, const WuiColor& fallback)
+		// ---- M14:主题令牌(解析在本层做,引擎内唯一一处)----
+		//
+		// 解析后取值:`ResolvedProp` 返回的指针要么指向节点原属性(非令牌,零拷贝),要么指向
+		// `scratch`(令牌解析结果)。令牌未定义 / 环 / 引用非法 ⇒ 记一条可读错误 + 返回 nullptr,
+		// 调用方走自己的 fallback(即按"未设置"处理,不会静默变成空串/0)。
+		const std::string* ResolvedProp(const UiNodePaintContext& ctx, std::string_view name,
+			std::string& scratch)
 		{
-			const std::string* value = FindProp(node, name);
+			const std::string* raw = FindProp(ctx.Node, name);
+			if (raw == nullptr || raw->empty() || !IsUiTokenRef(*raw))
+				return raw;
+			if (ctx.ResolveTokenValue(name, *raw, scratch))
+				return &scratch;
+			return nullptr;
+		}
+
+		std::string TokenText(const UiNodePaintContext& ctx, std::string_view name,
+			std::string fallback = std::string())
+		{
+			std::string scratch;
+			const std::string* value = ResolvedProp(ctx, name, scratch);
+			return value != nullptr ? *value : std::move(fallback);
+		}
+
+		bool TokenBool(const UiNodePaintContext& ctx, std::string_view name, bool fallback)
+		{
+			std::string scratch;
+			const std::string* value = ResolvedProp(ctx, name, scratch);
+			if (value == nullptr || value->empty())
+				return fallback;
+			return *value == "1" || *value == "true" || *value == "True" || *value == "yes" || *value == "on";
+		}
+
+		float TokenNumber(const UiNodePaintContext& ctx, std::string_view name, float fallback)
+		{
+			std::string scratch;
+			const std::string* value = ResolvedProp(ctx, name, scratch);
+			if (value == nullptr || value->empty())
+				return fallback;
+			char* end = nullptr;
+			const float parsed = std::strtof(value->c_str(), &end);
+			return end != value->c_str() ? parsed : fallback;
+		}
+
+		WuiColor TokenColor(const UiNodePaintContext& ctx, std::string_view name, const WuiColor& fallback)
+		{
+			std::string scratch;
+			const std::string* value = ResolvedProp(ctx, name, scratch);
 			WuiColor parsed = fallback;
 			if (value != nullptr && Wui::ParseComponentColor(*value, parsed))
 				return parsed;
@@ -74,7 +105,7 @@ namespace World::UI
 		// 设计单位属性 → 物理长度(乘视口缩放);未给 = 设计默认值。
 		float ScaledProp(const UiNodePaintContext& ctx, std::string_view name, float designFallback)
 		{
-			return NumberProp(ctx.Node, name, designFallback) * ctx.Scale;
+			return TokenNumber(ctx, name, designFallback) * ctx.Scale;
 		}
 
 		// ---- 命令发射(WuiContext 是唯一出口)----
@@ -144,10 +175,10 @@ namespace World::UI
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
 			const float radius = ScaledProp(ctx, "radius", theme.Radius);
-			AddRect(ctx, ctx.Rect, ColorProp(ctx.Node, "bg", theme.PanelBg), radius);
-			AddRectOutline(ctx, ctx.Rect, ColorProp(ctx.Node, "border", theme.Border), radius, 1.0f);
+			AddRect(ctx, ctx.Rect, TokenColor(ctx, "bg", theme.PanelBg), radius);
+			AddRectOutline(ctx, ctx.Rect, TokenColor(ctx, "border", theme.Border), radius, 1.0f);
 
-			const std::string title = Localized(TextProp(ctx.Node, "title"));
+			const std::string title = Localized(TokenText(ctx, "title"));
 			if (!title.empty())
 			{
 				AddText(ctx, ctx.Rect.X + theme.Pad * ctx.Scale, ctx.Rect.Y + 3.0f * ctx.Scale,
@@ -158,11 +189,11 @@ namespace World::UI
 
 		void PaintLabel(UiNodePaintContext& ctx)
 		{
-			const std::string text = Localized(TextProp(ctx.Node, "text", TextProp(ctx.Node, "label")));
+			const std::string text = Localized(TokenText(ctx, "text", TokenText(ctx, "label")));
 			const float font = ScaledProp(ctx, "fontSize", 15.0f);
 			const float y = ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - font) * 0.5f);
-			AddText(ctx, ctx.Rect.X, y, text, ColorProp(ctx.Node, "color", ctx.Theme.Text), font,
-				BoolProp(ctx.Node, "bold", false));
+			AddText(ctx, ctx.Rect.X, y, text, TokenColor(ctx, "color", ctx.Theme.Text), font,
+				TokenBool(ctx, "bold", false));
 			ctx.Label = text;
 			ctx.Value = text;
 		}
@@ -170,25 +201,25 @@ namespace World::UI
 		void PaintButton(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			const bool disabled = TokenBool(ctx, "disabled", false);
 			// 未给覆盖 = 主题令牌;`bg`/`bg.default` 是覆盖值(text 编码 #RRGGBB[AA])。
 			const WuiColor bg = disabled ? theme.ContentBg
-				: ColorProp(ctx.Node, "bg", ColorProp(ctx.Node, "bg.default", theme.ButtonBg));
-			const WuiColor border = ColorProp(ctx.Node, "border",
-				ColorProp(ctx.Node, "border.default", theme.Border));
+				: TokenColor(ctx, "bg", TokenColor(ctx, "bg.default", theme.ButtonBg));
+			const WuiColor border = TokenColor(ctx, "border",
+				TokenColor(ctx, "border.default", theme.Border));
 			const WuiColor textColor = disabled ? theme.TextDisabled
-				: ColorProp(ctx.Node, "text", ColorProp(ctx.Node, "text.default", theme.Text));
+				: TokenColor(ctx, "text", TokenColor(ctx, "text.default", theme.Text));
 			const float radius = ScaledProp(ctx, "radius", theme.Radius);
 			AddRect(ctx, ctx.Rect, bg, radius);
 			AddRectOutline(ctx, ctx.Rect, border, radius, 1.0f);
 
-			const std::string label = Localized(TextProp(ctx.Node, "label"));
+			const std::string label = Localized(TokenText(ctx, "label"));
 			const float font = ScaledProp(ctx, "fontSize", 15.0f);
 			const float padding = ScaledProp(ctx, "padding", 8.0f);
 			const float width = ctx.Context.MeasureTextWidth(label, font, Wui::WuiFontFamily::Ui);
 			const float x = ctx.Rect.X + std::max(padding, (ctx.Rect.W - width) * 0.5f);
 			const float y = ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - font) * 0.5f);
-			AddText(ctx, x, y, label, textColor, font, BoolProp(ctx.Node, "bold", false));
+			AddText(ctx, x, y, label, textColor, font, TokenBool(ctx, "bold", false));
 
 			ctx.Label = label;
 			ctx.Value = disabled ? std::string("disabled") : std::string();
@@ -200,14 +231,14 @@ namespace World::UI
 		void PaintImage(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const float textureId = NumberProp(ctx.Node, "textureId", 0.0f);
+			const float textureId = TokenNumber(ctx, "textureId", 0.0f);
 			const float radius = ScaledProp(ctx, "radius", theme.Radius);
 			if (textureId > 0.0f)
 			{
 				Wui::WuiDrawCommand command;
 				command.Kind = Wui::WuiDrawKind::Image;
 				command.Rect = ctx.Rect;
-				command.Color = ColorProp(ctx.Node, "tint", WuiColor { 1, 1, 1, 1 });
+				command.Color = TokenColor(ctx, "tint", WuiColor { 1, 1, 1, 1 });
 				command.Image = static_cast<uint64_t>(textureId);
 				command.Uv = WuiRect { 0, 0, 1, 1 };
 				ctx.Context.Commands().push_back(std::move(command));
@@ -218,27 +249,27 @@ namespace World::UI
 				AddRect(ctx, ctx.Rect, theme.ContentBg, radius);
 				AddRectOutline(ctx, ctx.Rect, theme.Border, radius, 1.0f);
 			}
-			ctx.Label = Localized(TextProp(ctx.Node, "label"));
+			ctx.Label = Localized(TokenText(ctx, "label"));
 			ctx.Value = textureId > 0.0f ? std::to_string(static_cast<long long>(textureId)) : std::string();
 		}
 
 		void PaintProgressBar(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const bool disabled = BoolProp(ctx.Node, "disabled", false);
-			const float value = std::clamp(NumberProp(ctx.Node, "value", 0.0f), 0.0f, 1.0f);
+			const bool disabled = TokenBool(ctx, "disabled", false);
+			const float value = std::clamp(TokenNumber(ctx, "value", 0.0f), 0.0f, 1.0f);
 			const float radius = ScaledProp(ctx, "radius", 3.0f);
-			AddRect(ctx, ctx.Rect, ColorProp(ctx.Node, "trackColor", theme.ContentBg), radius);
+			AddRect(ctx, ctx.Rect, TokenColor(ctx, "trackColor", theme.ContentBg), radius);
 			if (value > 0.0f)
 			{
 				const WuiColor fill = disabled ? theme.TextDisabled
-					: ColorProp(ctx.Node, "fillColor", theme.Accent);
+					: TokenColor(ctx, "fillColor", theme.Accent);
 				AddRect(ctx, WuiRect { ctx.Rect.X, ctx.Rect.Y, ctx.Rect.W * value, ctx.Rect.H }, fill, radius);
 			}
 
 			char buffer[32] = {};
 			std::snprintf(buffer, sizeof(buffer), "%.3f", value);
-			ctx.Label = Localized(TextProp(ctx.Node, "label"));
+			ctx.Label = Localized(TokenText(ctx, "label"));
 			ctx.Value = buffer;
 			ctx.Disabled = disabled;
 			if (disabled)
@@ -248,8 +279,8 @@ namespace World::UI
 		void PaintToggle(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const bool disabled = BoolProp(ctx.Node, "disabled", false);
-			const bool on = BoolProp(ctx.Node, "value", false);
+			const bool disabled = TokenBool(ctx, "disabled", false);
+			const bool on = TokenBool(ctx, "value", false);
 			const float box = ScaledProp(ctx, "boxSize", 16.0f);
 			const float radius = 3.0f * ctx.Scale;
 			const WuiRect boxRect { ctx.Rect.X,
@@ -258,9 +289,9 @@ namespace World::UI
 			AddRect(ctx, boxRect, boxFill, radius);
 			AddRectOutline(ctx, boxRect, theme.Border, radius, 1.0f);
 
-			const std::string label = Localized(TextProp(ctx.Node, "label"));
+			const std::string label = Localized(TokenText(ctx, "label"));
 			const float font = ScaledProp(ctx, "fontSize", 15.0f);
-			const WuiColor color = disabled ? theme.TextDisabled : ColorProp(ctx.Node, "color", theme.Text);
+			const WuiColor color = disabled ? theme.TextDisabled : TokenColor(ctx, "color", theme.Text);
 			AddText(ctx, boxRect.X + box + 8.0f * ctx.Scale,
 				ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - font) * 0.5f), label, color, font, false);
 
@@ -275,10 +306,10 @@ namespace World::UI
 		void PaintSlider(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const bool disabled = BoolProp(ctx.Node, "disabled", false);
-			const float minValue = NumberProp(ctx.Node, "min", 0.0f);
-			const float maxValue = NumberProp(ctx.Node, "max", 1.0f);
-			const float raw = NumberProp(ctx.Node, "value", 0.0f);
+			const bool disabled = TokenBool(ctx, "disabled", false);
+			const float minValue = TokenNumber(ctx, "min", 0.0f);
+			const float maxValue = TokenNumber(ctx, "max", 1.0f);
+			const float raw = TokenNumber(ctx, "value", 0.0f);
 			const float span = maxValue - minValue;
 			const float fraction = std::fabs(span) > 1.0e-6f
 				? std::clamp((raw - minValue) / span, 0.0f, 1.0f) : 0.0f;
@@ -287,19 +318,19 @@ namespace World::UI
 			const float knob = std::min(ctx.Rect.H, ScaledProp(ctx, "knobSize", 14.0f));
 
 			const WuiRect track { ctx.Rect.X, ctx.Rect.Y + (ctx.Rect.H - trackH) * 0.5f, ctx.Rect.W, trackH };
-			AddRect(ctx, track, ColorProp(ctx.Node, "trackColor", theme.ContentBg), radius);
+			AddRect(ctx, track, TokenColor(ctx, "trackColor", theme.ContentBg), radius);
 			if (fraction > 0.0f)
 			{
 				AddRect(ctx, WuiRect { track.X, track.Y, track.W * fraction, track.H },
-					disabled ? theme.TextDisabled : ColorProp(ctx.Node, "fillColor", theme.Accent), radius);
+					disabled ? theme.TextDisabled : TokenColor(ctx, "fillColor", theme.Accent), radius);
 			}
 			const float knobX = ctx.Rect.X + std::max(0.0f, ctx.Rect.W * fraction - knob * 0.5f);
 			AddRect(ctx, WuiRect { knobX, ctx.Rect.Y + (ctx.Rect.H - knob) * 0.5f, knob, knob },
-				disabled ? theme.TextDisabled : ColorProp(ctx.Node, "knobColor", theme.Text), knob * 0.5f);
+				disabled ? theme.TextDisabled : TokenColor(ctx, "knobColor", theme.Text), knob * 0.5f);
 
 			char buffer[32] = {};
 			std::snprintf(buffer, sizeof(buffer), "%.3f", raw);
-			const std::string label = Localized(TextProp(ctx.Node, "label"));
+			const std::string label = Localized(TokenText(ctx, "label"));
 			// 矩形够高时补文字(标签左、当前值右);紧凑高度只走无障碍 Value,不糊在轨道上。
 			const float font = ScaledProp(ctx, "fontSize", 13.0f);
 			if (ctx.Rect.H >= font * 1.8f)
@@ -319,9 +350,9 @@ namespace World::UI
 		void PaintCheckbox(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			const bool disabled = TokenBool(ctx, "disabled", false);
 			// 组件登记属性名是 `checked`;`value` 作为兼容别名(与 Toggle 同一编码)。
-			const bool on = BoolProp(ctx.Node, "checked", BoolProp(ctx.Node, "value", false));
+			const bool on = TokenBool(ctx, "checked", TokenBool(ctx, "value", false));
 			const float box = ScaledProp(ctx, "boxSize", 16.0f);
 			const float radius = 3.0f * ctx.Scale;
 			const WuiRect boxRect { ctx.Rect.X,
@@ -337,9 +368,9 @@ namespace World::UI
 					theme.PanelBg, radius * 0.5f);
 			}
 
-			const std::string label = Localized(TextProp(ctx.Node, "label"));
+			const std::string label = Localized(TokenText(ctx, "label"));
 			const float font = ScaledProp(ctx, "fontSize", 15.0f);
-			const WuiColor color = disabled ? theme.TextDisabled : ColorProp(ctx.Node, "color", theme.Text);
+			const WuiColor color = disabled ? theme.TextDisabled : TokenColor(ctx, "color", theme.Text);
 			AddText(ctx, boxRect.X + box + 8.0f * ctx.Scale,
 				ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - font) * 0.5f), label, color, font, false);
 
@@ -352,20 +383,20 @@ namespace World::UI
 		void PaintTextField(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			const bool disabled = TokenBool(ctx, "disabled", false);
 			const float radius = ScaledProp(ctx, "radius", theme.Radius);
-			AddRect(ctx, ctx.Rect, disabled ? theme.ContentBg : ColorProp(ctx.Node, "bg", theme.ContentBg), radius);
-			AddRectOutline(ctx, ctx.Rect, ColorProp(ctx.Node, "border", theme.Border), radius, 1.0f);
+			AddRect(ctx, ctx.Rect, disabled ? theme.ContentBg : TokenColor(ctx, "bg", theme.ContentBg), radius);
+			AddRectOutline(ctx, ctx.Rect, TokenColor(ctx, "border", theme.Border), radius, 1.0f);
 
-			const std::string label = Localized(TextProp(ctx.Node, "label"));
-			const std::string value = TextProp(ctx.Node, "value");
-			const std::string placeholder = Localized(TextProp(ctx.Node, "placeholder"));
+			const std::string label = Localized(TokenText(ctx, "label"));
+			const std::string value = TokenText(ctx, "value");
+			const std::string placeholder = Localized(TokenText(ctx, "placeholder"));
 			const bool empty = value.empty();
 			const std::string shown = empty ? placeholder : value;
 			const float font = ScaledProp(ctx, "fontSize", 15.0f);
 			const float padding = ScaledProp(ctx, "padding", 8.0f);
 			const WuiColor color = disabled ? theme.TextDisabled
-				: (empty ? theme.TextDisabled : ColorProp(ctx.Node, "color", theme.Text));
+				: (empty ? theme.TextDisabled : TokenColor(ctx, "color", theme.Text));
 			const float y = ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - font) * 0.5f);
 
 			float x = ctx.Rect.X + padding;
@@ -393,13 +424,13 @@ namespace World::UI
 		void PaintList(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			const bool disabled = TokenBool(ctx, "disabled", false);
 			const float radius = ScaledProp(ctx, "radius", theme.Radius);
-			AddRect(ctx, ctx.Rect, ColorProp(ctx.Node, "bg", theme.ContentBg), radius);
+			AddRect(ctx, ctx.Rect, TokenColor(ctx, "bg", theme.ContentBg), radius);
 			AddRectOutline(ctx, ctx.Rect, theme.Border, radius, 1.0f);
 
-			const int rows = std::max(0, static_cast<int>(NumberProp(ctx.Node, "rowCount", 0.0f)));
-			const float rowHeight = NumberProp(ctx.Node, "rowHeight", 24.0f) * ctx.Scale;
+			const int rows = std::max(0, static_cast<int>(TokenNumber(ctx, "rowCount", 0.0f)));
+			const float rowHeight = TokenNumber(ctx, "rowHeight", 24.0f) * ctx.Scale;
 			int drawn = 0;
 			if (rows > 0 && rowHeight > 0.0f)
 			{
@@ -409,9 +440,9 @@ namespace World::UI
 					static_cast<int>(std::ceil((offsetY + ctx.Rect.H) / rowHeight)) + 1, rows - 1);
 				const float font = ScaledProp(ctx, "fontSize", 14.0f);
 				const float padding = ScaledProp(ctx, "padding", 6.0f);
-				const std::string prefix = Localized(TextProp(ctx.Node, "rowPrefix"));
-				const WuiColor rowColorA = ColorProp(ctx.Node, "rowColor", theme.PanelBg);
-				const WuiColor rowColorB = ColorProp(ctx.Node, "rowColorAlt", theme.ContentBg);
+				const std::string prefix = Localized(TokenText(ctx, "rowPrefix"));
+				const WuiColor rowColorA = TokenColor(ctx, "rowColor", theme.PanelBg);
+				const WuiColor rowColorB = TokenColor(ctx, "rowColorAlt", theme.ContentBg);
 				for (int row = first; row <= last; ++row)
 				{
 					const float y = ctx.Rect.Y + static_cast<float>(row) * rowHeight - offsetY;
@@ -424,7 +455,7 @@ namespace World::UI
 				}
 			}
 
-			ctx.Label = Localized(TextProp(ctx.Node, "label"));
+			ctx.Label = Localized(TokenText(ctx, "label"));
 			ctx.Value = "items=" + std::to_string(rows) + " visible=" + std::to_string(drawn);
 			ctx.Disabled = disabled;
 			ctx.States = disabled ? "disabled" : std::string();
@@ -434,16 +465,16 @@ namespace World::UI
 		void PaintGrid(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const bool disabled = BoolProp(ctx.Node, "disabled", false);
+			const bool disabled = TokenBool(ctx, "disabled", false);
 			const float radius = ScaledProp(ctx, "radius", theme.Radius);
-			AddRect(ctx, ctx.Rect, ColorProp(ctx.Node, "bg", theme.ContentBg), radius);
+			AddRect(ctx, ctx.Rect, TokenColor(ctx, "bg", theme.ContentBg), radius);
 			AddRectOutline(ctx, ctx.Rect, theme.Border, radius, 1.0f);
 
-			const int columns = std::max(1, static_cast<int>(NumberProp(ctx.Node, "columns", 4.0f)));
-			const int rows = std::max(0, static_cast<int>(NumberProp(ctx.Node, "rowCount", 0.0f)));
-			const float cellW = NumberProp(ctx.Node, "cellW",
+			const int columns = std::max(1, static_cast<int>(TokenNumber(ctx, "columns", 4.0f)));
+			const int rows = std::max(0, static_cast<int>(TokenNumber(ctx, "rowCount", 0.0f)));
+			const float cellW = TokenNumber(ctx, "cellW",
 				(ctx.Rect.W / ctx.Scale) / static_cast<float>(columns)) * ctx.Scale;
-			const float cellH = NumberProp(ctx.Node, "cellH", 24.0f) * ctx.Scale;
+			const float cellH = TokenNumber(ctx, "cellH", 24.0f) * ctx.Scale;
 			int drawn = 0;
 			if (rows > 0 && cellW > 0.0f && cellH > 0.0f)
 			{
@@ -453,7 +484,7 @@ namespace World::UI
 					static_cast<int>(std::ceil((offsetY + ctx.Rect.H) / cellH)) + 1, rows - 1);
 				const float font = ScaledProp(ctx, "fontSize", 13.0f);
 				const float gap = ScaledProp(ctx, "gap", 2.0f);
-				const WuiColor cellColor = ColorProp(ctx.Node, "cellColor", theme.PanelBg);
+				const WuiColor cellColor = TokenColor(ctx, "cellColor", theme.PanelBg);
 				for (int row = first; row <= last; ++row)
 				{
 					const float y = ctx.Rect.Y + static_cast<float>(row) * cellH - offsetY;
@@ -469,7 +500,7 @@ namespace World::UI
 				}
 			}
 
-			ctx.Label = Localized(TextProp(ctx.Node, "label"));
+			ctx.Label = Localized(TokenText(ctx, "label"));
 			ctx.Value = "cells=" + std::to_string(rows * columns) + " visible=" + std::to_string(drawn);
 			ctx.Disabled = disabled;
 			ctx.States = disabled ? "disabled" : std::string();
@@ -646,7 +677,8 @@ namespace World::UI
 			UiNodePaintContext paint {
 				ctx, screen, node, *type, physical, viewport.Scale,
 				theme, options, path,
-				std::string(), std::string(), std::string(), false, &result.Warnings };
+				std::string(), std::string(), std::string(), false, &result.Warnings,
+				&document, &result.Errors };
 
 			type->Paint(paint);   // RegisterType 保证非空
 			const std::size_t emitted = ctx.Commands().size() - before;

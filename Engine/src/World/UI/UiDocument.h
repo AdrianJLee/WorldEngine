@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -85,7 +86,14 @@ namespace World::UI
 		std::string Theme;
 		std::vector<UiParamDecl> Parameters;
 		std::vector<UiStyleDef> Styles;
+		// M14:文档级主题令牌(与 `Styles` 同形;同名时 `Tokens` 优先,`Styles` 兼容回退)。
+		// 值支持 `$tokenId` 多级引用;解析口径见 `UiTypes.h::ResolveUiTokenValue`。
+		std::vector<UiStyleDef> Tokens;
 		std::vector<UiNode> Nodes;   // 根节点(有序)
+
+		// M14:换肤 —— 就地覆盖令牌值。命中的 Id 改写为单值令牌(`value`);
+		// 未命中的 Id 追加新令牌。宿主可在 Build 前按 `--theme` 调用(本任务不接线宿主)。
+		void ApplyTokenOverrides(const std::map<std::string, std::string>& values);
 
 		void ForEachNode(const std::function<void(UiNode&, const std::string& parentPath)>& fn);
 		void ForEachNode(const std::function<void(const UiNode&, const std::string& parentPath)>& fn) const;
@@ -105,6 +113,22 @@ namespace World::UI
 
 	// 行为等价比较(用于 round-trip 断言):逐字段比对,不比较 IdWasGenerated。
 	WLD_API bool UiDocumentsEquivalent(const UiDocument& a, const UiDocument& b);
+
+	// ---- 主题令牌(M14;仅追加)----
+	//
+	// 令牌表 = `Tokens`(优先)∪ `Styles`(回退);`$id` 在属性 `propName` 上取值时:
+	// ① 精确命中同名属性;② 令牌只声明一个属性时用它作为该令牌的"单值";③ 否则 = 未定义。
+	// 返回 nullptr = 未定义/不适用(调用方按"未设置"处理)。指针在 doc 存活期内有效。
+	WLD_API const std::string* FindUiToken(const UiDocument& doc, std::string_view tokenId,
+		std::string_view propName);
+	// 在 doc 的令牌表 + 属性名上下文下解析单个属性值(非令牌值原样返回)。
+	WLD_API UiTokenResult ResolveUiToken(const UiDocument& doc, std::string_view propName,
+		std::string_view value);
+	// 令牌表**结构**校验:空 Id / 重复 Id / 空 Props / 环。
+	// 注意:不在 `ValidateUiDocument` 里调用 —— M14 是兼容追加,加载保持宽松;
+	// "未定义令牌"是引用期问题,由解析期给可读错误并按"未设置"处理,不影响加载。
+	// 返回 true = 无 issue;issues 允许为空指针。
+	WLD_API bool ValidateUiTokens(const UiDocument& doc, std::vector<UiValidationIssue>* issues);
 
 	class WLD_API UiDocumentIO
 	{

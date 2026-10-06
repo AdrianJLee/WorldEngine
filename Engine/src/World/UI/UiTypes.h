@@ -12,7 +12,10 @@
 #include "World/WUI/WuiCore.h"
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -158,4 +161,47 @@ namespace World::UI
 	// 滚动偏移钳位:offset ∈ [0, max(0, contentSize - containerSize)]。
 	// 内容不溢出(或容器非法)⇒ 恒为 0;见 `contract.ui-runtime` §3 与派工单 M10 口径。
 	WLD_API float ClampUiScrollOffset(float offset, float contentSize, float containerSize);
+
+	// ---- 主题令牌与样式继承(工作包 M14;仅追加)----
+	//
+	// 令牌 = 文档级 `Tokens: [{ Id, Props }]`(**优先**)或既有局部 `Styles: [{ Id, Props }]`
+	// (兼容回退);两者同形,合并成一张令牌表。节点属性值形如 `$tokenId`(美元前缀,类比
+	// 本地化 `@key`)时,在**绘制期**解析成字面值:
+	//   `bg: $surface` → 取令牌 `surface` 在属性 `bg` 上的值(样式继承);
+	//   令牌只声明一个属性时,该属性即令牌的"单值",`$surface` 在任何属性上都取它;
+	//   令牌的值本身可以再是 `$other`(允许多级),因此**必须检测环**;
+	//   `$x` 未定义 / 有环 / 引用非法 ⇒ 可读错误,**该属性按"未设置"处理**
+	//   (回退到调用方的默认值,绝不静默变成空串或 0)。
+	//
+	// 口径(唯一解析点):解析只发生在 `UiPainter` 绘制期 —— 读取绘制/无障碍属性时逐值解析。
+	// **布局不解析令牌**:`UiScreen::Layout`(锚点 / 容器槽位 / List·Grid 内容尺寸自报)只读
+	// 数值属性,`$ref` 在那里等同"未设置"。令牌只影响绘制命令与无障碍文本。
+	inline constexpr char kUiTokenPrefix = '$';
+
+	// `$tokenId`:以 `$` 开头且去掉首尾空白后名字非空。`"$"` / `"$  "` / 字面值 = false。
+	WLD_API bool IsUiTokenRef(std::string_view value);
+	// `$` 之后的令牌名(去掉首尾空白);非令牌引用 = 空。
+	WLD_API std::string_view UiTokenRefId(std::string_view value);
+
+	// 令牌表查询:`propName` = 正在请求该值的属性名(样式继承的键)。
+	// 返回令牌的**原始值**(可以还是 `$ref`);令牌未定义 / 没有该属性值 = nullptr。
+	// 指针在令牌表存活期内有效;不得在回调返回后继续持有。
+	using UiTokenFinder = std::function<const std::string*(std::string_view tokenId, std::string_view propName)>;
+
+	struct UiTokenResult
+	{
+		std::string Value;      // 解析后的字面值;失败 = 空(调用方按"未设置"处理)
+		std::string Chain;      // 解析链(诊断),如 "$a -> $b -> $c"
+		std::string Error;      // 可读错误(未定义 / 环 / 引用非法 / 链过深);空 = 无错
+		bool WasToken = false;  // 输入是 `$...` 引用
+		bool Ok = false;        // 非令牌值,或令牌解析成功
+	};
+
+	// 解析链格式化(诊断/校验共用):["a","b"] → "$a -> $b"。
+	WLD_API std::string FormatUiTokenChain(const std::vector<std::string>& chain);
+
+	// 解析单个属性值:非令牌值原样返回(旧文档零变化);令牌值沿链解析并检测环。
+	// `maxDepth <= 0` 时用默认上限 32(防御超长链)。失败时 `Value` 为空、`Error` 可读。
+	WLD_API UiTokenResult ResolveUiTokenValue(std::string_view value, std::string_view propName,
+		const UiTokenFinder& find, int maxDepth = 32);
 }
