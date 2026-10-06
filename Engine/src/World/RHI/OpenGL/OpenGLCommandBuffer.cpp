@@ -855,6 +855,28 @@ namespace World::Rhi::OpenGL
 						break;
 					const uint32_t end = command.Count1 == 0 ? glPool->GetCount()
 						: std::min(glPool->GetCount(), command.Count0 + command.Count1);
+					if (end <= command.Count0)
+						break;
+					// D8b(2026-10-06):异步读回,**绝不**用 GL_QUERY_RESULT 阻塞等待 GPU。
+					// 回放到这一步时本帧的 GPU 命令通常还没跑完,旧实现在这里用
+					// glGetQueryObjectui64v(GL_QUERY_RESULT) 强制 CPU 等 GPU(帧末同步卡顿)。
+					// 现在先用 GL_QUERY_RESULT_AVAILABLE 探测(该调用不阻塞);只要区间内任一
+					// 查询还不可用就**整段跳过**:dst 保持原值(上一次成功写入的完整一对时间戳),
+					// 由上层下一帧重发本命令再试。成功时一次性写入整段,读侧永远看不到
+					// "半新半旧"的脏值。
+					bool available = true;
+					for (uint32_t i = command.Count0; i < end; ++i)
+					{
+						GLuint64 ready = 0;
+						glGetQueryObjectui64v(glPool->GetQuery(i), GL_QUERY_RESULT_AVAILABLE, &ready);
+						if (ready == 0)
+						{
+							available = false;
+							break;
+						}
+					}
+					if (!available)
+						break;
 					std::vector<GLuint64> results(end - command.Count0);
 					for (uint32_t i = command.Count0; i < end; i++)
 						glGetQueryObjectui64v(glPool->GetQuery(i), GL_QUERY_RESULT, &results[i - command.Count0]);

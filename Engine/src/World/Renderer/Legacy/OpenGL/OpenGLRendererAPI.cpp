@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Renderer/Legacy/OpenGL/OpenGLRendererAPI.h"
 #include "World/Renderer/Legacy/Gfx/VertexArray.h"
 #include "World/Renderer/Legacy/Gfx/Buffer.h"
@@ -8,7 +8,7 @@ namespace World
 {
 	void OpenGLRendererAPI::Init()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

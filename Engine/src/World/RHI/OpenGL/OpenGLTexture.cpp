@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/RHI/OpenGL/OpenGLTexture.h"
+#include "World/Profiling/MemoryTrack.h"
 #include "World/RHI/OpenGL/OpenGLHelpers.h"
 
 namespace World::Rhi::OpenGL
@@ -65,6 +66,8 @@ namespace World::Rhi::OpenGL
 		WLD_CORE_ASSERT(target != 0 && internalFormat != 0, "Unsupported texture type/format in OpenGL backend");
 
 		glCreateTextures(target, 1, &m_ID);
+		// GPU 驻留记账(GL 无分配尺寸可查 ⇒ 按 desc 估算;驱动可能向上对齐,故为下界)。
+		World::Profiling::MemoryTrack::AddGpuResident("Rhi.Texture", Rhi::EstimateTextureBytes(m_Desc));
 		if (multisampled)
 		{
 			// 多采样纹理没有 mip 链(levels 恒为 1)。fixedsamplelocations=GL_FALSE:
@@ -105,6 +108,9 @@ namespace World::Rhi::OpenGL
 
 	OpenGLTexture::~OpenGLTexture()
 	{
+		// 只对**自有**纹理记账:Adopt 来的外部纹理不归引擎所有(见头文件注释)。
+		if (m_OwnsId)
+			World::Profiling::MemoryTrack::RemoveGpuResident("Rhi.Texture", Rhi::EstimateTextureBytes(m_Desc));
 		if (m_ID && m_OwnsId)
 			glDeleteTextures(1, &m_ID);
 	}

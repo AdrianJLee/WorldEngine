@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Renderer/Legacy/OpenGL/OpenGLContext.h"
 
 #include <glad/glad.h>
@@ -14,7 +14,7 @@ namespace World
 
 	void OpenGLContext::Init()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		// Make the OpenGL context current
 		glfwMakeContextCurrent(m_WindowHandle);
@@ -31,7 +31,7 @@ namespace World
 	}
 	void OpenGLContext::SwapBuffers()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		// Swap front and back buffers
 		glfwSwapBuffers(m_WindowHandle);

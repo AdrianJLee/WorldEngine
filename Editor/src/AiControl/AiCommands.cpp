@@ -7,6 +7,7 @@
 #include "World/Plugins/PluginManager.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Profiling/Telemetry.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Scene/Components.h"
 #include "World/Schema/SchemaRegistry.h"
@@ -1044,7 +1045,65 @@ namespace World
 			result = out.str();
 			return true;
 		}
-		if (cmd == "log.tail")
+		// ---- 遥测:AI/脚本的机器可读查询面(键名与 docs/dev/profiling.md 的数据字典一致)----
+		if (cmd == "prof.stats")
+		{
+			result = World::Profiling::Telemetry::DescribeStatsJson();
+			return true;
+		}
+		if (cmd == "prof.capture.start")
+		{
+			World::Profiling::Telemetry::CaptureDesc desc;
+			const std::string frames = arg("frames");
+			const long parsed = frames.empty() ? 0 : std::strtol(frames.c_str(), nullptr, 10);
+			if (parsed < 0)
+			{
+				error = "frames must be >= 0";
+				return false;
+			}
+			desc.Frames = static_cast<uint32_t>(parsed);
+			// 导出路径复用既有抓图通道的解析规则(工作目录/临时目录下的相对路径),
+			// 不另造一套"输出目录"语义。
+			const std::string rawPath = arg("path");
+			if (!rawPath.empty())
+			{
+				std::string pathError;
+				const std::filesystem::path resolved = ResolveCapturePath(rawPath, &pathError);
+				if (resolved.empty())
+				{
+					error = pathError;
+					return false;
+				}
+				desc.OutputPath = resolved.string();
+			}
+			if (!World::Profiling::Telemetry::RequestCapture(desc))
+			{
+				error = "capture already in progress";
+				return false;
+			}
+			result = "capture started (frames=" + std::to_string(desc.Frames) + ")";
+			return true;
+		}
+		if (cmd == "prof.capture.stop")
+		{
+			World::Profiling::Telemetry::CancelCapture();
+			result = "capture cancelled";
+			return true;
+		}
+		if (cmd == "prof.memory")
+		{
+			// 内存明细在 M2 落地;此处先返回与数据字典同键的占位(未采集 = -1),
+			// 避免 AI 读到"缺失键"而误判成 0。
+			const World::Profiling::Telemetry::StatsSnapshot snapshot =
+				World::Profiling::Telemetry::GetStats();
+			std::ostringstream out;
+			out << "{\"collected\":" << (snapshot.Memory.Collected ? "true" : "false")
+				<< ",\"cpuTotal\":" << snapshot.Memory.CpuTotalBytes
+				<< ",\"cpuPeak\":" << snapshot.Memory.CpuPeakBytes
+				<< ",\"gpuResident\":" << snapshot.Memory.GpuResidentBytes << "}";
+			result = out.str();
+			return true;
+		}		if (cmd == "log.tail")
 		{
 			const size_t count = args.count("count") ? static_cast<size_t>(std::strtoul(arg("count").c_str(), nullptr, 10)) : 40;
 			result = JoinLines(Log::RecentLines(count ? count : 40));

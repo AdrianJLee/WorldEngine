@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Renderer/Legacy/OpenGL/OpenGLBuffer.h"
 #include <glad/glad.h>
 namespace World
@@ -7,7 +7,7 @@ namespace World
 
 	OpenGLVertexBuffer::OpenGLVertexBuffer(uint32_t size)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glCreateBuffers(1, &m_RendererID);
 		glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
@@ -15,7 +15,7 @@ namespace World
 	}
 	OpenGLVertexBuffer::OpenGLVertexBuffer(float* vertices, uint32_t size)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glCreateBuffers(1, &m_RendererID);
 		glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
@@ -23,19 +23,19 @@ namespace World
 	}
 	OpenGLVertexBuffer::~OpenGLVertexBuffer()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glDeleteBuffers(1, &m_RendererID);
 	}
 	void OpenGLVertexBuffer::Bind() const
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
 	}
 	void OpenGLVertexBuffer::Unbind() const
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
@@ -51,7 +51,7 @@ namespace World
 	OpenGLIndexBuffer::OpenGLIndexBuffer(uint32_t* indices, uint32_t count)
 		:m_Count(count)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glCreateBuffers(1, &m_RendererID);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_RendererID);
@@ -59,19 +59,19 @@ namespace World
 	}
 	OpenGLIndexBuffer::~OpenGLIndexBuffer()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glDeleteBuffers(1, &m_RendererID);
 	}
 	void OpenGLIndexBuffer::Bind() const
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_RendererID);
 	}
 	void OpenGLIndexBuffer::Unbind() const
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 	}

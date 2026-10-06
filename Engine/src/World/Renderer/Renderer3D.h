@@ -309,7 +309,9 @@ namespace World
 			bool InstancingEnabled = true;// D8b:实例合批开关(rendering.instancing)
 			uint32_t InstancedBatches = 0;    // 本帧合批次数
 			uint32_t InstancedObjects = 0;    // 被合批覆盖的实例数
-			// D8b:GPU 时间戳测得的 3D 主通道耗时(ms);rendering.gpu_timing 关闭时 0。
+			// D8b:GPU 时间戳测得的耗时(ms)。覆盖区间 = 阴影通道(若开启)+ 3D/2D 主通道;
+			// 异步读回(结果可用后写入缓冲,槽位复用时取走),因此可能滞后 1-2 帧。
+			// rendering.gpu_timing 关闭、或设备不支持时间戳时为 0。
 			double GpuMilliseconds = 0.0;
 			double CullMilliseconds = 0.0;    // 剔除(含世界 AABB)CPU 耗时
 			double SceneMilliseconds = 0.0;   // 整个 3D 场景提交(收集→阴影→主通道)CPU 耗时

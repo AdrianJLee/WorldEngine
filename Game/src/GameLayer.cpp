@@ -1,4 +1,4 @@
-﻿#include "GameLayer.h"
+#include "GameLayer.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Renderer/Legacy/Gfx/RenderCommand.h"
 
@@ -11,7 +11,7 @@ namespace World
 	}
 	void GameLayer::OnAttach()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 
 		m_SceneRenderer->Init();
@@ -29,14 +29,14 @@ namespace World
 	}
 	void GameLayer::OnDetach()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		m_Host.StopRuntime();
 		m_Host.Shutdown();
 		m_SceneRenderer->Shutdown();
 	}
 	void GameLayer::OnUpdate(Timestep ts)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		Renderer2D::ResetStats();
 		// 与 RuntimeLayer 完全同路径:场景 OnUpdateRuntime → 主相机提交渲染。
 		m_Host.Tick(ts, true);

@@ -66,6 +66,8 @@ namespace World::Rhi::Vulkan
 		VkImageView m_View = VK_NULL_HANDLE;
 		VkImageLayout m_Layout = VK_IMAGE_LAYOUT_UNDEFINED;
 		bool m_OwnsImage = true;
+		// 驱动给的**实际**设备内存分配尺寸(GPU 驻留记账与释放必须用同一个值)。
+		uint64_t m_AllocationSize = 0;
 		// 本纹理是否允许走异步上传环(材质贴图/多 mip 默认走同步,见 .cpp 的说明)。
 		bool UsesAsyncUploadRing() const;
 	};

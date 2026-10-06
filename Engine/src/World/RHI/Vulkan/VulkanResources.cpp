@@ -2,6 +2,7 @@
 #include "World/RHI/Vulkan/VulkanResources.h"
 #include "World/RHI/Vulkan/VulkanDevice.h"
 #include "World/RHI/Vulkan/VulkanUploadRing.h"
+#include "World/Profiling/MemoryTrack.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -171,6 +172,8 @@ namespace World::Rhi::Vulkan
 				VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
 		}
 		vkBindBufferMemory(device.GetNativeDevice(), m_Buffer, m_Memory, 0);
+		// GPU 驻留:用驱动给的**实际分配尺寸**(m_AllocationSize),不是请求尺寸。
+		World::Profiling::MemoryTrack::AddGpuResident("Rhi.Buffer", m_AllocationSize);
 		vkMapMemory(device.GetNativeDevice(), m_Memory, 0, desc.Size, 0, &m_Mapped);
 		if (desc.InitialData)
 			std::memcpy(m_Mapped, desc.InitialData, desc.Size);
@@ -178,6 +181,7 @@ namespace World::Rhi::Vulkan
 
 	VulkanBuffer::~VulkanBuffer()
 	{
+		World::Profiling::MemoryTrack::RemoveGpuResident("Rhi.Buffer", m_AllocationSize);
 		if (m_Device.SkipNativeDestroy())
 			return;   // 设备已丢失:交给 vkDestroyDevice/进程回收(见 VulkanDevice::SkipNativeDestroy)
 		const VkDevice device = m_Device.GetNativeDevice();
@@ -248,6 +252,9 @@ namespace World::Rhi::Vulkan
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		vkAllocateMemory(device.GetNativeDevice(), &allocInfo, nullptr, &m_Memory);
 		vkBindImageMemory(device.GetNativeDevice(), m_Image, m_Memory, 0);
+		// GPU 驻留:用驱动给的**实际分配尺寸**(不是 desc 估算,含驱动对齐/填充)。
+		m_AllocationSize = requirements.size;
+		World::Profiling::MemoryTrack::AddGpuResident("Rhi.Texture", m_AllocationSize);
 
 		VkImageViewCreateInfo viewInfo{};
 		viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -280,6 +287,9 @@ namespace World::Rhi::Vulkan
 
 	VulkanTexture::~VulkanTexture()
 	{
+		// 只对**自有**图像记账:包装交换链图像的实例不拥有 VkImage(见 ctor 注释)。
+		if (m_OwnsImage)
+			World::Profiling::MemoryTrack::RemoveGpuResident("Rhi.Texture", m_AllocationSize);
 		if (m_Device.SkipNativeDestroy())
 			return;
 		const VkDevice device = m_Device.GetNativeDevice();

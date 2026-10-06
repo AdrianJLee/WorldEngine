@@ -6,6 +6,7 @@
 #include <entt.hpp>
 
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <string>
 #include <vector>
@@ -91,9 +92,31 @@ namespace World::Gameplay
 			UpdateFn Update;
 			size_t Order = 0;
 			float Accumulator = 0.0f;
+			// 遥测用名:指向 m_NameStorage 里的稳定存储(见该成员注释)。
+			const char* TraceName = nullptr;
 		};
 
+		// RunPhase 的复用工作区。
+		// 为什么是成员:原先 RunPhase 每帧在栈上构造 5 个容器(vector×3 + unordered_map
+		// + vector<double>),每个系统每帧还要构造一次 SystemTiming::Name —— 直接违反
+		// docs/dev/performance-and-data-layout.md §4.4「每帧堆分配 0」。
+		// 复用后稳态每帧 0 次分配(仅首次/规模变化时增长)。
 		std::vector<Entry> m_Systems;
+		std::vector<Entry*> m_ScratchPhaseEntries;
+		std::vector<Entry*> m_ScratchTimingOrder;
+		std::vector<std::vector<Entry*>> m_BatchPool; // 只增不减;每帧按 m_BatchCount 复用
+		size_t m_BatchCount = 0;
+		std::unordered_map<Entry*, double> m_ScratchDurations;
+		std::vector<double> m_ScratchBatchDurations;
+
+		// 系统名的稳定存储:trace 事件只存 const char*,而 m_Systems 扩容会搬移 Entry
+		// (其 Desc.Name 的堆缓冲随之失效)。deque 元素地址稳定,且这些字符串从不修改
+		// ⇒ 其中的 c_str() 在系统注销前一直有效。
+		std::deque<std::string> m_NameStorage;
+
+		// 复用批次槽(返回的向量保留容量;调用方追加后不应长期持有引用)。
+		std::vector<Entry*>& NextBatch();
+
 		std::vector<SystemTiming> m_Timings;
 		std::string m_LastError;
 		uint64_t m_RunCount = 0;

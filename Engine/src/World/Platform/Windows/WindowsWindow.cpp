@@ -82,7 +82,7 @@ namespace World
 
 	void WindowsWindow::Init(const WindowProps& props)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		m_Data.Title = props.Title;
 		m_Data.Width = props.Widdth;
@@ -93,7 +93,7 @@ namespace World
 		if (!s_GLFWInitialized)
 		{
 			{
-				WLD_PROFILE_SCOPE("glfwInit");
+				WLD_TRACE_SCOPE("glfwInit");
 				//TODO: glfwTerminate on shutdown
 				int success = glfwInit();
 
@@ -105,7 +105,7 @@ namespace World
 		}
 
 		{
-			WLD_PROFILE_SCOPE("glfwCreateWindow");
+			WLD_TRACE_SCOPE("glfwCreateWindow");
 			// 后台/自动化运行:窗口是否可见由本进程直接决定,而不是只依赖启动器的
 			// -WindowStyle Hidden(GLFW 默认仍会显示窗口,实测会让验证时弹窗到桌面)。
 			// 判定顺序:WLD_WINDOW_HIDDEN 环境变量 > 进程被以 SW_HIDE 启动。
@@ -266,7 +266,7 @@ namespace World
 
 	void WindowsWindow::Shutdown()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		// 第三方输入法(如搜狗)会在进程退出时由系统回调其清理代码并可能崩溃。
 		// 在销毁窗口前禁用线程 IME 并泵空消息,让输入法先完成解挂。
@@ -318,7 +318,7 @@ namespace World
 
 	void WindowsWindow::OnUpdate()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		// 无边框窗口要保证 WS_THICKFRAME 在位:GLFW 在 maximize/restore 等路径会重算样式
 		// 并抹掉它(updateWindowStyles 先清 WS_OVERLAPPEDWINDOW 再按 decorated 重加)。
@@ -340,7 +340,7 @@ namespace World
 
 	void WindowsWindow::SetVsync(bool enabled)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		// 无 GL 上下文的窗口(Vulkan 附加窗口)不能调用 glfwSwapInterval。
 		if (!m_HasGLContext)
 		{

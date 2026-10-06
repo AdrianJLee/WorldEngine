@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Renderer/Legacy/OpenGL/OpenGLVertexArray.h"
 #include "World/Renderer/Legacy/Gfx/Buffer.h"
 
@@ -28,33 +28,33 @@ namespace World
 
 	OpenGLVertexArray::OpenGLVertexArray()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glGenVertexArrays(1, &m_RendererID);
 
 	}
 	OpenGLVertexArray::~OpenGLVertexArray()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glDeleteVertexArrays(1, &m_RendererID);
 	}
 	void OpenGLVertexArray::Bind() const
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glBindVertexArray(m_RendererID);
 
 	}
 	void OpenGLVertexArray::Unbind() const
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glBindVertexArray(0);
 	}
 	void OpenGLVertexArray::AddVertexBuffer(const Ref<class VertexBuffer>& vertexBuffer, const Ref<Shader>& shader)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		WLD_CORE_ASSERT(vertexBuffer->GetLayout().GetElements().size(), "Vertex Buffer has no layout!");
 
@@ -120,7 +120,7 @@ namespace World
 	}
 	void OpenGLVertexArray::SetIndexBuffer(const Ref<class IndexBuffer>& indexBuffer)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glBindVertexArray(m_RendererID);
 		indexBuffer->Bind();

@@ -226,6 +226,9 @@ target_link_libraries(World PRIVATE
     spdlog::spdlog
     # P1b D6:3D 物理(静态库,符号随 WorldRuntime.dll 导出;Jolt 类型不出 Physics3D.cpp)。
     Jolt
+    # 内存归因的调用点(Site)符号化:DbgHelp 读同目录 PDB,把采样到的返回地址
+    # 还原成 模块!函数+偏移(与行号,若有 PDB)。只在转储时调用,不在采集热路径上。
+    dbghelp
 )
 
 # P2 W3a:schema 生成器(纯 C++17 小工具,不参与产品二进制)。

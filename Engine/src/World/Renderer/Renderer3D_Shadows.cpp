@@ -145,7 +145,7 @@ uint32_t SurfaceNeededBindings(const MaterialParamLayout& layout, bool hasLayout
 	// 放弃(旧句柄一个都不动),返回 0 并把可读原因写进 error。成功返回重建的管线数;
 	// 旧管线走 QueueRelease 延迟释放(Vulkan 在飞命令缓冲仍引用旧 VkPipeline)。
 uint32_t Renderer3D::ReloadShaders(std::string* error){
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		State& state = GetState();
 		if (!Renderer::GetDevice() || !state.RenderPass || !state.ShadowPass
 			|| !state.ObjectLayout || !state.MaterialLayout)

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <cstdint>
 #include <cstddef>
 #include <iostream>
@@ -85,6 +85,8 @@ namespace World
 		size_t GetSize() const { return m_Size; }
 		size_t GetUsedMemory() const { return m_UsedMemory; }
 		size_t GetNumAllocations() const { return m_NumAllocations; }
+		// 内存面板/MemoryTrack 读取的展示名(可能为空指针)。
+		const char* GetDebugName() const { return m_DebugName; }
 
 	protected:
 		virtual void RegisterDestructor(void* obj, DestructorFunc func)

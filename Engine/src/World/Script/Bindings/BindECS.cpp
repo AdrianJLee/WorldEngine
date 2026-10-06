@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Profiling/ProfilingMacros.h"
 #include "World/Script/Bindings/BindECS.h"
 #include "World/Script/Bindings/BindServices.h"
 
@@ -713,6 +714,11 @@ namespace World
 				false,
 				[updateFn, name](Timestep ts)
 				{
+					// 脚本 tick 的显式作用域:**外层**由 SystemRegistry 按系统名包
+					// (告诉你"是哪个 Lua 系统"),这里这一层是 **VM 调用本身**的耗时。
+					// 名字必须是静态字面量(见 TraceEvents.h R2),故不拼 name。
+					WLD_TRACE_SCOPE("Lua.Update");
+					WLD_MEM_TAG("Script");
 					ScriptValue result;
 					std::string callError;
 					const ScriptValue fnArgs[] = { ScriptValue::Number(static_cast<double>(ts.GetSeconds())) };

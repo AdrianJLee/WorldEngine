@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifdef __cplusplus
 
@@ -16,7 +16,7 @@
 #include <unordered_set>
 
 #include "World/Core/Log.h"
-#include "World/Debug/Instrumentor.h"
+#include "World/Profiling/ProfilingMacros.h"
 
 #ifdef WLD_PLATFORM_WINDOWS
 #include <Windows.h>	

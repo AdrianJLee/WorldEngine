@@ -278,7 +278,7 @@ namespace World
 
 	void Renderer2D::Init()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		// P4-4b:渲染通道结构与渲染器管线的采样数都来自 rendering.msaa。Renderer2D::Init
 		// 是 Renderer::Init 里最早的渲染器初始化(Renderer3D::Init 的清单装载在它之后),
@@ -396,7 +396,7 @@ namespace World
 	// (Vulkan 在飞命令缓冲仍引用旧 VkPipeline)。
 	uint32_t Renderer2D::ReloadShaders(std::string* error)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		if (!Renderer::GetDevice())
 		{
 			if (error) *error = "RHI device is not initialized";
@@ -449,7 +449,7 @@ namespace World
 
 	void Renderer2D::Shutdown()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		s_CurrentCommandBuffer = nullptr;
 
 		const auto release = [](auto& batch)
@@ -478,13 +478,13 @@ namespace World
 
 	void Renderer2D::BeginScene(const Camera&, const glm::mat4&, Rhi::Handle<Rhi::CommandBuffer> commandBuffer)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		s_CurrentCommandBuffer = commandBuffer;
 	}
 
 	void Renderer2D::EndScene()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		Flush();
 		s_CurrentCommandBuffer = nullptr;
 	}
@@ -550,7 +550,7 @@ namespace World
 	void Renderer2D::DrawQuadCore(const glm::mat4& transform, const Rhi::Handle<Rhi::Texture>& texture,
 		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		glm::vec3 transformedPositions[4];
 		ComputeQuadPositions(transform, transformedPositions);
 		DrawQuadPositions(transformedPositions, texture, color, texCoords, tilingFactor, entityID);
@@ -577,7 +577,7 @@ namespace World
 	void Renderer2D::DrawQuadPositions(const glm::vec3 positions[4], const Rhi::Handle<Rhi::Texture>& texture,
 		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		if (s_Data.Quads.IndexCount >= MaxQuads * 6)
 			NextBatch();
 
@@ -622,7 +622,7 @@ namespace World
 	void Renderer2D::DrawCircleCore(const glm::mat4& transform, const glm::vec4& color,
 		float thickness, float fade, int entityID)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		glm::vec3 positions[4];
 		ComputeCirclePositions(transform, positions);
 		DrawCirclePositions(positions, color, thickness, fade, entityID);
@@ -631,7 +631,7 @@ namespace World
 	void Renderer2D::DrawCirclePositions(const glm::vec3 positions[4], const glm::vec4& color,
 		float thickness, float fade, int entityID)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		if (s_Data.Circles.IndexCount >= MaxCircles * 6)
 			NextBatch();
 		for (uint32_t i = 0; i < 4; i++)
@@ -651,7 +651,7 @@ namespace World
 	void Renderer2D::DrawLineCore(const glm::vec3& p0, const glm::vec3& p1,
 		const glm::vec4& color, int entityID)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		if (s_Data.Lines.IndexCount >= MaxLines * 2)
 			NextBatch();
 		s_Data.Lines.Ptr->Position = p0;
@@ -668,7 +668,7 @@ namespace World
 
 	void Renderer2D::DrawRectCore(const glm::mat4& transform, const glm::vec4& color, int entityID)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		glm::vec3 vertices[4];
 		ComputeQuadPositions(transform, vertices);   // 与 quad/circle 同一份顶点变换
 		for (uint32_t i = 0; i < 4; i++)
@@ -713,7 +713,7 @@ namespace World
 
 	void Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation, const glm::vec4& color)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
 			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
 			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
@@ -729,7 +729,7 @@ namespace World
 	void Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation,
 		const Rhi::Handle<Rhi::Texture>& texture, float tilingFactor, const glm::vec4& tintColor)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
 			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
 			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
@@ -737,7 +737,7 @@ namespace World
 	}
 	void Renderer2D::DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, float rotation)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
 			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
 			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });

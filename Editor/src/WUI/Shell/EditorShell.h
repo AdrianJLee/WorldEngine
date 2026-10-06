@@ -4,6 +4,7 @@
 #include "WUI/Panels/HierarchyPanel.h"
 #include "WUI/Panels/InputMapPanel.h"
 #include "WUI/Panels/PropertiesPanel.h"
+#include "WUI/Panels/ProfilerPanel.h"
 #include "WUI/Panels/ReadoutPanels.h"
 #include "WUI/Panels/SavePanel.h"
 #include "WUI/Panels/LevelPanel.h"

@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Profiling/ProfilingMacros.h"
 #include "World/Renderer/SceneRenderer.h"
 
 #include "World/RHI/RhiFramebufferBridge.h"
@@ -59,11 +60,17 @@ namespace World
 		if (!m_GpuTiming)
 			return;
 		const Rhi::Handle<Rhi::Device>& device = Renderer::GetDevice();
-		if (!device || !device->GetCapabilities().TimestampQueries)
+		if (!device)
 		{
-			// 设备不支持时间戳 → 明确退回关闭,而不是返回 0 让上层误以为"GPU 不耗时"。
-			if (device && !device->GetCapabilities().TimestampQueries)
-				WLD_CORE_WARN("rendering.gpu_timing 已开启,但当前设备不支持时间戳查询;GPU 耗时保持 0");
+			// 设备不可用 → 明确退回关闭并告警,不是静默返回 0 让上层误以为"GPU 不耗时"。
+			WLD_CORE_WARN("rendering.gpu_timing 已开启,但当前渲染设备不可用;GPU 耗时保持 0");
+			m_GpuTiming = false;
+			return;
+		}
+		if (!device->GetCapabilities().TimestampQueries)
+		{
+			// 设备不支持时间戳 → 明确退回关闭(同样是显式告警,不是静默)。
+			WLD_CORE_WARN("rendering.gpu_timing 已开启,但当前设备不支持时间戳查询;GPU 耗时保持 0");
 			m_GpuTiming = false;
 			return;
 		}
@@ -74,6 +81,10 @@ namespace World
 			bufferDesc.Size = sizeof(uint64_t) * 2;
 			bufferDesc.Usage = Rhi::BufferUsageTransferDst;
 			bufferDesc.Memory = Rhi::MemoryHint::HostVisible;
+			// 初值清零:异步读回下缓冲可能在被首次成功写入前就被读取,初值必须是"无效对"
+			// (stamps[1] <= stamps[0]),ReadGpuTiming 才会退回上一次有效值而不是未初始化内存。
+			const uint64_t zeroStamps[2] = { 0, 0 };
+			bufferDesc.InitialData = zeroStamps;
 			bufferDesc.DebugName = "SceneRenderer.GpuTimestamps";
 			m_TimestampBuffers[slot] = device->CreateBuffer(bufferDesc);
 			m_TimestampPending[slot] = false;
@@ -93,12 +104,20 @@ namespace World
 		if (!m_GpuTiming || !m_TimestampPools[slot])
 			return;
 		m_CommandBuffers[slot]->WriteTimestamp(m_TimestampPools[slot], 1);
-		m_CommandBuffers[slot]->CopyQueryResults(m_TimestampPools[slot], m_TimestampBuffers[slot], 0, 2);
 		m_TimestampPending[slot] = true;
+		// D8b(2026-10-06):异步读回。此处不等待 GPU;对"尚未成功读回"的每个槽位在本帧重发一次
+		// CopyQueryResults,后端只在结果可用时才拷贝(不可用则跳过,下一帧再试),因此本段永不
+		// 阻塞主线程。成功写入的读回缓冲在该槽位复用时由 ReadGpuTiming 取走。
+		for (uint32_t pending = 0; pending < kFramesInFlight; ++pending)
+			if (m_TimestampPending[pending] && m_TimestampPools[pending] && m_TimestampBuffers[pending])
+				m_CommandBuffers[slot]->CopyQueryResults(m_TimestampPools[pending],
+					m_TimestampBuffers[pending], 0, 2);
 	}
 
 	double SceneRenderer::ReadGpuTiming(uint32_t slot)
 	{
+		// 缓冲初值清零、拷贝失败时保持上一次的完整一对时间戳 ⇒ 这里读到的要么是本轮有效值,
+		// 要么是上一轮有效值;不会是"半写/未初始化"的脏值(见 EndGpuTiming 注释)。
 		if (!m_GpuTiming || !m_TimestampPending[slot] || !m_TimestampBuffers[slot])
 			return m_LastGpuMilliseconds;
 		uint64_t stamps[2] = {};
@@ -157,7 +176,7 @@ namespace World
 
 	void SceneRenderer::Init()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		if (m_Device)
 			Shutdown();
 		m_Device = Renderer::GetDevice();
@@ -287,7 +306,7 @@ namespace World
 
 	void SceneRenderer::Shutdown()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		// 抽取 sink 是跨帧装在场景上的:渲染器先死时把它摘掉,避免场景留着悬垂指针。
 		if (m_ExtractSinkScene)
 		{
@@ -797,6 +816,11 @@ namespace World
 
 		// D8a:场景提交总耗时(统计阈值起点,与 Renderer 的帧时间口径不同:
 		// 这里只量"收集 → 剔除 → 阴影 → 主通道 → 命令缓冲提交"这一段 CPU 时间)。
+		// 同一个区间同时开一个遥测作用域 ⇒ trace 里的 "Scene.Submit" 与 SceneStatistics
+		// 的 SceneMilliseconds 是**同一段**,不必在两个数字之间做对账。
+		WLD_TRACE_SCOPE("Scene.Submit");
+		// 归因标签:这段里产生的堆分配算在 "Renderer" 名下(零开销,见 ProfilingMacros)。
+		WLD_MEM_TAG("Renderer");
 		const auto sceneStart = std::chrono::steady_clock::now();
 		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
 		// 编辑/运行期都会改 Transform:每帧先重算层级世界矩阵,子实体才会跟随父实体
@@ -884,6 +908,10 @@ namespace World
 			}
 			cullMilliseconds = std::chrono::duration<double, std::milli>(
 				std::chrono::steady_clock::now() - cullStart).count();
+			// 与 CullMilliseconds 同一区间:便于在 trace 里对齐"剔除占了提交的多少"。
+			// 剔除耗时:计数器是整型,用**微秒**存(cull 常 <1ms,存毫秒会截断成 0)。
+			// 与帧计数器同口径:名称就写单位。
+			WLD_TRACE_COUNTER("Scene.CullUs", static_cast<int64_t>(cullMilliseconds * 1000.0));
 		}
 		uint32_t shadowCasters = 0;
 
@@ -980,11 +1008,17 @@ namespace World
 				shadowDraws.push_back(index);
 		}
 		shadowCasters = static_cast<uint32_t>(shadowDraws.size());
+		// 阴影通道规模(与 ShadowPassMilliseconds 配套的数字;耗时由 Renderer3D 统计给出)。
+		WLD_TRACE_COUNTER("Scene.ShadowCasters", static_cast<int64_t>(shadowCasters));
 		m_LightBuffers[slot]->SetData(&lightRig.Uniforms, sizeof(lightRig.Uniforms));
 
 		// D8a:场景提交前后的 Renderer3D 计数器快照(单调累计)→ 差值即本帧增量。
 		const Renderer3D::Statistics statsBeforeScene = Renderer3D::GetStats();
 		m_CommandBuffers[slot]->Begin();
+		// D8b(2026-10-06):起始时间戳提前到**阴影通道之前**,这样阴影通道与 3D/2D 主通道
+		// 都被量到。仍写在渲染通道之外(vkCmdWriteTimestamp 不能落在 render pass 内);
+		// 阴影关闭时只覆盖主通道,与旧的"仅主通道"口径一致。
+		BeginGpuTiming(slot);
 
 		// D4:方向光阴影通道(本帧 3D 主通道**之前**,同一命令缓冲):
 		// depth-only 管线把投影者写进 2048² 深度图,主通道按 PCF 采样。
@@ -1078,8 +1112,6 @@ namespace World
 		clears[2].IsDepthStencil = true;
 		clears[2].DepthStencil.Depth = 1.0f;
 
-		// D8b:起始时间戳在渲染通道**之外**写(vkCmdWriteTimestamp 不能在 render pass 内)。
-		BeginGpuTiming(slot);
 		m_CommandBuffers[slot]->BeginRenderPass(m_RenderPass, m_Framebuffer, clears);
 		m_CommandBuffers[slot]->SetViewport({ 0, 0, static_cast<float>(m_Width), static_cast<float>(m_Height) });
 		// 管线把视口/裁剪都设为动态状态,绑定后必须先设置再绘制
@@ -1301,8 +1333,9 @@ namespace World
 
 		Renderer2D::EndScene();
 		m_CommandBuffers[slot]->EndRenderPass();
-		// D8b:GPU 时间戳必须写在渲染通道之外(vkCmdWriteTimestamp 不能在 render pass 内),
-		// 因此这一段量的是"3D+2D 主通道"从 BeginRenderPass 到 EndRenderPass 的 GPU 时间。
+		// D8b:结束时间戳写在渲染通道之外(vkCmdWriteTimestamp 不能在 render pass 内)。
+		// 起点已提前到阴影通道之前 ⇒ 阴影开启时这一段量的是"阴影 + 3D/2D 主通道"的 GPU
+		// 时间;阴影关闭时只覆盖主通道(口径见 SceneStatistics::GpuMilliseconds 注释)。
 		EndGpuTiming(slot);
 		// 场景颜色附件在命令缓冲内转为可采样布局:提交方无需再 WaitIdle 做外部转换,
 		// 同一队列上后续提交(UI)按顺序即可安全采样。
@@ -1336,6 +1369,23 @@ namespace World
 			stats.SceneMilliseconds = std::chrono::duration<double, std::milli>(
 				std::chrono::steady_clock::now() - sceneStart).count();
 			Renderer3D::ReportSceneStatistics(stats);
+
+			// 渲染规模进 trace:此前这些数字只在编辑器 Stats 面板上,捕获文件里看不到,
+			// 于是"渲染慢是因为画得太多还是因为剔除没生效"无法事后分析。
+			// 与 SceneStatistics 同源(不是另算一份),键名与数据字典一致。
+			WLD_TRACE_COUNTER("Renderer.DrawCalls", static_cast<int64_t>(stats.DrawCalls));
+			WLD_TRACE_COUNTER("Renderer.Triangles", static_cast<int64_t>(stats.Triangles));
+			WLD_TRACE_COUNTER("Renderer.Submitted", static_cast<int64_t>(stats.Submitted));
+			WLD_TRACE_COUNTER("Renderer.Objects", static_cast<int64_t>(stats.Objects));
+			WLD_TRACE_COUNTER("Renderer.Culled", static_cast<int64_t>(stats.Culled));
+			WLD_TRACE_COUNTER("Renderer.DroppedObjects", static_cast<int64_t>(stats.DroppedObjects));
+			WLD_TRACE_COUNTER("Renderer.InstancedBatches", static_cast<int64_t>(stats.InstancedBatches));
+			WLD_TRACE_COUNTER("Renderer.Lights", static_cast<int64_t>(statsNow.Lights));
+			// 把 `Scene.Submit`(0.29ms/帧那种黑盒)拆开:主通道 = Submit − 阴影 − 剔除。
+			// 阴影/GPU 数字本来就有,只是过去只进 Renderer3D 统计、不进 trace。
+			WLD_TRACE_COUNTER("Renderer.ShadowMs", static_cast<int64_t>(statsNow.ShadowPassMilliseconds * 1000.0));
+			WLD_TRACE_COUNTER("Renderer.GpuUs", static_cast<int64_t>(stats.GpuMilliseconds * 1000.0));
+			WLD_TRACE_COUNTER("Renderer.SceneUs", static_cast<int64_t>(stats.SceneMilliseconds * 1000.0));
 		}
 	}
 

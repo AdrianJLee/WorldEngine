@@ -206,7 +206,7 @@ void EditorLayer::ProcessPluginReloadRequests(){
 
 
 void EditorLayer::OnAttach(){
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		// AI 控制通道:只有显式 --ai-control=<port> 时才监听(默认关闭,零行为变化)。
 		if (const int aiPort = Editor::AiControlPort(); aiPort > 0)
 		{
@@ -541,7 +541,7 @@ void EditorLayer::LoadIconTextures(){
 
 
 void EditorLayer::OnDetach(){
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		// 控制通道先停:避免关停过程中还有命令进来(Pump 已经不会再被调用)。
 		if (m_AiServer)
 		{
@@ -591,7 +591,7 @@ void EditorLayer::OnDetach(){
 
 
 void EditorLayer::OnUpdate(Timestep ts){
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		LayerTimingScope updateScope(LayerTimingState().Update);
 		// D5c-4a:渲染发生在面板绘制里(RenderScene),那里拿不到 Timestep —— 先缓存一帧。
 		m_LastDeltaSeconds = ts.GetSeconds();
@@ -705,7 +705,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 		Renderer2D::ResetStats();
 
 
-		WLD_PROFILE_SCOPE("Renderer Clear");
+		WLD_TRACE_SCOPE("Renderer Clear");
 		const Camera* renderCamera = &m_EditorCamera;
 		glm::mat4 renderCameraTransform = m_EditorCamera.GetTransform();
 		// D7-1a:3D 模式用 EditorCamera3D 的投影/视图(P1b D1 的相机),沿用同一个提交接口。
@@ -718,7 +718,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 
 
 		{
-			WLD_PROFILE_SCOPE("Renderer Draw");
+			WLD_TRACE_SCOPE("Renderer Draw");
 			switch (m_SceneState)
 			{
 				case SceneState::Edit:
@@ -1076,7 +1076,7 @@ void EditorLayer::RunPickCheck(){
 
 
 void EditorLayer::OnUiFrame(){
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		LayerTimingScope uiFrameScope(LayerTimingState().UiFrame);
 		// 手动打点(三段之间夹着"面板逻辑"与"WUI 录制",各自还要在末尾一次性累加)。
 		const bool timingEnabled = LayerTimingState().Enabled;
@@ -1197,7 +1197,7 @@ void EditorLayer::ExportOperationLog(){
 
 
 void EditorLayer::OnEvent(Event& event){
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		if (m_ViewportFocused && m_ViewportHovered)
 		{

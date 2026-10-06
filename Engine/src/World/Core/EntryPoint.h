@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #ifdef WLD_PLATFORM_WINDOWS
 extern World::Application* World::CreateApplication(World::WorldContext& context);
 
@@ -25,16 +25,12 @@ int main(int argc, char** argv)
 
 	World::WorldContext context;
 
-	WLD_PROFILE_BEGIN_SESSION("Startup", "WEProfile-Startup.json");
+	// 插桩不再有"会话"概念:进程生命周期由 Telemetry::Init/Shutdown 管,
+	// trace 只在**按需采集**窗口内产出(环境变量或 AI 命令驱动,见 docs/dev/profiling.md)。
 	auto app = World::CreateApplication(context);
-	WLD_PROFILE_END_SESSION();
-
-	WLD_PROFILE_BEGIN_SESSION("Runtime", "WEProfile-Runtime.json");
 	app->Run();
-	WLD_PROFILE_END_SESSION();
-
-	WLD_PROFILE_BEGIN_SESSION("Shutdown", "WEProfile-Shutdown.json");
 	delete app;
-	WLD_PROFILE_END_SESSION();
+
+
 }
 #endif

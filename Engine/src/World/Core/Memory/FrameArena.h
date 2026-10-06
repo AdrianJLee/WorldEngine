@@ -25,7 +25,7 @@ namespace World
 		static FrameArena& Get();
 		// 帧末回卷全部线程的 arena。只允许在其它线程空闲时调用。
 		static void ResetAll();
-		// 进程退出:释放全部 arena(含登记到 MemoryTracker 的条目)。
+		// 进程退出:释放全部 arena(登记在 MemoryTrack 里的分配器条目随之注销)。
 		static void Shutdown();
 		// 统计快照(内存面板/测试用);返回 arena 数量。
 		static size_t CollectStats(std::vector<AllocatorStats>& out);

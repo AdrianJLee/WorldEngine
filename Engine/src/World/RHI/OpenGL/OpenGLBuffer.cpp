@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/RHI/OpenGL/OpenGLBuffer.h"
+#include "World/Profiling/MemoryTrack.h"
 #include "World/RHI/OpenGL/OpenGLHelpers.h"
 
 #include <cstring>
@@ -22,6 +23,7 @@ namespace World::Rhi::OpenGL
 
 		glCreateBuffers(1, &m_ID);
 		glNamedBufferStorage(m_ID, desc.Size, desc.InitialData, storageFlags);
+		World::Profiling::MemoryTrack::AddGpuResident("Rhi.Buffer", desc.Size);
 		// 不使用持久映射:批绘制后端每帧多次覆写同一缓冲区,映射写入与 GPU
 		// 读取之间没有同步,早期批次会读到被后续批次覆盖的顶点数据(表现为
 		// 界面局部不绘制)。glNamedBufferSubData 由驱动处理读写冲突。
@@ -29,6 +31,9 @@ namespace World::Rhi::OpenGL
 
 	OpenGLBuffer::~OpenGLBuffer()
 	{
+		// GPU 驻留记账:创建/销毁成对,守恒可断言。GL 侧没有可查的分配尺寸,
+		// 用 desc.Size(请求尺寸);驱动可能向上对齐,故这是**下界**。
+		World::Profiling::MemoryTrack::RemoveGpuResident("Rhi.Buffer", m_Desc.Size);
 		if (m_ID)
 			glDeleteBuffers(1, &m_ID);
 	}

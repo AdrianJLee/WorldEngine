@@ -98,7 +98,10 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 			{ "properties",      EditorShell::PanelForm::Docked, {} },
 			{ "content_browser", EditorShell::PanelForm::Docked, {} },
 			{ "view",            EditorShell::PanelForm::Docked, {} },
-			{ "stats",           EditorShell::PanelForm::Docked, {} },
+
+			// M3:性能剖析(帧时间曲线 + 分位数 + 掉帧 + 内存概览;数据与 prof.stats 同源)。
+
+			{ "profiler",        EditorShell::PanelForm::Docked, {} },
 			{ "systems",         EditorShell::PanelForm::Docked, {} },
 			// M4-TEX P4:纹理设置(Texture Settings)—— 编辑一个 `.wtex` 资产(设置 + source:)。
 			// 形态与 Project Settings 同款(独立窗口形态,默认打开 = 附加到主窗口的标签):

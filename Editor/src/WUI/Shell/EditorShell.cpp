@@ -227,12 +227,13 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		m_PanelRegistry.emplace("properties", std::make_unique<PropertiesPanel>(*this));
 		m_PanelRegistry.emplace("content_browser", std::make_unique<ContentBrowserPanel>(*this));
 		m_PanelRegistry.emplace("view", std::make_unique<ViewportPanel>(*this));
-		m_PanelRegistry.emplace("stats", std::make_unique<StatsPanel>());
 		m_PanelRegistry.emplace("systems", std::make_unique<SystemsPanel>());
 		// D8a2:项目渲染设置(引擎用户可配置)。用户 2026-09-20 指定为独立窗口形态:
 		// 默认打开 = 附加到主窗口(见 PanelSpec),可拖出为独立 OS 窗口 / ui.detach。
 		m_PanelRegistry.emplace("settings", std::make_unique<SettingsPanel>());
 		m_PanelRegistry.emplace("prefs", std::make_unique<PreferencesPanel>());
+		// M3:性能剖析面板(与 stats/memory 并列,数据同源)。
+		m_PanelRegistry.emplace("profiler", std::make_unique<ProfilerPanel>());
 		m_PanelRegistry.emplace("memory", std::make_unique<MemoryPanel>());
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("save", std::make_unique<SavePanel>());
@@ -1062,7 +1063,6 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 			{ "properties",      { "panel.properties", "Properties" } },
 			{ "content_browser", { "panel.content_browser", "Content Browser" } },
 			{ "view",            { "panel.view", "View" } },
-			{ "stats",           { "panel.stats", "Stats" } },
 			{ "systems",         { "panel.systems", "Systems" } },
 			{ "settings",        { "panel.settings", "Project Settings" } },
 			{ "prefs",           { "panel.prefs", "Editor Preferences" } },

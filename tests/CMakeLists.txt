@@ -950,8 +950,15 @@ set_tests_properties(World.TextureRuntime PROPERTIES
 )
 
 # 内存基座回归:每线程帧 arena、析构、追加页、双轨与池分配器。
+# 注意:GlobalAllocHooks.cpp 是按模块生效的替换式 operator new —— 测试进程要统计自己的
+# 分配,必须也编译一份(状态在 WorldRuntime.dll 里,两份 hook 共享同一张表)。
+# 这正是“没装 hook 的模块的分配不可见”这条口径的实证。
+
 add_executable(WorldMemoryTests World/MemoryTests.cpp)
 target_link_libraries(WorldMemoryTests PRIVATE World)
+target_sources(WorldMemoryTests PRIVATE
+    ${WLD_ENGINE_ROOT}/Engine/src/World/Profiling/GlobalAllocHooks.cpp
+)
 target_compile_features(WorldMemoryTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldMemoryTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
@@ -964,6 +971,32 @@ if(MSVC)
     target_compile_options(WorldMemoryTests PRIVATE /utf-8)
 endif()
 
+# 遥测(M1)回归:帧统计分位数、采集落盘与回读、溢出计数、并发写入、缓冲复用。
+# 反假:分位数用"多数快帧 + 少数慢帧"的已知形状验证;采集回读解析 JSON 逐项核对。
+add_executable(WorldTelemetryTests World/TelemetryTests.cpp)
+target_link_libraries(WorldTelemetryTests PRIVATE World)
+# 同 WorldMemoryTests:测试进程要统计自己的分配,必须也编译一份 hook
+# (状态在 WorldRuntime.dll 里,各模块的 hook 共享同一张表)。
+target_sources(WorldTelemetryTests PRIVATE
+    ${WLD_ENGINE_ROOT}/Engine/src/World/Profiling/GlobalAllocHooks.cpp
+)
+target_compile_features(WorldTelemetryTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldTelemetryTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldTelemetryTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldTelemetryTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Telemetry COMMAND WorldTelemetryTests)
+set_tests_properties(World.Telemetry PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
 # 任务系统回归:提交/等待、ParallelFor、嵌套依赖、取消、压力与统计。
 add_executable(WorldTaskTests World/TaskTests.cpp)
 target_link_libraries(WorldTaskTests PRIVATE World)
@@ -1491,6 +1524,6 @@ add_custom_target(WeCopyRuntimeDllForTests
     VERBATIM
 )
 
-foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests ${_we_optional_test_targets})
     add_dependencies(${_we_test_target} WeCopyRuntimeDllForTests)
 endforeach()

@@ -21,6 +21,11 @@ namespace World::Rhi
 		std::string DebugName;
 	};
 
+	// 按 desc 估算设备内存占用(GPU 驻留统计口径;未知格式返回 0 并计数,见 .cpp 的说明)。
+	WLD_API uint64_t EstimateTextureBytes(const TextureDesc& desc);
+	WLD_API uint64_t UnaccountedTextureCount();
+	WLD_API uint64_t AccountedTextureCount();
+
 	struct TextureViewDesc
 	{
 		Format Format = Format::Undefined;   // Undefined = 继承基纹理

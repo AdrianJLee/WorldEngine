@@ -16,6 +16,8 @@
 #include "World/WUI/WuiCodeEditor.h"
 #include "World/WUI/Widgets/WuiControls.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include <cmath>
+#include "World/WUI/Widgets/WuiPlot.h"
 #include "World/Core/KeyCodes.h"
 
 #include <algorithm>
@@ -462,22 +464,24 @@ int main()
 
 		// 9b. 停靠矩形切分:两级 split 按比例分区
 		{
-			DockLayout layout = DockLayout::Default({ "hierarchy", "properties", "content_browser", "view", "stats", "memory" });
+			// 夹具用**真实存在的面板名**:`stats` 已并入 Profiler 面板(2026-10-06),
+			// 这个名字不再属于"杂项组",留在夹具里会让分组断言失去意义。
+			DockLayout layout = DockLayout::Default({ "hierarchy", "properties", "content_browser", "view", "memory", "operations" });
 			std::vector<std::pair<PanelId, WuiRect>> rects;
 			layout.ComputeRects({ 0, 0, 1000, 800 }, &rects);
 			CHECK(rects.size() == 6);
-			WuiRect hierarchy, view, stats;
+			WuiRect hierarchy, view, misc;
 			for (const auto& [panel, rect] : rects)
 			{
 				if (panel == "hierarchy") hierarchy = rect;
 				if (panel == "view") view = rect;
-				if (panel == "stats") stats = rect;
+				if (panel == "operations") misc = rect;
 			}
 			CHECK(Near(hierarchy.X, 0) && Near(hierarchy.W, 240));
 			CHECK(Near(hierarchy.H, 800 * 0.58f));
 			CHECK(Near(view.X, 240) && Near(view.W, 760));
 			CHECK(Near(view.H, 800 * 0.82f));
-			CHECK(Near(stats.Y, 800 * 0.82f));
+			CHECK(Near(misc.Y, 800 * 0.82f));
 		}
 
 		// 10. JSON:字符串转义与解析错误
@@ -6143,6 +6147,384 @@ int main()
 			}
 			accessibility.SetEnabled(false);
 			accessibility.Clear();
+		}
+
+		// WUIPLOT-2: 亚像素抽取(恒定序列必须可见) + 第二序列 + 参考线量程过滤。
+		//
+		// 为什么单独立用例:600 点画在 ~220px 宽上时,逐点折线每段只有 0.37px,
+		// 渲染端会退化成空图元 —— **平直**的序列会完全不显示
+		// (实测:显存长期 49.6MB 时整条曲线消失,看起来像"没有数据")。
+		// 这条用例把"恒定序列仍产生可绘制图元"钉死,防回归。
+		{
+			const WuiRect rect { 0.0f, 0.0f, 220.0f, 100.0f };
+
+			// A. 恒定序列(600 点 / 220px):必须产生绘制命令,且数量按**列**而非样本数。
+			{
+				std::vector<float> flat(600, 42.0f);
+				WuiPlot plot;
+				plot.Samples = flat.data();
+				plot.SampleCount = flat.size();
+				plot.MinValue = 0.0f;
+				plot.MaxValue = 100.0f;
+				plot.Arrange(rect);
+				WuiContext ctx;
+				WuiPaintContext paint(ctx);
+				plot.Paint(paint);
+
+				// 网格 7 条 + 序列图元;序列图元必须存在(> 7)。
+				CHECK(ctx.Commands().size() > 7);
+				// 抽取生效:远少于逐点绘制会产生的量级(599 段)。
+				const size_t seriesCommands = ctx.Commands().size() - 7;
+				CHECK(seriesCommands < 599);
+				// 上界:每列至多"填充 + 线"两个图元(允许少量余量)。
+				CHECK(seriesCommands <= 2 * 220 + 8);
+				// 图元必须落在绘图区内(1px 最小高度也不得越界)。
+				for (const auto& command : ctx.Commands())
+					for (const glm::vec2& vertex : command.Vertices)
+					{
+						CHECK(vertex.y >= rect.Y - 1.0f);
+						CHECK(vertex.y <= rect.Y + rect.H + 1.0f);
+					}
+
+				// 判据一:**存在可绘制的图元**。退化(零尺寸)的图元**照样会被 push 进命令流**,
+				// 所以"命令数 > 0"不算数 —— 必须检查几何尺寸。
+				size_t visibleSegments = 0;
+				for (const auto& command : ctx.Commands())
+				{
+					if (!SameColor(command.Color, plot.LineColor) || command.Vertices.size() < 2)
+						continue;
+					const glm::vec2& a = command.Vertices[0];
+					const glm::vec2& b = command.Vertices[1];
+					if (std::abs(b.x - a.x) >= 0.5f || std::abs(b.y - a.y) >= 0.5f)
+						++visibleSegments;
+				}
+				CHECK(visibleSegments > 0);
+
+				// 判据二(消锯齿的核心):**相邻列必须被连接段连起来**。
+				// 只画"每列一根竖条"会让相邻列各自起跳 ⇒ 窄面板上就是锯齿/梳齿。
+				// 这里要求横跨 >= 0.5px 的连接段足够多(600 点 / 220 列 ⇒ 约 219 条)。
+				size_t connectingSegments = 0;
+				for (const auto& command : ctx.Commands())
+				{
+					if (!SameColor(command.Color, plot.LineColor) || command.Vertices.size() < 2)
+						continue;
+					if (std::abs(command.Vertices[1].x - command.Vertices[0].x) >= 0.5f)
+						++connectingSegments;
+				}
+				CHECK(connectingSegments > 100);
+			}
+
+			// B. 第二序列:设了 Samples2 必须额外出图元(否则"两条线"是假的)。
+			{
+				std::vector<float> second(600, 70.0f);
+				WuiPlot plot;
+				plot.Arrange(rect);
+				WuiContext ctxA;
+				WuiPaintContext paintA(ctxA);
+				plot.Paint(paintA);
+				const size_t withoutSecond = ctxA.Commands().size();
+
+				plot.Samples2 = second.data();
+				plot.SampleCount2 = second.size();
+				WuiContext ctxB;
+				WuiPaintContext paintB(ctxB);
+				plot.Paint(paintB);
+				CHECK(ctxB.Commands().size() > withoutSecond);
+			}
+
+			// C. 参考线:量程内的画、量程外的**不画**(画到边缘会被误读成"刚好到顶")。
+			{
+				WuiPlot plot;
+				plot.MinValue = 0.0f;
+				plot.MaxValue = 100.0f;
+				plot.GuideCount = 2;
+				plot.Guides[0] = { 50.0f, { 1.0f, 1.0f, 1.0f, 1.0f } };   // 量程内
+				plot.Guides[1] = { 150.0f, { 1.0f, 1.0f, 1.0f, 1.0f } };  // 量程外
+				plot.Arrange(rect);
+				WuiContext ctx;
+				WuiPaintContext paint(ctx);
+				plot.Paint(paint);
+
+				// 纯白 1px 水平线 = 参考线;量程外那条不得出现。
+				size_t guides = 0;
+				for (const auto& command : ctx.Commands())
+				{
+					if (!SameColor(command.Color, { 1.0f, 1.0f, 1.0f, 1.0f }))
+						continue;
+					if (command.Vertices.size() >= 2 &&
+						std::abs(command.Vertices[0].y - command.Vertices[1].y) < 0.5f)
+						++guides;
+				}
+				CHECK(guides == 1);
+			}
+		}
+
+		// WUIPLOT: 图表控件 WuiPlot (折线/柱状图、自动定标、固定网格、告警线、越界夹取)
+		{
+			// 0. Measure 约束与尺寸 (MinW, MinH, MaxW, MaxH)
+			{
+				WuiPlot plot;
+				plot.MinHeight = 80.0f;
+				WuiConstraints c1;
+				c1.MinW = 0.0f; c1.MinH = 0.0f; c1.MaxW = 1000.0f; c1.MaxH = 1000.0f;
+				const WuiMeasure m1 = plot.Measure(c1);
+				CHECK(Near(m1.Width, 0.0f) && Near(m1.Height, 80.0f));
+
+				WuiConstraints c2;
+				c2.MinW = 50.0f; c2.MinH = 10.0f; c2.MaxW = 200.0f; c2.MaxH = 60.0f;
+				const WuiMeasure m2 = plot.Measure(c2);
+				CHECK(Near(m2.Width, 50.0f) && Near(m2.Height, 60.0f));
+			}
+
+			// A. 量程: 显式 MinValue/MaxValue 生效,断言数据在不同量程下映射的 y 不同
+			{
+				const float samples[] = { 10.0f, 40.0f };
+				const WuiRect rect { 0.0f, 0.0f, 100.0f, 100.0f };
+
+				WuiPlot plot1;
+				plot1.Samples = samples;
+				plot1.SampleCount = 2;
+				plot1.MinValue = 0.0f;
+				plot1.MaxValue = 50.0f;
+				plot1.Arrange(rect);
+
+				WuiContext ctx1;
+				WuiPaintContext paint1(ctx1);
+				plot1.Paint(paint1);
+
+				WuiPlot plot2;
+				plot2.Samples = samples;
+				plot2.SampleCount = 2;
+				plot2.MinValue = 0.0f;
+				plot2.MaxValue = 100.0f;
+				plot2.Arrange(rect);
+
+				WuiContext ctx2;
+				WuiPaintContext paint2(ctx2);
+				plot2.Paint(paint2);
+
+				// 找到 LineSegment 对应的 Quad 命令(折线线段)
+				// 对样本 40.0f:
+				// plot1 (0..50): t = 40/50 = 0.8
+				// plot2 (0..100): t = 40/100 = 0.4
+				// y1 应在 y2 之上(y1 < y2)
+				auto FindLineSegmentQuad = [](const std::vector<WuiDrawCommand>& cmds, const WuiColor& color) -> const WuiDrawCommand* {
+					for (const auto& cmd : cmds)
+					{
+						if (cmd.Kind == WuiDrawKind::Quad && SameColor(cmd.Color, color))
+							return &cmd;
+					}
+					return nullptr;
+				};
+
+				const WuiDrawCommand* line1 = FindLineSegmentQuad(ctx1.Commands(), plot1.LineColor);
+				const WuiDrawCommand* line2 = FindLineSegmentQuad(ctx2.Commands(), plot2.LineColor);
+				CHECK(line1 != nullptr);
+				CHECK(line2 != nullptr);
+
+				// line1 和 line2 终点 (x=100) 的 y 坐标
+				const float y1 = (line1->Vertices[1].y + line1->Vertices[2].y) * 0.5f;
+				const float y2 = (line2->Vertices[1].y + line2->Vertices[2].y) * 0.5f;
+				CHECK(!Near(y1, y2));
+				CHECK(y1 < y2); // plot1 量程更紧凑,40.0f 距离顶部更近
+
+				// 柱状图同样检验
+				plot1.Style = WuiPlot::Kind::Bars;
+				plot2.Style = WuiPlot::Kind::Bars;
+				WuiContext ctxBars1, ctxBars2;
+				WuiPaintContext paintBars1(ctxBars1), paintBars2(ctxBars2);
+				plot1.Paint(paintBars1);
+				plot2.Paint(paintBars2);
+
+				// 找第二根柱子(样本 40.0f)的矩形填充
+				auto FindSecondBarRect = [](const std::vector<WuiDrawCommand>& cmds, const WuiColor& color) -> const WuiDrawCommand* {
+					int count = 0;
+					for (const auto& cmd : cmds)
+					{
+						if (cmd.Kind == WuiDrawKind::Rect && SameColor(cmd.Color, color))
+						{
+							if (++count == 2)
+								return &cmd;
+						}
+					}
+					return nullptr;
+				};
+				const WuiDrawCommand* bar1 = FindSecondBarRect(ctxBars1.Commands(), plot1.FillColor);
+				const WuiDrawCommand* bar2 = FindSecondBarRect(ctxBars2.Commands(), plot2.FillColor);
+				CHECK(bar1 != nullptr && bar2 != nullptr);
+				CHECK(bar1->Rect.H > bar2->Rect.H); // plot1 的柱高是 plot2 的两倍 (0.8 / 0.4)
+				CHECK(Near(bar1->Rect.H / bar2->Rect.H, 2.0f));
+			}
+
+			// B. 自动定标: 不给 Max 时,峰值样本映射到绘图区顶部附近(留边距)
+			{
+				const float samples[] = { 5.0f, 25.0f, 10.0f };
+				const WuiRect rect { 10.0f, 20.0f, 200.0f, 100.0f };
+
+				WuiPlot plot;
+				plot.Samples = samples;
+				plot.SampleCount = 3;
+				plot.MinValue = 0.0f;
+				plot.MaxValue = 0.0f; // 自动定标
+				plot.FillColor.A = 0.0f; // 只看线,便于顶点检验
+				plot.Arrange(rect);
+
+				WuiContext ctx;
+				WuiPaintContext paint(ctx);
+				plot.Paint(paint);
+
+				// 样本 1 (25.0f) 是峰值。段 0->1 的终点和段 1->2 的起点均对应该点。
+				std::vector<const WuiDrawCommand*> lineCmds;
+				for (const auto& cmd : ctx.Commands())
+				{
+					if (cmd.Kind == WuiDrawKind::Quad && SameColor(cmd.Color, plot.LineColor))
+						lineCmds.push_back(&cmd);
+				}
+				CHECK(lineCmds.size() == 2);
+				const float peakY = (lineCmds[0]->Vertices[1].y + lineCmds[0]->Vertices[2].y) * 0.5f;
+
+				// 峰值 y 必须落在绘图区顶部附近并留出边距:
+				// rect.Y = 20, padTop = 6 => peakY 应该在 26 附近
+				CHECK(peakY > rect.Y);                     // 留出边距,不可画到 rect 外或顶格 0 边距
+				CHECK(peakY < rect.Y + 15.0f);             // 确实在顶部附近
+				CHECK(peakY >= rect.Y && peakY <= rect.Y + rect.H); // 严格落在 rect 内部
+			}
+
+			// C. 空数据: SampleCount == 0 与 Samples == nullptr 不崩、只画网格与告警线; 尺寸为 0 直接返回
+			{
+				const WuiRect rect { 0.0f, 0.0f, 100.0f, 100.0f };
+
+				// C1: SampleCount == 0, Samples == nullptr
+				{
+					WuiPlot plot;
+					plot.Samples = nullptr;
+					plot.SampleCount = 0;
+					plot.WarnThreshold = -1.0f;
+					plot.Arrange(rect);
+					WuiContext ctx;
+					WuiPaintContext paint(ctx);
+					plot.Paint(paint);
+					// 仅有 7 条网格线 (3 横 + 4 纵)
+					CHECK(ctx.Commands().size() == 7);
+					for (const auto& cmd : ctx.Commands())
+						CHECK(SameColor(cmd.Color, plot.GridColor));
+				}
+				// C2: SampleCount > 0, Samples == nullptr (防悬垂指针/野指针解引用)
+				{
+					WuiPlot plot;
+					plot.Samples = nullptr;
+					plot.SampleCount = 100;
+					plot.Arrange(rect);
+					WuiContext ctx;
+					WuiPaintContext paint(ctx);
+					plot.Paint(paint);
+					CHECK(ctx.Commands().size() == 7);
+				}
+				// C3: 尺寸为 0
+				{
+					const float samples[] = { 1.0f, 2.0f, 3.0f };
+					WuiPlot plot;
+					plot.Samples = samples;
+					plot.SampleCount = 3;
+					plot.Arrange({ 0.0f, 0.0f, 0.0f, 100.0f });
+					WuiContext ctx;
+					WuiPaintContext paint(ctx);
+					plot.Paint(paint);
+					CHECK(ctx.Commands().empty());
+
+					plot.Arrange({ 0.0f, 0.0f, 100.0f, 0.0f });
+					WuiContext ctx2;
+					WuiPaintContext paint2(ctx2);
+					plot.Paint(paint2);
+					CHECK(ctx2.Commands().empty());
+				}
+			}
+
+			// D. 告警线: WarnThreshold >= 0 时多出一条水平线段,命令计数与位置可断言
+			{
+				const float samples[] = { 10.0f, 20.0f, 30.0f };
+				const WuiRect rect { 0.0f, 0.0f, 100.0f, 100.0f };
+
+				WuiPlot plotNoWarn;
+				plotNoWarn.Samples = samples;
+				plotNoWarn.SampleCount = 3;
+				plotNoWarn.MinValue = 0.0f;
+				plotNoWarn.MaxValue = 40.0f;
+				plotNoWarn.WarnThreshold = -1.0f;
+				plotNoWarn.Arrange(rect);
+				WuiContext ctxNoWarn;
+				WuiPaintContext paintNoWarn(ctxNoWarn);
+				plotNoWarn.Paint(paintNoWarn);
+
+				WuiPlot plotWithWarn = plotNoWarn;
+				plotWithWarn.WarnThreshold = 20.0f; // 位于量程正中 (t = 0.5)
+				WuiContext ctxWithWarn;
+				WuiPaintContext paintWithWarn(ctxWithWarn);
+				plotWithWarn.Paint(paintWithWarn);
+
+				// 命令计数恰好差 1 (多了一条告警线)
+				CHECK(ctxWithWarn.Commands().size() == ctxNoWarn.Commands().size() + 1);
+
+				// 断言告警线属性
+				const WuiDrawCommand& warnCmd = ctxWithWarn.Commands().back();
+				CHECK(warnCmd.Kind == WuiDrawKind::Quad);
+				CHECK(SameColor(warnCmd.Color, plotWithWarn.ThresholdColor));
+
+				// 告警线为水平线段,两端横跨 rect.X 到 rect.X + rect.W
+				const float warnY = (warnCmd.Vertices[0].y + warnCmd.Vertices[2].y) * 0.5f;
+				CHECK(warnY >= rect.Y && warnY <= rect.Y + rect.H);
+				// 量程 0..40, 阈值 20 => t = 0.5, 应位于内部有效高度正中
+				const float padTop = 6.0f;
+				const float padBottom = 4.0f;
+				const float innerTop = rect.Y + padTop;
+				const float innerBottom = rect.Y + rect.H - padBottom;
+				const float expectedWarnY = innerBottom - 0.5f * (innerBottom - innerTop);
+				CHECK(Near(warnY, expectedWarnY));
+			}
+
+			// E. 不越界: 无论输入样本极端值如何,所有绘制命令的坐标全部落在 rect 内
+			{
+				const float extremeSamples[] = { -99999.0f, -50.0f, 0.0f, 25.0f, 60.0f, 1000.0f, 99999.0f };
+				const WuiRect rect { 15.0f, 25.0f, 180.0f, 90.0f };
+
+				for (auto style : { WuiPlot::Kind::Line, WuiPlot::Kind::Bars })
+				{
+					WuiPlot plot;
+					plot.Style = style;
+					plot.Samples = extremeSamples;
+					plot.SampleCount = sizeof(extremeSamples) / sizeof(extremeSamples[0]);
+					plot.MinValue = 0.0f;
+					plot.MaxValue = 50.0f;
+					plot.WarnThreshold = 25.0f;
+					plot.Arrange(rect);
+
+					WuiContext ctx;
+					WuiPaintContext paint(ctx);
+					plot.Paint(paint);
+
+					CHECK(!ctx.Commands().empty());
+					for (const auto& cmd : ctx.Commands())
+					{
+						if (cmd.Kind == WuiDrawKind::Rect)
+						{
+							CHECK(cmd.Rect.X >= rect.X - 0.01f);
+							CHECK(cmd.Rect.X + cmd.Rect.W <= rect.X + rect.W + 0.01f);
+							CHECK(cmd.Rect.Y >= rect.Y - 0.01f);
+							CHECK(cmd.Rect.Y + cmd.Rect.H <= rect.Y + rect.H + 0.01f);
+						}
+						else if (cmd.Kind == WuiDrawKind::Quad)
+						{
+							for (const auto& v : cmd.Vertices)
+							{
+								CHECK(v.x >= rect.X - 0.01f);
+								CHECK(v.x <= rect.X + rect.W + 0.01f);
+								CHECK(v.y >= rect.Y - 0.01f);
+								CHECK(v.y <= rect.Y + rect.H + 0.01f);
+							}
+						}
+					}
+				}
+			}
 		}
 
 		std::printf("World.Wui: all checks passed\n");

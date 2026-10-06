@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Renderer/Legacy/OpenGL/OpenGLShader.h"
 
 #include "World/Renderer/ShaderUtils.h"
@@ -21,13 +21,13 @@ namespace World
 
 	OpenGLShader::~OpenGLShader()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glDeleteProgram(m_RendererID);
 	}
 	void OpenGLShader::Bind() const
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		glUseProgram(m_RendererID);
 	}
@@ -69,13 +69,13 @@ namespace World
 
 	void OpenGLShader::Compile()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		Compile(shaderSources);
 	}
 
 	void OpenGLShader::Compile(const std::unordered_map<GLenum, std::string>& shaderSources)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		uint32_t rendererID = glCreateProgram();
 

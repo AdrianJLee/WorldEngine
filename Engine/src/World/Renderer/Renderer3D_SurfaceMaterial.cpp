@@ -553,7 +553,7 @@ uint32_t SubmitObject(State& state, const Ref<Mesh>& mesh, const Ref<Material>& 
 }
 
 void Renderer3D::Init(){
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		State& state = GetState();
 		// D8a2:阴影贴图边长来自项目清单(rendering.shadow_map_size);资源在这里按它创建,
 		// 因此该字段**启动时生效**。清单校验已保证 2 的幂且 ∈[256,4096]。

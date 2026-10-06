@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Renderer/Legacy/OpenGL/OpenGLCommandBuffer.h"
 #include "World/Renderer/Legacy/Gfx/RenderCommand.h"
 #include "World/Renderer/Renderer2D.h"
@@ -65,7 +65,7 @@ namespace World
 	}
 	void OpenGLCommandBuffer::Execute()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		// 核心：在渲染线程按序回放所有指令
 		for (auto& command : m_CommandQueue)
 		{

@@ -117,8 +117,10 @@ namespace World
 		uint32_t FrameSlot() const;
 
 		// ---- P1b D8b:GPU 时间戳(rendering.gpu_timing,默认关)----
-		// 每帧槽位一套查询池 + 读回缓冲:本帧写时间戳、该槽位 3 帧后被复用时才读上一轮
-		// 结果,所以测量本身不需要 WaitIdle(代价只有一次 16B 拷贝与一次 Map)。
+		// 每帧槽位一套查询池 + host-visible 读回缓冲。时间戳写在本槽位的命令缓冲里;
+		// 结果**异步**读回 —— 拷贝命令每帧重发,后端只在结果可用时才拷贝(不可用则跳过,
+		// 下一帧再试),绝不阻塞主线程;读回缓冲在该槽位 kFramesInFlight 帧后被复用时
+		// 才由 ReadGpuTiming 取走(代价只有一次 16B 拷贝与一次 Map)。
 		void InitGpuTiming();
 		void BeginGpuTiming(uint32_t slot);
 		void EndGpuTiming(uint32_t slot);
@@ -126,7 +128,7 @@ namespace World
 		bool m_GpuTiming = false;
 		Rhi::Handle<Rhi::QueryPool> m_TimestampPools[kFramesInFlight];
 		Rhi::Handle<Rhi::Buffer> m_TimestampBuffers[kFramesInFlight];
-		bool m_TimestampPending[kFramesInFlight] = {};
+		bool m_TimestampPending[kFramesInFlight] = {};   // true = 池里已有完整两点时间戳,尚未成功读回
 		double m_LastGpuMilliseconds = 0.0;
 
 		// m_Width/m_Height = 渲染目标尺寸(实际创建的附件/视口尺寸)。

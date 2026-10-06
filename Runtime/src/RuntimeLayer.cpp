@@ -45,7 +45,7 @@ namespace World
 
 	void RuntimeLayer::OnAttach()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		std::string moduleError;
 		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
@@ -150,7 +150,7 @@ namespace World
 	}
 	void RuntimeLayer::OnDetach()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		// 顺序与改造前一致:先停运行时并释放场景,再关闭渲染器。
 		m_Host.StopRuntime();
 		m_Host.Shutdown();
@@ -168,7 +168,7 @@ namespace World
 	}
 	void RuntimeLayer::OnUpdate(Timestep ts)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		// 窗口尺寸变化:等尺寸稳定约 0.1s 再重建渲染目标(拖拽缩放时逐帧重建会在 Vulkan 下
 		// 与在飞帧抢资源,和编辑器侧同一套节流策略)。
 		if (m_SceneRenderer)

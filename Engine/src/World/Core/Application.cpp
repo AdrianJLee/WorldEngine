@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Core/Application.h"
 
 #include "World/Core/Log.h"
@@ -7,7 +7,6 @@
 #include "World/Asset/ProjectMount.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Core/Thread/JobSystem.h"
-#include "World/Core/Memory/MemoryTracker.h"
 #include "World/Events/KeyEvent.h"
 #include "World/Events/MouseEvent.h"
 #include "World/Script/Runtime/ScriptEngine.h"
@@ -38,7 +37,7 @@ namespace World
 	Application::Application(const std::string& name, WorldContext& context)
 		: m_Context(context)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		WLD_CORE_ASSERT(!s_Instance, "Appliicatiion already exists!");
 		s_Instance = this;
@@ -72,7 +71,7 @@ namespace World
 
 	Application::~Application()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		Shutdown();
 	}
 
@@ -115,17 +114,9 @@ namespace World
 		// are still alive.
 		if (m_EngineAllocator) m_EngineAllocator->Reset();
 		FrameArena::Shutdown();
-		// 退出前的泄漏检查:仍有活跃分配的分配器会被点名(便于定位谁没释放)。
-		{
-			std::vector<std::string> leaks;
-			const size_t leaking = MemoryTracker::Get().ReportLeaks(&leaks);
-			if (leaking > 0)
-			{
-				for (const std::string& line : leaks)
-					WLD_CORE_WARN("[memory] leak: {0}", line);
-				WLD_CORE_WARN("[memory] {0} allocator(s) still hold live allocations at shutdown", leaking);
-			}
-		}
+		// 泄漏/归因报告由 Profiling::Telemetry::Shutdown() -> MemoryTrack::Shutdown() 输出:
+		// 它跑在 Reset/Shutdown **之前**,所以真泄漏不会被清空掩盖(旧实现顺序是反的)。
+		Profiling::Telemetry::Shutdown();
 		ScriptEngine::Shutdown();
 		JobSystem::Shutdown();
 		// GL 语义:窗口(=GL 上下文)一旦销毁,RHI 里所有 GL 资源析构都会在没有上下文的
@@ -138,14 +129,16 @@ namespace World
 
 	void Application::Run()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		if (m_Shutdown) return;
-		MemoryTracker::Get(); // 先启动监控
 		JobSystem::Init();    // 再启动线程池
+		Profiling::Telemetry::Init();    // 遥测:帧统计常开、作用域追踪按需
 
 		while (m_Running)
 		{
-			WLD_PROFILE_SCOPE("RunLoop");
+			WLD_TRACE_SCOPE("RunLoop");
+			// 帧边界:帧统计(常开)与采集状态机都由这一对驱动。
+			Profiling::Telemetry::BeginFrame();
 
 			float time = (float)glfwGetTime();
 			Timestep timestep = time - m_LastFrameTime;
@@ -170,7 +163,7 @@ namespace World
 				tracePhase("Renderer::BeginFramePresent");
 				Renderer::BeginFramePresent();
 				{
-					WLD_PROFILE_SCOPE("LayerStack OnUpdate");
+					WLD_TRACE_SCOPE("LayerStack OnUpdate");
 					for (Layer* layer : m_LayerStack)
 					{
 						tracePhase(("OnUpdate " + std::string(layer->GetName())).c_str());
@@ -179,7 +172,7 @@ namespace World
 				}
 
 				{
-					WLD_PROFILE_SCOPE("LayerStack UiFrame");
+					WLD_TRACE_SCOPE("LayerStack UiFrame");
 					for (Layer* layer : m_LayerStack)
 					{
 						tracePhase(("OnUiFrame " + std::string(layer->GetName())).c_str());
@@ -201,6 +194,9 @@ namespace World
 			// 帧内临时分配(每线程 arena):工作线程已空闲,统一回卷。
 			FrameArena::ResetAll();
 
+			// 帧收尾(采集满额时在此落盘:落盘只发生在采集结束之后)。
+			Profiling::Telemetry::EndFrame();
+
 			// JOBSYS:`WLD_JOB_STATS=1` 时每 ~2 秒打一行任务系统统计 —— 用于回答
 			// "并行到底有没有发生"(Executed 不涨 = 没有任何并行路径被触发)。
 			if (s_JobStatsEnabled)
@@ -218,7 +214,7 @@ namespace World
 
 	void Application::OnEvent(Event& e)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		EventDispatcher dispatcher(e);
 
 		// WUI RHI 后端输入:GLFW 事件先喂给输入收集器。
@@ -262,7 +258,7 @@ namespace World
 
 	bool Application::OnWindowClose(WindowCloseEvent& e)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		m_Running = false;
 		return true;
@@ -270,7 +266,7 @@ namespace World
 
 	bool Application::OnWindowResize(WindowResizeEvent& e)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		if (e.GetWidth() == 0 || e.GetHeight() == 0)
 		{
@@ -284,13 +280,13 @@ namespace World
 
 	void Application::PushLayer(Layer* layer)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		m_LayerStack.PushLayer(layer);
 	}
 	void Application::PushOverlay(Layer* layer)
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		m_LayerStack.PushOverLay(layer);
 	}

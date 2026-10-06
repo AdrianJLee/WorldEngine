@@ -372,7 +372,7 @@ namespace World
 
 	void Renderer::Shutdown()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 		// 设备销毁前的兜底:所有延迟释放先跑完(它们的资源属于当前设备)。
 		RunDeferredReleases(std::numeric_limits<uint64_t>::max());
 		// 释放交换链画面/信号量/描述符池前必须让 GPU 工作结束,
@@ -437,7 +437,7 @@ namespace World
 			result.Error = "RHI device is not initialized";
 			return result;
 		}
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
 		// 顺序固定 2D → 3D → WUI:2D/3D 同步重建(失败保留旧管线),WUI 走静态代数失效。
 		{

@@ -17,6 +17,7 @@
 | [shader-contract.md](shader-contract.md) | 材质着色器怎么写:表面函数契约、`//! param` 注解、严格类型、组合采样器、槽位表、诊断码、迁移 |
 | [texture-import.md](texture-import.md) | 纹理三层:源图 → `.wtex` 资产(唯一设置家)→ `.wtexc` 产物;格式表 / 缓存键 / 剥离口径 |
 | [performance-and-data-layout.md](performance-and-data-layout.md) | 数据布局与性能标准:判定四问、类型四分类、成员顺序与填充、跨界双断言与指纹、修复与优化清单 |
+| [profiling.md](profiling.md) | 性能/内存分析:两条通道(帧统计常开 / 作用域按需)、环境变量与 prof.* 命令、**数据字典**(人读与 AI 读同一张表)、trace schema 与验证口径 |
 
 用户侧文档在 [`../user/`](../user/);脚本作者的工作区与补全细节在
 [`../user/scripting/lua-tooling.md`](../user/scripting/lua-tooling.md)。
