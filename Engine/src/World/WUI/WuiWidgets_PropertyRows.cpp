@@ -671,7 +671,7 @@ std::string EllipsizeMiddleToWidth(const WuiContext& ctx, std::string_view text,
 	}
 
 
-bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme){
+bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme, const std::string& displayText){
 		const bool focused = ctx.Focus() == id;
 		// CPPT-5(2026-09-28):selected 越界(-1 = 无选中,或 >= size 的陈旧下标)时**不得**索引 options ——
 		// 当前值只在这里做一次受保护计算,a11y 节点与绘制命令共用;selected 仅在新弹层里点选条目时改写。
@@ -693,8 +693,11 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 		// M4-TEX-P7:当前值超出可用宽(左内边距 6 → 折角左侧再留 4px 呼吸距离)时,只在这条**绘制命令**里
 		// 做中间省略;options / a11y value / 返回值保持完整(搜索、读屏、回显都拿完整路径)。
 		const float valueBudget = caretX - (rect.X + 6.0f) - 4.0f;
+		// M19a:displayText 非空时触发器只画它(如 "Add" 入口的固定文案);空串走与今天
+		// **逐字节一致**的 current 路径(同一条命令、同一文本)。options / a11y value 不受影响。
+		const std::string& triggerText = displayText.empty() ? current : displayText;
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
-			theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, current, valueBudget, 15.0f), 15.0f, false });
+			theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, triggerText, valueBudget, 15.0f), 15.0f, false });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX, caretY, 7.0f, 1.5f }, theme.TextMuted, 1.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX + 1.5f, caretY + 3.0f, 4.0f, 1.5f }, theme.TextMuted, 1.0f });
 		DrawFocusRing(ctx, rect, id, theme);
@@ -772,7 +775,7 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 
 	// D3:可搜索下拉。选项多(材质/贴图路径)时,用输入框过滤 + 滚轮滚动选择,
 	// 交互与常见引擎的资源选择器一致。
-bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme){
+bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme, const std::string& displayText){
 		// 触发器本身也可被 ui.invoke 点击(等价于点开下拉)。
 		const bool focused = ctx.Focus() == id;
 		const std::string current = (selected >= 0 && selected < static_cast<int>(options.size()))
@@ -797,8 +800,10 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 			// M4-TEX-P7:右侧给 "v"/"^" 箭头(画在 rect.X + rect.W - 18)留 4px 呼吸距离;当前值超宽时
 			// 只在这条**绘制命令**里中间省略 —— 上面的 a11y value(current)保持完整路径。
 			const float valueBudget = (rect.X + rect.W - 22.0f) - (fieldRect.X + 6.0f);
+			// M19a:与 Combo 同一条口径 —— 非空 displayText 只改闭合态触发器的显示;a11y value(current)不动。
+			const std::string& triggerText = displayText.empty() ? current : displayText;
 			ctx.Commands().push_back({ WuiDrawKind::Text, { fieldRect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
-				theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, current, valueBudget, 15.0f), 15.0f, false });
+				theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, triggerText, valueBudget, 15.0f), 15.0f, false });
 		}
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + rect.W - 18.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
 			theme.TextMuted, 0, 1.0f, open ? "^" : "v", 14.0f, false });

@@ -187,10 +187,10 @@ namespace World
 		// 纯屏幕空间的文档(没有 `World` 块)在这里是零成本:没有任何节点命中,结果全为零。
 		if (m_WorldSpaceEnabled)
 		{
-			// M15 修正:宿主喂的相机是**渲染面物理像素**口径,而世界锚点求出的必须是
-			// WUI 的**视口坐标**(后端绘制时再乘 `Wui::UiScale()` 才是物理像素)。
-			// 少这一步换算,世界锚点会被内容缩放多放大一次
-			// (实测 UiScale=1.30 ⇒ 落点偏 1.30 倍,222px)。
+			// 坐标口径(硬):`UiWorldCamera::ScreenSize` 必须是**渲染面物理像素**。
+			// 世界锚点要落在与布局/命令/无障碍同一空间(即视口单位 = 物理/UiScale),
+			// 所以这里唯一一次换算成视口单位;宿主**不要**自己先除。
+			// (M15 实测:漏掉这一步 ⇒ 落点被内容缩放多乘一次,UiScale=1.30 时偏 222px。)
 			UI::UiWorldCamera worldCamera = m_WorldCamera;
 			const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
 			worldCamera.ScreenSize /= uiScale;

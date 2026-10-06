@@ -524,12 +524,17 @@ namespace World::Wui
 	//    越界 / 空选项时当前值为空串(绘制为空,不崩、不抛)。
 	//  · 控件**不改写**调用方的 `selected`,除非用户在新弹层里点选了条目(此时才写回该项下标)。
 	//  · 返回值 = 本帧是否因用户选择而改值(true = selected 已写为新下标;越界态本身不改值)。
+	//  · `displayText`(M19a,可选):非空时**触发器只画这条文案**(如 Add 入口的固定标题),
+	//    空串 = 今天的 options[selected];a11y value / 弹层选项 / 返回值与写回都不受影响。
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
-		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);
+		const std::vector<std::string>& options, int& selected, const WuiTheme& theme,
+		const std::string& displayText = std::string());
 	// 可搜索下拉(资源选择用):点击/输入展开带输入框的弹层,按子串过滤选项,
 	// 滚轮滚动结果列表,回车选中第一个匹配项。返回 true 表示本帧选了新值(写入 selected)。
+	// M19a:与 Combo 同一条 `displayText` 口径(闭合态触发器的显示文案;空 = 当前项)。
 	bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
-		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);
+		const std::vector<std::string>& options, int& selected, const WuiTheme& theme,
+		const std::string& displayText = std::string());
 	bool TreeNode(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool leaf, const WuiTheme& theme);
 
 	// 菜单与弹窗

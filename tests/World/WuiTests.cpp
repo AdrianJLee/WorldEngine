@@ -6527,6 +6527,123 @@ int main()
 			}
 		}
 
+		// 46. M19a:Combo / SearchableCombo 的可选 displayText 触发器显示文案 ——
+		//  ① 不传(默认实参)/ 显式空串:命令流与既有调用点逐字节一致(同一条文本命令 = 真实当前项);
+		//  ② 非空:闭合态触发器只画 displayText,a11y value 与展开后的候选行仍是真实当前项。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme;
+			WuiInputState idle;
+			const WuiRect rect { 100.0f, 100.0f, 200.0f, 22.0f };
+			const std::vector<std::string> options { "Alpha", "Beta", "Gamma" };
+			const WuiId comboId = HashId("test.m19a.combo");
+			const float triggerTextX = rect.X + 6.0f;
+			const float triggerTextY = rect.Y + (rect.H - 15.0f) * 0.5f;
+
+			// ① 默认实参(既有十几个调用点的形态,7 参)与显式空串:命令流逐字节相同。
+			int selected = 1;
+			WuiContext ctxDefault;
+			WuiContext ctxEmpty;
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctxDefault.BeginFrame(idle);
+				CHECK(!Combo(ctxDefault, comboId, rect, "Kind", options, selected, theme));
+				ctxDefault.EndFrame();
+			}
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctxEmpty.BeginFrame(idle);
+				CHECK(!Combo(ctxEmpty, comboId, rect, "Kind", options, selected, theme, std::string()));
+				ctxEmpty.EndFrame();
+			}
+			CHECK(ctxDefault.Commands().size() == ctxEmpty.Commands().size());
+			CHECK(CommandStreamHash(ctxDefault.Commands()) == CommandStreamHash(ctxEmpty.Commands()));
+			{
+				const WuiDrawCommand* text = FindTextCommand(ctxDefault.Commands(), triggerTextX, triggerTextY);
+				CHECK(text != nullptr && text->Text == options[1]);
+				const WuiAccessNode* node = accessibility.Find(comboId);
+				CHECK(node != nullptr && node->Kind == "combo" && node->Value == options[1]);
+			}
+
+			// ② 非空:触发器只画 "Add node";a11y value 仍是真实当前项。
+			WuiContext ctxAdd;
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctxAdd.BeginFrame(idle);
+				CHECK(!Combo(ctxAdd, comboId, rect, "Kind", options, selected, theme, "Add node"));
+				ctxAdd.EndFrame();
+			}
+			{
+				const WuiDrawCommand* text = FindTextCommand(ctxAdd.Commands(), triggerTextX, triggerTextY);
+				CHECK(text != nullptr && text->Text == "Add node");
+				const WuiAccessNode* node = accessibility.Find(comboId);
+				CHECK(node != nullptr && node->Kind == "combo" && node->Value == options[1]);
+			}
+			// 展开后候选行仍是 options 原串(displayText 不泄漏进弹层)。
+			{
+				WuiInputState click = idle;
+				click.MousePos = { rect.X + 10.0f, rect.Y + rect.H * 0.5f };
+				click.MouseClicked[0] = true;
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctxAdd.BeginFrame(click);
+				CHECK(!Combo(ctxAdd, comboId, rect, "Kind", options, selected, theme, "Add node"));
+				DrawTooltip(ctxAdd, theme);   // 宿主帧末收口:弹层绘制补进 overlay 命令流
+				ctxAdd.EndFrame();
+			}
+			CHECK(ctxAdd.IsPopupOpen(comboId));
+			for (size_t index = 0; index < options.size(); ++index)
+			{
+				const WuiDrawCommand* row = FindTextCommand(ctxAdd.OverlayCommands(), rect.X + 10.0f,
+					rect.Y + rect.H + 9.0f + 22.0f * static_cast<float>(index));
+				CHECK(row != nullptr);
+				CHECK(row != nullptr && row->Text == options[index]);
+			}
+
+			// ③ SearchableCombo 同一条口径:空串与今天一致,非空只改闭合态触发器。
+			int searchSelected = 1;
+			const WuiId searchId = HashId("test.m19a.search-combo");
+			const float searchTextX = rect.X + 1.0f + 6.0f;
+			WuiContext searchDefault;
+			WuiContext searchEmpty;
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				searchDefault.BeginFrame(idle);
+				CHECK(!SearchableCombo(searchDefault, searchId, rect, "Albedo", options, searchSelected, theme));
+				searchDefault.EndFrame();
+			}
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				searchEmpty.BeginFrame(idle);
+				CHECK(!SearchableCombo(searchEmpty, searchId, rect, "Albedo", options, searchSelected, theme, std::string()));
+				searchEmpty.EndFrame();
+			}
+			CHECK(searchDefault.Commands().size() == searchEmpty.Commands().size());
+			CHECK(CommandStreamHash(searchDefault.Commands()) == CommandStreamHash(searchEmpty.Commands()));
+			WuiContext searchText;
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				searchText.BeginFrame(idle);
+				CHECK(!SearchableCombo(searchText, searchId, rect, "Albedo", options, searchSelected, theme, "Pick asset"));
+				searchText.EndFrame();
+			}
+			{
+				const WuiDrawCommand* text = FindTextCommand(searchText.Commands(), searchTextX, triggerTextY);
+				CHECK(text != nullptr && text->Text == "Pick asset");
+				const WuiAccessNode* node = accessibility.Find(searchId);
+				CHECK(node != nullptr && node->Kind == "search-combo" && node->Value == options[1]);
+			}
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}

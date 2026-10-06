@@ -47,6 +47,8 @@ namespace World::UI
 	WLD_API bool ProjectWorldToScreen(const UiWorldCamera& camera, const glm::vec3& world, glm::vec2& outScreen);
 
 	// 把 `screen` 里带 `World` 锚点的节点重新定位到"投影点 + Offset"。
+	// 坐标口径:相机与目标都按**视口单位**(= 后端绘制前的那套坐标),与 `UiScreen` 的矩形、
+	// 无障碍节点同一空间;后端绘制时统一乘 `Wui::UiScale()`(唯一一次换算)。
 	// 必须在本帧 `UiScreen::Layout` 之后调用(尺寸取自布局结果,位置被覆盖)。
 	// 目标解析失败的节点会被移到内容矩形之外并标记不可见(宿主据此跳过绘制)。
 	WLD_API UiWorldResult ApplyWorldAnchors(UiScreen& screen, const UiViewport& viewport,

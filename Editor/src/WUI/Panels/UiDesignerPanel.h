@@ -9,6 +9,7 @@
 #include "World/WUI/WuiUndoStack.h"
 
 #include <filesystem>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -79,6 +80,15 @@ namespace World
 
 		// ---- M12:撤销/重做 / 手柄缩放 / 层级 ----
 		void HandleShortcuts(Wui::WuiContext& ctx);
+		// M19:方向键微调选中节点(Shift = ×10);Alt 关闭吸附。空格/中键拖动 = 平移画布。
+		void NudgeSelected(int axis, float amount);
+		// M19:画布适配比(不含用户缩放)—— LayoutCanvas 与"以光标为中心缩放"共用。
+		float CanvasFitScale(const Wui::WuiRect& rect) const;
+		// M19:把 Offset/Size 吸附到整数设计单位(Alt 或极小缩放时跳过)。
+		glm::vec2 SnapDesign(glm::vec2 value) const;
+		// M19:对齐参考线 —— 选中框的边/中心与父框(或视口内容矩形)对齐时点亮。
+		void DrawAlignmentGuides(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+			const Wui::WuiRect& box);
 		void UndoDocument();
 		void RedoDocument();
 		void PushDocumentUndo(const std::string& name, const World::UI::UiDocument& before);
@@ -146,6 +156,12 @@ namespace World
 		glm::vec2 m_DragStartDesign { 0.0f, 0.0f };
 		glm::vec2 m_DragStartOffset { 0.0f, 0.0f };
 		glm::vec2 m_DragStartSize { 0.0f, 0.0f };
+		// M19:画布缩放/平移(滚轮缩放;中键或空格+左键拖动平移;"Fit" 按钮复位)。
+		float m_CanvasZoom = 1.0f;
+		glm::vec2 m_CanvasPan { 0.0f, 0.0f };
+		bool m_CanvasPanning = false;
+		glm::vec2 m_CanvasPanStart { 0.0f, 0.0f };
+		glm::vec2 m_CanvasPanMouse { 0.0f, 0.0f };
 		World::UI::UiDocument m_DragBefore;   // 拖动起点整档快照(松开落一条撤销)
 		bool m_DragBeforeValid = false;
 
@@ -172,6 +188,7 @@ namespace World
 		};
 		std::vector<RecentDocument> m_RecentDocuments;
 		bool m_RecentScanned = false;
+		uint64_t m_RecentScanFrame = 0;
 		float m_RecentScroll = 0.0f;
 		// Add 下拉的当前项(Wui::Combo 的 selected 由调用方持有;越界时每帧回落到 0)。
 		int m_AddTypeIndex = 0;

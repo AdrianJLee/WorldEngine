@@ -1237,12 +1237,16 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 		// 物理面 = 场景矩形(设计单位,与 WuiContext 同一坐标系);DPI 系数取**真实平台内容缩放**
 		// (GLFW content scale,无窗口/失败 ⇒ 1.0;M9 前硬编码 1.0)。原点 = 场景矩形左上角,
 		// 于是绘制命令与无障碍矩形都落在视口内。
-		// M9 已知交互(留给主 agent 复核):WUI 后端把设计单位命令放大到物理像素时还会再乘一次
-		// `Wui::UiScale()`,高内容缩放屏上 `viewport.Scale` 与 `UiScale()` 会叠加;本任务按派工单
-		// 只做"填真实 DPI",不改 `UiScale()` 的既有语义,也不擅自用 PhysicalSize 抵消。
+		//
+		// M19(修 M9 留下的口径混用):`m_ViewportBounds` 是 **WuiContext 视口单位**(= 物理像素 /
+		// `Wui::UiScale()`),而后端绘制时还会再乘一次 `UiScale()`。所以这里必须把面**换算回物理
+		// 像素**并让 `DpiScale = 1.0`,否则 `viewport.Scale` 里再乘一次平台缩放 = 双重缩放
+		// (世界锚点因此整体向面板左上角压缩 ~1/UiScale,M19b 实测立案)。
+		// 数值上 Scale 与改前相同(= UiScale),但策略缩放从此按真实物理尺寸算,不再有歧义。
+		const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
 		UI::UiSurface surface;
-		surface.PhysicalSize = size;
-		surface.DpiScale = UiHost::PlatformContentScale();
+		surface.PhysicalSize = size * uiScale;
+		surface.DpiScale = 1.0f;
 		m_UiHost.SetSurface(surface);
 		m_UiHost.SetOrigin(origin);
 
@@ -1260,6 +1264,10 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 		if (m_SceneState == SceneState::Play && !m_ScenePaused)
 		{
 			worldCameraReady = m_PlayHost.GetMainCameraViewProjection(worldViewProjection, worldScreenSize);
+			// M19:`GetMainCameraViewProjection` 返回的是**视口面板的设计尺寸**(视口单位),
+			// 而 `UiHost` 需要物理像素(它会做唯一一次 ÷UiScale)。少这一步换算 ⇒ 世界锚点被
+			// 内容缩放多压一次,整体向面板左上角收 ~1/UiScale(M19b 实测立案)。
+			worldScreenSize *= uiScale;
 		}
 		else
 		{
@@ -1268,7 +1276,8 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 			{
 				worldViewProjection = viewportCamera.CameraPtr->GetProjectionMatrix() *
 					glm::inverse(viewportCamera.Transform);
-				worldScreenSize = size;
+				// 与上面的物理面同口径:相机投影输出的是**物理像素**,而 `size` 是视口单位。
+				worldScreenSize = size * uiScale;
 				worldCameraReady = worldScreenSize.x > 0.0f && worldScreenSize.y > 0.0f;
 			}
 		}

@@ -31,7 +31,8 @@ namespace World
 		constexpr float kToolbarRowGap = 2.0f;
 		constexpr float kToolbarHeightSingle = 34.0f;
 		constexpr float kToolbarHeightDouble = 62.0f;
-		constexpr float kToolbarSingleRowMinWidth = 780.0f;
+		// M19:工具栏又多了 Fit(和即将到来的 Refresh),单排阈值同步上调,否则会挤在一起。
+		constexpr float kToolbarSingleRowMinWidth = 860.0f;
 
 		float ToolbarNeededHeight(float panelWidth)
 		{
@@ -650,8 +651,8 @@ namespace World
 		}
 		x += iconWidth + gap;
 
-		// 行 1 尾部固定项:Open / Reload / Save(+ 单排时的 New / Add / Delete / Duplicate)。
-		float tailWidth = gap + buttonWidth * 3.0f + gap * 2.0f;
+		// 行 1 尾部固定项:Open / Reload / Save / Fit(+ 单排时的 New / Add / Delete / Duplicate)。
+		float tailWidth = gap + buttonWidth * 4.0f + gap * 3.0f;
 		if (!twoRows)
 			tailWidth += gap + buttonWidth + gap + addWidth + gap + deleteWidth + gap + duplicateWidth;
 		// 路径框拿走剩余宽度;面板极窄时钳到 80(后面的部件被画到边界外 = 截断,不互相叠)。
@@ -696,6 +697,19 @@ namespace World
 		}
 		x += buttonWidth + gap;
 
+		// M19:画布视图复位(F 键同路径)—— 放大看细节后一键回到"全貌适配"。
+		if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.fit"),
+			Wui::WuiRect { x, row1Y, buttonWidth, height },
+			Wui::Tr("panel.ui_designer.fit", "Fit"), theme, m_HasDocument, false,
+			Wui::Tr("panel.ui_designer.fit.tip",
+				"Fit the whole design into the canvas (F); wheel zooms, middle/space drag pans")))
+		{
+			m_CanvasZoom = 1.0f;
+			m_CanvasPan = glm::vec2 { 0.0f, 0.0f };
+			m_Status = Wui::Tr("panel.ui_designer.view_reset", "Canvas view reset");
+		}
+		x += buttonWidth + gap;
+
 		// ---- M16:New / Add / Delete / Duplicate(单排接在 Save 后;排不下换到第二排)----
 		float editX = twoRows ? left : x;
 		const float editY = twoRows ? row2Y : row1Y;
@@ -720,8 +734,11 @@ namespace World
 				m_AddTypeIndex = 0;
 			int picked = m_AddTypeIndex;
 			const std::string addLabel = Wui::Tr("panel.ui_designer.add", "Add");
+			// M19:触发器固定显示 "Add"(M19a 给 Combo 加的 displayText 尾参)——
+			// 否则它只会画上次选的类型名,用户看不出这是个"添加节点"入口。
 			if (Wui::Combo(ctx, Wui::HashId("ui_designer.add"),
-				Wui::WuiRect { editX, editY, addWidth, height }, addLabel, typeOptions, picked, theme))
+				Wui::WuiRect { editX, editY, addWidth, height }, addLabel, typeOptions, picked, theme,
+				addLabel))
 			{
 				m_AddTypeIndex = std::clamp(picked, 0, static_cast<int>(typeOptions.size()) - 1);
 				AddNode(typeOptions[static_cast<std::size_t>(m_AddTypeIndex)]);
@@ -1121,28 +1138,81 @@ namespace World
 	{
 		const float designWidth = std::max(m_Document.Design.Resolution.x, 1.0f);
 		const float designHeight = std::max(m_Document.Design.Resolution.y, 1.0f);
-		constexpr float pad = 14.0f;
-		const float fitWidth = std::max(1.0f, rect.W - pad * 2.0f) / designWidth;
-		const float fitHeight = std::max(1.0f, rect.H - pad * 2.0f) / designHeight;
-		const float fit = std::max(0.01f, std::min(fitWidth, fitHeight));
+		const float fit = CanvasFitScale(rect);
 
 		// 用"物理面 = 设计分辨率"(比例 = 1)调 ComputeUiViewport:安全区内缩在设计单位下
 		// 换算逐字段正确(ContentRect = 设计矩形扣安全区);再把 Scale 换成画布适配比、
 		// 把原点挪到画布中心 —— 设计器是设计视图,只做等比适配、不裁切。
 		UI::UiViewport viewport = UI::ComputeUiViewport(m_Document.Design, m_Document.SafeArea,
 			UI::UiSurface { glm::vec2 { designWidth, designHeight }, 1.0f });
-		viewport.Scale = fit;
+		// M19:适配比 × 用户缩放(滚轮),再加平移量 —— 大设计稿也能放大看细节。
+		// 视图中心仍然对齐画布中心,所以平移是"相对适配位置"的像素偏移,与缩放无关。
+		viewport.Scale = std::max(0.02f, fit * m_CanvasZoom);
 		viewport.PhysicalSize = glm::vec2 { rect.W, rect.H };
 		viewport.PhysicalOrigin = glm::vec2 {
-			rect.X + (rect.W - designWidth * fit) * 0.5f,
-			rect.Y + (rect.H - designHeight * fit) * 0.5f };
+			rect.X + (rect.W - designWidth * viewport.Scale) * 0.5f + m_CanvasPan.x,
+			rect.Y + (rect.H - designHeight * viewport.Scale) * 0.5f + m_CanvasPan.y };
 		m_Viewport = viewport;
 		m_Screen.Layout(viewport);
+	}
+
+	// M19:适配比 = 把整个设计分辨率塞进画布矩形(留 14px 边距)的等比缩放。
+	// 单独抽出来,是因为"以光标为中心缩放"要按**同一个**适配比反推平移量。
+	float UiDesignerPanel::CanvasFitScale(const Wui::WuiRect& rect) const
+	{
+		const float designWidth = std::max(m_Document.Design.Resolution.x, 1.0f);
+		const float designHeight = std::max(m_Document.Design.Resolution.y, 1.0f);
+		constexpr float pad = 14.0f;
+		const float fitWidth = std::max(1.0f, rect.W - pad * 2.0f) / designWidth;
+		const float fitHeight = std::max(1.0f, rect.H - pad * 2.0f) / designHeight;
+		return std::max(0.01f, std::min(fitWidth, fitHeight));
 	}
 
 	void UiDesignerPanel::HandleCanvasInput(Wui::WuiContext& ctx, const Wui::WuiRect& rect)
 	{
 		const Wui::WuiInputState& input = ctx.Input();
+
+		// ---- M19:画布视图操作(缩放 / 平移)----
+		// 滚轮落在画布上 = 以光标为中心缩放(与主流编辑器一致:放大时光标下的那个点不动)。
+		if (ctx.IsHovered(rect) && input.Wheel != 0.0f)
+		{
+			const glm::vec2 anchorDesign = m_Viewport.PhysicalToDesign(input.MousePos);
+			m_CanvasZoom = std::clamp(m_CanvasZoom * (input.Wheel > 0.0f ? 1.1f : (1.0f / 1.1f)), 0.25f, 8.0f);
+			// 解 "PhysicalOrigin + anchorDesign*scale == mousePos":
+			//   pan = mousePos - anchorDesign*scale - centerTerm
+			// 其中 centerTerm 是"无平移时"的适配原点(与 LayoutCanvas 同一公式)。
+			const float designWidth = std::max(m_Document.Design.Resolution.x, 1.0f);
+			const float designHeight = std::max(m_Document.Design.Resolution.y, 1.0f);
+			const float fit = CanvasFitScale(rect);
+			const float scale = std::max(0.02f, fit * m_CanvasZoom);
+			const glm::vec2 center {
+				rect.X + (rect.W - designWidth * scale) * 0.5f,
+				rect.Y + (rect.H - designHeight * scale) * 0.5f };
+			m_CanvasPan = input.MousePos - anchorDesign * scale - center;
+			m_Status = Wui::Tr("panel.ui_designer.zoom", "Zoom ")
+				+ std::to_string(static_cast<int>(m_CanvasZoom * 100.0f)) + "%";
+			// 滚轮被画布吃掉:不要让下面的滚动区再滚一次。
+			ctx.ConsumePointerClick();
+		}
+
+		// 中键拖动 / 空格+左键拖动 = 平移画布。
+		const bool panButton = input.MouseDown[2] || (input.MouseDown[0] && input.KeyDown.end() !=
+			std::find(input.KeyDown.begin(), input.KeyDown.end(), static_cast<uint32_t>(KeyCodes::Space)));
+		if (!m_CanvasPanning && ctx.IsHovered(rect) && panButton)
+		{
+			m_CanvasPanning = true;
+			m_CanvasPanStart = m_CanvasPan;
+			m_CanvasPanMouse = input.MousePos;
+			CancelDrag();
+		}
+		if (m_CanvasPanning)
+		{
+			m_CanvasPan = m_CanvasPanStart + (input.MousePos - m_CanvasPanMouse);
+			if (!input.MouseDown[2] && !input.MouseDown[0])
+				m_CanvasPanning = false;
+			return;   // 平移期间不参与选中/拖动,避免误改文档
+		}
+
 		// M12:选中节点的 8 个手柄悬停态(仅反馈用;拖动中不重算)。
 		m_HoverHandle = HandleNone;
 		Wui::WuiRect selectedBox;
@@ -1212,7 +1282,10 @@ namespace World
 				const glm::vec2 delta = design - m_DragStartDesign;
 				if (m_Drag == CanvasDrag::Move)
 				{
-					const glm::vec2 next { m_DragStartOffset.x + delta.x, m_DragStartOffset.y + delta.y };
+					// M19:吸附到整数设计单位(Alt = 临时关掉,做像素级微调)。
+					glm::vec2 next { m_DragStartOffset.x + delta.x, m_DragStartOffset.y + delta.y };
+					if (!input.Alt)
+						next = SnapDesign(next);
 					if (next.x != node->Anchor.Offset.x || next.y != node->Anchor.Offset.y)
 					{
 						node->Anchor.Offset = next;
@@ -1223,10 +1296,23 @@ namespace World
 				}
 				else
 				{
-					// 手柄语义:拖角改 Size 两轴、拖边只改单轴;补偿量 = 按下点起算的设计空间位移。
-					// Min!=Max(拉伸)时 Size 是"尺寸增量"(W = 锚框跨度 + Size),可以为负去收缩;
-					// 点锚定时 Size 就是实际尺寸,钳到 >= 0。
+					// 手柄语义:拖哪条边就动哪条边,**对边钉住不动**(与主流 UI 编辑器一致)。
+					//
+					// 两种锚定模式下手柄必须做的事不同(这是 M19 修的真 bug:此前只改 Size,
+					// 于是拖左边/上边时对边跟着跑,表现为"整框在移动而不是在缩放"):
+					//
+					//   点锚定(Min == Max):left = Offset.x - Pivot.x*W,right = Offset.x + (1-Pivot.x)*W
+					//     * 拖右边:W += delta(左边天然不动)⇒ 只改 Size
+					//     * 拖左边:W -= delta,再要 left 动 delta ⇒ Offset.x += delta*(1-Pivot.x)
+					//   拉伸(Min != Max):left = Offset.x(offsetMin),W = 锚框跨度 + Size
+					//     * 拖右边:Size += delta
+					//     * 拖左边:Offset.x += delta 且 Size -= delta(两边一起动,右边缘才不动)
+					//
+					// Y 轴同理(屏幕 Y 向下,"上边"= Y 变小)。
+					const bool pointX = node->Anchor.Min.x == node->Anchor.Max.x;
+					const bool pointY = node->Anchor.Min.y == node->Anchor.Max.y;
 					glm::vec2 size = m_DragStartSize;
+					glm::vec2 offset = m_DragStartOffset;
 					if ((m_DragHandle & HandleRight) != 0)
 						size.x = m_DragStartSize.x + delta.x;
 					if ((m_DragHandle & HandleLeft) != 0)
@@ -1247,14 +1333,45 @@ namespace World
 						size.x = m_DragStartSize.x * scale;
 						size.y = m_DragStartSize.y * scale;
 					}
-					if (node->Anchor.Min.x == node->Anchor.Max.x)
-						size.x = std::max(size.x, 0.0f);
-					if (node->Anchor.Min.y == node->Anchor.Max.y)
-						size.y = std::max(size.y, 0.0f);
+					// 点锚定时 Size 就是实际尺寸 ⇒ 钳到 >= 0;拉伸时 Size 是尺寸增量,允许为负。
+					if (pointX && size.x < 0.0f)
+						size.x = 0.0f;
+					if (pointY && size.y < 0.0f)
+						size.y = 0.0f;
 
-					if (size.x != node->Anchor.Size.x || size.y != node->Anchor.Size.y)
+					// M19:尺寸也吸附到整数设计单位(Alt 关掉)。
+					if (!input.Alt)
+						size = SnapDesign(size);
+
+					// 拖左边/上边时反推 Offset,使**对边**在任意钳位之后仍然钉住:
+					//   点锚定:right = Offset.x + (1-Pivot.x)*W ⇒ Offset.x = right0 - (1-Pivot.x)*W
+					//   拉伸  :right = Offset.x + 跨度 + Size ⇒ Offset.x = right0 - 跨度 - Size
+					// (right0 = 按下那一刻的右边缘;钳位改了 W,这里按钳后的 W 重算,所以缩到 0 时
+					//  左边缘正好停在右边缘上,而不是把整框推走。)
+					if ((m_DragHandle & HandleLeft) != 0)
+					{
+						const float right0 = pointX
+							? m_DragStartOffset.x + (1.0f - node->Anchor.Pivot.x) * m_DragStartSize.x
+							: m_DragStartOffset.x + m_DragStartSize.x;
+						offset.x = pointX
+							? right0 - (1.0f - node->Anchor.Pivot.x) * size.x
+							: right0 - size.x;
+					}
+					if ((m_DragHandle & HandleTop) != 0)
+					{
+						const float bottom0 = pointY
+							? m_DragStartOffset.y + (1.0f - node->Anchor.Pivot.y) * m_DragStartSize.y
+							: m_DragStartOffset.y + m_DragStartSize.y;
+						offset.y = pointY
+							? bottom0 - (1.0f - node->Anchor.Pivot.y) * size.y
+							: bottom0 - size.y;
+					}
+
+					if (size.x != node->Anchor.Size.x || size.y != node->Anchor.Size.y ||
+						offset.x != node->Anchor.Offset.x || offset.y != node->Anchor.Offset.y)
 					{
 						node->Anchor.Size = size;
+						node->Anchor.Offset = offset;
 						m_ScreenDirty = true;
 						m_Status = Wui::Tr("panel.ui_designer.drag_size", "Size ")
 							+ FormatFloat(size.x) + ", " + FormatFloat(size.y);
@@ -1310,6 +1427,10 @@ namespace World
 		Wui::WuiRect selectedBox;
 		if (SelectedNodeBox(selectedBox))
 			DrawResizeHandles(ctx, theme, selectedBox);
+
+		// M19:拖动/缩放中点亮对齐参考线(选中框的边或中心与"父框 / 视口内容矩形"的对应位置对齐时)。
+		if (dragging && SelectedNodeBox(selectedBox))
+			DrawAlignmentGuides(ctx, theme, selectedBox);
 
 		// 安全区(虚线)与设计面区分。
 		const Wui::WuiRect safeRect = m_Viewport.DesignRectToPhysical(m_Viewport.ContentRect);
@@ -1367,12 +1488,67 @@ namespace World
 			return;
 		const Wui::WuiInputState& input = ctx.Input();
 		if (!input.Ctrl)
+		{
+			// ---- M19:不带修饰键的常用操作(只在没有文本焦点时生效)----
+			// 方向键微调选中节点(Shift = ×10):改的是 Anchor.Offset,与鼠标拖动同一条模型路径。
+			if (!m_SelectedId.empty() && m_Drag == CanvasDrag::None)
+			{
+				const float step = input.Shift ? 10.0f : 1.0f;
+				if (ctx.WasKeyTriggered(KeyCodes::Left)) NudgeSelected(0, -step);
+				else if (ctx.WasKeyTriggered(KeyCodes::Right)) NudgeSelected(0, step);
+				else if (ctx.WasKeyTriggered(KeyCodes::Up)) NudgeSelected(1, -step);
+				else if (ctx.WasKeyTriggered(KeyCodes::Down)) NudgeSelected(1, step);
+			}
+			// Delete/Backspace = 删除选中节点(与工具栏 Delete 同一条守卫)。
+			if (ctx.WasKeyTriggered(KeyCodes::Delete) || ctx.WasKeyTriggered(KeyCodes::Backspace))
+				DeleteSelectedNode();
+			// F = 复位画布缩放/平移(看清全貌)。
+			if (ctx.WasKeyTriggered(KeyCodes::F))
+			{
+				m_CanvasZoom = 1.0f;
+				m_CanvasPan = glm::vec2 { 0.0f, 0.0f };
+				m_Status = Wui::Tr("panel.ui_designer.view_reset", "Canvas view reset");
+			}
 			return;
+		}
 		// Ctrl+Z = 撤销;Ctrl+Y / Ctrl+Shift+Z = 重做(与编辑器其它面板同口径)。
 		if (!input.Shift && ctx.WasKeyTriggered(KeyCodes::Z))
 			UndoDocument();
 		else if (ctx.WasKeyTriggered(KeyCodes::Y) || (input.Shift && ctx.WasKeyTriggered(KeyCodes::Z)))
 			RedoDocument();
+		// M19:Ctrl+D 复制 / Ctrl+S 保存(与工具栏按钮同一条路径)。
+		else if (ctx.WasKeyTriggered(KeyCodes::D))
+			DuplicateSelectedNode();
+		else if (ctx.WasKeyTriggered(KeyCodes::S))
+			SaveTo(m_Path.empty() ? ResolveInputPath(m_PathBuffer) : m_Path);
+	}
+
+	// M19:方向键微调 —— 与鼠标拖动共用"整档前像 + 一条撤销记录"的口径(连续微调合并成一条,
+	// 直到指针/按键停下来:这里用 NoteNodeEdit/CommitNodeEdit 的同一套合并机制)。
+	void UiDesignerPanel::NudgeSelected(int axis, float amount)
+	{
+		UI::UiNode* node = MutableSelectedNode();
+		if (node == nullptr)
+			return;
+		glm::vec2 next = node->Anchor.Offset;
+		(axis == 0 ? next.x : next.y) += amount;
+		if (next == node->Anchor.Offset)
+			return;
+		NoteNodeEdit(Wui::Tr("panel.ui_designer.nudge", "Nudge"));
+		node->Anchor.Offset = next;
+		m_ScreenDirty = true;
+		m_Status = Wui::Tr("panel.ui_designer.drag_offset", "Offset ")
+			+ FormatFloat(next.x) + ", " + FormatFloat(next.y);
+	}
+
+	// M19:把移动/缩放的结果吸附到**整数设计单位**(像素级对齐;Alt 或缩放很小时跳过)。
+	// 为什么是 1 而不是 8:设计单位通常就是像素,整数对齐能保证描边落在像素网格上;
+	// 需要粗网格时按住 Shift(×10 微调)或直接用属性页输入精确值。
+	glm::vec2 UiDesignerPanel::SnapDesign(glm::vec2 value) const
+	{
+		if (m_CanvasZoom < 0.6f)
+			return value;   // 缩得太小,1 单位的吸附感会变成"跟不上鼠标"
+		return glm::vec2 { std::round(value.x), std::round(value.y) };
 	}
 
 	void UiDesignerPanel::UndoDocument()
@@ -1586,6 +1762,13 @@ namespace World
 		const Wui::WuiTheme& theme = host.Theme();
 		if (!m_RecentScanned)
 			ScanRecentDocuments();
+		// M19:空态列表在面板打开期间也可能变(从内容浏览器新导出一份 .wui)——
+		// 每 ~2 秒(120 帧)重扫一次,否则用户要关掉面板再打开才看得到。
+		else if (ctx.Frame() >= m_RecentScanFrame + 120)
+		{
+			m_RecentScanFrame = ctx.Frame();
+			ScanRecentDocuments();
+		}
 
 		const bool hasFiles = !m_RecentDocuments.empty();
 		const std::string title = Wui::Tr("panel.ui_designer.no_document", "No UI document open");
@@ -1633,7 +1816,16 @@ namespace World
 	bool UiDesignerPanel::CreateNewDocument()
 	{
 		std::error_code error;
+		// M19(安全):`New` 只在"路径框为空 / 指向的文件不存在"时才用它。
+		// 原实现无条件采用路径框现值 —— 先 Open 一份文档再点 New,就会以同一路径建出空文档,
+		// 接着 Save 直接覆盖原文件(实测踩到的数据丢失路径)。
 		std::filesystem::path target = ResolveInputPath(m_PathBuffer);
+		if (!target.empty() && std::filesystem::exists(target, error))
+		{
+			m_Status = Wui::Tr("panel.ui_designer.new_refused",
+				"New refuses to reuse an existing file — clear the path box or pick another name");
+			return false;
+		}
 		if (target.empty())
 		{
 			// 路径框为空:落 <内容根>/ui/untitled.wui;已存在则加 -1、-2 后缀。
@@ -1789,6 +1981,51 @@ namespace World
 		m_Dirty = true;
 		PushDocumentUndo(Wui::Tr("panel.ui_designer.delete_node", "Delete Node"), before);
 		m_Status = Wui::Tr("panel.ui_designer.deleted", "Deleted ") + removedId;
+	}
+
+	// M19:对齐参考线 —— 拖动/缩放时,选中框的左/中/右、上/中/下与**父框**(没有父则视口内容矩形)
+	// 的对应位置在 1 设计单位内对齐时,画一条横跨父框的虚线。只在拖动期间画,零常驻开销。
+	// 与吸附的关系:吸附给"手感",参考线给"看得见的理由" —— 两者共用同一容差。
+	void UiDesignerPanel::DrawAlignmentGuides(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+		const Wui::WuiRect& box)
+	{
+		const UI::UiNodeInstance* selected = m_Screen.Find(m_SelectedId);
+		if (selected == nullptr)
+			return;
+		Wui::WuiRect reference = m_Viewport.ContentRect;
+		if (selected->Parent >= 0 && selected->Parent < static_cast<int>(m_Screen.Nodes().size()))
+			reference = m_Screen.Nodes()[static_cast<std::size_t>(selected->Parent)].Rect;
+
+		constexpr float kTolerance = 1.0f;
+		const float boxXs[3] = { box.X, box.X + box.W * 0.5f, box.X + box.W };
+		const float boxYs[3] = { box.Y, box.Y + box.H * 0.5f, box.Y + box.H };
+		const float refXs[3] = { reference.X, reference.X + reference.W * 0.5f, reference.X + reference.W };
+		const float refYs[3] = { reference.Y, reference.Y + reference.H * 0.5f, reference.Y + reference.H };
+
+		for (const float bx : boxXs)
+		{
+			for (const float rx : refXs)
+			{
+				if (std::abs(bx - rx) <= kTolerance)
+				{
+					Wui::LineSegment(ctx, glm::vec2 { rx, reference.Y }, glm::vec2 { rx, reference.Y + reference.H },
+						theme.Accent, 1.0f);
+					break;
+				}
+			}
+		}
+		for (const float by : boxYs)
+		{
+			for (const float ry : refYs)
+			{
+				if (std::abs(by - ry) <= kTolerance)
+				{
+					Wui::LineSegment(ctx, glm::vec2 { reference.X, ry }, glm::vec2 { reference.X + reference.W, ry },
+						theme.Accent, 1.0f);
+					break;
+				}
+			}
+		}
 	}
 
 	void UiDesignerPanel::DuplicateSelectedNode()
