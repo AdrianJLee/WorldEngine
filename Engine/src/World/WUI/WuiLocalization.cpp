@@ -111,7 +111,40 @@ namespace World::Wui
 		// 默认语言(英文族 / 空)= 源码内联文案,不读目录(P4-UX1 口径)。
 		bool IsInlineDefaultLanguage(const std::string& language)
 		{
-			return language.empty() || IsEnglishLike(language);
+			// M33(2026-10-06):**只有"未指定语言"才算"内联默认"**。
+			//
+			// 原实现把英文族(`en` / `en-US` …)也当内联默认 ⇒ `LanguageCandidates` 返回空 ⇒
+			// **一个语言包都不读**。对引擎自带的 UI 文案没问题(英文是源码内联兜底),
+			// 但 `.wui` 的 `@key` 没有任何内联英文 ⇒ `Tr(key, key)` 直接显示**裸键名**
+			// (实测 `WLD_LANG=en` 与默认语言下 23 个文本节点全是 `inventory.title` 这种;
+			//  M32 验证与主 agent 复现一致)。
+			// 现在英文族也和其它语言一样走"读目录 → 命中用译文 → 缺键回退内联英文"这条链。
+			return language.empty();
+		}
+
+		// M30:语言码形态 `zh` / `zh-CN` / `en_GB` / `pt-BR`…(2–3 位主标签,后续段 2–8 位字母数字)。
+		// 层目录下的 `glossary/`、`panels/` 这类域/工具目录不是语言 —— 设计器要的是语言码,排除掉。
+		bool LooksLikeLanguageTag(const std::string& name)
+		{
+			size_t start = 0;
+			size_t segment = 0;
+			while (start < name.size())
+			{
+				const size_t separator = name.find_first_of("-_", start);
+				const size_t end = separator == std::string::npos ? name.size() : separator;
+				const size_t length = end - start;
+				const size_t maxLength = segment == 0 ? 3 : 8;
+				if (length < 2 || length > maxLength)
+					return false;
+				for (size_t i = start; i < end; ++i)
+					if (std::isalnum(static_cast<unsigned char>(name[i])) == 0)
+						return false;
+				if (separator == std::string::npos)
+					return true;
+				start = separator + 1;
+				++segment;
+			}
+			return false;
 		}
 
 		// 语言回退链候选(S2):`zh-CN` → {`zh-CN`, `zh`}(去重);英文族/空 = 空表。
@@ -236,7 +269,8 @@ namespace World::Wui
 					out += ", ";
 				out += candidate;
 			}
-			return out.empty() ? std::string("(无:英文族/空语言不读目录)") : out;
+			// M33:英文族现在也读目录(见 IsInlineDefaultLanguage);只有"未指定语言"才是空表。
+			return out.empty() ? std::string("(无:未指定语言,只用内联英文兜底)") : out;
 		}
 
 		// 该层该语言要读的一个输入文件(相对键 → 路径;相对键 = 来源标签/排序键)。
@@ -536,7 +570,19 @@ namespace World::Wui
 		if (entry != nullptr && entry->HasText)
 			return entry->Text;
 		if (entry == nullptr && !state.Catalog.empty())
-			state.Missing.insert(std::string(key));
+		{
+			// M33:缺键要**可见**(M32 立案:"缺键不静默")—— 记账 + 每条键只警告一次,
+			// 否则 `.wui` 里写错一个键,运行时既不报错、界面上也只看到裸键名。
+			if (state.Missing.insert(std::string(key)).second)
+			{
+				static constexpr std::size_t kWarnLimit = 32;
+				if (state.Missing.size() <= kWarnLimit)
+					WLD_CORE_WARN("本地化缺键: '{0}'(语言 {1};回退为内联兜底文案)", key, state.Language);
+				else if (state.Missing.size() == kWarnLimit + 1)
+					WLD_CORE_WARN("本地化缺键已达 {0} 条,后续不再逐条警告(可用 MissingLocalizationKeys 取全量)",
+						kWarnLimit);
+			}
+		}
 		return std::string(fallback);
 	}
 
@@ -670,6 +716,48 @@ namespace World::Wui
 	std::vector<std::string> LocalizationLanguageCandidates()
 	{
 		return LanguageCandidates(State().Language);
+	}
+
+	bool HasLocalizationKey(std::string_view key)
+	{
+		LocalizationState& state = State();
+		// M33:只有**未指定语言**才是"内联默认"(该键的文本就是源码内联英文,永不缺);
+		// 英文族现在也读目录(见 IsInlineDefaultLanguage),所以要做真实查找 ——
+		// 否则 `.wui` 里的 `@key` 在 en 下会显示裸键名,面板还会误报"键存在"。
+		if (IsInlineDefaultLanguage(state.Language))
+			return true;
+		const LocalizationEntry* entry = FindEntry(state, key);
+		return entry != nullptr && entry->HasText;
+	}
+
+	std::vector<std::string> LocalizationLanguages()
+	{
+		LocalizationState& state = State();
+		std::vector<std::string> languages;
+		const auto scan = [&languages](const std::filesystem::path& directory)
+		{
+			std::error_code ec;
+			if (!std::filesystem::is_directory(directory, ec))
+				return;
+			for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(
+					directory, std::filesystem::directory_options::skip_permission_denied, ec))
+			{
+				std::error_code entryError;
+				if (!entry.is_directory(entryError))
+					continue;
+				const std::string name = entry.path().filename().string();
+				if (LooksLikeLanguageTag(name))
+					languages.push_back(name);
+			}
+		};
+		if (state.Layers.empty())
+			scan(state.Directory);
+		else
+			for (const LocalizationLayer& layer : state.Layers)
+				scan(layer.Directory);
+		std::sort(languages.begin(), languages.end());
+		languages.erase(std::unique(languages.begin(), languages.end()), languages.end());
+		return languages;
 	}
 
 	bool LocalizationFilesChanged()

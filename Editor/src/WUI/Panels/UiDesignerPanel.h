@@ -24,9 +24,9 @@ namespace World
 	//   · 左 = 节点大纲树(按文档层级,显示 Type + Id);
 	//   · 中 = 画布(设计空间线框视图:节点框 + 类型标签 + 安全区虚线 + 选中高亮 +
 	//            锚点标记;拖动选中节点改 Anchor.Offset);
-	//   · 右 = 属性(Node / Props / Anchor / World / Bind / On / Layout,全部复用
-	//           Wui::PropertyRow 一族;M24 起 Anchor 段之后是可折叠的 World 世界锚点段,
-	//           M25 起 World 段之后是可折叠的 Bind(数据绑定)/ On(命令)段)。
+	//   · 右 = 属性(M31 起分两大块:顶部 "Type: <TypeName> (N)" = 本类型独有属性;
+	//           下面 "Common" = 所有类型都有的公共段 Node / Anchor / Layout / World / Bind / On,
+	//           其中 World / Bind / On 默认折叠;全部复用 Wui::PropertyRow 一族)。
 	//
 	// M12(设计器工业化):选中节点画 8 个拖拽手柄(拖角改 Anchor.Size 两轴、拖边改单轴;
 	// Min!=Max 的拉伸节点 Size 是"尺寸增量");Ctrl+Z / Ctrl+Y 走**面板本地** WuiUndoStack
@@ -212,14 +212,15 @@ namespace World
 		float m_PropertyScroll = 0.0f;
 
 		// 属性分组折叠态(与 PropertyContentHeight 共用同一份事实源)。
+		// M31:Type 块恒展开(不再有独立的 Props 折叠态);Common 段里 Anchor/Layout 默认展开,
+		// World / Bind / On 不是每个界面都用,默认折叠以免淹没类型属性。
 		bool m_ShowNodeSection = true;
-		bool m_ShowPropsSection = true;
 		bool m_ShowAnchorSection = true;
 		// M24:世界锚点段(Enabled/Target/Offset/KeepOnScreen)。
-		bool m_ShowWorldSection = true;
+		bool m_ShowWorldSection = false;
 		// M25:数据绑定(Bind)/ 命令(On)段。
-		bool m_ShowBindSection = true;
-		bool m_ShowOnSection = true;
+		bool m_ShowBindSection = false;
+		bool m_ShowOnSection = false;
 		bool m_ShowLayoutSection = true;
 
 		std::filesystem::path m_ContentRoot;

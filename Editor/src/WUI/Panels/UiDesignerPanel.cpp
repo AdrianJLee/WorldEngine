@@ -6,6 +6,7 @@
 #include "World/Utils/Paths.h"
 #include "World/UI/UiNodeRegistry.h"
 #include "World/UI/UiTypes.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
@@ -45,6 +46,8 @@ namespace World
 		constexpr float kTreeRowHeight = 22.0f;
 		constexpr float kMinColumnWidth = 120.0f;
 		constexpr float kMinCanvasWidth = 140.0f;
+		// M31:属性字段下方 @key 预览行的高度(小字 + 行距;PropertyContentHeight 与渲染共用)。
+		constexpr float kLocalizationPreviewHeight = 16.0f;
 
 		// 属性行的"元数据":一行 = 本地化键 + 英文回退 + 目标字段。字段用枚举寻址,
 		// 面板按表驱动地生成 Anchor / Layout 的数值行(不手写 16 段重复代码)。
@@ -538,6 +541,44 @@ namespace World
 			default:
 				return Wui::Tr("panel.ui_designer.props.group.content", "Content");
 			}
+		}
+
+		// ---- M31:@key 本地化编辑体验 ----
+		// 文本类属性(与 UiPainter::Localized 读取的字段同一面:title/text/label/placeholder/rowPrefix,
+		// 外加一切 Kind::Text)的值以 @ 开头 = 本地化键。
+		bool IsLocalizableProperty(const Wui::WuiComponentProperty* meta, const std::string& name)
+		{
+			if (meta != nullptr && meta->Type == Wui::WuiComponentProperty::Kind::Text)
+				return true;
+			return name == "label" || name == "title" || name == "text"
+				|| name == "placeholder" || name == "rowPrefix";
+		}
+
+		// 预览行文案:存在 = "= <译文>";不存在 = "missing key: <key>"(missing 回传给调用方选颜色)。
+		std::string LocalizationPreview(const std::string& value, bool& missing)
+		{
+			missing = false;
+			if (value.size() < 2 || value.front() != '@')
+				return std::string();
+			const std::string key = value.substr(1);
+			if (Wui::HasLocalizationKey(key))
+				return "= " + Wui::Tr(key, key);
+			missing = true;
+			return "missing key: " + key;
+		}
+
+		// 已加载语言码(逗号拼接);tooltip 的语言清单。
+		std::string LocalizationLanguageList()
+		{
+			const std::vector<std::string> languages = Wui::LocalizationLanguages();
+			std::string joined;
+			for (const std::string& language : languages)
+			{
+				if (!joined.empty())
+					joined += ", ";
+				joined += language;
+			}
+			return joined;
 		}
 	}
 
@@ -1212,6 +1253,7 @@ namespace World
 		// M29:一行一属性 + 每换一个属性组多一个组标题行 —— 与 RenderProperties 共用
 		// `CollectPropertyRows`,两边不会漂移(漂移就是"滚动区高度不对/最后一行的字段点不到")。
 		float propertyRows = 1.0f;
+		float previewRows = 0.0f;
 		if (node != nullptr)
 		{
 			const std::vector<PropertyRowRef> rows = CollectPropertyRows(*node);
@@ -1219,19 +1261,28 @@ namespace World
 			std::string lastGroup;
 			for (const PropertyRowRef& ref : rows)
 			{
-				if (ref.Meta == nullptr)
-					continue;
-				const std::string groupName = PropertyGroupLabel(ref.Meta->Group);
-				if (groupName != lastGroup)
+				if (ref.Meta != nullptr)
 				{
-					lastGroup = groupName;
-					propertyRows += 1.0f;   // 组标题行
+					const std::string groupName = PropertyGroupLabel(ref.Meta->Group);
+					if (groupName != lastGroup)
+					{
+						lastGroup = groupName;
+						propertyRows += 1.0f;   // 组标题行
+					}
 				}
+				// M31:值为 @key 的文本类属性,字段下方多一行译文/缺键预览。
+				const UI::UiProp* current = node->FindProp(ref.Name);
+				const std::string value = current != nullptr
+					? current->Value
+					: (ref.Meta != nullptr ? PropertyDefaultText(*ref.Meta) : std::string());
+				if (IsLocalizableProperty(ref.Meta, ref.Name) && value.size() > 1 && value.front() == '@')
+					previewRows += 1.0f;
 			}
 		}
-		float rows = 7.0f;                                  // 七个分组头(Node/Props/Anchor/World/Bind/On/Layout)
+		// M31:两大块 —— Type 块头 + Common 块头 + 六个公共段头(Node/Anchor/Layout/World/Bind/On)。
+		float rows = 8.0f;
 		if (m_ShowNodeSection) rows += 2.0f;                // Id / Type
-		if (m_ShowPropsSection) rows += propertyRows;       // 每条属性一行
+		rows += propertyRows;                               // Type 块的类型独有属性(恒显示)
 		if (m_ShowAnchorSection) rows += 11.0f;             // 10 个数值 + RelativeToSafeArea
 		if (m_ShowWorldSection)
 		{
@@ -1261,7 +1312,7 @@ namespace World
 			}
 		}
 		if (m_ShowLayoutSection) rows += 8.0f;              // Kind + Gap + 4×Padding + Columns + RowMajor
-		return rowHeight * rows + 8.0f;
+		return rowHeight * rows + kLocalizationPreviewHeight * previewRows + 8.0f;
 	}
 
 	// M29:属性面板的行来源 —— **类型登记的属性表**在前(按登记顺序,组内即作者顺序),
@@ -1438,28 +1489,31 @@ namespace World
 			return;
 		}
 
-		// ---- Node ----
-		groupHeader("ui_designer.section.node", "Node", std::string(), m_ShowNodeSection);
-		if (m_ShowNodeSection)
+		// ---- Type:类型独有属性(M31)----
+		// 两大块分区的上半:强调色 + 较大字号 + 1px 分隔线(全走库件),右侧给属性条数。
+		const std::vector<PropertyRowRef> propRows = CollectPropertyRows(*node);
 		{
-			const auto inlineRow = [&](const char* key, const char* fallback, const std::string& value)
-			{
-				Wui::PropertyRowDesc desc;
-				desc.Label = Wui::Tr(key, fallback);
-				desc.A11yLabel = desc.Label;
-				desc.InlineValue = true;
-				desc.InlineValueText = value;
-				desc.LabelWidth = labelWidth;
-				Wui::PropertyRow(ctx, Wui::HashId(key), nextRow(rowHeight), desc, theme);
-			};
-			inlineRow("ui_designer.node.id", "Id", node->Id);
-			inlineRow("ui_designer.node.type", "Type", node->Type);
+			const Wui::WuiRect typeHeaderRow = nextRow(rowHeight);
+			const std::string typeTitle = "Type: " + node->Type;
+			Wui::SectionHeader(ctx, typeHeaderRow, typeTitle, theme.Accent, theme, theme.FontSizeTitle);
+			const std::string typeCount = "(" + std::to_string(propRows.size()) + ")";
+			const float countWidth = ctx.MeasureTextWidth(typeCount, theme.FontSizeSmall);
+			Wui::Label(ctx, glm::vec2 { typeHeaderRow.X + std::max(0.0f, typeHeaderRow.W - countWidth - 2.0f),
+				typeHeaderRow.Y + 4.0f }, typeCount, theme.TextMuted, theme.FontSizeSmall);
+			// a11y:标题节点(label = "Type: <TypeName>",value = 属性条数)—— 脚本按 label 可寻址。
+			Wui::WuiAccessNode typeNode;
+			typeNode.Id = Wui::HashId("ui_designer.type.header");
+			typeNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			typeNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			typeNode.Kind = "heading";
+			typeNode.Label = typeTitle;
+			typeNode.Value = typeCount;
+			typeNode.Rect = typeHeaderRow;
+			typeNode.Enabled = true;
+			typeNode.Interactive = false;
+			typeNode.Visible = true;
+			Wui::WuiAccessibility::Get().Register(typeNode);
 		}
-
-		// ---- Props(每条属性一行;值文本回车提交,失焦提交)----
-		groupHeader("ui_designer.section.props", "Props",
-			"(" + std::to_string(node->Props.size()) + ")", m_ShowPropsSection);
-		if (m_ShowPropsSection)
 		{
 			if (node->Props.empty())
 			{
@@ -1474,7 +1528,6 @@ namespace World
 			// Button / Label / Panel 的面板长得一模一样,而且**连 label 都设不了**
 			// (用户原话:"所有控件的属性都是相同的")。现在:类型登记表里的每个属性都出一行,
 			// 有覆盖值就显示覆盖值,没有就显示登记的默认值(灰);编辑即写入覆盖,↺ 清除覆盖。
-			const std::vector<PropertyRowRef> propRows = CollectPropertyRows(*node);
 			std::string lastGroup;
 			for (const PropertyRowRef& ref : propRows)
 			{
@@ -1518,8 +1571,42 @@ namespace World
 					"Clear this override (back to the type default)");
 				// (刻意不设 FieldPlaceholder:未覆盖时也要能**直接编辑**出覆盖值 ——
 				//  占位文本会顶掉字段控件,那样"加一个覆盖"就没法做了。)
+				// M31:值形如 @key 时,字段下方补一行译文/缺键预览,语言清单进 tooltip。
+				bool previewMissing = false;
+				std::string previewText;
+				if (IsLocalizableProperty(meta, ref.Name) && value.size() > 1 && value.front() == '@')
+				{
+					previewText = LocalizationPreview(value, previewMissing);
+					const std::string languages = LocalizationLanguageList();
+					if (!languages.empty())
+						desc.Tooltip += (desc.Tooltip.empty() ? "" : "\n")
+						+ Wui::Tr("panel.ui_designer.l10n.languages", "Languages") + ": " + languages;
+					if (previewMissing)
+						desc.Tooltip += (desc.Tooltip.empty() ? "" : "\n")
+						+ Wui::Tr("panel.ui_designer.l10n.missing_hint",
+						"No translation for this key - the runtime falls back to the inline text.");
+				}
 				const Wui::PropertyRowResult rowResult = Wui::PropertyRow(ctx,
 					Wui::HashId((base + ".row").c_str()), nextRow(rowHeight), desc, theme);
+				Wui::WuiRect previewRow {};
+				if (!previewText.empty())
+				{
+					previewRow = nextRow(kLocalizationPreviewHeight);
+					Wui::Label(ctx, glm::vec2 { rowResult.FieldRect.X + 2.0f, previewRow.Y + 1.0f },
+						previewText, previewMissing ? theme.Danger : theme.TextMuted, theme.FontSizeCaption);
+					Wui::WuiAccessNode previewNode;
+					previewNode.Id = Wui::HashId((base + ".l10n").c_str());
+					previewNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+					previewNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+					previewNode.Kind = "label";
+					previewNode.Label = previewText;
+					previewNode.Value = value;
+					previewNode.Rect = previewRow;
+					previewNode.Enabled = true;
+					previewNode.Interactive = false;
+					previewNode.Visible = true;
+					Wui::WuiAccessibility::Get().Register(previewNode);
+				}
 				if (rowResult.ResetClicked && overridden)
 				{
 					NoteNodeEdit(ref.Name);
@@ -1647,6 +1734,42 @@ namespace World
 			}
 		}
 
+		// ---- Common:所有类型都有的公共属性(M31)----
+		{
+			const Wui::WuiRect commonHeaderRow = nextRow(rowHeight);
+			const std::string commonTitle = Wui::Tr("panel.ui_designer.section.common", "Common");
+			Wui::SectionHeader(ctx, commonHeaderRow, commonTitle, theme.Text, theme, theme.FontSizeBody);
+			Wui::WuiAccessNode commonNode;
+			commonNode.Id = Wui::HashId("ui_designer.section.common");
+			commonNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			commonNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			commonNode.Kind = "heading";
+			commonNode.Label = commonTitle;
+			commonNode.Rect = commonHeaderRow;
+			commonNode.Enabled = true;
+			commonNode.Interactive = false;
+			commonNode.Visible = true;
+			Wui::WuiAccessibility::Get().Register(commonNode);
+		}
+
+		// ---- Node ----
+		groupHeader("ui_designer.section.node", "Node", std::string(), m_ShowNodeSection);
+		if (m_ShowNodeSection)
+		{
+			const auto inlineRow = [&](const char* key, const char* fallback, const std::string& value)
+			{
+				Wui::PropertyRowDesc desc;
+				desc.Label = Wui::Tr(key, fallback);
+				desc.A11yLabel = desc.Label;
+				desc.InlineValue = true;
+				desc.InlineValueText = value;
+				desc.LabelWidth = labelWidth;
+				Wui::PropertyRow(ctx, Wui::HashId(key), nextRow(rowHeight), desc, theme);
+			};
+			inlineRow("ui_designer.node.id", "Id", node->Id);
+			inlineRow("ui_designer.node.type", "Type", node->Type);
+		}
+
 		// ---- Anchor ----
 		groupHeader("ui_designer.section.anchor", "Anchor", std::string(), m_ShowAnchorSection);
 		if (m_ShowAnchorSection)
@@ -1666,6 +1789,76 @@ namespace World
 			{
 				m_ScreenDirty = true;
 				NoteNodeEdit(desc.Label);
+			}
+		}
+
+		// ---- Layout ----
+		groupHeader("ui_designer.section.layout", "Layout", std::string(), m_ShowLayoutSection);
+		if (m_ShowLayoutSection)
+		{
+			std::vector<std::string> options;
+			options.reserve(sizeof(kLayoutKinds) / sizeof(kLayoutKinds[0]));
+			for (const UI::UiLayoutKind kind : kLayoutKinds)
+				options.push_back(UI::UiLayoutKindName(kind));
+
+			int selected = 0;
+			for (std::size_t i = 0; i < options.size(); ++i)
+			{
+				if (kLayoutKinds[i] == node->Layout.Kind)
+				{
+					selected = static_cast<int>(i);
+					break;
+				}
+			}
+
+			Wui::PropertyRowDesc kindDesc;
+			kindDesc.Label = Wui::Tr("ui_designer.layout.kind", "Kind");
+			kindDesc.Term = "Kind";
+			kindDesc.A11yLabel = kindDesc.Label;
+			kindDesc.A11yValue = options.empty() ? std::string() : options[static_cast<std::size_t>(selected)];
+			kindDesc.LabelWidth = labelWidth;
+			const Wui::PropertyRowResult kindRow = Wui::PropertyRow(ctx,
+				Wui::HashId("ui_designer.layout.kind.row"), nextRow(rowHeight), kindDesc, theme);
+			if (Wui::Combo(ctx, Wui::HashId("ui_designer.layout.kind.field"), kindRow.FieldRect,
+				kindDesc.Label, options, selected, theme))
+			{
+				node->Layout.Kind = kLayoutKinds[static_cast<std::size_t>(selected)];
+				m_ScreenDirty = true;
+				NoteNodeEdit(kindDesc.Label);
+			}
+
+			for (const FloatRowDef& def : kLayoutFloatRows)
+				floatRow(def, *node);
+
+			Wui::PropertyRowDesc columnsDesc;
+			columnsDesc.Label = Wui::Tr("ui_designer.layout.columns", "Columns");
+			columnsDesc.Term = "Columns";
+			columnsDesc.A11yLabel = columnsDesc.Label;
+			columnsDesc.A11yValue = std::to_string(node->Layout.Columns);
+			columnsDesc.LabelWidth = labelWidth;
+			const Wui::PropertyRowResult columnsRow = Wui::PropertyRow(ctx,
+				Wui::HashId("ui_designer.layout.columns.row"), nextRow(rowHeight), columnsDesc, theme);
+			int64_t columns = node->Layout.Columns;
+			if (Wui::DragInt(ctx, Wui::HashId("ui_designer.layout.columns.field"), columnsRow.FieldRect,
+				columns, 1, 64, theme))
+			{
+				node->Layout.Columns = static_cast<int>(columns);
+				m_ScreenDirty = true;
+				NoteNodeEdit(columnsDesc.Label);
+			}
+
+			Wui::PropertyRowDesc rowMajorDesc;
+			rowMajorDesc.Label = Wui::Tr("ui_designer.layout.row_major", "Row Major");
+			rowMajorDesc.Term = "RowMajor";
+			rowMajorDesc.A11yLabel = rowMajorDesc.Label;
+			rowMajorDesc.LabelWidth = labelWidth;
+			const Wui::PropertyRowResult rowMajorRow = Wui::PropertyRow(ctx,
+				Wui::HashId("ui_designer.layout.row_major.row"), nextRow(rowHeight), rowMajorDesc, theme);
+			if (Wui::Checkbox(ctx, Wui::HashId("ui_designer.layout.row_major.field"), rowMajorRow.FieldRect,
+				std::string(), node->Layout.RowMajor, theme))
+			{
+				m_ScreenDirty = true;
+				NoteNodeEdit(rowMajorDesc.Label);
 			}
 		}
 
@@ -1985,76 +2178,6 @@ namespace World
 				++m_RowBufferGen;
 				NoteNodeEdit(Wui::Tr("panel.ui_designer.on.add", "+ Add command"));
 				m_Status = Wui::Tr("panel.ui_designer.on.added", "Added an empty command row");
-			}
-		}
-
-		// ---- Layout ----
-		groupHeader("ui_designer.section.layout", "Layout", std::string(), m_ShowLayoutSection);
-		if (m_ShowLayoutSection)
-		{
-			std::vector<std::string> options;
-			options.reserve(sizeof(kLayoutKinds) / sizeof(kLayoutKinds[0]));
-			for (const UI::UiLayoutKind kind : kLayoutKinds)
-				options.push_back(UI::UiLayoutKindName(kind));
-
-			int selected = 0;
-			for (std::size_t i = 0; i < options.size(); ++i)
-			{
-				if (kLayoutKinds[i] == node->Layout.Kind)
-				{
-					selected = static_cast<int>(i);
-					break;
-				}
-			}
-
-			Wui::PropertyRowDesc kindDesc;
-			kindDesc.Label = Wui::Tr("ui_designer.layout.kind", "Kind");
-			kindDesc.Term = "Kind";
-			kindDesc.A11yLabel = kindDesc.Label;
-			kindDesc.A11yValue = options.empty() ? std::string() : options[static_cast<std::size_t>(selected)];
-			kindDesc.LabelWidth = labelWidth;
-			const Wui::PropertyRowResult kindRow = Wui::PropertyRow(ctx,
-				Wui::HashId("ui_designer.layout.kind.row"), nextRow(rowHeight), kindDesc, theme);
-			if (Wui::Combo(ctx, Wui::HashId("ui_designer.layout.kind.field"), kindRow.FieldRect,
-				kindDesc.Label, options, selected, theme))
-			{
-				node->Layout.Kind = kLayoutKinds[static_cast<std::size_t>(selected)];
-				m_ScreenDirty = true;
-				NoteNodeEdit(kindDesc.Label);
-			}
-
-			for (const FloatRowDef& def : kLayoutFloatRows)
-				floatRow(def, *node);
-
-			Wui::PropertyRowDesc columnsDesc;
-			columnsDesc.Label = Wui::Tr("ui_designer.layout.columns", "Columns");
-			columnsDesc.Term = "Columns";
-			columnsDesc.A11yLabel = columnsDesc.Label;
-			columnsDesc.A11yValue = std::to_string(node->Layout.Columns);
-			columnsDesc.LabelWidth = labelWidth;
-			const Wui::PropertyRowResult columnsRow = Wui::PropertyRow(ctx,
-				Wui::HashId("ui_designer.layout.columns.row"), nextRow(rowHeight), columnsDesc, theme);
-			int64_t columns = node->Layout.Columns;
-			if (Wui::DragInt(ctx, Wui::HashId("ui_designer.layout.columns.field"), columnsRow.FieldRect,
-				columns, 1, 64, theme))
-			{
-				node->Layout.Columns = static_cast<int>(columns);
-				m_ScreenDirty = true;
-				NoteNodeEdit(columnsDesc.Label);
-			}
-
-			Wui::PropertyRowDesc rowMajorDesc;
-			rowMajorDesc.Label = Wui::Tr("ui_designer.layout.row_major", "Row Major");
-			rowMajorDesc.Term = "RowMajor";
-			rowMajorDesc.A11yLabel = rowMajorDesc.Label;
-			rowMajorDesc.LabelWidth = labelWidth;
-			const Wui::PropertyRowResult rowMajorRow = Wui::PropertyRow(ctx,
-				Wui::HashId("ui_designer.layout.row_major.row"), nextRow(rowHeight), rowMajorDesc, theme);
-			if (Wui::Checkbox(ctx, Wui::HashId("ui_designer.layout.row_major.field"), rowMajorRow.FieldRect,
-				std::string(), node->Layout.RowMajor, theme))
-			{
-				m_ScreenDirty = true;
-				NoteNodeEdit(rowMajorDesc.Label);
 			}
 		}
 

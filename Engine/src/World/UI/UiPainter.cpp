@@ -96,13 +96,29 @@ namespace World::UI
 			return fallback;
 		}
 
-		// 显示文本:`@key` = 本地化 key(缺 key 回退去掉 `@` 的字面量),其余原样。
+		// 显示文本的两种写法:
+		//   `@key`          —— 本地化 key;缺 key 时回退**去掉 `@` 的字面量**(可见 + 已记缺键日志)。
+		//   `@key|兜底文案` —— key + **内联兜底**(M33)。缺 key 时显示兜底文案,而不是裸键名。
+		//
+		// 为什么要内联兜底:引擎自带文案的英文是源码内联的(`Tr(key, "English")`),但 `.wui` 里
+		// 没有"源码",以前只能写 key ⇒ 任何语言缺这个 key 就显示裸键名(实测用户可见)。
+		// 现在作者可以写 `@ui.close|Close`:有译文用译文,没译文/缺 key 也有可读英文。
 		std::string Localized(std::string_view text)
 		{
 			if (!text.empty() && text.front() == '@')
 			{
-				const std::string key(text.substr(1));
-				return Wui::Tr(key, key);
+				const std::size_t separator = text.find('|');
+				if (separator == std::string_view::npos)
+				{
+					const std::string key(text.substr(1));
+					return Wui::Tr(key, key);
+				}
+				const std::string key(text.substr(1, separator - 1));
+				const std::string fallback(text.substr(separator + 1));
+				// 空 key 或空兜底 = 写法非法:按"没有本地化"处理(原样显示,便于一眼看出写错)。
+				if (key.empty() || fallback.empty())
+					return std::string(text);
+				return Wui::Tr(key, fallback);
 			}
 			return std::string(text);
 		}

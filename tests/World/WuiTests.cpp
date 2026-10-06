@@ -1820,10 +1820,15 @@ int main()
 				CHECK(Tr("fb.key", "fallback") == "zh-TW-main");             // 命中 zh-TW 就不再看 zh
 				CHECK(LocalizationLanguageCandidates().size() == 2);
 				SetLanguage("en");
-				CHECK(LocalizationLanguageCandidates().empty());             // 英文族 = 内联默认,无候选
+				// M33:英文族**不再**被当作"内联默认"——它和别的语言一样读目录
+				// (否则 `.wui` 的 `@key` 在 en 下会显示裸键名,实测用户可见)。
+				CHECK(LocalizationLanguageCandidates().size() == 1
+					&& LocalizationLanguageCandidates()[0] == "en");
 				CHECK(!LocalizationFilesChanged());
 				SetLanguage("en-US");
-				CHECK(LocalizationLanguageCandidates().empty());
+				CHECK(LocalizationLanguageCandidates().size() == 2
+					&& LocalizationLanguageCandidates()[0] == "en-US"
+					&& LocalizationLanguageCandidates()[1] == "en");        // 英文族也有主标签回退
 				SetLanguage("");
 				CHECK(LocalizationLanguageCandidates().empty());
 				CHECK(Tr("fb.key", "inline") == "inline");                   // 空语言 = 内联默认
@@ -3484,7 +3489,9 @@ int main()
 					}
 				}
 				CHECK(content == 1 && labelIsText);          // Content = 文本(label)
-				CHECK(style == 18);                          // Style = 字号/粗细/内边距 + 5 态 × 3 通道颜色
+				// M30:Style 补齐后 = 字号/粗细/内边距/圆角(4)+ **全体状态**通道 bg/border/text(3)
+				//      + 5 态 × 3 通道颜色(15)= 22(旧值 18 是"只有分槽颜色、没有无状态通道"的表)。
+				CHECK(style == 22);
 				CHECK(stateScopedColors == 15);              // 15 条颜色都按状态分槽
 				CHECK(layout == 1 && preferredOk);           // Layout = preferred size
 				CHECK(behavior == 1);                        // Behavior = disabled

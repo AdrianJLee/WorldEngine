@@ -75,6 +75,13 @@ namespace World::Wui
 	// 先命中的候选生效,层之间各自独立解析);英文族(`en`/`en-*`)与空语言 = **空表**
 	// (内联默认文案,不读目录)。
 	WLD_API std::vector<std::string> LocalizationLanguageCandidates();
+	// M30:设计器查询 —— 当前语言(含回退链 `zh-CN` → `zh`)里该键是否有译文。
+	// 判据与 `Tr` 同口径:回退链任一命中的目录条目带文本 ⇒ true;英文族(`en`/`en-*`)与空语言
+	// = 源码内联默认,该键的"当前语言文本"就是内联英文源文,故恒为 true。
+	WLD_API bool HasLocalizationKey(std::string_view key);
+	// M30:已注册语言层里**可加载的语言码**(扫描各层目录下的语言子目录,排序稳定、去重;
+	// 排除 `glossary/` 这类域/工具目录)。给设计器显示"这个键有哪些语言"。
+	WLD_API std::vector<std::string> LocalizationLanguages();
 	// 热重载戳(S2):本次加载涉及的输入文件(域文件,或编译产物 `<lang>/catalog.json`)
 	// 里任一「大小/mtime 变化、新增、删除」→ true。**只做比较,不重载**;
 	// 宿主发现 true 后自行调 `ReloadLocalization()`。

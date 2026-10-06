@@ -668,14 +668,21 @@ void RegisterBuiltins(){
 						WuiComponentPropertyGroup::Style, "文字字号(设计单位;未覆盖 = 15)。"),
 					Grouped(PropBool("bold"), WuiComponentPropertyGroup::Style,
 						"文字是否粗体(未覆盖 = 常规)。"),
-					Grouped(UnitOf(NumberDefault(PropFloat("padding", 0.0f, 40.0f, 1.0f), 8.0f), "px"),
+					Grouped(UnitOf(NumberDefault(PropFloat("padding", 0.0f, 64.0f, 1.0f), 8.0f), "px"),
 						WuiComponentPropertyGroup::Style, "文字左内边距(未覆盖 = 8)。"),
+					Grouped(UnitOf(NumberDefault(PropFloat("radius", 0.0f, 32.0f, 1.0f), 3.0f), "px"),
+						WuiComponentPropertyGroup::Style, "圆角设计单位(未覆盖 = theme.Radius)。"),
 					// Style:5 态 × 3 通道颜色(#RRGGBB / #RRGGBBAA;未覆盖 = 主题令牌)
+					// 不带状态后缀的通道值 = **全体状态**的覆盖(绘制先读它,再回退 per-state 槽)。
+					PropColor("bg", "#22272F", false,
+						"Fill for every state; overrides the per-state 'bg.<state>' slots."),
 					PropColor("bg.default", "#22272F", true, "Normal 态填充(未覆盖 = 主题 ButtonBg)。"),
 					PropColor("bg.hover", "#2A3038", true, "Hover 态填充(未覆盖 = 主题 ButtonHover)。"),
 					PropColor("bg.pressed", "#2A3038", true, "Pressed 态填充(未覆盖 = Hover 的兜底值)。"),
 					PropColor("bg.focus", "#22272F", true, "Focus 且未悬停时的填充(未覆盖 = Normal 的兜底值)。"),
 					PropColor("bg.disabled", "#101318", true, "Disabled 态填充(未覆盖 = 主题 ContentBg)。"),
+					PropColor("border", "#2B3138", false,
+						"Border for every state; overrides the per-state 'border.<state>' slots."),
 					PropColor("border.default", "#2B3138", true, "Normal 态描边(未覆盖 = 主题 Border)。"),
 					PropColor("border.hover", "#2B3138", true, "Hover 态描边(未覆盖 = 主题 Border)。"),
 					PropColor("border.pressed", "#2B3138", true, "Pressed 态描边(未覆盖 = 主题 Border)。"),
@@ -683,6 +690,8 @@ void RegisterBuiltins(){
 						"Focus 态描边 + 焦点环颜色(未覆盖 = 主题 FocusRing)。"),
 					PropColor("border.disabled", "#2B313899", true,
 						"Disabled 态描边(未覆盖 = 主题 Border 的 60% alpha)。"),
+					PropColor("text", "#D7DCE3", false,
+						"Text color for every state; overrides the per-state 'text.<state>' slots."),
 					PropColor("text.default", "#D7DCE3", true, "Normal 态文字(未覆盖 = 主题 Text)。"),
 					PropColor("text.hover", "#D7DCE3", true, "Hover 态文字(未覆盖 = 主题 Text)。"),
 					PropColor("text.pressed", "#4C8DFF", true, "Pressed 态文字(未覆盖 = 主题 Accent)。"),
@@ -786,7 +795,20 @@ void RegisterBuiltins(){
 				"showcase 首选 148x24;标签从 24px 起画,16x16 方块垂直居中;H 同上",
 				ShellIds("toggle"),
 				StateList({ "default", "on", "off", "hover", "focus", "disabled", "long-text" }),
-				{ PropText("label", "Enabled"), PropBool("value"), PropBool("disabled") },
+				{
+					Grouped(PropText("label", "Enabled"), WuiComponentPropertyGroup::Content,
+						"Toggle label drawn after the indicator box."),
+					Grouped(PropBool("value"), WuiComponentPropertyGroup::Content,
+						"On/off state (unset = off)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("fontSize", 6.0f, 48.0f, 1.0f), 15.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Label font size in design units (unset = 15)."),
+					PropColor("color", "#D7DCE3", false, "Label text color (unset = theme.Text)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("boxSize", 8.0f, 32.0f, 1.0f), 16.0f), "px"),
+						WuiComponentPropertyGroup::Layout,
+						"Square indicator size in design units (unset = 16)."),
+					Grouped(PropBool("disabled"), WuiComponentPropertyGroup::Behavior,
+						"Draw in the disabled style."),
+				},
 				&ShowToggle));
 
 			WuiComponentRegistry::Register(Desc(
@@ -807,7 +829,22 @@ void RegisterBuiltins(){
 				"showcase 首选 168x24;16x16 方块 + 24px 起画文字;H 同上",
 				ShellIds("checkbox"),
 				StateList({ "default", "checked", "unchecked", "hover", "focus", "disabled", "long-text" }),
-				{ PropText("label", "Enabled"), PropBool("checked"), PropBool("disabled") },
+				{
+					Grouped(PropText("label", "Enabled"), WuiComponentPropertyGroup::Content,
+						"Checkbox label drawn after the indicator box."),
+					Grouped(PropBool("checked"), WuiComponentPropertyGroup::Content,
+						"Checked state (unset = unchecked)."),
+					Grouped(PropBool("value"), WuiComponentPropertyGroup::Content,
+						"Fallback checked state used when 'checked' is not set."),
+					Grouped(UnitOf(NumberDefault(PropFloat("fontSize", 6.0f, 48.0f, 1.0f), 15.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Label font size in design units (unset = 15)."),
+					PropColor("color", "#D7DCE3", false, "Label text color (unset = theme.Text)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("boxSize", 8.0f, 32.0f, 1.0f), 16.0f), "px"),
+						WuiComponentPropertyGroup::Layout,
+						"Square indicator size in design units (unset = 16)."),
+					Grouped(PropBool("disabled"), WuiComponentPropertyGroup::Behavior,
+						"Draw in the disabled style."),
+				},
 				&ShowCheckbox));
 
 			WuiComponentRegistry::Register(Desc(
@@ -839,8 +876,29 @@ void RegisterBuiltins(){
 				"showcase 首选 190x24;轨道 4px 垂直居中;min/max 覆盖非法时退回 0..1",
 				ShellIds("slider.float"),
 				StateList({ "default", "hover", "focus", "disabled" }),
-				{ PropFloat("value", 0.0f, 1.0f, 0.01f), PropFloat("min", -1000.0f, 1000.0f, 0.1f),
-					PropFloat("max", -1000.0f, 1000.0f, 0.1f), PropBool("disabled") },
+				{
+					Grouped(NumberDefault(PropFloat("value", 0.0f, 1.0f, 0.01f), 0.0f),
+						WuiComponentPropertyGroup::Content, "Current value (clamped to min..max)."),
+					Grouped(NumberDefault(PropFloat("min", -1000.0f, 1000.0f, 0.1f), 0.0f),
+						WuiComponentPropertyGroup::Content, "Lower bound of the value range (unset = 0)."),
+					Grouped(NumberDefault(PropFloat("max", -1000.0f, 1000.0f, 0.1f), 1.0f),
+						WuiComponentPropertyGroup::Content, "Upper bound of the value range (unset = 1)."),
+					Grouped(PropText("label", "Volume"), WuiComponentPropertyGroup::Content,
+						"Accessibility label / optional caption for the slider."),
+					Grouped(UnitOf(NumberDefault(PropFloat("fontSize", 6.0f, 48.0f, 1.0f), 13.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Caption font size in design units (unset = 13)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("radius", 0.0f, 32.0f, 1.0f), 4.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Track corner radius in design units (unset = 4)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("trackHeight", 1.0f, 16.0f, 1.0f), 4.0f), "px"),
+						WuiComponentPropertyGroup::Layout, "Track thickness in design units (unset = 4)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("knobSize", 4.0f, 32.0f, 1.0f), 14.0f), "px"),
+						WuiComponentPropertyGroup::Layout, "Knob diameter in design units (unset = 14)."),
+					PropColor("trackColor", "#101318", false, "Track background color (unset = theme.ContentBg)."),
+					PropColor("fillColor", "#4C8DFF", false, "Filled-portion color (unset = theme.Accent)."),
+					PropColor("knobColor", "#D7DCE3", false, "Knob color (unset = theme.Text)."),
+					Grouped(PropBool("disabled"), WuiComponentPropertyGroup::Behavior,
+						"Draw in the disabled style."),
+				},
 				&ShowSliderFloat));
 
 			WuiComponentRegistry::Register(Desc(
@@ -893,8 +951,27 @@ void RegisterBuiltins(){
 				"showcase 首选 210x24;行内无纵向余量;长文本由控件自己滚动/裁剪",
 				ShellIds("textfield"),
 				StateList({ "default", "hover", "focus", "disabled", "long-text" }),
-				{ PropText("value", "Player"), PropText("label", "Name"), PropText("placeholder", "Enter a name"),
-					PropBool("disabled") },
+				{
+					Grouped(PropText("value", "Player"), WuiComponentPropertyGroup::Content,
+						"Current text value."),
+					Grouped(PropText("label", "Name"), WuiComponentPropertyGroup::Content,
+						"Field label; doubles as the accessibility label."),
+					Grouped(PropText("placeholder", "Enter a name"), WuiComponentPropertyGroup::Content,
+						"Placeholder shown while the value is empty."),
+					Grouped(UnitOf(NumberDefault(PropFloat("fontSize", 6.0f, 48.0f, 1.0f), 15.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Text font size in design units (unset = 15)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("padding", 0.0f, 64.0f, 1.0f), 8.0f), "px"),
+						WuiComponentPropertyGroup::Style,
+						"Horizontal text padding in design units (unset = 8)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("radius", 0.0f, 32.0f, 1.0f), 3.0f), "px"),
+						WuiComponentPropertyGroup::Style,
+						"Corner radius in design units (unset = theme.Radius)."),
+					PropColor("bg", "#171B21", false, "Field background fill (unset = theme.ContentBg)."),
+					PropColor("border", "#2B3138", false, "Field border color (unset = theme.Border)."),
+					PropColor("color", "#D7DCE3", false, "Text color (unset = theme.Text)."),
+					Grouped(PropBool("disabled"), WuiComponentPropertyGroup::Behavior,
+						"Draw in the disabled style."),
+				},
 				&ShowTextField));
 
 			WuiComponentRegistry::Register(Desc(
@@ -1085,8 +1162,83 @@ void RegisterBuiltins(){
 				A11yIds({ "showcase.listview", "showcase.listview.item.0", "showcase.listview.item.1",
 					"showcase.listview.item.2" }),
 				StateList({ "default", "hover", "selected", "disabled", "scrolled" }),
-				{ PropText("label", "Textures"), PropText("disabled", "Locked"), PropFloat("scroll", 0.0f, 200.0f, 1.0f) },
+				{
+					// Content
+					Grouped(PropText("label", "Textures"), WuiComponentPropertyGroup::Content,
+						"Accessibility label for the list container."),
+					Grouped(PropText("rowPrefix", "Row "), WuiComponentPropertyGroup::Content,
+						"Prefix for generated row labels in list mode."),
+					// Layout:行/网格几何(网格专属属性见下面 Grid 段)
+					Grouped(PropInt("rowCount", 0.0f, 1000.0f, 1.0f), WuiComponentPropertyGroup::Layout,
+						"Number of virtualized rows (0 = nothing drawn)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("rowHeight", 12.0f, 64.0f, 1.0f), 24.0f), "px"),
+						WuiComponentPropertyGroup::Layout, "List row height in design units (unset = 24)."),
+					// Style
+					Grouped(UnitOf(NumberDefault(PropFloat("fontSize", 6.0f, 48.0f, 1.0f), 14.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Row text font size in design units (unset = 14)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("padding", 0.0f, 64.0f, 1.0f), 6.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Content padding in design units (unset = 6)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("radius", 0.0f, 32.0f, 1.0f), 3.0f), "px"),
+						WuiComponentPropertyGroup::Style,
+						"Corner radius in design units (unset = theme.Radius)."),
+					PropColor("bg", "#101318", false, "Container background fill (unset = theme.ContentBg)."),
+					PropColor("rowColor", "#171B21", false, "Even-row color in list mode (unset = theme.PanelBg)."),
+					PropColor("rowColorAlt", "#1C2027", false, "Alternate-row color in list mode (unset = theme.ContentBg)."),
+					// Grid 段:`.wui` 的 Grid 类型与 List 共用本组件 id(见 UiPainter 的映射注与
+					// UiScrollTests 的 ComponentId 断言),网格专属属性一并声明,两个类型的设计器都看得到。
+					Grouped(NumberDefault(PropInt("columns", 1.0f, 64.0f, 1.0f), 4.0f),
+						WuiComponentPropertyGroup::Layout, "Grid: column count (unset = 4)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("cellW", 8.0f, 512.0f, 1.0f), 0.0f), "px"),
+						WuiComponentPropertyGroup::Layout,
+						"Grid: cell width in design units (0 = auto: container width / columns)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("cellH", 8.0f, 256.0f, 1.0f), 24.0f), "px"),
+						WuiComponentPropertyGroup::Layout, "Grid: cell height in design units (unset = 24)."),
+					PropColor("cellColor", "#171B21", false, "Grid: cell background color (unset = theme.PanelBg)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("gap", 0.0f, 64.0f, 1.0f), 2.0f), "px"),
+						WuiComponentPropertyGroup::Layout, "Grid: gap between cells in design units (unset = 2)."),
+					// Behavior
+					Grouped(UnitOf(NumberDefault(PropFloat("scroll", 0.0f, 400.0f, 1.0f), 0.0f), "px"),
+						WuiComponentPropertyGroup::Behavior,
+						"Runtime scroll offset (driven by the scroll system, not edited by hand)."),
+					Grouped(PropBool("disabled"), WuiComponentPropertyGroup::Behavior,
+						"Draw in the disabled style."),
+				},
 				&ShowListView));
+
+			// M30:GridView 是 WuiChrome.h 里声明的真实控件(图标网格,cellW/cellH 自动换行),
+			// 之前只被 `.wui` 的 Grid 类型**间接**覆盖(Grid 映射 listview);这里给它一条自己的
+			// 登记项 —— 工作台能单独展示它,属性表也只列网格属性。`.wui` Grid 的 ComponentId 仍是
+			// `listview`(UiScrollTests 钉住该映射),两个入口共用同一批属性名。
+			WuiComponentRegistry::Register(Desc(
+				"gridview", "GridView", "Grid View", "Containers", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
+				"role=无(GridView 不登记自己的 a11y 节点;showcase 外壳锚点 kind=component-root、interactive=false;单元格 Id 归调用方)",
+				"showcase 首选 230x96(自带滚动裁剪);单元格按 cellW/cellH 自动换行,列数 = 可用宽 / cellW",
+				ShellIds("gridview"),
+				StateList({ "default", "hover", "selected", "disabled", "scrolled" }),
+				{
+					Grouped(PropText("label", "Textures"), WuiComponentPropertyGroup::Content,
+						"Accessibility label for the grid."),
+					Grouped(PropInt("rowCount", 0.0f, 1000.0f, 1.0f), WuiComponentPropertyGroup::Layout,
+						"Item count (virtualized rows; 0 = empty grid)."),
+					Grouped(NumberDefault(PropInt("columns", 1.0f, 64.0f, 1.0f), 3.0f),
+						WuiComponentPropertyGroup::Layout, "Column count (unset = 3)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("cellW", 8.0f, 512.0f, 1.0f), 60.0f), "px"),
+						WuiComponentPropertyGroup::Layout, "Cell width in design units (unset = 60)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("cellH", 8.0f, 256.0f, 1.0f), 24.0f), "px"),
+						WuiComponentPropertyGroup::Layout, "Cell height in design units (unset = 24)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("gap", 0.0f, 64.0f, 1.0f), 2.0f), "px"),
+						WuiComponentPropertyGroup::Layout, "Gap between cells in design units (unset = 2)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("fontSize", 6.0f, 48.0f, 1.0f), 13.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Cell label font size in design units (unset = 13)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("radius", 0.0f, 32.0f, 1.0f), 3.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Cell corner radius in design units (unset = 3)."),
+					PropColor("bg", "#101318", false, "Grid background fill (unset = theme.ContentBg)."),
+					PropColor("cellColor", "#171B21", false, "Cell background color (unset = theme.PanelBg)."),
+					Grouped(PropBool("disabled"), WuiComponentPropertyGroup::Behavior,
+						"Draw in the disabled style."),
+				},
+				&ShowGridView));
 
 			WuiComponentRegistry::Register(Desc(
 				"table.header", "TableHeader", "Table Header", "Containers", WuiComponentStatus::Draft,
@@ -1147,7 +1299,19 @@ void RegisterBuiltins(){
 				"填满画布(showcase 首选 240x84);Direction/Gap 由属性控制;子件按 intrinsic 尺寸经 SolveFlex 排布 —— 与面板同一条布局路径",
 				ShellIds("box"),
 				StateList({ "default", "row" }),
-				{ PropFloat("gap", 0.0f, 24.0f, 1.0f), PropText("direction", "column") },
+				{
+					Grouped(PropText("title", "Panel"), WuiComponentPropertyGroup::Content,
+						"Optional header text drawn inside the top of the panel (empty = no header)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("radius", 0.0f, 32.0f, 1.0f), 3.0f), "px"),
+						WuiComponentPropertyGroup::Style,
+						"Corner radius in design units (unset = theme.Radius)."),
+					PropColor("bg", "#22272F", false, "Panel background fill (unset = theme.PanelBg)."),
+					PropColor("border", "#2B3138", false, "Panel border color (unset = theme.Border)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("gap", 0.0f, 24.0f, 1.0f), 6.0f), "px"),
+						WuiComponentPropertyGroup::Layout, "Spacing between child rows in design units."),
+					Grouped(PropText("direction", "column"), WuiComponentPropertyGroup::Layout,
+						"Layout direction: 'row' or 'column'."),
+				},
 				&ShowBox));
 
 			WuiComponentRegistry::Register(Desc(
@@ -1218,7 +1382,17 @@ void RegisterBuiltins(){
 				"showcase 首选 220x20;宽高 = 字宽×文本 / FontSize+6;不裁剪(超宽会溢出调用方的矩形)",
 				ShellIds("label"),
 				StateList({ "default", "long-text" }),
-				{ PropText("text", "Player Name"), PropFloat("fontSize", 8.0f, 32.0f, 1.0f), PropBool("bold") },
+				{
+					Grouped(PropText("label", "Player Name"), WuiComponentPropertyGroup::Content,
+						"Localization key or literal shown when 'text' is not set."),
+					Grouped(PropText("text", "Player Name"), WuiComponentPropertyGroup::Content,
+						"Label text; takes precedence over 'label' when both are set."),
+					Grouped(UnitOf(NumberDefault(PropFloat("fontSize", 6.0f, 48.0f, 1.0f), 15.0f), "px"),
+						WuiComponentPropertyGroup::Style, "Font size in design units (unset = 15)."),
+					PropColor("color", "#D7DCE3", false, "Text color (unset = theme.Text)."),
+					Grouped(PropBool("bold"), WuiComponentPropertyGroup::Style,
+						"Draw the text in a bold weight (unset = regular)."),
+				},
 				&ShowLabel));
 
 			WuiComponentRegistry::Register(Desc(
@@ -1228,7 +1402,16 @@ void RegisterBuiltins(){
 				"showcase 首选 96x96;纹理 id / UV / tint 由调用方给(视口、材质预览、模型预览都是这条路径)",
 				ShellIds("image"),
 				StateList({ "default" }),
-				{ PropInt("textureId", 0.0f, 100000.0f, 1.0f), PropText("tint", "#FFFFFF") },
+				{
+					Grouped(PropText("label", "Icon"), WuiComponentPropertyGroup::Content,
+						"Accessibility label for the image (the image itself draws no text)."),
+					Grouped(PropInt("textureId", 0.0f, 100000.0f, 1.0f), WuiComponentPropertyGroup::Content,
+						"Host texture id from WuiTextureRegistry (0 = empty image, drawn as a placeholder)."),
+					Grouped(UnitOf(NumberDefault(PropFloat("radius", 0.0f, 32.0f, 1.0f), 3.0f), "px"),
+						WuiComponentPropertyGroup::Style,
+						"Corner radius in design units (unset = theme.Radius)."),
+					PropColor("tint", "#FFFFFF", false, "Tint multiplied into the texture (unset = white)."),
+				},
 				&ShowImage));
 
 			WuiComponentRegistry::Register(Desc(
@@ -1273,7 +1456,19 @@ void RegisterBuiltins(){
 				"showcase 首选 200x12;轨道/填充都是 3px 圆角矩形;调用方决定行高",
 				ShellIds("progress"),
 				StateList({ "default", "disabled" }),
-				{ PropFloat("value", 0.0f, 1.0f, 0.01f), PropBool("disabled") },
+				{
+					Grouped(NumberDefault(PropFloat("value", 0.0f, 1.0f, 0.01f), 0.0f),
+						WuiComponentPropertyGroup::Content, "Progress fraction, clamped to 0..1."),
+					Grouped(PropText("label", "Loading"), WuiComponentPropertyGroup::Content,
+						"Accessibility label for the progress bar."),
+					Grouped(UnitOf(NumberDefault(PropFloat("radius", 0.0f, 32.0f, 1.0f), 3.0f), "px"),
+						WuiComponentPropertyGroup::Style,
+						"Corner radius of the track and fill in design units (unset = 3)."),
+					PropColor("trackColor", "#101318", false, "Track background color (unset = theme.ContentBg)."),
+					PropColor("fillColor", "#4C8DFF", false, "Completed-portion fill color (unset = theme.Accent)."),
+					Grouped(PropBool("disabled"), WuiComponentPropertyGroup::Behavior,
+						"Draw in the disabled style."),
+				},
 				&ShowProgress));
 
 			// M21:WuiPlot 是 ProfilerPanel(帧时间曲线)/ReadoutPanels(内存趋势)用的保留模式控件。

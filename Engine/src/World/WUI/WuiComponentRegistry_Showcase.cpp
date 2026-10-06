@@ -618,6 +618,41 @@ void ShowListView(const WuiComponentDraw& draw){
 		}
 
 
+void ShowGridView(const WuiComponentDraw& draw){
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, *draw.Theme, 230.0f, 96.0f);
+			const WuiId id = BeginShowcase(draw, "gridview", "Grid View", slot.Rect);
+			PseudoState pseudo(draw, id, slot.Rect);
+			const bool disabled = DisabledFor(draw);
+			// 选中项与条目数走持久槽:与 listview 的展示口径一致(属性覆盖即时生效)。
+			int64_t& activeState = DrivenInt(ctx, "showcase.gridview.active", draw, "active", 0, 0, 63);
+			const int rowCount = static_cast<int>(std::max<int64_t>(0,
+				DrivenInt(ctx, "showcase.gridview.count", draw, "rowCount", 6, 0, 1000)));
+			std::vector<GridViewItem> items;
+			items.reserve(static_cast<size_t>(rowCount));
+			for (int i = 0; i < rowCount; ++i)
+			{
+				GridViewItem item;
+				item.Id = HashId((std::string("showcase.gridview.item.") + std::to_string(i)).c_str());
+				item.Label = LocalizedText(draw, "label", "Icon", "图标") + std::to_string(i + 1);
+				item.Selected = activeState == i;
+				item.Disabled = disabled || (rowCount > 1 && i == rowCount - 1);
+				items.push_back(std::move(item));
+			}
+			float& scroll = DrivenFloat(ctx, "showcase.gridview.scroll", draw, "scroll", 0.0f, 0.0f, 400.0f);
+			if (draw.State == "scrolled")
+				scroll = 24.0f;
+			const float cellW = DrivenFloat(ctx, "showcase.gridview.cellW", draw, "cellW", 60.0f, 8.0f, 512.0f)
+				* slot.Scale;
+			const float cellH = DrivenFloat(ctx, "showcase.gridview.cellH", draw, "cellH", 24.0f, 8.0f, 256.0f)
+				* slot.Scale;
+			const GridViewResult grid = GridView(ctx, slot.Rect, items, cellW, cellH, scroll, theme);
+			if (grid.Clicked >= 0)
+				activeState = grid.Clicked;
+		}
+
+
 void ShowTableHeader(const WuiComponentDraw& draw){
 			WuiContext& ctx = *draw.Context;
 			const WuiTheme& theme = *draw.Theme;

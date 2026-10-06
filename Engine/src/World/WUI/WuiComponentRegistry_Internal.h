@@ -306,6 +306,8 @@ void ShowTreeView(const WuiComponentDraw& draw);
 
 void ShowListView(const WuiComponentDraw& draw);
 
+void ShowGridView(const WuiComponentDraw& draw);
+
 void ShowTableHeader(const WuiComponentDraw& draw);
 
 void ShowScrollArea(const WuiComponentDraw& draw);
