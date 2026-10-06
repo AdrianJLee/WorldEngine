@@ -770,6 +770,9 @@ void EditorLayer::SetSceneState(SceneState state){
 			{
 				m_PlayHost.StopRuntime();
 				m_PlayHost.Shutdown();
+				// GameUI(M7b):Play/Simulate 结束 —— 停画游戏 UI 并清掉它在无障碍树里的登记,
+				// 避免上一帧的节点在退出 Play 后变成幽灵行(共享通道 ⇒ 不关编辑器通道)。
+				m_UiHost.Shutdown();
 			}
 			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
 				app->SetPaused(false);
@@ -799,6 +802,10 @@ void EditorLayer::SetSceneState(SceneState state){
 				app->SetPaused(false);
 			// 视口尺寸在 SetScene 之后覆盖:GameHost 默认按宿主窗口同步,编辑器要用视图口尺寸。
 			UpdateSceneContext(m_RuntimeScene);
+			// GameUI(M7b):Play/Simulate 期间接上当前项目的游戏 UI(`WLD_UI_DOC` → 内容根
+			// `assets/ui/*.wui`;都没有 = 静默关闭)。物理面/原点每帧由 OnUiFrame 按视口面板的
+			// 场景矩形设置;节点登记进编辑器同一份无障碍树(panel = 文档 Screen 名)。
+			m_UiHost.Initialize(World::Paths::AssetRoot());
 		}
 		catch (const std::exception& error)
 		{

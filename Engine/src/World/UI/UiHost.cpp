@@ -1,4 +1,5 @@
-#include "UiHost.h"
+#include "wldpch.h"
+#include "World/UI/UiHost.h"
 
 #include "World/Core/Log.h"
 #include "World/UI/UiDocument.h"
@@ -94,25 +95,52 @@ namespace World
 			if (dump[0] != '\0')
 				m_A11yDumpPath = dump;
 
-		// 无障碍开关与加载条件一致:只有真的有 `.wui` 才开通道(没有 = 零开销,
-		// 且 HUD / 脚本 UI 的登记行为与引入本类之前逐字节一致)。
-		Wui::WuiAccessibility::Get().SetEnabled(true);
+		// 无障碍开关与加载条件一致:只有真的有 `.wui` 才(在自持通道口径下)开通道。
+		// SharedChannel = 通道归宿主,这里不动开关(编辑器靠 --ai-control 自己开)。
+		if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
+			Wui::WuiAccessibility::Get().SetEnabled(true);
 		m_Enabled = true;
 
-		WLD_CORE_INFO("[ui] game UI loaded from '{0}' (screen '{1}', {2} nodes, accessibility on)",
-			m_DocumentPath, m_Screen.Document().Screen, m_Screen.Count());
+		WLD_CORE_INFO("[ui] game UI loaded from '{0}' (screen '{1}', {2} nodes, accessibility {3})",
+			m_DocumentPath, m_Screen.Document().Screen, m_Screen.Count(),
+			m_A11yMode == UiHostAccessibilityMode::OwnChannel ? "on" : "host-managed");
 	}
 
 	void UiHost::Shutdown()
 	{
 		if (m_Enabled)
-			Wui::WuiAccessibility::Get().SetEnabled(false);
+		{
+			if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
+				Wui::WuiAccessibility::Get().SetEnabled(false);
+			else
+				// 共享通道:只清掉本窗口的登记(游戏 UI 节点),不关宿主的无障碍通道。
+				Wui::WuiAccessibility::Get().ClearWindow(m_WindowKey);
+		}
 		m_Screen = UI::UiScreen {};
 		m_DocumentPath.clear();
 		m_A11yDumpPath.clear();
+		m_HasSurface = false;
+		m_Origin = glm::vec2 { 0.0f, 0.0f };
 		m_A11yDumpWritten = false;
 		m_PaintProblemReported = false;
 		m_Enabled = false;
+	}
+
+	void UiHost::SetSurface(const UI::UiSurface& surface)
+	{
+		m_Surface = surface;
+		m_HasSurface = true;
+	}
+
+	void UiHost::SetOrigin(glm::vec2 origin)
+	{
+		m_Origin = origin;
+	}
+
+	void UiHost::ClearSurface()
+	{
+		m_HasSurface = false;
+		m_Origin = glm::vec2 { 0.0f, 0.0f };
 	}
 
 	void UiHost::DrawFrame(Wui::WuiContext& ctx, const Wui::WuiInputState& input)
@@ -120,23 +148,37 @@ namespace World
 		if (!m_Enabled)
 			return;
 
-		// `input.ViewportSize` 已是 WUI 的设计单位视口(物理像素 / 平台内容缩放,见
-		// WuiRhiBackend::BeginFrame)。`.wui` 的物理面就取它、DPI 系数保持 1.0:平台缩放
+		// 默认(Runtime):`input.ViewportSize` 已是 WUI 的设计单位视口(物理像素 / 平台内容缩放,
+		// 见 WuiRhiBackend::BeginFrame)。`.wui` 的物理面就取它、DPI 系数保持 1.0:平台缩放
 		// 已由 WUI 层的 UiScale() 施加过一次,这里再乘会变成双重缩放。
+		// 宿主显式 SetSurface 时(编辑器 Play)改用它给的子矩形尺寸(同一坐标系单位)。
 		UI::UiSurface surface;
-		surface.PhysicalSize = input.ViewportSize;
-		surface.DpiScale = 1.0f;
+		if (m_HasSurface)
+			surface = m_Surface;
+		else
+		{
+			surface.PhysicalSize = input.ViewportSize;
+			surface.DpiScale = 1.0f;
+		}
 
 		const UI::UiDocument& document = m_Screen.Document();
-		const UI::UiViewport viewport = UI::ComputeUiViewport(document.Design, document.SafeArea, surface);
+		UI::UiViewport viewport = UI::ComputeUiViewport(document.Design, document.SafeArea, surface);
+		// 画进子矩形时,内容原点 = 子矩形左上角(默认 (0,0) ⇒ 与 Runtime 逐字节一致)。
+		viewport.PhysicalOrigin = m_Origin;
 		if (!m_Screen.Layout(viewport))
 			return;
 
-		// 每帧重建本窗口的无障碍节点:绘制前清上一帧,绘制后节点与画面同源。
-		Wui::WuiAccessibility::Get().BeginFrame(m_WindowKey, viewport.PhysicalSize);
+		// OwnChannel(Runtime):每帧重建本窗口的无障碍节点:绘制前清上一帧,绘制后节点与画面同源。
+		// SharedChannel(编辑器):宿主的 shell 每帧已 BeginFrame("main"),这里**不能**再清,
+		// 否则会抹掉同窗口的编辑器节点;只登记游戏 UI 节点即可。
+		if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
+			Wui::WuiAccessibility::Get().BeginFrame(m_WindowKey, viewport.PhysicalSize);
 
 		UI::UiPaintOptions options;
 		options.WindowKey = m_WindowKey;
+		// 空 = 文档 Screen 名(与 Runtime 的既有结果一致);编辑器显式给 Screen 名,
+		// 避免落到 shell 当前面板 id。
+		options.PanelId = m_PanelId.empty() ? document.Screen : m_PanelId;
 		options.RegisterAccessibility = true;
 		const UI::UiPaintResult result = UI::UiPainter::Paint(ctx, m_Screen, options);
 		if (!result.Ok() && !m_PaintProblemReported)

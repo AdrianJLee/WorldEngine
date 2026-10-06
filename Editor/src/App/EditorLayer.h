@@ -11,6 +11,7 @@
 #include "World/Script/Runtime/ScriptFileWatch.h"
 #include "World/Modules/GameModuleReload.h"
 #include "Document/EditorDocument.h"
+#include "World/UI/UiHost.h"
 #include "World/WUI/WuiCommand.h"
 #include "World/WUI/WuiGizmo.h"
 #include "WUI/Shell/EditorShell.h"
@@ -211,6 +212,11 @@ namespace World
 		// 屏幕快照钩子(诊断):WLD_SCREEN_CAPTURE_DIR 存在时,把用户看到的最终窗口
 		// 连续写成 PPM(screen-<n>.ppm),供自动化比对"闪烁"这类最终画面问题。
 		void CaptureScreenSequence();
+		// GameUI(M7b):Play/Simulate 时把游戏 UI 画进视口面板的场景矩形并登记无障碍节点。
+		// 必须紧跟 `m_Shell.OnRender(...)` 之后、`m_WuiContext.EndFrame()` 之前调用:
+		// 命令进主通道 ⇒ 压在场景贴图之上、编辑器 overlay 通道(视图按钮/播放药丸/状态徽标)之下。
+		// 非 Play/Simulate,或没有加载到 `.wui`,或视口面板本帧未渲染 = 零操作。
+		void DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputState& input);
 		Wui::WuiCommandRegistry& Commands() { return m_Commands; }
 
 		// ---- P2 W5b:脚本热重载(编辑器侧接线)----
@@ -525,6 +531,10 @@ namespace World
 
 		Wui::WuiCommandRegistry m_Commands;
 		EditorShell m_Shell;
+		// GameUI(M7b):Play/Simulate 期间由它把 `.wui` 驱动的游戏 UI 画进视口面板的场景矩形,
+		// 并把节点登记进编辑器同一份无障碍树(window 仍 "main",panel = 文档 Screen 名)。
+		// 无障碍通道归编辑器(AI 控制)管理 —— 见 OnAttach 的 SharedChannel 设置。
+		UiHost m_UiHost;
 		// PROJ-2/T1:宿主是否给了显式项目(启动器/自动打开最近都要看它)。
 		bool m_ProjectExplicit = false;
 		// PROJ-3/T1:纯启动器模式(见 LauncherBootScope 与 OnAttach 的启动分支)。

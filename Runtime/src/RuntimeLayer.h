@@ -1,7 +1,8 @@
 ﻿#pragma once
 #include "World.h"
 #include "World/Gameplay/Runtime/GameHost.h"
-#include "UiHost.h"
+// GameUI(M7b):UiHost 已提升到引擎(Editor 与 Runtime 共用同一实现)。
+#include "World/UI/UiHost.h"
 
 #include <memory>
 

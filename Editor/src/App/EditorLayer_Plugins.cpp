@@ -4,6 +4,8 @@
 
 #include "World/Asset/AsyncLoader.h"
 #include "World/Asset/ScenePrefetch.h"
+// GameUI(M7b):Play 模式下把游戏 UI 限制在视口面板的场景矩形内(Wui::ClipScope)。
+#include "World/WUI/Widgets/WuiChrome.h"
 
 namespace World
 {
@@ -228,6 +230,10 @@ void EditorLayer::OnAttach(){
 				// 无障碍树只在通道开启时登记(正常编辑零开销)。
 				Wui::WuiAccessibility::Get().SetEnabled(true);
 		}
+		// GameUI(M7b):Play/Simulate 复用引擎 `UiHost`。无障碍**通道归编辑器**(上面的 AI 控制通道),
+		// 每帧的 `BeginFrame("main", …)` 由 shell 负责 —— UiHost 只用共享通道口径:只登记游戏 UI
+		// 节点、不重置窗口、不关通道(退出 Play 时只清本窗口登记)。
+		m_UiHost.SetAccessibilityMode(UiHostAccessibilityMode::SharedChannel);
 		// 主窗口无边框:顶部第一行(挂靠栏)即窗口栏位,可拖动/关闭;边缘缩放保留。
 		Application::Get().GetWindow().SetFrameless(true);
 		// MAT-UI8:主窗口 WUI 上下文接系统剪贴板 —— 单行文本框(查找/替换、重命名、
@@ -1139,6 +1145,10 @@ void EditorLayer::OnUiFrame(){
 			}
 			const double beginEnd = timingEnabled ? LayerTimingNowMs() : 0.0;
 			m_Shell.OnRender(m_WuiContext);
+			// GameUI(M7b):Play/Simulate 时把游戏 UI 画进视口面板的场景矩形;命令进主通道 ⇒
+			// 压在场景贴图之上、编辑器 overlay 通道(视图按钮/播放药丸/状态徽标)之下。
+			// 非 Play/Simulate 或没加载到 `.wui` 时本调用是零操作(编辑态行为不变)。
+			DrawPlayModeGameUi(m_WuiContext, input);
 			m_WuiContext.EndFrame();
 			const double shellEnd = timingEnabled ? LayerTimingNowMs() : 0.0;
 			wuiBackend.Render(m_WuiContext.Commands(), m_WuiContext.OverlayCommands());
@@ -1161,6 +1171,41 @@ void EditorLayer::OnUiFrame(){
 		CaptureScreenSequence();
 		wuiBackend.EndFrame(m_WuiContext.Cursor());
 		LayerTimingFlush();
+	}
+
+
+void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputState& input){
+		// 非 Play/Simulate,或没有加载到 `.wui`(Initialize 未启用)= 零操作:编辑态行为不变。
+		if (!m_UiHost.Enabled())
+			return;
+		if (m_SceneState != SceneState::Play && m_SceneState != SceneState::Simulate)
+			return;
+
+		// 只在本帧**确实渲染过视口面板**时画(shell 每帧开头把 ViewportRect 清空,隐藏面板 = 空矩形)。
+		const Wui::WuiRect panelRect = m_Shell.ViewportRect();
+		if (panelRect.W <= 0.0f || panelRect.H <= 0.0f)
+			return;
+
+		// 场景矩形 = 画面矩形(ViewportPanel 的 sceneRect,scene image 铺满整块面板)。
+		// m_ViewportBounds 由 SetViewportState 在本帧面板渲染时写入,与拾取/gizmo 同一口径。
+		const glm::vec2 origin { m_ViewportBounds[0].x, m_ViewportBounds[0].y };
+		const glm::vec2 size { m_ViewportBounds[1].x - m_ViewportBounds[0].x,
+			m_ViewportBounds[1].y - m_ViewportBounds[0].y };
+		if (size.x <= 0.0f || size.y <= 0.0f)
+			return;
+
+		// 物理面 = 场景矩形(设计单位,与 WuiContext 同一坐标系);DPI 系数 1.0 —— 平台缩放
+		// 已由 WUI 层施加过一次(与 RuntimeLayer 同口径)。原点 = 场景矩形左上角,
+		// 于是绘制命令与无障碍矩形都落在视口内。
+		UI::UiSurface surface;
+		surface.PhysicalSize = size;
+		surface.DpiScale = 1.0f;
+		m_UiHost.SetSurface(surface);
+		m_UiHost.SetOrigin(origin);
+
+		// 裁剪到面板矩形:节点锚点/尺寸异常也不会溢到相邻面板上。
+		Wui::ClipScope clip(ctx, panelRect);
+		m_UiHost.DrawFrame(ctx, input);
 	}
 
 
