@@ -77,7 +77,10 @@ namespace World::Wui
 			std::vector<unsigned char> Ttf;
 			stbtt_fontinfo* Info = nullptr;
 			float BaseSize = 16.0f;
-			uint32_t AtlasW = 1024, AtlasH = 1024;
+			// M53:桶粒度改成 1/4 px 后,同一字号区间的桶数 ×4 ⇒ 图集给足余量。
+			// 1024² = 4MB(R8G8B8A8),2048² = 16MB —— 换来的是长距离缩放扫描不必频繁撞满。
+			// 仍然会满:满了走"取最接近的已缓存桶"回退(见 `Bake`),不崩、不缺字。
+			uint32_t AtlasW = 2048, AtlasH = 2048;
 			std::vector<unsigned char> Atlas;
 			uint32_t CursorX = 1, CursorY = 1, RowH = 0;
 			bool AtlasDirty = false;

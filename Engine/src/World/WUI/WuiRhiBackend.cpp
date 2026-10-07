@@ -448,14 +448,17 @@ namespace World::Wui
 
 	WuiRhiBackend::Glyph& WuiRhiBackend::Bake(FontFace& face, uint32_t codepoint, float pixelSize)
 	{
-		// 字号按整数分桶:缓存数量可控,误差 <0.5px 的缩放肉眼看不出。
-		const uint32_t sizeKey = static_cast<uint32_t>(std::max(6.0f, std::round(pixelSize)));
+		// M53:桶粒度取 **1/4 物理像素**。字形位图的高度**必然是整数像素**(stbtt 的 bitmap box),
+		// 所以粗桶(整数)在连续缩放时会"卡住几档、再跳 1px"——观感就是"放大后字体大小还在变"
+		// (15px 字约 30px 高时是 3%,9px 小字是 11%,小字尤其明显)。1/4 桶把跳变压到 ≤0.125px
+		// (不可见),同时让绘制处的重采样比例落在 ±0.5% 内 —— 既连续、又清晰。
+		const uint32_t sizeKey = static_cast<uint32_t>(std::max(24.0f, std::round(pixelSize * 4.0f)));
 		const uint64_t key = (static_cast<uint64_t>(sizeKey) << 32) | codepoint;
 		auto it = face.Glyphs.find(key);
 		if (it != face.Glyphs.end())
 			return it->second;
 		Glyph glyph;
-		glyph.PixelSize = static_cast<float>(sizeKey);
+		glyph.PixelSize = static_cast<float>(sizeKey) / 4.0f;   // 桶 = 1/4 px(见上)
 		const float scale = stbtt_ScaleForPixelHeight(face.Info, glyph.PixelSize);
 		int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 		stbtt_GetCodepointBitmapBox(face.Info, codepoint, scale, scale, &x0, &y0, &x1, &y1);
@@ -777,14 +780,12 @@ namespace World::Wui
 			if (face && face->Info && cp != '\t' && cp != '\r' && cp != '\n')
 			{
 				Glyph& glyph = Bake(*face, cp, pixelSize);
-				// M52:图集按**整数**桶烘焙(`Bake`),因此这里必须按**桶的尺寸 1:1 画** —— 用
-				// `pixelSize / bucket` 去缩放会让位图被双线性重采样 ⇒ 字发虚(用户报的"滚轮放大后
-				// 部分文本变模糊":只要表观字号不是整数,比例就 ≠1,zoom 连续变化时几乎永远 ≠1)。
-				// 取舍:推进(advance)仍用**精确** pixelSize ⇒ 文本总宽/布局/居中全不变,只是每个
-				// 字形的位图按自己的桶尺寸画(同字号所有字形同一个桶 ⇒ 整行均匀,肉眼无差)。
-				const float sizeRatio = 1.0f;
-				// 描边/基线也钉到**整数物理像素**:位图字体在分数位置采样同样会糊(与上面的重采样
-				// 是两件独立的事,只修一件仍看得出软)。
+				// M53:按**精确** pixelSize 缩放绘制 —— 尺寸随缩放**连续**变化(不再一格一格跳)。
+				// 清晰度由桶的粒度保证:`Bake` 用 1/4 px 桶 ⇒ 这里的比例落在 ±0.5% 内,双线性重采样
+				// 到那个程度看不出来。上一版为"绝不重采样"改成按桶 1:1 画,反而让表观字号随桶跳变
+				// (用户报的"放大后字体大小还会变")—— 连续与清晰要一起解,不能只解一件。
+				const float sizeRatio = pixelSize / (glyph.PixelSize > 0.0f ? glyph.PixelSize : face->BaseSize);
+				// 落笔位置钉到**整数物理像素**(位图在分数位置采样也会软):只钉位置,不钉尺寸。
 				const float snapPen = std::round(pen * scale) / scale;
 				const float snapBase = std::round(baseline * scale) / scale;
 				const float w = glyph.W * sizeRatio / scale;
