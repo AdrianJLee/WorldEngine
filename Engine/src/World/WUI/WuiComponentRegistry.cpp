@@ -1484,6 +1484,14 @@ void RegisterBuiltins(){
 						"Accessibility label for the image (the image itself draws no text)."),
 					Grouped(PropInt("textureId", 0.0f, 100000.0f, 1.0f), WuiComponentPropertyGroup::Content,
 						"Host texture id from WuiTextureRegistry (0 = empty image, drawn as a placeholder)."),
+					// M48:`texture` = **逻辑路径**(用户与设计器看的那一层);`textureId` = 宿主句柄
+					// (程序化调用方/引擎内部用)。绘制优先 `texture`(经宿主装的解析钩子换成句柄),
+					// 解析不到再回退 `textureId`;两者都没有 = 空图占位框。
+					// 为什么两个都要:`texture` 让设计师/AI 能选图,`textureId` 保住既有程序化调用方
+					// (材质预览、模型预览、视口)的零改动路径。
+					Grouped(PropText("texture", ""), WuiComponentPropertyGroup::Content,
+						"Texture logical path (e.g. 'textures/Icon.wtex'); the host resolves it to a texture. "
+						"Takes priority over textureId; unset or unresolvable = empty image placeholder."),
 					Grouped(UnitOf(NumberDefault(PropFloat("radius", 0.0f, 32.0f, 1.0f), 3.0f), "px"),
 						WuiComponentPropertyGroup::Style,
 						"Corner radius in design units (unset = theme.Radius)."),

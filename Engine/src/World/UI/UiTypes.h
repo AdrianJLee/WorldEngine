@@ -134,6 +134,10 @@ namespace World::UI
 		float Padding[4] = { 0.0f, 0.0f, 0.0f, 0.0f };  // 左 上 右 下
 		int Columns = 2;                                  // Grid 用
 		bool RowMajor = false;                            // Flex 的主轴:false = 纵,true = 横
+		// M45:自动尺寸 —— 布局后按"内容"收紧节点矩形(文本 / 类型自报 / 子的包围盒,
+		// 按该优先级取第一个有来源者)。只在**点锚定**(Min == Max)下生效;拉伸锚定下尺寸
+		// 由锚框决定,不参与并记一条 warning。缺省 false = 与今天逐值一致(序列化省略默认值)。
+		bool AutoSize = false;
 	};
 
 	WLD_API Wui::WuiRect ApplyPadding(const UiLayoutSpec& spec, const Wui::WuiRect& parent);

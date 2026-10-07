@@ -779,7 +779,22 @@ void EditorLayer::RegisterUiTextures(){
 		};
 		for (int i = 0; i < 8; ++i)
 			m_IconIds[i] = registry.Register(icons[i]);
-		m_UiTextureGeneration = registry.Generation();
+		// M48:装上"逻辑路径 → 纹理句柄"的解析钩子 ⇒ `.wui` 里 `image { texture: "textures/X.wtex" }`
+		// 真的能画出图(此前 `image` 只有数值 `textureId`,设计师/AI 无处可选、选了也不生效)。
+		// owner = this:设备重建后本函数会重跑,重装即覆盖(钩子是 owner 键 + 后装者胜);
+		// 幂等性由 `WuiTextureRegistry::Register` 保证(按纹理对象去重,同一路径每帧问也只占一个 id)。
+		// 注意 `TextureLibrary::Get(logicalPath)` 的既有契约:缺图/坏图返回**共享 1x1 白纹理**
+		// (路径记在表里不逐帧重试)—— 因此"文件不存在"在这里表现为白色,而不是空图;
+		// 空路径才走 0(空图槽位画占位框)。这与材质/精灵的既有行为一致,不另造一套。
+		Wui::SetTextureResolveHook(this, [](std::string_view logicalPath) -> uint64_t {
+			if (logicalPath.empty())
+				return 0;
+			const Rhi::Handle<Rhi::Texture> texture =
+				World::TextureLibrary::Get().Get(std::string(logicalPath), /*srgb*/ true);
+			if (!texture)
+				return 0;
+			return Wui::WuiTextureRegistry::Get().Register(texture);
+		});
 	}
 
 

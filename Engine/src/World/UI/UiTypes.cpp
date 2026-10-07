@@ -268,7 +268,7 @@ namespace World::UI
 	bool IsDefaultLayout(const UiLayoutSpec& spec)
 	{
 		return spec.Kind == UiLayoutKind::Absolute && spec.Gap == 0.0f && spec.Columns == 2 &&
-			!spec.RowMajor &&
+			!spec.RowMajor && !spec.AutoSize &&
 			spec.Padding[0] == 0.0f && spec.Padding[1] == 0.0f &&
 			spec.Padding[2] == 0.0f && spec.Padding[3] == 0.0f;
 	}

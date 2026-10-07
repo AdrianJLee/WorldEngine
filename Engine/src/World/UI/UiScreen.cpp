@@ -3,8 +3,13 @@
 
 #include "World/UI/UiNodeRegistry.h"
 
+#include "World/Core/Log.h"
+#include "World/WUI/WuiContext.h"
+#include "World/WUI/WuiLocalization.h"
+
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <utility>
 
 namespace World::UI
@@ -28,6 +33,47 @@ namespace World::UI
 
 			for (const UiNode& child : node.Children)
 				FlattenNode(child, index, depth + 1, out);
+		}
+		// ---- M45:AutoSize 的属性读取(与 `UiPainter` 的取值口径一致)----
+		//
+		// 布局不解析主题令牌(`$token`,见 UiTypes.h 口径),但**本地化必须解析**:文本属性写的是
+		// `@key` / `@key|兜底`,按 key 量宽会让"框收紧到文字"与实际绘制错位。解码规则与
+		// `UiPainter.cpp::Localized` 同一份(M33 内联兜底)。
+		const std::string* FindPropValue(const UiNodeInstance& node, std::string_view name)
+		{
+			if (node.Source == nullptr)
+				return nullptr;
+			const UiProp* prop = node.Source->FindProp(name);
+			if (prop == nullptr || prop->Value.empty())
+				return nullptr;
+			return &prop->Value;
+		}
+
+		float NumberPropValue(const UiNodeInstance& node, std::string_view name, float fallback)
+		{
+			const std::string* value = FindPropValue(node, name);
+			if (value == nullptr)
+				return fallback;
+			char* end = nullptr;
+			const float parsed = std::strtof(value->c_str(), &end);
+			return end != value->c_str() ? parsed : fallback;
+		}
+
+		std::string LocalizedText(const std::string& text)
+		{
+			if (text.empty() || text.front() != '@')
+				return text;
+			const std::size_t separator = text.find('|');
+			if (separator == std::string::npos)
+			{
+				const std::string key(text.substr(1));
+				return Wui::Tr(key, key);
+			}
+			const std::string key(text.substr(1, separator - 1));
+			const std::string fallback(text.substr(separator + 1));
+			if (key.empty() || fallback.empty())
+				return text;   // 写法非法 = 按"没有本地化"处理(与绘制同口径)
+			return Wui::Tr(key, fallback);
 		}
 	}
 
@@ -61,6 +107,8 @@ namespace World::UI
 		m_ScrollOffsets.clear();
 		m_ScrollContentSizes.clear();
 		m_AppliedScrollOffsets.assign(m_Nodes.size(), glm::vec2 { 0.0f, 0.0f });
+		// M45:AutoSize 的"拉伸锚定不参与"warning 每节点只报一次。
+		m_AutoSizeStretchWarned.assign(m_Nodes.size(), 0);
 		return true;
 	}
 
@@ -192,9 +240,132 @@ namespace World::UI
 		}
 
 		// M10:布局重建后,把运行态滚动偏移重新作用到滚动容器的后代(增量基准清零 ⇒ 幂等)。
+		// M45:先按内容收紧 AutoSize 节点,再应用滚动偏移(用最终矩形算内容尺寸)。
+		TightenAutoSizeNodes();
 		m_AppliedScrollOffsets.assign(m_Nodes.size(), glm::vec2 { 0.0f, 0.0f });
 		ApplyScrollOffsets();
 		return true;
+	}
+	// ---- M45:AutoSize(自动尺寸)----
+	//
+	// 顺序与理由(本包最容易做错的地方):
+	//  ① 收紧在**容器 Solver 之后**跑:容器的内容尺寸(派工单口径 ③)= 直接子节点**矩形**的
+	//     并集 + Layout.Padding;子矩形只有 PlaceNode 递归跑完才存在,不可能量得更早;
+	//  ② 节点下标**降序**遍历 = Build 前序展平的逆序 ⇒ 先算子、后算父,AutoSize 容器量到的
+	//     是**已经收紧过**的子矩形,不会把子节点的 authored 旧尺寸当成内容;
+	//  ③ 收紧在 ApplyScrollOffsets **之前**跑:滚动内容尺寸与钳位必须基于最终矩形,否则
+	//     AutoSize 之后滚动区量的还是旧内容尺寸(滚不动 / 被钳回 0)。
+	//
+	// 已知取舍(不静默):Row/Column/Grid/Flex 容器内的 AutoSize 子节点由父容器按**槽位**摆放,
+	// 收紧只改子节点自身的框(锚点不动 ⇒ 默认 Pivot=0.5 时围绕槽位中心收紧),父容器本轮不围绕
+	// 收紧后的尺寸重新分配槽位;"父容器按内容回流"留给后续工作包。
+
+	bool UiScreen::IsAutoSizeEligible(std::size_t index)
+	{
+		const UiNodeInstance& node = m_Nodes[index];
+		if (node.Source == nullptr || !node.Source->Layout.AutoSize)
+			return false;
+
+		const UiAnchor& anchor = node.Source->Anchor;
+		if (anchor.Min.x == anchor.Max.x && anchor.Min.y == anchor.Max.y)
+			return true;
+
+		// 拉伸锚定(任一轴 Min != Max):尺寸由锚框决定,AutoSize 不参与。warning 每节点
+		// 只报一次(按节点下标),否则 Layout 每帧调用会把日志刷屏。
+		if (index < m_AutoSizeStretchWarned.size() && m_AutoSizeStretchWarned[index] == 0)
+		{
+			m_AutoSizeStretchWarned[index] = 1;
+			WLD_CORE_WARN("[ui] node '{0}' has Layout.AutoSize but a stretched anchor (Min != Max): "
+				"AutoSize is ignored, size comes from the anchor box", node.Id);
+		}
+		return false;
+	}
+
+	bool UiScreen::ComputeAutoSizeContent(const UiNodeInstance& node, glm::vec2& outSize) const
+	{
+		// ① 类型自报(程序化 List/Grid 的内容不是文档子节点;与滚动内容尺寸同一钩子)。
+		const UiNodeTypeDesc* type = UiNodeRegistry::Find(node.Type);
+		glm::vec2 reported { 0.0f, 0.0f };
+		if (type != nullptr && type->ContentSize != nullptr && type->ContentSize(node, reported))
+		{
+			outSize = reported;
+			return true;
+		}
+
+		// ② 文本:`text` → `label` → `title`(与 UiPainter 的取值优先级同口径);按本地化后的文案
+		// 量宽,行高取字号(UiPainter 的单行文本高度就是字号,见 PaintLabel/PaintButton 的
+		// `(Rect.H - font) * 0.5f`)。`padding` 只在节点**声明了**时加入。
+		const std::string* raw = FindPropValue(node, "text");
+		if (raw == nullptr)
+			raw = FindPropValue(node, "label");
+		if (raw == nullptr)
+			raw = FindPropValue(node, "title");
+		if (raw != nullptr)
+		{
+			const std::string text = LocalizedText(*raw);
+			const float font = NumberPropValue(node, "fontSize", 15.0f);
+			const float padding = NumberPropValue(node, "padding", 0.0f);
+			const float width = Wui::MeasureTextWithHook(text, font, Wui::WuiFontFamily::Ui);
+			outSize = glm::vec2 { std::max(width, 0.0f) + padding * 2.0f,
+				std::max(font, 0.0f) + padding * 2.0f };
+			return true;
+		}
+
+		// ③ 子的包围盒(容器;降序遍历 ⇒ 子节点的框已经收紧过)+ Layout.Padding。
+		if (node.Source != nullptr && !node.Children.empty())
+		{
+			bool any = false;
+			float minX = 0.0f, minY = 0.0f, maxX = 0.0f, maxY = 0.0f;
+			for (const int child : node.Children)
+			{
+				const Wui::WuiRect& rect = m_Nodes[static_cast<std::size_t>(child)].Rect;
+				if (!any)
+				{
+					minX = rect.X; minY = rect.Y;
+					maxX = rect.X + rect.W; maxY = rect.Y + rect.H;
+					any = true;
+					continue;
+				}
+				minX = std::min(minX, rect.X);
+				minY = std::min(minY, rect.Y);
+				maxX = std::max(maxX, rect.X + rect.W);
+				maxY = std::max(maxY, rect.Y + rect.H);
+			}
+			const UiLayoutSpec& spec = node.Source->Layout;
+			outSize = glm::vec2 {
+				std::max(maxX - minX, 0.0f) + spec.Padding[0] + spec.Padding[2],
+				std::max(maxY - minY, 0.0f) + spec.Padding[1] + spec.Padding[3] };
+			return true;
+		}
+
+		return false;   // ④ 都没有 ⇒ 不改(保持 authored Size)
+	}
+
+	void UiScreen::TightenAutoSizeNodes()
+	{
+		// 降序 = 先算子、后算父(理由见上方顺序说明)。
+		for (std::size_t i = m_Nodes.size(); i-- > 0;)
+		{
+			if (!IsAutoSizeEligible(i))
+				continue;
+
+			UiNodeInstance& node = m_Nodes[i];
+			glm::vec2 content { 0.0f, 0.0f };
+			if (!ComputeAutoSizeContent(node, content))
+				continue;
+
+			const UiAnchor& anchor = node.Source->Anchor;
+			const float width = std::max(content.x, 0.0f);
+			const float height = std::max(content.y, 0.0f);
+			// 保持锚点不动(等价于用新尺寸重解一次点锚定):默认 Pivot=0.5 ⇒ 围绕中心收紧,
+			// Pivot=(0,0) ⇒ 左上角不动 —— 不这样收紧会连带把节点挪位。
+			const float anchorX = node.Rect.X + anchor.Pivot.x * node.Rect.W;
+			const float anchorY = node.Rect.Y + anchor.Pivot.y * node.Rect.H;
+			node.Rect.W = width;
+			node.Rect.H = height;
+			node.Rect.X = anchorX - anchor.Pivot.x * width;
+			node.Rect.Y = anchorY - anchor.Pivot.y * height;
+		}
 	}
 
 	const UiNodeInstance* UiScreen::HitTest(glm::vec2 physicalPoint) const

@@ -124,6 +124,20 @@ namespace World::Wui
 	void WLD_API ClearTextMeasureHook(void* owner);
 	float WLD_API MeasureTextWithHook(std::string_view utf8, float fontSize, WuiFontFamily family);
 
+	// ---- 纹理解析钩子(M48)----
+	// `image` 的 `texture` 属性写的是**逻辑路径**(如 `textures/Icon.wtex`),而绘制命令要的是
+	// `WuiTextureRegistry` 的数值句柄 —— 路径→句柄的解析只有宿主知道(它持有资产库与设备)。
+	// 因此与文本度量钩子同一形态:宿主装钩子,核心只调用。未装钩子 / 解析不到 ⇒ 返回 0,
+	// 调用方按"空图槽位"处理(画占位框,不是静默画空气)。
+	// 契约:实现必须**幂等**(同一路径每次调用都返回同一个 id)—— 引擎每帧绘制都会问一次;
+	// 宿主用 `WuiTextureRegistry::Register`(按纹理对象去重)即可满足。
+	using WuiTextureResolveFn = std::function<uint64_t(std::string_view path)>;
+	// owner 用于注销:只有注册者本人可以清除钩子。
+	void WLD_API SetTextureResolveHook(void* owner, WuiTextureResolveFn fn);
+	void WLD_API ClearTextureResolveHook(void* owner);
+	// 未装钩子 / 路径为空 ⇒ 0(可读地表示"没有这张图")。
+	uint64_t WLD_API ResolveTextureWithHook(std::string_view path);
+
 	// P4-UX2c:UI 内容缩放(用户反馈"全屏后 UI 还是有点小")。
 	// 语义是"整块 UI 的缩放":布局坐标 = 物理像素 / UiScale,渲染时由视口映射放大,
 	// 文字按 UiScale 栅格化后仍以设计单位摆放。输入坐标必须除以它,否则命中会偏。

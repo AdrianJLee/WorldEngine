@@ -28,6 +28,7 @@
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/WUI/WuiTextureRegistry.h"
+#include "World/Renderer/Texture/TextureLibrary.h"   // M48:纹理解析钩子(逻辑路径 → 句柄)
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"

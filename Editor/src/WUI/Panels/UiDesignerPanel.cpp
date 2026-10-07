@@ -1,6 +1,10 @@
 #include "wldpch.h"
 #include "WUI/Panels/UiDesignerPanel.h"
 
+// M47:纹理引用行的编辑器侧数据适配层(逻辑路径 → 候选/徽标/状态)。
+// 面板只传值、收结果:不自己扫盘、不自己算徽标状态(与材质/纹理面板同一入口)。
+#include "WUI/Common/TextureRefCatalog.h"
+
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Utils/Paths.h"
@@ -12,6 +16,7 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -51,8 +56,8 @@ namespace World
 		// M31:属性字段下方 @key 预览行的高度(小字 + 行距;PropertyContentHeight 与渲染共用)。
 		constexpr float kLocalizationPreviewHeight = 16.0f;
 
-		// 属性行的"元数据":一行 = 本地化键 + 英文回退 + 目标字段。字段用枚举寻址,
-		// 面板按表驱动地生成 Anchor / Layout 的数值行(不手写 16 段重复代码)。
+		// 属性行的"元数据":一行 = 本地化键 + 英文回退 + 术语对照 + 目标字段 + 解释回退。
+		// 字段用枚举寻址,面板按表驱动地生成 Anchor / Layout 的数值行(不手写 16 段重复代码)。
 		enum class FloatField
 		{
 			AnchorMinX, AnchorMinY, AnchorMaxX, AnchorMaxY,
@@ -64,41 +69,71 @@ namespace World
 
 		struct FloatRowDef
 		{
-			const char* Key;
-			const char* Label;
-			const char* Term;
+			const char* Key;      // 本地化标签键(与控件 id 同源:HashId(Key))
+			const char* Label;    // 键缺失时的英文回退(也是 zh-CN 未覆盖时的可见文本)
+			const char* Term;     // 英文术语对照(不本地化;与 .wui 字段名对齐)
 			FloatField Field;
+			// M44:解释 tooltip 的英文回退(键 = <Key> + ".doc")。追加在末尾,
+			// 既有四元组的顺序与含义都不动 —— 只补文案,不改字段语义。
+			const char* Doc;
 		};
 
 		const FloatRowDef kAnchorFloatRows[] =
 		{
-			{ "ui_designer.anchor.min_x", "Min X", "Min.X", FloatField::AnchorMinX },
-			{ "ui_designer.anchor.min_y", "Min Y", "Min.Y", FloatField::AnchorMinY },
-			{ "ui_designer.anchor.max_x", "Max X", "Max.X", FloatField::AnchorMaxX },
-			{ "ui_designer.anchor.max_y", "Max Y", "Max.Y", FloatField::AnchorMaxY },
-			{ "ui_designer.anchor.pivot_x", "Pivot X", "Pivot.X", FloatField::AnchorPivotX },
-			{ "ui_designer.anchor.pivot_y", "Pivot Y", "Pivot.Y", FloatField::AnchorPivotY },
-			{ "ui_designer.anchor.offset_x", "Offset X", "Offset.X", FloatField::AnchorOffsetX },
-			{ "ui_designer.anchor.offset_y", "Offset Y", "Offset.Y", FloatField::AnchorOffsetY },
-			{ "ui_designer.anchor.size_w", "Size W", "Size.W", FloatField::AnchorSizeW },
-			{ "ui_designer.anchor.size_h", "Size H", "Size.H", FloatField::AnchorSizeH },
+			{ "panel.ui_designer.anchor.min_x", "Min X", "Min.X", FloatField::AnchorMinX,
+				"Anchor left edge: horizontal fraction of the parent rect (0 = left, 1 = right). "
+				"Equal to Max X means a point anchor, and Size W is then the real width." },
+			{ "panel.ui_designer.anchor.min_y", "Min Y", "Min.Y", FloatField::AnchorMinY,
+				"Anchor top edge: vertical fraction of the parent rect (0 = top, 1 = bottom). "
+				"Equal to Max Y means a point anchor, and Size H is then the real height." },
+			{ "panel.ui_designer.anchor.max_x", "Max X", "Max.X", FloatField::AnchorMaxX,
+				"Anchor right edge: horizontal fraction of the parent rect (0 = left, 1 = right). "
+				"Different from Min X means the node stretches horizontally." },
+			{ "panel.ui_designer.anchor.max_y", "Max Y", "Max.Y", FloatField::AnchorMaxY,
+				"Anchor bottom edge: vertical fraction of the parent rect (0 = top, 1 = bottom). "
+				"Different from Min Y means the node stretches vertically." },
+			{ "panel.ui_designer.anchor.pivot_x", "Pivot X", "Pivot.X", FloatField::AnchorPivotX,
+				"Horizontal pivot of the node rect (0 = left edge, 0.5 = centre, 1 = right edge). "
+				"Only a point anchor uses it." },
+			{ "panel.ui_designer.anchor.pivot_y", "Pivot Y", "Pivot.Y", FloatField::AnchorPivotY,
+				"Vertical pivot of the node rect (0 = top, 0.5 = centre, 1 = bottom). "
+				"Only a point anchor uses it." },
+			{ "panel.ui_designer.anchor.offset_x", "Offset X", "Offset.X", FloatField::AnchorOffsetX,
+				"Horizontal offset in design units. Point anchor: pivot position measured from the "
+				"anchor. Stretch anchor: left inset from the anchor rect." },
+			{ "panel.ui_designer.anchor.offset_y", "Offset Y", "Offset.Y", FloatField::AnchorOffsetY,
+				"Vertical offset in design units (down is positive). Same point/stretch rule as Offset X." },
+			{ "panel.ui_designer.anchor.size_w", "Size W", "Size.W", FloatField::AnchorSizeW,
+				"Width in design units. Point anchor: the real width. Stretch anchor: a delta added "
+				"to the anchored horizontal span." },
+			{ "panel.ui_designer.anchor.size_h", "Size H", "Size.H", FloatField::AnchorSizeH,
+				"Height in design units. Point anchor: the real height. Stretch anchor: a delta added "
+				"to the anchored vertical span." },
 		};
 
 		const FloatRowDef kLayoutFloatRows[] =
 		{
-			{ "ui_designer.layout.gap", "Gap", "Gap", FloatField::LayoutGap },
-			{ "ui_designer.layout.pad_left", "Padding Left", "Left", FloatField::LayoutPadL },
-			{ "ui_designer.layout.pad_top", "Padding Top", "Top", FloatField::LayoutPadT },
-			{ "ui_designer.layout.pad_right", "Padding Right", "Right", FloatField::LayoutPadR },
-			{ "ui_designer.layout.pad_bottom", "Padding Bottom", "Bottom", FloatField::LayoutPadB },
+			{ "panel.ui_designer.layout.gap", "Gap", "Gap", FloatField::LayoutGap,
+				"Space in design units left between children laid out by this container." },
+			{ "panel.ui_designer.layout.pad_left", "Padding Left", "Left", FloatField::LayoutPadL,
+				"Inner space on the left edge; children and content start after it." },
+			{ "panel.ui_designer.layout.pad_top", "Padding Top", "Top", FloatField::LayoutPadT,
+				"Inner space on the top edge; children and content start after it." },
+			{ "panel.ui_designer.layout.pad_right", "Padding Right", "Right", FloatField::LayoutPadR,
+				"Inner space on the right edge; children and content end before it." },
+			{ "panel.ui_designer.layout.pad_bottom", "Padding Bottom", "Bottom", FloatField::LayoutPadB,
+				"Inner space on the bottom edge; children and content end before it." },
 		};
 
 		// M24:世界锚点偏移(设计单位;投影点 + Offset)。
 		const FloatRowDef kWorldFloatRows[] =
 		{
-			{ "ui_designer.world.offset_x", "Offset X", "Offset.X", FloatField::WorldOffsetX },
-			{ "ui_designer.world.offset_y", "Offset Y", "Offset.Y", FloatField::WorldOffsetY },
-			{ "ui_designer.world.offset_z", "Offset Z", "Offset.Z", FloatField::WorldOffsetZ },
+			{ "panel.ui_designer.world.offset_x", "Offset X", "Offset.X", FloatField::WorldOffsetX,
+				"World-space X offset in metres added to the projected target position." },
+			{ "panel.ui_designer.world.offset_y", "Offset Y", "Offset.Y", FloatField::WorldOffsetY,
+				"World-space Y offset in metres added to the projected target position." },
+			{ "panel.ui_designer.world.offset_z", "Offset Z", "Offset.Z", FloatField::WorldOffsetZ,
+				"World-space Z offset in metres added to the projected target position." },
 		};
 
 		const UI::UiLayoutKind kLayoutKinds[] =
@@ -263,6 +298,105 @@ namespace World
 				glm::vec2 { center.x + half, center.y }, color, 1.0f);
 			Wui::LineSegment(ctx, glm::vec2 { center.x, center.y - half },
 				glm::vec2 { center.x, center.y + half }, color, 1.0f);
+		}
+
+		// ---- M46:锚点 9 宫格预设 ----
+		// 9 个点位预设(Min == Max = 点锚定)+ 2 个拉伸预设(只改一个轴,另一轴沿用当前值)。
+		// `Id` = 稳定 a11y id 后缀(id = "ui_designer.anchor.preset.<Id>");`Key`/`Label` 是
+		// 可见文本与 a11y label(键缺失时显示 Label);`Tip` 是 tooltip 的英文兜底(键 = <Key>.tip)。
+		struct AnchorPresetDef
+		{
+			const char* Id;
+			const char* Key;
+			const char* Label;
+			const char* Tip;
+			glm::vec2 Min;
+			glm::vec2 Max;
+			bool KeepMinX;   // true = 该轴沿用节点当前值(拉伸预设用)
+			bool KeepMinY;
+			bool KeepMaxX;
+			bool KeepMaxY;
+		};
+
+		const AnchorPresetDef kAnchorPresets[] =
+		{
+			{ "top_left", "panel.ui_designer.anchor.preset.top_left", "Top Left",
+				"Anchor to the top-left corner (Min = Max = 0, 0).",
+				{ 0.0f, 0.0f }, { 0.0f, 0.0f }, false, false, false, false },
+			{ "top_center", "panel.ui_designer.anchor.preset.top_center", "Top Center",
+				"Anchor to the top-centre edge (Min = Max = 0.5, 0).",
+				{ 0.5f, 0.0f }, { 0.5f, 0.0f }, false, false, false, false },
+			{ "top_right", "panel.ui_designer.anchor.preset.top_right", "Top Right",
+				"Anchor to the top-right corner (Min = Max = 1, 0).",
+				{ 1.0f, 0.0f }, { 1.0f, 0.0f }, false, false, false, false },
+			{ "middle_left", "panel.ui_designer.anchor.preset.middle_left", "Middle Left",
+				"Anchor to the left-centre edge (Min = Max = 0, 0.5).",
+				{ 0.0f, 0.5f }, { 0.0f, 0.5f }, false, false, false, false },
+			{ "center", "panel.ui_designer.anchor.preset.center", "Center",
+				"Anchor to the parent centre (Min = Max = 0.5, 0.5).",
+				{ 0.5f, 0.5f }, { 0.5f, 0.5f }, false, false, false, false },
+			{ "middle_right", "panel.ui_designer.anchor.preset.middle_right", "Middle Right",
+				"Anchor to the right-centre edge (Min = Max = 1, 0.5).",
+				{ 1.0f, 0.5f }, { 1.0f, 0.5f }, false, false, false, false },
+			{ "bottom_left", "panel.ui_designer.anchor.preset.bottom_left", "Bottom Left",
+				"Anchor to the bottom-left corner (Min = Max = 0, 1).",
+				{ 0.0f, 1.0f }, { 0.0f, 1.0f }, false, false, false, false },
+			{ "bottom_center", "panel.ui_designer.anchor.preset.bottom_center", "Bottom Center",
+				"Anchor to the bottom-centre edge (Min = Max = 0.5, 1).",
+				{ 0.5f, 1.0f }, { 0.5f, 1.0f }, false, false, false, false },
+			{ "bottom_right", "panel.ui_designer.anchor.preset.bottom_right", "Bottom Right",
+				"Anchor to the bottom-right corner (Min = Max = 1, 1).",
+				{ 1.0f, 1.0f }, { 1.0f, 1.0f }, false, false, false, false },
+			{ "stretch_horizontal", "panel.ui_designer.anchor.preset.stretch_horizontal",
+				"Stretch Horizontal",
+				"Stretch horizontally: Min X = 0, Max X = 1; the vertical anchor is kept.",
+				{ 0.0f, 0.0f }, { 1.0f, 0.0f }, false, true, false, true },
+			{ "stretch_vertical", "panel.ui_designer.anchor.preset.stretch_vertical",
+				"Stretch Vertical",
+				"Stretch vertically: Min Y = 0, Max Y = 1; the horizontal anchor is kept.",
+				{ 0.0f, 0.0f }, { 0.0f, 1.0f }, true, false, true, false },
+		};
+
+		constexpr std::size_t kAnchorPresetCount = sizeof(kAnchorPresets) / sizeof(kAnchorPresets[0]);
+
+		// 预设 = 直接写 Min/Max(**不改 Offset/Size/Pivot**;Keep* 轴不写)。
+		void ApplyAnchorPreset(UI::UiAnchor& anchor, const AnchorPresetDef& preset)
+		{
+			if (!preset.KeepMinX) anchor.Min.x = preset.Min.x;
+			if (!preset.KeepMinY) anchor.Min.y = preset.Min.y;
+			if (!preset.KeepMaxX) anchor.Max.x = preset.Max.x;
+			if (!preset.KeepMaxY) anchor.Max.y = preset.Max.y;
+		}
+
+		// 预设按钮几何。优先:3×3 点位(上)+ 1 行 2 个拉伸 = 整块 26×36,放在节点框
+		// **画布右上角一行 11 个**(固定位置,不贴节点)。为什么不在节点旁边:贴框时预设块正好压在
+		// 左上角那一片,而 `HandleCanvasInput` 把"落在预设上"的按下从画布交互里排除 ⇒ 左上/上/左
+		// 三个手柄会拖不动(实测)。固定位置与手柄/节点永不重叠,且位置可预期、AI 好寻址。
+		// 两段代码(命中判定与绘制)共用这一份几何 —— 分家就会出现"按钮画在这里、命中在那里"。
+		std::array<Wui::WuiRect, kAnchorPresetCount> LayoutAnchorPresets(
+			const Wui::WuiRect& nodeBox, const Wui::WuiRect& canvasRect)
+		{
+			std::array<Wui::WuiRect, kAnchorPresetCount> out {};
+			constexpr float cell = 8.0f;
+			constexpr float gap = 1.0f;
+			constexpr float gridSpan = cell * 3.0f + gap * 2.0f;      // 26
+			constexpr float cellSpan = cell;
+			constexpr float blockW = gridSpan;                        // 26
+			// M46 修(实测):预设块**不贴着节点框画** —— 贴框时它正好压在左上角那一片,
+			// 而 `HandleCanvasInput` 把"落在预设上"的按下从画布交互里排除 ⇒ **左上/上/左三个手柄
+			// 拖不动了**(探针实测:`nSTRETCH` 拖左边缘位移 +1885 而不是 -167 —— 点到预设上把锚点改了)。
+			// 因此固定画在画布右上角一行:与手柄/节点永远不重叠,位置可预期、AI 也好寻址。
+			// (块尺寸常量仍留给下面算行宽,不要在别处再引 `preferred`。)
+			constexpr float rowGap = 2.0f;
+			const float rowW = cell * static_cast<float>(kAnchorPresetCount)
+				+ rowGap * static_cast<float>(kAnchorPresetCount - 1);
+			const float originX = std::max(canvasRect.X + 2.0f,
+				canvasRect.X + canvasRect.W - rowW - 6.0f);
+			const float originY = canvasRect.Y + 6.0f;
+			for (std::size_t i = 0; i < kAnchorPresetCount; ++i)
+				out[i] = Wui::WuiRect { originX + static_cast<float>(i) * (cell + rowGap),
+					originY, cell, cellSpan };
+			return out;
 		}
 
 		// ---- M12:8 个缩放手柄 ----
@@ -738,6 +872,72 @@ namespace World
 			}
 			return states.empty() ? std::string() : states.front().Id;
 		}
+
+		// M44:`.wui` Type → **本地化控件名**。键 `wui.component.<ComponentId>.name`,
+		// 兜底 = 原始 Type(英文界面下与改动前逐字相同)。大纲行与属性页 Node 段的
+		// Type 值都用它;`Id` 与 a11y 标识符**保持原文**(脚本/AI 按它们寻址)。
+		// M44:`.wui` Type → **本地化控件名**。键分两层:
+		//   ① `wui.node.<Type>.name` —— 按 `.wui` 类型(唯一);
+		//   ② `wui.component.<ComponentId>.name` —— 回退(同 id 的多个类型共用名称时用);
+		//   ③ 原始 `Type`。
+		// 为什么要有 ①:多个 `.wui` 类型可以共用同一个 ComponentId(`List`/`Grid` 都用 `listview`;
+		// `Row`/`Column`/`Flex`/`GridContainer` 都用 `box`),只按组件 id 取键会让它们**同名同描述**
+		// —— 用户看到的正是「新增的容器全叫面板 / 原始英文标注」。
+		// 大纲行与属性页 Node 段的 Type 值都用它;`Id` 与 a11y 标识符**保持原文**(脚本/AI 按它们寻址)。
+		std::string ComponentDisplayName(std::string_view type)
+		{
+			const UI::UiNodeTypeDesc* desc = UI::UiNodeRegistry::Find(type);
+			const std::string componentId = desc != nullptr ? desc->ComponentId : std::string(type);
+			const std::string typeName = desc != nullptr ? desc->Type : std::string(type);
+			// 两层都走 Tr:内层给组件级兜底(可能命中),外层给类型级覆盖。
+			const std::string componentName = Wui::Tr("wui.component." + componentId + ".name", typeName);
+			return Wui::Tr("wui.node." + typeName + ".name", componentName);
+		}
+
+		// M44:同上的**描述**取值(`wui.node.<Type>.doc` → `wui.component.<id>.doc` → 引擎 `Doc`)。
+		// 引擎的 `UiNodeTypeDesc::Doc` 本来就是**按 Type** 写的 ⇒ 它作最后一层兜底是对的;
+		// 组件表里没有 `Doc` 时才退到 `SizeNotes`(技术说明,聊胜于无)。
+		std::string ComponentDisplayDoc(std::string_view type)
+		{
+			const UI::UiNodeTypeDesc* desc = UI::UiNodeRegistry::Find(type);
+			const std::string componentId = desc != nullptr ? desc->ComponentId : std::string(type);
+			const std::string typeName = desc != nullptr ? desc->Type : std::string(type);
+			const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Find(type) != nullptr
+				? UI::UiNodeRegistry::Component(type) : nullptr;
+			const std::string typeDoc = desc != nullptr ? desc->Doc : std::string();
+			const std::string componentDoc = !typeDoc.empty()
+				? typeDoc : (component != nullptr ? component->SizeNotes : std::string());
+			const std::string shared = Wui::Tr("wui.component." + componentId + ".doc", componentDoc);
+			return Wui::Tr("wui.node." + typeName + ".doc", shared);
+		}
+
+		// M44:状态选择器下方那行说明的**英文兜底**(键 `wui.state.<id>.doc`;中文由目录补)。
+		// 常用状态逐一写清"什么时候出现";未登记的 id 用一句通用说明兜底(不留空 ——
+		// 用户报的正是"State 解释不明确")。
+		const char* StateDocFallback(std::string_view id)
+		{
+			if (id == "default")
+				return "Base look when no other state is active; other states fall back to it.";
+			if (id == "hover")
+				return "Shown while the pointer is over the control.";
+			if (id == "pressed")
+				return "Shown while the control is being pressed down.";
+			if (id == "focus")
+				return "Shown while the control owns keyboard focus.";
+			if (id == "disabled")
+				return "Shown when the control is disabled and cannot be interacted with.";
+			if (id == "checked")
+				return "Shown when the option is on (checkbox / toggle).";
+			if (id == "on")
+				return "Shown when the switch is on.";
+			if (id == "off")
+				return "Shown when the switch is off.";
+			if (id == "selected")
+				return "Shown when this item is the selected one.";
+			if (id == "open")
+				return "Shown while the popup / list is open.";
+			return "Visual state of this control; pick one to edit only the properties scoped to it.";
+		}
 	}
 
 	// ---- 文档生命周期 ----
@@ -824,6 +1024,7 @@ namespace World
 		m_Undo.Clear();
 		CancelDrag();
 		CancelNodeEdit();
+		CancelOutlineRename();
 		m_Collapsed.clear();
 		m_OutlineScroll = 0.0f;
 		m_PropertyScroll = 0.0f;
@@ -1210,6 +1411,17 @@ namespace World
 			{
 				MoveSelectedNode(-1);
 			}
+			// M47:改名入口(稳定 a11y id,`ui.invoke` 可点;双击行是鼠标路径)。按钮窄,
+			// 可见文本用一个字母,完整名字进 tooltip 与 a11y label。
+			buttonX -= moveWidth + 3.0f;
+			if (Wui::ButtonEx(ctx, Wui::HashId("ui_designer.outline.rename"),
+				Wui::WuiRect { buttonX, headerY, moveWidth, headerHeight },
+				Wui::Tr("panel.ui_designer.outline.rename", "R"), theme, !m_SelectedId.empty(), false,
+				Wui::Tr("panel.ui_designer.outline.rename.tip",
+					"Rename the selected node (double-clicking its row does the same)")))
+			{
+				BeginOutlineRename(m_SelectedId);
+			}
 		}
 
 		const Wui::WuiRect area { rect.X + 2.0f, rect.Y + 18.0f,
@@ -1245,9 +1457,20 @@ namespace World
 				m_SelectedIds.clear();
 			}
 			// M20:按下即武装"拖动重挂父"(位移超过阈值才算拖动,单纯点击不受影响)。
-			m_OutlineDragActive = false;
-			m_OutlineDragId = *id;
-			m_OutlineDragStart = ctx.Input().MousePos;
+			// M47:改名编辑态下不武装拖动(否则在行内点选文字会被当成拖动重挂父)。
+			if (!m_OutlineRenameActive)
+			{
+				m_OutlineDragActive = false;
+				m_OutlineDragId = *id;
+				m_OutlineDragStart = ctx.Input().MousePos;
+			}
+		}
+		// M47:双击行 = 进入内联改名(TreeView 双击帧只报 DoubleClicked,所以选中也在这里补)。
+		if (const std::string* id = nodeIdAt(result.DoubleClicked))
+		{
+			m_SelectedId = *id;
+			m_SelectedIds.clear();
+			BeginOutlineRename(*id);
 		}
 		if (const std::string* id = nodeIdAt(result.KeyActivate))
 		{
@@ -1261,6 +1484,82 @@ namespace World
 		}
 		if (m_SelectedId != selectionBefore)
 			CommitNodeEdit();   // 选中变化前把上一节点的属性编辑落账
+
+		// ---- M47:大纲行内联改名框(画在树之上,覆盖被改名行的文本)----
+		// 与资源浏览器 RenameField 同一口径:TextFieldEx 行内报错;Escape 必须在控件之前
+		// 判(TextFieldEx 没有 cancelled 回调,否则"取消"会被当成失焦提交)。
+		if (m_OutlineRenameActive)
+		{
+			std::size_t renameIndex = m_OutlineIds.size();
+			for (std::size_t i = 0; i < m_OutlineIds.size(); ++i)
+			{
+				if (m_OutlineIds[i] == m_OutlineRenameNodeId)
+				{
+					renameIndex = i;
+					break;
+				}
+			}
+			// 行可能已被撤销/删除/滚出视口 ⇒ 收掉编辑态(不留一个悬空的输入框)。
+			const bool rowUsable = renameIndex < m_OutlineIds.size()
+				&& renameIndex < result.ItemRects.size()
+				&& result.ItemRects[renameIndex].Y + kTreeRowHeight * 0.5f >= area.Y
+				&& result.ItemRects[renameIndex].Y + kTreeRowHeight * 0.5f <= area.Y + area.H;
+			if (!rowUsable)
+			{
+				CancelOutlineRename();
+			}
+			else
+			{
+				const Wui::WuiRect row = result.ItemRects[renameIndex];
+				const Wui::WuiRect field { row.X + 18.0f, row.Y + 1.0f,
+					std::max(40.0f, row.W - 22.0f), std::max(10.0f, row.H - 2.0f) };
+				const Wui::WuiId renameId = Wui::HashId("ui_designer.outline.rename.field");
+				// M47 修:SetFocus 在**本帧**未必立刻生效(焦点可能在帧末才落到控件上)⇒ 请求焦点的那一帧
+				// 不能当作"失焦",否则下面那条 `ctx.Focus() != renameId` 会在同一帧提交(缓冲 = 原名 ⇒ 无害
+				// 提交 + CancelOutlineRename),输入框只存在一帧、永远改不了名(实测:点 R 后树里根本没有
+				// 行内输入框;a11y 快照里也读不到)。这里记下"这一帧刚请求过焦点",跳过本帧的失焦分支。
+				// M47 修(实测踩过):焦点请求要**连续几帧**重申,并且要和 "文本输入态" 一起给
+				// —— 与内容浏览器 StartRename 的既有做法一致(`ctx.SetFocus(id)` + `SetTextInputActive(true)`)。
+				// 只给一帧的话:该帧控件还没进焦点表,SetFocus 落空;下一帧按"失焦"提交 + 收口,
+				// 输入框只活一帧,用户永远改不了名(a11y 树里也读不到那个框)。
+				// 另外:只有**真正拿到过焦点**之后,失焦才算"提交"(否则第一帧就被判失焦)。
+				bool focusRequestedThisFrame = false;
+				if (ctx.Focus() == renameId)
+					m_OutlineRenameHadFocus = true;
+				if (m_OutlineRenameFocusPending || (!m_OutlineRenameHadFocus && m_OutlineRenameFocusTries < 4))
+				{
+					ctx.SetFocus(renameId);
+					ctx.SetTextInputActive(true);
+					m_OutlineRenameFocusPending = false;
+					focusRequestedThisFrame = true;
+					++m_OutlineRenameFocusTries;
+				}
+				const bool cancelRequested = ctx.Focus() == renameId
+					&& ctx.IsKeyPressed(KeyCodes::Escape);
+				const std::string error = OutlineRenameError(TrimCopy(m_OutlineRenameBuffer));
+				const bool submitted = Wui::TextFieldEx(ctx, renameId, field,
+					m_OutlineRenameBuffer, theme, error);
+				if (cancelRequested)
+				{
+					CancelOutlineRename();
+				}
+				else if (submitted)
+				{
+					if (!CommitOutlineRename(m_OutlineRenameBuffer))
+					{
+						// 非法名字拒绝提交:留在编辑态、焦点还给输入框,好继续改。
+						ctx.SetFocus(renameId);
+						ctx.SetTextInputActive(true);
+					}
+				}
+				else if (m_OutlineRenameHadFocus && ctx.Focus() != renameId)
+				{
+					// 失焦提交:非法名字不写文档(调用方会 CancelOutlineRename)。
+					if (!CommitOutlineRename(m_OutlineRenameBuffer))
+						CancelOutlineRename();
+				}
+			}
+		}
 
 		// ---- M20:大纲行拖动 = 重新挂父 ----
 		// 阈值 4px(与 WuiContext 的拖拽判定同口径),避免把"点一下"误判成拖动;
@@ -1340,7 +1639,9 @@ namespace World
 			std::string CategoryLabel;  // 本地化分类名(tooltip 用)
 			std::string Doc;            // 本地化功能介绍(tooltip 用)
 		};
-		std::vector<PaletteEntry> entries;
+		// M44:先建**全表**(未过滤)→ 按"可见名是否撞名"定型显示名 → 过滤 → 排序。
+		// 为什么不在过滤后判歧义:搜索词会改变候选集,可见名不该随搜索文字变来变去。
+		std::vector<PaletteEntry> allEntries;
 		for (const UI::UiNodeTypeDesc& desc : UI::UiNodeRegistry::All())
 		{
 			const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Component(desc.Type);
@@ -1349,16 +1650,31 @@ namespace World
 			if (component != nullptr)
 				entry.Category = component->Category;
 			// `Slider` 的 ComponentId 是 `slider.float`(含点)⇒ 键里就带点,不做任何替换。
-			// 兜底用**原始 `.wui` 类型名**(派工单的 palette 口径):英文界面下按钮文案与改动前
-			// 逐字相同;若改用 DisplayName,List 与 Grid(同为 `listview`)会撞名。
-			entry.Label = Wui::Tr("wui.component." + desc.ComponentId + ".name", desc.Type);
+			// 兜底用**原始 `.wui` 类型名**:英文界面下按钮文案与改动前逐字相同。
+			entry.Label = ComponentDisplayName(desc.Type);
 			entry.CategoryLabel = entry.Category.empty()
 				? Wui::Tr("panel.ui_designer.palette.other", "Other")
 				: Wui::Tr("wui.category." + entry.Category, entry.Category);
 			const std::string docSource = !desc.Doc.empty()
 				? desc.Doc
 				: (component != nullptr ? component->SizeNotes : std::string());
-			entry.Doc = Wui::Tr("wui.component." + desc.ComponentId + ".doc", docSource);
+			entry.Doc = ComponentDisplayDoc(desc.Type);
+			allEntries.push_back(std::move(entry));
+		}
+		// 消歧(可预测:撞名一律退回原始 `.wui` Type)。真因是登记表层面 List 与 Grid 的
+		// ComponentId 都是 `listview` ⇒ 本地化名相同;退回 Type 后按钮分别显示 "List" / "Grid"
+		// (Type 在登记表内唯一)。不在这里发明新的组件 id,也不加需要维护的后缀表。
+		std::unordered_map<std::string, int> labelCounts;
+		for (const PaletteEntry& entry : allEntries)
+			++labelCounts[entry.Label];
+		for (PaletteEntry& entry : allEntries)
+		{
+			if (labelCounts[entry.Label] > 1)
+				entry.Label = entry.Type;
+		}
+		std::vector<PaletteEntry> entries;
+		for (PaletteEntry& entry : allEntries)
+		{
 			// 过滤:原始 Type / 原始分类照旧(中文界面搜英文名仍然有效),再追加本地化名
 			// 与本地化分类(中文界面也能搜中文);**过滤逻辑不跟随本地化文本改动**。
 			if (!ContainsNoCase(entry.Type, needle) && !ContainsNoCase(entry.Category, needle)
@@ -1400,7 +1716,10 @@ namespace World
 				// a11y id 用**原始** Type(语言无关的稳定寻址);可见文本与 tooltip 走本地化。
 				Wui::HashId(("ui_designer.palette.add." + entries[i].Type).c_str()),
 				cell, entries[i].Label, theme, true, false,
-				JoinTooltipParts(entries[i].CategoryLabel, entries[i].Label, entries[i].Doc)))
+				// M44:分类名与控件名相同时省掉分类段(此前 "按钮 · 按钮 · 可点击的…" 首段冗余)。
+				JoinTooltipParts(entries[i].CategoryLabel == entries[i].Label
+					? std::string() : entries[i].CategoryLabel,
+					entries[i].Label, entries[i].Doc)))
 			{
 				addType = entries[i].Type;
 			}
@@ -1427,7 +1746,10 @@ namespace World
 			const bool collapsed = IsCollapsed(node.Id);
 			Wui::TreeViewItem item;
 			item.Id = Wui::HashId(("ui_designer.tree." + node.Id).c_str());
-			item.Label = node.Type + "  " + node.Id;
+			// M44:行文本 = **本地化控件名** + "  " + Id。
+			// `Id` 必须留在 label 里:既有验证脚本按 tree-item 的 label 含节点 Id(如 `btnA`)
+			// 找行/寻址,而 Id 是稳定身份(Bind/热重载/`ui.invoke` 都按它定位)—— 本地化只换前半段。
+			item.Label = ComponentDisplayName(node.Type) + "  " + node.Id;
 			item.Depth = depth;
 			item.HasChildren = hasChildren;
 			item.Expanded = hasChildren && !collapsed;
@@ -1437,6 +1759,111 @@ namespace World
 			if (hasChildren && !collapsed)
 				AppendOutlineItems(node.Children, depth + 1, out);
 		}
+	}
+
+	// ---- M47:大纲行内联改名 ----
+	//
+	// 改名只碰 `Id` 一个字段 —— `.wui` 里**没有**任何字段按节点 Id 引用节点:
+	//   · `Bind` 的**键**是该节点自己的属性名(如 `label`),值是数据源(`ecs:` / `service:` …);
+	//   · `On` 的键是事件名(`Click`),值是命令(`ui.close` / 工程自定义命令);
+	//   · `World.Target` 是宿主按**场景实体 Tag** 解析的名字 —— `GameHost::ResolveWorldPositionByName`
+	//     用 `TagComponent` 建索引(`UiWorldAnchor.h` 的注释也写的是"实体名/路径"),不是节点 Id;
+	//     误改它会把世界锚点指到不存在的实体。
+	// 所以"同步改写 Bind/On/World 里的引用"在这里是**空集**;要跟着迁移的只有**面板自己**
+	// 按 Id 建键的状态(选中集、折叠表、拖动/编辑缓冲)。将来若文档格式真的引入按 Id 的
+	// 引用字段,必须在这里补改写 —— 那是公共格式决定,不能由面板单方面发明。
+	void UiDesignerPanel::BeginOutlineRename(const std::string& nodeId)
+	{
+		const UI::UiNode* node = m_Document.FindNode(nodeId);
+		if (node == nullptr)
+			return;
+		m_OutlineRenameActive = true;
+		m_OutlineRenameNodeId = nodeId;
+		m_OutlineRenameBuffer = node->Id;
+		m_OutlineRenameFocusPending = true;
+		// M47 修:每次进入编辑都重置"焦点看过没有 / 重申了几帧"(见 RenderOutline 的焦点块)。
+		m_OutlineRenameHadFocus = false;
+		m_OutlineRenameFocusTries = 0;
+	}
+
+	void UiDesignerPanel::CancelOutlineRename()
+	{
+		m_OutlineRenameActive = false;
+		m_OutlineRenameNodeId.clear();
+		m_OutlineRenameBuffer.clear();
+		m_OutlineRenameFocusPending = false;
+	}
+
+	std::string UiDesignerPanel::OutlineRenameError(const std::string& newId) const
+	{
+		if (newId.empty())
+			return Wui::Tr("panel.ui_designer.rename.error.empty", "Name cannot be empty");
+		if (!UI::IsValidUiNodeId(newId))
+			return Wui::Tr("panel.ui_designer.rename.error.illegal",
+				"Use letters, digits, '_', '-', '.' or '#'; no spaces or '/'");
+		if (newId == m_OutlineRenameNodeId)
+			return std::string();   // 没改名 = 合法(提交时按"无变化"收口)
+		if (m_Document.FindNode(newId) != nullptr)
+			return Wui::Tr("panel.ui_designer.rename.error.duplicate",
+				"Another node already uses this name");
+		return std::string();
+	}
+
+	bool UiDesignerPanel::CommitOutlineRename(const std::string& newId)
+	{
+		if (!m_OutlineRenameActive)
+			return false;
+		const std::string oldId = m_OutlineRenameNodeId;
+		const std::string trimmed = TrimCopy(newId);
+		if (trimmed == oldId)
+		{
+			CancelOutlineRename();
+			return true;   // 名字没变也算收口(不落空撤销记录)
+		}
+		const std::string error = OutlineRenameError(trimmed);
+		if (!error.empty())
+		{
+			m_Status = error;
+			return false;   // 保持原名与编辑态(调用方把焦点还给输入框)
+		}
+		// 先把属性页上未提交的编辑落账,改名自己占一条撤销记录。
+		CommitNodeEdit();
+		const UI::UiDocument before = m_Document;
+		UI::UiNode* node = FindNodeMutable(m_Document.Nodes, oldId);
+		if (node == nullptr)
+		{
+			CancelOutlineRename();
+			return false;
+		}
+		node->Id = trimmed;
+		node->IdWasGenerated = false;   // 手工设过名 = 显式 Id,不再由 MakeStableId 生成
+		// 迁移面板内部按 Id 索引的状态(文档外的引用只有这些)。
+		if (m_SelectedId == oldId)
+			m_SelectedId = trimmed;
+		for (std::string& selected : m_SelectedIds)
+		{
+			if (selected == oldId)
+				selected = trimmed;
+		}
+		if (m_DragNodeId == oldId)
+			m_DragNodeId = trimmed;
+		if (m_OutlineDragId == oldId)
+			m_OutlineDragId = trimmed;
+		if (m_BufferNodeId == oldId)
+			m_BufferNodeId.clear();   // 属性文本缓冲按 Id 建键 ⇒ 下一帧重建
+		const auto collapsed = m_Collapsed.find(oldId);
+		if (collapsed != m_Collapsed.end())
+		{
+			m_Collapsed[trimmed] = collapsed->second;
+			m_Collapsed.erase(collapsed);
+		}
+		++m_RowBufferGen;   // Bind / On 行缓冲键含节点 Id ⇒ 换代
+		PushDocumentUndo(Wui::Tr("panel.ui_designer.rename", "Rename node"), before);
+		m_ScreenDirty = true;
+		m_Dirty = true;
+		m_Status = Wui::Tr("panel.ui_designer.renamed", "Renamed to ") + trimmed;
+		CancelOutlineRename();
+		return true;
 	}
 
 	float UiDesignerPanel::PropertyContentHeight(const UI::UiNode* node) const
@@ -1476,12 +1903,13 @@ namespace World
 		float rows = 9.0f;
 		if (m_ShowNodeSection) rows += 2.0f;                // Id / Type
 		rows += propertyRows;                               // Type 块的类型独有属性(恒显示)
-		// M37:Type 块的附加行 —— 状态选择器(类型登记了 ≥2 个状态时)与混选提示。
-		// 与 RenderProperties 同一判定(`PropStateOptions` / `SelectionMixedTypes`),不漂移。
+		// M37/M44:Type 块的附加行 —— 状态选择器(类型登记了 ≥2 个状态时)+ 选中状态的
+		// 一行说明(M44)与混选提示。与 RenderProperties 同一判定
+		// (`PropStateOptions` / `SelectionMixedTypes`),不漂移。
 		if (node != nullptr)
 		{
 			if (PropStateOptions(*node) != nullptr)
-				rows += 1.0f;
+				rows += 2.0f;   // 状态选择器 + 选中状态的一行说明
 			if (SelectionMixedTypes())
 				rows += 1.0f;
 		}
@@ -1644,6 +2072,8 @@ namespace World
 			desc.LabelWidth = labelWidth;
 			desc.Enabled = enabled;
 			desc.A11yEnabled = enabled;
+			// M44:每行一句解释(键 = <Key> + ".doc");禁用行换成禁用理由(第二通道与悬停提示同源)。
+			desc.Tooltip = Wui::Tr(std::string(def.Key) + ".doc", def.Doc);
 			if (!enabled)
 			{
 				desc.FieldPlaceholder = Wui::Tr("panel.ui_designer.world.inactive", "\u2014");
@@ -1841,6 +2271,11 @@ namespace World
 			stateDesc.A11yValue = stateOptions[static_cast<std::size_t>(stateSelected)];
 			stateDesc.A11yEnabled = false;
 			stateDesc.LabelWidth = labelWidth;
+			// M44:这一行的解释(是什么、切了会怎样)。
+			stateDesc.Tooltip = Wui::Tr("panel.ui_designer.props.state.doc",
+				"Which visual states this type declares. Picking one narrows the property list "
+				"below to that state's own properties (such as bg.hover); switching never edits "
+				"the document.");
 			const Wui::PropertyRowResult stateRow = Wui::PropertyRow(ctx,
 				Wui::HashId("ui_designer.props.state.row"), nextRow(rowHeight), stateDesc, theme);
 			if (Wui::Combo(ctx, Wui::HashId("ui_designer.props.state.field"), stateRow.FieldRect,
@@ -1848,6 +2283,27 @@ namespace World
 			{
 				pendingPropState = (*states)[static_cast<std::size_t>(stateSelected)].Id;
 			}
+			// M44:每个状态选项的说明。`Combo` 没有 per-option tooltip 口子(库件),按派工
+			// 降级为"选中状态下方一行说明" —— 高度已计入 PropertyContentHeight(+1 行)。
+			// 用本帧实际生效的 `m_PropState`(切换延后一帧),让说明与本帧显示的 StateScoped
+			// 行清单一致。
+			const std::string stateDoc = Wui::Tr("wui.state." + m_PropState + ".doc",
+				StateDocFallback(m_PropState));
+			const Wui::WuiRect stateDocRow = nextRow(rowHeight);
+			Wui::Label(ctx, glm::vec2 { stateDocRow.X + 2.0f, stateDocRow.Y + 4.0f }, stateDoc,
+				theme.TextMuted, theme.FontSizeCaption);
+			Wui::WuiAccessNode stateDocNode;
+			stateDocNode.Id = Wui::HashId("ui_designer.props.state.doc");
+			stateDocNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			stateDocNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			stateDocNode.Kind = "label";
+			stateDocNode.Label = stateDoc;
+			stateDocNode.Value = m_PropState;
+			stateDocNode.Rect = stateDocRow;
+			stateDocNode.Enabled = true;
+			stateDocNode.Interactive = false;
+			stateDocNode.Visible = true;
+			Wui::WuiAccessibility::Get().Register(stateDocNode);
 		}
 		{
 			if (node->Props.empty())
@@ -1985,6 +2441,41 @@ namespace World
 				const Wui::WuiComponentProperty::Kind kind = meta != nullptr
 					? meta->Type : Wui::WuiComponentProperty::Kind::Text;
 				const Wui::WuiId fieldId = Wui::HashId((base + ".field").c_str());
+				// M47:`textureId` 行换成 `Wui::WuiTexturePicker`(Image 及任何声明了该属性的
+				// 类型)—— 走 `Editor::TextureRefCatalog` 适配层,面板不自己扫盘/算徽标。
+				// 引擎侧 `textureId` 是 WuiTextureRegistry 的**数值句柄**(0 = 空图):
+				// 对选择器而言 0/空 = "无引用",传空串让它显示 (none),而不是把 "0" 当成
+				// 一个缺失的逻辑路径。选中/清空即写覆盖值(一条撤销记录)。
+				if (ref.Name == std::string("textureId"))
+				{
+					std::string picked;
+					char* numberEnd = nullptr;
+					const float numeric = value.empty() ? 0.0f : std::strtof(value.c_str(), &numberEnd);
+					const bool emptyRef = value.empty()
+						|| (numberEnd != value.c_str() && numberEnd != nullptr && *numberEnd == '\0'
+							&& numeric == 0.0f);
+					picked = emptyRef ? std::string() : value;
+					auto options = Editor::TexturePickerOptions(picked,
+						Wui::Tr("wui.prop.textureId.name", "Texture"),
+						"ui_designer.prop." + node->Id + "." + ref.Name, std::string());
+					bool revealRequested = false;
+					options.RevealRequested = &revealRequested;
+					if (Wui::WuiTexturePicker(ctx, fieldId, rowResult.FieldRect, picked, options, theme))
+						apply(picked);
+					// "定位" = 复用宿主既有的"在内容浏览器选中"通道(与材质面板同一口径);
+					// 面板不自己开资源管理器窗口。
+					if (revealRequested)
+					{
+						const std::string shown = picked.empty() ? value : picked;
+						if (host.SelectContentAsset(shown, "ui-designer-texture"))
+							m_Status = Wui::Tr("panel.ui_designer.texture.located",
+								"Selected in the Content Browser: ") + shown;
+						else
+							m_Status = Wui::Tr("panel.ui_designer.texture.locate_failed",
+								"Cannot locate this texture in the Content Browser: ") + shown;
+					}
+					continue;   // 本行不再走下面的默认文本编辑器
+				}
 				switch (kind)
 				{
 				case Wui::WuiComponentProperty::Kind::Bool:
@@ -2112,35 +2603,43 @@ namespace World
 		}
 
 		// ---- Node ----
-		groupHeader("ui_designer.section.node", "Node", std::string(), m_ShowNodeSection);
+		groupHeader("panel.ui_designer.section.node", "Node", std::string(), m_ShowNodeSection);
 		if (m_ShowNodeSection)
 		{
-			const auto inlineRow = [&](const char* key, const char* fallback, const std::string& value)
+			// M44:只读内联行。`a11yLabel` 是**稳定标识符**(恒英文:Id / Type),不随本地化变化;
+			// 可见标签与值才走本地化 —— 脚本/AI 按稳定标识符寻址,按 label 找不到中文行。
+			const auto inlineRow = [&](const char* key, const char* a11yLabel, const char* fallback,
+				const std::string& value)
 			{
 				Wui::PropertyRowDesc desc;
 				desc.Label = Wui::Tr(key, fallback);
-				desc.A11yLabel = desc.Label;
+				desc.A11yLabel = a11yLabel;
 				desc.InlineValue = true;
 				desc.InlineValueText = value;
 				desc.LabelWidth = labelWidth;
 				Wui::PropertyRow(ctx, Wui::HashId(key), nextRow(rowHeight), desc, theme);
 			};
-			inlineRow("ui_designer.node.id", "Id", node->Id);
-			inlineRow("ui_designer.node.type", "Type", node->Type);
+			// Id 的值是用户设的标识(原文,不本地化);Type 的值显示**本地化控件名**
+			// (键 `wui.component.<id>.name`,兜底 = 原始 Type),但 a11y 标识符保持 "Type"。
+			inlineRow("panel.ui_designer.node.id", "Id", "Id", node->Id);
+			inlineRow("panel.ui_designer.node.type", "Type", "Type", ComponentDisplayName(node->Type));
 		}
 
 		// ---- Anchor ----
-		groupHeader("ui_designer.section.anchor", "Anchor", std::string(), m_ShowAnchorSection);
+		groupHeader("panel.ui_designer.section.anchor", "Anchor", std::string(), m_ShowAnchorSection);
 		if (m_ShowAnchorSection)
 		{
 			for (const FloatRowDef& def : kAnchorFloatRows)
 				floatRow(def, *node);
 
 			Wui::PropertyRowDesc desc;
-			desc.Label = Wui::Tr("ui_designer.anchor.relative_safe", "Relative To Safe Area");
+			desc.Label = Wui::Tr("panel.ui_designer.anchor.relative_safe", "Relative To Safe Area");
 			desc.Term = "RelativeToSafeArea";
 			desc.A11yLabel = desc.Label;
 			desc.LabelWidth = labelWidth;
+			desc.Tooltip = Wui::Tr("panel.ui_designer.anchor.relative_safe.doc",
+				"Anchor against the viewport content rect (safe area already removed) instead of the "
+				"parent rect. Use it for HUD elements that must dodge screen notches.");
 			const Wui::PropertyRowResult result = Wui::PropertyRow(ctx,
 				Wui::HashId("ui_designer.anchor.relative_safe"), nextRow(rowHeight), desc, theme);
 			if (Wui::Checkbox(ctx, Wui::HashId("ui_designer.anchor.relative_safe.field"), result.FieldRect,
@@ -2152,7 +2651,7 @@ namespace World
 		}
 
 		// ---- Layout ----
-		groupHeader("ui_designer.section.layout", "Layout", std::string(), m_ShowLayoutSection);
+		groupHeader("panel.ui_designer.section.layout", "Layout", std::string(), m_ShowLayoutSection);
 		if (m_ShowLayoutSection)
 		{
 			std::vector<std::string> options;
@@ -2171,11 +2670,17 @@ namespace World
 			}
 
 			Wui::PropertyRowDesc kindDesc;
-			kindDesc.Label = Wui::Tr("ui_designer.layout.kind", "Kind");
+			kindDesc.Label = Wui::Tr("panel.ui_designer.layout.kind", "Kind");
 			kindDesc.Term = "Kind";
 			kindDesc.A11yLabel = kindDesc.Label;
 			kindDesc.A11yValue = options.empty() ? std::string() : options[static_cast<std::size_t>(selected)];
 			kindDesc.LabelWidth = labelWidth;
+			// 选项文本 = `.wui` 的枚举字面量(UiLayoutKindName;序列化值,不本地化),
+			// 只有行标签与解释走本地化 —— 改成中文会让"文档里写的值"对不上。
+			kindDesc.Tooltip = Wui::Tr("panel.ui_designer.layout.kind.doc",
+				"How this container arranges its children: Absolute (free, children use their own "
+				"anchor), Column / Row (stack with Gap), Overlay (stack on top of each other), "
+				"Grid (Columns wide) or Flex (Row Major picks the main axis).");
 			const Wui::PropertyRowResult kindRow = Wui::PropertyRow(ctx,
 				Wui::HashId("ui_designer.layout.kind.row"), nextRow(rowHeight), kindDesc, theme);
 			if (Wui::Combo(ctx, Wui::HashId("ui_designer.layout.kind.field"), kindRow.FieldRect,
@@ -2190,11 +2695,13 @@ namespace World
 				floatRow(def, *node);
 
 			Wui::PropertyRowDesc columnsDesc;
-			columnsDesc.Label = Wui::Tr("ui_designer.layout.columns", "Columns");
+			columnsDesc.Label = Wui::Tr("panel.ui_designer.layout.columns", "Columns");
 			columnsDesc.Term = "Columns";
 			columnsDesc.A11yLabel = columnsDesc.Label;
 			columnsDesc.A11yValue = std::to_string(node->Layout.Columns);
 			columnsDesc.LabelWidth = labelWidth;
+			columnsDesc.Tooltip = Wui::Tr("panel.ui_designer.layout.columns.doc",
+				"Number of columns used by the Grid layout kind. Other kinds ignore it.");
 			const Wui::PropertyRowResult columnsRow = Wui::PropertyRow(ctx,
 				Wui::HashId("ui_designer.layout.columns.row"), nextRow(rowHeight), columnsDesc, theme);
 			int64_t columns = node->Layout.Columns;
@@ -2207,10 +2714,13 @@ namespace World
 			}
 
 			Wui::PropertyRowDesc rowMajorDesc;
-			rowMajorDesc.Label = Wui::Tr("ui_designer.layout.row_major", "Row Major");
+			rowMajorDesc.Label = Wui::Tr("panel.ui_designer.layout.row_major", "Row Major");
 			rowMajorDesc.Term = "RowMajor";
 			rowMajorDesc.A11yLabel = rowMajorDesc.Label;
 			rowMajorDesc.LabelWidth = labelWidth;
+			rowMajorDesc.Tooltip = Wui::Tr("panel.ui_designer.layout.row_major.doc",
+				"Flex only: on = lay children out along the row (horizontal main axis), "
+				"off = down the column.");
 			const Wui::PropertyRowResult rowMajorRow = Wui::PropertyRow(ctx,
 				Wui::HashId("ui_designer.layout.row_major.row"), nextRow(rowHeight), rowMajorDesc, theme);
 			if (Wui::Checkbox(ctx, Wui::HashId("ui_designer.layout.row_major.field"), rowMajorRow.FieldRect,
@@ -2225,17 +2735,20 @@ namespace World
 		// `World:` 块 = 把节点钉在"目标世界位置投影到屏幕后的点"上(UiWorldProjector)。
 		// Enabled=false = 序列化时整块不写(不是写 `Enabled: false`);Target 为空 + Enabled=true
 		// 会被 ValidateUiDocument 判错、且保存出的文档 UiDocumentIO::Parse 读不回来 —— 段内必须先给可见提示。
-		groupHeader("ui_designer.section.world", "World",
+		groupHeader("panel.ui_designer.section.world", "World",
 			node->World.Enabled ? Wui::Tr("panel.ui_designer.world.on", "On") : std::string(),
 			m_ShowWorldSection);
 		if (m_ShowWorldSection)
 		{
 			Wui::PropertyRowDesc enabledDesc;
-			enabledDesc.Label = Wui::Tr("ui_designer.world.enabled", "Enabled");
+			enabledDesc.Label = Wui::Tr("panel.ui_designer.world.enabled", "Enabled");
 			enabledDesc.Term = "Enabled";
 			enabledDesc.A11yLabel = enabledDesc.Label;
 			enabledDesc.A11yValue = node->World.Enabled ? "true" : "false";
 			enabledDesc.LabelWidth = labelWidth;
+			enabledDesc.Tooltip = Wui::Tr("panel.ui_designer.world.enabled.doc",
+				"Pin this node to a world position projected onto the screen instead of the parent "
+				"rect. Off = a plain screen-space node (the whole World block is not written on save).");
 			const Wui::PropertyRowResult enabledRow = Wui::PropertyRow(ctx,
 				Wui::HashId("ui_designer.world.enabled.row"), nextRow(rowHeight), enabledDesc, theme);
 			if (Wui::Checkbox(ctx, Wui::HashId("ui_designer.world.enabled.field"), enabledRow.FieldRect,
@@ -2255,7 +2768,7 @@ namespace World
 			{
 				const std::string base = "ui_designer.world.target." + node->Id;
 				Wui::PropertyRowDesc targetDesc;
-				targetDesc.Label = Wui::Tr("ui_designer.world.target", "Target");
+				targetDesc.Label = Wui::Tr("panel.ui_designer.world.target", "Target");
 				targetDesc.Term = "Target";
 				targetDesc.A11yLabel = targetDesc.Label;
 				targetDesc.A11yValue = targetMissing ? targetWarning : node->World.Target;
@@ -2264,7 +2777,12 @@ namespace World
 				targetDesc.A11yEnabled = node->World.Enabled;
 				if (node->World.Enabled)
 				{
-					targetDesc.Tooltip = targetWarning;
+					// 空 Target 的红色提示保持不动(段内另有可见提示行);有值时给一句解释。
+					targetDesc.Tooltip = targetWarning.empty()
+						? Wui::Tr("panel.ui_designer.world.target.doc",
+							"Name the host resolves to a world position (an entity tag such as "
+							"'Mesh:Cube Green'), not a UI node id.")
+						: targetWarning;
 				}
 				else
 				{
@@ -2311,7 +2829,7 @@ namespace World
 				floatRow(def, *node, node->World.Enabled);
 
 			Wui::PropertyRowDesc keepDesc;
-			keepDesc.Label = Wui::Tr("ui_designer.world.keep_on_screen", "Keep On Screen");
+			keepDesc.Label = Wui::Tr("panel.ui_designer.world.keep_on_screen", "Keep On Screen");
 			keepDesc.Term = "KeepOnScreen";
 			keepDesc.A11yLabel = keepDesc.Label;
 			keepDesc.A11yValue = node->World.KeepOnScreen ? "true" : "false";
@@ -2320,7 +2838,7 @@ namespace World
 			keepDesc.A11yEnabled = node->World.Enabled;
 			if (node->World.Enabled)
 			{
-				keepDesc.Tooltip = Wui::Tr("ui_designer.world.keep_on_screen_hint",
+				keepDesc.Tooltip = Wui::Tr("panel.ui_designer.world.keep_on_screen.doc",
 					"Clamp the projected point into the content rect when it leaves the screen.");
 			}
 			else
@@ -2344,7 +2862,7 @@ namespace World
 		// `Bind:` 块 = "节点属性 ← 数据源"。源协议的唯一判据是引擎的 UiBinding::Parse;
 		// 本段只做文本编辑 + 空行 / 缺 `:` 的可见提示。空 Target/Source 会被
 		// ValidateUiDocument 拒绝 ⇒ 保存时整条不写盘(SaveTo 过滤写盘副本),模型里保留草稿。
-		groupHeader("ui_designer.section.bind", "Bind",
+		groupHeader("panel.ui_designer.section.bind", "Bind",
 			"(" + std::to_string(node->Bind.size()) + ")", m_ShowBindSection);
 		if (m_ShowBindSection)
 		{
@@ -2446,7 +2964,7 @@ namespace World
 		// ---- On(命令;M25)----
 		// `On:` 块 = "事件 → 命令"(如 Click → ui.close)。事件名 / 命令名由运行时消费端判定;
 		// 本段只做文本编辑 + 空行可见提示(空 Event/Command 同样不写盘)。
-		groupHeader("ui_designer.section.on", "On",
+		groupHeader("panel.ui_designer.section.on", "On",
 			"(" + std::to_string(node->On.size()) + ")", m_ShowOnSection);
 		if (m_ShowOnSection)
 		{
@@ -2655,6 +3173,21 @@ namespace World
 		m_HoverHandle = HandleNone;
 		Wui::WuiRect selectedBox;
 		const bool hasSelectedBox = SelectedNodeBox(selectedBox);
+		// M46:锚点预设按钮的命中区(与 DrawAnchorMarkers 共用同一份几何)。点预设不能
+		// 被当成"点空白 = 取消选中" —— HandleCanvasInput 在 DrawCanvas **之前**跑,不拦
+		// 这一下的话,预设还没画出来选中就被清掉,按钮永远点不中。
+		bool overAnchorPreset = false;
+		if (hasSelectedBox && ctx.IsHovered(rect))
+		{
+			for (const Wui::WuiRect& presetRect : LayoutAnchorPresets(selectedBox, rect))
+			{
+				if (ctx.IsHovered(presetRect))
+				{
+					overAnchorPreset = true;
+					break;
+				}
+			}
+		}
 		if (hasSelectedBox && m_Drag == CanvasDrag::None)
 		{
 			for (const HandleDef& handle : kHandles)
@@ -2667,7 +3200,8 @@ namespace World
 			}
 		}
 
-		if (m_Drag == CanvasDrag::None && ctx.IsHovered(rect) && ctx.IsClicked(rect, 0))
+		if (m_Drag == CanvasDrag::None && ctx.IsHovered(rect) && ctx.IsClicked(rect, 0)
+			&& !overAnchorPreset)
 		{
 			// ① 手柄优先:命中 8 手柄之一 → 缩放当前选中节点(不改变选中)。
 			UI::UiNode* node = m_HoverHandle != HandleNone ? MutableSelectedNode() : nullptr;
@@ -2940,16 +3474,17 @@ namespace World
 			Wui::Tr("panel.ui_designer.safe_area", "Safe Area"), theme.Warning, theme.FontSizeCaption);
 
 		// 锚点标记:选中节点优先;没有选中时给根节点画,让"锚点在父矩形上的位置"始终看得见。
+		// M46:9 宫格预设只给**选中**节点画(编辑对象明确,也不会一屏 11 个)。
 		if (const UI::UiNodeInstance* selected = m_Screen.Find(m_SelectedId))
 		{
-			DrawAnchorMarkers(ctx, theme, *selected);
+			DrawAnchorMarkers(ctx, theme, rect, *selected, true);
 		}
 		else
 		{
 			for (const UI::UiNodeInstance& node : m_Screen.Nodes())
 			{
 				if (node.Parent == -1)
-					DrawAnchorMarkers(ctx, theme, node);
+					DrawAnchorMarkers(ctx, theme, rect, node, false);
 			}
 		}
 
@@ -2976,7 +3511,7 @@ namespace World
 	}
 
 	void UiDesignerPanel::DrawAnchorMarkers(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		const UI::UiNodeInstance& node)
+		const Wui::WuiRect& canvasRect, const UI::UiNodeInstance& node, bool allowPresets)
 	{
 		if (node.Source == nullptr)
 			return;
@@ -2992,12 +3527,100 @@ namespace World
 		const glm::vec2 maxCanvas = m_Viewport.DesignToPhysical(parentMin + anchor.Max * parentSize);
 
 		Wui::LineSegment(ctx, minCanvas, maxCanvas, theme.BorderStrong, 1.0f);
+		// M46:拉伸锚定(任一轴 Min != Max)= 两点之间的"锚框"虚线矩形(与连线一起表达跨度)。
+		const bool stretchX = anchor.Min.x != anchor.Max.x;
+		const bool stretchY = anchor.Min.y != anchor.Max.y;
+		if (stretchX || stretchY)
+		{
+			DashedRectOutline(ctx,
+				Wui::WuiRect { std::min(minCanvas.x, maxCanvas.x), std::min(minCanvas.y, maxCanvas.y),
+					std::abs(maxCanvas.x - minCanvas.x), std::abs(maxCanvas.y - minCanvas.y) },
+				theme.BorderStrong, 1.0f);
+		}
 		MarkerCross(ctx, minCanvas, theme.Success);
 		MarkerCross(ctx, maxCanvas, theme.Warning);
 		Wui::PanelBackground(ctx, Wui::WuiRect { minCanvas.x - 2.0f, minCanvas.y - 2.0f, 4.0f, 4.0f },
 			theme.Success, 0.0f);
 		Wui::PanelBackground(ctx, Wui::WuiRect { maxCanvas.x - 2.0f, maxCanvas.y - 2.0f, 4.0f, 4.0f },
 			theme.Warning, 0.0f);
+
+		// M46:Min / Max 语义标签(截断预算 24px;颜色沿用既有令牌:Success = Min、Warning = Max)。
+		const float markerFont = theme.FontSizeCaption;
+		Wui::Label(ctx, glm::vec2 { minCanvas.x + 5.0f, minCanvas.y - 13.0f },
+			Wui::EllipsizeMiddleToWidth(ctx, "Min", 24.0f, markerFont), theme.Success, markerFont);
+		Wui::Label(ctx, glm::vec2 { maxCanvas.x + 5.0f, maxCanvas.y - 13.0f },
+			Wui::EllipsizeMiddleToWidth(ctx, "Max", 24.0f, markerFont), theme.Warning, markerFont);
+		// M46:相对安全区锚定在画布上不可见 ⇒ 十字旁加一个 "Safe" 角标(不给它新颜色)。
+		if (anchor.RelativeToSafeArea)
+		{
+			Wui::Label(ctx, glm::vec2 { minCanvas.x + 5.0f, minCanvas.y + 4.0f }, "Safe",
+				theme.Warning, markerFont);
+		}
+
+		if (!allowPresets)
+			return;
+
+		// M46:9 宫格锚点预设(点选即写 Min/Max,一条撤销记录;不改 Offset/Size/Pivot)。
+		// 几何与 HandleCanvasInput 的"点在预设上"判定同源(见 LayoutAnchorPresets 的注释)。
+		const std::array<Wui::WuiRect, kAnchorPresetCount> presetRects =
+			LayoutAnchorPresets(NodeBoxPhysical(m_Viewport, node.Rect), canvasRect);
+		UI::UiNode* target = nullptr;
+		const std::string undoName = Wui::Tr("panel.ui_designer.anchor.preset", "Set anchor preset");
+		for (std::size_t i = 0; i < kAnchorPresetCount; ++i)
+		{
+			const AnchorPresetDef& preset = kAnchorPresets[i];
+			const Wui::WuiRect& presetRect = presetRects[i];
+			if (presetRect.W <= 2.0f || presetRect.H <= 2.0f || !ctx.ClipAllows(presetRect))
+				continue;   // 裁掉/滚出的预设不画也不登记(与面板其它滚动区同一口径)
+			const std::string idKey = std::string("ui_designer.anchor.preset.") + preset.Id;
+			const std::string label = Wui::Tr(preset.Key, preset.Label);
+			const std::string tooltip = Wui::Tr(std::string(preset.Key) + ".tip", preset.Tip);
+			// 已经等于该预设(只比该预设**固定**了的轴)⇒ 高亮,给"当前是哪一个"的反馈。
+			const bool xFixed = !preset.KeepMinX || !preset.KeepMaxX;
+			const bool yFixed = !preset.KeepMinY || !preset.KeepMaxY;
+			const bool active = (!xFixed
+					|| (anchor.Min.x == preset.Min.x && anchor.Max.x == preset.Max.x))
+				&& (!yFixed
+					|| (anchor.Min.y == preset.Min.y && anchor.Max.y == preset.Max.y));
+			const bool hovered = ctx.IsHovered(presetRect);
+			// 8x8 小按钮:不画文字(库件 ButtonEx 的标签排版放不下),名字进 a11y label 与 tooltip。
+			Wui::PanelBackground(ctx, presetRect,
+				active ? theme.Accent : (hovered ? theme.ButtonHover : theme.ButtonBg), 1.0f);
+			Wui::HighlightOutline(ctx, presetRect, active ? theme.Accent : theme.Border, 1.0f, 1.0f);
+			Wui::WuiAccessNode presetNode;
+			presetNode.Id = Wui::HashId(idKey.c_str());
+			presetNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			presetNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			presetNode.Kind = "button";
+			// M46:标签带前缀 —— 裸 "Top Left" 在 a11y 树里看不出是「锚点预设」,AI 按 label 寻址会歧义。
+			presetNode.Label = Wui::Tr("panel.ui_designer.anchor.preset.label_prefix", "Anchor preset: ") + label;
+			presetNode.Value = active ? std::string("active") : std::string();
+			presetNode.Tooltip = tooltip;
+			presetNode.Rect = presetRect;
+			presetNode.Enabled = true;
+			presetNode.Interactive = true;
+			presetNode.Visible = true;
+			Wui::WuiAccessibility::Get().Register(presetNode);
+			if (hovered && !tooltip.empty())
+				Wui::Tooltip(ctx, presetRect, tooltip);
+			if (ctx.IsClicked(presetRect, 0))
+			{
+				if (target == nullptr)
+					target = FindNodeMutable(m_Document.Nodes, node.Id);
+				if (target != nullptr)
+				{
+					CommitNodeEdit();               // 收口上一条,让本次点选自己占一条记录
+					m_FrameNodeBefore = *target;
+					NoteNodeEdit(undoName);
+					ApplyAnchorPreset(target->Anchor, preset);
+					m_ScreenDirty = true;
+					m_Dirty = true;
+					CommitNodeEdit();
+					m_Status = Wui::Tr("panel.ui_designer.anchor.preset_applied", "Anchor preset: ")
+						+ label;
+				}
+			}
+		}
 	}
 
 	// ---- M12:撤销/重做(面板本地 WuiUndoStack)----
@@ -3108,6 +3731,7 @@ namespace World
 	{
 		CancelDrag();
 		CancelNodeEdit();
+		CancelOutlineRename();   // M47:撤销/重做会把被改名的行换掉,编辑态一并收口
 		m_Document = document;
 		m_ScreenDirty = true;
 		m_Dirty = true;
@@ -3691,6 +4315,7 @@ namespace World
 		m_Undo.Clear();          // 换文档 = 撤销历史作废(与 LoadFrom 同口径)
 		CancelDrag();
 		CancelNodeEdit();
+		CancelOutlineRename();
 		m_Collapsed.clear();
 		m_OutlineScroll = 0.0f;
 		m_PropertyScroll = 0.0f;

@@ -2,6 +2,7 @@
 #include "World/UI/UiPainter.h"
 
 #include "World/Core/Log.h"
+#include "World/WUI/Widgets/WuiChrome.h"   // M45:PanelBackground / HighlightOutline(库内真实表面件)
 #include "World/WUI/WuiLocalization.h"
 
 #include <algorithm>
@@ -252,26 +253,42 @@ namespace World::UI
 		void PaintImage(UiNodePaintContext& ctx)
 		{
 			const Wui::WuiTheme& theme = ctx.Theme;
-			const float textureId = TokenNumber(ctx, "textureId", 0.0f);
+			// M48:优先 `texture`(逻辑路径,经宿主装的解析钩子换成 `WuiTextureRegistry` 句柄)——
+			// 这是设计师/AI 能选的那一层;未写 / 解析不到(未装钩子、路径不存在)时回退既有的数值
+			// `textureId`(材质预览、模型预览、视口这些程序化调用方走这条,零改动)。两者都拿不到 ⇒
+			// handle = 0 = 空图槽位(画可见占位框,节点仍在,不是"静默画空气")。
+			uint64_t handle = 0;
+			const std::string texturePath = TokenText(ctx, "texture");
+			if (!texturePath.empty())
+				handle = Wui::ResolveTextureWithHook(texturePath);
+			if (handle == 0)
+			{
+				const float numeric = TokenNumber(ctx, "textureId", 0.0f);
+				if (numeric > 0.0f)
+					handle = static_cast<uint64_t>(numeric);
+			}
+
 			const float radius = ScaledProp(ctx, "radius", theme.Radius);
-			if (textureId > 0.0f)
+			if (handle > 0)
 			{
 				Wui::WuiDrawCommand command;
 				command.Kind = Wui::WuiDrawKind::Image;
 				command.Rect = ctx.Rect;
 				command.Color = TokenColor(ctx, "tint", WuiColor { 1, 1, 1, 1 });
-				command.Image = static_cast<uint64_t>(textureId);
+				command.Image = handle;
 				command.Uv = WuiRect { 0, 0, 1, 1 };
 				ctx.Context.Commands().push_back(std::move(command));
 			}
 			else
 			{
-				// textureId=0 = 空图槽位:画可见占位框,节点仍在(不是"静默画空气")。
 				AddRect(ctx, ctx.Rect, theme.ContentBg, radius);
 				AddRectOutline(ctx, ctx.Rect, theme.Border, radius, 1.0f);
 			}
 			ctx.Label = Localized(TokenText(ctx, "label"));
-			ctx.Value = textureId > 0.0f ? std::to_string(static_cast<long long>(textureId)) : std::string();
+			// value 报**能看到的那个身份**:选了路径就报路径(设计师/AI 读到的是它自己填的),
+			// 否则报数值句柄;都没有 = 空串。
+			ctx.Value = !texturePath.empty() ? texturePath
+				: (handle > 0 ? std::to_string(static_cast<long long>(handle)) : std::string());
 		}
 
 		void PaintProgressBar(UiNodePaintContext& ctx)
@@ -553,6 +570,125 @@ namespace World::UI
 			outSize = glm::vec2 { cellW * static_cast<float>(columns), cellH * static_cast<float>(rows) };
 			return true;
 		}
+		// ---- M45:新容器类型的绘制 ----
+		//
+		// 容器本体一律走库内真实表面件(`Wui::PanelBackground` + `Wui::HighlightOutline`,底色 + 边框,
+		// 与 `PaintPanel` 同口径),不新增裸 `WuiDrawKind`(门禁 F 拦新增裸绘制);文本走本文件既有的
+		// `AddText` 出口,不复刻 demo 控件。
+		void PaintContainerSurface(UiNodePaintContext& ctx, bool drawTitle)
+		{
+			const Wui::WuiTheme& theme = ctx.Theme;
+			const float radius = ScaledProp(ctx, "radius", theme.Radius);
+			Wui::PanelBackground(ctx.Context, ctx.Rect, TokenColor(ctx, "bg", theme.PanelBg), radius);
+			Wui::HighlightOutline(ctx.Context, ctx.Rect, TokenColor(ctx, "border", theme.Border), radius, 1.0f);
+
+			const std::string title = drawTitle ? Localized(TokenText(ctx, "title")) : std::string();
+			if (!title.empty())
+				AddText(ctx, ctx.Rect.X + theme.Pad * ctx.Scale, ctx.Rect.Y + 3.0f * ctx.Scale,
+					title, theme.Text, theme.FontSizeTitle * ctx.Scale, false);
+			ctx.Label = title;
+		}
+
+		// ScrollArea / Row / Column / Flex / GridContainer:同一块容器表面;子节点按各自
+		// `Layout.Kind` 摆放,绘制不参与布局(与 `PaintPanel` 一致)。
+		void PaintContainer(UiNodePaintContext& ctx)
+		{
+			PaintContainerSurface(ctx, true);
+		}
+
+		// Splitter:沿长边居中的分隔条(位置与长度由 `Anchor` 决定;不画手柄,thumb 由设计器叠加)。
+		void PaintSplitter(UiNodePaintContext& ctx)
+		{
+			const Wui::WuiTheme& theme = ctx.Theme;
+			const float thickness = std::max(ScaledProp(ctx, "thickness", 2.0f), 1.0f);
+			const WuiColor color = TokenColor(ctx, "color", theme.Border);
+			WuiRect band;
+			if (ctx.Rect.W >= ctx.Rect.H)
+			{
+				band = WuiRect { ctx.Rect.X,
+					ctx.Rect.Y + std::max((ctx.Rect.H - thickness) * 0.5f, 0.0f),
+					ctx.Rect.W, thickness };
+			}
+			else
+			{
+				band = WuiRect { ctx.Rect.X + std::max((ctx.Rect.W - thickness) * 0.5f, 0.0f),
+					ctx.Rect.Y, thickness, ctx.Rect.H };
+			}
+			Wui::PanelBackground(ctx.Context, band, color, 0.0f);
+			ctx.Label = Localized(TokenText(ctx, "label"));
+		}
+
+		// Tabs:顶栏一行标签(名字来自 `tabs` 属性,逗号分隔)+ 当前页(`active`)高亮。
+		void PaintTabs(UiNodePaintContext& ctx)
+		{
+			PaintContainerSurface(ctx, false);
+
+			const std::string names = TokenText(ctx, "tabs");
+			if (names.empty())
+				return;
+
+			const Wui::WuiTheme& theme = ctx.Theme;
+			const float font = ScaledProp(ctx, "fontSize", 14.0f);
+			const float pad = ScaledProp(ctx, "padding", 8.0f);
+			const int active = static_cast<int>(TokenNumber(ctx, "active", 0.0f));
+
+			auto trim = [](std::string text) {
+				while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+					text.erase(text.begin());
+				while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
+					text.pop_back();
+				return text;
+			};
+
+			std::size_t index = 0;
+			float x = ctx.Rect.X;
+			std::string current;
+			auto flush = [&]() {
+				const std::string label = trim(current);
+				current.clear();
+				if (label.empty())
+					return;
+				const float width = ctx.Context.MeasureTextWidth(label, font, Wui::WuiFontFamily::Ui) + pad * 2.0f;
+				if (static_cast<int>(index) == active)
+				{
+					Wui::PanelBackground(ctx.Context, WuiRect { x, ctx.Rect.Y, width, font + pad },
+						theme.ActiveBg, theme.Radius * ctx.Scale);
+					Wui::HighlightOutline(ctx.Context,
+						WuiRect { x, ctx.Rect.Y + font + pad - 2.0f, width, 2.0f }, theme.Accent, 0.0f, 2.0f);
+					ctx.Label = label;
+					ctx.Value = std::to_string(active);
+				}
+				AddText(ctx, x + pad, ctx.Rect.Y + pad * 0.5f, label, theme.Text, font, false);
+				x += width;
+				++index;
+			};
+
+			for (const char c : names)
+			{
+				if (c == ',')
+					flush();
+				else
+					current.push_back(c);
+			}
+			flush();
+		}
+
+		// Collapsible:可折叠分组的表头(标题 + `open`/`closed` 标记);子节点照常绘制。
+		void PaintCollapsible(UiNodePaintContext& ctx)
+		{
+			PaintContainerSurface(ctx, false);
+
+			const Wui::WuiTheme& theme = ctx.Theme;
+			const std::string title = Localized(TokenText(ctx, "title"));
+			const bool open = TokenBool(ctx, "open", true);
+			const float font = ScaledProp(ctx, "fontSize", 14.0f);
+			const float y = ctx.Rect.Y + 3.0f * ctx.Scale;
+			// 展开/收起标记用 '+'/'-' 文本(与既有控件同口径:不依赖字体箭头字形)。
+			AddText(ctx, ctx.Rect.X + theme.Pad * ctx.Scale, y, open ? "-" : "+", theme.Text, font, true);
+			AddText(ctx, ctx.Rect.X + theme.Pad * ctx.Scale + font, y, title, theme.Text, font, false);
+			ctx.Label = title;
+			ctx.Value = open ? std::string("open") : std::string("closed");
+		}
 	}
 
 	// 内置类型:`.wui` Type → 既有组件登记 id + 无障碍 role + 绘制入口。
@@ -622,6 +758,42 @@ namespace World::UI
 			&GridContentSize },
 			"Scrollable grid of equal cells with a fixed column count; use it for tile pickers and "
 			"icon galleries.");
+		// ---- M45:容器控件(登记类型 + 绘制;子节点驱动,与程序化 List/Grid 明确区分)----
+		//
+		// 「新建时的默认 `Layout.Kind`」不是 `UiNodeTypeDesc` 的字段 ⇒ 本包只登记类型与绘制,
+		// 默认布局(ScrollArea/Splitter/Tabs = Absolute;Row/Column/Flex = 同名 Kind;
+		// GridContainer = Grid;Collapsible = Column)由设计器 `AddNode` 侧决定。
+		add({ "ScrollArea", "scrollarea", "group", { "ScrollView" }, false, &PaintContainer,
+			{ "bg", "border", "radius", "title", "padding" } },
+			"Scrollable container that clips and offsets its children when they overflow; use it for "
+			"long lists, logs and detail panes.");
+		add({ "Row", "box", "group", { "HBox", "StackRow" }, false, &PaintContainer,
+			{ "padding" } },
+			"Stack container that lays its children out left to right; use it for toolbars and "
+			"button rows.");
+		add({ "Column", "box", "group", { "VBox", "StackColumn" }, false, &PaintContainer,
+			{ "padding" } },
+			"Stack container that lays its children out top to bottom; use it for forms and "
+			"vertical groups.");
+		add({ "Flex", "box", "group", { "FlexBox" }, false, &PaintContainer,
+			{ "padding", "rowMajor" } },
+			"Flex container that shares space among its children along one main axis; use it for "
+			"proportional toolbars and split content.");
+		add({ "GridContainer", "box", "group", { "GridLayout", "GridPanel" }, false, &PaintContainer,
+			{ "padding", "columns" } },
+			"Child-driven grid container that arranges its children into cells by column count; "
+			"use it for tiles and icon layouts.");
+		add({ "Splitter", "splitter", "splitter", { "Divider" }, false, &PaintSplitter,
+			{ "thickness", "color", "label" } },
+			"Draggable divider bar between two regions; use it to resize side panels and editors.");
+		add({ "Tabs", "tabs", "tab-bar", { "TabBar" }, false, &PaintTabs,
+			{ "bg", "border", "radius", "fontSize", "padding" } },
+			"Tab container that shows one labelled tab per entry and marks the active one; use it "
+			"for settings and multi-page panels.");
+		add({ "Collapsible", "collapsible", "group", { "Section", "Foldout" }, false, &PaintCollapsible,
+			{ "bg", "border", "radius", "fontSize", "padding" } },
+			"Collapsible group with a header that hides or shows its children; use it for optional "
+			"and advanced settings.");
 	}
 
 	// ---- M26:运行态属性覆盖表 ----

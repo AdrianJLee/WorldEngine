@@ -90,6 +90,12 @@ namespace World::UI
 		void PlaceNode(int index, const Wui::WuiRect& rect);
 		// 把每个滚动容器的当前偏移作用到其后代矩形(增量式,重复调用幂等)。
 		void ApplyScrollOffsets();
+		// M45:AutoSize 收紧(实现与顺序理由见 UiScreen.cpp;不改文档,只回写实例矩形)。
+		void TightenAutoSizeNodes();
+		// 该节点是否满足 AutoSize 生效条件(Layout.AutoSize 且点锚定);拉伸锚定下按需记一次 warning。
+		bool IsAutoSizeEligible(std::size_t index);
+		// 按优先级求内容尺寸:① 类型自报 ② 文本 ③ 子的包围盒 + Layout.Padding;都没有 = false。
+		bool ComputeAutoSizeContent(const UiNodeInstance& node, glm::vec2& outSize) const;
 		// 把 delta 加到 index 的全部后代(不含 index 自身)的矩形上。
 		void TranslateDescendants(std::size_t index, glm::vec2 delta);
 		// index 的可见性裁剪链:点在每个滚动祖先内才算命中。
@@ -103,5 +109,7 @@ namespace World::UI
 		std::unordered_map<std::string, glm::vec2> m_ScrollOffsets;        // 稳定 Id → 请求偏移(设计空间)
 		std::unordered_map<std::string, glm::vec2> m_ScrollContentSizes;  // 稳定 Id → 显式内容尺寸
 		std::vector<glm::vec2> m_AppliedScrollOffsets;                    // 每节点当前已应用的位移(增量基准)
+		// M45:每节点"AutoSize 遇拉伸锚定"的 warning 只报一次(不与 m_Nodes 同寿,故单列)。
+		std::vector<uint8_t> m_AutoSizeStretchWarned;
 	};
 }

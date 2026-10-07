@@ -274,7 +274,7 @@ namespace World::UI
 
 		bool LayoutEq(const UiLayoutSpec& a, const UiLayoutSpec& b)
 		{
-			if (a.Kind != b.Kind || a.Gap != b.Gap || a.Columns != b.Columns)
+			if (a.Kind != b.Kind || a.Gap != b.Gap || a.Columns != b.Columns || a.AutoSize != b.AutoSize)
 				return false;
 			for (int i = 0; i < 4; ++i)
 			{

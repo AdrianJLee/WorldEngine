@@ -21,6 +21,20 @@ namespace World::Wui
 			return hook;
 		}
 
+		// M48:纹理解析钩子(与上面的文本度量钩子同一形态:owner 键 + 后装者胜)。
+		// 与度量不同的是:**没有**回退实现 —— 未装钩子就是 0("没有这张图"),
+		// 调用方画占位框,而不是猜一个句柄。
+		struct TextureResolveHookState
+		{
+			std::vector<std::pair<void*, WuiTextureResolveFn>> Entries;
+		};
+
+		TextureResolveHookState& TextureHook()
+		{
+			static TextureResolveHookState hook;
+			return hook;
+		}
+
 		// 无钩子时的回退度量:ASCII 0.6em,其余 1.0em(与旧 CursorAtX 的启发式一致,
 		// 但按码点解码,不会把多字节串算成多个 ASCII)。
 		float FallbackAdvance(uint32_t codepoint, float fontSize)
@@ -110,6 +124,35 @@ namespace World::Wui
 		float width = 0;
 		ForEachCodepoint(utf8, [&](uint32_t cp) { width += FallbackAdvance(cp, fontSize); });
 		return width;
+	}
+
+	// ---- M48:纹理解析钩子(实现与契约见 WuiContext.h)----
+	// 与文本度量钩子**同一形态**:owner 键的列表,后装者胜(`Get` 走 `back()`),owner 可自注销。
+	// 为什么不缓存结果:路径→句柄的映射归宿主(`TextureLibrary` + `WuiTextureRegistry`),
+	// 设备重建/资产重烘之后映射会变;每帧问一次、由宿主的幂等实现去重,是唯一不会读到过期映射的做法。
+	void SetTextureResolveHook(void* owner, WuiTextureResolveFn fn)
+	{
+		auto& entries = TextureHook().Entries;
+		entries.erase(std::remove_if(entries.begin(), entries.end(),
+			[&](const auto& entry) { return entry.first == owner; }), entries.end());
+		entries.emplace_back(owner, std::move(fn));
+	}
+
+	void ClearTextureResolveHook(void* owner)
+	{
+		auto& entries = TextureHook().Entries;
+		entries.erase(std::remove_if(entries.begin(), entries.end(),
+			[&](const auto& entry) { return entry.first == owner; }), entries.end());
+	}
+
+	uint64_t ResolveTextureWithHook(std::string_view path)
+	{
+		if (path.empty())
+			return 0;
+		const auto& entries = TextureHook().Entries;
+		if (entries.empty() || !entries.back().second)
+			return 0;   // 未装钩子 = "没有这张图"(调用方按空图槽位画占位框)
+		return entries.back().second(path);
 	}
 
 	WuiTextFocus& WuiTextFocus::Get()

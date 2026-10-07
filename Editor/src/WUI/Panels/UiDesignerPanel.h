@@ -77,12 +77,23 @@ namespace World
 			std::vector<Wui::TreeViewItem>& out);
 		float PropertyContentHeight(const World::UI::UiNode* node) const;
 
+		// ---- M47:大纲行内联改名 ----
+		void BeginOutlineRename(const std::string& nodeId);
+		void CancelOutlineRename();
+		// 新名的可读错误(空 = 合法):与 `UI::IsValidUiNodeId` 同源 + 文档内唯一。
+		std::string OutlineRenameError(const std::string& newId) const;
+		// 提交改名:合法则写文档(一条撤销记录)并迁移面板按 Id 索引的状态;
+		// 返回 true = 收口(含"名字没变"),false = 校验失败且保持编辑态。
+		bool CommitOutlineRename(const std::string& newId);
+
 		// ---- 画布 ----
 		void LayoutCanvas(const Wui::WuiRect& rect);
 		void HandleCanvasInput(Wui::WuiContext& ctx, const Wui::WuiRect& rect);
 		void DrawCanvas(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// M46:`canvasRect` 用于锚点预设按钮的"放不下就降级到画布右上角"判定与裁剪;
+		// `allowPresets` 只给选中节点开(根节点的标记不带预设,避免一屏多份按钮)。
 		void DrawAnchorMarkers(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-			const World::UI::UiNodeInstance& node);
+			const Wui::WuiRect& canvasRect, const World::UI::UiNodeInstance& node, bool allowPresets);
 
 		// ---- M12:撤销/重做 / 手柄缩放 / 层级 ----
 		void HandleShortcuts(Wui::WuiContext& ctx);
@@ -175,6 +186,15 @@ namespace World
 		std::unordered_map<std::string, bool> m_Collapsed;
 		std::vector<std::string> m_OutlineIds;
 		float m_OutlineScroll = 0.0f;
+		// M47:大纲行内联改名(双击行 / 大纲头按钮进入;Enter 提交,Esc 或失焦取消)。
+		bool m_OutlineRenameActive = false;
+		std::string m_OutlineRenameNodeId;         // 被改名的节点(旧 Id)
+		std::string m_OutlineRenameBuffer;         // `TextFieldEx` 的进出参 = 编辑中的新名字
+		bool m_OutlineRenameFocusPending = false;  // 进入编辑后的第一帧把焦点交给输入框
+		// M47 修:焦点要连续几帧重申(见 BeginOutlineRename 与 RenderOutline 的注释);
+		// `HadFocus` = 真的拿到过焦点(没拿到之前不算"失焦提交"),`FocusTries` = 已重申几帧。
+		bool m_OutlineRenameHadFocus = false;
+		int m_OutlineRenameFocusTries = 0;
 
 		// ---- M12:撤销/重做(面板本地栈;不往 WuiContext / 引擎加全局状态)----
 		// 一条记录 = 一份"整档前像";Undo 恢复前像,Redo 恢复记录时的后像。

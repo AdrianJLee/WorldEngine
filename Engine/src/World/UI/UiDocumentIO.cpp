@@ -218,6 +218,9 @@ namespace World::UI
 					out.Layout.Columns = columns.as<int>();
 				if (const YAML::Node rowMajor = layout["RowMajor"])
 					out.Layout.RowMajor = rowMajor.as<bool>();
+				// M45:AutoSize(缺省 false = 旧文档行为不变;缺省不写回,见序列化)。
+				if (const YAML::Node autoSize = layout["AutoSize"])
+					out.Layout.AutoSize = autoSize.as<bool>();
 			}
 
 			if (const YAML::Node world = node["World"])
@@ -298,6 +301,9 @@ namespace World::UI
 					out << YAML::Key << "Columns" << YAML::Value << node.Layout.Columns;
 				if (node.Layout.Kind == UiLayoutKind::Flex)
 					out << YAML::Key << "RowMajor" << YAML::Value << node.Layout.RowMajor;
+				// M45:AutoSize 非默认才写,且**追加在映射末尾** —— 既有键序与旧文档逐字节不变。
+				if (node.Layout.AutoSize)
+					out << YAML::Key << "AutoSize" << YAML::Value << true;
 				out << YAML::EndMap;
 			}
 
