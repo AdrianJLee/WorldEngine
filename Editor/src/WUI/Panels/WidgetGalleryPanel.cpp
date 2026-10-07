@@ -272,30 +272,16 @@ std::string ResolveGitCommit(){
 		}
 
 
-		// SizeNotes 里的 preferred WxH → 单件画布尺寸(解析不出来就用 240x120)。
-std::pair<float, float> SizeNotesToSize(const std::string& notes){
-			const size_t marker = notes.find("preferred");
-			const size_t from = marker == std::string::npos ? 0 : marker;
-			float width = 240.0f;
-			float height = 120.0f;
-			const size_t x = notes.find('x', from);
-			if (x != std::string::npos)
-			{
-				size_t start = x;
-				while (start > 0 && (std::isdigit(static_cast<unsigned char>(notes[start - 1]))
-					|| notes[start - 1] == '.'))
-					--start;
-				const std::string widthText = notes.substr(start, x - start);
-				size_t end = x + 1;
-				while (end < notes.size() && (std::isdigit(static_cast<unsigned char>(notes[end]))
-					|| notes[end] == '.'))
-					++end;
-				const std::string heightText = notes.substr(x + 1, end - x - 1);
-				if (!widthText.empty())
-					width = SafeFloat(widthText, width);
-				if (!heightText.empty())
-					height = SafeFloat(heightText, height);
-			}
+		// 首选尺寸(M42):走**引擎唯一解析器**(与设计器 `AddNode`/`UiNodeTypeDesc::DefaultSize`
+		// 同源):优先按组件 id 查登记项,其次按 SizeNotes 解析,都失败 = 240x120
+		//(库件画布默认)。不再自己扫 `find('x')` 的散文字符串。
+std::pair<float, float> SizeNotesToSize(const std::string& notes, const std::string& componentId){
+			glm::vec2 preferred { 240.0f, 120.0f };
+			const bool byId = !componentId.empty() && Wui::PreferredComponentSize(componentId, preferred);
+			if (!byId)
+				Wui::ParsePreferredComponentSize(notes, preferred);   // 失败则保持 240x120
+			float width = preferred.x;
+			float height = preferred.y;
 			width = std::clamp(width, kMinCanvasSize, kMaxCanvasSize);
 			height = std::clamp(height, 28.0f, kMaxCanvasSize);
 			return { width, height };

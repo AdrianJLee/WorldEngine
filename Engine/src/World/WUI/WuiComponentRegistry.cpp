@@ -600,6 +600,83 @@ std::string FormatComponentSize(float width, float height){
 		return FormatDimension(width) + "x" + FormatDimension(height);
 	}
 
+namespace
+{
+		// M41:首选尺寸的唯一解析实现(约定见 WuiComponentRegistry.h 的声明注释)。
+
+bool IsDecimalDigit(char ch){
+			return ch >= '0' && ch <= '9';
+		}
+
+
+		// 位数封顶,避免超长数字串的整型溢出;设计单位远不会到这个量级。
+constexpr unsigned long long kMaxPreferredDimension = 1000000ULL;
+
+
+unsigned long long ReadDecimalRun(std::string_view text, size_t begin, size_t end){
+			unsigned long long value = 0;
+			for (size_t i = begin; i < end; ++i)
+			{
+				value = value * 10ULL + static_cast<unsigned long long>(text[i] - '0');
+				if (value > kMaxPreferredDimension)
+					value = kMaxPreferredDimension;
+			}
+			return value;
+		}
+
+}
+
+
+bool ParsePreferredComponentSize(std::string_view sizeNotes, glm::vec2& out){
+		const size_t size = sizeNotes.size();
+		size_t i = 0;
+		while (i < size)
+		{
+			if (!IsDecimalDigit(sizeNotes[i]))
+			{
+				++i;
+				continue;
+			}
+			// 小数尾段不是"N":如 "12.5x3" 不解析成 (5,3),继续往后找完整整数。
+			if (i > 0 && sizeNotes[i - 1] == '.')
+			{
+				++i;
+				continue;
+			}
+			const size_t widthBegin = i;
+			while (i < size && IsDecimalDigit(sizeNotes[i]))
+				++i;
+			const size_t widthEnd = i;
+
+			size_t cursor = widthEnd;
+			while (cursor < size && (sizeNotes[cursor] == ' ' || sizeNotes[cursor] == '\t'))
+				++cursor;
+			if (cursor >= size || sizeNotes[cursor] != 'x')
+				continue;   // i = widthEnd,继续扫后面可能的尺寸
+			++cursor;
+			while (cursor < size && (sizeNotes[cursor] == ' ' || sizeNotes[cursor] == '\t'))
+				++cursor;
+			if (cursor >= size || !IsDecimalDigit(sizeNotes[cursor]))
+				continue;
+
+			const size_t heightBegin = cursor;
+			while (cursor < size && IsDecimalDigit(sizeNotes[cursor]))
+				++cursor;
+			out = glm::vec2 { static_cast<float>(ReadDecimalRun(sizeNotes, widthBegin, widthEnd)),
+				static_cast<float>(ReadDecimalRun(sizeNotes, heightBegin, cursor)) };
+			return true;
+		}
+		return false;
+	}
+
+
+bool PreferredComponentSize(std::string_view componentId, glm::vec2& out){
+		const WuiComponentDesc* desc = WuiComponentRegistry::Find(std::string(componentId));
+		if (desc == nullptr)
+			return false;
+		return ParsePreferredComponentSize(desc->SizeNotes, out);
+	}
+
 namespace WuiComponentRegistryDetail
 {
 		// ---- 登记表构造小工具 ----

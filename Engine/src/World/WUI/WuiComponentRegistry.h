@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -146,6 +147,15 @@ namespace World::Wui
 	// 规范写法(面板回显/写回用):颜色 → "#RRGGBB"(A=1)或 "#RRGGBBAA";尺寸 → "WxH"(去尾零)。
 	WLD_API std::string FormatComponentColor(const WuiColor& color);
 	WLD_API std::string FormatComponentSize(float width, float height);
+
+	// SizeNotes 的机器可读约定(唯一实现,编辑器/引擎共用,不许各写一份散文字符串解析):
+	//   * 取注解里**第一处** `NxM`(N/M 为十进制整数,允许空格两侧)= 该组件的首选尺寸(设计单位);
+	//   * 没有 `NxM` ⇒ false,`out` 保持不变(调用方用自己的回落值)。
+	// 为什么认第一处而不是认 "preferred" 之后:既有条目两种语序都有("showcase 首选 128x24(preferred
+	// 属性可覆盖…)" / "preferred 96x28"),而尺寸永远是那一行里第一处 NxM。
+	WLD_API bool ParsePreferredComponentSize(std::string_view sizeNotes, glm::vec2& out);
+	// 便捷:按组件 id 查登记项并解析(`Find` 未命中 ⇒ false)。`out` 单位 = 设计单位。
+	WLD_API bool PreferredComponentSize(std::string_view componentId, glm::vec2& out);
 
 	// 只读查询接口:工作台、探针、门禁脚本都从这里取事实源。
 	class WLD_API WuiComponentRegistry

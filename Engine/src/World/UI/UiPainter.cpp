@@ -560,42 +560,68 @@ namespace World::UI
 	// `WuiNodeRegistry` 不重复定义属性表,属性元数据走 `UiNodeRegistry::Component()`。
 	void RegisterBuiltinUiNodeTypes()
 	{
-		auto add = [](UiNodeTypeDesc desc) {
+		auto add = [](UiNodeTypeDesc desc, const char* doc) {
 			// M10:滚动容器属性对**所有**类型有效(任何容器节点都能滚动)。统一声明,
 			// 否则 `scrollable`/`overflow` 会被"未知属性"提示刷屏。
 			for (const char* scrollProp : { "scrollable", "scroll", "overflow" })
 				desc.ExtraProps.emplace_back(scrollProp);
+			// M41:功能介绍(英文源文,本地化键 wui.component.<ComponentId>.doc)与新建默认尺寸
+			// (取自组件登记表 SizeNotes 的首选;唯一解析实现在 Wui::PreferredComponentSize,失败 = 0)。
+			desc.Doc = doc != nullptr ? doc : "";
+			glm::vec2 preferred { 0.0f, 0.0f };
+			if (Wui::PreferredComponentSize(desc.ComponentId, preferred))
+				desc.DefaultSize = preferred;
 			std::string error;
 			if (!UiNodeRegistry::RegisterType(std::move(desc), &error))
 				WLD_CORE_ERROR("[ui] builtin node type registration failed: {0}", error);
 		};
 
 		add({ "Panel", "box", "group", { "WuiBox" }, false, &PaintPanel,
-			{ "bg", "border", "radius", "title" } });
-		add({ "Label", "label", "text", { "WuiLabel" }, false, &PaintLabel, { "color" } });
+			{ "bg", "border", "radius", "title" } },
+			"Container surface with a themed background, border and optional title that lays out child "
+			"nodes inside; use it for cards, dialogs and toolbars.");
+		add({ "Label", "label", "text", { "WuiLabel" }, false, &PaintLabel, { "color" } },
+			"Read-only single line of text. Use it for captions, field labels and status readouts.");
 		add({ "Button", "button", "button", { "WuiButton" }, true, &PaintButton,
-			{ "bg", "border", "text", "radius" } });
-		add({ "Image", "image", "img", { "WuiImage" }, false, &PaintImage, { "radius" } });
+			{ "bg", "border", "text", "radius" } },
+			"Clickable push button with a label and hover/pressed/focus/disabled states; use it as the "
+			"main action in a dialog, toolbar or form.");
+		add({ "Image", "image", "img", { "WuiImage" }, false, &PaintImage, { "radius" } },
+			"Draws a texture (icon, thumbnail or preview) into the node rectangle, with optional "
+			"rounding and tint.");
 		add({ "ProgressBar", "progress", "progressbar", { "progress", "WuiProgress" }, false,
-			&PaintProgressBar, { "fillColor", "trackColor", "radius", "label" } });
+			&PaintProgressBar, { "fillColor", "trackColor", "radius", "label" } },
+			"Horizontal bar that fills a track from a 0..1 value; use it for loading, health and "
+			"task-progress readouts.");
 		add({ "Toggle", "toggle", "checkbox", { "WuiToggle" }, true, &PaintToggle,
-			{ "color", "boxSize" } });
+			{ "color", "boxSize" } },
+			"On/off switch with a square indicator and a label; use it for options that apply "
+			"immediately.");
 
 		// ---- M10:商业控件面 ----
 		// ComponentId 必须命中 `WuiComponentRegistry::Find`;登记表里没有恰好叫 slider/grid 的 id,
 		// 取最接近的既有登记项(Slider→`slider.float`, List/Grid→`listview`),不另起命名。
 		add({ "Slider", "slider.float", "slider", { "SliderFloat", "WuiSlider" }, true, &PaintSlider,
-			{ "label", "radius", "trackColor", "fillColor", "knobColor", "trackHeight", "knobSize" } });
+			{ "label", "radius", "trackColor", "fillColor", "knobColor", "trackHeight", "knobSize" } },
+			"Drag or arrow-key control that picks a number within a min..max range; use it for "
+			"volume, intensity and similar values.");
 		add({ "Checkbox", "checkbox", "checkbox", { "WuiCheckbox", "CheckboxEx" }, true, &PaintCheckbox,
-			{ "boxSize", "color", "fontSize" } });
+			{ "boxSize", "color", "fontSize" } },
+			"Checkbox with a label for one yes/no choice; pairs with an Apply/OK button in forms.");
 		add({ "TextField", "textfield", "text-field", { "WuiTextField", "Input" }, true, &PaintTextField,
-			{ "radius", "bg", "border", "fontSize", "padding", "color" } });
+			{ "radius", "bg", "border", "fontSize", "padding", "color" } },
+			"Single-line editable text input with placeholder support; use it for names, paths and "
+			"other short values.");
 		add({ "List", "listview", "list", { "ListView", "WuiList" }, true, &PaintList,
 			{ "rowCount", "rowHeight", "radius", "bg", "fontSize", "rowPrefix", "padding",
-				"rowColor", "rowColorAlt" }, &ListContentSize });
+				"rowColor", "rowColorAlt" }, &ListContentSize },
+			"Scrollable list of rows that reports the clicked row; use it for item pickers and "
+			"asset browsers.");
 		add({ "Grid", "listview", "grid", { "GridView", "WuiGrid" }, true, &PaintGrid,
 			{ "columns", "cellW", "cellH", "rowCount", "radius", "bg", "fontSize", "cellColor", "gap" },
-			&GridContentSize });
+			&GridContentSize },
+			"Scrollable grid of equal cells with a fixed column count; use it for tile pickers and "
+			"icon galleries.");
 	}
 
 	// ---- M26:运行态属性覆盖表 ----

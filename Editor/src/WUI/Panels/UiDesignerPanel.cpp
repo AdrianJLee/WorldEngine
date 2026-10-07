@@ -481,6 +481,25 @@ namespace World
 			return ToLowerAscii(std::string(haystack)).find(lowerNeedle) != std::string::npos;
 		}
 
+		// M42:非空段用 " · " 连接(节点面板 tooltip = 本地化分类 · 本地化名 · 本地化介绍;
+		// 某段为空时不悬着一个分隔符)。
+		std::string JoinTooltipParts(const std::string& first, const std::string& second,
+			const std::string& third)
+		{
+			std::string text = first;
+			const auto append = [&text](const std::string& part)
+			{
+				if (part.empty())
+					return;
+				if (!text.empty())
+					text += " \xC2\xB7 ";
+				text += part;
+			};
+			append(second);
+			append(third);
+			return text;
+		}
+
 		// M29:属性覆盖值的读写(属性面板按类型登记表出行的基础)。
 		UI::UiProp* FindPropMutable(UI::UiNode& node, std::string_view name)
 		{
@@ -1310,21 +1329,46 @@ namespace World
 
 		// 组装(分类 + 过滤),再按"分类连续块"渲染 —— 同名分类只出现一次标题。
 		const std::string needle = ToLowerAscii(m_PaletteSearch);
-		std::vector<std::pair<std::string, std::string>> entries;   // { Category, Type }
+		// M42:每格 = 原始标识(排序/过滤/AddNode 用)+ 本地化文案(可见文本与 tooltip)。
+		// 可见文案的键:`wui.component.<ComponentId>.name` / `.doc` 与 `wui.category.<分类>`,
+		// 兜底 = 组件登记表的英文源文(DisplayName / Doc / SizeNotes)。
+		struct PaletteEntry
+		{
+			std::string Category;       // 原始分类(空 = 未登记分类)
+			std::string Type;           // 原始 `.wui` 类型名(按钮 id 与 AddNode 的输入,不改)
+			std::string Label;          // 本地化控件名(按钮可见文本)
+			std::string CategoryLabel;  // 本地化分类名(tooltip 用)
+			std::string Doc;            // 本地化功能介绍(tooltip 用)
+		};
+		std::vector<PaletteEntry> entries;
 		for (const UI::UiNodeTypeDesc& desc : UI::UiNodeRegistry::All())
 		{
-			std::string category = Wui::Tr("panel.ui_designer.palette.other", "Other");
-			if (const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Component(desc.Type))
-			{
-				if (!component->Category.empty())
-					category = component->Category;
-			}
-			if (!ContainsNoCase(desc.Type, needle) && !ContainsNoCase(category, needle))
+			const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Component(desc.Type);
+			PaletteEntry entry;
+			entry.Type = desc.Type;
+			if (component != nullptr)
+				entry.Category = component->Category;
+			// `Slider` 的 ComponentId 是 `slider.float`(含点)⇒ 键里就带点,不做任何替换。
+			// 兜底用**原始 `.wui` 类型名**(派工单的 palette 口径):英文界面下按钮文案与改动前
+			// 逐字相同;若改用 DisplayName,List 与 Grid(同为 `listview`)会撞名。
+			entry.Label = Wui::Tr("wui.component." + desc.ComponentId + ".name", desc.Type);
+			entry.CategoryLabel = entry.Category.empty()
+				? Wui::Tr("panel.ui_designer.palette.other", "Other")
+				: Wui::Tr("wui.category." + entry.Category, entry.Category);
+			const std::string docSource = !desc.Doc.empty()
+				? desc.Doc
+				: (component != nullptr ? component->SizeNotes : std::string());
+			entry.Doc = Wui::Tr("wui.component." + desc.ComponentId + ".doc", docSource);
+			// 过滤:原始 Type / 原始分类照旧(中文界面搜英文名仍然有效),再追加本地化名
+			// 与本地化分类(中文界面也能搜中文);**过滤逻辑不跟随本地化文本改动**。
+			if (!ContainsNoCase(entry.Type, needle) && !ContainsNoCase(entry.Category, needle)
+				&& !ContainsNoCase(entry.Label, needle)
+				&& !ContainsNoCase(entry.CategoryLabel, needle))
 				continue;
-			entries.emplace_back(category, desc.Type);
+			entries.push_back(std::move(entry));
 		}
 		std::stable_sort(entries.begin(), entries.end(),
-			[](const auto& a, const auto& b) { return a.first < b.first; });
+			[](const PaletteEntry& a, const PaletteEntry& b) { return a.Category < b.Category; });
 
 		const Wui::WuiRect listRect { rect.X + pad, searchY + 24.0f,
 			std::max(40.0f, rect.W - pad * 2.0f),
@@ -1353,11 +1397,12 @@ namespace World
 			if (!ctx.ClipAllows(cell))
 				continue;   // 滚出视口的行不画也不登记(与属性页滚动区同一口径)
 			if (Wui::ButtonEx(ctx,
-				Wui::HashId(("ui_designer.palette.add." + entries[i].second).c_str()),
-				cell, entries[i].second, theme, true, false,
-				entries[i].first + " \xC2\xB7 " + entries[i].second))
+				// a11y id 用**原始** Type(语言无关的稳定寻址);可见文本与 tooltip 走本地化。
+				Wui::HashId(("ui_designer.palette.add." + entries[i].Type).c_str()),
+				cell, entries[i].Label, theme, true, false,
+				JoinTooltipParts(entries[i].CategoryLabel, entries[i].Label, entries[i].Doc)))
 			{
-				addType = entries[i].second;
+				addType = entries[i].Type;
 			}
 		}
 		if (entries.empty())
@@ -1427,7 +1472,8 @@ namespace World
 			}
 		}
 		// M31:两大块 —— Type 块头 + Common 块头 + 六个公共段头(Node/Anchor/Layout/World/Bind/On)。
-		float rows = 8.0f;
+		// M42:Type 块头下多一行**功能介绍**(见 RenderProperties 的 ui_designer.type.doc)。
+		float rows = 9.0f;
 		if (m_ShowNodeSection) rows += 2.0f;                // Id / Type
 		rows += propertyRows;                               // Type 块的类型独有属性(恒显示)
 		// M37:Type 块的附加行 —— 状态选择器(类型登记了 ≥2 个状态时)与混选提示。
@@ -1688,10 +1734,21 @@ namespace World
 			editTargets = SelectedNodesMutable();
 		if (editTargets.empty())
 			editTargets.push_back(node);
+		// M42:类型登记表的两个入口 —— `Find` 给 ComponentId/英文功能介绍(`Doc`),
+		// `Component` 给 DisplayName/SizeNotes(本地化键的兜底)。
+		const UI::UiNodeTypeDesc* typeDesc = UI::UiNodeRegistry::Find(node->Type);
+		const Wui::WuiComponentDesc* typeMeta = UI::UiNodeRegistry::Component(node->Type);
+		const std::string componentId = typeDesc != nullptr ? typeDesc->ComponentId : node->Type;
 		{
 			const Wui::WuiRect typeHeaderRow = nextRow(rowHeight);
+			// a11y 稳定标识符:标签保持 "Type: <Type>"(既有验证脚本按它寻址,不随语言变化)。
 			const std::string typeTitle = "Type: " + node->Type;
-			Wui::SectionHeader(ctx, typeHeaderRow, typeTitle, theme.Accent, theme, theme.FontSizeTitle);
+			// M42:可见文本 = 本地化控件名(键 `wui.component.<id>.name`,兜底 = DisplayName)。
+			Wui::SectionHeader(ctx, typeHeaderRow, Wui::Tr("panel.ui_designer.type_header", "Type: ")
+				+ Wui::Tr("wui.component." + componentId + ".name",
+					typeMeta != nullptr && !typeMeta->DisplayName.empty()
+					? typeMeta->DisplayName : node->Type),
+			theme.Accent, theme, theme.FontSizeTitle);
 			const std::string typeCount = "(" + std::to_string(propRows.size()) + ")";
 			const float countWidth = ctx.MeasureTextWidth(typeCount, theme.FontSizeSmall);
 			Wui::Label(ctx, glm::vec2 { typeHeaderRow.X + std::max(0.0f, typeHeaderRow.W - countWidth - 2.0f),
@@ -1709,6 +1766,30 @@ namespace World
 			typeNode.Interactive = false;
 			typeNode.Visible = true;
 			Wui::WuiAccessibility::Get().Register(typeNode);
+		}
+		// M42:类型功能介绍一行(键 `wui.component.<id>.doc`,兜底 = `UiNodeTypeDesc::Doc`,
+		// 空则用组件登记表的 SizeNotes)。a11y 稳定 id = `ui_designer.type.doc`、kind = label;
+		// 可见文本走本地化,Value 保留英文源文(对照与审计用)。
+		{
+			const Wui::WuiRect typeDocRow = nextRow(rowHeight);
+			const std::string docSource = typeDesc != nullptr && !typeDesc->Doc.empty()
+				? typeDesc->Doc
+				: (typeMeta != nullptr ? typeMeta->SizeNotes : std::string());
+			const std::string docText = Wui::Tr("wui.component." + componentId + ".doc", docSource);
+			Wui::Label(ctx, glm::vec2 { typeDocRow.X + 2.0f, typeDocRow.Y + 4.0f }, docText,
+				theme.TextMuted, theme.FontSizeCaption);
+			Wui::WuiAccessNode docNode;
+			docNode.Id = Wui::HashId("ui_designer.type.doc");
+			docNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			docNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			docNode.Kind = "label";
+			docNode.Label = docText;
+			docNode.Value = typeDesc != nullptr ? typeDesc->Doc : std::string();
+			docNode.Rect = typeDocRow;
+			docNode.Enabled = true;
+			docNode.Interactive = false;
+			docNode.Visible = true;
+			Wui::WuiAccessibility::Get().Register(docNode);
 		}
 		// M37:混选提示(块头一行)—— 不同 Type 的节点没有共同属性表,只改主选中。
 		if (mixedTypes)
@@ -1743,7 +1824,9 @@ namespace World
 			for (std::size_t i = 0; i < states->size(); ++i)
 			{
 				const Wui::WuiComponentState& state = (*states)[i];
-				stateOptions.push_back(state.Label.empty() ? state.Id : state.Label);
+				// M42:选项文本走本地化(键 `wui.state.<id>`),存值仍是 `state.Id`(别改)。
+				stateOptions.push_back(Wui::Tr("wui.state." + state.Id,
+					state.Label.empty() ? state.Id : state.Label));
 				if (state.Id == m_PropState)
 					stateSelected = static_cast<int>(i);
 			}
@@ -1812,13 +1895,16 @@ namespace World
 				const std::string base = "ui_designer.prop." + node->Id + "." + ref.Name;
 
 				Wui::PropertyRowDesc desc;
-				desc.Label = ref.Name;
+				// M42:可见文案走本地化(键 `wui.prop.<名>.name` / `.doc`);A11yLabel 保持原始
+				// 属性名(稳定标识符,脚本按它寻址),Term 仍是英文术语对照(既有 TrLabel 口径)。
+				desc.Label = Wui::Tr("wui.prop." + ref.Name + ".name", ref.Name);
 				desc.Term = ref.Name;
 				desc.A11yLabel = ref.Name;
 				desc.A11yValue = value;
 				desc.LabelWidth = labelWidth;
 				desc.Enabled = true;
-				desc.Tooltip = meta != nullptr ? meta->Doc : std::string();
+				desc.Tooltip = Wui::Tr("wui.prop." + ref.Name + ".doc",
+					meta != nullptr ? meta->Doc : std::string());
 				if (meta != nullptr && !meta->Unit.empty())
 					desc.Tooltip += (desc.Tooltip.empty() ? "" : "\n") + meta->Unit;
 				// ↺ = 清除覆盖值(回到类型默认);只在**有覆盖**时出现(库件的 ResetModified 口径)。
@@ -2650,15 +2736,24 @@ namespace World
 				{
 					// 手柄语义:拖哪条边就动哪条边,**对边钉住不动**(与主流 UI 编辑器一致)。
 					//
-					// 两种锚定模式下手柄必须做的事不同(这是 M19 修的真 bug:此前只改 Size,
-					// 于是拖左边/上边时对边跟着跑,表现为"整框在移动而不是在缩放"):
+					// 两种锚定模式下手柄必须做的事不同(M19 修的真 bug:此前只改 Size,
+					// 于是拖左边/上边时对边跟着跑;M42 补齐"拖右/下"的对称补偿 —— 此前
+					// 点锚定下拖右边会两边一起动):
 					//
-					//   点锚定(Min == Max):left = Offset.x - Pivot.x*W,right = Offset.x + (1-Pivot.x)*W
-					//     * 拖右边:W += delta(左边天然不动)⇒ 只改 Size
-					//     * 拖左边:W -= delta,再要 left 动 delta ⇒ Offset.x += delta*(1-Pivot.x)
-					//   拉伸(Min != Max):left = Offset.x(offsetMin),W = 锚框跨度 + Size
-					//     * 拖右边:Size += delta
-					//     * 拖左边:Offset.x += delta 且 Size -= delta(两边一起动,右边缘才不动)
+					//   点锚定(Min == Max):矩形完全由 Offset/Size 决定
+					//     edgeLow0  = Offset.x - Pivot.x*W          (拖前左边缘)
+					//     edgeHigh0 = Offset.x + (1-Pivot.x)*W      (拖前右边缘)
+					//     拖左: Offset.x = edgeHigh0 - (1-Pivot.x)*size.x   (右边缘钉住)
+					//     拖右: Offset.x = edgeLow0  + Pivot.x*size.x       (左边缘钉住)
+					//   拉伸(Min != Max):Offset.x = offsetMin,Size.x 是相对锚框跨度的**增量**
+					//     edgeLow0  = Offset.x                      (拖前左边缘)
+					//     edgeHigh0 = Offset.x + Size.x             (拖前右边缘;同一常量跨度下比较)
+					//     拖左: Offset.x = edgeHigh0 - size.x       (右边缘钉住)
+					//     拖右: Offset.x 不变,只改 Size.x           (左边缘天然钉住)
+					//
+					// 两种模式的差异只在"钉住对边要反推什么":点锚定反推 Pivot 造成的那段位移,
+					// 拉伸反推的是尺寸增量。**分开写清** —— 同一个量在两种模式下不是同一个意思
+					// (此前 `right0 = Offset.x + Size.x` 在拉伸分支代数上恰好成立,但它不是右边缘)。
 					//
 					// Y 轴同理(屏幕 Y 向下,"上边"= Y 变小)。
 					const bool pointX = node->Anchor.Min.x == node->Anchor.Max.x;
@@ -2695,28 +2790,42 @@ namespace World
 					if (!input.Alt)
 						size = SnapDesign(size);
 
-					// 拖左边/上边时反推 Offset,使**对边**在任意钳位之后仍然钉住:
-					//   点锚定:right = Offset.x + (1-Pivot.x)*W ⇒ Offset.x = right0 - (1-Pivot.x)*W
-					//   拉伸  :right = Offset.x + 跨度 + Size ⇒ Offset.x = right0 - 跨度 - Size
-					// (right0 = 按下那一刻的右边缘;钳位改了 W,这里按钳后的 W 重算,所以缩到 0 时
-					//  左边缘正好停在右边缘上,而不是把整框推走。)
+					// 拖某条边时反推 Offset,使**对边**在任意钳位之后仍然钉住
+					// (钳位改了 size,这里按钳后的 size 重算 ⇒ 缩到 0 时被拖的边正好停在
+					//  对边上,而不是把整框推走)。
 					if ((m_DragHandle & HandleLeft) != 0)
 					{
-						const float right0 = pointX
+						const float edgeHigh0 = pointX
 							? m_DragStartOffset.x + (1.0f - node->Anchor.Pivot.x) * m_DragStartSize.x
 							: m_DragStartOffset.x + m_DragStartSize.x;
 						offset.x = pointX
-							? right0 - (1.0f - node->Anchor.Pivot.x) * size.x
-							: right0 - size.x;
+							? edgeHigh0 - (1.0f - node->Anchor.Pivot.x) * size.x
+							: edgeHigh0 - size.x;
+					}
+					if ((m_DragHandle & HandleRight) != 0 && pointX)
+					{
+						// 点锚定:拖右 = 钉住左边缘 ⇒ 反推 Pivot.x*size.x 那段位移。
+						// (拉伸模式 Offset.x 保持不动 —— 左边缘天然钉住,只改 Size.x。)
+						const float edgeLow0 =
+							m_DragStartOffset.x - node->Anchor.Pivot.x * m_DragStartSize.x;
+						offset.x = edgeLow0 + node->Anchor.Pivot.x * size.x;
 					}
 					if ((m_DragHandle & HandleTop) != 0)
 					{
-						const float bottom0 = pointY
+						const float edgeHigh0 = pointY
 							? m_DragStartOffset.y + (1.0f - node->Anchor.Pivot.y) * m_DragStartSize.y
 							: m_DragStartOffset.y + m_DragStartSize.y;
 						offset.y = pointY
-							? bottom0 - (1.0f - node->Anchor.Pivot.y) * size.y
-							: bottom0 - size.y;
+							? edgeHigh0 - (1.0f - node->Anchor.Pivot.y) * size.y
+							: edgeHigh0 - size.y;
+					}
+					if ((m_DragHandle & HandleBottom) != 0 && pointY)
+					{
+						// 点锚定:拖下 = 钉住上边缘 ⇒ 反推 Pivot.y*size.y 那段位移。
+						// (拉伸模式 Offset.y 保持不动 —— 上边缘天然钉住,只改 Size.y。)
+						const float edgeLow0 =
+							m_DragStartOffset.y - node->Anchor.Pivot.y * m_DragStartSize.y;
+						offset.y = edgeLow0 + node->Anchor.Pivot.y * size.y;
 					}
 
 					if (size.x != node->Anchor.Size.x || size.y != node->Anchor.Size.y ||
@@ -3606,7 +3715,8 @@ namespace World
 				"Open or create a document first (New)");
 			return false;
 		}
-		if (UI::UiNodeRegistry::Find(type) == nullptr)
+		const UI::UiNodeTypeDesc* typeDesc = UI::UiNodeRegistry::Find(type);
+		if (typeDesc == nullptr)
 		{
 			m_Status = Wui::Tr("panel.ui_designer.unknown_type", "Unknown node type: ") + type;
 			return false;
@@ -3623,6 +3733,7 @@ namespace World
 		// `Label#1 → Label#0 → Label#2` 这种三层链 —— 既不是用户意图,也难管理。
 		std::vector<UI::UiNode>* targetList = &m_Document.Nodes;
 		std::string parentPath;
+		std::string parentId;   // 父容器 Id(空 = 根列表);M42 用它把新节点放进父内容框
 		std::size_t insertIndex = m_Document.Nodes.size();
 		if (!m_SelectedId.empty())
 		{
@@ -3634,6 +3745,7 @@ namespace World
 				{
 					targetList = &parent->Children;
 					parentPath = FindNodePath(m_Document, m_SelectedId);
+					parentId = parent->Id;
 					insertIndex = targetList->size();
 				}
 				else
@@ -3645,10 +3757,15 @@ namespace World
 					{
 						targetList = location.List;
 						insertIndex = location.Index + 1;
-						parentPath = FindNodePath(m_Document, m_SelectedId);
-						const std::size_t lastDot = parentPath.rfind('.');
-						parentPath = lastDot == std::string::npos
-							? std::string() : parentPath.substr(0, lastDot);
+						// 选中叶子的自身路径:末段是它自己,去掉末段 = 它的父路径
+						// (新节点成为它的兄弟,落在同一个父下;根层叶子没有父 ⇒ 两处都空)。
+						const std::string leafPath = FindNodePath(m_Document, m_SelectedId);
+						const std::size_t lastDot = leafPath.rfind('.');
+						if (lastDot != std::string::npos)
+						{
+							parentId = leafPath.substr(lastDot + 1);
+							parentPath = leafPath.substr(0, lastDot);
+						}
 					}
 				}
 			}
@@ -3660,12 +3777,31 @@ namespace World
 		node.Type = type;
 		node.Id = MakeUniqueNodeId(m_Document, reserved, parentPath, type, targetList->size());
 		node.IdWasGenerated = false;
-		// 默认锚点:父矩形左上角一个 240x48 的固定盒子(容器布局会覆盖,不影响)。
+		// 默认锚点:父内容框左上角一个盒子(容器布局会覆盖,不影响)。
 		node.Anchor.Min = glm::vec2 { 0.0f, 0.0f };
 		node.Anchor.Max = glm::vec2 { 0.0f, 0.0f };
 		node.Anchor.Pivot = glm::vec2 { 0.0f, 0.0f };
-		node.Anchor.Offset = glm::vec2 { 24.0f, 24.0f };
-		node.Anchor.Size = glm::vec2 { 240.0f, 48.0f };
+		// M42:尺寸取类型登记表的**首选尺寸**(`UiNodeTypeDesc::DefaultSize`,设计单位);
+		// 任一轴 <= 0 回落 240 / 48(此前所有类型写死 240x48 ⇒ 复选框/进度条/标签
+		// 因此比控件本体大好几倍)。字段由 we_engine 追加在 `UiNodeTypeDesc` 末尾。
+		const glm::vec2 preferred = typeDesc->DefaultSize;
+		const glm::vec2 size {
+			preferred.x > 0.0f ? preferred.x : 240.0f,
+			preferred.y > 0.0f ? preferred.y : 48.0f };
+		// M42:新节点落在**父容器内容框**内(固定 24,24 在小容器里会跑到容器外)。
+		// 父矩形查不到(m_Screen 未布局 / 根层)⇒ 保持 24,24(与旧行为一致)。
+		glm::vec2 offset { 24.0f, 24.0f };
+		if (!parentId.empty())
+		{
+			const Wui::WuiRect parentRect = m_Screen.RectOf(parentId);
+			if (parentRect.W > 0.0f && parentRect.H > 0.0f)
+			{
+				offset.x = std::clamp(offset.x, 0.0f, std::max(0.0f, parentRect.W - size.x));
+				offset.y = std::clamp(offset.y, 0.0f, std::max(0.0f, parentRect.H - size.y));
+			}
+		}
+		node.Anchor.Offset = offset;
+		node.Anchor.Size = size;
 		const std::string newId = node.Id;
 		insertIndex = std::min(insertIndex, targetList->size());
 		targetList->insert(targetList->begin() + static_cast<std::ptrdiff_t>(insertIndex), std::move(node));

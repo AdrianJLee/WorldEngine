@@ -137,7 +137,11 @@ std::string ReadFirstLine(const std::filesystem::path& path);
 
 std::string ResolveGitCommit();
 
-std::pair<float, float> SizeNotesToSize(const std::string& notes);
+// 首选尺寸(M42):引擎唯一解析器 —— `componentId` 非空时按组件 id 查登记项
+// (`Wui::PreferredComponentSize`),否则按 SizeNotes 解析(`Wui::ParsePreferredComponentSize`);
+// 都失败回落 240x120。`componentId` 有缺省值 ⇒ 只传 notes 的既有调用点照旧编译。
+std::pair<float, float> SizeNotesToSize(const std::string& notes,
+	const std::string& componentId = std::string());
 
 const char* StatusText(Wui::WuiComponentStatus status);
 

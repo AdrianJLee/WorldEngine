@@ -47,6 +47,11 @@ namespace World::UI
 		// M10:滚动内容尺寸自报入口(仅对滚动容器有意义);空 = 用子的包围盒。追加在末尾,
 		// 既有聚合初始化不受影响。
 		UiNodeContentSizeFn ContentSize = nullptr;
+		// M41:一行功能介绍(英文源文;UI 侧用 `wui.component.<ComponentId>.doc` 本地化覆盖)。
+		// 面向"用控件的人",不是面向改引擎的人(A11yNotes/SizeNotes 是技术说明,别混)。
+		std::string Doc;
+		// M41:设计器新建该类型时的默认尺寸(设计单位)。0 = 无偏好(调用方回落)。
+		glm::vec2 DefaultSize { 0.0f, 0.0f };
 	};
 
 	class WLD_API UiNodeRegistry
