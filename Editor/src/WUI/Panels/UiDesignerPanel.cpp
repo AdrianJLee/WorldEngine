@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Core/Utf8.h"
 #include "WUI/Panels/UiDesignerPanel.h"
 
 // M47:纹理引用行的编辑器侧数据适配层(逻辑路径 → 候选/徽标/状态)。
@@ -3614,9 +3615,11 @@ namespace World
 			if (fallbackNodes > 0)
 				message += " - " + std::to_string(fallbackNodes) + " unknown-type node(s)";
 			message += ": " + paint.Errors.front().Message;
-			constexpr std::size_t kMaxChars = 150;
-			if (message.size() > kMaxChars)
-				message = message.substr(0, kMaxChars) + "...";
+			// 上限是**字节**预算,必须落在字符边界上(否则末尾是半截 UTF-8 序列 ⇒ 幽灵码点 ⇒ 空白,
+			// 连带后面的 "..." 一起被吃掉)。见 World/Core/Utf8.h。
+			constexpr std::size_t kMaxBytes = 150;
+			if (message.size() > kMaxBytes)
+				message = World::Utf8::TrimToBytes(message, kMaxBytes) + "...";
 			const float barWidth = std::min(std::max(rect.W - 12.0f, 0.0f),
 				ctx.MeasureTextWidth(message, theme.FontSizeCaption) + 10.0f);
 			const Wui::WuiRect bar { rect.X + 6.0f, rect.Y + rect.H - 20.0f, barWidth, 16.0f };
