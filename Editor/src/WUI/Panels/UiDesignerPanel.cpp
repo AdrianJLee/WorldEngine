@@ -1536,7 +1536,7 @@ namespace World
 				}
 				const bool cancelRequested = ctx.Focus() == renameId
 					&& ctx.IsKeyPressed(KeyCodes::Escape);
-				const std::string error = OutlineRenameError(TrimCopy(m_OutlineRenameBuffer));
+				const std::string error = OutlineRenameError(m_OutlineRenameNodeId, TrimCopy(m_OutlineRenameBuffer));
 				const bool submitted = Wui::TextFieldEx(ctx, renameId, field,
 					m_OutlineRenameBuffer, theme, error);
 				if (cancelRequested)
@@ -1692,7 +1692,10 @@ namespace World
 		if (listRect.H < 12.0f)
 			return;
 
-		constexpr float rowHeight = 21.0f;
+		// 每格两行:第一行本地化名(按钮自己的文字),第二行**英文 `.wui` Type**(次要色)。
+		// 为什么两行:格子只有 ~100px 宽,`中文名 (English)` 放不下;而英文名是写文档/提示词
+		// 与 AI 交流时的正式名字(用户口径:"各 UI 控件的英文需要显示出来")。
+		constexpr float rowHeight = 30.0f;
 		constexpr float columnGap = 3.0f;
 		const float cellWidth = std::max(40.0f, (listRect.W - columnGap) * 0.5f);
 		const std::size_t rows = (entries.size() + 1) / 2;
@@ -1722,6 +1725,26 @@ namespace World
 					entries[i].Label, entries[i].Doc)))
 			{
 				addType = entries[i].Type;
+			}
+			// 第二行:英文 `.wui` Type(次要色,不参与命中 —— 命中与 a11y 都归上面的按钮整格)。
+			Wui::Label(ctx, glm::vec2 { cell.X + 6.0f, cell.Y + rowHeight - 12.0f },
+				entries[i].Type, theme.TextDisabled, theme.FontSizeCaption);
+			// 同一行文字也进无障碍树(kind=label):AI 按 `ui_designer.palette.type.<Type>` 能读到
+			// 每个控件的英文名 —— 用户要"英文显示出来",AI 侧同样要能拿到它。
+			{
+				Wui::WuiAccessNode typeNode;
+				typeNode.Id = Wui::HashId(("ui_designer.palette.type." + entries[i].Type).c_str());
+				typeNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				typeNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				typeNode.Kind = "label";
+				typeNode.Label = entries[i].Type;
+				typeNode.Value = entries[i].Label;   // 本地化名(对照)
+				typeNode.Rect = Wui::WuiRect { cell.X + 6.0f, cell.Y + rowHeight - 12.0f,
+					std::max(8.0f, cell.W - 12.0f), 12.0f };
+				typeNode.Enabled = true;
+				typeNode.Interactive = false;
+				typeNode.Visible = true;
+				Wui::WuiAccessibility::Get().Register(typeNode);
 			}
 		}
 		if (entries.empty())
@@ -1794,14 +1817,17 @@ namespace World
 		m_OutlineRenameFocusPending = false;
 	}
 
-	std::string UiDesignerPanel::OutlineRenameError(const std::string& newId) const
+	// M49:校验一个新名字相对 **oldId** 是否可用(合法字符 / 同层唯一 / 未改名)。
+	// 为什么必须传 oldId:属性页 Node/Id 行的旧名是它自己的缓冲,不是大纲那套成员 ——
+	// 用 m_OutlineRenameNodeId 判"没改名"会让属性页把"改成同名"误报成重名。
+	std::string UiDesignerPanel::OutlineRenameError(const std::string& oldId, const std::string& newId) const
 	{
 		if (newId.empty())
 			return Wui::Tr("panel.ui_designer.rename.error.empty", "Name cannot be empty");
 		if (!UI::IsValidUiNodeId(newId))
 			return Wui::Tr("panel.ui_designer.rename.error.illegal",
 				"Use letters, digits, '_', '-', '.' or '#'; no spaces or '/'");
-		if (newId == m_OutlineRenameNodeId)
+		if (newId == oldId)
 			return std::string();   // 没改名 = 合法(提交时按"无变化"收口)
 		if (m_Document.FindNode(newId) != nullptr)
 			return Wui::Tr("panel.ui_designer.rename.error.duplicate",
@@ -1809,32 +1835,31 @@ namespace World
 		return std::string();
 	}
 
-	bool UiDesignerPanel::CommitOutlineRename(const std::string& newId)
+	// M49:改名的**唯一实现** —— 大纲内联改名与属性页 Node/Id 行都调它。
+	// 为什么抽出来:两处都要"校验 + 面板内部按 Id 索引的状态一起搬 + 一条撤销",各写一份迟早
+	// 漂移(改了这里没改那里 = 从属性页改名会留下悬空的选中/折叠状态)。
+	bool UiDesignerPanel::RenameNode(const std::string& oldId, const std::string& newId, std::string* error)
 	{
-		if (!m_OutlineRenameActive)
-			return false;
-		const std::string oldId = m_OutlineRenameNodeId;
 		const std::string trimmed = TrimCopy(newId);
+		const auto fail = [error](const std::string& message) {
+			if (error)
+				*error = message;
+			return false;
+		};
 		if (trimmed == oldId)
+			return true;   // 名字没变也算成功(不落空撤销记录)
+		const std::string reason = OutlineRenameError(oldId, trimmed);
+		if (!reason.empty())
 		{
-			CancelOutlineRename();
-			return true;   // 名字没变也算收口(不落空撤销记录)
-		}
-		const std::string error = OutlineRenameError(trimmed);
-		if (!error.empty())
-		{
-			m_Status = error;
-			return false;   // 保持原名与编辑态(调用方把焦点还给输入框)
+			m_Status = reason;
+			return fail(reason);   // 保持原名(调用方把理由显示出来)
 		}
 		// 先把属性页上未提交的编辑落账,改名自己占一条撤销记录。
 		CommitNodeEdit();
 		const UI::UiDocument before = m_Document;
 		UI::UiNode* node = FindNodeMutable(m_Document.Nodes, oldId);
 		if (node == nullptr)
-		{
-			CancelOutlineRename();
-			return false;
-		}
+			return fail("the node no longer exists");
 		node->Id = trimmed;
 		node->IdWasGenerated = false;   // 手工设过名 = 显式 Id,不再由 MakeStableId 生成
 		// 迁移面板内部按 Id 索引的状态(文档外的引用只有这些)。
@@ -1862,6 +1887,18 @@ namespace World
 		m_ScreenDirty = true;
 		m_Dirty = true;
 		m_Status = Wui::Tr("panel.ui_designer.renamed", "Renamed to ") + trimmed;
+		if (error)
+			error->clear();
+		return true;
+	}
+
+	bool UiDesignerPanel::CommitOutlineRename(const std::string& newId)
+	{
+		if (!m_OutlineRenameActive)
+			return false;
+		std::string error;
+		if (!RenameNode(m_OutlineRenameNodeId, newId, &error))
+			return false;   // 保持原名与编辑态(调用方把焦点还给输入框)
 		CancelOutlineRename();
 		return true;
 	}
@@ -2255,8 +2292,9 @@ namespace World
 			{
 				const Wui::WuiComponentState& state = (*states)[i];
 				// M42:选项文本走本地化(键 `wui.state.<id>`),存值仍是 `state.Id`(别改)。
-				stateOptions.push_back(Wui::Tr("wui.state." + state.Id,
-					state.Label.empty() ? state.Id : state.Label));
+				// 用户口径:状态**选项文本不本地化**(保留登记表里的英文名,便于对照 .wui/文档),
+				// 但**选项描述**要本地化 —— 描述在选中状态下方那行(`wui.state.<id>.doc`,见下)。
+				stateOptions.push_back(state.Label.empty() ? state.Id : state.Label);
 				if (state.Id == m_PropState)
 					stateSelected = static_cast<int>(i);
 			}
@@ -2608,6 +2646,9 @@ namespace World
 		{
 			// M44:只读内联行。`a11yLabel` 是**稳定标识符**(恒英文:Id / Type),不随本地化变化;
 			// 可见标签与值才走本地化 —— 脚本/AI 按稳定标识符寻址,按 label 找不到中文行。
+			// 用户口径"UI node 的标识没法自定义编辑"。编辑走与大纲改名**同一条**校验 + 迁移
+			// (`RenameNode` 是唯一实现:合法性、同层唯一、面板内部按 Id 索引的状态一起搬),
+			// 非法名拒绝并保持原值。值都是稳定标识(不本地化),只有行标签本地化。
 			const auto inlineRow = [&](const char* key, const char* a11yLabel, const char* fallback,
 				const std::string& value)
 			{
@@ -2619,9 +2660,46 @@ namespace World
 				desc.LabelWidth = labelWidth;
 				Wui::PropertyRow(ctx, Wui::HashId(key), nextRow(rowHeight), desc, theme);
 			};
+			// ---- Id:可编辑 ----
+			// 行缓冲按"节点 Id + 代次"建键(与 Bind/On 行同一口径):换节点、改名、撤销之后
+			// 必须换代,否则输入框会回显上一个节点的名字。
+			if (m_IdRowNodeId != node->Id)
+			{
+				m_IdRowNodeId = node->Id;
+				m_IdRowBuffer = node->Id;
+			}
+			{
+				const std::string idRowError = OutlineRenameError(m_IdRowNodeId, TrimCopy(m_IdRowBuffer));
+				Wui::PropertyRowDesc desc;
+				desc.Label = Wui::Tr("panel.ui_designer.node.id", "Id");
+				desc.Term = "Id";
+				desc.A11yLabel = "Id";          // 稳定标识符:脚本/AI 按它寻址
+				desc.A11yValue = node->Id;
+				desc.LabelWidth = labelWidth;
+				desc.Tooltip = Wui::Tr("panel.ui_designer.node.id.doc",
+					"Stable identity of this node: bindings, events, hot reload and AI/script addressing "
+					"all use it. Press Enter to apply; an invalid or duplicate name is refused.");
+				const Wui::PropertyRowResult idRow = Wui::PropertyRow(ctx,
+					Wui::HashId("panel.ui_designer.node.id.row"), nextRow(rowHeight), desc, theme);
+				Wui::TextFieldA11y idA11y;
+				idA11y.Label = "Id";
+				if (Wui::TextFieldEx(ctx, Wui::HashId("panel.ui_designer.node.id.field"),
+					idRow.FieldRect, m_IdRowBuffer, theme, idRowError, &idA11y))
+				{
+					std::string renameError;
+					if (RenameNode(node->Id, TrimCopy(m_IdRowBuffer), &renameError))
+					{
+						m_IdRowNodeId = TrimCopy(m_IdRowBuffer);   // 提交成功:缓冲跟上新 Id
+					}
+					else
+					{
+						// 拒绝:保持原名与输入内容,理由进状态栏(用户能改完再回车)。
+						m_Status = renameError;
+					}
+				}
+			}
 			// Id 的值是用户设的标识(原文,不本地化);Type 的值显示**本地化控件名**
 			// (键 `wui.component.<id>.name`,兜底 = 原始 Type),但 a11y 标识符保持 "Type"。
-			inlineRow("panel.ui_designer.node.id", "Id", "Id", node->Id);
 			inlineRow("panel.ui_designer.node.type", "Type", "Type", ComponentDisplayName(node->Type));
 		}
 

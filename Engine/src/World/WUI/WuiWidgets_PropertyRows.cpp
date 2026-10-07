@@ -558,7 +558,30 @@ bool TextFieldCore(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& 
 				ctx.SetCursor(WuiCursor::IBeam);
 			const bool hasSelection = focused && state.SelStart >= 0 && state.SelEnd > state.SelStart;
 			const std::string text = buffer;
-			WuiDrawCommand command { WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 15.0f, false };
+		// 单行文本框的**可视窗口**:文字比字段宽时,必须裁到字段矩形内再画。
+		// 不裁的后果(实测用户报障「属性中文本框,文字一长就会和复原按钮重叠」):文本命令是
+		// 整行最后一条,画在重设按钮之上,超出的部分直接盖住右边的 ↺ 并继续往面板外溢。
+		// 同时把绘制原点**左移**,让光标始终留在可视区里(否则光标跑出字段,人在盲打)。
+		// 取舍:不做真正的横向滚动条/自动滚动——超出时显示"尾部对齐光标",未聚焦时显示头部。
+		constexpr float kTextInsetX = 6.0f;
+		const float visibleWidth = std::max(8.0f, rect.W - kTextInsetX * 2.0f);
+		float textShift = 0.0f;
+		const float fullWidth = ctx.MeasureTextWidth(text, 15.0f);
+		if (fullWidth > visibleWidth)
+		{
+			if (focused)
+			{
+				// 光标前那段的宽度 ⇒ 把光标推到右内边距处(尾部对齐)。
+				const std::size_t caretByte = Utf8Offset(buffer, state.Cursor < 0 ? 0 : state.Cursor);
+				const float caretWidth = ctx.MeasureTextWidth(
+					std::string_view(buffer).substr(0, std::min(caretByte, buffer.size())), 15.0f);
+				textShift = std::min(0.0f, visibleWidth - caretWidth);
+			}
+			else
+				textShift = 0.0f;   // 未聚焦:显示头部
+		}
+		WuiDrawCommand command { WuiDrawKind::Text, { rect.X + kTextInsetX + textShift,
+			rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 15.0f, false };
 			if (hasSelection)
 			{
 				command.TextSelStart = static_cast<int>(Utf8Offset(buffer, state.SelStart));
@@ -570,7 +593,10 @@ bool TextFieldCore(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& 
 			// 有错误时描边用 Danger(焦点态也一样):行内校验错误比焦点色更需要被看到。
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
 				error.empty() ? (focused ? theme.Accent : theme.Border) : theme.Danger, 3.0f, focused ? 1.5f : 1.0f });
-			ctx.Commands().push_back(std::move(command));
+		// 裁到字段矩形:文本命令画在最上层,不裁就会盖住右侧的 ↺(见上面的注释)。
+		ctx.PushClipRect(rect);
+		ctx.Commands().push_back(std::move(command));
+		ctx.PopClipRect();
 			DrawFocusRing(ctx, rect, id, theme);
 			return submitted;
 		}

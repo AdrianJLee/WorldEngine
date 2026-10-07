@@ -81,9 +81,12 @@ namespace World
 		void BeginOutlineRename(const std::string& nodeId);
 		void CancelOutlineRename();
 		// 新名的可读错误(空 = 合法):与 `UI::IsValidUiNodeId` 同源 + 文档内唯一。
-		std::string OutlineRenameError(const std::string& newId) const;
+		std::string OutlineRenameError(const std::string& oldId, const std::string& newId) const;
 		// 提交改名:合法则写文档(一条撤销记录)并迁移面板按 Id 索引的状态;
 		// 返回 true = 收口(含"名字没变"),false = 校验失败且保持编辑态。
+		// M49:改名的唯一实现(合法性 + 同层唯一 + 面板内部按 Id 索引的状态迁移 + 一条撤销)。
+		// 失败 = false + 可读原因(error 非空);名字没变 = true(不落空撤销记录)。
+		bool RenameNode(const std::string& oldId, const std::string& newId, std::string* error);
 		bool CommitOutlineRename(const std::string& newId);
 
 		// ---- 画布 ----
@@ -190,7 +193,10 @@ namespace World
 		bool m_OutlineRenameActive = false;
 		std::string m_OutlineRenameNodeId;         // 被改名的节点(旧 Id)
 		std::string m_OutlineRenameBuffer;         // `TextFieldEx` 的进出参 = 编辑中的新名字
-		bool m_OutlineRenameFocusPending = false;  // 进入编辑后的第一帧把焦点交给输入框
+		bool m_OutlineRenameFocusPending = false;
+		// M49:属性页 Node/Id 行的编辑缓冲(按"节点 Id"建键,换节点/改名/撤销要复位)。
+		std::string m_IdRowNodeId;
+		std::string m_IdRowBuffer;  // 进入编辑后的第一帧把焦点交给输入框
 		// M47 修:焦点要连续几帧重申(见 BeginOutlineRename 与 RenderOutline 的注释);
 		// `HadFocus` = 真的拿到过焦点(没拿到之前不算"失焦提交"),`FocusTries` = 已重申几帧。
 		bool m_OutlineRenameHadFocus = false;
