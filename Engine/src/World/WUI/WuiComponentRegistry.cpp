@@ -711,6 +711,13 @@ Property PropInt(const char* name, float min, float max, float step){
 		}
 
 
+		// M50:标记"内部字段"(属性面板不列)。与 Grouped/UnitOf 同一族的登记期小工具。
+Property HiddenInEditor(Property property){
+			property.EditorHidden = true;
+			return property;
+		}
+
+
 Property PropText(const char* name, const char* sample){
 			Property property;
 			property.Name = name;
@@ -1482,8 +1489,11 @@ void RegisterBuiltins(){
 				{
 					Grouped(PropText("label", "Icon"), WuiComponentPropertyGroup::Content,
 						"Accessibility label for the image (the image itself draws no text)."),
-					Grouped(PropInt("textureId", 0.0f, 100000.0f, 1.0f), WuiComponentPropertyGroup::Content,
-						"Host texture id from WuiTextureRegistry (0 = empty image, drawn as a placeholder)."),
+					// M50:宿主**数值句柄** —— 程序化调用方(材质预览/模型预览/视口)用,设计师不碰;
+					// 设计师选的是下面的 `texture` 逻辑路径。EditorHidden ⇒ 属性面板不列它。
+					Grouped(HiddenInEditor(PropInt("textureId", 0.0f, 100000.0f, 1.0f)),
+						WuiComponentPropertyGroup::Content,
+						"Host texture id from WuiTextureRegistry (internal; use `texture` instead)."),
 					// M48:`texture` = **逻辑路径**(用户与设计器看的那一层);`textureId` = 宿主句柄
 					// (程序化调用方/引擎内部用)。绘制优先 `texture`(经宿主装的解析钩子换成句柄),
 					// 解析不到再回退 `textureId`;两者都没有 = 空图占位框。
@@ -1517,7 +1527,7 @@ void RegisterBuiltins(){
 				"showcase 首选 32x32;方形图标位(内容网格 20x20 / 列表 16x16 / 工具条 18x18 都按调用方给的矩形画,控件不改布局)",
 				ShellIds("icon"),
 				StateList({ "default" }),
-				{ PropInt("textureId", 0.0f, 100000.0f, 1.0f), PropText("tint", "#FFFFFF") },
+				{ HiddenInEditor(PropInt("textureId", 0.0f, 100000.0f, 1.0f)), PropText("tint", "#FFFFFF") },
 				&ShowIcon));
 
 			// ---- Menus ----

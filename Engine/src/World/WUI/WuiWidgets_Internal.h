@@ -293,7 +293,8 @@ float PropertyRowLabelWidth(const WuiRect& row);
 
 float PropertyRowHeight();
 
-PropertyRowLayout MeasurePropertyRow(const WuiRect& row, float labelWidth, bool showReset);
+PropertyRowLayout MeasurePropertyRow(const WuiRect& row, float labelWidth, bool showReset,
+	float trailingReserve);
 
 float CollectionActionColumnWidth();
 

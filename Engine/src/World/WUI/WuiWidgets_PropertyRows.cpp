@@ -1,4 +1,5 @@
 #include "WuiWidgets_Internal.h"
+#include "World/WUI/Widgets/WuiChrome.h"   // M50:ClipScope(真裁渲染)
 
 namespace World::Wui
 {
@@ -165,12 +166,16 @@ float PropertyRowHeight(){
 	}
 
 
-PropertyRowLayout MeasurePropertyRow(const WuiRect& row, float labelWidth, bool showReset){
+PropertyRowLayout MeasurePropertyRow(const WuiRect& row, float labelWidth, bool showReset,
+		float trailingReserve){
 		PropertyRowLayout layout;
 		layout.LabelWidth = RowLabelWidth(row, labelWidth);
 		const float resetReserve = showReset ? kPropertyActionWidth + kPropertyActionGap : 0.0f;
+		// M50:自带尾随控件的库件(纹理选择器)再要一段,与 ↺ 的预留**叠加**。
+		const float extraReserve = std::max(0.0f, trailingReserve);
 		layout.Field = { row.X + layout.LabelWidth, row.Y + (row.H - kPropertyFieldHeight) * 0.5f,
-			std::max(24.0f, row.W - layout.LabelWidth - kPropertyFieldGutter - resetReserve), kPropertyFieldHeight };
+			std::max(24.0f, row.W - layout.LabelWidth - kPropertyFieldGutter - resetReserve - extraReserve),
+			kPropertyFieldHeight };
 		if (showReset)
 			layout.Reset = InsideActionRect(row, 0);
 		return layout;
@@ -184,7 +189,8 @@ float CollectionActionColumnWidth(){
 
 PropertyRowResult PropertyRow(WuiContext& ctx, WuiId id, const WuiRect& row, const PropertyRowDesc& desc, const WuiTheme& theme){
 		PropertyRowResult result;
-		const PropertyRowLayout layout = MeasurePropertyRow(row, desc.LabelWidth, desc.ShowReset);
+		const PropertyRowLayout layout = MeasurePropertyRow(row, desc.LabelWidth, desc.ShowReset,
+			desc.TrailingReserve);
 		const float labelWidth = layout.LabelWidth;
 		result.FieldRect = layout.Field;
 		result.ResetRect = layout.Reset;
@@ -594,9 +600,13 @@ bool TextFieldCore(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& 
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
 				error.empty() ? (focused ? theme.Accent : theme.Border) : theme.Danger, 3.0f, focused ? 1.5f : 1.0f });
 		// 裁到字段矩形:文本命令画在最上层,不裁就会盖住右侧的 ↺(见上面的注释)。
-		ctx.PushClipRect(rect);
-		ctx.Commands().push_back(std::move(command));
-		ctx.PopClipRect();
+		// **必须用 `Wui::ClipScope`** —— 它同时发 `ClipPush/ClipPop` 绘制命令(真正裁渲染)并维护
+		// 裁剪栈(`ClipAllows`)。只调 `PushClipRect` 是**不裁画面**的(实测:`= 材料` 与长 Id 仍然
+		// 压在 ↺ 上 —— 用户报的正是"文本框一长还是会挡住")。
+		{
+			Wui::ClipScope textClip(ctx, rect);
+			ctx.Commands().push_back(std::move(command));
+		}
 			DrawFocusRing(ctx, rect, id, theme);
 			return submitted;
 		}

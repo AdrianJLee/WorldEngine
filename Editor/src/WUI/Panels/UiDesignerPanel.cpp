@@ -2001,6 +2001,10 @@ namespace World
 			{
 				if (filterByState && meta.StateScoped && StateScopeSuffix(meta.Name) != m_PropState)
 					continue;
+				// M50:内部字段(如 `image.textureId` 的宿主句柄)不出行 —— 设计师选的是 `.texture`
+				// 逻辑路径;两个都列会让人以为要各填一遍(用户报障)。
+				if (meta.EditorHidden)
+					continue;
 				rows.push_back(PropertyRowRef { meta.Name, &meta });
 			}
 		}
@@ -2396,6 +2400,12 @@ namespace World
 				desc.A11yLabel = ref.Name;
 				desc.A11yValue = value;
 				desc.LabelWidth = labelWidth;
+				// M50:纹理行的值列里是 `WuiTexturePicker`(自带「定位」按钮)⇒ 字段再让出那一段,
+				// 否则它会贴到/压住行尾的 ↺(用户报的"控件没有自适应所占区域"就是这个观感)。
+				// 26(定位)+ 4(间距)+ 44(徽标常见宽度)。
+				if (ref.Name == std::string("texture"))
+					// 只让出与尾部复位键之间的间隙就够:选择器自己会按剩余宽度收缩 combo 与徽标(内部按 budget 切),预留过大反而把 combo 挤成 `<...>`(实测)。
+					desc.TrailingReserve = 10.0f;
 				desc.Enabled = true;
 				desc.Tooltip = Wui::Tr("wui.prop." + ref.Name + ".doc",
 					meta != nullptr ? meta->Doc : std::string());
@@ -2479,22 +2489,15 @@ namespace World
 				const Wui::WuiComponentProperty::Kind kind = meta != nullptr
 					? meta->Type : Wui::WuiComponentProperty::Kind::Text;
 				const Wui::WuiId fieldId = Wui::HashId((base + ".field").c_str());
-				// M47:`textureId` 行换成 `Wui::WuiTexturePicker`(Image 及任何声明了该属性的
-				// 类型)—— 走 `Editor::TextureRefCatalog` 适配层,面板不自己扫盘/算徽标。
-				// 引擎侧 `textureId` 是 WuiTextureRegistry 的**数值句柄**(0 = 空图):
-				// 对选择器而言 0/空 = "无引用",传空串让它显示 (none),而不是把 "0" 当成
-				// 一个缺失的逻辑路径。选中/清空即写覆盖值(一条撤销记录)。
-				if (ref.Name == std::string("textureId"))
+				// M50:纹理引用行换 `Wui::WuiTexturePicker`(走 `Editor::TextureRefCatalog` 适配层,
+				// 面板不自己扫盘/算徽标)。挂在 **`texture`(逻辑路径)** 上:这是用户与 AI 能选、
+				// 引擎能解析(纹理解析钩子)的那一层;数值句柄 `textureId` 已标内部、面板不列。
+				// 选中/清空即写覆盖值(一条撤销记录)。
+				if (ref.Name == std::string("texture"))
 				{
-					std::string picked;
-					char* numberEnd = nullptr;
-					const float numeric = value.empty() ? 0.0f : std::strtof(value.c_str(), &numberEnd);
-					const bool emptyRef = value.empty()
-						|| (numberEnd != value.c_str() && numberEnd != nullptr && *numberEnd == '\0'
-							&& numeric == 0.0f);
-					picked = emptyRef ? std::string() : value;
+					std::string picked = value;
 					auto options = Editor::TexturePickerOptions(picked,
-						Wui::Tr("wui.prop.textureId.name", "Texture"),
+						Wui::Tr("wui.prop.texture.name", "Texture"),
 						"ui_designer.prop." + node->Id + "." + ref.Name, std::string());
 					bool revealRequested = false;
 					options.RevealRequested = &revealRequested;

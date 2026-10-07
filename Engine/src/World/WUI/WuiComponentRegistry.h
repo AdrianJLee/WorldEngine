@@ -57,6 +57,9 @@ namespace World::Wui
 		float DefaultNumber = 0.0f;           // Float/Int 的类型化默认(面板初值 / Reset 的目标)
 		WuiColor DefaultColor {};             // Color 的类型化默认(暗色主题令牌值;文本编码 #RRGGBB[AA])
 		glm::vec2 DefaultSize { 0.0f, 0.0f }; // Size2 的类型化默认(设计单位;文本编码 "WxH")
+		// M50:内部字段 —— **不是给人编辑的**(如 `image.textureId` 是宿主句柄,设计师选的是 `.texture`
+		// 逻辑路径)。设计器(属性面板)跳过它;工作台/契约测试照旧能读到(登记表仍是唯一事实源)。
+		bool EditorHidden = false;
 	};
 
 	// 可被工作台强制切换的视觉/交互状态(适用者登记,不适用的不列)。

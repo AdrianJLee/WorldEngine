@@ -295,6 +295,10 @@ namespace World::Wui
 		bool InlineValue = false;
 		std::string InlineValueText;
 		float LabelWidth = 0.0f;       // 0 = PropertyRowLabelWidth(row);同一面板传同一值以对齐
+		// M50:字段向右的**额外**预留(设计单位)。用途:行的值列里放的是自带尾随控件的库件
+		// (如 `WuiTexturePicker` 的「定位」按钮)时,字段必须再让出那一段,否则它会与行尾的 ↺
+		// 贴在一起甚至叠上(实测)。预留与 ShowReset 的预留**叠加**,不做"取最大"。
+		float TrailingReserve = 0.0f;
 		float FieldHeight = 0.0f;      // 0 = kPropertyFieldHeight(20);向量这类多行控件传实际高度
 		// ---- VEC-H4:层级与"值不可用" ----
 		// LabelIndent = 只挪**标签文字**的缩进(px;嵌套结构每层 12,见 §规则 2)。
@@ -336,7 +340,10 @@ namespace World::Wui
 		WuiRect Reset {};
 		float LabelWidth = 0.0f;
 	};
-	WLD_API PropertyRowLayout MeasurePropertyRow(const WuiRect& row, float labelWidth, bool showReset);
+	// M50:`trailingReserve` = 值列里的库件自带尾随控件(如纹理选择器的「定位」)所需的额外宽度;
+	// 与 `showReset` 的预留**叠加**。默认 0 = 与引入前逐像素一致。
+	WLD_API PropertyRowLayout MeasurePropertyRow(const WuiRect& row, float labelWidth, bool showReset,
+		float trailingReserve = 0.0f);
 	// 属性行。返回值 = 本帧行尾"恢复默认"是否被点击;值列矩形在 result.FieldRect。
 	WLD_API PropertyRowResult PropertyRow(WuiContext& ctx, WuiId id, const WuiRect& row,
 		const PropertyRowDesc& desc, const WuiTheme& theme);
