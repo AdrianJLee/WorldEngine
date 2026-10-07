@@ -19,6 +19,7 @@
 #include <cmath>
 #include "World/WUI/Widgets/WuiPlot.h"
 #include "World/Core/KeyCodes.h"
+#include "World/Core/Utf8.h"
 
 #include <algorithm>
 #include <cctype>
@@ -326,6 +327,7 @@ namespace
 
 int main()
 {
+	std::setvbuf(stdout, nullptr, _IONBF, 0);   // 临时:定位挂起位置
 	try
 	{
 		// 1. Flex 行布局:等 grow 平分剩余空间
@@ -6649,6 +6651,51 @@ int main()
 			}
 			accessibility.SetEnabled(false);
 			accessibility.Clear();
+		}
+
+		// ---- M54:UTF-8 边界(界面"乱码"的一类真因)----
+		// 三处手写循环"先 pop_back、再跳过续字节"**都**会留下悬空引导字节;解码器把它与后面的
+		// 字节拼成幽灵码点(实机日志:U+6BAE / U+4BAE),字形表里没有 ⇒ 画成空白。
+		// 下面把"正确行为"钉死,并保留一个反面样本说明旧写法为什么错。
+		{
+			CHECK(World::Utf8::IsValid(u8"abc数据…"));
+			std::string one = u8"数据";
+			CHECK(World::Utf8::PopBack(one));
+			CHECK(one == u8"数");                       // 删掉的是**一个完整字符**
+			CHECK(!World::Utf8::PopBack(one));          // 删到空 ⇒ 返回 false(契约:返回"删完是否非空")
+			CHECK(one.empty());
+			CHECK(!World::Utf8::PopBack(one));          // 空串安全
+
+			// 半截序列(上游按字节截断留下的)也要清干净,不留悬空引导字节。
+			std::string half = u8"数据";
+			half.resize(4);                             // "数"(3B)+ E6 ⇒ 停在"据"的引导字节(半截序列)
+			CHECK(!World::Utf8::IsValid(half));
+			World::Utf8::PopBack(half);
+			CHECK(World::Utf8::IsValid(half));
+			CHECK(half == u8"数");
+
+			// 反面样本:旧写法只删续字节 ⇒ 留下 E6;拼上 "..." 后解码成 U+6BAE(实机日志里的幽灵码点)。
+			std::string legacy = u8"数据";
+			legacy.pop_back();
+			while (!legacy.empty() && (static_cast<unsigned char>(legacy.back()) & 0xC0u) == 0x80u)
+				legacy.pop_back();
+			CHECK(!World::Utf8::IsValid(legacy));
+			const std::string legacyWithDots = legacy + "...";
+			CHECK(legacyWithDots.size() == 7);          // 数(3B)+ 悬空 E6 + "..."
+			const size_t lead = legacy.size() - 1;      // 悬空引导字节的位置
+			const uint32_t phantom = ((static_cast<unsigned char>(legacyWithDots[lead]) & 0x0Fu) << 12)
+				| ((static_cast<unsigned char>(legacyWithDots[lead + 1]) & 0x3Fu) << 6)
+				| (static_cast<unsigned char>(legacyWithDots[lead + 2]) & 0x3Fu);
+			CHECK(phantom == 0x6BAEu);
+
+			// 按字节上限截断:必须退到字符边界(不能切碎)。
+			const std::string mixed = u8"abc数据";
+			CHECK(World::Utf8::SafeByteCount(mixed, 5) == 3);
+			CHECK(World::Utf8::SafeByteCount(mixed, 6) == 6);
+			CHECK(World::Utf8::SafeByteCount(mixed, 7) == 6);
+			CHECK(World::Utf8::SafeByteCount(mixed, 99) == mixed.size());
+			CHECK(World::Utf8::TrimToBytes(mixed, 7) == u8"abc数");
+			CHECK(World::Utf8::IsValid(World::Utf8::TrimToBytes(mixed, 5)));
 		}
 
 		std::printf("World.Wui: all checks passed\n");

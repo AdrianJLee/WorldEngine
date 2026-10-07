@@ -1,4 +1,5 @@
 #include "EditorShell_Internal.h"
+#include "World/Core/Utf8.h"
 
 namespace World
 {
@@ -785,11 +786,7 @@ void EditorShell::DrawStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& rect){
 			{
 				std::string cut = chipText;
 				while (cut.size() > 8 && ctx.MeasureTextWidth(cut + "…", 12.0f) + 12.0f > limit - chipX)
-				{
-					cut.pop_back();
-					while (!cut.empty() && (static_cast<unsigned char>(cut.back()) & 0xC0u) == 0x80u)
-						cut.pop_back();
-				}
+					World::Utf8::PopBack(cut);   // 按完整字符退(旧写法留悬空引导字节 ⇒ 空白/吃字)
 				chipText = cut.empty() ? std::string() : (cut + "…");
 				chipWidth = std::max(0.0f, limit - chipX);
 			}

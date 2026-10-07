@@ -1,4 +1,7 @@
 #include "WidgetGalleryPanel_Internal.h"
+#include "World/Core/Utf8.h"
+
+#include <cstdlib>
 
 namespace World
 {
@@ -31,16 +34,29 @@ std::string ClipText(const Wui::WuiContext& ctx, const std::string& text, float 
 				return std::string();
 			if (ctx.MeasureTextWidth(text, fontSize) <= width)
 				return text;
+			// 必须按**完整字符**退(见 World/Core/Utf8.h 的由来):旧写法只退续字节、留下悬空引导字节,
+			// 解码时会和后面的 "..." 拼成幽灵码点(U+6BAE 这类)→ 无字形 → 画成空白;省略号也被吃掉,
+			// 用户看到的就是"乱码"。
+			// WLD_WUI_LEGACY_CLIP=1:**只用于验证** —— 复现旧版"按字节退格"的裁剪(会留下悬空
+			// 引导字节 ⇒ 幽灵码点 ⇒ 空白、省略号被吃)。给 verify-wui-utf8-clip.py 做正反对照。
+			static const bool legacyClip = std::getenv("WLD_WUI_LEGACY_CLIP") != nullptr;
 			std::string out = text;
 			while (!out.empty())
 			{
-				out.pop_back();
-				while (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xC0) == 0x80)
+				if (legacyClip)
+				{
 					out.pop_back();
-				if (ctx.MeasureTextWidth(out + "...", fontSize) <= width)
+					while (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xC0) == 0x80)
+						out.pop_back();
+				}
+				else
+				{
+					World::Utf8::PopBack(out);
+				}
+				if (ctx.MeasureTextWidth(out + u8"\u2026", fontSize) <= width)
 					break;
 			}
-			return out.empty() ? std::string() : out + "...";
+			return out.empty() ? std::string() : out + u8"\u2026";
 		}
 
 

@@ -1,4 +1,5 @@
 #include "PropertiesPanel_Internal.h"
+#include "World/Core/Utf8.h"
 
 namespace World
 {
@@ -1280,8 +1281,9 @@ std::string ScriptDeclarationSignature(const std::vector<ComponentPropertyModel:
 std::string TruncateForPanel(const std::string& text, size_t limit ){
 			const size_t newline = text.find('\n');
 			std::string line = text.substr(0, newline == std::string::npos ? text.size() : newline);
+			// 按字节上限截断必须落在**字符边界**上,否则末尾是半截 UTF-8 序列 ⇒ 幽灵码点 ⇒ 空白。
 			if (line.size() > limit)
-				line = line.substr(0, limit) + "...";
+				line = World::Utf8::TrimToBytes(line, limit) + "...";
 			return line;
 		}
 

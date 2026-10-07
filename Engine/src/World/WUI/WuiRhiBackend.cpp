@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <utility>
 
@@ -25,6 +26,13 @@ namespace World::Wui
 	// HOTR-P1-T3:引擎 shader 失效代 + 活实例计数(多实例:主窗口 + 浮窗都要失效)。
 	uint32_t WuiRhiBackend::s_ShaderGeneration = 1;
 	uint32_t WuiRhiBackend::s_LiveInstances = 0;
+	// WLD_WUI_FONT_STATS=1:每 120 帧把每个字面的图集占用打进日志(默认关)。
+	bool WuiRhiBackend::s_FontStats = std::getenv("WLD_WUI_FONT_STATS") != nullptr;
+	// WLD_WUI_FONT_LEGACY_BLANK=1:**只用于验证** —— 复现旧版"图集满就把空白缓存下来"的缺陷,
+	// 让 `verify-wui-font-atlas.py` 能在同一个二进制上做正反对照(否则要另编一份旧代码)。
+	bool WuiRhiBackend::s_LegacyBlankBake = std::getenv("WLD_WUI_FONT_LEGACY_BLANK") != nullptr;
+	uint32_t WuiRhiBackend::s_FontMissLogs = 0;
+	uint32_t WuiRhiBackend::s_FontStatsFrame = 0;
 
 	namespace
 	{
@@ -40,10 +48,17 @@ namespace World::Wui
 				const int start = static_cast<int>(i);
 				const unsigned char c = static_cast<unsigned char>(text[i]);
 				uint32_t cp = 0;
+				// 续字节必须真的是 0b10xxxxxx:旧版只看"字节够不够",于是**半截序列**会把后面
+				// 1~2 个正常字节也当成分量吃掉(实测:省略号 "..." 被吞、并拼出幽灵码点 U+6BAE)。
+				// 现在非法序列只前进 1 字节并产出一个替换符,后续文字保持完整。
+				const auto cont = [&text](size_t index) {
+					return index < text.size()
+						&& (static_cast<unsigned char>(text[index]) & 0xC0u) == 0x80u;
+				};
 				if (c < 0x80) { cp = c; i += 1; }
-				else if ((c >> 5) == 0x6 && i + 1 < text.size()) { cp = ((c & 0x1Fu) << 6) | (text[i + 1] & 0x3Fu); i += 2; }
-				else if ((c >> 4) == 0xE && i + 2 < text.size()) { cp = ((c & 0x0Fu) << 12) | ((text[i + 1] & 0x3Fu) << 6) | (text[i + 2] & 0x3Fu); i += 3; }
-				else if ((c >> 3) == 0x1E && i + 3 < text.size()) { cp = ((c & 0x07u) << 18) | ((text[i + 1] & 0x3Fu) << 12) | ((text[i + 2] & 0x3Fu) << 6) | (text[i + 3] & 0x3Fu); i += 4; }
+				else if ((c >> 5) == 0x6 && cont(i + 1)) { cp = ((c & 0x1Fu) << 6) | (text[i + 1] & 0x3Fu); i += 2; }
+				else if ((c >> 4) == 0xE && cont(i + 1) && cont(i + 2)) { cp = ((c & 0x0Fu) << 12) | ((text[i + 1] & 0x3Fu) << 6) | (text[i + 2] & 0x3Fu); i += 3; }
+				else if ((c >> 3) == 0x1E && cont(i + 1) && cont(i + 2) && cont(i + 3)) { cp = ((c & 0x07u) << 18) | ((text[i + 1] & 0x3Fu) << 12) | ((text[i + 2] & 0x3Fu) << 6) | (text[i + 3] & 0x3Fu); i += 4; }
 				else { cp = 0xFFFD; i += 1; }
 				codepoints.push_back(cp);
 				byteOffsets.push_back(start);
@@ -399,6 +414,15 @@ namespace World::Wui
 				face.Ttf.clear();
 				continue;
 			}
+			face.Index = static_cast<uint32_t>(i);
+			// 诊断/门禁开关:把图集压小来**故意**制造"图集满",验证回退与重建路径
+			// (`WLD_WUI_ATLAS=512`)。默认 2048²:桶数 × 面积都留足余量。
+			if (const char* atlasSize = std::getenv("WLD_WUI_ATLAS"))
+			{
+				const int size = std::atoi(atlasSize);
+				if (size >= 64 && size <= 4096)
+					face.AtlasW = face.AtlasH = static_cast<uint32_t>(size);
+			}
 			face.Atlas.assign(static_cast<size_t>(face.AtlasW) * face.AtlasH * 4, 0);
 			Rhi::TextureDesc atlasDesc;
 			atlasDesc.Type = Rhi::TextureType::Texture2D;
@@ -446,24 +470,64 @@ namespace World::Wui
 		return primary ? primary : fallback;
 	}
 
+	// 桶粒度:按**相对误差**定档(0.25 / 0.5 / 1 / 2 px,×2 递增)。
+	// 位图字形的 bitmap box 高度**必然是整数像素**,所以"字号连续"只能靠细桶逼近:
+	//   * 固定 1/4px(M53):9px 字跳变 2.8% —— 小字号正好,可大字号一个字位图面积 ∝ 尺寸²,
+	//     同一步长在大字号上既多占桶数又多占面积,图集会被"只用一次的尺寸"塞满;
+	//   * 本档:跳变在 ≥12px 时 ≤1.2%,9px 仍是 2.8%(与 M53 相同,已实测可接受)。
+	void WuiRhiBackend::ResetFaceAtlas(FontFace& face)
+	{
+		// 整面重建:清字形缓存 + 清位图 + 归零游标。比"逐字形淘汰"简单得多,而字形缓存
+		// 本来就是"按需重烘"的,重建后自然补回来(所以不需要 LRU 账本)。
+		face.Glyphs.clear();
+		face.Atlas.assign(static_cast<size_t>(face.AtlasW) * face.AtlasH * 4, 0);
+		face.CursorX = 1;
+		face.CursorY = 1;
+		face.RowH = 0;
+		face.PeakRows = 0;
+		face.AtlasDirty = true;
+		face.NeedsReset = false;
+		++face.Resets;
+	}
+
+	static float BucketStep(float pixelSize)
+	{
+		float step = 0.25f;
+		while (step < pixelSize * 0.008f && step < 2.0f)
+			step *= 2.0f;
+		return step;
+	}
+
 	WuiRhiBackend::Glyph& WuiRhiBackend::Bake(FontFace& face, uint32_t codepoint, float pixelSize)
 	{
-		// M53:桶粒度取 **1/4 物理像素**。字形位图的高度**必然是整数像素**(stbtt 的 bitmap box),
-		// 所以粗桶(整数)在连续缩放时会"卡住几档、再跳 1px"——观感就是"放大后字体大小还在变"
-		// (15px 字约 30px 高时是 3%,9px 小字是 11%,小字尤其明显)。1/4 桶把跳变压到 ≤0.125px
-		// (不可见),同时让绘制处的重采样比例落在 ±0.5% 内 —— 既连续、又清晰。
-		const uint32_t sizeKey = static_cast<uint32_t>(std::max(24.0f, std::round(pixelSize * 4.0f)));
-		const uint64_t key = (static_cast<uint64_t>(sizeKey) << 32) | codepoint;
+		// 键统一量化到 **1/4px**:于是"同样的桶尺寸"必然命中同一份位图,与它是怎么定档来的无关
+		// (否则 21px/0.25 档与 42px/0.5 档会算出同一个档号,却要的是不同尺寸的位图)。
+		const float step = BucketStep(pixelSize);
+		const uint32_t sizeStep = static_cast<uint32_t>(std::max(1.0f, std::round(pixelSize / step)));
+		const float bucketSize = static_cast<float>(sizeStep) * step;
+		// 下限 6px 与旧版一致:太小的桶既看不清也没有缓存价值(会把 key 空间撑大)。
+		const uint32_t quant = static_cast<uint32_t>(std::max(24.0f, std::round(bucketSize * 4.0f)));
+		const uint64_t key = (static_cast<uint64_t>(quant) << 32) | codepoint;
 		auto it = face.Glyphs.find(key);
 		if (it != face.Glyphs.end())
 			return it->second;
+
 		Glyph glyph;
-		glyph.PixelSize = static_cast<float>(sizeKey) / 4.0f;   // 桶 = 1/4 px(见上)
+		glyph.PixelSize = static_cast<float>(quant) / 4.0f;
+		if (stbtt_FindGlyphIndex(face.Info, codepoint) == 0 && face.MissingGlyphLogs < 8)
+		{
+			// 该字面没有这个码点 ⇒ 一定画成空白。**旧版这里是静默的**,于是用户看到"乱码"
+			// 却没有半条日志可查。限流 8 条:足够暴露"选错字面"这类系统性错误,又不会刷屏。
+			++face.MissingGlyphLogs;
+			WLD_CORE_WARN("[wui-font] face#{0} has no glyph for U+{1:X} at {2}px — will draw blank",
+				face.Index, codepoint, glyph.PixelSize);
+		}
 		const float scale = stbtt_ScaleForPixelHeight(face.Info, glyph.PixelSize);
 		int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 		stbtt_GetCodepointBitmapBox(face.Info, codepoint, scale, scale, &x0, &y0, &x1, &y1);
 		const int width = x1 - x0;
 		const int height = y1 - y0;
+		bool placed = false;
 		if (width > 0 && height > 0)
 		{
 			if (face.CursorX + width + 1 >= face.AtlasW)
@@ -492,22 +556,46 @@ namespace World::Wui
 				glyph.H = static_cast<float>(height);
 				face.CursorX += width + 1;
 				face.RowH = std::max(face.RowH, static_cast<uint32_t>(height));
+				face.PeakRows = std::max(face.PeakRows, face.CursorY + face.RowH + 1);
+				face.Bakes += 1;
 				face.AtlasDirty = true;
+				placed = true;
 			}
 		}
-		if (glyph.W <= 0.0f || glyph.H <= 0.0f)
+		if (!placed && width > 0 && height > 0 && s_LegacyBlankBake)
 		{
-			// 图集满(或该码点无位图):回退到同码点**最接近**的已缓存字号 —— 宁可轻微缩放也不要缺字,
-			// 但"任意一个"会让 20px 的字用到 12px 的位图(缩放 1.67× ⇒ 明显发虚)。取最近的可把
-			// 误差压到半个桶(≤0.5px)。
+			// 旧行为(负对照,只用于验证):图集满 ⇒ 把 0×0 的空白按当前桶**缓存**下来,
+			// 不标记重建、也不做"最近桶"回退 ⇒ 这个字永久空白。用户看到的"乱码"就是这么来的。
+			glyph.OffsetX = static_cast<float>(x0);
+			glyph.OffsetY = static_cast<float>(y0);
+			int advance = 0;
+			stbtt_GetCodepointHMetrics(face.Info, codepoint, &advance, nullptr);
+			glyph.Advance = advance * scale;
+			return face.Glyphs.emplace(key, glyph).first->second;
+		}
+		if (!placed && width > 0 && height > 0)
+		{
+			// 有字形但**装不下**:取同码点最接近的已缓存桶(宁可轻微缩放也不要缺字;旧版取"任意一个"
+			// 时 20px 会用到 12px 的位图 = 1.67× 放大 ⇒ 明显发虚),并标记"下一帧重建图集"。
+			//
+			// **这里绝不缓存空白** —— 旧写法把空白按当前桶写进缓存,于是图集一满,之后**每个新码点
+			// 都永久变成空白**,用户看到的就是乱码,而且重启前不会自愈。现在最多影响当前一帧。
+			face.NeedsReset = true;
+			face.FullHits += 1;
+			if (face.AtlasFullLogs < 8)
+			{
+				++face.AtlasFullLogs;
+				WLD_CORE_WARN("[wui-font] face#{0} atlas full at U+{1:X} ({2}x{3}, peak rows {4}) — rebuild next frame",
+					face.Index, codepoint, face.AtlasW, face.AtlasH, face.PeakRows);
+			}
 			Glyph* nearest = nullptr;
 			uint32_t nearestDistance = 0xFFFFFFFFu;
 			for (auto& entry : face.Glyphs)
 			{
-				if ((entry.first & 0xFFFFFFFFull) != codepoint)
+				if (static_cast<uint32_t>(entry.first & 0xFFFFFFFFull) != codepoint)
 					continue;
 				const uint32_t cached = static_cast<uint32_t>(entry.first >> 32);
-				const uint32_t distance = cached > sizeKey ? cached - sizeKey : sizeKey - cached;
+				const uint32_t distance = cached > quant ? cached - quant : quant - cached;
 				if (distance < nearestDistance)
 				{
 					nearestDistance = distance;
@@ -516,15 +604,21 @@ namespace World::Wui
 			}
 			if (nearest != nullptr)
 				return *nearest;
-			if (width > 0 && height > 0)
-				WLD_CORE_WARN("[wui-font] glyph atlas full for U+{0:X} at {1}px (size buckets too many?)",
-					codepoint, sizeKey);
 		}
+		// 走到这里有两种情况:
+		//   ① 该码点没有位图(空格/组合符/字面缺码点)—— 正常,缓存下来省得每帧重算;
+		//   ② 有字形但图集满且**同码点一个桶都没有** —— 返回一个**不缓存**的替身(布局照旧正确),
+		//      下一帧重建图集后自然烘出来。签名是 `Glyph&`,所以替身必须住在 face 里。
 		glyph.OffsetX = static_cast<float>(x0);
 		glyph.OffsetY = static_cast<float>(y0);
 		int advance = 0;
 		stbtt_GetCodepointHMetrics(face.Info, codepoint, &advance, nullptr);
 		glyph.Advance = advance * scale;
+		if (!placed && width > 0 && height > 0)
+		{
+			face.Fallback = glyph;
+			return face.Fallback;
+		}
 		const auto result = face.Glyphs.emplace(key, glyph);
 		return result.first->second;
 	}
@@ -779,6 +873,24 @@ namespace World::Wui
 			// '\t' 按 4 空格推进但无字形;'\r'/'\n' 不可见。
 			if (face && face->Info && cp != '\t' && cp != '\r' && cp != '\n')
 			{
+				// 该字面没有这个码点 ⇒ 画**可见的豆腐块**而不是空白:乱码/缺字必须能被一眼看见,
+				// 静默空白会让"字体缺字 / 数据坏字节 / 上游截碎字符"这三类问题都变成猜谜
+				// (实测:用户报"乱码",日志里一条线索都没有)。日志侧另有 FaceForCodepoint 的限流告警。
+				if (stbtt_FindGlyphIndex(face->Info, cp) == 0)
+				{
+					const float boxW = std::max(2.0f, advance * scale * 0.82f);
+					const float boxH = std::max(2.0f, designSize * 0.62f);
+					const float boxY = baseline - boxH;
+					const float t = std::max(1.0f, designSize * 0.07f);
+					const float bx = std::round(pen * scale) / scale;
+					const float by = std::round(boxY * scale) / scale;
+					PushSolidQuad({ bx, by, boxW, t }, command.Color);
+					PushSolidQuad({ bx, by + boxH - t, boxW, t }, command.Color);
+					PushSolidQuad({ bx, by + t, t, boxH - 2 * t }, command.Color);
+					PushSolidQuad({ bx + boxW - t, by + t, t, boxH - 2 * t }, command.Color);
+					pen += advance;
+					continue;
+				}
 				Glyph& glyph = Bake(*face, cp, pixelSize);
 				// M53:按**精确** pixelSize 缩放绘制 —— 尺寸随缩放**连续**变化(不再一格一格跳)。
 				// 清晰度由桶的粒度保证:`Bake` 用 1/4 px 桶 ⇒ 这里的比例落在 ±0.5% 内,双线性重采样
@@ -960,6 +1072,17 @@ namespace World::Wui
 			framebuffer = m_UiFramebuffer;
 		}
 
+		// M54:图集重建**只在帧首**(prebake 之前)。一帧之内绘制命令已经带着 UV 提交,
+		// 中途清空图集会让这些 UV 指向空白区 —— 那才是真正的"乱码"。放在帧首,本帧 prebake
+		// 会按需把用到的字形重新烘一遍,画面完整;代价是这一帧多一次全量烘焙。
+		for (FontFace& face : m_Faces)
+			if (face.NeedsReset && face.AtlasTexture)
+			{
+				ResetFaceAtlas(face);
+				if (face.Resets <= kAtlasLogLimit)
+					WLD_CORE_WARN("[wui-font] face#{0} atlas rebuilt after filling up ({1}x{2}, reset #{3})",
+						face.Index, face.AtlasW, face.AtlasH, face.Resets);
+			}
 		const auto prebake = [&](const std::vector<WuiDrawCommand>& list)
 		{
 			for (const WuiDrawCommand& command : list)
@@ -975,6 +1098,14 @@ namespace World::Wui
 						FontFace* face = FaceForCodepoint(command.Family, command.Bold, cp);
 						if (face && face->Info)
 						{
+							// 缺码点时把**整条字符串**打出来:只说"U+XXXX 没字形"没法定位是哪条文案/哪个数据
+							// (实测踩过:两个幽灵码点 U+4BAE/U+6BAE 在仓库里翻遍了都搜不到)。限流 8 条。
+							if (stbtt_FindGlyphIndex(face->Info, cp) == 0 && s_FontMissLogs < 8)
+							{
+								++s_FontMissLogs;
+								WLD_CORE_WARN("[wui-font] face#{0} missing U+{1:X}: text=\"{2}\"",
+									face->Index, cp, command.Text);
+							}
 							// M52:必须按**物理**字号预热(design * UiScale)——与 `DrawText` 同一口径。
 							// 此前用设计字号:预热的是另一套整数桶,图集被永远用不到的尺寸塞满,
 							// 真正要画的字号反而落进"图集满"的任意尺寸回退 ⇒ **部分文本发虚**
@@ -1002,6 +1133,22 @@ namespace World::Wui
 				face.AtlasTexture->SetData(face.Atlas.data(), face.Atlas.size());
 				face.AtlasDirty = false;
 			}
+		// 诊断开关(WLD_WUI_FONT_STATS=1):每 120 帧打一行字面统计。图集占用是"乱码"类
+		// 问题的第一现场,而它以前完全不可观测(只能靠猜)。默认关闭,零开销。
+		if (s_FontStats && (s_FontStatsFrame++ % 120) == 0)
+			for (FontFace& face : m_Faces)
+				if (face.AtlasTexture)
+				{
+					std::vector<uint32_t> buckets;
+					buckets.reserve(face.Glyphs.size());
+					for (const auto& entry : face.Glyphs)
+						buckets.push_back(static_cast<uint32_t>(entry.first >> 32));
+					std::sort(buckets.begin(), buckets.end());
+					buckets.erase(std::unique(buckets.begin(), buckets.end()), buckets.end());
+					WLD_CORE_INFO("[wui-font] face#{0} glyphs={1} buckets={2} rows={3}/{4} peak={5} bakes={6} full={7} missing={8} resets={9}",
+						face.Index, face.Glyphs.size(), buckets.size(), face.CursorY + face.RowH + 1, face.AtlasH,
+						face.PeakRows, face.Bakes, face.FullHits, face.MissingGlyphLogs, face.Resets);
+				}
 
 		// WUI 矩形是“原点在左上、Y 向下”。GL 的 NDC +Y 在窗口上方,Vulkan 的
 		// NDC +Y 在窗口下方,所以要按后端取相反的 Y 顺序,才能让 rect.Y=0 落在

@@ -77,13 +77,24 @@ namespace World::Wui
 			std::vector<unsigned char> Ttf;
 			stbtt_fontinfo* Info = nullptr;
 			float BaseSize = 16.0f;
-			// M53:桶粒度改成 1/4 px 后,同一字号区间的桶数 ×4 ⇒ 图集给足余量。
-			// 1024² = 4MB(R8G8B8A8),2048² = 16MB —— 换来的是长距离缩放扫描不必频繁撞满。
-			// 仍然会满:满了走"取最接近的已缓存桶"回退(见 `Bake`),不崩、不缺字。
+			// 图集 2048² = 16MB(R8G8B8A8)/ 字面。桶粒度按相对误差定档(见 `BucketStep`)。
+			// **会满,而且满了必须能自愈**:满了标记 `NeedsReset`,下一帧帧首整面重建(见 `Render`)。
+			// 旧版满了会把空白按当前桶写进缓存 ⇒ 之后每个新码点永久空白(用户看到的"乱码")。
+			// `WLD_WUI_ATLAS=<64..4096>` 可压小图集,用来**故意**制造"图集满"做门禁。
 			uint32_t AtlasW = 2048, AtlasH = 2048;
 			std::vector<unsigned char> Atlas;
 			uint32_t CursorX = 1, CursorY = 1, RowH = 0;
 			bool AtlasDirty = false;
+			uint32_t Index = 0;              // m_Faces 下标(日志用)
+			uint32_t PeakRows = 0;           // 用过的最高行(诊断:离满还有多远)
+			uint32_t Bakes = 0;              // 累计烘焙字形数(诊断)
+			uint32_t FullHits = 0;           // 撞满次数(诊断)
+			uint32_t MissingGlyphLogs = 0;   // 缺码点告警限流
+			uint32_t AtlasFullLogs = 0;      // 撞满告警限流
+			bool NeedsReset = false;         // 装不下 ⇒ 下一帧帧首重建
+			uint32_t Resets = 0;
+			// 撞满且同码点一个桶都没缓存时的**非缓存**替身:签名是 `Glyph&`,不能返回栈对象。
+			Glyph Fallback;
 			Rhi::Handle<Rhi::Texture> AtlasTexture;
 			// 键 = (烘焙像素高度 << 32) | 码点:字号缩放时按目标尺寸重新烘焙,
 			// 否则大字号会复用基字号位图被放大成模糊(用户实测"放大字体后有点模糊")。
@@ -91,6 +102,8 @@ namespace World::Wui
 		};
 
 		void EnsureResources();
+		// 整面重建字形图集:清缓存 + 清位图 + 归零游标(只在帧首调用,见 `Render`)。
+		void ResetFaceAtlas(FontFace& face);
 		// 编译 Wui_Ui.slang 并按既有描述建管线;失败返回 false + error,**不动**任何既有句柄。
 		// reload=false = 启动路径(沿用断言编译入口);true = 热重载(非断言入口)。
 		bool BuildShaderAndPipeline(const Rhi::Handle<Rhi::Device>& device, bool reload,
@@ -144,6 +157,12 @@ namespace World::Wui
 		static constexpr uint32_t kFramesInFlight = Renderer::FramesInFlight;
 		// 引擎 shader 失效代(静态,= 进程内所有实例共享)与本实例已见代。
 		static uint32_t s_ShaderGeneration;
+		// WLD_WUI_FONT_STATS=1:每 120 帧打一行每个字面的图集占用(诊断开关,默认关闭)。
+		static bool s_FontStats;
+		static bool s_LegacyBlankBake;
+		static uint32_t s_FontMissLogs;   // 缺码点日志限流
+		static uint32_t s_FontStatsFrame;
+		static constexpr uint32_t kAtlasLogLimit = 8;
 		static uint32_t s_LiveInstances;
 		uint32_t m_SeenShaderGeneration = 0;
 		uint32_t FrameSlot() const;

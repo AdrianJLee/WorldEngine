@@ -1,4 +1,5 @@
 #include "WuiWidgets_Internal.h"
+#include "World/Core/Utf8.h"
 
 namespace World::Wui
 {
@@ -61,11 +62,9 @@ void AppendUtf8(std::string& buffer, uint32_t codepoint){
 
 
 void PopUtf8(std::string& buffer){
-			if (buffer.empty())
-				return;
-			buffer.pop_back();
-			while (!buffer.empty() && (static_cast<unsigned char>(buffer.back()) & 0xC0) == 0x80)
-				buffer.pop_back();
+			// 删**一个完整字符**:旧写法只删续字节会留下悬空引导字节 —— 编辑中文后缓冲区里
+			// 就有半截序列(渲染成空白,写盘也是坏字节)。见 World/Core/Utf8.h。
+			World::Utf8::PopBack(buffer);
 		}
 
 
