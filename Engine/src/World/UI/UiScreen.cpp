@@ -292,22 +292,73 @@ namespace World::UI
 			return true;
 		}
 
-		// ② 文本:`text` → `label` → `title`(与 UiPainter 的取值优先级同口径);按本地化后的文案
-		// 量宽,行高取字号(UiPainter 的单行文本高度就是字号,见 PaintLabel/PaintButton 的
-		// `(Rect.H - font) * 0.5f`)。`padding` 只在节点**声明了**时加入。
-		const std::string* raw = FindPropValue(node, "text");
-		if (raw == nullptr)
-			raw = FindPropValue(node, "label");
-		if (raw == nullptr)
-			raw = FindPropValue(node, "title");
-		if (raw != nullptr)
+		// ② 文本类:按**该控件真实的排版口径**量,不是统一按某一个字段名。
+		//
+		// 为什么要分型(用户报障「比如文本框,几个文本却要占很大的地方」):各控件画文字的方式
+		// 不同 —— 文本框是 `padding + [label + 6] + (value|placeholder) + padding`;复选框/开关是
+		// `boxSize + 间距 + label`;按钮是 `padding + label + padding`;文本是 `text`(兜底 `label`)。
+		// 用同一套"量 text 字段"必然对不上真实尺寸。下面逐型复刻各自的排版,数值与 `UiPainter` 的
+		// 同一常量对齐(字号 15、内边距 8、方框 16、label 与文字之间 6 —— 见各 Paint* 实现)。
+		const std::string typeName = node.Type;
+		const float font = NumberPropValue(node, "fontSize", 15.0f);
+		const auto measure = [&](const std::string& text) {
+			return text.empty() ? 0.0f : Wui::MeasureTextWithHook(text, font, Wui::WuiFontFamily::Ui);
+		};
+		// 属性文本取值(与 `UiPainter::TokenText` 的口径一致:取值 + 本地化解码)。
+		const auto propText = [&](const char* name) -> std::string {
+			const std::string* raw = FindPropValue(node, name);
+			return raw != nullptr ? LocalizedText(*raw) : std::string();
+		};
+		const std::string labelText = propText("label");
+		const std::string valueText = propText("value");
+		const std::string placeholderText = propText("placeholder");
+		const std::string contentText = propText("text");
+		const std::string titleText = propText("title");
+
+		if (typeName == "TextField")
 		{
-			const std::string text = LocalizedText(*raw);
-			const float font = NumberPropValue(node, "fontSize", 15.0f);
-			const float padding = NumberPropValue(node, "padding", 0.0f);
-			const float width = Wui::MeasureTextWithHook(text, font, Wui::WuiFontFamily::Ui);
-			outSize = glm::vec2 { std::max(width, 0.0f) + padding * 2.0f,
+			const float padding = NumberPropValue(node, "padding", 8.0f);
+			// 空值时画的是 placeholder(见 PaintTextField);两者都空 ⇒ 只有一个内边距的最小行。
+			const std::string shown = valueText.empty() ? placeholderText : valueText;
+			const float labelPart = labelText.empty() ? 0.0f : measure(labelText) + 6.0f;
+			outSize = glm::vec2 { padding + labelPart + measure(shown) + padding,
 				std::max(font, 0.0f) + padding * 2.0f };
+			return true;
+		}
+		if (typeName == "Checkbox" || typeName == "Toggle")
+		{
+			// `boxSize + 6 + label`,行高 = max(boxSize, 字号)(见 PaintCheckbox / PaintToggle)。
+			const float box = NumberPropValue(node, "boxSize", 16.0f);
+			outSize = glm::vec2 { box + (labelText.empty() ? 0.0f : 6.0f + measure(labelText)),
+				std::max(box, font) };
+			return true;
+		}
+		if (typeName == "Button")
+		{
+			const float padding = NumberPropValue(node, "padding", 8.0f);
+			outSize = glm::vec2 { measure(labelText) + padding * 2.0f, std::max(font, 0.0f) + padding * 2.0f };
+			return true;
+		}
+		if (typeName == "Label")
+		{
+			// 文本节点:内容 = `text`,兜底 `label`(与 PaintLabel 同一优先级)。
+			const std::string shown = contentText.empty() ? labelText : contentText;
+			outSize = glm::vec2 { measure(shown), std::max(font, 0.0f) };
+			return true;
+		}
+		if (typeName == "ProgressBar")
+		{
+			// 只有文字长度有意义(进度条长度是设计意图,不收紧);没文字 ⇒ 不参与。
+			if (labelText.empty())
+				return false;
+			outSize = glm::vec2 { measure(labelText), std::max(font, 0.0f) };
+			return true;
+		}
+		if (!titleText.empty())
+		{
+			// 带标题的容器(面板/卡片):按标题 + 内边距收紧到"能放下标题"。
+			const float padding = NumberPropValue(node, "padding", 0.0f);
+			outSize = glm::vec2 { measure(titleText) + padding * 2.0f, std::max(font, 0.0f) + padding * 2.0f };
 			return true;
 		}
 

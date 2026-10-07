@@ -1030,7 +1030,7 @@ bool ColorField(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& rgba,
 	}
 
 
-bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, float& value, float minValue, float maxValue, const WuiTheme& theme){
+bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, float& value, float minValue, float maxValue, const WuiTheme& theme, bool reverse){
 		const float lo = std::min(minValue, maxValue);
 		const float hi = std::max(minValue, maxValue);
 		const float centerX = rect.X + rect.W * 0.5f;
@@ -1058,7 +1058,9 @@ bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, flo
 		if (state.Dragging)
 		{
 			const float axis = vertical ? ctx.Input().MousePos.x : ctx.Input().MousePos.y;
-			const float next = std::clamp(state.PressValue + (axis - state.PressAxis), lo, hi);
+			// M50:reverse = 被改的尺寸在条的右侧/下侧 ⇒ 轴向位移取反(见头文件)。
+			const float travel = (axis - state.PressAxis) * (reverse ? -1.0f : 1.0f);
+			const float next = std::clamp(state.PressValue + travel, lo, hi);
 			if (next != value)
 			{
 				value = next;
@@ -1071,9 +1073,11 @@ bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, flo
 		if (focused && !state.Dragging)
 		{
 			const float step = theme.Pad;
-			const float delta = vertical
+			// M50:reverse 时键盘箭头同样取反(与鼠标同一条写值路径)。
+			const float sign = reverse ? -1.0f : 1.0f;
+			const float delta = sign * (vertical
 				? ((ctx.WasKeyPressed(KeyCodes::Left) ? -step : 0.0f) + (ctx.WasKeyPressed(KeyCodes::Right) ? step : 0.0f))
-				: ((ctx.WasKeyPressed(KeyCodes::Up) ? -step : 0.0f) + (ctx.WasKeyPressed(KeyCodes::Down) ? step : 0.0f));
+				: ((ctx.WasKeyPressed(KeyCodes::Up) ? -step : 0.0f) + (ctx.WasKeyPressed(KeyCodes::Down) ? step : 0.0f)));
 			if (delta != 0.0f)
 			{
 				const float next = std::clamp(value + delta, lo, hi);

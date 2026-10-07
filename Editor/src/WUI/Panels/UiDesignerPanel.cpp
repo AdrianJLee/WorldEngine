@@ -1186,8 +1186,10 @@ namespace World
 			// 分隔条:拖动直接改像素宽度,越界由上面的 clamp 在每个帧收口。
 			Wui::Splitter(ctx, Wui::HashId("ui_designer.split.left"), leftSplitter, true,
 				m_LeftWidth, kMinColumnWidth, maxLeft, theme);
+			// M51:右分隔条改的是**它右侧**的属性栏宽度 ⇒ reverse=true(否则往右拖属性栏反而变宽、
+			// 边界往左跑 —— 用户报的"左右拉效果是反的")。
 			Wui::Splitter(ctx, Wui::HashId("ui_designer.split.right"), rightSplitter, true,
-				m_RightWidth, kMinColumnWidth, maxRight, theme);
+				m_RightWidth, kMinColumnWidth, maxRight, theme, /*reverse=*/true);
 		}
 
 		if (statusHeight > 0.0f)
@@ -2005,6 +2007,11 @@ namespace World
 				// 逻辑路径;两个都列会让人以为要各填一遍(用户报障)。
 				if (meta.EditorHidden)
 					continue;
+				// M51:`label` 在文本节点上是**遗留兜底**(`text` 优先,见 PaintLabel)—— 只在 Label 上
+				// 出现,且写了 `text` 之后它就不生效。用户报障"label 与 text 两个控制的都是显示内容"
+				// 正是这个:留一行就够,别让人以为要各填一遍。
+				if (meta.Name == "label" && node.Type == "Label")
+					continue;
 				rows.push_back(PropertyRowRef { meta.Name, &meta });
 			}
 		}
@@ -2395,7 +2402,14 @@ namespace World
 				Wui::PropertyRowDesc desc;
 				// M42:可见文案走本地化(键 `wui.prop.<名>.name` / `.doc`);A11yLabel 保持原始
 				// 属性名(稳定标识符,脚本按它寻址),Term 仍是英文术语对照(既有 TrLabel 口径)。
-				desc.Label = Wui::Tr("wui.prop." + ref.Name + ".name", ref.Name);
+				// M51:属性名/说明分**两层键** —— `wui.node.<Type>.prop.<名>.*` 优先,再回退到
+				// `wui.prop.<名>.*`。为什么需要:同一个属性名在不同节点类型上含义不同 —— 文本节点的
+				// `text` 是**内容**,按钮的 `text` 是**文字颜色**;共用一套键必然有一边被译错
+				// (用户报的"两个控制的都是显示内容"就是文本节点上的 `text` 被标成了颜色)。
+				const std::string propNameKey = "wui.node." + node->Type + ".prop." + ref.Name + ".name";
+				const std::string propDocKey = "wui.node." + node->Type + ".prop." + ref.Name + ".doc";
+				desc.Label = Wui::Tr(propNameKey,
+					Wui::Tr("wui.prop." + ref.Name + ".name", ref.Name));
 				desc.Term = ref.Name;
 				desc.A11yLabel = ref.Name;
 				desc.A11yValue = value;
@@ -2407,8 +2421,8 @@ namespace World
 					// 只让出与尾部复位键之间的间隙就够:选择器自己会按剩余宽度收缩 combo 与徽标(内部按 budget 切),预留过大反而把 combo 挤成 `<...>`(实测)。
 					desc.TrailingReserve = 10.0f;
 				desc.Enabled = true;
-				desc.Tooltip = Wui::Tr("wui.prop." + ref.Name + ".doc",
-					meta != nullptr ? meta->Doc : std::string());
+				desc.Tooltip = Wui::Tr(propDocKey,
+					Wui::Tr("wui.prop." + ref.Name + ".doc", meta != nullptr ? meta->Doc : std::string()));
 				if (meta != nullptr && !meta->Unit.empty())
 					desc.Tooltip += (desc.Tooltip.empty() ? "" : "\n") + meta->Unit;
 				// ↺ = 清除覆盖值(回到类型默认);只在**有覆盖**时出现(库件的 ResetModified 口径)。
@@ -2735,6 +2749,29 @@ namespace World
 		groupHeader("panel.ui_designer.section.layout", "Layout", std::string(), m_ShowLayoutSection);
 		if (m_ShowLayoutSection)
 		{
+			// M51:「自适应大小」开关(用户报障:文本框几个字却占很大地方)。勾上后布局在容器
+			// 排布之后按**内容**收紧这个节点的框:文本按实测字宽、文本框按 padding+提示文字、
+			// 复选框/开关按方框+标签、容器按子的包围盒。只影响运行态矩形,不改文档的 Anchor.Size。
+			{
+				Wui::PropertyRowDesc autoDesc;
+				autoDesc.Label = Wui::Tr("panel.ui_designer.layout.autosize", "Fit content");
+				autoDesc.Term = "AutoSize";
+				autoDesc.A11yLabel = autoDesc.Label;
+				autoDesc.LabelWidth = labelWidth;
+				autoDesc.Tooltip = Wui::Tr("panel.ui_designer.layout.autosize.doc",
+					"Shrink this node's box to fit its content (text width, or the children's bounding "
+					"box) instead of using the authored size. Stretched anchors ignore it.");
+				const Wui::PropertyRowResult autoRow = Wui::PropertyRow(ctx,
+					Wui::HashId("ui_designer.layout.autosize"), nextRow(rowHeight), autoDesc, theme);
+				if (Wui::Checkbox(ctx, Wui::HashId("ui_designer.layout.autosize.field"), autoRow.FieldRect,
+					std::string(), node->Layout.AutoSize, theme))
+				{
+					// 注意:`Wui::Checkbox(..., bool& value, ...)` **自己就把值写回引用**了 ——
+					// 这里绝不能再取反一次,否则两次翻转抵消、点了没反应(实测踩过)。
+					NoteNodeEdit(autoDesc.Label);
+					m_ScreenDirty = true;
+				}
+			}
 			std::vector<std::string> options;
 			options.reserve(sizeof(kLayoutKinds) / sizeof(kLayoutKinds[0]));
 			for (const UI::UiLayoutKind kind : kLayoutKinds)

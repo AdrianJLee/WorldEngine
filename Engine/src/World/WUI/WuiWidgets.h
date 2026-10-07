@@ -613,8 +613,12 @@ namespace World::Wui
 	//  累加并 clamp 到 [minValue,maxValue];焦点上按轴向箭头 ±theme.Pad。双击复位由调用方决定。
 	//  无障碍:kind="splitter"、value=当前值字符串、interactive=true。
 	//  返回 true = 本次改动了 value。
+	//  M50:`reverse` —— 被改的尺寸在**条的右侧/下方**时置 true:位移取反(拖右 ⇒ 值变小)。
+	//  为什么需要:本控件按"值 += 轴向位移"累加(条左边的面板适用)。右分隔条改的是**右侧**面板的
+	//  宽度,不取反就是"往右拖、面板反而变宽、边界往左跑"(用户报的左右拉反向)。
+	//  默认 false = 既有调用点逐像素不变。
 	bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, float& value,
-		float minValue, float maxValue, const WuiTheme& theme);
+		float minValue, float maxValue, const WuiTheme& theme, bool reverse = false);
 
 	// ---- P4-UX12 / U2C:向量字段 / 空状态 ----
 	// 向量字段:三个分量同格(`X [ ]  Y [ ]  Z [ ]`),点进去输入、按住拖动微调(复用 DragFloat 的手感)。
