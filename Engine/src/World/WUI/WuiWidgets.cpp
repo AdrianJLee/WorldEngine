@@ -215,49 +215,10 @@ namespace WuiWidgetsDetail
 {
 		// 按绘制宽度折行:支持 '\n' 硬换行;对 CJK(无空格)按字符断行。
 std::vector<std::string> WrapTooltipText(WuiContext& ctx, const std::string& text, float fontSize, float maxWidth){
-			std::vector<std::string> lines;
-			const auto emit = [&](const std::string& paragraph)
-			{
-				std::string current;
-				size_t index = 0;
-				while (index < paragraph.size())
-				{
-					// 取一个 UTF-8 字符
-					const unsigned char lead = static_cast<unsigned char>(paragraph[index]);
-					size_t length = 1;
-					if ((lead & 0xE0) == 0xC0) length = 2;
-					else if ((lead & 0xF0) == 0xE0) length = 3;
-					else if ((lead & 0xF8) == 0xF0) length = 4;
-					length = std::min(length, paragraph.size() - index);
-					std::string candidate = current + paragraph.substr(index, length);
-					if (!current.empty() && ctx.MeasureTextWidth(candidate, fontSize) > maxWidth)
-					{
-						lines.push_back(current);
-						current.clear();
-						continue;   // 重新尝试放这个字符
-					}
-					current = std::move(candidate);
-					// 西文按空格优先断行:遇到空格且下一段超宽时在此断开
-					index += length;
-				}
-				if (!current.empty())
-					lines.push_back(current);
-			};
-			std::string paragraph;
-			for (size_t i = 0; i < text.size(); ++i)
-			{
-				if (text[i] == '\n')
-				{
-					emit(paragraph);
-					paragraph.clear();
-					continue;
-				}
-				paragraph.push_back(text[i]);
-			}
-			emit(paragraph);
-			if (lines.empty())
-				lines.push_back(std::string());
-			return lines;
+			// 折行逻辑已收敛到 `Wui::WrapTextLines`(唯一实现):这里只保留"tooltip 口径"——
+			// 丢掉空段(本地化文案常带尾随换行,渲染成空行会让气泡莫名变高)。
+			(void)ctx;
+			return Wui::WrapTextLines(text, fontSize, maxWidth, WuiFontFamily::Ui, /*keepEmptyLines*/ false);
 		}
 
 		// NumberFieldInt / StepperInt 的共同实现:steppers=true 时左右各一个 [−]/[+] 步进钮。

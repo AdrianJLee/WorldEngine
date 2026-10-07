@@ -124,6 +124,20 @@ namespace World::Wui
 	void WLD_API ClearTextMeasureHook(void* owner);
 	float WLD_API MeasureTextWithHook(std::string_view utf8, float fontSize, WuiFontFamily family);
 
+	// ---- 多行文本排版(M54b)----
+	// 唯一的按宽折行实现(编辑器的 WUI、游戏 UI 的 .wui、AutoSize 全部走它 —— 三处各写一份
+	// 必然漂移,实测"量出来的高度与画出来的行数不一致"就是这么来的)。
+	//
+	// 口径:
+	//   * **显式换行**:`\n` 一定生效(`\r` 丢弃);`\r\n` 也按一行处理。
+	//   * **按宽折行**:`maxWidth > 0` 时逐**UTF-8 字符**累加,超宽才断行(中文逐字断,
+	//     西文不按单词断 —— 与既有 tooltip 口径一致,保持像素基线不变)。
+	//   * `keepEmptyLines = true` 时空段落保留(**设计器里 `A\n\nB` 的中间空行是有意的**);
+	//     false = 丢掉空段(既有 tooltip 行为,逐字节不变)。
+	//   * 返回值至少一行(空串输入 ⇒ 一个空串),调用方不用处理空向量。
+	std::vector<std::string> WLD_API WrapTextLines(std::string_view utf8, float fontSize, float maxWidth,
+		WuiFontFamily family, bool keepEmptyLines = false);
+
 	// ---- 纹理解析钩子(M48)----
 	// `image` 的 `texture` 属性写的是**逻辑路径**(如 `textures/Icon.wtex`),而绘制命令要的是
 	// `WuiTextureRegistry` 的数值句柄 —— 路径→句柄的解析只有宿主知道(它持有资产库与设备)。

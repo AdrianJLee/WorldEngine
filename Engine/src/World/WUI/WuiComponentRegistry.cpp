@@ -711,6 +711,17 @@ Property PropInt(const char* name, float min, float max, float step){
 		}
 
 
+		// M54b:枚举属性 —— 属性面板渲染成**下拉**(`Wui::Combo`),值是 `Options` 里的原文。
+		// 选项文本不本地化(与状态选择器同一口径:值要与 `.wui`/文档对得上),说明走 `Doc`。
+Property PropEnum(const char* name, std::vector<std::string> options){
+			Property property;
+			property.Name = name;
+			property.Type = Property::Kind::Enum;
+			property.Options = std::move(options);
+			return property;
+		}
+
+
 		// M50:标记"内部字段"(属性面板不列)。与 Grouped/UnitOf 同一族的登记期小工具。
 Property HiddenInEditor(Property property){
 			property.EditorHidden = true;
@@ -1476,6 +1487,14 @@ void RegisterBuiltins(){
 					PropColor("color", "#D7DCE3", false, "Text color (unset = theme.Text)."),
 					Grouped(PropBool("bold"), WuiComponentPropertyGroup::Style,
 						"Draw the text in a bold weight (unset = regular)."),
+					// M54b:多行文本 —— 显式 `\n` **总是**换行;这三项控制"再按宽折行"与排版。
+					Grouped(PropEnum("align", { "left", "center", "right" }), WuiComponentPropertyGroup::Style,
+						"Horizontal text alignment inside the node (unset = left)."),
+					Grouped(PropBool("wrap"), WuiComponentPropertyGroup::Style,
+						"Wrap lines that exceed the node width (unset = off; explicit '\n' always breaks)."),
+					Grouped(NumberDefault(PropFloat("lineHeight", 1.0f, 3.0f, 0.05f), 1.25f),
+						WuiComponentPropertyGroup::Style,
+						"Line advance as a multiple of the font size (unset = 1.25)."),
 				},
 				&ShowLabel));
 

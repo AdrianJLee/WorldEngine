@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -284,6 +285,132 @@ namespace
 		CHECK(result.Commands > 0);
 	}
 
+	// ---- M54b:多行文本(显式 \n / 按宽折行 / 行距 / 对齐 / AutoSize 几何)----
+	//
+	// 这一组补的正是台账里"AutoSize 只有 TextField 一条实机证据"的缺口:
+	// 多行文本的**高度**必须由 UiScreen(布局)与 UiPainter(绘制)算出同一个数 —— 两边都用
+	// `Wui::WrapTextLines`,这里把"同一个数"钉死。
+	// 度量用注入的假钩子(1 码点 = fontSize * 0.6),避免依赖字体文件。
+	void TestMultilineTextLayoutAndPaint()
+	{
+		Wui::SetTextMeasureHook(nullptr, [](std::string_view text, float fontSize, Wui::WuiFontFamily) {
+			std::size_t codepoints = 0;
+			for (const char ch : text)
+				if ((static_cast<unsigned char>(ch) & 0xC0u) != 0x80u)
+					++codepoints;
+			return static_cast<float>(codepoints) * fontSize * 0.6f;
+		});
+
+		// ① 显式 `\n` = 两行:命令数 2(每行一条 Text),行距 1.25 ⇒ 块高 = 2 × 1.25 × 字号。
+		{
+			UiNode node = MakeNode("two", "Label");
+			node.Anchor = PointAnchor(10.0f, 10.0f, 400.0f, 200.0f);
+			SetProp(node, "text", "A\nB");
+			SetProp(node, "fontSize", "20");
+			const UiScreen screen = BuildAndLayout(BaseDocument({ node }));
+			Wui::WuiContext ctx;
+			BeginContext(ctx);
+			const UiPaintResult result = UiPainter::Paint(ctx, screen);
+			CHECK(result.Ok());
+			int textCommands = 0;
+			for (const Wui::WuiDrawCommand& command : ctx.Commands())
+				if (command.Kind == Wui::WuiDrawKind::Text)
+					++textCommands;
+			CHECK(textCommands == 2);                       // 两行 = 两条 Text 命令(单行时是 1)
+		}
+
+		// ② AutoSize + 显式 `\n`:高度 = 2 行 × 1.25 × 20 = 50(不是单行的 20)。
+		{
+			UiNode node = MakeNode("fit", "Label");
+			node.Anchor = PointAnchor(10.0f, 10.0f, 400.0f, 200.0f);
+			SetProp(node, "text", "A\nB");
+			SetProp(node, "fontSize", "20");
+			node.Layout.AutoSize = true;   // AutoSize 是**结构化字段**(Layout.AutoSize),不是 Props 里的文本键
+			const UiScreen screen = BuildAndLayout(BaseDocument({ node }));
+			CHECK(screen.Count() == 1);
+			const UiNodeInstance& laid = screen.Nodes()[0];
+			CHECK_NEAR(laid.Rect.H, 2.0f * 1.25f * 20.0f, 0.01f);
+			// 宽 = 最长行("A" / "B" 各 1 码点)⇒ 1 × 20 × 0.6 = 12。
+			CHECK_NEAR(laid.Rect.W, 12.0f, 0.01f);
+		}
+
+		// ③ AutoSize + `wrap`:宽度不够时折行,高度随行数增长(显式行长 10 码点);
+		//    这里 `wrap=true` 且**父矩形宽**由 AutoSize 自己决定 ⇒ 用它当前的 Rect.W 折行。
+		//    口径:wrap 时高度 ≥ 2 行(证明确实折了),且宽度不超过矩形宽。
+		{
+			UiNode node = MakeNode("wrap", "Label");
+			node.Anchor = PointAnchor(10.0f, 10.0f, 60.0f, 200.0f);
+			SetProp(node, "text", "ABCDEFGHIJ");
+			SetProp(node, "fontSize", "20");
+			SetProp(node, "wrap", "true");
+			node.Layout.AutoSize = true;   // AutoSize 是**结构化字段**(Layout.AutoSize),不是 Props 里的文本键
+			const UiScreen screen = BuildAndLayout(BaseDocument({ node }));
+			const UiNodeInstance& laid = screen.Nodes()[0];
+			CHECK(laid.Rect.W <= 60.0f + 0.01f);
+			CHECK(laid.Rect.H >= 2.0f * 1.25f * 20.0f - 0.01f);
+			CHECK(laid.Rect.H <= 10.0f * 1.25f * 20.0f + 0.01f);
+		}
+
+		// ④ 行距可覆盖:`lineHeight = 2` ⇒ AutoSize 高 = 2 × 2 × 20 = 80。
+		{
+			UiNode node = MakeNode("lh", "Label");
+			node.Anchor = PointAnchor(10.0f, 10.0f, 400.0f, 200.0f);
+			SetProp(node, "text", "A\nB");
+			SetProp(node, "fontSize", "20");
+			SetProp(node, "lineHeight", "2");
+			node.Layout.AutoSize = true;   // AutoSize 是**结构化字段**(Layout.AutoSize),不是 Props 里的文本键
+			const UiScreen screen = BuildAndLayout(BaseDocument({ node }));
+			CHECK_NEAR(screen.Nodes()[0].Rect.H, 80.0f, 0.01f);
+		}
+
+		// ⑤ 对齐 = center:两行的绘制起点都要居中(行宽不同 ⇒ 起点不同,但中心重合)。
+		{
+			UiNode node = MakeNode("align", "Label");
+			node.Anchor = PointAnchor(0.0f, 0.0f, 100.0f, 100.0f);
+			SetProp(node, "text", "AA\nBBBB");
+			SetProp(node, "fontSize", "10");
+			SetProp(node, "align", "center");
+			SetProp(node, "lineHeight", "1");
+			const UiScreen screen = BuildAndLayout(BaseDocument({ node }));
+			Wui::WuiContext ctx;
+			BeginContext(ctx);
+			CHECK(UiPainter::Paint(ctx, screen).Ok());
+			std::vector<float> xs;
+			for (const Wui::WuiDrawCommand& command : ctx.Commands())
+				if (command.Kind == Wui::WuiDrawKind::Text)
+					xs.push_back(command.Rect.X);
+			CHECK(xs.size() == 2);
+			// 注意:绘制命令的矩形是**物理**像素,而 `UiNodeInstance::Rect` 是设计单位 ——
+			// 行宽按**物理**字号量(与 `PaintLabel` 一致),不要拿设计字号算(差一个 kScale)。
+			const float physicalW = screen.Nodes()[0].Rect.W * kScale;
+			const float physicalFont = 10.0f * kScale;
+			const float lineA = 2.0f * physicalFont * 0.6f;      // "AA"
+			const float lineB = 4.0f * physicalFont * 0.6f;      // "BBBB"
+			CHECK_NEAR(xs[0] - screen.Nodes()[0].Rect.X * kScale, (physicalW - lineA) * 0.5f, 0.05f);
+			CHECK_NEAR(xs[1] - screen.Nodes()[0].Rect.X * kScale, (physicalW - lineB) * 0.5f, 0.05f);
+			CHECK_NEAR((xs[0] + lineA * 0.5f), (xs[1] + lineB * 0.5f), 0.05f);   // 两行中心重合
+		}
+
+		// ⑥ 负对照:同一个长文本**关掉** wrap(且没有显式 `\n`)= 单行一条命令,不折行。
+		{
+			UiNode node = MakeNode("nowrap", "Label");
+			node.Anchor = PointAnchor(0.0f, 0.0f, 30.0f, 100.0f);
+			SetProp(node, "text", "ABCDEFGHIJ");
+			SetProp(node, "fontSize", "20");
+			const UiScreen screen = BuildAndLayout(BaseDocument({ node }));
+			Wui::WuiContext ctx;
+			BeginContext(ctx);
+			CHECK(UiPainter::Paint(ctx, screen).Ok());
+			int textCommands = 0;
+			for (const Wui::WuiDrawCommand& command : ctx.Commands())
+				if (command.Kind == Wui::WuiDrawKind::Text)
+					++textCommands;
+			CHECK(textCommands == 1);      // 不折行 ⇒ 一条命令(与 ③ 的 ≥2 行形成对照)
+		}
+
+		Wui::ClearTextMeasureHook(nullptr);
+	}
+
 	void TestAccessibilityNodesRegistered()
 	{
 		Wui::WuiAccessibility& accessibility = Wui::WuiAccessibility::Get();
@@ -390,6 +517,7 @@ int main()
 		TestUnknownTypeIsReadableErrorAndSkipped();
 		TestAccessibilityNodesRegistered();
 		TestAccessibilityOffRegistersNothing();
+		TestMultilineTextLayoutAndPaint();
 	}
 	catch (const std::exception& e)
 	{

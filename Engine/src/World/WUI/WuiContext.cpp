@@ -116,6 +116,62 @@ namespace World::Wui
 			[&](const auto& entry) { return entry.first == owner; }), entries.end());
 	}
 
+	std::vector<std::string> WrapTextLines(std::string_view utf8, float fontSize, float maxWidth,
+		WuiFontFamily family, bool keepEmptyLines)
+	{
+		std::vector<std::string> lines;
+		const auto emit = [&](std::string_view paragraph)
+		{
+			if (maxWidth <= 0.0f)
+			{
+				// 不折行:一个段落一行(keepEmptyLines=false 时空段丢弃)。
+				if (keepEmptyLines || !paragraph.empty())
+					lines.emplace_back(paragraph);
+				return;
+			}
+			std::string current;
+			std::size_t index = 0;
+			while (index < paragraph.size())
+			{
+				// 取一个完整 UTF-8 字符(绝不在序列中间断行)。
+				const unsigned char lead = static_cast<unsigned char>(paragraph[index]);
+				std::size_t length = 1;
+				if ((lead & 0xE0u) == 0xC0u) length = 2;
+				else if ((lead & 0xF0u) == 0xE0u) length = 3;
+				else if ((lead & 0xF8u) == 0xF0u) length = 4;
+				length = std::min(length, paragraph.size() - index);
+				std::string candidate = current + std::string(paragraph.substr(index, length));
+				if (!current.empty() && MeasureTextWithHook(candidate, fontSize, family) > maxWidth)
+				{
+					lines.push_back(current);
+					current.clear();
+					continue;   // 重新尝试放这个字符(新行首字符一定放得下,不会死循环)
+				}
+				current = std::move(candidate);
+				index += length;
+			}
+			if (keepEmptyLines || !current.empty())
+				lines.push_back(current);
+		};
+		std::string paragraph;
+		for (const char ch : utf8)
+		{
+			if (ch == '\n')
+			{
+				emit(paragraph);
+				paragraph.clear();
+				continue;
+			}
+			if (ch == '\r')
+				continue;   // CRLF:按一个换行处理
+			paragraph.push_back(ch);
+		}
+		emit(paragraph);
+		if (lines.empty())
+			lines.emplace_back();
+		return lines;
+	}
+
 	float MeasureTextWithHook(std::string_view utf8, float fontSize, WuiFontFamily family)
 	{
 		const auto& entries = MeasureHook().Entries;

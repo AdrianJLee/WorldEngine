@@ -209,13 +209,57 @@ namespace World::UI
 			ctx.Label = title;
 		}
 
+		// M54b:文本的水平对齐(`align` = 左/中/右;未设置 = 左,与旧行为一致)。
+		// 返回该行的绘制起点 X(设计/物理同单位:这里已是物理矩形,行宽也是物理宽)。
+		float AlignedTextX(const UiNodePaintContext& ctx, const std::string& line, float font, float width)
+		{
+			if (width <= 0.0f)
+				return ctx.Rect.X;
+			const std::string align = TokenText(ctx, "align");
+			if (align == "center" || align == "Center" || align == "middle")
+				return ctx.Rect.X + std::max(0.0f, (ctx.Rect.W - width) * 0.5f);
+			if (align == "right" || align == "Right" || align == "end")
+				return ctx.Rect.X + std::max(0.0f, ctx.Rect.W - width);
+			return ctx.Rect.X;
+		}
+
 		void PaintLabel(UiNodePaintContext& ctx)
 		{
 			const std::string text = Localized(TokenText(ctx, "text", TokenText(ctx, "label")));
 			const float font = ScaledProp(ctx, "fontSize", 15.0f);
-			const float y = ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - font) * 0.5f);
-			AddText(ctx, ctx.Rect.X, y, text, TokenColor(ctx, "color", ctx.Theme.Text), font,
-				TokenBool(ctx, "bold", false));
+			const WuiColor color = TokenColor(ctx, "color", ctx.Theme.Text);
+			const bool bold = TokenBool(ctx, "bold", false);
+			const bool wrap = TokenBool(ctx, "wrap", false);
+			// 行距 = 倍数 × 字号(未设置 = 1.25;下限 1.0 防重叠)。
+			const float lineStep = font * std::max(1.0f, TokenNumber(ctx, "lineHeight", 1.25f));
+
+			// 单行且不折行:走**原来的**竖排口径(Rect.H - font 居中) —— 既有像素基线逐字节不变。
+			if (!wrap && text.find('\n') == std::string::npos && text.find('\r') == std::string::npos)
+			{
+				const float y = ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - font) * 0.5f);
+				const float width = ctx.Context.MeasureTextWidth(text, font, Wui::WuiFontFamily::Ui);
+				AddText(ctx, AlignedTextX(ctx, text, font, width), y, text, color, font, bold);
+				ctx.Label = text;
+				ctx.Value = text;
+				return;
+			}
+
+			// 多行:显式 `\n` 一定换行;`wrap` 时再按矩形宽折行(与 AutoSize 走同一函数)。
+			const std::vector<std::string> lines = Wui::WrapTextLines(text, font,
+				wrap ? ctx.Rect.W : 0.0f, Wui::WuiFontFamily::Ui, /*keepEmptyLines*/ true);
+			const float blockH = static_cast<float>(lines.size()) * lineStep;
+			float y = ctx.Rect.Y + std::max(0.0f, (ctx.Rect.H - blockH) * 0.5f);
+			for (const std::string& line : lines)
+			{
+				if (!line.empty())
+				{
+					const float width = ctx.Context.MeasureTextWidth(line, font, Wui::WuiFontFamily::Ui);
+					AddText(ctx, AlignedTextX(ctx, line, font, width), y, line, color, font, bold);
+				}
+				y += lineStep;
+			}
+			// 无障碍文本保留**原文**(含 `\n`):读屏/脚本要能拿到完整内容,
+			// 不是"把换行吃掉"的那一版(实测读屏会把两行读成一行)。
 			ctx.Label = text;
 			ctx.Value = text;
 		}
@@ -717,7 +761,9 @@ namespace World::UI
 			"Container surface with a themed background, border and optional title that lays out child "
 			"nodes inside; use it for cards, dialogs and toolbars.");
 		add({ "Label", "label", "text", { "WuiLabel" }, false, &PaintLabel, { "color" } },
-			"Read-only single line of text. Use it for captions, field labels and status readouts.");
+			"Read-only text block: one line by default, and a real multi-line block when the text "
+			"contains '\\n' or when 'wrap' is on. Use it for captions, field labels, status readouts "
+			"and long descriptions; 'align' and 'lineHeight' control the block layout.");
 		add({ "Button", "button", "button", { "WuiButton" }, true, &PaintButton,
 			{ "bg", "border", "text", "radius" } },
 			"Clickable push button with a label and hover/pressed/focus/disabled states; use it as the "

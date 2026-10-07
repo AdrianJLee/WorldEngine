@@ -59,6 +59,15 @@ namespace World::UI
 			return end != value->c_str() ? parsed : fallback;
 		}
 
+		// 同一取值口径的布尔版(`"1"/"true"/"yes"/"on"`),与 `UiPainter::TokenBool` 一致。
+		bool BoolPropValue(const UiNodeInstance& node, std::string_view name, bool fallback)
+		{
+			const std::string* value = FindPropValue(node, name);
+			if (value == nullptr || value->empty())
+				return fallback;
+			return *value == "1" || *value == "true" || *value == "True" || *value == "yes" || *value == "on";
+		}
+
 		std::string LocalizedText(const std::string& text)
 		{
 			if (text.empty() || text.front() != '@')
@@ -343,7 +352,18 @@ namespace World::UI
 		{
 			// 文本节点:内容 = `text`,兜底 `label`(与 PaintLabel 同一优先级)。
 			const std::string shown = contentText.empty() ? labelText : contentText;
-			outSize = glm::vec2 { measure(shown), std::max(font, 0.0f) };
+			// M54b:多行口径必须与 `PaintLabel` **同一函数**(否则"量出来的高度"与"画出来的
+			// 行数"必然漂移 —— 这是 AutoSize 最容易错的地方)。`wrap` 时按当前宽折行,高度按行距;
+			// 未 wrap 时显式 `\n` 仍然换行。
+			const bool wrap = BoolPropValue(node, "wrap", false);
+			const float lineStep = std::max(font, 0.0f)
+				* std::max(1.0f, NumberPropValue(node, "lineHeight", 1.25f));
+			const std::vector<std::string> lines = Wui::WrapTextLines(shown, font,
+				wrap ? node.Rect.W : 0.0f, Wui::WuiFontFamily::Ui, /*keepEmptyLines*/ true);
+			float widest = 0.0f;
+			for (const std::string& line : lines)
+				widest = std::max(widest, measure(line));
+			outSize = glm::vec2 { widest, static_cast<float>(lines.size()) * lineStep };
 			return true;
 		}
 		if (typeName == "ProgressBar")
