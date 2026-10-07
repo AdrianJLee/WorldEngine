@@ -58,6 +58,8 @@ namespace World
 		{
 			std::string LogicalPath;
 			std::vector<std::string> SystemNames;
+			// M55:该脚本用 `ui.onDraw` 注册的 UI 回调(整份重跑时先清后重注册,见 ReloadSystemScript)。
+			std::vector<ScriptFunctionRef> UiDraws;
 		};
 		std::vector<SystemScriptRecord> s_SystemScripts;
 		// 当前正在执行的系统脚本逻辑路径(空 = 不在加载系统脚本)。
@@ -1805,17 +1807,92 @@ namespace World
 		return ext == ".luau" || ext == ".lua";
 	}
 
+	// 惰性建立一份系统脚本的记录(第一次记名时建)。
+	// **注意顺序**:`ui.onDraw` 可能在 `ecs:AddSystem` 之前执行(脚本可以只画 UI、不注册系统),
+	// 所以两个入口都必须走这里 —— 早先只有 NoteScriptSystem 建记录,导致"只画 UI 的脚本"
+	// 被当成 internal 错误整份带崩(实测踩过)。
+	static SystemScriptRecord& EnsureSystemScriptRecord(const std::string& logicalPath)
+	{
+		if (SystemScriptRecord* existing = FindSystemScriptRecord(logicalPath))
+			return *existing;
+		s_SystemScripts.push_back(SystemScriptRecord{ logicalPath, {}, {} });
+		return s_SystemScripts.back();
+	}
+
 	void ScriptEngine::NoteScriptSystem(const std::string& systemName)
 	{
 		if (s_LoadingSystemScript.empty() || systemName.empty())
 			return;
-		SystemScriptRecord* record = FindSystemScriptRecord(s_LoadingSystemScript);
-		if (!record)
+		EnsureSystemScriptRecord(s_LoadingSystemScript).SystemNames.push_back(systemName);
+	}
+
+	// M55:系统脚本的 `ui.onDraw(fn)` 入口(绑定层调用)。归属 = **当前正在加载的系统脚本**;
+	// 不在加载期(交互式执行/刷新里调用)⇒ 可读错误,不做"记到某个随便的脚本名下"这种猜测。
+	void ScriptEngine::RegisterScriptUiDraw(const ScriptValue& fn, std::string* error)
+	{
+		const auto fail = [error](const char* message) {
+			if (error)
+				*error = message;
+		};
+		if (s_LoadingSystemScript.empty())
 		{
-			s_SystemScripts.push_back(SystemScriptRecord{ s_LoadingSystemScript, {} });
-			record = &s_SystemScripts.back();
+			fail("ui.onDraw can only be called while a system script is loading "
+				"(put it at the top level of <content root>/scripts/systems/*.luau)");
+			return;
 		}
-		record->SystemNames.push_back(systemName);
+		ScriptFunctionRef ref;
+		if (!fn.AsFunction(&ref) || !ref.IsValid())
+		{
+			fail("ui.onDraw expects a function");
+			return;
+		}
+		EnsureSystemScriptRecord(s_LoadingSystemScript).UiDraws.push_back(std::move(ref));
+	}
+
+	// M55:撤销一份系统脚本注册的全部 UI 回调(整份重跑/卸载时调用)。
+	void ScriptEngine::ClearScriptUiDraws(const std::string& logicalPath)
+	{
+		if (SystemScriptRecord* record = FindSystemScriptRecord(logicalPath))
+			record->UiDraws.clear();
+	}
+
+	std::size_t ScriptEngine::DrawScriptUi(Scene& scene, Wui::WuiContext& context)
+	{
+		AssertOwnerThread();
+		// \scene\ 现在不用:UI 回调是**只读**的返回值式交互(不像旧的 OnUI 会开结构写窗口)。
+		// 保留形参是因为宿主签名(RuntimeLayer)与“UI 阶段属于场景”的语义都在这里,不是历史残留。
+		(void)scene;
+		std::size_t failures = 0;
+		// 快照迭代:回调里允许 `ui.*` 交互(返回值式),也可能间接触发场景改动 —— 不做活遍历。
+		std::vector<std::pair<std::string, ScriptFunctionRef>> draws;
+		for (const SystemScriptRecord& record : s_SystemScripts)
+			for (const ScriptFunctionRef& fn : record.UiDraws)
+				draws.emplace_back(record.LogicalPath, fn);
+
+		for (auto& entry : draws)
+		{
+			try
+			{
+				// id 前缀 = 脚本逻辑路径:两份脚本各自用 "go" 也不会撞 id(与 W3c 原设计同一口径)。
+				ScriptUiScope scope(context, entry.first.c_str());
+				std::string error;
+				if (!entry.second.Call(nullptr, 0, nullptr, &error))
+					throw std::runtime_error(error);
+			}
+			catch (const std::exception& error)
+			{
+				++failures;
+				if (Log::GetCoreLogger())
+					WLD_CORE_ERROR("[Luau] '{}' ui.onDraw failed: {}", entry.first, error.what());
+			}
+			catch (...)
+			{
+				++failures;
+				if (Log::GetCoreLogger())
+					WLD_CORE_ERROR("[Luau] '{}' ui.onDraw failed: unknown exception", entry.first);
+			}
+		}
+		return failures;
 	}
 
 	std::size_t ScriptEngine::ReloadSystemScript(Scene& scene, const std::string& logicalPath)
@@ -1832,6 +1909,8 @@ namespace World
 			existing->SystemNames.clear();
 			for (const std::string& systemName : names)
 				scene.UnregisterFrameSystem(systemName);
+			// M55:UI 回调同样"先清后重注册" —— 不清就会热重载一次叠一层界面。
+			existing->UiDraws.clear();
 		}
 
 		// 2) 读源(VFS 优先、磁盘回退,与其余脚本读取同一语义)。
@@ -1870,6 +1949,7 @@ namespace World
 			for (const std::string& systemName : record.SystemNames)
 				if (scene.UnregisterFrameSystem(systemName))
 					++removed;
+		// M55:UI 回调住在记录里,随记录一并清掉(不留悬空回调)。
 		s_SystemScripts.clear();
 		s_LoadingSystemScript.clear();
 		// T13:系统脚本全部卸载(场景停止/换场景)⇒ 库模块缓存一并作废,

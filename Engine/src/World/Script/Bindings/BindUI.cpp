@@ -467,6 +467,25 @@ namespace World
 			return UiAxisSplitImpl(args, count, false);
 		}
 
+		// M55:`ui.onDraw(fn)` —— 在**系统脚本加载期**注册一个 UI 绘制回调。
+		//
+		// 为什么是"注册回调"而不是让脚本自己每帧跑:
+		//   * 系统脚本只在加载时执行一次(它注册的是 systems),UI 阶段晚于 Update;
+		//   * 每帧由宿主 `ScriptEngine::DrawScriptUi` 在 `ScriptUiScope(脚本逻辑路径)` 里调用回调
+		//     ⇒ `ui.*` 只在 UI 阶段可用(否则绑定层抛"can only be called during the UI phase"),
+		//     控件 id 自动带脚本前缀,两份脚本用同一个 "go" 也不撞;
+		//   * 热重载 = 整份重跑 ⇒ 旧回调先被清掉(否则每改一次脚本界面就叠一层)。
+		ScriptValue UiOnDrawImpl(const ScriptValue* args, std::size_t count)
+		{
+			if (count != 1 || !args[0].IsFunction())
+				throw std::logic_error("ui.onDraw expects a single function argument");
+			std::string error;
+			ScriptEngine::RegisterScriptUiDraw(args[0], &error);
+			if (!error.empty())
+				throw std::logic_error(error);
+			return ScriptValue();
+		}
+
 		// 创建 table,写入全部方法,注册为全局(与 BindServices 的只读表同一形态)。
 		bool RegisterUiTable(ScriptBindingContext& bindings, const ScriptServiceBinding& table, std::string* error)
 		{
@@ -628,6 +647,10 @@ namespace World
 			{ "cellH", "number", ScriptServiceArgType::Number, true, "Cell height in pixels; must be positive." },
 			{ "selectedIndex", "integer", ScriptServiceArgType::Number, true, "1-based selected cell used for highlighting." },
 		};
+		static const ScriptServiceParam onDrawParams[] = {
+			{ "draw", "function", ScriptServiceArgType::Table, true,
+				"UI draw callback; it runs every frame during the UI phase, after script systems have updated." },
+		};
 		static const ScriptServiceParam splitParams[] = {
 			{ "x", "number", ScriptServiceArgType::Number, true, "Left edge in UI pixels." },
 			{ "y", "number", ScriptServiceArgType::Number, true, "Top edge in UI pixels." },
@@ -687,10 +710,18 @@ namespace World
 				return UiColumnsImpl(args, count);
 			}, splitParams, 6, 6, "table",
 				"Split a rectangle into a column of cells; returns {x, y, w, h} tables." },
+			// M55:唯一的"注册型"方法 —— 它是 UI 阶段唯一的入口(其余方法都只能在回调里调用)。
+			{ "onDraw", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiOnDrawImpl(args, count);
+			}, onDrawParams, 1, 1, "",
+				"Register a function that draws this script's UI every frame (call it at the top level "
+				"of a system script; inside the callback you may call any other ui.* function)." },
 		};
 		static const ScriptServiceBinding uiTables[] = {
-			{ "ui", "Immediate-mode script UI table; draw calls are rebuilt every frame and there is no long-lived callback registration.",
-				uiMethods, 10 },
+			{ "ui", "Immediate-mode script UI table. Call `ui.onDraw(fn)` at the top level of a system "
+				"script to register the per-frame draw callback; inside it, every ui.* call is rebuilt each frame.",
+				uiMethods, 11 },
 		};
 		if (count)
 			*count = sizeof(uiTables) / sizeof(uiTables[0]);

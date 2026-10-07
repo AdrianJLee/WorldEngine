@@ -149,8 +149,18 @@ namespace World
 		static bool ReadScriptValue(const std::string& scriptPath, const std::string& field,
 			std::string& out, std::string* error = nullptr);
 
-		// UI 阶段兼容占位 (纯 ECS 脚本通过 WUI / System 渲染)
-		static std::size_t DrawScriptUi(Scene&, Wui::WuiContext&) { return 0; }
+		// M55:脚本 UI 阶段。系统脚本用 `ui.onDraw(fn)` 注册回调,宿主每帧在 UI 阶段调用一次:
+		//   * 每个回调都在 `ScriptUiScope(context, 脚本逻辑路径)` 里执行 ⇒ id 带脚本前缀不互相撞;
+		//   * **按回调隔离错误**(单个脚本抛错只停它自己,计数返回,日志记 [Luau] ... ui.onDraw failed);
+		//   * 返回失败回调数(0 = 全部成功;与 RuntimeLayer 的"只在本帧无错且确有命令时才标记画过"配合)。
+		// 只读语义:UI 阶段晚于 Update,`ui.*` 是**返回值式交互**(不做长期回调);此时对 ECS 的结构写
+		// 仍受既有结构写门禁约束(会给出可读错误),不是"悄悄允许"。
+		static std::size_t DrawScriptUi(Scene& scene, Wui::WuiContext& context);
+		// `ui.onDraw(fn)` 的引擎侧入口(绑定层调用):归属到**当前正在加载的系统脚本**;
+		// 不在加载期调用 = 可读 error(不猜归属)。
+		static void RegisterScriptUiDraw(const ScriptValue& fn, std::string* error = nullptr);
+		// 撤销一份系统脚本注册的全部 UI 回调(整份重跑/卸载时用)。
+		static void ClearScriptUiDraws(const std::string& logicalPath);
 
 		static void DefineMathType();
 		static void RegisterMathTypes();

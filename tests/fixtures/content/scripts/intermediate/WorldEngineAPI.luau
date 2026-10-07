@@ -538,7 +538,7 @@ function ecs:Off(handle) end
 function ecs:RequireLib(name) end
 
 -- Global script UI table 'ui': read-only; there is no runtime constructor.
----Immediate-mode script UI table; draw calls are rebuilt every frame and there is no long-lived callback registration.
+---Immediate-mode script UI table. Call `ui.onDraw(fn)` at the top level of a system script to register the per-frame draw callback; inside it, every ui.* call is rebuilt each frame.
 ---@class ui
 ui = {}
 
@@ -646,6 +646,10 @@ function ui:rows(x, y, w, h, count, gap) end
 ---@param gap number? Gap between cells in pixels; defaults to 0.
 ---@return table
 function ui:columns(x, y, w, h, count, gap) end
+
+---Register a function that draws this script's UI every frame (call it at the top level of a system script; inside the callback you may call any other ui.* function).
+---@param draw function UI draw callback; it runs every frame during the UI phase, after script systems have updated.
+function ui:onDraw(draw) end
 
 -- Component fields are exposed through Entity:GetComponent("AmbientLightComponent"); there is no runtime global named AmbientLightComponent.
 ---@class AmbientLightComponent

@@ -80,6 +80,6 @@ GetEntity().GetScene()->DeferStructuralChange([position](World::Scene& scene) {
 | 没有补全 | 打开的是仓库根或 `Game/`(配置见上表);语言服务器索引是否完成;声明基线是否存在 |
 | `ecs` 标红未定义 | 声明基线是否包含 `ecs` 块;重新构建并启动编辑器看生成是否报错;不要手改生成文件 |
 | 系统不生效 | 文件是否在 `<内容根>/scripts/systems/` 下;`ecs:AddSystem` 的名字是否与别处重名（同名会替换） |
-| `ui.*` 没反应 | 这是已知边界:脚本 UI 尚未恢复,现在调用不会报错也不会有显示效果 |
+| `ui.*` 没反应 | 是不是**没在 `ui.onDraw` 回调里**调?UI 只在 UI 阶段可用 —— 在系统脚本顶层直接 `ui.panel(...)` 会抛 "can only be called during the UI phase" |
 
 `tests/World/lua/CompletionProbe.lua` 有意包含错误,用于语言服务器的验收;日常工作区已把它排除在索引之外。

@@ -360,7 +360,11 @@ int main()
 			index.Query("ui.", 5, items);
 			CHECK(items.size() == 5);
 			index.Query("ui.", 200, items);
-			CHECK(items.size() == 10);   // ui 一共 10 个成员
+			// 用**名字集合**断言(不再数数量):加一个绑定方法不该让"成员清单"用例假红,
+			// 真正的契约是"这些成员都在补全里"。
+			for (const char* member : { "panel", "text", "button", "checkbox", "slider", "image",
+					"list", "grid", "rows", "columns", "onDraw" })
+				CHECK(HasName(items, member));
 
 			// 排序:vec2 的字段(x/y)在方法(length/new)之前
 			index.Query("vec2.", 100, items);

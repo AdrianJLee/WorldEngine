@@ -7,11 +7,13 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 #include "World/Script/Runtime/ScriptEngine.h"
+#include "World/Script/Runtime/HotReload.h"
 #include "World/Script/Vm/LuauVm.h"
 #include "World/Script/Vm/ScriptBindingContext.h"
 #include "World/Script/Vm/ScriptRef.h"
 #include "World/Script/Vm/ScriptValue.h"
 #include "World/Utils/Paths.h"
+#include "World/WUI/WuiContext.h"
 
 #include <cmath>
 #include <cstdio>
@@ -547,6 +549,78 @@ int main()
 			ScriptEngine::LoadSystemScripts(scene);
 			scene.OnUpdateRuntime(0.016f);
 			CHECK(scene.GetFrameSystemTimings().size() == firstPass);
+		}
+
+		// =====================================================================
+		// 8.5 M55:脚本 UI(`ui.onDraw`)—— 注册 / 只在 UI 阶段可用 / 热重载不叠层 / 卸载清干净
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			// 夹具:临时内容根下的 scripts/systems/。加载器读 VFS(内容根)⇒ 用 Paths 的内容根。
+			const std::filesystem::path systemsDir = World::Paths::AssetRoot() / "scripts/systems";
+			std::filesystem::create_directories(systemsDir);
+			const std::filesystem::path goodScript = systemsDir / "M55UiProbe.luau";
+			const std::filesystem::path badScript = systemsDir / "M55UiBad.luau";
+			{
+				std::ofstream out(goodScript, std::ios::binary | std::ios::trunc);
+				out << "ui.onDraw(function()\n"
+					<< "    ui.panel(10, 10, 120, 80, \"probe\")\n"
+					<< "    ui.text(20, 30, \"hello\", 16)\n"
+					<< "end)\n"
+					<< "ecs:AddSystem(\"M55UiProbeSystem\", function(dt) end)\n";
+			}
+			{
+				std::ofstream out(badScript, std::ios::binary | std::ios::trunc);
+				out << "ui.onDraw(function()\n"
+					<< "    error(\"probe failure\")\n"
+					<< "end)\n";
+			}
+
+			// 加载器按内容根扫 scripts/systems/*.luau;整份重跑语义 ⇒ 先卸载再加载。
+			ScriptEngine::UnloadSystemScripts(scene);
+			const std::size_t loadedSystems = ScriptEngine::LoadSystemScripts(scene, systemsDir);
+			CHECK(loadedSystems == 1);                  // 好的那份注册了 1 个系统(坏的那份只画 UI)
+			scene.OnUpdateRuntime(0.016f);
+
+			Wui::WuiContext ui;
+			Wui::WuiInputState input;
+			input.ViewportSize = glm::vec2 { 1280.0f, 720.0f };
+			ui.BeginFrame(input);
+
+			// ① 真的画了:两份脚本各注册一个回调,其中一份抛错 ⇒ 失败数 1,但命令仍然进流。
+			const std::size_t failures = ScriptEngine::DrawScriptUi(scene, ui);
+			CHECK(failures == 1);                       // ⑤ 只数抛错的那个
+			CHECK(ui.Commands().size() >= 2);           // ① 好的那份照常画(panel + text)
+			const std::size_t healthyCommands = ui.Commands().size();
+
+			// ② 帧外调用 `ui.*` 必须是可读错误(既有契约,不能因为新入口而放宽)。
+			//    断言**错误文本**:不能往只读的 `ui` 表写字段当回传通道(那本身是另一个错误)。
+			{
+				std::string outsideError;
+				const bool ran = ScriptEngine::GetState().RunString(
+					"ui.panel(0, 0, 1, 1, \"x\")", "M55Outside", &outsideError);
+				CHECK(!ran);
+				CHECK(outsideError.find("UI phase") != std::string::npos);
+			}
+
+			// ③ 热重载:整份重跑 = 旧回调先清 ⇒ 命令数**不叠层**(还是那一份的量)。
+			ScriptEngine::ReloadSystemScript(scene, "scripts/systems/M55UiProbe.luau");
+			scene.OnUpdateRuntime(0.016f);
+			ui.BeginFrame(input);
+			ScriptEngine::DrawScriptUi(scene, ui);
+			CHECK(ui.Commands().size() == healthyCommands);   // 3 倍/2 倍都是 bug
+
+			// ④ 卸载:没有任何回调留下 ⇒ 零操作。
+			ScriptEngine::UnloadSystemScripts(scene);
+			ui.BeginFrame(input);
+			CHECK(ScriptEngine::DrawScriptUi(scene, ui) == 0);
+			CHECK(ui.Commands().empty());
+
+			std::error_code ignored;
+			std::filesystem::remove(goodScript, ignored);
+			std::filesystem::remove(badScript, ignored);
 		}
 
 		// =====================================================================
