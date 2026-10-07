@@ -494,10 +494,25 @@ namespace World::Wui
 		}
 		if (glyph.W <= 0.0f || glyph.H <= 0.0f)
 		{
-			// 图集满(或该码点无位图):回退到同码点已缓存的任意字号,宁可轻微缩放也不要缺字。
+			// 图集满(或该码点无位图):回退到同码点**最接近**的已缓存字号 —— 宁可轻微缩放也不要缺字,
+			// 但"任意一个"会让 20px 的字用到 12px 的位图(缩放 1.67× ⇒ 明显发虚)。取最近的可把
+			// 误差压到半个桶(≤0.5px)。
+			Glyph* nearest = nullptr;
+			uint32_t nearestDistance = 0xFFFFFFFFu;
 			for (auto& entry : face.Glyphs)
-				if ((entry.first & 0xFFFFFFFFull) == codepoint)
-					return entry.second;
+			{
+				if ((entry.first & 0xFFFFFFFFull) != codepoint)
+					continue;
+				const uint32_t cached = static_cast<uint32_t>(entry.first >> 32);
+				const uint32_t distance = cached > sizeKey ? cached - sizeKey : sizeKey - cached;
+				if (distance < nearestDistance)
+				{
+					nearestDistance = distance;
+					nearest = &entry.second;
+				}
+			}
+			if (nearest != nullptr)
+				return *nearest;
 			if (width > 0 && height > 0)
 				WLD_CORE_WARN("[wui-font] glyph atlas full for U+{0:X} at {1}px (size buckets too many?)",
 					codepoint, sizeKey);
@@ -762,14 +777,22 @@ namespace World::Wui
 			if (face && face->Info && cp != '\t' && cp != '\r' && cp != '\n')
 			{
 				Glyph& glyph = Bake(*face, cp, pixelSize);
-				// 按烘焙像素尺寸缩放;字号分桶后 sizeRatio≈1(大字号不再被放大糊)。
-				const float sizeRatio = pixelSize / (glyph.PixelSize > 0.0f ? glyph.PixelSize : face->BaseSize);
+				// M52:图集按**整数**桶烘焙(`Bake`),因此这里必须按**桶的尺寸 1:1 画** —— 用
+				// `pixelSize / bucket` 去缩放会让位图被双线性重采样 ⇒ 字发虚(用户报的"滚轮放大后
+				// 部分文本变模糊":只要表观字号不是整数,比例就 ≠1,zoom 连续变化时几乎永远 ≠1)。
+				// 取舍:推进(advance)仍用**精确** pixelSize ⇒ 文本总宽/布局/居中全不变,只是每个
+				// 字形的位图按自己的桶尺寸画(同字号所有字形同一个桶 ⇒ 整行均匀,肉眼无差)。
+				const float sizeRatio = 1.0f;
+				// 描边/基线也钉到**整数物理像素**:位图字体在分数位置采样同样会糊(与上面的重采样
+				// 是两件独立的事,只修一件仍看得出软)。
+				const float snapPen = std::round(pen * scale) / scale;
+				const float snapBase = std::round(baseline * scale) / scale;
 				const float w = glyph.W * sizeRatio / scale;
 				const float h = glyph.H * sizeRatio / scale;
 				if (w > 0 && h > 0)
 				{
 					SetActiveTexture(face->AtlasTexture);
-					PushQuad({ pen + glyph.OffsetX * sizeRatio / scale, baseline + glyph.OffsetY * sizeRatio / scale, w, h },
+					PushQuad({ snapPen + glyph.OffsetX * sizeRatio / scale, snapBase + glyph.OffsetY * sizeRatio / scale, w, h },
 						command.Color,
 						{ glyph.X / face->AtlasW, glyph.Y / face->AtlasH, glyph.W / face->AtlasW, glyph.H / face->AtlasH });
 				}
@@ -950,7 +973,15 @@ namespace World::Wui
 							continue;
 						FontFace* face = FaceForCodepoint(command.Family, command.Bold, cp);
 						if (face && face->Info)
-							Bake(*face, cp, command.FontSize > 0.0f ? command.FontSize : 15.0f);
+						{
+							// M52:必须按**物理**字号预热(design * UiScale)——与 `DrawText` 同一口径。
+							// 此前用设计字号:预热的是另一套整数桶,图集被永远用不到的尺寸塞满,
+							// 真正要画的字号反而落进"图集满"的任意尺寸回退 ⇒ **部分文本发虚**
+							// (用户报的"滚轮放大后部分文本变模糊"正是这个:放大改变表观字号、
+							// 桶数量增长最快,最先撞满的就是设计器画布的字号)。
+							const float bakeScale = UiScale() > 0.0f ? UiScale() : 1.0f;
+							Bake(*face, cp, (command.FontSize > 0.0f ? command.FontSize : 15.0f) * bakeScale);
+						}
 					}
 				}
 		};
