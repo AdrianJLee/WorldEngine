@@ -135,6 +135,20 @@ namespace World
 		// out = 库 `return` 的值;失败返回 false 并把可读原因写进 error。
 		static bool RequireScriptLib(const std::string& name, ScriptValue& out, std::string* error = nullptr);
 
+		// ---- M38:UI 绑定只读值查询(仅追加;不改任何既有入口语义)----
+		// `script:<path>.<field>` 的求值端:按逻辑路径 load 脚本模块,读它 `return` 的表里的字段,
+		// 转成**属性文本协议**(与 `UiBindingSources.cpp` 的 FloatToText/值编码一致:
+		// bool "true"/"false"、数值整数不带小数点/其余 6 位有效数字、字符串原样)。
+		// **路径口径与 ecs 脚本一致:扩展名可省** —— 先试 `.luau`、再试 `.lua`;已带 `.luau`/`.lua`
+		// = 按给定路径。省略与带扩展名两种写法命中同一份模块缓存(缓存键 = 解析后的逻辑路径)。
+		// 与 `ecs:RequireLib` 同一沙箱、同一"load 模块 + 读返回表"口径;同一路径按内容指纹缓存
+		// 返回表(脚本内容变 ⇒ 重新执行),字段每次从缓存表重读(脚本对表的改动可见)。
+		// **只读**:不执行 OnCreate/OnUpdate、不建实例、不注册系统、不写任何脚本状态。
+		// 失败一律 false + 可读 error(**不抛**):VM 未初始化 / 线程不符 / 路径或字段为空 /
+		// 脚本不存在 / 编译或执行失败 / 返回值不是表 / 字段不存在 / 值类型不可转文本。
+		static bool ReadScriptValue(const std::string& scriptPath, const std::string& field,
+			std::string& out, std::string* error = nullptr);
+
 		// UI 阶段兼容占位 (纯 ECS 脚本通过 WUI / System 渲染)
 		static std::size_t DrawScriptUi(Scene&, Wui::WuiContext&) { return 0; }
 

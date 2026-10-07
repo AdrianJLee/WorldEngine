@@ -54,18 +54,18 @@ Nodes:
         Children:
           - Id: title_label
             Type: Label
-            Props: { text: "@inventory.title", color: $text, fontSize: 26, bold: true }
+            Props: { text: "@inventory.title|Inventory", color: $text, fontSize: 26, bold: true }
           - Id: capacity_bar
             Type: ProgressBar
             Props:
               value: 0.62
-              label: "@inventory.capacity"
+              label: "@inventory.capacity|Load"
               fillColor: $accent
               trackColor: $surface_alt
               radius: 4
           - Id: gold_label
             Type: Label
-            Props: { text: "@inventory.gold", color: $text_dim, fontSize: 20 }
+            Props: { text: "@inventory.gold|Gold 12,480", color: $text_dim, fontSize: 20 }
 
       # ---- 主体(Column 布局容器)----
       - Id: body
@@ -83,15 +83,15 @@ Nodes:
             Children:
               - Id: tab_all
                 Type: Button
-                Props: { label: "@inventory.tab.all", bg: $accent }
+                Props: { label: "@inventory.tab.all|All", bg: $accent }
                 On: { Click: inventory.tab.all }
               - Id: tab_weapon
                 Type: Button
-                Props: { label: "@inventory.tab.weapon" }
+                Props: { label: "@inventory.tab.weapon|Weapons" }
                 On: { Click: inventory.tab.weapon }
               - Id: tab_material
                 Type: Button
-                Props: { label: "@inventory.tab.material" }
+                Props: { label: "@inventory.tab.material|Materials" }
                 On: { Click: inventory.tab.material }
           # 滚动列表:32 行,内容高度 > 容器 ⇒ 触发虚拟化(只画可见行)。
           - Id: items_list
@@ -100,7 +100,7 @@ Nodes:
               scrollable: true
               rowCount: 32
               rowHeight: 38
-              rowPrefix: "@inventory.row"
+              rowPrefix: "@inventory.row|Item"
               bg: $surface
               radius: 6
               fontSize: 14
@@ -114,25 +114,25 @@ Nodes:
         Children:
           - Id: detail_title
             Type: Label
-            Props: { text: "@inventory.detail.title", color: $text, fontSize: 22, bold: true }
+            Props: { text: "@inventory.detail.title|Fine Steel Longsword", color: $text, fontSize: 22, bold: true }
             Anchor: { Min: [0, 0], Max: [1, 0], Offset: [20, 16], Size: [-40, 30] }
           - Id: detail_icon
             Type: Image
-            Props: { radius: 8, label: "@inventory.detail.icon" }
+            Props: { radius: 8, label: "@inventory.detail.icon|Item icon" }
             Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [20, 58], Size: [120, 120] }
           - Id: rarity_label
             Type: Label
-            Props: { text: "@inventory.detail.rarity", color: $accent, fontSize: 18 }
+            Props: { text: "@inventory.detail.rarity|Epic - One-handed", color: $accent, fontSize: 18 }
             Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [156, 62], Size: [220, 26] }
           - Id: detail_desc
             Type: Label
-            Props: { text: "@inventory.detail.desc", color: $text_dim, fontSize: 15 }
+            Props: { text: "@inventory.detail.desc|Forged from fine steel; slashes carry a little fire damage.\nEquipping raises attack and crit.", color: $text_dim, fontSize: 15 }
             Anchor: { Min: [0, 0], Max: [1, 0], Offset: [20, 192], Size: [-40, 64] }
           - Id: durability_bar
             Type: ProgressBar
             Props:
               value: 0.78
-              label: "@inventory.detail.durability"
+              label: "@inventory.detail.durability|Durability"
               fillColor: $accent
               trackColor: $surface
               radius: 4
@@ -141,14 +141,14 @@ Nodes:
             Type: ProgressBar
             Props:
               value: 0.41
-              label: "@inventory.detail.weight"
+              label: "@inventory.detail.weight|Weight"
               fillColor: $danger
               trackColor: $surface
               radius: 4
             Anchor: { Min: [0, 0], Max: [1, 0], Offset: [20, 306], Size: [-40, 22] }
           - Id: detail_hint
             Type: Label
-            Props: { text: "@inventory.detail.hint", color: $text_dim, fontSize: 13 }
+            Props: { text: "@inventory.detail.hint|Right-click to equip / drag to sort", color: $text_dim, fontSize: 13 }
             Anchor: { Min: [0, 0], Max: [1, 0], Offset: [20, 344], Size: [-40, 24] }
 
       # ---- 右侧属性面板(Grid 布局容器,3 列 × 2 行)----
@@ -160,22 +160,22 @@ Nodes:
         Children:
           - Id: stat_hp
             Type: Label
-            Props: { text: "@inventory.stat.hp", color: $text, fontSize: 16 }
+            Props: { text: "@inventory.stat.hp|Health", color: $text, fontSize: 16 }
           - Id: stat_atk
             Type: Label
-            Props: { text: "@inventory.stat.atk", color: $text, fontSize: 16 }
+            Props: { text: "@inventory.stat.atk|Attack", color: $text, fontSize: 16 }
           - Id: stat_def
             Type: Label
-            Props: { text: "@inventory.stat.def", color: $text, fontSize: 16 }
+            Props: { text: "@inventory.stat.def|Defense", color: $text, fontSize: 16 }
           - Id: stat_crit
             Type: Label
-            Props: { text: "@inventory.stat.crit", color: $text, fontSize: 16 }
+            Props: { text: "@inventory.stat.crit|Crit", color: $text, fontSize: 16 }
           - Id: stat_speed
             Type: Label
-            Props: { text: "@inventory.stat.speed", color: $text, fontSize: 16 }
+            Props: { text: "@inventory.stat.speed|Speed", color: $text, fontSize: 16 }
           - Id: stat_luck
             Type: Label
-            Props: { text: "@inventory.stat.luck", color: $text, fontSize: 16 }
+            Props: { text: "@inventory.stat.luck|Luck", color: $text, fontSize: 16 }
 
       # ---- 底栏(Row 布局容器 + 贴底居中锚点)----
       - Id: footer
@@ -186,17 +186,17 @@ Nodes:
         Children:
           - Id: equip_button
             Type: Button
-            Props: { label: "@inventory.equip", bg: $accent, radius: 6 }
+            Props: { label: "@inventory.equip|Equip", bg: $accent, radius: 6 }
             On: { Click: inventory.equip }
           - Id: drop_button
             Type: Button
-            Props: { label: "@inventory.drop", bg: $danger, radius: 6 }
+            Props: { label: "@inventory.drop|Drop", bg: $danger, radius: 6 }
             On: { Click: inventory.drop }
           - Id: close_button
             Type: Button
-            Props: { label: "@inventory.close", radius: 6 }
+            Props: { label: "@inventory.close|Close", radius: 6 }
             On: { Click: ui.close }
           - Id: version_label
             Type: Label
-            Props: { text: "@inventory.version", color: $text_dim, fontSize: 13 }
+            Props: { text: "@inventory.version|Inventory v1.0", color: $text_dim, fontSize: 13 }
             Anchor: { Min: [0.5, 1], Max: [0.5, 1], Pivot: [0.5, 1], Offset: [0, 0], Size: [180, 22] }

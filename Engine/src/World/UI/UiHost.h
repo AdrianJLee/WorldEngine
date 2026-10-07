@@ -5,7 +5,9 @@
 // 职责(一个小类,让宿主 UI 帧只调两三行):
 //   ① 加载:环境变量 `WLD_UI_DOC`(绝对路径或内容根相对)→ 内容根 `assets/ui/*.wui`
 //      (字典序第一个);都不存在 = 静默关闭(发布路径默认零开销);找到但解析 / 构建失败
-//      = 一条可读警告,不崩。
+//      = 一条可读警告,不崩。M38 起还做**加载期节点类型校验**:任一 `Type` 不在
+//      `UiNodeRegistry` ⇒ 整份拒绝(Initialize 不启用 / Reload 保留上一份可用版本),
+//      错误列出前 3 个未登记的 Type 与节点路径 —— 见 `UiHost.cpp` 的 ValidateNodeTypes。
 //   ② 每帧:组 `UiSurface` → `ComputeUiViewport` → `UiScreen::Layout` → `UiPainter::Paint`。
 //      Runtime 口径 = 整窗(`input.ViewportSize`)+ 原点 (0,0);宿主也可用
 //      `SetSurface` / `SetOrigin` 把 UI 画进物理面的**子矩形**(编辑器 Play 用它把游戏 UI
@@ -15,6 +17,9 @@
 //      * `SharedChannel`(编辑器 Play):通道与每帧 `BeginFrame("main")` 由宿主负责,
 //        本类只登记节点(退出 Play 时 `Shutdown` 只清本窗口登记,不关通道)。
 //      `WLD_UI_A11Y_DUMP` 是只读验证钩子(第一帧 `EndFrame` 之后写一次树;仅 `OwnChannel` 宿主会调)。
+//   ④ 页面栈 / 模态(M39):持有 `UiNavigator`,按层序绘制各层页面;**没有页面时仍只画 `m_Screen`**
+//      (与引入导航前逐字节一致);`.wui` 热重载迁移页面栈。入口见 `Navigator()` 与 .cpp 的开发开关
+//      `WLD_UI_PAGE` / `WLD_UI_MODAL`(宿主自持页面屏幕:每帧布局、重载就地重读)。
 //
 // 边界:不改 `Engine/**` 之外的东西;`.wui` 未启用时 `DrawFrame` / `EndFrame` 是纯空操作,
 // 宿主行为与引入本类之前逐字节一致。
@@ -23,6 +28,7 @@
 #include "World/UI/UiInputRouter.h"
 #include "World/UI/UiBinding.h"
 #include "World/UI/UiBindingSources.h"
+#include "World/UI/UiNavigator.h"
 #include "World/UI/UiPainter.h"
 #include "World/UI/UiScreen.h"
 #include "World/UI/UiTypes.h"
@@ -31,9 +37,11 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -61,10 +69,18 @@ namespace World
 	//
 	// 坐标:平台鼠标是物理像素,而 UI 布局是设计单位 ⇒ 与 `WuiInputCollector::OnMouseMove`
 	// 一样除以 `Wui::UiScale()`。无窗口(headless)⇒ 返回零状态、零边沿(绝不轮询不存在的窗口)。
+	//
+	// **脚本/AI 注入(contract.ui-runtime §5)**:采样末尾按 `windowKey` 叠加 `WuiScriptedInput`
+	// —— `ui.invoke` / `WLD_UI_CLICK` 走的因此是"和真人鼠标同一条输入路径",声明式游戏 UI
+	// 能被 AI 真的点到(不是测试分支)。注入是**破坏性**的(推进注入相位),所以同一帧里
+	// **只能有一个消费者**:宿主在游戏 UI 路由的那一帧把 `ApplyScriptedInput` 传 true,
+	// WUI 面板帧就不再消费同一份注入(见 RuntimeLayer / EditorLayer 的 gate;游戏 UI 没启用
+	// / 不在 Play 时行为与引入本参数前逐字节一致)。
 	class WLD_API UiPlatformInputSampler
 	{
 	public:
-		Wui::WuiInputState Sample(glm::vec2 viewportSize);
+		Wui::WuiInputState Sample(glm::vec2 viewportSize, const std::string& windowKey = "main",
+			bool applyScriptedInput = true);
 
 	private:
 		bool m_PrevDown[3] = { false, false, false };
@@ -73,6 +89,15 @@ namespace World
 	class WLD_API UiHost
 	{
 	public:
+		// `UiHost` 自持**自引用**状态:导航器里的 `UiPage::Screen` 指向本对象的 `m_Screen` 与
+		// `m_Pages[].Screen`。拷贝/搬移会让这些指针悬空或错位 ⇒ 明确不可拷贝、不可搬移
+		// (宿主一律按成员持有;需要转移时转移持有者本身,例如 `std::unique_ptr<UiHost>`)。
+		UiHost() = default;
+		UiHost(const UiHost&) = delete;
+		UiHost& operator=(const UiHost&) = delete;
+		UiHost(UiHost&&) = delete;
+		UiHost& operator=(UiHost&&) = delete;
+
 		// 解析并加载游戏 UI 文档。contentRoot 为空时回退 `World::Paths::AssetRoot()`。
 		void Initialize(const std::filesystem::path& contentRoot);
 		// 停止绘制并释放本对象持有的 UI 文档(幂等)。
@@ -82,6 +107,25 @@ namespace World
 
 		bool Enabled() const { return m_Enabled; }
 		const std::string& DocumentPath() const { return m_DocumentPath; }
+
+		// ---- 页面栈 / 模态(M39)----
+		//
+		// 宿主持有导航器(四层:Page < Modal < Overlay < Debug):项目代码经本访问器 Push/Pop/查询;
+		// `DrawFrame` 按层序绘制各层页面(**没有页面时仍只画 `m_Screen`**,与引入导航前逐字节一致);
+		// `Reload` 迁移页面栈。两个宿主把 `&Navigator()` 传给 `UiCommandRouter::Dispatch`
+		// (`ui.close` = 有模态先关模态、否则出栈;`ui.back` = `UiNavigator::Back()` 同一口径)。
+		//
+		// 页面屏幕归压栈方持有(`UiPage::Screen` 是 const,本类不改他方屏幕):压栈方负责 `Build`
+		// 与按视口 `Layout`(`ComputeUiViewport(document.Design, document.SafeArea, surface)`,
+		// surface 口径与 `SetSurface` 相同);本类只按层序绘制 + 登记无障碍。
+		// 宿主自持的页面(开发开关 `WLD_UI_PAGE` / `WLD_UI_MODAL`)由本类每帧布局、重载时就地重读。
+		// 已知未接(见 M39 报告):页面的世界锚点与 `Bind:` 求值仍只作用于 `m_Screen`。
+		UI::UiNavigator& Navigator() { return m_Navigator; }
+		const UI::UiNavigator& Navigator() const { return m_Navigator; }
+
+		// 无障碍窗口键(默认 `main`)。宿主把它交给 `UiPlatformInputSampler` ⇒ 脚本/AI 注入
+		// (`ui.invoke` / `WLD_UI_CLICK`)落在**同一个窗口**上,不靠调用点各自硬编码字符串。
+		const std::string& WindowKey() const { return m_WindowKey; }
 
 		// ---- 无障碍接入方式(持久设置,Shutdown 不改;默认 OwnChannel)----
 		void SetAccessibilityMode(UiHostAccessibilityMode mode) { m_A11yMode = mode; }
@@ -184,7 +228,40 @@ namespace World
 		};
 		static DocumentStamp ReadDocumentStamp(const std::filesystem::path& path);
 
+		// ---- M39:页面栈 / 模态 ----
+		//
+		// 宿主自持的一页(开发开关注入的 `.wui`)。屏幕归本对象持有 ⇒ 地址稳定,
+		// `Reload` 可就地重读文档,导航器里的 `UiPage::Screen` 保持有效。
+		struct HostedPage
+		{
+			UI::UiLayer Layer = UI::UiLayer::Page;
+			std::filesystem::path DocumentPath;
+			DocumentStamp Stamp;                  // 页面文档判脏戳(与主文档同一口径)
+			std::unique_ptr<UI::UiScreen> Screen;
+
+			// 屏幕归本记录**独占**(唯一所有权 = 地址稳定,导航器里的 `UiPage::Screen` 才不会悬空)
+			// ⇒ 只可搬移、不可拷贝。显式声明:否则编译器会按成员隐式删除拷贝赋值,
+			// 报错点落在 `std::vector` 深处,看不出真正的原因。
+			HostedPage() = default;
+			HostedPage(const HostedPage&) = delete;
+			HostedPage& operator=(const HostedPage&) = delete;
+			HostedPage(HostedPage&&) = default;
+			HostedPage& operator=(HostedPage&&) = default;
+		};
+		// 加载一份 `.wui` 并压入导航器的指定层。路径口径同 `Initialize` 的 `WLD_UI_DOC`:
+		// 绝对路径,或相对内容根(指向目录时取其中字典序第一个 `.wui`)。失败 = false + 可读 error,栈不变。
+		bool LoadPageDocument(UI::UiLayer layer, const std::filesystem::path& documentPath, std::string* error);
+		// 开发开关(与 `WLD_UI_DOC` 同族):`WLD_UI_PAGE` = 分号分隔的 `.wui` 依次压页面栈,
+		// `WLD_UI_MODAL` = 压模态层。用途 = 让页面栈在 Runtime / 编辑器 Play 里真的可跑
+		// (实机验证 "ui.close 先关模态、再出栈");未设置 = 零操作,失败只一条可读警告。
+		void SeedPagesFromEnvironment();
+		// 清空导航器各层(逐层 OnExit)+ 释放宿主自持页面屏幕(`Shutdown` 与重新 `Initialize`)。
+		void ClearPages();
+
 		UI::UiScreen m_Screen;
+		// M39:导航器(页面栈/模态/覆盖/调试)+ 宿主自持页面屏幕(开发开关注入)。
+		UI::UiNavigator m_Navigator;
+		std::vector<HostedPage> m_Pages;
 		std::filesystem::path m_ContentRoot;
 		std::string m_DocumentPath;
 		std::string m_A11yDumpPath;

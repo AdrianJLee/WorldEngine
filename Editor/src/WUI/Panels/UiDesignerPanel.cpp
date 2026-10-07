@@ -4,6 +4,7 @@
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Utils/Paths.h"
+#include "World/UI/UiPainter.h"
 #include "World/UI/UiNodeRegistry.h"
 #include "World/UI/UiTypes.h"
 #include "World/WUI/WuiAccessibility.h"
@@ -555,17 +556,49 @@ namespace World
 				|| name == "placeholder" || name == "rowPrefix";
 		}
 
-		// 预览行文案:存在 = "= <译文>";不存在 = "missing key: <key>"(missing 回传给调用方选颜色)。
-		std::string LocalizationPreview(const std::string& value, bool& missing)
+		// `@key` / `@key|兜底文案` 的切分(**与 `UiPainter::Localized` 同口径**):
+		// 只有第一种写法会在缺 key 时显示裸键名;第二种有内联兜底。空 key / 空兜底 = 写法非法。
+		struct LocalizationRef
+		{
+			bool Valid = false;         // 值以 '@' 开头且切分合法(空 key / 空兜底 = 非法)
+			bool HasInlineFallback = false;
+			std::string Key;
+			std::string Fallback;
+		};
+
+		LocalizationRef ParseLocalizationRef(const std::string& value)
+		{
+			LocalizationRef ref;
+			if (value.size() < 2 || value.front() != '@')
+				return ref;
+			const std::size_t separator = value.find('|');
+			if (separator == std::string::npos)
+			{
+				ref.Key = value.substr(1);
+				ref.Valid = !ref.Key.empty();
+				return ref;
+			}
+			ref.Key = value.substr(1, separator - 1);
+			ref.Fallback = value.substr(separator + 1);
+			ref.Valid = !ref.Key.empty() && !ref.Fallback.empty();
+			ref.HasInlineFallback = ref.Valid;
+			return ref;
+		}
+
+		// 预览行文案:`@key|兜底` 且缺 key ⇒ 提示"将显示内联兜底"(不是报错);
+		// 只有裸 `@key` 缺 key 才标 missing(那才是真的会露出键名)。
+		std::string LocalizationPreview(const LocalizationRef& ref, bool& missing)
 		{
 			missing = false;
-			if (value.size() < 2 || value.front() != '@')
+			if (!ref.Valid)
 				return std::string();
-			const std::string key = value.substr(1);
-			if (Wui::HasLocalizationKey(key))
-				return "= " + Wui::Tr(key, key);
+			const bool hasTranslation = Wui::HasLocalizationKey(ref.Key);
+			if (hasTranslation)
+				return "= " + Wui::Tr(ref.Key, ref.Key);
+			if (ref.HasInlineFallback)
+				return "= " + ref.Fallback;
 			missing = true;
-			return "missing key: " + key;
+			return "missing key: " + ref.Key;
 		}
 
 		// 已加载语言码(逗号拼接);tooltip 的语言清单。
@@ -654,6 +687,37 @@ namespace World
 			if (end == value->c_str())
 				return fallback;
 			return std::clamp(parsed, 8.0f, 48.0f);
+		}
+
+		// ---- M37:StateScoped 属性的"按状态分槽" ----
+		// `StateScoped=true` 的属性名形如 `bg.hover`(通道.状态);本函数取状态后缀。
+		// 没有 '.' 的名字按整名处理(登记表不该这样写,但面板不做硬失败)。
+		std::string_view StateScopeSuffix(std::string_view name)
+		{
+			const std::size_t dot = name.rfind('.');
+			return dot == std::string_view::npos ? name : name.substr(dot + 1);
+		}
+
+		// 该节点类型的**状态选择器选项**(`WuiComponentDesc::States`)。
+		// 返回 nullptr = 不显示选择器、也不按状态过滤(类型未登记 / 状态少于 2 个)——
+		// 这样"没有状态声明的组件"与引入选择器之前的行为逐字一致。
+		const std::vector<Wui::WuiComponentState>* PropStateOptions(const UI::UiNode& node)
+		{
+			const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Component(node.Type);
+			if (component == nullptr || component->States.size() < 2)
+				return nullptr;
+			return &component->States;
+		}
+
+		// 状态列表里等于 "default" 的那一项;没有就用第一项。
+		std::string DefaultPropState(const std::vector<Wui::WuiComponentState>& states)
+		{
+			for (const Wui::WuiComponentState& state : states)
+			{
+				if (state.Id == "default")
+					return state.Id;
+			}
+			return states.empty() ? std::string() : states.front().Id;
 		}
 	}
 
@@ -1358,7 +1422,7 @@ namespace World
 				const std::string value = current != nullptr
 					? current->Value
 					: (ref.Meta != nullptr ? PropertyDefaultText(*ref.Meta) : std::string());
-				if (IsLocalizableProperty(ref.Meta, ref.Name) && value.size() > 1 && value.front() == '@')
+				if (IsLocalizableProperty(ref.Meta, ref.Name) && ParseLocalizationRef(value).Valid)
 					previewRows += 1.0f;
 			}
 		}
@@ -1366,6 +1430,15 @@ namespace World
 		float rows = 8.0f;
 		if (m_ShowNodeSection) rows += 2.0f;                // Id / Type
 		rows += propertyRows;                               // Type 块的类型独有属性(恒显示)
+		// M37:Type 块的附加行 —— 状态选择器(类型登记了 ≥2 个状态时)与混选提示。
+		// 与 RenderProperties 同一判定(`PropStateOptions` / `SelectionMixedTypes`),不漂移。
+		if (node != nullptr)
+		{
+			if (PropStateOptions(*node) != nullptr)
+				rows += 1.0f;
+			if (SelectionMixedTypes())
+				rows += 1.0f;
+		}
 		if (m_ShowAnchorSection) rows += 11.0f;             // 10 个数值 + RelativeToSafeArea
 		if (m_ShowWorldSection)
 		{
@@ -1404,16 +1477,32 @@ namespace World
 		const UI::UiNode& node) const
 	{
 		std::vector<PropertyRowRef> rows;
-		if (const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Component(node.Type))
+		const Wui::WuiComponentDesc* component = UI::UiNodeRegistry::Component(node.Type);
+		if (component != nullptr)
 		{
+			// M37:状态过滤 —— `StateScoped` 行(如 `bg.hover`)只在**状态选择器选中的那个
+			// 状态**下出现;非 StateScoped 行(通道值 `bg`、`label`、字号…)恒显示。
+			// `PropStateOptions` 为 nullptr(类型未登记 / 状态少于 2 个)= 不过滤,
+			// 与引入选择器之前的行为逐字一致。
+			const bool filterByState = PropStateOptions(node) != nullptr;
 			rows.reserve(component->Properties.size());
 			for (const Wui::WuiComponentProperty& meta : component->Properties)
+			{
+				if (filterByState && meta.StateScoped && StateScopeSuffix(meta.Name) != m_PropState)
+					continue;
 				rows.push_back(PropertyRowRef { meta.Name, &meta });
+			}
 		}
+		// 文档里的额外/未登记属性仍然可编辑;但**登记表里有的属性**绝不在这里重复出现 ——
+		// 包括被状态过滤掉的那些(M37):它们是"当前状态不显示",不是"未登记"。
+		// (判定与旧实现等价:旧实现比对的"已出行"集合本来就只由登记表填充。)
 		for (const UI::UiProp& prop : node.Props)
 		{
-			const bool declared = std::any_of(rows.begin(), rows.end(),
-				[&prop](const PropertyRowRef& ref) { return ref.Name == prop.Name; });
+			const bool declared = (component != nullptr && std::any_of(component->Properties.begin(),
+				component->Properties.end(),
+				[&prop](const Wui::WuiComponentProperty& meta) { return meta.Name == prop.Name; }))
+				|| std::any_of(rows.begin(), rows.end(), [&prop](const PropertyRowRef& ref)
+					{ return ref.Name == prop.Name; });
 			if (!declared)
 				rows.push_back(PropertyRowRef { prop.Name, nullptr });
 		}
@@ -1445,6 +1534,21 @@ namespace World
 			// M25:Bind / On 的行缓冲按下标键 —— 换节点(含撤销/重载/新建/复制后的重选)
 			// 必须整体换代,否则后几行会回显上一个节点的文本。
 			++m_RowBufferGen;
+			// M37:换了节点就把状态选择器收回默认(否则 hover 会跨节点带过去)。
+			m_PropState = "default";
+		}
+
+		// M37:状态选择器当前项必须属于当前节点的类型;换类型(含撤销/热重载)后回落默认。
+		// 这一步在算高度(PropertyContentHeight)之前 —— 行清单与滚动高度同源。
+		if (node != nullptr)
+		{
+			if (const std::vector<Wui::WuiComponentState>* states = PropStateOptions(*node))
+			{
+				const bool known = std::any_of(states->begin(), states->end(),
+					[this](const Wui::WuiComponentState& state) { return state.Id == m_PropState; });
+				if (!known)
+					m_PropState = DefaultPropState(*states);
+			}
 		}
 
 		// M12:没有待提交编辑时,每帧抓一份"本帧起点"节点快照 —— 属性行首次改动时拿它当
@@ -1575,6 +1679,15 @@ namespace World
 		// ---- Type:类型独有属性(M31)----
 		// 两大块分区的上半:强调色 + 较大字号 + 1px 分隔线(全走库件),右侧给属性条数。
 		const std::vector<PropertyRowRef> propRows = CollectPropertyRows(*node);
+		// M37:多选批量改属性 —— 选中 >1 且同 Type 时,每个属性行同时写**全部**选中节点
+		// (同一条 NoteNodeEdit/CommitNodeEdit ⇒ 一条撤销记录);混选时只写主选中。
+		const bool batchEdit = BatchEditActive();
+		const bool mixedTypes = SelectionMixedTypes();
+		std::vector<UI::UiNode*> editTargets;
+		if (batchEdit)
+			editTargets = SelectedNodesMutable();
+		if (editTargets.empty())
+			editTargets.push_back(node);
 		{
 			const Wui::WuiRect typeHeaderRow = nextRow(rowHeight);
 			const std::string typeTitle = "Type: " + node->Type;
@@ -1596,6 +1709,62 @@ namespace World
 			typeNode.Interactive = false;
 			typeNode.Visible = true;
 			Wui::WuiAccessibility::Get().Register(typeNode);
+		}
+		// M37:混选提示(块头一行)—— 不同 Type 的节点没有共同属性表,只改主选中。
+		if (mixedTypes)
+		{
+			const Wui::WuiRect hintRow = nextRow(rowHeight);
+			const std::string hintText = Wui::Tr("panel.ui_designer.props.mixed_types",
+				"Mixed types: editing the primary selection");
+			Wui::Label(ctx, glm::vec2 { inner.X + 2.0f, hintRow.Y + 4.0f }, hintText,
+				theme.Warning, theme.FontSizeCaption);
+			// a11y:非交互提示行(验证脚本可在 `ui.tree` 里按 id/label 找到它)。
+			Wui::WuiAccessNode hintNode;
+			hintNode.Id = Wui::HashId("ui_designer.props.mixed_types");
+			hintNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			hintNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			hintNode.Kind = "label";
+			hintNode.Label = hintText;
+			hintNode.Rect = hintRow;
+			hintNode.Enabled = true;
+			hintNode.Interactive = false;
+			hintNode.Visible = true;
+			Wui::WuiAccessibility::Get().Register(hintNode);
+		}
+		// M37:状态选择器 —— `StateScoped` 属性按状态分槽(`bg.hover`)。选中某状态后
+		// Type 块只列该状态的 StateScoped 行 + 全部非状态行(过滤在 CollectPropertyRows)。
+		// 切换**延后到帧末生效**:本帧的行清单/高度已按旧状态算过,立刻改会错位一帧。
+		std::string pendingPropState = m_PropState;
+		if (const std::vector<Wui::WuiComponentState>* states = PropStateOptions(*node))
+		{
+			std::vector<std::string> stateOptions;
+			stateOptions.reserve(states->size());
+			int stateSelected = -1;
+			for (std::size_t i = 0; i < states->size(); ++i)
+			{
+				const Wui::WuiComponentState& state = (*states)[i];
+				stateOptions.push_back(state.Label.empty() ? state.Id : state.Label);
+				if (state.Id == m_PropState)
+					stateSelected = static_cast<int>(i);
+			}
+			if (stateSelected < 0)
+				stateSelected = 0;
+
+			Wui::PropertyRowDesc stateDesc;
+			stateDesc.Label = Wui::Tr("panel.ui_designer.props.state", "State");
+			stateDesc.Term = "State";
+			// 行标签只做展示(a11y 关掉);可交互字段的 a11y label 固定为 "Props state"。
+			stateDesc.A11yLabel = stateDesc.Label;
+			stateDesc.A11yValue = stateOptions[static_cast<std::size_t>(stateSelected)];
+			stateDesc.A11yEnabled = false;
+			stateDesc.LabelWidth = labelWidth;
+			const Wui::PropertyRowResult stateRow = Wui::PropertyRow(ctx,
+				Wui::HashId("ui_designer.props.state.row"), nextRow(rowHeight), stateDesc, theme);
+			if (Wui::Combo(ctx, Wui::HashId("ui_designer.props.state.field"), stateRow.FieldRect,
+				"Props state", stateOptions, stateSelected, theme))
+			{
+				pendingPropState = (*states)[static_cast<std::size_t>(stateSelected)].Id;
+			}
 		}
 		{
 			if (node->Props.empty())
@@ -1632,7 +1801,14 @@ namespace World
 				const std::string value = current != nullptr
 					? current->Value
 					: (meta != nullptr ? PropertyDefaultText(*meta) : std::string());
+				// M37:批量的"已覆盖"= 任一目标有覆盖(↺ 才亮);混选/单选 = 主选中自己。
 				const bool overridden = current != nullptr;
+				bool overriddenAny = overridden;
+				if (batchEdit)
+				{
+					overriddenAny = std::any_of(editTargets.begin(), editTargets.end(),
+						[&](const UI::UiNode* target) { return target->FindProp(ref.Name) != nullptr; });
+				}
 				const std::string base = "ui_designer.prop." + node->Id + "." + ref.Name;
 
 				Wui::PropertyRowDesc desc;
@@ -1648,8 +1824,8 @@ namespace World
 				// ↺ = 清除覆盖值(回到类型默认);只在**有覆盖**时出现(库件的 ResetModified 口径)。
 				desc.ShowReset = true;
 				desc.ResetId = Wui::HashId((base + ".reset").c_str());
-				desc.ResetModified = overridden;
-				desc.ResetEnabled = overridden;
+				desc.ResetModified = overriddenAny;
+				desc.ResetEnabled = overriddenAny;
 				desc.ResetTooltip = Wui::Tr("panel.ui_designer.prop.reset",
 					"Clear this override (back to the type default)");
 				// (刻意不设 FieldPlaceholder:未覆盖时也要能**直接编辑**出覆盖值 ——
@@ -1657,9 +1833,10 @@ namespace World
 				// M31:值形如 @key 时,字段下方补一行译文/缺键预览,语言清单进 tooltip。
 				bool previewMissing = false;
 				std::string previewText;
-				if (IsLocalizableProperty(meta, ref.Name) && value.size() > 1 && value.front() == '@')
+				const LocalizationRef localization = ParseLocalizationRef(value);
+				if (IsLocalizableProperty(meta, ref.Name) && localization.Valid)
 				{
-					previewText = LocalizationPreview(value, previewMissing);
+					previewText = LocalizationPreview(localization, previewMissing);
 					const std::string languages = LocalizationLanguageList();
 					if (!languages.empty())
 						desc.Tooltip += (desc.Tooltip.empty() ? "" : "\n")
@@ -1690,20 +1867,33 @@ namespace World
 					previewNode.Visible = true;
 					Wui::WuiAccessibility::Get().Register(previewNode);
 				}
-				if (rowResult.ResetClicked && overridden)
+				if (rowResult.ResetClicked && overriddenAny)
 				{
-					NoteNodeEdit(ref.Name);
-					ClearPropOverride(*node, ref.Name);
+					NoteNodeEdit(ref.Name, batchEdit);
+					for (UI::UiNode* target : editTargets)
+						ClearPropOverride(*target, ref.Name);
 					m_ScreenDirty = true;
 					continue;   // 本帧不再画字段(下一帧按"未覆盖"重画)
 				}
 				// ---- 按属性类型给编辑器;任何改动都写成"覆盖值" ----
+				// 目标值(覆盖值,未覆盖时 = 类型默认)按**每个目标节点**求;"任一目标与
+				// 新值不同"才算一次改动(批量下不会把已经等于新值的节点白写一遍)。
+				const auto effectiveValue = [&](const UI::UiNode& target) -> std::string
+				{
+					const UI::UiProp* prop = target.FindProp(ref.Name);
+					if (prop != nullptr)
+						return prop->Value;
+					return meta != nullptr ? PropertyDefaultText(*meta) : std::string();
+				};
 				const auto apply = [&](const std::string& text)
 				{
-					if (text == value)
+					const bool anyChange = std::any_of(editTargets.begin(), editTargets.end(),
+						[&](const UI::UiNode* target) { return effectiveValue(*target) != text; });
+					if (!anyChange)
 						return;
-					NoteNodeEdit(ref.Name);
-					WritePropOverride(*node, ref.Name, text);
+					NoteNodeEdit(ref.Name, batchEdit);
+					for (UI::UiNode* target : editTargets)
+						WritePropOverride(*target, ref.Name, text);
 					m_ScreenDirty = true;
 				};
 				const Wui::WuiComponentProperty::Kind kind = meta != nullptr
@@ -2264,6 +2454,9 @@ namespace World
 			}
 		}
 
+		// M37:状态切换在帧末生效(本帧的行清单/高度已按旧状态算过;下一帧起按新状态出行)。
+		m_PropState = pendingPropState;
+
 		Wui::EndScrollArea(ctx);
 	}
 
@@ -2566,37 +2759,60 @@ namespace World
 		Wui::PanelBackground(ctx, designRect, theme.ContentBg, 0.0f);
 		Wui::HighlightOutline(ctx, designRect, theme.Border, 0.0f, 1.0f);
 
-		// 节点框 + 类型标签(线框视图;不画真实控件外观)。
+		// ---- M37:画布所见即运行所得 ----
+		// 直接走运行时**同一个** `UiPainter::Paint`:同一份控件绘制实现、同一套主题令牌、
+		// 同一套逐状态颜色 —— 画布上看到的 = 运行起来会看到的(不再是复刻的线框)。
+		// 映射由 `viewport.DesignRectToPhysical` 完成,而画布视口就是 m_Screen 的视口
+		// (见 LayoutCanvas),所以命令天然落在画布上,缩放/平移自动跟随。
+		// `RegisterAccessibility=false`:设计器自己登记自己的控件 a11y,不能把一屏
+		// 游戏 UI 节点混进编辑器无障碍树(否则 AI 通道按 label 寻址会撞名)。
+		UI::UiPaintOptions paintOptions;
+		paintOptions.RegisterAccessibility = false;
+		const UI::UiPaintResult paint = UI::UiPainter::Paint(ctx, m_Screen, paintOptions);
+
 		// M12:拖动中(移动/缩放)选中框换成警示色,给"正在拖动"的反馈。
 		const bool dragging = m_Drag != CanvasDrag::None;
+
+		// M35 的"文本/色块回退"保留为 **Paint 报错(未知 Type)时的兜底**:未知类型的节点
+		// Paint 会跳过(绝不静默画空气),设计器在这里给它画回框 + 类型标签 + 红描边,
+		// 并在画布角落给一行红字(见本函数末尾)。已知类型一律是 Paint 的真实外观 ——
+		// 再画线框只会盖住控件。
+		std::size_t fallbackNodes = 0;
+		if (!paint.Ok())
+		{
+			for (const UI::UiNodeInstance& node : m_Screen.Nodes())
+			{
+				if (UI::UiNodeRegistry::Find(node.Type) != nullptr)
+					continue;
+				++fallbackNodes;
+				const Wui::WuiRect box = NodeBoxPhysical(m_Viewport, node.Rect);
+				Wui::WuiColor fill;
+				if (CanvasNodeColor(node, "bg", "bg.default", fill))
+					Wui::PanelBackground(ctx, box, fill, 0.0f);
+				else
+					Wui::PanelBackground(ctx, box, theme.Selection, 0.0f);
+				Wui::HighlightOutline(ctx, box, theme.Danger, 0.0f, 2.0f);
+				Wui::WuiColor textColor;
+				if (!CanvasNodeColor(node, "color", "text.default", textColor))
+					textColor = theme.Danger;
+				std::string caption = CanvasNodeText(node);
+				if (caption.empty())
+					caption = node.Type + "  " + node.Id;
+				Wui::Label(ctx, glm::vec2 { box.X + 3.0f, box.Y + 2.0f }, caption,
+					textColor, CanvasNodeFontSize(node, theme.FontSizeCaption));
+			}
+		}
+
+		// 选中高亮画在 Paint **之后**(真实控件之上):主选中 2px 强调色,其余加选项 1px。
 		for (const UI::UiNodeInstance& node : m_Screen.Nodes())
 		{
-			const Wui::WuiRect box = NodeBoxPhysical(m_Viewport, node.Rect);
-			const bool selected = (node.Id == m_SelectedId);
-
-			// M35:属性可见反馈 —— `bg` / `color` / `text`|`label`|`title` / `fontSize` 直接画进框内,
-			// 让"改了 UI 属性没变化"变成"立刻看得见"。每项只做一次 `FindProp`,不构造容器。
-			// 填充:有 `bg`(或 `bg.default`)就覆盖线框底色,否则沿用选中高亮底色。
-			Wui::WuiColor fill;
-			if (CanvasNodeColor(node, "bg", "bg.default", fill))
-				Wui::PanelBackground(ctx, box, fill, 0.0f);
-			else if (selected)
-				Wui::PanelBackground(ctx, box, theme.Selection, 0.0f);
-			const Wui::WuiColor outline = selected
-				? (dragging ? theme.Warning : theme.Accent) : theme.BorderStrong;
-			Wui::HighlightOutline(ctx, box, outline, 0.0f, selected ? 2.0f : 1.0f);
-
-			// 文字色:`color`(或 `text.default`)优先,解析失败回退选中/未选中主题色。
-			Wui::WuiColor textColor;
-			if (!CanvasNodeColor(node, "color", "text.default", textColor))
-				textColor = selected ? theme.Text : theme.TextMuted;
-
-			// 框内文字:优先 `text`/`label`/`title` 的本地化值(`@key` / `@key|兜底`);都没有时退回 `Type  Id`。
-			std::string caption = CanvasNodeText(node);
-			if (caption.empty())
-				caption = node.Type + "  " + node.Id;
-			const float fontSize = CanvasNodeFontSize(node, theme.FontSizeCaption);
-			Wui::Label(ctx, glm::vec2 { box.X + 3.0f, box.Y + 2.0f }, caption, textColor, fontSize);
+			if (!IsSelected(node.Id))
+				continue;
+			const bool primary = node.Id == m_SelectedId;
+			const Wui::WuiColor outline = primary
+				? (dragging ? theme.Warning : theme.Accent) : theme.Accent;
+			Wui::HighlightOutline(ctx, NodeBoxPhysical(m_Viewport, node.Rect), outline,
+				0.0f, primary ? 2.0f : 1.0f);
 		}
 
 		// M12:选中节点的 8 个缩放手柄(拖角改两轴、拖边改单轴;拖动手柄描边用强调色)。
@@ -2626,6 +2842,25 @@ namespace World
 				if (node.Parent == -1)
 					DrawAnchorMarkers(ctx, theme, node);
 			}
+		}
+
+		// M37:Paint 报错(未知 Type / 未解析令牌)不能静默 —— 画布角落一行红字,
+		// 带上条数与首条可读说明(令牌错误不阻断绘制,所以这里只是提示,不是"画不出来")。
+		if (!paint.Ok())
+		{
+			std::string message = "Paint: " + std::to_string(paint.Errors.size()) + " error(s)";
+			if (fallbackNodes > 0)
+				message += " - " + std::to_string(fallbackNodes) + " unknown-type node(s)";
+			message += ": " + paint.Errors.front().Message;
+			constexpr std::size_t kMaxChars = 150;
+			if (message.size() > kMaxChars)
+				message = message.substr(0, kMaxChars) + "...";
+			const float barWidth = std::min(std::max(rect.W - 12.0f, 0.0f),
+				ctx.MeasureTextWidth(message, theme.FontSizeCaption) + 10.0f);
+			const Wui::WuiRect bar { rect.X + 6.0f, rect.Y + rect.H - 20.0f, barWidth, 16.0f };
+			Wui::PanelBackground(ctx, bar, theme.WindowBg, 2.0f);
+			Wui::Label(ctx, glm::vec2 { bar.X + 4.0f, bar.Y + 1.0f }, message,
+				theme.Danger, theme.FontSizeCaption);
 		}
 
 		Wui::HighlightOutline(ctx, rect, theme.Border, 2.0f, 1.0f);
@@ -2772,7 +3007,7 @@ namespace World
 			m_SelectedId.clear();
 	}
 
-	void UiDesignerPanel::NoteNodeEdit(const std::string& name)
+	void UiDesignerPanel::NoteNodeEdit(const std::string& name, bool batchEdit)
 	{
 		if (m_PendingEditValid)
 			return;   // 一次连续编辑只记第一条(拖动 = 一条记录)
@@ -2784,6 +3019,12 @@ namespace World
 		m_PendingEditNodeId = m_SelectedId;
 		m_PendingEditBefore = m_FrameNodeBefore;
 		m_PendingEditName = name;
+		// M37:批量编辑(多选同 Type)一条撤销记录 = **整档前像** —— 单节点前像盖不住
+		// 同时被改的其它选中节点,撤销会把它们留在改后的值上。此刻改动还没写进文档,
+		// 所以这份快照就是"本次改动之前"的权威前像。
+		m_PendingEditBatch = batchEdit;
+		if (batchEdit)
+			m_PendingEditBeforeDoc = m_Document;
 	}
 
 	void UiDesignerPanel::CommitNodeEdit()
@@ -2793,6 +3034,11 @@ namespace World
 		const std::string nodeId = m_PendingEditNodeId;
 		const std::string name = m_PendingEditName;
 		const UI::UiNode before = m_PendingEditBefore;
+		// M37:批量前像要先取出来 —— CancelNodeEdit 会把它们清掉(见下)。
+		const bool batchEdit = m_PendingEditBatch;
+		UI::UiDocument batchBefore;
+		if (batchEdit)
+			batchBefore = m_PendingEditBeforeDoc;
 		CancelNodeEdit();
 		if (nodeId.empty())
 			return;
@@ -2802,9 +3048,17 @@ namespace World
 		// 后像 = 当前文档(节点就是 current);前像 = 当前文档把该节点换回 before。
 		// 拖回原值 / 未真正改动时不落空记录。
 		const UI::UiDocument after = m_Document;
-		UI::UiDocument beforeDoc = m_Document;
-		if (UI::UiNode* slot = FindNodeMutable(beforeDoc.Nodes, nodeId))
-			*slot = before;
+		UI::UiDocument beforeDoc;
+		if (batchEdit)
+		{
+			beforeDoc = batchBefore;
+		}
+		else
+		{
+			beforeDoc = m_Document;
+			if (UI::UiNode* slot = FindNodeMutable(beforeDoc.Nodes, nodeId))
+				*slot = before;
+		}
 		if (UI::UiDocumentsEquivalent(beforeDoc, after))
 			return;
 		PushDocumentUndo(name.empty() ? Wui::Tr("panel.ui_designer.edit", "Edit") : name, beforeDoc);
@@ -2816,6 +3070,8 @@ namespace World
 		m_PendingEditValid = false;
 		m_PendingEditNodeId.clear();
 		m_PendingEditName.clear();
+		m_PendingEditBatch = false;
+		m_PendingEditBeforeDoc = UI::UiDocument {};
 	}
 
 	void UiDesignerPanel::CancelDrag()
@@ -2831,7 +3087,8 @@ namespace World
 
 	// ---- M20:多选 ----
 	// `m_SelectedId` 是"主选中"(属性页/手柄/方向键作用在它上);`m_SelectedIds` 是额外的加选项。
-	// 删除/复制作用在整组(见 EffectiveSelection)。多选不做"成套属性编辑" —— 那是另一套模型。
+	// 删除/复制作用在整组(见 EffectiveSelection)。M37 起:同 Type 的多选支持**成套属性编辑**
+	// (属性行同时写全部选中节点),混选只改主选中并在 Type 块头给可见提示。
 	bool UiDesignerPanel::IsSelected(const std::string& nodeId) const
 	{
 		if (nodeId == m_SelectedId)
@@ -2869,6 +3126,46 @@ namespace World
 				ids.push_back(id);
 		}
 		return ids;
+	}
+
+	// M37:多选批量改属性 —— 选中的节点(主选中在前,顺序 = 大纲加选顺序)。
+	std::vector<UI::UiNode*> UiDesignerPanel::SelectedNodesMutable()
+	{
+		std::vector<UI::UiNode*> nodes;
+		for (const std::string& id : EffectiveSelection())
+		{
+			if (UI::UiNode* node = FindNodeMutable(m_Document.Nodes, id))
+				nodes.push_back(node);
+		}
+		return nodes;
+	}
+
+	// M37:选中的 Type 是否不一致(混选)。选中 ≤1 个 / 节点不存在 = false。
+	bool UiDesignerPanel::SelectionMixedTypes() const
+	{
+		std::string firstType;
+		bool haveFirst = false;
+		for (const std::string& id : EffectiveSelection())
+		{
+			const UI::UiNode* node = m_Document.FindNode(id);
+			if (node == nullptr)
+				continue;
+			if (!haveFirst)
+			{
+				firstType = node->Type;
+				haveFirst = true;
+				continue;
+			}
+			if (node->Type != firstType)
+				return true;
+		}
+		return false;
+	}
+
+	// M37:选中 >1 且全同 Type = 属性行批量写全部选中节点(否则只写主选中)。
+	bool UiDesignerPanel::BatchEditActive() const
+	{
+		return EffectiveSelection().size() > 1 && !SelectionMixedTypes();
 	}
 
 	// M20:大纲拖动 = 重新挂父。守卫与"上移/下移"同一口径:

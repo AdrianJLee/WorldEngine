@@ -43,10 +43,13 @@ namespace World::UI
 		for (const UiInputCommand& command : queue.Commands())
 		{
 			// ① 每条命令都进总线(UI → 逻辑的出口必须无损;含内置导航命令 —— 项目也能观察到它)。
+			// M38:`Value` 原样带过去(滑条 Change/Commit 的数值、文本域 Commit 的文本);
+			// 订阅者拿不到值曾是 M13 的遗漏。
 			UiCommandEvent event;
 			CopyTruncated(event.NodeId, command.NodeId);
 			CopyTruncated(event.Event, command.Event);
 			CopyTruncated(event.Command, command.Command);
+			CopyTruncated(event.Value, command.Value);
 			events.EmitDeferred(event);
 			++result.Dispatched;
 

@@ -26,6 +26,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <locale>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -80,6 +81,53 @@ namespace World
 		// 正在加载中的库逻辑路径(按加载顺序;报循环错误时给出加载栈)。
 		std::vector<std::string> s_ScriptLibLoading;
 
+		// -------------------------------------------------------------------------
+		// M38:UI 绑定只读值查询(`script:<path>.<field>`)—— 模块返回表缓存。
+		// 键 = 逻辑路径;内容指纹不一致 = 重新 load + 执行(与 s_ScriptLibCache 同一口径)。
+		// 只存"模块 return 的表",字段每次从缓存表重读 ⇒ 脚本运行期对表的改动可见。
+		// -------------------------------------------------------------------------
+		struct ScriptValueModuleCacheEntry
+		{
+			ScriptValue Table;
+			uint64_t Fingerprint = 0;
+		};
+		std::unordered_map<std::string, ScriptValueModuleCacheEntry> s_ScriptValueModuleCache;
+
+		// 脚本标量 → 属性文本协议(与 `UiBindingSources.cpp` 的 FloatToText 逐字节同口径:
+		// 整数数值不带小数点,其余用**经典 locale** 的默认精度,与进程 locale 无关)。
+		// 表/函数/userdata/nil 不可转文本 ⇒ false(调用方报可读错误)。
+		bool ScriptValueToText(const ScriptValue& value, std::string& out)
+		{
+			if (value.IsString())
+				return value.AsString(&out);
+			if (value.IsBoolean())
+			{
+				bool flag = false;
+				if (!value.AsBool(&flag))
+					return false;
+				out = flag ? "true" : "false";
+				return true;
+			}
+			if (value.IsNumber())
+			{
+				double number = 0.0;
+				if (!value.AsNumber(&number))
+					return false;
+				const double truncated = number < 0.0 ? std::ceil(number) : std::floor(number);
+				if (number == truncated && std::fabs(number) < 1.0e15)
+					out = std::to_string(static_cast<long long>(number));
+				else
+				{
+					std::ostringstream stream;
+					stream.imbue(std::locale::classic());
+					stream << number;
+					out = stream.str();
+				}
+				return true;
+			}
+			return false;
+		}
+
 		// 库的固定子树(逻辑路径口径:相对内容根、POSIX 分隔、无尾 '/';
 		// 与 SystemScriptPrefix() 对 <内容根>/scripts/lib 的输出同源)。
 		constexpr const char* kScriptLibPrefix = "scripts/lib/";
@@ -110,6 +158,24 @@ namespace World
 			while (suffix[length] != '\0')
 				++length;
 			return text.size() >= length && text.compare(text.size() - length, length, suffix) == 0;
+		}
+
+		// M38:`script:` 绑定的**逻辑路径**口径 —— 与 ecs 脚本同一约定:
+		//   * 已带 `.luau` / `.lua` ⇒ 只用给定路径(视作完整相对路径);
+		//   * 不带扩展名 ⇒ 先试 `.luau`、再试 `.lua`(与 `BuildScriptLibCandidates` / 脚本组件
+		//     的扩展名回退顺序逐字一致);
+		//   * 带其它扩展名 ⇒ 只用给定路径(不叠后缀):命中 = 用户明示的文件,不命中就报可读错误。
+		// 解析结果同时用作**模块缓存键** ⇒ `scripts/ui/hud` 与 `scripts/ui/hud.luau` 命中同一份表。
+		void BuildScriptValueCandidates(const std::string& scriptPath, std::vector<std::string>& candidates)
+		{
+			candidates.clear();
+			if (EndsWithText(scriptPath, ".luau") || EndsWithText(scriptPath, ".lua"))
+				candidates.push_back(scriptPath);
+			else
+			{
+				candidates.push_back(scriptPath + ".luau");
+				candidates.push_back(scriptPath + ".lua");
+			}
 		}
 
 		std::string JoinQuoted(const std::vector<std::string>& values)
@@ -1695,6 +1761,8 @@ namespace World
 			// T13:库缓存/加载栈在 VM 关闭前清空(引用在 VM 关闭后一律失效)。
 			s_ScriptLibCache.clear();
 			s_ScriptLibLoading.clear();
+			// M38:UI 绑定只读值查询的模块返回表缓存同 VM 生命周期一起清。
+			s_ScriptValueModuleCache.clear();
 			s_SystemWatch.reset();
 			s_OwnerThread = {};
 		}
@@ -1866,6 +1934,100 @@ namespace World
 	{
 		AssertOwnerThread();
 		return LoadScriptLib(name, out, error);
+	}
+
+	// M38:UI 绑定只读值查询入口(声明与语义见 ScriptEngine.h)。与 RequireScriptLib 不同,本口
+	// **不抛**:所有失败(VM 未初始化 / 线程不符 / 路径或字段为空 / 脚本不存在 / 编译或执行失败 /
+	// 返回值不是表 / 字段不存在 / 值类型不可转文本)一律 false + 可读 error —— 绑定求值失败只
+	// 记一条 warning,绝不能把 UI 帧炸掉。
+	bool ScriptEngine::ReadScriptValue(const std::string& scriptPath, const std::string& field,
+		std::string& out, std::string* error)
+	{
+		const auto fail = [error](std::string message) {
+			if (error)
+				*error = std::move(message);
+			return false;
+		};
+
+		if (scriptPath.empty())
+			return fail("script binding: the script path must not be empty");
+		if (field.empty())
+			return fail("script binding '" + scriptPath + "': the field name must not be empty");
+		if (!s_Vm)
+			return fail("script binding '" + scriptPath + "." + field +
+				"' needs an initialized Luau VM (ScriptEngine::Init was not called)");
+		if (s_OwnerThread != std::this_thread::get_id())
+			return fail("script binding '" + scriptPath + "." + field +
+				"' must be evaluated on the ScriptEngine owner thread");
+
+		// 脚本字节:VFS(登记的内容上下文 / Application)→ 磁盘 <内容根>/<逻辑路径>。
+		// 路径口径与 ecs 脚本一致:扩展名可省 —— 先试 `.luau`、再试 `.lua`;ReadScriptBytes 找不到时
+		// 抛 logic_error ⇒ 这里接住并转成可读 error(不抛穿绑定层)。候选**按顺序全部试完**,全部失败时
+		// 报告最后一个原因(它已经说明"文件不存在",不必再叠一层)。
+		std::vector<std::string> candidates;
+		BuildScriptValueCandidates(scriptPath, candidates);
+		std::string source;
+		std::string resolvedPath;
+		std::string readError;
+		for (const std::string& candidate : candidates)
+		{
+			try
+			{
+				const std::vector<uint8_t> bytes = ReadScriptBytes(candidate);
+				source.assign(bytes.begin(), bytes.end());
+				resolvedPath = candidate;
+				break;
+			}
+			catch (const std::exception& exception)
+			{
+				readError = exception.what();
+			}
+		}
+		if (resolvedPath.empty())
+			return fail("script '" + scriptPath + "' could not be read: " + readError);
+
+		// 缓存键 = **解析后**的逻辑路径:省略扩展名与带扩展名命中同一份返回表。
+		const uint64_t fingerprint = FingerprintScriptText(source);
+		ScriptTableRef table;
+		const auto cached = s_ScriptValueModuleCache.find(resolvedPath);
+		if (cached != s_ScriptValueModuleCache.end() && cached->second.Fingerprint == fingerprint)
+		{
+			if (!cached->second.Table.AsTable(&table))
+				return fail("script '" + resolvedPath + "': cached module value is no longer a table");
+		}
+		else
+		{
+			s_ScriptValueModuleCache.erase(resolvedPath);   // 内容变了(或没缓存)→ 丢掉旧表,重新执行
+
+			std::string loadError;
+			ScriptFunctionRef function = s_Vm->LoadChunk(std::string_view(source), resolvedPath.c_str(),
+				ScriptTableRef(), &loadError);
+			if (!function.IsValid())
+				return fail("script '" + resolvedPath + "' failed to compile" +
+					(loadError.empty() ? std::string() : ": " + loadError));
+
+			ScriptValue returned;
+			std::string callError;
+			if (!function.Call(nullptr, 0, &returned, &callError))
+				return fail("script '" + resolvedPath + "' failed to run" +
+					(callError.empty() ? std::string() : ": " + callError));
+			if (!returned.AsTable(&table))
+				return fail("script '" + resolvedPath + "' returned a " + returned.TypeName() +
+					" value; a table is required (add `return { ... }` to the script)");
+
+			s_ScriptValueModuleCache[resolvedPath] = ScriptValueModuleCacheEntry { returned, fingerprint };
+		}
+
+		const ScriptValue fieldValue = table.GetField(field.c_str());
+		if (fieldValue.IsNil())
+			return fail("script '" + scriptPath + "' has no field '" + field + "' (its returned table "
+				"declares no such string key)");
+		if (!ScriptValueToText(fieldValue, out))
+			return fail("script '" + scriptPath + "' field '" + field + "' is a " + fieldValue.TypeName() +
+				" value, which has no text representation for a UI binding");
+		if (error)
+			error->clear();
+		return true;
 	}
 
 	void ScriptEngine::Init()

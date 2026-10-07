@@ -25,7 +25,11 @@ namespace World::Wui
 		// button 与 WuiInputState 的 MouseDown/Clicked/Released 下标一致:0 = 左键(默认,
 		// 保持既有调用语义),1 = 右键,2 = 中键。控件侧读到的仍是普通输入 —— 右键用来
 		// 复现控件自己的上下文菜单路径(TreeView/ListView/GridView 的 ContextClicked)。
-		void QueueClick(const std::string& windowKey, glm::vec2 position, int button = 0);
+		// ctrl/shift = 这一次点击期间**按住**的修饰键:面板的"Ctrl+点击 = 加选(多选)"、
+		// "Shift+点击 = 范围/等比"这类路径只能靠它驱动(AI 无障碍操作多选的前提;
+		// 走的是与真人按键同一条 `WuiInputState.Ctrl/Shift` 口径,不是测试专用分支)。
+		void QueueClick(const std::string& windowKey, glm::vec2 position, int button = 0,
+			bool ctrl = false, bool shift = false);
 		// 在指定窗口注入一段文本(UTF-8)。语义:点击(QueueClick)完成后**下一帧**开始注入,
 		// 按 '\n' 分行、每帧一段(第 2 段起该帧先注入 Enter 键再写该行码点),'\r' 并入换行;
 		// 中文等非 ASCII 按 UTF-8 解码成码点写入 input.TextInput —— 与真实键盘上屏同一条路径。
@@ -46,8 +50,25 @@ namespace World::Wui
 		void QueueWheel(const std::string& windowKey, glm::vec2 position, float wheel);
 		// 是否还有待注入事件(供自动化等待"注入被消费")。
 		bool HasPending() const;
-		// 每个窗口每帧调用一次:把待注入事件写进该窗口的输入状态。
+		// 宿主**每帧开头**调用一次(在游戏 UI 采样与 WUI 帧之前):开启本帧的注入快照窗口。
+		// 同一帧内多个消费者(游戏 UI 的输入采样 + WUI 控件帧)各读一次同一份注入结果,相位
+		// 每帧只推进一次 —— 真人点一下本来就同时落在两个系统上,拆成"press 给一边、release
+		// 给另一边"是错的。未调用过 BeginFrame 的调用方(单元测试逐帧 Apply)保持旧语义。
+		void BeginFrame();
+		// 把本帧待注入的输入写进 `input`(可被同一帧的多个消费者各调一次)。
 		void Apply(const std::string& windowKey, WuiInputState& input);
+
+	private:
+		// 本帧的注入结果(相位推进一次的结果 + "是否写了指针位置")。
+		struct FrameInjection
+		{
+			WuiInputState State;
+			bool PointerPosition = false;
+		};
+		// 推进注入相位一帧(旧的 Apply 语义:一次调用 = 一帧),写进 `out`。
+		void AdvancePhase(const std::string& windowKey, WuiInputState& out, bool& outPointerPosition);
+		// 把本帧注入并入调用方状态(并集:不覆盖平台轮询的其它字段)。
+		static void MergeInjection(const FrameInjection& injection, WuiInputState& input);
 
 	private:
 		struct Pending
@@ -66,10 +87,21 @@ namespace World::Wui
 			int KeyHoldFrames = 0;
 			bool KeyCtrl = false;
 			bool KeyShift = false;
+			// 点击注入的修饰键(M38 之后追加):Ctrl+点击 = 面板的"加选"(多选),
+			// Shift+点击 = 范围/等比。两帧(按下 + 抬起)都保持同一份修饰状态,
+			// 面板读到的 `ctx.Input().Ctrl` 因此与真人按住 Ctrl 点一下完全一致。
+			bool ClickCtrl = false;
+			bool ClickShift = false;
 			// 滚轮注入(0 = 无;>0 = 还剩几帧要写 Wheel)。
 			int WheelFrames = 0;
 			float Wheel = 0.0f;
 		};
+
+		// 本帧的注入快照(键 = 窗口;BeginFrame 清空)。相位每帧只推进一次,同一帧的多个
+		// 消费者读同一份 ⇒ 游戏 UI 与 WUI 控件都能看到同一次注入。
+		std::unordered_map<std::string, FrameInjection> m_FrameSnapshots;
+		// 帧序号:0 = 从未 BeginFrame(旧语义:一次 Apply = 一帧,破坏性推进)。
+		uint64_t m_Serial = 0;
 		std::unordered_map<std::string, Pending> m_Pending;
 	};
 }

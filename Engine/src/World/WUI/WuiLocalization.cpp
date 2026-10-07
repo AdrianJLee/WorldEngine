@@ -64,6 +64,11 @@ namespace World::Wui
 			std::vector<std::string> Conflicts;                     // "层/文件.json:key"(层内重复,被忽略的那次)
 			std::unordered_set<std::string> Missing;
 			std::vector<LocalizationFileStamp> Stamp;               // 本次加载的输入文件(S2 热重载比对基准)
+			// M40:`LocalizationLanguages()` 的缓存(设计器每个 `@key` 属性每帧都会问一次,
+			// 而它要扫目录)。失效条件 = 代数变了(Reload/SetLanguage 都会 ++)或层数变了。
+			uint32_t LanguageListGeneration = 0;
+			size_t LanguageListLayerCount = 0;
+			std::vector<std::string> LanguageList;
 		};
 
 		// 编译产物(S2):`<layer>/<lang>/catalog.json` + `$format` 版本;条目与域文件同一套形态。
@@ -733,6 +738,11 @@ namespace World::Wui
 	std::vector<std::string> LocalizationLanguages()
 	{
 		LocalizationState& state = State();
+		// M40:命中缓存 = 不扫盘(每帧每个 `@key` 都会问一次;实测这是设计器里的热点)。
+		if (state.LanguageListGeneration == state.Generation &&
+			state.LanguageListLayerCount == state.Layers.size())
+			return state.LanguageList;
+
 		std::vector<std::string> languages;
 		const auto scan = [&languages](const std::filesystem::path& directory)
 		{
@@ -757,6 +767,9 @@ namespace World::Wui
 				scan(layer.Directory);
 		std::sort(languages.begin(), languages.end());
 		languages.erase(std::unique(languages.begin(), languages.end()), languages.end());
+		state.LanguageListGeneration = state.Generation;
+		state.LanguageListLayerCount = state.Layers.size();
+		state.LanguageList = languages;
 		return languages;
 	}
 

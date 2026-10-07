@@ -12,6 +12,8 @@
 //      `ui.close` 有 `UiNavigator` 时先关模态再出栈(`ui.back` 同 `UiNavigator::Back`);
 //   ⑥ `service:` 只读查询(会话级:input/level/save)与"无会话"可读报错;
 //   ⑦ `UiHost` 全链路:`.wui` 文档 `Bind:` → Attach → 按 tick Refresh → 覆盖 → 画出绑定值。
+//   ⑧ M38:`script:` 解析器(load 脚本模块 + 读返回表字段;路径/字段缺失可读报错)、
+//      `UiCommandEvent.Value` 原样进总线、`UiHost` 加载期未知 Type 整份拒绝(旧文档保留)。
 //
 // 本文件不构建、不渲染、不开窗口;只跑 headless 逻辑 + 命令流断言。
 
@@ -22,14 +24,17 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
+#include "World/Script/Runtime/ScriptEngine.h"
 #include "World/UI/UiBinding.h"
 #include "World/UI/UiBindingSources.h"
 #include "World/UI/UiCommandRouter.h"
 #include "World/UI/UiDocument.h"
 #include "World/UI/UiHost.h"
 #include "World/UI/UiNavigator.h"
+#include "World/UI/UiNodeRegistry.h"
 #include "World/UI/UiPainter.h"
 #include "World/UI/UiScreen.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiContext.h"
 
 #include <cstdio>
@@ -520,6 +525,206 @@ namespace
 		_putenv_s("WLD_UI_DOC", "");
 		std::filesystem::remove(path);
 	}
+
+	// ---- ⑧ M38:`script:` 解析器(load 脚本模块 + 读返回表字段)----
+
+	void TestScriptResolver()
+	{
+		// VM 未初始化:必须是 false + 可读 error(不崩、不静默)。
+		World::ScriptEngine::Shutdown();   // 幂等:保证从"无 VM"开始
+		RegisterScriptBindingResolver();
+		bool ok = false;
+		const std::string noVm = ResolveSingle("script:scripts/ui/hud_state.title", nullptr, ok);
+		CHECK(!ok);
+		CHECK_CONTAINS(noVm, "Luau VM");
+		CHECK_CONTAINS(noVm, "hud_state.title");
+
+		// 临时内容根 + 一份返回表的脚本(路径 = 逻辑路径,落在 <内容根>/scripts/ui/)。
+		const std::filesystem::path root =
+			std::filesystem::temp_directory_path() / "we-ui-binding-script-test";
+		std::error_code cleanupError;
+		std::filesystem::remove_all(root, cleanupError);
+		std::filesystem::create_directories(root / "scripts" / "ui");
+		{
+			std::ofstream file(root / "scripts" / "ui" / "hud_state.luau",
+				std::ios::binary | std::ios::trunc);
+			file << "return { title = 'Hello', count = 3, ratio = 1.5, flag = true, nested = { x = 1 } }\n";
+			CHECK(file.good());
+		}
+
+		// RAII:断言抛错也还原内容根 / 关 VM / 清临时目录(不污染同进程的其它用例)。
+		struct Guard
+		{
+			std::filesystem::path Root;
+			~Guard()
+			{
+				World::ScriptEngine::Shutdown();
+				World::Paths::SetAssetRootOverride(std::filesystem::path());
+				std::error_code error;
+				std::filesystem::remove_all(Root, error);
+			}
+		} guard { root };
+
+		World::Paths::SetAssetRootOverride(root);
+		World::ScriptEngine::Init();
+		RegisterScriptBindingResolver();
+
+		// 成功:字符串 / 整数(不带小数点)/ 小数 / 布尔 → 属性文本协议。
+		CHECK_STR(ResolveSingle("script:scripts/ui/hud_state.title", nullptr, ok), "Hello");
+		CHECK(ok);
+		CHECK_STR(ResolveSingle("script:scripts/ui/hud_state.count", nullptr, ok), "3");
+		CHECK(ok);
+		CHECK_STR(ResolveSingle("script:scripts/ui/hud_state.ratio", nullptr, ok), "1.5");
+		CHECK(ok);
+		CHECK_STR(ResolveSingle("script:scripts/ui/hud_state.flag", nullptr, ok), "true");
+		CHECK(ok);
+
+		// 字段不存在:false + 可读 error(指出脚本与字段名)。
+		const std::string missingField = ResolveSingle("script:scripts/ui/hud_state.nope", nullptr, ok);
+		CHECK(!ok);
+		CHECK_CONTAINS(missingField, "hud_state");
+		CHECK_CONTAINS(missingField, "nope");
+
+		// 脚本路径不存在:false + 可读 error。
+		const std::string missingScript =
+			ResolveSingle("script:scripts/ui/not_there.title", nullptr, ok);
+		CHECK(!ok);
+		CHECK_CONTAINS(missingScript, "not_there");
+
+		// 值不可转文本(表):false + 可读 error,不静默、不崩。
+		const std::string nestedValue = ResolveSingle("script:scripts/ui/hud_state.nested", nullptr, ok);
+		CHECK(!ok);
+		CHECK_CONTAINS(nestedValue, "nested");
+	}
+
+	// ---- ⑧ M38:`UiCommandEvent` 带 `Value` ----
+
+	void TestCommandEventCarriesValue()
+	{
+		Gameplay::EventBus events;
+		std::vector<UiCommandEvent> received;
+		events.Subscribe<UiCommandEvent>([&received](const UiCommandEvent& event)
+		{
+			received.push_back(event);
+		});
+
+		UiCommandQueue queue;
+		queue.Push(UiInputCommand { "volume.slider", "Change", "audio.volume", "0.750" });
+		queue.Push(UiInputCommand { "name.field", "Commit", "profile.rename", "Ada" });
+		CHECK(UiCommandRouter::Dispatch(queue, events).Dispatched == 2);
+		CHECK(events.DispatchPending() == 2);
+		CHECK(received.size() == 2);
+		// 值原样到达订阅者;既有字段不受追加影响。
+		CHECK_STR(std::string(received[0].Value), "0.750");
+		CHECK_STR(std::string(received[1].Value), "Ada");
+		CHECK_STR(std::string(received[0].Command), "audio.volume");
+		CHECK_STR(std::string(received[0].Event), "Change");
+
+		// 没值的命令 = 空串(不是垃圾内存)。
+		UiCommandQueue clickOnly;
+		clickOnly.Push(UiInputCommand { "btn", "Click", "ui.close", std::string() });
+		CHECK(UiCommandRouter::Dispatch(clickOnly, events).Dispatched == 1);
+		CHECK(events.DispatchPending() == 1);
+		CHECK(received.size() == 3);
+		CHECK_STR(std::string(received[2].Value), "");
+
+		// 超长值按字节截断(定长载荷,不越界)。
+		const std::string longValue(200, 'v');
+		UiCommandQueue truncating;
+		truncating.Push(UiInputCommand { "n", "Click", "c", longValue });
+		CHECK(UiCommandRouter::Dispatch(truncating, events).Dispatched == 1);
+		CHECK(events.DispatchPending() == 1);
+		CHECK(received.size() == 4);
+		CHECK(received[3].Value[kUiCommandEventValueCapacity - 1] == '\0');
+		CHECK_STR(std::string(received[3].Value), std::string(kUiCommandEventValueCapacity - 1, 'v'));
+	}
+
+	// ---- ⑧ M38:UiHost 加载期未知 Type 整份拒绝(旧文档保留)----
+
+	void TestUiHostRejectsUnknownNodeType()
+	{
+		const std::filesystem::path path =
+			std::filesystem::temp_directory_path() / "we-ui-host-type-guard-test.wui";
+		const std::string goodDocument =
+			"FormatVersion: 1\n"
+			"Screen: TypeGuard\n"
+			"Nodes:\n"
+			"  - Id: ok\n"
+			"    Type: Label\n"
+			"    Props:\n"
+			"      text: \"still-here\"\n"
+			"    Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [0, 0], Size: [200, 20] }\n";
+		{
+			std::ofstream file(path, std::ios::binary | std::ios::trunc);
+			file << goodDocument;
+			CHECK(file.good());
+		}
+
+		_putenv_s("WLD_UI_DOC", path.string().c_str());
+		UiHost host;
+		host.SetAccessibilityMode(UiHostAccessibilityMode::SharedChannel);   // 不碰全局无障碍通道
+		host.Initialize(std::filesystem::path {});
+		CHECK(host.Enabled());
+		CHECK_STR(host.DocumentPath(), path.string());
+
+		// 四个未登记 Type 的文档(root.a / root.b / root.c / root.d)。
+		const std::string badDocument =
+			"FormatVersion: 1\n"
+			"Screen: TypeGuard\n"
+			"Nodes:\n"
+			"  - Id: root\n"
+			"    Type: Label\n"
+			"    Children:\n"
+			"      - Id: a\n"
+			"        Type: NoSuchA\n"
+			"      - Id: b\n"
+			"        Type: NoSuchB\n"
+			"      - Id: c\n"
+			"        Type: NoSuchC\n"
+			"      - Id: d\n"
+			"        Type: NoSuchD\n";
+		{
+			std::ofstream file(path, std::ios::binary | std::ios::trunc);
+			file << badDocument;
+			CHECK(file.good());
+		}
+
+		// 文档层校验语义不变:`ValidateUiDocument` 只看 Type 非空、不看节点注册表。
+		UI::UiDocument parsed;
+		std::string parseError;
+		CHECK(UI::UiDocumentIO::Parse(badDocument, parsed, &parseError));
+		std::vector<UI::UiValidationIssue> issues;
+		CHECK(UI::ValidateUiDocument(parsed, &issues));
+
+		// 宿主加载策略:整份拒绝 + 可读错误(前 3 个未登记 Type 与节点路径;第 4 个不列)。
+		std::string reloadError;
+		CHECK(!host.Reload(&reloadError));
+		CHECK_CONTAINS(reloadError, "NoSuchA");
+		CHECK_CONTAINS(reloadError, "root.a");
+		CHECK_CONTAINS(reloadError, "NoSuchB");
+		CHECK_CONTAINS(reloadError, "root.b");
+		CHECK_CONTAINS(reloadError, "NoSuchC");
+		CHECK_CONTAINS(reloadError, "root.c");
+		CHECK(reloadError.find("NoSuchD") == std::string::npos);
+		CHECK_CONTAINS(host.LastReloadError(), "NoSuchA");
+
+		// 旧文档仍在:仍启用,且还能画出旧节点的文本。
+		CHECK(host.Enabled());
+		Wui::WuiContext ctx;
+		Wui::WuiInputState input;
+		input.ViewportSize = glm::vec2 { 1280.0f, 720.0f };
+		ctx.BeginFrame(input);
+		host.DrawFrame(ctx, input);
+		bool sawOldText = false;
+		for (const Wui::WuiDrawCommand& command : ctx.Commands())
+			if (command.Kind == Wui::WuiDrawKind::Text && command.Text == "still-here")
+				sawOldText = true;
+		CHECK(sawOldText);
+
+		host.Shutdown();
+		_putenv_s("WLD_UI_DOC", "");
+		std::filesystem::remove(path);
+	}
 }
 
 int main()
@@ -538,6 +743,9 @@ int main()
 		TestCommandRouterEmitsEvents();
 		TestCommandRouterNavigation();
 		TestUiHostBindingPipeline();
+		TestScriptResolver();
+		TestCommandEventCarriesValue();
+		TestUiHostRejectsUnknownNodeType();
 	}
 	catch (const std::exception& e)
 	{

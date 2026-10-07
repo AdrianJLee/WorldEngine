@@ -601,6 +601,8 @@ void EditorLayer::OnDetach(){
 void EditorLayer::OnUpdate(Timestep ts){
 		WLD_TRACE_FUNCTION();
 		LayerTimingScope updateScope(LayerTimingState().Update);
+		// contract.ui-runtime §5:本帧的脚本/AI 注入快照窗口(游戏 UI 采样与编辑器 UI 帧共读同一份)。
+		Wui::WuiScriptedInput::Get().BeginFrame();
 		// D5c-4a:渲染发生在面板绘制里(RenderScene),那里拿不到 Timestep —— 先缓存一帧。
 		m_LastDeltaSeconds = ts.GetSeconds();
 		ProcessPendingRendererChange();
@@ -742,15 +744,16 @@ void EditorLayer::OnUpdate(Timestep ts){
 						const uint32_t windowWidth = Application::Get().GetWindow().GetWidth();
 						const uint32_t windowHeight = Application::Get().GetWindow().GetHeight();
 						const Wui::WuiInputState uiInput = m_UiInputSampler.Sample(
-							glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)));
+							glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)),
+							m_UiHost.WindowKey());
 						m_PlayHost.SetPointerCaptured(m_UiHost.RouteInput(uiInput));
 						// GameUI(M26):命令出口 = `UiCommandRouter` → `EventBus`(`UiCommandEvent`)——
-						// 项目 Lua/C++ 系统订阅它即可响应。编辑器没有 `UiNavigator`(页面栈/模态归项目)
-						// ⇒ navigator 传空,命令只进总线(与 Runtime 同一口径)。
+						// 项目 Lua/C++ 系统订阅它即可响应。M39:与 Runtime 同一口径,把宿主的
+						// `UiNavigator` 交给 router ⇒ `ui.close` / `ui.back` 真的导航。
 						if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
 						{
 							const UI::UiCommandDispatchResult dispatched =
-								UI::UiCommandRouter::Dispatch(m_UiHost.Commands(), app->Events());
+								UI::UiCommandRouter::Dispatch(m_UiHost.Commands(), app->Events(), &m_UiHost.Navigator());
 							// 保留一条 debug 日志(只有真有命令时打,避免每帧刷屏)。
 							if (dispatched.Dispatched > 0)
 								WLD_CORE_TRACE("[ui] {0} command(s) -> UiCommandEvent on the EventBus ({1} navigation)",
@@ -1140,7 +1143,9 @@ void EditorLayer::OnUiFrame(){
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
 		{
-			Wui::WuiScriptedInput::Get().Apply("main", input);
+			// contract.ui-runtime §5:读**本帧同一份**注入快照(BeginFrame 已推进过相位)⇒ 游戏 UI 与
+			// 编辑器面板看到同一次点击。
+			Wui::WuiScriptedInput::Get().Apply(m_UiHost.WindowKey(), input);
 			m_WuiContext.BeginFrame(input);
 			// 注册表在设备切换/重建后会被清空(Generation 递增),此时需要
 			// 重新注册图标与场景纹理,否则图像命令解析不到贴图(图标消失)。

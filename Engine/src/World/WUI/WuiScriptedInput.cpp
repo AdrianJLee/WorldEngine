@@ -70,11 +70,15 @@ namespace World::Wui
 		return instance;
 	}
 
-	void WuiScriptedInput::QueueClick(const std::string& windowKey, glm::vec2 position, int button)
+	void WuiScriptedInput::QueueClick(const std::string& windowKey, glm::vec2 position, int button,
+	bool ctrl, bool shift)
 	{
 		Pending& pending = m_Pending[windowKey];
 		pending.Position = position;
 		pending.Button = std::clamp(button, 0, 2);
+	// 修饰键随这次点击一起注入(两帧都保持),点击结束自然消失。
+	pending.ClickCtrl = ctrl;
+	pending.ClickShift = shift;
 		pending.Phase = 0;
 		pending.FramesLeft = 2;   // press 帧 + release 帧
 		// 同一窗口同时只有一份待注入输入:新的点击丢弃上一份还没注入完的文本。
@@ -133,7 +137,58 @@ namespace World::Wui
 		pending.WheelFrames = 1;
 	}
 
-	void WuiScriptedInput::Apply(const std::string& windowKey, WuiInputState& input)
+	void WuiScriptedInput::BeginFrame()
+{
+	// 新的一帧:上一帧的快照作废(相位已在上一帧推进过,这里不推进)。
+	++m_Serial;
+	m_FrameSnapshots.clear();
+}
+
+// 把本帧待注入的输入写进 `input`(同一帧可被多个消费者各调一次)。语义见头文件。
+void WuiScriptedInput::Apply(const std::string& windowKey, WuiInputState& input)
+{
+	// 没调用过 BeginFrame 的调用方(逐帧 Apply 的单元测试)保持旧语义:一次调用推进一帧。
+	if (m_Serial == 0)
+	{
+		bool pointerPosition = false;
+		AdvancePhase(windowKey, input, pointerPosition);
+		return;
+	}
+	// 本帧第一次读 ⇒ 推进相位并把结果记成快照;同帧后续消费者只读同一份。
+	auto snapshot = m_FrameSnapshots.find(windowKey);
+	if (snapshot == m_FrameSnapshots.end())
+	{
+		FrameInjection injection;
+		AdvancePhase(windowKey, injection.State, injection.PointerPosition);
+		snapshot = m_FrameSnapshots.emplace(windowKey, std::move(injection)).first;
+	}
+	MergeInjection(snapshot->second, input);
+}
+
+// 把一次注入并入调用方状态:指针位置**覆盖**(注入优先),按钮边沿取并集,
+// 按键/文本追加,修饰键与 WantKeyboard 取或 —— 不碰平台轮询写进去的其它字段。
+void WuiScriptedInput::MergeInjection(const FrameInjection& injection, WuiInputState& input)
+{
+	const WuiInputState& source = injection.State;
+	if (injection.PointerPosition)
+		input.MousePos = source.MousePos;
+	for (int button = 0; button < 3; ++button)
+	{
+		input.MouseDown[button] = input.MouseDown[button] || source.MouseDown[button];
+		input.MouseClicked[button] = input.MouseClicked[button] || source.MouseClicked[button];
+		input.MouseReleased[button] = input.MouseReleased[button] || source.MouseReleased[button];
+	}
+	input.Wheel += source.Wheel;
+	input.Ctrl = input.Ctrl || source.Ctrl;
+	input.Shift = input.Shift || source.Shift;
+	input.WantKeyboard = input.WantKeyboard || source.WantKeyboard;
+	input.KeyDown.insert(input.KeyDown.end(), source.KeyDown.begin(), source.KeyDown.end());
+	input.KeyPressed.insert(input.KeyPressed.end(), source.KeyPressed.begin(), source.KeyPressed.end());
+	input.TextInput.insert(input.TextInput.end(), source.TextInput.begin(), source.TextInput.end());
+}
+
+// 推进注入相位一帧(旧的 Apply 语义:一次调用 = 一帧,写进 `out`)。
+void WuiScriptedInput::AdvancePhase(const std::string& windowKey, WuiInputState& input, bool& outPointerPosition)
 	{
 		auto entry = m_Pending.find(windowKey);
 		if (entry == m_Pending.end())
@@ -143,6 +198,7 @@ namespace World::Wui
 		{
 			// 滚轮单独占一帧(位置 + Wheel),不与点击/文本同帧:控件读到的就是普通滚轮输入。
 			input.MousePos = pending.Position;
+			outPointerPosition = true;   // 位置由注入给出(合并时覆盖平台轮询)
 			input.Wheel = pending.Wheel;
 			input.WantKeyboard = true;
 			if (std::getenv("WLD_TRACE_UI"))
@@ -191,7 +247,11 @@ namespace World::Wui
 			// 按键由注入时指定的 button 决定(0 = 左键,1 = 右键):写进对应的下标,
 			// 控件侧走的就是普通鼠标路径。
 			const int button = std::clamp(pending.Button, 0, 2);
+			// 修饰键:与真人按住 Ctrl/Shift 点一下同一口径(面板据此走"加选 / 等比"分支)。
+			input.Ctrl = pending.ClickCtrl;
+			input.Shift = pending.ClickShift;
 			input.MousePos = pending.Position;
+			outPointerPosition = true;   // 位置由注入给出(合并时覆盖平台轮询)
 			input.WantKeyboard = true;
 			if (pending.Phase == 0)
 			{

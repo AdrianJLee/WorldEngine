@@ -99,7 +99,7 @@ namespace World
 		void RedoDocument();
 		void PushDocumentUndo(const std::string& name, const World::UI::UiDocument& before);
 		void RestoreDocument(const World::UI::UiDocument& document);
-		void NoteNodeEdit(const std::string& name);
+		void NoteNodeEdit(const std::string& name, bool batchEdit = false);
 		void CommitNodeEdit();
 		void CancelNodeEdit();
 		void CancelDrag();
@@ -127,6 +127,12 @@ namespace World
 		void ToggleSelected(const std::string& nodeId);
 		void ClearSelection();
 		std::vector<std::string> EffectiveSelection() const;
+		// M37:多选批量改属性 —— `SelectedNodesMutable` 返回全部选中节点(主选中在前);
+		// `SelectionMixedTypes` = 选中的 Type 不一致(混选只改主选中,块头给提示);
+		// `BatchEditActive` = 选中 > 1 且同 Type(属性行的编辑同时写全部选中节点)。
+		std::vector<World::UI::UiNode*> SelectedNodesMutable();
+		bool SelectionMixedTypes() const;
+		bool BatchEditActive() const;
 		bool CanMoveSelected(int direction) const;
 		bool SelectedNodeBox(Wui::WuiRect& out) const;
 		void DrawResizeHandles(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
@@ -182,11 +188,18 @@ namespace World
 		std::string m_PendingEditNodeId;
 		std::string m_PendingEditName;
 		World::UI::UiNode m_PendingEditBefore;
+		// M37:批量编辑(多选同 Type 一次改多个节点)的撤销前像 = **整档快照** ——
+		// 单节点前像盖不住其它被同时改动的选中节点,撤销会把它们留在改后的值上。
+		bool m_PendingEditBatch = false;
+		World::UI::UiDocument m_PendingEditBeforeDoc;
 		World::UI::UiNode m_FrameNodeBefore;   // 属性页每帧起点快照(仅在无待提交编辑时维护)
 		// M25:Bind / On 行的编辑缓冲代次。行缓冲按 `下标` 键进 Persist,所以换节点、
 		// 撤销/重载/新建、以及增删行之后必须 ++ 换代 —— 否则删掉中间一行会让后面几行
 		// 回显上一行的文本。控件 id 不含代次(a11y 树里的 id 稳定、可被 AI 通道寻址)。
 		uint64_t m_RowBufferGen = 0;
+		// M37:属性面板"状态"选择器的当前项(组件登记的 `States` 之一;默认 "default")。
+		// 只影响 Type 块里 `StateScoped` 行的显示(非状态行恒显示);不写文档、不进撤销栈。
+		std::string m_PropState = "default";
 
 		// 画布拖动:Move = 改 Anchor.Offset;Resize = 改 Anchor.Size(拖 8 手柄之一)。
 		enum class CanvasDrag { None, Move, Resize };

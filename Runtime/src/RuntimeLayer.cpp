@@ -181,6 +181,9 @@ namespace World
 	void RuntimeLayer::OnUpdate(Timestep ts)
 	{
 		WLD_TRACE_FUNCTION();
+		// contract.ui-runtime §5:本帧的脚本/AI 注入快照窗口从此帧开始(游戏 UI 采样与 UI 帧
+		// 读同一份,相位每帧只推进一次)。没有待注入事件时是纯计数,零副作用。
+		Wui::WuiScriptedInput::Get().BeginFrame();
 		// 窗口尺寸变化:等尺寸稳定约 0.1s 再重建渲染目标(拖拽缩放时逐帧重建会在 Vulkan 下
 		// 与在飞帧抢资源,和编辑器侧同一套节流策略)。
 		if (m_SceneRenderer)
@@ -219,15 +222,17 @@ namespace World
 			const uint32_t windowWidth = Application::Get().GetWindow().GetWidth();
 			const uint32_t windowHeight = Application::Get().GetWindow().GetHeight();
 			const Wui::WuiInputState uiInput = m_UiInputSampler.Sample(
-				glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)));
+				glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)),
+				m_UiHost.WindowKey());
 			m_Host.SetPointerCaptured(m_UiHost.RouteInput(uiInput));
 			// GameUI(M26):命令出口 = `UiCommandRouter` → `EventBus`(`UiCommandEvent`)——
 			// 项目 Lua/C++ 系统订阅它即可响应(这才是"UI → 逻辑"的出口),引擎不发明玩法语义。
-			// Runtime 没有 `UiNavigator`(页面栈/模态归项目)⇒ navigator 传空,命令只进总线。
+			// M39:把宿主持有的 `UiNavigator` 交给 router ⇒ `ui.close`(有模态先关模态、否则出栈)
+			// 与 `ui.back` 真的导航(不再只发事件);没有页面时栈为空 = 纯 no-op。
 			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
 			{
 				const UI::UiCommandDispatchResult dispatched =
-					UI::UiCommandRouter::Dispatch(m_UiHost.Commands(), app->Events());
+					UI::UiCommandRouter::Dispatch(m_UiHost.Commands(), app->Events(), &m_UiHost.Navigator());
 				// 保留一条 debug 日志(只有真有命令时打,避免每帧刷屏)。
 				if (dispatched.Dispatched > 0)
 					WLD_CORE_TRACE("[ui] {0} command(s) -> UiCommandEvent on the EventBus ({1} navigation)",
@@ -294,7 +299,10 @@ namespace World
 			// 开发钩子:脚本点击注入 → 本窗口输入状态。必须在 BeginFrame 之后、控件绘制之前,
 			// 走的是和鼠标同一条输入路径(不是测试专用分支)。
 			ApplyDevUiActions();
-			Wui::WuiScriptedInput::Get().Apply("main", input);
+			// contract.ui-runtime §5:脚本/AI 注入走**和鼠标同一条输入路径**。本帧的快照已经在
+			// 游戏 UI 的输入采样(`UiPlatformInputSampler::Sample`)里推进过一次;这里读**同一份**
+			// 快照 ⇒ 两边看到同一次点击,而注入相位每帧只推进一次(见 WuiScriptedInput::BeginFrame)。
+			Wui::WuiScriptedInput::Get().Apply(m_UiHost.WindowKey(), input);
 			wuiContext.BeginFrame(input);
 			// 场景全屏显示:离屏颜色附件作为图像画进呈现目标,HUD 随后叠画。
 			if (m_SceneTextureId)

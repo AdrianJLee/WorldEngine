@@ -17,8 +17,11 @@
 //       避免依赖文件系统时间戳粒度(判据是大小 ⊕ mtime,任一变即脏)。
 
 #include "World/Core/KeyCodes.h"
+#include "World/Gameplay/Framework/EventBus.h"
+#include "World/UI/UiCommandRouter.h"
 #include "World/UI/UiHost.h"
 #include "World/UI/UiInputRouter.h"
+#include "World/UI/UiNavigator.h"
 #include "World/UI/UiScreen.h"
 #include "World/UI/UiTypes.h"
 #include "World/WUI/WuiContext.h"
@@ -34,6 +37,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -221,6 +225,83 @@ Nodes:
           Size: [200, 60]
 )YAML";
 
+	// ---- M39 页面栈夹具(与主文档同一 `.wui` 口径,写在同一个 `ui/` 下)----
+	//
+	// 每页 = 一个 Label(文本是断言对象)+ 一个 Button(`On: { Click: ui.close }`,用来跑
+	// "命令真的导航")。`kDocPageBReloaded` 与 `kDocPageB` 同形、只换文本(大小必然不同 ⇒
+	// size ⊕ mtime 判据成立),证明重载**重读了页面文档**而不只是恢复了栈的形状。
+	// 注意:主文档仍是 `ui/HUD.wui`(`ResolveDocumentPath` 取目录里字典序第一个 `.wui`,
+	// "HUD.wui" < "ModalC.wui" < "PageA.wui");页面/模态文档只经 `WLD_UI_PAGE` /
+	// `WLD_UI_MODAL` 的显式路径加载。
+	const char* kDocPageA = R"YAML(FormatVersion: 1
+Screen: PageA
+Design:
+  Resolution: [1920, 1080]
+  ScaleMode: ConstantPixelSize
+Nodes:
+  - Id: page_root
+    Type: Panel
+    Anchor: { Min: [0, 0], Max: [1, 1], Pivot: [0.5, 0.5], Offset: [0, 0], Size: [0, 0] }
+    Children:
+      - Id: page_label
+        Type: Label
+        Props: { text: PageABody }
+        Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [0, 0], Size: [400, 60] }
+      - Id: page_close
+        Type: Button
+        Props: { label: ClosePageA }
+        On: { Click: ui.close }
+        Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [0, 200], Size: [200, 60] }
+)YAML";
+
+	const char* kDocPageB = R"YAML(FormatVersion: 1
+Screen: PageB
+Design:
+  Resolution: [1920, 1080]
+  ScaleMode: ConstantPixelSize
+Nodes:
+  - Id: page_root
+    Type: Panel
+    Anchor: { Min: [0, 0], Max: [1, 1], Pivot: [0.5, 0.5], Offset: [0, 0], Size: [0, 0] }
+    Children:
+      - Id: page_label
+        Type: Label
+        Props: { text: PageBBody }
+        Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [0, 0], Size: [400, 60] }
+)YAML";
+
+	const char* kDocPageBReloaded = R"YAML(FormatVersion: 1
+Screen: PageB
+Design:
+  Resolution: [1920, 1080]
+  ScaleMode: ConstantPixelSize
+Nodes:
+  - Id: page_root
+    Type: Panel
+    Anchor: { Min: [0, 0], Max: [1, 1], Pivot: [0.5, 0.5], Offset: [0, 0], Size: [0, 0] }
+    Children:
+      - Id: page_label
+        Type: Label
+        Props: { text: PageBReloaded }
+        Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [0, 0], Size: [400, 60] }
+)YAML";
+
+	const char* kDocModalC = R"YAML(FormatVersion: 1
+Screen: ModalC
+Design:
+  Resolution: [1920, 1080]
+  ScaleMode: ConstantPixelSize
+Nodes:
+  - Id: modal_root
+    Type: Panel
+    Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [400, 300], Size: [600, 400] }
+    Children:
+      - Id: modal_label
+        Type: Label
+        Props: { text: ModalCBody }
+        Anchor: { Min: [0, 0], Max: [0, 0], Pivot: [0, 0], Offset: [0, 0], Size: [400, 60] }
+)YAML";
+
 	// ---- 临时内容根:一个 `ui/HUD.wui`(`ResolveDocumentPath` 的兜底路径 = `<内容根>/ui/*.wui`)----
 
 	class TempUiProject
@@ -248,19 +329,29 @@ Nodes:
 
 		const std::filesystem::path& Root() const { return m_Root; }
 		std::filesystem::path Document() const { return m_Root / "ui" / "HUD.wui"; }
+		// M39:页面/模态夹具文档(与主文档同一个 `ui/` 目录 ⇒ 内容根口径一致)。
+		std::filesystem::path PageADocument() const { return m_Root / "ui" / "PageA.wui"; }
+		std::filesystem::path PageBDocument() const { return m_Root / "ui" / "PageB.wui"; }
+		std::filesystem::path ModalCDocument() const { return m_Root / "ui" / "ModalC.wui"; }
 
 		// 写盘,并断言**文件戳真的变了**(大小必须不同):判据是 大小 ⊕ mtime,
 		// 只写同尺寸内容会依赖文件系统时间戳粒度 ⇒ 这里从根上避免 flaky。
 		void Write(const std::string& text, int line)
 		{
+			WriteDocumentFile(Document(), text, line);
+		}
+
+		// 任意文档写盘(同一"戳必须变"断言;M39 的页面/模态夹具用它)。
+		void WriteDocumentFile(const std::filesystem::path& path, const std::string& text, int line)
+		{
 			std::error_code error;
-			const std::uintmax_t sizeBefore = std::filesystem::file_size(Document(), error);
+			const std::uintmax_t sizeBefore = std::filesystem::file_size(path, error);
 			// error 非空 = 文件还不存在(首次写),sizeBefore 记 0,不影响下面的"必须变大"断言。
 			{
-				std::ofstream file(Document(), std::ios::binary | std::ios::trunc);
+				std::ofstream file(path, std::ios::binary | std::ios::trunc);
 				file << text;
 			}
-			const std::uintmax_t sizeAfter = std::filesystem::file_size(Document(), error);
+			const std::uintmax_t sizeAfter = std::filesystem::file_size(path, error);
 			Check(!error && sizeAfter == text.size() && sizeAfter != sizeBefore,
 				"hot-reload fixture write must change the file stamp (size)", line);
 		}
@@ -306,13 +397,62 @@ Nodes:
 		return false;
 	}
 
-	std::string PropValue(const UiHost& host, std::string_view nodeId, std::string_view propName)
+	// `PropValue` 的屏幕版:页面栈里的页由 `UiPage::Screen`(const)给出。
+	std::string ScreenPropValue(const UiScreen& screen, std::string_view nodeId, std::string_view propName)
 	{
-		const UiNodeInstance* node = host.Screen().Find(nodeId);
+		const UiNodeInstance* node = screen.Find(nodeId);
 		if (node == nullptr || node->Source == nullptr)
 			return "<no node>";
 		const UiProp* prop = node->Source->FindProp(propName);
 		return prop != nullptr ? prop->Value : std::string("<no prop>");
+	}
+
+	std::string PropValue(const UiHost& host, std::string_view nodeId, std::string_view propName)
+	{
+		return ScreenPropValue(host.Screen(), nodeId, propName);
+	}
+
+	// 命令流快照(单屏用例用来断言"重载前后逐字节一致")。用显式 `MainCommands()`,
+	// 结论不受 overlay 深度影响。
+	std::string DescribeCommands(Wui::WuiContext& ctx)
+	{
+		std::string description;
+		for (const Wui::WuiDrawCommand& command : ctx.MainCommands())
+		{
+			char buffer[96] = {};
+			std::snprintf(buffer, sizeof(buffer), "%d [%.1f,%.1f,%.1f,%.1f] ",
+				static_cast<int>(command.Kind), command.Rect.X, command.Rect.Y,
+				command.Rect.W, command.Rect.H);
+			description += buffer;
+			description += command.Text;
+			description += '\n';
+		}
+		return description;
+	}
+
+	// 命令流里首次出现该文本的下标(层序断言用);没有 = -1。
+	int CommandIndex(Wui::WuiContext& ctx, const std::string& text)
+	{
+		const std::vector<Wui::WuiDrawCommand>& commands = ctx.Commands();
+		for (std::size_t index = 0; index < commands.size(); ++index)
+		{
+			if (commands[index].Text == text)
+				return static_cast<int>(index);
+		}
+		return -1;
+	}
+
+	// 设置 / 清空宿主会读的开发开关(与 `main()` 的 `_putenv_s` 同一口径)。
+	void SetHostEnv(const char* name, const std::string& value)
+	{
+#if defined(_WIN32)
+		_putenv_s(name, value.c_str());
+#else
+		if (value.empty())
+			unsetenv(name);
+		else
+			setenv(name, value.c_str(), 1);
+#endif
 	}
 
 	// ---- ① 改盘 → 重载生效 ----
@@ -467,6 +607,104 @@ Nodes:
 
 		std::filesystem::remove_all(emptyRoot, error);
 	}
+
+	// ---- ⑤ 页面栈(M39):按层序绘制 + 命令真的导航 + 热重载迁移栈 ----
+
+	void TestPageStackDrawingNavigationAndReload()
+	{
+		TempUiProject project(kDocAlpha);
+		const std::filesystem::path pageA = project.PageADocument();
+		const std::filesystem::path pageB = project.PageBDocument();
+		const std::filesystem::path modalC = project.ModalCDocument();
+		project.WriteDocumentFile(pageA, kDocPageA, __LINE__);
+		project.WriteDocumentFile(pageB, kDocPageB, __LINE__);
+		project.WriteDocumentFile(modalC, kDocModalC, __LINE__);
+
+		// 开发开关注入页面栈:两页(栈底 PageA → 栈顶 PageB)+ 一个模态(ModalC)。
+		SetHostEnv("WLD_UI_PAGE", pageA.string() + ";" + pageB.string());
+		SetHostEnv("WLD_UI_MODAL", modalC.string());
+
+		UiHost host;
+		host.Initialize(project.Root());
+		CHECK(host.Enabled());
+		CHECK(host.Navigator().Count() == 2);
+		CHECK(host.Navigator().ModalCount() == 1);
+		CHECK_STR(host.Navigator().Stack()[0].Name, "PageA");
+		CHECK_STR(host.Navigator().Stack()[1].Name, "PageB");
+		CHECK_STR(host.Navigator().Top()->Name, "PageB");
+
+		// 按层序绘制:页面层(底→顶)先画、模态层后画;栈非空 ⇒ 不再画单屏 `m_Screen`。
+		Wui::WuiContext ctx;
+		DrawOneFrame(host, ctx);
+		CHECK(HasTextCommand(ctx, "PageABody"));
+		CHECK(HasTextCommand(ctx, "PageBBody"));
+		CHECK(HasTextCommand(ctx, "ModalCBody"));
+		CHECK(!HasTextCommand(ctx, "Alpha"));
+		CHECK(CommandIndex(ctx, "PageBBody") > CommandIndex(ctx, "PageABody"));
+		CHECK(CommandIndex(ctx, "ModalCBody") > CommandIndex(ctx, "PageBBody"));
+
+		// 页面文档改盘 ⇒ 同样判脏(M39 逐页文件戳);重载后**栈深与顶层不变**,页面内容是新的。
+		const UI::UiScreen* topScreenBefore = host.Navigator().Top()->Screen;
+		CHECK_STR(ScreenPropValue(*topScreenBefore, "page_label", "text"), "PageBBody");
+		project.WriteDocumentFile(pageB, kDocPageBReloaded, __LINE__);
+		host.PollDocumentChanges();
+		CHECK_STR(host.LastReloadError(), "");
+		CHECK(host.Navigator().Count() == 2);                       // 仍是两页
+		CHECK(host.Navigator().ModalCount() == 1);                  // 模态也没丢
+		CHECK_STR(host.Navigator().Stack()[0].Name, "PageA");
+		CHECK_STR(host.Navigator().Top()->Name, "PageB");           // 顶层不变
+		CHECK(host.Navigator().Top()->Screen == topScreenBefore);   // 屏幕身份不变(就地重读)
+		CHECK_STR(ScreenPropValue(*host.Navigator().Top()->Screen, "page_label", "text"), "PageBReloaded");
+		DrawOneFrame(host, ctx);
+		CHECK(HasTextCommand(ctx, "PageBReloaded"));
+		CHECK(!HasTextCommand(ctx, "PageBBody"));
+
+		// 命令真的导航(两个宿主把 `&Navigator()` 交给 `UiCommandRouter::Dispatch`)。
+		Gameplay::EventBus events;
+		std::size_t received = 0;
+		events.Subscribe<UiCommandEvent>([&received](const UiCommandEvent&) { ++received; });
+		UiCommandQueue close;
+		close.Push(UiInputCommand { "page_close", "Click", "ui.close", std::string() });
+		CHECK(UiCommandRouter::Dispatch(close, events, &host.Navigator()).Navigations == 1);
+		CHECK(host.Navigator().ModalCount() == 0);                  // 有模态 ⇒ 先关模态(栈不动)
+		CHECK(host.Navigator().Count() == 2);
+		CHECK(UiCommandRouter::Dispatch(close, events, &host.Navigator()).Navigations == 1);
+		CHECK(host.Navigator().Count() == 1);                       // 模态没了 ⇒ 出栈
+		CHECK_STR(host.Navigator().Top()->Name, "PageA");
+		CHECK(events.DispatchPending() == 2);                       // 命令照常进总线(UI → 逻辑无损)
+		CHECK(received == 2);
+
+		// 单屏(没有 push 过):重载必须是 no-op —— 栈仍为空,画面逐字节一致。
+		SetHostEnv("WLD_UI_PAGE", "");
+		SetHostEnv("WLD_UI_MODAL", "");
+		{
+			UiHost single;
+			single.Initialize(project.Root());
+			CHECK(single.Enabled());
+			CHECK(single.Navigator().Empty());
+			CHECK(single.Navigator().Count() == 0);
+			CHECK(single.Navigator().ModalCount() == 0);
+
+			Wui::WuiContext singleContext;
+			DrawOneFrame(single, singleContext);
+			const std::string before = DescribeCommands(singleContext);
+
+			// 只多一条 YAML 注释:实例树不变、文件大小变(判据 大小 ⊕ mtime 成立)⇒ 真的重载了。
+			project.Write(std::string(kDocAlpha) + "\n# M39: reload no-op probe\n", __LINE__);
+			single.PollDocumentChanges();
+			CHECK_STR(single.LastReloadError(), "");
+			CHECK(single.Navigator().Empty());                      // 单屏没有被变成空栈/多页
+			CHECK(single.Navigator().Count() == 0);
+			CHECK(single.Navigator().ModalCount() == 0);
+
+			DrawOneFrame(single, singleContext);
+			CHECK_STR(DescribeCommands(singleContext), before);     // 单屏退化:重载前后逐字节一致
+			std::printf("  [ok] single screen: reload kept the stack empty and the frame byte-identical\n");
+		}
+
+		std::printf("  [ok] page stack: 2 pages + 1 modal drawn by layer, ui.close closed the modal then popped, "
+			"reload kept depth/top and re-read the page document\n");
+	}
 }
 
 int main()
@@ -475,6 +713,9 @@ int main()
 	// 夹具走"内容根 `ui/*.wui`"这条发布路径:清掉开发开关,避免机器上恰好设了 WLD_UI_DOC
 	// 时测试指向别的文件(空值 = 未设置,`ResolveDocumentPath` 会回退内容根)。
 	_putenv_s("WLD_UI_DOC", "");
+	// M39:页面栈开关同理(机器上恰好设了 WLD_UI_PAGE 会把页面压进栈,影响"单屏"用例)。
+	_putenv_s("WLD_UI_PAGE", "");
+	_putenv_s("WLD_UI_MODAL", "");
 #endif
 
 	try
@@ -483,6 +724,7 @@ int main()
 		TestBadFileKeepsPreviousVersion();
 		TestRuntimeStateMigratesById();
 		TestDisabledHostIsInert();
+		TestPageStackDrawingNavigationAndReload();
 	}
 	catch (const std::exception& e)
 	{

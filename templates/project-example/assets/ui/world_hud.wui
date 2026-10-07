@@ -21,7 +21,7 @@ Tokens:
 Parameters:
   - Name: BossName
     Type: Text
-    Default: "@world.boss.name"
+    Default: "@world.boss.name|Stone Warden"
 Nodes:
   - Id: root
     Type: Panel
@@ -44,7 +44,7 @@ Nodes:
           - Id: bossName
             Type: Label
             Props:
-              text: "@world.boss.name"
+              text: "@world.boss.name|Stone Warden"
               color: "$label.text"
               fontSize: "15"
             Anchor: { Min: [0, 0], Max: [1, 0], Pivot: [0, 0], Size: [0, 20] }
@@ -55,14 +55,14 @@ Nodes:
               trackColor: "$hp.track"
               fill: "$hp.fill"
               fillColor: "$hp.fill"
-              label: "@world.boss.hp"
+              label: "@world.boss.hp|Health"
               value: "0.62"
               max: "1"
             Anchor: { Min: [0, 0], Max: [1, 0], Pivot: [0, 0], Size: [0, 14] }
       - Id: hint
         Type: Label
         Props:
-          text: "@world.hint"
+          text: "@world.hint|World-space anchor: the plate stays pinned to the entity"
           color: "$label.text"
           fontSize: "13"
         Anchor: { Min: [0.5, 1], Max: [0.5, 1], Pivot: [0.5, 1], Offset: [0, -16], Size: [420, 20] }

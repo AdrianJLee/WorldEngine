@@ -7,6 +7,7 @@
 #include "World/Gameplay/Framework/SaveService.h"
 #include "World/Gameplay/Runtime/GameApp.h"
 #include "World/Schema/Schema.h"
+#include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
 #include "World/UI/UiBinding.h"
@@ -23,7 +24,8 @@
 #include <variant>
 #include <vector>
 
-// `ecs:` / `service:` 解析器(工作包 M26)。数据源 = `UiBindingContext`(见头文件)。
+// `ecs:` / `service:` / `script:` 解析器。前两者 = 工作包 M26,数据源 = `UiBindingContext`(见头文件);
+// `script:` = M38,数据源 = `ScriptEngine`(只读查询口 `ReadScriptValue`,无 VM 时给可读 error)。
 //
 // `service:` 支持的只读查询(其余 = false + 可读 error;报告里列出未接的):
 //   * `service:input.<action>`      → 动作是否按下("1"/"0",`InputService::ActionDown`)
@@ -412,6 +414,19 @@ namespace
 			"' (supported: input.<action>, input.axis.<axis>, input.players, level.state, level.loading, "
 			"level.primary, level.pending, level.error, save.exists, save.global.<key>)");
 	}
+
+	// `RegisterScriptBindingResolver` 登记的 `script:` 解析器(M38)。源 = `script:<路径>.<字段>`,
+	// `UiBinding::Parse` 已按最后一个 '.' 切成 Parts = [路径, 字段]。求值**只读**:
+	// 走 `ScriptEngine::ReadScriptValue`(load 脚本模块 + 读返回表字段 → 属性文本协议)。
+	// 失败(VM 未初始化 / 路径不存在 / 字段不存在 / 值不可转文本)⇒ false + 可读 error。
+	bool ResolveScriptBinding(const World::UI::UiBindingSource& source, void* /*context*/,
+		std::string& out, std::string* error)
+	{
+		if (source.Parts.size() != 2)
+			return Fail(error, "script binding '" + source.Text +
+				"': expected 'script:<path>.<field>' (a script path and a field name)");
+		return World::ScriptEngine::ReadScriptValue(source.Parts[0], source.Parts[1], out, error);
+	}
 }
 
 namespace World::UI
@@ -428,9 +443,16 @@ namespace World::UI
 		UiBinding::RegisterResolver("service", &ResolveServiceBinding);
 	}
 
+	void RegisterScriptBindingResolver()
+	{
+		// 同名重复注册 = 覆盖 ⇒ 幂等;默认实现固定接 ScriptEngine(无 VM ⇒ 可读 error)。
+		UiBinding::RegisterResolver("script", &ResolveScriptBinding);
+	}
+
 	void RegisterBuiltinBindingSources(Gameplay::GameApp* app)
 	{
 		RegisterEcsBindingResolver();
+		RegisterScriptBindingResolver();
 		// service 解析器总是注册:没有会话时返回可读 error("needs an active GameApp session"),
 		// 比"no resolver registered"更能说明问题。`app == nullptr` = 清掉上次登记的回退源。
 		g_ServiceApp = app;

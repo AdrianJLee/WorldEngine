@@ -1155,7 +1155,11 @@ namespace World
 				button = std::atoi(arg("button").c_str());
 			if (button < 0 || button > 2)
 				button = 0;
-			Wui::WuiScriptedInput::Get().QueueClick(node->Window, center, button);
+			// 可选 ctrl/shift:这一次点击期间按住修饰键 —— 面板的 Ctrl+点击 = 加选(多选)、
+			// Shift+点击 = 等比/范围 只能靠它驱动(AI 无障碍操作多选的前提)。
+			const bool ctrl = args.count("ctrl") && arg("ctrl") == "1";
+			const bool shift = args.count("shift") && arg("shift") == "1";
+			Wui::WuiScriptedInput::Get().QueueClick(node->Window, center, button, ctrl, shift);
 			result = "queued " + node->Kind + " '" + node->Label + "' at ("
 				+ std::to_string(static_cast<int>(center.x)) + "," + std::to_string(static_cast<int>(center.y))
 				+ ") window=" + node->Window;

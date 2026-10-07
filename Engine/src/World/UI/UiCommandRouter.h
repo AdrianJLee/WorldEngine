@@ -12,9 +12,11 @@
 // ⇒ 命令只进总线(`Dispatch` 的 `navigator` 传空,报告里已记录)。
 //
 // 载荷口径:`EventBus::EmitDeferred` 按 `sizeof(T)` 字节复制(见 `EventBus.h`)⇒ `UiCommandEvent`
-// 必须是**平凡可拷贝的定长结构**;节点 / 事件 / 命令超长按字节截断(容量见下面常量)。
-// 注意:`UiInputCommand::Value`(M13 滑条/文本域的值)**不在**本事件载荷内(派工单口径
-// 为 `{NodeId, Event, Command}`);需要值的项目应在后续工作包里扩展载荷。
+// 必须是**平凡可拷贝的定长结构**;节点 / 事件 / 命令 / 值超长按字节截断(容量见下面常量)。
+// M38:`UiInputCommand::Value`(M13 滑条/文本域的值)现在**原样**进载荷 —— 追加在既有字段之后,
+// 保持 `{NodeId, Event, Command}` 的顺序,既有聚合初始化 / 既有订阅者不受影响。
+// 定长 `char[N]`(而非 std::string)是 `EventBus::EmitDeferred` 字节复制与
+// `is_trivially_copyable` 断言的硬约束,不是风格选择。
 
 #include "World/Core/Export.h"
 #include "World/UI/UiInputRouter.h"
@@ -33,6 +35,8 @@ namespace World::UI
 	inline constexpr std::size_t kUiCommandEventNodeIdCapacity = 64;
 	inline constexpr std::size_t kUiCommandEventEventCapacity = 32;
 	inline constexpr std::size_t kUiCommandEventCommandCapacity = 128;
+	// M38:值载荷容量。滑条值 = "%.3f"(短);文本域 Commit 是 UTF-8 文本,128 与命令同量级。
+	inline constexpr std::size_t kUiCommandEventValueCapacity = 128;
 
 	// 一条 UI 命令的总线载荷(值盒装;`EventBus::Subscribe<UiCommandEvent>` 反序列化同形值)。
 	struct UiCommandEvent
@@ -40,6 +44,7 @@ namespace World::UI
 		char NodeId[kUiCommandEventNodeIdCapacity] {};
 		char Event[kUiCommandEventEventCapacity] {};
 		char Command[kUiCommandEventCommandCapacity] {};
+		char Value[kUiCommandEventValueCapacity] {};
 	};
 
 	static_assert(std::is_trivially_copyable_v<UiCommandEvent>,
@@ -49,7 +54,8 @@ namespace World::UI
 	// (docs/dev/performance-and-data-layout.md §4.3 门禁形态;现有 `PhysicsEvents.h` 的
 	// EventBus 载荷尚未补,这里按新结构先落地)。
 	static_assert(sizeof(UiCommandEvent) ==
-		kUiCommandEventNodeIdCapacity + kUiCommandEventEventCapacity + kUiCommandEventCommandCapacity,
+		kUiCommandEventNodeIdCapacity + kUiCommandEventEventCapacity + kUiCommandEventCommandCapacity +
+			kUiCommandEventValueCapacity,
 		"UiCommandEvent size drift");
 	static_assert(offsetof(UiCommandEvent, NodeId) == 0, "UiCommandEvent.NodeId offset drift");
 	static_assert(offsetof(UiCommandEvent, Event) == kUiCommandEventNodeIdCapacity,
@@ -57,6 +63,9 @@ namespace World::UI
 	static_assert(offsetof(UiCommandEvent, Command) ==
 		kUiCommandEventNodeIdCapacity + kUiCommandEventEventCapacity,
 		"UiCommandEvent.Command offset drift");
+	static_assert(offsetof(UiCommandEvent, Value) ==
+		kUiCommandEventNodeIdCapacity + kUiCommandEventEventCapacity + kUiCommandEventCommandCapacity,
+		"UiCommandEvent.Value offset drift");
 
 	struct UiCommandDispatchResult
 	{
