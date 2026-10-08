@@ -46,6 +46,92 @@ namespace World::Gameplay
 		}
 	}
 
+	
+	namespace
+	{
+		InputModifier ParseModifier(const YAML::Node& node)
+		{
+			InputModifier m;
+			std::string type = node["type"] ? node["type"].as<std::string>() : "deadzone";
+			if (type == "deadzone")
+			{
+				m.Type = ModifierType::DeadZone;
+				if (node["lower"]) m.LowerThreshold = node["lower"].as<float>();
+				if (node["upper"]) m.UpperThreshold = node["upper"].as<float>();
+				if (node["radial"]) m.Radial = node["radial"].as<bool>();
+			}
+			else if (type == "invert")
+			{
+				m.Type = ModifierType::Invert;
+				if (node["x"]) m.InvertX = node["x"].as<bool>();
+				if (node["y"]) m.InvertY = node["y"].as<bool>();
+				if (node["z"]) m.InvertZ = node["z"].as<bool>();
+			}
+			else if (type == "scale")
+			{
+				m.Type = ModifierType::Scale;
+				if (node["factor"]) m.Scalar = glm::vec3(node["factor"].as<float>());
+			}
+			else if (type == "response_curve")
+			{
+				m.Type = ModifierType::ResponseCurve;
+				if (node["exponent"]) m.Exponent = node["exponent"].as<float>();
+			}
+			else if (type == "swizzle")
+			{
+				m.Type = ModifierType::Swizzle;
+				if (node["order"] && node["order"].IsSequence() && node["order"].size() >= 2)
+				{
+					m.SwizzleOrder[0] = node["order"][0].as<int>();
+					m.SwizzleOrder[1] = node["order"][1].as<int>();
+					if (node["order"].size() >= 3) m.SwizzleOrder[2] = node["order"][2].as<int>();
+				}
+			}
+			else if (type == "normalize")
+			{
+				m.Type = ModifierType::Normalize;
+				if (node["max"]) m.MaxLength = node["max"].as<float>();
+			}
+			return m;
+		}
+
+		InputTrigger ParseTrigger(const YAML::Node& node)
+		{
+			InputTrigger t;
+			std::string type = node["type"] ? node["type"].as<std::string>() : "pressed";
+			if (type == "pressed") t.Type = TriggerType::Pressed;
+			else if (type == "released") t.Type = TriggerType::Released;
+			else if (type == "hold")
+			{
+				t.Type = TriggerType::Hold;
+				if (node["duration"]) t.Duration = node["duration"].as<float>();
+			}
+			else if (type == "tap")
+			{
+				t.Type = TriggerType::Tap;
+				if (node["duration"]) t.Duration = node["duration"].as<float>();
+			}
+			else if (type == "double_tap")
+			{
+				t.Type = TriggerType::DoubleTap;
+				if (node["interval"]) t.Interval = node["interval"].as<float>();
+				if (node["duration"]) t.Duration = node["duration"].as<float>();
+			}
+			else if (type == "pulse")
+			{
+				t.Type = TriggerType::Pulse;
+				if (node["interval"]) t.Interval = node["interval"].as<float>();
+			}
+			else if (type == "chord")
+			{
+				t.Type = TriggerType::Chord;
+				if (node["chord_action"]) t.ChordAction = StringPool::Get().InternName(node["chord_action"].as<std::string>());
+			}
+			if (node["threshold"]) t.ActuationThreshold = node["threshold"].as<float>();
+			return t;
+		}
+	}
+
 	bool InputMap::Load(const std::filesystem::path& path, InputMap* out, std::string* error)
 	{
 		if (!out)
@@ -59,47 +145,111 @@ namespace World::Gameplay
 		{
 			const YAML::Node root = YAML::LoadFile(path.string());
 			InputMap parsed;
-			for (const YAML::Node& entry : root["actions"])
-			{
-				InputAction action;
-				if (entry["name"]) action.Name = entry["name"].as<std::string>();
-				if (action.Name.empty())
-				{
-					if (error) *error = "input action requires a name: " + path.string();
-					return false;
-				}
-				action.Id = StringPool::Get().InternName(action.Name);
-				for (const YAML::Node& binding : entry["bindings"])
-				{
-					InputBinding parsedBinding;
-					if (binding["device"]) parsedBinding.Device = ParseDevice(binding["device"].as<std::string>());
-					if (binding["code"]) parsedBinding.Code = binding["code"].as<int>();
-					if (binding["slot"]) parsedBinding.DeviceIndex = static_cast<uint8_t>(binding["slot"].as<int>());
-					action.Bindings.push_back(parsedBinding);
-				}
-				parsed.m_Actions.push_back(std::move(action));
-			}
-			for (const YAML::Node& entry : root["axes"])
-			{
-				InputAxis axis;
-				if (entry["name"]) axis.Name = entry["name"].as<std::string>();
-				if (entry["positive"]) axis.PositiveAction = entry["positive"].as<std::string>();
-				if (entry["negative"]) axis.NegativeAction = entry["negative"].as<std::string>();
-				if (entry["gamepad"]) axis.GamepadAxis = entry["gamepad"].as<std::string>();
-				if (entry["deadzone"]) axis.DeadZone = entry["deadzone"].as<float>();
-				if (axis.Name.empty())
-				{
-					if (error) *error = "input axis requires a name: " + path.string();
-					return false;
-				}
-				axis.Id = StringPool::Get().InternName(axis.Name);
-				if (!axis.PositiveAction.empty())
-					axis.PositiveActionId = StringPool::Get().InternName(axis.PositiveAction);
-				if (!axis.NegativeAction.empty())
-					axis.NegativeActionId = StringPool::Get().InternName(axis.NegativeAction);
 
-				parsed.m_Axes.push_back(std::move(axis));
+			// 1. 读取基础 actions
+			if (root["actions"])
+			{
+				for (const YAML::Node& entry : root["actions"])
+				{
+					InputAction action;
+					if (entry["name"]) action.Name = entry["name"].as<std::string>();
+					if (action.Name.empty())
+					{
+						if (error) *error = "input action requires a name: " + path.string();
+						return false;
+					}
+					action.Id = StringPool::Get().InternName(action.Name);
+					if (entry["type"])
+					{
+						std::string typeStr = entry["type"].as<std::string>();
+						if (typeStr == "axis1d") action.ValueType = InputActionValueType::Axis1D;
+						else if (typeStr == "axis2d") action.ValueType = InputActionValueType::Axis2D;
+						else if (typeStr == "axis3d") action.ValueType = InputActionValueType::Axis3D;
+						else action.ValueType = InputActionValueType::Button;
+					}
+					for (const YAML::Node& binding : entry["bindings"])
+					{
+						InputBinding parsedBinding;
+						if (binding["device"]) parsedBinding.Device = ParseDevice(binding["device"].as<std::string>());
+						if (binding["code"]) parsedBinding.Code = binding["code"].as<int>();
+						if (binding["slot"]) parsedBinding.DeviceIndex = static_cast<uint8_t>(binding["slot"].as<int>());
+						action.Bindings.push_back(parsedBinding);
+					}
+					parsed.m_Actions.push_back(std::move(action));
+				}
 			}
+
+			// 2. 读取基础 axes
+			if (root["axes"])
+			{
+				for (const YAML::Node& entry : root["axes"])
+				{
+					InputAxis axis;
+					if (entry["name"]) axis.Name = entry["name"].as<std::string>();
+					if (entry["positive"]) axis.PositiveAction = entry["positive"].as<std::string>();
+					if (entry["negative"]) axis.NegativeAction = entry["negative"].as<std::string>();
+					if (entry["gamepad"]) axis.GamepadAxis = entry["gamepad"].as<std::string>();
+					if (entry["deadzone"]) axis.DeadZone = entry["deadzone"].as<float>();
+					if (axis.Name.empty())
+					{
+						if (error) *error = "input axis requires a name: " + path.string();
+						return false;
+					}
+					axis.Id = StringPool::Get().InternName(axis.Name);
+					if (!axis.PositiveAction.empty())
+						axis.PositiveActionId = StringPool::Get().InternName(axis.PositiveAction);
+					if (!axis.NegativeAction.empty())
+						axis.NegativeActionId = StringPool::Get().InternName(axis.NegativeAction);
+
+					parsed.m_Axes.push_back(std::move(axis));
+				}
+			}
+
+			// 3. 读取 v2 contexts (Mapping Contexts + Modifiers + Triggers)
+			if (root["contexts"])
+			{
+				for (const YAML::Node& ctxNode : root["contexts"])
+				{
+					std::string ctxName = ctxNode["name"] ? ctxNode["name"].as<std::string>() : "Default";
+					int32_t priority = ctxNode["priority"] ? ctxNode["priority"].as<int32_t>() : 0;
+					bool consume = ctxNode["consume"] ? ctxNode["consume"].as<bool>() : true;
+
+					InputMappingContext ctx(ctxName, priority, consume);
+					if (ctxNode["mappings"])
+					{
+						for (const YAML::Node& mNode : ctxNode["mappings"])
+						{
+							ActionBindingConfig config;
+							if (mNode["action"]) config.ActionName = mNode["action"].as<std::string>();
+							config.Action = StringPool::Get().InternName(config.ActionName);
+
+							if (mNode["binding"])
+							{
+								const auto& bNode = mNode["binding"];
+								if (bNode["device"]) config.Binding.Device = ParseDevice(bNode["device"].as<std::string>());
+								if (bNode["code"]) config.Binding.Code = bNode["code"].as<int>();
+								if (bNode["slot"]) config.Binding.DeviceIndex = static_cast<uint8_t>(bNode["slot"].as<int>());
+							}
+
+							if (mNode["modifiers"])
+							{
+								for (const YAML::Node& modNode : mNode["modifiers"])
+									config.Modifiers.push_back(ParseModifier(modNode));
+							}
+
+							if (mNode["triggers"])
+							{
+								for (const YAML::Node& trigNode : mNode["triggers"])
+									config.Triggers.push_back(ParseTrigger(trigNode));
+							}
+
+							ctx.AddMapping(std::move(config));
+						}
+					}
+					parsed.m_Contexts.push_back(std::move(ctx));
+				}
+			}
+
 			parsed.RebuildIndices();
 			*out = std::move(parsed);
 			if (error) error->clear();
@@ -118,11 +268,14 @@ namespace World::Gameplay
 		{
 			YAML::Emitter out;
 			out << YAML::BeginMap;
+			out << YAML::Key << "version" << YAML::Value << 2;
+
 			out << YAML::Key << "actions" << YAML::Value << YAML::BeginSeq;
 			for (const InputAction& action : map.Actions())
 			{
 				out << YAML::BeginMap;
 				out << YAML::Key << "name" << YAML::Value << action.Name;
+				out << YAML::Key << "type" << YAML::Value << static_cast<int>(action.ValueType);
 				out << YAML::Key << "bindings" << YAML::Value << YAML::BeginSeq;
 				for (const InputBinding& binding : action.Bindings)
 				{
@@ -136,6 +289,7 @@ namespace World::Gameplay
 				out << YAML::EndSeq << YAML::EndMap;
 			}
 			out << YAML::EndSeq;
+
 			out << YAML::Key << "axes" << YAML::Value << YAML::BeginSeq;
 			for (const InputAxis& axis : map.Axes())
 			{
@@ -148,6 +302,36 @@ namespace World::Gameplay
 				out << YAML::EndMap;
 			}
 			out << YAML::EndSeq;
+
+			if (!map.Contexts().empty())
+			{
+				out << YAML::Key << "contexts" << YAML::Value << YAML::BeginSeq;
+				for (const auto& ctx : map.Contexts())
+				{
+					out << YAML::BeginMap;
+					out << YAML::Key << "name" << YAML::Value << ctx.GetName();
+					out << YAML::Key << "priority" << YAML::Value << ctx.GetPriority();
+					out << YAML::Key << "consume" << YAML::Value << ctx.ConsumesInput();
+
+					out << YAML::Key << "mappings" << YAML::Value << YAML::BeginSeq;
+					for (const auto& m : ctx.GetMappings())
+					{
+						out << YAML::BeginMap;
+						out << YAML::Key << "action" << YAML::Value << m.ActionName;
+						out << YAML::Key << "binding" << YAML::Value << YAML::BeginMap;
+						out << YAML::Key << "device" << YAML::Value << DeviceName(m.Binding.Device);
+						out << YAML::Key << "code" << YAML::Value << m.Binding.Code;
+						if (m.Binding.DeviceIndex > 0)
+							out << YAML::Key << "slot" << YAML::Value << static_cast<int>(m.Binding.DeviceIndex);
+						out << YAML::EndMap;
+						out << YAML::EndMap;
+					}
+					out << YAML::EndSeq;
+					out << YAML::EndMap;
+				}
+				out << YAML::EndSeq;
+			}
+
 			out << YAML::EndMap;
 
 			std::filesystem::create_directories(path.parent_path());
