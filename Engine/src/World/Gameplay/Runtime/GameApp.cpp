@@ -1,11 +1,13 @@
 #include "World/Gameplay/Runtime/GameApp.h"
 
 #include "World/Core/Log.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <chrono>
 #include <memory>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 
 namespace World::Gameplay
@@ -24,6 +26,42 @@ namespace World::Gameplay
 		double ElapsedMilliseconds(Clock::time_point start)
 		{
 			return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+		}
+
+		// 会话的输入映射 = 内容根下的 `input.weinput`(动作/轴/绑定)。必须在第一次 Tick 之前
+		// 装载:**不装载时 `InputService::FindAction/FindAxis` 恒返回空**,脚本侧
+		// `Input.Down/Pressed/Released/Axis` 一律 false/0,`GameHost::Tick` 也没有任何绑定可喂
+		// (`mapInput.Actions()` 为空)—— 而引擎全程不报错,是纯静默失效。
+		// 内容根口径与 `UiHost::Initialize` 同一条:显式 desc 优先,空则回落到 `Paths::AssetRoot()`
+		// (编辑器 Play 的 desc 不带 ContentRoot)。
+		void LoadInputMapForSession(InputService& input, const std::filesystem::path& contentRoot)
+		{
+			const std::filesystem::path root = contentRoot.empty() ? Paths::AssetRoot() : contentRoot;
+			if (root.empty())
+			{
+				WLD_CORE_WARN("[input] no content root: '<content root>/input.weinput' was not loaded, "
+					"so every Input.Down/Pressed/Released/Axis read returns false/0");
+				return;
+			}
+			const std::filesystem::path mapPath = root / "input.weinput";
+			std::error_code existsError;
+			if (!std::filesystem::exists(mapPath, existsError))
+			{
+				WLD_CORE_WARN("[input] '{0}' not found: every Input.Down/Pressed/Released/Axis read "
+					"returns false/0 (add the file or check the project content root)",
+					mapPath.string());
+				return;
+			}
+			InputMap map;
+			std::string error;
+			if (!InputMap::Load(mapPath, &map, &error))
+			{
+				WLD_CORE_ERROR("[input] cannot load '{0}': {1}", mapPath.string(), error);
+				return;
+			}
+			input.SetMap(std::move(map));
+			WLD_CORE_INFO("[input] input map loaded from '{0}' ({1} action(s), {2} axis/axes)",
+				mapPath.string(), input.GetMap().Actions().size(), input.GetMap().Axes().size());
 		}
 	}
 
@@ -58,6 +96,9 @@ namespace World::Gameplay
 
 		s_Instance = std::unique_ptr<GameApp>(new GameApp(desc));
 		s_Instance->m_SessionId = ++s_NextSessionId;
+		// 输入映射随会话创建装载:Editor Play 与 Runtime 都经这里(见 GameHost::Init),
+		// 是"脚本能读到输入"的唯一前置条件。
+		LoadInputMapForSession(s_Instance->m_Input, desc.ContentRoot);
 		// 会话创建即进入 Boot:宿主随后按需 Request(Playing)/Request(MainMenu)。
 		s_Instance->m_Flow.Start(FlowState::Boot, 0);
 

@@ -1264,18 +1264,21 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 		if (size.x <= 0.0f || size.y <= 0.0f)
 			return;
 
-		// 物理面 = 场景矩形(设计单位,与 WuiContext 同一坐标系);DPI 系数取**真实平台内容缩放**
-		// (GLFW content scale,无窗口/失败 ⇒ 1.0;M9 前硬编码 1.0)。原点 = 场景矩形左上角,
-		// 于是绘制命令与无障碍矩形都落在视口内。
+		// 面尺寸 = 场景矩形,**单位必须与 `origin` / 剪裁矩形(`panelRect`)/ 出图命令同一空间**,
+		// 即 WuiContext 视口单位(= 物理像素 / `UiScale()`);后端 `Render` 再乘一次 `UiScale()`
+		// 才落到物理像素。原点 = 场景矩形左上角,于是绘制命令与无障碍矩形都落在视口内。
 		//
-		// M19(修 M9 留下的口径混用):`m_ViewportBounds` 是 **WuiContext 视口单位**(= 物理像素 /
-		// `Wui::UiScale()`),而后端绘制时还会再乘一次 `UiScale()`。所以这里必须把面**换算回物理
-		// 像素**并让 `DpiScale = 1.0`,否则 `viewport.Scale` 里再乘一次平台缩放 = 双重缩放
-		// (世界锚点因此整体向面板左上角压缩 ~1/UiScale,M19b 实测立案)。
-		// 数值上 Scale 与改前相同(= UiScale),但策略缩放从此按真实物理尺寸算,不再有歧义。
+		// M36(修 M19 留下的口径混用):M19 把“后端还会再乘一次 `UiScale()`”当成了面要做物理换算
+		// 的理由,但那次乘法作用在**命令**侧,`UiHost` 自身**不**除面尺寸(它只对世界相机的
+		// `ScreenSize` 除一次,见 UiHost::DrawFrame)。按物理像素给面 = 策略缩放凭空大 `UiScale()`
+		// 倍:HUD 被推到视口剪裁矩形之外,**Play 里整块不可见** —— 而 `UiScale() == 1.00` 时两种
+		// 口径数值相同,因此一直看不出问题。实测同一工程同一场景(`--ai-control` + `ui.tree`):
+		// scale=1.50 视口内无 HUD 且无障碍矩形左边缘正好压在剪裁右边界上,scale=1.00 正常可见。
+		// 世界空间那一路仍按物理像素喂(下面 `worldScreenSize = size * uiScale`),与 UiHost 的
+		// 除以 `UiScale` 配成一对;单位不同是因为一个进命令空间、一个进渲染面尺寸。
 		const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
 		UI::UiSurface surface;
-		surface.PhysicalSize = size * uiScale;
+		surface.PhysicalSize = size;
 		surface.DpiScale = 1.0f;
 		m_UiHost.SetSurface(surface);
 		m_UiHost.SetOrigin(origin);

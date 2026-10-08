@@ -1,0 +1,26 @@
+# WorldEngine 项目清单(project.we.yaml)。  # content_root = 内容根(相对本文件);start_scene = 启动场景(相对内容根);  # renderer = opengl | vulkan。以下各区块也可由编辑器设置面板读写。
+id: com.example.game
+version: 1.0.0
+content_root: assets
+start_scene: scenes/3DTest.wd
+renderer: vulkan
+rendering:
+# 渲染:剔除/阴影/灯光上限/分辨率倍率/MSAA/合批等;括号里是生效时机。  # 由「项目设置 ▶ 项目」页读写;手改本文件同样生效。
+  culling: true
+  shadows: false
+  shadow_map_size: 2048
+  max_directional_lights: 1
+  max_point_lights: 7
+  gpu_timing: false
+  vsync: true
+  instancing: true
+  anisotropy: 1
+  msaa: 1
+  render_scale: 1
+physics:
+# 物理:固定步长(Hz)与重力(m/s²)。  # 单个场景可以在自己的 .wd 头部 World: 块里覆盖重力。  # multithreaded:true = Jolt 接引擎 JobSystem 多线程(要吞吐,不再保证逐位可复现);默认 false。
+  fixed_step_hz: 60
+  gravity: -9.81000042
+  multithreaded: false
+packages:
+  []

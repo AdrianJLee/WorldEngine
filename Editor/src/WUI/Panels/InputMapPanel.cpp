@@ -9,26 +9,10 @@
 #include "World/Gameplay/Framework/InputRemap.h"
 
 
-#include <array>
-
 namespace World
 {
 	namespace
 	{
-		// 捕获用候选键:常用集合(字母/数字/修饰/方向/空格等)。Escape 用于取消捕获。
-		const std::array<int, 62>& CaptureKeys()
-		{
-			static const std::array<int, 62> keys = {
-				32, 9, 13, 16, 17, 18, 37, 38, 39, 40,
-				48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
-				65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86,
-				87, 88, 89, 90,
-				96, 97, 98, 99, 100, 101, 102, 103, 104, 105,
-				112, 113, 114, 115, 116
-			};
-			return keys;
-		}
-
 		std::string BindingLabel(const Gameplay::InputBinding& binding)
 		{
 			return Gameplay::InputGlyphs::GetGlyphText(binding.Device, binding.Code);
@@ -131,18 +115,34 @@ namespace World
 			}
 			else
 			{
-				for (const int code : CaptureKeys())
+				// 捕获直接读**本帧真实按下的键**(WuiInputState::KeyPressed,引擎 KeyCodes = GLFW 空间;
+				// 同一个向量就是编辑器文本/快捷键用的那一份),而不是一份硬编码候选表。
+				//
+				// M39:此前那份 `std::array<int, 62>` 候选表把 **VK 码**混进了 GLFW 码空间 ——
+				// 9(VK Tab,GLFW 里是非法值)/13(VK Enter,GLFW Enter = 257)/16-18(VK 修饰键,
+				// GLFW 用 340-347)/37-40(VK 方向键,GLFW 是 262-265)/96-105(VK 小键盘,
+				// GLFW 是 320-329)/112-116(VK F1-F5,GLFW 是 290-294)。这些键**永远匹配不到**,
+				// 用户看到的就是"按了没反应";而标点、F6-F25、Delete/Home/End/PageUp/PageDown、
+				// Backspace、右侧修饰键压根不在表里 —— 这就是"很多键位录不上"。
+				// 顺带修掉旧表 `std::array<int, 62>` 只给了 61 个初值、末位被零初始化的越界读。
+				//
+				// 用 KeyPressed(本帧沿)而不是 KeyDown(按住),一次按下只录一个键,长按不会反复覆盖。
+				// Escape 上面已作为"取消"消费掉,这里不会再落到它。
+				for (const uint32_t code : ctx.Input().KeyPressed)
 				{
-					if (!ctx.IsKeyPressed(code))
-						continue;
+					const int keyCode = static_cast<int>(code);
+					bool bound = false;
 					for (Gameplay::InputAction& action : m_Map.Actions())
 					{
 						if (action.Name != m_RebindingAction)
 							continue;
 						action.Bindings.clear();
-						action.Bindings.push_back({ Gameplay::InputDevice::Key, code });
+						action.Bindings.push_back({ Gameplay::InputDevice::Key, keyCode });
+						bound = true;
 					}
-					m_Status = "bound '" + m_RebindingAction + "' to key " + std::to_string(code);
+					if (!bound)
+						continue;
+					m_Status = "bound '" + m_RebindingAction + "' to key " + std::to_string(keyCode);
 					m_RebindingAction.clear();
 					Save();
 					break;

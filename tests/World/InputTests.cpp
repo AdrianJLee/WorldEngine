@@ -86,6 +86,59 @@ int main()
 			CHECK(loaded.FindAction(jumpId) == loadedJump);
 			CHECK(loaded.FindAxis(moveId) == loadedMove);
 
+			// M40:上下文往返 —— 映射上的 modifiers / triggers 必须原样存回。
+			// 此前 Save 完全不写这两块(整个 Save 里 "Trigger" 出现 0 次),编辑器 Input Map 面板
+			// 保存一次就把它们抹掉:实测模板工程只重绑一个键,5 个 trigger 块全部消失。上面那段往返
+			// 只建了 actions/axes、没有 contexts,因此看不见这个缺陷 —— 本段即为该缺陷的回归。
+			{
+				InputMap contextual;
+				InputMappingContext walking("Walking", 0, false);
+				ActionBindingConfig holdCfg;
+				holdCfg.ActionName = "Sprint";
+				holdCfg.Binding = { InputDevice::Key, 340 };
+				holdCfg.Triggers.push_back(InputTrigger::MakeHold(0.3f));
+				holdCfg.Modifiers.push_back(InputModifier::MakeDeadZone(0.1f, 0.9f, true));
+				walking.AddMapping(holdCfg);
+				ActionBindingConfig tapCfg;
+				tapCfg.ActionName = "Interact";
+				tapCfg.Binding = { InputDevice::Key, 70 };
+				tapCfg.Triggers.push_back(InputTrigger::MakeTap(0.25f));
+				tapCfg.Triggers.push_back(InputTrigger::MakeDoubleTap(0.3f, 0.2f));
+				tapCfg.Triggers.push_back(InputTrigger::MakePulse(0.12f));
+				walking.AddMapping(tapCfg);
+				contextual.Contexts() = { walking };
+
+				CHECK(InputMap::Save(path, contextual, &error));
+				InputMap reloaded;
+				CHECK(InputMap::Load(path, &reloaded, &error));
+				CHECK(reloaded.Contexts().size() == 1);
+				const InputMappingContext& reloadedCtx = reloaded.Contexts().front();
+				CHECK(reloadedCtx.GetName() == "Walking");
+				CHECK(reloadedCtx.GetMappings().size() == 2);
+
+				const ActionBindingConfig& hold = reloadedCtx.GetMappings()[0];
+				CHECK(hold.ActionName == "Sprint");
+				CHECK(hold.Triggers.size() == 1);
+				CHECK(hold.Triggers[0].Type == TriggerType::Hold);
+				CHECK(std::fabs(hold.Triggers[0].Duration - 0.3f) < 1e-4f);
+				CHECK(hold.Modifiers.size() == 1);
+				CHECK(hold.Modifiers[0].Type == ModifierType::DeadZone);
+				CHECK(std::fabs(hold.Modifiers[0].LowerThreshold - 0.1f) < 1e-4f);
+				CHECK(std::fabs(hold.Modifiers[0].UpperThreshold - 0.9f) < 1e-4f);
+				CHECK(hold.Modifiers[0].Radial);
+
+				const ActionBindingConfig& tap = reloadedCtx.GetMappings()[1];
+				CHECK(tap.ActionName == "Interact");
+				CHECK(tap.Triggers.size() == 3);
+				CHECK(tap.Triggers[0].Type == TriggerType::Tap);
+				CHECK(std::fabs(tap.Triggers[0].Duration - 0.25f) < 1e-4f);
+				CHECK(tap.Triggers[1].Type == TriggerType::DoubleTap);
+				CHECK(std::fabs(tap.Triggers[1].Interval - 0.3f) < 1e-4f);
+				CHECK(std::fabs(tap.Triggers[1].Duration - 0.2f) < 1e-4f);
+				CHECK(tap.Triggers[2].Type == TriggerType::Pulse);
+				CHECK(std::fabs(tap.Triggers[2].Interval - 0.12f) < 1e-4f);
+			}
+
 			// 2. 服务:键状态 -> 动作/轴;边沿判定依赖 EndFrame。
 			InputService input;
 			input.SetMap(loaded);

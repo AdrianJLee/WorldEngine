@@ -650,7 +650,11 @@ namespace World
 			{ "Rumble", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
 				return InputRumbleImpl(args, count);
-			}, inputRumbleParams, 4, 2, "boolean",
+			// ExpectedArgs = 运行期实际读取的参数个数(见 ScriptServiceMethod 注释),这里必须是 4 ——
+			// 实现会读 args[3](player)。写成 2 会让 CheckArgumentCount(minimum=2) 把上限当成 2:
+			// 示例脚本 `Input.Rumble(0.4, 0.6, 0.25)` 传 3 个即抛
+			// "expects between 2 and 2 argument(s); got 3"(M38 实测立案)。
+			}, inputRumbleParams, 4, 4, "boolean",
 				"Trigger gamepad vibration (rumble) for player slot; returns true on success." },
 		};
 

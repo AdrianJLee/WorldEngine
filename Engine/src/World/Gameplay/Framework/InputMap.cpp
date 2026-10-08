@@ -262,6 +262,108 @@ namespace World::Gameplay
 		}
 	}
 
+	namespace
+	{
+		// M40:Save 侧的名字映射与字段发射,与上面的 ParseTrigger / ParseModifier 逐字段对称。
+		// 此前 Save **完全不写** modifiers / triggers(整个函数里 "Trigger" 出现 0 次),
+		// 于是编辑器 Input Map 面板保存一次就把它们连同注释一起抹掉 ——
+		// 实测:模板工程只重绑一个键,5 个 trigger 块全部消失(2232 -> 1523 字节)。
+		const char* TriggerTypeName(TriggerType type)
+		{
+			switch (type)
+			{
+			case TriggerType::Pressed: return "pressed";
+			case TriggerType::Released: return "released";
+			case TriggerType::Hold: return "hold";
+			case TriggerType::Tap: return "tap";
+			case TriggerType::DoubleTap: return "double_tap";
+			case TriggerType::Pulse: return "pulse";
+			case TriggerType::Chord: return "chord";
+			}
+			return "pressed";
+		}
+
+		const char* ModifierTypeName(ModifierType type)
+		{
+			switch (type)
+			{
+			case ModifierType::DeadZone: return "deadzone";
+			case ModifierType::Invert: return "invert";
+			case ModifierType::Scale: return "scale";
+			case ModifierType::ResponseCurve: return "response_curve";
+			case ModifierType::Swizzle: return "swizzle";
+			case ModifierType::Normalize: return "normalize";
+			}
+			return "deadzone";
+		}
+
+		// 只写该类型真正消费的参数(与对应 Parse* 读的键一一对应);threshold 等于默认 0.5 时省略,
+		// 于是"手写的原始文件"过一次保存后语义不变、噪声最小。
+		void WriteTrigger(YAML::Emitter& out, const InputTrigger& trigger)
+		{
+			out << YAML::BeginMap;
+			out << YAML::Key << "type" << YAML::Value << TriggerTypeName(trigger.Type);
+			switch (trigger.Type)
+			{
+			case TriggerType::Hold:
+			case TriggerType::Tap:
+				out << YAML::Key << "duration" << YAML::Value << trigger.Duration;
+				break;
+			case TriggerType::DoubleTap:
+				out << YAML::Key << "interval" << YAML::Value << trigger.Interval;
+				out << YAML::Key << "duration" << YAML::Value << trigger.Duration;
+				break;
+			case TriggerType::Pulse:
+				out << YAML::Key << "interval" << YAML::Value << trigger.Interval;
+				break;
+			case TriggerType::Chord:
+				if (trigger.ChordAction.IsValid())
+					out << YAML::Key << "chord_action" << YAML::Value
+						<< StringPool::Get().NameOf(trigger.ChordAction);
+				break;
+			default:
+				break;
+			}
+			if (trigger.ActuationThreshold != 0.5f)
+				out << YAML::Key << "threshold" << YAML::Value << trigger.ActuationThreshold;
+			out << YAML::EndMap;
+		}
+
+		void WriteModifier(YAML::Emitter& out, const InputModifier& modifier)
+		{
+			out << YAML::BeginMap;
+			out << YAML::Key << "type" << YAML::Value << ModifierTypeName(modifier.Type);
+			switch (modifier.Type)
+			{
+			case ModifierType::DeadZone:
+				out << YAML::Key << "lower" << YAML::Value << modifier.LowerThreshold;
+				out << YAML::Key << "upper" << YAML::Value << modifier.UpperThreshold;
+				out << YAML::Key << "radial" << YAML::Value << modifier.Radial;
+				break;
+			case ModifierType::Invert:
+				out << YAML::Key << "x" << YAML::Value << modifier.InvertX;
+				out << YAML::Key << "y" << YAML::Value << modifier.InvertY;
+				out << YAML::Key << "z" << YAML::Value << modifier.InvertZ;
+				break;
+			case ModifierType::Scale:
+				out << YAML::Key << "factor" << YAML::Value << modifier.Scalar.x;
+				break;
+			case ModifierType::ResponseCurve:
+				out << YAML::Key << "exponent" << YAML::Value << modifier.Exponent;
+				break;
+			case ModifierType::Swizzle:
+				out << YAML::Key << "order" << YAML::Value << YAML::Flow << YAML::BeginSeq
+					<< modifier.SwizzleOrder[0] << modifier.SwizzleOrder[1] << modifier.SwizzleOrder[2]
+					<< YAML::EndSeq << YAML::Block;
+				break;
+			case ModifierType::Normalize:
+				out << YAML::Key << "max" << YAML::Value << modifier.MaxLength;
+				break;
+			}
+			out << YAML::EndMap;
+		}
+	}
+
 	bool InputMap::Save(const std::filesystem::path& path, const InputMap& map, std::string* error)
 	{
 		try
@@ -324,6 +426,20 @@ namespace World::Gameplay
 						if (m.Binding.DeviceIndex > 0)
 							out << YAML::Key << "slot" << YAML::Value << static_cast<int>(m.Binding.DeviceIndex);
 						out << YAML::EndMap;
+						if (!m.Modifiers.empty())
+						{
+							out << YAML::Key << "modifiers" << YAML::Value << YAML::BeginSeq;
+							for (const InputModifier& modifier : m.Modifiers)
+								WriteModifier(out, modifier);
+							out << YAML::EndSeq;
+						}
+						if (!m.Triggers.empty())
+						{
+							out << YAML::Key << "triggers" << YAML::Value << YAML::BeginSeq;
+							for (const InputTrigger& trigger : m.Triggers)
+								WriteTrigger(out, trigger);
+							out << YAML::EndSeq;
+						}
 						out << YAML::EndMap;
 					}
 					out << YAML::EndSeq;
