@@ -863,21 +863,81 @@ namespace World
 		}
 
 		// Jolt 接触回调只把事实推进 pending 缓冲(回调顺序 = 事件顺序);Step 里 Update 返回后 flush。
+		static uint8_t ResolveSubShapeColliderIndex(const JPH::Body& body, const JPH::SubShapeID& subShapeID)
+		{
+			const JPH::Shape* shape = body.GetShape();
+			if (shape && shape->GetType() == JPH::EShapeType::Compound)
+			{
+				const auto* compound = static_cast<const JPH::CompoundShape*>(shape);
+				JPH::SubShapeID remainder;
+				return static_cast<uint8_t>(compound->GetSubShapeIndexFromID(subShapeID, remainder));
+			}
+			return 0;
+		}
+
 		void PushContactEvent(const JPH::Body& inBody1, const JPH::Body& inBody2,
 			const JPH::ContactManifold& inManifold, Physics::ContactPhase phase)
 		{
 			const entt::entity entityA = EntityFromBodyUserData(inBody1);
 			const entt::entity entityB = EntityFromBodyUserData(inBody2);
 
-			// Jolt 的传感器是**刚体级**:任一刚体 IsSensor ⇒ 事实走 TriggerEvent(无碰撞响应)。
-			// 两个都是 sensor 时 SensorEntity 取 body1,保证同一配对下顺序确定。
 			if (inBody1.IsSensor() || inBody2.IsSensor())
 			{
 				Physics::TriggerEvent event;
 				event.SensorEntity = inBody1.IsSensor() ? entityA : entityB;
 				event.OtherEntity = inBody1.IsSensor() ? entityB : entityA;
 				event.Phase = phase;
+				for (const auto& existing : m_PendingTriggers)
+				{
+					if (existing.SensorEntity == event.SensorEntity &&
+						existing.OtherEntity == event.OtherEntity &&
+						existing.Phase == phase)
+						return;
+				}
 				m_PendingTriggers.push_back(event);
+				return;
+			}
+
+			const uint8_t colliderIdxA = ResolveSubShapeColliderIndex(inBody1, inManifold.mSubShapeID1);
+			const uint8_t colliderIdxB = ResolveSubShapeColliderIndex(inBody2, inManifold.mSubShapeID2);
+			const uint32_t subShapeIdA = inManifold.mSubShapeID1.GetValue();
+			const uint32_t subShapeIdB = inManifold.mSubShapeID2.GetValue();
+			const glm::vec3 worldNormal = ToGlm(inManifold.mWorldSpaceNormal);
+
+			// 方案 A 实体对去重 + 方案 C 接触点明细聚合
+			auto it = std::find_if(m_PendingContacts.begin(), m_PendingContacts.end(),
+				[&](const Physics::ContactEvent& existing)
+				{
+					return existing.Phase == phase &&
+						((existing.EntityA == entityA && existing.EntityB == entityB) ||
+						 (existing.EntityA == entityB && existing.EntityB == entityA));
+				});
+
+			if (it != m_PendingContacts.end())
+			{
+				Physics::ContactEvent& existing = *it;
+				const bool isSameDirection = (existing.EntityA == entityA);
+
+				for (std::size_t i = 0; i < inManifold.mRelativeContactPointsOn1.size() && existing.PointCount < Physics::kMaxContactPoints; ++i)
+				{
+					Physics::ContactPoint cp;
+					cp.Position = ToGlm(inManifold.GetWorldSpaceContactPointOn1(static_cast<JPH::uint>(i)));
+					cp.Normal = isSameDirection ? worldNormal : -worldNormal;
+					cp.PenetrationDepth = inManifold.mPenetrationDepth;
+					cp.ColliderIndexA = isSameDirection ? colliderIdxA : colliderIdxB;
+					cp.ColliderIndexB = isSameDirection ? colliderIdxB : colliderIdxA;
+					cp.SubShapeIdA = isSameDirection ? subShapeIdA : subShapeIdB;
+					cp.SubShapeIdB = isSameDirection ? subShapeIdB : subShapeIdA;
+					existing.Points[existing.PointCount++] = cp;
+				}
+
+				if (inManifold.mPenetrationDepth > existing.PenetrationDepth)
+				{
+					existing.PenetrationDepth = inManifold.mPenetrationDepth;
+					existing.Normal = isSameDirection ? worldNormal : -worldNormal;
+					if (!inManifold.mRelativeContactPointsOn1.empty())
+						existing.Point = ToGlm(inManifold.GetWorldSpaceContactPointOn1(0));
+				}
 				return;
 			}
 
@@ -885,14 +945,25 @@ namespace World
 			event.EntityA = entityA;
 			event.EntityB = entityB;
 			event.Phase = phase;
-			// Jolt 口径:ContactManifold::mWorldSpaceNormal = "direction to move body 2 out of
-			// collision" ⇒ 语义为 body1 → body2,与契约 A→B(A = body1)同向,直接照抄。
-			event.Normal = ToGlm(inManifold.mWorldSpaceNormal);
-			// 第一个接触点取 shape 1 表面(世界系;与 2D b2Manifold 的接触点口径对齐)。
-			if (!inManifold.mRelativeContactPointsOn1.empty())
-				event.Point = ToGlm(inManifold.GetWorldSpaceContactPointOn1(0));
-			// mPenetrationDepth 已是本流形全部接触点的最大值;负值 = 推测接触(speculative),不夹取。
+			event.Normal = worldNormal;
 			event.PenetrationDepth = inManifold.mPenetrationDepth;
+			event.PointCount = 0;
+
+			for (std::size_t i = 0; i < inManifold.mRelativeContactPointsOn1.size() && event.PointCount < Physics::kMaxContactPoints; ++i)
+			{
+				Physics::ContactPoint cp;
+				cp.Position = ToGlm(inManifold.GetWorldSpaceContactPointOn1(static_cast<JPH::uint>(i)));
+				cp.Normal = worldNormal;
+				cp.PenetrationDepth = inManifold.mPenetrationDepth;
+				cp.ColliderIndexA = colliderIdxA;
+				cp.ColliderIndexB = colliderIdxB;
+				cp.SubShapeIdA = subShapeIdA;
+				cp.SubShapeIdB = subShapeIdB;
+				event.Points[event.PointCount++] = cp;
+			}
+			if (event.PointCount > 0)
+				event.Point = event.Points[0].Position;
+
 			m_PendingContacts.push_back(event);
 		}
 
@@ -902,8 +973,6 @@ namespace World
 			const entt::entity entityB = FindEntity(inSubShapePair.GetBody2ID());
 			if (entityA == entt::null || entityB == entt::null) return;
 
-			// OnContactRemoved 拿不到流形,且 Jolt 文档禁止在这里读 body ⇒ 用 Start 时存的
-			// BodyID → IsSensor 副本分流;几何量一律为零(契约:End 无几何)。
 			const bool sensorA = IsSensorBody(inSubShapePair.GetBody1ID());
 			if (sensorA || IsSensorBody(inSubShapePair.GetBody2ID()))
 			{
@@ -911,9 +980,26 @@ namespace World
 				event.SensorEntity = sensorA ? entityA : entityB;
 				event.OtherEntity = sensorA ? entityB : entityA;
 				event.Phase = Physics::ContactPhase::End;
+				for (const auto& existing : m_PendingTriggers)
+				{
+					if (existing.SensorEntity == event.SensorEntity &&
+						existing.OtherEntity == event.OtherEntity &&
+						existing.Phase == Physics::ContactPhase::End)
+						return;
+				}
 				m_PendingTriggers.push_back(event);
 				return;
 			}
+
+			auto it = std::find_if(m_PendingContacts.begin(), m_PendingContacts.end(),
+				[&](const Physics::ContactEvent& existing)
+				{
+					return existing.Phase == Physics::ContactPhase::End &&
+						((existing.EntityA == entityA && existing.EntityB == entityB) ||
+						 (existing.EntityA == entityB && existing.EntityB == entityA));
+				});
+			if (it != m_PendingContacts.end())
+				return;
 
 			Physics::ContactEvent event;
 			event.EntityA = entityA;

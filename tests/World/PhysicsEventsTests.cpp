@@ -528,6 +528,62 @@ namespace
 		scene->OnRuntimeStop();
 	}
 
+	void ContactPointDetails2DAnd3D()
+	{
+		// 2D 接触点明细断言
+		{
+			Ref<Scene> scene = CreateTestScene();
+			Entity ground = AddBox2D(*scene, "Ground", { 0.0f, 0.0f, 0.0f }, RigidBody2DComponent::BodyType::Static, { 4.0f, 0.5f });
+			Entity box = AddBox2D(*scene, "Box", { 0.0f, 1.0f, 0.0f }, RigidBody2DComponent::BodyType::Dynamic, { 0.25f, 0.25f });
+			box.AddComponent<CircleCollider2DComponent>().Radius = 0.3f;
+			scene->OnRuntimeStart();
+			bool checked2D = false;
+			for (int step = 0; step < 120; ++step)
+			{
+				scene->OnFixedUpdate(Timestep(1.0f / 60.0f));
+				for (const Physics::ContactEvent& e : scene->GetContactEvents())
+				{
+					if (e.Phase == Physics::ContactPhase::Begin &&
+						((e.EntityA == box && e.EntityB == ground) || (e.EntityA == ground && e.EntityB == box)))
+					{
+						CHECK(e.PointCount >= 1 && e.PointCount <= Physics::kMaxContactPoints);
+						CHECK(e.Points[0].PenetrationDepth >= 0.0f);
+						checked2D = true;
+					}
+				}
+				scene->ClearPhysicsEvents();
+			}
+			CHECK(checked2D);
+			scene->OnRuntimeStop();
+		}
+		// 3D 接触点明细断言
+		{
+			Ref<Scene> scene = CreateTestScene();
+			Entity ground = AddBox3D(*scene, "Ground", { 0.0f, 0.0f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 5.0f, 0.5f, 5.0f });
+			Entity box = AddBox3D(*scene, "Box", { 0.0f, 1.0f, 0.0f }, RigidBody3DComponent::MotionType::Dynamic, { 0.25f, 0.25f, 0.25f });
+			box.AddComponent<SphereCollider3DComponent>().Radius = 0.3f;
+			scene->OnRuntimeStart();
+			bool checked3D = false;
+			for (int step = 0; step < 120; ++step)
+			{
+				scene->OnFixedUpdate(Timestep(1.0f / 60.0f));
+				for (const Physics::ContactEvent& e : scene->GetContactEvents())
+				{
+					if (e.Phase == Physics::ContactPhase::Begin &&
+						((e.EntityA == box && e.EntityB == ground) || (e.EntityA == ground && e.EntityB == box)))
+					{
+						CHECK(e.PointCount >= 1 && e.PointCount <= Physics::kMaxContactPoints);
+						CHECK(e.Points[0].PenetrationDepth >= 0.0f);
+						checked3D = true;
+					}
+				}
+				scene->ClearPhysicsEvents();
+			}
+			CHECK(checked3D);
+			scene->OnRuntimeStop();
+		}
+	}
+
 int main()
 {
 	try
@@ -546,6 +602,7 @@ int main()
 			{ "2D: runtime Layer/Mask change takes effect", RuntimeFilterChangeTakesEffect2D },
 			{ "2D multi-collider: one Begin per entity pair", MultiColliderEventCount2D },
 			{ "3D multi-collider: one Begin per entity pair", MultiColliderEventCount3D },
+			{ "contact point details in 2D and 3D (Plan A+C)", ContactPointDetails2DAnd3D },
 			{ "2D: End event when a touching entity is destroyed", EndEventOnDestroyedBody2D },
 			{ "3D: End event when a touching entity is destroyed", EndEventOnDestroyedBody3D },
 		};

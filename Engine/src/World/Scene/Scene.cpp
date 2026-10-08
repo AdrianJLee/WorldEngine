@@ -306,19 +306,47 @@ namespace World
 			return Physics::UnpackEntityUserData(b2Shape_GetUserData(shape));
 		}
 
-		// 从 b2ContactData 的流形里取"世界系法线 / 首个接触点 / 最大穿透深度"。
-		void FillContactGeometry(const b2Manifold& manifold, Physics::ContactEvent& event)
+		uint8_t ResolveShapeColliderIndex(b2ShapeId shape)
 		{
-			event.Normal = glm::vec3(manifold.normal.x, manifold.normal.y, 0.0f);
-			float deepest = 0.0f;
-			for (int point = 0; point < manifold.pointCount && point < 2; ++point)
+			if (!b2Shape_IsValid(shape)) return 0;
+			const b2ShapeType type = b2Shape_GetType(shape);
+			return type == b2_circleShape ? 1 : 0;
+		}
+
+		void AppendContactGeometry(const b2Manifold& manifold, Physics::ContactEvent& event,
+			uint8_t colliderIdxA, uint8_t colliderIdxB)
+		{
+			const glm::vec3 normal(manifold.normal.x, manifold.normal.y, 0.0f);
+			if (event.PointCount == 0)
+				event.Normal = normal;
+
+			for (int point = 0; point < manifold.pointCount && event.PointCount < Physics::kMaxContactPoints; ++point)
 			{
 				const b2ManifoldPoint& manifoldPoint = manifold.points[point];
-				if (point == 0)
-					event.Point = glm::vec3(manifoldPoint.clipPoint.x, manifoldPoint.clipPoint.y, 0.0f);
-				deepest = std::max(deepest, -manifoldPoint.separation);
+				const glm::vec3 pt(manifoldPoint.clipPoint.x, manifoldPoint.clipPoint.y, 0.0f);
+				const float depth = std::max(0.0f, -manifoldPoint.separation);
+
+				Physics::ContactPoint cp;
+				cp.Position = pt;
+				cp.Normal = normal;
+				cp.PenetrationDepth = depth;
+				cp.ColliderIndexA = colliderIdxA;
+				cp.ColliderIndexB = colliderIdxB;
+				event.Points[event.PointCount++] = cp;
+
+				if (depth > event.PenetrationDepth || event.PointCount == 1)
+				{
+					event.PenetrationDepth = depth;
+					event.Point = pt;
+					event.Normal = normal;
+				}
 			}
-			event.PenetrationDepth = std::max(0.0f, deepest);
+		}
+
+		void FillContactGeometry(const b2Manifold& manifold, Physics::ContactEvent& event)
+		{
+			event.PointCount = 0;
+			AppendContactGeometry(manifold, event, 0, 0);
 		}
 
 		void HarvestPhysics2DEvents(b2WorldId world, entt::registry& registry,
@@ -340,13 +368,34 @@ namespace World
 				const entt::entity entityA = ResolveShapeEntity(source.shapeIdA);
 				const entt::entity entityB = ResolveShapeEntity(source.shapeIdB);
 				if (entityA == entt::null || entityB == entt::null) continue;
+
+				const uint64_t pairKey = PackEntityPair(entityA, entityB);
+				const uint8_t colIdxA = ResolveShapeColliderIndex(source.shapeIdA);
+				const uint8_t colIdxB = ResolveShapeColliderIndex(source.shapeIdB);
+
+				auto existing = std::find_if(outContacts.begin(), outContacts.end(),
+					[&](const Physics::ContactEvent& e)
+					{
+						return e.Phase == Physics::ContactPhase::Begin &&
+							((e.EntityA == entityA && e.EntityB == entityB) ||
+							 (e.EntityA == entityB && e.EntityB == entityA));
+					});
+
+				if (existing != outContacts.end())
+				{
+					if (b2Contact_IsValid(source.contactId))
+						AppendContactGeometry(b2Contact_GetData(source.contactId).manifold, *existing, colIdxA, colIdxB);
+					continue;
+				}
+
 				Physics::ContactEvent event;
 				event.EntityA = entityA;
 				event.EntityB = entityB;
 				event.Phase = Physics::ContactPhase::Begin;
+				event.PointCount = 0;
 				if (b2Contact_IsValid(source.contactId))
-					FillContactGeometry(b2Contact_GetData(source.contactId).manifold, event);
-				beganContacts.insert(PackEntityPair(entityA, entityB));
+					AppendContactGeometry(b2Contact_GetData(source.contactId).manifold, event, colIdxA, colIdxB);
+				beganContacts.insert(pairKey);
 				outContacts.push_back(event);
 			}
 			for (int index = 0; index < contactEvents.endCount; ++index)
@@ -355,10 +404,22 @@ namespace World
 				const entt::entity entityA = ResolveShapeEntity(source.shapeIdA);
 				const entt::entity entityB = ResolveShapeEntity(source.shapeIdB);
 				if (entityA == entt::null || entityB == entt::null) continue;
+
+				auto existing = std::find_if(outContacts.begin(), outContacts.end(),
+					[&](const Physics::ContactEvent& e)
+					{
+						return e.Phase == Physics::ContactPhase::End &&
+							((e.EntityA == entityA && e.EntityB == entityB) ||
+							 (e.EntityA == entityB && e.EntityB == entityA));
+					});
+				if (existing != outContacts.end())
+					continue;
+
 				Physics::ContactEvent event;
 				event.EntityA = entityA;
 				event.EntityB = entityB;
 				event.Phase = Physics::ContactPhase::End;   // 流形此时已不可靠 ⇒ 几何量保持为零
+				event.PointCount = 0;
 				outContacts.push_back(event);
 			}
 

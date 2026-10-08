@@ -24,10 +24,24 @@ namespace World::Physics
 		End
 	};
 
-	// 一次**实体接触**(非传感器)。几何量取自后端本步的流形:
-	//   * Box2D:b2Contact_GetData 的 b2Manifold(normal 指向 shape A → shape B);
-	//   * Jolt:ContactManifold(世界系法线 + 第一个接触点)。
-	// End 阶段拿不到流形 ⇒ Point/Normal 为零、PenetrationDepth = 0。
+	// 工业流形接触点上限 (2D ≤2, 3D 凸面 ≤4)
+	constexpr uint8_t kMaxContactPoints = 4;
+
+	// 单个接触点明细 (方案 C: 满足多接触点解算与部位伤害 Hitbox 需求)
+	struct ContactPoint
+	{
+		glm::vec3 Position { 0.0f };         // 世界系接触点
+		glm::vec3 Normal { 0.0f };           // 单位法线, 指向 A -> B
+		float PenetrationDepth = 0.0f;       // 局部穿透深度
+		uint8_t ColliderIndexA = 0;          // 实体 A 的子碰撞体序号 (部位识别)
+		uint8_t ColliderIndexB = 0;          // 实体 B 的子碰撞体序号
+		uint32_t SubShapeIdA = 0;            // 物理后端底层子形状 ID
+		uint32_t SubShapeIdB = 0;
+	};
+
+	// 一次**实体接触**(非传感器)。
+	// 方案 A + C: 宏观按实体对严格聚合去重(每步每对实体 ≤1 条), 微观内联定长明细数组(零堆分配)。
+	// End 阶段拿不到流形 ⇒ Point/Normal 为零、PenetrationDepth = 0、PointCount = 0。
 	struct ContactEvent
 	{
 		// 顺序由后端决定(Box2D:shapeA/shapeB;Jolt:body1/body2),
@@ -35,9 +49,13 @@ namespace World::Physics
 		entt::entity EntityA = entt::null;
 		entt::entity EntityB = entt::null;
 		ContactPhase Phase = ContactPhase::Begin;
-		glm::vec3 Point { 0.0f };            // 世界系接触点(2D 的 z 恒为 0)
-		glm::vec3 Normal { 0.0f };           // 单位法线,指向 A → B
-		float PenetrationDepth = 0.0f;       // 穿透深度(多接触点取最深;End 时为 0)
+		glm::vec3 Point { 0.0f };            // 主接触点(最深接触点, 2D 的 z 恒为 0)
+		glm::vec3 Normal { 0.0f };           // 单位法线, 指向 A -> B
+		float PenetrationDepth = 0.0f;       // 穿透深度(多接触点取最深; End 时为 0)
+
+		// 接触明细数组 (至多 kMaxContactPoints 个, 栈连续, 无动态堆分配)
+		ContactPoint Points[kMaxContactPoints] = {};
+		uint8_t PointCount = 0;
 	};
 
 	// **传感器/触发器**重叠:只上报事实,不产生任何碰撞响应。

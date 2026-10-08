@@ -1090,6 +1090,22 @@ namespace World
 				payload.SetField("point", BoxVector3(event.Point));
 				payload.SetField("normal", BoxVector3(event.Normal));
 				payload.SetField("depth", ScriptValue::Number(static_cast<double>(event.PenetrationDepth)));
+				if (event.PointCount > 0)
+				{
+					ScriptTableRef pointsTable = ScriptEngine::GetState().CreateTable();
+					for (uint8_t i = 0; i < event.PointCount; ++i)
+					{
+						const auto& pt = event.Points[i];
+						ScriptTableRef ptTable = ScriptEngine::GetState().CreateTable();
+						ptTable.SetField("point", BoxVector3(pt.Position));
+						ptTable.SetField("normal", BoxVector3(pt.Normal));
+						ptTable.SetField("depth", ScriptValue::Number(static_cast<double>(pt.PenetrationDepth)));
+						ptTable.SetField("colliderIndexA", ScriptValue::Number(pt.ColliderIndexA));
+						ptTable.SetField("colliderIndexB", ScriptValue::Number(pt.ColliderIndexB));
+						pointsTable.SetArrayElement(i + 1, ptTable.ToValue());
+					}
+					payload.SetField("points", pointsTable.ToValue());
+				}
 
 				const ScriptValue callArgs[] = { payload.ToValue() };
 				ScriptValue result;
