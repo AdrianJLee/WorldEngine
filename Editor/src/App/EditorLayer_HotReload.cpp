@@ -797,15 +797,14 @@ void EditorLayer::SetSceneState(SceneState state){
 			desc.FixedStepHz = 60;
 			m_PlayHost.Init(desc);
 			m_PlayHost.SetRenderer(m_SceneRenderer);
+			// 先初始化 UiHost 设置当前活动 UI 宿主指针(autoLoadDefault=false,不自动加载任何文档),
+			// 确保场景启动时 StartupSystem 可以安全主动调用 ui.open() 打开界面
+			m_UiHost.Initialize(World::Paths::AssetRoot(), /*autoLoadDefault=*/false);
 			m_PlayHost.SetScene(m_RuntimeScene, /*startRuntime=*/true);
 			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
 				app->SetPaused(false);
 			// 视口尺寸在 SetScene 之后覆盖:GameHost 默认按宿主窗口同步,编辑器要用视图口尺寸。
 			UpdateSceneContext(m_RuntimeScene);
-			// GameUI(M7b):Play/Simulate 期间接上当前项目的游戏 UI(`WLD_UI_DOC` → 内容根
-			// `assets/ui/*.wui`;都没有 = 静默关闭)。物理面/原点每帧由 OnUiFrame 按视口面板的
-			// 场景矩形设置;节点登记进编辑器同一份无障碍树(panel = 文档 Screen 名)。
-			m_UiHost.Initialize(World::Paths::AssetRoot());
 			// GameUI(M11):世界空间 UI 的默认位置解析器(实体名 → 世界位置)每次 Play 只设一次 ——
 			// `std::function` 不每帧重建;解析器内部按 tick 缓存实体名索引。相机每帧喂(见
 			// DrawPlayModeGameUi)。

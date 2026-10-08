@@ -752,11 +752,25 @@ namespace World
 			}, onDrawParams, 1, 1, "",
 				"Register a function that draws this script's UI every frame (call it at the top level "
 				"of a system script; inside the callback you may call any other ui.* function)." },
+			{ "open", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiOpenImpl(args, count);
+			}, openParams, 1, 1, "boolean",
+				"Actively open and display a declarative .wui document." },
+			{ "close", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiCloseImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Close the currently active .wui document." },
+			{ "isOpen", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiIsOpenImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Check if a .wui document is currently open." },
 		};
 		static const ScriptServiceBinding uiTables[] = {
-			{ "ui", "Immediate-mode script UI table. Call `ui.onDraw(fn)` at the top level of a system "
-				"script to register the per-frame draw callback; inside it, every ui.* call is rebuilt each frame.",
-				uiMethods, 11 },
+			{ "ui", "Immediate-mode script UI table and declarative .wui document control.",
+				uiMethods, 14 },
 		};
 		if (count)
 			*count = sizeof(uiTables) / sizeof(uiTables[0]);

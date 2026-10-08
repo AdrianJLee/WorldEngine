@@ -546,7 +546,7 @@ function ecs:Off(handle) end
 function ecs:RequireLib(name) end
 
 -- Global script UI table 'ui': read-only; there is no runtime constructor.
----Immediate-mode script UI table. Call `ui.onDraw(fn)` at the top level of a system script to register the per-frame draw callback; inside it, every ui.* call is rebuilt each frame.
+---Immediate-mode script UI table and declarative .wui document control.
 ---@class ui
 ui = {}
 
@@ -658,6 +658,19 @@ function ui:columns(x, y, w, h, count, gap) end
 ---Register a function that draws this script's UI every frame (call it at the top level of a system script; inside the callback you may call any other ui.* function).
 ---@param draw function UI draw callback; it runs every frame during the UI phase, after script systems have updated.
 function ui:onDraw(draw) end
+
+---Actively open and display a declarative .wui document.
+---@param path string Relative or absolute path to the .wui document.
+---@return boolean
+function ui:open(path) end
+
+---Close the currently active .wui document.
+---@return boolean
+function ui:close() end
+
+---Check if a .wui document is currently open.
+---@return boolean
+function ui:isOpen() end
 
 -- Component fields are exposed through Entity:GetComponent("AmbientLightComponent"); there is no runtime global named AmbientLightComponent.
 ---@class AmbientLightComponent
