@@ -743,6 +743,24 @@ namespace World::Gameplay
 				player.PrevDown[slot] = player.Resolved[slot].Down ? 1u : 0u;
 				player.PrevTriggered[slot] = player.Resolved[slot].Triggered ? 1u : 0u;
 			}
+			// R2:注入寿命推进(必须在 per-player 循环内)。Fresh 只活一帧,负责产出第一个
+			// Pressed 边沿;RemainingFrames 递减到 0 即自动撤销(注入不会永久粘住)。
+			// 只推进"已被解算消费过"的注入:注入发生在解算之后的那一帧不能被吃掉。
+			for (auto it = player.Injected.begin(); it != player.Injected.end();)
+			{
+				if (!it->second.Observed)
+				{
+					++it;
+				}
+				else
+				{
+					it->second.Fresh = false;
+					if (--it->second.RemainingFrames == 0)
+						it = player.Injected.erase(it);
+					else
+						++it;
+				}
+			}
 		}
 		// 边沿历史换了 ⇒ 下一帧必须重算(与 SetKeyState 共用同一个失效入口)。
 		InvalidateResolve();
@@ -1088,6 +1106,22 @@ namespace World::Gameplay
 
 	ActionState InputService::EvaluateActionOnStack(const PlayerState& player, NameId action, float dt) const
 	{
+		// R2:注入层优先于一切映射 —— 这是"AI/自动化能真正驱动动作"的唯一正确位置
+		// (见 PlayerState::Injected 的说明:写原始键位必被宿主轮询覆盖)。
+		if (const auto injected = player.Injected.find(action.Value); injected != player.Injected.end())
+		{
+			ActionState forced;
+			if (injected->second.Value > 0.5f)
+			{
+				forced.Value = glm::vec3(injected->second.Value, 0.0f, 0.0f);
+				forced.Down = true;
+				forced.Triggered = injected->second.Fresh;
+				forced.Phase = injected->second.Fresh ? TriggerPhase::Triggered : TriggerPhase::Ongoing;
+			}
+			const_cast<ActionInjection&>(injected->second).Observed = true;
+			return forced;
+		}
+
 		// 触发器状态按动作驻留(与 M2 同口径):同一动作的多层映射共用一份 hold 计时/双击窗口。
 		TriggerState& triggerState = player.TriggerStates[action.Value];
 
@@ -1163,6 +1197,26 @@ namespace World::Gameplay
 			}
 		}
 		return ActionState{};
+	}
+
+	void InputService::InjectAction(uint32_t player, NameId action, float value, uint32_t frames)
+	{
+		PlayerState* state = GetOrCreatePlayer(player);
+		ActionInjection injection;
+		injection.Value = value;
+		injection.RemainingFrames = frames == 0 ? 1u : frames;
+		injection.Fresh = true;
+		state->Injected[action.Value] = injection;
+		InvalidateResolve();
+	}
+
+	void InputService::ClearInjection(uint32_t player)
+	{
+		if (PlayerState* state = GetPlayer(player) ? GetOrCreatePlayer(player) : nullptr)
+		{
+			state->Injected.clear();
+			InvalidateResolve();
+		}
 	}
 
 	void InputService::ResolvePlayerIfStale(const PlayerState& player) const

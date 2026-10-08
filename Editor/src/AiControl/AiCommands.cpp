@@ -1154,8 +1154,19 @@ namespace World
 			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
 			{
 				// 模拟设置按键
-				app->Input().SetKeyState(player, Gameplay::InputDevice::Key, 32, val > 0.5f);
-				result = "{\"injected\":true}";
+				// R2:按**动作**注入。此前这里忽略了 action 参数、固定发 code 32,而且在有窗口的宿主里
+				// 下一帧就会被 GameHost 的 glfwGetKey 轮询覆盖 ⇒ 注入在 Editor/Runtime 里必定无效。
+				// 现在走 InputService 的动作级覆盖层,与原始设备状态解耦。
+				const World::NameId actionId = World::StringPool::Get().InternName(actionName);
+				if (!app->Input().GetMap().FindAction(actionId))
+				{
+					error = "unknown action '" + actionName + "'";
+					return false;
+				}
+				const uint32_t frames = args.count("frames")
+					? static_cast<uint32_t>(std::atoi(arg("frames").c_str())) : 1u;
+				app->Input().InjectAction(player, actionId, val, frames == 0 ? 1u : frames);
+				result = "{\"injected\":true,\"action\":\"" + actionName + "\"}";
 				return true;
 			}
 			error = "GameApp not active";

@@ -442,6 +442,53 @@ int main()
 			}
 
 			
+			// 8b. R2:动作级注入 —— 必须能在"宿主每帧轮询覆写原始键位"的前提下把动作驱动起来。
+			// 旧的 input.inject 直接写原始键位(SetKeyState),于是在有窗口的宿主里下一帧就被
+			// GameHost 的 glfwGetKey 覆盖 ⇒ 注入在 Editor/Runtime 中必定无效(实测立案)。
+			// 现在注入是解算结果之上的一层覆盖,与原始设备状态解耦。
+			{
+				InputService injected;
+				InputMap map;
+				InputAction fire;
+				fire.Name = "Fire";
+				fire.Bindings = { { InputDevice::Key, 32 } };
+				map.Actions() = { fire };
+				injected.SetMap(map);
+				injected.SetPlayerCount(1);
+				const World::NameId fireId = World::StringPool::Get().InternName("Fire");
+
+				// 反假基线:没注入也没按键 -> 不激活
+				CHECK(!injected.ActionDown(fireId, 0));
+				CHECK(!injected.ActionPressed(fireId, 0));
+
+				injected.InjectAction(0, fireId, 1.0f, 2);
+				CHECK(injected.ActionDown(fireId, 0));
+				CHECK(injected.ActionPressed(fireId, 0));    // 注入第一帧给出 Pressed 边沿
+				// 同一帧内多次查询必须给同一答案(Pressed 是帧级事实,不是"报一次就消"),
+				// 同时解算缓存只算一次 —— 这两件事互不冲突。
+				CHECK(injected.ActionPressed(fireId, 0));
+
+				// 宿主把原始键位轮询成"抬起" —— 注入不受影响(这正是旧实现失效的场景)
+				injected.SetKeyState(0, InputDevice::Key, 32, false);
+				CHECK(injected.ActionDown(fireId, 0));
+
+				injected.EndFrame();
+				CHECK(injected.ActionDown(fireId, 0));       // 仍在注入寿命内
+				CHECK(!injected.ActionPressed(fireId, 0));   // 但不再是边沿
+
+				injected.EndFrame();                         // 寿命耗尽,自动撤销
+				CHECK(!injected.ActionDown(fireId, 0));
+				CHECK(injected.ActionReleased(fireId, 0));
+				injected.EndFrame();
+				CHECK(!injected.ActionReleased(fireId, 0));  // 边沿只报一次
+
+				// 显式清除
+				injected.InjectAction(0, fireId, 1.0f, 10);
+				CHECK(injected.ActionDown(fireId, 0));
+				injected.ClearInjection(0);
+				CHECK(!injected.ActionDown(fireId, 0));
+			}
+
 			// 9. M3 测试: 定长 InputFrame (64B POD)、录制/回放 (.wreplay) 与 AI 注入源
 			{
 				// (a) InputFrame 尺寸与偏移静态断言验证

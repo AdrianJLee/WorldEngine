@@ -64,6 +64,18 @@ namespace World::Gameplay
 		mutable bool m_IndicesDirty = true;
 	};
 
+	// R2:一次动作级注入。Value > 0.5 视为激活;Fresh 只在该注入的第一帧为真
+	// (用于产出 Pressed 边沿);RemainingFrames 归零即自动撤销。
+	struct ActionInjection
+	{
+		float Value = 1.0f;
+		uint32_t RemainingFrames = 1;
+		bool Fresh = true;
+		// 是否已被一次解算消费过。只有消费过的注入才在 EndFrame 倒计时 ——
+		// 否则"注入发生在解算之后"的那一帧会把它直接吃掉,动作永远不出现。
+		bool Observed = false;
+	};
+
 	// 输入服务(P2a W7):宿主每帧把原始设备状态喂进来,玩法/脚本只问动作与轴。
 	// W7-4:每帧可生成只读快照,供并行安全系统读取(避免系统直接读实时服务)。
 	struct WLD_API InputSnapshot
@@ -157,6 +169,9 @@ namespace World::Gameplay
 		void SetFrameDelta(float dt) { m_FrameDelta = dt > 0.0f ? dt : (1.0f / 60.0f); }
 		float GetFrameDelta() const { return m_FrameDelta; }
 
+		// R2:动作级注入(AI 控制通道 / 自动化)。frames = 持续帧数;重复注入按最后一次为准。
+		void InjectAction(uint32_t player, NameId action, float value, uint32_t frames = 1);
+		void ClearInjection(uint32_t player);
 		void SetEventCallback(const std::function<void(World::Event&)>& callback) { m_EventCallback = callback; }
 
 
@@ -172,6 +187,13 @@ namespace World::Gameplay
 			// R1:触发器状态机,按动作 NameId 索引(保持 M2 口径 —— 允许"只 Push 上下文、
 			// 动作并不在当前映射表里"的用法,因此不能用槽位索引)。
 			mutable std::unordered_map<uint32_t, TriggerState> TriggerStates;
+		
+		// R2:动作级**注入**覆盖层(AI 控制通道 / 自动化脚本用)。
+		// 为什么不复用 SetKeyState:注入写的是"原始设备状态",而有窗口的宿主每帧都会用
+		// glfwGetKey 把同一批键位覆写一遍(GameHost::Tick)—— 实测注入在 Editor/Runtime 里
+		// **必定无效**。注入的语义本来就是"这个动作被触发",不是"这个键被按下",
+		// 因此覆盖层放在解算结果之上,宿主怎么轮询都盖不掉。
+		mutable std::unordered_map<uint32_t, ActionInjection> Injected;
 
 			// R1:每帧解算缓存,按动作**槽位**索引(= m_Map.Actions() 下标)。
 			//   Resolved       本帧解算结果(Value/Phase/Down/Triggered + 已算好的 Pressed/Released 边沿)
