@@ -1,4 +1,5 @@
 #include "wldpch.h"
+#include "World/Core/Log.h"
 #include "World/Gameplay/Framework/GamepadBackend.h"
 
 #include <algorithm>
@@ -39,21 +40,20 @@ namespace World::Gameplay
 		if (m_Initialized)
 			return;
 		m_Initialized = true;
-		ClearMock();
+		// R2b:已激活 mock 的 headless 夹具不被真实后端初始化打断
+		// (此前 Init 无条件 ClearMock,于是「先设 mock、后建会话」的顺序会把夹具状态抹掉)。
+		if (!m_MockActive)
+			ClearMock();
 		LoadXInput();
 	}
 
 	void GamepadBackend::Shutdown()
 	{
-#ifdef WLD_PLATFORM_WINDOWS
-		if (m_XInputModule)
-		{
-			FreeLibrary(static_cast<HMODULE>(m_XInputModule));
-			m_XInputModule = nullptr;
-			m_XInputGetState = nullptr;
-			m_XInputSetState = nullptr;
-		}
-#endif
+		// R2b:**故意不 FreeLibrary**。xinput 是系统 DLL,卸载它换不来任何资源回收
+		// (进程退出时由 OS 统一回收),却引入一个真实的 loader-lock 竞态:会话反复
+		// 建立/销毁(编辑器 Play -> Stop -> Play、以及连跑多个用例的测试进程)会对同一个
+		// DLL 反复 Load/Free,一旦与其它线程的加载器活动交叠就可能卡在卸载上。
+		// 只把"已初始化"状态清掉,模块句柄与函数指针留给进程生命周期。
 		m_Initialized = false;
 	}
 
@@ -74,6 +74,17 @@ namespace World::Gameplay
 			m_XInputModule = module;
 			m_XInputGetState = reinterpret_cast<void*>(GetProcAddress(module, "XInputGetState"));
 			m_XInputSetState = reinterpret_cast<void*>(GetProcAddress(module, "XInputSetState"));
+			// R2b:可观测性 —— “XInput 路径到底有没有启用”必须能在日志里看到,
+			// 否则失效时只会在玩家手里变成“按了没反应”(旧实现就是这样:
+			// Init() 无调用点 ⇒ 模块句柄恒空 ⇒ Rumble 静默无效)。
+			if (Log::GetCoreLogger())
+				WLD_CORE_INFO("[gamepad] XInput backend loaded (getState={0}, setState={1})",
+					(m_XInputGetState ? "yes" : "no"), (m_XInputSetState ? "yes" : "no"));
+		}
+		else if (Log::GetCoreLogger())
+		{
+			WLD_CORE_INFO("[gamepad] no XInput dll; falling back to the GLFW gamepad backend "
+			"(no rumble support on this path)");
 		}
 #endif
 	}

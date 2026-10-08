@@ -1,6 +1,7 @@
 #include "World/Gameplay/Runtime/GameApp.h"
 
 #include "World/Core/Log.h"
+#include "World/Gameplay/Framework/GamepadBackend.h"
 #include "World/Utils/Paths.h"
 
 #include <algorithm>
@@ -99,6 +100,10 @@ namespace World::Gameplay
 		// 输入映射随会话创建装载:Editor Play 与 Runtime 都经这里(见 GameHost::Init),
 		// 是"脚本能读到输入"的唯一前置条件。
 		LoadInputMapForSession(s_Instance->m_Input, desc.ContentRoot);
+		// R2b:手柄后端随会话初始化。此前 Init() 没有任何生产调用点 ⇒ LoadXInput() 从未执行
+		// ⇒ XInput 轮询路径永不启用(只剩 GLFW joystick 回退),而 `Input.Rumble` 在真实手柄上
+		// **静默无效**(m_XInputSetState 为空,没有调用对象)。
+		GamepadBackend::Get().Init();
 		// 会话创建即进入 Boot:宿主随后按需 Request(Playing)/Request(MainMenu)。
 		s_Instance->m_Flow.Start(FlowState::Boot, 0);
 
@@ -113,6 +118,8 @@ namespace World::Gameplay
 			return;
 
 		WLD_CORE_INFO("GameApp session shutdown after {0} frame(s)", s_Instance->m_FrameNumber);
+		// R2b:与 Create 对称收尾(释放 XInput 模块句柄)。
+		GamepadBackend::Get().Shutdown();
 		s_Instance.reset();
 	}
 

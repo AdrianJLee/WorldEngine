@@ -250,7 +250,25 @@ int main()
 						++disconnectEvents;
 				});
 
-				// (a) 模拟手柄连接与热插拔事件
+				// R2b:Init() 不得踩掉已激活的 mock —— 此前 Init 无条件 ClearMock,
+			// 于是「先设 mock、后建会话」的顺序会把夹具状态抹掉;而 Init()
+			// 本身在 R2b 之前没有任何生产调用点 ⇒ XInput 路径从未启用。
+			{
+				GamepadBackend::Get().ClearMock();
+				float probeAxes[6] = { 0.25f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+				GamepadBackend::Get().SetMockConnected(0, true);
+				GamepadBackend::Get().SetMockState(0, 0x0002, probeAxes);
+				CHECK(GamepadBackend::Get().IsMockActive());
+				GamepadBackend::Get().Init();
+				CHECK(GamepadBackend::Get().IsMockActive());   // 被 Init 踩掉就是回归
+				GamepadState probeState;
+				CHECK(GamepadBackend::Get().Poll(0, probeState));
+				CHECK(probeState.Buttons == 0x0002);
+				CHECK(std::fabs(probeState.Axes[0] - 0.25f) < 1e-4f);
+				GamepadBackend::Get().ClearMock();
+			}
+
+			// (a) 模拟手柄连接与热插拔事件
 				GamepadBackend::Get().ClearMock();
 				GamepadBackend::Get().SetMockConnected(0, true);
 				m1Input.PollDevices();
