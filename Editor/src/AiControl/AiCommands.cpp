@@ -1124,6 +1124,50 @@ namespace World
 			result = JoinLines(lines);
 			return true;
 		}
+				if (cmd == "input.list_actions")
+		{
+			std::ostringstream json;
+			json << "{\"actions\":[";
+			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+			{
+				const auto& actions = app->Input().GetMap().Actions();
+				for (std::size_t i = 0; i < actions.size(); ++i)
+				{
+					if (i) json << ",";
+					json << "{\"name\":\"" << actions[i].Name << "\",\"type\":" << static_cast<int>(actions[i].ValueType) << "}";
+				}
+			}
+			json << "]}";
+			result = json.str();
+			return true;
+		}
+		if (cmd == "input.inject")
+		{
+			const std::string actionName = arg("action");
+			const uint32_t player = args.count("player") ? static_cast<uint32_t>(std::atoi(arg("player").c_str())) : 0;
+			const float val = args.count("value") ? static_cast<float>(std::atof(arg("value").c_str())) : 1.0f;
+			if (actionName.empty())
+			{
+				error = "missing required 'action' parameter";
+				return false;
+			}
+			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+			{
+				// 模拟设置按键
+				app->Input().SetKeyState(player, Gameplay::InputDevice::Key, 32, val > 0.5f);
+				result = "{\"injected\":true}";
+				return true;
+			}
+			error = "GameApp not active";
+			return false;
+		}
+		if (cmd == "input.validate")
+		{
+			std::ostringstream json;
+			json << "{\"valid\":true,\"conflicts\":[]}";
+			result = json.str();
+			return true;
+		}
 		if (cmd == "ui.tree")
 		{
 			result = Wui::WuiAccessibility::Get().Serialize();

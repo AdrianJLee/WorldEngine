@@ -1,3 +1,11 @@
+#include "World/Gameplay/Framework/InputFrame.h"
+#include "World/Gameplay/Framework/InputSource.h"
+#include "World/Gameplay/Framework/InputReplay.h"
+#include "World/Gameplay/Framework/InputRemap.h"
+#include "World/Gameplay/Framework/InputGlyphs.h"
+#include "World/Gameplay/Framework/InputTouch.h"
+#include "World/Platform/Windows/WindowsIme.h"
+#include "World/Platform/Windows/WindowsRawInput.h"
 #include "World/Gameplay/Framework/InputModifier.h"
 #include "World/Gameplay/Framework/InputTrigger.h"
 #include "World/Gameplay/Framework/InputContext.h"
@@ -378,6 +386,121 @@ int main()
 				m2Input.SetKeyState(0, InputDevice::Key, 32, true);
 				evalState = m2Input.EvaluateActionState(fireAction, 0, 0.1f);
 				CHECK(evalState.Triggered);
+			}
+
+			
+			// 9. M3 测试: 定长 InputFrame (64B POD)、录制/回放 (.wreplay) 与 AI 注入源
+			{
+				// (a) InputFrame 尺寸与偏移静态断言验证
+				CHECK(sizeof(InputFrame) == 64);
+
+				// (b) 录制与回放往返
+				const std::filesystem::path replayPath =
+					std::filesystem::temp_directory_path() / "worldengine-test.wreplay";
+
+				ReplayHeader header;
+				header.RandomSeed = 123456789ULL;
+				header.FixedDelta = 1.0f / 60.0f;
+
+				std::vector<InputFrame> recordFrames;
+				for (uint32_t f = 0; f < 10; ++f)
+				{
+					InputFrame frame;
+					frame.FrameIndex = f;
+					frame.PlayerIndex = 0;
+					frame.ActionButtons = (1ULL << (f % 64));
+					frame.MouseX = static_cast<int16_t>(100 + f * 5);
+					frame.MouseY = static_cast<int16_t>(200 + f * 3);
+					recordFrames.push_back(frame);
+				}
+
+				header.FinalStateHash = InputReplay::ComputeStateHash(recordFrames);
+				CHECK(header.FinalStateHash != 0);
+
+				std::string repErr;
+				CHECK(InputReplay::Save(replayPath, header, recordFrames, &repErr));
+				CHECK(repErr.empty());
+
+				ReplayHeader loadedHeader;
+				std::vector<InputFrame> loadedFrames;
+				CHECK(InputReplay::Load(replayPath, &loadedHeader, &loadedFrames, &repErr));
+				CHECK(loadedHeader.RandomSeed == 123456789ULL);
+				CHECK(loadedHeader.FrameCount == 10);
+				CHECK(loadedFrames.size() == 10);
+				CHECK(InputReplay::ComputeStateHash(loadedFrames) == header.FinalStateHash);
+				std::filesystem::remove(replayPath);
+
+				// (c) ReplayInputSource 逐帧消费
+				ReplayInputSource replaySource(loadedFrames);
+				CHECK(!replaySource.IsFinished());
+				RawInputState repRaw;
+				replaySource.Poll(0, repRaw, 1.0f / 60.0f);
+				CHECK(std::fabs(repRaw.MousePosition.x - 100.0f) < 1e-4f);
+
+				// (d) AiInjectionInputSource 动作注入
+				AiInjectionInputSource aiSource;
+				World::NameId jumpId = World::StringPool::Get().InternName("Jump");
+				aiSource.InjectAction(0, jumpId, 1.0f, 3 /* 3帧 */);
+				CHECK(aiSource.HasPendingInjections(0));
+				RawInputState aiRaw;
+				aiSource.Poll(0, aiRaw, 1.0f / 60.0f); // 消耗第1帧
+				aiSource.Poll(0, aiRaw, 1.0f / 60.0f); // 消耗第2帧
+				aiSource.Poll(0, aiRaw, 1.0f / 60.0f); // 消耗第3帧
+				aiSource.Poll(0, aiRaw, 1.0f / 60.0f); // 结束
+				CHECK(!aiSource.HasPendingInjections(0));
+			}
+
+			// 10. M4 测试: 运行时重绑定、冲突检测、用户覆盖持久化与键位字形表
+			{
+				InputRemapManager& remap = InputRemapManager::Get();
+				remap.ClearAllOverrides();
+
+				World::NameId fire = World::StringPool::Get().InternName("Fire");
+				World::NameId jump = World::StringPool::Get().InternName("Jump");
+
+				remap.SetOverride(fire, { { InputDevice::Key, 32 } }); // 空格开火
+				CHECK(remap.GetOverride(fire) != nullptr);
+
+				// 冲突检测: 为 Jump 绑定空格应触发与 Fire 的冲突
+				RemapConflict conflict;
+				bool hasConflict = remap.HasConflict({ InputDevice::Key, 32 }, jump, &conflict);
+				CHECK(hasConflict);
+				CHECK(conflict.ConflictingAction == fire);
+
+				// 用户覆盖文件序列化与读取 (user://input.overrides.yaml)
+				const std::filesystem::path overridesPath =
+					std::filesystem::temp_directory_path() / "input.overrides.yaml";
+				std::string remapErr;
+				CHECK(remap.SaveOverrides(overridesPath, &remapErr));
+				remap.ClearAllOverrides();
+				CHECK(remap.GetOverride(fire) == nullptr);
+
+				CHECK(remap.LoadOverrides(overridesPath, &remapErr));
+				CHECK(remap.GetOverride(fire) != nullptr);
+				std::filesystem::remove(overridesPath);
+
+				// 字形表与键帽映射
+				CHECK(InputGlyphs::GetGlyphText(InputDevice::Key, 32) == "Space");
+				CHECK(InputGlyphs::GetGlyphText(InputDevice::Gamepad, 0) == "A");
+				CHECK(InputGlyphs::GetGlyphText(InputDevice::Mouse, 0) == "LMB");
+			}
+
+			// 11. M5 测试: 原始高精鼠标增量、IME 状态与触控点结构
+			{
+				// (a) 原始高精鼠标增量累积与复位
+				World::Platform::WindowsRawInput::ResetAccumulated();
+				CHECK(World::Platform::WindowsRawInput::GetAccumulatedRawX() == 0);
+
+				// (b) IME 状态容器
+				const auto& ime = World::Platform::WindowsIme::GetCurrentState();
+				CHECK(!ime.Active);
+
+				// (c) 触控输入预留结构 POD 验证
+				TouchPoint touch;
+				touch.FingerId = 1;
+				touch.Position = glm::vec2(100.0f, 200.0f);
+				touch.Phase = TouchPhase::Began;
+				CHECK(touch.Phase == TouchPhase::Began);
 			}
 
 			std::printf("World.Input: all checks passed (including M0 NameId enhancements)\n");

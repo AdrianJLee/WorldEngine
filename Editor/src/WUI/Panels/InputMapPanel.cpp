@@ -5,6 +5,9 @@
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/Gameplay/Framework/InputGlyphs.h"
+#include "World/Gameplay/Framework/InputRemap.h"
+
 
 #include <array>
 
@@ -28,9 +31,7 @@ namespace World
 
 		std::string BindingLabel(const Gameplay::InputBinding& binding)
 		{
-			const char* device = binding.Device == Gameplay::InputDevice::Mouse ? "mouse"
-				: (binding.Device == Gameplay::InputDevice::Gamepad ? "pad" : "key");
-			return std::string(device) + " " + std::to_string(binding.Code);
+			return Gameplay::InputGlyphs::GetGlyphText(binding.Device, binding.Code);
 		}
 	}
 
