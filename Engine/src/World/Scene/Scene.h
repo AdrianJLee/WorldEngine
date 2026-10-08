@@ -198,6 +198,8 @@ namespace World
 		{
 			std::unordered_map<std::string, bool> Buttons;   // 动作名 → 是否按下
 			std::unordered_map<std::string, float> Axes;     // 动作名 → 轴值 [-1,1]
+			std::unordered_map<uint32_t, bool> ButtonsById;
+			std::unordered_map<uint32_t, float> AxesById;
 			glm::vec2 MousePosition { 0.0f };
 			glm::vec2 MouseDelta { 0.0f };
 			float ScrollDelta = 0.0f;

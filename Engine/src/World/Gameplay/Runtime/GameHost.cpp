@@ -374,6 +374,8 @@ namespace World::Gameplay
 						input.SetKeyState(0, binding.Device, binding.Code, down);
 					}
 				}
+			input.PollDevices();
+			input.UpdateVibration(frameTime.GetSeconds());
 			input.BuildSnapshot(0);
 		}
 

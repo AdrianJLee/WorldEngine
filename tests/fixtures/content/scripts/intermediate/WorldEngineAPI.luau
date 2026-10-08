@@ -291,6 +291,14 @@ function Input:PlayerCount() end
 ---@return number
 function Input:Scroll() end
 
+---Trigger gamepad vibration (rumble) for player slot; returns true on success.
+---@param left number Left motor vibration [0, 1].
+---@param right number Right motor vibration [0, 1].
+---@param seconds number? Duration in seconds (0 = persistent).
+---@param player integer? Player slot index, default 0.
+---@return boolean
+function Input:Rumble(left, right, seconds, player) end
+
 -- Global service table 'Level': read-only; there is no runtime constructor.
 ---Read-only level/flow service table; scene handles and host callbacks are not exposed.
 ---@class Level

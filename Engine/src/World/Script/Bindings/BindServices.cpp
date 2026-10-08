@@ -252,6 +252,28 @@ namespace World
 			return ScriptValue::Number(static_cast<double>(scroll));
 		}
 
+		ScriptValue InputRumbleImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[6];
+			CheckArgumentCount("Input", method, count, 2);
+			const ScriptValue& argLeft = RequireArg("Input", method, args, count, 0);
+			const ScriptValue& argRight = RequireArg("Input", method, args, count, 1);
+			double left = 0.0, right = 0.0, duration = 0.0;
+			argLeft.AsNumber(&left);
+			argRight.AsNumber(&right);
+			if (count >= 3 && !args[2].IsNil())
+				args[2].AsNumber(&duration);
+			const uint32_t player = RequirePlayer("Input", method, args, count, 3);
+
+			if (GameApp* app = GameApp::TryGet())
+			{
+				app->Input().SetVibration(player, static_cast<float>(left), static_cast<float>(right), static_cast<float>(duration));
+				return ScriptValue::Boolean(true);
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+
 		// ---- WP5:Time(只读帧时间服务;推进全在引擎侧,脚本没有写入口) ----
 
 		// 无活动场景时返回 0 而不是抛错(与 Input 无会话时返回 false/0 的容错口径一致)。
@@ -583,6 +605,12 @@ namespace World
 			{ "action", "string", ScriptServiceArgType::String, true, "Registered action name." },
 			{ "player", "integer", ScriptServiceArgType::Number, false, "Player slot; 0 is the primary player." },
 		};
+		static const ScriptServiceParam inputRumbleParams[] = {
+			{ "left", "number", ScriptServiceArgType::Number, true, "Left motor vibration [0, 1]." },
+			{ "right", "number", ScriptServiceArgType::Number, true, "Right motor vibration [0, 1]." },
+			{ "seconds", "number", ScriptServiceArgType::Number, false, "Duration in seconds (0 = persistent)." },
+			{ "player", "integer", ScriptServiceArgType::Number, false, "Player slot index, default 0." },
+		};
 		static const ScriptServiceParam inputAxis[] = {
 			{ "axis", "string", ScriptServiceArgType::String, true, "Registered axis name." },
 			{ "player", "integer", ScriptServiceArgType::Number, false, "Player slot; 0 is the primary player." },
@@ -619,6 +647,11 @@ namespace World
 				return InputScrollImpl(args, count);
 			}, nullptr, 0, 0, "number",
 				"Vertical wheel delta for this frame; 0 when there is no wheel input." },
+			{ "Rumble", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputRumbleImpl(args, count);
+			}, inputRumbleParams, 4, 2, "boolean",
+				"Trigger gamepad vibration (rumble) for player slot; returns true on success." },
 		};
 
 		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。
@@ -762,7 +795,7 @@ namespace World
 				"Last save/load error; empty when the last operation succeeded." },
 		};
 		static const ScriptServiceBinding services[] = {
-			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, 6 },
+			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, 7 },
 			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, 9 },
 			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, 7 },
 			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, 6 },

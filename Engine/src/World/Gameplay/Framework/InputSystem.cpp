@@ -11,11 +11,12 @@ namespace World::Gameplay
 		using SceneSnapshot = Scene::InputSnapshot;
 
 		// 每个场景的"上一可变帧"边沿与鼠标状态(引擎主线程使用)。
-		// 场景销毁后条目允许残留:查询/采样前按 slot/generation 判活,地址复用不串味。
 		struct SceneInputState
 		{
 			std::unordered_map<std::string, bool> Pressed;
 			std::unordered_map<std::string, bool> Released;
+			std::unordered_map<uint32_t, bool> PressedById;
+			std::unordered_map<uint32_t, bool> ReleasedById;
 			glm::vec2 PreviousMouse{ 0.0f };
 			bool HasPreviousMouse = false;
 			uint64_t SampleCount = 0;
@@ -60,17 +61,17 @@ namespace World::Gameplay
 		SceneInputState& state = Ensure(scene);
 		const Gameplay::InputSnapshot& source = service.GetSnapshot();
 
-		// 第一帧(或场景刚复用)没有"上一帧鼠标"可比 ⇒ 增量记 0,不做假位移。
 		const bool firstSample = !scene.GetInputSnapshot().Valid;
 
 		SceneSnapshot snapshot;
 		snapshot.Buttons = source.Down;
 		snapshot.Axes = source.Axes;
+		snapshot.ButtonsById = source.DownById;
+		snapshot.AxesById = source.AxesById;
 		snapshot.MousePosition = mousePosition;
 		snapshot.MouseDelta = (firstSample || !state.HasPreviousMouse)
 			? glm::vec2(0.0f)
 			: (mousePosition - state.PreviousMouse);
-		// 垂直滚轮增量(宿主从平台事件累积传入;无窗口宿主恒 0)。
 		snapshot.ScrollDelta = scrollDelta.y;
 		snapshot.SampledFrame = scene.GetTime().FrameCount;
 		snapshot.Valid = true;
@@ -80,6 +81,8 @@ namespace World::Gameplay
 		state.HasPreviousMouse = true;
 		state.Pressed = source.Pressed;
 		state.Released = source.Released;
+		state.PressedById = source.PressedById;
+		state.ReleasedById = source.ReleasedById;
 		++state.SampleCount;
 		return scene.GetInputSnapshot();
 	}
@@ -87,14 +90,28 @@ namespace World::Gameplay
 	void InputSystem::Forget(Scene& scene)
 	{
 		States().erase(&scene);
-		// 清空快照:运行停止后读到的必须是"没有输入"(Valid=false),不能是上一场运行的旧值。
 		scene.SetInputSnapshot(Scene::InputSnapshot{});
+	}
+
+	bool InputSystem::IsDown(const Scene& scene, NameId action)
+	{
+		const auto it = scene.GetInputSnapshot().ButtonsById.find(action.Value);
+		return it != scene.GetInputSnapshot().ButtonsById.end() && it->second;
 	}
 
 	bool InputSystem::IsDown(const Scene& scene, const std::string& action)
 	{
 		const auto it = scene.GetInputSnapshot().Buttons.find(action);
 		return it != scene.GetInputSnapshot().Buttons.end() && it->second;
+	}
+
+	bool InputSystem::WasPressed(const Scene& scene, NameId action)
+	{
+		const SceneInputState* state = Find(scene);
+		if (!state)
+			return false;
+		const auto it = state->PressedById.find(action.Value);
+		return it != state->PressedById.end() && it->second;
 	}
 
 	bool InputSystem::WasPressed(const Scene& scene, const std::string& action)
@@ -106,6 +123,15 @@ namespace World::Gameplay
 		return it != state->Pressed.end() && it->second;
 	}
 
+	bool InputSystem::WasReleased(const Scene& scene, NameId action)
+	{
+		const SceneInputState* state = Find(scene);
+		if (!state)
+			return false;
+		const auto it = state->ReleasedById.find(action.Value);
+		return it != state->ReleasedById.end() && it->second;
+	}
+
 	bool InputSystem::WasReleased(const Scene& scene, const std::string& action)
 	{
 		const SceneInputState* state = Find(scene);
@@ -113,6 +139,12 @@ namespace World::Gameplay
 			return false;
 		const auto it = state->Released.find(action);
 		return it != state->Released.end() && it->second;
+	}
+
+	float InputSystem::GetAxis(const Scene& scene, NameId axis)
+	{
+		const auto it = scene.GetInputSnapshot().AxesById.find(axis.Value);
+		return it != scene.GetInputSnapshot().AxesById.end() ? it->second : 0.0f;
 	}
 
 	float InputSystem::GetAxis(const Scene& scene, const std::string& axis)
