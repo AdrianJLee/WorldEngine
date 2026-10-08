@@ -157,6 +157,7 @@ namespace World
 		void DrawFrame(Wui::WuiContext& ctx, const Wui::WuiInputState& input);
 		// 在 `ctx.EndFrame()` 之后调用:第一帧落一次无障碍树(`WLD_UI_A11Y_DUMP`);未启用时零操作。
 		void EndFrame();
+		bool WriteAccessibilityDump(const std::filesystem::path& path = {}) const;
 
 		// ---- 热重载(M34)----
 		//

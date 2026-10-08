@@ -304,6 +304,8 @@ namespace World
 			// 快照 ⇒ 两边看到同一次点击,而注入相位每帧只推进一次(见 WuiScriptedInput::BeginFrame)。
 			Wui::WuiScriptedInput::Get().Apply(m_UiHost.WindowKey(), input);
 			wuiContext.BeginFrame(input);
+			if (Wui::WuiAccessibility::Get().Enabled())
+				Wui::WuiAccessibility::Get().BeginFrame(m_UiHost.WindowKey(), input.ViewportSize);
 			// 场景全屏显示:离屏颜色附件作为图像画进呈现目标,HUD 随后叠画。
 			if (m_SceneTextureId)
 				wuiContext.Commands().push_back({ Wui::WuiDrawKind::Image,
@@ -489,6 +491,8 @@ namespace World
 		WLD_CORE_INFO("[dev-ui] present capture written (ui frame {0}, {1} bytes): {2}",
 			m_UiFrame, size, capturePath);
 		m_DevUiCapturePending = false;
+		if (m_UiHost.Enabled())
+			m_UiHost.WriteAccessibilityDump();
 		Application::Get().Close();
 	}
 	void RuntimeLayer::OnEvent(Event& event)

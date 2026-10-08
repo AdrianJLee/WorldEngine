@@ -189,7 +189,11 @@ namespace World
 		if (m_Enabled)
 		{
 			if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
+			{
+				if (!m_A11yDumpPath.empty())
+					WriteAccessibilityDump();
 				Wui::WuiAccessibility::Get().SetEnabled(false);
+			}
 			else
 			{
 				// 共享通道:只清掉**本片游戏 UI 的面板节点**,不关宿主的无障碍通道。
@@ -314,7 +318,10 @@ namespace World
 		// SharedChannel(编辑器):宿主的 shell 每帧已 BeginFrame("main"),这里**不能**再清,
 		// 否则会抹掉同窗口的编辑器节点;只登记游戏 UI 节点即可。
 		if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
-			Wui::WuiAccessibility::Get().BeginFrame(m_WindowKey, viewport.PhysicalSize);
+		{
+			const std::string panel = m_PanelId.empty() ? document.Screen : m_PanelId;
+			Wui::WuiAccessibility::Get().ClearPanel(m_WindowKey, panel);
+		}
 
 		UI::UiPaintOptions options;
 		options.WindowKey = m_WindowKey;
@@ -371,27 +378,36 @@ namespace World
 		}
 	}
 
+	bool UiHost::WriteAccessibilityDump(const std::filesystem::path& path) const
+	{
+		const std::filesystem::path target = path.empty() ? m_A11yDumpPath : path;
+		if (!m_Enabled || target.empty())
+			return false;
+
+		const std::string json = Wui::WuiAccessibility::Get().Serialize();
+		std::ofstream file(target, std::ios::binary | std::ios::trunc);
+		if (!file)
+		{
+			WLD_CORE_WARN("[ui] failed to open accessibility dump '{0}'", target.string());
+			return false;
+		}
+		file << json;
+		if (!file.good())
+		{
+			WLD_CORE_WARN("[ui] failed to write accessibility dump '{0}'", target.string());
+			return false;
+		}
+		WLD_CORE_INFO("[ui] accessibility dump written ({0} bytes): {1}", json.size(), target.string());
+		return true;
+	}
+
 	void UiHost::EndFrame()
 	{
 		if (!m_Enabled || m_A11yDumpWritten || m_A11yDumpPath.empty())
 			return;
 
-		// 只试一次:写盘失败也只留一条警告,不每帧打扰运行(验证脚本按"没有文件 = 失败"判定)。
 		m_A11yDumpWritten = true;
-		const std::string json = Wui::WuiAccessibility::Get().Serialize();
-		std::ofstream file(m_A11yDumpPath, std::ios::binary | std::ios::trunc);
-		if (!file)
-		{
-			WLD_CORE_WARN("[ui] failed to open accessibility dump '{0}'", m_A11yDumpPath);
-			return;
-		}
-		file << json;
-		if (!file.good())
-		{
-			WLD_CORE_WARN("[ui] failed to write accessibility dump '{0}'", m_A11yDumpPath);
-			return;
-		}
-		WLD_CORE_INFO("[ui] accessibility dump written ({0} bytes): {1}", json.size(), m_A11yDumpPath);
+		WriteAccessibilityDump();
 	}
 
 	// ---- M34:`.wui` 热重载 ----
