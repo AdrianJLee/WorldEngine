@@ -93,6 +93,16 @@ namespace World::UI
 		viewport.PhysicalOrigin = glm::vec2 { 0.0f, 0.0f };
 
 		Wui::WuiRect content { 0.0f, 0.0f, design.Resolution.x, design.Resolution.y };
+		// 自适应长宽比 (Unity CanvasScaler MatchWidthOrHeight 口径):
+		// 当物理面长宽比不等于 16:9 时，将画布的设计尺寸按物理面与缩放系数重解，
+		// 保证右上角锚点 (Min.x=1.0) 严格钉在当前屏幕/面板的最右侧，避免画面右侧超出或裁切。
+		if (surface.PhysicalSize.x > 0.0f && surface.PhysicalSize.y > 0.0f &&
+			design.ScaleMode != UiScaleMode::ConstantPixelSize)
+		{
+			content.W = surface.PhysicalSize.x / viewport.Scale;
+			content.H = surface.PhysicalSize.y / viewport.Scale;
+		}
+
 		if (safe.Enabled)
 		{
 			const float left = safe.Left / viewport.Scale;
