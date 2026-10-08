@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <string>
+#include <tuple>
 
 namespace World::Gameplay
 {
@@ -213,8 +215,12 @@ namespace World::Gameplay
 					std::string ctxName = ctxNode["name"] ? ctxNode["name"].as<std::string>() : "Default";
 					int32_t priority = ctxNode["priority"] ? ctxNode["priority"].as<int32_t>() : 0;
 					bool consume = ctxNode["consume"] ? ctxNode["consume"].as<bool>() : true;
+					// R1:`default: true` = 基础上下文,装载后自动压栈(见 InputService::SetMap)。
+					// 没标这个位的上下文(载具/瞄准/菜单…)由游戏代码或脚本 PushContext/PopContext。
+					const bool autoPush = ctxNode["default"] ? ctxNode["default"].as<bool>() : false;
 
 					InputMappingContext ctx(ctxName, priority, consume);
+					ctx.SetAutoPush(autoPush);
 					if (ctxNode["mappings"])
 					{
 						for (const YAML::Node& mNode : ctxNode["mappings"])
@@ -251,6 +257,54 @@ namespace World::Gameplay
 			}
 
 			parsed.RebuildIndices();
+
+			// R1:装载期诊断。此前"文件写错了"与"文件读到了"在日志上完全一样,而查询侧对未知
+			// 动作一律返回 false/0(该容错本身是对的)⇒ 组合出"永远读不到、永远不报错"的静默失效
+			// (同一子系统上已连续踩到三次)。这里把可判定的错误在装载时一次说清。
+			if (Log::GetCoreLogger())
+			{
+				if (parsed.m_Actions.empty())
+					WLD_CORE_WARN("[input] '{0}' declares no action: every Input.* query returns false/0",
+						path.string());
+				for (const InputAction& action : parsed.m_Actions)
+				{
+					if (!action.Bindings.empty())
+						continue;
+					bool mappedSomewhere = false;
+					for (const InputMappingContext& context : parsed.m_Contexts)
+						if (!context.FindMappings(action.Id).empty())
+						{
+							mappedSomewhere = true;
+							break;
+						}
+					if (!mappedSomewhere)
+						WLD_CORE_WARN("[input] action '{0}' is declared but never bound "
+							"(no bindings and no context mapping): it can never be triggered",
+							action.Name);
+				}
+				for (const InputMappingContext& context : parsed.m_Contexts)
+				{
+					// (device, code, action) 三元组 —— **同一个键绑给不同动作是合法的**
+					// (点按=跳 / 双击=翻滚 就是这么写的,两个动作各自独立解算),所以只报
+					// "同一动作在同一上下文里被绑了两次"这种纯冗余数据。
+					std::vector<std::tuple<int, int, uint32_t>> seen;
+					for (const ActionBindingConfig& mapping : context.GetMappings())
+					{
+						if (mapping.ActionName.empty() || !parsed.FindAction(mapping.Action))
+							WLD_CORE_WARN("[input] context '{0}' maps unknown action '{1}' "
+								"(no such entry under actions:)", context.GetName(), mapping.ActionName);
+						const std::tuple<int, int, uint32_t> key{ static_cast<int>(mapping.Binding.Device),
+							mapping.Binding.Code, mapping.Action.Value };
+						if (std::find(seen.begin(), seen.end(), key) != seen.end())
+							WLD_CORE_WARN("[input] context '{0}' binds action '{1}' to ({2}, {3}) more than once "
+								"(redundant mapping)", context.GetName(), mapping.ActionName,
+								DeviceName(mapping.Binding.Device), mapping.Binding.Code);
+						else
+							seen.push_back(key);
+					}
+				}
+			}
+
 			*out = std::move(parsed);
 			if (error) error->clear();
 			return true;
@@ -588,15 +642,35 @@ namespace World::Gameplay
 	{
 		m_Map = std::move(map);
 		m_Map.RebuildIndices();
+
+		// R1:`default: true` 的上下文自动压栈,这是"触发器 / 修改器 / 上下文优先级真正生效"的前提。
+		// 状态类上下文的进出仍归游戏代码或脚本(PushContext / PopContext)。
+		m_ContextStack.clear();
+		for (const InputMappingContext& context : m_Map.Contexts())
+			if (context.IsAutoPush())
+				PushContext(context, context.GetPriority());
+
+		InvalidateResolve();
+		// 映射表换了:动作槽位数、Id 集合都可能变 ⇒ 解算缓存与触发器历史全部作废。
+		for (PlayerState& player : m_Players)
+		{
+			player.Resolved.clear();
+			player.PrevDown.clear();
+			player.PrevTriggered.clear();
+			player.TriggerStates.clear();
+			player.ResolvedEpoch = ~0ull;
+		}
 	}
 
 	void InputService::SetPlayerCount(uint32_t count)
 	{
+		InvalidateResolve();
 		m_Players.resize(count);
 	}
 
 	void InputService::Clear()
 	{
+		InvalidateResolve();
 		m_Players.clear();
 		m_Snapshot = {};
 		m_EndFrameCount = 0;
@@ -622,6 +696,7 @@ namespace World::Gameplay
 
 	void InputService::SetKeyState(uint32_t player, InputDevice device, int code, bool down)
 	{
+		InvalidateResolve();
 		PlayerState* state = GetOrCreatePlayer(player);
 		if (device == InputDevice::Key)
 		{
@@ -639,6 +714,7 @@ namespace World::Gameplay
 
 	void InputService::SetGamepadAxis(uint32_t player, const std::string& axis, float value)
 	{
+		InvalidateResolve();
 		PlayerState* state = GetOrCreatePlayer(player);
 		state->NamedGamepadAxes[axis] = value;
 		const int index = ParseGamepadAxisIndex(axis);
@@ -648,6 +724,7 @@ namespace World::Gameplay
 
 	void InputService::SetGamepadAxis(uint32_t player, uint32_t axisIndex, float value)
 	{
+		InvalidateResolve();
 		PlayerState* state = GetOrCreatePlayer(player);
 		if (axisIndex < 6)
 			state->Current.SetGamepadAxis(0, static_cast<int>(axisIndex), value);
@@ -656,7 +733,19 @@ namespace World::Gameplay
 	void InputService::EndFrame()
 	{
 		for (PlayerState& player : m_Players)
+		{
 			player.Previous = player.Current;
+			// R1:解算结果的历史也要滚,否则下一帧的 Pressed/Released 会把上一帧的边沿再报一次
+			// (边沿现在建立在**解算后**的 Triggered / Down 上,而不是原始按键状态上)。
+			const std::size_t count = player.Resolved.size();
+			for (std::size_t slot = 0; slot < count; ++slot)
+			{
+				player.PrevDown[slot] = player.Resolved[slot].Down ? 1u : 0u;
+				player.PrevTriggered[slot] = player.Resolved[slot].Triggered ? 1u : 0u;
+			}
+		}
+		// 边沿历史换了 ⇒ 下一帧必须重算(与 SetKeyState 共用同一个失效入口)。
+		InvalidateResolve();
 		m_EndFrameCount++;
 	}
 
@@ -685,104 +774,42 @@ namespace World::Gameplay
 		}
 	}
 
-	bool InputService::BindingDown(const PlayerState& player, const InputAction& action) const
-	{
-		for (const InputBinding& binding : action.Bindings)
-		{
-			if (binding.Device == InputDevice::Key)
-			{
-				if (player.Current.IsKey(binding.Code))
-					return true;
-			}
-			else if (binding.Device == InputDevice::Mouse)
-			{
-				if (player.Current.IsMouseButton(binding.Code))
-					return true;
-			}
-			else if (binding.Device == InputDevice::Gamepad)
-			{
-				if (player.Current.IsGamepadButton(binding.DeviceIndex, binding.Code))
-					return true;
-			}
-		}
-		return false;
-	}
 
-	bool InputService::BindingPreviousDown(const PlayerState& player, const InputAction& action) const
-	{
-		for (const InputBinding& binding : action.Bindings)
-		{
-			if (binding.Device == InputDevice::Key)
-			{
-				if (player.Previous.IsKey(binding.Code))
-					return true;
-			}
-			else if (binding.Device == InputDevice::Mouse)
-			{
-				if (player.Previous.IsMouseButton(binding.Code))
-					return true;
-			}
-			else if (binding.Device == InputDevice::Gamepad)
-			{
-				if (player.Previous.IsGamepadButton(binding.DeviceIndex, binding.Code))
-					return true;
-			}
-		}
-		return false;
-	}
 
 	bool InputService::ActionDown(NameId action, uint32_t player) const
 	{
-		const PlayerState* state = GetPlayer(player);
-		const InputAction* definition = m_Map.FindAction(action);
-		if (!state || !definition)
-			return false;
-		return BindingDown(*state, *definition);
+		const ActionState* resolved = ResolvedAction(action, player);
+		return resolved != nullptr && resolved->Down;
 	}
 
 	bool InputService::ActionDown(const std::string& action, uint32_t player) const
 	{
-		const PlayerState* state = GetPlayer(player);
 		const InputAction* definition = m_Map.FindAction(action);
-		if (!state || !definition)
-			return false;
-		return BindingDown(*state, *definition);
+		return definition != nullptr && ActionDown(definition->Id, player);
 	}
 
 	bool InputService::ActionPressed(NameId action, uint32_t player) const
 	{
-		const PlayerState* state = GetPlayer(player);
-		const InputAction* definition = m_Map.FindAction(action);
-		if (!state || !definition)
-			return false;
-		return BindingDown(*state, *definition) && !BindingPreviousDown(*state, *definition);
+		const ActionState* resolved = ResolvedAction(action, player);
+		return resolved != nullptr && resolved->Pressed;
 	}
 
 	bool InputService::ActionPressed(const std::string& action, uint32_t player) const
 	{
-		const PlayerState* state = GetPlayer(player);
 		const InputAction* definition = m_Map.FindAction(action);
-		if (!state || !definition)
-			return false;
-		return BindingDown(*state, *definition) && !BindingPreviousDown(*state, *definition);
+		return definition != nullptr && ActionPressed(definition->Id, player);
 	}
 
 	bool InputService::ActionReleased(NameId action, uint32_t player) const
 	{
-		const PlayerState* state = GetPlayer(player);
-		const InputAction* definition = m_Map.FindAction(action);
-		if (!state || !definition)
-			return false;
-		return !BindingDown(*state, *definition) && BindingPreviousDown(*state, *definition);
+		const ActionState* resolved = ResolvedAction(action, player);
+		return resolved != nullptr && resolved->Released;
 	}
 
 	bool InputService::ActionReleased(const std::string& action, uint32_t player) const
 	{
-		const PlayerState* state = GetPlayer(player);
 		const InputAction* definition = m_Map.FindAction(action);
-		if (!state || !definition)
-			return false;
-		return !BindingDown(*state, *definition) && BindingPreviousDown(*state, *definition);
+		return definition != nullptr && ActionReleased(definition->Id, player);
 	}
 
 	float InputService::Axis(NameId axis, uint32_t player) const
@@ -818,26 +845,26 @@ namespace World::Gameplay
 		if (definition->PositiveActionId.IsValid())
 		{
 			if (const InputAction* positive = m_Map.FindAction(definition->PositiveActionId))
-				if (BindingDown(*state, *positive))
+				if (ActionDown(positive->Id, player))
 					value += 1.0f;
 		}
 		else if (!definition->PositiveAction.empty())
 		{
 			if (const InputAction* positive = m_Map.FindAction(definition->PositiveAction))
-				if (BindingDown(*state, *positive))
+				if (ActionDown(positive->Id, player))
 					value += 1.0f;
 		}
 
 		if (definition->NegativeActionId.IsValid())
 		{
 			if (const InputAction* negative = m_Map.FindAction(definition->NegativeActionId))
-				if (BindingDown(*state, *negative))
+				if (ActionDown(negative->Id, player))
 					value -= 1.0f;
 		}
 		else if (!definition->NegativeAction.empty())
 		{
 			if (const InputAction* negative = m_Map.FindAction(definition->NegativeAction))
-				if (BindingDown(*state, *negative))
+				if (ActionDown(negative->Id, player))
 					value -= 1.0f;
 		}
 
@@ -1022,90 +1049,164 @@ namespace World::Gameplay
 		m_ContextStack.clear();
 	}
 
-	ActionState InputService::EvaluateActionState(NameId action, uint32_t player, float dt) const
+	void InputService::EnsurePlayerCaches(const PlayerState& player) const
 	{
-		ActionState state;
-		const PlayerState* pState = GetPlayer(player);
-		if (!pState)
-			return state;
+		const std::size_t count = m_Map.Actions().size();
+		if (player.Resolved.size() == count && player.PrevDown.size() == count)
+			return;
+		player.Resolved.assign(count, ActionState{});
+		player.PrevDown.assign(count, 0u);
+		player.PrevTriggered.assign(count, 0u);
+		player.ResolvedEpoch = ~0ull;
+	}
 
-		// 1. 如果上下文栈为空, 回退到基础映射求值
-		if (m_ContextStack.empty())
+	bool InputService::RawBindingDown(const PlayerState& player, const InputBinding& binding) const
+	{
+		switch (binding.Device)
 		{
-			state.Down = ActionDown(action, player);
-			state.Pressed = ActionPressed(action, player);
-			state.Released = ActionReleased(action, player);
-			state.Triggered = state.Pressed;
-			state.Phase = state.Triggered ? TriggerPhase::Triggered : (state.Down ? TriggerPhase::Ongoing : TriggerPhase::None);
-			const float ax = Axis(action, player);
-			state.Value = glm::vec3(ax, 0.0f, 0.0f);
-			return state;
+		case InputDevice::Key:
+			return player.Current.IsKey(binding.Code);
+		case InputDevice::Mouse:
+			return player.Current.IsMouseButton(binding.Code);
+		case InputDevice::Gamepad:
+			return player.Current.IsGamepadButton(binding.DeviceIndex, binding.Code);
+		default:
+			return false;
 		}
+	}
 
-		// 2. 按上下文栈优先级求值
-		for (const auto& ctx : m_ContextStack)
+	std::size_t InputService::ActionSlotOf(NameId action) const
+	{
+		const std::vector<InputAction>& actions = m_Map.Actions();
+		if (actions.empty())
+			return 0;
+		const InputAction* found = m_Map.FindAction(action);
+		if (!found)
+			return actions.size();   // 越界值 = "不在映射表里"
+		return static_cast<std::size_t>(found - actions.data());
+	}
+
+	ActionState InputService::EvaluateActionOnStack(const PlayerState& player, NameId action, float dt) const
+	{
+		// 触发器状态按动作驻留(与 M2 同口径):同一动作的多层映射共用一份 hold 计时/双击窗口。
+		TriggerState& triggerState = player.TriggerStates[action.Value];
+
+		// 把"一条映射"求值成一个 ActionState:原始按下 -> Modifier 链 -> Trigger 链。
+		const auto evaluateMapping = [&](const InputBinding& binding,
+			const std::vector<InputModifier>& modifiers, const std::vector<InputTrigger>& triggers)
 		{
-			const auto mappings = ctx.FindMappings(action);
-			for (const ActionBindingConfig* config : mappings)
+			ActionState result;
+			const bool actuated = RawBindingDown(player, binding);
+			glm::vec3 value{ actuated ? 1.0f : 0.0f, 0.0f, 0.0f };
+			for (const InputModifier& modifier : modifiers)
+				value = modifier.Apply(value, dt);
+
+			TriggerPhase phase = TriggerPhase::None;
+			if (!triggers.empty())
 			{
-				bool bindingDown = false;
-				float rawVal = 0.0f;
-				if (config->Binding.Device == InputDevice::Key)
+				for (const InputTrigger& trig : triggers)
 				{
-					bindingDown = pState->Current.IsKey(config->Binding.Code);
-					rawVal = bindingDown ? 1.0f : 0.0f;
-				}
-				else if (config->Binding.Device == InputDevice::Mouse)
-				{
-					bindingDown = pState->Current.IsMouseButton(config->Binding.Code);
-					rawVal = bindingDown ? 1.0f : 0.0f;
-				}
-				else if (config->Binding.Device == InputDevice::Gamepad)
-				{
-					bindingDown = pState->Current.IsGamepadButton(config->Binding.DeviceIndex, config->Binding.Code);
-					rawVal = bindingDown ? 1.0f : 0.0f;
-				}
-
-				// 应用 Modifiers
-				glm::vec3 val{ rawVal, 0.0f, 0.0f };
-				for (const auto& mod : config->Modifiers)
-					val = mod.Apply(val, dt);
-
-				// 应用 Triggers
-				TriggerState& trigState = pState->TriggerStates[action.Value];
-				TriggerPhase phase = TriggerPhase::None;
-				if (!config->Triggers.empty())
-				{
-					for (const auto& trig : config->Triggers)
-					{
-						phase = trig.Evaluate(bindingDown, dt, trigState);
-						if (phase == TriggerPhase::Triggered)
-							break;
-					}
-				}
-				else
-				{
-					phase = bindingDown ? (trigState.WasActuated ? TriggerPhase::Ongoing : TriggerPhase::Triggered) : TriggerPhase::None;
-					trigState.WasActuated = bindingDown;
-				}
-
-				if (phase == TriggerPhase::Triggered || phase == TriggerPhase::Ongoing)
-				{
-					state.Value = val;
-					state.Phase = phase;
-					state.Triggered = (phase == TriggerPhase::Triggered);
-					state.Down = bindingDown;
-					state.HeldTime = trigState.HeldTime;
-					return state;
+					phase = trig.Evaluate(actuated, dt, triggerState);
+					if (phase == TriggerPhase::Triggered)
+						break;
 				}
 			}
+			else
+			{
+				// 无触发器 = 直通:按下那一帧 Triggered,之后 Ongoing(与旧 ActionPressed/ActionDown 等价)。
+				phase = actuated ? (triggerState.WasActuated ? TriggerPhase::Ongoing : TriggerPhase::Triggered)
+					: TriggerPhase::None;
+				triggerState.WasActuated = actuated;
+			}
 
-			// 如果上下文消费输入且已匹配，则拦截
-			if (ctx.ConsumesInput() && !mappings.empty())
-				break;
+			if (phase == TriggerPhase::Triggered || phase == TriggerPhase::Ongoing)
+			{
+				result.Value = value;
+				result.Phase = phase;
+				result.Triggered = (phase == TriggerPhase::Triggered);
+				result.Down = true;
+				result.HeldTime = triggerState.HeldTime;
+			}
+			return result;
+		};
+
+		// 第 1 层:显式上下文栈。PushContext 按 priority **从高到低插入**(降序),所以正序遍历
+		// 就是「高优先先算」—— 必须与 PushContext 的插入序一致,不能想当然地反向走。
+		for (auto it = m_ContextStack.begin(); it != m_ContextStack.end(); ++it)
+		{
+			const std::vector<const ActionBindingConfig*> mappings = it->FindMappings(action);
+			if (mappings.empty())
+				continue;
+			for (const ActionBindingConfig* config : mappings)
+			{
+				const ActionState result = evaluateMapping(config->Binding, config->Modifiers, config->Triggers);
+				if (result.Down)
+					return result;
+			}
+			// 本层对本动作有映射但都没触发:声明了消费输入就不再向低优先层传递(与 M2 口径一致)。
+			if (it->ConsumesInput())
+				return ActionState{};
 		}
 
-		return state;
+		// 第 2 层(最低优先):动作自带 bindings。
+		// R1 的关键改动就在这两层的关系:旧实现有一个 `m_ContextStack.empty()` 回退分支,
+		// 于是"带 trigger 的 contexts"与"裸 bindings"成了两套语义,而文档只描述了前者 ——
+		// 结果是触发器/修改器在生产里从不参与解算,文件里写的交互语义全是空的。
+		// 现在它们是同一条解算路径上的两个优先级层:任何映射都要过 Modifier 链与 Trigger 链。
+		if (const InputAction* definition = m_Map.FindAction(action))
+		{
+			for (const InputBinding& binding : definition->Bindings)
+			{
+				const ActionState result = evaluateMapping(binding, {}, {});
+				if (result.Down)
+					return result;
+			}
+		}
+		return ActionState{};
+	}
+
+	void InputService::ResolvePlayerIfStale(const PlayerState& player) const
+	{
+		EnsurePlayerCaches(player);
+		if (player.ResolvedEpoch == m_ResolveRevision)
+			return;
+		player.ResolvedEpoch = m_ResolveRevision;
+
+		const std::vector<InputAction>& actions = m_Map.Actions();
+		for (std::size_t slot = 0; slot < actions.size(); ++slot)
+		{
+			ActionState resolved = EvaluateActionOnStack(player, actions[slot].Id, m_FrameDelta);
+			// 边沿统一在缓存层算(而不是在触发器里算),这样五类交互的"该响一次"都成立:
+			//   Pressed  = Triggered 的上升沿 —— 裸绑定=按下那一帧;Hold=跨过阈值那一帧;
+			//              Tap=限时内抬起那一帧;DoubleTap=第二击;Pulse=每个脉冲
+			//   Released = Down(激活)的下降沿
+			resolved.Pressed = resolved.Triggered && player.PrevTriggered[slot] == 0;
+			resolved.Released = !resolved.Down && player.PrevDown[slot] != 0;
+			player.Resolved[slot] = resolved;
+		}
+	}
+
+	const ActionState* InputService::ResolvedAction(NameId action, uint32_t player) const
+	{
+		const PlayerState* state = GetPlayer(player);
+		if (!state)
+			return nullptr;
+		const std::size_t slot = ActionSlotOf(action);
+		if (slot >= m_Map.Actions().size())
+			return nullptr;
+		ResolvePlayerIfStale(*state);
+		if (slot >= state->Resolved.size())
+			return nullptr;
+		return &state->Resolved[slot];
+	}
+
+	ActionState InputService::EvaluateActionState(NameId action, uint32_t player, float dt) const
+	{
+		// dt 由调用方显式给:这是"可控时间步"的确定性入口(单测/回放用),不读 m_FrameDelta。
+		const PlayerState* state = GetPlayer(player);
+		if (!state)
+			return ActionState{};
+		return EvaluateActionOnStack(*state, action, dt);
 	}
 
 }

@@ -252,6 +252,60 @@ namespace World
 			return ScriptValue::Number(static_cast<double>(scroll));
 		}
 
+		// ---- R1:上下文开关。名字 -> 映射表里的 contexts;找不到返回 false(不抛,便于脚本探测) ----
+		// 语义要点:
+		//   * Push 幂等 —— 已激活再 Push 返回 true,不会叠出第二份(叠了会让同一动作被两层同时驱动);
+		//   * 按映射表里的 priority 压栈,与引擎装载 default: true 的上下文走同一条入口;
+		//   * 只动"当前激活集合",不改文档 —— 与 Input.Down/Pressed 的只读口径一致。
+		const Gameplay::InputMappingContext* FindContextByName(const Gameplay::InputMap& map, const std::string& name)
+		{
+			for (const Gameplay::InputMappingContext& context : map.Contexts())
+				if (context.GetName() == name)
+					return &context;
+			return nullptr;
+		}
+
+		ScriptValue InputPushContextImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[7];
+			const std::string name = RequireString("Input", method, args, count, 0);
+			GameApp* app = GameApp::TryGet();
+			if (!app)
+				return ScriptValue::Boolean(false);
+			const Gameplay::InputMappingContext* context = FindContextByName(app->Input().GetMap(), name);
+			if (!context)
+				return ScriptValue::Boolean(false);
+			if (app->Input().HasContext(context->GetId()))
+				return ScriptValue::Boolean(true);
+			app->Input().PushContext(*context, context->GetPriority());
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue InputPopContextImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[8];
+			const std::string name = RequireString("Input", method, args, count, 0);
+			GameApp* app = GameApp::TryGet();
+			if (!app)
+				return ScriptValue::Boolean(false);
+			const Gameplay::InputMappingContext* context = FindContextByName(app->Input().GetMap(), name);
+			if (!context || !app->Input().HasContext(context->GetId()))
+				return ScriptValue::Boolean(false);
+			app->Input().PopContext(context->GetId());
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue InputHasContextImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[9];
+			const std::string name = RequireString("Input", method, args, count, 0);
+			GameApp* app = GameApp::TryGet();
+			if (!app)
+				return ScriptValue::Boolean(false);
+			const Gameplay::InputMappingContext* context = FindContextByName(app->Input().GetMap(), name);
+			return ScriptValue::Boolean(context != nullptr && app->Input().HasContext(context->GetId()));
+		}
+
 		ScriptValue InputRumbleImpl(const ScriptValue* args, std::size_t count)
 		{
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[6];
@@ -605,6 +659,10 @@ namespace World
 			{ "action", "string", ScriptServiceArgType::String, true, "Registered action name." },
 			{ "player", "integer", ScriptServiceArgType::Number, false, "Player slot; 0 is the primary player." },
 		};
+		// R1:上下文名(映射表 contexts: 里的 name)。
+		static const ScriptServiceParam inputContextName[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "Context name as written under contexts: in the input map." },
+		};
 		static const ScriptServiceParam inputRumbleParams[] = {
 			{ "left", "number", ScriptServiceArgType::Number, true, "Left motor vibration [0, 1]." },
 			{ "right", "number", ScriptServiceArgType::Number, true, "Right motor vibration [0, 1]." },
@@ -656,6 +714,22 @@ namespace World
 			// "expects between 2 and 2 argument(s); got 3"(M38 实测立案)。
 			}, inputRumbleParams, 4, 4, "boolean",
 				"Trigger gamepad vibration (rumble) for player slot; returns true on success." },
+			// R1:上下文开关 —— 让 trigger/modifier 只在"该状态"生效,而不是全局常开。
+			{ "PushContext", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputPushContextImpl(args, count);
+			}, inputContextName, 1, 1, "boolean",
+				"Activate a mapping context by name; idempotent, returns false when the name is unknown." },
+			{ "PopContext", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputPopContextImpl(args, count);
+			}, inputContextName, 1, 1, "boolean",
+				"Deactivate a mapping context by name; returns false when it is not active." },
+			{ "HasContext", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputHasContextImpl(args, count);
+			}, inputContextName, 1, 1, "boolean",
+				"Whether a mapping context is currently active." },
 		};
 
 		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。
@@ -799,7 +873,7 @@ namespace World
 				"Last save/load error; empty when the last operation succeeded." },
 		};
 		static const ScriptServiceBinding services[] = {
-			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, 7 },
+			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, 10 },
 			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, 9 },
 			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, 7 },
 			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, 6 },

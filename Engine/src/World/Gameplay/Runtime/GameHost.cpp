@@ -405,6 +405,9 @@ namespace World::Gameplay
 					scrollDelta = glm::vec2(scroll.first, scroll.second);
 				}
 			}
+			// R1:先把本帧时间步喂给输入服务 —— hold/tap/double_tap/pulse 的时长判定依赖它。
+			// 未喂时 InputService 退化为 1/60(headless 夹具与单测不依赖宿主)。
+			GameApp::Get().Input().SetFrameDelta(frameTime.GetSeconds());
 			Gameplay::InputSystem::Sample(*m_Scene, GameApp::Get().Input(), mousePosition, scrollDelta);
 		}
 		GameApp::Get().Tick(frameTime);

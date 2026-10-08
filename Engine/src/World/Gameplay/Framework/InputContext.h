@@ -33,6 +33,12 @@ namespace World::Gameplay
 		bool ConsumesInput() const { return m_ConsumeInput; }
 		void SetConsumeInput(bool consume) { m_ConsumeInput = consume; }
 
+		// R1:标记为"基础上下文" —— 装载时自动压栈(按 priority 参与解算),不需要游戏代码显式 Push。
+		// 用于"任何时候都该生效"的映射集(例:步行/通用操作)。状态类上下文(载具/瞄准/菜单)
+		// 不标这个位,由游戏代码或脚本按需 PushContext/PopContext。
+		bool IsAutoPush() const { return m_AutoPush; }
+		void SetAutoPush(bool autoPush) { m_AutoPush = autoPush; }
+
 		void AddMapping(ActionBindingConfig config);
 		const std::vector<ActionBindingConfig>& GetMappings() const { return m_Mappings; }
 
@@ -43,6 +49,7 @@ namespace World::Gameplay
 		std::string m_Name;
 		int32_t m_Priority = 0;
 		bool m_ConsumeInput = true;
+		bool m_AutoPush = false;
 		std::vector<ActionBindingConfig> m_Mappings;
 	};
 }

@@ -299,6 +299,21 @@ function Input:Scroll() end
 ---@return boolean
 function Input:Rumble(left, right, seconds, player) end
 
+---Activate a mapping context by name; idempotent, returns false when the name is unknown.
+---@param name string Context name as written under contexts: in the input map.
+---@return boolean
+function Input:PushContext(name) end
+
+---Deactivate a mapping context by name; returns false when it is not active.
+---@param name string Context name as written under contexts: in the input map.
+---@return boolean
+function Input:PopContext(name) end
+
+---Whether a mapping context is currently active.
+---@param name string Context name as written under contexts: in the input map.
+---@return boolean
+function Input:HasContext(name) end
+
 -- Global service table 'Level': read-only; there is no runtime constructor.
 ---Read-only level/flow service table; scene handles and host callbacks are not exposed.
 ---@class Level

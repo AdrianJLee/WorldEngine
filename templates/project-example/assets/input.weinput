@@ -52,7 +52,10 @@ axes:
     deadzone: 0.15
 
 contexts:
+  # default: true = 基础上下文,装载后自动压栈(R1)。Walking 承载「常驻」操作语义;
+  # 状态类上下文(下面的 Vehicle)不带这个位,由脚本按需 Input.PushContext/PopContext。
   - name: Walking
+    default: true
     priority: 0
     consume: false
     mappings:
