@@ -228,7 +228,7 @@ namespace World
 		std::string m_PropState = "default";
 
 		// 画布拖动:Move = 改 Anchor.Offset;Resize = 改 Anchor.Size(拖 8 手柄之一)。
-		enum class CanvasDrag { None, Move, Resize };
+		enum class CanvasDrag { None, Move, Resize, DragAnchorMin, DragAnchorMax };
 		CanvasDrag m_Drag = CanvasDrag::None;
 		int m_DragHandle = 0;                 // 位掩码(见 UiDesignerPanel.cpp 的 HandleBits)
 		int m_HoverHandle = 0;                // 悬停手柄(仅反馈用)
@@ -249,6 +249,7 @@ namespace World
 		float m_LeftWidth = 210.0f;
 		float m_RightWidth = 320.0f;
 		float m_PropertyScroll = 0.0f;
+		float m_ActualPropertyContentHeight = 0.0f;
 
 		// 属性分组折叠态(与 PropertyContentHeight 共用同一份事实源)。
 		// M31:Type 块恒展开(不再有独立的 Props 折叠态);Common 段里 Anchor/Layout 默认展开,

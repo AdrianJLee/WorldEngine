@@ -409,6 +409,8 @@ namespace World
 			HandleRight = 2,
 			HandleTop = 4,
 			HandleBottom = 8,
+			HandleAnchorMin = 16,
+			HandleAnchorMax = 32,
 		};
 
 		struct HandleDef
@@ -2084,7 +2086,8 @@ namespace World
 		const Wui::WuiRect inner { rect.X + 6.0f, rect.Y + 6.0f, innerWidth, std::max(0.0f, rect.H - 12.0f) };
 		const float labelWidth = Wui::PropertyRowLabelWidth(Wui::WuiRect { 0.0f, 0.0f, innerWidth, rowHeight });
 
-		Wui::BeginScrollArea(ctx, inner, PropertyContentHeight(node), m_PropertyScroll, theme,
+		const float totalScrollContentHeight = std::max(PropertyContentHeight(node) + 60.0f, m_ActualPropertyContentHeight + 35.0f);
+		Wui::BeginScrollArea(ctx, inner, totalScrollContentHeight, m_PropertyScroll, theme,
 			Wui::HashId("ui_designer.props.scroll"));
 
 		float y = inner.Y - m_PropertyScroll;
@@ -2246,17 +2249,25 @@ namespace World
 			typeNode.Visible = true;
 			Wui::WuiAccessibility::Get().Register(typeNode);
 		}
-		// M42:类型功能介绍一行(键 `wui.component.<id>.doc`,兜底 = `UiNodeTypeDesc::Doc`,
-		// 空则用组件登记表的 SizeNotes)。a11y 稳定 id = `ui_designer.type.doc`、kind = label;
-		// 可见文本走本地化,Value 保留英文源文(对照与审计用)。
+		// M42/Fix:类型功能介绍(自动折行，避免超宽截断文本)。
 		{
-			const Wui::WuiRect typeDocRow = nextRow(rowHeight);
 			const std::string docSource = typeDesc != nullptr && !typeDesc->Doc.empty()
 				? typeDesc->Doc
 				: (typeMeta != nullptr ? typeMeta->SizeNotes : std::string());
 			const std::string docText = Wui::Tr("wui.component." + componentId + ".doc", docSource);
-			Wui::Label(ctx, glm::vec2 { typeDocRow.X + 2.0f, typeDocRow.Y + 4.0f }, docText,
-				theme.TextMuted, theme.FontSizeCaption);
+			const float availableW = std::max(60.0f, inner.W - 12.0f);
+			const std::vector<std::string> docLines = Wui::WrapTextLines(docText, theme.FontSizeCaption, availableW, Wui::WuiFontFamily::Ui, false);
+			const float lineH = 15.0f;
+			const float totalDocH = std::max(rowHeight, static_cast<float>(docLines.size()) * lineH + 6.0f);
+			const Wui::WuiRect typeDocRow = nextRow(totalDocH);
+
+			float curY = typeDocRow.Y + 3.0f;
+			for (const auto& line : docLines)
+			{
+				Wui::Label(ctx, glm::vec2 { typeDocRow.X + 2.0f, curY }, line,
+					theme.TextMuted, theme.FontSizeCaption);
+				curY += lineH;
+			}
 			Wui::WuiAccessNode docNode;
 			docNode.Id = Wui::HashId("ui_designer.type.doc");
 			docNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
@@ -2725,6 +2736,63 @@ namespace World
 		groupHeader("panel.ui_designer.section.anchor", "Anchor", std::string(), m_ShowAnchorSection);
 		if (m_ShowAnchorSection)
 		{
+			// ---- 锚点模式直观卡片与快捷预设网格 ----
+			{
+				const bool isPoint = (node->Anchor.Min == node->Anchor.Max);
+				std::string modeDesc;
+				if (isPoint)
+				{
+					if (node->Anchor.Min == glm::vec2(0.0f, 0.0f)) modeDesc = "Top-Left [左上点锚定]";
+					else if (node->Anchor.Min == glm::vec2(0.5f, 0.0f)) modeDesc = "Top-Center [顶中点锚定]";
+					else if (node->Anchor.Min == glm::vec2(1.0f, 0.0f)) modeDesc = "Top-Right [右上点锚定]";
+					else if (node->Anchor.Min == glm::vec2(0.0f, 0.5f)) modeDesc = "Middle-Left [左中点锚定]";
+					else if (node->Anchor.Min == glm::vec2(0.5f, 0.5f)) modeDesc = "Center [中心点锚定]";
+					else if (node->Anchor.Min == glm::vec2(1.0f, 0.5f)) modeDesc = "Middle-Right [右中点锚定]";
+					else if (node->Anchor.Min == glm::vec2(0.0f, 1.0f)) modeDesc = "Bottom-Left [左下点锚定]";
+					else if (node->Anchor.Min == glm::vec2(0.5f, 1.0f)) modeDesc = "Bottom-Center [底中点锚定]";
+					else if (node->Anchor.Min == glm::vec2(1.0f, 1.0f)) modeDesc = "Bottom-Right [右下点锚定]";
+					else modeDesc = "Custom Point [自定义点锚定]";
+				}
+				else
+				{
+					if (node->Anchor.Min == glm::vec2(0.0f, 0.0f) && node->Anchor.Max == glm::vec2(1.0f, 1.0f))
+						modeDesc = "Stretch All [全向自适应拉伸]";
+					else if (node->Anchor.Min.x == 0.0f && node->Anchor.Max.x == 1.0f)
+						modeDesc = "Stretch Horizontal [水平拉伸]";
+					else if (node->Anchor.Min.y == 0.0f && node->Anchor.Max.y == 1.0f)
+						modeDesc = "Stretch Vertical [垂直拉伸]";
+					else
+						modeDesc = "Custom Stretch [自定义拉伸]";
+				}
+
+				const Wui::WuiRect infoRow = nextRow(18.0f);
+				Wui::Label(ctx, glm::vec2 { infoRow.X + 2.0f, infoRow.Y + 2.0f },
+					"Anchor Mode: " + modeDesc, theme.Accent, theme.FontSizeCaption);
+
+				const Wui::WuiRect presetBar = nextRow(24.0f);
+				const float btnW = (presetBar.W - 12.0f) / 4.0f;
+				auto drawPresetBtn = [&](int idx, const char* label, glm::vec2 minA, glm::vec2 maxA) {
+					const Wui::WuiRect bRect { presetBar.X + idx * (btnW + 4.0f), presetBar.Y, btnW, 22.0f };
+					const bool isActive = (node->Anchor.Min == minA && node->Anchor.Max == maxA);
+					const bool hovered = ctx.IsHovered(bRect);
+					Wui::PanelBackground(ctx, bRect, isActive ? theme.Accent : (hovered ? theme.ButtonHover : theme.ButtonBg), 2.0f);
+					Wui::HighlightOutline(ctx, bRect, isActive ? theme.Accent : theme.Border, 1.0f, 1.0f);
+					Wui::Label(ctx, glm::vec2 { bRect.X + 4.0f, bRect.Y + 4.0f }, label, isActive ? theme.Text : theme.TextMuted, theme.FontSizeCaption);
+					if (ctx.IsClicked(bRect, 0))
+					{
+						NoteNodeEdit("Change Anchor Preset");
+						node->Anchor.Min = minA;
+						node->Anchor.Max = maxA;
+						m_ScreenDirty = true;
+						m_Dirty = true;
+					}
+				};
+				drawPresetBtn(0, "TopLeft", { 0.0f, 0.0f }, { 0.0f, 0.0f });
+				drawPresetBtn(1, "Center", { 0.5f, 0.5f }, { 0.5f, 0.5f });
+				drawPresetBtn(2, "StretchX", { 0.0f, node->Anchor.Min.y }, { 1.0f, node->Anchor.Max.y });
+				drawPresetBtn(3, "Full", { 0.0f, 0.0f }, { 1.0f, 1.0f });
+			}
+
 			for (const FloatRowDef& def : kAnchorFloatRows)
 				floatRow(def, *node);
 
@@ -3309,12 +3377,35 @@ namespace World
 		}
 		if (hasSelectedBox && m_Drag == CanvasDrag::None)
 		{
-			for (const HandleDef& handle : kHandles)
+			// 优先检测锚点图钉悬停
+			if (const UI::UiNodeInstance* selInst = m_Screen.Find(m_SelectedId))
 			{
-				if (ctx.IsHovered(HandlePhysicalRect(selectedBox, handle)))
+				if (selInst->Source != nullptr)
 				{
-					m_HoverHandle = handle.Bits;
-					break;
+					const Wui::WuiRect pRect = selInst->Parent >= 0
+						? m_Screen.Nodes()[static_cast<std::size_t>(selInst->Parent)].Rect
+						: m_Viewport.ContentRect;
+					const glm::vec2 pMin { pRect.X, pRect.Y };
+					const glm::vec2 pSize { pRect.W, pRect.H };
+					const glm::vec2 minPos = m_Viewport.DesignToPhysical(pMin + selInst->Source->Anchor.Min * pSize);
+					const glm::vec2 maxPos = m_Viewport.DesignToPhysical(pMin + selInst->Source->Anchor.Max * pSize);
+
+					if (glm::distance(input.MousePos, minPos) < 12.0f)
+						m_HoverHandle = HandleAnchorMin;
+					else if (glm::distance(input.MousePos, maxPos) < 12.0f)
+						m_HoverHandle = HandleAnchorMax;
+				}
+			}
+
+			if (m_HoverHandle == HandleNone)
+			{
+				for (const HandleDef& handle : kHandles)
+				{
+					if (ctx.IsHovered(HandlePhysicalRect(selectedBox, handle)))
+					{
+						m_HoverHandle = handle.Bits;
+						break;
+					}
 				}
 			}
 		}
@@ -3322,11 +3413,17 @@ namespace World
 		if (m_Drag == CanvasDrag::None && ctx.IsHovered(rect) && ctx.IsClicked(rect, 0)
 			&& !overAnchorPreset)
 		{
-			// ① 手柄优先:命中 8 手柄之一 → 缩放当前选中节点(不改变选中)。
+			// ① 手柄或锚点优先:命中锚点或 8 手柄之一
 			UI::UiNode* node = m_HoverHandle != HandleNone ? MutableSelectedNode() : nullptr;
 			if (node != nullptr)
 			{
-				m_Drag = CanvasDrag::Resize;
+				if (m_HoverHandle == HandleAnchorMin)
+					m_Drag = CanvasDrag::DragAnchorMin;
+				else if (m_HoverHandle == HandleAnchorMax)
+					m_Drag = CanvasDrag::DragAnchorMax;
+				else
+					m_Drag = CanvasDrag::Resize;
+
 				m_DragHandle = m_HoverHandle;
 				m_DragNodeId = node->Id;
 				m_DragStartDesign = m_Viewport.PhysicalToDesign(input.MousePos);
@@ -3658,12 +3755,19 @@ namespace World
 					std::abs(maxCanvas.x - minCanvas.x), std::abs(maxCanvas.y - minCanvas.y) },
 				theme.BorderStrong, 1.0f);
 		}
+		// 绘制锚点到节点各对应角的醒目偏移指示线
+		const Wui::WuiRect nodePhysical = m_Viewport.DesignRectToPhysical(node.Rect);
+		Wui::LineSegment(ctx, minCanvas, glm::vec2 { nodePhysical.X, nodePhysical.Y }, theme.Accent, 1.0f);
+		Wui::LineSegment(ctx, maxCanvas, glm::vec2 { nodePhysical.X + nodePhysical.W, nodePhysical.Y + nodePhysical.H }, theme.Accent, 1.0f);
+
+		// 大号鲜艳双层发光锚点图钉标志 (Min=青绿, Max=明黄)
+		Wui::PanelBackground(ctx, Wui::WuiRect { minCanvas.x - 6.0f, minCanvas.y - 6.0f, 12.0f, 12.0f }, theme.PanelBg, 6.0f);
+		Wui::HighlightOutline(ctx, Wui::WuiRect { minCanvas.x - 6.0f, minCanvas.y - 6.0f, 12.0f, 12.0f }, theme.Success, 6.0f, 2.0f);
 		MarkerCross(ctx, minCanvas, theme.Success);
+
+		Wui::PanelBackground(ctx, Wui::WuiRect { maxCanvas.x - 6.0f, maxCanvas.y - 6.0f, 12.0f, 12.0f }, theme.PanelBg, 6.0f);
+		Wui::HighlightOutline(ctx, Wui::WuiRect { maxCanvas.x - 6.0f, maxCanvas.y - 6.0f, 12.0f, 12.0f }, theme.Warning, 6.0f, 2.0f);
 		MarkerCross(ctx, maxCanvas, theme.Warning);
-		Wui::PanelBackground(ctx, Wui::WuiRect { minCanvas.x - 2.0f, minCanvas.y - 2.0f, 4.0f, 4.0f },
-			theme.Success, 0.0f);
-		Wui::PanelBackground(ctx, Wui::WuiRect { maxCanvas.x - 2.0f, maxCanvas.y - 2.0f, 4.0f, 4.0f },
-			theme.Warning, 0.0f);
 
 		// M46:Min / Max 语义标签(截断预算 24px;颜色沿用既有令牌:Success = Min、Warning = Max)。
 		const float markerFont = theme.FontSizeCaption;

@@ -1,6 +1,7 @@
 --!strict
 -- =============================================================================
 -- WorldEngine 增强输入系统玩法控制器示例 (EnhancedInputExample.luau)
+-- 位于示例工程模板: templates/project-example/assets/scripts/systems/
 -- 演示能力:
 --   1. 上下文栈 (Walking ↔ Vehicle) 动态压栈与出栈
 --   2. 交互状态机响应: Hold 奔跑, Tap 互动, DoubleTap 闪避翻滚, Pulse 连发
@@ -24,7 +25,6 @@ function OnCreate(self: any)
     print("[EnhancedInput] 初始化玩家输入控制器示例")
     
     -- 默认激活基础步行映射上下文
-    -- 基础上下文: WASD 移动, 鼠标旋转, 空格跳跃, F 互动
     if input.PushContext then
         input.PushContext("Walking", 0)
     end
@@ -32,9 +32,8 @@ end
 
 -- 帧系统更新回调
 function OnUpdate(self: any, dt: number)
-    -- 1. 读取 2D 移动轴输入 (经 WASD Swizzle + 摇杆 DeadZone 处理)
-    local moveX = input.Axis("MoveX")
-    local moveY = input.Axis("MoveY")
+    -- 1. 读取水平移动轴输入 (键盘 A/D 或手柄左摇杆 LX)
+    local moveAxis = input.Axis("Move")
 
     -- 2. 检查交互状态机
     -- (a) Tap: 短促按下 F 键 -> 触发场景物体交互 / 上下车
@@ -59,13 +58,13 @@ function OnUpdate(self: any, dt: number)
     local isSprinting = input.Down("Sprint")
     local currentSpeed = isSprinting and ControllerState.SprintSpeed or ControllerState.WalkSpeed
 
-    -- (c) Pulse: 按住开火键 -> 全自动连发脉冲
+    -- (c) Pulse: 按住鼠标左键开火 -> 全自动连发脉冲
     if input.Pressed("Fire") then
         print("[EnhancedInput] 武器开火: 触发微震动反馈")
         input.Rumble(0.1, 0.5, 0.08)
     end
 
-    -- (d) DoubleTap: 双击方向键 / 空格 -> 触发战术翻滚闪避
+    -- (d) DoubleTap: 双击空格 -> 触发战术翻滚闪避
     if input.Pressed("Dodge") then
         print("[EnhancedInput] 触发双击翻滚闪避!")
         input.Rumble(0.3, 0.3, 0.15)

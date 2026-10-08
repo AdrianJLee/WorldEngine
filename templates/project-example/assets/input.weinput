@@ -1,19 +1,107 @@
+version: 2
 actions:
   - name: Jump
+    type: 0 # Button
     bindings:
       - device: key
-        code: 32
+        code: 32 # Space
+      - device: gamepad
+        code: 0 # A
   - name: MoveRight
+    type: 0 # Button
     bindings:
       - device: key
-        code: 68
+        code: 68 # D
   - name: MoveLeft
+    type: 0 # Button
     bindings:
       - device: key
-        code: 65
+        code: 65 # A
+  - name: Sprint
+    type: 0 # Button
+    bindings:
+      - device: key
+        code: 340 # Left Shift
+  - name: Fire
+    type: 0 # Button
+    bindings:
+      - device: mouse
+        code: 0 # LMB
+      - device: gamepad
+        code: 5 # RT
+  - name: Interact
+    type: 0 # Button
+    bindings:
+      - device: key
+        code: 70 # F
+      - device: gamepad
+        code: 2 # X
+  - name: Dodge
+    type: 0 # Button
+    bindings:
+      - device: key
+        code: 32 # Space (DoubleTap)
+      - device: gamepad
+        code: 1 # B
+
 axes:
   - name: Move
     positive: MoveRight
     negative: MoveLeft
     gamepad: LX
-    deadzone: 0.150000006
+    deadzone: 0.15
+
+contexts:
+  - name: Walking
+    priority: 0
+    consume: false
+    mappings:
+      - action: Jump
+        binding:
+          device: key
+          code: 32
+      - action: Sprint
+        binding:
+          device: key
+          code: 340
+        triggers:
+          - type: hold
+            duration: 0.3
+      - action: Interact
+        binding:
+          device: key
+          code: 70
+        triggers:
+          - type: tap
+            duration: 0.25
+      - action: Dodge
+        binding:
+          device: key
+          code: 32
+        triggers:
+          - type: double_tap
+            interval: 0.3
+            duration: 0.2
+      - action: Fire
+        binding:
+          device: mouse
+          code: 0
+        triggers:
+          - type: pulse
+            interval: 0.12
+
+  - name: Vehicle
+    priority: 10
+    consume: true
+    mappings:
+      - action: Jump # 载具内空格重载为手刹
+        binding:
+          device: key
+          code: 32
+      - action: Interact # 载具内 F 键下车
+        binding:
+          device: key
+          code: 70
+        triggers:
+          - type: tap
+            duration: 0.25
