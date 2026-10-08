@@ -99,7 +99,17 @@ namespace World
 		UiHost& operator=(UiHost&&) = delete;
 
 		// 解析并加载游戏 UI 文档。contentRoot 为空时回退 `World::Paths::AssetRoot()`。
-		void Initialize(const std::filesystem::path& contentRoot);
+		// 初始化 UI 宿主运行时。autoLoadDefault 默认为 false (不自动附加任何文档，完全由逻辑主动调用 OpenDocument 加载)。
+		void Initialize(const std::filesystem::path& contentRoot, bool autoLoadDefault = false);
+
+		// 主动打开/加载一个 .wui 游戏 UI 文档 (相对内容根或绝对路径)。成功返回 true。
+		bool OpenDocument(const std::filesystem::path& documentPath);
+
+		// 主动关闭当前活动 UI 文档。
+		void CloseDocument();
+
+		// 获取当前全局活动 UiHost (若存在)
+		static UiHost* GetActive();
 		// 停止绘制并释放本对象持有的 UI 文档(幂等)。
 		//   OwnChannel  :关闭无障碍通道(SetEnabled(false))。
 		//   SharedChannel:只 ClearWindow(窗口 key) 清掉本片登记,不关宿主通道。

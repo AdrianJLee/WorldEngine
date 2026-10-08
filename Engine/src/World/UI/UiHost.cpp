@@ -27,6 +27,8 @@ namespace World
 {
 	namespace
 	{
+		UiHost* s_ActiveUiHost = nullptr;
+
 		// ---- M38:加载期节点类型校验(宿主策略)----
 		//
 		// 契约要求"未知 Type = 可读错误"(`contract.ui-document-format` §6)。但 `ValidateUiDocument`
@@ -92,6 +94,11 @@ namespace World
 		return documents.front();
 	}
 
+	UiHost* UiHost::GetActive()
+	{
+		return s_ActiveUiHost;
+	}
+
 	std::filesystem::path UiHost::ResolveDocumentPath() const
 	{
 		// 1) 开发开关 WLD_UI_DOC:绝对路径,或相对**内容根**;指向目录时取其中第一个 `.wui`。
@@ -115,51 +122,65 @@ namespace World
 		return FirstUiDocument(m_ContentRoot / "ui");
 	}
 
-	void UiHost::Initialize(const std::filesystem::path& contentRoot)
+	void UiHost::Initialize(const std::filesystem::path& contentRoot, bool autoLoadDefault)
 	{
 		Shutdown();
+		s_ActiveUiHost = this;
 		m_ContentRoot = contentRoot.empty() ? Paths::AssetRoot() : contentRoot;
 
-		// GameUI(M26):绑定解析器注册(宿主 Initialize 时一次;幂等)。`ecs:` 无外部依赖;
-		// `service:` 的只读数据源 = 会话 GameApp —— 编辑器 Play 与 Runtime 都在本调用前建好会话
-		// (`GameHost::Init` / `SetSceneState`),所以这里能拿到;拿不到也注册解析器,
-		// 求值时给"需要活跃会话"的可读 error,而不是含混的"no resolver registered"。
 		UI::RegisterBuiltinBindingSources(Gameplay::GameApp::TryGet());
 
-		const std::filesystem::path documentPath = ResolveDocumentPath();
-		if (documentPath.empty())
-			return;   // 没有 `.wui` = 今天的行为:不加载、不开通道、不推命令。
+		if (autoLoadDefault || std::getenv("WLD_UI_DOC"))
+		{
+			const std::filesystem::path documentPath = ResolveDocumentPath();
+			if (!documentPath.empty())
+				OpenDocument(documentPath);
+		}
+	}
+
+	bool UiHost::OpenDocument(const std::filesystem::path& path)
+	{
+		std::filesystem::path documentPath = path;
+		if (documentPath.is_relative())
+			documentPath = m_ContentRoot / documentPath;
+
+		if (!std::filesystem::exists(documentPath))
+		{
+			std::filesystem::path alt = m_ContentRoot / "ui" / path.filename();
+			if (std::filesystem::exists(alt))
+				documentPath = alt;
+			else
+			{
+				WLD_CORE_WARN("[ui] cannot open UI document '{0}': file not found", documentPath.string());
+				return false;
+			}
+		}
 
 		UI::UiDocument document;
 		std::string error;
 		if (!UI::UiDocumentIO::LoadFile(documentPath, document, &error))
 		{
 			WLD_CORE_WARN("[ui] game UI disabled: cannot load '{0}': {1}", documentPath.string(), error);
-			return;
+			return false;
 		}
 
-		// M38:加载期节点类型校验(宿主策略;见 ValidateNodeTypes 注释)。未知 Type = 整份拒绝,
-		// 不再"加载成功但少画东西"。校验在 `Build` 之前 ⇒ `m_Screen` 不会被半加载的文档污染。
 		std::string typeError;
 		if (!ValidateNodeTypes(document, &typeError))
 		{
 			WLD_CORE_WARN("[ui] game UI disabled: {0} (document '{1}')",
 				typeError, documentPath.string());
-			return;
+			return false;
 		}
 
-		// Build 会再跑一次 ValidateUiDocument,并在 `Source` 指针上持有本对象内的文档副本。
 		std::string buildError;
 		if (!m_Screen.Build(document, &buildError))
 		{
 			WLD_CORE_WARN("[ui] game UI disabled: {0} (document '{1}')",
 				buildError, documentPath.string());
-			return;
+			return false;
 		}
 
 		m_DocumentPath = documentPath.string();
-		// GameUI(M26):把文档的全部 `Bind:` 编成扁平表(重复 Initialize = 从头重建)。
-		// 只存节点稳定 Id + 目标属性 + 已解析源,不求值(DrawFrame 按 tick 求值)。
 		m_Bindings.Attach(m_Screen);
 		m_Overrides.Clear();
 		m_BindingProblemReported = false;
@@ -167,61 +188,61 @@ namespace World
 			if (dump[0] != '\0')
 				m_A11yDumpPath = dump;
 
-		// 无障碍开关与加载条件一致:只有真的有 `.wui` 才(在自持通道口径下)开通道。
-		// SharedChannel = 通道归宿主,这里不动开关(编辑器靠 --ai-control 自己开)。
 		if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
 			Wui::WuiAccessibility::Get().SetEnabled(true);
 		m_Enabled = true;
-		// M34:热重载的基线文件戳(首次登记不产生"变化")。
 		m_DocumentStamp = ReadDocumentStamp(documentPath);
 		m_LastReloadError.clear();
 
-		WLD_CORE_INFO("[ui] game UI loaded from '{0}' (screen '{1}', {2} nodes, accessibility {3})",
-			m_DocumentPath, m_Screen.Document().Screen, m_Screen.Count(),
-			m_A11yMode == UiHostAccessibilityMode::OwnChannel ? "on" : "host-managed");
+		WLD_CORE_INFO("[ui] game UI opened from '{0}' (screen '{1}', {2} nodes)",
+			m_DocumentPath, m_Screen.Document().Screen, m_Screen.Count());
 
-		// M39:开发开关注入页面栈(`WLD_UI_PAGE` / `WLD_UI_MODAL`;未设置 = 零操作)。
 		SeedPagesFromEnvironment();
+		return true;
 	}
 
-	void UiHost::Shutdown()
+	void UiHost::CloseDocument()
 	{
-		if (m_Enabled)
+		if (!m_Enabled)
+			return;
+
+		if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
 		{
-			if (m_A11yMode == UiHostAccessibilityMode::OwnChannel)
-			{
-				if (!m_A11yDumpPath.empty())
-					WriteAccessibilityDump();
-				Wui::WuiAccessibility::Get().SetEnabled(false);
-			}
-			else
-			{
-				// 共享通道:只清掉**本片游戏 UI 的面板节点**,不关宿主的无障碍通道。
-				// 不能用 `ClearWindow`:那会把同窗口("main")的编辑器节点一起清掉,退出 Play 后
-				// `ui.tree` 会读到空树。面板 id 与 DrawFrame 登记时同一表达式(空 = 文档 Screen 名)。
-				const std::string panel = m_PanelId.empty() ? m_Screen.Document().Screen : m_PanelId;
-				Wui::WuiAccessibility::Get().ClearPanel(m_WindowKey, panel);
-			}
+			if (!m_A11yDumpPath.empty())
+				WriteAccessibilityDump();
+			Wui::WuiAccessibility::Get().SetEnabled(false);
 		}
-		// M39:页面栈随文档一起清(逐层 OnExit + 释放宿主自持页面屏幕;空栈 = 纯 no-op)。
+		else
+		{
+			const std::string panel = m_PanelId.empty() ? m_Screen.Document().Screen : m_PanelId;
+			Wui::WuiAccessibility::Get().ClearPanel(m_WindowKey, panel);
+		}
+
 		ClearPages();
 		m_Screen = UI::UiScreen {};
 		m_DocumentPath.clear();
 		m_A11yDumpPath.clear();
+		m_Enabled = false;
+		m_DocumentStamp = DocumentStamp {};
+		m_Bindings.Reset();
+		m_Overrides.Clear();
+		WLD_CORE_INFO("[ui] game UI document closed");
+	}
+
+	void UiHost::Shutdown()
+	{
+		if (s_ActiveUiHost == this)
+			s_ActiveUiHost = nullptr;
+		CloseDocument();
 		m_HasSurface = false;
 		m_Origin = glm::vec2 { 0.0f, 0.0f };
 		m_A11yDumpWritten = false;
 		m_PaintProblemReported = false;
 		m_WorldProblemReported = false;
-		// M26:绑定表/覆盖表随文档一起清;运行时数据源失效(下次 Initialize 再 Attach)。
-		m_Bindings.Reset();
-		m_Overrides.Clear();
 		m_BindingRuntime = UI::UiBindingContext {};
 		m_BindingVersion = 0;
 		m_HasBindingRuntime = false;
 		m_BindingProblemReported = false;
-		// M34:热重载基线随文档一起清(下次 Initialize 再建)。
-		m_DocumentStamp = DocumentStamp {};
 		m_LastReloadError.clear();
 		m_Enabled = false;
 	}

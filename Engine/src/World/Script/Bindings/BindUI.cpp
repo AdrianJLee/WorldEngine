@@ -1,3 +1,4 @@
+#include "World/UI/UiHost.h"
 #include "wldpch.h"
 
 #include "World/Renderer/Texture/TextureLibrary.h"
@@ -475,6 +476,37 @@ namespace World
 		//     ⇒ `ui.*` 只在 UI 阶段可用(否则绑定层抛"can only be called during the UI phase"),
 		//     控件 id 自动带脚本前缀,两份脚本用同一个 "go" 也不撞;
 		//   * 热重载 = 整份重跑 ⇒ 旧回调先被清掉(否则每改一次脚本界面就叠一层)。
+		
+		ScriptValue UiOpenImpl(const ScriptValue* args, std::size_t count)
+		{
+			if (count < 1 || !args[0].IsString())
+				return ScriptValue::Boolean(false);
+			std::string path;
+			args[0].AsString(&path);
+			if (UiHost* host = UiHost::GetActive())
+				return ScriptValue::Boolean(host->OpenDocument(path));
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue UiCloseImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args; (void)count;
+			if (UiHost* host = UiHost::GetActive())
+			{
+				host->CloseDocument();
+				return ScriptValue::Boolean(true);
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue UiIsOpenImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args; (void)count;
+			if (UiHost* host = UiHost::GetActive())
+				return ScriptValue::Boolean(host->Enabled());
+			return ScriptValue::Boolean(false);
+		}
+
 		ScriptValue UiOnDrawImpl(const ScriptValue* args, std::size_t count)
 		{
 			if (count != 1 || !args[0].IsFunction())
@@ -650,6 +682,9 @@ namespace World
 		static const ScriptServiceParam onDrawParams[] = {
 			{ "draw", "function", ScriptServiceArgType::Table, true,
 				"UI draw callback; it runs every frame during the UI phase, after script systems have updated." },
+		};
+				static const ScriptServiceParam openParams[] = {
+			{ "path", "string", ScriptServiceArgType::String, true, "Relative or absolute path to the .wui document." },
 		};
 		static const ScriptServiceParam splitParams[] = {
 			{ "x", "number", ScriptServiceArgType::Number, true, "Left edge in UI pixels." },

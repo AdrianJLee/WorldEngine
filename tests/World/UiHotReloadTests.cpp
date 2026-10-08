@@ -461,7 +461,7 @@ Nodes:
 	{
 		TempUiProject project(kDocAlpha);
 		UiHost host;
-		host.Initialize(project.Root());
+		host.Initialize(project.Root(), true);
 		CHECK(host.Enabled());                                       // 有 `.wui` 才启用
 		CHECK_STR(host.LastReloadError(), "");
 		CHECK(host.Screen().Count() == 4);
@@ -497,7 +497,7 @@ Nodes:
 	{
 		TempUiProject project(kDocAlpha);
 		UiHost host;
-		host.Initialize(project.Root());
+		host.Initialize(project.Root(), true);
 		CHECK(host.Enabled());
 
 		Wui::WuiContext ctx;
@@ -544,7 +544,7 @@ Nodes:
 	{
 		TempUiProject project(kDocAlpha);
 		UiHost host;
-		host.Initialize(project.Root());
+		host.Initialize(project.Root(), true);
 		CHECK(host.Enabled());
 
 		Wui::WuiContext ctx;
@@ -625,7 +625,7 @@ Nodes:
 		SetHostEnv("WLD_UI_MODAL", modalC.string());
 
 		UiHost host;
-		host.Initialize(project.Root());
+		host.Initialize(project.Root(), true);
 		CHECK(host.Enabled());
 		CHECK(host.Navigator().Count() == 2);
 		CHECK(host.Navigator().ModalCount() == 1);
@@ -679,7 +679,7 @@ Nodes:
 		SetHostEnv("WLD_UI_MODAL", "");
 		{
 			UiHost single;
-			single.Initialize(project.Root());
+			single.Initialize(project.Root(), true);
 			CHECK(single.Enabled());
 			CHECK(single.Navigator().Empty());
 			CHECK(single.Navigator().Count() == 0);
