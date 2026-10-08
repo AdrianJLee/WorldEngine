@@ -41,6 +41,9 @@ namespace World::Gameplay
 
 		void AddMapping(ActionBindingConfig config);
 		const std::vector<ActionBindingConfig>& GetMappings() const { return m_Mappings; }
+		// R4:可变访问 —— 编辑器面板要就地增删映射、改其动作/绑定、增删触发器。
+		// 运行时只读(解算走 const 的 FindMappings/GetMappings),这个入口是给编辑器的。
+		std::vector<ActionBindingConfig>& Mappings() { return m_Mappings; }
 
 		std::vector<const ActionBindingConfig*> FindMappings(NameId action) const;
 
