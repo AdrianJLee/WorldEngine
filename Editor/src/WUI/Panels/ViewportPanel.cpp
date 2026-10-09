@@ -264,23 +264,38 @@ namespace World
 			Wui::Tr("viewport.camera.hint", "Viewport view mode — switch in the View menu (top-left)."));
 		ctx.RegisterOverlayRect(viewButton);
 
-		// Level 2.0: 视口工具栏 —— 数据层昼夜快捷切换 & 空间流送网格开关
+		// Level 2.0: 视口工具栏 —— 数据层开关(改的是**真实**渲染剔除掩码)与网格开关
 		float toolbarX = viewButton.X + viewButton.W + 8.0f;
-		const float dayNightW = 86.0f;
-		const Wui::WuiRect dayNightBtn { toolbarX, sceneRect.Y + kChromePad, dayNightW, kChromeRowH };
-		const std::string dayNightLabel = m_ActiveNightMode ? "🌙 Night" : "☀️ Day";
-		Wui::Tooltip(ctx, dayNightBtn, "切换关卡数据层 (Day/Night Data Layer Toggle)");
-		if (Wui::Button(ctx, Wui::HashId("viewport.day_night"), dayNightBtn, dayNightLabel, theme))
+
+		// 每个声明的数据层一个开关:点亮 = 该层实体参与本帧渲染。
+		// 这是昼夜/战损这类"同一空间多套内容"的实际切换点(SceneRenderer 按掩码剔除)。
+		const std::vector<Level::DataLayerDefinition>& dataLayers = m_Host.GetLevelDataLayers();
+		const uint32_t activeLayers = m_Host.GetActiveDataLayers();
+		for (const Level::DataLayerDefinition& layer : dataLayers)
 		{
-			m_ActiveNightMode = !m_ActiveNightMode;
+			if (layer.Name.empty())
+				continue;
+			const bool isOn = (layer.LayerMask & activeLayers) != 0;
+			const std::string label = (isOn ? "* " : "  ") + layer.Name;
+			const float layerW = ctx.MeasureTextWidth(label, 12.0f) + 16.0f;
+			const Wui::WuiRect layerBtn { toolbarX, sceneRect.Y + kChromePad, layerW, kChromeRowH };
+			const std::string layerHint = Wui::TrFormat("viewport.datalayer.hint",
+				"Toggle data layer '{0}' (mask {1}).", { { "name", layer.Name },
+					{ "mask", std::to_string(layer.LayerMask) } });
+			Wui::Tooltip(ctx, layerBtn, layerHint);
+			if (Wui::Button(ctx, Wui::HashId(("viewport.layer." + layer.Name).c_str()), layerBtn, label, theme))
+			{
+				const uint32_t next = isOn ? (activeLayers & ~layer.LayerMask) : (activeLayers | layer.LayerMask);
+				m_Host.SetActiveDataLayers(next);
+			}
+			ctx.RegisterOverlayRect(layerBtn);
+			toolbarX += layerW + 4.0f;
 		}
-		ctx.RegisterOverlayRect(dayNightBtn);
-		toolbarX += dayNightW + 6.0f;
 
 		const float gridBtnW = 88.0f;
 		const Wui::WuiRect gridBtn { toolbarX, sceneRect.Y + kChromePad, gridBtnW, kChromeRowH };
 		const std::string gridLabel = m_ShowSpatialGrid ? "🌐 Grid: ON" : "🌐 Grid: OFF";
-		Wui::Tooltip(ctx, gridBtn, "切换 64m 空间流送分区网格显示");
+		Wui::Tooltip(ctx, gridBtn, Wui::Tr("viewport.grid.hint", "Toggle the level authoring grid."));
 		if (Wui::Button(ctx, Wui::HashId("viewport.stream_grid"), gridBtn, gridLabel, theme))
 		{
 			m_ShowSpatialGrid = !m_ShowSpatialGrid;
@@ -1008,41 +1023,53 @@ namespace World
 			}
 		}
 
-		if (m_ShowSpatialGrid && camera3D)
+		// ---- 关卡创作网格(2D / 3D 两种视口都画,平面随视角选)----
+		//
+		// 口径:3D 视口按**地面 XZ 平面**画 64m 流送单元;2D 视口按**XY 平面**画创作网格。
+		// 之前只画 3D(XZ 平面在 2D 正交视角下是edge-on 的一根线),2D 视口下网格等于不存在。
+		if (m_ShowSpatialGrid)
 		{
 			const Wui::GizmoCamera levelCam = m_Host.GetGizmoCamera();
 			const glm::vec3 camPos = levelCam.Position;
-			const float cellSize = 64.0f;
-			const int32_t centerCellX = static_cast<int32_t>(std::floor(camPos.x / cellSize));
-			const int32_t centerCellZ = static_cast<int32_t>(std::floor(camPos.z / cellSize));
+			const float cellSize = camera3D ? 64.0f : 4.0f;
+			const float planeOffset = camera3D ? 0.05f : 0.0f;
+			const int32_t centerA = static_cast<int32_t>(std::floor(camPos.x / cellSize));
+			const int32_t centerB = static_cast<int32_t>(std::floor((camera3D ? camPos.z : camPos.y) / cellSize));
 
 			{
 				Wui::ClipScope levelClip(ctx, sceneRect);
 
-				// 绘制相机周围 3x3 空间分区网格 (半径 1 个 Cell)
-				for (int32_t dx = -1; dx <= 1; ++dx)
+				// 相机周围 3x3:中心格高亮(当前所在单元),周边格淡显(视距缓冲带)。
+				for (int32_t da = -1; da <= 1; ++da)
 				{
-					for (int32_t dz = -1; dz <= 1; ++dz)
+					for (int32_t db = -1; db <= 1; ++db)
 					{
-						const int32_t cx = centerCellX + dx;
-						const int32_t cz = centerCellZ + dz;
-						const float minX = cx * cellSize;
-						const float minZ = cz * cellSize;
-						const float maxX = minX + cellSize;
-						const float maxZ = minZ + cellSize;
+						const float minA = (centerA + da) * cellSize;
+						const float minB = (centerB + db) * cellSize;
+						const float maxA = minA + cellSize;
+						const float maxB = minB + cellSize;
 
-						const bool isCurrent = (dx == 0 && dz == 0);
+						const bool isCurrent = (da == 0 && db == 0);
 						const Wui::WuiColor cellColor = isCurrent
 							? Wui::WuiColor { 0.15f, 0.95f, 0.85f, 0.90f }
 							: Wui::WuiColor { 0.95f, 0.75f, 0.20f, 0.45f };
 						const float thickness = isCurrent ? 2.0f : 1.0f;
 
-						const glm::vec3 corners[4] = {
-							{ minX, 0.05f, minZ },
-							{ maxX, 0.05f, minZ },
-							{ maxX, 0.05f, maxZ },
-							{ minX, 0.05f, maxZ }
-						};
+						glm::vec3 corners[4];
+						if (camera3D)
+						{
+							corners[0] = { minA, planeOffset, minB };
+							corners[1] = { maxA, planeOffset, minB };
+							corners[2] = { maxA, planeOffset, maxB };
+							corners[3] = { minA, planeOffset, maxB };
+						}
+						else
+						{
+							corners[0] = { minA, minB, planeOffset };
+							corners[1] = { maxA, minB, planeOffset };
+							corners[2] = { maxA, maxB, planeOffset };
+							corners[3] = { minA, maxB, planeOffset };
+						}
 
 						for (int i = 0; i < 4; ++i)
 						{
@@ -1055,16 +1082,47 @@ namespace World
 				}
 			}
 
-			// 视口右上角 HUD 胶囊
-			const float hudW = 280.0f;
+			// 视口右上角 HUD:数字全部**取自当前文档**,不再写死。
+			size_t entityCount = 0;
+			if (const Ref<Scene> gridScene = m_Host.GetActiveScene())
+			{
+				const entt::registry& gridRegistry = gridScene->GetRegistry();
+				entityCount = gridRegistry.view<UUIDComponent>().size();
+			}
+
+			char hudLine1[160] = {};
+			char hudLine2[160] = {};
+			if (camera3D)
+			{
+				std::snprintf(hudLine1, sizeof(hudLine1),
+					"Grid 64m | Cell (%d, %d)", centerA, centerB);
+			}
+			else
+			{
+				std::snprintf(hudLine1, sizeof(hudLine1),
+					"Grid 4u | Cell (%d, %d)", centerA, centerB);
+			}
+			std::string layersText;
+			for (const Level::DataLayerDefinition& layer : m_Host.GetLevelDataLayers())
+			{
+				if (layer.Name.empty())
+					continue;
+				if ((layer.LayerMask & m_Host.GetActiveDataLayers()) == 0)
+					continue;
+				if (!layersText.empty())
+					layersText += "+";
+				layersText += layer.Name;
+			}
+			if (layersText.empty())
+				layersText = "all";
+			std::snprintf(hudLine2, sizeof(hudLine2),
+				"Layers: [%s] | Entities: %zu", layersText.c_str(), entityCount);
+
+			const float hudW = 240.0f;
 			const float hudH = 46.0f;
 			const Wui::WuiRect hudRect { sceneRect.X + sceneRect.W - hudW - 12.0f, sceneRect.Y + 12.0f, hudW, hudH };
 			Wui::PanelBackground(ctx, hudRect, Wui::WuiColor { 0.07f, 0.09f, 0.13f, 0.88f }, 4.0f);
 			Wui::HighlightOutline(ctx, hudRect, Wui::WuiColor { 0.18f, 0.65f, 0.90f, 0.70f }, 4.0f, 1.0f);
-
-			const std::string hudLine1 = "Level 2.0 | Cell: (" + std::to_string(centerCellX) + ", " + std::to_string(centerCellZ) + ") [64m Grid]";
-			const std::string hudLine2 = "Active: 9 Chunks | Layer: [" + std::string(m_ActiveNightMode ? "Night" : "Day") + "]";
-
 			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 5.0f }, hudLine1, Wui::WuiColor { 0.30f, 0.90f, 1.0f, 1.0f }, 12.0f);
 			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 24.0f }, hudLine2, Wui::WuiColor { 0.85f, 0.85f, 0.90f, 0.90f }, 12.0f);
 		}

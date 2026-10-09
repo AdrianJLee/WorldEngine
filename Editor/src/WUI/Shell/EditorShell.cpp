@@ -1058,6 +1058,26 @@ Wui::GizmoOperation EditorShell::GetGizmoOperation() const{
 	}
 
 
+const std::vector<Level::DataLayerDefinition>& EditorShell::GetLevelDataLayers() const{
+		// 当前文档是关卡包时用包 manifest 声明的层;否则视口不显示层开关
+		// (单场景 `.wd` 没有数据层概念)。
+		return m_Editor.GetDocument().GetDataLayers();
+	}
+
+
+uint32_t EditorShell::GetActiveDataLayers() const{
+		if (const Ref<Scene> scene = m_Editor.GetActiveScene())
+			return scene->GetActiveDataLayers();
+		return 0xFFFFFFFFu;
+	}
+
+
+void EditorShell::SetActiveDataLayers(uint32_t mask){
+		if (const Ref<Scene> scene = m_Editor.GetActiveScene())
+			scene->SetActiveDataLayers(mask);
+	}
+
+
 std::string EditorShell::PanelTitle(const std::string& id) const{
 		// 静态面板走本地化表;动态面板(材质/模型/脚本)用注册表里的动态标题。
 		static const std::pair<const char*, const char*>* kTitles = nullptr;

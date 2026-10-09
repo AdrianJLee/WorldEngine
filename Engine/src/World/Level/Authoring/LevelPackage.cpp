@@ -1,6 +1,13 @@
 #include "wldpch.h"
 #include "World/Level/Authoring/LevelPackage.h"
+
+#include "World/Core/StringPool.h"
+#include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
+#include "World/Scene/Scene.h"
+#include "World/Scene/SceneSerializer.h"
 #include <fstream>
+#include <set>
 #include <yaml-cpp/yaml.h>
 
 namespace World::Level
@@ -58,6 +65,26 @@ LevelPackage& LevelPackage::operator=(LevelPackage&& other) noexcept = default;
 		return nullptr;
 	}
 
+	void LevelPackage::CaptureFromScene(Scene& scene, const std::string& levelName, uint32_t gridCellSize)
+	{
+		m_Impl->Name = levelName;
+		m_Impl->GridCellSize = gridCellSize > 0 ? gridCellSize : 64;
+		m_Impl->Entities.clear();
+
+		entt::registry& registry = scene.GetRegistry();
+		for (const entt::entity handle : registry.view<UUIDComponent>())
+		{
+			const Entity entity(&scene, handle);
+
+			EntityDescriptor descriptor;
+			std::string documentError;
+			if (!SceneSerializer::SerializeEntityDocumentToYaml(entity, &descriptor.DocumentYaml, &documentError))
+				continue;
+			descriptor.RefreshDerivedFromDocument();
+			m_Impl->Entities.push_back(std::move(descriptor));
+		}
+	}
+
 	bool LevelPackage::Save(const std::filesystem::path& packageDir, std::string* outError) const
 	{
 		try
@@ -97,12 +124,26 @@ LevelPackage& LevelPackage::operator=(LevelPackage&& other) noexcept = default;
 			const std::filesystem::path entitiesDir = packageDir / "entities";
 			std::filesystem::create_directories(entitiesDir);
 
+			std::set<std::string> liveFiles;
 			for (const auto& entity : m_Impl->Entities)
 			{
 				const std::string filename = std::to_string(entity.EntityUUID) + ".entity";
+				liveFiles.insert(filename);
 				const std::filesystem::path entityPath = entitiesDir / filename;
 				if (!entity.Save(entityPath, outError))
 					return false;
+			}
+
+			// 剪枝:编辑器里删掉的实体若留下旧 `.entity`,下次载入会"复活"成幽灵实体。
+			// 保存 = 让磁盘与内存一致,因此这里把不在集合里的实体文件删掉。
+			for (const auto& entry : std::filesystem::directory_iterator(entitiesDir))
+			{
+				if (!entry.is_regular_file() || entry.path().extension() != ".entity")
+					continue;
+				if (liveFiles.count(entry.path().filename().string()) != 0)
+					continue;
+				std::error_code removeError;
+				std::filesystem::remove(entry.path(), removeError);
 			}
 
 			return true;

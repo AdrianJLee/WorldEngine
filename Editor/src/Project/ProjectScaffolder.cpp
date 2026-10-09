@@ -8,7 +8,6 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneSerializer.h"
-#include "World/Level/Authoring/LegacySceneMigration.h"
 #include "World/Script/Runtime/HotReload.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
@@ -387,14 +386,6 @@ namespace World::Editor
 					return false;
 				}
 			}
-			// Level 2.0: 同时输出现代 OFPA 关卡目录
-			auto migResult = Level::LegacySceneMigrationTool::DeconstructSceneToPackage(*scene, "Main", 64);
-			if (migResult.Success)
-			{
-				std::string pkgErr;
-				migResult.Package.Save(projectRoot / "assets" / "levels" / "Main", &pkgErr);
-			}
-
 			SceneSerializer serializer(scene);
 			if (!serializer.Serialize(scenePath.string()))
 			{

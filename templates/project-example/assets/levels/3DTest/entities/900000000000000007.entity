@@ -1,5 +1,4 @@
 ChunkID: 0
-DataLayerMask: 3
 Entity:
   World::UUIDComponent:
     ID:
@@ -15,3 +14,5 @@ Entity:
     Color: [1, 1, 1, 1]
     Mesh: ""
     Material: "materials/quadrants.wmat"
+  World::LevelEntityComponent:
+    DataLayerMask: 2

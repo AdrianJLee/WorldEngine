@@ -6,6 +6,7 @@
 #include "World/Renderer/SceneRenderer.h"
 #include "World/RHI/Rhi.h"
 #include "World/Renderer/Texture/TextureLibrary.h"
+#include "World/Level/Authoring/LevelPackage.h"
 #include "World/WUI/WuiGizmo.h"
 
 namespace World
@@ -35,5 +36,12 @@ namespace World
 		virtual Entity PickEntityAt(glm::vec2 viewportLocal) = 0;
 		virtual EditorCamera& GetEditorCamera() = 0;
 		virtual Wui::GizmoOperation GetGizmoOperation() const = 0;
+
+		// Level 2.0 数据层:当前文档声明的层(名字 + 掩码)与场景的激活掩码。
+		// 视口工具栏按这里返回的层渲染开关 —— 开关改的是**真实**渲染剔除掩码,
+		// 不是一个只翻状态、场景毫无变化的摆设。
+		virtual const std::vector<Level::DataLayerDefinition>& GetLevelDataLayers() const = 0;
+		virtual uint32_t GetActiveDataLayers() const = 0;
+		virtual void SetActiveDataLayers(uint32_t mask) = 0;
 	};
 }

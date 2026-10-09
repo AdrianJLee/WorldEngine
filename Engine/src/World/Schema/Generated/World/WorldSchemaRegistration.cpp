@@ -30,6 +30,7 @@ const TypeSchema& WeSchemaOf_SphereCollider3DComponent();
 const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent();
 const TypeSchema& WeSchemaOf_JointComponent();
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent();
+const TypeSchema& WeSchemaOf_LevelEntityComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -3292,6 +3293,62 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
 };
 
 template <>
+struct GeneratedAccess<World::LevelEntityComponent>
+{
+    static Value Get_DataLayerMask(const void* instance)
+    {
+        const World::LevelEntityComponent* self = static_cast<const World::LevelEntityComponent*>(instance);
+        return Value(self->DataLayerMask);
+    }
+    static void Set_DataLayerMask(void* instance, const Value& value)
+    {
+        World::LevelEntityComponent* self = static_cast<World::LevelEntityComponent*>(instance);
+        self->DataLayerMask = std::get<uint32_t>(value);
+    }
+    static const FieldSchema& Field_DataLayerMask()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4C564C4C41594552ull },
+            "DataLayerMask",
+            Kind::UInt32,
+            &Get_DataLayerMask,
+            &Set_DataLayerMask,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Level", std::nullopt, std::nullopt, false, false, "Bitmask matching the level package manifest DataLayers[].Mask; 0 = always visible.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::LevelEntityComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::LevelEntityComponent" },
+            "LevelEntityComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::LevelEntityComponent),
+            TypeCategory::Component,
+            {
+                Field_DataLayerMask(),
+            },
+            &StorageBindingOf(),
+            "Level",
+            "Level 2.0 data-layer membership: which level data layers this entity belongs to.",
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -3734,6 +3791,7 @@ const TypeSchema& WeSchemaOf_SphereCollider3DComponent() { return GeneratedAcces
 const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent() { return GeneratedAccess<World::CapsuleCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_JointComponent() { return GeneratedAccess<World::JointComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent() { return GeneratedAccess<World::MeshCollider3DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_LevelEntityComponent() { return GeneratedAccess<World::LevelEntityComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -3775,6 +3833,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_CapsuleCollider3DComponent(),
 			WeSchemaOf_JointComponent(),
 			WeSchemaOf_MeshCollider3DComponent(),
+			WeSchemaOf_LevelEntityComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

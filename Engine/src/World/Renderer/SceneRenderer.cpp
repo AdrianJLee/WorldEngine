@@ -555,6 +555,9 @@ namespace World
 				// 这里跳过以免同一个实体画两遍(只挂 MeshRendererComponent 的实体逐字节不变)。
 				if (scene.m_Registry.all_of<SkinnedMeshRendererComponent>(entity))
 					continue;
+				// Level 2.0 数据层:不在当前激活层的实体不参与本帧收集(昼夜/战损切换的真实剔除点)。
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
 				const auto& [transform, meshComponent] =
 					meshView.get<TransformComponent, MeshRendererComponent>(entity);
 				// D5:Mesh 指向 .wmodel 时优先加载(进程内缓存);坏文件/读不到时回退到
@@ -672,6 +675,8 @@ namespace World
 			auto skinnedView = scene.m_Registry.view<TransformComponent, SkinnedMeshRendererComponent>();
 			for (auto entity : skinnedView)
 			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
 				const auto& [transform, skinned] =
 					skinnedView.get<TransformComponent, SkinnedMeshRendererComponent>(entity);
 				if (!skinned.Mesh.HasPath() && !skinned.Mesh.Identity.IsValid())
@@ -777,12 +782,16 @@ namespace World
 			std::vector<DirectionalLightData> directionalLights;
 			for (auto entity : scene.m_Registry.view<DirectionalLightComponent>())
 			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
 				const auto& light = scene.m_Registry.get<DirectionalLightComponent>(entity);
 				directionalLights.push_back({ light.Color, light.Intensity, light.Direction, light.CastShadow });
 			}
 			std::vector<PointLightData> pointLights;
 			for (auto entity : scene.m_Registry.view<PointLightComponent>())
 			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
 				const auto& light = scene.m_Registry.get<PointLightComponent>(entity);
 				// 点光位置取实体世界位置(有层级时用求解后的世界矩阵,与网格同一约定)。
 				glm::vec3 position { 0.0f };

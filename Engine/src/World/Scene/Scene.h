@@ -93,6 +93,13 @@ namespace World
 		WorldSettings& GetWorldSettings() { return m_WorldSettings; }
 		const WorldSettings& GetWorldSettings() const { return m_WorldSettings; }
 
+		// Level 2.0 数据层:当前激活的层掩码(位 OR)。渲染与脚本按
+		// `LevelEntityComponent::DataLayerMask & Active` 剔除;默认全层可见。
+		uint32_t GetActiveDataLayers() const { return m_ActiveDataLayers; }
+		void SetActiveDataLayers(uint32_t mask) { m_ActiveDataLayers = mask; }
+		// 实体是否属于当前激活的数据层(无 LevelEntityComponent / 掩码为 0 = 常驻可见)。
+		bool IsEntityInActiveDataLayers(entt::entity entity) const;
+
 		// ---- P4-U13b:Prefab 实例注册表(随场景存档) ----
 		// 记录"哪些子树是 prefab 实例、来源文件、哪些字段被覆盖";此前只活在编辑器层级面板
 		// 的内存里,重开场景即丢;现在由 Scene 持有,并由 SceneSerializer 读写 `.wd` 的
@@ -629,6 +636,8 @@ namespace World
 		std::vector<Gameplay::PrefabInstanceRecord> m_PrefabInstances;
 		// P4-U4:场景级设置(.wd 头部的 World: 块)。
 		WorldSettings m_WorldSettings;
+		// 默认 0xFFFFFFFF = 全层可见(没有 LevelEntityComponent 的旧场景行为逐字节不变)。
+		uint32_t m_ActiveDataLayers { 0xFFFFFFFFu };
 
 		// Pure ECS M3.6: 响应式组件观察者注册表
 		uint64_t m_NextObserverId = 0;
@@ -672,6 +681,7 @@ namespace World
 		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_PhysicsBodies2D)));
 		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_Physics3D)));
 		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_WorldSettings)));
+		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_ActiveDataLayers)));
 		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_RenderExtract)));
 		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_FrameSystems)));
 		h = LayoutHash::Mix(h, static_cast<uint64_t>(offsetof(Scene, m_StartupSystems)));

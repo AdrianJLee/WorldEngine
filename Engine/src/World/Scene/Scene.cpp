@@ -1872,6 +1872,14 @@ namespace World
 		return {};
 	}
 
+	bool Scene::IsEntityInActiveDataLayers(entt::entity entity) const
+	{
+		const auto* level = m_Registry.try_get<LevelEntityComponent>(entity);
+		if (!level || level->DataLayerMask == 0)
+			return true;   // 没有归属标注 = 常驻可见(旧内容不因此消失)
+		return (level->DataLayerMask & m_ActiveDataLayers) != 0;
+	}
+
 	void Scene::DuplicateEntity(Entity entity)
 	{
 		AssertStructuralWrite();

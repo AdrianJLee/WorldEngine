@@ -7,6 +7,11 @@
 #include <string>
 #include <vector>
 
+namespace World
+{
+	class Scene;
+}
+
 namespace World::Level
 {
 	struct DataLayerDefinition
@@ -46,6 +51,11 @@ namespace World::Level
 
 		bool Save(const std::filesystem::path& packageDir, std::string* outError = nullptr) const;
 		bool Load(const std::filesystem::path& packageDir, std::string* outError = nullptr);
+
+		// 由场景重建整包:逐实体走 SceneSerializer 的**实体级**序列化 —— 全部组件随文件走,
+		// 数据层归属来自实体自身的 LevelEntityComponent。数据层定义(strings/masks)由调用方
+		// 事先设好(不随场景走)。已有实体集合会被清空重建。
+		void CaptureFromScene(Scene& scene, const std::string& levelName, uint32_t gridCellSize);
 
 	private:
 		struct Impl;

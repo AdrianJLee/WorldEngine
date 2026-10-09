@@ -66,6 +66,7 @@ namespace
 		{ "World::CapsuleCollider3DComponent",   20 },
 		{ "World::JointComponent",               56 },
 		{ "World::MeshCollider3DComponent",      24 },
+		{ "World::LevelEntityComponent",          4 },
 	};
 
 	// 非 schema 组件:不在注册表里,预算与豁免由 ComponentLayoutBudget.h 的编译期断言覆盖。

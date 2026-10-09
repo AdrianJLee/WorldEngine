@@ -749,4 +749,26 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	// Level 2.0 数据层归属。实体属于哪些关卡数据层(Base_World / Day / Night / 剧情分支…),
+	// 位掩码与关卡包 manifest 的 DataLayers[].Mask 对应。
+	//
+	// 场景另持"当前激活掩码"(Scene::SetActiveDataLayers),渲染与脚本按 `Mask & Active` 剔除 ——
+	// 昼夜/战损这类"同一空间多套内容"因此是**真实可编辑的数据**(component 随 `.entity` 落盘、
+	// 在属性面板里可改),而不是只在面板上翻一个不起作用的开关。
+	struct LevelEntityComponent
+	{
+		uint32_t DataLayerMask { 1 };   // 1 = Base_World(常驻层)
+
+		LevelEntityComponent() = default;
+		explicit LevelEntityComponent(uint32_t mask) : DataLayerMask(mask) {}
+
+		WE_SCHEMA_BODY(World, LevelEntityComponent, Component)
+			WE_SCHEMA_META(Category("Level"),
+				Doc("Level 2.0 data-layer membership: which level data layers this entity belongs to."))
+			WE_FIELD(DataLayerMask, UInt32, Id(0x4C564C4C41594552), Default(1),
+				Group("Level"),
+				Doc("Bitmask matching the level package manifest DataLayers[].Mask; 0 = always visible."));
+		WE_SCHEMA_END
+	};
+
 }

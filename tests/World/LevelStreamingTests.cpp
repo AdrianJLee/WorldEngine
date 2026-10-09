@@ -4,7 +4,6 @@
 #include "World/Level/Core/WorldSpace.h"
 #include "World/Level/Authoring/EntityDescriptor.h"
 #include "World/Level/Authoring/LevelPackage.h"
-#include "World/Level/Authoring/LegacySceneMigration.h"
 #include "World/Level/Cooking/LevelCooker.h"
 #include "World/Level/Runtime/StreamableChunk.h"
 #include "World/Level/Runtime/ChunkStreamingCoordinator.h"
@@ -96,6 +95,60 @@ int main()
 		}
 
 		const std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "worldengine-level2-m4-tests";
+		// 14.数据层剔除:SceneRenderer 用的就是这条谓词(Scene::IsEntityInActiveDataLayers)。
+		//     昼夜开关如果没有它,就只是个"翻状态但场景毫无变化"的摆设。
+		{
+			WorldContext context;
+			Scene scene(context);
+
+			Entity always = Entity::CreateEntity(&scene, "Floor", UUID(4001));
+			always.AddComponent<TransformComponent>(glm::vec3(0.0f));
+			always.AddComponent<LevelEntityComponent>(1u);        // Base_World
+
+			Entity dayOnly = Entity::CreateEntity(&scene, "DayStatue", UUID(4002));
+			dayOnly.AddComponent<TransformComponent>(glm::vec3(0.0f));
+			dayOnly.AddComponent<LevelEntityComponent>(2u);       // Day
+
+			Entity nightOnly = Entity::CreateEntity(&scene, "NightLantern", UUID(4003));
+			nightOnly.AddComponent<TransformComponent>(glm::vec3(0.0f));
+			nightOnly.AddComponent<LevelEntityComponent>(4u);     // Night
+
+			// 未标注层归属的实体永远可见(旧内容不因引入数据层而消失)。
+			Entity untagged = Entity::CreateEntity(&scene, "Untagged", UUID(4004));
+			untagged.AddComponent<TransformComponent>(glm::vec3(0.0f));
+
+			const entt::entity alwaysHandle = static_cast<entt::entity>(always);
+			const entt::entity dayHandle = static_cast<entt::entity>(dayOnly);
+			const entt::entity nightHandle = static_cast<entt::entity>(nightOnly);
+			const entt::entity untaggedHandle = static_cast<entt::entity>(untagged);
+
+			// 默认全层可见
+			CHECK(scene.IsEntityInActiveDataLayers(alwaysHandle));
+			CHECK(scene.IsEntityInActiveDataLayers(dayHandle));
+			CHECK(scene.IsEntityInActiveDataLayers(nightHandle));
+			CHECK(scene.IsEntityInActiveDataLayers(untaggedHandle));
+
+			// 只看白天(Base + Day):夜灯被剔除
+			scene.SetActiveDataLayers(1u | 2u);
+			CHECK(scene.IsEntityInActiveDataLayers(alwaysHandle));
+			CHECK(scene.IsEntityInActiveDataLayers(dayHandle));
+			CHECK(!scene.IsEntityInActiveDataLayers(nightHandle));
+			CHECK(scene.IsEntityInActiveDataLayers(untaggedHandle));
+
+			// 只看夜晚(Base + Night):白天雕像被剔除
+			scene.SetActiveDataLayers(1u | 4u);
+			CHECK(scene.IsEntityInActiveDataLayers(alwaysHandle));
+			CHECK(!scene.IsEntityInActiveDataLayers(dayHandle));
+			CHECK(scene.IsEntityInActiveDataLayers(nightHandle));
+
+			// 全关:只有常驻与未标注的留下
+			scene.SetActiveDataLayers(0u);
+			CHECK(!scene.IsEntityInActiveDataLayers(alwaysHandle));
+			CHECK(!scene.IsEntityInActiveDataLayers(dayHandle));
+			CHECK(!scene.IsEntityInActiveDataLayers(nightHandle));
+			CHECK(scene.IsEntityInActiveDataLayers(untaggedHandle));
+		}
+
 		std::filesystem::remove_all(tempDir);
 		std::filesystem::create_directories(tempDir);
 
@@ -114,12 +167,15 @@ int main()
 			renderer.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
 			renderer.Color = glm::vec4 { 1.0f, 0.55f, 0.12f, 1.0f };
 			cube.AddComponent<MeshRendererComponent>(renderer);
+			// 数据层归属是**实体内嵌组件**(唯一事实源),不是文件级元数据。
+			cube.AddComponent<LevelEntityComponent>(0x3u);
 
 			CHECK(SceneSerializer::SerializeEntityDocumentToYaml(cube, &doc, &docError));
 			CHECK(docError.empty());
 			// 组件随文档走:MeshRenderer 必须在文档里(这正是旧实现丢掉的载荷)。
 			CHECK(doc.find("World::MeshRendererComponent") != std::string::npos);
 			CHECK(doc.find("World::TransformComponent") != std::string::npos);
+			CHECK(doc.find("World::LevelEntityComponent") != std::string::npos);
 
 			EntityDescriptor descriptor;
 			descriptor.DocumentYaml = doc;
@@ -182,14 +238,14 @@ int main()
 			Entity tree = Entity::CreateEntity(&source, "DistantTree", UUID(2003));
 			tree.AddComponent<TransformComponent>(glm::vec3 { 500.0f, 0.0f, 500.0f });
 
-			MigrationResult migrated = LegacySceneMigrationTool::DeconstructSceneToPackage(source, "Barrens", 64);
-			CHECK(migrated.Success);
-			CHECK(migrated.Package.GetEntityCount() == 3);
+			LevelPackage package;
+			package.CaptureFromScene(source, "Barrens", 64);
+			CHECK(package.GetEntityCount() == 3);
 
 			// 显式分块:tower/crate 同块,tree 单独一块。
-			for (size_t i = 0; i < migrated.Package.GetEntityCount(); ++i)
+			for (size_t i = 0; i < package.GetEntityCount(); ++i)
 			{
-				EntityDescriptor& d = migrated.Package.GetMutableEntity(i);
+				EntityDescriptor& d = package.GetMutableEntity(i);
 				d.ChunkID = (d.EntityUUID == 2003ULL) ? 888ULL : 999ULL;
 			}
 
@@ -197,7 +253,7 @@ int main()
 			settings.GridCellSize = 64;
 			settings.SubspaceID = 0;
 
-			CookResult result = LevelCooker::CookPackage(migrated.Package, cookedDir, settings);
+			CookResult result = LevelCooker::CookPackage(package, cookedDir, settings);
 			CHECK(result.Success);
 			CHECK(result.ChunksCooked == 2);
 			CHECK(result.TotalEntitiesCooked == 3);
@@ -429,7 +485,7 @@ int main()
 			CHECK(res3 == PerceptionStatus::Clear);
 		}
 
-		// 13.LegacySceneMigrationTool (M4)
+		// 13.关卡包往返:场景 → 包(逐实体文件)→ 二进制烘焙 → 流送块载入
 		{
 			WorldContext context;
 			Scene sourceScene(context);
@@ -440,27 +496,43 @@ int main()
 			Entity e2 = Entity::CreateEntity(&sourceScene, "BossMonster", UUID(3002));
 			e2.AddComponent<TransformComponent>(glm::vec3(250.0f, 0.0f, 250.0f));
 
-			// Deconstruct scene into LevelPackage
-			MigrationResult migResult = LegacySceneMigrationTool::DeconstructSceneToPackage(sourceScene, "Dungeon_Migrated", 128);
-			CHECK(migResult.Success);
-			CHECK(migResult.EntitiesMigrated == 2);
-			CHECK(migResult.Package.GetName() == "Dungeon_Migrated");
-			CHECK(migResult.Package.GetGridCellSize() == 128);
-			CHECK(migResult.Package.GetEntityCount() == 2);
+			LevelPackage package;
+			package.CaptureFromScene(sourceScene, "Dungeon", 128);
+			CHECK(package.GetName() == "Dungeon");
+			CHECK(package.GetGridCellSize() == 128);
+			CHECK(package.GetEntityCount() == 2);
 
-			const std::filesystem::path migDir = tempDir / "MigratedDungeon";
+			const std::filesystem::path pkgDir = tempDir / "DungeonPackage";
 			std::string expError;
-			CHECK(LegacySceneMigrationTool::ExportPackageToDisk(migResult.Package, migDir, &expError));
+			CHECK(package.Save(pkgDir, &expError));
 			CHECK(expError.empty());
-			CHECK(std::filesystem::exists(migDir / "manifest.yaml"));
-			CHECK(std::filesystem::exists(migDir / "entities" / "3001.entity"));
-			CHECK(std::filesystem::exists(migDir / "entities" / "3002.entity"));
+			CHECK(std::filesystem::exists(pkgDir / "manifest.yaml"));
+			CHECK(std::filesystem::exists(pkgDir / "entities" / "3001.entity"));
+			CHECK(std::filesystem::exists(pkgDir / "entities" / "3002.entity"));
 
-			// Verify cooked output and streamed loading of migrated package
-			CookResult cookRes = LevelCooker::CookPackage(migResult.Package, migDir / "cooked", { 128, 0 });
+			// 剪枝:删掉一个实体再存,磁盘上的旧 `.entity` 必须消失(否则重载会"复活"它)。
+			LevelPackage pruned;
+			CHECK(pruned.Load(pkgDir, &expError));
+			CHECK(pruned.GetEntityCount() == 2);
+			EntityDescriptor kept = pruned.GetEntity(0);
+			LevelPackage slim;
+			slim.SetName("Dungeon");
+			slim.SetGridCellSize(128);
+			slim.AddEntity(kept);
+			CHECK(slim.Save(pkgDir, &expError));
+			{
+				size_t entityFiles = 0;
+				for (const auto& entry : std::filesystem::directory_iterator(pkgDir / "entities"))
+					if (entry.path().extension() == ".entity")
+						++entityFiles;
+				CHECK(entityFiles == 1);
+			}
+
+			// 烘焙 → 流送块
+			CookResult cookRes = LevelCooker::CookPackage(slim, pkgDir / "cooked", { 128, 0 });
 			CHECK(cookRes.Success);
 			CHECK(cookRes.ChunksCooked >= 1);
-			CHECK(cookRes.TotalEntitiesCooked == 2);
+			CHECK(cookRes.TotalEntitiesCooked == 1);
 
 			StreamableChunk migChunk;
 			CHECK(migChunk.LoadFromFile(cookRes.OutputChunkFiles[0]));

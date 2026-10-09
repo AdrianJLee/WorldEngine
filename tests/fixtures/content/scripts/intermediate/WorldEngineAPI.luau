@@ -758,6 +758,10 @@ function ui:isOpen() end
 ---@field Axis vec3
 ---@field AnchorSelf vec3
 
+-- Component fields are exposed through Entity:GetComponent("LevelEntityComponent"); there is no runtime global named LevelEntityComponent.
+---@class LevelEntityComponent
+---@field DataLayerMask number
+
 -- Component fields are exposed through Entity:GetComponent("MeshCollider3DComponent"); there is no runtime global named MeshCollider3DComponent.
 ---@class MeshCollider3DComponent
 ---@field Mode number
@@ -873,6 +877,8 @@ function ui:isOpen() end
 ---@field Hierarchy string Short alias for "HierarchyComponent".
 ---@field JointComponent string Registered component type name "JointComponent".
 ---@field Joint string Short alias for "JointComponent".
+---@field LevelEntityComponent string Registered component type name "LevelEntityComponent".
+---@field LevelEntity string Short alias for "LevelEntityComponent".
 ---@field MeshCollider3DComponent string Registered component type name "MeshCollider3DComponent".
 ---@field MeshCollider3D string Short alias for "MeshCollider3DComponent".
 ---@field MeshRendererComponent string Registered component type name "MeshRendererComponent".

@@ -54,6 +54,12 @@ namespace World::Level
 			if (const YAML::Node text = tag["Tag"])
 				Name = text.as<std::string>(Name);
 
+		// 数据层归属的唯一事实源是实体文档里的 LevelEntityComponent(随组件一起落盘、
+		// 在属性面板里可改);DataLayerMask 只是它的派生视图(供空间切分/二进制记录用)。
+		if (const YAML::Node level = entity["World::LevelEntityComponent"])
+			if (const YAML::Node mask = level["DataLayerMask"])
+				DataLayerMask = mask.as<uint32_t>(DataLayerMask);
+
 		if (const YAML::Node transform = entity[kTransformComponentKey])
 		{
 			ReadVec3(transform["Location"], &Position);
@@ -85,7 +91,6 @@ namespace World::Level
 			YAML::Emitter out;
 			out << YAML::BeginMap;
 			out << YAML::Key << "ChunkID" << YAML::Value << ChunkID;
-			out << YAML::Key << "DataLayerMask" << YAML::Value << DataLayerMask;
 			out << YAML::Key << "Entity" << YAML::Value << entities[0];
 			out << YAML::EndMap;
 
@@ -126,7 +131,7 @@ namespace World::Level
 			}
 
 			ChunkID = root["ChunkID"] ? root["ChunkID"].as<uint64_t>(0) : 0;
-			DataLayerMask = root["DataLayerMask"] ? root["DataLayerMask"].as<uint32_t>(1) : 1u;
+			DataLayerMask = 1;   // 派生;Load 末尾由 RefreshDerivedFromDocument 覆盖
 
 			const YAML::Node entity = root["Entity"];
 			if (!entity || !entity.IsMap())
