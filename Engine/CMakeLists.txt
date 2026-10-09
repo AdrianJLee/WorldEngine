@@ -105,6 +105,29 @@ set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_WEB OFF CACHE BOOL "" FORCE)
 add_subdirectory(${WE_THIRD_PARTY}/luau ${CMAKE_BINARY_DIR}/third_party/luau)
+set(WE_TEXTURE_CODEC_SOURCES
+    ${WE_THIRD_PARTY}/stb_image/stb_image.cpp
+    ${WE_THIRD_PARTY}/bc7enc16/bc7enc16.c
+    ${WE_THIRD_PARTY}/rgbcx/rgbcx.cpp
+)
+add_library(WorldTextureCodecs STATIC ${WE_TEXTURE_CODEC_SOURCES})
+add_library(WorldVolk STATIC "${WE_THIRD_PARTY}/volk/volk.c")
+target_include_directories(WorldVolk PUBLIC
+    "${WE_THIRD_PARTY}/volk"
+    "${WE_THIRD_PARTY}/vulkan-headers/include"
+    ${Vulkan_INCLUDE_DIRS}
+)
+target_compile_definitions(WorldVolk PUBLIC "VK_USE_PLATFORM_WIN32_KHR")
+
+target_include_directories(WorldTextureCodecs PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${WE_THIRD_PARTY}/stb_image"
+    "${WE_THIRD_PARTY}/bc7enc16"
+    "${WE_THIRD_PARTY}/rgbcx"
+    "${WE_THIRD_PARTY}/spdlog/include"
+    "${WE_THIRD_PARTY}/glm"
+)
+
 add_library(World SHARED)
 set_target_properties(World PROPERTIES
     OUTPUT_NAME "WorldRuntime"
@@ -171,10 +194,10 @@ target_include_directories(World PRIVATE
     # M4-TEX:纹理块压缩编码器(bc7enc16 = BC7,rgbcx = BC1–BC5)。
     "${WLD_ENGINE_ROOT}/third_party/bc7enc16"
     "${WLD_ENGINE_ROOT}/third_party/rgbcx"
+    ${Vulkan_INCLUDE_DIRS} # 自动解析的 Vulkan 路径
     "${WLD_ENGINE_ROOT}/third_party/vulkan-headers/include"
     "${WLD_ENGINE_ROOT}/third_party/volk"
-    ${Vulkan_INCLUDE_DIRS} # 自动解析的 Vulkan 路径
-)
+    )
 target_include_directories(World PUBLIC 
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${WLD_ENGINE_ROOT}/third_party/glm"
@@ -190,14 +213,14 @@ file(GLOB_RECURSE WORLD_SOURCES
     "src/*.h"
     "src/*.cpp"
     "${WE_THIRD_PARTY}/stb_image/*.h"
-    "${WE_THIRD_PARTY}/stb_image/*.cpp"
-    "${WE_THIRD_PARTY}/bc7enc16/*.c"
+    
+    
     "${WE_THIRD_PARTY}/bc7enc16/*.h"
-    "${WE_THIRD_PARTY}/rgbcx/*.cpp"
+    
     "${WE_THIRD_PARTY}/rgbcx/*.h"
     "${WE_THIRD_PARTY}/glm/glm/**.hpp"
 	"${WE_THIRD_PARTY}/glm/glm/**.inl"
-    "${WE_THIRD_PARTY}/volk/*.c"
+    
     "${WE_THIRD_PARTY}/volk/*.h"
 
 )
@@ -205,13 +228,12 @@ file(GLOB_RECURSE WORLD_SOURCES
 # 添加源文件到 target
 target_sources(World PRIVATE ${WORLD_SOURCES} $<TARGET_OBJECTS:WorldBox2d>)
 
-# volk 需要在启用 Win32 平台宏时编译,才会导出 VkWin32SurfaceCreateInfoKHR /
-# vkCreateWin32SurfaceKHR 等平台符号(VulkanSwapchain 用它们创建表面)。
-set_source_files_properties("${WLD_ENGINE_ROOT}/third_party/volk/volk.c"
-    PROPERTIES COMPILE_DEFINITIONS "VK_USE_PLATFORM_WIN32_KHR")
+
 
 # 链接库 (Vulkan::Vulkan 解决了 vulkan-1.lib 路径问题)
 target_link_libraries(World PRIVATE
+    WorldTextureCodecs
+    WorldVolk
     glfw    # 对应子目录生成的 target 名
     Glad
     opengl32
