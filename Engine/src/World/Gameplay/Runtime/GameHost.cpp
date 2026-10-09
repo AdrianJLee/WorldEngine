@@ -116,6 +116,46 @@ namespace World::Gameplay
 		m_Initialized = true;
 	}
 
+	namespace
+	{
+		std::string NormalizeLevelIdentifier(const std::string& value)
+		{
+			std::string out;
+			out.reserve(value.size());
+			for (char c : value)
+				out.push_back(c == '\\' ? '/' : c);
+			while (out.size() > 1 && out.back() == '/')
+				out.pop_back();
+			return out;
+		}
+
+		// 关卡集合里是否有指向该标识符的关卡。合法写法有三种(调用方按场景史各不相同):
+		//   · 关卡 Id                "3DTest"
+		//   · 内容根相对路径          "levels/3DTest"(= 项目清单的 start_scene)
+		//   · 关卡包目录路径          "E:/proj/assets/levels/3DTest"
+		bool MatchesLevelIdentifier(const Level::LevelInfo& info, const std::string& identifier)
+		{
+			const std::string needle = NormalizeLevelIdentifier(identifier);
+			if (needle.empty())
+				return false;
+			if (needle == info.Id)
+				return true;
+			if (needle == "levels/" + info.Id)
+				return true;
+			const std::string dir = NormalizeLevelIdentifier(info.PackageDir.generic_string());
+			return needle == dir || needle == NormalizeLevelIdentifier(info.PackageDir.filename().string());
+		}
+
+		const Level::LevelInfo* MatchLevelByIdentifier(const std::vector<Level::LevelInfo>& levels,
+			const std::string& identifier)
+		{
+			for (const Level::LevelInfo& info : levels)
+				if (MatchesLevelIdentifier(info, identifier))
+					return &info;
+			return nullptr;
+		}
+	}
+
 	void GameHost::InstallLevelServices(const GameAppDesc& desc)
 	{
 		LevelService& levels = GameApp::Get().Levels();
@@ -198,14 +238,10 @@ namespace World::Gameplay
 		if (startRuntime)
 		{
 			const LevelService& levels = GameApp::Get().Levels();
-			for (const Level::LevelInfo& info : levels.GetLevels())
+			if (const Level::LevelInfo* match = MatchLevelByIdentifier(levels.GetLevels(), scenePath))
 			{
-				if (info.PackageDir.generic_string() != scenePath
-					&& info.PackageDir.filename().string() != scenePath)
-					continue;
-				if (LoadLevelById(info.Id))
+						if (LoadLevelById(match->Id))
 					return true;
-				break;
 			}
 		}
 
