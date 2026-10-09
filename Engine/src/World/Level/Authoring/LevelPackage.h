@@ -22,6 +22,12 @@ namespace World::Level
 		LevelPackage();
 		~LevelPackage();
 
+		LevelPackage(LevelPackage&& other) noexcept;
+		LevelPackage& operator=(LevelPackage&& other) noexcept;
+
+		LevelPackage(const LevelPackage&) = delete;
+		LevelPackage& operator=(const LevelPackage&) = delete;
+
 		const std::string& GetName() const;
 		void SetName(const std::string& name);
 

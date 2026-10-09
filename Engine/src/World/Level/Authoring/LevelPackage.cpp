@@ -19,6 +19,8 @@ namespace World::Level
 	}
 
 	LevelPackage::~LevelPackage() = default;
+LevelPackage::LevelPackage(LevelPackage&& other) noexcept = default;
+LevelPackage& LevelPackage::operator=(LevelPackage&& other) noexcept = default;
 
 	const std::string& LevelPackage::GetName() const { return m_Impl->Name; }
 	void LevelPackage::SetName(const std::string& name) { m_Impl->Name = name; }

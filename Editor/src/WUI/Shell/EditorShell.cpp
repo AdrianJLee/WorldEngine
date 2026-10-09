@@ -238,6 +238,7 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("save", std::make_unique<SavePanel>());
 		m_PanelRegistry.emplace("levels", std::make_unique<LevelPanel>());
+		m_PanelRegistry.emplace("level_streaming", std::make_unique<LevelStreamingPanel>());
 		m_PanelRegistry.emplace("input", std::make_unique<InputMapPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 		m_PanelRegistry.emplace("material", std::make_unique<MaterialEditorPanel>());

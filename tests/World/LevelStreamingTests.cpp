@@ -4,6 +4,7 @@
 #include "World/Level/Core/WorldSpace.h"
 #include "World/Level/Authoring/EntityDescriptor.h"
 #include "World/Level/Authoring/LevelPackage.h"
+#include "World/Level/Authoring/LegacySceneMigration.h"
 #include "World/Level/Cooking/LevelCooker.h"
 #include "World/Level/Runtime/StreamableChunk.h"
 #include "World/Level/Runtime/ChunkStreamingCoordinator.h"
@@ -93,7 +94,7 @@ int main()
 		}
 
 		// 3. EntityDescriptor (OFPA single entity serialization)
-		const std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "worldengine-level2-m3-tests";
+		const std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "worldengine-level2-m4-tests";
 		std::filesystem::remove_all(tempDir);
 		std::filesystem::create_directories(tempDir);
 
@@ -326,9 +327,8 @@ int main()
 			portalDriver.AddSector(2, ChunkBounds{ { 10.0f, 0.0f, 0.0f }, { 20.0f, 5.0f, 10.0f } });
 			portalDriver.AddSector(3, ChunkBounds{ { 20.0f, 0.0f, 0.0f }, { 30.0f, 5.0f, 10.0f } });
 
-			// Sector 1 connects to Sector 2; Sector 2 connects to Sector 3
 			portalDriver.AddPortal(1, 2, { 10.0f, 2.5f, 5.0f }, { 0.1f, 2.0f, 1.0f }, true);
-			portalDriver.AddPortal(2, 3, { 20.0f, 2.5f, 5.0f }, { 0.1f, 2.0f, 1.0f }, false); // Portal 2->3 closed!
+			portalDriver.AddPortal(2, 3, { 20.0f, 2.5f, 5.0f }, { 0.1f, 2.0f, 1.0f }, false);
 
 			CHECK(portalDriver.GetSectorCount() == 3);
 			CHECK(portalDriver.GetPortalCount() == 2);
@@ -336,22 +336,18 @@ int main()
 			std::vector<uint64_t> toLoad;
 			std::vector<uint64_t> toUnload;
 
-			// Player in Sector 1 (5, 2.5, 5)
 			portalDriver.EvaluateStreaming({ 5.0f, 2.5f, 5.0f }, glm::mat4(1.0f), toLoad, toUnload);
-			// Sector 1 loaded; Sector 2 reached via open portal; Sector 3 blocked by closed portal!
 			CHECK(toLoad.size() == 2);
 			CHECK(std::find(toLoad.begin(), toLoad.end(), 1) != toLoad.end());
 			CHECK(std::find(toLoad.begin(), toLoad.end(), 2) != toLoad.end());
 			CHECK(std::find(toLoad.begin(), toLoad.end(), 3) == toLoad.end());
 
-			// Now open portal 2->3
 			toLoad.clear();
 			toUnload.clear();
 			portalDriver.SetPortalOpen(2, 3, true);
 			portalDriver.EvaluateStreaming({ 5.0f, 2.5f, 5.0f }, glm::mat4(1.0f), toLoad, toUnload);
 			CHECK(toLoad.size() == 1 && toLoad[0] == 3);
 
-			// Now close portal 1->2: Sector 2 and 3 should be unloaded!
 			toLoad.clear();
 			toUnload.clear();
 			portalDriver.SetPortalOpen(1, 2, false);
@@ -370,43 +366,77 @@ int main()
 			CHECK(layerMgr.GetRegisteredLayerCount() == 3);
 
 			CHECK(layerMgr.GetActiveMask() == (1 | 2));
-			CHECK(layerMgr.IsEntityVisible(1));      // Base visible
-			CHECK(layerMgr.IsEntityVisible(2));      // Day visible
-			CHECK(!layerMgr.IsEntityVisible(4));     // Night invisible
-			CHECK(layerMgr.IsEntityVisible(1 | 4));  // Mixed visible because 1 is active
+			CHECK(layerMgr.IsEntityVisible(1));
+			CHECK(layerMgr.IsEntityVisible(2));
+			CHECK(!layerMgr.IsEntityVisible(4));
+			CHECK(layerMgr.IsEntityVisible(1 | 4));
 
-			// Switch to Night: deactivate Day, activate Night
 			layerMgr.SetLayerActive("Day", false);
 			layerMgr.SetLayerActive("Night", true);
 			CHECK(layerMgr.GetActiveMask() == (1 | 4));
-			CHECK(!layerMgr.IsEntityVisible(2));     // Day now invisible
-			CHECK(layerMgr.IsEntityVisible(4));      // Night now visible
+			CHECK(!layerMgr.IsEntityVisible(2));
+			CHECK(layerMgr.IsEntityVisible(4));
 		}
 
 		// 12. AiPerceptionGate: Raycast Obstruction via Unloaded Space (M3)
 		{
 			AiPerceptionGate gate;
-			gate.RegisterChunk(10, ChunkBounds{ { 0.0f, 0.0f, 0.0f }, { 50.0f, 10.0f, 50.0f } }, true);   // Loaded
-			gate.RegisterChunk(20, ChunkBounds{ { 60.0f, 0.0f, 0.0f }, { 100.0f, 10.0f, 50.0f } }, false); // Unloaded!
+			gate.RegisterChunk(10, ChunkBounds{ { 0.0f, 0.0f, 0.0f }, { 50.0f, 10.0f, 50.0f } }, true);
+			gate.RegisterChunk(20, ChunkBounds{ { 60.0f, 0.0f, 0.0f }, { 100.0f, 10.0f, 50.0f } }, false);
 
-			// Ray within loaded chunk (10, 5, 25) -> (40, 5, 25)
 			uint64_t blockedChunk = 0;
 			PerceptionStatus res1 = gate.TestRay({ 10.0f, 5.0f, 25.0f }, { 40.0f, 5.0f, 25.0f }, &blockedChunk);
 			CHECK(res1 == PerceptionStatus::Clear);
 
-			// Ray aiming into unloaded chunk (10, 5, 25) -> (80, 5, 25)
 			PerceptionStatus res2 = gate.TestRay({ 10.0f, 5.0f, 25.0f }, { 80.0f, 5.0f, 25.0f }, &blockedChunk);
 			CHECK(res2 == PerceptionStatus::BlockedByUnloadedChunk);
 			CHECK(blockedChunk == 20);
 
-			// When chunk 20 loads, the perception ray becomes clear!
 			gate.SetChunkLoaded(20, true);
 			PerceptionStatus res3 = gate.TestRay({ 10.0f, 5.0f, 25.0f }, { 80.0f, 5.0f, 25.0f }, &blockedChunk);
 			CHECK(res3 == PerceptionStatus::Clear);
 		}
 
+		// 13. LegacySceneMigrationTool (M4)
+		{
+			WorldContext context;
+			Scene sourceScene(context);
+
+			Entity e1 = Entity::CreateEntity(&sourceScene, "PlayerStart", UUID(3001));
+			e1.AddComponent<TransformComponent>(glm::vec3(0.0f, 1.0f, 0.0f));
+
+			Entity e2 = Entity::CreateEntity(&sourceScene, "BossMonster", UUID(3002));
+			e2.AddComponent<TransformComponent>(glm::vec3(250.0f, 0.0f, 250.0f));
+
+			// Deconstruct scene into LevelPackage
+			MigrationResult migResult = LegacySceneMigrationTool::DeconstructSceneToPackage(sourceScene, "Dungeon_Migrated", 128);
+			CHECK(migResult.Success);
+			CHECK(migResult.EntitiesMigrated == 2);
+			CHECK(migResult.Package.GetName() == "Dungeon_Migrated");
+			CHECK(migResult.Package.GetGridCellSize() == 128);
+			CHECK(migResult.Package.GetEntityCount() == 2);
+
+			const std::filesystem::path migDir = tempDir / "MigratedDungeon";
+			std::string expError;
+			CHECK(LegacySceneMigrationTool::ExportPackageToDisk(migResult.Package, migDir, &expError));
+			CHECK(expError.empty());
+			CHECK(std::filesystem::exists(migDir / "manifest.yaml"));
+			CHECK(std::filesystem::exists(migDir / "entities" / "3001.entity"));
+			CHECK(std::filesystem::exists(migDir / "entities" / "3002.entity"));
+
+			// Verify cooked output and streamed loading of migrated package
+			CookResult cookRes = LevelCooker::CookPackage(migResult.Package, migDir / "cooked", { 128, 0 });
+			CHECK(cookRes.Success);
+			CHECK(cookRes.ChunksCooked >= 1);
+			CHECK(cookRes.TotalEntitiesCooked == 2);
+
+			StreamableChunk migChunk;
+			CHECK(migChunk.LoadFromFile(cookRes.OutputChunkFiles[0]));
+			CHECK(migChunk.GetState() == ChunkState::MemoryReady);
+		}
+
 		std::filesystem::remove_all(tempDir);
-		std::printf("[LevelStreamingTests] All Level 2.0 M0 + M1 + M2 + M3 tests passed successfully!\n");
+		std::printf("[LevelStreamingTests] All Level 2.0 M0 + M1 + M2 + M3 + M4 tests passed successfully!\n");
 		return 0;
 	}
 	catch (const std::exception& e)
