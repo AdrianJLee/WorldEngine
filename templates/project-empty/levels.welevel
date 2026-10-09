@@ -5,4 +5,7 @@
 #     - id: main
 #       name: Main
 #       scene: scenes/Main.wd
-levels: []
+levels:
+  - id: main
+    name: Main Level
+    scene: levels/Main

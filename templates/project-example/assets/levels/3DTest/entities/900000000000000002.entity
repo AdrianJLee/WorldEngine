@@ -1,0 +1,10 @@
+EntityUUID: 900000000000000002
+Name: "Mesh:Plane Floor"
+ChunkID: 0
+DataLayerMask: 1
+Transform:
+  Position: [0, 0, 0]
+  Rotation: [0, 0, 0]
+  Scale: [12, 1, 12]
+Properties:
+  Primitive: "2"

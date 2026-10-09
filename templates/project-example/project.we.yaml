@@ -2,7 +2,7 @@
 id: com.example.game
 version: 1.0.0
 content_root: assets
-start_scene: scenes/3DTest.wd
+start_scene: levels/3DTest
 renderer: vulkan
 rendering:
 # 渲染:剔除/阴影/灯光上限/分辨率倍率/MSAA/合批等;括号里是生效时机。  # 由「项目设置 ▶ 项目」页读写;手改本文件同样生效。

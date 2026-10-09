@@ -8,6 +8,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneSerializer.h"
+#include "World/Level/Authoring/LegacySceneMigration.h"
 #include "World/Script/Runtime/HotReload.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
@@ -386,6 +387,14 @@ namespace World::Editor
 					return false;
 				}
 			}
+			// Level 2.0: 同时输出现代 OFPA 关卡目录
+			auto migResult = Level::LegacySceneMigrationTool::DeconstructSceneToPackage(*scene, "Main", 64);
+			if (migResult.Success)
+			{
+				std::string pkgErr;
+				migResult.Package.Save(projectRoot / "assets" / "levels" / "Main", &pkgErr);
+			}
+
 			SceneSerializer serializer(scene);
 			if (!serializer.Serialize(scenePath.string()))
 			{
@@ -1701,7 +1710,7 @@ namespace World::Editor
 		{
 			const fs::path scenePath = directory / "assets" / fs::u8path(info.DefaultScene);
 			std::error_code sceneError;
-			if (!fs::is_regular_file(scenePath, sceneError))
+			if (!fs::is_regular_file(scenePath, sceneError) && !fs::is_directory(scenePath, sceneError))
 				return Wui::TrFormat("modal.newproject.error.template_scene_missing",
 					"Project template scene is missing: {scene}",
 					{ { "scene", scenePath.u8string() } });

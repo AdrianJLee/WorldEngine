@@ -1,0 +1,10 @@
+EntityUUID: 900000000000000003
+Name: "Mesh:Cube Orange"
+ChunkID: 0
+DataLayerMask: 1
+Transform:
+  Position: [-2.47874117, 0.5, 0]
+  Rotation: [0, 35, 0]
+  Scale: [1, 1, 1]
+Properties:
+  Primitive: "0"

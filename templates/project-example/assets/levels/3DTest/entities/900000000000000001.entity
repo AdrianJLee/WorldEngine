@@ -1,0 +1,8 @@
+EntityUUID: 900000000000000001
+Name: "Camera3D"
+ChunkID: 0
+DataLayerMask: 1
+Transform:
+  Position: [0, 1, 5]
+  Rotation: [0, 0, 0]
+  Scale: [1, 1, 1]

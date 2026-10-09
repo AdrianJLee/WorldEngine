@@ -1,0 +1,10 @@
+EntityUUID: 1002
+Name: "Directional Light"
+ChunkID: 0
+DataLayerMask: 1
+Transform:
+  Position: [0.0, 5.0, 0.0]
+  Rotation: [-45.0, 30.0, 0.0]
+  Scale: [1.0, 1.0, 1.0]
+Properties:
+  LightType: "Directional"
