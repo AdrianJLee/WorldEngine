@@ -395,14 +395,39 @@ void EditorLayer::OnAttach(){
 		LoadIconTextures();
 		RegisterUiTextures();
 
-		// 启动场景来源:-scene 参数(进程内传递,优先)或 WLD_START_SCENE 环境变量。
+		// 启动场景来源,按优先级:
+		//   ① `--scene <path>`(进程内传递)或 `WLD_START_SCENE` 环境变量 —— 显式覆盖;
+		//   ② 项目清单 `project.we.yaml` 的 `start_scene`(相对内容根)—— 项目声明的入口,
+		//      用户"打开项目"看到的就是它。`.wd` 场景与 Level 2.0 关卡目录(levels/<名>)都走
+		//      同一条 DoOpenScene → EditorDocument::LoadFromFile 分派;
+		//   ③ 都没有(无项目 / 清单未声明)→ 新建空场景。
 		std::string startScene = World::Editor::StartupScenePath();
 		if (startScene.empty())
 			if (const char* fromEnvironment = std::getenv("WLD_START_SCENE"))
 				startScene = fromEnvironment;
+
+		std::filesystem::path startupPath;
 		if (!startScene.empty())
 		{
-			const std::filesystem::path startupPath(startScene);
+			startupPath = std::filesystem::path(startScene);
+		}
+		else
+		{
+			std::filesystem::path manifestPath;
+			if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+			{
+				World::Asset::ProjectManifest manifest;
+				std::string manifestError;
+				if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError)
+					&& !manifest.StartScene.empty())
+				{
+					startupPath = manifest.ResolveContentRoot(manifestPath) / std::filesystem::u8path(manifest.StartScene);
+				}
+			}
+		}
+
+		if (!startupPath.empty())
+		{
 			WLD_CORE_INFO("Startup scene requested: {0}", startupPath.string());
 			DoOpenScene(startupPath);
 			if (!m_Document.HasPath())
@@ -411,23 +436,18 @@ void EditorLayer::OnAttach(){
 		}
 		else
 		{
-			const std::filesystem::path defaultLevel = World::Paths::AssetRoot() / "levels" / "DemoWorld";
-			if (std::filesystem::exists(defaultLevel))
-			{
-				WLD_CORE_INFO("Loading default Level 2.0 package: {0}", defaultLevel.string());
-				DoOpenScene(defaultLevel);
-			}
-			else
-			{
-				NewScene();
-			}
+			NewScene();
 		}
 
 		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
-		// D7-1a:3D 视口相机(轨道/飞行)。Level 2.0 默认开启 3D 模式以展示空间分区网格与实体
+		// D7-1a:3D 视口相机(轨道/飞行)。默认档:
+		//   显式 `WLD_VIEWPORT_3D` 优先;否则**项目入口是 Level 2.0 关卡目录**(levels/<名>,
+		//   流送网格与 HUD 挂在 3D 视口上)时默认 3D;传统 `.wd` 单场景保持历史默认(2D),
+		//   不把既有 2D 项目(如 2DTest)的默认视图翻掉。View 菜单/工具栏可随时切换。
+		const bool startupIsLevelPackage = !startupPath.empty() && std::filesystem::is_directory(startupPath);
 		m_EditorCamera3D = EditorCamera3D(60.0f, 1.6f / 0.9f, 0.1f, 2000.0f, 12.0f);
 		m_EditorCamera3D.SetViewportSize(1280, 720);
-		m_Viewport3D = true;
+		m_Viewport3D = std::getenv("WLD_VIEWPORT_3D") != nullptr || startupIsLevelPackage;
 		// D5c-5:从 3D 档起步(自动化入口)时同样先对齐 2D 视角,避免"从背面看场景"。
 		if (m_Viewport3D)
 			AlignEditorCamera3DWithView();

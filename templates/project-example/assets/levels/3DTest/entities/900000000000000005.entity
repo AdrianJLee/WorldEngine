@@ -1,10 +1,16 @@
-EntityUUID: 900000000000000005
-Name: "Mesh:Cube Blue"
 ChunkID: 0
-DataLayerMask: 1
-Transform:
-  Position: [2.5, 0.375983894, -1]
-  Rotation: [0, -20, 0]
-  Scale: [1, 1, 1]
-Properties:
-  Primitive: "0"
+DataLayerMask: 3
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 900000000000000005
+  World::TagComponent:
+    Tag: Mesh:Cube Blue
+  World::TransformComponent:
+    Location: [2.5, 0.375983894, -1]
+    Rotation: [0, -20, 0]
+    Scale: [1, 1, 1]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.25, 0.550000012, 0.949999988, 1]
+    Mesh: ""

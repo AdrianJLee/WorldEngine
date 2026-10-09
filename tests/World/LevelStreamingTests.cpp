@@ -17,7 +17,9 @@
 #include "World/Level/AI/AiVirtualizationManager.h"
 #include "World/Level/AI/AiPerceptionGate.h"
 #include "World/Level/Script/LevelScriptTypes.h"
+#include "World/Core/StringPool.h"
 #include "World/Core/WorldContext.h"
+#include "World/Scene/SceneSerializer.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
 
@@ -46,7 +48,7 @@ int main()
 		using namespace World::Level;
 		using namespace World::Level::AI;
 
-		// 1. ChunkHeader layout & constraints (M0)
+		// 1.ChunkHeader layout & constraints (M0)
 		{
 			ChunkHeader header;
 			header.ChunkID = 0x123456789ABCDEF0ULL;
@@ -67,7 +69,7 @@ int main()
 			CHECK(alignof(StaticEntityRecord) == 16);
 		}
 
-		// 2. DeltaStateRegistry (M0)
+		// 2.DeltaStateRegistry (M0)
 		{
 			DeltaStateRegistry registry;
 			CHECK(registry.DestroyedCount() == 0);
@@ -93,26 +95,47 @@ int main()
 			CHECK(!registry.IsDestroyed(1001));
 		}
 
-		// 3. EntityDescriptor (OFPA single entity serialization)
 		const std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "worldengine-level2-m4-tests";
 		std::filesystem::remove_all(tempDir);
 		std::filesystem::create_directories(tempDir);
 
+		// 3.EntityDescriptor:OFPA 单实体文件必须携带**全部组件**,不只是 Transform。
+		//    这里用真实场景实体走一遍 SceneSerializer 的实体级读写 —— 与编辑器/.wd 同一条口径。
+		std::string doc;
+		std::string docError;
 		{
-			EntityDescriptor original;
-			original.EntityUUID = 987654321ULL;
-			original.Name = "TestEnemy_Orc";
-			original.ChunkID = 101;
-			original.DataLayerMask = 0x3;
-			original.Position = { 10.5f, 0.0f, -25.25f };
-			original.RotationEuler = { 0.0f, 45.0f, 0.0f };
-			original.Scale = { 1.5f, 1.5f, 1.5f };
-			original.SetProperty("Faction", "Horde");
-			original.SetProperty("AI_Behavior", "Patrol");
+			WorldContext context;
+			Scene source(context);
 
-			const std::filesystem::path entityFile = tempDir / "orc.entity";
+			Entity cube = Entity::CreateEntity(&source, "Mesh:Cube Orange", UUID(987654321ULL));
+			cube.AddComponent<TransformComponent>(glm::vec3 { 10.5f, 0.5f, -25.25f },
+				glm::vec3 { 0.0f, 45.0f, 0.0f }, glm::vec3 { 1.5f, 1.5f, 1.5f });
+			MeshRendererComponent renderer;
+			renderer.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
+			renderer.Color = glm::vec4 { 1.0f, 0.55f, 0.12f, 1.0f };
+			cube.AddComponent<MeshRendererComponent>(renderer);
+
+			CHECK(SceneSerializer::SerializeEntityDocumentToYaml(cube, &doc, &docError));
+			CHECK(docError.empty());
+			// 组件随文档走:MeshRenderer 必须在文档里(这正是旧实现丢掉的载荷)。
+			CHECK(doc.find("World::MeshRendererComponent") != std::string::npos);
+			CHECK(doc.find("World::TransformComponent") != std::string::npos);
+
+			EntityDescriptor descriptor;
+			descriptor.DocumentYaml = doc;
+			descriptor.ChunkID = 101;
+			descriptor.DataLayerMask = 0x3;
+			descriptor.RefreshDerivedFromDocument();
+
+			CHECK(descriptor.EntityUUID == 987654321ULL);
+			CHECK(descriptor.Name == "Mesh:Cube Orange");
+			CHECK(descriptor.Position.x == 10.5f);
+			CHECK(descriptor.Position.z == -25.25f);
+			CHECK(descriptor.Scale.x == 1.5f);
+
+			const std::filesystem::path entityFile = tempDir / "cube.entity";
 			std::string error;
-			CHECK(original.Save(entityFile, &error));
+			CHECK(descriptor.Save(entityFile, &error));
 			CHECK(error.empty());
 			CHECK(std::filesystem::exists(entityFile));
 
@@ -120,60 +143,69 @@ int main()
 			CHECK(loaded.Load(entityFile, &error));
 			CHECK(error.empty());
 			CHECK(loaded.EntityUUID == 987654321ULL);
-			CHECK(loaded.Name == "TestEnemy_Orc");
 			CHECK(loaded.ChunkID == 101);
 			CHECK(loaded.DataLayerMask == 0x3);
+			CHECK(loaded.Name == "Mesh:Cube Orange");
 			CHECK(loaded.Position.x == 10.5f);
-			CHECK(loaded.Position.z == -25.25f);
-			CHECK(loaded.RotationEuler.y == 45.0f);
 			CHECK(loaded.Scale.x == 1.5f);
-			CHECK(loaded.GetProperty("Faction") == "Horde");
-			CHECK(loaded.GetProperty("AI_Behavior") == "Patrol");
+
+			// 并入一个**空场景**:组件必须真的回来(名字 + Transform + MeshRenderer)。
+			Scene target(context);
+			CHECK(SceneSerializer::AppendEntityYaml(target, loaded.DocumentYaml, &error) == 1);
+			SceneSerializer::FinalizeEntityImport(target);
+
+			auto& registry = target.GetRegistry();
+			auto view = registry.view<UUIDComponent, TagComponent, TransformComponent, MeshRendererComponent>();
+			size_t restored = 0;
+			for (const entt::entity handle : view)
+			{
+				++restored;
+				CHECK(registry.get<UUIDComponent>(handle).ID == UUID(987654321ULL));
+				CHECK(StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == "Mesh:Cube Orange");
+				CHECK(registry.get<TransformComponent>(handle).Location.x == 10.5f);
+				CHECK(registry.get<MeshRendererComponent>(handle).Primitive
+					== MeshRendererComponent::PrimitiveShape::Cube);
+			}
+			CHECK(restored == 1);
 		}
 
-		// 4. LevelCooker: Cook Package to Binary .wchunk (M1)
+		// 4.LevelCooker:由真实场景迁移出的关卡包 → 二进制 .wchunk
 		const std::filesystem::path cookedDir = tempDir / "CookedChunks";
 		{
-			LevelPackage package;
-			package.SetName("Barrens");
-			package.SetGridCellSize(64);
+			WorldContext context;
+			Scene source(context);
 
-			EntityDescriptor e1;
-			e1.EntityUUID = 2001;
-			e1.Name = "GuardTower";
-			e1.Position = { 10.0f, 0.0f, 10.0f };
-			e1.ChunkID = 999;
+			Entity tower = Entity::CreateEntity(&source, "GuardTower", UUID(2001));
+			tower.AddComponent<TransformComponent>(glm::vec3 { 10.0f, 0.0f, 10.0f });
+			Entity crate = Entity::CreateEntity(&source, "SupplyCrate", UUID(2002));
+			crate.AddComponent<TransformComponent>(glm::vec3 { 12.0f, 0.0f, 15.0f });
+			Entity tree = Entity::CreateEntity(&source, "DistantTree", UUID(2003));
+			tree.AddComponent<TransformComponent>(glm::vec3 { 500.0f, 0.0f, 500.0f });
 
-			EntityDescriptor e2;
-			e2.EntityUUID = 2002;
-			e2.Name = "SupplyCrate";
-			e2.Position = { 12.0f, 0.0f, 15.0f };
-			e2.ChunkID = 999;
+			MigrationResult migrated = LegacySceneMigrationTool::DeconstructSceneToPackage(source, "Barrens", 64);
+			CHECK(migrated.Success);
+			CHECK(migrated.Package.GetEntityCount() == 3);
 
-			EntityDescriptor e3;
-			e3.EntityUUID = 2003;
-			e3.Name = "DistantTree";
-			e3.Position = { 500.0f, 0.0f, 500.0f };
-			e3.ChunkID = 888;
-
-			package.AddEntity(e1);
-			package.AddEntity(e2);
-			package.AddEntity(e3);
+			// 显式分块:tower/crate 同块,tree 单独一块。
+			for (size_t i = 0; i < migrated.Package.GetEntityCount(); ++i)
+			{
+				EntityDescriptor& d = migrated.Package.GetMutableEntity(i);
+				d.ChunkID = (d.EntityUUID == 2003ULL) ? 888ULL : 999ULL;
+			}
 
 			CookSettings settings;
 			settings.GridCellSize = 64;
 			settings.SubspaceID = 0;
 
-			CookResult result = LevelCooker::CookPackage(package, cookedDir, settings);
+			CookResult result = LevelCooker::CookPackage(migrated.Package, cookedDir, settings);
 			CHECK(result.Success);
 			CHECK(result.ChunksCooked == 2);
 			CHECK(result.TotalEntitiesCooked == 3);
-			CHECK(result.OutputChunkFiles.size() == 2);
 			CHECK(std::filesystem::exists(cookedDir / "999.wchunk"));
 			CHECK(std::filesystem::exists(cookedDir / "888.wchunk"));
 		}
 
-		// 5. StreamableChunk Loading, Activation in Scene & DeltaState (M1)
+		// 5.StreamableChunk Loading, Activation in Scene & DeltaState (M1)
 		{
 			WorldContext context;
 			Scene scene(context);
@@ -198,7 +230,7 @@ int main()
 			CHECK(chunk.GetSpawnedCount() == 0);
 		}
 
-		// 6. SpatialGridDriver & Hysteresis Buffer Streaming (M2)
+		// 6.SpatialGridDriver & Hysteresis Buffer Streaming (M2)
 		{
 			SpatialGridDriver driver(100.0f, 150.0f);
 			driver.AddChunk(10, ChunkBounds{ { 0.0f, 0.0f, 0.0f }, { 50.0f, 10.0f, 50.0f } });
@@ -231,7 +263,7 @@ int main()
 			CHECK(toUnload.size() == 1 && toUnload[0] == 10);
 		}
 
-		// 7. WorldSpace & Origin Rebasing (M2)
+		// 7.WorldSpace & Origin Rebasing (M2)
 		{
 			WorldContext context;
 			Scene scene(context);
@@ -259,7 +291,7 @@ int main()
 			CHECK(worldPosBefore.z == worldPosAfter.z);
 		}
 
-		// 8. NavMeshChunkStitcher (M2)
+		// 8.NavMeshChunkStitcher (M2)
 		{
 			NavMeshChunkStitcher stitcher;
 			CHECK(stitcher.GetActiveTileCount() == 0);
@@ -291,7 +323,7 @@ int main()
 			CHECK(stitcher.GetStitchedBorderCount() == 0);
 		}
 
-		// 9. AiVirtualizationManager & Offline Delta Simulation (M2)
+		// 9.AiVirtualizationManager & Offline Delta Simulation (M2)
 		{
 			AiVirtualizationManager aiManager;
 			aiManager.RegisterAi(5001, 101, { 10.0f, 0.0f, 10.0f }, 100.0f, 1);
@@ -320,7 +352,7 @@ int main()
 			CHECK(it->Health == 45.0f);
 		}
 
-		// 10. SectorPortalDriver (M3)
+		// 10.SectorPortalDriver (M3)
 		{
 			SectorPortalDriver portalDriver;
 			portalDriver.AddSector(1, ChunkBounds{ { 0.0f, 0.0f, 0.0f }, { 10.0f, 5.0f, 10.0f } });
@@ -357,7 +389,7 @@ int main()
 			CHECK(std::find(toUnload.begin(), toUnload.end(), 3) != toUnload.end());
 		}
 
-		// 11. DataLayerManager (M3)
+		// 11.DataLayerManager (M3)
 		{
 			DataLayerManager layerMgr;
 			layerMgr.RegisterLayer(1, "Base_World", true);
@@ -378,7 +410,7 @@ int main()
 			CHECK(layerMgr.IsEntityVisible(4));
 		}
 
-		// 12. AiPerceptionGate: Raycast Obstruction via Unloaded Space (M3)
+		// 12.AiPerceptionGate: Raycast Obstruction via Unloaded Space (M3)
 		{
 			AiPerceptionGate gate;
 			gate.RegisterChunk(10, ChunkBounds{ { 0.0f, 0.0f, 0.0f }, { 50.0f, 10.0f, 50.0f } }, true);
@@ -397,7 +429,7 @@ int main()
 			CHECK(res3 == PerceptionStatus::Clear);
 		}
 
-		// 13. LegacySceneMigrationTool (M4)
+		// 13.LegacySceneMigrationTool (M4)
 		{
 			WorldContext context;
 			Scene sourceScene(context);

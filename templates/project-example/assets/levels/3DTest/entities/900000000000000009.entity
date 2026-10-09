@@ -1,11 +1,17 @@
-EntityUUID: 900000000000000009
-Name: "Mesh:Cube Satin Blue (material, no texture)"
 ChunkID: 0
-DataLayerMask: 1
-Transform:
-  Position: [1.1, 0.6, 1.2]
-  Rotation: [0, -15, 0]
-  Scale: [1.2, 1.2, 1.2]
-Properties:
-  Primitive: "0"
-  Material: "materials/satin_blue.wmat"
+DataLayerMask: 3
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 900000000000000009
+  World::TagComponent:
+    Tag: Mesh:Cube Satin Blue (material, no texture)
+  World::TransformComponent:
+    Location: [1.1, 0.6, 1.2]
+    Rotation: [0, -15, 0]
+    Scale: [1.2, 1.2, 1.2]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [1, 1, 1, 1]
+    Mesh: ""
+    Material: "materials/satin_blue.wmat"

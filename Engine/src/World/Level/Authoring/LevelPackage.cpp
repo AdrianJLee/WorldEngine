@@ -33,6 +33,7 @@ LevelPackage& LevelPackage::operator=(LevelPackage&& other) noexcept = default;
 
 	size_t LevelPackage::GetEntityCount() const { return m_Impl->Entities.size(); }
 	const EntityDescriptor& LevelPackage::GetEntity(size_t index) const { return m_Impl->Entities[index]; }
+	EntityDescriptor& LevelPackage::GetMutableEntity(size_t index) { return m_Impl->Entities[index]; }
 
 	void LevelPackage::AddEntity(const EntityDescriptor& entity)
 	{

@@ -1,11 +1,17 @@
-EntityUUID: 900000000000000007
-Name: "Mesh:Cube Textured (quadrants)"
 ChunkID: 0
-DataLayerMask: 1
-Transform:
-  Position: [-1.2, 0.9, 1.0]
-  Rotation: [0, 35, 0]
-  Scale: [1.8, 1.8, 1.8]
-Properties:
-  Primitive: "0"
-  Material: "materials/quadrants.wmat"
+DataLayerMask: 3
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 900000000000000007
+  World::TagComponent:
+    Tag: Mesh:Cube Textured (quadrants)
+  World::TransformComponent:
+    Location: [-1.2, 0.9, 1.0]
+    Rotation: [0, 35, 0]
+    Scale: [1.8, 1.8, 1.8]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [1, 1, 1, 1]
+    Mesh: ""
+    Material: "materials/quadrants.wmat"

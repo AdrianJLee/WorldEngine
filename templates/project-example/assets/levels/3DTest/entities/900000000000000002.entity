@@ -1,10 +1,16 @@
-EntityUUID: 900000000000000002
-Name: "Mesh:Plane Floor"
 ChunkID: 0
-DataLayerMask: 1
-Transform:
-  Position: [0, 0, 0]
-  Rotation: [0, 0, 0]
-  Scale: [12, 1, 12]
-Properties:
-  Primitive: "2"
+DataLayerMask: 3
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 900000000000000002
+  World::TagComponent:
+    Tag: Mesh:Plane Floor
+  World::TransformComponent:
+    Location: [0, 0, 0]
+    Rotation: [0, 0, 0]
+    Scale: [12, 1, 12]
+  World::MeshRendererComponent:
+    Primitive: 2
+    Color: [0.340000004, 0.360000014, 0.400000006, 1]
+    Mesh: ""

@@ -34,19 +34,22 @@ namespace World
 			if (package.Load(packageDir, &err))
 			{
 				Ref<Scene> newScene = CreateRef<Scene>(*m_Context);
+				size_t imported = 0;
 				for (size_t i = 0; i < package.GetEntityCount(); ++i)
 				{
 					const auto& desc = package.GetEntity(i);
-					Entity ent = Entity::CreateEntity(newScene.get(), desc.Name, UUID(desc.EntityUUID));
-					if (ent.IsValid())
-					{
-						ent.AddComponent<TransformComponent>(
-							desc.Position,
-							glm::radians(desc.RotationEuler),
-							desc.Scale
-						);
-					}
+					std::string importError;
+					imported += SceneSerializer::AppendEntityYaml(*newScene, desc.DocumentYaml, &importError);
+					if (!importError.empty())
+						WLD_CORE_WARN("Level '{0}': entity {1} failed to import: {2}",
+							packageDir.u8string(), desc.EntityUUID, importError);
 				}
+				// 逐实体并入之后必须收尾:重算 Transform 缓存矩阵 + 重建层级反向索引,
+				// 缺这一步会表现成"相机在物体内部 / 物体全堆在原点"。
+				SceneSerializer::FinalizeEntityImport(*newScene);
+
+				WLD_CORE_INFO("[level] 关卡包已载入: {0} ({1} 个实体)", packageDir.u8string(), imported);
+
 				m_Scene = newScene;
 				m_Path = packageDir;
 				m_Dirty = false;

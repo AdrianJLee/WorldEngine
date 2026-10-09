@@ -39,6 +39,8 @@ namespace World::Level
 
 		size_t GetEntityCount() const;
 		const EntityDescriptor& GetEntity(size_t index) const;
+		// 可变访问:烘焙前调整 ChunkID / DataLayerMask 等关卡层元数据(工具链用)。
+		EntityDescriptor& GetMutableEntity(size_t index);
 		void AddEntity(const EntityDescriptor& entity);
 		const EntityDescriptor* FindEntity(uint64_t entityUuid) const;
 

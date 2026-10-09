@@ -97,6 +97,80 @@ namespace World
 			}
 			out << YAML::EndMap;
 		}
+
+		// Level 2.0:把**一个 YAML 实体块**应用到场景(建实体 + 逐组件 Add/ReadFields)。
+		// 与 Deserialize 的内联循环同一条口径;抽出来给 .wd 与 `.entity` 两条读路径共用 ——
+		// 两处各写一份序列化正是"编辑器能读、流式路径丢组件"这类偏差的成因。
+		entt::entity ApplyEntityNode(Scene& scene, YAML::Node entity, const Schema::SchemaRegistry& schemas)
+		{
+			entt::registry& registry = scene.GetRegistry();
+			const entt::entity handle = registry.create();
+			Entity newEntity(&scene, handle);
+
+			Schema::YamlSchemaReader reader;
+			for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
+			{
+				if (!schema || !schema->Storage || !schema->Storage->Add)
+					continue;
+				YAML::Node compNode = entity[schema->Id.Name];
+				if (!compNode)
+				{
+					const size_t separator = schema->Id.Name.rfind("::");
+					if (separator != std::string::npos)
+						compNode = entity[schema->Id.Name.substr(separator + 2)];
+				}
+				if (!compNode)
+					continue;
+
+				schema->Storage->Add(static_cast<void*>(&newEntity));
+				void* rawInstance = newEntity.GetComponent(schema->Storage->ComponentId);
+				if (!rawInstance)
+					continue;
+				reader.ReadFields(*schema, rawInstance, compNode);
+			}
+			return handle;
+		}
+
+		// Level 2.0:把一个"单实体文档"(`Entities: [ {...} ]`)里的实体并入场景。
+		// 文件路径与内存文本两条入口共用它 —— 实体级读口径只有这一处。
+		// 已存在同 UUID 的实体一律跳过:同一关卡目录被重复并入时不能造出同 UUID 双胞胎。
+		size_t AppendEntityNodes(Scene& scene, YAML::Node document, std::string* error)
+		{
+			YAML::Node entities = document["Entities"];
+			if (!entities || !entities.IsSequence())
+			{
+				if (error) *error = "entity document has no Entities sequence";
+				return 0;
+			}
+
+			const Schema::SchemaRegistry& schemas = scene.GetContext().Schemas();
+			entt::registry& registry = scene.GetRegistry();
+
+			std::unordered_set<uint64_t> existing;
+			for (const entt::entity handle : registry.view<UUIDComponent>())
+				existing.insert(static_cast<uint64_t>(registry.get<UUIDComponent>(handle).ID));
+
+			size_t applied = 0;
+			for (YAML::Node node : entities)
+			{
+				if (!node.IsMap())
+					continue;
+
+				uint64_t uuid = 0;
+				if (YAML::Node identity = node["World::UUIDComponent"])
+					if (YAML::Node id = identity["ID"])
+						if (YAML::Node raw = id["m_UUID"])
+							uuid = raw.as<uint64_t>(0);
+				if (uuid != 0 && existing.count(uuid) != 0)
+					continue;
+
+				ApplyEntityNode(scene, node, schemas);
+				if (uuid != 0)
+					existing.insert(uuid);
+				++applied;
+			}
+			return applied;
+		}
 	}
 
 	SceneSerializer::SceneSerializer(const Ref<Scene>& scene)
@@ -357,8 +431,6 @@ namespace World
 		{
 			for (auto entity : entities)
 			{
-				auto newEntity = Entity(m_Scene.get(), m_Scene->m_Registry.create());
-
 				YAML::Node unknownMap(YAML::NodeType::Map);
 				bool hasUnknown = false;
 				for (const auto& kv : entity)
@@ -373,29 +445,8 @@ namespace World
 					}
 				}
 
-				Schema::YamlSchemaReader reader;
-				for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
-				{
-					if (!schema || !schema->Storage || !schema->Storage->Add)
-						continue;
-					YAML::Node compNode = entity[schema->Id.Name];
-					if (!compNode)
-					{
-						const size_t separator = schema->Id.Name.rfind("::");
-						if (separator != std::string::npos)
-							compNode = entity[schema->Id.Name.substr(separator + 2)];
-					}
-					if (!compNode)
-						continue;
-
-					schema->Storage->Add(static_cast<void*>(&newEntity));
-					void* rawInstance = newEntity.GetComponent(schema->Storage->ComponentId);
-					if (!rawInstance)
-						continue;
-					reader.ReadFields(*schema, rawInstance, compNode);
-
-
-				}
+				const entt::entity appliedHandle = ApplyEntityNode(*m_Scene, entity, schemas);
+				Entity newEntity(m_Scene.get(), appliedHandle);
 
 				if (hasUnknown && newEntity.HasComponent<UUIDComponent>())
 				{
@@ -491,6 +542,161 @@ namespace World
 		}
 
 		return true;
+	}
+
+	// ---- Level 2.0(OFPA)单实体文档读写 ----
+	//
+	// `.entity` 与 `.wd` 的实体块**逐字段同形**(同一个 SerializeEntity / ApplyEntityNode),
+	// 因此单实体文件既能被人肉审阅、在 Git 里逐行 diff,也能被同一条读路径无损还原 ——
+	// 这是"一个实体一个文件、多人零冲突"成立的前提。
+
+	bool SceneSerializer::SerializeEntityDocument(const Entity& entity, const std::filesystem::path& filepath,
+		std::string* error)
+	{
+		if (!entity.IsValid())
+		{
+			if (error) *error = "entity is not valid";
+			return false;
+		}
+		Scene* scene = entity.GetScene();
+		if (!scene)
+		{
+			if (error) *error = "entity has no scene";
+			return false;
+		}
+
+		try
+		{
+			std::string yaml;
+			if (!SerializeEntityDocumentToYaml(entity, &yaml, error))
+				return false;
+
+			if (filepath.has_parent_path())
+				std::filesystem::create_directories(filepath.parent_path());
+
+			std::ofstream fout(filepath);
+			if (!fout.is_open())
+			{
+				if (error) *error = "cannot open for write: " + filepath.string();
+				return false;
+			}
+			fout << yaml;
+			return true;
+		}
+		catch (const std::exception& e)
+		{
+			if (error) *error = e.what();
+			return false;
+		}
+	}
+
+	bool SceneSerializer::SerializeEntityDocumentToYaml(const Entity& entity, std::string* outYaml,
+		std::string* error)
+	{
+		if (!outYaml)
+		{
+			if (error) *error = "no output buffer";
+			return false;
+		}
+		if (!entity.IsValid())
+		{
+			if (error) *error = "entity is not valid";
+			return false;
+		}
+		Scene* scene = entity.GetScene();
+		if (!scene)
+		{
+			if (error) *error = "entity has no scene";
+			return false;
+		}
+
+		try
+		{
+			YAML::Emitter out;
+			out << YAML::BeginMap;
+			out << YAML::Key << "Entities" << YAML::Value << YAML::BeginSeq;
+			{
+				Schema::YamlSchemaWriter writer(out);
+				const std::unordered_map<UUID, std::string> noUnknown;
+				SerializeEntity(out, entity, scene->GetContext().Schemas(), noUnknown, writer);
+			}
+			out << YAML::EndSeq;
+			out << YAML::EndMap;
+			*outYaml = out.c_str();
+			return true;
+		}
+		catch (const std::exception& e)
+		{
+			if (error) *error = e.what();
+			return false;
+		}
+	}
+
+	void SceneSerializer::FinalizeEntityImport(Scene& scene)
+	{
+		entt::registry& registry = scene.GetRegistry();
+
+		// 反序列化只写 Location/Rotation/Scale 原始字段,不触发缓存矩阵重算
+		// (schema 生成的 setter 直接赋值)。这里统一重算一次,否则所有实体(含相机)
+		// 会停在单位矩阵 —— 表现为"相机在物体内部 / 物体全部堆在原点"。
+		for (const entt::entity handle : registry.view<TransformComponent>())
+			registry.get<TransformComponent>(handle).RecalculateTransform();
+
+		// 层级:Parent 已随字段读入,Children 不入库,这里按 Parent 重建反向索引。
+		for (const entt::entity handle : registry.view<HierarchyComponent>())
+			registry.remove<HierarchyChildrenComponent>(handle);
+		std::vector<entt::entity> childrenToLink;
+		for (const entt::entity handle : registry.view<HierarchyComponent>())
+		{
+			const auto& hierarchy = registry.get<HierarchyComponent>(handle);
+			if (hierarchy.Parent != entt::null && registry.valid(hierarchy.Parent))
+				childrenToLink.push_back(handle);
+		}
+		for (const entt::entity child : childrenToLink)
+		{
+			const entt::entity parent = registry.get<HierarchyComponent>(child).Parent;
+			registry.get_or_emplace<HierarchyComponent>(parent);
+			Hierarchy::MutableChildren(registry, parent).push_back(child);
+		}
+		Hierarchy::UpdateWorldTransforms(registry);
+	}
+
+	size_t SceneSerializer::AppendEntityDocument(Scene& scene, const std::filesystem::path& filepath,
+		std::string* error)
+	{
+		if (!std::filesystem::is_regular_file(filepath))
+		{
+			if (error) *error = "entity document not found: " + filepath.string();
+			return 0;
+		}
+
+		YAML::Node data;
+		try
+		{
+			data = YAML::LoadFile(filepath.string());
+		}
+		catch (const std::exception& e)
+		{
+			if (error) *error = e.what();
+			return 0;
+		}
+
+		return AppendEntityNodes(scene, data, error);
+	}
+
+	size_t SceneSerializer::AppendEntityYaml(Scene& scene, const std::string& documentYaml, std::string* error)
+	{
+		YAML::Node data;
+		try
+		{
+			data = YAML::Load(documentYaml);
+		}
+		catch (const std::exception& e)
+		{
+			if (error) *error = e.what();
+			return 0;
+		}
+		return AppendEntityNodes(scene, data, error);
 	}
 
 	bool SceneSerializer::SerializeRuntime(const std::string&)
