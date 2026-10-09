@@ -1,0 +1,10 @@
+EntityUUID: 1003
+Name: SunAltar_Day
+ChunkID: 0
+DataLayerMask: 2
+Transform:
+  Position: [25.0, 0.0, 10.0]
+  Rotation: [0.0, 0.0, 0.0]
+  Scale: [1.5, 1.5, 1.5]
+Properties:
+  SolarPower: 100

@@ -1,0 +1,10 @@
+EntityUUID: 1011
+Name: WestRuins_Pillar
+ChunkID: 0
+DataLayerMask: 1
+Transform:
+  Position: [-80.0, 0.0, 30.0]
+  Rotation: [15.0, 20.0, 0.0]
+  Scale: [1.5, 4.0, 1.5]
+Properties:
+  Ruins: Ancient

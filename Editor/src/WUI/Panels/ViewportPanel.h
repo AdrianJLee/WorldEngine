@@ -154,5 +154,7 @@ namespace World
 		std::vector<std::shared_ptr<Wui::WuiImageButton>> m_Tools;
 		bool m_GizmoActive = false;
 		TransformComponent m_GizmoBefore;
+		bool m_ActiveNightMode = false;
+		bool m_ShowSpatialGrid = true;
 	};
 }

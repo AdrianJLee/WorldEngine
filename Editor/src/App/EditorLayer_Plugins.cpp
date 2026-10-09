@@ -410,14 +410,24 @@ void EditorLayer::OnAttach(){
 					startupPath.string(), m_Document.GetLastError());
 		}
 		else
-			NewScene();
+		{
+			const std::filesystem::path defaultLevel = World::Paths::AssetRoot() / "levels" / "DemoWorld";
+			if (std::filesystem::exists(defaultLevel))
+			{
+				WLD_CORE_INFO("Loading default Level 2.0 package: {0}", defaultLevel.string());
+				DoOpenScene(defaultLevel);
+			}
+			else
+			{
+				NewScene();
+			}
+		}
 
 		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
-		// D7-1a:3D 视口相机(轨道/飞行)。默认关闭;WLD_VIEWPORT_3D=1 便于自动化验证,
-		// 工具栏切换在 ViewportPanel 接入(下一步)。
+		// D7-1a:3D 视口相机(轨道/飞行)。Level 2.0 默认开启 3D 模式以展示空间分区网格与实体
 		m_EditorCamera3D = EditorCamera3D(60.0f, 1.6f / 0.9f, 0.1f, 2000.0f, 12.0f);
 		m_EditorCamera3D.SetViewportSize(1280, 720);
-		m_Viewport3D = std::getenv("WLD_VIEWPORT_3D") != nullptr;
+		m_Viewport3D = true;
 		// D5c-5:从 3D 档起步(自动化入口)时同样先对齐 2D 视角,避免"从背面看场景"。
 		if (m_Viewport3D)
 			AlignEditorCamera3DWithView();

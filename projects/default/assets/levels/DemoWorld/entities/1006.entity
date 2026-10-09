@@ -1,0 +1,10 @@
+EntityUUID: 1006
+Name: EastOutpost_Tower
+ChunkID: 0
+DataLayerMask: 1
+Transform:
+  Position: [85.0, 0.0, 20.0]
+  Rotation: [0.0, 90.0, 0.0]
+  Scale: [3.0, 6.0, 3.0]
+Properties:
+  Faction: Alliance

@@ -1,0 +1,10 @@
+EntityUUID: 1012
+Name: AncientChest
+ChunkID: 0
+DataLayerMask: 1
+Transform:
+  Position: [-85.0, 0.0, 35.0]
+  Rotation: [0.0, 60.0, 0.0]
+  Scale: [1.0, 1.0, 1.0]
+Properties:
+  Loot: Epic

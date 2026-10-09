@@ -264,6 +264,29 @@ namespace World
 			Wui::Tr("viewport.camera.hint", "Viewport view mode — switch in the View menu (top-left)."));
 		ctx.RegisterOverlayRect(viewButton);
 
+		// Level 2.0: 视口工具栏 —— 数据层昼夜快捷切换 & 空间流送网格开关
+		float toolbarX = viewButton.X + viewButton.W + 8.0f;
+		const float dayNightW = 86.0f;
+		const Wui::WuiRect dayNightBtn { toolbarX, sceneRect.Y + kChromePad, dayNightW, kChromeRowH };
+		const std::string dayNightLabel = m_ActiveNightMode ? "🌙 Night" : "☀️ Day";
+		Wui::Tooltip(ctx, dayNightBtn, "切换关卡数据层 (Day/Night Data Layer Toggle)");
+		if (Wui::Button(ctx, Wui::HashId("viewport.day_night"), dayNightBtn, dayNightLabel, theme))
+		{
+			m_ActiveNightMode = !m_ActiveNightMode;
+		}
+		ctx.RegisterOverlayRect(dayNightBtn);
+		toolbarX += dayNightW + 6.0f;
+
+		const float gridBtnW = 88.0f;
+		const Wui::WuiRect gridBtn { toolbarX, sceneRect.Y + kChromePad, gridBtnW, kChromeRowH };
+		const std::string gridLabel = m_ShowSpatialGrid ? "🌐 Grid: ON" : "🌐 Grid: OFF";
+		Wui::Tooltip(ctx, gridBtn, "切换 64m 空间流送分区网格显示");
+		if (Wui::Button(ctx, Wui::HashId("viewport.stream_grid"), gridBtn, gridLabel, theme))
+		{
+			m_ShowSpatialGrid = !m_ShowSpatialGrid;
+		}
+		ctx.RegisterOverlayRect(gridBtn);
+
 		// ② 顶部居中:运行控制药丸(播放 / 模拟 / 暂停)。用户 2026-09-21:「悬浮在视口上居中」——
 		// 深色半透明圆角底板,悬停时提亮;不悬停时更淡,尽量少挡画面。
 		const float pillW = 3 * 28.0f + 2 * 4.0f + 20.0f;
@@ -983,6 +1006,67 @@ namespace World
 					}
 				}
 			}
+		}
+
+		if (m_ShowSpatialGrid && camera3D)
+		{
+			const Wui::GizmoCamera levelCam = m_Host.GetGizmoCamera();
+			const glm::vec3 camPos = levelCam.Position;
+			const float cellSize = 64.0f;
+			const int32_t centerCellX = static_cast<int32_t>(std::floor(camPos.x / cellSize));
+			const int32_t centerCellZ = static_cast<int32_t>(std::floor(camPos.z / cellSize));
+
+			{
+				Wui::ClipScope levelClip(ctx, sceneRect);
+
+				// 绘制相机周围 3x3 空间分区网格 (半径 1 个 Cell)
+				for (int32_t dx = -1; dx <= 1; ++dx)
+				{
+					for (int32_t dz = -1; dz <= 1; ++dz)
+					{
+						const int32_t cx = centerCellX + dx;
+						const int32_t cz = centerCellZ + dz;
+						const float minX = cx * cellSize;
+						const float minZ = cz * cellSize;
+						const float maxX = minX + cellSize;
+						const float maxZ = minZ + cellSize;
+
+						const bool isCurrent = (dx == 0 && dz == 0);
+						const Wui::WuiColor cellColor = isCurrent
+							? Wui::WuiColor { 0.15f, 0.95f, 0.85f, 0.90f }
+							: Wui::WuiColor { 0.95f, 0.75f, 0.20f, 0.45f };
+						const float thickness = isCurrent ? 2.0f : 1.0f;
+
+						const glm::vec3 corners[4] = {
+							{ minX, 0.05f, minZ },
+							{ maxX, 0.05f, minZ },
+							{ maxX, 0.05f, maxZ },
+							{ minX, 0.05f, maxZ }
+						};
+
+						for (int i = 0; i < 4; ++i)
+						{
+							PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+								levelCam.ViewProjection * glm::vec4(corners[i], 1.0f),
+								levelCam.ViewProjection * glm::vec4(corners[(i + 1) % 4], 1.0f),
+								cellColor, thickness);
+						}
+					}
+				}
+			}
+
+			// 视口右上角 HUD 胶囊
+			const float hudW = 280.0f;
+			const float hudH = 46.0f;
+			const Wui::WuiRect hudRect { sceneRect.X + sceneRect.W - hudW - 12.0f, sceneRect.Y + 12.0f, hudW, hudH };
+			Wui::PanelBackground(ctx, hudRect, Wui::WuiColor { 0.07f, 0.09f, 0.13f, 0.88f }, 4.0f);
+			Wui::HighlightOutline(ctx, hudRect, Wui::WuiColor { 0.18f, 0.65f, 0.90f, 0.70f }, 4.0f, 1.0f);
+
+			const std::string hudLine1 = "Level 2.0 | Cell: (" + std::to_string(centerCellX) + ", " + std::to_string(centerCellZ) + ") [64m Grid]";
+			const std::string hudLine2 = "Active: 9 Chunks | Layer: [" + std::string(m_ActiveNightMode ? "Night" : "Day") + "]";
+
+			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 5.0f }, hudLine1, Wui::WuiColor { 0.30f, 0.90f, 1.0f, 1.0f }, 12.0f);
+			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 24.0f }, hudLine2, Wui::WuiColor { 0.85f, 0.85f, 0.90f, 0.90f }, 12.0f);
 		}
 
 		// ---- 相机预览小窗(PiP):直接显示"场景相机看到的东西" ----

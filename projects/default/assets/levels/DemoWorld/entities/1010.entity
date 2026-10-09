@@ -1,0 +1,10 @@
+EntityUUID: 1010
+Name: NorthCamp_Bonfire
+ChunkID: 0
+DataLayerMask: 1
+Transform:
+  Position: [18.0, 0.0, 92.0]
+  Rotation: [0.0, 0.0, 0.0]
+  Scale: [1.0, 1.0, 1.0]
+Properties:
+  Heat: Active
