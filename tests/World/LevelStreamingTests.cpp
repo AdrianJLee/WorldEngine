@@ -7,11 +7,14 @@
 #include "World/Level/Cooking/LevelCooker.h"
 #include "World/Level/Runtime/StreamableChunk.h"
 #include "World/Level/Runtime/ChunkStreamingCoordinator.h"
+#include "World/Level/Runtime/DataLayerManager.h"
 #include "World/Level/Streaming/SpatialGridDriver.h"
+#include "World/Level/Streaming/SectorPortalDriver.h"
 #include "World/Level/AI/NavMeshTileTypes.h"
 #include "World/Level/AI/NavMeshChunkStitcher.h"
 #include "World/Level/AI/AiVirtualizationTypes.h"
 #include "World/Level/AI/AiVirtualizationManager.h"
+#include "World/Level/AI/AiPerceptionGate.h"
 #include "World/Level/Script/LevelScriptTypes.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Scene.h"
@@ -90,7 +93,7 @@ int main()
 		}
 
 		// 3. EntityDescriptor (OFPA single entity serialization)
-		const std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "worldengine-level2-m2-tests";
+		const std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "worldengine-level2-m3-tests";
 		std::filesystem::remove_all(tempDir);
 		std::filesystem::create_directories(tempDir);
 
@@ -183,7 +186,7 @@ int main()
 			CHECK(chunk.GetRecordCount() == 2);
 
 			DeltaStateRegistry deltaState;
-			deltaState.MarkDestroyed(2002); // SupplyCrate destroyed
+			deltaState.MarkDestroyed(2002);
 
 			chunk.OnActivateWithDelta(scene, &deltaState);
 			CHECK(chunk.GetState() == ChunkState::Active);
@@ -204,26 +207,22 @@ int main()
 			std::vector<uint64_t> toLoad;
 			std::vector<uint64_t> toUnload;
 
-			// Player at (25, 0, 25): Inside Chunk 10 (< 100m)
 			driver.EvaluateStreaming({ 25.0f, 0.0f, 25.0f }, glm::mat4(1.0f), toLoad, toUnload);
 			CHECK(toLoad.size() == 1 && toLoad[0] == 10);
 			CHECK(toUnload.empty());
 
-			// Player at (120, 0, 25): Distance ~70m to Chunk 10 (< 100m, already loaded), distance to Chunk 20 is > 200m
 			toLoad.clear();
 			toUnload.clear();
 			driver.EvaluateStreaming({ 120.0f, 0.0f, 25.0f }, glm::mat4(1.0f), toLoad, toUnload);
 			CHECK(toLoad.empty());
-			CHECK(toUnload.empty()); // In safe buffer, zero thrashing!
+			CHECK(toUnload.empty());
 
-			// Player moves to (180, 0, 25): Distance to Chunk 10 is 130m (inside hysteresis band 100~150m)
 			toLoad.clear();
 			toUnload.clear();
 			driver.EvaluateStreaming({ 180.0f, 0.0f, 25.0f }, glm::mat4(1.0f), toLoad, toUnload);
 			CHECK(toLoad.empty());
-			CHECK(toUnload.empty()); // Still no unload!
+			CHECK(toUnload.empty());
 
-			// Player moves far away to (250, 0, 25): Distance to Chunk 10 is 200m (> 150m unload radius)
 			toLoad.clear();
 			toUnload.clear();
 			driver.EvaluateStreaming({ 250.0f, 0.0f, 25.0f }, glm::mat4(1.0f), toLoad, toUnload);
@@ -245,7 +244,6 @@ int main()
 
 			glm::dvec3 worldPosBefore = space.ToWorldCoordinates(tc.Location);
 
-			// Rebase to (1000, 0, 1000)
 			space.Rebase(scene, { 1000.0f, 0.0f, 1000.0f });
 
 			CHECK(space.GetOriginOffset().x == 1000.0);
@@ -268,8 +266,8 @@ int main()
 
 			NavMeshTileHeader th;
 			NavMeshTileKey k1{ 101, 0, 0, 0 };
-			NavMeshTileKey k2{ 102, 1, 0, 0 }; // Adjacent horizontally
-			NavMeshTileKey k3{ 103, 5, 5, 0 }; // Far away
+			NavMeshTileKey k2{ 102, 1, 0, 0 };
+			NavMeshTileKey k3{ 103, 5, 5, 0 };
 
 			stitcher.RegisterTile(101, k1, th);
 			CHECK(stitcher.GetActiveTileCount() == 1);
@@ -286,7 +284,6 @@ int main()
 			CHECK(stitcher.GetTileState(k3) == TileStitchState::Loaded);
 			CHECK(stitcher.GetStitchedBorderCount() == 1);
 
-			// Unregister tile 102: border detaches
 			stitcher.UnregisterTile(102);
 			CHECK(stitcher.GetActiveTileCount() == 2);
 			CHECK(stitcher.GetTileState(k1) == TileStitchState::Loaded);
@@ -300,22 +297,18 @@ int main()
 			aiManager.RegisterAi(5002, 101, { 80.0f, 0.0f, 80.0f }, 100.0f, 2);
 			CHECK(aiManager.GetTrackedAiCount() == 2);
 
-			// Player at (0, 0, 0)
 			aiManager.UpdateLOD({ 0.0f, 0.0f, 0.0f }, 50.0f, 120.0f);
-			CHECK(aiManager.GetAiTier(5001) == AiLodTier::Tier1_Active);    // dist ~14m (< 50m)
-			CHECK(aiManager.GetAiTier(5002) == AiLodTier::Tier2_Hibernated); // dist ~113m (50~120m)
+			CHECK(aiManager.GetAiTier(5001) == AiLodTier::Tier1_Active);
+			CHECK(aiManager.GetAiTier(5002) == AiLodTier::Tier2_Hibernated);
 
-			// Chunk 101 unloaded: snapshots stored in DeltaState
 			DeltaStateRegistry deltaState;
 			aiManager.OnChunkUnloaded(101, deltaState);
 			CHECK(aiManager.GetTrackedAiCount() == 0);
 			CHECK(deltaState.HasProperty(5001, "AI_Health"));
 			CHECK(deltaState.GetProperty(5001, "AI_Health") == "100.000000");
 
-			// Simulate offline damage to virtualized AI
 			deltaState.SetProperty(5001, "AI_Health", "45.000000");
 
-			// Chunk 101 loaded again: AI restored with updated health
 			std::vector<AiVirtualSnapshot> restored;
 			aiManager.OnChunkLoaded(101, deltaState, restored);
 			CHECK(restored.size() == 2);
@@ -326,8 +319,94 @@ int main()
 			CHECK(it->Health == 45.0f);
 		}
 
+		// 10. SectorPortalDriver (M3)
+		{
+			SectorPortalDriver portalDriver;
+			portalDriver.AddSector(1, ChunkBounds{ { 0.0f, 0.0f, 0.0f }, { 10.0f, 5.0f, 10.0f } });
+			portalDriver.AddSector(2, ChunkBounds{ { 10.0f, 0.0f, 0.0f }, { 20.0f, 5.0f, 10.0f } });
+			portalDriver.AddSector(3, ChunkBounds{ { 20.0f, 0.0f, 0.0f }, { 30.0f, 5.0f, 10.0f } });
+
+			// Sector 1 connects to Sector 2; Sector 2 connects to Sector 3
+			portalDriver.AddPortal(1, 2, { 10.0f, 2.5f, 5.0f }, { 0.1f, 2.0f, 1.0f }, true);
+			portalDriver.AddPortal(2, 3, { 20.0f, 2.5f, 5.0f }, { 0.1f, 2.0f, 1.0f }, false); // Portal 2->3 closed!
+
+			CHECK(portalDriver.GetSectorCount() == 3);
+			CHECK(portalDriver.GetPortalCount() == 2);
+
+			std::vector<uint64_t> toLoad;
+			std::vector<uint64_t> toUnload;
+
+			// Player in Sector 1 (5, 2.5, 5)
+			portalDriver.EvaluateStreaming({ 5.0f, 2.5f, 5.0f }, glm::mat4(1.0f), toLoad, toUnload);
+			// Sector 1 loaded; Sector 2 reached via open portal; Sector 3 blocked by closed portal!
+			CHECK(toLoad.size() == 2);
+			CHECK(std::find(toLoad.begin(), toLoad.end(), 1) != toLoad.end());
+			CHECK(std::find(toLoad.begin(), toLoad.end(), 2) != toLoad.end());
+			CHECK(std::find(toLoad.begin(), toLoad.end(), 3) == toLoad.end());
+
+			// Now open portal 2->3
+			toLoad.clear();
+			toUnload.clear();
+			portalDriver.SetPortalOpen(2, 3, true);
+			portalDriver.EvaluateStreaming({ 5.0f, 2.5f, 5.0f }, glm::mat4(1.0f), toLoad, toUnload);
+			CHECK(toLoad.size() == 1 && toLoad[0] == 3);
+
+			// Now close portal 1->2: Sector 2 and 3 should be unloaded!
+			toLoad.clear();
+			toUnload.clear();
+			portalDriver.SetPortalOpen(1, 2, false);
+			portalDriver.EvaluateStreaming({ 5.0f, 2.5f, 5.0f }, glm::mat4(1.0f), toLoad, toUnload);
+			CHECK(toUnload.size() == 2);
+			CHECK(std::find(toUnload.begin(), toUnload.end(), 2) != toUnload.end());
+			CHECK(std::find(toUnload.begin(), toUnload.end(), 3) != toUnload.end());
+		}
+
+		// 11. DataLayerManager (M3)
+		{
+			DataLayerManager layerMgr;
+			layerMgr.RegisterLayer(1, "Base_World", true);
+			layerMgr.RegisterLayer(2, "Day", true);
+			layerMgr.RegisterLayer(4, "Night", false);
+			CHECK(layerMgr.GetRegisteredLayerCount() == 3);
+
+			CHECK(layerMgr.GetActiveMask() == (1 | 2));
+			CHECK(layerMgr.IsEntityVisible(1));      // Base visible
+			CHECK(layerMgr.IsEntityVisible(2));      // Day visible
+			CHECK(!layerMgr.IsEntityVisible(4));     // Night invisible
+			CHECK(layerMgr.IsEntityVisible(1 | 4));  // Mixed visible because 1 is active
+
+			// Switch to Night: deactivate Day, activate Night
+			layerMgr.SetLayerActive("Day", false);
+			layerMgr.SetLayerActive("Night", true);
+			CHECK(layerMgr.GetActiveMask() == (1 | 4));
+			CHECK(!layerMgr.IsEntityVisible(2));     // Day now invisible
+			CHECK(layerMgr.IsEntityVisible(4));      // Night now visible
+		}
+
+		// 12. AiPerceptionGate: Raycast Obstruction via Unloaded Space (M3)
+		{
+			AiPerceptionGate gate;
+			gate.RegisterChunk(10, ChunkBounds{ { 0.0f, 0.0f, 0.0f }, { 50.0f, 10.0f, 50.0f } }, true);   // Loaded
+			gate.RegisterChunk(20, ChunkBounds{ { 60.0f, 0.0f, 0.0f }, { 100.0f, 10.0f, 50.0f } }, false); // Unloaded!
+
+			// Ray within loaded chunk (10, 5, 25) -> (40, 5, 25)
+			uint64_t blockedChunk = 0;
+			PerceptionStatus res1 = gate.TestRay({ 10.0f, 5.0f, 25.0f }, { 40.0f, 5.0f, 25.0f }, &blockedChunk);
+			CHECK(res1 == PerceptionStatus::Clear);
+
+			// Ray aiming into unloaded chunk (10, 5, 25) -> (80, 5, 25)
+			PerceptionStatus res2 = gate.TestRay({ 10.0f, 5.0f, 25.0f }, { 80.0f, 5.0f, 25.0f }, &blockedChunk);
+			CHECK(res2 == PerceptionStatus::BlockedByUnloadedChunk);
+			CHECK(blockedChunk == 20);
+
+			// When chunk 20 loads, the perception ray becomes clear!
+			gate.SetChunkLoaded(20, true);
+			PerceptionStatus res3 = gate.TestRay({ 10.0f, 5.0f, 25.0f }, { 80.0f, 5.0f, 25.0f }, &blockedChunk);
+			CHECK(res3 == PerceptionStatus::Clear);
+		}
+
 		std::filesystem::remove_all(tempDir);
-		std::printf("[LevelStreamingTests] All Level 2.0 M0 + M1 + M2 tests passed successfully!\n");
+		std::printf("[LevelStreamingTests] All Level 2.0 M0 + M1 + M2 + M3 tests passed successfully!\n");
 		return 0;
 	}
 	catch (const std::exception& e)
