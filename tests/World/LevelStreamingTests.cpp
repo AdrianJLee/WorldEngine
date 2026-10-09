@@ -60,7 +60,8 @@ int main()
 			CHECK(sizeof(ChunkHeader) == 128);
 			CHECK(alignof(ChunkHeader) == 16);
 			CHECK(header.Magic == ChunkMagic);
-			CHECK(header.Version == 1);
+			CHECK(header.Version == ChunkVersion);
+			CHECK(ChunkVersion == 2);   // v2 = 带实体文档段
 			CHECK(header.ChunkID == 0x123456789ABCDEF0ULL);
 			CHECK(header.SubspaceID == 42);
 
@@ -231,10 +232,19 @@ int main()
 			WorldContext context;
 			Scene source(context);
 
+			// 带组件(不只是 Transform)的实体:块里必须把 MeshRenderer 一起带上。
+			MeshRendererComponent mesh;
+			mesh.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
+
 			Entity tower = Entity::CreateEntity(&source, "GuardTower", UUID(2001));
 			tower.AddComponent<TransformComponent>(glm::vec3 { 10.0f, 0.0f, 10.0f });
+			tower.AddComponent<MeshRendererComponent>(mesh);
+
 			Entity crate = Entity::CreateEntity(&source, "SupplyCrate", UUID(2002));
 			crate.AddComponent<TransformComponent>(glm::vec3 { 12.0f, 0.0f, 15.0f });
+			crate.AddComponent<MeshRendererComponent>(mesh);
+
+			// 无渲染组件的实体(纯逻辑/占位)也要能正确往返。
 			Entity tree = Entity::CreateEntity(&source, "DistantTree", UUID(2003));
 			tree.AddComponent<TransformComponent>(glm::vec3 { 500.0f, 0.0f, 500.0f });
 
@@ -261,7 +271,7 @@ int main()
 			CHECK(std::filesystem::exists(cookedDir / "888.wchunk"));
 		}
 
-		// 5.StreamableChunk Loading, Activation in Scene & DeltaState (M1)
+		// 5.流送块载入/激活 + DeltaState 过滤 + **组件载荷**(与编辑器路径等价)
 		{
 			WorldContext context;
 			Scene scene(context);
@@ -273,17 +283,39 @@ int main()
 			CHECK(chunk.GetChunkID() == 999);
 			CHECK(chunk.GetState() == ChunkState::MemoryReady);
 			CHECK(chunk.GetRecordCount() == 2);
+			// v2 块必须带组件载荷:没有它,载入结果就是一堆命名空壳。
+			CHECK(chunk.HasComponentPayload());
+			CHECK(chunk.GetDocumentCount() == 2);
 
 			DeltaStateRegistry deltaState;
-			deltaState.MarkDestroyed(2002);
+			deltaState.MarkDestroyed(2002);   // SupplyCrate 已被玩家打掉
 
 			chunk.OnActivateWithDelta(scene, &deltaState);
 			CHECK(chunk.GetState() == ChunkState::Active);
-			CHECK(chunk.GetSpawnedCount() == 1);
+			CHECK(chunk.GetSpawnedCount() == 1);   // 被摧毁的那个不生成
+
+			// 组件真的回来了:不只是名字 + Transform。
+			{
+				entt::registry& registry = scene.GetRegistry();
+				CHECK(registry.view<UUIDComponent>().size() == 1);
+
+				auto view = registry.view<UUIDComponent, MeshRendererComponent>();
+				size_t meshes = 0;
+				for (const entt::entity handle : view)
+				{
+					++meshes;
+					CHECK(registry.get<UUIDComponent>(handle).ID == UUID(2001));
+					CHECK(registry.get<MeshRendererComponent>(handle).Primitive
+						== MeshRendererComponent::PrimitiveShape::Cube);
+				}
+				CHECK(meshes == 1);
+			}
 
 			chunk.OnDeactivate(scene);
 			CHECK(chunk.GetState() == ChunkState::MemoryReady);
 			CHECK(chunk.GetSpawnedCount() == 0);
+			// 卸载后场景里不留残骸。
+			CHECK(scene.GetRegistry().view<UUIDComponent>().size() == 0);
 		}
 
 		// 6.SpatialGridDriver & Hysteresis Buffer Streaming (M2)

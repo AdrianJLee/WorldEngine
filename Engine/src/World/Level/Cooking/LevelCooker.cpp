@@ -100,6 +100,46 @@ namespace World::Level
 				header.BoundsMin = minBound;
 				header.BoundsMax = maxBound;
 
+				// 实体文档段:每个静态实体一份**完整组件文档**(与 `.entity` 同源)。
+				// 记录表给空间切分用,文档段才是"载入后场景真的长这样"的载荷 ——
+				// 只有记录表的话,载入结果是一堆命名空壳。
+				std::vector<ChunkDocumentEntry> documents(indices.size());
+				std::string blob;
+				{
+					for (size_t r = 0; r < indices.size(); ++r)
+					{
+						const auto& ent = package.GetEntity(indices[r]);
+						documents[r].EntityUUID = ent.EntityUUID;
+						documents[r].Size = static_cast<uint32_t>(ent.DocumentYaml.size());
+					}
+					size_t cursor = 0;
+					for (size_t r = 0; r < indices.size(); ++r)
+						cursor += documents[r].Size;
+					blob.resize(cursor);
+					cursor = 0;
+					for (size_t r = 0; r < indices.size(); ++r)
+					{
+						const auto& ent = package.GetEntity(indices[r]);
+						if (!ent.DocumentYaml.empty())
+							std::memcpy(blob.data() + cursor, ent.DocumentYaml.data(), ent.DocumentYaml.size());
+						cursor += ent.DocumentYaml.size();
+					}
+				}
+
+				header.DocumentOffset = sizeof(ChunkHeader)
+					+ indices.size() * sizeof(StaticEntityRecord);
+				header.DocumentSize = indices.size() * sizeof(ChunkDocumentEntry) + blob.size();
+
+				// 各条目的 YAML 绝对偏移:文档表之后依次摆放。
+				{
+					size_t cursor = header.DocumentOffset + indices.size() * sizeof(ChunkDocumentEntry);
+					for (size_t r = 0; r < indices.size(); ++r)
+					{
+						documents[r].Offset = cursor;
+						cursor += documents[r].Size;
+					}
+				}
+
 				const std::string chunkFileName = std::to_string(chunkId) + ".wchunk";
 				const std::filesystem::path chunkFilePath = outputDir / chunkFileName;
 
@@ -115,7 +155,11 @@ namespace World::Level
 				if (!indices.empty())
 				{
 					fout.write(reinterpret_cast<const char*>(records.get()), indices.size() * sizeof(StaticEntityRecord));
+					fout.write(reinterpret_cast<const char*>(documents.data()),
+						documents.size() * sizeof(ChunkDocumentEntry));
 				}
+				if (!blob.empty())
+					fout.write(blob.data(), static_cast<std::streamsize>(blob.size()));
 				fout.close();
 
 				result.OutputChunkFiles.push_back(chunkFilePath);

@@ -3,6 +3,9 @@
 
 #include "World/Asset/BuiltinImporters.h"
 #include "World/Asset/CookPipeline.h"
+#include "World/Level/Authoring/LevelCatalog.h"
+#include "World/Level/Authoring/LevelPackage.h"
+#include "World/Level/Cooking/LevelCooker.h"
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/Vfs/PackageProvider.h"
 #include "World/Plugins/PluginPackaging.h"
@@ -694,8 +697,16 @@ namespace World::Editor
 			std::string manifestError;
 			if (!World::Asset::ProjectManifest::Load(projectManifestPath, &manifest, &manifestError))
 				throw std::runtime_error("Project manifest load failed: " + manifestError);
+			// 清单没写包名时**不要**直接失败:包名只是发行产物的文件名,与项目能不能打包无关。
+			// 默认 `<项目 id>.wpak`(id 也空则 `content.wpak`),并写进发行清单 —— 否则
+			// "向导建的新项目 / 模板项目"永远 cook 不了(模板里 packages 就是空的)。
 			if (manifest.Packages.empty())
-				throw std::runtime_error("Project manifest declares no packages");
+			{
+				const std::string defaultPackage =
+					(manifest.Id.empty() ? std::string("content") : manifest.Id) + ".wpak";
+				manifest.Packages.push_back(defaultPackage);
+				WLD_CORE_INFO("[cook] 清单未声明 packages;默认使用 '{0}'", defaultPackage);
+			}
 
 			// 2. 启动场景覆盖(编辑器里当前打开的场景优先)。
 			if (!options.StartSceneOverride.empty())
@@ -865,6 +876,33 @@ namespace World::Editor
 					throw std::runtime_error("Source texture stripping failed ("
 						+ std::to_string(stripped.Failed) + " failed): " + stripped.Error);
 				result.StrippedSourceTextures = stripped.Stripped;
+			}
+
+			// 4f. Level 2.0:关卡包 → 二进制流送块。产物落在 cooked 内容根的关卡目录下,
+			//     随后随第 5 步进包 —— 关卡因此**同时**以两种形态发行:`.entity` 源文档
+			//     (编辑器/Instantiate 用)与 `.wchunk`(流送用,带完整组件载荷)。
+			{
+				const fs::path levelContentRoot = manifest.ResolveContentRoot(projectManifestPath);
+				for (const World::Level::LevelInfo& level : World::Level::LevelCatalog::Discover(levelContentRoot))
+				{
+					World::Level::LevelPackage levelPackage;
+					std::string levelError;
+					if (!levelPackage.Load(level.PackageDir, &levelError))
+						throw std::runtime_error("Level '" + level.Id + "' rejected: " + levelError);
+
+					World::Level::CookSettings cookSettings;
+					cookSettings.GridCellSize = levelPackage.GetGridCellSize();
+					const World::Level::CookResult cooked = World::Level::LevelCooker::CookPackage(
+						levelPackage, cookedContentDir / "levels" / level.Id / "cooked", cookSettings);
+					if (!cooked.Success)
+						throw std::runtime_error("Level '" + level.Id + "' cooking failed: "
+							+ cooked.ErrorMessage);
+
+					result.LevelChunksCooked += cooked.ChunksCooked;
+					result.LevelEntitiesCooked += cooked.TotalEntitiesCooked;
+					WLD_CORE_INFO("[level] cooked '{0}': {1} chunk(s), {2} entities",
+						level.Id, cooked.ChunksCooked, cooked.TotalEntitiesCooked);
+				}
 			}
 
 			// 5. 打包 cooked 产物为发行包。

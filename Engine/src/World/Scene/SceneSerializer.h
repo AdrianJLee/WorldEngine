@@ -3,6 +3,7 @@
 #include "World/Scene/Entity.h"
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace World
 {
@@ -35,6 +36,14 @@ namespace World
 		// 同上,但文档内容已经在内存里(关卡包逐实体读取用)。documentYaml 必须是
 		// `Entities: [ {...} ]` 形状的单实体文档。
 		static size_t AppendEntityYaml(Scene& scene, const std::string& documentYaml,
+			std::string* error = nullptr);
+
+		// 批量并入一组单实体文档(关卡包 / 流送块)。已存在同 UUID 的实体跳过;
+		// `skip` 非空时按其逐项跳过(流送块用它过滤 DeltaStateRegistry 里已摧毁的实体)。
+		// existing-UUID 集合只构建一次 —— 逐条调 AppendEntityYaml 会是 O(n²)。
+		// outApplied 非空时按并入顺序填回实体句柄(调用方据此登记可卸载集合)。
+		static size_t AppendEntityDocuments(Scene& scene, const std::vector<std::string>& documents,
+			const std::vector<uint8_t>* skip = nullptr, std::vector<Entity>* outApplied = nullptr,
 			std::string* error = nullptr);
 
 		// 逐实体并入之后**必须**收尾一次:反序列化只写 Transform 的原始字段,不会重算

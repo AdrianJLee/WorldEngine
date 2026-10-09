@@ -131,6 +131,29 @@ namespace World
 			return handle;
 		}
 
+		// 单个实体内嵌块 → 场景,并维护"已存在 UUID"集合(UUID 是存档/差分的唯一键,
+		// 同一批里重复出现或与场景已有实体撞 UUID 都必须跳过)。
+		// 返回新实体句柄;被跳过(重复 UUID / 非 map)时返回 entt::null。
+		entt::entity ApplyEntityNodeIfNew(Scene& scene, YAML::Node node, const Schema::SchemaRegistry& schemas,
+			std::unordered_set<uint64_t>& existing)
+		{
+			if (!node.IsMap())
+				return entt::null;
+
+			uint64_t uuid = 0;
+			if (YAML::Node identity = node["World::UUIDComponent"])
+				if (YAML::Node id = identity["ID"])
+					if (YAML::Node raw = id["m_UUID"])
+						uuid = raw.as<uint64_t>(0);
+			if (uuid != 0 && existing.count(uuid) != 0)
+				return entt::null;
+
+			const entt::entity handle = ApplyEntityNode(scene, node, schemas);
+			if (uuid != 0)
+				existing.insert(uuid);
+			return handle;
+		}
+
 		// Level 2.0:把一个"单实体文档"(`Entities: [ {...} ]`)里的实体并入场景。
 		// 文件路径与内存文本两条入口共用它 —— 实体级读口径只有这一处。
 		// 已存在同 UUID 的实体一律跳过:同一关卡目录被重复并入时不能造出同 UUID 双胞胎。
@@ -152,23 +175,8 @@ namespace World
 
 			size_t applied = 0;
 			for (YAML::Node node : entities)
-			{
-				if (!node.IsMap())
-					continue;
-
-				uint64_t uuid = 0;
-				if (YAML::Node identity = node["World::UUIDComponent"])
-					if (YAML::Node id = identity["ID"])
-						if (YAML::Node raw = id["m_UUID"])
-							uuid = raw.as<uint64_t>(0);
-				if (uuid != 0 && existing.count(uuid) != 0)
-					continue;
-
-				ApplyEntityNode(scene, node, schemas);
-				if (uuid != 0)
-					existing.insert(uuid);
-				++applied;
-			}
+				if (ApplyEntityNodeIfNew(scene, node, schemas, existing) != entt::null)
+					++applied;
 			return applied;
 		}
 	}
@@ -630,6 +638,52 @@ namespace World
 			if (error) *error = e.what();
 			return false;
 		}
+	}
+
+	size_t SceneSerializer::AppendEntityDocuments(Scene& scene, const std::vector<std::string>& documents,
+		const std::vector<uint8_t>* skip, std::vector<Entity>* outApplied, std::string* error)
+	{
+		const Schema::SchemaRegistry& schemas = scene.GetContext().Schemas();
+		entt::registry& registry = scene.GetRegistry();
+
+		std::unordered_set<uint64_t> existing;
+		for (const entt::entity handle : registry.view<UUIDComponent>())
+			existing.insert(static_cast<uint64_t>(registry.get<UUIDComponent>(handle).ID));
+
+		size_t applied = 0;
+		YAML::Node document;
+		for (size_t i = 0; i < documents.size(); ++i)
+		{
+			if (skip && i < skip->size() && (*skip)[i] != 0)
+				continue;
+			if (documents[i].empty())
+				continue;
+
+			try
+			{
+				document = YAML::Load(documents[i]);
+			}
+			catch (const std::exception& e)
+			{
+				if (error) *error = e.what();
+				continue;
+			}
+
+			YAML::Node entities = document["Entities"];
+			if (!entities || !entities.IsSequence())
+				continue;
+
+			for (YAML::Node node : entities)
+			{
+				const entt::entity handle = ApplyEntityNodeIfNew(scene, node, schemas, existing);
+				if (handle == entt::null)
+					continue;
+				++applied;
+				if (outApplied)
+					outApplied->emplace_back(&scene, handle);
+			}
+		}
+		return applied;
 	}
 
 	void SceneSerializer::FinalizeEntityImport(Scene& scene)

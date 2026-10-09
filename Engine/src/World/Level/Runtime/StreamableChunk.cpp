@@ -2,6 +2,7 @@
 #include "World/Level/Runtime/StreamableChunk.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/SceneSerializer.h"
 #include <fstream>
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
@@ -16,6 +17,7 @@ namespace World::Level
 		std::unique_ptr<StaticEntityRecord[]> Records;
 		size_t RecordCount{ 0 };
 		std::vector<Entity> SpawnedEntities;
+		std::vector<std::string> DocumentYaml;   // 每个静态实体一份组件文档(可为空 = v1 老块)
 		Scene* ActiveScene{ nullptr };
 	};
 
@@ -93,6 +95,39 @@ namespace World::Level
 			m_Impl->Records.reset();
 		}
 
+		// 实体文档段(v2):记录表之后是 ChunkDocumentEntry[] 与其后的 YAML 字节。
+		m_Impl->DocumentYaml.assign(m_Impl->RecordCount, std::string());
+		if (m_Impl->Header.DocumentSize > 0 && m_Impl->RecordCount > 0)
+		{
+			fin.seekg(static_cast<std::streamoff>(m_Impl->Header.DocumentOffset), std::ios::beg);
+			std::vector<ChunkDocumentEntry> documents(m_Impl->RecordCount);
+			const size_t tableBytes = documents.size() * sizeof(ChunkDocumentEntry);
+			fin.read(reinterpret_cast<char*>(documents.data()), tableBytes);
+			if (static_cast<size_t>(fin.gcount()) != tableBytes)
+			{
+				if (outError) *outError = "Chunk document table truncated in: " + chunkPath.string();
+				m_Impl->State = ChunkState::Unloaded;
+				return false;
+			}
+
+			for (size_t r = 0; r < documents.size(); ++r)
+			{
+				const ChunkDocumentEntry& entry = documents[r];
+				if (entry.Size == 0)
+					continue;
+				std::string& text = m_Impl->DocumentYaml[r];
+				text.resize(entry.Size);
+				fin.seekg(static_cast<std::streamoff>(entry.Offset), std::ios::beg);
+				fin.read(text.data(), static_cast<std::streamsize>(entry.Size));
+				if (static_cast<size_t>(fin.gcount()) != entry.Size)
+				{
+					if (outError) *outError = "Chunk entity document truncated in: " + chunkPath.string();
+					m_Impl->State = ChunkState::Unloaded;
+					return false;
+				}
+			}
+		}
+
 		m_Impl->State = ChunkState::MemoryReady;
 		return true;
 	}
@@ -116,24 +151,47 @@ namespace World::Level
 		m_Impl->SpawnedEntities.clear();
 		m_Impl->SpawnedEntities.reserve(m_Impl->RecordCount);
 
+		// 差分区:已摧毁的实体本轮不生成(记录表与文档表按记录序号一一对应)。
+		std::vector<uint8_t> skip(m_Impl->RecordCount, 0);
 		for (size_t i = 0; i < m_Impl->RecordCount; ++i)
-		{
-			const auto& rec = m_Impl->Records[i];
-			if (deltaState && deltaState->IsDestroyed(rec.EntityUUID))
+			if (deltaState && deltaState->IsDestroyed(m_Impl->Records[i].EntityUUID))
+				skip[i] = 1;
+
+		bool hasDocuments = false;
+		for (const std::string& text : m_Impl->DocumentYaml)
+			if (!text.empty())
 			{
-				continue;
+				hasDocuments = true;
+				break;
 			}
 
-			const std::string name = rec.Name[0] != '\0' ? rec.Name : "StaticEntity";
-			Entity ent = Entity::CreateEntity(&targetScene, name, UUID(rec.EntityUUID));
-			if (ent.IsValid())
+		if (hasDocuments)
+		{
+			// 带组件载荷:走与编辑器/关卡包**同一条**实体级读路径(全部组件)。
+			SceneSerializer::AppendEntityDocuments(targetScene, m_Impl->DocumentYaml, &skip,
+				&m_Impl->SpawnedEntities, nullptr);
+			SceneSerializer::FinalizeEntityImport(targetScene);
+		}
+		else
+		{
+			// v1 老块没有载荷:退化为"名字 + Transform"(不静默假装完整 —— 见 HasComponentPayload)。
+			for (size_t i = 0; i < m_Impl->RecordCount; ++i)
 			{
-				ent.AddComponent<TransformComponent>(
-					rec.Position,
-					glm::radians(rec.RotationEuler),
-					glm::vec3(rec.ScaleX, rec.ScaleY, rec.ScaleZ)
-				);
-				m_Impl->SpawnedEntities.push_back(ent);
+				const auto& rec = m_Impl->Records[i];
+				if (skip[i] != 0)
+					continue;
+
+				const std::string name = rec.Name[0] != '\0' ? rec.Name : "StaticEntity";
+				Entity ent = Entity::CreateEntity(&targetScene, name, UUID(rec.EntityUUID));
+				if (ent.IsValid())
+				{
+					ent.AddComponent<TransformComponent>(
+						rec.Position,
+						glm::radians(rec.RotationEuler),
+						glm::vec3(rec.ScaleX, rec.ScaleY, rec.ScaleZ)
+					);
+					m_Impl->SpawnedEntities.push_back(ent);
+				}
 			}
 		}
 
@@ -159,4 +217,21 @@ namespace World::Level
 	size_t StreamableChunk::GetRecordCount() const { return m_Impl->RecordCount; }
 	const StaticEntityRecord* StreamableChunk::GetRecords() const { return m_Impl->Records.get(); }
 	size_t StreamableChunk::GetSpawnedCount() const { return m_Impl->SpawnedEntities.size(); }
+
+	bool StreamableChunk::HasComponentPayload() const
+	{
+		for (const std::string& text : m_Impl->DocumentYaml)
+			if (!text.empty())
+				return true;
+		return false;
+	}
+
+	size_t StreamableChunk::GetDocumentCount() const
+	{
+		size_t count = 0;
+		for (const std::string& text : m_Impl->DocumentYaml)
+			if (!text.empty())
+				++count;
+		return count;
+	}
 }

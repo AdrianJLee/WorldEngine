@@ -7,7 +7,9 @@
 namespace World::Level
 {
 	constexpr uint32_t ChunkMagic = 0x5743484B; // "WCHK"
-	constexpr uint32_t ChunkVersion = 1;
+	// v2:文件尾部增加"实体文档段"(每个静态实体一份完整组件文档),流送块因此能还原
+	//     全部组件,而不只是名字 + Transform。v1 只有 StaticEntityRecord 表。
+	constexpr uint32_t ChunkVersion = 2;
 
 	#pragma pack(push, 16)
 	struct alignas(16) ChunkHeader
@@ -29,11 +31,29 @@ namespace World::Level
 		uint32_t NavMeshTileIndex{ 0 };
 		uint32_t DataLayerMask{ 0 };
 
+		// 快速记录表(StaticEntityRecord[]):空间切分/剔除/按需实例化用的扁平数据。
 		uint64_t BlobOffset{ 0 };
 		uint64_t BlobSize{ 0 };
+
+		// 头部自校验(目前未启用,恒 0;保留字段以免将来插入时移动偏移)。
 		uint64_t HeaderChecksum{ 0 };
 
-		uint64_t Reserved[4]{ 0, 0, 0, 0 };
+		// 实体文档段:ChunkDocumentEntry[StaticEntityCount] 紧接在 DocumentOffset 处,
+		// 各条目的 YAML 字节散落在其后。这是"组件随块走"的载荷 —— 只有记录表的话,
+		// 载入的场景是一堆命名空壳(没有 MeshRenderer/Camera/Light)。
+		uint64_t DocumentOffset{ 0 };
+		uint64_t DocumentSize{ 0 };
+
+		uint64_t Reserved[2]{ 0, 0 };
+	};
+
+	// 文档段里的一条索引:实体 UUID + 该实体 YAML 在文件中的绝对偏移与长度。
+	struct alignas(8) ChunkDocumentEntry
+	{
+		uint64_t EntityUUID{ 0 };
+		uint64_t Offset{ 0 };
+		uint32_t Size{ 0 };
+		uint32_t Reserved{ 0 };
 	};
 
 	struct alignas(16) StaticEntityRecord
@@ -69,7 +89,14 @@ namespace World::Level
 	static_assert(offsetof(ChunkHeader, BlobOffset) == 72, "ChunkHeader::BlobOffset offset mismatch");
 	static_assert(offsetof(ChunkHeader, BlobSize) == 80, "ChunkHeader::BlobSize offset mismatch");
 	static_assert(offsetof(ChunkHeader, HeaderChecksum) == 88, "ChunkHeader::HeaderChecksum offset mismatch");
-	static_assert(offsetof(ChunkHeader, Reserved) == 96, "ChunkHeader::Reserved offset mismatch");
+	static_assert(offsetof(ChunkHeader, DocumentOffset) == 96, "ChunkHeader::DocumentOffset offset mismatch");
+	static_assert(offsetof(ChunkHeader, DocumentSize) == 104, "ChunkHeader::DocumentSize offset mismatch");
+	static_assert(offsetof(ChunkHeader, Reserved) == 112, "ChunkHeader::Reserved offset mismatch");
+
+	static_assert(sizeof(ChunkDocumentEntry) == 24, "ChunkDocumentEntry must be exactly 24 bytes");
+	static_assert(offsetof(ChunkDocumentEntry, EntityUUID) == 0, "ChunkDocumentEntry::EntityUUID offset mismatch");
+	static_assert(offsetof(ChunkDocumentEntry, Offset) == 8, "ChunkDocumentEntry::Offset offset mismatch");
+	static_assert(offsetof(ChunkDocumentEntry, Size) == 16, "ChunkDocumentEntry::Size offset mismatch");
 
 	static_assert(sizeof(StaticEntityRecord) == 80, "StaticEntityRecord must be exactly 80 bytes");
 	static_assert(alignof(StaticEntityRecord) == 16, "StaticEntityRecord must be 16-byte aligned");

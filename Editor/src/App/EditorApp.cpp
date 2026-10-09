@@ -243,11 +243,13 @@ namespace World
 			{
 				std::printf("[cook] OK: %zu assets (%zu changed), %zu shader artifacts, "
 					"%zu textures (%zu baked, %zu uptodate, %zu stripped), "
-					"%zu localization files (%zu languages)\n",
+					"%zu localization files (%zu languages), "
+					"%zu level chunk(s) (%zu entities)\n",
 					cooked.AssetsTotal, cooked.AssetsChanged, cooked.ShaderArtifacts,
 					cooked.TextureBaked + cooked.TextureUpToDate + cooked.TextureSkipped,
 					cooked.TextureBaked, cooked.TextureUpToDate, cooked.StrippedSourceTextures,
-					cooked.LocalizationFiles, cooked.LocalizationLanguages);
+					cooked.LocalizationFiles, cooked.LocalizationLanguages,
+					cooked.LevelChunksCooked, cooked.LevelEntitiesCooked);
 				std::exit(0);
 			}
 			std::fprintf(stderr, "[cook] FAILED: %s\n", cooked.Error.c_str());

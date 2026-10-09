@@ -31,6 +31,11 @@ namespace World::Level
 		const StaticEntityRecord* GetRecords() const;
 		size_t GetSpawnedCount() const;
 
+		// 块内是否带**组件载荷**(v2 的实体文档段)。带载荷时激活会还原实体全部组件;
+		// 不带(v1 老块)时退化为"名字 + Transform"。
+		bool HasComponentPayload() const;
+		size_t GetDocumentCount() const;
+
 	private:
 		struct Impl;
 		std::unique_ptr<Impl> m_Impl;
