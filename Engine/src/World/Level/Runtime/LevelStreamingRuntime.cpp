@@ -3,11 +3,15 @@
 
 #include "World/Core/Log.h"
 #include "World/Core/UUID.h"
+#include "World/Core/Log.h"
+#include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Vfs/Vfs.h"
 #include "World/Scene/Scene.h"
 
+#include <atomic>
 #include <fstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace World::Level
@@ -25,7 +29,24 @@ namespace World::Level
 
 		float LoadDistance{ 256.0f };
 		float UnloadDistance{ 320.0f };
+		float TimeBudgetMs{ 2.0f };
+		bool AsyncIO{ true };
 		size_t LastLoggedActive{ static_cast<size_t>(-1) };   // -1 ⇒ 首帧必打一条
+
+		// 在飞的后台预读:块 Id → (字节, 是否就绪)。主线程只搬指针,不读盘。
+		// 跨线程交接:后台线程先填 Bytes、再置 Failed/Ready;主线程以 acquire 读 Ready
+		// 之后才碰 Bytes。缺这个 release/acquire 对就是数据竞争 —— 实测表现为
+		// "偶尔某一帧读不到已写好的字节",且不可复现。
+		struct Prefetch
+		{
+			std::vector<uint8_t> Bytes;
+			std::atomic<bool> Ready{ false };
+			std::atomic<bool> Failed{ false };
+		};
+		std::unordered_map<uint64_t, Prefetch> Prefetches;
+		// "驱动器说该装、但还没真正装上"的块。必需:驱动器在**第一次**裁决时就把块标成
+		// IsLoaded,异步读盘跨帧时它不会再重复裁决 —— 只靠驱动器的话,这一块永远装不上。
+		std::unordered_set<uint64_t> PendingLoads;
 
 		World::Vfs::Path LogicalDir() const
 		{
@@ -72,7 +93,14 @@ namespace World::Level
 	{
 	}
 
-	LevelStreamingRuntime::~LevelStreamingRuntime() = default;
+	LevelStreamingRuntime::~LevelStreamingRuntime()
+	{
+		// 后台预读任务持有本类 Impl 与槽位的**裸指针**(JobDecl 的负载必须平凡可拷贝,
+		// 不能捕获智能指针)。因此销毁前必须把在飞任务排干 —— 否则任务落在已释放的
+		// Impl 上就是 use-after-free(实测表现为 0xC0000005 随机崩溃)。
+		if (m_Impl && !m_Impl->Prefetches.empty() && JobSystem::IsRunning())
+			JobSystem::WaitAll();
+	}
 
 	bool LevelStreamingRuntime::IsReady() const { return m_Impl && !m_Impl->Index.IsEmpty(); }
 
@@ -125,7 +153,7 @@ namespace World::Level
 
 		// 驱动器由本类持有并**由本类**求值:协调器的 RequestLoad 只接受"已在内存"的块,
 		// 而"该读哪几块"要由驱动器先裁决 —— 两阶段(先裁决、再按需读盘)在宿主侧。
-		m_Impl->Coordinator.SetTimeSliceBudgetMs(2.0f);
+		m_Impl->Coordinator.SetTimeSliceBudgetMs(m_Impl->TimeBudgetMs);
 		WLD_CORE_WARN("[level] 流送就绪: '{0}', {1} 块, 视距 {2}/{3}m",
 			m_Impl->LevelId, m_Impl->Index.Entries().size(),
 			m_Impl->LoadDistance, m_Impl->UnloadDistance);
@@ -143,15 +171,35 @@ namespace World::Level
 		m_Impl->Coordinator.SetDeltaStateRegistry(deltaState);
 	}
 
-	void LevelStreamingRuntime::SetViewDistances(float loadDistance, float unloadDistance)
+	void LevelStreamingRuntime::SetViewDistances(float viewDistance, float unloadDistance)
 	{
-		m_Impl->LoadDistance = loadDistance;
-		m_Impl->UnloadDistance = unloadDistance > loadDistance ? unloadDistance : loadDistance + 32.0f;
+		m_Impl->LoadDistance = viewDistance;
+		// 缓冲带必须存在(与清单校验同一口径):卸载视距不合法就退回"视距 + 25%",
+		// 而不是接受一个必然抖动的配置。
+		m_Impl->UnloadDistance = unloadDistance > viewDistance ? unloadDistance : viewDistance * 1.25f;
 		if (m_Impl->Driver)
 		{
 			m_Impl->Driver->SetLoadDistance(m_Impl->LoadDistance);
 			m_Impl->Driver->SetUnloadDistance(m_Impl->UnloadDistance);
 		}
+	}
+
+	void LevelStreamingRuntime::SetTimeBudgetMs(float budgetMs)
+	{
+		m_Impl->TimeBudgetMs = budgetMs > 0.0f ? budgetMs : 0.0f;
+		m_Impl->Coordinator.SetTimeSliceBudgetMs(m_Impl->TimeBudgetMs);
+	}
+
+	void LevelStreamingRuntime::SetAsyncIO(bool enabled) { m_Impl->AsyncIO = enabled; }
+
+	size_t LevelStreamingRuntime::PendingPrefetches() const
+	{
+		size_t pending = 0;
+		for (const auto& [id, prefetch] : m_Impl->Prefetches)
+			if (!prefetch.Ready.load(std::memory_order_acquire)
+				&& !prefetch.Failed.load(std::memory_order_relaxed))
+				++pending;
+		return pending;
 	}
 
 	void LevelStreamingRuntime::Update(Timestep frameTime, const glm::vec3& viewPosition,
@@ -166,30 +214,111 @@ namespace World::Level
 		std::vector<uint64_t> toUnload;
 		m_Impl->Driver->EvaluateStreaming(viewPosition, viewProjection, toLoad, toUnload);
 
-		for (const uint64_t chunkId : toLoad)
+		const auto findEntry = [this](uint64_t chunkId) -> const ChunkIndexEntry*
 		{
-			if (m_Impl->Chunks.count(chunkId) == 0)
+			for (const ChunkIndexEntry& candidate : m_Impl->Index.Entries())
+				if (candidate.ChunkID == chunkId)
+					return &candidate;
+			return nullptr;
+		};
+
+		// 驱动器的裁决并入待装集合:它只在"第一次判断该装"时报一次,而异步读盘要跨帧,
+		// 所以"还没装上的"必须由本类自己记住并逐帧重试。
+		for (const uint64_t chunkId : toLoad)
+			m_Impl->PendingLoads.insert(chunkId);
+		// 已被裁决卸载(或已装上)的不再重试。
+		for (const uint64_t chunkId : toUnload)
+			m_Impl->PendingLoads.erase(chunkId);
+		for (auto it = m_Impl->PendingLoads.begin(); it != m_Impl->PendingLoads.end();)
+			it = (m_Impl->Chunks.count(*it) != 0
+				&& m_Impl->Chunks[*it]->GetState() == ChunkState::Active)
+				? m_Impl->PendingLoads.erase(it) : std::next(it);
+
+		// ②a 先把"裁决要装、字节还没到"的块排进后台预读(不阻塞本帧)。
+		//     异步关掉时跳过这一步,走下面的同步读分支。
+		if (m_Impl->AsyncIO && JobSystem::IsRunning())
+		{
+			const std::vector<uint64_t> prefetchSnapshot(m_Impl->PendingLoads.begin(), m_Impl->PendingLoads.end());
+			for (const uint64_t chunkId : prefetchSnapshot)
 			{
-				const ChunkIndexEntry* entry = nullptr;
-				for (const ChunkIndexEntry& candidate : m_Impl->Index.Entries())
-					if (candidate.ChunkID == chunkId)
-					{
-						entry = &candidate;
-						break;
-					}
+				if (m_Impl->Prefetches.count(chunkId) != 0)
+					continue;   // 已经在读了
+				const ChunkIndexEntry* entry = findEntry(chunkId);
 				if (!entry)
 					continue;
 
-				std::vector<uint8_t> bytes;
-				if (!m_Impl->ReadChunkBytes(*entry, &bytes))
+				// 陷阱:JobDecl 按值传递且没有自定义拷贝/移动构造(见 Core/Thread/Thread.h),
+				// 负载因此**必须平凡可拷贝** —— 捕获 std::string / vector 会位拷贝后被释放,
+				// 得到一个悬空对象,任务静默跑不起来。这里只捕获指针与整数:文件名在任务内
+				// 用 chunkId 从只读的索引里查(索引在 Initialize 之后不再改)。
+				Impl* impl = m_Impl.get();
+				Impl::Prefetch* slot = &m_Impl->Prefetches[chunkId];
+				const auto payload = [impl, slot, chunkId]()
 				{
-					WLD_CORE_ERROR("[level] 块 {0} 读不到字节({1})", chunkId, entry->File);
-					continue;
+					const char* fileName = nullptr;
+					for (const ChunkIndexEntry& candidate : impl->Index.Entries())
+						if (candidate.ChunkID == chunkId)
+						{
+							fileName = candidate.File.c_str();
+							break;
+						}
+
+					std::vector<uint8_t> bytes;
+					const bool ok = fileName && impl->ReadFile(fileName, &bytes) && !bytes.empty();
+					if (ok)
+						slot->Bytes = std::move(bytes);
+					else
+						slot->Failed.store(true, std::memory_order_relaxed);
+					slot->Ready.store(true, std::memory_order_release);
+				};
+
+				// `Emplace` 只负责**装填负载并登记析构**;入口函数必须由调用方显式设置。
+				// 漏设 Entry 的表现是任务被正常排队、正常窃取,却因为 Entry==nullptr 被
+				// Execute 静默跳过(executed 不涨、pending 不降)—— 极难从日志看出来。
+				using Payload = std::decay_t<decltype(payload)>;
+				JobDecl job;
+				job.Emplace(payload);
+				job.Entry = [](void* data) { (*static_cast<Payload*>(data))(); };
+				JobSystem::Kick(std::move(job), JobPriority::Low);
+			}
+		}
+
+		// ②b 主线程实例化:字节已到手的块才激活。
+		const std::vector<uint64_t> pendingSnapshot(m_Impl->PendingLoads.begin(), m_Impl->PendingLoads.end());
+		for (const uint64_t chunkId : pendingSnapshot)
+		{
+			if (m_Impl->Chunks.count(chunkId) == 0)
+			{
+				std::vector<uint8_t> bytes;
+				if (m_Impl->AsyncIO && JobSystem::IsRunning())
+				{
+					const auto it = m_Impl->Prefetches.find(chunkId);
+					// acquire 读 Ready:之后的 Bytes 访问才算有保证。
+					if (it == m_Impl->Prefetches.end()
+						|| !it->second.Ready.load(std::memory_order_acquire))
+						continue;   // 本帧还没读到 ⇒ 下帧再试(不阻塞主线程)
+					if (it->second.Failed.load(std::memory_order_relaxed))
+					{
+						WLD_CORE_ERROR("[level] 块 {0} 后台读取失败", chunkId);
+						m_Impl->Prefetches.erase(it);
+						continue;
+					}
+					bytes = std::move(it->second.Bytes);
+					m_Impl->Prefetches.erase(it);
+				}
+				else
+				{
+					const ChunkIndexEntry* entry = findEntry(chunkId);
+					if (!entry || !m_Impl->ReadChunkBytes(*entry, &bytes))
+					{
+						WLD_CORE_ERROR("[level] 块 {0} 读不到字节", chunkId);
+						continue;
+					}
 				}
 
 				auto chunk = std::make_shared<StreamableChunk>();
 				std::string loadError;
-				if (!chunk->LoadFromMemory(bytes, entry->File, &loadError))
+				if (!chunk->LoadFromMemory(bytes, std::to_string(chunkId), &loadError))
 				{
 					WLD_CORE_ERROR("[level] 块 {0} 载入失败: {1}", chunkId, loadError);
 					continue;

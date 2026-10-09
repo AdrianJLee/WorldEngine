@@ -90,6 +90,31 @@ namespace World::Asset
 		}
 	};
 
+	// Level 2.0 流送设置(`streaming:` 区块;缺省 = 引擎默认,与旧清单逐字节兼容)。
+	//
+	// 这些值以前**写死在代码里**(视距 256/320m、时间片 2ms),等于项目改不了 ——
+	// 一个室内小关卡和一个 4km 野外大世界不可能用同一组视距。放到清单里,游戏团队
+	// 才有旋钮可调,也让"帧率掉了"这类问题有明确的第一处排查点。
+	struct StreamingSettings
+	{
+		// 相机到块的最近距离 ≤ ViewDistance 时加载;> UnloadDistance 时卸载。
+		// 两者之间是**滞后缓冲带**(防止在边界来回横跳导致反复装/卸)。
+		float ViewDistance = 256.0f;
+		float UnloadDistance = 320.0f;
+		// 主线程每帧用于"实体实例化"的时间片上限(毫秒)。流送本身在后台读,
+		// 但把组件写进 ECS 必须在主线程 —— 这个上限是掉帧与卡顿之间的旋钮。
+		float TimeBudgetMs = 2.0f;
+		// 真异步读盘:块字节在后台线程读,主线程只做实例化。关掉 = 同步读
+		// (小关卡可省一个线程;大关卡会在换区时顿一下)。
+		bool AsyncIO = true;
+
+		bool IsDefault() const
+		{
+			return ViewDistance == 256.0f && UnloadDistance == 320.0f
+				&& TimeBudgetMs == 2.0f && AsyncIO;
+		}
+	};
+
 	// 项目清单(project.we.yaml):资产内容根、启动场景与发行包列表的单一事实源。
 	// ContentRoot 相对 manifest 文件所在目录;Packages 为发行布局下的相对路径。
 	class WLD_API ProjectManifest
@@ -110,6 +135,8 @@ namespace World::Asset
 		ModelImportSettings ImportDefaults;
 		// PLUG-T5:插件打包(`plugins:` 区块;缺省 = 空,向后兼容老清单)。
 		PluginPackageSettings Plugins;
+		// Level 2.0 流送(`streaming:` 区块;缺省 = 引擎默认)。
+		StreamingSettings Streaming;
 
 		// 加载并校验;error 为空表示成功。
 		static bool Load(const std::filesystem::path& path, ProjectManifest* out, std::string* error);

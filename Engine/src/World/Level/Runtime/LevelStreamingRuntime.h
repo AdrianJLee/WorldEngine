@@ -48,8 +48,15 @@ namespace World::Level
 		void SetScene(Scene* scene);
 		void SetDeltaState(DeltaStateRegistry* deltaState);
 
-		// 视距(米):进入 LoadDistance 加载,离开 UnloadDistance 卸载;两者之间保持现状。
-		void SetViewDistances(float loadDistance, float unloadDistance);
+		// 视距(米):进入 ViewDistance 加载,离开 UnloadDistance 卸载;两者之间保持现状
+		// (滞后缓冲带,防边界抖动)。缺省取自项目清单 `streaming:`。
+		void SetViewDistances(float viewDistance, float unloadDistance);
+		// 主线程每帧用于实体实例化的时间片(毫秒)。实例化必须走主线程(写 ECS 注册表),
+		// 这个上限是"掉帧"与"卡顿"之间的旋钮。
+		void SetTimeBudgetMs(float budgetMs);
+		// 真异步读盘:字节在 JobSystem 后台线程读,主线程只做实例化。
+		// 关闭 = 同步读(小关卡省一个线程;大关卡换区时会顿)。
+		void SetAsyncIO(bool enabled);
 
 		// 宿主每帧调用(相机位置/视投影;引擎的 Demo/验证只用到位置)。
 		void Update(Timestep frameTime, const glm::vec3& viewPosition, const glm::mat4& viewProjection);
@@ -59,6 +66,10 @@ namespace World::Level
 		size_t ActiveChunks() const;
 		// 当前活跃块里承载的实体数(校验"块真的长出实体了",而不是只有块状态)。
 		size_t ActiveEntityCount() const;
+
+	// 后台预读:把"驱动器本帧裁决要装、但字节还没到手"的块排进 JobSystem。
+	// 分离成公开方法是为了让 Update 保持"只做本帧该做的事",预读时机由宿主决定。
+	size_t PendingPrefetches() const;
 
 	private:
 		struct Impl;

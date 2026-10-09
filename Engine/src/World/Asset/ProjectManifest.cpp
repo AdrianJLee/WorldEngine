@@ -443,6 +443,17 @@ namespace World::Asset
 			return values;
 		}
 
+		// Level 2.0:流送区块。视距/时间片是数值旋钮,写成人可读的定点文本。
+		std::vector<ManifestKeyValue> StreamingKeyValues(const ProjectManifest& manifest)
+		{
+			return {
+				{ "view_distance", FormatFloatValue(manifest.Streaming.ViewDistance) },
+				{ "unload_distance", FormatFloatValue(manifest.Streaming.UnloadDistance) },
+				{ "time_budget_ms", FormatFloatValue(manifest.Streaming.TimeBudgetMs) },
+				{ "async_io", FormatBoolValue(manifest.Streaming.AsyncIO) },
+			};
+		}
+
 		// P4-U4:`imports:` 区块(资产导入默认值)。`model.` 前缀是刻意留的:贴图/音频等
 		// 后续导入设置按 `<类型>.<字段>` 继续加,不会和模型字段撞名。
 		std::vector<ManifestKeyValue> ImportsKeyValues(const ProjectManifest& manifest)
@@ -494,6 +505,12 @@ namespace World::Asset
 					"资产导入默认值(当前是模型导入):<类型>.<字段> 扁平 key。",
 					"只在源文件**还没有产物**时生效 —— 已有资产 meta 里的逐源设置永远优先,不会改动已有资产。",
 					"由「项目设置 ▶ 导入默认值」页读写。",
+				};
+			if (blockKey == "streaming")
+				return {
+					"Level 2.0 流送:视距(米)、卸载视距(米,须大于视距,两者之间是滞后缓冲带)、",
+					"主线程每帧实例化时间片(毫秒)、以及是否在后台线程真异步读块。",
+					"缺省 = 引擎默认(256/320m、2ms、异步开);由「项目设置 ▶ 关卡流送」页读写。",
 				};
 			if (blockKey == "plugins")
 				return {
@@ -577,6 +594,12 @@ namespace World::Asset
 				PhysicsKeyValues(manifest, multithreadedPresent || manifest.Physics.Multithreaded), eol);
 			// `imports:` 只在"确实有非默认值"或"文件里已经有这个块"时才合并 ——
 			// 否则保存一次随便什么设置就会给每个项目的清单塞进 11 行默认值。
+			// `streaming:` 与 `imports:` 同款口径:只在"文件里已有该块"或"确实偏离默认"时写,
+			// 免得保存任意设置都给每个项目的清单塞进 4 行默认值。
+			const bool streamingPresent = FindTopLevelKey(lines, "streaming") != kNoLine;
+			if (streamingPresent || !manifest.Streaming.IsDefault())
+				MergeManifestBlock(lines, edits, appended, "streaming", StreamingKeyValues(manifest), eol);
+
 			const bool importsPresent = FindTopLevelKey(lines, "imports") != kNoLine;
 			if (importsPresent || ModelImportSettings::Hash(manifest.ImportDefaults)
 				!= ModelImportSettings::Hash(ModelImportSettings::Default()))
@@ -775,6 +798,43 @@ namespace World::Asset
 				if (physics["multithreaded"])
 					manifest.Physics.Multithreaded = physics["multithreaded"].as<bool>(manifest.Physics.Multithreaded);
 			}
+			// Level 2.0:流送设置。缺块 = 保持 StreamingSettings 默认(与旧清单逐字节兼容)。
+			if (const YAML::Node streaming = root["streaming"])
+			{
+				if (!streaming.IsMap())
+				{
+					if (error) *error = "manifest 'streaming' must be a map: " + path.string();
+					return false;
+				}
+				if (streaming["view_distance"])
+					manifest.Streaming.ViewDistance = streaming["view_distance"].as<float>(manifest.Streaming.ViewDistance);
+				if (streaming["unload_distance"])
+					manifest.Streaming.UnloadDistance = streaming["unload_distance"].as<float>(manifest.Streaming.UnloadDistance);
+				if (streaming["time_budget_ms"])
+					manifest.Streaming.TimeBudgetMs = streaming["time_budget_ms"].as<float>(manifest.Streaming.TimeBudgetMs);
+				if (streaming["async_io"])
+					manifest.Streaming.AsyncIO = streaming["async_io"].as<bool>(manifest.Streaming.AsyncIO);
+
+				// 卸载视距必须**大于**加载视距,否则滞后缓冲带不存在,块会在边界反复装/卸
+				// (这正是缓冲带存在的唯一理由)。宁可拒绝清单,也不要静默接受一个必然抖动的配置。
+				if (manifest.Streaming.ViewDistance <= 0.0f)
+				{
+					if (error) *error = "manifest 'streaming.view_distance' must be > 0: " + path.string();
+					return false;
+				}
+				if (manifest.Streaming.UnloadDistance <= manifest.Streaming.ViewDistance)
+				{
+					if (error) *error = "manifest 'streaming.unload_distance' must be greater than "
+						"'streaming.view_distance' (the gap is the hysteresis band): " + path.string();
+					return false;
+				}
+				if (manifest.Streaming.TimeBudgetMs <= 0.0f)
+				{
+					if (error) *error = "manifest 'streaming.time_budget_ms' must be > 0: " + path.string();
+					return false;
+				}
+			}
+
 			// P4-U4:`imports:` = 资产导入默认值(当前只有模型导入的字段)。
 			// key 用**扁平点号**(`model.scale`),与 `rendering`/`physics` 一样保持"区块内一级 key",
 			// 这样 key 级文本合并不需要支持嵌套;`model.` 前缀给后续贴图/音频导入设置留位。
@@ -935,6 +995,18 @@ namespace World::Asset
 				out << YAML::Key << "model.reuse_textures" << YAML::Value << imports.ReuseTextures;
 				out << YAML::Key << "model.animation_sample_rate" << YAML::Value << imports.AnimationSampleRate;
 				out << YAML::Key << "model.shared_material_folder" << YAML::Value << imports.SharedMaterialFolder;
+				out << YAML::EndMap;
+			}
+			// Level 2.0 流送区块(缺省不写,保持旧清单形态;与 MergeManifestText 同口径)。
+			if (!copy.Streaming.IsDefault())
+			{
+				out << YAML::Key << "streaming" << YAML::Value << YAML::BeginMap;
+				for (const std::string& comment : BlockComments("streaming"))
+					out << YAML::Comment(comment);
+				out << YAML::Key << "view_distance" << YAML::Value << copy.Streaming.ViewDistance;
+				out << YAML::Key << "unload_distance" << YAML::Value << copy.Streaming.UnloadDistance;
+				out << YAML::Key << "time_budget_ms" << YAML::Value << copy.Streaming.TimeBudgetMs;
+				out << YAML::Key << "async_io" << YAML::Value << copy.Streaming.AsyncIO;
 				out << YAML::EndMap;
 			}
 			out << YAML::Key << "packages" << YAML::Value;

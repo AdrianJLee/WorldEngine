@@ -324,6 +324,28 @@ namespace World::Gameplay
 		}
 
 		auto streaming = std::make_unique<Level::LevelStreamingRuntime>();
+
+		// 项目清单是流送参数的单一事实源(视距/卸载视距/实例化时间片/异步读)。
+		// **必须在 Initialize 之前应用**:驱动器是按当时的值构造的,晚一步设就只是改了个
+		// 没人读的字段(实测表现:日志里视距永远显示默认值)。
+		bool asyncIO = true;
+		{
+			std::filesystem::path manifestPath;
+			if (Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+			{
+				Asset::ProjectManifest manifest;
+				std::string manifestError;
+				if (Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError))
+				{
+					streaming->SetViewDistances(manifest.Streaming.ViewDistance,
+						manifest.Streaming.UnloadDistance);
+					streaming->SetTimeBudgetMs(manifest.Streaming.TimeBudgetMs);
+					streaming->SetAsyncIO(manifest.Streaming.AsyncIO);
+					asyncIO = manifest.Streaming.AsyncIO;
+				}
+			}
+		}
+
 		if (!streaming->Initialize(*context, levelId, physicalDir, error))
 			return false;
 
@@ -337,8 +359,8 @@ namespace World::Gameplay
 		m_LevelStreaming = std::move(streaming);
 
 		m_LoadedPath = "levels/" + levelId;
-		WLD_CORE_WARN("[level] 流送模式:'{0}'(共 {1} 块,视距驱动按相机推进)",
-			m_LoadedPath, m_LevelStreaming->TotalChunks());
+		WLD_CORE_WARN("[level] 流送模式:'{0}'(共 {1} 块,异步={2})",
+			m_LoadedPath, m_LevelStreaming->TotalChunks(), asyncIO ? "on" : "off");
 		return true;
 	}
 

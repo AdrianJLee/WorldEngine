@@ -19,6 +19,8 @@
 #include "World/Level/AI/AiPerceptionGate.h"
 #include "World/Level/Script/LevelScriptTypes.h"
 #include "World/Core/StringPool.h"
+#include "World/Asset/ProjectManifest.h"
+#include "World/Core/Thread/JobSystem.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/SceneSerializer.h"
 #include "World/Scene/Scene.h"
@@ -613,6 +615,9 @@ int main()
 			LevelStreamingRuntime streaming;
 			std::string initError;
 			CHECK(streaming.Initialize(context, "StreamLevel", levelDir, &initError));
+			// 本组验证的是**空间裁决与状态机**,用同步读让"一帧内装上"可断言;
+			// 异步跨帧的收敛由后面的异步组单独覆盖。
+			streaming.SetAsyncIO(false);
 			CHECK(initError.empty());
 			CHECK(streaming.IsReady());
 			CHECK(streaming.GetLevelId() == "StreamLevel");
@@ -651,6 +656,125 @@ int main()
 			CHECK(!uninitialized.Initialize(context, "NoSuchLevel", tempDir / "NoSuchLevel", &missingError));
 			CHECK(!missingError.empty());
 			CHECK(!uninitialized.IsReady());
+		}
+
+		// 16.流送参数进项目清单:往返 + 非法配置必须在**加载期**被拒(不是运行期抖动)。
+		{
+			const std::filesystem::path manifestPath = tempDir / "project.we.yaml";
+			Asset::ProjectManifest manifest;
+			manifest.Id = "com.test.streaming";
+			manifest.StartScene = "levels/Arena";
+			manifest.Packages.push_back("content.wpak");
+			manifest.Streaming.ViewDistance = 96.0f;
+			manifest.Streaming.UnloadDistance = 128.0f;
+			manifest.Streaming.TimeBudgetMs = 1.5f;
+			manifest.Streaming.AsyncIO = false;
+
+			std::string manifestError;
+			CHECK(Asset::ProjectManifest::Save(manifestPath, manifest, &manifestError));
+			CHECK(manifestError.empty());
+
+			Asset::ProjectManifest reloaded;
+			CHECK(Asset::ProjectManifest::Load(manifestPath, &reloaded, &manifestError));
+			CHECK(manifestError.empty());
+			CHECK(reloaded.Streaming.ViewDistance == 96.0f);
+			CHECK(reloaded.Streaming.UnloadDistance == 128.0f);
+			CHECK(reloaded.Streaming.TimeBudgetMs == 1.5f);
+			CHECK(reloaded.Streaming.AsyncIO == false);
+
+			// ① 卸载视距 ≤ 视距 = 滞后缓冲带不存在 ⇒ 必然在边界反复装/卸。加载期必须拒。
+			{
+				const std::filesystem::path badPath = tempDir / "bad-streaming.we.yaml";
+				std::ofstream(badPath) <<
+					"id: com.test.bad\nversion: 1.0.0\ncontent_root: assets\n"
+					"start_scene: levels/Arena\n"
+					"streaming:\n  view_distance: 200\n  unload_distance: 100\n";
+				Asset::ProjectManifest rejected;
+				std::string rejectedError;
+				CHECK(!Asset::ProjectManifest::Load(badPath, &rejected, &rejectedError));
+				CHECK(!rejectedError.empty());
+			}
+
+			// ② 视距 ≤ 0 同样拒绝。
+			{
+				const std::filesystem::path badPath = tempDir / "bad-view.we.yaml";
+				std::ofstream(badPath) <<
+					"id: com.test.bad2\nversion: 1.0.0\ncontent_root: assets\n"
+					"start_scene: levels/Arena\n"
+					"streaming:\n  view_distance: 0\n  unload_distance: 64\n";
+				Asset::ProjectManifest rejected;
+				std::string rejectedError;
+				CHECK(!Asset::ProjectManifest::Load(badPath, &rejected, &rejectedError));
+			}
+
+			// ③ 缺省清单(无 streaming 块)保持默认 —— 旧项目不因新增区块而改变行为。
+			{
+				const std::filesystem::path plainPath = tempDir / "plain.we.yaml";
+				std::ofstream(plainPath) <<
+					"id: com.test.plain\nversion: 1.0.0\ncontent_root: assets\n"
+					"start_scene: levels/Arena\n";
+				Asset::ProjectManifest loadedPlain;
+				std::string plainError;
+				CHECK(Asset::ProjectManifest::Load(plainPath, &loadedPlain, &plainError));
+				CHECK(loadedPlain.Streaming.IsDefault());
+			}
+		}
+
+		// 17.异步流送:后台预读 + 主线程实例化,必须跨帧收敛且不重复实例化。
+		{
+			JobSystem::Init(2);
+
+			ChunkIndex index;
+			{
+				StreamableChunk probe;
+				CHECK(probe.LoadFromFile(cookedDir / "888.wchunk"));
+				ChunkIndexEntry entry;
+				entry.ChunkID = probe.GetChunkID();
+				entry.File = "888.wchunk";
+				entry.Bounds = probe.GetBounds();
+				entry.EntityCount = static_cast<uint32_t>(probe.GetRecordCount());
+				index.Entries().push_back(entry);
+			}
+
+			const std::filesystem::path levelDir = tempDir / "AsyncLevel";
+			std::filesystem::create_directories(levelDir / "cooked");
+			std::string indexError;
+			CHECK(ChunkIndex::Save(levelDir / "cooked" / ChunkIndex::FileName, index, &indexError));
+			std::filesystem::copy_file(cookedDir / "888.wchunk", levelDir / "cooked" / "888.wchunk",
+				std::filesystem::copy_options::overwrite_existing);
+
+			WorldContext context;
+			Scene scene(context);
+
+			LevelStreamingRuntime streaming;
+			std::string initError;
+			CHECK(streaming.Initialize(context, "AsyncLevel", levelDir, &initError));
+			streaming.SetAsyncIO(true);
+			streaming.SetScene(&scene);
+
+			// 上界放宽:读盘 + 线程调度在负载机器上可能占若干帧。一旦"待预读归零"就该已激活 ——
+			// 那才是收敛的定义;固定 1~2 帧的断言在慢机器上是假失败。
+			for (int frame = 0;
+				frame < 200 && !(streaming.ActiveChunks() == 1 && streaming.PendingPrefetches() == 0);
+				++frame)
+			{
+				streaming.Update(Timestep(0.016f), glm::vec3(500.0f, 0.0f, 500.0f), glm::mat4(1.0f));
+			}
+
+			CHECK(streaming.ActiveChunks() == 1);
+			CHECK(streaming.PendingPrefetches() == 0);
+			const size_t asyncEntities = streaming.ActiveEntityCount();
+			CHECK(asyncEntities == 1);
+
+			// 稳定后再跑若干帧:不得重复实例化(异步最典型的 bug 是同一块被装两次)。
+			for (int frame = 0; frame < 16; ++frame)
+				streaming.Update(Timestep(0.016f), glm::vec3(500.0f, 0.0f, 500.0f), glm::mat4(1.0f));
+			CHECK(streaming.ActiveChunks() == 1);
+			CHECK(streaming.ActiveEntityCount() == asyncEntities);
+			CHECK(scene.GetRegistry().view<UUIDComponent>().size() == asyncEntities);
+
+			JobSystem::WaitAll();
+			JobSystem::Shutdown();
 		}
 
 		std::filesystem::remove_all(tempDir);
