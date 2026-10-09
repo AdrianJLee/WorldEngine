@@ -5,6 +5,9 @@ namespace World { class Event; }
 #include "World/Core/Export.h"
 #include "World/Gameplay/Framework/InputTypes.h"
 #include "World/Gameplay/Framework/InputContext.h"
+#include "World/Gameplay/Framework/InputFrame.h"
+#include "World/Gameplay/Framework/InputSource.h"
+#include <memory>
 
 
 #include <cstdint>
@@ -106,6 +109,18 @@ namespace World::Gameplay
 	class WLD_API InputService
 	{
 	public:
+		InputService();
+	public:
+		// R2c: 统一输入源管理 (默认 DeviceInputSource 硬件源; 可替换为 ReplayInputSource / AiInjectionInputSource)
+		void SetInputSource(std::shared_ptr<IInputSource> source);
+		IInputSource* GetInputSource() const { return m_InputSource.get(); }
+		void Poll(float dt, bool pointerCaptured = false);
+
+		// R3: 确定性 64B POD InputFrame 捕获与应用
+		InputFrame CaptureFrame(uint32_t player, uint32_t frameIndex) const;
+		void ApplyFrame(const InputFrame& frame);
+		void InvalidateResolve() { ++m_ResolveRevision; }
+
 		void SetMap(InputMap map);
 		const InputMap& GetMap() const { return m_Map; }
 
@@ -222,7 +237,7 @@ namespace World::Gameplay
 		ActionState EvaluateActionOnStack(const PlayerState& player, NameId action, float dt) const;
 		// R1:输入一变就作废解算缓存。用修订号而不是帧号:边沿必须对"同一帧内先 SetKeyState 再查询"立刻可见(旧实现从 Current/Previous 原始状态算边沿,
 		// 天然有这条性质;单测与 AI 注入都依赖它)。同一帧内没有人写输入时仍只解算一次。
-		void InvalidateResolve() { ++m_ResolveRevision; }
+		
 		void EnsurePlayerCaches(const PlayerState& player) const;
 		// R1:取某个动作本帧的解算结果(按需惰性解算);动作不在映射表里 / 玩家不存在返回 nullptr。
 		const ActionState* ResolvedAction(NameId action, uint32_t player) const;
@@ -236,6 +251,7 @@ namespace World::Gameplay
 		std::function<void(World::Event&)> m_EventCallback;
 		bool m_PrevGamepadConnected[4] = { false };
 		std::vector<InputMappingContext> m_ContextStack;
+		std::shared_ptr<IInputSource> m_InputSource;
 		float m_FrameDelta = 1.0f / 60.0f;
 		uint64_t m_ResolveRevision = 1;
 

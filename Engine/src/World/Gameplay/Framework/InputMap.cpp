@@ -2,6 +2,7 @@
 #include "World/Events/DeviceEvent.h"
 #include "wldpch.h"
 #include "World/Gameplay/Framework/InputMap.h"
+#include "World/Gameplay/Framework/InputRemap.h"
 
 #include "World/Core/Log.h"
 
@@ -638,6 +639,107 @@ namespace World::Gameplay
 
 	// ---- InputService ----
 
+	InputService::InputService()
+		: m_InputSource(std::make_shared<DeviceInputSource>())
+	{
+	}
+
+	void InputService::SetInputSource(std::shared_ptr<IInputSource> source)
+	{
+		m_InputSource = source ? std::move(source) : std::make_shared<DeviceInputSource>();
+		InvalidateResolve();
+	}
+
+	void InputService::Poll(float dt, bool pointerCaptured)
+	{
+		if (m_Players.empty())
+			SetPlayerCount(1);
+
+		if (m_InputSource)
+		{
+			if (auto* dev = dynamic_cast<DeviceInputSource*>(m_InputSource.get()))
+			{
+				dev->SetPointerCaptured(pointerCaptured);
+			}
+			m_InputSource->Poll(0, m_Players[0].Current, dt);
+			InvalidateResolve();
+		}
+		// GameUI(M9): UI 吃掉指针的那一帧, 鼠标按键与滚轮一律被压下 (无窗口 headless 下保留的模拟状态也一并清零)
+		if (pointerCaptured && !m_Players.empty())
+		{
+			m_Players[0].Current.MouseButtons = 0;
+			m_Players[0].Current.ScrollDelta = glm::vec2(0.0f);
+			InvalidateResolve();
+		}
+		PollDevices();
+		UpdateVibration(dt);
+	}
+
+	InputFrame InputService::CaptureFrame(uint32_t player, uint32_t frameIndex) const
+	{
+		InputFrame frame;
+		frame.FrameIndex = frameIndex;
+		frame.PlayerIndex = player;
+
+		const auto& actions = m_Map.Actions();
+		const std::size_t actionCount = std::min(actions.size(), std::size_t(64));
+		for (std::size_t i = 0; i < actionCount; ++i)
+		{
+			if (ActionDown(actions[i].Id, player))
+				frame.ActionButtons |= (1ULL << i);
+		}
+
+		const auto& axes = m_Map.Axes();
+		const std::size_t axisCount = std::min(axes.size(), std::size_t(16));
+		for (std::size_t i = 0; i < axisCount; ++i)
+		{
+			const float val = Axis(axes[i].Id, player);
+			frame.QuantizedAxes[i] = static_cast<int16_t>(std::clamp(val, -1.0f, 1.0f) * 32767.0f);
+		}
+
+		const PlayerState* pState = GetPlayer(player);
+		if (pState)
+		{
+			frame.MouseX = static_cast<int16_t>(pState->Current.MousePosition.x);
+			frame.MouseY = static_cast<int16_t>(pState->Current.MousePosition.y);
+			frame.MouseDeltaX = static_cast<int16_t>(pState->Current.MouseDelta.x);
+			frame.MouseDeltaY = static_cast<int16_t>(pState->Current.MouseDelta.y);
+			frame.ScrollX = static_cast<int16_t>(pState->Current.ScrollDelta.x);
+			frame.ScrollY = static_cast<int16_t>(pState->Current.ScrollDelta.y);
+		}
+		return frame;
+	}
+
+	void InputService::ApplyFrame(const InputFrame& frame)
+	{
+		PlayerState* pState = GetOrCreatePlayer(frame.PlayerIndex);
+		if (!pState)
+			return;
+
+		pState->Injected.clear();
+		const auto& actions = m_Map.Actions();
+		const std::size_t actionCount = std::min(actions.size(), std::size_t(64));
+		for (std::size_t i = 0; i < actionCount; ++i)
+		{
+			if ((frame.ActionButtons & (1ULL << i)) != 0)
+			{
+				ActionInjection inj;
+				inj.Value = 1.0f;
+				inj.RemainingFrames = 1;
+				inj.Fresh = true;
+				pState->Injected[actions[i].Id.Value] = inj;
+			}
+		}
+
+		pState->Current.MousePosition.x = static_cast<float>(frame.MouseX);
+		pState->Current.MousePosition.y = static_cast<float>(frame.MouseY);
+		pState->Current.MouseDelta.x = static_cast<float>(frame.MouseDeltaX);
+		pState->Current.MouseDelta.y = static_cast<float>(frame.MouseDeltaY);
+		pState->Current.ScrollDelta.x = static_cast<float>(frame.ScrollX);
+		pState->Current.ScrollDelta.y = static_cast<float>(frame.ScrollY);
+		InvalidateResolve();
+	}
+
 	void InputService::SetMap(InputMap map)
 	{
 		m_Map = std::move(map);
@@ -1033,6 +1135,7 @@ namespace World::Gameplay
 				return a.GetPriority() > b.GetPriority();
 			});
 		m_ContextStack.insert(it, std::move(context));
+		InvalidateResolve();
 	}
 
 	void InputService::PopContext(NameId contextId)
@@ -1042,6 +1145,7 @@ namespace World::Gameplay
 			if (it->GetId() == contextId)
 			{
 				m_ContextStack.erase(it);
+				InvalidateResolve();
 				break;
 			}
 		}
@@ -1065,6 +1169,7 @@ namespace World::Gameplay
 	void InputService::ClearContexts()
 	{
 		m_ContextStack.clear();
+		InvalidateResolve();
 	}
 
 	void InputService::EnsurePlayerCaches(const PlayerState& player) const
@@ -1189,7 +1294,10 @@ namespace World::Gameplay
 		// 现在它们是同一条解算路径上的两个优先级层:任何映射都要过 Modifier 链与 Trigger 链。
 		if (const InputAction* definition = m_Map.FindAction(action))
 		{
-			for (const InputBinding& binding : definition->Bindings)
+			// R2c:支持用户自定义重绑定覆盖 (InputRemapManager user://input.overrides.yaml)
+			const auto* overrides = InputRemapManager::Get().GetOverride(action);
+			const auto& bindings = (overrides && !overrides->empty()) ? *overrides : definition->Bindings;
+			for (const InputBinding& binding : bindings)
 			{
 				const ActionState result = evaluateMapping(binding, {}, {});
 				if (result.Down)

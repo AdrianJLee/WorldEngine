@@ -329,6 +329,11 @@ namespace World::Gameplay
 		// WP5:运行结束丢掉该场景的输入边沿/鼠标缓存(下次 StartRuntime 从干净状态开始,
 		// 也避免编辑器反复 Play/Stop 时按场景地址累积条目)。
 		Gameplay::InputSystem::Forget(*m_Scene);
+		if (m_IsRecording)
+		{
+			std::string recErr;
+			StopRecording(&recErr);
+		}
 		m_RuntimeStarted = false;
 	}
 
@@ -342,41 +347,18 @@ namespace World::Gameplay
 		if (!m_Initialized)
 			return;
 
-		// W7-3:把引擎轮询到的键盘/鼠标状态喂给 InputService(只喂映射里真正用到的绑定),
-		// 再生成只读快照供并行安全系统读取(W7-4)。
+		// W7-3: 统一输入源采样与定长帧录制
 		{
 			Gameplay::InputService& input = GameApp::Get().Input();
-			const Gameplay::InputMap& mapInput = input.GetMap();
-			if (input.GetPlayerCount() == 0)
-				input.SetPlayerCount(1);
-			// 无 Application/窗口的宿主(测试、工具、专用服务器)没有 GLFW 句柄:
-			// 这里必须保留调用方直接喂进 InputService 的状态,不能去轮询一个不存在的窗口
-			// (真实故障:headless 下 Input::IsKeyPressed 走 Application::Get() 空实例 →
-			//  glfwGetKey 拿到野指针,0xC0000005;在"有实例但无真实窗口"时也会把注入状态覆盖成抬起)。
-			const bool hasEngineWindow = Application::HasInstance();
-			for (const Gameplay::InputAction& action : mapInput.Actions())
-				for (const Gameplay::InputBinding& binding : action.Bindings)
-				{
-					if (binding.Device == Gameplay::InputDevice::Mouse)
-					{
-						// M9:UI 吃掉指针的那一帧,鼠标键位一律按抬起(不产生 Pressed/Released 边沿);
-						// 只在有窗口或"捕获帧"时写入 —— 无窗口且未捕获时保留调用方喂入的状态
-						// (既有 headless 口径不变)。
-						const bool down = hasEngineWindow && !pointerCaptured
-							&& Input::IsMouseButtonPressed(binding.Code);
-						if (hasEngineWindow || pointerCaptured)
-							input.SetKeyState(0, Gameplay::InputDevice::Mouse, binding.Code, down);
-					}
-					else if (hasEngineWindow)
-					{
-						const bool down = binding.Device == Gameplay::InputDevice::Key
-							&& Input::IsKeyPressed(binding.Code);
-						input.SetKeyState(0, binding.Device, binding.Code, down);
-					}
-				}
-			input.PollDevices();
-			input.UpdateVibration(frameTime.GetSeconds());
+			input.SetFrameDelta(frameTime.GetSeconds());
+			input.Poll(frameTime.GetSeconds(), pointerCaptured);
 			input.BuildSnapshot(0);
+
+			if (m_IsRecording)
+			{
+				m_RecordedFrames.push_back(
+					input.CaptureFrame(0, static_cast<uint32_t>(m_RecordedFrames.size())));
+			}
 		}
 
 		// T5c:帧首提交后台解析结果。必须在**任何**可能提前 return 的分支之前,
@@ -407,7 +389,6 @@ namespace World::Gameplay
 			}
 			// R1:先把本帧时间步喂给输入服务 —— hold/tap/double_tap/pulse 的时长判定依赖它。
 			// 未喂时 InputService 退化为 1/60(headless 夹具与单测不依赖宿主)。
-			GameApp::Get().Input().SetFrameDelta(frameTime.GetSeconds());
 			Gameplay::InputSystem::Sample(*m_Scene, GameApp::Get().Input(), mousePosition, scrollDelta);
 		}
 		GameApp::Get().Tick(frameTime);
@@ -633,4 +614,64 @@ namespace World::Gameplay
 
 		m_Scene->OnViewportResize(width, height);
 	}
+
+	bool GameHost::StartRecording(const std::filesystem::path& path)
+	{
+		m_RecordPath = path;
+		m_RecordedFrames.clear();
+		m_IsRecording = true;
+		WLD_CORE_INFO("[replay] started recording input to '{0}'", path.string());
+		return true;
+	}
+
+	bool GameHost::StopRecording(std::string* error)
+	{
+		if (!m_IsRecording)
+		{
+			if (error) *error = "not recording";
+			return false;
+		}
+		m_IsRecording = false;
+		ReplayHeader header;
+		header.RandomSeed = 123456789ULL;
+		header.FixedDelta = static_cast<float>(m_LastTickSeconds > 0.0 ? m_LastTickSeconds : (1.0 / 60.0));
+		header.FrameCount = static_cast<uint32_t>(m_RecordedFrames.size());
+		header.FinalStateHash = InputReplay::ComputeStateHash(m_RecordedFrames);
+		const bool ok = InputReplay::Save(m_RecordPath, header, m_RecordedFrames, error);
+		if (ok)
+		{
+			WLD_CORE_INFO("[replay] stopped recording: wrote {0} frame(s), hash 0x{1:08x} to '{2}'",
+				header.FrameCount, header.FinalStateHash, m_RecordPath.string());
+		}
+		return ok;
+	}
+
+	bool GameHost::StartReplay(const std::filesystem::path& path, std::string* error)
+	{
+		ReplayHeader header;
+		std::vector<InputFrame> frames;
+		if (!InputReplay::Load(path, &header, &frames, error))
+			return false;
+
+		if (GameApp* app = GameApp::TryGet())
+		{
+			app->Input().SetInputSource(std::make_shared<ReplayInputSource>(std::move(frames)));
+			WLD_CORE_INFO("[replay] started replay from '{0}' ({1} frame(s), hash 0x{2:08x})",
+				path.string(), header.FrameCount, header.FinalStateHash);
+			return true;
+		}
+		if (error) *error = "GameApp session does not exist";
+		return false;
+	}
+
+	bool GameHost::IsReplaying() const
+	{
+		if (GameApp* app = GameApp::TryGet())
+		{
+			if (auto* rep = dynamic_cast<ReplayInputSource*>(app->Input().GetInputSource()))
+				return !rep->IsFinished();
+		}
+		return false;
+	}
+
 }

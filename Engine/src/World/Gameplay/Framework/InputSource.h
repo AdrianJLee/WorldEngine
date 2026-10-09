@@ -16,11 +16,18 @@ namespace World::Gameplay
 		virtual void Poll(uint32_t player, RawInputState& outState, float dt) = 0;
 	};
 
-	// 硬件物理输入源
+	// 硬件物理输入源 (GLFW 键盘/鼠标 + GamepadBackend XInput/GLFW 手柄 + WindowsRawInput 原始鼠标)
 	class WLD_API DeviceInputSource : public IInputSource
 	{
 	public:
+		DeviceInputSource() = default;
 		void Poll(uint32_t player, RawInputState& outState, float dt) override;
+
+		void SetPointerCaptured(bool captured) { m_PointerCaptured = captured; }
+		bool IsPointerCaptured() const { return m_PointerCaptured; }
+
+	private:
+		bool m_PointerCaptured = false;
 	};
 
 	// AI 注入输入源

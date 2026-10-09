@@ -1,14 +1,105 @@
 #include "wldpch.h"
 #include "World/Gameplay/Framework/InputReplay.h"
+#include "World/Gameplay/Framework/InputMap.h"
+#include "World/Gameplay/Framework/InputRemap.h"
+#include "World/Gameplay/Framework/GamepadBackend.h"
+#include "World/Gameplay/Runtime/GameApp.h"
+#include "World/Core/Application.h"
+#include "World/Core/Input.h"
+
+#ifdef WLD_PLATFORM_WINDOWS
+#include "World/Platform/Windows/WindowsRawInput.h"
+#endif
+
 #include <fstream>
+#include <algorithm>
 
 namespace World::Gameplay
 {
 	void DeviceInputSource::Poll(uint32_t player, RawInputState& outState, float dt)
 	{
-		(void)player;
-		(void)outState;
 		(void)dt;
+		if (player != 0)
+			return;
+
+		if (!Application::HasInstance())
+			return;
+
+		// 1. 键鼠状态采样 (遍历 actions 自带绑定、重映射覆盖与全部活跃 contexts)
+		if (GameApp* app = GameApp::TryGet())
+		{
+			const InputMap& map = app->Input().GetMap();
+			for (const InputAction& action : map.Actions())
+			{
+				const auto* overrides = InputRemapManager::Get().GetOverride(action.Id);
+				const auto& bindings = (overrides && !overrides->empty()) ? *overrides : action.Bindings;
+				for (const InputBinding& b : bindings)
+				{
+					if (b.Device == InputDevice::Key)
+					{
+						outState.SetKey(b.Code, Input::IsKeyPressed(b.Code));
+					}
+					else if (b.Device == InputDevice::Mouse)
+					{
+						outState.SetMouseButton(b.Code, !m_PointerCaptured && Input::IsMouseButtonPressed(b.Code));
+					}
+				}
+			}
+			for (const InputMappingContext& ctx : map.Contexts())
+			{
+				for (const ActionBindingConfig& cfg : ctx.GetMappings())
+				{
+					if (cfg.Binding.Device == InputDevice::Key)
+					{
+						outState.SetKey(cfg.Binding.Code, Input::IsKeyPressed(cfg.Binding.Code));
+					}
+					else if (cfg.Binding.Device == InputDevice::Mouse)
+					{
+						outState.SetMouseButton(cfg.Binding.Code, !m_PointerCaptured && Input::IsMouseButtonPressed(cfg.Binding.Code));
+					}
+				}
+			}
+		}
+
+		// 2. 指针位置与滚轮
+		const auto pos = Input::GetMousePosition();
+		outState.MousePosition = glm::vec2(pos.first, pos.second);
+		if (!m_PointerCaptured)
+		{
+			const auto scroll = Input::GetScrollDelta();
+			outState.ScrollDelta = glm::vec2(scroll.first, scroll.second);
+		}
+		else
+		{
+			outState.ScrollDelta = glm::vec2(0.0f);
+		}
+
+#ifdef WLD_PLATFORM_WINDOWS
+		const int rawX = Platform::WindowsRawInput::GetAccumulatedRawX();
+		const int rawY = Platform::WindowsRawInput::GetAccumulatedRawY();
+		Platform::WindowsRawInput::ResetAccumulated();
+		if (rawX != 0 || rawY != 0)
+		{
+			outState.MouseDelta = glm::vec2(static_cast<float>(rawX), static_cast<float>(rawY));
+		}
+#endif
+
+		// 3. 4 个手柄槽位
+		for (uint32_t slot = 0; slot < 4; ++slot)
+		{
+			GamepadState gpState;
+			if (GamepadBackend::Get().Poll(slot, gpState))
+			{
+				outState.GamepadButtons[slot] = gpState.Buttons;
+				for (int a = 0; a < 6; ++a)
+					outState.GamepadAxes[slot][a] = gpState.Axes[a];
+				outState.GamepadConnected[slot] = true;
+			}
+			else
+			{
+				outState.GamepadConnected[slot] = false;
+			}
+		}
 	}
 
 	void AiInjectionInputSource::InjectAction(uint32_t player, NameId action, float value, uint32_t frames)
@@ -134,6 +225,10 @@ namespace World::Gameplay
 				outState.MouseDelta.y = static_cast<float>(f.MouseDeltaY);
 				outState.ScrollDelta.x = static_cast<float>(f.ScrollX);
 				outState.ScrollDelta.y = static_cast<float>(f.ScrollY);
+				if (GameApp* app = GameApp::TryGet())
+				{
+					app->Input().ApplyFrame(f);
+				}
 				++m_Cursor;
 			}
 		}

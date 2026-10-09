@@ -3,6 +3,10 @@
 #include "World/Core/Export.h"
 #include "World/Core/Timestep.h"
 #include "World/Gameplay/Runtime/GameApp.h"
+#include "World/Gameplay/Framework/InputFrame.h"
+#include "World/Gameplay/Framework/InputReplay.h"
+#include <vector>
+#include <filesystem>
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Scene/Scene.h"
 // GameUI(M11):世界空间 UI 的宿主侧喂参 —— `UI::UiWorldPositionResolver`(默认解析器的类型)。
@@ -66,6 +70,14 @@ namespace World::Gameplay
 		//   * 鼠标**位置照常**传(相机瞄准可用)。
 		// **消费一次即复位**:`Tick` 读取后立即清回 false;宿主每帧设置,不设置 = 下一帧自动 false,
 		// 捕获状态不会泄漏到后续帧。默认 false ⇒ 关掉 `.wui` 时行为与引入本接口前逐字节一致。
+		// R2/R3: 输入录制与回放控制
+		bool StartRecording(const std::filesystem::path& path);
+		bool StopRecording(std::string* error = nullptr);
+		bool IsRecording() const { return m_IsRecording; }
+
+		bool StartReplay(const std::filesystem::path& path, std::string* error = nullptr);
+		bool IsReplaying() const;
+
 		void SetPointerCaptured(bool captured) { m_PointerCaptured = captured; }
 		bool IsPointerCaptured() const { return m_PointerCaptured; }
 
@@ -132,6 +144,9 @@ namespace World::Gameplay
 		bool m_CreatedSession = false;
 		// M9:本帧 UI 是否吃掉了指针(宿主每帧设置,Tick 消费一次即复位)。
 		bool m_PointerCaptured = false;
+		bool m_IsRecording = false;
+		std::filesystem::path m_RecordPath;
+		std::vector<Gameplay::InputFrame> m_RecordedFrames;
 		// GameUI(M11):世界空间 UI 的默认位置解析器(默认 = 按实体名的 `ResolveWorldPositionByName`)
 		// 与它的实体名索引缓存。缓存按 (场景指针, CurrentWorldTick) 失效;键指向 StringPool 的
 		// 稳定文本存储(deque,插入不失效),查表不产生每次解析的字符串分配。

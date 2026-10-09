@@ -507,6 +507,62 @@ int main()
 				CHECK(!injected.ActionDown(fireId, 0));
 			}
 
+			// 8c. R2c/R3: CaptureFrame 与 ApplyFrame 往返, 以及 InputRemapManager 覆盖生效测试
+			{
+				InputService svc;
+				InputMap map;
+				InputAction jumpAction;
+				jumpAction.Name = "Jump";
+				jumpAction.Bindings = { { InputDevice::Key, 32 } };
+				InputAction fireAction;
+				fireAction.Name = "Fire";
+				fireAction.Bindings = { { InputDevice::Key, 70 } };
+				map.Actions() = { jumpAction, fireAction };
+
+				InputAxis moveAxis;
+				moveAxis.Name = "Move";
+				moveAxis.PositiveAction = "Fire";
+				map.Axes() = { moveAxis };
+
+				svc.SetMap(map);
+				svc.SetPlayerCount(1);
+				const World::NameId jumpId = World::StringPool::Get().InternName("Jump");
+				const World::NameId fireId = World::StringPool::Get().InternName("Fire");
+
+				// 1) 模拟按下 Jump 并捕获 64B InputFrame
+				svc.SetKeyState(0, InputDevice::Key, 32, true);
+				CHECK(svc.ActionDown(jumpId, 0));
+				InputFrame captured = svc.CaptureFrame(0, 42);
+				CHECK(captured.FrameIndex == 42);
+				CHECK(captured.PlayerIndex == 0);
+				CHECK((captured.ActionButtons & 1ULL) != 0);       // 第 0 个动作 Jump 激活
+				CHECK((captured.ActionButtons & 2ULL) == 0);       // 第 1 个动作 Fire 未激活
+
+				// 2) 清空状态, 并通过 ApplyFrame 恢复
+				svc.SetKeyState(0, InputDevice::Key, 32, false);
+				CHECK(!svc.ActionDown(jumpId, 0));
+				svc.ApplyFrame(captured);
+				CHECK(svc.ActionDown(jumpId, 0));                 // 通过 InputFrame 成功恢复激活态
+				CHECK(svc.ActionPressed(jumpId, 0));              // 第一帧给出上升沿
+
+				// 3) InputRemapManager 覆盖生效测试: 将 Fire 重绑定到 Space(32)
+				InputRemapManager& remap = InputRemapManager::Get();
+				remap.ClearAllOverrides();
+				remap.SetOverride(fireId, { { InputDevice::Key, 32 } });
+				// 此时按键 32 会触发 Fire (来自覆盖层), 而不是原绑定的 70
+				svc.ClearInjection(0);
+				svc.SetKeyState(0, InputDevice::Key, 32, true);
+				svc.SetKeyState(0, InputDevice::Key, 70, false);
+				CHECK(svc.ActionDown(fireId, 0));
+				remap.ClearAllOverrides();
+				svc.InvalidateResolve();
+				// 撤销覆盖后恢复原绑定 70
+				CHECK(!svc.ActionDown(fireId, 0));
+				svc.SetKeyState(0, InputDevice::Key, 70, true);
+				CHECK(svc.ActionDown(fireId, 0));
+				remap.ClearAllOverrides();
+			}
+
 			// 9. M3 测试: 定长 InputFrame (64B POD)、录制/回放 (.wreplay) 与 AI 注入源
 			{
 				// (a) InputFrame 尺寸与偏移静态断言验证

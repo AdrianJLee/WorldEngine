@@ -8,6 +8,11 @@
 #include "World/Renderer/Legacy/OpenGL/OpenGLContext.h"
 #include "World/Renderer/Renderer.h"
 
+#ifdef WLD_PLATFORM_WINDOWS
+#include "World/Platform/Windows/WindowsRawInput.h"
+#include "World/Platform/Windows/WindowsIme.h"
+#endif
+
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
 #include <imm.h>
@@ -163,6 +168,9 @@ namespace World
 			m_PrevWndProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
 				hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&WindowsWindow::StaticWndProc)));
 			DragAcceptFiles(hwnd, TRUE);
+#ifdef WLD_PLATFORM_WINDOWS
+			Platform::WindowsRawInput::RegisterDevice(hwnd);
+#endif
 		}
 		if (m_HasGLContext)
 		{
@@ -639,6 +647,18 @@ namespace World
 		{
 			// D10:拖入本窗口的文件存进本窗口队列(消费掉,不转给 GLFW:它只会调用
 			// 引擎没设的 drop callback,并把 HDROP 释放掉)。
+			#ifdef WLD_PLATFORM_WINDOWS
+			if (msg == WM_INPUT)
+			{
+				int dx = 0, dy = 0;
+				Platform::WindowsRawInput::ProcessMessage(lParam, dx, dy);
+			}
+			else if (msg == WM_IME_STARTCOMPOSITION || msg == WM_IME_COMPOSITION || msg == WM_IME_ENDCOMPOSITION)
+			{
+				Platform::ImeState state;
+				Platform::WindowsIme::HandleMessage(hwnd, msg, wParam, lParam, state);
+			}
+#endif
 			if (msg == WM_DROPFILES)
 				return self->HandleDroppedFiles(wParam);
 			// 只有无边框窗口接管命中测试;有系统标题栏的窗口必须让 GLFW/系统决定

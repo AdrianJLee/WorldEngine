@@ -15,6 +15,7 @@
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/Utils/Paths.h"
+#include "World/Gameplay/Framework/InputRemap.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -1172,10 +1173,76 @@ namespace World
 			error = "GameApp not active";
 			return false;
 		}
+		if (cmd == "input.record.start")
+		{
+			std::string pathError;
+			const std::filesystem::path path = ResolveCapturePath(arg("path"), &pathError);
+			if (path.empty())
+			{
+				error = pathError.empty() ? "missing path parameter" : pathError;
+				return false;
+			}
+			if (m_PlayHost.StartRecording(path))
+			{
+				result = "{\"recording\":true,\"path\":\"" + JsonEscape(path.string()) + "\"}";
+				return true;
+			}
+			error = "failed to start recording";
+			return false;
+		}
+		if (cmd == "input.record.stop")
+		{
+			std::string saveErr;
+			if (m_PlayHost.StopRecording(&saveErr))
+			{
+				result = "{\"recording\":false}";
+				return true;
+			}
+			error = "failed to stop recording: " + saveErr;
+			return false;
+		}
+		if (cmd == "input.replay")
+		{
+			std::string pathError;
+			const std::filesystem::path path = ResolveCapturePath(arg("path"), &pathError);
+			if (path.empty())
+			{
+				error = pathError.empty() ? "missing path parameter" : pathError;
+				return false;
+			}
+			std::string repErr;
+			if (!m_PlayHost.StartReplay(path, &repErr))
+			{
+				error = "failed to start replay: " + repErr;
+				return false;
+			}
+			result = "{\"replaying\":true,\"path\":\"" + JsonEscape(path.string()) + "\"}";
+			return true;
+		}
 		if (cmd == "input.validate")
 		{
 			std::ostringstream json;
-			json << "{\"valid\":true,\"conflicts\":[]}";
+			json << "{\"valid\":true,\"conflicts\":[";
+			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+			{
+				const auto& map = app->Input().GetMap();
+				bool first = true;
+				for (const auto& action : map.Actions())
+				{
+					for (const auto& binding : action.Bindings)
+					{
+						Gameplay::RemapConflict conflict;
+						if (Gameplay::InputRemapManager::Get().HasConflict(binding, action.Id, &conflict))
+						{
+							if (!first) json << ",";
+							first = false;
+							json << "{\"action\":\"" << JsonEscape(action.Name)
+								 << "\",\"conflicts_with\":\"" << JsonEscape(conflict.ActionName) << "\"}";
+						}
+					}
+				}
+			}
+			json << "]}";
 			result = json.str();
 			return true;
 		}
