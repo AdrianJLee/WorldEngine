@@ -3,6 +3,12 @@
 
 namespace World::Wui
 {
+	const std::string& WuiUndoStack::EmptyName()
+	{
+		static const std::string empty;
+		return empty;
+	}
+
 	void WuiUndoStack::Push(std::string name, std::function<void()> undo, std::function<void()> redo)
 	{
 		if (m_Index < m_Entries.size())

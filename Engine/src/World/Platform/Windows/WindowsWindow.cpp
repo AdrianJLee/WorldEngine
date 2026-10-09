@@ -169,7 +169,8 @@ namespace World
 				hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&WindowsWindow::StaticWndProc)));
 			DragAcceptFiles(hwnd, TRUE);
 #ifdef WLD_PLATFORM_WINDOWS
-			Platform::WindowsRawInput::RegisterDevice(hwnd);
+			if (!m_Auxiliary)
+				Platform::WindowsRawInput::RegisterDevice(hwnd);
 #endif
 		}
 		if (m_HasGLContext)

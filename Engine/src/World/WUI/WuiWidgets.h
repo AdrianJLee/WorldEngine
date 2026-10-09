@@ -521,9 +521,20 @@ namespace World::Wui
 	//  · 启用态悬停 = ButtonHover 填充 + Accent 描边 + Hand 光标;tooltip 非空时悬停登记提示;
 	//  · 键盘与 Button 同口径:焦点在它上面时 Enter/Space = 激活一次。
 	// 返回 true = 本帧被点击/键盘激活(enabled=false 恒 false)。
+	// 按钮**文字色调**(2026-10-09,输入映射面板重设计):一行里要能一眼分开
+	// "已经存在的值"(键位胶囊、属性字段 —— 填充底 + 常规文字)与"可以点的操作入口"
+	// ("+ Key" / "+ Mapping" / "Add" —— 无填充 + 强调色文字)。色调只改文字/填充/描边;
+	// 点击、键盘激活、焦点链、无障碍登记与 Default 完全同一条路径(不是另一类控件)。
+	enum class ButtonTone : uint8_t
+	{
+		Default = 0,   // 常规按钮:ButtonBg 填充 + Text 文字(primary = Accent 填充 + WindowBg 文字)
+		Action,        // 新增/动作入口:无填充(透出所在行底色)+ Accent 文字,悬停才浮出底色并描边
+		Muted          // 次要入口(行内 ×):无填充 + TextMuted 文字,悬停浮出底色、文字转常规
+	};
+
 	bool ButtonEx(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const WuiTheme& theme, bool enabled = true, bool primary = false,
-		const std::string& tooltip = std::string());
+		const std::string& tooltip = std::string(), ButtonTone tone = ButtonTone::Default);
 
 	// 下拉触发器(P4-UX1:只画当前值,label 只进无障碍节点)。契约(CPPT-5,2026-09-28):
 	//  · `selected < 0` = 无选中;`selected >= options.size()`(陈旧下标)同样按无选中处理。

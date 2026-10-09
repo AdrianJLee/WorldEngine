@@ -575,6 +575,20 @@ int main()
 			CHECK(stack.Undo() && value == 0);
 			stack.Clear();
 			CHECK(!stack.CanUndo() && !stack.CanRedo());
+			// 取名边界(2026-10-09 回归):空栈与退到栈底/顶后取名字必须安全返回空,
+			// 而不是 `m_Entries[SIZE_MAX]` —— 编辑器 Ctrl+Z 曾因此弹断言框。
+			CHECK(stack.UndoName().empty() && stack.RedoName().empty());
+			stack.Push("only", [&] {}, [&] {});
+			CHECK(stack.UndoName() == "only" && stack.RedoName().empty());
+			CHECK(stack.Undo());
+			CHECK(!stack.CanUndo());
+			CHECK(stack.UndoName().empty());
+			CHECK(stack.RedoName() == "only");
+			CHECK(stack.Redo());
+			CHECK(!stack.CanRedo());
+			CHECK(stack.RedoName().empty());
+			stack.Clear();
+			CHECK(!stack.CanUndo() && !stack.CanRedo());
 		}
 
 		// 13. 布局不变量:任意 MoveTab 序列后无重复/缺失/空组/单子 split

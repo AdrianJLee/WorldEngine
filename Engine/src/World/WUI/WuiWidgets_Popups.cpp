@@ -172,17 +172,28 @@ bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& l
 	// 语义收进库:"不可用"必须同时体现在 Enabled 与 Value/Tooltip(禁用的理由)上。
 	// P1c-LIB3(用户裁决 2026-09-24):enabled=false 时不登记焦点表 ⇒ 不进 Tab 焦点链;
 	// a11y 节点照登记(Enabled=false + Value/Tooltip=理由),即"可读不可点"。
-bool ButtonEx(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme, bool enabled, bool primary, const std::string& tooltip){
+bool ButtonEx(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme, bool enabled, bool primary, const std::string& tooltip, ButtonTone tone){
 		const bool hovered = ctx.IsHovered(rect);
 		const bool focused = ctx.Focus() == id;
-		const WuiColor fill = !enabled
-			? theme.PanelBg
-			: (primary ? theme.Accent : (hovered ? theme.ButtonHover : theme.ButtonBg));
-		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });
-		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
-			enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f });
+		// Action / Muted 是"平面入口":启用且静止时**不画底也不画描边**,让所在行的底色透出来 ——
+		// 一行里"有底框的是已有数值、没底框的是可点操作",这就是两个色调存在的理由。
+		// 可点性靠悬停(浮出底色 + 手型光标)与焦点环表达,静止时不抢注意力。
+		const bool flat = (tone != ButtonTone::Default) && !primary;
+		const bool drawSurface = !flat || hovered || !enabled;
+		const WuiColor fill = !enabled ? theme.PanelBg
+			: (primary ? theme.Accent
+				: (hovered ? theme.ButtonHover : (flat ? WuiColor { 0, 0, 0, 0 } : theme.ButtonBg)));
+		if (drawSurface)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });
+			const WuiColor outline = !enabled ? theme.Border
+				: (hovered ? (tone == ButtonTone::Muted ? theme.BorderStrong : theme.Accent) : theme.Border);
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, outline, 3.0f, 1.0f });
+		}
 		// accent 填充上压深色文字(白字对比度不够);禁用态用 TextDisabled。
-		const WuiColor textColor = !enabled ? theme.TextDisabled : (primary ? theme.WindowBg : theme.Text);
+		const WuiColor toneText = tone == ButtonTone::Action ? theme.Accent
+			: (tone == ButtonTone::Muted ? (hovered ? theme.Text : theme.TextMuted) : theme.Text);
+		const WuiColor textColor = !enabled ? theme.TextDisabled : (primary ? theme.WindowBg : toneText);
 		ctx.Commands().push_back({ WuiDrawKind::Text,
 			{ rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, textColor, 0, 1.0f, label, 15.0f, false });
 		// 灰按钮不能没有理由:禁用时这一句进 Value 与 Tooltip(启用时是普通用途说明)。

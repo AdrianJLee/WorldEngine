@@ -328,8 +328,9 @@ int WINAPI wWinMain(HINSTANCE /*instance*/, HINSTANCE /*previousInstance*/,
 	startup.cb = sizeof(startup);
 	PROCESS_INFORMATION process{};
 	std::wstring writableCommandLine = commandLine;   // CreateProcessW 可能改写该缓冲
+	const DWORD creationFlags = environmentBlock.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT;
 	const BOOL spawned = CreateProcessW(targetExe.c_str(), writableCommandLine.data(),
-		nullptr, nullptr, FALSE, 0,
+		nullptr, nullptr, FALSE, creationFlags,
 		environmentBlock.empty() ? nullptr : environmentBlock.data(),
 		projectRoot.c_str(), &startup, &process);
 	if (spawned)

@@ -723,8 +723,13 @@ namespace World::Asset
 			manifest.StartScene = root["start_scene"] ? root["start_scene"].as<std::string>("") : "";
 			manifest.Renderer = root["renderer"] ? root["renderer"].as<std::string>("opengl") : "opengl";
 			if (const YAML::Node packages = root["packages"])
-				for (const YAML::Node& item : packages)
-					manifest.Packages.push_back(item.as<std::string>(""));
+			{
+				if (packages.IsSequence())
+				{
+					for (const YAML::Node& item : packages)
+						manifest.Packages.push_back(item.as<std::string>(""));
+				}
+			}
 			if (const YAML::Node rendering = root["rendering"])
 			{
 				if (!rendering.IsMap())
@@ -932,10 +937,18 @@ namespace World::Asset
 				out << YAML::Key << "model.shared_material_folder" << YAML::Value << imports.SharedMaterialFolder;
 				out << YAML::EndMap;
 			}
-			out << YAML::Key << "packages" << YAML::Value << YAML::BeginSeq;
-			for (const std::string& package : copy.Packages)
-				out << package;
-			out << YAML::EndSeq;
+			out << YAML::Key << "packages" << YAML::Value;
+			if (copy.Packages.empty())
+			{
+				out << YAML::Flow << YAML::BeginSeq << YAML::EndSeq << YAML::Block;
+			}
+			else
+			{
+				out << YAML::BeginSeq;
+				for (const std::string& package : copy.Packages)
+					out << package;
+				out << YAML::EndSeq;
+			}
 			// PLUG-T5:插件打包区块(缺省不写,保持旧清单形态;发行清单的 shipped 由 cook 写入)。
 			if (!copy.Plugins.IsDefault())
 			{

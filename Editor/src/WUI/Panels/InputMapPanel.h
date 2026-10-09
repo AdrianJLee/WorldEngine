@@ -31,13 +31,25 @@ namespace World
 	private:
 		void EnsureLoaded();
 		bool Save();
-		float ContentHeight() const;
 		void MarkDirtyAndSave(const std::string& what);
+
+		// 三段并排(左/中/右),窗口不够宽时降级为 2 列 / 1 列;每段自带
+		//"固定标题 + 固定添加框 + **自己的**滚动区" —— 所以滚轮只影响鼠标所在的那一段,
+		// 添加框永远停在段落顶部(不会随内容滚走)。
+		void RenderActionsSection(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const Wui::WuiRect& rect);
+		void RenderAxesSection(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const Wui::WuiRect& rect);
+		void RenderContextsSection(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const Wui::WuiRect& rect);
+		// 各段列表的**内容高度**:必须与对应 Render*Section 的推进逐行一致(同一组行高助手)。
+		float ActionsListHeight(float sectionWidth) const;
+		float AxesListHeight(float sectionWidth) const;
+		float ContextsListHeight(float sectionWidth) const;
 
 		Gameplay::InputMap m_Map;
 		std::filesystem::path m_Path;
 		bool m_Loaded = false;
 		std::string m_Status;
+		// 状态行严重性:失败时页脚圆点变红。**不靠文案子串猜**(文案会随语言变)。
+		bool m_StatusError = false;
 
 		// 正在**替换**主绑定的动作(点名字触发的重绑,既有行为)。
 		std::string m_RebindingAction;
@@ -49,6 +61,9 @@ namespace World
 		std::string m_NewAxisName;
 		std::string m_NewContextName;
 
-		float m_ScrollY = 0.0f;
+		// 三段各自的滚动位置(与三列布局一一对应)。
+		float m_ScrollActions = 0.0f;
+		float m_ScrollAxes = 0.0f;
+		float m_ScrollContexts = 0.0f;
 	};
 }

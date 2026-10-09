@@ -315,13 +315,27 @@ void EditorShell::OnRender(Wui::WuiContext& ctx){
 			&& (ctx.IsKeyPressed(KeyCodes::Y) || (ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z)));
 		if (undoKey)
 		{
-			if (ctx.History().Undo())
-				ctx.RecordOp("undo", "undo", ctx.History().UndoName(), "");
+			// 名字必须在 Undo() **之前**取:Undo() 会把 m_Index 回退,退到栈底时
+			// UndoName() 原本读的是 `m_Entries[SIZE_MAX]` —— Debug 下直接弹
+			// "vector subscript out of range" 断言框(用户口径的"Ctrl+Z 崩溃")。
+			// 与 UI 设计器(先取名字、再 Undo)同一口径。
+			auto& history = ctx.History();
+			if (history.CanUndo())
+			{
+				const std::string undone = history.UndoName();
+				if (history.Undo())
+					ctx.RecordOp("undo", "undo", undone, "");
+			}
 		}
 		else if (redoKey)
 		{
-			if (ctx.History().Redo())
-				ctx.RecordOp("undo", "redo", ctx.History().RedoName(), "");
+			auto& history = ctx.History();
+			if (history.CanRedo())
+			{
+				const std::string redone = history.RedoName();
+				if (history.Redo())
+					ctx.RecordOp("undo", "redo", redone, "");
+			}
 		}
 		const glm::vec2 viewport = ctx.ViewportSize();
 		// D10-11(用户 2026-09-19"这种窗口也该抽象出来"):导入位置是**窗口级模态** ——

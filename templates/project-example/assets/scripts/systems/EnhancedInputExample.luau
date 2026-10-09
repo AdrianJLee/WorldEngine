@@ -1,68 +1,120 @@
 -- =============================================================================
--- WorldEngine 纯 ECS 玩家输入系统 (EnhancedInputExample.luau)
--- 位于: templates/project-example/assets/scripts/systems/
--- 运行机制:
---   1. 场景启动时由 ScriptEngine::LoadSystemScripts 自动加载并注册进帧管线;
---   2. 采用 Pure ECS 架构, 使用 ecs:AddSystem 注册进 "Update" 阶段;
---   3. 响应输入动作, 并在交互时**逻辑主动打开/关闭游戏 UI (不自动附加)**。
+-- WorldEngine 输入闭环示例 (EnhancedInputExample.luau)
+-- =============================================================================
+-- 这份脚本与 **assets/input.weinput** 是一对演示,两者必须逐项对得上:
+--   * 映射里声明的每个 action / axis / context,本脚本都消费(否则那个声明在演示里是死的);
+--   * 本脚本用到的每个名字,都必须在映射里真实存在(否则脚本读到的恒为 false)。
+--   这条一致性由门禁 `verify-example-input-loop.py` 双向校验(静态对齐 + 实机跑通)。
 --
--- 输入语义(R1 起触发器真正参与解算 —— 见 assets/input.weinput 的 triggers):
---   Input.Pressed(name)  = 该动作的触发器**本帧触发**。五类交互因此各自只在该响的时候响:
---                          裸绑定=按下那一帧;hold=按住达到时长那一帧;tap=限时内抬起那一帧;
---                          double_tap=第二击;pulse=按住期间每隔 interval 一次。
---   Input.Down(name)     = 动作当前处于激活态(含触发前的进行中,例如按住但还没到 hold 阈值)。
---   Input.Released(name) = 激活态的下降沿。
---   注意:触发器写在 contexts 的 mapping 上 —— 只有该上下文**处于激活态**时才生效。
---   Walking 在映射表里标了 default: true(装载即自动压栈);Vehicle 由本脚本按需压栈/出栈。
+-- 一行一事的对照表(左 = 映射里的一行,右 = 本脚本打印什么):
+--   action Jump     空间(空格)      Walking -> "Jump Walking=跳跃";Vehicle -> "Jump Vehicle=手刹"
+--                                   ↑ 同一个动作、同一个按键,靠 contexts 覆盖语义 —— 这就是上下文的演示点
+--   action Sprint  LeftShift        hold 0.3s 跨过阈值那一帧 -> "Sprint (hold)";松开 -> 结束
+--   action Interact  F              tap 0.25s -> 上车/下车(压栈/弹栈 Vehicle)+ 开关 HUD
+--   action Dodge    Space 双击      double_tap -> "Dodge (double_tap)"(单击不会触发)
+--   action Fire     LMB             pulse 0.12s -> 按住期间每个脉冲打一行 + 微震动
+--   axis   Move     A/D 或 LX       方向变化时打一行(而不是每帧刷屏)
+--   context Walking default: true   装载即自动压栈(引擎侧行为,无需脚本)
+--   context Vehicle 由 Interact(F) 压栈/弹栈
+--
+-- 与 GameUiStartupSystem.luau 的分工(两个演示不打架):
+--   * 启动系统负责"场景开始时**弹出**HUD 一次"(演示原生生命周期 API);
+--   * 本脚本负责"玩家按 F 可以关掉/重新打开它"(演示输入 -> UI 的闭环)。
+--   两份脚本操作的是同一个 HUD 文档,方向不同,不重复。
 -- =============================================================================
 
-local inVehicle = false
+-- 只在**方向变化**时打印轴(每帧打印会把日志刷没)
+local lastMoveSign = 0
+local registered = false
+
+local function demo(tag: string, detail: string?)
+    if detail then
+        print(string.format("[INPUT-DEMO] %-22s %s", tag, detail))
+    else
+        print(string.format("[INPUT-DEMO] %s", tag))
+    end
+end
 
 ecs:AddSystem("PlayerInputSystem", "Update", function(dt: number)
-    -- 1. 读取移动轴输入 (键盘 A/D 或手柄左摇杆 LX)
+    if not registered then
+        registered = true
+        demo("consume assets/input.weinput", "(7 actions / 1 axis / 2 contexts)")
+    end
+
+    -- 1) 轴:Move(A/D 或手柄 LX)。
     local moveAxis = Input.Axis("Move")
-
-    -- 2. 交互状态机响应
-    -- (a) Tap: 短按 F 键 -> 逻辑主动打开 / 关闭 HUD UI (纯逻辑驱动，无静默自动附加)
-    if Input.Pressed("Interact") then
-        if ui.isOpen() then
-            print("[PlayerInputSystem] 玩家主动关闭 HUD UI")
-            ui.close()
+    local sign = 0
+    if moveAxis > 0.05 then
+        sign = 1
+    elseif moveAxis < -0.05 then
+        sign = -1
+    end
+    if sign ~= lastMoveSign then
+        if sign == 0 then
+            demo("Move axis", string.format("%+.2f -> idle", moveAxis))
         else
-            print("[PlayerInputSystem] 玩家主动打开 HUD UI: 'assets/ui/hud.wui'")
-            ui.open("assets/ui/hud.wui")
+            demo("Move axis", string.format("%+.2f -> %s", moveAxis,
+                sign > 0 and "MoveRight(正向)" or "MoveLeft(反向)"))
         end
+        lastMoveSign = sign
+    end
 
-        inVehicle = not inVehicle
-        -- 上下文切换:F 键在载具里是"下车",语义不同 —— 靠上下文覆盖,而不是在脚本里堆 if。
-        if inVehicle then
-            Input.PushContext("Vehicle")
-            print("[PlayerInputSystem] 已压入输入上下文 Vehicle(空格改为手刹)")
-            Input.Rumble(0.4, 0.6, 0.25)
+    -- 2) Jump:同一个动作、同一个空格键,按上下文给出**不同语义**。
+    --    映射侧:Walking 的 Jump 是跳跃,Vehicle 的 Jump 是手刹(见 input.weinput 的注释)。
+    if Input.Pressed("Jump") then
+        if Input.HasContext("Vehicle") then
+            demo("Jump", "Vehicle 上下文:空格 = 手刹(contexts 覆盖了同一个动作)")
         else
-            Input.PopContext("Vehicle")
-            print("[PlayerInputSystem] 已弹出输入上下文 Vehicle(恢复步行语义)")
+            demo("Jump", "Walking 上下文:空格 = 跳跃")
         end
     end
 
-    -- (b) Hold: 长按 Shift -> 持续疾跑。
-    --     Down  = 按住即真;想要"必须按住满 0.3s 才起效"用 Input.Pressed("Sprint")
-    --     (hold 触发器只在跨过阈值那一帧触发一次)。
-    local isSprinting = Input.Down("Sprint")
-
-    -- (c) Pulse: 按住开火键 -> 全自动脉冲连发(pulse 触发器每个 interval 触发一次)
-    if Input.Pressed("Fire") then
-        print("[PlayerInputSystem] 武器开火: 触发微震动")
-        Input.Rumble(0.1, 0.5, 0.08)
-    end
-
-    -- (d) DoubleTap: 双击空格 -> 战术翻滚闪避(单击不会触发)
+    -- 3) Dodge:双击空格才会触发(double_tap 触发器;单击留给上面的 Jump)。
     if Input.Pressed("Dodge") then
-        print("[PlayerInputSystem] 触发双击翻滚闪避!")
+        demo("Dodge (double_tap)", "双击空格 -> 战术翻滚")
         Input.Rumble(0.3, 0.3, 0.15)
     end
 
-    -- 3. 纯 ECS 查询: 驱动挂载 TransformComponent 的实体移动
+    -- 4) Sprint:hold 触发器只在跨过 0.3s 阈值那一帧触发一次;持续奔跑看 Down。
+    local isSprinting = Input.Down("Sprint")
+    if Input.Pressed("Sprint") then
+        demo("Sprint (hold)", "按住达到 0.3s 阈值 -> 疾跑开始")
+    end
+    if Input.Released("Sprint") then
+        demo("Sprint (hold)", "松开 -> 疾跑结束")
+    end
+
+    -- 5) Fire:pulse 触发器 —— 按住期间每隔 interval(0.12s)响一次。
+    if Input.Pressed("Fire") then
+        demo("Fire (pulse)", "脉冲连发(interval 0.12s)")
+        Input.Rumble(0.1, 0.5, 0.08)
+    end
+
+    -- 6) Interact:tap 触发器(短按)。它同时是"上下文的状态开关"和"输入 -> UI 的闭环":
+    --    步行时按 F = 上车(压入 Vehicle);载具里按 F = 下车(弹出 Vehicle)。
+    if Input.Pressed("Interact") then
+        if Input.HasContext("Vehicle") then
+            Input.PopContext("Vehicle")
+            demo("Interact (tap)", "下车 -> 弹出上下文 Vehicle(恢复步行语义)")
+        else
+            Input.PushContext("Vehicle")
+            demo("Interact (tap)", "上车 -> 压入上下文 Vehicle(空格改为手刹)")
+            Input.Rumble(0.4, 0.6, 0.25)
+        end
+        -- 输入 -> UI 闭环:关掉/重新打开启动系统弹出的那份 HUD(同一份文档,不抢所有权)。
+        if ui.isOpen() then
+            ui.close()
+            demo("UI", "关闭 HUD('assets/ui/hud.wui')")
+        else
+            if ui.open("assets/ui/hud.wui") then
+                demo("UI", "打开 HUD('assets/ui/hud.wui')")
+            else
+                demo("UI", "打开 HUD 失败(检查文档路径)")
+            end
+        end
+    end
+
+    -- 7) 纯 ECS 查询:轴 + 疾跑状态驱动挂 TransformComponent 的实体。
     local query = ecs:Query({ "TransformComponent" })
     query:Each(function(e, t)
         if math.abs(moveAxis) > 0.05 then
@@ -72,4 +124,4 @@ ecs:AddSystem("PlayerInputSystem", "Update", function(dt: number)
     end)
 end)
 
-print("[PureECS] PlayerInputSystem 已成功注册进场景 Update 帧管线")
+print("[INPUT-DEMO] PlayerInputSystem 已注册(消费 assets/input.weinput 的 7 个动作 / 1 根轴 / 2 个上下文)")

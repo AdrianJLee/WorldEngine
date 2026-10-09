@@ -427,8 +427,9 @@ void EditorLayer::RestartForRendererChange(){
 			startup.cb = sizeof(startup);
 			PROCESS_INFORMATION process {};
 			std::wstring writableCommandLine = commandLine;   // CreateProcess 可能修改该缓冲
+			const DWORD flags = (environment != nullptr) ? CREATE_UNICODE_ENVIRONMENT : 0;
 			const BOOL ok = CreateProcessW(exePath.wstring().c_str(), writableCommandLine.data(),
-				nullptr, nullptr, FALSE, 0, environment, nullptr, &startup, &process);
+				nullptr, nullptr, FALSE, flags, environment, nullptr, &startup, &process);
 			if (ok)
 			{
 				CloseHandle(process.hThread);
@@ -563,8 +564,9 @@ void EditorLayer::DoRelaunchWithProject(const std::filesystem::path& projectRoot
 		startup.cb = sizeof(startup);
 		PROCESS_INFORMATION process {};
 		std::wstring writableCommandLine = commandLine;   // CreateProcess 可能修改该缓冲
+		const DWORD creationFlags = environmentBlock.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT;
 		const BOOL spawned = CreateProcessW(exePath.wstring().c_str(), writableCommandLine.data(),
-			nullptr, nullptr, FALSE, 0, environmentBlock.data(), rootWide.c_str(), &startup, &process);
+			nullptr, nullptr, FALSE, creationFlags, environmentBlock.empty() ? nullptr : environmentBlock.data(), rootWide.c_str(), &startup, &process);
 		bool launched = spawned != FALSE;
 		if (launched)
 		{
