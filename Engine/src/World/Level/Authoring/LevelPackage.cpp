@@ -2,6 +2,7 @@
 #include "World/Level/Authoring/LevelPackage.h"
 
 #include "World/Core/StringPool.h"
+#include "World/Renderer/EditorCamera.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
@@ -85,6 +86,58 @@ LevelPackage& LevelPackage::operator=(LevelPackage&& other) noexcept = default;
 		}
 		SceneSerializer::FinalizeEntityImport(*scene);
 		return scene;
+	}
+
+	bool LevelPackage::CreateEmpty(WorldContext& context, const std::filesystem::path& packageDir,
+		const std::string& levelName, std::string* error)
+	{
+		if (packageDir.empty())
+		{
+			if (error) *error = "level directory is empty";
+			return false;
+		}
+
+		// 已存在且非空 = 别人的关卡,拒绝覆盖(与"新建项目"同一保护口径)。
+		std::error_code ec;
+		if (std::filesystem::is_directory(packageDir, ec))
+		{
+			const bool empty = std::filesystem::is_empty(packageDir, ec);
+			if (ec || !empty)
+			{
+				if (error) *error = "level directory already exists and is not empty: "
+					+ packageDir.u8string();
+				return false;
+			}
+		}
+
+		// 起手内容:相机 + 方向光 + 一个立方体。新关卡打开就能看见东西、也能立刻
+		// 验证"渲染走的是这个关卡",而不是一片黑让人怀疑没加载上。
+		Scene scene(context);
+		{
+			Entity camera = Entity::CreateEntity(&scene, "Camera3D");
+			camera.AddComponent<TransformComponent>(glm::vec3 { 0.0f, 1.0f, 5.0f });
+			CameraComponent cameraComponent;
+			cameraComponent.Camera.m_ProjectionType = CameraSettings::ProjectionType::Perspective;
+			cameraComponent.Camera.m_PerspectiveFarClip = 200.0f;
+			cameraComponent.Primary = true;
+			camera.AddComponent<CameraComponent>(cameraComponent);
+
+			Entity light = Entity::CreateEntity(&scene, "Directional Light");
+			light.AddComponent<TransformComponent>();
+			light.AddComponent<DirectionalLightComponent>();
+
+			Entity cube = Entity::CreateEntity(&scene, "Cube");
+			cube.AddComponent<TransformComponent>(glm::vec3 { 0.0f, 0.0f, 0.0f });
+			MeshRendererComponent renderer;
+			renderer.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
+			renderer.Color = glm::vec4 { 0.82f, 0.82f, 0.86f, 1.0f };
+			cube.AddComponent<MeshRendererComponent>(renderer);
+		}
+
+		LevelPackage package;
+		package.CaptureFromScene(scene, levelName.empty() ? packageDir.filename().string() : levelName, 64);
+		package.GetDataLayers().push_back({ 1u, "Base_World", true });
+		return package.Save(packageDir, error);
 	}
 
 	void LevelPackage::CaptureFromScene(Scene& scene, const std::string& levelName, uint32_t gridCellSize)

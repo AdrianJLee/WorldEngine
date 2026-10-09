@@ -3,6 +3,7 @@
 #include "World/Level/Core/DeltaState.h"
 #include "World/Level/Core/WorldSpace.h"
 #include "World/Level/Authoring/EntityDescriptor.h"
+#include "World/Level/Authoring/LevelCatalog.h"
 #include "World/Level/Authoring/LevelPackage.h"
 #include "World/Level/Cooking/LevelCooker.h"
 #include "World/Level/Runtime/StreamableChunk.h"
@@ -775,6 +776,68 @@ int main()
 
 			JobSystem::WaitAll();
 			JobSystem::Shutdown();
+		}
+
+		// 18.新建关卡(唯一创建入口 `LevelPackage::CreateEmpty`):落盘 → 被目录发现 →
+		//     实例化后**带起手实体**(相机/灯/方块),并可再次保存。
+		{
+			WorldContext context;
+			const std::filesystem::path contentRoot = tempDir / "FreshProject";
+			std::filesystem::create_directories(contentRoot / "levels");
+
+			const std::filesystem::path packageDir = contentRoot / "levels" / "Brand New Level";
+			std::string createError;
+			CHECK(LevelPackage::CreateEmpty(context, packageDir, "Brand New Level", &createError));
+			CHECK(createError.empty());
+			CHECK(std::filesystem::exists(packageDir / "manifest.yaml"));
+			CHECK(std::filesystem::is_directory(packageDir / "entities"));
+
+			// 起手实体真的落了盘(每实体一个文件)。
+			{
+				size_t entityFiles = 0;
+				for (const auto& entry : std::filesystem::directory_iterator(packageDir / "entities"))
+					if (entry.path().extension() == ".entity")
+						++entityFiles;
+				CHECK(entityFiles == 3);
+			}
+
+			// 目录结构即注册表:新建出来立刻能被发现,不需要改任何清单。
+			const std::vector<LevelInfo> discovered = LevelCatalog::Discover(contentRoot);
+			CHECK(discovered.size() == 1);
+			CHECK(discovered[0].Id == "Brand New Level");
+			CHECK(discovered[0].DisplayName == "Brand New Level");
+
+			// 实例化:起手实体带**组件**回来(相机 / 方向光 / 网格),不是空壳。
+			LevelPackage loaded;
+			std::string loadError;
+			CHECK(loaded.Load(packageDir, &loadError));
+			Ref<Scene> scene = loaded.Instantiate(context);
+			CHECK(scene != nullptr);
+			{
+				entt::registry& registry = scene->GetRegistry();
+				CHECK(registry.view<CameraComponent>().size() == 1);
+				CHECK(registry.view<DirectionalLightComponent>().size() == 1);
+				CHECK(registry.view<MeshRendererComponent>().size() == 1);
+			}
+
+			// 幂等保护:已存在且非空的目录必须拒绝,不能覆盖别人的关卡。
+			std::string clobberError;
+			CHECK(!LevelPackage::CreateEmpty(context, packageDir, "Brand New Level", &clobberError));
+			CHECK(!clobberError.empty());
+
+			// 保存往返:改了场景再存回同一个包,仍然是 3 个实体(不重复、不丢)。
+			{
+				Entity extra = Entity::CreateEntity(scene.get(), "ExtraProp");
+				extra.AddComponent<TransformComponent>(glm::vec3 { 5.0f, 0.0f, 5.0f });
+				LevelPackage repacked;
+				repacked.CaptureFromScene(*scene, "Brand New Level", 64);
+				CHECK(repacked.GetEntityCount() == 4);
+				CHECK(repacked.Save(packageDir, &loadError));
+
+				LevelPackage reopened;
+				CHECK(reopened.Load(packageDir, &loadError));
+				CHECK(reopened.GetEntityCount() == 4);
+			}
 		}
 
 		std::filesystem::remove_all(tempDir);

@@ -54,6 +54,14 @@ namespace World::Level
 		bool Save(const std::filesystem::path& packageDir, std::string* outError = nullptr) const;
 		bool Load(const std::filesystem::path& packageDir, std::string* outError = nullptr);
 
+		// 新建一个可用的空关卡:`manifest.yaml`(Base_World 层)+ 起手实体
+		// (相机 / 方向光 / 一个立方体)。起手实体走同一个场景 → 包 的捕获路径,
+		// 因此它们与编辑器里手摆的实体逐字段同形(带全部组件)。
+		//
+		// 目标目录已存在且非空 ⇒ 拒绝(不覆盖别人的关卡)。成功时 out 填关卡目录。
+		static bool CreateEmpty(WorldContext& context, const std::filesystem::path& packageDir,
+			const std::string& levelName, std::string* error = nullptr);
+
 		// 由场景重建整包:逐实体走 SceneSerializer 的**实体级**序列化 —— 全部组件随文件走,
 		// 数据层归属来自实体自身的 LevelEntityComponent。数据层定义(strings/masks)由调用方
 		// 事先设好(不随场景走)。已有实体集合会被清空重建。

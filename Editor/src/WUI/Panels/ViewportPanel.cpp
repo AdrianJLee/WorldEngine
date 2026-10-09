@@ -294,7 +294,7 @@ namespace World
 
 		const float gridBtnW = 88.0f;
 		const Wui::WuiRect gridBtn { toolbarX, sceneRect.Y + kChromePad, gridBtnW, kChromeRowH };
-		const std::string gridLabel = m_ShowSpatialGrid ? "🌐 Grid: ON" : "🌐 Grid: OFF";
+		const std::string gridLabel = m_ShowSpatialGrid ? "Grid: ON" : "Grid: OFF";
 		Wui::Tooltip(ctx, gridBtn, Wui::Tr("viewport.grid.hint", "Toggle the level authoring grid."));
 		if (Wui::Button(ctx, Wui::HashId("viewport.stream_grid"), gridBtn, gridLabel, theme))
 		{

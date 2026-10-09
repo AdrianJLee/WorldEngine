@@ -6,5 +6,8 @@
     "panel.levels."
   ],
   "panel.levels.not_found": "尚未发现关卡。在 assets/levels/ 下加一个目录(含 manifest.yaml 与 entities/)即可。",
-  "panel.levels.empty": "关卡清单为空。"
+  "panel.levels.empty": "暂无关卡。用上方的 Create 新建一个(关卡 = assets/levels/ 下的一个目录)。",
+  "panel.levels.name_empty": "请输入关卡名称。",
+  "panel.levels.name_invalid": "关卡名不能包含路径分隔符。",
+  "panel.levels.create": "新建"
 }
