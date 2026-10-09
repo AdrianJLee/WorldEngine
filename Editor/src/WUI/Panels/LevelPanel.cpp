@@ -2,7 +2,7 @@
 #include "WUI/Panels/LevelPanel.h"
 
 #include "World/Asset/ProjectManifest.h"
-#include "World/Gameplay/Framework/LevelList.h"
+#include "World/Level/Authoring/LevelCatalog.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
@@ -14,7 +14,7 @@ namespace World
 			return;
 		m_Loaded = true;
 
-		// 与 GameHost 相同的定位顺序:内容根上一级(项目目录,项目清单同级)→ 内容根 → 当前目录。
+		// 与 GameHost/编辑器启动同一条定位:项目清单 → 内容根。
 		std::filesystem::path manifestPath;
 		if (!World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
 			return;
@@ -25,24 +25,7 @@ namespace World
 			return;
 		m_ContentRoot = manifest.ResolveContentRoot(manifestPath);
 
-		const std::filesystem::path candidates[] = {
-			m_ContentRoot.parent_path() / "levels.welevel",
-			m_ContentRoot / "levels.welevel",
-			std::filesystem::current_path() / "levels.welevel",
-		};
-		for (const std::filesystem::path& candidate : candidates)
-		{
-			if (!std::filesystem::exists(candidate))
-				continue;
-			Gameplay::LevelList list;
-			if (Gameplay::LevelList::Load(candidate, &list, &error))
-			{
-				m_ListPath = candidate;
-				m_Entries = list.Entries();
-				break;
-			}
-			WLD_CORE_WARN("LevelPanel: failed to load '{0}': {1}", candidate.string(), error);
-		}
+		m_Levels = Level::LevelCatalog::Discover(m_ContentRoot);
 	}
 
 	void LevelPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
@@ -54,41 +37,39 @@ namespace World
 		Label(ctx, { rect.X + 10.0f, y }, "Levels", theme.Text, 15.0f);
 		y += 24.0f;
 
-		if (m_Entries.empty())
+		if (m_Levels.empty())
 		{
 			Label(ctx, { rect.X + 10.0f, y },
-				m_ListPath.empty()
-					? Wui::Tr("panel.levels.not_found",
-						"levels.welevel not found (the level list next to the project manifest).")
-					: Wui::Tr("panel.levels.empty", "The level list is empty."), theme.TextMuted, 13.0f);
+				m_ContentRoot.empty()
+					? Wui::Tr("panel.levels.not_found", "No project manifest; cannot locate levels.")
+					: Wui::Tr("panel.levels.empty",
+						"No levels yet. Add a folder under assets/levels/ (a manifest.yaml plus entities/)."),
+				theme.TextMuted, 13.0f);
 			return;
 		}
 
 		const float rowH = 24.0f;
-		for (size_t index = 0; index < m_Entries.size(); ++index)
+		for (size_t index = 0; index < m_Levels.size(); ++index)
 		{
-			const Gameplay::LevelEntry& entry = m_Entries[index];
+			const Level::LevelInfo& level = m_Levels[index];
 			const Wui::WuiRect row { rect.X + 8.0f, y, rect.W - 16.0f, rowH };
 			Wui::PanelBackground(ctx, row, theme.PanelHeader, 1.0f);
 
 			Label(ctx, { row.X + 6.0f, row.Y + 5.0f },
-				entry.DisplayName + "  (" + entry.Id + ")", theme.Text, 13.0f);
-			Label(ctx, { row.X + 6.0f, row.Y + rowH - 4.0f }, entry.ScenePath, theme.TextMuted, 11.0f);
+				level.DisplayName + "  (" + level.Id + ")", theme.Text, 13.0f);
+			Label(ctx, { row.X + 6.0f, row.Y + rowH - 4.0f },
+				"levels/" + level.Id, theme.TextMuted, 11.0f);
 
-			if (Button(ctx, Wui::HashId(("level.open." + entry.Id).c_str()),
+			if (Button(ctx, Wui::HashId(("level.open." + level.Id).c_str()),
 				{ row.X + row.W - 70.0f, row.Y + 2.0f, 62.0f, 20.0f }, "Open", theme))
 			{
-				// 编辑器里的关卡切换 = 打开该关卡的场景资产(Play/Simulate 仍由视图口驱动)。
-				const std::filesystem::path scenePath = m_ContentRoot / entry.ScenePath;
-				if (std::filesystem::exists(scenePath))
-					host.OpenScene(scenePath);
-				else
-					WLD_CORE_ERROR("LevelPanel: scene asset not found: {0}", scenePath.string());
+				// 打开关卡包目录:EditorDocument 按目录分派到 Level 2.0 读路径。
+				host.OpenScene(level.PackageDir);
 			}
 			y += rowH + 4.0f;
 		}
 
 		Label(ctx, { rect.X + 10.0f, rect.Y + rect.H - 20.0f },
-			m_ListPath.string(), theme.TextMuted, 11.0f);
+			(m_ContentRoot / "levels").string(), theme.TextMuted, 11.0f);
 	}
 }

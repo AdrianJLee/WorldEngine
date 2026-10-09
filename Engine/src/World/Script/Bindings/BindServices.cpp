@@ -21,7 +21,6 @@ namespace World
 	{
 		using Gameplay::GameApp;
 		using Gameplay::InputService;
-		using Gameplay::LevelEntry;
 		using Gameplay::LevelLoadStateName;
 		using Gameplay::LevelService;
 		using Gameplay::SaveService;
@@ -446,14 +445,15 @@ namespace World
 		{
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[8], count, 0);
-			const std::vector<LevelEntry>& entries = RequireGameApp().Levels().GetLevelList().Entries();
+			// 关卡集合来自内容根目录结构(assets/levels/<Id>/),没有清单文件。
+			const std::vector<Level::LevelInfo>& levels = RequireGameApp().Levels().GetLevels();
 			ScriptTableRef result = MakeScriptTable();
-			for (std::size_t index = 0; index < entries.size(); ++index)
+			for (std::size_t index = 0; index < levels.size(); ++index)
 			{
 				ScriptTableRef entry = MakeScriptTable();
-				entry.SetField("Id", ScriptValue::String(entries[index].Id));
-				entry.SetField("Name", ScriptValue::String(entries[index].DisplayName));
-				entry.SetField("Scene", ScriptValue::String(entries[index].ScenePath));
+				entry.SetField("Id", ScriptValue::String(levels[index].Id));
+				entry.SetField("Name", ScriptValue::String(levels[index].DisplayName));
+				entry.SetField("Path", ScriptValue::String(levels[index].PackageDir.u8string()));
 				result.SetArrayElement(index + 1, entry.ToValue());
 			}
 			return result.ToValue();
@@ -818,7 +818,7 @@ namespace World
 			{
 				return LevelEntriesImpl(args, count);
 			}, nullptr, 0, 0, "table",
-				"Level list entries as {Id, Name, Scene} tables." },
+				"Discovered level packages as {Id, Name, Path} tables \u2014 one entry per folder under assets/levels/." },
 		};
 
 		static const ScriptServiceParam saveSlot[] = {

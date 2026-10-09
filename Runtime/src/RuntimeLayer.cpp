@@ -53,7 +53,7 @@ namespace World
 		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
 			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
 
-		// 会话描述:项目清单是唯一事实源(内容根/启动场景/后端),也是关卡清单(levels.welevel)的定位依据。
+		// 会话描述:项目清单是唯一事实源(内容根/启动场景/后端),也是关卡目录(assets/levels/)的定位依据。
 		Gameplay::GameAppDesc desc;
 		desc.ProjectId = "worldengine-runtime";
 		desc.FixedStepHz = 60;

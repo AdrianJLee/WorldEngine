@@ -352,7 +352,7 @@ function Level:Unload(id) end
 ---Unload every active level.
 function Level:UnloadAll() end
 
----Level list entries as {Id, Name, Scene} tables.
+---Discovered level packages as {Id, Name, Path} tables — one entry per folder under assets/levels/.
 ---@return table
 function Level:Entries() end
 

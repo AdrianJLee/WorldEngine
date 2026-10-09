@@ -1,9 +1,10 @@
 #pragma once
 
 #include "World/Core/Export.h"
-#include "World/Gameplay/Framework/LevelList.h"
+#include "World/Level/Authoring/LevelCatalog.h"
 #include "World/Scene/Scene.h"
 
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -29,21 +30,30 @@ namespace World::Gameplay
 		std::string Error;
 	};
 
-	// 关卡服务(P2a W2):负责"加载/卸载/场景栈"的流程与状态机,不负责 Scene 的构造方式。
-	// 场景构造由宿主注入的 SceneLoader 完成(默认实现走 SceneSerializer + VFS),
-	// 这样服务本身可以脱离设备/窗口单测,也把"谁拥有 WorldContext"留给宿主。
+	// 关卡服务:负责"加载/卸载/场景栈"的流程与状态机,不负责 Scene 的构造方式。
+	//
+	// 关卡集合来自 `LevelCatalog::Discover(内容根)` —— 内容根下 `levels/<Id>/` 的目录结构
+	// 本身,不再有 `levels.welevel` 登记表。场景构造由宿主注入的 SceneLoader 完成
+	// (默认实现 = 读关卡包并 Instantiate),这样服务本身可以脱离设备/窗口单测,
+	// 也把"谁拥有 WorldContext"留给宿主。
 	//
 	// 线程约定:主线程对象。RequestLoad 只登记请求,真正的加载在宿主调用 Pump() 时发生,
 	// 因此"异步"体现为跨帧的加载状态(不阻塞请求帧),不会在工作线程上碰 Scene/注册表。
 	class WLD_API LevelService
 	{
 	public:
-		// 返回 nullptr 表示失败,error 需填写原因。
-		using SceneLoader = std::function<Ref<Scene>(const std::string& scenePath, std::string* error)>;
+		// 返回 nullptr 表示失败,error 需填写原因。参数是**关卡包目录**。
+		using SceneLoader = std::function<Ref<Scene>(const std::filesystem::path& packageDir, std::string* error)>;
 		using ProgressCallback = std::function<void(const LevelLoadProgress&)>;
 
-		void SetLevelList(LevelList list);
-		const LevelList& GetLevelList() const { return m_LevelList; }
+		// 设定内容根并立即扫描关卡目录(目录不存在 = 空集合)。
+		void SetContentRoot(const std::filesystem::path& contentRoot);
+		const std::filesystem::path& GetContentRoot() const { return m_ContentRoot; }
+		// 重新扫描(编辑器里新建/删除关卡目录后调用)。
+		void RefreshLevels();
+
+		const std::vector<Level::LevelInfo>& GetLevels() const { return m_Levels; }
+		const Level::LevelInfo* FindLevel(const std::string& levelId) const;
 
 		void SetSceneLoader(SceneLoader loader) { m_Loader = std::move(loader); }
 		void SetProgressCallback(ProgressCallback callback) { m_ProgressCallback = std::move(callback); }
@@ -77,7 +87,8 @@ namespace World::Gameplay
 		bool IsActive(const std::string& levelId) const;
 		void Emit(LevelLoadState state, const std::string& levelId, float progress, const std::string& error = {});
 
-		LevelList m_LevelList;
+		std::filesystem::path m_ContentRoot;
+		std::vector<Level::LevelInfo> m_Levels;
 		SceneLoader m_Loader;
 		ProgressCallback m_ProgressCallback;
 

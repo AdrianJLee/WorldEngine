@@ -21,9 +21,22 @@ namespace World::Gameplay
 		return "Unknown";
 	}
 
-	void LevelService::SetLevelList(LevelList list)
+	void LevelService::SetContentRoot(const std::filesystem::path& contentRoot)
 	{
-		m_LevelList = std::move(list);
+		m_ContentRoot = contentRoot;
+		RefreshLevels();
+	}
+
+	void LevelService::RefreshLevels()
+	{
+		m_Levels = Level::LevelCatalog::Discover(m_ContentRoot);
+		WLD_CORE_INFO("LevelService: 发现 {0} 个关卡(内容根 {1})",
+			m_Levels.size(), m_ContentRoot.u8string());
+	}
+
+	const Level::LevelInfo* LevelService::FindLevel(const std::string& levelId) const
+	{
+		return Level::LevelCatalog::Find(m_Levels, levelId);
 	}
 
 	bool LevelService::IsActive(const std::string& levelId) const
@@ -60,8 +73,7 @@ namespace World::Gameplay
 			return false;
 		}
 
-		const LevelEntry* entry = m_LevelList.Find(levelId);
-		if (!entry)
+		if (!FindLevel(levelId))
 		{
 			m_LastError = "LevelService::RequestLoad: unknown level '" + levelId + "'";
 			m_State = LevelLoadState::Failed;
@@ -73,7 +85,7 @@ namespace World::Gameplay
 			m_LastError = "LevelService::RequestLoad: another level is already loading ('" + m_PendingLevelId + "')";
 			return false;
 		}
-		if (!additive && IsActive(levelId) && m_ActiveLevelIds.front() == levelId)
+		if (!additive && IsActive(levelId) && !m_ActiveLevelIds.empty() && m_ActiveLevelIds.front() == levelId)
 			return false;   // 已经是主关卡,重复请求视为无操作
 
 		m_PendingLevelId = levelId;
@@ -89,11 +101,11 @@ namespace World::Gameplay
 		if (m_State != LevelLoadState::Reading)
 			return;
 
-		const LevelEntry* entry = m_LevelList.Find(m_PendingLevelId);
-		if (!entry)
+		const Level::LevelInfo* info = FindLevel(m_PendingLevelId);
+		if (!info)
 		{
 			m_State = LevelLoadState::Failed;
-			m_LastError = "level '" + m_PendingLevelId + "' disappeared from the level list";
+			m_LastError = "level '" + m_PendingLevelId + "' disappeared from the level catalog";
 			Emit(m_State, m_PendingLevelId, 0.0f, m_LastError);
 			return;
 		}
@@ -102,7 +114,7 @@ namespace World::Gameplay
 		Emit(m_State, m_PendingLevelId, 0.4f);
 
 		std::string error;
-		Ref<Scene> scene = m_Loader(entry->ScenePath, &error);
+		Ref<Scene> scene = m_Loader(info->PackageDir, &error);
 		if (!scene)
 		{
 			m_State = LevelLoadState::Failed;
@@ -118,8 +130,6 @@ namespace World::Gameplay
 		if (!m_PendingAdditive)
 		{
 			// 非叠加加载 = 替换主关卡:原有附加层先卸载,再替换主关卡。
-			while (m_ActiveLevels.size() > 1)
-				m_ActiveLevels.pop_back();
 			m_ActiveLevels.clear();
 			m_ActiveLevelIds.clear();
 		}

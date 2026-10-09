@@ -5,6 +5,6 @@
   "$owns": [
     "panel.levels."
   ],
-  "panel.levels.not_found": "未找到 levels.welevel(项目清单同级的关卡清单)。",
+  "panel.levels.not_found": "尚未发现关卡。在 assets/levels/ 下加一个目录(含 manifest.yaml 与 entities/)即可。",
   "panel.levels.empty": "关卡清单为空。"
 }

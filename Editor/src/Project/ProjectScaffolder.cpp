@@ -48,7 +48,7 @@ namespace World::Editor
 		// 模板里必须存在的条目(模板缺失/被删空时向导给可读的行内错误,而不是生成
 		// 一个残缺项目)。目录条目用尾部 '/' 表示。
 		constexpr const char* kRequiredTemplateEntries[] = {
-			"levels.welevel",
+			"assets/levels/",
 			"assets/input.weinput",
 			"assets/materials/",
 			"assets/models/",

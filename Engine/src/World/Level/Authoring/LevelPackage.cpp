@@ -5,6 +5,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
+#include "World/Core/WorldContext.h"
 #include "World/Scene/SceneSerializer.h"
 #include <fstream>
 #include <set>
@@ -63,6 +64,27 @@ LevelPackage& LevelPackage::operator=(LevelPackage&& other) noexcept = default;
 				return &entity;
 		}
 		return nullptr;
+	}
+
+	Ref<Scene> LevelPackage::Instantiate(WorldContext& context) const
+	{
+		Ref<Scene> scene = CreateRef<Scene>(context);
+		for (size_t i = 0; i < m_Impl->Entities.size(); ++i)
+		{
+			const EntityDescriptor& descriptor = m_Impl->Entities[i];
+			if (descriptor.DocumentYaml.empty())
+				continue;
+
+			std::string importError;
+			SceneSerializer::AppendEntityYaml(*scene, descriptor.DocumentYaml, &importError);
+			if (!importError.empty())
+			{
+				WLD_CORE_WARN("LevelPackage '{0}': 实体 {1} 并入失败: {2}",
+					m_Impl->Name, descriptor.EntityUUID, importError);
+			}
+		}
+		SceneSerializer::FinalizeEntityImport(*scene);
+		return scene;
 	}
 
 	void LevelPackage::CaptureFromScene(Scene& scene, const std::string& levelName, uint32_t gridCellSize)

@@ -121,7 +121,8 @@ namespace World::Gameplay
 		LevelService& levels = GameApp::Get().Levels();
 
 		// 场景构造留在宿主侧(Scene 的 WorldContext 与注册表都必须在主线程使用)。
-		levels.SetSceneLoader([this](const std::string& scenePath, std::string* error) -> Ref<Scene>
+		// 关卡包 → Scene 走 LevelPackage::Instantiate(与编辑器打开关卡同一条实现)。
+		levels.SetSceneLoader([this](const std::filesystem::path& packageDir, std::string* error) -> Ref<Scene>
 		{
 			WorldContext* context = Application::HasInstance() ? &Application::Get().GetContext() : m_OwnedContext.get();
 			if (!context)
@@ -129,15 +130,10 @@ namespace World::Gameplay
 				if (error) *error = "no WorldContext available for level loading";
 				return nullptr;
 			}
-			Ref<Scene> scene = CreateRef<Scene>(*context);
-			SceneSerializer serializer(scene);
-			if (!serializer.Deserialize(scenePath))
-			{
-				if (error) *error = serializer.GetLastError().empty()
-					? ("failed to deserialize '" + scenePath + "'") : serializer.GetLastError();
+			Level::LevelPackage package;
+			if (!package.Load(packageDir, error))
 				return nullptr;
-			}
-			return scene;
+			return package.Instantiate(*context);
 		});
 
 		levels.SetProgressCallback([this](const LevelLoadProgress& report)
@@ -156,27 +152,8 @@ namespace World::Gameplay
 			}
 		});
 
-		// 清单查找顺序:内容根父目录(项目根)→ 内容根 → 当前工作目录;找不到就只用路径加载。
-		LevelList list;
-		std::string error;
-		const std::filesystem::path candidates[] = {
-			desc.ContentRoot.parent_path() / "levels.welevel",
-			desc.ContentRoot / "levels.welevel",
-			std::filesystem::current_path() / "levels.welevel",
-		};
-		for (const std::filesystem::path& candidate : candidates)
-		{
-			if (candidate.empty() || !std::filesystem::exists(candidate))
-				continue;
-			if (LevelList::Load(candidate, &list, &error))
-			{
-				WLD_CORE_INFO("GameHost: level list '{0}' loaded ({1} level(s))",
-					candidate.generic_string(), list.Entries().size());
-				levels.SetLevelList(std::move(list));
-				return;
-			}
-			WLD_CORE_WARN("GameHost: level list '{0}' rejected: {1}", candidate.generic_string(), error);
-		}
+		// 关卡集合 = 内容根的目录结构(levels/<Id>/),没有清单文件可找。
+		levels.SetContentRoot(desc.ContentRoot);
 	}
 
 	void GameHost::Shutdown()
@@ -216,16 +193,17 @@ namespace World::Gameplay
 			return false;
 		}
 
-		// W2:清单里存在同一场景的关卡时优先走关卡服务(统一走加载状态机/进度),
-		// 由 Tick 内的 Pump 完成激活;清单缺失或不匹配时退回直接路径加载。
+		// 关卡集合里存在指向该包的关卡时优先走关卡服务(统一走加载状态机/进度),
+		// 由 Tick 内的 Pump 完成激活;找不到时退回直接路径加载(单场景 `.wd`)。
 		if (startRuntime)
 		{
 			const LevelService& levels = GameApp::Get().Levels();
-			for (const LevelEntry& entry : levels.GetLevelList().Entries())
+			for (const Level::LevelInfo& info : levels.GetLevels())
 			{
-				if (entry.ScenePath != scenePath)
+				if (info.PackageDir.generic_string() != scenePath
+					&& info.PackageDir.filename().string() != scenePath)
 					continue;
-				if (LoadLevelById(entry.Id))
+				if (LoadLevelById(info.Id))
 					return true;
 				break;
 			}
