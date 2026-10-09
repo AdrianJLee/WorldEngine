@@ -1,5 +1,7 @@
 #include "wldpch.h"
 #include "World/Level/Cooking/LevelCooker.h"
+
+#include "World/Level/Core/ChunkIndex.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -24,6 +26,9 @@ namespace World::Level
 		try
 		{
 			std::filesystem::create_directories(outputDir);
+
+			// 流送索引:发行包里没有目录遍历,运行期靠它知道"有哪几块、在哪、包围盒多大"。
+			ChunkIndex chunkIndex;
 
 			const float cellSize = static_cast<float>(settings.GridCellSize > 0 ? settings.GridCellSize : (package.GetGridCellSize() > 0 ? package.GetGridCellSize() : 64));
 			std::vector<ChunkBucket> chunkBuckets;
@@ -162,9 +167,27 @@ namespace World::Level
 					fout.write(blob.data(), static_cast<std::streamsize>(blob.size()));
 				fout.close();
 
+				ChunkIndexEntry indexEntry;
+				indexEntry.ChunkID = chunkId;
+				indexEntry.File = chunkFileName;
+				indexEntry.Bounds = ChunkBounds{ minBound, maxBound };
+				indexEntry.EntityCount = static_cast<uint32_t>(indices.size());
+				for (size_t r = 0; r < indices.size(); ++r)
+					indexEntry.DataLayerMask |= package.GetEntity(indices[r]).DataLayerMask;
+				chunkIndex.Entries().push_back(std::move(indexEntry));
+
 				result.OutputChunkFiles.push_back(chunkFilePath);
 				result.ChunksCooked++;
 				result.TotalEntitiesCooked += static_cast<uint32_t>(indices.size());
+			}
+
+			// 索引最后写:块全写成功才留下索引,避免"索引说有三块、盘上只有两块"。
+			std::string indexError;
+			if (!ChunkIndex::Save(outputDir / ChunkIndex::FileName, chunkIndex, &indexError))
+			{
+				result.Success = false;
+				result.ErrorMessage = "Failed to write chunk index: " + indexError;
+				return result;
 			}
 
 			result.Success = true;

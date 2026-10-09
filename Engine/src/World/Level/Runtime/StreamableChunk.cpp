@@ -50,7 +50,6 @@ namespace World::Level
 			return false;
 		}
 
-		m_Impl->State = ChunkState::IO_Loading;
 		std::ifstream fin(chunkPath, std::ios::binary);
 		if (!fin.is_open())
 		{
@@ -58,73 +57,94 @@ namespace World::Level
 			m_Impl->State = ChunkState::Unloaded;
 			return false;
 		}
-
-		fin.read(reinterpret_cast<char*>(&m_Impl->Header), sizeof(ChunkHeader));
-		if (fin.gcount() != sizeof(ChunkHeader))
+		fin.seekg(0, std::ios::end);
+		const std::streamoff size = fin.tellg();
+		fin.seekg(0, std::ios::beg);
+		if (size <= 0)
 		{
-			if (outError) *outError = "Chunk header read incomplete: " + chunkPath.string();
+			if (outError) *outError = "Chunk file is empty: " + chunkPath.string();
 			m_Impl->State = ChunkState::Unloaded;
 			return false;
 		}
 
-		if (m_Impl->Header.Magic != ChunkMagic || m_Impl->Header.Version != ChunkVersion)
+		std::vector<uint8_t> bytes(static_cast<size_t>(size));
+		fin.read(reinterpret_cast<char*>(bytes.data()), size);
+		return LoadFromMemory(bytes, chunkPath.u8string(), outError);
+	}
+
+	bool StreamableChunk::LoadFromMemory(const std::vector<uint8_t>& bytes, const std::string& sourceName,
+		std::string* outError)
+	{
+		const auto fail = [&](const std::string& message)
 		{
-			if (outError) *outError = "Invalid chunk magic or version in: " + chunkPath.string();
+			if (outError) *outError = message + (sourceName.empty() ? std::string() : (" (" + sourceName + ")"));
 			m_Impl->State = ChunkState::Unloaded;
 			return false;
-		}
+		};
+
+		if (bytes.size() < sizeof(ChunkHeader))
+			return fail("Chunk payload is smaller than its header");
+
+		m_Impl->State = ChunkState::IO_Loading;
+
+		std::memcpy(&m_Impl->Header, bytes.data(), sizeof(ChunkHeader));
+		if (m_Impl->Header.Magic != ChunkMagic)
+			return fail("Invalid chunk magic");
+		if (m_Impl->Header.Version != ChunkVersion)
+			return fail("Unsupported chunk version " + std::to_string(m_Impl->Header.Version));
 
 		m_Impl->Bounds.Min = m_Impl->Header.BoundsMin;
 		m_Impl->Bounds.Max = m_Impl->Header.BoundsMax;
 
-		m_Impl->RecordCount = m_Impl->Header.StaticEntityCount;
-		if (m_Impl->RecordCount > 0)
+		const auto readRange = [&](uint64_t offset, uint64_t length, const char* what,
+			std::vector<uint8_t>* out) -> bool
 		{
-			m_Impl->Records = std::make_unique<StaticEntityRecord[]>(m_Impl->RecordCount);
-			const size_t bytesToRead = m_Impl->RecordCount * sizeof(StaticEntityRecord);
-			fin.read(reinterpret_cast<char*>(m_Impl->Records.get()), bytesToRead);
-			if (static_cast<size_t>(fin.gcount()) != bytesToRead)
+			if (length == 0)
+				return true;
+			if (offset > bytes.size() || length > bytes.size() - offset)
 			{
-				if (outError) *outError = "Corrupted chunk payload in: " + chunkPath.string();
-				m_Impl->State = ChunkState::Unloaded;
+				fail(std::string("Chunk ") + what + " is out of bounds");
 				return false;
 			}
-		}
-		else
+			out->assign(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+				bytes.begin() + static_cast<std::ptrdiff_t>(offset + length));
+			return true;
+		};
+
+		// 记录表
+		m_Impl->RecordCount = m_Impl->Header.StaticEntityCount;
+		m_Impl->Records.reset();
+		if (m_Impl->RecordCount > 0)
 		{
-			m_Impl->Records.reset();
+			std::vector<uint8_t> recordBytes;
+			if (!readRange(m_Impl->Header.BlobOffset,
+					m_Impl->RecordCount * sizeof(StaticEntityRecord), "record table", &recordBytes))
+				return false;
+			m_Impl->Records = std::make_unique<StaticEntityRecord[]>(m_Impl->RecordCount);
+			std::memcpy(m_Impl->Records.get(), recordBytes.data(), recordBytes.size());
 		}
 
-		// 实体文档段(v2):记录表之后是 ChunkDocumentEntry[] 与其后的 YAML 字节。
+		// 实体文档段(v2;v1 无此段 ⇒ 退化为"名字 + Transform")
 		m_Impl->DocumentYaml.assign(m_Impl->RecordCount, std::string());
 		if (m_Impl->Header.DocumentSize > 0 && m_Impl->RecordCount > 0)
 		{
-			fin.seekg(static_cast<std::streamoff>(m_Impl->Header.DocumentOffset), std::ios::beg);
-			std::vector<ChunkDocumentEntry> documents(m_Impl->RecordCount);
-			const size_t tableBytes = documents.size() * sizeof(ChunkDocumentEntry);
-			fin.read(reinterpret_cast<char*>(documents.data()), tableBytes);
-			if (static_cast<size_t>(fin.gcount()) != tableBytes)
-			{
-				if (outError) *outError = "Chunk document table truncated in: " + chunkPath.string();
-				m_Impl->State = ChunkState::Unloaded;
+			std::vector<uint8_t> tableBytes;
+			if (!readRange(m_Impl->Header.DocumentOffset,
+					m_Impl->RecordCount * sizeof(ChunkDocumentEntry), "document table", &tableBytes))
 				return false;
-			}
+
+			std::vector<ChunkDocumentEntry> documents(m_Impl->RecordCount);
+			std::memcpy(documents.data(), tableBytes.data(), tableBytes.size());
 
 			for (size_t r = 0; r < documents.size(); ++r)
 			{
 				const ChunkDocumentEntry& entry = documents[r];
 				if (entry.Size == 0)
 					continue;
-				std::string& text = m_Impl->DocumentYaml[r];
-				text.resize(entry.Size);
-				fin.seekg(static_cast<std::streamoff>(entry.Offset), std::ios::beg);
-				fin.read(text.data(), static_cast<std::streamsize>(entry.Size));
-				if (static_cast<size_t>(fin.gcount()) != entry.Size)
-				{
-					if (outError) *outError = "Chunk entity document truncated in: " + chunkPath.string();
-					m_Impl->State = ChunkState::Unloaded;
+				std::vector<uint8_t> textBytes;
+				if (!readRange(entry.Offset, entry.Size, "entity document", &textBytes))
 					return false;
-				}
+				m_Impl->DocumentYaml[r].assign(textBytes.begin(), textBytes.end());
 			}
 		}
 

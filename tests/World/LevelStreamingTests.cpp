@@ -6,7 +6,9 @@
 #include "World/Level/Authoring/LevelPackage.h"
 #include "World/Level/Cooking/LevelCooker.h"
 #include "World/Level/Runtime/StreamableChunk.h"
+#include "World/Level/Core/ChunkIndex.h"
 #include "World/Level/Runtime/ChunkStreamingCoordinator.h"
+#include "World/Level/Runtime/LevelStreamingRuntime.h"
 #include "World/Level/Runtime/DataLayerManager.h"
 #include "World/Level/Streaming/SpatialGridDriver.h"
 #include "World/Level/Streaming/SectorPortalDriver.h"
@@ -569,6 +571,86 @@ int main()
 			StreamableChunk migChunk;
 			CHECK(migChunk.LoadFromFile(cookRes.OutputChunkFiles[0]));
 			CHECK(migChunk.GetState() == ChunkState::MemoryReady);
+		}
+
+		// 15.流送索引 + LevelStreamingRuntime:相机推进 → 按空间装/卸、块真的长出实体。
+		{
+			// 复用第 4 步烘出的块(999 两块 + 888 一块),补一份索引。
+			ChunkIndex index;
+			{
+				StreamableChunk probe;
+				CHECK(probe.LoadFromFile(cookedDir / "999.wchunk"));
+				ChunkIndexEntry entry;
+				entry.ChunkID = probe.GetChunkID();
+				entry.File = "999.wchunk";
+				entry.Bounds = probe.GetBounds();
+				entry.EntityCount = static_cast<uint32_t>(probe.GetRecordCount());
+				entry.DataLayerMask = 1u;
+				index.Entries().push_back(entry);
+			}
+			CHECK(index.Entries().size() == 1);
+			CHECK(index.Entries()[0].File == "999.wchunk");
+
+			const std::filesystem::path levelDir = tempDir / "StreamLevel";
+			std::filesystem::create_directories(levelDir / "cooked");
+			std::string indexError;
+			CHECK(ChunkIndex::Save(levelDir / "cooked" / ChunkIndex::FileName, index, &indexError));
+			CHECK(indexError.empty());
+
+			// 往返:存了再读,条目与包围盒必须一致(发行包只靠这份索引,读错就等于流送错地方)。
+			ChunkIndex reloaded;
+			CHECK(ChunkIndex::LoadFromFile(levelDir / "cooked" / ChunkIndex::FileName, &reloaded, &indexError));
+			CHECK(reloaded.Entries().size() == 1);
+			CHECK(reloaded.Entries()[0].ChunkID == index.Entries()[0].ChunkID);
+			CHECK(reloaded.Entries()[0].Bounds.Min.x == index.Entries()[0].Bounds.Min.x);
+			CHECK(reloaded.Entries()[0].Bounds.Max.z == index.Entries()[0].Bounds.Max.z);
+
+			// 块文件放到索引同目录(ResolveFile 的口径)。
+			std::filesystem::copy_file(cookedDir / "999.wchunk", levelDir / "cooked" / "999.wchunk",
+				std::filesystem::copy_options::overwrite_existing);
+
+			WorldContext context;
+			LevelStreamingRuntime streaming;
+			std::string initError;
+			CHECK(streaming.Initialize(context, "StreamLevel", levelDir, &initError));
+			CHECK(initError.empty());
+			CHECK(streaming.IsReady());
+			CHECK(streaming.GetLevelId() == "StreamLevel");
+			CHECK(streaming.TotalChunks() == 1);
+			CHECK(streaming.ActiveChunks() == 0);
+
+			Scene scene(context);
+			streaming.SetScene(&scene);
+			DeltaStateRegistry deltaState;
+			streaming.SetDeltaState(&deltaState);
+
+			// ① 远视距:相机离块很远 ⇒ 不加载、不激活。
+			streaming.Update(Timestep(0.016f), glm::vec3(10000.0f, 0.0f, 10000.0f), glm::mat4(1.0f));
+			CHECK(streaming.LoadedChunks() == 0);
+			CHECK(streaming.ActiveChunks() == 0);
+
+			// ② 进入视距:块被读进内存并激活,实体出现在场景里。
+			streaming.Update(Timestep(0.016f), glm::vec3(10.0f, 0.0f, 10.0f), glm::mat4(1.0f));
+			CHECK(streaming.LoadedChunks() == 1);
+			CHECK(streaming.ActiveChunks() == 1);
+			CHECK(streaming.ActiveEntityCount() == 2);
+			CHECK(scene.GetRegistry().view<UUIDComponent>().size() == 2);
+
+			// ③ 走出去再回来:离开视距卸载,回到近处重新激活(且不重复累加实体)。
+			streaming.Update(Timestep(0.016f), glm::vec3(10000.0f, 0.0f, 10000.0f), glm::mat4(1.0f));
+			CHECK(streaming.ActiveChunks() == 0);
+			CHECK(streaming.ActiveEntityCount() == 0);
+
+			streaming.Update(Timestep(0.016f), glm::vec3(10.0f, 0.0f, 10.0f), glm::mat4(1.0f));
+			CHECK(streaming.ActiveChunks() == 1);
+			CHECK(scene.GetRegistry().view<UUIDComponent>().size() == 2);
+
+			// ④ 索引缺失 = 未烘焙:必须**拒绝**而不是静默当成空关卡。
+			LevelStreamingRuntime uninitialized;
+			std::string missingError;
+			CHECK(!uninitialized.Initialize(context, "NoSuchLevel", tempDir / "NoSuchLevel", &missingError));
+			CHECK(!missingError.empty());
+			CHECK(!uninitialized.IsReady());
 		}
 
 		std::filesystem::remove_all(tempDir);

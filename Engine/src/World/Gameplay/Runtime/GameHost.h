@@ -8,6 +8,7 @@
 #include <vector>
 #include <filesystem>
 #include "World/Renderer/SceneRenderer.h"
+#include "World/Level/Runtime/LevelStreamingRuntime.h"
 #include "World/Scene/Scene.h"
 // GameUI(M11):世界空间 UI 的宿主侧喂参 —— `UI::UiWorldPositionResolver`(默认解析器的类型)。
 #include "World/UI/UiWorldProjector.h"
@@ -53,6 +54,15 @@ namespace World::Gameplay
 		// W2:按关卡目录(assets/levels/<Id>/)加载;请求在下一帧 Tick 内推进,进度经 GetLastLevelProgress 可查。
 		bool LoadLevelById(const std::string& levelId, bool additive = false);
 		const LevelLoadProgress& GetLastLevelProgress() const { return m_LastLevelProgress; }
+		// Level 2.0 流送:按关卡启动**空间按需流送**。
+		// `levelId` = 关卡目录名;`physicalDir` = 该关卡在磁盘上的目录(**可空**,发行包里
+		// 内容根未必存在,那时走 Vfs 逻辑路径)。
+		// 两处都没有 `cooked/index.yaml`(关卡未烘焙)⇒ 返回 false,退回整包实例化。
+		bool StartLevelStreaming(const std::string& levelId,
+			const std::filesystem::path& physicalDir, std::string* error = nullptr);
+		const Level::LevelStreamingRuntime* GetLevelStreaming() const { return m_LevelStreaming.get(); }
+		bool IsLevelStreaming() const { return m_LevelStreaming != nullptr; }
+
 		// 编辑器 Play/Simulate:注入运行时场景副本;startRuntime=false 用于 Simulate 语义。
 		void SetScene(const Ref<Scene>& scene, bool startRuntime);
 
@@ -132,6 +142,9 @@ namespace World::Gameplay
 		void ApplyViewportToScene();
 
 		Ref<Scene> m_Scene;
+		// Level 2.0 空间流送(启用时每帧按主相机推进)。nullptr = 整包实例化路径。
+		std::unique_ptr<Level::LevelStreamingRuntime> m_LevelStreaming;
+		std::unique_ptr<Level::DeltaStateRegistry> m_LevelDeltaState;
 		Ref<SceneRenderer> m_SceneRenderer;
 		LevelLoadProgress m_LastLevelProgress;
 		std::unique_ptr<WorldContext> m_OwnedContext;

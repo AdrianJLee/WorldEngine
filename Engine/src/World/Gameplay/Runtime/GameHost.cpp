@@ -199,6 +199,8 @@ namespace World::Gameplay
 	void GameHost::Shutdown()
 	{
 		StopRuntime();
+		m_LevelStreaming.reset();
+		m_LevelDeltaState.reset();
 		m_Scene.reset();
 		InvalidateWorldNameIndex();
 		m_SceneRenderer.reset();
@@ -233,15 +235,31 @@ namespace World::Gameplay
 			return false;
 		}
 
-		// 关卡集合里存在指向该包的关卡时优先走关卡服务(统一走加载状态机/进度),
-		// 由 Tick 内的 Pump 完成激活;找不到时退回直接路径加载(单场景 `.wd`)。
 		if (startRuntime)
 		{
+			// 关卡集合里存在指向该包的关卡时优先走关卡服务(统一走加载状态机/进度),
+			// 由 Tick 内的 Pump 完成激活;找不到时退回直接路径加载(单场景 `.wd`)。
 			const LevelService& levels = GameApp::Get().Levels();
 			if (const Level::LevelInfo* match = MatchLevelByIdentifier(levels.GetLevels(), scenePath))
 			{
-						if (LoadLevelById(match->Id))
+				if (LoadLevelById(match->Id))
 					return true;
+			}
+
+			// 流送:start_scene 形如 `levels/<Id>`,关卡目录 = 内容根 + 它。磁盘上存在就走
+			// 本地索引;发行包里内容根不存在,交给流送运行时按 Vfs 逻辑路径找
+			// `levels/<Id>/cooked/index.yaml`。两条路都汇到同一份索引格式。
+			if (!scenePath.empty())
+			{
+				const std::filesystem::path sceneFsPath = std::filesystem::u8path(scenePath);
+				const std::string levelId = sceneFsPath.filename().u8string();
+				const std::filesystem::path physical = levels.GetContentRoot() / sceneFsPath;
+
+				std::string streamingError;
+				if (StartLevelStreaming(levelId, physical, &streamingError))
+					return true;
+				WLD_CORE_INFO("GameHost::LoadLevel: '{0}' 未走流送({1});退回整包实例化",
+					scenePath, streamingError);
 			}
 		}
 
@@ -292,6 +310,35 @@ namespace World::Gameplay
 			StartRuntime();
 
 		WLD_CORE_INFO("GameHost loaded level '{0}' (runtime {1})", scenePath, startRuntime ? "started" : "not started");
+		return true;
+	}
+
+	bool GameHost::StartLevelStreaming(const std::string& levelId,
+		const std::filesystem::path& physicalDir, std::string* error)
+	{
+		WorldContext* context = Application::HasInstance() ? &Application::Get().GetContext() : m_OwnedContext.get();
+		if (!context)
+		{
+			if (error) *error = "no WorldContext available for level streaming";
+			return false;
+		}
+
+		auto streaming = std::make_unique<Level::LevelStreamingRuntime>();
+		if (!streaming->Initialize(*context, levelId, physicalDir, error))
+			return false;
+
+		StopRuntime();
+		m_Scene = CreateRef<Scene>(*context);
+		ApplyViewportToScene();
+
+		m_LevelDeltaState = std::make_unique<Level::DeltaStateRegistry>();
+		streaming->SetScene(m_Scene.get());
+		streaming->SetDeltaState(m_LevelDeltaState.get());
+		m_LevelStreaming = std::move(streaming);
+
+		m_LoadedPath = "levels/" + levelId;
+		WLD_CORE_WARN("[level] 流送模式:'{0}'(共 {1} 块,视距驱动按相机推进)",
+			m_LoadedPath, m_LevelStreaming->TotalChunks());
 		return true;
 	}
 
@@ -353,6 +400,33 @@ namespace World::Gameplay
 
 	void GameHost::Tick(Timestep frameTime, bool render)
 	{
+		// Level 2.0 空间流送:在场景更新之前按**主相机**推进(先流送进来,本帧才看得见新块)。
+		if (m_LevelStreaming && m_Scene)
+		{
+			glm::mat4 viewProjection{ 1.0f };
+			const bool hasCamera = [&]()
+			{
+				if (!m_SceneRenderer)
+					return false;
+				// GetComponent 非 const ⇒ 句柄不能是 const Entity。
+				Entity camera = m_Scene->GetPrimaryCameraEntity();
+				if (!camera.IsValid() || !camera.HasComponent<CameraComponent>()
+					|| !camera.HasComponent<TransformComponent>())
+					return false;
+				glm::mat4 world = camera.GetComponent<TransformComponent>().GetLocalMatrix();
+				if (camera.HasComponent<WorldTransformComponent>())
+					world = camera.GetComponent<WorldTransformComponent>().Matrix;
+				const Camera& view = m_Scene->GetCameraView(static_cast<entt::entity>(camera));
+				viewProjection = view.GetProjectionMatrix() * glm::inverse(world);
+				return true;
+			}();
+
+			const glm::vec3 viewPosition = hasCamera
+				? glm::vec3(glm::inverse(viewProjection)[3])
+				: glm::vec3(0.0f);
+			m_LevelStreaming->Update(frameTime, viewPosition, viewProjection);
+		}
+
 		// GameUI(M9):宿主在 Tick 前 `SetPointerCaptured(...)`;这里**消费一次即复位** ——
 		// 宿主不设置 = 下一帧自动 false,捕获状态不泄漏到后续帧。
 		const bool pointerCaptured = m_PointerCaptured;

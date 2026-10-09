@@ -3,6 +3,8 @@
 #include "World/Level/Core/IStreamableChunk.h"
 #include "World/Level/Core/DeltaState.h"
 #include <filesystem>
+#include <string>
+#include <vector>
 #include <memory>
 
 namespace World::Level
@@ -14,6 +16,10 @@ namespace World::Level
 		virtual ~StreamableChunk() override;
 
 		bool LoadFromFile(const std::filesystem::path& chunkPath, std::string* outError = nullptr);
+		// 从内存字节载入(发行包里块在 vpak 内,只能经 Vfs::Read 取字节,没有文件路径)。
+		// 与 LoadFromFile 共用同一套解析与校验 —— 载入来源有两处,格式只有一处。
+		bool LoadFromMemory(const std::vector<uint8_t>& bytes, const std::string& sourceName = {},
+			std::string* outError = nullptr);
 
 		virtual uint64_t GetChunkID() const override;
 		virtual SubspaceID GetSubspaceID() const override;
