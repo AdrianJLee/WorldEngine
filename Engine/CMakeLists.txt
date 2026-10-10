@@ -15,7 +15,7 @@ add_subdirectory(${WE_THIRD_PARTY}/spdlog ${CMAKE_BINARY_DIR}/third_party/spdlog
 # Box2D 以 OBJECT 库并入 World（W4）：box2d 是带全局 id 池（b2_worldIdPool）
 # 的 C 库，若以静态库形式被 World 和消费者各链接一份，跨 DLL 的
 # b2Body_IsValid 等接口会查各自模块的 id 池而失效。以 OBJECT 形式并入
-# World 后，符号经 WINDOWS_EXPORT_ALL_SYMBOLS 从 WorldRuntime.dll 导出，
+# World 后，符号由 box2d_EXPORTS 经 B2_API 从 WorldRuntime.dll 导出，
 # 保证进程内只有一份 box2d 状态。
 set(WE_BOX2D_SOURCES
     ${WE_THIRD_PARTY}/box2d/src/aabb.c
@@ -136,11 +136,8 @@ set_target_properties(World PROPERTIES
 )
 
 # 预编译头
-# W4 说明：World 改为 SHARED + WINDOWS_EXPORT_ALL_SYMBOLS 后，PCH 对象
-# (cmake_pch.cxx.obj / cmake_pch.c.obj) 的 __@@_PchSym_ 符号会让链接器在
-# 生成 exports.def 时误导出并报 LNK2001 "无法解析的外部符号 __"。暂时关闭
-# PCH（wldpch.h 仍作为普通头文件被各源文件 include），后续可用显式 .def
-# 方案恢复。
+# 在关闭 WINDOWS_EXPORT_ALL_SYMBOLS 并迁移至 WLD_API 显式宏导出体系后，
+# PCH 对象的 __@@_PchSym_ 符号不再产生误导出与 LNK2001 冲突，成功激活加速。
 target_precompile_headers(World PRIVATE src/wldpch.h)
 
 # 用 /FI 强制包含替代 PCH：既保持各 TU 的传递头文件语义，又不产生

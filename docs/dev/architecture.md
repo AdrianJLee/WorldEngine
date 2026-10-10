@@ -4,7 +4,7 @@
 
 | 模块 | 产物 | 职责 |
 | --- | --- | --- |
-| `World/` | `WorldRuntime.dll`(`WINDOWS_EXPORT_ALL_SYMBOLS` 导出符号) | 引擎核心:应用与帧循环、内存/作业、VFS 与资产、渲染 RHI、场景与反射、WUI、脚本 |
+| `World/` | `WorldRuntime.dll`(`WLD_API` 显式宏导出公共契约) | 引擎核心:应用与帧循环、内存/作业、VFS 与资产、渲染 RHI、场景与反射、WUI、脚本 |
 | `Game/` | `Game.dll` | 游戏逻辑;独立 DLL,经显式接口注册进引擎 |
 | `Editor/` | `Editor.exe` | 编辑器宿主 |
 | `Runtime/` | `Runtime.exe` | 游戏运行宿主 |
