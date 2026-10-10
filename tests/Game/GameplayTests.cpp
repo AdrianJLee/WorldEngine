@@ -229,7 +229,7 @@ int main()
 			CHECK(GameApp::TryGet() == session);
 
 			// 加载失败:返回 false,保持当前(空)场景,不抛异常。
-			CHECK(!host.LoadLevel("scenes/__worldengine_missing_scene__.wd"));
+			CHECK(!host.LoadLevel("scenes/__worldengine_missing_scene__.wlevel"));
 			CHECK(host.GetScene() == nullptr);
 			host.Tick(Timestep(kStep60), true); // 无场景 + 无渲染器:不崩
 

@@ -2,6 +2,7 @@
 #include "WUI/Panels/DataLayersPanel.h"
 
 #include "World/Level/Authoring/LevelPackage.h"
+#include <unordered_map>
 #include "World/Scene/Components.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
@@ -75,6 +76,22 @@ namespace World
 		uint32_t pendingMask = 0;
 		std::string pendingName;
 
+		// 统计当前打开关卡各数据层的实体引用数
+		std::unordered_map<uint32_t, size_t> layerEntityCounts;
+		if (const Ref<Scene> scene = host.GetActiveScene())
+		{
+			const entt::registry& registry = std::as_const(*scene).GetRegistry();
+			for (const entt::entity handle : registry.view<LevelEntityComponent>())
+			{
+				const uint32_t mask = registry.get<LevelEntityComponent>(handle).DataLayerMask;
+				for (const Level::DataLayerDefinition& layer : m_Draft)
+				{
+					if ((mask & layer.LayerMask) != 0)
+						layerEntityCounts[layer.LayerMask]++;
+				}
+			}
+		}
+
 		const uint32_t nextMask = Level::NextFreeLayerMask(m_Draft);
 
 		for (size_t index = 0; index < m_Draft.size(); ++index)
@@ -100,10 +117,12 @@ namespace World
 				pendingMask = layer.LayerMask;
 			}
 
+			const size_t entityCount = layerEntityCounts[layer.LayerMask];
 			const float secondY = rowY + 24.0f;
 			Label(ctx, { rect.X + 10.0f, secondY + 3.0f },
-				Wui::TrFormat("panel.data_layers.mask", "mask {mask}",
-					{ { "mask", std::to_string(layer.LayerMask) } }),
+				Wui::TrFormat("panel.data_layers.mask", "mask {mask} ({count})",
+					{ { "mask", std::to_string(layer.LayerMask) },
+					  { "count", std::to_string(entityCount) } }),
 				theme.TextMuted, 11.0f);
 			const Wui::WuiRect defaultRect { rect.X + 78.0f, secondY, rect.W - 86.0f, 20.0f };
 			bool defaultActive = layer.DefaultActive;
@@ -180,7 +199,7 @@ namespace World
 				// 与保存后渲染用的那份实体集合同源。
 				if (const Ref<Scene> scene = host.GetActiveScene())
 				{
-					entt::registry& registry = scene->GetRegistry();
+					const entt::registry& registry = std::as_const(*scene).GetRegistry();
 					for (const entt::entity handle : registry.view<LevelEntityComponent>())
 					{
 						const uint32_t mask = registry.get<LevelEntityComponent>(handle).DataLayerMask;

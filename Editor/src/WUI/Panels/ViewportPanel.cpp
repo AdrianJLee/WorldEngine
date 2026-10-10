@@ -1086,7 +1086,7 @@ namespace World
 			size_t entityCount = 0;
 			if (const Ref<Scene> gridScene = m_Host.GetActiveScene())
 			{
-				const entt::registry& gridRegistry = gridScene->GetRegistry();
+				const entt::registry& gridRegistry = std::as_const(*gridScene).GetRegistry();
 				entityCount = gridRegistry.view<UUIDComponent>().size();
 			}
 

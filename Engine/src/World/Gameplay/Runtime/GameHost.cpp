@@ -619,7 +619,7 @@ namespace World::Gameplay
 		if (!m_WorldNameIndexValid || m_WorldNameIndexScene != scene || m_WorldNameIndexTick != tick)
 		{
 			m_WorldNameIndex.clear();
-			const entt::registry& registry = scene->GetRegistry();
+			const entt::registry& registry = std::as_const(*scene).GetRegistry();
 			for (const entt::entity entity : registry.view<TagComponent>())
 			{
 				const NameId name = registry.get<TagComponent>(entity).Tag;
@@ -641,7 +641,7 @@ namespace World::Gameplay
 			return false;
 
 		const entt::entity entity = it->second;
-		const entt::registry& registry = scene->GetRegistry();
+		const entt::registry& registry = std::as_const(*scene).GetRegistry();
 		// 本 tick 内实体可能已被销毁:存活检查后回退,绝不返回死句柄的位置。
 		if (!registry.valid(entity))
 			return false;

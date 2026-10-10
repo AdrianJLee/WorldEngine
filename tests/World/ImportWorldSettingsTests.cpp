@@ -55,7 +55,7 @@ namespace
 		"id: u4-test\n"
 		"version: \"1.0.0\"\n"
 		"content_root: assets\n"
-		"start_scene: scenes/3DTest.wd\n"
+		"start_scene: scenes/3DTest.wlevel\n"
 		"renderer: vulkan\n"
 		"custom_key: keep-me\n"
 		"physics:\n"
@@ -193,7 +193,7 @@ int main()
 			std::filesystem::create_directories(freshPath.parent_path(), ignored);
 			World::Asset::ProjectManifest manifest;
 			manifest.Id = "fresh";
-			manifest.StartScene = "scenes/3DTest.wd";
+			manifest.StartScene = "scenes/3DTest.wlevel";
 			std::string error;
 			CHECK(World::Asset::ProjectManifest::Save(freshPath, manifest, &error));
 			const std::string fresh = ReadText(freshPath);
