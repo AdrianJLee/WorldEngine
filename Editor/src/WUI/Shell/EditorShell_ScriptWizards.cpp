@@ -241,7 +241,7 @@ std::string NewCppScriptTemplateSource(const std::string& name){
 			source += "\t//\n";
 			source += "\t// 结构与示例项目模板 src/Components/SampleDataComponent.h 一致:标量 / 枚举 / 命名\n";
 			source += "\t// struct / Array / Map 各留一行范例,不需要的字段整行删掉即可。只有被编辑过的值才写进\n";
-			source += "\t// 场景(.wd),未编辑时用成员初始化里的默认值。\n";
+			source += "\t// 关卡字段,未编辑时用成员初始化里的默认值。\n";
 			source += "\t// ============================================================================\n\n";
 			source += "\t// 枚举:WE_ENUM_SCHEMA 注册后,`Enum, Of(...)` 在面板里是下拉框,存档写整数。\n";
 			source += "\tenum class " + name + "Mode : int32_t\n";

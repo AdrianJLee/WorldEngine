@@ -75,10 +75,10 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 
 | 扩展名 | 是什么 |
 | --- | --- |
-| `.wd` | 场景文件(实体与组件) |
+| `.wlevel` | 关卡入口:命名并打开一个关卡;内容在同级 `levels/<Id>/` 下一实体一文件 |
+| `.wprefab` | 预制体:可复用的实体子树(以实例形式放进关卡) |
 | `.wmodel` | 模型资产:由 `.gltf` / `.glb` 导入产生,导入设置保存在资产自身 |
 | `.wmat` | 材质资产 |
-| `.wprefab` | 预制体 |
 | `.wpak` | 内容包(打包产物) |
 | `.lua` / `.luau` | 脚本;引擎内嵌的脚本运行时是 Luau |
 | `WorldEngineAPI.luau` | 编辑器生成的补全声明(`<项目>/assets/scripts/intermediate/`),不要手改 |

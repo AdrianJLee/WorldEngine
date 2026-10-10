@@ -13,7 +13,8 @@
 | `.hlsli` | 引擎着色器**共享头片段**(Slang / C++ 共用,非独立翻译单元) | `Engine` | 同契约版本 | 如 `MaterialSurfaceContract.hlsli` |
 | `.luau` | 脚本 / 生成存根 | `Engine`(Luau VM) + 编辑器 | — | 存根:工程 `assets/scripts/intermediate/**`,有漂移门禁 |
 | `.wui.json`(历史) | 编辑器窗口布局/浏览器/偏好 | 编辑器 | — | **已迁移**为 `local/*.json`(不入库) |
-| `.wd` / `.wscene`(待确认) | 场景文件 | `Engine`(Scene) | — | ⚠ 待补:确认实际扩展名与版本字段后填表 |
+| `.wlevel` | 关卡入口(manifest:Id / Name / GridCellSize / World / DataLayers) | `Engine`(Level) | 由 `Id` 键标识;入口文件名必须等于 `Id` |
+| `.entity` | 单实体文档(一实体一文件,`ChunkID` + `Entity` 两个顶层键) | `Engine`(Level) | 与 `.wprefab` 的实体块同形 |
 
 ## 待补清单
 

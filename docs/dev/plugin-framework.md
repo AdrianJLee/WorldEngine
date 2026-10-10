@@ -166,7 +166,7 @@ ChoicesCount, Doc}`(定义与字段注释见 `Engine/src/World/Plugins/WePluginA
 
 用法示例即 `templates/plugin-component/src/plugin.cpp`(生成物可直接编译);单测
 `World.Plugins` 覆盖:注册可见性(`Find` / `ListByModule`)、字段元数据映射、
-`.wd` 同一条序列化 API 的往返(含按 `offsetof` 的逐字节断言)、注销幂等、卸载与析构兜底回收。
+`.entity` 同一条序列化 API 的往返(含按 `offsetof` 的逐字节断言)、注销幂等、卸载与析构兜底回收。
 
 ## 9. 编辑器扩展(命令与面板,T3b,2026-09-30)
 
@@ -327,7 +327,7 @@ struct WeScriptCallApi      { StructSize, AbiVersion, UserData, ArgCount,
 T2b 的组件注册只有 schema(`Storage == nullptr`,不能挂到场景实体上)。T2c 在
 `WeComponentDesc` **尾部追加** `Size` / `Alignment`(append-only:不升
 `WE_PLUGIN_ABI_VERSION`),宿主据此为插件组件**合成 entt blob 存储** —— 组件从此能挂到
-场景实体上,Add/Remove/Copy/`.wd` 序列化/属性面板全部走既有 schema 通路。
+场景实体上,Add/Remove/Copy/`.entity` 序列化/属性面板全部走既有 schema 通路。
 
 ```cpp
 struct WeComponentDesc {
@@ -373,7 +373,7 @@ struct WeComponentDesc {
 单测 `World.Plugins`(用例 T2c)覆盖:注册产物(`Storage != nullptr`、`Size` = 声明值、
 保留段 id、`FindByComponentId` 自洽)、按 id 挂到实体 + blob 初始清零、
 `FieldSchema::Set/Get` 按插件 `offsetof` 逐字节成立、`DuplicateEntity` / `CopyScene`
-两条复制通路、`.wd` 往返一致、插件缺失时未知组件 YAML 片段保留、移除组件后类型仍在、
+两条复制通路、`.entity` 往返一致、插件缺失时未知组件 YAML 片段保留、移除组件后类型仍在、
 有活实例时 Unload 被拒 / 清实例后成功 + 槽位与绑定可复用、单类型注销后同模块其余类型仍可用、
 以及 `Size = 0` 的旧式 schema-only 行为不变。
 
@@ -404,7 +404,7 @@ cook 因此**不加载插件 DLL**(打包是确定性、可审计的步骤,不�
 
 ```yaml
 contributes:
-  components: [com.example.health]              # .wd 里的组件类型 id(WeComponentDesc::Id)
+  components: [com.example.health]              # 实体文档里的组件类型 id(WeComponentDesc::Id)
   asset_types:                                  # 资产类型:内容里以扩展名出现
     - id: health
       extensions: [.whealth]
@@ -436,7 +436,7 @@ contributes:
 
 | 面 | 扫描口径 | 引用落在闭包外 |
 | --- | --- | --- |
-| ① 组件 | `.wd` 实体里出现的组件类型键 | cook 失败 |
+| ① 组件 | `.entity` 实体里出现的组件类型键 | cook 失败 |
 | ② 资产类型 | 内容里匹配声明扩展名的文件 | cook 失败 |
 | ③ 导入器 | 内容里匹配导入器声明扩展名的源文件 | cook 失败 |
 | ④ 脚本命名空间 | `.luau` / `.lua` 里的 `<命名空间>.` 调用(整行 `--` 注释跳过) | cook 失败 |
@@ -445,7 +445,7 @@ contributes:
 诊断逐条给出**引用者 → 引用面 → 建议**:
 
 ```
-assets/scenes/main.wd (entity 0) → component 'com.example.health' → enable plugin
+scenes/main.wlevel (level entry) → levels/main/entities/*.entity → component 'com.example.health' → enable plugin
 'com.example.health-plugin' (project.we.yaml plugins.enabled) or declare it under plugins.tolerate_missing
 ```
 
@@ -566,7 +566,7 @@ load/unload 账本零增长 + 条目数不增长"。
 ### 插件组件显示名的本地化约定
 
 - **约定键:`plugin.<pluginId>.<typeId>`**。`<typeId>` 先按组件类型**全名**(`WeComponentDesc::Id`,
-  也是 `.wd` 里的类型键)查,未命中再按**短名**(最后一个 `.` 之后)查一次;都未命中 ⇒ 回落插件声明的
+  也是实体文档里的类型键)查,未命中再按**短名**(最后一个 `.` 之后)查一次;都未命中 ⇒ 回落插件声明的
   `DisplayName`(英文 canonical)。
 - 解析时机 = **插件加载 / 重载时**(组件注册进 schema 的同一生命周期),结果写入 `TypeSchema.DisplayName`:
   属性面板分区标题、Add Component 候选行(行 id = `prop.add.<DisplayName>`)与 `plugin.info` 共用同一份文案。

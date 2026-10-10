@@ -11,7 +11,7 @@ using namespace EditorShellDetail;
 	// 需求(用户 2026-09-28):在任意位置生成一个**标准、干净**的项目骨架(不含示例)。
 	// 本模态只做三件事:收集 项目名 + 位置;实时回显落点与行内错误;把"浏览…/创建"
 	// 标记成下一帧开头的任务(原生对话框与落盘都不在渲染中途做)。
-	// 生成内核 = Editor::ProjectScaffolder(清单走引擎 writer、Main.wd 走引擎序列化、
+	// 生成内核 = Editor::ProjectScaffolder(清单走引擎 writer、Main 关卡走 LevelPackage、
 	// 结构来自所选模板 templates/project-<id>/**);成功后模态换成两个动作:资源管理器打开 / 打开项目。
 	// PROJ-2/T1 追加:可勾选"最小可运行场景"(默认勾选),成功态第三个动作 = 启动项目
 	// (独立 Runtime 进程,不重启编辑器)。
@@ -298,7 +298,7 @@ void EditorShell::DrawNewProjectModal(Wui::WuiContext& ctx){
 			}
 			if (!m_NewProjectCreatedStartScene.empty())
 			{
-				// PROJ-7/T2:模板自带启动场景(example ⇒ scenes/3DTest.wd)—— 没有生成 Main.wd。
+				// PROJ-7/T2:模板自带启动关卡(example ⇒ scenes/3DTest.wlevel)—— 没有生成 Main。
 				Wui::Label(ctx, { labelX, cursorY },
 					Wui::TrFormat("modal.newproject.created.template_scene",
 						"Start scene: {scene} (ships with the template).",
@@ -603,10 +603,10 @@ void EditorShell::DrawNewProjectModal(Wui::WuiContext& ctx){
 		}
 
 		// ---- PROJ-2/T1 + PROJ-7/T2:最小可运行场景(相机 + 方向光;默认勾选)----
-		// 勾选 = assets/scenes/Main.wd 由引擎序列化写入一台 Camera3D + 一盏方向光(不含示例);
+		// 勾选 = 写出关卡 assets/scenes/Main.wlevel + assets/levels/Main/(一台 Camera3D + 一盏方向光,不含示例);
 		// 不勾 = 旧口径的空场景,成功态会给"启动后是空画面"的提示。
-		// 所选模板自带启动场景(example ⇒ scenes/3DTest.wd)时该勾选框**禁用**(灰显 + 理由):
-		// 清单的 start_scene 指向模板自带场景,不再生成 Main.wd —— 勾选没有意义。
+		// 所选模板自带启动关卡(example ⇒ scenes/3DTest.wlevel)时该勾选框**禁用**(灰显 + 理由):
+		// 清单的 start_scene 指向模板自带关卡,不再生成 Main —— 勾选没有意义。
 		{
 			const Wui::WuiId starterId = Wui::HashId("project.new.starter_scene");
 			const Wui::WuiRect starterRect { labelX, cursorY, frame.W - (labelX - frame.X) - 16.0f, 22.0f };

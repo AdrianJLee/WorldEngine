@@ -87,7 +87,7 @@ namespace World
 			bool PhysicsDebug = false;
 
 			bool HasGravityOverride() const { return std::isfinite(Gravity); }
-			// 是否有任何非默认值(决定要不要在 .wd 里写 `World:` 块)。
+			// 是否有任何非默认值(决定要不要在关卡 manifest 里写 `World:` 块)。
 			bool IsDefault() const { return !HasGravityOverride() && !PhysicsDebug; }
 		};
 		WorldSettings& GetWorldSettings() { return m_WorldSettings; }

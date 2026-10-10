@@ -146,7 +146,7 @@
   "schema.category.Physics.2D": "物理 / 2D",
   "schema.category.Physics.3D": "物理 / 3D",
   "schema.category.Project": "项目",
-  "schema.component.UUIDComponent.doc": "持久化身份:写进 .wd,存读档时用它把实体对上;每个实体都应当有。",
+  "schema.component.UUIDComponent.doc": "持久化身份:写进实体文档(.entity / 关卡内容),存读档时用它把实体对上;每个实体都应当有。",
   "schema.component.TagComponent.doc": "人类可读的实体名(层级面板/AI 通道/日志用),不是标识符。",
   "schema.component.TransformComponent.doc": "实体的本地平移/旋转/缩放;RotationQuat 与缓存的 Transform 矩阵是运行时派生状态(不序列化)。",
   "schema.component.SpriteComponent.doc": "2D 贴图四边形:Texture 为空时退化成纯色填充,TilingFactor 重复贴图 UV。",

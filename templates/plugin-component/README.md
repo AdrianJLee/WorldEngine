@@ -18,7 +18,7 @@ Kind / Offset / Size,用 `offsetof` / `sizeof` 填写)交给宿主;宿主据此�
 结构总大小与对齐用 `WeComponentDesc::Size` / `Alignment` 声明(T2c):
 
 - `Size = sizeof(你的组件结构)`(> 0)⇒ 宿主为它合成固定尺寸 blob 存储,组件能挂到场景
-  实体上:Add/Remove/Copy/`.wd` 序列化/属性面板全部走既有 schema 通路;
+  实体上:Add/Remove/Copy/`.entity` 序列化/属性面板全部走既有 schema 通路;
   最大档见 `docs/dev/plugin-framework.md` 的档位表(超过 = 注册被干净拒绝);
 - `Alignment = alignof(你的组件结构)`(0 = 未声明;非 0 必须是 2 的幂且 ≤ 16);
 - 每个字段必须落在 `Size` 之内(否则注册被拒绝 —— 宿主不会按越界的偏移读写);

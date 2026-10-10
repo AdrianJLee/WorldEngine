@@ -40,7 +40,7 @@
 清单字段(与 `ProjectManifest` 同源;由引擎 writer 生成):
 
 - `id`(反域名,如 `com.example.mygame`)、`version`、`content_root`(标准值 `assets`)、
-  `start_scene`(相对**内容根**,如 `scenes/Main.wd`)、`renderer`、`rendering:`、`physics:`、`packages:`。
+  `start_scene`(相对**内容根**,如 `scenes/Main.wlevel` —— 关卡入口)、`renderer`、`rendering:`、`physics:`、`packages:`。
 
 禁止:
 
@@ -52,7 +52,7 @@
 
 1. 编辑器 `File ▸ New Project…`:选**模板**(`templates/project-empty/**` 干净骨架或 `templates/project-example/**` 示例内容)+ **位置** + 项目名 → 由仓库模板 +
    引擎 `ProjectManifest::Save` 生成;实现上先写临时目录再整体改名,**永不覆盖**已有内容。
-   干净骨架向导默认勾选"包含最小可运行场景(相机 + 方向光)":生成的 `assets/scenes/Main.wd` 里会放一台
+   干净骨架向导默认勾选"包含最小可运行场景(相机 + 方向光)":生成的关卡 `assets/scenes/Main.wlevel`(入口)+ `assets/levels/Main/` 里会放一台
    `CameraComponent Primary=true` 的实体与一盏方向光 —— 这是**可运行的最低要求**,不是示例内容
    (示例资产/脚本见 `templates/project-example/**`);不勾则写空场景。
 2. 等价手动流程:复制模板目录(`templates/project-empty/**` 或 `templates/project-example/**`)到目标位置改名,再改清单字段。

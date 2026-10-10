@@ -228,7 +228,7 @@ namespace World
 			if (message) *message = "settings panel is not wired to a host";
 			return false;
 		}
-		// 内容根下的场景(逻辑路径,如 "scenes/3DTest.wd"),给"启动场景"下拉用。
+		// 内容根下的关卡入口(逻辑路径,如 "scenes/3DTest.wlevel"),给"启动关卡"下拉用。
 		virtual std::vector<std::string> ListProjectScenes() { return {}; }
 		// ---- U25-M2:材质工作流(把调好的材质接回场景;实现在 EditorShell → EditorLayer)----
 		// 把材质逻辑路径写进**当前选中实体**的 MeshRendererComponent.MaterialPath
@@ -311,7 +311,7 @@ namespace World
 		// 关闭一个动态面板(脚本编辑器工具栏 Close 按钮)。默认空实现。
 		virtual void CloseEditorPanel(const std::string& panelId) { (void)panelId; }
 		// ---- W5-L1:文档场景的外部改动提示(EditorShell 转发 EditorLayer;默认未接线)----
-		// 磁盘上的 .wd 内容变化 → 视口顶部提示条 + "重新打开"按钮;**不自动替换**文档。
+		// 磁盘上的关卡入口(.wlevel)内容变化 → 视口顶部提示条 + "重新打开"按钮;**不自动替换**文档。
 		virtual bool ExternalSceneChanged() const { return false; }
 		virtual void ReopenExternalScene() {}
 		// ---- P1b D5:模型资产(.wmodel)实例化 ----

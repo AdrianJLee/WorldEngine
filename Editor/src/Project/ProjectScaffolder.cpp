@@ -326,7 +326,7 @@ namespace World::Editor
 		}
 
 		// startScene = 内容根(assets/)相对路径:模板声明了 defaultScene 就用它,否则用
-		// 引擎序列化写出的 Main.wd(kStandardStartScene)。
+		// 由引擎关卡写出器产出的 Main 关卡入口(kStandardStartScene)。
 		bool WriteStandardManifest(const fs::path& projectRoot, const std::string& name,
 			const std::string& startScene, std::string* error)
 		{
@@ -1820,7 +1820,7 @@ namespace World::Editor
 		bool built = CopyTemplateTree(templateInfo.Directory, temporary, &error);
 		if (built)
 			built = WriteStandardManifest(temporary, name, startScene, &error);
-		// 模板自带启动场景(example)时不写 Main.wd —— 清单的 start_scene 已经指向模板里的场景,
+		// 模板自带启动关卡(example)时不写 Main —— 清单的 start_scene 已经指向模板里的关卡,
 		// 再写一份只会多出一个用不到的场景;没有 defaultScene 的模板(empty)保持原口径:
 		// includeStarterScene = 相机 + 方向光 / 空场景。
 		if (built && !templateOwnsStartScene)

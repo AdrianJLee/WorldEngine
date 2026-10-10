@@ -341,7 +341,7 @@ namespace World
 		bool StartPluginBuildAndReload(const std::string& id, std::string* message = nullptr);
 
 		// ---- P2 W5-L1:资产热重载(材质/贴图自动重载;文档场景提示 + 一键重开)----
-		// 文档场景(.wd)在磁盘上被外部改动 → 视口提示条;重开会走未保存确认(不静默丢弃修改)。
+		// 文档关卡(.wlevel)在磁盘上被外部改动 → 视口提示条;重开会走未保存确认(不静默丢弃修改)。
 		// HOTR-P2-T5:文档**干净**且编辑态时改为自动重开(选择/相机恢复);dirty / Play / Simulate
 		// 仍然只提示 —— 见 MaybeAutoReloadExternalScene。
 		bool ExternalSceneChanged() const { return m_ExternalSceneChanged; }
@@ -594,7 +594,7 @@ namespace World
 		std::vector<std::string> m_PendingScriptReloads;
 		// 监听目标场景:换场景(进入/退出 Play、开关文档)时必须重建基线,不能跨场景复用。
 		Scene* m_ScriptWatchScene = nullptr;
-		// W5-L1:文档场景(.wd)外部改动监听(150ms)与提示状态。
+		// W5-L1:文档关卡(.wlevel)外部改动监听(150ms)与提示状态。
 		AssetFileWatch m_SceneWatch;
 		// 当前监听的文档场景逻辑路径(空 = 未监听);镜像它以便换文档时重设基线。
 		std::string m_WatchedSceneLogicalPath;

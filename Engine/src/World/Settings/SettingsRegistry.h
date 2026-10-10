@@ -37,7 +37,7 @@ namespace World::Settings
 		Project = 0,   // 随项目提交:<项目根>/project.we.yaml
 		Editor = 1,    // 用户级:Editor/editor-prefs.json
 		Import = 2,    // 项目级:project.we.yaml 的 imports:
-		World = 3,     // 场景级:.wd 场景头
+		World = 3,     // 关卡级:.wlevel manifest 的 World: 块
 	};
 
 	// 生效时机(面板画黄色徽标;tooltip 里也要写)。

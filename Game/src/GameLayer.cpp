@@ -1,4 +1,6 @@
 #include "GameLayer.h"
+#include "World/Asset/ProjectManifest.h"
+#include "World/Gameplay/Runtime/GameApp.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Renderer/Legacy/Gfx/RenderCommand.h"
 
@@ -17,10 +19,31 @@ namespace World
 		m_SceneRenderer->Init();
 
 		// Game.dll 的宿主层与会话:与 RuntimeLayer 走同一条 GameApp/GameHost 路径。
+		// 启动关卡只认项目清单的 start_scene(Level 2.0 关卡的入口文件,如
+		// `scenes/3DTest.wlevel`)—— 这里**不再**硬编码路径:原先写死的
+		// `scenes/PhysicalTest.wd` 在任何模板里都不存在,宿主每次启动都静默加载失败。
 		Gameplay::GameAppDesc desc;
 		desc.ProjectId = "worldengine-game";
 		desc.FixedStepHz = 60;
 		desc.ContentRoot = std::filesystem::current_path();
+		std::filesystem::path manifestPath;
+		if (Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+		{
+			Asset::ProjectManifest manifest;
+			std::string manifestError;
+			if (Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError))
+			{
+				if (!manifest.Id.empty())
+					desc.ProjectId = manifest.Id;
+				desc.ContentRoot = manifest.ResolveContentRoot(manifestPath);
+				desc.StartLevel = manifest.StartScene;
+			}
+			else
+			{
+				WLD_CORE_ERROR("GameLayer: project manifest '{0}' rejected: {1}",
+					manifestPath.string(), manifestError);
+			}
+		}
 		m_Host.Init(desc);
 		m_Host.SetRenderer(m_SceneRenderer);
 
@@ -64,9 +87,16 @@ namespace World
 
 	void GameLayer::LoadLevel()
 	{
-		// During the cook process, scenes could be packed or placed in content folder.
-		// Assuming "Resource/Scenes/TestScene.wdscene" relative path is maintained or packed in pak.
-		std::string scenePath = "scenes/PhysicalTest.wlevel";
+		// 关卡来源 = 会话描述里的 StartLevel(清单的 start_scene,在 OnAttach 里解析)。
+		// 清单缺失或没写 start_scene ⇒ 空路径,由 GameHost::LoadLevel 报可读错误,而不是
+		// 偷偷去跑一个不存在的硬编码路径。
+		const std::string scenePath = Gameplay::GameApp::Get().Desc().StartLevel;
+		if (scenePath.empty())
+		{
+			WLD_CORE_ERROR("GameLayer: no start level — project.we.yaml is missing or has no start_scene; "
+				"not loading any level");
+			return;
+		}
 		// 加载失败时保持当前场景不变;无相机告警/视口同步/运行时启动由 GameHost 统一处理。
 		m_Host.LoadLevel(scenePath, true);
 	}

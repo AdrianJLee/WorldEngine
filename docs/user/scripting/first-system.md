@@ -30,7 +30,7 @@ end, "Update")
 在编辑器里:选中实体 → 属性面板 `添加组件` → 找到 `VelocityComponent`,把 `Linear` 填成
 `1, 0, 0`。
 
-(.wd 场景文件里长这样 —— 组件就是一个块:)
+(实体文档里长这样 —— 组件就是一个块:)
 
 ```yaml
   - World::UUIDComponent:

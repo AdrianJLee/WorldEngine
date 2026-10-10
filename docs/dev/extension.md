@@ -27,7 +27,7 @@ Prefab 实例化会连运行时对象一起抄:
 | `String` | `std::string`(有堆、非平凡拷贝) | 真正无界的用户自由文本 |
 | `Text` | `InlineString<N>`(`InlineText24` / `InlineText32`) | 有界文本(名字、标签串、备注):无堆、平凡可拷贝;超长输入**截断并告警**,不静默丢字符 |
 | `Name` | `NameId`(4B 驻留) | 标识符(标签、动画片段名):比较是整数比较,热路径不物化字符串 |
-| `Asset` | 4B / 值类型资产引用 | 资产引用:`.wd` 上仍是人类可读逻辑路径,schema 生成器走 `AssetOps` |
+| `Asset` | 4B / 值类型资产引用 | 资产引用:`.entity` 上仍是人类可读逻辑路径,schema 生成器走 `AssetOps` |
 
 组件的默认选择是 `Text` / `Name` / `Asset`;只有当文本确实无界(多行自由内容)时才用 `String`。
 

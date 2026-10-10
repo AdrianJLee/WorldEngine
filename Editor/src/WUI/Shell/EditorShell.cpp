@@ -1073,7 +1073,7 @@ Wui::GizmoOperation EditorShell::GetGizmoOperation() const{
 
 const std::vector<Level::DataLayerDefinition>& EditorShell::GetLevelDataLayers() const{
 		// 当前文档是关卡包时用包 manifest 声明的层;否则视口不显示层开关
-		// (单场景 `.wd` 没有数据层概念)。
+		// (单实体/预制体路径没有数据层概念)。
 		return m_Editor.GetDocument().GetDataLayers();
 	}
 

@@ -66,7 +66,7 @@ namespace World
 		void RegisterProjectSettings();
 		// P4-U4:project.we.yaml 的 `imports:`(资产导入默认值)。
 		void RegisterImportSettings();
-		// P4-U4:.wd 场景头的 `World:` 块(场景级设置;绑当前文档场景)。
+		// P4-U4:关卡 manifest 的 `World:` 块(关卡级设置;绑当前文档关卡)。
 		void RegisterWorldSettings();
 	};
 }

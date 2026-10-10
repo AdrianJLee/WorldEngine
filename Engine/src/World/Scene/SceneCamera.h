@@ -9,7 +9,7 @@ namespace World
 	// 投影矩阵是派生量,由 CameraSystem 按(参数, 有效宽高比, 视口)指纹脏标记缓存
 	// (见 Components.h 的 CameraViewComponent)。
 	//
-	// 字段名与声明顺序、默认值都与迁移前的 SceneCamera 完全一致(m_* 是 .wd 里
+	// 字段名与声明顺序、默认值都与迁移前的 SceneCamera 完全一致(m_* 是实体文档里
 	// 实际存储的名字),所以存量场景零迁移。唯一变化是类型名(SceneCamera -> CameraSettings)。
 	struct CameraSettings
 	{

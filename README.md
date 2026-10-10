@@ -95,10 +95,10 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 
 | Extension | What it is |
 | --- | --- |
-| `.wd` | Scene file (entities and components) |
+| `.wlevel` | Level entry: names and opens a level; content lives beside it in `levels/<Id>/` (one `.entity` per entity) |
+| `.wprefab` | Prefab: a reusable entity subtree (placed into levels as instances) |
 | `.wmodel` | Model asset: produced by importing `.gltf` / `.glb`; import settings live in the asset |
 | `.wmat` | Material asset |
-| `.wprefab` | Prefab |
 | `.wpak` | Content package (packaging output) |
 | `.lua` / `.luau` | Scripts; the embedded scripting runtime is Luau |
 | `WorldEngineAPI.luau` | Editor-generated completion stubs (`<project>/assets/scripts/intermediate/`); do not edit by hand |

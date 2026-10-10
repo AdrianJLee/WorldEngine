@@ -618,7 +618,7 @@ void EditorLayer::PollAssetHotReload(float deltaSeconds){
 		// 之外时,实例引用的 prefab 逻辑路径仍然有效,跟随不受影响。
 		PollPrefabHotReload(static_cast<double>(deltaSeconds));
 
-		// 2) 文档场景(.wd):内容变化 → 视口提示条;**干净文档 + 编辑态**再自动重开
+		// 2) 文档关卡(.wlevel):内容变化 → 视口提示条;**干净文档 + 编辑态**再自动重开
 		//    (HOTR-P2-T5;重开前按 UUID 记选择、记相机,重开后恢复)。
 		//    dirty / Play / Simulate / `scene_auto_reload` 关闭 → 只提示 + 手动重开,
 		//    绝不自动覆盖未保存修改。

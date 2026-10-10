@@ -46,7 +46,7 @@ namespace World::Schema
 			if (child.Meta.Transient)
 				continue;
 			fields.emplace(child.Name, ReadSchemaField(child, instance));
-			// 资产稳定身份:与路径并列写一个 `<字段名>Id` 兄弟键(.wd 里人可读、读回时一起恢复)。
+			// 资产稳定身份:与路径并列写一个 `<字段名>Id` 兄弟键(实体文档里人可读、读回时一起恢复)。
 			// 只在已分配身份时写 —— 未分配不产生噪音键。
 			if (child.K == Kind::Asset && child.GetAssetIdentity)
 			{

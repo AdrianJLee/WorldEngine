@@ -19,7 +19,7 @@ namespace World
 		//                 说明文件 —— 它们会被复制进项目);
 		//   * project.we.yaml ← 引擎 writer(ProjectManifest::Save,与解析同源,不手写 YAML);
 		//   * 启动场景:模板声明了 defaultScene(相对内容根 assets/)⇒ 用模板自带的那份;
-		//     模板没声明(empty)⇒ assets/scenes/Main.wd 走引擎场景序列化
+		//     模板没声明(empty)⇒ 关卡入口 assets/scenes/Main.wlevel + 内容 assets/levels/Main/ 走 LevelPackage
 		//     (includeStarterScene:相机 + 方向光 / 空场景);
 		//   * .vscode / .luau-lsp(Luau LSP 脚手架)← 引擎既有 EnsureScriptEditorScaffold
 		//     (与编辑器启动期为当前项目生成的那两份逐字节同源)。
@@ -38,7 +38,7 @@ namespace World
 				std::string Id;            // 目录名 project-<id> 的 <id>(稳定标识;向导 a11y id = project.new.template.<id>)
 				std::string Name;          // 显示名(向导里画在分段按钮上)
 				std::string Description;   // 一行说明(悬停提示 + 选中行说明)
-				std::string DefaultScene;  // 模板自带的启动场景(相对内容根 assets/,例 "scenes/3DTest.wd");空 = 模板不声明
+				std::string DefaultScene;  // 模板自带的启动关卡入口(相对内容根 assets/,例 "scenes/3DTest.wlevel");空 = 模板不声明
 				bool HasSamples = false;   // 模板带示例内容(assets/scripts/examples/ 存在)⇒ 向导给"会带入示例…"提示
 				int Order = 100;           // 排序键(小的在前);template.json 缺省 100
 				bool Valid = true;         // false = template.json 缺失/非法(Error = 可读原因)
@@ -127,16 +127,16 @@ namespace World
 			};
 			static BuildEntryResult EnsureBuildEntryPoints(const std::filesystem::path& projectRoot);
 
-			// 生成骨架。context 只用于构造 Scene 走引擎的场景序列化(写 Main.wd)。
+			// 生成骨架。context 只用于构造 Scene,再交给 LevelPackage 写出 Main 关卡。
 			// templateId(默认 "empty",PROJ-7/T2):templates/project-<id> 里的模板;不存在/
 			//   缺 template.json/缺必需条目 ⇒ 可读错误,不写任何东西。
 			// includeStarterScene(PROJ-2/T1,调用方默认传 true):
 			//   只对**没有 defaultScene 的模板**(empty)生效:
-			//     true  ⇒ Main.wd = 最小可运行场景:一台 Camera3D(Primary,位置 [0,1,5])+ 一盏
+			//     true  ⇒ Main 关卡 = 最小可运行内容:一台 Camera3D(Primary,位置 [0,1,5])+ 一盏
 			//             方向光 —— 启动 Runtime 就有可看的画面;**不含**任何示例资产/材质/脚本;
 			//     false ⇒ 旧行为(空场景,启动后是空画面)。
 			//   模板声明了 defaultScene(example)时:清单 start_scene 用模板自带的场景,
-			//   **不生成** Main.wd,这个参数被忽略(不产生用不到的第 5 个场景)。
+			//   **不生成** Main 关卡,这个参数被忽略(不产生用不到的第 5 个关卡)。
 			// 目标目录已存在且为空时:改名阶段先移除那个空目录,再整体 rename 进来。
 			static Result Create(const std::filesystem::path& location, const std::string& name,
 				WorldContext& context, bool includeStarterScene, const std::string& templateId = "empty");

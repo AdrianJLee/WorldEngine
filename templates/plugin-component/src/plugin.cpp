@@ -70,7 +70,7 @@ namespace
 		Host() = host;
 
 		WeComponentDesc desc;
-		desc.Id = "{{PluginId}}.Health";     // 类型全名(也是 .wd 里的类型键)
+		desc.Id = "{{PluginId}}.Health";     // 类型全名(也是实体文档里的组件键)
 		desc.DisplayName = "{{PluginName}} Health";
 		desc.ComponentId = 0;                // 存储 id 由宿主分配 ⇒ 插件必须填 0
 		desc.Fields = ComponentFields();

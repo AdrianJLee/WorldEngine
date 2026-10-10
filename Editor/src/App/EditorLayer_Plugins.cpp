@@ -443,7 +443,7 @@ void EditorLayer::OnAttach(){
 		// D7-1a:3D 视口相机(轨道/飞行)。默认档:
 		//   显式 `WLD_VIEWPORT_3D` 优先;否则**项目入口是 Level 2.0 关卡目录**(levels/<名>,
 		//   流送网格与 HUD 挂在 3D 视口上)时默认 3D;传统 `.wd` 单场景保持历史默认(2D),
-		//   不把既有 2D 项目(如 2DTest)的默认视图翻掉。View 菜单/工具栏可随时切换。
+		//   不把既有 2D 关卡(如 2DTest)的默认视图翻掉。View 菜单/工具栏可随时切换。
 		const bool startupIsLevelPackage = !startupPath.empty() && std::filesystem::is_directory(startupPath);
 		m_EditorCamera3D = EditorCamera3D(60.0f, 1.6f / 0.9f, 0.1f, 2000.0f, 12.0f);
 		m_EditorCamera3D.SetViewportSize(1280, 720);

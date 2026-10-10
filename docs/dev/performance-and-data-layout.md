@@ -50,7 +50,7 @@
 | **C1 组件 (schema 注册)** | `TransformComponent`、`MeshRendererComponent` | **`≤ 64B`**（单条 CPU cache line）；特例走豁免表 | 必须 `is_trivially_copyable` | 编译期模板实例化断言（`MakeComponentStorage<T>`）+ 自动化 ctest 反射枚举校验（门禁 A：`World.ComponentLayout`）。 |
 | **C2 热路径临时 / 批量结构** | `InstanceData`、`LightUniforms`、排序键、`RenderExtract` 条目 | 视实测而定；优先控制在 `≤ 64B` 或显式固定 stride | 必须为 POD 结构体 | 逐字段 `offsetof` 编译期断言；若 `≥ 1000/帧` 或耗时 `≥ 5%`，必须将微基准数字固化于知识库。 |
 | **C3 跨边界 ABI 结构** | `WeHostApi`、`WeComponentDesc`、`Scene` 宿主接口 | 不设尺寸上限，但必须具备版本锁与逐字段断言 | 依接口契约定义 | 结构体大小版本门（`StructSize`）+ 偏移哈希世代指纹（门禁 B/C：`World.RuntimeContract`）。 |
-| **C4 磁盘 / 二进制格式** | `.wd` 字段、`.wtex` / `.wmodel` 头部、顶点 stride | 依格式规范版本锁死 | 不适用 | 遵循“只增不删”与版本升级协议；禁止直接 `memcpy` 结构体持久化，全量依赖 schema 字段名与 ID 反序列化。 |
+| **C4 磁盘 / 二进制格式** | `.entity` 字段、`.wtex` / `.wmodel` 头部、顶点 stride | 依格式规范版本锁死 | 不适用 | 遵循“只增不删”与版本升级协议；禁止直接 `memcpy` 结构体持久化，全量依赖 schema 字段名与 ID 反序列化。 |
 
 ---
 
@@ -482,7 +482,7 @@ Release,3 次复现,ns/quad(4096 quad):
 - **`WorldTransformComponent`**：`64 字节`。满足单条 cache line 上限且为平凡可拷贝，通过编译期静态断言锁定。
 - **`CameraViewComponent`**：`112 字节`。**已登记豁免**。内含 64B 投影矩阵与 32B 指纹参数；因每场景仅 1~2 台相机（Q1 = No），无热遍历性能顾虑。复核日期：2027-01-05。
 - **`PhysicsInterpolationState`**：`68 字节`。**已登记豁免**。包含 64B 上一帧局部矩阵与有效位；作为 O2 优化候选，待基准测试裁决。复核日期：2026-11-05。
-- **`HierarchyChildrenComponent`**：包含 `std::vector<Entity>`。**已登记豁免（有意非平凡）**。该组件为运行期反向子实体索引缓存，不入 `.wd`、不进属性面板、不走 schema 复制与预制体实例化，不设尺寸预算限制。
+- **`HierarchyChildrenComponent`**：包含 `std::vector<Entity>`。**已登记豁免（有意非平凡）**。该组件为运行期反向子实体索引缓存，不入 `.entity`、不进属性面板、不走 schema 复制与预制体实例化，不设尺寸预算限制。
 
 ### A.3 门禁命令速查
 
