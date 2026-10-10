@@ -124,7 +124,7 @@ namespace World
 					{ { "mask", std::to_string(layer.LayerMask) },
 					  { "count", std::to_string(entityCount) } }),
 				theme.TextMuted, 11.0f);
-			const Wui::WuiRect defaultRect { rect.X + 78.0f, secondY, rect.W - 86.0f, 20.0f };
+			const Wui::WuiRect defaultRect { rect.X + 78.0f, secondY, rect.W - 86.0f - 56.0f, 20.0f };
 			bool defaultActive = layer.DefaultActive;
 			if (Wui::Checkbox(ctx,
 				Wui::HashId(("level.layer.default." + std::to_string(layer.LayerMask)).c_str()),
@@ -135,6 +135,33 @@ namespace World
 				pending = LayerAction::ToggleDefault;
 				pendingMask = layer.LayerMask;
 				pendingName = defaultActive ? "1" : "0";
+			}
+
+			// 一键指派当前选中实体到此数据层
+			Entity selected = host.GetSelectedEntity();
+			const bool canAssign = selected.IsValid() && selected.GetScene() == host.GetActiveScene().get();
+			const Wui::WuiRect assignRect { rect.X + rect.W - 58.0f, secondY, 50.0f, 20.0f };
+			if (Button(ctx, Wui::HashId(("level.layer.assign." + std::to_string(layer.LayerMask)).c_str()),
+				assignRect, Wui::Tr("panel.data_layers.assign", "Assign"), theme))
+			{
+				if (canAssign)
+				{
+					if (selected.HasComponent<LevelEntityComponent>())
+					{
+						selected.GetComponent<LevelEntityComponent>().DataLayerMask |= layer.LayerMask;
+					}
+					else
+					{
+						selected.AddComponent<LevelEntityComponent>(LevelEntityComponent { layer.LayerMask });
+					}
+					host.MarkDocumentDirty();
+					m_Notice = Wui::TrFormat("panel.data_layers.assigned", "Assigned selected entity to layer '{layer}'.",
+						{ { "layer", layer.Name } });
+				}
+				else
+				{
+					m_Error = Wui::Tr("panel.data_layers.no_selection", "Select an entity in Hierarchy first.");
+				}
 			}
 			y = secondY + 24.0f;
 		}

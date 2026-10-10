@@ -356,6 +356,29 @@ function Level:UnloadAll() end
 ---@return table
 function Level:Entries() end
 
+---List of data layers {Mask, Name, DefaultActive} declared in the active level manifest.
+---@return table
+function Level:GetDataLayers() end
+
+---Active data layer mask of the current scene.
+---@return number
+function Level:GetActiveDataLayers() end
+
+---Set the active data layer mask of the current scene.
+---@param mask number Bitwise active layer mask.
+function Level:SetActiveDataLayers(mask) end
+
+---Toggle a data layer on or off by mask number or name.
+---@param layer number|string Layer mask number or layer name string.
+---@param active boolean Whether the layer should be active.
+---@return boolean
+function Level:SetDataLayerActive(layer, active) end
+
+---Check if a data layer is currently active by mask number or name.
+---@param layer number|string Layer mask number or layer name string.
+---@return boolean
+function Level:IsDataLayerActive(layer) end
+
 -- Global service table 'Save': read-only; there is no runtime constructor.
 ---Read-only save service table; migrations, traits and paths are not exposed.
 ---@class Save

@@ -459,6 +459,154 @@ namespace World
 			return result.ToValue();
 		}
 
+		ScriptValue LevelGetDataLayersImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[9], count, 0);
+			const std::vector<Level::LevelInfo>& levels = RequireGameApp().Levels().GetLevels();
+			const std::string primaryId = RequireGameApp().Levels().GetPrimaryLevel();
+			ScriptTableRef result = MakeScriptTable();
+			for (const auto& info : levels)
+			{
+				if (info.Id == primaryId)
+				{
+					for (std::size_t i = 0; i < info.DataLayers.size(); ++i)
+					{
+						ScriptTableRef entry = MakeScriptTable();
+						entry.SetField("Mask", ScriptValue::Number(static_cast<double>(info.DataLayers[i].LayerMask)));
+						entry.SetField("Name", ScriptValue::String(info.DataLayers[i].Name));
+						entry.SetField("DefaultActive", ScriptValue::Boolean(info.DataLayers[i].DefaultActive));
+						result.SetArrayElement(i + 1, entry.ToValue());
+					}
+					break;
+				}
+			}
+			return result.ToValue();
+		}
+
+		ScriptValue LevelGetActiveDataLayersImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[10], count, 0);
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				return ScriptValue::Number(static_cast<double>(scene->GetActiveDataLayers()));
+			return ScriptValue::Number(static_cast<double>(0xFFFFFFFFu));
+		}
+
+		ScriptValue LevelSetActiveDataLayersImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[11];
+			CheckArgumentCount("Level", method, count, 1);
+			if (!args[0].IsNumber())
+				throw std::logic_error("Level.SetActiveDataLayers: mask must be a number");
+			double num = 0.0;
+			args[0].AsNumber(&num);
+			const uint32_t mask = static_cast<uint32_t>(num);
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				scene->SetActiveDataLayers(mask);
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue LevelSetDataLayerActiveImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[12];
+			CheckArgumentCount("Level", method, count, 2);
+			if (!args[1].IsBoolean())
+				throw std::logic_error("Level.SetDataLayerActive: active must be a boolean");
+			bool active = false;
+			args[1].AsBool(&active);
+			uint32_t mask = 0;
+			if (args[0].IsNumber())
+			{
+				double num = 0.0;
+				args[0].AsNumber(&num);
+				mask = static_cast<uint32_t>(num);
+			}
+			else if (args[0].IsString())
+			{
+				std::string name;
+				args[0].AsString(&name);
+				const std::vector<Level::LevelInfo>& levels = RequireGameApp().Levels().GetLevels();
+				const std::string primaryId = RequireGameApp().Levels().GetPrimaryLevel();
+				for (const auto& info : levels)
+				{
+					if (info.Id == primaryId)
+					{
+						for (const auto& layer : info.DataLayers)
+						{
+							if (layer.Name == name)
+							{
+								mask = layer.LayerMask;
+								break;
+							}
+						}
+						break;
+					}
+				}
+				if (mask == 0)
+					return ScriptValue::Boolean(false);
+			}
+			else
+			{
+				throw std::logic_error("Level.SetDataLayerActive: layer must be a mask number or layer name string");
+			}
+
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+			{
+				uint32_t current = scene->GetActiveDataLayers();
+				if (active) current |= mask;
+				else current &= ~mask;
+				scene->SetActiveDataLayers(current);
+				return ScriptValue::Boolean(true);
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue LevelIsDataLayerActiveImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[13];
+			CheckArgumentCount("Level", method, count, 1);
+			uint32_t mask = 0;
+			if (args[0].IsNumber())
+			{
+				double num = 0.0;
+				args[0].AsNumber(&num);
+				mask = static_cast<uint32_t>(num);
+			}
+			else if (args[0].IsString())
+			{
+				std::string name;
+				args[0].AsString(&name);
+				const std::vector<Level::LevelInfo>& levels = RequireGameApp().Levels().GetLevels();
+				const std::string primaryId = RequireGameApp().Levels().GetPrimaryLevel();
+				for (const auto& info : levels)
+				{
+					if (info.Id == primaryId)
+					{
+						for (const auto& layer : info.DataLayers)
+						{
+							if (layer.Name == name)
+							{
+								mask = layer.LayerMask;
+								break;
+							}
+						}
+						break;
+					}
+				}
+				if (mask == 0)
+					return ScriptValue::Boolean(false);
+			}
+			else
+			{
+				throw std::logic_error("Level.IsDataLayerActive: layer must be a mask number or layer name string");
+			}
+
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				return ScriptValue::Boolean((scene->GetActiveDataLayers() & mask) != 0);
+			return ScriptValue::Boolean(false);
+		}
+
 		ScriptValue SaveToSlot(const ScriptServiceMethod& method, const ScriptValue* args, std::size_t count)
 		{
 			const uint32_t slot = RequireSlot("Save", method, args, count, 0);
@@ -770,6 +918,16 @@ namespace World
 			{ "id", "string", ScriptServiceArgType::String, true, "Level id from the level list." },
 			{ "additive", "boolean", ScriptServiceArgType::Boolean, false, "Push the level on top of the current stack instead of replacing it." },
 		};
+		static const ScriptServiceParam levelActiveMask[] = {
+			{ "mask", "number", ScriptServiceArgType::Number, true, "Bitwise active layer mask." },
+		};
+		static const ScriptServiceParam levelSetLayer[] = {
+			{ "layer", "number|string", static_cast<ScriptServiceArgType>(static_cast<uint32_t>(ScriptServiceArgType::Number) | static_cast<uint32_t>(ScriptServiceArgType::String)), true, "Layer mask number or layer name string." },
+			{ "active", "boolean", ScriptServiceArgType::Boolean, true, "Whether the layer should be active." },
+		};
+		static const ScriptServiceParam levelIsLayer[] = {
+			{ "layer", "number|string", static_cast<ScriptServiceArgType>(static_cast<uint32_t>(ScriptServiceArgType::Number) | static_cast<uint32_t>(ScriptServiceArgType::String)), true, "Layer mask number or layer name string." },
+		};
 		static const ScriptServiceParam levelUnload[] = {
 			{ "id", "string", ScriptServiceArgType::String, true, "Active level id to unload." },
 		};
@@ -819,6 +977,31 @@ namespace World
 				return LevelEntriesImpl(args, count);
 			}, nullptr, 0, 0, "table",
 				"Discovered level packages as {Id, Name, Path} tables \u2014 one entry per folder under assets/levels/." },
+			{ "GetDataLayers", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelGetDataLayersImpl(args, count);
+			}, nullptr, 0, 0, "table",
+				"List of data layers {Mask, Name, DefaultActive} declared in the active level manifest." },
+			{ "GetActiveDataLayers", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelGetActiveDataLayersImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Active data layer mask of the current scene." },
+			{ "SetActiveDataLayers", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelSetActiveDataLayersImpl(args, count);
+			}, levelActiveMask, 1, 1, "",
+				"Set the active data layer mask of the current scene." },
+			{ "SetDataLayerActive", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelSetDataLayerActiveImpl(args, count);
+			}, levelSetLayer, 2, 2, "boolean",
+				"Toggle a data layer on or off by mask number or name." },
+			{ "IsDataLayerActive", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelIsDataLayerActiveImpl(args, count);
+			}, levelIsLayer, 1, 1, "boolean",
+				"Check if a data layer is currently active by mask number or name." },
 		};
 
 		static const ScriptServiceParam saveSlot[] = {
@@ -874,7 +1057,7 @@ namespace World
 		};
 		static const ScriptServiceBinding services[] = {
 			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, 10 },
-			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, 9 },
+			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, 14 },
 			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, 7 },
 			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, 6 },
 		};

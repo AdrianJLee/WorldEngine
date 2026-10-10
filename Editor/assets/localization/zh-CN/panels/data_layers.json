@@ -14,5 +14,8 @@
   "panel.data_layers.full": "32 个层位已用尽。",
   "panel.data_layers.keep_one": "关卡至少要保留一个数据层。",
   "panel.data_layers.in_use": "仍有实体归属该层 —— 先在属性面板改掉它们的层归属再删除。",
-  "panel.data_layers.no_level": "还没有打开关卡。先在 Levels(关卡)面板 Open 一个关卡,这里才会出现它的数据层。"
+  "panel.data_layers.no_level": "还没有打开关卡。先在 Levels(关卡)面板 Open 一个关卡,这里才会出现它的数据层。",
+  "panel.data_layers.assign": "指派",
+  "panel.data_layers.assigned": "已将选中实体分配给数据层 '{layer}'。",
+  "panel.data_layers.no_selection": "请先在层级(Hierarchy)面板中选中一个实体。"
 }
