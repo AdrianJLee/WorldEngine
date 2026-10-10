@@ -14,7 +14,8 @@
 | `.luau` | 脚本 / 生成存根 | `Engine`(Luau VM) + 编辑器 | — | 存根:工程 `assets/scripts/intermediate/**`,有漂移门禁 |
 | `.wui.json`(历史) | 编辑器窗口布局/浏览器/偏好 | 编辑器 | — | **已迁移**为 `local/*.json`(不入库) |
 | `.wlevel` | 关卡入口(manifest:Id / Name / GridCellSize / World / DataLayers) | `Engine`(Level) | 由 `Id` 键标识;入口文件名必须等于 `Id` |
-| `.entity` | 单实体文档(一实体一文件,`ChunkID` + `Entity` 两个顶层键) | `Engine`(Level) | 与 `.wprefab` 的实体块同形 |
+| `.entity` | 单实体文档(一实体一文件,`ChunkID` + `Entity` 两个顶层键) | `Engine`(Level) | 与 `.wprefab` 的实体块同形;实例根携带 `Prefab:` 块(内联子实体覆写) |
+| `.wprefab` | 预制体模板(实体子树模板资产,含固化 `PrefabLocalId` 的单根场景文档) | `Engine`(Gameplay/Prefab) | `FormatVersion: 2` | 创作期复用模板;实例放入关卡时以 `EntityMapping` + 内联覆写落盘,未解包子实体 0 文件落盘 |
 
 ## 待补清单
 
@@ -22,3 +23,4 @@
 - 关卡 `.welevel` 与场景的关系;
 - 资产 `.meta`(若存在)的字段与生成规则;
 - 打包清单(`EditorCooker` 产物)格式与版本。
+
