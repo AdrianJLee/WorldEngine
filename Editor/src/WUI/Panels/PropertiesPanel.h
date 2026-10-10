@@ -73,6 +73,11 @@ namespace World
 		float DrawTransformInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, TransformComponent& transform,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
+		// 关卡数据层归属(LevelEntityComponent):一层一个勾选框(**关卡打开时**才有意义 ——
+		// 层的名字/数量来自关卡 manifest,不是 schema 常量)。没打开关卡 ⇒ 退回普通数字行。
+		float DrawLevelEntityInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
 		float DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);

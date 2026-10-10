@@ -156,6 +156,12 @@ namespace World
 		// 当前文档的逻辑路径(相对内容根;无文档 / 不在内容根内 → 空)。供面板查询
 		// (如 Levels 面板拒绝"删掉正在编辑的关卡"),与内部同名私有方法同一口径。
 		std::string OpenDocumentLogicalPath() const { return CurrentDocumentLogicalPath(); }
+
+		// ---- 关卡数据层编辑(数据层编辑 UI 的宿主面)----
+		// 打开的是关卡文档 ⇒ 填出它声明的层并返回 true;否则 false(面板画提示)。
+		bool GetEditableDataLayers(std::vector<Level::DataLayerDefinition>* out) const;
+		// 写回:交给 EditorDocument(归一化 + 只重写入口 manifest),成功后同步视口开关用的那份。
+		bool ApplyDataLayers(const std::vector<Level::DataLayerDefinition>& layers, std::string* message);
 		Entity GetSelectedEntity() const { return m_SelectedEntity; }
 		void SetSelectedEntity(Entity entity) { m_SelectedEntity = entity; }
 		EditorCamera& GetEditorCamera() { return m_EditorCamera; }

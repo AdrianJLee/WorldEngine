@@ -4,6 +4,7 @@
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiGizmo.h"
 #include "World/Asset/ProjectManifest.h"
+#include "World/Level/Authoring/LevelPackage.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 
@@ -230,6 +231,23 @@ namespace World
 		}
 		// 内容根下的关卡入口(逻辑路径,如 "scenes/3DTest.wlevel"),给"启动关卡"下拉用。
 		virtual std::vector<std::string> ListProjectScenes() { return {}; }
+		// ---- 关卡数据层编辑(与视口工具栏同一份"当前文档声明的层")----
+		// 打开的是**关卡文档**时才可用;返回 false(或 out 为空)⇒ 面板画"未打开关卡"的提示,
+		// 而不是画一组点了没用的控件。
+		virtual bool GetEditableDataLayers(std::vector<Level::DataLayerDefinition>* out)
+		{
+			(void)out;
+			return false;
+		}
+		// 写回层定义:引擎侧归一化 + **只重写入口 manifest**(实体文件不动)。
+		// 成功 = 盘上已是新定义(面板据此刷新草稿);失败 message 里是原因。
+		virtual bool ApplyDataLayers(const std::vector<Level::DataLayerDefinition>& layers,
+			std::string* message = nullptr)
+		{
+			(void)layers;
+			if (message) *message = "data-layer editing is not wired to a host";
+			return false;
+		}
 		// ---- U25-M2:材质工作流(把调好的材质接回场景;实现在 EditorShell → EditorLayer)----
 		// 把材质逻辑路径写进**当前选中实体**的 MeshRendererComponent.MaterialPath
 		// (与 AI 通道 scene.set Material / 属性面板同一条字段写入口)。

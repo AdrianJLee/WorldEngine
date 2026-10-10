@@ -9,5 +9,14 @@
   "panel.levels.empty": "暂无关卡。用上方的 Create 新建一个(会同时生成入口文件与内容目录)。",
   "panel.levels.name_empty": "请输入关卡名称。",
   "panel.levels.name_invalid": "关卡名不能包含路径分隔符。",
-  "panel.levels.create": "新建"
+  "panel.levels.create": "新建",
+  "panel.levels.layers.title": "数据层",
+  "panel.levels.layers.hint": "每层一位;默认激活 = 打开关卡时该层可见(视口工具栏可临时开关)。",
+  "panel.levels.layers.mask": "掩码 {mask}",
+  "panel.levels.layers.default_active": "默认激活",
+  "panel.levels.layers.add_name": "请输入新层的名字。",
+  "panel.levels.layers.full": "32 个层位已用尽。",
+  "panel.levels.layers.keep_one": "关卡至少要保留一个数据层。",
+  "panel.levels.layers.in_use": "仍有实体归属该层 —— 先在属性面板改掉它们的层归属再删除。",
+  "panel.levels.layers.no_level": "先在上面的列表里 Open 一个关卡,才能编辑它的数据层。"
 }

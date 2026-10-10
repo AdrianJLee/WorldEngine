@@ -148,6 +148,35 @@ namespace World
 		return true;
 	}
 
+	bool EditorDocument::SaveDataLayers(std::string* error)
+	{
+		if (!IsLevelPackage())
+		{
+			if (error) *error = "the open document is not a level (no data layers to save)";
+			return false;
+		}
+
+		// 走 LevelPackage 的读写器:Load 拿回同一份 manifest(Id/Name/GridCellSize/World/实体引用
+		// 都不动)+ 归一化层定义,然后**只**写入口文件(SaveEntry)—— 实体文件一个字节不碰。
+		Level::LevelPackage package;
+		std::string packageError;
+		if (!package.Load(m_LevelPackagePath, &packageError))
+		{
+			if (error) *error = "level manifest could not be reopened: " + packageError;
+			return false;
+		}
+		package.GetDataLayers() = m_DataLayers;
+		if (!package.SaveEntry(&packageError))
+		{
+			if (error) *error = "level manifest could not be written: " + packageError;
+			return false;
+		}
+
+		// 写回的是**归一化后**的定义(引擎侧规则),文档缓存与磁盘保持一致。
+		m_DataLayers = package.GetDataLayers();
+		return true;
+	}
+
 	void EditorDocument::New()
 	{
 		m_Scene = CreateRef<Scene>(*m_Context);

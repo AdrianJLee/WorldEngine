@@ -36,6 +36,9 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 		// 自定义检查器:Primary / Fixed Aspect Ratio + 投影类型下拉 + 对应参数组。
 		else if (schema.Id.Name == "World::CameraComponent")
 			height = DrawCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		// 自定义检查器:关卡数据层归属(勾选替代裸掩码数字);Play/Simulate 只读时退回普通行。
+		else if (schema.Id.Name == "World::LevelEntityComponent" && !m_ReadOnly)
+			height = DrawLevelEntityInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 
 
 		else
@@ -128,6 +131,107 @@ float PropertiesPanel::DrawTransformInspector(Wui::WuiContext& ctx, const Wui::W
 			}
 		}
 		return locationHeight + rotationHeight + scaleHeight;
+	}
+
+
+// 关卡数据层归属:勾选式(掩码数字 → 层的名字)。层的定义来自**关卡 manifest**(host 提供),
+// 所以没打开关卡时本函数不可用(调用方已按 !m_ReadOnly 分派,这里再兜一层 host 判定)。
+float PropertiesPanel::DrawLevelEntityInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields){
+		const Wui::WuiTheme& theme = m_Host.Theme();
+
+		std::vector<Level::DataLayerDefinition> layers;
+		if (!m_Host.GetEditableDataLayers(&layers) || layers.empty())
+			return 0.0f;   // 没打开关卡 ⇒ 0 行,由调用方保证这里不会被走到(退化为普通行)
+
+		auto* component = static_cast<LevelEntityComponent*>(instance);
+		if (!component)
+			return 0.0f;
+
+		const Schema::FieldSchema* maskField = nullptr;
+		for (const Schema::FieldSchema& field : schema.Fields)
+			if (field.Name == "DataLayerMask")
+				maskField = &field;
+		if (!maskField)
+			return 0.0f;
+
+		const std::string& typeName = schema.DisplayName;
+		const auto reachable = [&visibleRect](const Wui::WuiRect& control)
+		{
+			return control.X + control.W * 0.5f >= visibleRect.X
+				&& control.X + control.W * 0.5f <= visibleRect.X + visibleRect.W
+				&& control.Y + control.H * 0.5f >= visibleRect.Y
+				&& control.Y + control.H * 0.5f <= visibleRect.Y + visibleRect.H;
+		};
+		const auto markField = [changedFields, &typeName]()
+		{
+			if (changedFields)
+				changedFields->push_back(typeName + ".DataLayerMask");
+		};
+
+		float y = 0.0f;
+		uint32_t mask = component->DataLayerMask;
+		const uint32_t original = mask;
+
+		// 标题行:说明这一区是"关卡数据层归属",末尾给出原始掩码(排查时与 manifest 对得上)。
+		const auto hex32 = [](uint32_t value)
+		{
+			static const char* digits = "0123456789ABCDEF";
+			std::string text;
+			for (int shift = 28; shift >= 0; shift -= 4)
+				text.push_back(digits[(value >> shift) & 0xF]);
+			return text;
+		};
+		Wui::Label(ctx, { rect.X + 4.0f, rect.Y + y + 3.0f },
+			Wui::Tr("panel.properties.level_layers", "Level data layers"),
+			theme.TextMuted, 13.0f);
+		Wui::Label(ctx, { rect.X + rect.W - 74.0f, rect.Y + y + 3.0f }, "0x" + hex32(mask),
+			theme.TextMuted, 12.0f);
+		y += kRowHeight;
+
+		// 一层一个勾选框;勾选 = 该位。(0 = 常驻可见,由最后那一行表达。)
+		for (const Level::DataLayerDefinition& layer : layers)
+		{
+			const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, kRowHeight };
+			if (reachable(row))
+			{
+				bool on = (mask & layer.LayerMask) != 0;
+				const std::string label = layer.Name.empty()
+					? ("Layer" + std::to_string(layer.LayerMask)) : layer.Name;
+				const std::string term = "mask " + std::to_string(layer.LayerMask);
+				const Wui::WuiRect box { row.X + 8.0f, row.Y + 2.0f, row.W - 16.0f, row.H - 4.0f };
+				if (Wui::Checkbox(ctx,
+					Wui::HashId(("panel.properties.level_layers." + std::to_string(layer.LayerMask)).c_str()),
+					box, label, term, on, theme))
+				{
+					mask = on ? (mask | layer.LayerMask) : (mask & ~layer.LayerMask);
+				}
+			}
+			y += kRowHeight;
+		}
+
+		// "常驻可见"(掩码 0):不属于任何层的实体在**所有**层组合下都可见。
+		{
+			const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, kRowHeight };
+			if (reachable(row))
+			{
+				bool always = mask == 0;
+				const Wui::WuiRect box { row.X + 8.0f, row.Y + 2.0f, row.W - 16.0f, row.H - 4.0f };
+				if (Wui::Checkbox(ctx, Wui::HashId("panel.properties.level_layers.always"),
+					box, Wui::Tr("panel.properties.level_always", "Always visible (no layer)"),
+					always, theme))
+				{
+					mask = always ? 0u : 1u;   // 取消"常驻" ⇒ 回到常驻层(第一个层位)
+				}
+			}
+			y += kRowHeight;
+		}
+
+		if (mask != original)
+		{
+			component->DataLayerMask = mask;
+			markField();
+		}
+		return y;
 	}
 
 

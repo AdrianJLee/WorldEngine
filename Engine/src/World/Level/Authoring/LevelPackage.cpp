@@ -10,6 +10,7 @@
 #include "World/Scene/SceneSerializer.h"
 #include "World/Gameplay/Prefab/Prefab.h"
 
+#include <algorithm>
 #include <fstream>
 #include <set>
 #include <unordered_map>
@@ -106,6 +107,96 @@ namespace World::Level
 		std::vector<EntityDescriptor> Entities;
 	};
 
+	namespace
+	{
+		bool IsSingleBit(uint32_t mask)
+		{
+			return mask != 0 && (mask & (mask - 1)) == 0;
+		}
+
+		uint32_t BitIndex(uint32_t singleBit)
+		{
+			uint32_t index = 0;
+			while (singleBit > 1)
+			{
+				singleBit >>= 1;
+				++index;
+			}
+			return index;
+		}
+	}
+
+	bool NormalizeDataLayers(std::vector<DataLayerDefinition>& layers)
+	{
+		std::vector<DataLayerDefinition> cleaned;
+		cleaned.reserve(layers.size());
+		for (const DataLayerDefinition& layer : layers)
+		{
+			if (!IsSingleBit(layer.LayerMask))
+				continue;   // 0 / 多位掩码:不是"一层"(实体侧才用多位归属)
+			bool duplicate = false;
+			for (const DataLayerDefinition& kept : cleaned)
+				if (kept.LayerMask == layer.LayerMask)
+				{
+					duplicate = true;
+					break;
+				}
+			if (duplicate)
+				continue;   // 同一位保留首个
+			cleaned.push_back(layer);
+		}
+
+		for (DataLayerDefinition& layer : cleaned)
+			if (layer.Name.empty())
+				layer.Name = "Layer" + std::to_string(BitIndex(layer.LayerMask) + 1);
+
+		std::sort(cleaned.begin(), cleaned.end(),
+			[](const DataLayerDefinition& a, const DataLayerDefinition& b) { return a.LayerMask < b.LayerMask; });
+
+		if (cleaned.empty())
+			cleaned.push_back({ 1u, "Base_World", true });   // 关卡至少要有一个可归属的层
+
+		const bool changed = cleaned.size() != layers.size() || [&]
+		{
+			for (size_t i = 0; i < cleaned.size(); ++i)
+				if (cleaned[i].LayerMask != layers[i].LayerMask || cleaned[i].Name != layers[i].Name
+					|| cleaned[i].DefaultActive != layers[i].DefaultActive)
+					return true;
+			return false;
+		}();
+
+		layers = std::move(cleaned);
+		return changed;
+	}
+
+	uint32_t NextFreeLayerMask(const std::vector<DataLayerDefinition>& layers)
+	{
+		for (uint32_t bit = 0; bit < 32; ++bit)
+		{
+			const uint32_t candidate = 1u << bit;
+			bool used = false;
+			for (const DataLayerDefinition& layer : layers)
+				if ((layer.LayerMask & candidate) != 0)
+				{
+					used = true;
+					break;
+				}
+			if (!used)
+				return candidate;
+		}
+		return 0;   // 32 个层位用尽
+	}
+
+	bool IsMaskCoveredByLayers(uint32_t mask, const std::vector<DataLayerDefinition>& layers)
+	{
+		if (mask == 0)
+			return true;   // 0 = 常驻可见,不依赖任何层
+		uint32_t declared = 0;
+		for (const DataLayerDefinition& layer : layers)
+			declared |= layer.LayerMask;
+		return (mask & ~declared) == 0;
+	}
+
 	LevelPackage::LevelPackage()
 		: m_Impl(std::make_unique<Impl>())
 	{
@@ -185,6 +276,8 @@ namespace World::Level
 				out << YAML::EndMap;
 			}
 
+			// 写盘前归一化:manifest 是对外事实源,绝不写出非法层定义。
+			NormalizeDataLayers(m_Impl->DataLayers);
 			if (!m_Impl->DataLayers.empty())
 			{
 				out << YAML::Key << "DataLayers" << YAML::Value << YAML::BeginSeq;
@@ -325,6 +418,10 @@ namespace World::Level
 				}
 			}
 
+			// 旧文件 / 手改文件里的非法层定义(0 掩码、多位、重复位、空名)在内存里先归一化,
+			// 否则视口会出现"两个同掩码的开关"这类自相矛盾的 UI。
+			NormalizeDataLayers(m_Impl->DataLayers);
+
 			m_Impl->Entities.clear();
 			const std::filesystem::path entitiesDir = ContentDir() / kEntitiesDirName;
 			if (std::filesystem::exists(entitiesDir))
@@ -383,6 +480,11 @@ namespace World::Level
 
 		// 起手内容:相机 + 方向光 + 一个立方体。新关卡打开就能看见东西,
 		// 也能立刻验证"渲染走的是这个关卡",而不是一片黑让人怀疑没加载上。
+		//
+		// 三个起手实体都带 `LevelEntityComponent { 1 }`(常驻层):这与模板里随包发行的
+		// 起手内容**同形**(见 templates/project-empty/assets/levels/Main/entities/*.entity),
+		// 也让"关卡内容 = 有层归属的实体"这条不变式从第一帧就成立 —— 否则新建关卡里的实体
+		// 没有层归属,"按层隐藏"与"删除层"这类操作会在起手内容上表现为"没有任何实体归属该层"。
 		Scene scene(context);
 		{
 			Entity camera = Entity::CreateEntity(&scene, "Camera3D");
@@ -392,10 +494,12 @@ namespace World::Level
 			cameraComponent.Camera.m_PerspectiveFarClip = 200.0f;
 			cameraComponent.Primary = true;
 			camera.AddComponent<CameraComponent>(cameraComponent);
+			camera.AddComponent<LevelEntityComponent>(LevelEntityComponent { 1u });
 
 			Entity light = Entity::CreateEntity(&scene, "Directional Light");
 			light.AddComponent<TransformComponent>();
 			light.AddComponent<DirectionalLightComponent>();
+			light.AddComponent<LevelEntityComponent>(LevelEntityComponent { 1u });
 
 			Entity cube = Entity::CreateEntity(&scene, "Cube");
 			cube.AddComponent<TransformComponent>(glm::vec3 { 0.0f, 0.0f, 0.0f });
@@ -403,6 +507,7 @@ namespace World::Level
 			renderer.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
 			renderer.Color = glm::vec4 { 0.82f, 0.82f, 0.86f, 1.0f };
 			cube.AddComponent<MeshRendererComponent>(renderer);
+			cube.AddComponent<LevelEntityComponent>(LevelEntityComponent { 1u });
 		}
 
 		package.CaptureFromScene(scene, id, 64);

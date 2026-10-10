@@ -1091,6 +1091,17 @@ void EditorShell::SetActiveDataLayers(uint32_t mask){
 	}
 
 
+bool EditorShell::GetEditableDataLayers(std::vector<Level::DataLayerDefinition>* out){
+		// 与视口工具栏读同一份(文档缓存):面板改完写回,两边立刻同源。
+		return m_Editor.GetEditableDataLayers(out);
+	}
+
+
+bool EditorShell::ApplyDataLayers(const std::vector<Level::DataLayerDefinition>& layers, std::string* message){
+		return m_Editor.ApplyDataLayers(layers, message);
+	}
+
+
 std::string EditorShell::PanelTitle(const std::string& id) const{
 		// 静态面板走本地化表;动态面板(材质/模型/脚本)用注册表里的动态标题。
 		static const std::pair<const char*, const char*>* kTitles = nullptr;

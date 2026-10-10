@@ -31,6 +31,10 @@ namespace World
 		bool RenameLevel(PanelHost& host, const std::string& oldId, const std::string& newId,
 			std::string* error);
 		bool DeleteLevel(PanelHost& host, const std::string& id, std::string* error);
+		// 数据层编辑区(只对**当前打开的关卡**):草稿 → 写回。规则(归一化/掩码分配)在引擎侧。
+		void DrawDataLayers(Wui::WuiContext& ctx, float& y, const Wui::WuiRect& rect, PanelHost& host);
+		// 把草稿写回宿主;成功 ⇒ 草稿失效(下一帧从宿主重读归一化后的结果)。
+		bool CommitLayerDraft(PanelHost& host, std::string* error);
 		// 清单里的 start_scene 是否指向该关卡(三种历史写法都认)。命中时改名要同步清单。
 		bool IsCurrentStartScene(const std::string& id) const;
 
@@ -50,5 +54,15 @@ namespace World
 		std::string m_RenameText;
 		// 行级操作(改名/删除)的失败原因 —— 与新建表单的错误分开显示,互不覆盖。
 		std::string m_RowError;
+
+		// ---- 数据层编辑(草稿模型)----
+		// 为什么留草稿:改名是逐字符输入,不可能每敲一个字就写一次 manifest。文本框回车提交、
+		// 勾选/增删立即提交 —— 提交 = 整份草稿归一化后写回入口 manifest。
+		std::vector<Level::DataLayerDefinition> m_LayerDraft;
+		bool m_LayerDraftValid = false;      // false ⇒ 下一帧从宿主重读(打开/切换关卡、提交后)
+		std::string m_NewLayerName;
+		std::string m_LayerError;            // 数据层区的错误(与上面的 m_RowError 分开)
+		std::string m_LayerNotice;           // 成功回执(写盘路径/层数)
+		std::filesystem::path m_LayerDraftFor;   // 草稿对应的关卡入口(换关卡即失效)
 	};
 }

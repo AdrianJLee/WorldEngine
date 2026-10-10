@@ -6,6 +6,48 @@ namespace World
 using namespace EditorLayerDetail;
 
 
+	// ---- 关卡数据层编辑(2026-10-10)----
+	//
+	// 宿主面只有两个动作:读当前文档声明的层、把编辑后的层写回去。
+	// 规则(归一化:每层恰一位 / 去重 / 排序 / 至少一层)在引擎侧(LevelPackage),这里不重复。
+
+bool EditorLayer::GetEditableDataLayers(std::vector<Level::DataLayerDefinition>* out) const{
+		if (!out)
+			return false;
+		out->clear();
+		if (!m_Document.IsLevelPackage())
+			return false;   // 预制体 / 空文档:没有关卡数据层可编辑
+		*out = m_Document.GetDataLayers();
+		return true;
+	}
+
+
+bool EditorLayer::ApplyDataLayers(const std::vector<Level::DataLayerDefinition>& layers, std::string* message){
+		if (!m_Document.IsLevelPackage())
+		{
+			if (message) *message = "no level is open";
+			return false;
+		}
+
+		m_Document.MutableDataLayers() = layers;
+		std::string error;
+		if (!m_Document.SaveDataLayers(&error))
+		{
+			if (message) *message = error;
+			WLD_CORE_ERROR("[level] data layers were not saved: {0}", error);
+			return false;
+		}
+
+		// 视口工具栏与属性面板都读文档缓存 ⇒ 写回后立刻同源(不需要重启或重开关卡)。
+		const std::vector<Level::DataLayerDefinition>& saved = m_Document.GetDataLayers();
+		if (message)
+			*message = "data layers saved (" + std::to_string(saved.size()) + " layer(s))";
+		WLD_CORE_INFO("[level] data layers saved: {0} layer(s) on '{1}'",
+			saved.size(), m_Document.GetPath().filename().u8string());
+		return true;
+	}
+
+
 	// ---- CPPT-3:Game 模块(`Game.dll`)热重载(编辑器入口;plan CPPT-2 §6.1 T5b)----
 
 const char* EditorLayer::CppModuleStateName() const{

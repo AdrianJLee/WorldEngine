@@ -403,6 +403,74 @@ int main()
 				CHECK(overrideSurvived);
 			}
 		}
+		// 8. 数据层定义规则(数据层编辑 UI 的引擎侧契约):
+		//    归一化(每层一位/去重/排序/补名/至少一层)、下一个空闲位、掩码覆盖判定、manifest 往返。
+		{
+			std::vector<DataLayerDefinition> messy;
+			messy.push_back({ 4u, "", false });        // 空名 ⇒ Layer3
+			messy.push_back({ 0u, "Zero", true });     // 0 掩码 ⇒ 丢
+			messy.push_back({ 3u, "MultiBit", true }); // 多位掩码 ⇒ 丢(一层恰一位)
+			messy.push_back({ 4u, "Dup", true });      // 与首个同一位 ⇒ 丢后来的
+			messy.push_back({ 1u, "Base_World", true });
+			CHECK(NormalizeDataLayers(messy));
+			CHECK(messy.size() == 2);
+			CHECK(messy[0].LayerMask == 1u);           // 排序:掩码升序
+			CHECK(messy[0].Name == "Base_World");
+			CHECK(messy[1].LayerMask == 4u);
+			CHECK(messy[1].Name == "Layer3");          // 位序 3(1 起)⇒ Layer3
+			CHECK(messy[1].DefaultActive == false);
+			CHECK(!NormalizeDataLayers(messy));        // 幂等:已规范 ⇒ 无改动
+
+			// 全部无效 ⇒ 回填常驻层(关卡必须至少有一个可归属的层)。
+			std::vector<DataLayerDefinition> fallback;
+			fallback.push_back({ 0u, "OnlyZero", true });
+			CHECK(NormalizeDataLayers(fallback));
+			CHECK(fallback.size() == 1);
+			CHECK(fallback[0].LayerMask == 1u);
+			CHECK(fallback[0].Name == "Base_World");
+
+			// 下一个空闲位(面板"添加层"的分配依据)。
+			std::vector<DataLayerDefinition> layers { { 1u, "Base_World", true }, { 2u, "Day", true } };
+			CHECK(NextFreeLayerMask(layers) == 4u);
+			layers.push_back({ 0x80000000u, "Last", false });
+			CHECK(NextFreeLayerMask(layers) == 4u);    // 高位被占不影响低位分配
+			std::vector<DataLayerDefinition> everyBit;
+			for (uint32_t bit = 0; bit < 32; ++bit)
+				everyBit.push_back({ 1u << bit, "L" + std::to_string(bit), true });
+			CHECK(NextFreeLayerMask(everyBit) == 0u);  // 32 位用尽 ⇒ 0(调用方禁用"添加层")
+
+			// 覆盖判定(删除层守卫的依据)。
+			CHECK(IsMaskCoveredByLayers(0u, layers));                  // 0 = 常驻可见,恒覆盖
+			CHECK(IsMaskCoveredByLayers(1u | 2u, layers));
+			CHECK(!IsMaskCoveredByLayers(1u | 8u, layers));            // 8 位没被任何层声明
+
+			// manifest 往返:层定义随入口文件走,且写盘前被归一化。
+			const std::filesystem::path root = tempDir / "LayerRoot";
+			const std::filesystem::path entry = LevelCatalog::EntryPathFor(root, "Layered");
+			LevelPackage package;
+			package.SetId("Layered");
+			package.SetName("Layered");
+			std::vector<DataLayerDefinition>& savedLayers = package.GetDataLayers();
+			savedLayers.push_back({ 2u, "Day", true });
+			savedLayers.push_back({ 1u, "Base_World", true });
+			savedLayers.push_back({ 2u, "DayDup", true });   // 写盘时被归一化丢掉
+			std::string error;
+			CHECK(package.Save(entry, &error));
+			CHECK(error.empty());
+
+			LevelPackage reloaded;
+			CHECK(reloaded.Load(entry, &error));
+			CHECK(reloaded.GetDataLayers().size() == 2);
+			CHECK(reloaded.GetDataLayers()[0].Name == "Base_World");
+			CHECK(reloaded.GetDataLayers()[1].Name == "Day");
+
+			// 目录发现带出同一份层定义(视口工具栏 / 属性面板据此渲染)。
+			const std::vector<LevelInfo> found = LevelCatalog::Discover(root);
+			CHECK(found.size() == 1);
+			CHECK(found[0].DataLayers.size() == 2);
+			CHECK(found[0].DataLayers[1].Name == "Day");
+		}
+
 		std::filesystem::remove_all(tempDir);
 		std::printf("[LevelTests] Level 2.0 .wlevel catalog + service + scene-level round trip tests passed.\n");
 		return 0;

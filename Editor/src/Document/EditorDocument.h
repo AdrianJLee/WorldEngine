@@ -36,6 +36,13 @@ namespace World
 		// 当前文档是否是 Level 2.0 关卡包(决定"关卡"相关面板/数据层开关是否可用)。
 		bool IsLevelPackage() const { return !m_LevelPackagePath.empty(); }
 		const std::vector<Level::DataLayerDefinition>& GetDataLayers() const { return m_DataLayers; }
+		// 可编辑的数据层定义(数据层编辑 UI 的写入面)。显式拿到可变引用 ⇒ 面板不必走后门,
+		// 也提示调用方:改完要调 SaveDataLayers 才会落盘。
+		std::vector<Level::DataLayerDefinition>& MutableDataLayers() { return m_DataLayers; }
+		// **只重写入口 manifest 的 DataLayers 段**:实体文件、Id/Name/GridCellSize/World 都不动。
+		// 归一化由引擎侧(LevelPackage::NormalizeDataLayers)负责 —— 面板不做规则。
+		// 非关卡文档 ⇒ false + 理由(调用方据此禁用 UI,而不是静默不写)。
+		bool SaveDataLayers(std::string* error = nullptr);
 
 		// 加载成功才替换当前场景/路径并清 dirty;失败保留原状态。
 		bool LoadFromFile(const std::filesystem::path& path);
