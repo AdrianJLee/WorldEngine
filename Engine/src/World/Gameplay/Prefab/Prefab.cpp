@@ -13,29 +13,34 @@ namespace World::Gameplay
 {
 	namespace
 	{
-		// 复制单个实体的内置组件(HierarchyComponent 单独重建,避免复制到源场景的句柄)。
-		template <typename T>
-		void CopyComponentIfPresent(const entt::registry& source, entt::registry& destination,
+		// 复制单个实体的组件 —— **schema 驱动**,不再是手写清单。
+		//
+		// 手写清单曾漏掉 3D 物理、灯光、蒙皮、动画以及**所有自定义组件**
+		// (Game.dll / 插件注册的组件在 prefab 实例化时静默消失)。
+		// 这里改为遍历 schema 注册表,与 `Scene::DuplicateEntity` 同一条机制。
+		//
+		// 排除两类:
+		//   * `UUIDComponent`  —— 预制体实例必须**重新生成身份**,不继承模板的 UUID;
+		//   * `NotInPrefab`     —— 关卡/世界层专有组件(如数据层归属),预制体不该携带。
+		//     `HierarchyComponent` 由调用方单独重建,不在此处复制。
+		void CopySchemaComponents(const Scene& source, Scene& destination,
 			entt::entity from, entt::entity to)
 		{
-			if (const auto* component = source.try_get<T>(from))
-				destination.emplace_or_replace<T>(to, *component);
-		}
-
-		void CopyBuiltinComponents(const entt::registry& source, entt::registry& destination,
-			entt::entity from, entt::entity to)
-		{
-			CopyComponentIfPresent<TagComponent>(source, destination, from, to);
-			CopyComponentIfPresent<TransformComponent>(source, destination, from, to);
-			CopyComponentIfPresent<SpriteComponent>(source, destination, from, to);
-			CopyComponentIfPresent<CircleRendererComponent>(source, destination, from, to);
-			CopyComponentIfPresent<MeshRendererComponent>(source, destination, from, to);
-			CopyComponentIfPresent<CameraComponent>(source, destination, from, to);
-			// WP3(PECS 1.1):2D 运行态句柄已下沉到 Scene 内部表,组件是纯配置 ⇒
-			// 与其它组件同一条整体拷贝路径,副本不会带出源场景的 body 句柄。
-			CopyComponentIfPresent<RigidBody2DComponent>(source, destination, from, to);
-			CopyComponentIfPresent<BoxCollider2DComponent>(source, destination, from, to);
-			CopyComponentIfPresent<CircleCollider2DComponent>(source, destination, from, to);
+			Entity sourceEntity(const_cast<Scene*>(&source), from);
+			Entity destinationEntity(&destination, to);
+			const auto& schemas = source.GetContext().Schemas();
+			for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
+			{
+				if (!schema || !schema->Storage || !schema->Storage->Copy)
+					continue;
+				if (schema->NotInPrefab || schema->Id.Name == "World::UUIDComponent"
+					|| schema->Id.Name == "World::HierarchyComponent")
+					continue;
+				if (!sourceEntity.HasComponent(schema->Storage->ComponentId))
+					continue;
+				schema->Storage->Copy(static_cast<void*>(&destinationEntity),
+					static_cast<void*>(&sourceEntity));
+			}
 		}
 
 		// 先序收集子树:记录"副本内应使用的父节点"(实例根始终为 null,父由调用方指定)。
@@ -93,7 +98,7 @@ namespace World::Gameplay
 		{
 			const entt::entity to = destinationRegistry.create();
 			remap[from] = to;
-			CopyBuiltinComponents(sourceRegistry, destinationRegistry, from, to);
+			CopySchemaComponents(source, destination, from, to);
 			destinationRegistry.emplace_or_replace<UUIDComponent>(to, UUID());
 		}
 

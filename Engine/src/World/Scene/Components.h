@@ -764,7 +764,8 @@ namespace World
 
 		WE_SCHEMA_BODY(World, LevelEntityComponent, Component)
 			WE_SCHEMA_META(Category("Level"),
-				Doc("Level 2.0 data-layer membership: which level data layers this entity belongs to."))
+				Doc("Level 2.0 data-layer membership: which level data layers this entity belongs to."),
+				NotInPrefab())
 			WE_FIELD(DataLayerMask, UInt32, Id(0x4C564C4C41594552), Default(1),
 				Group("Level"),
 				Doc("Bitmask matching the level package manifest DataLayers[].Mask; 0 = always visible."));

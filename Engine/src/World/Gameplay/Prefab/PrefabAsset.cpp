@@ -43,6 +43,11 @@ namespace World::Gameplay
 			return false;
 		}
 
+		// 契约(而非巧合):预制体**不携带世界设置**。抽取虽然走新建暂存场景、
+		// 其 WorldSettings 恰为默认,但那是副产品;这里显式清空,免得将来换成
+		// "从现有场景另存"时把重力覆盖等世界级设置带进 .wprefab。
+		staging->GetWorldSettings() = Scene::WorldSettings {};
+
 		SceneSerializer serializer(staging);
 		if (!serializer.Serialize(path.string()))
 		{

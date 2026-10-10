@@ -267,6 +267,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             "Project",
             "Game-module sample component used to exercise schema-driven editing; its eight fields cover bool, integer, float, vector, string and bounded-text kinds.",
             false,
+            false,
         };
         return schema;
     }

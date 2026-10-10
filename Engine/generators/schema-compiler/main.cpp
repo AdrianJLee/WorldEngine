@@ -233,6 +233,8 @@ namespace
 		std::string MetaDoc;
 		// WE_SCHEMA_META(..., Core()):核心组件(编辑器不允许移除)。
 		bool MetaCore = false;
+		// WE_SCHEMA_META(..., NotInPrefab()):关卡/世界层专有,预制体不得携带。
+		bool MetaNotInPrefab = false;
 		bool HasMeta = false;
 		SourcePos MetaPos;
 		std::vector<FieldDecl> Fields;
@@ -345,8 +347,9 @@ namespace
 				while (true)
 				{
 					const Attr attr = ParseAttr();
-					if (attr.Name != "Category" && attr.Name != "Doc" && attr.Name != "Core")
-						Fail(m_File, attr.Pos, "unknown WE_SCHEMA_META attribute '" + attr.Name + "' (expected Category/Doc/Core)");
+					if (attr.Name != "Category" && attr.Name != "Doc" && attr.Name != "Core"
+						&& attr.Name != "NotInPrefab")
+						Fail(m_File, attr.Pos, "unknown WE_SCHEMA_META attribute '" + attr.Name + "' (expected Category/Doc/Core/NotInPrefab)");
 					if (attr.Name == "Core")
 					{
 						if (!(attr.Args.empty() || (attr.Args.size() == 1 && attr.Args[0].empty())))
@@ -354,6 +357,14 @@ namespace
 						if (decl.MetaCore)
 							Fail(m_File, attr.Pos, "duplicate WE_SCHEMA_META attribute 'Core'");
 						decl.MetaCore = true;
+					}
+					else if (attr.Name == "NotInPrefab")
+					{
+						if (!(attr.Args.empty() || (attr.Args.size() == 1 && attr.Args[0].empty())))
+							Fail(m_File, attr.Pos, "WE_SCHEMA_META attribute 'NotInPrefab' takes no arguments");
+						if (decl.MetaNotInPrefab)
+							Fail(m_File, attr.Pos, "duplicate WE_SCHEMA_META attribute 'NotInPrefab'");
+						decl.MetaNotInPrefab = true;
 					}
 					else
 					{
@@ -1241,6 +1252,7 @@ namespace
 		out << "            \"" << decl.MetaCategory << "\",\n";
 		out << "            \"" << decl.MetaDoc << "\",\n";
 		out << "            " << (decl.MetaCore ? "true" : "false") << ",\n";
+		out << "            " << (decl.MetaNotInPrefab ? "true" : "false") << ",\n";
 		out << "        };\n        return schema;\n    }\n";
 		out << "};\n\n";
 	}

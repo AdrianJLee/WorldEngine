@@ -181,6 +181,7 @@ struct GeneratedAccess<World::TestSchema::HealthFixture>
             "",
             "",
             false,
+            false,
         };
         return schema;
     }
@@ -319,6 +320,7 @@ struct GeneratedAccess<World::TestSchema::ReorderFixture>
             "",
             "",
             false,
+            false,
         };
         return schema;
     }
@@ -453,6 +455,7 @@ struct GeneratedAccess<World::TestSchema::NestedFixture>
             "",
             "",
             false,
+            false,
         };
         return schema;
     }
@@ -532,6 +535,7 @@ struct GeneratedAccess<World::TestSchema::StatEntry>
             nullptr,
             "",
             "",
+            false,
             false,
         };
         return schema;
@@ -774,6 +778,7 @@ struct GeneratedAccess<World::TestSchema::ContainerFixture>
             &StorageBindingOf(),
             "",
             "",
+            false,
             false,
         };
         return schema;
@@ -1521,6 +1526,7 @@ struct GeneratedAccess<World::TestSchema::DefaultKindFixture>
             nullptr,
             "",
             "",
+            false,
             false,
         };
         return schema;

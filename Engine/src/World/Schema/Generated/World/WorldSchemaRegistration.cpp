@@ -98,6 +98,7 @@ struct GeneratedAccess<World::UUIDComponent>
             "Scene",
             "Persistence identity written into the .wd file so entities can be matched across save and load; every entity is expected to carry one.",
             true,
+            false,
         };
         return schema;
     }
@@ -154,6 +155,7 @@ struct GeneratedAccess<World::TagComponent>
             "Scene",
             "Human-readable entity label used by the hierarchy, the AI command channel and log messages; not an identifier.",
             true,
+            false,
         };
         return schema;
     }
@@ -268,6 +270,7 @@ struct GeneratedAccess<World::TransformComponent>
             "Scene",
             "Local translation/rotation/scale of the entity; 48-byte compact POD.",
             true,
+            false,
         };
         return schema;
     }
@@ -352,6 +355,7 @@ struct GeneratedAccess<World::VelocityComponent>
             &StorageBindingOf(),
             "Movement",
             "Linear and angular velocity of the entity for ECS movement systems.",
+            false,
             false,
         };
         return schema;
@@ -484,6 +488,7 @@ struct GeneratedAccess<World::SpriteComponent>
             "Rendering/Mesh",
             "2D textured quad: an empty Texture falls back to a flat Color fill and TilingFactor repeats the texture UVs.",
             false,
+            false,
         };
         return schema;
     }
@@ -597,6 +602,7 @@ struct GeneratedAccess<World::CircleRendererComponent>
             &StorageBindingOf(),
             "Rendering/Mesh",
             "Flat 2D disc: Thickness is the ring width as a fraction of the radius (1 = filled) and Fade is the normalized edge softness.",
+            false,
             false,
         };
         return schema;
@@ -807,6 +813,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
             &StorageBindingOf(),
             "Rendering/Mesh",
             "Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty Material shades with Color.",
+            false,
             false,
         };
         return schema;
@@ -1101,6 +1108,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             "Rendering/Mesh",
             "Skeleton-driven mesh: an empty AnimationClip plays the first clip and Time is written by the animation system (read-only under Play).",
             false,
+            false,
         };
         return schema;
     }
@@ -1187,6 +1195,7 @@ struct GeneratedAccess<World::HierarchyComponent>
             &StorageBindingOf(),
             "Scene",
             "Parent link plus whether the parent transform is inherited. The runtime child list lives in the non-schema HierarchyChildrenComponent.",
+            false,
             false,
         };
         return schema;
@@ -1303,6 +1312,7 @@ struct GeneratedAccess<World::CameraComponent>
             &StorageBindingOf(),
             "Scene",
             "Scene camera settings plus Primary (the camera Play and the runtime render through); FixedAspectRatio keeps the projection from following the viewport size.",
+            false,
             false,
         };
         return schema;
@@ -1447,6 +1457,7 @@ struct GeneratedAccess<World::DirectionalLightComponent>
             "Rendering/Light",
             "Sun-style light: Direction is the propagation direction in world space (normalized when packed) and only the first one casts shadows.",
             false,
+            false,
         };
         return schema;
     }
@@ -1561,6 +1572,7 @@ struct GeneratedAccess<World::PointLightComponent>
             "Rendering/Light",
             "Local light with distance falloff: Range is the falloff radius in world units, attenuation saturates as (1 - d/Range)^2, and at most 7 point lights reach the shader.",
             false,
+            false,
         };
         return schema;
     }
@@ -1645,6 +1657,7 @@ struct GeneratedAccess<World::AmbientLightComponent>
             &StorageBindingOf(),
             "Rendering/Light",
             "Global ambient term without a spatial range: only the first ambient light is used and 0.25 grey applies when the scene has none.",
+            false,
             false,
         };
         return schema;
@@ -1821,6 +1834,7 @@ struct GeneratedAccess<World::RigidBody2DComponent>
             &StorageBindingOf(),
             "Physics/2D",
             "Box2D body: BodyType selects Static/Dynamic/Kinematic and FixedRotation locks the angular degree of freedom.",
+            false,
             false,
         };
         return schema;
@@ -2052,6 +2066,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             "Physics/2D",
             "2D box collider simulated by Box2D: Size defines the box in local units (multiplied by the entity transform) and Offset is the local centre offset.",
             false,
+            false,
         };
         return schema;
     }
@@ -2281,6 +2296,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             &StorageBindingOf(),
             "Physics/2D",
             "2D circle collider simulated by Box2D: Radius scaled by the entity transform with a local Offset; ShowCollider toggles the physics debug outline.",
+            false,
             false,
         };
         return schema;
@@ -2632,6 +2648,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             "Physics/3D",
             "Jolt body: Mass and the damping terms drive Dynamic bodies, UseGravity opts into scene gravity, and Static bodies never move.",
             false,
+            false,
         };
         return schema;
     }
@@ -2717,6 +2734,7 @@ struct GeneratedAccess<World::BoxCollider3DComponent>
             "Physics/3D",
             "Box shape: HalfExtents are local half sizes scaled by the entity transform and Offset is a local offset applied unscaled.",
             false,
+            false,
         };
         return schema;
     }
@@ -2801,6 +2819,7 @@ struct GeneratedAccess<World::SphereCollider3DComponent>
             &StorageBindingOf(),
             "Physics/3D",
             "Sphere shape: Radius in local units with a local Offset applied unscaled.",
+            false,
             false,
         };
         return schema;
@@ -2915,6 +2934,7 @@ struct GeneratedAccess<World::CapsuleCollider3DComponent>
             &StorageBindingOf(),
             "Physics/3D",
             "Capsule along the entity's local Y axis: HalfHeight is the cylinder half height excluding the two hemisphere caps.",
+            false,
             false,
         };
         return schema;
@@ -3181,6 +3201,7 @@ struct GeneratedAccess<World::JointComponent>
             "Physics",
             "Constraint between this entity and another body. Fixed welds the two frames, Distance keeps them within a range, Hinge allows rotation around Axis only.",
             false,
+            false,
         };
         return schema;
     }
@@ -3287,6 +3308,7 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
             "Physics/3D",
             "Mesh-derived collision: an empty Mesh uses the entity's MeshRenderer mesh, StaticTriangles only works on Static bodies, and the editor draws no outline for it.",
             false,
+            false,
         };
         return schema;
     }
@@ -3343,6 +3365,7 @@ struct GeneratedAccess<World::LevelEntityComponent>
             "Level",
             "Level 2.0 data-layer membership: which level data layers this entity belongs to.",
             false,
+            true,
         };
         return schema;
     }
@@ -3393,6 +3416,7 @@ struct GeneratedAccess<World::UUID>
             nullptr,
             "",
             "",
+            false,
             false,
         };
         return schema;
@@ -3651,6 +3675,7 @@ struct GeneratedAccess<World::CameraSettings>
             nullptr,
             "",
             "",
+            false,
             false,
         };
         return schema;
