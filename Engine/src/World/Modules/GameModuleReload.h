@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 // CPPT-2(T5b,2026-09-27 用户裁决 D-B):模块(`Game.dll`)级热重载编排。
 //
 // 语义(PURE-ECS 2026-10-02 起;单实体脚本实例已整体删除):
@@ -51,7 +53,7 @@ namespace World::Modules
 		std::string RollbackPath;           // 回滚副本路径(存在时)
 	};
 
-	class GameModuleReload
+	class WLD_API GameModuleReload
 	{
 	public:
 		// 模块 id 与 Game/src/GameAPI.cpp 的 WeModule::Id 一致。

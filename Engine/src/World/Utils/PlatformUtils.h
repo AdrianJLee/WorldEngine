@@ -1,8 +1,9 @@
 ﻿#pragma once
 #include <string>
+#include "World/Core/Export.h"
 namespace World
 {
-	class FileDialogs
+	class WLD_API FileDialogs
 	{
 	public:
 		static std::string OpenFile(const char* filter);
@@ -11,7 +12,7 @@ namespace World
 		static std::string SelectFolder(const char* title);
 	};
 
-	class SystemUtils
+	class WLD_API SystemUtils
 	{
 	public:
 		// 设置指定窗口底层输入法(IME)开关状态

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Core.h"
+#include "World/Core/Export.h"
 #include "World/Level/Authoring/EntityDescriptor.h"
 
 #include <cstdint>
@@ -37,14 +38,14 @@ namespace World::Level
 	//   * 按掩码升序排序(顺序稳定 ⇒ manifest 逐字节确定性,便于 diff 与门禁);
 	//   * 全部无效 ⇒ 回填常驻层 `{ 1, "Base_World", true }`(关卡必须至少有一个可归属的层)。
 	// 返回 true = 内容有改动(调用方据此决定是否重写 manifest)。
-	bool NormalizeDataLayers(std::vector<DataLayerDefinition>& layers);
+	WLD_API bool NormalizeDataLayers(std::vector<DataLayerDefinition>& layers);
 
 	// 下一个空闲的**单个**位(自 bit0 起);32 位全部占用 ⇒ 0(调用方据此禁用"添加层")。
-	uint32_t NextFreeLayerMask(const std::vector<DataLayerDefinition>& layers);
+	WLD_API uint32_t NextFreeLayerMask(const std::vector<DataLayerDefinition>& layers);
 
 	// 该掩码是否**完全**被层定义覆盖(0 = 常驻可见,恒为 true)。
 	// 用途:删除层的守卫 —— 有实体用到未被覆盖的位时拒绝删除,避免静默改变可见性语义。
-	bool IsMaskCoveredByLayers(uint32_t mask, const std::vector<DataLayerDefinition>& layers);
+	WLD_API bool IsMaskCoveredByLayers(uint32_t mask, const std::vector<DataLayerDefinition>& layers);
 
 	// 关卡级世界设置(`.wlevel` 的 `World:` 块)。
 	//
@@ -67,7 +68,7 @@ namespace World::Level
 	// `LevelCatalog` 校验 —— 不一致即报错,不静默降级。
 	//
 	// 入口路径是**唯一**入参:`ContentDir()` 由它推导,不存在"同名耦合"的第二个事实源。
-	class LevelPackage
+	class WLD_API LevelPackage
 	{
 	public:
 		static constexpr const char* EntryExtension = ".wlevel";

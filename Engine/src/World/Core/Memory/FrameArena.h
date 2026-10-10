@@ -1,6 +1,9 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Core/Memory/Allocator.h"
+#include "World/Core/Memory/LinearAllocator.h"
 
 #include <cstdint>
 #include <memory>
@@ -9,7 +12,6 @@
 
 namespace World
 {
-	class LinearAllocator;
 
 	// 每线程一页(或多页)线性 arena:承载帧内临时分配(WLD_FRAME_NEW)。
 	//
@@ -18,9 +20,11 @@ namespace World
 	// - 帧末由渲染线程调用 ResetAll 统一回卷(契约:调用时所有工作线程已 join/空闲);
 	// - Debug 下 Reset 前把已用区域填充 0xDD,便于发现"跨帧引用已回收内存";
 	// - 非平凡对象在 Reset 时按登记顺序逆序析构(与 DualTrack 一致)。
-	class FrameArena final : public Allocator
+	class WLD_API FrameArena final : public Allocator
 	{
 	public:
+		FrameArena(const FrameArena&) = delete;
+		FrameArena& operator=(const FrameArena&) = delete;
 		// 当前线程的 arena(首次访问时创建,默认 1 MiB 首页,按需追加页)。
 		static FrameArena& Get();
 		// 帧末回卷全部线程的 arena。只允许在其它线程空闲时调用。

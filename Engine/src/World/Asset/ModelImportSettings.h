@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include "World/Core/Export.h"
 
 namespace World::Asset
 {
@@ -12,7 +13,7 @@ namespace World::Asset
 	// 语义:
 	//  - 资产的 meta 读不出来 → 落到项目默认并在 reason 里记原因,**不失败**;
 	//  - Hash() 覆盖全部字段,供 .wmodel 的 meta.settingsHash 与 cook 复合指纹使用。
-	struct ModelImportSettings
+	struct WLD_API ModelImportSettings
 	{
 		float Scale = 1.0f;                  // 导入期统一放大(烘焙进几何/节点)
 		uint8_t UpAxis = 0;                  // 0 = Y(引擎坐标,不做转换);1 = Z(绕 X 轴 -90° 烘焙)

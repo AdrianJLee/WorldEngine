@@ -8,7 +8,7 @@
 
 namespace World
 {
-	class Entity
+	class WLD_API Entity
 	{
 	public:
 		static Entity CreateEntity(Scene* scene, const std::string& name = "Empty Entity", const UUID& id = UUID());

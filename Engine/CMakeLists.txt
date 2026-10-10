@@ -56,6 +56,7 @@ set(WE_BOX2D_SOURCES
     ${WE_THIRD_PARTY}/box2d/src/wheel_joint.c
 )
 add_library(WorldBox2d OBJECT ${WE_BOX2D_SOURCES})
+target_compile_definitions(WorldBox2d PRIVATE box2d_EXPORTS)
 target_include_directories(WorldBox2d
     PUBLIC "${WLD_ENGINE_ROOT}/third_party/box2d/include"
     PRIVATE "${WLD_ENGINE_ROOT}/third_party/box2d/src"
@@ -131,7 +132,7 @@ target_include_directories(WorldTextureCodecs PUBLIC
 add_library(World SHARED)
 set_target_properties(World PROPERTIES
     OUTPUT_NAME "WorldRuntime"
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
+    WINDOWS_EXPORT_ALL_SYMBOLS OFF
 )
 
 # 预编译头
@@ -140,7 +141,7 @@ set_target_properties(World PROPERTIES
 # 生成 exports.def 时误导出并报 LNK2001 "无法解析的外部符号 __"。暂时关闭
 # PCH（wldpch.h 仍作为普通头文件被各源文件 include），后续可用显式 .def
 # 方案恢复。
-# target_precompile_headers(World PRIVATE src/wldpch.h)
+target_precompile_headers(World PRIVATE src/wldpch.h)
 
 # 用 /FI 强制包含替代 PCH：既保持各 TU 的传递头文件语义，又不产生
 # cmake_pch.*.obj 参与导出表生成。
@@ -154,6 +155,10 @@ if(WIN32)
         WLD_PLATFORM_WINDOWS
         WLD_BUILD_DLL
         GLFW_INCLUDE_NONE
+        box2d_EXPORTS
+    )
+    target_compile_definitions(World PUBLIC
+        BOX2D_DLL
     )
 
     # 2. 编译选项 (buildoptions)

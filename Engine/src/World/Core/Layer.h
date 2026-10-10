@@ -5,7 +5,7 @@
 
 namespace World
 {
-	class Layer
+	class WLD_API Layer
 	{
 	public:
 		Layer(const std::string& name = "Layer");

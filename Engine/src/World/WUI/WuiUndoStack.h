@@ -8,7 +8,7 @@
 namespace World::Wui
 {
 	// 通用撤销栈:每个条目携带 Undo/Redo 闭包,新 Push 截断重做分支。
-	class WuiUndoStack
+	class WLD_API WuiUndoStack
 	{
 	public:
 		static constexpr size_t MaxDepth = 64;

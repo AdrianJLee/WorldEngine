@@ -13,7 +13,7 @@ namespace World
 	class OrthographicCamera;
 	class Shader;
 	class VertexArray;
-	class Renderer2D
+	class WLD_API Renderer2D
 	{
 	public:
 		static void Init();
@@ -80,6 +80,6 @@ namespace World
 		static void NextBatch();
 
 	private:
-		static WLD_API Rhi::Handle<Rhi::CommandBuffer> s_CurrentCommandBuffer;
+		static Rhi::Handle<Rhi::CommandBuffer> s_CurrentCommandBuffer;
 	};
 }

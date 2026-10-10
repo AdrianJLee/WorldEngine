@@ -50,7 +50,7 @@ namespace World::Wui
 		bool Attached = false;
 	};
 
-	class DockLayout
+	class WLD_API DockLayout
 	{
 	public:
 		static DockLayout Default(const std::vector<PanelId>& panels);

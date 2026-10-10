@@ -19,7 +19,7 @@ namespace World::Wui
 	};
 
 	// 追加式操作记录:定位交互问题、审计与后续撤销系统的数据基础。
-	class WuiOperationLog
+	class WLD_API WuiOperationLog
 	{
 	public:
 		static constexpr size_t MaxRecords = 512;

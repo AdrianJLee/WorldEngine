@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 // WUI Core:纯逻辑(布局/样式/命中/焦点),不依赖任何渲染后端。
 
 #include <cstdint>
@@ -95,7 +97,7 @@ namespace World::Wui
 		WuiStyle Props;
 	};
 
-	class WuiStyleSheet
+	class WLD_API WuiStyleSheet
 	{
 	public:
 		void AddRule(const std::string& selector, const WuiStyle& props);
@@ -136,11 +138,11 @@ namespace World::Wui
 		float CrossSize = 0;
 	};
 
-	WuiFlexResult SolveFlex(const WuiFlexLayout& layout, const std::vector<WuiFlexItem>& items, const WuiConstraints& container);
+	WLD_API WuiFlexResult SolveFlex(const WuiFlexLayout& layout, const std::vector<WuiFlexItem>& items, const WuiConstraints& container);
 
 	// ---- 命中与焦点 ----
-	bool HitTest(const WuiRect& rect, glm::vec2 point);
+	WLD_API bool HitTest(const WuiRect& rect, glm::vec2 point);
 
 	// 按树序找下一个可聚焦 id(线性遍历,无环);无下一项返回 nullopt。
-	std::optional<WuiId> NextFocus(const std::vector<WuiId>& order, WuiId current, bool backwards);
+	WLD_API std::optional<WuiId> NextFocus(const std::vector<WuiId>& order, WuiId current, bool backwards);
 }

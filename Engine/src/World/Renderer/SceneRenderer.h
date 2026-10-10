@@ -19,7 +19,7 @@ namespace World
 		bool ShowGrid = true;
 	};
 
-	class SceneRenderer : public IRenderExtractSink
+	class WLD_API SceneRenderer : public IRenderExtractSink
 	{
 	public:
 		void Init();

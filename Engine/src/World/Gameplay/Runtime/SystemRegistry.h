@@ -25,7 +25,7 @@ namespace World::Gameplay
 		Count,
 	};
 
-	const char* SystemPhaseName(SystemPhase phase);
+	WLD_API const char* SystemPhaseName(SystemPhase phase);
 
 	struct SystemDesc
 	{

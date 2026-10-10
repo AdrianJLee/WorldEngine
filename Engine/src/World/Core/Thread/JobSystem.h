@@ -22,7 +22,7 @@ namespace World
 	// - 等待用"帮忙执行 + 条件变量阻塞",不再忙等 yield;
 	// - 计数器取消(Cancel)会跳过尚未开始的任务;
 	// - 内置统计:执行数/窃取数/等待期执行数/溢出次数/队列峰值。
-	class JobSystem
+	class WLD_API JobSystem
 	{
 	public:
 		// threadCount = 0 时:取 WLD_JOB_THREADS 环境变量,否则 max(1, hardware_concurrency-1)。

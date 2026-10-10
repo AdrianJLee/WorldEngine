@@ -13,7 +13,7 @@ namespace World
 	// SerializeEntityDocument 写出、由 AppendEntityDocument 读回,字段形状与 .wd
 	// 里每个实体块逐字段同源 —— 两处各写一份序列化正是"编辑器能读、流送丢组件"
 	// 这类偏差的成因。
-	class SceneSerializer
+	class WLD_API SceneSerializer
 	{
 	public:
 		SceneSerializer(const Ref<Scene>& scene);

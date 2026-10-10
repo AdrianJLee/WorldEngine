@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Modules/WeModule.h"
 
 #include <filesystem>
@@ -7,18 +9,23 @@
 #include <string>
 #include <vector>
 
+#include "World/Utils/DynamicLibrary.h"
+
 namespace World
 {
 	class WorldContext;
-	class DynamicLibrary;
 }
 
 namespace World::Modules
 {
 	// 宿主唯一持有的模块管理器。加载失败不留下半注册状态;退出时逆序卸载。
-	class ModuleManager
+	class WLD_API ModuleManager
 	{
 	public:
+		ModuleManager() = default;
+		~ModuleManager() = default;
+		ModuleManager(const ModuleManager&) = delete;
+		ModuleManager& operator=(const ModuleManager&) = delete;
 		enum class Status : uint8_t
 		{
 			Ok,

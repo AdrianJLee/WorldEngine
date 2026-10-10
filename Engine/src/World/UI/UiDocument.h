@@ -47,7 +47,7 @@ namespace World::UI
 		std::string Command;
 	};
 
-	struct UiNode
+	struct WLD_API UiNode
 	{
 		std::string Id;      // 稳定身份:文档内唯一;AI/绑定/测试/动画引用它
 		std::string Type;    // 类型名:必须在 UiNodeRegistry 登记
@@ -77,7 +77,7 @@ namespace World::UI
 		std::string Default;
 	};
 
-	struct UiDocument
+	struct WLD_API UiDocument
 	{
 		int FormatVersion = kUiDocumentFormatVersion;
 		std::string Screen;

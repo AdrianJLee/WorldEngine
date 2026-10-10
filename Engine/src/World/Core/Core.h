@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <filesystem>
+#include "World/Core/Export.h"
 
 #ifdef WLD_DEBUG
 #if defined(WLD_PLATFORM_WINDOWS)

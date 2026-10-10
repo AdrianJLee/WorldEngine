@@ -91,7 +91,7 @@ namespace World::UI
 	};
 
 	// 设计空间 ↔ 物理空间 的**唯一**映射。
-	struct UiViewport
+	struct WLD_API UiViewport
 	{
 		glm::vec2 DesignResolution { 1920.0f, 1080.0f };
 		glm::vec2 PhysicalSize { 1280.0f, 720.0f };
@@ -124,8 +124,8 @@ namespace World::UI
 		Flex,           // 复用 Wui::SolveFlex
 	};
 
-	const char* UiLayoutKindName(UiLayoutKind kind);
-	bool ParseUiLayoutKind(std::string_view name, UiLayoutKind& out);
+	WLD_API const char* UiLayoutKindName(UiLayoutKind kind);
+	WLD_API bool ParseUiLayoutKind(std::string_view name, UiLayoutKind& out);
 
 	struct UiLayoutSpec
 	{

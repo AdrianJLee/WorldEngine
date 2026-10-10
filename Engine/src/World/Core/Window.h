@@ -2,6 +2,7 @@
 #include "wldpch.h"
 
 #include "World/Core/Core.h"
+#include "World/Core/Export.h"
 #include "World/Events/Event.h"
 
 #include <glm/glm.hpp>
@@ -26,7 +27,7 @@ namespace World
 		}
 	};
 
-	class Window
+	class WLD_API Window
 	{
 	public:
 		//函数容器

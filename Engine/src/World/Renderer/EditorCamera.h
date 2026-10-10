@@ -1,4 +1,6 @@
 ﻿#pragma once
+
+#include "World/Core/Export.h"
 #include "World/Renderer/Camera.h"
 #include "World/Events/MouseEvent.h"
 #include "World/Core/Timestep.h"
@@ -7,7 +9,7 @@
 
 namespace World
 {
-	class EditorCamera :public Camera
+	class WLD_API EditorCamera : public Camera
 	{
 	public:
 		EditorCamera() = default;

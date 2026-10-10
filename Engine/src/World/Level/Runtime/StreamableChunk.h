@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Level/Core/IStreamableChunk.h"
 #include "World/Level/Core/DeltaState.h"
 #include <filesystem>
@@ -9,7 +11,7 @@
 
 namespace World::Level
 {
-	class StreamableChunk : public IStreamableChunk
+	class WLD_API StreamableChunk : public IStreamableChunk
 	{
 	public:
 		StreamableChunk();

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Level/Core/IStreamingDriver.h"
 #include <memory>
 
 namespace World::Level
 {
-	class SpatialGridDriver : public IStreamingDriver
+	class WLD_API SpatialGridDriver : public IStreamingDriver
 	{
 	public:
 		SpatialGridDriver(float loadDistance = 128.0f, float unloadDistance = 160.0f);

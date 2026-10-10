@@ -14,19 +14,19 @@ namespace World::Wui
 {
 	// ---- 基础表面与高亮 ----
 	// 面板/子区域底色:纯填充,统一从这里走,避免面板里散落裸绘制。
-	void PanelBackground(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius = 0.0f);
+	WLD_API void PanelBackground(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius = 0.0f);
 	// 条状底板(挂靠栏/菜单栏等):填充 + 底边 1px 分隔线。
-	void BarSurface(WuiContext& ctx, const WuiRect& rect, const WuiColor& fill, const WuiColor& border);
+	WLD_API void BarSurface(WuiContext& ctx, const WuiRect& rect, const WuiColor& fill, const WuiColor& border);
 	// 行悬停/选中底色:仅在 hovered 或 selected 时绘制,返回 hovered。
-	bool HoverRow(WuiContext& ctx, const WuiRect& rect, bool hovered, bool selected, const WuiTheme& theme,
+	WLD_API bool HoverRow(WuiContext& ctx, const WuiRect& rect, bool hovered, bool selected, const WuiTheme& theme,
 		float radius = 3.0f);
 	// 高亮描边:拖放目标/拖动标签等统一用强调色。
-	void HighlightOutline(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius = 2.0f,
+	WLD_API void HighlightOutline(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius = 2.0f,
 		float thickness = 2.0f);
 	// 拖放落区预览:半透明强调色填充 + 高亮描边(边缘停靠/挂靠栏提示)。
-	void DropZoneOverlay(WuiContext& ctx, const WuiRect& rect, float alpha = 0.30f, float radius = 3.0f);
+	WLD_API void DropZoneOverlay(WuiContext& ctx, const WuiRect& rect, float alpha = 0.30f, float radius = 3.0f);
 	// 分节标题:标题文字 + 下方 1px 分隔线。
-	void SectionHeader(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiColor& color,
+	WLD_API void SectionHeader(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiColor& color,
 		const WuiTheme& theme, float fontSize = 15.0f);
 
 	// ---- P1c-LIB2:即时可折叠分区标题(面板标题行的库化入口) ----
@@ -40,7 +40,7 @@ namespace World::Wui
 	//   kind="button"、label=title、value="open"/"closed"、interactive=true、focused 跟随焦点;
 	//   进焦点表(Tab 可达)。
 	// 返回 true = 本帧切换了 open(调用方据此记操作记录 / 更新布局)。
-	bool CollapsibleHeader(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& title, bool& open,
+	WLD_API bool CollapsibleHeader(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& title, bool& open,
 		const WuiTheme& theme, const std::string& term = std::string(),
 		const std::string& trailing = std::string(), const std::string& tooltip = std::string(),
 		float fontSize = 14.0f);
@@ -52,14 +52,14 @@ namespace World::Wui
 	//  · fontSize <= 0 = theme.FontSizeCaption;bold 默认 true(徽标字形一律粗体);
 	//  · radius < 0 = 胶囊(min(rect.W, rect.H) * 0.5;正方形小标 = 圆);
 	//  · 不裁剪文字(调用方约束宽度);不登记 a11y 节点(展示件,节点由调用方或外壳锚点负责)。
-	void Badge(WuiContext& ctx, const WuiRect& rect, const std::string& text, const WuiColor& fill,
+	WLD_API void Badge(WuiContext& ctx, const WuiRect& rect, const std::string& text, const WuiColor& fill,
 		const WuiColor& textColor, const WuiTheme& theme, float fontSize = 0.0f, bool bold = true,
 		float radius = -1.0f);
 
 	// 染色图标:纹理 id + tint(与 WuiImage 同一套纹理注册口径 —— 宿主用 WuiTextureRegistry
 	// 注册后把 id 交给面板)。textureId == 0(空图)时画**兜底占位**(底 + 2×2 棋盘 + 描边),
 	// 保证图标位不空、也不是纯色块(所以 icon 不适用 image/spacer 的像素断言豁免)。
-	void Icon(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv,
+	WLD_API void Icon(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv,
 		const WuiColor& tint, const WuiTheme& theme, float radius = 0.0f);
 
 	// 即时裁剪作用域(RAII):等价于面板里手写的一对
@@ -107,7 +107,7 @@ namespace World::Wui
 
 	// 主窗口挂靠栏上的标签:活动/悬停底色 + 标题 + 可选关闭 ×。
 	// 拖动状态机仍由调用方持有(本组件只负责绘制与命中)。
-	AttachTagResult AttachTag(WuiContext& ctx, const WuiRect& rect, const std::string& title, bool active,
+	WLD_API AttachTagResult AttachTag(WuiContext& ctx, const WuiRect& rect, const std::string& title, bool active,
 		bool closable, const WuiTheme& theme, float fontSize = 13.0f);
 
 	// ---- 停靠标签栏 ----
@@ -128,7 +128,7 @@ namespace World::Wui
 	};
 
 	// 绘制标签栏并处理命中/关闭/拖动起手。标签高度默认 24。
-	DockTabBarResult DockTabBar(WuiContext& ctx, const WuiRect& area, const std::vector<DockTab>& tabs,
+	WLD_API DockTabBarResult DockTabBar(WuiContext& ctx, const WuiRect& area, const std::vector<DockTab>& tabs,
 		const WuiTheme& theme, float tabHeight = 24.0f, float maxTabWidth = 150.0f);
 
 	// ---- 分隔条 ----
@@ -140,39 +140,39 @@ namespace World::Wui
 	};
 
 	// 可拖动分隔条(row=true 时是竖直条,拖动改变水平位置)。thickness 建议 4。
-	SplitterResult Splitter(WuiContext& ctx, const WuiRect& area, bool row, const WuiTheme& theme,
+	WLD_API SplitterResult Splitter(WuiContext& ctx, const WuiRect& area, bool row, const WuiTheme& theme,
 		bool dragging, float thickness = 4.0f);
 
 	// ---- 工具栏 ----
 	// 绘制工具栏底板,返回内容区域(调用方在其中摆放按钮/分隔线)。
-	WuiRect Toolbar(WuiContext& ctx, const WuiRect& area, const WuiTheme& theme,
+	WLD_API WuiRect Toolbar(WuiContext& ctx, const WuiRect& area, const WuiTheme& theme,
 		float rounding = 6.0f, float alpha = 0.85f);
 	// 工具栏图标按钮:纹理缺失时退化为按钮底色 + 标签文字。
-	bool ToolbarIconButton(WuiContext& ctx, WuiId id, const WuiRect& rect, uint64_t textureId,
+	WLD_API bool ToolbarIconButton(WuiContext& ctx, WuiId id, const WuiRect& rect, uint64_t textureId,
 		const WuiRect& uv, const std::string& fallbackLabel, const WuiTheme& theme, bool enabled = true);
-	void ToolbarSeparator(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
+	WLD_API void ToolbarSeparator(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
 
 	// ---- 右键菜单 ----
 	// P4-U30:ContextMenuItem/ContextMenuToggleItem 直接转发到 Wui::MenuItem —— 右键菜单与菜单栏
 	// 共用同一套"release 确认"规则:press 落在(打开菜单的按钮 ∪ 菜单面板)内、release 落在
 	// 本项上才触发;在项上按下后拖走松开、或在菜单外按下再拖到项上松开都不触发(破坏性项可反悔)。
 	// Begin:在固定位置画出菜单面板并返回是否为有效菜单区域(内部已 PushOverlay)。
-	bool BeginContextMenu(WuiContext& ctx, WuiId id, const glm::vec2& pinnedPos, float width,
+	WLD_API bool BeginContextMenu(WuiContext& ctx, WuiId id, const glm::vec2& pinnedPos, float width,
 		size_t itemCount, WuiRect* panel, const WuiTheme& theme);
-	void EndContextMenu(WuiContext& ctx, WuiId id, const WuiRect& panel, const WuiTheme& theme);
+	WLD_API void EndContextMenu(WuiContext& ctx, WuiId id, const WuiRect& panel, const WuiTheme& theme);
 	// 菜单项:普通动作项。
-	bool ContextMenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+	WLD_API bool ContextMenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const WuiTheme& theme, bool enabled = true);
 	// 菜单项:带勾选标记(可见性开关)。
-	bool ContextMenuToggleItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+	WLD_API bool ContextMenuToggleItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		bool checked, const WuiTheme& theme, bool enabled = true);
-	void ContextMenuSeparator(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
+	WLD_API void ContextMenuSeparator(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
 
 	// ---- 面包屑 ----
 	// 显示以 '/' 分隔的路径;返回被点击(或键盘激活)的段索引(-1 = 未触发)。
 	// P1c-E4:id != 0 时整条面包屑进焦点表(Tab 可达)并画焦点环,←/→ 移动段光标(画在段上)、
 	// Enter/Space 激活光标段(返回值 = 该段下标);旧调用点不传 id,行为逐字节不变。
-	int Breadcrumb(WuiContext& ctx, const WuiRect& area, const std::string& path, const WuiTheme& theme,
+	WLD_API int Breadcrumb(WuiContext& ctx, const WuiRect& area, const std::string& path, const WuiTheme& theme,
 		WuiId id = 0);
 
 	// ---- 搜索框 ----
@@ -180,7 +180,7 @@ namespace World::Wui
 	// P1c-E4:id != 0 时**无条件**进焦点表并登记 kind="text-field" 节点(label=占位文案、
 	// value=内容或占位、focused 跟随焦点)—— 旧实现只在 ctx.Focus()==id 时才调 TextField,
 	// 而焦点登记在那条路径里,Tab/脚本都到不了("先有鸡还是先有蛋")。
-	bool SearchField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
+	WLD_API bool SearchField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
 		const std::string& placeholder, const WuiTheme& theme);
 
 	// ---- 列表视图 ----
@@ -213,7 +213,7 @@ namespace World::Wui
 	// (rect = 可见行带、focused 跟随焦点、value="items=N[ selected=<行>]");行节点只在
 	// "焦点在列表上"时把当前选中行标成 focused;↑/↓/Home/End/Enter/Space 走 KeyMoveTo/KeyActivate。
 	// 旧调用点不传 id = 行为不变。
-	ListViewResult ListView(WuiContext& ctx, const WuiRect& area, const std::vector<ListViewItem>& items,
+	WLD_API ListViewResult ListView(WuiContext& ctx, const WuiRect& area, const std::vector<ListViewItem>& items,
 		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id = 0);
 
 	// ---- 网格视图 ----
@@ -237,7 +237,7 @@ namespace World::Wui
 	};
 
 	// 图标网格:按 cellWidth/cellHeight 自动换行,自带滚动裁剪。
-	GridViewResult GridView(WuiContext& ctx, const WuiRect& area, const std::vector<GridViewItem>& items,
+	WLD_API GridViewResult GridView(WuiContext& ctx, const WuiRect& area, const std::vector<GridViewItem>& items,
 		float cellWidth, float cellHeight, float& scrollY, const WuiTheme& theme);
 
 	// ---- 树视图 ----
@@ -272,7 +272,7 @@ namespace World::Wui
 	// 结果写进 KeyMoveTo / KeyToggleExpand / KeyActivate(旧调用点不传 id,行为不变)。
 	// P1c-E4:容器登记 kind="tree" 节点(id 同 id、rect=可见行带、value="items=N[ selected=<行>]"),
 	// 焦点在树上时容器与当前行都带 focused=true —— 焦点位从 a11y 读得到(以前只有行节点、无焦点位)。
-	TreeViewResult TreeView(WuiContext& ctx, const WuiRect& area, const std::vector<TreeViewItem>& items,
+	WLD_API TreeViewResult TreeView(WuiContext& ctx, const WuiRect& area, const std::vector<TreeViewItem>& items,
 		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id = 0);
 
 	// ---- P4-U24:坐标系指示器(主视口 + 材质/模型/预制体预览共用) ----
@@ -284,6 +284,6 @@ namespace World::Wui
 	//   · 轴接近正对/背对相机(屏幕投影长度 < 0.22)时不再"只留一个点":
 	//     朝观察者画**实心圆点**,背离画**空心圆环**,标号仍留 ≥4px 间隙。
 	// 返回 gizmo 盒矩形(调用方据此登记 <panel>.axis 无障碍节点,value 仍是 yaw/pitch)。
-	WuiRect AxisGizmo(WuiContext& ctx, const WuiRect& viewport, const glm::vec3& viewRight,
+	WLD_API WuiRect AxisGizmo(WuiContext& ctx, const WuiRect& viewport, const glm::vec3& viewRight,
 		const glm::vec3& viewUp, float size = 48.0f);
 }

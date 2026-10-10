@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Level/Core/IStreamingDriver.h"
 #include <memory>
 
@@ -13,7 +15,7 @@ namespace World::Level
 		bool IsOpen{ true };
 	};
 
-	class SectorPortalDriver : public IStreamingDriver
+	class WLD_API SectorPortalDriver : public IStreamingDriver
 	{
 	public:
 		SectorPortalDriver();

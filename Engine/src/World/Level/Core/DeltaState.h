@@ -1,12 +1,14 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
 
 namespace World::Level
 {
-	class DeltaStateRegistry
+	class WLD_API DeltaStateRegistry
 	{
 	public:
 		DeltaStateRegistry();

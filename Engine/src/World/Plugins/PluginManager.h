@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Asset/AssetImporter.h"
 #include "World/Plugins/PluginManifest.h"
 #include "World/Plugins/PluginHostServices.h"
@@ -74,7 +76,7 @@ namespace World::Plugins
 	//
 	// T2 边界:注册面只到"资产类型 + 导入器 + C++ 导出查询";组件/系统/命令/面板/渲染钩子
 	// 与打包(T5)、热重载(T6)不在本类内。
-	class PluginManager
+	class WLD_API PluginManager
 	{
 	public:
 		enum class Status : uint8_t

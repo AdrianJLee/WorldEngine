@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <string>
@@ -15,7 +17,7 @@ namespace World
 	// 所以这里只前置声明,不在本文件里制造新的映射表。
 	struct ScriptServiceBinding;
 
-	class LuaStubGenerator
+	class WLD_API LuaStubGenerator
 	{
 	public:
 		// Pure rendering: neither the registry, output nor filesystem changes on failure.

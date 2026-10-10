@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Level/Core/ChunkTypes.h"
 #include <glm/glm.hpp>
 #include <memory>
@@ -13,7 +15,7 @@ namespace World::Level::AI
 		BlockedByGeometry = 2
 	};
 
-	class AiPerceptionGate
+	class WLD_API AiPerceptionGate
 	{
 	public:
 		AiPerceptionGate();

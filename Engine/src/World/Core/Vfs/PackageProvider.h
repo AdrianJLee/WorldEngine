@@ -1,12 +1,14 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Core/Vfs/Vfs.h"
 
 #include <unordered_map>
 
 namespace World::Vfs
 {
-	class PackageProvider final : public IVfsProvider
+	class WLD_API PackageProvider final : public IVfsProvider
 	{
 	public:
 		Source SourceType() const override { return Source::Package; }

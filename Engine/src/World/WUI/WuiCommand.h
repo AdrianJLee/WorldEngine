@@ -21,7 +21,7 @@ namespace World::Wui
 	};
 
 	// 菜单动作与快捷键的统一入口。
-	class WuiCommandRegistry
+	class WLD_API WuiCommandRegistry
 	{
 	public:
 		void Register(WuiCommand command);

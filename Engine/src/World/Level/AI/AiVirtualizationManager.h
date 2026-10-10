@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Level/AI/AiVirtualizationTypes.h"
 #include "World/Level/Core/DeltaState.h"
 #include <memory>
@@ -7,7 +9,7 @@
 
 namespace World::Level::AI
 {
-	class AiVirtualizationManager
+	class WLD_API AiVirtualizationManager
 	{
 	public:
 		AiVirtualizationManager();

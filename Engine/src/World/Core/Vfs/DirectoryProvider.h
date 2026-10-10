@@ -1,10 +1,12 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Core/Vfs/Vfs.h"
 
 namespace World::Vfs
 {
-	class DirectoryProvider final : public IVfsProvider
+	class WLD_API DirectoryProvider final : public IVfsProvider
 	{
 	public:
 		explicit DirectoryProvider(std::filesystem::path root);

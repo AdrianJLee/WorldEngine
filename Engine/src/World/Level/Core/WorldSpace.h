@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include <glm/glm.hpp>
 
 namespace World
@@ -9,7 +11,7 @@ namespace World
 
 namespace World::Level
 {
-	class WorldSpace
+	class WLD_API WorldSpace
 	{
 	public:
 		WorldSpace(float rebaseThreshold = 1000.0f);

@@ -57,7 +57,7 @@ namespace World
 		std::vector<LuaOperatorDesc> Operators;
 	};
 
-	class LuaReflectionRegistry
+	class WLD_API LuaReflectionRegistry
 	{
 	public:
 		static std::vector<LuaTypeReflection>& GetTable();
@@ -91,7 +91,7 @@ namespace World
 	// W3a-A1:组件字段代理(Entity:GetComponent 的返回值;Kind → Lua 映射表见 Script/BindComponentAccess.h)。
 	WLD_API bool RegisterComponentProxyBinding(ScriptBindingContext& bindings, std::string* error);
 
-	class ScriptEngine
+	class WLD_API ScriptEngine
 	{
 	public:
 		static void Init();      // 在 Application 启动时调用：建立 Luau VM、沙箱、绑定层与 API 注册

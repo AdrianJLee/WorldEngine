@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Schema/Schema.h"
+#include "World/Core/Export.h"
 
 #include <cstdint>
 #include <string>
@@ -10,7 +11,7 @@
 namespace World::Schema
 {
 	// 宿主唯一持有的注册表。模块只拿到引用,模块内部不存在注册表单例。
-	class SchemaRegistry
+	class WLD_API SchemaRegistry
 	{
 	public:
 		enum class Status : uint8_t

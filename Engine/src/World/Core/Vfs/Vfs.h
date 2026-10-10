@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -16,7 +18,7 @@ namespace World::Vfs
 
 	// 归一化：'\\'->'/'，折叠重复 '/'，去掉尾部 '/'。
 	// 拒绝：空串、".." 段、"." 段、绝对路径（含 '/' 开头与盘符）、NUL。拒绝时 out 保持空。
-	bool Normalize(std::string_view raw, Path& out, std::error_code& ec);
+	WLD_API bool Normalize(std::string_view raw, Path& out, std::error_code& ec);
 
 	enum class Source : uint8_t { None = 0, Directory, Package };
 
@@ -28,7 +30,7 @@ namespace World::Vfs
 		bool isDirectory = false;
 	};
 
-	class IVfsProvider
+	class WLD_API IVfsProvider
 	{
 	public:
 		virtual ~IVfsProvider() = default;
@@ -40,7 +42,7 @@ namespace World::Vfs
 	using ProviderPtr = std::shared_ptr<IVfsProvider>;
 	using MountId = uint64_t;   // 0 = 无效
 
-	class Vfs
+	class WLD_API Vfs
 	{
 	public:
 		MountId Mount(std::string id, ProviderPtr provider, int priority);

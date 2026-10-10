@@ -40,7 +40,7 @@ namespace World
 	// 零内存开销的挂起销毁标签组件:替代过去的 std::unordered_set<entt::entity>
 	struct PendingDestroyTag {};
 
-	class Scene
+	class WLD_API Scene
 	{
 	public:
 		// 数据布局门禁 B(标准 docs/dev/performance-and-data-layout.md §4.3 硬规则 2):

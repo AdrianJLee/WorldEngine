@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include <volk.h>
 
 #include <cstdint>
@@ -32,7 +34,7 @@ namespace World::Rhi::Vulkan
 	// 调用方不需要额外的信号量/等待。
 	//
 	// 线程约定:仅限渲染线程使用(vkQueueSubmit 需要对队列外部同步)。
-	class VulkanUploadRing
+	class WLD_API VulkanUploadRing
 	{
 	public:
 		VulkanUploadRing(VulkanDevice& device, uint64_t segmentSize = 4ull * 1024 * 1024,

@@ -5,7 +5,7 @@
 
 namespace World
 {
-	class Input
+	class WLD_API Input
 	{
 	public:
 		static bool IsKeyPressed(int keycode);

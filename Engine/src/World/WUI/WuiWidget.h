@@ -10,7 +10,7 @@
 
 namespace World::Wui
 {
-	class WuiWidget;
+	class WLD_API WuiWidget;
 	using WuiWidgetPtr = std::shared_ptr<WuiWidget>;
 
 	struct WuiMeasure
@@ -20,7 +20,7 @@ namespace World::Wui
 	};
 
 	// 树绘制上下文:向渲染后端输出命令,并维护嵌套裁剪。
-	class WuiPaintContext
+	class WLD_API WuiPaintContext
 	{
 	public:
 		explicit WuiPaintContext(WuiContext& context) : m_Context(context) {}
@@ -36,7 +36,7 @@ namespace World::Wui
 	};
 
 	// 保留模式 widget 基类:测量/布局/绘制/命中/焦点与脏标记。
-	class WuiWidget : public std::enable_shared_from_this<WuiWidget>
+	class WLD_API WuiWidget : public std::enable_shared_from_this<WuiWidget>
 	{
 	public:
 		virtual ~WuiWidget() = default;
@@ -91,7 +91,7 @@ namespace World::Wui
 	};
 
 	// flex 容器:布局引擎的实际消费者。
-	class WuiBox final : public WuiWidget
+	class WLD_API WuiBox final : public WuiWidget
 	{
 	public:
 		WuiDirection Direction = WuiDirection::Column;
@@ -115,7 +115,7 @@ namespace World::Wui
 
 	// ---- 叶子控件 ----
 
-	class WuiLabel final : public WuiWidget
+	class WLD_API WuiLabel final : public WuiWidget
 	{
 	public:
 		std::string Text;
@@ -129,7 +129,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiSpacer final : public WuiWidget
+	class WLD_API WuiSpacer final : public WuiWidget
 	{
 	public:
 		float Width = 0;
@@ -139,7 +139,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext&) override {}
 	};
 
-	class WuiButton final : public WuiWidget
+	class WLD_API WuiButton final : public WuiWidget
 	{
 	public:
 		std::string Label;
@@ -156,7 +156,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiCheckbox final : public WuiWidget
+	class WLD_API WuiCheckbox final : public WuiWidget
 	{
 	public:
 		std::string Label;
@@ -166,7 +166,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiImage final : public WuiWidget
+	class WLD_API WuiImage final : public WuiWidget
 	{
 	public:
 		uint64_t TextureId = 0;
@@ -183,7 +183,7 @@ namespace World::Wui
 		return theme;
 	}
 
-	class WuiTextField final : public WuiWidget
+	class WLD_API WuiTextField final : public WuiWidget
 	{
 	public:
 		std::string* Buffer = nullptr;
@@ -198,7 +198,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiDragFloat final : public WuiWidget
+	class WLD_API WuiDragFloat final : public WuiWidget
 	{
 	public:
 		float* Value = nullptr;
@@ -211,7 +211,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiDragInt final : public WuiWidget
+	class WLD_API WuiDragInt final : public WuiWidget
 	{
 	public:
 		int64_t* Value = nullptr;
@@ -223,7 +223,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiCombo final : public WuiWidget
+	class WLD_API WuiCombo final : public WuiWidget
 	{
 	public:
 		std::string Label;
@@ -235,7 +235,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiScrollArea final : public WuiWidget
+	class WLD_API WuiScrollArea final : public WuiWidget
 	{
 	public:
 		WuiWidgetPtr Child;
@@ -251,7 +251,7 @@ namespace World::Wui
 		float m_ScrollY = 0;
 	};
 
-	class WuiProgress final : public WuiWidget
+	class WLD_API WuiProgress final : public WuiWidget
 	{
 	public:
 		float Fraction = 0; // 0..1
@@ -262,7 +262,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiListRow final : public WuiWidget
+	class WLD_API WuiListRow final : public WuiWidget
 	{
 	public:
 		std::string Text;
@@ -285,7 +285,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiImageButton final : public WuiWidget
+	class WLD_API WuiImageButton final : public WuiWidget
 	{
 	public:
 		uint64_t TextureId = 0;
@@ -302,7 +302,7 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
-	class WuiSection final : public WuiWidget
+	class WLD_API WuiSection final : public WuiWidget
 	{
 	public:
 		std::string Title;
@@ -321,7 +321,7 @@ namespace World::Wui
 		WuiRect m_ContentRect;
 	};
 
-	class WuiCustom final : public WuiWidget
+	class WLD_API WuiCustom final : public WuiWidget
 	{
 	public:
 		float ContentHeight = 0;
@@ -332,5 +332,5 @@ namespace World::Wui
 	};
 
 	// 便捷:根据约束框递归测量并布局整棵树。
-	void LayoutWidgetTree(const WuiWidgetPtr& root, const WuiRect& rect);
+	WLD_API void LayoutWidgetTree(const WuiWidgetPtr& root, const WuiRect& rect);
 }

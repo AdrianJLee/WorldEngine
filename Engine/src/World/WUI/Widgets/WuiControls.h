@@ -13,7 +13,7 @@
 namespace World::Wui
 {
 	// 水平分隔线。
-	class WuiSeparator final : public WuiWidget
+	class WLD_API WuiSeparator final : public WuiWidget
 	{
 	public:
 		float Thickness = 1.0f;
@@ -24,7 +24,7 @@ namespace World::Wui
 	};
 
 	// 图标按钮:纹理 + 悬停底色,可选 Tooltip。
-	class WuiIconButton final : public WuiWidget
+	class WLD_API WuiIconButton final : public WuiWidget
 	{
 	public:
 		uint64_t TextureId = 0;
@@ -39,7 +39,7 @@ namespace World::Wui
 	};
 
 	// 开关:布尔值驱动,点击切换。
-	class WuiToggle final : public WuiWidget
+	class WLD_API WuiToggle final : public WuiWidget
 	{
 	public:
 		std::string Label;
@@ -52,7 +52,7 @@ namespace World::Wui
 	};
 
 	// 数值滑条:点击定位 + 按住拖动;值域 [Min, Max]。
-	class WuiSlider final : public WuiWidget
+	class WLD_API WuiSlider final : public WuiWidget
 	{
 	public:
 		float* Value = nullptr;
@@ -66,7 +66,7 @@ namespace World::Wui
 	};
 
 	// 列表条目:层级面板、文件列表、设置项通用行。
-	class WuiListItem final : public WuiWidget
+	class WLD_API WuiListItem final : public WuiWidget
 	{
 	public:
 		std::string Label;
@@ -81,7 +81,7 @@ namespace World::Wui
 	};
 
 	// 树形条目:Expanded 为空表示叶子;箭头区域切换展开,其余区域选择。
-	class WuiTreeItem final : public WuiWidget
+	class WLD_API WuiTreeItem final : public WuiWidget
 	{
 	public:
 		std::string Label;
@@ -98,7 +98,7 @@ namespace World::Wui
 	};
 
 	// 标签页:等宽页签 + 选中下划线。
-	class WuiTabs final : public WuiWidget
+	class WLD_API WuiTabs final : public WuiWidget
 	{
 	public:
 		std::vector<std::string> Labels;
@@ -111,7 +111,7 @@ namespace World::Wui
 	};
 
 	// 悬浮提示:Anchor 命中时在 Overlay 层绘制提示框。
-	class WuiTooltip final : public WuiWidget
+	class WLD_API WuiTooltip final : public WuiWidget
 	{
 	public:
 		std::string Text;
@@ -123,7 +123,7 @@ namespace World::Wui
 	};
 
 	// 弹出菜单按钮:点击展开条目列表,选择后关闭;支持外部点击关闭。
-	class WuiMenuButton final : public WuiWidget
+	class WLD_API WuiMenuButton final : public WuiWidget
 	{
 	public:
 		std::string Label;

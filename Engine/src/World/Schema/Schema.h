@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 // WorldEngine Schema 2.0 — 单一事实源反射契约。
 // 纯数据合同:不依赖 entt、UI 框架、Scene 类型;访问器由 schema-compiler 生成。
 // 本头文件禁止任何静态初始化期注册与跨 DLL 单例。
@@ -123,7 +125,7 @@ namespace World::Schema
 
 	// 形状的可读名(None/Array/Map):诊断、序列化与脚本属性层共用。
 	// 定义在 SchemaRegistry.cpp(本头文件不引 WLD 导出宏,保持纯数据合同)。
-	const char* CollectionKindName(CollectionKind collection);
+	WLD_API const char* CollectionKindName(CollectionKind collection);
 
 	// 类型化边界值。热路径直接用字段成员,不经过 Value。
 	//
@@ -358,10 +360,10 @@ namespace World::Schema
 	//                        调用方因此可以"未设 = 保留实例成员初值";
 	//   * 读写都不触碰 Transient 字段(与 SchemaWriter 既有口径一致)。
 	// 定义在 Schema/SchemaAccess.cpp。
-	Value ReadSchemaField(const FieldSchema& field, const void* instance);
-	Value ReadStructValue(const TypeSchema& type, const void* instance);
-	bool WriteSchemaField(const FieldSchema& field, void* instance, const Value& value);
-	bool WriteStructValue(const TypeSchema& type, void* instance, const Value& value);
+	WLD_API Value ReadSchemaField(const FieldSchema& field, const void* instance);
+	WLD_API Value ReadStructValue(const TypeSchema& type, const void* instance);
+	WLD_API bool WriteSchemaField(const FieldSchema& field, void* instance, const Value& value);
+	WLD_API bool WriteStructValue(const TypeSchema& type, void* instance, const Value& value);
 }
 
 // ---- 注解宏 ----

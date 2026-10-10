@@ -1,11 +1,13 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Level/AI/NavMeshTileTypes.h"
 #include <memory>
 
 namespace World::Level::AI
 {
-	class NavMeshChunkStitcher
+	class WLD_API NavMeshChunkStitcher
 	{
 	public:
 		NavMeshChunkStitcher();

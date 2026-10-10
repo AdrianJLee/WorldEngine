@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -23,6 +25,6 @@ namespace World::Math::Simd
 	//   * 语义 = 逐顶点 `transform * vertices[i]`,取 xyz(与 glm 版观感一致);
 	//   * 不改变任何调用方的确定性口径(同一输入同一输出);
 	//   * 非 x86-64 目标走同文件的标量回退(S3),两条路都被 `World.Simd` 的对照测试覆盖。
-	void MultiplyMat4ByVec4Batch4(const glm::mat4& transform, const glm::vec4* vertices,
+	WLD_API void MultiplyMat4ByVec4Batch4(const glm::mat4& transform, const glm::vec4* vertices,
 		glm::vec3* outPositions);
 }

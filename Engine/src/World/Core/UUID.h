@@ -1,10 +1,12 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Schema/Schema.h"
 
 namespace World
 {
-	class UUID
+	class WLD_API UUID
 	{
 	public:
 		UUID();

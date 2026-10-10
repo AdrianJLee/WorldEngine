@@ -55,7 +55,7 @@ namespace World::UI
 		std::string& out, std::string* error);
 
 	// 扁平绑定表里的一条:节点稳定 Id + 目标属性 + 已解析源。
-	struct UiBinding
+	struct WLD_API UiBinding
 	{
 		std::string NodeId;
 		std::string Target;

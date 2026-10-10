@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Plugins/PluginManifest.h"
+#include "World/Core/Export.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -36,7 +37,7 @@ namespace World::Plugins
 	// 发现两个插件根(不加载 DLL)。清单不合法 / 同根重复 id 的包记入 diagnostics 并跳过;
 	// 跨根同 id = 项目插件覆盖引擎插件(方案 §1 优先级),同样记入 diagnostics。
 	// 根不存在 = 0 个包(不是错误)。
-	bool DiscoverPluginPackages(const std::filesystem::path& enginePluginsRoot,
+	WLD_API bool DiscoverPluginPackages(const std::filesystem::path& enginePluginsRoot,
 		const std::filesystem::path& projectPluginsRoot,
 		const std::vector<std::filesystem::path>& devBinaryRoots,
 		std::vector<PluginPackage>* out, std::vector<std::string>* diagnostics);
@@ -81,5 +82,5 @@ namespace World::Plugins
 	};
 
 	// 完整打包:发现 → 闭包 → 引用硬门 → 拷贝 DLL → 摘要行(细节都写核心日志)。
-	PluginPackResult PackagePlugins(const PluginPackRequest& request);
+	WLD_API PluginPackResult PackagePlugins(const PluginPackRequest& request);
 }

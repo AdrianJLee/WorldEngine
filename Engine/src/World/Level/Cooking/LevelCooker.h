@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Level/Authoring/LevelPackage.h"
 #include "World/Level/Core/ChunkHeader.h"
 #include <filesystem>
@@ -23,7 +25,7 @@ namespace World::Level
 		std::vector<std::filesystem::path> OutputChunkFiles;
 	};
 
-	class LevelCooker
+	class WLD_API LevelCooker
 	{
 	public:
 		static CookResult CookPackage(

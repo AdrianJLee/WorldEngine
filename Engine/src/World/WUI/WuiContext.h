@@ -203,7 +203,7 @@ namespace World::Wui
 	};
 
 	// 帧级上下文:输入、持久状态、样式栈、焦点、绘制命令。
-	class WuiContext
+	class WLD_API WuiContext
 	{
 	public:
 		WuiContext();

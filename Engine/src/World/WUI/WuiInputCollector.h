@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/WUI/WuiContext.h"
 
 #include <unordered_set>
@@ -7,7 +9,7 @@
 namespace World::Wui
 {
 	// GLFW 事件 → WUI 输入态收集器。主线程每帧调用 BeginFrame/EndFrame。
-	class WuiInputCollector
+	class WLD_API WuiInputCollector
 	{
 	public:
 		void OnKey(uint32_t keyCode, bool down, bool repeat);

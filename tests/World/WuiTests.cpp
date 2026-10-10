@@ -309,6 +309,12 @@ namespace
 					size_t before = at;
 					while (before > 0 && isBlank(text[before - 1]))
 						--before;
+					if (before >= 7 && text.compare(before - 7, 7, "WLD_API") == 0)
+					{
+						before -= 7;
+						while (before > 0 && isBlank(text[before - 1]))
+							--before;
+					}
 					const bool asType = (before >= 6 && text.compare(before - 6, 6, "struct") == 0)
 						|| (before >= 5 && text.compare(before - 5, 5, "class") == 0);
 					size_t after = end;

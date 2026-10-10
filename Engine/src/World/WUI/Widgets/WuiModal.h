@@ -19,8 +19,8 @@ namespace World::Wui
 	// 一帧的模态输入封锁:宿主在**画任何面板之前**调用,画模态本体之前 EndModalInputBlock 解开。
 	// 语义 = 原来 shell 里那套 PushHoverBlocker(整窗) → 面板照常绘制但命中全部落空 → 画模态前 Clear。
 	// 必须成对:Begin 之后同一帧内必须 End(否则模态自己的控件也点不动)。
-	void BeginModalInputBlock(WuiContext& ctx);
-	void EndModalInputBlock(WuiContext& ctx);
+	WLD_API void BeginModalInputBlock(WuiContext& ctx);
+	WLD_API void EndModalInputBlock(WuiContext& ctx);
 
 	// 居中的模态外框:遮罩 + 面板 + 标题栏。内部按 ctx.ViewportSize() 居中(沿用 BeginModal 的算法)。
 	// 仅在 ctx.Modal() == desc.Id 时绘制;返回 true = 本帧模态可见,调用方继续画 body,并在结尾
@@ -32,9 +32,9 @@ namespace World::Wui
 		glm::vec2 Size { 420.0f, 320.0f };
 		float TitleHeight = 34.0f;
 	};
-	bool BeginModalFrame(WuiContext& ctx, const ModalFrameDesc& desc, WuiRect* frameRect,
+	WLD_API bool BeginModalFrame(WuiContext& ctx, const ModalFrameDesc& desc, WuiRect* frameRect,
 		bool* escapePressed, const WuiTheme& theme);
-	void EndModalFrame(WuiContext& ctx);
+	WLD_API void EndModalFrame(WuiContext& ctx);
 
 	// 底部按钮条:自动放在 frameRect 底部,返回点击结果(取消/确认)。
 	// 两个按钮都绘制、都登记无障碍节点(button;confirmEnabled=false 时登记为 disabled 且不可点)。
@@ -48,7 +48,7 @@ namespace World::Wui
 	inline constexpr float ModalFooterPadding = 16.0f;
 	inline constexpr float ModalFooterHeight = 30.0f;
 	// ModalFooter 内部转调 ModalButtons(固定宽度口径不变),自身签名/语义保持原样。
-	ModalResult ModalFooter(WuiContext& ctx, const WuiRect& frameRect, const std::string& confirmLabel,
+	WLD_API ModalResult ModalFooter(WuiContext& ctx, const WuiRect& frameRect, const std::string& confirmLabel,
 		const std::string& cancelLabel, WuiId confirmId, WuiId cancelId, bool confirmEnabled,
 		const WuiTheme& theme);
 
@@ -65,6 +65,6 @@ namespace World::Wui
 		// 原有两按钮宽度口径,不参与均分)。
 		float Width = 0.0f;
 	};
-	int ModalButtons(WuiContext& ctx, const WuiRect& frameRect, const ModalButtonDesc* buttons,
+	WLD_API int ModalButtons(WuiContext& ctx, const WuiRect& frameRect, const ModalButtonDesc* buttons,
 		std::size_t count, const WuiTheme& theme);
 }

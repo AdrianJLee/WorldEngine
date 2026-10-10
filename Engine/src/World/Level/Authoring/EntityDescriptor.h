@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include <cstdint>
 #include <filesystem>
 #include <glm/glm.hpp>
@@ -17,7 +19,7 @@ namespace World::Level
 	//
 	// Position / RotationEuler / Scale / Name 是**派生视图**(从文档解析而来,用于空间切分
 	// 与二进制快速记录),不落盘;文档是唯一事实源,改文档后由 RefreshDerivedFromDocument() 重算。
-	struct EntityDescriptor
+	struct WLD_API EntityDescriptor
 	{
 		uint64_t EntityUUID{ 0 };
 		uint64_t ChunkID{ 0 };

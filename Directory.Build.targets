@@ -1,5 +1,2 @@
 <Project>
-  <Target Name="FilterExports" BeforeTargets="Link" AfterTargets="PreLinkEvent" Condition="'$(ProjectName)' == 'World'">
-    <Exec Command="python &quot;$(MSBuildThisFileDirectory)tools/agents/filter_exports.py&quot; &quot;$(ProjectDir)World.dir/$(Configuration)/exports.def&quot;" />
-  </Target>
 </Project>

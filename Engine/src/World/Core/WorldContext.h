@@ -14,7 +14,7 @@ namespace World
 	class Scene;
 
 	// 引擎所有可扩展状态的显式所有者。宿主在 main 中创建,模块只拿到引用。
-	class WorldContext
+	class WLD_API WorldContext
 	{
 	public:
 		WorldContext();

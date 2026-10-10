@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/Plugins/PluginTypes.h"
 #include "World/Plugins/WePluginApi.h"
 
@@ -37,7 +39,7 @@ namespace World::Plugins
 	//   * engine 缺省 = 不限制;当前只接受 ">=X.Y" 形态(最低引擎版本);
 	//   * scope 由**位置**推导;清单若写了 `scope:` 且与位置不符 = 拒绝加载;
 	//   * ship 只接受 auto|always|never(语义在 T5 落地)。
-	struct PluginManifest
+	struct WLD_API PluginManifest
 	{
 		std::string Id;
 		std::string Name;              // 缺省 = id
@@ -83,9 +85,9 @@ namespace World::Plugins
 	// 事实源 = 根 `CMakeLists.txt` 的 `project(World VERSION …)`:该值由编译定义
 	// `WLD_ENGINE_VERSION` 带进 World(含所有链接 World 的宿主),这里只读它 —— 不复制
 	// 第二份版本号(缺编译定义时的兜底字面量仅服务"不经过 CMake 的独立编译"场景)。
-	const char* HostEngineVersion();
+	WLD_API const char* HostEngineVersion();
 	// 清单的 `engine: ">=X.Y"` 是否被宿主引擎满足(host.major.minor >= X.Y)。
 	// 约定:host 版本串不可解析 ⇒ 返回 true(宿主自身问题不应拒绝插件);
 	// 清单不带 engine: 时由调用方直接视为满足,不调本函数。
-	bool HostEngineSatisfies(uint32_t minimumMajor, uint32_t minimumMinor);
+	WLD_API bool HostEngineSatisfies(uint32_t minimumMajor, uint32_t minimumMinor);
 }

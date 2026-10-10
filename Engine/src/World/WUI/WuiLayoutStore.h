@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/WUI/WuiDock.h"
 
 #include <filesystem>
@@ -8,7 +10,7 @@
 namespace World::Wui
 {
 	// 布局持久化:默认布局 + JSON 读写;损坏/缺失回退默认布局。
-	class WuiLayoutStore
+	class WLD_API WuiLayoutStore
 	{
 	public:
 		static bool Save(const std::filesystem::path& path, const DockLayout& layout, std::string* error);

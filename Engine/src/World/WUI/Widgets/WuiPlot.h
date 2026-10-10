@@ -1,12 +1,14 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include "World/WUI/WuiWidget.h"
 #include <cstddef>
 
 namespace World::Wui
 {
 	// 折线图/柱状图:数据由调用方持有,控件**不拷贝样本**。
-	class WuiPlot final : public WuiWidget
+	class WLD_API WuiPlot final : public WuiWidget
 	{
 	public:
 		enum class Kind { Line, Bars };

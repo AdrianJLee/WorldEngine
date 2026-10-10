@@ -14,7 +14,7 @@
 namespace World
 {
 	// 网格顶点布局:直接复用 RHI 的属性/绑定描述,管线与网格共用同一份声明。
-	struct MeshVertexLayout
+	struct WLD_API MeshVertexLayout
 	{
 		std::vector<Rhi::VertexAttribute> Attributes;
 		std::vector<Rhi::VertexBinding> Bindings;

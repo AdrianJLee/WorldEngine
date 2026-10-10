@@ -29,7 +29,7 @@ namespace World
 		std::string Error;        // 首个失败的可读原因(可空)
 	};
 
-	class Renderer
+	class WLD_API Renderer
 	{
 	public:
 		static void Init();
@@ -127,8 +127,8 @@ namespace World
 			glm::mat4 ViewProjectionMatrix;
 		};
 
-		static WLD_API SceneData* m_SceneData;
-		static WLD_API Rhi::Handle<Rhi::Device> m_Device;
+		static SceneData* m_SceneData;
+		static Rhi::Handle<Rhi::Device> m_Device;
 	};
 }
 

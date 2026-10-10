@@ -1,5 +1,7 @@
 #pragma once
 
+#include "World/Core/Export.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -9,7 +11,7 @@
 namespace World::Wui
 {
 	// 最小 JSON 值/解析器/序列化器:为布局持久化与配置提供无外部依赖的数据格式。
-	class JsonValue
+	class WLD_API JsonValue
 	{
 	public:
 		enum class Type : uint8_t

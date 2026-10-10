@@ -64,8 +64,8 @@ namespace World::Wui
 	WLD_API uint32_t ThemeGeneration();
 	WLD_API bool IsDarkTheme();
 
-	void Panel(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiTheme& theme);
-	void Label(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const WuiColor& color, float fontSize);
+	WLD_API void Panel(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiTheme& theme);
+	WLD_API void Label(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const WuiColor& color, float fontSize);
 	// 标签列的默认宽度预算(设计单位)。旧调用点(不传 width)按它裁剪,而不是让文字压到
 	// 右侧控件上;面板有更精确的列宽时显式传 width。
 	// 150 = 现有面板最紧的标签列(SettingsPanel 的控件列在 x+170,标签列到 164)+ 余量。
@@ -76,10 +76,10 @@ namespace World::Wui
 	// 放不下就不画术语);② 主名自己都放不下时才缩略主名(EllipsizeToWidth 语义),规格与
 	// 调用方无障碍标签无必然关系 —— 只影响本行绘制文本。
 	// width 省略时用 LabelDefaultWidth;传 0 = 不做宽度裁剪(仅按自身文本绘制)。
-	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
+	WLD_API void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
 		const WuiColor& color, float fontSize, const WuiTheme& theme, float width);
 	// 兼容重载:旧调用点(Editor 侧 12 处)语义不变,内部按 LabelDefaultWidth 裁剪。
-	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
+	WLD_API void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
 		const WuiColor& color, float fontSize, const WuiTheme& theme);
 
 	// M4-TEX-P7 中间省略(文本进不了可用宽度时的**绘制期**裁剪口径;与编辑器侧
@@ -90,15 +90,15 @@ namespace World::Wui
 	//  - 只裁"要画的这一条文本":选项字符串、无障碍 value/label、控件返回值都由调用方保持完整,
 	//    搜索/读屏/回显读的仍是原串。
 	// width <= 0 或空文本 ⇒ 空串(没有可画的空间)。
-	std::string EllipsizeMiddleToWidth(const WuiContext& ctx, std::string_view text, float width, float fontSize);
+	WLD_API std::string EllipsizeMiddleToWidth(const WuiContext& ctx, std::string_view text, float width, float fontSize);
 
 	// P4-UX4 悬停提示(用户 2026-09-20:"鼠标悬停在一个设置里的选项是不是得有介绍"):
 	//  - `Tooltip(ctx, hoverRect, text)`:鼠标在该矩形内时登记文本(后登记覆盖先登记);
 	//  - `DrawTooltip(ctx, theme)`:宿主在**画完所有面板之后**调用一次,画到 overlay 层
 	//    (不受面板裁剪、永远在最上层);文本支持 '\n' 与按宽度自动换行。
 	// 文案约定(见 skill engine-ui-patterns):名称 + 一句用途 + 默认值/范围 + 生效时机 + 禁用原因。
-	void Tooltip(WuiContext& ctx, const WuiRect& hoverRect, const std::string& text);
-	void DrawTooltip(WuiContext& ctx, const WuiTheme& theme);
+	WLD_API void Tooltip(WuiContext& ctx, const WuiRect& hoverRect, const std::string& text);
+	WLD_API void DrawTooltip(WuiContext& ctx, const WuiTheme& theme);
 	// P4-UX6 焦点环:id 是当前焦点控件时画"圆角细描边 + 外发光"(颜色基色 = theme.FocusRing)。
 	// 控件在**自身绘制末尾**调用;环走 overlay 命令层(与 tooltip 同一机制),因此后画的兄弟控件
 	// 不会盖住它。没有焦点时什么都不画。
@@ -109,7 +109,7 @@ namespace World::Wui
 	//      不改变控件几何,也不动命中/布局)。
 	// 可辨识性:主环 alpha ≥ 0.7 且仍是实心细线,键盘焦点在任何主题底色上都读得出来;两条都不改
 	// 控件自身的矩形/a11y 节点。ringColor 非空 = 用它当基色(P1.5:per-state 的 border.focus 覆盖)。
-	void DrawFocusRing(WuiContext& ctx, const WuiRect& rect, WuiId id, const WuiTheme& theme,
+	WLD_API void DrawFocusRing(WuiContext& ctx, const WuiRect& rect, WuiId id, const WuiTheme& theme,
 		const WuiColor* ringColor = nullptr);
 
 	// ---- WUI-P1.5:Button 的样式结构(库默认 → 实例覆盖)----
@@ -162,40 +162,40 @@ namespace World::Wui
 		bool Bold = false;
 	};
 
-	WuiButtonResolvedStyle ResolveButtonStyle(const WuiButtonStyle* style, bool disabled, bool pressed,
+	WLD_API WuiButtonResolvedStyle ResolveButtonStyle(const WuiButtonStyle* style, bool disabled, bool pressed,
 		bool hovered, bool focused, const WuiColor& fallbackBg, const WuiColor& fallbackBorder,
 		const WuiColor& fallbackText, const WuiColor& fallbackFocusRing);
 
 	// style = nullptr(默认)= 既有行为:主题令牌 + 硬编码 8px/15px。
-	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme,
+	WLD_API bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme,
 		const WuiButtonStyle* style = nullptr);
-	bool Toggle(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
+	WLD_API bool Toggle(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	// P4-UX6 单行标签条:每个标签等分 rect.W,活跃标签 = ActiveBg 填充 + 底部 2px Accent 下划线;
 	// 每个标签登记无障碍节点 kind="tab"、value=(active==i),可被 ui.invoke 点击。
 	// 返回值 = 本帧选中项是否变化;中键点击某个标签把它的下标写进 *closeRequested(可选),
 	// 控件**不自行关闭**(由调用方决定:关面板 / 提示未保存 / 忽略)。
-	bool TabBar(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::vector<std::string>& tabs,
+	WLD_API bool TabBar(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::vector<std::string>& tabs,
 		int& active, const WuiTheme& theme, int* closeRequested = nullptr);
 	// P4-UX6 分段按钮(用法约定 2–4 项,代码对任意数量都按等分处理,空表直接返回 false):
 	// 同一圆角外壳内等分,选中项 ActiveBg + Accent 文本。无障碍节点 kind="segmented"(组,value=下标)
 	// + 子项 kind="segmented-option"(value=(selected==i))。返回值 = 选中项是否变化。
-	bool Segmented(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::vector<std::string>& options,
+	WLD_API bool Segmented(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::vector<std::string>& options,
 		int& selected, const WuiTheme& theme);
 	// 值驱动的勾选框(供 Inspector 等绑定外部状态):状态写回 value;
 	// 返回值 = 本帧是否被点击改值(与 Combo/DragInt/DragFloat 同约定)。
-	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool& value, const WuiTheme& theme);
+	WLD_API bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool& value, const WuiTheme& theme);
 	// 同上,带英文术语对照(中文界面下显示 "垂直同步  Vertical Sync")。
-	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::string& term,
+	WLD_API bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::string& term,
 		bool& value, const WuiTheme& theme);
 	// P4-UX6 多选行的三态勾选:mixed=true 画水平短横(—)而不是勾;点击后按"全部选中"处理
 	// (mixed 是按值传入的,本控件内部按 mixed=false、value=true 绘制并返回 true,由调用方把 value
 	// 写给它管辖的多个对象)。无障碍节点 value = "mixed" / "true" / "false",kind 与 Checkbox 相同。
-	bool CheckboxMixed(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+	WLD_API bool CheckboxMixed(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		bool& value, bool mixed, const WuiTheme& theme);
-	void SliderFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float min, float max, const WuiTheme& theme);
+	WLD_API void SliderFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float min, float max, const WuiTheme& theme);
 	// 数值编辑:点击进入文本输入,按住左右拖动微调;Enter 提交,Escape 取消。
-	bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme);
-	bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int64_t min, int64_t max, const WuiTheme& theme);
+	WLD_API bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme);
+	WLD_API bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int64_t min, int64_t max, const WuiTheme& theme);
 
 	// ---- P4-U24:数值控件族(值常显 + 可输入 + 固定占位恢复默认) ----
 	// **分类规则(硬口径;面板按字段语义选控件,不要逐字段特判)**:
@@ -219,11 +219,11 @@ namespace World::Wui
 		int Decimals = 3;          // 显示/编辑小数位;-1 = 自动(去尾零)
 		bool Steppers = false;     // NumberField 是否画 [−]/[+] 步进箭头(StepperInt 恒为真)
 	};
-	bool DragBarFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value,
+	WLD_API bool DragBarFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value,
 		float min, float max, const WuiTheme& theme, const WuiNumberStyle& style = {});
-	bool NumberFieldInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value,
+	WLD_API bool NumberFieldInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value,
 		int64_t min, int64_t max, const WuiTheme& theme, const WuiNumberStyle& style = {});
-	bool StepperInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int& value, int min, int max,
+	WLD_API bool StepperInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int& value, int min, int max,
 		const WuiTheme& theme, const WuiNumberStyle& style = {});
 	// **固定占位"恢复默认"**:调用方按行高**恒定预留** rect(例如 24×24 命中位;VEC-H7 起可见底板
 	//   = 20×20 居中在里面,设计口径的"20×20 图标按钮");偏离默认(modified=true)时高亮可点,
@@ -236,7 +236,7 @@ namespace World::Wui
 	//   返回值 = 本帧被点击或键盘激活(modified=false 恒 false,调用方据此写回默认值)。
 	//   无障碍:kind="button"(与行内 `-`/`+`、分组头同一契约)、value="modified"/"default"、
 	//   enabled/interactive 跟随 modified、tooltip 进节点 Tooltip(禁用态 = 那条理由)。
-	bool ResetDefaultButton(WuiContext& ctx, WuiId id, const WuiRect& rect, bool modified,
+	WLD_API bool ResetDefaultButton(WuiContext& ctx, WuiId id, const WuiRect& rect, bool modified,
 		const WuiTheme& theme, const std::string& label = std::string(),
 		const std::string& tooltip = std::string());
 
@@ -282,8 +282,8 @@ namespace World::Wui
 	{
 		// 显示文案(已本地化;不含英文术语)。空 = 只画值列(纯值行)。
 		std::string Label;
-		std::string Term;              // 英文术语对照(中文界面用;走 LabelWithTerm 的裁剪口径)
-		std::string Tooltip;           // 悬停说明;禁用行这里是禁用理由(第二通道同源)
+	std::string Term;              // 英文术语对照(中文界面用;走 LabelWithTerm 的裁剪口径)
+	std::string Tooltip;           // 悬停说明;禁用行这里是禁用理由(第二通道同源)
 		// 无障碍节点(节点 id = PropertyRow 的 id 参数;与面板既有 id 契约逐字节一致)。
 		const char* A11yKind = "label";
 		std::string A11yLabel;         // 空 = 用 Label
@@ -324,7 +324,7 @@ namespace World::Wui
 
 	struct PropertyRowResult
 	{
-		WuiRect FieldRect {};          // 值列矩形(调用方把字段控件画在这里)
+	WuiRect FieldRect {};          // 值列矩形(调用方把字段控件画在这里)
 		WuiRect ResetRect {};
 		bool ResetClicked = false;
 	};
@@ -356,9 +356,9 @@ namespace World::Wui
 		std::string Label;
 		std::string Term;
 		std::string Tooltip;
-		std::string Trailing;          // 右侧计数/摘要文本(可选,如 "(3)")
+	std::string Trailing;          // 右侧计数/摘要文本(可选,如 "(3)")
 		std::string A11yLabel;
-		std::string A11yValue;         // 覆盖 value(默认 "open"/"closed")
+	std::string A11yValue;         // 覆盖 value(默认 "open"/"closed")
 		bool Open = false;
 		bool Enabled = true;
 		bool Modified = false;
@@ -473,14 +473,14 @@ namespace World::Wui
 		std::string Label;
 		std::string Placeholder;
 	};
-	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme,
+	WLD_API bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme,
 		bool* cancelledOut = nullptr, const TextFieldA11y* a11y = nullptr);
 	// P4-UX6 带行内错误的文本字段:error 非空时描边用 theme.Danger,并在控件下方画一行 Caption
 	// 字号的 Danger 说明(调用方负责给这一行留高度;文案超宽按省略号裁剪)。
 	// 返回值与 TextField 相同(回车提交)。无障碍节点 value 追加 " error=<文本>"。
-	bool TextFieldEx(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
+	WLD_API bool TextFieldEx(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
 		const WuiTheme& theme, const std::string& error, const TextFieldA11y* a11y = nullptr);
-	void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme);
+	WLD_API void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme);
 
 	// ---- P1c-LIB2:渐变填充 / 禁用态按钮(面板缺件 → 库件) ----
 
@@ -488,10 +488,10 @@ namespace World::Wui
 	// 任何几何改写 —— 需要裁剪由调用方套 ClipScope)。四个角颜色顺序 = TL → TR → BR → BL,
 	// 与 WuiDrawCommand::Corners 的固定顺序一致;把这四项写成面板手写的
 	// `{Gradient, rect, Corners={…}}` 就是同一条命令(逐字段等价)。
-	void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& topLeft, const WuiColor& topRight,
+	WLD_API void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& topLeft, const WuiColor& topRight,
 		const WuiColor& bottomRight, const WuiColor& bottomLeft);
 	// 双色便捷版:vertical=true(默认)= 上→下,false = 左→右;等价于把 from/to 复制到相应两角。
-	void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& from, const WuiColor& to,
+	WLD_API void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& from, const WuiColor& to,
 		bool vertical = true);
 
 	// ---- P1c-LIB3:即时线段原语(屏幕空间"投影线段"四边形 → 库件) ----
@@ -507,7 +507,7 @@ namespace World::Wui
 	//  · thickness 不钳制、不做最小线宽兜底:<=0 时得到零面积四边形(与面板手写同样的退化结果);
 	//  · 命令只设 Kind/Color/Vertices,其余字段保持 WuiDrawCommand 默认值(与面板默认构造一致)。
 	// 需要裁剪(如视口外不越界)由调用方套 Wui::ClipScope。
-	void LineSegment(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, const WuiColor& color,
+	WLD_API void LineSegment(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, const WuiColor& color,
 		float thickness = 1.0f);
 
 	// 带禁用态 + 理由的按钮(材质/内容浏览器面板里 ActionButton / ModalActionButton 的库化入口)。
@@ -532,7 +532,7 @@ namespace World::Wui
 		Muted          // 次要入口(行内 ×):无填充 + TextMuted 文字,悬停浮出底色、文字转常规
 	};
 
-	bool ButtonEx(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+	WLD_API bool ButtonEx(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const WuiTheme& theme, bool enabled = true, bool primary = false,
 		const std::string& tooltip = std::string(), ButtonTone tone = ButtonTone::Default);
 
@@ -544,38 +544,38 @@ namespace World::Wui
 	//  · 返回值 = 本帧是否因用户选择而改值(true = selected 已写为新下标;越界态本身不改值)。
 	//  · `displayText`(M19a,可选):非空时**触发器只画这条文案**(如 Add 入口的固定标题),
 	//    空串 = 今天的 options[selected];a11y value / 弹层选项 / 返回值与写回都不受影响。
-	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+	WLD_API bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme,
 		const std::string& displayText = std::string());
 	// 可搜索下拉(资源选择用):点击/输入展开带输入框的弹层,按子串过滤选项,
 	// 滚轮滚动结果列表,回车选中第一个匹配项。返回 true 表示本帧选了新值(写入 selected)。
 	// M19a:与 Combo 同一条 `displayText` 口径(闭合态触发器的显示文案;空 = 当前项)。
-	bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+	WLD_API bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme,
 		const std::string& displayText = std::string());
-	bool TreeNode(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool leaf, const WuiTheme& theme);
+	WLD_API bool TreeNode(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool leaf, const WuiTheme& theme);
 
 	// 菜单与弹窗
-	bool BeginMenuBar(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
-	void EndMenuBar(WuiContext& ctx);
-	bool BeginMenu(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
-	void EndMenu(WuiContext& ctx, WuiId id, const WuiRect& panel, const WuiTheme& theme);
+	WLD_API bool BeginMenuBar(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
+	WLD_API void EndMenuBar(WuiContext& ctx);
+	WLD_API bool BeginMenu(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
+	WLD_API void EndMenu(WuiContext& ctx, WuiId id, const WuiRect& panel, const WuiTheme& theme);
 	// 弹出面板背景(在条目之前调用,避免背景盖住文字)。
-	void DrawPanelSurface(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
-	bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool enabled, const WuiTheme& theme);
+	WLD_API void DrawPanelSurface(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
+	WLD_API bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool enabled, const WuiTheme& theme);
 	// checked:在标签前绘制勾选标记。
-	bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool checked, bool enabled, const WuiTheme& theme);
-	bool BeginModal(WuiContext& ctx, WuiId id, const std::string& title, const glm::vec2& size, WuiRect* panel, const WuiTheme& theme);
-	void EndModal(WuiContext& ctx, WuiId id);
+	WLD_API bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool checked, bool enabled, const WuiTheme& theme);
+	WLD_API bool BeginModal(WuiContext& ctx, WuiId id, const std::string& title, const glm::vec2& size, WuiRect* panel, const WuiTheme& theme);
+	WLD_API void EndModal(WuiContext& ctx, WuiId id);
 
 	// 滚动区:Begin 后子项按 -scrollY 偏移绘制,End 恢复裁剪。
 	// P1c-E4:id != 0 时滚动区进焦点表(Tab 可达)并登记 kind="scroll-area" 节点(value="scroll=<y>/<max>",
 	// focused 跟随焦点;滚动区自己不是点击目标 → interactive=false,滚轮走 ui.wheel、键盘走下面的键)。
 	// 焦点在它上面时 ↑/↓ = ±40px、PageUp/PageDown = ±一屏(0.9×H)、Space = +一屏、Home/End = 两端。
 	// ListView/TreeView 这类自带容器节点的调用方传 0(避免同一矩形出现两个停靠点/两个节点)。
-	bool BeginScrollArea(WuiContext& ctx, const WuiRect& viewport, float contentHeight, float& scrollY,
+	WLD_API bool BeginScrollArea(WuiContext& ctx, const WuiRect& viewport, float contentHeight, float& scrollY,
 		const WuiTheme& theme, WuiId id = 0);
-	void EndScrollArea(WuiContext& ctx);
+	WLD_API void EndScrollArea(WuiContext& ctx);
 
 	// P1c-LIB2:有状态滚动条(轨道 + 可选上下翻页按钮 + 滑块;位置既读得出、也设得进)。
 	//  · 口径与 BeginScrollArea 一致:contentHeight / viewportHeight / scrollY 都由调用方持有,
@@ -588,11 +588,11 @@ namespace World::Wui
 	//    (前缀与 BeginScrollArea 的 value 同口径,脚本按同一套字符串读);还有滚动量时
 	//    Enabled/Interactive=true 且进焦点表(Tab 可达),没有滚动量时 Enabled/Interactive=false。
 	// 返回 true = 本帧 scrollY 真的变了(调用方据此记操作记录)。
-	bool ScrollBar(WuiContext& ctx, WuiId id, const WuiRect& rect, float contentHeight, float viewportHeight,
+	WLD_API bool ScrollBar(WuiContext& ctx, WuiId id, const WuiRect& rect, float contentHeight, float viewportHeight,
 		float& scrollY, const WuiTheme& theme, bool pageButtons = true);
 
 	// 表格单元矩形(按列宽累计)。
-	WuiRect TableCell(const WuiRect& table, const std::vector<float>& columns, size_t row, size_t column, float rowHeight);
+	WLD_API WuiRect TableCell(const WuiRect& table, const std::vector<float>& columns, size_t row, size_t column, float rowHeight);
 
 	// ---- P4-UX7 / U2B:表头排序 / 颜色字段 / 分隔条 ----
 	// 表头 + 排序:一行常驻表头,列矩形按 TableCell 口径用 columnWidths 累计排布。
@@ -604,7 +604,7 @@ namespace World::Wui
 	//  无障碍:每列一个节点 kind="table-header"、label=列名、value="asc"/"desc"/""、interactive=true,
 	//  节点 id 由父 id 派生(稳定);脚本 ui.invoke 注入坐标后走与鼠标同一条 ctx.IsClicked 路径。
 	//  返回 true = 本次改动了排序状态(sortColumn 或 ascending)。
-	bool TableHeader(WuiContext& ctx, WuiId id, const WuiRect& table, const std::vector<std::string>& columns,
+	WLD_API bool TableHeader(WuiContext& ctx, WuiId id, const WuiRect& table, const std::vector<std::string>& columns,
 		const std::vector<float>& columnWidths, int& sortColumn, bool& ascending, const WuiTheme& theme);
 	// 颜色字段:折叠态 = rect(建议 22 高) 内左侧 6px 圆角色块(棋盘格底 + 当前色)+ 右侧色值文本。
 	//  点击(或焦点上 Enter/Space)用 ctx.OpenPopup/ClosePopup 展开 220×132 弹层:R/G/B/A 四条
@@ -617,7 +617,7 @@ namespace World::Wui
 	//  松手那一帧落最终值。修的是用户报的「选取颜色板左键拖拽不松开,颜色不会变」:旧实现每帧都要
 	//  `IsHovered(子区域)`,拖动一离开那个十几像素高的条/板就停更,看起来像"只有松手才变"。
 	//  返回 true = 本次通过滑杆或 hex 改动了 rgba。
-	bool ColorField(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& rgba, const WuiTheme& theme);
+	WLD_API bool ColorField(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& rgba, const WuiTheme& theme);
 	// 分隔条:vertical=true = 竖向条(左右拖动改 value,光标 ResizeEW);false = 横向条(上下拖动,
 	//  ResizeNS)。命中带宽固定 6px、居中于传入 rect 的轴线;视觉线默认 1px(theme.Border),
 	//  悬停 3px(theme.BorderStrong),拖动中 3px(theme.Accent)。拖动按"按下时的 value + 轴向位移"
@@ -628,7 +628,7 @@ namespace World::Wui
 	//  为什么需要:本控件按"值 += 轴向位移"累加(条左边的面板适用)。右分隔条改的是**右侧**面板的
 	//  宽度,不取反就是"往右拖、面板反而变宽、边界往左跑"(用户报的左右拉反向)。
 	//  默认 false = 既有调用点逐像素不变。
-	bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, float& value,
+	WLD_API bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, float& value,
 		float minValue, float maxValue, const WuiTheme& theme, bool reverse = false);
 
 	// ---- P4-UX12 / U2C:向量字段 / 空状态 ----
@@ -645,7 +645,7 @@ namespace World::Wui
 	//  无障碍:整体 kind="vec3-field"、value="x,y,z";三个分量各登记一个 kind="vec3-axis" 子节点
 	//  (id = DerivedChildId(id, ".axis.", i)、label="X"/"Y"/"Z"、value = 该分量的字符串化数值、
 	//  interactive=true、不是独立焦点项)。返回值 = 本帧 value 是否真的被改动。
-	bool Vec3Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec3& value, float speed,
+	WLD_API bool Vec3Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec3& value, float speed,
 		float minValue, float maxValue, const WuiTheme& theme, int layout = 0);
 	// Vec2/Vec4 同族(与 Vec3Field **同一份实现** VecFieldCore,手感/子节点约定逐条一致):
 	//  - 分量左侧 12px 画 X/Y(/Z/W)小标签(与 Vec3Field 同一外观:theme.TextMuted + Caption 字号;
@@ -660,9 +660,9 @@ namespace World::Wui
 	//  无障碍:整体 kind="vec2-field"/"vec4-field"、value="x,y" / "x,y,z,w";每个分量登记
 	//  kind="vec2-axis"/"vec4-axis" 子节点(id = DerivedChildId(id, ".axis.", i)、label="X"/"Y"…)。
 	//  返回 true = 本帧 value 是否真的被改动。
-	bool Vec2Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec2& value, float speed,
+	WLD_API bool Vec2Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec2& value, float speed,
 		float minValue, float maxValue, const WuiTheme& theme, int layout = 0);
-	bool Vec4Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& value, float speed,
+	WLD_API bool Vec4Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& value, float speed,
 		float minValue, float maxValue, const WuiTheme& theme, int layout = 0);
 	// 空状态(列表/面板没有内容时的统一表达):垂直居中依次排 glyph(可空,FontSizeHeading +
 	//  theme.TextMuted)→ title(FontSizeTitle + theme.Text)→ hint(可空,FontSizeSmall + theme.TextMuted,
@@ -671,7 +671,7 @@ namespace World::Wui
 	//  视觉克制:**不画**外框/背景块(面板自己已经有背景),只画文字与按钮。
 	//  无障碍:一个 kind="empty-state" 节点(label=title、value=hint、interactive=false);有 action 时
 	//  按钮由 Button 自己登记(可脚本点击)。返回值 = 用户点了 action 按钮。
-	bool EmptyState(WuiContext& ctx, const WuiRect& rect, const std::string& glyph, const std::string& title,
+	WLD_API bool EmptyState(WuiContext& ctx, const WuiRect& rect, const std::string& glyph, const std::string& title,
 		const std::string& hint, const std::string& actionLabel, WuiId actionId, const WuiTheme& theme);
 
 	// 标准窗口控制(最小化/最大化或还原/关闭),绘制在 bar 右侧;返回被点击的按钮。
@@ -682,5 +682,5 @@ namespace World::Wui
 		Maximize = 2,
 		Close = 4,
 	};
-	WindowControl WindowControls(WuiContext& ctx, const WuiRect& bar, const WuiTheme& theme, bool maximized = false);
+	WLD_API WindowControl WindowControls(WuiContext& ctx, const WuiRect& bar, const WuiTheme& theme, bool maximized = false);
 }

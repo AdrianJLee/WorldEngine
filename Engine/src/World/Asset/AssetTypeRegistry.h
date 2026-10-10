@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include "World/Core/Export.h"
 
 namespace World
 {
@@ -43,7 +44,7 @@ namespace World
 
 	// 进程内唯一的一张表。实现放在 .cpp 里,符号随 WorldRuntime.dll 导出 ——
 	// 保证 Editor 与 World 侧读到的是**同一个实例**(头文件里放 inline 单例会各自生成副本)。
-	class AssetTypeRegistry
+	class WLD_API AssetTypeRegistry
 	{
 	public:
 		static AssetTypeRegistry& Get();

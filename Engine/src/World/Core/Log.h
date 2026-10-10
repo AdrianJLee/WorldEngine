@@ -11,7 +11,7 @@
 
 namespace World
 {
-	class  Log
+	class WLD_API Log
 	{
 	public:
 		static void Init();
@@ -22,8 +22,8 @@ namespace World
 		// 没有它就只能靠 stdout 重定向,拿不到"运行时刚刚发生了什么"。
 		static std::vector<std::string> RecentLines(size_t maxLines);
 	private:
-		static WLD_API std::shared_ptr<spdlog::logger> s_CoreLogger;
-		static WLD_API std::shared_ptr<spdlog::logger> s_ClientLogger;
+		static std::shared_ptr<spdlog::logger> s_CoreLogger;
+		static std::shared_ptr<spdlog::logger> s_ClientLogger;
 	};
 }
 

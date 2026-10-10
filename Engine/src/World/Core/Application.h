@@ -9,7 +9,7 @@
 
 namespace World
 {
-	class Application
+	class WLD_API Application
 	{
 	public:
 		Application(const std::string& name, WorldContext& context);
@@ -53,7 +53,7 @@ namespace World
 
 		LayerStack m_LayerStack;
 
-		static WLD_API Application* s_Instance;
+		static Application* s_Instance;
 
 
 	};
