@@ -238,6 +238,8 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("save", std::make_unique<SavePanel>());
 		m_PanelRegistry.emplace("levels", std::make_unique<LevelPanel>());
+		// 数据层(独立栏位):编辑当前打开关卡的层定义(与 Levels 面板分工,见 EditorShell_Internal.h)。
+		m_PanelRegistry.emplace("data_layers", std::make_unique<DataLayersPanel>());
 		m_PanelRegistry.emplace("level_streaming", std::make_unique<LevelStreamingPanel>());
 		m_PanelRegistry.emplace("input", std::make_unique<InputMapPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
@@ -1117,6 +1119,7 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 			{ "operations",      { "panel.operations", "Operations" } },
 			{ "save",            { "panel.save", "Save" } },
 			{ "levels",          { "panel.levels", "Levels" } },
+			{ "data_layers",     { "panel.data_layers", "Data Layers" } },
 			{ "gallery",         { "panel.gallery", "Widget Gallery" } },
 			{ "input",           { "panel.input", "Input Map" } },
 			{ "scripts",         { "panel.scripts", "Scripts" } },

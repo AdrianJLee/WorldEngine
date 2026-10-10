@@ -8,6 +8,7 @@
 #include "WUI/Panels/ReadoutPanels.h"
 #include "WUI/Panels/SavePanel.h"
 #include "WUI/Panels/LevelPanel.h"
+#include "WUI/Panels/DataLayersPanel.h"
 #include "WUI/Panels/LevelStreamingPanel.h"
 #include "WUI/Panels/MaterialEditorPanel.h"
 #include "WUI/Panels/TextureSettingsPanel.h"

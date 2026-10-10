@@ -1,0 +1,18 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "editor",
+  "$language": "zh-CN",
+  "$owns": [
+    "panel.data_layers."
+  ],
+  "panel.data_layers.title": "数据层",
+  "panel.data_layers.level": "关卡:{id}",
+  "panel.data_layers.hint": "每层一位;默认激活 = 打开关卡时该层可见(视口工具栏可临时开关)。",
+  "panel.data_layers.mask": "掩码 {mask}",
+  "panel.data_layers.default_active": "默认激活",
+  "panel.data_layers.add_name": "请输入新层的名字。",
+  "panel.data_layers.full": "32 个层位已用尽。",
+  "panel.data_layers.keep_one": "关卡至少要保留一个数据层。",
+  "panel.data_layers.in_use": "仍有实体归属该层 —— 先在属性面板改掉它们的层归属再删除。",
+  "panel.data_layers.no_level": "还没有打开关卡。先在 Levels(关卡)面板 Open 一个关卡,这里才会出现它的数据层。"
+}

@@ -118,6 +118,9 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 			{ "operations",      EditorShell::PanelForm::Docked, {} },
 			{ "save",            EditorShell::PanelForm::Docked, {} },
 			{ "levels",          EditorShell::PanelForm::Docked, {} },
+			// 数据层(2026-10-10 用户口径:"把数据层UI和关卡栏位分开单独成一个栏位")——
+			// Levels 管"有哪些关卡 / 打开哪一个",这一栏管"打开的这个关卡有哪些层"。
+			{ "data_layers",     EditorShell::PanelForm::Docked, {} },
 			// 独立窗口(用户指定):Widget Gallery、Input Map、Scripts(与 2026-09-20 起的
 			// Project Settings)。
 			{ "gallery",         EditorShell::PanelForm::Independent, { 120.0f, 120.0f, 520.0f, 400.0f } },

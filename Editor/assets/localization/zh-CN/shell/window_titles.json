@@ -14,6 +14,7 @@
     "panel.operations",
     "panel.save",
     "panel.levels",
+    "panel.data_layers",
     "panel.gallery",
     "panel.input",
     "panel.scripts"
@@ -29,6 +30,7 @@
   "panel.operations": "操作记录",
   "panel.save": "存档",
   "panel.levels": "关卡",
+  "panel.data_layers": "数据层",
   "panel.gallery": "控件库",
   "panel.input": "输入映射",
   "panel.scripts": "脚本"
