@@ -566,7 +566,7 @@ namespace World::Editor
 			[&prefs] { return prefs.Data().AssetHotReload; },
 			[&prefs] { prefs.SetAssetHotReload(true); return true; });
 
-		// HOTR-P2-T5:场景 `.wd` 自动重开(仅"文档干净 + 编辑态"时;有未保存改动仍然只提示)。
+		// HOTR-P2-T5:关卡入口 `.wlevel` 自动重开(仅"文档干净 + 编辑态"时;有未保存改动仍然只提示)。
 		addBool("editor.workflow.scene_auto_reload", "Workflow", SettingApply::Immediate, "Scene Auto Reload",
 			"Scene auto reload\nReopens the open level when its .wlevel changes on disk, but only while the document has no unsaved edits and the editor is in Edit mode; the selection and the editor camera are restored. With unsaved edits the scene is never replaced (the viewport keeps showing the reopen prompt).\nDefault: on (the WLD_SCENE_AUTORELOAD=0 environment variable overrides). Applies immediately.",
 			[&prefs] { return FormatBool(prefs.Data().SceneAutoReload); },

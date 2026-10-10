@@ -96,7 +96,7 @@ struct GeneratedAccess<World::UUIDComponent>
             },
             &StorageBindingOf(),
             "Scene",
-            "Persistence identity written into the .wd file so entities can be matched across save and load; every entity is expected to carry one.",
+            "Persistence identity written into the entity document so entities can be matched across save and load; every entity is expected to carry one.",
             true,
             false,
         };

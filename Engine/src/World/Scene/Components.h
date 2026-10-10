@@ -32,7 +32,7 @@ namespace World
 		WE_SCHEMA_BODY(World, UUIDComponent, Component)
 			WE_SCHEMA_META(Category("Scene"),
 				Core(),
-				Doc("Persistence identity written into the .wd file so entities can be matched across save and load; every entity is expected to carry one."))
+				Doc("Persistence identity written into the entity document so entities can be matched across save and load; every entity is expected to carry one."))
 			WE_FIELD(ID, Object, Of(UUID));
 		WE_SCHEMA_END
 	};
@@ -200,7 +200,7 @@ namespace World
 		WE_SCHEMA_END
 	};
 
-	// WP2(PECS 1.1):运行期子列表缓存。**非 schema**(不入 .wd、不进属性面板、不参与 schema 复制),
+	// WP2(PECS 1.1):运行期子列表缓存。**非 schema**(不入 .entity、不进属性面板、不参与 schema 复制),
 	// 读档后由 SceneSerializer 按 Parent 重建,写路径由 Hierarchy::SetParent / InsertChild 维护。
 	// 拆出来是为了让 HierarchyComponent 保持平凡可拷贝(原 struct 内嵌 std::vector 会带 24B 堆指针)。
 	struct HierarchyChildrenComponent
@@ -215,7 +215,7 @@ namespace World
 
 	// P6:固定步长 → 渲染插值的内部状态。
 	//
-	// **非 schema**:不入 .wd、不进属性面板、不参与序列化(与 WorldTransformComponent 同口径)。
+	// **非 schema**:不入 .entity、不进属性面板、不参与序列化(与 WorldTransformComponent 同口径)。
 	// 只由物理系统(步进前记录)与渲染抽取(写 Model 时读取)使用:
 	//   * `PreviousLocation/Rotation/Scale` = 上一固定步开始时该实体的**局部 TRS**
 	//     (权威分量,不是派生矩阵 —— 见下面 O2 的说明);
@@ -320,7 +320,7 @@ namespace World
 	// 决定用哪套骨架);Material 空 = 走模型的材质槽/Color 回退。
 	// AnimationClip 空 = 第 0 条 clip;Time 是动画系统每帧写入的运行态(允许进 schema,
 	// Play/Simulate 下由 AnimationSystem 写,属性面板只读)。
-	// 字段 id 全部显式钉住("SK…" ASCII):一旦写进 .wd 存档就不能再改,否则旧场景迁移语义漂移。
+	// 字段 id 全部显式钉住("SK…" ASCII):一旦写进 .entity 存档就不能再改,否则旧场景迁移语义漂移。
 	struct SkinnedMeshRendererComponent
 	{
 		AssetRef Mesh;
@@ -373,7 +373,7 @@ namespace World
 	// PECS(相机组件数据导向化):投影矩阵这类派生量不进组件,改由 CameraSystem 按
 	// (CameraSettings 参数, 有效宽高比, 视口尺寸)指纹脏标记缓存到本组件。
 	//
-	// **非 schema**:不入 .wd、不进属性面板、不参与序列化(与 WorldTransformComponent 同口径)。
+	// **非 schema**:不入 .entity、不进属性面板、不参与序列化(与 WorldTransformComponent 同口径)。
 	// 由 Scene 在结构提交点预建(OnRuntimeStart / 组件新增),运行期只更新字段值。
 	struct CameraViewComponent
 	{
@@ -553,7 +553,7 @@ namespace World
 	};
 
 	// P1b D6:3D 物理(Jolt)组件。字段 id 全部显式钉住("RB3D…"/"…3D…" ASCII):
-	// 组件一旦写进 .wd 存档就不能再改 id,否则旧场景迁移语义会漂移,--check 门禁也要求
+	// 组件一旦写进 .entity 存档就不能再改 id,否则旧场景迁移语义会漂移,--check 门禁也要求
 	// 生成物与注解逐字节一致。
 	struct RigidBody3DComponent
 	{

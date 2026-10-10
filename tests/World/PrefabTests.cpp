@@ -126,7 +126,7 @@ int main()
 			uuids.insert(static_cast<uint64_t>(destinationRegistry.get<UUIDComponent>(entity).ID));
 		CHECK(uuids.size() == static_cast<size_t>(destinationRegistry.view<UUIDComponent>().size()));
 
-		// 6. 资产往返:.wprefab 保存后能从文件实例化(与 .wd 同格式,复用同一序列化器)。
+		// 6. 资产往返:.wprefab 保存后能从文件实例化(与退役的 .wd 同格式(同一序列化器))。
 		{
 			const std::filesystem::path prefabPath =
 				std::filesystem::temp_directory_path() / "worldengine-prefab-test.wprefab";
@@ -242,11 +242,11 @@ int main()
 			const std::filesystem::path prefabPath =
 				std::filesystem::temp_directory_path() / "worldengine-prefab-persist.wprefab";
 			const std::filesystem::path scenePath =
-				std::filesystem::temp_directory_path() / "worldengine-prefab-persist.wd";
+				std::filesystem::temp_directory_path() / "worldengine-prefab-persist.wprefab";
 			const std::filesystem::path emptyScenePath =
-				std::filesystem::temp_directory_path() / "worldengine-prefab-empty.wd";
+				std::filesystem::temp_directory_path() / "worldengine-prefab-empty.wprefab";
 			const std::filesystem::path orphanScenePath =
-				std::filesystem::temp_directory_path() / "worldengine-prefab-orphan.wd";
+				std::filesystem::temp_directory_path() / "worldengine-prefab-orphan.wprefab";
 
 			std::string error;
 			CHECK(SaveFromScene(source, Entity(&source, root), prefabPath, &error));
@@ -273,7 +273,7 @@ int main()
 			CHECK(&updated == &record);
 			CHECK(GetOverrideCount(updated) == 1);
 
-			// A → .wd:Prefabs 块写来源路径与实体 UUID(而不是 entt 句柄)。
+			// A → 整场景文档:Prefabs 块写来源路径与实体 UUID(而不是 entt 句柄)。
 			{
 				SceneSerializer serializer(sceneA);
 				CHECK(serializer.Serialize(scenePath.string()));
@@ -310,7 +310,7 @@ int main()
 			CHECK(restoredFields->second.size() == 1);
 			CHECK(restoredFields->second[0] == "TransformComponent.Location");
 
-			// 空注册表:Prefabs 块不写(默认 .wd 形态不变)。
+			// 空注册表:Prefabs 块不写(默认文档形态不变)。
 			sceneB->PrefabInstances().clear();
 			{
 				SceneSerializer serializer(sceneB);

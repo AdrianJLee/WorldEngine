@@ -37,7 +37,7 @@ namespace World::Editor
 		// ---- P4-UX7:编辑器 / 工作流 / 自动化 / 诊断 ----
 		float ScriptFontSize = 14.0f;                   // 10..32,脚本编辑器初始字号(用户明确要过)
 		bool AssetHotReload = true;                     // 资产/材质热重载;WLD_ASSET_HOTRELOAD 覆盖
-		// HOTR-P2-T5:文档场景(`.wd`)被外部改动且文档干净、编辑态时自动重开(选择/相机恢复);
+		// HOTR-P2-T5:文档关卡(`.wlevel`)被外部改动且文档干净、编辑态时自动重开(选择/相机恢复);
 		// 文档有未保存改动 → 仍然只提示(绝不自动覆盖)。`WLD_SCENE_AUTORELOAD=0` 可关(自动化用)。
 		bool SceneAutoReload = true;
 		// PROJ-2/T1:没有显式项目时,启动自动重启到"最近项目"第一条(只自动打开一次,

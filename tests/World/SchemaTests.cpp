@@ -230,7 +230,7 @@ int main()
 			// (Array(Struct) / Map(Struct) 的元素是"字段名 → 值"的递归 map)。
 			{
 				const std::filesystem::path path =
-					std::filesystem::temp_directory_path() / "worldengine-schema-containers.wd";
+					std::filesystem::temp_directory_path() / "worldengine-schema-containers.entity";
 				{
 					Ref<Scene> scene = CreateRef<Scene>(context);
 					Entity entity = Entity::CreateEntity(scene.get(), "ContainerRoundTrip", World::UUID(uint64_t(0x2233)));
@@ -284,7 +284,7 @@ int main()
 			entity.AddComponent<TransformComponent>().SetTransform(glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(0.1f, 0.2f, 0.3f), glm::vec3(2.0f));
 			entity.AddComponent<BoxCollider2DComponent>().Density = 3.5f;
 
-			const std::filesystem::path path = std::filesystem::temp_directory_path() / "worldengine-schema-roundtrip.wd";
+			const std::filesystem::path path = std::filesystem::temp_directory_path() / "worldengine-schema-roundtrip.entity";
 			SceneSerializer writer(scene);
 			CHECK(writer.Serialize(path.string()));
 
@@ -355,7 +355,7 @@ int main()
 			CHECK(std::holds_alternative<std::string>(FindField(*kinds, "TextValue")->Default));
 
 			// Text 端到端:边界字符串 ↔ InlineString<N>(TextOps),并经通用读写器往返。
-			// 这是新 kind 的关键验收 —— 少了它,"Text 能进 .wd"就只是推断。
+			// 这是新 kind 的关键验收 —— 少了它,"Text 能进实体文档"就只是推断。
 			{
 				const FieldSchema* textField = FindField(*kinds, "TextValue");
 				CHECK(textField != nullptr && textField->K == Kind::Text);

@@ -71,7 +71,7 @@ namespace
 		out << "id: com.example.test\n"
 			<< "version: 2.0.0\n"
 			<< "content_root: assets\n"
-			<< "start_scene: scenes/main.wd\n"
+			<< "start_scene: scenes/main.wlevel\n"
 			<< "renderer: vulkan\n";
 		out << renderingBlock;
 		out << "packages:\n  - packages/Base.wpak\n";
@@ -181,7 +181,7 @@ namespace
 			"id: com.example.test\n"
 			"version: 2.0.0\n"
 			"content_root: assets\n"
-			"start_scene: scenes/main.wd\n"
+			"start_scene: scenes/main.wlevel\n"
 			"renderer: vulkan\n"
 			"# 3D 渲染设置(引擎用户可直接改)\n"
 			"rendering:\n"
@@ -276,7 +276,7 @@ namespace
 		WriteText(manifestPath,
 			"id: com.example.test\n"
 			"content_root: assets\n"
-			"start_scene: scenes/main.wd\n"
+			"start_scene: scenes/main.wlevel\n"
 			"# 渲染设置\n"
 			"rendering:\n"
 			"  shadows: false\n");
@@ -382,7 +382,7 @@ namespace
 	{
 		World::Asset::ProjectManifest manifest;
 		manifest.Id = "com.example.test";
-		manifest.StartScene = "scenes/main.wd";
+		manifest.StartScene = "scenes/main.wlevel";
 		manifest.Rendering.Culling = false;
 		manifest.Rendering.ShadowMapSize = 512u;
 		manifest.Rendering.MaxPointLights = 3u;

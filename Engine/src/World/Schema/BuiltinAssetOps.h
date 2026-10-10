@@ -5,7 +5,7 @@
 //
 // 2026-10-04:组件里的资产定位符改为驻留 POD 标识。`AssetOps<PathId>` 让 schema 层
 // 完全无感 —— 生成器对 `Kind == Asset` 的字段一律发 `AssetOps<decltype(字段)>::GetPath/
-// SetPath`,换成员类型(字符串 → 4B id)不需要改生成器;`.wd` 上仍然写人类可读的逻辑路径,
+// SetPath`,换成员类型(字符串 → 4B id)不需要改生成器;实体文档上仍然写人类可读的逻辑路径,
 // 只在内存里换成 id。
 
 #include "World/Core/Core.h"

@@ -19,7 +19,7 @@ namespace World
 	//   · **关卡包目录**(`assets/levels/<名>/`,Level 2.0 OFPA)—— 首选形态。一个实体一个
 	//     文件,保存时按 UUID 增量写回并剪掉已删除实体的文件;数据层归属随实体的
 	//     LevelEntityComponent 一起落盘。
-	//   · **单场景 `.wd`** —— 仍保留给 Prefab 与老内容;不作为关卡入口。
+	//   · **整场景文档**(`.wprefab` / 历史 `.wd`)—— 走 SceneSerializer 的整场景路径;不作为关卡入口。
 	class EditorDocument
 	{
 	public:
