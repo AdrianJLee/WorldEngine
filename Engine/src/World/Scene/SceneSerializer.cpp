@@ -7,6 +7,7 @@
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Core/UUID.h"
 #include "World/Gameplay/Prefab/PrefabTypes.h"
+#include "World/Gameplay/Prefab/Prefab.h"
 #include "World/Schema/SchemaWriter.h"
 
 #include <algorithm>
@@ -44,7 +45,7 @@ namespace World
 		// 一条 prefab 实例记录 → `Path/Root/Overrides` map(盘上一律写实体 UUID:
 		// entt 句柄跨会话无效)。返回 false = 该记录不可写(根实体已消失)。
 		bool EmitPrefabInstanceRecord(YAML::Emitter& out, const entt::registry& registry,
-			const Gameplay::PrefabInstanceRecord& record)
+			const Gameplay::PrefabInstanceRecord& record, bool includeReconstructionMap = false)
 		{
 			uint64_t rootUuid = 0;
 			if (!TryGetEntityUuid(registry, record.Root, &rootUuid))
@@ -57,6 +58,25 @@ namespace World
 			out << YAML::BeginMap;
 			out << YAML::Key << "Path" << YAML::Value << record.PrefabPath;
 			out << YAML::Key << "Root" << YAML::Value << rootUuid;
+			// 稀疏放置(§16.10):带上"模板先序 → 实体 UUID"映射。加载端据此**实例化模板**并
+			// 把 UUID 逐个贴回去,因此未落盘的子实体也能原样重建。没有这一项 = 稠密形态:
+			// 加载端只按读到的实体文档重建实例记录(今天的 `.wd` / 全量路径)。
+			if (includeReconstructionMap)
+			{
+				std::vector<entt::entity> subtree;
+				Gameplay::FlattenInstanceSubtree(registry, record.Root, subtree);
+				if (!subtree.empty())
+				{
+					out << YAML::Key << "Entities" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+					for (const entt::entity handle : subtree)
+					{
+						uint64_t uuid = 0;
+						if (TryGetEntityUuid(registry, handle, &uuid))
+							out << uuid;
+					}
+					out << YAML::EndSeq;
+				}
+			}
 			if (!record.Overrides.empty())
 			{
 				out << YAML::Key << "Overrides" << YAML::Value << YAML::BeginSeq;
@@ -85,6 +105,56 @@ namespace World
 			return true;
 		}
 
+		// Level 2.0 §16.10:`Prefab:` 块(模板引用 + 覆盖字段 + 稀疏重建映射)的**唯一**解析处。
+		// 导入侧(CapturePreservedEntityData)与关卡加载侧(SceneSerializer::ReadPrefabBlock ——
+		// 它要在建场景**之前**就知道该不该实例化模板)共用它,避免两份口径漂移。
+		bool ParsePrefabBlockNode(const YAML::Node& prefabNode, uint64_t entityUuid,
+			Gameplay::PendingPrefabInstanceRecord* out)
+		{
+			if (!out || !prefabNode || !prefabNode.IsMap() || !prefabNode["Root"])
+			{
+				if (prefabNode && entityUuid != 0)
+					WLD_CORE_WARN("Level import: entity {0} has a malformed 'Prefab' block; ignored", entityUuid);
+				return false;
+			}
+
+			out->PrefabPath = prefabNode["Path"] ? prefabNode["Path"].as<std::string>("") : std::string();
+			out->RootUuid = prefabNode["Root"].as<uint64_t>(0);
+
+			// 稀疏重建映射(可选):`Entities: [uuid, ...]` = 模板先序的实体 UUID。
+			out->EntityUuids.clear();
+			if (const YAML::Node ids = prefabNode["Entities"])
+			{
+				if (ids.IsSequence())
+					for (const YAML::Node& id : ids)
+						out->EntityUuids.push_back(id.as<uint64_t>(0));
+				else
+					WLD_CORE_WARN("Level import: entity {0} has non-sequence 'Prefab.Entities'; ignored", entityUuid);
+			}
+
+			out->Overrides.clear();
+			if (const YAML::Node overrides = prefabNode["Overrides"])
+			{
+				if (!overrides.IsSequence())
+				{
+					WLD_CORE_WARN("Level import: entity {0} has non-sequence 'Prefab.Overrides'; ignored", entityUuid);
+				}
+				else
+				{
+					for (const YAML::Node& entry : overrides)
+					{
+						if (!entry.IsMap() || !entry["Entity"] || !entry["Fields"])
+							continue;
+						std::vector<std::string> fields;
+						for (const YAML::Node& field : entry["Fields"])
+							fields.push_back(field.as<std::string>());
+						if (!fields.empty())
+							out->Overrides.emplace_back(entry["Entity"].as<uint64_t>(0), std::move(fields));
+					}
+				}
+			}
+			return true;
+		}
 		// Level 2.0:实体块里的"保留数据"统一采集 —— 未注册组件片段 + `Prefab:` 实例块。
 		// `.wd` 全场景读 与 `.entity` 单实体读 共用这一处;两处各写一份正是"编辑器能读、
 		// 流式路径丢数据"这类偏差的成因。
@@ -113,40 +183,9 @@ namespace World
 			if (hasUnknown)
 				scene.SetUnknownComponentFragment(UUID(entityUuid), YAML::Dump(unknownMap));
 
-			const YAML::Node prefabNode = entityNode[kPrefabBlockKey];
-			if (!prefabNode)
-				return;
-			if (!prefabNode.IsMap() || !prefabNode["Root"])
-			{
-				WLD_CORE_WARN("Level import: entity {0} has a malformed 'Prefab' block; ignored", entityUuid);
-				return;
-			}
-
 			Gameplay::PendingPrefabInstanceRecord pending;
-			pending.PrefabPath = prefabNode["Path"] ? prefabNode["Path"].as<std::string>("") : std::string();
-			pending.RootUuid = prefabNode["Root"].as<uint64_t>(0);
-			if (const YAML::Node overrides = prefabNode["Overrides"])
-			{
-				if (!overrides.IsSequence())
-				{
-					WLD_CORE_WARN("Level import: entity {0} has non-sequence 'Prefab.Overrides'; ignored",
-						entityUuid);
-				}
-				else
-				{
-					for (const YAML::Node& entry : overrides)
-					{
-						if (!entry.IsMap() || !entry["Entity"] || !entry["Fields"])
-							continue;
-						std::vector<std::string> fields;
-						for (const YAML::Node& field : entry["Fields"])
-							fields.push_back(field.as<std::string>());
-						if (!fields.empty())
-							pending.Overrides.emplace_back(entry["Entity"].as<uint64_t>(0), std::move(fields));
-					}
-				}
-			}
-			scene.AddPendingPrefabInstance(std::move(pending));
+			if (ParsePrefabBlockNode(entityNode[kPrefabBlockKey], entityUuid, &pending))
+				scene.AddPendingPrefabInstance(std::move(pending));
 		}
 
 		// 2026-09-26 重写:两个脚本组件的属性表**同一份 YAML 形态**(顺序 = 声明顺序):
@@ -216,7 +255,9 @@ namespace World
 				if (owner)
 				{
 					out << YAML::Key << kPrefabBlockKey << YAML::Value;
-					EmitPrefabInstanceRecord(out, owner->GetRegistry(), *prefabInstance);
+					// 稀疏实例的实体文档要带上"模板先序 → UUID"映射(加载端据此重建子树)。
+					EmitPrefabInstanceRecord(out, owner->GetRegistry(), *prefabInstance,
+						prefabInstance->SparsePlacement);
 				}
 			}
 			out << YAML::EndMap;
@@ -873,6 +914,123 @@ namespace World
 		return AppendEntityNodes(scene, data, error);
 	}
 
+	// ---- Level 2.0 §16.10:稀疏放置的合并读路径 ----
+	//
+	// 稀疏形态的关卡里,实例的一部分实体**没有**自己的 `.entity`(它们由"实例化模板"补齐)。
+	// 因此加载顺序是:① 先在场景里重建实例子树(带盘上 UUID);② 再把落盘的实体文档**覆盖**上去。
+	// ② 必须能覆盖已存在的 UUID —— `AppendEntityDocuments` 的"同 UUID 跳过"是流送/密集包的
+	// 正确语义(重复并入不能造双胞胎),这里要的是相反语义,所以单独一条实现而不是改既有口径。
+	size_t SceneSerializer::MergeEntityDocuments(Scene& scene, const std::vector<std::string>& documents,
+		bool overwriteExisting, std::string* error)
+	{
+		const Schema::SchemaRegistry& schemas = scene.GetContext().Schemas();
+		entt::registry& registry = scene.GetRegistry();
+
+		std::unordered_map<uint64_t, entt::entity> handlesByUuid;
+		for (const entt::entity handle : registry.view<UUIDComponent>())
+			handlesByUuid.emplace(static_cast<uint64_t>(registry.get<UUIDComponent>(handle).ID), handle);
+
+		std::unordered_set<uint64_t> existing;
+		for (const auto& [uuid, handle] : handlesByUuid)
+		{
+			(void)handle;
+			existing.insert(uuid);
+		}
+
+		size_t applied = 0;
+		for (const std::string& documentYaml : documents)
+		{
+			if (documentYaml.empty())
+				continue;
+			YAML::Node document;
+			try
+			{
+				document = YAML::Load(documentYaml);
+			}
+			catch (const std::exception& e)
+			{
+				if (error) *error = e.what();
+				continue;
+			}
+
+			YAML::Node entities = document["Entities"];
+			if (!entities || !entities.IsSequence())
+				continue;
+
+			for (YAML::Node node : entities)
+			{
+				if (!node.IsMap())
+					continue;
+
+				uint64_t uuid = 0;
+				if (YAML::Node identity = node["World::UUIDComponent"])
+					if (YAML::Node id = identity["ID"])
+						if (YAML::Node raw = id["m_UUID"])
+							uuid = raw.as<uint64_t>(0);
+
+				const auto target = uuid != 0 ? handlesByUuid.find(uuid) : handlesByUuid.end();
+				if (overwriteExisting && target != handlesByUuid.end() && registry.valid(target->second))
+				{
+					// 覆盖:先把文档读进一个临时实体(与新建同一条读路径,规避 schema Add 的
+					// emplace 语义),再按组件 Copy 到既有实体(Copy = AddOrReplace)。
+					const entt::entity staged = ApplyEntityNode(scene, node, schemas);
+					Entity stagedEntity(&scene, staged);
+					Entity targetEntity(&scene, target->second);
+					for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
+					{
+						if (!schema || !schema->Storage || !schema->Storage->Add)
+							continue;
+						const entt::id_type componentId = schema->Storage->ComponentId;
+						if (!stagedEntity.HasComponent(componentId))
+							continue;
+						if (schema->Storage->Copy)
+							schema->Storage->Copy(static_cast<void*>(&targetEntity),
+								static_cast<void*>(&stagedEntity));
+						else if (!targetEntity.HasComponent(componentId))
+							schema->Storage->Add(static_cast<void*>(&targetEntity));
+					}
+					registry.destroy(staged);
+					CapturePreservedEntityData(scene, node, uuid);
+					++applied;
+					continue;
+				}
+
+				const entt::entity handle = ApplyEntityNodeIfNew(scene, node, schemas, existing);
+				if (handle == entt::null)
+					continue;
+				++applied;
+				if (uuid != 0)
+					handlesByUuid.emplace(uuid, handle);
+				uint64_t appliedUuid = 0;
+				if (TryGetEntityUuid(registry, handle, &appliedUuid))
+					CapturePreservedEntityData(scene, node, appliedUuid);
+			}
+		}
+		return applied;
+	}
+
+	bool SceneSerializer::ReadPrefabBlock(const std::string& documentYaml,
+		Gameplay::PendingPrefabInstanceRecord* out)
+	{
+		if (!out || documentYaml.empty())
+			return false;
+		YAML::Node document;
+		try
+		{
+			document = YAML::Load(documentYaml);
+		}
+		catch (const std::exception&)
+		{
+			return false;
+		}
+		YAML::Node entities = document["Entities"];
+		if (!entities || !entities.IsSequence() || entities.size() == 0)
+			return false;
+		YAML::Node entity = entities[0];
+		if (!entity || !entity.IsMap())
+			return false;
+		return ParsePrefabBlockNode(entity[kPrefabBlockKey], 0, out);
+	}
 	bool SceneSerializer::SerializeRuntime(const std::string&)
 	{
 		return false;

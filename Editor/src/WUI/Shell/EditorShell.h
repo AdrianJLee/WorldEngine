@@ -92,6 +92,8 @@ namespace World
 		void DuplicateSelectedEntity() override;
 		void OpenScene(const std::filesystem::path& path) override;
 		std::string GetOpenDocumentPath() const override;
+		// 面板排队"打开这个文档",在帧边界真正执行(见 EditorShell::OpenScene 的说明)。
+		std::filesystem::path m_PendingOpenDocument;
 		Wui::WuiTheme& Theme() override { return m_Theme; }
 
 		// ---- ViewportHost ----
@@ -217,6 +219,14 @@ namespace World
 		bool SaveProjectPackages(const std::vector<std::string>& packages, std::string* message = nullptr) override;
 		// P4-UX15:把停靠面板切到前台(选中它所在标签页),供 AI 通道 ui.activate 用。
 		bool AiActivatePanel(const std::string& panel, std::string* message);
+		// AI 通道:`project.new` —— 打开"新建项目"向导(与 File ▸ New Project… 同一条路径)。
+		// preselectTemplateId 非空时预选该模板;返回是否已排队(帧边界真正打开)。
+		bool AiOpenNewProjectWizard(const std::string& preselectTemplateId, std::string* message);
+		// AI 通道:`project.new` 的预填(空串 = 不动该字段)。
+		void AiPrefillNewProject(const std::string& name, const std::string& location);
+		// AI 通道:`project.new create=1` —— 排队在帧边界落盘(与模态里点 Create 同一条
+		// RunNewProjectCreate)。**返回 = 已排队**,不是"已写盘":调用方应以磁盘结果为准断言。
+		bool AiCreateQueuedProject(std::string* message);
 		void ApplyProjectRendererChange(const std::string& renderer) override;
 		// P1b D5:内容浏览器双击 .gltf/.glb → 导入(不实例化);回传 .wmodel 逻辑路径供打开预览。
 		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr,
@@ -483,6 +493,9 @@ namespace World
 		std::string NewProjectTrimmedName() const;
 		bool m_NewProjectOpen = false;
 		uint32_t m_NewProjectOpenedFrame = 0;
+		// AI 通道 `project.new`:上一帧只置标记,帧边界打开向导(见 EditorShell_DockingLayout)。
+		bool m_NewProjectOpenPending = false;
+		std::string m_NewProjectOpenPreselect;   // 预选模板 id(空 = 保持当前选择)
 		std::string m_NewProjectName;            // 项目名(= 目录名)
 		std::string m_NewProjectLocation;        // 位置(UTF-8,来自输入框或原生文件夹对话框)
 		std::string m_NewProjectFailure;         // 落盘失败原因(名称/落点变化时清)

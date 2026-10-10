@@ -2012,7 +2012,37 @@ namespace World
 				"or pass component=<type> [property=<field>] for any schema component)";
 			return false;
 		}
-		if (cmd == "scene.open")
+		// ---- 2026-10-10:新建项目向导(脚本化)----
+		// 打开 File ▸ New Project… 那个模态(帧边界打开)。参数全部可选:
+		//   template = 模板 id(empty/example/…);name/location = 预填;create=1 = 直接落盘
+		//   (与模态里点 Create 是同一条 RunNewProjectCreate 路径)。
+		// 为什么需要它:新建工程是"用户看到的第一件事",而它此前只有鼠标路径 ——
+		// 端到端验收(verify-level-authoring.py)必须能无头断言向导产出。
+		if (cmd == "project.new")
+		{
+			// 预填(在帧边界真正打开之前生效,因此模板/名字/位置都是脚本给的那一份)。
+			m_Shell.AiPrefillNewProject(args.count("name") ? arg("name") : std::string(),
+				args.count("location") ? arg("location") : std::string());
+			std::string message;
+			if (!m_Shell.AiOpenNewProjectWizard(arg("template"), &message))
+			{
+				error = message.empty() ? "cannot open the new-project wizard" : message;
+				return false;
+			}
+			if (args.count("create") && arg("create") == "1")
+			{
+				std::string createMessage;
+				if (!m_Shell.AiCreateQueuedProject(&createMessage))
+				{
+					error = createMessage.empty() ? "project creation failed" : createMessage;
+					return false;
+				}
+				result = createMessage;
+				return true;
+			}
+			result = message;
+			return true;
+		}		if (cmd == "scene.open")
 		{
 			const std::string path = arg("path");
 			if (path.empty())

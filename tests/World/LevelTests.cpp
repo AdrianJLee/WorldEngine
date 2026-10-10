@@ -12,8 +12,12 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
+#include "World/Scene/Hierarchy.h"
 #include "World/Scene/SceneSerializer.h"
+#include "World/Gameplay/Prefab/Prefab.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -281,6 +285,124 @@ int main()
 			CHECK(restoredRecord.Overrides.begin()->second[0] == "Location");
 		}
 
+		// 7. 稀疏放置(§16.10):未被改动的实例只落"实例根 + 模板引用",加载端实例化模板补齐。
+		//    这正是"摆 200 个补给箱 ⇒ 200 份完整副本 + 失去传播"要消灭的形态。
+		{
+			const std::filesystem::path root = tempDir / "SparseRoot";
+			std::filesystem::create_directories(root / "prefabs");
+			WorldContext context;
+
+			// 模板:补给箱 = 根 + 箱盖 + 箱底(3 个实体)。
+			const std::filesystem::path prefabPath = root / "prefabs" / "Crate.wprefab";
+			{
+				Scene templateScene(context);
+				Entity crateRoot = Entity::CreateEntity(&templateScene, "Crate");
+				crateRoot.AddComponent<TransformComponent>(glm::vec3 { 0.0f, 0.0f, 0.0f });
+				Entity lid = Entity::CreateEntity(&templateScene, "Lid");
+				lid.AddComponent<TransformComponent>(glm::vec3 { 0.0f, 0.5f, 0.0f });
+				Hierarchy::SetParent(templateScene.GetRegistry(), static_cast<entt::entity>(lid),
+					static_cast<entt::entity>(crateRoot));
+				Entity base = Entity::CreateEntity(&templateScene, "Base");
+				base.AddComponent<TransformComponent>(glm::vec3 { 0.0f, -0.5f, 0.0f });
+				Hierarchy::SetParent(templateScene.GetRegistry(), static_cast<entt::entity>(base),
+					static_cast<entt::entity>(crateRoot));
+
+				std::string prefabError;
+				CHECK(Gameplay::SaveFromScene(templateScene, crateRoot, prefabPath, &prefabError));
+				CHECK(prefabError.empty());
+			}
+
+			// 关卡:同一个模板摆 3 次(全部未改动,只是根的位置不同)。
+			const std::filesystem::path entry = LevelCatalog::EntryPathFor(root, "Sparse");
+			Scene levelScene(context);
+			std::vector<entt::entity> placedRoots;
+			for (int index = 0; index < 3; ++index)
+			{
+				const Gameplay::PrefabInstanceResult placed =
+					Gameplay::InstantiateFromFile(prefabPath, levelScene, entt::null);
+				CHECK(placed.IsValid());
+				CHECK(placed.EntityCount == 3);
+				Entity placedRoot = placed.Root;
+				placedRoot.GetComponent<TransformComponent>().Location =
+					glm::vec3 { static_cast<float>(index) * 4.0f, 0.0f, 0.0f };
+				levelScene.AddPrefabInstance("prefabs/Crate.wprefab", static_cast<entt::entity>(placed.Root));
+				placedRoots.push_back(static_cast<entt::entity>(placed.Root));
+			}
+			CHECK(levelScene.GetRegistry().view<UUIDComponent>().size() == 9);
+
+			LevelPackage package;
+			package.SetEntryPath(entry);
+			package.CaptureFromScene(levelScene, "Sparse", 64);
+			std::printf("[sparse] sparse=%d captured=%zu (expect 3)\n",
+				static_cast<int>(levelScene.PrefabInstances().empty() ? -1 : levelScene.PrefabInstances()[0].SparsePlacement),
+				package.GetEntityCount());
+			CHECK(package.GetEntityCount() == 3);   // 只有 3 个实例根落盘(9 → 3)
+			std::string error;
+			CHECK(package.Save(entry, &error));
+			CHECK(error.empty());
+			{
+				size_t entityFiles = 0;
+				for (const auto& file : std::filesystem::directory_iterator(
+					root / "levels" / "Sparse" / "entities"))
+					if (file.path().extension() == ".entity")
+						++entityFiles;
+				CHECK(entityFiles == 3);
+			}
+
+			// 重开:9 个实体一个不少(其余 6 个由模板实例化补齐),3 条实例记录都在。
+			LevelPackage reloaded;
+			CHECK(reloaded.Load(entry, &error));
+			Ref<Scene> restored = reloaded.Instantiate(context);
+			CHECK(restored->GetRegistry().view<UUIDComponent>().size() == 9);
+			CHECK(restored->PrefabInstances().size() == 3);
+			// 根的位置是"用户摆的",必须原样回来(模板给的是 0,0,0)。
+			std::vector<float> rootXs;
+			for (const Gameplay::PrefabInstanceRecord& record : restored->PrefabInstances())
+			{
+				CHECK(record.Root != entt::null);
+				const auto* transform = restored->GetRegistry().try_get<TransformComponent>(record.Root);
+				CHECK(transform != nullptr);
+				rootXs.push_back(transform->Location.x);
+			}
+			std::sort(rootXs.begin(), rootXs.end());
+			CHECK(rootXs.size() == 3);
+			CHECK(std::fabs(rootXs[0] - 0.0f) < 1e-5f);
+			CHECK(std::fabs(rootXs[1] - 4.0f) < 1e-5f);
+			CHECK(std::fabs(rootXs[2] - 8.0f) < 1e-5f);
+
+			// 改一个实例的**子实体**并登记覆盖 ⇒ 那个子实体必须落盘(它是"差异实体"),
+			// 重启后改动不能丢。其余未改动的实例仍是稀疏形态。
+			{
+				std::vector<entt::entity> subtree;
+				Gameplay::FlattenInstanceSubtree(levelScene.GetRegistry(), placedRoots[1], subtree);
+				CHECK(subtree.size() == 3);
+				const entt::entity lid = subtree[1];
+				levelScene.GetRegistry().get<TransformComponent>(lid).Location = glm::vec3 { 0.0f, 2.5f, 0.0f };
+				Gameplay::PrefabInstanceRecord* record = levelScene.FindPrefabInstance(placedRoots[1]);
+				CHECK(record != nullptr);
+				Gameplay::MarkOverride(*record, lid, "TransformComponent.Location");
+
+				LevelPackage repacked;
+				repacked.SetEntryPath(entry);
+				repacked.CaptureFromScene(levelScene, "Sparse", 64);
+				CHECK(repacked.GetEntityCount() == 4);   // 3 个根 + 1 个差异子实体
+				CHECK(repacked.Save(entry, &error));
+				CHECK(error.empty());
+
+				LevelPackage reopened;
+				CHECK(reopened.Load(entry, &error));
+				Ref<Scene> after = reopened.Instantiate(context);
+				CHECK(after->GetRegistry().view<UUIDComponent>().size() == 9);
+				bool overrideSurvived = false;
+				for (const entt::entity handle : after->GetRegistry().view<TransformComponent>())
+				{
+					const TransformComponent& transform = after->GetRegistry().get<TransformComponent>(handle);
+					if (std::fabs(transform.Location.y - 2.5f) < 1e-5f)
+						overrideSurvived = true;
+				}
+				CHECK(overrideSurvived);
+			}
+		}
 		std::filesystem::remove_all(tempDir);
 		std::printf("[LevelTests] Level 2.0 .wlevel catalog + service + scene-level round trip tests passed.\n");
 		return 0;

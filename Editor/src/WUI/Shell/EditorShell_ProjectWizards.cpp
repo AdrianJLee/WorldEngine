@@ -81,6 +81,13 @@ const Editor::ProjectScaffolder::TemplateInfo* EditorShell::SelectedNewProjectTe
 
 
 void EditorShell::OpenNewProjectModal(Wui::WuiContext& ctx, const std::string& preselectTemplateId){
+		if (m_NewProjectOpen)
+		{
+			// 已经开着就只切模板(幂等):脚本可以反复 project.new 而不叠出第二个模态。
+			if (!preselectTemplateId.empty())
+				m_NewProjectTemplateId = preselectTemplateId;
+			return;
+		}
 		// PROJ-17(用户 2026-09-29:"位置那里,删除按一下就把路径全删了"):文本框的编辑状态
 		// (光标/选区)按控件 id 长期持久化 —— 上一次会话里若整段被选中(拖选或 Ctrl+A),
 		// 下次打开对话框时选区仍在,第一次 Delete/Backspace 就会把**整段路径**一次删掉。
@@ -115,6 +122,48 @@ void EditorShell::OpenNewProjectModal(Wui::WuiContext& ctx, const std::string& p
 		ctx.RecordOp("project", "new-ask", NewProjectTrimmedName(), m_NewProjectLocation);
 	}
 
+
+void EditorShell::AiPrefillNewProject(const std::string& name, const std::string& location)
+{
+	if (!name.empty())
+		m_NewProjectName = name;
+	if (!location.empty())
+		m_NewProjectLocation = location;
+}
+
+
+bool EditorShell::AiCreateQueuedProject(std::string* message)
+{
+	if (!m_NewProjectOpen)
+	{
+		if (message) *message = "no new-project wizard is open";
+		return false;
+	}
+	// 与模态里的 Create 按钮同一条落盘路径(帧边界执行,见 EditorShell_DockingLayout)。
+	m_NewProjectCreatePending = true;
+	if (message) *message = "queued: creating the project at the next frame boundary";
+	return true;
+}
+
+bool EditorShell::AiOpenNewProjectWizard(const std::string& preselectTemplateId, std::string* message)
+{
+	if (m_NewProjectOpen)
+	{
+		if (!preselectTemplateId.empty())
+			m_NewProjectTemplateId = preselectTemplateId;
+		if (message) *message = "new-project wizard is already open";
+		return true;
+	}
+	if (!m_NewProjectOpenPending)
+	{
+		m_NewProjectOpenPending = true;
+		m_NewProjectOpenPreselect = preselectTemplateId;
+	}
+	if (message)
+		*message = "queued: the New Project wizard opens at the next frame boundary"
+			+ (preselectTemplateId.empty() ? std::string() : (" (template '" + preselectTemplateId + "')"));
+	return true;
+}
 
 void EditorShell::RunNewProjectBrowse(Wui::WuiContext& ctx){
 		// 原生"选择文件夹"对话框:只在帧边界打开(取消返回空串 → 保持原值)。

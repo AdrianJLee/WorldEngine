@@ -6,6 +6,7 @@
 #include "World/Scene/SceneSerializer.h"
 
 #include <memory>
+#include <algorithm>
 
 namespace World::Gameplay
 {
@@ -85,6 +86,29 @@ namespace World::Gameplay
 		result = Instantiate(*staging, Entity(staging.get(), prefabRoot), destination, parent);
 		if (result.IsValid())
 			WLD_CORE_INFO("Prefab instantiated: {0} ({1} entities)", path.generic_string(), result.EntityCount);
+		return result;
+	}
+
+	PrefabInstanceResult InstantiateFromFileWithIds(const std::filesystem::path& path,
+		Scene& destination, entt::entity parent, const std::vector<uint64_t>& entityUuids)
+	{
+		PrefabInstanceResult result = InstantiateFromFile(path, destination, parent);
+		if (!result.IsValid())
+			return result;
+		if (entityUuids.empty())
+			return result;
+
+		// 与 Instantiate 内部同一份先序口径:下标 i 的实体拿 entityUuids[i]。
+		// 长度不足 ⇒ 多出来的实体保持新生成的 UUID(告警而不是失败:结构漂移的实例仍应能打开)。
+		std::vector<entt::entity> subtree;
+		FlattenInstanceSubtree(destination.GetRegistry(), static_cast<entt::entity>(result.Root), subtree);
+		const size_t count = std::min(subtree.size(), entityUuids.size());
+		for (size_t i = 0; i < count; ++i)
+			destination.GetRegistry().emplace_or_replace<UUIDComponent>(subtree[i], UUID(entityUuids[i]));
+		if (subtree.size() != entityUuids.size())
+			WLD_CORE_WARN("Prefab::InstantiateFromFileWithIds: '{0}' has {1} entities but {2} recorded id(s); "
+				"the extra entities keep freshly generated ids",
+				path.generic_string(), subtree.size(), entityUuids.size());
 		return result;
 	}
 }

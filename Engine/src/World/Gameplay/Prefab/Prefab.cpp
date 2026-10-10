@@ -120,4 +120,14 @@ namespace World::Gameplay
 		result.EntityCount = static_cast<uint32_t>(subtree.size());
 		return result;
 	}
+
+	void FlattenInstanceSubtree(const entt::registry& registry, entt::entity root,
+		std::vector<entt::entity>& out)
+	{
+		out.clear();
+		if (root == entt::null || !registry.valid(root))
+			return;
+		std::unordered_map<entt::entity, entt::entity> parents;
+		CollectSubtree(registry, root, out, parents);
+	}
 }

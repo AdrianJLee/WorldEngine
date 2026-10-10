@@ -101,6 +101,9 @@ namespace World
 			package.SetId(entryPath.stem().string());
 			package.SetName(m_DataLayers.empty() && !package.GetName().empty()
 				? package.GetName() : entryPath.stem().string());
+			// 入口路径必须先设:CameraFromScene 的稀疏放置判定要用内容根解析实例引用的
+			// `.wprefab`(见 LevelPackage::SetEntryPath)。
+			package.SetEntryPath(entryPath);
 			package.CaptureFromScene(*m_Scene, entryPath.stem().string(), 64);
 			if (!m_DataLayers.empty())
 				package.GetDataLayers() = m_DataLayers;

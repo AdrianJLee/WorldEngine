@@ -631,7 +631,15 @@ void EditorShell::DuplicateSelectedEntity(){
 
 
 void EditorShell::OpenScene(const std::filesystem::path& path){
-		m_Editor.OpenScene(path);
+		// 面板的"打开"一律**推迟到帧边界**(见 EditorShell_DockingLayout 的待办消费)。
+		//
+		// 为什么不能就地调:`EditorLayer::RequestAction` 在文档**不脏**时是**同步执行**的,
+		// 于是"面板渲染中途 → 打开文档 → 换掉 EditorDocument/m_ActiveScene"会重入正在
+		// 渲染的面板与宿主(2026-10-10 实测:Levels 面板改名后跟随打开 ⇒ 进程
+		// `std::terminate: bad allocation`)。帧边界执行与菜单/快捷键路径同一时序,
+		// 面板只负责"排队",不负责"换文档"。
+		if (!path.empty())
+			m_PendingOpenDocument = path;
 	}
 
 

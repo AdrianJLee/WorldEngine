@@ -46,6 +46,20 @@ namespace World
 			const std::vector<uint8_t>* skip = nullptr, std::vector<Entity>* outApplied = nullptr,
 			std::string* error = nullptr);
 
+		// Level 2.0 §16.10:把一组单实体文档并入场景,`overwriteExisting = true` 时同 UUID 的
+		// 实体**被覆盖**(而不是跳过)。稀疏放置的关卡加载要用它:实例子树先由"实例化模板"
+		// 建好(带盘上 UUID),随后落盘的实体文档(实例根 + 与模板不一致的后代)覆盖上去。
+		//
+		// 覆盖走"临时实体读一遍 + 按组件 Copy 到既有实体"—— schema 的 Add 是 emplace
+		// (重复加会断言),Copy 才是 AddOrReplace;这样"逐组件读写口径"仍然只有一处实现。
+		static size_t MergeEntityDocuments(Scene& scene, const std::vector<std::string>& documents,
+			bool overwriteExisting = true, std::string* error = nullptr);
+
+		// 解析一份实体文档里的 `Prefab:` 块(模板引用 + 覆盖字段 [+ 稀疏重建映射])。
+		// 没有该块 / 形状不对 ⇒ 返回 false(不是错误:绝大多数实体文档都不带块)。
+		static bool ReadPrefabBlock(const std::string& documentYaml,
+			Gameplay::PendingPrefabInstanceRecord* out);
+
 		// 逐实体并入之后**必须**收尾一次:反序列化只写 Transform 的原始字段,不会重算
 		// 缓存矩阵;层级反向索引也只有在全部实体就位后才能重建。缺这一步的表现是
 		// "相机在物体内部 / 全部物体堆在原点"。

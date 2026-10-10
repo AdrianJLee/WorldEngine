@@ -83,6 +83,9 @@ namespace World::Level
 
 		// 入口文件路径(`scenes/<Id>.wlevel`)。未加载/未设置时为空。
 		const std::filesystem::path& GetEntryPath() const { return m_EntryPath; }
+		// 预先设置入口路径(内容根由它推导)。捕获侧(CaptureFromScene)需要它来解析实例
+		// 引用的 `.wprefab`,因此 `Save` **之前**就要设好 —— 编辑器保存即走这条。
+		void SetEntryPath(const std::filesystem::path& entryPath) { m_EntryPath = entryPath; }
 		// 内容目录:入口路径推导 —— `<内容根>/levels/<Id>`。入口未设置时返回空。
 		std::filesystem::path ContentDir() const;
 

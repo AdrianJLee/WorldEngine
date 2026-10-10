@@ -41,6 +41,20 @@ namespace World::Gameplay
 	WLD_API PrefabInstanceResult InstantiateFromFile(const std::filesystem::path& path,
 		Scene& destination, entt::entity parent = entt::null);
 
+	// Level 2.0 §16.10:与 InstantiateFromFile 同一条路径,但把实例子树的 UUID **按给定
+	// 先序列表逐个写入**(而不是各生成一个新 UUID)。
+	//
+	// 为什么需要:稀疏放置的实例在磁盘上只带"模板先序 → 实体 UUID"这张映射表;加载时必须
+	// 让重建出来的实体拿到**盘上记着的那些 UUID**,否则覆盖条目(按 UUID 键控)与关卡里
+	// 其它实体的引用都会对不上。列表长度不足时多出来的实体保持新生成的 UUID(并告警)。
+	WLD_API PrefabInstanceResult InstantiateFromFileWithIds(const std::filesystem::path& path,
+		Scene& destination, entt::entity parent, const std::vector<uint64_t>& entityUuids);
+
+	// 实例子树(含根)的**先序**实体列表 —— 稀疏放置的"模板下标 ↔ 实体"映射与逐实体
+	// 落盘都按这个顺序。与 Instantiate 内部的 CollectSubtree 同一口径(同一份实现)。
+	WLD_API void FlattenInstanceSubtree(const entt::registry& registry, entt::entity root,
+		std::vector<entt::entity>& out);
+
 	// W4-3:实例覆盖记录(类型定义见 PrefabTypes.h —— Scene 也要持有它,故与 Scene.h 解耦)。
 
 	WLD_API void MarkOverride(PrefabInstanceRecord& record, entt::entity entity, const std::string& field);

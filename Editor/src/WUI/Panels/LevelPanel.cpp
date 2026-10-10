@@ -8,6 +8,7 @@
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include <algorithm>
 
 namespace World
 {
@@ -196,6 +197,18 @@ namespace World
 		const Wui::WuiTheme& theme = host.Theme();
 		EnsureLoaded();
 
+		// 行级动作**先记账、循环后执行**。
+		//
+		// 为什么不能边画边做:新建/改名/删除之后都要 Reload() 重建 m_Levels,而循环里的
+		// `const Level::LevelInfo& level = m_Levels[index]` 是**指向容器元素的引用** ——
+		// 在循环内清空重填会让它当场悬垂,后续读 DisplayName/Id 就是读已释放内存
+		// (2026-10-10 实测:面板内改名 ⇒ 进程 `std::terminate: bad allocation`)。
+		// 记账后循环结束再执行,既避开悬垂,也让一帧内只做一件事。
+		enum class RowAction { None, Open, Delete, RenameCommit };
+		RowAction pendingAction = RowAction::None;
+		std::string pendingId;
+		std::string pendingNewId;
+
 		float y = rect.Y + 8.0f;
 		Label(ctx, { rect.X + 10.0f, y }, "Levels", theme.Text, 15.0f);
 		y += 24.0f;
@@ -240,7 +253,7 @@ namespace World
 						? &Application::Get().GetContext() : nullptr;
 					if (context && Level::LevelPackage::CreateEmpty(*context, entryPath, name, &createError))
 					{
-						Reload();
+						Reload();   // 在行循环**之前**:此刻没有指向 m_Levels 的引用在用
 					}
 					else
 					{
@@ -282,19 +295,22 @@ namespace World
 			const float right = row.X + row.W - 8.0f;
 			if (m_RenameId == level.Id)
 			{
-				const Wui::WuiRect field { right - 264.0f, row.Y + row.H - 28.0f, 150.0f, 22.0f };
+				// 改名条**从左往右**排版,不按面板右缘反推:Levels 面板常常只有 ~200 宽
+				// (左侧停靠位的默认宽度),按 `right - 264` 摆输入框会把它推到**客户区外**
+				// ——用户点不到 = 改名功能实际不可用(2026-10-10 实测:ui.invoke 报
+				// "off-screen")。宽度按剩余空间夹取,保证输入框 + OK + Cancel 永远在行内。
+				const float fieldWidth = std::clamp(row.W - 130.0f, 60.0f, 150.0f);
+				const Wui::WuiRect field { row.X + 6.0f, row.Y + row.H - 28.0f, fieldWidth, 22.0f };
 				Wui::TextFieldA11y renameA11y;
-				renameA11y.Label = "New level name";
+				renameA11y.Label = "Rename level to";   // 与新建框区分:a11y/脚本定位要能分清两个输入框
 				Wui::TextField(ctx, Wui::HashId(("level.rename.field." + level.Id).c_str()), field,
 					m_RenameText, theme, nullptr, &renameA11y);
 				if (Button(ctx, Wui::HashId(("level.rename.ok." + level.Id).c_str()),
 					{ field.X + field.W + 4.0f, field.Y, 46.0f, 22.0f }, "OK", theme))
 				{
-					m_RowError.clear();
-					m_NewLevelError.clear();
-					std::string renameError;
-					if (!RenameLevel(host, level.Id, m_RenameText, &renameError))
-						m_RowError = renameError;
+					pendingAction = RowAction::RenameCommit;
+					pendingId = level.Id;
+					pendingNewId = m_RenameText;
 				}
 				if (Button(ctx, Wui::HashId(("level.rename.cancel." + level.Id).c_str()),
 					{ field.X + field.W + 54.0f, field.Y, 60.0f, 22.0f }, "Cancel", theme))
@@ -305,8 +321,8 @@ namespace World
 				if (Button(ctx, Wui::HashId(("level.open." + level.Id).c_str()),
 					{ right - 62.0f, row.Y + 2.0f, 62.0f, 20.0f }, "Open", theme))
 				{
-					// 打开关卡入口:EditorDocument 按 `.wlevel` 后缀走 Level 2.0 读路径。
-					host.OpenScene(level.EntryPath);
+					pendingAction = RowAction::Open;
+					pendingId = level.Id;
 				}
 				if (Button(ctx, Wui::HashId(("level.rename." + level.Id).c_str()),
 					{ right - 128.0f, row.Y + 2.0f, 62.0f, 20.0f }, "Rename", theme))
@@ -318,14 +334,38 @@ namespace World
 				if (Button(ctx, Wui::HashId(("level.delete." + level.Id).c_str()),
 					{ right - 128.0f, row.Y + 24.0f, 62.0f, 20.0f }, "Delete", theme))
 				{
-					m_RowError.clear();
-					m_NewLevelError.clear();
-					std::string deleteError;
-					if (!DeleteLevel(host, level.Id, &deleteError))
-						m_RowError = deleteError;
+					pendingAction = RowAction::Delete;
+					pendingId = level.Id;
 				}
 			}
 			y += rowH + 4.0f;
+		}
+
+		// ---- 行级动作:此刻已不持有 m_Levels 的引用,Reload()/打开文档都安全 ----
+		if (pendingAction != RowAction::None)
+		{
+			m_RowError.clear();
+			m_NewLevelError.clear();
+			std::string actionError;
+			switch (pendingAction)
+			{
+			case RowAction::Open:
+				// 打开关卡入口:EditorDocument 按 `.wlevel` 后缀走 Level 2.0 读路径;
+				// 宿主把"换文档"排到帧边界执行(面板渲染中途换文档会重入)。
+				if (const Level::LevelInfo* info = Level::LevelCatalog::Find(m_Levels, pendingId))
+					host.OpenScene(info->EntryPath);
+				break;
+			case RowAction::RenameCommit:
+				if (!RenameLevel(host, pendingId, pendingNewId, &actionError))
+					m_RowError = actionError;
+				break;
+			case RowAction::Delete:
+				if (!DeleteLevel(host, pendingId, &actionError))
+					m_RowError = actionError;
+				break;
+			case RowAction::None:
+				break;
+			}
 		}
 
 		if (!m_RowError.empty())

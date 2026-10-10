@@ -8,9 +8,12 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/SceneSerializer.h"
+#include "World/Gameplay/Prefab/Prefab.h"
 
 #include <fstream>
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <yaml-cpp/yaml.h>
 
 namespace World::Level
@@ -18,6 +21,78 @@ namespace World::Level
 	namespace
 	{
 		constexpr const char* kEntitiesDirName = "entities";
+
+		// 先序形状签名:每个实体在**本列表内**的父下标(根 / 父在列表外 ⇒ -1)。
+		//
+		// 为什么单独要一层形状校验:逐实体比对剔除了 `HierarchyComponent`(Parent 是每个场景
+		// 各自编号的 entt 句柄),于是"实例内部被拖动/重挂"这类**只改结构**的改动不会体现在
+		// 指纹上。形状签名把它挡下来 —— 不一致 ⇒ 走稠密写,不让稀疏形态悄悄丢掉结构改动。
+		std::string SubtreeShape(const entt::registry& registry, const std::vector<entt::entity>& order)
+		{
+			std::unordered_map<entt::entity, size_t> indexOf;
+			indexOf.reserve(order.size());
+			for (size_t index = 0; index < order.size(); ++index)
+				indexOf.emplace(order[index], index);
+
+			std::string shape;
+			shape.reserve(order.size() * 4);
+			for (const entt::entity handle : order)
+			{
+				long long parent = -1;
+				if (const auto* hierarchy = registry.try_get<HierarchyComponent>(handle))
+				{
+					if (hierarchy->Parent != entt::null)
+					{
+						const auto found = indexOf.find(hierarchy->Parent);
+						if (found != indexOf.end())
+							parent = static_cast<long long>(found->second);
+					}
+				}
+				shape += std::to_string(parent);
+				shape += ',';
+			}
+			return shape;
+		}
+		// 稀疏放置(§16.10)的逐实体比对键:实体文档里**除这几项之外**的全部组件。
+		//
+		// 剔除的理由(每一项都是"同构的两棵树必然不同"的字段,不剔除会让稀疏永不成立):
+		//   * `World::UUIDComponent` —— 重建时 UUID 由"模板先序 → UUID"映射贴回,而模板暂存
+		//     场景里的 UUID 是新生成的;
+		//   * `Prefab` —— 实例根自己的引用块,只活在实时实体上;
+		//   * `World::HierarchyComponent` —— Parent 存的是 **entt 句柄**(schema 里是 UInt64),
+		//     每个场景各自编号,暂存场景与关卡场景必然不同。结构由"形状签名"单独把关(见下),
+		//     所以这里剔除它是安全的。
+		std::string ComponentFingerprint(const std::string& documentYaml)
+		{
+			if (documentYaml.empty())
+				return {};
+			try
+			{
+				YAML::Node document = YAML::Load(documentYaml);
+				YAML::Node entities = document["Entities"];
+				if (!entities || !entities.IsSequence() || entities.size() == 0)
+					return documentYaml;
+				YAML::Node entity = entities[0];
+				if (!entity || !entity.IsMap())
+					return documentYaml;
+
+				YAML::Emitter out;
+				out << YAML::BeginMap;
+				for (const auto& kv : entity)
+				{
+					const std::string key = kv.first.as<std::string>();
+					if (key == "World::UUIDComponent" || key == "Prefab" || key == "World::HierarchyComponent")
+						continue;
+					out << YAML::Key << key << YAML::Value << kv.second;
+				}
+				out << YAML::EndMap;
+				return out.c_str();
+			}
+			catch (const std::exception&)
+			{
+				return documentYaml;
+			}
+		}
 		constexpr const char* kEntityExtension = ".entity";
 	}
 
@@ -352,8 +427,115 @@ namespace World::Level
 		m_Impl->World.PhysicsDebug = world.PhysicsDebug;
 
 		entt::registry& registry = scene.GetRegistry();
+
+		// ---- 稀疏放置(§16.10)----
+		//
+		// 目标:摆 200 个**未被改动**的实例 ⇒ 只落 200 份"实例根 + 模板引用",而不是 200 棵
+		// 子树的完整副本(旧形态:仓库随摆放量线性膨胀,且失去传播)。
+		//
+		// 判定是**逐实体比对**,不是"相信同构":按模板实例化一份到暂存场景,再把实时实体与
+		// 模板对应实体逐字段比 —— 有覆盖登记或有实际差异的后代照常落盘。因此实例内部被增删/
+		// 拖动过时不会丢数据,最多退化成今天的稠密形态(告警说明原因)。
+		// 内容根 = 关卡内容目录上溯两级(<内容根>/levels/<Id>)—— 实例记录里的 .wprefab 是
+		// 相对**内容根**的逻辑路径(与编辑器 Paths::AssetRoot 同一口径)。
+		const std::filesystem::path contentRoot = ContentDir().parent_path().parent_path();
+		std::unordered_set<entt::entity> sparseSkipped;
+
+		struct TemplateCache
+		{
+			bool Loaded = false;
+			bool Failed = false;
+			std::vector<std::string> Docs;   // 先序逐实体文档
+			std::string Shape;               // 模板子树的先序形状签名(见 SubtreeShape)
+		};
+		std::unordered_map<std::string, TemplateCache> templates;
+
+		for (Gameplay::PrefabInstanceRecord& record : scene.PrefabInstances())
+		{
+			record.SparsePlacement = false;
+			if (!record.IsValid() || record.PrefabPath.empty() || contentRoot.empty())
+				continue;
+			if (!registry.valid(record.Root))
+				continue;
+
+			TemplateCache& cache = templates[record.PrefabPath];
+			if (!cache.Loaded)
+			{
+				cache.Loaded = true;
+				const std::filesystem::path prefabPath =
+					contentRoot / std::filesystem::u8path(record.PrefabPath);
+				std::error_code ec;
+				if (!std::filesystem::is_regular_file(prefabPath, ec))
+				{
+					cache.Failed = true;
+					WLD_CORE_WARN("LevelPackage: prefab '{0}' cannot be resolved under '{1}'; "
+						"writing every entity of its instances (dense)",
+						record.PrefabPath, contentRoot.u8string());
+				}
+				else
+				{
+					const Ref<Scene> staging = CreateRef<Scene>(scene.GetContext());
+					const Gameplay::PrefabInstanceResult staged =
+						Gameplay::InstantiateFromFile(prefabPath, *staging);
+					if (!staged.IsValid())
+					{
+						cache.Failed = true;
+					}
+					else
+					{
+						std::vector<entt::entity> order;
+						Gameplay::FlattenInstanceSubtree(staging->GetRegistry(),
+							static_cast<entt::entity>(staged.Root), order);
+						cache.Shape = SubtreeShape(staging->GetRegistry(), order);
+						for (const entt::entity handle : order)
+						{
+							std::string doc;
+							std::string ignored;
+							if (SceneSerializer::SerializeEntityDocumentToYaml(
+								Entity(staging.get(), handle), &doc, &ignored))
+								cache.Docs.push_back(std::move(doc));
+						}
+					}
+				}
+			}
+			if (cache.Failed)
+				continue;
+
+			std::vector<entt::entity> order;
+			Gameplay::FlattenInstanceSubtree(registry, record.Root, order);
+			if (order.size() != cache.Docs.size())
+			{
+				WLD_CORE_WARN("LevelPackage: prefab instance '{0}' has {1} entities but its template has {2}; "
+					"writing every entity of the instance (dense)",
+					record.PrefabPath, order.size(), cache.Docs.size());
+				continue;
+			}
+			if (SubtreeShape(registry, order) != cache.Shape)
+			{
+				WLD_CORE_WARN("LevelPackage: prefab instance '{0}' no longer matches its template's structure; "
+					"writing every entity of the instance (dense)", record.PrefabPath);
+				continue;
+			}
+
+			record.SparsePlacement = true;
+			for (size_t index = 1; index < order.size(); ++index)
+			{
+				// 有覆盖登记 ⇒ 值可能与模板不同 ⇒ 照常落盘(它是"差异实体")。
+				if (record.Overrides.find(static_cast<uint32_t>(order[index])) != record.Overrides.end())
+					continue;
+				std::string live;
+				std::string ignored;
+				if (!SceneSerializer::SerializeEntityDocumentToYaml(Entity(&scene, order[index]), &live, &ignored))
+					continue;
+				if (ComponentFingerprint(live) == ComponentFingerprint(cache.Docs[index]))
+					sparseSkipped.insert(order[index]);
+			}
+		}
+
 		for (const entt::entity handle : registry.view<UUIDComponent>())
 		{
+			if (sparseSkipped.count(handle) != 0)
+				continue;
 			const Entity entity(&scene, handle);
 
 			EntityDescriptor descriptor;
@@ -368,19 +550,56 @@ namespace World::Level
 	Ref<Scene> LevelPackage::Instantiate(WorldContext& context) const
 	{
 		Ref<Scene> scene = CreateRef<Scene>(context);
-		for (size_t i = 0; i < m_Impl->Entities.size(); ++i)
-		{
-			const EntityDescriptor& descriptor = m_Impl->Entities[i];
-			if (descriptor.DocumentYaml.empty())
-				continue;
 
-			std::string importError;
-			SceneSerializer::AppendEntityYaml(*scene, descriptor.DocumentYaml, &importError);
-			if (!importError.empty())
+		// ① 稀疏实例(§16.10):文档带"模板先序 → 实体 UUID"映射 ⇒ 先**实例化模板**并把这些
+		//    UUID 贴回重建出来的实体。未落盘的子实体因此原样出现,且身份(覆盖条目键控、
+		//    关卡里其它实体的引用)与存盘前一致。
+		// 内容根 = 关卡内容目录上溯两级(<内容根>/levels/<Id>)—— 实例记录里的 .wprefab 是
+		// 相对**内容根**的逻辑路径(与编辑器 Paths::AssetRoot 同一口径)。
+		const std::filesystem::path contentRoot = ContentDir().parent_path().parent_path();
+		if (!contentRoot.empty())
+		{
+			for (const EntityDescriptor& descriptor : m_Impl->Entities)
 			{
-				WLD_CORE_WARN("LevelPackage '{0}': 实体 {1} 并入失败: {2}",
-					m_Impl->Name, descriptor.EntityUUID, importError);
+				if (descriptor.DocumentYaml.empty())
+					continue;
+				Gameplay::PendingPrefabInstanceRecord block;
+				if (!SceneSerializer::ReadPrefabBlock(descriptor.DocumentYaml, &block))
+					continue;
+				if (block.EntityUuids.empty() || block.PrefabPath.empty())
+					continue;
+
+				const std::filesystem::path prefabPath =
+					contentRoot / std::filesystem::u8path(block.PrefabPath);
+				std::error_code ec;
+				if (!std::filesystem::is_regular_file(prefabPath, ec))
+				{
+					WLD_CORE_WARN("LevelPackage '{0}': sparse instance references missing prefab '{1}'; "
+						"only the entities that have their own document will load",
+						m_Impl->Id, block.PrefabPath);
+					continue;
+				}
+				const Gameplay::PrefabInstanceResult staged = Gameplay::InstantiateFromFileWithIds(
+					prefabPath, *scene, entt::null, block.EntityUuids);
+				if (!staged.IsValid())
+					WLD_CORE_WARN("LevelPackage '{0}': failed to rebuild sparse instance from '{1}'",
+						m_Impl->Id, block.PrefabPath);
 			}
+		}
+
+		// ② 逐实体文档:UUID 已存在(稀疏实例的根与"差异实体")⇒ 覆盖写;其余新建。覆盖语义
+		//    正是稀疏形态需要的 —— 模板把值铺好,落盘的文档再把用户改过的部分盖上去。
+		std::vector<std::string> documents;
+		documents.reserve(m_Impl->Entities.size());
+		for (const EntityDescriptor& descriptor : m_Impl->Entities)
+			if (!descriptor.DocumentYaml.empty())
+				documents.push_back(descriptor.DocumentYaml);
+
+		std::string mergeError;
+		SceneSerializer::MergeEntityDocuments(*scene, documents, /*overwriteExisting*/ true, &mergeError);
+		if (!mergeError.empty())
+		{
+			WLD_CORE_WARN("LevelPackage '{0}': 部分实体文档并入失败: {1}", m_Impl->Name, mergeError);
 		}
 		SceneSerializer::FinalizeEntityImport(*scene);
 

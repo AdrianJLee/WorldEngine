@@ -244,10 +244,27 @@ void EditorShell::OnRender(Wui::WuiContext& ctx){
 		// PROJ-1/T1:"New Project…" 的 Browse…(原生文件夹对话框)与 Create(写盘)同样是
 		// **帧边界**动作:上一帧只置标记,这里统一执行(渲染中途弹 Win32 模态/写盘会踩坑,
 		// 与 m_PendingScriptOpen 同一条纪律)。
-		if (m_NewProjectBrowsePending)
+		// 面板排队的"打开文档"在帧边界执行:面板渲染中途换文档会重入正在渲染的面板/宿主
+		// (见 EditorShell::OpenScene)。放在其它帧边界待办之前 —— 用户点了"打开"就先换文档,
+		// 同一帧的后继待办(如"新建项目"向导)看到的才是新文档。
+		if (!m_PendingOpenDocument.empty())
+		{
+			const std::filesystem::path pending = m_PendingOpenDocument;
+			m_PendingOpenDocument.clear();
+			m_Editor.OpenScene(pending);
+		}		if (m_NewProjectBrowsePending)
 		{
 			m_NewProjectBrowsePending = false;
 			RunNewProjectBrowse(ctx);
+		}
+		// AI 通道(2026-10-10):`project.new` 只置标记,这里在帧边界打开向导(与菜单点击同一条
+		// OpenNewProjectModal 路径)。为什么不让命令直接开:模态要一个 WuiContext,而命令是在
+		// 帧内被 dispatch 的;帧边界打开也保证"命令返回 ⇒ 下一帧模态已经在树上",脚本可断言。
+		if (m_NewProjectOpenPending)
+		{
+			m_NewProjectOpenPending = false;
+			OpenNewProjectModal(ctx, m_NewProjectOpenPreselect);
+			m_NewProjectOpenPreselect.clear();
 		}
 		if (m_NewProjectCreatePending)
 		{
