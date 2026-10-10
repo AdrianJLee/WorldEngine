@@ -539,24 +539,26 @@ int main()
 			CHECK(package.GetGridCellSize() == 128);
 			CHECK(package.GetEntityCount() == 2);
 
-			const std::filesystem::path pkgDir = tempDir / "DungeonPackage";
+			// 关卡 = 入口文件(`scenes/<Id>.wlevel`)+ 内容目录(`levels/<Id>/`)。
+			const std::filesystem::path pkgEntry = tempDir / "scenes" / "Dungeon.wlevel";
+			const std::filesystem::path pkgDir = tempDir / "levels" / "Dungeon";
 			std::string expError;
-			CHECK(package.Save(pkgDir, &expError));
+			CHECK(package.Save(pkgEntry, &expError));
 			CHECK(expError.empty());
-			CHECK(std::filesystem::exists(pkgDir / "manifest.yaml"));
+			CHECK(std::filesystem::exists(pkgEntry));
 			CHECK(std::filesystem::exists(pkgDir / "entities" / "3001.entity"));
 			CHECK(std::filesystem::exists(pkgDir / "entities" / "3002.entity"));
 
 			// 剪枝:删掉一个实体再存,磁盘上的旧 `.entity` 必须消失(否则重载会"复活"它)。
 			LevelPackage pruned;
-			CHECK(pruned.Load(pkgDir, &expError));
+			CHECK(pruned.Load(pkgEntry, &expError));
 			CHECK(pruned.GetEntityCount() == 2);
 			EntityDescriptor kept = pruned.GetEntity(0);
 			LevelPackage slim;
 			slim.SetName("Dungeon");
 			slim.SetGridCellSize(128);
 			slim.AddEntity(kept);
-			CHECK(slim.Save(pkgDir, &expError));
+			CHECK(slim.Save(pkgEntry, &expError));
 			{
 				size_t entityFiles = 0;
 				for (const auto& entry : std::filesystem::directory_iterator(pkgDir / "entities"))
@@ -783,13 +785,15 @@ int main()
 		{
 			WorldContext context;
 			const std::filesystem::path contentRoot = tempDir / "FreshProject";
-			std::filesystem::create_directories(contentRoot / "levels");
+			std::filesystem::create_directories(contentRoot / "scenes");
 
+			// 入口路径是**唯一**入参:内容目录由它推导(`levels/<Id>/`)。
+			const std::filesystem::path packageEntry = contentRoot / "scenes" / "Brand New Level.wlevel";
 			const std::filesystem::path packageDir = contentRoot / "levels" / "Brand New Level";
 			std::string createError;
-			CHECK(LevelPackage::CreateEmpty(context, packageDir, "Brand New Level", &createError));
+			CHECK(LevelPackage::CreateEmpty(context, packageEntry, "Brand New Level", &createError));
 			CHECK(createError.empty());
-			CHECK(std::filesystem::exists(packageDir / "manifest.yaml"));
+			CHECK(std::filesystem::exists(packageEntry));
 			CHECK(std::filesystem::is_directory(packageDir / "entities"));
 
 			// 起手实体真的落了盘(每实体一个文件)。
@@ -810,7 +814,7 @@ int main()
 			// 实例化:起手实体带**组件**回来(相机 / 方向光 / 网格),不是空壳。
 			LevelPackage loaded;
 			std::string loadError;
-			CHECK(loaded.Load(packageDir, &loadError));
+			CHECK(loaded.Load(packageEntry, &loadError));
 			Ref<Scene> scene = loaded.Instantiate(context);
 			CHECK(scene != nullptr);
 			{
@@ -822,7 +826,7 @@ int main()
 
 			// 幂等保护:已存在且非空的目录必须拒绝,不能覆盖别人的关卡。
 			std::string clobberError;
-			CHECK(!LevelPackage::CreateEmpty(context, packageDir, "Brand New Level", &clobberError));
+			CHECK(!LevelPackage::CreateEmpty(context, packageEntry, "Brand New Level", &clobberError));
 			CHECK(!clobberError.empty());
 
 			// 保存往返:改了场景再存回同一个包,仍然是 3 个实体(不重复、不丢)。
@@ -832,10 +836,10 @@ int main()
 				LevelPackage repacked;
 				repacked.CaptureFromScene(*scene, "Brand New Level", 64);
 				CHECK(repacked.GetEntityCount() == 4);
-				CHECK(repacked.Save(packageDir, &loadError));
+				CHECK(repacked.Save(packageEntry, &loadError));
 
 				LevelPackage reopened;
-				CHECK(reopened.Load(packageDir, &loadError));
+				CHECK(reopened.Load(packageEntry, &loadError));
 				CHECK(reopened.GetEntityCount() == 4);
 			}
 		}

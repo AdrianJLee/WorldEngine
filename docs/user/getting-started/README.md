@@ -13,13 +13,14 @@
 # 工作目录 = 仓库根
 .\build\x64-Debug\Editor\Debug\Editor.exe
 
-# 想直接打开某个场景(路径按**项目内容根**解析;把 <项目根> 换成你的项目目录)
-.\build\x64-Debug\Editor\Debug\Editor.exe --project <项目根> -scene assets/scenes/3DTest.wd
+# 想直接打开某个关卡(路径按**项目内容根**解析;把 <项目根> 换成你的项目目录)
+.\build\x64-Debug\Editor\Debug\Editor.exe --project <项目根> -scene assets/scenes/3DTest.wlevel
 ```
 
 - 不带参数时编辑器进**项目启动器**(不挂载任何项目);建项目用 `文件 ▸ 新建项目…`(可选"示例"模板)。
-- 示例场景(`2DTest.wd`、`3DTest.wd`、`LightingTest.wd`、`Physics3DTest.wd`)在示例模板
-  `templates/project-example/assets/scenes/` 里,用示例模板建项目后即可在内容浏览器里双击 `.wd` 打开。
+- 示例关卡(`2DTest`、`3DTest`、`LightingTest`、`Physics3DTest`)在示例模板
+  `templates/project-example/assets/scenes/` 里:`scenes/<名字>.wlevel` 是可双击打开的**入口文件**,
+  内容按一实体一文件放在 `assets/levels/<名字>/entities/` 下。用示例模板建项目后即可在内容浏览器里双击打开。
 - 编辑器启动时恢复上次的面板布局;要回到默认布局,用 Window 菜单里的 `Reset Layout`。
 
 ## 3. 看到画面之后

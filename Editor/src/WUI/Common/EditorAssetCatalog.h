@@ -69,7 +69,7 @@ namespace World
 					const std::string extension = LowerExtension(path);
 					return extension == ".lua" || extension == ".luau";
 				}
-				case EditorAssetKind::Scene: return LowerExtension(path) == ".wd";
+				case EditorAssetKind::Scene: return LowerExtension(path) == ".wlevel";
 				// M7a(GameUI):`.wui` 不可被场景/字段引用(它不是资产引用,只是编辑器文档),
 				// 所以只按扩展名归类;AssetCatalog::Scan(UiDocument) 仍能列出它们。
 				case EditorAssetKind::UiDocument: return LowerExtension(path) == ".wui";

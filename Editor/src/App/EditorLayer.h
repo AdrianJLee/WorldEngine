@@ -153,6 +153,9 @@ namespace World
 		std::size_t PendingAssetLoads() const;
 		std::string DescribeAssetLoads() const;
 		EditorDocument& GetDocument() { return m_Document; }
+		// 当前文档的逻辑路径(相对内容根;无文档 / 不在内容根内 → 空)。供面板查询
+		// (如 Levels 面板拒绝"删掉正在编辑的关卡"),与内部同名私有方法同一口径。
+		std::string OpenDocumentLogicalPath() const { return CurrentDocumentLogicalPath(); }
 		Entity GetSelectedEntity() const { return m_SelectedEntity; }
 		void SetSelectedEntity(Entity entity) { m_SelectedEntity = entity; }
 		EditorCamera& GetEditorCamera() { return m_EditorCamera; }

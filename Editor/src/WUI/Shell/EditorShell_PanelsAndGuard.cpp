@@ -577,7 +577,7 @@ bool EditorShell::SaveProjectStartupSettings(const std::string& renderer, const 
 
 
 std::vector<std::string> EditorShell::ListProjectScenes(){
-		// 内容根下的 .wd 场景(逻辑路径,与 manifest 的 start_scene 同一口径:相对 content_root)。
+		// 内容根下的关卡入口(逻辑路径,与 manifest 的 start_scene 同一口径:相对 content_root)。
 		std::vector<std::string> scenes;
 		std::filesystem::path manifestPath;
 		if (!Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
@@ -593,7 +593,7 @@ std::vector<std::string> EditorShell::ListProjectScenes(){
 		{
 			if (code)
 				break;
-			if (!entry.is_regular_file(code) || entry.path().extension() != ".wd")
+			if (!entry.is_regular_file(code) || entry.path().extension() != ".wlevel")
 				continue;
 			scenes.push_back(std::filesystem::relative(entry.path(), root, code).generic_string());
 		}

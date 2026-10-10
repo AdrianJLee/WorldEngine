@@ -887,7 +887,7 @@ namespace World::Editor
 				{
 					World::Level::LevelPackage levelPackage;
 					std::string levelError;
-					if (!levelPackage.Load(level.PackageDir, &levelError))
+					if (!levelPackage.Load(level.EntryPath, &levelError))
 						throw std::runtime_error("Level '" + level.Id + "' rejected: " + levelError);
 
 					World::Level::CookSettings cookSettings;

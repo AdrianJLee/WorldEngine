@@ -309,7 +309,8 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 				return;
 			}
 		}
-		if (path.extension() == ".wd")
+		// Level 2.0:关卡入口是 `.wlevel`(可双击打开的那一个文件),内容在 `levels/<Id>/`。
+		if (LowerExtension(path) == ".wlevel")
 			m_Host.OpenScene(path);
 		else if (LowerExtension(path) == ".wui")
 		{

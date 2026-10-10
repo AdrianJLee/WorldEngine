@@ -89,6 +89,9 @@ namespace World
 		virtual void MarkDocumentDirty() = 0;
 		virtual void DuplicateSelectedEntity() = 0;
 		virtual void OpenScene(const std::filesystem::path& path) = 0;
+		// 当前正在编辑的文档的**逻辑路径**(相对内容根,如 "scenes/3DTest.wlevel");
+		// 未打开文档时为空。关卡面板据此拒绝"删掉正在编辑的关卡"这类会留下悬空引用的操作。
+		virtual std::string GetOpenDocumentPath() const { return {}; }
 		virtual Wui::WuiTheme& Theme() = 0;
 		// 图标纹理 id(与 ViewportHost 一致;0 = 无图标)。
 		virtual uint64_t GetIconId(int index) const = 0;

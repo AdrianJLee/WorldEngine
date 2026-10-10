@@ -5,8 +5,8 @@
   "$owns": [
     "panel.levels."
   ],
-  "panel.levels.not_found": "尚未发现关卡。在 assets/levels/ 下加一个目录(含 manifest.yaml 与 entities/)即可。",
-  "panel.levels.empty": "暂无关卡。用上方的 Create 新建一个(关卡 = assets/levels/ 下的一个目录)。",
+  "panel.levels.not_found": "尚未发现关卡入口。每个关卡 = assets/scenes/<Id>.wlevel(入口)+ assets/levels/<Id>/entities/(内容)。",
+  "panel.levels.empty": "暂无关卡。用上方的 Create 新建一个(会同时生成入口文件与内容目录)。",
   "panel.levels.name_empty": "请输入关卡名称。",
   "panel.levels.name_invalid": "关卡名不能包含路径分隔符。",
   "panel.levels.create": "新建"

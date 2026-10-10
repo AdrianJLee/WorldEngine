@@ -1,4 +1,5 @@
-Name: Main
+Id: LightingTest
+Name: LightingTest
 GridCellSize: 64
 DataLayers:
   - Mask: 1

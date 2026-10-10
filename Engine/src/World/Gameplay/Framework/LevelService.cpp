@@ -114,7 +114,7 @@ namespace World::Gameplay
 		Emit(m_State, m_PendingLevelId, 0.4f);
 
 		std::string error;
-		Ref<Scene> scene = m_Loader(info->PackageDir, &error);
+		Ref<Scene> scene = m_Loader(info->EntryPath, &error);
 		if (!scene)
 		{
 			m_State = LevelLoadState::Failed;

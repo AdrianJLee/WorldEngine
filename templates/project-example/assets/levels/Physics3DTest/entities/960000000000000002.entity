@@ -1,0 +1,16 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000002
+  World::TagComponent:
+    Tag: Sun (directional, casts shadow)
+  World::TransformComponent:
+    Location: [0, 6, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::DirectionalLightComponent:
+    Color: [1, 0.970000029, 0.899999976]
+    Intensity: 1.20000005
+    Direction: [-0.400000006, -0.800000012, -0.449999988]
+    CastShadow: true

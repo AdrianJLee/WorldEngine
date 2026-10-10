@@ -1,0 +1,32 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000004
+  World::TagComponent:
+    Tag: Floating Box (dynamic 3D box)
+  World::TransformComponent:
+    Location: [0, 4, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.850000024, 0.550000012, 0.25, 1]
+    Mesh: ""
+    Material: ""
+    MeshIndex: 0
+  World::RigidBody3DComponent:
+    Type: 2
+    Mass: 1
+    LinearDamping: 0
+    AngularDamping: 0
+    Friction: 0.5
+    Restitution: 0.100000001
+    UseGravity: true
+    Layer: 1
+    Mask: 4294967295
+    IsSensor: false
+    Ccd: false
+  World::BoxCollider3DComponent:
+    HalfExtents: [0.5, 0.5, 0.5]
+    Offset: [0, 0, 0]

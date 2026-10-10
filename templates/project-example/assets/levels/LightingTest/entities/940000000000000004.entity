@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 940000000000000004
+  World::TagComponent:
+    Tag: Shadow Caster
+  World::TransformComponent:
+    Location: [0, -1, 0.5]
+    Rotation: [-0, 0.412118495, -0, -0.91113025]
+    Scale: [3, 3, 3]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.850000024, 0.550000012, 0.25, 1]
+    Mesh: ""
+    Material: ""
+    MeshIndex: 0

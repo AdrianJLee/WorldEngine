@@ -1168,6 +1168,25 @@ namespace World
 		return false;
 	}
 
+	void Scene::SetUnknownComponentFragment(const UUID& entity, const std::string& yaml)
+	{
+		AssertOwnerThread();
+		if (static_cast<uint64_t>(entity) == 0)
+			return;
+		if (yaml.empty())
+			m_UnknownComponentNodes.erase(entity);
+		else
+			m_UnknownComponentNodes[entity] = yaml;
+	}
+
+	void Scene::AddPendingPrefabInstance(Gameplay::PendingPrefabInstanceRecord record)
+	{
+		AssertOwnerThread();
+		if (record.RootUuid == 0)
+			return;
+		m_PendingPrefabRecords.push_back(std::move(record));
+	}
+
 	bool Scene::IsPendingDestroy(entt::entity entity) const
 	{
 		AssertOwnerThread();

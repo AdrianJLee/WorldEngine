@@ -114,6 +114,14 @@ namespace World
 		Gameplay::PrefabInstanceRecord& AddPrefabInstance(const std::string& prefabPath, entt::entity root);
 		bool RemovePrefabInstance(entt::entity root);
 
+		// Level 2.0:未注册组件片段(按实体 UUID 存原始 YAML)。读文件时对 schema 注册表
+		// 里没有的组件按实体记账,保存时原样回写 —— 缺插件不再静默丢数据。
+		void SetUnknownComponentFragment(const UUID& entity, const std::string& yaml);
+		// Level 2.0:实体级 `Prefab:` 块的**待解析**记账。盘上只有实体 UUID(entt 句柄跨
+		// 会话无效),且根与子实体可能分散在不同 `.entity` 文件/流送块里,读到一半无法反查
+		// 句柄;等该批实体全部导入后由 SceneSerializer::FinalizeEntityImport 统一解析。
+		void AddPendingPrefabInstance(Gameplay::PendingPrefabInstanceRecord record);
+
 		void OnUpdateEditor(Timestep ts, const EditorCamera& camera);
 		void OnUpdateRuntime(Timestep ts);
 		void OnUpdateSimulation(Timestep ts, const EditorCamera& camera);
@@ -634,6 +642,8 @@ namespace World
 		std::unordered_map<UUID, std::string> m_UnknownComponentNodes;
 		// P4-U13b:prefab 实例注册表(随 `.wd` 的 Prefabs: 块读写)。
 		std::vector<Gameplay::PrefabInstanceRecord> m_PrefabInstances;
+		// Level 2.0:实体级 `Prefab:` 块的待解析记账(见 AddPendingPrefabInstance)。
+		std::vector<Gameplay::PendingPrefabInstanceRecord> m_PendingPrefabRecords;
 		// P4-U4:场景级设置(.wd 头部的 World: 块)。
 		WorldSettings m_WorldSettings;
 		// 默认 0xFFFFFFFF = 全层可见(没有 LevelEntityComponent 的旧场景行为逐字节不变)。

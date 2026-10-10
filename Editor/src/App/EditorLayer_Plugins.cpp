@@ -1510,7 +1510,7 @@ void EditorLayer::DoNewScene(){
 	}
 
 void EditorLayer::OpenScene(){
-		std::string path = FileDialogs::OpenFile("Scene File (*.wd)\0*.wd\0");
+		std::string path = FileDialogs::OpenFile("Level (*.wlevel)\0*.wlevel\0");
 		if (path.empty())
 			return;
 		OpenScene(std::filesystem::path(path));

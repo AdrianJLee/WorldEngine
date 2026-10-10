@@ -73,14 +73,10 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				m_NewShaderPendingOpen = true;
 				return true;
 			});
-		// Scene:只创建 + 选中,**不自动打开** —— 打开会直接替换当前文档
-		// (EditorLayer::DoOpenScene 不拦未保存改动),"新建资产"不该顺带丢掉用户正在编辑的场景。
-		add("scene", "Scene", ".wd", 20, false,
-			[this](const std::filesystem::path& dir, std::string* error)
-			{
-				std::filesystem::path created;
-				return CreateSceneAsset(dir, error, &created);
-			});
+		// Level 2.0:关卡**不从这里新建** —— 关卡是"入口文件 + 内容目录"的成对结构
+		// (`scenes/<Id>.wlevel` + `levels/<Id>/`),不是在某个任意目录里落一个文件;
+		// 而且这里的 dir 由浏览器的当前目录决定,关卡却必须落在内容根下。
+		// 唯一创建入口是 Levels 面板(新建 / 重命名 / 删除三件套,见 LevelPanel)。
 		// M7a(GameUI):`.wui` 游戏 UI 文档(排序紧跟在场景之后)。只创建 + 选中,
 		// **不自动打开** —— 设计器是单实例面板,打开会替换它当前载入的文档;
 		// 双击该资产才是显式打开(见 ContentBrowserPanel::OpenItem / ui_designer)。
@@ -221,31 +217,6 @@ bool ContentBrowserPanel::CreateMaterialAsset(const std::filesystem::path& dir, 
 	}
 
 
-bool ContentBrowserPanel::CreateSceneAsset(const std::filesystem::path& dir, std::string* error, std::filesystem::path* outPath){
-		// 用引擎自己的 SceneSerializer 写"空场景",而不是手写模板字符串:
-		// 产物与编辑器另存出来的场景同格式(FormatVersion/Entities),格式演进时不会两处漂移。
-		const Ref<Scene> active = m_Host.GetActiveScene();
-		if (!active)
-		{
-			if (error) *error = "no active scene to derive a world context from";
-			return false;
-		}
-		const std::filesystem::path target = MakeUniqueAssetPath(dir, "scene", ".wd");
-		SceneSerializer serializer(CreateRef<Scene>(active->GetContext()));
-		if (!serializer.Serialize(target.string()))
-		{
-			const std::string localError = serializer.GetLastError().empty()
-				? ("could not write " + target.string()) : serializer.GetLastError();
-			WLD_CORE_ERROR("Could not create scene: {0}", localError);
-			if (error) *error = localError;
-			return false;
-		}
-		SelectCreated(target, "new-scene");
-		if (outPath) *outPath = target;
-		return true;
-	}
-
-
 	// PECS-T11:合并后的「Lua Script…」入口只排队 —— 宿主在帧边界取走标记并打开
 	// 同一个「新建 Lua …」向导(见 EditorShell::OnRender 的帧边界分支)。
 bool ContentBrowserPanel::ConsumePendingLuaWizardRequest(){
@@ -320,7 +291,7 @@ Wui::WuiRect ContentBrowserPanel::RenderNewAssetItems(Wui::WuiContext& ctx, cons
 				ctx.CloseAllPopups();
 				break;
 			}
-			// 右侧扩展名提示(材料 → .wmat / 场景 → .wd / 脚本 → .lua),一眼可辨且与"另存为"同名。
+			// 右侧扩展名提示(材料 → .wmat / 关卡 → .wlevel / 脚本 → .lua),一眼可辨且与"另存为"同名。
 			if (!desc.Extension.empty())
 			{
 				const float textWidth = ctx.MeasureTextWidth(desc.Extension, 12.0f);

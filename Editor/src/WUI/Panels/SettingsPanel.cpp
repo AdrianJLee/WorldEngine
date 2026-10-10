@@ -466,7 +466,7 @@ namespace World
 		}
 	}
 
-	// P4-U4(2026-09-21):World / Scene Settings —— `.wd` 头部的 `World:` 块。
+	// P4-U4(2026-09-21):World / Scene Settings —— 关卡 manifest 的 `World:` 块。
 	//
 	// 只放"引擎已经有实现、但过去只能靠环境变量或全局设置"的 knob(符合项目口径:
 	// 功能没实现就不进面板)。读写直接绑**当前文档场景**,改完标脏,落盘随"保存场景"。
@@ -483,7 +483,7 @@ namespace World
 		SettingsRegistry& registry = SettingsRegistry::Get();
 		registry.ClearScope(SettingScope::World);
 
-		// 取当前文档场景;没有场景(未打开 .wd)时全部行禁用并写清原因 —— 而不是假装可改。
+		// 取当前文档场景;没有场景(未打开关卡)时全部行禁用并写清原因 —— 而不是假装可改。
 		const auto worldOf = [this]() -> Scene* 
 		{
 			if (!m_Host)
@@ -514,7 +514,7 @@ namespace World
 				if (!scene)
 				{
 					if (error) *error = Wui::Tr("settings.world.no_scene",
-						"No scene is open — open a .wd first");
+						"No scene is open — open a .wlevel first");
 					return false;
 				}
 				scene->GetWorldSettings().PhysicsDebug = value == "true";
@@ -533,7 +533,7 @@ namespace World
 				return true;
 			};
 			descriptor.IsEnabled = [worldOf] { return worldOf() != nullptr; };
-			descriptor.DisabledReason = "No scene is open — open a .wd first";
+			descriptor.DisabledReason = "No scene is open — open a .wlevel first";
 			registry.Register(std::move(descriptor));
 		}
 
@@ -553,7 +553,7 @@ namespace World
 			descriptor.Apply = SettingApply::NextPlay;
 			descriptor.Label = "Scene Gravity";
 			descriptor.Tooltip = "场景重力\n跟随项目 = 用 project.we.yaml 的 physics.gravity;\n"
-				"自定义 = 只覆盖当前场景(存在 .wd 场景头里)。\n默认:跟随项目。进入 Play 时生效。";
+				"自定义 = 只覆盖当前场景(存在关卡 manifest 里)。\n默认:跟随项目。进入 Play 时生效。";
 			descriptor.Options = {
 				{ "project", "Follow project" },
 				{ "custom", "Custom" },
@@ -565,7 +565,7 @@ namespace World
 				if (!scene)
 				{
 					if (error) *error = Wui::Tr("settings.world.no_scene",
-						"No scene is open — open a .wd first");
+						"No scene is open — open a .wlevel first");
 					return false;
 				}
 				if (value == "custom")
@@ -589,7 +589,7 @@ namespace World
 				return true;
 			};
 			descriptor.IsEnabled = [worldOf] { return worldOf() != nullptr; };
-			descriptor.DisabledReason = "No scene is open — open a .wd first";
+			descriptor.DisabledReason = "No scene is open — open a .wlevel first";
 			registryForMode.Register(std::move(descriptor));
 		}
 		{
@@ -621,7 +621,7 @@ namespace World
 				if (!scene)
 				{
 					if (error) *error = Wui::Tr("settings.world.no_scene",
-						"No scene is open — open a .wd first");
+						"No scene is open — open a .wlevel first");
 					return false;
 				}
 				const float parsed = std::strtof(value.c_str(), nullptr);
@@ -684,7 +684,7 @@ namespace World
 		const float pad = 10.0f;
 		// P4-U4:四个作用域里的三个在**本面板**按页签分家(Editor Preferences 有自己的面板):
 		//   Project(渲染/物理/启动/发行包) | Import Defaults(project.we.yaml 的 imports:) |
-		//   World(.wd 场景头:物理调试 + 场景重力)。
+		//   World(关卡 manifest:物理调试 + 场景重力)。
 		// 为什么合成页签而不是三个面板:它们共享同一份"项目上下文",拆成三个面板会让
 		// Window 菜单里出现三个名字相近的入口;页签是 Unity/Blender 的同类做法。
 		const float tabHeight = 28.0f;

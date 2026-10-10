@@ -16,6 +16,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneSerializer.h"
+#include "World/Level/Authoring/LevelCatalog.h"
 
 #include <memory>
 #include <string_view>
@@ -116,46 +117,6 @@ namespace World::Gameplay
 		m_Initialized = true;
 	}
 
-	namespace
-	{
-		std::string NormalizeLevelIdentifier(const std::string& value)
-		{
-			std::string out;
-			out.reserve(value.size());
-			for (char c : value)
-				out.push_back(c == '\\' ? '/' : c);
-			while (out.size() > 1 && out.back() == '/')
-				out.pop_back();
-			return out;
-		}
-
-		// 关卡集合里是否有指向该标识符的关卡。合法写法有三种(调用方按场景史各不相同):
-		//   · 关卡 Id                "3DTest"
-		//   · 内容根相对路径          "levels/3DTest"(= 项目清单的 start_scene)
-		//   · 关卡包目录路径          "E:/proj/assets/levels/3DTest"
-		bool MatchesLevelIdentifier(const Level::LevelInfo& info, const std::string& identifier)
-		{
-			const std::string needle = NormalizeLevelIdentifier(identifier);
-			if (needle.empty())
-				return false;
-			if (needle == info.Id)
-				return true;
-			if (needle == "levels/" + info.Id)
-				return true;
-			const std::string dir = NormalizeLevelIdentifier(info.PackageDir.generic_string());
-			return needle == dir || needle == NormalizeLevelIdentifier(info.PackageDir.filename().string());
-		}
-
-		const Level::LevelInfo* MatchLevelByIdentifier(const std::vector<Level::LevelInfo>& levels,
-			const std::string& identifier)
-		{
-			for (const Level::LevelInfo& info : levels)
-				if (MatchesLevelIdentifier(info, identifier))
-					return &info;
-			return nullptr;
-		}
-	}
-
 	void GameHost::InstallLevelServices(const GameAppDesc& desc)
 	{
 		LevelService& levels = GameApp::Get().Levels();
@@ -237,26 +198,26 @@ namespace World::Gameplay
 
 		if (startRuntime)
 		{
-			// 关卡集合里存在指向该包的关卡时优先走关卡服务(统一走加载状态机/进度),
-			// 由 Tick 内的 Pump 完成激活;找不到时退回直接路径加载(单场景 `.wd`)。
+			// 关卡集合里存在该关卡时优先走关卡服务(统一走加载状态机/进度),由 Tick 内的
+			// Pump 完成激活。单文件场景(`.wd`)退役后 `start_scene` 指向关卡**入口文件**
+			// (`scenes/<Id>.wlevel`),这里按入口 stem 解析;裸 Id / `levels/<Id>` 写法同样命中。
+			//
+			// 为什么不再要"三种写法"的补丁:入口是单一规范路径,解析只剩"取 stem 查目录"一步。
 			const LevelService& levels = GameApp::Get().Levels();
-			if (const Level::LevelInfo* match = MatchLevelByIdentifier(levels.GetLevels(), scenePath))
+			const std::filesystem::path sceneFsPath = std::filesystem::u8path(scenePath);
+			std::string levelId = sceneFsPath.filename().u8string();
+			if (sceneFsPath.extension() == Level::LevelPackage::EntryExtension)
+				levelId = sceneFsPath.stem().u8string();
+
+			if (const Level::LevelInfo* match = Level::LevelCatalog::Find(levels.GetLevels(), levelId))
 			{
 				if (LoadLevelById(match->Id))
 					return true;
-			}
 
-			// 流送:start_scene 形如 `levels/<Id>`,关卡目录 = 内容根 + 它。磁盘上存在就走
-			// 本地索引;发行包里内容根不存在,交给流送运行时按 Vfs 逻辑路径找
-			// `levels/<Id>/cooked/index.yaml`。两条路都汇到同一份索引格式。
-			if (!scenePath.empty())
-			{
-				const std::filesystem::path sceneFsPath = std::filesystem::u8path(scenePath);
-				const std::string levelId = sceneFsPath.filename().u8string();
-				const std::filesystem::path physical = levels.GetContentRoot() / sceneFsPath;
-
+				// 流送:内容目录(`levels/<Id>/`)里有烘焙索引就走本地索引;发行包里内容根
+				// 不存在,交给流送运行时按 Vfs 逻辑路径找 `levels/<Id>/cooked/index.yaml`。
 				std::string streamingError;
-				if (StartLevelStreaming(levelId, physical, &streamingError))
+				if (StartLevelStreaming(match->Id, match->ContentDir, &streamingError))
 					return true;
 				WLD_CORE_INFO("GameHost::LoadLevel: '{0}' 未走流送({1});退回整包实例化",
 					scenePath, streamingError);

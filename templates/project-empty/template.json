@@ -3,5 +3,5 @@
   "name": "Empty Project",
   "description": "Clean standard skeleton: content root, level list, input map, asset folders, material shader and the Luau script template. No sample content.",
   "order": 1,
-  "defaultScene": "levels/Main"
+  "defaultScene": "scenes/Main.wlevel"
 }

@@ -91,6 +91,7 @@ namespace World
 		void MarkDocumentDirty() override;
 		void DuplicateSelectedEntity() override;
 		void OpenScene(const std::filesystem::path& path) override;
+		std::string GetOpenDocumentPath() const override;
 		Wui::WuiTheme& Theme() override { return m_Theme; }
 
 		// ---- ViewportHost ----

@@ -57,7 +57,10 @@ namespace World
 		Gameplay::GameAppDesc desc;
 		desc.ProjectId = "worldengine-runtime";
 		desc.FixedStepHz = 60;
-		std::string scenePath = "scenes/test.wd";
+		// 启动场景只认项目清单的 start_scene(Level 2.0 关卡的入口文件,如
+		// `scenes/3DTest.wlevel`)。这里不再有硬编码兜底场景:清单缺失时给可读告警,
+		// 由 LoadLevel 报"没有启动场景",而不是偷偷去跑一个早已不存在的旧路径。
+		std::string scenePath;
 		std::filesystem::path manifestPath;
 		// PLUG-T5:发行清单里的随包插件 id(cook 写下的依赖拓扑序)。
 		std::vector<std::string> shippedPlugins;
@@ -84,8 +87,8 @@ namespace World
 		}
 		else
 		{
-			WLD_CORE_WARN("[runtime] no project.we.yaml found from cwd '{0}'; falling back to '{1}'",
-				std::filesystem::current_path().string(), scenePath);
+			WLD_CORE_ERROR("[runtime] no project.we.yaml found from cwd '{0}'; no start scene to load",
+				std::filesystem::current_path().string());
 		}
 		// 开发/验证钩子:WLD_START_SCENE 覆盖启动场景(与编辑器同名开关一致)。
 		// 端到端验收(verify-play-vs-runtime.ps1)要靠它让 Runtime 跑指定的测试关卡;

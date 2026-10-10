@@ -92,8 +92,10 @@ namespace World
 		if (isDirectory)
 			return { EditorAssetKind::Folder, "Folder" };
 		const std::string extension = LowerExtension(path);
-		if (extension == ".wd")
-			return { EditorAssetKind::Scene, "Scene" };
+		// Level 2.0:关卡入口是 `.wlevel`(可双击打开的那一个文件),内容在 `levels/<Id>/`。
+		// `.wd` 已退役 —— 单文件场景不再存在,因此也不再是一个资产类型。
+		if (extension == ".wlevel")
+			return { EditorAssetKind::Scene, "Level" };
 		if (extension == ".wmat")
 			return { EditorAssetKind::Material, "Material" };
 		// Slang-B1:`.slang` 是一等资产(Material Shader)——它写表面函数与参数默认值,

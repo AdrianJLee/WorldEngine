@@ -1,0 +1,15 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 210000000000000003
+  World::TagComponent:
+    Tag: Sprite C
+  World::TransformComponent:
+    Location: [0.600000024, 0, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::SpriteComponent:
+    Color: [0.349999994, 0.550000012, 1, 1]
+    Texture: ""
+    TilingFactor: 1

@@ -66,7 +66,7 @@ namespace World
 	{
 		// During the cook process, scenes could be packed or placed in content folder.
 		// Assuming "Resource/Scenes/TestScene.wdscene" relative path is maintained or packed in pak.
-		std::string scenePath = "scenes/PhysicalTest.wd";
+		std::string scenePath = "scenes/PhysicalTest.wlevel";
 		// 加载失败时保持当前场景不变;无相机告警/视口同步/运行时启动由 GameHost 统一处理。
 		m_Host.LoadLevel(scenePath, true);
 	}

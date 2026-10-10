@@ -37,8 +37,8 @@ void MaterialEditorPanel::RefreshReferences(double now, bool force){
 				continue;
 			const std::string extension = LowerExtension(entry.path().string());
 			const char* type = nullptr;
-			if (extension == ".wd")
-				type = "scene";
+			if (extension == ".wlevel")
+				type = "level";
 			else if (extension == ".wprefab")
 				type = "prefab";
 			else if (extension == ".wmodel")

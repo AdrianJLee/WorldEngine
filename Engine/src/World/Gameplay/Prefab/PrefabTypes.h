@@ -27,4 +27,17 @@ namespace World::Gameplay
 
 		bool IsValid() const { return Root != entt::null; }
 	};
+
+	// Level 2.0:实体级 `.entity` 里 `Prefab:` 块的**待解析**形态。
+	//
+	// 为什么不直接建成 PrefabInstanceRecord:读文件时 entt 句柄一个都不存在,盘上只有
+	// 实体 UUID;而实例的根与子实体可能分散在不同 `.entity` 文件(关卡)甚至不同流送块
+	// (运行时),读到一半无法反查句柄。所以先按 UUID 记账,等该批实体全部导入后由
+	// `SceneSerializer::FinalizeEntityImport` 一次性解析成句柄记录。
+	struct PendingPrefabInstanceRecord
+	{
+		std::string PrefabPath;
+		uint64_t RootUuid = 0;
+		std::vector<std::pair<uint64_t, std::vector<std::string>>> Overrides;  // (实体 UUID, 被覆盖字段名)
+	};
 }

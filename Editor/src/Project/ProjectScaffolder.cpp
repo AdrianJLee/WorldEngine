@@ -22,6 +22,9 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include "World/Level/Authoring/LevelCatalog.h"
+#include "World/Level/Authoring/LevelPackage.h"
+
 #include <random>
 #include <system_error>
 
@@ -35,10 +38,11 @@ namespace World::Editor
 		// ApplyStandardSettingDefaults;示例内容永远不来自默认项目)。
 		constexpr const char* kStandardVersion = "1.0.0";
 		constexpr const char* kStandardContentRoot = "assets";
-		constexpr const char* kStandardStartScene = "scenes/Main.wd";
+		constexpr const char* kStandardStartScene = "scenes/Main.wlevel";
 
 		constexpr const char* kManifestFileName = "project.we.yaml";
-		constexpr const char* kMainSceneRelative = "assets/scenes/Main.wd";
+		constexpr const char* kMainSceneRelative = "assets/scenes/Main.wlevel";
+		constexpr const char* kMainLevelId = "Main";
 
 		// PROJ-7/T2:模板库 = <checkout>/templates/project-<id>/,每个模板一个
 		// template.json(id/name/description/order/defaultScene)。
@@ -336,21 +340,21 @@ namespace World::Editor
 			return Asset::ProjectManifest::Save(projectRoot / kManifestFileName, manifest, error);
 		}
 
-		// Main.wd 走引擎序列化(不手写 YAML):Scene 需要一个 WorldContext,序列化完即弃。
-		// includeStarterScene = true 时写入"最小可运行场景":一台 Camera3D(位置 [0,1,5]、
-		// Primary、透视)+ 一盏方向光 —— 只由引擎组件构成,不带任何示例资产/材质/脚本;
-		// false 时保持旧行为(空场景)。形态与示例模板自带的 scenes/3DTest.wd
-		// (templates/project-example/assets/scenes/3DTest.wd)同源(同一个 writer)。
+		// Main 关卡 = 入口文件(`scenes/Main.wlevel`,存 manifest)+ 内容目录
+		// (`levels/Main/`,一实体一文件),与编辑器 Levels 面板的"新建关卡"**同一条实现**。
+		// includeStarterScene = true 时给"最小可运行场景":一台 Camera3D(位置 [0,1,5]、
+		// Primary、透视)+ 一盏方向光 + 一颗内置图元立方体 —— 只由引擎组件构成,
+		// 不带任何示例资产/材质/脚本;false 时写一个**空关卡**(仍是合法关卡,能双击打开)。
 		bool WriteMainScene(const fs::path& projectRoot, WorldContext& context, bool includeStarterScene,
 			std::string* error)
 		{
-			const fs::path scenePath = projectRoot / kMainSceneRelative;
+			const fs::path entryPath = projectRoot / kMainSceneRelative;
 			std::error_code ec;
-			fs::create_directories(scenePath.parent_path(), ec);
+			fs::create_directories(entryPath.parent_path(), ec);
 			if (ec)
 			{
 				if (error)
-					*error = "cannot create " + scenePath.parent_path().u8string() + " (" + ec.message() + ")";
+					*error = "cannot create " + entryPath.parent_path().u8string() + " (" + ec.message() + ")";
 				return false;
 			}
 			const Ref<Scene> scene = CreateRef<Scene>(context);
@@ -386,15 +390,18 @@ namespace World::Editor
 					return false;
 				}
 			}
-			SceneSerializer serializer(scene);
-			if (!serializer.Serialize(scenePath.string()))
+			// 走引擎自己的关卡写出器:入口 + 逐实体内容一次成型。单文件场景(`.wd`)已退役,
+			// 新项目从第一天起就是 Level 2.0 结构。
+			Level::LevelPackage package;
+			package.SetId(kMainLevelId);
+			package.SetName(kMainLevelId);
+			package.CaptureFromScene(*scene, kMainLevelId, 64);
+			package.GetDataLayers().push_back({ 1u, "Base_World", true });
+			std::string levelError;
+			if (!package.Save(entryPath, &levelError))
 			{
 				if (error)
-				{
-					const std::string reason = serializer.GetLastError();
-					*error = "scene serialization failed: " + scenePath.u8string()
-						+ (reason.empty() ? std::string() : " (" + reason + ")");
-				}
+					*error = "level creation failed: " + levelError;
 				return false;
 			}
 			return true;
@@ -1305,7 +1312,7 @@ namespace World::Editor
 				}
 			}
 			if (fs::is_directory(projectRoot / "assets" / "scripts" / "examples", ec)
-				|| fs::is_regular_file(projectRoot / "assets" / "scenes" / "3DTest.wd", ec))
+				|| fs::is_regular_file(projectRoot / "assets" / "scenes" / "3DTest.wlevel", ec))
 				return "example";
 			return "empty";
 		}

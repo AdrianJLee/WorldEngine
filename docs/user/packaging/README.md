@@ -10,7 +10,7 @@
 .\build\x64-Debug\Editor\Debug\Editor.exe --cook build\publish --check
 
 # 覆盖起始场景(写进发行清单)
-.\build\x64-Debug\Editor\Debug\Editor.exe --cook build\publish --scene assets/scenes/2DTest.wd
+.\build\x64-Debug\Editor\Debug\Editor.exe --cook build\publish --scene assets/scenes/2DTest.wlevel
 ```
 
 打包流程依次做:读项目清单 → 增量烘焙资产 → 烘焙着色器 → 把烘焙结果打成内容包 →

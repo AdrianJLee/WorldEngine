@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 940000000000000005
+  World::TagComponent:
+    Tag: Point Lit Cube
+  World::TransformComponent:
+    Location: [2.79999995, -1.70000005, 1.39999998]
+    Rotation: [0, -0.937999964, 0, 0.346635312]
+    Scale: [1.60000002, 1.60000002, 1.60000002]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.720000029, 0.75999999, 0.819999993, 1]
+    Mesh: ""
+    Material: ""
+    MeshIndex: 0

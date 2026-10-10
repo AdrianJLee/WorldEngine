@@ -635,6 +635,11 @@ void EditorShell::OpenScene(const std::filesystem::path& path){
 	}
 
 
+std::string EditorShell::GetOpenDocumentPath() const{
+		return m_Editor.OpenDocumentLogicalPath();
+	}
+
+
 void EditorShell::OpenPrefabEditor(const std::string& logicalPath){
 		// P4-U13e:同一个 prefab 的**资产窗口**里有未保存改动时,先进文档会话会把这些改动丢掉
 		// (文档会话从磁盘读)。所以先问一次(丢弃 / 取消),用户确认丢弃后才真的切过去。

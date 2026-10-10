@@ -214,8 +214,6 @@ namespace World
 		// 各类型的真正实现(注册表回调指向它们;dir = 目标目录,必须已存在)。
 		bool CreateMaterialAsset(const std::filesystem::path& dir, std::string* error,
 			std::filesystem::path* outPath);
-		bool CreateSceneAsset(const std::filesystem::path& dir, std::string* error,
-			std::filesystem::path* outPath);
 		// PECS-T11:旧的 `CreateScriptAsset`(落当前目录、`.lua`)/ `CreateLuaSystemAsset`
 		// (固定在 scripts/systems/)已删除 —— Lua 的创建统一由宿主的「新建 Lua …」向导完成。
 		// "New ▶" 子菜单:画行 / 画展开的类型列表(工具条 `…` 与内容区空白右键共用)。

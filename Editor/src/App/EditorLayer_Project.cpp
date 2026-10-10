@@ -886,7 +886,7 @@ bool EditorLayer::TrySave(){
 		m_Document.ClearError();
 		if (!m_Document.HasPath())
 		{
-			std::string path = FileDialogs::SaveFile("Scene File (*.wd)\0*.wd\0");
+			std::string path = FileDialogs::SaveFile("Level (*.wlevel)\0*.wlevel\0");
 			if (path.empty())
 				return false;
 			const bool saved = m_Document.SaveTo(std::filesystem::path(path));

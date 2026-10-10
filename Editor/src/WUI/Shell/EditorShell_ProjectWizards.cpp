@@ -240,7 +240,7 @@ void EditorShell::DrawNewProjectModal(Wui::WuiContext& ctx){
 				sceneNode.Kind = "text";
 				sceneNode.Label = Wui::Tr("modal.newproject.created.scene_label", "Start scene");
 				sceneNode.Value = m_NewProjectCreatedStartScene.empty()
-					? std::string("scenes/Main.wd") : m_NewProjectCreatedStartScene;
+					? std::string("scenes/Main.wlevel") : m_NewProjectCreatedStartScene;
 				sceneNode.Rect = { labelX, frame.Y + 66.0f, frame.W - (labelX - frame.X) - 16.0f, 18.0f };
 				sceneNode.Enabled = true;
 				sceneNode.Interactive = false;
@@ -260,7 +260,7 @@ void EditorShell::DrawNewProjectModal(Wui::WuiContext& ctx){
 			{
 				Wui::Label(ctx, { labelX, cursorY },
 					Wui::Tr("modal.newproject.created.starter",
-						"assets/scenes/Main.wd has a minimal scene (camera + directional light) — "
+						"assets/scenes/Main.wlevel has a minimal level (camera + directional light) — "
 						"Launch Project shows a picture right away."),
 					m_Theme.TextMuted, 12.0f);
 			}
@@ -596,7 +596,7 @@ void EditorShell::DrawNewProjectModal(Wui::WuiContext& ctx){
 				Wui::Checkbox(ctx, starterId, starterRect, starterLabel, m_NewProjectStarterScene, m_Theme);
 				Wui::Tooltip(ctx, starterRect,
 					Wui::Tr("modal.newproject.starter.tooltip",
-						"Writes assets/scenes/Main.wd with a Camera3D at [0, 1, 5] and a directional "
+						"Writes the level assets/scenes/Main.wlevel (entry) + assets/levels/Main/ with a Camera3D at [0, 1, 5] and a directional "
 						"light, so Launch Project renders a picture. No sample assets, materials or "
 						"scripts are copied."));
 			}

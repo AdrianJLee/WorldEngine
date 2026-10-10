@@ -79,12 +79,12 @@ namespace World::Hierarchy
 		hierarchy.Parent = parent;
 		if (parent != entt::null)
 		{
-			registry.get_or_emplace<HierarchyComponent>(parent);
+			(void)registry.get_or_emplace<HierarchyComponent>(parent);
 			auto& parentChildren = MutableChildren(registry, parent);
 			if (std::find(parentChildren.begin(), parentChildren.end(), child) == parentChildren.end())
 				parentChildren.push_back(child);
 		}
-		registry.get_or_emplace<WorldTransformComponent>(child);
+		(void)registry.get_or_emplace<WorldTransformComponent>(child);
 		return true;
 	}
 

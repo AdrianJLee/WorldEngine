@@ -453,7 +453,7 @@ namespace World
 				ScriptTableRef entry = MakeScriptTable();
 				entry.SetField("Id", ScriptValue::String(levels[index].Id));
 				entry.SetField("Name", ScriptValue::String(levels[index].DisplayName));
-				entry.SetField("Path", ScriptValue::String(levels[index].PackageDir.u8string()));
+				entry.SetField("Path", ScriptValue::String(levels[index].EntryPath.u8string()));
 				result.SetArrayElement(index + 1, entry.ToValue());
 			}
 			return result.ToValue();

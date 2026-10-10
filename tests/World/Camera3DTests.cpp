@@ -259,13 +259,14 @@ int main()
 				for (int row = 0; row < 4; ++row)
 					CHECK(std::fabs(actual[column][row] - expected[column][row]) < 1e-6f);
 
-			// 旧嵌套写法兼容:直接读入仓库既有的 .wd(相机仍是 Camera: { m_* } 形态)。
+			// 旧格式兼容:读入仓库既有的**预制体**夹具(`.wprefab` 是这个"整场景读写"路径
+			// 在单文件场景退役后唯一剩下的真实用例;相机仍是 Camera: { m_* } 嵌套形态)。
 			WorldContext legacyContext;
 			Ref<Scene> legacy = CreateRef<Scene>(legacyContext);
 			{
 				SceneSerializer serializer(legacy);
-				if (!serializer.Deserialize("templates/project-example/assets/scenes/3DTest.wd"))
-					throw std::runtime_error(std::string("camera pod test: legacy .wd load failed: ") + serializer.GetLastError());
+				if (!serializer.Deserialize("tests/fixtures/legacy-camera-pod.wprefab"))
+					throw std::runtime_error(std::string("camera pod test: legacy prefab load failed: ") + serializer.GetLastError());
 			}
 			const entt::registry& legacyRegistry = static_cast<const Scene*>(legacy.get())->GetRegistry();
 			entt::entity legacyHandle = entt::null;

@@ -9,16 +9,18 @@
 
 namespace World::Level
 {
-	// 一个可加载的关卡(Level 2.0 形态)。
+	// 一个可打开的关卡。
 	//
-	// 关卡 = 内容根下 `levels/<Id>/` 里的一个关卡包目录;`Id` 就是目录名,显示名取
-	// manifest 的 `Name`(空则回落 Id)。**不再有 `levels.welevel` 清单文件** ——
-	// 关卡集合由目录结构本身表达,加一个关卡 = 加一个目录,少一份会漂移的登记表。
+	// 关卡入口 = 内容根下 `scenes/<Id>.wlevel`(存 manifest,可在内容浏览器里双击打开);
+	// 内容 = 同内容根的 `levels/<Id>/entries/*.entity`。二者按 **Id 同名**成对,
+	// 由 `LevelCatalog` 校验:入口文件名必须等于 manifest 里的 `Id`、且内容目录存在,
+	// 不一致即**报错**而不是静默降级 —— 同名耦合靠约定不如靠校验。
 	struct LevelInfo
 	{
 		std::string Id;
 		std::string DisplayName;
-		std::filesystem::path PackageDir;
+		std::filesystem::path EntryPath;     // 可打开的入口文件(`scenes/<Id>.wlevel`)
+		std::filesystem::path ContentDir;    // `levels/<Id>/`
 		std::vector<DataLayerDefinition> DataLayers;
 	};
 
@@ -26,13 +28,16 @@ namespace World::Level
 	class WLD_API LevelCatalog
 	{
 	public:
-		// 扫描 `<contentRoot>/levels/*/manifest.yaml`,按 Id 排序返回。
-		// 目录不存在 = 没有关卡(空表,不是错误)。
+		// 扫描 `<contentRoot>/scenes/*.wlevel`,按 Id 排序返回。目录不存在 = 空表(不是错误)。
+		// 不成对(入口名 ≠ Id、或内容目录缺失)的关卡**跳过并告警**,不拖垮其它关卡。
 		static std::vector<LevelInfo> Discover(const std::filesystem::path& contentRoot);
 
 		static const LevelInfo* Find(const std::vector<LevelInfo>& levels, const std::string& id);
+		// 入口文件路径。`id` 必须是不含分隔符的裸名(拒绝路径穿越)。
+		static std::filesystem::path EntryPathFor(const std::filesystem::path& contentRoot,
+			const std::string& id);
 
-		// 定位单个关卡。失败填 error 并返回 false。
+		// 定位单个关卡并做成对校验。失败填 error 并返回 false。
 		static bool Resolve(const std::filesystem::path& contentRoot, const std::string& id,
 			LevelInfo* out, std::string* error = nullptr);
 	};
