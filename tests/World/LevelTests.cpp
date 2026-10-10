@@ -385,7 +385,8 @@ int main()
 				LevelPackage repacked;
 				repacked.SetEntryPath(entry);
 				repacked.CaptureFromScene(levelScene, "Sparse", 64);
-				CHECK(repacked.GetEntityCount() == 4);   // 3 个根 + 1 个差异子实体
+				// Prefab 2.0 (1010-1630): 未解包实例的子实体 100% 零文件落盘, 差异值内联进根实体, 故实落盘文件仍为 3
+				CHECK(repacked.GetEntityCount() == 3);
 				CHECK(repacked.Save(entry, &error));
 				CHECK(error.empty());
 
@@ -481,3 +482,4 @@ int main()
 		return 1;
 	}
 }
+

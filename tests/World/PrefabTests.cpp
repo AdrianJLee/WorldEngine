@@ -521,6 +521,119 @@ int main()
 			std::filesystem::remove(mismatchPath);
 			std::filesystem::remove(treePath);
 		}
+		// 11. Prefab 2.0 (M0):基于 PrefabLocalId 的工业级映射与墓碑实例化。
+		{
+			const std::filesystem::path templatePath =
+				std::filesystem::temp_directory_path() / "worldengine-prefab-v2-m0.wprefab";
+			const std::filesystem::path evolvedPath =
+				std::filesystem::temp_directory_path() / "worldengine-prefab-v2-evolved.wprefab";
+
+			// 保存基础模板:Root -> Child
+			std::string error;
+			CHECK(SaveFromScene(source, Entity(&source, root), templatePath, &error));
+			CHECK(error.empty());
+
+			// 模板资产内的 LocalId 是 .wprefab 内部持久化的实体 UUID
+			auto loadedTemplate = CreateRef<Scene>(context);
+			{
+				SceneSerializer serializer(loadedTemplate);
+				CHECK(serializer.Deserialize(templatePath.string()));
+			}
+			entt::entity loadedRoot = entt::null;
+			for (const auto e : loadedTemplate->GetRegistry().view<UUIDComponent>())
+			{
+				const auto* h = loadedTemplate->GetRegistry().try_get<HierarchyComponent>(e);
+				if (!h || h->Parent == entt::null || !loadedTemplate->GetRegistry().valid(h->Parent))
+				{
+					loadedRoot = e;
+					break;
+				}
+			}
+			std::vector<entt::entity> templateOrder;
+			FlattenInstanceSubtree(loadedTemplate->GetRegistry(), loadedRoot, templateOrder);
+			std::vector<PrefabLocalId> templateLocalIds;
+			templateLocalIds.reserve(templateOrder.size());
+			for (const entt::entity e : templateOrder)
+				templateLocalIds.push_back(static_cast<uint64_t>(loadedTemplate->GetRegistry().get<UUIDComponent>(e).ID));
+
+			CHECK(templateLocalIds.size() == 2);
+						const PrefabLocalId rootLocalId = templateLocalIds[0];
+			
+			const PrefabLocalId childLocalId = templateLocalIds[1];
+			CHECK(rootLocalId != 0);
+			CHECK(childLocalId != 0);
+			CHECK(rootLocalId != childLocalId);
+
+			// A) 首次实例化:mapping 为空 -> 自动填入两个映射
+			Scene destA(context);
+			std::unordered_map<PrefabLocalId, uint64_t> mapping;
+			const PrefabInstanceResult resA = InstantiateFromFileWithMapping(templatePath, destA, entt::null, mapping);
+			CHECK(resA.IsValid());
+			CHECK(resA.EntityCount == 2);
+			CHECK(mapping.size() == 2);
+			CHECK(mapping.count(rootLocalId) == 1);
+			CHECK(mapping.count(childLocalId) == 1);
+			const uint64_t rootLevelUuid = mapping[rootLocalId];
+			const uint64_t childLevelUuid = mapping[childLocalId];
+			CHECK(destA.GetRegistry().get<UUIDComponent>(static_cast<entt::entity>(resA.Root)).ID == UUID(rootLevelUuid));
+
+			// B) 二次重载:传入已有 mapping -> 100% 还原相同 Level UUID
+			Scene destB(context);
+			std::unordered_map<PrefabLocalId, uint64_t> mappingCopy = mapping;
+			const PrefabInstanceResult resB = InstantiateFromFileWithMapping(templatePath, destB, entt::null, mappingCopy);
+			CHECK(resB.IsValid());
+			CHECK(resB.EntityCount == 2);
+			CHECK(destB.GetRegistry().get<UUIDComponent>(static_cast<entt::entity>(resB.Root)).ID == UUID(rootLevelUuid));
+			const auto childrenB = Hierarchy::ChildrenOf(destB.GetRegistry(), static_cast<entt::entity>(resB.Root));
+			CHECK(childrenB.size() == 1);
+			CHECK(destB.GetRegistry().get<UUIDComponent>(childrenB[0]).ID == UUID(childLevelUuid));
+
+			// C) 模板进化(追加新子节点):已有 mapping 的实体 UUID 不漂移,新节点拿到新 UUID
+			Scene evolvedSource(context);
+			auto& evolvedReg = evolvedSource.GetRegistry();
+			const entt::entity evoRoot = evolvedReg.create();
+			evolvedReg.emplace<UUIDComponent>(evoRoot, UUID(rootLocalId));
+			evolvedReg.emplace<TagComponent>(evoRoot, "Evo Root");
+			evolvedReg.emplace<TransformComponent>(evoRoot);
+
+			const entt::entity evoChildOld = evolvedReg.create();
+			evolvedReg.emplace<UUIDComponent>(evoChildOld, UUID(childLocalId));
+			evolvedReg.emplace<TagComponent>(evoChildOld, "Evo Child Old");
+			evolvedReg.emplace<TransformComponent>(evoChildOld);
+			CHECK(Hierarchy::SetParent(evolvedReg, evoChildOld, evoRoot));
+
+			const entt::entity evoChildNew = evolvedReg.create();
+			const PrefabLocalId newChildLocalId = 999988887777ull;
+			evolvedReg.emplace<UUIDComponent>(evoChildNew, UUID(newChildLocalId));
+			evolvedReg.emplace<TagComponent>(evoChildNew, "Evo Child New");
+			evolvedReg.emplace<TransformComponent>(evoChildNew);
+			CHECK(Hierarchy::SetParent(evolvedReg, evoChildNew, evoRoot));
+
+			CHECK(SaveFromScene(evolvedSource, Entity(&evolvedSource, evoRoot), evolvedPath, &error));
+
+			Scene destC(context);
+			std::unordered_map<PrefabLocalId, uint64_t> mappingC = mapping; // 只有旧的两个映射
+			const PrefabInstanceResult resC = InstantiateFromFileWithMapping(evolvedPath, destC, entt::null, mappingC);
+			CHECK(resC.IsValid());
+			CHECK(resC.EntityCount == 3);
+						
+			CHECK(mappingC.size() == 3); // 自动追加了新节点的映射
+			CHECK(mappingC[rootLocalId] == rootLevelUuid);   // 根实体 UUID 零漂移
+			CHECK(mappingC[childLocalId] == childLevelUuid); // 旧子实体 UUID 零漂移
+			CHECK(mappingC.count(newChildLocalId) == 1);     // 新子实体拿到合法 UUID
+
+			// D) 结构墓碑删除(Tombstones):删除 childLocalId -> 实例化结果只剩根节点
+			Scene destD(context);
+			std::unordered_map<PrefabLocalId, uint64_t> mappingD = mapping;
+			const std::vector<PrefabLocalId> tombstones = { childLocalId };
+			const PrefabInstanceResult resD = InstantiateFromFileWithMapping(templatePath, destD, entt::null, mappingD, tombstones);
+			CHECK(resD.IsValid());
+			CHECK(resD.EntityCount == 1);
+			CHECK(Hierarchy::ChildrenOf(destD.GetRegistry(), static_cast<entt::entity>(resD.Root)).empty());
+
+			std::filesystem::remove(templatePath);
+			std::filesystem::remove(evolvedPath);
+		}
 		std::printf("World.Prefab: all checks passed\n");
 		return 0;
 	}

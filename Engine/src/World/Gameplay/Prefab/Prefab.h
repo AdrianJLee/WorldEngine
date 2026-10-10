@@ -49,6 +49,20 @@ namespace World::Gameplay
 	// 其它实体的引用都会对不上。列表长度不足时多出来的实体保持新生成的 UUID(并告警)。
 	WLD_API PrefabInstanceResult InstantiateFromFileWithIds(const std::filesystem::path& path,
 		Scene& destination, entt::entity parent, const std::vector<uint64_t>& entityUuids);
+	// Prefab 2.0 (M0):基于 PrefabLocalId 的工业级映射实例化。
+	// 契约:
+	//  - inOutMapping 为输入输出映射(LocalId -> InstanceUuid):
+	//    * 既有 LocalId 沿用记录的 UUID,模板新增节点自动生成新 UUID 并追加登记;
+	//    * tombstones 内的 LocalId 在实例化时直接跳过(墓碑删除);
+	//  - 彻底摆脱树序数组依赖,模板内部增删重排对已有实例覆盖完全免疫。
+	WLD_API PrefabInstanceResult InstantiateFromFileWithMapping(const std::filesystem::path& path,
+		Scene& destination, entt::entity parent,
+		std::unordered_map<PrefabLocalId, uint64_t>& inOutMapping,
+		const std::vector<PrefabLocalId>& tombstones = {});
+
+	// 收集模板子树各实体的 PrefabLocalId(即模板内部实体原有的持久化 UUID)。
+	WLD_API void CollectTemplateLocalIds(const entt::registry& registry, entt::entity root,
+		std::vector<PrefabLocalId>& outIds);
 
 	// 实例子树(含根)的**先序**实体列表 —— 稀疏放置的"模板下标 ↔ 实体"映射与逐实体
 	// 落盘都按这个顺序。与 Instantiate 内部的 CollectSubtree 同一口径(同一份实现)。
@@ -86,3 +100,4 @@ namespace World::Gameplay
 	// 是否还能回滚(有来源且根仍然有效)。
 	WLD_API bool CanRevert(const PrefabInstanceRecord& record, const Scene& scene);
 }
+

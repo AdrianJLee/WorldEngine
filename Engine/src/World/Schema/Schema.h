@@ -160,6 +160,8 @@ namespace World::Schema
 		using Base::Base;
 		using Base::operator=;
 		Value() = default;
+		bool operator==(const Value& other) const { return static_cast<const Base&>(*this) == static_cast<const Base&>(other); }
+		bool operator!=(const Value& other) const { return !(*this == other); }
 	};
 
 	// ---- 容器装箱/拆箱(生成代码用;T = 元素的 C++ 类型,Pack/Unpack = 元素 <-> Value)----
@@ -393,3 +395,5 @@ namespace World::Schema
 #define WE_ENUM_SCHEMA(Module, TypeName, Underlying)
 #define WE_ENUM_VALUE(...)
 #define WE_ENUM_END
+
+

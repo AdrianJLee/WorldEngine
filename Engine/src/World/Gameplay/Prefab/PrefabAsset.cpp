@@ -3,10 +3,12 @@
 
 #include "World/Core/Log.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Hierarchy.h"
 #include "World/Scene/SceneSerializer.h"
 
 #include <memory>
 #include <algorithm>
+#include <unordered_set>
 
 namespace World::Gameplay
 {
@@ -42,6 +44,18 @@ namespace World::Gameplay
 		{
 			if (error) *error = "failed to stage prefab subtree";
 			return false;
+		}
+
+		// 保持源实体 UUID:模板内部实体的 UUID 必须作为稳定的 PrefabLocalId 固化入资产文件,不能每次保存都重新生成。
+		std::vector<entt::entity> sourceOrder;
+		FlattenInstanceSubtree(source.GetRegistry(), static_cast<entt::entity>(root), sourceOrder);
+		std::vector<entt::entity> stagingOrder;
+		FlattenInstanceSubtree(staging->GetRegistry(), static_cast<entt::entity>(staged.Root), stagingOrder);
+		const size_t uuidCount = std::min(sourceOrder.size(), stagingOrder.size());
+		for (size_t i = 0; i < uuidCount; ++i)
+		{
+			if (const auto* srcUuid = source.GetRegistry().try_get<UUIDComponent>(sourceOrder[i]))
+				staging->GetRegistry().emplace_or_replace<UUIDComponent>(stagingOrder[i], srcUuid->ID);
 		}
 
 		// 契约(而非巧合):预制体**不携带世界设置**。抽取虽然走新建暂存场景、
@@ -111,4 +125,112 @@ namespace World::Gameplay
 				path.generic_string(), subtree.size(), entityUuids.size());
 		return result;
 	}
+
+	void CollectTemplateLocalIds(const entt::registry& registry, entt::entity root,
+		std::vector<PrefabLocalId>& outIds)
+	{
+		outIds.clear();
+		std::vector<entt::entity> subtree;
+		FlattenInstanceSubtree(registry, root, subtree);
+		outIds.reserve(subtree.size());
+		for (const entt::entity handle : subtree)
+		{
+			if (const auto* uuid = registry.try_get<UUIDComponent>(handle))
+				outIds.push_back(static_cast<uint64_t>(uuid->ID));
+			else
+				outIds.push_back(0);
+		}
+	}
+
+	PrefabInstanceResult InstantiateFromFileWithMapping(const std::filesystem::path& path,
+		Scene& destination, entt::entity parent,
+		std::unordered_map<PrefabLocalId, uint64_t>& inOutMapping,
+		const std::vector<PrefabLocalId>& tombstones)
+	{
+		PrefabInstanceResult result;
+		const Ref<Scene> staging = CreateRef<Scene>(destination.GetContext());
+		SceneSerializer serializer(staging);
+		if (!serializer.Deserialize(path.string()))
+		{
+			WLD_CORE_ERROR("Prefab::InstantiateFromFileWithMapping: {0} ({1})",
+				path.generic_string(), serializer.GetLastError());
+			return result;
+		}
+
+		const entt::entity prefabRoot = FindPrefabRoot(*staging);
+		if (prefabRoot == entt::null)
+		{
+			WLD_CORE_ERROR("Prefab::InstantiateFromFileWithMapping: no root entity in {0}", path.generic_string());
+			return result;
+		}
+
+		const auto* rootUuidComp = staging->GetRegistry().try_get<UUIDComponent>(prefabRoot);
+		const uint64_t rootLocalId = rootUuidComp ? static_cast<uint64_t>(rootUuidComp->ID) : 0;
+		if (std::find(tombstones.begin(), tombstones.end(), rootLocalId) != tombstones.end())
+		{
+			WLD_CORE_WARN("Prefab::InstantiateFromFileWithMapping: instance root {0} is in tombstones", rootLocalId);
+			return result;
+		}
+
+		result = Instantiate(*staging, Entity(staging.get(), prefabRoot), destination, parent);
+		if (!result.IsValid())
+			return result;
+
+		std::vector<entt::entity> stagingSubtree;
+		FlattenInstanceSubtree(staging->GetRegistry(), prefabRoot, stagingSubtree);
+
+		std::vector<entt::entity> destinationSubtree;
+		FlattenInstanceSubtree(destination.GetRegistry(), static_cast<entt::entity>(result.Root), destinationSubtree);
+
+		const size_t count = std::min(stagingSubtree.size(), destinationSubtree.size());
+		std::unordered_set<PrefabLocalId> tombstoneSet(tombstones.begin(), tombstones.end());
+
+		std::vector<entt::entity> toRemove;
+		for (size_t i = 0; i < count; ++i)
+		{
+			const entt::entity stageHandle = stagingSubtree[i];
+			const entt::entity destHandle = destinationSubtree[i];
+			const auto* uuidComp = staging->GetRegistry().try_get<UUIDComponent>(stageHandle);
+			const PrefabLocalId localId = uuidComp ? static_cast<uint64_t>(uuidComp->ID) : 0;
+
+			if (tombstoneSet.count(localId) > 0)
+			{
+				toRemove.push_back(destHandle);
+				continue;
+			}
+
+						const auto it = inOutMapping.find(localId);
+			if (it != inOutMapping.end())
+			{
+				destination.GetRegistry().emplace_or_replace<UUIDComponent>(destHandle, UUID(it->second));
+			}
+			else
+			{
+				const uint64_t newUuid = static_cast<uint64_t>(destination.GetRegistry().get<UUIDComponent>(destHandle).ID);
+				inOutMapping[localId] = newUuid;
+			}
+		}
+
+		for (const entt::entity doomed : toRemove)
+		{
+			World::Hierarchy::ClearParent(destination.GetRegistry(), doomed);
+			destination.GetRegistry().destroy(doomed);
+			if (result.EntityCount > 0)
+				--result.EntityCount;
+		}
+
+		World::Hierarchy::UpdateWorldTransforms(destination.GetRegistry());
+		return result;
+	}
 }
+
+
+
+
+
+
+
+
+
+
+

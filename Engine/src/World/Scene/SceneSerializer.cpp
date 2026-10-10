@@ -58,48 +58,120 @@ namespace World
 			out << YAML::BeginMap;
 			out << YAML::Key << "Path" << YAML::Value << record.PrefabPath;
 			out << YAML::Key << "Root" << YAML::Value << rootUuid;
-			// 稀疏放置(§16.10):带上"模板先序 → 实体 UUID"映射。加载端据此**实例化模板**并
-			// 把 UUID 逐个贴回去,因此未落盘的子实体也能原样重建。没有这一项 = 稠密形态:
-			// 加载端只按读到的实体文档重建实例记录(今天的 `.wd` / 全量路径)。
-			if (includeReconstructionMap)
+
+			if (record.Version == 2 || !record.EntityMapping.empty() || !record.PropertyOverrides.empty()
+				|| !record.StructuralOverrides.Tombstones.empty())
 			{
-				std::vector<entt::entity> subtree;
-				Gameplay::FlattenInstanceSubtree(registry, record.Root, subtree);
-				if (!subtree.empty())
+				out << YAML::Key << "Version" << YAML::Value << 2;
+				if (!record.EntityMapping.empty())
 				{
-					out << YAML::Key << "Entities" << YAML::Value << YAML::Flow << YAML::BeginSeq;
-					for (const entt::entity handle : subtree)
+					out << YAML::Key << "EntityMapping" << YAML::Value << YAML::BeginMap;
+					for (const auto& [localId, instUuid] : record.EntityMapping)
 					{
-						uint64_t uuid = 0;
-						if (TryGetEntityUuid(registry, handle, &uuid))
-							out << uuid;
+						out << YAML::Key << localId << YAML::Value << instUuid;
 					}
-					out << YAML::EndSeq;
-				}
-			}
-			if (!record.Overrides.empty())
-			{
-				out << YAML::Key << "Overrides" << YAML::Value << YAML::BeginSeq;
-				for (const auto& [handle, fields] : record.Overrides)
-				{
-					if (fields.empty())
-						continue;
-					uint64_t entityUuid = 0;
-					if (!TryGetEntityUuid(registry, static_cast<entt::entity>(handle), &entityUuid))
-					{
-						WLD_CORE_WARN("SceneSerializer: dropping an override entry of '{0}' — its entity is gone",
-							record.PrefabPath);
-						continue;
-					}
-					out << YAML::BeginMap;
-					out << YAML::Key << "Entity" << YAML::Value << entityUuid;
-					out << YAML::Key << "Fields" << YAML::Value << YAML::Flow << YAML::BeginSeq;
-					for (const std::string& field : fields)
-						out << field;
-					out << YAML::EndSeq;
 					out << YAML::EndMap;
 				}
-				out << YAML::EndSeq;
+				if (!record.PropertyOverrides.empty())
+				{
+					out << YAML::Key << "PropertyOverrides" << YAML::Value << YAML::BeginMap;
+					for (const auto& [localId, compMap] : record.PropertyOverrides)
+					{
+						if (compMap.empty())
+							continue;
+						out << YAML::Key << localId << YAML::Value << YAML::BeginMap;
+						for (const auto& [compName, yamlSnippet] : compMap)
+						{
+							try
+							{
+								YAML::Node compNode = YAML::Load(yamlSnippet);
+								out << YAML::Key << compName << YAML::Value << compNode;
+							}
+							catch (...)
+							{
+								out << YAML::Key << compName << YAML::Value << YAML::BeginMap << YAML::EndMap;
+							}
+						}
+						out << YAML::EndMap;
+					}
+					out << YAML::EndMap;
+				}
+				if (!record.StructuralOverrides.Tombstones.empty() ||
+					!record.StructuralOverrides.Reparented.empty() ||
+					!record.StructuralOverrides.AddedEntities.empty())
+				{
+					out << YAML::Key << "StructuralOverrides" << YAML::Value << YAML::BeginMap;
+					if (!record.StructuralOverrides.Tombstones.empty())
+					{
+						out << YAML::Key << "Tombstones" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+						for (const uint64_t t : record.StructuralOverrides.Tombstones)
+							out << t;
+						out << YAML::EndSeq;
+					}
+					if (!record.StructuralOverrides.Reparented.empty())
+					{
+						out << YAML::Key << "Reparented" << YAML::Value << YAML::BeginSeq;
+						for (const auto& reparent : record.StructuralOverrides.Reparented)
+						{
+							out << YAML::BeginMap;
+							out << YAML::Key << "Target" << YAML::Value << reparent.TargetLocalId;
+							out << YAML::Key << "NewParent" << YAML::Value << reparent.NewParentUuid;
+							out << YAML::EndMap;
+						}
+						out << YAML::EndSeq;
+					}
+					if (!record.StructuralOverrides.AddedEntities.empty())
+					{
+						out << YAML::Key << "AddedEntities" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+						for (const uint64_t a : record.StructuralOverrides.AddedEntities)
+							out << a;
+						out << YAML::EndSeq;
+					}
+					out << YAML::EndMap;
+				}
+			}
+			else
+			{
+				if (includeReconstructionMap)
+				{
+					std::vector<entt::entity> subtree;
+					Gameplay::FlattenInstanceSubtree(registry, record.Root, subtree);
+					if (!subtree.empty())
+					{
+						out << YAML::Key << "Entities" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+						for (const entt::entity handle : subtree)
+						{
+							uint64_t uuid = 0;
+							if (TryGetEntityUuid(registry, handle, &uuid))
+								out << uuid;
+						}
+						out << YAML::EndSeq;
+					}
+				}
+				if (!record.Overrides.empty())
+				{
+					out << YAML::Key << "Overrides" << YAML::Value << YAML::BeginSeq;
+					for (const auto& [handle, fields] : record.Overrides)
+					{
+						if (fields.empty())
+							continue;
+						uint64_t entityUuid = 0;
+						if (!TryGetEntityUuid(registry, static_cast<entt::entity>(handle), &entityUuid))
+						{
+							WLD_CORE_WARN("SceneSerializer: dropping an override entry of '{0}' — its entity is gone",
+								record.PrefabPath);
+							continue;
+						}
+						out << YAML::BeginMap;
+						out << YAML::Key << "Entity" << YAML::Value << entityUuid;
+						out << YAML::Key << "Fields" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+						for (const std::string& field : fields)
+							out << field;
+						out << YAML::EndSeq;
+						out << YAML::EndMap;
+					}
+					out << YAML::EndSeq;
+				}
 			}
 			out << YAML::EndMap;
 			return true;
@@ -120,8 +192,78 @@ namespace World
 
 			out->PrefabPath = prefabNode["Path"] ? prefabNode["Path"].as<std::string>("") : std::string();
 			out->RootUuid = prefabNode["Root"].as<uint64_t>(0);
+			out->Version = prefabNode["Version"] ? prefabNode["Version"].as<uint32_t>(1) : 1;
 
-			// 稀疏重建映射(可选):`Entities: [uuid, ...]` = 模板先序的实体 UUID。
+			if (const YAML::Node mappingNode = prefabNode["EntityMapping"])
+			{
+				out->Version = 2;
+				out->EntityMapping.clear();
+				if (mappingNode.IsMap())
+				{
+					for (const auto& kv : mappingNode)
+					{
+						out->EntityMapping[kv.first.as<uint64_t>(0)] = kv.second.as<uint64_t>(0);
+					}
+				}
+			}
+
+			if (const YAML::Node propOverrides = prefabNode["PropertyOverrides"])
+			{
+				out->Version = 2;
+				out->PropertyOverrides.clear();
+				if (propOverrides.IsMap())
+				{
+					for (const auto& entityKv : propOverrides)
+					{
+						const uint64_t localId = entityKv.first.as<uint64_t>(0);
+						if (entityKv.second.IsMap())
+						{
+							for (const auto& compKv : entityKv.second)
+							{
+								const std::string compName = compKv.first.as<std::string>();
+								YAML::Emitter compEmitter;
+								compEmitter << compKv.second;
+								out->PropertyOverrides[localId][compName] = compEmitter.c_str();
+							}
+						}
+					}
+				}
+			}
+
+			if (const YAML::Node structOverrides = prefabNode["StructuralOverrides"])
+			{
+				out->Version = 2;
+				if (const YAML::Node tombstones = structOverrides["Tombstones"])
+				{
+					if (tombstones.IsSequence())
+						for (const YAML::Node& t : tombstones)
+							out->StructuralOverrides.Tombstones.push_back(t.as<uint64_t>(0));
+				}
+				if (const YAML::Node reparented = structOverrides["Reparented"])
+				{
+					if (reparented.IsSequence())
+					{
+						for (const YAML::Node& r : reparented)
+						{
+							if (r.IsMap() && r["Target"] && r["NewParent"])
+							{
+								Gameplay::PrefabReparentRecord rep;
+								rep.TargetLocalId = r["Target"].as<uint64_t>(0);
+								rep.NewParentUuid = r["NewParent"].as<uint64_t>(0);
+								out->StructuralOverrides.Reparented.push_back(rep);
+							}
+						}
+					}
+				}
+				if (const YAML::Node added = structOverrides["AddedEntities"])
+				{
+					if (added.IsSequence())
+						for (const YAML::Node& a : added)
+							out->StructuralOverrides.AddedEntities.push_back(a.as<uint64_t>(0));
+				}
+			}
+
+			// 稀疏重建映射(V1):
 			out->EntityUuids.clear();
 			if (const YAML::Node ids = prefabNode["Entities"])
 			{
@@ -860,6 +1002,10 @@ namespace World
 				}
 				Gameplay::PrefabInstanceRecord& record =
 					scene.AddPrefabInstance(pending.PrefabPath, rootHandle->second);
+				record.Version = pending.Version;
+				record.EntityMapping = pending.EntityMapping;
+				record.PropertyOverrides = pending.PropertyOverrides;
+				record.StructuralOverrides = pending.StructuralOverrides;
 				for (const auto& [entityUuid, fields] : pending.Overrides)
 				{
 					const auto entityHandle = handlesByUuid.find(UUID(entityUuid));
@@ -1041,3 +1187,9 @@ namespace World
 		return false;
 	}
 }
+
+
+
+
+
+

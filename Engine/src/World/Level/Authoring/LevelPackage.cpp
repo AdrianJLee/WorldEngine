@@ -9,6 +9,8 @@
 #include "World/Scene/Scene.h"
 #include "World/Scene/SceneSerializer.h"
 #include "World/Gameplay/Prefab/Prefab.h"
+#include "World/Gameplay/Prefab/PrefabDiffSerializer.h"
+#include "World/Schema/SchemaWriter.h"
 
 #include <algorithm>
 #include <fstream>
@@ -123,6 +125,54 @@ namespace World::Level
 				++index;
 			}
 			return index;
+		}
+
+		void ApplyInlinePropertyOverrides(Scene& scene,
+			const Gameplay::PendingPrefabInstanceRecord& block,
+			const std::unordered_map<Gameplay::PrefabLocalId, uint64_t>& mapping)
+		{
+			const Schema::SchemaRegistry& schemas = scene.GetContext().Schemas();
+			entt::registry& registry = scene.GetRegistry();
+			std::unordered_map<uint64_t, entt::entity> handlesByUuid;
+			for (const entt::entity handle : registry.view<UUIDComponent>())
+				handlesByUuid.emplace(static_cast<uint64_t>(registry.get<UUIDComponent>(handle).ID), handle);
+
+			Schema::YamlSchemaReader reader;
+			for (const auto& [localId, compOverrides] : block.PropertyOverrides)
+			{
+				auto mapIt = mapping.find(localId);
+				if (mapIt == mapping.end())
+					continue;
+				auto handleIt = handlesByUuid.find(mapIt->second);
+				if (handleIt == handlesByUuid.end())
+					continue;
+
+				Entity entity(&scene, handleIt->second);
+				for (const auto& [compName, yamlFields] : compOverrides)
+				{
+					const Schema::TypeSchema* schema = schemas.Find(compName);
+					if (!schema)
+						schema = schemas.Find("World::" + compName);
+					if (!schema || !schema->Storage)
+						continue;
+
+					if (!entity.HasComponent(schema->Storage->ComponentId))
+						continue;
+					void* rawInstance = entity.GetComponent(schema->Storage->ComponentId);
+					if (!rawInstance)
+						continue;
+
+					try
+					{
+						YAML::Node node = YAML::Load(yamlFields);
+						reader.ReadFields(*schema, rawInstance, node);
+					}
+					catch (const std::exception& e)
+					{
+						WLD_CORE_WARN("ApplyInlinePropertyOverrides: failed to parse '{0}': {1}", compName, e.what());
+					}
+				}
+			}
 		}
 	}
 
@@ -550,8 +600,10 @@ namespace World::Level
 		{
 			bool Loaded = false;
 			bool Failed = false;
-			std::vector<std::string> Docs;   // 先序逐实体文档
-			std::string Shape;               // 模板子树的先序形状签名(见 SubtreeShape)
+			Ref<Scene> StagingScene;
+			std::vector<entt::entity> Order;
+			std::vector<std::string> Docs;
+			std::string Shape;
 		};
 		std::unordered_map<std::string, TemplateCache> templates;
 
@@ -580,25 +632,33 @@ namespace World::Level
 				else
 				{
 					const Ref<Scene> staging = CreateRef<Scene>(scene.GetContext());
-					const Gameplay::PrefabInstanceResult staged =
-						Gameplay::InstantiateFromFile(prefabPath, *staging);
-					if (!staged.IsValid())
+					SceneSerializer serializer(staging);
+					if (!serializer.Deserialize(prefabPath.string()))
 					{
 						cache.Failed = true;
 					}
 					else
 					{
-						std::vector<entt::entity> order;
-						Gameplay::FlattenInstanceSubtree(staging->GetRegistry(),
-							static_cast<entt::entity>(staged.Root), order);
-						cache.Shape = SubtreeShape(staging->GetRegistry(), order);
-						for (const entt::entity handle : order)
+						entt::entity prefabRoot = entt::null;
+						for (const auto entity : staging->GetRegistry().view<UUIDComponent>())
 						{
-							std::string doc;
-							std::string ignored;
-							if (SceneSerializer::SerializeEntityDocumentToYaml(
-								Entity(staging.get(), handle), &doc, &ignored))
-								cache.Docs.push_back(std::move(doc));
+							const auto* hierarchy = staging->GetRegistry().try_get<HierarchyComponent>(entity);
+							if (!hierarchy || hierarchy->Parent == entt::null || !staging->GetRegistry().valid(hierarchy->Parent))
+							{
+								prefabRoot = entity;
+								break;
+							}
+						}
+						if (prefabRoot == entt::null)
+						{
+							cache.Failed = true;
+						}
+						else
+						{
+							cache.StagingScene = staging;
+							Gameplay::FlattenInstanceSubtree(staging->GetRegistry(),
+								prefabRoot, cache.Order);
+							cache.Shape = SubtreeShape(staging->GetRegistry(), cache.Order);
 						}
 					}
 				}
@@ -608,11 +668,11 @@ namespace World::Level
 
 			std::vector<entt::entity> order;
 			Gameplay::FlattenInstanceSubtree(registry, record.Root, order);
-			if (order.size() != cache.Docs.size())
+			if (order.size() != cache.Order.size())
 			{
 				WLD_CORE_WARN("LevelPackage: prefab instance '{0}' has {1} entities but its template has {2}; "
 					"writing every entity of the instance (dense)",
-					record.PrefabPath, order.size(), cache.Docs.size());
+					record.PrefabPath, order.size(), cache.Order.size());
 				continue;
 			}
 			if (SubtreeShape(registry, order) != cache.Shape)
@@ -622,18 +682,38 @@ namespace World::Level
 				continue;
 			}
 
+			record.Version = 2;
 			record.SparsePlacement = true;
+			record.EntityMapping.clear();
+			record.PropertyOverrides.clear();
+
+			const size_t matchCount = std::min(cache.Order.size(), order.size());
+			for (size_t i = 0; i < matchCount; ++i)
+			{
+				const entt::entity tmplHandle = cache.Order[i];
+				const entt::entity instHandle = order[i];
+				const auto* tmplUuid = cache.StagingScene->GetRegistry().try_get<UUIDComponent>(tmplHandle);
+				const auto* instUuid = registry.try_get<UUIDComponent>(instHandle);
+				if (!tmplUuid || !instUuid)
+					continue;
+
+				const Gameplay::PrefabLocalId localId = static_cast<uint64_t>(tmplUuid->ID);
+				record.EntityMapping[localId] = static_cast<uint64_t>(instUuid->ID);
+
+				std::unordered_map<std::string, std::string> overrides;
+				const Entity instEntity(const_cast<Scene*>(&scene), instHandle);
+				const Entity tmplEntity(cache.StagingScene.get(), tmplHandle);
+				if (Gameplay::PrefabDiffSerializer::DiffEntityComponents(
+					instEntity, tmplEntity, scene.GetContext().Schemas(), overrides))
+				{
+					record.PropertyOverrides[localId] = std::move(overrides);
+				}
+			}
+
+			// Prefab 2.0:未解包子实体 100% 豁免落盘(子实体 0 文件落盘!)
 			for (size_t index = 1; index < order.size(); ++index)
 			{
-				// 有覆盖登记 ⇒ 值可能与模板不同 ⇒ 照常落盘(它是"差异实体")。
-				if (record.Overrides.find(static_cast<uint32_t>(order[index])) != record.Overrides.end())
-					continue;
-				std::string live;
-				std::string ignored;
-				if (!SceneSerializer::SerializeEntityDocumentToYaml(Entity(&scene, order[index]), &live, &ignored))
-					continue;
-				if (ComponentFingerprint(live) == ComponentFingerprint(cache.Docs[index]))
-					sparseSkipped.insert(order[index]);
+				sparseSkipped.insert(order[index]);
 			}
 		}
 
@@ -671,7 +751,7 @@ namespace World::Level
 				Gameplay::PendingPrefabInstanceRecord block;
 				if (!SceneSerializer::ReadPrefabBlock(descriptor.DocumentYaml, &block))
 					continue;
-				if (block.EntityUuids.empty() || block.PrefabPath.empty())
+				if (block.PrefabPath.empty())
 					continue;
 
 				const std::filesystem::path prefabPath =
@@ -684,11 +764,30 @@ namespace World::Level
 						m_Impl->Id, block.PrefabPath);
 					continue;
 				}
-				const Gameplay::PrefabInstanceResult staged = Gameplay::InstantiateFromFileWithIds(
-					prefabPath, *scene, entt::null, block.EntityUuids);
-				if (!staged.IsValid())
-					WLD_CORE_WARN("LevelPackage '{0}': failed to rebuild sparse instance from '{1}'",
-						m_Impl->Id, block.PrefabPath);
+
+					if (block.Version == 2 || !block.EntityMapping.empty())
+				{
+					std::unordered_map<Gameplay::PrefabLocalId, uint64_t> mapping = block.EntityMapping;
+					const Gameplay::PrefabInstanceResult staged = Gameplay::InstantiateFromFileWithMapping(
+						prefabPath, *scene, entt::null, mapping, block.StructuralOverrides.Tombstones);
+					if (staged.IsValid())
+					{
+						ApplyInlinePropertyOverrides(*scene, block, mapping);
+					}
+					else
+					{
+						WLD_CORE_WARN("LevelPackage '{0}': failed to rebuild sparse V2 instance from '{1}'",
+							m_Impl->Id, block.PrefabPath);
+					}
+				}
+				else if (!block.EntityUuids.empty())
+				{
+					const Gameplay::PrefabInstanceResult staged = Gameplay::InstantiateFromFileWithIds(
+						prefabPath, *scene, entt::null, block.EntityUuids);
+					if (!staged.IsValid())
+						WLD_CORE_WARN("LevelPackage '{0}': failed to rebuild sparse instance from '{1}'",
+							m_Impl->Id, block.PrefabPath);
+				}
 			}
 		}
 
@@ -720,3 +819,15 @@ namespace World::Level
 		return scene;
 	}
 }
+
+
+
+
+
+
+
+
+
+
+
+
