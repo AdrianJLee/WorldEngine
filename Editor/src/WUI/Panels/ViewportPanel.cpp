@@ -1120,112 +1120,111 @@ namespace World
 		const glm::vec3 camPos = levelCam.Position;
 		// 复用前面已获取的 currentVp, currentProj, isOrtho
 
-		// ==================== 轨道一：场景地面参考网格 (Reference Grid: 正交下铺满图纸，透视下由 SceneRenderer 原生 GPU 深度通道呈现) ====================
+		// ==================== 轨道一：场景地面参考网格 (Reference Grid: 正交下铺满视口，透视下由 SceneRenderer 原生 GPU 深度通道呈现) ====================
 		if (m_ShowReferenceGrid && isOrtho)
 		{
 			Wui::ClipScope gridClip(ctx, sceneRect);
-			const float orthoSpan = isOrtho ? std::max(0.1f, levelCam.OrthographicSize) : std::max(10.0f, levelCam.Distance * 1.5f);
+			const float orthoSpan = std::max(0.1f, levelCam.OrthographicSize);
 			const float aspect = (sceneRect.W > 0.0f && sceneRect.H > 0.0f) ? sceneRect.W / sceneRect.H : 1.0f;
 			const float spanW = orthoSpan * aspect;
 			const float spanH = orthoSpan;
 
-			// 自适应刻度步长: 视场很大时以 10m 为基准，拉近时显示 1m 细格
-			const float cellSize = (orthoSpan > 150.0f) ? 10.0f : ((orthoSpan > 40.0f) ? 5.0f : 1.0f);
-			const Wui::WuiColor minorColor { 0.45f, 0.55f, 0.65f, 0.20f };
+			// 精确计算相机的焦平面目标中心 (Target = Eye + Forward * Distance)，绝不使用 Eye Position 导致偏心
+			const glm::vec3 camTarget = levelCam.Position + levelCam.Forward * levelCam.Distance;
+
+			// 工业级对数自适应标尺步长: 确保屏幕上每格在 [60, 160] 像素之间，线条总数恒定在 15~25 根，绝不截断丢弃
+			const float worldPerPixel = orthoSpan / std::max(1.0f, sceneRect.H);
+			const float targetStep = worldPerPixel * 75.0f;
+			const float exponent = std::floor(std::log10(std::max(1e-4f, targetStep)));
+			const float baseStep = std::pow(10.0f, exponent);
+			const float fracStep = targetStep / baseStep;
+			const float cellSize = (fracStep >= 5.0f) ? (baseStep * 5.0f) : ((fracStep >= 2.0f) ? (baseStep * 2.0f) : baseStep);
+
+			const Wui::WuiColor minorColor { 0.45f, 0.52f, 0.62f, 0.22f };
 			const Wui::WuiColor majorColor { 0.55f, 0.65f, 0.78f, 0.40f };
-			const Wui::WuiColor originColor { 0.55f, 0.62f, 0.72f, 0.40f };
+			const Wui::WuiColor xAxisColor { 0.68f, 0.38f, 0.38f, 0.55f }; // X 轴微弱暗红
+			const Wui::WuiColor yAxisColor { 0.38f, 0.68f, 0.38f, 0.55f }; // Y 轴微弱暗绿
+			const Wui::WuiColor zAxisColor { 0.38f, 0.48f, 0.70f, 0.55f }; // Z 轴微弱暗蓝
 
 			if (currentVp == World::ViewportViewpoint::Front || currentVp == World::ViewportViewpoint::Back)
 			{
-				// XY 立面参考网格
-				const float minX = std::floor((camPos.x - spanW * 0.5f) / cellSize) * cellSize;
-				const float maxX = std::ceil((camPos.x + spanW * 0.5f) / cellSize) * cellSize;
-				const float minY = std::floor((camPos.y - spanH * 0.5f) / cellSize) * cellSize;
-				const float maxY = std::ceil((camPos.y + spanH * 0.5f) / cellSize) * cellSize;
-				const int countX = static_cast<int>(std::ceil((maxX - minX) / cellSize));
-				const int countY = static_cast<int>(std::ceil((maxY - minY) / cellSize));
-				if (countX <= 160 && countY <= 160)
+				// XY 立面参考网格: 水平 X, 垂直 Y
+				const float minX = std::floor((camTarget.x - spanW * 0.5f) / cellSize) * cellSize - cellSize;
+				const float maxX = std::ceil((camTarget.x + spanW * 0.5f) / cellSize) * cellSize + cellSize;
+				const float minY = std::floor((camTarget.y - spanH * 0.5f) / cellSize) * cellSize - cellSize;
+				const float maxY = std::ceil((camTarget.y + spanH * 0.5f) / cellSize) * cellSize + cellSize;
+
+				for (float x = minX; x <= maxX + 0.01f; x += cellSize)
 				{
-					for (float x = minX; x <= maxX + 0.01f; x += cellSize)
-					{
-						const bool isOrigin = std::abs(x) < 0.01f;
-						const bool isMajor = std::fmod(std::abs(x), cellSize * 5.0f) < 0.01f;
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(x, minY, 0.0f, 1.0f),
-							levelCam.ViewProjection * glm::vec4(x, maxY, 0.0f, 1.0f),
-							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
-					}
-					for (float y = minY; y <= maxY + 0.01f; y += cellSize)
-					{
-						const bool isOrigin = std::abs(y) < 0.01f;
-						const bool isMajor = std::fmod(std::abs(y), cellSize * 5.0f) < 0.01f;
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(minX, y, 0.0f, 1.0f),
-							levelCam.ViewProjection * glm::vec4(maxX, y, 0.0f, 1.0f),
-							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
-					}
+					const bool isOrigin = std::abs(x) < (cellSize * 0.25f);
+					const bool isMajor = std::fmod(std::abs(x), cellSize * 5.0f) < (cellSize * 0.25f);
+					PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+						levelCam.ViewProjection * glm::vec4(x, minY, 0.0f, 1.0f),
+						levelCam.ViewProjection * glm::vec4(x, maxY, 0.0f, 1.0f),
+						isOrigin ? yAxisColor : (isMajor ? majorColor : minorColor), isOrigin ? 1.8f : 1.0f);
+				}
+				for (float y = minY; y <= maxY + 0.01f; y += cellSize)
+				{
+					const bool isOrigin = std::abs(y) < (cellSize * 0.25f);
+					const bool isMajor = std::fmod(std::abs(y), cellSize * 5.0f) < (cellSize * 0.25f);
+					PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+						levelCam.ViewProjection * glm::vec4(minX, y, 0.0f, 1.0f),
+						levelCam.ViewProjection * glm::vec4(maxX, y, 0.0f, 1.0f),
+						isOrigin ? xAxisColor : (isMajor ? majorColor : minorColor), isOrigin ? 1.8f : 1.0f);
 				}
 			}
 			else if (currentVp == World::ViewportViewpoint::Right || currentVp == World::ViewportViewpoint::Left)
 			{
-				// ZY 立面参考网格
-				const float minZ = std::floor((camPos.z - spanW * 0.5f) / cellSize) * cellSize;
-				const float maxZ = std::ceil((camPos.z + spanW * 0.5f) / cellSize) * cellSize;
-				const float minY = std::floor((camPos.y - spanH * 0.5f) / cellSize) * cellSize;
-				const float maxY = std::ceil((camPos.y + spanH * 0.5f) / cellSize) * cellSize;
-				const int countZ = static_cast<int>(std::ceil((maxZ - minZ) / cellSize));
-				const int countY = static_cast<int>(std::ceil((maxY - minY) / cellSize));
-				if (countZ <= 160 && countY <= 160)
+				// ZY 立面参考网格: 水平 Z, 垂直 Y
+				const float minZ = std::floor((camTarget.z - spanW * 0.5f) / cellSize) * cellSize - cellSize;
+				const float maxZ = std::ceil((camTarget.z + spanW * 0.5f) / cellSize) * cellSize + cellSize;
+				const float minY = std::floor((camTarget.y - spanH * 0.5f) / cellSize) * cellSize - cellSize;
+				const float maxY = std::ceil((camTarget.y + spanH * 0.5f) / cellSize) * cellSize + cellSize;
+
+				for (float z = minZ; z <= maxZ + 0.01f; z += cellSize)
 				{
-					for (float z = minZ; z <= maxZ + 0.01f; z += cellSize)
-					{
-						const bool isOrigin = std::abs(z) < 0.01f;
-						const bool isMajor = std::fmod(std::abs(z), cellSize * 5.0f) < 0.01f;
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(0.0f, minY, z, 1.0f),
-							levelCam.ViewProjection * glm::vec4(0.0f, maxY, z, 1.0f),
-							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
-					}
-					for (float y = minY; y <= maxY + 0.01f; y += cellSize)
-					{
-						const bool isOrigin = std::abs(y) < 0.01f;
-						const bool isMajor = std::fmod(std::abs(y), cellSize * 5.0f) < 0.01f;
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(0.0f, y, minZ, 1.0f),
-							levelCam.ViewProjection * glm::vec4(0.0f, y, maxZ, 1.0f),
-							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
-					}
+					const bool isOrigin = std::abs(z) < (cellSize * 0.25f);
+					const bool isMajor = std::fmod(std::abs(z), cellSize * 5.0f) < (cellSize * 0.25f);
+					PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+						levelCam.ViewProjection * glm::vec4(0.0f, minY, z, 1.0f),
+						levelCam.ViewProjection * glm::vec4(0.0f, maxY, z, 1.0f),
+						isOrigin ? yAxisColor : (isMajor ? majorColor : minorColor), isOrigin ? 1.8f : 1.0f);
+				}
+				for (float y = minY; y <= maxY + 0.01f; y += cellSize)
+				{
+					const bool isOrigin = std::abs(y) < (cellSize * 0.25f);
+					const bool isMajor = std::fmod(std::abs(y), cellSize * 5.0f) < (cellSize * 0.25f);
+					PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+						levelCam.ViewProjection * glm::vec4(0.0f, y, minZ, 1.0f),
+						levelCam.ViewProjection * glm::vec4(0.0f, y, maxZ, 1.0f),
+						isOrigin ? zAxisColor : (isMajor ? majorColor : minorColor), isOrigin ? 1.8f : 1.0f);
 				}
 			}
 			else
 			{
-				// XZ 地面参考网格 (Top / Bottom 或 3D 自由透视漫游)
-				const float minX = std::floor((camPos.x - spanW * 0.5f) / cellSize) * cellSize;
-				const float maxX = std::ceil((camPos.x + spanW * 0.5f) / cellSize) * cellSize;
-				const float minZ = std::floor((camPos.z - spanH * 0.5f) / cellSize) * cellSize;
-				const float maxZ = std::ceil((camPos.z + spanH * 0.5f) / cellSize) * cellSize;
-				const int countX = static_cast<int>(std::ceil((maxX - minX) / cellSize));
-				const int countZ = static_cast<int>(std::ceil((maxZ - minZ) / cellSize));
-				if (countX <= 160 && countZ <= 160)
+				// XZ 地面参考网格: 水平 X, 垂直 Z (顶视 Top / 底视 Bottom)
+				const float minX = std::floor((camTarget.x - spanW * 0.5f) / cellSize) * cellSize - cellSize;
+				const float maxX = std::ceil((camTarget.x + spanW * 0.5f) / cellSize) * cellSize + cellSize;
+				const float minZ = std::floor((camTarget.z - spanH * 0.5f) / cellSize) * cellSize - cellSize;
+				const float maxZ = std::ceil((camTarget.z + spanH * 0.5f) / cellSize) * cellSize + cellSize;
+
+				for (float x = minX; x <= maxX + 0.01f; x += cellSize)
 				{
-					for (float x = minX; x <= maxX + 0.01f; x += cellSize)
-					{
-						const bool isOrigin = std::abs(x) < 0.01f;
-						const bool isMajor = std::fmod(std::abs(x), cellSize * 5.0f) < 0.01f;
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(x, 0.0f, minZ, 1.0f),
-							levelCam.ViewProjection * glm::vec4(x, 0.0f, maxZ, 1.0f),
-							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
-					}
-					for (float z = minZ; z <= maxZ + 0.01f; z += cellSize)
-					{
-						const bool isOrigin = std::abs(z) < 0.01f;
-						const bool isMajor = std::fmod(std::abs(z), cellSize * 5.0f) < 0.01f;
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(minX, 0.0f, z, 1.0f),
-							levelCam.ViewProjection * glm::vec4(maxX, 0.0f, z, 1.0f),
-							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
-					}
+					const bool isOrigin = std::abs(x) < (cellSize * 0.25f);
+					const bool isMajor = std::fmod(std::abs(x), cellSize * 5.0f) < (cellSize * 0.25f);
+					PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+						levelCam.ViewProjection * glm::vec4(x, 0.0f, minZ, 1.0f),
+						levelCam.ViewProjection * glm::vec4(x, 0.0f, maxZ, 1.0f),
+						isOrigin ? zAxisColor : (isMajor ? majorColor : minorColor), isOrigin ? 1.8f : 1.0f);
+				}
+				for (float z = minZ; z <= maxZ + 0.01f; z += cellSize)
+				{
+					const bool isOrigin = std::abs(z) < (cellSize * 0.25f);
+					const bool isMajor = std::fmod(std::abs(z), cellSize * 5.0f) < (cellSize * 0.25f);
+					PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+						levelCam.ViewProjection * glm::vec4(minX, 0.0f, z, 1.0f),
+						levelCam.ViewProjection * glm::vec4(maxX, 0.0f, z, 1.0f),
+						isOrigin ? xAxisColor : (isMajor ? majorColor : minorColor), isOrigin ? 1.8f : 1.0f);
 				}
 			}
 		}
