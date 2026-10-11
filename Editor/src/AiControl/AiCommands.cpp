@@ -1543,7 +1543,19 @@ namespace World
 				+ " to " + node->Kind + " '" + node->Label + "' window=" + node->Window;
 			return true;
 		}
-		if (cmd == "ui.open" || cmd == "ui.toggle" || cmd == "ui.close")
+		if (cmd == "ui.open")
+		{
+			const std::string panel = normalizePanel(arg("panel"));
+			if (panel.empty())
+			{
+				error = "missing panel";
+				return false;
+			}
+			m_Shell.OpenOrFocusIndependentWindow(panel);
+			result = "opened " + panel;
+			return true;
+		}
+		if (cmd == "ui.toggle" || cmd == "ui.close")
 		{
 			const std::string panel = normalizePanel(arg("panel"));
 			if (panel.empty())

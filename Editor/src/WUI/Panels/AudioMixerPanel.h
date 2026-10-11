@@ -13,6 +13,8 @@ namespace World
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 
 	private:
-		int m_SelectedBusIndex { 0 };
+		bool m_ShowHelpGuide { true };
+		int m_ActiveSnapshotIndex { 0 }; // 0: Default, 1: Pause Menu, 2: Dialogue Ducking, 3: Combat
+		std::string m_StatusNotice;
 	};
 }

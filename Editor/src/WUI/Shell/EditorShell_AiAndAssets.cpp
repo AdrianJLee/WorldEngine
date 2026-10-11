@@ -495,28 +495,25 @@ void EditorShell::EraseFloatHost(FloatWindowHost* host){
 
 
 void EditorShell::OpenOrFocusIndependentWindow(const std::string& panel){
-		if (FloatWindowHost* host = FindFloatHost(panel))
+		// 1. 若当前处于顶栏/挂靠槽位附着状态 (Attached Tab)，严格保持附着状态，仅切换并激活该附着标签 (绝不强行脱离附着)
+		if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) != m_AttachedPanels.end())
 		{
-			host->SetHidden(false);
-			host->ActivatePanel(panel);
-			host->Focus();
-			auto it = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
-			if (it != m_AttachedPanels.end())
-				m_AttachedPanels.erase(it);
-			FocusIndependentWindow(panel);
+			m_ActiveWindowTag = panel;
 			return;
 		}
-		OpenIndependentPanel(panel);
+
+		// 2. 若当前为独立浮动 OS 窗口 (Floating Window)，保持浮动状态并前置聚焦
 		if (FloatWindowHost* host = FindFloatHost(panel))
 		{
-			host->SetHidden(false);
+			if (host->IsHidden())
+				host->SetHidden(false);
 			host->ActivatePanel(panel);
 			host->Focus();
+			return;
 		}
-		auto it = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
-		if (it != m_AttachedPanels.end())
-			m_AttachedPanels.erase(it);
-		FocusIndependentWindow(panel);
+
+		// 3. 尚未打开：走统一的激活/打开逻辑
+		AiActivatePanel(panel, nullptr);
 	}
 
 void EditorShell::FocusIndependentWindow(const std::string& panel){
