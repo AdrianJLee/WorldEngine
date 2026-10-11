@@ -21,6 +21,8 @@
 #include "WUI/Panels/PluginsPanel.h"
 #include "WUI/Panels/PluginPanel.h"
 #include "WUI/Panels/UiDesignerPanel.h"
+#include "WUI/Panels/AudioMixerPanel.h"
+#include "WUI/Panels/AiAudioStudioPanel.h"
 #include "WUI/Shell/PluginEditorHost.h"
 #include "WUI/Shell/FloatWindowHost.h"
 #include "Project/ProjectLauncher.h"
@@ -122,6 +124,7 @@ namespace World
 		std::string IndependentWindowPanel(size_t index) const override;
 		std::string IndependentWindowLabel(size_t index) const override;
 		void FocusIndependentWindow(const std::string& panel) override;
+		void OpenOrFocusIndependentWindow(const std::string& panel);
 		void DockBackIndependentWindow(const std::string& panel) override;
 		// D3:打开材质编辑器(必要时先打开独立窗口)并载入指定材质。
 		void OpenMaterialEditor(const std::string& path) override;
@@ -784,6 +787,7 @@ namespace World
 		std::shared_ptr<Wui::WuiButton> m_FileButton;
 		// P4-U6b:View 菜单(相机模式/预览 + 范围可视化开关)。
 		std::shared_ptr<Wui::WuiButton> m_WindowButton;
+		std::shared_ptr<Wui::WuiButton> m_AudioButton;
 		// PROJ-2/T1:运行菜单(运行 ▸ 启动项目(Runtime))。
 		std::shared_ptr<Wui::WuiButton> m_RunButton;
 		// P4-U6b:当前显示帧级模态的面板(空 = 无)。帧初封锁输入,渲染该面板前解开。

@@ -1,0 +1,14 @@
+Id: "ui_click"
+BusId: 4
+MaxInstances: 16
+StealPolicy: 0
+CooldownSeconds: 0.02
+VolumeRange: [1.0, 1.0]
+PitchRange: [0.0, 0.0]
+Spatial:
+  Is3D: false
+RootContainer:
+  Type: 0
+  Variations:
+    - Path: "audio/sfx/ui_click.waudio"
+      Weight: 1.0

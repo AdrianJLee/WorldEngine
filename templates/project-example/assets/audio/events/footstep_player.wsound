@@ -1,0 +1,18 @@
+Id: "footstep_player"
+BusId: 2
+MaxInstances: 4
+StealPolicy: 0
+CooldownSeconds: 0.08
+VolumeRange: [0.85, 1.0]
+PitchRange: [-1.5, 1.5]
+Spatial:
+  Is3D: true
+  MinDistance: 1.0
+  MaxDistance: 25.0
+  AttenuationModel: 2
+RootContainer:
+  Type: 1
+  ShuffleNoRepeat: true
+  Variations:
+    - Path: "audio/sfx/footstep_grass.waudio"
+      Weight: 1.0

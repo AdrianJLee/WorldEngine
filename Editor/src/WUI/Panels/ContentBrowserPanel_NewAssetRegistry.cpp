@@ -1,3 +1,5 @@
+#include "World/Audio/SoundEvent.h"
+#include <fstream>
 #include "ContentBrowserPanel_Internal.h"
 
 // M7a(GameUI):「新建 UI 文档」写出的 `.wui` 用引擎自己的文档模型 + UiDocumentIO::SaveFile,
@@ -128,6 +130,56 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				m_PendingLuaWizard = true;
 				return true;
 			});
+		add("sound_event", "Sound Event", ".wsound", 32, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				Audio::SoundEvent evt("New_SoundEvent", Audio::kBusSfx);
+				std::string yaml = evt.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "sound_event", ".wsound");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-sound-event");
+				return true;
+			});
+
+		add("audio_mixer", "Audio Mixer", ".wmixer", 34, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "main", ".wmixer");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << "Version: 1\nBuses:\n  - Id: 0\n    Name: \"Master\"\n    Volume: 1.0\n";
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-audio-mixer");
+				return true;
+			});
+
+		add("voice_profile", "Timbre Profile", ".wvoice", 36, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "character", ".wvoice");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << "CharacterId: \"character_01\"\nPresetName: \"Neutral\"\nPitchShiftSemi: 0.0\nRateScale: 1.0\n";
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-voice-profile");
+				return true;
+			});
+
 	}
 
 
@@ -137,7 +189,7 @@ void ContentBrowserPanel::UnregisterDefaultAssetTypes(){
 		m_AssetTypesRegistered = false;
 		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
 		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
-		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script" })
+		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "audio_mixer", "voice_profile" })
 			registry.Unregister(id);
 	}
 

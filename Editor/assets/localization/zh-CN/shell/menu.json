@@ -51,5 +51,16 @@
   "menu.file.build_reload_cpp_module.tooltip": "一步完成:卸载 Game.dll → 后台运行当前项目自己的 build.cmd → 加载新构建。构建失败时模块保持未加载,输出尾部在日志与 module.status 的 buildOutput 里可见;同一时刻只运行一个构建。",
   "menu.run": "运行",
   "menu.run.launch_project": "启动项目(Runtime)",
-  "menu.run.launch_project.tooltip": "用独立的 Runtime 进程启动当前项目(按清单里的 start_scene 运行)。编辑器不重启、不需要先进 Play;项目根 = 当前项目。"
+  "menu.run.launch_project.tooltip": "用独立的 Runtime 进程启动当前项目(按清单里的 start_scene 运行)。编辑器不重启、不需要先进 Play;项目根 = 当前项目。",
+  "menu.audio": "音频",
+  "menu.audio.mixer": "音频混音台",
+  "menu.audio.mixer.tooltip": "打开音频混音台 (多通道推子、实时 VU 电平表、DSP 效果机架与快照)",
+  "menu.audio.studio": "AI 音频工坊",
+  "menu.audio.studio.tooltip": "打开 AI 音频工坊 (角色多音色台词配音、Viseme 口型提取、AI 音效与配乐生成)",
+  "menu.audio.test_click": "测试界面音效",
+  "menu.audio.test_click.tooltip": "试听界面 2D 点击声",
+  "menu.audio.test_step": "测试 3D 空间音效",
+  "menu.audio.test_step.tooltip": "试听 3D 空间定位脚步声",
+  "menu.audio.stop_all": "停止全部声音",
+  "menu.audio.stop_all.tooltip": "立即停止所有正在播放的声音"
 }

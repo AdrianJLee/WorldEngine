@@ -1,3 +1,4 @@
+#include "World/Audio/AudioSystem.h"
 #include "EditorLayer_Internal.h"
 #include "World/Platform/Windows/WindowsIme.h"
 
@@ -237,6 +238,7 @@ void EditorLayer::OnAttach(){
 		// 每帧的 `BeginFrame("main", …)` 由 shell 负责 —— UiHost 只用共享通道口径:只登记游戏 UI
 		// 节点、不重置窗口、不关通道(退出 Play 时只清本窗口登记)。
 		m_UiHost.SetAccessibilityMode(UiHostAccessibilityMode::SharedChannel);
+		Audio::AudioSystem::Get().Initialize(false);
 		// 主窗口无边框:顶部第一行(挂靠栏)即窗口栏位,可拖动/关闭;边缘缩放保留。
 		Application::Get().GetWindow().SetFrameless(true);
 		// MAT-UI8:主窗口 WUI 上下文接系统剪贴板 —— 单行文本框(查找/替换、重命名、
@@ -582,6 +584,7 @@ void EditorLayer::LoadIconTextures(){
 
 void EditorLayer::OnDetach(){
 		WLD_TRACE_FUNCTION();
+		Audio::AudioSystem::Get().Shutdown();
 		// 控制通道先停:避免关停过程中还有命令进来(Pump 已经不会再被调用)。
 		if (m_AiServer)
 		{
@@ -638,6 +641,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 		// D5c-4a:渲染发生在面板绘制里(RenderScene),那里拿不到 Timestep —— 先缓存一帧。
 		m_LastDeltaSeconds = ts.GetSeconds();
 		ProcessPendingRendererChange();
+		Audio::AudioSystem::Get().Update(ts.GetSeconds(), m_ActiveScene.get());
 		// PROJ-2/T1:启动期"自动打开最近项目一次"。放在第一帧(窗口/渲染器已经初始化)执行,
 		// 而不是 OnAttach 里直接关进程;RelaunchWithProject 内部仍走未保存确认(启动期无改动)。
 		if (m_PendingAutoOpenRecent)

@@ -494,6 +494,31 @@ void EditorShell::EraseFloatHost(FloatWindowHost* host){
 	}
 
 
+void EditorShell::OpenOrFocusIndependentWindow(const std::string& panel){
+		if (FloatWindowHost* host = FindFloatHost(panel))
+		{
+			host->SetHidden(false);
+			host->ActivatePanel(panel);
+			host->Focus();
+			auto it = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
+			if (it != m_AttachedPanels.end())
+				m_AttachedPanels.erase(it);
+			FocusIndependentWindow(panel);
+			return;
+		}
+		OpenIndependentPanel(panel);
+		if (FloatWindowHost* host = FindFloatHost(panel))
+		{
+			host->SetHidden(false);
+			host->ActivatePanel(panel);
+			host->Focus();
+		}
+		auto it = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
+		if (it != m_AttachedPanels.end())
+			m_AttachedPanels.erase(it);
+		FocusIndependentWindow(panel);
+	}
+
 void EditorShell::FocusIndependentWindow(const std::string& panel){
 		if (FloatWindowHost* host = FindFloatHost(panel))
 			host->Focus();

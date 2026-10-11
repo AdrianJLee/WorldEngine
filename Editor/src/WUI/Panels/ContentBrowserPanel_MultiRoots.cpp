@@ -337,6 +337,26 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 					"UI Designer is not available in this editor session."));
 			}
 		}
+				else if (LowerExtension(path) == ".wsound" || LowerExtension(path) == ".wmixer")
+		{
+			auto* shell = dynamic_cast<EditorShell*>(&m_Host);
+			if (shell)
+			{
+				shell->OpenOrFocusIndependentWindow("audio_mixer");
+				if (m_Ctx)
+					m_Ctx->RecordOp("browser", "open-audio-mixer", path.filename().generic_string(), path.generic_string());
+			}
+		}
+		else if (LowerExtension(path) == ".wvoice")
+		{
+			auto* shell = dynamic_cast<EditorShell*>(&m_Host);
+			if (shell)
+			{
+				shell->OpenOrFocusIndependentWindow("ai_audio_studio");
+				if (m_Ctx)
+					m_Ctx->RecordOp("browser", "open-ai-audio-studio", path.filename().generic_string(), path.generic_string());
+			}
+		}
 		else if (LowerExtension(path) == ".wtex")
 		{
 			// M4-TEX P4:纹理**资产**双击 → 打开 Texture Settings(编辑设置 + source:,

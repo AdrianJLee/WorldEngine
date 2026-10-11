@@ -1,3 +1,4 @@
+#include "World/Audio/AudioSystem.h"
 #include "EditorShell_Internal.h"
 
 namespace World
@@ -907,6 +908,24 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 						m_Ctx->ClosePopup(menuWindow);
 				};
 			m_MenuBar->Add(m_WindowButton, { 78, 78, 0, 22, 0 });
+			const Wui::WuiId menuAudio = Wui::HashId("menu.audio");
+			m_AudioButton = std::make_shared<Wui::WuiButton>();
+			m_AudioButton->SetId(menuAudio);
+			m_AudioButton->Label = Wui::Tr("menu.audio", "Audio");
+			m_AudioButton->OnClick = [this, menuAudio]
+				{
+					const bool opening = m_OpenMenu != menuAudio;
+					m_OpenMenu = opening ? menuAudio : 0;
+					if (opening)
+					{
+						m_Ctx->CloseAllPopups();
+						m_MenuHeaderRect = m_AudioButton->Rect();
+						m_Ctx->OpenPopup(menuAudio);
+					}
+					else
+						m_Ctx->ClosePopup(menuAudio);
+				};
+			m_MenuBar->Add(m_AudioButton, { 64, 64, 0, 22, 0 });
 			// PROJ-2/T1:运行菜单 —— 独立 Runtime 进程的"启动项目"入口(不重启编辑器)。
 			m_RunButton = std::make_shared<Wui::WuiButton>();
 			m_RunButton->SetId(menuRun);
@@ -1260,6 +1279,41 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		appendPanels(/*independent=*/false);
 		windowEntries.push_back({ Wui::Tr("menu.window.reset_layout", "Reset Layout"), false, [this, &ctx] { ResetLayout(ctx); } });
 		drawMenu(menuWindow, "menu.window", windowEntries);
+
+		const Wui::WuiId menuAudio = Wui::HashId("menu.audio");
+		std::vector<MenuEntry> audioEntries;
+		auto openAsIndependentWindow = [this](const std::string& panel)
+		{
+			OpenIndependentPanel(panel);
+			if (auto* host = FindFloatHost(panel))
+			{
+				host->SetHidden(false);
+				host->ActivatePanel(panel);
+			}
+			auto it = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
+			if (it != m_AttachedPanels.end()) m_AttachedPanels.erase(it);
+			FocusIndependentWindow(panel);
+		};
+
+		audioEntries.push_back({ Wui::Tr("menu.audio.mixer", "Audio Mixer"),
+			m_Layout.IsFloating("audio_mixer"),
+			[this] { OpenOrFocusIndependentWindow("audio_mixer"); }, false,
+			Wui::Tr("menu.audio.mixer.tooltip", "Open the Audio Mixer panel (Buses, VU Meters, Faders, DSP).") });
+		audioEntries.push_back({ Wui::Tr("menu.audio.studio", "AI Audio Studio"),
+			m_Layout.IsFloating("ai_audio_studio"),
+			[this] { OpenOrFocusIndependentWindow("ai_audio_studio"); }, false,
+			Wui::Tr("menu.audio.studio.tooltip", "Open AI Audio Studio (Dialogue Voice Acting, Lip-Sync, Text-to-SFX & Music).") });
+		audioEntries.push_back({ "---", false, {}, true });
+		audioEntries.push_back({ Wui::Tr("menu.audio.test_click", "Test UI Click SFX"), false,
+			[] { Audio::AudioSystem::Get().PostEvent2D("ui_click"); }, false,
+			Wui::Tr("menu.audio.test_click.tooltip", "Audition test for UI 2D Click Sound.") });
+		audioEntries.push_back({ Wui::Tr("menu.audio.test_step", "Test 3D Footstep SFX"), false,
+			[] { Audio::AudioSystem::Get().PostEvent("footstep_player"); }, false,
+			Wui::Tr("menu.audio.test_step.tooltip", "Audition test for 3D Spatial Footstep Sound.") });
+		audioEntries.push_back({ Wui::Tr("menu.audio.stop_all", "Stop All Audio"), false,
+			[] { Audio::AudioSystem::Get().StopAll(); }, false,
+			Wui::Tr("menu.audio.stop_all.tooltip", "Stop all playing voices immediately.") });
+		drawMenu(menuAudio, "menu.audio", audioEntries);
 
 		// P4-U8a:菜单栏不再有 View 菜单 —— "看"的开关**全部搬进视口自己的悬浮 `视图 ▼`**
 		// (用户 2026-09-21:「视图菜单栏的功能能否放到 view 里」;Unity 的 Scene 视图工具条/

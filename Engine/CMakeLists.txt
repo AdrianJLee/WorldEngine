@@ -243,6 +243,7 @@ target_link_libraries(World PRIVATE
     # WindowsWindow/WindowsPlatformUtils 的 IME 接口(ImmGetContext 等);
     # 此前由已移除的第三方 UI 依赖传递链接,现需显式声明。
     imm32
+    winmm
     cgltf
     Luau.VM
     Luau.Compiler
