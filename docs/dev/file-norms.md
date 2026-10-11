@@ -19,7 +19,7 @@
 
 ```
 .gitattributes  .gitignore  .gitmodules  CMakeLists.txt  CMakeSettings.json
-LICENSE         README.md   README.zh-CN.md  .luarc.json
+LICENSE         NOTICE      README.md   README.zh-CN.md  .luarc.json
 docs/   Editor/  Engine/   Game/       Launcher/  plugins/  projects/
 Runtime/  templates/  tests/  third_party/  vendor/
 ```
@@ -207,3 +207,4 @@ Runtime/  templates/  tests/  third_party/  vendor/
 | ignore 漂移 | `git check-ignore` 命中"必须入库清单"任一项 → 报错 |
 | 孤儿资产 | 内容根内不被任何 `.wmat`/场景引用且无 `.meta` 记录 → 报告 |
 | 产品名泄漏 | **入库范围**内(`docs/**`、`AGENTS.md`)出现具体 AI 产品目录名 → 报错(`tools/**` 本机自用,不检查) |
+
