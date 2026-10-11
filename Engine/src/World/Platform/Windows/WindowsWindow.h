@@ -25,6 +25,7 @@ namespace World
 		bool IsVsync() const override;
 
 		inline virtual void* GetNativeWindow() const override { return m_Window; };
+		void* GetPlatformWindowHandle() const override;
 
 		void MakeCurrent() override;
 		void SwapBuffers() override;

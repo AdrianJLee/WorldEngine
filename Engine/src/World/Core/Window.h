@@ -52,6 +52,8 @@ namespace World
 
 
 		virtual void* GetNativeWindow() const = 0;
+		// 平台原生底层窗口句柄 (Windows 下为 HWND; 非 Win 为 nullptr)
+		virtual void* GetPlatformWindowHandle() const { return nullptr; }
 		// 无边框窗口的"边缘缩放带"厚度(物理像素);0 = 平台不提供/窗口有系统边框。
 		// WUI 用它来给出 ResizeEW/NS/NWSE 光标 —— 否则用户看不出边缘可以拖。
 		virtual int ResizeBorderPixels() const { return 0; }

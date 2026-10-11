@@ -681,7 +681,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 		{
 			const bool viewportActive = (m_ViewportFocused && m_ViewportHovered) || (m_Viewport3DDragging != Viewport3DDrag::None);
 			const bool textActive = Wui::WuiTextFocus::Get().Active();
-			HWND hwnd = static_cast<HWND>(Application::Get().GetWindow().GetNativeWindow());
+			HWND hwnd = static_cast<HWND>(Application::Get().GetWindow().GetPlatformWindowHandle());
 			if (hwnd)
 			{
 				if (viewportActive && !textActive)

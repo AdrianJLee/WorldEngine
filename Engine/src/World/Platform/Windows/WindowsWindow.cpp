@@ -365,6 +365,11 @@ namespace World
 		m_Data.VSync = enabled;
 	}
 
+	void* WindowsWindow::GetPlatformWindowHandle() const
+	{
+		return static_cast<void*>(glfwGetWin32Window(m_Window));
+	}
+
 	void WindowsWindow::MakeCurrent()
 	{
 		// Vulkan 附加窗口用 GLFW_NO_API 创建,没有 GL 上下文。

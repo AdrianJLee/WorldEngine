@@ -1513,13 +1513,43 @@ namespace World
 			std::snprintf(hudLine2, sizeof(hudLine2),
 				"Layers: [%s] | Entities: %zu", layersText.c_str(), entityCount);
 
-			const float hudW = 240.0f;
+			const float text1W = ctx.MeasureTextWidth(hudLine1, 12.0f);
+			const float text2W = ctx.MeasureTextWidth(hudLine2, 12.0f);
+			const float hudW = std::max(240.0f, std::max(text1W, text2W) + 20.0f);
 			const float hudH = 46.0f;
 			const Wui::WuiRect hudRect { sceneRect.X + sceneRect.W - hudW - 12.0f, sceneRect.Y + 12.0f, hudW, hudH };
 			Wui::PanelBackground(ctx, hudRect, Wui::WuiColor { 0.07f, 0.09f, 0.13f, 0.88f }, 4.0f);
 			Wui::HighlightOutline(ctx, hudRect, Wui::WuiColor { 0.18f, 0.65f, 0.90f, 0.70f }, 4.0f, 1.0f);
 			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 5.0f }, hudLine1, Wui::WuiColor { 0.30f, 0.90f, 1.0f, 1.0f }, 12.0f);
 			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 24.0f }, hudLine2, Wui::WuiColor { 0.85f, 0.85f, 0.90f, 0.90f }, 12.0f);
+
+		// ⑥ 飞行漫游实时速度浮动胶囊 (对标 UE5 Camera Speed Floating Badge, 居中高亮醒目呈现)
+		if (m_Host.IsFlyNavigating() || m_Host.GetFlySpeedTimer() > 0.0f)
+		{
+			const float speedScale = m_Host.GetFlySpeedScale();
+			const float curSpeed = 12.0f * speedScale;
+			char speedText[64] = {};
+			std::snprintf(speedText, sizeof(speedText), "飞行速度: %.1f m/s  (%.1fx)", curSpeed, speedScale);
+
+			const float badgeTextW = ctx.MeasureTextWidth(speedText, 13.0f);
+			const float badgeW = badgeTextW + 36.0f;
+			const float badgeH = 28.0f;
+			const Wui::WuiRect badgeRect {
+				sceneRect.X + (sceneRect.W - badgeW) * 0.5f,
+				sceneRect.Y + kChromePad + kChromeRowH + 12.0f,
+				badgeW,
+				badgeH
+			};
+
+			const Wui::WuiColor badgeBg { 0.06f, 0.10f, 0.16f, 0.92f };
+			const Wui::WuiColor badgeBorder { 0.20f, 0.85f, 0.90f, 0.85f };
+			const Wui::WuiColor badgeTextCol { 0.35f, 0.92f, 1.0f, 1.0f };
+
+			Wui::PanelBackground(ctx, badgeRect, badgeBg, 14.0f);
+			Wui::HighlightOutline(ctx, badgeRect, badgeBorder, 14.0f, 1.2f);
+			Wui::Label(ctx, { badgeRect.X + 18.0f, badgeRect.Y + 7.0f }, speedText, badgeTextCol, 13.0f);
+			ctx.RegisterOverlayRect(badgeRect);
+		}
 
 		// ---- 相机预览小窗(PiP):直接显示"场景相机看到的东西" ----
 		//

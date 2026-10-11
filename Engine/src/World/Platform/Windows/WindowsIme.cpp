@@ -66,17 +66,54 @@ namespace World::Platform
 		return false;
 	}
 
+	namespace
+	{
+		HWND s_DisabledHwnd = nullptr;
+		HIMC s_PreviousHimc = nullptr;
+	}
+
 	void WindowsIme::SetImeEnabled(HWND hwnd, bool enabled)
 	{
-		HIMC himc = ImmGetContext(hwnd);
-		if (himc)
+		if (!hwnd)
+			return;
+
+		if (!enabled)
 		{
-			ImmSetOpenStatus(himc, enabled ? TRUE : FALSE);
-			if (!enabled)
+			// 1. 取消正在进行的任何输入法组合
+			HIMC current = ImmGetContext(hwnd);
+			if (current)
 			{
-				ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+				ImmNotifyIME(current, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+				ImmSetOpenStatus(current, FALSE);
+				ImmReleaseContext(hwnd, current);
 			}
-			ImmReleaseContext(hwnd, himc);
+
+			// 2. 操作系统级彻底脱钩输入法上下文 (ImmAssociateContext nullptr: 系统视其为无输入法原生游戏窗口)
+			HIMC oldHimc = ImmAssociateContext(hwnd, nullptr);
+			if (oldHimc && !s_PreviousHimc)
+			{
+				s_PreviousHimc = oldHimc;
+				s_DisabledHwnd = hwnd;
+			}
+		}
+		else
+		{
+			// 恢复输入法关联
+			if (s_DisabledHwnd == hwnd && s_PreviousHimc)
+			{
+				ImmAssociateContext(hwnd, s_PreviousHimc);
+				s_PreviousHimc = nullptr;
+				s_DisabledHwnd = nullptr;
+			}
+			else
+			{
+				HIMC himc = ImmGetContext(hwnd);
+				if (himc)
+				{
+					ImmSetOpenStatus(himc, TRUE);
+					ImmReleaseContext(hwnd, himc);
+				}
+			}
 		}
 	}
 #endif
