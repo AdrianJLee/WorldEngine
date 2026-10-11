@@ -1338,6 +1338,7 @@ namespace World
 			}
 			RenderDebug(camera, cameraTransform);
 		}
+		RenderGroundGrid(camera, cameraTransform);
 		RenderGeometry(camera, cameraTransform);
 
 		Renderer2D::EndScene();
@@ -1661,4 +1662,73 @@ namespace World
 		if (m_WarnedPaths.insert(key).second)
 			WLD_CORE_WARN("{0}", message);
 	}
+
+	void SceneRenderer::RenderGroundGrid(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		(void)camera;
+		if (!m_Options.ShowGrid)
+			return;
+
+		const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+		// 大视场覆盖半径 240 米，主格 10m，近处细格 1m
+		constexpr float kMaxRadius = 240.0f;
+		constexpr float kMajorCellSize = 10.0f;
+		constexpr float kMinorCellSize = 1.0f;
+
+		const float startX = std::floor((camPos.x - kMaxRadius) / kMajorCellSize) * kMajorCellSize;
+		const float endX = std::ceil((camPos.x + kMaxRadius) / kMajorCellSize) * kMajorCellSize;
+		const float startZ = std::floor((camPos.z - kMaxRadius) / kMajorCellSize) * kMajorCellSize;
+		const float endZ = std::ceil((camPos.z + kMaxRadius) / kMajorCellSize) * kMajorCellSize;
+
+		// 10m 主网格线（平滑边缘淡出，远景融入天空雾，绝无黑地截断）
+		for (float x = startX; x <= endX + 0.01f; x += kMajorCellSize)
+		{
+			const float distRatio = std::min(1.0f, std::abs(x - camPos.x) / kMaxRadius);
+			const float alpha = (1.0f - distRatio * distRatio) * 0.35f;
+			if (alpha <= 0.01f) continue;
+			const bool isZAxis = (std::abs(x) < 0.01f);
+			const glm::vec4 color = isZAxis
+				? glm::vec4(0.38f, 0.48f, 0.70f, 0.55f) // Z 轴微弱暗蓝基准线
+				: glm::vec4(0.52f, 0.60f, 0.70f, alpha);
+			Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, startZ), glm::vec3(x, 0.0f, endZ), color);
+		}
+		for (float z = startZ; z <= endZ + 0.01f; z += kMajorCellSize)
+		{
+			const float distRatio = std::min(1.0f, std::abs(z - camPos.z) / kMaxRadius);
+			const float alpha = (1.0f - distRatio * distRatio) * 0.35f;
+			if (alpha <= 0.01f) continue;
+			const bool isXAxis = (std::abs(z) < 0.01f);
+			const glm::vec4 color = isXAxis
+				? glm::vec4(0.68f, 0.38f, 0.38f, 0.55f) // X 轴微弱暗红基准线
+				: glm::vec4(0.52f, 0.60f, 0.70f, alpha);
+			Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z), color);
+		}
+
+		// 45 米近处 1m 细网格（细致辅助摆放与对齐，远处收敛防摩尔纹）
+		constexpr float kMinorRadius = 45.0f;
+		const float minorStartX = std::floor((camPos.x - kMinorRadius) / kMinorCellSize) * kMinorCellSize;
+		const float minorEndX = std::ceil((camPos.x + kMinorRadius) / kMinorCellSize) * kMinorCellSize;
+		const float minorStartZ = std::floor((camPos.z - kMinorRadius) / kMinorCellSize) * kMinorCellSize;
+		const float minorEndZ = std::ceil((camPos.z + kMinorRadius) / kMinorCellSize) * kMinorCellSize;
+
+		for (float x = minorStartX; x <= minorEndX + 0.01f; x += kMinorCellSize)
+		{
+			if (std::fmod(std::abs(x), kMajorCellSize) < 0.01f) continue; // 避开主线
+			const float distRatio = std::min(1.0f, std::abs(x - camPos.x) / kMinorRadius);
+			const float alpha = (1.0f - distRatio * distRatio) * 0.18f;
+			if (alpha <= 0.01f) continue;
+			Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, minorStartZ), glm::vec3(x, 0.0f, minorEndZ),
+				glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+		}
+		for (float z = minorStartZ; z <= minorEndZ + 0.01f; z += kMinorCellSize)
+		{
+			if (std::fmod(std::abs(z), kMajorCellSize) < 0.01f) continue;
+			const float distRatio = std::min(1.0f, std::abs(z - camPos.z) / kMinorRadius);
+			const float alpha = (1.0f - distRatio * distRatio) * 0.18f;
+			if (alpha <= 0.01f) continue;
+			Renderer2D::DrawLineCore(glm::vec3(minorStartX, 0.0f, z), glm::vec3(minorEndX, 0.0f, z),
+				glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+		}
+	}
+
 }

@@ -498,6 +498,22 @@ void EditorShell::ToggleViewportCamera3D(){
 		m_Editor.ToggleViewportCamera3D();
 	}
 
+World::ViewportProjection EditorShell::GetViewportProjection() const {
+		return m_Editor.GetViewportProjection();
+	}
+
+void EditorShell::SetViewportProjection(World::ViewportProjection proj) {
+		m_Editor.SetViewportProjection(proj);
+	}
+
+World::ViewportViewpoint EditorShell::GetViewportViewpoint() const {
+		return m_Editor.GetViewportViewpoint();
+	}
+
+void EditorShell::SetViewportViewpoint(World::ViewportViewpoint vp) {
+		m_Editor.SetViewportViewpoint(vp);
+	}
+
 
 Wui::GizmoCamera EditorShell::GetGizmoCamera() const{
 		// gizmo 只依赖"投影 + 相机基向量 + 距离/FOV":2D 与 3D 视口各取一台相机。
@@ -543,7 +559,6 @@ Wui::GizmoCamera EditorShell::GetGizmoCamera() const{
 				}
 			}
 		}
-		if (m_Editor.IsViewportCamera3D())
 		{
 			EditorCamera3D& source = m_Editor.GetEditorCamera3D();
 			camera.ViewProjection = source.GetViewProjectionMatrix(/*vulkan=*/false);
@@ -553,17 +568,8 @@ Wui::GizmoCamera EditorShell::GetGizmoCamera() const{
 			camera.Position = source.GetPosition();
 			camera.Distance = source.GetDistance();
 			camera.FovDegrees = source.GetFOV();
-		}
-		else
-		{
-			EditorCamera& source = m_Editor.GetEditorCamera();
-			camera.ViewProjection = source.GetViewProjection();
-			camera.Right = source.GetRightDirection();
-			camera.Up = source.GetUpDirection();
-			camera.Forward = source.GetForwardDirection();
-			camera.Position = source.GetPosition();
-			camera.Distance = source.GetDistance();
-			camera.FovDegrees = source.GetFov();
+			camera.IsOrthographic = source.IsOrthographic();
+			camera.OrthographicSize = source.GetOrthographicSize();
 		}
 		return camera;
 	}

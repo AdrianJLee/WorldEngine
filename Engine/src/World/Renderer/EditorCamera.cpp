@@ -11,6 +11,43 @@
 
 namespace World
 {
+	static void GetOrthoAxisBasis(OrthographicAxis axis, glm::vec3* forward, glm::vec3* up, glm::vec3* right)
+	{
+		switch (axis)
+		{
+		case OrthographicAxis::Top:
+			if (forward) *forward = { 0.0f, -1.0f, 0.0f };
+			if (up)      *up      = { 0.0f, 0.0f, -1.0f };
+			if (right)   *right   = { 1.0f, 0.0f, 0.0f };
+			break;
+		case OrthographicAxis::Bottom:
+			if (forward) *forward = { 0.0f, 1.0f, 0.0f };
+			if (up)      *up      = { 0.0f, 0.0f, 1.0f };
+			if (right)   *right   = { 1.0f, 0.0f, 0.0f };
+			break;
+		case OrthographicAxis::Front:
+			if (forward) *forward = { 0.0f, 0.0f, -1.0f };
+			if (up)      *up      = { 0.0f, 1.0f, 0.0f };
+			if (right)   *right   = { 1.0f, 0.0f, 0.0f };
+			break;
+		case OrthographicAxis::Back:
+			if (forward) *forward = { 0.0f, 0.0f, 1.0f };
+			if (up)      *up      = { 0.0f, 1.0f, 0.0f };
+			if (right)   *right   = { -1.0f, 0.0f, 0.0f };
+			break;
+		case OrthographicAxis::Right:
+			if (forward) *forward = { -1.0f, 0.0f, 0.0f };
+			if (up)      *up      = { 0.0f, 1.0f, 0.0f };
+			if (right)   *right   = { 0.0f, 0.0f, -1.0f };
+			break;
+		case OrthographicAxis::Left:
+			if (forward) *forward = { 1.0f, 0.0f, 0.0f };
+			if (up)      *up      = { 0.0f, 1.0f, 0.0f };
+			if (right)   *right   = { 0.0f, 0.0f, 1.0f };
+			break;
+		}
+	}
+
 	EditorCamera::EditorCamera(float fov, float aspectRatio, float nearClip, float farClip)
 		:m_Fov(fov), m_AspectRatio(aspectRatio), m_NearClip(nearClip), m_FarClip(farClip),
 		Camera(glm::perspective(glm::radians(fov), aspectRatio, nearClip, farClip))
@@ -84,34 +121,111 @@ namespace World
 	}
 	glm::vec3 EditorCamera::GetUpDirection() const
 	{
+		if (m_IsOrthographic)
+		{
+			glm::vec3 up;
+			GetOrthoAxisBasis(m_OrthoAxis, nullptr, &up, nullptr);
+			return up;
+		}
 		return glm::rotate(GetOrientation(), glm::vec3(0.0f, 1.0f, 0.0f));
 	}
 	glm::vec3 EditorCamera::GetRightDirection() const
 	{
+		if (m_IsOrthographic)
+		{
+			glm::vec3 right;
+			GetOrthoAxisBasis(m_OrthoAxis, nullptr, nullptr, &right);
+			return right;
+		}
 		return glm::rotate(GetOrientation(), glm::vec3(1.0f, 0.0f, 0.0f));
 	}
 	glm::vec3 EditorCamera::GetForwardDirection() const
 	{
+		if (m_IsOrthographic)
+		{
+			glm::vec3 forward;
+			GetOrthoAxisBasis(m_OrthoAxis, &forward, nullptr, nullptr);
+			return forward;
+		}
 		return glm::rotate(GetOrientation(), glm::vec3(0.0f, 0.0f, -1.0f));
 	}
 	glm::quat EditorCamera::GetOrientation() const
 	{
 		return glm::quat(glm::vec3(-m_Pitch, -m_Yaw, 0.0f));
 	}
+	void EditorCamera::SetOrthographic(bool orthographic)
+	{
+		m_IsOrthographic = orthographic;
+		if (m_IsOrthographic)
+		{
+			m_Pitch = 0.0f;
+			m_Yaw = 0.0f;
+		}
+		UpdateProjection();
+		UpdateView();
+	}
+
+	void EditorCamera::SetOrthographicSize(float size)
+	{
+		m_OrthographicSize = std::clamp(size, 0.05f, 50000.0f);
+		UpdateProjection();
+	}
+
+	void EditorCamera::SetFocalPoint(const glm::vec3& focalPoint)
+	{
+		m_FocalPoint = focalPoint;
+		UpdateView();
+	}
+
+	void EditorCamera::SetOrthographicAxis(OrthographicAxis axis)
+	{
+		m_OrthoAxis = axis;
+		if (m_IsOrthographic)
+		{
+			UpdateView();
+		}
+	}
+
 	void EditorCamera::UpdateProjection()
 	{
-		m_AspectRatio = m_ViewportWidth / m_ViewportHeight;
-		m_ProjectionMatrix = glm::perspective(glm::radians(m_Fov), m_AspectRatio, m_NearClip, m_FarClip);
+		m_AspectRatio = m_ViewportWidth / std::max(m_ViewportHeight, 1.0f);
+		if (m_IsOrthographic)
+		{
+			const float orthoH = m_OrthographicSize;
+			const float orthoW = orthoH * m_AspectRatio;
+			m_ProjectionMatrix = glm::ortho(
+				-orthoW * 0.5f, orthoW * 0.5f,
+				-orthoH * 0.5f, orthoH * 0.5f,
+				-1000.0f, 1000.0f
+			);
+		}
+		else
+		{
+			m_ProjectionMatrix = glm::perspective(glm::radians(m_Fov), m_AspectRatio, m_NearClip, m_FarClip);
+		}
 	}
+
 	void EditorCamera::UpdateView()
 	{
-		m_Position = CalculatePosition();
-
-		glm::quat orientation = GetOrientation();
-
-		m_Transform = glm::translate(glm::mat4(1.0f), m_Position) * glm::toMat4(orientation);
-		m_ViewMatrix = glm::inverse(m_Transform);
+		if (m_IsOrthographic)
+		{
+			m_Pitch = 0.0f;
+			m_Yaw = 0.0f;
+			glm::vec3 forward, up, right;
+			GetOrthoAxisBasis(m_OrthoAxis, &forward, &up, &right);
+			m_Position = m_FocalPoint - forward * m_Distance;
+			m_ViewMatrix = glm::lookAt(m_Position, m_FocalPoint, up);
+			m_Transform = glm::inverse(m_ViewMatrix);
+		}
+		else
+		{
+			m_Position = CalculatePosition();
+			glm::quat orientation = GetOrientation();
+			m_Transform = glm::translate(glm::mat4(1.0f), m_Position) * glm::toMat4(orientation);
+			m_ViewMatrix = glm::inverse(m_Transform);
+		}
 	}
+
 	bool EditorCamera::OnMouseScroll(MouseScrolledEvent& e)
 	{
 		float delta = e.GetYOffset() * 0.1f;
@@ -119,27 +233,56 @@ namespace World
 		UpdateView();
 		return false;
 	}
+
 	void EditorCamera::MousePan(const glm::vec2& delta)
 	{
+		if (m_IsOrthographic)
+		{
+			const float orthoW = m_OrthographicSize * m_AspectRatio;
+			const float unitsPerNormX = orthoW * 0.5f;
+			const float unitsPerNormY = m_OrthographicSize * 0.5f;
+			m_FocalPoint += -GetRightDirection() * (delta.x * unitsPerNormX * 10.0f);
+			m_FocalPoint += GetUpDirection() * (delta.y * unitsPerNormY * 10.0f);
+			UpdateView();
+			return;
+		}
 		auto [xSpeed, ySpeed] = PanSpeed();
 		m_FocalPoint += -GetRightDirection() * delta.x * xSpeed * m_Distance;
 		m_FocalPoint += GetUpDirection() * delta.y * ySpeed * m_Distance;
 	}
+
 	void EditorCamera::MousePan(const glm::vec3& delta)
 	{
+		if (m_IsOrthographic)
+		{
+			m_FocalPoint.x += delta.x;
+			m_FocalPoint.y += delta.y;
+			return;
+		}
 		const glm::vec3& speed = glm::vec3 { 0.3 };
 		m_FocalPoint += -GetRightDirection() * delta.x * speed.x * m_Distance;
 		m_FocalPoint += GetForwardDirection() * delta.y * speed.y * m_Distance;
 		m_FocalPoint += GetUpDirection() * delta.z * speed.z * m_Distance;
 	}
+
 	void EditorCamera::MouseRotate(const glm::vec2& delta)
 	{
+		if (m_IsOrthographic)
+			return;
 		float yawSign = GetUpDirection().y < 0 ? -1.0f : 1.0f;
 		m_Yaw += yawSign * delta.x * RotationSpeed();
 		m_Pitch += delta.y * RotationSpeed();
 	}
+
 	void EditorCamera::MouseZoom(float delta)
 	{
+		if (m_IsOrthographic)
+		{
+			m_OrthographicSize -= delta * m_OrthographicSize * 0.2f;
+			m_OrthographicSize = std::clamp(m_OrthographicSize, 0.05f, 50000.0f);
+			UpdateProjection();
+			return;
+		}
 		m_Distance -= delta * ZoomSpeed();
 		if (m_Distance < 1.0f)
 		{

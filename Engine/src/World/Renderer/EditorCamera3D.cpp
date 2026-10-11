@@ -32,6 +32,61 @@ namespace World
 		m_YawDegrees += deltaYawDegrees;
 		m_PitchDegrees += deltaPitchDegrees;
 		ClampPitch();
+		// 主动旋转后自动转入自由视角
+		m_Viewpoint = ViewportViewpoint::Free;
+	}
+
+	void EditorCamera3D::SetProjection(ViewportProjection proj)
+	{
+		if (m_Projection == proj)
+			return;
+		m_Projection = proj;
+		const float halfFov = glm::radians(m_FOV * 0.5f);
+		if (m_Projection == ViewportProjection::Orthographic)
+		{
+			// 从透视切正交: 由当前 distance 与 FOV 换算对应的 OrthographicSize
+			m_OrthographicSize = std::clamp(2.0f * m_Distance * std::tan(halfFov), 0.1f, 10000.0f);
+		}
+		else
+		{
+			// 从正交切透视: 由当前 OrthographicSize 反算 distance
+			m_Distance = std::clamp((m_OrthographicSize * 0.5f) / std::tan(halfFov), kMinDistance, kMaxDistance);
+		}
+	}
+
+	void EditorCamera3D::SetViewpoint(ViewportViewpoint vp)
+	{
+		m_Viewpoint = vp;
+		switch (vp)
+		{
+		case ViewportViewpoint::Top:
+			SetYawPitch(180.0f, 89.0f);
+			break;
+		case ViewportViewpoint::Bottom:
+			SetYawPitch(180.0f, -89.0f);
+			break;
+		case ViewportViewpoint::Front:
+			SetYawPitch(180.0f, 0.0f);
+			break;
+		case ViewportViewpoint::Back:
+			SetYawPitch(0.0f, 0.0f);
+			break;
+		case ViewportViewpoint::Right:
+			SetYawPitch(90.0f, 0.0f);
+			break;
+		case ViewportViewpoint::Left:
+			SetYawPitch(270.0f, 0.0f);
+			break;
+		case ViewportViewpoint::Free:
+			break;
+		}
+	}
+
+	void EditorCamera3D::SetOrthographicSize(float size)
+	{
+		m_OrthographicSize = std::clamp(size, 0.05f, 50000.0f);
+		const float halfFov = glm::radians(m_FOV * 0.5f);
+		m_Distance = std::clamp((m_OrthographicSize * 0.5f) / std::tan(halfFov), kMinDistance, kMaxDistance);
 	}
 
 	void EditorCamera3D::Pan(float deltaRight, float deltaUp)
@@ -41,7 +96,15 @@ namespace World
 
 	void EditorCamera3D::Dolly(float deltaDistance)
 	{
-		SetDistance(m_Distance + deltaDistance);
+		if (m_Projection == ViewportProjection::Orthographic)
+		{
+			const float factor = std::clamp(1.0f + deltaDistance * 0.08f, 0.05f, 20.0f);
+			SetOrthographicSize(m_OrthographicSize * factor);
+		}
+		else
+		{
+			SetDistance(m_Distance + deltaDistance);
+		}
 	}
 
 	void EditorCamera3D::FocusOn(const glm::vec3& point, float distance)
@@ -122,7 +185,21 @@ namespace World
 
 	glm::mat4 EditorCamera3D::GetProjectionMatrix(bool vulkan) const
 	{
-		glm::mat4 projection = glm::perspective(glm::radians(m_FOV), m_Aspect, m_Near, m_Far);
+		glm::mat4 projection;
+		if (m_Projection == ViewportProjection::Orthographic)
+		{
+			const float orthoH = m_OrthographicSize;
+			const float orthoW = orthoH * m_Aspect;
+			projection = glm::ortho(
+				-orthoW * 0.5f, orthoW * 0.5f,
+				-orthoH * 0.5f, orthoH * 0.5f,
+				-std::max(2000.0f, m_Far), std::max(2000.0f, m_Far)
+			);
+		}
+		else
+		{
+			projection = glm::perspective(glm::radians(m_FOV), m_Aspect, m_Near, m_Far);
+		}
 		// 与渲染路径共用同一份适配(Y 翻转 + 深度范围重映射),避免"渲染对了、拾取反了"。
 		return AdaptViewProjectionToBackend(projection, vulkan);
 	}

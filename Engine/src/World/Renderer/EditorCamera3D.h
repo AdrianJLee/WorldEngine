@@ -6,7 +6,24 @@
 
 namespace World
 {
-	// 3D 编辑器相机(P1b D1):目标点 + 距离 + yaw/pitch 的轨道模型,兼作飞行相机。
+	enum class ViewportProjection
+	{
+		Perspective = 0,   // 透视投影 (近大远小)
+		Orthographic = 1,  // 正交投影 (平行投影)
+	};
+
+	enum class ViewportViewpoint
+	{
+		Free = 0,    // 自由视角 (Orbit 自由漫游)
+		Top = 1,     // 顶视 (Top [XZ], 俯视角)
+		Bottom = 2,  // 底视 (Bottom [XZ], 仰视角)
+		Front = 3,   // 前视 (Front [XY], 正视立面)
+		Back = 4,    // 后视 (Back [XY], 背视立面)
+		Right = 5,   // 右视 (Right [ZY], 侧视立面)
+		Left = 6,    // 左视 (Left [ZY], 侧视立面)
+	};
+
+	// 统一三维视口相机:目标点 + 距离 + yaw/pitch 轨道模型,兼具透视与平行正交双投影模式。
 	//
 	// 约定:
 	//  - yaw=0、pitch=0 时相机位于 Target 的 -Z 侧,视线指向 Target;
@@ -33,6 +50,17 @@ namespace World
 		void SetFOV(float fovDegrees) { m_FOV = fovDegrees; }
 		void SetClipPlanes(float nearClip, float farClip);
 		void SetYawPitch(float yawDegrees, float pitchDegrees);
+
+		// ---- 投影与方位 (图形学第一性原理) ----
+		void SetProjection(ViewportProjection proj);
+		ViewportProjection GetProjection() const { return m_Projection; }
+		bool IsOrthographic() const { return m_Projection == ViewportProjection::Orthographic; }
+
+		void SetViewpoint(ViewportViewpoint vp);
+		ViewportViewpoint GetViewpoint() const { return m_Viewpoint; }
+
+		void SetOrthographicSize(float size);
+		float GetOrthographicSize() const { return m_OrthographicSize; }
 
 		// ---- 查询 ----
 		const glm::vec3& GetTarget() const { return m_Target; }
@@ -67,5 +95,8 @@ namespace World
 		float m_Distance = 10.0f;
 		float m_YawDegrees = 0.0f;
 		float m_PitchDegrees = 0.0f;
+		ViewportProjection m_Projection = ViewportProjection::Perspective;
+		ViewportViewpoint m_Viewpoint = ViewportViewpoint::Free;
+		float m_OrthographicSize = 10.0f;
 	};
 }

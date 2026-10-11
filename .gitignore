@@ -44,6 +44,9 @@ projects/*/assets/**/*.wtexc
 # 夹具,仍然入库 —— 所以规则只针对 templates/。
 templates/*/assets/.luau-lsp/
 templates/*/assets/scripts/intermediate/
+projects/assets/
+projects/**/.luau-lsp/
+projects/**/scripts/intermediate/
 
 # W8:编辑器脚本工作区脚手架(create-if-missing 生成;用户改过的配置不入库即保留)。
 # 上面的 `.vscode` 忽略规则会连带排除父目录;PROJ-7 起引擎内不再有内置项目,

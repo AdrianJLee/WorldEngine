@@ -42,6 +42,8 @@ namespace World::Wui
 		float WorldPerPixel(const GizmoCamera& camera, const WuiRect& viewport)
 		{
 			const float height = std::max(1.0f, viewport.H);
+			if (camera.IsOrthographic)
+				return std::max(0.0001f, camera.OrthographicSize) / height;
 			return 2.0f * camera.Distance * std::tan(glm::radians(camera.FovDegrees) * 0.5f) / height;
 		}
 

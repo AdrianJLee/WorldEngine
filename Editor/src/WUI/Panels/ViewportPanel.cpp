@@ -15,6 +15,20 @@ namespace World
 {
 	namespace
 	{
+		static const char* OrthoAxisShortName(World::OrthographicAxis axis)
+		{
+			switch (axis)
+			{
+			case World::OrthographicAxis::Top:    return "Top";
+			case World::OrthographicAxis::Bottom: return "Bottom";
+			case World::OrthographicAxis::Front:  return "Front";
+			case World::OrthographicAxis::Back:   return "Back";
+			case World::OrthographicAxis::Right:  return "Right";
+			case World::OrthographicAxis::Left:   return "Left";
+			}
+			return "Front";
+		}
+
 		// 投影 + 近平面裁剪 + 线段四边形:相机视锥等覆盖层线段共用。
 		void PushProjectedSegment(Wui::WuiContext& ctx, const glm::mat4& viewProjection,
 			const Wui::WuiRect& viewport, const glm::vec4& clipA, const glm::vec4& clipB,
@@ -243,15 +257,26 @@ namespace World
 		// 悬浮控件自己照常命中,而**它下面的视口拾取/gizmo 不会同时吃到这一下点击**。
 		ctx.PushOverlay();
 
-		// ① 左上:`视图 ▼`(相机模式 / 相机预览 / 光源范围 / 碰撞体轮廓 的唯一入口)
-		const bool camera3D = m_Host.IsViewportCamera3D();
-		const std::string cameraText = camera3D
-			? Wui::Tr("viewport.camera.caption_3d", "3D Perspective")
-			: Wui::Tr("viewport.camera.caption_2d", "2D Orthographic");
-		// 按钮标签直接带当前相机模式(Unreal/Blender 的视口角标同一信息,但不额外占一块地方)。
+		// ① 左上:`视图 ▼`(投影方式 / 观察方位 / 相机预览 / 光照 / 碰撞体 的唯一入口)
+		const World::ViewportProjection currentProj = m_Host.GetViewportProjection();
+		const World::ViewportViewpoint currentVp = m_Host.GetViewportViewpoint();
+		const bool isOrtho = (currentProj == World::ViewportProjection::Orthographic);
+		const bool camera3D = !isOrtho;
+		const char* projName = isOrtho ? "正交" : "透视";
+		const char* vpShort = "自由";
+		switch (currentVp)
+		{
+		case World::ViewportViewpoint::Free:   vpShort = "自由"; break;
+		case World::ViewportViewpoint::Top:    vpShort = "Top"; break;
+		case World::ViewportViewpoint::Bottom: vpShort = "Bottom"; break;
+		case World::ViewportViewpoint::Front:  vpShort = "Front"; break;
+		case World::ViewportViewpoint::Back:   vpShort = "Back"; break;
+		case World::ViewportViewpoint::Right:  vpShort = "Right"; break;
+		case World::ViewportViewpoint::Left:   vpShort = "Left"; break;
+		}
+		const std::string cameraText = std::string(projName) + " · " + vpShort;
 		const std::string viewLabel = Wui::Tr("viewport.view.button", "View") + ": "
-			+ (camera3D ? Wui::Tr("viewport.camera.short_3d", "3D") : Wui::Tr("viewport.camera.short_2d", "2D"))
-			+ "  ▼";
+			+ projName + " · " + vpShort + "  ▼";
 		const float viewButtonW = ctx.MeasureTextWidth(viewLabel, 13.0f) + 20.0f;
 		const Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad, viewButtonW, kChromeRowH };
 		const std::string viewHint = Wui::Tr("viewport.view.hint",
@@ -294,13 +319,24 @@ namespace World
 
 		const float gridBtnW = 88.0f;
 		const Wui::WuiRect gridBtn { toolbarX, sceneRect.Y + kChromePad, gridBtnW, kChromeRowH };
-		const std::string gridLabel = m_ShowSpatialGrid ? "Grid: ON" : "Grid: OFF";
-		Wui::Tooltip(ctx, gridBtn, Wui::Tr("viewport.grid.hint", "Toggle the level authoring grid."));
+		const std::string gridLabel = m_ShowReferenceGrid ? "Grid: ON" : "Grid: OFF";
+		Wui::Tooltip(ctx, gridBtn, Wui::Tr("viewport.grid.hint", "Toggle ground reference grid (1m/10m)."));
 		if (Wui::Button(ctx, Wui::HashId("viewport.stream_grid"), gridBtn, gridLabel, theme))
 		{
-			m_ShowSpatialGrid = !m_ShowSpatialGrid;
+			m_ShowReferenceGrid = !m_ShowReferenceGrid;
 		}
 		ctx.RegisterOverlayRect(gridBtn);
+		toolbarX += gridBtnW + 4.0f;
+
+		const float partBtnW = 100.0f;
+		const Wui::WuiRect partBtn { toolbarX, sceneRect.Y + kChromePad, partBtnW, kChromeRowH };
+		const std::string partLabel = m_ShowWorldPartition ? "Partition: ON" : "Partition: OFF";
+		Wui::Tooltip(ctx, partBtn, Wui::Tr("viewport.partition.hint", "Toggle world partition & streaming chunk overlay."));
+		if (Wui::Button(ctx, Wui::HashId("viewport.partition_grid"), partBtn, partLabel, theme))
+		{
+			m_ShowWorldPartition = !m_ShowWorldPartition;
+		}
+		ctx.RegisterOverlayRect(partBtn);
 
 		// ② 顶部居中:运行控制药丸(播放 / 模拟 / 暂停)。用户 2026-09-21:「悬浮在视口上居中」——
 		// 深色半透明圆角底板,悬停时提亮;不悬停时更淡,尽量少挡画面。
@@ -340,21 +376,86 @@ namespace World
 			ctx.RegisterOverlayRect(modeRect);
 		}
 
-		// ④ 视图菜单弹层(与菜单栏同一套 MenuItem:勾选态 + 悬停说明 + 点外关闭 + Esc)。
+		// ④ 视图菜单弹层(下拉选项: 视图模式 Combo + 视图方位 Combo + 覆盖层开关)。
 		const Wui::WuiId viewPopup = Wui::HashId("viewport.view.popup");
 		if (ctx.IsPopupOpen(viewPopup))
 		{
 			const float rowH = 22.0f;
-			const Wui::WuiRect panel { viewButton.X, viewButton.Y + viewButton.H + 2.0f, 250.0f, rowH * 6.0f + 8.0f };
+			const float comboH = 24.0f;
+			const Wui::WuiRect panel { viewButton.X, viewButton.Y + viewButton.H + 2.0f, 260.0f, comboH * 2.0f + rowH * 4.0f + 24.0f };
 			Wui::DrawPanelSurface(ctx, panel, theme);
 			ctx.RegisterOverlayRect(panel);
-			float rowY = panel.Y + 4.0f;
+			float rowY = panel.Y + 6.0f;
+
+			// ① 投影方式下拉选项 (Projection: 屏幕映射方式)
+			{
+				const Wui::WuiRect comboRect { panel.X + 8.0f, rowY, panel.W - 16.0f, comboH };
+				rowY += comboH + 6.0f;
+				const std::vector<std::string> projOptions = {
+					Wui::Tr("viewport.view.proj_persp", "透视 (Perspective)"),
+					Wui::Tr("viewport.view.proj_ortho", "正交 (Orthographic)")
+				};
+				int selectedProj = (currentProj == World::ViewportProjection::Orthographic) ? 1 : 0;
+				if (Wui::Combo(ctx, Wui::HashId("viewport.combo.proj"), comboRect,
+					Wui::Tr("viewport.view.proj_label", "投影"), projOptions, selectedProj, theme))
+				{
+					m_Host.SetViewportProjection(selectedProj == 1 ? World::ViewportProjection::Orthographic : World::ViewportProjection::Perspective);
+				}
+				ctx.RegisterOverlayRect(comboRect);
+			}
+
+			// ② 观察方位下拉选项 (Viewpoint: 空间朝向，与投影方式完全解耦)
+			{
+				const Wui::WuiRect comboRect { panel.X + 8.0f, rowY, panel.W - 16.0f, comboH };
+				rowY += comboH + 8.0f;
+				const std::vector<std::string> vpOptions = {
+					Wui::Tr("viewport.vp.free", "自由视角 (Free Orbit)"),
+					Wui::Tr("viewport.vp.top", "顶视图 Top (XZ [俯视])"),
+					Wui::Tr("viewport.vp.front", "前视图 Front (XY [立面])"),
+					Wui::Tr("viewport.vp.right", "右视图 Right (ZY [侧面])"),
+					Wui::Tr("viewport.vp.bottom", "底视图 Bottom (XZ [仰视])"),
+					Wui::Tr("viewport.vp.back", "后视图 Back (XY [背面])"),
+					Wui::Tr("viewport.vp.left", "左视图 Left (ZY [侧面])")
+				};
+				int selectedVp = 0;
+				switch (currentVp)
+				{
+				case World::ViewportViewpoint::Free:   selectedVp = 0; break;
+				case World::ViewportViewpoint::Top:    selectedVp = 1; break;
+				case World::ViewportViewpoint::Front:  selectedVp = 2; break;
+				case World::ViewportViewpoint::Right:  selectedVp = 3; break;
+				case World::ViewportViewpoint::Bottom: selectedVp = 4; break;
+				case World::ViewportViewpoint::Back:   selectedVp = 5; break;
+				case World::ViewportViewpoint::Left:   selectedVp = 6; break;
+				}
+				if (Wui::Combo(ctx, Wui::HashId("viewport.combo.vp"), comboRect,
+					Wui::Tr("viewport.view.vp_label", "方位"), vpOptions, selectedVp, theme))
+				{
+					World::ViewportViewpoint newVp = World::ViewportViewpoint::Free;
+					switch (selectedVp)
+					{
+					case 0: newVp = World::ViewportViewpoint::Free; break;
+					case 1: newVp = World::ViewportViewpoint::Top; break;
+					case 2: newVp = World::ViewportViewpoint::Front; break;
+					case 3: newVp = World::ViewportViewpoint::Right; break;
+					case 4: newVp = World::ViewportViewpoint::Bottom; break;
+					case 5: newVp = World::ViewportViewpoint::Back; break;
+					case 6: newVp = World::ViewportViewpoint::Left; break;
+					}
+					m_Host.SetViewportViewpoint(newVp);
+				}
+				ctx.RegisterOverlayRect(comboRect);
+			}
+
+			// 分割线
+			Wui::PanelBackground(ctx, { panel.X + 8.0f, rowY, panel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 6.0f;
+
 			const auto header = [&](const std::string& text)
 			{
 				const Wui::WuiRect row { panel.X + 8.0f, rowY, panel.W - 16.0f, rowH };
 				rowY += rowH;
 				Wui::Label(ctx, { row.X, row.Y + 4.0f }, text, theme.TextMuted, 12.0f);
-				// 分组标题进无障碍树(可见但读不到 = 读屏/脚本看不出分组结构)。
 				RegisterReadonlyNode(Wui::HashId(("viewport.view.group." + text).c_str()), "text",
 					text, std::string(), row);
 			};
@@ -367,7 +468,6 @@ namespace World
 					Wui::Tooltip(ctx, row, tooltip);
 				if (Wui::MenuItem(ctx, Wui::HashId(id), row, label, checked, true, theme))
 					action();
-				// 说明同步进无障碍节点(读屏/脚本看不到悬停提示)。
 				if (!tooltip.empty())
 				{
 					Wui::WuiAccessNode node;
@@ -382,26 +482,18 @@ namespace World
 					Wui::WuiAccessibility::Get().Register(node);
 				}
 			};
-			// P4-U13h:分组标题从 "Camera" 改为 "View Mode" —— 这一项切的是**编辑器视口**的观察
-			// 方式(3D 透视轨道 / 2D 正交俯视),不是开关场景里的某个相机;"Camera" 分组 +
-			// "3D Orbit Camera" 条目容易被读成相机开关(用户:「名字有误导性」)。
-			header(Wui::Tr("viewport.view.group.view_mode", "View Mode"));
-			// 条目文案随状态变化:勾选(3D)/取消(2D)各自说清当前是什么。
-			const std::string camera3dLabel = camera3D
-				? Wui::Tr("viewport.view.camera3d", "3D Perspective (Orbit)")
-				: Wui::Tr("viewport.view.camera3d.off", "2D Top-Down (Orthographic)");
-			item("viewport.view.camera3d", camera3dLabel, camera3D,
-				Wui::Tr("viewport.view.camera3d.tooltip",
-					"Editor viewport view mode (not a scene camera). In 3D: right-drag orbits, "
-					"middle-drag pans, wheel dollies. To see what a game camera sees, "
-					"use Camera Preview in this menu."),
-				[this] { m_Host.ToggleViewportCamera3D(); });
+
+			header(Wui::Tr("viewport.view.group.overlays", "Overlays"));
+			item("viewport.view.world_partition", Wui::Tr("viewport.view.world_partition", "World Partition (流送区块)"),
+				m_ShowWorldPartition,
+				Wui::Tr("viewport.overlays.partition.tooltip", "Draw 64m world partition chunks, streaming radius circle, and active chunk highlight."),
+				[this] { m_ShowWorldPartition = !m_ShowWorldPartition; });
 			item("viewport.view.camera_preview", Wui::Tr("viewport.view.camera_preview", "Camera Preview"),
 				m_Host.IsCameraPreviewEnabled(),
 				Wui::Tr("viewport.view.camera_preview.tooltip",
 					"Show a picture-in-picture preview of the selected camera entity (bottom-left)."),
 				[this] { m_Host.ToggleCameraPreview(); });
-			header(Wui::Tr("viewport.view.group.overlays", "Overlays"));
+
 			const bool rangesAll = Editor::EditorPreferences::Get().Data().ViewportLightRangesAll;
 			item("viewport.view.light_ranges",
 				Wui::Tr("viewport.view.light_ranges", "Light Ranges: All Lights"), rangesAll,
@@ -1023,85 +1115,252 @@ namespace World
 			}
 		}
 
-		// ---- 关卡创作网格(2D / 3D 两种视口都画,平面随视角选)----
-		//
-		// 口径:3D 视口按**地面 XZ 平面**画 64m 流送单元;2D 视口按**XY 平面**画创作网格。
-		// 之前只画 3D(XZ 平面在 2D 正交视角下是edge-on 的一根线),2D 视口下网格等于不存在。
-		if (m_ShowSpatialGrid)
+		// ---- 双轨制视口辅助系统: 轨道一 (地面参考标尺 1m/10m) + 轨道二 (世界分区宏观沙盘 64m) ----
+		const Wui::GizmoCamera levelCam = m_Host.GetGizmoCamera();
+		const glm::vec3 camPos = levelCam.Position;
+		// 复用前面已获取的 currentVp, currentProj, isOrtho
+
+		// ==================== 轨道一：场景地面参考网格 (Reference Grid: 正交下铺满图纸，透视下由 SceneRenderer 原生 GPU 深度通道呈现) ====================
+		if (m_ShowReferenceGrid && isOrtho)
 		{
-			const Wui::GizmoCamera levelCam = m_Host.GetGizmoCamera();
-			const glm::vec3 camPos = levelCam.Position;
-			const float cellSize = camera3D ? 64.0f : 4.0f;
-			const float planeOffset = camera3D ? 0.05f : 0.0f;
-			const int32_t centerA = static_cast<int32_t>(std::floor(camPos.x / cellSize));
-			const int32_t centerB = static_cast<int32_t>(std::floor((camera3D ? camPos.z : camPos.y) / cellSize));
+			Wui::ClipScope gridClip(ctx, sceneRect);
+			const float orthoSpan = isOrtho ? std::max(0.1f, levelCam.OrthographicSize) : std::max(10.0f, levelCam.Distance * 1.5f);
+			const float aspect = (sceneRect.W > 0.0f && sceneRect.H > 0.0f) ? sceneRect.W / sceneRect.H : 1.0f;
+			const float spanW = orthoSpan * aspect;
+			const float spanH = orthoSpan;
 
+			// 自适应刻度步长: 视场很大时以 10m 为基准，拉近时显示 1m 细格
+			const float cellSize = (orthoSpan > 150.0f) ? 10.0f : ((orthoSpan > 40.0f) ? 5.0f : 1.0f);
+			const Wui::WuiColor minorColor { 0.45f, 0.55f, 0.65f, 0.20f };
+			const Wui::WuiColor majorColor { 0.55f, 0.65f, 0.78f, 0.40f };
+			const Wui::WuiColor originColor { 0.55f, 0.62f, 0.72f, 0.40f };
+
+			if (currentVp == World::ViewportViewpoint::Front || currentVp == World::ViewportViewpoint::Back)
 			{
-				Wui::ClipScope levelClip(ctx, sceneRect);
-
-				// 相机周围 3x3:中心格高亮(当前所在单元),周边格淡显(视距缓冲带)。
-				for (int32_t da = -1; da <= 1; ++da)
+				// XY 立面参考网格
+				const float minX = std::floor((camPos.x - spanW * 0.5f) / cellSize) * cellSize;
+				const float maxX = std::ceil((camPos.x + spanW * 0.5f) / cellSize) * cellSize;
+				const float minY = std::floor((camPos.y - spanH * 0.5f) / cellSize) * cellSize;
+				const float maxY = std::ceil((camPos.y + spanH * 0.5f) / cellSize) * cellSize;
+				const int countX = static_cast<int>(std::ceil((maxX - minX) / cellSize));
+				const int countY = static_cast<int>(std::ceil((maxY - minY) / cellSize));
+				if (countX <= 160 && countY <= 160)
 				{
-					for (int32_t db = -1; db <= 1; ++db)
+					for (float x = minX; x <= maxX + 0.01f; x += cellSize)
 					{
-						const float minA = (centerA + da) * cellSize;
-						const float minB = (centerB + db) * cellSize;
-						const float maxA = minA + cellSize;
-						const float maxB = minB + cellSize;
+						const bool isOrigin = std::abs(x) < 0.01f;
+						const bool isMajor = std::fmod(std::abs(x), cellSize * 5.0f) < 0.01f;
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(x, minY, 0.0f, 1.0f),
+							levelCam.ViewProjection * glm::vec4(x, maxY, 0.0f, 1.0f),
+							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
+					}
+					for (float y = minY; y <= maxY + 0.01f; y += cellSize)
+					{
+						const bool isOrigin = std::abs(y) < 0.01f;
+						const bool isMajor = std::fmod(std::abs(y), cellSize * 5.0f) < 0.01f;
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(minX, y, 0.0f, 1.0f),
+							levelCam.ViewProjection * glm::vec4(maxX, y, 0.0f, 1.0f),
+							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
+					}
+				}
+			}
+			else if (currentVp == World::ViewportViewpoint::Right || currentVp == World::ViewportViewpoint::Left)
+			{
+				// ZY 立面参考网格
+				const float minZ = std::floor((camPos.z - spanW * 0.5f) / cellSize) * cellSize;
+				const float maxZ = std::ceil((camPos.z + spanW * 0.5f) / cellSize) * cellSize;
+				const float minY = std::floor((camPos.y - spanH * 0.5f) / cellSize) * cellSize;
+				const float maxY = std::ceil((camPos.y + spanH * 0.5f) / cellSize) * cellSize;
+				const int countZ = static_cast<int>(std::ceil((maxZ - minZ) / cellSize));
+				const int countY = static_cast<int>(std::ceil((maxY - minY) / cellSize));
+				if (countZ <= 160 && countY <= 160)
+				{
+					for (float z = minZ; z <= maxZ + 0.01f; z += cellSize)
+					{
+						const bool isOrigin = std::abs(z) < 0.01f;
+						const bool isMajor = std::fmod(std::abs(z), cellSize * 5.0f) < 0.01f;
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(0.0f, minY, z, 1.0f),
+							levelCam.ViewProjection * glm::vec4(0.0f, maxY, z, 1.0f),
+							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
+					}
+					for (float y = minY; y <= maxY + 0.01f; y += cellSize)
+					{
+						const bool isOrigin = std::abs(y) < 0.01f;
+						const bool isMajor = std::fmod(std::abs(y), cellSize * 5.0f) < 0.01f;
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(0.0f, y, minZ, 1.0f),
+							levelCam.ViewProjection * glm::vec4(0.0f, y, maxZ, 1.0f),
+							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
+					}
+				}
+			}
+			else
+			{
+				// XZ 地面参考网格 (Top / Bottom 或 3D 自由透视漫游)
+				const float minX = std::floor((camPos.x - spanW * 0.5f) / cellSize) * cellSize;
+				const float maxX = std::ceil((camPos.x + spanW * 0.5f) / cellSize) * cellSize;
+				const float minZ = std::floor((camPos.z - spanH * 0.5f) / cellSize) * cellSize;
+				const float maxZ = std::ceil((camPos.z + spanH * 0.5f) / cellSize) * cellSize;
+				const int countX = static_cast<int>(std::ceil((maxX - minX) / cellSize));
+				const int countZ = static_cast<int>(std::ceil((maxZ - minZ) / cellSize));
+				if (countX <= 160 && countZ <= 160)
+				{
+					for (float x = minX; x <= maxX + 0.01f; x += cellSize)
+					{
+						const bool isOrigin = std::abs(x) < 0.01f;
+						const bool isMajor = std::fmod(std::abs(x), cellSize * 5.0f) < 0.01f;
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(x, 0.0f, minZ, 1.0f),
+							levelCam.ViewProjection * glm::vec4(x, 0.0f, maxZ, 1.0f),
+							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
+					}
+					for (float z = minZ; z <= maxZ + 0.01f; z += cellSize)
+					{
+						const bool isOrigin = std::abs(z) < 0.01f;
+						const bool isMajor = std::fmod(std::abs(z), cellSize * 5.0f) < 0.01f;
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(minX, 0.0f, z, 1.0f),
+							levelCam.ViewProjection * glm::vec4(maxX, 0.0f, z, 1.0f),
+							isOrigin ? originColor : (isMajor ? majorColor : minorColor), isOrigin ? 2.0f : 1.0f);
+					}
+				}
+			}
+		}
 
-						const bool isCurrent = (da == 0 && db == 0);
-						const Wui::WuiColor cellColor = isCurrent
-							? Wui::WuiColor { 0.15f, 0.95f, 0.85f, 0.90f }
-							: Wui::WuiColor { 0.95f, 0.75f, 0.20f, 0.45f };
-						const float thickness = isCurrent ? 2.0f : 1.0f;
+		// ==================== 轨道二：世界分区系统 (World Partition / Streaming Grid) ====================
+		int32_t activeChunkX = 0;
+		int32_t activeChunkZ = 0;
+		size_t authoredChunkCount = 0;
+		if (m_ShowWorldPartition)
+		{
+			Wui::ClipScope partClip(ctx, sceneRect);
+			const float chunkSize = 64.0f;
+			activeChunkX = static_cast<int32_t>(std::floor(camPos.x / chunkSize));
+			activeChunkZ = static_cast<int32_t>(std::floor(camPos.z / chunkSize));
 
-						glm::vec3 corners[4];
-						if (camera3D)
-						{
-							corners[0] = { minA, planeOffset, minB };
-							corners[1] = { maxA, planeOffset, minB };
-							corners[2] = { maxA, planeOffset, maxB };
-							corners[3] = { minA, planeOffset, maxB };
-						}
-						else
-						{
-							corners[0] = { minA, minB, planeOffset };
-							corners[1] = { maxA, minB, planeOffset };
-							corners[2] = { maxA, maxB, planeOffset };
-							corners[3] = { minA, maxB, planeOffset };
-						}
+			// 统计当前关卡在各 Chunk 的实体分布热度
+			std::unordered_map<int64_t, uint32_t> chunkEntityMap;
+			if (const Ref<Scene> activeScene = m_Host.GetActiveScene())
+			{
+				const entt::registry& reg = std::as_const(*activeScene).GetRegistry();
+				auto transformView = reg.view<TransformComponent>();
+				for (auto entity : transformView)
+				{
+					const auto& tc = transformView.get<TransformComponent>(entity);
+					const int32_t cx = static_cast<int32_t>(std::floor(tc.Location.x / chunkSize));
+					const int32_t cz = static_cast<int32_t>(std::floor(tc.Location.z / chunkSize));
+					const int64_t key = (static_cast<int64_t>(cx) << 32) ^ static_cast<uint32_t>(cz);
+					chunkEntityMap[key]++;
+				}
+			}
+			authoredChunkCount = chunkEntityMap.size();
 
-						for (int i = 0; i < 4; ++i)
-						{
-							PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-								levelCam.ViewProjection * glm::vec4(corners[i], 1.0f),
-								levelCam.ViewProjection * glm::vec4(corners[(i + 1) % 4], 1.0f),
-								cellColor, thickness);
-						}
+			// 1. 固定空间大棋盘 (Fixed Chessboard: 绝对空间网格, 不随相机跳动)
+			constexpr int32_t kGridRadius = 3;
+			const Wui::WuiColor chunkBorderColor { 0.40f, 0.50f, 0.65f, 0.22f };
+			const Wui::WuiColor activeChunkBorder { 0.20f, 0.90f, 0.85f, 0.90f };
+			const Wui::WuiColor authoredChunkBorder { 0.95f, 0.75f, 0.20f, 0.60f };
+
+			for (int32_t dx = -kGridRadius; dx <= kGridRadius; ++dx)
+			{
+				for (int32_t dz = -kGridRadius; dz <= kGridRadius; ++dz)
+				{
+					const int32_t cx = activeChunkX + dx;
+					const int32_t cz = activeChunkZ + dz;
+					const float minX = cx * chunkSize;
+					const float minZ = cz * chunkSize;
+					const float maxX = minX + chunkSize;
+					const float maxZ = minZ + chunkSize;
+
+					const bool isCurrent = (dx == 0 && dz == 0);
+					const int64_t key = (static_cast<int64_t>(cx) << 32) ^ static_cast<uint32_t>(cz);
+					const bool hasEntities = chunkEntityMap.find(key) != chunkEntityMap.end();
+
+					const glm::vec3 corners[4] = {
+						{ minX, 0.05f, minZ },
+						{ maxX, 0.05f, minZ },
+						{ maxX, 0.05f, maxZ },
+						{ minX, 0.05f, maxZ },
+					};
+
+					const Wui::WuiColor borderColor = isCurrent ? activeChunkBorder
+						: (hasEntities ? authoredChunkBorder : chunkBorderColor);
+					const float thickness = isCurrent ? 2.2f : (hasEntities ? 1.4f : 1.0f);
+
+					for (int i = 0; i < 4; ++i)
+					{
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(corners[i], 1.0f),
+							levelCam.ViewProjection * glm::vec4(corners[(i + 1) % 4], 1.0f),
+							borderColor, thickness);
+					}
+
+					// 当前活跃 Chunk 内侧画 L 型定位角标
+					if (isCurrent)
+					{
+						constexpr float kBracket = 6.0f;
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(minX, 0.06f, minZ, 1.0f),
+							levelCam.ViewProjection * glm::vec4(minX + kBracket, 0.06f, minZ, 1.0f),
+							activeChunkBorder, 2.5f);
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(minX, 0.06f, minZ, 1.0f),
+							levelCam.ViewProjection * glm::vec4(minX, 0.06f, minZ + kBracket, 1.0f),
+							activeChunkBorder, 2.5f);
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(maxX, 0.06f, maxZ, 1.0f),
+							levelCam.ViewProjection * glm::vec4(maxX - kBracket, 0.06f, maxZ, 1.0f),
+							activeChunkBorder, 2.5f);
+						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+							levelCam.ViewProjection * glm::vec4(maxX, 0.06f, maxZ, 1.0f),
+							levelCam.ViewProjection * glm::vec4(maxX, 0.06f, maxZ - kBracket, 1.0f),
+							activeChunkBorder, 2.5f);
 					}
 				}
 			}
 
-			// 视口右上角 HUD:数字全部**取自当前文档**,不再写死。
-			size_t entityCount = 0;
-			if (const Ref<Scene> gridScene = m_Host.GetActiveScene())
-			{
-				const entt::registry& gridRegistry = std::as_const(*gridScene).GetRegistry();
-				entityCount = gridRegistry.view<UUIDComponent>().size();
-			}
+			// 2. 真实流送辐射圈 (Streaming Radius: 128m 真实加载半径)
+			const Wui::WuiColor streamingCircleColor { 0.20f, 0.85f, 0.75f, 0.35f };
+			PushWorldCircle(ctx, levelCam.ViewProjection, sceneRect, glm::mat4(1.0f),
+				{ camPos.x, 0.05f, camPos.z }, 128.0f, 1 /*XZ 平面*/,
+				streamingCircleColor, 1.6f, nullptr, nullptr);
+		}
 
-			char hudLine1[160] = {};
-			char hudLine2[160] = {};
-			if (camera3D)
+		// 视口右上角 HUD
+		size_t entityCount = 0;
+		if (const Ref<Scene> gridScene = m_Host.GetActiveScene())
+		{
+			const entt::registry& gridRegistry = std::as_const(*gridScene).GetRegistry();
+			entityCount = gridRegistry.view<UUIDComponent>().size();
+		}
+
+		char hudLine1[160] = {};
+		char hudLine2[160] = {};
+		if (m_ShowWorldPartition)
+		{
+			std::snprintf(hudLine1, sizeof(hudLine1),
+				"Partition 64m | Chunk (%d, %d) | Authored: %zu | Stream: 128m",
+				activeChunkX, activeChunkZ, authoredChunkCount);
+		}
+		else if (m_ShowReferenceGrid)
+		{
+			const char* axisTag = "Free (XZ)";
+			switch (currentVp)
 			{
-				std::snprintf(hudLine1, sizeof(hudLine1),
-					"Grid 64m | Cell (%d, %d)", centerA, centerB);
+			case World::ViewportViewpoint::Free:   axisTag = "Free (XZ)"; break;
+			case World::ViewportViewpoint::Top:    axisTag = "Top (XZ)"; break;
+			case World::ViewportViewpoint::Bottom: axisTag = "Bottom (XZ)"; break;
+			case World::ViewportViewpoint::Front:  axisTag = "Front (XY)"; break;
+			case World::ViewportViewpoint::Back:   axisTag = "Back (XY)"; break;
+			case World::ViewportViewpoint::Right:  axisTag = "Right (ZY)"; break;
+			case World::ViewportViewpoint::Left:   axisTag = "Left (ZY)"; break;
 			}
-			else
-			{
-				std::snprintf(hudLine1, sizeof(hudLine1),
-					"Grid 4u | Cell (%d, %d)", centerA, centerB);
-			}
+			std::snprintf(hudLine1, sizeof(hudLine1),
+				"Grid 1m/10m | %s | Scale: %.1fu", axisTag, isOrtho ? levelCam.OrthographicSize : levelCam.Distance);
+		}
 			std::string layersText;
 			for (const Level::DataLayerDefinition& layer : m_Host.GetLevelDataLayers())
 			{
@@ -1125,7 +1384,6 @@ namespace World
 			Wui::HighlightOutline(ctx, hudRect, Wui::WuiColor { 0.18f, 0.65f, 0.90f, 0.70f }, 4.0f, 1.0f);
 			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 5.0f }, hudLine1, Wui::WuiColor { 0.30f, 0.90f, 1.0f, 1.0f }, 12.0f);
 			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 24.0f }, hudLine2, Wui::WuiColor { 0.85f, 0.85f, 0.90f, 0.90f }, 12.0f);
-		}
 
 		// ---- 相机预览小窗(PiP):直接显示"场景相机看到的东西" ----
 		//

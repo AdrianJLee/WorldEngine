@@ -774,12 +774,12 @@ void EditorLayer::LaunchProjectRuntime(const std::filesystem::path& projectRoot)
 	}
 
 
-	// D5c-5:把 3D 轨道相机对齐到当前 2D 视图 —— EditorCamera3D 默认朝向(yaw=pitch=0 → +Z)
-	// 与场景/2D 相机(+Z 处朝 -Z)相反,直接切 3D 档会从"背面"看场景,单面几何/蒙皮网格被背面剔除。
-void EditorLayer::AlignEditorCamera3DWithView(){
-		m_EditorCamera3D.SetYawPitch(180.0f, 0.0f);
-		m_EditorCamera3D.FocusOn(glm::vec3(0.0f), 12.0f);
-	}
+void EditorLayer::ToggleViewportCamera3D()
+{
+	m_EditorCamera3D.SetProjection(m_EditorCamera3D.IsOrthographic()
+		? World::ViewportProjection::Perspective
+		: World::ViewportProjection::Orthographic);
+}
 
 
 void EditorLayer::ProcessPendingRendererChange(){

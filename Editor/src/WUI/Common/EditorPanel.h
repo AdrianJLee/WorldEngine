@@ -3,6 +3,7 @@
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiGizmo.h"
+#include "World/Renderer/EditorCamera3D.h"
 #include "World/Asset/ProjectManifest.h"
 #include "World/Level/Authoring/LevelPackage.h"
 #include "World/Scene/Entity.h"
@@ -115,8 +116,12 @@ namespace World
 		// Play/Simulate 期间为 true:面板只读查看(可选中/显示,但不改场景数据)。
 		virtual bool IsReadOnlyMode() const { return false; }
 		// D7-1a:视口相机模式(2D/3D)与切换 —— 视口面板用它画切换按钮。
-		virtual bool IsViewportCamera3D() const { return false; }
+		virtual bool IsViewportCamera3D() const { return true; }
 		virtual void ToggleViewportCamera3D() {}
+		virtual World::ViewportProjection GetViewportProjection() const { return World::ViewportProjection::Perspective; }
+		virtual void SetViewportProjection(World::ViewportProjection proj) {}
+		virtual World::ViewportViewpoint GetViewportViewpoint() const { return World::ViewportViewpoint::Free; }
+		virtual void SetViewportViewpoint(World::ViewportViewpoint vp) {}
 		// D7-1b:gizmo 用的相机摘要(按当前视口模式由宿主提供 2D 或 3D 相机)。
 		virtual Wui::GizmoCamera GetGizmoCamera() const { return Wui::GizmoCamera {}; }
 		// D3:在材质编辑器里打开指定 .wmat(内容浏览器双击/Window 菜单共用);

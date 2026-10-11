@@ -2,6 +2,7 @@
 #include "World/Core/Core.h"
 #include "World/Core/WorldContext.h"
 #include "World/Renderer/CameraRay.h"
+#include "World/Renderer/EditorCamera.h"
 #include "World/Renderer/EditorCamera3D.h"
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Scene/Components.h"
@@ -323,6 +324,87 @@ int main()
 			cacheRegistry.get<CameraComponent>(cacheHandle).Camera.m_PerspectiveFOV = 70.0f;
 			CameraSystem::UpdateAllCameras(cacheRegistry, 1280, 720);
 			CHECK(CameraSystem::ProjectionRebuildCount() == beforeLoop + 1);        // 参数变 ⇒ 恰好 1 次
+		}
+
+		// 10. EditorCamera 2D 正交模式基线验证
+		{
+			EditorCamera orthoCam(45.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
+			orthoCam.SetViewportSize(1600.0f, 900.0f);
+			orthoCam.SetOrthographic(true);
+			orthoCam.SetOrthographicSize(10.0f);
+			orthoCam.SetFocalPoint(glm::vec3(5.0f, -3.0f, 0.0f));
+
+			CHECK(orthoCam.IsOrthographic());
+			CHECK(std::fabs(orthoCam.GetOrthographicSize() - 10.0f) < 1e-5f);
+			CHECK(std::fabs(orthoCam.GetPitch()) < 1e-5f);
+			CHECK(std::fabs(orthoCam.GetYaw()) < 1e-5f);
+
+			// 验证平行投影无透视灭点：不同 Z 值的相同 (X, Y) 坐标，在 NDC 上的 X/Y 严格相同
+			const glm::mat4 vp = orthoCam.GetViewProjection();
+			const glm::vec4 clip1 = vp * glm::vec4(5.0f, -3.0f, 10.0f, 1.0f);
+			const glm::vec4 clip2 = vp * glm::vec4(5.0f, -3.0f, -50.0f, 1.0f);
+			CHECK(std::fabs(clip1.x - clip2.x) < 1e-5f);
+			CHECK(std::fabs(clip1.y - clip2.y) < 1e-5f);
+			// 焦点映射到 NDC 原点 (0, 0)
+			CHECK(std::fabs(clip1.x) < 1e-4f);
+			CHECK(std::fabs(clip1.y) < 1e-4f);
+
+			// 验证 2D 正交与 3D 透视焦点与视野换算闭环
+			const float orthoH = orthoCam.GetOrthographicSize();
+			const float fov3d = 60.0f;
+			const float halfRad = glm::radians(fov3d * 0.5f);
+			const float dist3d = (orthoH * 0.5f) / std::tan(halfRad);
+			const float restoredOrthoH = 2.0f * dist3d * std::tan(halfRad);
+			CHECK(std::fabs(orthoH - restoredOrthoH) < 1e-4f);
+
+			// 验证 6 轴向切换与基向量朝向
+			orthoCam.SetOrthographicAxis(OrthographicAxis::Top);
+			CHECK(orthoCam.GetOrthographicAxis() == OrthographicAxis::Top);
+			CHECK(glm::dot(orthoCam.GetForwardDirection(), glm::vec3(0.0f, -1.0f, 0.0f)) > 0.999f);
+			CHECK(glm::dot(orthoCam.GetUpDirection(), glm::vec3(0.0f, 0.0f, -1.0f)) > 0.999f);
+			CHECK(glm::dot(orthoCam.GetRightDirection(), glm::vec3(1.0f, 0.0f, 0.0f)) > 0.999f);
+
+			orthoCam.SetOrthographicAxis(OrthographicAxis::Right);
+			CHECK(orthoCam.GetOrthographicAxis() == OrthographicAxis::Right);
+			CHECK(glm::dot(orthoCam.GetForwardDirection(), glm::vec3(-1.0f, 0.0f, 0.0f)) > 0.999f);
+			CHECK(glm::dot(orthoCam.GetUpDirection(), glm::vec3(0.0f, 1.0f, 0.0f)) > 0.999f);
+			CHECK(glm::dot(orthoCam.GetRightDirection(), glm::vec3(0.0f, 0.0f, -1.0f)) > 0.999f);
+		}
+
+		// 11. EditorCamera3D 第一性原理透视/正交与观察方位解耦测试
+		{
+			EditorCamera3D cam(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f, 12.0f);
+			cam.SetViewportSize(1600, 900);
+			cam.SetTarget(glm::vec3(0.0f, 2.0f, 0.0f));
+
+			// 默认透视 + 自由视角
+			CHECK(!cam.IsOrthographic());
+			CHECK(cam.GetProjection() == ViewportProjection::Perspective);
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Free);
+
+			// 切到顶视 (Top): 依然是透视
+			cam.SetViewpoint(ViewportViewpoint::Top);
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Top);
+			CHECK(cam.GetProjection() == ViewportProjection::Perspective);
+			CHECK(cam.GetPitch() > 88.0f);
+
+			// 切到正交 (Orthographic): 方位依然是顶视 (Top Ortho)
+			cam.SetProjection(ViewportProjection::Orthographic);
+			CHECK(cam.IsOrthographic());
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Top);
+			CHECK(cam.GetPitch() > 88.0f);
+
+			// 在正交下切前视 (Front)
+			cam.SetViewpoint(ViewportViewpoint::Front);
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Front);
+			CHECK(cam.IsOrthographic());
+			CHECK(std::fabs(cam.GetPitch()) < 1e-4f);
+			CHECK(std::fabs(cam.GetYaw() - 180.0f) < 1e-4f);
+
+			// 在固定方位下 Orbit 拖拽旋转: 自然转入自由视角 (Free)，正交依然保留
+			cam.Orbit(15.0f, 10.0f);
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Free);
+			CHECK(cam.IsOrthographic());
 		}
 
 		std::printf("World.Camera3D: all checks passed\n");

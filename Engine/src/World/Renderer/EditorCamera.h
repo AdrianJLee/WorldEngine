@@ -9,6 +9,16 @@
 
 namespace World
 {
+	enum class OrthographicAxis
+	{
+		Top = 0,     // 顶视: 视线朝 -Y, Up 为 -Z, Right 为 +X (看 XZ 平面)
+		Bottom = 1,  // 底视: 视线朝 +Y, Up 为 +Z, Right 为 +X (看 XZ 平面)
+		Front = 2,   // 前视: 视线朝 -Z, Up 为 +Y, Right 为 +X (看 XY 平面)
+		Back = 3,    // 后视: 视线朝 +Z, Up 为 +Y, Right 为 -X (看 XY 平面)
+		Right = 4,   // 右视: 视线朝 -X, Up 为 +Y, Right 为 -Z (看 ZY 平面)
+		Left = 5,    // 左视: 视线朝 +X, Up 为 +Y, Right 为 +Z (看 ZY 平面)
+	};
+
 	class WLD_API EditorCamera : public Camera
 	{
 	public:
@@ -38,6 +48,16 @@ namespace World
 		float GetYaw() const { return m_Yaw; }
 		// Gizmo 需要"世界单位 → 屏幕像素"的换算(依赖 FOV),因此暴露只读访问。
 		float GetFov() const { return m_Fov; }
+
+		// 正交模式与 2D 视口支持
+		void SetOrthographic(bool orthographic);
+		bool IsOrthographic() const { return m_IsOrthographic; }
+		void SetOrthographicSize(float size);
+		float GetOrthographicSize() const { return m_OrthographicSize; }
+		const glm::vec3& GetFocalPoint() const { return m_FocalPoint; }
+		void SetFocalPoint(const glm::vec3& focalPoint);
+		void SetOrthographicAxis(OrthographicAxis axis);
+		OrthographicAxis GetOrthographicAxis() const { return m_OrthoAxis; }
 	private:
 
 		void UpdateProjection();
@@ -61,6 +81,9 @@ namespace World
 	private:
 
 		float m_Fov = 45.0f, m_AspectRatio = 16.0f / 9.0f, m_NearClip = 0.1f, m_FarClip = 1000.0f;
+		bool m_IsOrthographic = false;
+		float m_OrthographicSize = 10.0f;
+		OrthographicAxis m_OrthoAxis = OrthographicAxis::Front;
 		glm::mat4 m_Transform { 1.0f };
 		glm::mat4 m_ViewMatrix { 1.0f };
 		// 摄像机位置

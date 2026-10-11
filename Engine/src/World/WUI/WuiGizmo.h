@@ -26,6 +26,8 @@ namespace World::Wui
 		glm::vec3 Position { 0.0f, 0.0f, 0.0f };
 		float Distance = 10.0f;
 		float FovDegrees = 45.0f;
+		bool IsOrthographic = false;
+		float OrthographicSize = 10.0f;
 	};
 
 	// WUI Gizmo:在视口内直接操纵实体的 Transform。返回本帧是否正在拖拽。

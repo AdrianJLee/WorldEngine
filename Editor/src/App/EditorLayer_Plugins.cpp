@@ -440,6 +440,8 @@ void EditorLayer::OnAttach(){
 		}
 
 		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
+		m_EditorCamera.SetOrthographic(true);
+		m_EditorCamera.SetOrthographicSize(10.0f);
 		// D7-1a:3D 视口相机(轨道/飞行)。默认档:
 		//   显式 `WLD_VIEWPORT_3D` 优先;否则**项目入口是 Level 2.0 关卡目录**(levels/<名>,
 		//   流送网格与 HUD 挂在 3D 视口上)时默认 3D;传统 `.wd` 单场景保持历史默认(2D),
@@ -448,9 +450,8 @@ void EditorLayer::OnAttach(){
 		m_EditorCamera3D = EditorCamera3D(60.0f, 1.6f / 0.9f, 0.1f, 2000.0f, 12.0f);
 		m_EditorCamera3D.SetViewportSize(1280, 720);
 		m_Viewport3D = std::getenv("WLD_VIEWPORT_3D") != nullptr || startupIsLevelPackage;
-		// D5c-5:从 3D 档起步(自动化入口)时同样先对齐 2D 视角,避免"从背面看场景"。
-		if (m_Viewport3D)
-			AlignEditorCamera3DWithView();
+		// 初始朝向对齐正前方(+Z 朝 -Z)
+		m_EditorCamera3D.SetYawPitch(180.0f, 0.0f);
 
 		// 开发验证:WLD_HIERARCHY_DEMO=1 现场造一个"父精灵 + 子精灵"的最小层级
 		// (子实体局部偏移 0.4):验证 2D 精灵子节点跟随父节点 —— 渲染路径必须消费
@@ -740,8 +741,8 @@ void EditorLayer::OnUpdate(Timestep ts){
 		//WLD_CORE_TRACE("Delta Time: {0} ({1} FPS)", ts.GetSeconds(), ts.GetFPS());
 
 		{
-			// TODO: 停止聚焦时，摄像机不再更新,这不太合理，应该让摄像机在停止聚焦时继续更新，但不处理输入事件
-			if (m_ViewportFocused)
+			// 3D 模式下视口由 EditorCamera3D 驱动; 2D 模式下才更新 m_EditorCamera
+			if (m_ViewportFocused && !m_Viewport3D)
 			{
 				m_EditorCamera.OnUpdate(ts);
 			}
@@ -850,6 +851,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 		const Camera* renderCamera = viewportCamera.CameraPtr;
 		const glm::mat4 renderCameraTransform = viewportCamera.Transform;
 
+		m_RendererOptions.ShowGrid = m_EditorCamera3D.GetProjection() == World::ViewportProjection::Perspective;
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
 		// D5c-4a:骨骼动画步长(编辑态也推进,便于在视口里直接看动画;Play 时同一口径)。
 		m_SceneRenderer->SetDeltaSeconds(m_LastDeltaSeconds);
@@ -1244,20 +1246,10 @@ void EditorLayer::OnUiFrame(){
 
 
 EditorLayer::ViewportSceneCamera EditorLayer::ResolveViewportSceneCamera(){
-		// 默认 = 编辑器视口相机(Edit / Simulate / Play-暂停 三种状态视口都用它):
-		//   2D 档 = `m_EditorCamera`;3D 档 = `m_EditorCamera3D` 的投影 + `inverse(视图矩阵)`。
 		ViewportSceneCamera result;
-		if (m_Viewport3D)
-		{
-			m_ViewportCamera3D = Camera { m_EditorCamera3D.GetProjectionMatrix(false) };
-			result.CameraPtr = &m_ViewportCamera3D;
-			result.Transform = glm::inverse(m_EditorCamera3D.GetViewMatrix());
-		}
-		else
-		{
-			result.CameraPtr = &m_EditorCamera;
-			result.Transform = m_EditorCamera.GetTransform();
-		}
+		m_ViewportCamera3D = Camera { m_EditorCamera3D.GetProjectionMatrix(false) };
+		result.CameraPtr = &m_ViewportCamera3D;
+		result.Transform = glm::inverse(m_EditorCamera3D.GetViewMatrix());
 
 		// Play **运行中**视口画的是 Play 场景主相机实体;Play-暂停不切换(画面仍是编辑器相机)。
 		// 选法与 `GameHost::SubmitSceneRender` 的 `ResolvePrimaryCamera` 同源。
@@ -1409,63 +1401,48 @@ void EditorLayer::OnEvent(Event& event){
 
 		if (m_ViewportFocused && m_ViewportHovered)
 		{
-			m_EditorCamera.OnEvent(event);
-			// D7-1a:3D 视口的轨道/平移/推拉(右键 orbit、中键 pan、滚轮 dolly)。
-			if (m_Viewport3D)
+			EventDispatcher cameraDispatcher(event);
+			cameraDispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e)
 			{
-				EventDispatcher cameraDispatcher(event);
-				cameraDispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e)
+				m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键 orbit*/ ? Viewport3DDrag::Orbit
+					: (e.GetMouseButton() == 2 /*中键 pan*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
+				return false;
+			});
+			cameraDispatcher.Dispatch<MouseButtonReleasedEvent>([this](MouseButtonReleasedEvent& e)
+			{
+				(void)e;
+				m_Viewport3DDragging = Viewport3DDrag::None;
+				return false;
+			});
+			cameraDispatcher.Dispatch<MouseMovedEvent>([this](MouseMovedEvent& e)
+			{
+				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
 				{
-					m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键*/ ? Viewport3DDrag::Orbit
-						: (e.GetMouseButton() == 2 /*中键*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
-					if (PanTraceEnabled())
-						WLD_CORE_INFO("[dev] 3D pan trace: press button={0} -> mode={1}",
-							e.GetMouseButton(), static_cast<int>(m_Viewport3DDragging));
-					return false;
-				});
-				cameraDispatcher.Dispatch<MouseButtonReleasedEvent>([this](MouseButtonReleasedEvent& e)
+					m_EditorCamera3D.Orbit(e.GetX() - m_Viewport3DLastMouse.x, e.GetY() - m_Viewport3DLastMouse.y);
+				}
+				else if (m_Viewport3DDragging == Viewport3DDrag::Pan)
 				{
-					(void)e;
-					m_Viewport3DDragging = Viewport3DDrag::None;
-					return false;
-				});
-				cameraDispatcher.Dispatch<MouseMovedEvent>([this](MouseMovedEvent& e)
-				{
-					if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
-						m_EditorCamera3D.Orbit(e.GetX() - m_Viewport3DLastMouse.x, e.GetY() - m_Viewport3DLastMouse.y);
-					else if (m_Viewport3DDragging == Viewport3DDrag::Pan)
-					{
-						// P4-U13h:鼠标事件是**物理像素**,布局/视口尺寸是**设计单位**(见
-						// WuiInputCollector::OnMouseMove 的换算)→ 先把像素位移换算成设计单位,
-						// 再按视口高度归一化,平移量与窗口 DPI 缩放无关。
-						const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
-						// 视口高度(设计单位);首帧布局之前 m_ViewportSize 还是 0,退回窗口高度。
-						const float viewportHeight = m_ViewportSize.y > 1.0f
-							? m_ViewportSize.y
-							: static_cast<float>(Application::Get().GetWindow().GetHeight()) / uiScale;
-						// 目标平面处的视锥高度(世界单位)= 2 × 距离 × tan(FOV/2)。
-						const float viewportHeightWorld = 2.0f * m_EditorCamera3D.GetDistance()
-							* std::tan(glm::radians(m_EditorCamera3D.GetFOV()) * 0.5f);
-						const float unitsPerDesignUnit = kPanUnitsPerViewportHeight
-							* viewportHeightWorld / std::max(viewportHeight, 1.0f);
-						const float dx = (e.GetX() - m_Viewport3DLastMouse.x) / uiScale * unitsPerDesignUnit;
-						const float dy = (e.GetY() - m_Viewport3DLastMouse.y) / uiScale * unitsPerDesignUnit;
-						if (PanTraceEnabled())
-							WLD_CORE_INFO("[dev] 3D pan trace: mouse=({0:.1f},{1:.1f})px uiScale={2:.2f} "
-								"viewportH={3:.1f}du worldPerViewport={4:.3f} world=({5:.4f},{6:.4f})",
-								e.GetX() - m_Viewport3DLastMouse.x, e.GetY() - m_Viewport3DLastMouse.y,
-								uiScale, viewportHeight, viewportHeightWorld, dx, dy);
-						m_EditorCamera3D.Pan(dx, dy);
-					}
-					m_Viewport3DLastMouse = { e.GetX(), e.GetY() };
-					return false;
-				});
-				cameraDispatcher.Dispatch<MouseScrolledEvent>([this](MouseScrolledEvent& e)
-				{
-					m_EditorCamera3D.Dolly(-e.GetYOffset() * 0.6f);
-					return false;
-				});
-			}
+					const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+					const float viewportHeight = m_ViewportSize.y > 1.0f
+						? m_ViewportSize.y
+						: static_cast<float>(Application::Get().GetWindow().GetHeight()) / uiScale;
+					const float viewportHeightWorld = m_EditorCamera3D.IsOrthographic()
+						? m_EditorCamera3D.GetOrthographicSize()
+						: (2.0f * m_EditorCamera3D.GetDistance() * std::tan(glm::radians(m_EditorCamera3D.GetFOV()) * 0.5f));
+					const float unitsPerDesignUnit = kPanUnitsPerViewportHeight
+						* viewportHeightWorld / std::max(viewportHeight, 1.0f);
+					const float dx = -(e.GetX() - m_Viewport3DLastMouse.x) / uiScale * unitsPerDesignUnit;
+					const float dy = (e.GetY() - m_Viewport3DLastMouse.y) / uiScale * unitsPerDesignUnit;
+					m_EditorCamera3D.Pan(dx, dy);
+				}
+				m_Viewport3DLastMouse = { e.GetX(), e.GetY() };
+				return false;
+			});
+			cameraDispatcher.Dispatch<MouseScrolledEvent>([this](MouseScrolledEvent& e)
+			{
+				m_EditorCamera3D.Dolly(-e.GetYOffset() * 0.6f);
+				return false;
+			});
 		}
 
 		EventDispatcher dispatcher(event);
