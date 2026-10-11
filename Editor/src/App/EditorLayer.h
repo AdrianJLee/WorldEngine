@@ -173,6 +173,8 @@ namespace World
 		void SetViewportViewpoint(World::ViewportViewpoint vp) { m_EditorCamera3D.SetViewpoint(vp); }
 		bool IsViewportCamera3D() const { return m_EditorCamera3D.GetProjection() == World::ViewportProjection::Perspective; }
 		void ToggleViewportCamera3D();
+		bool IsReferenceGridEnabled() const { return m_ShowReferenceGrid; }
+		void SetReferenceGridEnabled(bool enabled) { m_ShowReferenceGrid = enabled; }
 		Ref<SceneRenderer>& GetSceneRenderer() { return m_SceneRenderer; }
 		// 相机可视化:预览小窗(用场景相机渲一份 PiP)与视锥显示。
 		uint64_t GetCameraPreviewTextureId() const { return m_PreviewTextureId; }
@@ -514,6 +516,7 @@ namespace World
 		glm::vec2 m_Viewport3DLastMouse { 0.0f, 0.0f };
 		bool m_Viewport2DDragging = false;
 		glm::vec2 m_Viewport2DLastMouse { 0.0f, 0.0f };
+		bool m_ShowReferenceGrid = true;
 
 		Entity m_SelectedEntity;
 

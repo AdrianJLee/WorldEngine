@@ -314,6 +314,8 @@ namespace World
 		// D7-1a:视口相机模式透传(视口面板的 2D/3D 切换按钮)。
 		bool IsViewportCamera3D() const override;
 		void ToggleViewportCamera3D() override;
+		bool IsReferenceGridEnabled() const override;
+		void SetReferenceGridEnabled(bool enabled) override;
 		World::ViewportProjection GetViewportProjection() const override;
 		void SetViewportProjection(World::ViewportProjection proj) override;
 		World::ViewportViewpoint GetViewportViewpoint() const override;

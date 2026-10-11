@@ -319,11 +319,12 @@ namespace World
 
 		const float gridBtnW = 88.0f;
 		const Wui::WuiRect gridBtn { toolbarX, sceneRect.Y + kChromePad, gridBtnW, kChromeRowH };
-		const std::string gridLabel = m_ShowReferenceGrid ? "Grid: ON" : "Grid: OFF";
+		const bool gridOn = m_Host.IsReferenceGridEnabled();
+		const std::string gridLabel = gridOn ? "Grid: ON" : "Grid: OFF";
 		Wui::Tooltip(ctx, gridBtn, Wui::Tr("viewport.grid.hint", "Toggle ground reference grid (1m/10m)."));
 		if (Wui::Button(ctx, Wui::HashId("viewport.stream_grid"), gridBtn, gridLabel, theme))
 		{
-			m_ShowReferenceGrid = !m_ShowReferenceGrid;
+			m_Host.SetReferenceGridEnabled(!gridOn);
 		}
 		ctx.RegisterOverlayRect(gridBtn);
 		toolbarX += gridBtnW + 4.0f;
@@ -1121,24 +1122,34 @@ namespace World
 		// 复用前面已获取的 currentVp, currentProj, isOrtho
 
 		// ==================== 轨道一：场景地面参考网格 (Reference Grid: 正交下铺满视口，透视下由 SceneRenderer 原生 GPU 深度通道呈现) ====================
-		if (m_ShowReferenceGrid && isOrtho)
+		const bool showGrid = m_Host.IsReferenceGridEnabled();
+		if (showGrid && isOrtho)
 		{
 			Wui::ClipScope gridClip(ctx, sceneRect);
 			const float orthoSpan = std::max(0.1f, levelCam.OrthographicSize);
-			const float aspect = (sceneRect.W > 0.0f && sceneRect.H > 0.0f) ? sceneRect.W / sceneRect.H : 1.0f;
-			const float spanW = orthoSpan * aspect;
-			const float spanH = orthoSpan;
 
-			// 精确计算相机的焦平面目标中心 (Target = Eye + Forward * Distance)，绝不使用 Eye Position 导致偏心
-			const glm::vec3 camTarget = levelCam.Position + levelCam.Forward * levelCam.Distance;
-
-			// 工业级对数自适应标尺步长: 确保屏幕上每格在 [60, 160] 像素之间，线条总数恒定在 15~25 根，绝不截断丢弃
+			// 工业级对数自适应标尺步长: 确保屏幕上每格在 [60, 160] 像素之间，绝不产生线条过多或过少
 			const float worldPerPixel = orthoSpan / std::max(1.0f, sceneRect.H);
 			const float targetStep = worldPerPixel * 75.0f;
 			const float exponent = std::floor(std::log10(std::max(1e-4f, targetStep)));
 			const float baseStep = std::pow(10.0f, exponent);
 			const float fracStep = targetStep / baseStep;
 			const float cellSize = (fracStep >= 5.0f) ? (baseStep * 5.0f) : ((fracStep >= 2.0f) ? (baseStep * 2.0f) : baseStep);
+
+			// 精确求出视口四角在世界空间中的可视范围 (无论焦点位置、距离多少，100% 严格铺满视口矩形)
+			const glm::mat4 invVP = glm::inverse(levelCam.ViewProjection);
+			const glm::vec4 ndcCorners[4] = {
+				{ -1.0f, -1.0f, 0.0f, 1.0f },
+				{  1.0f, -1.0f, 0.0f, 1.0f },
+				{  1.0f,  1.0f, 0.0f, 1.0f },
+				{ -1.0f,  1.0f, 0.0f, 1.0f }
+			};
+			glm::vec3 wc[4];
+			for (int i = 0; i < 4; ++i)
+			{
+				const glm::vec4 p = invVP * ndcCorners[i];
+				wc[i] = glm::vec3(p) / (std::abs(p.w) > 1e-6f ? p.w : 1.0f);
+			}
 
 			const Wui::WuiColor minorColor { 0.45f, 0.52f, 0.62f, 0.22f };
 			const Wui::WuiColor majorColor { 0.55f, 0.65f, 0.78f, 0.40f };
@@ -1149,10 +1160,15 @@ namespace World
 			if (currentVp == World::ViewportViewpoint::Front || currentVp == World::ViewportViewpoint::Back)
 			{
 				// XY 立面参考网格: 水平 X, 垂直 Y
-				const float minX = std::floor((camTarget.x - spanW * 0.5f) / cellSize) * cellSize - cellSize;
-				const float maxX = std::ceil((camTarget.x + spanW * 0.5f) / cellSize) * cellSize + cellSize;
-				const float minY = std::floor((camTarget.y - spanH * 0.5f) / cellSize) * cellSize - cellSize;
-				const float maxY = std::ceil((camTarget.y + spanH * 0.5f) / cellSize) * cellSize + cellSize;
+				const float rawMinX = std::min({ wc[0].x, wc[1].x, wc[2].x, wc[3].x });
+				const float rawMaxX = std::max({ wc[0].x, wc[1].x, wc[2].x, wc[3].x });
+				const float rawMinY = std::min({ wc[0].y, wc[1].y, wc[2].y, wc[3].y });
+				const float rawMaxY = std::max({ wc[0].y, wc[1].y, wc[2].y, wc[3].y });
+
+				const float minX = std::floor((rawMinX - cellSize * 2.0f) / cellSize) * cellSize;
+				const float maxX = std::ceil((rawMaxX + cellSize * 2.0f) / cellSize) * cellSize;
+				const float minY = std::floor((rawMinY - cellSize * 2.0f) / cellSize) * cellSize;
+				const float maxY = std::ceil((rawMaxY + cellSize * 2.0f) / cellSize) * cellSize;
 
 				for (float x = minX; x <= maxX + 0.01f; x += cellSize)
 				{
@@ -1176,10 +1192,15 @@ namespace World
 			else if (currentVp == World::ViewportViewpoint::Right || currentVp == World::ViewportViewpoint::Left)
 			{
 				// ZY 立面参考网格: 水平 Z, 垂直 Y
-				const float minZ = std::floor((camTarget.z - spanW * 0.5f) / cellSize) * cellSize - cellSize;
-				const float maxZ = std::ceil((camTarget.z + spanW * 0.5f) / cellSize) * cellSize + cellSize;
-				const float minY = std::floor((camTarget.y - spanH * 0.5f) / cellSize) * cellSize - cellSize;
-				const float maxY = std::ceil((camTarget.y + spanH * 0.5f) / cellSize) * cellSize + cellSize;
+				const float rawMinZ = std::min({ wc[0].z, wc[1].z, wc[2].z, wc[3].z });
+				const float rawMaxZ = std::max({ wc[0].z, wc[1].z, wc[2].z, wc[3].z });
+				const float rawMinY = std::min({ wc[0].y, wc[1].y, wc[2].y, wc[3].y });
+				const float rawMaxY = std::max({ wc[0].y, wc[1].y, wc[2].y, wc[3].y });
+
+				const float minZ = std::floor((rawMinZ - cellSize * 2.0f) / cellSize) * cellSize;
+				const float maxZ = std::ceil((rawMaxZ + cellSize * 2.0f) / cellSize) * cellSize;
+				const float minY = std::floor((rawMinY - cellSize * 2.0f) / cellSize) * cellSize;
+				const float maxY = std::ceil((rawMaxY + cellSize * 2.0f) / cellSize) * cellSize;
 
 				for (float z = minZ; z <= maxZ + 0.01f; z += cellSize)
 				{
@@ -1202,11 +1223,16 @@ namespace World
 			}
 			else
 			{
-				// XZ 地面参考网格: 水平 X, 垂直 Z (顶视 Top / 底视 Bottom)
-				const float minX = std::floor((camTarget.x - spanW * 0.5f) / cellSize) * cellSize - cellSize;
-				const float maxX = std::ceil((camTarget.x + spanW * 0.5f) / cellSize) * cellSize + cellSize;
-				const float minZ = std::floor((camTarget.z - spanH * 0.5f) / cellSize) * cellSize - cellSize;
-				const float maxZ = std::ceil((camTarget.z + spanH * 0.5f) / cellSize) * cellSize + cellSize;
+				// XZ 地面参考网格: 水平 X, 垂直 Z (顶视 Top / 底视 Bottom 或 正交自由视角)
+				const float rawMinX = std::min({ wc[0].x, wc[1].x, wc[2].x, wc[3].x });
+				const float rawMaxX = std::max({ wc[0].x, wc[1].x, wc[2].x, wc[3].x });
+				const float rawMinZ = std::min({ wc[0].z, wc[1].z, wc[2].z, wc[3].z });
+				const float rawMaxZ = std::max({ wc[0].z, wc[1].z, wc[2].z, wc[3].z });
+
+				const float minX = std::floor((rawMinX - cellSize * 2.0f) / cellSize) * cellSize;
+				const float maxX = std::ceil((rawMaxX + cellSize * 2.0f) / cellSize) * cellSize;
+				const float minZ = std::floor((rawMinZ - cellSize * 2.0f) / cellSize) * cellSize;
+				const float maxZ = std::ceil((rawMaxZ + cellSize * 2.0f) / cellSize) * cellSize;
 
 				for (float x = minX; x <= maxX + 0.01f; x += cellSize)
 				{

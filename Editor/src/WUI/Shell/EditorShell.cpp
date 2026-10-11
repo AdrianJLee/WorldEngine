@@ -498,6 +498,14 @@ void EditorShell::ToggleViewportCamera3D(){
 		m_Editor.ToggleViewportCamera3D();
 	}
 
+bool EditorShell::IsReferenceGridEnabled() const {
+		return m_Editor.IsReferenceGridEnabled();
+	}
+
+void EditorShell::SetReferenceGridEnabled(bool enabled) {
+		m_Editor.SetReferenceGridEnabled(enabled);
+	}
+
 World::ViewportProjection EditorShell::GetViewportProjection() const {
 		return m_Editor.GetViewportProjection();
 	}

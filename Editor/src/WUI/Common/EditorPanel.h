@@ -118,6 +118,8 @@ namespace World
 		// D7-1a:视口相机模式(2D/3D)与切换 —— 视口面板用它画切换按钮。
 		virtual bool IsViewportCamera3D() const { return true; }
 		virtual void ToggleViewportCamera3D() {}
+		virtual bool IsReferenceGridEnabled() const { return true; }
+		virtual void SetReferenceGridEnabled(bool enabled) {}
 		virtual World::ViewportProjection GetViewportProjection() const { return World::ViewportProjection::Perspective; }
 		virtual void SetViewportProjection(World::ViewportProjection proj) {}
 		virtual World::ViewportViewpoint GetViewportViewpoint() const { return World::ViewportViewpoint::Free; }
