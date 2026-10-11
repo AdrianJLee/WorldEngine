@@ -39,5 +39,11 @@
   "viewport.surface": "视口画面区",
   "viewport.surface.tooltip": "渲染画面占满整块面板;运行控制与视图菜单悬浮在画面之上。",
   "viewport.axis": "视口坐标系",
-  "viewport.axis.tooltip": "视口右下角的世界坐标系:X 红 / Y 绿 / Z 蓝,随当前视口相机转动;2D 正交视图只画 X/Y。"
+  "viewport.axis.tooltip": "视口右下角的世界坐标系:X 红 / Y 绿 / Z 蓝,随当前视口相机转动;2D 正交视图只画 X/Y。",
+  "viewport.layers.hint": "管理关卡数据层渲染可见性。",
+  "viewport.grid.hint": "开关地面参考网格(1m/10m)。",
+  "viewport.partition.hint": "开关大世界空间分区与流送区块辅助网格。",
+  "viewport.layers.title": "关卡数据层",
+  "viewport.layers.all": "全部显示",
+  "viewport.layers.base_only": "仅Base"
 }

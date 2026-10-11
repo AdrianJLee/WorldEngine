@@ -17,7 +17,8 @@
     "panel.data_layers",
     "panel.gallery",
     "panel.input",
-    "panel.scripts"
+    "panel.scripts",
+    "panel.systems"
   ],
   "panel.hierarchy": "层级",
   "panel.properties": "属性",
@@ -33,5 +34,6 @@
   "panel.data_layers": "数据层",
   "panel.gallery": "控件库",
   "panel.input": "输入映射",
-  "panel.scripts": "脚本"
+  "panel.scripts": "脚本",
+  "panel.systems": "系统管线"
 }

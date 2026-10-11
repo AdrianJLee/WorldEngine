@@ -293,24 +293,23 @@ namespace World::Rhi::Vulkan
 		if (m_Device.SkipNativeDestroy())
 			return;
 		const VkDevice device = m_Device.GetNativeDevice();
-		if (m_View) vkDestroyImageView(device, m_View, nullptr);
-		// HOTR-P2C(2026-09-30 实测):**多 mip 纹理走同步上传**。
-		// 逐 mip `SetData` 会在同一帧内打多次异步上传环提交(如 BC7 产物 7 mips = 7 次),
-		// 实测在"活动材质换贴图"时打坏帧同步状态(VUID 01123/01779 → 00045/00071 → device lost,
-		// 复现见 tools/agents/scratch/HOTR-P2/t5-texture-rebake-probe.py);改走同步路径后 0 丢失。
-		// 多 mip 纹理只在资产加载/热重载时上传(低频),同步的代价可接受;
-		// `WLD_TEX_SYNC_UPLOAD=1` 可强制所有纹理走同步路径(诊断用)。
-		// 注:上传环本身在"同一帧多次异步提交"下仍有隐患,已记档待单独修复(plan.md P2-c 取证记录)。
-		static const bool forceSyncUpload = std::getenv("WLD_TEX_SYNC_UPLOAD") != nullptr;
-		// 诊断:`WLD_TEX_RING_UPLOAD=1` 强制材质贴图也走异步环(复现上传环缺陷,见
-		// tools/agents/scratch/HOTR-P2/t5-texture-rebake-probe.py + WLD_UPLOAD_RING_TRACE=1)。
-		static const bool forceRingUpload = std::getenv("WLD_TEX_RING_UPLOAD") != nullptr;
-		const bool uploadSynchronously =
-			!forceRingUpload && (forceSyncUpload || m_Desc.SynchronousUpload || m_Desc.MipLevels > 1);
-		if (m_OwnsImage && !uploadSynchronously)
+		if (m_View)
 		{
-			if (m_Image) vkDestroyImage(device, m_Image, nullptr);
-			if (m_Memory) vkFreeMemory(device, m_Memory, nullptr);
+			vkDestroyImageView(device, m_View, nullptr);
+			m_View = VK_NULL_HANDLE;
+		}
+		if (m_OwnsImage)
+		{
+			if (m_Image)
+			{
+				vkDestroyImage(device, m_Image, nullptr);
+				m_Image = VK_NULL_HANDLE;
+			}
+			if (m_Memory)
+			{
+				vkFreeMemory(device, m_Memory, nullptr);
+				m_Memory = VK_NULL_HANDLE;
+			}
 		}
 	}
 
