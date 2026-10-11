@@ -1672,23 +1672,34 @@ namespace World
 		const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
 		const glm::vec3 camForward = -glm::normalize(glm::vec3(cameraTransform[2]));
 
-		// 1. 动态自适应覆盖半径: 根据相机高度与视距自适应扩展，拉远缩小时平滑扩大至 600m ~ 1500m
+		// 1. 动态自适应视场覆盖: 随视距/高度自适应扩展，保证正交与透视拉远时绝不半截截断
 		const float camHeight = std::abs(camPos.y);
-		const float dynamicRadius = std::clamp(350.0f + camHeight * 5.0f, 400.0f, 1500.0f);
+		const float groundDist = std::max(camHeight, std::sqrt(camPos.x * camPos.x + camPos.z * camPos.z));
+		const float dynamicRadius = std::clamp(400.0f + groundDist * 4.0f, 500.0f, 2500.0f);
 
-		// 2. 视线前向投影偏移: 当相机平视或俯视时，将网格重心沿视线水平前推，确保前方地平线深处完全被地网铺满
+		// 2. 视线前推重心: 确保平视或俯视时，视线前方地平线深处完全被地网铺满
 		const glm::vec2 horizForward = glm::length(glm::vec2(camForward.x, camForward.z)) > 1e-4f
 			? glm::normalize(glm::vec2(camForward.x, camForward.z))
 			: glm::vec2(0.0f, -1.0f);
 		const float forwardBias = dynamicRadius * 0.35f;
 		const glm::vec2 gridCenter = glm::vec2(camPos.x, camPos.z) + horizForward * forwardBias;
 
-		// 3. 多级 LOD 刻度 (宏观 50m/100m + 中景 10m + 近景 1m)，兼顾地平线铺满与防摩尔纹
-		const float macroStep = (dynamicRadius > 800.0f) ? 100.0f : 50.0f;
+		// 3. 距离驱动的 LOD 门禁因子 (彻底根治远处密集黑斑/摩尔纹补丁):
+		// - 当相机距离地面 > 60m 时，1m 细网格完全淡出 (权重归零，绝不产生密集黑膏药)
+		// - 只有拉近到近处 (< 50m) 时，1m 细线才平滑浮现
+		const float distToFocalGround = std::max(camHeight, glm::length(glm::vec2(camPos.x, camPos.z) - gridCenter));
+		const float minorLodWeight = std::clamp(1.0f - (distToFocalGround - 25.0f) / 35.0f, 0.0f, 1.0f);
+
+		// - 中景 10m 网格随极远视距平滑过渡到 50m/100m 宏观大格
+		const float majorLodWeight = (distToFocalGround > 400.0f)
+			? std::clamp(1.0f - (distToFocalGround - 400.0f) / 400.0f, 0.0f, 1.0f)
+			: 1.0f;
+
+		const float macroStep = (dynamicRadius > 1000.0f) ? 100.0f : 50.0f;
 		constexpr float kMajorStep = 10.0f;
 		constexpr float kMinorStep = 1.0f;
 
-		// ------------------ LOD 2: 宏观大网格 (覆盖至地平线 1000m~1500m 极远处) ------------------
+		// ------------------ LOD 2: 宏观大网格 (覆盖至地平线 1500m~2500m 极远处) ------------------
 		{
 			const float startX = std::floor((gridCenter.x - dynamicRadius) / macroStep) * macroStep;
 			const float endX = std::ceil((gridCenter.x + dynamicRadius) / macroStep) * macroStep;
@@ -1699,7 +1710,7 @@ namespace World
 			{
 				const float dist = std::abs(x - gridCenter.x);
 				const float normDist = dist / dynamicRadius;
-				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.28f;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.26f;
 				if (alpha <= 0.01f) continue;
 				const bool isZAxis = (std::abs(x) < 0.01f);
 				const glm::vec4 color = isZAxis
@@ -1711,7 +1722,7 @@ namespace World
 			{
 				const float dist = std::abs(z - gridCenter.y);
 				const float normDist = dist / dynamicRadius;
-				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.28f;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.26f;
 				if (alpha <= 0.01f) continue;
 				const bool isXAxis = (std::abs(z) < 0.01f);
 				const glm::vec4 color = isXAxis
@@ -1721,9 +1732,10 @@ namespace World
 			}
 		}
 
-		// ------------------ LOD 1: 中景 10m 主网格 (覆盖 350m 范围) ------------------
+		// ------------------ LOD 1: 中景 10m 主网格 (覆盖 350m 范围，远处平滑淡出) ------------------
+		if (majorLodWeight > 0.01f)
 		{
-			const float midRadius = std::min(dynamicRadius * 0.55f, 350.0f);
+			const float midRadius = std::min(dynamicRadius * 0.55f, 400.0f);
 			const float startX = std::floor((camPos.x - midRadius) / kMajorStep) * kMajorStep;
 			const float endX = std::ceil((camPos.x + midRadius) / kMajorStep) * kMajorStep;
 			const float startZ = std::floor((camPos.z - midRadius) / kMajorStep) * kMajorStep;
@@ -1734,7 +1746,7 @@ namespace World
 				if (std::fmod(std::abs(x), macroStep) < 0.01f) continue; // 避免与大线重叠
 				const float dist = std::abs(x - camPos.x);
 				const float normDist = dist / midRadius;
-				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.25f;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.25f * majorLodWeight;
 				if (alpha <= 0.01f) continue;
 				const bool isZAxis = (std::abs(x) < 0.01f);
 				const glm::vec4 color = isZAxis
@@ -1747,7 +1759,7 @@ namespace World
 				if (std::fmod(std::abs(z), macroStep) < 0.01f) continue;
 				const float dist = std::abs(z - camPos.z);
 				const float normDist = dist / midRadius;
-				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.25f;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.25f * majorLodWeight;
 				if (alpha <= 0.01f) continue;
 				const bool isXAxis = (std::abs(z) < 0.01f);
 				const glm::vec4 color = isXAxis
@@ -1757,9 +1769,10 @@ namespace World
 			}
 		}
 
-		// ------------------ LOD 0: 近处 1m 细网格 (50m 辅助对齐) ------------------
+		// ------------------ LOD 0: 近景 1m 细网格 (只有相机拉近时才出现，拉远彻底消失!) ------------------
+		if (minorLodWeight > 0.01f)
 		{
-			constexpr float kMinorRadius = 50.0f;
+			constexpr float kMinorRadius = 45.0f;
 			const float startX = std::floor((camPos.x - kMinorRadius) / kMinorStep) * kMinorStep;
 			const float endX = std::ceil((camPos.x + kMinorRadius) / kMinorStep) * kMinorStep;
 			const float startZ = std::floor((camPos.z - kMinorRadius) / kMinorStep) * kMinorStep;
@@ -1770,7 +1783,7 @@ namespace World
 				if (std::fmod(std::abs(x), kMajorStep) < 0.01f) continue;
 				const float dist = std::abs(x - camPos.x);
 				const float normDist = dist / kMinorRadius;
-				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.16f;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.16f * minorLodWeight;
 				if (alpha <= 0.01f) continue;
 				Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, startZ), glm::vec3(x, 0.0f, endZ),
 					glm::vec4(0.42f, 0.50f, 0.60f, alpha));
@@ -1780,7 +1793,7 @@ namespace World
 				if (std::fmod(std::abs(z), kMajorStep) < 0.01f) continue;
 				const float dist = std::abs(z - camPos.z);
 				const float normDist = dist / kMinorRadius;
-				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.16f;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.16f * minorLodWeight;
 				if (alpha <= 0.01f) continue;
 				Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z),
 					glm::vec4(0.42f, 0.50f, 0.60f, alpha));

@@ -851,8 +851,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 		const Camera* renderCamera = viewportCamera.CameraPtr;
 		const glm::mat4 renderCameraTransform = viewportCamera.Transform;
 
-		m_RendererOptions.ShowGrid = (m_EditorCamera3D.GetProjection() == World::ViewportProjection::Perspective)
-			&& m_ShowReferenceGrid;
+		m_RendererOptions.ShowGrid = m_ShowReferenceGrid;
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
 		// D5c-4a:骨骼动画步长(编辑态也推进,便于在视口里直接看动画;Play 时同一口径)。
 		m_SceneRenderer->SetDeltaSeconds(m_LastDeltaSeconds);
