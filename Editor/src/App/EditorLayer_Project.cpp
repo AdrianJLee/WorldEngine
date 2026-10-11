@@ -978,6 +978,16 @@ bool EditorLayer::OnKeyPressed(KeyPressedEvent& e){
 			if (panel->OnShortcut(e.GetKeyCode(), control, shift, alt))
 				return true;
 		}
+
+		// 小键盘一键切视角 (Blender/行业标准免 Alt 单键)
+		if (!control && !shift && !alt)
+		{
+			if (e.GetKeyCode() == KeyCodes::KP7) { SetViewportViewpoint(World::ViewportViewpoint::Top); return true; }
+			if (e.GetKeyCode() == KeyCodes::KP1) { SetViewportViewpoint(World::ViewportViewpoint::Front); return true; }
+			if (e.GetKeyCode() == KeyCodes::KP3) { SetViewportViewpoint(World::ViewportViewpoint::Right); return true; }
+			if (e.GetKeyCode() == KeyCodes::KP5) { ToggleViewportCamera3D(); return true; }
+		}
+
 		return m_Commands.HandleKey(e.GetKeyCode(), control, shift);
 	}
 
@@ -1066,5 +1076,28 @@ Entity EditorLayer::GetEntityAtMousePosition(glm::vec2 viewportLocal){
 
 		return result.IsValid() && !m_ActiveScene->IsPendingDestroy(result) ? result : Entity{};
 	}
+
+
+void EditorLayer::FocusOnSelectedEntity()
+{
+	glm::vec3 targetPos { 0.0f, 0.0f, 0.0f };
+	float targetDistance = 10.0f;
+
+	if (m_SelectedEntity.IsValid() && m_SelectedEntity.HasComponent<TransformComponent>())
+	{
+		targetPos = glm::vec3(EntityWorldMatrix(m_SelectedEntity)[3]);
+
+		if (m_SelectedEntity.HasComponent<MeshRendererComponent>())
+			targetDistance = 5.0f;
+		else if (m_SelectedEntity.HasComponent<CameraComponent>())
+			targetDistance = 6.0f;
+		else
+			targetDistance = 4.0f;
+	}
+
+	m_EditorCamera3D.FocusOn(targetPos, targetDistance);
+	m_EditorCamera.SetFocalPoint(targetPos);
+	m_EditorCamera.SetOrthographicSize(targetDistance * 1.5f);
+}
 
 }

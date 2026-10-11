@@ -437,6 +437,31 @@ int main()
 			CHECK(clipExtent >= 3500.0f - 1.0f);
 		}
 
+		// 13. FocusOn 智能聚焦与 Fly 空间飞行漫游数学验证
+		{
+			EditorCamera3D cam(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f, 10.0f);
+
+			// 透视聚焦
+			const glm::vec3 targetPoint(15.0f, 2.0f, -8.0f);
+			cam.FocusOn(targetPoint, 5.0f);
+			CHECK(glm::length(cam.GetTarget() - targetPoint) < 1e-4f);
+			CHECK(std::fabs(cam.GetDistance() - 5.0f) < 1e-4f);
+
+			// 正交聚焦 (自适应换算 OrthoSize)
+			cam.SetProjection(ViewportProjection::Orthographic);
+			cam.FocusOn(targetPoint, 6.0f);
+			CHECK(glm::length(cam.GetTarget() - targetPoint) < 1e-4f);
+			const float halfRad = glm::radians(60.0f * 0.5f);
+			const float expectedOrthoH = 2.0f * 6.0f * std::tan(halfRad);
+			CHECK(std::fabs(cam.GetOrthographicSize() - expectedOrthoH) < 1e-4f);
+
+			// 自由飞行漫游 (Fly forward/right/up)
+			const glm::vec3 beforeFly = cam.GetTarget();
+			cam.Fly(10.0f, -5.0f, 2.0f);
+			const glm::vec3 expectedDelta = cam.GetForward() * 10.0f + cam.GetRight() * -5.0f + cam.GetUp() * 2.0f;
+			CHECK(glm::length(cam.GetTarget() - (beforeFly + expectedDelta)) < 1e-4f);
+		}
+
 		std::printf("World.Camera3D: all checks passed\n");
 		return 0;
 	}

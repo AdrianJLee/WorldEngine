@@ -173,6 +173,7 @@ namespace World
 		void SetViewportViewpoint(World::ViewportViewpoint vp) { m_EditorCamera3D.SetViewpoint(vp); }
 		bool IsViewportCamera3D() const { return m_EditorCamera3D.GetProjection() == World::ViewportProjection::Perspective; }
 		void ToggleViewportCamera3D();
+		void FocusOnSelectedEntity();
 		bool IsReferenceGridEnabled() const { return m_ShowReferenceGrid; }
 		void SetReferenceGridEnabled(bool enabled) { m_ShowReferenceGrid = enabled; }
 		Ref<SceneRenderer>& GetSceneRenderer() { return m_SceneRenderer; }

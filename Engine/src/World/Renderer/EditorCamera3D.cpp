@@ -112,7 +112,15 @@ namespace World
 	void EditorCamera3D::FocusOn(const glm::vec3& point, float distance)
 	{
 		m_Target = point;
-		SetDistance(distance);
+		if (m_Projection == ViewportProjection::Orthographic)
+		{
+			const float halfFov = glm::radians(m_FOV * 0.5f);
+			SetOrthographicSize(2.0f * distance * std::tan(halfFov));
+		}
+		else
+		{
+			SetDistance(distance);
+		}
 	}
 
 	void EditorCamera3D::Fly(float forward, float right, float up)

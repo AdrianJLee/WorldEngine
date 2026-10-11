@@ -647,6 +647,31 @@ void EditorLayer::OnUpdate(Timestep ts){
 			if (!root.empty())
 				RelaunchWithProject(root);
 		}
+		// 视口按住右键自由飞行穿梭 (WASD / QE 飞行漫游)
+		if (m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Orbit)
+		{
+			float speed = 12.0f; // 基础飞行速度 12 m/s
+			if (Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift))
+				speed *= 2.5f; // Shift 冲刺加速至 30 m/s
+
+			float forward = 0.0f;
+			float right = 0.0f;
+			float up = 0.0f;
+
+			if (Input::IsKeyPressed(KeyCodes::W)) forward += 1.0f;
+			if (Input::IsKeyPressed(KeyCodes::S)) forward -= 1.0f;
+			if (Input::IsKeyPressed(KeyCodes::D)) right += 1.0f;
+			if (Input::IsKeyPressed(KeyCodes::A)) right -= 1.0f;
+			if (Input::IsKeyPressed(KeyCodes::E)) up += 1.0f;
+			if (Input::IsKeyPressed(KeyCodes::Q)) up -= 1.0f;
+
+			if (forward != 0.0f || right != 0.0f || up != 0.0f)
+			{
+				const float moveDist = speed * ts.GetSeconds();
+				m_EditorCamera3D.Fly(forward * moveDist, right * moveDist, up * moveDist);
+			}
+		}
+
 		m_HasRenderedScene = false;
 		// 视口目标重建节流:尺寸稳定(约 100ms)后再真正重建渲染目标。
 		if (m_PendingViewportSize.x > 0 && m_PendingViewportSize.y > 0)
@@ -1404,7 +1429,13 @@ void EditorLayer::OnEvent(Event& event){
 			EventDispatcher cameraDispatcher(event);
 			cameraDispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e)
 			{
-				m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键 orbit*/ ? Viewport3DDrag::Orbit
+				const bool spacePressed = Input::IsKeyPressed(KeyCodes::Space);
+				if (e.GetMouseButton() == 0 /*左键*/ && spacePressed)
+				{
+					m_Viewport3DDragging = Viewport3DDrag::Pan;
+					return true;
+				}
+				m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键 orbit/fly*/ ? Viewport3DDrag::Orbit
 					: (e.GetMouseButton() == 2 /*中键 pan*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
 				return false;
 			});
