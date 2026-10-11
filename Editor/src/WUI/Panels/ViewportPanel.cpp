@@ -325,32 +325,32 @@ namespace World
 			Wui::Tr("viewport.camera.hint", "Viewport view mode — switch in the View menu (top-left)."));
 		ctx.RegisterOverlayRect(viewButton);
 
-		// Level 2.0: 视口工具栏 —— 数据层开关(改的是**真实**渲染剔除掩码)与网格开关
+		// Level 2.0: 视口工具栏 —— 数据层收拢下拉按钮 (Layers: N/M ▼) 与网格/分区开关
 		float toolbarX = viewButton.X + viewButton.W + 8.0f;
 
-		// 每个声明的数据层一个开关:点亮 = 该层实体参与本帧渲染。
-		// 这是昼夜/战损这类"同一空间多套内容"的实际切换点(SceneRenderer 按掩码剔除)。
+		// 数据层收拢为单个紧凑按钮，无论关卡有 3 个还是 30 个层，工具栏永远不被撑爆
 		const std::vector<Level::DataLayerDefinition>& dataLayers = m_Host.GetLevelDataLayers();
 		const uint32_t activeLayers = m_Host.GetActiveDataLayers();
-		for (const Level::DataLayerDefinition& layer : dataLayers)
+		Wui::WuiRect layersBtnRect {};
+		if (!dataLayers.empty())
 		{
-			if (layer.Name.empty())
-				continue;
-			const bool isOn = (layer.LayerMask & activeLayers) != 0;
-			const std::string label = (isOn ? "* " : "  ") + layer.Name;
-			const float layerW = ctx.MeasureTextWidth(label, 12.0f) + 16.0f;
-			const Wui::WuiRect layerBtn { toolbarX, sceneRect.Y + kChromePad, layerW, kChromeRowH };
-			const std::string layerHint = Wui::TrFormat("viewport.datalayer.hint",
-				"Toggle data layer '{0}' (mask {1}).", { { "name", layer.Name },
-					{ "mask", std::to_string(layer.LayerMask) } });
-			Wui::Tooltip(ctx, layerBtn, layerHint);
-			if (Wui::Button(ctx, Wui::HashId(("viewport.layer." + layer.Name).c_str()), layerBtn, label, theme))
+			size_t activeCount = 0;
+			for (const auto& layer : dataLayers)
 			{
-				const uint32_t next = isOn ? (activeLayers & ~layer.LayerMask) : (activeLayers | layer.LayerMask);
-				m_Host.SetActiveDataLayers(next);
+				if (!layer.Name.empty() && (layer.LayerMask & activeLayers) != 0)
+					activeCount++;
 			}
-			ctx.RegisterOverlayRect(layerBtn);
-			toolbarX += layerW + 4.0f;
+			char layersLabel[64] = {};
+			std::snprintf(layersLabel, sizeof(layersLabel), "Layers: %zu/%zu ▼", activeCount, dataLayers.size());
+			const float layersBtnW = ctx.MeasureTextWidth(layersLabel, 12.0f) + 16.0f;
+			layersBtnRect = { toolbarX, sceneRect.Y + kChromePad, layersBtnW, kChromeRowH };
+			Wui::Tooltip(ctx, layersBtnRect, Wui::Tr("viewport.layers.hint", "Manage data layer visibility."));
+			if (Wui::Button(ctx, Wui::HashId("viewport.layers_dropdown"), layersBtnRect, layersLabel, theme))
+			{
+				ctx.OpenPopup(Wui::HashId("viewport.layers.popup"));
+			}
+			ctx.RegisterOverlayRect(layersBtnRect);
+			toolbarX += layersBtnW + 4.0f;
 		}
 
 		const float gridBtnW = 88.0f;
@@ -419,7 +419,9 @@ namespace World
 		{
 			const float rowH = 22.0f;
 			const float comboH = 24.0f;
-			const Wui::WuiRect panel { viewButton.X, viewButton.Y + viewButton.H + 2.0f, 260.0f, comboH * 2.0f + rowH * 4.0f + 24.0f };
+			// 精确计算弹层高度: 顶部留白(6) + 2个Combo(2*comboH + 14) + 分割线(7) + 标题(rowH) + 3个Overlays菜单项(3*rowH) + 底部留白(6) = 175px
+			const float panelH = 6.0f + (comboH * 2.0f + 14.0f) + 7.0f + rowH * 4.0f + 6.0f;
+			const Wui::WuiRect panel { viewButton.X, viewButton.Y + viewButton.H + 2.0f, 250.0f, panelH };
 			Wui::DrawPanelSurface(ctx, panel, theme);
 			ctx.RegisterOverlayRect(panel);
 			float rowY = panel.Y + 6.0f;
@@ -523,10 +525,6 @@ namespace World
 			};
 
 			header(Wui::Tr("viewport.view.group.overlays", "Overlays"));
-			item("viewport.view.world_partition", Wui::Tr("viewport.view.world_partition", "World Partition (流送区块)"),
-				m_ShowWorldPartition,
-				Wui::Tr("viewport.overlays.partition.tooltip", "Draw 64m world partition chunks, streaming radius circle, and active chunk highlight."),
-				[this] { m_ShowWorldPartition = !m_ShowWorldPartition; });
 			item("viewport.view.camera_preview", Wui::Tr("viewport.view.camera_preview", "Camera Preview"),
 				m_Host.IsCameraPreviewEnabled(),
 				Wui::Tr("viewport.view.camera_preview.tooltip",
@@ -556,6 +554,66 @@ namespace World
 			ctx.ClosePopupsOnOutsideClick({ viewPopup }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(viewPopup);
+		}
+
+		// ⑤ 数据层多选弹层 (Layers Popup: 无论有多少数据层，绝不挤爆视口)
+		const Wui::WuiId layersPopup = Wui::HashId("viewport.layers.popup");
+		if (ctx.IsPopupOpen(layersPopup) && !dataLayers.empty())
+		{
+			const float rowH = 22.0f;
+			const float popupW = 200.0f;
+			const float popupH = 30.0f + static_cast<float>(dataLayers.size()) * rowH + 34.0f;
+			const Wui::WuiRect panel { layersBtnRect.X, layersBtnRect.Y + layersBtnRect.H + 2.0f, popupW, popupH };
+			Wui::DrawPanelSurface(ctx, panel, theme);
+			ctx.RegisterOverlayRect(panel);
+
+			float rowY = panel.Y + 6.0f;
+			Wui::Label(ctx, { panel.X + 8.0f, rowY + 3.0f }, Wui::Tr("viewport.layers.title", "关卡数据层 (Data Layers)"), theme.TextMuted, 12.0f);
+			rowY += 20.0f;
+			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 4.0f;
+
+			for (const Level::DataLayerDefinition& layer : dataLayers)
+			{
+				if (layer.Name.empty())
+					continue;
+				const bool isOn = (layer.LayerMask & activeLayers) != 0;
+				const Wui::WuiRect row { panel.X + 4.0f, rowY, panel.W - 8.0f, rowH };
+				rowY += rowH;
+
+				const std::string layerHint = Wui::TrFormat("viewport.datalayer.hint",
+					"Toggle data layer '{0}' (mask {1}).", { { "name", layer.Name },
+						{ "mask", std::to_string(layer.LayerMask) } });
+				Wui::Tooltip(ctx, row, layerHint);
+
+				if (Wui::MenuItem(ctx, Wui::HashId(("viewport.layer." + layer.Name).c_str()), row, layer.Name, isOn, true, theme))
+				{
+					const uint32_t next = isOn ? (activeLayers & ~layer.LayerMask) : (activeLayers | layer.LayerMask);
+					m_Host.SetActiveDataLayers(next);
+				}
+			}
+
+			// 底部快捷操作行: [全部开启] / [仅基础层]
+			rowY += 2.0f;
+			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 4.0f;
+			const float btnHalfW = (panel.W - 16.0f) * 0.5f;
+			const Wui::WuiRect allBtn { panel.X + 6.0f, rowY, btnHalfW, 20.0f };
+			const Wui::WuiRect baseBtn { panel.X + 10.0f + btnHalfW, rowY, btnHalfW, 20.0f };
+			if (Wui::Button(ctx, Wui::HashId("viewport.layers.all"), allBtn, "全部显示", theme))
+			{
+				uint32_t allMask = 0;
+				for (const auto& l : dataLayers) allMask |= l.LayerMask;
+				m_Host.SetActiveDataLayers(allMask);
+			}
+			if (Wui::Button(ctx, Wui::HashId("viewport.layers.base_only"), baseBtn, "仅Base", theme))
+			{
+				m_Host.SetActiveDataLayers(1u);
+			}
+
+			ctx.ClosePopupsOnOutsideClick({ layersPopup }, panel);
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+				ctx.ClosePopup(layersPopup);
 		}
 		// U22(用户 §5.5「所有视口类窗口都要有坐标系来表明方向」):主视口右下角
 		// 半透明三轴指示(X 红 / Y 绿 / Z 蓝),朝向取**当前画面用的相机基** ——
