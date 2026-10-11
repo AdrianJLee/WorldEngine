@@ -3,7 +3,11 @@
   "$layer": "engine",
   "$language": "zh-CN",
   "$owns": [
-    "schema."
+    "schema.",
+    "schema.component.AudioSourceComponent",
+    "schema.component.AudioSourceComponent.doc",
+    "schema.component.AudioListenerComponent",
+    "schema.component.AudioListenerComponent.doc"
   ],
   "schema.component.UUIDComponent": "UUID 组件",
   "schema.component.TagComponent": "标签组件",
@@ -166,5 +170,9 @@
   "schema.component.SphereCollider3DComponent.doc": "球形状:Radius 为本地单位,Offset 是本地偏移(不缩放)。",
   "schema.component.CapsuleCollider3DComponent.doc": "沿实体本地 Y 轴的胶囊:HalfHeight 是圆柱段半高(不含两端半球)。",
   "schema.component.MeshCollider3DComponent.doc": "按网格求交的碰撞体:Mesh 为空时用实体 MeshRenderer 的网格;StaticTriangles 只能用于静态刚体;编辑器不画轮廓。",
-  "schema.component.SampleDataComponent.doc": "Game 模块的示例组件(用来验证 schema 驱动编辑):八个字段覆盖 bool/整数/浮点/向量/有界文本。"
+  "schema.component.SampleDataComponent.doc": "Game 模块的示例组件(用来验证 schema 驱动编辑):八个字段覆盖 bool/整数/浮点/向量/有界文本。",
+  "schema.component.AudioSourceComponent": "音频源组件 (Audio Source)",
+  "schema.component.AudioSourceComponent.doc": "3D/2D 音频发声源：发声事件 (.wsound) 或剪辑，支持 3D 距离衰减与空间声像定位。",
+  "schema.component.AudioListenerComponent": "音频监听者 (Audio Listener)",
+  "schema.component.AudioListenerComponent.doc": "音频监听者：接收世界中 3D 空间声音并输出到声卡 (通常挂载在主相机上)。"
 }

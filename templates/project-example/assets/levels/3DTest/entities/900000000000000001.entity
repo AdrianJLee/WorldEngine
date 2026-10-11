@@ -22,3 +22,6 @@ Entity:
     FixedAspectRatio: false
   World::LevelEntityComponent:
     DataLayerMask: 1
+  World::AudioListenerComponent:
+    Active: true
+    VolumeScale: 1.0

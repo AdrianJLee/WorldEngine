@@ -249,6 +249,7 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		// M5:GameUI 可视化设计器(config 表已声明 ui_designer;这里登记实例)。
 		m_PanelRegistry.emplace("ui_designer", std::make_unique<UiDesignerPanel>());
 		m_PanelRegistry.emplace("audio_mixer", std::make_unique<AudioMixerPanel>());
+		m_PanelRegistry.emplace("sound_event_editor", std::make_unique<SoundEventEditorPanel>());
 		m_PanelRegistry.emplace("ai_audio_studio", std::make_unique<AiAudioStudioPanel>());
 		// PLUG-T3:插件管理器面板(数据/动作都走 EditorShell → EditorLayer;项目形态才注册)。
 		if (!m_LauncherMode)

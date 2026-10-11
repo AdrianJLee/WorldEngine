@@ -15,3 +15,11 @@ Entity:
     Mesh: ""
   World::LevelEntityComponent:
     DataLayerMask: 1
+  World::AudioSourceComponent:
+    Volume: 1.0
+    Pitch: 1.0
+    MinDistance: 2.0
+    MaxDistance: 15.0
+    Spatial3D: true
+    Looping: true
+    PlayOnAwake: true

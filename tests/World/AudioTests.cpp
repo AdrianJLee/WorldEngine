@@ -207,10 +207,11 @@ static void TestCookerRoundtrip()
 static void TestComponentLayout()
 {
 	std::cout << "[Test] AudioComponent Layout Static Asserts..." << std::endl;
-	static_assert(sizeof(World::AudioSourceComponent) == 64, "AudioSourceComponent must be 64B");
+	static_assert(sizeof(World::AudioSourceComponent) == 40, "AudioSourceComponent must be 40B");
+	static_assert(sizeof(World::AudioListenerComponent) == 8, "AudioListenerComponent must be 8B");
 	static_assert(std::is_trivially_copyable_v<World::AudioSourceComponent>, "Must be trivially copyable");
 
-	static_assert(sizeof(World::AudioListenerComponent) == 32, "AudioListenerComponent must be 32B");
+	static_assert(sizeof(World::AudioListenerComponent) == 8, "AudioListenerComponent must be 32B");
 	static_assert(std::is_trivially_copyable_v<World::AudioListenerComponent>, "Must be trivially copyable");
 
 	static_assert(sizeof(World::AudioZoneComponent) == 32, "AudioZoneComponent must be 32B");

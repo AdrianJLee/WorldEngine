@@ -32,6 +32,8 @@ const TypeSchema& WeSchemaOf_JointComponent();
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent();
 const TypeSchema& WeSchemaOf_PartitionVolumeComponent();
 const TypeSchema& WeSchemaOf_LevelEntityComponent();
+const TypeSchema& WeSchemaOf_AudioSourceComponent();
+const TypeSchema& WeSchemaOf_AudioListenerComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -3517,6 +3519,369 @@ struct GeneratedAccess<World::LevelEntityComponent>
 };
 
 template <>
+struct GeneratedAccess<World::AudioSourceComponent>
+{
+    static Value Get_Sound(const void* instance)
+    {
+        const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Sound)>>::GetPath(self->Sound));
+    }
+    static void Set_Sound(void* instance, const Value& value)
+    {
+        World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Sound)>>::SetPath(self->Sound, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_Sound(const void* instance)
+    {
+        const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Sound)>>::GetIdentity(self->Sound);
+    }
+    static void SetAssetIdentity_Sound(void* instance, uint64_t identity)
+    {
+        World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Sound)>>::SetIdentity(self->Sound, identity);
+    }
+    static Value Get_Volume(const void* instance)
+    {
+        const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
+        return Value(self->Volume);
+    }
+    static void Set_Volume(void* instance, const Value& value)
+    {
+        World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
+        self->Volume = std::get<float>(value);
+    }
+    static Value Get_Pitch(const void* instance)
+    {
+        const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
+        return Value(self->Pitch);
+    }
+    static void Set_Pitch(void* instance, const Value& value)
+    {
+        World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
+        self->Pitch = std::get<float>(value);
+    }
+    static Value Get_MinDistance(const void* instance)
+    {
+        const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
+        return Value(self->MinDistance);
+    }
+    static void Set_MinDistance(void* instance, const Value& value)
+    {
+        World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
+        self->MinDistance = std::get<float>(value);
+    }
+    static Value Get_MaxDistance(const void* instance)
+    {
+        const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
+        return Value(self->MaxDistance);
+    }
+    static void Set_MaxDistance(void* instance, const Value& value)
+    {
+        World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
+        self->MaxDistance = std::get<float>(value);
+    }
+    static Value Get_Spatial3D(const void* instance)
+    {
+        const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
+        return Value(self->Spatial3D);
+    }
+    static void Set_Spatial3D(void* instance, const Value& value)
+    {
+        World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
+        self->Spatial3D = std::get<bool>(value);
+    }
+    static Value Get_Looping(const void* instance)
+    {
+        const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
+        return Value(self->Looping);
+    }
+    static void Set_Looping(void* instance, const Value& value)
+    {
+        World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
+        self->Looping = std::get<bool>(value);
+    }
+    static Value Get_PlayOnAwake(const void* instance)
+    {
+        const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
+        return Value(self->PlayOnAwake);
+    }
+    static void Set_PlayOnAwake(void* instance, const Value& value)
+    {
+        World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
+        self->PlayOnAwake = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Sound()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x72F7C7D8C2E420B4ull },
+            "Sound",
+            Kind::Asset,
+            &Get_Sound,
+            &Set_Sound,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "SoundEvent",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Sound event or audio asset to play.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_Sound,
+            &SetAssetIdentity_Sound,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Volume()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4F7D4819B41B30EFull },
+            "Volume",
+            Kind::Float,
+            &Get_Volume,
+            &Set_Volume,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(4.000000f), false, false, "Playback volume gain multiplier (1.0 = 0dB).", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Pitch()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5EDFDD340C899E51ull },
+            "Pitch",
+            Kind::Float,
+            &Get_Pitch,
+            &Set_Pitch,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(4.000000f), false, false, "Playback pitch multiplier (1.0 = normal, 2.0 = +1 octave).", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MinDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7B2F527D210A3730ull },
+            "MinDistance",
+            Kind::Float,
+            &Get_MinDistance,
+            &Set_MinDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(1000.000000f), false, false, "Minimum distance in meters where sound plays at full volume.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2A4FC1A9C3DAF116ull },
+            "MaxDistance",
+            Kind::Float,
+            &Get_MaxDistance,
+            &Set_MaxDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.500000f), std::optional<float>(5000.000000f), false, false, "Maximum distance in meters where sound fades out completely.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Spatial3D()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xAFFD2F0A81245BBCull },
+            "Spatial3D",
+            Kind::Bool,
+            &Get_Spatial3D,
+            &Set_Spatial3D,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Enable 3D spatial positioning and distance attenuation.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Looping()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFE5414E10253D86Dull },
+            "Looping",
+            Kind::Bool,
+            &Get_Looping,
+            &Set_Looping,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the sound repeats continuously.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_PlayOnAwake()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xDE44F5F160798805ull },
+            "PlayOnAwake",
+            Kind::Bool,
+            &Get_PlayOnAwake,
+            &Set_PlayOnAwake,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically start playing when scene starts.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::AudioSourceComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::AudioSourceComponent" },
+            "AudioSourceComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::AudioSourceComponent),
+            TypeCategory::Component,
+            {
+                Field_Sound(),
+                Field_Volume(),
+                Field_Pitch(),
+                Field_MinDistance(),
+                Field_MaxDistance(),
+                Field_Spatial3D(),
+                Field_Looping(),
+                Field_PlayOnAwake(),
+            },
+            &StorageBindingOf(),
+            "Audio",
+            "3D/2D Audio Source: plays a .wsound event or audio clip with distance attenuation and spatial panning.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::AudioListenerComponent>
+{
+    static Value Get_VolumeScale(const void* instance)
+    {
+        const World::AudioListenerComponent* self = static_cast<const World::AudioListenerComponent*>(instance);
+        return Value(self->VolumeScale);
+    }
+    static void Set_VolumeScale(void* instance, const Value& value)
+    {
+        World::AudioListenerComponent* self = static_cast<World::AudioListenerComponent*>(instance);
+        self->VolumeScale = std::get<float>(value);
+    }
+    static Value Get_Active(const void* instance)
+    {
+        const World::AudioListenerComponent* self = static_cast<const World::AudioListenerComponent*>(instance);
+        return Value(self->Active);
+    }
+    static void Set_Active(void* instance, const Value& value)
+    {
+        World::AudioListenerComponent* self = static_cast<World::AudioListenerComponent*>(instance);
+        self->Active = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_VolumeScale()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x34C0F843A0CBBDBCull },
+            "VolumeScale",
+            Kind::Float,
+            &Get_VolumeScale,
+            &Set_VolumeScale,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(2.000000f), false, false, "Master volume scaling factor for this listener.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Active()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x63B34C1EB594A58Eull },
+            "Active",
+            Kind::Bool,
+            &Get_Active,
+            &Set_Active,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this listener actively receives sound.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::AudioListenerComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::AudioListenerComponent" },
+            "AudioListenerComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::AudioListenerComponent),
+            TypeCategory::Component,
+            {
+                Field_VolumeScale(),
+                Field_Active(),
+            },
+            &StorageBindingOf(),
+            "Audio",
+            "Audio Listener: receives 3D spatial sound from the scene (usually attached to the Camera).",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -3963,6 +4328,8 @@ const TypeSchema& WeSchemaOf_JointComponent() { return GeneratedAccess<World::Jo
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent() { return GeneratedAccess<World::MeshCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PartitionVolumeComponent() { return GeneratedAccess<World::PartitionVolumeComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_LevelEntityComponent() { return GeneratedAccess<World::LevelEntityComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_AudioSourceComponent() { return GeneratedAccess<World::AudioSourceComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_AudioListenerComponent() { return GeneratedAccess<World::AudioListenerComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -4006,6 +4373,8 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_MeshCollider3DComponent(),
 			WeSchemaOf_PartitionVolumeComponent(),
 			WeSchemaOf_LevelEntityComponent(),
+			WeSchemaOf_AudioSourceComponent(),
+			WeSchemaOf_AudioListenerComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

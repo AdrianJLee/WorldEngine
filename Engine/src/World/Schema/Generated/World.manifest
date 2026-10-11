@@ -22,6 +22,8 @@ struct World::JointComponent
 struct World::MeshCollider3DComponent
 struct World::PartitionVolumeComponent
 struct World::LevelEntityComponent
+struct World::AudioSourceComponent
+struct World::AudioListenerComponent
 struct World::UUID
 struct World::CameraSettings
 enum World::MeshRendererComponent::PrimitiveShape

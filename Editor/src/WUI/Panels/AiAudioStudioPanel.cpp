@@ -1,3 +1,6 @@
+#include "World/Audio/AudioCooker.h"
+#include <filesystem>
+#include <fstream>
 #include "wldpch.h"
 #include "WUI/Panels/AiAudioStudioPanel.h"
 #include "World/Audio/AudioSystem.h"
@@ -218,7 +221,50 @@ namespace World
 
 		if (Wui::Button(ctx, Wui::HashId("ai.btn.bake"), btnBake, "一键烘焙入库 (.waudio + .wsound + .wlip)", theme))
 		{
-			m_StatusFeedback = "已烘焙资产: assets/audio/dialogues/line_001.waudioc 及口型数据 .wlip (自动关联 Voice 总线)!";
+			std::string character = kCards[m_SelectedTimbreIndex % 5].id;
+			Audio::VoiceEmotion emo = static_cast<Audio::VoiceEmotion>(m_SelectedEmotionIndex);
+			auto result = studio.SynthesizeLine(character, m_DialogueText, emo, m_EmotionIntensity);
+
+			std::filesystem::path genDir = "assets/audio/generated";
+			std::error_code ec;
+			std::filesystem::create_directories(genDir, ec);
+
+			std::string baseName = character + "_voice_line";
+			std::filesystem::path waudioPath = genDir / (baseName + ".waudio");
+			std::filesystem::path wsoundPath = genDir / (baseName + ".wsound");
+			std::filesystem::path wlipPath = genDir / (baseName + ".wlip");
+
+			Audio::AudioCookSettings settings;
+			settings.format = Audio::AudioFormat::PcmFloat32;
+			auto cookedBytes = Audio::AudioCooker::CookToBinary(result.audio, settings);
+			std::ofstream outCooked(waudioPath, std::ios::binary);
+			if (outCooked.is_open())
+			{
+				outCooked.write(reinterpret_cast<const char*>(cookedBytes.data()), cookedBytes.size());
+			}
+
+			Audio::SoundEvent evt(baseName, Audio::kBusVoice);
+			evt.GetSpatial().is3D = false;
+			evt.GetRootContainer()->variations.push_back({ waudioPath.generic_string(), 1.0f });
+			std::ofstream outSound(wsoundPath);
+			if (outSound.is_open())
+			{
+				outSound << evt.SerializeYaml();
+			}
+
+			std::ofstream outLip(wlipPath);
+			if (outLip.is_open())
+			{
+				outLip << "# Lip-Sync Viseme Phoneme Alignments\n";
+				for (const auto& pv : result.lipSyncTrack)
+				{
+					outLip << pv.timeSeconds << " " << pv.phoneme << " " << pv.visemeWeight << "\n";
+				}
+			}
+
+			audio.RegisterSoundEvent(evt);
+			audio.RegisterAudioBuffer(waudioPath.generic_string(), std::make_shared<Audio::AudioBuffer>(result.audio));
+			m_StatusFeedback = "已成功烘焙产物到: " + wsoundPath.generic_string() + " 及口型数据 " + wlipPath.generic_string();
 		}
 
 		if (!m_StatusFeedback.empty())

@@ -22,6 +22,7 @@
 #include "WUI/Panels/PluginPanel.h"
 #include "WUI/Panels/UiDesignerPanel.h"
 #include "WUI/Panels/AudioMixerPanel.h"
+#include "WUI/Panels/SoundEventEditorPanel.h"
 #include "WUI/Panels/AiAudioStudioPanel.h"
 #include "WUI/Shell/PluginEditorHost.h"
 #include "WUI/Shell/FloatWindowHost.h"

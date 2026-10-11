@@ -1,3 +1,4 @@
+#include "World/Audio/AudioSystem.h"
 #include "PropertiesPanel_Internal.h"
 
 namespace World
@@ -36,6 +37,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 		// 自定义检查器:Primary / Fixed Aspect Ratio + 投影类型下拉 + 对应参数组。
 		else if (schema.Id.Name == "World::CameraComponent")
 			height = DrawCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::AudioSourceComponent")
+			height = DrawAudioSourceInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		// 自定义检查器:关卡数据层归属(勾选替代裸掩码数字);Play/Simulate 只读时退回普通行。
 		else if (schema.Id.Name == "World::LevelEntityComponent" && !m_ReadOnly)
 			height = DrawLevelEntityInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
@@ -460,4 +463,26 @@ float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiR
 		return y + 2.0f;
 	}
 
+
+float PropertiesPanel::DrawAudioSourceInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	const Wui::WuiRect btnPlay { rect.X + 12.0f, y, 140.0f, 24.0f };
+	const Wui::WuiRect btnStop { rect.X + 158.0f, y, 80.0f, 24.0f };
+
+	if (Wui::Button(ctx, Wui::HashId("prop.audiosrc.play"), btnPlay, "▶ 实时试听此声源", theme))
+	{
+		Audio::AudioSystem::Get().PostEvent("footstep_player", glm::vec3(0.0f));
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.audiosrc.stop"), btnStop, "■ 停止", theme))
+	{
+		Audio::AudioSystem::Get().StopAll(0.05f);
+	}
+	return (y + 30.0f) - rect.Y;
+}
 }

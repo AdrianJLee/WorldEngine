@@ -997,6 +997,27 @@ namespace World
 										sphere->Radius, axis, color, thickness, &overlayMin, &overlayMax);
 							drew = true;
 						}
+						if (const auto* audioSrc = registry.try_get<AudioSourceComponent>(handle))
+						{
+							if (audioSrc->Spatial3D)
+							{
+								if (audioSrc->MinDistance > 0.0f)
+								{
+									const Wui::WuiColor minColor { 0.20f, 0.85f, 0.95f, 0.85f };
+									for (int axis = 0; axis < 3; ++axis)
+										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+											audioSrc->MinDistance, axis, minColor, 1.2f, &overlayMin, &overlayMax);
+								}
+								if (audioSrc->MaxDistance > audioSrc->MinDistance)
+								{
+									const Wui::WuiColor maxColor { 0.35f, 0.50f, 0.95f, 0.65f };
+									for (int axis = 0; axis < 3; ++axis)
+										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+											audioSrc->MaxDistance, axis, maxColor, 1.0f, &overlayMin, &overlayMax);
+								}
+								drew = true;
+							}
+						}
 						if (const auto* capsule = registry.try_get<CapsuleCollider3DComponent>(handle))
 						{
 							// 近似:上下两个端面圆 + 两条母线(沿本地 Y 轴)。

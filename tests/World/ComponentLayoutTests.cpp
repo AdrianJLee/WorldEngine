@@ -68,6 +68,8 @@ namespace
 		{ "World::MeshCollider3DComponent",      24 },
 		{ "World::PartitionVolumeComponent",     24 },
 		{ "World::LevelEntityComponent",          4 },
+		{ "World::AudioSourceComponent",         40 },
+		{ "World::AudioListenerComponent",        8 },
 	};
 
 	// 非 schema 组件:不在注册表里,预算与豁免由 ComponentLayoutBudget.h 的编译期断言覆盖。

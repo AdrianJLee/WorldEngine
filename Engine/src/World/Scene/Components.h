@@ -807,4 +807,59 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+
+	struct AudioSourceComponent
+	{
+		AssetRef Sound;
+		float Volume = 1.0f;
+		float Pitch = 1.0f;
+		float MinDistance = 1.0f;
+		float MaxDistance = 25.0f;
+		bool Spatial3D = true;
+		bool Looping = false;
+		bool PlayOnAwake = true;
+		uint8_t _Padding = 0;
+
+		AudioSourceComponent() = default;
+
+		WE_SCHEMA_BODY(World, AudioSourceComponent, Component)
+			WE_SCHEMA_META(Category("Audio"),
+				Doc("3D/2D Audio Source: plays a .wsound event or audio clip with distance attenuation and spatial panning."))
+			WE_FIELD(Sound, Asset, Of("SoundEvent"),
+				Doc("Sound event or audio asset to play."));
+			WE_FIELD(Volume, Float, Range(0.0f, 4.0f),
+				Doc("Playback volume gain multiplier (1.0 = 0dB)."));
+			WE_FIELD(Pitch, Float, Range(0.1f, 4.0f),
+				Doc("Playback pitch multiplier (1.0 = normal, 2.0 = +1 octave)."));
+			WE_FIELD(MinDistance, Float, Range(0.1f, 1000.0f),
+				Doc("Minimum distance in meters where sound plays at full volume."));
+			WE_FIELD(MaxDistance, Float, Range(0.5f, 5000.0f),
+				Doc("Maximum distance in meters where sound fades out completely."));
+			WE_FIELD(Spatial3D, Bool,
+				Doc("Enable 3D spatial positioning and distance attenuation."));
+			WE_FIELD(Looping, Bool,
+				Doc("Whether the sound repeats continuously."));
+			WE_FIELD(PlayOnAwake, Bool,
+				Doc("Automatically start playing when scene starts."));
+		WE_SCHEMA_END
+	};
+
+	struct AudioListenerComponent
+	{
+		float VolumeScale = 1.0f;
+		bool Active = true;
+		uint8_t _Padding[3] { 0, 0, 0 };
+
+		AudioListenerComponent() = default;
+
+		WE_SCHEMA_BODY(World, AudioListenerComponent, Component)
+			WE_SCHEMA_META(Category("Audio"),
+				Doc("Audio Listener: receives 3D spatial sound from the scene (usually attached to the Camera)."))
+			WE_FIELD(VolumeScale, Float, Range(0.0f, 2.0f),
+				Doc("Master volume scaling factor for this listener."));
+			WE_FIELD(Active, Bool,
+				Doc("Whether this listener actively receives sound."));
+		WE_SCHEMA_END
+	};
+
 }
