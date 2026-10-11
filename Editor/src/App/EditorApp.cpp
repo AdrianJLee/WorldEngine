@@ -267,8 +267,23 @@ namespace World
 			std::filesystem::path(WLD_WORLD_DIR) / "assets" / "localization", 0);
 		World::Wui::RegisterLocalizationLayer("editor",
 			std::filesystem::path(WLD_EDITOR_DIR) / "assets" / "localization", 100);
-		World::Wui::RegisterLocalizationLayer("project",
-			World::Paths::ProjectFile("assets/localization"), 200);
+
+		// 只有在明确挂载了具体项目工程且项目本地化目录存在时才注册 project 层;
+		// 处于纯编辑器模式/启动器模式时绝不注册假层，绝不制造“本地化层目录缺失”假警报。
+		std::filesystem::path foundManifest;
+		if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &foundManifest))
+		{
+			World::Asset::ProjectManifest manifest;
+			std::string error;
+			if (World::Asset::ProjectManifest::Load(foundManifest, &manifest, &error))
+			{
+				const auto projLocDir = manifest.ResolveContentRoot(foundManifest) / "localization";
+				if (std::filesystem::is_directory(projLocDir))
+				{
+					World::Wui::RegisterLocalizationLayer("project", projLocDir, 200);
+				}
+			}
+		}
 		// 本机状态目录(编辑器偏好/布局/窗口/最近使用):不入库;首次运行自动创建。
 		std::filesystem::create_directories(std::filesystem::path(WLD_LOCAL_DIR));
 		World::Editor::EditorPreferences::Get().Load(

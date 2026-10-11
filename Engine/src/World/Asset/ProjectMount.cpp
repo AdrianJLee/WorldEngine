@@ -61,12 +61,8 @@ namespace World::Asset
 		}
 		else
 		{
-			// P4-U12:没有清单 = 什么都不挂。旧开发形态(直接跑 build 里的 Runtime.exe,
-			// 从内容根猜 + 扫 cwd/content/*.wpak)已移除:内容根与包
-			// 只由项目清单说了算。报错要能直接指出该去哪儿启动。
-			WLD_CORE_ERROR("No 'project.we.yaml' under '{0}'; nothing mounted. Run the runtime "
-				"from a packaged directory (manifest next to the executable) or from the "
-				"repository root.", std::filesystem::current_path().string());
+			// 处于纯编辑器/启动器模式(无项目清单)，清晰友好告知状态，不以错误刷屏
+			WLD_CORE_INFO("[mount] 当前处于独立编辑器模式 (未挂载项目工程，可通过启动器向导新建或打开项目)");
 		}
 
 		// 着色器烘焙产物解析:发行形态优先读包内 cooked 产物(不依赖源码树/编译器),
