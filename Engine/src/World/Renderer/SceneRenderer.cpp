@@ -1670,64 +1670,121 @@ namespace World
 			return;
 
 		const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
-		// 大视场覆盖半径 240 米，主格 10m，近处细格 1m
-		constexpr float kMaxRadius = 240.0f;
-		constexpr float kMajorCellSize = 10.0f;
-		constexpr float kMinorCellSize = 1.0f;
+		const glm::vec3 camForward = -glm::normalize(glm::vec3(cameraTransform[2]));
 
-		const float startX = std::floor((camPos.x - kMaxRadius) / kMajorCellSize) * kMajorCellSize;
-		const float endX = std::ceil((camPos.x + kMaxRadius) / kMajorCellSize) * kMajorCellSize;
-		const float startZ = std::floor((camPos.z - kMaxRadius) / kMajorCellSize) * kMajorCellSize;
-		const float endZ = std::ceil((camPos.z + kMaxRadius) / kMajorCellSize) * kMajorCellSize;
+		// 1. 动态自适应覆盖半径: 根据相机高度与视距自适应扩展，拉远缩小时平滑扩大至 600m ~ 1500m
+		const float camHeight = std::abs(camPos.y);
+		const float dynamicRadius = std::clamp(350.0f + camHeight * 5.0f, 400.0f, 1500.0f);
 
-		// 10m 主网格线（平滑边缘淡出，远景融入天空雾，绝无黑地截断）
-		for (float x = startX; x <= endX + 0.01f; x += kMajorCellSize)
+		// 2. 视线前向投影偏移: 当相机平视或俯视时，将网格重心沿视线水平前推，确保前方地平线深处完全被地网铺满
+		const glm::vec2 horizForward = glm::length(glm::vec2(camForward.x, camForward.z)) > 1e-4f
+			? glm::normalize(glm::vec2(camForward.x, camForward.z))
+			: glm::vec2(0.0f, -1.0f);
+		const float forwardBias = dynamicRadius * 0.35f;
+		const glm::vec2 gridCenter = glm::vec2(camPos.x, camPos.z) + horizForward * forwardBias;
+
+		// 3. 多级 LOD 刻度 (宏观 50m/100m + 中景 10m + 近景 1m)，兼顾地平线铺满与防摩尔纹
+		const float macroStep = (dynamicRadius > 800.0f) ? 100.0f : 50.0f;
+		constexpr float kMajorStep = 10.0f;
+		constexpr float kMinorStep = 1.0f;
+
+		// ------------------ LOD 2: 宏观大网格 (覆盖至地平线 1000m~1500m 极远处) ------------------
 		{
-			const float distRatio = std::min(1.0f, std::abs(x - camPos.x) / kMaxRadius);
-			const float alpha = (1.0f - distRatio * distRatio) * 0.35f;
-			if (alpha <= 0.01f) continue;
-			const bool isZAxis = (std::abs(x) < 0.01f);
-			const glm::vec4 color = isZAxis
-				? glm::vec4(0.38f, 0.48f, 0.70f, 0.55f) // Z 轴微弱暗蓝基准线
-				: glm::vec4(0.52f, 0.60f, 0.70f, alpha);
-			Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, startZ), glm::vec3(x, 0.0f, endZ), color);
+			const float startX = std::floor((gridCenter.x - dynamicRadius) / macroStep) * macroStep;
+			const float endX = std::ceil((gridCenter.x + dynamicRadius) / macroStep) * macroStep;
+			const float startZ = std::floor((gridCenter.y - dynamicRadius) / macroStep) * macroStep;
+			const float endZ = std::ceil((gridCenter.y + dynamicRadius) / macroStep) * macroStep;
+
+			for (float x = startX; x <= endX + 0.01f; x += macroStep)
+			{
+				const float dist = std::abs(x - gridCenter.x);
+				const float normDist = dist / dynamicRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.28f;
+				if (alpha <= 0.01f) continue;
+				const bool isZAxis = (std::abs(x) < 0.01f);
+				const glm::vec4 color = isZAxis
+					? glm::vec4(0.38f, 0.48f, 0.70f, 0.55f) // Z 轴微弱暗蓝
+					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
+				Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, startZ), glm::vec3(x, 0.0f, endZ), color);
+			}
+			for (float z = startZ; z <= endZ + 0.01f; z += macroStep)
+			{
+				const float dist = std::abs(z - gridCenter.y);
+				const float normDist = dist / dynamicRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.28f;
+				if (alpha <= 0.01f) continue;
+				const bool isXAxis = (std::abs(z) < 0.01f);
+				const glm::vec4 color = isXAxis
+					? glm::vec4(0.68f, 0.38f, 0.38f, 0.55f) // X 轴微弱暗红
+					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
+				Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z), color);
+			}
 		}
-		for (float z = startZ; z <= endZ + 0.01f; z += kMajorCellSize)
+
+		// ------------------ LOD 1: 中景 10m 主网格 (覆盖 350m 范围) ------------------
 		{
-			const float distRatio = std::min(1.0f, std::abs(z - camPos.z) / kMaxRadius);
-			const float alpha = (1.0f - distRatio * distRatio) * 0.35f;
-			if (alpha <= 0.01f) continue;
-			const bool isXAxis = (std::abs(z) < 0.01f);
-			const glm::vec4 color = isXAxis
-				? glm::vec4(0.68f, 0.38f, 0.38f, 0.55f) // X 轴微弱暗红基准线
-				: glm::vec4(0.52f, 0.60f, 0.70f, alpha);
-			Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z), color);
+			const float midRadius = std::min(dynamicRadius * 0.55f, 350.0f);
+			const float startX = std::floor((camPos.x - midRadius) / kMajorStep) * kMajorStep;
+			const float endX = std::ceil((camPos.x + midRadius) / kMajorStep) * kMajorStep;
+			const float startZ = std::floor((camPos.z - midRadius) / kMajorStep) * kMajorStep;
+			const float endZ = std::ceil((camPos.z + midRadius) / kMajorStep) * kMajorStep;
+
+			for (float x = startX; x <= endX + 0.01f; x += kMajorStep)
+			{
+				if (std::fmod(std::abs(x), macroStep) < 0.01f) continue; // 避免与大线重叠
+				const float dist = std::abs(x - camPos.x);
+				const float normDist = dist / midRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.25f;
+				if (alpha <= 0.01f) continue;
+				const bool isZAxis = (std::abs(x) < 0.01f);
+				const glm::vec4 color = isZAxis
+					? glm::vec4(0.38f, 0.48f, 0.70f, 0.55f)
+					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
+				Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, startZ), glm::vec3(x, 0.0f, endZ), color);
+			}
+			for (float z = startZ; z <= endZ + 0.01f; z += kMajorStep)
+			{
+				if (std::fmod(std::abs(z), macroStep) < 0.01f) continue;
+				const float dist = std::abs(z - camPos.z);
+				const float normDist = dist / midRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.25f;
+				if (alpha <= 0.01f) continue;
+				const bool isXAxis = (std::abs(z) < 0.01f);
+				const glm::vec4 color = isXAxis
+					? glm::vec4(0.68f, 0.38f, 0.38f, 0.55f)
+					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
+				Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z), color);
+			}
 		}
 
-		// 45 米近处 1m 细网格（细致辅助摆放与对齐，远处收敛防摩尔纹）
-		constexpr float kMinorRadius = 45.0f;
-		const float minorStartX = std::floor((camPos.x - kMinorRadius) / kMinorCellSize) * kMinorCellSize;
-		const float minorEndX = std::ceil((camPos.x + kMinorRadius) / kMinorCellSize) * kMinorCellSize;
-		const float minorStartZ = std::floor((camPos.z - kMinorRadius) / kMinorCellSize) * kMinorCellSize;
-		const float minorEndZ = std::ceil((camPos.z + kMinorRadius) / kMinorCellSize) * kMinorCellSize;
+		// ------------------ LOD 0: 近处 1m 细网格 (50m 辅助对齐) ------------------
+		{
+			constexpr float kMinorRadius = 50.0f;
+			const float startX = std::floor((camPos.x - kMinorRadius) / kMinorStep) * kMinorStep;
+			const float endX = std::ceil((camPos.x + kMinorRadius) / kMinorStep) * kMinorStep;
+			const float startZ = std::floor((camPos.z - kMinorRadius) / kMinorStep) * kMinorStep;
+			const float endZ = std::ceil((camPos.z + kMinorRadius) / kMinorStep) * kMinorStep;
 
-		for (float x = minorStartX; x <= minorEndX + 0.01f; x += kMinorCellSize)
-		{
-			if (std::fmod(std::abs(x), kMajorCellSize) < 0.01f) continue; // 避开主线
-			const float distRatio = std::min(1.0f, std::abs(x - camPos.x) / kMinorRadius);
-			const float alpha = (1.0f - distRatio * distRatio) * 0.18f;
-			if (alpha <= 0.01f) continue;
-			Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, minorStartZ), glm::vec3(x, 0.0f, minorEndZ),
-				glm::vec4(0.42f, 0.50f, 0.60f, alpha));
-		}
-		for (float z = minorStartZ; z <= minorEndZ + 0.01f; z += kMinorCellSize)
-		{
-			if (std::fmod(std::abs(z), kMajorCellSize) < 0.01f) continue;
-			const float distRatio = std::min(1.0f, std::abs(z - camPos.z) / kMinorRadius);
-			const float alpha = (1.0f - distRatio * distRatio) * 0.18f;
-			if (alpha <= 0.01f) continue;
-			Renderer2D::DrawLineCore(glm::vec3(minorStartX, 0.0f, z), glm::vec3(minorEndX, 0.0f, z),
-				glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+			for (float x = startX; x <= endX + 0.01f; x += kMinorStep)
+			{
+				if (std::fmod(std::abs(x), kMajorStep) < 0.01f) continue;
+				const float dist = std::abs(x - camPos.x);
+				const float normDist = dist / kMinorRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.16f;
+				if (alpha <= 0.01f) continue;
+				Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, startZ), glm::vec3(x, 0.0f, endZ),
+					glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+			}
+			for (float z = startZ; z <= endZ + 0.01f; z += kMinorStep)
+			{
+				if (std::fmod(std::abs(z), kMajorStep) < 0.01f) continue;
+				const float dist = std::abs(z - camPos.z);
+				const float normDist = dist / kMinorRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.16f;
+				if (alpha <= 0.01f) continue;
+				Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z),
+					glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+			}
 		}
 	}
 
