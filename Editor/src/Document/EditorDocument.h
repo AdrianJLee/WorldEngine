@@ -35,6 +35,10 @@ namespace World
 
 		// 当前文档是否是 Level 2.0 关卡包(决定"关卡"相关面板/数据层开关是否可用)。
 		bool IsLevelPackage() const { return !m_LevelPackagePath.empty(); }
+		const Level::LevelPartitionSettings& GetPartitionSettings() const { return m_PartitionSettings; }
+		Level::LevelPartitionSettings& MutablePartitionSettings() { return m_PartitionSettings; }
+		bool SavePartitionSettings(std::string* error = nullptr);
+
 		const std::vector<Level::DataLayerDefinition>& GetDataLayers() const { return m_DataLayers; }
 		// 可编辑的数据层定义(数据层编辑 UI 的写入面)。显式拿到可变引用 ⇒ 面板不必走后门,
 		// 也提示调用方:改完要调 SaveDataLayers 才会落盘。
@@ -62,5 +66,6 @@ namespace World
 		// 保存时按 UUID 对齐场景实体后写回(而不是把整包推倒重来)。
 		std::filesystem::path m_LevelPackagePath;
 		std::vector<Level::DataLayerDefinition> m_DataLayers;
+		Level::LevelPartitionSettings m_PartitionSettings;
 	};
 }

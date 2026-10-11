@@ -515,6 +515,32 @@ bool EditorShell::SaveProjectPhysicsSettings(const Asset::PhysicsSettingsData& s
 	}
 
 
+bool EditorShell::SaveProjectStreamingSettings(const Asset::StreamingSettings& settings, std::string* message){
+		std::filesystem::path manifestPath;
+		if (!Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+		{
+			if (message) *message = "找不到 project.we.yaml(工作目录下没有清单)";
+			return false;
+		}
+		Asset::ProjectManifest manifest;
+		std::string error;
+		if (!Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+		{
+			if (message) *message = "清单读取失败: " + error;
+			return false;
+		}
+		manifest.Streaming = settings;
+		if (!Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+		{
+			if (message) *message = "清单写入失败: " + error;
+			return false;
+		}
+		if (message)
+			*message = "已保存流送与空间分区设置到 " + manifestPath.filename().string();
+		return true;
+	}
+
+
 bool EditorShell::SaveProjectImportDefaults(const Asset::ModelImportSettings& settings, std::string* message){
 		// P4-U4:与渲染/物理同一套"回写清单"口径(Load → 只覆盖 imports → Save)。
 		// 额外一步:写进进程级默认,让**本次会话之后的新导入**立刻按新默认走。

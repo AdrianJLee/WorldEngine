@@ -66,6 +66,7 @@ namespace
 		{ "World::CapsuleCollider3DComponent",   20 },
 		{ "World::JointComponent",               56 },
 		{ "World::MeshCollider3DComponent",      24 },
+		{ "World::PartitionVolumeComponent",     24 },
 		{ "World::LevelEntityComponent",          4 },
 	};
 

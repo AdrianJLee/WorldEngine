@@ -29,13 +29,54 @@ namespace World
 			return "Front";
 		}
 
+		// Liang-Barsky 严格二维线段裁剪: 确保裁剪后线段严格保持原始斜率与方向, 绝不因轴向暴力 clamp 产生几何畸变
+		static bool ClipLineSegment2D(glm::vec2& p0, glm::vec2& p1, float minX, float maxX, float minY, float maxY)
+		{
+			float t0 = 0.0f, t1 = 1.0f;
+			const float dx = p1.x - p0.x;
+			const float dy = p1.y - p0.y;
+
+			const auto clipTest = [&](float p, float q) -> bool
+			{
+				if (p < 0.0f)
+				{
+					const float r = q / p;
+					if (r > t1) return false;
+					if (r > t0) t0 = r;
+				}
+				else if (p > 0.0f)
+				{
+					const float r = q / p;
+					if (r < t0) return false;
+					if (r < t1) t1 = r;
+				}
+				else if (q < 0.0f)
+				{
+					return false;
+				}
+				return true;
+			};
+
+			if (clipTest(-dx, p0.x - minX) &&
+				clipTest(dx, maxX - p0.x) &&
+				clipTest(-dy, p0.y - minY) &&
+				clipTest(dy, maxY - p0.y))
+			{
+				const glm::vec2 origP0 = p0;
+				p0 = origP0 + t0 * glm::vec2(dx, dy);
+				p1 = origP0 + t1 * glm::vec2(dx, dy);
+				return true;
+			}
+			return false;
+		}
+
 		// 投影 + 近平面裁剪 + 线段四边形:相机视锥等覆盖层线段共用。
 		void PushProjectedSegment(Wui::WuiContext& ctx, const glm::mat4& viewProjection,
 			const Wui::WuiRect& viewport, const glm::vec4& clipA, const glm::vec4& clipB,
 			const Wui::WuiColor& color, float thickness,
 			glm::vec2* boundsMin = nullptr, glm::vec2* boundsMax = nullptr)
 		{
-			constexpr float kMinW = 0.0001f;
+			constexpr float kMinW = 0.15f;
 			glm::vec4 a = clipA;
 			glm::vec4 b = clipB;
 			if (a.w < kMinW && b.w < kMinW)
@@ -56,33 +97,28 @@ namespace World
 				return glm::vec2 { viewport.X + (ndc.x + 1.0f) * 0.5f * viewport.W,
 					viewport.Y + (1.0f - ndc.y) * 0.5f * viewport.H };
 			};
-			const float pad = 10.0f * std::max(viewport.W, viewport.H);
-			const auto clampScreen = [&viewport, pad](const glm::vec2& point)
+			glm::vec2 from = project(a);
+			glm::vec2 to = project(b);
+
+			if (std::isnan(from.x) || std::isnan(from.y) || std::isnan(to.x) || std::isnan(to.y))
+				return;
+
+			// 使用 Liang-Barsky 严格保持几何斜率地裁剪至视口矩形
+			const float pad = 4.0f;
+			if (!ClipLineSegment2D(from, to, viewport.X - pad, viewport.X + viewport.W + pad,
+				viewport.Y - pad, viewport.Y + viewport.H + pad))
 			{
-				return glm::vec2 { glm::clamp(point.x, viewport.X - pad, viewport.X + viewport.W + pad),
-					glm::clamp(point.y, viewport.Y - pad, viewport.Y + viewport.H + pad) };
-			};
-			const glm::vec2 from = clampScreen(project(a));
-			const glm::vec2 to = clampScreen(project(b));
-			// 供"视锥覆盖范围"日志/自动化核对:统计端点与视口矩形的交叠范围(夹到视口内,
-			// 反映"用户在视口里能看到的这部分视锥"),而不是夹到 pad 之外的原始端点。
-			const auto clampToViewport = [&viewport](const glm::vec2& point)
-			{
-				return glm::vec2 { glm::clamp(point.x, viewport.X, viewport.X + viewport.W),
-					glm::clamp(point.y, viewport.Y, viewport.Y + viewport.H) };
-			};
-			const glm::vec2 visibleFrom = clampToViewport(from);
-			const glm::vec2 visibleTo = clampToViewport(to);
+				return;
+			}
+
 			if (boundsMin)
-				*boundsMin = glm::min(*boundsMin, glm::min(visibleFrom, visibleTo));
+				*boundsMin = glm::min(*boundsMin, glm::min(from, to));
 			if (boundsMax)
-				*boundsMax = glm::max(*boundsMax, glm::max(visibleFrom, visibleTo));
+				*boundsMax = glm::max(*boundsMax, glm::max(from, to));
 			const glm::vec2 delta = to - from;
 			const float length = glm::length(delta);
 			if (length < 0.5f)
 				return;
-			// P1c-W3.6:投影后的屏幕线段 = 一条旋转四边形,末段走库件 `Wui::LineSegment`
-			// (法线/半点偏移/顶点顺序/退化阈值与手写逐字段相同;投影/近平面裁剪/夹取仍在上面本函数里)。
 			Wui::LineSegment(ctx, from, to, color, thickness);
 		}
 
@@ -447,6 +483,8 @@ namespace World
 				}
 				ctx.RegisterOverlayRect(comboRect);
 			}
+
+
 
 			// 分割线
 			Wui::PanelBackground(ctx, { panel.X + 8.0f, rowY, panel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
@@ -1225,120 +1263,245 @@ namespace World
 			}
 		}
 
-		// ==================== 轨道二：世界分区系统 (World Partition / Streaming Grid) ====================
-		int32_t activeChunkX = 0;
-		int32_t activeChunkZ = 0;
-		size_t authoredChunkCount = 0;
-		if (m_ShowWorldPartition)
-		{
-			Wui::ClipScope partClip(ctx, sceneRect);
-			const float chunkSize = 64.0f;
-			activeChunkX = static_cast<int32_t>(std::floor(camPos.x / chunkSize));
-			activeChunkZ = static_cast<int32_t>(std::floor(camPos.z / chunkSize));
-
-			// 统计当前关卡在各 Chunk 的实体分布热度
-			std::unordered_map<int64_t, uint32_t> chunkEntityMap;
-			if (const Ref<Scene> activeScene = m_Host.GetActiveScene())
-			{
-				const entt::registry& reg = std::as_const(*activeScene).GetRegistry();
-				auto transformView = reg.view<TransformComponent>();
-				for (auto entity : transformView)
-				{
-					const auto& tc = transformView.get<TransformComponent>(entity);
-					const int32_t cx = static_cast<int32_t>(std::floor(tc.Location.x / chunkSize));
-					const int32_t cz = static_cast<int32_t>(std::floor(tc.Location.z / chunkSize));
-					const int64_t key = (static_cast<int64_t>(cx) << 32) ^ static_cast<uint32_t>(cz);
-					chunkEntityMap[key]++;
-				}
-			}
-			authoredChunkCount = chunkEntityMap.size();
-
-			// 1. 固定空间大棋盘 (Fixed Chessboard: 绝对空间网格, 不随相机跳动)
-			constexpr int32_t kGridRadius = 3;
-			const Wui::WuiColor chunkBorderColor { 0.40f, 0.50f, 0.65f, 0.22f };
-			const Wui::WuiColor activeChunkBorder { 0.20f, 0.90f, 0.85f, 0.90f };
-			const Wui::WuiColor authoredChunkBorder { 0.95f, 0.75f, 0.20f, 0.60f };
-
-			for (int32_t dx = -kGridRadius; dx <= kGridRadius; ++dx)
-			{
-				for (int32_t dz = -kGridRadius; dz <= kGridRadius; ++dz)
-				{
-					const int32_t cx = activeChunkX + dx;
-					const int32_t cz = activeChunkZ + dz;
-					const float minX = cx * chunkSize;
-					const float minZ = cz * chunkSize;
-					const float maxX = minX + chunkSize;
-					const float maxZ = minZ + chunkSize;
-
-					const bool isCurrent = (dx == 0 && dz == 0);
-					const int64_t key = (static_cast<int64_t>(cx) << 32) ^ static_cast<uint32_t>(cz);
-					const bool hasEntities = chunkEntityMap.find(key) != chunkEntityMap.end();
-
-					const glm::vec3 corners[4] = {
-						{ minX, 0.05f, minZ },
-						{ maxX, 0.05f, minZ },
-						{ maxX, 0.05f, maxZ },
-						{ minX, 0.05f, maxZ },
-					};
-
-					const Wui::WuiColor borderColor = isCurrent ? activeChunkBorder
-						: (hasEntities ? authoredChunkBorder : chunkBorderColor);
-					const float thickness = isCurrent ? 2.2f : (hasEntities ? 1.4f : 1.0f);
-
-					for (int i = 0; i < 4; ++i)
-					{
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(corners[i], 1.0f),
-							levelCam.ViewProjection * glm::vec4(corners[(i + 1) % 4], 1.0f),
-							borderColor, thickness);
-					}
-
-					// 当前活跃 Chunk 内侧画 L 型定位角标
-					if (isCurrent)
-					{
-						constexpr float kBracket = 6.0f;
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(minX, 0.06f, minZ, 1.0f),
-							levelCam.ViewProjection * glm::vec4(minX + kBracket, 0.06f, minZ, 1.0f),
-							activeChunkBorder, 2.5f);
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(minX, 0.06f, minZ, 1.0f),
-							levelCam.ViewProjection * glm::vec4(minX, 0.06f, minZ + kBracket, 1.0f),
-							activeChunkBorder, 2.5f);
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(maxX, 0.06f, maxZ, 1.0f),
-							levelCam.ViewProjection * glm::vec4(maxX - kBracket, 0.06f, maxZ, 1.0f),
-							activeChunkBorder, 2.5f);
-						PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
-							levelCam.ViewProjection * glm::vec4(maxX, 0.06f, maxZ, 1.0f),
-							levelCam.ViewProjection * glm::vec4(maxX, 0.06f, maxZ - kBracket, 1.0f),
-							activeChunkBorder, 2.5f);
-					}
-				}
-			}
-
-			// 2. 真实流送辐射圈 (Streaming Radius: 128m 真实加载半径)
-			const Wui::WuiColor streamingCircleColor { 0.20f, 0.85f, 0.75f, 0.35f };
-			PushWorldCircle(ctx, levelCam.ViewProjection, sceneRect, glm::mat4(1.0f),
-				{ camPos.x, 0.05f, camPos.z }, 128.0f, 1 /*XZ 平面*/,
-				streamingCircleColor, 1.6f, nullptr, nullptr);
-		}
-
-		// 视口右上角 HUD
+		// 视口右上角 HUD 基础数据声明
 		size_t entityCount = 0;
 		if (const Ref<Scene> gridScene = m_Host.GetActiveScene())
 		{
 			const entt::registry& gridRegistry = std::as_const(*gridScene).GetRegistry();
 			entityCount = gridRegistry.view<UUIDComponent>().size();
 		}
-
 		char hudLine1[160] = {};
 		char hudLine2[160] = {};
+
+		// ==================== 轨道二：世界分区系统 (World Partition / Streaming Grid) ====================
+		int32_t activeChunkX = 0;
+		int32_t activeChunkY = 0;
+		int32_t activeChunkZ = 0;
+		size_t authoredChunkCount = 0;
 		if (m_ShowWorldPartition)
 		{
+			const Level::LevelPartitionSettings partSettings = m_Host.GetLevelPartitionSettings();
+			const float chunkSize = static_cast<float>(partSettings.GridCellSize > 0 ? partSettings.GridCellSize : 64);
+			const Level::PartitionGridPlane planeMode = partSettings.GridPlane;
+
+			activeChunkX = static_cast<int32_t>(std::floor(camPos.x / chunkSize));
+			activeChunkY = static_cast<int32_t>(std::floor(camPos.y / chunkSize));
+			activeChunkZ = static_cast<int32_t>(std::floor(camPos.z / chunkSize));
+
+			// 统计当前关卡在各 Chunk 的实体分布热度
+			if (const Ref<Scene> activeScene = m_Host.GetActiveScene())
+			{
+				std::unordered_set<int64_t> chunkSet;
+				const entt::registry& reg = std::as_const(*activeScene).GetRegistry();
+				auto transformView = reg.view<TransformComponent>();
+				for (auto entity : transformView)
+				{
+					const auto& tc = transformView.get<TransformComponent>(entity);
+					int32_t cA = static_cast<int32_t>(std::floor(tc.Location.x / chunkSize));
+					int32_t cB = static_cast<int32_t>(std::floor(tc.Location.z / chunkSize));
+					if (planeMode == Level::PartitionGridPlane::VerticalXY)
+					{
+						cA = static_cast<int32_t>(std::floor(tc.Location.x / chunkSize));
+						cB = static_cast<int32_t>(std::floor(tc.Location.y / chunkSize));
+					}
+					else if (planeMode == Level::PartitionGridPlane::VerticalZY)
+					{
+						cA = static_cast<int32_t>(std::floor(tc.Location.z / chunkSize));
+						cB = static_cast<int32_t>(std::floor(tc.Location.y / chunkSize));
+					}
+					const int64_t key = (static_cast<int64_t>(cA) << 32) ^ static_cast<uint32_t>(cB);
+					chunkSet.insert(key);
+				}
+				authoredChunkCount = chunkSet.size();
+			}
+
+			const float viewSpan = isOrtho ? levelCam.OrthographicSize : std::max(20.0f, levelCam.Distance);
+			const float proximityWeight = isOrtho ? 1.0f : std::clamp((viewSpan - 40.0f) / 60.0f, 0.0f, 1.0f);
+
+			if (proximityWeight > 0.01f)
+			{
+				Wui::ClipScope partClip(ctx, sceneRect);
+				const int32_t gridRadius = std::clamp(static_cast<int32_t>(std::ceil((viewSpan * 1.5f) / chunkSize)), 4, 16);
+				const Wui::WuiColor chunkBorderColor { 0.40f, 0.50f, 0.65f, 0.22f * proximityWeight };
+
+				// 1. 全局大世界空间分区棋盘 (支持 XZ / XY / ZY / Isometric / Full3D)
+				for (int32_t da = -gridRadius; da <= gridRadius; ++da)
+				{
+					for (int32_t db = -gridRadius; db <= gridRadius; ++db)
+					{
+						const float distSq = static_cast<float>(da * da + db * db);
+						const float normDist = std::sqrt(distSq) / static_cast<float>(gridRadius);
+						const float fadeAlpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f);
+						if (fadeAlpha <= 0.02f)
+							continue;
+
+						Wui::WuiColor borderColor = chunkBorderColor;
+						borderColor.A *= fadeAlpha;
+
+						if (planeMode == Level::PartitionGridPlane::VerticalXY)
+						{
+							const float minX = (activeChunkX + da) * chunkSize;
+							const float minY = (activeChunkY + db) * chunkSize;
+							const float maxX = minX + chunkSize;
+							const float maxY = minY + chunkSize;
+							const glm::vec3 corners[4] = {
+								{ minX, minY, 0.05f }, { maxX, minY, 0.05f },
+								{ maxX, maxY, 0.05f }, { minX, maxY, 0.05f }
+							};
+							for (int i = 0; i < 4; ++i)
+								PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+									levelCam.ViewProjection * glm::vec4(corners[i], 1.0f),
+									levelCam.ViewProjection * glm::vec4(corners[(i + 1) % 4], 1.0f),
+									borderColor, 1.0f);
+						}
+						else if (planeMode == Level::PartitionGridPlane::VerticalZY)
+						{
+							const float minZ = (activeChunkZ + da) * chunkSize;
+							const float minY = (activeChunkY + db) * chunkSize;
+							const float maxZ = minZ + chunkSize;
+							const float maxY = minY + chunkSize;
+							const glm::vec3 corners[4] = {
+								{ 0.05f, minY, minZ }, { 0.05f, minY, maxZ },
+								{ 0.05f, maxY, maxZ }, { 0.05f, maxY, minZ }
+							};
+							for (int i = 0; i < 4; ++i)
+								PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+									levelCam.ViewProjection * glm::vec4(corners[i], 1.0f),
+									levelCam.ViewProjection * glm::vec4(corners[(i + 1) % 4], 1.0f),
+									borderColor, 1.0f);
+						}
+						else if (planeMode == Level::PartitionGridPlane::Isometric)
+						{
+							const float ca = (activeChunkX + da) * chunkSize;
+							const float cb = (activeChunkZ + db) * chunkSize;
+							const glm::vec3 corners[4] = {
+								{ (ca) * 0.7071f + (cb) * 0.7071f, 0.05f, (ca) * 0.7071f - (cb) * 0.7071f },
+								{ (ca + chunkSize) * 0.7071f + (cb) * 0.7071f, 0.05f, (ca + chunkSize) * 0.7071f - (cb) * 0.7071f },
+								{ (ca + chunkSize) * 0.7071f + (cb + chunkSize) * 0.7071f, 0.05f, (ca + chunkSize) * 0.7071f - (cb + chunkSize) * 0.7071f },
+								{ (ca) * 0.7071f + (cb + chunkSize) * 0.7071f, 0.05f, (ca) * 0.7071f - (cb + chunkSize) * 0.7071f },
+							};
+							for (int i = 0; i < 4; ++i)
+								PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+									levelCam.ViewProjection * glm::vec4(corners[i], 1.0f),
+									levelCam.ViewProjection * glm::vec4(corners[(i + 1) % 4], 1.0f),
+									borderColor, 1.0f);
+						}
+						else if (planeMode == Level::PartitionGridPlane::Full3D)
+						{
+							const float minX = (activeChunkX + da) * chunkSize;
+							const float minZ = (activeChunkZ + db) * chunkSize;
+							const float maxX = minX + chunkSize;
+							const float maxZ = minZ + chunkSize;
+							const float minY = 0.0f;
+							const float maxY = chunkSize;
+							const glm::vec3 bCorners[8] = {
+								{ minX, minY, minZ }, { maxX, minY, minZ }, { maxX, minY, maxZ }, { minX, minY, maxZ },
+								{ minX, maxY, minZ }, { maxX, maxY, minZ }, { maxX, maxY, maxZ }, { minX, maxY, maxZ },
+							};
+							const int bEdges[12][2] = {
+								{0,1}, {1,2}, {2,3}, {3,0}, {4,5}, {5,6}, {6,7}, {7,4},
+								{0,4}, {1,5}, {2,6}, {3,7}
+							};
+							for (int e = 0; e < 12; ++e)
+								PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+									levelCam.ViewProjection * glm::vec4(bCorners[bEdges[e][0]], 1.0f),
+									levelCam.ViewProjection * glm::vec4(bCorners[bEdges[e][1]], 1.0f),
+									borderColor, 1.0f);
+						}
+						else // HorizontalXZ
+						{
+							const float minX = (activeChunkX + da) * chunkSize;
+							const float minZ = (activeChunkZ + db) * chunkSize;
+							const float maxX = minX + chunkSize;
+							const float maxZ = minZ + chunkSize;
+							const glm::vec3 corners[4] = {
+								{ minX, 0.05f, minZ }, { maxX, 0.05f, minZ },
+								{ maxX, 0.05f, maxZ }, { minX, 0.05f, maxZ }
+							};
+							for (int i = 0; i < 4; ++i)
+								PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+									levelCam.ViewProjection * glm::vec4(corners[i], 1.0f),
+									levelCam.ViewProjection * glm::vec4(corners[(i + 1) % 4], 1.0f),
+									borderColor, 1.0f);
+						}
+					}
+				}
+
+				// 2. 特定区域局部覆盖呈现 (PartitionVolumeComponent 3D包围盒与细网格)
+				if (const Ref<Scene> activeScene = m_Host.GetActiveScene())
+				{
+					const entt::registry& reg = std::as_const(*activeScene).GetRegistry();
+					auto volumeView = reg.view<PartitionVolumeComponent, TransformComponent>();
+					for (auto entity : volumeView)
+					{
+						const auto& pvc = volumeView.get<PartitionVolumeComponent>(entity);
+						const auto& tc = volumeView.get<TransformComponent>(entity);
+						if (!pvc.Active)
+							continue;
+
+						const glm::vec3 center = tc.Location;
+						const glm::vec3 h = pvc.HalfExtents;
+						const Wui::WuiColor volumeBoxColor { 0.95f, 0.72f, 0.28f, 0.65f };
+
+						const glm::vec3 bCorners[8] = {
+							center + glm::vec3(-h.x, -h.y, -h.z),
+							center + glm::vec3( h.x, -h.y, -h.z),
+							center + glm::vec3( h.x, -h.y,  h.z),
+							center + glm::vec3(-h.x, -h.y,  h.z),
+							center + glm::vec3(-h.x,  h.y, -h.z),
+							center + glm::vec3( h.x,  h.y, -h.z),
+							center + glm::vec3( h.x,  h.y,  h.z),
+							center + glm::vec3(-h.x,  h.y,  h.z),
+						};
+						const int edges[12][2] = {
+							{0,1}, {1,2}, {2,3}, {3,0},
+							{4,5}, {5,6}, {6,7}, {7,4},
+							{0,4}, {1,5}, {2,6}, {3,7}
+						};
+						for (int e = 0; e < 12; ++e)
+						{
+							PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+								levelCam.ViewProjection * glm::vec4(bCorners[edges[e][0]], 1.0f),
+								levelCam.ViewProjection * glm::vec4(bCorners[edges[e][1]], 1.0f),
+								volumeBoxColor, 1.8f);
+						}
+
+						// 盒内地表细分网格呈现
+						const float subCell = static_cast<float>(pvc.OverrideCellSize > 0 ? pvc.OverrideCellSize : 16);
+						const Wui::WuiColor subGridColor { 0.95f, 0.80f, 0.35f, 0.28f };
+						const float startX = std::floor((center.x - h.x) / subCell) * subCell;
+						const float endX = std::ceil((center.x + h.x) / subCell) * subCell;
+						const float startZ = std::floor((center.z - h.z) / subCell) * subCell;
+						const float endZ = std::ceil((center.z + h.z) / subCell) * subCell;
+
+						for (float x = startX; x <= endX; x += subCell)
+						{
+							PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+								levelCam.ViewProjection * glm::vec4(x, center.y - h.y + 0.05f, center.z - h.z, 1.0f),
+								levelCam.ViewProjection * glm::vec4(x, center.y - h.y + 0.05f, center.z + h.z, 1.0f),
+								subGridColor, 1.2f);
+						}
+						for (float z = startZ; z <= endZ; z += subCell)
+						{
+							PushProjectedSegment(ctx, levelCam.ViewProjection, sceneRect,
+								levelCam.ViewProjection * glm::vec4(center.x - h.x, center.y - h.y + 0.05f, z, 1.0f),
+								levelCam.ViewProjection * glm::vec4(center.x + h.x, center.y - h.y + 0.05f, z, 1.0f),
+								subGridColor, 1.2f);
+						}
+					}
+				}
+			}
+
+			const char* planeTag = "XZ";
+			if (planeMode == Level::PartitionGridPlane::VerticalXY) planeTag = "XY";
+			else if (planeMode == Level::PartitionGridPlane::VerticalZY) planeTag = "ZY";
+			else if (planeMode == Level::PartitionGridPlane::Isometric) planeTag = "ISO";
+			else if (planeMode == Level::PartitionGridPlane::Full3D) planeTag = "3D";
+
 			std::snprintf(hudLine1, sizeof(hudLine1),
-				"Partition 64m | Chunk (%d, %d) | Authored: %zu | Stream: 128m",
-				activeChunkX, activeChunkZ, authoredChunkCount);
+				"Partition %um [%s] | Chunk (%d, %d) | Authored: %zu Chunks",
+				partSettings.GridCellSize, planeTag,
+				activeChunkX, (planeMode == Level::PartitionGridPlane::VerticalXY || planeMode == Level::PartitionGridPlane::VerticalZY) ? activeChunkY : activeChunkZ, authoredChunkCount);
 		}
 		else if (m_ShowReferenceGrid)
 		{
@@ -1353,8 +1516,15 @@ namespace World
 			case World::ViewportViewpoint::Right:  axisTag = "Right (ZY)"; break;
 			case World::ViewportViewpoint::Left:   axisTag = "Left (ZY)"; break;
 			}
+			const float scaleValue = isOrtho ? levelCam.OrthographicSize : levelCam.Distance;
+			const char* gridStepLabel = "Grid 1m/10m";
+			if (scaleValue > 300.0f)
+				gridStepLabel = "Grid 50m/100m";
+			else if (scaleValue > 60.0f)
+				gridStepLabel = "Grid 10m/50m";
+
 			std::snprintf(hudLine1, sizeof(hudLine1),
-				"Grid 1m/10m | %s | Scale: %.1fu", axisTag, isOrtho ? levelCam.OrthographicSize : levelCam.Distance);
+				"%s | %s | Scale: %.1fu", gridStepLabel, axisTag, scaleValue);
 		}
 			std::string layersText;
 			for (const Level::DataLayerDefinition& layer : m_Host.GetLevelDataLayers())

@@ -52,6 +52,29 @@ namespace World::Level
 	// 为什么在 manifest 而不是实体级:重力覆盖、物理调试是**整个世界**的属性,
 	// 不挂在任何单个实体上,所以进不了 `.entity`(那是一个实体的文件)。
 	// 它也不属于预制体 —— 预制体是可复用子树,不带世界设置。
+	enum class PartitionGridPlane : uint8_t
+	{
+		HorizontalXZ = 0, // 3D 水平大世界地平面 [默认]
+		VerticalXY = 1,   // 2D 正面立面 (横版跳跃/卷轴)
+		VerticalZY = 2,   // 2D 侧面立面 (纵向进深/剖面)
+		Isometric = 3,    // 2.5D 等轴测斜向 (45°菱形网格, 如暗黑/哈迪斯)
+		Full3D = 4,       // 纯 3D 立体分块 (立方体体素, 如太空/天坑)
+	};
+
+	struct LevelPartitionSettings
+	{
+		uint32_t GridCellSize{ 64 };
+		PartitionGridPlane GridPlane{ PartitionGridPlane::HorizontalXZ };
+		float StreamingRadius{ 128.0f };
+
+		bool IsDefault() const
+		{
+			return GridCellSize == 64 &&
+			       GridPlane == PartitionGridPlane::HorizontalXZ &&
+			       std::abs(StreamingRadius - 128.0f) < 1e-3f;
+		}
+	};
+
 	struct LevelWorldSettings
 	{
 		bool HasGravityOverride{ false };
@@ -88,6 +111,9 @@ namespace World::Level
 
 		const std::string& GetName() const;
 		void SetName(const std::string& name);
+
+		const LevelPartitionSettings& GetPartitionSettings() const;
+		void SetPartitionSettings(const LevelPartitionSettings& settings);
 
 		uint32_t GetGridCellSize() const;
 		void SetGridCellSize(uint32_t size);

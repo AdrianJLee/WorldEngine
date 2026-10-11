@@ -211,6 +211,8 @@ namespace World
 		// P4-1:物理设置写回 project.we.yaml(同一个面板的"保存")。
 		bool SaveProjectPhysicsSettings(const Asset::PhysicsSettingsData& settings,
 			std::string* message = nullptr) override;
+		bool SaveProjectStreamingSettings(const Asset::StreamingSettings& settings,
+			std::string* message = nullptr) override;
 		// P4-U4:资产导入默认值(project.we.yaml 的 imports:)。
 		bool SaveProjectImportDefaults(const Asset::ModelImportSettings& settings,
 			std::string* message = nullptr) override;
@@ -328,6 +330,8 @@ namespace World
 		const std::vector<Level::DataLayerDefinition>& GetLevelDataLayers() const override;
 		uint32_t GetActiveDataLayers() const override;
 		void SetActiveDataLayers(uint32_t mask) override;
+		Level::LevelPartitionSettings GetLevelPartitionSettings() const override;
+		void SetLevelPartitionSettings(const Level::LevelPartitionSettings& settings) override;
 		// 关卡数据层编辑(PanelHost):读当前文档声明的层 / 写回(只重写入口 manifest)。
 		bool GetEditableDataLayers(std::vector<Level::DataLayerDefinition>* out) override;
 		bool ApplyDataLayers(const std::vector<Level::DataLayerDefinition>& layers,

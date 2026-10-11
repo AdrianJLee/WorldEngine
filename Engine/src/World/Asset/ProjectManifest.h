@@ -108,10 +108,15 @@ namespace World::Asset
 		// (小关卡可省一个线程;大关卡会在换区时顿一下)。
 		bool AsyncIO = true;
 
+		// 大世界空间分区项目级设置 (project.we.yaml 的 `streaming:` 区块)
+		uint32_t CellSize = 64;             // 默认分块边长(米): 16..256
+		std::string Plane = "HorizontalXZ"; // 默认切面: "HorizontalXZ" (3D大世界) 或 "VerticalXY" (2D横版)
+
 		bool IsDefault() const
 		{
 			return ViewDistance == 256.0f && UnloadDistance == 320.0f
-				&& TimeBudgetMs == 2.0f && AsyncIO;
+				&& TimeBudgetMs == 2.0f && AsyncIO
+				&& CellSize == 64 && Plane == "HorizontalXZ";
 		}
 	};
 

@@ -472,6 +472,85 @@ int main()
 			CHECK(found[0].DataLayers[1].Name == "Day");
 		}
 
+		// 9. 空间分区设置 (LevelPartitionSettings) 序列化、切面与向后兼容性验证
+		{
+			using namespace World::Level;
+			const std::filesystem::path root = tempDir / "PartitionRoot";
+			const std::filesystem::path entry = LevelCatalog::EntryPathFor(root, "Partitioned");
+			LevelPackage package;
+			package.SetId("Partitioned");
+			package.SetName("Partitioned Level");
+
+			// 默认状态判定
+			CHECK(package.GetPartitionSettings().IsDefault());
+			CHECK(package.GetGridCellSize() == 64);
+			CHECK(package.GetPartitionSettings().GridPlane == PartitionGridPlane::HorizontalXZ);
+
+			// 自定义配置：32m 边长、2D 竖直切面 (VerticalXY)、流送半径 96m
+			LevelPartitionSettings customSettings;
+			customSettings.GridCellSize = 32;
+			customSettings.GridPlane = PartitionGridPlane::VerticalXY;
+			customSettings.StreamingRadius = 96.0f;
+			package.SetPartitionSettings(customSettings);
+			CHECK(!package.GetPartitionSettings().IsDefault());
+
+			std::string error;
+			CHECK(package.Save(entry, &error));
+			CHECK(error.empty());
+
+			// 重新加载验证 100% 往返
+			LevelPackage reloaded;
+			CHECK(reloaded.Load(entry, &error));
+			CHECK(reloaded.GetPartitionSettings().GridCellSize == 32);
+			CHECK(reloaded.GetGridCellSize() == 32);
+			CHECK(reloaded.GetPartitionSettings().GridPlane == PartitionGridPlane::VerticalXY);
+			CHECK(std::fabs(reloaded.GetPartitionSettings().StreamingRadius - 96.0f) < 1e-3f);
+
+			// 验证其他 3 种切面模式 (VerticalZY, Isometric, Full3D) 完整往返
+			customSettings.GridPlane = PartitionGridPlane::VerticalZY;
+			package.SetPartitionSettings(customSettings);
+			CHECK(package.Save(entry, &error));
+			CHECK(reloaded.Load(entry, &error));
+			CHECK(reloaded.GetPartitionSettings().GridPlane == PartitionGridPlane::VerticalZY);
+
+			customSettings.GridPlane = PartitionGridPlane::Isometric;
+			package.SetPartitionSettings(customSettings);
+			CHECK(package.Save(entry, &error));
+			CHECK(reloaded.Load(entry, &error));
+			CHECK(reloaded.GetPartitionSettings().GridPlane == PartitionGridPlane::Isometric);
+
+			customSettings.GridPlane = PartitionGridPlane::Full3D;
+			package.SetPartitionSettings(customSettings);
+			CHECK(package.Save(entry, &error));
+			CHECK(reloaded.Load(entry, &error));
+			CHECK(reloaded.GetPartitionSettings().GridPlane == PartitionGridPlane::Full3D);
+
+			// 验证特定区域覆盖卷 (PartitionVolumeComponent) 的数学判定
+			PartitionVolumeComponent volume({ 100.0f, 50.0f, 100.0f }, 16, 64.0f);
+			CHECK(volume.Contains({ 50.0f, 10.0f, 50.0f }, { 0.0f, 0.0f, 0.0f }));
+			CHECK(!volume.Contains({ 150.0f, 10.0f, 50.0f }, { 0.0f, 0.0f, 0.0f }));
+			volume.Active = false;
+			CHECK(!volume.Contains({ 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f }));
+
+			// 向后兼容性测试: 手写旧版只带顶层 GridCellSize 的 manifest
+			const std::filesystem::path legacyEntry = root / "scenes" / "Legacy.wlevel";
+			WriteRawFile(legacyEntry,
+				"Id: Legacy\n"
+				"Name: Legacy Level\n"
+				"GridCellSize: 128\n"
+				"DataLayers:\n"
+				"  - Name: Base_World\n"
+				"    LayerMask: 1\n"
+				"    DefaultActive: true\n");
+
+			LevelPackage legacyLoaded;
+			CHECK(legacyLoaded.Load(legacyEntry, &error));
+			CHECK(legacyLoaded.GetGridCellSize() == 128);
+			CHECK(legacyLoaded.GetPartitionSettings().GridCellSize == 128);
+			// 默认回退到水平 3D 大世界切面
+			CHECK(legacyLoaded.GetPartitionSettings().GridPlane == PartitionGridPlane::HorizontalXZ);
+		}
+
 		std::filesystem::remove_all(tempDir);
 		std::printf("[LevelTests] Level 2.0 .wlevel catalog + service + scene-level round trip tests passed.\n");
 		return 0;

@@ -20,6 +20,7 @@ struct World::SphereCollider3DComponent
 struct World::CapsuleCollider3DComponent
 struct World::JointComponent
 struct World::MeshCollider3DComponent
+struct World::PartitionVolumeComponent
 struct World::LevelEntityComponent
 struct World::UUID
 struct World::CameraSettings

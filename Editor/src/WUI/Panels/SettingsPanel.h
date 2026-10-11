@@ -45,6 +45,8 @@ namespace World
 		// P4-1:物理设置(与渲染设置同一个面板)。
 		Asset::PhysicsSettingsData m_Physics;
 		bool m_PhysicsChanged = false;
+		Asset::StreamingSettings m_Streaming;
+		bool m_StreamingChanged = false;
 		// P4-UX11:启动与内容(renderer / start_scene / content_root)—— 来自 project.we.yaml,
 		// 以前只能手改文件;这三项各自生效时机不同(见面板 tooltip 与重启入口)。
 		struct StartupSettings

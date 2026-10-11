@@ -227,6 +227,12 @@ namespace World
 			if (message) *message = "settings panel is not wired to a host";
 			return false;
 		}
+		virtual bool SaveProjectStreamingSettings(const Asset::StreamingSettings& settings, std::string* message = nullptr)
+		{
+			(void)settings;
+			if (message) *message = "settings panel is not wired to a host";
+			return false;
+		}
 		// P4-UX11:项目启动项(renderer / start_scene / content_root)—— 与渲染/物理同一份清单,
 		// 只覆盖这三个字段(Load 后局部改,保留 id/包列表/注释)。
 		virtual bool SaveProjectStartupSettings(const std::string& renderer, const std::string& startScene,

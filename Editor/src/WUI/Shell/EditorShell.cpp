@@ -1106,6 +1106,38 @@ void EditorShell::SetActiveDataLayers(uint32_t mask){
 			scene->SetActiveDataLayers(mask);
 	}
 
+Level::LevelPartitionSettings EditorShell::GetLevelPartitionSettings() const
+{
+	if (m_Editor.GetDocument().IsLevelPackage())
+	{
+		const auto& levelSettings = m_Editor.GetDocument().GetPartitionSettings();
+		if (!levelSettings.IsDefault())
+			return levelSettings;
+	}
+	// 自动继承项目设置(project.we.yaml 的 streaming: 区块)
+	std::filesystem::path manifestPath;
+	Asset::ProjectManifest manifest;
+	std::string error;
+	if (Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath) &&
+		Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+	{
+		Level::LevelPartitionSettings projectSettings;
+		projectSettings.GridCellSize = manifest.Streaming.CellSize;
+		projectSettings.GridPlane = (manifest.Streaming.Plane == "VerticalXY")
+			? Level::PartitionGridPlane::VerticalXY
+			: Level::PartitionGridPlane::HorizontalXZ;
+		projectSettings.StreamingRadius = manifest.Streaming.ViewDistance;
+		return projectSettings;
+	}
+	return m_Editor.GetDocument().GetPartitionSettings();
+}
+
+void EditorShell::SetLevelPartitionSettings(const Level::LevelPartitionSettings& settings)
+{
+	m_Editor.GetDocument().MutablePartitionSettings() = settings;
+	m_Editor.GetDocument().SavePartitionSettings();
+}
+
 
 bool EditorShell::GetEditableDataLayers(std::vector<Level::DataLayerDefinition>* out){
 		// 与视口工具栏读同一份(文档缓存):面板改完写回,两边立刻同源。

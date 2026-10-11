@@ -407,6 +407,36 @@ int main()
 			CHECK(cam.IsOrthographic());
 		}
 
+				// 12. 缩放范围约束 [0.5m, 1000m] 与正交自适应近远裁剪面验证
+		{
+			EditorCamera3D cam(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f, 10.0f);
+
+			// 透视距离范围 clamp
+			cam.SetDistance(50000.0f);
+			CHECK(std::fabs(cam.GetDistance() - 1000.0f) < 1e-4f);
+			cam.SetDistance(0.01f);
+			CHECK(std::fabs(cam.GetDistance() - 0.5f) < 1e-4f);
+
+			// 正交视场范围 clamp
+			cam.SetProjection(ViewportProjection::Orthographic);
+			cam.SetOrthographicSize(100000.0f);
+			CHECK(std::fabs(cam.GetOrthographicSize() - 1000.0f) < 1e-4f);
+			cam.SetOrthographicSize(0.01f);
+			CHECK(std::fabs(cam.GetOrthographicSize() - 0.5f) < 1e-4f);
+
+			// Dolly 缩放同样受到 clamp 约束
+			cam.Dolly(10000.0f);
+			CHECK(cam.GetOrthographicSize() <= 1000.0f + 1e-4f);
+			cam.Dolly(-10000.0f);
+			CHECK(cam.GetOrthographicSize() >= 0.5f - 1e-4f);
+
+			// 正交自适应近远裁剪面: 当视场为 1000m 时，深度跨度至少包络 3500m，避免远端地网被 GPU 硬件截断
+			cam.SetOrthographicSize(1000.0f);
+			const glm::mat4 orthoProj = cam.GetProjectionMatrix(false);
+			const float clipExtent = -1.0f / orthoProj[2][2];
+			CHECK(clipExtent >= 3500.0f - 1.0f);
+		}
+
 		std::printf("World.Camera3D: all checks passed\n");
 		return 0;
 	}

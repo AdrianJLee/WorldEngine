@@ -447,6 +447,8 @@ namespace World::Asset
 		std::vector<ManifestKeyValue> StreamingKeyValues(const ProjectManifest& manifest)
 		{
 			return {
+				{ "cell_size", std::to_string(manifest.Streaming.CellSize) },
+				{ "plane", "\"" + manifest.Streaming.Plane + "\"" },
 				{ "view_distance", FormatFloatValue(manifest.Streaming.ViewDistance) },
 				{ "unload_distance", FormatFloatValue(manifest.Streaming.UnloadDistance) },
 				{ "time_budget_ms", FormatFloatValue(manifest.Streaming.TimeBudgetMs) },
@@ -806,6 +808,10 @@ namespace World::Asset
 					if (error) *error = "manifest 'streaming' must be a map: " + path.string();
 					return false;
 				}
+				if (streaming["cell_size"])
+					manifest.Streaming.CellSize = streaming["cell_size"].as<uint32_t>(manifest.Streaming.CellSize);
+				if (streaming["plane"])
+					manifest.Streaming.Plane = streaming["plane"].as<std::string>(manifest.Streaming.Plane);
 				if (streaming["view_distance"])
 					manifest.Streaming.ViewDistance = streaming["view_distance"].as<float>(manifest.Streaming.ViewDistance);
 				if (streaming["unload_distance"])
@@ -1003,6 +1009,8 @@ namespace World::Asset
 				out << YAML::Key << "streaming" << YAML::Value << YAML::BeginMap;
 				for (const std::string& comment : BlockComments("streaming"))
 					out << YAML::Comment(comment);
+				out << YAML::Key << "cell_size" << YAML::Value << copy.Streaming.CellSize;
+				out << YAML::Key << "plane" << YAML::Value << copy.Streaming.Plane;
 				out << YAML::Key << "view_distance" << YAML::Value << copy.Streaming.ViewDistance;
 				out << YAML::Key << "unload_distance" << YAML::Value << copy.Streaming.UnloadDistance;
 				out << YAML::Key << "time_budget_ms" << YAML::Value << copy.Streaming.TimeBudgetMs;

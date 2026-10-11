@@ -798,6 +798,13 @@ function ui:isOpen() end
 ---@field Mesh string
 ---@field Primitive number
 
+-- Component fields are exposed through Entity:GetComponent("PartitionVolumeComponent"); there is no runtime global named PartitionVolumeComponent.
+---@class PartitionVolumeComponent
+---@field Active boolean
+---@field OverrideCellSize number
+---@field HalfExtents vec3
+---@field OverrideStreamingRadius number
+
 -- Component fields are exposed through Entity:GetComponent("PointLightComponent"); there is no runtime global named PointLightComponent.
 ---@class PointLightComponent
 ---@field Range number
@@ -906,6 +913,8 @@ function ui:isOpen() end
 ---@field MeshCollider3D string Short alias for "MeshCollider3DComponent".
 ---@field MeshRendererComponent string Registered component type name "MeshRendererComponent".
 ---@field MeshRenderer string Short alias for "MeshRendererComponent".
+---@field PartitionVolumeComponent string Registered component type name "PartitionVolumeComponent".
+---@field PartitionVolume string Short alias for "PartitionVolumeComponent".
 ---@field PointLightComponent string Registered component type name "PointLightComponent".
 ---@field PointLight string Short alias for "PointLightComponent".
 ---@field RigidBody2DComponent string Registered component type name "RigidBody2DComponent".

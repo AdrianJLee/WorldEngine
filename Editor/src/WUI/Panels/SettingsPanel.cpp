@@ -221,6 +221,64 @@ namespace World
 			[this] { return m_Physics.Gravity == physicsDefaults.Gravity; },
 			[this] { m_Physics.Gravity = physicsDefaults.Gravity; return true; });
 
+				// ---- 大世界空间分区与关卡流送 Streaming (project.we.yaml 的 `streaming:` 区块) ----
+		addEnum("streaming.cell_size", "Streaming", SettingApply::Immediate, "Default Cell Size",
+			"默认分块尺寸\n大世界关卡空间分区的默认分块边长(米)。\n"
+			"高密主城/室内建议 16m/32m;开阔大世界建议 64m/128m;超大平原建议 256m。",
+			{ SettingOption { "16", "16m (高密主城/室内)" }, SettingOption { "32", "32m (紧凑城镇)" },
+				SettingOption { "64", "64m (默认标准)" }, SettingOption { "128", "128m (开阔原野)" },
+				SettingOption { "256", "256m (超大平原/海域)" } },
+			[this] { return std::to_string(m_Streaming.CellSize); },
+			[this](const std::string& value, std::string*)
+			{
+				m_Streaming.CellSize = static_cast<uint32_t>(std::atoi(value.c_str()));
+				m_StreamingChanged = true;
+				m_PendingSave = true;
+				m_LastChangeSeconds = SettingsNowSeconds();
+				return true;
+			},
+			[this] { return m_Streaming.CellSize == 64; },
+			[this] { m_Streaming.CellSize = 64; m_StreamingChanged = true; return true; });
+
+		addEnum("streaming.plane", "Streaming", SettingApply::Immediate, "Grid Plane",
+			"分块基准切面\n大世界空间网格的切面基准(3D XZ / 2D XY / 2D ZY / 2.5D 等轴测 / 纯 3D 立体)。\n"
+			"3D大世界选水平 XZ;2D横版选垂直 XY;侧面选垂直 ZY;暗黑/哈迪斯选等轴测;太空/天坑选纯 3D。",
+			{
+				SettingOption { "HorizontalXZ", "3D 水平 XZ (大世界 [默认])" },
+				SettingOption { "VerticalXY", "2D 正面立面 XY (横版卷轴)" },
+				SettingOption { "VerticalZY", "2D 侧面立面 ZY (纵向剖面)" },
+				SettingOption { "Isometric", "2.5D 等轴测 (45°斜向菱形)" },
+				SettingOption { "Full3D", "纯 3D 立体切块 (立方体体素)" }
+			},
+			[this] { return m_Streaming.Plane; },
+			[this](const std::string& value, std::string*)
+			{
+				m_Streaming.Plane = value;
+				m_StreamingChanged = true;
+				m_PendingSave = true;
+				m_LastChangeSeconds = SettingsNowSeconds();
+				return true;
+			},
+			[this] { return m_Streaming.Plane == "HorizontalXZ"; },
+			[this] { m_Streaming.Plane = "HorizontalXZ"; m_StreamingChanged = true; return true; });
+
+		addNumber("streaming.view_distance", "Streaming", SettingType::Float, SettingApply::Immediate,
+			"Loading Radius (m)", "流送加载半径\n以玩家/相机为中心动态加载 Chunk 的视野距离(米)。",
+			"m", 32.0, 1000.0, 16.0,
+			[this] { return FormatFloat(m_Streaming.ViewDistance); },
+			[this](const std::string& value, std::string*)
+			{
+				m_Streaming.ViewDistance = std::clamp(static_cast<float>(std::atof(value.c_str())), 32.0f, 1000.0f);
+				if (m_Streaming.UnloadDistance <= m_Streaming.ViewDistance)
+					m_Streaming.UnloadDistance = m_Streaming.ViewDistance + 32.0f;
+				m_StreamingChanged = true;
+				m_PendingSave = true;
+				m_LastChangeSeconds = SettingsNowSeconds();
+				return true;
+			},
+			[this] { return std::fabs(m_Streaming.ViewDistance - 256.0f) < 1e-3f; },
+			[this] { m_Streaming.ViewDistance = 256.0f; m_StreamingChanged = true; return true; });
+
 		// ---- 启动与内容 Startup(写清单是即时的,所以不给"恢复默认":它们不是"默认值"问题) ----
 		addEnum("project.renderer", "Startup", SettingApply::Restart, "Renderer",
 			"渲染后端\n编辑器与 Runtime 启动时使用的 RHI 后端(OpenGL / Vulkan)。\n"
@@ -666,6 +724,7 @@ namespace World
 				// 这一动作就把本会话的导入默认值对齐到清单(与启动期 LoadProjectDefaults 幂等)。
 				m_Import = manifest.ImportDefaults;
 				Asset::ModelImportSettings::SetProjectDefaults(m_Import);
+				m_Streaming = manifest.Streaming;
 			}
 			else
 			{
@@ -706,7 +765,7 @@ namespace World
 		const float pageTop = rect.Y + 4.0f + tabHeight + 6.0f;
 		const Wui::WuiRect page { rect.X + pad, pageTop, rect.W - pad * 2.0f,
 			std::max(120.0f, rect.Y + rect.H - pageTop - 116.0f) };
-		const std::vector<std::string> groups { "Rendering", "Physics", "Startup" };
+		const std::vector<std::string> groups { "Rendering", "Physics", "Streaming", "Startup" };
 		bool changed = false;
 		if (m_Tab == 0)
 		{
@@ -823,7 +882,8 @@ namespace World
 		{
 			std::string message;
 			if (host.SaveProjectRenderSettings(m_Edit, &message) &&
-				host.SaveProjectPhysicsSettings(m_Physics, &message))
+				host.SaveProjectPhysicsSettings(m_Physics, &message) &&
+				host.SaveProjectStreamingSettings(m_Streaming, &message))
 			{
 				m_Status = Wui::Tr("settings.status.saved", "Saved automatically");
 				m_StatusIsError = false;

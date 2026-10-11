@@ -30,6 +30,7 @@ const TypeSchema& WeSchemaOf_SphereCollider3DComponent();
 const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent();
 const TypeSchema& WeSchemaOf_JointComponent();
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent();
+const TypeSchema& WeSchemaOf_PartitionVolumeComponent();
 const TypeSchema& WeSchemaOf_LevelEntityComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
@@ -3315,6 +3316,150 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
 };
 
 template <>
+struct GeneratedAccess<World::PartitionVolumeComponent>
+{
+    static Value Get_HalfExtents(const void* instance)
+    {
+        const World::PartitionVolumeComponent* self = static_cast<const World::PartitionVolumeComponent*>(instance);
+        return Value(self->HalfExtents);
+    }
+    static void Set_HalfExtents(void* instance, const Value& value)
+    {
+        World::PartitionVolumeComponent* self = static_cast<World::PartitionVolumeComponent*>(instance);
+        self->HalfExtents = std::get<glm::vec3>(value);
+    }
+    static Value Get_OverrideCellSize(const void* instance)
+    {
+        const World::PartitionVolumeComponent* self = static_cast<const World::PartitionVolumeComponent*>(instance);
+        return Value(self->OverrideCellSize);
+    }
+    static void Set_OverrideCellSize(void* instance, const Value& value)
+    {
+        World::PartitionVolumeComponent* self = static_cast<World::PartitionVolumeComponent*>(instance);
+        self->OverrideCellSize = std::get<uint32_t>(value);
+    }
+    static Value Get_OverrideStreamingRadius(const void* instance)
+    {
+        const World::PartitionVolumeComponent* self = static_cast<const World::PartitionVolumeComponent*>(instance);
+        return Value(self->OverrideStreamingRadius);
+    }
+    static void Set_OverrideStreamingRadius(void* instance, const Value& value)
+    {
+        World::PartitionVolumeComponent* self = static_cast<World::PartitionVolumeComponent*>(instance);
+        self->OverrideStreamingRadius = std::get<float>(value);
+    }
+    static Value Get_Active(const void* instance)
+    {
+        const World::PartitionVolumeComponent* self = static_cast<const World::PartitionVolumeComponent*>(instance);
+        return Value(self->Active);
+    }
+    static void Set_Active(void* instance, const Value& value)
+    {
+        World::PartitionVolumeComponent* self = static_cast<World::PartitionVolumeComponent*>(instance);
+        self->Active = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_HalfExtents()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x50564C48414C4658ull },
+            "HalfExtents",
+            Kind::Vec3,
+            &Get_HalfExtents,
+            &Set_HalfExtents,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Half size of the partition volume box in world meters.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_OverrideCellSize()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x50564C43454C4C53ull },
+            "OverrideCellSize",
+            Kind::UInt32,
+            &Get_OverrideCellSize,
+            &Set_OverrideCellSize,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Local cell size in meters (e.g. 16m for dense cities).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_OverrideStreamingRadius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x50564C5354524144ull },
+            "OverrideStreamingRadius",
+            Kind::Float,
+            &Get_OverrideStreamingRadius,
+            &Set_OverrideStreamingRadius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Local streaming load radius in meters.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Active()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x50564C4143544956ull },
+            "Active",
+            Kind::Bool,
+            &Get_Active,
+            &Set_Active,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this partition volume is currently active.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::PartitionVolumeComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::PartitionVolumeComponent" },
+            "PartitionVolumeComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::PartitionVolumeComponent),
+            TypeCategory::Component,
+            {
+                Field_HalfExtents(),
+                Field_OverrideCellSize(),
+                Field_OverrideStreamingRadius(),
+                Field_Active(),
+            },
+            &StorageBindingOf(),
+            "Level",
+            "Spatial partition volume that overrides grid cell size and streaming radius for entities inside it.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::LevelEntityComponent>
 {
     static Value Get_DataLayerMask(const void* instance)
@@ -3816,6 +3961,7 @@ const TypeSchema& WeSchemaOf_SphereCollider3DComponent() { return GeneratedAcces
 const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent() { return GeneratedAccess<World::CapsuleCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_JointComponent() { return GeneratedAccess<World::JointComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshCollider3DComponent() { return GeneratedAccess<World::MeshCollider3DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_PartitionVolumeComponent() { return GeneratedAccess<World::PartitionVolumeComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_LevelEntityComponent() { return GeneratedAccess<World::LevelEntityComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
@@ -3858,6 +4004,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_CapsuleCollider3DComponent(),
 			WeSchemaOf_JointComponent(),
 			WeSchemaOf_MeshCollider3DComponent(),
+			WeSchemaOf_PartitionVolumeComponent(),
 			WeSchemaOf_LevelEntityComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),

@@ -755,6 +755,41 @@ namespace World
 	// 场景另持"当前激活掩码"(Scene::SetActiveDataLayers),渲染与脚本按 `Mask & Active` 剔除 ——
 	// 昼夜/战损这类"同一空间多套内容"因此是**真实可编辑的数据**(component 随 `.entity` 落盘、
 	// 在属性面板里可改),而不是只在面板上翻一个不起作用的开关。
+	// 大世界空间分区特定区域覆盖卷 (Partition Volume)
+	// 用于繁华城镇、高密建筑群、地下矿洞等特定区域的局部细切分块(如 16m/32m)与流送半径覆盖。
+	struct PartitionVolumeComponent
+	{
+		glm::vec3 HalfExtents { 50.0f, 25.0f, 50.0f }; // 半长宽高（范围：长100m, 高50m, 宽100m）
+		uint32_t OverrideCellSize { 16 };             // 局部特化分块边长(米): 16, 32 等
+		float OverrideStreamingRadius { 64.0f };      // 局部流送加载半径(米)
+		bool Active { true };                         // 是否启用该区域覆盖
+		uint8_t _Padding[3] { 0, 0, 0 };              // 补齐 24B
+
+		PartitionVolumeComponent() = default;
+		PartitionVolumeComponent(const glm::vec3& extents, uint32_t cellSize = 16, float radius = 64.0f)
+			: HalfExtents(extents), OverrideCellSize(cellSize), OverrideStreamingRadius(radius), Active(true) {}
+
+		bool Contains(const glm::vec3& worldPos, const glm::vec3& volumeCenter) const
+		{
+			if (!Active) return false;
+			const glm::vec3 delta = glm::abs(worldPos - volumeCenter);
+			return delta.x <= HalfExtents.x && delta.y <= HalfExtents.y && delta.z <= HalfExtents.z;
+		}
+
+		WE_SCHEMA_BODY(World, PartitionVolumeComponent, Component)
+			WE_SCHEMA_META(Category("Level"),
+				Doc("Spatial partition volume that overrides grid cell size and streaming radius for entities inside it."))
+			WE_FIELD(HalfExtents, Vec3, Id(0x50564C48414C4658),
+				Doc("Half size of the partition volume box in world meters."));
+			WE_FIELD(OverrideCellSize, UInt32, Id(0x50564C43454C4C53),
+				Doc("Local cell size in meters (e.g. 16m for dense cities)."));
+			WE_FIELD(OverrideStreamingRadius, Float, Id(0x50564C5354524144),
+				Doc("Local streaming load radius in meters."));
+			WE_FIELD(Active, Bool, Id(0x50564C4143544956),
+				Doc("Whether this partition volume is currently active."));
+		WE_SCHEMA_END
+	};
+
 	struct LevelEntityComponent
 	{
 		uint32_t DataLayerMask { 1 };   // 1 = Base_World(常驻层)

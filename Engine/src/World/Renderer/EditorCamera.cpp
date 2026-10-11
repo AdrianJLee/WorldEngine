@@ -167,7 +167,7 @@ namespace World
 
 	void EditorCamera::SetOrthographicSize(float size)
 	{
-		m_OrthographicSize = std::clamp(size, 0.05f, 50000.0f);
+		m_OrthographicSize = std::clamp(size, 0.5f, 1000.0f);
 		UpdateProjection();
 	}
 
@@ -193,10 +193,11 @@ namespace World
 		{
 			const float orthoH = m_OrthographicSize;
 			const float orthoW = orthoH * m_AspectRatio;
+			const float clipExtent = std::max({ m_FarClip, orthoH * 3.5f, 1000.0f });
 			m_ProjectionMatrix = glm::ortho(
 				-orthoW * 0.5f, orthoW * 0.5f,
 				-orthoH * 0.5f, orthoH * 0.5f,
-				-1000.0f, 1000.0f
+				-clipExtent, clipExtent
 			);
 		}
 		else
@@ -279,7 +280,7 @@ namespace World
 		if (m_IsOrthographic)
 		{
 			m_OrthographicSize -= delta * m_OrthographicSize * 0.2f;
-			m_OrthographicSize = std::clamp(m_OrthographicSize, 0.05f, 50000.0f);
+			m_OrthographicSize = std::clamp(m_OrthographicSize, 0.5f, 1000.0f);
 			UpdateProjection();
 			return;
 		}

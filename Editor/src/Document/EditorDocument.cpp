@@ -38,6 +38,7 @@ namespace World
 				m_Path = path;
 				m_LevelPackagePath = path;
 				m_DataLayers = package.GetDataLayers();
+				m_PartitionSettings = package.GetPartitionSettings();
 				m_Dirty = false;
 				m_LastError.clear();
 				WLD_CORE_INFO("[level] 关卡已载入: {0} ({1} 个实体, {2} 个数据层)",
@@ -64,6 +65,7 @@ namespace World
 		m_Path = path;
 		m_LevelPackagePath.clear();
 		m_DataLayers.clear();
+		m_PartitionSettings = Level::LevelPartitionSettings{};
 		m_Dirty = false;
 		m_LastError.clear();
 		return true;
@@ -124,6 +126,7 @@ namespace World
 				return false;
 			}
 
+			package.SetPartitionSettings(m_PartitionSettings);
 			m_Path = entryPath;
 			m_LevelPackagePath = entryPath;
 			m_DataLayers = package.GetDataLayers();
@@ -177,12 +180,40 @@ namespace World
 		return true;
 	}
 
+	bool EditorDocument::SavePartitionSettings(std::string* error)
+	{
+		if (!IsLevelPackage())
+		{
+			if (error) *error = "current document is not a level package.";
+			return false;
+		}
+
+		Level::LevelPackage package;
+		std::string packageError;
+		if (!package.Load(m_LevelPackagePath, &packageError))
+		{
+			if (error) *error = "level manifest could not be reopened: " + packageError;
+			return false;
+		}
+		package.SetPartitionSettings(m_PartitionSettings);
+		if (!package.SaveEntry(&packageError))
+		{
+			if (error) *error = "level manifest could not be written: " + packageError;
+			return false;
+		}
+		WLD_CORE_INFO("[level] 空间分区设置已保存至 manifest: {0} (CellSize={1}, Plane={2})",
+			m_LevelPackagePath.u8string(), m_PartitionSettings.GridCellSize,
+			m_PartitionSettings.GridPlane == Level::PartitionGridPlane::VerticalXY ? "VerticalXY" : "HorizontalXZ");
+		return true;
+	}
+
 	void EditorDocument::New()
 	{
 		m_Scene = CreateRef<Scene>(*m_Context);
 		m_Path.clear();
 		m_LevelPackagePath.clear();
 		m_DataLayers.clear();
+		m_PartitionSettings = Level::LevelPartitionSettings{};
 		m_Dirty = false;
 		m_LastError.clear();
 	}

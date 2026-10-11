@@ -2,6 +2,7 @@
 #include "World/Level/Cooking/LevelCooker.h"
 
 #include "World/Level/Core/ChunkIndex.h"
+#include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -30,7 +31,41 @@ namespace World::Level
 			// 流送索引:发行包里没有目录遍历,运行期靠它知道"有哪几块、在哪、包围盒多大"。
 			ChunkIndex chunkIndex;
 
-			const float cellSize = static_cast<float>(settings.GridCellSize > 0 ? settings.GridCellSize : (package.GetGridCellSize() > 0 ? package.GetGridCellSize() : 64));
+			const float defaultCellSize = static_cast<float>(settings.GridCellSize > 0 ? settings.GridCellSize : (package.GetGridCellSize() > 0 ? package.GetGridCellSize() : 64));
+			const PartitionGridPlane gridPlane = package.GetPartitionSettings().GridPlane;
+
+			// 收集场景中定义的局部特化特定区域 Volume (PartitionVolumeComponent)
+			struct LocalVolume
+			{
+				glm::vec3 Center{ 0.0f };
+				glm::vec3 HalfExtents{ 50.0f, 25.0f, 50.0f };
+				uint32_t OverrideCellSize{ 16 };
+			};
+			std::vector<LocalVolume> localVolumes;
+			for (size_t i = 0; i < package.GetEntityCount(); ++i)
+			{
+				const auto& ent = package.GetEntity(i);
+				if (ent.DocumentYaml.find("PartitionVolumeComponent") != std::string::npos)
+				{
+					try
+					{
+						YAML::Node node = YAML::Load(ent.DocumentYaml);
+						if (node["Entities"] && node["Entities"][0] && node["Entities"][0]["World::PartitionVolumeComponent"])
+						{
+							const auto& pv = node["Entities"][0]["World::PartitionVolumeComponent"];
+							LocalVolume vol;
+							vol.Center = ent.Position;
+							if (pv["HalfExtents"] && pv["HalfExtents"].IsSequence())
+								vol.HalfExtents = glm::vec3(pv["HalfExtents"][0].as<float>(50.0f), pv["HalfExtents"][1].as<float>(25.0f), pv["HalfExtents"][2].as<float>(50.0f));
+							if (pv["OverrideCellSize"])
+								vol.OverrideCellSize = pv["OverrideCellSize"].as<uint32_t>(16);
+							localVolumes.push_back(vol);
+						}
+					}
+					catch (...) {}
+				}
+			}
+
 			std::vector<ChunkBucket> chunkBuckets;
 
 			for (size_t i = 0; i < package.GetEntityCount(); ++i)
@@ -39,9 +74,54 @@ namespace World::Level
 				uint64_t chunkId = entity.ChunkID;
 				if (chunkId == 0)
 				{
-					int32_t cellX = static_cast<int32_t>(std::floor(entity.Position.x / cellSize));
-					int32_t cellZ = static_cast<int32_t>(std::floor(entity.Position.z / cellSize));
-					chunkId = (static_cast<uint64_t>(static_cast<uint32_t>(cellX)) << 32) | static_cast<uint64_t>(static_cast<uint32_t>(cellZ));
+					// 判断实体是否落在某个特定区域 Volume 内
+					float activeCellSize = defaultCellSize;
+					for (const auto& vol : localVolumes)
+					{
+						const glm::vec3 delta = glm::abs(entity.Position - vol.Center);
+						if (delta.x <= vol.HalfExtents.x && delta.y <= vol.HalfExtents.y && delta.z <= vol.HalfExtents.z)
+						{
+							activeCellSize = static_cast<float>(vol.OverrideCellSize > 0 ? vol.OverrideCellSize : 16);
+							break;
+						}
+					}
+
+					// 根据 5 大切面模式精确计算 ChunkID
+					if (gridPlane == PartitionGridPlane::VerticalXY)
+					{
+						const int32_t cx = static_cast<int32_t>(std::floor(entity.Position.x / activeCellSize));
+						const int32_t cy = static_cast<int32_t>(std::floor(entity.Position.y / activeCellSize));
+						chunkId = (static_cast<uint64_t>(static_cast<uint32_t>(cx)) << 32) | static_cast<uint64_t>(static_cast<uint32_t>(cy));
+					}
+					else if (gridPlane == PartitionGridPlane::VerticalZY)
+					{
+						const int32_t cz = static_cast<int32_t>(std::floor(entity.Position.z / activeCellSize));
+						const int32_t cy = static_cast<int32_t>(std::floor(entity.Position.y / activeCellSize));
+						chunkId = (static_cast<uint64_t>(static_cast<uint32_t>(cz)) << 32) | static_cast<uint64_t>(static_cast<uint32_t>(cy));
+					}
+					else if (gridPlane == PartitionGridPlane::Isometric)
+					{
+						const float isoX = (entity.Position.x - entity.Position.z) * 0.70710678f;
+						const float isoZ = (entity.Position.x + entity.Position.z) * 0.70710678f;
+						const int32_t cx = static_cast<int32_t>(std::floor(isoX / activeCellSize));
+						const int32_t cz = static_cast<int32_t>(std::floor(isoZ / activeCellSize));
+						chunkId = (static_cast<uint64_t>(static_cast<uint32_t>(cx)) << 32) | static_cast<uint64_t>(static_cast<uint32_t>(cz));
+					}
+					else if (gridPlane == PartitionGridPlane::Full3D)
+					{
+						const int32_t cx = static_cast<int32_t>(std::floor(entity.Position.x / activeCellSize));
+						const int32_t cy = static_cast<int32_t>(std::floor(entity.Position.y / activeCellSize));
+						const int32_t cz = static_cast<int32_t>(std::floor(entity.Position.z / activeCellSize));
+						chunkId = (static_cast<uint64_t>(static_cast<uint32_t>(cx) & 0x1FFFFFu) << 42)
+						        | (static_cast<uint64_t>(static_cast<uint32_t>(cy) & 0x1FFFFFu) << 21)
+						        | static_cast<uint64_t>(static_cast<uint32_t>(cz) & 0x1FFFFFu);
+					}
+					else // HorizontalXZ (3D大世界 [默认])
+					{
+						const int32_t cx = static_cast<int32_t>(std::floor(entity.Position.x / activeCellSize));
+						const int32_t cz = static_cast<int32_t>(std::floor(entity.Position.z / activeCellSize));
+						chunkId = (static_cast<uint64_t>(static_cast<uint32_t>(cx)) << 32) | static_cast<uint64_t>(static_cast<uint32_t>(cz));
+					}
 				}
 
 				auto it = std::find_if(chunkBuckets.begin(), chunkBuckets.end(), [chunkId](const ChunkBucket& b) {

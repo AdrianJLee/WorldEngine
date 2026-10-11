@@ -1675,7 +1675,7 @@ namespace World
 		// 1. 动态自适应视场覆盖: 随视距/高度自适应扩展，保证正交与透视拉远时绝不半截截断
 		const float camHeight = std::abs(camPos.y);
 		const float groundDist = std::max(camHeight, std::sqrt(camPos.x * camPos.x + camPos.z * camPos.z));
-		const float dynamicRadius = std::clamp(400.0f + groundDist * 4.0f, 500.0f, 2500.0f);
+		const float dynamicRadius = std::clamp(500.0f + groundDist * 4.0f, 600.0f, 3500.0f);
 
 		// 2. 视线前推重心: 确保平视或俯视时，视线前方地平线深处完全被地网铺满
 		const glm::vec2 horizForward = glm::length(glm::vec2(camForward.x, camForward.z)) > 1e-4f

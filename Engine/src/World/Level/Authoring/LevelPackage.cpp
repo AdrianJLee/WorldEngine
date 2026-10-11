@@ -103,7 +103,7 @@ namespace World::Level
 	{
 		std::string Id;
 		std::string Name;
-		uint32_t GridCellSize{ 64 };
+		LevelPartitionSettings Partition;
 		LevelWorldSettings World;
 		std::vector<DataLayerDefinition> DataLayers;
 		std::vector<EntityDescriptor> Entities;
@@ -262,8 +262,11 @@ namespace World::Level
 	const std::string& LevelPackage::GetName() const { return m_Impl->Name; }
 	void LevelPackage::SetName(const std::string& name) { m_Impl->Name = name; }
 
-	uint32_t LevelPackage::GetGridCellSize() const { return m_Impl->GridCellSize; }
-	void LevelPackage::SetGridCellSize(uint32_t size) { m_Impl->GridCellSize = size; }
+	const LevelPartitionSettings& LevelPackage::GetPartitionSettings() const { return m_Impl->Partition; }
+	void LevelPackage::SetPartitionSettings(const LevelPartitionSettings& settings) { m_Impl->Partition = settings; }
+
+	uint32_t LevelPackage::GetGridCellSize() const { return m_Impl->Partition.GridCellSize; }
+	void LevelPackage::SetGridCellSize(uint32_t size) { m_Impl->Partition.GridCellSize = size > 0 ? size : 64; }
 
 	const LevelWorldSettings& LevelPackage::GetWorld() const { return m_Impl->World; }
 	LevelWorldSettings& LevelPackage::GetWorld() { return m_Impl->World; }
@@ -313,7 +316,27 @@ namespace World::Level
 			out << YAML::BeginMap;
 			out << YAML::Key << "Id" << YAML::Value << m_Impl->Id;
 			out << YAML::Key << "Name" << YAML::Value << m_Impl->Name;
-			out << YAML::Key << "GridCellSize" << YAML::Value << m_Impl->GridCellSize;
+			if (!m_Impl->Partition.IsDefault())
+			{
+				out << YAML::Key << "Partition" << YAML::Value << YAML::BeginMap;
+				out << YAML::Key << "GridCellSize" << YAML::Value << m_Impl->Partition.GridCellSize;
+				std::string planeStr = "HorizontalXZ";
+				switch (m_Impl->Partition.GridPlane)
+				{
+				case PartitionGridPlane::VerticalXY: planeStr = "VerticalXY"; break;
+				case PartitionGridPlane::VerticalZY: planeStr = "VerticalZY"; break;
+				case PartitionGridPlane::Isometric:  planeStr = "Isometric"; break;
+				case PartitionGridPlane::Full3D:     planeStr = "Full3D"; break;
+				default: planeStr = "HorizontalXZ"; break;
+				}
+				out << YAML::Key << "GridPlane" << YAML::Value << planeStr;
+				out << YAML::Key << "StreamingRadius" << YAML::Value << m_Impl->Partition.StreamingRadius;
+				out << YAML::EndMap;
+			}
+			else
+			{
+				out << YAML::Key << "GridCellSize" << YAML::Value << m_Impl->Partition.GridCellSize;
+			}
 
 			// `World:` 只在与默认不同时写(旧 manifest 形态不变)。
 			if (!m_Impl->World.IsDefault())
@@ -441,7 +464,22 @@ namespace World::Level
 			m_Impl->Name = root["Name"] ? root["Name"].as<std::string>("") : std::string();
 			if (m_Impl->Name.empty())
 				m_Impl->Name = m_Impl->Id;
-			m_Impl->GridCellSize = root["GridCellSize"] ? root["GridCellSize"].as<uint32_t>(64) : 64u;
+			m_Impl->Partition = LevelPartitionSettings {};
+			if (YAML::Node partition = root["Partition"])
+			{
+				m_Impl->Partition.GridCellSize = partition["GridCellSize"] ? partition["GridCellSize"].as<uint32_t>(64) : 64u;
+				const std::string planeStr = partition["GridPlane"] ? partition["GridPlane"].as<std::string>("HorizontalXZ") : "HorizontalXZ";
+				if (planeStr == "VerticalXY") m_Impl->Partition.GridPlane = PartitionGridPlane::VerticalXY;
+				else if (planeStr == "VerticalZY") m_Impl->Partition.GridPlane = PartitionGridPlane::VerticalZY;
+				else if (planeStr == "Isometric")  m_Impl->Partition.GridPlane = PartitionGridPlane::Isometric;
+				else if (planeStr == "Full3D")     m_Impl->Partition.GridPlane = PartitionGridPlane::Full3D;
+				else m_Impl->Partition.GridPlane = PartitionGridPlane::HorizontalXZ;
+				m_Impl->Partition.StreamingRadius = partition["StreamingRadius"] ? partition["StreamingRadius"].as<float>(128.0f) : 128.0f;
+			}
+			else if (YAML::Node cellSize = root["GridCellSize"])
+			{
+				m_Impl->Partition.GridCellSize = cellSize.as<uint32_t>(64);
+			}
 
 			m_Impl->World = LevelWorldSettings {};
 			if (YAML::Node world = root["World"])
@@ -568,7 +606,7 @@ namespace World::Level
 	void LevelPackage::CaptureFromScene(Scene& scene, const std::string& levelName, uint32_t gridCellSize)
 	{
 		m_Impl->Name = levelName;
-		m_Impl->GridCellSize = gridCellSize > 0 ? gridCellSize : 64;
+		m_Impl->Partition.GridCellSize = gridCellSize > 0 ? gridCellSize : 64;
 		m_Impl->Entities.clear();
 
 		// 世界设置随关卡走(重力覆盖 / 物理调试);预制体不带这些。

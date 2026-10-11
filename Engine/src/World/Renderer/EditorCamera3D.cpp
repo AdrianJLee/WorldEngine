@@ -12,8 +12,10 @@ namespace World
 	namespace
 	{
 		constexpr float kMaxPitchDegrees = 89.0f;
-		constexpr float kMinDistance = 0.01f;
-		constexpr float kMaxDistance = 100000.0f;
+		constexpr float kMinDistance = 0.5f;
+		constexpr float kMaxDistance = 1000.0f;
+		constexpr float kMinOrthoSize = 0.5f;
+		constexpr float kMaxOrthoSize = 1000.0f;
 	}
 
 	EditorCamera3D::EditorCamera3D(float fovDegrees, float aspectRatio, float nearClip, float farClip,
@@ -45,7 +47,7 @@ namespace World
 		if (m_Projection == ViewportProjection::Orthographic)
 		{
 			// 从透视切正交: 由当前 distance 与 FOV 换算对应的 OrthographicSize
-			m_OrthographicSize = std::clamp(2.0f * m_Distance * std::tan(halfFov), 0.1f, 10000.0f);
+			m_OrthographicSize = std::clamp(2.0f * m_Distance * std::tan(halfFov), kMinOrthoSize, kMaxOrthoSize);
 		}
 		else
 		{
@@ -84,7 +86,7 @@ namespace World
 
 	void EditorCamera3D::SetOrthographicSize(float size)
 	{
-		m_OrthographicSize = std::clamp(size, 0.05f, 50000.0f);
+		m_OrthographicSize = std::clamp(size, kMinOrthoSize, kMaxOrthoSize);
 		const float halfFov = glm::radians(m_FOV * 0.5f);
 		m_Distance = std::clamp((m_OrthographicSize * 0.5f) / std::tan(halfFov), kMinDistance, kMaxDistance);
 	}
@@ -190,10 +192,11 @@ namespace World
 		{
 			const float orthoH = m_OrthographicSize;
 			const float orthoW = orthoH * m_Aspect;
+			const float clipExtent = std::max({ m_Far, orthoH * 3.5f, 2000.0f });
 			projection = glm::ortho(
 				-orthoW * 0.5f, orthoW * 0.5f,
 				-orthoH * 0.5f, orthoH * 0.5f,
-				-std::max(2000.0f, m_Far), std::max(2000.0f, m_Far)
+				-clipExtent, clipExtent
 			);
 		}
 		else

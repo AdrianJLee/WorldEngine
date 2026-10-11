@@ -43,5 +43,9 @@ namespace World
 		virtual const std::vector<Level::DataLayerDefinition>& GetLevelDataLayers() const = 0;
 		virtual uint32_t GetActiveDataLayers() const = 0;
 		virtual void SetActiveDataLayers(uint32_t mask) = 0;
+
+		// Level 2.0 空间分区配置
+		virtual Level::LevelPartitionSettings GetLevelPartitionSettings() const = 0;
+		virtual void SetLevelPartitionSettings(const Level::LevelPartitionSettings& settings) = 0;
 	};
 }
