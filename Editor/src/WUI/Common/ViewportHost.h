@@ -47,5 +47,10 @@ namespace World
 		// Level 2.0 空间分区配置
 		virtual Level::LevelPartitionSettings GetLevelPartitionSettings() const = 0;
 		virtual void SetLevelPartitionSettings(const Level::LevelPartitionSettings& settings) = 0;
+
+		// 视口飞行漫游状态与调速反馈
+		virtual float GetFlySpeedScale() const = 0;
+		virtual float GetFlySpeedTimer() const = 0;
+		virtual bool IsFlyNavigating() const = 0;
 	};
 }

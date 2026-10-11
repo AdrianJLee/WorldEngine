@@ -1054,9 +1054,7 @@ namespace World
 				world = selected.GetComponent<WorldTransformComponent>().Matrix;
 			const bool plane = selected.GetComponent<MeshRendererComponent>().Primitive == MeshRendererComponent::PrimitiveShape::Plane;
 
-			// 单位网格角点:bit0 = X、bit1 = Y、bit2 = Z;plane 只有 y = 0 的一层(z/x 四角)。
-			// 保留**裁剪空间**坐标:大物体(例如地面平面)的角点会跑到相机后面,直接丢角点会让
-			// 框缺边/变形,这里按近平面 w 裁剪线段后再投影。
+			// 单位网格角点: bit0 = X、bit1 = Y、bit2 = Z; plane 只有 y = 0 的一层
 			glm::vec4 clipPos[8];
 			for (int i = 0; i < 8; ++i)
 			{
@@ -1064,24 +1062,8 @@ namespace World
 					(i & 4) ? 0.5f : -0.5f };
 				clipPos[i] = gizmoCamera.ViewProjection * (world * glm::vec4 { corner, 1.0f });
 			}
-			const auto projectClip = [&sceneRect](const glm::vec4& clip)
-			{
-				const glm::vec3 ndc = glm::vec3(clip) / clip.w;
-				return glm::vec2 { sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
-					sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H };
-			};
-			// 近平面裁剪后的端点可能落在极远处(大平面):夹到视口周围一个安全范围,
-			// 避免 WUI 批处理里出现 1e7 级坐标(方向几乎不变,绘制结果由 ClipPush 决定)。
-			const float clampPad = 10.0f * std::max(sceneRect.W, sceneRect.H);
-			const auto clampScreen = [&sceneRect, clampPad](const glm::vec2& point)
-			{
-				return glm::vec2 { glm::clamp(point.x, sceneRect.X - clampPad, sceneRect.X + sceneRect.W + clampPad),
-					glm::clamp(point.y, sceneRect.Y - clampPad, sceneRect.Y + sceneRect.H + clampPad) };
-			};
 
 			// 面朝向判定:只画"至少依附一个朝向相机的面"的棱 —— 物体后面的棱不再出现
-			// (用户 2026-09-16:不要透视效果、别让我看到盒子后面的框)。
-			// 面索引:0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z。
 			const glm::mat3 normalMatrix = glm::mat3(world);
 			const glm::vec3 faceNormals[6] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 },
 				{ 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
@@ -1095,118 +1077,33 @@ namespace World
 				faceVisible[i] = glm::dot(normalWorld, gizmoCamera.Position - centerWorld) > 0.0f;
 			}
 
-			struct Edge { glm::vec2 From { 0.0f, 0.0f }; glm::vec2 To { 0.0f, 0.0f }; float Depth = 0.0f; };
-			std::vector<Edge> edges;
-			const auto addEdge = [&](int a, int b, int faceA, int faceB)
-			{
-				// 两条相邻面都背向相机 = 这条棱在物体后面,跳过。
-				if (!(faceVisible[faceA] || faceVisible[faceB]))
-					return;
-				glm::vec4 p0 = clipPos[a];
-				glm::vec4 p1 = clipPos[b];
-				constexpr float kMinW = 0.0001f;
-				if (p0.w < kMinW && p1.w < kMinW)
-					return; // 整条棱在相机后面
-				if (p0.w < kMinW)
-				{
-					const float t = (kMinW - p0.w) / (p1.w - p0.w);
-					p0 = glm::mix(p0, p1, t);
-				}
-				else if (p1.w < kMinW)
-				{
-					const float t = (kMinW - p1.w) / (p0.w - p1.w);
-					p1 = glm::mix(p1, p0, t);
-				}
-				edges.push_back({ clampScreen(projectClip(p0)), clampScreen(projectClip(p1)),
-					std::max(p0.w, p1.w) });
-			};
+			const Wui::WuiColor selectOutlineColor { 1.0f, 0.55f, 0.12f, 1.0f };
+			Wui::ClipScope selectionClip(ctx, sceneRect);
+
 			if (plane)
 			{
-				// 平面只有 4 个角:i = 0/1(x)、4/5(z)→ {0,1},{1,5},{5,4},{4,0}
-				// 平面没有体积,不做面剔除(始终画它的 4 条边)。
+				// 平面 4 条边: {0,1}, {1,5}, {5,4}, {4,0} (走 Liang-Barsky 严格几何裁剪, 绝无折断飞线与除零畸变)
 				const int planeEdges[4][2] = { { 0, 1 }, { 1, 5 }, { 5, 4 }, { 4, 0 } };
 				for (const auto& edge : planeEdges)
 				{
-					glm::vec4 p0 = clipPos[edge[0]];
-					glm::vec4 p1 = clipPos[edge[1]];
-					constexpr float kMinW = 0.0001f;
-					if (p0.w < kMinW && p1.w < kMinW)
-						continue;
-					if (p0.w < kMinW)
-					{
-						const float t = (kMinW - p0.w) / (p1.w - p0.w);
-						p0 = glm::mix(p0, p1, t);
-					}
-					else if (p1.w < kMinW)
-					{
-						const float t = (kMinW - p1.w) / (p0.w - p1.w);
-						p1 = glm::mix(p1, p0, t);
-					}
-					edges.push_back({ clampScreen(projectClip(p0)), clampScreen(projectClip(p1)), std::max(p0.w, p1.w) });
+					PushProjectedSegment(ctx, gizmoCamera.ViewProjection, sceneRect,
+						clipPos[edge[0]], clipPos[edge[1]], selectOutlineColor, 1.8f);
 				}
 			}
 			else
 			{
-				// 12 条棱 + 每条棱的两个相邻面(见上面的面索引)。
+				// 12 条棱 + 每条棱的两个相邻面
 				const int cubeEdges[12][4] = {
-					{ 0, 1, 3, 5 }, { 2, 3, 2, 5 }, { 4, 5, 3, 4 }, { 6, 7, 2, 4 },   // 沿 X(角点 y/z 固定)
-					{ 0, 2, 1, 5 }, { 1, 3, 0, 5 }, { 4, 6, 1, 4 }, { 5, 7, 0, 4 },   // 沿 Y(角点 x/z 固定)
-					{ 0, 4, 1, 3 }, { 1, 5, 0, 3 }, { 2, 6, 1, 2 }, { 3, 7, 0, 2 },   // 沿 Z(角点 x/y 固定)
+					{ 0, 1, 3, 5 }, { 2, 3, 2, 5 }, { 4, 5, 3, 4 }, { 6, 7, 2, 4 },   // 沿 X
+					{ 0, 2, 1, 5 }, { 1, 3, 0, 5 }, { 4, 6, 1, 4 }, { 5, 7, 0, 4 },   // 沿 Y
+					{ 0, 4, 1, 3 }, { 1, 5, 0, 3 }, { 2, 6, 1, 2 }, { 3, 7, 0, 2 },   // 沿 Z
 				};
 				for (const auto& edge : cubeEdges)
-					addEdge(edge[0], edge[1], edge[2], edge[3]);
-			}
-
-			if (!edges.empty())
-			{
-				glm::vec2 minScreen { 1e30f, 1e30f };
-				glm::vec2 maxScreen { -1e30f, -1e30f };
-				float minDepth = edges[0].Depth, maxDepth = edges[0].Depth;
-				for (const Edge& edge : edges)
 				{
-					minScreen = glm::min(minScreen, glm::min(edge.From, edge.To));
-					maxScreen = glm::max(maxScreen, glm::max(edge.From, edge.To));
-					minDepth = std::min(minDepth, edge.Depth);
-					maxDepth = std::max(maxDepth, edge.Depth);
-				}
-				// 远的先画(先画的被后画的盖住),并按视深度淡出:近实远淡。
-				std::sort(edges.begin(), edges.end(),
-					[](const Edge& a, const Edge& b) { return a.Depth > b.Depth; });
-				{
-					// P1c-W3.4:选中框线框的裁剪走库件 Wui::ClipScope。
-					Wui::ClipScope selectionClip(ctx, sceneRect);
-					for (const Edge& edge : edges)
+					if (faceVisible[edge[2]] || faceVisible[edge[3]])
 					{
-						// 可见棱统一实色(不再做远近淡出:背面棱已经被剔除,不需要透视暗示)。
-						const Wui::WuiColor color { 1.0f, 0.55f, 0.12f, 1.0f };
-						const glm::vec2 from = edge.From;
-						const glm::vec2 to = edge.To;
-						// P1c-W3.6:可见棱同理走库件(1.8px 宽 = 半点偏移 0.9)。
-						Wui::LineSegment(ctx, from, to, color, 1.8f);
-					}
-				}
-				if (std::getenv("WLD_TRACE_UI"))
-				{
-					// 句柄或矩形变化时打一行(上限 40 行):Play↔暂停会换相机,矩形必须跟着变,
-					// 自动化要能同时看到两种状态的框。
-					static uint32_t lastHandle = 0;
-					static Wui::WuiRect lastRect { 0, 0, 0, 0 };
-					static int traced = 0;
-					const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(selected));
-					const Wui::WuiRect rect { minScreen.x, minScreen.y, maxScreen.x - minScreen.x, maxScreen.y - minScreen.y };
-					const bool moved = std::abs(rect.X - lastRect.X) > 1.0f || std::abs(rect.Y - lastRect.Y) > 1.0f ||
-						std::abs(rect.W - lastRect.W) > 1.0f || std::abs(rect.H - lastRect.H) > 1.0f;
-					if ((handle != lastHandle || moved) && traced < 40)
-					{
-						lastHandle = handle;
-						lastRect = rect;
-						++traced;
-						const int visibleFaces = (faceVisible[0] ? 1 : 0) + (faceVisible[1] ? 1 : 0) +
-							(faceVisible[2] ? 1 : 0) + (faceVisible[3] ? 1 : 0) +
-							(faceVisible[4] ? 1 : 0) + (faceVisible[5] ? 1 : 0);
-						WLD_CORE_INFO("[ui] selection box(3d) handle={0} bbox=({1},{2},{3},{4}) edges={5} faces={6}",
-							handle, minScreen.x, minScreen.y, maxScreen.x - minScreen.x, maxScreen.y - minScreen.y,
-							edges.size(), visibleFaces);
+						PushProjectedSegment(ctx, gizmoCamera.ViewProjection, sceneRect,
+							clipPos[edge[0]], clipPos[edge[1]], selectOutlineColor, 1.8f);
 					}
 				}
 			}
@@ -1560,6 +1457,14 @@ namespace World
 				"Partition %um [%s] | Chunk (%d, %d) | Authored: %zu Chunks",
 				partSettings.GridCellSize, planeTag,
 				activeChunkX, (planeMode == Level::PartitionGridPlane::VerticalXY || planeMode == Level::PartitionGridPlane::VerticalZY) ? activeChunkY : activeChunkZ, authoredChunkCount);
+
+			if (m_Host.IsFlyNavigating() || m_Host.GetFlySpeedTimer() > 0.0f)
+			{
+				char flyInfo[48] = {};
+				const float curSpeed = 12.0f * m_Host.GetFlySpeedScale();
+				std::snprintf(flyInfo, sizeof(flyInfo), " | Fly: %.1f m/s (%.1fx)", curSpeed, m_Host.GetFlySpeedScale());
+				std::strncat(hudLine1, flyInfo, sizeof(hudLine1) - std::strlen(hudLine1) - 1);
+			}
 		}
 		else if (m_ShowReferenceGrid)
 		{
@@ -1583,6 +1488,14 @@ namespace World
 
 			std::snprintf(hudLine1, sizeof(hudLine1),
 				"%s | %s | Scale: %.1fu", gridStepLabel, axisTag, scaleValue);
+
+			if (m_Host.IsFlyNavigating() || m_Host.GetFlySpeedTimer() > 0.0f)
+			{
+				char flyInfo[48] = {};
+				const float curSpeed = 12.0f * m_Host.GetFlySpeedScale();
+				std::snprintf(flyInfo, sizeof(flyInfo), " | Fly: %.1f m/s (%.1fx)", curSpeed, m_Host.GetFlySpeedScale());
+				std::strncat(hudLine1, flyInfo, sizeof(hudLine1) - std::strlen(hudLine1) - 1);
+			}
 		}
 			std::string layersText;
 			for (const Level::DataLayerDefinition& layer : m_Host.GetLevelDataLayers())

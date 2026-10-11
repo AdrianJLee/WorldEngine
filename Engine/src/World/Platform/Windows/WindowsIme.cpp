@@ -65,5 +65,19 @@ namespace World::Platform
 		}
 		return false;
 	}
+
+	void WindowsIme::SetImeEnabled(HWND hwnd, bool enabled)
+	{
+		HIMC himc = ImmGetContext(hwnd);
+		if (himc)
+		{
+			ImmSetOpenStatus(himc, enabled ? TRUE : FALSE);
+			if (!enabled)
+			{
+				ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+			}
+			ImmReleaseContext(hwnd, himc);
+		}
+	}
 #endif
 }

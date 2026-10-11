@@ -332,6 +332,9 @@ namespace World
 		void SetActiveDataLayers(uint32_t mask) override;
 		Level::LevelPartitionSettings GetLevelPartitionSettings() const override;
 		void SetLevelPartitionSettings(const Level::LevelPartitionSettings& settings) override;
+		float GetFlySpeedScale() const override;
+		float GetFlySpeedTimer() const override;
+		bool IsFlyNavigating() const override;
 		// 关卡数据层编辑(PanelHost):读当前文档声明的层 / 写回(只重写入口 manifest)。
 		bool GetEditableDataLayers(std::vector<Level::DataLayerDefinition>* out) override;
 		bool ApplyDataLayers(const std::vector<Level::DataLayerDefinition>& layers,

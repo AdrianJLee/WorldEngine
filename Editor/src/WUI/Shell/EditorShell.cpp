@@ -1138,6 +1138,21 @@ void EditorShell::SetLevelPartitionSettings(const Level::LevelPartitionSettings&
 	m_Editor.GetDocument().SavePartitionSettings();
 }
 
+float EditorShell::GetFlySpeedScale() const
+{
+	return m_Editor.GetFlySpeedScale();
+}
+
+float EditorShell::GetFlySpeedTimer() const
+{
+	return m_Editor.GetFlySpeedTimer();
+}
+
+bool EditorShell::IsFlyNavigating() const
+{
+	return m_Editor.IsFlyNavigating();
+}
+
 
 bool EditorShell::GetEditableDataLayers(std::vector<Level::DataLayerDefinition>* out){
 		// 与视口工具栏读同一份(文档缓存):面板改完写回,两边立刻同源。

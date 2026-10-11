@@ -25,5 +25,8 @@ namespace World::Platform
 		static bool HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, ImeState& outState);
 #endif
 		static const ImeState& GetCurrentState();
+#ifdef WLD_PLATFORM_WINDOWS
+		static void SetImeEnabled(HWND hwnd, bool enabled);
+#endif
 	};
 }

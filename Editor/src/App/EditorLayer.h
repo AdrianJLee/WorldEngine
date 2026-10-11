@@ -174,6 +174,9 @@ namespace World
 		bool IsViewportCamera3D() const { return m_EditorCamera3D.GetProjection() == World::ViewportProjection::Perspective; }
 		void ToggleViewportCamera3D();
 		void FocusOnSelectedEntity();
+		float GetFlySpeedScale() const { return m_FlySpeedScale; }
+		float GetFlySpeedTimer() const { return m_FlySpeedFeedbackTimer; }
+		bool IsFlyNavigating() const { return m_Viewport3DDragging == Viewport3DDrag::Orbit; }
 		bool IsReferenceGridEnabled() const { return m_ShowReferenceGrid; }
 		void SetReferenceGridEnabled(bool enabled) { m_ShowReferenceGrid = enabled; }
 		Ref<SceneRenderer>& GetSceneRenderer() { return m_SceneRenderer; }
@@ -514,6 +517,8 @@ namespace World
 		bool m_Viewport3D = false;
 		enum class Viewport3DDrag { None, Orbit, Pan };
 		Viewport3DDrag m_Viewport3DDragging = Viewport3DDrag::None;
+		float m_FlySpeedScale = 1.0f;
+		float m_FlySpeedFeedbackTimer = 0.0f;
 		glm::vec2 m_Viewport3DLastMouse { 0.0f, 0.0f };
 		bool m_Viewport2DDragging = false;
 		glm::vec2 m_Viewport2DLastMouse { 0.0f, 0.0f };

@@ -1,4 +1,5 @@
 #include "EditorLayer_Internal.h"
+#include "World/Platform/Windows/WindowsIme.h"
 
 #include "World/Renderer/Texture/TextureLibrary.h"
 
@@ -648,11 +649,14 @@ void EditorLayer::OnUpdate(Timestep ts){
 				RelaunchWithProject(root);
 		}
 		// 视口按住右键自由飞行穿梭 (WASD / QE 飞行漫游)
+		if (m_FlySpeedFeedbackTimer > 0.0f)
+			m_FlySpeedFeedbackTimer -= ts.GetSeconds();
+
 		if (m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Orbit)
 		{
-			float speed = 12.0f; // 基础飞行速度 12 m/s
+			float speed = 12.0f * m_FlySpeedScale; // 基础飞行速度乘以滚轮速度倍率
 			if (Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift))
-				speed *= 2.5f; // Shift 冲刺加速至 30 m/s
+				speed *= 2.5f; // Shift 冲刺加速至 2.5 倍
 
 			float forward = 0.0f;
 			float right = 0.0f;
@@ -671,6 +675,22 @@ void EditorLayer::OnUpdate(Timestep ts){
 				m_EditorCamera3D.Fly(forward * moveDist, right * moveDist, up * moveDist);
 			}
 		}
+
+#ifdef WLD_PLATFORM_WINDOWS
+		// 视口输入法防护: 当处于视口焦点或正在按住右键飞行漫游时, 临时抑制中文输入法组合, 防止 WASD/F 被输入法拦截
+		{
+			const bool viewportActive = (m_ViewportFocused && m_ViewportHovered) || (m_Viewport3DDragging != Viewport3DDrag::None);
+			const bool textActive = Wui::WuiTextFocus::Get().Active();
+			HWND hwnd = static_cast<HWND>(Application::Get().GetWindow().GetNativeWindow());
+			if (hwnd)
+			{
+				if (viewportActive && !textActive)
+					Platform::WindowsIme::SetImeEnabled(hwnd, false);
+				else if (textActive)
+					Platform::WindowsIme::SetImeEnabled(hwnd, true);
+			}
+		}
+#endif
 
 		m_HasRenderedScene = false;
 		// 视口目标重建节流:尺寸稳定(约 100ms)后再真正重建渲染目标。
@@ -1471,6 +1491,15 @@ void EditorLayer::OnEvent(Event& event){
 			});
 			cameraDispatcher.Dispatch<MouseScrolledEvent>([this](MouseScrolledEvent& e)
 			{
+				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
+				{
+					// 按住右键漫游飞行模式下: 滚轮专属用于调节飞行速度倍率, 绝不触发镜头推拉缩放
+					const float delta = e.GetYOffset();
+					m_FlySpeedScale = std::clamp(m_FlySpeedScale * (1.0f + delta * 0.15f), 0.1f, 10.0f);
+					m_FlySpeedFeedbackTimer = 2.5f; // 2.5 秒速度反馈提示
+					return true;
+				}
+				// 常规编辑模式下: 滚轮执行镜头前后推进拉远 (Dolly)
 				m_EditorCamera3D.Dolly(-e.GetYOffset() * 0.6f);
 				return false;
 			});
