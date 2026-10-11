@@ -26,17 +26,11 @@ docs
 AGENTS.md
 # 本机状态(编辑器偏好/布局/窗口/最近使用组件):不入库;整个目录可删,删后自动重建。
 /local/
+# 本地工程容器目录:整目录不入库(用户项目在任意位置通过向导创建或本地放置)。
+/projects/
 # glTF 导入产物(.wmodel / .wmat / 贴图)由导入器生成:夹具只提交 .gltf,
 # 导入结果由测试/编辑器首次导入时重建(2026-09-20 误提交过一次,已改回忽略)。
-# Layout-S7:项目内容根在 projects/<名>/assets/**。
-projects/*/assets/models/**/*.wmodel
-projects/*/assets/models/**/materials/
-projects/*/assets/models/**/textures/
 
-# M4-TEX:开发期的纹理产物(`.wtexc`)是**生成物**:cook 会重新烘进 cooked/,
-# 编辑器 Texture Settings 的 Apply/Reimport 就地刷新它(供开发态运行时命中产物路径)。
-# 仓库只存源图 + `.wtex` 资产,不存产物。
-projects/*/assets/**/*.wtexc
 
 # 编辑器把任意项目目录当内容根时会生成这两处(脚本存根 + LSP 配置)。
 # templates/ 下的示例项目在仓库内,验证脚本一旦把内容根指向它就会产生这些文件
@@ -44,9 +38,7 @@ projects/*/assets/**/*.wtexc
 # 夹具,仍然入库 —— 所以规则只针对 templates/。
 templates/*/assets/.luau-lsp/
 templates/*/assets/scripts/intermediate/
-projects/assets/
-projects/**/.luau-lsp/
-projects/**/scripts/intermediate/
+
 
 # W8:编辑器脚本工作区脚手架(create-if-missing 生成;用户改过的配置不入库即保留)。
 # 上面的 `.vscode` 忽略规则会连带排除父目录;PROJ-7 起引擎内不再有内置项目,
