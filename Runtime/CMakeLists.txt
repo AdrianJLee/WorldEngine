@@ -27,7 +27,10 @@ file(GLOB_RECURSE Runtime_SOURCES
     "src/*.cpp"
 
 )
-target_sources(Runtime PRIVATE ${Runtime_SOURCES})
+target_sources(Runtime PRIVATE 
+    ${Runtime_SOURCES}
+    "${CMAKE_SOURCE_DIR}/Engine/src/World/Profiling/GlobalAllocHooks.cpp"
+)
 
 target_link_libraries(Runtime PRIVATE 
     World

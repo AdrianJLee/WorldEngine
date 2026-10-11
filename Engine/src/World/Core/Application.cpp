@@ -159,9 +159,15 @@ namespace World
 						WLD_CORE_INFO("[frame-trace] {0}", phase);
 				};
 				tracePhase("Renderer::BeginFrame");
-				Renderer::BeginFrame();
+				{
+					WLD_TRACE_SCOPE("Renderer.BeginFrame");
+					Renderer::BeginFrame();
+				}
 				tracePhase("Renderer::BeginFramePresent");
-				Renderer::BeginFramePresent();
+				{
+					WLD_TRACE_SCOPE("Renderer.BeginFramePresent");
+					Renderer::BeginFramePresent();
+				}
 				{
 					WLD_TRACE_SCOPE("LayerStack OnUpdate");
 					for (Layer* layer : m_LayerStack)
@@ -183,9 +189,15 @@ namespace World
 				// 清掉累积值;平台轮询(OnUpdate)随后只累积下一帧的增量。
 				Input::ResetScrollDelta();
 				tracePhase("Renderer::EndFramePresent");
-				Renderer::EndFramePresent();
+				{
+					WLD_TRACE_SCOPE("Renderer.EndFramePresent");
+					Renderer::EndFramePresent();
+				}
 				tracePhase("Renderer::EndFrame");
-				Renderer::EndFrame();
+				{
+					WLD_TRACE_SCOPE("Renderer.EndFrame");
+					Renderer::EndFrame();
+				}
 			}
 
 

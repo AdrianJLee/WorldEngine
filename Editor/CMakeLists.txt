@@ -26,7 +26,10 @@ file(GLOB_RECURSE EDITOR_SOURCES
     "src/*.h"
     "src/*.cpp"
 )
-target_sources(Editor PRIVATE ${EDITOR_SOURCES})
+target_sources(Editor PRIVATE 
+    ${EDITOR_SOURCES}
+    "${CMAKE_SOURCE_DIR}/Engine/src/World/Profiling/GlobalAllocHooks.cpp"
+)
 
 # 与 Engine 的"一个 target 一个 include 根"同口径:Editor 内部头文件按
 # Editor/src 下的规范路径引用(如 "WUI/Panels/X.h"、"App/EditorLayer.h"),

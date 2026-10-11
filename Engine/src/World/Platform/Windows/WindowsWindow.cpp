@@ -336,14 +336,20 @@ namespace World
 			EnsureFramelessResizableStyle();
 
 		// Poll for and process events
-		glfwPollEvents();
+		{
+			WLD_TRACE_SCOPE("Platform.PollEvents");
+			glfwPollEvents();
+		}
 
 		// Vulkan 由交换链 Present 呈现;GL 保持 glfwSwapBuffers。
 		if (m_Context && Renderer::GetBackendName() != "vulkan")
 		{
 			// 多窗口:独立窗口渲染会切换当前上下文,交换前必须切回本窗口。
 			glfwMakeContextCurrent(m_Window);
-			m_Context->SwapBuffers();
+			{
+				WLD_TRACE_SCOPE("Window.SwapBuffers");
+				m_Context->SwapBuffers();
+			}
 		}
 	}
 

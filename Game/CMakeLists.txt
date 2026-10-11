@@ -153,6 +153,7 @@ target_sources(Game PRIVATE
     ${GAME_SKELETON_SOURCES}
     ${GAME_MODULE_SOURCES}
     "${GAME_SCHEMA_ACTIVE_SOURCE}"
+    "${WLD_ENGINE_ROOT}/Engine/src/World/Profiling/GlobalAllocHooks.cpp"
 )
 target_include_directories(Game PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"

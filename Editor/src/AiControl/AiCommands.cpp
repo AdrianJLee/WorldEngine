@@ -1052,6 +1052,41 @@ namespace World
 			result = World::Profiling::Telemetry::DescribeStatsJson();
 			return true;
 		}
+		if (cmd == "prof.diagnose")
+		{
+			const auto snapshot = World::Profiling::Telemetry::GetStats();
+			const auto sceneStats = World::Renderer3D::GetSceneStatistics();
+			std::ostringstream out;
+			out << "=== WorldEngine Bottleneck Diagnosis ===\n"
+				<< "Frame: " << snapshot.FrameIndex << ", LastMs: " << snapshot.Frame.LastMs
+				<< ", p50: " << snapshot.Frame.P50Ms << ", p95: " << snapshot.Frame.P95Ms
+				<< ", JankCount: " << snapshot.Frame.JankCount << "\n"
+				<< "Render: Draws=" << sceneStats.DrawCalls << ", Triangles=" << sceneStats.Triangles
+				<< ", Culled=" << sceneStats.Culled << ", GPU=" << sceneStats.GpuMilliseconds << " ms\n";
+
+			if (sceneStats.GpuMilliseconds > 0.0 && sceneStats.GpuMilliseconds > snapshot.Frame.LastMs * 1.2)
+			{
+				out << "Classification: [GPU-BOUND]\n"
+					<< "Primary Bottleneck: GPU rendering / shader execution (" << sceneStats.GpuMilliseconds << " ms vs CPU " << snapshot.Frame.LastMs << " ms).\n"
+					<< "Advice: Optimize shaders, reduce resolution, or tone down shadow cascade passes.\n";
+			}
+			else if (snapshot.Frame.LastMs > 16.67f)
+			{
+				out << "Classification: [CPU-BOUND / SLOW FRAME]\n"
+					<< "Primary Bottleneck: CPU frame time exceeded 16.67ms (60 FPS) budget.\n";
+				if (sceneStats.DrawCalls > 1000)
+					out << "Advice: Draw calls are high (" << sceneStats.DrawCalls << "), consider mesh instancing or batching.\n";
+				else
+					out << "Advice: Draw calls are low (" << sceneStats.DrawCalls << "). Cost is in CPU culling, scene traversal, or game logic.\n";
+			}
+			else
+			{
+				out << "Classification: [HEALTHY]\n"
+					<< "Status: Frame time is within standard 60 FPS budget. No major bottleneck detected.\n";
+			}
+			result = out.str();
+			return true;
+		}
 		if (cmd == "prof.capture.start")
 		{
 			World::Profiling::Telemetry::CaptureDesc desc;

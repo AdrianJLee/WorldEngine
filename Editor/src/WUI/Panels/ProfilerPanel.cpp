@@ -5,6 +5,7 @@
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Profiling/Telemetry.h"
+#include "World/Scene/Scene.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidget.h"
@@ -23,10 +24,10 @@ namespace World
 		//   3. **斜杠要说明**:`8/8` 改成 `8 of 8 visible`,读者不必猜分子分母;
 		//   4. **面板里只放数据**:环境变量、配置路径这类"怎么开"的说明移到文档与 tooltip,
 		//      不再和数字挤在一个列表里(那是"乱"的主要来源)。
-		constexpr int kLineCount = 13;
+		constexpr int kLineCount = 15;
 	}
 
-	void ProfilerPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost&)
+	void ProfilerPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		// 数据源:唯一真相(与 prof.stats / 导出 / 无障碍同源)。
 		const Profiling::Telemetry::StatsSnapshot snapshot = Profiling::Telemetry::GetStats();
@@ -202,6 +203,56 @@ namespace World
 					Wui::Tr("profiler.idle", "idle").c_str());
 			setLine(12, buffer, snapshot.Capture.DroppedEvents > 0
 				? Wui::WuiColor { 1.0f, 0.5f, 0.4f, 1.0f } : muted);
+		}
+
+		// ---- 热点与瓶颈:当前帧耗时最多的系统(实时回答慢在哪) ----
+		section(13, "profiler.section.hotspots", "HOTSPOTS");
+		{
+			std::string hotDesc = Wui::Tr("profiler.noHotspots", "no active frame systems");
+			Wui::WuiColor hotColor = muted;
+			if (Ref<Scene> activeScene = host.GetActiveScene())
+			{
+				const auto& timings = activeScene->GetFrameSystemTimings();
+				if (!timings.empty())
+				{
+					const Scene::FrameSystemTiming* top1 = nullptr;
+					const Scene::FrameSystemTiming* top2 = nullptr;
+					for (const auto& t : timings)
+					{
+						if (!top1 || t.Milliseconds > top1->Milliseconds)
+						{
+							top2 = top1;
+							top1 = &t;
+						}
+						else if (!top2 || t.Milliseconds > top2->Milliseconds)
+						{
+							top2 = &t;
+						}
+					}
+
+					if (top1 && top1->Milliseconds > 0.0)
+					{
+						char hotBuf[200];
+						if (top2 && top2->Milliseconds > 0.0)
+						{
+							std::snprintf(hotBuf, sizeof(hotBuf), "%s %.2f ms      %s %.2f ms",
+								top1->Name.c_str(), top1->Milliseconds,
+								top2->Name.c_str(), top2->Milliseconds);
+						}
+						else
+						{
+							std::snprintf(hotBuf, sizeof(hotBuf), "%s %.2f ms",
+								top1->Name.c_str(), top1->Milliseconds);
+						}
+						hotDesc = hotBuf;
+
+						const bool isSpike = top1->Milliseconds >= 4.0 ||
+							(snapshot.Frame.LastMs > 0.0f && top1->Milliseconds >= snapshot.Frame.LastMs * 0.35);
+						hotColor = isSpike ? Wui::WuiColor { 1.0f, 0.45f, 0.35f, 1.0f } : normal;
+					}
+				}
+			}
+			setLine(14, hotDesc.c_str(), hotColor);
 		}
 		// 无障碍节点:自动化可直接断言这组数字(键名与数据字典一致)。
 		{

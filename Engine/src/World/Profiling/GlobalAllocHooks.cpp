@@ -25,6 +25,32 @@
 
 #if defined(WLD_PLATFORM_WINDOWS)
 #include <intrin.h> // _ReturnAddress:调用点采样(非 SIMD)
+
+extern "C" __declspec(dllimport) unsigned short __stdcall CaptureStackBackTrace(
+	unsigned long FramesToSkip,
+	unsigned long FramesToCapture,
+	void** BackTrace,
+	unsigned long* BackTraceHash);
+
+namespace
+{
+	inline void* CaptureCallerFrame() noexcept
+	{
+		void* stack[4] = {};
+		const unsigned short count = CaptureStackBackTrace(1, 4, stack, nullptr);
+		// 穿透 STL 模板: 优先取第 2 层业务帧, 其次第 1 层容器帧
+		if (count > 2 && stack[2])
+			return stack[2];
+		if (count > 1 && stack[1])
+			return stack[1];
+		return stack[0] ? stack[0] : _ReturnAddress();
+	}
+}
+#else
+namespace
+{
+	inline void* CaptureCallerFrame() noexcept { return nullptr; }
+}
 #endif
 #include <new>
 
@@ -47,9 +73,7 @@ void* operator new(size_t size)
 	{
 		HookGuard guard;
 		if (guard.ShouldRecord())
-			// 在 hook 自己的帧里取返回地址 —— 这才是用户代码里的分配点
-			// (在 MemoryTrack 里取会退化成 RecordAllocate 自己,站点表就废了)。
-			World::Profiling::MemoryTrack::RecordAllocate(memory, size, _ReturnAddress());
+			World::Profiling::MemoryTrack::RecordAllocate(memory, size, CaptureCallerFrame());
 		return memory;
 	}
 	throw std::bad_alloc();
@@ -67,7 +91,7 @@ void* operator new(size_t size, const std::nothrow_t&) noexcept
 		return nullptr;
 	HookGuard guard;
 	if (guard.ShouldRecord())
-		World::Profiling::MemoryTrack::RecordAllocate(memory, size, _ReturnAddress());
+		World::Profiling::MemoryTrack::RecordAllocate(memory, size, CaptureCallerFrame());
 	return memory;
 }
 
