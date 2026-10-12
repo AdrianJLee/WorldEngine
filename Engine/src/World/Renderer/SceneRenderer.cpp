@@ -1335,7 +1335,18 @@ namespace World
 				!selectedEntity.HasComponent<MeshRendererComponent>())
 			{
 				auto& transform = selectedEntity.GetComponent<TransformComponent>();
-				Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
+				const auto& sprite = selectedEntity.GetComponent<SpriteComponent>();
+				glm::mat4 rectTr = transform.GetLocalMatrix();
+				if (sprite.Pivot.x != 0.5f || sprite.Pivot.y != 0.5f)
+				{
+					rectTr = glm::translate(rectTr, glm::vec3(0.5f - sprite.Pivot.x, 0.5f - sprite.Pivot.y, 0.0f));
+				}
+				Renderer2D::DrawRectCore(rectTr, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
+				const float crossSz = 0.08f * std::max(transform.Scale.x, 1.0f);
+				Renderer2D::DrawLineCore(transform.Location - glm::vec3(crossSz, 0.0f, 0.0f),
+					transform.Location + glm::vec3(crossSz, 0.0f, 0.0f), { 0.2f, 0.95f, 0.95f, 1.0f }, selectedEntity);
+				Renderer2D::DrawLineCore(transform.Location - glm::vec3(0.0f, crossSz, 0.0f),
+					transform.Location + glm::vec3(0.0f, crossSz, 0.0f), { 0.2f, 0.95f, 0.95f, 1.0f }, selectedEntity);
 			}
 			RenderDebug(camera, cameraTransform);
 		}
@@ -1509,12 +1520,14 @@ namespace World
 				glm::vec2 resolvedCoords[4];
 
 				// If sprite.Texture is a .watlas asset, resolve the atlas sub-texture
+				std::shared_ptr<TextureAtlas> atlas = nullptr;
+				const SubTexture2D* sub = nullptr;
 				if (sprite.Texture.HasPath())
 				{
 					const std::string& path = StringPool::Get().PathOf(sprite.Texture.Path);
 					if (path.length() >= 7 && path.compare(path.length() - 7, 7, ".watlas") == 0)
 					{
-						auto atlas = TextureAtlas::GetOrLoad(path);
+						atlas = TextureAtlas::GetOrLoad(path);
 						if (atlas)
 						{
 							if (!atlas->GetTexturePath().empty())
@@ -1522,7 +1535,6 @@ namespace World
 								PathId atlasTexPath = StringPool::Get().InternPath(atlas->GetTexturePath());
 								texture = TextureLibrary::Get().Get(atlasTexPath, true);
 							}
-							const SubTexture2D* sub = nullptr;
 							if (sprite.SubTextureName.IsValid())
 								sub = atlas->FindSubTexture(sprite.SubTextureName);
 							else if (atlas->GetSubTextureCount() > 0)
@@ -1565,9 +1577,57 @@ namespace World
 					spriteMatrix = glm::translate(spriteMatrix, glm::vec3(0.5f - sprite.Pivot.x, 0.5f - sprite.Pivot.y, 0.0f));
 				}
 
-				Renderer2D::DrawQuadCore(spriteMatrix, texture, sprite.Color, texCoords,
-					sprite.TilingFactor, static_cast<uint32_t>(item.entity));
-			}
+				// 9-Slice sliced sprite rendering
+				if (sprite.DrawMode == 1 && sub && (sub->Border.x > 0.0f || sub->Border.y > 0.0f || sub->Border.z > 0.0f || sub->Border.w > 0.0f) && atlas)
+				{
+					const float w = sub->PixelRect.z > 0.0f ? sub->PixelRect.z : 1.0f;
+					const float h = sub->PixelRect.w > 0.0f ? sub->PixelRect.w : 1.0f;
+					const float bL = sub->Border.x;
+					const float bR = sub->Border.y;
+					const float bT = sub->Border.z;
+					const float bB = sub->Border.w;
+					const float normL = std::min(bL / w, 0.49f);
+					const float normR = std::min(bR / w, 0.49f);
+					const float normT = std::min(bT / h, 0.49f);
+					const float normB = std::min(bB / h, 0.49f);
+
+					const float X[4] = { -0.5f, -0.5f + normL, 0.5f - normR, 0.5f };
+					const float Y[4] = { -0.5f, -0.5f + normB, 0.5f - normT, 0.5f };
+
+					const float rx = sub->PixelRect.x;
+					const float ry = sub->PixelRect.y;
+					const float aW = static_cast<float>(atlas->GetWidth());
+					const float aH = static_cast<float>(atlas->GetHeight());
+					float U[4] = { rx / aW, (rx + bL) / aW, (rx + w - bR) / aW, (rx + w) / aW };
+					float V[4] = { (aH - (ry + h)) / aH, (aH - (ry + h - bB)) / aH, (aH - (ry + bT)) / aH, (aH - ry) / aH };
+
+					if (sprite.FlipX) { std::swap(U[0], U[3]); std::swap(U[1], U[2]); }
+					if (sprite.FlipY) { std::swap(V[0], V[3]); std::swap(V[1], V[2]); }
+
+					for (int cx = 0; cx < 3; ++cx)
+					{
+						for (int cy = 0; cy < 3; ++cy)
+						{
+							const glm::vec3 cellCenter(0.5f * (X[cx] + X[cx + 1]), 0.5f * (Y[cy] + Y[cy + 1]), 0.0f);
+							const glm::vec3 cellSize(X[cx + 1] - X[cx], Y[cy + 1] - Y[cy], 1.0f);
+							const glm::mat4 cellMat = spriteMatrix * glm::translate(glm::mat4(1.0f), cellCenter) * glm::scale(glm::mat4(1.0f), cellSize);
+
+							const glm::vec2 cellUV[4] = {
+								{ U[cx], V[cy] },
+								{ U[cx + 1], V[cy] },
+								{ U[cx + 1], V[cy + 1] },
+								{ U[cx], V[cy + 1] }
+							};
+							Renderer2D::DrawQuadCore(cellMat, texture, sprite.Color, cellUV, 1.0f, static_cast<uint32_t>(item.entity));
+						}
+					}
+				}
+				else
+				{
+					Renderer2D::DrawQuadCore(spriteMatrix, texture, sprite.Color, texCoords,
+						sprite.TilingFactor, static_cast<uint32_t>(item.entity));
+				}
+		}
 		}
 		{
 			auto view = m_ActiveScene->m_Registry.view<TransformComponent, CircleRendererComponent>();

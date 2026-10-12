@@ -888,6 +888,16 @@ function ui:isOpen() end
 ---@field Offset vec3
 ---@field Radius number
 
+-- Component fields are exposed through Entity:GetComponent("SpriteAnimatorComponent"); there is no runtime global named SpriteAnimatorComponent.
+---@class SpriteAnimatorComponent
+---@field CurrentTime number
+---@field Finished boolean
+---@field Speed number
+---@field Playing boolean
+---@field LoopMode number
+---@field Animation string
+---@field CurrentFrame number
+
 -- Component fields are exposed through Entity:GetComponent("SpriteComponent"); there is no runtime global named SpriteComponent.
 ---@class SpriteComponent
 ---@field TilingFactor number
@@ -969,6 +979,8 @@ function ui:isOpen() end
 ---@field SkinnedMeshRenderer string Short alias for "SkinnedMeshRendererComponent".
 ---@field SphereCollider3DComponent string Registered component type name "SphereCollider3DComponent".
 ---@field SphereCollider3D string Short alias for "SphereCollider3DComponent".
+---@field SpriteAnimatorComponent string Registered component type name "SpriteAnimatorComponent".
+---@field SpriteAnimator string Short alias for "SpriteAnimatorComponent".
 ---@field SpriteComponent string Registered component type name "SpriteComponent".
 ---@field Sprite string Short alias for "SpriteComponent".
 ---@field TagComponent string Registered component type name "TagComponent".

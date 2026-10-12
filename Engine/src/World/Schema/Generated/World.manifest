@@ -3,6 +3,7 @@ struct World::TagComponent
 struct World::TransformComponent
 struct World::VelocityComponent
 struct World::SpriteComponent
+struct World::SpriteAnimatorComponent
 struct World::CircleRendererComponent
 struct World::MeshRendererComponent
 struct World::SkinnedMeshRendererComponent
@@ -33,4 +34,5 @@ enum World::JointComponent::JointKind
 enum World::CameraSettings::ProjectionType
 enum World::RigidBody3DComponent::MotionType
 enum World::MeshCollider3DComponent::ColliderMode
+
 

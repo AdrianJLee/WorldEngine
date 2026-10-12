@@ -188,6 +188,40 @@ namespace World
 	static_assert(sizeof(SpriteComponent) == 64, "SpriteComponent must be exactly 64 bytes");
 	static_assert(std::is_trivially_copyable_v<SpriteComponent>, "SpriteComponent must be trivially copyable");
 
+	struct SpriteAnimatorComponent
+	{
+		AssetRef Animation;
+		float Speed = 1.0f;
+		float CurrentTime = 0.0f;
+		uint32_t CurrentFrame = 0;
+		uint8_t LoopMode = 0;
+		bool Playing = true;
+		bool Finished = false;
+		uint8_t Reserved1 = 0;
+
+		SpriteAnimatorComponent() = default;
+
+		WE_SCHEMA_BODY(World, SpriteAnimatorComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/2D"),
+				Doc("2D flipbook sprite animator that drives SpriteComponent sub-texture frames over time."))
+			WE_FIELD(Animation, Asset, Of("SpriteAnimation"));
+			WE_FIELD(Speed, Float, Default(1.0f),
+				Doc("Playback speed multiplier."));
+			WE_FIELD(CurrentTime, Float, Default(0.0f),
+				Doc("Current animation elapsed time in seconds."));
+			WE_FIELD(CurrentFrame, UInt32, Default(0),
+				Doc("Current evaluated frame index."));
+			WE_FIELD(LoopMode, UInt8, Default(0),
+				Doc("0 = Loop, 1 = Once, 2 = PingPong."));
+			WE_FIELD(Playing, Bool, Default(true),
+				Doc("Whether the animation is currently playing."));
+			WE_FIELD(Finished, Bool, Default(false),
+				Doc("Whether a non-looping animation has reached the end."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(SpriteAnimatorComponent) == 32, "SpriteAnimatorComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<SpriteAnimatorComponent>, "SpriteAnimatorComponent must be trivially copyable");
+
 	struct CircleRendererComponent
 	{
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };

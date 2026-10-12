@@ -48,6 +48,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawSpriteInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::CapsuleCollider2DComponent")
 			height = DrawCapsuleCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::SpriteAnimatorComponent")
+			height = DrawSpriteAnimatorInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		// 自定义检查器:关卡数据层归属(勾选替代裸掩码数字);Play/Simulate 只读时退回普通行。
 		else if (schema.Id.Name == "World::LevelEntityComponent" && !m_ReadOnly)
 			height = DrawLevelEntityInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
@@ -702,5 +704,79 @@ float PropertiesPanel::DrawCapsuleCollider2DInspector(Wui::WuiContext& ctx, cons
 
 	return (y + 10.0f) - rect.Y;
 }
+
+float PropertiesPanel::DrawSpriteAnimatorInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* anim = static_cast<World::SpriteAnimatorComponent*>(instance);
+	if (!anim) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "动画播控 (Playback Controls):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 80.0f;
+	const float btnH = 22.0f;
+	const Wui::WuiRect btnPlay { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnReset{ rect.X + 98.0f, y, btnW, btnH };
+
+	std::string playText = anim->Playing ? "❚❚ 暂停" : "▶ 播放";
+	if (Wui::Button(ctx, Wui::HashId("prop.anim.play"), btnPlay, playText, theme))
+	{
+		anim->Playing = !anim->Playing;
+		if (anim->Playing) anim->Finished = false;
+		if (changedFields) changedFields->push_back("Playing");
+	}
+
+	if (Wui::Button(ctx, Wui::HashId("prop.anim.reset"), btnReset, "■ 重置", theme))
+	{
+		anim->CurrentTime = 0.0f;
+		anim->CurrentFrame = 0;
+		anim->Finished = false;
+		if (changedFields) { changedFields->push_back("CurrentTime"); changedFields->push_back("CurrentFrame"); }
+	}
+	y += 28.0f;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "循环模式 (Loop Mode):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const Wui::WuiRect btnLoop { rect.X + 12.0f, y, 70.0f, btnH };
+	const Wui::WuiRect btnOnce { rect.X + 88.0f, y, 70.0f, btnH };
+	const Wui::WuiRect btnPing { rect.X + 164.0f, y, 80.0f, btnH };
+
+	std::string loopStr = anim->LoopMode == 0 ? "✔ 循环" : "循环";
+	if (Wui::Button(ctx, Wui::HashId("prop.anim.mode_loop"), btnLoop, loopStr, theme))
+	{
+		anim->LoopMode = 0;
+		if (changedFields) changedFields->push_back("LoopMode");
+	}
+
+	std::string onceStr = anim->LoopMode == 1 ? "✔ 单次" : "单次";
+	if (Wui::Button(ctx, Wui::HashId("prop.anim.mode_once"), btnOnce, onceStr, theme))
+	{
+		anim->LoopMode = 1;
+		if (changedFields) changedFields->push_back("LoopMode");
+	}
+
+	std::string pingStr = anim->LoopMode == 2 ? "✔ 往返" : "往返";
+	if (Wui::Button(ctx, Wui::HashId("prop.anim.mode_ping"), btnPing, pingStr, theme))
+	{
+		anim->LoopMode = 2;
+		if (changedFields) changedFields->push_back("LoopMode");
+	}
+	y += 28.0f;
+
+	std::string statusMsg = anim->Playing ? ("● 播放中 | 进度: " + std::to_string(anim->CurrentTime).substr(0, 4) + "s | 帧 " + std::to_string(anim->CurrentFrame))
+		: (anim->Finished ? "■ 播放已结束" : "❚❚ 已暂停");
+	Wui::Label(ctx, { rect.X + 14.0f, y + 2.0f }, statusMsg, anim->Playing ? theme.Accent : theme.TextMuted, 10.5f);
+	y += 20.0f;
+
+	return y - rect.Y;
 }
+}
+
 

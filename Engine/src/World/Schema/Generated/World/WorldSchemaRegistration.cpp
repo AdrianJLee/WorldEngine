@@ -13,6 +13,7 @@ const TypeSchema& WeSchemaOf_TagComponent();
 const TypeSchema& WeSchemaOf_TransformComponent();
 const TypeSchema& WeSchemaOf_VelocityComponent();
 const TypeSchema& WeSchemaOf_SpriteComponent();
+const TypeSchema& WeSchemaOf_SpriteAnimatorComponent();
 const TypeSchema& WeSchemaOf_CircleRendererComponent();
 const TypeSchema& WeSchemaOf_MeshRendererComponent();
 const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent();
@@ -723,6 +724,254 @@ struct GeneratedAccess<World::SpriteComponent>
             &StorageBindingOf(),
             "Rendering/2D",
             "2D sprite quad with support for textures, texture atlas sub-sprites, custom pivot, flipping, sorting layers, and 9-slice.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::SpriteAnimatorComponent>
+{
+    static Value Get_Animation(const void* instance)
+    {
+        const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Animation)>>::GetPath(self->Animation));
+    }
+    static void Set_Animation(void* instance, const Value& value)
+    {
+        World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Animation)>>::SetPath(self->Animation, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_Animation(const void* instance)
+    {
+        const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Animation)>>::GetIdentity(self->Animation);
+    }
+    static void SetAssetIdentity_Animation(void* instance, uint64_t identity)
+    {
+        World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Animation)>>::SetIdentity(self->Animation, identity);
+    }
+    static Value Get_Speed(const void* instance)
+    {
+        const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
+        return Value(self->Speed);
+    }
+    static void Set_Speed(void* instance, const Value& value)
+    {
+        World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
+        self->Speed = std::get<float>(value);
+    }
+    static Value Get_CurrentTime(const void* instance)
+    {
+        const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
+        return Value(self->CurrentTime);
+    }
+    static void Set_CurrentTime(void* instance, const Value& value)
+    {
+        World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
+        self->CurrentTime = std::get<float>(value);
+    }
+    static Value Get_CurrentFrame(const void* instance)
+    {
+        const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
+        return Value(self->CurrentFrame);
+    }
+    static void Set_CurrentFrame(void* instance, const Value& value)
+    {
+        World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
+        self->CurrentFrame = std::get<uint32_t>(value);
+    }
+    static Value Get_LoopMode(const void* instance)
+    {
+        const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
+        return Value(self->LoopMode);
+    }
+    static void Set_LoopMode(void* instance, const Value& value)
+    {
+        World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
+        self->LoopMode = std::get<uint8_t>(value);
+    }
+    static Value Get_Playing(const void* instance)
+    {
+        const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
+        return Value(self->Playing);
+    }
+    static void Set_Playing(void* instance, const Value& value)
+    {
+        World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
+        self->Playing = std::get<bool>(value);
+    }
+    static Value Get_Finished(const void* instance)
+    {
+        const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
+        return Value(self->Finished);
+    }
+    static void Set_Finished(void* instance, const Value& value)
+    {
+        World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
+        self->Finished = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Animation()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF0B0C102929292D6ull },
+            "Animation",
+            Kind::Asset,
+            &Get_Animation,
+            &Set_Animation,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "SpriteAnimation",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_Animation,
+            &SetAssetIdentity_Animation,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Speed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9C47FBC9B4DB7573ull },
+            "Speed",
+            Kind::Float,
+            &Get_Speed,
+            &Set_Speed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Playback speed multiplier.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CurrentTime()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC078F46A0F0035Cull },
+            "CurrentTime",
+            Kind::Float,
+            &Get_CurrentTime,
+            &Set_CurrentTime,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current animation elapsed time in seconds.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CurrentFrame()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF2B8C1CBB4DDC2FEull },
+            "CurrentFrame",
+            Kind::UInt32,
+            &Get_CurrentFrame,
+            &Set_CurrentFrame,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current evaluated frame index.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LoopMode()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCD7C42E6BB57CFEDull },
+            "LoopMode",
+            Kind::UInt8,
+            &Get_LoopMode,
+            &Set_LoopMode,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "0 = Loop, 1 = Once, 2 = PingPong.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Playing()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB2FE9E84DD220886ull },
+            "Playing",
+            Kind::Bool,
+            &Get_Playing,
+            &Set_Playing,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the animation is currently playing.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Finished()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x77780A4324BF3E06ull },
+            "Finished",
+            Kind::Bool,
+            &Get_Finished,
+            &Set_Finished,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether a non-looping animation has reached the end.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::SpriteAnimatorComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::SpriteAnimatorComponent" },
+            "SpriteAnimatorComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::SpriteAnimatorComponent),
+            TypeCategory::Component,
+            {
+                Field_Animation(),
+                Field_Speed(),
+                Field_CurrentTime(),
+                Field_CurrentFrame(),
+                Field_LoopMode(),
+                Field_Playing(),
+                Field_Finished(),
+            },
+            &StorageBindingOf(),
+            "Rendering/2D",
+            "2D flipbook sprite animator that drives SpriteComponent sub-texture frames over time.",
             false,
             false,
         };
@@ -4831,6 +5080,7 @@ const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagC
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_VelocityComponent() { return GeneratedAccess<World::VelocityComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SpriteComponent() { return GeneratedAccess<World::SpriteComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_SpriteAnimatorComponent() { return GeneratedAccess<World::SpriteAnimatorComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleRendererComponent() { return GeneratedAccess<World::CircleRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshRendererComponent() { return GeneratedAccess<World::MeshRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent() { return GeneratedAccess<World::SkinnedMeshRendererComponent>::WeSchema(); }
@@ -4877,6 +5127,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_TransformComponent(),
 			WeSchemaOf_VelocityComponent(),
 			WeSchemaOf_SpriteComponent(),
+			WeSchemaOf_SpriteAnimatorComponent(),
 			WeSchemaOf_CircleRendererComponent(),
 			WeSchemaOf_MeshRendererComponent(),
 			WeSchemaOf_SkinnedMeshRendererComponent(),

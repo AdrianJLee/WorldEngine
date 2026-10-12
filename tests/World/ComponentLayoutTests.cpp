@@ -49,6 +49,7 @@ namespace
 		{ "World::TransformComponent",           48 },
 		{ "World::VelocityComponent",            24 },
 		{ "World::SpriteComponent",              64 },
+		{ "World::SpriteAnimatorComponent",      32 },
 		{ "World::CircleRendererComponent",      24 },
 		{ "World::MeshRendererComponent",        56 },
 		{ "World::SkinnedMeshRendererComponent", 56 },
@@ -167,4 +168,5 @@ int main()
 		return 1;
 	}
 }
+
 

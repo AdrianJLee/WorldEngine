@@ -5,6 +5,7 @@
 #include "World/Scene/Systems/TransformSystem.h"
 #include "World/Scene/Systems/CameraSystem.h"
 #include "World/Scene/Systems/MovementSystem.h"
+#include "World/Scene/Systems/SpriteAnimationSystem.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Script/Runtime/ScriptEngine.h"
@@ -1756,6 +1757,9 @@ namespace World
 		// PURE-ECS:骨骼动画采样进 `PreRender` 阶段 —— 它必须排在 transform-system 之后、
 		// 渲染之前;进管线后它出现在 Systems Pipeline 里,用户系统也能用 `after` 排序它。
 		// 幂等:编辑态不跑帧系统,由 SceneRenderer 兜底跑同一个 EnsureAnimationAdvanced。
+		RegisterFrameSystem({ "sprite-animation-system", false,
+			[this](Timestep ts) { SpriteAnimationSystem::Update(m_Registry, ts); },
+			Gameplay::SystemPhase::PreRender, {} });
 		RegisterFrameSystem({ "animation-system", false,
 			[this](Timestep ts) { EnsureAnimationAdvanced(ts); },
 			Gameplay::SystemPhase::PreRender, {} });
@@ -2148,3 +2152,4 @@ namespace World
 		}
 	}
 }
+
