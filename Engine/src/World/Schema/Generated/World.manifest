@@ -14,6 +14,7 @@ struct World::AmbientLightComponent
 struct World::RigidBody2DComponent
 struct World::BoxCollider2DComponent
 struct World::CircleCollider2DComponent
+struct World::CapsuleCollider2DComponent
 struct World::RigidBody3DComponent
 struct World::BoxCollider3DComponent
 struct World::SphereCollider3DComponent
@@ -32,3 +33,4 @@ enum World::JointComponent::JointKind
 enum World::CameraSettings::ProjectionType
 enum World::RigidBody3DComponent::MotionType
 enum World::MeshCollider3DComponent::ColliderMode
+

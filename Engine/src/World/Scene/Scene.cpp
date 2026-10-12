@@ -209,6 +209,29 @@ namespace World
 				PrepareShape(shapeDef, circle->IsSensor);
 				b2CreateCircleShape(body, &shapeDef, &shape);
 			}
+			if (const auto* capsule = registry.try_get<CapsuleCollider2DComponent>(entity))
+			{
+				b2Capsule shape;
+				const float halfLen = capsule->Length * 0.5f;
+				if (capsule->Direction == 0) // Vertical
+				{
+					shape.center1 = { capsule->Offset.x, capsule->Offset.y - halfLen * transform->Scale.y };
+					shape.center2 = { capsule->Offset.x, capsule->Offset.y + halfLen * transform->Scale.y };
+					shape.radius = capsule->Radius * transform->Scale.x;
+				}
+				else // Horizontal
+				{
+					shape.center1 = { capsule->Offset.x - halfLen * transform->Scale.x, capsule->Offset.y };
+					shape.center2 = { capsule->Offset.x + halfLen * transform->Scale.x, capsule->Offset.y };
+					shape.radius = capsule->Radius * transform->Scale.y;
+				}
+				b2ShapeDef shapeDef = b2DefaultShapeDef();
+				shapeDef.density = capsule->Density;
+				shapeDef.material.friction = capsule->Friction;
+				shapeDef.material.restitution = capsule->Restitution;
+				PrepareShape(shapeDef, capsule->IsSensor);
+				b2CreateCapsuleShape(body, &shapeDef, &shape);
+			}
 			// P5:记下建体时用的 (Layer,Mask) —— 运行时改组件后据此检测变化并 b2Shape_SetFilter。
 			filters[entity] = (static_cast<uint64_t>(rb->Layer) << 32) | static_cast<uint64_t>(rb->Mask);
 			return true;

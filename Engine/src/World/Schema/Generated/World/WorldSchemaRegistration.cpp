@@ -24,6 +24,7 @@ const TypeSchema& WeSchemaOf_AmbientLightComponent();
 const TypeSchema& WeSchemaOf_RigidBody2DComponent();
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent();
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent();
+const TypeSchema& WeSchemaOf_CapsuleCollider2DComponent();
 const TypeSchema& WeSchemaOf_RigidBody3DComponent();
 const TypeSchema& WeSchemaOf_BoxCollider3DComponent();
 const TypeSchema& WeSchemaOf_SphereCollider3DComponent();
@@ -398,6 +399,26 @@ struct GeneratedAccess<World::SpriteComponent>
         World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
         AssetOps<std::remove_reference_t<decltype(self->Texture)>>::SetIdentity(self->Texture, identity);
     }
+    static Value Get_Pivot(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return Value(self->Pivot);
+    }
+    static void Set_Pivot(void* instance, const Value& value)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        self->Pivot = std::get<glm::vec2>(value);
+    }
+    static Value Get_SubTextureName(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return Value(NameOps<std::remove_reference_t<decltype(self->SubTextureName)>>::GetName(self->SubTextureName));
+    }
+    static void Set_SubTextureName(void* instance, const Value& value)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        NameOps<std::remove_reference_t<decltype(self->SubTextureName)>>::SetName(self->SubTextureName, std::get<std::string>(value));
+    }
     static Value Get_TilingFactor(const void* instance)
     {
         const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
@@ -407,6 +428,66 @@ struct GeneratedAccess<World::SpriteComponent>
     {
         World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
         self->TilingFactor = std::get<float>(value);
+    }
+    static Value Get_SortingLayer(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return Value(self->SortingLayer);
+    }
+    static void Set_SortingLayer(void* instance, const Value& value)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        self->SortingLayer = std::get<int32_t>(value);
+    }
+    static Value Get_OrderInLayer(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return Value(self->OrderInLayer);
+    }
+    static void Set_OrderInLayer(void* instance, const Value& value)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        self->OrderInLayer = std::get<int32_t>(value);
+    }
+    static Value Get_FlipX(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return Value(self->FlipX);
+    }
+    static void Set_FlipX(void* instance, const Value& value)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        self->FlipX = std::get<bool>(value);
+    }
+    static Value Get_FlipY(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return Value(self->FlipY);
+    }
+    static void Set_FlipY(void* instance, const Value& value)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        self->FlipY = std::get<bool>(value);
+    }
+    static Value Get_EnableYSort(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return Value(self->EnableYSort);
+    }
+    static void Set_EnableYSort(void* instance, const Value& value)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        self->EnableYSort = std::get<bool>(value);
+    }
+    static Value Get_DrawMode(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return Value(self->DrawMode);
+    }
+    static void Set_DrawMode(void* instance, const Value& value)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        self->DrawMode = std::get<uint8_t>(value);
     }
     static const FieldSchema& Field_Color()
     {
@@ -451,6 +532,42 @@ struct GeneratedAccess<World::SpriteComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_Pivot()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x272980C8AD2417A7ull },
+            "Pivot",
+            Kind::Vec2,
+            &Get_Pivot,
+            &Set_Pivot,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Normalized pivot point; (0.5, 0.5) = center, (0.5, 0.0) = foot center.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SubTextureName()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC39B87AA95F43AAFull },
+            "SubTextureName",
+            Kind::Name,
+            &Get_SubTextureName,
+            &Set_SubTextureName,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Name of the sub-sprite within the referenced TextureAtlas.", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
     static const FieldSchema& Field_TilingFactor()
     {
         static const FieldSchema schema = {
@@ -466,6 +583,114 @@ struct GeneratedAccess<World::SpriteComponent>
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Repeats the texture UVs; 1 = once across the quad.", false, "", {  }, "", std::nullopt },
             Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SortingLayer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA10CAF2A3A9821D0ull },
+            "SortingLayer",
+            Kind::Int32,
+            &Get_SortingLayer,
+            &Set_SortingLayer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Render layer priority (Default = 0, Background = -10, Foreground = 10).", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_OrderInLayer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCB750BF80A62929ull },
+            "OrderInLayer",
+            Kind::Int32,
+            &Get_OrderInLayer,
+            &Set_OrderInLayer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Order within the sorting layer (higher numbers draw on top).", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FlipX()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x38F74C5B7A801E2Aull },
+            "FlipX",
+            Kind::Bool,
+            &Get_FlipX,
+            &Set_FlipX,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Horizontally flip sprite graphics.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FlipY()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x38F74D5B7A801FDDull },
+            "FlipY",
+            Kind::Bool,
+            &Get_FlipY,
+            &Set_FlipY,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Vertically flip sprite graphics.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableYSort()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xAEE7CCE4E5ACC771ull },
+            "EnableYSort",
+            Kind::Bool,
+            &Get_EnableYSort,
+            &Set_EnableYSort,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Sort depth dynamically based on foot Y position for Top-Down games.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_DrawMode()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF2A99ED41EF4400Cull },
+            "DrawMode",
+            Kind::UInt8,
+            &Get_DrawMode,
+            &Set_DrawMode,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Draw mode: 0 = Simple, 1 = Sliced, 2 = Tiled.", false, "", {  }, "", std::nullopt },
+            Value(0),
         };
         return schema;
     }
@@ -485,11 +710,19 @@ struct GeneratedAccess<World::SpriteComponent>
             {
                 Field_Color(),
                 Field_Texture(),
+                Field_Pivot(),
+                Field_SubTextureName(),
                 Field_TilingFactor(),
+                Field_SortingLayer(),
+                Field_OrderInLayer(),
+                Field_FlipX(),
+                Field_FlipY(),
+                Field_EnableYSort(),
+                Field_DrawMode(),
             },
             &StorageBindingOf(),
-            "Rendering/Mesh",
-            "2D textured quad: an empty Texture falls back to a flat Color fill and TilingFactor repeats the texture UVs.",
+            "Rendering/2D",
+            "2D sprite quad with support for textures, texture atlas sub-sprites, custom pivot, flipping, sorting layers, and 9-slice.",
             false,
             false,
         };
@@ -2299,6 +2532,295 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             &StorageBindingOf(),
             "Physics/2D",
             "2D circle collider simulated by Box2D: Radius scaled by the entity transform with a local Offset; ShowCollider toggles the physics debug outline.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::CapsuleCollider2DComponent>
+{
+    static Value Get_Offset(const void* instance)
+    {
+        const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
+        return Value(self->Offset);
+    }
+    static void Set_Offset(void* instance, const Value& value)
+    {
+        World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
+        self->Offset = std::get<glm::vec2>(value);
+    }
+    static Value Get_Radius(const void* instance)
+    {
+        const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
+        return Value(self->Radius);
+    }
+    static void Set_Radius(void* instance, const Value& value)
+    {
+        World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
+        self->Radius = std::get<float>(value);
+    }
+    static Value Get_Length(const void* instance)
+    {
+        const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
+        return Value(self->Length);
+    }
+    static void Set_Length(void* instance, const Value& value)
+    {
+        World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
+        self->Length = std::get<float>(value);
+    }
+    static Value Get_Density(const void* instance)
+    {
+        const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
+        return Value(self->Density);
+    }
+    static void Set_Density(void* instance, const Value& value)
+    {
+        World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
+        self->Density = std::get<float>(value);
+    }
+    static Value Get_Friction(const void* instance)
+    {
+        const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
+        return Value(self->Friction);
+    }
+    static void Set_Friction(void* instance, const Value& value)
+    {
+        World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
+        self->Friction = std::get<float>(value);
+    }
+    static Value Get_Restitution(const void* instance)
+    {
+        const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
+        return Value(self->Restitution);
+    }
+    static void Set_Restitution(void* instance, const Value& value)
+    {
+        World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
+        self->Restitution = std::get<float>(value);
+    }
+    static Value Get_Direction(const void* instance)
+    {
+        const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
+        return Value(self->Direction);
+    }
+    static void Set_Direction(void* instance, const Value& value)
+    {
+        World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
+        self->Direction = std::get<uint8_t>(value);
+    }
+    static Value Get_ShowCollider(const void* instance)
+    {
+        const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
+        return Value(self->ShowCollider);
+    }
+    static void Set_ShowCollider(void* instance, const Value& value)
+    {
+        World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
+        self->ShowCollider = std::get<bool>(value);
+    }
+    static Value Get_IsSensor(const void* instance)
+    {
+        const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
+        return Value(self->IsSensor);
+    }
+    static void Set_IsSensor(void* instance, const Value& value)
+    {
+        World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
+        self->IsSensor = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Offset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE4DC9EC3A47E8358ull },
+            "Offset",
+            Kind::Vec2,
+            &Get_Offset,
+            &Set_Offset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Centre offset in local units.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Radius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBE0642DD9D5C8D19ull },
+            "Radius",
+            Kind::Float,
+            &Get_Radius,
+            &Set_Radius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Radius of the capsule end caps.", false, "", {  }, "", std::nullopt },
+            Value(0.25f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Length()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x33A197CF1F2FC673ull },
+            "Length",
+            Kind::Float,
+            &Get_Length,
+            &Set_Length,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Length of the cylindrical body between end cap centers.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Density()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4D9DAF43F1CCC5E5ull },
+            "Density",
+            Kind::Float,
+            &Get_Density,
+            &Set_Density,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Mass per area.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Friction()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC538B0EC9E239B3Dull },
+            "Friction",
+            Kind::Float,
+            &Get_Friction,
+            &Set_Friction,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Surface friction against other colliders.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Restitution()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBFAFF0BFEF1DE59ull },
+            "Restitution",
+            Kind::Float,
+            &Get_Restitution,
+            &Set_Restitution,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bounciness.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Direction()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x33E62A964804B894ull },
+            "Direction",
+            Kind::UInt8,
+            &Get_Direction,
+            &Set_Direction,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "0 = Vertical, 1 = Horizontal.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShowCollider()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4515D713686FCBCEull },
+            "ShowCollider",
+            Kind::Bool,
+            &Get_ShowCollider,
+            &Set_ShowCollider,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Draw the physics debug outline.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IsSensor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5BB0789CAD6EA401ull },
+            "IsSensor",
+            Kind::Bool,
+            &Get_IsSensor,
+            &Set_IsSensor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Sensor mode (triggers only, no physical collision).", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::CapsuleCollider2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::CapsuleCollider2DComponent" },
+            "CapsuleCollider2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::CapsuleCollider2DComponent),
+            TypeCategory::Component,
+            {
+                Field_Offset(),
+                Field_Radius(),
+                Field_Length(),
+                Field_Density(),
+                Field_Friction(),
+                Field_Restitution(),
+                Field_Direction(),
+                Field_ShowCollider(),
+                Field_IsSensor(),
+            },
+            &StorageBindingOf(),
+            "Physics/2D",
+            "2D capsule collider simulated by Box2D: Radius and Length define a smoothed cylinder shape ideal for characters.",
             false,
             false,
         };
@@ -4320,6 +4842,7 @@ const TypeSchema& WeSchemaOf_AmbientLightComponent() { return GeneratedAccess<Wo
 const TypeSchema& WeSchemaOf_RigidBody2DComponent() { return GeneratedAccess<World::RigidBody2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent() { return GeneratedAccess<World::BoxCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent() { return GeneratedAccess<World::CircleCollider2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_CapsuleCollider2DComponent() { return GeneratedAccess<World::CapsuleCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_RigidBody3DComponent() { return GeneratedAccess<World::RigidBody3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BoxCollider3DComponent() { return GeneratedAccess<World::BoxCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SphereCollider3DComponent() { return GeneratedAccess<World::SphereCollider3DComponent>::WeSchema(); }
@@ -4365,6 +4888,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_RigidBody2DComponent(),
 			WeSchemaOf_BoxCollider2DComponent(),
 			WeSchemaOf_CircleCollider2DComponent(),
+			WeSchemaOf_CapsuleCollider2DComponent(),
 			WeSchemaOf_RigidBody3DComponent(),
 			WeSchemaOf_BoxCollider3DComponent(),
 			WeSchemaOf_SphereCollider3DComponent(),

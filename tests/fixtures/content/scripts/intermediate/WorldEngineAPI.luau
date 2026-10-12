@@ -752,6 +752,18 @@ function ui:isOpen() end
 ---@field FixedAspectRatio boolean
 ---@field Primary boolean
 
+-- Component fields are exposed through Entity:GetComponent("CapsuleCollider2DComponent"); there is no runtime global named CapsuleCollider2DComponent.
+---@class CapsuleCollider2DComponent
+---@field Restitution number
+---@field Length number
+---@field Direction number
+---@field ShowCollider boolean
+---@field Density number
+---@field IsSensor boolean
+---@field Radius number
+---@field Friction number
+---@field Offset vec2
+
 -- Component fields are exposed through Entity:GetComponent("CapsuleCollider3DComponent"); there is no runtime global named CapsuleCollider3DComponent.
 ---@class CapsuleCollider3DComponent
 ---@field HalfHeight number
@@ -879,7 +891,15 @@ function ui:isOpen() end
 -- Component fields are exposed through Entity:GetComponent("SpriteComponent"); there is no runtime global named SpriteComponent.
 ---@class SpriteComponent
 ---@field TilingFactor number
+---@field OrderInLayer number
+---@field Pivot vec2
+---@field FlipX boolean
+---@field FlipY boolean
 ---@field Color vec4
+---@field SortingLayer number
+---@field EnableYSort boolean
+---@field SubTextureName string
+---@field DrawMode number
 ---@field Texture string
 
 -- Component fields are exposed through Entity:GetComponent("TagComponent"); there is no runtime global named TagComponent.
@@ -915,6 +935,8 @@ function ui:isOpen() end
 ---@field BoxCollider3D string Short alias for "BoxCollider3DComponent".
 ---@field CameraComponent string Registered component type name "CameraComponent".
 ---@field Camera string Short alias for "CameraComponent".
+---@field CapsuleCollider2DComponent string Registered component type name "CapsuleCollider2DComponent".
+---@field CapsuleCollider2D string Short alias for "CapsuleCollider2DComponent".
 ---@field CapsuleCollider3DComponent string Registered component type name "CapsuleCollider3DComponent".
 ---@field CapsuleCollider3D string Short alias for "CapsuleCollider3DComponent".
 ---@field CircleCollider2DComponent string Registered component type name "CircleCollider2DComponent".

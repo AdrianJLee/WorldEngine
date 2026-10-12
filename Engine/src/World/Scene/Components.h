@@ -140,25 +140,53 @@ namespace World
 
 	// 2D 精灵:纹理引用也是**驻留 PathId**(不是 Ref<Texture2D>)——运行态对象不进组件,
 	// 解析由 TextureLibrary(键 = PathId,进程内驻留)在渲染时 O(1) 完成。
+	// 支持单图、图集切片子精灵(.watlas)、自定义锚点 Pivot、X/Y 翻转、排序图层与 Y-Sort 深度。
 	struct SpriteComponent
 	{
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
 		AssetRef Texture;
+		glm::vec2 Pivot { 0.5f, 0.5f };
+		NameId SubTextureName;
 		float TilingFactor = 1.0f;
+		int32_t SortingLayer = 0;
+		int32_t OrderInLayer = 0;
+		bool FlipX = false;
+		bool FlipY = false;
+		bool EnableYSort = false;
+		uint8_t DrawMode = 0; // 0: Simple, 1: Sliced, 2: Tiled
+		uint32_t Reserved = 0;
 
 		SpriteComponent() = default;
 		SpriteComponent(const glm::vec4& color) : Color(color) {}
 
 		WE_SCHEMA_BODY(World, SpriteComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Mesh"),
-				Doc("2D textured quad: an empty Texture falls back to a flat Color fill and TilingFactor repeats the texture UVs."))
+			WE_SCHEMA_META(Category("Rendering/2D"),
+				Doc("2D sprite quad with support for textures, texture atlas sub-sprites, custom pivot, flipping, sorting layers, and 9-slice."))
 			WE_FIELD(Color, Vec4, Color(),
 				Doc("Tint multiplied into the sprite (alpha < 1 blends with what is behind)."));
 			WE_FIELD(Texture, Asset, Of("Texture2D"));
+			WE_FIELD(Pivot, Vec2,
+				Doc("Normalized pivot point; (0.5, 0.5) = center, (0.5, 0.0) = foot center."));
+			WE_FIELD(SubTextureName, Name,
+				Doc("Name of the sub-sprite within the referenced TextureAtlas."));
 			WE_FIELD(TilingFactor, Float,
 				Doc("Repeats the texture UVs; 1 = once across the quad."));
+			WE_FIELD(SortingLayer, Int32, Default(0),
+				Doc("Render layer priority (Default = 0, Background = -10, Foreground = 10)."));
+			WE_FIELD(OrderInLayer, Int32, Default(0),
+				Doc("Order within the sorting layer (higher numbers draw on top)."));
+			WE_FIELD(FlipX, Bool, Default(false),
+				Doc("Horizontally flip sprite graphics."));
+			WE_FIELD(FlipY, Bool, Default(false),
+				Doc("Vertically flip sprite graphics."));
+			WE_FIELD(EnableYSort, Bool, Default(false),
+				Doc("Sort depth dynamically based on foot Y position for Top-Down games."));
+			WE_FIELD(DrawMode, UInt8, Default(0),
+				Doc("Draw mode: 0 = Simple, 1 = Sliced, 2 = Tiled."));
 		WE_SCHEMA_END
 	};
+	static_assert(sizeof(SpriteComponent) == 64, "SpriteComponent must be exactly 64 bytes");
+	static_assert(std::is_trivially_copyable_v<SpriteComponent>, "SpriteComponent must be trivially copyable");
 
 	struct CircleRendererComponent
 	{
@@ -551,6 +579,45 @@ namespace World
 				Doc("Sensor: report overlaps as trigger events but never block or bounce against other bodies."));
 		WE_SCHEMA_END
 	};
+	struct CapsuleCollider2DComponent
+	{
+		glm::vec2 Offset { 0.0f, 0.0f };
+		float Radius = 0.25f;
+		float Length = 0.5f;
+		float Density = 1.0f;
+		float Friction = 0.5f;
+		float Restitution = 0.0f;
+		uint8_t Direction = 0; // 0 = Vertical, 1 = Horizontal
+		bool ShowCollider = true;
+		bool IsSensor = false;
+		uint8_t Reserved = 0;
+
+		WE_SCHEMA_BODY(World, CapsuleCollider2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D capsule collider simulated by Box2D: Radius and Length define a smoothed cylinder shape ideal for characters."))
+			WE_FIELD(Offset, Vec2,
+				Doc("Centre offset in local units."));
+			WE_FIELD(Radius, Float, Default(0.25f),
+				Doc("Radius of the capsule end caps."));
+			WE_FIELD(Length, Float, Default(0.5f),
+				Doc("Length of the cylindrical body between end cap centers."));
+			WE_FIELD(Density, Float, Default(1.0f),
+				Doc("Mass per area."));
+			WE_FIELD(Friction, Float, Default(0.5f),
+				Doc("Surface friction against other colliders."));
+			WE_FIELD(Restitution, Float, Default(0.0f),
+				Doc("Bounciness."));
+			WE_FIELD(Direction, UInt8, Default(0),
+				Doc("0 = Vertical, 1 = Horizontal."));
+			WE_FIELD(ShowCollider, Bool, Default(true),
+				Doc("Draw the physics debug outline."));
+			WE_FIELD(IsSensor, Bool, Default(false),
+				Doc("Sensor mode (triggers only, no physical collision)."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(CapsuleCollider2DComponent) == 32, "CapsuleCollider2DComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<CapsuleCollider2DComponent>, "CapsuleCollider2DComponent must be trivially copyable");
+
 
 	// P1b D6:3D 物理(Jolt)组件。字段 id 全部显式钉住("RB3D…"/"…3D…" ASCII):
 	// 组件一旦写进 .entity 存档就不能再改 id,否则旧场景迁移语义会漂移,--check 门禁也要求

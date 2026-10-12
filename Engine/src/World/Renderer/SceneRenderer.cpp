@@ -11,6 +11,7 @@
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/Texture/TextureLibrary.h"
+#include "World/Renderer/TextureAtlas.h"
 #include "World/Asset/AssetCatalog.h"
 #include "World/Asset/AsyncLoader.h"
 #include "World/Utils/Paths.h"
@@ -1463,40 +1464,109 @@ namespace World
 		};
 		{
 			auto group = m_ActiveScene->m_Registry.group<TransformComponent>(entt::get<SpriteComponent>);
-			std::vector<entt::entity> entities;
+			struct SpriteSortItem
+			{
+				entt::entity entity;
+				int32_t sortingLayer;
+				int32_t orderInLayer;
+				float depthKey;
+				uint32_t entityId;
+			};
+			std::vector<SpriteSortItem> items;
+			items.reserve(group.size());
 			for (auto entity : group)
-				entities.push_back(entity);
-			const size_t count = entities.size();
-			if (count >= kParallelPrepThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
 			{
-				std::vector<glm::mat4> transforms(count);
-				std::vector<std::array<glm::vec3, 4>> positions(count);
-				for (size_t i = 0; i < count; i++)
+				const auto& [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
+				float depthKey = 0.0f;
+				if (sprite.EnableYSort)
 				{
-					const auto& transform = std::get<0>(group.get<TransformComponent, SpriteComponent>(entities[i]));
-					transforms[i] = *spriteMatrixOf(entities[i], transform);
+					// Y-Sort: lower world Y (foot closer to screen bottom) renders later to occlude upper entities
+					depthKey = -(transform.Location.y + (0.5f - sprite.Pivot.y) * transform.Scale.y);
 				}
-
-				JobSystem::ParallelFor(static_cast<uint32_t>(count), 32, [&](uint32_t i)
+				else
 				{
-					Renderer2D::ComputeQuadPositions(transforms[i], positions[i].data());
-				});
-
-				for (size_t i = 0; i < count; i++)
-				{
-					auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entities[i]);
-					Renderer2D::DrawQuadPositions(positions[i].data(), spriteTextureOf(sprite), sprite.Color,
-						nullptr, sprite.TilingFactor, static_cast<uint32_t>(entities[i]));
+					depthKey = -transform.Location.z;
 				}
+				items.push_back({ entity, sprite.SortingLayer, sprite.OrderInLayer, depthKey, static_cast<uint32_t>(entity) });
 			}
-			else
+
+			std::stable_sort(items.begin(), items.end(), [](const SpriteSortItem& a, const SpriteSortItem& b)
 			{
-				for (auto entity : entities)
+				if (a.sortingLayer != b.sortingLayer)
+					return a.sortingLayer < b.sortingLayer;
+				if (a.orderInLayer != b.orderInLayer)
+					return a.orderInLayer < b.orderInLayer;
+				if (std::abs(a.depthKey - b.depthKey) > 1e-4f)
+					return a.depthKey < b.depthKey;
+				return a.entityId < b.entityId;
+			});
+
+			for (const auto& item : items)
+			{
+				auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(item.entity);
+				Rhi::Handle<Rhi::Texture> texture = ResolveTextureAsset(sprite.Texture);
+				const glm::vec2* texCoords = nullptr;
+				glm::vec2 resolvedCoords[4];
+
+				// If sprite.Texture is a .watlas asset, resolve the atlas sub-texture
+				if (sprite.Texture.HasPath())
 				{
-					auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
-					Renderer2D::DrawQuadCore(*spriteMatrixOf(entity, transform), spriteTextureOf(sprite), sprite.Color, nullptr,
-						sprite.TilingFactor, static_cast<uint32_t>(entity));
+					const std::string& path = StringPool::Get().PathOf(sprite.Texture.Path);
+					if (path.length() >= 7 && path.compare(path.length() - 7, 7, ".watlas") == 0)
+					{
+						auto atlas = TextureAtlas::GetOrLoad(path);
+						if (atlas)
+						{
+							if (!atlas->GetTexturePath().empty())
+							{
+								PathId atlasTexPath = StringPool::Get().InternPath(atlas->GetTexturePath());
+								texture = TextureLibrary::Get().Get(atlasTexPath, true);
+							}
+							const SubTexture2D* sub = nullptr;
+							if (sprite.SubTextureName.IsValid())
+								sub = atlas->FindSubTexture(sprite.SubTextureName);
+							else if (atlas->GetSubTextureCount() > 0)
+								sub = atlas->GetSubTexture(0);
+
+							if (sub)
+							{
+								std::memcpy(resolvedCoords, sub->TexCoords, sizeof(resolvedCoords));
+								texCoords = resolvedCoords;
+							}
+						}
+					}
 				}
+
+				// Handle FlipX and FlipY
+				if (sprite.FlipX || sprite.FlipY)
+				{
+					if (!texCoords)
+					{
+						constexpr glm::vec2 defCoords[4] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
+						std::memcpy(resolvedCoords, defCoords, sizeof(resolvedCoords));
+						texCoords = resolvedCoords;
+					}
+					if (sprite.FlipX)
+					{
+						std::swap(resolvedCoords[0].x, resolvedCoords[1].x);
+						std::swap(resolvedCoords[3].x, resolvedCoords[2].x);
+					}
+					if (sprite.FlipY)
+					{
+						std::swap(resolvedCoords[0].y, resolvedCoords[3].y);
+						std::swap(resolvedCoords[1].y, resolvedCoords[2].y);
+					}
+				}
+
+				// Handle Pivot offset in local quad coordinates
+				glm::mat4 spriteMatrix = *spriteMatrixOf(item.entity, transform);
+				if (sprite.Pivot.x != 0.5f || sprite.Pivot.y != 0.5f)
+				{
+					spriteMatrix = glm::translate(spriteMatrix, glm::vec3(0.5f - sprite.Pivot.x, 0.5f - sprite.Pivot.y, 0.0f));
+				}
+
+				Renderer2D::DrawQuadCore(spriteMatrix, texture, sprite.Color, texCoords,
+					sprite.TilingFactor, static_cast<uint32_t>(item.entity));
 			}
 		}
 		{
@@ -1551,6 +1621,49 @@ namespace World
 					transform.Scale.y * circleCollider.Radius * 2.0f, 1.0f));
 			Renderer2D::DrawCircleCore(colliderTransform, { 0.1f, 0.9f, 0.1f, 1.0f },
 				0.025f, 0.005f, static_cast<uint32_t>(entity));
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<CapsuleCollider2DComponent>())
+		{
+			auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			auto& cap = m_ActiveScene->m_Registry.get<CapsuleCollider2DComponent>(entity);
+			if (!cap.ShowCollider) continue;
+			const float halfLen = cap.Length * 0.5f;
+			const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::mat4_cast(transform.Rotation)
+				* glm::translate(glm::mat4(1.0f), glm::vec3(cap.Offset.x, cap.Offset.y, 0.0f));
+
+			if (cap.Direction == 0) // Vertical
+			{
+				glm::vec3 c1 = glm::vec3(baseTr * glm::vec4(0.0f, -halfLen * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 c2 = glm::vec3(baseTr * glm::vec4(0.0f, halfLen * transform.Scale.y, 0.0f, 1.0f));
+				float rad = cap.Radius * transform.Scale.x;
+				glm::mat4 c1Tr = glm::translate(glm::mat4(1.0f), c1) * glm::scale(glm::mat4(1.0f), glm::vec3(rad * 2.0f, rad * 2.0f, 1.0f));
+				glm::mat4 c2Tr = glm::translate(glm::mat4(1.0f), c2) * glm::scale(glm::mat4(1.0f), glm::vec3(rad * 2.0f, rad * 2.0f, 1.0f));
+				Renderer2D::DrawCircleCore(c1Tr, { 0.1f, 0.9f, 0.1f, 1.0f }, 0.025f, 0.005f, static_cast<uint32_t>(entity));
+				Renderer2D::DrawCircleCore(c2Tr, { 0.1f, 0.9f, 0.1f, 1.0f }, 0.025f, 0.005f, static_cast<uint32_t>(entity));
+				glm::vec3 left1 = glm::vec3(baseTr * glm::vec4(-rad, -halfLen * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 left2 = glm::vec3(baseTr * glm::vec4(-rad, halfLen * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 right1 = glm::vec3(baseTr * glm::vec4(rad, -halfLen * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 right2 = glm::vec3(baseTr * glm::vec4(rad, halfLen * transform.Scale.y, 0.0f, 1.0f));
+				Renderer2D::DrawLineCore(left1, left2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+				Renderer2D::DrawLineCore(right1, right2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			}
+			else // Horizontal
+			{
+				glm::vec3 c1 = glm::vec3(baseTr * glm::vec4(-halfLen * transform.Scale.x, 0.0f, 0.0f, 1.0f));
+				glm::vec3 c2 = glm::vec3(baseTr * glm::vec4(halfLen * transform.Scale.x, 0.0f, 0.0f, 1.0f));
+				float rad = cap.Radius * transform.Scale.y;
+				glm::mat4 c1Tr = glm::translate(glm::mat4(1.0f), c1) * glm::scale(glm::mat4(1.0f), glm::vec3(rad * 2.0f, rad * 2.0f, 1.0f));
+				glm::mat4 c2Tr = glm::translate(glm::mat4(1.0f), c2) * glm::scale(glm::mat4(1.0f), glm::vec3(rad * 2.0f, rad * 2.0f, 1.0f));
+				Renderer2D::DrawCircleCore(c1Tr, { 0.1f, 0.9f, 0.1f, 1.0f }, 0.025f, 0.005f, static_cast<uint32_t>(entity));
+				Renderer2D::DrawCircleCore(c2Tr, { 0.1f, 0.9f, 0.1f, 1.0f }, 0.025f, 0.005f, static_cast<uint32_t>(entity));
+				glm::vec3 top1 = glm::vec3(baseTr * glm::vec4(-halfLen * transform.Scale.x, rad, 0.0f, 1.0f));
+				glm::vec3 top2 = glm::vec3(baseTr * glm::vec4(halfLen * transform.Scale.x, rad, 0.0f, 1.0f));
+				glm::vec3 bot1 = glm::vec3(baseTr * glm::vec4(-halfLen * transform.Scale.x, -rad, 0.0f, 1.0f));
+				glm::vec3 bot2 = glm::vec3(baseTr * glm::vec4(halfLen * transform.Scale.x, -rad, 0.0f, 1.0f));
+				Renderer2D::DrawLineCore(top1, top2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+				Renderer2D::DrawLineCore(bot1, bot2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			}
 		}
 	}
 

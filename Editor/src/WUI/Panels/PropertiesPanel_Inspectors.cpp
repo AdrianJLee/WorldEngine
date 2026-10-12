@@ -44,6 +44,10 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::AudioSourceComponent")
 			height = DrawAudioSourceInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::SpriteComponent")
+			height = DrawSpriteInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::CapsuleCollider2DComponent")
+			height = DrawCapsuleCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		// 自定义检查器:关卡数据层归属(勾选替代裸掩码数字);Play/Simulate 只读时退回普通行。
 		else if (schema.Id.Name == "World::LevelEntityComponent" && !m_ReadOnly)
 			height = DrawLevelEntityInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
@@ -561,6 +565,142 @@ float PropertiesPanel::DrawAudioSourceInspector(Wui::WuiContext& ctx, const Wui:
 	}
 
 	return (noticeY + 20.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawSpriteInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* sprite = static_cast<World::SpriteComponent*>(instance);
+	if (!sprite) return height;
+
+	// Pivot Presets
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "锚点快捷预设 (Pivot Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 90.0f;
+	const float btnH = 22.0f;
+	const Wui::WuiRect btnCenter { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnFoot   { rect.X + 108.0f, y, btnW, btnH };
+	const Wui::WuiRect btnTopLeft{ rect.X + 204.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnCenter, "设为几何中心 (0.5, 0.5)");
+	if (Wui::Button(ctx, Wui::HashId("prop.sprite.pivot_center"), btnCenter, "中心 (0.5, 0.5)", theme))
+	{
+		sprite->Pivot = { 0.5f, 0.5f };
+		if (changedFields) changedFields->push_back("Pivot");
+	}
+
+	Wui::Tooltip(ctx, btnFoot, "设为脚底中心 (0.5, 0.0) —— 适用于角色与地面站立");
+	if (Wui::Button(ctx, Wui::HashId("prop.sprite.pivot_foot"), btnFoot, "脚底 (0.5, 0.0)", theme))
+	{
+		sprite->Pivot = { 0.5f, 0.0f };
+		if (changedFields) changedFields->push_back("Pivot");
+	}
+
+	Wui::Tooltip(ctx, btnTopLeft, "设为左上角 (0.0, 1.0) —— 适用于 UI 或网格瓦片");
+	if (Wui::Button(ctx, Wui::HashId("prop.sprite.pivot_topleft"), btnTopLeft, "左上 (0.0, 1.0)", theme))
+	{
+		sprite->Pivot = { 0.0f, 1.0f };
+		if (changedFields) changedFields->push_back("Pivot");
+	}
+	y += 28.0f;
+
+	// Quick Flip Toggles
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "图形翻转 (Quick Flip):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const Wui::WuiRect btnFlipX { rect.X + 12.0f, y, 110.0f, btnH };
+	const Wui::WuiRect btnFlipY { rect.X + 128.0f, y, 110.0f, btnH };
+
+	std::string flipXText = sprite->FlipX ? "✔ 水平翻转 (X)" : "水平翻转 (X)";
+	if (Wui::Button(ctx, Wui::HashId("prop.sprite.flip_x"), btnFlipX, flipXText, theme))
+	{
+		sprite->FlipX = !sprite->FlipX;
+		if (changedFields) changedFields->push_back("FlipX");
+	}
+
+	std::string flipYText = sprite->FlipY ? "✔ 垂直翻转 (Y)" : "垂直翻转 (Y)";
+	if (Wui::Button(ctx, Wui::HashId("prop.sprite.flip_y"), btnFlipY, flipYText, theme))
+	{
+		sprite->FlipY = !sprite->FlipY;
+		if (changedFields) changedFields->push_back("FlipY");
+	}
+	y += 28.0f;
+
+	// Quick Sorting Layer Presets
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "排序层预设 (Sorting Layer):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const Wui::WuiRect btnLyrBg  { rect.X + 12.0f, y, 70.0f, btnH };
+	const Wui::WuiRect btnLyrDef { rect.X + 88.0f, y, 70.0f, btnH };
+	const Wui::WuiRect btnLyrEnt { rect.X + 164.0f, y, 70.0f, btnH };
+	const Wui::WuiRect btnLyrFg  { rect.X + 240.0f, y, 70.0f, btnH };
+
+	if (Wui::Button(ctx, Wui::HashId("prop.sprite.lyr_bg"), btnLyrBg, "背景 (-10)", theme))
+	{
+		sprite->SortingLayer = -10;
+		if (changedFields) changedFields->push_back("SortingLayer");
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.sprite.lyr_def"), btnLyrDef, "默认 (0)", theme))
+	{
+		sprite->SortingLayer = 0;
+		if (changedFields) changedFields->push_back("SortingLayer");
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.sprite.lyr_ent"), btnLyrEnt, "实体 (5)", theme))
+	{
+		sprite->SortingLayer = 5;
+		if (changedFields) changedFields->push_back("SortingLayer");
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.sprite.lyr_fg"), btnLyrFg, "前景 (20)", theme))
+	{
+		sprite->SortingLayer = 20;
+		if (changedFields) changedFields->push_back("SortingLayer");
+	}
+	y += 28.0f;
+
+	return (y + 10.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawCapsuleCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* cap = static_cast<World::CapsuleCollider2DComponent*>(instance);
+	if (!cap) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "胶囊体方向 (Direction):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 100.0f;
+	const float btnH = 22.0f;
+	const Wui::WuiRect btnVert { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnHoriz{ rect.X + 118.0f, y, btnW, btnH };
+
+	std::string vertText = cap->Direction == 0 ? "✔ 垂直 (Vertical)" : "垂直 (Vertical)";
+	if (Wui::Button(ctx, Wui::HashId("prop.cap2d.vert"), btnVert, vertText, theme))
+	{
+		cap->Direction = 0;
+		if (changedFields) changedFields->push_back("Direction");
+	}
+
+	std::string horizText = cap->Direction == 1 ? "✔ 水平 (Horizontal)" : "水平 (Horizontal)";
+	if (Wui::Button(ctx, Wui::HashId("prop.cap2d.horiz"), btnHoriz, horizText, theme))
+	{
+		cap->Direction = 1;
+		if (changedFields) changedFields->push_back("Direction");
+	}
+	y += 28.0f;
+
+	return (y + 10.0f) - rect.Y;
 }
 }
 

@@ -48,7 +48,7 @@ namespace
 		{ "World::TagComponent",                  4 },
 		{ "World::TransformComponent",           48 },
 		{ "World::VelocityComponent",            24 },
-		{ "World::SpriteComponent",              40 },
+		{ "World::SpriteComponent",              64 },
 		{ "World::CircleRendererComponent",      24 },
 		{ "World::MeshRendererComponent",        56 },
 		{ "World::SkinnedMeshRendererComponent", 56 },
@@ -60,6 +60,7 @@ namespace
 		{ "World::RigidBody2DComponent",         16 },
 		{ "World::BoxCollider2DComponent",       32 },
 		{ "World::CircleCollider2DComponent",    28 },
+		{ "World::CapsuleCollider2DComponent",   32 },
 		{ "World::RigidBody3DComponent",         40 },
 		{ "World::BoxCollider3DComponent",       24 },
 		{ "World::SphereCollider3DComponent",    16 },
@@ -166,3 +167,4 @@ int main()
 		return 1;
 	}
 }
+
