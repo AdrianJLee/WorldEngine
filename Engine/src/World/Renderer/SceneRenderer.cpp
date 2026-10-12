@@ -1639,7 +1639,7 @@ namespace World
 					const float aW = static_cast<float>(atlas->GetWidth());
 					const float aH = static_cast<float>(atlas->GetHeight());
 					float U[4] = { rx / aW, (rx + bL) / aW, (rx + w - bR) / aW, (rx + w) / aW };
-					float V[4] = { (aH - (ry + h)) / aH, (aH - (ry + h - bB)) / aH, (aH - (ry + bT)) / aH, (aH - ry) / aH };
+					float V[4] = { (ry + h) / aH, (ry + h - bB) / aH, (ry + bT) / aH, ry / aH };
 
 					if (sprite.FlipX) { std::swap(U[0], U[3]); std::swap(U[1], U[2]); }
 					if (sprite.FlipY) { std::swap(V[0], V[3]); std::swap(V[1], V[2]); }
@@ -1762,9 +1762,10 @@ namespace World
 									texCoords = sub->TexCoords;
 							}
 
+							// Align Y axis: y=0 is top row in Tilemap, mapped to +Y top in scene
 							const glm::vec3 cellOffset(
 								originX + (static_cast<float>(x) + 0.5f) * cellW,
-								originY + (static_cast<float>(y) + 0.5f) * cellH,
+								originY + (static_cast<float>(height - 1 - y) + 0.5f) * cellH,
 								0.0f);
 							const glm::mat4 cellWorldMatrix = baseMatrix
 								* glm::translate(glm::mat4(1.0f), cellOffset)
@@ -1923,7 +1924,7 @@ namespace World
 			for (const auto& r : rects)
 			{
 				const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
-				const float cy = -mapH * 0.5f + (r.Y + r.Height * 0.5f) * cellH;
+				const float cy = +mapH * 0.5f - (r.Y + r.Height * 0.5f) * cellH;
 				const float rw = r.Width * cellW;
 				const float rh = r.Height * cellH;
 				const glm::mat4 rectTr = baseTr

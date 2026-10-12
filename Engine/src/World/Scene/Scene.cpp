@@ -254,7 +254,7 @@ namespace World
 						for (const auto& r : rects)
 						{
 							const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
-							const float cy = -mapH * 0.5f + (r.Y + r.Height * 0.5f) * cellH;
+							const float cy = +mapH * 0.5f - (r.Y + r.Height * 0.5f) * cellH;
 							const float hx = (r.Width * cellW) * 0.5f;
 							const float hy = (r.Height * cellH) * 0.5f;
 							if (hx > 1e-5f && hy > 1e-5f)

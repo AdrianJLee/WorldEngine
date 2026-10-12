@@ -50,13 +50,13 @@ namespace World
 
 		const float u0 = pixelRect.x * invW;
 		const float u1 = (pixelRect.x + pixelRect.z) * invW;
-		const float v0 = (static_cast<float>(atlasH) - (pixelRect.y + pixelRect.w)) * invH;
-		const float v1 = (static_cast<float>(atlasH) - pixelRect.y) * invH;
+		const float v0 = pixelRect.y * invH;                 // Top in image space
+		const float v1 = (pixelRect.y + pixelRect.w) * invH; // Bottom in image space
 
-		TexCoords[0] = { u0, v0 }; // Bottom-Left
-		TexCoords[1] = { u1, v0 }; // Bottom-Right
-		TexCoords[2] = { u1, v1 }; // Top-Right
-		TexCoords[3] = { u0, v1 }; // Top-Left
+		TexCoords[0] = { u0, v1 }; // Bottom-Left: world (-0.5, -0.5) gets subtexture bottom
+		TexCoords[1] = { u1, v1 }; // Bottom-Right: world (+0.5, -0.5) gets subtexture bottom
+		TexCoords[2] = { u1, v0 }; // Top-Right: world (+0.5, +0.5) gets subtexture top
+		TexCoords[3] = { u0, v0 }; // Top-Left: world (-0.5, +0.5) gets subtexture top
 	}
 
 	TextureAtlas::TextureAtlas(std::string texturePath, uint32_t width, uint32_t height)

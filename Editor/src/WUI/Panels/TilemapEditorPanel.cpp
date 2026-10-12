@@ -525,41 +525,42 @@ namespace World
 		std::string toolInfo = "2D 网格画布 · 当前工具: " + toolTitle + " | 选瓦片 #" + std::to_string(m_SelectedTileId);
 		Wui::Label(ctx, { canvasBar.X + 8.0f, canvasBar.Y + 5.0f }, toolInfo, theme.Accent, 11.5f);
 
-		// Zoom Control Buttons on the right
-		float zX = canvasBar.X + canvasBar.W - 275.0f;
+		// Zoom Control Buttons on the right (compact footprint to prevent canvas clipping)
+		const float zoomCtrlW = 210.0f;
+		float zX = std::max(canvasBar.X + 160.0f, canvasBar.X + canvasBar.W - zoomCtrlW);
 		const std::string zoomPercentStr = "缩放: " + std::to_string(static_cast<int>(std::round(m_Zoom * 100.0f))) + "%";
 		Wui::Label(ctx, { zX, canvasBar.Y + 6.0f }, zoomPercentStr, theme.Text, 11.0f);
-		zX += 72.0f;
+		zX += 64.0f;
 
 		// [＋ 放大]
-		const Wui::WuiRect btnZoomIn { zX, canvasBar.Y + 2.0f, 42.0f, 22.0f };
+		const Wui::WuiRect btnZoomIn { zX, canvasBar.Y + 2.0f, 32.0f, 22.0f };
 		Wui::Tooltip(ctx, btnZoomIn, "放大网格画布 (也可使用鼠标滚轮向前滚动) (tilemap.btn.zoom_in)");
 		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.zoom_in"), btnZoomIn, "＋", theme))
 		{
 			SetZoom(m_Zoom * 1.25f);
 		}
-		zX += 46.0f;
+		zX += 36.0f;
 
 		// [－ 缩小]
-		const Wui::WuiRect btnZoomOut { zX, canvasBar.Y + 2.0f, 42.0f, 22.0f };
+		const Wui::WuiRect btnZoomOut { zX, canvasBar.Y + 2.0f, 32.0f, 22.0f };
 		Wui::Tooltip(ctx, btnZoomOut, "缩小网格画布 (也可使用鼠标滚轮向后滚动) (tilemap.btn.zoom_out)");
 		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.zoom_out"), btnZoomOut, "－", theme))
 		{
 			SetZoom(m_Zoom * 0.8f);
 		}
-		zX += 46.0f;
+		zX += 36.0f;
 
 		// [⟲ 适应]
-		const Wui::WuiRect btnFit { zX, canvasBar.Y + 2.0f, 52.0f, 22.0f };
+		const Wui::WuiRect btnFit { zX, canvasBar.Y + 2.0f, 44.0f, 22.0f };
 		Wui::Tooltip(ctx, btnFit, "重置缩放并居中自适应网格画布 (tilemap.btn.zoom_fit)");
 		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.zoom_fit"), btnFit, "⟲ 适应", theme))
 		{
 			ResetView();
 		}
-		zX += 56.0f;
+		zX += 48.0f;
 
 		// [1:1]
-		const Wui::WuiRect btn11 { zX, canvasBar.Y + 2.0f, 44.0f, 22.0f };
+		const Wui::WuiRect btn11 { zX, canvasBar.Y + 2.0f, 26.0f, 22.0f };
 		Wui::Tooltip(ctx, btn11, "恢复 100% 原始大小 (tilemap.btn.zoom_100)");
 		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.zoom_100"), btn11, "1:1", theme))
 		{
