@@ -28,16 +28,16 @@ static void TestSubTextureUVMath()
 
 	// u0 = 20 / 200 = 0.10f
 	// u1 = (20 + 40) / 200 = 0.30f
-	// v0 = (100 - (10 + 30)) / 100 = 0.60f
-	// v1 = (100 - 10) / 100 = 0.90f
+	// v0 = 10 / 100 = 0.10f (top)
+	// v1 = (10 + 30) / 100 = 0.40f (bottom)
 	assert(std::abs(sub.TexCoords[0].x - 0.10f) < 1e-5f);
-	assert(std::abs(sub.TexCoords[0].y - 0.60f) < 1e-5f);
+	assert(std::abs(sub.TexCoords[0].y - 0.40f) < 1e-5f); // Bottom-Left
 	assert(std::abs(sub.TexCoords[1].x - 0.30f) < 1e-5f);
-	assert(std::abs(sub.TexCoords[1].y - 0.60f) < 1e-5f);
+	assert(std::abs(sub.TexCoords[1].y - 0.40f) < 1e-5f); // Bottom-Right
 	assert(std::abs(sub.TexCoords[2].x - 0.30f) < 1e-5f);
-	assert(std::abs(sub.TexCoords[2].y - 0.90f) < 1e-5f);
+	assert(std::abs(sub.TexCoords[2].y - 0.10f) < 1e-5f); // Top-Right
 	assert(std::abs(sub.TexCoords[3].x - 0.10f) < 1e-5f);
-	assert(std::abs(sub.TexCoords[3].y - 0.90f) < 1e-5f);
+	assert(std::abs(sub.TexCoords[3].y - 0.10f) < 1e-5f); // Top-Left
 
 	std::cout << "[PASS] TestSubTextureUVMath\n";
 }

@@ -631,15 +631,14 @@ namespace World
 		const float invAtlasW = (m_Atlas && m_Atlas->GetWidth() > 0) ? (1.0f / static_cast<float>(m_Atlas->GetWidth())) : 1.0f;
 		const float invAtlasH = (m_Atlas && m_Atlas->GetHeight() > 0) ? (1.0f / static_cast<float>(m_Atlas->GetHeight())) : 1.0f;
 
-		// Draw each cell (row = gridH - 1 - y so y=0 is at the bottom, matching +Y up world space)
+		// Draw each cell (y=0 at the top, matching natural 2D tilemap convention and scene +Y down offset)
 		for (uint32_t y = 0; y < gridH; ++y)
 		{
-			const uint32_t row = gridH - 1u - y;
 			for (uint32_t x = 0; x < gridW; ++x)
 			{
 				const Wui::WuiRect cellRect {
 					gridOriginX + static_cast<float>(x) * cellPx,
-					gridOriginY + static_cast<float>(row) * cellPx,
+					gridOriginY + static_cast<float>(y) * cellPx,
 					cellPx,
 					cellPx
 				};
@@ -716,7 +715,7 @@ namespace World
 			for (const auto& mr : mergedRects)
 			{
 				const float sx = gridOriginX + mr.X * cellPx;
-				const float sy = gridOriginY + (static_cast<float>(gridH) - (mr.Y + mr.Height)) * cellPx;
+				const float sy = gridOriginY + mr.Y * cellPx;
 				const float sw = mr.Width * cellPx;
 				const float sh = mr.Height * cellPx;
 				Wui::HighlightOutline(ctx, { sx, sy, sw, sh }, mergedCol, 2.0f, 2.0f);
@@ -733,14 +732,12 @@ namespace World
 			if (relX >= 0.0f && relX < totalGridPxW && relY >= 0.0f && relY < totalGridPxH)
 			{
 				const uint32_t gx = static_cast<uint32_t>(relX / cellPx);
-				const uint32_t row = static_cast<uint32_t>(relY / cellPx);
-				if (gx < gridW && row < gridH)
+				const uint32_t gy = static_cast<uint32_t>(relY / cellPx);
+				if (gx < gridW && gy < gridH)
 				{
-					const uint32_t gy = gridH - 1u - row;
-
 					const Wui::WuiRect hoverCellRect {
 						gridOriginX + static_cast<float>(gx) * cellPx,
-						gridOriginY + static_cast<float>(row) * cellPx,
+						gridOriginY + static_cast<float>(gy) * cellPx,
 						cellPx,
 						cellPx
 					};
@@ -754,7 +751,7 @@ namespace World
 						const uint32_t minY = std::min(m_RectStartY, gy);
 						const uint32_t maxY = std::max(m_RectStartY, gy);
 						const float rx = gridOriginX + static_cast<float>(minX) * cellPx;
-						const float ry = gridOriginY + static_cast<float>(gridH - 1u - maxY) * cellPx;
+						const float ry = gridOriginY + static_cast<float>(minY) * cellPx;
 						const float rw = static_cast<float>(maxX - minX + 1u) * cellPx;
 						const float rh = static_cast<float>(maxY - minY + 1u) * cellPx;
 						Wui::HighlightOutline(ctx, { rx, ry, rw, rh }, theme.Accent, 2.0f, 2.0f);
