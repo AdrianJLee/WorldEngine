@@ -1935,6 +1935,7 @@ void EditorShell::RestoreIndependentWindows(const std::vector<PendingFloatRestor
 				EnsurePluginPanelFromId(panel);   // PLUG-T3b:插件面板跨会话恢复
 				EnsureAtlasPanelFromId(panel);
 				EnsureAnimationPanelFromId(panel);
+				EnsureTilemapPanelFromId(panel);
 			}
 			const bool attach = forceTabs || item.Attached;
 			// 先隐藏着建出来:恢复成 chip 时不会"闪一下窗口",恢复成浮窗时下一步再显示。

@@ -1,5 +1,7 @@
 #include "wldpch.h"
 #include "WUI/Panels/SpriteAnimationEditorPanel.h"
+#include "World/Scene/Components.h"
+#include "WUI/Common/EditorAssetCatalog.h"
 #include "World/Core/Log.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiWidgets.h"
@@ -330,6 +332,37 @@ namespace World
 		std::string pathText = "资产: " + m_LogicalPath;
 		Wui::Label(ctx, { topBar.X + 340.0f, topBar.Y + 8.0f }, pathText, theme.TextMuted, 11.0f);
 
+		const Wui::WuiRect btnInst { topBar.X + topBar.W - 246.0f, topBar.Y + 4.0f, 128.0f, 24.0f };
+		Wui::Tooltip(ctx, btnInst, "在当前活动场景创建挂载 SpriteComponent 与 SpriteAnimatorComponent 的动画实体 (anim.btn.instantiate)");
+		if (Wui::Button(ctx, Wui::HashId("anim.btn.instantiate"), btnInst, "🏗 放入当前场景", theme))
+		{
+			if (m_Dirty)
+				Save();
+			if (auto scene = host.GetActiveScene())
+			{
+				const std::string entName = (m_Animation && !m_Animation->GetName().empty())
+					? m_Animation->GetName()
+					: std::filesystem::path(m_LogicalPath).stem().string();
+				Entity ent = Entity::CreateEntity(scene.get(), entName);
+				auto& sc = ent.AddComponent<SpriteComponent>();
+				if (!m_EditAtlasPath.empty())
+					sc.Texture.Path = StringPool::Get().InternPath(m_EditAtlasPath);
+				if (m_Animation && m_Animation->GetFrameCount() > 0)
+					sc.SubTextureName = StringPool::Get().InternName(m_Animation->GetAllFrames()[0].NameString);
+				auto& sac = ent.AddComponent<SpriteAnimatorComponent>();
+				sac.Animation.Path = StringPool::Get().InternPath(m_LogicalPath);
+				sac.LoopMode = static_cast<uint8_t>(m_LoopMode);
+				sac.Playing = true;
+				host.SetSelectedEntity(ent);
+				host.MarkDocumentDirty();
+				m_StatusFeedback = "已在当前场景创建动画实体 '" + entName + "'";
+			}
+			else
+			{
+				m_StatusFeedback = "当前无活动场景，无法放入实体";
+			}
+		}
+
 		const Wui::WuiRect btnSave { topBar.X + topBar.W - 110.0f, topBar.Y + 4.0f, 102.0f, 24.0f };
 		Wui::Tooltip(ctx, btnSave, "保存动画配置到 .wanim 文件并刷新缓存 (anim.btn.save)");
 		if (Wui::Button(ctx, Wui::HashId("anim.btn.save"), btnSave, m_Dirty ? "💾 保存动画 *" : "💾 保存动画", theme))
@@ -438,12 +471,28 @@ namespace World
 		Wui::Label(ctx, { leftCol.X + 10.0f, alY }, "关联图集设置 (Atlas Binding)", theme.Text, 12.0f);
 		alY += 22.0f;
 
-		// Atlas path input
-		Wui::Label(ctx, { leftCol.X + 10.0f, alY + 3.0f }, "图集路径:", theme.TextMuted, 11.0f);
+		// Atlas path dropdown
+		Wui::Label(ctx, { leftCol.X + 10.0f, alY + 3.0f }, "关联图集:", theme.TextMuted, 11.0f);
 		const Wui::WuiRect atlasRect { leftCol.X + 70.0f, alY, leftCol.W - 78.0f, 22.0f };
-		std::string oldAtlas = m_EditAtlasPath;
-		if (Wui::TextField(ctx, Wui::HashId("anim.field.atlas_path"), atlasRect, m_EditAtlasPath, theme) || m_EditAtlasPath != oldAtlas)
+		Wui::Tooltip(ctx, atlasRect, "从工程资产中选择关联 2D 图集 (.watlas)，无需手动输入路径 (anim.field.atlas_path)");
+		const auto& atlasPaths = Editor::AssetCatalog::PathsForName("SpriteAtlas");
+		std::vector<std::string> atlasOptions;
+		atlasOptions.push_back("(none)");
+		for (const auto& p : atlasPaths) atlasOptions.push_back(p);
+		int atlasSelected = 0;
+		const auto foundAtlas = std::find(atlasOptions.begin(), atlasOptions.end(), m_EditAtlasPath);
+		if (foundAtlas != atlasOptions.end())
+			atlasSelected = static_cast<int>(foundAtlas - atlasOptions.begin());
+		else if (!m_EditAtlasPath.empty())
 		{
+			atlasOptions.push_back(m_EditAtlasPath);
+			atlasSelected = static_cast<int>(atlasOptions.size()) - 1;
+		}
+		const int beforeAtlasPick = atlasSelected;
+		if (Wui::SearchableCombo(ctx, Wui::HashId("anim.field.atlas_path"), atlasRect, "", atlasOptions, atlasSelected, theme)
+			&& atlasSelected != beforeAtlasPick)
+		{
+			m_EditAtlasPath = atlasSelected <= 0 ? "" : atlasOptions[static_cast<size_t>(atlasSelected)];
 			if (m_Animation) m_Animation->SetAtlasPath(m_EditAtlasPath);
 			m_Dirty = true;
 			EnsureAnimationAtlasLoaded();

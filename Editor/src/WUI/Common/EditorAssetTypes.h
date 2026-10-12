@@ -34,6 +34,9 @@ namespace World
 		CppHeader,      // .h / .hpp / .inl
 		CppSource,      // .c / .cc / .cpp / .cxx
 		UiDocument,     // .wui
+		SpriteAtlas,    // .watlas (2D 图集)
+		SpriteAnimation,// .wanim (2D 序列帧动画)
+		Tilemap,        // .wtilemap (2D 瓦片地图)
 		Folder,
 		// 兼容别名:P4 之前的代码把"贴图"叫 Texture(= 源图)。新代码请用上面两个名字。
 		// **必须放在最后**:枚举值按"上一个枚举项"自增,别名插在中间会把后面的项顶成重复值
@@ -112,6 +115,12 @@ namespace World
 			return { EditorAssetKind::Prefab, "Prefab" };
 		// M7a(GameUI):`.wui` 是 GameUI 的**设计数据**资产(单一扩展名,与其他核心资产同款);
 		// 类型名走 Wui::Tr("asset.file.ui", "UI Document"),这里的 Name 只作英文兜底/日志用。
+		if (extension == ".watlas")
+			return { EditorAssetKind::SpriteAtlas, "Sprite Atlas" };
+		if (extension == ".wanim")
+			return { EditorAssetKind::SpriteAnimation, "Sprite Animation" };
+		if (extension == ".wtilemap")
+			return { EditorAssetKind::Tilemap, "Tilemap" };
 		if (extension == ".wui")
 			return { EditorAssetKind::UiDocument, "UI Document" };
 		// M4-TEX P4:内容根的图片是**源图**(材质引用它;产物 `<源图>.wtexc` 由它烘出来);

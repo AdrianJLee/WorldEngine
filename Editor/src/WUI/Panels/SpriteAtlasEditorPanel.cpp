@@ -1,6 +1,8 @@
 #include "wldpch.h"
 #include "WUI/Panels/SpriteAtlasEditorPanel.h"
 #include "World/Renderer/SpriteAnimation.h"
+#include "WUI/Common/EditorAssetCatalog.h"
+#include "World/Scene/Components.h"
 #include "World/Core/Log.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiWidgets.h"
@@ -270,6 +272,36 @@ namespace World
 		std::string pathText = "资产: " + m_LogicalPath;
 		Wui::Label(ctx, { topBar.X + 280.0f, topBar.Y + 8.0f }, pathText, theme.TextMuted, 11.0f);
 
+		const Wui::WuiRect btnInst { topBar.X + topBar.W - 246.0f, topBar.Y + 4.0f, 128.0f, 24.0f };
+		Wui::Tooltip(ctx, btnInst, "在当前活动场景创建绑定该图集与当前子精灵的 2D 实体 (atlas.btn.instantiate)");
+		if (Wui::Button(ctx, Wui::HashId("atlas.btn.instantiate"), btnInst, "🏗 放入当前场景", theme))
+		{
+			if (m_Dirty)
+				Save();
+			if (auto scene = host.GetActiveScene())
+			{
+				std::string subName = m_EditName;
+				if (subName.empty() && m_Atlas && m_Atlas->GetSubTextureCount() > 0)
+					subName = m_Atlas->GetAllSubTextures()[0].Name;
+				const std::string entName = !subName.empty()
+					? subName
+					: std::filesystem::path(m_LogicalPath).stem().string();
+				Entity ent = Entity::CreateEntity(scene.get(), entName);
+				auto& sc = ent.AddComponent<SpriteComponent>();
+				sc.Texture.Path = StringPool::Get().InternPath(m_LogicalPath);
+				if (!subName.empty())
+					sc.SubTextureName = StringPool::Get().InternName(subName);
+				sc.Pivot = { m_EditPivotX, m_EditPivotY };
+				host.SetSelectedEntity(ent);
+				host.MarkDocumentDirty();
+				m_StatusFeedback = "已在当前场景创建精灵实体 '" + entName + "'";
+			}
+			else
+			{
+				m_StatusFeedback = "当前无活动场景，无法放入实体";
+			}
+		}
+
 		const Wui::WuiRect btnSave { topBar.X + topBar.W - 110.0f, topBar.Y + 4.0f, 102.0f, 24.0f };
 		Wui::Tooltip(ctx, btnSave, "保存图集配置到 .watlas 文件并刷新缓存 (atlas.btn.save)");
 		if (Wui::Button(ctx, Wui::HashId("atlas.btn.save"), btnSave, m_Dirty ? "💾 保存图集 *" : "💾 保存图集", theme))
@@ -291,12 +323,30 @@ namespace World
 		Wui::Label(ctx, { leftCol.X + 10.0f, lY }, "源纹理设置 (Texture Configuration)", theme.Text, 12.0f);
 		lY += 22.0f;
 
-		// Texture path input
-		Wui::Label(ctx, { leftCol.X + 10.0f, lY + 3.0f }, "贴图路径:", theme.TextMuted, 11.0f);
+		// Texture path dropdown
+		Wui::Label(ctx, { leftCol.X + 10.0f, lY + 3.0f }, "源贴图:", theme.TextMuted, 11.0f);
 		const Wui::WuiRect texRect { leftCol.X + 70.0f, lY, leftCol.W - 78.0f, 22.0f };
-		std::string oldTex = m_EditTexturePath;
-		if (Wui::TextField(ctx, Wui::HashId("atlas.field.tex_path"), texRect, m_EditTexturePath, theme) || m_EditTexturePath != oldTex)
+		Wui::Tooltip(ctx, texRect, "从工程资产中选择贴图源，无需手动输入路径 (atlas.field.tex_path)");
+		const auto& texSrcs = Editor::AssetCatalog::PathsFor(EditorAssetKind::TextureSource);
+		const auto& texAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::TextureAsset);
+		std::vector<std::string> texOptions;
+		texOptions.push_back("(none)");
+		for (const auto& p : texSrcs) texOptions.push_back(p);
+		for (const auto& p : texAssets) texOptions.push_back(p);
+		int texSelected = 0;
+		const auto foundTex = std::find(texOptions.begin(), texOptions.end(), m_EditTexturePath);
+		if (foundTex != texOptions.end())
+			texSelected = static_cast<int>(foundTex - texOptions.begin());
+		else if (!m_EditTexturePath.empty())
 		{
+			texOptions.push_back(m_EditTexturePath);
+			texSelected = static_cast<int>(texOptions.size()) - 1;
+		}
+		const int beforeTexPick = texSelected;
+		if (Wui::SearchableCombo(ctx, Wui::HashId("atlas.field.tex_path"), texRect, "", texOptions, texSelected, theme)
+			&& texSelected != beforeTexPick)
+		{
+			m_EditTexturePath = texSelected <= 0 ? "" : texOptions[static_cast<size_t>(texSelected)];
 			if (m_Atlas) m_Atlas->SetTexturePath(m_EditTexturePath);
 			m_Dirty = true;
 			EnsureTextureLoaded();

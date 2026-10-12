@@ -1,6 +1,7 @@
 #include "World/Audio/SoundEvent.h"
 #include "World/Renderer/TextureAtlas.h"
 #include "World/Renderer/SpriteAnimation.h"
+#include "World/Renderer/Tilemap.h"
 #include <fstream>
 #include "ContentBrowserPanel_Internal.h"
 
@@ -231,6 +232,33 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				return true;
 			});
 
+		add("tilemap", "2D Tilemap (瓦片地图)", ".wtilemap", 42, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				Tilemap tm("new_tilemap", 12, 8, "assets/textures/characters/dungeon_atlas.watlas");
+				tm.FillRect(0, 0, 11, 7, 1, false);
+				tm.FillRect(0, 0, 11, 0, 2, true);
+				tm.FillRect(0, 7, 11, 7, 2, true);
+				tm.FillRect(0, 0, 0, 7, 2, true);
+				tm.FillRect(11, 0, 11, 7, 2, true);
+				std::string yaml = tm.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_tilemap", ".wtilemap");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				out.close();
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-tilemap");
+				std::error_code ec;
+				const std::filesystem::path rel = std::filesystem::relative(target, m_Model.Root, ec);
+				m_Host.OpenTilemapEditor(ec ? target.generic_string() : rel.generic_string());
+				return true;
+			});
+
 	}
 
 
@@ -240,7 +268,7 @@ void ContentBrowserPanel::UnregisterDefaultAssetTypes(){
 		m_AssetTypesRegistered = false;
 		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
 		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
-		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "audio_mixer", "voice_profile", "sprite_atlas", "sprite_animation" })
+		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "audio_mixer", "voice_profile", "sprite_atlas", "sprite_animation", "tilemap" })
 			registry.Unregister(id);
 	}
 

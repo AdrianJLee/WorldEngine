@@ -1,6 +1,7 @@
 #include "ContentBrowserPanel_Internal.h"
 #include "World/Renderer/TextureAtlas.h"
 #include "World/Renderer/SpriteAnimation.h"
+#include "World/Renderer/Tilemap.h"
 
 namespace World
 {
@@ -1600,6 +1601,73 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 					items.insert(items.begin(), BrowserItem {
 						Wui::Tr("panel.content_browser.item.create_texture_asset", "Create Texture Asset"),
 						[this] { CreateTextureAssetFor(m_Model.ContextMenuPath); } });
+				}
+				if (contextExtension == ".watlas")
+				{
+					items.insert(items.begin(), BrowserItem {
+						Wui::Tr("panel.content_browser.item.create_tilemap_from_atlas", "基于该图集创建 2D 瓦片地图 (Create Tilemap)"),
+						[this]
+						{
+							const std::filesystem::path contentRoot = m_Model.Root;
+							std::error_code ec;
+							const std::filesystem::path rel = std::filesystem::relative(m_Model.ContextMenuPath, contentRoot, ec);
+							const std::string atlasLogical = ec ? m_Model.ContextMenuPath.generic_string() : rel.generic_string();
+							std::filesystem::path dir = m_Model.ContextMenuPath.parent_path();
+							std::string baseName = m_Model.ContextMenuPath.stem().string() + "_tilemap";
+							std::filesystem::path target = MakeUniqueAssetPath(dir, baseName, ".wtilemap");
+							Tilemap tm(baseName, 12, 8, atlasLogical);
+							tm.FillRect(0, 0, 11, 7, 1, false);
+							tm.FillRect(0, 0, 11, 0, 2, true);
+							tm.FillRect(0, 7, 11, 7, 2, true);
+							tm.FillRect(0, 0, 0, 7, 2, true);
+							tm.FillRect(11, 0, 11, 7, 2, true);
+							tm.SaveToFile(target.string());
+							NotifyAssetWritten(target);
+							SelectCreated(target, "new-tilemap");
+							const std::filesystem::path relTarget = std::filesystem::relative(target, contentRoot, ec);
+							m_Host.OpenTilemapEditor(ec ? target.generic_string() : relTarget.generic_string());
+						} });
+					items.insert(items.begin(), BrowserItem {
+						Wui::Tr("panel.content_browser.item.create_anim_from_atlas", "基于该图集创建序列帧动画 (Create Animation)"),
+						[this]
+						{
+							const std::filesystem::path contentRoot = m_Model.Root;
+							std::error_code ec;
+							const std::filesystem::path rel = std::filesystem::relative(m_Model.ContextMenuPath, contentRoot, ec);
+							const std::string atlasLogical = ec ? m_Model.ContextMenuPath.generic_string() : rel.generic_string();
+							std::filesystem::path dir = m_Model.ContextMenuPath.parent_path();
+							std::string baseName = m_Model.ContextMenuPath.stem().string() + "_anim";
+							std::filesystem::path target = MakeUniqueAssetPath(dir, baseName, ".wanim");
+							SpriteAnimation anim(baseName, 12.0f, AnimationLoopMode::Loop);
+							anim.SetAtlasPath(atlasLogical);
+							auto loadedAtlas = TextureAtlas::LoadFromFile(m_Model.ContextMenuPath.string());
+							if (loadedAtlas && loadedAtlas->GetSubTextureCount() > 0)
+							{
+								for (const auto& sub : loadedAtlas->GetAllSubTextures())
+									anim.AddFrame(SpriteAnimationFrame(sub.Name, 0.0833f));
+							}
+							else
+							{
+								anim.AddFrame(SpriteAnimationFrame("slice_0", 0.0833f));
+							}
+							anim.SaveToFile(target.string());
+							NotifyAssetWritten(target);
+							SelectCreated(target, "new-sprite-animation");
+							const std::filesystem::path relTarget = std::filesystem::relative(target, contentRoot, ec);
+							m_Host.OpenAnimationEditor(ec ? target.generic_string() : relTarget.generic_string());
+						} });
+				}
+				if (contextExtension == ".wtilemap")
+				{
+					items.insert(items.begin(), BrowserItem {
+						Wui::Tr("panel.content_browser.item.open_tilemap_editor", "打开 2D 瓦片地图编辑器 (Open Tilemap Editor)"),
+						[this]
+						{
+							const std::filesystem::path contentRoot = m_Model.Root;
+							std::error_code ec;
+							const std::filesystem::path rel = std::filesystem::relative(m_Model.ContextMenuPath, contentRoot, ec);
+							m_Host.OpenTilemapEditor(ec ? m_Model.ContextMenuPath.generic_string() : rel.generic_string());
+						} });
 				}
 			}
 			// 右键菜单走组件(ContextMenu):位置钉住 + 外部点击/Esc 关闭统一处理。

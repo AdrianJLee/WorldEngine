@@ -222,6 +222,42 @@ namespace World
 	static_assert(sizeof(SpriteAnimatorComponent) == 32, "SpriteAnimatorComponent must be exactly 32 bytes");
 	static_assert(std::is_trivially_copyable_v<SpriteAnimatorComponent>, "SpriteAnimatorComponent must be trivially copyable");
 
+	struct TilemapComponent
+	{
+		glm::vec4 TintColor { 1.0f, 1.0f, 1.0f, 1.0f };
+		AssetRef Tilemap;
+		glm::vec2 CellSize { 1.0f, 1.0f };
+		int32_t SortingLayer = -5;
+		int32_t OrderInLayer = 0;
+		bool GenerateCollision = true;
+		bool ShowGrid = false;
+		uint16_t Reserved1 = 0;
+		uint32_t Reserved2 = 0;
+
+		TilemapComponent() = default;
+
+		WE_SCHEMA_BODY(World, TilemapComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/2D"),
+				Doc("2D grid tilemap renderer and merged Box2D static collider generator."))
+			WE_FIELD(TintColor, Vec4, Color(),
+				Doc("Tint multiplied into all painted tiles."));
+			WE_FIELD(Tilemap, Asset, Of("Tilemap"),
+				Doc("Tilemap asset (.wtilemap) containing grid cells, atlas binding, and solid mask."));
+			WE_FIELD(CellSize, Vec2,
+				Doc("World-space size of a single grid cell in meters."));
+			WE_FIELD(SortingLayer, Int32, Default(-5),
+				Doc("Render layer priority (Background = -10, Tilemap = -5, Default = 0)."));
+			WE_FIELD(OrderInLayer, Int32, Default(0),
+				Doc("Order within the sorting layer."));
+			WE_FIELD(GenerateCollision, Bool, Default(true),
+				Doc("Automatically merge contiguous solid tiles into Box2D static box colliders."));
+			WE_FIELD(ShowGrid, Bool, Default(false),
+				Doc("Draw tile grid overlay in the editor viewport."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(TilemapComponent) == 56, "TilemapComponent must be exactly 56 bytes");
+	static_assert(std::is_trivially_copyable_v<TilemapComponent>, "TilemapComponent must be trivially copyable");
+
 	struct CircleRendererComponent
 	{
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };

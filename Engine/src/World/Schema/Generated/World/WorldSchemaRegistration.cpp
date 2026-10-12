@@ -14,6 +14,7 @@ const TypeSchema& WeSchemaOf_TransformComponent();
 const TypeSchema& WeSchemaOf_VelocityComponent();
 const TypeSchema& WeSchemaOf_SpriteComponent();
 const TypeSchema& WeSchemaOf_SpriteAnimatorComponent();
+const TypeSchema& WeSchemaOf_TilemapComponent();
 const TypeSchema& WeSchemaOf_CircleRendererComponent();
 const TypeSchema& WeSchemaOf_MeshRendererComponent();
 const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent();
@@ -972,6 +973,254 @@ struct GeneratedAccess<World::SpriteAnimatorComponent>
             &StorageBindingOf(),
             "Rendering/2D",
             "2D flipbook sprite animator that drives SpriteComponent sub-texture frames over time.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::TilemapComponent>
+{
+    static Value Get_TintColor(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return Value(self->TintColor);
+    }
+    static void Set_TintColor(void* instance, const Value& value)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        self->TintColor = std::get<glm::vec4>(value);
+    }
+    static Value Get_Tilemap(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Tilemap)>>::GetPath(self->Tilemap));
+    }
+    static void Set_Tilemap(void* instance, const Value& value)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Tilemap)>>::SetPath(self->Tilemap, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_Tilemap(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Tilemap)>>::GetIdentity(self->Tilemap);
+    }
+    static void SetAssetIdentity_Tilemap(void* instance, uint64_t identity)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Tilemap)>>::SetIdentity(self->Tilemap, identity);
+    }
+    static Value Get_CellSize(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return Value(self->CellSize);
+    }
+    static void Set_CellSize(void* instance, const Value& value)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        self->CellSize = std::get<glm::vec2>(value);
+    }
+    static Value Get_SortingLayer(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return Value(self->SortingLayer);
+    }
+    static void Set_SortingLayer(void* instance, const Value& value)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        self->SortingLayer = std::get<int32_t>(value);
+    }
+    static Value Get_OrderInLayer(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return Value(self->OrderInLayer);
+    }
+    static void Set_OrderInLayer(void* instance, const Value& value)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        self->OrderInLayer = std::get<int32_t>(value);
+    }
+    static Value Get_GenerateCollision(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return Value(self->GenerateCollision);
+    }
+    static void Set_GenerateCollision(void* instance, const Value& value)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        self->GenerateCollision = std::get<bool>(value);
+    }
+    static Value Get_ShowGrid(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return Value(self->ShowGrid);
+    }
+    static void Set_ShowGrid(void* instance, const Value& value)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        self->ShowGrid = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_TintColor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCF6E0F900F4EFA14ull },
+            "TintColor",
+            Kind::Vec4,
+            &Get_TintColor,
+            &Set_TintColor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Tint multiplied into all painted tiles.", true, "", {  }, "", std::nullopt },
+            Value(glm::vec4(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Tilemap()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD6FA114911DAF9F6ull },
+            "Tilemap",
+            Kind::Asset,
+            &Get_Tilemap,
+            &Set_Tilemap,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Tilemap",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Tilemap asset (.wtilemap) containing grid cells, atlas binding, and solid mask.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_Tilemap,
+            &SetAssetIdentity_Tilemap,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CellSize()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF47BE4F581C7D419ull },
+            "CellSize",
+            Kind::Vec2,
+            &Get_CellSize,
+            &Set_CellSize,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "World-space size of a single grid cell in meters.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SortingLayer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4B200B187ECEDBEDull },
+            "SortingLayer",
+            Kind::Int32,
+            &Get_SortingLayer,
+            &Set_SortingLayer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Render layer priority (Background = -10, Tilemap = -5, Default = 0).", false, "", {  }, "", std::nullopt },
+            Value(-5),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_OrderInLayer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x28CE58C932A8034Cull },
+            "OrderInLayer",
+            Kind::Int32,
+            &Get_OrderInLayer,
+            &Set_OrderInLayer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Order within the sorting layer.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_GenerateCollision()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9AAA438126A8EED5ull },
+            "GenerateCollision",
+            Kind::Bool,
+            &Get_GenerateCollision,
+            &Set_GenerateCollision,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically merge contiguous solid tiles into Box2D static box colliders.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShowGrid()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5E48D1B45F0323E9ull },
+            "ShowGrid",
+            Kind::Bool,
+            &Get_ShowGrid,
+            &Set_ShowGrid,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Draw tile grid overlay in the editor viewport.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::TilemapComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::TilemapComponent" },
+            "TilemapComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::TilemapComponent),
+            TypeCategory::Component,
+            {
+                Field_TintColor(),
+                Field_Tilemap(),
+                Field_CellSize(),
+                Field_SortingLayer(),
+                Field_OrderInLayer(),
+                Field_GenerateCollision(),
+                Field_ShowGrid(),
+            },
+            &StorageBindingOf(),
+            "Rendering/2D",
+            "2D grid tilemap renderer and merged Box2D static collider generator.",
             false,
             false,
         };
@@ -5081,6 +5330,7 @@ const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World
 const TypeSchema& WeSchemaOf_VelocityComponent() { return GeneratedAccess<World::VelocityComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SpriteComponent() { return GeneratedAccess<World::SpriteComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SpriteAnimatorComponent() { return GeneratedAccess<World::SpriteAnimatorComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_TilemapComponent() { return GeneratedAccess<World::TilemapComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleRendererComponent() { return GeneratedAccess<World::CircleRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshRendererComponent() { return GeneratedAccess<World::MeshRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent() { return GeneratedAccess<World::SkinnedMeshRendererComponent>::WeSchema(); }
@@ -5128,6 +5378,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_VelocityComponent(),
 			WeSchemaOf_SpriteComponent(),
 			WeSchemaOf_SpriteAnimatorComponent(),
+			WeSchemaOf_TilemapComponent(),
 			WeSchemaOf_CircleRendererComponent(),
 			WeSchemaOf_MeshRendererComponent(),
 			WeSchemaOf_SkinnedMeshRendererComponent(),

@@ -154,6 +154,7 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 		// 2D 资产面板:图集 (atlas:<逻辑路径>) 与动画 (anim:<逻辑路径>) 独立窗口形态。
 		constexpr const char* kAtlasPanelPrefix = "atlas:";
 		constexpr const char* kAnimPanelPrefix = "anim:";
+		constexpr const char* kTilemapPanelPrefix = "tilemap:";
 	}
 
 	// ---- CPPT-6-ED-NEWSCRIPT + PECS-T8/T11:File ▸ New C++ …(组件 / 系统 / 空 同一个向导)----

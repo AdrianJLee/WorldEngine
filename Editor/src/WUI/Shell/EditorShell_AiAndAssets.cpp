@@ -27,6 +27,14 @@ bool EditorShell::AiTogglePanel(const std::string& panel){
 			OpenPanelAttached(panel);
 			return true;
 		}
+		if (panel.rfind("tilemap:", 0) == 0)
+		{
+			EnsureTilemapPanelFromId(panel);
+			if (!m_Layout.FindFloatMemory(panel, nullptr))
+				m_Layout.FloatMemory.push_back({ panel, Wui::WuiRect { 240.0f, 170.0f, 880.0f, 580.0f } });
+			OpenPanelAttached(panel);
+			return true;
+		}
 		if (!IsDeclaredPanel(panel))
 			return false;
 		// 材质面板是动态实例:先按 id 建出面板对象,再走菜单同一条开关路径。
@@ -180,6 +188,13 @@ bool EditorShell::AiActivatePanel(const std::string& panel, std::string* message
 		if (panel.rfind("anim:", 0) == 0)
 		{
 			EnsureAnimationPanelFromId(panel);
+			OpenPanelAttached(panel);
+			if (message) *message = "opened and activated " + panel;
+			return true;
+		}
+		if (panel.rfind("tilemap:", 0) == 0)
+		{
+			EnsureTilemapPanelFromId(panel);
 			OpenPanelAttached(panel);
 			if (message) *message = "opened and activated " + panel;
 			return true;
@@ -664,6 +679,46 @@ SpriteAnimationEditorPanel* EditorShell::FindAnimationPanel(const std::string& l
 	auto it = m_PanelRegistry.find(panelId);
 	if (it != m_PanelRegistry.end())
 		return dynamic_cast<SpriteAnimationEditorPanel*>(it->second.get());
+	return nullptr;
+}
+
+void EditorShell::OpenTilemapEditor(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	if (path.empty()) return;
+	const std::string panelId = "tilemap:" + path;
+	if (m_PanelRegistry.find(panelId) == m_PanelRegistry.end())
+	{
+		auto panel = std::make_unique<TilemapEditorPanel>(path);
+		m_PanelRegistry.emplace(panelId, std::move(panel));
+		m_Panels.push_back(panelId);
+		m_Layout.FloatMemory.push_back({ panelId, Wui::WuiRect { 240.0f, 170.0f, 880.0f, 580.0f } });
+	}
+	OpenPanelAttached(panelId);
+}
+
+void EditorShell::EnsureTilemapPanelFromId(const std::string& panelId)
+{
+	if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
+		return;
+	if (panelId.rfind("tilemap:", 0) != 0)
+		return;
+	const std::string path = panelId.substr(8);
+	auto panel = std::make_unique<TilemapEditorPanel>(path);
+	m_PanelRegistry.emplace(panelId, std::move(panel));
+	if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
+		m_Panels.push_back(panelId);
+}
+
+TilemapEditorPanel* EditorShell::FindTilemapPanel(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	const std::string panelId = "tilemap:" + path;
+	auto it = m_PanelRegistry.find(panelId);
+	if (it != m_PanelRegistry.end())
+		return dynamic_cast<TilemapEditorPanel*>(it->second.get());
 	return nullptr;
 }
 

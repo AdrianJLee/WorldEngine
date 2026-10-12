@@ -340,6 +340,8 @@ EditorShell::PanelForm EditorShell::FormOf(const std::string& panel) const{
 			return PanelForm::Independent;
 		if (panel.compare(0, std::strlen(kAnimPanelPrefix), kAnimPanelPrefix) == 0)
 			return PanelForm::Independent;
+		if (panel.compare(0, std::strlen(kTilemapPanelPrefix), kTilemapPanelPrefix) == 0)
+			return PanelForm::Independent;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
 				return spec.Form;
@@ -365,6 +367,8 @@ bool EditorShell::IsDeclaredPanel(const std::string& panel) const{
 		if (panel.compare(0, std::strlen(kAtlasPanelPrefix), kAtlasPanelPrefix) == 0)
 			return true;
 		if (panel.compare(0, std::strlen(kAnimPanelPrefix), kAnimPanelPrefix) == 0)
+			return true;
+		if (panel.compare(0, std::strlen(kTilemapPanelPrefix), kTilemapPanelPrefix) == 0)
 			return true;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
@@ -1210,6 +1214,8 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 				return "图集: " + std::filesystem::path(id.substr(std::strlen(kAtlasPanelPrefix))).filename().string();
 			if (id.rfind(kAnimPanelPrefix, 0) == 0)
 				return "动画: " + std::filesystem::path(id.substr(std::strlen(kAnimPanelPrefix))).filename().string();
+			if (id.rfind(kTilemapPanelPrefix, 0) == 0)
+				return "瓦片地图: " + std::filesystem::path(id.substr(std::strlen(kTilemapPanelPrefix))).filename().string();
 			return id;
 		}
 		std::string title = it->second->Title();

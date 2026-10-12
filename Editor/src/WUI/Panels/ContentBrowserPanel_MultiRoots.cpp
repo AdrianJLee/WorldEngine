@@ -464,6 +464,16 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 			m_Host.OpenAnimationEditor(logical);
 			WLD_CORE_INFO("[anim] editor opened: {0}", logical);
 		}
+		else if (path.extension() == ".wtilemap")
+		{
+			// P4: 2D 瓦片地图资产双击 → 打开瓦片地图编辑器
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			m_Host.OpenTilemapEditor(logical);
+			WLD_CORE_INFO("[tilemap] editor opened: {0}", logical);
+		}
 		else if (path.extension() == ".gltf" || path.extension() == ".glb")
 		{
 			// P1b D5:glTF 双击 → 导入(.wmodel/.wmat/贴图)并**打开模型预览**(不实例化)。

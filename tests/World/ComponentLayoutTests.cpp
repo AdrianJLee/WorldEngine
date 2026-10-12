@@ -50,6 +50,7 @@ namespace
 		{ "World::VelocityComponent",            24 },
 		{ "World::SpriteComponent",              64 },
 		{ "World::SpriteAnimatorComponent",      32 },
+		{ "World::TilemapComponent",             56 },
 		{ "World::CircleRendererComponent",      24 },
 		{ "World::MeshRendererComponent",        56 },
 		{ "World::SkinnedMeshRendererComponent", 56 },

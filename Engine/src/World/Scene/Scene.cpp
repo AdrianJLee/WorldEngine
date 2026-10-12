@@ -6,6 +6,7 @@
 #include "World/Scene/Systems/CameraSystem.h"
 #include "World/Scene/Systems/MovementSystem.h"
 #include "World/Scene/Systems/SpriteAnimationSystem.h"
+#include "World/Renderer/Tilemap.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Script/Runtime/ScriptEngine.h"
@@ -150,7 +151,12 @@ namespace World
 		{
 			if (!b2World_IsValid(worldId)) return false;
 			auto* rb = registry.try_get<RigidBody2DComponent>(entity);
-			if (!rb || b2Body_IsValid(FindBody2D(bodies, entity))) return false;
+			const auto* tilemapForBody = registry.try_get<TilemapComponent>(entity);
+			if ((!rb && !(tilemapForBody && tilemapForBody->GenerateCollision)) || b2Body_IsValid(FindBody2D(bodies, entity)))
+				return false;
+			const RigidBody2DComponent defaultStaticRb{};
+			if (!rb)
+				rb = const_cast<RigidBody2DComponent*>(&defaultStaticRb);
 			auto toBox2DType = [](RigidBody2DComponent::BodyType type)
 			{
 				switch (type)
@@ -232,6 +238,35 @@ namespace World
 				shapeDef.material.restitution = capsule->Restitution;
 				PrepareShape(shapeDef, capsule->IsSensor);
 				b2CreateCapsuleShape(body, &shapeDef, &shape);
+			}
+			if (const auto* tilemapComp = registry.try_get<TilemapComponent>(entity))
+			{
+				if (tilemapComp->GenerateCollision && tilemapComp->Tilemap.HasPath())
+				{
+					const std::string& tmPath = StringPool::Get().PathOf(tilemapComp->Tilemap.Path);
+					if (auto tm = Tilemap::GetOrLoad(tmPath))
+					{
+						const float cellW = (tilemapComp->CellSize.x > 0.0f ? tilemapComp->CellSize.x : tm->GetCellSize().x) * transform->Scale.x;
+						const float cellH = (tilemapComp->CellSize.y > 0.0f ? tilemapComp->CellSize.y : tm->GetCellSize().y) * transform->Scale.y;
+						const float mapW = static_cast<float>(tm->GetWidth()) * cellW;
+						const float mapH = static_cast<float>(tm->GetHeight()) * cellH;
+						const auto rects = tm->ComputeMergedColliderRects();
+						for (const auto& r : rects)
+						{
+							const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
+							const float cy = -mapH * 0.5f + (r.Y + r.Height * 0.5f) * cellH;
+							const float hx = (r.Width * cellW) * 0.5f;
+							const float hy = (r.Height * cellH) * 0.5f;
+							if (hx > 1e-5f && hy > 1e-5f)
+							{
+								b2Polygon box = b2MakeOffsetBox(hx, hy, { cx, cy }, b2Rot_identity);
+								b2ShapeDef shapeDef = b2DefaultShapeDef();
+								PrepareShape(shapeDef, false);
+								b2CreatePolygonShape(body, &shapeDef, &box);
+							}
+						}
+					}
+				}
 			}
 			// P5:记下建体时用的 (Layer,Mask) —— 运行时改组件后据此检测变化并 b2Shape_SetFilter。
 			filters[entity] = (static_cast<uint64_t>(rb->Layer) << 32) | static_cast<uint64_t>(rb->Mask);
@@ -2006,6 +2041,11 @@ namespace World
 		{
 			// W3f:创建逻辑抽到 BuildRuntimeBody,与运行时 AddComponent 补建共用同一套形状/质量口径。
 			BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
+		}
+		for (const auto entity : m_Registry.view<TilemapComponent>())
+		{
+			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
 		}
 	}
 

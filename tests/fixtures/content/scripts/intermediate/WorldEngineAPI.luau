@@ -916,6 +916,16 @@ function ui:isOpen() end
 ---@class TagComponent
 ---@field Tag string
 
+-- Component fields are exposed through Entity:GetComponent("TilemapComponent"); there is no runtime global named TilemapComponent.
+---@class TilemapComponent
+---@field OrderInLayer number
+---@field SortingLayer number
+---@field ShowGrid boolean
+---@field GenerateCollision boolean
+---@field TintColor vec4
+---@field Tilemap string
+---@field CellSize vec2
+
 -- Component fields are exposed through Entity:GetComponent("TransformComponent"); there is no runtime global named TransformComponent.
 ---@class TransformComponent
 ---@field Scale vec3
@@ -985,6 +995,8 @@ function ui:isOpen() end
 ---@field Sprite string Short alias for "SpriteComponent".
 ---@field TagComponent string Registered component type name "TagComponent".
 ---@field Tag string Short alias for "TagComponent".
+---@field TilemapComponent string Registered component type name "TilemapComponent".
+---@field Tilemap string Short alias for "TilemapComponent".
 ---@field TransformComponent string Registered component type name "TransformComponent".
 ---@field Transform string Short alias for "TransformComponent".
 ---@field UUIDComponent string Registered component type name "UUIDComponent".

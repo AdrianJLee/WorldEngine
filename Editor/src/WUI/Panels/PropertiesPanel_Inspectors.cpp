@@ -1,4 +1,5 @@
 #include "World/Audio/AudioSystem.h"
+#include "World/Renderer/Tilemap.h"
 #include "World/Scene/Components.h"
 #include "World/Core/StringPool.h"
 #include "PropertiesPanel_Internal.h"
@@ -50,6 +51,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawCapsuleCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::SpriteAnimatorComponent")
 			height = DrawSpriteAnimatorInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::TilemapComponent")
+			height = DrawTilemapInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		// 自定义检查器:关卡数据层归属(勾选替代裸掩码数字);Play/Simulate 只读时退回普通行。
 		else if (schema.Id.Name == "World::LevelEntityComponent" && !m_ReadOnly)
 			height = DrawLevelEntityInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
@@ -774,6 +777,44 @@ float PropertiesPanel::DrawSpriteAnimatorInspector(Wui::WuiContext& ctx, const W
 		: (anim->Finished ? "■ 播放已结束" : "❚❚ 已暂停");
 	Wui::Label(ctx, { rect.X + 14.0f, y + 2.0f }, statusMsg, anim->Playing ? theme.Accent : theme.TextMuted, 10.5f);
 	y += 20.0f;
+
+	return y - rect.Y;
+}
+
+float PropertiesPanel::DrawTilemapInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* tmComp = static_cast<World::TilemapComponent*>(instance);
+	if (!tmComp) return height;
+
+	const std::string tmPath = tmComp->Tilemap.HasPath() ? StringPool::Get().PathOf(tmComp->Tilemap.Path) : "";
+
+	const Wui::WuiRect btnOpen { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
+	Wui::Tooltip(ctx, btnOpen, tmPath.empty() ? "请先绑定 .wtilemap 瓦片地图资产" : ("在瓦片地图工作台中打开: " + tmPath + " (prop.tilemap.open)"));
+	if (Wui::Button(ctx, Wui::HashId("prop.tilemap.open"), btnOpen, "🗺 打开瓦片地图编辑器", theme))
+	{
+		if (!tmPath.empty())
+			m_Host.OpenTilemapEditor(tmPath);
+	}
+	y += 28.0f;
+
+	if (!tmPath.empty())
+	{
+		if (auto tm = Tilemap::GetOrLoad(tmPath))
+		{
+			const size_t mergedCount = tm->ComputeMergedColliderRects().size();
+			std::string summary = "网格: " + std::to_string(tm->GetWidth()) + "x" + std::to_string(tm->GetHeight())
+				+ " | 已绘瓦片: " + std::to_string(tm->CountPaintedTiles())
+				+ " | 合并碰撞盒: " + std::to_string(mergedCount) + " 个";
+			Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, summary, theme.Accent, 10.5f);
+			y += 20.0f;
+		}
+	}
 
 	return y - rect.Y;
 }

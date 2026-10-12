@@ -12,6 +12,7 @@
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Renderer/TextureAtlas.h"
+#include "World/Renderer/Tilemap.h"
 #include "World/Asset/AssetCatalog.h"
 #include "World/Asset/AsyncLoader.h"
 #include "World/Utils/Paths.h"
@@ -1348,6 +1349,45 @@ namespace World
 				Renderer2D::DrawLineCore(transform.Location - glm::vec3(0.0f, crossSz, 0.0f),
 					transform.Location + glm::vec3(0.0f, crossSz, 0.0f), { 0.2f, 0.95f, 0.95f, 1.0f }, selectedEntity);
 			}
+			if (selectedEntity.HasComponent<TilemapComponent>() &&
+				!selectedEntity.HasComponent<MeshRendererComponent>())
+			{
+				auto& transform = selectedEntity.GetComponent<TransformComponent>();
+				const auto& tilemapComp = selectedEntity.GetComponent<TilemapComponent>();
+				std::shared_ptr<Tilemap> tm = nullptr;
+				if (tilemapComp.Tilemap.HasPath())
+				{
+					const std::string& tmPath = StringPool::Get().PathOf(tilemapComp.Tilemap.Path);
+					if (!tmPath.empty())
+						tm = Tilemap::GetOrLoad(tmPath);
+				}
+				const uint32_t tmW = tm ? tm->GetWidth() : 16u;
+				const uint32_t tmH = tm ? tm->GetHeight() : 16u;
+				const float cellW = tilemapComp.CellSize.x > 0.0f ? tilemapComp.CellSize.x : (tm ? tm->GetCellSize().x : 1.0f);
+				const float cellH = tilemapComp.CellSize.y > 0.0f ? tilemapComp.CellSize.y : (tm ? tm->GetCellSize().y : 1.0f);
+				const float mapW = static_cast<float>(tmW) * cellW;
+				const float mapH = static_cast<float>(tmH) * cellH;
+				const glm::mat4 baseTr = transform.GetLocalMatrix();
+				const glm::mat4 rectTr = baseTr * glm::scale(glm::mat4(1.0f), glm::vec3(mapW, mapH, 1.0f));
+				Renderer2D::DrawRectCore(rectTr, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
+				if (!tilemapComp.ShowGrid)
+				{
+					for (uint32_t gx = 1; gx < tmW; ++gx)
+					{
+						const float lx = -mapW * 0.5f + static_cast<float>(gx) * cellW;
+						const glm::vec3 p0 = glm::vec3(baseTr * glm::vec4(lx, -mapH * 0.5f, 0.0f, 1.0f));
+						const glm::vec3 p1 = glm::vec3(baseTr * glm::vec4(lx,  mapH * 0.5f, 0.0f, 1.0f));
+						Renderer2D::DrawLineCore(p0, p1, { 1.0f, 0.65f, 0.15f, 0.28f }, selectedEntity);
+					}
+					for (uint32_t gy = 1; gy < tmH; ++gy)
+					{
+						const float ly = -mapH * 0.5f + static_cast<float>(gy) * cellH;
+						const glm::vec3 p0 = glm::vec3(baseTr * glm::vec4(-mapW * 0.5f, ly, 0.0f, 1.0f));
+						const glm::vec3 p1 = glm::vec3(baseTr * glm::vec4( mapW * 0.5f, ly, 0.0f, 1.0f));
+						Renderer2D::DrawLineCore(p0, p1, { 1.0f, 0.65f, 0.15f, 0.28f }, selectedEntity);
+					}
+				}
+			}
 			RenderDebug(camera, cameraTransform);
 		}
 		RenderGroundGrid(camera, cameraTransform);
@@ -1630,6 +1670,139 @@ namespace World
 		}
 		}
 		{
+			auto tilemapView = m_ActiveScene->m_Registry.view<TransformComponent, TilemapComponent>();
+			struct TilemapSortItem
+			{
+				entt::entity entity;
+				int32_t sortingLayer;
+				int32_t orderInLayer;
+				float depthKey;
+				uint32_t entityId;
+			};
+			std::vector<TilemapSortItem> tmItems;
+			for (auto entity : tilemapView)
+			{
+				if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& [transform, tilemapComp] = tilemapView.get<TransformComponent, TilemapComponent>(entity);
+				tmItems.push_back({
+					entity,
+					tilemapComp.SortingLayer,
+					tilemapComp.OrderInLayer,
+					-transform.Location.z,
+					static_cast<uint32_t>(entity)
+				});
+			}
+
+			std::stable_sort(tmItems.begin(), tmItems.end(), [](const TilemapSortItem& a, const TilemapSortItem& b)
+			{
+				if (a.sortingLayer != b.sortingLayer)
+					return a.sortingLayer < b.sortingLayer;
+				if (a.orderInLayer != b.orderInLayer)
+					return a.orderInLayer < b.orderInLayer;
+				if (std::abs(a.depthKey - b.depthKey) > 1e-4f)
+					return a.depthKey < b.depthKey;
+				return a.entityId < b.entityId;
+			});
+
+			for (const auto& tmItem : tmItems)
+			{
+				const auto& [transform, tilemapComp] = tilemapView.get<TransformComponent, TilemapComponent>(tmItem.entity);
+				const glm::mat4 baseMatrix = *spriteMatrixOf(tmItem.entity, transform);
+
+				std::shared_ptr<Tilemap> tm = nullptr;
+				if (tilemapComp.Tilemap.HasPath())
+				{
+					const std::string& path = StringPool::Get().PathOf(tilemapComp.Tilemap.Path);
+					if (!path.empty())
+						tm = Tilemap::GetOrLoad(path);
+				}
+
+				const uint32_t width = tm ? tm->GetWidth() : 16u;
+				const uint32_t height = tm ? tm->GetHeight() : 16u;
+				const float cellW = tilemapComp.CellSize.x > 0.0f ? tilemapComp.CellSize.x : (tm ? tm->GetCellSize().x : 1.0f);
+				const float cellH = tilemapComp.CellSize.y > 0.0f ? tilemapComp.CellSize.y : (tm ? tm->GetCellSize().y : 1.0f);
+				const float mapW = static_cast<float>(width) * cellW;
+				const float mapH = static_cast<float>(height) * cellH;
+				const float originX = -mapW * 0.5f;
+				const float originY = -mapH * 0.5f;
+
+				if (tm)
+				{
+					std::shared_ptr<TextureAtlas> atlas = nullptr;
+					Rhi::Handle<Rhi::Texture> texture{};
+					if (!tm->GetAtlasPath().empty())
+					{
+						atlas = TextureAtlas::GetOrLoad(tm->GetAtlasPath());
+						if (atlas && !atlas->GetTexturePath().empty())
+						{
+							PathId atlasTexPid = StringPool::Get().InternPath(atlas->GetTexturePath());
+							texture = TextureLibrary::Get().Get(atlasTexPid, true);
+						}
+						else
+						{
+							PathId directTexPid = StringPool::Get().InternPath(tm->GetAtlasPath());
+							texture = TextureLibrary::Get().Get(directTexPid, true);
+						}
+					}
+
+					for (uint32_t y = 0; y < height; ++y)
+					{
+						for (uint32_t x = 0; x < width; ++x)
+						{
+							const uint16_t tileId = tm->GetTile(x, y);
+							if (tileId == 0)
+								continue;
+
+							const glm::vec2* texCoords = nullptr;
+							const size_t subIndex = static_cast<size_t>(tileId - 1);
+							if (atlas && subIndex < atlas->GetSubTextureCount())
+							{
+								if (const SubTexture2D* sub = atlas->GetSubTexture(subIndex))
+									texCoords = sub->TexCoords;
+							}
+
+							const glm::vec3 cellOffset(
+								originX + (static_cast<float>(x) + 0.5f) * cellW,
+								originY + (static_cast<float>(y) + 0.5f) * cellH,
+								0.0f);
+							const glm::mat4 cellWorldMatrix = baseMatrix
+								* glm::translate(glm::mat4(1.0f), cellOffset)
+								* glm::scale(glm::mat4(1.0f), glm::vec3(cellW, cellH, 1.0f));
+
+							Renderer2D::DrawQuadCore(
+								cellWorldMatrix,
+								texture,
+								tilemapComp.TintColor,
+								texCoords,
+								1.0f,
+								static_cast<uint32_t>(tmItem.entity));
+						}
+					}
+				}
+
+				if (tilemapComp.ShowGrid)
+				{
+					const glm::mat4 borderTr = baseMatrix * glm::scale(glm::mat4(1.0f), glm::vec3(mapW, mapH, 1.0f));
+					Renderer2D::DrawRectCore(borderTr, { 0.35f, 0.75f, 0.95f, 0.65f }, static_cast<uint32_t>(tmItem.entity));
+					for (uint32_t gx = 1; gx < width; ++gx)
+					{
+						const float lx = originX + static_cast<float>(gx) * cellW;
+						const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(lx, originY, 0.0f, 1.0f));
+						const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(lx, originY + mapH, 0.0f, 1.0f));
+						Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.28f }, static_cast<uint32_t>(tmItem.entity));
+					}
+					for (uint32_t gy = 1; gy < height; ++gy)
+					{
+						const float ly = originY + static_cast<float>(gy) * cellH;
+						const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(originX, ly, 0.0f, 1.0f));
+						const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(originX + mapW, ly, 0.0f, 1.0f));
+						Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.28f }, static_cast<uint32_t>(tmItem.entity));
+					}
+				}
+			}
+		}
+		{
 			auto view = m_ActiveScene->m_Registry.view<TransformComponent, CircleRendererComponent>();
 			std::vector<entt::entity> entities;
 			for (auto entity : view)
@@ -1723,6 +1896,40 @@ namespace World
 				glm::vec3 bot2 = glm::vec3(baseTr * glm::vec4(halfLen * transform.Scale.x, -rad, 0.0f, 1.0f));
 				Renderer2D::DrawLineCore(top1, top2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
 				Renderer2D::DrawLineCore(bot1, bot2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			}
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, TilemapComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& tilemapComp = m_ActiveScene->m_Registry.get<TilemapComponent>(entity);
+			if (!tilemapComp.GenerateCollision || !tilemapComp.Tilemap.HasPath())
+				continue;
+
+			const std::string& tmPath = StringPool::Get().PathOf(tilemapComp.Tilemap.Path);
+			if (tmPath.empty())
+				continue;
+			auto tm = Tilemap::GetOrLoad(tmPath);
+			if (!tm)
+				continue;
+
+			const float cellW = (tilemapComp.CellSize.x > 0.0f ? tilemapComp.CellSize.x : tm->GetCellSize().x) * transform.Scale.x;
+			const float cellH = (tilemapComp.CellSize.y > 0.0f ? tilemapComp.CellSize.y : tm->GetCellSize().y) * transform.Scale.y;
+			const float mapW = static_cast<float>(tm->GetWidth()) * cellW;
+			const float mapH = static_cast<float>(tm->GetHeight()) * cellH;
+			const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::mat4_cast(transform.Rotation);
+
+			const auto rects = tm->ComputeMergedColliderRects();
+			for (const auto& r : rects)
+			{
+				const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
+				const float cy = -mapH * 0.5f + (r.Y + r.Height * 0.5f) * cellH;
+				const float rw = r.Width * cellW;
+				const float rh = r.Height * cellH;
+				const glm::mat4 rectTr = baseTr
+					* glm::translate(glm::mat4(1.0f), glm::vec3(cx, cy, 0.0f))
+					* glm::scale(glm::mat4(1.0f), glm::vec3(rw, rh, 1.0f));
+				Renderer2D::DrawRectCore(rectTr, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
 			}
 		}
 	}

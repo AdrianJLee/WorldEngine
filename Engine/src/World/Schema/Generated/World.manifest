@@ -4,6 +4,7 @@ struct World::TransformComponent
 struct World::VelocityComponent
 struct World::SpriteComponent
 struct World::SpriteAnimatorComponent
+struct World::TilemapComponent
 struct World::CircleRendererComponent
 struct World::MeshRendererComponent
 struct World::SkinnedMeshRendererComponent

@@ -11,8 +11,10 @@
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/TextureAtlas.h"
 #include "World/Renderer/SpriteAnimation.h"
+#include "World/Renderer/Tilemap.h"
 #include "WUI/Panels/SpriteAtlasEditorPanel.h"
 #include "WUI/Panels/SpriteAnimationEditorPanel.h"
+#include "WUI/Panels/TilemapEditorPanel.h"
 #include "World/Scene/Components.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/Runtime/ComponentPropertyModel.h"
@@ -2845,6 +2847,141 @@ namespace World
 				panel->Stop();
 			}
 			result = "animation stopped: " + path;
+			return true;
+		}
+		if (cmd == "asset.create_tilemap")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			std::filesystem::path outPath(path);
+			if (!outPath.is_absolute())
+			{
+				if (path.rfind("assets/", 0) == 0 || path.rfind("assets\\", 0) == 0)
+					outPath = World::Paths::AssetRoot() / path.substr(7);
+				else
+					outPath = World::Paths::AssetRoot() / outPath;
+			}
+			std::filesystem::create_directories(outPath.parent_path());
+
+			const std::string name = args.count("name") ? arg("name") : outPath.stem().string();
+			const std::string atlasPath = args.count("atlas") ? arg("atlas") : "";
+			const uint32_t width = args.count("width") ? static_cast<uint32_t>(std::max(1, std::atoi(arg("width").c_str()))) : 16u;
+			const uint32_t height = args.count("height") ? static_cast<uint32_t>(std::max(1, std::atoi(arg("height").c_str()))) : 12u;
+
+			World::Tilemap tm(name, width, height, atlasPath);
+			if (!tm.SaveToFile(outPath.string()))
+			{
+				error = "failed to save tilemap to " + outPath.string();
+				return false;
+			}
+			World::Tilemap::ClearCache();
+			m_Shell.OpenTilemapEditor(path);
+			result = "created tilemap at " + outPath.string();
+			return true;
+		}
+		if (cmd == "asset.open_tilemap")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			m_Shell.OpenTilemapEditor(path);
+			result = "opened tilemap editor for " + path;
+			return true;
+		}
+		if (cmd == "asset.tilemap_info")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			std::shared_ptr<World::Tilemap> tm;
+			if (auto* panel = m_Shell.FindTilemapPanel(path))
+				tm = panel->GetTilemap();
+			if (!tm)
+			{
+				std::filesystem::path resolved = resolveAssetPath(path);
+				tm = World::Tilemap::LoadFromFile(resolved.string());
+			}
+			if (!tm)
+			{
+				error = "failed to load tilemap: " + path;
+				return false;
+			}
+			const auto merged = tm->ComputeMergedColliderRects();
+			std::ostringstream json;
+			json << "{"
+				 << "\"name\":\"" << JsonEscape(tm->GetName()) << "\","
+				 << "\"atlas\":\"" << JsonEscape(tm->GetAtlasPath()) << "\","
+				 << "\"width\":" << tm->GetWidth() << ","
+				 << "\"height\":" << tm->GetHeight() << ","
+				 << "\"paintedCount\":" << tm->CountPaintedTiles() << ","
+				 << "\"solidCount\":" << tm->CountSolidTiles() << ","
+				 << "\"mergedColliderCount\":" << merged.size()
+				 << "}";
+			result = json.str();
+			return true;
+		}
+		if (cmd == "asset.tilemap_paint")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			const uint32_t x = args.count("x") ? static_cast<uint32_t>(std::max(0, std::atoi(arg("x").c_str()))) : 0u;
+			const uint32_t y = args.count("y") ? static_cast<uint32_t>(std::max(0, std::atoi(arg("y").c_str()))) : 0u;
+			const uint32_t w = args.count("w") ? static_cast<uint32_t>(std::max(1, std::atoi(arg("w").c_str()))) : 1u;
+			const uint32_t h = args.count("h") ? static_cast<uint32_t>(std::max(1, std::atoi(arg("h").c_str()))) : 1u;
+			const uint16_t tile = args.count("tile") ? static_cast<uint16_t>(std::max(0, std::atoi(arg("tile").c_str()))) : 1u;
+			const bool solid = args.count("solid") && (arg("solid") == "true" || arg("solid") == "1");
+			const bool flood = args.count("flood") && (arg("flood") == "true" || arg("flood") == "1");
+
+			if (auto* panel = m_Shell.FindTilemapPanel(path))
+			{
+				if (flood)
+					panel->FloodFillCells(x, y, tile, solid);
+				else if (w > 1u || h > 1u)
+					panel->FillRectCells(x, y, x + w - 1u, y + h - 1u, tile, solid);
+				else
+					panel->PaintCell(x, y, tile, solid);
+				panel->Save();
+			}
+			else
+			{
+				std::filesystem::path resolved = resolveAssetPath(path);
+				auto tm = World::Tilemap::LoadFromFile(resolved.string());
+				if (!tm)
+				{
+					error = "failed to load tilemap: " + path;
+					return false;
+				}
+				if (flood)
+					tm->FloodFill(x, y, tile, solid);
+				else if (w > 1u || h > 1u)
+					tm->FillRect(x, y, x + w - 1u, y + h - 1u, tile, solid);
+				else
+				{
+					tm->SetTile(x, y, tile);
+					tm->SetSolid(x, y, tile == 0 ? false : solid);
+				}
+				if (!tm->SaveToFile(resolved.string()))
+				{
+					error = "failed to save tilemap: " + resolved.string();
+					return false;
+				}
+				World::Tilemap::ClearCache();
+			}
+			result = "painted tilemap " + path;
 			return true;
 		}
 		if (cmd == "asset.open_material")
