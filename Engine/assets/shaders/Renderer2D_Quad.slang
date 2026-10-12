@@ -21,8 +21,9 @@ struct VS_OUTPUT
     
     [[vk::location(0)]] float4 v_Color : COLOR;
     [[vk::location(1)]] float2 v_TexCoord : TEXCOORD0;
-    [[vk::location(2)]] float v_TexIndex : TEXCOORD1;
-    [[vk::location(3)]] float v_TilingFactor : TILING;
+    // nointerpolation 确保浮点插值不产生向下微量截断(避免 0.999999 变为 0 槽位的白色纹理而导致噪点/撕裂条纹)
+    [[vk::location(2)]] nointerpolation float v_TexIndex : TEXCOORD1;
+    [[vk::location(3)]] nointerpolation float v_TilingFactor : TILING;
     // nointerpolation 对应 GLSL 的 flat，防止整数被插值
     [[vk::location(4)]] nointerpolation int v_EntityID : ENTITY_ID;
 };
@@ -79,11 +80,14 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     PS_OUTPUT output;
 
     // 采样纹理：使用纹理对象的 Sample 方法
-    // 增加 + 0.5f 解决插值过程中的浮点数精度丢失引发的向下截断问题
-    float4 texColor = u_Textures[uint(input.v_TexIndex)].Sample(input.v_TexCoord * input.v_TilingFactor);
+    // 增加 + 0.5f 解决插值与浮点精度丢失引发的向下截断到槽位 0(白色纹理)导致的噪点与条纹
+    uint texSlot = clamp(uint(input.v_TexIndex + 0.5f), 0u, 31u);
+    float4 texColor = u_Textures[texSlot].Sample(input.v_TexCoord * input.v_TilingFactor);
     
     // 最终颜色计算
     output.Color = texColor * input.v_Color;
+    if (output.Color.a <= 0.001f)
+        discard;
     
     // 传递 ID (通常用于鼠标点击选中物体)
     output.EntityID = input.v_EntityID;

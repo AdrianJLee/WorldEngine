@@ -109,6 +109,10 @@ namespace World
 			// **整块 2D 内容在 Vulkan 下被剔除**(2026-09-16 W10-3 双后端基线在 2DTest 发现:
 			// GL 三个实体、Vulkan 一个都没有)。
 			desc.Cull = Rhi::CullMode::None;
+			// 2D 精灵按 CPU 排序(SortingLayer/OrderInLayer/DepthKey)透明混合绘制:
+			// 深度测试开启(可被 3D 前景遮挡),关闭深度写入避免 2D 同平面 Z-fighting 与相互深度剔除产生撕裂
+			desc.DepthStencil.DepthTest = true;
+			desc.DepthStencil.DepthWrite = false;
 			desc.Blends.push_back({
 				true,
 				Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
@@ -299,9 +303,9 @@ namespace World
 		Rhi::SamplerDesc samplerDesc;
 		samplerDesc.MinFilter = Rhi::Filter::Linear;
 		samplerDesc.MagFilter = Rhi::Filter::Linear;
-		samplerDesc.AddressU = Rhi::SamplerAddressMode::Repeat;
-		samplerDesc.AddressV = Rhi::SamplerAddressMode::Repeat;
-		samplerDesc.AddressW = Rhi::SamplerAddressMode::Repeat;
+		samplerDesc.AddressU = Rhi::SamplerAddressMode::ClampToEdge;
+		samplerDesc.AddressV = Rhi::SamplerAddressMode::ClampToEdge;
+		samplerDesc.AddressW = Rhi::SamplerAddressMode::ClampToEdge;
 		s_Data.Sampler = Renderer::GetDevice()->CreateSampler(samplerDesc);
 
 		// Renderer2D 管线渲染进 SceneRenderer 目标;创建结构相同的渲染通道,
