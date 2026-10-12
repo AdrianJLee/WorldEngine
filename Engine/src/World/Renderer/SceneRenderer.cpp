@@ -2052,55 +2052,66 @@ namespace World
 		const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
 		const glm::vec3 camForward = -glm::normalize(glm::vec3(cameraTransform[2]));
 
-		// 检查是否处于纯 2D 正交正视状态 (正交投影且视线朝向 XY 平面)
-		const bool is2DView = (std::abs(camera.GetProjectionMatrix()[3][3] - 1.0f) < 1e-4f)
-			&& (std::abs(camForward.z) > 0.85f);
-		if (is2DView)
+		const bool isOrtho = (std::abs(camera.GetProjectionMatrix()[3][3] - 1.0f) < 1e-4f);
+		const float orthoHeight = isOrtho
+			? (2.0f / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[1][1])))
+			: 0.0f;
+
+		// 正交立面视图 (Front/Back 看 XY 平面，或 Right/Left 看 ZY 平面): 自适应绘制对应立面网格
+		// (Top/Bottom 俯仰视看 XZ 平面，自然落入下方通用 XZ 地面网格)
+		if (isOrtho && (std::abs(camForward.z) > 0.85f || std::abs(camForward.x) > 0.85f))
 		{
-			// 纯 2D 正交模式下: 绘制 XY 竖立平面的标准笛卡尔坐标参考网格 (Z = 0)
-			const float viewSpan = std::max(20.0f, std::abs(camPos.z) * 2.0f);
-			const float startX = std::floor((camPos.x - viewSpan) / 10.0f) * 10.0f;
-			const float endX = std::ceil((camPos.x + viewSpan) / 10.0f) * 10.0f;
-			const float startY = std::floor((camPos.y - viewSpan) / 10.0f) * 10.0f;
-			const float endY = std::ceil((camPos.y + viewSpan) / 10.0f) * 10.0f;
+			const bool isXY = std::abs(camForward.z) > 0.85f;
+			const float viewSpan = std::clamp(orthoHeight * 1.5f, 20.0f, 1500.0f);
+			const float centerH = isXY ? camPos.x : camPos.z;
+			const float centerV = camPos.y;
+			const float startH = std::floor((centerH - viewSpan) / 10.0f) * 10.0f;
+			const float endH = std::ceil((centerH + viewSpan) / 10.0f) * 10.0f;
+			const float startV = std::floor((centerV - viewSpan) / 10.0f) * 10.0f;
+			const float endV = std::ceil((centerV + viewSpan) / 10.0f) * 10.0f;
+
+			const auto pt = [isXY](float h, float v) -> glm::vec3 {
+				return isXY ? glm::vec3(h, v, 0.0f) : glm::vec3(0.0f, v, h);
+			};
 
 			// 10m 主网格
 			const glm::vec4 majorCol { 0.45f, 0.55f, 0.65f, 0.35f };
-			for (float x = startX; x <= endX + 0.01f; x += 10.0f)
+			for (float h = startH; h <= endH + 0.01f; h += 10.0f)
 			{
-				if (std::abs(x) < 0.01f) continue;
-				Renderer2D::DrawLineCore(glm::vec3(x, startY, 0.0f), glm::vec3(x, endY, 0.0f), majorCol);
+				if (std::abs(h) < 0.01f) continue;
+				Renderer2D::DrawLineCore(pt(h, startV), pt(h, endV), majorCol);
 			}
-			for (float y = startY; y <= endY + 0.01f; y += 10.0f)
+			for (float v = startV; v <= endV + 0.01f; v += 10.0f)
 			{
-				if (std::abs(y) < 0.01f) continue;
-				Renderer2D::DrawLineCore(glm::vec3(startX, y, 0.0f), glm::vec3(endX, y, 0.0f), majorCol);
+				if (std::abs(v) < 0.01f) continue;
+				Renderer2D::DrawLineCore(pt(startH, v), pt(endH, v), majorCol);
 			}
 
 			// 1m 次网格 (近距离平滑浮现)
-			if (viewSpan < 120.0f)
+			if (orthoHeight < 80.0f)
 			{
-				const float alpha = std::clamp(1.0f - (viewSpan - 40.0f) / 80.0f, 0.0f, 1.0f) * 0.18f;
+				const float alpha = std::clamp(1.0f - (orthoHeight - 25.0f) / 55.0f, 0.0f, 1.0f) * 0.18f;
 				const glm::vec4 minorCol { 0.45f, 0.55f, 0.65f, alpha };
-				const float mStartX = std::floor((camPos.x - viewSpan) / 1.0f) * 1.0f;
-				const float mEndX = std::ceil((camPos.x + viewSpan) / 1.0f) * 1.0f;
-				const float mStartY = std::floor((camPos.y - viewSpan) / 1.0f) * 1.0f;
-				const float mEndY = std::ceil((camPos.y + viewSpan) / 1.0f) * 1.0f;
-				for (float x = mStartX; x <= mEndX + 0.01f; x += 1.0f)
+				const float mStartH = std::floor((centerH - viewSpan) / 1.0f) * 1.0f;
+				const float mEndH = std::ceil((centerH + viewSpan) / 1.0f) * 1.0f;
+				const float mStartV = std::floor((centerV - viewSpan) / 1.0f) * 1.0f;
+				const float mEndV = std::ceil((centerV + viewSpan) / 1.0f) * 1.0f;
+				for (float h = mStartH; h <= mEndH + 0.01f; h += 1.0f)
 				{
-					if (std::fmod(std::abs(x), 10.0f) < 0.01f) continue;
-					Renderer2D::DrawLineCore(glm::vec3(x, mStartY, 0.0f), glm::vec3(x, mEndY, 0.0f), minorCol);
+					if (std::fmod(std::abs(h), 10.0f) < 0.01f) continue;
+					Renderer2D::DrawLineCore(pt(h, mStartV), pt(h, mEndV), minorCol);
 				}
-				for (float y = mStartY; y <= mEndY + 0.01f; y += 1.0f)
+				for (float v = mStartV; v <= mEndV + 0.01f; v += 1.0f)
 				{
-					if (std::fmod(std::abs(y), 10.0f) < 0.01f) continue;
-					Renderer2D::DrawLineCore(glm::vec3(mStartX, y, 0.0f), glm::vec3(mEndX, y, 0.0f), minorCol);
+					if (std::fmod(std::abs(v), 10.0f) < 0.01f) continue;
+					Renderer2D::DrawLineCore(pt(mStartH, v), pt(mEndH, v), minorCol);
 				}
 			}
 
-			// X 轴红线 (y=0) 与 Y 轴绿线 (x=0)
-			Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, 0.0f), glm::vec3(endX, 0.0f, 0.0f), { 0.78f, 0.32f, 0.32f, 0.70f });
-			Renderer2D::DrawLineCore(glm::vec3(0.0f, startY, 0.0f), glm::vec3(0.0f, endY, 0.0f), { 0.32f, 0.78f, 0.38f, 0.70f });
+			// 横轴基准线 (XY下为X轴红线, ZY下为Z轴蓝线) 与 纵轴基准线 (Y轴绿线)
+			const glm::vec4 hAxisCol = isXY ? glm::vec4(0.78f, 0.32f, 0.32f, 0.70f) : glm::vec4(0.32f, 0.52f, 0.85f, 0.70f);
+			Renderer2D::DrawLineCore(pt(startH, 0.0f), pt(endH, 0.0f), hAxisCol);
+			Renderer2D::DrawLineCore(pt(0.0f, startV), pt(0.0f, endV), { 0.32f, 0.78f, 0.38f, 0.70f });
 			return;
 		}
 

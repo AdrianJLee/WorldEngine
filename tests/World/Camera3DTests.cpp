@@ -462,25 +462,38 @@ int main()
 			CHECK(glm::length(cam.GetTarget() - (beforeFly + expectedDelta)) < 1e-4f);
 		}
 
-				// 14. 纯 2D 视口锁定模式 (Set2DMode): 强制正交投影、锁定 Front 方位、禁止 Orbit 旋转
+				// 14. 视角旋转锁定 (Set2DMode / Lock Rotation):
+		//     禁止鼠标 Orbit 旋转，但保留当前方位且允许左上角 SetViewpoint 自由切换 Top(俯视)/Front(横版)/Right(侧视)
 		{
 			EditorCamera3D cam(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f, 10.0f);
 			CHECK(!cam.Is2DMode());
 
+			// 切为正交 + Top (俯视角 2D) 并开启旋转锁定
+			cam.SetProjection(ViewportProjection::Orthographic);
+			cam.SetViewpoint(ViewportViewpoint::Top);
 			cam.Set2DMode(true);
 			CHECK(cam.Is2DMode());
 			CHECK(cam.IsOrthographic());
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Top);
+			CHECK(cam.GetPitch() > 88.0f);
+
+			// 锁定状态下鼠标 Orbit 旋转完全被忽略，不会破坏 Top 俯视方位
+			cam.Orbit(45.0f, -30.0f);
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Top);
+			CHECK(cam.GetPitch() > 88.0f);
+
+			// 锁定状态下通过左上角菜单切换方位到 Front (横版立面) 依然正常生效
+			cam.SetViewpoint(ViewportViewpoint::Front);
 			CHECK(cam.GetViewpoint() == ViewportViewpoint::Front);
 			CHECK(std::fabs(cam.GetPitch()) < 1e-4f);
 			CHECK(std::fabs(cam.GetYaw() - 180.0f) < 1e-4f);
 
-			// 2D 锁定模式下 Orbit 旋转完全被锁定忽略
-			cam.Orbit(45.0f, 30.0f);
+			// 锁定在 Front 下鼠标 Orbit 旋转同样被忽略
+			cam.Orbit(25.0f, 15.0f);
 			CHECK(cam.GetViewpoint() == ViewportViewpoint::Front);
 			CHECK(std::fabs(cam.GetPitch()) < 1e-4f);
-			CHECK(std::fabs(cam.GetYaw() - 180.0f) < 1e-4f);
 
-			// 解锁 2D 模式后恢复 Orbit 旋转
+			// 解锁后恢复鼠标 Orbit 自由旋转
 			cam.Set2DMode(false);
 			CHECK(!cam.Is2DMode());
 			cam.Orbit(30.0f, 15.0f);

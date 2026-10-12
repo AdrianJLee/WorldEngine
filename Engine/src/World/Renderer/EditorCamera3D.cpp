@@ -44,12 +44,8 @@ namespace World
 
 	void EditorCamera3D::Set2DMode(bool enabled)
 	{
+		// 仅锁定/解锁相机旋转 (Orbit)，不强行篡改用户当前选择的投影或方位 (如 Top 俯视 / Front 横版 / 等轴测角度)
 		m_Is2DMode = enabled;
-		if (enabled)
-		{
-			SetProjection(ViewportProjection::Orthographic);
-			SetViewpoint(ViewportViewpoint::Front);
-		}
 	}
 
 	void EditorCamera3D::SetProjection(ViewportProjection proj)

@@ -508,12 +508,16 @@ namespace World::Wui
 		{
 			const glm::vec2 mouseDelta = mouse - s_RectStartMouse;
 			const float wpp = WorldPerPixel(camera, viewport);
-			const glm::vec2 worldDelta = mouseDelta * wpp;
+			const glm::vec3 worldMove = camera.Right * (mouseDelta.x * wpp) - camera.Up * (mouseDelta.y * wpp);
+			const glm::vec3 localAxisX = glm::normalize(rot * glm::vec3(1.0f, 0.0f, 0.0f));
+			const glm::vec3 localAxisY = glm::normalize(rot * glm::vec3(0.0f, 1.0f, 0.0f));
+			const float localDx = glm::dot(worldMove, localAxisX);
+			const float localDy = glm::dot(worldMove, localAxisY);
 
 			if (s_RectActiveHandle == 8) // 锚点拖拽
 			{
-				float newPx = std::clamp(s_RectStartPivot.x + worldDelta.x / std::max(0.01f, size.x * transform.Scale.x), 0.0f, 1.0f);
-				float newPy = std::clamp(s_RectStartPivot.y - worldDelta.y / std::max(0.01f, size.y * transform.Scale.y), 0.0f, 1.0f);
+				float newPx = std::clamp(s_RectStartPivot.x + localDx / std::max(0.01f, size.x * transform.Scale.x), 0.0f, 1.0f);
+				float newPy = std::clamp(s_RectStartPivot.y + localDy / std::max(0.01f, size.y * transform.Scale.y), 0.0f, 1.0f);
 				if (ctx.Input().Ctrl)
 				{
 					auto snap = [](float v) {
@@ -528,8 +532,8 @@ namespace World::Wui
 			}
 			else
 			{
-				const float dx = worldDelta.x / std::max(0.01f, size.x);
-				const float dy = -worldDelta.y / std::max(0.01f, size.y);
+				const float dx = localDx / std::max(0.01f, size.x);
+				const float dy = localDy / std::max(0.01f, size.y);
 
 				if (s_RectActiveHandle == 2) // TR
 				{

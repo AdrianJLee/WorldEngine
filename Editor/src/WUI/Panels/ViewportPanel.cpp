@@ -311,9 +311,10 @@ namespace World
 		case World::ViewportViewpoint::Right:  vpShort = "Right"; break;
 		case World::ViewportViewpoint::Left:   vpShort = "Left"; break;
 		}
-		const std::string cameraText = std::string(projName) + " · " + vpShort;
+		const bool rotLocked = m_Host.Is2DMode();
+		const std::string cameraText = std::string(projName) + " · " + vpShort + (rotLocked ? " [Lock]" : "");
 		const std::string viewLabel = Wui::Tr("viewport.view.button", "View") + ": "
-			+ projName + " · " + vpShort + "  ▼";
+			+ projName + " · " + vpShort + (rotLocked ? " [🔒]" : "") + "  ▼";
 		const float viewButtonW = ctx.MeasureTextWidth(viewLabel, 13.0f) + 20.0f;
 		const Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad, viewButtonW, kChromeRowH };
 		const std::string viewHint = Wui::Tr("viewport.view.hint",
@@ -377,12 +378,12 @@ namespace World
 		ctx.RegisterOverlayRect(partBtn);
 		toolbarX += partBtnW + 4.0f;
 
-		// 2D / 3D 视口锁定模式一键切换按钮
-		const float mode2dBtnW = 76.0f;
+		// 视角旋转锁定按钮 (配合正交/透视与左上角任意方位使用: 锁定鼠标旋转，右键拖拽改为平移，左上角仍可自由切方向)
+		const float mode2dBtnW = 82.0f;
 		const Wui::WuiRect mode2dBtn { toolbarX, sceneRect.Y + kChromePad, mode2dBtnW, kChromeRowH };
 		const bool is2D = m_Host.Is2DMode();
-		const std::string mode2dLabel = is2D ? "2D: ON" : "2D: OFF";
-		Wui::Tooltip(ctx, mode2dBtn, Wui::Tr("viewport.2d.hint", "切换纯 2D 视口锁定模式 (锁定正交投影与 XY 平面，禁用 3D 旋转) (viewport.btn.toggle_2d)"));
+		const std::string mode2dLabel = is2D ? "Lock: ON" : "Lock: OFF";
+		Wui::Tooltip(ctx, mode2dBtn, Wui::Tr("viewport.2d.hint", "锁定/解锁鼠标旋转视角 (锁定后禁止鼠标旋转、右键拖拽变为平移；左上角方位菜单仍可正常切换方向) (viewport.btn.toggle_2d)"));
 		if (Wui::Button(ctx, Wui::HashId("viewport.btn.toggle_2d"), mode2dBtn, mode2dLabel, theme))
 		{
 			m_Host.Set2DMode(!is2D);
@@ -456,8 +457,8 @@ namespace World
 		{
 			const float rowH = 22.0f;
 			const float comboH = 24.0f;
-			// 精确计算弹层高度: 顶部留白(6) + 2个Combo(2*comboH + 14) + 分割线(7) + 标题(rowH) + 3个Overlays菜单项(3*rowH) + 底部留白(6) = 175px
-			const float panelH = 6.0f + (comboH * 2.0f + 14.0f) + 7.0f + rowH * 4.0f + 6.0f;
+			// 精确计算弹层高度: 顶部留白(6) + 2个Combo(2*comboH + 14) + 旋转锁定项(rowH + 4) + 分割线(7) + 标题(rowH) + 3个Overlays菜单项(3*rowH) + 底部留白(6)
+			const float panelH = 6.0f + (comboH * 2.0f + 14.0f) + (rowH + 4.0f) + 7.0f + rowH * 4.0f + 6.0f;
 			const Wui::WuiRect panel { viewButton.X, viewButton.Y + viewButton.H + 2.0f, 250.0f, panelH };
 			Wui::DrawPanelSurface(ctx, panel, theme);
 			ctx.RegisterOverlayRect(panel);
@@ -524,6 +525,22 @@ namespace World
 			}
 
 
+
+			// ③ 视角鼠标旋转锁定开关 (配合正交/透视与任意方位使用)
+			{
+				const Wui::WuiRect lockRow { panel.X + 4.0f, rowY, panel.W - 8.0f, rowH };
+				rowY += rowH + 4.0f;
+				const bool locked = m_Host.Is2DMode();
+				const std::string lockTip = Wui::Tr("viewport.view.lock_rotation.tooltip",
+					"锁定鼠标旋转视角 (右键拖拽改为平移画布); 左上角『方位』下拉菜单仍可正常切换方向。");
+				Wui::Tooltip(ctx, lockRow, lockTip);
+				if (Wui::MenuItem(ctx, Wui::HashId("viewport.view.lock_rotation"), lockRow,
+					Wui::Tr("viewport.view.lock_rotation", "锁定鼠标旋转 (Lock Rotation)"), locked, true, theme))
+				{
+					m_Host.Set2DMode(!locked);
+				}
+				ctx.RegisterOverlayRect(lockRow);
+			}
 
 			// 分割线
 			Wui::PanelBackground(ctx, { panel.X + 8.0f, rowY, panel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
