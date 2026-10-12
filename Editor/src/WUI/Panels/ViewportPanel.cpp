@@ -311,11 +311,11 @@ namespace World
 		case World::ViewportViewpoint::Right:  vpShort = "Right"; break;
 		case World::ViewportViewpoint::Left:   vpShort = "Left"; break;
 		}
-		const bool rotLocked = m_Host.Is2DMode();
-		const std::string cameraText = std::string(projName) + " · " + vpShort + (rotLocked ? " [Lock]" : "");
+		const std::string cameraText = std::string(projName) + " · " + vpShort;
 		const std::string viewLabel = Wui::Tr("viewport.view.button", "View") + ": "
-			+ projName + " · " + vpShort + (rotLocked ? " [🔒]" : "") + "  ▼";
-		const float viewButtonW = ctx.MeasureTextWidth(viewLabel, 13.0f) + 20.0f;
+			+ projName + " · " + vpShort + "  ▼";
+		// 固定最小宽度 144px，防止切换 Lock 或切换 Top/Front/Bottom 时工具栏发生水平位移跳动
+		const float viewButtonW = std::max(144.0f, ctx.MeasureTextWidth(viewLabel, 13.0f) + 20.0f);
 		const Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad, viewButtonW, kChromeRowH };
 		const std::string viewHint = Wui::Tr("viewport.view.hint",
 			"View options: view mode (3D/2D), camera preview, light ranges, collider outlines.");
