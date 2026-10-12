@@ -2,6 +2,8 @@
 
 #include "WUI/Common/EditorPanel.h"
 #include "World/Renderer/SpriteAnimation.h"
+#include "World/Renderer/TextureAtlas.h"
+#include "World/RHI/Rhi.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -64,5 +66,10 @@ namespace World
 		std::string m_EditFrameEvent;
 
 		float m_ListScrollY { 0.0f };
+		uint64_t m_UiTextureId { 0 };
+		Rhi::Handle<Rhi::Texture> m_GpuTexture { nullptr };
+		std::shared_ptr<TextureAtlas> m_Atlas { nullptr };
+		std::string m_LoadedAtlasPath;
+		void EnsureAnimationAtlasLoaded();
 	};
 }

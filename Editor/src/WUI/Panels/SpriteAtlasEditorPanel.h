@@ -2,6 +2,7 @@
 
 #include "WUI/Common/EditorPanel.h"
 #include "World/Renderer/TextureAtlas.h"
+#include "World/RHI/Rhi.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -58,5 +59,9 @@ namespace World
 		float m_EditBorderB { 0.0f };
 
 		float m_ListScrollY { 0.0f };
+		uint64_t m_UiTextureId { 0 };
+		Rhi::Handle<Rhi::Texture> m_GpuTexture { nullptr };
+		std::string m_LoadedTexturePath;
+		void EnsureTextureLoaded();
 	};
 }

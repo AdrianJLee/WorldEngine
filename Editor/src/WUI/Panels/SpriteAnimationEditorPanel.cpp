@@ -4,14 +4,41 @@
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
+#include "World/WUI/WuiTextureRegistry.h"
+#include "World/Core/StringPool.h"
 
 #include <filesystem>
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <cmath>
 
 namespace World
 {
+	static void DrawCheckerboard(Wui::WuiContext& ctx, const Wui::WuiRect& rect, float cellSize = 14.0f)
+	{
+		const Wui::WuiColor c0 { 0.13f, 0.15f, 0.18f, 1.0f };
+		const Wui::WuiColor c1 { 0.19f, 0.22f, 0.26f, 1.0f };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, c0, 2.0f });
+		int cols = static_cast<int>(std::ceil(rect.W / cellSize));
+		int rows = static_cast<int>(std::ceil(rect.H / cellSize));
+		for (int r = 0; r < rows; ++r)
+		{
+			for (int c = 0; c < cols; ++c)
+			{
+				if ((r + c) % 2 == 1)
+				{
+					float x = rect.X + c * cellSize;
+					float y = rect.Y + r * cellSize;
+					float w = std::min(cellSize, rect.X + rect.W - x);
+					float h = std::min(cellSize, rect.Y + rect.H - y);
+					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { x, y, w, h }, c1, 0.0f });
+				}
+			}
+		}
+	}
+
 	SpriteAnimationEditorPanel::SpriteAnimationEditorPanel(std::string logicalPath)
 		: m_LogicalPath(std::move(logicalPath))
 	{
@@ -20,6 +47,7 @@ namespace World
 		m_PanelTitle = "动画: " + std::filesystem::path(m_LogicalPath).filename().string();
 		Reload();
 	}
+
 	std::filesystem::path SpriteAnimationEditorPanel::ResolvePhysicalPath() const
 	{
 		std::filesystem::path p(m_LogicalPath);
@@ -43,6 +71,44 @@ namespace World
 		return p;
 	}
 
+	void SpriteAnimationEditorPanel::EnsureAnimationAtlasLoaded()
+	{
+		if (!m_Animation || m_Animation->GetAtlasPath().empty())
+			return;
+
+		std::string atlasPath = m_Animation->GetAtlasPath();
+		if (atlasPath == m_LoadedAtlasPath && m_Atlas)
+			return;
+
+		std::string logical = atlasPath;
+		if (logical.rfind("assets/", 0) == 0 || logical.rfind("assets\\", 0) == 0)
+			logical = logical.substr(7);
+
+		std::filesystem::path phys = Paths::AssetRoot() / logical;
+		if (!std::filesystem::exists(phys))
+			phys = Paths::ProjectDir() / atlasPath;
+
+		m_Atlas = TextureAtlas::GetOrLoad(phys.string());
+		m_LoadedAtlasPath = atlasPath;
+
+		if (m_Atlas && !m_Atlas->GetTexturePath().empty())
+		{
+			std::string texPath = m_Atlas->GetTexturePath();
+			if (texPath.rfind("assets/", 0) == 0 || texPath.rfind("assets\\", 0) == 0)
+				texPath = texPath.substr(7);
+			PathId pid = StringPool::Get().InternPath(texPath);
+			auto gpu = TextureLibrary::Get().Get(pid, true);
+			if (gpu)
+			{
+				m_GpuTexture = gpu;
+				if (m_UiTextureId == 0)
+					m_UiTextureId = Wui::WuiTextureRegistry::Get().Register(gpu);
+				else
+					Wui::WuiTextureRegistry::Get().Update(m_UiTextureId, gpu);
+			}
+		}
+	}
+
 	bool SpriteAnimationEditorPanel::Reload(std::string* message)
 	{
 		const auto phys = ResolvePhysicalPath();
@@ -57,8 +123,8 @@ namespace World
 		m_FrameRate = m_Animation->GetFrameRate();
 		m_LoopMode = m_Animation->GetLoopMode();
 		m_SelectedFrameIndex = m_Animation->GetFrameCount() > 0 ? 0 : -1;
-		m_PlayheadTime = 0.0f;
 		m_ActiveSampledFrame = 0;
+		m_PlayheadTime = 0.0f;
 		m_IsPlaying = false;
 		SyncFromSelectedFrame();
 		m_Dirty = false;
@@ -83,7 +149,7 @@ namespace World
 		const auto phys = ResolvePhysicalPath();
 		if (!m_Animation->SaveToFile(phys.string()))
 		{
-			m_StatusFeedback = "保存动画失败: " + phys.string();
+			m_StatusFeedback = "保存失败: " + phys.string();
 			if (message) *message = m_StatusFeedback;
 			return false;
 		}
@@ -115,26 +181,22 @@ namespace World
 		SyncFromSelectedFrame();
 	}
 
-	void SpriteAnimationEditorPanel::PrevFrame()
+	void SpriteAnimationEditorPanel::NextFrame()
 	{
-		m_IsPlaying = false;
 		if (!m_Animation || m_Animation->GetFrameCount() == 0) return;
-		if (m_SelectedFrameIndex > 0)
-			m_SelectedFrameIndex--;
-		else
-			m_SelectedFrameIndex = static_cast<int>(m_Animation->GetFrameCount()) - 1;
+		CommitToSelectedFrame();
+		m_SelectedFrameIndex = (m_SelectedFrameIndex + 1) % static_cast<int>(m_Animation->GetFrameCount());
 		m_ActiveSampledFrame = static_cast<uint32_t>(m_SelectedFrameIndex);
 		SyncFromSelectedFrame();
 	}
 
-	void SpriteAnimationEditorPanel::NextFrame()
+	void SpriteAnimationEditorPanel::PrevFrame()
 	{
-		m_IsPlaying = false;
 		if (!m_Animation || m_Animation->GetFrameCount() == 0) return;
-		if (static_cast<size_t>(m_SelectedFrameIndex + 1) < m_Animation->GetFrameCount())
-			m_SelectedFrameIndex++;
-		else
-			m_SelectedFrameIndex = 0;
+		CommitToSelectedFrame();
+		m_SelectedFrameIndex--;
+		if (m_SelectedFrameIndex < 0)
+			m_SelectedFrameIndex = static_cast<int>(m_Animation->GetFrameCount()) - 1;
 		m_ActiveSampledFrame = static_cast<uint32_t>(m_SelectedFrameIndex);
 		SyncFromSelectedFrame();
 	}
@@ -142,7 +204,7 @@ namespace World
 	void SpriteAnimationEditorPanel::SyncFromSelectedFrame()
 	{
 		if (!m_Animation || m_SelectedFrameIndex < 0 ||
-			static_cast<size_t>(m_SelectedFrameIndex) >= m_Animation->GetFrameCount())
+			m_SelectedFrameIndex >= static_cast<int>(m_Animation->GetFrameCount()))
 		{
 			m_EditFrameSub.clear();
 			m_EditFrameDuration = 0.0833f;
@@ -150,18 +212,18 @@ namespace World
 			return;
 		}
 
-		const SpriteAnimationFrame* f = m_Animation->GetFrame(static_cast<size_t>(m_SelectedFrameIndex));
-		if (!f) return;
+		const auto* frame = m_Animation->GetFrame(static_cast<size_t>(m_SelectedFrameIndex));
+		if (!frame) return;
 
-		m_EditFrameSub = f->NameString;
-		m_EditFrameDuration = f->Duration;
-		m_EditFrameEvent = f->EventTag;
+		m_EditFrameSub = frame->NameString;
+		m_EditFrameDuration = frame->Duration;
+		m_EditFrameEvent = frame->EventTag;
 	}
 
 	void SpriteAnimationEditorPanel::CommitToSelectedFrame()
 	{
 		if (!m_Animation || m_SelectedFrameIndex < 0 ||
-			static_cast<size_t>(m_SelectedFrameIndex) >= m_Animation->GetFrameCount())
+			m_SelectedFrameIndex >= static_cast<int>(m_Animation->GetFrameCount()))
 			return;
 
 		std::vector<SpriteAnimationFrame> frames = m_Animation->GetAllFrames();
@@ -170,7 +232,7 @@ namespace World
 
 		frames[static_cast<size_t>(m_SelectedFrameIndex)] = SpriteAnimationFrame(
 			m_EditFrameSub,
-			m_EditFrameDuration,
+			m_EditFrameDuration > 0.0f ? m_EditFrameDuration : 0.0833f,
 			m_EditFrameEvent
 		);
 
@@ -182,7 +244,7 @@ namespace World
 	void SpriteAnimationEditorPanel::AddFrame(const std::string& subTexture, float duration, const std::string& eventTag)
 	{
 		if (!m_Animation)
-			m_Animation = std::make_shared<SpriteAnimation>("anim", 12.0f);
+			m_Animation = std::make_shared<SpriteAnimation>("new_anim", m_FrameRate, m_LoopMode);
 
 		CommitToSelectedFrame();
 		m_Animation->AddFrame(SpriteAnimationFrame(subTexture, duration, eventTag));
@@ -226,6 +288,8 @@ namespace World
 	{
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, theme.PanelBg);
+
+		EnsureAnimationAtlasLoaded();
 
 		// Frame timing & Playback sampling
 		const auto now = std::chrono::steady_clock::now();
@@ -279,13 +343,13 @@ namespace World
 		float cX = ctrlBar.X + 8.0f;
 
 		// Play / Pause
-		const Wui::WuiRect btnPlay { cX, ctrlBar.Y + 5.0f, 80.0f, 24.0f };
+		const Wui::WuiRect btnPlay { cX, ctrlBar.Y + 5.0f, 76.0f, 24.0f };
 		Wui::Tooltip(ctx, btnPlay, "播放或暂停序列帧动画 (anim.btn.play)");
 		if (Wui::Button(ctx, Wui::HashId("anim.btn.play"), btnPlay, m_IsPlaying ? "❚❚ 暂停" : "▶ 播放", theme))
 		{
 			m_IsPlaying = !m_IsPlaying;
 		}
-		cX += 86.0f;
+		cX += 82.0f;
 
 		// Reset
 		const Wui::WuiRect btnReset { cX, ctrlBar.Y + 5.0f, 68.0f, 24.0f };
@@ -297,26 +361,26 @@ namespace World
 		cX += 74.0f;
 
 		// Prev / Next
-		const Wui::WuiRect btnPrev { cX, ctrlBar.Y + 5.0f, 76.0f, 24.0f };
+		const Wui::WuiRect btnPrev { cX, ctrlBar.Y + 5.0f, 72.0f, 24.0f };
 		Wui::Tooltip(ctx, btnPrev, "单步后退至上一帧 (anim.btn.prev_frame)");
 		if (Wui::Button(ctx, Wui::HashId("anim.btn.prev_frame"), btnPrev, "◀ 上一帧", theme))
 		{
 			PrevFrame();
 		}
-		cX += 82.0f;
+		cX += 78.0f;
 
-		const Wui::WuiRect btnNext { cX, ctrlBar.Y + 5.0f, 76.0f, 24.0f };
+		const Wui::WuiRect btnNext { cX, ctrlBar.Y + 5.0f, 72.0f, 24.0f };
 		Wui::Tooltip(ctx, btnNext, "单步前进至下一帧 (anim.btn.next_frame)");
 		if (Wui::Button(ctx, Wui::HashId("anim.btn.next_frame"), btnNext, "▶ 下一帧", theme))
 		{
 			NextFrame();
 		}
-		cX += 90.0f;
+		cX += 78.0f;
 
 		// FPS Input
 		Wui::Label(ctx, { cX, ctrlBar.Y + 9.0f }, "FPS:", theme.TextMuted, 11.5f);
-		cX += 36.0f;
-		const Wui::WuiRect fpsRect { cX, ctrlBar.Y + 5.0f, 60.0f, 24.0f };
+		cX += 34.0f;
+		const Wui::WuiRect fpsRect { cX, ctrlBar.Y + 5.0f, 54.0f, 24.0f };
 		Wui::Tooltip(ctx, fpsRect, "动画帧率 FPS (anim.field.fps)");
 		float oldFps = m_FrameRate;
 		if (Wui::DragFloat(ctx, Wui::HashId("anim.field.fps"), fpsRect, m_FrameRate, 0.5f, 1.0f, 60.0f, theme))
@@ -328,14 +392,14 @@ namespace World
 				SyncFromSelectedFrame();
 			}
 		}
-		cX += 70.0f;
+		cX += 62.0f;
 
 		// Loop Mode button
-		std::string loopStr = "循环: 循环 (Loop)";
-		if (m_LoopMode == AnimationLoopMode::Once) loopStr = "循环: 单次 (Once)";
-		else if (m_LoopMode == AnimationLoopMode::PingPong) loopStr = "循环: 往返 (PingPong)";
+		std::string loopStr = "循环 (Loop)";
+		if (m_LoopMode == AnimationLoopMode::Once) loopStr = "单次 (Once)";
+		else if (m_LoopMode == AnimationLoopMode::PingPong) loopStr = "往返 (PingPong)";
 
-		const Wui::WuiRect btnLoop { cX, ctrlBar.Y + 5.0f, 130.0f, 24.0f };
+		const Wui::WuiRect btnLoop { cX, ctrlBar.Y + 5.0f, 100.0f, 24.0f };
 		Wui::Tooltip(ctx, btnLoop, "切换循环模式: Loop / Once / PingPong (anim.btn.loop_mode)");
 		if (Wui::Button(ctx, Wui::HashId("anim.btn.loop_mode"), btnLoop, loopStr, theme))
 		{
@@ -345,7 +409,7 @@ namespace World
 			if (m_Animation) m_Animation->SetLoopMode(m_LoopMode);
 			m_Dirty = true;
 		}
-		cX += 140.0f;
+		cX += 108.0f;
 
 		// Playback Status String
 		std::ostringstream ss;
@@ -359,7 +423,7 @@ namespace World
 
 		curY += 40.0f;
 		const float contentH = rect.H - (curY - rect.Y) - 8.0f;
-		const float leftW = std::min(320.0f, rect.W * 0.4f);
+		const float leftW = std::min(300.0f, rect.W * 0.35f);
 		const float rightX = rect.X + 8.0f + leftW + 8.0f;
 		const float rightW = rect.W - 16.0f - leftW - 8.0f;
 
@@ -396,7 +460,7 @@ namespace World
 				DeleteFrame(static_cast<size_t>(m_SelectedFrameIndex));
 		}
 
-		// Frame List Box
+		// Frame List Box with ScrollArea
 		float fListY = fBtnY + 30.0f;
 		float fListH = leftCol.H - (fListY - leftCol.Y) - 8.0f;
 		const Wui::WuiRect fListRect { leftCol.X + 6.0f, fListY, leftCol.W - 12.0f, fListH };
@@ -405,12 +469,11 @@ namespace World
 		if (m_Animation)
 		{
 			const auto& allFrames = m_Animation->GetAllFrames();
-			float itemY = fListRect.Y + 4.0f;
+			const float totalH = static_cast<float>(allFrames.size()) * 28.0f + 8.0f;
+			Wui::BeginScrollArea(ctx, fListRect, totalH, m_ListScrollY, theme, Wui::HashId("anim.scroll.list"));
+			float itemY = fListRect.Y - m_ListScrollY + 4.0f;
 			for (size_t i = 0; i < allFrames.size(); ++i)
 			{
-				if (itemY + 24.0f > fListRect.Y + fListRect.H)
-					break;
-
 				const Wui::WuiRect itemRect { fListRect.X + 4.0f, itemY, fListRect.W - 8.0f, 24.0f };
 				bool isSelected = (static_cast<int>(i) == m_SelectedFrameIndex);
 				bool isPlayingNow = (m_IsPlaying && i == m_ActiveSampledFrame);
@@ -435,68 +498,139 @@ namespace World
 				}
 				itemY += 28.0f;
 			}
+			Wui::EndScrollArea(ctx);
 		}
 
-		// 4. Right Column: Selected Frame Inspector
+		// 4. Right Column: Top Live Flipbook Canvas + Bottom Frame Inspector
 		const Wui::WuiRect rightCol { rightX, curY, rightW, contentH };
-		Wui::PanelBackground(ctx, rightCol, theme.ContentBg, 4.0f);
 
-		Wui::Label(ctx, { rightCol.X + 12.0f, rightCol.Y + 10.0f }, "序列帧属性检视 (Frame Inspector)", theme.Text, 13.0f);
+		const float canvasH = std::min(250.0f, contentH * 0.52f);
+		const Wui::WuiRect canvasBox { rightX, curY, rightW, canvasH };
+		Wui::PanelBackground(ctx, canvasBox, theme.ContentBg, 4.0f);
 
-		float fInspY = rightCol.Y + 36.0f;
-		if (m_SelectedFrameIndex >= 0 && m_Animation &&
-			static_cast<size_t>(m_SelectedFrameIndex) < m_Animation->GetFrameCount())
+		std::string frameInfo = "(无帧)";
+		if (m_Animation && m_ActiveSampledFrame < m_Animation->GetFrameCount())
 		{
-			bool changed = false;
+			const auto* f = m_Animation->GetFrame(m_ActiveSampledFrame);
+			if (f) frameInfo = "#" + std::to_string(m_ActiveSampledFrame) + " " + f->NameString;
+		}
+		std::string canvasTitle = "实时动画走带 (Live Flipbook Playback) · " + frameInfo;
+		Wui::Label(ctx, { canvasBox.X + 12.0f, canvasBox.Y + 8.0f }, canvasTitle, m_IsPlaying ? theme.Accent : theme.Text, 12.0f);
 
-			// SubTexture Name
-			Wui::Label(ctx, { rightCol.X + 12.0f, fInspY + 4.0f }, "子图名称 (SubTexture):", theme.TextMuted, 11.5f);
-			const Wui::WuiRect subRect { rightCol.X + 150.0f, fInspY, std::min(260.0f, rightCol.W - 170.0f), 24.0f };
-			Wui::Tooltip(ctx, subRect, "图集中的切片名称 (anim.field.frame_sub)");
-			std::string oldSub = m_EditFrameSub;
-			if (Wui::TextField(ctx, Wui::HashId("anim.field.frame_sub"), subRect, m_EditFrameSub, theme) || m_EditFrameSub != oldSub)
-			{
-				changed = true;
-			}
-			fInspY += 32.0f;
+		const Wui::WuiRect innerCanvas { canvasBox.X + 8.0f, canvasBox.Y + 28.0f, canvasBox.W - 16.0f, canvasBox.H - 36.0f };
+		DrawCheckerboard(ctx, innerCanvas, 14.0f);
 
-			// Duration
-			Wui::Label(ctx, { rightCol.X + 12.0f, fInspY + 4.0f }, "帧持续时间 (Duration, s):", theme.TextMuted, 11.5f);
-			const Wui::WuiRect durRect { rightCol.X + 150.0f, fInspY, 100.0f, 24.0f };
-			Wui::Tooltip(ctx, durRect, "本帧持续秒数 (anim.field.frame_duration)");
-			if (Wui::DragFloat(ctx, Wui::HashId("anim.field.frame_duration"), durRect, m_EditFrameDuration, 0.005f, 0.005f, 10.0f, theme))
+		if (m_Animation && m_ActiveSampledFrame < m_Animation->GetFrameCount())
+		{
+			const auto* f = m_Animation->GetFrame(m_ActiveSampledFrame);
+			const SubTexture2D* sub = (f && m_Atlas) ? m_Atlas->FindSubTexture(f->NameString) : nullptr;
+			if (sub)
 			{
-				changed = true;
-			}
-			fInspY += 32.0f;
+				const float sliceW = sub->PixelRect.z > 0.0f ? sub->PixelRect.z : 32.0f;
+				const float sliceH = sub->PixelRect.w > 0.0f ? sub->PixelRect.w : 32.0f;
 
-			// Event Tag
-			Wui::Label(ctx, { rightCol.X + 12.0f, fInspY + 4.0f }, "事件打点 (Event Tag):", theme.TextMuted, 11.5f);
-			const Wui::WuiRect evtRect { rightCol.X + 150.0f, fInspY, std::min(260.0f, rightCol.W - 170.0f), 24.0f };
-			Wui::Tooltip(ctx, evtRect, "播放到达此帧时触发的事件标识 (anim.field.frame_event)");
-			std::string oldEvt = m_EditFrameEvent;
-			if (Wui::TextField(ctx, Wui::HashId("anim.field.frame_event"), evtRect, m_EditFrameEvent, theme) || m_EditFrameEvent != oldEvt)
-			{
-				changed = true;
-			}
-			fInspY += 32.0f;
+				const float maxDrawW = innerCanvas.W - 24.0f;
+				const float maxDrawH = innerCanvas.H - 24.0f;
+				float scale = std::min(maxDrawW / sliceW, maxDrawH / sliceH);
+				if (scale > 1.0f) scale = std::floor(scale);
+				scale = std::max(scale, 0.1f);
 
-			if (changed)
-			{
-				m_Dirty = true;
-				CommitToSelectedFrame();
+				const float drawW = sliceW * scale;
+				const float drawH = sliceH * scale;
+				const Wui::WuiRect imgRect {
+					innerCanvas.X + (innerCanvas.W - drawW) * 0.5f,
+					innerCanvas.Y + (innerCanvas.H - drawH) * 0.5f,
+					drawW,
+					drawH
+				};
+
+				if (m_UiTextureId != 0 && m_Atlas->GetWidth() > 0 && m_Atlas->GetHeight() > 0)
+				{
+					const float invW = 1.0f / static_cast<float>(m_Atlas->GetWidth());
+					const float invH = 1.0f / static_cast<float>(m_Atlas->GetHeight());
+					const float u0 = sub->PixelRect.x * invW;
+					const float v0 = sub->PixelRect.y * invH;
+					const float uW = sliceW * invW;
+					const float vH = sliceH * invH;
+
+					Wui::Image(ctx, imgRect, m_UiTextureId, { u0, v0, uW, vH }, theme);
+				}
+
+				// Pivot Crosshair (cyan cross)
+				const float pvScreenX = imgRect.X + sub->Pivot.x * imgRect.W;
+				const float pvScreenY = imgRect.Y + (1.0f - sub->Pivot.y) * imgRect.H;
+				const Wui::WuiColor pvCol { 0.15f, 0.95f, 0.95f, 1.0f };
+				Wui::LineSegment(ctx, { pvScreenX - 8.0f, pvScreenY }, { pvScreenX + 8.0f, pvScreenY }, pvCol, 1.5f);
+				Wui::LineSegment(ctx, { pvScreenX, pvScreenY - 8.0f }, { pvScreenX, pvScreenY + 8.0f }, pvCol, 1.5f);
+
+				// HUD Badge
+				std::ostringstream hudStr;
+				hudStr << (m_IsPlaying ? "● 播放中 · " : "❚❚ 暂停 · ") << f->NameString << " (" << static_cast<int>(sliceW)
+					   << "x" << static_cast<int>(sliceH) << " px) · 时长: " << std::fixed << std::setprecision(3) << f->Duration << "s";
+				if (!f->EventTag.empty())
+					hudStr << " · 事件: [" << f->EventTag << "]";
+				Wui::Label(ctx, { innerCanvas.X + 8.0f, innerCanvas.Y + innerCanvas.H - 16.0f }, hudStr.str(), theme.TextMuted, 10.0f);
 			}
 		}
-		else
-		{
-			Wui::Label(ctx, { rightCol.X + 24.0f, fInspY + 20.0f }, "请在左侧列表中选择序列帧，或点击 [＋ 添加帧] 创建新帧。", theme.TextMuted, 12.0f);
-		}
 
-		// Status Feedback
-		const Wui::WuiRect statusRect { rightCol.X + 12.0f, rightCol.Y + rightCol.H - 26.0f, rightCol.W - 24.0f, 20.0f };
-		Wui::Label(ctx, { statusRect.X, statusRect.Y + 3.0f }, m_StatusFeedback, theme.TextMuted, 11.0f);
+		// Bottom Half: Selected Frame Inspector
+		float inspY = curY + canvasH + 8.0f;
+		float inspH = contentH - canvasH - 8.0f;
+		if (inspH > 50.0f)
+		{
+			const Wui::WuiRect inspBox { rightX, inspY, rightW, inspH };
+			Wui::PanelBackground(ctx, inspBox, theme.ContentBg, 4.0f);
+
+			Wui::Label(ctx, { inspBox.X + 12.0f, inspBox.Y + 8.0f }, "当前帧参数 (Frame Inspector)", theme.Text, 12.5f);
+
+			float fieldY = inspBox.Y + 30.0f;
+			if (m_SelectedFrameIndex >= 0 && m_Animation &&
+				m_SelectedFrameIndex < static_cast<int>(m_Animation->GetFrameCount()))
+			{
+				bool fieldsChanged = false;
+
+				// SubTexture Name input
+				Wui::Label(ctx, { inspBox.X + 12.0f, fieldY + 4.0f }, "子图名称 (SubTexture):", theme.TextMuted, 11.5f);
+				const Wui::WuiRect subRect { inspBox.X + 140.0f, fieldY, std::min(240.0f, inspBox.W - 160.0f), 24.0f };
+				std::string oldSub = m_EditFrameSub;
+				if (Wui::TextField(ctx, Wui::HashId("anim.field.sub"), subRect, m_EditFrameSub, theme) || m_EditFrameSub != oldSub)
+				{
+					fieldsChanged = true;
+				}
+				fieldY += 30.0f;
+
+				// Duration (s) input
+				Wui::Label(ctx, { inspBox.X + 12.0f, fieldY + 4.0f }, "帧持续时长 (Duration s):", theme.TextMuted, 11.5f);
+				const Wui::WuiRect durRect { inspBox.X + 140.0f, fieldY, 90.0f, 24.0f };
+				if (Wui::DragFloat(ctx, Wui::HashId("anim.field.dur"), durRect, m_EditFrameDuration, 0.01f, 0.01f, 10.0f, theme))
+				{
+					fieldsChanged = true;
+				}
+				fieldY += 30.0f;
+
+				// Event Tag input
+				Wui::Label(ctx, { inspBox.X + 12.0f, fieldY + 4.0f }, "关键帧打点 (Event Tag):", theme.TextMuted, 11.5f);
+				const Wui::WuiRect evtRect { inspBox.X + 140.0f, fieldY, std::min(240.0f, inspBox.W - 160.0f), 24.0f };
+				std::string oldEvt = m_EditFrameEvent;
+				if (Wui::TextField(ctx, Wui::HashId("anim.field.evt"), evtRect, m_EditFrameEvent, theme) || m_EditFrameEvent != oldEvt)
+				{
+					fieldsChanged = true;
+				}
+
+				if (fieldsChanged)
+				{
+					m_Dirty = true;
+					CommitToSelectedFrame();
+				}
+			}
+			else
+			{
+				Wui::Label(ctx, { inspBox.X + 24.0f, fieldY + 16.0f }, "请在左侧帧列表中选择一个序列帧进行编辑", theme.TextMuted, 12.0f);
+			}
+
+			// Status Feedback Bar
+			const Wui::WuiRect statusRect { inspBox.X + 12.0f, inspBox.Y + inspBox.H - 22.0f, inspBox.W - 24.0f, 18.0f };
+			Wui::Label(ctx, { statusRect.X, statusRect.Y + 1.0f }, m_StatusFeedback, theme.TextMuted, 10.5f);
+		}
 	}
 }
-
-
-

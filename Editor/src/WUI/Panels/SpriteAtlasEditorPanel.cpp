@@ -4,13 +4,41 @@
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
+#include "World/WUI/WuiTextureRegistry.h"
+#include "World/Core/StringPool.h"
 
 #include <filesystem>
 #include <algorithm>
 #include <sstream>
+#include <iomanip>
+#include <cmath>
 
 namespace World
 {
+	static void DrawCheckerboard(Wui::WuiContext& ctx, const Wui::WuiRect& rect, float cellSize = 14.0f)
+	{
+		const Wui::WuiColor c0 { 0.13f, 0.15f, 0.18f, 1.0f };
+		const Wui::WuiColor c1 { 0.19f, 0.22f, 0.26f, 1.0f };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, c0, 2.0f });
+		int cols = static_cast<int>(std::ceil(rect.W / cellSize));
+		int rows = static_cast<int>(std::ceil(rect.H / cellSize));
+		for (int r = 0; r < rows; ++r)
+		{
+			for (int c = 0; c < cols; ++c)
+			{
+				if ((r + c) % 2 == 1)
+				{
+					float x = rect.X + c * cellSize;
+					float y = rect.Y + r * cellSize;
+					float w = std::min(cellSize, rect.X + rect.W - x);
+					float h = std::min(cellSize, rect.Y + rect.H - y);
+					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { x, y, w, h }, c1, 0.0f });
+				}
+			}
+		}
+	}
+
 	SpriteAtlasEditorPanel::SpriteAtlasEditorPanel(std::string logicalPath)
 		: m_LogicalPath(std::move(logicalPath))
 	{
@@ -41,6 +69,31 @@ namespace World
 		if (!p.is_absolute())
 			return Paths::ProjectDir() / p;
 		return p;
+	}
+
+	void SpriteAtlasEditorPanel::EnsureTextureLoaded()
+	{
+		if (!m_Atlas || m_Atlas->GetTexturePath().empty())
+			return;
+		std::string texPath = m_Atlas->GetTexturePath();
+		if (texPath == m_LoadedTexturePath && m_UiTextureId != 0)
+			return;
+
+		std::string logical = texPath;
+		if (logical.rfind("assets/", 0) == 0 || logical.rfind("assets\\", 0) == 0)
+			logical = logical.substr(7);
+
+		PathId pid = StringPool::Get().InternPath(logical);
+		auto gpu = TextureLibrary::Get().Get(pid, true);
+		if (gpu)
+		{
+			m_GpuTexture = gpu;
+			m_LoadedTexturePath = texPath;
+			if (m_UiTextureId == 0)
+				m_UiTextureId = Wui::WuiTextureRegistry::Get().Register(gpu);
+			else
+				Wui::WuiTextureRegistry::Get().Update(m_UiTextureId, gpu);
+		}
 	}
 
 	bool SpriteAtlasEditorPanel::Reload(std::string* message)
@@ -164,10 +217,12 @@ namespace World
 			return false;
 
 		std::vector<SubTexture2D> list = m_Atlas->GetAllSubTextures();
-		const std::string delName = list[index].Name;
+		std::string delName = list[index].Name;
 		list.erase(list.begin() + static_cast<std::ptrdiff_t>(index));
 
-		auto rebuilt = std::make_shared<TextureAtlas>(m_Atlas->GetTexturePath(), m_Atlas->GetWidth(), m_Atlas->GetHeight());
+		const uint32_t atlasW = m_Atlas->GetWidth();
+		const uint32_t atlasH = m_Atlas->GetHeight();
+		auto rebuilt = std::make_shared<TextureAtlas>(m_Atlas->GetTexturePath(), atlasW, atlasH);
 		for (const auto& s : list)
 			rebuilt->AddSubTexture(s);
 		m_Atlas = std::move(rebuilt);
@@ -187,6 +242,8 @@ namespace World
 	{
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, theme.PanelBg);
+
+		EnsureTextureLoaded();
 
 		float curY = rect.Y + 6.0f;
 
@@ -244,7 +301,7 @@ namespace World
 				DeleteSprite(static_cast<size_t>(m_SelectedIndex));
 		}
 
-		// Slices List
+		// Slices List with ScrollArea
 		float listY = btnY + 30.0f;
 		float listH = leftCol.H - (listY - leftCol.Y) - 8.0f;
 		const Wui::WuiRect listRect { leftCol.X + 6.0f, listY, leftCol.W - 12.0f, listH };
@@ -253,12 +310,11 @@ namespace World
 		if (m_Atlas)
 		{
 			const auto& allSubs = m_Atlas->GetAllSubTextures();
-			float itemY = listRect.Y + 4.0f;
+			const float totalH = static_cast<float>(allSubs.size()) * 28.0f + 8.0f;
+			Wui::BeginScrollArea(ctx, listRect, totalH, m_ListScrollY, theme, Wui::HashId("atlas.scroll.list"));
+			float itemY = listRect.Y - m_ListScrollY + 4.0f;
 			for (size_t i = 0; i < allSubs.size(); ++i)
 			{
-				if (itemY + 24.0f > listRect.Y + listRect.H)
-					break; // Bound within display list
-
 				const Wui::WuiRect itemRect { listRect.X + 4.0f, itemY, listRect.W - 8.0f, 24.0f };
 				bool isSelected = (static_cast<int>(i) == m_SelectedIndex);
 
@@ -275,15 +331,16 @@ namespace World
 				}
 				itemY += 28.0f;
 			}
+			Wui::EndScrollArea(ctx);
 		}
 
-		// 3. Right Column: Inspector
+		// 3. Right Column: Inspector + Visual Preview Canvas
 		const Wui::WuiRect rightCol { rightX, curY, rightW, contentH };
 		Wui::PanelBackground(ctx, rightCol, theme.ContentBg, 4.0f);
 
-		Wui::Label(ctx, { rightCol.X + 12.0f, rightCol.Y + 10.0f }, "子精灵检视 (Sprite Inspector)", theme.Text, 13.0f);
+		Wui::Label(ctx, { rightCol.X + 12.0f, rightCol.Y + 8.0f }, "子精灵参数检视 (Sprite Inspector)", theme.Text, 12.5f);
 
-		float inspY = rightCol.Y + 36.0f;
+		float inspY = rightCol.Y + 30.0f;
 		if (m_SelectedIndex >= 0 && m_Atlas && m_SelectedIndex < static_cast<int>(m_Atlas->GetSubTextureCount()))
 		{
 			bool fieldsChanged = false;
@@ -297,7 +354,7 @@ namespace World
 			{
 				fieldsChanged = true;
 			}
-			inspY += 32.0f;
+			inspY += 30.0f;
 
 			// Row 2: Pixel Rect (X, Y, W, H)
 			Wui::Label(ctx, { rightCol.X + 12.0f, inspY + 4.0f }, "区域 (Rect X/Y/W/H):", theme.TextMuted, 11.5f);
@@ -327,7 +384,7 @@ namespace World
 			if (Wui::DragFloat(ctx, Wui::HashId("atlas.field.h"), rH, m_EditRectH, 1.0f, 1.0f, 8192.0f, theme))
 				fieldsChanged = true;
 
-			inspY += 32.0f;
+			inspY += 30.0f;
 
 			// Row 3: Pivot (X, Y)
 			Wui::Label(ctx, { rightCol.X + 12.0f, inspY + 4.0f }, "中心锚点 (Pivot):", theme.TextMuted, 11.5f);
@@ -341,59 +398,61 @@ namespace World
 			if (Wui::DragFloat(ctx, Wui::HashId("atlas.field.pivot_y"), pY, m_EditPivotY, 0.01f, 0.0f, 1.0f, theme))
 				fieldsChanged = true;
 
-			inspY += 28.0f;
+			inspY += 26.0f;
 
-			// Fast Preset Buttons
+			// Fast Preset Buttons (2 rows of 3 buttons)
 			float preX = rightCol.X + 120.0f;
-			const float preW = 60.0f;
-			const Wui::WuiRect btnP0 { preX, inspY, preW, 22.0f };
+			const float preW = 85.0f;
+			const Wui::WuiRect btnP0 { preX, inspY, preW, 20.0f };
 			Wui::Tooltip(ctx, btnP0, "快捷设为几何中心 (0.5, 0.5)");
-			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_center"), btnP0, "中心", theme))
+			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_center"), btnP0, "中心 (0.5, 0.5)", theme))
 			{
 				m_EditPivotX = 0.5f; m_EditPivotY = 0.5f; fieldsChanged = true;
 			}
 			preX += preW + 4.0f;
 
-			const Wui::WuiRect btnP1 { preX, inspY, preW, 22.0f };
+			const Wui::WuiRect btnP1 { preX, inspY, preW, 20.0f };
 			Wui::Tooltip(ctx, btnP1, "快捷设为脚底中心 (0.5, 0.0)");
-			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_bottom"), btnP1, "脚底", theme))
+			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_bottom"), btnP1, "脚底 (0.5, 0.0)", theme))
 			{
 				m_EditPivotX = 0.5f; m_EditPivotY = 0.0f; fieldsChanged = true;
 			}
 			preX += preW + 4.0f;
 
-			const Wui::WuiRect btnP2 { preX, inspY, preW, 22.0f };
+			const Wui::WuiRect btnP2 { preX, inspY, preW, 20.0f };
 			Wui::Tooltip(ctx, btnP2, "快捷设为左上角 (0.0, 1.0)");
-			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_topleft"), btnP2, "左上", theme))
+			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_topleft"), btnP2, "左上 (0.0, 1.0)", theme))
 			{
 				m_EditPivotX = 0.0f; m_EditPivotY = 1.0f; fieldsChanged = true;
 			}
-			preX += preW + 4.0f;
 
-			const Wui::WuiRect btnP3 { preX, inspY, preW, 22.0f };
+			inspY += 24.0f;
+
+			preX = rightCol.X + 120.0f;
+			const Wui::WuiRect btnP3 { preX, inspY, preW, 20.0f };
 			Wui::Tooltip(ctx, btnP3, "快捷设为右上角 (1.0, 1.0)");
-			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_topright"), btnP3, "右上", theme))
+			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_topright"), btnP3, "右上 (1.0, 1.0)", theme))
 			{
 				m_EditPivotX = 1.0f; m_EditPivotY = 1.0f; fieldsChanged = true;
 			}
 			preX += preW + 4.0f;
 
-			const Wui::WuiRect btnP4 { preX, inspY, preW, 22.0f };
+			const Wui::WuiRect btnP4 { preX, inspY, preW, 20.0f };
 			Wui::Tooltip(ctx, btnP4, "快捷设为左下角 (0.0, 0.0)");
-			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_bottomleft"), btnP4, "左下", theme))
+			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_bottomleft"), btnP4, "左下 (0.0, 0.0)", theme))
 			{
 				m_EditPivotX = 0.0f; m_EditPivotY = 0.0f; fieldsChanged = true;
 			}
 			preX += preW + 4.0f;
 
-			const Wui::WuiRect btnP5 { preX, inspY, preW, 22.0f };
+			const Wui::WuiRect btnP5 { preX, inspY, preW, 20.0f };
 			Wui::Tooltip(ctx, btnP5, "快捷设为右下角 (1.0, 0.0)");
-			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_bottomright"), btnP5, "右下", theme))
+			if (Wui::Button(ctx, Wui::HashId("atlas.btn.pivot_bottomright"), btnP5, "右下 (1.0, 0.0)", theme))
 			{
 				m_EditPivotX = 1.0f; m_EditPivotY = 0.0f; fieldsChanged = true;
 			}
 
-			inspY += 34.0f;
+			inspY += 28.0f;
 
 			// Row 4: 9-Slice Border (L, R, T, B)
 			Wui::Label(ctx, { rightCol.X + 12.0f, inspY + 4.0f }, "九宫格边距 (Border):", theme.TextMuted, 11.5f);
@@ -427,17 +486,114 @@ namespace World
 				m_Dirty = true;
 				CommitToSelected();
 			}
+			inspY += 30.0f;
 		}
 		else
 		{
-			Wui::Label(ctx, { rightCol.X + 24.0f, inspY + 20.0f }, "请在左侧切片列表中选择子精灵，或点击 [＋ 添加子精灵] 创建新切片。", theme.TextMuted, 12.0f);
+			Wui::Label(ctx, { rightCol.X + 24.0f, inspY + 20.0f }, "请在左侧列表中选择一个切片，或点击 [＋ 添加子精灵]", theme.TextMuted, 12.0f);
+			inspY += 60.0f;
+		}
+
+		// 4. Visual Slice & 9-Slice Preview Canvas
+		float canvasY = inspY + 8.0f;
+		float canvasH = (rightCol.Y + rightCol.H - 26.0f) - canvasY;
+		if (canvasH > 50.0f)
+		{
+			const Wui::WuiRect canvasBox { rightCol.X + 8.0f, canvasY, rightCol.W - 16.0f, canvasH };
+			Wui::PanelBackground(ctx, canvasBox, theme.PanelBg, 3.0f);
+
+			std::string sliceName = (m_SelectedIndex >= 0 && !m_EditName.empty()) ? m_EditName : "(未选)";
+			Wui::Label(ctx, { canvasBox.X + 10.0f, canvasBox.Y + 6.0f }, "切片图形与锚点预览 (Slice Preview) · " + sliceName, theme.Accent, 12.0f);
+
+			const Wui::WuiRect innerCanvas { canvasBox.X + 6.0f, canvasBox.Y + 24.0f, canvasBox.W - 12.0f, canvasBox.H - 30.0f };
+			DrawCheckerboard(ctx, innerCanvas, 14.0f);
+
+			if (m_SelectedIndex >= 0 && m_Atlas)
+			{
+				const float sliceW = m_EditRectW > 0.0f ? m_EditRectW : 32.0f;
+				const float sliceH = m_EditRectH > 0.0f ? m_EditRectH : 32.0f;
+
+				const float maxDrawW = innerCanvas.W - 24.0f;
+				const float maxDrawH = innerCanvas.H - 24.0f;
+				float scale = std::min(maxDrawW / sliceW, maxDrawH / sliceH);
+				if (scale > 1.0f) scale = std::floor(scale);
+				scale = std::max(scale, 0.1f);
+
+				const float drawW = sliceW * scale;
+				const float drawH = sliceH * scale;
+				const Wui::WuiRect imgRect {
+					innerCanvas.X + (innerCanvas.W - drawW) * 0.5f,
+					innerCanvas.Y + (innerCanvas.H - drawH) * 0.5f,
+					drawW,
+					drawH
+				};
+
+				if (m_UiTextureId != 0 && m_Atlas->GetWidth() > 0 && m_Atlas->GetHeight() > 0)
+				{
+					const float invW = 1.0f / static_cast<float>(m_Atlas->GetWidth());
+					const float invH = 1.0f / static_cast<float>(m_Atlas->GetHeight());
+					const float u0 = m_EditRectX * invW;
+					const float v0 = m_EditRectY * invH;
+					const float uW = sliceW * invW;
+					const float vH = sliceH * invH;
+
+					Wui::Image(ctx, imgRect, m_UiTextureId, { u0, v0, uW, vH }, theme);
+				}
+				else
+				{
+					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, imgRect, { 0.2f, 0.25f, 0.35f, 0.5f }, 0.0f });
+					ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, imgRect, theme.Accent, 0.0f, 1.5f });
+				}
+
+				// 9-Slice Guidelines (green overlay lines)
+				if (m_EditBorderL > 0.0f || m_EditBorderR > 0.0f || m_EditBorderT > 0.0f || m_EditBorderB > 0.0f)
+				{
+					const Wui::WuiColor guideCol { 0.25f, 0.95f, 0.40f, 0.85f };
+					if (m_EditBorderL > 0.0f)
+					{
+						float lx = imgRect.X + m_EditBorderL * scale;
+						Wui::LineSegment(ctx, { lx, imgRect.Y }, { lx, imgRect.Y + imgRect.H }, guideCol, 1.0f);
+					}
+					if (m_EditBorderR > 0.0f)
+					{
+						float rx = imgRect.X + (sliceW - m_EditBorderR) * scale;
+						Wui::LineSegment(ctx, { rx, imgRect.Y }, { rx, imgRect.Y + imgRect.H }, guideCol, 1.0f);
+					}
+					if (m_EditBorderT > 0.0f)
+					{
+						float ty = imgRect.Y + m_EditBorderT * scale;
+						Wui::LineSegment(ctx, { imgRect.X, ty }, { imgRect.X + imgRect.W, ty }, guideCol, 1.0f);
+					}
+					if (m_EditBorderB > 0.0f)
+					{
+						float by = imgRect.Y + (sliceH - m_EditBorderB) * scale;
+						Wui::LineSegment(ctx, { imgRect.X, by }, { imgRect.X + imgRect.W, by }, guideCol, 1.0f);
+					}
+				}
+
+				// Pivot Crosshair (cyan cross)
+				const float pvScreenX = imgRect.X + m_EditPivotX * imgRect.W;
+				const float pvScreenY = imgRect.Y + (1.0f - m_EditPivotY) * imgRect.H;
+				const Wui::WuiColor pvCol { 0.15f, 0.95f, 0.95f, 1.0f };
+				Wui::LineSegment(ctx, { pvScreenX - 8.0f, pvScreenY }, { pvScreenX + 8.0f, pvScreenY }, pvCol, 1.5f);
+				Wui::LineSegment(ctx, { pvScreenX, pvScreenY - 8.0f }, { pvScreenX, pvScreenY + 8.0f }, pvCol, 1.5f);
+
+				// Bottom Tag
+				std::ostringstream tagStr;
+				tagStr << static_cast<int>(sliceW) << " x " << static_cast<int>(sliceH) << " px ("
+					   << static_cast<int>(scale) << "x 缩放) · 锚点: (" << std::fixed << std::setprecision(2) << m_EditPivotX
+					   << ", " << m_EditPivotY << ")";
+				if (m_EditBorderL > 0.0f || m_EditBorderR > 0.0f || m_EditBorderT > 0.0f || m_EditBorderB > 0.0f)
+				{
+					tagStr << " · 九宫格: [" << static_cast<int>(m_EditBorderL) << ", " << static_cast<int>(m_EditBorderR)
+						   << ", " << static_cast<int>(m_EditBorderT) << ", " << static_cast<int>(m_EditBorderB) << "]";
+				}
+				Wui::Label(ctx, { innerCanvas.X + 8.0f, innerCanvas.Y + innerCanvas.H - 16.0f }, tagStr.str(), theme.TextMuted, 10.0f);
+			}
 		}
 
 		// Status Feedback Bar
-		const Wui::WuiRect statusRect { rightCol.X + 12.0f, rightCol.Y + rightCol.H - 26.0f, rightCol.W - 24.0f, 20.0f };
-		Wui::Label(ctx, { statusRect.X, statusRect.Y + 3.0f }, m_StatusFeedback, theme.TextMuted, 11.0f);
+		const Wui::WuiRect statusRect { rightCol.X + 12.0f, rightCol.Y + rightCol.H - 22.0f, rightCol.W - 24.0f, 18.0f };
+		Wui::Label(ctx, { statusRect.X, statusRect.Y + 1.0f }, m_StatusFeedback, theme.TextMuted, 10.5f);
 	}
 }
-
-
-
