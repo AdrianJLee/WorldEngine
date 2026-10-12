@@ -163,7 +163,7 @@ namespace World::Audio
 		// Sync ECS Listener and Source components if scene is provided
 		if (activeScene)
 		{
-			auto& reg = activeScene->GetRegistry();
+			const auto& reg = static_cast<const Scene*>(activeScene)->GetRegistry();
 
 			// 1. Find active AudioListenerComponent
 			auto listenerView = reg.view<AudioListenerComponent, TransformComponent>();

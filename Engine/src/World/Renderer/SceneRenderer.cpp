@@ -1504,11 +1504,11 @@ namespace World
 		// Scene::EnsureInterpolatedWorldTransforms 算好的**渲染**世界矩阵(层级合成后的),
 		// 否则 2D 物理驱动的精灵在非 60Hz 刷新下会阶梯抖动(3D 网格路径早已修好)。
 		const auto spriteMatrixOf = [this](entt::entity entity,
-			const TransformComponent& transform) -> const glm::mat4*
+			const TransformComponent& transform) -> glm::mat4
 		{
-			return ResolveSpriteRenderMatrix(*m_ActiveScene, entity, transform.GetLocalMatrix());
+			const glm::mat4 local = transform.GetLocalMatrix();
+			return *ResolveSpriteRenderMatrix(*m_ActiveScene, entity, local);
 		};
-		// 精灵纹理:组件只存驻留 PathId,这里按 id 从 TextureLibrary O(1) 取回(同路径 = 同实例)。
 		const auto spriteTextureOf = [this](const SpriteComponent& sprite)
 		{
 			return ResolveTextureAsset(sprite.Texture);
@@ -1611,7 +1611,7 @@ namespace World
 				}
 
 				// Handle Pivot offset in local quad coordinates
-				glm::mat4 spriteMatrix = *spriteMatrixOf(item.entity, transform);
+				glm::mat4 spriteMatrix = spriteMatrixOf(item.entity, transform);
 				if (sprite.Pivot.x != 0.5f || sprite.Pivot.y != 0.5f)
 				{
 					spriteMatrix = glm::translate(spriteMatrix, glm::vec3(0.5f - sprite.Pivot.x, 0.5f - sprite.Pivot.y, 0.0f));
@@ -1708,7 +1708,7 @@ namespace World
 			for (const auto& tmItem : tmItems)
 			{
 				const auto& [transform, tilemapComp] = tilemapView.get<TransformComponent, TilemapComponent>(tmItem.entity);
-				const glm::mat4 baseMatrix = *spriteMatrixOf(tmItem.entity, transform);
+				const glm::mat4 baseMatrix = spriteMatrixOf(tmItem.entity, transform);
 
 				std::shared_ptr<Tilemap> tm = nullptr;
 				if (tilemapComp.Tilemap.HasPath())
@@ -1813,7 +1813,7 @@ namespace World
 				std::vector<glm::mat4> transforms(count);
 				std::vector<std::array<glm::vec3, 4>> positions(count);
 				for (size_t i = 0; i < count; i++)
-					transforms[i] = *spriteMatrixOf(entities[i], view.get<TransformComponent>(entities[i]));
+					transforms[i] = spriteMatrixOf(entities[i], view.get<TransformComponent>(entities[i]));
 				JobSystem::ParallelFor(static_cast<uint32_t>(count), 32, [&](uint32_t i)
 				{
 					Renderer2D::ComputeCirclePositions(transforms[i], positions[i].data());
@@ -1831,7 +1831,7 @@ namespace World
 				{
 					auto& transform = view.get<TransformComponent>(entity);
 					const auto& circle = view.get<CircleRendererComponent>(entity);
-					Renderer2D::DrawCircleCore(*spriteMatrixOf(entity, transform), circle.Color, circle.Thickness,
+					Renderer2D::DrawCircleCore(spriteMatrixOf(entity, transform), circle.Color, circle.Thickness,
 						circle.Fade, static_cast<uint32_t>(entity));
 				}
 			}

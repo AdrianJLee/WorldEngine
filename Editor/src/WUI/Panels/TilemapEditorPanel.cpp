@@ -231,6 +231,7 @@ namespace World
 					? m_EditName
 					: std::filesystem::path(m_LogicalPath).stem().string();
 				Entity ent = Entity::CreateEntity(scene.get(), entName);
+				ent.AddComponent<TransformComponent>();
 				auto& tc = ent.AddComponent<TilemapComponent>();
 				tc.Tilemap.Path = StringPool::Get().InternPath(m_LogicalPath);
 				tc.CellSize = { m_EditCellW, m_EditCellH };
@@ -568,6 +569,7 @@ namespace World
 		// 4.2 Interactive Canvas Surface
 		const Wui::WuiRect innerCanvas { rightCol.X + 8.0f, rightCol.Y + 36.0f, rightCol.W - 16.0f, std::max(60.0f, rightCol.H - 64.0f) };
 		Wui::DrawPanelSurface(ctx, innerCanvas, theme);
+		ctx.PushClipRect(innerCanvas);
 
 		// Handle Mouse Wheel Zooming (centered on mouse cursor)
 		if (ctx.IsHovered(innerCanvas))
@@ -624,7 +626,7 @@ namespace World
 		const float gridOriginY = innerCanvas.Y + (innerCanvas.H - totalGridPxH) * 0.5f + m_PanY;
 		const Wui::WuiRect gridBounds { gridOriginX, gridOriginY, totalGridPxW, totalGridPxH };
 
-		Wui::PanelBackground(ctx, gridBounds, theme.PanelBg, 1.0f);
+		Wui::PanelBackground(ctx, innerCanvas, theme.PanelBg, 1.0f);
 
 		const float invAtlasW = (m_Atlas && m_Atlas->GetWidth() > 0) ? (1.0f / static_cast<float>(m_Atlas->GetWidth())) : 1.0f;
 		const float invAtlasH = (m_Atlas && m_Atlas->GetHeight() > 0) ? (1.0f / static_cast<float>(m_Atlas->GetHeight())) : 1.0f;
@@ -813,6 +815,8 @@ namespace World
 				   << " | 提示: 鼠标滚轮缩放画布，按住右键/中键拖拽平移";
 		if (!m_StatusFeedback.empty())
 			statusLine << "  |  " << m_StatusFeedback;
+
+		ctx.PopClipRect();
 
 		Wui::Label(ctx, { rightCol.X + 12.0f, rightCol.Y + rightCol.H - 22.0f }, statusLine.str(), theme.TextMuted, 10.5f);
 	}

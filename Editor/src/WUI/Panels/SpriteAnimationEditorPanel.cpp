@@ -344,6 +344,7 @@ namespace World
 					? m_Animation->GetName()
 					: std::filesystem::path(m_LogicalPath).stem().string();
 				Entity ent = Entity::CreateEntity(scene.get(), entName);
+				ent.AddComponent<TransformComponent>();
 				auto& sc = ent.AddComponent<SpriteComponent>();
 				if (!m_EditAtlasPath.empty())
 					sc.Texture.Path = StringPool::Get().InternPath(m_EditAtlasPath);

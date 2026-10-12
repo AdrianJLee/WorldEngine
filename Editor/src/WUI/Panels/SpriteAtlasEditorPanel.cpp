@@ -287,6 +287,7 @@ namespace World
 					? subName
 					: std::filesystem::path(m_LogicalPath).stem().string();
 				Entity ent = Entity::CreateEntity(scene.get(), entName);
+				ent.AddComponent<TransformComponent>();
 				auto& sc = ent.AddComponent<SpriteComponent>();
 				sc.Texture.Path = StringPool::Get().InternPath(m_LogicalPath);
 				if (!subName.empty())

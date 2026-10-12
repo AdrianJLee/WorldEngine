@@ -1,5 +1,10 @@
+#include "World/Utils/Paths.h"
 #include "SpriteAnimation.h"
 #include "World/Core/Log.h"
+
+#include <filesystem>
+
+
 
 #include <yaml-cpp/yaml.h>
 #include <fstream>
@@ -9,6 +14,31 @@
 
 namespace World
 {
+	namespace
+	{
+		std::filesystem::path ResolvePhysicalPath(const std::string& filepath)
+		{
+			if (filepath.empty())
+				return {};
+			std::error_code ec;
+			std::filesystem::path p(filepath);
+			if (std::filesystem::exists(p, ec))
+				return p;
+			std::filesystem::path fromProj = Paths::ProjectDir() / p;
+			if (std::filesystem::exists(fromProj, ec))
+				return fromProj;
+			std::filesystem::path fromAsset = Paths::AssetRoot() / p;
+			if (std::filesystem::exists(fromAsset, ec))
+				return fromAsset;
+			if (filepath.rfind("assets/", 0) == 0 || filepath.rfind("assets\\", 0) == 0)
+			{
+				std::filesystem::path stripped = Paths::AssetRoot() / filepath.substr(7);
+				if (std::filesystem::exists(stripped, ec))
+					return stripped;
+			}
+			return p;
+		}
+	}
 	static std::unordered_map<std::string, std::shared_ptr<SpriteAnimation>> s_AnimCache;
 	static std::mutex s_AnimCacheMutex;
 
@@ -163,7 +193,8 @@ namespace World
 
 	std::shared_ptr<SpriteAnimation> SpriteAnimation::LoadFromFile(const std::string& filepath)
 	{
-		std::ifstream file(filepath);
+		const auto resolved = ResolvePhysicalPath(filepath);
+		std::ifstream file(resolved.string());
 		if (!file.is_open())
 		{
 			WLD_CORE_WARN("[SpriteAnimation] Failed to open file: {}", filepath);

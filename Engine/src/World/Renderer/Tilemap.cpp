@@ -1,3 +1,4 @@
+#include "World/Utils/Paths.h"
 #include "Tilemap.h"
 #include "World/Core/Log.h"
 
@@ -15,22 +16,31 @@ namespace World
 	static std::unordered_map<std::string, std::shared_ptr<Tilemap>> s_TilemapCache;
 	static std::mutex s_TilemapCacheMutex;
 
+
+
 	namespace
 	{
-		std::string ResolvePhysicalPath(const std::string& filepath)
+		std::filesystem::path ResolvePhysicalPath(const std::string& filepath)
 		{
 			if (filepath.empty())
-				return filepath;
-
+				return {};
 			std::error_code ec;
-			if (std::filesystem::exists(filepath, ec))
-				return filepath;
-
-			const std::string defaultProjectCandidate = "projects/default/" + filepath;
-			if (std::filesystem::exists(defaultProjectCandidate, ec))
-				return defaultProjectCandidate;
-
-			return filepath;
+			std::filesystem::path p(filepath);
+			if (std::filesystem::exists(p, ec))
+				return p;
+			std::filesystem::path fromProj = Paths::ProjectDir() / p;
+			if (std::filesystem::exists(fromProj, ec))
+				return fromProj;
+			std::filesystem::path fromAsset = Paths::AssetRoot() / p;
+			if (std::filesystem::exists(fromAsset, ec))
+				return fromAsset;
+			if (filepath.rfind("assets/", 0) == 0 || filepath.rfind("assets\\", 0) == 0)
+			{
+				std::filesystem::path stripped = Paths::AssetRoot() / filepath.substr(7);
+				if (std::filesystem::exists(stripped, ec))
+					return stripped;
+			}
+			return p;
 		}
 	}
 
@@ -375,7 +385,7 @@ namespace World
 
 	std::shared_ptr<Tilemap> Tilemap::LoadFromFile(const std::string& filepath)
 	{
-		const std::string physicalPath = ResolvePhysicalPath(filepath);
+		const std::string physicalPath = ResolvePhysicalPath(filepath).string();
 		std::ifstream file(physicalPath);
 		if (!file.is_open())
 		{
@@ -415,7 +425,7 @@ namespace World
 
 	bool Tilemap::SaveToFile(const std::string& filepath) const
 	{
-		const std::string physicalPath = ResolvePhysicalPath(filepath);
+		const std::string physicalPath = ResolvePhysicalPath(filepath).string();
 		const std::filesystem::path fsPath(physicalPath);
 		if (fsPath.has_parent_path())
 		{
