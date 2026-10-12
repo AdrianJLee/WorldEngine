@@ -10,5 +10,5 @@ Spatial:
 RootContainer:
   Type: 0
   Variations:
-    - Path: "audio/sfx/ui_click.waudio"
+    - Path: "assets/audio/sfx/ui_click.waudio"
       Weight: 1.0

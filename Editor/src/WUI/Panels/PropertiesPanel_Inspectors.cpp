@@ -1,5 +1,10 @@
 #include "World/Audio/AudioSystem.h"
+#include "World/Scene/Components.h"
+#include "World/Core/StringPool.h"
 #include "PropertiesPanel_Internal.h"
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 namespace World
 {
@@ -472,17 +477,90 @@ float PropertiesPanel::DrawAudioSourceInspector(Wui::WuiContext& ctx, const Wui:
 	float y = rect.Y + height + 6.0f;
 	const Wui::WuiTheme& theme = m_Host.Theme();
 
-	const Wui::WuiRect btnPlay { rect.X + 12.0f, y, 140.0f, 24.0f };
-	const Wui::WuiRect btnStop { rect.X + 158.0f, y, 80.0f, 24.0f };
-
-	if (Wui::Button(ctx, Wui::HashId("prop.audiosrc.play"), btnPlay, "▶ 实时试听此声源", theme))
+	auto* comp = static_cast<World::AudioSourceComponent*>(instance);
+	std::string soundPath;
+	if (comp && comp->Sound.HasPath())
 	{
-		Audio::AudioSystem::Get().PostEvent("footstep_player", glm::vec3(0.0f));
+		soundPath = StringPool::Get().PathOf(comp->Sound.Path);
 	}
+
+	bool hasSound = !soundPath.empty();
+	std::string soundEventId = soundPath;
+
+	if (hasSound)
+	{
+		auto& audio = Audio::AudioSystem::Get();
+		if (!audio.FindSoundEvent(soundEventId))
+		{
+			std::filesystem::path p(soundPath);
+			std::string stem = p.stem().string();
+			if (audio.FindSoundEvent(stem))
+			{
+				soundEventId = stem;
+			}
+			else
+			{
+				std::ifstream in(p);
+				if (!in.is_open() && !p.is_absolute())
+				{
+					std::filesystem::path candidate = std::filesystem::current_path() / "projects" / "default" / p;
+					if (std::filesystem::exists(candidate)) in.open(candidate);
+				}
+				if (in.is_open())
+				{
+					std::stringstream ss;
+					ss << in.rdbuf();
+					Audio::SoundEvent ev;
+					if (ev.DeserializeYaml(ss.str()))
+					{
+						audio.RegisterSoundEvent(ev);
+						soundEventId = ev.GetId();
+					}
+				}
+			}
+		}
+	}
+
+	std::string soundDisplay = hasSound ? soundEventId : "(未指定声音)";
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "绑定声音: " + soundDisplay, hasSound ? theme.Accent : theme.TextMuted, 11.5f);
+	y += 22.0f;
+
+	const Wui::WuiRect btnPlay { rect.X + 12.0f, y, 80.0f, 24.0f };
+	const Wui::WuiRect btnStop { rect.X + 98.0f, y, 80.0f, 24.0f };
+
+	std::string playTooltip = hasSound ? ("试听声音: " + soundEventId) : "未指定声音，请先绑定声音资产！";
+
+	Wui::Tooltip(ctx, btnPlay, playTooltip);
+	if (Wui::Button(ctx, Wui::HashId("prop.audiosrc.play"), btnPlay, "▶ 试听", theme))
+	{
+		if (hasSound)
+		{
+			auto& audio = Audio::AudioSystem::Get();
+			if (comp->Spatial3D)
+			{
+				audio.PostEvent(soundEventId, glm::vec3(0.0f), comp->Volume, comp->Pitch);
+			}
+			else
+			{
+				audio.PostEvent2D(soundEventId, comp->Volume, comp->Pitch);
+			}
+		}
+	}
+
+	Wui::Tooltip(ctx, btnStop, "停止试听声音");
 	if (Wui::Button(ctx, Wui::HashId("prop.audiosrc.stop"), btnStop, "■ 停止", theme))
 	{
 		Audio::AudioSystem::Get().StopAll(0.05f);
 	}
-	return (y + 30.0f) - rect.Y;
+
+	float noticeY = y + 28.0f;
+	if (hasSound)
+	{
+		std::string statusText = "● 状态: 已就绪" + std::string(comp->Spatial3D ? " [3D 空间声源]" : " [2D 立体声]");
+		Wui::Label(ctx, { rect.X + 14.0f, noticeY }, statusText, { 0.35f, 0.85f, 0.45f, 1.0f }, 10.5f);
+	}
+
+	return (noticeY + 20.0f) - rect.Y;
 }
 }
+

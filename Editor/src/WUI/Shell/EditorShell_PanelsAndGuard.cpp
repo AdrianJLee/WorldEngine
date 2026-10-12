@@ -1295,24 +1295,14 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 			FocusIndependentWindow(panel);
 		};
 
-		audioEntries.push_back({ Wui::Tr("menu.audio.mixer", "Audio Mixer"),
+		audioEntries.push_back({ Wui::Tr("menu.audio.manager", "音频管理器 (Audio Manager)"),
 			m_Layout.IsFloating("audio_mixer"),
 			[this] { OpenOrFocusIndependentWindow("audio_mixer"); }, false,
-			Wui::Tr("menu.audio.mixer.tooltip", "Open the Audio Mixer panel (Buses, VU Meters, Faders, DSP).") });
-		audioEntries.push_back({ Wui::Tr("menu.audio.studio", "AI Audio Studio"),
-			m_Layout.IsFloating("ai_audio_studio"),
-			[this] { OpenOrFocusIndependentWindow("ai_audio_studio"); }, false,
-			Wui::Tr("menu.audio.studio.tooltip", "Open AI Audio Studio (Dialogue Voice Acting, Lip-Sync, Text-to-SFX & Music).") });
+			Wui::Tr("menu.audio.manager.tooltip", "打开音频管理器: 统一管理工程音频库、试听播放器与游戏全局音量") });
 		audioEntries.push_back({ "---", false, {}, true });
-		audioEntries.push_back({ Wui::Tr("menu.audio.test_click", "Test UI Click SFX"), false,
-			[] { Audio::AudioSystem::Get().PostEvent2D("ui_click"); }, false,
-			Wui::Tr("menu.audio.test_click.tooltip", "Audition test for UI 2D Click Sound.") });
-		audioEntries.push_back({ Wui::Tr("menu.audio.test_step", "Test 3D Footstep SFX"), false,
-			[] { Audio::AudioSystem::Get().PostEvent("footstep_player"); }, false,
-			Wui::Tr("menu.audio.test_step.tooltip", "Audition test for 3D Spatial Footstep Sound.") });
-		audioEntries.push_back({ Wui::Tr("menu.audio.stop_all", "Stop All Audio"), false,
-			[] { Audio::AudioSystem::Get().StopAll(); }, false,
-			Wui::Tr("menu.audio.stop_all.tooltip", "Stop all playing voices immediately.") });
+		audioEntries.push_back({ Wui::Tr("menu.audio.stop_all", "停止全部声音 (Stop All Audio)"), false,
+			[] { Audio::AudioSystem::Get().StopAll(0.05f); }, false,
+			Wui::Tr("menu.audio.stop_all.tooltip", "立即停止所有播放中与试听中的声音") });
 		drawMenu(menuAudio, "menu.audio", audioEntries);
 
 		// P4-U8a:菜单栏不再有 View 菜单 —— "看"的开关**全部搬进视口自己的悬浮 `视图 ▼`**

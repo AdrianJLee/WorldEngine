@@ -1,4 +1,7 @@
 #include "AudioSystem.h"
+#include "AudioCooker.h"
+#include <algorithm>
+#include <filesystem>
 #include "AudioNullBackend.h"
 #include "MiniaudioBackend.h"
 #include "AudioComponents.h"
@@ -56,15 +59,15 @@ namespace World::Audio
 
 		// Pre-populate default synthetic buffers and standard sound events
 		auto clickBuffer = std::make_shared<AudioBuffer>(AudioBuffer::GenerateSineWave(880.0f, 0.08f, 0.3f, m_SampleRate));
-		RegisterAudioBuffer("audio/sfx/ui_click.waudio", clickBuffer);
+		RegisterAudioBuffer("assets/audio/sfx/ui_click.waudio", clickBuffer);
 
 		SoundEvent uiClick("ui_click", kBusUi);
 		uiClick.GetSpatial().is3D = false;
-		uiClick.GetRootContainer()->variations.push_back({ "audio/sfx/ui_click.waudio", 1.0f });
+		uiClick.GetRootContainer()->variations.push_back({ "assets/audio/sfx/ui_click.waudio", 1.0f });
 		RegisterSoundEvent(uiClick);
 
 		auto footstepBuffer = std::make_shared<AudioBuffer>(AudioBuffer::GenerateWhiteNoise(0.12f, 0.25f, m_SampleRate));
-		RegisterAudioBuffer("audio/sfx/footstep_grass.waudio", footstepBuffer);
+		RegisterAudioBuffer("assets/audio/sfx/footstep_grass.waudio", footstepBuffer);
 
 		SoundEvent footstep("footstep_player", kBusSfx);
 		footstep.GetSpatial().is3D = true;
@@ -72,7 +75,7 @@ namespace World::Audio
 		footstep.GetSpatial().maxDistance = 20.0f;
 		footstep.SetVolumeRange(0.8f, 1.0f);
 		footstep.SetPitchRangeSemitones(-1.5f, 1.5f);
-		footstep.GetRootContainer()->variations.push_back({ "audio/sfx/footstep_grass.waudio", 1.0f });
+		footstep.GetRootContainer()->variations.push_back({ "assets/audio/sfx/footstep_grass.waudio", 1.0f });
 		RegisterSoundEvent(footstep);
 
 		m_Backend->Start();
@@ -156,7 +159,8 @@ namespace World::Audio
 		const std::string& eventId,
 		const glm::vec3& worldPos,
 		float volumeScale,
-		float pitchScale)
+		float pitchScale,
+		bool looping)
 	{
 		const SoundEvent* evt = FindSoundEvent(eventId);
 		if (!evt) return kInvalidVoiceHandle;
@@ -179,7 +183,7 @@ namespace World::Audio
 			evt->GetBusId(),
 			finalVol,
 			finalPitch,
-			false,
+			looping,
 			128,
 			evt->GetStealPolicy());
 
@@ -209,9 +213,10 @@ namespace World::Audio
 	VoiceHandle AudioSystem::PostEvent2D(
 		const std::string& eventId,
 		float volumeScale,
-		float pitchScale)
+		float pitchScale,
+		bool looping)
 	{
-		return PostEvent(eventId, glm::vec3(0.0f), volumeScale, pitchScale);
+		return PostEvent(eventId, glm::vec3(0.0f), volumeScale, pitchScale, looping);
 	}
 
 	void AudioSystem::StopVoice(VoiceHandle handle, float fadeSeconds)
@@ -222,6 +227,11 @@ namespace World::Audio
 	void AudioSystem::PauseVoice(VoiceHandle handle)
 	{
 		m_VoicePool.PauseVoice(handle);
+	}
+
+	void AudioSystem::SetVoiceLooping(VoiceHandle handle, bool loop)
+	{
+		m_VoicePool.SetVoiceLooping(handle, loop);
 	}
 
 	void AudioSystem::ResumeVoice(VoiceHandle handle)
@@ -268,8 +278,22 @@ namespace World::Audio
 
 	const SoundEvent* AudioSystem::FindSoundEvent(const std::string& eventId) const
 	{
+		std::lock_guard<std::mutex> lock(m_RegistryMutex);
 		auto it = m_SoundEvents.find(eventId);
 		return (it != m_SoundEvents.end()) ? &it->second : nullptr;
+	}
+
+	std::vector<std::string> AudioSystem::GetRegisteredSoundEventIds() const
+	{
+		std::lock_guard<std::mutex> lock(m_RegistryMutex);
+		std::vector<std::string> ids;
+		ids.reserve(m_SoundEvents.size());
+		for (const auto& [id, _] : m_SoundEvents)
+		{
+			ids.push_back(id);
+		}
+		std::sort(ids.begin(), ids.end());
+		return ids;
 	}
 
 	void AudioSystem::RegisterAudioBuffer(const std::string& path, std::shared_ptr<AudioBuffer> buffer)
@@ -280,7 +304,48 @@ namespace World::Audio
 
 	std::shared_ptr<AudioBuffer> AudioSystem::FindAudioBuffer(const std::string& path) const
 	{
-		auto it = m_AudioBuffers.find(path);
-		return (it != m_AudioBuffers.end()) ? it->second : nullptr;
+		{
+			std::lock_guard<std::mutex> lock(m_RegistryMutex);
+			auto it = m_AudioBuffers.find(path);
+			if (it != m_AudioBuffers.end())
+			{
+				return it->second;
+			}
+		}
+
+		std::string normalizedPath = path;
+		while (!normalizedPath.empty() && (normalizedPath.front() == '/' || normalizedPath.front() == '\\'))
+		{
+			normalizedPath.erase(normalizedPath.begin());
+		}
+
+		const std::vector<std::string> candidates = {
+			path,
+			normalizedPath,
+			"assets/" + normalizedPath,
+			"assets/audio/" + normalizedPath,
+			"Engine/assets/" + normalizedPath,
+			"Editor/assets/" + normalizedPath,
+			"projects/assets/" + normalizedPath,
+			"templates/project-example/assets/" + normalizedPath,
+			"templates/project-example/assets/audio/" + normalizedPath
+		};
+
+		std::error_code ec;
+		for (const auto& candidate : candidates)
+		{
+			if (std::filesystem::exists(candidate, ec) && !std::filesystem::is_directory(candidate, ec))
+			{
+				auto loaded = AudioCooker::LoadCookedFile(candidate);
+				if (loaded)
+				{
+					std::lock_guard<std::mutex> lock(m_RegistryMutex);
+					m_AudioBuffers[path] = loaded;
+					return loaded;
+				}
+			}
+		}
+
+		return nullptr;
 	}
 }

@@ -1,10 +1,11 @@
 #include "SoundEvent.h"
+#include <algorithm>
 #include <random>
 #include <sstream>
 
 namespace World::Audio
 {
-	static std::mt19937 s_Rng(42);
+	static std::mt19937 s_Rng(std::random_device{}());
 
 	std::string SoundContainerNode::EvaluateSelection(
 		const std::unordered_map<std::string, std::string>& switchParams,
@@ -18,22 +19,51 @@ namespace World::Audio
 
 		case ContainerType::Random:
 			if (variations.empty()) return "";
-			if (variations.size() == 1) return variations[0].soundAssetPath;
-
-			if (shuffleNoRepeat && variations.size() > 1)
+			if (variations.size() == 1)
 			{
-				std::uniform_int_distribution<uint32_t> dist(0, static_cast<uint32_t>(variations.size()) - 2);
-				uint32_t pick = dist(s_Rng);
-				if (pick >= lastChosenIndex) ++pick;
-				lastChosenIndex = pick;
-				return variations[pick].soundAssetPath;
+				lastChosenIndex = 0;
+				return variations[0].soundAssetPath;
 			}
-			else
 			{
-				std::uniform_int_distribution<uint32_t> dist(0, static_cast<uint32_t>(variations.size()) - 1);
-				uint32_t pick = dist(s_Rng);
-				lastChosenIndex = pick;
-				return variations[pick].soundAssetPath;
+				const bool skipLast = (shuffleNoRepeat && variations.size() > 1 && lastChosenIndex < variations.size());
+				float totalWeight = 0.0f;
+				for (size_t i = 0; i < variations.size(); ++i)
+				{
+					if (skipLast && i == lastChosenIndex) continue;
+					totalWeight += std::max(0.01f, variations[i].weight);
+				}
+
+				if (totalWeight <= 0.0f)
+				{
+					lastChosenIndex = 0;
+					return variations[0].soundAssetPath;
+				}
+
+				std::uniform_real_distribution<float> dist(0.0f, totalWeight);
+				float roll = dist(s_Rng);
+
+				size_t selectedIndex = static_cast<size_t>(-1);
+				size_t lastCandidate = 0;
+				float accumulated = 0.0f;
+				for (size_t i = 0; i < variations.size(); ++i)
+				{
+					if (skipLast && i == lastChosenIndex) continue;
+					lastCandidate = i;
+					accumulated += std::max(0.01f, variations[i].weight);
+					if (roll <= accumulated)
+					{
+						selectedIndex = i;
+						break;
+					}
+				}
+
+				if (selectedIndex == static_cast<size_t>(-1))
+				{
+					selectedIndex = lastCandidate;
+				}
+
+				lastChosenIndex = static_cast<uint32_t>(selectedIndex);
+				return variations[selectedIndex].soundAssetPath;
 			}
 
 		case ContainerType::Sequence:
@@ -167,6 +197,11 @@ namespace World::Audio
 			std::string key = line.substr(0, colonPos);
 			// trim key
 			while (!key.empty() && (key.front() == ' ' || key.front() == '\t')) key.erase(key.begin());
+			if (!key.empty() && key.front() == '-')
+			{
+				key.erase(key.begin());
+				while (!key.empty() && (key.front() == ' ' || key.front() == '\t')) key.erase(key.begin());
+			}
 
 			if (key == "Id")
 			{
@@ -207,6 +242,20 @@ namespace World::Audio
 					SoundVariation v;
 					v.soundAssetPath = line.substr(q1 + 1, q2 - q1 - 1);
 					m_RootContainer->variations.push_back(v);
+				}
+			}
+			else if (key == "Weight")
+			{
+				if (m_RootContainer && !m_RootContainer->variations.empty())
+				{
+					try
+					{
+						m_RootContainer->variations.back().weight = std::stof(line.substr(colonPos + 1));
+					}
+					catch (...)
+					{
+						m_RootContainer->variations.back().weight = 1.0f;
+					}
 				}
 			}
 		}

@@ -14,5 +14,5 @@ RootContainer:
   Type: 1
   ShuffleNoRepeat: true
   Variations:
-    - Path: "audio/sfx/footstep_grass.waudio"
+    - Path: "assets/audio/sfx/footstep_grass.waudio"
       Weight: 1.0

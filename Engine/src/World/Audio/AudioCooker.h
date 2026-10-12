@@ -28,6 +28,7 @@ namespace World::Audio
 		static std::vector<uint8_t> CookToBinary(const AudioBuffer& sourceBuffer, const AudioCookSettings& settings);
 		static bool ParseCookedBinary(const uint8_t* data, size_t size, AudioBuffer& outBuffer, AudioCookSettings& outSettings);
 
+		static bool LoadWavFile(const std::string& wavPath, AudioBuffer& outBuffer);
 		static bool CookFile(const std::string& sourceWavPath, const std::string& outputCookedPath, const AudioCookSettings& settings);
 		static std::shared_ptr<AudioBuffer> LoadCookedFile(const std::string& cookedPath);
 	};

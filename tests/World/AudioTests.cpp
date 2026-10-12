@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cmath>
 #include <vector>
+#include <algorithm>
 
 using namespace World::Audio;
 
@@ -131,6 +132,11 @@ static void TestOfflineDeterministicNullBackend()
 	bool ok = audio.Initialize(true, 48000, 256);
 	assert(ok);
 
+	const auto eventIds = audio.GetRegisteredSoundEventIds();
+	assert(!eventIds.empty());
+	assert(std::find(eventIds.begin(), eventIds.end(), "ui_click") != eventIds.end());
+	assert(std::find(eventIds.begin(), eventIds.end(), "footstep_player") != eventIds.end());
+
 	VoiceHandle vh = audio.PostEvent2D("ui_click", 1.0f, 1.0f);
 	assert(vh != kInvalidVoiceHandle);
 
@@ -204,6 +210,29 @@ static void TestCookerRoundtrip()
 	std::cout << "  -> Passed." << std::endl;
 }
 
+static void TestSoundEventYamlRoundtrip()
+{
+	std::cout << "[Test] SoundEvent YAML Roundtrip (Weight deserialization)..." << std::endl;
+	SoundEvent evt("test_evt", kBusSfx);
+	auto root = evt.GetRootContainer();
+	assert(root != nullptr);
+	root->variations.push_back({ "assets/audio/sfx/var1.waudio", 0.75f });
+	root->variations.push_back({ "assets/audio/sfx/var2.waudio", 0.25f });
+
+	std::string yaml = evt.SerializeYaml();
+	SoundEvent loaded("temp", kBusMaster);
+	bool ok = loaded.DeserializeYaml(yaml);
+	assert(ok);
+	assert(loaded.GetId() == "test_evt");
+	assert(loaded.GetRootContainer() != nullptr);
+	assert(loaded.GetRootContainer()->variations.size() == 2);
+	assert(loaded.GetRootContainer()->variations[0].soundAssetPath == "assets/audio/sfx/var1.waudio");
+	assert(std::abs(loaded.GetRootContainer()->variations[0].weight - 0.75f) < 0.001f);
+	assert(loaded.GetRootContainer()->variations[1].soundAssetPath == "assets/audio/sfx/var2.waudio");
+	assert(std::abs(loaded.GetRootContainer()->variations[1].weight - 0.25f) < 0.001f);
+	std::cout << "  -> Passed." << std::endl;
+}
+
 static void TestComponentLayout()
 {
 	std::cout << "[Test] AudioComponent Layout Static Asserts..." << std::endl;
@@ -234,10 +263,11 @@ int main()
 		TestOfflineDeterministicNullBackend();
 		TestAiAudioStudio();
 		TestCookerRoundtrip();
+		TestSoundEventYamlRoundtrip();
 		TestComponentLayout();
 
 		std::cout << "========================================" << std::endl;
-		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (8/8)    " << std::endl;
+		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (9/9)    " << std::endl;
 		std::cout << "========================================" << std::endl;
 		return 0;
 	}

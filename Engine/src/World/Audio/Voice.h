@@ -45,6 +45,8 @@ namespace World::Audio
 		void SetOcclusion(float occlusion01) noexcept;
 		void SetPitch(float pitch) noexcept;
 		void SetVolume(float volume) noexcept;
+		void SetLooping(bool loop) noexcept { m_Looping = loop; }
+		bool IsLooping() const noexcept { return m_Looping; }
 
 		void UpdateSpatial(
 			const glm::vec3& listenerPos,

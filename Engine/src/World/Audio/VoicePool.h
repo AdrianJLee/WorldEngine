@@ -27,6 +27,7 @@ namespace World::Audio
 		void StopVoice(VoiceHandle handle, float fadeOutSeconds = 0.05f);
 		void PauseVoice(VoiceHandle handle);
 		void ResumeVoice(VoiceHandle handle);
+		void SetVoiceLooping(VoiceHandle handle, bool loop);
 		void StopAllVoices(float fadeOutSeconds = 0.05f);
 
 		Voice* FindVoice(VoiceHandle handle);

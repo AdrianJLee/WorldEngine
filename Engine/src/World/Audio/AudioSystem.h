@@ -10,6 +10,7 @@
 #include "AiAudioStudio.h"
 #include <memory>
 #include <string>
+#include <vector>
 #include <unordered_map>
 #include <mutex>
 
@@ -40,16 +41,17 @@ namespace World::Audio
 			const std::string& eventId,
 			const glm::vec3& worldPos = glm::vec3(0.0f),
 			float volumeScale = 1.0f,
-			float pitchScale = 1.0f);
+			float pitchScale = 1.0f, bool looping = false);
 
 		VoiceHandle PostEvent2D(
 			const std::string& eventId,
 			float volumeScale = 1.0f,
-			float pitchScale = 1.0f);
+			float pitchScale = 1.0f, bool looping = false);
 
 		void StopVoice(VoiceHandle handle, float fadeSeconds = 0.05f);
 		void PauseVoice(VoiceHandle handle);
 		void ResumeVoice(VoiceHandle handle);
+		void SetVoiceLooping(VoiceHandle handle, bool loop);
 		void StopAll(float fadeSeconds = 0.05f);
 
 		// Bus & Snapshot controls
@@ -74,6 +76,7 @@ namespace World::Audio
 		// Event and Asset Registry
 		void RegisterSoundEvent(const SoundEvent& soundEvent);
 		const SoundEvent* FindSoundEvent(const std::string& eventId) const;
+		std::vector<std::string> GetRegisteredSoundEventIds() const;
 		void RegisterAudioBuffer(const std::string& path, std::shared_ptr<AudioBuffer> buffer);
 		std::shared_ptr<AudioBuffer> FindAudioBuffer(const std::string& path) const;
 
@@ -91,7 +94,7 @@ namespace World::Audio
 		AiAudioStudioManager m_AiStudio;
 
 		std::unordered_map<std::string, SoundEvent> m_SoundEvents;
-		std::unordered_map<std::string, std::shared_ptr<AudioBuffer>> m_AudioBuffers;
+		mutable std::unordered_map<std::string, std::shared_ptr<AudioBuffer>> m_AudioBuffers;
 
 		// Listener state
 		glm::vec3 m_ListenerPosition { 0.0f };
@@ -100,6 +103,6 @@ namespace World::Audio
 
 		// Scratch bus mix buffers (reused across blocks to guarantee 0 heap allocation)
 		std::unordered_map<BusId, std::pair<std::vector<float>, std::vector<float>>> m_BusMixBuffers;
-		std::mutex m_RegistryMutex;
+		mutable std::mutex m_RegistryMutex;
 	};
 }

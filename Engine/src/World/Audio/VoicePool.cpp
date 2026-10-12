@@ -88,6 +88,14 @@ namespace World::Audio
 		}
 	}
 
+	void VoicePool::SetVoiceLooping(VoiceHandle handle, bool loop)
+	{
+		if (auto* v = FindVoice(handle))
+		{
+			v->SetLooping(loop);
+		}
+	}
+
 	void VoicePool::ResumeVoice(VoiceHandle handle)
 	{
 		if (auto* v = FindVoice(handle))
