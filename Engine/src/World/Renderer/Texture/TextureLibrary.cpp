@@ -426,7 +426,9 @@ namespace World
 			m_Device = Renderer::GetDevice().get();
 		}
 
-		const std::string normalized = path.IsValid() ? StringPool::Get().PathOf(path) : std::string();
+				std::string normalized = path.IsValid() ? StringPool::Get().PathOf(path) : std::string();
+		if (normalized.rfind("assets/", 0) == 0 || normalized.rfind("assets\\", 0) == 0)
+			normalized = normalized.substr(7);
 		const std::uint64_t key = MakeKey(path, srgb);
 		const auto cached = m_Entries.find(key);
 		if (cached != m_Entries.end())

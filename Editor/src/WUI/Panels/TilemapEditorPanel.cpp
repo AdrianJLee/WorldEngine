@@ -569,7 +569,7 @@ namespace World
 		// 4.2 Interactive Canvas Surface
 		const Wui::WuiRect innerCanvas { rightCol.X + 8.0f, rightCol.Y + 36.0f, rightCol.W - 16.0f, std::max(60.0f, rightCol.H - 64.0f) };
 		Wui::DrawPanelSurface(ctx, innerCanvas, theme);
-		ctx.PushClipRect(innerCanvas);
+		Wui::ClipScope canvasClip(ctx, innerCanvas);
 
 		// Handle Mouse Wheel Zooming (centered on mouse cursor)
 		if (ctx.IsHovered(innerCanvas))
@@ -816,7 +816,7 @@ namespace World
 		if (!m_StatusFeedback.empty())
 			statusLine << "  |  " << m_StatusFeedback;
 
-		ctx.PopClipRect();
+		// canvasClip pop on scope exit
 
 		Wui::Label(ctx, { rightCol.X + 12.0f, rightCol.Y + rightCol.H - 22.0f }, statusLine.str(), theme.TextMuted, 10.5f);
 	}
