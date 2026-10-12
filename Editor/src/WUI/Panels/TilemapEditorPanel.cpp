@@ -569,7 +569,6 @@ namespace World
 		// 4.2 Interactive Canvas Surface
 		const Wui::WuiRect innerCanvas { rightCol.X + 8.0f, rightCol.Y + 36.0f, rightCol.W - 16.0f, std::max(60.0f, rightCol.H - 64.0f) };
 		Wui::DrawPanelSurface(ctx, innerCanvas, theme);
-		Wui::ClipScope canvasClip(ctx, innerCanvas);
 
 		// Handle Mouse Wheel Zooming (centered on mouse cursor)
 		if (ctx.IsHovered(innerCanvas))
@@ -630,6 +629,12 @@ namespace World
 
 		const float invAtlasW = (m_Atlas && m_Atlas->GetWidth() > 0) ? (1.0f / static_cast<float>(m_Atlas->GetWidth())) : 1.0f;
 		const float invAtlasH = (m_Atlas && m_Atlas->GetHeight() > 0) ? (1.0f / static_cast<float>(m_Atlas->GetHeight())) : 1.0f;
+
+		const std::vector<MergedColliderRect> mergedRects = m_Tilemap->ComputeMergedColliderRects();
+
+		{
+			// GPU 视口裁切作用域严格限定在网格画布区域内，避免影响状态栏与全局浮动控件
+			Wui::ClipScope canvasClip(ctx, innerCanvas);
 
 		// Draw each cell (y=0 at the top, matching natural 2D tilemap convention and scene +Y down offset)
 		for (uint32_t y = 0; y < gridH; ++y)
@@ -708,7 +713,7 @@ namespace World
 		}
 
 		// Merged Box2D collider rectangles overlay
-		const std::vector<MergedColliderRect> mergedRects = m_Tilemap->ComputeMergedColliderRects();
+		// mergedRects computed above
 		if (m_ShowCollisionOverlay)
 		{
 			const Wui::WuiColor mergedCol { 0.20f, 0.95f, 0.42f, 0.95f };
@@ -798,6 +803,8 @@ namespace World
 				}
 			}
 		}
+
+		} // 退出网格绘制区域，弹出 GPU 裁切栈
 
 		// Bottom Status Bar with real-time painted & merged collider counts and zoom feedback
 		const uint32_t paintedCount = m_Tilemap->CountPaintedTiles();
