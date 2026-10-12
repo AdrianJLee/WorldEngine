@@ -99,6 +99,8 @@ namespace World
 		virtual uint64_t GetIconId(int index) const = 0;
 		// 旧式(GL)纹理纪元:窗口/上下文重建后自增,面板据此重新加载自己的图标。
 		virtual uint32_t TextureEpoch() const = 0;
+		virtual bool IsEditingCollider() const { return false; }
+		virtual void SetEditingCollider(bool editing) {}
 		// ---- 独立窗口(与停靠面板不同的组件)----
 		virtual size_t IndependentWindowCount() const = 0;
 		virtual std::string IndependentWindowPanel(size_t index) const = 0;

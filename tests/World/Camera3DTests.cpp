@@ -462,6 +462,32 @@ int main()
 			CHECK(glm::length(cam.GetTarget() - (beforeFly + expectedDelta)) < 1e-4f);
 		}
 
+				// 14. 纯 2D 视口锁定模式 (Set2DMode): 强制正交投影、锁定 Front 方位、禁止 Orbit 旋转
+		{
+			EditorCamera3D cam(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f, 10.0f);
+			CHECK(!cam.Is2DMode());
+
+			cam.Set2DMode(true);
+			CHECK(cam.Is2DMode());
+			CHECK(cam.IsOrthographic());
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Front);
+			CHECK(std::fabs(cam.GetPitch()) < 1e-4f);
+			CHECK(std::fabs(cam.GetYaw() - 180.0f) < 1e-4f);
+
+			// 2D 锁定模式下 Orbit 旋转完全被锁定忽略
+			cam.Orbit(45.0f, 30.0f);
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Front);
+			CHECK(std::fabs(cam.GetPitch()) < 1e-4f);
+			CHECK(std::fabs(cam.GetYaw() - 180.0f) < 1e-4f);
+
+			// 解锁 2D 模式后恢复 Orbit 旋转
+			cam.Set2DMode(false);
+			CHECK(!cam.Is2DMode());
+			cam.Orbit(30.0f, 15.0f);
+			CHECK(cam.GetViewpoint() == ViewportViewpoint::Free);
+			CHECK(std::fabs(cam.GetPitch() - 15.0f) < 1e-4f);
+		}
+
 		std::printf("World.Camera3D: all checks passed\n");
 		return 0;
 	}

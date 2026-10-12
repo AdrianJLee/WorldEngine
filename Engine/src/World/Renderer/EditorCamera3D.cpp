@@ -31,11 +31,25 @@ namespace World
 
 	void EditorCamera3D::Orbit(float deltaYawDegrees, float deltaPitchDegrees)
 	{
+		// 纯 2D 锁定模式下严格锁定相机旋转, 防止误触 3D 偏航/俯仰倾斜
+		if (m_Is2DMode)
+			return;
+
 		m_YawDegrees += deltaYawDegrees;
 		m_PitchDegrees += deltaPitchDegrees;
 		ClampPitch();
 		// 主动旋转后自动转入自由视角
 		m_Viewpoint = ViewportViewpoint::Free;
+	}
+
+	void EditorCamera3D::Set2DMode(bool enabled)
+	{
+		m_Is2DMode = enabled;
+		if (enabled)
+		{
+			SetProjection(ViewportProjection::Orthographic);
+			SetViewpoint(ViewportViewpoint::Front);
+		}
 	}
 
 	void EditorCamera3D::SetProjection(ViewportProjection proj)

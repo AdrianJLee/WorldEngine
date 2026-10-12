@@ -411,4 +411,543 @@ namespace World::Wui
 			|| (operation == GizmoOperation::Rotate && glm::length(mouse - center) <= kArrowSize);
 		return dragging || (hoveringHandle && ctx.IsHovered(viewport));
 	}
+
+	// =========================================================================
+	// 2D 矩形变换手柄 (Rect Transform Tool)
+	// =========================================================================
+	bool ManipulateRect2D(const GizmoCamera& camera,
+		TransformComponent& transform, glm::vec2& pivot, glm::vec2 size,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation)
+	{
+		const float w = std::max(0.01f, size.x * transform.Scale.x);
+		const float h = std::max(0.01f, size.y * transform.Scale.y);
+		const float x0 = -pivot.x * w;
+		const float x1 = (1.0f - pivot.x) * w;
+		const float y0 = -pivot.y * h;
+		const float y1 = (1.0f - pivot.y) * h;
+
+		const glm::mat3 rot = glm::mat3_cast(transform.Rotation);
+		const glm::vec3 cBL = transform.Location + rot * glm::vec3(x0, y0, 0.0f);
+		const glm::vec3 cBR = transform.Location + rot * glm::vec3(x1, y0, 0.0f);
+		const glm::vec3 cTR = transform.Location + rot * glm::vec3(x1, y1, 0.0f);
+		const glm::vec3 cTL = transform.Location + rot * glm::vec3(x0, y1, 0.0f);
+		const glm::vec3 cPivot = transform.Location;
+
+		const glm::vec2 sBL = WorldToScreen(camera, cBL, viewport);
+		const glm::vec2 sBR = WorldToScreen(camera, cBR, viewport);
+		const glm::vec2 sTR = WorldToScreen(camera, cTR, viewport);
+		const glm::vec2 sTL = WorldToScreen(camera, cTL, viewport);
+		const glm::vec2 sPivot = WorldToScreen(camera, cPivot, viewport);
+
+		if (sBL.x < -1e8f || sBR.x < -1e8f || sTR.x < -1e8f || sTL.x < -1e8f)
+			return false;
+
+		const glm::vec2 sLeft = (sBL + sTL) * 0.5f;
+		const glm::vec2 sRight = (sBR + sTR) * 0.5f;
+		const glm::vec2 sBottom = (sBL + sBR) * 0.5f;
+		const glm::vec2 sTop = (sTL + sTR) * 0.5f;
+
+		// 0..3: 角点(BL, BR, TR, TL); 4..7: 边中点(Left, Right, Bottom, Top); 8: Pivot 锚点
+		const glm::vec2 handles[9] = { sBL, sBR, sTR, sTL, sLeft, sRight, sBottom, sTop, sPivot };
+
+		const glm::vec2 mouse = ctx.Input().MousePos;
+		int hovered = -1;
+		if (ctx.IsHovered(viewport))
+		{
+			float bestDist = kPickTolerance + 2.0f;
+			for (int i = 0; i < 9; ++i)
+			{
+				const float d = glm::length(mouse - handles[i]);
+				if (d <= bestDist)
+				{
+					bestDist = d;
+					hovered = i;
+				}
+			}
+		}
+
+		// 绘制矩形边框 (青色)
+		const WuiColor rectCol { 0.20f, 0.85f, 0.95f, 0.90f };
+		PushLine(ctx, sBL, sBR, rectCol, 1.8f);
+		PushLine(ctx, sBR, sTR, rectCol, 1.8f);
+		PushLine(ctx, sTR, sTL, rectCol, 1.8f);
+		PushLine(ctx, sTL, sBL, rectCol, 1.8f);
+
+		// 绘制角手柄 (白色方块) 与 边中点手柄 (青色方块)
+		for (int i = 0; i < 4; ++i)
+		{
+			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : WuiColor{ 1.0f, 1.0f, 1.0f, 1.0f }, 8.0f);
+		}
+		for (int i = 4; i < 8; ++i)
+		{
+			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : rectCol, 6.0f);
+		}
+
+		// 绘制中心 Pivot 锚点手柄 (金黄色十字圆心)
+		PushBox(ctx, sPivot, (hovered == 8) ? kHighlight : WuiColor{ 1.0f, 0.68f, 0.15f, 1.0f }, 7.0f);
+
+		if (!allowManipulation)
+			return false;
+
+		static bool s_RectDragging = false;
+		static int s_RectActiveHandle = -1;
+		static glm::vec2 s_RectStartMouse {};
+		static glm::vec3 s_RectStartScale {};
+		static glm::vec2 s_RectStartPivot {};
+
+		if (!s_RectDragging && ctx.Input().MouseClicked[0] && ctx.IsHovered(viewport) && hovered >= 0)
+		{
+			s_RectDragging = true;
+			s_RectActiveHandle = hovered;
+			s_RectStartMouse = mouse;
+			s_RectStartScale = transform.Scale;
+			s_RectStartPivot = pivot;
+		}
+
+		if (s_RectDragging && ctx.Input().MouseDown[0])
+		{
+			const glm::vec2 mouseDelta = mouse - s_RectStartMouse;
+			const float wpp = WorldPerPixel(camera, viewport);
+			const glm::vec2 worldDelta = mouseDelta * wpp;
+
+			if (s_RectActiveHandle == 8) // 锚点拖拽
+			{
+				float newPx = std::clamp(s_RectStartPivot.x + worldDelta.x / std::max(0.01f, size.x * transform.Scale.x), 0.0f, 1.0f);
+				float newPy = std::clamp(s_RectStartPivot.y - worldDelta.y / std::max(0.01f, size.y * transform.Scale.y), 0.0f, 1.0f);
+				if (ctx.Input().Ctrl)
+				{
+					auto snap = [](float v) {
+						if (std::abs(v - 0.5f) < 0.15f) return 0.5f;
+						return v < 0.5f ? 0.0f : 1.0f;
+					};
+					newPx = snap(newPx);
+					newPy = snap(newPy);
+				}
+				pivot.x = newPx;
+				pivot.y = newPy;
+			}
+			else
+			{
+				const float dx = worldDelta.x / std::max(0.01f, size.x);
+				const float dy = -worldDelta.y / std::max(0.01f, size.y);
+
+				if (s_RectActiveHandle == 2) // TR
+				{
+					transform.Scale.x = std::max(0.01f, s_RectStartScale.x + dx);
+					transform.Scale.y = std::max(0.01f, s_RectStartScale.y + dy);
+				}
+				else if (s_RectActiveHandle == 0) // BL
+				{
+					transform.Scale.x = std::max(0.01f, s_RectStartScale.x - dx);
+					transform.Scale.y = std::max(0.01f, s_RectStartScale.y - dy);
+				}
+				else if (s_RectActiveHandle == 1) // BR
+				{
+					transform.Scale.x = std::max(0.01f, s_RectStartScale.x + dx);
+					transform.Scale.y = std::max(0.01f, s_RectStartScale.y - dy);
+				}
+				else if (s_RectActiveHandle == 3) // TL
+				{
+					transform.Scale.x = std::max(0.01f, s_RectStartScale.x - dx);
+					transform.Scale.y = std::max(0.01f, s_RectStartScale.y + dy);
+				}
+				else if (s_RectActiveHandle == 5) // Right
+				{
+					transform.Scale.x = std::max(0.01f, s_RectStartScale.x + dx);
+				}
+				else if (s_RectActiveHandle == 4) // Left
+				{
+					transform.Scale.x = std::max(0.01f, s_RectStartScale.x - dx);
+				}
+				else if (s_RectActiveHandle == 7) // Top
+				{
+					transform.Scale.y = std::max(0.01f, s_RectStartScale.y + dy);
+				}
+				else if (s_RectActiveHandle == 6) // Bottom
+				{
+					transform.Scale.y = std::max(0.01f, s_RectStartScale.y - dy);
+				}
+				transform.RecalculateTransform();
+			}
+		}
+
+		if (s_RectDragging && ctx.Input().MouseReleased[0])
+		{
+			s_RectDragging = false;
+			s_RectActiveHandle = -1;
+		}
+
+		return s_RectDragging || (hovered >= 0 && ctx.IsHovered(viewport));
+	}
+
+	// =========================================================================
+	// 2D 盒状碰撞体视口手柄 (Box Collider 2D Gizmo)
+	// =========================================================================
+	bool ManipulateBoxCollider2D(const GizmoCamera& camera,
+		const TransformComponent& transform, glm::vec2& offset, glm::vec2& size,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation)
+	{
+		const glm::vec3 centerWorld = transform.Location + glm::vec3(offset.x * transform.Scale.x, offset.y * transform.Scale.y, 0.0f);
+		const float hw = (size.x * 0.5f) * std::abs(transform.Scale.x);
+		const float hh = (size.y * 0.5f) * std::abs(transform.Scale.y);
+
+		const glm::vec2 sCenter = WorldToScreen(camera, centerWorld, viewport);
+		const glm::vec2 sLeft   = WorldToScreen(camera, centerWorld + glm::vec3(-hw, 0.0f, 0.0f), viewport);
+		const glm::vec2 sRight  = WorldToScreen(camera, centerWorld + glm::vec3( hw, 0.0f, 0.0f), viewport);
+		const glm::vec2 sBottom = WorldToScreen(camera, centerWorld + glm::vec3(0.0f, -hh, 0.0f), viewport);
+		const glm::vec2 sTop    = WorldToScreen(camera, centerWorld + glm::vec3(0.0f,  hh, 0.0f), viewport);
+
+		const glm::vec2 sBL = WorldToScreen(camera, centerWorld + glm::vec3(-hw, -hh, 0.0f), viewport);
+		const glm::vec2 sBR = WorldToScreen(camera, centerWorld + glm::vec3( hw, -hh, 0.0f), viewport);
+		const glm::vec2 sTR = WorldToScreen(camera, centerWorld + glm::vec3( hw,  hh, 0.0f), viewport);
+		const glm::vec2 sTL = WorldToScreen(camera, centerWorld + glm::vec3(-hw,  hh, 0.0f), viewport);
+
+		if (sCenter.x < -1e8f || sBL.x < -1e8f || sTR.x < -1e8f)
+			return false;
+
+		const glm::vec2 handles[5] = { sLeft, sRight, sBottom, sTop, sCenter };
+		const glm::vec2 mouse = ctx.Input().MousePos;
+		int hovered = -1;
+		if (ctx.IsHovered(viewport))
+		{
+			float bestDist = kPickTolerance + 2.0f;
+			for (int i = 0; i < 5; ++i)
+			{
+				const float d = glm::length(mouse - handles[i]);
+				if (d <= bestDist)
+				{
+					bestDist = d;
+					hovered = i;
+				}
+			}
+		}
+
+		// 绘制碰撞框轮廓 (鲜亮浅绿)
+		const WuiColor colGreen { 0.20f, 0.95f, 0.42f, 0.95f };
+		PushLine(ctx, sBL, sBR, colGreen, 2.0f);
+		PushLine(ctx, sBR, sTR, colGreen, 2.0f);
+		PushLine(ctx, sTR, sTL, colGreen, 2.0f);
+		PushLine(ctx, sTL, sBL, colGreen, 2.0f);
+
+		// 4 边手柄 + 1 中心手柄
+		for (int i = 0; i < 4; ++i)
+			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : colGreen, 7.0f);
+		PushBox(ctx, sCenter, (hovered == 4) ? kHighlight : WuiColor{ 0.95f, 0.85f, 0.20f, 1.0f }, 6.0f);
+
+		if (!allowManipulation)
+			return false;
+
+		static bool s_BoxDragging = false;
+		static int s_BoxActiveHandle = -1;
+		static glm::vec2 s_BoxStartMouse {};
+		static glm::vec2 s_BoxStartSize {};
+		static glm::vec2 s_BoxStartOffset {};
+
+		if (!s_BoxDragging && ctx.Input().MouseClicked[0] && ctx.IsHovered(viewport) && hovered >= 0)
+		{
+			s_BoxDragging = true;
+			s_BoxActiveHandle = hovered;
+			s_BoxStartMouse = mouse;
+			s_BoxStartSize = size;
+			s_BoxStartOffset = offset;
+		}
+
+		if (s_BoxDragging && ctx.Input().MouseDown[0])
+		{
+			const glm::vec2 mouseDelta = mouse - s_BoxStartMouse;
+			const float wpp = WorldPerPixel(camera, viewport);
+			const glm::vec2 worldDelta = mouseDelta * wpp;
+			const float sx = std::max(0.001f, std::abs(transform.Scale.x));
+			const float sy = std::max(0.001f, std::abs(transform.Scale.y));
+
+			if (s_BoxActiveHandle == 4) // 中心偏移拖拽
+			{
+				offset.x = s_BoxStartOffset.x + worldDelta.x / sx;
+				offset.y = s_BoxStartOffset.y - worldDelta.y / sy;
+			}
+			else if (s_BoxActiveHandle == 1) // Right
+			{
+				size.x = std::max(0.05f, s_BoxStartSize.x + (worldDelta.x * 2.0f) / sx);
+			}
+			else if (s_BoxActiveHandle == 0) // Left
+			{
+				size.x = std::max(0.05f, s_BoxStartSize.x - (worldDelta.x * 2.0f) / sx);
+			}
+			else if (s_BoxActiveHandle == 3) // Top
+			{
+				size.y = std::max(0.05f, s_BoxStartSize.y - (worldDelta.y * 2.0f) / sy);
+			}
+			else if (s_BoxActiveHandle == 2) // Bottom
+			{
+				size.y = std::max(0.05f, s_BoxStartSize.y + (worldDelta.y * 2.0f) / sy);
+			}
+		}
+
+		if (s_BoxDragging && ctx.Input().MouseReleased[0])
+		{
+			s_BoxDragging = false;
+			s_BoxActiveHandle = -1;
+		}
+
+		return s_BoxDragging || (hovered >= 0 && ctx.IsHovered(viewport));
+	}
+
+	// =========================================================================
+	// 2D 圆形碰撞体视口手柄 (Circle Collider 2D Gizmo)
+	// =========================================================================
+	bool ManipulateCircleCollider2D(const GizmoCamera& camera,
+		const TransformComponent& transform, glm::vec2& offset, float& radius,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation)
+	{
+		const glm::vec3 centerWorld = transform.Location + glm::vec3(offset.x * transform.Scale.x, offset.y * transform.Scale.y, 0.0f);
+		const float rWorld = radius * std::max(std::abs(transform.Scale.x), std::abs(transform.Scale.y));
+		const glm::vec2 sCenter = WorldToScreen(camera, centerWorld, viewport);
+
+		if (sCenter.x < -1e8f)
+			return false;
+
+		const glm::vec2 sRight  = WorldToScreen(camera, centerWorld + glm::vec3( rWorld, 0.0f, 0.0f), viewport);
+		const glm::vec2 sTop    = WorldToScreen(camera, centerWorld + glm::vec3(0.0f,  rWorld, 0.0f), viewport);
+		const glm::vec2 sLeft   = WorldToScreen(camera, centerWorld + glm::vec3(-rWorld, 0.0f, 0.0f), viewport);
+		const glm::vec2 sBottom = WorldToScreen(camera, centerWorld + glm::vec3(0.0f, -rWorld, 0.0f), viewport);
+
+		const glm::vec2 handles[5] = { sRight, sTop, sLeft, sBottom, sCenter };
+		const glm::vec2 mouse = ctx.Input().MousePos;
+		int hovered = -1;
+		if (ctx.IsHovered(viewport))
+		{
+			float bestDist = kPickTolerance + 2.0f;
+			for (int i = 0; i < 5; ++i)
+			{
+				const float d = glm::length(mouse - handles[i]);
+				if (d <= bestDist)
+				{
+					bestDist = d;
+					hovered = i;
+				}
+			}
+		}
+
+		// 绘制圆形轮廓
+		const WuiColor colGreen { 0.20f, 0.95f, 0.42f, 0.95f };
+		constexpr int kSegments = 32;
+		glm::vec2 prevPt = WorldToScreen(camera, centerWorld + glm::vec3(rWorld, 0.0f, 0.0f), viewport);
+		for (int i = 1; i <= kSegments; ++i)
+		{
+			const float angle = glm::two_pi<float>() * static_cast<float>(i) / kSegments;
+			const glm::vec2 curPt = WorldToScreen(camera, centerWorld + glm::vec3(rWorld * std::cos(angle), rWorld * std::sin(angle), 0.0f), viewport);
+			PushLine(ctx, prevPt, curPt, colGreen, 2.0f);
+			prevPt = curPt;
+		}
+
+		for (int i = 0; i < 4; ++i)
+			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : colGreen, 7.0f);
+		PushBox(ctx, sCenter, (hovered == 4) ? kHighlight : WuiColor{ 0.95f, 0.85f, 0.20f, 1.0f }, 6.0f);
+
+		if (!allowManipulation)
+			return false;
+
+		static bool s_CircleDragging = false;
+		static int s_CircleActiveHandle = -1;
+		static glm::vec2 s_CircleStartMouse {};
+		static float s_CircleStartRadius = 0.5f;
+		static glm::vec2 s_CircleStartOffset {};
+
+		if (!s_CircleDragging && ctx.Input().MouseClicked[0] && ctx.IsHovered(viewport) && hovered >= 0)
+		{
+			s_CircleDragging = true;
+			s_CircleActiveHandle = hovered;
+			s_CircleStartMouse = mouse;
+			s_CircleStartRadius = radius;
+			s_CircleStartOffset = offset;
+		}
+
+		if (s_CircleDragging && ctx.Input().MouseDown[0])
+		{
+			const glm::vec2 mouseDelta = mouse - s_CircleStartMouse;
+			const float wpp = WorldPerPixel(camera, viewport);
+			const glm::vec2 worldDelta = mouseDelta * wpp;
+			const float s = std::max(0.001f, std::max(std::abs(transform.Scale.x), std::abs(transform.Scale.y)));
+
+			if (s_CircleActiveHandle == 4) // 中心偏移
+			{
+				offset.x = s_CircleStartOffset.x + worldDelta.x / s;
+				offset.y = s_CircleStartOffset.y - worldDelta.y / s;
+			}
+			else if (s_CircleActiveHandle == 0) // Right
+			{
+				radius = std::max(0.05f, s_CircleStartRadius + worldDelta.x / s);
+			}
+			else if (s_CircleActiveHandle == 1) // Top
+			{
+				radius = std::max(0.05f, s_CircleStartRadius - worldDelta.y / s);
+			}
+			else if (s_CircleActiveHandle == 2) // Left
+			{
+				radius = std::max(0.05f, s_CircleStartRadius - worldDelta.x / s);
+			}
+			else if (s_CircleActiveHandle == 3) // Bottom
+			{
+				radius = std::max(0.05f, s_CircleStartRadius + worldDelta.y / s);
+			}
+		}
+
+		if (s_CircleDragging && ctx.Input().MouseReleased[0])
+		{
+			s_CircleDragging = false;
+			s_CircleActiveHandle = -1;
+		}
+
+		return s_CircleDragging || (hovered >= 0 && ctx.IsHovered(viewport));
+	}
+
+	// =========================================================================
+	// 2D 胶囊体碰撞体视口手柄 (Capsule Collider 2D Gizmo)
+	// =========================================================================
+	bool ManipulateCapsuleCollider2D(const GizmoCamera& camera,
+		const TransformComponent& transform, glm::vec2& offset, float& radius, float& length, int direction,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation)
+	{
+		const glm::vec3 centerWorld = transform.Location + glm::vec3(offset.x * transform.Scale.x, offset.y * transform.Scale.y, 0.0f);
+		const float s = std::max(0.001f, std::max(std::abs(transform.Scale.x), std::abs(transform.Scale.y)));
+		const float rW = radius * s;
+		const float halfL = (length * 0.5f) * s;
+		const glm::vec2 sCenter = WorldToScreen(camera, centerWorld, viewport);
+
+		if (sCenter.x < -1e8f)
+			return false;
+
+		glm::vec2 sCapA {}, sCapB {}, sSideA {}, sSideB {};
+		if (direction == 0) // 垂直 (Vertical: 上下半球，左右侧边)
+		{
+			sCapA = WorldToScreen(camera, centerWorld + glm::vec3(0.0f,  halfL + rW, 0.0f), viewport);
+			sCapB = WorldToScreen(camera, centerWorld + glm::vec3(0.0f, -halfL - rW, 0.0f), viewport);
+			sSideA = WorldToScreen(camera, centerWorld + glm::vec3( rW, 0.0f, 0.0f), viewport);
+			sSideB = WorldToScreen(camera, centerWorld + glm::vec3(-rW, 0.0f, 0.0f), viewport);
+		}
+		else // 水平 (Horizontal: 左右半球，上下侧边)
+		{
+			sCapA = WorldToScreen(camera, centerWorld + glm::vec3( halfL + rW, 0.0f, 0.0f), viewport);
+			sCapB = WorldToScreen(camera, centerWorld + glm::vec3(-halfL - rW, 0.0f, 0.0f), viewport);
+			sSideA = WorldToScreen(camera, centerWorld + glm::vec3(0.0f,  rW, 0.0f), viewport);
+			sSideB = WorldToScreen(camera, centerWorld + glm::vec3(0.0f, -rW, 0.0f), viewport);
+		}
+
+		const glm::vec2 handles[5] = { sCapA, sCapB, sSideA, sSideB, sCenter };
+		const glm::vec2 mouse = ctx.Input().MousePos;
+		int hovered = -1;
+		if (ctx.IsHovered(viewport))
+		{
+			float bestDist = kPickTolerance + 2.0f;
+			for (int i = 0; i < 5; ++i)
+			{
+				const float d = glm::length(mouse - handles[i]);
+				if (d <= bestDist)
+				{
+					bestDist = d;
+					hovered = i;
+				}
+			}
+		}
+
+		const WuiColor colGreen { 0.20f, 0.95f, 0.42f, 0.95f };
+		// 绘制胶囊体两端端点轴线与侧边线
+		if (direction == 0)
+		{
+			const glm::vec2 sTopL = WorldToScreen(camera, centerWorld + glm::vec3(-rW,  halfL, 0.0f), viewport);
+			const glm::vec2 sTopR = WorldToScreen(camera, centerWorld + glm::vec3( rW,  halfL, 0.0f), viewport);
+			const glm::vec2 sBotL = WorldToScreen(camera, centerWorld + glm::vec3(-rW, -halfL, 0.0f), viewport);
+			const glm::vec2 sBotR = WorldToScreen(camera, centerWorld + glm::vec3( rW, -halfL, 0.0f), viewport);
+			PushLine(ctx, sTopL, sBotL, colGreen, 2.0f);
+			PushLine(ctx, sTopR, sBotR, colGreen, 2.0f);
+			PushLine(ctx, sTopL, sCapA, colGreen, 1.5f);
+			PushLine(ctx, sTopR, sCapA, colGreen, 1.5f);
+			PushLine(ctx, sBotL, sCapB, colGreen, 1.5f);
+			PushLine(ctx, sBotR, sCapB, colGreen, 1.5f);
+		}
+		else
+		{
+			const glm::vec2 sLeftT  = WorldToScreen(camera, centerWorld + glm::vec3(-halfL,  rW, 0.0f), viewport);
+			const glm::vec2 sLeftB  = WorldToScreen(camera, centerWorld + glm::vec3(-halfL, -rW, 0.0f), viewport);
+			const glm::vec2 sRightT = WorldToScreen(camera, centerWorld + glm::vec3( halfL,  rW, 0.0f), viewport);
+			const glm::vec2 sRightB = WorldToScreen(camera, centerWorld + glm::vec3( halfL, -rW, 0.0f), viewport);
+			PushLine(ctx, sLeftT, sRightT, colGreen, 2.0f);
+			PushLine(ctx, sLeftB, sRightB, colGreen, 2.0f);
+			PushLine(ctx, sLeftT, sCapB, colGreen, 1.5f);
+			PushLine(ctx, sLeftB, sCapB, colGreen, 1.5f);
+			PushLine(ctx, sRightT, sCapA, colGreen, 1.5f);
+			PushLine(ctx, sRightB, sCapA, colGreen, 1.5f);
+		}
+
+		for (int i = 0; i < 4; ++i)
+			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : colGreen, 7.0f);
+		PushBox(ctx, sCenter, (hovered == 4) ? kHighlight : WuiColor{ 0.95f, 0.85f, 0.20f, 1.0f }, 6.0f);
+
+		if (!allowManipulation)
+			return false;
+
+		static bool s_CapDragging = false;
+		static int s_CapActiveHandle = -1;
+		static glm::vec2 s_CapStartMouse {};
+		static float s_CapStartLength = 1.0f;
+		static float s_CapStartRadius = 0.5f;
+		static glm::vec2 s_CapStartOffset {};
+
+		if (!s_CapDragging && ctx.Input().MouseClicked[0] && ctx.IsHovered(viewport) && hovered >= 0)
+		{
+			s_CapDragging = true;
+			s_CapActiveHandle = hovered;
+			s_CapStartMouse = mouse;
+			s_CapStartLength = length;
+			s_CapStartRadius = radius;
+			s_CapStartOffset = offset;
+		}
+
+		if (s_CapDragging && ctx.Input().MouseDown[0])
+		{
+			const glm::vec2 mouseDelta = mouse - s_CapStartMouse;
+			const float wpp = WorldPerPixel(camera, viewport);
+			const glm::vec2 worldDelta = mouseDelta * wpp;
+
+			if (s_CapActiveHandle == 4) // 中心偏移
+			{
+				offset.x = s_CapStartOffset.x + worldDelta.x / s;
+				offset.y = s_CapStartOffset.y - worldDelta.y / s;
+			}
+			else if (s_CapActiveHandle == 0 || s_CapActiveHandle == 1) // 长度控制
+			{
+				if (direction == 0)
+				{
+					const float deltaL = (s_CapActiveHandle == 0) ? -worldDelta.y * 2.0f : worldDelta.y * 2.0f;
+					length = std::max(0.05f, s_CapStartLength + deltaL / s);
+				}
+				else
+				{
+					const float deltaL = (s_CapActiveHandle == 0) ? worldDelta.x * 2.0f : -worldDelta.x * 2.0f;
+					length = std::max(0.05f, s_CapStartLength + deltaL / s);
+				}
+			}
+			else if (s_CapActiveHandle == 2 || s_CapActiveHandle == 3) // 半径控制
+			{
+				if (direction == 0)
+				{
+					const float deltaR = (s_CapActiveHandle == 2) ? worldDelta.x : -worldDelta.x;
+					radius = std::max(0.05f, s_CapStartRadius + deltaR / s);
+				}
+				else
+				{
+					const float deltaR = (s_CapActiveHandle == 2) ? -worldDelta.y : worldDelta.y;
+					radius = std::max(0.05f, s_CapStartRadius + deltaR / s);
+				}
+			}
+		}
+
+		if (s_CapDragging && ctx.Input().MouseReleased[0])
+		{
+			s_CapDragging = false;
+			s_CapActiveHandle = -1;
+		}
+
+		return s_CapDragging || (hovered >= 0 && ctx.IsHovered(viewport));
+	}
 }

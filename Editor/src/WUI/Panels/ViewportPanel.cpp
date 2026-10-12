@@ -2,6 +2,7 @@
 #include "WUI/Panels/ViewportPanel.h"
 
 #include "World/WUI/WuiGizmo.h"
+#include "World/Renderer/Tilemap.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
@@ -374,6 +375,42 @@ namespace World
 			m_ShowWorldPartition = !m_ShowWorldPartition;
 		}
 		ctx.RegisterOverlayRect(partBtn);
+		toolbarX += partBtnW + 4.0f;
+
+		// 2D / 3D 视口锁定模式一键切换按钮
+		const float mode2dBtnW = 76.0f;
+		const Wui::WuiRect mode2dBtn { toolbarX, sceneRect.Y + kChromePad, mode2dBtnW, kChromeRowH };
+		const bool is2D = m_Host.Is2DMode();
+		const std::string mode2dLabel = is2D ? "2D: ON" : "2D: OFF";
+		Wui::Tooltip(ctx, mode2dBtn, Wui::Tr("viewport.2d.hint", "切换纯 2D 视口锁定模式 (锁定正交投影与 XY 平面，禁用 3D 旋转) (viewport.btn.toggle_2d)"));
+		if (Wui::Button(ctx, Wui::HashId("viewport.btn.toggle_2d"), mode2dBtn, mode2dLabel, theme))
+		{
+			m_Host.Set2DMode(!is2D);
+		}
+		ctx.RegisterOverlayRect(mode2dBtn);
+		toolbarX += mode2dBtnW + 4.0f;
+
+		// Gizmo 工具栏快捷按钮 (Q: 选 / W: 移 / E: 转 / R: 缩 / T: 2D 矩形手柄)
+		const float gizmoBtnW = 24.0f;
+		struct GizmoBtnSpec { const char* id; const char* label; Wui::GizmoOperation op; const char* tip; };
+		const GizmoBtnSpec gizmoBtns[5] = {
+			{ "viewport.btn.gizmo_q", "Q", Wui::GizmoOperation::None, "选择模式 (None) [快捷键 Q]" },
+			{ "viewport.btn.gizmo_w", "W", Wui::GizmoOperation::Translate, "平移工具 (Move) [快捷键 W]" },
+			{ "viewport.btn.gizmo_e", "E", Wui::GizmoOperation::Rotate, "旋转工具 (Rotate) [快捷键 E]" },
+			{ "viewport.btn.gizmo_r", "R", Wui::GizmoOperation::Scale, "缩放工具 (Scale) [快捷键 R]" },
+			{ "viewport.btn.gizmo_t", "T", Wui::GizmoOperation::Rect, "2D 矩形变换手柄 (Rect Transform) [快捷键 T]" }
+		};
+		for (int i = 0; i < 5; ++i)
+		{
+			const Wui::WuiRect gBtnRect { toolbarX, sceneRect.Y + kChromePad, gizmoBtnW, kChromeRowH };
+			Wui::Tooltip(ctx, gBtnRect, gizmoBtns[i].tip);
+			if (Wui::Button(ctx, Wui::HashId(gizmoBtns[i].id), gBtnRect, gizmoBtns[i].label, theme))
+			{
+				m_Host.SetGizmoOperation(gizmoBtns[i].op);
+			}
+			ctx.RegisterOverlayRect(gBtnRect);
+			toolbarX += gizmoBtnW + 2.0f;
+		}
 
 		// ② 顶部居中:运行控制药丸(播放 / 模拟 / 暂停)。用户 2026-09-21:「悬浮在视口上居中」——
 		// 深色半透明圆角底板,悬停时提亮;不悬停时更淡,尽量少挡画面。
@@ -663,9 +700,61 @@ namespace World
 		{
 			auto& transform = selected.GetComponent<TransformComponent>();
 			const TransformComponent before = transform;
-			const bool nowUsing = Wui::ManipulateGizmo(m_Host.GetGizmoCamera(),
-				m_Host.GetGizmoOperation(), transform, sceneRect, ctx,
-				/*allowManipulation=*/!m_Host.IsReadOnlyMode());
+			bool nowUsing = false;
+
+			if (m_Host.IsEditingCollider())
+			{
+				if (selected.HasComponent<BoxCollider2DComponent>())
+				{
+					auto& box = selected.GetComponent<BoxCollider2DComponent>();
+					nowUsing = Wui::ManipulateBoxCollider2D(m_Host.GetGizmoCamera(), transform, box.Offset, box.Size, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				}
+				else if (selected.HasComponent<CircleCollider2DComponent>())
+				{
+					auto& circle = selected.GetComponent<CircleCollider2DComponent>();
+					nowUsing = Wui::ManipulateCircleCollider2D(m_Host.GetGizmoCamera(), transform, circle.Offset, circle.Radius, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				}
+				else if (selected.HasComponent<CapsuleCollider2DComponent>())
+				{
+					auto& cap = selected.GetComponent<CapsuleCollider2DComponent>();
+					nowUsing = Wui::ManipulateCapsuleCollider2D(m_Host.GetGizmoCamera(), transform, cap.Offset, cap.Radius, cap.Length, cap.Direction, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				}
+			}
+			else if (m_Host.GetGizmoOperation() == Wui::GizmoOperation::Rect)
+			{
+				glm::vec2 pivot { 0.5f, 0.5f };
+				glm::vec2 baseSize { 1.0f, 1.0f };
+				if (selected.HasComponent<SpriteComponent>())
+				{
+					auto& spr = selected.GetComponent<SpriteComponent>();
+					nowUsing = Wui::ManipulateRect2D(m_Host.GetGizmoCamera(), transform, spr.Pivot, baseSize, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				}
+				else if (selected.HasComponent<TilemapComponent>())
+				{
+					auto& tmComp = selected.GetComponent<TilemapComponent>();
+					float mapW = 16.0f, mapH = 16.0f;
+					if (tmComp.Tilemap.HasPath())
+					{
+						const std::string tmP = StringPool::Get().PathOf(tmComp.Tilemap.Path);
+						if (auto tm = Tilemap::GetOrLoad(tmP))
+						{
+							mapW = static_cast<float>(tm->GetWidth()) * (tmComp.CellSize.x > 0.0f ? tmComp.CellSize.x : tm->GetCellSize().x);
+							mapH = static_cast<float>(tm->GetHeight()) * (tmComp.CellSize.y > 0.0f ? tmComp.CellSize.y : tm->GetCellSize().y);
+						}
+					}
+					nowUsing = Wui::ManipulateRect2D(m_Host.GetGizmoCamera(), transform, pivot, { mapW, mapH }, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				}
+				else
+				{
+					nowUsing = Wui::ManipulateRect2D(m_Host.GetGizmoCamera(), transform, pivot, baseSize, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				}
+			}
+			else
+			{
+				nowUsing = Wui::ManipulateGizmo(m_Host.GetGizmoCamera(),
+					m_Host.GetGizmoOperation(), transform, sceneRect, ctx,
+					/*allowManipulation=*/!m_Host.IsReadOnlyMode());
+			}
 			gizmoEngaged = nowUsing;
 			if (!m_GizmoActive && nowUsing)
 			{

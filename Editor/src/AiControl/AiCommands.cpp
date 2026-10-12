@@ -2984,6 +2984,45 @@ namespace World
 			result = "painted tilemap " + path;
 			return true;
 		}
+		if (cmd == "viewport.set_2d_mode")
+		{
+			const bool enabled = !args.count("enabled") || (arg("enabled") == "true" || arg("enabled") == "1");
+			Set2DMode(enabled);
+			result = enabled ? "2d_mode=on" : "2d_mode=off";
+			return true;
+		}
+		if (cmd == "viewport.get_2d_mode")
+		{
+			std::ostringstream ss;
+			ss << "{\"is2d\":" << (Is2DMode() ? "true" : "false")
+			   << ",\"editCollider\":" << (IsEditingCollider() ? "true" : "false")
+			   << ",\"gizmoOp\":" << static_cast<int>(GetGizmoOperation()) << "}";
+			result = ss.str();
+			return true;
+		}
+		if (cmd == "viewport.set_gizmo_op")
+		{
+			const std::string op = arg("op");
+			if (op == "none" || op == "q") SetGizmoOperation(Wui::GizmoOperation::None);
+			else if (op == "translate" || op == "move" || op == "w") SetGizmoOperation(Wui::GizmoOperation::Translate);
+			else if (op == "rotate" || op == "e") SetGizmoOperation(Wui::GizmoOperation::Rotate);
+			else if (op == "scale" || op == "r") SetGizmoOperation(Wui::GizmoOperation::Scale);
+			else if (op == "rect" || op == "t") SetGizmoOperation(Wui::GizmoOperation::Rect);
+			else
+			{
+				error = "invalid gizmo op: " + op;
+				return false;
+			}
+			result = "gizmo_op=" + op;
+			return true;
+		}
+		if (cmd == "viewport.set_edit_collider")
+		{
+			const bool enabled = !args.count("enabled") || (arg("enabled") == "true" || arg("enabled") == "1");
+			SetEditingCollider(enabled);
+			result = enabled ? "edit_collider=on" : "edit_collider=off";
+			return true;
+		}
 		if (cmd == "asset.open_material")
 		{
 			const std::string path = arg("path");

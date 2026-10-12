@@ -535,6 +535,26 @@ void EditorShell::SetViewportViewpoint(World::ViewportViewpoint vp) {
 		m_Editor.SetViewportViewpoint(vp);
 	}
 
+bool EditorShell::Is2DMode() const {
+	return m_Editor.Is2DMode();
+}
+
+void EditorShell::Set2DMode(bool enabled) {
+	m_Editor.Set2DMode(enabled);
+}
+
+void EditorShell::SetGizmoOperation(Wui::GizmoOperation op) {
+	m_Editor.SetGizmoOperation(op);
+}
+
+bool EditorShell::IsEditingCollider() const {
+	return m_Editor.IsEditingCollider();
+}
+
+void EditorShell::SetEditingCollider(bool editing) {
+	m_Editor.SetEditingCollider(editing);
+}
+
 
 Wui::GizmoCamera EditorShell::GetGizmoCamera() const{
 		// gizmo 只依赖"投影 + 相机基向量 + 距离/FOV":2D 与 3D 视口各取一台相机。

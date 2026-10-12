@@ -12,6 +12,7 @@ namespace World::Wui
 		Translate,
 		Rotate,
 		Scale,
+		Rect,
 	};
 
 	// D7-1b:相机视图摘要 —— 2D(EditorCamera)与 3D(EditorCamera3D)都能提供,
@@ -38,4 +39,22 @@ namespace World::Wui
 	WLD_API bool ManipulateGizmo(const GizmoCamera& camera, GizmoOperation operation,
 		TransformComponent& transform, const WuiRect& viewport, WuiContext& ctx,
 		bool allowManipulation = true);
+
+	// WUI 2D 矩形变换手柄 (Rect Transform Tool: 四角缩放/四边拉伸/中心锚点)
+	WLD_API bool ManipulateRect2D(const GizmoCamera& camera,
+		TransformComponent& transform, glm::vec2& pivot, glm::vec2 size,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation = true);
+
+	// WUI 2D 碰撞体编辑手柄 (Edit Collider Gizmos)
+	WLD_API bool ManipulateBoxCollider2D(const GizmoCamera& camera,
+		const TransformComponent& transform, glm::vec2& offset, glm::vec2& size,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation = true);
+
+	WLD_API bool ManipulateCircleCollider2D(const GizmoCamera& camera,
+		const TransformComponent& transform, glm::vec2& offset, float& radius,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation = true);
+
+	WLD_API bool ManipulateCapsuleCollider2D(const GizmoCamera& camera,
+		const TransformComponent& transform, glm::vec2& offset, float& radius, float& length, int direction,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation = true);
 }

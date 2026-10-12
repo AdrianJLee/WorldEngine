@@ -49,6 +49,10 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawSpriteInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::CapsuleCollider2DComponent")
 			height = DrawCapsuleCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::BoxCollider2DComponent")
+			height = DrawBoxCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::CircleCollider2DComponent")
+			height = DrawCircleCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::SpriteAnimatorComponent")
 			height = DrawSpriteAnimatorInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::TilemapComponent")
@@ -705,7 +709,59 @@ float PropertiesPanel::DrawCapsuleCollider2DInspector(Wui::WuiContext& ctx, cons
 	}
 	y += 28.0f;
 
+	const bool editingCollider = m_Host.IsEditingCollider();
+	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑碰撞体 (Edit Collider)";
+	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑碰撞体尺寸与偏移 (prop.cap2d.edit)");
+	if (Wui::Button(ctx, Wui::HashId("prop.cap2d.edit"), btnEditCol, editColText, theme))
+	{
+		m_Host.SetEditingCollider(!editingCollider);
+	}
+	y += 28.0f;
+
 	return (y + 10.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawBoxCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	const bool editingCollider = m_Host.IsEditingCollider();
+	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑碰撞体 (Edit Collider)";
+	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑碰撞体尺寸与偏移 (prop.box2d.edit)");
+	if (Wui::Button(ctx, Wui::HashId("prop.box2d.edit"), btnEditCol, editColText, theme))
+	{
+		m_Host.SetEditingCollider(!editingCollider);
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawCircleCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	const bool editingCollider = m_Host.IsEditingCollider();
+	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑碰撞体 (Edit Collider)";
+	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑碰撞体尺寸与偏移 (prop.circle2d.edit)");
+	if (Wui::Button(ctx, Wui::HashId("prop.circle2d.edit"), btnEditCol, editColText, theme))
+	{
+		m_Host.SetEditingCollider(!editingCollider);
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
 }
 
 float PropertiesPanel::DrawSpriteAnimatorInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,

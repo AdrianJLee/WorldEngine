@@ -2046,12 +2046,63 @@ namespace World
 
 	void SceneRenderer::RenderGroundGrid(const Camera& camera, const glm::mat4& cameraTransform)
 	{
-		(void)camera;
 		if (!m_Options.ShowGrid)
 			return;
 
 		const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
 		const glm::vec3 camForward = -glm::normalize(glm::vec3(cameraTransform[2]));
+
+		// 检查是否处于纯 2D 正交正视状态 (正交投影且视线朝向 XY 平面)
+		const bool is2DView = (std::abs(camera.GetProjectionMatrix()[3][3] - 1.0f) < 1e-4f)
+			&& (std::abs(camForward.z) > 0.85f);
+		if (is2DView)
+		{
+			// 纯 2D 正交模式下: 绘制 XY 竖立平面的标准笛卡尔坐标参考网格 (Z = 0)
+			const float viewSpan = std::max(20.0f, std::abs(camPos.z) * 2.0f);
+			const float startX = std::floor((camPos.x - viewSpan) / 10.0f) * 10.0f;
+			const float endX = std::ceil((camPos.x + viewSpan) / 10.0f) * 10.0f;
+			const float startY = std::floor((camPos.y - viewSpan) / 10.0f) * 10.0f;
+			const float endY = std::ceil((camPos.y + viewSpan) / 10.0f) * 10.0f;
+
+			// 10m 主网格
+			const glm::vec4 majorCol { 0.45f, 0.55f, 0.65f, 0.35f };
+			for (float x = startX; x <= endX + 0.01f; x += 10.0f)
+			{
+				if (std::abs(x) < 0.01f) continue;
+				Renderer2D::DrawLineCore(glm::vec3(x, startY, 0.0f), glm::vec3(x, endY, 0.0f), majorCol);
+			}
+			for (float y = startY; y <= endY + 0.01f; y += 10.0f)
+			{
+				if (std::abs(y) < 0.01f) continue;
+				Renderer2D::DrawLineCore(glm::vec3(startX, y, 0.0f), glm::vec3(endX, y, 0.0f), majorCol);
+			}
+
+			// 1m 次网格 (近距离平滑浮现)
+			if (viewSpan < 120.0f)
+			{
+				const float alpha = std::clamp(1.0f - (viewSpan - 40.0f) / 80.0f, 0.0f, 1.0f) * 0.18f;
+				const glm::vec4 minorCol { 0.45f, 0.55f, 0.65f, alpha };
+				const float mStartX = std::floor((camPos.x - viewSpan) / 1.0f) * 1.0f;
+				const float mEndX = std::ceil((camPos.x + viewSpan) / 1.0f) * 1.0f;
+				const float mStartY = std::floor((camPos.y - viewSpan) / 1.0f) * 1.0f;
+				const float mEndY = std::ceil((camPos.y + viewSpan) / 1.0f) * 1.0f;
+				for (float x = mStartX; x <= mEndX + 0.01f; x += 1.0f)
+				{
+					if (std::fmod(std::abs(x), 10.0f) < 0.01f) continue;
+					Renderer2D::DrawLineCore(glm::vec3(x, mStartY, 0.0f), glm::vec3(x, mEndY, 0.0f), minorCol);
+				}
+				for (float y = mStartY; y <= mEndY + 0.01f; y += 1.0f)
+				{
+					if (std::fmod(std::abs(y), 10.0f) < 0.01f) continue;
+					Renderer2D::DrawLineCore(glm::vec3(mStartX, y, 0.0f), glm::vec3(mEndX, y, 0.0f), minorCol);
+				}
+			}
+
+			// X 轴红线 (y=0) 与 Y 轴绿线 (x=0)
+			Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, 0.0f), glm::vec3(endX, 0.0f, 0.0f), { 0.78f, 0.32f, 0.32f, 0.70f });
+			Renderer2D::DrawLineCore(glm::vec3(0.0f, startY, 0.0f), glm::vec3(0.0f, endY, 0.0f), { 0.32f, 0.78f, 0.38f, 0.70f });
+			return;
+		}
 
 		// 1. 动态自适应视场覆盖: 随视距/高度自适应扩展，保证正交与透视拉远时绝不半截截断
 		const float camHeight = std::abs(camPos.y);

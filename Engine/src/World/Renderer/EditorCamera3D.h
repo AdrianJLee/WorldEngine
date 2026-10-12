@@ -62,6 +62,10 @@ namespace World
 		void SetOrthographicSize(float size);
 		float GetOrthographicSize() const { return m_OrthographicSize; }
 
+		// 纯 2D 视口锁定模式 (锁定正交投影与 XY 平面, 禁用 3D 旋转)
+		void Set2DMode(bool enabled);
+		bool Is2DMode() const { return m_Is2DMode; }
+
 		// ---- 查询 ----
 		const glm::vec3& GetTarget() const { return m_Target; }
 		float GetDistance() const { return m_Distance; }
@@ -98,5 +102,6 @@ namespace World
 		ViewportProjection m_Projection = ViewportProjection::Perspective;
 		ViewportViewpoint m_Viewpoint = ViewportViewpoint::Free;
 		float m_OrthographicSize = 10.0f;
+		bool m_Is2DMode = false;
 	};
 }

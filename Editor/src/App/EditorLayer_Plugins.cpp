@@ -656,6 +656,27 @@ void EditorLayer::OnUpdate(Timestep ts){
 		if (m_FlySpeedFeedbackTimer > 0.0f)
 			m_FlySpeedFeedbackTimer -= ts.GetSeconds();
 
+		if (m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Pan && m_EditorCamera3D.Is2DMode())
+		{
+			// 2D 模式下按住右键时, WASD 键平移相机 (A/D = 左右, W/S = 上下)
+			float speed = 12.0f * m_FlySpeedScale;
+			if (Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift))
+				speed *= 2.5f;
+
+			float right = 0.0f;
+			float up = 0.0f;
+			if (Input::IsKeyPressed(KeyCodes::D)) right += 1.0f;
+			if (Input::IsKeyPressed(KeyCodes::A)) right -= 1.0f;
+			if (Input::IsKeyPressed(KeyCodes::W)) up += 1.0f;
+			if (Input::IsKeyPressed(KeyCodes::S)) up -= 1.0f;
+
+			if (right != 0.0f || up != 0.0f)
+			{
+				const float moveDist = speed * ts.GetSeconds();
+				m_EditorCamera3D.Pan(right * moveDist, up * moveDist);
+			}
+		}
+
 		if (m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Orbit)
 		{
 			float speed = 12.0f * m_FlySpeedScale; // 基础飞行速度乘以滚轮速度倍率
@@ -1459,8 +1480,17 @@ void EditorLayer::OnEvent(Event& event){
 					m_Viewport3DDragging = Viewport3DDrag::Pan;
 					return true;
 				}
-				m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键 orbit/fly*/ ? Viewport3DDrag::Orbit
-					: (e.GetMouseButton() == 2 /*中键 pan*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
+				// 纯 2D 锁定模式下: 右键为平移(Pan), 彻底禁止 3D Orbit 旋转
+				if (m_EditorCamera3D.Is2DMode())
+				{
+					m_Viewport3DDragging = (e.GetMouseButton() == 1 || e.GetMouseButton() == 2)
+						? Viewport3DDrag::Pan : Viewport3DDrag::None;
+				}
+				else
+				{
+					m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键 orbit/fly*/ ? Viewport3DDrag::Orbit
+						: (e.GetMouseButton() == 2 /*中键 pan*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
+				}
 				return false;
 			});
 			cameraDispatcher.Dispatch<MouseButtonReleasedEvent>([this](MouseButtonReleasedEvent& e)

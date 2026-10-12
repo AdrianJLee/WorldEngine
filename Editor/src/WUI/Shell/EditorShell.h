@@ -344,6 +344,11 @@ namespace World
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;
 		EditorCamera& GetEditorCamera() override;
 		Wui::GizmoOperation GetGizmoOperation() const override;
+		void SetGizmoOperation(Wui::GizmoOperation op) override;
+		bool Is2DMode() const override;
+		void Set2DMode(bool enabled) override;
+		bool IsEditingCollider() const override;
+		void SetEditingCollider(bool editing) override;
 		const std::vector<Level::DataLayerDefinition>& GetLevelDataLayers() const override;
 		uint32_t GetActiveDataLayers() const override;
 		void SetActiveDataLayers(uint32_t mask) override;

@@ -238,6 +238,8 @@ EditorLayer::EditorLayer(bool projectExplicit, bool launcherMode) : Layer("Edito
 		m_Commands.Register({ Wui::HashId("cmd.gizmo_move"), "Gizmo Move", KeyCodes::W, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Translate); } });
 		m_Commands.Register({ Wui::HashId("cmd.gizmo_rotate"), "Gizmo Rotate", KeyCodes::E, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Rotate); } });
 		m_Commands.Register({ Wui::HashId("cmd.gizmo_scale"), "Gizmo Scale", KeyCodes::R, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Scale); } });
+		m_Commands.Register({ Wui::HashId("cmd.gizmo_rect"), "Gizmo Rect", KeyCodes::T, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Rect); } });
+		m_Commands.Register({ Wui::HashId("cmd.toggle_2d_mode"), "Toggle 2D Mode", KeyCodes::D2, false, true, [this] { Set2DMode(!Is2DMode()); } });
 		m_Commands.Register({ Wui::HashId("cmd.focus"), "Focus", KeyCodes::F, false, false, [this] { FocusOnSelectedEntity(); } });
 		m_Commands.Register({ Wui::HashId("cmd.view_top"), "View Top", KeyCodes::D7, false, true, [this] { SetViewportViewpoint(World::ViewportViewpoint::Top); } });
 		m_Commands.Register({ Wui::HashId("cmd.view_front"), "View Front", KeyCodes::D1, false, true, [this] { SetViewportViewpoint(World::ViewportViewpoint::Front); } });

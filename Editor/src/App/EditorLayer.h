@@ -194,6 +194,10 @@ namespace World
 		void ToggleSimulate();
 		void TogglePause();
 		void SetGizmoOperation(Wui::GizmoOperation operation) { m_CurrentGizmoOperation = operation; }
+		bool Is2DMode() const { return m_EditorCamera3D.Is2DMode(); }
+		void Set2DMode(bool enabled) { m_EditorCamera3D.Set2DMode(enabled); }
+		bool IsEditingCollider() const { return m_IsEditingCollider; }
+		void SetEditingCollider(bool editing) { m_IsEditingCollider = editing; }
 		Wui::GizmoOperation GetGizmoOperation() const { return m_CurrentGizmoOperation; }
 		Entity PickEntityAt(glm::vec2 viewportLocal) { return GetEntityAtMousePosition(viewportLocal); }
 		uint64_t GetIconId(int index) const;
@@ -536,6 +540,7 @@ namespace World
 
 		// Gizmo operation type
 		Wui::GizmoOperation m_CurrentGizmoOperation = Wui::GizmoOperation::None;
+		bool m_IsEditingCollider = false;
 
 
 		Rhi::Handle<Rhi::Texture> m_IconPlay, m_IconStop;
