@@ -129,6 +129,9 @@ namespace World
 		// D3:在材质编辑器里打开指定 .wmat(内容浏览器双击/Window 菜单共用);
 		// 未注册材质面板时为空实现(不影响其它面板)。
 		virtual void OpenMaterialEditor(const std::string& path) {}
+		// 2D 图集资产 (.watlas) 与序列帧动画资产 (.wanim) 打开入口
+		virtual void OpenAtlasEditor(const std::string& logicalPath) { (void)logicalPath; }
+		virtual void OpenAnimationEditor(const std::string& logicalPath) { (void)logicalPath; }
 		// ---- W8:脚本面板(Panels/ScriptsPanel)协作;默认空实现 = 宿主未接线 ----
 		// P4-U13:prefab 资产(内容浏览器双击/右键共用)。
 		// 打开编辑:把 .wprefab 当**文档**打开(顶部横幅标明"正在编辑 Prefab",保存 = 写回资产)。

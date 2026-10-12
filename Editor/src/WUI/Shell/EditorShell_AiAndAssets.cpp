@@ -9,7 +9,25 @@ using namespace EditorShellDetail;
 	// ---- AI 控制通道 ----
 
 bool EditorShell::AiTogglePanel(const std::string& panel){
-		if (panel.empty() || !IsDeclaredPanel(panel))
+		if (panel.empty())
+			return false;
+		if (panel.rfind("atlas:", 0) == 0)
+		{
+			EnsureAtlasPanelFromId(panel);
+			if (!m_Layout.FindFloatMemory(panel, nullptr))
+				m_Layout.FloatMemory.push_back({ panel, Wui::WuiRect { 200.0f, 150.0f, 820.0f, 540.0f } });
+			OpenPanelAttached(panel);
+			return true;
+		}
+		if (panel.rfind("anim:", 0) == 0)
+		{
+			EnsureAnimationPanelFromId(panel);
+			if (!m_Layout.FindFloatMemory(panel, nullptr))
+				m_Layout.FloatMemory.push_back({ panel, Wui::WuiRect { 220.0f, 160.0f, 820.0f, 540.0f } });
+			OpenPanelAttached(panel);
+			return true;
+		}
+		if (!IsDeclaredPanel(panel))
 			return false;
 		// 材质面板是动态实例:先按 id 建出面板对象,再走菜单同一条开关路径。
 		if (panel.rfind("material:", 0) == 0)
@@ -150,7 +168,23 @@ bool EditorShell::AiActivatePanel(const std::string& panel, std::string* message
 			if (message) *message = text;
 			return false;
 		};
-		if (panel.empty() || !IsDeclaredPanel(panel))
+		if (panel.empty())
+			return fail("unknown panel '" + panel + "'");
+		if (panel.rfind("atlas:", 0) == 0)
+		{
+			EnsureAtlasPanelFromId(panel);
+			OpenPanelAttached(panel);
+			if (message) *message = "opened and activated " + panel;
+			return true;
+		}
+		if (panel.rfind("anim:", 0) == 0)
+		{
+			EnsureAnimationPanelFromId(panel);
+			OpenPanelAttached(panel);
+			if (message) *message = "opened and activated " + panel;
+			return true;
+		}
+		if (!IsDeclaredPanel(panel))
 			return fail("unknown panel '" + panel + "'");
 		if (IsIndependentPanel(panel))
 		{
@@ -552,6 +586,86 @@ void EditorShell::EnsureMaterialPanelFromId(const std::string& panelId){
 		if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
 			m_Panels.push_back(panelId);
 	}
+
+void EditorShell::OpenAtlasEditor(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	if (path.empty()) return;
+	const std::string panelId = "atlas:" + path;
+	if (m_PanelRegistry.find(panelId) == m_PanelRegistry.end())
+	{
+		auto panel = std::make_unique<SpriteAtlasEditorPanel>(path);
+		m_PanelRegistry.emplace(panelId, std::move(panel));
+		m_Panels.push_back(panelId);
+		m_Layout.FloatMemory.push_back({ panelId, Wui::WuiRect { 200.0f, 150.0f, 820.0f, 540.0f } });
+	}
+	OpenPanelAttached(panelId);
+}
+
+void EditorShell::EnsureAtlasPanelFromId(const std::string& panelId)
+{
+	if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
+		return;
+	if (panelId.rfind("atlas:", 0) != 0)
+		return;
+	const std::string path = panelId.substr(6);
+	auto panel = std::make_unique<SpriteAtlasEditorPanel>(path);
+	m_PanelRegistry.emplace(panelId, std::move(panel));
+	if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
+		m_Panels.push_back(panelId);
+}
+
+SpriteAtlasEditorPanel* EditorShell::FindAtlasPanel(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	const std::string panelId = "atlas:" + path;
+	auto it = m_PanelRegistry.find(panelId);
+	if (it != m_PanelRegistry.end())
+		return dynamic_cast<SpriteAtlasEditorPanel*>(it->second.get());
+	return nullptr;
+}
+
+void EditorShell::OpenAnimationEditor(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	if (path.empty()) return;
+	const std::string panelId = "anim:" + path;
+	if (m_PanelRegistry.find(panelId) == m_PanelRegistry.end())
+	{
+		auto panel = std::make_unique<SpriteAnimationEditorPanel>(path);
+		m_PanelRegistry.emplace(panelId, std::move(panel));
+		m_Panels.push_back(panelId);
+		m_Layout.FloatMemory.push_back({ panelId, Wui::WuiRect { 220.0f, 160.0f, 820.0f, 540.0f } });
+	}
+	OpenPanelAttached(panelId);
+}
+
+void EditorShell::EnsureAnimationPanelFromId(const std::string& panelId)
+{
+	if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
+		return;
+	if (panelId.rfind("anim:", 0) != 0)
+		return;
+	const std::string path = panelId.substr(5);
+	auto panel = std::make_unique<SpriteAnimationEditorPanel>(path);
+	m_PanelRegistry.emplace(panelId, std::move(panel));
+	if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
+		m_Panels.push_back(panelId);
+}
+
+SpriteAnimationEditorPanel* EditorShell::FindAnimationPanel(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	const std::string panelId = "anim:" + path;
+	auto it = m_PanelRegistry.find(panelId);
+	if (it != m_PanelRegistry.end())
+		return dynamic_cast<SpriteAnimationEditorPanel*>(it->second.get());
+	return nullptr;
+}
 
 
 	// ---- P1b D5:模型预览面板(动态实例,id = "model:<逻辑路径>")----

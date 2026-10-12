@@ -444,6 +444,26 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 			m_Host.OpenPrefabWindow(logical);
 			WLD_CORE_INFO("[prefab] asset window opened: {0}", logical);
 		}
+		else if (path.extension() == ".watlas")
+		{
+			// M3: 2D 图集资产双击 → 打开图集编辑器
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			m_Host.OpenAtlasEditor(logical);
+			WLD_CORE_INFO("[atlas] editor opened: {0}", logical);
+		}
+		else if (path.extension() == ".wanim")
+		{
+			// M3: 2D 序列帧动画资产双击 → 打开动画编辑器
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			m_Host.OpenAnimationEditor(logical);
+			WLD_CORE_INFO("[anim] editor opened: {0}", logical);
+		}
 		else if (path.extension() == ".gltf" || path.extension() == ".glb")
 		{
 			// P1b D5:glTF 双击 → 导入(.wmodel/.wmat/贴图)并**打开模型预览**(不实例化)。

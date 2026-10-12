@@ -24,6 +24,8 @@
 #include "WUI/Panels/AudioMixerPanel.h"
 #include "WUI/Panels/SoundEventEditorPanel.h"
 #include "WUI/Panels/AiAudioStudioPanel.h"
+#include "WUI/Panels/SpriteAtlasEditorPanel.h"
+#include "WUI/Panels/SpriteAnimationEditorPanel.h"
 #include "WUI/Shell/PluginEditorHost.h"
 #include "WUI/Shell/FloatWindowHost.h"
 #include "Project/ProjectLauncher.h"
@@ -129,6 +131,13 @@ namespace World
 		void DockBackIndependentWindow(const std::string& panel) override;
 		// D3:打开材质编辑器(必要时先打开独立窗口)并载入指定材质。
 		void OpenMaterialEditor(const std::string& path) override;
+		// M3:2D 图集编辑器与序列帧动画编辑器面板 (动态实例, id = "atlas:<logicalPath>", "anim:<logicalPath>")
+		void OpenAtlasEditor(const std::string& logicalPath) override;
+		void OpenAnimationEditor(const std::string& logicalPath) override;
+		void EnsureAtlasPanelFromId(const std::string& panelId);
+		void EnsureAnimationPanelFromId(const std::string& panelId);
+		SpriteAtlasEditorPanel* FindAtlasPanel(const std::string& logicalPath);
+		SpriteAnimationEditorPanel* FindAnimationPanel(const std::string& logicalPath);
 		// 动态材质面板(每个材质一个 "material:<path>" 面板):从布局存档恢复时按 id 建实例。
 		void EnsureMaterialPanelFromId(const std::string& panelId);
 		// P1b D5:动态模型预览面板("model:<逻辑路径>")从布局存档恢复时按 id 建实例。

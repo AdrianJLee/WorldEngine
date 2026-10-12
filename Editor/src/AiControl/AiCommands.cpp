@@ -9,6 +9,10 @@
 #include "World/Renderer/Renderer3D.h"
 #include "World/Profiling/Telemetry.h"
 #include "World/Renderer/MaterialLibrary.h"
+#include "World/Renderer/TextureAtlas.h"
+#include "World/Renderer/SpriteAnimation.h"
+#include "WUI/Panels/SpriteAtlasEditorPanel.h"
+#include "WUI/Panels/SpriteAnimationEditorPanel.h"
 #include "World/Scene/Components.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/Runtime/ComponentPropertyModel.h"
@@ -2504,6 +2508,236 @@ namespace World
 			return true;
 		}
 		// ---- 资产 / 材质 ----
+		auto resolveAssetPath = [](const std::string& p) -> std::filesystem::path
+		{
+			std::filesystem::path r(p);
+			if (std::filesystem::exists(r)) return r;
+			std::filesystem::path tryProject = World::Paths::ProjectDir() / r;
+			if (std::filesystem::exists(tryProject)) return tryProject;
+			std::filesystem::path tryAsset = World::Paths::AssetRoot() / r;
+			if (std::filesystem::exists(tryAsset)) return tryAsset;
+			if (p.rfind("assets/", 0) == 0 || p.rfind("assets\\", 0) == 0)
+			{
+				std::filesystem::path stripped = World::Paths::AssetRoot() / p.substr(7);
+				if (std::filesystem::exists(stripped)) return stripped;
+			}
+			return r;
+		};
+		if (cmd == "asset.open_atlas")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			m_Shell.OpenAtlasEditor(path);
+			result = "opened atlas editor for " + path;
+			return true;
+		}
+		if (cmd == "asset.atlas_info")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			std::filesystem::path resolved = resolveAssetPath(path);
+			auto atlas = World::TextureAtlas::LoadFromFile(resolved.string());
+			if (!atlas)
+			{
+				error = "failed to load atlas: " + path;
+				return false;
+			}
+			std::ostringstream json;
+			json << "{"
+				 << "\"texturePath\":\"" << JsonEscape(atlas->GetTexturePath()) << "\","
+				 << "\"width\":" << atlas->GetWidth() << ","
+				 << "\"height\":" << atlas->GetHeight() << ","
+				 << "\"count\":" << atlas->GetSubTextureCount() << ","
+				 << "\"sprites\":[";
+			const auto& sprites = atlas->GetAllSubTextures();
+			for (size_t i = 0; i < sprites.size(); ++i)
+			{
+				if (i > 0) json << ",";
+				const auto& s = sprites[i];
+				json << "{"
+					 << "\"name\":\"" << JsonEscape(s.Name) << "\","
+					 << "\"rect\":[" << s.PixelRect.x << "," << s.PixelRect.y << "," << s.PixelRect.z << "," << s.PixelRect.w << "],"
+					 << "\"pivot\":[" << s.Pivot.x << "," << s.Pivot.y << "],"
+					 << "\"border\":[" << s.Border.x << "," << s.Border.y << "," << s.Border.z << "," << s.Border.w << "]"
+					 << "}";
+			}
+			json << "]}";
+			result = json.str();
+			return true;
+		}
+		if (cmd == "asset.atlas_add_sprite")
+		{
+			const std::string path = arg("path");
+			const std::string name = arg("name");
+			if (path.empty() || name.empty())
+			{
+				error = "missing path or name";
+				return false;
+			}
+			float x = args.count("x") ? std::strtof(arg("x").c_str(), nullptr) : 0.0f;
+			float y = args.count("y") ? std::strtof(arg("y").c_str(), nullptr) : 0.0f;
+			float w = args.count("w") ? std::strtof(arg("w").c_str(), nullptr) : 32.0f;
+			float h = args.count("h") ? std::strtof(arg("h").c_str(), nullptr) : 32.0f;
+			float px = args.count("pivot_x") ? std::strtof(arg("pivot_x").c_str(), nullptr) : 0.5f;
+			float py = args.count("pivot_y") ? std::strtof(arg("pivot_y").c_str(), nullptr) : 0.5f;
+			float bl = args.count("border_l") ? std::strtof(arg("border_l").c_str(), nullptr) : 0.0f;
+			float br = args.count("border_r") ? std::strtof(arg("border_r").c_str(), nullptr) : 0.0f;
+			float bt = args.count("border_t") ? std::strtof(arg("border_t").c_str(), nullptr) : 0.0f;
+			float bb = args.count("border_b") ? std::strtof(arg("border_b").c_str(), nullptr) : 0.0f;
+
+			if (auto* panel = m_Shell.FindAtlasPanel(path))
+			{
+				panel->AddSprite(name, { x, y, w, h }, { px, py }, { bl, br, bt, bb });
+				panel->Save();
+			}
+			else
+			{
+				std::filesystem::path resolved = resolveAssetPath(path);
+				auto atlas = World::TextureAtlas::LoadFromFile(resolved.string());
+				if (!atlas)
+				{
+					error = "failed to load atlas: " + path;
+					return false;
+				}
+				World::SubTexture2D sub(name, { x, y, w, h }, atlas->GetWidth(), atlas->GetHeight(), { px, py }, { bl, br, bt, bb });
+				atlas->AddSubTexture(sub);
+				if (!atlas->SaveToFile(resolved.string()))
+				{
+					error = "failed to save atlas: " + resolved.string();
+					return false;
+				}
+				World::TextureAtlas::ClearCache();
+			}
+			result = "added sprite '" + name + "' to " + path;
+			return true;
+		}
+		if (cmd == "asset.open_anim")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			m_Shell.OpenAnimationEditor(path);
+			result = "opened animation editor for " + path;
+			return true;
+		}
+		if (cmd == "asset.anim_info")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			std::filesystem::path resolved = resolveAssetPath(path);
+			auto anim = World::SpriteAnimation::LoadFromFile(resolved.string());
+			if (!anim)
+			{
+				error = "failed to load animation: " + path;
+				return false;
+			}
+			std::ostringstream json;
+			json << "{"
+				 << "\"name\":\"" << JsonEscape(anim->GetName()) << "\","
+				 << "\"atlasPath\":\"" << JsonEscape(anim->GetAtlasPath()) << "\","
+				 << "\"fps\":" << anim->GetFrameRate() << ","
+				 << "\"loopMode\":" << static_cast<int>(anim->GetLoopMode()) << ","
+				 << "\"duration\":" << anim->GetTotalDuration() << ","
+				 << "\"frameCount\":" << anim->GetFrameCount() << ","
+				 << "\"frames\":[";
+			const auto& frames = anim->GetAllFrames();
+			for (size_t i = 0; i < frames.size(); ++i)
+			{
+				if (i > 0) json << ",";
+				const auto& f = frames[i];
+				json << "{"
+					 << "\"subtexture\":\"" << JsonEscape(f.NameString) << "\","
+					 << "\"duration\":" << f.Duration << ","
+					 << "\"event\":\"" << JsonEscape(f.EventTag) << "\""
+					 << "}";
+			}
+			json << "]}";
+			result = json.str();
+			return true;
+		}
+		if (cmd == "asset.anim_add_frame")
+		{
+			const std::string path = arg("path");
+			const std::string subtexture = arg("subtexture");
+			if (path.empty() || subtexture.empty())
+			{
+				error = "missing path or subtexture";
+				return false;
+			}
+			float duration = args.count("duration") ? std::strtof(arg("duration").c_str(), nullptr) : 0.0833f;
+			std::string eventTag = args.count("event") ? arg("event") : "";
+
+			if (auto* panel = m_Shell.FindAnimationPanel(path))
+			{
+				panel->AddFrame(subtexture, duration, eventTag);
+				panel->Save();
+			}
+			else
+			{
+				std::filesystem::path resolved = resolveAssetPath(path);
+				auto anim = World::SpriteAnimation::LoadFromFile(resolved.string());
+				if (!anim)
+				{
+					error = "failed to load animation: " + path;
+					return false;
+				}
+				anim->AddFrame(World::SpriteAnimationFrame(subtexture, duration, eventTag));
+				if (!anim->SaveToFile(resolved.string()))
+				{
+					error = "failed to save animation: " + resolved.string();
+					return false;
+				}
+				World::SpriteAnimation::ClearCache();
+			}
+			result = "added frame '" + subtexture + "' to " + path;
+			return true;
+		}
+		if (cmd == "asset.anim_play")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			m_Shell.OpenAnimationEditor(path);
+			if (auto* panel = m_Shell.FindAnimationPanel(path))
+			{
+				panel->Play();
+			}
+			result = "animation playing: " + path;
+			return true;
+		}
+		if (cmd == "asset.anim_stop")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			if (auto* panel = m_Shell.FindAnimationPanel(path))
+			{
+				panel->Stop();
+			}
+			result = "animation stopped: " + path;
+			return true;
+		}
 		if (cmd == "asset.open_material")
 		{
 			const std::string path = arg("path");
@@ -2526,12 +2760,9 @@ namespace World
 				error = "missing path";
 				return false;
 			}
-			std::filesystem::path resolved(path);
-			if (!resolved.is_absolute())
-				resolved = World::Paths::AssetRoot() / resolved;
+			std::filesystem::path resolved = resolveAssetPath(path);
 			std::string message;
 			std::string logicalModel;
-			// D10:可选 dest = 目标逻辑目录(相对内容根,如 "models/props");空 = 源所在目录。
 			const std::string destination = arg("dest");
 			if (!ImportModelFile(resolved.string(), &message, &logicalModel, destination))
 			{
@@ -2853,3 +3084,8 @@ namespace World
 		return false;
 	}
 }
+
+
+
+
+
