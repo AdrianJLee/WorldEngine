@@ -1,4 +1,6 @@
 #include "World/Audio/SoundEvent.h"
+#include "World/Renderer/TextureAtlas.h"
+#include "World/Renderer/SpriteAnimation.h"
 #include <fstream>
 #include "ContentBrowserPanel_Internal.h"
 
@@ -180,6 +182,55 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				return true;
 			});
 
+		add("sprite_atlas", "2D Sprite Atlas (图集)", ".watlas", 38, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				TextureAtlas atlas("assets/textures/Icon.wtex", 256, 256);
+				atlas.AddSubTexture(SubTexture2D("sprite_0", { 0.0f, 0.0f, 64.0f, 64.0f }, 256, 256, { 0.5f, 0.5f }));
+				atlas.AddSubTexture(SubTexture2D("sprite_1", { 64.0f, 0.0f, 64.0f, 64.0f }, 256, 256, { 0.5f, 0.5f }));
+				std::string yaml = atlas.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_atlas", ".watlas");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				out.close();
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-sprite-atlas");
+				std::error_code ec;
+				const std::filesystem::path rel = std::filesystem::relative(target, m_Model.Root, ec);
+				m_Host.OpenAtlasEditor(ec ? target.generic_string() : rel.generic_string());
+				return true;
+			});
+
+		add("sprite_animation", "2D Sprite Animation (序列帧动画)", ".wanim", 40, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				SpriteAnimation anim("new_animation", 12.0f, AnimationLoopMode::Loop);
+				anim.SetAtlasPath("assets/textures/characters/hero_atlas.watlas");
+				anim.AddFrame(SpriteAnimationFrame("hero_idle", 0.0833f));
+				anim.AddFrame(SpriteAnimationFrame("hero_walk", 0.0833f));
+				std::string yaml = anim.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_animation", ".wanim");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				out.close();
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-sprite-animation");
+				std::error_code ec;
+				const std::filesystem::path rel = std::filesystem::relative(target, m_Model.Root, ec);
+				m_Host.OpenAnimationEditor(ec ? target.generic_string() : rel.generic_string());
+				return true;
+			});
+
 	}
 
 
@@ -189,7 +240,7 @@ void ContentBrowserPanel::UnregisterDefaultAssetTypes(){
 		m_AssetTypesRegistered = false;
 		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
 		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
-		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "audio_mixer", "voice_profile" })
+		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "audio_mixer", "voice_profile", "sprite_atlas", "sprite_animation" })
 			registry.Unregister(id);
 	}
 

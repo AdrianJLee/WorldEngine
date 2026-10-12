@@ -1,4 +1,6 @@
 #include "ContentBrowserPanel_Internal.h"
+#include "World/Renderer/TextureAtlas.h"
+#include "World/Renderer/SpriteAnimation.h"
 
 namespace World
 {
@@ -1531,6 +1533,25 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 			}
 			else if (textureAssetFile)
 			{
+				items.push_back({ Wui::Tr("panel.content_browser.item.create_atlas_from_tex", "基于该贴图创建 2D 图集 (Create Sprite Atlas)"),
+					[this]
+					{
+						const std::filesystem::path contentRoot = m_Model.Root;
+						std::error_code ec;
+						const std::filesystem::path rel = std::filesystem::relative(m_Model.ContextMenuPath, contentRoot, ec);
+						const std::string texLogical = ec ? m_Model.ContextMenuPath.generic_string() : rel.generic_string();
+						std::filesystem::path dir = m_Model.ContextMenuPath.parent_path();
+						std::string baseName = m_Model.ContextMenuPath.stem().string() + "_atlas";
+						std::filesystem::path target = MakeUniqueAssetPath(dir, baseName, ".watlas");
+						TextureAtlas atlas(texLogical, 256, 256);
+						atlas.AddSubTexture(SubTexture2D("slice_0", { 0.0f, 0.0f, 64.0f, 64.0f }, 256, 256, { 0.5f, 0.5f }));
+						atlas.AddSubTexture(SubTexture2D("slice_1", { 64.0f, 0.0f, 64.0f, 64.0f }, 256, 256, { 0.5f, 0.5f }));
+						atlas.SaveToFile(target.string());
+						NotifyAssetWritten(target);
+						SelectCreated(target, "new-sprite-atlas");
+						const std::filesystem::path relTarget = std::filesystem::relative(target, contentRoot, ec);
+						m_Host.OpenAtlasEditor(ec ? target.generic_string() : relTarget.generic_string());
+					} });
 				items.push_back({ Wui::Tr("panel.content_browser.item.texture_settings", "Texture Settings…"),
 					[this] { OpenTextureSettingsFor(m_Model.ContextMenuPath, false); } });
 				items.push_back({ Wui::Tr("panel.content_browser.item.texture_reimport", "Reimport"),

@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "WUI/Panels/SpriteAtlasEditorPanel.h"
+#include "World/Renderer/SpriteAnimation.h"
 #include "World/Core/Log.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiWidgets.h"
@@ -16,8 +17,6 @@
 
 namespace World
 {
-
-
 	SpriteAtlasEditorPanel::SpriteAtlasEditorPanel(std::string logicalPath)
 		: m_LogicalPath(std::move(logicalPath))
 	{
@@ -86,6 +85,9 @@ namespace World
 			return false;
 		}
 
+		m_EditTexturePath = m_Atlas->GetTexturePath();
+		m_EditAtlasW = m_Atlas->GetWidth();
+		m_EditAtlasH = m_Atlas->GetHeight();
 		m_SelectedIndex = m_Atlas->GetSubTextureCount() > 0 ? 0 : -1;
 		SyncFromSelected();
 		m_Dirty = false;
@@ -103,6 +105,10 @@ namespace World
 			if (message) *message = m_StatusFeedback;
 			return false;
 		}
+
+		m_Atlas->SetTexturePath(m_EditTexturePath);
+		m_Atlas->SetDimensions(static_cast<uint32_t>(std::max<int64_t>(1, m_EditAtlasW)),
+			static_cast<uint32_t>(std::max<int64_t>(1, m_EditAtlasH)));
 
 		const auto phys = ResolvePhysicalPath();
 		if (!m_Atlas->SaveToFile(phys.string()))
@@ -177,7 +183,7 @@ namespace World
 		const glm::vec2& pivot, const glm::vec4& border)
 	{
 		if (!m_Atlas)
-			m_Atlas = std::make_shared<TextureAtlas>("", 256, 256);
+			m_Atlas = std::make_shared<TextureAtlas>(m_EditTexturePath, static_cast<uint32_t>(m_EditAtlasW), static_cast<uint32_t>(m_EditAtlasH));
 
 		CommitToSelected();
 		const uint32_t atlasW = m_Atlas->GetWidth();
@@ -217,6 +223,36 @@ namespace World
 		return true;
 	}
 
+	void SpriteAtlasEditorPanel::AutoGridSlice(float cellW, float cellH)
+	{
+		if (cellW <= 0.0f || cellH <= 0.0f) return;
+		if (!m_Atlas)
+			m_Atlas = std::make_shared<TextureAtlas>(m_EditTexturePath, static_cast<uint32_t>(m_EditAtlasW), static_cast<uint32_t>(m_EditAtlasH));
+
+		const uint32_t atlasW = m_Atlas->GetWidth();
+		const uint32_t atlasH = m_Atlas->GetHeight();
+		const int cols = static_cast<int>(atlasW / cellW);
+		const int rows = static_cast<int>(atlasH / cellH);
+		if (cols <= 0 || rows <= 0) return;
+
+		auto rebuilt = std::make_shared<TextureAtlas>(m_Atlas->GetTexturePath(), atlasW, atlasH);
+		int count = 0;
+		for (int r = 0; r < rows; ++r)
+		{
+			for (int c = 0; c < cols; ++c)
+			{
+				std::string name = "slice_" + std::to_string(count++);
+				glm::vec4 rect { static_cast<float>(c) * cellW, static_cast<float>(r) * cellH, cellW, cellH };
+				rebuilt->AddSubTexture(SubTexture2D(name, rect, atlasW, atlasH, { 0.5f, 0.5f }));
+			}
+		}
+		m_Atlas = std::move(rebuilt);
+		m_SelectedIndex = m_Atlas->GetSubTextureCount() > 0 ? 0 : -1;
+		SyncFromSelected();
+		m_Dirty = true;
+		m_StatusFeedback = "自动网格切分完成: 共切分出 " + std::to_string(count) + " 个子精灵";
+	}
+
 	void SpriteAtlasEditorPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
@@ -229,10 +265,10 @@ namespace World
 		// 1. Top Bar: Header, logical path, Save button
 		const Wui::WuiRect topBar { rect.X + 8.0f, curY, rect.W - 16.0f, 32.0f };
 		Wui::BarSurface(ctx, topBar, theme.PanelHeader, theme.Border);
-		Wui::Label(ctx, { topBar.X + 10.0f, topBar.Y + 7.0f }, "图集编辑器 (Sprite Atlas Editor)", theme.Accent, 13.5f);
+		Wui::Label(ctx, { topBar.X + 10.0f, topBar.Y + 7.0f }, "2D 图集编辑器 (Sprite Atlas Workstation)", theme.Accent, 13.5f);
 
 		std::string pathText = "资产: " + m_LogicalPath;
-		Wui::Label(ctx, { topBar.X + 260.0f, topBar.Y + 8.0f }, pathText, theme.TextMuted, 11.0f);
+		Wui::Label(ctx, { topBar.X + 280.0f, topBar.Y + 8.0f }, pathText, theme.TextMuted, 11.0f);
 
 		const Wui::WuiRect btnSave { topBar.X + topBar.W - 110.0f, topBar.Y + 4.0f, 102.0f, 24.0f };
 		Wui::Tooltip(ctx, btnSave, "保存图集配置到 .watlas 文件并刷新缓存 (atlas.btn.save)");
@@ -243,58 +279,139 @@ namespace World
 
 		curY += 38.0f;
 		const float contentH = rect.H - (curY - rect.Y) - 8.0f;
-		const float leftW = std::min(300.0f, rect.W * 0.35f);
+		const float leftW = std::min(320.0f, rect.W * 0.36f);
 		const float rightX = rect.X + 8.0f + leftW + 8.0f;
 		const float rightW = rect.W - 16.0f - leftW - 8.0f;
 
-		// 2. Left Column: Summary, Toolbar, Slices List
+		// 2. Left Column: Texture Configuration, Auto Grid Slicing, Slices List
 		const Wui::WuiRect leftCol { rect.X + 8.0f, curY, leftW, contentH };
 		Wui::PanelBackground(ctx, leftCol, theme.ContentBg, 4.0f);
 
-		Wui::Label(ctx, { leftCol.X + 10.0f, leftCol.Y + 8.0f }, "图集概览", theme.Text, 12.5f);
-		std::string texPath = m_Atlas ? m_Atlas->GetTexturePath() : "无";
-		Wui::Label(ctx, { leftCol.X + 10.0f, leftCol.Y + 28.0f }, "源纹理: " + texPath, theme.TextMuted, 11.0f);
+		float lY = leftCol.Y + 8.0f;
+		Wui::Label(ctx, { leftCol.X + 10.0f, lY }, "源纹理设置 (Texture Configuration)", theme.Text, 12.0f);
+		lY += 22.0f;
 
-		uint32_t w = m_Atlas ? m_Atlas->GetWidth() : 0;
-		uint32_t h = m_Atlas ? m_Atlas->GetHeight() : 0;
-		size_t count = m_Atlas ? m_Atlas->GetSubTextureCount() : 0;
-		std::string dimText = "尺寸: " + std::to_string(w) + "x" + std::to_string(h) + " · 切片数: " + std::to_string(count);
-		Wui::Label(ctx, { leftCol.X + 10.0f, leftCol.Y + 46.0f }, dimText, theme.TextMuted, 11.0f);
-
-		// Toolbar: Add / Delete
-		float btnY = leftCol.Y + 68.0f;
-		const float btnHalfW = (leftCol.W - 24.0f) * 0.5f;
-		const Wui::WuiRect btnAdd { leftCol.X + 8.0f, btnY, btnHalfW, 24.0f };
-		Wui::Tooltip(ctx, btnAdd, "添加新的子精灵切片 (atlas.btn.add)");
-		if (Wui::Button(ctx, Wui::HashId("atlas.btn.add"), btnAdd, "＋ 添加子精灵", theme))
+		// Texture path input
+		Wui::Label(ctx, { leftCol.X + 10.0f, lY + 3.0f }, "贴图路径:", theme.TextMuted, 11.0f);
+		const Wui::WuiRect texRect { leftCol.X + 70.0f, lY, leftCol.W - 78.0f, 22.0f };
+		std::string oldTex = m_EditTexturePath;
+		if (Wui::TextField(ctx, Wui::HashId("atlas.field.tex_path"), texRect, m_EditTexturePath, theme) || m_EditTexturePath != oldTex)
 		{
-			std::string newName = "sprite_" + std::to_string(count);
+			if (m_Atlas) m_Atlas->SetTexturePath(m_EditTexturePath);
+			m_Dirty = true;
+			EnsureTextureLoaded();
+		}
+		lY += 26.0f;
+
+		// Dimensions input
+		Wui::Label(ctx, { leftCol.X + 10.0f, lY + 3.0f }, "大图尺寸:", theme.TextMuted, 11.0f);
+		const float dimW = (leftCol.W - 100.0f) * 0.5f;
+		const Wui::WuiRect dimRectW { leftCol.X + 70.0f, lY, dimW, 22.0f };
+		const Wui::WuiRect dimRectH { leftCol.X + 74.0f + dimW, lY, dimW, 22.0f };
+		int64_t oldW = m_EditAtlasW;
+		int64_t oldH = m_EditAtlasH;
+		if (Wui::DragInt(ctx, Wui::HashId("atlas.field.tex_w"), dimRectW, m_EditAtlasW, 1, 8192, theme) ||
+			Wui::DragInt(ctx, Wui::HashId("atlas.field.tex_h"), dimRectH, m_EditAtlasH, 1, 8192, theme))
+		{
+			if (m_EditAtlasW != oldW || m_EditAtlasH != oldH)
+			{
+				if (m_Atlas) m_Atlas->SetDimensions(static_cast<uint32_t>(m_EditAtlasW), static_cast<uint32_t>(m_EditAtlasH));
+				m_Dirty = true;
+			}
+		}
+		lY += 30.0f;
+
+		// Auto Grid Slice Box
+		const Wui::WuiRect gridBox { leftCol.X + 6.0f, lY, leftCol.W - 12.0f, 56.0f };
+		Wui::PanelBackground(ctx, gridBox, theme.PanelBg, 3.0f);
+		Wui::Label(ctx, { gridBox.X + 8.0f, gridBox.Y + 5.0f }, "一键自动网格切图 (Auto Grid Slice)", theme.Accent, 11.0f);
+
+		float gX = gridBox.X + 8.0f;
+		Wui::Label(ctx, { gX, gridBox.Y + 28.0f }, "格宽:", theme.TextMuted, 10.5f);
+		gX += 30.0f;
+		const Wui::WuiRect gwRect { gX, gridBox.Y + 26.0f, 44.0f, 20.0f };
+		Wui::DragFloat(ctx, Wui::HashId("atlas.field.grid_w"), gwRect, m_GridCellW, 1.0f, 4.0f, 512.0f, theme);
+		gX += 48.0f;
+
+		Wui::Label(ctx, { gX, gridBox.Y + 28.0f }, "高:", theme.TextMuted, 10.5f);
+		gX += 20.0f;
+		const Wui::WuiRect ghRect { gX, gridBox.Y + 26.0f, 44.0f, 20.0f };
+		Wui::DragFloat(ctx, Wui::HashId("atlas.field.grid_h"), ghRect, m_GridCellH, 1.0f, 4.0f, 512.0f, theme);
+		gX += 48.0f;
+
+		const Wui::WuiRect btnAutoGrid { gX, gridBox.Y + 25.0f, gridBox.W - (gX - gridBox.X) - 6.0f, 22.0f };
+		Wui::Tooltip(ctx, btnAutoGrid, "按设定的行列像素宽高一键自动切分整张大图 (atlas.btn.auto_grid)");
+		if (Wui::Button(ctx, Wui::HashId("atlas.btn.auto_grid"), btnAutoGrid, "⚡ 自动切分", theme))
+		{
+			AutoGridSlice(m_GridCellW, m_GridCellH);
+		}
+		lY += 62.0f;
+
+		// Actions: Add Slice / Delete Slice / Generate Animation (.wanim)
+		const float btnHalfW = (leftCol.W - 20.0f) * 0.5f;
+		const Wui::WuiRect btnAdd { leftCol.X + 6.0f, lY, btnHalfW, 22.0f };
+		Wui::Tooltip(ctx, btnAdd, "添加新的子精灵切片 (atlas.btn.add)");
+		if (Wui::Button(ctx, Wui::HashId("atlas.btn.add"), btnAdd, "＋ 添加切片", theme))
+		{
+			size_t curCount = m_Atlas ? m_Atlas->GetSubTextureCount() : 0;
+			std::string newName = "sprite_" + std::to_string(curCount);
 			AddSprite(newName, { 0.0f, 0.0f, 32.0f, 32.0f });
 		}
 
-		const Wui::WuiRect btnDel { leftCol.X + 16.0f + btnHalfW, btnY, btnHalfW, 24.0f };
+		const Wui::WuiRect btnDel { leftCol.X + 10.0f + btnHalfW, lY, btnHalfW, 22.0f };
 		Wui::Tooltip(ctx, btnDel, "删除当前选中的子精灵切片 (atlas.btn.del)");
-		if (Wui::Button(ctx, Wui::HashId("atlas.btn.del"), btnDel, "✖ 删除", theme))
+		if (Wui::Button(ctx, Wui::HashId("atlas.btn.del"), btnDel, "✖ 删除切片", theme))
 		{
 			if (m_SelectedIndex >= 0)
 				DeleteSprite(static_cast<size_t>(m_SelectedIndex));
 		}
+		lY += 26.0f;
+
+		// One-click generate animation (.wanim) from all slices
+		const Wui::WuiRect btnMakeAnim { leftCol.X + 6.0f, lY, leftCol.W - 12.0f, 22.0f };
+		Wui::Tooltip(ctx, btnMakeAnim, "基于当前图集切片一键生成序列帧动画 (.wanim) 并打开编辑器 (atlas.btn.make_anim)");
+		if (Wui::Button(ctx, Wui::HashId("atlas.btn.make_anim"), btnMakeAnim, "🎬 基于当前切片生成动画 (.wanim)", theme))
+		{
+			const auto phys = ResolvePhysicalPath();
+			std::filesystem::path dir = phys.parent_path();
+			std::string baseName = phys.stem().string() + "_anim";
+			std::filesystem::path target = dir / (baseName + ".wanim");
+			for (int idx = 1; std::filesystem::exists(target); ++idx)
+				target = dir / (baseName + "_" + std::to_string(idx) + ".wanim");
+
+			SpriteAnimation anim(phys.stem().string(), 12.0f, AnimationLoopMode::Loop);
+			anim.SetAtlasPath(m_LogicalPath);
+			if (m_Atlas && m_Atlas->GetSubTextureCount() > 0)
+			{
+				for (const auto& sub : m_Atlas->GetAllSubTextures())
+					anim.AddFrame(SpriteAnimationFrame(sub.Name, 0.0833f));
+			}
+			else
+			{
+				anim.AddFrame(SpriteAnimationFrame("frame_0", 0.0833f));
+			}
+			anim.SaveToFile(target.string());
+			m_StatusFeedback = "已生成序列帧动画: " + target.filename().string();
+			std::error_code ec;
+			const std::filesystem::path rel = std::filesystem::relative(target, Paths::ProjectDir(), ec);
+			host.OpenAnimationEditor(ec ? target.generic_string() : rel.generic_string());
+		}
+		lY += 28.0f;
 
 		// Slices List with ScrollArea
-		float listY = btnY + 30.0f;
-		float listH = leftCol.H - (listY - leftCol.Y) - 8.0f;
-		const Wui::WuiRect listRect { leftCol.X + 6.0f, listY, leftCol.W - 12.0f, listH };
+		float listH = leftCol.H - (lY - leftCol.Y) - 6.0f;
+		const Wui::WuiRect listRect { leftCol.X + 6.0f, lY, leftCol.W - 12.0f, listH };
 		Wui::PanelBackground(ctx, listRect, theme.PanelBg, 2.0f);
 
 		if (m_Atlas)
 		{
 			const auto& allSubs = m_Atlas->GetAllSubTextures();
-			const float totalH = static_cast<float>(allSubs.size()) * 28.0f + 8.0f;
+			const float totalH = static_cast<float>(allSubs.size()) * 26.0f + 6.0f;
 			Wui::BeginScrollArea(ctx, listRect, totalH, m_ListScrollY, theme, Wui::HashId("atlas.scroll.list"));
-			float itemY = listRect.Y - m_ListScrollY + 4.0f;
+			float itemY = listRect.Y - m_ListScrollY + 3.0f;
 			for (size_t i = 0; i < allSubs.size(); ++i)
 			{
-				const Wui::WuiRect itemRect { listRect.X + 4.0f, itemY, listRect.W - 8.0f, 24.0f };
+				const Wui::WuiRect itemRect { listRect.X + 4.0f, itemY, listRect.W - 8.0f, 22.0f };
 				bool isSelected = (static_cast<int>(i) == m_SelectedIndex);
 
 				std::string itemLabel = (isSelected ? "● " : "  ") + allSubs[i].Name + " ["
@@ -308,7 +425,7 @@ namespace World
 					m_SelectedIndex = static_cast<int>(i);
 					SyncFromSelected();
 				}
-				itemY += 28.0f;
+				itemY += 26.0f;
 			}
 			Wui::EndScrollArea(ctx);
 		}
@@ -469,7 +586,7 @@ namespace World
 		}
 		else
 		{
-			Wui::Label(ctx, { rightCol.X + 24.0f, inspY + 20.0f }, "请在左侧列表中选择一个切片，或点击 [＋ 添加子精灵]", theme.TextMuted, 12.0f);
+			Wui::Label(ctx, { rightCol.X + 24.0f, inspY + 20.0f }, "请在左侧列表中选择一个切片，或点击 [＋ 添加切片]", theme.TextMuted, 12.0f);
 			inspY += 60.0f;
 		}
 

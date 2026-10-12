@@ -2523,6 +2523,61 @@ namespace World
 			}
 			return r;
 		};
+		if (cmd == "asset.create_atlas")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			const std::string texture = args.count("texture") ? arg("texture") : "assets/textures/Icon.wtex";
+			const uint32_t w = args.count("w") ? static_cast<uint32_t>(std::strtoul(arg("w").c_str(), nullptr, 10)) : 256;
+			const uint32_t h = args.count("h") ? static_cast<uint32_t>(std::strtoul(arg("h").c_str(), nullptr, 10)) : 256;
+			const float gw = args.count("grid_w") ? std::strtof(arg("grid_w").c_str(), nullptr) : 0.0f;
+			const float gh = args.count("grid_h") ? std::strtof(arg("grid_h").c_str(), nullptr) : 0.0f;
+
+			std::filesystem::path outPath(path);
+			if (!outPath.is_absolute())
+			{
+				std::filesystem::path tryAsset = World::Paths::AssetRoot() / outPath;
+				if (path.rfind("assets/", 0) == 0 || path.rfind("assets\\", 0) == 0)
+					outPath = World::Paths::AssetRoot() / path.substr(7);
+				else
+					outPath = tryAsset;
+			}
+			std::filesystem::create_directories(outPath.parent_path());
+
+			World::TextureAtlas atlas(texture, w, h);
+			if (gw > 0.0f && gh > 0.0f)
+			{
+				int cols = static_cast<int>(w / gw);
+				int rows = static_cast<int>(h / gh);
+				int count = 0;
+				for (int r = 0; r < rows; ++r)
+				{
+					for (int c = 0; c < cols; ++c)
+					{
+						std::string sname = "slice_" + std::to_string(count++);
+						atlas.AddSubTexture(World::SubTexture2D(sname, { c * gw, r * gh, gw, gh }, w, h, { 0.5f, 0.5f }));
+					}
+				}
+			}
+			else
+			{
+				atlas.AddSubTexture(World::SubTexture2D("slice_0", { 0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h) }, w, h, { 0.5f, 0.5f }));
+			}
+
+			if (!atlas.SaveToFile(outPath.string()))
+			{
+				error = "failed to save atlas to " + outPath.string();
+				return false;
+			}
+			World::TextureAtlas::ClearCache();
+			m_Shell.OpenAtlasEditor(path);
+			result = "created atlas at " + outPath.string();
+			return true;
+		}
 		if (cmd == "asset.open_atlas")
 		{
 			const std::string path = arg("path");
@@ -2617,6 +2672,60 @@ namespace World
 				World::TextureAtlas::ClearCache();
 			}
 			result = "added sprite '" + name + "' to " + path;
+			return true;
+		}
+		if (cmd == "asset.create_anim")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			std::filesystem::path outPath(path);
+			if (!outPath.is_absolute())
+			{
+				std::filesystem::path tryAsset = World::Paths::AssetRoot() / outPath;
+				if (path.rfind("assets/", 0) == 0 || path.rfind("assets\\", 0) == 0)
+					outPath = World::Paths::AssetRoot() / path.substr(7);
+				else
+					outPath = tryAsset;
+			}
+			std::filesystem::create_directories(outPath.parent_path());
+
+			const std::string name = args.count("name") ? arg("name") : outPath.stem().string();
+			const std::string atlasPath = args.count("atlas") ? arg("atlas") : "";
+			const float fps = args.count("fps") ? std::strtof(arg("fps").c_str(), nullptr) : 12.0f;
+			const int loop = args.count("loop") ? std::atoi(arg("loop").c_str()) : 0;
+			const bool autoFill = args.count("auto_fill") && (arg("auto_fill") == "true" || arg("auto_fill") == "1");
+
+			World::SpriteAnimation anim(name, fps, static_cast<World::AnimationLoopMode>(loop));
+			anim.SetAtlasPath(atlasPath);
+
+			if (autoFill && !atlasPath.empty())
+			{
+				std::filesystem::path atlasPhys = resolveAssetPath(atlasPath);
+				auto atlas = World::TextureAtlas::LoadFromFile(atlasPhys.string());
+				if (atlas && atlas->GetSubTextureCount() > 0)
+				{
+					const float dur = 1.0f / fps;
+					for (const auto& sub : atlas->GetAllSubTextures())
+						anim.AddFrame(World::SpriteAnimationFrame(sub.Name, dur));
+				}
+			}
+			if (anim.GetFrameCount() == 0)
+			{
+				anim.AddFrame(World::SpriteAnimationFrame("frame_0", 1.0f / fps));
+			}
+
+			if (!anim.SaveToFile(outPath.string()))
+			{
+				error = "failed to save animation to " + outPath.string();
+				return false;
+			}
+			World::SpriteAnimation::ClearCache();
+			m_Shell.OpenAnimationEditor(path);
+			result = "created animation at " + outPath.string();
 			return true;
 		}
 		if (cmd == "asset.open_anim")

@@ -29,6 +29,7 @@ namespace World
 		void AddSprite(const std::string& name, const glm::vec4& pixelRect,
 			const glm::vec2& pivot = { 0.5f, 0.5f }, const glm::vec4& border = { 0.0f, 0.0f, 0.0f, 0.0f });
 		bool DeleteSprite(size_t index);
+		void AutoGridSlice(float cellW, float cellH);
 
 		std::shared_ptr<TextureAtlas> GetAtlas() const noexcept { return m_Atlas; }
 
@@ -36,6 +37,7 @@ namespace World
 		void SyncFromSelected();
 		void CommitToSelected();
 		std::filesystem::path ResolvePhysicalPath() const;
+		void EnsureTextureLoaded();
 
 		std::string m_LogicalPath;
 		std::string m_PanelId;
@@ -45,6 +47,12 @@ namespace World
 		int m_SelectedIndex { -1 };
 		bool m_Dirty { false };
 		std::string m_StatusFeedback;
+
+		std::string m_EditTexturePath;
+		int64_t m_EditAtlasW { 256 };
+		int64_t m_EditAtlasH { 256 };
+		float m_GridCellW { 64.0f };
+		float m_GridCellH { 64.0f };
 
 		std::string m_EditName;
 		float m_EditRectX { 0.0f };
@@ -62,6 +70,5 @@ namespace World
 		uint64_t m_UiTextureId { 0 };
 		Rhi::Handle<Rhi::Texture> m_GpuTexture { nullptr };
 		std::string m_LoadedTexturePath;
-		void EnsureTextureLoaded();
 	};
 }

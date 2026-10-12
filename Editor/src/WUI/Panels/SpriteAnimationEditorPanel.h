@@ -36,6 +36,7 @@ namespace World
 
 		void AddFrame(const std::string& subTexture, float duration = 0.0833f, const std::string& eventTag = "");
 		bool DeleteFrame(size_t index);
+		void ImportAllAtlasSlices();
 
 		std::shared_ptr<SpriteAnimation> GetAnimation() const noexcept { return m_Animation; }
 
@@ -43,6 +44,7 @@ namespace World
 		void SyncFromSelectedFrame();
 		void CommitToSelectedFrame();
 		std::filesystem::path ResolvePhysicalPath() const;
+		void EnsureAnimationAtlasLoaded();
 
 		std::string m_LogicalPath;
 		std::string m_PanelId;
@@ -58,6 +60,7 @@ namespace World
 
 		std::chrono::steady_clock::time_point m_LastFrameTime {};
 
+		std::string m_EditAtlasPath;
 		float m_FrameRate { 12.0f };
 		AnimationLoopMode m_LoopMode { AnimationLoopMode::Loop };
 
@@ -70,6 +73,5 @@ namespace World
 		Rhi::Handle<Rhi::Texture> m_GpuTexture { nullptr };
 		std::shared_ptr<TextureAtlas> m_Atlas { nullptr };
 		std::string m_LoadedAtlasPath;
-		void EnsureAnimationAtlasLoaded();
 	};
 }
