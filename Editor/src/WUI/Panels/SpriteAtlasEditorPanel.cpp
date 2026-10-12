@@ -16,28 +16,7 @@
 
 namespace World
 {
-	static void DrawCheckerboard(Wui::WuiContext& ctx, const Wui::WuiRect& rect, float cellSize = 14.0f)
-	{
-		const Wui::WuiColor c0 { 0.13f, 0.15f, 0.18f, 1.0f };
-		const Wui::WuiColor c1 { 0.19f, 0.22f, 0.26f, 1.0f };
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, c0, 2.0f });
-		int cols = static_cast<int>(std::ceil(rect.W / cellSize));
-		int rows = static_cast<int>(std::ceil(rect.H / cellSize));
-		for (int r = 0; r < rows; ++r)
-		{
-			for (int c = 0; c < cols; ++c)
-			{
-				if ((r + c) % 2 == 1)
-				{
-					float x = rect.X + c * cellSize;
-					float y = rect.Y + r * cellSize;
-					float w = std::min(cellSize, rect.X + rect.W - x);
-					float h = std::min(cellSize, rect.Y + rect.H - y);
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { x, y, w, h }, c1, 0.0f });
-				}
-			}
-		}
-	}
+
 
 	SpriteAtlasEditorPanel::SpriteAtlasEditorPanel(std::string logicalPath)
 		: m_LogicalPath(std::move(logicalPath))
@@ -506,7 +485,7 @@ namespace World
 			Wui::Label(ctx, { canvasBox.X + 10.0f, canvasBox.Y + 6.0f }, "切片图形与锚点预览 (Slice Preview) · " + sliceName, theme.Accent, 12.0f);
 
 			const Wui::WuiRect innerCanvas { canvasBox.X + 6.0f, canvasBox.Y + 24.0f, canvasBox.W - 12.0f, canvasBox.H - 30.0f };
-			DrawCheckerboard(ctx, innerCanvas, 14.0f);
+			Wui::DrawPanelSurface(ctx, innerCanvas, theme);
 
 			if (m_SelectedIndex >= 0 && m_Atlas)
 			{
@@ -541,8 +520,8 @@ namespace World
 				}
 				else
 				{
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, imgRect, { 0.2f, 0.25f, 0.35f, 0.5f }, 0.0f });
-					ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, imgRect, theme.Accent, 0.0f, 1.5f });
+					Wui::PanelBackground(ctx, imgRect, theme.PanelBg, 2.0f);
+					Wui::HighlightOutline(ctx, imgRect, theme.Accent, 2.0f, 1.0f);
 				}
 
 				// 9-Slice Guidelines (green overlay lines)
@@ -597,3 +576,4 @@ namespace World
 		Wui::Label(ctx, { statusRect.X, statusRect.Y + 1.0f }, m_StatusFeedback, theme.TextMuted, 10.5f);
 	}
 }
+

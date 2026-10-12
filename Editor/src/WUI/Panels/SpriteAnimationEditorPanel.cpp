@@ -16,28 +16,7 @@
 
 namespace World
 {
-	static void DrawCheckerboard(Wui::WuiContext& ctx, const Wui::WuiRect& rect, float cellSize = 14.0f)
-	{
-		const Wui::WuiColor c0 { 0.13f, 0.15f, 0.18f, 1.0f };
-		const Wui::WuiColor c1 { 0.19f, 0.22f, 0.26f, 1.0f };
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, c0, 2.0f });
-		int cols = static_cast<int>(std::ceil(rect.W / cellSize));
-		int rows = static_cast<int>(std::ceil(rect.H / cellSize));
-		for (int r = 0; r < rows; ++r)
-		{
-			for (int c = 0; c < cols; ++c)
-			{
-				if ((r + c) % 2 == 1)
-				{
-					float x = rect.X + c * cellSize;
-					float y = rect.Y + r * cellSize;
-					float w = std::min(cellSize, rect.X + rect.W - x);
-					float h = std::min(cellSize, rect.Y + rect.H - y);
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { x, y, w, h }, c1, 0.0f });
-				}
-			}
-		}
-	}
+
 
 	SpriteAnimationEditorPanel::SpriteAnimationEditorPanel(std::string logicalPath)
 		: m_LogicalPath(std::move(logicalPath))
@@ -518,7 +497,7 @@ namespace World
 		Wui::Label(ctx, { canvasBox.X + 12.0f, canvasBox.Y + 8.0f }, canvasTitle, m_IsPlaying ? theme.Accent : theme.Text, 12.0f);
 
 		const Wui::WuiRect innerCanvas { canvasBox.X + 8.0f, canvasBox.Y + 28.0f, canvasBox.W - 16.0f, canvasBox.H - 36.0f };
-		DrawCheckerboard(ctx, innerCanvas, 14.0f);
+		Wui::DrawPanelSurface(ctx, innerCanvas, theme);
 
 		if (m_Animation && m_ActiveSampledFrame < m_Animation->GetFrameCount())
 		{
@@ -634,3 +613,4 @@ namespace World
 		}
 	}
 }
+
