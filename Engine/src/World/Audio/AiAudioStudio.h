@@ -21,7 +21,7 @@ namespace World::Audio
 		Heroic = 6
 	};
 
-	struct TimbreProfile
+	struct WLD_API TimbreProfile
 	{
 		std::string characterId;       // e.g. "Old_King", "Young_Knight"
 		std::string presetName;        // e.g. "Deep_Old_Male", "Crisp_Female"
@@ -31,6 +31,9 @@ namespace World::Audio
 		float warmth { 0.5f };          // 0.0 to 1.0
 		float roughness { 0.2f };       // 0.0 to 1.0
 		std::vector<float> latentEmbedding; // 256-dim acoustic vector if cloned
+
+		std::string SerializeYaml() const;
+		bool DeserializeYaml(const std::string& yaml);
 	};
 
 	struct PhonemeViseme

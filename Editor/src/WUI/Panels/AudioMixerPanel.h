@@ -1,3 +1,4 @@
+#include "World/Audio/AiAudioStudio.h"
 #pragma once
 
 #include "WUI/Common/EditorPanel.h"
@@ -12,7 +13,9 @@ namespace World
 	enum class AudioItemKind : uint8_t
 	{
 		SoundEvent = 0,
-		AudioSlice = 1
+		AudioSlice = 1,
+		MixerConfig = 2,
+		VoiceProfile = 3
 	};
 
 	struct AudioLibraryItem
@@ -59,6 +62,10 @@ namespace World
 
 		// Selected item state
 		Audio::SoundEvent m_SelectedEvent;
+		Audio::TimbreProfile m_SelectedTimbre;
+		std::string m_LoadedMixerYaml;
+		void RenderVoiceInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host, const AudioLibraryItem& item);
+		void RenderMixerInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host, const AudioLibraryItem& item);
 		bool m_IsEventLoaded { false };
 		std::string m_LoadedEventPath;
 		std::string m_ImportWavInput { "projects/assets/audio/sfx/sample.wav" };

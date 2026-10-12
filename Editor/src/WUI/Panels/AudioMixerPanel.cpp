@@ -198,6 +198,48 @@ namespace World
 			m_Items.push_back({ "ui_click.wsound", "ui_click", p, AudioItemKind::SoundEvent });
 		}
 
+		// 2.5 Scan disk for .wmixer and .wvoice files
+		const char* metaDirs[] = {
+			"projects/assets/audio",
+			"projects/assets/audio/voices",
+			"assets/audio",
+			"assets/audio/voices",
+			"templates/project-example/assets/audio",
+			"templates/project-example/assets/audio/voices"
+		};
+		for (const char* dir : metaDirs)
+		{
+			std::error_code ec;
+			if (std::filesystem::exists(dir, ec))
+			{
+				for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
+				{
+					if (!entry.is_regular_file(ec)) continue;
+					std::string ext = entry.path().extension().string();
+					std::string fname = entry.path().filename().string();
+					std::string stem = entry.path().stem().string();
+					std::string normPath = entry.path().lexically_normal().generic_string();
+
+					bool exists = false;
+					for (const auto& it : m_Items)
+					{
+						if (it.path == normPath || it.displayName == fname) { exists = true; break; }
+					}
+					if (!exists)
+					{
+						if (ext == ".wmixer")
+						{
+							m_Items.push_back({ fname, stem, normPath, AudioItemKind::MixerConfig });
+						}
+						else if (ext == ".wvoice")
+						{
+							m_Items.push_back({ fname, stem, normPath, AudioItemKind::VoiceProfile });
+						}
+					}
+				}
+			}
+		}
+
 		// 3. Scan disk for audio slices (.waudio, .wav, .ogg, .mp3)
 		const char* sliceDirs[] = {
 			"projects/assets/audio/sfx",
@@ -684,6 +726,16 @@ namespace World
 		}
 
 		const auto& item = m_Items[m_SelectedIndex];
+		if (item.kind == AudioItemKind::VoiceProfile)
+		{
+			RenderVoiceInspector(ctx, rect, host, item);
+			return;
+		}
+		if (item.kind == AudioItemKind::MixerConfig)
+		{
+			RenderMixerInspector(ctx, rect, host, item);
+			return;
+		}
 		float curY = rect.Y + 8.0f;
 
 		// 1. Top Title & Real Path Header with Open In Explorer Button
@@ -1025,4 +1077,184 @@ namespace World
 			Wui::Label(ctx, { rect.X + 12.0f, rect.Y + rect.H - 16.0f }, m_StatusNotice, theme.Accent, 10.5f);
 		}
 	}
+}
+
+namespace World
+{
+	void AudioMixerPanel::RenderVoiceInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host, const AudioLibraryItem& item)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		float curY = rect.Y + 8.0f;
+
+		Wui::Label(ctx, { rect.X + 12.0f, curY }, item.displayName, theme.Text, 16.0f);
+		curY += 22.0f;
+
+		Wui::Label(ctx, { rect.X + 12.0f, curY + 2.0f }, "类型: 角色音色配置文件 (.wvoice) | 路径: " + item.path, theme.TextMuted, 11.0f);
+
+		const Wui::WuiRect btnOpenDir { rect.X + rect.W - 120.0f, curY - 2.0f, 108.0f, 22.0f };
+		if (Wui::Button(ctx, Wui::HashId("voice.btn.open_dir"), btnOpenDir, "打开文件夹", theme))
+		{
+			std::filesystem::path p(item.path);
+			std::string dir = p.has_parent_path() ? p.parent_path().string() : ".";
+			ShellExecuteA(nullptr, "open", dir.c_str(), nullptr, nullptr, SW_SHOW);
+		}
+		curY += 28.0f;
+
+		// Voice Properties Box
+		const Wui::WuiRect vBox { rect.X + 8.0f, curY, rect.W - 16.0f, 240.0f };
+		Wui::PanelBackground(ctx, vBox, theme.PanelBg, 4.0f);
+
+		float vy = vBox.Y + 10.0f;
+		Wui::Label(ctx, { vBox.X + 12.0f, vy }, "角色音色属性 (Timbre Profile Parameters):", { 0.85f, 0.45f, 0.95f, 1.0f }, 12.5f);
+		vy += 26.0f;
+
+		Wui::Label(ctx, { vBox.X + 12.0f, vy + 2.0f }, "角色标识 (CharacterId): " + m_SelectedTimbre.characterId, theme.Text, 11.5f);
+		Wui::Label(ctx, { vBox.X + 320.0f, vy + 2.0f }, "基础预设 (Preset): " + m_SelectedTimbre.presetName, theme.Text, 11.5f);
+		vy += 28.0f;
+
+		// Pitch shift
+		char pitchStr[32];
+		std::snprintf(pitchStr, sizeof(pitchStr), "音高微调 (半音): %+.1f", m_SelectedTimbre.pitchShiftSemi);
+		Wui::Label(ctx, { vBox.X + 12.0f, vy + 2.0f }, pitchStr, theme.TextMuted, 11.5f);
+		const Wui::WuiRect rPitch { vBox.X + 160.0f, vy + 2.0f, 180.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("voice.slider.pitch"), rPitch, m_SelectedTimbre.pitchShiftSemi, -12.0f, 12.0f, theme);
+		vy += 28.0f;
+
+		// Speech rate
+		char rateStr[32];
+		std::snprintf(rateStr, sizeof(rateStr), "语速倍率 (Rate): %.2fx", m_SelectedTimbre.rateScale);
+		Wui::Label(ctx, { vBox.X + 12.0f, vy + 2.0f }, rateStr, theme.TextMuted, 11.5f);
+		const Wui::WuiRect rRate { vBox.X + 160.0f, vy + 2.0f, 180.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("voice.slider.rate"), rRate, m_SelectedTimbre.rateScale, 0.5f, 2.0f, theme);
+		vy += 28.0f;
+
+		// Warmth
+		char warmStr[32];
+		std::snprintf(warmStr, sizeof(warmStr), "音色温暖度 (Warmth): %.2f", m_SelectedTimbre.warmth);
+		Wui::Label(ctx, { vBox.X + 12.0f, vy + 2.0f }, warmStr, theme.TextMuted, 11.5f);
+		const Wui::WuiRect rWarm { vBox.X + 180.0f, vy + 2.0f, 160.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("voice.slider.warmth"), rWarm, m_SelectedTimbre.warmth, 0.0f, 1.0f, theme);
+		vy += 28.0f;
+
+		// Roughness
+		char roughStr[32];
+		std::snprintf(roughStr, sizeof(roughStr), "嗓音粗糙感 (Roughness): %.2f", m_SelectedTimbre.roughness);
+		Wui::Label(ctx, { vBox.X + 12.0f, vy + 2.0f }, roughStr, theme.TextMuted, 11.5f);
+		const Wui::WuiRect rRough { vBox.X + 180.0f, vy + 2.0f, 160.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("voice.slider.roughness"), rRough, m_SelectedTimbre.roughness, 0.0f, 1.0f, theme);
+		vy += 38.0f;
+
+		// Audition & Save Action bar
+		curY += 250.0f;
+		const Wui::WuiRect btnSynth { rect.X + 8.0f, curY, 200.0f, 28.0f };
+		if (Wui::Button(ctx, Wui::HashId("voice.btn.synth"), btnSynth, "▶ 试听音色台词合成", theme))
+		{
+			auto& audio = Audio::AudioSystem::Get();
+			auto& studio = audio.GetAiStudio();
+			studio.RegisterTimbre(m_SelectedTimbre);
+			std::string testLine = "你好，这是 " + m_SelectedTimbre.characterId + " 的音色台词试听效果！";
+			auto result = studio.SynthesizeLine(m_SelectedTimbre.characterId, testLine, Audio::VoiceEmotion::Neutral, 0.7f);
+			if (result.success)
+			{
+				std::string previewPath = "assets/audio/voices/preview_" + m_SelectedTimbre.characterId + ".waudio";
+				audio.RegisterAudioBuffer(previewPath, std::make_shared<Audio::AudioBuffer>(result.audio));
+				Audio::SoundEvent previewEvt("preview_dialogue", Audio::kBusVoice);
+				previewEvt.GetRootContainer()->variations.push_back({ previewPath, 1.0f });
+				audio.RegisterSoundEvent(previewEvt);
+				audio.PostEvent2D("preview_dialogue");
+				m_StatusNotice = "正在试听音色合成: " + m_SelectedTimbre.characterId;
+			}
+		}
+
+		const Wui::WuiRect btnSaveVoice { rect.X + 220.0f, curY, 180.0f, 28.0f };
+		if (Wui::Button(ctx, Wui::HashId("voice.btn.save"), btnSaveVoice, "保存音色配置 (.wvoice)", theme))
+		{
+			std::ofstream out(item.path);
+			if (out.is_open())
+			{
+				out << m_SelectedTimbre.SerializeYaml();
+				Audio::AudioSystem::Get().GetAiStudio().RegisterTimbre(m_SelectedTimbre);
+				m_StatusNotice = "已成功保存音色配置到: " + item.path;
+			}
+		}
+	}
+
+	void AudioMixerPanel::RenderMixerInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host, const AudioLibraryItem& item)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto& audio = Audio::AudioSystem::Get();
+		auto& mixer = audio.GetMixerGraph();
+
+		float curY = rect.Y + 8.0f;
+		Wui::Label(ctx, { rect.X + 12.0f, curY }, item.displayName, theme.Text, 16.0f);
+		curY += 22.0f;
+
+		Wui::Label(ctx, { rect.X + 12.0f, curY + 2.0f }, "类型: 混音总线拓扑配置 (.wmixer) | 路径: " + item.path, theme.TextMuted, 11.0f);
+
+		const Wui::WuiRect btnOpenDir { rect.X + rect.W - 120.0f, curY - 2.0f, 108.0f, 22.0f };
+		if (Wui::Button(ctx, Wui::HashId("mixer.btn.open_dir"), btnOpenDir, "打开文件夹", theme))
+		{
+			std::filesystem::path p(item.path);
+			std::string dir = p.has_parent_path() ? p.parent_path().string() : ".";
+			ShellExecuteA(nullptr, "open", dir.c_str(), nullptr, nullptr, SW_SHOW);
+		}
+		curY += 28.0f;
+
+		// Mixer Layout Box
+		const Wui::WuiRect mBox { rect.X + 8.0f, curY, rect.W - 16.0f, 200.0f };
+		Wui::PanelBackground(ctx, mBox, theme.PanelBg, 4.0f);
+
+		float my = mBox.Y + 10.0f;
+		Wui::Label(ctx, { mBox.X + 12.0f, my }, "总线架构与默认设计电平 (Mixer Bus Hierarchy):", { 0.95f, 0.75f, 0.20f, 1.0f }, 12.5f);
+		my += 24.0f;
+
+		const char* busNames[] = { "Master (主总线)", "Music (背景音乐)", "SFX (场景音效)", "Voice (对白配音)", "UI (界面音效)", "Ambience (环境底噪)" };
+		for (size_t b = 0; b < 6; ++b)
+		{
+			auto* bus = mixer.FindBus(static_cast<Audio::BusId>(b));
+			if (!bus) continue;
+
+			Wui::Label(ctx, { mBox.X + 12.0f, my + 2.0f }, busNames[b], theme.Text, 11.5f);
+			const Wui::WuiRect sRect { mBox.X + 170.0f, my + 2.0f, 160.0f, 18.0f };
+			float v = bus->GetVolume();
+			Wui::SliderFloat(ctx, Wui::HashId(("mbus.s." + std::to_string(b)).c_str()), sRect, v, 0.0f, 1.5f, theme);
+			if (std::abs(v - bus->GetVolume()) > 0.001f)
+			{
+				bus->SetVolume(v);
+			}
+
+			char volStr[16];
+			std::snprintf(volStr, sizeof(volStr), "%d%%", static_cast<int>(bus->GetVolume() * 100.0f));
+			Wui::Label(ctx, { mBox.X + 340.0f, my + 2.0f }, volStr, theme.TextMuted, 10.5f);
+
+			my += 26.0f;
+		}
+
+		curY += 212.0f;
+
+		const Wui::WuiRect btnApplyMixer { rect.X + 8.0f, curY, 210.0f, 28.0f };
+		if (Wui::Button(ctx, Wui::HashId("mixer.btn.apply"), btnApplyMixer, "▶ 重新加载并应用此混音配置", theme))
+		{
+			std::ifstream in(item.path);
+			if (in.is_open())
+			{
+				std::stringstream ss;
+				ss << in.rdbuf();
+				mixer.DeserializeYaml(ss.str());
+				m_StatusNotice = "已重新加载并应用混音配置: " + item.path;
+			}
+		}
+
+		const Wui::WuiRect btnSaveMixer { rect.X + 230.0f, curY, 210.0f, 28.0f };
+		if (Wui::Button(ctx, Wui::HashId("mixer.btn.save_file"), btnSaveMixer, "保存混音配置 (.wmixer)", theme))
+		{
+			std::ofstream out(item.path);
+			if (out.is_open())
+			{
+				out << mixer.SerializeYaml();
+				m_StatusNotice = "已成功保存当前总线混音配置到: " + item.path;
+			}
+		}
+	}
+
 }

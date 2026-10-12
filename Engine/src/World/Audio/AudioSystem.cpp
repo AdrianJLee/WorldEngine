@@ -78,6 +78,38 @@ namespace World::Audio
 		footstep.GetRootContainer()->variations.push_back({ "assets/audio/sfx/footstep_grass.waudio", 1.0f });
 		RegisterSoundEvent(footstep);
 
+				// Load default mixer configuration and voice profiles from disk
+		std::string mixerPath = "projects/assets/audio/main.wmixer";
+		if (!std::filesystem::exists(mixerPath)) mixerPath = "assets/audio/main.wmixer";
+		if (!std::filesystem::exists(mixerPath)) mixerPath = "templates/project-example/assets/audio/main.wmixer";
+		if (std::filesystem::exists(mixerPath))
+		{
+			std::ifstream in(mixerPath);
+			if (in.is_open())
+			{
+				std::stringstream ss;
+				ss << in.rdbuf();
+				m_Mixer.DeserializeYaml(ss.str());
+			}
+		}
+
+		std::string voicePath = "projects/assets/audio/voices/narrator.wvoice";
+		if (!std::filesystem::exists(voicePath)) voicePath = "templates/project-example/assets/audio/voices/narrator.wvoice";
+		if (std::filesystem::exists(voicePath))
+		{
+			std::ifstream in(voicePath);
+			if (in.is_open())
+			{
+				std::stringstream ss;
+				ss << in.rdbuf();
+				TimbreProfile tp;
+				if (tp.DeserializeYaml(ss.str()))
+				{
+					m_AiStudio.RegisterTimbre(tp);
+				}
+			}
+		}
+
 		m_Backend->Start();
 		m_Initialized = true;
 		return true;

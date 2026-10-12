@@ -290,3 +290,86 @@ namespace World::Audio
 		}
 	}
 }
+
+namespace World::Audio
+{
+	std::string MixerGraph::SerializeYaml() const
+	{
+		std::ostringstream ss;
+		ss << "Version: 1\n";
+		ss << "Buses:\n";
+		for (BusId id : m_BusOrder)
+		{
+			const auto* bus = FindBus(id);
+			if (!bus) continue;
+			ss << "  - Id: " << static_cast<int>(id) << "\n";
+			ss << "    Name: \"" << bus->GetName() << "\"\n";
+			ss << "    ParentId: " << static_cast<int>(bus->GetParentId()) << "\n";
+			ss << "    Volume: " << bus->GetVolume() << "\n";
+		}
+		ss << "Snapshots:\n";
+		for (const auto& [name, snap] : m_Snapshots)
+		{
+			ss << "  - Name: \"" << name << "\"\n";
+			ss << "    BusVolumes:\n";
+			for (const auto& [bid, vol] : snap.busVolumes)
+			{
+				ss << "      " << static_cast<int>(bid) << ": " << vol << "\n";
+			}
+		}
+		return ss.str();
+	}
+
+	bool MixerGraph::DeserializeYaml(const std::string& yaml)
+	{
+		std::istringstream stream(yaml);
+		std::string line;
+		BusId currentBusId = kInvalidBusId;
+		std::string currentSnapName;
+
+		while (std::getline(stream, line))
+		{
+			auto colonPos = line.find(':');
+			if (colonPos == std::string::npos) continue;
+
+			std::string key = line.substr(0, colonPos);
+			while (!key.empty() && (key.front() == ' ' || key.front() == '\t' || key.front() == '-')) key.erase(key.begin());
+			while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
+
+			if (key == "Id")
+			{
+				currentBusId = static_cast<BusId>(std::stoul(line.substr(colonPos + 1)));
+			}
+			else if (key == "Volume" && currentBusId != kInvalidBusId)
+			{
+				float vol = std::stof(line.substr(colonPos + 1));
+				SetBusVolume(currentBusId, vol);
+			}
+			else if (key == "Name" && line.find("Snapshot") != std::string::npos)
+			{
+				auto q1 = line.find('"', colonPos);
+				auto q2 = line.rfind('"');
+				if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1)
+					currentSnapName = line.substr(q1 + 1, q2 - q1 - 1);
+			}
+			else if (!currentSnapName.empty() && !key.empty() && std::isdigit(static_cast<unsigned char>(key.front())))
+			{
+				BusId bid = static_cast<BusId>(std::stoul(key));
+				float vol = std::stof(line.substr(colonPos + 1));
+				auto it = m_Snapshots.find(currentSnapName);
+				if (it != m_Snapshots.end())
+				{
+					it->second.busVolumes[bid] = vol;
+				}
+				else
+				{
+					MixerSnapshot s;
+					s.name = currentSnapName;
+					s.busVolumes[bid] = vol;
+					RegisterSnapshot(s);
+				}
+			}
+		}
+		return true;
+	}
+}

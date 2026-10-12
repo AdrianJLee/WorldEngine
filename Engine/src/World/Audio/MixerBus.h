@@ -125,6 +125,9 @@ namespace World::Audio
 		void TriggerSnapshot(const std::string& name, float transitionSeconds = 0.3f);
 		void ClearSnapshot(float transitionSeconds = 0.3f);
 
+		std::string SerializeYaml() const;
+		bool DeserializeYaml(const std::string& yaml);
+
 		void ProcessGraph(
 			std::unordered_map<BusId, std::pair<std::vector<float>, std::vector<float>>>& busBuffers,
 			float* finalMasterLeft,

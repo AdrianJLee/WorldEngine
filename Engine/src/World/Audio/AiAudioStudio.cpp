@@ -327,3 +327,56 @@ namespace World::Audio
 		return results;
 	}
 }
+
+namespace World::Audio
+{
+	std::string TimbreProfile::SerializeYaml() const
+	{
+		std::ostringstream ss;
+		ss << "CharacterId: \"" << characterId << "\"\n";
+		ss << "PresetName: \"" << presetName << "\"\n";
+		ss << "PitchShiftSemi: " << pitchShiftSemi << "\n";
+		ss << "RateScale: " << rateScale << "\n";
+		ss << "Warmth: " << warmth << "\n";
+		ss << "Roughness: " << roughness << "\n";
+		if (!referenceAudioPath.empty())
+		{
+			ss << "ReferenceAudioPath: \"" << referenceAudioPath << "\"\n";
+		}
+		return ss.str();
+	}
+
+	bool TimbreProfile::DeserializeYaml(const std::string& yaml)
+	{
+		std::istringstream stream(yaml);
+		std::string line;
+		while (std::getline(stream, line))
+		{
+			auto colonPos = line.find(':');
+			if (colonPos == std::string::npos) continue;
+			std::string key = line.substr(0, colonPos);
+			while (!key.empty() && (key.front() == ' ' || key.front() == '\t')) key.erase(key.begin());
+			while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
+
+			auto extractStr = [&](size_t start) -> std::string {
+				auto q1 = line.find('"', start);
+				auto q2 = line.rfind('"');
+				if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1)
+					return line.substr(q1 + 1, q2 - q1 - 1);
+				std::string val = line.substr(start + 1);
+				while (!val.empty() && (val.front() == ' ' || val.front() == '\t')) val.erase(val.begin());
+				while (!val.empty() && (val.back() == ' ' || val.back() == '\t' || val.back() == '\r')) val.pop_back();
+				return val;
+			};
+
+			if (key == "CharacterId") characterId = extractStr(colonPos);
+			else if (key == "PresetName") presetName = extractStr(colonPos);
+			else if (key == "ReferenceAudioPath") referenceAudioPath = extractStr(colonPos);
+			else if (key == "PitchShiftSemi") pitchShiftSemi = std::stof(line.substr(colonPos + 1));
+			else if (key == "RateScale") rateScale = std::stof(line.substr(colonPos + 1));
+			else if (key == "Warmth") warmth = std::stof(line.substr(colonPos + 1));
+			else if (key == "Roughness") roughness = std::stof(line.substr(colonPos + 1));
+		}
+		return true;
+	}
+}
