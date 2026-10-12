@@ -715,6 +715,22 @@ function ui:isOpen() end
 ---@field Intensity number
 ---@field Color vec3
 
+-- Component fields are exposed through Entity:GetComponent("AudioListenerComponent"); there is no runtime global named AudioListenerComponent.
+---@class AudioListenerComponent
+---@field VolumeScale number
+---@field Active boolean
+
+-- Component fields are exposed through Entity:GetComponent("AudioSourceComponent"); there is no runtime global named AudioSourceComponent.
+---@class AudioSourceComponent
+---@field MaxDistance number
+---@field Volume number
+---@field Pitch number
+---@field Sound string
+---@field MinDistance number
+---@field Spatial3D boolean
+---@field PlayOnAwake boolean
+---@field Looping boolean
+
 -- Component fields are exposed through Entity:GetComponent("BoxCollider2DComponent"); there is no runtime global named BoxCollider2DComponent.
 ---@class BoxCollider2DComponent
 ---@field Friction number
@@ -889,6 +905,10 @@ function ui:isOpen() end
 ---@class Comp
 ---@field AmbientLightComponent string Registered component type name "AmbientLightComponent".
 ---@field AmbientLight string Short alias for "AmbientLightComponent".
+---@field AudioListenerComponent string Registered component type name "AudioListenerComponent".
+---@field AudioListener string Short alias for "AudioListenerComponent".
+---@field AudioSourceComponent string Registered component type name "AudioSourceComponent".
+---@field AudioSource string Short alias for "AudioSourceComponent".
 ---@field BoxCollider2DComponent string Registered component type name "BoxCollider2DComponent".
 ---@field BoxCollider2D string Short alias for "BoxCollider2DComponent".
 ---@field BoxCollider3DComponent string Registered component type name "BoxCollider3DComponent".
