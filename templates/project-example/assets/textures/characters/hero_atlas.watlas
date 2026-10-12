@@ -22,3 +22,11 @@ Sprites:
     Rect: [32, 32, 64, 64]
     Pivot: [0.5, 0]
     Border: [0, 0, 0, 0]
+  - Name: ai_slice_test
+    Rect: [32, 32, 64, 64]
+    Pivot: [0.5, 0]
+    Border: [0, 0, 0, 0]
+  - Name: ai_slice_test
+    Rect: [32, 32, 64, 64]
+    Pivot: [0.5, 0]
+    Border: [0, 0, 0, 0]

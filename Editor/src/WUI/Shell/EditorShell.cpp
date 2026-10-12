@@ -336,6 +336,10 @@ EditorShell::PanelForm EditorShell::FormOf(const std::string& panel) const{
 		// PLUG-T3b:插件贡献的面板 = 独立窗口形态(与插件管理器同款)。
 		if (panel.compare(0, std::strlen(kPluginPanelPrefix), kPluginPanelPrefix) == 0)
 			return PanelForm::Independent;
+		if (panel.compare(0, std::strlen(kAtlasPanelPrefix), kAtlasPanelPrefix) == 0)
+			return PanelForm::Independent;
+		if (panel.compare(0, std::strlen(kAnimPanelPrefix), kAnimPanelPrefix) == 0)
+			return PanelForm::Independent;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
 				return spec.Form;
@@ -357,6 +361,10 @@ bool EditorShell::IsDeclaredPanel(const std::string& panel) const{
 		if (panel.compare(0, std::strlen(kScriptPanelPrefix), kScriptPanelPrefix) == 0)
 			return true;
 		if (panel.compare(0, std::strlen(kPrefabPanelPrefix), kPrefabPanelPrefix) == 0)
+			return true;
+		if (panel.compare(0, std::strlen(kAtlasPanelPrefix), kAtlasPanelPrefix) == 0)
+			return true;
+		if (panel.compare(0, std::strlen(kAnimPanelPrefix), kAnimPanelPrefix) == 0)
 			return true;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
@@ -1197,7 +1205,13 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 			return Wui::Tr(found->second.first, found->second.second);
 		const auto it = m_PanelRegistry.find(id);
 		if (it == m_PanelRegistry.end())
+		{
+			if (id.rfind(kAtlasPanelPrefix, 0) == 0)
+				return "图集: " + std::filesystem::path(id.substr(std::strlen(kAtlasPanelPrefix))).filename().string();
+			if (id.rfind(kAnimPanelPrefix, 0) == 0)
+				return "动画: " + std::filesystem::path(id.substr(std::strlen(kAnimPanelPrefix))).filename().string();
 			return id;
+		}
 		std::string title = it->second->Title();
 		// P4-U13e:prefab 资产窗口有未保存改动时标题带 `*`(窗口标签 / 挂靠标签 / Window 菜单
 		// 共用这一份标题,所以"改了但没保存"到哪儿都看得见)。

@@ -16,3 +16,9 @@ Frames:
   - SubTexture: ai_slice_test
     Duration: 0.125
     EventTag: ai_event_ping
+  - SubTexture: ai_slice_test
+    Duration: 0.125
+    EventTag: ai_event_ping
+  - SubTexture: ai_slice_test
+    Duration: 0.125
+    EventTag: ai_event_ping
