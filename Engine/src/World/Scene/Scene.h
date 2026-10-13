@@ -31,6 +31,16 @@
 
 namespace World
 {
+namespace Animation
+{
+	struct AnimationEvent
+	{
+	entt::entity Entity = entt::null;
+	std::string EventTag;
+	uint32_t FrameIndex = 0;
+	};
+}
+
 	class Entity;
 	class Physics3DWorld;
 	namespace Gameplay { class SystemRegistry; }
@@ -422,6 +432,13 @@ namespace World
 		void EnqueueTriggerEvent(const Physics::TriggerEvent& event);
 		const std::vector<Physics::ContactEvent>& GetContactEvents() const { return m_ContactEvents; }
 		const std::vector<Physics::TriggerEvent>& GetTriggerEvents() const { return m_TriggerEvents; }
+		void PostAnimationEvent(entt::entity entity, const std::string& tag, uint32_t frame)
+		{
+			m_AnimationEvents.push_back({ entity, tag, frame });
+		}
+		const std::vector<Animation::AnimationEvent>& GetAnimationEvents() const { return m_AnimationEvents; }
+		void ClearAnimationEvents() { m_AnimationEvents.clear(); }
+
 		void ClearPhysicsEvents();
 		// Physics3DWorld::SyncTransforms 的写口:只在位姿变化时写 TransformComponent
 		// (避免每帧标脏/打断层级);Static 由调用方过滤;PendingDestroy/PendingRemoval 跳过。
@@ -637,6 +654,7 @@ namespace World
 		// P5:本帧的物理事件(固定步产出 → 可变阶段消费)。见 EnqueueContactEvent / ClearPhysicsEvents。
 		std::vector<Physics::ContactEvent> m_ContactEvents;
 		std::vector<Physics::TriggerEvent> m_TriggerEvents;
+		std::vector<Animation::AnimationEvent> m_AnimationEvents;
 		// P5:2D 传感器重叠的"仍然在重叠"集合(Box2D 不把传感器重叠当接触,b2Body_GetContactData
 		// 拿不到,所以 Persist 由场景自己维护)。键 = PackEntityPair(有序实体对);OnPhysics2DStop 清空。
 		std::set<std::uint64_t> m_SensorOverlaps2D;

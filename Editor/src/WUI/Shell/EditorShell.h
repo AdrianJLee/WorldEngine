@@ -347,6 +347,10 @@ namespace World
 		void SetGizmoOperation(Wui::GizmoOperation op) override;
 		bool Is2DMode() const override;
 		void Set2DMode(bool enabled) override;
+		bool IsPixelSnapEnabled() const override;
+		void SetPixelSnapEnabled(bool enabled) override;
+		float GetPixelSnapPpu() const override;
+		void SetPixelSnapPpu(float ppu) override;
 		bool IsEditingCollider() const override;
 		void SetEditingCollider(bool editing) override;
 		const std::vector<Level::DataLayerDefinition>& GetLevelDataLayers() const override;

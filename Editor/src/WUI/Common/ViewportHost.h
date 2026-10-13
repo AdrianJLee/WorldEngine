@@ -39,6 +39,10 @@ namespace World
 		virtual void SetGizmoOperation(Wui::GizmoOperation op) = 0;
 		virtual bool Is2DMode() const = 0;
 		virtual void Set2DMode(bool enabled) = 0;
+		virtual bool IsPixelSnapEnabled() const = 0;
+		virtual void SetPixelSnapEnabled(bool enabled) = 0;
+		virtual float GetPixelSnapPpu() const = 0;
+		virtual void SetPixelSnapPpu(float ppu) = 0;
 
 		// Level 2.0 数据层:当前文档声明的层(名字 + 掩码)与场景的激活掩码。
 		// 视口工具栏按这里返回的层渲染开关 —— 开关改的是**真实**渲染剔除掩码,

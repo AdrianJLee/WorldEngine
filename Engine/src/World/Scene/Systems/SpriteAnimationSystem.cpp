@@ -1,11 +1,13 @@
 #include "SpriteAnimationSystem.h"
 #include "World/Scene/Components.h"
 #include "World/Renderer/SpriteAnimation.h"
+#include "World/Scene/Scene.h"
 #include "World/Core/StringPool.h"
+#include "World/Core/Log.h"
 
 namespace World
 {
-	void SpriteAnimationSystem::Update(entt::registry& registry, Timestep ts)
+	void SpriteAnimationSystem::Update(entt::registry& registry, Timestep ts, Scene* scene)
 	{
 		auto view = registry.view<SpriteComponent, SpriteAnimatorComponent>();
 		for (auto entity : view)
@@ -20,6 +22,7 @@ namespace World
 			auto anim = SpriteAnimation::GetOrLoad(animPath);
 			if (!anim || anim->GetFrameCount() == 0) continue;
 
+			const uint32_t prevFrame = animator.CurrentFrame;
 			animator.CurrentTime += ts.GetSeconds() * animator.Speed;
 			bool finished = false;
 			uint32_t frameIdx = anim->SampleFrame(animator.CurrentTime, &finished);
@@ -30,6 +33,16 @@ namespace World
 			if (frame && frame->SubTextureName.IsValid())
 			{
 				sprite.SubTextureName = frame->SubTextureName;
+			}
+
+			if (frameIdx != prevFrame && frame && !frame->EventTag.empty())
+			{
+				if (scene)
+				{
+					scene->PostAnimationEvent(entity, frame->EventTag, frameIdx);
+				}
+				WLD_CORE_INFO("[animation] Entity {0} triggered EventTag '{1}' at frame {2}",
+					static_cast<uint32_t>(entity), frame->EventTag, frameIdx);
 			}
 		}
 	}

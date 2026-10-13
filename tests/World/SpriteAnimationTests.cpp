@@ -111,6 +111,43 @@ static void TestAnimationSystemRuntime()
 	std::cout << "[PASS] TestAnimationSystemRuntime\n";
 }
 
+static void TestAnimationEventDispatch()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	Entity entity = scene.CreateEntityShell("AnimatedCharacter");
+	auto& sprite = entity.AddComponent<SpriteComponent>();
+	auto& animator = entity.AddComponent<SpriteAnimatorComponent>();
+
+	auto anim = std::make_shared<SpriteAnimation>("hero_punch", 10.0f, AnimationLoopMode::Once);
+	anim->AddFrame(SpriteAnimationFrame("punch_0", 0.1f));
+	anim->AddFrame(SpriteAnimationFrame("punch_1", 0.1f, "hit_box_open"));
+	anim->AddFrame(SpriteAnimationFrame("punch_2", 0.1f, "play_whoosh"));
+
+	std::filesystem::create_directories("build");
+	const std::string animPath = "build/temp_hero_punch.wanim";
+	anim->SaveToFile(animPath);
+	animator.Animation = AssetRef{ StringPool::Get().InternPath(animPath), AssetId{} };
+
+	SpriteAnimationSystem::Update(scene.GetRegistry(), Timestep(0.12f), &scene);
+	const auto& events1 = scene.GetAnimationEvents();
+	assert(!events1.empty());
+	assert(events1.back().EventTag == "hit_box_open");
+	assert(events1.back().FrameIndex == 1);
+	assert(events1.back().Entity == static_cast<entt::entity>(entity));
+
+	scene.ClearAnimationEvents();
+
+	SpriteAnimationSystem::Update(scene.GetRegistry(), Timestep(0.10f), &scene);
+	const auto& events2 = scene.GetAnimationEvents();
+	assert(!events2.empty());
+	assert(events2.back().EventTag == "play_whoosh");
+	assert(events2.back().FrameIndex == 2);
+
+	std::cout << "[PASS] TestAnimationEventDispatch\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -121,5 +158,6 @@ int main()
 	TestAnimationSystemRuntime();
 
 	std::cout << "All 2D Sprite Animation tests passed.\n";
+		TestAnimationEventDispatch();
 	return 0;
 }

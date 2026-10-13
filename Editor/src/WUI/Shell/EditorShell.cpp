@@ -543,6 +543,22 @@ void EditorShell::Set2DMode(bool enabled) {
 	m_Editor.Set2DMode(enabled);
 }
 
+bool EditorShell::IsPixelSnapEnabled() const {
+	return m_Editor.IsPixelSnapEnabled();
+}
+
+void EditorShell::SetPixelSnapEnabled(bool enabled) {
+	m_Editor.SetPixelSnapEnabled(enabled);
+}
+
+float EditorShell::GetPixelSnapPpu() const {
+	return m_Editor.GetPixelSnapPpu();
+}
+
+void EditorShell::SetPixelSnapPpu(float ppu) {
+	m_Editor.SetPixelSnapPpu(ppu);
+}
+
 void EditorShell::SetGizmoOperation(Wui::GizmoOperation op) {
 	m_Editor.SetGizmoOperation(op);
 }

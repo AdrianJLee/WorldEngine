@@ -199,6 +199,10 @@ namespace World
 		bool IsEditingCollider() const { return m_IsEditingCollider; }
 		void SetEditingCollider(bool editing) { m_IsEditingCollider = editing; }
 		Wui::GizmoOperation GetGizmoOperation() const { return m_CurrentGizmoOperation; }
+		bool IsPixelSnapEnabled() const { return m_PixelSnapEnabled; }
+		void SetPixelSnapEnabled(bool enabled) { m_PixelSnapEnabled = enabled; }
+		float GetPixelSnapPpu() const { return m_PixelSnapPpu; }
+		void SetPixelSnapPpu(float ppu) { m_PixelSnapPpu = ppu > 0.0f ? ppu : 16.0f; }
 		Entity PickEntityAt(glm::vec2 viewportLocal) { return GetEntityAtMousePosition(viewportLocal); }
 		uint64_t GetIconId(int index) const;
 		// 旧式纹理纪元:窗口/上下文重建后自增,面板据此重载自己的 GL 图标。
@@ -540,6 +544,8 @@ namespace World
 
 		// Gizmo operation type
 		Wui::GizmoOperation m_CurrentGizmoOperation = Wui::GizmoOperation::None;
+		bool m_PixelSnapEnabled = false;
+		float m_PixelSnapPpu = 16.0f;
 		bool m_IsEditingCollider = false;
 
 

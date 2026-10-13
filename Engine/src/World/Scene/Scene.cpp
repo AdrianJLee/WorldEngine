@@ -2059,7 +2059,7 @@ namespace World
 		// 渲染之前;进管线后它出现在 Systems Pipeline 里,用户系统也能用 `after` 排序它。
 		// 幂等:编辑态不跑帧系统,由 SceneRenderer 兜底跑同一个 EnsureAnimationAdvanced。
 		RegisterFrameSystem({ "sprite-animation-system", false,
-			[this](Timestep ts) { SpriteAnimationSystem::Update(m_Registry, ts); },
+			[this](Timestep ts) { ClearAnimationEvents(); SpriteAnimationSystem::Update(m_Registry, ts, this); },
 			Gameplay::SystemPhase::PreRender, {} });
 		RegisterFrameSystem({ "animation-system", false,
 			[this](Timestep ts) { EnsureAnimationAdvanced(ts); },

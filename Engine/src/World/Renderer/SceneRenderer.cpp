@@ -2542,6 +2542,35 @@ namespace World
 			}
 		}
 
+		// Phase 12: 微观像素网格 (Micro Pixel Grid: 当 2D 正交相机放大到极近景时显示 1/16m 像素点阵)
+		const bool isFrontBackXY = std::abs(camForward.z) > 0.85f;
+		if (isOrtho && isFrontBackXY && orthoHeight <= 8.0f)
+		{
+			constexpr float kPixelPpu = 16.0f;
+			constexpr float kPixelStep = 1.0f / kPixelPpu;
+			const float microAlpha = std::clamp((8.0f - orthoHeight) / 5.0f, 0.0f, 1.0f) * 0.18f;
+			if (microAlpha > 0.01f)
+			{
+				const float microRadius = std::min(orthoHeight * 0.8f, 6.0f);
+				const float startPx = std::floor((camPos.x - microRadius) / kPixelStep) * kPixelStep;
+				const float endPx = std::ceil((camPos.x + microRadius) / kPixelStep) * kPixelStep;
+				const float startPy = std::floor((camPos.y - microRadius) / kPixelStep) * kPixelStep;
+				const float endPy = std::ceil((camPos.y + microRadius) / kPixelStep) * kPixelStep;
+
+				const glm::vec4 microCol(0.40f, 0.52f, 0.65f, microAlpha);
+				for (float x = startPx; x <= endPx + 0.001f; x += kPixelStep)
+				{
+					if (std::fmod(std::abs(x), 1.0f) < 0.005f) continue;
+					Renderer2D::DrawLineCore(glm::vec3(x, startPy, 0.0f), glm::vec3(x, endPy, 0.0f), microCol, -1);
+				}
+				for (float y = startPy; y <= endPy + 0.001f; y += kPixelStep)
+				{
+					if (std::fmod(std::abs(y), 1.0f) < 0.005f) continue;
+					Renderer2D::DrawLineCore(glm::vec3(startPx, y, 0.0f), glm::vec3(endPx, y, 0.0f), microCol, -1);
+				}
+			}
+		}
+
 		// ------------------ LOD 0: 近景 1m 细网格 (只有相机拉近时才出现，拉远彻底消失!) ------------------
 		if (minorLodWeight > 0.01f)
 		{

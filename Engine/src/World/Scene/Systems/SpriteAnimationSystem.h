@@ -6,10 +6,11 @@
 
 namespace World
 {
+	class Scene;
+
 	class WLD_API SpriteAnimationSystem
 	{
 	public:
-		static void Update(entt::registry& registry, Timestep ts);
+		static void Update(entt::registry& registry, Timestep ts, Scene* scene = nullptr);
 	};
 }
-

@@ -448,6 +448,9 @@ namespace World
 		naturalRightIslandW += gridBtnW + 3.0f;
 		naturalRightIslandW += partBtnW + 3.0f;
 		naturalRightIslandW += lockBtnW + 3.0f;
+		const std::string snapLabel = Wui::Tr("viewport.snap.short", "Snap");
+		const float snapBtnW = std::max(42.0f, ctx.MeasureTextWidth(snapLabel, 12.0f) + 14.0f);
+		naturalRightIslandW += snapBtnW + 3.0f;
 		naturalRightIslandW += 8.0f + 3.0f; // 分割线
 		naturalRightIslandW += modeWidth;
 		naturalRightIslandW += 4.0f;
@@ -549,6 +552,26 @@ namespace World
 			}
 			ctx.RegisterOverlayRect(mode2dBtn);
 			rightCursor += lockBtnW + 3.0f;
+		}
+
+		// 4b) 2D 像素网格吸附开关 (Snap)
+		if (rightCursor + snapBtnW <= rightLimit)
+		{
+			const Wui::WuiRect snapBtn { rightCursor, rightBtnY, snapBtnW, kBtnH };
+			const bool isSnap = m_Host.IsPixelSnapEnabled();
+			Wui::Tooltip(ctx, snapBtn, Wui::Tr("viewport.snap.hint", "2D 像素网格吸附开关 (按 1/PPU 步长吸附坐标，杜绝亚像素插值撕裂与接缝抖动) (viewport.btn.toggle_snap)"));
+			auto snapTheme = theme;
+			if (isSnap)
+			{
+				snapTheme.ButtonBg = theme.ActiveBg;
+				snapTheme.Border = theme.Accent;
+			}
+			if (Wui::Button(ctx, Wui::HashId("viewport.btn.toggle_snap"), snapBtn, snapLabel, snapTheme))
+			{
+				m_Host.SetPixelSnapEnabled(!isSnap);
+			}
+			ctx.RegisterOverlayRect(snapBtn);
+			rightCursor += snapBtnW + 3.0f;
 		}
 
 		// 5) 分割线
@@ -902,6 +925,12 @@ namespace World
 				nowUsing = Wui::ManipulateGizmo(m_Host.GetGizmoCamera(),
 					m_Host.GetGizmoOperation(), transform, sceneRect, ctx,
 					/*allowManipulation=*/!m_Host.IsReadOnlyMode());
+			}
+			if (nowUsing && m_Host.IsPixelSnapEnabled())
+			{
+				const float ppu = m_Host.GetPixelSnapPpu();
+				transform.Location.x = std::round(transform.Location.x * ppu) / ppu;
+				transform.Location.y = std::round(transform.Location.y * ppu) / ppu;
 			}
 			gizmoEngaged = nowUsing;
 			if (!m_GizmoActive && nowUsing)
