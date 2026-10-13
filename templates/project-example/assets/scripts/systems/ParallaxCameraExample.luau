@@ -145,7 +145,19 @@ print("[2D-DEMO] ParallaxCameraDemoSystem 已注册入 ECS")
 local animEventHandle = ecs:OnAnimationEvent(function(event)
     local entityName = "Unknown"
     if event.entity and event.entity:IsValid() then
-        entityName = event.entity:GetName()
+        if event.entity:HasComponent("TagComponent") then
+            local ok, name = pcall(function() return event.entity:GetName() end)
+            if ok and name and #name > 0 then
+                entityName = name
+            else
+                local tagComp = event.entity:Get("TagComponent")
+                if tagComp and tagComp.Tag then
+                    entityName = tagComp.Tag
+                end
+            end
+        else
+            entityName = "Entity#" .. tostring(event.entity:GetID())
+        end
     end
     print(string.format("[ANIM-EVENT] 实体 '%s' 触发动画事件: Tag='%s' | Frame=%d",
         entityName, event.tag, event.frame))
