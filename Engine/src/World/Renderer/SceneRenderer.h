@@ -80,6 +80,7 @@ namespace World
 		void ApplyRenderScale();
 		void RecordSubmit(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity);
 		void RenderGeometry(const Camera& camera, const glm::mat4& cameraTransform);
+		void Render2DLighting(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderDebug(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderGroundGrid(const Camera& camera, const glm::mat4& cameraTransform);
 		// D5:网格/材质资产加载失败只警告一次(按路径去重),避免逐帧刷屏。

@@ -328,19 +328,57 @@ namespace World
 						const float cellH = (tilemapComp->CellSize.y > 0.0f ? tilemapComp->CellSize.y : tm->GetCellSize().y) * transform->Scale.y;
 						const float mapW = static_cast<float>(tm->GetWidth()) * cellW;
 						const float mapH = static_cast<float>(tm->GetHeight()) * cellH;
-						const auto rects = tm->ComputeMergedColliderRects();
-						for (const auto& r : rects)
+						if (tilemapComp->ColliderType == 1) // CompositeChain
 						{
-							const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
-							const float cy = +mapH * 0.5f - (r.Y + r.Height * 0.5f) * cellH;
-							const float hx = (r.Width * cellW) * 0.5f;
-							const float hy = (r.Height * cellH) * 0.5f;
-							if (hx > 1e-5f && hy > 1e-5f)
+							const auto contours = tm->ComputeCompositeChainContours();
+							for (auto contour : contours)
 							{
-								b2Polygon box = b2MakeOffsetBox(hx, hy, { cx, cy }, b2Rot_identity);
-								b2ShapeDef shapeDef = b2DefaultShapeDef();
-								PrepareShape(shapeDef, false);
-								b2CreatePolygonShape(body, &shapeDef, &box);
+								if (contour.size() < 3)
+									continue;
+								while (contour.size() < 4)
+								{
+									const glm::vec2 mid = (contour[contour.size() - 2] + contour.back()) * 0.5f;
+									contour.insert(contour.end() - 1, mid);
+								}
+								std::vector<b2Vec2> b2Pts(contour.size());
+								for (size_t i = 0; i < contour.size(); ++i)
+								{
+									const float px = -mapW * 0.5f + (contour[i].x / tm->GetCellSize().x) * cellW;
+									const float py = +mapH * 0.5f - (contour[i].y / tm->GetCellSize().y) * cellH;
+									b2Pts[i] = { px, py };
+								}
+								b2SurfaceMaterial mat = b2DefaultSurfaceMaterial();
+								mat.friction = 0.6f;
+								mat.restitution = 0.0f;
+
+								b2ChainDef chainDef = b2DefaultChainDef();
+								chainDef.points = b2Pts.data();
+								chainDef.count = static_cast<int>(b2Pts.size());
+								chainDef.isLoop = true;
+								chainDef.materials = &mat;
+								chainDef.materialCount = 1;
+								chainDef.userData = Physics::PackEntityUserData(entity);
+								chainDef.filter.categoryBits = rb->Layer;
+								chainDef.filter.maskBits = rb->Mask;
+								b2CreateChain(body, &chainDef);
+							}
+						}
+						else if (tilemapComp->ColliderType == 0) // MergedBoxes
+						{
+							const auto rects = tm->ComputeMergedColliderRects();
+							for (const auto& r : rects)
+							{
+								const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
+								const float cy = +mapH * 0.5f - (r.Y + r.Height * 0.5f) * cellH;
+								const float hx = (r.Width * cellW) * 0.5f;
+								const float hy = (r.Height * cellH) * 0.5f;
+								if (hx > 1e-5f && hy > 1e-5f)
+								{
+									b2Polygon box = b2MakeOffsetBox(hx, hy, { cx, cy }, b2Rot_identity);
+									b2ShapeDef shapeDef = b2DefaultShapeDef();
+									PrepareShape(shapeDef, false);
+									b2CreatePolygonShape(body, &shapeDef, &box);
+								}
 							}
 						}
 					}

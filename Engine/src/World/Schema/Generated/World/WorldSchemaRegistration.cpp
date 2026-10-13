@@ -28,6 +28,7 @@ const TypeSchema& WeSchemaOf_AmbientLightComponent();
 const TypeSchema& WeSchemaOf_PointLight2DComponent();
 const TypeSchema& WeSchemaOf_GlobalLight2DComponent();
 const TypeSchema& WeSchemaOf_ShadowCaster2DComponent();
+const TypeSchema& WeSchemaOf_FreeformLight2DComponent();
 const TypeSchema& WeSchemaOf_RigidBody2DComponent();
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent();
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent();
@@ -1117,6 +1118,16 @@ struct GeneratedAccess<World::TilemapComponent>
         World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
         self->GridType = std::get<uint8_t>(value);
     }
+    static Value Get_ColliderType(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return Value(self->ColliderType);
+    }
+    static void Set_ColliderType(void* instance, const Value& value)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        self->ColliderType = std::get<uint8_t>(value);
+    }
     static const FieldSchema& Field_TintColor()
     {
         static const FieldSchema schema = {
@@ -1268,6 +1279,24 @@ struct GeneratedAccess<World::TilemapComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_ColliderType()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8D9DA0FAD3274D28ull },
+            "ColliderType",
+            Kind::UInt8,
+            &Get_ColliderType,
+            &Set_ColliderType,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Collision mode: 0 = MergedBoxes (greedy rects), 1 = CompositeChain (smooth edge chain), 2 = None.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::TilemapComponent>();
@@ -1290,6 +1319,7 @@ struct GeneratedAccess<World::TilemapComponent>
                 Field_GenerateCollision(),
                 Field_ShowGrid(),
                 Field_GridType(),
+                Field_ColliderType(),
             },
             &StorageBindingOf(),
             "Rendering/2D",
@@ -3706,6 +3736,266 @@ struct GeneratedAccess<World::ShadowCaster2DComponent>
             &StorageBindingOf(),
             "Rendering/2D",
             "2D shadow caster hull that extrudes silhouette shadow geometry away from 2D point lights.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::FreeformLight2DComponent>
+{
+    static Value Get_Color(const void* instance)
+    {
+        const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
+        return Value(self->Color);
+    }
+    static void Set_Color(void* instance, const Value& value)
+    {
+        World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
+        self->Color = std::get<glm::vec4>(value);
+    }
+    static Value Get_Points(const void* instance)
+    {
+        const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
+        return Value(NameOps<std::remove_reference_t<decltype(self->Points)>>::GetName(self->Points));
+    }
+    static void Set_Points(void* instance, const Value& value)
+    {
+        World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
+        NameOps<std::remove_reference_t<decltype(self->Points)>>::SetName(self->Points, std::get<std::string>(value));
+    }
+    static Value Get_Intensity(const void* instance)
+    {
+        const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
+        return Value(self->Intensity);
+    }
+    static void Set_Intensity(void* instance, const Value& value)
+    {
+        World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
+        self->Intensity = std::get<float>(value);
+    }
+    static Value Get_FalloffDistance(const void* instance)
+    {
+        const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
+        return Value(self->FalloffDistance);
+    }
+    static void Set_FalloffDistance(void* instance, const Value& value)
+    {
+        World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
+        self->FalloffDistance = std::get<float>(value);
+    }
+    static Value Get_TargetSortingLayer(const void* instance)
+    {
+        const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
+        return Value(self->TargetSortingLayer);
+    }
+    static void Set_TargetSortingLayer(void* instance, const Value& value)
+    {
+        World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
+        self->TargetSortingLayer = std::get<int32_t>(value);
+    }
+    static Value Get_AffectAllLayers(const void* instance)
+    {
+        const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
+        return Value(self->AffectAllLayers);
+    }
+    static void Set_AffectAllLayers(void* instance, const Value& value)
+    {
+        World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
+        self->AffectAllLayers = std::get<bool>(value);
+    }
+    static Value Get_CastShadows(const void* instance)
+    {
+        const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
+        return Value(self->CastShadows);
+    }
+    static void Set_CastShadows(void* instance, const Value& value)
+    {
+        World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
+        self->CastShadows = std::get<bool>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
+        self->Enabled = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Color()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE0B60788C791225Full },
+            "Color",
+            Kind::Vec4,
+            &Get_Color,
+            &Set_Color,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Light tint color and multiplier.", true, "", {  }, "", std::nullopt },
+            Value(glm::vec4(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Points()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x48304A53D7044677ull },
+            "Points",
+            Kind::Name,
+            &Get_Points,
+            &Set_Points,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Semicolon-separated list of 2D vertex coordinates in local space.", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Intensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x78395B0392AE7C9ull },
+            "Intensity",
+            Kind::Float,
+            &Get_Intensity,
+            &Set_Intensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Light luminous power.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FalloffDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8B433FAB868947Dull },
+            "FalloffDistance",
+            Kind::Float,
+            &Get_FalloffDistance,
+            &Set_FalloffDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Feathered edge falloff distance in world meters.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_TargetSortingLayer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF0A7CB0C936FC04Cull },
+            "TargetSortingLayer",
+            Kind::Int32,
+            &Get_TargetSortingLayer,
+            &Set_TargetSortingLayer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target sorting layer when AffectAllLayers is false.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AffectAllLayers()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6B7F56A20C2FBE56ull },
+            "AffectAllLayers",
+            Kind::Bool,
+            &Get_AffectAllLayers,
+            &Set_AffectAllLayers,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this light affects all 2D sorting layers.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CastShadows()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1EE3E6393857F584ull },
+            "CastShadows",
+            Kind::Bool,
+            &Get_CastShadows,
+            &Set_CastShadows,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this light interacts with 2D shadow casters.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD6387E3D1BB473F9ull },
+            "Enabled",
+            Kind::Bool,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this 2D freeform light is active.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::FreeformLight2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::FreeformLight2DComponent" },
+            "FreeformLight2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::FreeformLight2DComponent),
+            TypeCategory::Component,
+            {
+                Field_Color(),
+                Field_Points(),
+                Field_Intensity(),
+                Field_FalloffDistance(),
+                Field_TargetSortingLayer(),
+                Field_AffectAllLayers(),
+                Field_CastShadows(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Rendering/2D",
+            "2D freeform polygon light: Points defines arbitrary polygon vertices in local space.",
             false,
             false,
         };
@@ -9267,6 +9557,7 @@ const TypeSchema& WeSchemaOf_AmbientLightComponent() { return GeneratedAccess<Wo
 const TypeSchema& WeSchemaOf_PointLight2DComponent() { return GeneratedAccess<World::PointLight2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_GlobalLight2DComponent() { return GeneratedAccess<World::GlobalLight2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_ShadowCaster2DComponent() { return GeneratedAccess<World::ShadowCaster2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_FreeformLight2DComponent() { return GeneratedAccess<World::FreeformLight2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_RigidBody2DComponent() { return GeneratedAccess<World::RigidBody2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent() { return GeneratedAccess<World::BoxCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent() { return GeneratedAccess<World::CircleCollider2DComponent>::WeSchema(); }
@@ -9330,6 +9621,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_PointLight2DComponent(),
 			WeSchemaOf_GlobalLight2DComponent(),
 			WeSchemaOf_ShadowCaster2DComponent(),
+			WeSchemaOf_FreeformLight2DComponent(),
 			WeSchemaOf_RigidBody2DComponent(),
 			WeSchemaOf_BoxCollider2DComponent(),
 			WeSchemaOf_CircleCollider2DComponent(),

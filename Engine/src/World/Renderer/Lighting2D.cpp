@@ -55,6 +55,63 @@ namespace World::Lighting2D
 		return worldPts;
 	}
 
+	std::vector<glm::vec2> ExtractWorldPolygon(
+		const TransformComponent& transform,
+		const FreeformLight2DComponent& light)
+	{
+		const std::vector<glm::vec2> localPts = light.GetLocalPolygon();
+		std::vector<glm::vec2> worldPts;
+		worldPts.reserve(localPts.size());
+
+		const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
+			* glm::mat4_cast(transform.Rotation);
+
+		for (const glm::vec2& lp : localPts)
+		{
+			const glm::vec4 wp = baseTr * glm::vec4(lp.x * transform.Scale.x, lp.y * transform.Scale.y, 0.0f, 1.0f);
+			worldPts.emplace_back(wp.x, wp.y);
+		}
+
+		if (SignedPolygonArea2D(worldPts) < 0.0f)
+			std::reverse(worldPts.begin(), worldPts.end());
+
+		return worldPts;
+	}
+
+	std::vector<FreeformLight2DInstance> CollectFreeformLights2D(const Scene* scene)
+	{
+		std::vector<FreeformLight2DInstance> results;
+		if (!scene)
+			return results;
+
+		const auto& registry = scene->GetRegistry();
+		for (auto entity : registry.view<TransformComponent, FreeformLight2DComponent>())
+		{
+			if (!scene->IsEntityInActiveDataLayers(entity))
+				continue;
+			const auto& transform = registry.get<TransformComponent>(entity);
+			const auto& fl = registry.get<FreeformLight2DComponent>(entity);
+			if (!fl.Enabled || fl.Intensity <= 0.0f)
+				continue;
+
+			auto poly = ExtractWorldPolygon(transform, fl);
+			if (poly.size() < 3)
+				continue;
+
+			FreeformLight2DInstance inst;
+			inst.Entity = entity;
+			inst.Color = fl.Color;
+			inst.Intensity = fl.Intensity;
+			inst.FalloffDistance = std::max(fl.FalloffDistance, 0.0f);
+			inst.TargetSortingLayer = fl.TargetSortingLayer;
+			inst.AffectAllLayers = fl.AffectAllLayers;
+			inst.CastShadows = fl.CastShadows;
+			inst.WorldPolygon = std::move(poly);
+			results.push_back(std::move(inst));
+		}
+		return results;
+	}
+
 	void ExtrudeShadowPolygon(
 		const glm::vec2& lightPos,
 		float lightOuterRadius,
@@ -349,6 +406,43 @@ namespace World::Lighting2D
 				std::max(pl.NormalMapZ, 0.05f),
 				pl.CastShadows ? 1.0f : 0.0f,
 				pl.AffectAllLayers ? 99999.0f : static_cast<float>(pl.TargetSortingLayer));
+		}
+
+		for (auto entity : registry.view<TransformComponent, FreeformLight2DComponent>())
+		{
+			if (!scene->IsEntityInActiveDataLayers(entity))
+				continue;
+			const auto& transform = registry.get<TransformComponent>(entity);
+			const auto& fl = registry.get<FreeformLight2DComponent>(entity);
+			if (!fl.Enabled || fl.Intensity <= 0.0f)
+				continue;
+			if (pointLightCount >= static_cast<int>(MaxPointLights2D))
+				break;
+
+			auto poly = ExtractWorldPolygon(transform, fl);
+			if (poly.size() < 3)
+				continue;
+
+			glm::vec2 centroid(0.0f);
+			for (const auto& p : poly)
+				centroid += p;
+			centroid /= static_cast<float>(poly.size());
+
+			float maxRadius = 0.1f;
+			for (const auto& p : poly)
+				maxRadius = std::max(maxRadius, glm::distance(centroid, p));
+
+			PointLight2DGpuData& dst = uniforms.PointLights[pointLightCount++];
+			const float innerR = std::max(0.0f, maxRadius - fl.FalloffDistance);
+			const float outerR = maxRadius + std::max(fl.FalloffDistance, 0.1f);
+			dst.PositionAndRadii = glm::vec4(centroid.x, centroid.y, innerR, outerR);
+			dst.ColorAndIntensity = glm::vec4(fl.Color.r, fl.Color.g, fl.Color.b, fl.Intensity);
+			dst.DirectionAndAngles = glm::vec4(0.0f, 1.0f, -1.0f, -1.0f);
+			dst.Params = glm::vec4(
+				0.5f,
+				0.5f,
+				fl.CastShadows ? 1.0f : 0.0f,
+				fl.AffectAllLayers ? 99999.0f : static_cast<float>(fl.TargetSortingLayer));
 		}
 
 		uniforms.Counts.x = pointLightCount;

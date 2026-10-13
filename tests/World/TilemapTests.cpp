@@ -157,6 +157,56 @@ static void TestTilemapYamlRoundtrip()
 	std::cout << "[PASS] TestTilemapYamlRoundtrip\n";
 }
 
+static void TestTilemapCompositeChainContours()
+{
+	// Case 1: 2x2 contiguous solid block -> 1 closed contour with exactly 4 corner points
+	{
+		Tilemap tm("Block2x2", 8, 8);
+		tm.FillRect(2, 2, 3, 3, 1, true); // (2, 2), (2, 3), (3, 2), (3, 3) are solid
+		assert(tm.CountSolidTiles() == 4);
+
+		auto contours = tm.ComputeCompositeChainContours();
+		assert(contours.size() == 1);
+		assert(contours[0].size() == 4);
+
+		auto hasCorner = [&](float x, float y) {
+			for (const auto& pt : contours[0])
+			{
+				if (std::abs(pt.x - x) < 1e-4f && std::abs(pt.y - y) < 1e-4f)
+					return true;
+			}
+			return false;
+		};
+		assert(hasCorner(2.0f, 2.0f));
+		assert(hasCorner(4.0f, 2.0f));
+		assert(hasCorner(4.0f, 4.0f));
+		assert(hasCorner(2.0f, 4.0f));
+	}
+
+	// Case 2: Two disjoint 1x1 solid tiles -> 2 separate closed contours
+	{
+		Tilemap tmDisjoint("Disjoint", 10, 10);
+		tmDisjoint.SetTile(1, 1, 1);
+		tmDisjoint.SetSolid(1, 1, true);
+		tmDisjoint.SetTile(5, 5, 1);
+		tmDisjoint.SetSolid(5, 5, true);
+
+		auto contours = tmDisjoint.ComputeCompositeChainContours();
+		assert(contours.size() == 2);
+		assert(contours[0].size() == 4);
+		assert(contours[1].size() == 4);
+	}
+
+	// Case 3: Empty tilemap -> 0 contours
+	{
+		Tilemap tmEmpty("Empty", 8, 8);
+		auto contours = tmEmpty.ComputeCompositeChainContours();
+		assert(contours.empty());
+	}
+
+	std::cout << "[PASS] TestTilemapCompositeChainContours\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -164,6 +214,7 @@ int main()
 
 	TestTilemapPaintingAndFloodFill();
 	TestGreedyMergedColliderRects();
+	TestTilemapCompositeChainContours();
 	TestTilemapYamlRoundtrip();
 
 	std::cout << "All WorldTilemapTests passed successfully.\n";

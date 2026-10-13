@@ -64,6 +64,7 @@ namespace
 		{ "World::PointLight2DComponent",        48 },
 		{ "World::GlobalLight2DComponent",       36 },
 		{ "World::ShadowCaster2DComponent",      32 },
+		{ "World::FreeformLight2DComponent",      36 },
 		{ "World::RigidBody2DComponent",         16 },
 		{ "World::BoxCollider2DComponent",       32 },
 		{ "World::CircleCollider2DComponent",    28 },

@@ -62,6 +62,26 @@ namespace World
 			const TransformComponent& transform,
 			const ShadowCaster2DComponent& caster);
 
+		// Extract world-space CCW 2D polygon hull from TransformComponent + FreeformLight2DComponent
+		WLD_API std::vector<glm::vec2> ExtractWorldPolygon(
+			const TransformComponent& transform,
+			const FreeformLight2DComponent& light);
+
+		struct FreeformLight2DInstance
+		{
+			entt::entity Entity { entt::null };
+			glm::vec4 Color { 1.0f, 1.0f, 0.9f, 1.0f };
+			float Intensity = 1.0f;
+			float FalloffDistance = 0.5f;
+			int32_t TargetSortingLayer = 0;
+			bool AffectAllLayers = true;
+			bool CastShadows = false;
+			std::vector<glm::vec2> WorldPolygon;
+		};
+
+		// Collect all active FreeformLight2D instances from the scene
+		WLD_API std::vector<FreeformLight2DInstance> CollectFreeformLights2D(const Scene* scene);
+
 		// Extrude silhouette/back-facing edges of a world-space 2D polygon away from lightPos
 		WLD_API void ExtrudeShadowPolygon(
 			const glm::vec2& lightPos,

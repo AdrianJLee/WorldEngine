@@ -16,6 +16,8 @@
 #include <sstream>
 #include <iomanip>
 #include <cmath>
+#include <fstream>
+#include "World/Renderer/Texture/TextureData.h"
 
 namespace World
 {
@@ -255,6 +257,166 @@ namespace World
 		m_StatusFeedback = "自动网格切分完成: 共切分出 " + std::to_string(count) + " 个子精灵";
 	}
 
+	void SpriteAtlasEditorPanel::AutoAlphaSlice(float alphaThreshold)
+	{
+		std::string texPath = m_EditTexturePath.empty() ? (m_Atlas ? m_Atlas->GetTexturePath() : "") : m_EditTexturePath;
+		if (texPath.empty())
+		{
+			m_StatusFeedback = "未设置源贴图，无法进行 Alpha 自动切分";
+			return;
+		}
+
+		// 解析贴图物理文件路径
+		std::filesystem::path texPhys;
+		{
+			std::filesystem::path p(texPath);
+			if (std::filesystem::exists(p))
+				texPhys = std::filesystem::absolute(p);
+			else if (std::filesystem::exists(Paths::ProjectDir() / p))
+				texPhys = std::filesystem::absolute(Paths::ProjectDir() / p);
+			else if (std::filesystem::exists(Paths::AssetRoot() / p))
+				texPhys = std::filesystem::absolute(Paths::AssetRoot() / p);
+			else if (texPath.rfind("assets/", 0) == 0 || texPath.rfind("assets\\", 0) == 0)
+			{
+				std::filesystem::path stripped = Paths::AssetRoot() / texPath.substr(7);
+				if (std::filesystem::exists(stripped))
+					texPhys = std::filesystem::absolute(stripped);
+			}
+			if (texPhys.empty())
+			{
+				const auto atlasPhys = ResolvePhysicalPath();
+				if (!atlasPhys.empty() && std::filesystem::exists(atlasPhys.parent_path() / p))
+					texPhys = std::filesystem::absolute(atlasPhys.parent_path() / p);
+			}
+		}
+
+		if (texPhys.empty() || !std::filesystem::exists(texPhys))
+		{
+			m_StatusFeedback = "无法在磁盘找到贴图文件: " + texPath;
+			return;
+		}
+
+		TextureData texData = LoadTextureData(texPhys.string(), false);
+		if (!texData.Valid || texData.Pixels.empty() || texData.Width == 0 || texData.Height == 0)
+		{
+			m_StatusFeedback = "解码贴图像素失败: " + texPhys.filename().string();
+			return;
+		}
+
+		const int width = static_cast<int>(texData.Width);
+		const int height = static_cast<int>(texData.Height);
+		const uint8_t* pixels = texData.Pixels.data();
+
+		// 8-邻域 BFS 连通分量分析
+		const uint8_t minAlpha = static_cast<uint8_t>(std::clamp(alphaThreshold, 0.0f, 1.0f) * 255.0f);
+		std::vector<uint8_t> visited(static_cast<size_t>(width) * height, 0);
+
+		struct SliceBox
+		{
+			int minX = 0;
+			int minY = 0;
+			int maxX = 0;
+			int maxY = 0;
+		};
+		std::vector<SliceBox> boxes;
+
+		const int dx[8] = { -1,  0,  1, -1, 1, -1, 0, 1 };
+		const int dy[8] = { -1, -1, -1,  0, 0,  1, 1, 1 };
+
+		std::vector<std::pair<int, int>> queue;
+		queue.reserve(4096);
+
+		for (int y = 0; y < height; ++y)
+		{
+			for (int x = 0; x < width; ++x)
+			{
+				const size_t idx = static_cast<size_t>(y) * width + x;
+				if (visited[idx]) continue;
+				visited[idx] = 1;
+
+				if (pixels[idx * 4 + 3] <= minAlpha) continue;
+
+				SliceBox box { x, y, x, y };
+				queue.clear();
+				queue.push_back({ x, y });
+
+				size_t head = 0;
+				while (head < queue.size())
+				{
+					const auto [cx, cy] = queue[head++];
+					box.minX = std::min(box.minX, cx);
+					box.maxX = std::max(box.maxX, cx);
+					box.minY = std::min(box.minY, cy);
+					box.maxY = std::max(box.maxY, cy);
+
+					for (int dir = 0; dir < 8; ++dir)
+					{
+						const int nx = cx + dx[dir];
+						const int ny = cy + dy[dir];
+						if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+						{
+							const size_t nIdx = static_cast<size_t>(ny) * width + nx;
+							if (!visited[nIdx])
+							{
+								visited[nIdx] = 1;
+								if (pixels[nIdx * 4 + 3] > minAlpha)
+								{
+									queue.push_back({ nx, ny });
+								}
+							}
+						}
+					}
+				}
+
+				const int bw = box.maxX - box.minX + 1;
+				const int bh = box.maxY - box.minY + 1;
+				if (bw >= 4 && bh >= 4)
+				{
+					boxes.push_back(box);
+				}
+			}
+		}
+
+
+		if (boxes.empty())
+		{
+			m_StatusFeedback = "Alpha 自动切分未发现有效精灵 (Alpha 阈值: " +
+				std::to_string(alphaThreshold) + ", 过滤宽高过小杂点)";
+			return;
+		}
+
+		// 排序: 上到下, 左到右
+		std::sort(boxes.begin(), boxes.end(), [](const SliceBox& a, const SliceBox& b) {
+			if (std::abs(a.minY - b.minY) > 8)
+				return a.minY < b.minY;
+			return a.minX < b.minX;
+		});
+
+		const uint32_t atlasW = static_cast<uint32_t>(width);
+		const uint32_t atlasH = static_cast<uint32_t>(height);
+		m_EditAtlasW = atlasW;
+		m_EditAtlasH = atlasH;
+
+		auto rebuilt = std::make_shared<TextureAtlas>(m_EditTexturePath, atlasW, atlasH);
+		int count = 0;
+		for (const auto& b : boxes)
+		{
+			std::string name = "slice_" + std::to_string(count++);
+			const float sx = static_cast<float>(b.minX);
+			const float sy = static_cast<float>(b.minY);
+			const float sw = static_cast<float>(b.maxX - b.minX + 1);
+			const float sh = static_cast<float>(b.maxY - b.minY + 1);
+			glm::vec4 rect { sx, sy, sw, sh };
+			rebuilt->AddSubTexture(SubTexture2D(name, rect, atlasW, atlasH, { 0.5f, 0.5f }));
+		}
+
+		m_Atlas = std::move(rebuilt);
+		m_SelectedIndex = m_Atlas->GetSubTextureCount() > 0 ? 0 : -1;
+		SyncFromSelected();
+		m_Dirty = true;
+		m_StatusFeedback = "Alpha 自动切分完成: 成功识别并切分 " + std::to_string(count) + " 个子精灵";
+	}
+
 	void SpriteAtlasEditorPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
@@ -372,23 +534,24 @@ namespace World
 		}
 		lY += 30.0f;
 
-		// Auto Grid Slice Box
-		const Wui::WuiRect gridBox { leftCol.X + 6.0f, lY, leftCol.W - 12.0f, 56.0f };
+		// Auto Grid & Alpha Slicing Box
+		const Wui::WuiRect gridBox { leftCol.X + 6.0f, lY, leftCol.W - 12.0f, 84.0f };
 		Wui::PanelBackground(ctx, gridBox, theme.PanelBg, 3.0f);
-		Wui::Label(ctx, { gridBox.X + 8.0f, gridBox.Y + 5.0f }, "一键自动网格切图 (Auto Grid Slice)", theme.Accent, 11.0f);
+		Wui::Label(ctx, { gridBox.X + 8.0f, gridBox.Y + 5.0f }, "一键智能切图工具 (Auto Slicing)", theme.Accent, 11.0f);
 
+		// Row 1: Grid Slicing
 		float gX = gridBox.X + 8.0f;
 		Wui::Label(ctx, { gX, gridBox.Y + 28.0f }, "格宽:", theme.TextMuted, 10.5f);
-		gX += 30.0f;
-		const Wui::WuiRect gwRect { gX, gridBox.Y + 26.0f, 44.0f, 20.0f };
+		gX += 28.0f;
+		const Wui::WuiRect gwRect { gX, gridBox.Y + 26.0f, 38.0f, 20.0f };
 		Wui::DragFloat(ctx, Wui::HashId("atlas.field.grid_w"), gwRect, m_GridCellW, 1.0f, 4.0f, 512.0f, theme);
-		gX += 48.0f;
+		gX += 42.0f;
 
 		Wui::Label(ctx, { gX, gridBox.Y + 28.0f }, "高:", theme.TextMuted, 10.5f);
-		gX += 20.0f;
-		const Wui::WuiRect ghRect { gX, gridBox.Y + 26.0f, 44.0f, 20.0f };
+		gX += 18.0f;
+		const Wui::WuiRect ghRect { gX, gridBox.Y + 26.0f, 38.0f, 20.0f };
 		Wui::DragFloat(ctx, Wui::HashId("atlas.field.grid_h"), ghRect, m_GridCellH, 1.0f, 4.0f, 512.0f, theme);
-		gX += 48.0f;
+		gX += 42.0f;
 
 		const Wui::WuiRect btnAutoGrid { gX, gridBox.Y + 25.0f, gridBox.W - (gX - gridBox.X) - 6.0f, 22.0f };
 		Wui::Tooltip(ctx, btnAutoGrid, "按设定的行列像素宽高一键自动切分整张大图 (atlas.btn.auto_grid)");
@@ -396,7 +559,22 @@ namespace World
 		{
 			AutoGridSlice(m_GridCellW, m_GridCellH);
 		}
-		lY += 62.0f;
+
+		// Row 2: Alpha Slicing
+		float aX = gridBox.X + 8.0f;
+		Wui::Label(ctx, { aX, gridBox.Y + 56.0f }, "阈值:", theme.TextMuted, 10.5f);
+		aX += 28.0f;
+		const Wui::WuiRect thRect { aX, gridBox.Y + 54.0f, 48.0f, 20.0f };
+		Wui::DragFloat(ctx, Wui::HashId("atlas.field.alpha_th"), thRect, m_AlphaThreshold, 0.01f, 0.01f, 0.99f, theme);
+		aX += 52.0f;
+
+		const Wui::WuiRect btnAutoAlpha { aX, gridBox.Y + 53.0f, gridBox.W - (aX - gridBox.X) - 6.0f, 22.0f };
+		Wui::Tooltip(ctx, btnAutoAlpha, "分析贴图 Alpha 透明度连通域，自动识别不规则精灵并切分 (atlas.btn.auto_alpha)");
+		if (Wui::Button(ctx, Wui::HashId("atlas.btn.auto_alpha"), btnAutoAlpha, "✂ Alpha 自动切分", theme))
+		{
+			AutoAlphaSlice(m_AlphaThreshold);
+		}
+		lY += 90.0f;
 
 		// Actions: Add Slice / Delete Slice / Generate Animation (.wanim)
 		const float btnHalfW = (leftCol.W - 20.0f) * 0.5f;

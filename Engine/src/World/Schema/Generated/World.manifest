@@ -18,6 +18,7 @@ struct World::AmbientLightComponent
 struct World::PointLight2DComponent
 struct World::GlobalLight2DComponent
 struct World::ShadowCaster2DComponent
+struct World::FreeformLight2DComponent
 struct World::RigidBody2DComponent
 struct World::BoxCollider2DComponent
 struct World::CircleCollider2DComponent

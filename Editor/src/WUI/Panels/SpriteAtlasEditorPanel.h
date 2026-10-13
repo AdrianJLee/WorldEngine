@@ -30,6 +30,7 @@ namespace World
 			const glm::vec2& pivot = { 0.5f, 0.5f }, const glm::vec4& border = { 0.0f, 0.0f, 0.0f, 0.0f });
 		bool DeleteSprite(size_t index);
 		void AutoGridSlice(float cellW, float cellH);
+		void AutoAlphaSlice(float alphaThreshold = 0.05f);
 
 		std::shared_ptr<TextureAtlas> GetAtlas() const noexcept { return m_Atlas; }
 
@@ -53,6 +54,7 @@ namespace World
 		int64_t m_EditAtlasH { 256 };
 		float m_GridCellW { 64.0f };
 		float m_GridCellH { 64.0f };
+		float m_AlphaThreshold { 0.05f };
 
 		std::string m_EditName;
 		float m_EditRectX { 0.0f };

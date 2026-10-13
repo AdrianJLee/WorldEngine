@@ -846,6 +846,17 @@ function ui:isOpen() end
 ---@field EnableCollision boolean
 ---@field EnableLimit boolean
 
+-- Component fields are exposed through Entity:GetComponent("FreeformLight2DComponent"); there is no runtime global named FreeformLight2DComponent.
+---@class FreeformLight2DComponent
+---@field Intensity number
+---@field FalloffDistance number
+---@field CastShadows boolean
+---@field Points string
+---@field AffectAllLayers boolean
+---@field Enabled boolean
+---@field Color vec4
+---@field TargetSortingLayer number
+
 -- Component fields are exposed through Entity:GetComponent("GlobalLight2DComponent"); there is no runtime global named GlobalLight2DComponent.
 ---@class GlobalLight2DComponent
 ---@field Enabled boolean
@@ -1079,6 +1090,7 @@ function ui:isOpen() end
 ---@field OrderInLayer number
 ---@field SortingLayer number
 ---@field ShowGrid boolean
+---@field ColliderType number
 ---@field GenerateCollision boolean
 ---@field GridType number
 ---@field TintColor vec4
@@ -1148,6 +1160,8 @@ function ui:isOpen() end
 ---@field DirectionalLight string Short alias for "DirectionalLightComponent".
 ---@field DistanceJoint2DComponent string Registered component type name "DistanceJoint2DComponent".
 ---@field DistanceJoint2D string Short alias for "DistanceJoint2DComponent".
+---@field FreeformLight2DComponent string Registered component type name "FreeformLight2DComponent".
+---@field FreeformLight2D string Short alias for "FreeformLight2DComponent".
 ---@field GlobalLight2DComponent string Registered component type name "GlobalLight2DComponent".
 ---@field GlobalLight2D string Short alias for "GlobalLight2DComponent".
 ---@field HierarchyComponent string Registered component type name "HierarchyComponent".

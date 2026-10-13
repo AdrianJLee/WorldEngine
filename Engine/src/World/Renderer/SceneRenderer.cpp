@@ -1394,6 +1394,7 @@ namespace World
 			RenderDebug(camera, cameraTransform);
 		}
 		RenderGroundGrid(camera, cameraTransform);
+		Render2DLighting(camera, cameraTransform);
 		RenderGeometry(camera, cameraTransform);
 
 		Renderer2D::EndScene();
@@ -1493,6 +1494,102 @@ namespace World
 		if (m_AssetRegistry)
 			return m_AssetRegistry->ResolveTexture(asset);
 		return TextureLibrary::Get().Get(asset.Path, /*srgb*/ true);
+	}
+
+	void SceneRenderer::Render2DLighting(const Camera&, const glm::mat4&)
+	{
+		if (!m_ActiveScene)
+			return;
+
+		const auto freeformLights = Lighting2D::CollectFreeformLights2D(m_ActiveScene);
+		for (const auto& light : freeformLights)
+		{
+			const size_t n = light.WorldPolygon.size();
+			if (n < 3)
+				continue;
+
+			const uint32_t entityId = light.Entity != entt::null ? static_cast<uint32_t>(light.Entity) : 0u;
+			const glm::vec3 col(light.Color.r, light.Color.g, light.Color.b);
+			const float intensityNorm = std::clamp(light.Intensity, 0.0f, 1.0f);
+
+			// 1. Semi-transparent luminous polygon face
+			const glm::vec4 faceColor(col.r, col.g, col.b, 0.25f * intensityNorm);
+			glm::vec2 centroid(0.0f);
+			for (const auto& p : light.WorldPolygon)
+				centroid += p;
+			centroid /= static_cast<float>(n);
+
+			for (size_t i = 0; i < n; ++i)
+			{
+				const size_t next = (i + 1) % n;
+				const glm::vec3 pos[4] = {
+					glm::vec3(centroid.x, centroid.y, 0.0f),
+					glm::vec3(light.WorldPolygon[i].x, light.WorldPolygon[i].y, 0.0f),
+					glm::vec3(light.WorldPolygon[next].x, light.WorldPolygon[next].y, 0.0f),
+					glm::vec3(light.WorldPolygon[next].x, light.WorldPolygon[next].y, 0.0f)
+				};
+				Renderer2D::DrawQuadPositions(pos, nullptr, faceColor, nullptr, 1.0f, entityId);
+			}
+
+			// 2. Outer boundary wireframe line
+			const glm::vec4 wireColor(col.r, col.g, col.b, 0.90f * intensityNorm);
+			for (size_t i = 0; i < n; ++i)
+			{
+				const size_t next = (i + 1) % n;
+				const glm::vec3 p0(light.WorldPolygon[i].x, light.WorldPolygon[i].y, 0.0f);
+				const glm::vec3 p1(light.WorldPolygon[next].x, light.WorldPolygon[next].y, 0.0f);
+				Renderer2D::DrawLineCore(p0, p1, wireColor, entityId);
+			}
+
+			// 3. Inner feathered falloff edge
+			if (light.FalloffDistance > 0.01f)
+			{
+				const glm::vec4 featherColor(col.r, col.g, col.b, 0.45f * intensityNorm);
+				std::vector<glm::vec2> innerPts(n);
+				for (size_t i = 0; i < n; ++i)
+				{
+					const glm::vec2& pPrev = light.WorldPolygon[(i + n - 1) % n];
+					const glm::vec2& pCur = light.WorldPolygon[i];
+					const glm::vec2& pNext = light.WorldPolygon[(i + 1) % n];
+
+					glm::vec2 d1 = pCur - pPrev;
+					glm::vec2 d2 = pNext - pCur;
+					const float len1 = glm::length(d1);
+					const float len2 = glm::length(d2);
+					if (len1 > 1e-5f) d1 /= len1;
+					if (len2 > 1e-5f) d2 /= len2;
+
+					const glm::vec2 n1(-d1.y, d1.x);
+					const glm::vec2 n2(-d2.y, d2.x);
+					glm::vec2 avgN = n1 + n2;
+					const float avgLen = glm::length(avgN);
+					if (avgLen > 1e-5f)
+						avgN /= avgLen;
+					else
+						avgN = n1;
+
+					innerPts[i] = pCur + avgN * std::min(light.FalloffDistance, 0.8f);
+				}
+
+				for (size_t i = 0; i < n; ++i)
+				{
+					const size_t next = (i + 1) % n;
+					Renderer2D::DrawLineCore(
+						glm::vec3(innerPts[i].x, innerPts[i].y, 0.0f),
+						glm::vec3(innerPts[next].x, innerPts[next].y, 0.0f),
+						featherColor, entityId);
+
+					const glm::vec3 stripQuad[4] = {
+						glm::vec3(light.WorldPolygon[i].x, light.WorldPolygon[i].y, 0.0f),
+						glm::vec3(light.WorldPolygon[next].x, light.WorldPolygon[next].y, 0.0f),
+						glm::vec3(innerPts[next].x, innerPts[next].y, 0.0f),
+						glm::vec3(innerPts[i].x, innerPts[i].y, 0.0f)
+					};
+					const glm::vec4 stripColor(col.r, col.g, col.b, 0.15f * intensityNorm);
+					Renderer2D::DrawQuadPositions(stripQuad, nullptr, stripColor, nullptr, 1.0f, entityId);
+				}
+			}
+		}
 	}
 
 	void SceneRenderer::RenderGeometry(const Camera& camera, const glm::mat4& cameraTransform)
@@ -2049,17 +2146,39 @@ namespace World
 			const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
 				* glm::mat4_cast(transform.Rotation);
 
-			const auto rects = tm->ComputeMergedColliderRects();
-			for (const auto& r : rects)
+			if (tilemapComp.ColliderType == 1) // CompositeChain
 			{
-				const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
-				const float cy = +mapH * 0.5f - (r.Y + r.Height * 0.5f) * cellH;
-				const float rw = r.Width * cellW;
-				const float rh = r.Height * cellH;
-				const glm::mat4 rectTr = baseTr
-					* glm::translate(glm::mat4(1.0f), glm::vec3(cx, cy, 0.0f))
-					* glm::scale(glm::mat4(1.0f), glm::vec3(rw, rh, 1.0f));
-				Renderer2D::DrawRectCore(rectTr, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+				const auto contours = tm->ComputeCompositeChainContours();
+				for (const auto& contour : contours)
+				{
+					if (contour.size() < 2) continue;
+					for (size_t i = 0; i < contour.size(); ++i)
+					{
+						const size_t next = (i + 1) % contour.size();
+						const float p0x = -mapW * 0.5f + (contour[i].x / tm->GetCellSize().x) * cellW;
+						const float p0y = +mapH * 0.5f - (contour[i].y / tm->GetCellSize().y) * cellH;
+						const float p1x = -mapW * 0.5f + (contour[next].x / tm->GetCellSize().x) * cellW;
+						const float p1y = +mapH * 0.5f - (contour[next].y / tm->GetCellSize().y) * cellH;
+						const glm::vec3 v0 = glm::vec3(baseTr * glm::vec4(p0x, p0y, 0.0f, 1.0f));
+						const glm::vec3 v1 = glm::vec3(baseTr * glm::vec4(p1x, p1y, 0.0f, 1.0f));
+						Renderer2D::DrawLineCore(v0, v1, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+					}
+				}
+			}
+			else if (tilemapComp.ColliderType == 0) // MergedBoxes
+			{
+				const auto rects = tm->ComputeMergedColliderRects();
+				for (const auto& r : rects)
+				{
+					const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
+					const float cy = +mapH * 0.5f - (r.Y + r.Height * 0.5f) * cellH;
+					const float rw = r.Width * cellW;
+					const float rh = r.Height * cellH;
+					const glm::mat4 rectTr = baseTr
+						* glm::translate(glm::mat4(1.0f), glm::vec3(cx, cy, 0.0f))
+						* glm::scale(glm::mat4(1.0f), glm::vec3(rw, rh, 1.0f));
+					Renderer2D::DrawRectCore(rectTr, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+				}
 			}
 		}
 		// Phase 9: PointLight2D, GlobalLight2D & ShadowCaster2D debug wireframes

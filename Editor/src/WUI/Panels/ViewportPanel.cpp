@@ -1,3 +1,4 @@
+#include "WUI/Panels/ViewportPanel_ToolGizmos.h"
 #include "wldpch.h"
 #include "WUI/Panels/ViewportPanel.h"
 
@@ -931,6 +932,12 @@ namespace World
 				const float ppu = m_Host.GetPixelSnapPpu();
 				transform.Location.x = std::round(transform.Location.x * ppu) / ppu;
 				transform.Location.y = std::round(transform.Location.y * ppu) / ppu;
+			}
+			if (selected.HasComponent<FreeformLight2DComponent>())
+			{
+				auto& light = selected.GetComponent<FreeformLight2DComponent>();
+				const bool lightUsing = ManipulateFreeformLight2D(m_Host.GetGizmoCamera(), transform, light, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				if (lightUsing) nowUsing = true;
 			}
 			gizmoEngaged = nowUsing;
 			if (!m_GizmoActive && nowUsing)

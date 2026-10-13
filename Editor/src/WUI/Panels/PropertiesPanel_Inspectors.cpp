@@ -87,6 +87,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawGlobalLight2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::ShadowCaster2DComponent")
 			height = DrawShadowCaster2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::FreeformLight2DComponent")
+			height = DrawFreeformLight2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		// 自定义检查器:关卡数据层归属(勾选替代裸掩码数字);Play/Simulate 只读时退回普通行。
 		else if (schema.Id.Name == "World::LevelEntityComponent" && !m_ReadOnly)
 			height = DrawLevelEntityInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
@@ -916,6 +918,56 @@ float PropertiesPanel::DrawSpriteAnimatorInspector(Wui::WuiContext& ctx, const W
 	return y - rect.Y;
 }
 
+float PropertiesPanel::DrawFreeformLight2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* light = static_cast<World::FreeformLight2DComponent*>(instance);
+	if (!light) return height;
+
+	auto pts = light->GetLocalPolygon();
+	std::string summary = "2D 自由多边形光区 (Freeform Shape · " + std::to_string(pts.size()) + " 个顶点):";
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, summary, theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 96.0f;
+	const float btnH = 22.0f;
+	const Wui::WuiRect btnTrapezoid { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnCone      { rect.X + 114.0f, y, btnW, btnH };
+	const Wui::WuiRect btnDiamond   { rect.X + 216.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnTrapezoid, "梯形光区预设: -1,-0.7;1,-0.7;0.6,0.8;-0.6,0.8 (prop.freeform.preset_trapezoid)");
+	if (Wui::Button(ctx, Wui::HashId("prop.freeform.preset_trapezoid"), btnTrapezoid, "📐 梯形光区", theme))
+	{
+		light->Points = StringPool::Get().InternName("-1,-0.7;1,-0.7;0.6,0.8;-0.6,0.8");
+		m_Host.MarkDocumentDirty();
+		if (changedFields) changedFields->push_back("Points");
+	}
+
+	Wui::Tooltip(ctx, btnCone, "射灯光锥预设: 0,-1;1.2,1;-1.2,1 (prop.freeform.preset_cone)");
+	if (Wui::Button(ctx, Wui::HashId("prop.freeform.preset_cone"), btnCone, "📐 射灯光锥", theme))
+	{
+		light->Points = StringPool::Get().InternName("0,-1;1.2,1;-1.2,1");
+		m_Host.MarkDocumentDirty();
+		if (changedFields) changedFields->push_back("Points");
+	}
+
+	Wui::Tooltip(ctx, btnDiamond, "菱形天窗预设: 0,-1;1,0;0,1;-1,0 (prop.freeform.preset_diamond)");
+	if (Wui::Button(ctx, Wui::HashId("prop.freeform.preset_diamond"), btnDiamond, "📐 菱形天窗", theme))
+	{
+		light->Points = StringPool::Get().InternName("0,-1;1,0;0,1;-1,0");
+		m_Host.MarkDocumentDirty();
+		if (changedFields) changedFields->push_back("Points");
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
 float PropertiesPanel::DrawTilemapInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 	std::vector<std::string>* changedFields)
@@ -963,6 +1015,41 @@ float PropertiesPanel::DrawTilemapInspector(Wui::WuiContext& ctx, const Wui::Wui
 	}
 	y += 28.0f;
 
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "碰撞生成模式 (Collider Mode):", theme.TextMuted, 11.0f);
+	y += 20.0f;
+
+	const float colBtnW = 86.0f;
+	const float colBtnH = 22.0f;
+	struct ColPreset { const char* id; const char* label; const char* tip; uint8_t type; };
+	const ColPreset colliders[3] = {
+		{ "prop.tm.col_merged", "贪心矩形", "0: MergedBoxes 贪心合并为若干大矩形碰撞盒 (prop.tm.col_merged)", 0 },
+		{ "prop.tm.col_chain",  "边缘链",   "1: CompositeChain 连续平滑多边形边缘链碰撞体 (prop.tm.col_chain)", 1 },
+		{ "prop.tm.col_none",   "无碰撞",   "2: None 不为此 Tilemap 生成碰撞体 (prop.tm.col_none)", 2 }
+	};
+	for (int i = 0; i < 3; ++i)
+	{
+		const Wui::WuiRect bRect { rect.X + 12.0f + i * (colBtnW + 4.0f), y, colBtnW, colBtnH };
+		auto btnTheme = theme;
+		if (tmComp->ColliderType == colliders[i].type)
+		{
+			btnTheme.ButtonBg = theme.ActiveBg;
+			btnTheme.Border = theme.Accent;
+		}
+		Wui::Tooltip(ctx, bRect, colliders[i].tip);
+		if (Wui::Button(ctx, Wui::HashId(colliders[i].id), bRect, colliders[i].label, btnTheme))
+		{
+			tmComp->ColliderType = colliders[i].type;
+			tmComp->GenerateCollision = (colliders[i].type != 2);
+			m_Host.MarkDocumentDirty();
+			if (changedFields)
+			{
+				changedFields->push_back("ColliderType");
+				changedFields->push_back("GenerateCollision");
+			}
+		}
+	}
+	y += 28.0f;
+
 	const std::string tmPath = tmComp->Tilemap.HasPath() ? StringPool::Get().PathOf(tmComp->Tilemap.Path) : "";
 
 	const Wui::WuiRect btnOpen { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
@@ -979,9 +1066,12 @@ float PropertiesPanel::DrawTilemapInspector(Wui::WuiContext& ctx, const Wui::Wui
 		if (auto tm = Tilemap::GetOrLoad(tmPath))
 		{
 			const size_t mergedCount = tm->ComputeMergedColliderRects().size();
+			std::string colModeStr = tmComp->ColliderType == 0
+				? ("贪心矩形 (" + std::to_string(mergedCount) + " 个)")
+				: (tmComp->ColliderType == 1 ? "平滑边缘链" : "无");
 			std::string summary = "网格: " + std::to_string(tm->GetWidth()) + "x" + std::to_string(tm->GetHeight())
 				+ " | 已绘瓦片: " + std::to_string(tm->CountPaintedTiles())
-				+ " | 合并碰撞盒: " + std::to_string(mergedCount) + " 个";
+				+ " | 碰撞模式: " + colModeStr;
 			Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, summary, theme.Accent, 10.5f);
 			y += 20.0f;
 		}

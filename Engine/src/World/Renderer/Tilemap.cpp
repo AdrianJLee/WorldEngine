@@ -289,6 +289,173 @@ namespace World
 		return rects;
 	}
 
+	std::vector<std::vector<glm::vec2>> Tilemap::ComputeCompositeChainContours() const
+	{
+		std::vector<std::vector<glm::vec2>> contours;
+		if (m_Width == 0 || m_Height == 0)
+			return contours;
+
+		struct DirectedEdge
+		{
+			glm::ivec2 A;
+			glm::ivec2 B;
+		};
+
+		std::vector<DirectedEdge> edges;
+		edges.reserve(static_cast<size_t>(m_Width) * m_Height);
+
+		for (uint32_t y = 0; y < m_Height; ++y)
+		{
+			const int iy = static_cast<int>(y);
+			for (uint32_t x = 0; x < m_Width; ++x)
+			{
+				if (!IsSolid(x, y))
+					continue;
+
+				const int ix = static_cast<int>(x);
+
+				// Bottom edge: (x, y) -> (x+1, y) (when y == 0 || !IsSolid(x, y-1))
+				if (y == 0 || !IsSolid(x, y - 1))
+					edges.push_back({ { ix, iy }, { ix + 1, iy } });
+
+				// Right edge: (x+1, y) -> (x+1, y+1) (when x == Width-1 || !IsSolid(x+1, y))
+				if (x == m_Width - 1 || !IsSolid(x + 1, y))
+					edges.push_back({ { ix + 1, iy }, { ix + 1, iy + 1 } });
+
+				// Top edge: (x+1, y+1) -> (x, y+1) (when y == Height-1 || !IsSolid(x, y+1))
+				if (y == m_Height - 1 || !IsSolid(x, y + 1))
+					edges.push_back({ { ix + 1, iy + 1 }, { ix, iy + 1 } });
+
+				// Left edge: (x, y+1) -> (x, y) (when x == 0 || !IsSolid(x-1, y))
+				if (x == 0 || !IsSolid(x - 1, y))
+					edges.push_back({ { ix, iy + 1 }, { ix, iy } });
+			}
+		}
+
+		if (edges.empty())
+			return contours;
+
+		auto packVertex = [](const glm::ivec2& v) -> uint64_t
+		{
+			return (static_cast<uint64_t>(static_cast<uint32_t>(v.x)) << 32) | static_cast<uint64_t>(static_cast<uint32_t>(v.y));
+		};
+
+		std::unordered_map<uint64_t, std::vector<glm::ivec2>> outgoing;
+		for (const auto& e : edges)
+		{
+			outgoing[packVertex(e.A)].push_back(e.B);
+		}
+
+		while (!outgoing.empty())
+		{
+			auto it = outgoing.begin();
+			while (it != outgoing.end() && it->second.empty())
+			{
+				it = outgoing.erase(it);
+			}
+			if (it == outgoing.end())
+				break;
+
+			const glm::ivec2 startA = glm::ivec2(
+				static_cast<int>(static_cast<int32_t>(it->first >> 32)),
+				static_cast<int>(static_cast<int32_t>(it->first & 0xFFFFFFFFULL))
+			);
+			const glm::ivec2 startB = it->second.back();
+			it->second.pop_back();
+			if (it->second.empty())
+				outgoing.erase(it);
+
+			std::vector<glm::ivec2> rawLoop;
+			rawLoop.push_back(startA);
+
+			glm::ivec2 prev = startA;
+			glm::ivec2 cur = startB;
+			size_t stepCount = 0;
+			const size_t maxSteps = edges.size() + 4;
+
+			while (cur != startA && stepCount < maxSteps)
+			{
+				rawLoop.push_back(cur);
+				++stepCount;
+
+				const uint64_t curKey = packVertex(cur);
+				auto nextIt = outgoing.find(curKey);
+				if (nextIt == outgoing.end() || nextIt->second.empty())
+					break;
+
+				// If multiple outgoing edges (e.g. diagonal checkerboard corner), prefer leftmost CCW turn
+				size_t bestIdx = 0;
+				if (nextIt->second.size() > 1)
+				{
+					const glm::ivec2 inDir = cur - prev;
+					int bestScore = -999;
+					for (size_t k = 0; k < nextIt->second.size(); ++k)
+					{
+						const glm::ivec2 outDir = nextIt->second[k] - cur;
+						const int cross = inDir.x * outDir.y - inDir.y * outDir.x;
+						const int dot = inDir.x * outDir.x + inDir.y * outDir.y;
+						int score = 0;
+						if (cross > 0) score = 3;
+						else if (cross == 0 && dot > 0) score = 2;
+						else if (cross < 0) score = 1;
+						if (score > bestScore)
+						{
+							bestScore = score;
+							bestIdx = k;
+						}
+					}
+				}
+
+				const glm::ivec2 nextPt = nextIt->second[bestIdx];
+				nextIt->second.erase(nextIt->second.begin() + bestIdx);
+				if (nextIt->second.empty())
+					outgoing.erase(nextIt);
+
+				prev = cur;
+				cur = nextPt;
+			}
+
+			// Simplify collinear points along closed polygon loop
+			if (rawLoop.size() >= 3)
+			{
+				std::vector<glm::ivec2> simplified;
+				const size_t N = rawLoop.size();
+				for (size_t i = 0; i < N; ++i)
+				{
+					const glm::ivec2& p0 = rawLoop[(i + N - 1) % N];
+					const glm::ivec2& p1 = rawLoop[i];
+					const glm::ivec2& p2 = rawLoop[(i + 1) % N];
+
+					const glm::ivec2 d1 = p1 - p0;
+					const glm::ivec2 d2 = p2 - p1;
+					const int cross = d1.x * d2.y - d1.y * d2.x;
+					const int dot = d1.x * d2.x + d1.y * d2.y;
+
+					if (cross == 0 && dot > 0)
+						continue; // Collinear, remove intermediate vertex
+
+					simplified.push_back(p1);
+				}
+
+				if (simplified.size() >= 3)
+			{
+					std::vector<glm::vec2> contour;
+					contour.reserve(simplified.size());
+					for (const auto& pt : simplified)
+					{
+						contour.emplace_back(
+							static_cast<float>(pt.x) * m_CellSize.x,
+							static_cast<float>(pt.y) * m_CellSize.y
+						);
+					}
+					contours.push_back(std::move(contour));
+				}
+			}
+		}
+
+		return contours;
+	}
+
 	std::string Tilemap::SerializeYaml() const
 	{
 		YAML::Emitter out;

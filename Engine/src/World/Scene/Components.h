@@ -235,7 +235,7 @@ namespace World
 		bool GenerateCollision = true;
 		bool ShowGrid = false;
 		uint8_t GridType = 0;
-		uint8_t Reserved1 = 0;
+		uint8_t ColliderType = 0; // 0 = MergedBoxes, 1 = CompositeChain, 2 = None
 		uint32_t Reserved2 = 0;
 
 		TilemapComponent() = default;
@@ -259,6 +259,8 @@ namespace World
 				Doc("Draw tile grid overlay in the editor viewport."));
 			WE_FIELD(GridType, UInt8, Default(0),
 				Doc("0 = Orthogonal, 1 = Isometric, 2 = HexagonalPointy, 3 = HexagonalFlat."));
+			WE_FIELD(ColliderType, UInt8, Default(0),
+				Doc("Collision mode: 0 = MergedBoxes (greedy rects), 1 = CompositeChain (smooth edge chain), 2 = None."));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(TilemapComponent) == 56, "TilemapComponent must be exactly 56 bytes");
@@ -760,6 +762,66 @@ namespace World
 	};
 	static_assert(sizeof(ShadowCaster2DComponent) == 32, "ShadowCaster2DComponent must be exactly 32 bytes");
 	static_assert(std::is_trivially_copyable_v<ShadowCaster2DComponent>, "ShadowCaster2DComponent must be trivially copyable");
+
+	struct FreeformLight2DComponent
+	{
+		glm::vec4 Color { 1.0f, 1.0f, 0.9f, 1.0f };
+		NameId Points;
+		float Intensity = 1.0f;
+		float FalloffDistance = 0.5f;
+		int32_t TargetSortingLayer = 0;
+		bool AffectAllLayers = true;
+		bool CastShadows = false;
+		bool Enabled = true;
+		uint8_t _Padding = 0;
+
+		FreeformLight2DComponent() = default;
+
+		inline std::vector<glm::vec2> GetLocalPolygon() const
+		{
+			if (Points.IsValid())
+			{
+				auto pts = Physics2D::ParsePointList(StringPool::Get().NameOf(Points));
+				if (pts.size() >= 3)
+					return pts;
+			}
+			return {
+				{ -1.0f, -0.7f },
+				{  1.0f, -0.7f },
+				{  0.6f,  0.8f },
+				{ -0.6f,  0.8f }
+			};
+		}
+
+		inline void SetPoints(const std::vector<glm::vec2>& points)
+		{
+			std::string formatted = Physics2D::FormatPointList(points);
+			Points = formatted.empty() ? NameId{} : StringPool::Get().InternName(formatted);
+		}
+
+		WE_SCHEMA_BODY(World, FreeformLight2DComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/2D"),
+				Doc("2D freeform polygon light: Points defines arbitrary polygon vertices in local space."))
+			WE_FIELD(Color, Vec4, Color(),
+				Doc("Light tint color and multiplier."));
+			WE_FIELD(Points, Name,
+				Doc("Semicolon-separated list of 2D vertex coordinates in local space."));
+			WE_FIELD(Intensity, Float, Default(1.0f),
+				Doc("Light luminous power."));
+			WE_FIELD(FalloffDistance, Float, Default(0.5f),
+				Doc("Feathered edge falloff distance in world meters."));
+			WE_FIELD(TargetSortingLayer, Int32, Default(0),
+				Doc("Target sorting layer when AffectAllLayers is false."));
+			WE_FIELD(AffectAllLayers, Bool, Default(true),
+				Doc("Whether this light affects all 2D sorting layers."));
+			WE_FIELD(CastShadows, Bool, Default(false),
+				Doc("Whether this light interacts with 2D shadow casters."));
+			WE_FIELD(Enabled, Bool, Default(true),
+				Doc("Whether this 2D freeform light is active."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(FreeformLight2DComponent) == 36, "FreeformLight2DComponent must be exactly 36 bytes");
+	static_assert(std::is_trivially_copyable_v<FreeformLight2DComponent>, "FreeformLight2DComponent must be trivially copyable");
 
 
 

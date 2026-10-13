@@ -66,6 +66,9 @@ namespace World
 		// Synthesizes contiguous solid cells into maximal merged rectangles to eliminate ghost collisions
 		std::vector<MergedColliderRect> ComputeMergedColliderRects() const;
 
+		// Synthesizes contiguous solid cells into smooth closed polygon contour chains for Box2D chain colliders
+		std::vector<std::vector<glm::vec2>> ComputeCompositeChainContours() const;
+
 		const std::vector<uint16_t>& GetRawTiles() const noexcept { return m_Tiles; }
 		const std::vector<uint8_t>& GetRawCollisionMask() const noexcept { return m_CollisionMask; }
 
