@@ -966,6 +966,7 @@ function ui:isOpen() end
 ---@field SortingLayer number
 ---@field ShowGrid boolean
 ---@field GenerateCollision boolean
+---@field GridType number
 ---@field TintColor vec4
 ---@field Tilemap string
 ---@field CellSize vec2

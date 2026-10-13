@@ -167,6 +167,15 @@ namespace World
 			return;
 		m_Tilemap->SetTile(x, y, tileId);
 		m_Tilemap->SetSolid(x, y, tileId == 0 ? false : setSolid);
+		if (m_AutoTileMode && m_Tilemap)
+		{
+			if (!m_ActiveRuleTile)
+			{
+				m_ActiveRuleTile = std::make_shared<RuleTile>(
+					RuleTile::CreateStandard47Template("AutoRule", m_EditAtlasPath, static_cast<uint16_t>(std::max(1, m_SelectedTileId))));
+			}
+			m_Tilemap->ApplyRuleTileAt(static_cast<int>(x), static_cast<int>(y), *m_ActiveRuleTile);
+		}
 		m_Dirty = true;
 	}
 
@@ -340,6 +349,37 @@ namespace World
 		}
 		tX += 126.0f;
 
+		// Auto-Tile Toggle
+		const Wui::WuiRect btnAutoTile { tX, toolBar.Y + 5.0f, 126.0f, 24.0f };
+		Wui::Tooltip(ctx, btnAutoTile, "开启/关闭 47-Tile 8邻域自动拼接笔刷 (tilemap.btn.auto_tile)");
+		std::string autoStr = m_AutoTileMode ? "✔ 自动拼接: 开" : "⚡ 自动拼接: 关";
+		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.auto_tile"), btnAutoTile, autoStr, theme))
+		{
+			m_AutoTileMode = !m_AutoTileMode;
+			if (m_AutoTileMode && !m_ActiveRuleTile)
+			{
+				m_ActiveRuleTile = std::make_shared<RuleTile>(
+					RuleTile::CreateStandard47Template("AutoRule", m_EditAtlasPath, static_cast<uint16_t>(std::max(1, m_SelectedTileId))));
+			}
+		}
+		tX += 132.0f;
+
+		// Apply Auto-Tile All
+		const Wui::WuiRect btnApplyAll { tX, toolBar.Y + 5.0f, 134.0f, 24.0f };
+		Wui::Tooltip(ctx, btnApplyAll, "根据 47-Tile 8邻域规则对整张地图一键自动拼接边缘与转角 (tilemap.btn.apply_all)");
+		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.apply_all"), btnApplyAll, "⚡ 全图自动拼接", theme))
+		{
+			if (!m_ActiveRuleTile)
+			{
+				m_ActiveRuleTile = std::make_shared<RuleTile>(
+					RuleTile::CreateStandard47Template("AutoRule", m_EditAtlasPath, static_cast<uint16_t>(std::max(1, m_SelectedTileId))));
+			}
+			m_Tilemap->ApplyRuleTile(*m_ActiveRuleTile);
+			m_Dirty = true;
+			m_StatusFeedback = "全图 47-Tile 自动拼接完成";
+		}
+		tX += 140.0f;
+
 		// Clear Grid
 		const Wui::WuiRect btnClear { tX, toolBar.Y + 5.0f, 68.0f, 24.0f };
 		Wui::Tooltip(ctx, btnClear, "清空整个网格的全部瓦片与碰撞 (tilemap.btn.clear)");
@@ -361,6 +401,29 @@ namespace World
 		float lY = leftCol.Y + 8.0f;
 		Wui::Label(ctx, { leftCol.X + 10.0f, lY }, "地图与图集配置 (Map & Atlas Setup)", theme.Text, 12.0f);
 		lY += 22.0f;
+
+		// Grid Topology Dropdown
+		Wui::Label(ctx, { leftCol.X + 10.0f, lY + 3.0f }, "网格拓扑:", theme.TextMuted, 11.0f);
+		const Wui::WuiRect topoRect { leftCol.X + 68.0f, lY, leftCol.W - 76.0f, 22.0f };
+		Wui::Tooltip(ctx, topoRect, "切换正交 (Orthogonal)、等轴测 2.5D (Isometric) 或六边形蜂窝网格 (tilemap.field.topology)");
+		const std::vector<std::string> topoOptions = {
+			"正交直角 (Orthogonal)",
+			"等轴测 2.5D (Isometric)",
+			"尖顶六边形 (Hex Pointy)",
+			"平顶六边形 (Hex Flat)"
+		};
+		int currentTopo = m_Tilemap ? static_cast<int>(m_Tilemap->GetGridType()) : 0;
+		const int beforeTopo = currentTopo;
+		if (Wui::Combo(ctx, Wui::HashId("tilemap.field.topology"), topoRect, "拓扑", topoOptions, currentTopo, theme)
+			&& currentTopo != beforeTopo)
+		{
+			if (m_Tilemap)
+			{
+				m_Tilemap->SetGridType(static_cast<TilemapGridType>(currentTopo));
+				m_Dirty = true;
+			}
+		}
+		lY += 26.0f;
 
 		// Atlas path SearchableCombo + Open Atlas button
 		Wui::Label(ctx, { leftCol.X + 10.0f, lY + 3.0f }, "图集资产:", theme.TextMuted, 11.0f);

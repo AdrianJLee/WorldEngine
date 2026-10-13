@@ -1774,11 +1774,12 @@ namespace World
 									texCoords = sub->TexCoords;
 							}
 
-							// Align Y axis: y=0 is top row in Tilemap, mapped to +Y top in scene
-							const glm::vec3 cellOffset(
-								originX + (static_cast<float>(x) + 0.5f) * cellW,
-								originY + (static_cast<float>(height - 1 - y) + 0.5f) * cellH,
-								0.0f);
+							const TilemapGridType activeGridType = tilemapComp.GridType != 0
+								? static_cast<TilemapGridType>(tilemapComp.GridType)
+								: (tm ? tm->GetGridType() : TilemapGridType::Orthogonal);
+							const glm::vec2 localCenter = TilemapGridUtils::GridToLocal(
+								static_cast<int>(x), static_cast<int>(y), activeGridType, { cellW, cellH }, width, height);
+							const glm::vec3 cellOffset(localCenter.x, localCenter.y, 0.0f);
 							const glm::mat4 cellWorldMatrix = baseMatrix
 								* glm::translate(glm::mat4(1.0f), cellOffset)
 								* glm::scale(glm::mat4(1.0f), glm::vec3(cellW, cellH, 1.0f));
@@ -1796,21 +1797,46 @@ namespace World
 
 				if (tilemapComp.ShowGrid)
 				{
-					const glm::mat4 borderTr = baseMatrix * glm::scale(glm::mat4(1.0f), glm::vec3(mapW, mapH, 1.0f));
-					Renderer2D::DrawRectCore(borderTr, { 0.35f, 0.75f, 0.95f, 0.65f }, static_cast<uint32_t>(tmItem.entity));
-					for (uint32_t gx = 1; gx < width; ++gx)
+					const TilemapGridType activeGridType = tilemapComp.GridType != 0
+						? static_cast<TilemapGridType>(tilemapComp.GridType)
+						: (tm ? tm->GetGridType() : TilemapGridType::Orthogonal);
+
+					if (activeGridType == TilemapGridType::Orthogonal)
 					{
-						const float lx = originX + static_cast<float>(gx) * cellW;
-						const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(lx, originY, 0.0f, 1.0f));
-						const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(lx, originY + mapH, 0.0f, 1.0f));
-						Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.28f }, static_cast<uint32_t>(tmItem.entity));
+						const glm::mat4 borderTr = baseMatrix * glm::scale(glm::mat4(1.0f), glm::vec3(mapW, mapH, 1.0f));
+						Renderer2D::DrawRectCore(borderTr, { 0.35f, 0.75f, 0.95f, 0.65f }, static_cast<uint32_t>(tmItem.entity));
+						for (uint32_t gx = 1; gx < width; ++gx)
+						{
+							const float lx = originX + static_cast<float>(gx) * cellW;
+							const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(lx, originY, 0.0f, 1.0f));
+							const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(lx, originY + mapH, 0.0f, 1.0f));
+							Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.28f }, static_cast<uint32_t>(tmItem.entity));
+						}
+						for (uint32_t gy = 1; gy < height; ++gy)
+						{
+							const float ly = originY + static_cast<float>(gy) * cellH;
+							const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(originX, ly, 0.0f, 1.0f));
+							const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(originX + mapW, ly, 0.0f, 1.0f));
+							Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.28f }, static_cast<uint32_t>(tmItem.entity));
+						}
 					}
-					for (uint32_t gy = 1; gy < height; ++gy)
+					else
 					{
-						const float ly = originY + static_cast<float>(gy) * cellH;
-						const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(originX, ly, 0.0f, 1.0f));
-						const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(originX + mapW, ly, 0.0f, 1.0f));
-						Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.28f }, static_cast<uint32_t>(tmItem.entity));
+						for (uint32_t gy = 0; gy < height; ++gy)
+						{
+							for (uint32_t gx = 0; gx < width; ++gx)
+							{
+								const auto poly = TilemapGridUtils::GetCellPolygon(
+									static_cast<int>(gx), static_cast<int>(gy), activeGridType, { cellW, cellH }, width, height);
+								for (size_t k = 0; k < poly.size(); ++k)
+								{
+									const size_t next = (k + 1) % poly.size();
+									const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(poly[k].x, poly[k].y, 0.0f, 1.0f));
+									const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(poly[next].x, poly[next].y, 0.0f, 1.0f));
+									Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.35f }, static_cast<uint32_t>(tmItem.entity));
+								}
+							}
+						}
 					}
 				}
 			}

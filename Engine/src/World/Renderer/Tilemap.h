@@ -2,6 +2,7 @@
 
 #include "World/Core/Export.h"
 #include "World/Core/StringPool.h"
+#include "World/Renderer/TilemapGridUtils.h"
 
 #include <glm/glm.hpp>
 #include <cstdint>
@@ -11,6 +12,7 @@
 
 namespace World
 {
+	class RuleTile;
 	struct WLD_API MergedColliderRect
 	{
 		float X { 0.0f };      // Bottom-left X in grid cell units
@@ -39,6 +41,13 @@ namespace World
 
 		const glm::vec2& GetCellSize() const noexcept { return m_CellSize; }
 		void SetCellSize(const glm::vec2& size) noexcept { m_CellSize = size; }
+
+		TilemapGridType GetGridType() const noexcept { return m_GridType; }
+		void SetGridType(TilemapGridType type) noexcept { m_GridType = type; }
+
+		// 规则瓦片自动拼接 (对整图或指定单格及 8 邻域应用规则匹配)
+		void ApplyRuleTile(const RuleTile& ruleTile);
+		void ApplyRuleTileAt(int x, int y, const RuleTile& ruleTile);
 
 		// tileId: 0 = empty, 1..N = SubTexture index (0..N-1) + 1
 		void SetTile(uint32_t x, uint32_t y, uint16_t tileId);
@@ -74,6 +83,7 @@ namespace World
 		uint32_t m_Width { 16 };
 		uint32_t m_Height { 16 };
 		glm::vec2 m_CellSize { 1.0f, 1.0f };
+		TilemapGridType m_GridType { TilemapGridType::Orthogonal };
 		std::vector<uint16_t> m_Tiles;        // size = m_Width * m_Height
 		std::vector<uint8_t> m_CollisionMask; // size = m_Width * m_Height (0 = passable, 1 = solid)
 	};

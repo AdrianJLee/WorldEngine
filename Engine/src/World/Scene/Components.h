@@ -232,7 +232,8 @@ namespace World
 		int32_t OrderInLayer = 0;
 		bool GenerateCollision = true;
 		bool ShowGrid = false;
-		uint16_t Reserved1 = 0;
+		uint8_t GridType = 0;
+		uint8_t Reserved1 = 0;
 		uint32_t Reserved2 = 0;
 
 		TilemapComponent() = default;
@@ -254,6 +255,8 @@ namespace World
 				Doc("Automatically merge contiguous solid tiles into Box2D static box colliders."));
 			WE_FIELD(ShowGrid, Bool, Default(false),
 				Doc("Draw tile grid overlay in the editor viewport."));
+			WE_FIELD(GridType, UInt8, Default(0),
+				Doc("0 = Orthogonal, 1 = Isometric, 2 = HexagonalPointy, 3 = HexagonalFlat."));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(TilemapComponent) == 56, "TilemapComponent must be exactly 56 bytes");

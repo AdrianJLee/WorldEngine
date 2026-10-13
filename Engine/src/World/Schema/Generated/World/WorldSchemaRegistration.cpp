@@ -1068,6 +1068,16 @@ struct GeneratedAccess<World::TilemapComponent>
         World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
         self->ShowGrid = std::get<bool>(value);
     }
+    static Value Get_GridType(const void* instance)
+    {
+        const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
+        return Value(self->GridType);
+    }
+    static void Set_GridType(void* instance, const Value& value)
+    {
+        World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
+        self->GridType = std::get<uint8_t>(value);
+    }
     static const FieldSchema& Field_TintColor()
     {
         static const FieldSchema schema = {
@@ -1201,6 +1211,24 @@ struct GeneratedAccess<World::TilemapComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_GridType()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA102C6FEACF1637Cull },
+            "GridType",
+            Kind::UInt8,
+            &Get_GridType,
+            &Set_GridType,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "0 = Orthogonal, 1 = Isometric, 2 = HexagonalPointy, 3 = HexagonalFlat.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::TilemapComponent>();
@@ -1222,6 +1250,7 @@ struct GeneratedAccess<World::TilemapComponent>
                 Field_OrderInLayer(),
                 Field_GenerateCollision(),
                 Field_ShowGrid(),
+                Field_GridType(),
             },
             &StorageBindingOf(),
             "Rendering/2D",

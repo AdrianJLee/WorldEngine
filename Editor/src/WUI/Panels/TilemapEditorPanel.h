@@ -1,3 +1,5 @@
+#include "World/Renderer/RuleTile.h"
+#include "World/Renderer/TilemapGridUtils.h"
 #pragma once
 
 #include "WUI/Common/EditorPanel.h"
@@ -78,6 +80,8 @@ namespace World
 		TilePaintTool m_ActiveTool { TilePaintTool::Brush };
 		bool m_PaintSolid { false };
 		bool m_ShowCollisionOverlay { true };
+		bool m_AutoTileMode { false };
+		std::shared_ptr<RuleTile> m_ActiveRuleTile { nullptr };
 		bool m_Dirty { false };
 		std::string m_StatusFeedback;
 

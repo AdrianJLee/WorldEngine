@@ -1,3 +1,4 @@
+#include "World/Renderer/RuleTile.h"
 #include "World/Utils/Paths.h"
 #include "Tilemap.h"
 #include "World/Core/Log.h"
@@ -294,6 +295,7 @@ namespace World
 		out << YAML::BeginMap;
 		out << YAML::Key << "Tilemap" << YAML::Value << m_Name;
 		out << YAML::Key << "AtlasPath" << YAML::Value << m_AtlasPath;
+	out << YAML::Key << "GridType" << YAML::Value << TilemapGridUtils::GetGridTypeName(m_GridType);
 		out << YAML::Key << "Width" << YAML::Value << m_Width;
 		out << YAML::Key << "Height" << YAML::Value << m_Height;
 		out << YAML::Key << "CellSize" << YAML::Flow << YAML::BeginSeq
@@ -339,6 +341,8 @@ namespace World
 
 			if (data["AtlasPath"])
 				m_AtlasPath = data["AtlasPath"].as<std::string>();
+			if (data["GridType"])
+				m_GridType = TilemapGridUtils::ParseGridTypeName(data["GridType"].as<std::string>().c_str());
 			if (data["Width"])
 				m_Width = std::max(1u, data["Width"].as<uint32_t>());
 			if (data["Height"])
@@ -421,6 +425,46 @@ namespace World
 	{
 		std::lock_guard<std::mutex> lock(s_TilemapCacheMutex);
 		s_TilemapCache.clear();
+	}
+
+	
+	void Tilemap::ApplyRuleTile(const RuleTile& ruleTile)
+	{
+		for (uint32_t y = 0; y < m_Height; ++y)
+		{
+			for (uint32_t x = 0; x < m_Width; ++x)
+			{
+				if (IsSolid(x, y) || GetTile(x, y) != 0)
+				{
+					const uint16_t resolvedId = ruleTile.ResolveTile(*this, static_cast<int>(x), static_cast<int>(y));
+					SetTile(x, y, resolvedId);
+				}
+			}
+		}
+	}
+
+	void Tilemap::ApplyRuleTileAt(int x, int y, const RuleTile& ruleTile)
+	{
+		if (x < 0 || x >= static_cast<int>(m_Width) || y < 0 || y >= static_cast<int>(m_Height))
+			return;
+
+		static const int dx[9] = { 0, -1,  0,  1, -1,  1, -1,  0,  1 };
+		static const int dy[9] = { 0, -1, -1, -1,  0,  0,  1,  1,  1 };
+
+		for (int i = 0; i < 9; ++i)
+		{
+			const int nx = x + dx[i];
+			const int ny = y + dy[i];
+			if (nx >= 0 && nx < static_cast<int>(m_Width) &&
+			    ny >= 0 && ny < static_cast<int>(m_Height))
+			{
+				if (IsSolid(nx, ny) || GetTile(nx, ny) != 0)
+				{
+					const uint16_t resolvedId = ruleTile.ResolveTile(*this, nx, ny);
+					SetTile(static_cast<uint32_t>(nx), static_cast<uint32_t>(ny), resolvedId);
+				}
+			}
+		}
 	}
 
 	bool Tilemap::SaveToFile(const std::string& filepath) const
