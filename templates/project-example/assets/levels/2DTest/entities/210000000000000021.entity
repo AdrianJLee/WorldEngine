@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 210000000000000021
+  World::TagComponent:
+    Tag: Animated Knight Hero
+  World::TransformComponent:
+    Location: [-3.5, 0.5, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::SpriteComponent:
+    Color: [1, 1, 1, 1]
+    Texture: "assets/textures/characters/hero_atlas.watlas"
+    SubTextureName: "hero_idle"
+    TilingFactor: 1
+    SortingLayer: 0
+    OrderInLayer: 5
+  World::SpriteAnimatorComponent:
+    Animation: "assets/textures/characters/hero_walk.wanim"
+    Speed: 1
+    CurrentTime: 0
+    CurrentFrame: 0
+    LoopMode: 0
+    Playing: true
+    Finished: false

@@ -568,6 +568,11 @@ function ecs:AddTeardownSystem(name, fn) end
 ---@return number
 function ecs:OnContact(fn) end
 
+---Subscribe to animation keyframe events triggered by SpriteAnimatorComponent; called with { entity, tag, frame }; returns a handle for ecs:Off.
+---@param fn function Called on keyframe animation events with table { entity, tag, frame }.
+---@return number
+function ecs:OnAnimationEvent(fn) end
+
 ---Subscribe to this frame's sensor/trigger events; called once per event with { sensor, other, phase }; returns a handle for ecs:Off.
 ---@param fn function Called once per sensor/trigger event of the current frame with a table { sensor, other, phase }.
 ---@return number

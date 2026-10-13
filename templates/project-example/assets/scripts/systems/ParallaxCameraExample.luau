@@ -137,3 +137,25 @@ ecs:AddSystem("ParallaxCameraDemoSystem", "Update", function(dt: number)
 end)
 
 print("[2D-DEMO] ParallaxCameraDemoSystem 已注册入 ECS")
+-- =========================================================================
+-- 动画关键帧事件监听示例 (Animation Keyframe Events Listener)
+-- =========================================================================
+-- 当角色播放带有 EventTag 的动画关键帧 (如 hero_walk.wanim 中的 step_left / step_right) 时
+-- 引擎将精确打点并在当前帧通过 ecs:OnAnimationEvent 派发到脚本
+local animEventHandle = ecs:OnAnimationEvent(function(event)
+    local entityName = "Unknown"
+    local tagComp = event.entity:Get("TagComponent")
+    if tagComp then
+        entityName = tagComp.Tag
+    end
+    print(string.format("[ANIM-EVENT] 实体 '%s' 触发动画事件: Tag='%s' | Frame=%d",
+        entityName, event.tag, event.frame))
+
+    if event.tag == "step_left" or event.tag == "step_right" then
+        print(string.format("  -> 触发移动脚步音效逻辑: assets/audio/sfx/footstep_grass.waudio (Tag: %s)", event.tag))
+    elseif event.tag == "attack_hit" then
+        print(string.format("  -> 开启攻击判定伤害盒 (HitBox Opened)"))
+    end
+end)
+
+print("[2D-DEMO] 动画关键帧事件监听器已注册 (Handle=" .. tostring(animEventHandle) .. ")")

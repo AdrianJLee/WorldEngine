@@ -1271,6 +1271,158 @@ namespace World
 			return SubscribePhysicsEventsImpl(args, count, true, "ecs:OnTrigger");
 		}
 
+		// ---- Animation Events (ecs:OnAnimationEvent) ----
+		struct AnimationEventSubscription
+		{
+			std::uint64_t Id = 0;
+			ScriptFunctionRef Callback;
+		};
+
+		struct AnimationEventDispatchState
+		{
+			Scene* OwnerScene = nullptr;
+			std::vector<AnimationEventSubscription> Subscriptions;
+		};
+
+		constexpr const char* kAnimationEventSystemName = "lua-animation-events";
+		constexpr std::uint64_t kAnimationEventHandleBase = 0x20000000;
+
+		std::vector<std::weak_ptr<AnimationEventDispatchState>>& AnimationEventStates()
+		{
+			static std::vector<std::weak_ptr<AnimationEventDispatchState>> states;
+			return states;
+		}
+
+		std::uint64_t NextAnimationEventHandle()
+		{
+			static std::uint64_t next = kAnimationEventHandleBase;
+			return ++next;
+		}
+
+		void DispatchAnimationEventToLua(const ScriptFunctionRef& callback, Scene& scene, const Animation::AnimationEvent& event)
+		{
+			try
+			{
+				ScriptTableRef payload = ScriptEngine::GetState().CreateTable();
+				payload.SetField("entity", BoxEntityForScene(scene, event.Entity));
+				payload.SetField("tag", ScriptValue::String(event.EventTag));
+				payload.SetField("frame", ScriptValue::Number(static_cast<double>(event.FrameIndex)));
+
+				const ScriptValue callArgs[] = { payload.ToValue() };
+				std::string callError;
+				ScriptValue result;
+				if (!callback.Call(callArgs, 1, &result, &callError))
+				{
+					if (Log::GetCoreLogger())
+						WLD_CORE_ERROR("[Luau ECS OnAnimationEvent] callback error: {}", callError);
+				}
+			}
+			catch (const std::exception& error)
+			{
+				if (Log::GetCoreLogger())
+					WLD_CORE_ERROR("[Luau ECS OnAnimationEvent] error: {}", error.what());
+			}
+			catch (...)
+			{
+			}
+		}
+
+		void DispatchAnimationEventsToLua(Scene& scene, AnimationEventDispatchState& state)
+		{
+			if (!ScriptEngine::IsInitialized())
+				return;
+			const std::vector<Animation::AnimationEvent>& animEvents = scene.GetAnimationEvents();
+			if (state.Subscriptions.empty() || animEvents.empty())
+				return;
+
+			std::vector<ScriptFunctionRef> subscribers;
+			subscribers.reserve(state.Subscriptions.size());
+			for (const auto& sub : state.Subscriptions)
+				if (sub.Callback.IsValid())
+					subscribers.push_back(sub.Callback);
+
+			for (const Animation::AnimationEvent& event : animEvents)
+				for (const auto& cb : subscribers)
+					DispatchAnimationEventToLua(cb, scene, event);
+		}
+
+		AnimationEventDispatchState& EnsureAnimationEventDispatch(Scene& scene)
+		{
+			std::vector<std::weak_ptr<AnimationEventDispatchState>>& states = AnimationEventStates();
+			for (auto it = states.begin(); it != states.end();)
+			{
+				std::shared_ptr<AnimationEventDispatchState> live = it->lock();
+				if (!live)
+				{
+					it = states.erase(it);
+					continue;
+				}
+				if (live->OwnerScene == &scene)
+					return *live;
+				++it;
+			}
+
+			std::shared_ptr<AnimationEventDispatchState> state = std::make_shared<AnimationEventDispatchState>();
+			state->OwnerScene = &scene;
+			if (!scene.HasFrameSystem(kAnimationEventSystemName))
+			{
+				Scene* target = &scene;
+				std::shared_ptr<AnimationEventDispatchState> captured = state;
+				scene.RegisterFrameSystem({
+					kAnimationEventSystemName,
+					false,
+					[target, captured](Timestep) { DispatchAnimationEventsToLua(*target, *captured); },
+					Gameplay::SystemPhase::Late,
+					{}
+				});
+				scene.SetFrameSystemOwner(kAnimationEventSystemName, "Lua:animation-events");
+			}
+			states.push_back(state);
+			return *state;
+		}
+
+		bool RemoveAnimationEventSubscription(std::uint64_t handle)
+		{
+			if (handle < kAnimationEventHandleBase)
+				return false;
+			for (const std::weak_ptr<AnimationEventDispatchState>& weak : AnimationEventStates())
+			{
+				std::shared_ptr<AnimationEventDispatchState> state = weak.lock();
+				if (!state)
+					continue;
+				const auto found = std::remove_if(state->Subscriptions.begin(), state->Subscriptions.end(),
+					[handle](const AnimationEventSubscription& sub) { return sub.Id == handle; });
+				if (found == state->Subscriptions.end())
+					continue;
+				state->Subscriptions.erase(found, state->Subscriptions.end());
+				return true;
+			}
+			return false;
+		}
+
+		ScriptValue OnAnimationEventImpl(const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+				startIndex = 1;
+			if (count <= startIndex)
+				throw std::logic_error("ecs:OnAnimationEvent expects (fn)");
+
+			ScriptFunctionRef fn;
+			if (!args[startIndex].AsFunction(&fn) || !fn.IsValid())
+				throw std::logic_error("ecs:OnAnimationEvent: callback must be a valid function");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:OnAnimationEvent requires an active scene");
+
+			AnimationEventDispatchState& state = EnsureAnimationEventDispatch(*activeScene);
+			const std::uint64_t handle = NextAnimationEventHandle();
+			state.Subscriptions.push_back({ handle, fn });
+			return ScriptValue::Number(static_cast<double>(handle));
+		}
+
+
 		// -------------------------------------------------------------------------
 		// ecs:OnAdd(componentName, fn) 实现
 		// -------------------------------------------------------------------------
@@ -1483,6 +1635,9 @@ namespace World
 		static const ScriptServiceParam onContactParams[] = {
 			{ "fn", "function", ScriptServiceArgType::None, true, "Called once per contact event of the current frame with a table { a, b, phase, point, normal, depth }." },
 		};
+				static const ScriptServiceParam onAnimEventParams[] = {
+			{ "fn", "function", ScriptServiceArgType::None, true, "Called on keyframe animation events with table { entity, tag, frame }." },
+		};
 		static const ScriptServiceParam onTriggerParams[] = {
 			{ "fn", "function", ScriptServiceArgType::None, true, "Called once per sensor/trigger event of the current frame with a table { sensor, other, phase }." },
 		};
@@ -1516,6 +1671,8 @@ namespace World
 				"Register a teardown system that runs once when the active scene stops running." },
 			{ "OnContact", &OnContactImpl, onContactParams, 1, 1, "number",
 				"Subscribe to this frame's contact events; called once per event with { a, b, phase, point, normal, depth }. Events are produced in the fixed step and read once per frame, so call it from a variable-phase system; returns a handle for ecs:Off." },
+						{ "OnAnimationEvent", &OnAnimationEventImpl, onAnimEventParams, 1, 1, "number",
+				"Subscribe to animation keyframe events triggered by SpriteAnimatorComponent; called with { entity, tag, frame }; returns a handle for ecs:Off." },
 			{ "OnTrigger", &OnTriggerImpl, onTriggerParams, 1, 1, "number",
 				"Subscribe to this frame's sensor/trigger events; called once per event with { sensor, other, phase }; returns a handle for ecs:Off." },
 			{ "Off", &OffImpl, offParams, 1, 1, "boolean",
