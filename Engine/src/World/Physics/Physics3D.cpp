@@ -1181,7 +1181,7 @@ namespace World
 		// 同一实体同时挂 2D 与 3D 物理组件 → 运行时拒绝(可读错误)。
 		const auto conflicts2DAnd3D = [&registry](entt::entity entity)
 		{
-			const bool has2D = registry.any_of<RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent>(entity);
+			const bool has2D = registry.any_of<RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent, CapsuleCollider2DComponent, PolygonCollider2DComponent, ChainCollider2DComponent>(entity);
 			const bool has3D = registry.any_of<RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent,
 				CapsuleCollider3DComponent, MeshCollider3DComponent>(entity);
 			return has2D && has3D;

@@ -1,0 +1,20 @@
+FormatVersion: 2
+Scene: ExampleTerrainChain
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000302
+    World::TagComponent:
+      Tag: Terrain Chain
+    World::TransformComponent:
+      Location: [0, 0, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [1, 1, 1]
+    World::ChainCollider2DComponent:
+      Offset: [0, 0]
+      Points: "-5,2;-2,0;2,0;5,2"
+      Friction: 0.6
+      Restitution: 0.0
+      Loop: false
+      ShowCollider: true
+      IsSensor: false

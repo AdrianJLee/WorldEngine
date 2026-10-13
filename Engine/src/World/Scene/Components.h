@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/StringPool.h"
+#include "World/Physics/Physics2DUtils.h"
 #include "World/Core/UUID.h"
 #include "World/Core/Memory/Memory.h"
 #include "World/Scene/Entity.h"
@@ -747,6 +748,123 @@ namespace World
 	};
 	static_assert(sizeof(CapsuleCollider2DComponent) == 32, "CapsuleCollider2DComponent must be exactly 32 bytes");
 	static_assert(std::is_trivially_copyable_v<CapsuleCollider2DComponent>, "CapsuleCollider2DComponent must be trivially copyable");
+
+	struct PolygonCollider2DComponent
+	{
+		glm::vec2 Offset { 0.0f, 0.0f };
+		NameId Points;
+		float Density = 1.0f;
+		float Friction = 0.5f;
+		float Restitution = 0.0f;
+		bool ShowCollider = true;
+		bool IsSensor = false;
+		uint8_t _Padding[2] { 0, 0 };
+
+		inline std::vector<glm::vec2> GetPoints() const
+		{
+			if (!Points.IsValid()) return Physics2D::GetDefaultPolygonPoints();
+			auto pts = Physics2D::ParsePointList(StringPool::Get().NameOf(Points));
+			return pts.size() >= 3 ? pts : Physics2D::GetDefaultPolygonPoints();
+		}
+		inline void SetPoints(const std::vector<glm::vec2>& points)
+		{
+			std::string formatted = Physics2D::FormatPointList(points);
+			Points = formatted.empty() ? NameId{} : StringPool::Get().InternName(formatted);
+		}
+
+		WE_SCHEMA_BODY(World, PolygonCollider2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D polygon collider simulated by Box2D: Points defines arbitrary polygon vertices in local space."))
+			WE_FIELD(Offset, Vec2,
+				Doc("Centre offset in local units."));
+			WE_FIELD(Points, Name,
+				Doc("Semicolon-separated list of 2D vertex coordinates (e.g. -0.5,-0.5;0.5,-0.5;0,0.5)."));
+			WE_FIELD(Density, Float, Default(1.0f),
+				Doc("Mass per area."));
+			WE_FIELD(Friction, Float, Default(0.5f),
+				Doc("Surface friction against other colliders."));
+			WE_FIELD(Restitution, Float, Default(0.0f),
+				Doc("Bounciness."));
+			WE_FIELD(ShowCollider, Bool, Default(true),
+				Doc("Draw the physics debug outline."));
+			WE_FIELD(IsSensor, Bool, Default(false),
+				Doc("Sensor mode (triggers only, no physical collision)."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(PolygonCollider2DComponent) == 28, "PolygonCollider2DComponent must be exactly 28 bytes");
+	static_assert(std::is_trivially_copyable_v<PolygonCollider2DComponent>, "PolygonCollider2DComponent must be trivially copyable");
+
+	struct ChainCollider2DComponent
+	{
+		glm::vec2 Offset { 0.0f, 0.0f };
+		NameId Points;
+		float Friction = 0.5f;
+		float Restitution = 0.0f;
+		bool Loop = false;
+		bool ShowCollider = true;
+		bool IsSensor = false;
+		uint8_t _Padding[1] { 0 };
+
+		inline std::vector<glm::vec2> GetPoints() const
+		{
+			if (!Points.IsValid()) return Physics2D::GetDefaultChainPoints();
+			auto pts = Physics2D::ParsePointList(StringPool::Get().NameOf(Points));
+			return pts.size() >= 2 ? pts : Physics2D::GetDefaultChainPoints();
+		}
+		inline void SetPoints(const std::vector<glm::vec2>& points)
+		{
+			std::string formatted = Physics2D::FormatPointList(points);
+			Points = formatted.empty() ? NameId{} : StringPool::Get().InternName(formatted);
+		}
+
+		WE_SCHEMA_BODY(World, ChainCollider2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D chain/edge collider simulated by Box2D: Points defines connected line segments ideal for terrain contours."))
+			WE_FIELD(Offset, Vec2,
+				Doc("Centre offset in local units."));
+			WE_FIELD(Points, Name,
+				Doc("Semicolon-separated list of 2D vertex coordinates (e.g. -2,0;-1,0.5;1,0.5;2,0)."));
+			WE_FIELD(Friction, Float, Default(0.5f),
+				Doc("Surface friction against other colliders."));
+			WE_FIELD(Restitution, Float, Default(0.0f),
+				Doc("Bounciness."));
+			WE_FIELD(Loop, Bool, Default(false),
+				Doc("Whether the chain forms a closed loop."));
+			WE_FIELD(ShowCollider, Bool, Default(true),
+				Doc("Draw the physics debug outline."));
+			WE_FIELD(IsSensor, Bool, Default(false),
+				Doc("Sensor mode (triggers only, no physical collision)."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(ChainCollider2DComponent) == 24, "ChainCollider2DComponent must be exactly 24 bytes");
+	static_assert(std::is_trivially_copyable_v<ChainCollider2DComponent>, "ChainCollider2DComponent must be trivially copyable");
+
+	struct PlatformEffector2DComponent
+	{
+		float SurfaceArc = 180.0f;
+		float RotationalOffset = 0.0f;
+		bool OneWay = true;
+		bool UseSideFriction = false;
+		bool UseSideBounce = false;
+		uint8_t _Padding[5] { 0, 0, 0, 0, 0 };
+
+		WE_SCHEMA_BODY(World, PlatformEffector2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D platform effector: modifies collision behavior to enable one-way jump-through platforms."))
+			WE_FIELD(SurfaceArc, Float, Default(180.0f),
+				Doc("Angle of the solid surface in degrees (default 180 = top hemisphere)."));
+			WE_FIELD(RotationalOffset, Float, Default(0.0f),
+				Doc("Rotational offset in degrees from the entity up vector."));
+			WE_FIELD(OneWay, Bool, Default(true),
+				Doc("Whether one-way pass-through collision is enabled."));
+			WE_FIELD(UseSideFriction, Bool, Default(false),
+				Doc("Whether friction is applied on side contact."));
+			WE_FIELD(UseSideBounce, Bool, Default(false),
+				Doc("Whether bounce is applied on side contact."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(PlatformEffector2DComponent) == 16, "PlatformEffector2DComponent must be exactly 16 bytes");
+	static_assert(std::is_trivially_copyable_v<PlatformEffector2DComponent>, "PlatformEffector2DComponent must be trivially copyable");
 
 
 	// P1b D6:3D 物理(Jolt)组件。字段 id 全部显式钉住("RB3D…"/"…3D…" ASCII):

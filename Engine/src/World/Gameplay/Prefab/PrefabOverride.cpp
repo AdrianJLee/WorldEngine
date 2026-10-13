@@ -54,6 +54,10 @@ namespace World::Gameplay
 			RestoreComponentIfPresent<RigidBody2DComponent>(source, destination, from, to);
 			RestoreComponentIfPresent<BoxCollider2DComponent>(source, destination, from, to);
 			RestoreComponentIfPresent<CircleCollider2DComponent>(source, destination, from, to);
+			RestoreComponentIfPresent<CapsuleCollider2DComponent>(source, destination, from, to);
+			RestoreComponentIfPresent<PolygonCollider2DComponent>(source, destination, from, to);
+			RestoreComponentIfPresent<ChainCollider2DComponent>(source, destination, from, to);
+			RestoreComponentIfPresent<PlatformEffector2DComponent>(source, destination, from, to);
 		}
 
 		// ---- P2-b:ApplyPrefabChanges 的字段解析与快照辅助 ----

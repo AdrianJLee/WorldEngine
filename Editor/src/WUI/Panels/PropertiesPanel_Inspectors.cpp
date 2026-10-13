@@ -49,6 +49,12 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawSpriteInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::CapsuleCollider2DComponent")
 			height = DrawCapsuleCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::PolygonCollider2DComponent")
+			height = DrawPolygonCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::ChainCollider2DComponent")
+			height = DrawChainCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::PlatformEffector2DComponent")
+			height = DrawPlatformEffector2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::BoxCollider2DComponent")
 			height = DrawBoxCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::CircleCollider2DComponent")
@@ -955,6 +961,153 @@ float PropertiesPanel::DrawParallaxLayerInspector(Wui::WuiContext& ctx, const Wu
 			plx->ScrollFactor = { presets[i].fx, presets[i].fy };
 			if (changedFields) changedFields->push_back("ScrollFactor");
 		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawPolygonCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* poly = static_cast<World::PolygonCollider2DComponent*>(instance);
+	if (!poly) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "多边形预设 (Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 60.0f;
+	const float btnH = 22.0f;
+	const Wui::WuiRect btnTri   { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnQuad  { rect.X + 76.0f, y, btnW, btnH };
+	const Wui::WuiRect btnPenta { rect.X + 140.0f, y, btnW, btnH };
+	const Wui::WuiRect btnStar  { rect.X + 204.0f, y, btnW, btnH };
+
+	if (Wui::Button(ctx, Wui::HashId("prop.poly2d.preset_tri"), btnTri, "三角形", theme))
+	{
+		poly->SetPoints({ { -0.5f, -0.5f }, { 0.5f, -0.5f }, { 0.0f, 0.5f } });
+		if (changedFields) changedFields->push_back("Points");
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.poly2d.preset_quad"), btnQuad, "矩形", theme))
+	{
+		poly->SetPoints({ { -0.5f, -0.5f }, { 0.5f, -0.5f }, { 0.5f, 0.5f }, { -0.5f, 0.5f } });
+		if (changedFields) changedFields->push_back("Points");
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.poly2d.preset_penta"), btnPenta, "五边形", theme))
+	{
+		std::vector<glm::vec2> pts;
+		for (int i = 0; i < 5; ++i)
+		{
+			float angle = glm::radians(90.0f + i * 72.0f);
+			pts.push_back({ 0.5f * std::cos(angle), 0.5f * std::sin(angle) });
+		}
+		poly->SetPoints(pts);
+		if (changedFields) changedFields->push_back("Points");
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.poly2d.preset_star"), btnStar, "五角星", theme))
+	{
+		std::vector<glm::vec2> pts;
+		for (int i = 0; i < 10; ++i)
+		{
+			float angle = glm::radians(90.0f + i * 36.0f);
+			float r = (i % 2 == 0) ? 0.6f : 0.25f;
+			pts.push_back({ r * std::cos(angle), r * std::sin(angle) });
+		}
+		poly->SetPoints(pts);
+		if (changedFields) changedFields->push_back("Points");
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawChainCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* chain = static_cast<World::ChainCollider2DComponent*>(instance);
+	if (!chain) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "地表轮廓预设 (Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 60.0f;
+	const float btnH = 22.0f;
+	const Wui::WuiRect btnFlat   { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnSlope  { rect.X + 76.0f, y, btnW, btnH };
+	const Wui::WuiRect btnValley { rect.X + 140.0f, y, btnW, btnH };
+	const Wui::WuiRect btnWave   { rect.X + 204.0f, y, btnW, btnH };
+
+	if (Wui::Button(ctx, Wui::HashId("prop.chain2d.preset_flat"), btnFlat, "平坦地", theme))
+	{
+		chain->SetPoints({ { -3.0f, 0.0f }, { -1.0f, 0.0f }, { 1.0f, 0.0f }, { 3.0f, 0.0f } });
+		chain->Loop = false;
+		if (changedFields) { changedFields->push_back("Points"); changedFields->push_back("Loop"); }
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.chain2d.preset_slope"), btnSlope, "斜坡", theme))
+	{
+		chain->SetPoints({ { -3.0f, -1.0f }, { -1.0f, 0.0f }, { 1.0f, 1.0f }, { 3.0f, 2.0f } });
+		chain->Loop = false;
+		if (changedFields) { changedFields->push_back("Points"); changedFields->push_back("Loop"); }
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.chain2d.preset_valley"), btnValley, "U形谷", theme))
+	{
+		chain->SetPoints({ { -3.0f, 2.0f }, { -1.5f, 0.0f }, { 1.5f, 0.0f }, { 3.0f, 2.0f } });
+		chain->Loop = false;
+		if (changedFields) { changedFields->push_back("Points"); changedFields->push_back("Loop"); }
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.chain2d.preset_wave"), btnWave, "波浪", theme))
+	{
+		chain->SetPoints({ { -3.0f, 0.0f }, { -1.5f, 1.0f }, { 0.0f, 0.0f }, { 1.5f, -1.0f }, { 3.0f, 0.0f } });
+		chain->Loop = false;
+		if (changedFields) { changedFields->push_back("Points"); changedFields->push_back("Loop"); }
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawPlatformEffector2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* effector = static_cast<World::PlatformEffector2DComponent*>(instance);
+	if (!effector) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "单向跳板预设 (Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 96.0f;
+	const float btnH = 22.0f;
+	const Wui::WuiRect btn180 { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btn90  { rect.X + 114.0f, y, btnW, btnH };
+
+	if (Wui::Button(ctx, Wui::HashId("prop.plat2d.preset_180"), btn180, "顶面半球 180°", theme))
+	{
+		effector->SurfaceArc = 180.0f;
+		effector->RotationalOffset = 0.0f;
+		effector->OneWay = true;
+		if (changedFields) { changedFields->push_back("SurfaceArc"); changedFields->push_back("RotationalOffset"); changedFields->push_back("OneWay"); }
+	}
+	if (Wui::Button(ctx, Wui::HashId("prop.plat2d.preset_90"), btn90, "垂直顶面 90°", theme))
+	{
+		effector->SurfaceArc = 90.0f;
+		effector->RotationalOffset = 0.0f;
+		effector->OneWay = true;
+		if (changedFields) { changedFields->push_back("SurfaceArc"); changedFields->push_back("RotationalOffset"); changedFields->push_back("OneWay"); }
 	}
 	y += 28.0f;
 

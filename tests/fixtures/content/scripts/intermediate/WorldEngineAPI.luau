@@ -770,6 +770,16 @@ function ui:isOpen() end
 ---@field Offset vec3
 ---@field Radius number
 
+-- Component fields are exposed through Entity:GetComponent("ChainCollider2DComponent"); there is no runtime global named ChainCollider2DComponent.
+---@class ChainCollider2DComponent
+---@field ShowCollider boolean
+---@field Points string
+---@field Offset vec2
+---@field Friction number
+---@field IsSensor boolean
+---@field Restitution number
+---@field Loop boolean
+
 -- Component fields are exposed through Entity:GetComponent("CircleCollider2DComponent"); there is no runtime global named CircleCollider2DComponent.
 ---@class CircleCollider2DComponent
 ---@field Restitution number
@@ -849,11 +859,29 @@ function ui:isOpen() end
 ---@field PixelsPerUnit number
 ---@field SnapToPixelGrid boolean
 
+-- Component fields are exposed through Entity:GetComponent("PlatformEffector2DComponent"); there is no runtime global named PlatformEffector2DComponent.
+---@class PlatformEffector2DComponent
+---@field RotationalOffset number
+---@field UseSideBounce boolean
+---@field SurfaceArc number
+---@field UseSideFriction boolean
+---@field OneWay boolean
+
 -- Component fields are exposed through Entity:GetComponent("PointLightComponent"); there is no runtime global named PointLightComponent.
 ---@class PointLightComponent
 ---@field Range number
 ---@field Intensity number
 ---@field Color vec3
+
+-- Component fields are exposed through Entity:GetComponent("PolygonCollider2DComponent"); there is no runtime global named PolygonCollider2DComponent.
+---@class PolygonCollider2DComponent
+---@field IsSensor boolean
+---@field Friction number
+---@field ShowCollider boolean
+---@field Restitution number
+---@field Offset vec2
+---@field Points string
+---@field Density number
 
 -- Component fields are exposed through Entity:GetComponent("RigidBody2DComponent"); there is no runtime global named RigidBody2DComponent.
 ---@class RigidBody2DComponent
@@ -975,6 +1003,8 @@ function ui:isOpen() end
 ---@field CapsuleCollider2D string Short alias for "CapsuleCollider2DComponent".
 ---@field CapsuleCollider3DComponent string Registered component type name "CapsuleCollider3DComponent".
 ---@field CapsuleCollider3D string Short alias for "CapsuleCollider3DComponent".
+---@field ChainCollider2DComponent string Registered component type name "ChainCollider2DComponent".
+---@field ChainCollider2D string Short alias for "ChainCollider2DComponent".
 ---@field CircleCollider2DComponent string Registered component type name "CircleCollider2DComponent".
 ---@field CircleCollider2D string Short alias for "CircleCollider2DComponent".
 ---@field CircleRendererComponent string Registered component type name "CircleRendererComponent".
@@ -997,8 +1027,12 @@ function ui:isOpen() end
 ---@field PartitionVolume string Short alias for "PartitionVolumeComponent".
 ---@field PixelPerfectCameraComponent string Registered component type name "PixelPerfectCameraComponent".
 ---@field PixelPerfectCamera string Short alias for "PixelPerfectCameraComponent".
+---@field PlatformEffector2DComponent string Registered component type name "PlatformEffector2DComponent".
+---@field PlatformEffector2D string Short alias for "PlatformEffector2DComponent".
 ---@field PointLightComponent string Registered component type name "PointLightComponent".
 ---@field PointLight string Short alias for "PointLightComponent".
+---@field PolygonCollider2DComponent string Registered component type name "PolygonCollider2DComponent".
+---@field PolygonCollider2D string Short alias for "PolygonCollider2DComponent".
 ---@field RigidBody2DComponent string Registered component type name "RigidBody2DComponent".
 ---@field RigidBody2D string Short alias for "RigidBody2DComponent".
 ---@field RigidBody3DComponent string Registered component type name "RigidBody3DComponent".

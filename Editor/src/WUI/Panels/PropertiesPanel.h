@@ -90,6 +90,15 @@ namespace World
 		float DrawCapsuleCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
+		float DrawPolygonCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
+		float DrawChainCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
+		float DrawPlatformEffector2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
 		float DrawBoxCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);

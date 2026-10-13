@@ -1911,6 +1911,66 @@ namespace World
 				Renderer2D::DrawLineCore(bot1, bot2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
 			}
 		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, PolygonCollider2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& poly = m_ActiveScene->m_Registry.get<PolygonCollider2DComponent>(entity);
+			if (!poly.ShowCollider) continue;
+			const auto pts = poly.GetPoints();
+			if (pts.size() < 3) continue;
+
+			const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::mat4_cast(transform.Rotation)
+				* glm::translate(glm::mat4(1.0f), glm::vec3(poly.Offset.x, poly.Offset.y, 0.0f));
+
+			for (size_t i = 0; i < pts.size(); ++i)
+			{
+				size_t next = (i + 1) % pts.size();
+				glm::vec3 p1 = glm::vec3(baseTr * glm::vec4(pts[i].x * transform.Scale.x, pts[i].y * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 p2 = glm::vec3(baseTr * glm::vec4(pts[next].x * transform.Scale.x, pts[next].y * transform.Scale.y, 0.0f, 1.0f));
+				Renderer2D::DrawLineCore(p1, p2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			}
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, ChainCollider2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& chain = m_ActiveScene->m_Registry.get<ChainCollider2DComponent>(entity);
+			if (!chain.ShowCollider) continue;
+			const auto pts = chain.GetPoints();
+			if (pts.size() < 2) continue;
+
+			const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::mat4_cast(transform.Rotation)
+				* glm::translate(glm::mat4(1.0f), glm::vec3(chain.Offset.x, chain.Offset.y, 0.0f));
+
+			const size_t segmentCount = chain.Loop ? pts.size() : (pts.size() - 1);
+			for (size_t i = 0; i < segmentCount; ++i)
+			{
+				size_t next = (i + 1) % pts.size();
+				glm::vec3 p1 = glm::vec3(baseTr * glm::vec4(pts[i].x * transform.Scale.x, pts[i].y * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 p2 = glm::vec3(baseTr * glm::vec4(pts[next].x * transform.Scale.x, pts[next].y * transform.Scale.y, 0.0f, 1.0f));
+				Renderer2D::DrawLineCore(p1, p2, { 0.2f, 0.9f, 0.8f, 1.0f }, static_cast<uint32_t>(entity));
+			}
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, PlatformEffector2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& effector = m_ActiveScene->m_Registry.get<PlatformEffector2DComponent>(entity);
+			if (!effector.OneWay) continue;
+
+			const float rotZ = transform.GetEulerAngles().z + glm::radians(effector.RotationalOffset);
+			const glm::vec3 center = transform.Location;
+			const glm::vec3 upDir = { -std::sin(rotZ), std::cos(rotZ), 0.0f };
+			const glm::vec3 rightDir = { std::cos(rotZ), std::sin(rotZ), 0.0f };
+
+			const glm::vec3 arrowTip = center + upDir * 0.7f;
+			Renderer2D::DrawLineCore(center, arrowTip, { 1.0f, 0.65f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+
+			const glm::vec3 wing1 = arrowTip - upDir * 0.18f + rightDir * 0.12f;
+			const glm::vec3 wing2 = arrowTip - upDir * 0.18f - rightDir * 0.12f;
+			Renderer2D::DrawLineCore(arrowTip, wing1, { 1.0f, 0.65f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			Renderer2D::DrawLineCore(arrowTip, wing2, { 1.0f, 0.65f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+		}
 		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, TilemapComponent>())
 		{
 			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);

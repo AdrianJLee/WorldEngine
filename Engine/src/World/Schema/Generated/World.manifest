@@ -19,6 +19,9 @@ struct World::RigidBody2DComponent
 struct World::BoxCollider2DComponent
 struct World::CircleCollider2DComponent
 struct World::CapsuleCollider2DComponent
+struct World::PolygonCollider2DComponent
+struct World::ChainCollider2DComponent
+struct World::PlatformEffector2DComponent
 struct World::RigidBody3DComponent
 struct World::BoxCollider3DComponent
 struct World::SphereCollider3DComponent

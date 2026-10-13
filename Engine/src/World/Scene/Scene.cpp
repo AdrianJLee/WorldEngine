@@ -1,3 +1,4 @@
+#include "World/Physics/Physics2DUtils.h"
 #include "wldpch.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Scene.h"
@@ -151,8 +152,11 @@ namespace World
 		{
 			if (!b2World_IsValid(worldId)) return false;
 			auto* rb = registry.try_get<RigidBody2DComponent>(entity);
+			const bool hasCollider = registry.any_of<BoxCollider2DComponent, CircleCollider2DComponent,
+				CapsuleCollider2DComponent, PolygonCollider2DComponent, ChainCollider2DComponent>(entity);
 			const auto* tilemapForBody = registry.try_get<TilemapComponent>(entity);
-			if ((!rb && !(tilemapForBody && tilemapForBody->GenerateCollision)) || b2Body_IsValid(FindBody2D(bodies, entity)))
+			const bool hasTilemapColl = (tilemapForBody && tilemapForBody->GenerateCollision);
+			if ((!rb && !hasCollider && !hasTilemapColl) || b2Body_IsValid(FindBody2D(bodies, entity)))
 				return false;
 			const RigidBody2DComponent defaultStaticRb{};
 			if (!rb)
@@ -238,6 +242,62 @@ namespace World
 				shapeDef.material.restitution = capsule->Restitution;
 				PrepareShape(shapeDef, capsule->IsSensor);
 				b2CreateCapsuleShape(body, &shapeDef, &shape);
+			}
+			if (const auto* poly = registry.try_get<PolygonCollider2DComponent>(entity))
+			{
+				const auto triangles = Physics2D::DecomposeOrTriangulatePolygon(poly->GetPoints());
+				for (const auto& tri : triangles)
+				{
+					std::vector<b2Vec2> b2Pts(tri.size());
+					for (size_t i = 0; i < tri.size(); ++i)
+					{
+						b2Pts[i] = { (poly->Offset.x + tri[i].x) * transform->Scale.x,
+						             (poly->Offset.y + tri[i].y) * transform->Scale.y };
+					}
+					b2Hull hull = b2ComputeHull(b2Pts.data(), static_cast<int>(b2Pts.size()));
+					if (hull.count >= 3)
+					{
+						b2Polygon b2Poly = b2MakePolygon(&hull, 0.0f);
+						b2ShapeDef shapeDef = b2DefaultShapeDef();
+						shapeDef.density = poly->Density;
+						shapeDef.material.friction = poly->Friction;
+						shapeDef.material.restitution = poly->Restitution;
+						PrepareShape(shapeDef, poly->IsSensor);
+						b2CreatePolygonShape(body, &shapeDef, &b2Poly);
+					}
+				}
+			}
+			if (const auto* chain = registry.try_get<ChainCollider2DComponent>(entity))
+			{
+				auto pts = chain->GetPoints();
+				if (pts.size() >= 2)
+				{
+					while (pts.size() < 4)
+					{
+						const glm::vec2 mid = (pts[pts.size() - 2] + pts.back()) * 0.5f;
+						pts.insert(pts.end() - 1, mid);
+					}
+					std::vector<b2Vec2> b2Pts(pts.size());
+					for (size_t i = 0; i < pts.size(); ++i)
+					{
+						b2Pts[i] = { (chain->Offset.x + pts[i].x) * transform->Scale.x,
+						             (chain->Offset.y + pts[i].y) * transform->Scale.y };
+					}
+					b2SurfaceMaterial mat = b2DefaultSurfaceMaterial();
+					mat.friction = chain->Friction;
+					mat.restitution = chain->Restitution;
+
+					b2ChainDef chainDef = b2DefaultChainDef();
+					chainDef.points = b2Pts.data();
+					chainDef.count = static_cast<int>(b2Pts.size());
+					chainDef.isLoop = chain->Loop;
+					chainDef.materials = &mat;
+					chainDef.materialCount = 1;
+					chainDef.userData = Physics::PackEntityUserData(entity);
+					chainDef.filter.categoryBits = rb->Layer;
+					chainDef.filter.maskBits = rb->Mask;
+					b2CreateChain(body, &chainDef);
+				}
 			}
 			if (const auto* tilemapComp = registry.try_get<TilemapComponent>(entity))
 			{
@@ -2027,6 +2087,42 @@ namespace World
 		}
 	}
 
+			// P7: Box2D v3 单向平台效应器 (PlatformEffector2D) 预解算碰撞门禁
+		static bool OnPhysics2DPreSolve(b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, void* context)
+		{
+			(void)point;
+			Scene* scene = static_cast<Scene*>(context);
+			if (!scene) return true;
+			entt::entity entityA = Physics::UnpackEntityUserData(b2Shape_GetUserData(shapeIdA));
+			entt::entity entityB = Physics::UnpackEntityUserData(b2Shape_GetUserData(shapeIdB));
+
+			auto checkEffector = [&](entt::entity platformEnt, entt::entity otherEnt, b2ShapeId platformShape, b2ShapeId otherShape, const glm::vec2& normFromPlat) -> bool
+			{
+				if (!scene->GetRegistry().valid(platformEnt)) return true;
+				const auto* effector = scene->GetRegistry().try_get<PlatformEffector2DComponent>(platformEnt);
+				if (!effector || !effector->OneWay) return true;
+
+				const auto* transform = scene->GetRegistry().try_get<TransformComponent>(platformEnt);
+				const float rotZ = transform ? transform->GetEulerAngles().z : 0.0f;
+
+				const b2BodyId bodyPlat = b2Shape_GetBody(platformShape);
+				const b2BodyId bodyOther = b2Shape_GetBody(otherShape);
+				const b2Vec2 vP = b2Body_IsValid(bodyPlat) ? b2Body_GetLinearVelocity(bodyPlat) : b2Vec2{ 0.0f, 0.0f };
+				const b2Vec2 vO = b2Body_IsValid(bodyOther) ? b2Body_GetLinearVelocity(bodyOther) : b2Vec2{ 0.0f, 0.0f };
+				const glm::vec2 relVel { vO.x - vP.x, vO.y - vP.y };
+
+				return Physics2D::EvaluatePlatformEffector(effector->SurfaceArc, effector->RotationalOffset, rotZ, normFromPlat, relVel);
+			};
+
+			const glm::vec2 normAtoB { normal.x, normal.y };
+			if (!checkEffector(entityA, entityB, shapeIdA, shapeIdB, normAtoB))
+				return false;
+			if (!checkEffector(entityB, entityA, shapeIdB, shapeIdA, -normAtoB))
+				return false;
+
+			return true;
+		}
+
 	void Scene::OnPhysics2DStart()
 	{
 		if (b2World_IsValid(m_PhysicsWorldId)) return;
@@ -2034,15 +2130,25 @@ namespace World
 		worldDef.gravity = { 0.0f, -9.8f };
 		worldDef.restitutionThreshold = 0.5f;
 		m_PhysicsWorldId = b2CreateWorld(&worldDef);
+		b2World_SetPreSolveCallback(m_PhysicsWorldId, OnPhysics2DPreSolve, this);
 		m_PhysicsBodies2D.clear();
 		m_PhysicsJoints2D.clear();
 		m_PhysicsFilter2D.clear();
 		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 		{
-			// W3f:创建逻辑抽到 BuildRuntimeBody,与运行时 AddComponent 补建共用同一套形状/质量口径。
 			BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
 		}
 		for (const auto entity : m_Registry.view<TilemapComponent>())
+		{
+			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
+		}
+		for (const auto entity : m_Registry.view<PolygonCollider2DComponent>())
+		{
+			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
+		}
+		for (const auto entity : m_Registry.view<ChainCollider2DComponent>())
 		{
 			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
 				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
