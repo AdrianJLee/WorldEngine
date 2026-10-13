@@ -2205,6 +2205,63 @@ namespace World
 			Renderer2D::DrawLineCore(pA, pB, { 0.85f, 0.35f, 0.85f, 0.90f }, static_cast<uint32_t>(entity));
 			Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), pB) * glm::scale(glm::mat4(1.0f), glm::vec3(0.35f)), { 0.85f, 0.35f, 0.85f, 0.90f }, 0.15f, 0.005f, static_cast<uint32_t>(entity));
 		}
+
+		// Phase 11: 2D Effectors debug wireframes
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, AreaEffector2DComponent>())
+		{
+			const auto& tr = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& area = m_ActiveScene->m_Registry.get<AreaEffector2DComponent>(entity);
+			if (!area.Enabled) continue;
+
+			const glm::vec3 center = tr.Location;
+			if (area.ForceMode == 0) // Directional wind arrow
+			{
+				glm::vec2 dir = area.ForceDirection;
+				if (!area.UseGlobalCoordinates)
+				{
+					const float rz = tr.GetEulerAngles().z;
+					dir = { dir.x * std::cos(rz) - dir.y * std::sin(rz), dir.x * std::sin(rz) + dir.y * std::cos(rz) };
+				}
+				if (glm::length(dir) > 1e-4f) dir = glm::normalize(dir);
+				const glm::vec3 tip = center + glm::vec3(dir * 0.9f, 0.0f);
+				Renderer2D::DrawLineCore(center, tip, { 0.25f, 0.95f, 0.45f, 0.95f }, static_cast<uint32_t>(entity));
+				const glm::vec3 wing1 = tip - glm::vec3(dir * 0.22f, 0.0f) + glm::vec3(-dir.y * 0.12f, dir.x * 0.12f, 0.0f);
+				const glm::vec3 wing2 = tip - glm::vec3(dir * 0.22f, 0.0f) - glm::vec3(-dir.y * 0.12f, dir.x * 0.12f, 0.0f);
+				Renderer2D::DrawLineCore(tip, wing1, { 0.25f, 0.95f, 0.45f, 0.95f }, static_cast<uint32_t>(entity));
+				Renderer2D::DrawLineCore(tip, wing2, { 0.25f, 0.95f, 0.45f, 0.95f }, static_cast<uint32_t>(entity));
+			}
+			else // Center ring for point attractor/repulsor
+			{
+				Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), center) * glm::scale(glm::mat4(1.0f), glm::vec3(0.4f)),
+					{ 0.25f, 0.95f, 0.55f, 0.85f }, 0.2f, 0.005f, static_cast<uint32_t>(entity));
+			}
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, BuoyancyEffector2DComponent>())
+		{
+			const auto& tr = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& buoy = m_ActiveScene->m_Registry.get<BuoyancyEffector2DComponent>(entity);
+			if (!buoy.Enabled) continue;
+
+			const float waterY = tr.Location.y + buoy.SurfaceLevel;
+			const float halfW = 0.5f * std::max(tr.Scale.x, 1.0f);
+			const glm::vec3 p0(tr.Location.x - halfW, waterY, 0.0f);
+			const glm::vec3 p1(tr.Location.x + halfW, waterY, 0.0f);
+			Renderer2D::DrawLineCore(p0, p1, { 0.2f, 0.65f, 0.95f, 0.95f }, static_cast<uint32_t>(entity));
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, SurfaceEffector2DComponent>())
+		{
+			const auto& tr = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& surf = m_ActiveScene->m_Registry.get<SurfaceEffector2DComponent>(entity);
+			if (!surf.Enabled) continue;
+
+			const float halfW = 0.5f * std::max(tr.Scale.x, 1.0f);
+			const float sign = surf.Speed >= 0.0f ? 1.0f : -1.0f;
+			const glm::vec3 center = tr.Location;
+			Renderer2D::DrawLineCore(center - glm::vec3(halfW * 0.4f * sign, 0.0f, 0.0f),
+				center + glm::vec3(halfW * 0.4f * sign, 0.0f, 0.0f), { 0.95f, 0.85f, 0.2f, 0.9f }, static_cast<uint32_t>(entity));
+		}
 	}
 
 

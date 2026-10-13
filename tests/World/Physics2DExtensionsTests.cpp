@@ -288,7 +288,7 @@ static void TestRevoluteJoint2DPendulumSimulation()
 	// 对于 anchor (0, 5): 局部锚点为 (0, 0)
 	// 对于 bob (2, 5): 局部锚点为 (-2, 0)
 	auto& revJoint = bob.AddComponent<RevoluteJoint2DComponent>();
-	revJoint.ConnectedEntity = static_cast<uint64_t>(anchor.GetComponent<UUIDComponent>().ID);
+	revJoint.ConnectedEntity = static_cast<entt::entity>(anchor);
 	revJoint.AnchorSelf = { -2.0f, 0.0f };
 	revJoint.AnchorOther = { 0.0f, 0.0f };
 	revJoint.EnableCollision = false;
@@ -352,7 +352,7 @@ static void TestDistanceJoint2DSimulation()
 		weightBox.Density = 1.0f;
 
 		auto& distJoint = weight.AddComponent<DistanceJoint2DComponent>();
-		distJoint.ConnectedEntity = static_cast<uint64_t>(anchor.GetComponent<UUIDComponent>().ID);
+		distJoint.ConnectedEntity = static_cast<entt::entity>(anchor);
 		distJoint.AnchorSelf = { 0.0f, 0.0f };
 		distJoint.AnchorOther = { 0.0f, 0.0f };
 		// 默认刚性杆 (Hertz = 0, EnableSpring = false)
@@ -400,7 +400,7 @@ static void TestDistanceJoint2DSimulation()
 		bobBox.Density = 1.0f;
 
 		auto& distJoint = bob.AddComponent<DistanceJoint2DComponent>();
-		distJoint.ConnectedEntity = static_cast<uint64_t>(anchor.GetComponent<UUIDComponent>().ID);
+		distJoint.ConnectedEntity = static_cast<entt::entity>(anchor);
 		distJoint.AnchorSelf = { 0.0f, 0.0f };
 		distJoint.AnchorOther = { 0.0f, 0.0f };
 		distJoint.EnableSpring = true;
@@ -449,7 +449,7 @@ static void TestPrismaticAndWheelJointsLifecycle()
 	slider.AddComponent<BoxCollider2DComponent>().Size = { 0.4f, 0.4f };
 
 	auto& prism = slider.AddComponent<PrismaticJoint2DComponent>();
-	prism.ConnectedEntity = static_cast<uint64_t>(track.GetComponent<UUIDComponent>().ID);
+	prism.ConnectedEntity = static_cast<entt::entity>(track);
 	prism.Axis = { 1.0f, 0.0f };
 	prism.EnableLimit = true;
 	prism.LowerTranslation = -2.0f;
@@ -471,7 +471,7 @@ static void TestPrismaticAndWheelJointsLifecycle()
 	wheelEnt.AddComponent<CircleCollider2DComponent>().Radius = 0.3f;
 
 	auto& wheel = wheelEnt.AddComponent<WheelJoint2DComponent>();
-	wheel.ConnectedEntity = static_cast<uint64_t>(carBody.GetComponent<UUIDComponent>().ID);
+	wheel.ConnectedEntity = static_cast<entt::entity>(carBody);
 	wheel.SuspensionAxis = { 0.0f, 1.0f };
 	wheel.Hertz = 5.0f;
 	wheel.DampingRatio = 0.7f;
@@ -497,6 +497,199 @@ static void TestPrismaticAndWheelJointsLifecycle()
 	std::cout << "[PASS] TestPrismaticAndWheelJointsLifecycle\n";
 }
 
+
+static void TestEffectors2DComponentPODAndDefaults()
+{
+	static_assert(sizeof(AreaEffector2DComponent) == 28, "AreaEffector2DComponent must be exactly 28 bytes");
+	static_assert(std::is_trivially_copyable_v<AreaEffector2DComponent>, "AreaEffector2DComponent must be trivially copyable");
+
+	static_assert(sizeof(BuoyancyEffector2DComponent) == 32, "BuoyancyEffector2DComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<BuoyancyEffector2DComponent>, "BuoyancyEffector2DComponent must be trivially copyable");
+
+	static_assert(sizeof(SurfaceEffector2DComponent) == 16, "SurfaceEffector2DComponent must be exactly 16 bytes");
+	static_assert(std::is_trivially_copyable_v<SurfaceEffector2DComponent>, "SurfaceEffector2DComponent must be trivially copyable");
+
+	// 1. AreaEffector2DComponent defaults
+	{
+		AreaEffector2DComponent area;
+		assert(area.ForceDirection.x == 0.0f && area.ForceDirection.y == 1.0f);
+		assert(area.ForceMagnitude == 10.0f);
+		assert(area.LinearDrag == 0.5f);
+		assert(area.AngularDrag == 0.5f);
+		assert(area.ForceMode == 0);
+		assert(!area.UseGlobalCoordinates);
+		assert(!area.AffectsInertia);
+		assert(area.Enabled);
+	}
+
+	// 2. BuoyancyEffector2DComponent defaults
+	{
+		BuoyancyEffector2DComponent buoy;
+		assert(buoy.Density == 2.0f);
+		assert(buoy.SurfaceLevel == 0.0f);
+		assert(buoy.LinearDrag == 2.5f);
+		assert(buoy.AngularDrag == 1.5f);
+		assert(buoy.FlowVelocity.x == 0.0f && buoy.FlowVelocity.y == 0.0f);
+		assert(buoy.Enabled);
+	}
+
+	// 3. SurfaceEffector2DComponent defaults
+	{
+		SurfaceEffector2DComponent surf;
+		assert(surf.Speed == 3.0f);
+		assert(surf.ForceScale == 1.0f);
+		assert(surf.Enabled);
+	}
+
+	std::cout << "[PASS] TestEffectors2DComponentPODAndDefaults\n";
+}
+
+static void TestAreaEffector2DWindSimulation()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	// 1. 创建上升气流传感器区域 (AreaEffector2DComponent)
+	Entity windArea = scene.CreateEntityShell("WindArea");
+	auto& windT = windArea.AddComponent<TransformComponent>();
+	windT.Location = { 0.0f, 0.0f, 0.0f };
+	auto& windRb = windArea.AddComponent<RigidBody2DComponent>();
+	windRb.Type = RigidBody2DComponent::BodyType::Static;
+	auto& windBox = windArea.AddComponent<BoxCollider2DComponent>();
+	windBox.Size = { 5.0f, 5.0f };
+	windBox.IsSensor = true;
+	auto& area = windArea.AddComponent<AreaEffector2DComponent>();
+	area.ForceDirection = { 0.0f, 1.0f };
+	area.ForceMagnitude = 30.0f;
+	area.ForceMode = 0; // Directional
+	area.LinearDrag = 0.5f;
+
+	// 2. 创建置于气流中的动态刚体 (初始 Y = 0.0)
+	Entity floater = scene.CreateEntityShell("Floater");
+	auto& floaterT = floater.AddComponent<TransformComponent>();
+	floaterT.Location = { 0.0f, 0.0f, 0.0f };
+	auto& floaterRb = floater.AddComponent<RigidBody2DComponent>();
+	floaterRb.Type = RigidBody2DComponent::BodyType::Dynamic;
+	auto& floaterBox = floater.AddComponent<BoxCollider2DComponent>();
+	floaterBox.Size = { 0.4f, 0.4f };
+	floaterBox.Density = 1.0f;
+
+	scene.OnRuntimeStart();
+	assert(scene.IsPhysics2DRunning());
+
+	// 模拟 40 步 (约 0.64s)，物体在风力作用下克服重力向上升起 (Location.y 显著增加)
+	for (int i = 0; i < 40; ++i)
+	{
+		scene.OnFixedUpdate(Timestep(0.016f));
+	}
+
+	assert(floaterT.Location.y > 1.0f);
+
+	scene.OnRuntimeStop();
+	assert(!scene.IsPhysics2DRunning());
+
+	std::cout << "[PASS] TestAreaEffector2DWindSimulation\n";
+}
+
+static void TestBuoyancyEffector2DFloatingSimulation()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	// 1. 创建水体传感器区域 (BuoyancyEffector2DComponent)
+	// 中心位于 Y = -2.0, 尺寸 10x2 (Y 范围 -4.0 ~ 0.0), 水面高度 local +2.0 => world Y = 0.0
+	Entity water = scene.CreateEntityShell("WaterPool");
+	auto& waterT = water.AddComponent<TransformComponent>();
+	waterT.Location = { 0.0f, -2.0f, 0.0f };
+	auto& waterRb = water.AddComponent<RigidBody2DComponent>();
+	waterRb.Type = RigidBody2DComponent::BodyType::Static;
+	auto& waterBox = water.AddComponent<BoxCollider2DComponent>();
+	waterBox.Size = { 10.0f, 2.0f };
+	waterBox.IsSensor = true;
+	auto& buoy = water.AddComponent<BuoyancyEffector2DComponent>();
+	buoy.Density = 2.5f;
+	buoy.SurfaceLevel = 2.0f;
+	buoy.LinearDrag = 3.0f;
+
+	// 2. 创建从水面上方落下的动态刚体 (初始 Y = 1.0)
+	Entity boat = scene.CreateEntityShell("Boat");
+	auto& boatT = boat.AddComponent<TransformComponent>();
+	boatT.Location = { 0.0f, 1.0f, 0.0f };
+	auto& boatRb = boat.AddComponent<RigidBody2DComponent>();
+	boatRb.Type = RigidBody2DComponent::BodyType::Dynamic;
+	auto& boatBox = boat.AddComponent<BoxCollider2DComponent>();
+	boatBox.Size = { 0.4f, 0.4f };
+	boatBox.Density = 1.0f;
+
+	scene.OnRuntimeStart();
+	assert(scene.IsPhysics2DRunning());
+
+	// 模拟 60 步 (约 0.96s)，下落刚体浸入水体后受浮力阻止继续无限下坠并浮起
+	for (int i = 0; i < 60; ++i)
+	{
+		scene.OnFixedUpdate(Timestep(0.016f));
+	}
+
+	// 浸入水体后受浮力支撑, 维持在水面附近 (Y > -1.5 且 < 0.5), 不会深坠虚空
+	assert(boatT.Location.y > -1.5f && boatT.Location.y < 0.5f);
+
+	scene.OnRuntimeStop();
+	assert(!scene.IsPhysics2DRunning());
+
+	std::cout << "[PASS] TestBuoyancyEffector2DFloatingSimulation\n";
+}
+
+static void TestSurfaceEffector2DConveyorSimulation()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	// 1. 创建传送带地面实体 (SurfaceEffector2DComponent)
+	Entity conveyor = scene.CreateEntityShell("Conveyor");
+	auto& convT = conveyor.AddComponent<TransformComponent>();
+	convT.Location = { 0.0f, 0.0f, 0.0f };
+	auto& convRb = conveyor.AddComponent<RigidBody2DComponent>();
+	convRb.Type = RigidBody2DComponent::BodyType::Static;
+	auto& convBox = conveyor.AddComponent<BoxCollider2DComponent>();
+	convBox.Size = { 10.0f, 0.5f };
+	convBox.Friction = 0.8f;
+	convBox.IsSensor = false;
+	auto& surf = conveyor.AddComponent<SurfaceEffector2DComponent>();
+	surf.Speed = 5.0f;
+	surf.ForceScale = 1.0f;
+
+	// 2. 创建下落接触传送带的物体 (初始位置 Y = 1.2)
+	Entity cargo = scene.CreateEntityShell("Cargo");
+	auto& cargoT = cargo.AddComponent<TransformComponent>();
+	cargoT.Location = { 0.0f, 1.2f, 0.0f };
+	auto& cargoRb = cargo.AddComponent<RigidBody2DComponent>();
+	cargoRb.Type = RigidBody2DComponent::BodyType::Dynamic;
+	auto& cargoBox = cargo.AddComponent<BoxCollider2DComponent>();
+	cargoBox.Size = { 0.3f, 0.3f };
+	cargoBox.Friction = 0.8f;
+	cargoBox.Density = 1.0f;
+
+	scene.OnRuntimeStart();
+	assert(scene.IsPhysics2DRunning());
+
+	// 模拟 40 步 (约 0.64s)，物体落在传送带上后在切线速度作用下横向移动 (LinearVelocity.x > 0 且 Location.x > 0)
+	for (int i = 0; i < 40; ++i)
+	{
+		scene.OnFixedUpdate(Timestep(0.016f));
+	}
+
+	b2BodyId cargoBody = scene.GetPhysicsBody2D(cargo);
+	assert(b2Body_IsValid(cargoBody));
+	const b2Vec2 vel = b2Body_GetLinearVelocity(cargoBody);
+	assert(vel.x > 0.0f);
+	assert(cargoT.Location.x > 0.0f);
+
+	scene.OnRuntimeStop();
+	assert(!scene.IsPhysics2DRunning());
+
+	std::cout << "[PASS] TestSurfaceEffector2DConveyorSimulation\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -509,6 +702,10 @@ int main()
 	TestRevoluteJoint2DPendulumSimulation();
 	TestDistanceJoint2DSimulation();
 	TestPrismaticAndWheelJointsLifecycle();
+	TestEffectors2DComponentPODAndDefaults();
+	TestAreaEffector2DWindSimulation();
+	TestBuoyancyEffector2DFloatingSimulation();
+	TestSurfaceEffector2DConveyorSimulation();
 
 	std::cout << "All WorldPhysics2DExtensionsTests passed successfully.\n";
 	return 0;

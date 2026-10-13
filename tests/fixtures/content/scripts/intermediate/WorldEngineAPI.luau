@@ -715,6 +715,17 @@ function ui:isOpen() end
 ---@field Intensity number
 ---@field Color vec3
 
+-- Component fields are exposed through Entity:GetComponent("AreaEffector2DComponent"); there is no runtime global named AreaEffector2DComponent.
+---@class AreaEffector2DComponent
+---@field UseGlobalCoordinates boolean
+---@field ForceMode number
+---@field AngularDrag number
+---@field AffectsInertia boolean
+---@field Enabled boolean
+---@field ForceDirection vec2
+---@field ForceMagnitude number
+---@field LinearDrag number
+
 -- Component fields are exposed through Entity:GetComponent("AudioListenerComponent"); there is no runtime global named AudioListenerComponent.
 ---@class AudioListenerComponent
 ---@field VolumeScale number
@@ -745,6 +756,15 @@ function ui:isOpen() end
 ---@class BoxCollider3DComponent
 ---@field HalfExtents vec3
 ---@field Offset vec3
+
+-- Component fields are exposed through Entity:GetComponent("BuoyancyEffector2DComponent"); there is no runtime global named BuoyancyEffector2DComponent.
+---@class BuoyancyEffector2DComponent
+---@field AngularDrag number
+---@field LinearDrag number
+---@field SurfaceLevel number
+---@field FlowVelocity vec2
+---@field Enabled boolean
+---@field Density number
 
 -- Component fields are exposed through Entity:GetComponent("CameraComponent"); there is no runtime global named CameraComponent.
 ---@class CameraComponent
@@ -1034,6 +1054,12 @@ function ui:isOpen() end
 ---@field DrawMode number
 ---@field Texture string
 
+-- Component fields are exposed through Entity:GetComponent("SurfaceEffector2DComponent"); there is no runtime global named SurfaceEffector2DComponent.
+---@class SurfaceEffector2DComponent
+---@field Speed number
+---@field Enabled boolean
+---@field ForceScale number
+
 -- Component fields are exposed through Entity:GetComponent("TagComponent"); there is no runtime global named TagComponent.
 ---@class TagComponent
 ---@field Tag string
@@ -1084,6 +1110,8 @@ function ui:isOpen() end
 ---@class Comp
 ---@field AmbientLightComponent string Registered component type name "AmbientLightComponent".
 ---@field AmbientLight string Short alias for "AmbientLightComponent".
+---@field AreaEffector2DComponent string Registered component type name "AreaEffector2DComponent".
+---@field AreaEffector2D string Short alias for "AreaEffector2DComponent".
 ---@field AudioListenerComponent string Registered component type name "AudioListenerComponent".
 ---@field AudioListener string Short alias for "AudioListenerComponent".
 ---@field AudioSourceComponent string Registered component type name "AudioSourceComponent".
@@ -1092,6 +1120,8 @@ function ui:isOpen() end
 ---@field BoxCollider2D string Short alias for "BoxCollider2DComponent".
 ---@field BoxCollider3DComponent string Registered component type name "BoxCollider3DComponent".
 ---@field BoxCollider3D string Short alias for "BoxCollider3DComponent".
+---@field BuoyancyEffector2DComponent string Registered component type name "BuoyancyEffector2DComponent".
+---@field BuoyancyEffector2D string Short alias for "BuoyancyEffector2DComponent".
 ---@field CameraComponent string Registered component type name "CameraComponent".
 ---@field Camera string Short alias for "CameraComponent".
 ---@field CapsuleCollider2DComponent string Registered component type name "CapsuleCollider2DComponent".
@@ -1154,6 +1184,8 @@ function ui:isOpen() end
 ---@field SpriteAnimator string Short alias for "SpriteAnimatorComponent".
 ---@field SpriteComponent string Registered component type name "SpriteComponent".
 ---@field Sprite string Short alias for "SpriteComponent".
+---@field SurfaceEffector2DComponent string Registered component type name "SurfaceEffector2DComponent".
+---@field SurfaceEffector2D string Short alias for "SurfaceEffector2DComponent".
 ---@field TagComponent string Registered component type name "TagComponent".
 ---@field Tag string Short alias for "TagComponent".
 ---@field TilemapComponent string Registered component type name "TilemapComponent".

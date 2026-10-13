@@ -55,6 +55,12 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawChainCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::PlatformEffector2DComponent")
 			height = DrawPlatformEffector2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::AreaEffector2DComponent")
+			height = DrawAreaEffector2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::BuoyancyEffector2DComponent")
+			height = DrawBuoyancyEffector2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::SurfaceEffector2DComponent")
+			height = DrawSurfaceEffector2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::DistanceJoint2DComponent")
 			height = DrawDistanceJoint2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::RevoluteJoint2DComponent")
@@ -1769,6 +1775,233 @@ float PropertiesPanel::DrawWheelJoint2DInspector(Wui::WuiContext& ctx, const Wui
 			changedFields->push_back("EnableMotor");
 			changedFields->push_back("MotorSpeed");
 			changedFields->push_back("MaxMotorTorque");
+		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+
+float PropertiesPanel::DrawAreaEffector2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* effector = static_cast<World::AreaEffector2DComponent*>(instance);
+	if (!effector) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "区域效应器预设 (Area Effector Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float gap = 6.0f;
+	const float btnH = 22.0f;
+	const float availW = std::max(270.0f, rect.W - 24.0f);
+	const float btnW = (availW - gap) / 2.0f;
+
+	const Wui::WuiRect btnUpdraft   { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnCrosswind { rect.X + 12.0f + btnW + gap, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnUpdraft, "上升气流: 垂直向上吹拂升力 (ForceDirection={0, 1}, ForceMagnitude=18.0, ForceMode=0 [方向风场])");
+	if (Wui::Button(ctx, Wui::HashId("prop.area2d.preset_updraft"), btnUpdraft, "上升气流 (Updraft)", theme))
+	{
+		effector->ForceDirection = { 0.0f, 1.0f };
+		effector->ForceMagnitude = 18.0f;
+		effector->ForceMode = 0;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("ForceDirection");
+			changedFields->push_back("ForceMagnitude");
+			changedFields->push_back("ForceMode");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnCrosswind, "横向强风: 水平向右吹拂 (ForceDirection={1, 0}, ForceMagnitude=15.0, ForceMode=0 [方向风场])");
+	if (Wui::Button(ctx, Wui::HashId("prop.area2d.preset_crosswind"), btnCrosswind, "横向强风 (Crosswind)", theme))
+	{
+		effector->ForceDirection = { 1.0f, 0.0f };
+		effector->ForceMagnitude = 15.0f;
+		effector->ForceMode = 0;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("ForceDirection");
+			changedFields->push_back("ForceMagnitude");
+			changedFields->push_back("ForceMode");
+		}
+	}
+	y += 28.0f;
+
+	const Wui::WuiRect btnAttractor { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnRepulsor  { rect.X + 12.0f + btnW + gap, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnAttractor, "引力黑洞: 向区域中心聚集吸引 (ForceMode=1 [点引力], ForceMagnitude=25.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.area2d.preset_attractor"), btnAttractor, "引力黑洞 (Attractor)", theme))
+	{
+		effector->ForceMode = 1;
+		effector->ForceMagnitude = 25.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("ForceMode");
+			changedFields->push_back("ForceMagnitude");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnRepulsor, "冲击排斥: 向外围爆发排斥 (ForceMode=2 [点斥力], ForceMagnitude=30.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.area2d.preset_repulsor"), btnRepulsor, "冲击排斥 (Repulsor)", theme))
+	{
+		effector->ForceMode = 2;
+		effector->ForceMagnitude = 30.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("ForceMode");
+			changedFields->push_back("ForceMagnitude");
+		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawBuoyancyEffector2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* effector = static_cast<World::BuoyancyEffector2DComponent*>(instance);
+	if (!effector) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "浮力水体预设 (Buoyancy Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float gap = 6.0f;
+	const float btnH = 22.0f;
+	const float availW = std::max(270.0f, rect.W - 24.0f);
+	const float btnW = (availW - gap * 2.0f) / 3.0f;
+
+	const Wui::WuiRect btnWater { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnRiver { rect.X + 12.0f + btnW + gap, y, btnW, btnH };
+	const Wui::WuiRect btnMud   { rect.X + 12.0f + (btnW + gap) * 2.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnWater, "静止深水池: 常规清水平静水域 (Density=2.0, LinearDrag=2.5, AngularDrag=1.5, FlowVelocity={0, 0})");
+	if (Wui::Button(ctx, Wui::HashId("prop.buoy2d.preset_water"), btnWater, "静止深水池", theme))
+	{
+		effector->Density = 2.0f;
+		effector->LinearDrag = 2.5f;
+		effector->AngularDrag = 1.5f;
+		effector->FlowVelocity = { 0.0f, 0.0f };
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Density");
+			changedFields->push_back("LinearDrag");
+			changedFields->push_back("AngularDrag");
+			changedFields->push_back("FlowVelocity");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnRiver, "向右急流河: 沿 X 轴向右流动的水流 (Density=1.8, LinearDrag=2.0, FlowVelocity={4.0, 0})");
+	if (Wui::Button(ctx, Wui::HashId("prop.buoy2d.preset_river"), btnRiver, "向右急流河", theme))
+	{
+		effector->Density = 1.8f;
+		effector->LinearDrag = 2.0f;
+		effector->FlowVelocity = { 4.0f, 0.0f };
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Density");
+			changedFields->push_back("LinearDrag");
+			changedFields->push_back("FlowVelocity");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnMud, "高粘度泥浆: 高密度高粘滞阻尼泥泞环境 (Density=3.0, LinearDrag=6.0, AngularDrag=4.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.buoy2d.preset_mud"), btnMud, "高粘度泥浆", theme))
+	{
+		effector->Density = 3.0f;
+		effector->LinearDrag = 6.0f;
+		effector->AngularDrag = 4.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Density");
+			changedFields->push_back("LinearDrag");
+			changedFields->push_back("AngularDrag");
+		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawSurfaceEffector2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* effector = static_cast<World::SurfaceEffector2DComponent*>(instance);
+	if (!effector) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "传送带预设 (Conveyor Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float gap = 6.0f;
+	const float btnH = 22.0f;
+	const float availW = std::max(270.0f, rect.W - 24.0f);
+	const float btnW = (availW - gap * 2.0f) / 3.0f;
+
+	const Wui::WuiRect btnNormal  { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnFast    { rect.X + 12.0f + btnW + gap, y, btnW, btnH };
+	const Wui::WuiRect btnReverse { rect.X + 12.0f + (btnW + gap) * 2.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnNormal, "常规传送带: 3.0m/s 标准传送 (Speed=3.0, ForceScale=1.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.surf2d.preset_normal"), btnNormal, "常规传送带 (3m/s)", theme))
+	{
+		effector->Speed = 3.0f;
+		effector->ForceScale = 1.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Speed");
+			changedFields->push_back("ForceScale");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnFast, "高速加速带: 8.0m/s 快速推进强力驱动 (Speed=8.0, ForceScale=2.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.surf2d.preset_fast"), btnFast, "高速加速带 (8m/s)", theme))
+	{
+		effector->Speed = 8.0f;
+		effector->ForceScale = 2.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Speed");
+			changedFields->push_back("ForceScale");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnReverse, "反向传送带: -3.0m/s 逆向传输 (Speed=-3.0, ForceScale=1.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.surf2d.preset_reverse"), btnReverse, "反向传送带 (-3m/s)", theme))
+	{
+		effector->Speed = -3.0f;
+		effector->ForceScale = 1.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Speed");
+			changedFields->push_back("ForceScale");
 		}
 	}
 	y += 28.0f;

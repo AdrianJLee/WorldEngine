@@ -1208,6 +1208,99 @@ namespace World
 	static_assert(sizeof(WheelJoint2DComponent) == 56, "WheelJoint2DComponent must be exactly 56 bytes");
 	static_assert(std::is_trivially_copyable_v<WheelJoint2DComponent>, "WheelJoint2DComponent must be trivially copyable");
 
+	struct AreaEffector2DComponent
+	{
+		glm::vec2 ForceDirection { 0.0f, 1.0f };
+		float ForceMagnitude = 10.0f;
+		float LinearDrag = 0.5f;
+		float AngularDrag = 0.5f;
+		uint8_t ForceMode = 0; // 0 = Directional, 1 = PointAttraction, 2 = PointRepulsion
+		bool UseGlobalCoordinates = false;
+		bool AffectsInertia = false;
+		bool Enabled = true;
+		uint8_t _Padding[4] { 0, 0, 0, 0 };
+
+		AreaEffector2DComponent() = default;
+
+		WE_SCHEMA_BODY(World, AreaEffector2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D area effector: applies directional wind forces or point attraction/repulsion to dynamic bodies inside this sensor volume."))
+			WE_FIELD(ForceDirection, Vec2,
+				Doc("Direction vector of the applied force when in Directional mode."));
+			WE_FIELD(ForceMagnitude, Float, Default(10.0f), Range(0.0f, 10000.0f),
+				Doc("Magnitude of the force in Newtons (or acceleration if AffectsInertia is true)."));
+			WE_FIELD(LinearDrag, Float, Default(0.5f), Range(0.0f, 100.0f),
+				Doc("Linear air resistance/drag applied to bodies inside the volume."));
+			WE_FIELD(AngularDrag, Float, Default(0.5f), Range(0.0f, 100.0f),
+				Doc("Rotational air resistance/drag applied to bodies inside the volume."));
+			WE_FIELD(ForceMode, UInt8, Default(0),
+				Doc("0 = Directional (constant wind vector), 1 = PointAttraction (towards center), 2 = PointRepulsion (away from center)."));
+			WE_FIELD(UseGlobalCoordinates, Bool, Default(false),
+				Doc("Whether ForceDirection is in world coordinates (true) or rotates with the entity (false)."));
+			WE_FIELD(AffectsInertia, Bool, Default(false),
+				Doc("Whether force scales with body mass (acceleration mode) or is constant."));
+			WE_FIELD(Enabled, Bool, Default(true),
+				Doc("Whether this area effector is active."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(AreaEffector2DComponent) == 28, "AreaEffector2DComponent must be exactly 28 bytes");
+	static_assert(std::is_trivially_copyable_v<AreaEffector2DComponent>, "AreaEffector2DComponent must be trivially copyable");
+
+	struct BuoyancyEffector2DComponent
+	{
+		float Density = 2.0f;
+		float SurfaceLevel = 0.0f;
+		float LinearDrag = 2.5f;
+		float AngularDrag = 1.5f;
+		glm::vec2 FlowVelocity { 0.0f, 0.0f };
+		bool Enabled = true;
+		uint8_t _Padding[7] { 0, 0, 0, 0, 0, 0, 0 };
+
+		BuoyancyEffector2DComponent() = default;
+
+		WE_SCHEMA_BODY(World, BuoyancyEffector2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D buoyancy effector: simulates fluid submersion, counter-gravity buoyancy, and fluid drag resistance."))
+			WE_FIELD(Density, Float, Default(2.0f), Range(0.01f, 100.0f),
+				Doc("Fluid density relative to body density (higher values cause stronger upward buoyancy floatation)."));
+			WE_FIELD(SurfaceLevel, Float, Default(0.0f),
+				Doc("Water surface Y height in local coordinates above the entity center."));
+			WE_FIELD(LinearDrag, Float, Default(2.5f), Range(0.0f, 100.0f),
+				Doc("Fluid linear viscous drag coefficient dampening body velocity."));
+			WE_FIELD(AngularDrag, Float, Default(1.5f), Range(0.0f, 100.0f),
+				Doc("Fluid rotational drag coefficient dampening spin."));
+			WE_FIELD(FlowVelocity, Vec2,
+				Doc("Current/river flow velocity vector dragging submerged objects."));
+			WE_FIELD(Enabled, Bool, Default(true),
+				Doc("Whether this buoyancy effector is active."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(BuoyancyEffector2DComponent) == 32, "BuoyancyEffector2DComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<BuoyancyEffector2DComponent>, "BuoyancyEffector2DComponent must be trivially copyable");
+
+	struct SurfaceEffector2DComponent
+	{
+		float Speed = 3.0f;
+		float ForceScale = 1.0f;
+		bool Enabled = true;
+		uint8_t _Padding[7] { 0, 0, 0, 0, 0, 0, 0 };
+
+		SurfaceEffector2DComponent() = default;
+
+		WE_SCHEMA_BODY(World, SurfaceEffector2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D surface effector: conveyor belt that propels contacting dynamic bodies along the surface tangent."))
+			WE_FIELD(Speed, Float, Default(3.0f), Range(0.0f, 100.0f),
+				Doc("Tangent speed in meters per second pushing bodies touching this surface."));
+			WE_FIELD(ForceScale, Float, Default(1.0f), Range(0.0f, 10.0f),
+				Doc("Scale factor for conveyor friction drive force."));
+			WE_FIELD(Enabled, Bool, Default(true),
+				Doc("Whether this surface effector is active."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(SurfaceEffector2DComponent) == 16, "SurfaceEffector2DComponent must be exactly 16 bytes");
+	static_assert(std::is_trivially_copyable_v<SurfaceEffector2DComponent>, "SurfaceEffector2DComponent must be trivially copyable");
+
 
 	// P1b D6:3D 物理(Jolt)组件。字段 id 全部显式钉住("RB3D…"/"…3D…" ASCII):
 	// 组件一旦写进 .entity 存档就不能再改 id,否则旧场景迁移语义会漂移,--check 门禁也要求

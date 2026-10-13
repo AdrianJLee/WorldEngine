@@ -39,6 +39,9 @@ const TypeSchema& WeSchemaOf_DistanceJoint2DComponent();
 const TypeSchema& WeSchemaOf_RevoluteJoint2DComponent();
 const TypeSchema& WeSchemaOf_PrismaticJoint2DComponent();
 const TypeSchema& WeSchemaOf_WheelJoint2DComponent();
+const TypeSchema& WeSchemaOf_AreaEffector2DComponent();
+const TypeSchema& WeSchemaOf_BuoyancyEffector2DComponent();
+const TypeSchema& WeSchemaOf_SurfaceEffector2DComponent();
 const TypeSchema& WeSchemaOf_RigidBody3DComponent();
 const TypeSchema& WeSchemaOf_BoxCollider3DComponent();
 const TypeSchema& WeSchemaOf_SphereCollider3DComponent();
@@ -6670,6 +6673,583 @@ struct GeneratedAccess<World::WheelJoint2DComponent>
 };
 
 template <>
+struct GeneratedAccess<World::AreaEffector2DComponent>
+{
+    static Value Get_ForceDirection(const void* instance)
+    {
+        const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
+        return Value(self->ForceDirection);
+    }
+    static void Set_ForceDirection(void* instance, const Value& value)
+    {
+        World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
+        self->ForceDirection = std::get<glm::vec2>(value);
+    }
+    static Value Get_ForceMagnitude(const void* instance)
+    {
+        const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
+        return Value(self->ForceMagnitude);
+    }
+    static void Set_ForceMagnitude(void* instance, const Value& value)
+    {
+        World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
+        self->ForceMagnitude = std::get<float>(value);
+    }
+    static Value Get_LinearDrag(const void* instance)
+    {
+        const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
+        return Value(self->LinearDrag);
+    }
+    static void Set_LinearDrag(void* instance, const Value& value)
+    {
+        World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
+        self->LinearDrag = std::get<float>(value);
+    }
+    static Value Get_AngularDrag(const void* instance)
+    {
+        const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
+        return Value(self->AngularDrag);
+    }
+    static void Set_AngularDrag(void* instance, const Value& value)
+    {
+        World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
+        self->AngularDrag = std::get<float>(value);
+    }
+    static Value Get_ForceMode(const void* instance)
+    {
+        const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
+        return Value(self->ForceMode);
+    }
+    static void Set_ForceMode(void* instance, const Value& value)
+    {
+        World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
+        self->ForceMode = std::get<uint8_t>(value);
+    }
+    static Value Get_UseGlobalCoordinates(const void* instance)
+    {
+        const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
+        return Value(self->UseGlobalCoordinates);
+    }
+    static void Set_UseGlobalCoordinates(void* instance, const Value& value)
+    {
+        World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
+        self->UseGlobalCoordinates = std::get<bool>(value);
+    }
+    static Value Get_AffectsInertia(const void* instance)
+    {
+        const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
+        return Value(self->AffectsInertia);
+    }
+    static void Set_AffectsInertia(void* instance, const Value& value)
+    {
+        World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
+        self->AffectsInertia = std::get<bool>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
+        self->Enabled = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_ForceDirection()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE7ED5EF0CBACC71Full },
+            "ForceDirection",
+            Kind::Vec2,
+            &Get_ForceDirection,
+            &Set_ForceDirection,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Direction vector of the applied force when in Directional mode.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ForceMagnitude()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF9AF229706EB2CC4ull },
+            "ForceMagnitude",
+            Kind::Float,
+            &Get_ForceMagnitude,
+            &Set_ForceMagnitude,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10000.000000f), false, false, "Magnitude of the force in Newtons (or acceleration if AffectsInertia is true).", false, "", {  }, "", std::nullopt },
+            Value(10.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LinearDrag()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFA57841E542794DCull },
+            "LinearDrag",
+            Kind::Float,
+            &Get_LinearDrag,
+            &Set_LinearDrag,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Linear air resistance/drag applied to bodies inside the volume.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AngularDrag()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBA27A39856CEB511ull },
+            "AngularDrag",
+            Kind::Float,
+            &Get_AngularDrag,
+            &Set_AngularDrag,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Rotational air resistance/drag applied to bodies inside the volume.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ForceMode()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x96500272D7491461ull },
+            "ForceMode",
+            Kind::UInt8,
+            &Get_ForceMode,
+            &Set_ForceMode,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "0 = Directional (constant wind vector), 1 = PointAttraction (towards center), 2 = PointRepulsion (away from center).", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_UseGlobalCoordinates()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x78552EED649E466Cull },
+            "UseGlobalCoordinates",
+            Kind::Bool,
+            &Get_UseGlobalCoordinates,
+            &Set_UseGlobalCoordinates,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether ForceDirection is in world coordinates (true) or rotates with the entity (false).", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AffectsInertia()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCDBABA58714FC067ull },
+            "AffectsInertia",
+            Kind::Bool,
+            &Get_AffectsInertia,
+            &Set_AffectsInertia,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether force scales with body mass (acceleration mode) or is constant.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE4C556AF4916A5F4ull },
+            "Enabled",
+            Kind::Bool,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this area effector is active.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::AreaEffector2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::AreaEffector2DComponent" },
+            "AreaEffector2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::AreaEffector2DComponent),
+            TypeCategory::Component,
+            {
+                Field_ForceDirection(),
+                Field_ForceMagnitude(),
+                Field_LinearDrag(),
+                Field_AngularDrag(),
+                Field_ForceMode(),
+                Field_UseGlobalCoordinates(),
+                Field_AffectsInertia(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Physics/2D",
+            "2D area effector: applies directional wind forces or point attraction/repulsion to dynamic bodies inside this sensor volume.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::BuoyancyEffector2DComponent>
+{
+    static Value Get_Density(const void* instance)
+    {
+        const World::BuoyancyEffector2DComponent* self = static_cast<const World::BuoyancyEffector2DComponent*>(instance);
+        return Value(self->Density);
+    }
+    static void Set_Density(void* instance, const Value& value)
+    {
+        World::BuoyancyEffector2DComponent* self = static_cast<World::BuoyancyEffector2DComponent*>(instance);
+        self->Density = std::get<float>(value);
+    }
+    static Value Get_SurfaceLevel(const void* instance)
+    {
+        const World::BuoyancyEffector2DComponent* self = static_cast<const World::BuoyancyEffector2DComponent*>(instance);
+        return Value(self->SurfaceLevel);
+    }
+    static void Set_SurfaceLevel(void* instance, const Value& value)
+    {
+        World::BuoyancyEffector2DComponent* self = static_cast<World::BuoyancyEffector2DComponent*>(instance);
+        self->SurfaceLevel = std::get<float>(value);
+    }
+    static Value Get_LinearDrag(const void* instance)
+    {
+        const World::BuoyancyEffector2DComponent* self = static_cast<const World::BuoyancyEffector2DComponent*>(instance);
+        return Value(self->LinearDrag);
+    }
+    static void Set_LinearDrag(void* instance, const Value& value)
+    {
+        World::BuoyancyEffector2DComponent* self = static_cast<World::BuoyancyEffector2DComponent*>(instance);
+        self->LinearDrag = std::get<float>(value);
+    }
+    static Value Get_AngularDrag(const void* instance)
+    {
+        const World::BuoyancyEffector2DComponent* self = static_cast<const World::BuoyancyEffector2DComponent*>(instance);
+        return Value(self->AngularDrag);
+    }
+    static void Set_AngularDrag(void* instance, const Value& value)
+    {
+        World::BuoyancyEffector2DComponent* self = static_cast<World::BuoyancyEffector2DComponent*>(instance);
+        self->AngularDrag = std::get<float>(value);
+    }
+    static Value Get_FlowVelocity(const void* instance)
+    {
+        const World::BuoyancyEffector2DComponent* self = static_cast<const World::BuoyancyEffector2DComponent*>(instance);
+        return Value(self->FlowVelocity);
+    }
+    static void Set_FlowVelocity(void* instance, const Value& value)
+    {
+        World::BuoyancyEffector2DComponent* self = static_cast<World::BuoyancyEffector2DComponent*>(instance);
+        self->FlowVelocity = std::get<glm::vec2>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::BuoyancyEffector2DComponent* self = static_cast<const World::BuoyancyEffector2DComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::BuoyancyEffector2DComponent* self = static_cast<World::BuoyancyEffector2DComponent*>(instance);
+        self->Enabled = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Density()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF7FE3976F3A536B8ull },
+            "Density",
+            Kind::Float,
+            &Get_Density,
+            &Set_Density,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.010000f), std::optional<float>(100.000000f), false, false, "Fluid density relative to body density (higher values cause stronger upward buoyancy floatation).", false, "", {  }, "", std::nullopt },
+            Value(2.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SurfaceLevel()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5685C82A65535803ull },
+            "SurfaceLevel",
+            Kind::Float,
+            &Get_SurfaceLevel,
+            &Set_SurfaceLevel,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Water surface Y height in local coordinates above the entity center.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LinearDrag()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4AAFC496B88BD4CFull },
+            "LinearDrag",
+            Kind::Float,
+            &Get_LinearDrag,
+            &Set_LinearDrag,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Fluid linear viscous drag coefficient dampening body velocity.", false, "", {  }, "", std::nullopt },
+            Value(2.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AngularDrag()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2F3138127D8BF330ull },
+            "AngularDrag",
+            Kind::Float,
+            &Get_AngularDrag,
+            &Set_AngularDrag,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Fluid rotational drag coefficient dampening spin.", false, "", {  }, "", std::nullopt },
+            Value(1.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FlowVelocity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xDAA68BD19F8374F3ull },
+            "FlowVelocity",
+            Kind::Vec2,
+            &Get_FlowVelocity,
+            &Set_FlowVelocity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current/river flow velocity vector dragging submerged objects.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF35CE69490E913E9ull },
+            "Enabled",
+            Kind::Bool,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this buoyancy effector is active.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::BuoyancyEffector2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::BuoyancyEffector2DComponent" },
+            "BuoyancyEffector2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::BuoyancyEffector2DComponent),
+            TypeCategory::Component,
+            {
+                Field_Density(),
+                Field_SurfaceLevel(),
+                Field_LinearDrag(),
+                Field_AngularDrag(),
+                Field_FlowVelocity(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Physics/2D",
+            "2D buoyancy effector: simulates fluid submersion, counter-gravity buoyancy, and fluid drag resistance.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::SurfaceEffector2DComponent>
+{
+    static Value Get_Speed(const void* instance)
+    {
+        const World::SurfaceEffector2DComponent* self = static_cast<const World::SurfaceEffector2DComponent*>(instance);
+        return Value(self->Speed);
+    }
+    static void Set_Speed(void* instance, const Value& value)
+    {
+        World::SurfaceEffector2DComponent* self = static_cast<World::SurfaceEffector2DComponent*>(instance);
+        self->Speed = std::get<float>(value);
+    }
+    static Value Get_ForceScale(const void* instance)
+    {
+        const World::SurfaceEffector2DComponent* self = static_cast<const World::SurfaceEffector2DComponent*>(instance);
+        return Value(self->ForceScale);
+    }
+    static void Set_ForceScale(void* instance, const Value& value)
+    {
+        World::SurfaceEffector2DComponent* self = static_cast<World::SurfaceEffector2DComponent*>(instance);
+        self->ForceScale = std::get<float>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::SurfaceEffector2DComponent* self = static_cast<const World::SurfaceEffector2DComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::SurfaceEffector2DComponent* self = static_cast<World::SurfaceEffector2DComponent*>(instance);
+        self->Enabled = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Speed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x976E984F572C76Aull },
+            "Speed",
+            Kind::Float,
+            &Get_Speed,
+            &Set_Speed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Tangent speed in meters per second pushing bodies touching this surface.", false, "", {  }, "", std::nullopt },
+            Value(3.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ForceScale()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7A00915D17F26790ull },
+            "ForceScale",
+            Kind::Float,
+            &Get_ForceScale,
+            &Set_ForceScale,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "Scale factor for conveyor friction drive force.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x33881E0F6C162254ull },
+            "Enabled",
+            Kind::Bool,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this surface effector is active.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::SurfaceEffector2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::SurfaceEffector2DComponent" },
+            "SurfaceEffector2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::SurfaceEffector2DComponent),
+            TypeCategory::Component,
+            {
+                Field_Speed(),
+                Field_ForceScale(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Physics/2D",
+            "2D surface effector: conveyor belt that propels contacting dynamic bodies along the surface tangent.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::RigidBody3DComponent>
 {
     static Value Get_Type(const void* instance)
@@ -8698,6 +9278,9 @@ const TypeSchema& WeSchemaOf_DistanceJoint2DComponent() { return GeneratedAccess
 const TypeSchema& WeSchemaOf_RevoluteJoint2DComponent() { return GeneratedAccess<World::RevoluteJoint2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PrismaticJoint2DComponent() { return GeneratedAccess<World::PrismaticJoint2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_WheelJoint2DComponent() { return GeneratedAccess<World::WheelJoint2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_AreaEffector2DComponent() { return GeneratedAccess<World::AreaEffector2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_BuoyancyEffector2DComponent() { return GeneratedAccess<World::BuoyancyEffector2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_SurfaceEffector2DComponent() { return GeneratedAccess<World::SurfaceEffector2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_RigidBody3DComponent() { return GeneratedAccess<World::RigidBody3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BoxCollider3DComponent() { return GeneratedAccess<World::BoxCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SphereCollider3DComponent() { return GeneratedAccess<World::SphereCollider3DComponent>::WeSchema(); }
@@ -8758,6 +9341,9 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_RevoluteJoint2DComponent(),
 			WeSchemaOf_PrismaticJoint2DComponent(),
 			WeSchemaOf_WheelJoint2DComponent(),
+			WeSchemaOf_AreaEffector2DComponent(),
+			WeSchemaOf_BuoyancyEffector2DComponent(),
+			WeSchemaOf_SurfaceEffector2DComponent(),
 			WeSchemaOf_RigidBody3DComponent(),
 			WeSchemaOf_BoxCollider3DComponent(),
 			WeSchemaOf_SphereCollider3DComponent(),

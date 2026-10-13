@@ -99,6 +99,15 @@ namespace World
 		float DrawPlatformEffector2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
+		float DrawAreaEffector2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
+		float DrawBuoyancyEffector2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
+		float DrawSurfaceEffector2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
 		float DrawDistanceJoint2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);

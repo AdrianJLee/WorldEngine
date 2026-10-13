@@ -9,6 +9,7 @@
 --   5. TilemapComponent: 正交 / 等轴测 2.5D (Isometric) / 六边形蜂窝 (Hexagonal) 瓦片地图
 --   6. 2D 光照与阴影: GlobalLight2D / PointLight2D / ShadowCaster2D 动态光源与阴影投射
 --   7. 2D 物理关节: DistanceJoint2D / RevoluteJoint2D / PrismaticJoint2D / WheelJoint2D
+--   8. 2D 物理效应器: AreaEffector2D (风场/引力) / BuoyancyEffector2D (水体浮力) / SurfaceEffector2D (传送带)
 -- =============================================================================
 
 local initialized = false
@@ -112,6 +113,25 @@ ecs:AddSystem("ParallaxCameraDemoSystem", "Update", function(dt: number)
             print(string.format("[2D-DEMO] 2D 车轮关节(悬挂) '%s': 目标实体ID=%s | 悬挂轴=(%.2f, %.2f) | 弹簧阻尼=%.1f Hz / %.2f | 行程限制=%s (%.2f~%.2f m)",
                 tag.Tag, tostring(wheel.ConnectedEntity), wheel.SuspensionAxis.x, wheel.SuspensionAxis.y,
                 wheel.Hertz, wheel.DampingRatio, tostring(wheel.EnableLimit), wheel.LowerTranslation, wheel.UpperTranslation))
+        end)
+
+        -- 8) Phase 11: 查询 2D 物理效应器 (AreaEffector2D / BuoyancyEffector2D / SurfaceEffector2D)
+        local areaQuery = ecs:Query({ "AreaEffector2DComponent", "TagComponent" })
+        areaQuery:Each(function(e, area, tag)
+            print(string.format("[2D-DEMO] 2D 区域效应器(风场/引力) '%s': 模式=%d | 力量=%.1f N | 方向=(%.2f, %.2f) | 阻尼=%.2f",
+                tag.Tag, area.ForceMode, area.ForceMagnitude, area.ForceDirection.x, area.ForceDirection.y, area.LinearDrag))
+        end)
+
+        local buoyQuery = ecs:Query({ "BuoyancyEffector2DComponent", "TagComponent" })
+        buoyQuery:Each(function(e, buoy, tag)
+            print(string.format("[2D-DEMO] 2D 浮力效应器(水体) '%s': 密度=%.2f | 水面高度=%.2f | 水流速度=(%.2f, %.2f) | 阻尼=%.2f",
+                tag.Tag, buoy.Density, buoy.SurfaceLevel, buoy.FlowVelocity.x, buoy.FlowVelocity.y, buoy.LinearDrag))
+        end)
+
+        local surfQuery = ecs:Query({ "SurfaceEffector2DComponent", "TagComponent" })
+        surfQuery:Each(function(e, surf, tag)
+            print(string.format("[2D-DEMO] 2D 表面效应器(传送带) '%s': 切线速度=%.2f m/s | 摩擦推力倍率=%.2f | 启用=%s",
+                tag.Tag, surf.Speed, surf.ForceScale, tostring(surf.Enabled)))
         end)
     end
 end)

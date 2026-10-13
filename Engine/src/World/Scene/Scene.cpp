@@ -209,6 +209,11 @@ namespace World
 				shapeDef.enableContactEvents = true;
 				shapeDef.enableSensorEvents = true;
 				shapeDef.userData = Physics::PackEntityUserData(entity);
+				if (const auto* surf = registry.try_get<SurfaceEffector2DComponent>(entity))
+				{
+					if (surf->Enabled)
+						shapeDef.material.tangentSpeed = surf->Speed;
+				}
 			};
 			if (const auto* box = registry.try_get<BoxCollider2DComponent>(entity))
 			{
@@ -2376,6 +2381,107 @@ namespace World
 		// P5:步进结束后立刻把 Box2D 的 begin/end/persist 翻译进场景事件队列
 		// (队列在"本帧第一个固定步"清空,由 RunFixedFrameSystems 负责)。
 		HarvestPhysics2DEvents(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_ContactEvents, m_TriggerEvents, m_SensorOverlaps2D);
+		// Phase 11: Apply 2D Area & Buoyancy Effectors across active sensor overlaps
+		for (const uint64_t pair : m_SensorOverlaps2D)
+		{
+			const entt::entity entA = static_cast<entt::entity>(pair >> 32);
+			const entt::entity entB = static_cast<entt::entity>(pair & 0xFFFFFFFF);
+			if (!m_Registry.valid(entA) || !m_Registry.valid(entB)) continue;
+
+			auto applyEffectorPair = [&](entt::entity sensorEnt, entt::entity targetEnt)
+			{
+				const b2BodyId targetBody = FindBody2D(m_PhysicsBodies2D, targetEnt);
+				if (!b2Body_IsValid(targetBody) || b2Body_GetType(targetBody) != b2_dynamicBody) return;
+
+				const auto* sTr = m_Registry.try_get<TransformComponent>(sensorEnt);
+				if (!sTr) return;
+
+				if (const auto* area = m_Registry.try_get<AreaEffector2DComponent>(sensorEnt))
+				{
+					if (area->Enabled && area->ForceMagnitude > 0.0f)
+					{
+						const b2Vec2 bPos = b2Body_GetPosition(targetBody);
+						glm::vec2 forceDir = area->ForceDirection;
+						if (area->ForceMode == 0)
+						{
+							if (!area->UseGlobalCoordinates)
+							{
+								const float rotZ = sTr->GetEulerAngles().z;
+								forceDir = {
+									area->ForceDirection.x * std::cos(rotZ) - area->ForceDirection.y * std::sin(rotZ),
+									area->ForceDirection.x * std::sin(rotZ) + area->ForceDirection.y * std::cos(rotZ)
+								};
+							}
+							if (glm::length(forceDir) > 1e-4f)
+								forceDir = glm::normalize(forceDir);
+						}
+						else if (area->ForceMode == 1)
+						{
+							const glm::vec2 toCenter(sTr->Location.x - bPos.x, sTr->Location.y - bPos.y);
+							const float d = glm::length(toCenter);
+							forceDir = d > 1e-4f ? (toCenter / d) : glm::vec2(0.0f);
+						}
+						else if (area->ForceMode == 2)
+						{
+							const glm::vec2 fromCenter(bPos.x - sTr->Location.x, bPos.y - sTr->Location.y);
+							const float d = glm::length(fromCenter);
+							forceDir = d > 1e-4f ? (fromCenter / d) : glm::vec2(0.0f);
+						}
+
+						float forceMag = area->ForceMagnitude;
+						const float mass = b2Body_GetMass(targetBody);
+						if (area->AffectsInertia) forceMag *= mass;
+						glm::vec2 totalForce = forceDir * forceMag;
+
+						if (area->LinearDrag > 0.0f)
+						{
+							const b2Vec2 v = b2Body_GetLinearVelocity(targetBody);
+							totalForce.x -= v.x * area->LinearDrag * mass;
+							totalForce.y -= v.y * area->LinearDrag * mass;
+						}
+						b2Body_ApplyForceToCenter(targetBody, { totalForce.x, totalForce.y }, true);
+
+						if (area->AngularDrag > 0.0f)
+						{
+							const float w = b2Body_GetAngularVelocity(targetBody);
+							const float I = b2Body_GetRotationalInertia(targetBody);
+							b2Body_ApplyTorque(targetBody, -w * area->AngularDrag * I, true);
+						}
+					}
+				}
+
+				if (const auto* buoy = m_Registry.try_get<BuoyancyEffector2DComponent>(sensorEnt))
+				{
+					if (buoy->Enabled)
+					{
+						const b2Vec2 bPos = b2Body_GetPosition(targetBody);
+						const float waterSurfaceY = sTr->Location.y + buoy->SurfaceLevel;
+						if (bPos.y < waterSurfaceY)
+						{
+							const float depth = waterSurfaceY - bPos.y;
+							const float submerged = std::clamp(depth / 1.0f, 0.0f, 1.0f);
+							const float mass = b2Body_GetMass(targetBody);
+							const b2Vec2 grav = b2World_GetGravity(m_PhysicsWorldId);
+							const float buoyantForceY = -grav.y * buoy->Density * mass * submerged;
+							const b2Vec2 v = b2Body_GetLinearVelocity(targetBody);
+							const b2Vec2 relV = { v.x - buoy->FlowVelocity.x, v.y - buoy->FlowVelocity.y };
+							const float dragX = -relV.x * buoy->LinearDrag * mass * submerged;
+							const float dragY = -relV.y * buoy->LinearDrag * mass * submerged;
+							b2Body_ApplyForceToCenter(targetBody, { dragX, buoyantForceY + dragY }, true);
+							if (buoy->AngularDrag > 0.0f)
+							{
+								const float w = b2Body_GetAngularVelocity(targetBody);
+								const float I = b2Body_GetRotationalInertia(targetBody);
+								b2Body_ApplyTorque(targetBody, -w * buoy->AngularDrag * I * submerged, true);
+							}
+						}
+					}
+				}
+			};
+
+			applyEffectorPair(entA, entB);
+			applyEffectorPair(entB, entA);
+		}
 		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 		{
 			if (IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<RigidBody2DComponent>().hash())) continue;
