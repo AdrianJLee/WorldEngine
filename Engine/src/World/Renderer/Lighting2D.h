@@ -102,6 +102,6 @@ namespace World
 			int32_t entityId = -1);
 
 		// Build Light2DUniforms from all active GlobalLight2D, PointLight2D, and ShadowCaster2D entities in a Scene
-		WLD_API Light2DUniforms BuildSceneLight2DUniforms(Scene* scene);
+		WLD_API Light2DUniforms BuildSceneLight2DUniforms(const Scene* scene);
 	}
 }

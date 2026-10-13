@@ -286,13 +286,13 @@ namespace World::Lighting2D
 		return totalLight;
 	}
 
-	Light2DUniforms BuildSceneLight2DUniforms(Scene* scene)
+	Light2DUniforms BuildSceneLight2DUniforms(const Scene* scene)
 	{
 		Light2DUniforms uniforms{};
 		if (!scene)
 			return uniforms;
 
-		auto& registry = scene->GetRegistry();
+		const auto& registry = scene->GetRegistry();
 
 		bool hasAnyGlobalLight = false;
 		for (auto entity : registry.view<GlobalLight2DComponent>())
