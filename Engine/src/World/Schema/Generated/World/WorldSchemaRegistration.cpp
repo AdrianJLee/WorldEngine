@@ -20,6 +20,8 @@ const TypeSchema& WeSchemaOf_MeshRendererComponent();
 const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent();
 const TypeSchema& WeSchemaOf_HierarchyComponent();
 const TypeSchema& WeSchemaOf_CameraComponent();
+const TypeSchema& WeSchemaOf_PixelPerfectCameraComponent();
+const TypeSchema& WeSchemaOf_ParallaxLayerComponent();
 const TypeSchema& WeSchemaOf_DirectionalLightComponent();
 const TypeSchema& WeSchemaOf_PointLightComponent();
 const TypeSchema& WeSchemaOf_AmbientLightComponent();
@@ -2046,6 +2048,352 @@ struct GeneratedAccess<World::CameraComponent>
             &StorageBindingOf(),
             "Scene",
             "Scene camera settings plus Primary (the camera Play and the runtime render through); FixedAspectRatio keeps the projection from following the viewport size.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::PixelPerfectCameraComponent>
+{
+    static Value Get_ReferenceResolution(const void* instance)
+    {
+        const World::PixelPerfectCameraComponent* self = static_cast<const World::PixelPerfectCameraComponent*>(instance);
+        return Value(self->ReferenceResolution);
+    }
+    static void Set_ReferenceResolution(void* instance, const Value& value)
+    {
+        World::PixelPerfectCameraComponent* self = static_cast<World::PixelPerfectCameraComponent*>(instance);
+        self->ReferenceResolution = std::get<glm::ivec2>(value);
+    }
+    static Value Get_PixelsPerUnit(const void* instance)
+    {
+        const World::PixelPerfectCameraComponent* self = static_cast<const World::PixelPerfectCameraComponent*>(instance);
+        return Value(self->PixelsPerUnit);
+    }
+    static void Set_PixelsPerUnit(void* instance, const Value& value)
+    {
+        World::PixelPerfectCameraComponent* self = static_cast<World::PixelPerfectCameraComponent*>(instance);
+        self->PixelsPerUnit = std::get<uint32_t>(value);
+    }
+    static Value Get_CurrentScale(const void* instance)
+    {
+        const World::PixelPerfectCameraComponent* self = static_cast<const World::PixelPerfectCameraComponent*>(instance);
+        return Value(self->CurrentScale);
+    }
+    static void Set_CurrentScale(void* instance, const Value& value)
+    {
+        World::PixelPerfectCameraComponent* self = static_cast<World::PixelPerfectCameraComponent*>(instance);
+        self->CurrentScale = std::get<uint32_t>(value);
+    }
+    static Value Get_SnapToPixelGrid(const void* instance)
+    {
+        const World::PixelPerfectCameraComponent* self = static_cast<const World::PixelPerfectCameraComponent*>(instance);
+        return Value(self->SnapToPixelGrid);
+    }
+    static void Set_SnapToPixelGrid(void* instance, const Value& value)
+    {
+        World::PixelPerfectCameraComponent* self = static_cast<World::PixelPerfectCameraComponent*>(instance);
+        self->SnapToPixelGrid = std::get<bool>(value);
+    }
+    static Value Get_UpscaleRT(const void* instance)
+    {
+        const World::PixelPerfectCameraComponent* self = static_cast<const World::PixelPerfectCameraComponent*>(instance);
+        return Value(self->UpscaleRT);
+    }
+    static void Set_UpscaleRT(void* instance, const Value& value)
+    {
+        World::PixelPerfectCameraComponent* self = static_cast<World::PixelPerfectCameraComponent*>(instance);
+        self->UpscaleRT = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_ReferenceResolution()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x28D8663727488349ull },
+            "ReferenceResolution",
+            Kind::IVec2,
+            &Get_ReferenceResolution,
+            &Set_ReferenceResolution,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target design reference resolution in pixels (e.g. 320x180, 640x360).", false, "", {  }, "", std::nullopt },
+            Value(glm::ivec2(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_PixelsPerUnit()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB38546F7BE936264ull },
+            "PixelsPerUnit",
+            Kind::UInt32,
+            &Get_PixelsPerUnit,
+            &Set_PixelsPerUnit,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Pixels Per Unit (PPU): number of pixels in one world meter/unit.", false, "", {  }, "", std::nullopt },
+            Value(16),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CurrentScale()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4AFE7946A8860E6Full },
+            "CurrentScale",
+            Kind::UInt32,
+            &Get_CurrentScale,
+            &Set_CurrentScale,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Evaluated integer scaling ratio for the current viewport size.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SnapToPixelGrid()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE29F6804E5D8DC59ull },
+            "SnapToPixelGrid",
+            Kind::Bool,
+            &Get_SnapToPixelGrid,
+            &Set_SnapToPixelGrid,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Snap camera view matrix translation to the pixel grid to eliminate sub-pixel jitter.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_UpscaleRT()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9B35487967302E75ull },
+            "UpscaleRT",
+            Kind::Bool,
+            &Get_UpscaleRT,
+            &Set_UpscaleRT,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to render to a native reference-resolution buffer then upscale with nearest-neighbor filtering.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::PixelPerfectCameraComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::PixelPerfectCameraComponent" },
+            "PixelPerfectCameraComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::PixelPerfectCameraComponent),
+            TypeCategory::Component,
+            {
+                Field_ReferenceResolution(),
+                Field_PixelsPerUnit(),
+                Field_CurrentScale(),
+                Field_SnapToPixelGrid(),
+                Field_UpscaleRT(),
+            },
+            &StorageBindingOf(),
+            "Rendering/2D",
+            "Pixel-perfect 2D retro camera: calculates integer-multiple viewport scaling and snaps view translation to pixel grid to eliminate jitter and stretching.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::ParallaxLayerComponent>
+{
+    static Value Get_ScrollFactor(const void* instance)
+    {
+        const World::ParallaxLayerComponent* self = static_cast<const World::ParallaxLayerComponent*>(instance);
+        return Value(self->ScrollFactor);
+    }
+    static void Set_ScrollFactor(void* instance, const Value& value)
+    {
+        World::ParallaxLayerComponent* self = static_cast<World::ParallaxLayerComponent*>(instance);
+        self->ScrollFactor = std::get<glm::vec2>(value);
+    }
+    static Value Get_RepeatSize(const void* instance)
+    {
+        const World::ParallaxLayerComponent* self = static_cast<const World::ParallaxLayerComponent*>(instance);
+        return Value(self->RepeatSize);
+    }
+    static void Set_RepeatSize(void* instance, const Value& value)
+    {
+        World::ParallaxLayerComponent* self = static_cast<World::ParallaxLayerComponent*>(instance);
+        self->RepeatSize = std::get<glm::vec2>(value);
+    }
+    static Value Get_Offset(const void* instance)
+    {
+        const World::ParallaxLayerComponent* self = static_cast<const World::ParallaxLayerComponent*>(instance);
+        return Value(self->Offset);
+    }
+    static void Set_Offset(void* instance, const Value& value)
+    {
+        World::ParallaxLayerComponent* self = static_cast<World::ParallaxLayerComponent*>(instance);
+        self->Offset = std::get<glm::vec2>(value);
+    }
+    static Value Get_RepeatX(const void* instance)
+    {
+        const World::ParallaxLayerComponent* self = static_cast<const World::ParallaxLayerComponent*>(instance);
+        return Value(self->RepeatX);
+    }
+    static void Set_RepeatX(void* instance, const Value& value)
+    {
+        World::ParallaxLayerComponent* self = static_cast<World::ParallaxLayerComponent*>(instance);
+        self->RepeatX = std::get<bool>(value);
+    }
+    static Value Get_RepeatY(const void* instance)
+    {
+        const World::ParallaxLayerComponent* self = static_cast<const World::ParallaxLayerComponent*>(instance);
+        return Value(self->RepeatY);
+    }
+    static void Set_RepeatY(void* instance, const Value& value)
+    {
+        World::ParallaxLayerComponent* self = static_cast<World::ParallaxLayerComponent*>(instance);
+        self->RepeatY = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_ScrollFactor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8DA893B58C3E19E8ull },
+            "ScrollFactor",
+            Kind::Vec2,
+            &Get_ScrollFactor,
+            &Set_ScrollFactor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Scroll speed multiplier relative to camera movement (e.g. 0.1 for distant mountains, 1.2 for foreground).", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_RepeatSize()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x96655A71328EEB88ull },
+            "RepeatSize",
+            Kind::Vec2,
+            &Get_RepeatSize,
+            &Set_RepeatSize,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Tile repeat bounds in world units (0 = use sprite bounds).", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Offset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF5067C9C269B9BD1ull },
+            "Offset",
+            Kind::Vec2,
+            &Get_Offset,
+            &Set_Offset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Initial static layer offset.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_RepeatX()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF9109EF422BCCED3ull },
+            "RepeatX",
+            Kind::Bool,
+            &Get_RepeatX,
+            &Set_RepeatX,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically tile horizontally in camera view.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_RepeatY()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF9109DF422BCCD20ull },
+            "RepeatY",
+            Kind::Bool,
+            &Get_RepeatY,
+            &Set_RepeatY,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically tile vertically in camera view.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::ParallaxLayerComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::ParallaxLayerComponent" },
+            "ParallaxLayerComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::ParallaxLayerComponent),
+            TypeCategory::Component,
+            {
+                Field_ScrollFactor(),
+                Field_RepeatSize(),
+                Field_Offset(),
+                Field_RepeatX(),
+                Field_RepeatY(),
+            },
+            &StorageBindingOf(),
+            "Rendering/2D",
+            "2D Parallax Background Layer: scrolls at a factor of the active camera speed and supports seamless repeating.",
             false,
             false,
         };
@@ -5336,6 +5684,8 @@ const TypeSchema& WeSchemaOf_MeshRendererComponent() { return GeneratedAccess<Wo
 const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent() { return GeneratedAccess<World::SkinnedMeshRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_HierarchyComponent() { return GeneratedAccess<World::HierarchyComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraComponent() { return GeneratedAccess<World::CameraComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_PixelPerfectCameraComponent() { return GeneratedAccess<World::PixelPerfectCameraComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_ParallaxLayerComponent() { return GeneratedAccess<World::ParallaxLayerComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_DirectionalLightComponent() { return GeneratedAccess<World::DirectionalLightComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PointLightComponent() { return GeneratedAccess<World::PointLightComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_AmbientLightComponent() { return GeneratedAccess<World::AmbientLightComponent>::WeSchema(); }
@@ -5384,6 +5734,8 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_SkinnedMeshRendererComponent(),
 			WeSchemaOf_HierarchyComponent(),
 			WeSchemaOf_CameraComponent(),
+			WeSchemaOf_PixelPerfectCameraComponent(),
+			WeSchemaOf_ParallaxLayerComponent(),
 			WeSchemaOf_DirectionalLightComponent(),
 			WeSchemaOf_PointLightComponent(),
 			WeSchemaOf_AmbientLightComponent(),

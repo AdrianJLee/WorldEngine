@@ -108,6 +108,26 @@ namespace World
 		const float aspect = EffectiveAspect(component->Camera, fixedAspectRatio, viewportWidth, viewportHeight);
 
 		CameraSettings params = component->Camera;
+
+		// 像素风专用相机评估 (Pixel Perfect 2D Camera):
+		// 自动计算最大整数倍缩放 (1x, 2x, 3x...) 并换算精准的正交视场半高，彻底杜绝像素拉伸形变
+		if (auto* pixelCam = registry.try_get<PixelPerfectCameraComponent>(entity))
+		{
+			const int refW = std::max(1, pixelCam->ReferenceResolution.x);
+			const int refH = std::max(1, pixelCam->ReferenceResolution.y);
+			const int scaleX = std::max(1, static_cast<int>(viewportWidth) / refW);
+			const int scaleY = std::max(1, static_cast<int>(viewportHeight) / refH);
+			const uint32_t scale = static_cast<uint32_t>(std::max(1, std::min(scaleX, scaleY)));
+			pixelCam->CurrentScale = scale;
+
+			const float ppu = std::max(1.0f, static_cast<float>(pixelCam->PixelsPerUnit));
+			const float orthoZoom = (static_cast<float>(viewportHeight) * 0.5f) / (ppu * static_cast<float>(scale));
+			params.m_ProjectionType = CameraSettings::ProjectionType::Orthographic;
+			params.m_OrthographicZoom = orthoZoom;
+			component->Camera.m_ProjectionType = CameraSettings::ProjectionType::Orthographic;
+			component->Camera.m_OrthographicZoom = orthoZoom;
+		}
+
 		ClampSettings(params, aspect);
 
 		const bool viewportChanged = view->LastViewportWidth != viewportWidth ||

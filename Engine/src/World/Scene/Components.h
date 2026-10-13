@@ -468,6 +468,66 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	struct PixelPerfectCameraComponent
+	{
+		glm::ivec2 ReferenceResolution { 320, 180 };
+		uint32_t PixelsPerUnit = 16;
+		uint32_t CurrentScale = 1;
+		bool SnapToPixelGrid = true;
+		bool UpscaleRT = false;
+		uint16_t Reserved = 0;
+		uint32_t Reserved2 = 0;
+
+		PixelPerfectCameraComponent() = default;
+
+		WE_SCHEMA_BODY(World, PixelPerfectCameraComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/2D"),
+				Doc("Pixel-perfect 2D retro camera: calculates integer-multiple viewport scaling and snaps view translation to pixel grid to eliminate jitter and stretching."))
+			WE_FIELD(ReferenceResolution, IVec2,
+				Doc("Target design reference resolution in pixels (e.g. 320x180, 640x360)."));
+			WE_FIELD(PixelsPerUnit, UInt32, Default(16),
+				Doc("Pixels Per Unit (PPU): number of pixels in one world meter/unit."));
+			WE_FIELD(CurrentScale, UInt32, Default(1),
+				Doc("Evaluated integer scaling ratio for the current viewport size."));
+			WE_FIELD(SnapToPixelGrid, Bool, Default(true),
+				Doc("Snap camera view matrix translation to the pixel grid to eliminate sub-pixel jitter."));
+			WE_FIELD(UpscaleRT, Bool, Default(false),
+				Doc("Whether to render to a native reference-resolution buffer then upscale with nearest-neighbor filtering."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(PixelPerfectCameraComponent) == 24, "PixelPerfectCameraComponent must be exactly 24 bytes");
+	static_assert(std::is_trivially_copyable_v<PixelPerfectCameraComponent>, "PixelPerfectCameraComponent must be trivially copyable");
+
+	struct ParallaxLayerComponent
+	{
+		glm::vec2 ScrollFactor { 0.5f, 0.5f };
+		glm::vec2 RepeatSize { 0.0f, 0.0f };
+		glm::vec2 Offset { 0.0f, 0.0f };
+		bool RepeatX = true;
+		bool RepeatY = false;
+		uint16_t Reserved = 0;
+		uint32_t Reserved2 = 0;
+
+		ParallaxLayerComponent() = default;
+
+		WE_SCHEMA_BODY(World, ParallaxLayerComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/2D"),
+				Doc("2D Parallax Background Layer: scrolls at a factor of the active camera speed and supports seamless repeating."))
+			WE_FIELD(ScrollFactor, Vec2,
+				Doc("Scroll speed multiplier relative to camera movement (e.g. 0.1 for distant mountains, 1.2 for foreground)."));
+			WE_FIELD(RepeatSize, Vec2,
+				Doc("Tile repeat bounds in world units (0 = use sprite bounds)."));
+			WE_FIELD(Offset, Vec2,
+				Doc("Initial static layer offset."));
+			WE_FIELD(RepeatX, Bool, Default(true),
+				Doc("Automatically tile horizontally in camera view."));
+			WE_FIELD(RepeatY, Bool, Default(false),
+				Doc("Automatically tile vertically in camera view."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(ParallaxLayerComponent) == 32, "ParallaxLayerComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<ParallaxLayerComponent>, "ParallaxLayerComponent must be trivially copyable");
+
 	// PECS(相机组件数据导向化):投影矩阵这类派生量不进组件,改由 CameraSystem 按
 	// (CameraSettings 参数, 有效宽高比, 视口尺寸)指纹脏标记缓存到本组件。
 	//

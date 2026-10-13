@@ -1492,7 +1492,7 @@ namespace World
 		return TextureLibrary::Get().Get(asset.Path, /*srgb*/ true);
 	}
 
-	void SceneRenderer::RenderGeometry(const Camera&, const glm::mat4&)
+	void SceneRenderer::RenderGeometry(const Camera& camera, const glm::mat4& cameraTransform)
 	{
 		// B3:每实体的顶点变换(纯数学,不触碰批次状态机)按阈值并行;
 		// 批次写入仍按原顺序在主线程执行,绘制顺序与像素结果与串行版本一致。
@@ -1612,6 +1612,18 @@ namespace World
 
 				// Handle Pivot offset in local quad coordinates
 				glm::mat4 spriteMatrix = spriteMatrixOf(item.entity, transform);
+
+				// 视差多景深层位移计算 (Parallax Background Scrolling)
+				if (const auto* parallax = m_ActiveScene->m_Registry.try_get<ParallaxLayerComponent>(item.entity))
+				{
+					const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+					const glm::vec3 pOffset(
+						(camPos.x * (1.0f - parallax->ScrollFactor.x)) + parallax->Offset.x,
+						(camPos.y * (1.0f - parallax->ScrollFactor.y)) + parallax->Offset.y,
+						0.0f);
+					spriteMatrix = glm::translate(glm::mat4(1.0f), pOffset) * spriteMatrix;
+				}
+
 				if (sprite.Pivot.x != 0.5f || sprite.Pivot.y != 0.5f)
 				{
 					spriteMatrix = glm::translate(spriteMatrix, glm::vec3(0.5f - sprite.Pivot.x, 0.5f - sprite.Pivot.y, 0.0f));

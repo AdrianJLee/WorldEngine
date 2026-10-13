@@ -10,6 +10,8 @@ struct World::MeshRendererComponent
 struct World::SkinnedMeshRendererComponent
 struct World::HierarchyComponent
 struct World::CameraComponent
+struct World::PixelPerfectCameraComponent
+struct World::ParallaxLayerComponent
 struct World::DirectionalLightComponent
 struct World::PointLightComponent
 struct World::AmbientLightComponent

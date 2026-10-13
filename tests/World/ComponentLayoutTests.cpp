@@ -56,6 +56,8 @@ namespace
 		{ "World::SkinnedMeshRendererComponent", 56 },
 		{ "World::HierarchyComponent",            8 },
 		{ "World::CameraComponent",              36 },
+		{ "World::PixelPerfectCameraComponent",   24 },
+		{ "World::ParallaxLayerComponent",        32 },
 		{ "World::DirectionalLightComponent",    32 },
 		{ "World::PointLightComponent",          20 },
 		{ "World::AmbientLightComponent",        16 },

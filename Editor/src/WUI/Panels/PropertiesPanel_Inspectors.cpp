@@ -57,6 +57,10 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawSpriteAnimatorInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::TilemapComponent")
 			height = DrawTilemapInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::PixelPerfectCameraComponent")
+			height = DrawPixelPerfectCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::ParallaxLayerComponent")
+			height = DrawParallaxLayerInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		// 自定义检查器:关卡数据层归属(勾选替代裸掩码数字);Play/Simulate 只读时退回普通行。
 		else if (schema.Id.Name == "World::LevelEntityComponent" && !m_ReadOnly)
 			height = DrawLevelEntityInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
@@ -874,6 +878,87 @@ float PropertiesPanel::DrawTilemapInspector(Wui::WuiContext& ctx, const Wui::Wui
 
 	return y - rect.Y;
 }
+
+
+
+
+float PropertiesPanel::DrawPixelPerfectCameraInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* ppc = static_cast<World::PixelPerfectCameraComponent*>(instance);
+	if (!ppc) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "常用复古像素分辨率预设:", theme.TextMuted, 11.0f);
+	y += 20.0f;
+
+	const float btnW = 64.0f;
+	const float btnH = 22.0f;
+	struct ResPreset { const char* id; const char* label; int w; int h; };
+	const ResPreset presets[4] = {
+		{ "prop.ppc.320", "320×180", 320, 180 },
+		{ "prop.ppc.640", "640×360", 640, 360 },
+		{ "prop.ppc.256", "256×240", 256, 240 },
+		{ "prop.ppc.160", "160×144", 160, 144 }
+	};
+	for (int i = 0; i < 4; ++i)
+	{
+		const Wui::WuiRect bRect { rect.X + 12.0f + static_cast<float>(i) * (btnW + 4.0f), y, btnW, btnH };
+		if (Wui::Button(ctx, Wui::HashId(presets[i].id), bRect, presets[i].label, theme))
+		{
+			ppc->ReferenceResolution = { presets[i].w, presets[i].h };
+			if (changedFields) changedFields->push_back("ReferenceResolution");
+		}
+	}
+	y += 28.0f;
+
+	std::string status = "当前整数倍缩放: " + std::to_string(ppc->CurrentScale) + "x | PPU: "
+		+ std::to_string(ppc->PixelsPerUnit) + " px/m | 像素吸附: " + (ppc->SnapToPixelGrid ? "开启" : "关闭");
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, status, theme.Accent, 10.5f);
+	y += 20.0f;
+
+	return (y + 6.0f) - rect.Y;
 }
 
+float PropertiesPanel::DrawParallaxLayerInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
 
+	auto* plx = static_cast<World::ParallaxLayerComponent*>(instance);
+	if (!plx) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "视差景深快速预设 (ScrollFactor):", theme.TextMuted, 11.0f);
+	y += 20.0f;
+
+	const float btnW = 68.0f;
+	const float btnH = 22.0f;
+	struct PlxPreset { const char* id; const char* label; float fx; float fy; };
+	const PlxPreset presets[4] = {
+		{ "prop.plx.sky", "天空 (0.0)", 0.0f, 0.0f },
+		{ "prop.plx.far", "远景 (0.2)", 0.2f, 0.1f },
+		{ "prop.plx.mid", "中景 (0.5)", 0.5f, 0.3f },
+		{ "prop.plx.fg",  "近景 (1.2)", 1.2f, 1.0f }
+	};
+	for (int i = 0; i < 4; ++i)
+	{
+		const Wui::WuiRect bRect { rect.X + 12.0f + static_cast<float>(i) * (btnW + 4.0f), y, btnW, btnH };
+		if (Wui::Button(ctx, Wui::HashId(presets[i].id), bRect, presets[i].label, theme))
+		{
+			plx->ScrollFactor = { presets[i].fx, presets[i].fy };
+			if (changedFields) changedFields->push_back("ScrollFactor");
+		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+}

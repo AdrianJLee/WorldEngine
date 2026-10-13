@@ -96,6 +96,12 @@ namespace World
 		float DrawCircleCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
+		float DrawPixelPerfectCameraInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
+		float DrawParallaxLayerInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
 		// 2026-09-26 脚本组件重写:统一脚本检视器(两个脚本组件共用一条路径)。
 		float DrawTilemapInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
