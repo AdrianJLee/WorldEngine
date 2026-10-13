@@ -55,6 +55,14 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawChainCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::PlatformEffector2DComponent")
 			height = DrawPlatformEffector2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::DistanceJoint2DComponent")
+			height = DrawDistanceJoint2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::RevoluteJoint2DComponent")
+			height = DrawRevoluteJoint2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::PrismaticJoint2DComponent")
+			height = DrawPrismaticJoint2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::WheelJoint2DComponent")
+			height = DrawWheelJoint2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::BoxCollider2DComponent")
 			height = DrawBoxCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::CircleCollider2DComponent")
@@ -1470,6 +1478,298 @@ float PropertiesPanel::DrawShadowCaster2DInspector(Wui::WuiContext& ctx, const W
 		});
 		m_Host.MarkDocumentDirty();
 		if (changedFields) { changedFields->push_back("ShapeType"); changedFields->push_back("Points"); }
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawDistanceJoint2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* joint = static_cast<World::DistanceJoint2DComponent*>(instance);
+	if (!joint) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "距离关节预设 (Distance Joint Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float gap = 6.0f;
+	const float btnH = 22.0f;
+	const float availW = std::max(270.0f, rect.W - 24.0f);
+	const float btnW = (availW - gap * 2.0f) / 3.0f;
+	const Wui::WuiRect btnRigid  { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnSpring { rect.X + 12.0f + btnW + gap, y, btnW, btnH };
+	const Wui::WuiRect btnRope   { rect.X + 12.0f + (btnW + gap) * 2.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnRigid, "刚性硬杆: 刚性连接，无弹性 (EnableSpring=false, Hertz=0.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.dist2d.preset_rigid"), btnRigid, "钢制硬杆 (Rigid)", theme))
+	{
+		joint->EnableSpring = false;
+		joint->Hertz = 0.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("EnableSpring");
+			changedFields->push_back("Hertz");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnSpring, "弹性弹簧: 5Hz 频率弹性阻尼连接 (EnableSpring=true, Hertz=5.0, DampingRatio=0.7)");
+	if (Wui::Button(ctx, Wui::HashId("prop.dist2d.preset_spring"), btnSpring, "弹性弹簧 (Spring 5Hz)", theme))
+	{
+		joint->EnableSpring = true;
+		joint->Hertz = 5.0f;
+		joint->DampingRatio = 0.7f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("EnableSpring");
+			changedFields->push_back("Hertz");
+			changedFields->push_back("DampingRatio");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnRope, "柔性绳索: 允许在 0~3m 范围内活动 (EnableLimit=true, MinDistance=0.0, MaxDistance=3.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.dist2d.preset_rope"), btnRope, "柔性绳索 (Limit)", theme))
+	{
+		joint->EnableLimit = true;
+		joint->MinDistance = 0.0f;
+		joint->MaxDistance = 3.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("EnableLimit");
+			changedFields->push_back("MinDistance");
+			changedFields->push_back("MaxDistance");
+		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawRevoluteJoint2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* joint = static_cast<World::RevoluteJoint2DComponent*>(instance);
+	if (!joint) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "销轴铰链预设 (Revolute Joint Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float gap = 6.0f;
+	const float btnH = 22.0f;
+	const float availW = std::max(270.0f, rect.W - 24.0f);
+	const float btnW = (availW - gap * 2.0f) / 3.0f;
+	const Wui::WuiRect btnFree   { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnPend   { rect.X + 12.0f + btnW + gap, y, btnW, btnH };
+	const Wui::WuiRect btnMotor  { rect.X + 12.0f + (btnW + gap) * 2.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnFree, "自由销轴: 360° 无约束自由旋转 (EnableLimit=false, EnableMotor=false)");
+	if (Wui::Button(ctx, Wui::HashId("prop.revolute2d.preset_free"), btnFree, "自由销轴 360°", theme))
+	{
+		joint->EnableLimit = false;
+		joint->EnableMotor = false;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("EnableLimit");
+			changedFields->push_back("EnableMotor");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnPend, "钟摆限位: 限制在 -45°~+45° 摆动 (EnableLimit=true, LowerAngle=-45.0, UpperAngle=45.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.revolute2d.preset_pendulum"), btnPend, "钟摆限位 ±45°", theme))
+	{
+		joint->EnableLimit = true;
+		joint->LowerAngle = -45.0f;
+		joint->UpperAngle = 45.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("EnableLimit");
+			changedFields->push_back("LowerAngle");
+			changedFields->push_back("UpperAngle");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnMotor, "旋转电机: 180°/s 驱动电机 (EnableMotor=true, MotorSpeed=180.0, MaxMotorTorque=25.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.revolute2d.preset_motor"), btnMotor, "旋转电机 (180°/s)", theme))
+	{
+		joint->EnableMotor = true;
+		joint->MotorSpeed = 180.0f;
+		joint->MaxMotorTorque = 25.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("EnableMotor");
+			changedFields->push_back("MotorSpeed");
+			changedFields->push_back("MaxMotorTorque");
+		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawPrismaticJoint2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* joint = static_cast<World::PrismaticJoint2DComponent*>(instance);
+	if (!joint) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "滑轨关节预设 (Prismatic Joint Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float gap = 6.0f;
+	const float btnH = 22.0f;
+	const float availW = std::max(270.0f, rect.W - 24.0f);
+	const float btnW = (availW - gap * 2.0f) / 3.0f;
+	const Wui::WuiRect btnRailX  { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnLiftY  { rect.X + 12.0f + btnW + gap, y, btnW, btnH };
+	const Wui::WuiRect btnMotor  { rect.X + 12.0f + (btnW + gap) * 2.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnRailX, "水平滑轨: 沿 X 轴滑动 ±2.0m (Axis={1, 0}, LowerTranslation=-2.0, UpperTranslation=2.0, EnableLimit=true)");
+	if (Wui::Button(ctx, Wui::HashId("prop.prismatic2d.preset_rail_x"), btnRailX, "水平滑轨 X", theme))
+	{
+		joint->Axis = { 1.0f, 0.0f };
+		joint->LowerTranslation = -2.0f;
+		joint->UpperTranslation = 2.0f;
+		joint->EnableLimit = true;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Axis");
+			changedFields->push_back("LowerTranslation");
+			changedFields->push_back("UpperTranslation");
+			changedFields->push_back("EnableLimit");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnLiftY, "垂直升降: 沿 Y 轴升降 -1.5m~3.0m (Axis={0, 1}, LowerTranslation=-1.5, UpperTranslation=3.0, EnableLimit=true)");
+	if (Wui::Button(ctx, Wui::HashId("prop.prismatic2d.preset_lift_y"), btnLiftY, "垂直升降 Y", theme))
+	{
+		joint->Axis = { 0.0f, 1.0f };
+		joint->LowerTranslation = -1.5f;
+		joint->UpperTranslation = 3.0f;
+		joint->EnableLimit = true;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Axis");
+			changedFields->push_back("LowerTranslation");
+			changedFields->push_back("UpperTranslation");
+			changedFields->push_back("EnableLimit");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnMotor, "往复驱动电机: 2m/s 驱动电机 (EnableMotor=true, MotorSpeed=2.0, MaxMotorForce=100.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.prismatic2d.preset_motor"), btnMotor, "往复驱动电机", theme))
+	{
+		joint->EnableMotor = true;
+		joint->MotorSpeed = 2.0f;
+		joint->MaxMotorForce = 100.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("EnableMotor");
+			changedFields->push_back("MotorSpeed");
+			changedFields->push_back("MaxMotorForce");
+		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawWheelJoint2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* joint = static_cast<World::WheelJoint2DComponent*>(instance);
+	if (!joint) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "车轮悬挂关节预设 (Wheel Joint Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float gap = 6.0f;
+	const float btnH = 22.0f;
+	const float availW = std::max(270.0f, rect.W - 24.0f);
+	const float btnW = (availW - gap * 2.0f) / 3.0f;
+	const Wui::WuiRect btnOffroad { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnSport   { rect.X + 12.0f + btnW + gap, y, btnW, btnH };
+	const Wui::WuiRect btnMotor   { rect.X + 12.0f + (btnW + gap) * 2.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnOffroad, "越野车长行程悬挂 (Hertz=4.0, DampingRatio=0.7, LowerTranslation=-0.3, UpperTranslation=0.3)");
+	if (Wui::Button(ctx, Wui::HashId("prop.wheel2d.preset_offroad"), btnOffroad, "越野车悬挂 (4Hz)", theme))
+	{
+		joint->Hertz = 4.0f;
+		joint->DampingRatio = 0.7f;
+		joint->LowerTranslation = -0.3f;
+		joint->UpperTranslation = 0.3f;
+		joint->EnableLimit = true;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Hertz");
+			changedFields->push_back("DampingRatio");
+			changedFields->push_back("LowerTranslation");
+			changedFields->push_back("UpperTranslation");
+			changedFields->push_back("EnableLimit");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnSport, "硬派跑车短行程硬悬挂 (Hertz=8.0, DampingRatio=0.85, LowerTranslation=-0.1, UpperTranslation=0.1)");
+	if (Wui::Button(ctx, Wui::HashId("prop.wheel2d.preset_sport"), btnSport, "硬派跑车 (8Hz)", theme))
+	{
+		joint->Hertz = 8.0f;
+		joint->DampingRatio = 0.85f;
+		joint->LowerTranslation = -0.1f;
+		joint->UpperTranslation = 0.1f;
+		joint->EnableLimit = true;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Hertz");
+			changedFields->push_back("DampingRatio");
+			changedFields->push_back("LowerTranslation");
+			changedFields->push_back("UpperTranslation");
+			changedFields->push_back("EnableLimit");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnMotor, "车轮驱动电机: 720°/s 匀速旋转 (EnableMotor=true, MotorSpeed=720.0, MaxMotorTorque=30.0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.wheel2d.preset_motor"), btnMotor, "车轮驱动电机", theme))
+	{
+		joint->EnableMotor = true;
+		joint->MotorSpeed = 720.0f;
+		joint->MaxMotorTorque = 30.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("EnableMotor");
+			changedFields->push_back("MotorSpeed");
+			changedFields->push_back("MaxMotorTorque");
+		}
 	}
 	y += 28.0f;
 

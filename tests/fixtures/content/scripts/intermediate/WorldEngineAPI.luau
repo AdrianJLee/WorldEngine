@@ -803,6 +803,19 @@ function ui:isOpen() end
 ---@field CastShadow boolean
 ---@field Direction vec3
 
+-- Component fields are exposed through Entity:GetComponent("DistanceJoint2DComponent"); there is no runtime global named DistanceJoint2DComponent.
+---@class DistanceJoint2DComponent
+---@field DampingRatio number
+---@field ConnectedEntity number
+---@field AnchorOther vec2
+---@field Hertz number
+---@field MaxDistance number
+---@field MinDistance number
+---@field AnchorSelf vec2
+---@field EnableSpring boolean
+---@field EnableCollision boolean
+---@field EnableLimit boolean
+
 -- Component fields are exposed through Entity:GetComponent("GlobalLight2DComponent"); there is no runtime global named GlobalLight2DComponent.
 ---@class GlobalLight2DComponent
 ---@field Enabled boolean
@@ -907,6 +920,33 @@ function ui:isOpen() end
 ---@field Offset vec2
 ---@field Points string
 ---@field Density number
+
+-- Component fields are exposed through Entity:GetComponent("PrismaticJoint2DComponent"); there is no runtime global named PrismaticJoint2DComponent.
+---@class PrismaticJoint2DComponent
+---@field Axis vec2
+---@field EnableLimit boolean
+---@field UpperTranslation number
+---@field AnchorOther vec2
+---@field LowerTranslation number
+---@field EnableCollision boolean
+---@field EnableMotor boolean
+---@field AnchorSelf vec2
+---@field MaxMotorForce number
+---@field MotorSpeed number
+---@field ConnectedEntity number
+
+-- Component fields are exposed through Entity:GetComponent("RevoluteJoint2DComponent"); there is no runtime global named RevoluteJoint2DComponent.
+---@class RevoluteJoint2DComponent
+---@field EnableCollision boolean
+---@field AnchorSelf vec2
+---@field UpperAngle number
+---@field MotorSpeed number
+---@field LowerAngle number
+---@field AnchorOther vec2
+---@field MaxMotorTorque number
+---@field EnableLimit boolean
+---@field ConnectedEntity number
+---@field EnableMotor boolean
 
 -- Component fields are exposed through Entity:GetComponent("RigidBody2DComponent"); there is no runtime global named RigidBody2DComponent.
 ---@class RigidBody2DComponent
@@ -1024,6 +1064,22 @@ function ui:isOpen() end
 ---@field Linear vec3
 ---@field Angular vec3
 
+-- Component fields are exposed through Entity:GetComponent("WheelJoint2DComponent"); there is no runtime global named WheelJoint2DComponent.
+---@class WheelJoint2DComponent
+---@field Hertz number
+---@field ConnectedEntity number
+---@field DampingRatio number
+---@field SuspensionAxis vec2
+---@field AnchorSelf vec2
+---@field EnableCollision boolean
+---@field LowerTranslation number
+---@field EnableMotor boolean
+---@field MaxMotorTorque number
+---@field UpperTranslation number
+---@field EnableLimit boolean
+---@field AnchorOther vec2
+---@field MotorSpeed number
+
 ---Pure-ECS component name lookup table; provides autocomplete for ecs:Query / entity:GetComponent.
 ---@class Comp
 ---@field AmbientLightComponent string Registered component type name "AmbientLightComponent".
@@ -1050,6 +1106,8 @@ function ui:isOpen() end
 ---@field CircleRenderer string Short alias for "CircleRendererComponent".
 ---@field DirectionalLightComponent string Registered component type name "DirectionalLightComponent".
 ---@field DirectionalLight string Short alias for "DirectionalLightComponent".
+---@field DistanceJoint2DComponent string Registered component type name "DistanceJoint2DComponent".
+---@field DistanceJoint2D string Short alias for "DistanceJoint2DComponent".
 ---@field GlobalLight2DComponent string Registered component type name "GlobalLight2DComponent".
 ---@field GlobalLight2D string Short alias for "GlobalLight2DComponent".
 ---@field HierarchyComponent string Registered component type name "HierarchyComponent".
@@ -1076,6 +1134,10 @@ function ui:isOpen() end
 ---@field PointLight string Short alias for "PointLightComponent".
 ---@field PolygonCollider2DComponent string Registered component type name "PolygonCollider2DComponent".
 ---@field PolygonCollider2D string Short alias for "PolygonCollider2DComponent".
+---@field PrismaticJoint2DComponent string Registered component type name "PrismaticJoint2DComponent".
+---@field PrismaticJoint2D string Short alias for "PrismaticJoint2DComponent".
+---@field RevoluteJoint2DComponent string Registered component type name "RevoluteJoint2DComponent".
+---@field RevoluteJoint2D string Short alias for "RevoluteJoint2DComponent".
 ---@field RigidBody2DComponent string Registered component type name "RigidBody2DComponent".
 ---@field RigidBody2D string Short alias for "RigidBody2DComponent".
 ---@field RigidBody3DComponent string Registered component type name "RigidBody3DComponent".
@@ -1102,6 +1164,8 @@ function ui:isOpen() end
 ---@field UUID string Short alias for "UUIDComponent".
 ---@field VelocityComponent string Registered component type name "VelocityComponent".
 ---@field Velocity string Short alias for "VelocityComponent".
+---@field WheelJoint2DComponent string Registered component type name "WheelJoint2DComponent".
+---@field WheelJoint2D string Short alias for "WheelJoint2DComponent".
 Comp = {}
 
 ---Alias for Comp.

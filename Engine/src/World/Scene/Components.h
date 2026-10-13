@@ -1020,6 +1020,194 @@ namespace World
 	static_assert(sizeof(PlatformEffector2DComponent) == 16, "PlatformEffector2DComponent must be exactly 16 bytes");
 	static_assert(std::is_trivially_copyable_v<PlatformEffector2DComponent>, "PlatformEffector2DComponent must be trivially copyable");
 
+	struct DistanceJoint2DComponent
+	{
+		entt::entity ConnectedEntity = entt::null;
+		glm::vec2 AnchorSelf { 0.0f, 0.0f };
+		glm::vec2 AnchorOther { 0.0f, 0.0f };
+		float MinDistance = -1.0f;
+		float MaxDistance = -1.0f;
+		float Hertz = 0.0f;
+		float DampingRatio = 0.7f;
+		bool EnableLimit = false;
+		bool EnableSpring = false;
+		bool EnableCollision = false;
+		uint8_t _Padding[1] { 0 };
+
+		DistanceJoint2DComponent() = default;
+
+		WE_SCHEMA_BODY(World, DistanceJoint2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D distance joint: constrains distance between two 2D rigid bodies, with optional min/max distance limits and spring-damper suspension."))
+			WE_FIELD(ConnectedEntity, UInt64, Entity32,
+				Doc("The target entity to connect with (must have a 2D RigidBody)."));
+			WE_FIELD(AnchorSelf, Vec2,
+				Doc("Anchor point in this entity local space."));
+			WE_FIELD(AnchorOther, Vec2,
+				Doc("Anchor point in the connected entity local space."));
+			WE_FIELD(MinDistance, Float, 
+				Doc("Minimum allowed distance; negative = derived from initial separation."));
+			WE_FIELD(MaxDistance, Float, 
+				Doc("Maximum allowed distance; negative = derived from initial separation."));
+			WE_FIELD(Hertz, Float, Default(0.0f), Range(0.0f, 60.0f),
+				Doc("Spring frequency in Hz (0 = rigid rod, > 0 = springy soft constraint)."));
+			WE_FIELD(DampingRatio, Float, Default(0.7f), Range(0.0f, 10.0f),
+				Doc("Spring damping ratio (0 = no damping, 1 = critical damping)."));
+			WE_FIELD(EnableLimit, Bool, Default(false),
+				Doc("Whether MinDistance and MaxDistance clamping is active."));
+			WE_FIELD(EnableSpring, Bool, Default(false),
+				Doc("Whether spring-damper stiffness is active."));
+			WE_FIELD(EnableCollision, Bool, Default(false),
+				Doc("Whether the two connected bodies can collide with each other."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(DistanceJoint2DComponent) == 40, "DistanceJoint2DComponent must be exactly 40 bytes");
+	static_assert(std::is_trivially_copyable_v<DistanceJoint2DComponent>, "DistanceJoint2DComponent must be trivially copyable");
+
+	struct RevoluteJoint2DComponent
+	{
+		entt::entity ConnectedEntity = entt::null;
+		glm::vec2 AnchorSelf { 0.0f, 0.0f };
+		glm::vec2 AnchorOther { 0.0f, 0.0f };
+		float LowerAngle = 0.0f;
+		float UpperAngle = 0.0f;
+		float MotorSpeed = 0.0f;
+		float MaxMotorTorque = 10.0f;
+		bool EnableLimit = false;
+		bool EnableMotor = false;
+		bool EnableCollision = false;
+		uint8_t _Padding[1] { 0 };
+
+		RevoluteJoint2DComponent() = default;
+
+		WE_SCHEMA_BODY(World, RevoluteJoint2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D revolute (hinge/pin) joint: allows rotational motion around a shared anchor point with angle limits and rotational motor."))
+			WE_FIELD(ConnectedEntity, UInt64, Entity32,
+				Doc("The target entity to connect with (must have a 2D RigidBody)."));
+			WE_FIELD(AnchorSelf, Vec2,
+				Doc("Pin anchor point in this entity local space."));
+			WE_FIELD(AnchorOther, Vec2,
+				Doc("Pin anchor point in the connected entity local space."));
+			WE_FIELD(LowerAngle, Float, Default(0.0f),
+				Doc("Lower rotational angle limit in degrees."));
+			WE_FIELD(UpperAngle, Float, Default(0.0f),
+				Doc("Upper rotational angle limit in degrees."));
+			WE_FIELD(MotorSpeed, Float, Default(0.0f),
+				Doc("Target motor rotational speed in degrees per second."));
+			WE_FIELD(MaxMotorTorque, Float, Default(10.0f), Range(0.0f, 10000.0f),
+				Doc("Maximum motor torque in N*m."));
+			WE_FIELD(EnableLimit, Bool, Default(false),
+				Doc("Whether angle limits are enforced."));
+			WE_FIELD(EnableMotor, Bool, Default(false),
+				Doc("Whether the rotational motor is active."));
+			WE_FIELD(EnableCollision, Bool, Default(false),
+				Doc("Whether the two connected bodies can collide with each other."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(RevoluteJoint2DComponent) == 40, "RevoluteJoint2DComponent must be exactly 40 bytes");
+	static_assert(std::is_trivially_copyable_v<RevoluteJoint2DComponent>, "RevoluteJoint2DComponent must be trivially copyable");
+
+	struct PrismaticJoint2DComponent
+	{
+		entt::entity ConnectedEntity = entt::null;
+		glm::vec2 AnchorSelf { 0.0f, 0.0f };
+		glm::vec2 AnchorOther { 0.0f, 0.0f };
+		glm::vec2 Axis { 1.0f, 0.0f };
+		float LowerTranslation = -1.0f;
+		float UpperTranslation = 1.0f;
+		float MotorSpeed = 0.0f;
+		float MaxMotorForce = 50.0f;
+		bool EnableLimit = false;
+		bool EnableMotor = false;
+		bool EnableCollision = false;
+		uint8_t _Padding[1] { 0 };
+
+		PrismaticJoint2DComponent() = default;
+
+		WE_SCHEMA_BODY(World, PrismaticJoint2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D prismatic (slider) joint: allows linear motion along a specified axis with translation limits and linear motor."))
+			WE_FIELD(ConnectedEntity, UInt64, Entity32,
+				Doc("The target entity to connect with (must have a 2D RigidBody)."));
+			WE_FIELD(AnchorSelf, Vec2,
+				Doc("Anchor point in this entity local space."));
+			WE_FIELD(AnchorOther, Vec2,
+				Doc("Anchor point in the connected entity local space."));
+			WE_FIELD(Axis, Vec2,
+				Doc("Sliding translation axis in this entity local space."));
+			WE_FIELD(LowerTranslation, Float,
+				Doc("Lower translation limit in meters."));
+			WE_FIELD(UpperTranslation, Float, Default(1.0f),
+				Doc("Upper translation limit in meters."));
+			WE_FIELD(MotorSpeed, Float, Default(0.0f),
+				Doc("Target linear motor speed in meters per second."));
+			WE_FIELD(MaxMotorForce, Float, Default(50.0f), Range(0.0f, 10000.0f),
+				Doc("Maximum linear motor force in Newtons."));
+			WE_FIELD(EnableLimit, Bool, Default(false),
+				Doc("Whether translation limits are enforced."));
+			WE_FIELD(EnableMotor, Bool, Default(false),
+				Doc("Whether the linear motor is active."));
+			WE_FIELD(EnableCollision, Bool, Default(false),
+				Doc("Whether the two connected bodies can collide with each other."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(PrismaticJoint2DComponent) == 48, "PrismaticJoint2DComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<PrismaticJoint2DComponent>, "PrismaticJoint2DComponent must be trivially copyable");
+
+	struct WheelJoint2DComponent
+	{
+		entt::entity ConnectedEntity = entt::null;
+		glm::vec2 AnchorSelf { 0.0f, 0.0f };
+		glm::vec2 AnchorOther { 0.0f, 0.0f };
+		glm::vec2 SuspensionAxis { 0.0f, 1.0f };
+		float Hertz = 4.0f;
+		float DampingRatio = 0.7f;
+		float LowerTranslation = -0.2f;
+		float UpperTranslation = 0.2f;
+		float MotorSpeed = 0.0f;
+		float MaxMotorTorque = 20.0f;
+		bool EnableLimit = true;
+		bool EnableMotor = false;
+		bool EnableCollision = false;
+		uint8_t _Padding[1] { 0 };
+
+		WheelJoint2DComponent() = default;
+
+		WE_SCHEMA_BODY(World, WheelJoint2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D wheel joint: provides vehicle wheel suspension with spring-damper suspension axis, travel limits, and rotational drive motor."))
+			WE_FIELD(ConnectedEntity, UInt64, Entity32,
+				Doc("The target entity to connect with (must have a 2D RigidBody)."));
+			WE_FIELD(AnchorSelf, Vec2,
+				Doc("Wheel mount anchor point in this entity local space."));
+			WE_FIELD(AnchorOther, Vec2,
+				Doc("Wheel axle anchor point in the connected entity local space."));
+			WE_FIELD(SuspensionAxis, Vec2,
+				Doc("Suspension shock-absorber axis in this entity local space."));
+			WE_FIELD(Hertz, Float, Default(4.0f), Range(0.0f, 60.0f),
+				Doc("Suspension spring frequency in Hz."));
+			WE_FIELD(DampingRatio, Float, Default(0.7f), Range(0.0f, 10.0f),
+				Doc("Suspension spring damping ratio."));
+			WE_FIELD(LowerTranslation, Float,
+				Doc("Lower suspension travel limit in meters."));
+			WE_FIELD(UpperTranslation, Float, Default(0.2f),
+				Doc("Upper suspension travel limit in meters."));
+			WE_FIELD(MotorSpeed, Float, Default(0.0f),
+				Doc("Wheel drive motor target speed in degrees per second."));
+			WE_FIELD(MaxMotorTorque, Float, Default(20.0f), Range(0.0f, 10000.0f),
+				Doc("Maximum wheel motor torque in N*m."));
+			WE_FIELD(EnableLimit, Bool, Default(true),
+				Doc("Whether suspension travel limits are enforced."));
+			WE_FIELD(EnableMotor, Bool, Default(false),
+				Doc("Whether wheel drive motor is active."));
+			WE_FIELD(EnableCollision, Bool, Default(false),
+				Doc("Whether the two connected bodies can collide with each other."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(WheelJoint2DComponent) == 56, "WheelJoint2DComponent must be exactly 56 bytes");
+	static_assert(std::is_trivially_copyable_v<WheelJoint2DComponent>, "WheelJoint2DComponent must be trivially copyable");
+
 
 	// P1b D6:3D 物理(Jolt)组件。字段 id 全部显式钉住("RB3D…"/"…3D…" ASCII):
 	// 组件一旦写进 .entity 存档就不能再改 id,否则旧场景迁移语义会漂移,--check 门禁也要求

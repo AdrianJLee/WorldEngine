@@ -400,6 +400,8 @@ namespace World
 
 		void EnsurePhysicsJoint(entt::entity entity);
 		void DestroyPhysicsJoint(entt::entity entity);
+		void EnsurePhysicsJoint2D(entt::entity entity);
+		void DestroyPhysicsJoint2D(entt::entity entity);
 		// 某实体被销毁时,把其它实体指向它的关节一起拆掉(否则后端会留悬垂 pair)。
 		void DestroyJointsReferencing(entt::entity entity);
 		// ---- P1b D6:3D 物理(Jolt)运行时接口 ----

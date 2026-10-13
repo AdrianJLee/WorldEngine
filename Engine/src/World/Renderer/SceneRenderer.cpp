@@ -2142,7 +2142,71 @@ namespace World
 				}
 			}
 		}
+
+		// Phase 10: 2D Physics Joints debug wireframes
+		auto resolveWorldAnchor = [&](entt::entity ent, const glm::vec2& localAnchor) -> glm::vec3
+		{
+			if (!m_ActiveScene->m_Registry.valid(ent)) return { 0.0f, 0.0f, 0.0f };
+			const auto* tr = m_ActiveScene->m_Registry.try_get<TransformComponent>(ent);
+			if (!tr) return { 0.0f, 0.0f, 0.0f };
+			const glm::mat4 m = glm::translate(glm::mat4(1.0f), tr->Location) * glm::mat4_cast(tr->Rotation);
+			return glm::vec3(m * glm::vec4(localAnchor.x * tr->Scale.x, localAnchor.y * tr->Scale.y, 0.0f, 1.0f));
+		};
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, DistanceJoint2DComponent>())
+		{
+			const auto& joint = m_ActiveScene->m_Registry.get<DistanceJoint2DComponent>(entity);
+			entt::entity other = joint.ConnectedEntity;
+			if (!m_ActiveScene->m_Registry.valid(other)) continue;
+			const glm::vec3 pA = resolveWorldAnchor(entity, joint.AnchorSelf);
+			const glm::vec3 pB = resolveWorldAnchor(other, joint.AnchorOther);
+			Renderer2D::DrawLineCore(pA, pB, { 0.25f, 0.85f, 0.95f, 0.90f }, static_cast<uint32_t>(entity));
+			Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), pA) * glm::scale(glm::mat4(1.0f), glm::vec3(0.12f)), { 0.25f, 0.95f, 0.95f, 1.0f }, 0.25f, 0.005f, static_cast<uint32_t>(entity));
+			Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), pB) * glm::scale(glm::mat4(1.0f), glm::vec3(0.12f)), { 0.25f, 0.95f, 0.95f, 1.0f }, 0.25f, 0.005f, static_cast<uint32_t>(entity));
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, RevoluteJoint2DComponent>())
+		{
+			const auto& joint = m_ActiveScene->m_Registry.get<RevoluteJoint2DComponent>(entity);
+			const glm::vec3 pA = resolveWorldAnchor(entity, joint.AnchorSelf);
+			Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), pA) * glm::scale(glm::mat4(1.0f), glm::vec3(0.20f)), { 0.95f, 0.85f, 0.25f, 1.0f }, 0.25f, 0.005f, static_cast<uint32_t>(entity));
+			entt::entity other = joint.ConnectedEntity;
+			if (m_ActiveScene->m_Registry.valid(other))
+			{
+				const glm::vec3 pB = resolveWorldAnchor(other, joint.AnchorOther);
+				Renderer2D::DrawLineCore(pA, pB, { 0.95f, 0.85f, 0.25f, 0.70f }, static_cast<uint32_t>(entity));
+			}
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, PrismaticJoint2DComponent>())
+		{
+			const auto& joint = m_ActiveScene->m_Registry.get<PrismaticJoint2DComponent>(entity);
+			const glm::vec3 pA = resolveWorldAnchor(entity, joint.AnchorSelf);
+			const auto& tr = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const glm::vec2 localAxis = glm::length(joint.Axis) > 1e-5f ? glm::normalize(joint.Axis) : glm::vec2(1.0f, 0.0f);
+			const float rotZ = tr.GetEulerAngles().z;
+			const glm::vec2 worldAxis(
+				localAxis.x * std::cos(rotZ) - localAxis.y * std::sin(rotZ),
+				localAxis.x * std::sin(rotZ) + localAxis.y * std::cos(rotZ)
+			);
+			const float low = joint.EnableLimit ? joint.LowerTranslation : -2.0f;
+			const float high = joint.EnableLimit ? joint.UpperTranslation : 2.0f;
+			const glm::vec3 r0 = pA + glm::vec3(worldAxis * low, 0.0f);
+			const glm::vec3 r1 = pA + glm::vec3(worldAxis * high, 0.0f);
+			Renderer2D::DrawLineCore(r0, r1, { 0.95f, 0.45f, 0.25f, 0.90f }, static_cast<uint32_t>(entity));
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, WheelJoint2DComponent>())
+		{
+			const auto& joint = m_ActiveScene->m_Registry.get<WheelJoint2DComponent>(entity);
+			const glm::vec3 pA = resolveWorldAnchor(entity, joint.AnchorSelf);
+			entt::entity other = joint.ConnectedEntity;
+			const glm::vec3 pB = m_ActiveScene->m_Registry.valid(other) ? resolveWorldAnchor(other, joint.AnchorOther) : pA;
+			Renderer2D::DrawLineCore(pA, pB, { 0.85f, 0.35f, 0.85f, 0.90f }, static_cast<uint32_t>(entity));
+			Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), pB) * glm::scale(glm::mat4(1.0f), glm::vec3(0.35f)), { 0.85f, 0.35f, 0.85f, 0.90f }, 0.15f, 0.005f, static_cast<uint32_t>(entity));
+		}
 	}
+
 
 	void SceneRenderer::OnResize(uint32_t width, uint32_t height)
 	{

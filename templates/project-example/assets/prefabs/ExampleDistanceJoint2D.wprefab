@@ -1,0 +1,43 @@
+FormatVersion: 2
+Scene: ExampleDistanceJoint2D
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000305
+    World::TagComponent:
+      Tag: Distance Joint Bob
+    World::TransformComponent:
+      Location: [0, 1.5, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [1, 1, 1]
+    World::SpriteComponent:
+      Color: [0.4, 0.85, 0.45, 1]
+      Texture: "assets/textures/Icon.wtex"
+      TilingFactor: 1
+      SortingLayer: 0
+      OrderInLayer: 2
+    World::RigidBody2DComponent:
+      Type: Dynamic
+      FixedRotation: false
+      Ccd: false
+      Layer: 1
+      Mask: 65535
+    World::BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1.0
+      Friction: 0.4
+      Restitution: 0.1
+      ShowCollider: true
+      IsSensor: false
+    World::DistanceJoint2DComponent:
+      ConnectedEntity: 0
+      AnchorSelf: [0, 0]
+      AnchorOther: [0, 0]
+      MinDistance: 1.0
+      MaxDistance: 3.0
+      Hertz: 2.5
+      DampingRatio: 0.7
+      EnableLimit: true
+      EnableSpring: true
+      EnableCollision: false

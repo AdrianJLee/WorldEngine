@@ -1,0 +1,31 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 210000000000000016
+  World::TagComponent:
+    Tag: Anchor Pin
+  World::TransformComponent:
+    Location: [2.5, 3.5, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [0.4, 0.4, 1]
+  World::SpriteComponent:
+    Color: [0.85, 0.85, 0.9, 1]
+    Texture: "assets/textures/Icon.wtex"
+    TilingFactor: 1
+    SortingLayer: 0
+    OrderInLayer: 2
+  World::RigidBody2DComponent:
+    Type: Static
+    FixedRotation: true
+    Ccd: false
+    Layer: 1
+    Mask: 65535
+  World::CircleCollider2DComponent:
+    Offset: [0, 0]
+    Radius: 0.2
+    Density: 1.0
+    Friction: 0.5
+    Restitution: 0.0
+    ShowCollider: true
+    IsSensor: false

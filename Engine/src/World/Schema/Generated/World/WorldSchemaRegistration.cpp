@@ -35,6 +35,10 @@ const TypeSchema& WeSchemaOf_CapsuleCollider2DComponent();
 const TypeSchema& WeSchemaOf_PolygonCollider2DComponent();
 const TypeSchema& WeSchemaOf_ChainCollider2DComponent();
 const TypeSchema& WeSchemaOf_PlatformEffector2DComponent();
+const TypeSchema& WeSchemaOf_DistanceJoint2DComponent();
+const TypeSchema& WeSchemaOf_RevoluteJoint2DComponent();
+const TypeSchema& WeSchemaOf_PrismaticJoint2DComponent();
+const TypeSchema& WeSchemaOf_WheelJoint2DComponent();
 const TypeSchema& WeSchemaOf_RigidBody3DComponent();
 const TypeSchema& WeSchemaOf_BoxCollider3DComponent();
 const TypeSchema& WeSchemaOf_SphereCollider3DComponent();
@@ -5270,6 +5274,1402 @@ struct GeneratedAccess<World::PlatformEffector2DComponent>
 };
 
 template <>
+struct GeneratedAccess<World::DistanceJoint2DComponent>
+{
+    static Value Get_ConnectedEntity(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(static_cast<uint64_t>(static_cast<uint32_t>(self->ConnectedEntity)));
+    }
+    static void Set_ConnectedEntity(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        const uint64_t raw = std::get<uint64_t>(value);
+        self->ConnectedEntity = raw == static_cast<uint64_t>(entt::null)
+            ? entt::null : static_cast<entt::entity>(static_cast<uint32_t>(raw));
+    }
+    static Value Get_AnchorSelf(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(self->AnchorSelf);
+    }
+    static void Set_AnchorSelf(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        self->AnchorSelf = std::get<glm::vec2>(value);
+    }
+    static Value Get_AnchorOther(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(self->AnchorOther);
+    }
+    static void Set_AnchorOther(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        self->AnchorOther = std::get<glm::vec2>(value);
+    }
+    static Value Get_MinDistance(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(self->MinDistance);
+    }
+    static void Set_MinDistance(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        self->MinDistance = std::get<float>(value);
+    }
+    static Value Get_MaxDistance(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(self->MaxDistance);
+    }
+    static void Set_MaxDistance(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        self->MaxDistance = std::get<float>(value);
+    }
+    static Value Get_Hertz(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(self->Hertz);
+    }
+    static void Set_Hertz(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        self->Hertz = std::get<float>(value);
+    }
+    static Value Get_DampingRatio(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(self->DampingRatio);
+    }
+    static void Set_DampingRatio(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        self->DampingRatio = std::get<float>(value);
+    }
+    static Value Get_EnableLimit(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(self->EnableLimit);
+    }
+    static void Set_EnableLimit(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        self->EnableLimit = std::get<bool>(value);
+    }
+    static Value Get_EnableSpring(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(self->EnableSpring);
+    }
+    static void Set_EnableSpring(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        self->EnableSpring = std::get<bool>(value);
+    }
+    static Value Get_EnableCollision(const void* instance)
+    {
+        const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
+        return Value(self->EnableCollision);
+    }
+    static void Set_EnableCollision(void* instance, const Value& value)
+    {
+        World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
+        self->EnableCollision = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_ConnectedEntity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x49545EE4E2F2513Full },
+            "ConnectedEntity",
+            Kind::UInt64,
+            &Get_ConnectedEntity,
+            &Set_ConnectedEntity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "The target entity to connect with (must have a 2D RigidBody).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(static_cast<uint32_t>(entt::null))),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorSelf()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9124B43893832432ull },
+            "AnchorSelf",
+            Kind::Vec2,
+            &Get_AnchorSelf,
+            &Set_AnchorSelf,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Anchor point in this entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorOther()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4B30771B0F0F168Aull },
+            "AnchorOther",
+            Kind::Vec2,
+            &Get_AnchorOther,
+            &Set_AnchorOther,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Anchor point in the connected entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MinDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x857C30511470115Cull },
+            "MinDistance",
+            Kind::Float,
+            &Get_MinDistance,
+            &Set_MinDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Minimum allowed distance; negative = derived from initial separation.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7DCB6C15F3BBED3Aull },
+            "MaxDistance",
+            Kind::Float,
+            &Get_MaxDistance,
+            &Set_MaxDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Maximum allowed distance; negative = derived from initial separation.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Hertz()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6F83FFC6C8642282ull },
+            "Hertz",
+            Kind::Float,
+            &Get_Hertz,
+            &Set_Hertz,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(60.000000f), false, false, "Spring frequency in Hz (0 = rigid rod, > 0 = springy soft constraint).", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_DampingRatio()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3ECFE7B80111B148ull },
+            "DampingRatio",
+            Kind::Float,
+            &Get_DampingRatio,
+            &Set_DampingRatio,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "Spring damping ratio (0 = no damping, 1 = critical damping).", false, "", {  }, "", std::nullopt },
+            Value(0.7f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableLimit()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF1BCB1B3CDA09591ull },
+            "EnableLimit",
+            Kind::Bool,
+            &Get_EnableLimit,
+            &Set_EnableLimit,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether MinDistance and MaxDistance clamping is active.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableSpring()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA35A16BADC6C150Full },
+            "EnableSpring",
+            Kind::Bool,
+            &Get_EnableSpring,
+            &Set_EnableSpring,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether spring-damper stiffness is active.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableCollision()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBAC526B37B0A6982ull },
+            "EnableCollision",
+            Kind::Bool,
+            &Get_EnableCollision,
+            &Set_EnableCollision,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the two connected bodies can collide with each other.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::DistanceJoint2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::DistanceJoint2DComponent" },
+            "DistanceJoint2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::DistanceJoint2DComponent),
+            TypeCategory::Component,
+            {
+                Field_ConnectedEntity(),
+                Field_AnchorSelf(),
+                Field_AnchorOther(),
+                Field_MinDistance(),
+                Field_MaxDistance(),
+                Field_Hertz(),
+                Field_DampingRatio(),
+                Field_EnableLimit(),
+                Field_EnableSpring(),
+                Field_EnableCollision(),
+            },
+            &StorageBindingOf(),
+            "Physics/2D",
+            "2D distance joint: constrains distance between two 2D rigid bodies, with optional min/max distance limits and spring-damper suspension.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::RevoluteJoint2DComponent>
+{
+    static Value Get_ConnectedEntity(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(static_cast<uint64_t>(static_cast<uint32_t>(self->ConnectedEntity)));
+    }
+    static void Set_ConnectedEntity(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        const uint64_t raw = std::get<uint64_t>(value);
+        self->ConnectedEntity = raw == static_cast<uint64_t>(entt::null)
+            ? entt::null : static_cast<entt::entity>(static_cast<uint32_t>(raw));
+    }
+    static Value Get_AnchorSelf(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(self->AnchorSelf);
+    }
+    static void Set_AnchorSelf(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        self->AnchorSelf = std::get<glm::vec2>(value);
+    }
+    static Value Get_AnchorOther(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(self->AnchorOther);
+    }
+    static void Set_AnchorOther(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        self->AnchorOther = std::get<glm::vec2>(value);
+    }
+    static Value Get_LowerAngle(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(self->LowerAngle);
+    }
+    static void Set_LowerAngle(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        self->LowerAngle = std::get<float>(value);
+    }
+    static Value Get_UpperAngle(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(self->UpperAngle);
+    }
+    static void Set_UpperAngle(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        self->UpperAngle = std::get<float>(value);
+    }
+    static Value Get_MotorSpeed(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(self->MotorSpeed);
+    }
+    static void Set_MotorSpeed(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        self->MotorSpeed = std::get<float>(value);
+    }
+    static Value Get_MaxMotorTorque(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(self->MaxMotorTorque);
+    }
+    static void Set_MaxMotorTorque(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        self->MaxMotorTorque = std::get<float>(value);
+    }
+    static Value Get_EnableLimit(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(self->EnableLimit);
+    }
+    static void Set_EnableLimit(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        self->EnableLimit = std::get<bool>(value);
+    }
+    static Value Get_EnableMotor(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(self->EnableMotor);
+    }
+    static void Set_EnableMotor(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        self->EnableMotor = std::get<bool>(value);
+    }
+    static Value Get_EnableCollision(const void* instance)
+    {
+        const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
+        return Value(self->EnableCollision);
+    }
+    static void Set_EnableCollision(void* instance, const Value& value)
+    {
+        World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
+        self->EnableCollision = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_ConnectedEntity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCEB4BA679769302Eull },
+            "ConnectedEntity",
+            Kind::UInt64,
+            &Get_ConnectedEntity,
+            &Set_ConnectedEntity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "The target entity to connect with (must have a 2D RigidBody).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(static_cast<uint32_t>(entt::null))),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorSelf()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4A88936B2D397C05ull },
+            "AnchorSelf",
+            Kind::Vec2,
+            &Get_AnchorSelf,
+            &Set_AnchorSelf,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Pin anchor point in this entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorOther()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x827FDD03B8E44B97ull },
+            "AnchorOther",
+            Kind::Vec2,
+            &Get_AnchorOther,
+            &Set_AnchorOther,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Pin anchor point in the connected entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LowerAngle()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x65C1E2B934E3B49Eull },
+            "LowerAngle",
+            Kind::Float,
+            &Get_LowerAngle,
+            &Set_LowerAngle,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Lower rotational angle limit in degrees.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_UpperAngle()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x50BA3274EFFD154Dull },
+            "UpperAngle",
+            Kind::Float,
+            &Get_UpperAngle,
+            &Set_UpperAngle,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Upper rotational angle limit in degrees.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MotorSpeed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5CB4F90035DB324Eull },
+            "MotorSpeed",
+            Kind::Float,
+            &Get_MotorSpeed,
+            &Set_MotorSpeed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target motor rotational speed in degrees per second.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxMotorTorque()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBD64EFCB1D6AF46Bull },
+            "MaxMotorTorque",
+            Kind::Float,
+            &Get_MaxMotorTorque,
+            &Set_MaxMotorTorque,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10000.000000f), false, false, "Maximum motor torque in N*m.", false, "", {  }, "", std::nullopt },
+            Value(10.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableLimit()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC757CCB895BC7378ull },
+            "EnableLimit",
+            Kind::Bool,
+            &Get_EnableLimit,
+            &Set_EnableLimit,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether angle limits are enforced.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableMotor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE00F8AA32A98A48Eull },
+            "EnableMotor",
+            Kind::Bool,
+            &Get_EnableMotor,
+            &Set_EnableMotor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the rotational motor is active.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableCollision()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1B860C7F0D4E1DF3ull },
+            "EnableCollision",
+            Kind::Bool,
+            &Get_EnableCollision,
+            &Set_EnableCollision,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the two connected bodies can collide with each other.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::RevoluteJoint2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::RevoluteJoint2DComponent" },
+            "RevoluteJoint2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::RevoluteJoint2DComponent),
+            TypeCategory::Component,
+            {
+                Field_ConnectedEntity(),
+                Field_AnchorSelf(),
+                Field_AnchorOther(),
+                Field_LowerAngle(),
+                Field_UpperAngle(),
+                Field_MotorSpeed(),
+                Field_MaxMotorTorque(),
+                Field_EnableLimit(),
+                Field_EnableMotor(),
+                Field_EnableCollision(),
+            },
+            &StorageBindingOf(),
+            "Physics/2D",
+            "2D revolute (hinge/pin) joint: allows rotational motion around a shared anchor point with angle limits and rotational motor.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::PrismaticJoint2DComponent>
+{
+    static Value Get_ConnectedEntity(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(static_cast<uint64_t>(static_cast<uint32_t>(self->ConnectedEntity)));
+    }
+    static void Set_ConnectedEntity(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        const uint64_t raw = std::get<uint64_t>(value);
+        self->ConnectedEntity = raw == static_cast<uint64_t>(entt::null)
+            ? entt::null : static_cast<entt::entity>(static_cast<uint32_t>(raw));
+    }
+    static Value Get_AnchorSelf(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->AnchorSelf);
+    }
+    static void Set_AnchorSelf(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->AnchorSelf = std::get<glm::vec2>(value);
+    }
+    static Value Get_AnchorOther(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->AnchorOther);
+    }
+    static void Set_AnchorOther(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->AnchorOther = std::get<glm::vec2>(value);
+    }
+    static Value Get_Axis(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->Axis);
+    }
+    static void Set_Axis(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->Axis = std::get<glm::vec2>(value);
+    }
+    static Value Get_LowerTranslation(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->LowerTranslation);
+    }
+    static void Set_LowerTranslation(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->LowerTranslation = std::get<float>(value);
+    }
+    static Value Get_UpperTranslation(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->UpperTranslation);
+    }
+    static void Set_UpperTranslation(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->UpperTranslation = std::get<float>(value);
+    }
+    static Value Get_MotorSpeed(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->MotorSpeed);
+    }
+    static void Set_MotorSpeed(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->MotorSpeed = std::get<float>(value);
+    }
+    static Value Get_MaxMotorForce(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->MaxMotorForce);
+    }
+    static void Set_MaxMotorForce(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->MaxMotorForce = std::get<float>(value);
+    }
+    static Value Get_EnableLimit(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->EnableLimit);
+    }
+    static void Set_EnableLimit(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->EnableLimit = std::get<bool>(value);
+    }
+    static Value Get_EnableMotor(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->EnableMotor);
+    }
+    static void Set_EnableMotor(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->EnableMotor = std::get<bool>(value);
+    }
+    static Value Get_EnableCollision(const void* instance)
+    {
+        const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
+        return Value(self->EnableCollision);
+    }
+    static void Set_EnableCollision(void* instance, const Value& value)
+    {
+        World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
+        self->EnableCollision = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_ConnectedEntity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFE92472AF1D22DDEull },
+            "ConnectedEntity",
+            Kind::UInt64,
+            &Get_ConnectedEntity,
+            &Set_ConnectedEntity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "The target entity to connect with (must have a 2D RigidBody).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(static_cast<uint32_t>(entt::null))),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorSelf()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBED9E57F62DF9695ull },
+            "AnchorSelf",
+            Kind::Vec2,
+            &Get_AnchorSelf,
+            &Set_AnchorSelf,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Anchor point in this entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorOther()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9372EBB6911D5827ull },
+            "AnchorOther",
+            Kind::Vec2,
+            &Get_AnchorOther,
+            &Set_AnchorOther,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Anchor point in the connected entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Axis()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1FF927D3FA834AFull },
+            "Axis",
+            Kind::Vec2,
+            &Get_Axis,
+            &Set_Axis,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Sliding translation axis in this entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LowerTranslation()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9D933911F5B6E11Eull },
+            "LowerTranslation",
+            Kind::Float,
+            &Get_LowerTranslation,
+            &Set_LowerTranslation,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Lower translation limit in meters.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_UpperTranslation()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x47F827DB56DFCCE9ull },
+            "UpperTranslation",
+            Kind::Float,
+            &Get_UpperTranslation,
+            &Set_UpperTranslation,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Upper translation limit in meters.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MotorSpeed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF91399210410939Eull },
+            "MotorSpeed",
+            Kind::Float,
+            &Get_MotorSpeed,
+            &Set_MotorSpeed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target linear motor speed in meters per second.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxMotorForce()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xDA754890D5917FACull },
+            "MaxMotorForce",
+            Kind::Float,
+            &Get_MaxMotorForce,
+            &Set_MaxMotorForce,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10000.000000f), false, false, "Maximum linear motor force in Newtons.", false, "", {  }, "", std::nullopt },
+            Value(50.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableLimit()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xDDDD52321F90408ull },
+            "EnableLimit",
+            Kind::Bool,
+            &Get_EnableLimit,
+            &Set_EnableLimit,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether translation limits are enforced.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableMotor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBC2C752033FCB27Eull },
+            "EnableMotor",
+            Kind::Bool,
+            &Get_EnableMotor,
+            &Set_EnableMotor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the linear motor is active.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableCollision()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA0EBDBCC2A64BF03ull },
+            "EnableCollision",
+            Kind::Bool,
+            &Get_EnableCollision,
+            &Set_EnableCollision,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the two connected bodies can collide with each other.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::PrismaticJoint2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::PrismaticJoint2DComponent" },
+            "PrismaticJoint2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::PrismaticJoint2DComponent),
+            TypeCategory::Component,
+            {
+                Field_ConnectedEntity(),
+                Field_AnchorSelf(),
+                Field_AnchorOther(),
+                Field_Axis(),
+                Field_LowerTranslation(),
+                Field_UpperTranslation(),
+                Field_MotorSpeed(),
+                Field_MaxMotorForce(),
+                Field_EnableLimit(),
+                Field_EnableMotor(),
+                Field_EnableCollision(),
+            },
+            &StorageBindingOf(),
+            "Physics/2D",
+            "2D prismatic (slider) joint: allows linear motion along a specified axis with translation limits and linear motor.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::WheelJoint2DComponent>
+{
+    static Value Get_ConnectedEntity(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(static_cast<uint64_t>(static_cast<uint32_t>(self->ConnectedEntity)));
+    }
+    static void Set_ConnectedEntity(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        const uint64_t raw = std::get<uint64_t>(value);
+        self->ConnectedEntity = raw == static_cast<uint64_t>(entt::null)
+            ? entt::null : static_cast<entt::entity>(static_cast<uint32_t>(raw));
+    }
+    static Value Get_AnchorSelf(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->AnchorSelf);
+    }
+    static void Set_AnchorSelf(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->AnchorSelf = std::get<glm::vec2>(value);
+    }
+    static Value Get_AnchorOther(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->AnchorOther);
+    }
+    static void Set_AnchorOther(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->AnchorOther = std::get<glm::vec2>(value);
+    }
+    static Value Get_SuspensionAxis(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->SuspensionAxis);
+    }
+    static void Set_SuspensionAxis(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->SuspensionAxis = std::get<glm::vec2>(value);
+    }
+    static Value Get_Hertz(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->Hertz);
+    }
+    static void Set_Hertz(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->Hertz = std::get<float>(value);
+    }
+    static Value Get_DampingRatio(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->DampingRatio);
+    }
+    static void Set_DampingRatio(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->DampingRatio = std::get<float>(value);
+    }
+    static Value Get_LowerTranslation(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->LowerTranslation);
+    }
+    static void Set_LowerTranslation(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->LowerTranslation = std::get<float>(value);
+    }
+    static Value Get_UpperTranslation(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->UpperTranslation);
+    }
+    static void Set_UpperTranslation(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->UpperTranslation = std::get<float>(value);
+    }
+    static Value Get_MotorSpeed(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->MotorSpeed);
+    }
+    static void Set_MotorSpeed(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->MotorSpeed = std::get<float>(value);
+    }
+    static Value Get_MaxMotorTorque(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->MaxMotorTorque);
+    }
+    static void Set_MaxMotorTorque(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->MaxMotorTorque = std::get<float>(value);
+    }
+    static Value Get_EnableLimit(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->EnableLimit);
+    }
+    static void Set_EnableLimit(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->EnableLimit = std::get<bool>(value);
+    }
+    static Value Get_EnableMotor(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->EnableMotor);
+    }
+    static void Set_EnableMotor(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->EnableMotor = std::get<bool>(value);
+    }
+    static Value Get_EnableCollision(const void* instance)
+    {
+        const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
+        return Value(self->EnableCollision);
+    }
+    static void Set_EnableCollision(void* instance, const Value& value)
+    {
+        World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
+        self->EnableCollision = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_ConnectedEntity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1DDA06EC6E2172C5ull },
+            "ConnectedEntity",
+            Kind::UInt64,
+            &Get_ConnectedEntity,
+            &Set_ConnectedEntity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "The target entity to connect with (must have a 2D RigidBody).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(static_cast<uint32_t>(entt::null))),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorSelf()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3EF30451005865BCull },
+            "AnchorSelf",
+            Kind::Vec2,
+            &Get_AnchorSelf,
+            &Set_AnchorSelf,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Wheel mount anchor point in this entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnchorOther()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF27395AC0FAE6688ull },
+            "AnchorOther",
+            Kind::Vec2,
+            &Get_AnchorOther,
+            &Set_AnchorOther,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Wheel axle anchor point in the connected entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SuspensionAxis()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x30CEBFD2C2031C67ull },
+            "SuspensionAxis",
+            Kind::Vec2,
+            &Get_SuspensionAxis,
+            &Set_SuspensionAxis,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Suspension shock-absorber axis in this entity local space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Hertz()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1391F2E9D5502BE0ull },
+            "Hertz",
+            Kind::Float,
+            &Get_Hertz,
+            &Set_Hertz,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(60.000000f), false, false, "Suspension spring frequency in Hz.", false, "", {  }, "", std::nullopt },
+            Value(4.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_DampingRatio()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2E24D0DF9166E472ull },
+            "DampingRatio",
+            Kind::Float,
+            &Get_DampingRatio,
+            &Set_DampingRatio,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "Suspension spring damping ratio.", false, "", {  }, "", std::nullopt },
+            Value(0.7f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LowerTranslation()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x634EFAD5D7B42D03ull },
+            "LowerTranslation",
+            Kind::Float,
+            &Get_LowerTranslation,
+            &Set_LowerTranslation,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Lower suspension travel limit in meters.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_UpperTranslation()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xEB9DB36F770A5B8Cull },
+            "UpperTranslation",
+            Kind::Float,
+            &Get_UpperTranslation,
+            &Set_UpperTranslation,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Upper suspension travel limit in meters.", false, "", {  }, "", std::nullopt },
+            Value(0.2f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MotorSpeed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFDD5442BC98E2793ull },
+            "MotorSpeed",
+            Kind::Float,
+            &Get_MotorSpeed,
+            &Set_MotorSpeed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Wheel drive motor target speed in degrees per second.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxMotorTorque()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD7F3B51B534E2D2Eull },
+            "MaxMotorTorque",
+            Kind::Float,
+            &Get_MaxMotorTorque,
+            &Set_MaxMotorTorque,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10000.000000f), false, false, "Maximum wheel motor torque in N*m.", false, "", {  }, "", std::nullopt },
+            Value(20.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableLimit()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF05847F5433243EFull },
+            "EnableLimit",
+            Kind::Bool,
+            &Get_EnableLimit,
+            &Set_EnableLimit,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether suspension travel limits are enforced.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableMotor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA52D760B2218F3FDull },
+            "EnableMotor",
+            Kind::Bool,
+            &Get_EnableMotor,
+            &Set_EnableMotor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether wheel drive motor is active.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableCollision()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x56051EAC28ECA444ull },
+            "EnableCollision",
+            Kind::Bool,
+            &Get_EnableCollision,
+            &Set_EnableCollision,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the two connected bodies can collide with each other.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::WheelJoint2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::WheelJoint2DComponent" },
+            "WheelJoint2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::WheelJoint2DComponent),
+            TypeCategory::Component,
+            {
+                Field_ConnectedEntity(),
+                Field_AnchorSelf(),
+                Field_AnchorOther(),
+                Field_SuspensionAxis(),
+                Field_Hertz(),
+                Field_DampingRatio(),
+                Field_LowerTranslation(),
+                Field_UpperTranslation(),
+                Field_MotorSpeed(),
+                Field_MaxMotorTorque(),
+                Field_EnableLimit(),
+                Field_EnableMotor(),
+                Field_EnableCollision(),
+            },
+            &StorageBindingOf(),
+            "Physics/2D",
+            "2D wheel joint: provides vehicle wheel suspension with spring-damper suspension axis, travel limits, and rotational drive motor.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::RigidBody3DComponent>
 {
     static Value Get_Type(const void* instance)
@@ -7294,6 +8694,10 @@ const TypeSchema& WeSchemaOf_CapsuleCollider2DComponent() { return GeneratedAcce
 const TypeSchema& WeSchemaOf_PolygonCollider2DComponent() { return GeneratedAccess<World::PolygonCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_ChainCollider2DComponent() { return GeneratedAccess<World::ChainCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PlatformEffector2DComponent() { return GeneratedAccess<World::PlatformEffector2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_DistanceJoint2DComponent() { return GeneratedAccess<World::DistanceJoint2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_RevoluteJoint2DComponent() { return GeneratedAccess<World::RevoluteJoint2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_PrismaticJoint2DComponent() { return GeneratedAccess<World::PrismaticJoint2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_WheelJoint2DComponent() { return GeneratedAccess<World::WheelJoint2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_RigidBody3DComponent() { return GeneratedAccess<World::RigidBody3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BoxCollider3DComponent() { return GeneratedAccess<World::BoxCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SphereCollider3DComponent() { return GeneratedAccess<World::SphereCollider3DComponent>::WeSchema(); }
@@ -7350,6 +8754,10 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_PolygonCollider2DComponent(),
 			WeSchemaOf_ChainCollider2DComponent(),
 			WeSchemaOf_PlatformEffector2DComponent(),
+			WeSchemaOf_DistanceJoint2DComponent(),
+			WeSchemaOf_RevoluteJoint2DComponent(),
+			WeSchemaOf_PrismaticJoint2DComponent(),
+			WeSchemaOf_WheelJoint2DComponent(),
 			WeSchemaOf_RigidBody3DComponent(),
 			WeSchemaOf_BoxCollider3DComponent(),
 			WeSchemaOf_SphereCollider3DComponent(),

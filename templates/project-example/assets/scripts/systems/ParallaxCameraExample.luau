@@ -7,6 +7,8 @@
 --   3. PlatformEffector2DComponent: 单向跳跃平台效应器 (自下而上穿透, 顶部站立)
 --   4. PolygonCollider2D / ChainCollider2D: 凹凸多边形与连续地形轮廓链条物理
 --   5. TilemapComponent: 正交 / 等轴测 2.5D (Isometric) / 六边形蜂窝 (Hexagonal) 瓦片地图
+--   6. 2D 光照与阴影: GlobalLight2D / PointLight2D / ShadowCaster2D 动态光源与阴影投射
+--   7. 2D 物理关节: DistanceJoint2D / RevoluteJoint2D / PrismaticJoint2D / WheelJoint2D
 -- =============================================================================
 
 local initialized = false
@@ -81,6 +83,35 @@ ecs:AddSystem("ParallaxCameraDemoSystem", "Update", function(dt: number)
         casterQuery:Each(function(e, caster, tag)
             print(string.format("[2D-DEMO] 2D 阴影投射器 '%s': 尺寸=(%.1f, %.1f) | 挤出长度=%.1f | 阴影浓度=%.2f",
                 tag.Tag, caster.Size.x, caster.Size.y, caster.ExtrusionLength, caster.ShadowIntensity))
+        end)
+
+        -- 7) Phase 10: 查询 2D 物理关节约束 (Distance / Revolute / Prismatic / Wheel)
+        local distJointQuery = ecs:Query({ "DistanceJoint2DComponent", "TagComponent" })
+        distJointQuery:Each(function(e, dist, tag)
+            print(string.format("[2D-DEMO] 2D 距离关节 '%s': 目标实体ID=%s | 弹簧=%s (%.1f Hz) | 距离限制=%s (%.1f~%.1f)",
+                tag.Tag, tostring(dist.ConnectedEntity), tostring(dist.EnableSpring), dist.Hertz,
+                tostring(dist.EnableLimit), dist.MinDistance, dist.MaxDistance))
+        end)
+
+        local revJointQuery = ecs:Query({ "RevoluteJoint2DComponent", "TagComponent" })
+        revJointQuery:Each(function(e, rev, tag)
+            print(string.format("[2D-DEMO] 2D 旋转关节(铰链) '%s': 目标实体ID=%s | 锚点=(%.2f, %.2f) | 电机=%s (%.1f deg/s) | 限制=%s (%.1f°~%.1f°)",
+                tag.Tag, tostring(rev.ConnectedEntity), rev.AnchorSelf.x, rev.AnchorSelf.y,
+                tostring(rev.EnableMotor), rev.MotorSpeed, tostring(rev.EnableLimit), rev.LowerAngle, rev.UpperAngle))
+        end)
+
+        local prismJointQuery = ecs:Query({ "PrismaticJoint2DComponent", "TagComponent" })
+        prismJointQuery:Each(function(e, prism, tag)
+            print(string.format("[2D-DEMO] 2D 移动关节(滑块) '%s': 目标实体ID=%s | 滑动轴=(%.2f, %.2f) | 电机=%s (%.1f m/s) | 限制=%s (%.1f~%.1f m)",
+                tag.Tag, tostring(prism.ConnectedEntity), prism.Axis.x, prism.Axis.y,
+                tostring(prism.EnableMotor), prism.MotorSpeed, tostring(prism.EnableLimit), prism.LowerTranslation, prism.UpperTranslation))
+        end)
+
+        local wheelJointQuery = ecs:Query({ "WheelJoint2DComponent", "TagComponent" })
+        wheelJointQuery:Each(function(e, wheel, tag)
+            print(string.format("[2D-DEMO] 2D 车轮关节(悬挂) '%s': 目标实体ID=%s | 悬挂轴=(%.2f, %.2f) | 弹簧阻尼=%.1f Hz / %.2f | 行程限制=%s (%.2f~%.2f m)",
+                tag.Tag, tostring(wheel.ConnectedEntity), wheel.SuspensionAxis.x, wheel.SuspensionAxis.y,
+                wheel.Hertz, wheel.DampingRatio, tostring(wheel.EnableLimit), wheel.LowerTranslation, wheel.UpperTranslation))
         end)
     end
 end)

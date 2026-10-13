@@ -130,6 +130,19 @@ namespace World
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("{0}", error);
 		}
 
+		entt::entity ResolveConnectedEntity2D(const entt::registry& registry, uint64_t connectedValue)
+		{
+			if (connectedValue == 0) return entt::null;
+			entt::entity asEntity = static_cast<entt::entity>(connectedValue);
+			if (registry.valid(asEntity)) return asEntity;
+			for (auto e : registry.view<UUIDComponent>())
+			{
+				if (registry.get<UUIDComponent>(e).ID == UUID(connectedValue))
+					return e;
+			}
+			return entt::null;
+		}
+
 		// WP3:2D runtime handle lookup. Handles never live in components, so every reader goes
 		// through these two helpers; a missing entry means "no live Box2D object".
 		b2BodyId FindBody2D(const std::unordered_map<entt::entity, b2BodyId>& bodies, entt::entity entity)
@@ -1440,6 +1453,194 @@ namespace World
 		for (const entt::entity owner : m_Registry.view<JointComponent>())
 			if (m_Registry.get<JointComponent>(owner).Connected == entity)
 				DestroyPhysicsJoint(owner);
+		for (const entt::entity owner : m_Registry.view<DistanceJoint2DComponent>())
+			if (m_Registry.get<DistanceJoint2DComponent>(owner).ConnectedEntity == entity)
+				DestroyPhysicsJoint2D(owner);
+		for (const entt::entity owner : m_Registry.view<RevoluteJoint2DComponent>())
+			if (m_Registry.get<RevoluteJoint2DComponent>(owner).ConnectedEntity == entity)
+				DestroyPhysicsJoint2D(owner);
+		for (const entt::entity owner : m_Registry.view<PrismaticJoint2DComponent>())
+			if (m_Registry.get<PrismaticJoint2DComponent>(owner).ConnectedEntity == entity)
+				DestroyPhysicsJoint2D(owner);
+		for (const entt::entity owner : m_Registry.view<WheelJoint2DComponent>())
+			if (m_Registry.get<WheelJoint2DComponent>(owner).ConnectedEntity == entity)
+				DestroyPhysicsJoint2D(owner);
+	}
+
+	void Scene::DestroyPhysicsJoint2D(entt::entity entity)
+	{
+		const auto it = m_PhysicsJoints2D.find(entity);
+		if (it != m_PhysicsJoints2D.end())
+		{
+			if (b2Joint_IsValid(it->second))
+				b2DestroyJoint(it->second, true);
+			m_PhysicsJoints2D.erase(it);
+		}
+	}
+
+	void Scene::EnsurePhysicsJoint2D(entt::entity entity)
+	{
+		if (!m_Registry.valid(entity) || !b2World_IsValid(m_PhysicsWorldId)) return;
+		if (b2Joint_IsValid(FindJoint2D(m_PhysicsJoints2D, entity))) return;
+
+		const b2BodyId ownerBodyId = FindBody2D(m_PhysicsBodies2D, entity);
+		if (!b2Body_IsValid(ownerBodyId)) return;
+
+		if (const auto* dist = m_Registry.try_get<DistanceJoint2DComponent>(entity))
+		{
+			const entt::entity other = dist->ConnectedEntity;
+			if (!m_Registry.valid(other) || other == entity) return;
+			b2BodyId otherBodyId = FindBody2D(m_PhysicsBodies2D, other);
+			if (!b2Body_IsValid(otherBodyId)) return;
+
+			b2DistanceJointDef def = b2DefaultDistanceJointDef();
+			def.base.bodyIdA = ownerBodyId;
+			def.base.bodyIdB = otherBodyId;
+			def.base.localFrameA = { { dist->AnchorSelf.x, dist->AnchorSelf.y }, b2Rot_identity };
+			def.base.localFrameB = { { dist->AnchorOther.x, dist->AnchorOther.y }, b2Rot_identity };
+
+			const b2Vec2 worldA = b2Body_GetWorldPoint(ownerBodyId, { dist->AnchorSelf.x, dist->AnchorSelf.y });
+			const b2Vec2 worldB = b2Body_GetWorldPoint(otherBodyId, { dist->AnchorOther.x, dist->AnchorOther.y });
+			def.length = b2Distance(worldA, worldB);
+
+			if (dist->EnableLimit)
+			{
+				def.enableLimit = true;
+				def.minLength = dist->MinDistance >= 0.0f ? dist->MinDistance : def.length;
+				def.maxLength = dist->MaxDistance >= dist->MinDistance ? dist->MaxDistance : def.length;
+			}
+			if (dist->EnableSpring && dist->Hertz > 0.0f)
+			{
+				def.enableSpring = true;
+				def.hertz = dist->Hertz;
+				def.dampingRatio = dist->DampingRatio;
+			}
+			b2JointId jointId = b2CreateDistanceJoint(m_PhysicsWorldId, &def);
+			if (b2Joint_IsValid(jointId))
+			{
+				b2Joint_SetCollideConnected(jointId, dist->EnableCollision);
+				m_PhysicsJoints2D[entity] = jointId;
+			}
+			return;
+		}
+
+		if (const auto* rev = m_Registry.try_get<RevoluteJoint2DComponent>(entity))
+		{
+			const entt::entity other = rev->ConnectedEntity;
+			if (!m_Registry.valid(other) || other == entity) return;
+			b2BodyId otherBodyId = FindBody2D(m_PhysicsBodies2D, other);
+			if (!b2Body_IsValid(otherBodyId)) return;
+
+			b2RevoluteJointDef def = b2DefaultRevoluteJointDef();
+			def.base.bodyIdA = ownerBodyId;
+			def.base.bodyIdB = otherBodyId;
+			def.base.localFrameA = { { rev->AnchorSelf.x, rev->AnchorSelf.y }, b2Rot_identity };
+			def.base.localFrameB = { { rev->AnchorOther.x, rev->AnchorOther.y }, b2Rot_identity };
+
+			if (rev->EnableLimit)
+			{
+				def.enableLimit = true;
+				def.lowerAngle = glm::radians(rev->LowerAngle);
+				def.upperAngle = glm::radians(rev->UpperAngle);
+			}
+			if (rev->EnableMotor)
+			{
+				def.enableMotor = true;
+				def.motorSpeed = glm::radians(rev->MotorSpeed);
+				def.maxMotorTorque = rev->MaxMotorTorque;
+			}
+			b2JointId jointId = b2CreateRevoluteJoint(m_PhysicsWorldId, &def);
+			if (b2Joint_IsValid(jointId))
+			{
+				b2Joint_SetCollideConnected(jointId, rev->EnableCollision);
+				m_PhysicsJoints2D[entity] = jointId;
+			}
+			return;
+		}
+
+		if (const auto* prism = m_Registry.try_get<PrismaticJoint2DComponent>(entity))
+		{
+			const entt::entity other = prism->ConnectedEntity;
+			if (!m_Registry.valid(other) || other == entity) return;
+			b2BodyId otherBodyId = FindBody2D(m_PhysicsBodies2D, other);
+			if (!b2Body_IsValid(otherBodyId)) return;
+
+			b2PrismaticJointDef def = b2DefaultPrismaticJointDef();
+			def.base.bodyIdA = ownerBodyId;
+			def.base.bodyIdB = otherBodyId;
+
+			glm::vec2 axis = glm::length(prism->Axis) > 1e-5f ? glm::normalize(prism->Axis) : glm::vec2(1.0f, 0.0f);
+			const float angle = std::atan2(axis.y, axis.x);
+			const b2Rot rot = b2MakeRot(angle);
+
+			def.base.localFrameA = { { prism->AnchorSelf.x, prism->AnchorSelf.y }, rot };
+			def.base.localFrameB = { { prism->AnchorOther.x, prism->AnchorOther.y }, rot };
+
+			if (prism->EnableLimit)
+			{
+				def.enableLimit = true;
+				def.lowerTranslation = prism->LowerTranslation;
+				def.upperTranslation = prism->UpperTranslation;
+			}
+			if (prism->EnableMotor)
+			{
+				def.enableMotor = true;
+				def.motorSpeed = prism->MotorSpeed;
+				def.maxMotorForce = prism->MaxMotorForce;
+			}
+			b2JointId jointId = b2CreatePrismaticJoint(m_PhysicsWorldId, &def);
+			if (b2Joint_IsValid(jointId))
+			{
+				b2Joint_SetCollideConnected(jointId, prism->EnableCollision);
+				m_PhysicsJoints2D[entity] = jointId;
+			}
+			return;
+		}
+
+		if (const auto* wheel = m_Registry.try_get<WheelJoint2DComponent>(entity))
+		{
+			const entt::entity other = wheel->ConnectedEntity;
+			if (!m_Registry.valid(other) || other == entity) return;
+			b2BodyId otherBodyId = FindBody2D(m_PhysicsBodies2D, other);
+			if (!b2Body_IsValid(otherBodyId)) return;
+
+			b2WheelJointDef def = b2DefaultWheelJointDef();
+			def.base.bodyIdA = ownerBodyId;
+			def.base.bodyIdB = otherBodyId;
+
+			glm::vec2 axis = glm::length(wheel->SuspensionAxis) > 1e-5f ? glm::normalize(wheel->SuspensionAxis) : glm::vec2(0.0f, 1.0f);
+			const float angle = std::atan2(axis.y, axis.x);
+			const b2Rot rot = b2MakeRot(angle);
+
+			def.base.localFrameA = { { wheel->AnchorSelf.x, wheel->AnchorSelf.y }, rot };
+			def.base.localFrameB = { { wheel->AnchorOther.x, wheel->AnchorOther.y }, rot };
+
+			if (wheel->Hertz > 0.0f)
+			{
+				def.enableSpring = true;
+				def.hertz = wheel->Hertz;
+				def.dampingRatio = wheel->DampingRatio;
+			}
+			if (wheel->EnableLimit)
+			{
+				def.enableLimit = true;
+				def.lowerTranslation = wheel->LowerTranslation;
+				def.upperTranslation = wheel->UpperTranslation;
+			}
+			if (wheel->EnableMotor)
+			{
+				def.enableMotor = true;
+				def.motorSpeed = glm::radians(wheel->MotorSpeed);
+				def.maxMotorTorque = wheel->MaxMotorTorque;
+			}
+			b2JointId jointId = b2CreateWheelJoint(m_PhysicsWorldId, &def);
+			if (b2Joint_IsValid(jointId))
+			{
+				b2Joint_SetCollideConnected(jointId, wheel->EnableCollision);
+				m_PhysicsJoints2D[entity] = jointId;
+			}
+			return;
+		}
 	}
 
 	void Scene::EnsurePhysicsJoint(entt::entity entity)
@@ -1905,6 +2106,14 @@ namespace World
 		{
 			EnsurePhysicsJoint(entity);
 		}
+		for (const auto entity : m_Registry.view<DistanceJoint2DComponent>())
+			EnsurePhysicsJoint2D(entity);
+		for (const auto entity : m_Registry.view<RevoluteJoint2DComponent>())
+			EnsurePhysicsJoint2D(entity);
+		for (const auto entity : m_Registry.view<PrismaticJoint2DComponent>())
+			EnsurePhysicsJoint2D(entity);
+		for (const auto entity : m_Registry.view<WheelJoint2DComponent>())
+			EnsurePhysicsJoint2D(entity);
 		// P6:为物理实体预建插值状态(结构写只允许在非运行态 / 提交点做;这里 m_State 还是 Stopped)。
 		if (m_PhysicsInterpolationEnabled)
 		{
