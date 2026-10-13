@@ -15,6 +15,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/SceneSerializer.h"
 #include "World/Scene/Systems/CameraSystem.h"
+#include "World/Schema/Schema.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
@@ -131,6 +132,117 @@ namespace World
 			char buffer[48] = {};
 			std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
 			return buffer;
+		}
+
+		std::string FormatSchemaValue(const Schema::Value& value, const Schema::FieldSchema* field)
+		{
+			return std::visit([field](const auto& item) -> std::string
+			{
+				using T = std::decay_t<decltype(item)>;
+				if constexpr (std::is_same_v<T, std::monostate>)
+				{
+					return "(none)";
+				}
+				else if constexpr (std::is_same_v<T, bool>)
+				{
+					return item ? "true" : "false";
+				}
+				else if constexpr (std::is_same_v<T, std::string>)
+				{
+					return item.empty() ? "(empty)" : item;
+				}
+				else if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t>
+					|| std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>)
+				{
+					const int64_t asInt = static_cast<int64_t>(item);
+					if (field && field->GetEnum)
+					{
+						if (const Schema::EnumSchema* enumSchema = field->GetEnum())
+						{
+							if (const char* name = enumSchema->FindName(asInt))
+								return std::string(name);
+						}
+					}
+					return std::to_string(asInt);
+				}
+				else if constexpr (std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t>
+					|| std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t>)
+				{
+					const int64_t asInt = static_cast<int64_t>(item);
+					if (field && field->GetEnum)
+					{
+						if (const Schema::EnumSchema* enumSchema = field->GetEnum())
+						{
+							if (const char* name = enumSchema->FindName(asInt))
+								return std::string(name);
+						}
+					}
+					return std::to_string(item);
+				}
+				else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+				{
+					return FormatFloat(static_cast<float>(item), 2);
+				}
+				else if constexpr (std::is_same_v<T, glm::vec2>)
+				{
+					return "[" + FormatFloat(item.x, 2) + ", " + FormatFloat(item.y, 2) + "]";
+				}
+				else if constexpr (std::is_same_v<T, glm::vec3>)
+				{
+					return "[" + FormatFloat(item.x, 2) + ", " + FormatFloat(item.y, 2) + ", "
+						+ FormatFloat(item.z, 2) + "]";
+				}
+				else if constexpr (std::is_same_v<T, glm::vec4>)
+				{
+					return "[" + FormatFloat(item.x, 2) + ", " + FormatFloat(item.y, 2) + ", "
+						+ FormatFloat(item.z, 2) + ", " + FormatFloat(item.w, 2) + "]";
+				}
+				else if constexpr (std::is_same_v<T, glm::ivec2>)
+				{
+					return "[" + std::to_string(item.x) + ", " + std::to_string(item.y) + "]";
+				}
+				else if constexpr (std::is_same_v<T, glm::ivec3>)
+				{
+					return "[" + std::to_string(item.x) + ", " + std::to_string(item.y) + ", "
+						+ std::to_string(item.z) + "]";
+				}
+				else if constexpr (std::is_same_v<T, glm::ivec4>)
+				{
+					return "[" + std::to_string(item.x) + ", " + std::to_string(item.y) + ", "
+						+ std::to_string(item.z) + ", " + std::to_string(item.w) + "]";
+				}
+				else if constexpr (std::is_same_v<T, glm::uvec2>)
+				{
+					return "[" + std::to_string(item.x) + ", " + std::to_string(item.y) + "]";
+				}
+				else if constexpr (std::is_same_v<T, glm::uvec3>)
+				{
+					return "[" + std::to_string(item.x) + ", " + std::to_string(item.y) + ", "
+						+ std::to_string(item.z) + "]";
+				}
+				else if constexpr (std::is_same_v<T, glm::uvec4>)
+				{
+					return "[" + std::to_string(item.x) + ", " + std::to_string(item.y) + ", "
+						+ std::to_string(item.z) + ", " + std::to_string(item.w) + "]";
+				}
+				else if constexpr (std::is_same_v<T, glm::quat>)
+				{
+					return "[" + FormatFloat(item.w, 2) + ", " + FormatFloat(item.x, 2) + ", "
+						+ FormatFloat(item.y, 2) + ", " + FormatFloat(item.z, 2) + "]";
+				}
+				else if constexpr (std::is_same_v<T, Schema::ValueList>)
+				{
+					return "[" + std::to_string(item.size()) + " items]";
+				}
+				else if constexpr (std::is_same_v<T, Schema::ValueMap>)
+				{
+					return "{" + std::to_string(item.size()) + " entries}";
+				}
+				else
+				{
+					return "(none)";
+				}
+			}, value);
 		}
 
 		// 组件短名(小节标题 / 字段 id / AI 通道的 component 参数共用一份拼写)。
@@ -631,8 +743,7 @@ namespace World
 		return lines;
 	}
 
-	// P4-U13e:只读小节 —— 可编辑组件之外的部分仍要给摘要(用户 2026-09-21:
-	// 「除上述字段外的组件仍显示只读摘要」)。短名走 schema 的 DisplayName(去命名空间)。
+	// P4-U13e:只读小节 —— 预制体只读组件详情与 Schema 反射检视
 	std::vector<std::string> PrefabPanel::BuildReadOnlySummary(entt::entity handle) const
 	{
 		std::vector<std::string> lines;
@@ -642,35 +753,57 @@ namespace World
 		if (!registry.valid(handle))
 			return lines;
 
-		if (const auto* tag = registry.try_get<TagComponent>(handle))
-			lines.push_back("Tag: " + StringPool::Get().NameOf(tag->Tag));
-		if (const auto* sprite = registry.try_get<SpriteComponent>(handle))
-			lines.push_back("Sprite: TilingFactor=" + FormatFloat(sprite->TilingFactor, 2));
-		if (const auto* skinned = registry.try_get<SkinnedMeshRendererComponent>(handle))
-			lines.push_back("SkinnedMeshRenderer: Mesh="
-				+ (skinned->Mesh.HasPath() ? StringPool::Get().PathOf(skinned->Mesh.Path) : std::string("(none)"))
-				+ "  Material=" + (skinned->Material.HasPath() ? StringPool::Get().PathOf(skinned->Material.Path) : std::string("(none)")));
-
-		// 其余带 schema 的组件(物理/脚本/碰撞体…)按短名列一行,至少让用户知道它在这个实体上
-		// (这一层不暴露可写控件,所以不做字段级摘要)。
 		const Schema::SchemaRegistry& schemas = m_Staging->GetContext().Schemas();
 		for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
 		{
 			if (!schema || !schema->Storage)
 				continue;
-			const std::string& display = schema->DisplayName;
-			const std::string shortName = display.rfind("::", 0) == 0 ? display
-				: (display.find("::") != std::string::npos ? display.substr(display.rfind("::") + 2) : display);
-			if (shortName == "TagComponent" || shortName == "SpriteComponent"
-				|| shortName == "SkinnedMeshRendererComponent")
-				continue;   // 上面已经给过更具体的摘要
+			const std::string& display = !schema->DisplayName.empty() ? schema->DisplayName : schema->Id.Name;
+			const std::string shortName = display.find("::") != std::string::npos
+				? display.substr(display.rfind("::") + 2)
+				: display;
+			const std::string typeName = schema->Id.Name.find("::") != std::string::npos
+				? schema->Id.Name.substr(schema->Id.Name.rfind("::") + 2)
+				: schema->Id.Name;
 			if (shortName == "TransformComponent" || shortName == "MeshRendererComponent"
 				|| shortName == "CameraComponent" || shortName == "DirectionalLightComponent"
-				|| shortName == "PointLightComponent" || shortName == "AmbientLightComponent")
-				continue;   // 可编辑小节已经覆盖
+				|| shortName == "PointLightComponent" || shortName == "AmbientLightComponent"
+				|| shortName == "UUIDComponent" || shortName == "RelationshipComponent"
+				|| shortName == "HierarchyComponent" || shortName == "HierarchyChildrenComponent"
+				|| typeName == "TransformComponent" || typeName == "MeshRendererComponent"
+				|| typeName == "CameraComponent" || typeName == "DirectionalLightComponent"
+				|| typeName == "PointLightComponent" || typeName == "AmbientLightComponent"
+				|| typeName == "UUIDComponent" || typeName == "RelationshipComponent"
+				|| typeName == "HierarchyComponent" || typeName == "HierarchyChildrenComponent")
+			{
+				continue; // 可编辑小节已覆盖或管线内部组件
+			}
+
 			const auto* storage = registry.storage(schema->Storage->ComponentId);
-			if (storage && storage->contains(handle))
-				lines.push_back(shortName + ": (read-only)");
+			if (!storage || !storage->contains(handle))
+				continue;
+
+			const void* instance = storage->value(handle);
+			if (!instance)
+				continue;
+
+			lines.push_back("• " + shortName);
+			bool hasField = false;
+			for (const Schema::FieldSchema& field : schema->Fields)
+			{
+				if (field.Meta.Transient)
+					continue;
+				const Schema::Value val = Schema::ReadSchemaField(field, instance);
+				if (std::holds_alternative<std::monostate>(val))
+					continue;
+				const std::string fieldLabel = !field.Meta.DisplayName.empty() ? field.Meta.DisplayName : field.Name;
+				lines.push_back("    " + fieldLabel + ": " + FormatSchemaValue(val, &field));
+				hasField = true;
+			}
+			if (!hasField)
+			{
+				lines.push_back("    (present)");
+			}
 		}
 		return lines;
 	}
@@ -1558,7 +1691,16 @@ namespace World
 			height += kSection + kFieldRowHeight * 2.0f + 6.0f;
 		const std::vector<std::string> readOnly = BuildReadOnlySummary(handle);
 		if (!readOnly.empty())
-			height += kSection + kReadOnlyLineHeight * static_cast<float>(readOnly.size()) + 8.0f;
+		{
+			float roHeight = 0.0f;
+			for (const std::string& line : readOnly)
+			{
+				if (line.rfind("• ", 0) == 0)
+					roHeight += 3.0f;
+				roHeight += kReadOnlyLineHeight;
+			}
+			height += kSection + roHeight + 8.0f;
+		}
 		return std::max(60.0f, height);
 	}
 
@@ -1914,7 +2056,33 @@ namespace World
 			y += 20.0f;
 			for (const std::string& line : readOnly)
 			{
-				Wui::Label(ctx, { x + 2.0f, y + 1.0f }, TruncateUtf8(line, 140), theme.TextMuted, 12.0f);
+				if (line.rfind("• ", 0) == 0)
+				{
+					y += 3.0f;
+					Wui::Label(ctx, { x + 2.0f, y + 1.0f }, TruncateUtf8(line, 140), theme.Accent, 12.5f);
+				}
+				else if (line.rfind("    ", 0) == 0)
+				{
+					const size_t colon = line.find(':');
+					if (colon != std::string::npos)
+					{
+						const std::string labelText = line.substr(0, colon + 1);
+						std::string valueText = line.substr(colon + 1);
+						if (!valueText.empty() && valueText.front() == ' ')
+							valueText.erase(0, 1);
+						Wui::Label(ctx, { x + 2.0f, y + 1.0f }, labelText, theme.TextMuted, 11.5f);
+						const float labelWidth = ctx.MeasureTextWidth(labelText + " ", 11.5f);
+						Wui::Label(ctx, { x + 2.0f + labelWidth, y + 1.0f }, TruncateUtf8(valueText, 140), theme.Text, 11.5f);
+					}
+					else
+					{
+						Wui::Label(ctx, { x + 2.0f, y + 1.0f }, TruncateUtf8(line, 140), theme.TextMuted, 11.5f);
+					}
+				}
+				else
+				{
+					Wui::Label(ctx, { x + 2.0f, y + 1.0f }, TruncateUtf8(line, 140), theme.TextMuted, 12.0f);
+				}
 				y += kReadOnlyLineHeight;
 			}
 		}

@@ -639,7 +639,12 @@ namespace World
 		if (s_Data.Quads.IndexCount >= MaxQuads * 6)
 			NextBatch();
 
-		constexpr glm::vec2 defaultTexCoords[] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+		constexpr glm::vec2 defaultTexCoords[] = {
+			{ 0.0f, 1.0f }, // 0: Bottom-Left (y = -0.5 -> image bottom v1)
+			{ 1.0f, 1.0f }, // 1: Bottom-Right (y = -0.5 -> image bottom v1)
+			{ 1.0f, 0.0f }, // 2: Top-Right (y = +0.5 -> image top v0)
+			{ 0.0f, 0.0f }  // 3: Top-Left (y = +0.5 -> image top v0)
+		};
 		const glm::vec2* actualTexCoords = texCoords ? texCoords : defaultTexCoords;
 
 		auto bindSlot = [](const Rhi::Handle<Rhi::Texture>& tex) -> float

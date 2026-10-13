@@ -2,6 +2,7 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiWidgets_Internal.h"
 #include "World/Core/KeyCodes.h"
 
 #include <algorithm>
@@ -11,14 +12,6 @@ namespace World::Wui
 {
 	namespace
 	{
-		// 子控件(标签 / 分段项 / 光标槽)的无障碍 id:与 WuiWidgets.cpp 的 DerivedChildId
-		// 同一套约定(父 id + 类别 + 下标,哈希走 Wui::HashId),脚本可按同一算法复算。
-		WuiId DerivedChildId(WuiId parent, const char* category, size_t index)
-		{
-			const std::string key = std::to_string(parent) + category + std::to_string(index);
-			return HashId(key.c_str());
-		}
-
 		void PushText(WuiContext& ctx, const glm::vec2& pos, const std::string& text,
 			const WuiColor& color, float size, bool bold = false)
 		{
@@ -188,20 +181,39 @@ namespace World::Wui
 	{
 		AttachTagResult result;
 		result.Rect = rect;
-		result.CloseRect = { rect.X + rect.W - 18.0f, rect.Y + 5.0f, 12.0f, 12.0f };
+		const float closeSize = 13.0f;
+		result.CloseRect = { rect.X + rect.W - closeSize - 5.0f, rect.Y + (rect.H - closeSize) * 0.5f, closeSize, closeSize };
 		result.Hovered = ctx.IsHovered(rect);
 		result.CloseHovered = closable && ctx.IsHovered(result.CloseRect);
 
-		// 活动标签优先使用面板底色(与 DockTabBar 一致),悬停只在非活动时给反馈。
 		if (active)
-			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.PanelBg, 2.0f });
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ActiveBg, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.BorderStrong, 3.0f, 1.0f });
+		}
 		else if (result.Hovered)
-			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 2.0f });
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.HoverBg, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
+		}
+		else
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect,
+				WuiColor { theme.PanelHeader.R * 0.75f, theme.PanelHeader.G * 0.75f, theme.PanelHeader.B * 0.75f, 0.45f }, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
+				WuiColor { theme.Border.R, theme.Border.G, theme.Border.B, 0.65f }, 3.0f, 1.0f });
+		}
 		if (result.Hovered)
 			ctx.SetCursor(WuiCursor::Hand);
 
-		PushText(ctx, { rect.X + (closable ? 8.0f : 7.0f), rect.Y + 4.0f }, title,
-			active ? theme.Text : theme.TextMuted, fontSize);
+		const float maxTextWidth = std::max(0.0f, rect.W - (closable ? (closeSize + 14.0f) : 12.0f));
+		const float tagFontSize = (fontSize == 13.0f) ? 12.5f : fontSize;
+		const std::string shownTitle = EllipsizeToWidth(ctx, title, maxTextWidth, tagFontSize);
+		if (shownTitle != title && result.Hovered)
+			Wui::Tooltip(ctx, rect, title);
+
+		PushText(ctx, { rect.X + 7.0f, rect.Y + 4.0f }, shownTitle,
+			active ? theme.Text : theme.TextMuted, tagFontSize);
 
 		if (!closable)
 		{
@@ -209,12 +221,13 @@ namespace World::Wui
 			return result;
 		}
 
+		const WuiColor closeBg = result.CloseHovered ? theme.Danger : WuiColor { 1.0f, 1.0f, 1.0f, 0.12f };
+		ctx.Commands().push_back({ WuiDrawKind::Rect, result.CloseRect, closeBg, 2.5f });
 		if (result.CloseHovered)
-		{
-			ctx.Commands().push_back({ WuiDrawKind::Rect, result.CloseRect, theme.ButtonHover, 2.0f });
 			ctx.SetCursor(WuiCursor::Hand);
-		}
-		PushText(ctx, { result.CloseRect.X + 2.0f, result.CloseRect.Y - 1.0f }, "x", theme.TextMuted, fontSize - 1.0f);
+
+		const WuiColor closeTextColor = result.CloseHovered ? WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : theme.Text;
+		PushText(ctx, { result.CloseRect.X + 2.5f, result.CloseRect.Y - 1.0f }, "x", closeTextColor, 11.5f);
 		result.CloseClicked = ctx.IsClicked(result.CloseRect);
 		result.Clicked = !result.CloseClicked && ctx.IsClicked(rect);
 		return result;
@@ -250,7 +263,12 @@ namespace World::Wui
 			if (hovered)
 				ctx.SetCursor(WuiCursor::Hand);
 
-			PushText(ctx, { tabRect.X + 6.0f, tabRect.Y + 3.0f }, tab.Title, theme.Text, 14.0f, tab.Active);
+			const float maxTabTitleWidth = std::max(0.0f, width - 26.0f);
+			const std::string shownTabTitle = EllipsizeToWidth(ctx, tab.Title, maxTabTitleWidth, 14.0f);
+			if (shownTabTitle != tab.Title && hovered)
+				Wui::Tooltip(ctx, tabRect, tab.Title);
+
+			PushText(ctx, { tabRect.X + 6.0f, tabRect.Y + 3.0f }, shownTabTitle, theme.Text, 14.0f, tab.Active);
 
 			if (ctx.IsHovered(closeRect))
 			{

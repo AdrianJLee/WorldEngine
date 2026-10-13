@@ -39,6 +39,28 @@ static void TestSubTextureUVMath()
 	assert(std::abs(sub.TexCoords[3].x - 0.10f) < 1e-5f);
 	assert(std::abs(sub.TexCoords[3].y - 0.10f) < 1e-5f); // Top-Left
 
+	// Verify default constructor UV coordinates
+	SubTexture2D defaultSub;
+	assert(std::abs(defaultSub.TexCoords[0].x - 0.0f) < 1e-5f);
+	assert(std::abs(defaultSub.TexCoords[0].y - 1.0f) < 1e-5f); // Bottom-Left
+	assert(std::abs(defaultSub.TexCoords[1].x - 1.0f) < 1e-5f);
+	assert(std::abs(defaultSub.TexCoords[1].y - 1.0f) < 1e-5f); // Bottom-Right
+	assert(std::abs(defaultSub.TexCoords[2].x - 1.0f) < 1e-5f);
+	assert(std::abs(defaultSub.TexCoords[2].y - 0.0f) < 1e-5f); // Top-Right
+	assert(std::abs(defaultSub.TexCoords[3].x - 0.0f) < 1e-5f);
+	assert(std::abs(defaultSub.TexCoords[3].y - 0.0f) < 1e-5f); // Top-Left
+
+	// Verify full-texture mapping
+	SubTexture2D fullSub("full", { 0.0f, 0.0f, 100.0f, 100.0f }, 100, 100);
+	assert(std::abs(fullSub.TexCoords[0].x - 0.0f) < 1e-5f);
+	assert(std::abs(fullSub.TexCoords[0].y - 1.0f) < 1e-5f); // Bottom-Left
+	assert(std::abs(fullSub.TexCoords[1].x - 1.0f) < 1e-5f);
+	assert(std::abs(fullSub.TexCoords[1].y - 1.0f) < 1e-5f); // Bottom-Right
+	assert(std::abs(fullSub.TexCoords[2].x - 1.0f) < 1e-5f);
+	assert(std::abs(fullSub.TexCoords[2].y - 0.0f) < 1e-5f); // Top-Right
+	assert(std::abs(fullSub.TexCoords[3].x - 0.0f) < 1e-5f);
+	assert(std::abs(fullSub.TexCoords[3].y - 0.0f) < 1e-5f); // Top-Left
+
 	std::cout << "[PASS] TestSubTextureUVMath\n";
 }
 

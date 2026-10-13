@@ -1597,7 +1597,12 @@ namespace World
 				{
 					if (!texCoords)
 					{
-						constexpr glm::vec2 defCoords[4] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
+						constexpr glm::vec2 defCoords[4] = {
+							{ 0.0f, 1.0f }, // 0: Bottom-Left
+							{ 1.0f, 1.0f }, // 1: Bottom-Right
+							{ 1.0f, 0.0f }, // 2: Top-Right
+							{ 0.0f, 0.0f }  // 3: Top-Left
+						};
 						std::memcpy(resolvedCoords, defCoords, sizeof(resolvedCoords));
 						texCoords = resolvedCoords;
 					}

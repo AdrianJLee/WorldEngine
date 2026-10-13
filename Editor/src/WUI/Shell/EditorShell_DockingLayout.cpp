@@ -1364,7 +1364,8 @@ void EditorShell::DrawAttachBar(Wui::WuiContext& ctx){
 		// 标签栏只列出"窗口":Main + 已附加到主窗口的独立窗口(切换关系)。
 		float x = bar.X + 6.0f;
 		{
-			const Wui::WuiRect tab { x, bar.Y + 3.0f, 90.0f, bar.H - 6.0f };
+			const float mainW = 62.0f;
+			const Wui::WuiRect tab { x, bar.Y + 3.0f, mainW, bar.H - 6.0f };
 			const bool active = m_ActiveWindowTag.empty();
 			// 标签 chip 走组件:活动/悬停底色与关闭 x 的外观统一。
 			if (Wui::AttachTag(ctx, tab, "Main", active, false, m_Theme).Clicked)
@@ -1372,9 +1373,8 @@ void EditorShell::DrawAttachBar(Wui::WuiContext& ctx){
 			// P3-1②:Main 标签同样登记(稳定 id `shell.attach.main`)—— 脚本可以在
 			// ui.attach 把视图切到某个附加窗口之后,再读/点这一枚标签切回主界面。
 			RegisterAttachNode("main", tab, active ? "active" : "inactive", "Main", true);
-			x += 96.0f;
+			x += mainW + 4.0f;
 		}
-		x += 4.0f;
 
 		// 已附加的独立窗口标签:点击切换;× 关闭该窗口;按住可拖出为独立窗口;
 		// 多个附加窗口之间可左右拖动换位。
@@ -1384,10 +1384,13 @@ void EditorShell::DrawAttachBar(Wui::WuiContext& ctx){
 		for (const std::string& panel : m_AttachedPanels)
 		{
 			const bool active = m_ActiveWindowTag == panel;
-			const Wui::WuiRect tab { x, bar.Y + 3.0f, 140.0f, bar.H - 6.0f };
-			const Wui::AttachTagResult tag = Wui::AttachTag(ctx, tab, PanelTitle(panel), active, true, m_Theme);
+			const std::string title = PanelTitle(panel);
+			const float textWidth = ctx.MeasureTextWidth(title, 12.5f);
+			const float tabW = std::clamp(textWidth + 26.0f, 68.0f, 160.0f);
+			const Wui::WuiRect tab { x, bar.Y + 3.0f, tabW, bar.H - 6.0f };
+			const Wui::AttachTagResult tag = Wui::AttachTag(ctx, tab, title, active, true, m_Theme);
 			// P3-1②:同一 id 在浮动态由下面的浮窗分支登记(value=floating),这里登记附加态。
-			RegisterAttachNode(panel, tab, "attached", PanelTitle(panel), true);
+			RegisterAttachNode(panel, tab, "attached", title, true);
 			if (tag.CloseClicked)
 				closeRequest = panel;
 			// 按下(非关闭键)记录起点;移动超过阈值进入拖动。
@@ -1407,12 +1410,12 @@ void EditorShell::DrawAttachBar(Wui::WuiContext& ctx){
 				const bool outside = !ctx.IsHovered(bar);
 				ctx.PushOverlay();
 				Label(ctx, { ctx.Input().MousePos.x + 14.0f, ctx.Input().MousePos.y + 14.0f },
-					outside ? std::string(PanelTitle(panel)) + "  →  独立窗口" : std::string(PanelTitle(panel)),
+					outside ? title + "  →  独立窗口" : title,
 					m_Theme.Text, 13.0f);
 				ctx.PopOverlay();
 			}
 			tagHits.push_back({ panel, tab });
-			x += 144.0f;
+			x += tabW + 4.0f;
 		}
 
 		// 同一窗口的其它标签页:顶栏只给窗口一枚 chip(拖出=整个窗口),但它们的形态

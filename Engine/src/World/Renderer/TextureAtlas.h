@@ -15,10 +15,10 @@ namespace World
 	{
 		std::string Name;
 		glm::vec2 TexCoords[4] {
-			{ 0.0f, 0.0f }, // 0: Bottom-Left
-			{ 1.0f, 0.0f }, // 1: Bottom-Right
-			{ 1.0f, 1.0f }, // 2: Top-Right
-			{ 0.0f, 1.0f }  // 3: Top-Left
+			{ 0.0f, 1.0f }, // 0: Bottom-Left
+			{ 1.0f, 1.0f }, // 1: Bottom-Right
+			{ 1.0f, 0.0f }, // 2: Top-Right
+			{ 0.0f, 0.0f }  // 3: Top-Left
 		};
 		glm::vec4 PixelRect { 0.0f, 0.0f, 0.0f, 0.0f }; // [x, y, width, height]
 		glm::vec2 Pivot { 0.5f, 0.5f };                 // Normalized pivot point (0.5, 0.5 = center)

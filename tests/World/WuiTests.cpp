@@ -1204,7 +1204,7 @@ int main()
 				ctx.BeginFrame(input);
 				const AttachTagResult result = AttachTag(ctx, tag, "Widget", false, false, theme);
 				CHECK(result.Hovered && result.Clicked && !result.CloseClicked);
-				CHECK(ctx.Commands().size() == 2); // 悬停底色 + 标题
+				CHECK(ctx.Commands().size() == 3); // 悬停底色 + 描边 + 标题
 				ctx.EndFrame();
 			}
 			{
@@ -1214,7 +1214,7 @@ int main()
 				ctx.BeginFrame(input);
 				const AttachTagResult result = AttachTag(ctx, tag, "Widget", true, false, theme);
 				CHECK(result.Hovered && !result.Clicked);
-				CHECK(ctx.Commands().size() == 2); // 活动底色 + 标题
+				CHECK(ctx.Commands().size() == 3); // 活动底色 + 描边 + 标题
 				ctx.EndFrame();
 			}
 			{
@@ -1225,10 +1225,95 @@ int main()
 				ctx.BeginFrame(input);
 				const AttachTagResult result = AttachTag(ctx, tag, "Widget", false, true, theme);
 				CHECK(result.CloseHovered && result.CloseClicked && !result.Clicked);
-				CHECK(result.CloseRect.W > 0.0f);
+				CHECK(result.CloseRect.W == 13.0f);
+				CHECK(result.CloseRect.H == 13.0f);
 				CHECK(result.CloseRect.X + result.CloseRect.W <= tag.X + tag.W);
+				CHECK(ctx.Commands().size() == 5); // 悬停底色 + 描边 + 标题 + 危险关闭徽标 + x
 				ctx.EndFrame();
 			}
+			{
+				// 常态未悬停标签:细腻暗底 + 明确描边 (不裸露悬浮)
+				WuiContext ctx;
+				WuiInputState input;
+				input.MousePos = { -100, -100 };
+				ctx.BeginFrame(input);
+				const AttachTagResult result = AttachTag(ctx, tag, "Widget", false, false, theme);
+				CHECK(!result.Hovered && !result.Clicked);
+				CHECK(ctx.Commands().size() == 3); // 常态暗底 + 描边 + 标题
+				ctx.EndFrame();
+			}
+			{
+				// 长标题防溢出与省略保护测试:
+				// 当标签宽度受限(tag.W = 140)且标题超长时,标题被安全截断并包含 '…',
+				// 悬停时完整标题登记入 Tooltip,且文本末端与关闭按钮保持安全间距,悬停/关闭交互完好无损。
+				const std::string longTitle = "VeryLongIndependentPanelTitleExceedingTagWidth";
+				{
+					WuiContext ctx;
+					WuiInputState input;
+					input.MousePos = { 20, 10 };
+					ctx.BeginFrame(input);
+					const AttachTagResult result = AttachTag(ctx, tag, longTitle, false, true, theme);
+					CHECK(result.Hovered && !result.CloseHovered);
+					CHECK(ctx.Tooltip() == longTitle);
+
+					std::string renderedTitle;
+					for (const auto& cmd : ctx.Commands())
+					{
+						if (cmd.Kind == WuiDrawKind::Text && cmd.Text != "x")
+						{
+							renderedTitle = cmd.Text;
+							break;
+						}
+					}
+					CHECK(!renderedTitle.empty());
+					CHECK(renderedTitle != longTitle);
+					CHECK(renderedTitle.find("…") != std::string::npos);
+
+					// 文本绘制宽度加上起始偏移(rect.X + 7.0f),严禁侵入关闭按钮 result.CloseRect
+					const float textWidth = ctx.MeasureTextWidth(renderedTitle, 12.5f);
+					const float textEndX = (tag.X + 7.0f) + textWidth;
+					CHECK(textEndX <= result.CloseRect.X);
+					CHECK(ctx.Commands().size() == 5); // 悬停底色 + 描边 + 标题 + 常态微徽标底色 + x
+					ctx.EndFrame();
+				}
+				{
+					// 关闭按钮悬停与点击交互保持完好
+					WuiContext ctx;
+					WuiInputState input;
+					input.MousePos = { tag.X + tag.W - 12.0f, tag.Y + tag.H * 0.5f };
+					input.MouseClicked[0] = true;
+					ctx.BeginFrame(input);
+					const AttachTagResult result = AttachTag(ctx, tag, longTitle, false, true, theme);
+					CHECK(result.CloseHovered && result.CloseClicked && !result.Clicked);
+					CHECK(ctx.Commands().size() == 5); // 悬停底色 + 描边 + 标题 + 危险关闭徽标 + x
+					ctx.EndFrame();
+				}
+			}
+		}
+
+		// 18. 停靠标签栏 DockTabBar:多标签密集分栏长标题防溢出与省略测试
+		{
+			WuiContext ctx;
+			WuiTheme theme;
+			const WuiRect area { 0, 0, 300, 24 };
+			const std::vector<DockTab> tabs = {
+				{ HashId("tab1"), "VeryLongInspectorPanelTitleForDockTesting", true },
+				{ HashId("tab2"), "AnotherExcessivelyLongHierarchyPanelTitle", false }
+			};
+			ctx.BeginFrame({});
+			const DockTabBarResult barResult = DockTabBar(ctx, area, tabs, theme);
+			std::vector<std::string> renderedTitles;
+			for (const auto& cmd : ctx.Commands())
+			{
+				if (cmd.Kind == WuiDrawKind::Text && cmd.Text != "x")
+					renderedTitles.push_back(cmd.Text);
+			}
+			CHECK(renderedTitles.size() == 2);
+			for (const auto& title : renderedTitles)
+			{
+				CHECK(title.find("…") != std::string::npos);
+			}
+			ctx.EndFrame();
 		}
 
 		// D3:可搜索下拉(材质/贴图路径选择)的交互回归:
