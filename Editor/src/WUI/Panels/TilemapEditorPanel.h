@@ -82,6 +82,10 @@ namespace World
 		bool m_ShowCollisionOverlay { true };
 		bool m_AutoTileMode { false };
 		std::shared_ptr<RuleTile> m_ActiveRuleTile { nullptr };
+		// 九宫格+孤立+内角共 11 个规则槽位对应的瓦片 ID:
+		// [0:↖左上, 1:↑上边, 2:↗右上, 3:←左边, 4:■中心, 5:→右边, 6:↙左下, 7:↓下边, 8:↘右下, 9:●孤立, 10:✚内角]
+		uint16_t m_RuleSlotTiles[11] { 2, 6, 3, 8, 1, 9, 4, 7, 5, 16, 10 };
+		void RebuildRuleTileFromSlots();
 		bool m_Dirty { false };
 		std::string m_StatusFeedback;
 

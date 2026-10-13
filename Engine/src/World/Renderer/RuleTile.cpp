@@ -72,14 +72,20 @@ namespace World
 		const uint8_t N = static_cast<uint8_t>(RuleNeighbor::NotThis);
 		const uint8_t X = static_cast<uint8_t>(RuleNeighbor::Ignore);
 
-		// 1. 孤立地块 (四周皆空)
-		rt.AddRule({ { N, N, N,  N, N,  N, N, N }, static_cast<uint16_t>(baseTileId + 15) });
+		// 1. 孤立地块 (上下左右皆空)
+		rt.AddRule({ { X, N, X,  N, N,  X, N, X }, static_cast<uint16_t>(baseTileId + 15) });
 
-		// 2. 外部四角 (Outer Corners)
-		rt.AddRule({ { N, N, N,  N, T,  N, T, T }, static_cast<uint16_t>(baseTileId + 1) }); // 左上外角
-		rt.AddRule({ { N, N, N,  T, N,  T, T, N }, static_cast<uint16_t>(baseTileId + 2) }); // 右上外角
-		rt.AddRule({ { N, T, T,  N, T,  N, N, N }, static_cast<uint16_t>(baseTileId + 3) }); // 左下外角
-		rt.AddRule({ { T, T, N,  T, N,  N, N, N }, static_cast<uint16_t>(baseTileId + 4) }); // 右下外角
+		// 2. 外部四角 (Outer Corners: 忽略无关对角线，使 2x2、L形及任意矩形均能精准识别转角)
+		rt.AddRule({ { X, N, X,  N, T,  X, T, X }, static_cast<uint16_t>(baseTileId + 1) }); // 左上外角
+		rt.AddRule({ { X, N, X,  T, N,  X, T, X }, static_cast<uint16_t>(baseTileId + 2) }); // 右上外角
+		rt.AddRule({ { X, T, X,  N, T,  X, N, X }, static_cast<uint16_t>(baseTileId + 3) }); // 左下外角
+		rt.AddRule({ { X, T, X,  T, N,  X, N, X }, static_cast<uint16_t>(baseTileId + 4) }); // 右下外角
+
+		// 单行/单列末端外角兜底
+		rt.AddRule({ { X, N, X,  N, T,  X, N, X }, static_cast<uint16_t>(baseTileId + 1) }); // 水平左端
+		rt.AddRule({ { X, N, X,  T, N,  X, N, X }, static_cast<uint16_t>(baseTileId + 2) }); // 水平右端
+		rt.AddRule({ { X, N, X,  N, N,  X, T, X }, static_cast<uint16_t>(baseTileId + 1) }); // 垂直上端
+		rt.AddRule({ { X, T, X,  N, N,  X, N, X }, static_cast<uint16_t>(baseTileId + 3) }); // 垂直下端
 
 		// 3. 四个边缘 (Edges)
 		rt.AddRule({ { X, N, X,  T, T,  X, T, X }, static_cast<uint16_t>(baseTileId + 5) }); // 上边缘
@@ -97,8 +103,8 @@ namespace World
 		rt.AddRule({ { X, T, X,  N, N,  X, T, X }, static_cast<uint16_t>(baseTileId + 13) }); // 垂直柱
 		rt.AddRule({ { X, N, X,  T, T,  X, N, X }, static_cast<uint16_t>(baseTileId + 14) }); // 水平道
 
-		// 6. 默认中心全实心填充 (8 邻域全为 This)
-		rt.AddRule({ { T, T, T,  T, T,  T, T, T }, baseTileId });
+		// 6. 默认中心全实心填充
+		rt.AddRule({ { X, T, X,  T, T,  X, T, X }, baseTileId });
 
 		return rt;
 	}

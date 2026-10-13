@@ -161,6 +161,70 @@ namespace World
 		return true;
 	}
 
+	void TilemapEditorPanel::RebuildRuleTileFromSlots()
+	{
+		const uint16_t maxTile = (m_Atlas && m_Atlas->GetSubTextureCount() > 0)
+			? static_cast<uint16_t>(m_Atlas->GetSubTextureCount())
+			: 16u;
+		auto clampTile = [maxTile](uint16_t id) -> uint16_t {
+			if (id < 1) return 1;
+			return static_cast<uint16_t>(((id - 1) % maxTile) + 1);
+		};
+
+		const uint16_t nwTile     = clampTile(m_RuleSlotTiles[0]); // ↖ 左上外角
+		const uint16_t nTile      = clampTile(m_RuleSlotTiles[1]); // ↑ 上边缘
+		const uint16_t neTile     = clampTile(m_RuleSlotTiles[2]); // ↗ 右上外角
+		const uint16_t wTile      = clampTile(m_RuleSlotTiles[3]); // ← 左边缘
+		const uint16_t centerTile = clampTile(m_RuleSlotTiles[4]); // ■ 中心实心
+		const uint16_t eTile      = clampTile(m_RuleSlotTiles[5]); // → 右边缘
+		const uint16_t swTile     = clampTile(m_RuleSlotTiles[6]); // ↙ 左下外角
+		const uint16_t sTile      = clampTile(m_RuleSlotTiles[7]); // ↓ 下边缘
+		const uint16_t seTile     = clampTile(m_RuleSlotTiles[8]); // ↘ 右下外角
+		const uint16_t isoTile    = clampTile(m_RuleSlotTiles[9]); // ● 孤立单块
+		const uint16_t innerTile  = clampTile(m_RuleSlotTiles[10]);// ✚ 内转角
+
+		RuleTile rt("CustomAutoRule", m_EditAtlasPath, centerTile);
+		const uint8_t T = static_cast<uint8_t>(RuleNeighbor::This);
+		const uint8_t N = static_cast<uint8_t>(RuleNeighbor::NotThis);
+		const uint8_t X = static_cast<uint8_t>(RuleNeighbor::Ignore);
+
+		// 1. 孤立单块 (上下左右皆空)
+		rt.AddRule({ { X, N, X,  N, N,  X, N, X }, isoTile });
+
+		// 2. 外部四角 (两相邻外侧为空，对向两侧有邻居)
+		rt.AddRule({ { X, N, X,  N, T,  X, T, X }, nwTile }); // ↖ 左上外角
+		rt.AddRule({ { X, N, X,  T, N,  X, T, X }, neTile }); // ↗ 右上外角
+		rt.AddRule({ { X, T, X,  N, T,  X, N, X }, swTile }); // ↙ 左下外角
+		rt.AddRule({ { X, T, X,  T, N,  X, N, X }, seTile }); // ↘ 右下外角
+
+		// 单排/单列端点外角兜底
+		rt.AddRule({ { X, N, X,  N, T,  X, N, X }, nwTile }); // 水平左端
+		rt.AddRule({ { X, N, X,  T, N,  X, N, X }, neTile }); // 水平右端
+		rt.AddRule({ { X, N, X,  N, N,  X, T, X }, nwTile }); // 垂直上端
+		rt.AddRule({ { X, T, X,  N, N,  X, N, X }, swTile }); // 垂直下端
+
+		// 3. 四条边缘 (单侧为空，其余三侧有邻居)
+		rt.AddRule({ { X, N, X,  T, T,  X, T, X }, nTile });  // ↑ 上边缘
+		rt.AddRule({ { X, T, X,  T, T,  X, N, X }, sTile });  // ↓ 下边缘
+		rt.AddRule({ { X, T, X,  N, T,  X, T, X }, wTile });  // ← 左边缘
+		rt.AddRule({ { X, T, X,  T, N,  X, T, X }, eTile });  // → 右边缘
+
+		// 单排/单列中间段
+		rt.AddRule({ { X, N, X,  T, T,  X, N, X }, nTile });  // 水平横条
+		rt.AddRule({ { X, T, X,  N, N,  X, T, X }, wTile });  // 垂直竖条
+
+		// 4. 内部转角 (上下左右全有，对角线缺口)
+		rt.AddRule({ { N, T, T,  T, T,  T, T, T }, innerTile });
+		rt.AddRule({ { T, T, N,  T, T,  T, T, T }, innerTile });
+		rt.AddRule({ { T, T, T,  T, T,  N, T, T }, innerTile });
+		rt.AddRule({ { T, T, T,  T, T,  T, T, N }, innerTile });
+
+		// 5. 中心全实心填充
+		rt.AddRule({ { X, T, X,  T, T,  X, T, X }, centerTile });
+
+		m_ActiveRuleTile = std::make_shared<RuleTile>(std::move(rt));
+	}
+
 	void TilemapEditorPanel::PaintCell(uint32_t x, uint32_t y, uint16_t tileId, bool setSolid)
 	{
 		if (!m_Tilemap)
@@ -170,10 +234,7 @@ namespace World
 		if (m_AutoTileMode && m_Tilemap)
 		{
 			if (!m_ActiveRuleTile)
-			{
-				m_ActiveRuleTile = std::make_shared<RuleTile>(
-					RuleTile::CreateStandard47Template("AutoRule", m_EditAtlasPath, static_cast<uint16_t>(std::max(1, m_SelectedTileId))));
-			}
+				RebuildRuleTileFromSlots();
 			m_Tilemap->ApplyRuleTileAt(static_cast<int>(x), static_cast<int>(y), *m_ActiveRuleTile);
 		}
 		m_Dirty = true;
@@ -351,32 +412,30 @@ namespace World
 
 		// Auto-Tile Toggle
 		const Wui::WuiRect btnAutoTile { tX, toolBar.Y + 5.0f, 126.0f, 24.0f };
-		Wui::Tooltip(ctx, btnAutoTile, "开启/关闭 47-Tile 8邻域自动拼接笔刷 (tilemap.btn.auto_tile)");
+		Wui::Tooltip(ctx, btnAutoTile, "开启/关闭 8邻域自动拼接笔刷: 涂抹时根据周围邻居自动替换为九宫格对应边缘/转角瓦片 (tilemap.btn.auto_tile)");
 		std::string autoStr = m_AutoTileMode ? "✔ 自动拼接: 开" : "⚡ 自动拼接: 关";
-		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.auto_tile"), btnAutoTile, autoStr, theme))
+		auto autoBtnTheme = theme;
+		if (m_AutoTileMode)
+		{
+			autoBtnTheme.ButtonBg = theme.ActiveBg;
+			autoBtnTheme.Border = theme.Accent;
+		}
+		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.auto_tile"), btnAutoTile, autoStr, autoBtnTheme))
 		{
 			m_AutoTileMode = !m_AutoTileMode;
-			if (m_AutoTileMode && !m_ActiveRuleTile)
-			{
-				m_ActiveRuleTile = std::make_shared<RuleTile>(
-					RuleTile::CreateStandard47Template("AutoRule", m_EditAtlasPath, static_cast<uint16_t>(std::max(1, m_SelectedTileId))));
-			}
+			RebuildRuleTileFromSlots();
 		}
 		tX += 132.0f;
 
 		// Apply Auto-Tile All
 		const Wui::WuiRect btnApplyAll { tX, toolBar.Y + 5.0f, 134.0f, 24.0f };
-		Wui::Tooltip(ctx, btnApplyAll, "根据 47-Tile 8邻域规则对整张地图一键自动拼接边缘与转角 (tilemap.btn.apply_all)");
+		Wui::Tooltip(ctx, btnApplyAll, "按左侧『自动拼接九宫格规则』对全图所有已绘瓦片重新计算边缘与转角 (tilemap.btn.apply_all)");
 		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.apply_all"), btnApplyAll, "⚡ 全图自动拼接", theme))
 		{
-			if (!m_ActiveRuleTile)
-			{
-				m_ActiveRuleTile = std::make_shared<RuleTile>(
-					RuleTile::CreateStandard47Template("AutoRule", m_EditAtlasPath, static_cast<uint16_t>(std::max(1, m_SelectedTileId))));
-			}
+			RebuildRuleTileFromSlots();
 			m_Tilemap->ApplyRuleTile(*m_ActiveRuleTile);
 			m_Dirty = true;
-			m_StatusFeedback = "全图 47-Tile 自动拼接完成";
+			m_StatusFeedback = "已按九宫格规则完成全图自动拼接";
 		}
 		tX += 140.0f;
 
@@ -504,6 +563,121 @@ namespace World
 			}
 		}
 		lY += 28.0f;
+
+		// Visual 3x3 Auto-Tile Rule Matrix (自动拼接九宫格规则可视化与点击绑定)
+		Wui::Label(ctx, { leftCol.X + 10.0f, lY }, "⚡ 自动拼接九宫格规则 (点选下方瓦片后点击方位绑定):", theme.Accent, 11.0f);
+		lY += 18.0f;
+		Wui::Label(ctx, { leftCol.X + 10.0f, lY }, "逻辑: 检测上下左右是否有相邻瓦片，无邻居侧自动切换为边缘/转角切片", theme.TextMuted, 10.0f);
+		lY += 16.0f;
+
+		{
+			struct RuleSlotSpec { int slotIdx; const char* id; const char* name; const char* ruleTip; };
+			const RuleSlotSpec gridSlots[9] = {
+				{ 0, "tilemap.rule.nw", "↖左上", "【左上外角】规则: 上方空 + 左方空 + 右/下方有瓦片。点击将当前选中瓦片绑定到左上角。" },
+				{ 1, "tilemap.rule.n",  "↑上边", "【上边缘】规则: 上方空 + 左/右/下方有瓦片。点击将当前选中瓦片绑定到上边缘。" },
+				{ 2, "tilemap.rule.ne", "↗右上", "【右上外角】规则: 上方空 + 右方空 + 左/下方有瓦片。点击将当前选中瓦片绑定到右上角。" },
+				{ 3, "tilemap.rule.w",  "←左边", "【左边缘】规则: 左方空 + 上/下/右方有瓦片。点击将当前选中瓦片绑定到左边缘。" },
+				{ 4, "tilemap.rule.c",  "■中心", "【中心实心】规则: 上/下/左/右四周均有瓦片包围。点击将当前选中瓦片绑定到中心块。" },
+				{ 5, "tilemap.rule.e",  "→右边", "【右边缘】规则: 右方空 + 上/下/左方有瓦片。点击将当前选中瓦片绑定到右边缘。" },
+				{ 6, "tilemap.rule.sw", "↙左下", "【左下外角】规则: 下方空 + 左方空 + 右/上方有瓦片。点击将当前选中瓦片绑定到左下角。" },
+				{ 7, "tilemap.rule.s",  "↓下边", "【下边缘】规则: 下方空 + 左/右/上方有瓦片。点击将当前选中瓦片绑定到下边缘。" },
+				{ 8, "tilemap.rule.se", "↘右下", "【右下外角】规则: 下方空 + 右方空 + 左/上方有瓦片。点击将当前选中瓦片绑定到右下角。" }
+			};
+
+			const float matX = leftCol.X + 8.0f;
+			const float matW = leftCol.W - 16.0f;
+			const float cellW3 = (matW - 8.0f) / 3.0f;
+			const float cellH3 = 24.0f;
+
+			for (int r = 0; r < 3; ++r)
+			{
+				for (int c = 0; c < 3; ++c)
+				{
+					const int idx = r * 3 + c;
+					const auto& spec = gridSlots[idx];
+					const uint16_t boundTile = m_RuleSlotTiles[spec.slotIdx];
+					const Wui::WuiRect slotRect { matX + c * (cellW3 + 4.0f), lY + r * (cellH3 + 3.0f), cellW3, cellH3 };
+					const std::string slotLabel = std::string(spec.name) + " #" + std::to_string(boundTile);
+					Wui::Tooltip(ctx, slotRect, spec.ruleTip);
+					auto slotTheme = theme;
+					if (spec.slotIdx == 4) slotTheme.Border = theme.Accent;
+					if (Wui::Button(ctx, Wui::HashId(spec.id), slotRect, slotLabel, slotTheme))
+					{
+						m_RuleSlotTiles[spec.slotIdx] = static_cast<uint16_t>(std::max(1, m_SelectedTileId));
+						RebuildRuleTileFromSlots();
+						if (m_Tilemap)
+						{
+							m_Tilemap->ApplyRuleTile(*m_ActiveRuleTile);
+							m_Dirty = true;
+						}
+						m_StatusFeedback = std::string("已将规则槽 [") + spec.name + "] 绑定为瓦片 #" + std::to_string(m_SelectedTileId);
+					}
+					// 在槽位右侧绘制绑定的瓦片缩略图
+					if (m_UiTextureId != 0 && m_Atlas && boundTile >= 1 && boundTile <= m_Atlas->GetSubTextureCount()
+						&& m_Atlas->GetWidth() > 0 && m_Atlas->GetHeight() > 0)
+					{
+						if (const SubTexture2D* sub = m_Atlas->GetSubTexture(static_cast<size_t>(boundTile - 1)))
+						{
+							const float invW = 1.0f / static_cast<float>(m_Atlas->GetWidth());
+							const float invH = 1.0f / static_cast<float>(m_Atlas->GetHeight());
+							const Wui::WuiRect miniThumb { slotRect.X + slotRect.W - 20.0f, slotRect.Y + 3.0f, 18.0f, 18.0f };
+							Wui::Image(ctx, miniThumb, m_UiTextureId, {
+								sub->PixelRect.x * invW,
+								sub->PixelRect.y * invH,
+								sub->PixelRect.z * invW,
+								sub->PixelRect.w * invH
+							}, theme);
+						}
+					}
+				}
+			}
+			lY += 3 * (cellH3 + 3.0f) + 2.0f;
+
+			// Extra row: Isolated, Inner Corner, Auto-Fill Sequence
+			const Wui::WuiRect isoRect   { matX, lY, cellW3, cellH3 };
+			const Wui::WuiRect innerRect { matX + (cellW3 + 4.0f), lY, cellW3, cellH3 };
+			const Wui::WuiRect seqRect   { matX + 2.0f * (cellW3 + 4.0f), lY, cellW3, cellH3 };
+
+			Wui::Tooltip(ctx, isoRect, "【孤立单格】规则: 上下左右四周均无相邻瓦片时使用此瓦片。点击绑定当前选中瓦片。");
+			if (Wui::Button(ctx, Wui::HashId("tilemap.rule.iso"), isoRect, "●孤立 #" + std::to_string(m_RuleSlotTiles[9]), theme))
+			{
+				m_RuleSlotTiles[9] = static_cast<uint16_t>(std::max(1, m_SelectedTileId));
+				RebuildRuleTileFromSlots();
+				if (m_Tilemap) { m_Tilemap->ApplyRuleTile(*m_ActiveRuleTile); m_Dirty = true; }
+			}
+
+			Wui::Tooltip(ctx, innerRect, "【内转角】规则: 上下左右全有瓦片，但对角线存在缺口时使用此瓦片。点击绑定当前选中瓦片。");
+			if (Wui::Button(ctx, Wui::HashId("tilemap.rule.inner"), innerRect, "✚内角 #" + std::to_string(m_RuleSlotTiles[10]), theme))
+			{
+				m_RuleSlotTiles[10] = static_cast<uint16_t>(std::max(1, m_SelectedTileId));
+				RebuildRuleTileFromSlots();
+				if (m_Tilemap) { m_Tilemap->ApplyRuleTile(*m_ActiveRuleTile); m_Dirty = true; }
+			}
+
+			Wui::Tooltip(ctx, seqRect, "从当前选中瓦片开始，按顺序自动填充九宫格全部槽位并刷新地图 (tilemap.rule.seq)");
+			if (Wui::Button(ctx, Wui::HashId("tilemap.rule.seq"), seqRect, "↻ 顺次分配", theme))
+			{
+				const uint16_t base = static_cast<uint16_t>(std::max(1, m_SelectedTileId));
+				const uint16_t maxT = (m_Atlas && m_Atlas->GetSubTextureCount() > 0)
+					? static_cast<uint16_t>(m_Atlas->GetSubTextureCount()) : 16u;
+				auto wrapT = [maxT](uint16_t v) -> uint16_t { return static_cast<uint16_t>(((v - 1) % maxT) + 1); };
+				m_RuleSlotTiles[4]  = wrapT(base);      // 中心
+				m_RuleSlotTiles[0]  = wrapT(base + 1);  // 左上
+				m_RuleSlotTiles[2]  = wrapT(base + 2);  // 右上
+				m_RuleSlotTiles[6]  = wrapT(base + 3);  // 左下
+				m_RuleSlotTiles[8]  = wrapT(base + 4);  // 右下
+				m_RuleSlotTiles[1]  = wrapT(base + 5);  // 上边
+				m_RuleSlotTiles[7]  = wrapT(base + 6);  // 下边
+				m_RuleSlotTiles[3]  = wrapT(base + 7);  // 左边
+				m_RuleSlotTiles[5]  = wrapT(base + 8);  // 右边
+				m_RuleSlotTiles[10] = wrapT(base + 9);  // 内角
+				m_RuleSlotTiles[9]  = wrapT(base + 15); // 孤立
+				RebuildRuleTileFromSlots();
+				if (m_Tilemap) { m_Tilemap->ApplyRuleTile(*m_ActiveRuleTile); m_Dirty = true; }
+				m_StatusFeedback = "已从瓦片 #" + std::to_string(base) + " 起顺次分配九宫格拼接规则";
+			}
+			lY += cellH3 + 8.0f;
+		}
 
 		// Visual Tile Palette Header
 		Wui::Label(ctx, { leftCol.X + 10.0f, lY }, "瓦片调色板 (Visual Tile Palette)", theme.Accent, 11.5f);
@@ -700,120 +874,211 @@ namespace World
 			// GPU 视口裁切作用域严格限定在网格画布区域内，避免影响状态栏与全局浮动控件
 			Wui::ClipScope canvasClip(ctx, innerCanvas);
 
-		// Draw each cell (y=0 at the top, matching natural 2D tilemap convention and scene +Y down offset)
-		for (uint32_t y = 0; y < gridH; ++y)
-		{
-			for (uint32_t x = 0; x < gridW; ++x)
-			{
-				const Wui::WuiRect cellRect {
-					gridOriginX + static_cast<float>(x) * cellPx,
-					gridOriginY + static_cast<float>(y) * cellPx,
-					cellPx,
-					cellPx
-				};
+			const TilemapGridType activeGridType = m_Tilemap ? m_Tilemap->GetGridType() : TilemapGridType::Orthogonal;
+			const glm::vec2 canvasCenter {
+				innerCanvas.X + innerCanvas.W * 0.5f + m_PanX,
+				innerCanvas.Y + innerCanvas.H * 0.5f + m_PanY
+			};
+			glm::vec2 topoCellSize { cellPx, cellPx };
+			if (activeGridType == TilemapGridType::Isometric)
+				topoCellSize = { cellPx * 1.4f, cellPx * 0.7f };
+			else if (activeGridType == TilemapGridType::HexagonalPointy || activeGridType == TilemapGridType::HexagonalFlat)
+				topoCellSize = { cellPx * 1.05f, cellPx * 1.05f };
 
-				// Viewport clipping: skip cells outside innerCanvas
-				if (cellRect.X + cellRect.W < innerCanvas.X || cellRect.X > innerCanvas.X + innerCanvas.W ||
-					cellRect.Y + cellRect.H < innerCanvas.Y || cellRect.Y > innerCanvas.Y + innerCanvas.H)
+			auto getCellScreenRect = [&](uint32_t x, uint32_t y) -> Wui::WuiRect
+			{
+				if (activeGridType == TilemapGridType::Orthogonal)
 				{
-					continue;
-				}
-
-				const uint16_t tileId = m_Tilemap->GetTile(x, y);
-				if (tileId > 0)
-				{
-					if (m_UiTextureId != 0 && m_Atlas && tileId <= m_Atlas->GetSubTextureCount()
-						&& m_Atlas->GetWidth() > 0 && m_Atlas->GetHeight() > 0)
-					{
-						if (const SubTexture2D* sub = m_Atlas->GetSubTexture(static_cast<size_t>(tileId - 1)))
-						{
-							const float u0 = sub->PixelRect.x * invAtlasW;
-							const float v0 = sub->PixelRect.y * invAtlasH;
-							const float uW = sub->PixelRect.z * invAtlasW;
-							const float vH = sub->PixelRect.w * invAtlasH;
-							Wui::Image(ctx, cellRect, m_UiTextureId, { u0, v0, uW, vH }, theme);
-						}
-					}
-					else
-					{
-						Wui::PanelBackground(ctx,
-							{ cellRect.X + 1.0f, cellRect.Y + 1.0f, std::max(1.0f, cellRect.W - 2.0f), std::max(1.0f, cellRect.H - 2.0f) },
-							theme.Accent, 1.0f);
-					}
-				}
-
-				if (m_ShowCollisionOverlay && m_Tilemap->IsSolid(x, y))
-				{
-					Wui::HighlightOutline(ctx,
-						{ cellRect.X + 1.0f, cellRect.Y + 1.0f, std::max(1.0f, cellRect.W - 2.0f), std::max(1.0f, cellRect.H - 2.0f) },
-						{ 0.95f, 0.38f, 0.18f, 0.85f }, 1.0f, 1.5f);
-				}
-			}
-		}
-
-		// Low-contrast grid lines
-		const Wui::WuiColor gridLineCol { 0.38f, 0.42f, 0.48f, 0.35f };
-		for (uint32_t x = 0; x <= gridW; ++x)
-		{
-			const float lx = gridOriginX + static_cast<float>(x) * cellPx;
-			if (lx >= innerCanvas.X && lx <= innerCanvas.X + innerCanvas.W)
-			{
-				const float ly0 = std::max(innerCanvas.Y, gridOriginY);
-				const float ly1 = std::min(innerCanvas.Y + innerCanvas.H, gridOriginY + totalGridPxH);
-				if (ly1 > ly0)
-					Wui::LineSegment(ctx, { lx, ly0 }, { lx, ly1 }, gridLineCol, 1.0f);
-			}
-		}
-		for (uint32_t r = 0; r <= gridH; ++r)
-		{
-			const float ly = gridOriginY + static_cast<float>(r) * cellPx;
-			if (ly >= innerCanvas.Y && ly <= innerCanvas.Y + innerCanvas.H)
-			{
-				const float lx0 = std::max(innerCanvas.X, gridOriginX);
-				const float lx1 = std::min(innerCanvas.X + innerCanvas.W, gridOriginX + totalGridPxW);
-				if (lx1 > lx0)
-					Wui::LineSegment(ctx, { lx0, ly }, { lx1, ly }, gridLineCol, 1.0f);
-			}
-		}
-
-		// Merged Box2D collider rectangles overlay
-		// mergedRects computed above
-		if (m_ShowCollisionOverlay)
-		{
-			const Wui::WuiColor mergedCol { 0.20f, 0.95f, 0.42f, 0.95f };
-			for (const auto& mr : mergedRects)
-			{
-				const float sx = gridOriginX + mr.X * cellPx;
-				const float sy = gridOriginY + mr.Y * cellPx;
-				const float sw = mr.Width * cellPx;
-				const float sh = mr.Height * cellPx;
-				Wui::HighlightOutline(ctx, { sx, sy, sw, sh }, mergedCol, 2.0f, 2.0f);
-			}
-		}
-
-		// Mouse interaction & hover preview inside the grid (taking zoom and pan into account)
-		if (ctx.IsHovered(innerCanvas) && !m_IsPanning)
-		{
-			const glm::vec2 mouse = ctx.Input().MousePos;
-			const float relX = mouse.x - gridOriginX;
-			const float relY = mouse.y - gridOriginY;
-
-			if (relX >= 0.0f && relX < totalGridPxW && relY >= 0.0f && relY < totalGridPxH)
-			{
-				const uint32_t gx = static_cast<uint32_t>(relX / cellPx);
-				const uint32_t gy = static_cast<uint32_t>(relY / cellPx);
-				if (gx < gridW && gy < gridH)
-				{
-					const Wui::WuiRect hoverCellRect {
-						gridOriginX + static_cast<float>(gx) * cellPx,
-						gridOriginY + static_cast<float>(gy) * cellPx,
+					return {
+						gridOriginX + static_cast<float>(x) * cellPx,
+						gridOriginY + static_cast<float>(y) * cellPx,
 						cellPx,
 						cellPx
 					};
-					Wui::HighlightOutline(ctx, hoverCellRect, theme.Accent, 1.0f, 1.5f);
+				}
+				const glm::vec2 local = TilemapGridUtils::GridToLocal(
+					static_cast<int>(x), static_cast<int>(y), activeGridType, topoCellSize, gridW, gridH);
+				const float sx = canvasCenter.x + local.x;
+				const float sy = canvasCenter.y - local.y;
+				const float drawW = (activeGridType == TilemapGridType::Isometric) ? topoCellSize.x * 0.72f : topoCellSize.x * 0.78f;
+				const float drawH = (activeGridType == TilemapGridType::Isometric) ? topoCellSize.y * 0.95f : topoCellSize.y * 0.78f;
+				return { sx - drawW * 0.5f, sy - drawH * 0.5f, drawW, drawH };
+			};
 
-					// Rect Fill Preview Outline
-					if (m_ActiveTool == TilePaintTool::RectFill && m_HasRectStart)
+			auto drawCellPolygonOutline = [&](uint32_t x, uint32_t y, const Wui::WuiColor& color, float thickness)
+			{
+				const auto poly = TilemapGridUtils::GetCellPolygon(
+					static_cast<int>(x), static_cast<int>(y), activeGridType, topoCellSize, gridW, gridH);
+				for (size_t k = 0; k < poly.size(); ++k)
+				{
+					const size_t next = (k + 1) % poly.size();
+					const glm::vec2 p0 { canvasCenter.x + poly[k].x, canvasCenter.y - poly[k].y };
+					const glm::vec2 p1 { canvasCenter.x + poly[next].x, canvasCenter.y - poly[next].y };
+					Wui::LineSegment(ctx, p0, p1, color, thickness);
+				}
+			};
+
+			// 1. 绘制所有瓦片与碰撞框
+			for (uint32_t y = 0; y < gridH; ++y)
+			{
+				for (uint32_t x = 0; x < gridW; ++x)
+				{
+					const Wui::WuiRect cellRect = getCellScreenRect(x, y);
+
+					if (cellRect.X + cellRect.W < innerCanvas.X - 32.0f || cellRect.X > innerCanvas.X + innerCanvas.W + 32.0f ||
+						cellRect.Y + cellRect.H < innerCanvas.Y - 32.0f || cellRect.Y > innerCanvas.Y + innerCanvas.H + 32.0f)
+					{
+						continue;
+					}
+
+					const uint16_t tileId = m_Tilemap->GetTile(x, y);
+					if (tileId > 0)
+					{
+						if (m_UiTextureId != 0 && m_Atlas && tileId <= m_Atlas->GetSubTextureCount()
+							&& m_Atlas->GetWidth() > 0 && m_Atlas->GetHeight() > 0)
+						{
+							if (const SubTexture2D* sub = m_Atlas->GetSubTexture(static_cast<size_t>(tileId - 1)))
+							{
+								const float u0 = sub->PixelRect.x * invAtlasW;
+								const float v0 = sub->PixelRect.y * invAtlasH;
+								const float uW = sub->PixelRect.z * invAtlasW;
+								const float vH = sub->PixelRect.w * invAtlasH;
+								Wui::Image(ctx, cellRect, m_UiTextureId, { u0, v0, uW, vH }, theme);
+							}
+						}
+						else
+						{
+							Wui::PanelBackground(ctx,
+								{ cellRect.X + 1.0f, cellRect.Y + 1.0f, std::max(1.0f, cellRect.W - 2.0f), std::max(1.0f, cellRect.H - 2.0f) },
+								theme.Accent, 1.0f);
+						}
+					}
+
+					if (m_ShowCollisionOverlay && m_Tilemap->IsSolid(x, y))
+					{
+						if (activeGridType == TilemapGridType::Orthogonal)
+						{
+							Wui::HighlightOutline(ctx,
+								{ cellRect.X + 1.0f, cellRect.Y + 1.0f, std::max(1.0f, cellRect.W - 2.0f), std::max(1.0f, cellRect.H - 2.0f) },
+								{ 0.95f, 0.38f, 0.18f, 0.85f }, 1.0f, 1.5f);
+						}
+						else
+						{
+							drawCellPolygonOutline(x, y, { 0.95f, 0.38f, 0.18f, 0.90f }, 1.8f);
+						}
+					}
+				}
+			}
+
+			// 2. 绘制网格辅助线 (根据当前拓扑动态绘制正交网、等轴测 2.5D 菱形网或六边形蜂窝网)
+			const Wui::WuiColor gridLineCol { 0.38f, 0.42f, 0.48f, 0.40f };
+			if (activeGridType == TilemapGridType::Orthogonal)
+			{
+				for (uint32_t x = 0; x <= gridW; ++x)
+				{
+					const float lx = gridOriginX + static_cast<float>(x) * cellPx;
+					if (lx >= innerCanvas.X && lx <= innerCanvas.X + innerCanvas.W)
+					{
+						const float ly0 = std::max(innerCanvas.Y, gridOriginY);
+						const float ly1 = std::min(innerCanvas.Y + innerCanvas.H, gridOriginY + totalGridPxH);
+						if (ly1 > ly0)
+							Wui::LineSegment(ctx, { lx, ly0 }, { lx, ly1 }, gridLineCol, 1.0f);
+					}
+				}
+				for (uint32_t r = 0; r <= gridH; ++r)
+				{
+					const float ly = gridOriginY + static_cast<float>(r) * cellPx;
+					if (ly >= innerCanvas.Y && ly <= innerCanvas.Y + innerCanvas.H)
+					{
+						const float lx0 = std::max(innerCanvas.X, gridOriginX);
+						const float lx1 = std::min(innerCanvas.X + innerCanvas.W, gridOriginX + totalGridPxW);
+						if (lx1 > lx0)
+							Wui::LineSegment(ctx, { lx0, ly }, { lx1, ly }, gridLineCol, 1.0f);
+					}
+				}
+			}
+			else
+			{
+				for (uint32_t y = 0; y < gridH; ++y)
+				{
+					for (uint32_t x = 0; x < gridW; ++x)
+					{
+						drawCellPolygonOutline(x, y, gridLineCol, 1.0f);
+					}
+				}
+			}
+
+			// 3. 合并碰撞盒预览 (正交模式下展示贪心合并矩形)
+			if (m_ShowCollisionOverlay && activeGridType == TilemapGridType::Orthogonal)
+			{
+				const Wui::WuiColor mergedCol { 0.20f, 0.95f, 0.42f, 0.95f };
+				for (const auto& mr : mergedRects)
+				{
+					const float sx = gridOriginX + mr.X * cellPx;
+					const float sy = gridOriginY + mr.Y * cellPx;
+					const float sw = mr.Width * cellPx;
+					const float sh = mr.Height * cellPx;
+					Wui::HighlightOutline(ctx, { sx, sy, sw, sh }, mergedCol, 2.0f, 2.0f);
+				}
+			}
+
+			// 4. 鼠标悬停拾取与落笔交互 (自适应正交、等轴测与六边形蜂窝拾取)
+			if (ctx.IsHovered(innerCanvas) && !m_IsPanning)
+			{
+				const glm::vec2 mouse = ctx.Input().MousePos;
+				bool hasHoveredCell = false;
+				uint32_t gx = 0;
+				uint32_t gy = 0;
+
+				if (activeGridType == TilemapGridType::Orthogonal)
+				{
+					const float relX = mouse.x - gridOriginX;
+					const float relY = mouse.y - gridOriginY;
+					if (relX >= 0.0f && relX < totalGridPxW && relY >= 0.0f && relY < totalGridPxH)
+					{
+						gx = static_cast<uint32_t>(relX / cellPx);
+						gy = static_cast<uint32_t>(relY / cellPx);
+						hasHoveredCell = (gx < gridW && gy < gridH);
+					}
+				}
+				else
+				{
+					const glm::vec2 localMouse { mouse.x - canvasCenter.x, -(mouse.y - canvasCenter.y) };
+					float bestDistSq = 1e30f;
+					const float maxRadius = std::max(topoCellSize.x, topoCellSize.y) * 0.55f;
+					const float maxRadiusSq = maxRadius * maxRadius;
+					for (uint32_t y = 0; y < gridH; ++y)
+					{
+						for (uint32_t x = 0; x < gridW; ++x)
+						{
+							const glm::vec2 center = TilemapGridUtils::GridToLocal(
+								static_cast<int>(x), static_cast<int>(y), activeGridType, topoCellSize, gridW, gridH);
+							const glm::vec2 diff = localMouse - center;
+							const float d2 = diff.x * diff.x + diff.y * diff.y;
+							if (d2 < bestDistSq && d2 <= maxRadiusSq)
+							{
+								bestDistSq = d2;
+								gx = x;
+								gy = y;
+								hasHoveredCell = true;
+							}
+						}
+					}
+				}
+
+				if (hasHoveredCell && gx < gridW && gy < gridH)
+				{
+					if (activeGridType == TilemapGridType::Orthogonal)
+					{
+						const Wui::WuiRect hoverCellRect = getCellScreenRect(gx, gy);
+						Wui::HighlightOutline(ctx, hoverCellRect, theme.Accent, 1.0f, 1.5f);
+					}
+					else
+					{
+						drawCellPolygonOutline(gx, gy, theme.Accent, 2.2f);
+					}
+
+					if (m_ActiveTool == TilePaintTool::RectFill && m_HasRectStart && activeGridType == TilemapGridType::Orthogonal)
 					{
 						const uint32_t minX = std::min(m_RectStartX, gx);
 						const uint32_t maxX = std::max(m_RectStartX, gx);
@@ -841,6 +1106,11 @@ namespace World
 					else if (m_ActiveTool == TilePaintTool::FloodFill && clicked)
 					{
 						FloodFillCells(gx, gy, activeTile, m_PaintSolid);
+						if (m_AutoTileMode)
+						{
+							RebuildRuleTileFromSlots();
+							m_Tilemap->ApplyRuleTile(*m_ActiveRuleTile);
+						}
 					}
 					else if (m_ActiveTool == TilePaintTool::RectFill && clicked)
 					{
@@ -854,6 +1124,11 @@ namespace World
 						else
 						{
 							FillRectCells(m_RectStartX, m_RectStartY, gx, gy, activeTile, m_PaintSolid);
+							if (m_AutoTileMode)
+							{
+								RebuildRuleTileFromSlots();
+								m_Tilemap->ApplyRuleTile(*m_ActiveRuleTile);
+							}
 							m_HasRectStart = false;
 							m_StatusFeedback = "已完成矩形区域填充";
 						}
@@ -866,7 +1141,6 @@ namespace World
 					}
 				}
 			}
-		}
 
 		} // 退出网格绘制区域，弹出 GPU 裁切栈
 
