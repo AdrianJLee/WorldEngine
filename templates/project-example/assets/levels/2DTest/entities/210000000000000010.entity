@@ -12,11 +12,17 @@ Entity:
   World::CameraComponent:
     Camera:
       m_ProjectionType: 1
-      m_OrthographicZoom: 1
-      m_OrthographicNearClip: -1
-      m_OrthographicFarClip: 1
+      m_OrthographicZoom: 5.625
+      m_OrthographicNearClip: -100
+      m_OrthographicFarClip: 100
       m_PerspectiveFOV: 45
       m_PerspectiveNearClip: 0.100000001
       m_PerspectiveFarClip: 100
     Primary: true
     FixedAspectRatio: false
+  World::PixelPerfectCameraComponent:
+    ReferenceResolution: [320, 180]
+    PixelsPerUnit: 16
+    CurrentScale: 1
+    SnapToPixelGrid: true
+    UpscaleRT: false

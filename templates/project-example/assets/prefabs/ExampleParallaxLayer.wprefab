@@ -1,0 +1,24 @@
+FormatVersion: 2
+Scene: ExampleParallaxLayer
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000202
+    World::TagComponent:
+      Tag: Parallax Background Layer
+    World::TransformComponent:
+      Location: [0, 0, -5]
+      Rotation: [0, 0, 0, 1]
+      Scale: [16, 8, 1]
+    World::SpriteComponent:
+      Color: [0.3, 0.6, 0.9, 1]
+      Texture: "assets/textures/Icon.wtex"
+      TilingFactor: 1
+      SortingLayer: -10
+      OrderInLayer: 0
+    World::ParallaxLayerComponent:
+      ScrollFactor: [0.3, 0.1]
+      RepeatSize: [16, 8]
+      Offset: [0, 0]
+      RepeatX: true
+      RepeatY: false

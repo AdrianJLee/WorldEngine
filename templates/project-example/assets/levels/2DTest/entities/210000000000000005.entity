@@ -1,0 +1,23 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 210000000000000005
+  World::TagComponent:
+    Tag: Parallax Mountains
+  World::TransformComponent:
+    Location: [0, -1.5, -5]
+    Rotation: [0, 0, 0, 1]
+    Scale: [16, 6, 1]
+  World::SpriteComponent:
+    Color: [0.35, 0.65, 0.75, 1]
+    Texture: "assets/textures/Icon.wtex"
+    TilingFactor: 1
+    SortingLayer: -10
+    OrderInLayer: 0
+  World::ParallaxLayerComponent:
+    ScrollFactor: [0.2, 0.1]
+    RepeatSize: [16, 6]
+    Offset: [0, -1.5]
+    RepeatX: true
+    RepeatY: false
