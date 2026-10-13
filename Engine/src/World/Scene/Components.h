@@ -155,7 +155,7 @@ namespace World
 		bool FlipY = false;
 		bool EnableYSort = false;
 		uint8_t DrawMode = 0; // 0: Simple, 1: Sliced, 2: Tiled
-		uint32_t Reserved = 0;
+		NameId NormalMap;
 
 		SpriteComponent() = default;
 		SpriteComponent(const glm::vec4& color) : Color(color) {}
@@ -184,6 +184,8 @@ namespace World
 				Doc("Sort depth dynamically based on foot Y position for Top-Down games."));
 			WE_FIELD(DrawMode, UInt8, Default(0),
 				Doc("Draw mode: 0 = Simple, 1 = Sliced, 2 = Tiled."));
+			WE_FIELD(NormalMap, Name,
+				Doc("Optional normal map texture path for 2D lighting surface relief."));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(SpriteComponent) == 64, "SpriteComponent must be exactly 64 bytes");
@@ -609,6 +611,155 @@ namespace World
 				Doc("Ambient strength: 0 = no ambient, 0.25 is the engine default when the scene has none."));
 		WE_SCHEMA_END
 	};
+
+	struct PointLight2DComponent
+	{
+		glm::vec3 Color { 1.0f, 1.0f, 1.0f };
+		float Intensity = 1.0f;
+		float InnerRadius = 0.5f;
+		float OuterRadius = 5.0f;
+		float FalloffIntensity = 0.5f;
+		float InnerAngle = 360.0f;
+		float OuterAngle = 360.0f;
+		float NormalMapZ = 0.5f;
+		int32_t TargetSortingLayer = 0;
+		bool CastShadows = true;
+		bool AffectAllLayers = true;
+		bool Enabled = true;
+		uint8_t _Padding = 0;
+
+		PointLight2DComponent() = default;
+
+		WE_SCHEMA_BODY(World, PointLight2DComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/2D"),
+				Doc("2D point/spot light with inner/outer radius attenuation, angular cone falloff, shadow casting, and normal map Z height."))
+			WE_FIELD(Color, Vec3, Color(),
+				Doc("Linear RGB color of the 2D light."));
+			WE_FIELD(Intensity, Float, Default(1.0f), Range(0.0f, 50.0f),
+				Doc("Brightness multiplier applied to the 2D light color."));
+			WE_FIELD(InnerRadius, Float, Default(0.5f), Range(0.0f, 500.0f),
+				Doc("Inner radius in world units within which light is at full intensity."));
+			WE_FIELD(OuterRadius, Float, Default(5.0f), Range(0.05f, 1000.0f),
+				Doc("Outer radius in world units where light attenuates to zero."));
+			WE_FIELD(FalloffIntensity, Float, Default(0.5f), Range(0.0f, 1.0f),
+				Doc("Falloff curve exponent control (0 = linear, 0.5 = smooth quadratic, 1 = steep)."));
+			WE_FIELD(InnerAngle, Float, Default(360.0f), Range(0.0f, 360.0f),
+				Doc("Inner spot cone angle in degrees (360 = omnidirectional 2D point light)."));
+			WE_FIELD(OuterAngle, Float, Default(360.0f), Range(0.0f, 360.0f),
+				Doc("Outer spot cone angle in degrees."));
+			WE_FIELD(NormalMapZ, Float, Default(0.5f), Range(0.05f, 10.0f),
+				Doc("Virtual Z height above the 2D sprite plane used for normal map lighting."));
+			WE_FIELD(TargetSortingLayer, Int32, Default(0),
+				Doc("Target 2D sorting layer when AffectAllLayers is false."));
+			WE_FIELD(CastShadows, Bool, Default(true),
+				Doc("Whether this 2D light is occluded by ShadowCaster2D silhouettes."));
+			WE_FIELD(AffectAllLayers, Bool, Default(true),
+				Doc("Whether this light illuminates all 2D sorting layers."));
+			WE_FIELD(Enabled, Bool, Default(true),
+				Doc("Whether this 2D light is active."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(PointLight2DComponent) == 48, "PointLight2DComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<PointLight2DComponent>, "PointLight2DComponent must be trivially copyable");
+
+	struct GlobalLight2DComponent
+	{
+		glm::vec3 Color { 1.0f, 1.0f, 1.0f };
+		float Intensity = 1.0f;
+		glm::vec2 Direction { 0.0f, -1.0f };
+		float DirectionIntensity = 0.0f;
+		int32_t TargetSortingLayer = 0;
+		bool AffectAllLayers = true;
+		bool Enabled = true;
+		uint8_t _Padding[2] { 0, 0 };
+
+		GlobalLight2DComponent() = default;
+
+		WE_SCHEMA_BODY(World, GlobalLight2DComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/2D"),
+				Doc("2D global ambient and directional light controlling overall 2D scene illumination and normal map directional relief."))
+			WE_FIELD(Color, Vec3, Color(),
+				Doc("Global 2D ambient light color."));
+			WE_FIELD(Intensity, Float, Default(1.0f), Range(0.0f, 20.0f),
+				Doc("Global 2D light intensity multiplier."));
+			WE_FIELD(Direction, Vec2,
+				Doc("2D directional vector for global normal map relief lighting."));
+			WE_FIELD(DirectionIntensity, Float, Default(0.0f), Range(0.0f, 1.0f),
+				Doc("Strength of directional normal map shading on 2D sprites (0 = uniform ambient)."));
+			WE_FIELD(TargetSortingLayer, Int32, Default(0),
+				Doc("Target 2D sorting layer when AffectAllLayers is false."));
+			WE_FIELD(AffectAllLayers, Bool, Default(true),
+				Doc("Whether global 2D light affects all sorting layers."));
+			WE_FIELD(Enabled, Bool, Default(true),
+				Doc("Whether this global 2D light is active."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(GlobalLight2DComponent) == 36, "GlobalLight2DComponent must be exactly 36 bytes");
+	static_assert(std::is_trivially_copyable_v<GlobalLight2DComponent>, "GlobalLight2DComponent must be trivially copyable");
+
+	struct ShadowCaster2DComponent
+	{
+		glm::vec2 Offset { 0.0f, 0.0f };
+		glm::vec2 Size { 1.0f, 1.0f };
+		NameId Points;
+		float ShadowIntensity = 0.85f;
+		float ExtrusionLength = 12.0f;
+		uint8_t ShapeType = 0; // 0 = Box, 1 = Polygon
+		bool SelfShadows = false;
+		bool CastShadows = true;
+		bool ShowGizmo = true;
+
+		ShadowCaster2DComponent() = default;
+
+		inline std::vector<glm::vec2> GetLocalPolygon() const
+		{
+			if (ShapeType == 1 && Points.IsValid())
+			{
+				auto pts = Physics2D::ParsePointList(StringPool::Get().NameOf(Points));
+				if (pts.size() >= 3)
+					return pts;
+			}
+			const float hx = std::max(Size.x * 0.5f, 0.001f);
+			const float hy = std::max(Size.y * 0.5f, 0.001f);
+			return {
+				{ -hx, -hy },
+				{  hx, -hy },
+				{  hx,  hy },
+				{ -hx,  hy }
+			};
+		}
+
+		inline void SetPoints(const std::vector<glm::vec2>& points)
+		{
+			std::string formatted = Physics2D::FormatPointList(points);
+			Points = formatted.empty() ? NameId{} : StringPool::Get().InternName(formatted);
+		}
+
+		WE_SCHEMA_BODY(World, ShadowCaster2DComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/2D"),
+				Doc("2D shadow caster hull that extrudes silhouette shadow geometry away from 2D point lights."))
+			WE_FIELD(Offset, Vec2,
+				Doc("Local 2D center offset of the shadow hull."));
+			WE_FIELD(Size, Vec2,
+				Doc("Width and height of the shadow hull when ShapeType is Box (0)."));
+			WE_FIELD(Points, Name,
+				Doc("Semicolon-separated 2D polygon vertices when ShapeType is Polygon (1)."));
+			WE_FIELD(ShadowIntensity, Float, Default(0.85f), Range(0.0f, 1.0f),
+				Doc("Shadow occlusion darkness in [0, 1] (1 = completely blocks point light)."));
+			WE_FIELD(ExtrusionLength, Float, Default(12.0f), Range(0.5f, 200.0f),
+				Doc("Distance in world units to extrude silhouette shadow geometry away from lights."));
+			WE_FIELD(ShapeType, UInt8, Default(0),
+				Doc("Silhouette shape mode: 0 = Box (uses Size), 1 = Polygon (uses Points)."));
+			WE_FIELD(SelfShadows, Bool, Default(false),
+				Doc("Whether this entity shadows its own sprite surface."));
+			WE_FIELD(CastShadows, Bool, Default(true),
+				Doc("Whether this shadow caster actively blocks 2D lights."));
+			WE_FIELD(ShowGizmo, Bool, Default(true),
+				Doc("Draw silhouette and extruded shadow rays in the editor viewport."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(ShadowCaster2DComponent) == 32, "ShadowCaster2DComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<ShadowCaster2DComponent>, "ShadowCaster2DComponent must be trivially copyable");
 
 
 

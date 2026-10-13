@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 210000000000000012
+  World::TagComponent:
+    Tag: 2D Atmosphere Light
+  World::TransformComponent:
+    Location: [0, 6, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::GlobalLight2DComponent:
+    Color: [0.65, 0.75, 0.95]
+    Intensity: 0.7
+    Direction: [-0.6, -0.8]
+    DirectionIntensity: 0.35
+    TargetSortingLayer: 0
+    AffectAllLayers: true
+    Enabled: true

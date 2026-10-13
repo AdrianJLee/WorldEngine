@@ -63,6 +63,25 @@ ecs:AddSystem("ParallaxCameraDemoSystem", "Update", function(dt: number)
             print(string.format("[2D-DEMO] 瓦片地图 '%s': 拓扑=%s | 资产='%s' | 网格尺寸=(%.2f, %.2f)",
                 tag.Tag, tName, tm.Tilemap, tm.CellSize.x, tm.CellSize.y))
         end)
+
+        -- 6) Phase 9: 查询 2D 光源与阴影投射器
+        local glQuery = ecs:Query({ "GlobalLight2DComponent", "TagComponent" })
+        glQuery:Each(function(e, gl, tag)
+            print(string.format("[2D-DEMO] 2D 全局氛围光 '%s': 强度=%.2f | 方向凹凸=%.2f",
+                tag.Tag, gl.Intensity, gl.DirectionIntensity))
+        end)
+
+        local plQuery = ecs:Query({ "PointLight2DComponent", "TagComponent" })
+        plQuery:Each(function(e, pl, tag)
+            print(string.format("[2D-DEMO] 2D 点光源 '%s': 颜色=(%.2f, %.2f, %.2f) | 强度=%.2f | 外径=%.1f | 阴影=%s",
+                tag.Tag, pl.Color.x, pl.Color.y, pl.Color.z, pl.Intensity, pl.OuterRadius, tostring(pl.CastShadows)))
+        end)
+
+        local casterQuery = ecs:Query({ "ShadowCaster2DComponent", "TagComponent" })
+        casterQuery:Each(function(e, caster, tag)
+            print(string.format("[2D-DEMO] 2D 阴影投射器 '%s': 尺寸=(%.1f, %.1f) | 挤出长度=%.1f | 阴影浓度=%.2f",
+                tag.Tag, caster.Size.x, caster.Size.y, caster.ExtrusionLength, caster.ShadowIntensity))
+        end)
     end
 end)
 

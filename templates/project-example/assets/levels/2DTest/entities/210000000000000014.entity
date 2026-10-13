@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 210000000000000014
+  World::TagComponent:
+    Tag: Shadow Pillar Obstacle
+  World::TransformComponent:
+    Location: [0.8, 0.5, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::SpriteComponent:
+    Color: [0.7, 0.7, 0.78, 1]
+    Texture: "assets/textures/quadrants.wtex"
+    TilingFactor: 1
+    SortingLayer: 0
+    OrderInLayer: 2
+  World::ShadowCaster2DComponent:
+    Offset: [0, 0]
+    Size: [1.2, 1.2]
+    ShadowIntensity: 0.85
+    ExtrusionLength: 12.0
+    ShapeType: 0
+    SelfShadows: false
+    CastShadows: true
+    ShowGizmo: true

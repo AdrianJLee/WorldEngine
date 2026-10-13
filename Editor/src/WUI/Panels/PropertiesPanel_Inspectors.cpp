@@ -67,6 +67,12 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawPixelPerfectCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::ParallaxLayerComponent")
 			height = DrawParallaxLayerInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::PointLight2DComponent")
+			height = DrawPointLight2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::GlobalLight2DComponent")
+			height = DrawGlobalLight2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::ShadowCaster2DComponent")
+			height = DrawShadowCaster2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		// 自定义检查器:关卡数据层归属(勾选替代裸掩码数字);Play/Simulate 只读时退回普通行。
 		else if (schema.Id.Name == "World::LevelEntityComponent" && !m_ReadOnly)
 			height = DrawLevelEntityInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
@@ -682,6 +688,55 @@ float PropertiesPanel::DrawSpriteInspector(Wui::WuiContext& ctx, const Wui::WuiR
 	}
 	y += 28.0f;
 
+	// Normal Map Selector (2D Lighting Relief)
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "法线贴图 (Normal Map):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const std::vector<std::string>& texPaths = Editor::AssetCatalog::PathsForName("Texture2D");
+	std::vector<std::string> normalMapOptions;
+	normalMapOptions.reserve(texPaths.size() + 2);
+	normalMapOptions.push_back("(None / 无法线贴图)");
+	for (const auto& p : texPaths)
+		normalMapOptions.push_back(p);
+
+	const std::string currentNormalMap = sprite->NormalMap.IsValid()
+		? World::StringPool::Get().NameOf(sprite->NormalMap)
+		: std::string();
+	int selectedNormalIdx = 0;
+	if (!currentNormalMap.empty())
+	{
+		const auto found = std::find(normalMapOptions.begin() + 1, normalMapOptions.end(), currentNormalMap);
+		if (found != normalMapOptions.end())
+		{
+			selectedNormalIdx = static_cast<int>(found - normalMapOptions.begin());
+		}
+		else
+		{
+			normalMapOptions.push_back(currentNormalMap);
+			selectedNormalIdx = static_cast<int>(normalMapOptions.size()) - 1;
+		}
+	}
+
+	const Wui::WuiRect normalComboRect { rect.X + 12.0f, y, std::max(140.0f, rect.W - 24.0f), 22.0f };
+	Wui::Tooltip(ctx, normalComboRect, "选择用于 2D 动态光照凹凸受光的法线贴图资产 (prop.sprite.normal_map)");
+	const int beforeNormalIdx = selectedNormalIdx;
+	if (Wui::SearchableCombo(ctx, Wui::HashId("prop.sprite.normal_map"), normalComboRect, "",
+		normalMapOptions, selectedNormalIdx, theme) && selectedNormalIdx != beforeNormalIdx)
+	{
+		if (selectedNormalIdx <= 0)
+		{
+			sprite->NormalMap = World::NameId{};
+		}
+		else
+		{
+			const std::string& selectedPath = normalMapOptions[static_cast<size_t>(selectedNormalIdx)];
+			sprite->NormalMap = World::StringPool::Get().InternName(selectedPath);
+		}
+		m_Host.MarkDocumentDirty();
+		if (changedFields) changedFields->push_back("NormalMap");
+	}
+	y += 28.0f;
+
 	return (y + 10.0f) - rect.Y;
 }
 
@@ -1144,6 +1199,277 @@ float PropertiesPanel::DrawPlatformEffector2DInspector(Wui::WuiContext& ctx, con
 		effector->RotationalOffset = 0.0f;
 		effector->OneWay = true;
 		if (changedFields) { changedFields->push_back("SurfaceArc"); changedFields->push_back("RotationalOffset"); changedFields->push_back("OneWay"); }
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawPointLight2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* light = static_cast<World::PointLight2DComponent*>(instance);
+	if (!light) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "2D 点光源快捷预设 (Light Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 84.0f;
+	const float btnH = 22.0f;
+	const Wui::WuiRect btnTorch   { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnCrystal { rect.X + 102.0f, y, btnW, btnH };
+	const Wui::WuiRect btnSpot    { rect.X + 192.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnTorch, "暖橙色全向火把光 (Intensity=1.8, OuterRadius=5.5m, 360°)");
+	if (Wui::Button(ctx, Wui::HashId("prop.light2d.preset_torch"), btnTorch, "火把暖光", theme))
+	{
+		light->Color = { 1.0f, 0.62f, 0.22f };
+		light->Intensity = 1.8f;
+		light->InnerRadius = 0.4f;
+		light->OuterRadius = 5.5f;
+		light->InnerAngle = 360.0f;
+		light->OuterAngle = 360.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Color");
+			changedFields->push_back("Intensity");
+			changedFields->push_back("InnerRadius");
+			changedFields->push_back("OuterRadius");
+			changedFields->push_back("InnerAngle");
+			changedFields->push_back("OuterAngle");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnCrystal, "冰蓝色全向魔法晶石光 (Intensity=1.5, OuterRadius=4.5m, 360°)");
+	if (Wui::Button(ctx, Wui::HashId("prop.light2d.preset_crystal"), btnCrystal, "魔法晶石", theme))
+	{
+		light->Color = { 0.25f, 0.82f, 1.0f };
+		light->Intensity = 1.5f;
+		light->InnerRadius = 0.3f;
+		light->OuterRadius = 4.5f;
+		light->InnerAngle = 360.0f;
+		light->OuterAngle = 360.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Color");
+			changedFields->push_back("Intensity");
+			changedFields->push_back("InnerRadius");
+			changedFields->push_back("OuterRadius");
+			changedFields->push_back("InnerAngle");
+			changedFields->push_back("OuterAngle");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnSpot, "高亮度聚光锥形手电筒 (Intensity=2.0, OuterRadius=8.0m, 32°~65°)");
+	if (Wui::Button(ctx, Wui::HashId("prop.light2d.preset_spot"), btnSpot, "锥形手电", theme))
+	{
+		light->Color = { 0.95f, 0.96f, 0.85f };
+		light->Intensity = 2.0f;
+		light->InnerRadius = 0.2f;
+		light->OuterRadius = 8.0f;
+		light->InnerAngle = 32.0f;
+		light->OuterAngle = 65.0f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Color");
+			changedFields->push_back("Intensity");
+			changedFields->push_back("InnerRadius");
+			changedFields->push_back("OuterRadius");
+			changedFields->push_back("InnerAngle");
+			changedFields->push_back("OuterAngle");
+		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawGlobalLight2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* globalLight = static_cast<World::GlobalLight2DComponent*>(instance);
+	if (!globalLight) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "全局氛围光预设 (Atmosphere Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 64.0f;
+	const float btnH = 22.0f;
+	const Wui::WuiRect btnDay     { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnDusk    { rect.X + 80.0f, y, btnW, btnH };
+	const Wui::WuiRect btnDungeon { rect.X + 148.0f, y, btnW, btnH };
+	const Wui::WuiRect btnNight   { rect.X + 216.0f, y, btnW, btnH };
+
+	Wui::Tooltip(ctx, btnDay, "晴朗白昼环境光 (Intensity=1.0, DirectionIntensity=0.15)");
+	if (Wui::Button(ctx, Wui::HashId("prop.glight2d.preset_day"), btnDay, "晴朗白昼", theme))
+	{
+		globalLight->Color = { 1.0f, 1.0f, 1.0f };
+		globalLight->Intensity = 1.0f;
+		globalLight->DirectionIntensity = 0.15f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Color");
+			changedFields->push_back("Intensity");
+			changedFields->push_back("DirectionIntensity");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnDusk, "温暖黄昏斜射夕照 (Intensity=0.8, Direction=(-0.6, -0.8), DirectionIntensity=0.45)");
+	if (Wui::Button(ctx, Wui::HashId("prop.glight2d.preset_dusk"), btnDusk, "黄昏夕照", theme))
+	{
+		globalLight->Color = { 1.0f, 0.72f, 0.48f };
+		globalLight->Intensity = 0.8f;
+		globalLight->Direction = { -0.6f, -0.8f };
+		globalLight->DirectionIntensity = 0.45f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Color");
+			changedFields->push_back("Intensity");
+			changedFields->push_back("Direction");
+			changedFields->push_back("DirectionIntensity");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnDungeon, "冷暗地牢氛围底光 (Intensity=0.45, DirectionIntensity=0.35)");
+	if (Wui::Button(ctx, Wui::HashId("prop.glight2d.preset_dungeon"), btnDungeon, "幽暗地牢", theme))
+	{
+		globalLight->Color = { 0.22f, 0.25f, 0.35f };
+		globalLight->Intensity = 0.45f;
+		globalLight->DirectionIntensity = 0.35f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Color");
+			changedFields->push_back("Intensity");
+			changedFields->push_back("DirectionIntensity");
+		}
+	}
+
+	Wui::Tooltip(ctx, btnNight, "静谧蓝调月夜环境光 (Intensity=0.55, Direction=(0.3, -0.95), DirectionIntensity=0.4)");
+	if (Wui::Button(ctx, Wui::HashId("prop.glight2d.preset_night"), btnNight, "静谧月夜", theme))
+	{
+		globalLight->Color = { 0.35f, 0.48f, 0.75f };
+		globalLight->Intensity = 0.55f;
+		globalLight->Direction = { 0.3f, -0.95f };
+		globalLight->DirectionIntensity = 0.4f;
+		m_Host.MarkDocumentDirty();
+		if (changedFields)
+		{
+			changedFields->push_back("Color");
+			changedFields->push_back("Intensity");
+			changedFields->push_back("Direction");
+			changedFields->push_back("DirectionIntensity");
+		}
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawShadowCaster2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* caster = static_cast<World::ShadowCaster2DComponent*>(instance);
+	if (!caster) return height;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "遮光轮廓形态切换 (Hull Shape):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnH = 22.0f;
+	const Wui::WuiRect btnShapeBox  { rect.X + 12.0f, y, 108.0f, btnH };
+	const Wui::WuiRect btnShapePoly { rect.X + 126.0f, y, 124.0f, btnH };
+
+	const std::string boxText = (caster->ShapeType == 0) ? "✔ 矩形 Box" : "矩形 Box";
+	Wui::Tooltip(ctx, btnShapeBox, "使用 Size 宽高定义的矩形遮光轮廓 (ShapeType=0)");
+	if (Wui::Button(ctx, Wui::HashId("prop.shadow2d.shape_box"), btnShapeBox, boxText, theme))
+	{
+		caster->ShapeType = 0;
+		m_Host.MarkDocumentDirty();
+		if (changedFields) changedFields->push_back("ShapeType");
+	}
+
+	const std::string polyText = (caster->ShapeType == 1) ? "✔ 多边形 Polygon" : "多边形 Polygon";
+	Wui::Tooltip(ctx, btnShapePoly, "使用 Points 顶点列表定义的多边形遮光轮廓 (ShapeType=1)");
+	if (Wui::Button(ctx, Wui::HashId("prop.shadow2d.shape_poly"), btnShapePoly, polyText, theme))
+	{
+		caster->ShapeType = 1;
+		if (!caster->Points.IsValid())
+		{
+			caster->SetPoints({ { -0.5f, -0.5f }, { 0.5f, -0.5f }, { 0.5f, 0.5f }, { -0.5f, 0.5f } });
+			if (changedFields) changedFields->push_back("Points");
+		}
+		m_Host.MarkDocumentDirty();
+		if (changedFields) changedFields->push_back("ShapeType");
+	}
+	y += 28.0f;
+
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "多边形轮廓预设 (Polygon Presets):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float presetW = 76.0f;
+	const Wui::WuiRect btnSquare  { rect.X + 12.0f, y, presetW, btnH };
+	const Wui::WuiRect btnOctagon { rect.X + 94.0f, y, presetW, btnH };
+	const Wui::WuiRect btnLWall   { rect.X + 176.0f, y, presetW, btnH };
+
+	Wui::Tooltip(ctx, btnSquare, "生成 1×1 标准正方形遮光轮廓并切换为多边形模式");
+	if (Wui::Button(ctx, Wui::HashId("prop.shadow2d.preset_square"), btnSquare, "正方形", theme))
+	{
+		caster->ShapeType = 1;
+		caster->SetPoints({ { -0.5f, -0.5f }, { 0.5f, -0.5f }, { 0.5f, 0.5f }, { -0.5f, 0.5f } });
+		m_Host.MarkDocumentDirty();
+		if (changedFields) { changedFields->push_back("ShapeType"); changedFields->push_back("Points"); }
+	}
+
+	Wui::Tooltip(ctx, btnOctagon, "生成 8 顶点八角柱遮光轮廓并切换为多边形模式");
+	if (Wui::Button(ctx, Wui::HashId("prop.shadow2d.preset_octagon"), btnOctagon, "八角柱", theme))
+	{
+		std::vector<glm::vec2> pts;
+		pts.reserve(8);
+		for (int i = 0; i < 8; ++i)
+		{
+			float angle = glm::radians(22.5f + static_cast<float>(i) * 45.0f);
+			pts.push_back({ 0.5f * std::cos(angle), 0.5f * std::sin(angle) });
+		}
+		caster->ShapeType = 1;
+		caster->SetPoints(pts);
+		m_Host.MarkDocumentDirty();
+		if (changedFields) { changedFields->push_back("ShapeType"); changedFields->push_back("Points"); }
+	}
+
+	Wui::Tooltip(ctx, btnLWall, "生成 6 顶点 L 形转角墙体遮光轮廓并切换为多边形模式");
+	if (Wui::Button(ctx, Wui::HashId("prop.shadow2d.preset_lwall"), btnLWall, "L形墙体", theme))
+	{
+		caster->ShapeType = 1;
+		caster->SetPoints({
+			{ -0.5f, -0.5f },
+			{  0.5f, -0.5f },
+			{  0.5f, -0.15f },
+			{ -0.15f, -0.15f },
+			{ -0.15f,  0.5f },
+			{ -0.5f,  0.5f }
+		});
+		m_Host.MarkDocumentDirty();
+		if (changedFields) { changedFields->push_back("ShapeType"); changedFields->push_back("Points"); }
 	}
 	y += 28.0f;
 

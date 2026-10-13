@@ -1,6 +1,7 @@
 #include "wldpch.h"
 #include "World/Profiling/ProfilingMacros.h"
 #include "World/Renderer/SceneRenderer.h"
+#include "World/Renderer/Lighting2D.h"
 
 #include "World/RHI/RhiFramebufferBridge.h"
 
@@ -1323,6 +1324,8 @@ namespace World
 			}
 		}
 
+		const Lighting2D::Light2DUniforms light2D = Lighting2D::BuildSceneLight2DUniforms(m_ActiveScene);
+		Renderer2D::SetLight2DUniforms(&light2D, sizeof(light2D));
 		Renderer2D::StartBatch();
 		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffers[slot]);
 
@@ -1670,14 +1673,35 @@ namespace World
 								{ U[cx + 1], V[cy + 1] },
 								{ U[cx], V[cy + 1] }
 							};
-							Renderer2D::DrawQuadCore(cellMat, texture, sprite.Color, cellUV, 1.0f, static_cast<uint32_t>(item.entity));
+							Rhi::Handle<Rhi::Texture> normalTexture = nullptr;
+							if (sprite.NormalMap.IsValid())
+							{
+								const std::string& normName = StringPool::Get().NameOf(sprite.NormalMap);
+								if (!normName.empty())
+								{
+									PathId normPath = StringPool::Get().InternPath(normName);
+									normalTexture = TextureLibrary::Get().Get(normPath, false);
+								}
+							}
+							Renderer2D::DrawQuadCore(cellMat, texture, sprite.Color, cellUV, 1.0f, static_cast<uint32_t>(item.entity),
+								normalTexture, sprite.SortingLayer);
 						}
 					}
 				}
 				else
 				{
+					Rhi::Handle<Rhi::Texture> normalTexture = nullptr;
+					if (sprite.NormalMap.IsValid())
+					{
+						const std::string& normName = StringPool::Get().NameOf(sprite.NormalMap);
+						if (!normName.empty())
+						{
+							PathId normPath = StringPool::Get().InternPath(normName);
+							normalTexture = TextureLibrary::Get().Get(normPath, false);
+						}
+					}
 					Renderer2D::DrawQuadCore(spriteMatrix, texture, sprite.Color, texCoords,
-						sprite.TilingFactor, static_cast<uint32_t>(item.entity));
+						sprite.TilingFactor, static_cast<uint32_t>(item.entity), normalTexture, sprite.SortingLayer);
 				}
 		}
 		}
@@ -1790,7 +1814,9 @@ namespace World
 								tilemapComp.TintColor,
 								texCoords,
 								1.0f,
-								static_cast<uint32_t>(tmItem.entity));
+								static_cast<uint32_t>(tmItem.entity),
+								nullptr,
+								tilemapComp.SortingLayer);
 						}
 					}
 				}
@@ -2029,6 +2055,91 @@ namespace World
 					* glm::translate(glm::mat4(1.0f), glm::vec3(cx, cy, 0.0f))
 					* glm::scale(glm::mat4(1.0f), glm::vec3(rw, rh, 1.0f));
 				Renderer2D::DrawRectCore(rectTr, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			}
+		}
+		// Phase 9: PointLight2D, GlobalLight2D & ShadowCaster2D debug wireframes
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, PointLight2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& pl = m_ActiveScene->m_Registry.get<PointLight2DComponent>(entity);
+			if (!pl.Enabled) continue;
+
+			const glm::vec3 center = transform.Location;
+			const glm::vec4 outerCol(pl.Color.r, pl.Color.g, pl.Color.b, 0.75f);
+			const glm::vec4 innerCol(1.0f, 0.95f, 0.55f, 0.45f);
+			constexpr int kSegs = 32;
+			const float outerR = std::max(0.05f, pl.OuterRadius);
+			const float innerR = std::clamp(pl.InnerRadius, 0.0f, outerR);
+
+			if (pl.OuterAngle >= 359.9f)
+			{
+				for (int i = 0; i < kSegs; ++i)
+				{
+					const float a0 = glm::two_pi<float>() * static_cast<float>(i) / static_cast<float>(kSegs);
+					const float a1 = glm::two_pi<float>() * static_cast<float>(i + 1) / static_cast<float>(kSegs);
+					const glm::vec3 d0(std::cos(a0), std::sin(a0), 0.0f);
+					const glm::vec3 d1(std::cos(a1), std::sin(a1), 0.0f);
+					Renderer2D::DrawLineCore(center + d0 * outerR, center + d1 * outerR, outerCol, static_cast<uint32_t>(entity));
+					if (innerR > 0.05f)
+						Renderer2D::DrawLineCore(center + d0 * innerR, center + d1 * innerR, innerCol, static_cast<uint32_t>(entity));
+				}
+			}
+			else
+			{
+				const float rotZ = transform.GetEulerAngles().z + glm::half_pi<float>();
+				const float halfOuter = glm::radians(glm::clamp(pl.OuterAngle, 1.0f, 360.0f) * 0.5f);
+				const glm::vec3 rayL(std::cos(rotZ + halfOuter), std::sin(rotZ + halfOuter), 0.0f);
+				const glm::vec3 rayR(std::cos(rotZ - halfOuter), std::sin(rotZ - halfOuter), 0.0f);
+				Renderer2D::DrawLineCore(center, center + rayL * outerR, outerCol, static_cast<uint32_t>(entity));
+				Renderer2D::DrawLineCore(center, center + rayR * outerR, outerCol, static_cast<uint32_t>(entity));
+				for (int i = 0; i < 16; ++i)
+				{
+					const float t0 = static_cast<float>(i) / 16.0f;
+					const float t1 = static_cast<float>(i + 1) / 16.0f;
+					const float a0 = (rotZ - halfOuter) + (2.0f * halfOuter) * t0;
+					const float a1 = (rotZ - halfOuter) + (2.0f * halfOuter) * t1;
+					Renderer2D::DrawLineCore(
+						center + glm::vec3(std::cos(a0), std::sin(a0), 0.0f) * outerR,
+						center + glm::vec3(std::cos(a1), std::sin(a1), 0.0f) * outerR,
+						outerCol, static_cast<uint32_t>(entity));
+				}
+			}
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, ShadowCaster2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& caster = m_ActiveScene->m_Registry.get<ShadowCaster2DComponent>(entity);
+			if (!caster.ShowGizmo || !caster.CastShadows) continue;
+
+			const auto poly = Lighting2D::ExtractWorldPolygon(transform, caster);
+			const size_t n = poly.size();
+			for (size_t i = 0; i < n; ++i)
+			{
+				const glm::vec2& p0 = poly[i];
+				const glm::vec2& p1 = poly[(i + 1) % n];
+				Renderer2D::DrawLineCore({ p0.x, p0.y, 0.0f }, { p1.x, p1.y, 0.0f },
+					{ 0.78f, 0.35f, 0.95f, 0.95f }, static_cast<uint32_t>(entity));
+			}
+
+			for (auto lightEntity : m_ActiveScene->m_Registry.view<TransformComponent, PointLight2DComponent>())
+			{
+				const auto& lTr = m_ActiveScene->m_Registry.get<TransformComponent>(lightEntity);
+				const auto& pl = m_ActiveScene->m_Registry.get<PointLight2DComponent>(lightEntity);
+				if (!pl.Enabled || !pl.CastShadows) continue;
+
+				std::vector<Lighting2D::ShadowQuad2D> shadowQuads;
+				Lighting2D::ExtrudeShadowPolygon(
+					{ lTr.Location.x, lTr.Location.y }, pl.OuterRadius, poly,
+					std::min(caster.ExtrusionLength, 6.0f), caster.ShadowIntensity, shadowQuads);
+				for (const auto& sq : shadowQuads)
+				{
+					Renderer2D::DrawLineCore({ sq.A.x, sq.A.y, 0.0f }, { sq.AExtruded.x, sq.AExtruded.y, 0.0f },
+						{ 0.55f, 0.25f, 0.85f, 0.42f }, static_cast<uint32_t>(entity));
+					Renderer2D::DrawLineCore({ sq.B.x, sq.B.y, 0.0f }, { sq.BExtruded.x, sq.BExtruded.y, 0.0f },
+						{ 0.55f, 0.25f, 0.85f, 0.42f }, static_cast<uint32_t>(entity));
+					Renderer2D::DrawLineCore({ sq.AExtruded.x, sq.AExtruded.y, 0.0f }, { sq.BExtruded.x, sq.BExtruded.y, 0.0f },
+						{ 0.55f, 0.25f, 0.85f, 0.30f }, static_cast<uint32_t>(entity));
+				}
 			}
 		}
 	}

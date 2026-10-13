@@ -25,6 +25,9 @@ const TypeSchema& WeSchemaOf_ParallaxLayerComponent();
 const TypeSchema& WeSchemaOf_DirectionalLightComponent();
 const TypeSchema& WeSchemaOf_PointLightComponent();
 const TypeSchema& WeSchemaOf_AmbientLightComponent();
+const TypeSchema& WeSchemaOf_PointLight2DComponent();
+const TypeSchema& WeSchemaOf_GlobalLight2DComponent();
+const TypeSchema& WeSchemaOf_ShadowCaster2DComponent();
 const TypeSchema& WeSchemaOf_RigidBody2DComponent();
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent();
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent();
@@ -496,6 +499,16 @@ struct GeneratedAccess<World::SpriteComponent>
         World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
         self->DrawMode = std::get<uint8_t>(value);
     }
+    static Value Get_NormalMap(const void* instance)
+    {
+        const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
+        return Value(NameOps<std::remove_reference_t<decltype(self->NormalMap)>>::GetName(self->NormalMap));
+    }
+    static void Set_NormalMap(void* instance, const Value& value)
+    {
+        World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
+        NameOps<std::remove_reference_t<decltype(self->NormalMap)>>::SetName(self->NormalMap, std::get<std::string>(value));
+    }
     static const FieldSchema& Field_Color()
     {
         static const FieldSchema schema = {
@@ -701,6 +714,24 @@ struct GeneratedAccess<World::SpriteComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_NormalMap()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7FABF466F7893A8Cull },
+            "NormalMap",
+            Kind::Name,
+            &Get_NormalMap,
+            &Set_NormalMap,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Optional normal map texture path for 2D lighting surface relief.", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::SpriteComponent>();
@@ -726,6 +757,7 @@ struct GeneratedAccess<World::SpriteComponent>
                 Field_FlipY(),
                 Field_EnableYSort(),
                 Field_DrawMode(),
+                Field_NormalMap(),
             },
             &StorageBindingOf(),
             "Rendering/2D",
@@ -2771,6 +2803,902 @@ struct GeneratedAccess<World::AmbientLightComponent>
             &StorageBindingOf(),
             "Rendering/Light",
             "Global ambient term without a spatial range: only the first ambient light is used and 0.25 grey applies when the scene has none.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::PointLight2DComponent>
+{
+    static Value Get_Color(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->Color);
+    }
+    static void Set_Color(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->Color = std::get<glm::vec3>(value);
+    }
+    static Value Get_Intensity(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->Intensity);
+    }
+    static void Set_Intensity(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->Intensity = std::get<float>(value);
+    }
+    static Value Get_InnerRadius(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->InnerRadius);
+    }
+    static void Set_InnerRadius(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->InnerRadius = std::get<float>(value);
+    }
+    static Value Get_OuterRadius(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->OuterRadius);
+    }
+    static void Set_OuterRadius(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->OuterRadius = std::get<float>(value);
+    }
+    static Value Get_FalloffIntensity(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->FalloffIntensity);
+    }
+    static void Set_FalloffIntensity(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->FalloffIntensity = std::get<float>(value);
+    }
+    static Value Get_InnerAngle(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->InnerAngle);
+    }
+    static void Set_InnerAngle(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->InnerAngle = std::get<float>(value);
+    }
+    static Value Get_OuterAngle(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->OuterAngle);
+    }
+    static void Set_OuterAngle(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->OuterAngle = std::get<float>(value);
+    }
+    static Value Get_NormalMapZ(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->NormalMapZ);
+    }
+    static void Set_NormalMapZ(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->NormalMapZ = std::get<float>(value);
+    }
+    static Value Get_TargetSortingLayer(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->TargetSortingLayer);
+    }
+    static void Set_TargetSortingLayer(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->TargetSortingLayer = std::get<int32_t>(value);
+    }
+    static Value Get_CastShadows(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->CastShadows);
+    }
+    static void Set_CastShadows(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->CastShadows = std::get<bool>(value);
+    }
+    static Value Get_AffectAllLayers(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->AffectAllLayers);
+    }
+    static void Set_AffectAllLayers(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->AffectAllLayers = std::get<bool>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
+        self->Enabled = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Color()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC5732440FCA956B7ull },
+            "Color",
+            Kind::Vec3,
+            &Get_Color,
+            &Set_Color,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Linear RGB color of the 2D light.", true, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Intensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFB9D0258E4705941ull },
+            "Intensity",
+            Kind::Float,
+            &Get_Intensity,
+            &Set_Intensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(50.000000f), false, false, "Brightness multiplier applied to the 2D light color.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_InnerRadius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1F99DCD50DE1BD66ull },
+            "InnerRadius",
+            Kind::Float,
+            &Get_InnerRadius,
+            &Set_InnerRadius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(500.000000f), false, false, "Inner radius in world units within which light is at full intensity.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_OuterRadius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5787D94F6B3757A1ull },
+            "OuterRadius",
+            Kind::Float,
+            &Get_OuterRadius,
+            &Set_OuterRadius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.050000f), std::optional<float>(1000.000000f), false, false, "Outer radius in world units where light attenuates to zero.", false, "", {  }, "", std::nullopt },
+            Value(5.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FalloffIntensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7399742AD1168A5Full },
+            "FalloffIntensity",
+            Kind::Float,
+            &Get_FalloffIntensity,
+            &Set_FalloffIntensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Falloff curve exponent control (0 = linear, 0.5 = smooth quadratic, 1 = steep).", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_InnerAngle()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC05451E51C3B0473ull },
+            "InnerAngle",
+            Kind::Float,
+            &Get_InnerAngle,
+            &Set_InnerAngle,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(360.000000f), false, false, "Inner spot cone angle in degrees (360 = omnidirectional 2D point light).", false, "", {  }, "", std::nullopt },
+            Value(360.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_OuterAngle()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x72395560C35F54D2ull },
+            "OuterAngle",
+            Kind::Float,
+            &Get_OuterAngle,
+            &Set_OuterAngle,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(360.000000f), false, false, "Outer spot cone angle in degrees.", false, "", {  }, "", std::nullopt },
+            Value(360.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_NormalMapZ()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE778906A3A397CBull },
+            "NormalMapZ",
+            Kind::Float,
+            &Get_NormalMapZ,
+            &Set_NormalMapZ,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.050000f), std::optional<float>(10.000000f), false, false, "Virtual Z height above the 2D sprite plane used for normal map lighting.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_TargetSortingLayer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x65646CC850926154ull },
+            "TargetSortingLayer",
+            Kind::Int32,
+            &Get_TargetSortingLayer,
+            &Set_TargetSortingLayer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target 2D sorting layer when AffectAllLayers is false.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CastShadows()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD56948675CBE382Cull },
+            "CastShadows",
+            Kind::Bool,
+            &Get_CastShadows,
+            &Set_CastShadows,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this 2D light is occluded by ShadowCaster2D silhouettes.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AffectAllLayers()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7CD37030158966BEull },
+            "AffectAllLayers",
+            Kind::Bool,
+            &Get_AffectAllLayers,
+            &Set_AffectAllLayers,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this light illuminates all 2D sorting layers.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD08D88F19D2F7281ull },
+            "Enabled",
+            Kind::Bool,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this 2D light is active.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::PointLight2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::PointLight2DComponent" },
+            "PointLight2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::PointLight2DComponent),
+            TypeCategory::Component,
+            {
+                Field_Color(),
+                Field_Intensity(),
+                Field_InnerRadius(),
+                Field_OuterRadius(),
+                Field_FalloffIntensity(),
+                Field_InnerAngle(),
+                Field_OuterAngle(),
+                Field_NormalMapZ(),
+                Field_TargetSortingLayer(),
+                Field_CastShadows(),
+                Field_AffectAllLayers(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Rendering/2D",
+            "2D point/spot light with inner/outer radius attenuation, angular cone falloff, shadow casting, and normal map Z height.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::GlobalLight2DComponent>
+{
+    static Value Get_Color(const void* instance)
+    {
+        const World::GlobalLight2DComponent* self = static_cast<const World::GlobalLight2DComponent*>(instance);
+        return Value(self->Color);
+    }
+    static void Set_Color(void* instance, const Value& value)
+    {
+        World::GlobalLight2DComponent* self = static_cast<World::GlobalLight2DComponent*>(instance);
+        self->Color = std::get<glm::vec3>(value);
+    }
+    static Value Get_Intensity(const void* instance)
+    {
+        const World::GlobalLight2DComponent* self = static_cast<const World::GlobalLight2DComponent*>(instance);
+        return Value(self->Intensity);
+    }
+    static void Set_Intensity(void* instance, const Value& value)
+    {
+        World::GlobalLight2DComponent* self = static_cast<World::GlobalLight2DComponent*>(instance);
+        self->Intensity = std::get<float>(value);
+    }
+    static Value Get_Direction(const void* instance)
+    {
+        const World::GlobalLight2DComponent* self = static_cast<const World::GlobalLight2DComponent*>(instance);
+        return Value(self->Direction);
+    }
+    static void Set_Direction(void* instance, const Value& value)
+    {
+        World::GlobalLight2DComponent* self = static_cast<World::GlobalLight2DComponent*>(instance);
+        self->Direction = std::get<glm::vec2>(value);
+    }
+    static Value Get_DirectionIntensity(const void* instance)
+    {
+        const World::GlobalLight2DComponent* self = static_cast<const World::GlobalLight2DComponent*>(instance);
+        return Value(self->DirectionIntensity);
+    }
+    static void Set_DirectionIntensity(void* instance, const Value& value)
+    {
+        World::GlobalLight2DComponent* self = static_cast<World::GlobalLight2DComponent*>(instance);
+        self->DirectionIntensity = std::get<float>(value);
+    }
+    static Value Get_TargetSortingLayer(const void* instance)
+    {
+        const World::GlobalLight2DComponent* self = static_cast<const World::GlobalLight2DComponent*>(instance);
+        return Value(self->TargetSortingLayer);
+    }
+    static void Set_TargetSortingLayer(void* instance, const Value& value)
+    {
+        World::GlobalLight2DComponent* self = static_cast<World::GlobalLight2DComponent*>(instance);
+        self->TargetSortingLayer = std::get<int32_t>(value);
+    }
+    static Value Get_AffectAllLayers(const void* instance)
+    {
+        const World::GlobalLight2DComponent* self = static_cast<const World::GlobalLight2DComponent*>(instance);
+        return Value(self->AffectAllLayers);
+    }
+    static void Set_AffectAllLayers(void* instance, const Value& value)
+    {
+        World::GlobalLight2DComponent* self = static_cast<World::GlobalLight2DComponent*>(instance);
+        self->AffectAllLayers = std::get<bool>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::GlobalLight2DComponent* self = static_cast<const World::GlobalLight2DComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::GlobalLight2DComponent* self = static_cast<World::GlobalLight2DComponent*>(instance);
+        self->Enabled = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Color()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC9B9CF7D5D2A7528ull },
+            "Color",
+            Kind::Vec3,
+            &Get_Color,
+            &Set_Color,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Global 2D ambient light color.", true, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Intensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF0500BEB86B7CEBAull },
+            "Intensity",
+            Kind::Float,
+            &Get_Intensity,
+            &Set_Intensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(20.000000f), false, false, "Global 2D light intensity multiplier.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Direction()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB23B59169ABAA87Aull },
+            "Direction",
+            Kind::Vec2,
+            &Get_Direction,
+            &Set_Direction,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "2D directional vector for global normal map relief lighting.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_DirectionIntensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD61B72A639F7F4ABull },
+            "DirectionIntensity",
+            Kind::Float,
+            &Get_DirectionIntensity,
+            &Set_DirectionIntensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Strength of directional normal map shading on 2D sprites (0 = uniform ambient).", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_TargetSortingLayer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9F034AD5604F3501ull },
+            "TargetSortingLayer",
+            Kind::Int32,
+            &Get_TargetSortingLayer,
+            &Set_TargetSortingLayer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target 2D sorting layer when AffectAllLayers is false.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AffectAllLayers()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC2376BE486BE0755ull },
+            "AffectAllLayers",
+            Kind::Bool,
+            &Get_AffectAllLayers,
+            &Set_AffectAllLayers,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether global 2D light affects all sorting layers.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x425B401BABEC10AEull },
+            "Enabled",
+            Kind::Bool,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this global 2D light is active.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::GlobalLight2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::GlobalLight2DComponent" },
+            "GlobalLight2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::GlobalLight2DComponent),
+            TypeCategory::Component,
+            {
+                Field_Color(),
+                Field_Intensity(),
+                Field_Direction(),
+                Field_DirectionIntensity(),
+                Field_TargetSortingLayer(),
+                Field_AffectAllLayers(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Rendering/2D",
+            "2D global ambient and directional light controlling overall 2D scene illumination and normal map directional relief.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::ShadowCaster2DComponent>
+{
+    static Value Get_Offset(const void* instance)
+    {
+        const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
+        return Value(self->Offset);
+    }
+    static void Set_Offset(void* instance, const Value& value)
+    {
+        World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
+        self->Offset = std::get<glm::vec2>(value);
+    }
+    static Value Get_Size(const void* instance)
+    {
+        const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
+        return Value(self->Size);
+    }
+    static void Set_Size(void* instance, const Value& value)
+    {
+        World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
+        self->Size = std::get<glm::vec2>(value);
+    }
+    static Value Get_Points(const void* instance)
+    {
+        const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
+        return Value(NameOps<std::remove_reference_t<decltype(self->Points)>>::GetName(self->Points));
+    }
+    static void Set_Points(void* instance, const Value& value)
+    {
+        World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
+        NameOps<std::remove_reference_t<decltype(self->Points)>>::SetName(self->Points, std::get<std::string>(value));
+    }
+    static Value Get_ShadowIntensity(const void* instance)
+    {
+        const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
+        return Value(self->ShadowIntensity);
+    }
+    static void Set_ShadowIntensity(void* instance, const Value& value)
+    {
+        World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
+        self->ShadowIntensity = std::get<float>(value);
+    }
+    static Value Get_ExtrusionLength(const void* instance)
+    {
+        const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
+        return Value(self->ExtrusionLength);
+    }
+    static void Set_ExtrusionLength(void* instance, const Value& value)
+    {
+        World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
+        self->ExtrusionLength = std::get<float>(value);
+    }
+    static Value Get_ShapeType(const void* instance)
+    {
+        const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
+        return Value(self->ShapeType);
+    }
+    static void Set_ShapeType(void* instance, const Value& value)
+    {
+        World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
+        self->ShapeType = std::get<uint8_t>(value);
+    }
+    static Value Get_SelfShadows(const void* instance)
+    {
+        const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
+        return Value(self->SelfShadows);
+    }
+    static void Set_SelfShadows(void* instance, const Value& value)
+    {
+        World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
+        self->SelfShadows = std::get<bool>(value);
+    }
+    static Value Get_CastShadows(const void* instance)
+    {
+        const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
+        return Value(self->CastShadows);
+    }
+    static void Set_CastShadows(void* instance, const Value& value)
+    {
+        World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
+        self->CastShadows = std::get<bool>(value);
+    }
+    static Value Get_ShowGizmo(const void* instance)
+    {
+        const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
+        return Value(self->ShowGizmo);
+    }
+    static void Set_ShowGizmo(void* instance, const Value& value)
+    {
+        World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
+        self->ShowGizmo = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Offset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA3B3BE8EFC4181A5ull },
+            "Offset",
+            Kind::Vec2,
+            &Get_Offset,
+            &Set_Offset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Local 2D center offset of the shadow hull.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Size()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF800C9CB3C321B0Bull },
+            "Size",
+            Kind::Vec2,
+            &Get_Size,
+            &Set_Size,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Width and height of the shadow hull when ShapeType is Box (0).", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Points()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBA560BB46ABFBC05ull },
+            "Points",
+            Kind::Name,
+            &Get_Points,
+            &Set_Points,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Semicolon-separated 2D polygon vertices when ShapeType is Polygon (1).", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShadowIntensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFCD774CB1155146Bull },
+            "ShadowIntensity",
+            Kind::Float,
+            &Get_ShadowIntensity,
+            &Set_ShadowIntensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Shadow occlusion darkness in [0, 1] (1 = completely blocks point light).", false, "", {  }, "", std::nullopt },
+            Value(0.85f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ExtrusionLength()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x978062F2A975E755ull },
+            "ExtrusionLength",
+            Kind::Float,
+            &Get_ExtrusionLength,
+            &Set_ExtrusionLength,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.500000f), std::optional<float>(200.000000f), false, false, "Distance in world units to extrude silhouette shadow geometry away from lights.", false, "", {  }, "", std::nullopt },
+            Value(12.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShapeType()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9713C48AF4F09327ull },
+            "ShapeType",
+            Kind::UInt8,
+            &Get_ShapeType,
+            &Set_ShapeType,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Silhouette shape mode: 0 = Box (uses Size), 1 = Polygon (uses Points).", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SelfShadows()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB7A27FA54225AF39ull },
+            "SelfShadows",
+            Kind::Bool,
+            &Get_SelfShadows,
+            &Set_SelfShadows,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this entity shadows its own sprite surface.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CastShadows()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB6D13E456F86D532ull },
+            "CastShadows",
+            Kind::Bool,
+            &Get_CastShadows,
+            &Set_CastShadows,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this shadow caster actively blocks 2D lights.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShowGizmo()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCF992BB56796434Full },
+            "ShowGizmo",
+            Kind::Bool,
+            &Get_ShowGizmo,
+            &Set_ShowGizmo,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Draw silhouette and extruded shadow rays in the editor viewport.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::ShadowCaster2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::ShadowCaster2DComponent" },
+            "ShadowCaster2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::ShadowCaster2DComponent),
+            TypeCategory::Component,
+            {
+                Field_Offset(),
+                Field_Size(),
+                Field_Points(),
+                Field_ShadowIntensity(),
+                Field_ExtrusionLength(),
+                Field_ShapeType(),
+                Field_SelfShadows(),
+                Field_CastShadows(),
+                Field_ShowGizmo(),
+            },
+            &StorageBindingOf(),
+            "Rendering/2D",
+            "2D shadow caster hull that extrudes silhouette shadow geometry away from 2D point lights.",
             false,
             false,
         };
@@ -6356,6 +7284,9 @@ const TypeSchema& WeSchemaOf_ParallaxLayerComponent() { return GeneratedAccess<W
 const TypeSchema& WeSchemaOf_DirectionalLightComponent() { return GeneratedAccess<World::DirectionalLightComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PointLightComponent() { return GeneratedAccess<World::PointLightComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_AmbientLightComponent() { return GeneratedAccess<World::AmbientLightComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_PointLight2DComponent() { return GeneratedAccess<World::PointLight2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_GlobalLight2DComponent() { return GeneratedAccess<World::GlobalLight2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_ShadowCaster2DComponent() { return GeneratedAccess<World::ShadowCaster2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_RigidBody2DComponent() { return GeneratedAccess<World::RigidBody2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent() { return GeneratedAccess<World::BoxCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent() { return GeneratedAccess<World::CircleCollider2DComponent>::WeSchema(); }
@@ -6409,6 +7340,9 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_DirectionalLightComponent(),
 			WeSchemaOf_PointLightComponent(),
 			WeSchemaOf_AmbientLightComponent(),
+			WeSchemaOf_PointLight2DComponent(),
+			WeSchemaOf_GlobalLight2DComponent(),
+			WeSchemaOf_ShadowCaster2DComponent(),
 			WeSchemaOf_RigidBody2DComponent(),
 			WeSchemaOf_BoxCollider2DComponent(),
 			WeSchemaOf_CircleCollider2DComponent(),

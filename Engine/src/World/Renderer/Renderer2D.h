@@ -27,8 +27,11 @@ namespace World
 		static void StartBatch();
 		static void Flush();
 
+		static void SetLight2DUniforms(const void* light2DUniforms, uint32_t byteSize);
+
 		static void DrawQuadCore(const glm::mat4& transform, const Rhi::Handle<Rhi::Texture>& texture,
-			const glm::vec4& color = glm::vec4(1.0f), const glm::vec2* texCoords = nullptr, float tilingFactor = 1.0f, int entityID = -1);
+			const glm::vec4& color = glm::vec4(1.0f), const glm::vec2* texCoords = nullptr, float tilingFactor = 1.0f, int entityID = -1,
+			const Rhi::Handle<Rhi::Texture>& normalTexture = nullptr, int32_t sortingLayer = 0);
 		static void DrawCircleCore(const glm::mat4& transform, const glm::vec4& color, float thickness = 1.0f, float fade = 0.005f, int entityID = -1);
 
 		// ---- B3 并行几何预处理 ----
@@ -37,7 +40,8 @@ namespace World
 		// 随后的 Draw*Positions 仍在主线程按原顺序写入批次缓冲,保证绘制顺序与结果不变。
 		static void ComputeQuadPositions(const glm::mat4& transform, glm::vec3 outPositions[4]);
 		static void DrawQuadPositions(const glm::vec3 positions[4], const Rhi::Handle<Rhi::Texture>& texture,
-			const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID);
+			const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID,
+			const Rhi::Handle<Rhi::Texture>& normalTexture = nullptr, int32_t sortingLayer = 0);
 		static void ComputeCirclePositions(const glm::mat4& transform, glm::vec3 outPositions[4]);
 		static void DrawCirclePositions(const glm::vec3 positions[4], const glm::vec4& color,
 			float thickness, float fade, int entityID);

@@ -1,0 +1,26 @@
+FormatVersion: 2
+Scene: ExampleShadowPillar2D
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000502
+    World::TagComponent:
+      Tag: Example Shadow Pillar 2D
+    World::TransformComponent:
+      Location: [0, 0, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [1, 1, 1]
+    World::SpriteComponent:
+      Color: [0.65, 0.65, 0.72, 1]
+      Texture: "assets/textures/quadrants.wtex"
+      SortingLayer: 0
+      OrderInLayer: 2
+    World::ShadowCaster2DComponent:
+      Offset: [0, 0]
+      Size: [1.2, 1.2]
+      ShadowIntensity: 0.85
+      ExtrusionLength: 12.0
+      ShapeType: 0
+      SelfShadows: false
+      CastShadows: true
+      ShowGizmo: true

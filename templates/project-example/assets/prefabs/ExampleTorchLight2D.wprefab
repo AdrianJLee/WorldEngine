@@ -1,0 +1,31 @@
+FormatVersion: 2
+Scene: ExampleTorchLight2D
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000501
+    World::TagComponent:
+      Tag: Example Torch Light 2D
+    World::TransformComponent:
+      Location: [0, 0, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [1, 1, 1]
+    World::SpriteComponent:
+      Color: [1, 0.9, 0.6, 1]
+      Texture: "assets/textures/characters/hero_atlas.watlas"
+      SubTextureName: "idle_0"
+      SortingLayer: 0
+      OrderInLayer: 10
+    World::PointLight2DComponent:
+      Color: [1, 0.62, 0.22]
+      Intensity: 2.2
+      InnerRadius: 0.5
+      OuterRadius: 6.5
+      FalloffIntensity: 0.5
+      InnerAngle: 360
+      OuterAngle: 360
+      NormalMapZ: 0.5
+      TargetSortingLayer: 0
+      CastShadows: true
+      AffectAllLayers: true
+      Enabled: true

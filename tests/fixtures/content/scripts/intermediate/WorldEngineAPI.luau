@@ -803,6 +803,16 @@ function ui:isOpen() end
 ---@field CastShadow boolean
 ---@field Direction vec3
 
+-- Component fields are exposed through Entity:GetComponent("GlobalLight2DComponent"); there is no runtime global named GlobalLight2DComponent.
+---@class GlobalLight2DComponent
+---@field Enabled boolean
+---@field TargetSortingLayer number
+---@field Direction vec2
+---@field AffectAllLayers boolean
+---@field Color vec3
+---@field DirectionIntensity number
+---@field Intensity number
+
 -- Component fields are exposed through Entity:GetComponent("HierarchyComponent"); there is no runtime global named HierarchyComponent.
 ---@class HierarchyComponent
 ---@field Parent number
@@ -867,6 +877,21 @@ function ui:isOpen() end
 ---@field UseSideFriction boolean
 ---@field OneWay boolean
 
+-- Component fields are exposed through Entity:GetComponent("PointLight2DComponent"); there is no runtime global named PointLight2DComponent.
+---@class PointLight2DComponent
+---@field NormalMapZ number
+---@field InnerRadius number
+---@field OuterRadius number
+---@field TargetSortingLayer number
+---@field OuterAngle number
+---@field FalloffIntensity number
+---@field AffectAllLayers boolean
+---@field InnerAngle number
+---@field Color vec3
+---@field Enabled boolean
+---@field CastShadows boolean
+---@field Intensity number
+
 -- Component fields are exposed through Entity:GetComponent("PointLightComponent"); there is no runtime global named PointLightComponent.
 ---@class PointLightComponent
 ---@field Range number
@@ -916,6 +941,18 @@ function ui:isOpen() end
 ---@field Speed number
 ---@field DisplayName string read-only
 
+-- Component fields are exposed through Entity:GetComponent("ShadowCaster2DComponent"); there is no runtime global named ShadowCaster2DComponent.
+---@class ShadowCaster2DComponent
+---@field ShapeType number
+---@field ExtrusionLength number
+---@field Offset vec2
+---@field CastShadows boolean
+---@field SelfShadows boolean
+---@field Points string
+---@field ShowGizmo boolean
+---@field Size vec2
+---@field ShadowIntensity number
+
 -- Component fields are exposed through Entity:GetComponent("SkinnedMeshRendererComponent"); there is no runtime global named SkinnedMeshRendererComponent.
 ---@class SkinnedMeshRendererComponent
 ---@field AnimationClip string
@@ -949,6 +986,7 @@ function ui:isOpen() end
 ---@field Pivot vec2
 ---@field FlipX boolean
 ---@field FlipY boolean
+---@field NormalMap string
 ---@field Color vec4
 ---@field SortingLayer number
 ---@field EnableYSort boolean
@@ -1012,6 +1050,8 @@ function ui:isOpen() end
 ---@field CircleRenderer string Short alias for "CircleRendererComponent".
 ---@field DirectionalLightComponent string Registered component type name "DirectionalLightComponent".
 ---@field DirectionalLight string Short alias for "DirectionalLightComponent".
+---@field GlobalLight2DComponent string Registered component type name "GlobalLight2DComponent".
+---@field GlobalLight2D string Short alias for "GlobalLight2DComponent".
 ---@field HierarchyComponent string Registered component type name "HierarchyComponent".
 ---@field Hierarchy string Short alias for "HierarchyComponent".
 ---@field JointComponent string Registered component type name "JointComponent".
@@ -1030,6 +1070,8 @@ function ui:isOpen() end
 ---@field PixelPerfectCamera string Short alias for "PixelPerfectCameraComponent".
 ---@field PlatformEffector2DComponent string Registered component type name "PlatformEffector2DComponent".
 ---@field PlatformEffector2D string Short alias for "PlatformEffector2DComponent".
+---@field PointLight2DComponent string Registered component type name "PointLight2DComponent".
+---@field PointLight2D string Short alias for "PointLight2DComponent".
 ---@field PointLightComponent string Registered component type name "PointLightComponent".
 ---@field PointLight string Short alias for "PointLightComponent".
 ---@field PolygonCollider2DComponent string Registered component type name "PolygonCollider2DComponent".
@@ -1040,6 +1082,8 @@ function ui:isOpen() end
 ---@field RigidBody3D string Short alias for "RigidBody3DComponent".
 ---@field SampleDataComponent string Registered component type name "SampleDataComponent".
 ---@field SampleData string Short alias for "SampleDataComponent".
+---@field ShadowCaster2DComponent string Registered component type name "ShadowCaster2DComponent".
+---@field ShadowCaster2D string Short alias for "ShadowCaster2DComponent".
 ---@field SkinnedMeshRendererComponent string Registered component type name "SkinnedMeshRendererComponent".
 ---@field SkinnedMeshRenderer string Short alias for "SkinnedMeshRendererComponent".
 ---@field SphereCollider3DComponent string Registered component type name "SphereCollider3DComponent".

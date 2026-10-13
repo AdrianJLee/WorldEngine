@@ -5,6 +5,7 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/ShaderUtils.h"
+#include "World/Renderer/Lighting2D.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -32,6 +33,8 @@ namespace World
 			float TexIndex = 0.0f;
 			float TilingFactor = 1.0f;
 			int EntityID = -1;
+			float NormalTexIndex = 0.0f;
+			float SortingLayer = 0.0f;
 		};
 
 		struct CircleVertex
@@ -146,6 +149,8 @@ namespace World
 					{ 3, 0, Rhi::Format::R32_SFLOAT, 36 },
 					{ 4, 0, Rhi::Format::R32_SFLOAT, 40 },
 					{ 5, 0, Rhi::Format::R32_SINT, 44 },
+					{ 6, 0, Rhi::Format::R32_SFLOAT, 48 },
+					{ 7, 0, Rhi::Format::R32_SFLOAT, 52 },
 				}, Rhi::PrimitiveTopology::TriangleList, 1.0f };
 			return spec;
 		}
@@ -199,6 +204,8 @@ namespace World
 			// 已绑定的 GPU 纹理句柄(用于去重:同一张贴图在本帧只占一个槽位)。
 			std::array<Rhi::Handle<Rhi::Texture>, MaxTextureSlots> SourceTextures;
 			uint32_t TextureSlotIndex = 1;
+			std::array<Rhi::Handle<Rhi::Buffer>, Renderer::FramesInFlight> Light2DBuffers;
+			Lighting2D::Light2DUniforms CurrentLight2D{};
 
 			glm::vec4 VertexPositions[4] =
 			{
@@ -290,15 +297,30 @@ namespace World
 		// 生效采样数(否则 msaa>1 时 2D 管线在场景通道里绘制会被判为不兼容)。
 		RenderSettings::LoadFromProject(std::filesystem::current_path());
 
-		// 纹理描述符(binding 1 = 贴图槽;GL 侧单元号 = binding)。
+		// 纹理描述符(binding 1 = 贴图槽;binding 4 = 2D 光照 UBO)。
 		Rhi::DescriptorSetLayoutDesc textureLayout;
 		textureLayout.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), MaxTextureSlots });
+		textureLayout.Bindings.push_back({ 4, Rhi::DescriptorType::UniformBuffer,
+			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
 		s_Data.TextureLayout =
 			Renderer::GetDevice()->CreateDescriptorSetLayout(textureLayout);
 		s_Data.TextureDescriptorSet =
 			Renderer::GetDevice()->CreateDescriptorSet(
 				s_Data.TextureLayout);
+
+		Rhi::BufferDesc light2DDesc;
+		light2DDesc.Size = sizeof(Lighting2D::Light2DUniforms);
+		light2DDesc.Usage = Rhi::BufferUsageUniform;
+		light2DDesc.Memory = Rhi::MemoryHint::HostVisible;
+		light2DDesc.DebugName = "Renderer2D.Light2DUBO";
+		s_Data.CurrentLight2D = Lighting2D::Light2DUniforms{};
+		for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
+		{
+			s_Data.Light2DBuffers[slot] = Renderer::GetDevice()->CreateBuffer(light2DDesc);
+			if (s_Data.Light2DBuffers[slot])
+				s_Data.Light2DBuffers[slot]->SetData(&s_Data.CurrentLight2D, sizeof(Lighting2D::Light2DUniforms), 0);
+		}
 
 		Rhi::SamplerDesc samplerDesc;
 		samplerDesc.MinFilter = Rhi::Filter::Linear;
@@ -476,14 +498,31 @@ namespace World
 		s_Data.TextureLayout = nullptr;
 		s_Data.Textures.fill(nullptr);
 		s_Data.SourceTextures.fill(nullptr);
+		s_Data.Light2DBuffers.fill(nullptr);
+		s_Data.CurrentLight2D = Lighting2D::Light2DUniforms{};
 		s_Data.TextureSlotIndex = 1;
 		s_Data.Stats = {};
+	}
+
+	void Renderer2D::SetLight2DUniforms(const void* light2DUniforms, uint32_t byteSize)
+	{
+		if (light2DUniforms && byteSize == sizeof(Lighting2D::Light2DUniforms))
+			std::memcpy(&s_Data.CurrentLight2D, light2DUniforms, sizeof(Lighting2D::Light2DUniforms));
+		else
+			s_Data.CurrentLight2D = Lighting2D::Light2DUniforms{};
+
+		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		if (s_Data.Light2DBuffers[slot])
+			s_Data.Light2DBuffers[slot]->SetData(&s_Data.CurrentLight2D, sizeof(Lighting2D::Light2DUniforms), 0);
 	}
 
 	void Renderer2D::BeginScene(const Camera&, const glm::mat4&, Rhi::Handle<Rhi::CommandBuffer> commandBuffer)
 	{
 		WLD_TRACE_FUNCTION();
 		s_CurrentCommandBuffer = commandBuffer;
+		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		if (s_Data.Light2DBuffers[slot])
+			s_Data.Light2DBuffers[slot]->SetData(&s_Data.CurrentLight2D, sizeof(Lighting2D::Light2DUniforms), 0);
 	}
 
 	void Renderer2D::EndScene()
@@ -491,6 +530,7 @@ namespace World
 		WLD_TRACE_FUNCTION();
 		Flush();
 		s_CurrentCommandBuffer = nullptr;
+		s_Data.CurrentLight2D = Lighting2D::Light2DUniforms{};
 	}
 
 	void Renderer2D::StartBatch()
@@ -512,9 +552,9 @@ namespace World
 		if (!s_CurrentCommandBuffer)
 			return;
 
-		// 纹理描述符更新。
+		// 纹理描述符与 2D 光照 UBO 更新。
 		std::vector<Rhi::DescriptorWrite> writes;
-		writes.reserve(s_Data.TextureSlotIndex);
+		writes.reserve(s_Data.TextureSlotIndex + 1);
 		for (uint32_t i = 0; i < s_Data.TextureSlotIndex; ++i)
 		{
 			Rhi::DescriptorWrite write;
@@ -524,6 +564,18 @@ namespace World
 			write.Texture = s_Data.Textures[i];
 			write.Sampler = s_Data.Sampler;
 			writes.push_back(write);
+		}
+		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		if (s_Data.Light2DBuffers[slot])
+		{
+			Rhi::DescriptorWrite lightWrite;
+			lightWrite.Binding = 4;
+			lightWrite.ArrayIndex = 0;
+			lightWrite.Type = Rhi::DescriptorType::UniformBuffer;
+			lightWrite.Buffer = s_Data.Light2DBuffers[slot];
+			lightWrite.BufferOffset = 0;
+			lightWrite.BufferRange = sizeof(Lighting2D::Light2DUniforms);
+			writes.push_back(lightWrite);
 		}
 		s_Data.TextureDescriptorSet->Update(writes);
 
@@ -552,12 +604,13 @@ namespace World
 	}
 
 	void Renderer2D::DrawQuadCore(const glm::mat4& transform, const Rhi::Handle<Rhi::Texture>& texture,
-		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
+		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID,
+		const Rhi::Handle<Rhi::Texture>& normalTexture, int32_t sortingLayer)
 	{
 		WLD_TRACE_FUNCTION();
 		glm::vec3 transformedPositions[4];
 		ComputeQuadPositions(transform, transformedPositions);
-		DrawQuadPositions(transformedPositions, texture, color, texCoords, tilingFactor, entityID);
+		DrawQuadPositions(transformedPositions, texture, color, texCoords, tilingFactor, entityID, normalTexture, sortingLayer);
 	}
 
 	// 只做"每实体独立"的顶点变换:可在工作线程调用(只读 s_Data.VertexPositions)。
@@ -579,7 +632,8 @@ namespace World
 	}
 	// 批次状态机部分(纹理槽/批缓冲指针):必须在主线程按原顺序执行。
 	void Renderer2D::DrawQuadPositions(const glm::vec3 positions[4], const Rhi::Handle<Rhi::Texture>& texture,
-		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
+		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID,
+		const Rhi::Handle<Rhi::Texture>& normalTexture, int32_t sortingLayer)
 	{
 		WLD_TRACE_FUNCTION();
 		if (s_Data.Quads.IndexCount >= MaxQuads * 6)
@@ -588,26 +642,30 @@ namespace World
 		constexpr glm::vec2 defaultTexCoords[] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
 		const glm::vec2* actualTexCoords = texCoords ? texCoords : defaultTexCoords;
 
-		// 纹理已经是 GPU 句柄(唯一驻留在 TextureLibrary),这里只做"本帧是否有同槽"的去重。
-		float textureIndex = 0.0f;
-		if (texture)
+		auto bindSlot = [](const Rhi::Handle<Rhi::Texture>& tex) -> float
 		{
+			if (!tex)
+				return 0.0f;
 			for (uint32_t i = 1; i < s_Data.TextureSlotIndex; i++)
-				if (s_Data.SourceTextures[i].get() == texture.get())
-				{
-					textureIndex = static_cast<float>(i);
-					break;
-				}
-			if (textureIndex == 0.0f)
 			{
-				if (s_Data.TextureSlotIndex >= MaxTextureSlots)
-					NextBatch();
-				textureIndex = static_cast<float>(s_Data.TextureSlotIndex);
-				s_Data.Textures[s_Data.TextureSlotIndex] = texture;
-				s_Data.SourceTextures[s_Data.TextureSlotIndex] = texture;
-				s_Data.TextureSlotIndex++;
+				if (s_Data.SourceTextures[i].get() == tex.get())
+					return static_cast<float>(i);
 			}
-		}
+			if (s_Data.TextureSlotIndex >= MaxTextureSlots)
+				NextBatch();
+			const float idx = static_cast<float>(s_Data.TextureSlotIndex);
+			s_Data.Textures[s_Data.TextureSlotIndex] = tex;
+			s_Data.SourceTextures[s_Data.TextureSlotIndex] = tex;
+			s_Data.TextureSlotIndex++;
+			return idx;
+		};
+
+		if (texture && normalTexture && s_Data.TextureSlotIndex + 2 > MaxTextureSlots)
+			NextBatch();
+
+		const float textureIndex = bindSlot(texture);
+		const float normalIndex = bindSlot(normalTexture);
+		const float sortLayerFloat = static_cast<float>(sortingLayer);
 
 		for (uint32_t i = 0; i < 4; i++)
 		{
@@ -617,6 +675,8 @@ namespace World
 			s_Data.Quads.Ptr->TexIndex = textureIndex;
 			s_Data.Quads.Ptr->TilingFactor = tilingFactor;
 			s_Data.Quads.Ptr->EntityID = entityID;
+			s_Data.Quads.Ptr->NormalTexIndex = normalIndex;
+			s_Data.Quads.Ptr->SortingLayer = sortLayerFloat;
 			s_Data.Quads.Ptr++;
 		}
 		s_Data.Quads.IndexCount += 6;
