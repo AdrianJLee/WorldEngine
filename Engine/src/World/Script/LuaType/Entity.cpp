@@ -166,6 +166,7 @@ namespace World
 			{ "FindByName", { { "name", "string", "TagComponent name to find." } }, "Entity|nil", "Find the first matching entity in the scene. Entities synchronously created during the current script update stay hidden until the next frame." },
 			{ "InstantiatePrefab", { { "path", "string", "Prefab path; relative paths resolve under the content root (WLD_ASSETPATH)." } }, "Entity", "Instantiate a .wprefab synchronously and return its root handle. Synchronous I/O: large prefabs can stall the frame; raises on a missing or invalid prefab." },
 			{ "HasComponent", { { "componentType", "string", "Registered component type name." } }, "boolean", "Check whether this entity has the component; invalid entities or non-component types raise an error." },
+						{ "Get", { { "componentType", "string", "Registered component type name." } }, "userdata|nil", "Alias for GetComponent: return a schema-driven field proxy, or nil when the component is absent." },
 			{ "GetComponent", { { "componentType", "string", "Registered component type name." } }, "userdata|nil", "Return a schema-driven field proxy, or nil when the component is absent. Every field access re-checks the entity and component; writes type-check against the schema." },
 			{ "AddComponent", { { "componentType", "string", "Registered component type name." } }, "", "Add a default component. Pure-data components (Transform/Sprite/Circle/MeshRenderer/Camera/Hierarchy) commit synchronously inside callbacks; script/physics components keep their existing deferred or rejected rules." },
 			{ "RemoveComponent", { { "componentType", "string", "Registered component type name." } }, "", "Remove the component through scene cleanup; requests during callbacks are deferred and duplicates are ignored." },
@@ -345,6 +346,17 @@ namespace World
 						RequireEntity(*entity, "HasComponent");
 						const std::string typeName = RequireStringArgument(args, count, 1, "Entity:HasComponent");
 						return ScriptValue::Boolean(entity->HasComponent(RequireComponentType(*entity, typeName, "HasComponent").Storage->ComponentId));
+					} },
+								{ "Get", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "Get");
+						RequireEntity(*entity, "Get");
+						const std::string typeName = RequireStringArgument(args, count, 1, "Entity:Get");
+						const Schema::TypeSchema& schema = RequireComponentType(*entity, typeName, "Get");
+						if (!entity->HasComponent(schema.Storage->ComponentId))
+							return ScriptValue::Nil();
+						return MakeComponentProxy(context, *entity, schema);
 					} },
 				{ "GetComponent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 					{

@@ -144,9 +144,8 @@ print("[2D-DEMO] ParallaxCameraDemoSystem 已注册入 ECS")
 -- 引擎将精确打点并在当前帧通过 ecs:OnAnimationEvent 派发到脚本
 local animEventHandle = ecs:OnAnimationEvent(function(event)
     local entityName = "Unknown"
-    local tagComp = event.entity:Get("TagComponent")
-    if tagComp then
-        entityName = tagComp.Tag
+    if event.entity and event.entity:IsValid() then
+        entityName = event.entity:GetName()
     end
     print(string.format("[ANIM-EVENT] 实体 '%s' 触发动画事件: Tag='%s' | Frame=%d",
         entityName, event.tag, event.frame))

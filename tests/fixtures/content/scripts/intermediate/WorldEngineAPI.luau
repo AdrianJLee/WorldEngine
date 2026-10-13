@@ -37,6 +37,11 @@ function Entity:Destroy() end
 ---@return Entity|nil
 function Entity:FindByName(name) end
 
+---Alias for GetComponent: return a schema-driven field proxy, or nil when the component is absent.
+---@param componentType string Registered component type name.
+---@return userdata|nil
+function Entity:Get(componentType) end
+
 ---Return the Box2D angular velocity (radians per second) of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running.
 ---@return number
 function Entity:GetAngularVelocity() end
