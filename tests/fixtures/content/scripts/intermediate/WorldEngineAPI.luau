@@ -843,7 +843,7 @@ function ui:isOpen() end
 
 -- Component fields are exposed through Entity:GetComponent("PixelPerfectCameraComponent"); there is no runtime global named PixelPerfectCameraComponent.
 ---@class PixelPerfectCameraComponent
----@field ReferenceResolution unknown no script mapping for schema kind 'IVec2'
+---@field ReferenceResolution vec2
 ---@field CurrentScale number
 ---@field UpscaleRT boolean
 ---@field PixelsPerUnit number

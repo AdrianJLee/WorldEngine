@@ -429,12 +429,18 @@ namespace World
 			mapping.LuaTypeName = "number";
 			break;
 		case Schema::Kind::Vec2:
+		case Schema::Kind::IVec2:
+		case Schema::Kind::UVec2:
 			mapping.LuaTypeName = "vec2";
 			break;
 		case Schema::Kind::Vec3:
+		case Schema::Kind::IVec3:
+		case Schema::Kind::UVec3:
 			mapping.LuaTypeName = "vec3";
 			break;
 		case Schema::Kind::Vec4:
+		case Schema::Kind::IVec4:
+		case Schema::Kind::UVec4:
 			mapping.LuaTypeName = "vec4";
 			break;
 		case Schema::Kind::Mat3:
@@ -486,10 +492,16 @@ namespace World
 				return ScriptValue::Number(static_cast<double>(payload));
 			else if constexpr (std::is_same_v<Payload, glm::vec2>)
 				return MakeMathUserdata(bindings, "vec2", payload);
+			else if constexpr (std::is_same_v<Payload, glm::ivec2> || std::is_same_v<Payload, glm::uvec2>)
+				return MakeMathUserdata(bindings, "vec2", glm::vec2(payload));
 			else if constexpr (std::is_same_v<Payload, glm::vec3>)
 				return MakeMathUserdata(bindings, "vec3", payload);
+			else if constexpr (std::is_same_v<Payload, glm::ivec3> || std::is_same_v<Payload, glm::uvec3>)
+				return MakeMathUserdata(bindings, "vec3", glm::vec3(payload));
 			else if constexpr (std::is_same_v<Payload, glm::vec4>)
 				return MakeMathUserdata(bindings, "vec4", payload);
+			else if constexpr (std::is_same_v<Payload, glm::ivec4> || std::is_same_v<Payload, glm::uvec4>)
+				return MakeMathUserdata(bindings, "vec4", glm::vec4(payload));
 			else if constexpr (std::is_same_v<Payload, glm::mat3>)
 				return MakeMathUserdata(bindings, "mat3", payload);
 			else if constexpr (std::is_same_v<Payload, glm::mat4>)
@@ -531,10 +543,52 @@ namespace World
 			return Schema::Value(RequireFiniteNumber(field, value));
 		case Schema::Kind::Vec2:
 			return Schema::Value(RequireMathUserdata<glm::vec2>(bindings, field, value, "vec2"));
+		case Schema::Kind::IVec2:
+		{
+			const glm::vec2 v = RequireMathUserdata<glm::vec2>(bindings, field, value, "vec2");
+			return Schema::Value(glm::ivec2(static_cast<int32_t>(std::round(v.x)),
+											static_cast<int32_t>(std::round(v.y))));
+		}
+		case Schema::Kind::UVec2:
+		{
+			const glm::vec2 v = RequireMathUserdata<glm::vec2>(bindings, field, value, "vec2");
+			return Schema::Value(glm::uvec2(static_cast<uint32_t>(std::max(0.0f, std::round(v.x))),
+											static_cast<uint32_t>(std::max(0.0f, std::round(v.y)))));
+		}
 		case Schema::Kind::Vec3:
 			return Schema::Value(RequireMathUserdata<glm::vec3>(bindings, field, value, "vec3"));
+		case Schema::Kind::IVec3:
+		{
+			const glm::vec3 v = RequireMathUserdata<glm::vec3>(bindings, field, value, "vec3");
+			return Schema::Value(glm::ivec3(static_cast<int32_t>(std::round(v.x)),
+											static_cast<int32_t>(std::round(v.y)),
+											static_cast<int32_t>(std::round(v.z))));
+		}
+		case Schema::Kind::UVec3:
+		{
+			const glm::vec3 v = RequireMathUserdata<glm::vec3>(bindings, field, value, "vec3");
+			return Schema::Value(glm::uvec3(static_cast<uint32_t>(std::max(0.0f, std::round(v.x))),
+											static_cast<uint32_t>(std::max(0.0f, std::round(v.y))),
+											static_cast<uint32_t>(std::max(0.0f, std::round(v.z)))));
+		}
 		case Schema::Kind::Vec4:
 			return Schema::Value(RequireMathUserdata<glm::vec4>(bindings, field, value, "vec4"));
+		case Schema::Kind::IVec4:
+		{
+			const glm::vec4 v = RequireMathUserdata<glm::vec4>(bindings, field, value, "vec4");
+			return Schema::Value(glm::ivec4(static_cast<int32_t>(std::round(v.x)),
+											static_cast<int32_t>(std::round(v.y)),
+											static_cast<int32_t>(std::round(v.z)),
+											static_cast<int32_t>(std::round(v.w))));
+		}
+		case Schema::Kind::UVec4:
+		{
+			const glm::vec4 v = RequireMathUserdata<glm::vec4>(bindings, field, value, "vec4");
+			return Schema::Value(glm::uvec4(static_cast<uint32_t>(std::max(0.0f, std::round(v.x))),
+											static_cast<uint32_t>(std::max(0.0f, std::round(v.y))),
+											static_cast<uint32_t>(std::max(0.0f, std::round(v.z))),
+											static_cast<uint32_t>(std::max(0.0f, std::round(v.w)))));
+		}
 		case Schema::Kind::Mat3:
 			return Schema::Value(RequireMathUserdata<glm::mat3>(bindings, field, value, "mat3"));
 		case Schema::Kind::Mat4:

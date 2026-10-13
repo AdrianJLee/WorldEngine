@@ -875,6 +875,24 @@ namespace World
 					*out = *source;
 					return true;
 				}
+				case Schema::Kind::IVec2:
+				{
+					ScriptBindingContext* bindings = BindingContextIfAvailable();
+					glm::vec2* source = nullptr;
+					if (!bindings || !bindings->Unwrap("vec2", value, &source) || !source)
+						return false;
+					*out = glm::ivec2(static_cast<int32_t>(std::round(source->x)), static_cast<int32_t>(std::round(source->y)));
+					return true;
+				}
+				case Schema::Kind::UVec2:
+				{
+					ScriptBindingContext* bindings = BindingContextIfAvailable();
+					glm::vec2* source = nullptr;
+					if (!bindings || !bindings->Unwrap("vec2", value, &source) || !source)
+						return false;
+					*out = glm::uvec2(static_cast<uint32_t>(std::max(0.0f, std::round(source->x))), static_cast<uint32_t>(std::max(0.0f, std::round(source->y))));
+					return true;
+				}
 				case Schema::Kind::Vec3:
 				{
 					ScriptBindingContext* bindings = BindingContextIfAvailable();
@@ -935,8 +953,14 @@ namespace World
 			if (const uint32_t* number = std::get_if<uint32_t>(&value)) return ScriptValue::Number(static_cast<double>(*number));
 			if (const std::string* text = std::get_if<std::string>(&value)) return ScriptValue::String(*text);
 			if (const glm::vec2* vector = std::get_if<glm::vec2>(&value)) return NewVectorUserdata("vec2", *vector);
+			if (const glm::ivec2* vector = std::get_if<glm::ivec2>(&value)) return NewVectorUserdata("vec2", glm::vec2(*vector));
+			if (const glm::uvec2* vector = std::get_if<glm::uvec2>(&value)) return NewVectorUserdata("vec2", glm::vec2(*vector));
 			if (const glm::vec3* vector = std::get_if<glm::vec3>(&value)) return NewVectorUserdata("vec3", *vector);
+			if (const glm::ivec3* vector = std::get_if<glm::ivec3>(&value)) return NewVectorUserdata("vec3", glm::vec3(*vector));
+			if (const glm::uvec3* vector = std::get_if<glm::uvec3>(&value)) return NewVectorUserdata("vec3", glm::vec3(*vector));
 			if (const glm::vec4* vector = std::get_if<glm::vec4>(&value)) return NewVectorUserdata("vec4", *vector);
+			if (const glm::ivec4* vector = std::get_if<glm::ivec4>(&value)) return NewVectorUserdata("vec4", glm::vec4(*vector));
+			if (const glm::uvec4* vector = std::get_if<glm::uvec4>(&value)) return NewVectorUserdata("vec4", glm::vec4(*vector));
 			return ScriptValue::Nil();
 		}
 

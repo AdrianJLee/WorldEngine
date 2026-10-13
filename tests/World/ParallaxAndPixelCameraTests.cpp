@@ -1,3 +1,6 @@
+#include "World/Core/WorldContext.h"
+#include "World/Schema/SchemaRegistry.h"
+#include "World/Script/Bindings/BindComponentAccess.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Entity.h"
@@ -97,8 +100,34 @@ static void TestParallaxLayerMath()
 	std::cout << "[PASS] TestParallaxLayerMath\n";
 }
 
+
+static void TestPixelPerfectCameraScriptReflection()
+{
+	WorldContext context;
+	const Schema::TypeSchema* schema = context.Schemas().Find("World::PixelPerfectCameraComponent");
+	assert(schema != nullptr);
+	const Schema::FieldSchema* refResField = nullptr;
+	for (const auto& f : schema->Fields)
+	{
+		if (f.Name == "ReferenceResolution")
+		{
+			refResField = &f;
+			break;
+		}
+	}
+	assert(refResField != nullptr);
+	assert(refResField->K == Schema::Kind::IVec2);
+
+	const ScriptFieldMapping mapping = DescribeScriptField(*refResField);
+	assert(mapping.LuaTypeName != nullptr);
+	assert(std::string(mapping.LuaTypeName) == "vec2");
+
+	std::cout << "[PASS] TestPixelPerfectCameraScriptReflection\n";
+}
+
 int main()
 {
+	TestPixelPerfectCameraScriptReflection();
 	Log::Init();
 	std::cout << "Running WorldParallaxAndPixelCameraTests...\n";
 

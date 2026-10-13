@@ -1198,6 +1198,44 @@ int main()
 			ScriptEngine::SetActiveScene(nullptr);
 		}
 
+
+		// =====================================================================
+		// 12. 2D 像素相机组件与 IVec2 脚本代理读写验证
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			Entity camEntity = scene.CreateEntityShell("PixelCamTest");
+			auto& ppc = camEntity.AddComponent<PixelPerfectCameraComponent>();
+			ppc.ReferenceResolution = { 320, 180 };
+			ppc.PixelsPerUnit = 16;
+			ppc.CurrentScale = 4;
+
+			RUN_OK(R"(
+				local q = ecs:Query({"PixelPerfectCameraComponent"})
+				assert(q:Count() == 1, "PixelPerfectCamera query must find 1 entity")
+
+				local ran = false
+				q:Each(function(entity, cam)
+					ran = true
+					assert(cam.PixelsPerUnit == 16, "PPU must be 16")
+					assert(cam.CurrentScale == 4, "CurrentScale must be 4")
+					assert(cam.ReferenceResolution.x == 320, "ReferenceResolution.x must be 320")
+					assert(cam.ReferenceResolution.y == 180, "ReferenceResolution.y must be 180")
+
+					-- 验证修改 IVec2 字段写回
+					cam.ReferenceResolution = vec2.new(640, 360)
+				end)
+				assert(ran, "Each callback must execute")
+			)", "TestPixelPerfectCameraIVec2Access");
+
+			CHECK(ppc.ReferenceResolution.x == 640);
+			CHECK(ppc.ReferenceResolution.y == 360);
+
+			ScriptEngine::SetActiveScene(nullptr);
+		}
+
 		ScriptEngine::Shutdown();
 		std::puts("World.LuauEcs: all tests passed!");
 		return 0;

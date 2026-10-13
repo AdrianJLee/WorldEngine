@@ -690,8 +690,14 @@ namespace World
 				case Schema::Kind::Float: return std::holds_alternative<float>(value);
 				case Schema::Kind::Double: return std::holds_alternative<double>(value);
 				case Schema::Kind::Vec2: return std::holds_alternative<glm::vec2>(value);
+				case Schema::Kind::IVec2: return std::holds_alternative<glm::ivec2>(value);
+				case Schema::Kind::UVec2: return std::holds_alternative<glm::uvec2>(value);
 				case Schema::Kind::Vec3: return std::holds_alternative<glm::vec3>(value);
+				case Schema::Kind::IVec3: return std::holds_alternative<glm::ivec3>(value);
+				case Schema::Kind::UVec3: return std::holds_alternative<glm::uvec3>(value);
 				case Schema::Kind::Vec4: return std::holds_alternative<glm::vec4>(value);
+				case Schema::Kind::IVec4: return std::holds_alternative<glm::ivec4>(value);
+				case Schema::Kind::UVec4: return std::holds_alternative<glm::uvec4>(value);
 				// B 期:结构化表的值在 Children 里,Value 必须是 monostate(空表也是 monostate)。
 				// CPPT-6:容器的元素/值可以是一层"字段名 → Value"的 map(命名 struct),
 				// 所以 Object 也接受 ValueMap。
