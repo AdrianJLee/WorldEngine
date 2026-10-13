@@ -186,7 +186,8 @@ namespace World
 		// P4-U8a:视口"悬浮层"布局 —— 运行控制 / 视图菜单 / 状态徽标全部**浮在画面上**,
 		// 不占布局(否则场景图被挤扁,用户 2026-09-21:「play 三个按钮使视口变形了」)。
 		constexpr float kChromePad = 8.0f;     // 悬浮层与画面边缘的距离
-		constexpr float kChromeRowH = 24.0f;   // 左侧视图按钮 / 右侧状态徽标的高度
+		constexpr float kIslandH = 30.0f;      // 悬浮岛屿底板高度
+		constexpr float kBtnH = 22.0f;         // 悬浮岛内按钮与控件高度
 		constexpr float kPillH = 36.0f;        // 居中药丸(运行控制)的高度
 		// 运行控制按钮的稳定无障碍 id:脚本按 id 点,不靠坐标(与菜单/其它按钮同一条口径)。
 		const char* const kViewportToolIds[3] = {
@@ -294,7 +295,22 @@ namespace World
 		// 悬浮控件自己照常命中,而**它下面的视口拾取/gizmo 不会同时吃到这一下点击**。
 		ctx.PushOverlay();
 
-		// ① 左上:`视图 ▼`(投影方式 / 观察方位 / 相机预览 / 光照 / 碰撞体 的唯一入口)
+		// ① 顶部居中: 运行控制药丸 (播放 / 模拟 / 暂停) 作为中央绝对安全禁区
+		const float pillW = 3 * 28.0f + 2 * 4.0f + 20.0f; // 112px
+		const Wui::WuiRect pillRect { sceneRect.X + (sceneRect.W - pillW) * 0.5f,
+			sceneRect.Y + kChromePad, pillW, kPillH };
+		const bool pillHovered = ctx.IsHovered(pillRect);
+		Wui::Toolbar(ctx, pillRect, theme, kPillH * 0.5f,
+			pillHovered ? 0.95f : (play || simulate ? 0.85f : 0.65f));
+		Wui::LayoutWidgetTree(m_ToolPill, pillRect);
+		m_ToolPill->Paint(paint);
+		ctx.RegisterOverlayRect(pillRect);
+
+		// 药丸安全边界防护: 左右各预留 10px 空隙，严禁任何两侧岛屿穿透碰撞
+		const float pillLeftBound = pillRect.X - 10.0f;
+		const float pillRightBound = pillRect.X + pillRect.W + 10.0f;
+
+		// ② 左岛 (Left Island - 视图与变换工具组): [视图下拉] + [分割线] + [Q / W / E / R / T]
 		const World::ViewportProjection currentProj = m_Host.GetViewportProjection();
 		const World::ViewportViewpoint currentVp = m_Host.GetViewportViewpoint();
 		const bool isOrtho = (currentProj == World::ViewportProjection::Orthographic);
@@ -314,9 +330,37 @@ namespace World
 		const std::string cameraText = std::string(projName) + " · " + vpShort;
 		const std::string viewLabel = Wui::Tr("viewport.view.button", "View") + ": "
 			+ projName + " · " + vpShort + "  ▼";
-		// 固定最小宽度 144px，防止切换 Lock 或切换 Top/Front/Bottom 时工具栏发生水平位移跳动
-		const float viewButtonW = std::max(144.0f, ctx.MeasureTextWidth(viewLabel, 13.0f) + 20.0f);
-		const Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad, viewButtonW, kChromeRowH };
+		// 固定最小宽度 140px，防止切换 Lock 或切换 Top/Front/Bottom 时工具栏发生水平位移跳动
+		const float viewButtonW = std::max(140.0f, ctx.MeasureTextWidth(viewLabel, 12.0f) + 16.0f);
+
+		// Gizmo 工具组规格 (Q: 选 / W: 移 / E: 转 / R: 缩 / T: 2D 矩形手柄，22×22px)
+		const float gizmoBtnW = 22.0f;
+		const float gizmoBtnH = 22.0f;
+		struct GizmoBtnSpec { const char* id; const char* label; Wui::GizmoOperation op; const char* tip; };
+		const GizmoBtnSpec gizmoBtns[5] = {
+			{ "viewport.btn.gizmo_q", "Q", Wui::GizmoOperation::None, "选择模式 (None) [快捷键 Q]" },
+			{ "viewport.btn.gizmo_w", "W", Wui::GizmoOperation::Translate, "平移工具 (Move) [快捷键 W]" },
+			{ "viewport.btn.gizmo_e", "E", Wui::GizmoOperation::Rotate, "旋转工具 (Rotate) [快捷键 E]" },
+			{ "viewport.btn.gizmo_r", "R", Wui::GizmoOperation::Scale, "缩放工具 (Scale) [快捷键 R]" },
+			{ "viewport.btn.gizmo_t", "T", Wui::GizmoOperation::Rect, "2D 矩形变换手柄 (Rect Transform) [快捷键 T]" }
+		};
+		const Wui::GizmoOperation activeGizmo = m_Host.GetGizmoOperation();
+
+		// 左岛全宽: 内衬4 + viewButtonW + 间隙3 + 分割线8 + 间隙3 + 5*22 + 4*2 + 内衬4
+		const float fullLeftIslandW = 4.0f + viewButtonW + 3.0f + 8.0f + 3.0f + (5 * gizmoBtnW + 4 * 2.0f) + 4.0f;
+		const float leftIslandX = sceneRect.X + kChromePad;
+		const float leftIslandY = sceneRect.Y + kChromePad;
+		// 受中岛左边界严格防护
+		const float maxLeftIslandW = std::max(viewButtonW + 8.0f, pillLeftBound - leftIslandX);
+		const float leftIslandW = std::min(fullLeftIslandW, maxLeftIslandW);
+
+		const Wui::WuiRect leftIslandRect { leftIslandX, leftIslandY, leftIslandW, kIslandH };
+		Wui::Toolbar(ctx, leftIslandRect, theme, 6.0f, 0.85f);
+		ctx.RegisterOverlayRect(leftIslandRect);
+
+		// 左岛内部内容填充
+		const float leftBtnY = leftIslandRect.Y + 4.0f;
+		const Wui::WuiRect viewButton { leftIslandRect.X + 4.0f, leftBtnY, viewButtonW, kBtnH };
 		const std::string viewHint = Wui::Tr("viewport.view.hint",
 			"View options: view mode (3D/2D), camera preview, light ranges, collider outlines.");
 		Wui::Tooltip(ctx, viewButton, viewHint);
@@ -327,42 +371,20 @@ namespace World
 			Wui::Tr("viewport.camera.hint", "Viewport view mode — switch in the View menu (top-left)."));
 		ctx.RegisterOverlayRect(viewButton);
 
-		// ② 顶部居中: 运行控制药丸 (播放 / 模拟 / 暂停)
-		// 独立绝对矩形居中悬浮, 左右两侧功能区均以此为安全禁区边界, 严禁像素重叠遮挡
-		const float pillW = 3 * 28.0f + 2 * 4.0f + 20.0f; // 112px
-		const Wui::WuiRect pillRect { sceneRect.X + (sceneRect.W - pillW) * 0.5f,
-			sceneRect.Y + kChromePad, pillW, kPillH };
-		const bool pillHovered = ctx.IsHovered(pillRect);
-		Wui::Toolbar(ctx, pillRect, theme, kPillH * 0.5f,
-			pillHovered ? 0.95f : (play || simulate ? 0.85f : 0.65f));
-		Wui::LayoutWidgetTree(m_ToolPill, pillRect);
-		m_ToolPill->Paint(paint);
-		ctx.RegisterOverlayRect(pillRect);
+		float leftCursor = viewButton.X + viewButton.W + 3.0f;
+		if (leftCursor + 8.0f + gizmoBtnW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
+		{
+			const Wui::WuiRect sepRect { leftCursor, leftIslandRect.Y, 8.0f, kIslandH };
+			Wui::ToolbarSeparator(ctx, sepRect, theme);
+			leftCursor += 8.0f + 3.0f;
+		}
 
-		// 药丸安全边界防护: 左右各预留 10px 空隙
-		const float pillLeftBound = pillRect.X - 10.0f;
-		const float pillRightBound = pillRect.X + pillRect.W + 10.0f;
-
-		// ③ 左侧功能区: [View 菜单] + [Gizmo 工具组 Q / W / E / R / T]
-		float leftCursor = viewButton.X + viewButton.W + 6.0f;
-
-		// Gizmo 工具栏快捷按钮 (Q: 选 / W: 移 / E: 转 / R: 缩 / T: 2D 矩形手柄)
-		const float gizmoBtnW = 24.0f;
-		struct GizmoBtnSpec { const char* id; const char* label; Wui::GizmoOperation op; const char* tip; };
-		const GizmoBtnSpec gizmoBtns[5] = {
-			{ "viewport.btn.gizmo_q", "Q", Wui::GizmoOperation::None, "选择模式 (None) [快捷键 Q]" },
-			{ "viewport.btn.gizmo_w", "W", Wui::GizmoOperation::Translate, "平移工具 (Move) [快捷键 W]" },
-			{ "viewport.btn.gizmo_e", "E", Wui::GizmoOperation::Rotate, "旋转工具 (Rotate) [快捷键 E]" },
-			{ "viewport.btn.gizmo_r", "R", Wui::GizmoOperation::Scale, "缩放工具 (Scale) [快捷键 R]" },
-			{ "viewport.btn.gizmo_t", "T", Wui::GizmoOperation::Rect, "2D 矩形变换手柄 (Rect Transform) [快捷键 T]" }
-		};
-		const Wui::GizmoOperation activeGizmo = m_Host.GetGizmoOperation();
 		for (int i = 0; i < 5; ++i)
 		{
-			if (leftCursor + gizmoBtnW > pillLeftBound)
-				break; // 保护中央药丸不受左侧工具侵占
+			if (leftCursor + gizmoBtnW > leftIslandRect.X + leftIslandRect.W - 4.0f)
+				break;
 
-			const Wui::WuiRect gBtnRect { leftCursor, sceneRect.Y + kChromePad, gizmoBtnW, kChromeRowH };
+			const Wui::WuiRect gBtnRect { leftCursor, leftBtnY, gizmoBtnW, gizmoBtnH };
 			Wui::Tooltip(ctx, gBtnRect, gizmoBtns[i].tip);
 
 			auto gizmoTheme = theme;
@@ -379,7 +401,34 @@ namespace World
 			leftCursor += gizmoBtnW + 2.0f;
 		}
 
-		// ④ 右侧功能区: 运行状态徽标 + 覆盖层与锁定开关从右至左紧凑排布
+		// ③ 右岛 (Right Island - 覆盖层与状态徽章)
+		// 从左至右内含: [图层下拉] + [分割线] + [Grid] + [Part] + [Lock] + [分割线] + [状态徽章]
+		const std::vector<Level::DataLayerDefinition>& dataLayers = m_Host.GetLevelDataLayers();
+		const uint32_t activeLayers = m_Host.GetActiveDataLayers();
+		const bool hasDataLayers = !dataLayers.empty();
+		size_t activeCount = 0;
+		if (hasDataLayers)
+		{
+			for (const auto& layer : dataLayers)
+			{
+				if (!layer.Name.empty() && (layer.LayerMask & activeLayers) != 0)
+					activeCount++;
+			}
+		}
+		char layersLabel[64] = {};
+		std::snprintf(layersLabel, sizeof(layersLabel), "%s: %zu/%zu ▼",
+			Wui::Tr("viewport.layers.dropdown", "图层").c_str(), activeCount, dataLayers.size());
+		const float layersBtnW = hasDataLayers ? (ctx.MeasureTextWidth(layersLabel, 12.0f) + 16.0f) : 0.0f;
+
+		const std::string gridLabel = Wui::Tr("viewport.grid.short", "Grid");
+		const float gridBtnW = std::max(42.0f, ctx.MeasureTextWidth(gridLabel, 12.0f) + 14.0f);
+
+		const std::string partLabel = Wui::Tr("viewport.partition.short", "Part");
+		const float partBtnW = std::max(42.0f, ctx.MeasureTextWidth(partLabel, 12.0f) + 14.0f);
+
+		const std::string lockLabel = Wui::Tr("viewport.2d.short", "Lock");
+		const float lockBtnW = std::max(42.0f, ctx.MeasureTextWidth(lockLabel, 12.0f) + 14.0f);
+
 		const char* const modeKey = simulate ? (paused ? "paused" : "simulate")
 			: (play ? (paused ? "paused" : "play") : "edit");
 		const std::string modeText = paused ? Wui::Tr("viewport.mode.paused", "Paused")
@@ -388,52 +437,66 @@ namespace World
 					: Wui::Tr("viewport.mode.edit", "Edit Mode")));
 		const Wui::WuiColor modeColor = paused ? theme.Warning
 			: (simulate ? theme.Accent : (play ? theme.Success : theme.TextDisabled));
-		const float modeWidth = ctx.MeasureTextWidth(modeText, 12.0f) + 18.0f;
-		const Wui::WuiRect modeRect { sceneRect.X + sceneRect.W - kChromePad - modeWidth,
-			sceneRect.Y + kChromePad + (kChromeRowH - 20.0f) * 0.5f, modeWidth, 20.0f };
-		if (modeKey[0] != 'e' || rect.W >= 360.0f)
+		const float modeWidth = ctx.MeasureTextWidth(modeText, 11.5f) + 18.0f;
+
+		// 计算右岛理想总宽度
+		float naturalRightIslandW = 4.0f;
+		if (hasDataLayers)
 		{
-			Wui::WuiColor modeFill = modeColor;
-			modeFill.A = modeKey[0] == 'e' ? 0.10f : 0.20f;
-			Wui::Badge(ctx, modeRect, modeText, modeFill, modeColor, theme, 12.0f, true, 10.0f);
-			RegisterReadonlyNode(Wui::HashId("viewport.mode"), "text", modeText, modeKey, modeRect);
-			ctx.RegisterOverlayRect(modeRect);
+			naturalRightIslandW += layersBtnW + 3.0f + 8.0f + 3.0f;
+		}
+		naturalRightIslandW += gridBtnW + 3.0f;
+		naturalRightIslandW += partBtnW + 3.0f;
+		naturalRightIslandW += lockBtnW + 3.0f;
+		naturalRightIslandW += 8.0f + 3.0f; // 分割线
+		naturalRightIslandW += modeWidth;
+		naturalRightIslandW += 4.0f;
+
+		float rightIslandW = naturalRightIslandW;
+		float rightIslandX = sceneRect.X + sceneRect.W - kChromePad - rightIslandW;
+
+		// 严格受中岛右边界 pillRightBound 防护
+		if (rightIslandX < pillRightBound)
+		{
+			rightIslandX = pillRightBound;
+			rightIslandW = std::max(0.0f, (sceneRect.X + sceneRect.W - kChromePad) - rightIslandX);
 		}
 
-		// 从右向左排布右侧辅助开关 (保证右侧控件永远紧靠状态徽标，绝不越过中央运行药丸)
-		float rightCursor = modeRect.X - 6.0f;
+		const Wui::WuiRect rightIslandRect { rightIslandX, sceneRect.Y + kChromePad, rightIslandW, kIslandH };
+		Wui::Toolbar(ctx, rightIslandRect, theme, 6.0f, 0.85f);
+		ctx.RegisterOverlayRect(rightIslandRect);
 
-		// 1) 视角旋转锁定按钮 (2D Mode Lock) - 固定 74px 宽，点击绝不引起水平排版位移
-		const float mode2dBtnW = 74.0f;
-		if (rightCursor - mode2dBtnW >= pillRightBound)
+		// 右岛内部控件由左向右整齐排布
+		float rightCursor = rightIslandRect.X + 4.0f;
+		const float rightBtnY = rightIslandRect.Y + 4.0f;
+		const float rightLimit = rightIslandRect.X + rightIslandRect.W - 4.0f;
+
+		// 1) 数据层多选下拉按钮
+		Wui::WuiRect layersBtnRect {};
+		if (hasDataLayers && rightCursor + layersBtnW <= rightLimit)
 		{
-			rightCursor -= mode2dBtnW;
-			const Wui::WuiRect mode2dBtn { rightCursor, sceneRect.Y + kChromePad, mode2dBtnW, kChromeRowH };
-			const bool is2D = m_Host.Is2DMode();
-			const std::string mode2dLabel = is2D ? "Lock: ON" : "Lock: OFF";
-			Wui::Tooltip(ctx, mode2dBtn, Wui::Tr("viewport.2d.hint", "锁定/解锁鼠标旋转视角 (锁定后禁止鼠标旋转、右键拖拽变为平移；左上角方位菜单仍可正常切换方向) (viewport.btn.toggle_2d)"));
-			auto lockTheme = theme;
-			if (is2D)
+			layersBtnRect = { rightCursor, rightBtnY, layersBtnW, kBtnH };
+			Wui::Tooltip(ctx, layersBtnRect, Wui::Tr("viewport.layers.hint", "Manage data layer visibility."));
+			if (Wui::Button(ctx, Wui::HashId("viewport.layers_dropdown"), layersBtnRect, layersLabel, theme))
 			{
-				lockTheme.ButtonBg = theme.ActiveBg;
-				lockTheme.Border = theme.Accent;
+				ctx.OpenPopup(Wui::HashId("viewport.layers.popup"));
 			}
-			if (Wui::Button(ctx, Wui::HashId("viewport.btn.toggle_2d"), mode2dBtn, mode2dLabel, lockTheme))
+			ctx.RegisterOverlayRect(layersBtnRect);
+			rightCursor += layersBtnW + 3.0f;
+
+			if (rightCursor + 8.0f <= rightLimit)
 			{
-				m_Host.Set2DMode(!is2D);
+				const Wui::WuiRect sepRect { rightCursor, rightIslandRect.Y, 8.0f, kIslandH };
+				Wui::ToolbarSeparator(ctx, sepRect, theme);
+				rightCursor += 8.0f + 3.0f;
 			}
-			ctx.RegisterOverlayRect(mode2dBtn);
-			rightCursor -= 4.0f;
 		}
 
-		// 2) 基准参考网格开关 (Grid: ON / OFF) - 固定 72px 宽
-		const float gridBtnW = 72.0f;
-		if (rightCursor - gridBtnW >= pillRightBound)
+		// 2) 网格开关 (Grid) - 开启时背景变亮 (ActiveBg + Accent 边框)，严禁带有生硬的 : ON / : OFF
+		if (rightCursor + gridBtnW <= rightLimit)
 		{
-			rightCursor -= gridBtnW;
-			const Wui::WuiRect gridBtn { rightCursor, sceneRect.Y + kChromePad, gridBtnW, kChromeRowH };
+			const Wui::WuiRect gridBtn { rightCursor, rightBtnY, gridBtnW, kBtnH };
 			const bool gridOn = m_Host.IsReferenceGridEnabled();
-			const std::string gridLabel = gridOn ? "Grid: ON" : "Grid: OFF";
 			Wui::Tooltip(ctx, gridBtn, Wui::Tr("viewport.grid.hint", "Toggle ground reference grid (1m/10m)."));
 			auto gridTheme = theme;
 			if (gridOn)
@@ -446,16 +509,13 @@ namespace World
 				m_Host.SetReferenceGridEnabled(!gridOn);
 			}
 			ctx.RegisterOverlayRect(gridBtn);
-			rightCursor -= 4.0f;
+			rightCursor += gridBtnW + 3.0f;
 		}
 
-		// 3) 世界分区调试覆盖层开关 (Partition: ON / OFF) - 固定 76px 宽
-		const float partBtnW = 76.0f;
-		if (rightCursor - partBtnW >= pillRightBound)
+		// 3) 分区开关 (Part) - 开启时高亮，严禁带有 : ON / : OFF
+		if (rightCursor + partBtnW <= rightLimit)
 		{
-			rightCursor -= partBtnW;
-			const Wui::WuiRect partBtn { rightCursor, sceneRect.Y + kChromePad, partBtnW, kChromeRowH };
-			const std::string partLabel = m_ShowWorldPartition ? "Part: ON" : "Part: OFF";
+			const Wui::WuiRect partBtn { rightCursor, rightBtnY, partBtnW, kBtnH };
 			Wui::Tooltip(ctx, partBtn, Wui::Tr("viewport.partition.hint", "Toggle world partition & streaming chunk overlay."));
 			auto partTheme = theme;
 			if (m_ShowWorldPartition)
@@ -468,36 +528,46 @@ namespace World
 				m_ShowWorldPartition = !m_ShowWorldPartition;
 			}
 			ctx.RegisterOverlayRect(partBtn);
-			rightCursor -= 4.0f;
+			rightCursor += partBtnW + 3.0f;
 		}
 
-		// 4) 数据层收拢下拉按钮 (Layers: N/M ▼)
-		const std::vector<Level::DataLayerDefinition>& dataLayers = m_Host.GetLevelDataLayers();
-		const uint32_t activeLayers = m_Host.GetActiveDataLayers();
-		Wui::WuiRect layersBtnRect {};
-		if (!dataLayers.empty())
+		// 4) 视角旋转锁定 (Lock) - 开启时高亮，严禁带有 : ON / : OFF
+		if (rightCursor + lockBtnW <= rightLimit)
 		{
-			size_t activeCount = 0;
-			for (const auto& layer : dataLayers)
+			const Wui::WuiRect mode2dBtn { rightCursor, rightBtnY, lockBtnW, kBtnH };
+			const bool is2D = m_Host.Is2DMode();
+			Wui::Tooltip(ctx, mode2dBtn, Wui::Tr("viewport.2d.hint", "锁定/解锁鼠标旋转视角 (锁定后禁止鼠标旋转、右键拖拽变为平移；左上角方位菜单仍可正常切换方向) (viewport.btn.toggle_2d)"));
+			auto lockTheme = theme;
+			if (is2D)
 			{
-				if (!layer.Name.empty() && (layer.LayerMask & activeLayers) != 0)
-					activeCount++;
+				lockTheme.ButtonBg = theme.ActiveBg;
+				lockTheme.Border = theme.Accent;
 			}
-			char layersLabel[64] = {};
-			std::snprintf(layersLabel, sizeof(layersLabel), "Layers: %zu/%zu ▼", activeCount, dataLayers.size());
-			const float layersBtnW = ctx.MeasureTextWidth(layersLabel, 12.0f) + 16.0f;
-			if (rightCursor - layersBtnW >= pillRightBound)
+			if (Wui::Button(ctx, Wui::HashId("viewport.btn.toggle_2d"), mode2dBtn, lockLabel, lockTheme))
 			{
-				rightCursor -= layersBtnW;
-				layersBtnRect = { rightCursor, sceneRect.Y + kChromePad, layersBtnW, kChromeRowH };
-				Wui::Tooltip(ctx, layersBtnRect, Wui::Tr("viewport.layers.hint", "Manage data layer visibility."));
-				if (Wui::Button(ctx, Wui::HashId("viewport.layers_dropdown"), layersBtnRect, layersLabel, theme))
-				{
-					ctx.OpenPopup(Wui::HashId("viewport.layers.popup"));
-				}
-				ctx.RegisterOverlayRect(layersBtnRect);
-				rightCursor -= 4.0f;
+				m_Host.Set2DMode(!is2D);
 			}
+			ctx.RegisterOverlayRect(mode2dBtn);
+			rightCursor += lockBtnW + 3.0f;
+		}
+
+		// 5) 分割线
+		if (rightCursor + 8.0f <= rightLimit)
+		{
+			const Wui::WuiRect sepRect { rightCursor, rightIslandRect.Y, 8.0f, kIslandH };
+			Wui::ToolbarSeparator(ctx, sepRect, theme);
+			rightCursor += 8.0f + 3.0f;
+		}
+
+		// 6) 运行状态徽章 (viewport.mode)
+		if (rightCursor + modeWidth <= rightIslandRect.X + rightIslandRect.W + 2.0f)
+		{
+			const Wui::WuiRect modeRect { rightCursor, rightBtnY, modeWidth, kBtnH };
+			Wui::WuiColor modeFill = modeColor;
+			modeFill.A = modeKey[0] == 'e' ? 0.12f : 0.22f;
+			Wui::Badge(ctx, modeRect, modeText, modeFill, modeColor, theme, 11.5f, true, 4.0f);
+			RegisterReadonlyNode(Wui::HashId("viewport.mode"), "text", modeText, modeKey, modeRect);
+			ctx.RegisterOverlayRect(modeRect);
 		}
 
 		// ④ 视图菜单弹层(下拉选项: 视图模式 Combo + 视图方位 Combo + 覆盖层开关)。
@@ -508,7 +578,7 @@ namespace World
 			const float comboH = 24.0f;
 			// 精确计算弹层高度: 顶部留白(6) + 2个Combo(2*comboH + 14) + 旋转锁定项(rowH + 4) + 分割线(7) + 标题(rowH) + 3个Overlays菜单项(3*rowH) + 底部留白(6)
 			const float panelH = 6.0f + (comboH * 2.0f + 14.0f) + (rowH + 4.0f) + 7.0f + rowH * 6.0f + 6.0f;
-			const Wui::WuiRect panel { viewButton.X, viewButton.Y + viewButton.H + 2.0f, 250.0f, panelH };
+			const Wui::WuiRect panel { viewButton.X, leftIslandRect.Y + leftIslandRect.H + 3.0f, 250.0f, panelH };
 			Wui::DrawPanelSurface(ctx, panel, theme);
 			ctx.RegisterOverlayRect(panel);
 			float rowY = panel.Y + 6.0f;
@@ -674,8 +744,10 @@ namespace World
 			const float rowH = 22.0f;
 			const float popupW = 200.0f;
 			const float popupH = 30.0f + static_cast<float>(dataLayers.size()) * rowH + 34.0f;
-			const float popupX = layersBtnRect.W > 0.0f ? layersBtnRect.X : (sceneRect.X + sceneRect.W - popupW - kChromePad);
-			const float popupY = layersBtnRect.H > 0.0f ? (layersBtnRect.Y + layersBtnRect.H + 2.0f) : (sceneRect.Y + 30.0f);
+			const float popupX = layersBtnRect.W > 0.0f
+				? std::min(layersBtnRect.X, sceneRect.X + sceneRect.W - popupW - kChromePad)
+				: (sceneRect.X + sceneRect.W - popupW - kChromePad);
+			const float popupY = rightIslandRect.Y + rightIslandRect.H + 3.0f;
 			const Wui::WuiRect panel { popupX, popupY, popupW, popupH };
 			Wui::DrawPanelSurface(ctx, panel, theme);
 			ctx.RegisterOverlayRect(panel);
@@ -1699,15 +1771,42 @@ namespace World
 			std::snprintf(hudLine2, sizeof(hudLine2),
 				"Layers: [%s] | Entities: %zu", layersText.c_str(), entityCount);
 
-			const float text1W = ctx.MeasureTextWidth(hudLine1, 12.0f);
-			const float text2W = ctx.MeasureTextWidth(hudLine2, 12.0f);
-			const float hudW = std::max(240.0f, std::max(text1W, text2W) + 20.0f);
-			const float hudH = 46.0f;
-			const Wui::WuiRect hudRect { sceneRect.X + sceneRect.W - hudW - 12.0f, sceneRect.Y + 12.0f, hudW, hudH };
-			Wui::PanelBackground(ctx, hudRect, Wui::WuiColor { 0.07f, 0.09f, 0.13f, 0.88f }, 4.0f);
-			Wui::HighlightOutline(ctx, hudRect, Wui::WuiColor { 0.18f, 0.65f, 0.90f, 0.70f }, 4.0f, 1.0f);
-			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 5.0f }, hudLine1, Wui::WuiColor { 0.30f, 0.90f, 1.0f, 1.0f }, 12.0f);
-			Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 24.0f }, hudLine2, Wui::WuiColor { 0.85f, 0.85f, 0.90f, 0.90f }, 12.0f);
+		// ⑤ 视口状态信息卡片下沉至右下角 (避免遮挡顶部工具栏与 3D AxisGizmo 坐标系)
+		const bool hasHudData = (hudLine1[0] != '\0' || entityCount > 0 || !m_Host.GetLevelDataLayers().empty());
+		if (hasHudData)
+		{
+			const float text1W = ctx.MeasureTextWidth(hudLine1, 11.5f);
+			const float text2W = ctx.MeasureTextWidth(hudLine2, 11.5f);
+			const float hudW = std::max(220.0f, std::max(text1W, text2W) + 20.0f);
+			const float hudH = 42.0f;
+
+			// 避让右下角 48px 坐标轴指示器 (AxisGizmo), 视口宽裕时留出 56px 避让空间
+			const float axisAvoid = (sceneRect.W >= 420.0f) ? 56.0f : 0.0f;
+			const Wui::WuiRect hudRect {
+				sceneRect.X + sceneRect.W - hudW - 12.0f - axisAvoid,
+				sceneRect.Y + sceneRect.H - hudH - 12.0f,
+				hudW,
+				hudH
+			};
+
+			Wui::PanelBackground(ctx, hudRect, Wui::WuiColor { 0.08f, 0.10f, 0.14f, 0.85f }, 6.0f);
+			Wui::HighlightOutline(ctx, hudRect, Wui::WuiColor { 0.20f, 0.25f, 0.32f, 0.70f }, 6.0f, 1.0f);
+
+			if (hudLine1[0] != '\0')
+			{
+				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 4.0f }, hudLine1,
+					Wui::WuiColor { 0.38f, 0.82f, 0.95f, 0.95f }, 11.5f);
+				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 22.0f }, hudLine2,
+					Wui::WuiColor { 0.75f, 0.78f, 0.84f, 0.90f }, 11.5f);
+			}
+			else
+			{
+				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 12.0f }, hudLine2,
+					Wui::WuiColor { 0.75f, 0.78f, 0.84f, 0.90f }, 11.5f);
+			}
+
+			ctx.RegisterOverlayRect(hudRect);
+		}
 
 		// ⑥ 飞行漫游实时速度浮动胶囊 (对标 UE5 Camera Speed Floating Badge, 居中高亮醒目呈现)
 		if (m_Host.IsFlyNavigating() || m_Host.GetFlySpeedTimer() > 0.0f)
@@ -1722,7 +1821,7 @@ namespace World
 			const float badgeH = 28.0f;
 			const Wui::WuiRect badgeRect {
 				sceneRect.X + (sceneRect.W - badgeW) * 0.5f,
-				sceneRect.Y + kChromePad + kChromeRowH + 12.0f,
+				sceneRect.Y + kChromePad + kPillH + 8.0f,
 				badgeW,
 				badgeH
 			};
