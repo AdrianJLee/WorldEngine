@@ -891,6 +891,16 @@ namespace World
 					auto& cap = selected.GetComponent<CapsuleCollider2DComponent>();
 					nowUsing = Wui::ManipulateCapsuleCollider2D(m_Host.GetGizmoCamera(), transform, cap.Offset, cap.Radius, cap.Length, cap.Direction, sceneRect, ctx, !m_Host.IsReadOnlyMode());
 				}
+				else if (selected.HasComponent<PolygonCollider2DComponent>())
+				{
+					auto& poly = selected.GetComponent<PolygonCollider2DComponent>();
+					nowUsing = ManipulatePolygonCollider2D(m_Host.GetGizmoCamera(), transform, poly, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				}
+				else if (selected.HasComponent<ChainCollider2DComponent>())
+				{
+					auto& chain = selected.GetComponent<ChainCollider2DComponent>();
+					nowUsing = ManipulateChainCollider2D(m_Host.GetGizmoCamera(), transform, chain, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				}
 			}
 			else if (m_Host.GetGizmoOperation() == Wui::GizmoOperation::Rect)
 			{

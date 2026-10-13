@@ -1,6 +1,8 @@
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/Tilemap.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Hierarchy.h"
+#include <unordered_set>
 #include "World/Core/StringPool.h"
 #include "PropertiesPanel_Internal.h"
 #include <filesystem>
@@ -53,6 +55,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawPolygonCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::ChainCollider2DComponent")
 			height = DrawChainCollider2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::CompositeCollider2DComponent")
+			height = DrawCompositeCollider2DInspector(ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::PlatformEffector2DComponent")
 			height = DrawPlatformEffector2DInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::AreaEffector2DComponent")
@@ -1218,6 +1222,16 @@ float PropertiesPanel::DrawPolygonCollider2DInspector(Wui::WuiContext& ctx, cons
 	}
 	y += 28.0f;
 
+	const bool editingCollider = m_Host.IsEditingCollider();
+	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑多边形 (Edit Polygon)";
+	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑多边形顶点 (prop.poly2d.edit)");
+	if (Wui::Button(ctx, Wui::HashId("prop.poly2d.edit"), btnEditCol, editColText, theme))
+	{
+		m_Host.SetEditingCollider(!editingCollider);
+	}
+	y += 28.0f;
+
 	return (y + 6.0f) - rect.Y;
 }
 
@@ -1267,6 +1281,122 @@ float PropertiesPanel::DrawChainCollider2DInspector(Wui::WuiContext& ctx, const 
 		if (changedFields) { changedFields->push_back("Points"); changedFields->push_back("Loop"); }
 	}
 	y += 28.0f;
+
+	const bool editingCollider = m_Host.IsEditingCollider();
+	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑折线链 (Edit Chain)";
+	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑折线链顶点 (prop.chain2d.edit)");
+	if (Wui::Button(ctx, Wui::HashId("prop.chain2d.edit"), btnEditCol, editColText, theme))
+	{
+		m_Host.SetEditingCollider(!editingCollider);
+	}
+	y += 28.0f;
+
+	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawCompositeCollider2DInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	auto* comp = static_cast<World::CompositeCollider2DComponent*>(instance);
+	if (!comp) return height;
+
+	// 1. GeometryType 切换按钮
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "几何合并模式 (Geometry Type):", theme.TextMuted, 11.5f);
+	y += 20.0f;
+
+	const float btnW = 120.0f;
+	const float btnH = 24.0f;
+	const Wui::WuiRect btnPoly  { rect.X + 12.0f, y, btnW, btnH };
+	const Wui::WuiRect btnChain { rect.X + 138.0f, y, btnW, btnH };
+
+	const std::string polyText = (comp->GeometryType == 0) ? "● 多边形 (Polygons)" : "  多边形 (Polygons)";
+	const std::string chainText = (comp->GeometryType == 1) ? "● 轮廓链 (OutlineChain)" : "  轮廓链 (OutlineChain)";
+
+	Wui::Tooltip(ctx, btnPoly, "合并为多边形实体并集 (Box2D 多边形碰撞体)");
+	if (Wui::Button(ctx, Wui::HashId("prop.comp2d.geom_poly"), btnPoly, polyText, theme))
+	{
+		comp->GeometryType = 0;
+		if (changedFields) changedFields->push_back("GeometryType");
+		m_Host.MarkDocumentDirty();
+	}
+
+	Wui::Tooltip(ctx, btnChain, "合并为外部闭合轮廓链 (Box2D 链式线段碰撞体)");
+	if (Wui::Button(ctx, Wui::HashId("prop.comp2d.geom_chain"), btnChain, chainText, theme))
+	{
+		comp->GeometryType = 1;
+		if (changedFields) changedFields->push_back("GeometryType");
+		m_Host.MarkDocumentDirty();
+	}
+	y += 30.0f;
+
+	// 2. 统计当前实体及其子实体中收集的子碰撞体数量
+	int boxCount = 0;
+	int circleCount = 0;
+	int capsuleCount = 0;
+	int polyCount = 0;
+	int totalColliders = 0;
+
+	if (entity.IsValid() && entity.GetScene())
+	{
+		const entt::registry& reg = entity.GetScene()->GetRegistry();
+		std::unordered_set<entt::entity> visited;
+		std::vector<entt::entity> stack;
+		stack.push_back(static_cast<entt::entity>(entity));
+
+		while (!stack.empty())
+		{
+			entt::entity curr = stack.back();
+			stack.pop_back();
+
+			if (!reg.valid(curr) || visited.count(curr))
+				continue;
+			visited.insert(curr);
+
+			if (reg.all_of<BoxCollider2DComponent>(curr)) { ++boxCount; ++totalColliders; }
+			if (reg.all_of<CircleCollider2DComponent>(curr)) { ++circleCount; ++totalColliders; }
+			if (reg.all_of<CapsuleCollider2DComponent>(curr)) { ++capsuleCount; ++totalColliders; }
+			if (reg.all_of<PolygonCollider2DComponent>(curr)) { ++polyCount; ++totalColliders; }
+
+			const auto& children = Hierarchy::ChildrenOf(reg, curr);
+			for (entt::entity child : children)
+			{
+				if (reg.valid(child))
+					stack.push_back(child);
+			}
+		}
+	}
+
+	// 3. 绘制统计提示卡片
+	const float cardW = std::max(200.0f, rect.W - 24.0f);
+	const float cardH = (totalColliders > 0) ? 52.0f : 44.0f;
+	const Wui::WuiRect cardRect { rect.X + 12.0f, y, cardW, cardH };
+	Wui::PanelBackground(ctx, cardRect, theme.PanelBg, 4.0f);
+	Wui::HighlightOutline(ctx, cardRect, (totalColliders > 0) ? Wui::WuiColor { 0.2f, 0.75f, 0.4f, 0.6f } : Wui::WuiColor { 0.4f, 0.4f, 0.45f, 0.5f }, 4.0f, 1.0f);
+
+	if (totalColliders > 0)
+	{
+		std::string summary = "✓ 已聚合 " + std::to_string(totalColliders) + " 个子碰撞体 (Box: " +
+			std::to_string(boxCount) + ", Poly: " + std::to_string(polyCount) +
+			", Circle: " + std::to_string(circleCount) + ", Cap: " + std::to_string(capsuleCount) + ")";
+		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 6.0f }, summary, { 0.35f, 0.88f, 0.45f, 1.0f }, 11.5f);
+
+		std::string geomNote = (comp->GeometryType == 0)
+			? "当前合成目标: 多边形实体 (Polygons 模式)"
+			: "当前合成目标: 闭合外轮廓 (OutlineChain 模式)";
+		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 28.0f }, geomNote, theme.TextMuted, 10.5f);
+	}
+	else
+	{
+		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 6.0f }, "ℹ 暂未聚合到子碰撞体", { 0.9f, 0.75f, 0.25f, 1.0f }, 11.5f);
+		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 24.0f }, "提示: 在此实体或其子级添加 Box/Polygon 碰撞体以自动合并", theme.TextMuted, 10.5f);
+	}
+	y += cardH + 8.0f;
 
 	return (y + 6.0f) - rect.Y;
 }

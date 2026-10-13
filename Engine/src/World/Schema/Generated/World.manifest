@@ -25,6 +25,7 @@ struct World::CircleCollider2DComponent
 struct World::CapsuleCollider2DComponent
 struct World::PolygonCollider2DComponent
 struct World::ChainCollider2DComponent
+struct World::CompositeCollider2DComponent
 struct World::PlatformEffector2DComponent
 struct World::DistanceJoint2DComponent
 struct World::RevoluteJoint2DComponent

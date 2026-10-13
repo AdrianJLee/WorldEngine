@@ -177,7 +177,9 @@ namespace World
 			{ "SetAngularVelocity", { { "velocity", "number", "New angular velocity in radians per second." } }, "", "Set the angular velocity of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running." },
 			{ "ApplyLinearImpulse", { { "impulse", "vec2", "Impulse vector in kilogram-metres per second, applied at the centre of mass." } }, "", "Apply a linear impulse to this entity's dynamic 2D rigid body (also wakes it); raises when the entity has no live body or the 2D physics world is not running." },
 			{ "ApplyForce", { { "force", "vec2", "Force vector in newtons, applied at the centre of mass for one step." } }, "", "Apply a force to this entity's dynamic 2D rigid body (also wakes it); raises when the entity has no live body or the 2D physics world is not running." },
-			{ "SyncPhysicsBody", {}, "", "Teleport this entity's 2D rigid body to the current Transform location/rotation (Z radian) and wake it; used for kinematic/static bodies; raises when the entity has no live body or the 2D physics world is not running." }
+			{ "SyncPhysicsBody", {}, "", "Teleport this entity's 2D rigid body to the current Transform location/rotation (Z radian) and wake it; used for kinematic/static bodies; raises when the entity has no live body or the 2D physics world is not running." },
+			{ "DropThrough", { { "duration", "number", "Optional duration in seconds (default 0.35)." } }, "", "Enable one-way platform drop-through for this entity across one-way platforms in the scene." },
+			{ "DropThroughPlatform", { { "platformEntity", "Entity", "Platform entity to drop through." }, { "duration", "number", "Optional duration in seconds (default 0.35)." } }, "", "Enable one-way platform drop-through for this entity specifically on the specified platform." }
 		};
 		type.BindFunc = [](ScriptBindingContext& bindings)
 		{
@@ -475,6 +477,44 @@ namespace World
 						Entity* entity = Receiver(context, args, count, "SyncPhysicsBody");
 						RequirePhysicsBody(*entity, "SyncPhysicsBody");
 						entity->GetScene()->SyncPhysicsBodyFromTransform(static_cast<entt::entity>(*entity));
+						return ScriptValue::Nil();
+					} },
+				{ "DropThrough", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "DropThrough");
+						RequireEntity(*entity, "DropThrough");
+						float duration = 0.35f;
+						if (count >= 2 && !args[1].IsNil())
+							duration = RequireFiniteFloat(args, count, "DropThrough", 1);
+						Scene* scene = entity->GetScene();
+						if (!scene)
+							throw std::logic_error("Entity:DropThrough scene is invalid");
+						const entt::entity selfEnt = static_cast<entt::entity>(*entity);
+						scene->RegisterPlatformDropThrough(entt::null, selfEnt, duration);
+						for (const auto [platEnt, effector] : scene->GetRegistry().view<PlatformEffector2DComponent>().each())
+						{
+							scene->RegisterPlatformDropThrough(platEnt, selfEnt, duration);
+						}
+						return ScriptValue::Nil();
+					} },
+				{ "DropThroughPlatform", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "DropThroughPlatform");
+						RequireEntity(*entity, "DropThroughPlatform");
+						Entity* platform = nullptr;
+						if (count < 2 || !context.Unwrap<Entity>("Entity", args[1], &platform) || !platform)
+							throw std::logic_error("Entity:DropThroughPlatform expects an Entity platform");
+						if (!platform->IsValid() || platform->GetScene() != entity->GetScene())
+							throw std::logic_error("Entity:DropThroughPlatform platform entity is invalid or belongs to another scene");
+						float duration = 0.35f;
+						if (count >= 3 && !args[2].IsNil())
+							duration = RequireFiniteFloat(args, count, "DropThroughPlatform", 2);
+						Scene* scene = entity->GetScene();
+						if (!scene)
+							throw std::logic_error("Entity:DropThroughPlatform scene is invalid");
+						scene->RegisterPlatformDropThrough(static_cast<entt::entity>(*platform), static_cast<entt::entity>(*entity), duration);
 						return ScriptValue::Nil();
 					} },
 			};

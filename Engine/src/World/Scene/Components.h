@@ -1055,6 +1055,36 @@ namespace World
 	static_assert(sizeof(ChainCollider2DComponent) == 24, "ChainCollider2DComponent must be exactly 24 bytes");
 	static_assert(std::is_trivially_copyable_v<ChainCollider2DComponent>, "ChainCollider2DComponent must be trivially copyable");
 
+	struct CompositeCollider2DComponent
+	{
+		float Density = 1.0f;
+		float Friction = 0.5f;
+		float Restitution = 0.0f;
+		uint8_t GeometryType = 0; // 0 = Polygons, 1 = OutlineChain
+		bool IsSensor = false;
+		bool ShowCollider = true;
+		uint8_t _Padding = 0;
+
+		WE_SCHEMA_BODY(World, CompositeCollider2DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/2D"),
+				Doc("2D composite collider: merges Box and Polygon colliders across this entity and its children into a unified collision body."))
+			WE_FIELD(Density, Float, Default(1.0f),
+				Doc("Mass density per unit area."));
+			WE_FIELD(Friction, Float, Default(0.5f),
+				Doc("Surface friction against other colliders."));
+			WE_FIELD(Restitution, Float, Default(0.0f),
+				Doc("Bounciness restitution coefficient."));
+			WE_FIELD(GeometryType, UInt8, Default(0),
+				Doc("Composite geometry type: 0 = Polygons, 1 = OutlineChain."));
+			WE_FIELD(IsSensor, Bool, Default(false),
+				Doc("Sensor mode (triggers only, no physical response)."));
+			WE_FIELD(ShowCollider, Bool, Default(true),
+				Doc("Draw composite debug wireframe."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(CompositeCollider2DComponent) == 16, "CompositeCollider2DComponent must be exactly 16 bytes");
+	static_assert(std::is_trivially_copyable_v<CompositeCollider2DComponent>, "CompositeCollider2DComponent must be trivially copyable");
+
 	struct PlatformEffector2DComponent
 	{
 		float SurfaceArc = 180.0f;

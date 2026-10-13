@@ -71,6 +71,7 @@ namespace
 		{ "World::CapsuleCollider2DComponent",   32 },
 		{ "World::PolygonCollider2DComponent",   28 },
 		{ "World::ChainCollider2DComponent",     24 },
+		{ "World::CompositeCollider2DComponent", 16 },
 		{ "World::PlatformEffector2DComponent",  16 },
 		{ "World::DistanceJoint2DComponent",    40 },
 		{ "World::RevoluteJoint2DComponent",    40 },

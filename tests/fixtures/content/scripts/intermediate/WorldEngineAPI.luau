@@ -32,6 +32,15 @@ function Entity:CreateChild() end
 ---Destroy this entity through scene cleanup; requests during callbacks are deferred and duplicates are ignored.
 function Entity:Destroy() end
 
+---Enable one-way platform drop-through for this entity across one-way platforms in the scene.
+---@param duration number Optional duration in seconds (default 0.35).
+function Entity:DropThrough(duration) end
+
+---Enable one-way platform drop-through for this entity specifically on the specified platform.
+---@param platformEntity Entity Platform entity to drop through.
+---@param duration number Optional duration in seconds (default 0.35).
+function Entity:DropThroughPlatform(platformEntity, duration) end
+
 ---Find the first matching entity in the scene. Entities synchronously created during the current script update stay hidden until the next frame.
 ---@param name string TagComponent name to find.
 ---@return Entity|nil
@@ -826,6 +835,15 @@ function ui:isOpen() end
 ---@field Thickness number
 ---@field Color vec4
 
+-- Component fields are exposed through Entity:GetComponent("CompositeCollider2DComponent"); there is no runtime global named CompositeCollider2DComponent.
+---@class CompositeCollider2DComponent
+---@field GeometryType number
+---@field Restitution number
+---@field Density number
+---@field ShowCollider boolean
+---@field IsSensor boolean
+---@field Friction number
+
 -- Component fields are exposed through Entity:GetComponent("DirectionalLightComponent"); there is no runtime global named DirectionalLightComponent.
 ---@class DirectionalLightComponent
 ---@field Color vec3
@@ -1156,6 +1174,8 @@ function ui:isOpen() end
 ---@field CircleCollider2D string Short alias for "CircleCollider2DComponent".
 ---@field CircleRendererComponent string Registered component type name "CircleRendererComponent".
 ---@field CircleRenderer string Short alias for "CircleRendererComponent".
+---@field CompositeCollider2DComponent string Registered component type name "CompositeCollider2DComponent".
+---@field CompositeCollider2D string Short alias for "CompositeCollider2DComponent".
 ---@field DirectionalLightComponent string Registered component type name "DirectionalLightComponent".
 ---@field DirectionalLight string Short alias for "DirectionalLightComponent".
 ---@field DistanceJoint2DComponent string Registered component type name "DistanceJoint2DComponent".

@@ -157,6 +157,22 @@ namespace World
 			return it == joints.end() ? b2_nullJointId : it->second;
 		}
 
+		static bool IsSubsumedByCompositeCollider(const entt::registry& registry, entt::entity entity)
+		{
+			entt::entity current = entity;
+			uint32_t guard = 0;
+			while (guard++ < 512)
+			{
+				const auto* hier = registry.try_get<HierarchyComponent>(current);
+				if (!hier || hier->Parent == entt::null || !registry.valid(hier->Parent))
+					break;
+				current = hier->Parent;
+				if (registry.any_of<CompositeCollider2DComponent>(current))
+					return true;
+			}
+			return false;
+		}
+
 		// W3f:刚体创建的唯一实现(世界启动与运行时 AddComponent 共用)。
 		// 形状/质量折算与 OnPhysics2DStart 的既有口径一致:位置/旋转取 Transform,尺寸乘 Scale。
 		bool BuildRuntimeBody(b2WorldId worldId, entt::registry& registry,
@@ -164,9 +180,12 @@ namespace World
 			std::unordered_map<entt::entity, uint64_t>& filters, entt::entity entity)
 		{
 			if (!b2World_IsValid(worldId)) return false;
+			if (IsSubsumedByCompositeCollider(registry, entity))
+				return false;
 			auto* rb = registry.try_get<RigidBody2DComponent>(entity);
 			const bool hasCollider = registry.any_of<BoxCollider2DComponent, CircleCollider2DComponent,
-				CapsuleCollider2DComponent, PolygonCollider2DComponent, ChainCollider2DComponent>(entity);
+				CapsuleCollider2DComponent, PolygonCollider2DComponent, ChainCollider2DComponent,
+				CompositeCollider2DComponent>(entity);
 			const auto* tilemapForBody = registry.try_get<TilemapComponent>(entity);
 			const bool hasTilemapColl = (tilemapForBody && tilemapForBody->GenerateCollision);
 			if ((!rb && !hasCollider && !hasTilemapColl) || b2Body_IsValid(FindBody2D(bodies, entity)))
@@ -208,6 +227,7 @@ namespace World
 				shapeDef.isSensor = isSensor;
 				shapeDef.enableContactEvents = true;
 				shapeDef.enableSensorEvents = true;
+				shapeDef.enablePreSolveEvents = (rb->Type == RigidBody2DComponent::BodyType::Dynamic);
 				shapeDef.userData = Physics::PackEntityUserData(entity);
 				if (const auto* surf = registry.try_get<SurfaceEffector2DComponent>(entity))
 				{
@@ -215,64 +235,206 @@ namespace World
 						shapeDef.material.tangentSpeed = surf->Speed;
 				}
 			};
-			if (const auto* box = registry.try_get<BoxCollider2DComponent>(entity))
+			if (const auto* composite = registry.try_get<CompositeCollider2DComponent>(entity))
 			{
-				b2ShapeDef shapeDef = b2DefaultShapeDef();
-				shapeDef.density = box->Density;
-				shapeDef.material.friction = box->Friction;
-				shapeDef.material.restitution = box->Restitution;
-				PrepareShape(shapeDef, box->IsSensor);
-				b2Polygon polygon = b2MakeOffsetBox(transform->Scale.x * box->Size.x, transform->Scale.y * box->Size.y,
-					{ box->Offset.x, box->Offset.y }, b2MakeRot(0.0f));
-				b2CreatePolygonShape(body, &shapeDef, &polygon);
-			}
-			if (const auto* circle = registry.try_get<CircleCollider2DComponent>(entity))
-			{
-				b2Circle shape;
-				shape.center = { circle->Offset.x, circle->Offset.y };
-				shape.radius = circle->Radius * transform->Scale.x;
-				b2ShapeDef shapeDef = b2DefaultShapeDef();
-				shapeDef.density = circle->Density;
-				shapeDef.material.friction = circle->Friction;
-				shapeDef.material.restitution = circle->Restitution;
-				PrepareShape(shapeDef, circle->IsSensor);
-				b2CreateCircleShape(body, &shapeDef, &shape);
-			}
-			if (const auto* capsule = registry.try_get<CapsuleCollider2DComponent>(entity))
-			{
-				b2Capsule shape;
-				const float halfLen = capsule->Length * 0.5f;
-				if (capsule->Direction == 0) // Vertical
+				std::vector<entt::entity> targetEntities;
+				targetEntities.push_back(entity);
+
+				std::function<void(entt::entity)> collectChildren = [&](entt::entity parent)
 				{
-					shape.center1 = { capsule->Offset.x, capsule->Offset.y - halfLen * transform->Scale.y };
-					shape.center2 = { capsule->Offset.x, capsule->Offset.y + halfLen * transform->Scale.y };
-					shape.radius = capsule->Radius * transform->Scale.x;
-				}
-				else // Horizontal
+					const auto& children = Hierarchy::ChildrenOf(registry, parent);
+					for (entt::entity child : children)
+					{
+						if (registry.valid(child) && std::find(targetEntities.begin(), targetEntities.end(), child) == targetEntities.end())
+						{
+							targetEntities.push_back(child);
+							collectChildren(child);
+						}
+					}
+					for (auto [childEnt, hier] : registry.view<HierarchyComponent>().each())
+					{
+						if (hier.Parent == parent && registry.valid(childEnt) &&
+							std::find(targetEntities.begin(), targetEntities.end(), childEnt) == targetEntities.end())
+						{
+							targetEntities.push_back(childEnt);
+							collectChildren(childEnt);
+						}
+					}
+				};
+				collectChildren(entity);
+
+				for (const entt::entity currEnt : targetEntities)
 				{
-					shape.center1 = { capsule->Offset.x - halfLen * transform->Scale.x, capsule->Offset.y };
-					shape.center2 = { capsule->Offset.x + halfLen * transform->Scale.x, capsule->Offset.y };
-					shape.radius = capsule->Radius * transform->Scale.y;
+					glm::mat4 m(1.0f);
+					if (currEnt != entity)
+					{
+						entt::entity cur = currEnt;
+						uint32_t guard = 0;
+						while (cur != entity && cur != entt::null && registry.valid(cur) && guard++ < 64)
+						{
+							if (const auto* tr = registry.try_get<TransformComponent>(cur))
+								m = tr->GetLocalMatrix() * m;
+							const auto* hier = registry.try_get<HierarchyComponent>(cur);
+							cur = hier ? hier->Parent : entt::null;
+						}
+					}
+					const glm::mat4 relTransform = glm::scale(glm::mat4(1.0f), glm::vec3(transform->Scale.x, transform->Scale.y, 1.0f)) * m;
+
+					if (const auto* box = registry.try_get<BoxCollider2DComponent>(currEnt))
+					{
+						const glm::vec2 offset = box->Offset;
+						const glm::vec2 halfSize = box->Size;
+						const glm::vec4 corners[4] = {
+							relTransform * glm::vec4(offset.x - halfSize.x, offset.y - halfSize.y, 0.0f, 1.0f),
+							relTransform * glm::vec4(offset.x + halfSize.x, offset.y - halfSize.y, 0.0f, 1.0f),
+							relTransform * glm::vec4(offset.x + halfSize.x, offset.y + halfSize.y, 0.0f, 1.0f),
+							relTransform * glm::vec4(offset.x - halfSize.x, offset.y + halfSize.y, 0.0f, 1.0f)
+						};
+					b2Vec2 b2Pts[4];
+					for (int i = 0; i < 4; ++i)
+						b2Pts[i] = { corners[i].x, corners[i].y };
+					b2Hull hull = b2ComputeHull(b2Pts, 4);
+					if (hull.count >= 3)
+					{
+						b2Polygon b2Poly = b2MakePolygon(&hull, 0.0f);
+						b2ShapeDef shapeDef = b2DefaultShapeDef();
+						shapeDef.density = composite->Density;
+						shapeDef.material.friction = composite->Friction;
+						shapeDef.material.restitution = composite->Restitution;
+						PrepareShape(shapeDef, composite->IsSensor);
+						b2CreatePolygonShape(body, &shapeDef, &b2Poly);
+					}
+					}
+					if (const auto* circle = registry.try_get<CircleCollider2DComponent>(currEnt))
+					{
+						const glm::vec4 center4 = relTransform * glm::vec4(circle->Offset.x, circle->Offset.y, 0.0f, 1.0f);
+						const float scaleX = glm::length(glm::vec2(relTransform[0]));
+						const float scaleY = glm::length(glm::vec2(relTransform[1]));
+						const float radius = circle->Radius * std::max(scaleX, scaleY);
+						b2Circle shape;
+						shape.center = { center4.x, center4.y };
+						shape.radius = radius;
+						b2ShapeDef shapeDef = b2DefaultShapeDef();
+						shapeDef.density = composite->Density;
+						shapeDef.material.friction = composite->Friction;
+						shapeDef.material.restitution = composite->Restitution;
+						PrepareShape(shapeDef, composite->IsSensor);
+						b2CreateCircleShape(body, &shapeDef, &shape);
+					}
+					if (const auto* capsule = registry.try_get<CapsuleCollider2DComponent>(currEnt))
+					{
+						const float halfLen = capsule->Length * 0.5f;
+						glm::vec4 c1(0.0f), c2(0.0f);
+						if (capsule->Direction == 0) // Vertical
+						{
+							c1 = relTransform * glm::vec4(capsule->Offset.x, capsule->Offset.y - halfLen, 0.0f, 1.0f);
+							c2 = relTransform * glm::vec4(capsule->Offset.x, capsule->Offset.y + halfLen, 0.0f, 1.0f);
+						}
+						else // Horizontal
+						{
+							c1 = relTransform * glm::vec4(capsule->Offset.x - halfLen, capsule->Offset.y, 0.0f, 1.0f);
+							c2 = relTransform * glm::vec4(capsule->Offset.x + halfLen, capsule->Offset.y, 0.0f, 1.0f);
+						}
+						const float scaleX = glm::length(glm::vec2(relTransform[0]));
+						const float scaleY = glm::length(glm::vec2(relTransform[1]));
+						const float radius = capsule->Radius * std::max(scaleX, scaleY);
+						b2Capsule shape;
+						shape.center1 = { c1.x, c1.y };
+						shape.center2 = { c2.x, c2.y };
+						shape.radius = radius;
+						b2ShapeDef shapeDef = b2DefaultShapeDef();
+						shapeDef.density = composite->Density;
+						shapeDef.material.friction = composite->Friction;
+						shapeDef.material.restitution = composite->Restitution;
+						PrepareShape(shapeDef, composite->IsSensor);
+						b2CreateCapsuleShape(body, &shapeDef, &shape);
+					}
+					if (const auto* poly = registry.try_get<PolygonCollider2DComponent>(currEnt))
+					{
+						const auto triangles = Physics2D::DecomposeOrTriangulatePolygon(poly->GetPoints());
+						for (const auto& tri : triangles)
+						{
+							std::vector<b2Vec2> b2Pts(tri.size());
+							for (size_t i = 0; i < tri.size(); ++i)
+							{
+								const glm::vec4 p = relTransform * glm::vec4(poly->Offset.x + tri[i].x, poly->Offset.y + tri[i].y, 0.0f, 1.0f);
+								b2Pts[i] = { p.x, p.y };
+							}
+							b2Hull hull = b2ComputeHull(b2Pts.data(), static_cast<int>(b2Pts.size()));
+							if (hull.count >= 3)
+							{
+								b2Polygon b2Poly = b2MakePolygon(&hull, 0.0f);
+								b2ShapeDef shapeDef = b2DefaultShapeDef();
+								shapeDef.density = composite->Density;
+								shapeDef.material.friction = composite->Friction;
+								shapeDef.material.restitution = composite->Restitution;
+								PrepareShape(shapeDef, composite->IsSensor);
+								b2CreatePolygonShape(body, &shapeDef, &b2Poly);
+							}
+						}
+					}
 				}
+			}
+			else
+			{
+				if (const auto* box = registry.try_get<BoxCollider2DComponent>(entity))
+				{
+					b2ShapeDef shapeDef = b2DefaultShapeDef();
+					shapeDef.density = box->Density;
+					shapeDef.material.friction = box->Friction;
+					shapeDef.material.restitution = box->Restitution;
+					PrepareShape(shapeDef, box->IsSensor);
+					b2Polygon polygon = b2MakeOffsetBox(transform->Scale.x * box->Size.x, transform->Scale.y * box->Size.y,
+						{ box->Offset.x, box->Offset.y }, b2MakeRot(0.0f));
+					b2CreatePolygonShape(body, &shapeDef, &polygon);
+				}
+				if (const auto* circle = registry.try_get<CircleCollider2DComponent>(entity))
+				{
+					b2Circle shape;
+					shape.center = { circle->Offset.x, circle->Offset.y };
+					shape.radius = circle->Radius * transform->Scale.x;
+					b2ShapeDef shapeDef = b2DefaultShapeDef();
+					shapeDef.density = circle->Density;
+					shapeDef.material.friction = circle->Friction;
+					shapeDef.material.restitution = circle->Restitution;
+					PrepareShape(shapeDef, circle->IsSensor);
+					b2CreateCircleShape(body, &shapeDef, &shape);
+				}
+				if (const auto* capsule = registry.try_get<CapsuleCollider2DComponent>(entity))
+				{
+					b2Capsule shape;
+					const float halfLen = capsule->Length * 0.5f;
+					if (capsule->Direction == 0) // Vertical
+					{
+						shape.center1 = { capsule->Offset.x, capsule->Offset.y - halfLen * transform->Scale.y };
+						shape.center2 = { capsule->Offset.x, capsule->Offset.y + halfLen * transform->Scale.y };
+						shape.radius = capsule->Radius * transform->Scale.x;
+					}
+					else // Horizontal
+					{
+						shape.center1 = { capsule->Offset.x - halfLen * transform->Scale.x, capsule->Offset.y };
+						shape.center2 = { capsule->Offset.x + halfLen * transform->Scale.x, capsule->Offset.y };
+						shape.radius = capsule->Radius * transform->Scale.y;
+					}
 				b2ShapeDef shapeDef = b2DefaultShapeDef();
 				shapeDef.density = capsule->Density;
 				shapeDef.material.friction = capsule->Friction;
 				shapeDef.material.restitution = capsule->Restitution;
 				PrepareShape(shapeDef, capsule->IsSensor);
 				b2CreateCapsuleShape(body, &shapeDef, &shape);
-			}
-			if (const auto* poly = registry.try_get<PolygonCollider2DComponent>(entity))
-			{
-				const auto triangles = Physics2D::DecomposeOrTriangulatePolygon(poly->GetPoints());
-				for (const auto& tri : triangles)
+				}
+				if (const auto* poly = registry.try_get<PolygonCollider2DComponent>(entity))
 				{
-					std::vector<b2Vec2> b2Pts(tri.size());
-					for (size_t i = 0; i < tri.size(); ++i)
+					const auto triangles = Physics2D::DecomposeOrTriangulatePolygon(poly->GetPoints());
+					for (const auto& tri : triangles)
 					{
-						b2Pts[i] = { (poly->Offset.x + tri[i].x) * transform->Scale.x,
-						             (poly->Offset.y + tri[i].y) * transform->Scale.y };
-					}
-					b2Hull hull = b2ComputeHull(b2Pts.data(), static_cast<int>(b2Pts.size()));
+						std::vector<b2Vec2> b2Pts(tri.size());
+						for (size_t i = 0; i < tri.size(); ++i)
+						{
+							b2Pts[i] = { (poly->Offset.x + tri[i].x) * transform->Scale.x,
+							             (poly->Offset.y + tri[i].y) * transform->Scale.y };
+						}
+						b2Hull hull = b2ComputeHull(b2Pts.data(), static_cast<int>(b2Pts.size()));
 					if (hull.count >= 3)
 					{
 						b2Polygon b2Poly = b2MakePolygon(&hull, 0.0f);
@@ -283,6 +445,7 @@ namespace World
 						PrepareShape(shapeDef, poly->IsSensor);
 						b2CreatePolygonShape(body, &shapeDef, &b2Poly);
 					}
+				}
 				}
 			}
 			if (const auto* chain = registry.try_get<ChainCollider2DComponent>(entity))
@@ -1801,6 +1964,33 @@ namespace World
 		return true;
 	}
 
+	void Scene::RegisterPlatformDropThrough(entt::entity platform, entt::entity target, float duration)
+	{
+		if (duration <= 0.0f) return;
+		for (auto& record : m_PlatformDropThroughs)
+		{
+			if (record.Platform == platform && record.Target == target)
+			{
+				record.RemainingTime = std::max(record.RemainingTime, duration);
+				return;
+			}
+		}
+		m_PlatformDropThroughs.push_back({ platform, target, duration });
+	}
+
+	bool Scene::IsPlatformDropThroughActive(entt::entity platform, entt::entity target) const
+	{
+		for (const auto& record : m_PlatformDropThroughs)
+		{
+			if (record.Target == target && (record.Platform == platform || record.Platform == entt::null))
+			{
+				if (record.RemainingTime > 0.0f)
+					return true;
+			}
+		}
+		return false;
+	}
+
 	b2BodyId Scene::GetPhysicsBody2D(entt::entity entity) const
 	{
 		return FindBody2D(m_PhysicsBodies2D, entity);
@@ -2348,13 +2538,18 @@ namespace World
 			entt::entity entityA = Physics::UnpackEntityUserData(b2Shape_GetUserData(shapeIdA));
 			entt::entity entityB = Physics::UnpackEntityUserData(b2Shape_GetUserData(shapeIdB));
 
+			const Scene* constScene = scene;
+			const auto& reg = constScene->GetRegistry();
 			auto checkEffector = [&](entt::entity platformEnt, entt::entity otherEnt, b2ShapeId platformShape, b2ShapeId otherShape, const glm::vec2& normFromPlat) -> bool
 			{
-				if (!scene->GetRegistry().valid(platformEnt)) return true;
-				const auto* effector = scene->GetRegistry().try_get<PlatformEffector2DComponent>(platformEnt);
+				if (!reg.valid(platformEnt)) return true;
+				const auto* effector = reg.try_get<PlatformEffector2DComponent>(platformEnt);
 				if (!effector || !effector->OneWay) return true;
 
-				const auto* transform = scene->GetRegistry().try_get<TransformComponent>(platformEnt);
+				if (scene->IsPlatformDropThroughActive(platformEnt, otherEnt))
+					return false;
+
+				const auto* transform = reg.try_get<TransformComponent>(platformEnt);
 				const float rotZ = transform ? transform->GetEulerAngles().z : 0.0f;
 
 				const b2BodyId bodyPlat = b2Shape_GetBody(platformShape);
@@ -2405,6 +2600,11 @@ namespace World
 			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
 				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
 		}
+		for (const auto entity : m_Registry.view<CompositeCollider2DComponent>())
+		{
+			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
+		}
 	}
 
 	void Scene::OnUpdatePhysics2D(Timestep ts)
@@ -2415,6 +2615,15 @@ namespace World
 		// P5:步进前同步 Layer/Mask(字段可被脚本/面板/读档改,任何写入路径都要生效)。
 		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 			SyncBodyFilter2D(entity);
+		const float dt = ts.GetSeconds();
+		for (auto it = m_PlatformDropThroughs.begin(); it != m_PlatformDropThroughs.end(); )
+		{
+			it->RemainingTime -= dt;
+			if (it->RemainingTime <= 0.0f || !m_Registry.valid(it->Target))
+				it = m_PlatformDropThroughs.erase(it);
+			else
+				++it;
+		}
 		b2World_Step(m_PhysicsWorldId, ts.GetSeconds(), 4);
 		// P5:步进结束后立刻把 Box2D 的 begin/end/persist 翻译进场景事件队列
 		// (队列在"本帧第一个固定步"清空,由 RunFixedFrameSystems 负责)。
@@ -2544,6 +2753,7 @@ namespace World
 		if (b2World_IsValid(m_PhysicsWorldId)) b2DestroyWorld(m_PhysicsWorldId);
 		m_PhysicsWorldId = b2_nullWorldId;
 		m_SensorOverlaps2D.clear();   // 世界没了,重叠状态不能跨运行存活
+		m_PlatformDropThroughs.clear();
 		m_PhysicsBodies2D.clear();
 		m_PhysicsFilter2D.clear();
 	}

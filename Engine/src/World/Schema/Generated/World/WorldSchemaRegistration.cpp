@@ -35,6 +35,7 @@ const TypeSchema& WeSchemaOf_CircleCollider2DComponent();
 const TypeSchema& WeSchemaOf_CapsuleCollider2DComponent();
 const TypeSchema& WeSchemaOf_PolygonCollider2DComponent();
 const TypeSchema& WeSchemaOf_ChainCollider2DComponent();
+const TypeSchema& WeSchemaOf_CompositeCollider2DComponent();
 const TypeSchema& WeSchemaOf_PlatformEffector2DComponent();
 const TypeSchema& WeSchemaOf_DistanceJoint2DComponent();
 const TypeSchema& WeSchemaOf_RevoluteJoint2DComponent();
@@ -5394,6 +5395,208 @@ struct GeneratedAccess<World::ChainCollider2DComponent>
 };
 
 template <>
+struct GeneratedAccess<World::CompositeCollider2DComponent>
+{
+    static Value Get_Density(const void* instance)
+    {
+        const World::CompositeCollider2DComponent* self = static_cast<const World::CompositeCollider2DComponent*>(instance);
+        return Value(self->Density);
+    }
+    static void Set_Density(void* instance, const Value& value)
+    {
+        World::CompositeCollider2DComponent* self = static_cast<World::CompositeCollider2DComponent*>(instance);
+        self->Density = std::get<float>(value);
+    }
+    static Value Get_Friction(const void* instance)
+    {
+        const World::CompositeCollider2DComponent* self = static_cast<const World::CompositeCollider2DComponent*>(instance);
+        return Value(self->Friction);
+    }
+    static void Set_Friction(void* instance, const Value& value)
+    {
+        World::CompositeCollider2DComponent* self = static_cast<World::CompositeCollider2DComponent*>(instance);
+        self->Friction = std::get<float>(value);
+    }
+    static Value Get_Restitution(const void* instance)
+    {
+        const World::CompositeCollider2DComponent* self = static_cast<const World::CompositeCollider2DComponent*>(instance);
+        return Value(self->Restitution);
+    }
+    static void Set_Restitution(void* instance, const Value& value)
+    {
+        World::CompositeCollider2DComponent* self = static_cast<World::CompositeCollider2DComponent*>(instance);
+        self->Restitution = std::get<float>(value);
+    }
+    static Value Get_GeometryType(const void* instance)
+    {
+        const World::CompositeCollider2DComponent* self = static_cast<const World::CompositeCollider2DComponent*>(instance);
+        return Value(self->GeometryType);
+    }
+    static void Set_GeometryType(void* instance, const Value& value)
+    {
+        World::CompositeCollider2DComponent* self = static_cast<World::CompositeCollider2DComponent*>(instance);
+        self->GeometryType = std::get<uint8_t>(value);
+    }
+    static Value Get_IsSensor(const void* instance)
+    {
+        const World::CompositeCollider2DComponent* self = static_cast<const World::CompositeCollider2DComponent*>(instance);
+        return Value(self->IsSensor);
+    }
+    static void Set_IsSensor(void* instance, const Value& value)
+    {
+        World::CompositeCollider2DComponent* self = static_cast<World::CompositeCollider2DComponent*>(instance);
+        self->IsSensor = std::get<bool>(value);
+    }
+    static Value Get_ShowCollider(const void* instance)
+    {
+        const World::CompositeCollider2DComponent* self = static_cast<const World::CompositeCollider2DComponent*>(instance);
+        return Value(self->ShowCollider);
+    }
+    static void Set_ShowCollider(void* instance, const Value& value)
+    {
+        World::CompositeCollider2DComponent* self = static_cast<World::CompositeCollider2DComponent*>(instance);
+        self->ShowCollider = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Density()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x955A071719EB9B95ull },
+            "Density",
+            Kind::Float,
+            &Get_Density,
+            &Set_Density,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Mass density per unit area.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Friction()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCA262FADB277EF6Dull },
+            "Friction",
+            Kind::Float,
+            &Get_Friction,
+            &Set_Friction,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Surface friction against other colliders.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Restitution()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x752B04B318148F29ull },
+            "Restitution",
+            Kind::Float,
+            &Get_Restitution,
+            &Set_Restitution,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bounciness restitution coefficient.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_GeometryType()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x35323520A82284BBull },
+            "GeometryType",
+            Kind::UInt8,
+            &Get_GeometryType,
+            &Set_GeometryType,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Composite geometry type: 0 = Polygons, 1 = OutlineChain.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IsSensor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB9EB543ED4223271ull },
+            "IsSensor",
+            Kind::Bool,
+            &Get_IsSensor,
+            &Set_IsSensor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Sensor mode (triggers only, no physical response).", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShowCollider()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x959C0C5085F1355Eull },
+            "ShowCollider",
+            Kind::Bool,
+            &Get_ShowCollider,
+            &Set_ShowCollider,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Draw composite debug wireframe.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::CompositeCollider2DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::CompositeCollider2DComponent" },
+            "CompositeCollider2DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::CompositeCollider2DComponent),
+            TypeCategory::Component,
+            {
+                Field_Density(),
+                Field_Friction(),
+                Field_Restitution(),
+                Field_GeometryType(),
+                Field_IsSensor(),
+                Field_ShowCollider(),
+            },
+            &StorageBindingOf(),
+            "Physics/2D",
+            "2D composite collider: merges Box and Polygon colliders across this entity and its children into a unified collision body.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::PlatformEffector2DComponent>
 {
     static Value Get_SurfaceArc(const void* instance)
@@ -9564,6 +9767,7 @@ const TypeSchema& WeSchemaOf_CircleCollider2DComponent() { return GeneratedAcces
 const TypeSchema& WeSchemaOf_CapsuleCollider2DComponent() { return GeneratedAccess<World::CapsuleCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PolygonCollider2DComponent() { return GeneratedAccess<World::PolygonCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_ChainCollider2DComponent() { return GeneratedAccess<World::ChainCollider2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_CompositeCollider2DComponent() { return GeneratedAccess<World::CompositeCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PlatformEffector2DComponent() { return GeneratedAccess<World::PlatformEffector2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_DistanceJoint2DComponent() { return GeneratedAccess<World::DistanceJoint2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_RevoluteJoint2DComponent() { return GeneratedAccess<World::RevoluteJoint2DComponent>::WeSchema(); }
@@ -9628,6 +9832,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_CapsuleCollider2DComponent(),
 			WeSchemaOf_PolygonCollider2DComponent(),
 			WeSchemaOf_ChainCollider2DComponent(),
+			WeSchemaOf_CompositeCollider2DComponent(),
 			WeSchemaOf_PlatformEffector2DComponent(),
 			WeSchemaOf_DistanceJoint2DComponent(),
 			WeSchemaOf_RevoluteJoint2DComponent(),

@@ -1,6 +1,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Entity.h"
+#include "World/Scene/Hierarchy.h"
 #include "World/Physics/Physics2DUtils.h"
 #include <box2d/box2d.h>
 #include "World/Core/Log.h"
@@ -690,6 +691,155 @@ static void TestSurfaceEffector2DConveyorSimulation()
 	std::cout << "[PASS] TestSurfaceEffector2DConveyorSimulation\n";
 }
 
+static void TestPlatformDropThrough()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	// 1. 创建单向平台实体 (PlatformEffector2DComponent)
+	Entity platform = scene.CreateEntityShell("OneWayPlatform");
+	auto& platT = platform.AddComponent<TransformComponent>();
+	platT.Location = { 0.0f, 2.0f, 0.0f };
+	auto& platRb = platform.AddComponent<RigidBody2DComponent>();
+	platRb.Type = RigidBody2DComponent::BodyType::Static;
+	auto& platBox = platform.AddComponent<BoxCollider2DComponent>();
+	platBox.Size = { 3.0f, 0.2f };
+	auto& effector = platform.AddComponent<PlatformEffector2DComponent>();
+	effector.OneWay = true;
+	effector.SurfaceArc = 180.0f;
+
+	// 2. 创建角色实体 (处于平台上方 Y = 2.35)
+	Entity character = scene.CreateEntityShell("Player");
+	auto& charT = character.AddComponent<TransformComponent>();
+	charT.Location = { 0.0f, 2.35f, 0.0f };
+	auto& charRb = character.AddComponent<RigidBody2DComponent>();
+	charRb.Type = RigidBody2DComponent::BodyType::Dynamic;
+	auto& charBox = character.AddComponent<BoxCollider2DComponent>();
+	charBox.Size = { 0.3f, 0.3f };
+	charBox.Density = 1.0f;
+
+	// 3. 测试初始状态下未穿透
+	assert(!scene.IsPlatformDropThroughActive(platform, character));
+
+	// 4. 注册下落穿透 0.5s
+	scene.RegisterPlatformDropThrough(platform, character, 0.5f);
+	assert(scene.IsPlatformDropThroughActive(platform, character));
+
+	// 5. 启动运行时物理模拟
+	scene.OnRuntimeStart();
+	assert(scene.IsPhysics2DRunning());
+
+	// 模拟 10 步 (约 0.16s < 0.5s)，穿透记录依然有效
+	for (int i = 0; i < 10; ++i)
+	{
+		scene.OnFixedUpdate(Timestep(0.016f));
+	}
+	assert(scene.IsPlatformDropThroughActive(platform, character));
+
+	// 继续模拟直到累计超过 0.6s (> 0.5s)，穿透记录自动超时过期
+	for (int i = 0; i < 30; ++i)
+	{
+		scene.OnFixedUpdate(Timestep(0.016f));
+	}
+	assert(!scene.IsPlatformDropThroughActive(platform, character));
+
+	// 角色受重力下落已成功穿透平台 (当前 Y 坐标 < 2.0，落入平台下方)
+	assert(charT.Location.y < 2.0f);
+
+	scene.OnRuntimeStop();
+	assert(!scene.IsPhysics2DRunning());
+
+	std::cout << "[PASS] TestPlatformDropThrough\n";
+}
+
+static void TestCompositeCollider2D()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	// 1. 创建复合碰撞体父实体
+	Entity parent = scene.CreateEntityShell("CompositeParent");
+	auto& parentT = parent.AddComponent<TransformComponent>();
+	parentT.Location = { 0.0f, 5.0f, 0.0f };
+	auto& parentRb = parent.AddComponent<RigidBody2DComponent>();
+	parentRb.Type = RigidBody2DComponent::BodyType::Dynamic;
+	auto& comp = parent.AddComponent<CompositeCollider2DComponent>();
+	comp.Density = 2.0f;
+	comp.Friction = 0.7f;
+	comp.Restitution = 0.3f;
+	comp.IsSensor = false;
+
+	// 2. 创建子实体 1: 带有 BoxCollider2DComponent
+	Entity childBox = scene.CreateEntityShell("ChildBox");
+	auto& c1T = childBox.AddComponent<TransformComponent>();
+	c1T.Location = { 1.5f, 0.0f, 0.0f };
+	auto& c1Rb = childBox.AddComponent<RigidBody2DComponent>();
+	c1Rb.Type = RigidBody2DComponent::BodyType::Dynamic;
+	auto& c1Box = childBox.AddComponent<BoxCollider2DComponent>();
+	c1Box.Size = { 0.5f, 0.5f };
+	Hierarchy::SetParent(scene.GetRegistry(), childBox, parent);
+
+	// 3. 创建子实体 2: 带有 CircleCollider2DComponent
+	Entity childCircle = scene.CreateEntityShell("ChildCircle");
+	auto& c2T = childCircle.AddComponent<TransformComponent>();
+	c2T.Location = { -1.5f, 0.0f, 0.0f };
+	auto& c2Circle = childCircle.AddComponent<CircleCollider2DComponent>();
+	c2Circle.Radius = 0.5f;
+	Hierarchy::SetParent(scene.GetRegistry(), childCircle, parent);
+
+	// 4. 创建子实体 3: 带有 PolygonCollider2DComponent
+	Entity childPoly = scene.CreateEntityShell("ChildPoly");
+	auto& c3T = childPoly.AddComponent<TransformComponent>();
+	c3T.Location = { 0.0f, 1.0f, 0.0f };
+	auto& c3Poly = childPoly.AddComponent<PolygonCollider2DComponent>();
+	c3Poly.SetPoints({
+		{ -0.5f, -0.5f },
+		{  0.5f, -0.5f },
+		{  0.0f,  0.5f }
+	});
+	Hierarchy::SetParent(scene.GetRegistry(), childPoly, parent);
+
+	// 5. 启动运行时物理世界
+	scene.OnRuntimeStart();
+	assert(scene.IsPhysics2DRunning());
+
+	// 父实体拥有唯一的刚体
+	b2BodyId parentBody = scene.GetPhysicsBody2D(parent);
+	assert(b2Body_IsValid(parentBody));
+
+	// 被复合的子实体不应生成独立刚体
+	assert(!b2Body_IsValid(scene.GetPhysicsBody2D(childBox)));
+	assert(!b2Body_IsValid(scene.GetPhysicsBody2D(childCircle)));
+	assert(!b2Body_IsValid(scene.GetPhysicsBody2D(childPoly)));
+
+	// 父实体刚体聚合了子实体的 3 个碰撞形状 (Box + Circle + Polygon)
+	const int shapeCount = b2Body_GetShapeCount(parentBody);
+	assert(shapeCount == 3);
+
+	// 验证所有形状继承了 CompositeCollider2DComponent 的物理材质属性
+	b2ShapeId shapes[4];
+	const int fetched = b2Body_GetShapes(parentBody, shapes, 4);
+	assert(fetched == 3);
+	for (int i = 0; i < fetched; ++i)
+	{
+		assert(std::fabs(b2Shape_GetDensity(shapes[i]) - comp.Density) < 1e-4f);
+		assert(std::fabs(b2Shape_GetFriction(shapes[i]) - comp.Friction) < 1e-4f);
+		assert(std::fabs(b2Shape_GetRestitution(shapes[i]) - comp.Restitution) < 1e-4f);
+	}
+
+	// 模拟 10 步，验证复合刚体在重力下正常物理步进
+	for (int i = 0; i < 10; ++i)
+	{
+		scene.OnFixedUpdate(Timestep(0.016f));
+	}
+	assert(parentT.Location.y < 5.0f);
+
+	scene.OnRuntimeStop();
+	assert(!scene.IsPhysics2DRunning());
+
+	std::cout << "[PASS] TestCompositeCollider2D\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -706,6 +856,8 @@ int main()
 	TestAreaEffector2DWindSimulation();
 	TestBuoyancyEffector2DFloatingSimulation();
 	TestSurfaceEffector2DConveyorSimulation();
+	TestPlatformDropThrough();
+	TestCompositeCollider2D();
 
 	std::cout << "All WorldPhysics2DExtensionsTests passed successfully.\n";
 	return 0;

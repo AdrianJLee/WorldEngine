@@ -50,6 +50,13 @@ namespace Animation
 	// 零内存开销的挂起销毁标签组件:替代过去的 std::unordered_set<entt::entity>
 	struct PendingDestroyTag {};
 
+	struct PlatformDropThroughRecord
+	{
+		entt::entity Platform = entt::null;
+		entt::entity Target = entt::null;
+		float RemainingTime = 0.0f;
+	};
+
 	class WLD_API Scene
 	{
 	public:
@@ -395,6 +402,10 @@ namespace Animation
 		// P5:把组件的 Layer/Mask 同步到物理后端(2D 逐 shape 重设 filter;3D 重映射 ObjectLayer)。
 		// 每固定步对每个刚体做一次整数比较 ⇒ 任何写入路径(脚本/面板/读档)都能生效。
 		void SyncBodyFilter2D(entt::entity entity);
+		// Phase 16: 单向平台穿透下落机制 (Platform Drop-Through)
+		using PlatformDropThroughRecord = World::PlatformDropThroughRecord;
+		void RegisterPlatformDropThrough(entt::entity platform, entt::entity target, float duration = 0.35f);
+		bool IsPlatformDropThroughActive(entt::entity platform, entt::entity target) const;
 		// ---- P7:关节(约束)运行时接口 ----
 		// 与刚体同一生命周期:世界只在 OnRuntimeStart/OnSimulationStart → OnRuntimeStop 之间存在。
 		// 2D 走 Box2D 关节,3D 走 Jolt 约束;两侧都必须是同一后端的刚体。
@@ -658,6 +669,8 @@ namespace Animation
 		// P5:2D 传感器重叠的"仍然在重叠"集合(Box2D 不把传感器重叠当接触,b2Body_GetContactData
 		// 拿不到,所以 Persist 由场景自己维护)。键 = PackEntityPair(有序实体对);OnPhysics2DStop 清空。
 		std::set<std::uint64_t> m_SensorOverlaps2D;
+		// Phase 16: 单向平台向下穿透记录
+		std::vector<PlatformDropThroughRecord> m_PlatformDropThroughs;
 		// 上次反序列化时未能识别的组件节点（按实体 UUID 保存原始 YAML 片段），供保存时回写，避免缺插件静默丢数据。
 		std::unordered_map<UUID, std::string> m_UnknownComponentNodes;
 		// P4-U13b:prefab 实例注册表(随 `.wd` 的 Prefabs: 块读写)。
