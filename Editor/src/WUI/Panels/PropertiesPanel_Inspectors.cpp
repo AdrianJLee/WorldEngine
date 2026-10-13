@@ -858,6 +858,42 @@ float PropertiesPanel::DrawTilemapInspector(Wui::WuiContext& ctx, const Wui::Wui
 	auto* tmComp = static_cast<World::TilemapComponent*>(instance);
 	if (!tmComp) return height;
 
+	Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f }, "网格拓扑形态 (Grid Topology):", theme.TextMuted, 11.0f);
+	y += 20.0f;
+
+	const float topoBtnW = 64.0f;
+	const float topoBtnH = 22.0f;
+	struct TopoPreset { const char* id; const char* label; uint8_t type; float cw; float ch; };
+	const TopoPreset topos[4] = {
+		{ "prop.tm.topo_ortho", "正交直角", 0, 1.0f, 1.0f },
+		{ "prop.tm.topo_iso",   "等轴2.5D", 1, 1.5f, 0.75f },
+		{ "prop.tm.topo_hexp",  "尖顶六边", 2, 1.0f, 1.0f },
+		{ "prop.tm.topo_hexf",  "平顶六边", 3, 1.0f, 1.0f }
+	};
+	for (int i = 0; i < 4; ++i)
+	{
+		const Wui::WuiRect bRect { rect.X + 12.0f + i * (topoBtnW + 4.0f), y, topoBtnW, topoBtnH };
+		auto btnTheme = theme;
+		if (tmComp->GridType == topos[i].type)
+		{
+			btnTheme.ButtonBg = theme.ActiveBg;
+			btnTheme.Border = theme.Accent;
+		}
+		if (Wui::Button(ctx, Wui::HashId(topos[i].id), bRect, topos[i].label, btnTheme))
+		{
+			tmComp->GridType = topos[i].type;
+			tmComp->CellSize = { topos[i].cw, topos[i].ch };
+			tmComp->ShowGrid = true;
+			if (changedFields)
+			{
+				changedFields->push_back("GridType");
+				changedFields->push_back("CellSize");
+				changedFields->push_back("ShowGrid");
+			}
+		}
+	}
+	y += 28.0f;
+
 	const std::string tmPath = tmComp->Tilemap.HasPath() ? StringPool::Get().PathOf(tmComp->Tilemap.Path) : "";
 
 	const Wui::WuiRect btnOpen { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
