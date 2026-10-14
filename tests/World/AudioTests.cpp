@@ -10,6 +10,9 @@
 #include "World/Audio/AudioCapture.h"
 #include "World/Audio/AudioPerceptionBridge.h"
 #include "World/Audio/AudioProfiler.h"
+#include "World/Audio/AudioStreamer.h"
+#include <fstream>
+#include <filesystem>
 #include "World/Core/WorldContext.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Scene.h"
@@ -1151,6 +1154,209 @@ static void TestAudioPerceptionAndCapture()
 	std::cout << "  -> Passed." << std::endl;
 }
 
+
+static void TestZeroCrossingSnap()
+{
+	std::cout << "[Test] Zero-Crossing Loop Snap..." << std::endl;
+	AudioBuffer sine = AudioBuffer::GenerateSineWave(440.0f, 0.5f, 0.8f, 48000);
+
+	// Pick a non-zero frame (quarter wavelength of 440Hz @ 48kHz is ~27 frames, where sine is at max peak ~0.8f)
+	uint32_t zc = sine.FindZeroCrossing(27, 256);
+	assert(zc != 27);
+	float s0 = sine.GetSample(0, zc - 1);
+	float s1 = sine.GetSample(0, zc);
+	// Must transition from <= 0 to >= 0
+	assert(s0 <= 0.0f && s1 >= 0.0f);
+	assert(std::abs(s1) < 0.06f);
+
+	// Test automatic loop point snapping
+	sine.SetLoopPoints(30, 20000);
+	sine.SnapLoopPointsToZeroCrossing(256);
+	uint32_t start = sine.GetLoopStartFrame();
+	uint32_t end = sine.GetLoopEndFrame();
+	assert(start > 0);
+	assert(end > start);
+	assert(sine.GetSample(0, start - 1) <= 0.0f && sine.GetSample(0, start) >= 0.0f);
+	assert(sine.GetSample(0, end - 1) <= 0.0f && sine.GetSample(0, end) >= 0.0f);
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestAudioStreamer()
+{
+	std::cout << "[Test] AudioStreamer Ring Double-Buffering & Seek..." << std::endl;
+
+	// 1. In-memory buffer streaming
+	AudioBuffer testBuf = AudioBuffer::GenerateSineWave(440.0f, 0.5f, 0.7f, 48000);
+	AudioStreamer streamer;
+	bool ok = streamer.OpenFromBuffer(testBuf);
+	assert(ok);
+	assert(streamer.IsOpen());
+	assert(streamer.GetTotalFrames() == testBuf.GetFrameCount());
+	assert(!streamer.IsEof());
+
+	std::vector<float> block(512 * 2);
+	uint32_t read0 = streamer.ReadFrames(block.data(), 512);
+	assert(read0 == 512);
+	assert(std::abs(block[0] - testBuf.GetSample(0, 0)) < 0.0001f);
+	assert(std::abs(block[1] - testBuf.GetSample(1, 0)) < 0.0001f);
+
+	// Test Seek
+	streamer.SeekFrame(5000);
+	assert(streamer.GetCurrentFrame() == 5000);
+	uint32_t readSeek = streamer.ReadFrames(block.data(), 512);
+	assert(readSeek == 512);
+	assert(std::abs(block[0] - testBuf.GetSample(0, 5000)) < 0.0001f);
+	assert(std::abs(block[1] - testBuf.GetSample(1, 5000)) < 0.0001f);
+
+	// 2. Real disk WAV file streaming
+	std::string tempWav = "test_stream_temp.wav";
+	{
+		std::ofstream out(tempWav, std::ios::binary);
+		uint32_t numFrames = 10000;
+		uint16_t numChannels = 2;
+		uint32_t sRate = 48000;
+		uint16_t bitsPerSample = 16;
+		uint32_t byteRate = sRate * numChannels * (bitsPerSample / 8);
+		uint16_t blockAlign = numChannels * (bitsPerSample / 8);
+		uint32_t dataBytes = numFrames * blockAlign;
+		uint32_t riffSize = 36 + dataBytes;
+
+		out.write("RIFF", 4);
+		out.write(reinterpret_cast<const char*>(&riffSize), 4);
+		out.write("WAVE", 4);
+		out.write("fmt ", 4);
+		uint32_t fmtSize = 16;
+		uint16_t fmtTag = 1; // PCM
+		out.write(reinterpret_cast<const char*>(&fmtSize), 4);
+		out.write(reinterpret_cast<const char*>(&fmtTag), 2);
+		out.write(reinterpret_cast<const char*>(&numChannels), 2);
+		out.write(reinterpret_cast<const char*>(&sRate), 4);
+		out.write(reinterpret_cast<const char*>(&byteRate), 4);
+		out.write(reinterpret_cast<const char*>(&blockAlign), 2);
+		out.write(reinterpret_cast<const char*>(&bitsPerSample), 2);
+		out.write("data", 4);
+		out.write(reinterpret_cast<const char*>(&dataBytes), 4);
+
+		std::vector<int16_t> pcmData(numFrames * numChannels);
+		for (uint32_t i = 0; i < numFrames; ++i)
+		{
+			float s = std::sin(2.0f * 3.14159265f * 440.0f * (static_cast<float>(i) / 48000.0f)) * 0.5f;
+			pcmData[i * 2] = static_cast<int16_t>(s * 32767.0f);
+			pcmData[i * 2 + 1] = static_cast<int16_t>(s * 32767.0f);
+		}
+		out.write(reinterpret_cast<const char*>(pcmData.data()), dataBytes);
+	}
+
+	AudioStreamer fileStreamer;
+	bool fileOk = fileStreamer.Open(tempWav);
+	assert(fileOk);
+	assert(fileStreamer.IsOpen());
+	assert(fileStreamer.GetTotalFrames() == 10000);
+	assert(fileStreamer.GetSampleRate() == 48000);
+	assert(fileStreamer.GetChannels() == 2);
+
+	std::vector<float> readBuf(2048 * 2);
+	uint32_t r = fileStreamer.ReadFrames(readBuf.data(), 1024);
+	assert(r == 1024);
+
+	// Seek near end and read to EOF
+	fileStreamer.SeekFrame(9000);
+	assert(fileStreamer.GetCurrentFrame() == 9000);
+	r = fileStreamer.ReadFrames(readBuf.data(), 1500);
+	assert(r == 1000); // Only 1000 frames available until EOF
+	assert(fileStreamer.IsEof());
+
+	fileStreamer.Close();
+	std::filesystem::remove(tempWav);
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestAdvancedDspEffects()
+{
+	std::cout << "[Test] Advanced DSP: FDN Reverb, 5-Band EQ, Stereo Delay & Multi-Ray Occlusion..." << std::endl;
+
+	std::cout << "    (1) FDN Reverb..." << std::endl;
+	// 1. FDN 8-line Algorithmic Reverb
+	{
+		AlgorithmicReverb reverb;
+		reverb.Configure(0.5f, 0.4f, 0.0f, 1.0f, 0.0f); // 100% wet, 0 pre-delay
+		std::vector<float> left(4800, 0.0f);
+		std::vector<float> right(4800, 0.0f);
+		left[0] = 1.0f;
+		right[0] = 1.0f; // Unit impulse
+
+		reverb.Process(left.data(), right.data(), 4800, 48000.0f);
+
+		float tailEnergyEarly = 0.0f;
+		for (size_t i = 1200; i < 2200; ++i) tailEnergyEarly += left[i] * left[i];
+
+		float tailEnergyLate = 0.0f;
+		for (size_t i = 3500; i < 4500; ++i) tailEnergyLate += left[i] * left[i];
+
+		assert(tailEnergyEarly > 0.0001f);
+		assert(tailEnergyLate < tailEnergyEarly); // Reverb tail naturally decays
+	}
+
+	std::cout << "    (2) 5-Band EQ..." << std::endl;
+	// 2. 5-Band Parametric EQ
+	{
+		ParametricEq eq;
+		eq.SetBand(2, 12.0f, 1.0f); // +12dB boost on Band 2 (1000Hz)
+
+		AudioBuffer sine1k = AudioBuffer::GenerateSineWave(1000.0f, 0.1f, 0.2f, 48000);
+		std::vector<float> eqL(sine1k.GetFrameCount());
+		std::vector<float> eqR(sine1k.GetFrameCount());
+		for (size_t i = 0; i < sine1k.GetFrameCount(); ++i)
+		{
+			eqL[i] = sine1k.GetSample(0, static_cast<uint32_t>(i));
+			eqR[i] = sine1k.GetSample(1, static_cast<uint32_t>(i));
+		}
+
+		eq.Process(eqL.data(), eqR.data(), static_cast<uint32_t>(eqL.size()), 48000.0f);
+
+		float maxBoosted = 0.0f;
+		for (float s : eqL) maxBoosted = std::max(maxBoosted, std::abs(s));
+		assert(maxBoosted > 0.5f); // Peak amplified significantly by +12dB boost
+	}
+
+	std::cout << "    (3) Stereo Delay..." << std::endl;
+	// 3. Stereo Delay & Ping-Pong
+	{
+		StereoDelay delay;
+		delay.Configure(10.0f, 20.0f, 0.4f, false, 0.5f); // 10ms = 480 samples, 20ms = 960 samples @ 48kHz
+		std::vector<float> delL(2000, 0.0f);
+		std::vector<float> delR(2000, 0.0f);
+		delL[0] = 1.0f;
+		delR[0] = 1.0f;
+
+		delay.Process(delL.data(), delR.data(), 2000, 48000.0f);
+		assert(std::abs(delL[480]) > 0.1f); // Echo peak at 10ms
+		assert(std::abs(delR[960]) > 0.1f); // Echo peak at 20ms
+	}
+
+	std::cout << "    (4) Multi-Ray Occlusion..." << std::endl;
+	// 4. Multi-Ray Occlusion
+	{
+		AudioSystem& sys = AudioSystem::Get();
+		sys.SetMultiRayOcclusionEnabled(true);
+		sys.SetOcclusionRaycastOffsets(0.5f, 0.5f);
+		sys.SetOcclusionRaycastCallback([](const glm::vec3& listener, const glm::vec3& source) -> float
+		{
+			// Center ray is blocked, but upward and lateral rays are clear
+			if (std::abs(listener.y) < 0.1f && std::abs(listener.x) < 0.1f) return 1.0f;
+			return 0.0f;
+		});
+
+		float occ = sys.CalculateMultiRayOcclusion(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 5.0f));
+		// 1 blocked, 2 clear -> exactly 1/3 (0.333f)
+		assert(std::abs(occ - (1.0f / 3.0f)) < 0.05f);
+	}
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
 int main()
 {
 	std::cout << "========================================" << std::endl;
@@ -1180,9 +1386,11 @@ int main()
 		TestSplineAudioEmitter();
 		TestRadioFilterAndTypewriter();
 		TestAudioPerceptionAndCapture();
-
+		TestZeroCrossingSnap();
+		TestAudioStreamer();
+		TestAdvancedDspEffects();
 		std::cout << "========================================" << std::endl;
-		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (21/21)  " << std::endl;
+		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (24/24)  " << std::endl;
 		std::cout << "========================================" << std::endl;
 		return 0;
 	}

@@ -479,8 +479,12 @@ namespace World::Audio
 
 						if (m_OcclusionRaycastCallback)
 						{
-							float occ = m_OcclusionRaycastCallback(m_ListenerPosition, transform.Location);
-							voice->SetOcclusion(std::clamp(occ, 0.0f, 1.0f));
+							float targetOcc = CalculateMultiRayOcclusion(m_ListenerPosition, transform.Location);
+							float currentOcc = voice->GetOcclusion();
+							float smoothRate = 12.0f;
+							float alpha = (deltaSeconds > 0.0f) ? std::clamp(deltaSeconds * smoothRate, 0.0f, 1.0f) : 1.0f;
+							float newOcc = currentOcc + (targetOcc - currentOcc) * alpha;
+							voice->SetOcclusion(newOcc);
 						}
 
 						voice->SetSpatialParameters(
@@ -912,6 +916,38 @@ namespace World::Audio
 			if (auto* v = m_VoicePool.FindVoice(handle))
 				v->SetOcclusion(occlusion01);
 		}
+	}
+
+	float AudioSystem::CalculateMultiRayOcclusion(const glm::vec3& listenerPos, const glm::vec3& sourcePos) const
+	{
+		if (!m_OcclusionRaycastCallback) return 0.0f;
+		if (!m_MultiRayOcclusionEnabled)
+		{
+			return std::clamp(m_OcclusionRaycastCallback(listenerPos, sourcePos), 0.0f, 1.0f);
+		}
+
+		glm::vec3 dir = sourcePos - listenerPos;
+		float dist = glm::length(dir);
+		glm::vec3 up(0.0f, 1.0f, 0.0f);
+		glm::vec3 side(1.0f, 0.0f, 0.0f);
+		if (dist > 0.001f)
+		{
+			glm::vec3 normDir = dir / dist;
+			glm::vec3 crossSide = glm::cross(normDir, up);
+			if (glm::length(crossSide) > 0.001f)
+			{
+				side = glm::normalize(crossSide);
+			}
+		}
+
+		glm::vec3 upBias = up * m_OcclusionUpOffset;
+		glm::vec3 sideBias = side * m_OcclusionSideOffset;
+
+		float occCenter = m_OcclusionRaycastCallback(listenerPos, sourcePos);
+		float occUp = m_OcclusionRaycastCallback(listenerPos + upBias, sourcePos + upBias);
+		float occSide = m_OcclusionRaycastCallback(listenerPos + sideBias, sourcePos + sideBias);
+
+		return std::clamp((occCenter + occUp + occSide) / 3.0f, 0.0f, 1.0f);
 	}
 
 	double AudioSystem::GetDspTime() const noexcept

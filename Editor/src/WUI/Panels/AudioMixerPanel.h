@@ -1,12 +1,17 @@
-#include "World/Audio/AiAudioStudio.h"
 #pragma once
 
 #include "WUI/Common/EditorPanel.h"
 #include "World/Audio/AudioTypes.h"
 #include "World/Audio/SoundEvent.h"
+#include "World/Audio/AiAudioStudio.h"
 #include <string>
 #include <vector>
 #include <memory>
+
+namespace World::Audio
+{
+	class AudioBuffer;
+}
 
 namespace World
 {
@@ -49,6 +54,8 @@ namespace World
 		void RenderLeftLibrary(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void RenderRightInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void RenderGlobalVolume(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		void RenderProfilerHud(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		std::shared_ptr<Audio::AudioBuffer> GetSelectedBuffer();
 
 		// Library state
 		std::vector<AudioLibraryItem> m_Items;
@@ -93,5 +100,11 @@ namespace World
 		bool m_GlobalBusesSynced { false };
 
 		std::string m_StatusNotice;
+
+		// Profiler & Zero-Crossing state
+		std::vector<float> m_SpectrumBands;
+		uint32_t m_SnappedLoopStart { 0 };
+		uint32_t m_SnappedLoopEnd { 0 };
+		bool m_HasSnappedLoop { false };
 	};
 }

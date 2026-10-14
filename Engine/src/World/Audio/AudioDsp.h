@@ -3,6 +3,7 @@
 #include "AudioTypes.h"
 #include <cmath>
 #include <algorithm>
+#include <vector>
 
 namespace World::Audio
 {
@@ -11,7 +12,9 @@ namespace World::Audio
 		LowPass = 0,
 		HighPass = 1,
 		BandPass = 2,
-		PeakingEQ = 3
+		PeakingEQ = 3,
+		LowShelf = 4,
+		HighShelf = 5
 	};
 
 	class WLD_API BiquadFilter
@@ -209,5 +212,135 @@ namespace World::Audio
 		float m_LastBlipTime { -1.0f };
 		bool m_LastWasPunctuation { false };
 		uint32_t m_RngSeed { 12345 };
+	};
+
+	// 5-band parametric equalizer (LowShelf, LowMid, Mid, HighMid, HighShelf)
+	class WLD_API ParametricEq
+	{
+	public:
+		static constexpr size_t kBandCount = 5;
+
+		struct BandSettings
+		{
+			FilterType type { FilterType::PeakingEQ };
+			float frequencyHz { 1000.0f };
+			float gainDb { 0.0f };
+			float q { 0.7071f };
+		};
+
+		ParametricEq();
+
+		void SetBand(size_t bandIndex, float gainDb, float q = 0.7071f) noexcept;
+		void SetBandGain(size_t bandIndex, float gainDb) noexcept;
+		void SetBandQ(size_t bandIndex, float q) noexcept;
+		void SetBandFrequency(size_t bandIndex, float frequencyHz) noexcept;
+
+		const BandSettings& GetBand(size_t bandIndex) const noexcept;
+		BandSettings& GetBand(size_t bandIndex) noexcept;
+
+		void Reset() noexcept;
+		void Process(float* inOutLeft, float* inOutRight, uint32_t frameCount, float sampleRate);
+
+	private:
+		void UpdateFilters(float sampleRate);
+
+		BandSettings m_Bands[kBandCount];
+		BiquadFilter m_FiltersL[kBandCount];
+		BiquadFilter m_FiltersR[kBandCount];
+		float m_LastSampleRate { 0.0f };
+		bool m_Dirty { true };
+	};
+
+	// Algorithmic Feedback Delay Network (FDN) 8-line reverb
+	class WLD_API AlgorithmicReverb
+	{
+	public:
+		static constexpr size_t kNumDelayLines = 8;
+
+		AlgorithmicReverb();
+
+		void Configure(
+			float roomSize = 0.5f,
+			float damping = 0.5f,
+			float preDelayMs = 20.0f,
+			float wetGain = 0.3f,
+			float dryGain = 1.0f) noexcept;
+
+		void SetRoomSize(float r) noexcept { m_RoomSize = std::clamp(r, 0.0f, 1.0f); m_Dirty = true; }
+		void SetDamping(float d) noexcept { m_Damping = std::clamp(d, 0.0f, 1.0f); }
+		void SetPreDelayMs(float ms) noexcept { m_PreDelayMs = std::clamp(ms, 0.0f, 200.0f); }
+		void SetWetGain(float w) noexcept { m_WetGain = std::clamp(w, 0.0f, 1.0f); }
+		void SetDryGain(float d) noexcept { m_DryGain = std::clamp(d, 0.0f, 1.0f); }
+
+		float GetRoomSize() const noexcept { return m_RoomSize; }
+		float GetDamping() const noexcept { return m_Damping; }
+		float GetPreDelayMs() const noexcept { return m_PreDelayMs; }
+		float GetWetGain() const noexcept { return m_WetGain; }
+		float GetDryGain() const noexcept { return m_DryGain; }
+
+		void Reset() noexcept;
+		void Process(float* inOutLeft, float* inOutRight, uint32_t frameCount, float sampleRate);
+
+	private:
+		void UpdateParameters(float sampleRate);
+
+		float m_RoomSize { 0.5f };
+		float m_Damping { 0.5f };
+		float m_PreDelayMs { 20.0f };
+		float m_WetGain { 0.3f };
+		float m_DryGain { 1.0f };
+
+		std::vector<float> m_DelayBuffers[kNumDelayLines];
+		size_t m_DelayLengths[kNumDelayLines] {};
+		size_t m_WriteIndices[kNumDelayLines] {};
+		float m_DampedStates[kNumDelayLines] {};
+
+		std::vector<float> m_PreDelayBuffer;
+		size_t m_PreDelayWriteIndex { 0 };
+
+		float m_LastSampleRate { 0.0f };
+		bool m_Dirty { true };
+	};
+
+	// Stereo delay with ping-pong option and feedback control
+	class WLD_API StereoDelay
+	{
+	public:
+		StereoDelay();
+
+		void Configure(
+			float delayTimeLeftMs = 250.0f,
+			float delayTimeRightMs = 375.0f,
+			float feedbackGain = 0.4f,
+			bool pingPong = false,
+			float wetDryMix = 0.5f) noexcept;
+
+		void SetDelayTimeLeft(float ms) noexcept { m_DelayTimeLeftMs = std::clamp(ms, 1.0f, 2000.0f); }
+		void SetDelayTimeRight(float ms) noexcept { m_DelayTimeRightMs = std::clamp(ms, 1.0f, 2000.0f); }
+		void SetFeedback(float fb) noexcept { m_FeedbackGain = std::clamp(fb, 0.0f, 0.95f); }
+		void SetPingPong(bool pingPong) noexcept { m_PingPong = pingPong; }
+		void SetWetDryMix(float mix) noexcept { m_WetDryMix = std::clamp(mix, 0.0f, 1.0f); }
+
+		float GetDelayTimeLeft() const noexcept { return m_DelayTimeLeftMs; }
+		float GetDelayTimeRight() const noexcept { return m_DelayTimeRightMs; }
+		float GetFeedback() const noexcept { return m_FeedbackGain; }
+		bool IsPingPong() const noexcept { return m_PingPong; }
+		float GetWetDryMix() const noexcept { return m_WetDryMix; }
+
+		void Reset() noexcept;
+		void Process(float* inOutLeft, float* inOutRight, uint32_t frameCount, float sampleRate);
+
+	private:
+		float m_DelayTimeLeftMs { 250.0f };
+		float m_DelayTimeRightMs { 375.0f };
+		float m_FeedbackGain { 0.4f };
+		bool m_PingPong { false };
+		float m_WetDryMix { 0.5f };
+
+		std::vector<float> m_BufferLeft;
+		std::vector<float> m_BufferRight;
+		size_t m_WritePosLeft { 0 };
+		size_t m_WritePosRight { 0 };
+		float m_LastSampleRate { 0.0f };
 	};
 }

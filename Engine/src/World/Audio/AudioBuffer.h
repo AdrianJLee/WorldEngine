@@ -33,6 +33,10 @@ namespace World::Audio
 		uint32_t GetLoopEndFrame() const noexcept { return m_LoopEndFrame; }
 		bool HasLoopPoints() const noexcept { return m_LoopEndFrame > m_LoopStartFrame; }
 
+		// Zero-crossing snap helpers to eliminate loop-boundary clicks & pops
+		uint32_t FindZeroCrossing(uint32_t targetFrame, uint32_t searchWindow = 256) const noexcept;
+		void SnapLoopPointsToZeroCrossing(uint32_t searchWindow = 256) noexcept;
+
 		float CalculatePeak() const noexcept;
 		float CalculateRms() const noexcept;
 		float EstimateLufs() const noexcept;

@@ -9,6 +9,7 @@
 #include "World/WUI/WuiLocalization.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Physics/Physics3D.h"
+#include "World/Audio/AudioComponents.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
 #include "Core/EditorPreferences.h"
@@ -17,6 +18,7 @@ namespace World
 {
 	namespace
 	{
+		static bool s_ShowAllAudioGizmos = false;
 		static const char* OrthoAxisShortName(World::OrthographicAxis axis)
 		{
 			switch (axis)
@@ -748,6 +750,14 @@ namespace World
 					Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
 					prefs.SetViewportColliderOutlinesAll(!prefs.Data().ViewportColliderOutlinesAll);
 				});
+			item("viewport.view.audio_gizmos",
+				Wui::Tr("viewport.view.audio_gizmos", "Audio Gizmos: All"), s_ShowAllAudioGizmos,
+				Wui::Tr("viewport.overlays.audio_gizmos.tooltip",
+					"Draw 3D audio source spheres and acoustic zone wireframes.\n"
+					"Off = only the selected entity."),
+				[] {
+					s_ShowAllAudioGizmos = !s_ShowAllAudioGizmos;
+				});
 			item("viewport.view.reference_grid",
 				Wui::Tr("viewport.view.reference_grid", "Ground Grid (1m/10m)"), m_Host.IsReferenceGridEnabled(),
 				Wui::Tr("viewport.grid.hint", "Toggle ground reference grid (1m/10m)."),
@@ -1139,6 +1149,8 @@ namespace World
 
 				int lightCount = 0;
 				int colliderCount = 0;
+				int audioCount = 0;
+				bool showAllAudio = false;
 				glm::vec2 overlayMin { 1e30f, 1e30f };
 				glm::vec2 overlayMax { -1e30f, -1e30f };
 				{
@@ -1280,27 +1292,6 @@ namespace World
 										sphere->Radius, axis, color, thickness, &overlayMin, &overlayMax);
 							drew = true;
 						}
-						if (const auto* audioSrc = registry.try_get<AudioSourceComponent>(handle))
-						{
-							if (audioSrc->Spatial3D)
-							{
-								if (audioSrc->MinDistance > 0.0f)
-								{
-									const Wui::WuiColor minColor { 0.20f, 0.85f, 0.95f, 0.85f };
-									for (int axis = 0; axis < 3; ++axis)
-										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
-											audioSrc->MinDistance, axis, minColor, 1.2f, &overlayMin, &overlayMax);
-								}
-								if (audioSrc->MaxDistance > audioSrc->MinDistance)
-								{
-									const Wui::WuiColor maxColor { 0.35f, 0.50f, 0.95f, 0.65f };
-									for (int axis = 0; axis < 3; ++axis)
-										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
-											audioSrc->MaxDistance, axis, maxColor, 1.0f, &overlayMin, &overlayMax);
-								}
-								drew = true;
-							}
-						}
 						if (const auto* capsule = registry.try_get<CapsuleCollider3DComponent>(handle))
 						{
 							// 近似:上下两个端面圆 + 两条母线(沿本地 Y 轴)。
@@ -1331,18 +1322,114 @@ namespace World
 							++colliderCount;
 					}
 
+					// ---- 声学覆盖层 (Audio Gizmos: AudioSourceComponent & AudioZoneComponent) ----
+					showAllAudio = (std::getenv("WLD_AUDIO_DEBUG") != nullptr);
+					for (const entt::entity handle : registry.view<TransformComponent>())
+					{
+						const bool isSelected = (handle == selectedHandle);
+						if (!isSelected && !showAllAudio)
+							continue;
+
+						const glm::mat4 world = registry.try_get<TransformComponent>(handle)
+							? registry.get<TransformComponent>(handle).GetLocalMatrix() : glm::mat4(1.0f);
+
+						bool drewAudio = false;
+						if (const auto* audioSrc = registry.try_get<AudioSourceComponent>(handle))
+						{
+							if (audioSrc->Spatial3D)
+							{
+								// 1. MinDistance (全响近场区): 亮青色三轴立体大圆线框
+								if (audioSrc->MinDistance > 0.0f)
+								{
+									const Wui::WuiColor minColor { 0.2f, 0.85f, 0.95f, isSelected ? 0.95f : 0.5f };
+									for (int axis = 0; axis < 3; ++axis)
+									{
+										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+											audioSrc->MinDistance, axis, minColor, isSelected ? 1.6f : 1.1f, &overlayMin, &overlayMax);
+									}
+								}
+
+								// 2. MaxDistance (衰减截止区): 深蓝色三轴立体大圆线框
+								if (audioSrc->MaxDistance > audioSrc->MinDistance)
+								{
+									const Wui::WuiColor maxColor { 0.35f, 0.55f, 0.95f, isSelected ? 0.75f : 0.35f };
+									for (int axis = 0; axis < 3; ++axis)
+									{
+										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+											audioSrc->MaxDistance, axis, maxColor, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
+									}
+								}
+
+								// 3. 中心扬声器 3 轴十字标: 0.3m 定位十字
+								const float cross = 0.15f; // 0.3m 总跨度
+								const Wui::WuiColor crossColor { 0.2f, 0.85f, 0.95f, isSelected ? 0.95f : 0.5f };
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									{ -cross, 0.0f, 0.0f }, { cross, 0.0f, 0.0f }, crossColor, isSelected ? 2.0f : 1.2f, &overlayMin, &overlayMax);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									{ 0.0f, -cross, 0.0f }, { 0.0f, cross, 0.0f }, crossColor, isSelected ? 2.0f : 1.2f, &overlayMin, &overlayMax);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									{ 0.0f, 0.0f, -cross }, { 0.0f, 0.0f, cross }, crossColor, isSelected ? 2.0f : 1.2f, &overlayMin, &overlayMax);
+
+								drewAudio = true;
+							}
+						}
+
+						if (const auto* audioZone = registry.try_get<AudioZoneComponent>(handle))
+						{
+							// 4. AudioZoneComponent 空间混响区域包围盒: 暖金黄色 12 条棱边 AABB 线框
+							const Wui::WuiColor zoneColor { 0.95f, 0.75f, 0.2f, isSelected ? 0.9f : 0.45f };
+							const float hx = std::max(0.05f, audioZone->HalfExtents[0]);
+							const float hy = std::max(0.05f, audioZone->HalfExtents[1]);
+							const float hz = std::max(0.05f, audioZone->HalfExtents[2]);
+
+							const glm::vec3 corners[8] = {
+								{ -hx, -hy, -hz }, // 0
+								{  hx, -hy, -hz }, // 1
+								{  hx,  hy, -hz }, // 2
+								{ -hx,  hy, -hz }, // 3
+								{ -hx, -hy,  hz }, // 4
+								{  hx, -hy,  hz }, // 5
+								{  hx,  hy,  hz }, // 6
+								{ -hx,  hy,  hz }  // 7
+							};
+
+							const float thickness = isSelected ? 1.8f : 1.1f;
+							// 底面 4 条棱边
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[0], corners[1], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[1], corners[2], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[2], corners[3], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[3], corners[0], zoneColor, thickness, &overlayMin, &overlayMax);
+
+							// 顶面 4 条棱边
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[4], corners[5], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[5], corners[6], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[6], corners[7], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[7], corners[4], zoneColor, thickness, &overlayMin, &overlayMax);
+
+							// 4 条垂直柱棱边
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[0], corners[4], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[1], corners[5], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[2], corners[6], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[3], corners[7], zoneColor, thickness, &overlayMin, &overlayMax);
+
+							drewAudio = true;
+						}
+
+						if (drewAudio)
+							++audioCount;
+					}
 				}
 				// 取证(与相机视锥同口径):脚本可断言"画了几个、覆盖到哪",不靠像素。
-				if ((lightCount > 0 || colliderCount > 0) && std::getenv("WLD_TRACE_UI"))
+				if ((lightCount > 0 || colliderCount > 0 || audioCount > 0) && std::getenv("WLD_TRACE_UI"))
 				{
 					static uint64_t lastOverlayLog = ~0ull;
 					const uint64_t stamp = ctx.Frame() / 120;
 					if (stamp != lastOverlayLog)
 					{
 						lastOverlayLog = stamp;
-						WLD_CORE_INFO("[ui] overlays lights={0} colliders={1} allLights={2} allColliders={3} "
-							"bbox=({4},{5},{6},{7})",
-							lightCount, colliderCount, showAllLights ? 1 : 0, showAllColliders ? 1 : 0,
+						WLD_CORE_INFO("[ui] overlays lights={0} colliders={1} audio={2} allLights={3} allColliders={4} allAudio={5} "
+							"bbox=({6},{7},{8},{9})",
+							lightCount, colliderCount, audioCount, showAllLights ? 1 : 0, showAllColliders ? 1 : 0, showAllAudio ? 1 : 0,
 							overlayMin.x, overlayMin.y, overlayMax.x - overlayMin.x, overlayMax.y - overlayMin.y);
 					}
 				}

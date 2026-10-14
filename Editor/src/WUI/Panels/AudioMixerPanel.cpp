@@ -3,6 +3,8 @@
 #include "World/Audio/AudioCooker.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Audio/AudioTypes.h"
+#include "World/Audio/AudioBuffer.h"
+#include "World/Audio/AudioProfiler.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
@@ -22,6 +24,62 @@
 
 namespace World
 {
+	namespace
+	{
+		template <typename T, typename = void>
+		struct HasSnapLoopMethod : std::false_type {};
+
+		template <typename T>
+		struct HasSnapLoopMethod<T, std::void_t<decltype(std::declval<T>().SnapLoopPointsToZeroCrossing(256))>> : std::true_type {};
+
+		template <typename BufferT>
+		void DoSnapLoopPoints(BufferT& buf, uint32_t searchWindow = 256)
+		{
+			if constexpr (HasSnapLoopMethod<BufferT>::value)
+			{
+				buf.SnapLoopPointsToZeroCrossing(searchWindow);
+			}
+			else
+			{
+				const auto& samples = buf.GetSamples();
+				const uint32_t channels = buf.GetChannels();
+				const uint32_t frameCount = buf.GetFrameCount();
+				if (samples.empty() || frameCount < 2 || channels == 0) return;
+
+				auto findZeroCrossing = [&](uint32_t target) -> uint32_t {
+					uint32_t bestFrame = target;
+					float bestDist = 1e9f;
+					int32_t startSearch = std::max(1, static_cast<int32_t>(target) - static_cast<int32_t>(searchWindow));
+					int32_t endSearch = std::min(static_cast<int32_t>(frameCount - 1), static_cast<int32_t>(target + searchWindow));
+
+					for (int32_t f = startSearch; f <= endSearch; ++f)
+					{
+						float prev = samples[(f - 1) * channels];
+						float curr = samples[f * channels];
+						if (prev <= 0.0f && curr >= 0.0f)
+						{
+							float dist = static_cast<float>(std::abs(f - static_cast<int32_t>(target)));
+							if (dist < bestDist)
+							{
+								bestDist = dist;
+								bestFrame = static_cast<uint32_t>(f);
+							}
+						}
+					}
+					return bestFrame;
+				};
+
+				uint32_t start = buf.GetLoopStartFrame();
+				uint32_t end = buf.HasLoopPoints() ? buf.GetLoopEndFrame() : frameCount;
+				uint32_t newStart = findZeroCrossing(start);
+				uint32_t newEnd = findZeroCrossing(end);
+				if (newEnd > newStart)
+				{
+					buf.SetLoopPoints(newStart, newEnd);
+				}
+			}
+		}
+	}
 	std::string AudioMixerPanel::s_PendingOpenAsset;
 
 	void AudioMixerPanel::RequestOpenAsset(const std::string& path)
@@ -72,7 +130,29 @@ namespace World
 #endif
 	}
 
-	static std::shared_ptr<Audio::AudioBuffer> EnsureSliceBuffer(const std::string& path, size_t variationSeed = 0)
+	static std::shared_ptr<Audio::AudioBuffer> EnsureSliceBuffer(const std::string& path, size_t variationSeed = 0);
+
+	std::shared_ptr<Audio::AudioBuffer> AudioMixerPanel::GetSelectedBuffer()
+	{
+		if (m_SelectedIndex < 0 || m_SelectedIndex >= static_cast<int>(m_Items.size()))
+			return nullptr;
+
+		const auto& item = m_Items[m_SelectedIndex];
+		if (item.kind == AudioItemKind::AudioSlice)
+		{
+			return EnsureSliceBuffer(item.path);
+		}
+		else if (item.kind == AudioItemKind::SoundEvent)
+		{
+			if (m_SelectedEvent.GetRootContainer() && !m_SelectedEvent.GetRootContainer()->variations.empty())
+			{
+				return EnsureSliceBuffer(m_SelectedEvent.GetRootContainer()->variations[0].soundAssetPath, 0);
+			}
+		}
+		return nullptr;
+	}
+
+	static std::shared_ptr<Audio::AudioBuffer> EnsureSliceBuffer(const std::string& path, size_t variationSeed)
 	{
 		auto& audio = Audio::AudioSystem::Get();
 		auto buf = audio.FindAudioBuffer(path);
@@ -328,6 +408,9 @@ namespace World
 		m_LoadedEventPath.clear();
 		m_PlaybackTime = 0.0f;
 		m_Duration = 1.8f;
+		m_HasSnappedLoop = false;
+		m_SnappedLoopStart = 0;
+		m_SnappedLoopEnd = 0;
 
 		if (item.kind == AudioItemKind::SoundEvent)
 		{
@@ -721,7 +804,9 @@ namespace World
 
 		if (m_SelectedIndex < 0 || m_SelectedIndex >= static_cast<int>(m_Items.size()))
 		{
-			Wui::Label(ctx, { rect.X + 20.0f, rect.Y + 20.0f }, "请在左侧工程音频库中选择一个声音条目。", theme.TextMuted, 13.0f);
+			Wui::Label(ctx, { rect.X + 20.0f, rect.Y + 14.0f }, "请在左侧工程音频库中选择一个声音条目以检视与编辑。", theme.TextMuted, 13.0f);
+			const Wui::WuiRect profilerBox { rect.X + 8.0f, rect.Y + 38.0f, rect.W - 16.0f, 142.0f };
+			RenderProfilerHud(ctx, profilerBox, host);
 			return;
 		}
 
@@ -765,10 +850,10 @@ namespace World
 		Wui::PanelBackground(ctx, transportBox, theme.PanelBg, 4.0f);
 
 		float btnY = transportBox.Y + 8.0f;
-		const Wui::WuiRect btnPlay { transportBox.X + 12.0f, btnY, 78.0f, 26.0f };
-		const Wui::WuiRect btnPause { transportBox.X + 96.0f, btnY, 78.0f, 26.0f };
-		const Wui::WuiRect btnStop { transportBox.X + 180.0f, btnY, 78.0f, 26.0f };
-		const Wui::WuiRect btnLoop { transportBox.X + 264.0f, btnY, 92.0f, 26.0f };
+		const Wui::WuiRect btnPlay { transportBox.X + 12.0f, btnY, 74.0f, 26.0f };
+		const Wui::WuiRect btnPause { transportBox.X + 90.0f, btnY, 74.0f, 26.0f };
+		const Wui::WuiRect btnStop { transportBox.X + 168.0f, btnY, 74.0f, 26.0f };
+		const Wui::WuiRect btnLoop { transportBox.X + 246.0f, btnY, 86.0f, 26.0f };
 
 		Wui::Tooltip(ctx, btnPlay, "开始回放选中的声音 (多切片事件将按变体权重随机触发)");
 		if (Wui::Button(ctx, Wui::HashId("trans.play"), btnPlay, "▶ 播放", theme))
@@ -797,6 +882,42 @@ namespace World
 			{
 				Audio::AudioSystem::Get().SetVoiceLooping(m_CurrentVoice, m_Looping);
 			}
+		}
+
+		// 零交叉吸附按钮 (Snap to Zero-Crossing)
+		const Wui::WuiRect btnSnapLoop { transportBox.X + 338.0f, btnY, 175.0f, 26.0f };
+		Wui::Tooltip(ctx, btnSnapLoop, "将循环起点与终点自动吸附到波形正斜率零交叉点，彻底根治循环接缝处的爆音 (Clicks & Pops)");
+		if (Wui::Button(ctx, Wui::HashId("trans.btn.snap_zero"), btnSnapLoop, "⚡ 零交叉吸附 (Snap)", theme))
+		{
+			auto buf = GetSelectedBuffer();
+			if (buf && buf->GetFrameCount() > 0)
+			{
+				if (!buf->HasLoopPoints())
+				{
+					buf->SetLoopPoints(0, buf->GetFrameCount());
+				}
+				DoSnapLoopPoints(*buf, 256);
+				m_SnappedLoopStart = buf->GetLoopStartFrame();
+				m_SnappedLoopEnd = buf->GetLoopEndFrame();
+				m_HasSnappedLoop = true;
+				m_StatusNotice = "零交叉吸附完成: 起点 " + std::to_string(m_SnappedLoopStart) + " 帧, 终点 " + std::to_string(m_SnappedLoopEnd) + " 帧 (无缝循环)";
+			}
+			else
+			{
+				m_StatusNotice = "当前条目未加载有效的音频切片波形数据";
+			}
+		}
+
+		auto activeBuf = GetSelectedBuffer();
+		if (activeBuf && activeBuf->GetFrameCount() > 0 && transportBox.W > 540.0f)
+		{
+			char loopInfoStr[80];
+			uint32_t lStart = activeBuf->GetLoopStartFrame();
+			uint32_t lEnd = activeBuf->HasLoopPoints() ? activeBuf->GetLoopEndFrame() : activeBuf->GetFrameCount();
+			std::snprintf(loopInfoStr, sizeof(loopInfoStr), "循环帧: %u ~ %u %s",
+				lStart, lEnd, m_HasSnappedLoop ? "[已吸附零点]" : "");
+			Wui::Label(ctx, { transportBox.X + 520.0f, btnY + 6.0f }, loopInfoStr,
+				m_HasSnappedLoop ? Wui::WuiColor{ 0.35f, 0.85f, 0.95f, 1.0f } : theme.TextMuted, 11.0f);
 		}
 
 		// Progress bar & playback time
@@ -892,7 +1013,12 @@ namespace World
 
 		curY += 134.0f;
 
-		// 4. Variations Section (if compound sound event)
+		// 4. Audio Profiler 实时声学与频谱监视卡片
+		const Wui::WuiRect profilerBox { rect.X + 8.0f, curY, rect.W - 16.0f, 142.0f };
+		RenderProfilerHud(ctx, profilerBox, host);
+		curY += 148.0f;
+
+		// 5. Variations Section (if compound sound event)
 		if (item.kind == AudioItemKind::SoundEvent && m_SelectedEvent.GetRootContainer())
 		{
 			float varBoxH = rect.H - (curY - rect.Y) - 10.0f;
@@ -1257,4 +1383,132 @@ namespace World
 		}
 	}
 
+	void AudioMixerPanel::RenderProfilerHud(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		Wui::PanelBackground(ctx, rect, theme.PanelBg, 4.0f);
+
+		auto& audio = Audio::AudioSystem::Get();
+		const auto profilerSnap = audio.GetProfiler().GetSnapshot();
+		const bool isClipped = profilerSnap.masterClipping || audio.GetProfiler().IsMasterClipping();
+		const double dspTime = audio.GetDspTime();
+
+		float curY = rect.Y + 8.0f;
+
+		// 1. Header Row: Title + DSP Absolute Timestamp + DAC Clipping LED
+		Wui::Label(ctx, { rect.X + 12.0f, curY }, "音频分析器 (Audio Profiler HUD)", { 0.35f, 0.85f, 0.95f, 1.0f }, 13.0f);
+
+		// DSP Absolute Time
+		char dspStr[64];
+		std::snprintf(dspStr, sizeof(dspStr), "DSP 绝对时间: %.3f s", dspTime);
+		Wui::Label(ctx, { rect.X + rect.W - 250.0f, curY + 1.0f }, dspStr, theme.TextMuted, 11.5f);
+
+		// Clipping Indicator LED Badge
+		const Wui::WuiRect ledRect { rect.X + rect.W - 96.0f, curY, 86.0f, 18.0f };
+		if (isClipped)
+		{
+			Wui::PanelBackground(ctx, ledRect, { 0.95f, 0.20f, 0.20f, 0.95f }, 3.0f);
+			Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 2.0f }, "● DAC 削波", { 1.0f, 1.0f, 1.0f, 1.0f }, 10.5f);
+		}
+		else
+		{
+			Wui::PanelBackground(ctx, ledRect, { 0.15f, 0.32f, 0.20f, 0.90f }, 3.0f);
+			Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 2.0f }, "● 输出正常", { 0.45f, 0.85f, 0.55f, 0.95f }, 10.5f);
+		}
+		Wui::Tooltip(ctx, ledRect, isClipped ? "警告: 发生 DAC 输出削波失真 (Clipping)！请降低总线增益" : "DAC 输出电平正常，无削波失真");
+
+		curY += 24.0f;
+
+		// 2. Voice Resource Indicators (Physical & Virtual Voice Progress Bars)
+		const float halfW = (rect.W - 32.0f) * 0.5f;
+
+		// Physical Voice Bar
+		char physText[48];
+		std::snprintf(physText, sizeof(physText), "物理声部: %u / %u", profilerSnap.activePhysicalVoices, profilerSnap.totalPhysicalVoices);
+		Wui::Label(ctx, { rect.X + 12.0f, curY }, physText, theme.Text, 11.0f);
+
+		const float physLabelWidth = 140.0f;
+		const Wui::WuiRect physBarBg { rect.X + 12.0f + physLabelWidth, curY + 2.0f, std::max(20.0f, halfW - physLabelWidth), 10.0f };
+		Wui::PanelBackground(ctx, physBarBg, theme.ContentBg, 2.0f);
+		const float physRatio = std::clamp(static_cast<float>(profilerSnap.activePhysicalVoices) /
+			static_cast<float>(std::max(1u, profilerSnap.totalPhysicalVoices)), 0.0f, 1.0f);
+		if (physRatio > 0.005f)
+		{
+			Wui::PanelBackground(ctx, { physBarBg.X, physBarBg.Y, physBarBg.W * physRatio, physBarBg.H }, { 0.25f, 0.80f, 0.95f, 0.95f }, 2.0f);
+		}
+
+		// Virtual Voice Bar
+		const float virtX = rect.X + 20.0f + halfW;
+		char virtText[48];
+		std::snprintf(virtText, sizeof(virtText), "虚拟等待声部: %u / %u", profilerSnap.activeVirtualVoices, profilerSnap.totalVirtualVoices);
+		Wui::Label(ctx, { virtX, curY }, virtText, theme.Text, 11.0f);
+
+		const float virtLabelWidth = 160.0f;
+		const Wui::WuiRect virtBarBg { virtX + virtLabelWidth, curY + 2.0f, std::max(20.0f, halfW - virtLabelWidth), 10.0f };
+		Wui::PanelBackground(ctx, virtBarBg, theme.ContentBg, 2.0f);
+		const float virtRatio = std::clamp(static_cast<float>(profilerSnap.activeVirtualVoices) /
+			static_cast<float>(std::max(1u, profilerSnap.totalVirtualVoices)), 0.0f, 1.0f);
+		if (virtRatio > 0.005f)
+		{
+			Wui::PanelBackground(ctx, { virtBarBg.X, virtBarBg.Y, virtBarBg.W * virtRatio, virtBarBg.H }, { 0.70f, 0.50f, 0.95f, 0.95f }, 2.0f);
+		}
+
+		curY += 20.0f;
+
+		// 3. FFT Spectrum Bars (32 bands)
+		audio.GetSpectrum(m_SpectrumBands, 32);
+		if (m_SpectrumBands.size() < 32)
+		{
+			m_SpectrumBands.assign(32, 0.0f);
+		}
+
+		const float specH = 60.0f;
+		const Wui::WuiRect specBox { rect.X + 12.0f, curY, rect.W - 24.0f, specH };
+		Wui::PanelBackground(ctx, specBox, theme.ContentBg, 3.0f);
+
+		const float padX = 6.0f;
+		const float padY = 4.0f;
+		const float innerW = specBox.W - padX * 2.0f;
+		const float innerH = specBox.H - padY * 2.0f;
+		const float barGap = 2.0f;
+		const float barW = std::max(2.0f, (innerW - 31.0f * barGap) / 32.0f);
+
+		for (uint32_t b = 0; b < 32; ++b)
+		{
+			float val = std::clamp(m_SpectrumBands[b], 0.0f, 1.0f);
+			float barH = std::max(2.0f, val * innerH);
+			float bx = specBox.X + padX + static_cast<float>(b) * (barW + barGap);
+			float by = specBox.Y + specBox.H - padY - barH;
+
+			// Colorful gradient across 32 frequency bands:
+			// Bass (cyan/blue) -> Mid (green/emerald) -> Presence (gold/amber) -> Treble (coral/red)
+			const float t = static_cast<float>(b) / 31.0f;
+			Wui::WuiColor barColor;
+			if (t < 0.33f)
+			{
+				const float u = t / 0.33f;
+				barColor = { glm::mix(0.18f, 0.25f, u), glm::mix(0.75f, 0.88f, u), glm::mix(0.95f, 0.45f, u), val > 0.03f ? 0.95f : 0.40f };
+			}
+			else if (t < 0.66f)
+			{
+				const float u = (t - 0.33f) / 0.33f;
+				barColor = { glm::mix(0.25f, 0.95f, u), glm::mix(0.88f, 0.78f, u), glm::mix(0.45f, 0.20f, u), val > 0.03f ? 0.95f : 0.40f };
+			}
+			else
+			{
+				const float u = (t - 0.66f) / 0.34f;
+				barColor = { glm::mix(0.95f, 0.95f, u), glm::mix(0.78f, 0.30f, u), glm::mix(0.20f, 0.35f, u), val > 0.03f ? 0.95f : 0.40f };
+			}
+
+			Wui::PanelBackground(ctx, { bx, by, barW, barH }, barColor, 1.0f);
+		}
+
+		// 4. Frequency axis labels under the spectrum
+		curY += specH + 3.0f;
+		Wui::Label(ctx, { specBox.X + 4.0f, curY }, "20Hz", theme.TextMuted, 9.5f);
+		Wui::Label(ctx, { specBox.X + specBox.W * 0.25f - 10.0f, curY }, "250Hz", theme.TextMuted, 9.5f);
+		Wui::Label(ctx, { specBox.X + specBox.W * 0.50f - 10.0f, curY }, "1kHz", theme.TextMuted, 9.5f);
+		Wui::Label(ctx, { specBox.X + specBox.W * 0.75f - 10.0f, curY }, "6kHz", theme.TextMuted, 9.5f);
+		Wui::Label(ctx, { specBox.X + specBox.W - 28.0f, curY }, "20kHz", theme.TextMuted, 9.5f);
+	}
 }

@@ -562,4 +562,323 @@ namespace World::Audio
 
 		return true;
 	}
+
+	// =========================================================================
+	// ParametricEq Implementation
+	// =========================================================================
+	ParametricEq::ParametricEq()
+	{
+		m_Bands[0] = { FilterType::LowShelf, 80.0f, 0.0f, 0.7071f };
+		m_Bands[1] = { FilterType::PeakingEQ, 250.0f, 0.0f, 1.0f };
+		m_Bands[2] = { FilterType::PeakingEQ, 1000.0f, 0.0f, 1.0f };
+		m_Bands[3] = { FilterType::PeakingEQ, 4000.0f, 0.0f, 1.0f };
+		m_Bands[4] = { FilterType::HighShelf, 12000.0f, 0.0f, 0.7071f };
+	}
+
+	void ParametricEq::SetBand(size_t bandIndex, float gainDb, float q) noexcept
+	{
+		if (bandIndex >= kBandCount) return;
+		m_Bands[bandIndex].gainDb = std::clamp(gainDb, -18.0f, 18.0f);
+		m_Bands[bandIndex].q = std::clamp(q, 0.1f, 10.0f);
+		m_Dirty = true;
+	}
+
+	void ParametricEq::SetBandGain(size_t bandIndex, float gainDb) noexcept
+	{
+		if (bandIndex >= kBandCount) return;
+		m_Bands[bandIndex].gainDb = std::clamp(gainDb, -18.0f, 18.0f);
+		m_Dirty = true;
+	}
+
+	void ParametricEq::SetBandQ(size_t bandIndex, float q) noexcept
+	{
+		if (bandIndex >= kBandCount) return;
+		m_Bands[bandIndex].q = std::clamp(q, 0.1f, 10.0f);
+		m_Dirty = true;
+	}
+
+	void ParametricEq::SetBandFrequency(size_t bandIndex, float frequencyHz) noexcept
+	{
+		if (bandIndex >= kBandCount) return;
+		m_Bands[bandIndex].frequencyHz = std::max(10.0f, frequencyHz);
+		m_Dirty = true;
+	}
+
+	const ParametricEq::BandSettings& ParametricEq::GetBand(size_t bandIndex) const noexcept
+	{
+		static const BandSettings kDummy{};
+		if (bandIndex >= kBandCount) return kDummy;
+		return m_Bands[bandIndex];
+	}
+
+	ParametricEq::BandSettings& ParametricEq::GetBand(size_t bandIndex) noexcept
+	{
+		if (bandIndex >= kBandCount) return m_Bands[0];
+		m_Dirty = true;
+		return m_Bands[bandIndex];
+	}
+
+	void ParametricEq::Reset() noexcept
+	{
+		for (size_t i = 0; i < kBandCount; ++i)
+		{
+			m_FiltersL[i].Reset();
+			m_FiltersR[i].Reset();
+		}
+	}
+
+	void ParametricEq::UpdateFilters(float sampleRate)
+	{
+		for (size_t i = 0; i < kBandCount; ++i)
+		{
+			m_FiltersL[i].Configure(m_Bands[i].type, m_Bands[i].frequencyHz, sampleRate, m_Bands[i].q, m_Bands[i].gainDb);
+			m_FiltersR[i].Configure(m_Bands[i].type, m_Bands[i].frequencyHz, sampleRate, m_Bands[i].q, m_Bands[i].gainDb);
+		}
+		m_LastSampleRate = sampleRate;
+		m_Dirty = false;
+	}
+
+	void ParametricEq::Process(float* inOutLeft, float* inOutRight, uint32_t frameCount, float sampleRate)
+	{
+		if (!inOutLeft || !inOutRight || frameCount == 0) return;
+
+		if (m_Dirty || sampleRate != m_LastSampleRate)
+		{
+			UpdateFilters(sampleRate);
+		}
+
+		for (uint32_t f = 0; f < frameCount; ++f)
+		{
+			float l = inOutLeft[f];
+			float r = inOutRight[f];
+
+			for (size_t b = 0; b < kBandCount; ++b)
+			{
+				l = m_FiltersL[b].Process(l);
+				r = m_FiltersR[b].Process(r);
+			}
+
+			inOutLeft[f] = l;
+			inOutRight[f] = r;
+		}
+	}
+
+	// =========================================================================
+	// AlgorithmicReverb Implementation
+	// =========================================================================
+	static constexpr uint32_t kBasePrimeDelays[8] = { 1087, 1283, 1511, 1777, 1999, 2287, 2521, 2803 };
+
+	AlgorithmicReverb::AlgorithmicReverb()
+	{
+		Reset();
+	}
+
+	void AlgorithmicReverb::Configure(
+		float roomSize,
+		float damping,
+		float preDelayMs,
+		float wetGain,
+		float dryGain) noexcept
+	{
+		m_RoomSize = std::clamp(roomSize, 0.0f, 1.0f);
+		m_Damping = std::clamp(damping, 0.0f, 1.0f);
+		m_PreDelayMs = std::clamp(preDelayMs, 0.0f, 200.0f);
+		m_WetGain = std::clamp(wetGain, 0.0f, 1.0f);
+		m_DryGain = std::clamp(dryGain, 0.0f, 1.0f);
+		m_Dirty = true;
+	}
+
+	void AlgorithmicReverb::Reset() noexcept
+	{
+		for (size_t i = 0; i < kNumDelayLines; ++i)
+		{
+			std::fill(m_DelayBuffers[i].begin(), m_DelayBuffers[i].end(), 0.0f);
+			m_WriteIndices[i] = 0;
+			m_DampedStates[i] = 0.0f;
+		}
+		std::fill(m_PreDelayBuffer.begin(), m_PreDelayBuffer.end(), 0.0f);
+		m_PreDelayWriteIndex = 0;
+	}
+
+	void AlgorithmicReverb::UpdateParameters(float sampleRate)
+	{
+		if (sampleRate <= 0.0f) sampleRate = static_cast<float>(kDefaultSampleRate);
+		float scale = (0.6f + m_RoomSize * 0.8f) * (sampleRate / 48000.0f);
+
+		for (size_t i = 0; i < kNumDelayLines; ++i)
+		{
+			size_t len = static_cast<size_t>(kBasePrimeDelays[i] * scale);
+			len = std::max<size_t>(16, len);
+			if (m_DelayBuffers[i].size() < len + 16)
+			{
+				m_DelayBuffers[i].assign(len + 16, 0.0f);
+				m_WriteIndices[i] = 0;
+			}
+			m_DelayLengths[i] = len;
+		}
+
+		size_t maxPreDelaySamples = static_cast<size_t>(sampleRate * 0.22f) + 32;
+		if (m_PreDelayBuffer.size() < maxPreDelaySamples)
+		{
+			m_PreDelayBuffer.assign(maxPreDelaySamples, 0.0f);
+			m_PreDelayWriteIndex = 0;
+		}
+
+		m_LastSampleRate = sampleRate;
+		m_Dirty = false;
+	}
+
+	void AlgorithmicReverb::Process(float* inOutLeft, float* inOutRight, uint32_t frameCount, float sampleRate)
+	{
+		if (!inOutLeft || !inOutRight || frameCount == 0) return;
+
+		if (m_Dirty || sampleRate != m_LastSampleRate)
+		{
+			UpdateParameters(sampleRate);
+		}
+
+		size_t preDelaySamples = static_cast<size_t>(m_PreDelayMs * 0.001f * sampleRate);
+		size_t preBufSize = m_PreDelayBuffer.empty() ? 1 : m_PreDelayBuffer.size();
+		preDelaySamples = std::min(preDelaySamples, preBufSize - 1);
+
+		float feedbackDecay = 0.65f + m_RoomSize * 0.32f;
+		float dampCoeff = std::clamp(m_Damping * 0.65f, 0.0f, 0.95f);
+
+		for (uint32_t f = 0; f < frameCount; ++f)
+		{
+			float inL = inOutLeft[f];
+			float inR = inOutRight[f];
+			float monoIn = (inL + inR) * 0.5f;
+
+			// Write to pre-delay buffer
+			m_PreDelayBuffer[m_PreDelayWriteIndex] = monoIn;
+			size_t readPos = (m_PreDelayWriteIndex + preBufSize - preDelaySamples) % preBufSize;
+			float delayedInput = m_PreDelayBuffer[readPos];
+			m_PreDelayWriteIndex = (m_PreDelayWriteIndex + 1) % preBufSize;
+
+			// Read and damp outputs of the 8 delay lines
+			float lineOutputs[kNumDelayLines];
+			float sum = 0.0f;
+			for (size_t j = 0; j < kNumDelayLines; ++j)
+			{
+				size_t len = m_DelayLengths[j];
+				float rawOut = m_DelayBuffers[j][m_WriteIndices[j]];
+
+				m_DampedStates[j] = m_DampedStates[j] * dampCoeff + rawOut * (1.0f - dampCoeff);
+				lineOutputs[j] = m_DampedStates[j];
+				sum += lineOutputs[j];
+			}
+
+			// Householder orthogonal matrix: H = I - 2/N * 1_N
+			float householderOut[kNumDelayLines];
+			for (size_t j = 0; j < kNumDelayLines; ++j)
+			{
+				householderOut[j] = lineOutputs[j] - 0.25f * sum;
+			}
+
+			// Write feedback + delayed input into delay lines
+			for (size_t j = 0; j < kNumDelayLines; ++j)
+			{
+				float nextIn = delayedInput + feedbackDecay * householderOut[j];
+				nextIn = std::clamp(nextIn, -3.0f, 3.0f);
+				m_DelayBuffers[j][m_WriteIndices[j]] = nextIn;
+				m_WriteIndices[j] = (m_WriteIndices[j] + 1) % m_DelayLengths[j];
+			}
+
+			// Stereophonic tap extraction
+			float revL = (lineOutputs[0] - lineOutputs[2] + lineOutputs[4] - lineOutputs[6] + 0.5f * (lineOutputs[1] - lineOutputs[3])) * 0.35f;
+			float revR = (lineOutputs[1] - lineOutputs[3] + lineOutputs[5] - lineOutputs[7] + 0.5f * (lineOutputs[0] - lineOutputs[2])) * 0.35f;
+
+			inOutLeft[f] = inL * m_DryGain + revL * m_WetGain;
+			inOutRight[f] = inR * m_DryGain + revR * m_WetGain;
+		}
+	}
+
+	// =========================================================================
+	// StereoDelay Implementation
+	// =========================================================================
+	StereoDelay::StereoDelay()
+	{
+		Reset();
+	}
+
+	void StereoDelay::Configure(
+		float delayTimeLeftMs,
+		float delayTimeRightMs,
+		float feedbackGain,
+		bool pingPong,
+		float wetDryMix) noexcept
+	{
+		m_DelayTimeLeftMs = std::clamp(delayTimeLeftMs, 1.0f, 2000.0f);
+		m_DelayTimeRightMs = std::clamp(delayTimeRightMs, 1.0f, 2000.0f);
+		m_FeedbackGain = std::clamp(feedbackGain, 0.0f, 0.95f);
+		m_PingPong = pingPong;
+		m_WetDryMix = std::clamp(wetDryMix, 0.0f, 1.0f);
+	}
+
+	void StereoDelay::Reset() noexcept
+	{
+		std::fill(m_BufferLeft.begin(), m_BufferLeft.end(), 0.0f);
+		std::fill(m_BufferRight.begin(), m_BufferRight.end(), 0.0f);
+		m_WritePosLeft = 0;
+		m_WritePosRight = 0;
+	}
+
+	void StereoDelay::Process(float* inOutLeft, float* inOutRight, uint32_t frameCount, float sampleRate)
+	{
+		if (!inOutLeft || !inOutRight || frameCount == 0) return;
+
+		if (sampleRate <= 0.0f) sampleRate = static_cast<float>(kDefaultSampleRate);
+
+		size_t maxCapacity = static_cast<size_t>(sampleRate * 2.05f) + 32;
+		if (m_BufferLeft.size() < maxCapacity)
+		{
+			m_BufferLeft.assign(maxCapacity, 0.0f);
+			m_BufferRight.assign(maxCapacity, 0.0f);
+			m_WritePosLeft = 0;
+			m_WritePosRight = 0;
+		}
+
+		size_t cap = m_BufferLeft.size();
+		size_t delaySamplesL = std::clamp<size_t>(static_cast<size_t>(m_DelayTimeLeftMs * 0.001f * sampleRate), 1, cap - 1);
+		size_t delaySamplesR = std::clamp<size_t>(static_cast<size_t>(m_DelayTimeRightMs * 0.001f * sampleRate), 1, cap - 1);
+
+		for (uint32_t f = 0; f < frameCount; ++f)
+		{
+			float inL = inOutLeft[f];
+			float inR = inOutRight[f];
+
+			size_t readPosL = (m_WritePosLeft + cap - delaySamplesL) % cap;
+			size_t readPosR = (m_WritePosRight + cap - delaySamplesR) % cap;
+
+			float delayedL = m_BufferLeft[readPosL];
+			float delayedR = m_BufferRight[readPosR];
+
+			float feedbackL = 0.0f;
+			float feedbackR = 0.0f;
+
+			if (m_PingPong)
+			{
+				feedbackL = inL + delayedR * m_FeedbackGain;
+				feedbackR = inR + delayedL * m_FeedbackGain;
+			}
+			else
+			{
+				feedbackL = inL + delayedL * m_FeedbackGain;
+				feedbackR = inR + delayedR * m_FeedbackGain;
+			}
+
+			feedbackL = std::clamp(feedbackL, -3.0f, 3.0f);
+			feedbackR = std::clamp(feedbackR, -3.0f, 3.0f);
+
+			m_BufferLeft[m_WritePosLeft] = feedbackL;
+			m_BufferRight[m_WritePosRight] = feedbackR;
+
+			m_WritePosLeft = (m_WritePosLeft + 1) % cap;
+			m_WritePosRight = (m_WritePosRight + 1) % cap;
+
+			inOutLeft[f] = inL * (1.0f - m_WetDryMix) + delayedL * m_WetDryMix;
+			inOutRight[f] = inR * (1.0f - m_WetDryMix) + delayedR * m_WetDryMix;
+		}
+	}
 }

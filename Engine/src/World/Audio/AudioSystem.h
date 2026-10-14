@@ -152,11 +152,22 @@ namespace World::Audio
 		void SetZoneTransitionRate(float rate) noexcept { m_ZoneTransitionRate = rate; }
 		float GetZoneTransitionRate() const noexcept { return m_ZoneTransitionRate; }
 
-		// Raycast occlusion callback
+		// Raycast occlusion callback & multi-ray evaluation
 		void SetOcclusionRaycastCallback(std::function<float(const glm::vec3& listenerPos, const glm::vec3& sourcePos)> callback)
 		{
 			m_OcclusionRaycastCallback = std::move(callback);
 		}
+		void SetMultiRayOcclusionEnabled(bool enabled) noexcept { m_MultiRayOcclusionEnabled = enabled; }
+		bool IsMultiRayOcclusionEnabled() const noexcept { return m_MultiRayOcclusionEnabled; }
+		void SetOcclusionRaycastOffsets(float upOffset, float sideOffset) noexcept
+		{
+			m_OcclusionUpOffset = upOffset;
+			m_OcclusionSideOffset = sideOffset;
+		}
+		float GetOcclusionUpOffset() const noexcept { return m_OcclusionUpOffset; }
+		float GetOcclusionSideOffset() const noexcept { return m_OcclusionSideOffset; }
+
+		float CalculateMultiRayOcclusion(const glm::vec3& listenerPos, const glm::vec3& sourcePos) const;
 
 		// Bus & Snapshot controls
 		void SetBusVolume(BusId busId, float volume);
@@ -260,8 +271,11 @@ namespace World::Audio
 		// ECS transform tracking for velocities
 		std::unordered_map<uint32_t, glm::vec3> m_EntityLastPosition;
 
-		// Optional raycast occlusion callback
+		// Optional raycast occlusion callback and multi-ray parameters
 		std::function<float(const glm::vec3& listenerPos, const glm::vec3& sourcePos)> m_OcclusionRaycastCallback;
+		bool m_MultiRayOcclusionEnabled { true };
+		float m_OcclusionUpOffset { 0.5f };
+		float m_OcclusionSideOffset { 0.5f };
 
 		// Scratch bus mix buffers (reused across blocks to guarantee 0 heap allocation)
 		std::unordered_map<BusId, std::pair<std::vector<float>, std::vector<float>>> m_BusMixBuffers;
