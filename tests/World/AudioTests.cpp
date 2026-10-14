@@ -1,4 +1,4 @@
-#include "World/Audio/AudioSystem.h"
+﻿#include "World/Audio/AudioSystem.h"
 #include "World/Audio/AudioCommandQueue.h"
 #include "World/Audio/AudioNullBackend.h"
 #include "World/Audio/AudioDsp.h"
@@ -1544,6 +1544,292 @@ static void TestProceduralSynthAndFootstep()
 	std::cout << "  -> Passed." << std::endl;
 }
 
+
+static void TestContainersAndInstanceLimits()
+{
+	std::cout << "[Test] SoundEvent: Multi-Track Layer, Blend Crossfade, MaxInstances & Cooldown..." << std::endl;
+
+	// 1. Layer container multi-track simultaneous evaluation
+	SoundEvent layerEvt("explosion_layer", kBusSfx);
+	auto root = layerEvt.GetRootContainer();
+	root->type = ContainerType::Layer;
+
+	auto subPunch = std::make_shared<SoundContainerNode>();
+	subPunch->type = ContainerType::Single;
+	subPunch->variations.push_back({ "assets/audio/sfx/explosion_punch.waudio", 1.0f });
+
+	auto subDebris = std::make_shared<SoundContainerNode>();
+	subDebris->type = ContainerType::Single;
+	subDebris->variations.push_back({ "assets/audio/sfx/explosion_debris.waudio", 1.0f });
+
+	root->layerChildren.push_back({ 1.0f, subPunch });
+	root->layerChildren.push_back({ 0.7f, subDebris });
+
+	auto tracks = layerEvt.EvaluateTracks({}, {});
+	assert(tracks.size() == 2);
+	assert(tracks[0].soundAssetPath == "assets/audio/sfx/explosion_punch.waudio");
+	assert(tracks[0].volumeScale == 1.0f);
+	assert(tracks[1].soundAssetPath == "assets/audio/sfx/explosion_debris.waudio");
+	assert(std::abs(tracks[1].volumeScale - 0.7f) < 0.001f);
+
+	// 2. Blend container crossfade
+	SoundEvent blendEvt("engine_blend", kBusSfx);
+	auto blendRoot = blendEvt.GetRootContainer();
+	blendRoot->type = ContainerType::Blend;
+	blendRoot->blendParamName = "RPM";
+
+	auto idleNode = std::make_shared<SoundContainerNode>();
+	idleNode->variations.push_back({ "assets/audio/sfx/engine_idle.waudio", 1.0f });
+	auto highNode = std::make_shared<SoundContainerNode>();
+	highNode->variations.push_back({ "assets/audio/sfx/engine_high.waudio", 1.0f });
+
+	blendRoot->blendPoints.push_back({ 1000.0f, idleNode });
+	blendRoot->blendPoints.push_back({ 5000.0f, highNode });
+
+	// At 3000 RPM (exact midpoint): equal-power crossfade weights should be ~0.7071
+	std::unordered_map<std::string, float> blendParams;
+	blendParams["RPM"] = 3000.0f;
+	auto blendTracks = blendEvt.EvaluateTracks({}, blendParams);
+	assert(blendTracks.size() == 2);
+	assert(std::abs(blendTracks[0].volumeScale - 0.7071f) < 0.02f);
+	assert(std::abs(blendTracks[1].volumeScale - 0.7071f) < 0.02f);
+
+	// 3. MaxInstances and Cooldown in AudioSystem
+	AudioSystem audio;
+	audio.Initialize(true);
+	audio.SetRapidFireThrottlingEnabled(false); // Enable strict event instance & cooldown checks
+
+	SoundEvent gunEvt("pistol_shot", kBusSfx);
+	gunEvt.SetMaxInstances(2);
+	gunEvt.SetCooldownSeconds(0.1f);
+	gunEvt.SetStealPolicy(StealPolicy::StealReject);
+	gunEvt.GetRootContainer()->variations.push_back({ "assets/audio/sfx/test_gun.waudio", 1.0f });
+
+	auto shotBuf = std::make_shared<AudioBuffer>(48000, 2, 24000);
+	shotBuf->SetSample(0, 0, 0.5f);
+	audio.RegisterAudioBuffer("assets/audio/sfx/test_gun.waudio", shotBuf);
+	audio.RegisterSoundEvent(gunEvt);
+
+	// First trigger
+	VoiceHandle g1 = audio.PostEvent("pistol_shot");
+	assert(g1 != kInvalidVoiceHandle);
+
+	// Immediate trigger within cooldown (<0.1s): should be rejected
+	VoiceHandle g2 = audio.PostEvent("pistol_shot");
+	assert(g2 == kInvalidVoiceHandle);
+
+	// Advance time past cooldown
+	audio.Update(0.15f);
+
+	// Second trigger: succeeds (now 2 active instances = max)
+	VoiceHandle g3 = audio.PostEvent("pistol_shot");
+	assert(g3 != kInvalidVoiceHandle);
+
+	// Advance past cooldown again
+	audio.Update(0.15f);
+
+	// Third trigger with StealReject: max instances (2) reached, should reject
+	VoiceHandle g4 = audio.PostEvent("pistol_shot");
+	assert(g4 == kInvalidVoiceHandle);
+
+	audio.Shutdown();
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestAuxReverbAndVoiceVirtualization()
+{
+	std::cout << "[Test] Aux Reverb Send & Two-Way Virtual Voice Promotion..." << std::endl;
+
+	// 1. Aux Reverb Send
+	MixerGraph mixer;
+	mixer.FindBus(kBusSfx)->SetReverbSend(0.5f);
+	assert(mixer.FindBus(kBusSfx)->GetReverbSend() == 0.5f);
+	assert(mixer.IsAuxReverbEnabled());
+
+	std::unordered_map<BusId, std::pair<std::vector<float>, std::vector<float>>> busBuffers;
+	busBuffers[kBusSfx].first.assign(512, 0.4f);
+	busBuffers[kBusSfx].second.assign(512, 0.4f);
+
+	std::vector<float> finalL(512, 0.0f);
+	std::vector<float> finalR(512, 0.0f);
+	mixer.ProcessGraph(busBuffers, finalL.data(), finalR.data(), 512, 48000.0f);
+
+	float masterEnergy = 0.0f;
+	for (float s : finalL) masterEnergy += s * s;
+	assert(masterEnergy > 0.01f);
+
+	// 2. VoicePool Victim Demotion and Promotion
+	VoicePool pool;
+	auto testBuf = std::make_shared<AudioBuffer>(48000, 1, 48000); // 1 second mono
+	for (uint32_t i = 0; i < 48000; ++i) testBuf->SetSample(0, i, 0.5f);
+
+	// Fill all 64 physical voices
+	std::vector<VoiceHandle> physicalHandles;
+	for (int i = 0; i < 64; ++i)
+	{
+		VoiceHandle h = pool.AllocateVoice(testBuf, kBusSfx, 1.0f);
+		assert(h != kInvalidVoiceHandle);
+		physicalHandles.push_back(h);
+	}
+	assert(pool.GetActivePhysicalVoiceCount() == 64);
+	assert(pool.GetActiveVirtualVoiceCount() == 0);
+
+	// Allocate 65th voice with StealOldest: oldest physical voice should be demoted to virtual!
+	VoiceHandle h65 = pool.AllocateVoice(testBuf, kBusSfx, 1.0f, 1.0f, false, 128, StealPolicy::StealOldest);
+	assert(h65 != kInvalidVoiceHandle);
+	assert(pool.GetActivePhysicalVoiceCount() == 64);
+	assert(pool.GetActiveVirtualVoiceCount() >= 1);
+
+	// Advance virtual voices and promote when physical voice finishes
+	pool.StopVoice(physicalHandles[10], 0.0f); // Immediately free one physical slot
+	std::unordered_map<BusId, std::pair<std::vector<float>, std::vector<float>>> mixBuffers;
+	pool.MixVoicesIntoBuses(mixBuffers, 256, 48000.0f);
+
+	// The virtual voice should have been automatically promoted to fill the free physical slot!
+	assert(pool.GetActivePhysicalVoiceCount() == 64);
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestNextGenAcousticsAndRooms()
+{
+	std::cout << "[Test] Next-Gen Acoustics: Portals, 7.1 VBAP, Early Reflections, SpeedOfSound & HDR..." << std::endl;
+
+	// 1. Acoustic Portal diffraction
+	AcousticPortal portal;
+	portal.position = glm::vec3(0.0f, 1.5f, 0.0f);
+	portal.normal = glm::vec3(0.0f, 0.0f, 1.0f);
+	portal.width = 2.0f;
+	portal.height = 3.0f;
+	portal.isOpen = true;
+
+	glm::vec3 listenerPos(0.0f, 1.5f, 5.0f);
+	glm::vec3 emitterPos(6.0f, 1.5f, -5.0f); // Behind wall offset to the right
+
+	glm::vec3 virtualPos;
+	float diffractionFactor = 0.0f;
+	float lowPassCutoff = 0.0f;
+	bool diffOk = CalculatePortalDiffraction(listenerPos, emitterPos, portal, virtualPos, diffractionFactor, lowPassCutoff);
+	assert(diffOk);
+	// Virtual sound emitter should be bent towards the portal aperture
+	assert(std::abs(virtualPos.z - portal.position.z) < 0.01f);
+	assert(diffractionFactor > 0.05f && diffractionFactor < 1.0f);
+	assert(lowPassCutoff >= 600.0f && lowPassCutoff <= 20000.0f);
+
+	// 2. 7.1 VBAP surround panning
+	SpeakerLayout8 surroundGains;
+	CalculateVbapSurround(glm::vec3(0.0f, 0.0f, -5.0f), surroundGains); // Straight ahead
+	assert(surroundGains.center > 0.5f);
+
+	CalculateVbapSurround(glm::vec3(5.0f, 0.0f, 0.0f), surroundGains); // 90 degrees right
+	assert(surroundGains.sideRight > 0.5f);
+
+	// 3. Early reflections
+	std::array<float, 6> wallDists = { 4.0f, 6.0f, 2.5f, 1.0f, 8.0f, 10.0f };
+	auto earlyRef = CalculateEarlyReflections(listenerPos, wallDists);
+	assert(earlyRef.estimatedRoomVolume > 100.0f);
+	assert(earlyRef.delayMs > 5.0f && earlyRef.delayMs < 100.0f);
+	assert(earlyRef.gain > 0.05f);
+
+	// 4. Speed of sound delay
+	float delay1 = CalculateSpeedOfSoundDelaySeconds(343.0f);
+	assert(std::abs(delay1 - 1.0f) < 0.01f);
+	float delay2 = CalculateSpeedOfSoundDelaySeconds(686.0f);
+	assert(std::abs(delay2 - 2.0f) < 0.01f);
+
+	// 5. Large-world audio clustering
+	std::vector<AudioEmitterClusterItem> torches;
+	for (int i = 0; i < 10; ++i)
+	{
+		torches.push_back({ static_cast<uint64_t>(i), glm::vec3(50.0f + static_cast<float>(i % 3), 0.0f, 50.0f + static_cast<float>(i / 3)), 0.5f, "torch_burn" });
+	}
+	auto clustered = ClusterDistantEmitters(torches, glm::vec3(0.0f), 25.0f, 15.0f);
+	// 10 distant torches merged into a single clustered centroid
+	assert(clustered.size() == 1);
+	assert(clustered[0].originalCount == 10);
+	assert(clustered[0].combinedVolume > 1.0f);
+
+	// 6. HDR Audio perception
+	HdrAudioSystem hdr;
+	hdr.PostHdrEvent(120.0f); // 120 dB SPL explosion
+	float gainDucked = hdr.GetCurrentCompressionGain();
+	assert(gainDucked < 0.6f); // Lower sounds compressed/ducked
+	hdr.Update(5.0f); // Decay time
+	assert(hdr.GetCurrentCompressionGain() > gainDucked); // Restoring dynamic range
+
+	// 7. Facial Lip-Sync extraction
+	AudioBuffer speechBuf(48000, 1, 48000);
+	for (uint32_t i = 0; i < 48000; ++i)
+	{
+		float s = std::sin(2.0f * 3.14159265f * 200.0f * (static_cast<float>(i) / 48000.0f)) * 0.4f;
+		speechBuf.SetSample(0, i, s);
+	}
+	auto lipFrames = GenerateLipSyncFrames(speechBuf, 0.033f);
+	assert(!lipFrames.empty());
+	assert(lipFrames[10].jawOpen > 0.1f);
+
+	// 8. Head directional radiation cone
+	float radCutoff = 0.0f;
+	float frontGain = CalculateHeadRadiationFactor(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, 0.0f, 5.0f), radCutoff);
+	assert(frontGain > 0.95f);
+	assert(radCutoff > 18000.0f);
+
+	float rearGain = CalculateHeadRadiationFactor(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 0.0f, 5.0f), radCutoff);
+	assert(rearGain < 0.6f); // Attenuated behind head
+	assert(radCutoff < 5000.0f); // High-frequency muffled
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestGenreSuitesAndAiCuration()
+{
+	std::cout << "[Test] Genre Suites: NoiseGate, Weather, Stems & AI Curation Pipeline..." << std::endl;
+
+	// 1. NoiseGate
+	NoiseGate gate;
+	gate.Configure(-30.0f, 5.0f, 50.0f, 20.0f);
+	std::vector<float> noiseL(512, 0.001f); // Below threshold (~ -60dB)
+	std::vector<float> noiseR(512, 0.001f);
+	gate.ProcessStereo(noiseL.data(), noiseR.data(), 512, 48000.0f);
+	assert(std::abs(noiseL[256]) < 0.0005f); // Gate attenuated noise
+
+	// 2. Procedural Weather System
+	ProceduralWeatherSystem weather;
+	weather.Update(80.0f, 0.9f, 0.8f, 1.0f);
+	assert(weather.GetWindGain() > 0.5f);
+	assert(weather.GetRainGain() > 0.7f);
+
+	// 3. Audio Curation: TrimSilence, ZeroCrossingFadeout, NormalizeLoudness
+	AudioBuffer rawBuf(48000, 1, 10000);
+	for (uint32_t i = 0; i < 2000; ++i) rawBuf.SetSample(0, i, 0.0f); // Leading silence
+	for (uint32_t i = 2000; i < 7000; ++i) rawBuf.SetSample(0, i, 0.2f); // Audio signal
+	for (uint32_t i = 7000; i < 10000; ++i) rawBuf.SetSample(0, i, 0.0f); // Trailing silence
+
+	bool trimOk = AudioCurationPipeline::TrimSilence(rawBuf, -40.0f);
+	assert(trimOk);
+	assert(rawBuf.GetFrameCount() < 10000);
+	assert(rawBuf.GetFrameCount() >= 5000);
+
+	AudioCurationPipeline::NormalizeLoudness(rawBuf, -16.0f);
+	assert(rawBuf.CalculatePeak() > 0.15f && rawBuf.CalculatePeak() <= 0.99f);
+
+	// 4. Phoneme Markup & Emotion/Pause parser
+	std::string rawDialogue = "为了{重|chong}返荣光！[Angry] 冲锋！[pause=0.5s]";
+	std::string parsedMarkup = PhonemeDictionary::ParsePronunciationMarkup(rawDialogue);
+	assert(parsedMarkup.find("[chong]") != std::string::npos);
+
+	std::string cleanText;
+	VoiceEmotion emo = VoiceEmotion::Neutral;
+	float intensity = 0.0f;
+	float pauseSec = 0.0f;
+	PhonemeDictionary::ExtractEmotionAndPauses(parsedMarkup, cleanText, emo, intensity, pauseSec);
+	assert(emo == VoiceEmotion::Angry);
+	assert(std::abs(pauseSec - 0.5f) < 0.01f);
+	assert(cleanText.find("[Angry]") == std::string::npos);
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
 int main()
 {
 	std::cout << "========================================" << std::endl;
@@ -1580,8 +1866,12 @@ int main()
 		TestConvolutionReverb();
 		TestAudioFileMultiFormatLoader();
 		TestProceduralSynthAndFootstep();
+		TestContainersAndInstanceLimits();
+		TestAuxReverbAndVoiceVirtualization();
+		TestNextGenAcousticsAndRooms();
+		TestGenreSuitesAndAiCuration();
 		std::cout << "========================================" << std::endl;
-		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (28/28)  " << std::endl;
+		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (32/32)  " << std::endl;
 		std::cout << "========================================" << std::endl;
 		return 0;
 	}

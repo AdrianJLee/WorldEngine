@@ -1,4 +1,4 @@
-#include "Voice.h"
+﻿#include "Voice.h"
 
 namespace World::Audio
 {
@@ -382,6 +382,22 @@ namespace World::Audio
 		}
 
 		return true;
+	}
+
+	void Voice::DemoteToVirtual() noexcept
+	{
+		if (m_State == VoiceState::Playing || m_State == VoiceState::Stopping)
+		{
+			m_State = VoiceState::Virtual;
+		}
+	}
+
+	void Voice::PromoteToPhysical() noexcept
+	{
+		if (m_State == VoiceState::Virtual)
+		{
+			m_State = VoiceState::Playing;
+		}
 	}
 
 	bool Voice::AdvanceVirtual(uint32_t frameCount) noexcept

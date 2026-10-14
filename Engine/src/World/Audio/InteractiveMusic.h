@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "AudioTypes.h"
 #include <string>
@@ -23,6 +23,15 @@ namespace World::Audio
 		float durationSeconds { 60.0f };
 	};
 
+	struct MusicStemDesc
+	{
+		std::string stemName;
+		std::string soundEvent;
+		float targetVolume { 1.0f };
+		float currentVolume { 1.0f };
+		VoiceHandle voiceHandle { kInvalidVoiceHandle };
+	};
+
 	class WLD_API InteractiveMusicClock
 	{
 	public:
@@ -38,6 +47,7 @@ namespace World::Audio
 		uint32_t GetCurrentBeat() const noexcept { return m_CurrentBeat; }
 		float GetBeatProgress() const noexcept { return m_BeatProgress; }
 		uint64_t GetDspClockFrames() const noexcept { return m_DspClockFrames; }
+		float GetAccumulatedSeconds() const noexcept { return m_AccumulatedSeconds; }
 
 		bool DidCrossBeat() const noexcept { return m_CrossedBeat; }
 		bool DidCrossBar() const noexcept { return m_CrossedBar; }
@@ -77,8 +87,24 @@ namespace World::Audio
 		VoiceHandle GetCurrentVoice() const noexcept { return m_CurrentVoice; }
 		uint64_t GetDspClockFrames() const noexcept { return m_Clock.GetDspClockFrames(); }
 
+		// Audio Latency Calibration
+		void SetAudioOffsetMs(float offsetMs) noexcept { m_AudioOffsetMs = offsetMs; }
+		float GetAudioOffsetMs() const noexcept { return m_AudioOffsetMs; }
+		double GetCalibratedDspTime(uint32_t sampleRate = kDefaultSampleRate) const noexcept;
+
+		// Vertical Remixing / Stems
+		void RegisterStem(const std::string& stemName, const std::string& soundEvent, float initialVolume = 1.0f);
+		void SetStemVolume(const std::string& stemName, float volume, float fadeSeconds = 0.5f);
+		float GetStemVolume(const std::string& stemName) const;
+		void StartAllStems(float fadeSeconds = 0.5f);
+		void StopAllStems(float fadeSeconds = 0.5f);
+
+		// Horizontal Stinger
+		VoiceHandle PlayStinger(const std::string& stingerSoundEvent, float volume = 1.0f);
+
 	private:
 		std::unordered_map<std::string, MusicTrackDesc> m_Tracks;
+		std::unordered_map<std::string, MusicStemDesc> m_Stems;
 		InteractiveMusicClock m_Clock;
 
 		VoiceHandle m_CurrentVoice { kInvalidVoiceHandle };
@@ -87,5 +113,7 @@ namespace World::Audio
 		TransitionSync m_PendingSync { TransitionSync::NextBar };
 		float m_PendingFadeSec { 1.0f };
 		bool m_HasPendingTransition { false };
+
+		float m_AudioOffsetMs { 0.0f };
 	};
 }

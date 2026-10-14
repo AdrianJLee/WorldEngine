@@ -600,6 +600,38 @@ function Audio:GetParameter(name) end
 ---@return number
 function Audio:PlayFootstep(surface, x, y, z) end
 
+---Pause or unpause gameplay audio buses while keeping UI and music playing.
+---@param paused boolean Whether to pause gameplay bus audio.
+function Audio:SetPaused(paused) end
+
+---Check if gameplay audio buses are currently paused.
+---@return boolean
+function Audio:IsPaused() end
+
+---Set gameplay time scale and pitch dilation factor (e.g. bullet time).
+---@param timeScale number Gameplay time scale factor (0.05 to 4.0).
+---@param pitchScale number? Optional pitch scale override (default matches timeScale).
+function Audio:SetTimeDilation(timeScale, pitchScale) end
+
+---Play a tilemap surface-specific footstep event; returns a voice handle or 0 on failure.
+---@param tileX number Tilemap X grid coordinate.
+---@param tileY number Tilemap Y grid coordinate.
+---@param surface string Surface material name ('Grass', 'Stone', 'Wood', etc.).
+---@param worldX number? World X position (default 0).
+---@param worldY number? World Y position (default 0).
+---@return number
+function Audio:PlayTileFootstep(tileX, tileY, surface, worldX, worldY) end
+
+---Set volume multiplier for an active voice instance.
+---@param voiceHandle number Voice handle returned by PostEvent.
+---@param volume number Volume scale multiplier.
+function Audio:SetVoiceVolume(voiceHandle, volume) end
+
+---Set pitch multiplier for an active voice instance.
+---@param voiceHandle number Voice handle returned by PostEvent.
+---@param pitch number Pitch scale multiplier.
+function Audio:SetVoicePitch(voiceHandle, pitch) end
+
 -- Global service table 'Music': read-only; there is no runtime constructor.
 ---Read-only interactive music service table for playback and transitions.
 ---@class Music

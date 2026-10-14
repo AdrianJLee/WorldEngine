@@ -1,7 +1,7 @@
-#include "InteractiveMusic.h"
+﻿#include "InteractiveMusic.h"
 #include "AudioSystem.h"
-#include <algorithm>
 #include <cmath>
+#include <algorithm>
 
 namespace World::Audio
 {
@@ -12,8 +12,8 @@ namespace World::Audio
 
 	void InteractiveMusicClock::Configure(float bpm, uint32_t beatsPerBar)
 	{
-		m_Bpm = std::clamp(bpm, 20.0f, 300.0f);
-		m_BeatsPerBar = std::max(1u, beatsPerBar);
+		m_Bpm = std::clamp(bpm, 20.0f, 400.0f);
+		m_BeatsPerBar = (beatsPerBar > 0) ? beatsPerBar : 4;
 		m_SecondsPerBeat = 60.0f / m_Bpm;
 		Reset();
 	}
@@ -36,18 +36,18 @@ namespace World::Audio
 
 		if (deltaSeconds <= 0.0f) return;
 
-		float prevTime = m_AccumulatedSeconds;
+		float prevSec = m_AccumulatedSeconds;
 		m_AccumulatedSeconds += deltaSeconds;
 
-		uint32_t prevTotalBeats = static_cast<uint32_t>(prevTime / m_SecondsPerBeat);
-		uint32_t newTotalBeats = static_cast<uint32_t>(m_AccumulatedSeconds / m_SecondsPerBeat);
+		uint64_t prevTotalBeats = static_cast<uint64_t>(prevSec / m_SecondsPerBeat);
+		uint64_t newTotalBeats = static_cast<uint64_t>(m_AccumulatedSeconds / m_SecondsPerBeat);
 
 		if (newTotalBeats > prevTotalBeats)
 		{
 			m_CrossedBeat = true;
-			m_CurrentBeat = newTotalBeats % m_BeatsPerBar;
+			m_CurrentBeat = static_cast<uint32_t>(newTotalBeats % m_BeatsPerBar);
 			uint32_t prevBar = m_CurrentBar;
-			m_CurrentBar = newTotalBeats / m_BeatsPerBar;
+			m_CurrentBar = static_cast<uint32_t>(newTotalBeats / m_BeatsPerBar);
 			if (m_CurrentBar > prevBar)
 			{
 				m_CrossedBar = true;
@@ -148,6 +148,8 @@ namespace World::Audio
 		m_PendingTrackId.clear();
 		m_HasPendingTransition = false;
 		m_Clock.Reset();
+
+		StopAllStems(fadeSeconds);
 	}
 
 	void InteractiveMusicManager::AdvanceDspClock(uint32_t frameCount, uint32_t sampleRate)
@@ -175,28 +177,77 @@ namespace World::Audio
 
 	void InteractiveMusicManager::Update(float deltaSeconds)
 	{
-		// Fallback to deltaSeconds clock only if DSP hardware clock has not started
-		if (m_Clock.GetDspClockFrames() == 0)
-		{
-			m_Clock.Update(deltaSeconds);
-		}
+		m_Clock.Update(deltaSeconds);
+	}
 
-		if (m_HasPendingTransition)
-		{
-			bool canExecute = false;
-			if (m_PendingSync == TransitionSync::NextBeat && m_Clock.DidCrossBeat())
-			{
-				canExecute = true;
-			}
-			else if (m_PendingSync == TransitionSync::NextBar && m_Clock.DidCrossBar())
-			{
-				canExecute = true;
-			}
+	double InteractiveMusicManager::GetCalibratedDspTime(uint32_t sampleRate) const noexcept
+	{
+		if (sampleRate == 0) return 0.0;
+		double rawTime = static_cast<double>(m_Clock.GetDspClockFrames()) / static_cast<double>(sampleRate);
+		return std::max(0.0, rawTime - (static_cast<double>(m_AudioOffsetMs) * 0.001));
+	}
 
-			if (canExecute)
+	void InteractiveMusicManager::RegisterStem(const std::string& stemName, const std::string& soundEvent, float initialVolume)
+	{
+		MusicStemDesc desc;
+		desc.stemName = stemName;
+		desc.soundEvent = soundEvent;
+		desc.targetVolume = std::clamp(initialVolume, 0.0f, 4.0f);
+		desc.currentVolume = desc.targetVolume;
+		desc.voiceHandle = kInvalidVoiceHandle;
+		m_Stems[stemName] = desc;
+	}
+
+	void InteractiveMusicManager::SetStemVolume(const std::string& stemName, float volume, float fadeSeconds)
+	{
+		auto it = m_Stems.find(stemName);
+		if (it != m_Stems.end())
+		{
+			it->second.targetVolume = std::clamp(volume, 0.0f, 4.0f);
+			if (it->second.voiceHandle != kInvalidVoiceHandle)
 			{
-				Play(m_PendingTrackId, m_PendingFadeSec);
+				AudioSystem::Get().SetVoiceVolume(it->second.voiceHandle, it->second.targetVolume);
 			}
 		}
+	}
+
+	float InteractiveMusicManager::GetStemVolume(const std::string& stemName) const
+	{
+		auto it = m_Stems.find(stemName);
+		if (it != m_Stems.end())
+		{
+			return it->second.targetVolume;
+		}
+		return 0.0f;
+	}
+
+	void InteractiveMusicManager::StartAllStems(float fadeSeconds)
+	{
+		for (auto& [name, stem] : m_Stems)
+		{
+			if (stem.voiceHandle != kInvalidVoiceHandle)
+			{
+				AudioSystem::Get().StopVoice(stem.voiceHandle, 0.01f);
+			}
+			stem.voiceHandle = AudioSystem::Get().PostEvent2D(stem.soundEvent, stem.targetVolume, 1.0f, true);
+		}
+	}
+
+	void InteractiveMusicManager::StopAllStems(float fadeSeconds)
+	{
+		for (auto& [name, stem] : m_Stems)
+		{
+			if (stem.voiceHandle != kInvalidVoiceHandle)
+			{
+				AudioSystem::Get().StopVoice(stem.voiceHandle, fadeSeconds);
+				stem.voiceHandle = kInvalidVoiceHandle;
+			}
+		}
+	}
+
+	VoiceHandle InteractiveMusicManager::PlayStinger(const std::string& stingerSoundEvent, float volume)
+	{
+		if (stingerSoundEvent.empty()) return kInvalidVoiceHandle;
+		return AudioSystem::Get().PostEvent2D(stingerSoundEvent, volume, 1.0f, false, false);
 	}
 }

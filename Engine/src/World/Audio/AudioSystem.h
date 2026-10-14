@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "AudioTypes.h"
 #include "AudioRtpc.h"
@@ -13,6 +13,7 @@
 #include "AudioFft.h"
 #include "AudioPerceptionBridge.h"
 #include "AudioProfiler.h"
+#include "AudioAcoustics.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -35,6 +36,25 @@ namespace World::Audio
 		float stepSemitones = 1.0f;
 		float maxPitchRatio = 2.0f;
 		float timeoutSeconds = 1.5f;
+	};
+
+	struct AudioZone2D
+	{
+		glm::vec2 minBounds { -10.0f, -10.0f };
+		glm::vec2 maxBounds { 10.0f, 10.0f };
+		float innerRadius { 5.0f };
+		float outerBlendDistance { 3.0f };
+		float lowPassCutoff { 20000.0f };
+		float reverbSend { 0.0f };
+		std::string snapshotName;
+		float priority { 1.0f };
+		bool isBox { true };
+	};
+
+	struct EventInstanceTracker
+	{
+		float lastTriggerTime { -100.0f };
+		std::vector<VoiceHandle> activeVoices;
 	};
 
 	struct RapidFireTracker
@@ -70,6 +90,26 @@ namespace World::Audio
 
 		VoiceHandle PostEvent2D(
 			const std::string& eventId,
+			float volumeScale = 1.0f,
+			float pitchScale = 1.0f,
+			bool looping = false,
+			bool allowThrottling = true);
+
+		VoiceHandle PostEvent(
+			const std::string& eventId,
+			const glm::vec3& worldPos,
+			const std::unordered_map<std::string, std::string>& switchParams,
+			const std::unordered_map<std::string, float>& blendParams,
+			float volumeScale = 1.0f,
+			float pitchScale = 1.0f,
+			bool looping = false,
+			bool allowThrottling = true);
+
+		VoiceHandle PostEvent2D(
+			const std::string& eventId,
+			const glm::vec2& screenPos,
+			const std::unordered_map<std::string, std::string>& switchParams,
+			const std::unordered_map<std::string, float>& blendParams,
 			float volumeScale = 1.0f,
 			float pitchScale = 1.0f,
 			bool looping = false,
@@ -122,7 +162,35 @@ namespace World::Audio
 		AudioCommandQueue& GetCommandQueue() noexcept { return m_CommandQueue; }
 		const AudioCommandQueue& GetCommandQueue() const noexcept { return m_CommandQueue; }
 
+		// Pause Group and Time Dilation
+		void SetPaused(bool paused) noexcept;
+		bool IsPaused() const noexcept { return m_IsPaused; }
+		void SetTimeDilation(float timeScale, float pitchScale = -1.0f) noexcept;
+		float GetTimeDilation() const noexcept { return m_TimeDilation; }
+		float GetTimeDilationPitch() const noexcept { return m_TimeDilationPitch; }
+
+		// 2D Specialized Audio Extensions
+		VoiceHandle PlayTileFootstep(int tileX, int tileY, const std::string& surfaceTag, const glm::vec2& worldPos);
+		void AddAudioZone2D(const AudioZone2D& zone);
+		void ClearAudioZones2D() noexcept { m_AudioZones2D.clear(); }
+		void UpdateAudioZones2D(const glm::vec2& listenerPos);
+		float CalculateBox2DOcclusion(const glm::vec2& listenerPos, const glm::vec2& emitterPos, bool hasWallBlocking) const noexcept;
+		VoiceHandle TriggerSpriteFrameAudio(const std::string& soundEvent, const glm::vec2& spriteWorldPos, float volumeScale = 1.0f);
+
+		// Next-Gen Acoustics Subsystems
+		HdrAudioSystem& GetHdrSystem() noexcept { return m_HdrSystem; }
+		const HdrAudioSystem& GetHdrSystem() const noexcept { return m_HdrSystem; }
+		ProceduralWeatherSystem& GetWeatherSystem() noexcept { return m_WeatherSystem; }
+		const ProceduralWeatherSystem& GetWeatherSystem() const noexcept { return m_WeatherSystem; }
+		NoiseGate& GetVoiceNoiseGate() noexcept { return m_VoiceNoiseGate; }
+		const NoiseGate& GetVoiceNoiseGate() const noexcept { return m_VoiceNoiseGate; }
+
+		float CalculateSpeedOfSoundDelay(float distanceMeters) const noexcept { return CalculateSpeedOfSoundDelaySeconds(distanceMeters); }
+		void CalculateVbapGains(const glm::vec3& relPos, SpeakerLayout8& outGains) const noexcept { CalculateVbapSurround(relPos, outGains); }
+
 		// Volumetric, Velocity & Occlusion controls
+		void SetVoiceVolume(VoiceHandle handle, float volume);
+		void SetVoicePitch(VoiceHandle handle, float pitch);
 		void SetVoiceVolumetricRadius(VoiceHandle handle, float radius);
 		void SetVoiceVelocity(VoiceHandle handle, const glm::vec3& velocity);
 		void SetVoiceOcclusion(VoiceHandle handle, float occlusion01);
@@ -298,6 +366,18 @@ namespace World::Audio
 		AudioPerceptionBridge m_PerceptionBridge;
 		AudioProfiler m_Profiler;
 		std::unordered_map<std::string, SoundStimulusConfig> m_PerceptionConfigs;
+
+		// Pause, Time Dilation & 2D Zones
+		bool m_IsPaused { false };
+		float m_TimeDilation { 1.0f };
+		float m_TimeDilationPitch { 1.0f };
+		std::vector<AudioZone2D> m_AudioZones2D;
+		std::unordered_map<std::string, EventInstanceTracker> m_EventInstanceTrackers;
+
+		// Next-Gen & Genre Subsystems
+		HdrAudioSystem m_HdrSystem;
+		ProceduralWeatherSystem m_WeatherSystem;
+		NoiseGate m_VoiceNoiseGate;
 
 		mutable std::mutex m_RegistryMutex;
 	};

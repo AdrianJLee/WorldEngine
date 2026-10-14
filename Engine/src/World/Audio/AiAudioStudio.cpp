@@ -1,4 +1,4 @@
-#include "AiAudioStudio.h"
+﻿#include "AiAudioStudio.h"
 #include <cmath>
 #include <sstream>
 
@@ -378,5 +378,221 @@ namespace World::Audio
 			else if (key == "Roughness") roughness = std::stof(line.substr(colonPos + 1));
 		}
 		return true;
+	}
+}
+
+namespace World::Audio
+{
+	bool AudioCurationPipeline::TrimSilence(AudioBuffer& buf, float thresholdDb)
+	{
+		uint32_t frames = buf.GetFrameCount();
+		uint32_t channels = buf.GetChannels();
+		if (frames == 0 || channels == 0) return false;
+
+		float linThresh = std::pow(10.0f, thresholdDb / 20.0f);
+
+		uint32_t firstActive = 0;
+		bool foundStart = false;
+		for (uint32_t i = 0; i < frames; ++i)
+		{
+			float maxVal = 0.0f;
+			for (uint32_t ch = 0; ch < channels; ++ch)
+			{
+				maxVal = std::max(maxVal, std::abs(buf.GetSample(ch, i)));
+			}
+			if (maxVal >= linThresh)
+			{
+				firstActive = (i > 16) ? i - 16 : 0; // Keep 16 frames of pre-roll to avoid click
+				foundStart = true;
+				break;
+			}
+		}
+
+		if (!foundStart) return false;
+
+		uint32_t lastActive = frames - 1;
+		for (int32_t i = static_cast<int32_t>(frames) - 1; i >= 0; --i)
+		{
+			float maxVal = 0.0f;
+			for (uint32_t ch = 0; ch < channels; ++ch)
+			{
+				maxVal = std::max(maxVal, std::abs(buf.GetSample(ch, static_cast<uint32_t>(i))));
+			}
+			if (maxVal >= linThresh)
+			{
+				lastActive = std::min(frames - 1, static_cast<uint32_t>(i + 32)); // 32 frames post-roll
+				break;
+			}
+		}
+
+		if (lastActive <= firstActive) return false;
+
+		uint32_t newFrames = lastActive - firstActive + 1;
+		AudioBuffer trimmed(buf.GetSampleRate(), channels, newFrames);
+		for (uint32_t ch = 0; ch < channels; ++ch)
+		{
+			for (uint32_t i = 0; i < newFrames; ++i)
+			{
+				trimmed.SetSample(ch, i, buf.GetSample(ch, firstActive + i));
+			}
+		}
+		buf = std::move(trimmed);
+		return true;
+	}
+
+	bool AudioCurationPipeline::ZeroCrossingFadeout(AudioBuffer& buf, uint32_t fadeFrames)
+	{
+		uint32_t frames = buf.GetFrameCount();
+		uint32_t channels = buf.GetChannels();
+		if (frames == 0 || channels == 0) return false;
+
+		uint32_t fadeCount = std::min(fadeFrames, frames);
+		uint32_t startIdx = frames - fadeCount;
+
+		for (uint32_t i = 0; i < fadeCount; ++i)
+		{
+			float t = 1.0f - static_cast<float>(i) / static_cast<float>(fadeCount);
+			float gain = t * t; // Smooth quadratic fade to zero
+			for (uint32_t ch = 0; ch < channels; ++ch)
+			{
+				buf.SetSample(ch, startIdx + i, buf.GetSample(ch, startIdx + i) * gain);
+			}
+		}
+		return true;
+	}
+
+	bool AudioCurationPipeline::NormalizeLoudness(AudioBuffer& buf, float targetLufs)
+	{
+		uint32_t frames = buf.GetFrameCount();
+		uint32_t channels = buf.GetChannels();
+		if (frames == 0 || channels == 0) return false;
+
+		double sumSq = 0.0;
+		float peak = 0.0f;
+		for (uint32_t ch = 0; ch < channels; ++ch)
+		{
+			for (uint32_t i = 0; i < frames; ++i)
+			{
+				float s = buf.GetSample(ch, i);
+				sumSq += s * s;
+				peak = std::max(peak, std::abs(s));
+			}
+		}
+
+		if (peak < 1e-6f) return false;
+
+		double meanSq = sumSq / static_cast<double>(frames * channels);
+		float currentRmsDb = static_cast<float>(10.0 * std::log10(meanSq + 1e-9));
+		float currentLufs = currentRmsDb - 0.691f;
+
+		float gainDeltaDb = targetLufs - currentLufs;
+		float linearGain = std::pow(10.0f, gainDeltaDb / 20.0f);
+
+		// Prevent clipping above -0.1 dBTP (0.988)
+		if (peak * linearGain > 0.988f)
+		{
+			linearGain = 0.988f / peak;
+		}
+
+		for (uint32_t ch = 0; ch < channels; ++ch)
+		{
+			for (uint32_t i = 0; i < frames; ++i)
+			{
+				buf.SetSample(ch, i, buf.GetSample(ch, i) * linearGain);
+			}
+		}
+		return true;
+	}
+
+	bool AudioCurationPipeline::AutoCurate(AudioBuffer& buf, float targetLufs)
+	{
+		TrimSilence(buf, -45.0f);
+		ZeroCrossingFadeout(buf, 64);
+		NormalizeLoudness(buf, targetLufs);
+		return true;
+	}
+
+	std::string PhonemeDictionary::ParsePronunciationMarkup(const std::string& markupText)
+	{
+		std::string result;
+		size_t pos = 0;
+		while (pos < markupText.size())
+		{
+			size_t openBrace = markupText.find('{', pos);
+			if (openBrace == std::string::npos)
+			{
+				result += markupText.substr(pos);
+				break;
+			}
+
+			result += markupText.substr(pos, openBrace - pos);
+			size_t barPos = markupText.find('|', openBrace);
+			size_t closeBrace = markupText.find('}', openBrace);
+
+			if (barPos != std::string::npos && closeBrace != std::string::npos && barPos < closeBrace)
+			{
+				std::string word = markupText.substr(openBrace + 1, barPos - (openBrace + 1));
+				std::string pinyin = markupText.substr(barPos + 1, closeBrace - (barPos + 1));
+				result += word + " [" + pinyin + "]";
+				pos = closeBrace + 1;
+			}
+			else
+			{
+				result += '{';
+				pos = openBrace + 1;
+			}
+		}
+		return result;
+	}
+
+	void PhonemeDictionary::ExtractEmotionAndPauses(
+		const std::string& input,
+		std::string& outCleanText,
+		VoiceEmotion& outEmotion,
+		float& outEmotionIntensity,
+		float& outPauseSeconds)
+	{
+		outEmotion = VoiceEmotion::Neutral;
+		outEmotionIntensity = 0.5f;
+		outPauseSeconds = 0.0f;
+		outCleanText.clear();
+
+		size_t pos = 0;
+		while (pos < input.size())
+		{
+			size_t openBracket = input.find('[', pos);
+			if (openBracket == std::string::npos)
+			{
+				outCleanText += input.substr(pos);
+				break;
+			}
+
+			outCleanText += input.substr(pos, openBracket - pos);
+			size_t closeBracket = input.find(']', openBracket);
+			if (closeBracket != std::string::npos)
+			{
+				std::string tag = input.substr(openBracket + 1, closeBracket - (openBracket + 1));
+				if (tag == "Angry") { outEmotion = VoiceEmotion::Angry; outEmotionIntensity = 0.8f; }
+				else if (tag == "Whisper") { outEmotion = VoiceEmotion::Whisper; outEmotionIntensity = 0.9f; }
+				else if (tag == "Sad") { outEmotion = VoiceEmotion::Sad; outEmotionIntensity = 0.7f; }
+				else if (tag == "Happy") { outEmotion = VoiceEmotion::Happy; outEmotionIntensity = 0.7f; }
+				else if (tag == "Heroic") { outEmotion = VoiceEmotion::Heroic; outEmotionIntensity = 0.9f; }
+				else if (tag.rfind("pause=", 0) == 0)
+				{
+					std::string valStr = tag.substr(6);
+					try
+					{
+						outPauseSeconds += std::stof(valStr);
+					}
+					catch (...) {}
+				}
+				pos = closeBracket + 1;
+			}
+			else
+			{
+				outCleanText += '[';
+				pos = openBracket + 1;
+			}
+		}
 	}
 }

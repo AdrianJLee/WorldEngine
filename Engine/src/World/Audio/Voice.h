@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "AudioTypes.h"
 #include "AudioBuffer.h"
@@ -103,6 +103,8 @@ namespace World::Audio
 
 		// Advances play cursor without rendering (for virtual voices)
 		bool AdvanceVirtual(uint32_t frameCount) noexcept;
+		void DemoteToVirtual() noexcept;
+		void PromoteToPhysical() noexcept;
 
 		float CalculateStealScore() const noexcept;
 

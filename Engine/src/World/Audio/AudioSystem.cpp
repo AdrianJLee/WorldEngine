@@ -1,4 +1,4 @@
-#include <chrono>
+﻿#include <chrono>
 #include "AudioSystem.h"
 #include <random>
 #include "AudioCooker.h"
@@ -618,6 +618,19 @@ namespace World::Audio
 		bool looping,
 		bool allowThrottling)
 	{
+		return PostEvent(eventId, worldPos, {}, {}, volumeScale, pitchScale, looping, allowThrottling);
+	}
+
+	VoiceHandle AudioSystem::PostEvent(
+		const std::string& eventId,
+		const glm::vec3& worldPos,
+		const std::unordered_map<std::string, std::string>& switchParams,
+		const std::unordered_map<std::string, float>& blendParams,
+		float volumeScale,
+		float pitchScale,
+		bool looping,
+		bool allowThrottling)
+	{
 		// 1. Rapid-fire throttling check
 		if (allowThrottling && m_RapidFireThrottlingEnabled && !looping)
 		{
@@ -697,34 +710,104 @@ namespace World::Audio
 			return kInvalidVoiceHandle;
 		}
 
-		std::unordered_map<std::string, std::string> switchParams;
-		std::unordered_map<std::string, float> blendParams;
-		std::string chosenAsset = evt->GetRootContainer() ?
-			evt->GetRootContainer()->EvaluateSelection(switchParams, blendParams) : "";
-
-		if (chosenAsset.empty()) return kInvalidVoiceHandle;
-
-		auto buffer = FindAudioBuffer(chosenAsset);
-		if (!buffer) return kInvalidVoiceHandle;
-
-		float finalVol = evt->EvaluateRandomVolume() * volumeScale;
-		float finalPitch = evt->EvaluateRandomPitch() * pitchScale;
-
-		VoiceHandle h = m_VoicePool.AllocateVoice(
-			buffer,
-			evt->GetBusId(),
-			finalVol,
-			finalPitch,
-			looping,
-			128,
-			evt->GetStealPolicy());
-
-		if (h != kInvalidVoiceHandle)
+		// 2. Cooldown check
+		auto& instTracker = m_EventInstanceTrackers[eventId];
+		if (!m_RapidFireThrottlingEnabled && allowThrottling && evt->GetCooldownSeconds() > 0.001f && instTracker.lastTriggerTime >= 0.0f)
 		{
+			if ((m_TotalTimeSeconds - instTracker.lastTriggerTime) < evt->GetCooldownSeconds())
+			{
+				return kInvalidVoiceHandle;
+			}
+		}
+
+		// 3. Clean up finished voice instances
+		instTracker.activeVoices.erase(
+			std::remove_if(instTracker.activeVoices.begin(), instTracker.activeVoices.end(),
+				[this](VoiceHandle h) {
+					auto* v = m_VoicePool.FindVoice(h);
+					return !v || !v->IsActive();
+				}),
+			instTracker.activeVoices.end());
+
+		// 4. MaxInstances check & StealPolicy
+		if (instTracker.activeVoices.size() >= evt->GetMaxInstances())
+		{
+			if (evt->GetStealPolicy() == StealPolicy::StealReject)
+			{
+				return kInvalidVoiceHandle;
+			}
+			else if (evt->GetStealPolicy() == StealPolicy::StealOldest)
+			{
+				VoiceHandle oldest = instTracker.activeVoices.front();
+				m_VoicePool.StopVoice(oldest, 0.02f);
+				instTracker.activeVoices.erase(instTracker.activeVoices.begin());
+			}
+			else if (evt->GetStealPolicy() == StealPolicy::StealQuiet)
+			{
+				size_t quietestIdx = 0;
+				float lowestAud = 1e9f;
+				for (size_t i = 0; i < instTracker.activeVoices.size(); ++i)
+				{
+					if (auto* v = m_VoicePool.FindVoice(instTracker.activeVoices[i]))
+					{
+						if (v->GetAudibility() < lowestAud)
+						{
+							lowestAud = v->GetAudibility();
+							quietestIdx = i;
+						}
+					}
+				}
+				m_VoicePool.StopVoice(instTracker.activeVoices[quietestIdx], 0.02f);
+				instTracker.activeVoices.erase(instTracker.activeVoices.begin() + quietestIdx);
+			}
+		}
+
+		// 5. Multi-track container evaluation (Layer & Blend)
+		auto tracks = evt->EvaluateTracks(switchParams, blendParams);
+		if (tracks.empty()) return kInvalidVoiceHandle;
+
+		float baseVol = evt->EvaluateRandomVolume() * volumeScale;
+		float basePitch = evt->EvaluateRandomPitch() * pitchScale;
+
+		// Time dilation pitch for SFX/Ambience
+		if (evt->GetBusId() == kBusSfx || evt->GetBusId() == kBusAmbience)
+		{
+			basePitch *= m_TimeDilationPitch;
+			baseVol *= m_HdrSystem.GetCurrentCompressionGain();
+		}
+
+		VoiceHandle primaryHandle = kInvalidVoiceHandle;
+
+		for (const auto& trk : tracks)
+		{
+			auto buffer = FindAudioBuffer(trk.soundAssetPath);
+			if (!buffer) continue;
+
+			float trackVol = baseVol * trk.volumeScale;
+
+			VoiceHandle h = m_VoicePool.AllocateVoice(
+				buffer,
+				evt->GetBusId(),
+				trackVol,
+				basePitch,
+				looping,
+				128,
+				evt->GetStealPolicy());
+
+			if (h == kInvalidVoiceHandle) continue;
+
+			if (primaryHandle == kInvalidVoiceHandle)
+			{
+				primaryHandle = h;
+			}
+
+			instTracker.activeVoices.push_back(h);
+
 			if (allowThrottling && m_RapidFireThrottlingEnabled && !looping)
 			{
 				m_RapidFireTrackers[eventId].lastVoiceHandle = h;
 			}
+
 			if (auto* v = m_VoicePool.FindVoice(h))
 			{
 				if (m_PhaseJitterEnabled && !looping && buffer->GetFrameCount() > 512)
@@ -742,8 +825,9 @@ namespace World::Audio
 				if (sp.mode == SpatialMode::Spatial2D)
 				{
 					glm::vec2 listener2D(m_ListenerPosition.x, m_ListenerPosition.y);
+					glm::vec2 emitter2D(worldPos.x, worldPos.y);
 					v->SetSpatial2DParameters(
-						glm::vec2(worldPos.x, worldPos.y),
+						emitter2D,
 						listener2D,
 						sp.halfViewWidth > 0.0f ? sp.halfViewWidth : 10.0f,
 						sp.minDistance,
@@ -763,7 +847,12 @@ namespace World::Audio
 						sp.outerGain);
 				}
 			}
+		}
 
+		instTracker.lastTriggerTime = m_TotalTimeSeconds;
+
+		if (primaryHandle != kInvalidVoiceHandle)
+		{
 			auto pIt = m_PerceptionConfigs.find(eventId);
 			if (pIt != m_PerceptionConfigs.end())
 			{
@@ -776,7 +865,7 @@ namespace World::Audio
 			}
 		}
 
-		return h;
+		return primaryHandle;
 	}
 
 	VoiceHandle AudioSystem::PostEvent2D(
@@ -797,7 +886,20 @@ namespace World::Audio
 		bool looping,
 		bool allowThrottling)
 	{
-		VoiceHandle h = PostEvent(eventId, glm::vec3(screenPos.x, screenPos.y, 0.0f), volumeScale, pitchScale, looping, allowThrottling);
+		return PostEvent2D(eventId, screenPos, {}, {}, volumeScale, pitchScale, looping, allowThrottling);
+	}
+
+	VoiceHandle AudioSystem::PostEvent2D(
+		const std::string& eventId,
+		const glm::vec2& screenPos,
+		const std::unordered_map<std::string, std::string>& switchParams,
+		const std::unordered_map<std::string, float>& blendParams,
+		float volumeScale,
+		float pitchScale,
+		bool looping,
+		bool allowThrottling)
+	{
+		VoiceHandle h = PostEvent(eventId, glm::vec3(screenPos.x, screenPos.y, 0.0f), switchParams, blendParams, volumeScale, pitchScale, looping, allowThrottling);
 		if (h != kInvalidVoiceHandle)
 		{
 			if (auto* v = m_VoicePool.FindVoice(h))
@@ -821,7 +923,6 @@ namespace World::Audio
 		}
 		return h;
 	}
-
 	VoiceHandle AudioSystem::PostComboEvent(
 		const std::string& eventId,
 		const std::string& comboGroup,
@@ -877,6 +978,30 @@ namespace World::Audio
 		escalator.stepSemitones = stepSemitones;
 		escalator.maxPitchRatio = maxPitchRatio;
 		escalator.timeoutSeconds = timeoutSeconds;
+	}
+
+	void AudioSystem::SetVoiceVolume(VoiceHandle handle, float volume)
+	{
+		AudioCommand cmd{};
+		cmd.type = AudioCommandType::SetVoiceVolume;
+		cmd.voiceHandle = handle;
+		cmd.floatParam0 = volume;
+		if (!m_CommandQueue.Push(cmd))
+		{
+			if (auto* v = m_VoicePool.FindVoice(handle)) v->SetVolume(volume);
+		}
+	}
+
+	void AudioSystem::SetVoicePitch(VoiceHandle handle, float pitch)
+	{
+		AudioCommand cmd{};
+		cmd.type = AudioCommandType::SetVoicePitch;
+		cmd.voiceHandle = handle;
+		cmd.floatParam0 = pitch;
+		if (!m_CommandQueue.Push(cmd))
+		{
+			if (auto* v = m_VoicePool.FindVoice(handle)) v->SetPitch(pitch);
+		}
 	}
 
 	void AudioSystem::SetVoiceVolumetricRadius(VoiceHandle handle, float radius)
@@ -1186,6 +1311,97 @@ namespace World::Audio
 	float AudioSystem::GetVoiceParameter(VoiceHandle handle, const std::string& name) const
 	{
 		return m_RtpcManager.GetVoiceParameter(handle, name);
+	}
+
+	void AudioSystem::SetPaused(bool paused) noexcept
+	{
+		m_IsPaused = paused;
+		if (paused)
+		{
+			m_Mixer.SetBusMute(kBusSfx, true);
+			m_Mixer.SetBusMute(kBusVoice, true);
+			m_Mixer.SetBusMute(kBusAmbience, true);
+		}
+		else
+		{
+			m_Mixer.SetBusMute(kBusSfx, false);
+			m_Mixer.SetBusMute(kBusVoice, false);
+			m_Mixer.SetBusMute(kBusAmbience, false);
+		}
+	}
+
+	void AudioSystem::SetTimeDilation(float timeScale, float pitchScale) noexcept
+	{
+		m_TimeDilation = std::clamp(timeScale, 0.05f, 4.0f);
+		m_TimeDilationPitch = (pitchScale > 0.0f) ? std::clamp(pitchScale, 0.1f, 4.0f) : m_TimeDilation;
+	}
+
+	VoiceHandle AudioSystem::PlayTileFootstep(int tileX, int tileY, const std::string& surfaceTag, const glm::vec2& worldPos)
+	{
+		std::unordered_map<std::string, std::string> switches;
+		switches["Surface"] = surfaceTag.empty() ? "Stone" : surfaceTag;
+		std::unordered_map<std::string, float> blends;
+		return PostEvent2D("footstep_player", worldPos, switches, blends, 1.0f, 1.0f, false, false);
+	}
+
+	void AudioSystem::AddAudioZone2D(const AudioZone2D& zone)
+	{
+		m_AudioZones2D.push_back(zone);
+	}
+
+	void AudioSystem::UpdateAudioZones2D(const glm::vec2& listenerPos)
+	{
+		float highestPriority = -1e9f;
+		const AudioZone2D* bestZone = nullptr;
+		float bestWeight = 0.0f;
+
+		for (const auto& z : m_AudioZones2D)
+		{
+			float dist = 0.0f;
+			if (z.isBox)
+			{
+				glm::vec2 clamped = glm::clamp(listenerPos, z.minBounds, z.maxBounds);
+				dist = glm::length(listenerPos - clamped);
+			}
+			else
+			{
+				glm::vec2 center = (z.minBounds + z.maxBounds) * 0.5f;
+				float d = glm::length(listenerPos - center);
+				dist = std::max(0.0f, d - z.innerRadius);
+			}
+
+			if (dist <= z.outerBlendDistance)
+			{
+				float weight = 1.0f - (dist / std::max(1e-4f, z.outerBlendDistance));
+				if (z.priority > highestPriority)
+				{
+					highestPriority = z.priority;
+					bestZone = &z;
+					bestWeight = weight;
+				}
+			}
+		}
+
+		if (bestZone && bestWeight > 0.01f)
+		{
+			m_ActiveZoneReverbSend = bestZone->reverbSend * bestWeight;
+			if (!bestZone->snapshotName.empty())
+			{
+				m_Mixer.TriggerSnapshot(bestZone->snapshotName, 0.5f);
+			}
+		}
+	}
+
+	float AudioSystem::CalculateBox2DOcclusion(const glm::vec2& listenerPos, const glm::vec2& emitterPos, bool hasWallBlocking) const noexcept
+	{
+		if (!hasWallBlocking) return 0.0f;
+		float dist = glm::length(listenerPos - emitterPos);
+		return std::clamp(0.4f + 0.1f * std::log10(std::max(1.0f, dist)), 0.3f, 0.95f);
+	}
+
+	VoiceHandle AudioSystem::TriggerSpriteFrameAudio(const std::string& soundEvent, const glm::vec2& spriteWorldPos, float volumeScale)
+	{
+		return PostEvent2D(soundEvent, spriteWorldPos, volumeScale, 1.0f, false, false);
 	}
 
 	VoiceHandle AudioSystem::PlayFootstep(const std::string& surface, const glm::vec3& worldPos, float volume)

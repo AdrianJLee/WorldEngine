@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "AudioTypes.h"
 #include "AudioBuffer.h"
@@ -119,6 +119,27 @@ namespace World::Audio
 	private:
 		std::string m_ApiKey;
 		std::string m_Endpoint;
+	};
+
+	class WLD_API AudioCurationPipeline
+	{
+	public:
+		static bool TrimSilence(AudioBuffer& buf, float thresholdDb = -45.0f);
+		static bool ZeroCrossingFadeout(AudioBuffer& buf, uint32_t fadeFrames = 64);
+		static bool NormalizeLoudness(AudioBuffer& buf, float targetLufs = -16.0f);
+		static bool AutoCurate(AudioBuffer& buf, float targetLufs = -16.0f);
+	};
+
+	class WLD_API PhonemeDictionary
+	{
+	public:
+		static std::string ParsePronunciationMarkup(const std::string& markupText);
+		static void ExtractEmotionAndPauses(
+			const std::string& input,
+			std::string& outCleanText,
+			VoiceEmotion& outEmotion,
+			float& outEmotionIntensity,
+			float& outPauseSeconds);
 	};
 
 	class WLD_API AiAudioStudioManager

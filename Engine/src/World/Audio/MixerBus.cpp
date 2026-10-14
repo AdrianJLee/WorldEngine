@@ -1,4 +1,4 @@
-#include "MixerBus.h"
+﻿#include "MixerBus.h"
 
 namespace World::Audio
 {
@@ -275,6 +275,42 @@ namespace World::Audio
 				{
 					parentBuf.first[i] += buf.first[i];
 					parentBuf.second[i] += buf.second[i];
+				}
+			}
+		}
+
+		// Step 4.5: Aux Reverb processing
+		if (m_AuxReverbEnabled)
+		{
+			std::vector<float> auxL(frameCount, 0.0f);
+			std::vector<float> auxR(frameCount, 0.0f);
+			bool hasSend = false;
+
+			for (BusId bid : m_BusOrder)
+			{
+				if (bid == kBusMaster) continue;
+				const auto* bus = FindBus(bid);
+				if (!bus) continue;
+				float send = bus->GetReverbSend();
+				if (send > 0.001f)
+				{
+					hasSend = true;
+					const auto& buf = busBuffers[bid];
+					for (uint32_t i = 0; i < frameCount; ++i)
+					{
+						auxL[i] += buf.first[i] * send;
+						auxR[i] += buf.second[i] * send;
+					}
+				}
+			}
+
+			if (hasSend)
+			{
+				m_AuxReverb.Process(auxL.data(), auxR.data(), frameCount, sampleRate);
+				for (uint32_t i = 0; i < frameCount; ++i)
+				{
+					masterBuf.first[i] += auxL[i];
+					masterBuf.second[i] += auxR[i];
 				}
 			}
 		}

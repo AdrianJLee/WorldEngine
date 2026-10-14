@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "AudioTypes.h"
 #include <string>
@@ -14,7 +14,15 @@ namespace World::Audio
 		Random = 1,
 		Sequence = 2,
 		Switch = 3,
-		Blend = 4
+		Blend = 4,
+		Layer = 5
+	};
+
+	struct EvaluatedSoundTrack
+	{
+		std::string soundAssetPath;
+		float volumeScale { 1.0f };
+		float delaySeconds { 0.0f };
 	};
 
 	struct SoundVariation
@@ -35,11 +43,18 @@ namespace World::Audio
 		std::string blendParamName;
 		std::vector<std::pair<float, std::shared_ptr<SoundContainerNode>>> blendPoints;
 
+		// Layer parameters (ContainerType::Layer): multiple simultaneous sub-nodes
+		std::vector<std::pair<float, std::shared_ptr<SoundContainerNode>>> layerChildren;
+
 		// Internal state for playback
 		uint32_t lastChosenIndex { 0xFFFFFFFFu };
 		uint32_t sequenceIndex { 0 };
 
 		std::string EvaluateSelection(
+			const std::unordered_map<std::string, std::string>& switchParams,
+			const std::unordered_map<std::string, float>& blendParams);
+
+		std::vector<EvaluatedSoundTrack> EvaluateTracks(
 			const std::unordered_map<std::string, std::string>& switchParams,
 			const std::unordered_map<std::string, float>& blendParams);
 	};
@@ -88,6 +103,10 @@ namespace World::Audio
 
 		std::shared_ptr<SoundContainerNode>& GetRootContainer() noexcept { return m_RootContainer; }
 		const std::shared_ptr<SoundContainerNode>& GetRootContainer() const noexcept { return m_RootContainer; }
+
+		std::vector<EvaluatedSoundTrack> EvaluateTracks(
+			const std::unordered_map<std::string, std::string>& switchParams,
+			const std::unordered_map<std::string, float>& blendParams) const;
 
 		// Serialization / Deserialization from YAML
 		std::string SerializeYaml() const;

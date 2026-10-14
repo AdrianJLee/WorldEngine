@@ -1,7 +1,8 @@
-#include "SoundEvent.h"
+﻿#include "SoundEvent.h"
 #include <algorithm>
 #include <random>
 #include <sstream>
+#include <cmath>
 
 namespace World::Audio
 {
@@ -11,67 +12,90 @@ namespace World::Audio
 		const std::unordered_map<std::string, std::string>& switchParams,
 		const std::unordered_map<std::string, float>& blendParams)
 	{
+		auto tracks = EvaluateTracks(switchParams, blendParams);
+		if (!tracks.empty())
+		{
+			return tracks[0].soundAssetPath;
+		}
+		return variations.empty() ? "" : variations[0].soundAssetPath;
+	}
+
+	std::vector<EvaluatedSoundTrack> SoundContainerNode::EvaluateTracks(
+		const std::unordered_map<std::string, std::string>& switchParams,
+		const std::unordered_map<std::string, float>& blendParams)
+	{
+		std::vector<EvaluatedSoundTrack> results;
+
 		switch (type)
 		{
 		case ContainerType::Single:
-			if (!variations.empty()) return variations[0].soundAssetPath;
+			if (!variations.empty())
+			{
+				results.push_back({ variations[0].soundAssetPath, 1.0f, 0.0f });
+			}
 			break;
 
 		case ContainerType::Random:
-			if (variations.empty()) return "";
-			if (variations.size() == 1)
+			if (!variations.empty())
 			{
-				lastChosenIndex = 0;
-				return variations[0].soundAssetPath;
-			}
-			{
-				const bool skipLast = (shuffleNoRepeat && variations.size() > 1 && lastChosenIndex < variations.size());
-				float totalWeight = 0.0f;
-				for (size_t i = 0; i < variations.size(); ++i)
-				{
-					if (skipLast && i == lastChosenIndex) continue;
-					totalWeight += std::max(0.01f, variations[i].weight);
-				}
-
-				if (totalWeight <= 0.0f)
+				if (variations.size() == 1)
 				{
 					lastChosenIndex = 0;
-					return variations[0].soundAssetPath;
+					results.push_back({ variations[0].soundAssetPath, 1.0f, 0.0f });
 				}
-
-				std::uniform_real_distribution<float> dist(0.0f, totalWeight);
-				float roll = dist(s_Rng);
-
-				size_t selectedIndex = static_cast<size_t>(-1);
-				size_t lastCandidate = 0;
-				float accumulated = 0.0f;
-				for (size_t i = 0; i < variations.size(); ++i)
+				else
 				{
-					if (skipLast && i == lastChosenIndex) continue;
-					lastCandidate = i;
-					accumulated += std::max(0.01f, variations[i].weight);
-					if (roll <= accumulated)
+					const bool skipLast = (shuffleNoRepeat && variations.size() > 1 && lastChosenIndex < variations.size());
+					float totalWeight = 0.0f;
+					for (size_t i = 0; i < variations.size(); ++i)
 					{
-						selectedIndex = i;
-						break;
+						if (skipLast && i == lastChosenIndex) continue;
+						totalWeight += std::max(0.01f, variations[i].weight);
+					}
+
+					if (totalWeight <= 0.0f)
+					{
+						lastChosenIndex = 0;
+						results.push_back({ variations[0].soundAssetPath, 1.0f, 0.0f });
+					}
+					else
+					{
+						std::uniform_real_distribution<float> dist(0.0f, totalWeight);
+						float roll = dist(s_Rng);
+
+						size_t selectedIndex = static_cast<size_t>(-1);
+						size_t lastCandidate = 0;
+						float accumulated = 0.0f;
+						for (size_t i = 0; i < variations.size(); ++i)
+						{
+							if (skipLast && i == lastChosenIndex) continue;
+							lastCandidate = i;
+							accumulated += std::max(0.01f, variations[i].weight);
+							if (roll <= accumulated)
+							{
+								selectedIndex = i;
+								break;
+							}
+						}
+
+						if (selectedIndex == static_cast<size_t>(-1))
+						{
+							selectedIndex = lastCandidate;
+						}
+
+						lastChosenIndex = static_cast<uint32_t>(selectedIndex);
+						results.push_back({ variations[selectedIndex].soundAssetPath, 1.0f, 0.0f });
 					}
 				}
-
-				if (selectedIndex == static_cast<size_t>(-1))
-				{
-					selectedIndex = lastCandidate;
-				}
-
-				lastChosenIndex = static_cast<uint32_t>(selectedIndex);
-				return variations[selectedIndex].soundAssetPath;
 			}
+			break;
 
 		case ContainerType::Sequence:
 			if (!variations.empty())
 			{
 				uint32_t idx = sequenceIndex % variations.size();
 				++sequenceIndex;
-				return variations[idx].soundAssetPath;
+				results.push_back({ variations[idx].soundAssetPath, 1.0f, 0.0f });
 			}
 			break;
 
@@ -83,14 +107,14 @@ namespace World::Audio
 					auto branchIt = switchBranches.find(it->second);
 					if (branchIt != switchBranches.end() && branchIt->second)
 					{
-						return branchIt->second->EvaluateSelection(switchParams, blendParams);
+						return branchIt->second->EvaluateTracks(switchParams, blendParams);
 					}
 				}
 				// Default branch fallback if available
 				auto defIt = switchBranches.find("Default");
 				if (defIt != switchBranches.end() && defIt->second)
 				{
-					return defIt->second->EvaluateSelection(switchParams, blendParams);
+					return defIt->second->EvaluateTracks(switchParams, blendParams);
 				}
 			}
 			break;
@@ -98,31 +122,88 @@ namespace World::Audio
 		case ContainerType::Blend:
 			if (!blendPoints.empty())
 			{
-				float paramVal = 0.0f;
-				auto it = blendParams.find(blendParamName);
-				if (it != blendParams.end()) paramVal = it->second;
-
-				// Find closest point
-				size_t closestIdx = 0;
-				float closestDiff = 1e9f;
-				for (size_t i = 0; i < blendPoints.size(); ++i)
+				if (blendPoints.size() == 1)
 				{
-					float diff = std::abs(blendPoints[i].first - paramVal);
-					if (diff < closestDiff)
+					if (blendPoints[0].second)
 					{
-						closestDiff = diff;
-						closestIdx = i;
+						return blendPoints[0].second->EvaluateTracks(switchParams, blendParams);
 					}
 				}
-				if (blendPoints[closestIdx].second)
+				else
 				{
-					return blendPoints[closestIdx].second->EvaluateSelection(switchParams, blendParams);
+					float paramVal = 0.0f;
+					auto it = blendParams.find(blendParamName);
+					if (it != blendParams.end()) paramVal = it->second;
+
+					// Clamp to outer range
+					if (paramVal <= blendPoints.front().first)
+					{
+						if (blendPoints.front().second)
+							return blendPoints.front().second->EvaluateTracks(switchParams, blendParams);
+					}
+					else if (paramVal >= blendPoints.back().first)
+					{
+						if (blendPoints.back().second)
+							return blendPoints.back().second->EvaluateTracks(switchParams, blendParams);
+					}
+					else
+					{
+						// Find enclosing span [i, i+1]
+						for (size_t i = 0; i + 1 < blendPoints.size(); ++i)
+						{
+							float p0 = blendPoints[i].first;
+							float p1 = blendPoints[i + 1].first;
+							if (paramVal >= p0 && paramVal <= p1)
+							{
+								float span = std::max(1e-4f, p1 - p0);
+								float t = std::clamp((paramVal - p0) / span, 0.0f, 1.0f);
+
+								// Equal-power crossfade (cos/sin preserve RMS power)
+								float w0 = std::cos(t * 1.57079632679f);
+								float w1 = std::sin(t * 1.57079632679f);
+
+								if (blendPoints[i].second)
+								{
+									auto t0 = blendPoints[i].second->EvaluateTracks(switchParams, blendParams);
+									for (auto& trk : t0) trk.volumeScale *= w0;
+									results.insert(results.end(), t0.begin(), t0.end());
+								}
+								if (blendPoints[i + 1].second)
+								{
+									auto t1 = blendPoints[i + 1].second->EvaluateTracks(switchParams, blendParams);
+									for (auto& trk : t1) trk.volumeScale *= w1;
+									results.insert(results.end(), t1.begin(), t1.end());
+								}
+								break;
+							}
+						}
+					}
+				}
+			}
+			break;
+
+		case ContainerType::Layer:
+			for (const auto& child : layerChildren)
+			{
+				if (child.second)
+				{
+					float layerVol = std::max(0.0f, child.first);
+					auto sub = child.second->EvaluateTracks(switchParams, blendParams);
+					for (auto& trk : sub)
+					{
+						trk.volumeScale *= layerVol;
+					}
+					results.insert(results.end(), sub.begin(), sub.end());
 				}
 			}
 			break;
 		}
 
-		return variations.empty() ? "" : variations[0].soundAssetPath;
+		if (results.empty() && !variations.empty())
+		{
+			results.push_back({ variations[0].soundAssetPath, 1.0f, 0.0f });
+		}
+		return results;
 	}
 
 	SoundEvent::SoundEvent(std::string id, BusId busId)
@@ -152,6 +233,17 @@ namespace World::Audio
 			semitones = m_MinPitchSemitones;
 		}
 		return PitchSemitonesToRatio(semitones);
+	}
+
+	std::vector<EvaluatedSoundTrack> SoundEvent::EvaluateTracks(
+		const std::unordered_map<std::string, std::string>& switchParams,
+		const std::unordered_map<std::string, float>& blendParams) const
+	{
+		if (m_RootContainer)
+		{
+			return m_RootContainer->EvaluateTracks(switchParams, blendParams);
+		}
+		return {};
 	}
 
 	std::string SoundEvent::SerializeYaml() const
@@ -189,7 +281,6 @@ namespace World::Audio
 
 	bool SoundEvent::DeserializeYaml(const std::string& yamlText)
 	{
-		// Lightweight parser for standard fields
 		std::istringstream stream(yamlText);
 		std::string line;
 		while (std::getline(stream, line))
@@ -198,7 +289,6 @@ namespace World::Audio
 			if (colonPos == std::string::npos) continue;
 
 			std::string key = line.substr(0, colonPos);
-			// trim key
 			while (!key.empty() && (key.front() == ' ' || key.front() == '\t')) key.erase(key.begin());
 			if (!key.empty() && key.front() == '-')
 			{
@@ -222,6 +312,10 @@ namespace World::Audio
 			else if (key == "MaxInstances")
 			{
 				m_MaxInstances = static_cast<uint32_t>(std::stoul(line.substr(colonPos + 1)));
+			}
+			else if (key == "CooldownSeconds")
+			{
+				m_CooldownSeconds = std::stof(line.substr(colonPos + 1));
 			}
 			else if (key == "Is3D")
 			{

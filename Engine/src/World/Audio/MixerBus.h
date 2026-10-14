@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "AudioTypes.h"
 #include "AudioDsp.h"
@@ -72,6 +72,9 @@ namespace World::Audio
 		void SetDuckingFactor(float duck) noexcept { m_DuckingFactor = std::clamp(duck, 0.0f, 1.0f); }
 		float GetDuckingFactor() const noexcept { return m_DuckingFactor; }
 
+		void SetReverbSend(float send) noexcept { m_ReverbSend = std::clamp(send, 0.0f, 1.0f); }
+		float GetReverbSend() const noexcept { return m_ReverbSend; }
+
 		BusEffectRack& GetEffectRack() noexcept { return m_Effects; }
 
 		void UpdateMeter(float lPeak, float rPeak, float lRms, float rRms) noexcept;
@@ -88,6 +91,7 @@ namespace World::Audio
 		bool m_Mute { false };
 		bool m_Solo { false };
 		float m_DuckingFactor { 1.0f };
+		float m_ReverbSend { 0.0f };
 
 		BusEffectRack m_Effects;
 
@@ -126,6 +130,13 @@ namespace World::Audio
 		void TriggerSnapshot(const std::string& name, float transitionSeconds = 0.3f);
 		void ClearSnapshot(float transitionSeconds = 0.3f);
 
+		void SetAuxReverbRoomSize(float roomSize) noexcept { m_AuxReverb.SetRoomSize(roomSize); }
+		void SetAuxReverbDamping(float damping) noexcept { m_AuxReverb.SetDamping(damping); }
+		void SetAuxReverbEnabled(bool enabled) noexcept { m_AuxReverbEnabled = enabled; }
+		bool IsAuxReverbEnabled() const noexcept { return m_AuxReverbEnabled; }
+		AlgorithmicReverb& GetAuxReverb() noexcept { return m_AuxReverb; }
+		const AlgorithmicReverb& GetAuxReverb() const noexcept { return m_AuxReverb; }
+
 		std::string SerializeYaml() const;
 		bool DeserializeYaml(const std::string& yaml);
 
@@ -147,6 +158,10 @@ namespace World::Audio
 		float m_SnapshotBlend { 0.0f }; // 0.0 -> 1.0
 		float m_SnapshotTargetBlend { 0.0f };
 		float m_SnapshotSpeed { 1.0f };
+
+		// Master Limiter
+		AlgorithmicReverb m_AuxReverb;
+		bool m_AuxReverbEnabled { true };
 
 		// Master Limiter
 		TruePeakLimiter m_MasterLimiter;

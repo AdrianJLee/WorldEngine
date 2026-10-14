@@ -637,6 +637,124 @@ namespace World
 			return ScriptValue::Nil();
 		}
 
+		ScriptValue AudioSetPausedImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[23];
+			CheckArgumentCount("Audio", method, count, 1);
+			const bool paused = RequireBool("Audio", method, args, count, 0);
+			Audio::AudioSystem::Get().SetPaused(paused);
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioIsPausedImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[24];
+			CheckArgumentCount("Audio", method, count, 0);
+			return ScriptValue::Boolean(Audio::AudioSystem::Get().IsPaused());
+		}
+
+		ScriptValue AudioSetTimeDilationImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[25];
+			CheckArgumentCount("Audio", method, count, 1);
+			const double timeScale = RequireNumber("Audio", method, args, count, 0);
+			const double pitchScale = OptionalNumber("Audio", method, args, count, 1, -1.0);
+			Audio::AudioSystem::Get().SetTimeDilation(static_cast<float>(timeScale), static_cast<float>(pitchScale));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioPlayTileFootstepImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[26];
+			CheckArgumentCount("Audio", method, count, 3);
+			const double tileX = RequireNumber("Audio", method, args, count, 0);
+			const double tileY = RequireNumber("Audio", method, args, count, 1);
+			const std::string surface = RequireString("Audio", method, args, count, 2);
+			const double worldX = OptionalNumber("Audio", method, args, count, 3, 0.0);
+			const double worldY = OptionalNumber("Audio", method, args, count, 4, 0.0);
+			Audio::VoiceHandle h = Audio::AudioSystem::Get().PlayTileFootstep(
+				static_cast<int>(tileX), static_cast<int>(tileY), surface,
+				glm::vec2(static_cast<float>(worldX), static_cast<float>(worldY)));
+			return ScriptValue::Number(static_cast<double>(h));
+		}
+
+		ScriptValue AudioSetVoiceVolumeImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[27];
+			CheckArgumentCount("Audio", method, count, 2);
+			const double handle = RequireNumber("Audio", method, args, count, 0);
+			const double vol = RequireNumber("Audio", method, args, count, 1);
+			Audio::AudioSystem::Get().SetVoiceVolume(static_cast<Audio::VoiceHandle>(handle), static_cast<float>(vol));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioSetVoicePitchImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[28];
+			CheckArgumentCount("Audio", method, count, 2);
+			const double handle = RequireNumber("Audio", method, args, count, 0);
+			const double pitch = RequireNumber("Audio", method, args, count, 1);
+			Audio::AudioSystem::Get().SetVoicePitch(static_cast<Audio::VoiceHandle>(handle), static_cast<float>(pitch));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue MusicSetStemVolumeImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[1].Methods[3];
+			CheckArgumentCount("Music", method, count, 2);
+			const std::string stem = RequireString("Music", method, args, count, 0);
+			const double vol = RequireNumber("Music", method, args, count, 1);
+			const double fade = OptionalNumber("Music", method, args, count, 2, 0.5);
+			Audio::AudioSystem::Get().GetMusic().SetStemVolume(stem, static_cast<float>(vol), static_cast<float>(fade));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue MusicGetStemVolumeImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[1].Methods[4];
+			CheckArgumentCount("Music", method, count, 1);
+			const std::string stem = RequireString("Music", method, args, count, 0);
+			float v = Audio::AudioSystem::Get().GetMusic().GetStemVolume(stem);
+			return ScriptValue::Number(static_cast<double>(v));
+		}
+
+		ScriptValue MusicPlayStingerImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[1].Methods[5];
+			CheckArgumentCount("Music", method, count, 1);
+			const std::string stinger = RequireString("Music", method, args, count, 0);
+			const double vol = OptionalNumber("Music", method, args, count, 1, 1.0);
+			Audio::VoiceHandle h = Audio::AudioSystem::Get().GetMusic().PlayStinger(stinger, static_cast<float>(vol));
+			return ScriptValue::Number(static_cast<double>(h));
+		}
+
+		ScriptValue MusicSetAudioOffsetMsImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[1].Methods[6];
+			CheckArgumentCount("Music", method, count, 1);
+			const double ms = RequireNumber("Music", method, args, count, 0);
+			Audio::AudioSystem::Get().GetMusic().SetAudioOffsetMs(static_cast<float>(ms));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue MusicGetAudioOffsetMsImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[1].Methods[7];
+			CheckArgumentCount("Music", method, count, 0);
+			return ScriptValue::Number(static_cast<double>(Audio::AudioSystem::Get().GetMusic().GetAudioOffsetMs()));
+		}
+
 		// ---- 描述表 ----
 
 		static const ScriptServiceParam audioPostEventParams[] = {
@@ -750,6 +868,52 @@ namespace World
 			{ "y", "number", ScriptServiceArgType::Number, false, "World Y position (default 0)." },
 			{ "z", "number", ScriptServiceArgType::Number, false, "World Z position (default 0)." },
 		};
+		static const ScriptServiceParam audioSetPausedParams[] = {
+			{ "paused", "boolean", ScriptServiceArgType::Boolean, true, "Whether to pause gameplay bus audio." },
+		};
+
+		static const ScriptServiceParam audioSetTimeDilationParams[] = {
+			{ "timeScale", "number", ScriptServiceArgType::Number, true, "Gameplay time scale factor (0.05 to 4.0)." },
+			{ "pitchScale", "number", ScriptServiceArgType::Number, false, "Optional pitch scale override (default matches timeScale)." },
+		};
+
+		static const ScriptServiceParam audioPlayTileFootstepParams[] = {
+			{ "tileX", "number", ScriptServiceArgType::Number, true, "Tilemap X grid coordinate." },
+			{ "tileY", "number", ScriptServiceArgType::Number, true, "Tilemap Y grid coordinate." },
+			{ "surface", "string", ScriptServiceArgType::String, true, "Surface material name ('Grass', 'Stone', 'Wood', etc.)." },
+			{ "worldX", "number", ScriptServiceArgType::Number, false, "World X position (default 0)." },
+			{ "worldY", "number", ScriptServiceArgType::Number, false, "World Y position (default 0)." },
+		};
+
+		static const ScriptServiceParam audioSetVoiceVolumeParams[] = {
+			{ "voiceHandle", "number", ScriptServiceArgType::Number, true, "Voice handle returned by PostEvent." },
+			{ "volume", "number", ScriptServiceArgType::Number, true, "Volume scale multiplier." },
+		};
+
+		static const ScriptServiceParam audioSetVoicePitchParams[] = {
+			{ "voiceHandle", "number", ScriptServiceArgType::Number, true, "Voice handle returned by PostEvent." },
+			{ "pitch", "number", ScriptServiceArgType::Number, true, "Pitch scale multiplier." },
+		};
+
+		static const ScriptServiceParam musicSetStemVolumeParams[] = {
+			{ "stemName", "string", ScriptServiceArgType::String, true, "Music stem identifier ('Percussion', 'Bass', etc.)." },
+			{ "volume", "number", ScriptServiceArgType::Number, true, "Target stem volume (0.0 to 4.0)." },
+			{ "fadeSeconds", "number", ScriptServiceArgType::Number, false, "Crossfade duration in seconds (default 0.5)." },
+		};
+
+		static const ScriptServiceParam musicGetStemVolumeParams[] = {
+			{ "stemName", "string", ScriptServiceArgType::String, true, "Music stem identifier." },
+		};
+
+		static const ScriptServiceParam musicPlayStingerParams[] = {
+			{ "stingerEvent", "string", ScriptServiceArgType::String, true, "Stinger sound event name." },
+			{ "volume", "number", ScriptServiceArgType::Number, false, "Volume multiplier (default 1.0)." },
+		};
+
+		static const ScriptServiceParam musicSetAudioOffsetMsParams[] = {
+			{ "offsetMs", "number", ScriptServiceArgType::Number, true, "Audio offset calibration in milliseconds." },
+		};
+
 		static const ScriptServiceMethod audioMethods[] = {
 			{ "PostEvent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -887,6 +1051,42 @@ namespace World
 				return AudioPlayFootstepImpl(args, count);
 			}, audioPlayFootstepParams, 4, 4, "number",
 				"Play a surface-specific footstep sound event; returns a voice handle or 0 on failure." },
+
+			{ "SetPaused", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioSetPausedImpl(args, count);
+			}, audioSetPausedParams, 1, 1, "",
+				"Pause or unpause gameplay audio buses while keeping UI and music playing." },
+
+			{ "IsPaused", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioIsPausedImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Check if gameplay audio buses are currently paused." },
+
+			{ "SetTimeDilation", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioSetTimeDilationImpl(args, count);
+			}, audioSetTimeDilationParams, 2, 2, "",
+				"Set gameplay time scale and pitch dilation factor (e.g. bullet time)." },
+
+			{ "PlayTileFootstep", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioPlayTileFootstepImpl(args, count);
+			}, audioPlayTileFootstepParams, 5, 5, "number",
+				"Play a tilemap surface-specific footstep event; returns a voice handle or 0 on failure." },
+
+			{ "SetVoiceVolume", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioSetVoiceVolumeImpl(args, count);
+			}, audioSetVoiceVolumeParams, 2, 2, "",
+				"Set volume multiplier for an active voice instance." },
+
+			{ "SetVoicePitch", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioSetVoicePitchImpl(args, count);
+			}, audioSetVoicePitchParams, 2, 2, "",
+				"Set pitch multiplier for an active voice instance." },
 		};
 
 		static const ScriptServiceParam musicPlayParams[] = {

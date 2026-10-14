@@ -1,4 +1,4 @@
-#include "VoicePool.h"
+﻿#include "VoicePool.h"
 
 namespace World::Audio
 {
@@ -54,6 +54,17 @@ namespace World::Audio
 				}
 			}
 
+			// Demote victim into an inactive virtual voice slot
+			for (auto& vv : m_VirtualVoices)
+			{
+				if (!vv.IsActive())
+				{
+					vv = m_PhysicalVoices[victimIndex];
+					vv.DemoteToVirtual();
+					break;
+				}
+			}
+
 			// Steal victim: allocate new voice into its slot
 			m_PhysicalVoices[victimIndex].Setup(handle, buffer, busId, volume, pitch, loop, priority);
 			return handle;
@@ -65,6 +76,7 @@ namespace World::Audio
 			if (!v.IsActive())
 			{
 				v.Setup(handle, buffer, busId, volume, pitch, loop, priority);
+				v.DemoteToVirtual();
 				return handle;
 			}
 		}
@@ -164,9 +176,33 @@ namespace World::Audio
 		// Advance virtual voices without DSP cost
 		for (auto& v : m_VirtualVoices)
 		{
-			if (v.IsVirtual())
+			if (v.IsVirtual() || v.IsActive())
 			{
 				v.AdvanceVirtual(frameCount);
+			}
+		}
+
+		// Check for promotion of virtual voices into empty physical voice slots
+		for (auto& pv : m_PhysicalVoices)
+		{
+			if (!pv.IsActive())
+			{
+				size_t bestVvIdx = static_cast<size_t>(-1);
+				float bestAudibility = 0.001f;
+				for (size_t vi = 0; vi < m_VirtualVoices.size(); ++vi)
+				{
+					if (m_VirtualVoices[vi].IsActive() && m_VirtualVoices[vi].GetAudibility() > bestAudibility)
+					{
+						bestAudibility = m_VirtualVoices[vi].GetAudibility();
+						bestVvIdx = vi;
+					}
+				}
+				if (bestVvIdx != static_cast<size_t>(-1))
+				{
+					pv = m_VirtualVoices[bestVvIdx];
+					pv.PromoteToPhysical();
+					m_VirtualVoices[bestVvIdx].Reset();
+				}
 			}
 		}
 	}
