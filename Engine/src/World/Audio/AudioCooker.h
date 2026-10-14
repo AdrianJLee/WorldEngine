@@ -31,5 +31,9 @@ namespace World::Audio
 		static bool LoadWavFile(const std::string& wavPath, AudioBuffer& outBuffer);
 		static bool CookFile(const std::string& sourceWavPath, const std::string& outputCookedPath, const AudioCookSettings& settings);
 		static std::shared_ptr<AudioBuffer> LoadCookedFile(const std::string& cookedPath);
+
+		// IMA-ADPCM 4:1 compression codecs
+		static std::vector<uint8_t> EncodeImaAdpcm(const int16_t* pcmSamples, size_t sampleCount, uint32_t channels);
+		static std::vector<int16_t> DecodeImaAdpcm(const uint8_t* adpcmData, size_t totalSamples, uint32_t channels);
 	};
 }

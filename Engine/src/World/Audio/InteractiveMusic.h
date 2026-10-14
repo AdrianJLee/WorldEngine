@@ -32,10 +32,12 @@ namespace World::Audio
 		void Reset() noexcept;
 
 		void Update(float deltaSeconds);
+		void AdvanceDspFrames(uint32_t frameCount, uint32_t sampleRate = kDefaultSampleRate);
 
 		uint32_t GetCurrentBar() const noexcept { return m_CurrentBar; }
 		uint32_t GetCurrentBeat() const noexcept { return m_CurrentBeat; }
 		float GetBeatProgress() const noexcept { return m_BeatProgress; }
+		uint64_t GetDspClockFrames() const noexcept { return m_DspClockFrames; }
 
 		bool DidCrossBeat() const noexcept { return m_CrossedBeat; }
 		bool DidCrossBar() const noexcept { return m_CrossedBar; }
@@ -46,6 +48,8 @@ namespace World::Audio
 		float m_SecondsPerBeat { 0.5f };
 
 		float m_AccumulatedSeconds { 0.0f };
+		uint64_t m_DspClockFrames { 0 };
+		uint32_t m_SampleRate { kDefaultSampleRate };
 		uint32_t m_CurrentBar { 0 };
 		uint32_t m_CurrentBeat { 0 };
 		float m_BeatProgress { 0.0f };
@@ -66,14 +70,18 @@ namespace World::Audio
 		void Stop(float fadeSeconds = 1.0f);
 
 		void Update(float deltaSeconds);
+		void AdvanceDspClock(uint32_t frameCount, uint32_t sampleRate = kDefaultSampleRate);
 
 		const std::string& GetCurrentTrackId() const noexcept { return m_CurrentTrackId; }
 		const InteractiveMusicClock& GetClock() const noexcept { return m_Clock; }
+		VoiceHandle GetCurrentVoice() const noexcept { return m_CurrentVoice; }
+		uint64_t GetDspClockFrames() const noexcept { return m_Clock.GetDspClockFrames(); }
 
 	private:
 		std::unordered_map<std::string, MusicTrackDesc> m_Tracks;
 		InteractiveMusicClock m_Clock;
 
+		VoiceHandle m_CurrentVoice { kInvalidVoiceHandle };
 		std::string m_CurrentTrackId;
 		std::string m_PendingTrackId;
 		TransitionSync m_PendingSync { TransitionSync::NextBar };

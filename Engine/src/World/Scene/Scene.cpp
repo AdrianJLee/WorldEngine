@@ -17,6 +17,7 @@
 #include "World/Gameplay/Runtime/SystemRegistry.h"
 #include "World/Gameplay/Framework/TimerSystem.h"
 #include "World/Physics/Physics3D.h"
+#include "World/Audio/AudioSystem.h"
 #include <box2d/box2d.h>
 #include <algorithm>
 #include <chrono>
@@ -2308,6 +2309,7 @@ namespace World
 		if (ScriptEngine::IsInitialized())
 			ScriptEngine::PollSystemScriptReload(*this, ts.GetSeconds());
 		RunFrameSystems(ts);
+		Audio::AudioSystem::Get().Update(ts.GetSeconds(), this);
 		FlushStructuralChanges();
 	}
 

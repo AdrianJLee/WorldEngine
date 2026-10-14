@@ -5,6 +5,7 @@
 #include "World/Core/EntryPoint.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiLocalization.h"
+#include "World/Audio/AudioSystem.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -98,11 +99,13 @@ namespace World
 			// 必须在 Renderer::Init 之前,发行形态才能从内容包读着色器。
 			// 语言层必须在 RuntimeLayer 构造(OnAttach 会取文案)之前注册好。
 			RegisterRuntimeLocalizationLayers();
+			Audio::AudioSystem::Get().Initialize(false);
 			PushLayer(WLD_ENGINE_NEW(RuntimeLayer));
 		}
 
 		~RuntimeApp()
 		{
+			Audio::AudioSystem::Get().Shutdown();
 		}
 	};
 

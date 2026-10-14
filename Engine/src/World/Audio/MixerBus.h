@@ -116,6 +116,7 @@ namespace World::Audio
 		MixerBus* FindBus(BusId id);
 		const MixerBus* FindBus(BusId id) const;
 		const std::vector<BusId>& GetBusOrder() const noexcept { return m_BusOrder; }
+		const std::unordered_map<BusId, MixerBus>& GetBuses() const noexcept { return m_Buses; }
 
 		void SetBusVolume(BusId id, float volume);
 		void SetBusMute(BusId id, bool mute);

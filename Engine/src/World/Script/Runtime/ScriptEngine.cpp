@@ -10,6 +10,7 @@
 #include "World/Script/Bindings/BindEvents.h"
 #include "World/Script/Bindings/BindUI.h"
 #include "World/Script/Bindings/BindServices.h"
+#include "World/Script/Bindings/BindAudio.h"
 #include "World/Script/Runtime/HotReload.h"
 #include "World/Script/Vm/LuauVm.h"
 #include "World/Script/Runtime/PluginScriptLibrary.h"
@@ -2171,6 +2172,9 @@ namespace World
 			// W3b:游戏服务面(Input/Level/Save 三个只读全局表;参数与失败语义见 Script/BindServices.h)。
 			if (!RegisterGameplayServiceBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the gameplay service bindings: " + error);
+			// 音频与音乐全局服务面 (Audio/Music 只读全局表;见 Script/BindAudio.h)。
+			if (!RegisterAudioBindings(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the audio bindings: " + error);
 			// W3c:UI 面(只读全局表 `ui`;宿主入口 DrawScriptUi 见 Script/BindUI.h)。
 			if (!RegisterUiBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the UI bindings: " + error);
@@ -2356,6 +2360,11 @@ namespace World
 		serviceList.reserve(serviceCount);
 		for (std::size_t index = 0; index < serviceCount; ++index)
 			serviceList.push_back(&services[index]);
+		// 音频与音乐全局服务面 (Audio / Music 只读全局表)
+		std::size_t audioCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&audioCount);
+		for (std::size_t index = 0; index < audioCount; ++index)
+			serviceList.push_back(&audioTables[index]);
 		// W3c:UI 块渲染在服务块之后、组件块之前(与脚本可见的全局表顺序一致)。
 		std::size_t uiCount = 0;
 		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);

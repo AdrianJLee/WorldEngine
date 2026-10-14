@@ -91,7 +91,8 @@ namespace World::Audio
 		SetBusMute,
 		SetBusSolo,
 		TriggerSnapshot,
-		ClearSnapshot
+		ClearSnapshot,
+		StopAll
 	};
 
 	struct AudioCommand

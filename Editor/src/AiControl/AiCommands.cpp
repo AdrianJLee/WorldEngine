@@ -22,6 +22,8 @@
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/Utils/Paths.h"
 #include "World/Gameplay/Framework/InputRemap.h"
+#include "World/Audio/AudioSystem.h"
+#include "World/Audio/SoundEvent.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -52,6 +54,25 @@ namespace World
 				out << lines[i];
 			}
 			return out.str();
+		}
+
+		void CollectSoundVariations(const std::shared_ptr<Audio::SoundContainerNode>& node,
+			std::vector<std::string>& outPaths, size_t depth = 0)
+		{
+			if (!node || depth > 16)
+				return;
+			for (const auto& var : node->variations)
+			{
+				outPaths.push_back(var.soundAssetPath);
+			}
+			for (const auto& [name, branch] : node->switchBranches)
+			{
+				CollectSoundVariations(branch, outPaths, depth + 1);
+			}
+			for (const auto& [point, blendNode] : node->blendPoints)
+			{
+				CollectSoundVariations(blendNode, outPaths, depth + 1);
+			}
 		}
 
 		// JSON 文本转义:面板 id / 材质路径 / 场景标签都可能含 '"' 或 '\'(Windows 路径),
@@ -3303,6 +3324,115 @@ namespace World
 			if (arg("save") == "1" || arg("save") == "true")
 				saved = MaterialLibrary::Get().Save(material, path, nullptr);
 			result = "revision=" + std::to_string(material->GetRevision()) + " saved=" + (saved ? "true" : "false");
+			return true;
+		}
+		// ---- 音频控制通道 (AI Control Audio Commands) ----
+		if (cmd == "audio.post")
+		{
+			std::string eventName = arg("event");
+			if (eventName.empty())
+				eventName = arg("name", "ui_click");
+
+			const float x = args.count("x") ? std::strtof(arg("x").c_str(), nullptr) : 0.0f;
+			const float y = args.count("y") ? std::strtof(arg("y").c_str(), nullptr) : 0.0f;
+			const float z = args.count("z") ? std::strtof(arg("z").c_str(), nullptr) : 0.0f;
+			const float volume = args.count("volume") ? std::strtof(arg("volume").c_str(), nullptr) : 1.0f;
+			const float pitch = args.count("pitch") ? std::strtof(arg("pitch").c_str(), nullptr) : 1.0f;
+			const bool loop = (arg("loop") == "1" || arg("loop") == "true");
+			const bool is3D = (arg("is3D") == "1" || arg("is3D") == "true" || arg("is_3d") == "1" || arg("is_3d") == "true");
+
+			auto& audio = Audio::AudioSystem::Get();
+			Audio::VoiceHandle handle = Audio::kInvalidVoiceHandle;
+			if (is3D || x != 0.0f || y != 0.0f || z != 0.0f)
+			{
+				handle = audio.PostEvent(eventName, glm::vec3(x, y, z), volume, pitch, loop);
+			}
+			else
+			{
+				handle = audio.PostEvent2D(eventName, volume, pitch, loop);
+			}
+
+			std::ostringstream out;
+			out << "{\"voice_handle\":" << handle << ",\"event\":\"" << JsonEscape(eventName) << "\"}";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "audio.stop_all")
+		{
+			const float fade = args.count("fade") ? std::strtof(arg("fade").c_str(), nullptr) : 0.05f;
+			Audio::AudioSystem::Get().StopAll(fade);
+			result = "{\"success\":true}";
+			return true;
+		}
+		if (cmd == "audio.get_stats")
+		{
+			auto& audio = Audio::AudioSystem::Get();
+			const bool initialized = audio.IsInitialized();
+			const uint32_t physical = audio.GetVoicePool().GetActivePhysicalVoiceCount();
+			const uint32_t virtualVoices = audio.GetVoicePool().GetActiveVirtualVoiceCount();
+			const size_t registeredEvents = audio.GetRegisteredSoundEventIds().size();
+
+			std::ostringstream out;
+			out << "{"
+				<< "\"initialized\":" << (initialized ? "true" : "false")
+				<< ",\"physical_voices\":" << physical
+				<< ",\"virtual_voices\":" << virtualVoices
+				<< ",\"registered_events\":" << registeredEvents
+				<< "}";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "audio.validate")
+		{
+			auto& audio = Audio::AudioSystem::Get();
+			const std::vector<std::string> eventIds = audio.GetRegisteredSoundEventIds();
+			std::vector<std::string> errors;
+
+			for (const auto& eventId : eventIds)
+			{
+				const Audio::SoundEvent* evt = audio.FindSoundEvent(eventId);
+				if (!evt)
+				{
+					errors.push_back("Event not found: " + eventId);
+					continue;
+				}
+
+				const auto& root = evt->GetRootContainer();
+				if (!root)
+				{
+					errors.push_back("Event '" + eventId + "' has null root container");
+					continue;
+				}
+
+				std::vector<std::string> assetPaths;
+				CollectSoundVariations(root, assetPaths);
+				for (const auto& assetPath : assetPaths)
+				{
+					if (assetPath.empty())
+					{
+						errors.push_back("Event '" + eventId + "' has empty asset path");
+						continue;
+					}
+					if (!audio.FindAudioBuffer(assetPath))
+					{
+						errors.push_back("Event '" + eventId + "' missing audio buffer for asset: " + assetPath);
+					}
+				}
+			}
+
+			std::ostringstream out;
+			out << "{"
+				<< "\"valid\":" << (errors.empty() ? "true" : "false")
+				<< ",\"events_checked\":" << eventIds.size()
+				<< ",\"errors\":[";
+			for (size_t i = 0; i < errors.size(); ++i)
+			{
+				if (i > 0)
+					out << ",";
+				out << "\"" << JsonEscape(errors[i]) << "\"";
+			}
+			out << "]}";
+			result = out.str();
 			return true;
 		}
 		// ---- 录制 / 回放(把一次通道会话变成可复现脚本) ----

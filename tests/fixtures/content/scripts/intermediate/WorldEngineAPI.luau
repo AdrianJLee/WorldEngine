@@ -462,6 +462,86 @@ function Time:FixedStepCount() end
 ---@return number
 function Time:TimeScale() end
 
+-- Global service table 'Audio': read-only; there is no runtime constructor.
+---Read-only audio service table for sound events, playback control, bus volumes, and snapshots.
+---@class Audio
+Audio = {}
+
+---Post a 3D sound event at world position; returns a voice handle or 0 on failure.
+---@param eventId string Sound event identifier.
+---@param x number? World X position (default 0).
+---@param y number? World Y position (default 0).
+---@param z number? World Z position (default 0).
+---@param volume number? Volume scale multiplier (default 1.0).
+---@param pitch number? Pitch scale multiplier (default 1.0).
+---@param loop boolean? Whether playback loops (default false).
+---@return number
+function Audio:PostEvent(eventId, x, y, z, volume, pitch, loop) end
+
+---Post a 2D sound event without spatial attenuation; returns a voice handle or 0 on failure.
+---@param eventId string Sound event identifier.
+---@param volume number? Volume scale multiplier (default 1.0).
+---@param pitch number? Pitch scale multiplier (default 1.0).
+---@param loop boolean? Whether playback loops (default false).
+---@return number
+function Audio:PostEvent2D(eventId, volume, pitch, loop) end
+
+---Stop an active voice with optional fade-out duration.
+---@param voiceHandle number Voice handle returned by PostEvent.
+---@param fadeSeconds number? Fade-out duration in seconds (default 0.05).
+function Audio:Stop(voiceHandle, fadeSeconds) end
+
+---Pause playback of an active voice.
+---@param voiceHandle number Voice handle returned by PostEvent.
+function Audio:Pause(voiceHandle) end
+
+---Resume playback of a paused voice.
+---@param voiceHandle number Voice handle returned by PostEvent.
+function Audio:Resume(voiceHandle) end
+
+---Set looping state for an active voice.
+---@param voiceHandle number Voice handle returned by PostEvent.
+---@param loop boolean Whether playback loops.
+function Audio:SetLooping(voiceHandle, loop) end
+
+---Stop all active voices with optional fade-out duration.
+---@param fadeSeconds number? Fade-out duration in seconds (default 0.05).
+function Audio:StopAll(fadeSeconds) end
+
+---Set mixer bus volume.
+---@param busId number Mixer bus id (0=Master, 1=Music, 2=Sfx, 3=Voice, 4=UI, 5=Ambience).
+---@param volume number Linear volume scale.
+function Audio:SetBusVolume(busId, volume) end
+
+---Activate a mixer snapshot with optional transition duration.
+---@param snapshotName string Mixer snapshot preset name.
+---@param transitionSeconds number? Transition duration in seconds (default 0.3).
+function Audio:TriggerSnapshot(snapshotName, transitionSeconds) end
+
+---Clear active mixer snapshot with optional transition duration.
+---@param transitionSeconds number? Transition duration in seconds (default 0.3).
+function Audio:ClearSnapshot(transitionSeconds) end
+
+-- Global service table 'Music': read-only; there is no runtime constructor.
+---Read-only interactive music service table for playback and transitions.
+---@class Music
+Music = {}
+
+---Play a registered music track with optional fade-in duration.
+---@param trackId string Music track identifier.
+---@param fadeSeconds number? Fade-in duration in seconds (default 0.5).
+function Music:Play(trackId, fadeSeconds) end
+
+---Transition to another music track with beat/bar synchronization.
+---@param trackId string Target music track identifier.
+---@param sync number? Sync mode: 0=Immediate, 1=NextBeat, 2=NextBar (default 2).
+---@param fadeSeconds number? Crossfade duration in seconds (default 1.0).
+function Music:TransitionTo(trackId, sync, fadeSeconds) end
+
+---Stop active music playback with optional fade-out duration.
+---@param fadeSeconds number? Fade-out duration in seconds (default 1.0).
+function Music:Stop(fadeSeconds) end
+
 -- Global service table 'events': read-only; there is no runtime constructor.
 ---Read-only event table; subscriptions belong to the calling script instance.
 ---@class events

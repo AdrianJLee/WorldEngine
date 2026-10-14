@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AudioTypes.h"
+#include "AudioCommandQueue.h"
 #include "AudioBuffer.h"
 #include "VoicePool.h"
 #include "MixerBus.h"
@@ -54,6 +55,11 @@ namespace World::Audio
 		void SetVoiceLooping(VoiceHandle handle, bool loop);
 		void StopAll(float fadeSeconds = 0.05f);
 
+		// Lock-free command queue
+		bool EnqueueCommand(const AudioCommand& cmd);
+		AudioCommandQueue& GetCommandQueue() noexcept { return m_CommandQueue; }
+		const AudioCommandQueue& GetCommandQueue() const noexcept { return m_CommandQueue; }
+
 		// Bus & Snapshot controls
 		void SetBusVolume(BusId busId, float volume);
 		void SetBusMute(BusId busId, bool mute);
@@ -80,8 +86,13 @@ namespace World::Audio
 		void RegisterAudioBuffer(const std::string& path, std::shared_ptr<AudioBuffer> buffer);
 		std::shared_ptr<AudioBuffer> FindAudioBuffer(const std::string& path) const;
 
+		// ECS entity voice tracking inspection
+		const std::unordered_map<uint32_t, VoiceHandle>& GetEntityVoiceMap() const noexcept { return m_EntityVoiceMap; }
+
 	private:
 		void AudioRenderCallback(float* outLeft, float* outRight, uint32_t frameCount);
+		void ProcessCommandQueue();
+		void ExecuteCommand(const AudioCommand& cmd);
 
 		bool m_Initialized { false };
 		uint32_t m_SampleRate { kDefaultSampleRate };
@@ -93,8 +104,14 @@ namespace World::Audio
 		InteractiveMusicManager m_Music;
 		AiAudioStudioManager m_AiStudio;
 
+		AudioCommandQueue m_CommandQueue;
+
 		std::unordered_map<std::string, SoundEvent> m_SoundEvents;
 		mutable std::unordered_map<std::string, std::shared_ptr<AudioBuffer>> m_AudioBuffers;
+
+		// ECS Voice tracking & Zone state
+		std::unordered_map<uint32_t, VoiceHandle> m_EntityVoiceMap;
+		uint32_t m_ActiveZoneSnapshotId { 0 };
 
 		// Listener state
 		glm::vec3 m_ListenerPosition { 0.0f };

@@ -19,6 +19,7 @@
 #include "World/Script/Bindings/BindECS.h"
 #include "World/Script/Bindings/BindEvents.h"
 #include "World/Script/Bindings/BindServices.h"
+#include "World/Script/Bindings/BindAudio.h"
 #include "World/Script/Bindings/BindUI.h"
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Script/Tooling/LuauFormatter.h"
@@ -248,6 +249,10 @@ namespace
 		serviceList.reserve(serviceCount + 2);
 		for (std::size_t index = 0; index < serviceCount; ++index)
 			serviceList.push_back(&services[index]);
+		std::size_t audioCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&audioCount);
+		for (std::size_t index = 0; index < audioCount; ++index)
+			serviceList.push_back(&audioTables[index]);
 		// W4:events/timers 与 Input/Level/Save 共用服务块链路(ScriptEngine::GenerateLuaStubs 同序)。
 		std::size_t eventCount = 0;
 		const ScriptServiceBinding* eventTables = ScriptEventBindings(&eventCount);
