@@ -486,11 +486,125 @@ namespace
 		CHECK(std::string(getDspTime->ReturnType) == "number");
 	}
 
+	void AudioServiceBindingsExposeRhythmFftAndAiStimulus()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		CHECK(audioTables != nullptr);
+		CHECK(serviceCount == 2);
+		CHECK(std::string(audioTables[0].Name) == "Audio");
+
+		const ScriptServiceMethod* getSpectrum = nullptr;
+		const ScriptServiceMethod* isBeat = nullptr;
+		const ScriptServiceMethod* broadcastStimulus = nullptr;
+		const ScriptServiceMethod* getProfilerStats = nullptr;
+
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			const std::string name = audioTables[0].Methods[i].Name;
+			if (name == "GetSpectrum")
+				getSpectrum = &audioTables[0].Methods[i];
+			else if (name == "IsBeat")
+				isBeat = &audioTables[0].Methods[i];
+			else if (name == "BroadcastAiStimulus")
+				broadcastStimulus = &audioTables[0].Methods[i];
+			else if (name == "GetProfilerStats")
+				getProfilerStats = &audioTables[0].Methods[i];
+		}
+
+		CHECK(getSpectrum != nullptr);
+		CHECK(getSpectrum->ParamCount == 1);
+		CHECK(std::string(getSpectrum->Params[0].Name) == "bandCount");
+		CHECK(!getSpectrum->Params[0].Required);
+		CHECK(std::string(getSpectrum->ReturnType) == "table");
+
+		CHECK(isBeat != nullptr);
+		CHECK(isBeat->ParamCount == 0);
+		CHECK(std::string(isBeat->ReturnType) == "boolean");
+
+		CHECK(broadcastStimulus != nullptr);
+		CHECK(broadcastStimulus->ParamCount == 6);
+		CHECK(std::string(broadcastStimulus->Params[0].Name) == "x");
+		CHECK(std::string(broadcastStimulus->Params[1].Name) == "y");
+		CHECK(std::string(broadcastStimulus->Params[2].Name) == "z");
+		CHECK(std::string(broadcastStimulus->Params[3].Name) == "radius");
+		CHECK(std::string(broadcastStimulus->Params[4].Name) == "loudness");
+		CHECK(std::string(broadcastStimulus->Params[5].Name) == "tag");
+		CHECK(std::string(broadcastStimulus->ReturnType) == "");
+
+		CHECK(getProfilerStats != nullptr);
+		CHECK(getProfilerStats->ParamCount == 0);
+		CHECK(std::string(getProfilerStats->ReturnType) == "table");
+	}
+
+	void AudioBroadcastAiStimulusRecordsCorrectly()
+	{
+		ClearRecentAiStimuli();
+		CHECK(GetRecentAiStimuli().empty());
+
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		const ScriptServiceMethod* broadcastMethod = nullptr;
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			if (std::string(audioTables[0].Methods[i].Name) == "BroadcastAiStimulus")
+			{
+				broadcastMethod = &audioTables[0].Methods[i];
+				break;
+			}
+		}
+		CHECK(broadcastMethod != nullptr);
+
+		const ScriptValue args[] = {
+			ScriptValue::Number(10.5),
+			ScriptValue::Number(2.0),
+			ScriptValue::Number(-15.0),
+			ScriptValue::Number(25.0),
+			ScriptValue::Number(0.85),
+			ScriptValue::String("gunshot")
+		};
+		ScriptValue result = broadcastMethod->Function(args, 6);
+		CHECK(result.IsNil());
+
+		auto stimuli = GetRecentAiStimuli();
+		CHECK(stimuli.size() == 1);
+		CHECK(std::abs(stimuli[0].position.x - 10.5f) < 0.001f);
+		CHECK(std::abs(stimuli[0].position.y - 2.0f) < 0.001f);
+		CHECK(std::abs(stimuli[0].position.z - (-15.0f)) < 0.001f);
+		CHECK(std::abs(stimuli[0].radius - 25.0f) < 0.001f);
+		CHECK(std::abs(stimuli[0].loudness - 0.85f) < 0.001f);
+		CHECK(stimuli[0].tag == "gunshot");
+
+		ClearRecentAiStimuli();
+		CHECK(GetRecentAiStimuli().empty());
+	}
+
+	void AudioIsBeatReturnsBoolean()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		const ScriptServiceMethod* isBeatMethod = nullptr;
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			if (std::string(audioTables[0].Methods[i].Name) == "IsBeat")
+			{
+				isBeatMethod = &audioTables[0].Methods[i];
+				break;
+			}
+		}
+		CHECK(isBeatMethod != nullptr);
+		ScriptValue result = isBeatMethod->Function(nullptr, 0);
+		CHECK(result.IsBoolean());
+	}
+
 	int RunAll()
 	{
 		const std::pair<const char*, void(*)()> tests[] = {
 			{ "Audio service descriptors expose 2D screen panning and combo escalation", AudioServiceBindingsExpose2DAndCombo },
 			{ "Audio service descriptors expose 3D spatial parameters and DSP clock", AudioServiceBindingsExpose3DSpatialAndDspClock },
+			{ "Audio service descriptors expose rhythm beat, FFT spectrum, AI stimulus, and profiler", AudioServiceBindingsExposeRhythmFftAndAiStimulus },
+			{ "Audio BroadcastAiStimulus records acoustic stimuli with tag and coordinates", AudioBroadcastAiStimulusRecordsCorrectly },
+			{ "Audio IsBeat returns valid boolean state", AudioIsBeatReturnsBoolean },
 			{ "ResolveScriptDiskPath hits a real disk file", ResolveDiskPathHitsRealFile },
 			{ "ResolveScriptDiskPath rejects invalid logical paths", ResolveDiskPathRejectsInvalidPaths },
 			{ "ResolveScriptDiskPath rejects a missing file", ResolveDiskPathRejectsMissingFile },

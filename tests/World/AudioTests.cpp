@@ -5,6 +5,11 @@
 #include "World/Audio/AudioCooker.h"
 #include "World/Audio/AudioComponents.h"
 #include "World/Audio/AiAudioStudio.h"
+#include "World/Audio/AudioFft.h"
+#include "World/Audio/SplineAudioEmitter.h"
+#include "World/Audio/AudioCapture.h"
+#include "World/Audio/AudioPerceptionBridge.h"
+#include "World/Audio/AudioProfiler.h"
 #include "World/Core/WorldContext.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Scene.h"
@@ -821,6 +826,331 @@ static void TestPhysicsContactSound()
 	std::cout << "  -> Passed." << std::endl;
 }
 
+static void TestAudioFftAndBeatDetection()
+{
+	std::cout << "[Test] AudioFftAndBeatDetection..." << std::endl;
+
+	// 1. FFT Analyzer with sine wave
+	AudioFftAnalyzer fft(1024);
+	assert(fft.GetFftSize() == 1024);
+
+	// Generate 1000Hz pure tone at 48kHz
+	constexpr float kSampleRate = 48000.0f;
+	constexpr float kFreq = 1000.0f;
+	std::vector<float> sineWave(1024);
+	constexpr float kPi = 3.14159265358979323846f;
+	for (size_t i = 0; i < 1024; ++i)
+	{
+		sineWave[i] = std::sin(2.0f * kPi * kFreq * static_cast<float>(i) / kSampleRate);
+	}
+
+	fft.FeedSamplesMono(sineWave.data(), 1024);
+
+	// Test raw magnitudes: bin corresponding to 1000Hz is 1000 * 1024 / 48000 = 21.33 -> bin 21
+	std::vector<float> magnitudes;
+	fft.GetRawMagnitudes(magnitudes);
+	assert(magnitudes.size() == 512);
+
+	size_t peakBin = 0;
+	float peakMag = 0.0f;
+	for (size_t i = 0; i < magnitudes.size(); ++i)
+	{
+		if (magnitudes[i] > peakMag)
+		{
+			peakMag = magnitudes[i];
+			peakBin = i;
+		}
+	}
+	assert(peakBin >= 19 && peakBin <= 23);
+	assert(peakMag > 0.4f);
+
+	// Test 64-band logarithmic spectrum
+	std::vector<float> bands;
+	fft.GetSpectrum(bands, 64);
+	assert(bands.size() == 64);
+
+	size_t peakBand = 0;
+	float peakBandVal = 0.0f;
+	for (size_t i = 0; i < bands.size(); ++i)
+	{
+		if (bands[i] > peakBandVal)
+		{
+			peakBandVal = bands[i];
+			peakBand = i;
+		}
+	}
+	assert(peakBand >= 33 && peakBand <= 40);
+
+	// Test BandEnergy
+	float energy1000 = fft.CalculateBandEnergy(800.0f, 1200.0f, kSampleRate);
+	float energyBass = fft.CalculateBandEnergy(50.0f, 200.0f, kSampleRate);
+	assert(energy1000 > energyBass * 10.0f);
+
+	// 2. BeatDetector
+	BeatDetector beat(16, 1.5f, 0.15f);
+	beat.Reset();
+
+	// Feed baseline low energy
+	for (int i = 0; i < 10; ++i)
+	{
+		bool b = beat.Process(0.1f, 0.02f);
+		assert(!b);
+	}
+
+	// Sudden kick drum impulse: energy jump to 0.8f (> 0.1 * 1.5)
+	bool isBeat = beat.Process(0.8f, 0.02f);
+	assert(isBeat);
+	assert(beat.IsBeat());
+
+	// Immediately subsequent frame within refractory period (e.g. 20ms < 150ms)
+	bool immediateNext = beat.Process(0.85f, 0.02f);
+	assert(!immediateNext);
+
+	// Advance time past 150ms refractory period
+	beat.Process(0.1f, 0.10f); // t = 120ms
+	beat.Process(0.1f, 0.05f); // t = 170ms > 150ms
+
+	// Next kick impulse triggers beat
+	bool nextBeat = beat.Process(0.9f, 0.02f);
+	assert(nextBeat);
+
+	// 3. AudioSystem spectrum and beat integration
+	auto& audio = AudioSystem::Get();
+	audio.Initialize(true);
+
+	std::vector<float> sysBands;
+	audio.GetSpectrum(sysBands, 64);
+	assert(sysBands.size() == 64);
+
+	bool sysBeat = audio.IsBeatDetected();
+	(void)sysBeat;
+
+	audio.Shutdown();
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestSplineAudioEmitter()
+{
+	std::cout << "[Test] SplineAudioEmitter..." << std::endl;
+
+	// 3-point polyline along right angle: (0, 0, 0) -> (10, 0, 0) -> (10, 10, 0)
+	std::vector<glm::vec3> points = {
+		glm::vec3(0.0f, 0.0f, 0.0f),
+		glm::vec3(10.0f, 0.0f, 0.0f),
+		glm::vec3(10.0f, 10.0f, 0.0f)
+	};
+
+	SplineAudioEmitter spline(points, false);
+	assert(spline.GetPointCount() == 3);
+	assert(!spline.IsClosedLoop());
+
+	// Listener near first segment: (3, 2, 0) -> closest should be (3, 0, 0)
+	glm::vec3 p1 = spline.GetClosestPointOnSpline(glm::vec3(3.0f, 2.0f, 0.0f));
+	assert(std::abs(p1.x - 3.0f) < 0.001f);
+	assert(std::abs(p1.y - 0.0f) < 0.001f);
+	assert(std::abs(p1.z - 0.0f) < 0.001f);
+	assert(std::abs(spline.GetDistanceToSpline(glm::vec3(3.0f, 2.0f, 0.0f)) - 2.0f) < 0.001f);
+
+	// Listener near second segment: (12, 6, 0) -> closest should be (10, 6, 0)
+	glm::vec3 p2 = spline.GetClosestPointOnSpline(glm::vec3(12.0f, 6.0f, 0.0f));
+	assert(std::abs(p2.x - 10.0f) < 0.001f);
+	assert(std::abs(p2.y - 6.0f) < 0.001f);
+	assert(std::abs(p2.z - 0.0f) < 0.001f);
+
+	// Listener beyond endpoint: (10, 15, 0) -> closest clamped to (10, 10, 0)
+	glm::vec3 p3 = spline.GetClosestPointOnSpline(glm::vec3(10.0f, 15.0f, 0.0f));
+	assert(std::abs(p3.x - 10.0f) < 0.001f);
+	assert(std::abs(p3.y - 10.0f) < 0.001f);
+
+	// Volumetric spread test
+	spline.SetVolumetricParameters(2.0f, 10.0f, 1.0f);
+	// Distance 1.0m (< innerRadius 2.0m) -> full spread 1.0
+	float sNear = spline.CalculateVolumetricSpread(glm::vec3(3.0f, 1.0f, 0.0f));
+	assert(std::abs(sNear - 1.0f) < 0.001f);
+
+	// Distance 15.0m (> outerRadius 10.0m) -> 0.0 spread (point source)
+	float sFar = spline.CalculateVolumetricSpread(glm::vec3(3.0f, 25.0f, 0.0f));
+	assert(std::abs(sFar - 0.0f) < 0.001f);
+
+	// Closed loop test
+	spline.SetClosedLoop(true);
+	assert(spline.IsClosedLoop());
+	// Segment closing (10, 10, 0) to (0, 0, 0)
+	glm::vec3 pClosed = spline.GetClosestPointOnSpline(glm::vec3(5.0f, 5.0f, 0.0f));
+	assert(std::abs(pClosed.x - 5.0f) < 0.01f);
+	assert(std::abs(pClosed.y - 5.0f) < 0.01f);
+
+	// AudioSystem playback lifecycle
+	auto& audio = AudioSystem::Get();
+	audio.Initialize(true);
+	spline.Play(audio, "ui_click", 1.0f);
+	assert(spline.IsPlaying());
+	spline.Update(0.016f, glm::vec3(2.0f, 1.0f, 0.0f), audio);
+	assert(spline.GetCurrentSpread() > 0.0f);
+	spline.Stop(audio, 0.0f);
+	assert(!spline.IsPlaying());
+	audio.Shutdown();
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestRadioFilterAndTypewriter()
+{
+	std::cout << "[Test] RadioFilterAndTypewriter..." << std::endl;
+
+	// 1. RadioFilter test
+	RadioFilter radio;
+	radio.Configure(400.0f, 3500.0f, 1.8f, 48000.0f);
+	assert(radio.GetHpCutoff() == 400.0f);
+	assert(radio.GetLpCutoff() == 3500.0f);
+
+	// Feed 100Hz sine (below HP 400Hz) vs 1000Hz sine (in passband)
+	float maxLow = 0.0f;
+	float maxMid = 0.0f;
+	constexpr float kPi = 3.14159265358979323846f;
+	for (int i = 0; i < 480; ++i)
+	{
+		float t = static_cast<float>(i) / 48000.0f;
+		float sLow = std::sin(2.0f * kPi * 100.0f * t) * 0.5f;
+		float outLow = radio.Process(sLow);
+		maxLow = std::max(maxLow, std::abs(outLow));
+	}
+
+	radio.Reset();
+	for (int i = 0; i < 480; ++i)
+	{
+		float t = static_cast<float>(i) / 48000.0f;
+		float sMid = std::sin(2.0f * kPi * 1000.0f * t) * 0.5f;
+		float outMid = radio.Process(sMid);
+		maxMid = std::max(maxMid, std::abs(outMid));
+	}
+
+	// Mid band should have significantly higher transmission than sub-400Hz
+	assert(maxMid > maxLow * 1.5f);
+
+	// Stereo process check
+	float left = 0.5f, right = 0.5f;
+	radio.ProcessStereo(left, right);
+	assert(std::abs(left) > 0.0f && std::abs(right) > 0.0f);
+
+	// 2. TypewriterBlipThrottler test
+	TypewriterBlipThrottler throttler;
+	throttler.Configure(0.040f, 0.080f, 0.8f);
+	throttler.Reset();
+
+	float pitch = 1.0f;
+	// Char 1 at t = 0.0s -> true
+	assert(throttler.ShouldPlayCharacter('H', 0.0f, pitch));
+	assert(pitch > 0.8f && pitch < 1.2f);
+
+	// Char 2 at t = 0.020s (< 40ms) -> throttled false
+	assert(!throttler.ShouldPlayCharacter('e', 0.020f, pitch));
+
+	// Char 2 at t = 0.045s (> 40ms) -> true
+	assert(throttler.ShouldPlayCharacter('e', 0.045f, pitch));
+
+	// Space at t = 0.090s -> always false
+	assert(!throttler.ShouldPlayCharacter(' ', 0.090f, pitch));
+
+	// Punctuation '?' at t = 0.100s -> true, pitch modulated up
+	assert(throttler.ShouldPlayCharacter('?', 0.100f, pitch));
+	assert(pitch > 1.05f); // Curiosity inflection
+
+	// Next char at t = 0.150s (only 50ms after punctuation; requires 40+80=120ms) -> false
+	assert(!throttler.ShouldPlayCharacter('A', 0.150f, pitch));
+
+	// Next char at t = 0.230s (130ms after punctuation > 120ms) -> true
+	assert(throttler.ShouldPlayCharacter('A', 0.230f, pitch));
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestAudioPerceptionAndCapture()
+{
+	std::cout << "[Test] AudioPerceptionAndCapture..." << std::endl;
+
+	// 1. AudioPerceptionBridge test
+	AudioPerceptionBridge bridge;
+	int callbackCount = 0;
+	SoundStimulus lastStim;
+
+	bridge.SetStimulusCallback([&](const SoundStimulus& s) {
+		callbackCount++;
+		lastStim = s;
+	});
+
+	SoundStimulus stim1 { glm::vec3(10.0f, 0.0f, 5.0f), 20.0f, 0.9f, "explosion" };
+	bridge.BroadcastStimulus(stim1);
+
+	assert(callbackCount == 1);
+	assert(lastStim.position == glm::vec3(10.0f, 0.0f, 5.0f));
+	assert(lastStim.radius == 20.0f);
+	assert(lastStim.loudness == 0.9f);
+	assert(lastStim.tag == "explosion");
+	assert(bridge.GetTotalStimuliBroadcast() == 1);
+
+	auto recent = bridge.GetRecentStimuli();
+	assert(recent.size() == 1);
+	assert(recent[0].tag == "explosion");
+
+	// 2. AudioSystem event perception test
+	auto& audio = AudioSystem::Get();
+	audio.Initialize(true);
+
+	audio.ConfigureEventPerception("footstep_player", 15.0f, "step_noise");
+	int sysCallbackCount = 0;
+	SoundStimulus sysStim;
+	audio.GetPerceptionBridge().SetStimulusCallback([&](const SoundStimulus& s) {
+		sysCallbackCount++;
+		sysStim = s;
+	});
+
+	audio.PostEvent("footstep_player", glm::vec3(2.0f, 0.0f, 3.0f), 0.5f);
+	assert(sysCallbackCount == 1);
+	assert(sysStim.position == glm::vec3(2.0f, 0.0f, 3.0f));
+	assert(std::abs(sysStim.radius - 7.5f) < 0.01f); // 15.0f * 0.5f volumeScale
+	assert(sysStim.tag == "step_noise");
+
+	// Test AudioProfiler
+	auto& profiler = audio.GetProfiler();
+	auto snap = profiler.GetSnapshot();
+	assert(snap.totalPhysicalVoices == kMaxPhysicalVoices);
+	assert(!profiler.ToJson().empty());
+
+	audio.Shutdown();
+
+	// 3. AudioCaptureDevice test
+	AudioCaptureDevice capture;
+	auto nullBackend = std::make_unique<NullAudioCaptureBackend>();
+	auto* backendRaw = nullBackend.get();
+	capture.Initialize(std::move(nullBackend), 48000, 1, 4800);
+	assert(!capture.IsCapturing());
+
+	capture.Start();
+	assert(capture.IsCapturing());
+
+	// Simulate incoming microphone audio frames
+	std::vector<float> micInput(256, 0.5f);
+	backendRaw->SimulateMicInput(micInput.data(), 256);
+
+	assert(capture.GetAvailableFrames() == 256);
+	assert(capture.GetInputLevelRms() > 0.4f);
+
+	std::vector<float> pulled(128);
+	uint32_t readCount = capture.PopSamples(pulled.data(), 128);
+	assert(readCount == 128);
+	assert(std::abs(pulled[0] - 0.5f) < 0.001f);
+	assert(capture.GetAvailableFrames() == 128);
+
+	capture.ClearBuffer();
+	assert(capture.GetAvailableFrames() == 0);
+
+	capture.Stop();
+	assert(!capture.IsCapturing());
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
 int main()
 {
 	std::cout << "========================================" << std::endl;
@@ -846,9 +1176,13 @@ int main()
 		TestHrtfAndVolumetricSpread();
 		TestAirAbsorptionAndDoppler();
 		TestPhysicsContactSound();
+		TestAudioFftAndBeatDetection();
+		TestSplineAudioEmitter();
+		TestRadioFilterAndTypewriter();
+		TestAudioPerceptionAndCapture();
 
 		std::cout << "========================================" << std::endl;
-		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (17/17)  " << std::endl;
+		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (21/21)  " << std::endl;
 		std::cout << "========================================" << std::endl;
 		return 0;
 	}
@@ -858,3 +1192,4 @@ int main()
 		return 1;
 	}
 }
+

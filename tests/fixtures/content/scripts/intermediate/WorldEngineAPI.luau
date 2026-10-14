@@ -554,6 +554,28 @@ function Audio:SetVoiceOcclusion(voiceHandle, occlusion) end
 ---@return number
 function Audio:GetDspTime() end
 
+---Get normalized FFT spectrum energy array for master mix.
+---@param bandCount number? Number of frequency bands (default 64).
+---@return table
+function Audio:GetSpectrum(bandCount) end
+
+---Check if current frame hits a low-frequency rhythm beat pulse.
+---@return boolean
+function Audio:IsBeat() end
+
+---Broadcast an acoustic stimulus event to the AI perception system.
+---@param x number World X position.
+---@param y number World Y position.
+---@param z number World Z position.
+---@param radius number Propagation radius in world units.
+---@param loudness number Loudness factor between 0.0 and 1.0.
+---@param tag string Semantic stimulus tag.
+function Audio:BroadcastAiStimulus(x, y, z, radius, loudness, tag) end
+
+---Get real-time audio profiler metrics including active voice counts, clipping, and DSP time.
+---@return table
+function Audio:GetProfilerStats() end
+
 -- Global service table 'Music': read-only; there is no runtime constructor.
 ---Read-only interactive music service table for playback and transitions.
 ---@class Music

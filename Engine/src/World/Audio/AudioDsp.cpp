@@ -407,4 +407,159 @@ namespace World::Audio
 
 		return cues;
 	}
+
+	// -------------------------------------------------------------
+	// RadioFilter Implementation
+	// -------------------------------------------------------------
+
+	void RadioFilter::Configure(
+		float hpCutoff,
+		float lpCutoff,
+		float distortionDrive,
+		float sampleRate)
+	{
+		if (sampleRate <= 0.0f) sampleRate = static_cast<float>(kDefaultSampleRate);
+		m_HpCutoff = std::clamp(hpCutoff, 50.0f, 4000.0f);
+		m_LpCutoff = std::clamp(lpCutoff, m_HpCutoff + 100.0f, sampleRate * 0.49f);
+		m_DistortionDrive = std::clamp(distortionDrive, 1.0f, 10.0f);
+
+		m_HighPassL.Configure(FilterType::HighPass, m_HpCutoff, sampleRate, 0.7071f);
+		m_HighPassR.Configure(FilterType::HighPass, m_HpCutoff, sampleRate, 0.7071f);
+		m_LowPassL.Configure(FilterType::LowPass, m_LpCutoff, sampleRate, 0.7071f);
+		m_LowPassR.Configure(FilterType::LowPass, m_LpCutoff, sampleRate, 0.7071f);
+		m_MakeupGain = 0.85f;
+	}
+
+	void RadioFilter::Reset() noexcept
+	{
+		m_HighPassL.Reset();
+		m_HighPassR.Reset();
+		m_LowPassL.Reset();
+		m_LowPassR.Reset();
+	}
+
+	float RadioFilter::Process(float inSample) noexcept
+	{
+		float hp = m_HighPassL.Process(inSample);
+		float lp = m_LowPassL.Process(hp);
+		float driven = lp * m_DistortionDrive;
+		return std::tanh(driven) * m_MakeupGain;
+	}
+
+	void RadioFilter::ProcessStereo(float& left, float& right) noexcept
+	{
+		float hpL = m_HighPassL.Process(left);
+		float lpL = m_LowPassL.Process(hpL);
+		float drivenL = lpL * m_DistortionDrive;
+		left = std::tanh(drivenL) * m_MakeupGain;
+
+		float hpR = m_HighPassR.Process(right);
+		float lpR = m_LowPassR.Process(hpR);
+		float drivenR = lpR * m_DistortionDrive;
+		right = std::tanh(drivenR) * m_MakeupGain;
+	}
+
+	void RadioFilter::Process(float* inOutLeft, float* inOutRight, uint32_t frameCount) noexcept
+	{
+		if (!inOutLeft || frameCount == 0) return;
+		for (uint32_t i = 0; i < frameCount; ++i)
+		{
+			float l = inOutLeft[i];
+			float r = inOutRight ? inOutRight[i] : l;
+			ProcessStereo(l, r);
+			inOutLeft[i] = l;
+			if (inOutRight) inOutRight[i] = r;
+		}
+	}
+
+	// -------------------------------------------------------------
+	// TypewriterBlipThrottler Implementation
+	// -------------------------------------------------------------
+
+	void TypewriterBlipThrottler::Configure(
+		float baseIntervalSeconds,
+		float punctuationExtraSeconds,
+		float pitchVariationSemitones) noexcept
+	{
+		m_BaseInterval = std::max(0.010f, baseIntervalSeconds);
+		m_PunctuationExtra = std::max(0.0f, punctuationExtraSeconds);
+		m_PitchVariationSemitones = std::clamp(pitchVariationSemitones, 0.0f, 6.0f);
+	}
+
+	void TypewriterBlipThrottler::Reset() noexcept
+	{
+		m_LastBlipTime = -1.0f;
+		m_LastWasPunctuation = false;
+		m_RngSeed = 12345;
+	}
+
+	bool TypewriterBlipThrottler::IsPunctuation(char32_t c) noexcept
+	{
+		switch (c)
+		{
+		case U'.': case U',': case U'!': case U'?':
+		case U';': case U':': case U'-': case U'—':
+		case U'"': case U'\'':
+		case 0x3002: // '。'
+		case 0xFF0C: // '，'
+		case 0xFF01: // '！'
+		case 0xFF1F: // '？'
+		case 0xFF1B: // '；'
+		case 0xFF1A: // '：'
+		case 0x2026: // '…'
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	bool TypewriterBlipThrottler::ShouldPlayCharacter(char c, float currentTimeSeconds, float& outPitchMultiplier) noexcept
+	{
+		return ShouldPlayCharacter(static_cast<char32_t>(static_cast<unsigned char>(c)), currentTimeSeconds, outPitchMultiplier);
+	}
+
+	bool TypewriterBlipThrottler::ShouldPlayCharacter(char32_t codepoint, float currentTimeSeconds, float& outPitchMultiplier) noexcept
+	{
+		outPitchMultiplier = 1.0f;
+
+		// Skip whitespace
+		if (codepoint == U' ' || codepoint == U'\t' || codepoint == U'\r' || codepoint == U'\n')
+		{
+			return false;
+		}
+
+		bool isPunc = IsPunctuation(codepoint);
+		float requiredInterval = m_BaseInterval;
+		if (m_LastWasPunctuation)
+		{
+			requiredInterval += m_PunctuationExtra;
+		}
+
+		if (m_LastBlipTime >= 0.0f && (currentTimeSeconds - m_LastBlipTime) < requiredInterval)
+		{
+			return false;
+		}
+
+		m_LastBlipTime = currentTimeSeconds;
+		m_LastWasPunctuation = isPunc;
+
+		// Narrative pitch modulation
+		if (codepoint == U'?' || codepoint == 0xFF1F)
+		{
+			outPitchMultiplier = PitchSemitonesToRatio(1.5f);
+		}
+		else if (codepoint == U'.' || codepoint == 0x3002 || codepoint == U'!' || codepoint == 0xFF01)
+		{
+			outPitchMultiplier = PitchSemitonesToRatio(-1.2f);
+		}
+		else
+		{
+			m_RngSeed = m_RngSeed * 1664525u + 1013904223u;
+			float norm = static_cast<float>(m_RngSeed & 0xFFFF) / 65535.0f;
+			float semi = (norm * 2.0f - 1.0f) * m_PitchVariationSemitones;
+			outPitchMultiplier = PitchSemitonesToRatio(semi);
+		}
+
+		return true;
+	}
 }

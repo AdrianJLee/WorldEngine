@@ -1,3 +1,4 @@
+#include <chrono>
 #include "AudioSystem.h"
 #include <random>
 #include "AudioCooker.h"
@@ -71,7 +72,12 @@ namespace World::Audio
 		m_TotalRenderedFrames.store(0, std::memory_order_relaxed);
 		m_TotalTimeSeconds = 0.0f;
 		m_ComboEscalators.clear();
-		m_RapidFireTrackers.clear();
+				m_RapidFireTrackers.clear();
+		m_FftAnalyzer.Reset();
+		m_BeatDetector.Reset();
+		m_PerceptionBridge.ClearHistory();
+		m_Profiler.Reset();
+		m_PerceptionConfigs.clear();
 
 		// Pre-populate default synthetic buffers and standard sound events
 		auto clickBuffer = std::make_shared<AudioBuffer>(AudioBuffer::GenerateSineWave(880.0f, 0.08f, 0.3f, m_SampleRate));
@@ -164,6 +170,12 @@ namespace World::Audio
 		m_TotalTimeSeconds = 0.0f;
 		m_ComboEscalators.clear();
 		m_RapidFireTrackers.clear();
+				m_FftAnalyzer.Reset();
+		m_BeatDetector.Reset();
+		m_PerceptionBridge.ClearStimulusCallback();
+		m_PerceptionBridge.ClearHistory();
+		m_Profiler.Reset();
+		m_PerceptionConfigs.clear();
 		m_Initialized = false;
 	}
 
@@ -264,6 +276,8 @@ namespace World::Audio
 
 	void AudioSystem::AudioRenderCallback(float* outLeft, float* outRight, uint32_t frameCount)
 	{
+		auto startTime = std::chrono::high_resolution_clock::now();
+
 		// 0. Drain command queue from main thread
 		ProcessCommandQueue();
 		m_TotalRenderedFrames.fetch_add(frameCount, std::memory_order_relaxed);
@@ -284,6 +298,62 @@ namespace World::Audio
 
 		// 4. Advance DSP sample clock for interactive music
 		m_Music.AdvanceDspClock(frameCount, m_SampleRate);
+
+		// 5. Send master output samples to FFT analyzer
+		m_FftAnalyzer.FeedSamplesStereo(outLeft, outRight, frameCount);
+
+		// 6. Record bus metrics and profiler stats
+		bool masterClip = false;
+		float masterPeak = 0.0f;
+		float masterSumSq = 0.0f;
+		for (uint32_t i = 0; i < frameCount; ++i)
+		{
+			float mL = std::abs(outLeft[i]);
+			float mR = std::abs(outRight[i]);
+			if (mL > 1.0f || mR > 1.0f) masterClip = true;
+			masterPeak = std::max(masterPeak, std::max(mL, mR));
+			masterSumSq += (mL * mL + mR * mR) * 0.5f;
+		}
+		float masterPeakDb = LinearToDb(masterPeak);
+		float masterRmsDb = LinearToDb(std::sqrt(masterSumSq / std::max(1u, frameCount)));
+		m_Profiler.RecordBusMetric(kBusMaster, "Master", masterPeakDb, masterRmsDb, masterRmsDb - 3.0f, masterClip);
+
+		const BusId childBuses[] = { kBusMusic, kBusSfx, kBusVoice, kBusUi, kBusAmbience };
+		const char* childNames[] = { "Music", "Sfx", "Voice", "Ui", "Ambience" };
+		for (size_t b = 0; b < 5; ++b)
+		{
+			BusId bid = childBuses[b];
+			auto it = m_BusMixBuffers.find(bid);
+			if (it != m_BusMixBuffers.end())
+			{
+				const auto& lBuf = it->second.first;
+				const auto& rBuf = it->second.second;
+				float peak = 0.0f;
+				float sumSq = 0.0f;
+				bool busClip = false;
+				for (uint32_t i = 0; i < frameCount && i < lBuf.size(); ++i)
+				{
+					float mL = std::abs(lBuf[i]);
+					float mR = std::abs(rBuf[i]);
+					if (mL > 1.0f || mR > 1.0f) busClip = true;
+					peak = std::max(peak, std::max(mL, mR));
+					sumSq += (mL * mL + mR * mR) * 0.5f;
+				}
+				float peakDb = LinearToDb(peak);
+				float rmsDb = LinearToDb(std::sqrt(sumSq / std::max(1u, frameCount)));
+				m_Profiler.RecordBusMetric(bid, childNames[b], peakDb, rmsDb, rmsDb - 3.0f, busClip);
+			}
+		}
+
+		auto endTime = std::chrono::high_resolution_clock::now();
+		uint64_t cpuTimeUs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count());
+		m_Profiler.RecordMixBlock(
+			cpuTimeUs,
+			m_VoicePool.GetActivePhysicalVoiceCount(),
+			m_VoicePool.GetActiveVirtualVoiceCount(),
+			m_TotalRenderedFrames.load(std::memory_order_relaxed),
+			GetDspTime(),
+			masterClip);
 	}
 
 	void AudioSystem::Update(float deltaSeconds, Scene* activeScene)
@@ -531,6 +601,9 @@ namespace World::Audio
 			Voice::SetListenerContext(m_ListenerForward, m_ListenerVelocity);
 			m_VoicePool.UpdateSpatialAll(m_ListenerPosition, m_ListenerRight, static_cast<float>(m_SampleRate));
 		}
+		// Update beat detector with low-frequency energy (20~200Hz)
+		float bassEnergy = m_FftAnalyzer.CalculateBandEnergy(20.0f, 200.0f, static_cast<float>(m_SampleRate));
+		m_BeatDetector.Process(bassEnergy, deltaSeconds);
 	}
 
 	VoiceHandle AudioSystem::PostEvent(
@@ -685,6 +758,17 @@ namespace World::Audio
 						sp.outerAngle,
 						sp.outerGain);
 				}
+			}
+
+			auto pIt = m_PerceptionConfigs.find(eventId);
+			if (pIt != m_PerceptionConfigs.end())
+			{
+				SoundStimulus stim;
+				stim.position = worldPos;
+				stim.radius = pIt->second.radius * volumeScale;
+				stim.loudness = volumeScale;
+				stim.tag = pIt->second.tag;
+				m_PerceptionBridge.BroadcastStimulus(stim);
 			}
 		}
 
@@ -1026,5 +1110,25 @@ namespace World::Audio
 		}
 
 		return nullptr;
+	}
+
+	void AudioSystem::GetSpectrum(std::vector<float>& outBands, uint32_t bandCount)
+	{
+		m_FftAnalyzer.GetSpectrum(outBands, bandCount);
+	}
+
+	bool AudioSystem::IsBeatDetected() const noexcept
+	{
+		return m_BeatDetector.IsBeat();
+	}
+
+	void AudioSystem::ConfigureEventPerception(const std::string& eventId, float radius, const std::string& tag)
+	{
+		m_PerceptionConfigs[eventId] = { radius, tag };
+	}
+
+	void AudioSystem::BroadcastSoundStimulus(const SoundStimulus& stimulus)
+	{
+		m_PerceptionBridge.BroadcastStimulus(stimulus);
 	}
 }

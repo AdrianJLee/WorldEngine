@@ -5,6 +5,7 @@
 #include "World/Audio/AudioTypes.h"
 #include "World/Audio/InteractiveMusic.h"
 #include "World/Script/Bindings/BindServices.h"
+#include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Script/Vm/LuauVm.h"
 #include "World/Script/Vm/ScriptBindingContext.h"
 #include "World/Script/Vm/ScriptRef.h"
@@ -14,7 +15,9 @@
 #include <glm/vec3.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <mutex>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -24,6 +27,9 @@ namespace World
 {
 	namespace
 	{
+		std::mutex s_AiStimulusMutex;
+		std::vector<AiStimulusRecord> s_RecentAiStimuli;
+		constexpr std::size_t kMaxRecentAiStimuli = 128;
 		const char* TypeNameOf(const ScriptValue& value)
 		{
 			return value.TypeName();
@@ -380,6 +386,103 @@ namespace World
 			return ScriptValue::Number(dspSeconds);
 		}
 
+		ScriptValue AudioGetSpectrumImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[15];
+			CheckArgumentCount("Audio", method, count, 0);
+			const double bandCountDouble = OptionalNumber("Audio", method, args, count, 0, 64.0);
+			uint32_t bandCount = static_cast<uint32_t>(std::clamp(static_cast<int>(bandCountDouble), 1, 512));
+
+			ScriptTableRef table = ScriptEngine::GetState().CreateTable();
+			if (!table.IsValid())
+				return ScriptValue::Nil();
+
+			std::vector<float> bands;
+			Audio::AudioSystem::Get().GetSpectrum(bands, bandCount);
+			if (bands.empty())
+			{
+				bands.assign(bandCount, 0.0f);
+			}
+
+			for (std::size_t i = 0; i < bands.size(); ++i)
+			{
+				table.SetArrayElement(i + 1, ScriptValue::Number(static_cast<double>(bands[i])));
+			}
+
+			return table.ToValue();
+		}
+
+		ScriptValue AudioIsBeatImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[16];
+			CheckArgumentCount("Audio", method, count, 0);
+
+			bool isBeat = Audio::AudioSystem::Get().IsBeatDetected() ||
+				Audio::AudioSystem::Get().GetMusic().GetClock().DidCrossBeat();
+			return ScriptValue::Boolean(isBeat);
+		}
+
+		ScriptValue AudioBroadcastAiStimulusImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[17];
+			CheckArgumentCount("Audio", method, count, 6);
+			const double x = RequireNumber("Audio", method, args, count, 0);
+			const double y = RequireNumber("Audio", method, args, count, 1);
+			const double z = RequireNumber("Audio", method, args, count, 2);
+			const double radius = RequireNumber("Audio", method, args, count, 3);
+			const double loudness = RequireNumber("Audio", method, args, count, 4);
+			const std::string tag = RequireString("Audio", method, args, count, 5);
+
+			Audio::SoundStimulus stimulus;
+			stimulus.position = glm::vec3(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+			stimulus.radius = static_cast<float>(radius);
+			stimulus.loudness = static_cast<float>(loudness);
+			stimulus.tag = tag;
+			Audio::AudioSystem::Get().BroadcastSoundStimulus(stimulus);
+
+			AiStimulusRecord record;
+			record.position = stimulus.position;
+			record.radius = stimulus.radius;
+			record.loudness = stimulus.loudness;
+			record.tag = stimulus.tag;
+			record.timestamp = Audio::AudioSystem::Get().GetDspTime();
+
+			{
+				std::lock_guard<std::mutex> lock(s_AiStimulusMutex);
+				if (s_RecentAiStimuli.size() >= kMaxRecentAiStimuli)
+				{
+					s_RecentAiStimuli.erase(s_RecentAiStimuli.begin());
+				}
+				s_RecentAiStimuli.push_back(std::move(record));
+			}
+
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioGetProfilerStatsImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[18];
+			CheckArgumentCount("Audio", method, count, 0);
+
+			Audio::AudioProfilerStats snapshot = Audio::AudioSystem::Get().GetProfiler().GetSnapshot();
+			double dspTime = snapshot.dspTimeSeconds > 0.0 ? snapshot.dspTimeSeconds : Audio::AudioSystem::Get().GetDspTime();
+
+			ScriptTableRef stats = ScriptEngine::GetState().CreateTable();
+			if (stats.IsValid())
+			{
+				stats.SetField("physical_voices", ScriptValue::Number(static_cast<double>(snapshot.activePhysicalVoices)));
+				stats.SetField("virtual_voices", ScriptValue::Number(static_cast<double>(snapshot.activeVirtualVoices)));
+				stats.SetField("clipping", ScriptValue::Boolean(snapshot.masterClipping));
+				stats.SetField("dsp_time", ScriptValue::Number(dspTime));
+				return stats.ToValue();
+			}
+			return ScriptValue::Nil();
+		}
+
 		ScriptValue MusicPlayImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
@@ -500,6 +603,19 @@ namespace World
 			{ "voiceHandle", "number", ScriptServiceArgType::Number, true, "Voice handle returned by PostEvent." },
 			{ "occlusion", "number", ScriptServiceArgType::Number, true, "Direct occlusion factor between 0.0 (unoccluded) and 1.0 (fully occluded)." },
 		};
+
+		static const ScriptServiceParam audioGetSpectrumParams[] = {
+			{ "bandCount", "number", ScriptServiceArgType::Number, false, "Number of frequency bands (default 64)." },
+		};
+
+		static const ScriptServiceParam audioBroadcastAiStimulusParams[] = {
+			{ "x", "number", ScriptServiceArgType::Number, true, "World X position." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "World Y position." },
+			{ "z", "number", ScriptServiceArgType::Number, true, "World Z position." },
+			{ "radius", "number", ScriptServiceArgType::Number, true, "Propagation radius in world units." },
+			{ "loudness", "number", ScriptServiceArgType::Number, true, "Loudness factor between 0.0 and 1.0." },
+			{ "tag", "string", ScriptServiceArgType::String, true, "Semantic stimulus tag." },
+		};
 		static const ScriptServiceMethod audioMethods[] = {
 			{ "PostEvent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -589,6 +705,30 @@ namespace World
 				return AudioGetDspTimeImpl(args, count);
 			}, nullptr, 0, 0, "number",
 				"Get current DSP audio clock time in seconds based on cumulative hardware mix frames." },
+
+			{ "GetSpectrum", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioGetSpectrumImpl(args, count);
+			}, audioGetSpectrumParams, 1, 1, "table",
+				"Get normalized FFT spectrum energy array for master mix." },
+
+			{ "IsBeat", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioIsBeatImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Check if current frame hits a low-frequency rhythm beat pulse." },
+
+			{ "BroadcastAiStimulus", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioBroadcastAiStimulusImpl(args, count);
+			}, audioBroadcastAiStimulusParams, 6, 6, "",
+				"Broadcast an acoustic stimulus event to the AI perception system." },
+
+			{ "GetProfilerStats", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioGetProfilerStatsImpl(args, count);
+			}, nullptr, 0, 0, "table",
+				"Get real-time audio profiler metrics including active voice counts, clipping, and DSP time." },
 		};
 
 		static const ScriptServiceParam musicPlayParams[] = {
@@ -720,5 +860,17 @@ namespace World
 		if (count)
 			*count = sizeof(audioServiceBindingsTable) / sizeof(audioServiceBindingsTable[0]);
 		return audioServiceBindingsTable;
+	}
+
+	std::vector<AiStimulusRecord> GetRecentAiStimuli()
+	{
+		std::lock_guard<std::mutex> lock(s_AiStimulusMutex);
+		return s_RecentAiStimuli;
+	}
+
+	void ClearRecentAiStimuli()
+	{
+		std::lock_guard<std::mutex> lock(s_AiStimulusMutex);
+		s_RecentAiStimuli.clear();
 	}
 }

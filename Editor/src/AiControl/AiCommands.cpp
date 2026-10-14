@@ -24,6 +24,7 @@
 #include "World/Gameplay/Framework/InputRemap.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Audio/SoundEvent.h"
+#include "World/Audio/AudioNullBackend.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -74,6 +75,77 @@ namespace World
 				CollectSoundVariations(blendNode, outPaths, depth + 1);
 			}
 		}
+
+		std::vector<float> ComputeSpectrumSummary(Audio::AudioSystem& audio)
+		{
+			std::vector<float> spectrum(8, 0.0f);
+			auto* nullBackend = dynamic_cast<Audio::AudioNullBackend*>(audio.GetBackend());
+			if (nullBackend && !nullBackend->GetCapturedLeft().empty())
+			{
+				const auto& left = nullBackend->GetCapturedLeft();
+				const auto& right = nullBackend->GetCapturedRight();
+				const size_t totalFrames = left.size();
+				const size_t N = std::min<size_t>(256, totalFrames);
+				const size_t startIdx = totalFrames - N;
+
+				const std::pair<size_t, size_t> bandBins[8] = {
+					{ 1, 1 },    // ~187 Hz (Sub/Bass)
+					{ 2, 3 },    // ~375 - 562 Hz
+					{ 4, 7 },    // ~750 - 1312 Hz
+					{ 8, 15 },   // ~1500 - 2812 Hz
+					{ 16, 31 },  // ~3000 - 5812 Hz
+					{ 32, 47 },  // ~6000 - 8812 Hz
+					{ 48, 79 },  // ~9000 - 14812 Hz
+					{ 80, 127 }  // ~15000 - 23812 Hz
+				};
+
+				constexpr double kTwoPi = 6.28318530717958647692;
+				for (size_t b = 0; b < 8; ++b)
+				{
+					double bandEnergy = 0.0;
+					size_t binCount = 0;
+					for (size_t k = bandBins[b].first; k <= bandBins[b].second && k < N / 2; ++k)
+					{
+						double real = 0.0;
+						double imag = 0.0;
+						for (size_t n = 0; n < N; ++n)
+						{
+							const float s = 0.5f * (left[startIdx + n] + right[startIdx + n]);
+							const double angle = kTwoPi * static_cast<double>(k * n) / static_cast<double>(N);
+							real += static_cast<double>(s) * std::cos(angle);
+							imag -= static_cast<double>(s) * std::sin(angle);
+						}
+						bandEnergy += (real * real + imag * imag) / (static_cast<double>(N) * static_cast<double>(N));
+						binCount++;
+					}
+					if (binCount > 0)
+					{
+						const float mag = static_cast<float>(std::sqrt(bandEnergy / static_cast<double>(binCount)));
+						spectrum[b] = std::clamp(mag * 2.0f, 0.0f, 1.0f);
+					}
+				}
+				return spectrum;
+			}
+
+			// Fallback: estimate from Master Bus RMS if no offline capture buffer available
+			if (const auto* master = audio.GetMixerGraph().FindBus(Audio::kBusMaster))
+			{
+				const auto meter = master->GetMeter();
+				const float rmsDb = std::max(meter.leftRmsDb, meter.rightRmsDb);
+				const float rmsLin = Audio::DbToLinear(rmsDb);
+				if (rmsLin > 0.0001f)
+				{
+					const float rollOff[8] = { 1.0f, 0.85f, 0.70f, 0.55f, 0.40f, 0.30f, 0.20f, 0.10f };
+					for (size_t i = 0; i < 8; ++i)
+					{
+						spectrum[i] = std::clamp(rmsLin * rollOff[i], 0.0f, 1.0f);
+					}
+				}
+			}
+
+			return spectrum;
+		}
+
 
 		// JSON 文本转义:面板 id / 材质路径 / 场景标签都可能含 '"' 或 '\'(Windows 路径),
 		// 不转义会让 state.dump 变成非法 JSON(脚本侧 json.loads 直接失败)。
@@ -3453,6 +3525,97 @@ namespace World
 			result = out.str();
 			return true;
 		}
+		if (cmd == "audio.list_events" || cmd == "audio.listEvents")
+		{
+			auto& audio = Audio::AudioSystem::Get();
+			const std::vector<std::string> eventIds = audio.GetRegisteredSoundEventIds();
+
+			std::ostringstream out;
+			out << "{\"count\":" << eventIds.size() << ",\"events\":[";
+			bool first = true;
+			for (const auto& eventId : eventIds)
+			{
+				const Audio::SoundEvent* evt = audio.FindSoundEvent(eventId);
+				if (!evt)
+					continue;
+
+				if (!first)
+					out << ",";
+				first = false;
+
+				const auto& sp = evt->GetSpatial();
+				const bool is3D = (sp.is3D || sp.mode == Audio::SpatialMode::Spatial3D);
+
+				out << "{"
+					<< "\"id\":\"" << JsonEscape(eventId) << "\","
+					<< "\"bus\":" << evt->GetBusId() << ","
+					<< "\"is_3d\":" << (is3D ? "true" : "false") << ","
+					<< "\"min_dist\":" << sp.minDistance << ","
+					<< "\"max_dist\":" << sp.maxDistance
+					<< "}";
+			}
+			out << "]}";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "audio.capture")
+		{
+			uint32_t durationMs = 1000;
+			if (args.count("duration_ms"))
+				durationMs = static_cast<uint32_t>(std::strtoul(arg("duration_ms").c_str(), nullptr, 10));
+			else if (args.count("durationMs"))
+				durationMs = static_cast<uint32_t>(std::strtoul(arg("durationMs").c_str(), nullptr, 10));
+			else if (args.count("duration"))
+				durationMs = static_cast<uint32_t>(std::strtoul(arg("duration").c_str(), nullptr, 10));
+
+			if (durationMs == 0)
+				durationMs = 1000;
+
+			auto& audio = Audio::AudioSystem::Get();
+			auto* nullBackend = dynamic_cast<Audio::AudioNullBackend*>(audio.GetBackend());
+
+			float peakDb = -96.0f;
+			float rmsDb = -96.0f;
+			float lufs = -96.0f;
+			bool clipping = false;
+
+			if (nullBackend)
+			{
+				nullBackend->ClearCapture();
+				const float seconds = static_cast<float>(durationMs) / 1000.0f;
+				nullBackend->StepSeconds(seconds);
+
+				Audio::AudioBuffer captured = nullBackend->ExportCapturedBuffer();
+				const float peakLinear = captured.CalculatePeak();
+				const float rmsLinear = captured.CalculateRms();
+				peakDb = Audio::LinearToDb(peakLinear);
+				rmsDb = Audio::LinearToDb(rmsLinear);
+				lufs = captured.EstimateLufs();
+				clipping = (peakLinear >= 1.0f || peakDb >= 0.0f);
+			}
+			else
+			{
+				if (const auto* master = audio.GetMixerGraph().FindBus(Audio::kBusMaster))
+				{
+					const auto meter = master->GetMeter();
+					peakDb = std::max(meter.leftPeakDb, meter.rightPeakDb);
+					rmsDb = std::max(meter.leftRmsDb, meter.rightRmsDb);
+					lufs = (rmsDb > -96.0f) ? (rmsDb - 0.691f) : -96.0f;
+					clipping = (peakDb >= 0.0f);
+				}
+			}
+
+			std::ostringstream out;
+			out << "{"
+				<< "\"duration_ms\":" << durationMs
+				<< ",\"peak_db\":" << peakDb
+				<< ",\"rms_db\":" << rmsDb
+				<< ",\"lufs\":" << lufs
+				<< ",\"clipping\":" << (clipping ? "true" : "false")
+				<< "}";
+			result = out.str();
+			return true;
+		}
 		if (cmd == "audio.get_stats")
 		{
 			auto& audio = Audio::AudioSystem::Get();
@@ -3487,6 +3650,55 @@ namespace World
 				listenerPos = m_EditorCamera3D.GetPosition();
 			}
 
+			const bool isBeat = audio.IsBeatDetected();
+
+			bool clipping = false;
+			if (const auto* master = audio.GetMixerGraph().FindBus(Audio::kBusMaster))
+			{
+				const auto meter = master->GetMeter();
+				const float peakDb = std::max(meter.leftPeakDb, meter.rightPeakDb);
+				clipping = (peakDb >= 0.0f);
+			}
+			if (!clipping && audio.GetProfiler().IsMasterClipping())
+			{
+				clipping = true;
+			}
+			auto* nullBackend = dynamic_cast<Audio::AudioNullBackend*>(audio.GetBackend());
+			if (!clipping && nullBackend && !nullBackend->GetCapturedLeft().empty())
+			{
+				const auto& left = nullBackend->GetCapturedLeft();
+				const auto& right = nullBackend->GetCapturedRight();
+				const size_t checkCount = std::min<size_t>(256, left.size());
+				for (size_t i = left.size() - checkCount; i < left.size(); ++i)
+				{
+					if (std::abs(left[i]) >= 1.0f || std::abs(right[i]) >= 1.0f)
+					{
+						clipping = true;
+						break;
+					}
+				}
+			}
+
+			std::vector<float> spectrum;
+			audio.GetSpectrum(spectrum, 8);
+			if (spectrum.size() < 8)
+			{
+				spectrum.resize(8, 0.0f);
+			}
+			bool allZero = true;
+			for (float s : spectrum)
+			{
+				if (s > 0.0001f) { allZero = false; break; }
+			}
+			if (allZero)
+			{
+				const auto fallbackSpectrum = ComputeSpectrumSummary(audio);
+				if (!fallbackSpectrum.empty())
+				{
+					spectrum = fallbackSpectrum;
+				}
+			}
+
 			std::ostringstream out;
 			out << "{"
 				<< "\"initialized\":" << (initialized ? "true" : "false")
@@ -3494,6 +3706,16 @@ namespace World
 				<< ",\"virtual_voices\":" << virtualVoices
 				<< ",\"registered_events\":" << registeredEvents
 				<< ",\"dsp_time\":" << dspTime
+				<< ",\"is_beat\":" << (isBeat ? "true" : "false")
+				<< ",\"clipping\":" << (clipping ? "true" : "false")
+				<< ",\"spectrum_summary\":[";
+			for (size_t i = 0; i < spectrum.size(); ++i)
+			{
+				if (i > 0)
+					out << ",";
+				out << spectrum[i];
+			}
+			out << "]"
 				<< ",\"listener_pos\":{\"x\":" << listenerPos.x << ",\"y\":" << listenerPos.y << ",\"z\":" << listenerPos.z << "}"
 				<< "}";
 			result = out.str();

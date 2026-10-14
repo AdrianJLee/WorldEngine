@@ -144,4 +144,10 @@ namespace World::Audio
 		float leftRmsDb { -96.0f };
 		float rightRmsDb { -96.0f };
 	};
+
+	struct SoundStimulusConfig
+	{
+		float radius { 10.0f };
+		std::string tag { "noise" };
+	};
 }

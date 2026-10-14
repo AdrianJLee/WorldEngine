@@ -9,6 +9,9 @@
 #include "IAudioBackend.h"
 #include "InteractiveMusic.h"
 #include "AiAudioStudio.h"
+#include "AudioFft.h"
+#include "AudioPerceptionBridge.h"
+#include "AudioProfiler.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -162,6 +165,24 @@ namespace World::Audio
 		void TriggerSnapshot(const std::string& snapshotName, float transitionSeconds = 0.3f);
 		void ClearSnapshot(float transitionSeconds = 0.3f);
 
+				// Rhythm & FFT Spectrum analysis
+		void GetSpectrum(std::vector<float>& outBands, uint32_t bandCount = 64);
+		bool IsBeatDetected() const noexcept;
+		AudioFftAnalyzer& GetFftAnalyzer() noexcept { return m_FftAnalyzer; }
+		const AudioFftAnalyzer& GetFftAnalyzer() const noexcept { return m_FftAnalyzer; }
+		BeatDetector& GetBeatDetector() noexcept { return m_BeatDetector; }
+		const BeatDetector& GetBeatDetector() const noexcept { return m_BeatDetector; }
+
+		// AI Hearing / Sound Perception bridge
+		AudioPerceptionBridge& GetPerceptionBridge() noexcept { return m_PerceptionBridge; }
+		const AudioPerceptionBridge& GetPerceptionBridge() const noexcept { return m_PerceptionBridge; }
+		void ConfigureEventPerception(const std::string& eventId, float radius, const std::string& tag = "noise");
+		void BroadcastSoundStimulus(const SoundStimulus& stimulus);
+
+		// Audio Profiler & Telemetry
+		AudioProfiler& GetProfiler() noexcept { return m_Profiler; }
+		const AudioProfiler& GetProfiler() const noexcept { return m_Profiler; }
+
 		// Subsystems access
 		MixerGraph& GetMixerGraph() noexcept { return m_Mixer; }
 		const MixerGraph& GetMixerGraph() const noexcept { return m_Mixer; }
@@ -244,6 +265,16 @@ namespace World::Audio
 
 		// Scratch bus mix buffers (reused across blocks to guarantee 0 heap allocation)
 		std::unordered_map<BusId, std::pair<std::vector<float>, std::vector<float>>> m_BusMixBuffers;
+				// M4 Modules: FFT Analyzer, Beat Detector, Perception Bridge, Audio Profiler
+		AudioFftAnalyzer m_FftAnalyzer;
+		BeatDetector m_BeatDetector;
+		AudioPerceptionBridge m_PerceptionBridge;
+		AudioProfiler m_Profiler;
+		std::unordered_map<std::string, SoundStimulusConfig> m_PerceptionConfigs;
+
 		mutable std::mutex m_RegistryMutex;
 	};
 }
+
+
+

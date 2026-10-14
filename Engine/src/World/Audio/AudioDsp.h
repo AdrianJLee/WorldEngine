@@ -146,4 +146,68 @@ namespace World::Audio
 			const glm::vec3& listenerForward = glm::vec3(0.0f, 0.0f, -1.0f),
 			const glm::vec3& listenerUp = glm::vec3(0.0f, 1.0f, 0.0f)) noexcept;
 	};
+
+	class WLD_API RadioFilter
+	{
+	public:
+		RadioFilter() = default;
+
+		void Configure(
+			float hpCutoff = 400.0f,
+			float lpCutoff = 3500.0f,
+			float distortionDrive = 1.8f,
+			float sampleRate = static_cast<float>(kDefaultSampleRate));
+
+		void Reset() noexcept;
+
+		float Process(float inSample) noexcept;
+		void ProcessStereo(float& left, float& right) noexcept;
+		void Process(float* inOutLeft, float* inOutRight, uint32_t frameCount) noexcept;
+
+		float GetHpCutoff() const noexcept { return m_HpCutoff; }
+		float GetLpCutoff() const noexcept { return m_LpCutoff; }
+		float GetDistortionDrive() const noexcept { return m_DistortionDrive; }
+
+	private:
+		BiquadFilter m_HighPassL;
+		BiquadFilter m_HighPassR;
+		BiquadFilter m_LowPassL;
+		BiquadFilter m_LowPassR;
+
+		float m_HpCutoff { 400.0f };
+		float m_LpCutoff { 3500.0f };
+		float m_DistortionDrive { 1.8f };
+		float m_MakeupGain { 0.85f };
+	};
+
+	class WLD_API TypewriterBlipThrottler
+	{
+	public:
+		TypewriterBlipThrottler() = default;
+
+		void Configure(
+			float baseIntervalSeconds = 0.040f,
+			float punctuationExtraSeconds = 0.080f,
+			float pitchVariationSemitones = 0.8f) noexcept;
+
+		void Reset() noexcept;
+
+		// Returns true if audio blip should play for this character
+		// outPitchMultiplier returns the adjusted pitch ratio (1.0 = base)
+		bool ShouldPlayCharacter(char c, float currentTimeSeconds, float& outPitchMultiplier) noexcept;
+		bool ShouldPlayCharacter(char32_t codepoint, float currentTimeSeconds, float& outPitchMultiplier) noexcept;
+
+		float GetBaseInterval() const noexcept { return m_BaseInterval; }
+		float GetPunctuationExtra() const noexcept { return m_PunctuationExtra; }
+
+	private:
+		static bool IsPunctuation(char32_t c) noexcept;
+
+		float m_BaseInterval { 0.040f };           // 40ms minimum between blips
+		float m_PunctuationExtra { 0.080f };       // +80ms pause after punctuation (total 120ms)
+		float m_PitchVariationSemitones { 0.8f };  // +/- 0.8 semitone subtle variation
+		float m_LastBlipTime { -1.0f };
+		bool m_LastWasPunctuation { false };
+		uint32_t m_RngSeed { 12345 };
+	};
 }

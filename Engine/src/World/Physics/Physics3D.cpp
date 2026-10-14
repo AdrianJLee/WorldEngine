@@ -10,6 +10,7 @@
 #include "World/Physics/PhysicsEvents.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
+#include <mutex>
 
 // D6 硬约束:Jolt 头文件只允许出现在 3D 物理模块内部 —— 本 TU 与 PhysicsJobSystem.{h,cpp}
 // (JOBSYS:引擎 JobSystem 适配器必须继承 JPH::JobSystemWithBarrier)。Physics3D.h / Scene.h
@@ -878,6 +879,7 @@ namespace World
 		void PushContactEvent(const JPH::Body& inBody1, const JPH::Body& inBody2,
 			const JPH::ContactManifold& inManifold, Physics::ContactPhase phase)
 		{
+			std::lock_guard<std::mutex> lock(m_ContactMutex);
 			const entt::entity entityA = EntityFromBodyUserData(inBody1);
 			const entt::entity entityB = EntityFromBodyUserData(inBody2);
 
@@ -969,6 +971,7 @@ namespace World
 
 		void PushContactEnd(const JPH::SubShapeIDPair& inSubShapePair)
 		{
+			std::lock_guard<std::mutex> lock(m_ContactMutex);
 			const entt::entity entityA = FindEntity(inSubShapePair.GetBody1ID());
 			const entt::entity entityB = FindEntity(inSubShapePair.GetBody2ID());
 			if (entityA == entt::null || entityB == entt::null) return;
@@ -1010,10 +1013,15 @@ namespace World
 
 		void FlushEvents()
 		{
-			for (const Physics::ContactEvent& event : m_PendingContacts) m_Owner.EmitContactEvent(event);
-			for (const Physics::TriggerEvent& event : m_PendingTriggers) m_Owner.EmitTriggerEvent(event);
-			m_PendingContacts.clear();
-			m_PendingTriggers.clear();
+			std::vector<Physics::ContactEvent> contacts;
+			std::vector<Physics::TriggerEvent> triggers;
+			{
+				std::lock_guard<std::mutex> lock(m_ContactMutex);
+				contacts.swap(m_PendingContacts);
+				triggers.swap(m_PendingTriggers);
+			}
+			for (const Physics::ContactEvent& event : contacts) m_Owner.EmitContactEvent(event);
+			for (const Physics::TriggerEvent& event : triggers) m_Owner.EmitTriggerEvent(event);
 		}
 
 	private:
@@ -1148,6 +1156,7 @@ namespace World
 		std::unordered_map<entt::entity, JPH::BodyID> m_Bodies;
 		std::unordered_map<uint32_t, entt::entity> m_BodyEntities;
 		std::unordered_map<uint32_t, bool> m_BodySensors;
+		mutable std::mutex m_ContactMutex;
 		std::vector<Physics::ContactEvent> m_PendingContacts;
 		std::vector<Physics::TriggerEvent> m_PendingTriggers;
 		std::vector<JointRecord> m_JointRecords;
