@@ -533,6 +533,27 @@ function Audio:TriggerSnapshot(snapshotName, transitionSeconds) end
 ---@param transitionSeconds number? Transition duration in seconds (default 0.3).
 function Audio:ClearSnapshot(transitionSeconds) end
 
+---Set near-field volumetric spread radius for an active voice.
+---@param voiceHandle number Voice handle returned by PostEvent.
+---@param radius number Near-field volumetric spread radius.
+function Audio:SetVoiceVolumetricRadius(voiceHandle, radius) end
+
+---Set velocity vector for an active voice to drive Doppler pitch shift.
+---@param voiceHandle number Voice handle returned by PostEvent.
+---@param vx number Velocity X component in world units per second.
+---@param vy number Velocity Y component in world units per second.
+---@param vz number Velocity Z component in world units per second.
+function Audio:SetVoiceVelocity(voiceHandle, vx, vy, vz) end
+
+---Set direct occlusion factor for an active voice.
+---@param voiceHandle number Voice handle returned by PostEvent.
+---@param occlusion number Direct occlusion factor between 0.0 (unoccluded) and 1.0 (fully occluded).
+function Audio:SetVoiceOcclusion(voiceHandle, occlusion) end
+
+---Get current DSP audio clock time in seconds based on cumulative hardware mix frames.
+---@return number
+function Audio:GetDspTime() end
+
 -- Global service table 'Music': read-only; there is no runtime constructor.
 ---Read-only interactive music service table for playback and transitions.
 ---@class Music

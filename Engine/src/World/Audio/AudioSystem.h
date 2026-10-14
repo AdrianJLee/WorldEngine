@@ -14,6 +14,8 @@
 #include <vector>
 #include <unordered_map>
 #include <mutex>
+#include <functional>
+#include <atomic>
 
 namespace World
 {
@@ -116,6 +118,43 @@ namespace World::Audio
 		AudioCommandQueue& GetCommandQueue() noexcept { return m_CommandQueue; }
 		const AudioCommandQueue& GetCommandQueue() const noexcept { return m_CommandQueue; }
 
+		// Volumetric, Velocity & Occlusion controls
+		void SetVoiceVolumetricRadius(VoiceHandle handle, float radius);
+		void SetVoiceVelocity(VoiceHandle handle, const glm::vec3& velocity);
+		void SetVoiceOcclusion(VoiceHandle handle, float occlusion01);
+
+		// Listener state getters & setters
+		const glm::vec3& GetListenerPosition() const noexcept { return m_ListenerPosition; }
+		void SetListenerPosition(const glm::vec3& pos) noexcept { m_ListenerPosition = pos; }
+		const glm::vec3& GetListenerForward() const noexcept { return m_ListenerForward; }
+		const glm::vec3& GetListenerRight() const noexcept { return m_ListenerRight; }
+		const glm::vec3& GetListenerVelocity() const noexcept { return m_ListenerVelocity; }
+		void SetListenerVelocity(const glm::vec3& vel) noexcept { m_ListenerVelocity = vel; }
+
+		// Hardware DSP clock in seconds
+		double GetDspTime() const noexcept;
+
+		// Physics contact event integration
+		void HandlePhysicsContact(
+			const glm::vec3& contactPoint,
+			float normalImpulse,
+			const std::string& soundEvent = "footstep_player");
+
+		void SetPhysicsContactThreshold(float threshold) noexcept { m_PhysicsContactThreshold = threshold; }
+		float GetPhysicsContactThreshold() const noexcept { return m_PhysicsContactThreshold; }
+
+		// Zone transition & reverb send state
+		float GetCurrentZoneReverbSend() const noexcept { return m_CurrentZoneReverbSend; }
+		float GetActiveZoneReverbSend() const noexcept { return m_ActiveZoneReverbSend; }
+		void SetZoneTransitionRate(float rate) noexcept { m_ZoneTransitionRate = rate; }
+		float GetZoneTransitionRate() const noexcept { return m_ZoneTransitionRate; }
+
+		// Raycast occlusion callback
+		void SetOcclusionRaycastCallback(std::function<float(const glm::vec3& listenerPos, const glm::vec3& sourcePos)> callback)
+		{
+			m_OcclusionRaycastCallback = std::move(callback);
+		}
+
 		// Bus & Snapshot controls
 		void SetBusVolume(BusId busId, float volume);
 		void SetBusMute(BusId busId, bool mute);
@@ -182,6 +221,26 @@ namespace World::Audio
 		glm::vec3 m_ListenerPosition { 0.0f };
 		glm::vec3 m_ListenerRight { 1.0f, 0.0f, 0.0f };
 		glm::vec3 m_ListenerForward { 0.0f, 0.0f, -1.0f };
+		glm::vec3 m_ListenerVelocity { 0.0f };
+		glm::vec3 m_LastListenerPosition { 0.0f };
+		bool m_HasLastListenerPos { false };
+
+		// Zone reverb & smooth transition
+		float m_ActiveZoneReverbSend { 0.0f };
+		float m_CurrentZoneReverbSend { 0.0f };
+		float m_ZoneTransitionRate { 3.0f };
+
+		// Physics contact sound threshold
+		float m_PhysicsContactThreshold { 0.5f };
+
+		// Hardware DSP sample clock
+		std::atomic<uint64_t> m_TotalRenderedFrames { 0 };
+
+		// ECS transform tracking for velocities
+		std::unordered_map<uint32_t, glm::vec3> m_EntityLastPosition;
+
+		// Optional raycast occlusion callback
+		std::function<float(const glm::vec3& listenerPos, const glm::vec3& sourcePos)> m_OcclusionRaycastCallback;
 
 		// Scratch bus mix buffers (reused across blocks to guarantee 0 heap allocation)
 		std::unordered_map<BusId, std::pair<std::vector<float>, std::vector<float>>> m_BusMixBuffers;

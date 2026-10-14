@@ -313,4 +313,98 @@ namespace World::Audio
 		outLeftGain = std::cos(angle);
 		outRightGain = std::sin(angle);
 	}
+
+	void SpatialCalculator::ApplyVolumetricSpread(
+		float distance,
+		float volumetricRadius,
+		float& inOutLeftGain,
+		float& inOutRightGain) noexcept
+	{
+		if (volumetricRadius <= 0.0001f || distance >= volumetricRadius)
+		{
+			return;
+		}
+
+		float spread = std::clamp(1.0f - distance / std::max(volumetricRadius, 0.001f), 0.0f, 1.0f);
+		constexpr float kCenterGain = 0.70710678f;
+		inOutLeftGain = (1.0f - spread) * inOutLeftGain + spread * kCenterGain;
+		inOutRightGain = (1.0f - spread) * inOutRightGain + spread * kCenterGain;
+	}
+
+	float SpatialCalculator::CalculateAirAbsorptionCutoff(
+		float distance,
+		float baseCutoff,
+		float absorptionRate) noexcept
+	{
+		if (distance <= 0.0f) return baseCutoff;
+		float cutoff = baseCutoff * std::exp(-distance * absorptionRate);
+		return std::clamp(cutoff, 800.0f, 20000.0f);
+	}
+
+	float SpatialCalculator::CalculateDopplerPitch(
+		const glm::vec3& sourcePos,
+		const glm::vec3& sourceVel,
+		const glm::vec3& listenerPos,
+		const glm::vec3& listenerVel,
+		float speedOfSound,
+		float dopplerScale) noexcept
+	{
+		glm::vec3 r = sourcePos - listenerPos;
+		float dist = glm::length(r);
+		if (dist < 0.0001f) return 1.0f;
+
+		glm::vec3 dir = r / dist;
+		float vl = glm::dot(listenerVel, dir) * dopplerScale;
+		float vs = glm::dot(sourceVel, dir) * dopplerScale;
+
+		float c = std::max(speedOfSound, 1.0f);
+		float num = c + vl;
+		float den = c + vs;
+
+		if (den < 0.1f * c) den = 0.1f * c;
+		if (num < 0.1f * c) num = 0.1f * c;
+
+		float ratio = num / den;
+		return std::clamp(ratio, 0.25f, 4.0f);
+	}
+
+	BinauralCues SpatialCalculator::CalculateBinauralCues(
+		const glm::vec3& sourcePos,
+		const glm::vec3& listenerPos,
+		const glm::vec3& listenerRight,
+		const glm::vec3& listenerForward,
+		const glm::vec3& listenerUp) noexcept
+	{
+		BinauralCues cues{};
+		CalculateStereoPan(sourcePos, listenerPos, listenerRight, cues.leftGain, cues.rightGain);
+
+		glm::vec3 toSource = sourcePos - listenerPos;
+		float dist = glm::length(toSource);
+		if (dist < 0.0001f)
+		{
+			return cues;
+		}
+
+		glm::vec3 dir = toSource / dist;
+		float dotFwd = glm::dot(dir, listenerForward);
+		float dotUp = glm::dot(dir, listenerUp);
+
+		cues.elevationFactor = std::clamp(dotUp, -1.0f, 1.0f);
+
+		if (dotFwd < 0.0f)
+		{
+			float rearFactor = std::clamp(-dotFwd, 0.0f, 1.0f);
+			cues.rearFilterCutoff = 20000.0f * (1.0f - rearFactor * 0.675f);
+			constexpr float kMaxRearDb = -4.0f;
+			float minGain = DbToLinear(kMaxRearDb);
+			cues.rearGain = (1.0f - rearFactor) * 1.0f + rearFactor * minGain;
+		}
+		else
+		{
+			cues.rearFilterCutoff = 20000.0f;
+			cues.rearGain = 1.0f;
+		}
+
+		return cues;
+	}
 }

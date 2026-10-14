@@ -11,6 +11,7 @@
 #include "World/Script/Vm/ScriptValue.h"
 
 #include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -213,7 +214,7 @@ namespace World
 		ScriptValue AudioPostComboImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[3];
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[2];
 			CheckArgumentCount("Audio", method, count, 1);
 			const std::string eventId = RequireString("Audio", method, args, count, 0);
 			const std::string comboGroup = OptionalString("Audio", method, args, count, 1, "default");
@@ -232,7 +233,7 @@ namespace World
 		ScriptValue AudioStopImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[2];
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[3];
 			CheckArgumentCount("Audio", method, count, 1);
 			const double handleNum = RequireNumber("Audio", method, args, count, 0);
 			const double fade = OptionalNumber("Audio", method, args, count, 1, 0.05);
@@ -323,6 +324,60 @@ namespace World
 
 			Audio::AudioSystem::Get().ClearSnapshot(static_cast<float>(transition));
 			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioSetVoiceVolumetricRadiusImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[11];
+			CheckArgumentCount("Audio", method, count, 2);
+			const double handleNum = RequireNumber("Audio", method, args, count, 0);
+			const double radius = RequireNumber("Audio", method, args, count, 1);
+
+			Audio::AudioSystem::Get().SetVoiceVolumetricRadius(
+				static_cast<Audio::VoiceHandle>(handleNum),
+				static_cast<float>(radius));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioSetVoiceVelocityImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[12];
+			CheckArgumentCount("Audio", method, count, 4);
+			const double handleNum = RequireNumber("Audio", method, args, count, 0);
+			const double vx = RequireNumber("Audio", method, args, count, 1);
+			const double vy = RequireNumber("Audio", method, args, count, 2);
+			const double vz = RequireNumber("Audio", method, args, count, 3);
+
+			Audio::AudioSystem::Get().SetVoiceVelocity(
+				static_cast<Audio::VoiceHandle>(handleNum),
+				glm::vec3(static_cast<float>(vx), static_cast<float>(vy), static_cast<float>(vz)));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioSetVoiceOcclusionImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[13];
+			CheckArgumentCount("Audio", method, count, 2);
+			const double handleNum = RequireNumber("Audio", method, args, count, 0);
+			const double occlusion = RequireNumber("Audio", method, args, count, 1);
+
+			Audio::AudioSystem::Get().SetVoiceOcclusion(
+				static_cast<Audio::VoiceHandle>(handleNum),
+				static_cast<float>(occlusion));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioGetDspTimeImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[14];
+			CheckArgumentCount("Audio", method, count, 0);
+
+			double dspSeconds = Audio::AudioSystem::Get().GetDspTime();
+			return ScriptValue::Number(dspSeconds);
 		}
 
 		ScriptValue MusicPlayImpl(const ScriptValue* args, std::size_t count)
@@ -428,6 +483,23 @@ namespace World
 			{ "transitionSeconds", "number", ScriptServiceArgType::Number, false, "Transition duration in seconds (default 0.3)." },
 		};
 
+		
+		static const ScriptServiceParam audioSetVoiceVolumetricRadiusParams[] = {
+			{ "voiceHandle", "number", ScriptServiceArgType::Number, true, "Voice handle returned by PostEvent." },
+			{ "radius", "number", ScriptServiceArgType::Number, true, "Near-field volumetric spread radius." },
+		};
+
+		static const ScriptServiceParam audioSetVoiceVelocityParams[] = {
+			{ "voiceHandle", "number", ScriptServiceArgType::Number, true, "Voice handle returned by PostEvent." },
+			{ "vx", "number", ScriptServiceArgType::Number, true, "Velocity X component in world units per second." },
+			{ "vy", "number", ScriptServiceArgType::Number, true, "Velocity Y component in world units per second." },
+			{ "vz", "number", ScriptServiceArgType::Number, true, "Velocity Z component in world units per second." },
+		};
+
+		static const ScriptServiceParam audioSetVoiceOcclusionParams[] = {
+			{ "voiceHandle", "number", ScriptServiceArgType::Number, true, "Voice handle returned by PostEvent." },
+			{ "occlusion", "number", ScriptServiceArgType::Number, true, "Direct occlusion factor between 0.0 (unoccluded) and 1.0 (fully occluded)." },
+		};
 		static const ScriptServiceMethod audioMethods[] = {
 			{ "PostEvent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -494,6 +566,29 @@ namespace World
 				return AudioClearSnapshotImpl(args, count);
 			}, audioTransitionOnlyParams, 1, 1, "",
 				"Clear active mixer snapshot with optional transition duration." },
+			{ "SetVoiceVolumetricRadius", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioSetVoiceVolumetricRadiusImpl(args, count);
+			}, audioSetVoiceVolumetricRadiusParams, 2, 2, "",
+				"Set near-field volumetric spread radius for an active voice." },
+
+			{ "SetVoiceVelocity", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioSetVoiceVelocityImpl(args, count);
+			}, audioSetVoiceVelocityParams, 4, 4, "",
+				"Set velocity vector for an active voice to drive Doppler pitch shift." },
+
+			{ "SetVoiceOcclusion", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioSetVoiceOcclusionImpl(args, count);
+			}, audioSetVoiceOcclusionParams, 2, 2, "",
+				"Set direct occlusion factor for an active voice." },
+
+			{ "GetDspTime", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioGetDspTimeImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Get current DSP audio clock time in seconds based on cumulative hardware mix frames." },
 		};
 
 		static const ScriptServiceParam musicPlayParams[] = {

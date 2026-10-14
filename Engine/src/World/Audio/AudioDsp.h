@@ -87,6 +87,15 @@ namespace World::Audio
 		float m_HeldRight { 0.0f };
 	};
 
+	struct BinauralCues
+	{
+		float leftGain { 0.7071f };
+		float rightGain { 0.7071f };
+		float rearFilterCutoff { 20000.0f }; // Pinna shadowing cutoff for rear sounds
+		float rearGain { 1.0f };             // Rear attenuation factor (3~5dB down)
+		float elevationFactor { 0.0f };      // Height cue: -1.0 (below) to +1.0 (above)
+	};
+
 	class WLD_API SpatialCalculator
 	{
 	public:
@@ -110,5 +119,31 @@ namespace World::Audio
 			const glm::vec3& listenerRight,
 			float& outLeftGain,
 			float& outRightGain) noexcept;
+
+		static void ApplyVolumetricSpread(
+			float distance,
+			float volumetricRadius,
+			float& inOutLeftGain,
+			float& inOutRightGain) noexcept;
+
+		static float CalculateAirAbsorptionCutoff(
+			float distance,
+			float baseCutoff = 20000.0f,
+			float absorptionRate = 0.005f) noexcept;
+
+		static float CalculateDopplerPitch(
+			const glm::vec3& sourcePos,
+			const glm::vec3& sourceVel,
+			const glm::vec3& listenerPos,
+			const glm::vec3& listenerVel,
+			float speedOfSound = 343.0f,
+			float dopplerScale = 1.0f) noexcept;
+
+		static BinauralCues CalculateBinauralCues(
+			const glm::vec3& sourcePos,
+			const glm::vec3& listenerPos,
+			const glm::vec3& listenerRight,
+			const glm::vec3& listenerForward = glm::vec3(0.0f, 0.0f, -1.0f),
+			const glm::vec3& listenerUp = glm::vec3(0.0f, 1.0f, 0.0f)) noexcept;
 	};
 }

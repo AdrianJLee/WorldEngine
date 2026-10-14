@@ -65,9 +65,32 @@ namespace World::Audio
 		void SetLooping(bool loop) noexcept { m_Looping = loop; }
 		bool IsLooping() const noexcept { return m_Looping; }
 
+		void SetVolumetricRadius(float radius) noexcept { m_VolumetricRadius = std::max(0.0f, radius); }
+		float GetVolumetricRadius() const noexcept { return m_VolumetricRadius; }
+
+		void SetVelocity(const glm::vec3& velocity) noexcept { m_Velocity = velocity; }
+		const glm::vec3& GetVelocity() const noexcept { return m_Velocity; }
+
+		float GetDopplerPitch() const noexcept { return m_DopplerPitch; }
+		float GetAirAbsorptionCutoff() const noexcept { return m_AirAbsorptionCutoff; }
+		float GetHrtfCutoff() const noexcept { return m_HrtfCutoff; }
+		float GetElevationFactor() const noexcept { return m_ElevationFactor; }
+		float GetEffectivePitch() const noexcept { return m_Pitch * m_DopplerPitch; }
+
+		static void SetListenerContext(
+			const glm::vec3& forward,
+			const glm::vec3& velocity) noexcept;
+
 		void UpdateSpatial(
 			const glm::vec3& listenerPos,
 			const glm::vec3& listenerRight,
+			float sampleRate) noexcept;
+
+		void UpdateSpatial(
+			const glm::vec3& listenerPos,
+			const glm::vec3& listenerRight,
+			const glm::vec3& listenerForward,
+			const glm::vec3& listenerVelocity,
 			float sampleRate) noexcept;
 
 		// Renders stereo frames into outLeft/outRight buffers; returns true if still playing
@@ -116,6 +139,15 @@ namespace World::Audio
 		float m_InnerAngle { 360.0f };
 		float m_OuterAngle { 360.0f };
 		float m_OuterGain { 1.0f };
+
+		// Volumetric & 3D Spatial
+		float m_VolumetricRadius { 0.0f };
+		glm::vec3 m_Velocity { 0.0f };
+		float m_DopplerPitch { 1.0f };
+		float m_AirAbsorptionCutoff { 20000.0f };
+		float m_HrtfCutoff { 20000.0f };
+		float m_ElevationFactor { 0.0f };
+		float m_RearGain { 1.0f };
 
 		// Spatial 2D
 		glm::vec2 m_Spatial2DWorldPos { 0.0f };

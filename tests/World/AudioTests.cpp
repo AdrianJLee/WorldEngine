@@ -641,6 +641,186 @@ static void TestComboEscalatorAndThrottling()
 	std::cout << "  -> Passed." << std::endl;
 }
 
+
+static void TestHrtfAndVolumetricSpread()
+{
+	std::cout << "[Test] HRTF & Volumetric Spread..." << std::endl;
+
+	// 1. Volumetric Spread
+	float panL = 0.1f;
+	float panR = 0.9f;
+	// Far distance: distance (10.0f) >= volumetricRadius (2.0f), gains must be unchanged
+	SpatialCalculator::ApplyVolumetricSpread(10.0f, 2.0f, panL, panR);
+	assert(std::abs(panL - 0.1f) < 0.0001f);
+	assert(std::abs(panR - 0.9f) < 0.0001f);
+
+	// Inside radius: distance 0.0f -> full spread towards 0.7071f
+	SpatialCalculator::ApplyVolumetricSpread(0.0f, 2.0f, panL, panR);
+	assert(std::abs(panL - 0.7071f) < 0.001f);
+	assert(std::abs(panR - 0.7071f) < 0.001f);
+
+	// Partial spread: distance 1.0f with radius 2.0f -> 50% blend
+	float initL = 0.0f, initR = 1.0f;
+	SpatialCalculator::ApplyVolumetricSpread(1.0f, 2.0f, initL, initR);
+	assert(std::abs(initL - 0.35355f) < 0.01f);
+	assert(std::abs(initR - 0.85355f) < 0.01f);
+
+	// 2. Binaural Cues (Front/Back pinna shadowing and elevation)
+	glm::vec3 listenerPos(0.0f, 0.0f, 0.0f);
+	glm::vec3 listenerRight(1.0f, 0.0f, 0.0f);
+	glm::vec3 listenerForward(0.0f, 0.0f, -1.0f);
+	glm::vec3 listenerUp(0.0f, 1.0f, 0.0f);
+
+	// Sound directly in front (-Z)
+	auto cuesFront = SpatialCalculator::CalculateBinauralCues(
+		glm::vec3(0.0f, 0.0f, -5.0f),
+		listenerPos, listenerRight, listenerForward, listenerUp);
+	assert(cuesFront.rearFilterCutoff == 20000.0f);
+	assert(cuesFront.rearGain == 1.0f);
+	assert(std::abs(cuesFront.elevationFactor) < 0.001f);
+
+	// Sound directly behind (+Z)
+	auto cuesRear = SpatialCalculator::CalculateBinauralCues(
+		glm::vec3(0.0f, 0.0f, 5.0f),
+		listenerPos, listenerRight, listenerForward, listenerUp);
+	assert(cuesRear.rearFilterCutoff < 10000.0f);
+	assert(cuesRear.rearGain < 0.75f && cuesRear.rearGain > 0.5f); // 3~5dB attenuation
+
+	// Sound directly above (+Y)
+	auto cuesAbove = SpatialCalculator::CalculateBinauralCues(
+		glm::vec3(0.0f, 5.0f, 0.0f),
+		listenerPos, listenerRight, listenerForward, listenerUp);
+	assert(cuesAbove.elevationFactor > 0.99f);
+
+	// Sound directly below (-Y)
+	auto cuesBelow = SpatialCalculator::CalculateBinauralCues(
+		glm::vec3(0.0f, -5.0f, 0.0f),
+		listenerPos, listenerRight, listenerForward, listenerUp);
+	assert(cuesBelow.elevationFactor < -0.99f);
+
+	// 3. Voice integration test
+	Voice voice;
+	auto testBuffer = std::make_shared<AudioBuffer>(AudioBuffer::GenerateSineWave(440.0f, 0.5f, 0.8f, 48000));
+	voice.Setup(1, testBuffer, kBusSfx, 1.0f, 1.0f, false);
+	voice.SetSpatialParameters(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f, 0.0f, -1.0f), 1.0f, 20.0f, AttenuationModel::InverseSquare);
+	voice.SetVolumetricRadius(3.0f);
+	voice.UpdateSpatial(listenerPos, listenerRight, listenerForward, glm::vec3(0.0f), 48000.0f);
+
+	assert(voice.GetVolumetricRadius() == 3.0f);
+	assert(voice.GetHrtfCutoff() < 10000.0f);
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestAirAbsorptionAndDoppler()
+{
+	std::cout << "[Test] Air Absorption & Doppler..." << std::endl;
+
+	// 1. Air Absorption Cutoff
+	float cutoff0 = SpatialCalculator::CalculateAirAbsorptionCutoff(0.0f);
+	assert(cutoff0 == 20000.0f);
+
+	float cutoff50 = SpatialCalculator::CalculateAirAbsorptionCutoff(50.0f);
+	assert(cutoff50 < 20000.0f && cutoff50 > 12000.0f);
+
+	float cutoff500 = SpatialCalculator::CalculateAirAbsorptionCutoff(500.0f);
+	assert(cutoff500 < cutoff50);
+
+	float cutoffFar = SpatialCalculator::CalculateAirAbsorptionCutoff(5000.0f);
+	assert(cutoffFar == 800.0f); // Clamped minimum 800Hz
+
+	// 2. Doppler Pitch Shift
+	glm::vec3 listenerPos(0.0f, 0.0f, 0.0f);
+	glm::vec3 sourcePos(100.0f, 0.0f, 0.0f);
+
+	// Stationary
+	float pitchStatic = SpatialCalculator::CalculateDopplerPitch(
+		sourcePos, glm::vec3(0.0f), listenerPos, glm::vec3(0.0f), 343.0f);
+	assert(std::abs(pitchStatic - 1.0f) < 0.0001f);
+
+	// Source moving towards listener (-X) at 34.3 m/s (Mach 0.1)
+	// Ratio = 343 / (343 - 34.3) = 1.1111f
+	float pitchApproaching = SpatialCalculator::CalculateDopplerPitch(
+		sourcePos, glm::vec3(-34.3f, 0.0f, 0.0f), listenerPos, glm::vec3(0.0f), 343.0f);
+	assert(std::abs(pitchApproaching - (343.0f / (343.0f - 34.3f))) < 0.01f);
+	assert(pitchApproaching > 1.0f);
+
+	// Source moving away from listener (+X) at 34.3 m/s
+	// Ratio = 343 / (343 + 34.3) = 0.90909f
+	float pitchReceding = SpatialCalculator::CalculateDopplerPitch(
+		sourcePos, glm::vec3(34.3f, 0.0f, 0.0f), listenerPos, glm::vec3(0.0f), 343.0f);
+	assert(std::abs(pitchReceding - (343.0f / (343.0f + 34.3f))) < 0.01f);
+	assert(pitchReceding < 1.0f);
+
+	// Listener moving towards source (+X) at 34.3 m/s
+	// Ratio = (343 + 34.3) / 343 = 1.10f
+	float pitchListenerApproaching = SpatialCalculator::CalculateDopplerPitch(
+		sourcePos, glm::vec3(0.0f), listenerPos, glm::vec3(34.3f, 0.0f, 0.0f), 343.0f);
+	assert(std::abs(pitchListenerApproaching - ((343.0f + 34.3f) / 343.0f)) < 0.01f);
+
+	// Safety clamping to [0.25f, 4.0f]
+	float pitchExtremeHigh = SpatialCalculator::CalculateDopplerPitch(
+		sourcePos, glm::vec3(-1000.0f, 0.0f, 0.0f), listenerPos, glm::vec3(0.0f), 343.0f);
+	assert(pitchExtremeHigh <= 4.0f);
+
+	float pitchExtremeLow = SpatialCalculator::CalculateDopplerPitch(
+		sourcePos, glm::vec3(10000.0f, 0.0f, 0.0f), listenerPos, glm::vec3(0.0f), 343.0f);
+	assert(pitchExtremeLow >= 0.25f);
+
+	// 3. Voice Doppler and Air Absorption Integration
+	Voice voice;
+	auto testBuffer = std::make_shared<AudioBuffer>(AudioBuffer::GenerateSineWave(440.0f, 0.5f, 0.8f, 48000));
+	voice.Setup(2, testBuffer, kBusSfx, 1.0f, 1.0f, false);
+	voice.SetSpatialParameters(sourcePos, glm::vec3(0.0f, 0.0f, -1.0f), 1.0f, 500.0f, AttenuationModel::Linear);
+	voice.SetVelocity(glm::vec3(-34.3f, 0.0f, 0.0f));
+	voice.UpdateSpatial(listenerPos, glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f), 48000.0f);
+
+	assert(voice.GetDopplerPitch() > 1.05f);
+	assert(voice.GetAirAbsorptionCutoff() < 15000.0f);
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestPhysicsContactSound()
+{
+	std::cout << "[Test] Physics Contact Sound & Zones..." << std::endl;
+
+	AudioSystem audio;
+	bool ok = audio.Initialize(true, 48000, 256);
+	assert(ok);
+
+	audio.SetPhysicsContactThreshold(1.0f);
+	assert(audio.GetPhysicsContactThreshold() == 1.0f);
+
+	// 1. Contact below threshold: no sound triggered
+	audio.HandlePhysicsContact(glm::vec3(0.0f, 0.0f, 2.0f), 0.5f, "ui_click");
+	assert(audio.GetVoicePool().GetActivePhysicalVoiceCount() == 0);
+
+	// 2. Contact above threshold: sound triggered
+	audio.HandlePhysicsContact(glm::vec3(0.0f, 0.0f, 2.0f), 10.0f, "ui_click");
+	assert(audio.GetVoicePool().GetActivePhysicalVoiceCount() == 1);
+
+	// 3. DSP Time Clock
+	double dspTime0 = audio.GetDspTime();
+	assert(dspTime0 >= 0.0);
+
+	// Advance audio engine render frames via null backend
+	audio.Update(0.1f);
+	assert(audio.GetDspTime() >= dspTime0);
+
+	// 4. AudioZone Reverb smooth transition
+	assert(audio.GetCurrentZoneReverbSend() == 0.0f);
+	audio.SetZoneTransitionRate(5.0f);
+	assert(audio.GetZoneTransitionRate() == 5.0f);
+
+	// 5. Listener velocity and position
+	audio.SetListenerPosition(glm::vec3(10.0f, 0.0f, 0.0f));
+	assert(audio.GetListenerPosition() == glm::vec3(10.0f, 0.0f, 0.0f));
+
+	audio.Shutdown();
+	std::cout << "  -> Passed." << std::endl;
+}
+
 int main()
 {
 	std::cout << "========================================" << std::endl;
@@ -663,9 +843,12 @@ int main()
 		TestAudioSystemEcsLifecycle();
 		TestSpatial2DAndBitcrusher();
 		TestComboEscalatorAndThrottling();
+		TestHrtfAndVolumetricSpread();
+		TestAirAbsorptionAndDoppler();
+		TestPhysicsContactSound();
 
 		std::cout << "========================================" << std::endl;
-		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (14/14)  " << std::endl;
+		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (17/17)  " << std::endl;
 		std::cout << "========================================" << std::endl;
 		return 0;
 	}

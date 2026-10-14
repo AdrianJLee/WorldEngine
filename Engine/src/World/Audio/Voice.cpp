@@ -31,6 +31,13 @@ namespace World::Audio
 		m_Bitcrusher.Reset();
 		m_FadeRemainingFrames = 0;
 		m_FadeTotalFrames = 0;
+		m_VolumetricRadius = 0.0f;
+		m_Velocity = glm::vec3(0.0f);
+		m_DopplerPitch = 1.0f;
+		m_AirAbsorptionCutoff = 20000.0f;
+		m_HrtfCutoff = 20000.0f;
+		m_ElevationFactor = 0.0f;
+		m_RearGain = 1.0f;
 	}
 
 	void Voice::Setup(
@@ -149,9 +156,28 @@ namespace World::Audio
 		m_BaseVolume = std::clamp(volume, 0.0f, 4.0f);
 	}
 
+	static glm::vec3 s_GlobalListenerForward { 0.0f, 0.0f, -1.0f };
+	static glm::vec3 s_GlobalListenerVelocity { 0.0f, 0.0f, 0.0f };
+
+	void Voice::SetListenerContext(const glm::vec3& forward, const glm::vec3& velocity) noexcept
+	{
+		s_GlobalListenerForward = forward;
+		s_GlobalListenerVelocity = velocity;
+	}
+
 	void Voice::UpdateSpatial(
 		const glm::vec3& listenerPos,
 		const glm::vec3& listenerRight,
+		float sampleRate) noexcept
+	{
+		UpdateSpatial(listenerPos, listenerRight, s_GlobalListenerForward, s_GlobalListenerVelocity, sampleRate);
+	}
+
+	void Voice::UpdateSpatial(
+		const glm::vec3& listenerPos,
+		const glm::vec3& listenerRight,
+		const glm::vec3& listenerForward,
+		const glm::vec3& listenerVelocity,
 		float sampleRate) noexcept
 	{
 		if (m_SpatialMode == SpatialMode::Spatial2D)
@@ -201,19 +227,37 @@ namespace World::Audio
 		float coneAtten = SpatialCalculator::CalculateConeAttenuation(
 			m_Position, m_Forward, listenerPos, m_InnerAngle, m_OuterAngle, m_OuterGain);
 
-		float panLeft = 0.7071f;
-		float panRight = 0.7071f;
-		SpatialCalculator::CalculateStereoPan(m_Position, listenerPos, listenerRight, panLeft, panRight);
+		// Binaural HRTF Cues (Front/Back pinna shadowing and elevation)
+		BinauralCues cues = SpatialCalculator::CalculateBinauralCues(
+			m_Position, listenerPos, listenerRight, listenerForward);
+		float panLeft = cues.leftGain;
+		float panRight = cues.rightGain;
+		m_HrtfCutoff = cues.rearFilterCutoff;
+		m_RearGain = cues.rearGain;
+		m_ElevationFactor = cues.elevationFactor;
+
+		// Volumetric Near-Field Spread
+		SpatialCalculator::ApplyVolumetricSpread(dist, m_VolumetricRadius, panLeft, panRight);
 		m_LeftPanGain = panLeft;
 		m_RightPanGain = panRight;
 
+		// Doppler Pitch Shift
+		m_DopplerPitch = SpatialCalculator::CalculateDopplerPitch(
+			m_Position, m_Velocity, listenerPos, listenerVelocity);
+
+		// Air Absorption Cutoff
+		m_AirAbsorptionCutoff = SpatialCalculator::CalculateAirAbsorptionCutoff(dist);
+
 		// Occlusion low-pass filter cutoff frequency: drops from 20000Hz to 600Hz as occlusion goes 0 -> 1
-		float cutoffFreq = 20000.0f * (1.0f - m_Occlusion * 0.95f) + 400.0f;
-		m_FilterLeft.Configure(FilterType::LowPass, cutoffFreq, sampleRate);
-		m_FilterRight.Configure(FilterType::LowPass, cutoffFreq, sampleRate);
+		float occlusionCutoff = 20000.0f * (1.0f - m_Occlusion * 0.95f) + 400.0f;
+
+		// Serialized lowest low-pass cutoff filter
+		float finalCutoff = std::min({ m_AirAbsorptionCutoff, occlusionCutoff, m_HrtfCutoff });
+		m_FilterLeft.Configure(FilterType::LowPass, finalCutoff, sampleRate);
+		m_FilterRight.Configure(FilterType::LowPass, finalCutoff, sampleRate);
 
 		float occlusionGain = 1.0f - m_Occlusion * 0.4f; // 40% volume reduction on full occlusion
-		float totalGain = m_BaseVolume * distAtten * coneAtten * occlusionGain;
+		float totalGain = m_BaseVolume * distAtten * coneAtten * occlusionGain * m_RearGain;
 
 		m_LeftGain = panLeft * totalGain;
 		m_RightGain = panRight * totalGain;
@@ -257,7 +301,8 @@ namespace World::Audio
 		// Resampling ratio
 		double bufferSampleRate = static_cast<double>(m_Buffer->GetSampleRate());
 		double outputSampleRate = static_cast<double>(sampleRate);
-		double step = (bufferSampleRate / outputSampleRate) * static_cast<double>(m_Pitch);
+		double effectivePitch = static_cast<double>(m_Pitch * m_DopplerPitch);
+		double step = (bufferSampleRate / outputSampleRate) * effectivePitch;
 
 		uint32_t loopStart = m_Buffer->GetLoopStartFrame();
 		uint32_t loopEnd = m_Buffer->HasLoopPoints() ? m_Buffer->GetLoopEndFrame() : bufFrames;
@@ -347,7 +392,7 @@ namespace World::Audio
 		uint32_t bufFrames = m_Buffer->GetFrameCount();
 		if (bufFrames == 0) { m_State = VoiceState::Free; return false; }
 
-		double step = static_cast<double>(m_Pitch);
+		double step = static_cast<double>(m_Pitch * m_DopplerPitch);
 		m_CursorFrame += step * static_cast<double>(frameCount);
 
 		if (m_CursorFrame >= static_cast<double>(bufFrames))

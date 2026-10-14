@@ -61,7 +61,14 @@ namespace World::Audio
 		m_Mixer.ResetToDefaults();
 		m_CommandQueue.Clear();
 		m_EntityVoiceMap.clear();
+		m_EntityLastPosition.clear();
 		m_ActiveZoneSnapshotId = 0;
+		m_ActiveZoneReverbSend = 0.0f;
+		m_CurrentZoneReverbSend = 0.0f;
+		m_ListenerVelocity = glm::vec3(0.0f);
+		m_LastListenerPosition = glm::vec3(0.0f);
+		m_HasLastListenerPos = false;
+		m_TotalRenderedFrames.store(0, std::memory_order_relaxed);
 		m_TotalTimeSeconds = 0.0f;
 		m_ComboEscalators.clear();
 		m_RapidFireTrackers.clear();
@@ -152,6 +159,7 @@ namespace World::Audio
 
 		m_VoicePool.Reset();
 		m_EntityVoiceMap.clear();
+		m_EntityLastPosition.clear();
 		m_CommandQueue.Clear();
 		m_TotalTimeSeconds = 0.0f;
 		m_ComboEscalators.clear();
@@ -215,6 +223,14 @@ namespace World::Audio
 			if (auto* v = m_VoicePool.FindVoice(cmd.voiceHandle))
 				v->SetOcclusion(cmd.floatParam0);
 			break;
+		case AudioCommandType::SetVoiceVolumetricRadius:
+			if (auto* v = m_VoicePool.FindVoice(cmd.voiceHandle))
+				v->SetVolumetricRadius(cmd.floatParam0);
+			break;
+		case AudioCommandType::SetVoiceVelocity:
+			if (auto* v = m_VoicePool.FindVoice(cmd.voiceHandle))
+				v->SetVelocity(cmd.vecParam);
+			break;
 		case AudioCommandType::SetBusVolume:
 			m_Mixer.SetBusVolume(cmd.busId, cmd.floatParam0);
 			break;
@@ -250,6 +266,7 @@ namespace World::Audio
 	{
 		// 0. Drain command queue from main thread
 		ProcessCommandQueue();
+		m_TotalRenderedFrames.fetch_add(frameCount, std::memory_order_relaxed);
 
 		// 1. Clear scratch bus buffers (zero-allocation: only std::fill, no assign/resize)
 		for (auto& [bid, bufPair] : m_BusMixBuffers)
@@ -298,6 +315,18 @@ namespace World::Audio
 					break;
 				}
 			}
+
+			// Track listener velocity
+			if (deltaSeconds > 0.0001f && m_HasLastListenerPos)
+			{
+				m_ListenerVelocity = (m_ListenerPosition - m_LastListenerPosition) / deltaSeconds;
+			}
+			else
+			{
+				m_ListenerVelocity = glm::vec3(0.0f);
+			}
+			m_LastListenerPosition = m_ListenerPosition;
+			m_HasLastListenerPos = true;
 
 			// 2. Process AudioSourceComponent lifecycle and 3D transform sync
 			auto sourceView = reg.view<AudioSourceComponent, TransformComponent>();
@@ -367,7 +396,23 @@ namespace World::Audio
 					}
 					else if (source.Spatial3D)
 					{
-						// Still playing and 3D: sync transform position
+						// Still playing and 3D: sync transform position and velocity
+						glm::vec3 sourceVel(0.0f);
+						auto lastPosIt = m_EntityLastPosition.find(entityId);
+						if (lastPosIt != m_EntityLastPosition.end() && deltaSeconds > 0.0001f)
+						{
+							sourceVel = (transform.Location - lastPosIt->second) / deltaSeconds;
+						}
+						m_EntityLastPosition[entityId] = transform.Location;
+
+						voice->SetVelocity(sourceVel);
+
+						if (m_OcclusionRaycastCallback)
+						{
+							float occ = m_OcclusionRaycastCallback(m_ListenerPosition, transform.Location);
+							voice->SetOcclusion(std::clamp(occ, 0.0f, 1.0f));
+						}
+
 						voice->SetSpatialParameters(
 							transform.Location,
 							glm::vec3(0.0f, 0.0f, -1.0f),
@@ -413,6 +458,7 @@ namespace World::Audio
 				if (activeEntities.find(it->first) == activeEntities.end())
 				{
 					StopVoice(it->second, 0.05f);
+					m_EntityLastPosition.erase(it->first);
 					it = m_EntityVoiceMap.erase(it);
 				}
 				else
@@ -424,6 +470,7 @@ namespace World::Audio
 			// 3. Process AudioZoneComponent
 			auto zoneView = reg.view<AudioZoneComponent, TransformComponent>();
 			bool inZone = false;
+			float targetReverbSend = 0.0f;
 			for (auto entity : zoneView)
 			{
 				const auto& zone = zoneView.get<AudioZoneComponent>(entity);
@@ -437,11 +484,13 @@ namespace World::Audio
 				if (diff.x <= halfExtents.x && diff.y <= halfExtents.y && diff.z <= halfExtents.z)
 				{
 					inZone = true;
+					targetReverbSend = zone.ReverbSendLevel;
 					if (zone.SnapshotId != 0 && zone.SnapshotId != m_ActiveZoneSnapshotId)
 					{
 						m_ActiveZoneSnapshotId = zone.SnapshotId;
 						std::string snapName = "Snapshot_" + std::to_string(zone.SnapshotId);
-						TriggerSnapshot(snapName, 0.3f);
+						float snapTrans = (m_ZoneTransitionRate > 0.0f) ? (1.0f / m_ZoneTransitionRate) : 0.3f;
+						TriggerSnapshot(snapName, snapTrans);
 					}
 					break;
 				}
@@ -450,10 +499,36 @@ namespace World::Audio
 			if (!inZone && m_ActiveZoneSnapshotId != 0)
 			{
 				m_ActiveZoneSnapshotId = 0;
-				ClearSnapshot(0.3f);
+				float snapTrans = (m_ZoneTransitionRate > 0.0f) ? (1.0f / m_ZoneTransitionRate) : 0.3f;
+				ClearSnapshot(snapTrans);
 			}
 
+			m_ActiveZoneReverbSend = targetReverbSend;
+			float blendFactor = std::clamp(deltaSeconds * m_ZoneTransitionRate, 0.0f, 1.0f);
+			m_CurrentZoneReverbSend += (m_ActiveZoneReverbSend - m_CurrentZoneReverbSend) * blendFactor;
+
 			// 4. Update all active voices spatial state relative to listener
+			Voice::SetListenerContext(m_ListenerForward, m_ListenerVelocity);
+			m_VoicePool.UpdateSpatialAll(m_ListenerPosition, m_ListenerRight, static_cast<float>(m_SampleRate));
+		}
+		else
+		{
+			// If no active scene, smooth reverb send towards 0 and update listener velocity if position changed
+			if (deltaSeconds > 0.0001f && m_HasLastListenerPos)
+			{
+				m_ListenerVelocity = (m_ListenerPosition - m_LastListenerPosition) / deltaSeconds;
+			}
+			else
+			{
+				m_ListenerVelocity = glm::vec3(0.0f);
+			}
+			m_LastListenerPosition = m_ListenerPosition;
+			m_HasLastListenerPos = true;
+
+			float blendFactor = std::clamp(deltaSeconds * m_ZoneTransitionRate, 0.0f, 1.0f);
+			m_CurrentZoneReverbSend += (m_ActiveZoneReverbSend - m_CurrentZoneReverbSend) * blendFactor;
+
+			Voice::SetListenerContext(m_ListenerForward, m_ListenerVelocity);
 			m_VoicePool.UpdateSpatialAll(m_ListenerPosition, m_ListenerRight, static_cast<float>(m_SampleRate));
 		}
 	}
@@ -714,6 +789,69 @@ namespace World::Audio
 		escalator.stepSemitones = stepSemitones;
 		escalator.maxPitchRatio = maxPitchRatio;
 		escalator.timeoutSeconds = timeoutSeconds;
+	}
+
+	void AudioSystem::SetVoiceVolumetricRadius(VoiceHandle handle, float radius)
+	{
+		AudioCommand cmd{};
+		cmd.type = AudioCommandType::SetVoiceVolumetricRadius;
+		cmd.voiceHandle = handle;
+		cmd.floatParam0 = radius;
+		if (!m_CommandQueue.Push(cmd))
+		{
+			if (auto* v = m_VoicePool.FindVoice(handle))
+				v->SetVolumetricRadius(radius);
+		}
+	}
+
+	void AudioSystem::SetVoiceVelocity(VoiceHandle handle, const glm::vec3& velocity)
+	{
+		AudioCommand cmd{};
+		cmd.type = AudioCommandType::SetVoiceVelocity;
+		cmd.voiceHandle = handle;
+		cmd.vecParam = velocity;
+		if (!m_CommandQueue.Push(cmd))
+		{
+			if (auto* v = m_VoicePool.FindVoice(handle))
+				v->SetVelocity(velocity);
+		}
+	}
+
+	void AudioSystem::SetVoiceOcclusion(VoiceHandle handle, float occlusion01)
+	{
+		AudioCommand cmd{};
+		cmd.type = AudioCommandType::SetVoiceOcclusion;
+		cmd.voiceHandle = handle;
+		cmd.floatParam0 = occlusion01;
+		if (!m_CommandQueue.Push(cmd))
+		{
+			if (auto* v = m_VoicePool.FindVoice(handle))
+				v->SetOcclusion(occlusion01);
+		}
+	}
+
+	double AudioSystem::GetDspTime() const noexcept
+	{
+		if (m_SampleRate == 0) return 0.0;
+		return static_cast<double>(m_TotalRenderedFrames.load(std::memory_order_relaxed)) / static_cast<double>(m_SampleRate);
+	}
+
+	void AudioSystem::HandlePhysicsContact(
+		const glm::vec3& contactPoint,
+		float normalImpulse,
+		const std::string& soundEvent)
+	{
+		if (normalImpulse < m_PhysicsContactThreshold)
+		{
+			return;
+		}
+
+		float excess = normalImpulse - m_PhysicsContactThreshold;
+		float norm = excess / 20.0f;
+		float volume = std::clamp(0.25f + 0.75f * std::log10(1.0f + 9.0f * std::min(norm, 1.0f)) + std::max(0.0f, norm - 1.0f) * 0.2f, 0.1f, 3.0f);
+		float pitch = std::clamp(0.9f + 0.15f * std::min(norm, 1.0f), 0.7f, 1.4f);
+
+		PostEvent(soundEvent, contactPoint, volume, pitch);
 	}
 
 	void AudioSystem::StopVoice(VoiceHandle handle, float fadeSeconds)

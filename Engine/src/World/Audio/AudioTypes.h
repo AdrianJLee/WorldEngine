@@ -95,6 +95,8 @@ namespace World::Audio
 		SetVoiceSpatialPosition,
 		SetVoiceSpatial2DPosition,
 		SetVoiceOcclusion,
+		SetVoiceVolumetricRadius,
+		SetVoiceVelocity,
 		SetBusVolume,
 		SetBusMute,
 		SetBusSolo,

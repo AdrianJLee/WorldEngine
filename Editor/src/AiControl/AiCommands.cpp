@@ -3418,6 +3418,41 @@ namespace World
 			result = "{\"success\":true}";
 			return true;
 		}
+		if (cmd == "audio.set_occlusion" || cmd == "audio.setOcclusion")
+		{
+			std::string handleStr = arg("voice_handle");
+			if (handleStr.empty())
+				handleStr = arg("handle");
+			if (handleStr.empty())
+				handleStr = arg("voiceHandle", "0");
+
+			const Audio::VoiceHandle voiceHandle = static_cast<Audio::VoiceHandle>(std::strtoul(handleStr.c_str(), nullptr, 10));
+
+			float occlusion = 0.0f;
+			if (args.count("occlusion"))
+				occlusion = std::clamp(std::strtof(arg("occlusion").c_str(), nullptr), 0.0f, 1.0f);
+			else if (args.count("val"))
+				occlusion = std::clamp(std::strtof(arg("val").c_str(), nullptr), 0.0f, 1.0f);
+			else if (args.count("value"))
+				occlusion = std::clamp(std::strtof(arg("value").c_str(), nullptr), 0.0f, 1.0f);
+
+			auto& audio = Audio::AudioSystem::Get();
+			Audio::AudioCommand cmdMsg;
+			cmdMsg.type = Audio::AudioCommandType::SetVoiceOcclusion;
+			cmdMsg.voiceHandle = voiceHandle;
+			cmdMsg.floatParam0 = occlusion;
+			audio.EnqueueCommand(cmdMsg);
+
+			if (auto* v = audio.GetVoicePool().FindVoice(voiceHandle))
+			{
+				v->SetOcclusion(occlusion);
+			}
+
+			std::ostringstream out;
+			out << "{\"voice_handle\":" << voiceHandle << ",\"occlusion\":" << occlusion << "}";
+			result = out.str();
+			return true;
+		}
 		if (cmd == "audio.get_stats")
 		{
 			auto& audio = Audio::AudioSystem::Get();
@@ -3426,12 +3461,40 @@ namespace World
 			const uint32_t virtualVoices = audio.GetVoicePool().GetActiveVirtualVoiceCount();
 			const size_t registeredEvents = audio.GetRegisteredSoundEventIds().size();
 
+			const double dspFramesSec = static_cast<double>(audio.GetMusic().GetDspClockFrames()) / static_cast<double>(Audio::kDefaultSampleRate);
+			const double dspTime = (dspFramesSec > 0.0) ? dspFramesSec : static_cast<double>(audio.GetTotalTimeSeconds());
+
+			glm::vec3 listenerPos(0.0f);
+			bool foundListener = false;
+			if (m_ActiveScene)
+			{
+				const auto& reg = m_ActiveScene->GetRegistry();
+				auto listenerView = reg.view<AudioListenerComponent, TransformComponent>();
+				for (auto entity : listenerView)
+				{
+					const auto& listener = listenerView.get<AudioListenerComponent>(entity);
+					if (listener.Active)
+					{
+						const auto& transform = listenerView.get<TransformComponent>(entity);
+						listenerPos = transform.Location;
+						foundListener = true;
+						break;
+					}
+				}
+			}
+			if (!foundListener)
+			{
+				listenerPos = m_EditorCamera3D.GetPosition();
+			}
+
 			std::ostringstream out;
 			out << "{"
 				<< "\"initialized\":" << (initialized ? "true" : "false")
 				<< ",\"physical_voices\":" << physical
 				<< ",\"virtual_voices\":" << virtualVoices
 				<< ",\"registered_events\":" << registeredEvents
+				<< ",\"dsp_time\":" << dspTime
+				<< ",\"listener_pos\":{\"x\":" << listenerPos.x << ",\"y\":" << listenerPos.y << ",\"z\":" << listenerPos.z << "}"
 				<< "}";
 			result = out.str();
 			return true;

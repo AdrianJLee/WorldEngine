@@ -438,10 +438,59 @@ namespace
 		CHECK(std::string(postCombo->Params[4].Name) == "volume");
 	}
 
+	void AudioServiceBindingsExpose3DSpatialAndDspClock()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		CHECK(audioTables != nullptr);
+		CHECK(serviceCount == 2);
+		CHECK(std::string(audioTables[0].Name) == "Audio");
+
+		const ScriptServiceMethod* setVolumetric = nullptr;
+		const ScriptServiceMethod* setVelocity = nullptr;
+		const ScriptServiceMethod* setOcclusion = nullptr;
+		const ScriptServiceMethod* getDspTime = nullptr;
+
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			const std::string name = audioTables[0].Methods[i].Name;
+			if (name == "SetVoiceVolumetricRadius")
+				setVolumetric = &audioTables[0].Methods[i];
+			else if (name == "SetVoiceVelocity")
+				setVelocity = &audioTables[0].Methods[i];
+			else if (name == "SetVoiceOcclusion")
+				setOcclusion = &audioTables[0].Methods[i];
+			else if (name == "GetDspTime")
+				getDspTime = &audioTables[0].Methods[i];
+		}
+
+		CHECK(setVolumetric != nullptr);
+		CHECK(setVolumetric->ParamCount == 2);
+		CHECK(std::string(setVolumetric->Params[0].Name) == "voiceHandle");
+		CHECK(std::string(setVolumetric->Params[1].Name) == "radius");
+
+		CHECK(setVelocity != nullptr);
+		CHECK(setVelocity->ParamCount == 4);
+		CHECK(std::string(setVelocity->Params[0].Name) == "voiceHandle");
+		CHECK(std::string(setVelocity->Params[1].Name) == "vx");
+		CHECK(std::string(setVelocity->Params[2].Name) == "vy");
+		CHECK(std::string(setVelocity->Params[3].Name) == "vz");
+
+		CHECK(setOcclusion != nullptr);
+		CHECK(setOcclusion->ParamCount == 2);
+		CHECK(std::string(setOcclusion->Params[0].Name) == "voiceHandle");
+		CHECK(std::string(setOcclusion->Params[1].Name) == "occlusion");
+
+		CHECK(getDspTime != nullptr);
+		CHECK(getDspTime->ParamCount == 0);
+		CHECK(std::string(getDspTime->ReturnType) == "number");
+	}
+
 	int RunAll()
 	{
 		const std::pair<const char*, void(*)()> tests[] = {
 			{ "Audio service descriptors expose 2D screen panning and combo escalation", AudioServiceBindingsExpose2DAndCombo },
+			{ "Audio service descriptors expose 3D spatial parameters and DSP clock", AudioServiceBindingsExpose3DSpatialAndDspClock },
 			{ "ResolveScriptDiskPath hits a real disk file", ResolveDiskPathHitsRealFile },
 			{ "ResolveScriptDiskPath rejects invalid logical paths", ResolveDiskPathRejectsInvalidPaths },
 			{ "ResolveScriptDiskPath rejects a missing file", ResolveDiskPathRejectsMissingFile },
