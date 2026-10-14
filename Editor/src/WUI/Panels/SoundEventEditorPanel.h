@@ -48,6 +48,12 @@ namespace World
 		float m_MaxDist { 25.0f };
 		bool m_Is3D { true };
 
+		int m_SelectedContainerType { 1 }; // 0: Single, 1: Random, 2: Sequence, 3: Switch, 4: Blend, 5: Layer
+		int m_MaxInstances { 8 };
+		float m_CooldownSeconds { 0.05f };
+		int m_StealPolicyIndex { 0 }; // 0: StealOldest, 1: StealQuiet, 2: StealReject
+		int m_SpatialModeIndex { 1 }; // 0: 2D Pan, 1: 3D Spatial, 2: None
+
 		Audio::VoiceHandle m_CurrentAuditionVoice { Audio::kInvalidVoiceHandle };
 	};
 }

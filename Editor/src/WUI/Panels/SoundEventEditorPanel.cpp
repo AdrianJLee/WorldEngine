@@ -194,6 +194,11 @@ namespace World
 		m_Is3D = m_Event.GetSpatial().is3D;
 		m_MinDist = m_Event.GetSpatial().minDistance;
 		m_MaxDist = m_Event.GetSpatial().maxDistance;
+		m_MaxInstances = static_cast<int>(m_Event.GetMaxInstances());
+		m_CooldownSeconds = m_Event.GetCooldownSeconds();
+		m_StealPolicyIndex = static_cast<int>(m_Event.GetStealPolicy());
+		if (m_Event.GetSpatial().mode == Audio::SpatialMode::Spatial2D) m_SpatialModeIndex = 0; else if (m_Event.GetSpatial().is3D || m_Event.GetSpatial().mode == Audio::SpatialMode::Spatial3D) m_SpatialModeIndex = 1; else m_SpatialModeIndex = 2;
+		if (m_Event.GetRootContainer()) m_SelectedContainerType = static_cast<int>(m_Event.GetRootContainer()->type);
 		m_StatusFeedback = "已载入声音事件资产: " + path;
 
 		EnsureBuffersForEvent();
@@ -217,11 +222,15 @@ namespace World
 		}
 
 		m_Event.SetBusId(static_cast<Audio::BusId>(m_SelectedBusIndex));
-		m_Event.GetSpatial().is3D = m_Is3D;
+		m_Event.SetMaxInstances(static_cast<uint32_t>(std::max(1, m_MaxInstances)));
+		m_Event.SetCooldownSeconds(std::max(0.0f, m_CooldownSeconds));
+		m_Event.SetStealPolicy(static_cast<Audio::StealPolicy>(m_StealPolicyIndex));
+		if (m_SpatialModeIndex == 0) { m_Event.GetSpatial().mode = Audio::SpatialMode::Spatial2D; m_Event.GetSpatial().is3D = false; } else if (m_SpatialModeIndex == 1) { m_Event.GetSpatial().mode = Audio::SpatialMode::Spatial3D; m_Event.GetSpatial().is3D = true; } else { m_Event.GetSpatial().mode = Audio::SpatialMode::None; m_Event.GetSpatial().is3D = false; }
 		m_Event.GetSpatial().minDistance = m_MinDist;
 		m_Event.GetSpatial().maxDistance = m_MaxDist;
 		m_Event.SetVolumeRange(m_MinVolume, m_MaxVolume);
 		m_Event.SetPitchRangeSemitones(m_MinPitchSemi, m_MaxPitchSemi);
+		if (m_Event.GetRootContainer()) m_Event.GetRootContainer()->type = static_cast<Audio::ContainerType>(m_SelectedContainerType);
 
 		std::filesystem::path p(m_LoadedPath);
 		std::error_code ec;
@@ -255,9 +264,13 @@ namespace World
 			m_CurrentAuditionVoice = Audio::kInvalidVoiceHandle;
 		}
 
-		if (m_Is3D)
+		if (m_SpatialModeIndex == 1)
 		{
 			m_CurrentAuditionVoice = audio.PostEvent(m_Event.GetId(), glm::vec3(0.0f));
+		}
+		else if (m_SpatialModeIndex == 0)
+		{
+			m_CurrentAuditionVoice = audio.PostEvent2D(m_Event.GetId(), glm::vec2(0.0f));
 		}
 		else
 		{
@@ -356,72 +369,71 @@ namespace World
 
 		curY += 38.0f;
 
-		// 3. Section 1: Properties Box
-		const Wui::WuiRect propBox { rect.X + 8.0f, curY, rect.W - 16.0f, 136.0f };
+				// 3. Section 1: Properties Box
+		const Wui::WuiRect propBox { rect.X + 8.0f, curY, rect.W - 16.0f, 172.0f };
 		Wui::PanelBackground(ctx, propBox, theme.ContentBg, 4.0f);
-
-		float pY = propBox.Y + 8.0f;
-		Wui::Label(ctx, { propBox.X + 12.0f, pY }, "声效核心属性参数 (Properties)", { 0.95f, 0.75f, 0.20f, 1.0f }, 12.5f);
-		pY += 26.0f;
-
+		float pY = propBox.Y + 6.0f;
+		Wui::Label(ctx, { propBox.X + 12.0f, pY }, "Properties", { 0.95f, 0.75f, 0.20f, 1.0f }, 12.0f);
+		pY += 22.0f;
 		// Row 1: Bus Selector Buttons
-		Wui::Label(ctx, { propBox.X + 12.0f, pY + 2.0f }, "所属总线 (Bus):", theme.TextMuted, 11.5f);
-		const char* buses[] = { "Master", "Music", "SFX", "Voice", "UI" };
-		float bX = propBox.X + 130.0f;
-		for (int b = 0; b < 5; ++b)
-		{
-			bool active = (m_SelectedBusIndex == b);
-			const Wui::WuiRect bBtn { bX, pY, 78.0f, 22.0f };
-			std::string bLabel = active ? ("* " + std::string(buses[b])) : buses[b];
-			if (Wui::Button(ctx, Wui::HashId(("se.bus." + std::to_string(b)).c_str()), bBtn, bLabel, theme))
-			{
-				m_SelectedBusIndex = b;
-			}
-			bX += 82.0f;
-		}
-		pY += 28.0f;
-
-		// Row 2: 3D Spatial Attenuation Toggle & Distance Sliders
-		const Wui::WuiRect btn3D { propBox.X + 12.0f, pY, 140.0f, 22.0f };
-		std::string s3D = m_Is3D ? "✓ 启用 3D 空间声像" : "  启用 3D 空间声像";
-		if (Wui::Button(ctx, Wui::HashId("se.btn.3d"), btn3D, s3D, theme))
-		{
-			m_Is3D = !m_Is3D;
-		}
-
-		if (m_Is3D)
-		{
-			char dMinStr[32];
-			std::snprintf(dMinStr, sizeof(dMinStr), "最小响度距: %.1fm", m_MinDist);
-			Wui::Label(ctx, { propBox.X + 160.0f, pY + 2.0f }, dMinStr, theme.TextMuted, 11.0f);
-			const Wui::WuiRect rMinD { propBox.X + 270.0f, pY + 2.0f, 90.0f, 18.0f };
-			Wui::SliderFloat(ctx, Wui::HashId("se.slider.mind"), rMinD, m_MinDist, 0.1f, 10.0f, theme);
-
-			char dMaxStr[32];
-			std::snprintf(dMaxStr, sizeof(dMaxStr), "最大截止距: %.1fm", m_MaxDist);
-			Wui::Label(ctx, { propBox.X + 380.0f, pY + 2.0f }, dMaxStr, theme.TextMuted, 11.0f);
-			const Wui::WuiRect rMaxD { propBox.X + 490.0f, pY + 2.0f, 100.0f, 18.0f };
-			Wui::SliderFloat(ctx, Wui::HashId("se.slider.maxd"), rMaxD, m_MaxDist, 5.0f, 100.0f, theme);
-		}
-		pY += 28.0f;
-
-		// Row 3: Pitch & Volume Range
-		char pitchReadout[32];
-		std::snprintf(pitchReadout, sizeof(pitchReadout), "随机音高: ±%.1f 半音", m_MaxPitchSemi);
-		Wui::Label(ctx, { propBox.X + 12.0f, pY + 2.0f }, pitchReadout, theme.TextMuted, 11.0f);
-		const Wui::WuiRect rPitch { propBox.X + 150.0f, pY + 2.0f, 110.0f, 18.0f };
-		Wui::SliderFloat(ctx, Wui::HashId("se.slider.pitch"), rPitch, m_MaxPitchSemi, 0.0f, 6.0f, theme);
+		Wui::Label(ctx, { propBox.X + 12.0f, pY + 2.0f }, "Bus:", theme.TextMuted, 11.0f);
+		const char* buses[] = { "Master", "Music", "SFX", "Voice", "UI", "Ambience" };
+		float bX = propBox.X + 90.0f;
+		for (int b = 0; b < 6; ++b) { bool active = (m_SelectedBusIndex == b); const Wui::WuiRect bBtn { bX, pY, 70.0f, 20.0f }; std::string bLabel = active ? ("* " + std::string(buses[b])) : buses[b]; if (Wui::Button(ctx, Wui::HashId(("se.bus." + std::to_string(b)).c_str()), bBtn, bLabel, theme)) m_SelectedBusIndex = b; bX += 74.0f; }
+		pY += 25.0f;
+		// Row 2: Container Type Buttons
+		Wui::Label(ctx, { propBox.X + 12.0f, pY + 2.0f }, "Container:", theme.TextMuted, 11.0f);
+		const char* cTypes[] = { "Single", "Random", "Seq", "Switch", "Blend", "Layer" };
+		float cX = propBox.X + 90.0f;
+		for (int c = 0; c < 6; ++c) { bool active = (m_SelectedContainerType == c); const Wui::WuiRect cBtn { cX, pY, 76.0f, 20.0f }; std::string cLabel = active ? ("* " + std::string(cTypes[c])) : cTypes[c]; if (Wui::Button(ctx, Wui::HashId(("se.cnt." + std::to_string(c)).c_str()), cBtn, cLabel, theme)) { m_SelectedContainerType = c; if (m_Event.GetRootContainer()) m_Event.GetRootContainer()->type = static_cast<Audio::ContainerType>(c); } cX += 80.0f; }
+		pY += 25.0f;
+		// Row 3: Spatial Mode & Distance
+		Wui::Label(ctx, { propBox.X + 12.0f, pY + 2.0f }, "Spatial:", theme.TextMuted, 11.0f);
+		const char* spatials[] = { "2D Pan", "3D Spatial", "Center 2D" };
+		float sX = propBox.X + 90.0f;
+		for (int s = 0; s < 3; ++s) { bool active = (m_SpatialModeIndex == s); const Wui::WuiRect sBtn { sX, pY, 72.0f, 20.0f }; std::string sLabel = active ? ("* " + std::string(spatials[s])) : spatials[s]; if (Wui::Button(ctx, Wui::HashId(("se.spat." + std::to_string(s)).c_str()), sBtn, sLabel, theme)) m_SpatialModeIndex = s; sX += 76.0f; }
+		char dMinStr[32], dMaxStr[32];
+		std::snprintf(dMinStr, sizeof(dMinStr), "Min: %.1fm", m_MinDist);
+		Wui::Label(ctx, { sX + 10.0f, pY + 2.0f }, dMinStr, theme.TextMuted, 10.5f);
+		const Wui::WuiRect rMinD { sX + 75.0f, pY + 2.0f, 75.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("se.slider.mind"), rMinD, m_MinDist, 0.1f, 10.0f, theme);
+		std::snprintf(dMaxStr, sizeof(dMaxStr), "Max: %.1fm", m_MaxDist);
+		Wui::Label(ctx, { sX + 160.0f, pY + 2.0f }, dMaxStr, theme.TextMuted, 10.5f);
+		const Wui::WuiRect rMaxD { sX + 225.0f, pY + 2.0f, 75.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("se.slider.maxd"), rMaxD, m_MaxDist, 2.0f, 100.0f, theme);
+		pY += 25.0f;
+		// Row 4: MaxInstances, Cooldown, Stealing
+		char instStr[32], cdStr[32];
+		std::snprintf(instStr, sizeof(instStr), "MaxInst: %d", m_MaxInstances);
+		Wui::Label(ctx, { propBox.X + 12.0f, pY + 2.0f }, instStr, theme.TextMuted, 10.5f);
+		float fInst = static_cast<float>(m_MaxInstances);
+		const Wui::WuiRect sInst { propBox.X + 105.0f, pY + 2.0f, 65.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("se.slider.maxinst"), sInst, fInst, 1.0f, 32.0f, theme);
+		m_MaxInstances = static_cast<int>(fInst);
+		std::snprintf(cdStr, sizeof(cdStr), "CD: %.2fs", m_CooldownSeconds);
+		Wui::Label(ctx, { propBox.X + 175.0f, pY + 2.0f }, cdStr, theme.TextMuted, 10.5f);
+		const Wui::WuiRect sCd { propBox.X + 245.0f, pY + 2.0f, 65.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("se.slider.cd"), sCd, m_CooldownSeconds, 0.0f, 1.0f, theme);
+		Wui::Label(ctx, { propBox.X + 315.0f, pY + 2.0f }, "Steal:", theme.TextMuted, 10.5f);
+		const char* steals[] = { "Oldest", "Quiet", "Reject" };
+		float stX = propBox.X + 360.0f;
+		for (int st = 0; st < 3; ++st) { bool active = (m_StealPolicyIndex == st); const Wui::WuiRect stBtn { stX, pY, 68.0f, 20.0f }; std::string stLabel = active ? ("* " + std::string(steals[st])) : steals[st]; if (Wui::Button(ctx, Wui::HashId(("se.steal." + std::to_string(st)).c_str()), stBtn, stLabel, theme)) m_StealPolicyIndex = st; stX += 72.0f; }
+		pY += 25.0f;
+		// Row 5: Volume Range & Pitch Range
+		char vRangeStr[32];
+		std::snprintf(vRangeStr, sizeof(vRangeStr), "Vol: %.2f~%.2f", m_MinVolume, m_MaxVolume);
+		Wui::Label(ctx, { propBox.X + 12.0f, pY + 2.0f }, vRangeStr, theme.TextMuted, 10.5f);
+		const Wui::WuiRect sMinV { propBox.X + 110.0f, pY + 2.0f, 65.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("se.slider.minv"), sMinV, m_MinVolume, 0.1f, 1.0f, theme);
+		const Wui::WuiRect sMaxV { propBox.X + 180.0f, pY + 2.0f, 65.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("se.slider.vmax"), sMaxV, m_MaxVolume, 0.5f, 2.0f, theme);
+		char pRangeStr[32];
+		std::snprintf(pRangeStr, sizeof(pRangeStr), "Pitch: +-%.1fst", m_MaxPitchSemi);
+		Wui::Label(ctx, { propBox.X + 250.0f, pY + 2.0f }, pRangeStr, theme.TextMuted, 10.5f);
+		const Wui::WuiRect sMaxP { propBox.X + 345.0f, pY + 2.0f, 85.0f, 18.0f };
+		Wui::SliderFloat(ctx, Wui::HashId("se.slider.maxp"), sMaxP, m_MaxPitchSemi, 0.0f, 12.0f, theme);
 		m_MinPitchSemi = -m_MaxPitchSemi;
-
-		char volReadout[32];
-		std::snprintf(volReadout, sizeof(volReadout), "音量范围: %.2fx ~ %.2fx", m_MinVolume, m_MaxVolume);
-		Wui::Label(ctx, { propBox.X + 290.0f, pY + 2.0f }, volReadout, theme.TextMuted, 11.0f);
-		const Wui::WuiRect rVolMin { propBox.X + 440.0f, pY + 2.0f, 80.0f, 18.0f };
-		const Wui::WuiRect rVolMax { propBox.X + 530.0f, pY + 2.0f, 80.0f, 18.0f };
-		Wui::SliderFloat(ctx, Wui::HashId("se.slider.vmin"), rVolMin, m_MinVolume, 0.5f, 1.0f, theme);
-		Wui::SliderFloat(ctx, Wui::HashId("se.slider.vmax"), rVolMax, m_MaxVolume, 1.0f, 1.5f, theme);
-
-		curY += 144.0f;
+		curY += 180.0f;
 
 		// 4. Section 2: Variations Box
 		float bottomBarHeight = 44.0f;

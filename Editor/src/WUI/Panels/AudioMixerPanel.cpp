@@ -92,7 +92,8 @@ namespace World
 		"Music",
 		"SFX",
 		"Voice",
-		"UI"
+		"UI",
+		"Ambience"
 	};
 
 	static const char* kBusOptionButtons[] = {
@@ -100,7 +101,8 @@ namespace World
 		"Music",
 		"SFX",
 		"Voice",
-		"UI"
+		"UI",
+		"Ambience"
 	};
 
 	static void OpenInExplorer(const std::filesystem::path& path)
@@ -946,7 +948,7 @@ namespace World
 		// Row 1: Bus Category Options
 		Wui::Label(ctx, { propBox.X + 12.0f, pY + 2.0f }, "所属分类 (Bus):", theme.TextMuted, 11.5f);
 		float bX = propBox.X + 130.0f;
-		for (int b = 0; b < 5; ++b)
+		for (int b = 0; b < 6; ++b)
 		{
 			bool active = (m_SelectedBus == b);
 			const Wui::WuiRect bBtn { bX, pY, 78.0f, 22.0f };
@@ -1168,7 +1170,7 @@ namespace World
 			"界面音效 (UI)"
 		};
 
-		for (int b = 0; b < 5; ++b)
+		for (int b = 0; b < 6; ++b)
 		{
 			const Wui::WuiRect rowRect { rect.X + 8.0f, gY, rect.W - 16.0f, 22.0f };
 

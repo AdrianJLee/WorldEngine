@@ -28,7 +28,7 @@ namespace World
 		// Provider Status badge
 		Wui::WuiRect badgeRect { rect.X + rect.W - 200.0f, rect.Y + 10.0f, 185.0f, 22.0f };
 		Wui::BarSurface(ctx, badgeRect, { 0.10f, 0.18f, 0.14f, 1.0f }, { 0.20f, 0.65f, 0.35f, 1.0f });
-		Wui::Label(ctx, { badgeRect.X + 10.0f, badgeRect.Y + 4.0f }, "● Engine: Local Edge ONNX (0 Token)", { 0.30f, 0.85f, 0.45f, 1.0f }, 10.5f);
+		Wui::Label(ctx, { badgeRect.X + 10.0f, badgeRect.Y + 4.0f }, "● Mode: Procedural / ONNX Edge (0 Token) | Auto-Curated (-16 LUFS)", { 0.30f, 0.85f, 0.45f, 1.0f }, 10.5f);
 
 		float y = rect.Y + 52.0f;
 
@@ -197,6 +197,7 @@ namespace World
 			std::string character = kCards[m_SelectedTimbreIndex % 5].id;
 			Audio::VoiceEmotion emo = static_cast<Audio::VoiceEmotion>(m_SelectedEmotionIndex);
 			auto result = studio.SynthesizeLine(character, m_DialogueText, emo, m_EmotionIntensity);
+			Audio::AudioCurationPipeline::AutoCurate(result.audio, -16.0f);
 
 			if (result.success)
 			{
@@ -224,6 +225,7 @@ namespace World
 			std::string character = kCards[m_SelectedTimbreIndex % 5].id;
 			Audio::VoiceEmotion emo = static_cast<Audio::VoiceEmotion>(m_SelectedEmotionIndex);
 			auto result = studio.SynthesizeLine(character, m_DialogueText, emo, m_EmotionIntensity);
+			Audio::AudioCurationPipeline::AutoCurate(result.audio, -16.0f);
 
 			std::filesystem::path genDir = "assets/audio/generated";
 			std::error_code ec;

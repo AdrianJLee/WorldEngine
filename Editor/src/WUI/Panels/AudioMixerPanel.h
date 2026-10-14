@@ -95,8 +95,9 @@ namespace World
 		float m_PitchRandomSemi { 1.5f }; // ±1.5 semitones
 
 		// Global volume bus controls (5 buses)
-		float m_BusVolumes[5] { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
-		bool m_BusMuted[5] { false, false, false, false, false };
+		float m_BusVolumes[6] { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+		float m_BusReverbSend[6] { 0.0f, 0.0f, 0.2f, 0.1f, 0.0f, 0.3f };
+		bool m_BusMuted[6] { false, false, false, false, false, false };
 		bool m_GlobalBusesSynced { false };
 
 		std::string m_StatusNotice;
