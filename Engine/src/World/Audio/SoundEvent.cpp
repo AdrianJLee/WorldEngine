@@ -165,6 +165,9 @@ namespace World::Audio
 		ss << "PitchRange: [" << m_MinPitchSemitones << ", " << m_MaxPitchSemitones << "]\n";
 		ss << "Spatial:\n";
 		ss << "  Is3D: " << (m_Spatial.is3D ? "true" : "false") << "\n";
+		ss << "  SpatialMode: " << static_cast<int>(m_Spatial.mode) << "\n";
+		ss << "  HalfViewWidth: " << m_Spatial.halfViewWidth << "\n";
+		ss << "  MaxPan: " << m_Spatial.maxPan << "\n";
 		ss << "  MinDistance: " << m_Spatial.minDistance << "\n";
 		ss << "  MaxDistance: " << m_Spatial.maxDistance << "\n";
 		ss << "  AttenuationModel: " << static_cast<int>(m_Spatial.model) << "\n";
@@ -223,6 +226,20 @@ namespace World::Audio
 			else if (key == "Is3D")
 			{
 				m_Spatial.is3D = (line.find("true") != std::string::npos);
+				if (m_Spatial.is3D && m_Spatial.mode == SpatialMode::None) m_Spatial.mode = SpatialMode::Spatial3D;
+			}
+			else if (key == "SpatialMode")
+			{
+				m_Spatial.mode = static_cast<SpatialMode>(std::stoul(line.substr(colonPos + 1)));
+				if (m_Spatial.mode == SpatialMode::Spatial3D) m_Spatial.is3D = true;
+			}
+			else if (key == "HalfViewWidth")
+			{
+				m_Spatial.halfViewWidth = std::stof(line.substr(colonPos + 1));
+			}
+			else if (key == "MaxPan")
+			{
+				m_Spatial.maxPan = std::stof(line.substr(colonPos + 1));
 			}
 			else if (key == "MinDistance")
 			{

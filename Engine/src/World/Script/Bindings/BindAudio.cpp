@@ -10,6 +10,8 @@
 #include "World/Script/Vm/ScriptRef.h"
 #include "World/Script/Vm/ScriptValue.h"
 
+#include <glm/vec2.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -149,6 +151,20 @@ namespace World
 			return result;
 		}
 
+		std::string OptionalString(const std::string& table, const ScriptServiceMethod& method,
+			const ScriptValue* args, std::size_t argCount, std::size_t index, const std::string& fallback)
+		{
+			if (index >= argCount || args[index].IsNil())
+				return fallback;
+			if (!MatchesType(method.Params[index].Accepted, args[index]))
+				throw std::logic_error(MethodSignature(table, method) + ": argument " + std::to_string(index + 1) +
+					" ('" + method.Params[index].Name + "') must be " + method.Params[index].LuaType +
+					", got " + TypeNameOf(args[index]));
+			std::string result = fallback;
+			args[index].AsString(&result);
+			return result;
+		}
+
 		// ---- 方法实现 ----
 
 		ScriptValue AudioPostEventImpl(const ScriptValue* args, std::size_t count)
@@ -179,15 +195,37 @@ namespace World
 			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[1];
 			CheckArgumentCount("Audio", method, count, 1);
 			const std::string eventId = RequireString("Audio", method, args, count, 0);
-			const double volume = OptionalNumber("Audio", method, args, count, 1, 1.0);
-			const double pitch = OptionalNumber("Audio", method, args, count, 2, 1.0);
-			const bool loop = OptionalBool("Audio", method, args, count, 3, false);
+			const double screenX = OptionalNumber("Audio", method, args, count, 1, 0.0);
+			const double screenY = OptionalNumber("Audio", method, args, count, 2, 0.0);
+			const double volume = OptionalNumber("Audio", method, args, count, 3, 1.0);
+			const double pitch = OptionalNumber("Audio", method, args, count, 4, 1.0);
+			const bool loop = OptionalBool("Audio", method, args, count, 5, false);
 
 			Audio::VoiceHandle handle = Audio::AudioSystem::Get().PostEvent2D(
 				eventId,
+				glm::vec2(static_cast<float>(screenX), static_cast<float>(screenY)),
 				static_cast<float>(volume),
 				static_cast<float>(pitch),
 				loop);
+			return ScriptValue::Number(static_cast<double>(handle));
+		}
+
+		ScriptValue AudioPostComboImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[3];
+			CheckArgumentCount("Audio", method, count, 1);
+			const std::string eventId = RequireString("Audio", method, args, count, 0);
+			const std::string comboGroup = OptionalString("Audio", method, args, count, 1, "default");
+			const double screenX = OptionalNumber("Audio", method, args, count, 2, 0.0);
+			const double screenY = OptionalNumber("Audio", method, args, count, 3, 0.0);
+			const double volume = OptionalNumber("Audio", method, args, count, 4, 1.0);
+
+			Audio::VoiceHandle handle = Audio::AudioSystem::Get().PostComboEvent(
+				eventId,
+				comboGroup,
+				glm::vec2(static_cast<float>(screenX), static_cast<float>(screenY)),
+				static_cast<float>(volume));
 			return ScriptValue::Number(static_cast<double>(handle));
 		}
 
@@ -208,7 +246,7 @@ namespace World
 		ScriptValue AudioPauseImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[3];
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[4];
 			CheckArgumentCount("Audio", method, count, 1);
 			const double handleNum = RequireNumber("Audio", method, args, count, 0);
 
@@ -219,7 +257,7 @@ namespace World
 		ScriptValue AudioResumeImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[4];
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[5];
 			CheckArgumentCount("Audio", method, count, 1);
 			const double handleNum = RequireNumber("Audio", method, args, count, 0);
 
@@ -230,7 +268,7 @@ namespace World
 		ScriptValue AudioSetLoopingImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[5];
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[6];
 			CheckArgumentCount("Audio", method, count, 2);
 			const double handleNum = RequireNumber("Audio", method, args, count, 0);
 			const bool loop = RequireBool("Audio", method, args, count, 1);
@@ -242,7 +280,7 @@ namespace World
 		ScriptValue AudioStopAllImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[6];
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[7];
 			CheckArgumentCount("Audio", method, count, 0);
 			const double fade = OptionalNumber("Audio", method, args, count, 0, 0.05);
 
@@ -253,7 +291,7 @@ namespace World
 		ScriptValue AudioSetBusVolumeImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[7];
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[8];
 			CheckArgumentCount("Audio", method, count, 2);
 			const double busId = RequireNumber("Audio", method, args, count, 0);
 			const double volume = RequireNumber("Audio", method, args, count, 1);
@@ -267,7 +305,7 @@ namespace World
 		ScriptValue AudioTriggerSnapshotImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[8];
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[9];
 			CheckArgumentCount("Audio", method, count, 1);
 			const std::string snapshotName = RequireString("Audio", method, args, count, 0);
 			const double transition = OptionalNumber("Audio", method, args, count, 1, 0.3);
@@ -279,7 +317,7 @@ namespace World
 		ScriptValue AudioClearSnapshotImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[9];
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[10];
 			CheckArgumentCount("Audio", method, count, 0);
 			const double transition = OptionalNumber("Audio", method, args, count, 0, 0.3);
 
@@ -343,9 +381,19 @@ namespace World
 
 		static const ScriptServiceParam audioPostEvent2DParams[] = {
 			{ "eventId", "string", ScriptServiceArgType::String, true, "Sound event identifier." },
+			{ "screenX", "number", ScriptServiceArgType::Number, false, "Screen or viewport X coordinate (default 0)." },
+			{ "screenY", "number", ScriptServiceArgType::Number, false, "Screen or viewport Y coordinate (default 0)." },
 			{ "volume", "number", ScriptServiceArgType::Number, false, "Volume scale multiplier (default 1.0)." },
 			{ "pitch", "number", ScriptServiceArgType::Number, false, "Pitch scale multiplier (default 1.0)." },
 			{ "loop", "boolean", ScriptServiceArgType::Boolean, false, "Whether playback loops (default false)." },
+		};
+
+		static const ScriptServiceParam audioPostComboParams[] = {
+			{ "eventId", "string", ScriptServiceArgType::String, true, "Sound event identifier." },
+			{ "comboGroup", "string", ScriptServiceArgType::String, false, "Combo escalation group name (default 'default')." },
+			{ "screenX", "number", ScriptServiceArgType::Number, false, "Screen or viewport X coordinate (default 0)." },
+			{ "screenY", "number", ScriptServiceArgType::Number, false, "Screen or viewport Y coordinate (default 0)." },
+			{ "volume", "number", ScriptServiceArgType::Number, false, "Volume scale multiplier (default 1.0)." },
 		};
 
 		static const ScriptServiceParam audioStopParams[] = {
@@ -390,8 +438,14 @@ namespace World
 			{ "PostEvent2D", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
 				return AudioPostEvent2DImpl(args, count);
-			}, audioPostEvent2DParams, 4, 4, "number",
-				"Post a 2D sound event without spatial attenuation; returns a voice handle or 0 on failure." },
+			}, audioPostEvent2DParams, 6, 6, "number",
+				"Post a 2D sound event with screen panning and attenuation; returns a voice handle or 0 on failure." },
+
+			{ "PostCombo", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioPostComboImpl(args, count);
+			}, audioPostComboParams, 5, 5, "number",
+				"Post a combo sound event with automatic pitch escalation; returns a voice handle or 0 on failure." },
 
 			{ "Stop", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{

@@ -65,6 +65,28 @@ namespace World::Audio
 		float m_Gain { 1.0f };
 	};
 
+	class WLD_API Bitcrusher
+	{
+	public:
+		Bitcrusher() = default;
+
+		void Configure(int bitDepth = 8, int downsampleFactor = 4) noexcept;
+		void Reset() noexcept;
+
+		void Process(float* inOutLeft, float* inOutRight, uint32_t frameCount) noexcept;
+		void ProcessSample(float& inOutLeft, float& inOutRight) noexcept;
+
+		int GetBitDepth() const noexcept { return m_BitDepth; }
+		int GetDownsampleFactor() const noexcept { return m_DownsampleFactor; }
+
+	private:
+		int m_BitDepth { 8 };
+		int m_DownsampleFactor { 4 };
+		int m_DownsampleCounter { 0 };
+		float m_HeldLeft { 0.0f };
+		float m_HeldRight { 0.0f };
+	};
+
 	class WLD_API SpatialCalculator
 	{
 	public:

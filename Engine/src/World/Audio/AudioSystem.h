@@ -22,6 +22,22 @@ namespace World
 
 namespace World::Audio
 {
+	struct ComboEscalator
+	{
+		int currentCombo = 0;
+		float lastTriggerTime = 0.0f;
+		float stepSemitones = 1.0f;
+		float maxPitchRatio = 2.0f;
+		float timeoutSeconds = 1.5f;
+	};
+
+	struct RapidFireTracker
+	{
+		float lastTriggerTime = -1.0f;
+		uint32_t triggerCountInWindow = 0;
+		VoiceHandle lastVoiceHandle = kInvalidVoiceHandle;
+	};
+
 	class WLD_API AudioSystem
 	{
 	public:
@@ -42,12 +58,52 @@ namespace World::Audio
 			const std::string& eventId,
 			const glm::vec3& worldPos = glm::vec3(0.0f),
 			float volumeScale = 1.0f,
-			float pitchScale = 1.0f, bool looping = false);
+			float pitchScale = 1.0f,
+			bool looping = false,
+			bool allowThrottling = true);
 
 		VoiceHandle PostEvent2D(
 			const std::string& eventId,
 			float volumeScale = 1.0f,
-			float pitchScale = 1.0f, bool looping = false);
+			float pitchScale = 1.0f,
+			bool looping = false,
+			bool allowThrottling = true);
+
+		VoiceHandle PostEvent2D(
+			const std::string& eventId,
+			const glm::vec2& screenPos,
+			float volumeScale = 1.0f,
+			float pitchScale = 1.0f,
+			bool looping = false,
+			bool allowThrottling = true);
+
+
+
+		VoiceHandle PostComboEvent(
+			const std::string& eventId,
+			const std::string& comboGroup = "default",
+			const glm::vec2& screenPos = glm::vec2(0.0f),
+			float volumeScale = 1.0f);
+
+		const ComboEscalator* GetComboEscalator(const std::string& comboGroup = "default") const;
+		void ResetComboEscalator(const std::string& comboGroup = "default");
+		void ConfigureComboEscalator(
+			const std::string& comboGroup,
+			float stepSemitones,
+			float maxPitchRatio,
+			float timeoutSeconds);
+
+		// Rapid-fire throttling configuration
+		void SetRapidFireThrottlingEnabled(bool enabled) noexcept { m_RapidFireThrottlingEnabled = enabled; }
+		bool IsRapidFireThrottlingEnabled() const noexcept { return m_RapidFireThrottlingEnabled; }
+		void ConfigureRapidFireThrottling(uint32_t threshold = 3, float windowSeconds = 0.010f) noexcept
+		{
+			m_RapidFireThreshold = threshold;
+			m_RapidFireWindowSeconds = windowSeconds;
+		}
+		void SetPhaseJitterEnabled(bool enabled) noexcept { m_PhaseJitterEnabled = enabled; }
+		bool IsPhaseJitterEnabled() const noexcept { return m_PhaseJitterEnabled; }
+		float GetTotalTimeSeconds() const noexcept { return m_TotalTimeSeconds; }
 
 		void StopVoice(VoiceHandle handle, float fadeSeconds = 0.05f);
 		void PauseVoice(VoiceHandle handle);
@@ -112,6 +168,15 @@ namespace World::Audio
 		// ECS Voice tracking & Zone state
 		std::unordered_map<uint32_t, VoiceHandle> m_EntityVoiceMap;
 		uint32_t m_ActiveZoneSnapshotId { 0 };
+
+		// 2D & Combo & Throttling state
+		float m_TotalTimeSeconds { 0.0f };
+		std::unordered_map<std::string, ComboEscalator> m_ComboEscalators;
+		std::unordered_map<std::string, RapidFireTracker> m_RapidFireTrackers;
+		bool m_RapidFireThrottlingEnabled { true };
+		uint32_t m_RapidFireThreshold { 3 };
+		float m_RapidFireWindowSeconds { 0.010f };
+		bool m_PhaseJitterEnabled { true };
 
 		// Listener state
 		glm::vec3 m_ListenerPosition { 0.0f };

@@ -478,13 +478,24 @@ Audio = {}
 ---@return number
 function Audio:PostEvent(eventId, x, y, z, volume, pitch, loop) end
 
----Post a 2D sound event without spatial attenuation; returns a voice handle or 0 on failure.
+---Post a 2D sound event with screen panning and attenuation; returns a voice handle or 0 on failure.
 ---@param eventId string Sound event identifier.
+---@param screenX number? Screen or viewport X coordinate (default 0).
+---@param screenY number? Screen or viewport Y coordinate (default 0).
 ---@param volume number? Volume scale multiplier (default 1.0).
 ---@param pitch number? Pitch scale multiplier (default 1.0).
 ---@param loop boolean? Whether playback loops (default false).
 ---@return number
-function Audio:PostEvent2D(eventId, volume, pitch, loop) end
+function Audio:PostEvent2D(eventId, screenX, screenY, volume, pitch, loop) end
+
+---Post a combo sound event with automatic pitch escalation; returns a voice handle or 0 on failure.
+---@param eventId string Sound event identifier.
+---@param comboGroup string? Combo escalation group name (default 'default').
+---@param screenX number? Screen or viewport X coordinate (default 0).
+---@param screenY number? Screen or viewport Y coordinate (default 0).
+---@param volume number? Volume scale multiplier (default 1.0).
+---@return number
+function Audio:PostCombo(eventId, comboGroup, screenX, screenY, volume) end
 
 ---Stop an active voice with optional fade-out duration.
 ---@param voiceHandle number Voice handle returned by PostEvent.

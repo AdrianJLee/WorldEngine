@@ -157,6 +157,75 @@ namespace World::Audio
 		right = std::clamp(right, -1.0f, 1.0f);
 	}
 
+	void Bitcrusher::Configure(int bitDepth, int downsampleFactor) noexcept
+	{
+		m_BitDepth = std::clamp(bitDepth, 2, 16);
+		m_DownsampleFactor = std::clamp(downsampleFactor, 1, 32);
+		Reset();
+	}
+
+	void Bitcrusher::Reset() noexcept
+	{
+		m_DownsampleCounter = 0;
+		m_HeldLeft = 0.0f;
+		m_HeldRight = 0.0f;
+	}
+
+	void Bitcrusher::ProcessSample(float& inOutLeft, float& inOutRight) noexcept
+	{
+		if (m_DownsampleCounter == 0)
+		{
+			float steps = static_cast<float>(1 << (m_BitDepth - 1));
+			float invSteps = 1.0f / steps;
+
+			float l = std::clamp(inOutLeft, -1.0f, 1.0f);
+			m_HeldLeft = std::round(l * steps) * invSteps;
+
+			float r = std::clamp(inOutRight, -1.0f, 1.0f);
+			m_HeldRight = std::round(r * steps) * invSteps;
+		}
+
+		inOutLeft = m_HeldLeft;
+		inOutRight = m_HeldRight;
+
+		if (++m_DownsampleCounter >= m_DownsampleFactor)
+		{
+			m_DownsampleCounter = 0;
+		}
+	}
+
+	void Bitcrusher::Process(float* inOutLeft, float* inOutRight, uint32_t frameCount) noexcept
+	{
+		if (frameCount == 0) return;
+		float steps = static_cast<float>(1 << (m_BitDepth - 1));
+		float invSteps = 1.0f / steps;
+
+		for (uint32_t i = 0; i < frameCount; ++i)
+		{
+			if (m_DownsampleCounter == 0)
+			{
+				if (inOutLeft)
+				{
+					float l = std::clamp(inOutLeft[i], -1.0f, 1.0f);
+					m_HeldLeft = std::round(l * steps) * invSteps;
+				}
+				if (inOutRight)
+				{
+					float r = std::clamp(inOutRight[i], -1.0f, 1.0f);
+					m_HeldRight = std::round(r * steps) * invSteps;
+				}
+			}
+
+			if (inOutLeft) inOutLeft[i] = m_HeldLeft;
+			if (inOutRight) inOutRight[i] = m_HeldRight;
+
+			if (++m_DownsampleCounter >= m_DownsampleFactor)
+			{
+				m_DownsampleCounter = 0;
+			}
+		}
+	}
+
 	float SpatialCalculator::CalculateDistanceAttenuation(
 		float distance,
 		float minDistance,

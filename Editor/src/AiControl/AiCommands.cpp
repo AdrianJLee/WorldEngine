@@ -3341,9 +3341,35 @@ namespace World
 			const bool loop = (arg("loop") == "1" || arg("loop") == "true");
 			const bool is3D = (arg("is3D") == "1" || arg("is3D") == "true" || arg("is_3d") == "1" || arg("is_3d") == "true");
 
+			const bool hasScreenX = (args.count("screen_x") || args.count("screenX"));
+			const bool hasScreenY = (args.count("screen_y") || args.count("screenY"));
+			const bool spatial2D = (arg("spatial2d") == "1" || arg("spatial2d") == "true" ||
+			                        arg("spatial_2d") == "1" || arg("spatial_2d") == "true" ||
+			                        hasScreenX || hasScreenY);
+
+			float screenX = 0.0f;
+			if (args.count("screen_x"))
+				screenX = std::strtof(arg("screen_x").c_str(), nullptr);
+			else if (args.count("screenX"))
+				screenX = std::strtof(arg("screenX").c_str(), nullptr);
+			else if (args.count("x"))
+				screenX = std::strtof(arg("x").c_str(), nullptr);
+
+			float screenY = 0.0f;
+			if (args.count("screen_y"))
+				screenY = std::strtof(arg("screen_y").c_str(), nullptr);
+			else if (args.count("screenY"))
+				screenY = std::strtof(arg("screenY").c_str(), nullptr);
+			else if (args.count("y"))
+				screenY = std::strtof(arg("y").c_str(), nullptr);
+
 			auto& audio = Audio::AudioSystem::Get();
 			Audio::VoiceHandle handle = Audio::kInvalidVoiceHandle;
-			if (is3D || x != 0.0f || y != 0.0f || z != 0.0f)
+			if (spatial2D)
+			{
+				handle = audio.PostEvent2D(eventName, glm::vec2(screenX, screenY), volume, pitch, loop);
+			}
+			else if (is3D || x != 0.0f || y != 0.0f || z != 0.0f)
 			{
 				handle = audio.PostEvent(eventName, glm::vec3(x, y, z), volume, pitch, loop);
 			}
@@ -3354,6 +3380,34 @@ namespace World
 
 			std::ostringstream out;
 			out << "{\"voice_handle\":" << handle << ",\"event\":\"" << JsonEscape(eventName) << "\"}";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "audio.post_combo" || cmd == "audio.postCombo")
+		{
+			std::string eventName = arg("event");
+			if (eventName.empty())
+				eventName = arg("name", "ui_click");
+
+			std::string comboGroup = arg("combo_group");
+			if (comboGroup.empty())
+				comboGroup = arg("comboGroup", "default");
+
+			const float x = args.count("x") ? std::strtof(arg("x").c_str(), nullptr) :
+				(args.count("screen_x") ? std::strtof(arg("screen_x").c_str(), nullptr) :
+				(args.count("screenX") ? std::strtof(arg("screenX").c_str(), nullptr) : 0.0f));
+			const float y = args.count("y") ? std::strtof(arg("y").c_str(), nullptr) :
+				(args.count("screen_y") ? std::strtof(arg("screen_y").c_str(), nullptr) :
+				(args.count("screenY") ? std::strtof(arg("screenY").c_str(), nullptr) : 0.0f));
+			const float volume = args.count("volume") ? std::strtof(arg("volume").c_str(), nullptr) : 1.0f;
+
+			auto& audio = Audio::AudioSystem::Get();
+			const Audio::VoiceHandle handle = audio.PostComboEvent(eventName, comboGroup, glm::vec2(x, y), volume);
+
+			std::ostringstream out;
+			out << "{\"voice_handle\":" << handle
+				<< ",\"combo_group\":\"" << JsonEscape(comboGroup) << "\""
+				<< ",\"event\":\"" << JsonEscape(eventName) << "\"}";
 			result = out.str();
 			return true;
 		}

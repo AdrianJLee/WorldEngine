@@ -1,4 +1,5 @@
 #include "AudioSystem.h"
+#include <random>
 #include "AudioCooker.h"
 #include <algorithm>
 #include <filesystem>
@@ -61,6 +62,9 @@ namespace World::Audio
 		m_CommandQueue.Clear();
 		m_EntityVoiceMap.clear();
 		m_ActiveZoneSnapshotId = 0;
+		m_TotalTimeSeconds = 0.0f;
+		m_ComboEscalators.clear();
+		m_RapidFireTrackers.clear();
 
 		// Pre-populate default synthetic buffers and standard sound events
 		auto clickBuffer = std::make_shared<AudioBuffer>(AudioBuffer::GenerateSineWave(880.0f, 0.08f, 0.3f, m_SampleRate));
@@ -149,6 +153,9 @@ namespace World::Audio
 		m_VoicePool.Reset();
 		m_EntityVoiceMap.clear();
 		m_CommandQueue.Clear();
+		m_TotalTimeSeconds = 0.0f;
+		m_ComboEscalators.clear();
+		m_RapidFireTrackers.clear();
 		m_Initialized = false;
 	}
 
@@ -191,6 +198,17 @@ namespace World::Audio
 					cmd.floatParam0 > 0.0f ? cmd.floatParam0 : 1.0f,
 					cmd.floatParam1 > 0.0f ? cmd.floatParam1 : 25.0f,
 					AttenuationModel::InverseSquare);
+			}
+			break;
+		case AudioCommandType::SetVoiceSpatial2DPosition:
+			if (auto* v = m_VoicePool.FindVoice(cmd.voiceHandle))
+			{
+				v->SetSpatial2DParameters(
+					glm::vec2(cmd.vecParam.x, cmd.vecParam.y),
+					glm::vec2(m_ListenerPosition.x, m_ListenerPosition.y),
+					cmd.floatParam0 > 0.0f ? cmd.floatParam0 : 10.0f,
+					cmd.floatParam1 > 0.0f ? cmd.floatParam1 : 1.0f,
+					cmd.floatParam2 > 0.0f ? cmd.floatParam2 : 25.0f);
 			}
 			break;
 		case AudioCommandType::SetVoiceOcclusion:
@@ -254,6 +272,8 @@ namespace World::Audio
 	void AudioSystem::Update(float deltaSeconds, Scene* activeScene)
 	{
 		if (!m_Initialized) return;
+
+		m_TotalTimeSeconds += deltaSeconds;
 
 		m_Music.Update(deltaSeconds);
 
@@ -363,6 +383,27 @@ namespace World::Audio
 						cmd.floatParam1 = source.MaxDistance;
 						m_CommandQueue.Push(cmd);
 					}
+					else if (voice->GetSpatialMode() == SpatialMode::Spatial2D)
+					{
+						glm::vec2 entityPos2D(transform.Location.x, transform.Location.y);
+						glm::vec2 listenerPos2D(m_ListenerPosition.x, m_ListenerPosition.y);
+						voice->SetSpatial2DParameters(
+							entityPos2D,
+							listenerPos2D,
+							10.0f,
+							source.MinDistance,
+							source.MaxDistance,
+							0.75f);
+
+						AudioCommand cmd{};
+						cmd.type = AudioCommandType::SetVoiceSpatial2DPosition;
+						cmd.voiceHandle = handle;
+						cmd.vecParam = glm::vec3(entityPos2D.x, entityPos2D.y, 0.0f);
+						cmd.floatParam0 = 10.0f;
+						cmd.floatParam1 = source.MinDistance;
+						cmd.floatParam2 = source.MaxDistance;
+						m_CommandQueue.Push(cmd);
+					}
 				}
 			}
 
@@ -422,8 +463,39 @@ namespace World::Audio
 		const glm::vec3& worldPos,
 		float volumeScale,
 		float pitchScale,
-		bool looping)
+		bool looping,
+		bool allowThrottling)
 	{
+		// 1. Rapid-fire throttling check
+		if (allowThrottling && m_RapidFireThrottlingEnabled && !looping)
+		{
+			auto& tracker = m_RapidFireTrackers[eventId];
+			if (tracker.lastTriggerTime >= 0.0f && (m_TotalTimeSeconds - tracker.lastTriggerTime) < m_RapidFireWindowSeconds)
+			{
+				tracker.triggerCountInWindow++;
+				if (tracker.triggerCountInWindow > m_RapidFireThreshold)
+				{
+					if (tracker.lastVoiceHandle != kInvalidVoiceHandle)
+					{
+						if (auto* activeVoice = m_VoicePool.FindVoice(tracker.lastVoiceHandle))
+						{
+							if (activeVoice->IsActive())
+							{
+								float stackMultiplier = 1.0f + 0.3f * std::log10(static_cast<float>(tracker.triggerCountInWindow));
+								activeVoice->SetVolume(std::min(4.0f, activeVoice->GetAudibility() * stackMultiplier));
+								return tracker.lastVoiceHandle;
+							}
+						}
+					}
+				}
+			}
+			else
+			{
+				tracker.lastTriggerTime = m_TotalTimeSeconds;
+				tracker.triggerCountInWindow = 1;
+			}
+		}
+
 		const SoundEvent* evt = FindSoundEvent(eventId);
 		if (!evt)
 		{
@@ -441,14 +513,31 @@ namespace World::Audio
 					StealPolicy::StealOldest);
 				if (h != kInvalidVoiceHandle)
 				{
+					if (allowThrottling && m_RapidFireThrottlingEnabled && !looping)
+					{
+						m_RapidFireTrackers[eventId].lastVoiceHandle = h;
+					}
 					if (auto* v = m_VoicePool.FindVoice(h))
 					{
-						v->SetSpatialParameters(
-							worldPos,
-							glm::vec3(0.0f, 0.0f, -1.0f),
-							1.0f,
-							25.0f,
-							AttenuationModel::InverseSquare);
+						if (m_PhaseJitterEnabled && !looping && buffer->GetFrameCount() > 512)
+						{
+							static std::mt19937 s_JitterRng(1337);
+							uint32_t maxJitter = std::min(256u, buffer->GetFrameCount() / 4);
+							if (maxJitter > 0)
+							{
+								std::uniform_int_distribution<uint32_t> dist(0, maxJitter);
+								v->SetCursorFrame(static_cast<double>(dist(s_JitterRng)));
+							}
+						}
+						if (worldPos != glm::vec3(0.0f))
+						{
+							v->SetSpatialParameters(
+								worldPos,
+								glm::vec3(0.0f, 0.0f, -1.0f),
+								1.0f,
+								25.0f,
+								AttenuationModel::InverseSquare);
+						}
 					}
 				}
 				return h;
@@ -480,10 +569,36 @@ namespace World::Audio
 
 		if (h != kInvalidVoiceHandle)
 		{
+			if (allowThrottling && m_RapidFireThrottlingEnabled && !looping)
+			{
+				m_RapidFireTrackers[eventId].lastVoiceHandle = h;
+			}
 			if (auto* v = m_VoicePool.FindVoice(h))
 			{
+				if (m_PhaseJitterEnabled && !looping && buffer->GetFrameCount() > 512)
+				{
+					static std::mt19937 s_JitterRng(1337);
+					uint32_t maxJitter = std::min(256u, buffer->GetFrameCount() / 4);
+					if (maxJitter > 0)
+					{
+						std::uniform_int_distribution<uint32_t> dist(0, maxJitter);
+						v->SetCursorFrame(static_cast<double>(dist(s_JitterRng)));
+					}
+				}
+
 				const auto& sp = evt->GetSpatial();
-				if (sp.is3D)
+				if (sp.mode == SpatialMode::Spatial2D)
+				{
+					glm::vec2 listener2D(m_ListenerPosition.x, m_ListenerPosition.y);
+					v->SetSpatial2DParameters(
+						glm::vec2(worldPos.x, worldPos.y),
+						listener2D,
+						sp.halfViewWidth > 0.0f ? sp.halfViewWidth : 10.0f,
+						sp.minDistance,
+						sp.maxDistance,
+						sp.maxPan);
+				}
+				else if (sp.is3D || sp.mode == SpatialMode::Spatial3D)
 				{
 					v->SetSpatialParameters(
 						worldPos,
@@ -505,9 +620,100 @@ namespace World::Audio
 		const std::string& eventId,
 		float volumeScale,
 		float pitchScale,
-		bool looping)
+		bool looping,
+		bool allowThrottling)
 	{
-		return PostEvent(eventId, glm::vec3(0.0f), volumeScale, pitchScale, looping);
+		return PostEvent(eventId, glm::vec3(0.0f), volumeScale, pitchScale, looping, allowThrottling);
+	}
+
+	VoiceHandle AudioSystem::PostEvent2D(
+		const std::string& eventId,
+		const glm::vec2& screenPos,
+		float volumeScale,
+		float pitchScale,
+		bool looping,
+		bool allowThrottling)
+	{
+		VoiceHandle h = PostEvent(eventId, glm::vec3(screenPos.x, screenPos.y, 0.0f), volumeScale, pitchScale, looping, allowThrottling);
+		if (h != kInvalidVoiceHandle)
+		{
+			if (auto* v = m_VoicePool.FindVoice(h))
+			{
+				const SoundEvent* evt = FindSoundEvent(eventId);
+				float halfViewWidth = 10.0f;
+				float minDist = 1.0f;
+				float maxDist = 25.0f;
+				float maxPan = 0.75f;
+				if (evt)
+				{
+					const auto& sp = evt->GetSpatial();
+					if (sp.halfViewWidth > 0.0f) halfViewWidth = sp.halfViewWidth;
+					minDist = sp.minDistance;
+					maxDist = sp.maxDistance;
+					maxPan = sp.maxPan;
+				}
+				glm::vec2 listener2D(m_ListenerPosition.x, m_ListenerPosition.y);
+				v->SetSpatial2DParameters(screenPos, listener2D, halfViewWidth, minDist, maxDist, maxPan);
+			}
+		}
+		return h;
+	}
+
+	VoiceHandle AudioSystem::PostComboEvent(
+		const std::string& eventId,
+		const std::string& comboGroup,
+		const glm::vec2& screenPos,
+		float volumeScale)
+	{
+		auto& escalator = m_ComboEscalators[comboGroup];
+		if (escalator.currentCombo > 0 && (m_TotalTimeSeconds - escalator.lastTriggerTime) < escalator.timeoutSeconds)
+		{
+			escalator.currentCombo++;
+		}
+		else
+		{
+			escalator.currentCombo = 1;
+		}
+
+		escalator.lastTriggerTime = m_TotalTimeSeconds;
+
+		float pitchScale = std::min(
+			escalator.maxPitchRatio,
+			std::pow(2.0f, (static_cast<float>(escalator.currentCombo) * escalator.stepSemitones) / 12.0f));
+
+		if (screenPos != glm::vec2(0.0f))
+		{
+			return PostEvent2D(eventId, screenPos, volumeScale, pitchScale, false, false);
+		}
+		return PostEvent2D(eventId, volumeScale, pitchScale, false, false);
+	}
+
+	const ComboEscalator* AudioSystem::GetComboEscalator(const std::string& comboGroup) const
+	{
+		auto it = m_ComboEscalators.find(comboGroup);
+		return (it != m_ComboEscalators.end()) ? &it->second : nullptr;
+	}
+
+	void AudioSystem::ResetComboEscalator(const std::string& comboGroup)
+	{
+		auto it = m_ComboEscalators.find(comboGroup);
+		if (it != m_ComboEscalators.end())
+		{
+			it->second.currentCombo = 0;
+			it->second.lastTriggerTime = -100.0f;
+		}
+	}
+
+	void AudioSystem::ConfigureComboEscalator(
+		const std::string& comboGroup,
+		float stepSemitones,
+		float maxPitchRatio,
+		float timeoutSeconds)
+	{
+		auto& escalator = m_ComboEscalators[comboGroup];
+		escalator.stepSemitones = stepSemitones;
+		escalator.maxPitchRatio = maxPitchRatio;
+		escalator.timeoutSeconds = timeoutSeconds;
 	}
 
 	void AudioSystem::StopVoice(VoiceHandle handle, float fadeSeconds)

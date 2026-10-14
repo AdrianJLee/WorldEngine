@@ -480,6 +480,167 @@ static void TestAudioSystemEcsLifecycle()
 	std::cout << "  -> Passed." << std::endl;
 }
 
+static void TestSpatial2DAndBitcrusher()
+{
+	std::cout << "[Test] Spatial2D & Bitcrusher..." << std::endl;
+
+	// 1. Test Spatial2D equal-power stereo pan
+	Voice voice;
+	auto testBuffer = std::make_shared<AudioBuffer>(AudioBuffer::GenerateSineWave(440.0f, 0.5f, 1.0f, 48000));
+	voice.Setup(1, testBuffer, kBusSfx, 1.0f, 1.0f, false);
+
+	// Source to the right: screenPos.x = 5.0, listener.x = 0.0, halfViewWidth = 10.0, maxPan = 0.75
+	voice.SetSpatial2DParameters(glm::vec2(5.0f, 0.0f), glm::vec2(0.0f, 0.0f), 10.0f, 1.0f, 25.0f, 0.75f);
+	assert(voice.GetSpatialMode() == SpatialMode::Spatial2D);
+	assert(voice.GetRightPanGain() > voice.GetLeftPanGain());
+	float pRight = voice.GetRightPanGain();
+	float pLeft = voice.GetLeftPanGain();
+	float powerSum = pLeft * pLeft + pRight * pRight;
+	assert(std::abs(powerSum - 1.0f) < 0.001f); // Equal power check
+
+	// Source to the left: screenPos.x = -5.0
+	voice.SetSpatial2DParameters(glm::vec2(-5.0f, 0.0f), glm::vec2(0.0f, 0.0f), 10.0f, 1.0f, 25.0f, 0.75f);
+	assert(voice.GetLeftPanGain() > voice.GetRightPanGain());
+	pRight = voice.GetRightPanGain();
+	pLeft = voice.GetLeftPanGain();
+	powerSum = pLeft * pLeft + pRight * pRight;
+	assert(std::abs(powerSum - 1.0f) < 0.001f);
+
+	// Center: screenPos.x = 0.0
+	voice.SetSpatial2DParameters(glm::vec2(0.0f, 0.0f), glm::vec2(0.0f, 0.0f), 10.0f, 1.0f, 25.0f, 0.75f);
+	assert(std::abs(voice.GetLeftPanGain() - voice.GetRightPanGain()) < 0.001f);
+
+	// 2. Test XY radial distance attenuation (ignoring Z)
+	// Within minDistance: dist = 0.5 < 1.0 -> full audibility (1.0)
+	voice.SetSpatial2DParameters(glm::vec2(0.0f, 0.5f), glm::vec2(0.0f, 0.0f), 10.0f, 1.0f, 25.0f, 0.75f);
+	assert(std::abs(voice.GetAudibility() - 1.0f) < 0.001f);
+
+	// Beyond maxDistance: dist = 30.0 > 25.0 -> inaudible (0.0)
+	voice.SetSpatial2DParameters(glm::vec2(0.0f, 30.0f), glm::vec2(0.0f, 0.0f), 10.0f, 1.0f, 25.0f, 0.75f);
+	assert(voice.GetAudibility() == 0.0f);
+
+	// 3. Test Bitcrusher DSP node
+	Bitcrusher crusher;
+	crusher.Configure(4, 4); // 4-bit, 4x downsample
+	assert(crusher.GetBitDepth() == 4);
+	assert(crusher.GetDownsampleFactor() == 4);
+
+	float bufL[16];
+	float bufR[16];
+	for (int i = 0; i < 16; ++i)
+	{
+		bufL[i] = static_cast<float>(i) / 16.0f; // Linear ramp 0.0 to ~0.9375
+		bufR[i] = -static_cast<float>(i) / 16.0f;
+	}
+
+	crusher.Process(bufL, bufR, 16);
+
+	// Check sample-and-hold (frames 0..3 should be equal to frame 0 value)
+	assert(bufL[0] == bufL[1] && bufL[1] == bufL[2] && bufL[2] == bufL[3]);
+	assert(bufR[0] == bufR[1] && bufR[1] == bufR[2] && bufR[2] == bufR[3]);
+
+	// Check quantization: 4 bits -> steps = 1 << 3 = 8, step size = 0.125
+	float stepSize = 1.0f / 8.0f;
+	for (int i = 0; i < 16; ++i)
+	{
+		float val = std::abs(bufL[i]);
+		float remainder = std::fmod(val, stepSize);
+		assert(remainder < 0.0001f || std::abs(remainder - stepSize) < 0.0001f);
+	}
+
+	// 4. Test Bitcrusher integrated in Voice RenderBlock
+	voice.Reset();
+	voice.Setup(2, testBuffer, kBusSfx, 1.0f, 1.0f, false);
+	voice.SetBitcrusher(true, 4, 4);
+	assert(voice.HasBitcrusher());
+
+	float renderL[256] = { 0 };
+	float renderR[256] = { 0 };
+	bool stillPlaying = voice.RenderBlock(renderL, renderR, 256, 48000.0f);
+	assert(stillPlaying);
+
+	// Verify rendered audio is non-zero
+	float maxVal = 0.0f;
+	for (int i = 0; i < 256; ++i)
+	{
+		maxVal = std::max(maxVal, std::abs(renderL[i]));
+	}
+	assert(maxVal > 0.0f);
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestComboEscalatorAndThrottling()
+{
+	std::cout << "[Test] ComboEscalator & Rapid-Fire Throttling..." << std::endl;
+
+	AudioSystem audio;
+	bool ok = audio.Initialize(true, 48000, 256);
+	assert(ok);
+
+	// 1. Test Combo Escalator pitch progression
+	VoiceHandle h1 = audio.PostComboEvent("ui_click", "test_combo");
+	assert(h1 != kInvalidVoiceHandle);
+	const auto* esc1 = audio.GetComboEscalator("test_combo");
+	assert(esc1 != nullptr);
+	assert(esc1->currentCombo == 1);
+
+	Voice* v1 = audio.GetVoicePool().FindVoice(h1);
+	assert(v1 != nullptr);
+
+	// Trigger second combo hit within timeout
+	VoiceHandle h2 = audio.PostComboEvent("ui_click", "test_combo");
+	assert(h2 != kInvalidVoiceHandle);
+	const auto* esc2 = audio.GetComboEscalator("test_combo");
+	assert(esc2->currentCombo == 2);
+
+	Voice* v2 = audio.GetVoicePool().FindVoice(h2);
+	assert(v2 != nullptr);
+
+	// Trigger third combo hit
+	VoiceHandle h3 = audio.PostComboEvent("ui_click", "test_combo");
+	assert(h3 != kInvalidVoiceHandle);
+	const auto* esc3 = audio.GetComboEscalator("test_combo");
+	assert(esc3->currentCombo == 3);
+
+	// Advance time past timeout (1.5s timeout)
+	audio.Update(2.0f);
+
+	// Trigger fourth combo hit after timeout: should reset to 1
+	VoiceHandle h4 = audio.PostComboEvent("ui_click", "test_combo");
+	assert(h4 != kInvalidVoiceHandle);
+	const auto* esc4 = audio.GetComboEscalator("test_combo");
+	assert(esc4->currentCombo == 1);
+
+	// 2. Test Rapid-Fire Throttling (<10ms window, threshold = 3)
+	audio.ConfigureRapidFireThrottling(3, 0.010f);
+
+	// Rapidly trigger 5 times in the same audio frame (time does not advance)
+	VoiceHandle r1 = audio.PostEvent("ui_click");
+	VoiceHandle r2 = audio.PostEvent("ui_click");
+	VoiceHandle r3 = audio.PostEvent("ui_click");
+	assert(r1 != kInvalidVoiceHandle && r2 != kInvalidVoiceHandle && r3 != kInvalidVoiceHandle);
+	// First three should be distinct allocated voices
+	assert(r1 != r2 && r2 != r3 && r1 != r3);
+
+	// 4th and 5th triggers should exceed threshold (3) and merge into 3rd voice handle
+	VoiceHandle r4 = audio.PostEvent("ui_click");
+	VoiceHandle r5 = audio.PostEvent("ui_click");
+	assert(r4 == r3);
+	assert(r5 == r3);
+
+	// Advance time by 20ms (> 10ms window)
+	audio.Update(0.020f);
+
+	// Next trigger should be treated as new window, allocating a fresh voice
+	VoiceHandle r6 = audio.PostEvent("ui_click");
+	assert(r6 != kInvalidVoiceHandle);
+	assert(r6 != r3);
+
+	audio.Shutdown();
+	std::cout << "  -> Passed." << std::endl;
+}
+
 int main()
 {
 	std::cout << "========================================" << std::endl;
@@ -500,9 +661,11 @@ int main()
 		TestAudioCommandQueue();
 		TestAudioAdpcmCooker();
 		TestAudioSystemEcsLifecycle();
+		TestSpatial2DAndBitcrusher();
+		TestComboEscalatorAndThrottling();
 
 		std::cout << "========================================" << std::endl;
-		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (12/12)  " << std::endl;
+		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (14/14)  " << std::endl;
 		std::cout << "========================================" << std::endl;
 		return 0;
 	}

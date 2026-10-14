@@ -42,6 +42,23 @@ namespace World::Audio
 			float outerAngle = 360.0f,
 			float outerGain = 1.0f) noexcept;
 
+		void SetSpatial2DParameters(
+			const glm::vec2& worldPos,
+			const glm::vec2& listenerPos,
+			float halfViewWidth = 10.0f,
+			float minDistance = 1.0f,
+			float maxDistance = 25.0f,
+			float maxPan = 0.75f) noexcept;
+
+		void SetBitcrusher(bool enable, int bitDepth = 8, int downsampleFactor = 4) noexcept;
+		bool HasBitcrusher() const noexcept { return m_EnableBitcrusher; }
+		Bitcrusher& GetBitcrusher() noexcept { return m_Bitcrusher; }
+		const Bitcrusher& GetBitcrusher() const noexcept { return m_Bitcrusher; }
+
+		void SetCursorFrame(double cursor) noexcept { m_CursorFrame = cursor; }
+		double GetCursorFrame() const noexcept { return m_CursorFrame; }
+
+
 		void SetOcclusion(float occlusion01) noexcept;
 		void SetPitch(float pitch) noexcept;
 		void SetVolume(float volume) noexcept;
@@ -70,6 +87,11 @@ namespace World::Audio
 		VoiceState GetState() const noexcept { return m_State; }
 		uint8_t GetPriority() const noexcept { return m_Priority; }
 		float GetAudibility() const noexcept { return m_CurrentAudibility; }
+		SpatialMode GetSpatialMode() const noexcept { return m_SpatialMode; }
+		float GetLeftPanGain() const noexcept { return m_LeftPanGain; }
+		float GetRightPanGain() const noexcept { return m_RightPanGain; }
+		float GetLeftGain() const noexcept { return m_LeftGain; }
+		float GetRightGain() const noexcept { return m_RightGain; }
 
 	private:
 		VoiceHandle m_Handle { kInvalidVoiceHandle };
@@ -83,7 +105,8 @@ namespace World::Audio
 		bool m_Looping { false };
 		uint8_t m_Priority { 128 };
 
-		// Spatial 3D
+		// Spatial
+		SpatialMode m_SpatialMode { SpatialMode::None };
 		bool m_IsSpatial { false };
 		glm::vec3 m_Position { 0.0f };
 		glm::vec3 m_Forward { 0.0f, 0.0f, -1.0f };
@@ -94,6 +117,14 @@ namespace World::Audio
 		float m_OuterAngle { 360.0f };
 		float m_OuterGain { 1.0f };
 
+		// Spatial 2D
+		glm::vec2 m_Spatial2DWorldPos { 0.0f };
+		glm::vec2 m_Spatial2DListenerPos { 0.0f };
+		float m_Spatial2DHalfViewWidth { 10.0f };
+		float m_Spatial2DMaxPan { 0.75f };
+		float m_LeftPanGain { 0.7071f };
+		float m_RightPanGain { 0.7071f };
+
 		// Gains & DSP
 		float m_LeftGain { 0.7071f };
 		float m_RightGain { 0.7071f };
@@ -101,6 +132,8 @@ namespace World::Audio
 		float m_Occlusion { 0.0f };
 		BiquadFilter m_FilterLeft;
 		BiquadFilter m_FilterRight;
+		bool m_EnableBitcrusher { false };
+		Bitcrusher m_Bitcrusher;
 
 		// Fade out
 		uint32_t m_FadeRemainingFrames { 0 };

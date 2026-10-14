@@ -13,13 +13,22 @@ namespace World::Audio
 		m_Pitch = 1.0f;
 		m_Looping = false;
 		m_Priority = 128;
+		m_SpatialMode = SpatialMode::None;
 		m_IsSpatial = false;
+		m_Spatial2DWorldPos = glm::vec2(0.0f);
+		m_Spatial2DListenerPos = glm::vec2(0.0f);
+		m_Spatial2DHalfViewWidth = 10.0f;
+		m_Spatial2DMaxPan = 0.75f;
+		m_LeftPanGain = 0.7071f;
+		m_RightPanGain = 0.7071f;
 		m_LeftGain = 0.7071f;
 		m_RightGain = 0.7071f;
 		m_CurrentAudibility = 1.0f;
 		m_Occlusion = 0.0f;
 		m_FilterLeft.Reset();
 		m_FilterRight.Reset();
+		m_EnableBitcrusher = false;
+		m_Bitcrusher.Reset();
 		m_FadeRemainingFrames = 0;
 		m_FadeTotalFrames = 0;
 	}
@@ -80,6 +89,7 @@ namespace World::Audio
 		float outerAngle,
 		float outerGain) noexcept
 	{
+		m_SpatialMode = SpatialMode::Spatial3D;
 		m_IsSpatial = true;
 		m_Position = position;
 		m_Forward = forward;
@@ -89,6 +99,39 @@ namespace World::Audio
 		m_InnerAngle = innerAngle;
 		m_OuterAngle = outerAngle;
 		m_OuterGain = outerGain;
+	}
+
+	void Voice::SetSpatial2DParameters(
+		const glm::vec2& worldPos,
+		const glm::vec2& listenerPos,
+		float halfViewWidth,
+		float minDistance,
+		float maxDistance,
+		float maxPan) noexcept
+	{
+		m_SpatialMode = SpatialMode::Spatial2D;
+		m_IsSpatial = true;
+		m_Spatial2DWorldPos = worldPos;
+		m_Spatial2DListenerPos = listenerPos;
+		m_Spatial2DHalfViewWidth = std::max(0.001f, halfViewWidth);
+		m_MinDistance = std::max(0.01f, minDistance);
+		m_MaxDistance = std::max(m_MinDistance + 0.1f, maxDistance);
+		m_Spatial2DMaxPan = std::clamp(maxPan, 0.0f, 1.0f);
+
+		UpdateSpatial(glm::vec3(listenerPos.x, listenerPos.y, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f), static_cast<float>(kDefaultSampleRate));
+	}
+
+	void Voice::SetBitcrusher(bool enable, int bitDepth, int downsampleFactor) noexcept
+	{
+		m_EnableBitcrusher = enable;
+		if (enable)
+		{
+			m_Bitcrusher.Configure(bitDepth, downsampleFactor);
+		}
+		else
+		{
+			m_Bitcrusher.Reset();
+		}
 	}
 
 	void Voice::SetOcclusion(float occlusion01) noexcept
@@ -111,8 +154,40 @@ namespace World::Audio
 		const glm::vec3& listenerRight,
 		float sampleRate) noexcept
 	{
+		if (m_SpatialMode == SpatialMode::Spatial2D)
+		{
+			m_Spatial2DListenerPos = glm::vec2(listenerPos.x, listenerPos.y);
+
+			float normalizedOffset = std::clamp((m_Spatial2DWorldPos.x - m_Spatial2DListenerPos.x) / m_Spatial2DHalfViewWidth, -1.0f, 1.0f) * m_Spatial2DMaxPan;
+			constexpr float kPi = 3.14159265358979323846f;
+			float angle = (normalizedOffset + 1.0f) * 0.25f * kPi;
+			m_LeftPanGain = std::cos(angle);
+			m_RightPanGain = std::sin(angle);
+
+			float dist = glm::length(glm::vec2(m_Spatial2DWorldPos.x - m_Spatial2DListenerPos.x, m_Spatial2DWorldPos.y - m_Spatial2DListenerPos.y));
+			float distAtten = SpatialCalculator::CalculateDistanceAttenuation(
+				dist, m_MinDistance, m_MaxDistance, m_AttenuationModel);
+
+			float totalGain = m_BaseVolume * distAtten;
+			m_LeftGain = m_LeftPanGain * totalGain;
+			m_RightGain = m_RightPanGain * totalGain;
+			m_CurrentAudibility = totalGain;
+
+			if (m_CurrentAudibility < 0.001f && m_State == VoiceState::Playing)
+			{
+				m_State = VoiceState::Virtual;
+			}
+			else if (m_CurrentAudibility >= 0.001f && m_State == VoiceState::Virtual)
+			{
+				m_State = VoiceState::Playing;
+			}
+			return;
+		}
+
 		if (!m_IsSpatial)
 		{
+			m_LeftPanGain = 0.7071f;
+			m_RightPanGain = 0.7071f;
 			m_LeftGain = m_BaseVolume * 0.7071f;
 			m_RightGain = m_BaseVolume * 0.7071f;
 			m_CurrentAudibility = m_BaseVolume;
@@ -129,6 +204,8 @@ namespace World::Audio
 		float panLeft = 0.7071f;
 		float panRight = 0.7071f;
 		SpatialCalculator::CalculateStereoPan(m_Position, listenerPos, listenerRight, panLeft, panRight);
+		m_LeftPanGain = panLeft;
+		m_RightPanGain = panRight;
 
 		// Occlusion low-pass filter cutoff frequency: drops from 20000Hz to 600Hz as occlusion goes 0 -> 1
 		float cutoffFreq = 20000.0f * (1.0f - m_Occlusion * 0.95f) + 400.0f;
@@ -247,6 +324,11 @@ namespace World::Audio
 			// Apply DSP filters & gains
 			float filteredL = m_FilterLeft.Process(inL);
 			float filteredR = m_FilterRight.Process(inR);
+
+			if (m_EnableBitcrusher)
+			{
+				m_Bitcrusher.ProcessSample(filteredL, filteredR);
+			}
 
 			outLeft[i] += filteredL * m_LeftGain * fadeMultiplier;
 			outRight[i] += filteredR * m_RightGain * fadeMultiplier;

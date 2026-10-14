@@ -47,12 +47,15 @@ namespace World::Audio
 	struct SoundSpatialDesc
 	{
 		bool is3D { false };
+		SpatialMode mode { SpatialMode::None };
 		AttenuationModel model { AttenuationModel::InverseSquare };
 		float minDistance { 1.0f };
 		float maxDistance { 25.0f };
 		float innerAngle { 360.0f };
 		float outerAngle { 360.0f };
 		float outerGain { 1.0f };
+		float halfViewWidth { 10.0f };
+		float maxPan { 0.75f };
 	};
 
 	class WLD_API SoundEvent

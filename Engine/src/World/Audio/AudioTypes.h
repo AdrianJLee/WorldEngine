@@ -44,6 +44,13 @@ namespace World::Audio
 		Surround51 = 6
 	};
 
+	enum class SpatialMode : uint8_t
+	{
+		None = 0,
+		Spatial3D = 1,
+		Spatial2D = 2
+	};
+
 	enum class AttenuationModel : uint8_t
 	{
 		Linear = 0,
@@ -86,6 +93,7 @@ namespace World::Audio
 		SetVoiceVolume,
 		SetVoicePitch,
 		SetVoiceSpatialPosition,
+		SetVoiceSpatial2DPosition,
 		SetVoiceOcclusion,
 		SetBusVolume,
 		SetBusMute,

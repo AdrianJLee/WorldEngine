@@ -403,9 +403,45 @@ namespace
 		CHECK(buffer.Text() == "a\nB\n");
 	}
 
+	void AudioServiceBindingsExpose2DAndCombo()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		CHECK(audioTables != nullptr);
+		CHECK(serviceCount == 2);
+		CHECK(std::string(audioTables[0].Name) == "Audio");
+
+		const ScriptServiceMethod* postEvent2D = nullptr;
+		const ScriptServiceMethod* postCombo = nullptr;
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			if (std::string(audioTables[0].Methods[i].Name) == "PostEvent2D")
+				postEvent2D = &audioTables[0].Methods[i];
+			else if (std::string(audioTables[0].Methods[i].Name) == "PostCombo")
+				postCombo = &audioTables[0].Methods[i];
+		}
+		CHECK(postEvent2D != nullptr);
+		CHECK(postEvent2D->ParamCount == 6);
+		CHECK(std::string(postEvent2D->Params[0].Name) == "eventId");
+		CHECK(std::string(postEvent2D->Params[1].Name) == "screenX");
+		CHECK(std::string(postEvent2D->Params[2].Name) == "screenY");
+		CHECK(std::string(postEvent2D->Params[3].Name) == "volume");
+		CHECK(std::string(postEvent2D->Params[4].Name) == "pitch");
+		CHECK(std::string(postEvent2D->Params[5].Name) == "loop");
+
+		CHECK(postCombo != nullptr);
+		CHECK(postCombo->ParamCount == 5);
+		CHECK(std::string(postCombo->Params[0].Name) == "eventId");
+		CHECK(std::string(postCombo->Params[1].Name) == "comboGroup");
+		CHECK(std::string(postCombo->Params[2].Name) == "screenX");
+		CHECK(std::string(postCombo->Params[3].Name) == "screenY");
+		CHECK(std::string(postCombo->Params[4].Name) == "volume");
+	}
+
 	int RunAll()
 	{
 		const std::pair<const char*, void(*)()> tests[] = {
+			{ "Audio service descriptors expose 2D screen panning and combo escalation", AudioServiceBindingsExpose2DAndCombo },
 			{ "ResolveScriptDiskPath hits a real disk file", ResolveDiskPathHitsRealFile },
 			{ "ResolveScriptDiskPath rejects invalid logical paths", ResolveDiskPathRejectsInvalidPaths },
 			{ "ResolveScriptDiskPath rejects a missing file", ResolveDiskPathRejectsMissingFile },
