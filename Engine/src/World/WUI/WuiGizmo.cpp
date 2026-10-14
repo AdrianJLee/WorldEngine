@@ -954,4 +954,80 @@ namespace World::Wui
 
 		return s_CapDragging || (hovered >= 0 && ctx.IsHovered(viewport));
 	}
+	// =========================================================================
+	// WUI 3D 声源衰减编辑手柄 (ManipulateAudioSource3D)
+	// =========================================================================
+	bool ManipulateAudioSource3D(const GizmoCamera& camera,
+		const TransformComponent& transform, float& minDistance, float& maxDistance,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation)
+	{
+		const glm::vec3 center = transform.Location;
+		const glm::vec2 sCenter = WorldToScreen(camera, center, viewport);
+		if (sCenter.x < -1e8f) return false;
+
+		const glm::vec3 rightDir = camera.Right;
+		const glm::vec3 upDir = camera.Up;
+
+		const glm::vec2 sMinRight = WorldToScreen(camera, center + rightDir * minDistance, viewport);
+		const glm::vec2 sMaxRight = WorldToScreen(camera, center + rightDir * maxDistance, viewport);
+		const glm::vec2 sMinUp = WorldToScreen(camera, center + upDir * minDistance, viewport);
+		const glm::vec2 sMaxUp = WorldToScreen(camera, center + upDir * maxDistance, viewport);
+
+		const glm::vec2 mouse = ctx.Input().MousePos;
+		int hovered = -1;
+		const glm::vec2 handles[4] = { sMinRight, sMaxRight, sMinUp, sMaxUp };
+		if (ctx.IsHovered(viewport))
+		{
+			float bestDist = kPickTolerance + 3.0f;
+			for (int i = 0; i < 4; ++i)
+			{
+				float d = glm::length(mouse - handles[i]);
+				if (d <= bestDist)
+				{
+					bestDist = d;
+					hovered = i;
+				}
+			}
+		}
+
+		const WuiColor colMin { 0.20f, 0.85f, 0.95f, 0.95f };
+		const WuiColor colMax { 0.35f, 0.55f, 0.95f, 0.85f };
+		PushBox(ctx, sMinRight, (hovered == 0) ? kHighlight : colMin, 7.0f);
+		PushBox(ctx, sMaxRight, (hovered == 1) ? kHighlight : colMax, 7.0f);
+		PushBox(ctx, sMinUp, (hovered == 2) ? kHighlight : colMin, 7.0f);
+		PushBox(ctx, sMaxUp, (hovered == 3) ? kHighlight : colMax, 7.0f);
+
+		static int s_ActiveHandle = -1;
+		if (allowManipulation && ctx.Input().MouseDown[0])
+		{
+			if (s_ActiveHandle == -1 && hovered >= 0)
+				s_ActiveHandle = hovered;
+
+			if (s_ActiveHandle >= 0)
+			{
+				float distPx = glm::length(mouse - sCenter);
+				float scaleFactor = glm::length(sMaxRight - sCenter) / std::max(maxDistance, 0.001f);
+				if (scaleFactor > 1e-4f)
+				{
+					float newDist = std::max(0.1f, distPx / scaleFactor);
+					if (s_ActiveHandle == 0 || s_ActiveHandle == 2)
+					{
+						minDistance = std::min(newDist, maxDistance - 0.1f);
+					}
+					else
+					{
+						maxDistance = std::max(newDist, minDistance + 0.1f);
+					}
+				}
+				return true;
+			}
+		}
+		else
+		{
+			s_ActiveHandle = -1;
+		}
+
+		return false;
+	}
+
 }

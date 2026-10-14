@@ -1167,4 +1167,56 @@ namespace World::Audio
 	{
 		m_PerceptionBridge.BroadcastStimulus(stimulus);
 	}
+
+	void AudioSystem::SetGlobalParameter(const std::string& name, float value)
+	{
+		m_RtpcManager.SetGlobalParameter(name, value);
+	}
+
+	float AudioSystem::GetGlobalParameter(const std::string& name) const
+	{
+		return m_RtpcManager.GetGlobalParameter(name);
+	}
+
+	void AudioSystem::SetVoiceParameter(VoiceHandle handle, const std::string& name, float value)
+	{
+		m_RtpcManager.SetVoiceParameter(handle, name, value);
+	}
+
+	float AudioSystem::GetVoiceParameter(VoiceHandle handle, const std::string& name) const
+	{
+		return m_RtpcManager.GetVoiceParameter(handle, name);
+	}
+
+	VoiceHandle AudioSystem::PlayFootstep(const std::string& surface, const glm::vec3& worldPos, float volume)
+	{
+		float pitch = 1.0f;
+		float volScale = volume;
+
+		std::string lowerSurf = surface;
+		std::transform(lowerSurf.begin(), lowerSurf.end(), lowerSurf.begin(), ::tolower);
+
+		if (lowerSurf == "stone" || lowerSurf == "rock" || lowerSurf == "concrete")
+		{
+			pitch = 1.25f;
+			volScale *= 1.1f;
+		}
+		else if (lowerSurf == "wood" || lowerSurf == "bridge")
+		{
+			pitch = 0.85f;
+			volScale *= 1.0f;
+		}
+		else if (lowerSurf == "metal" || lowerSurf == "grate")
+		{
+			pitch = 1.45f;
+			volScale *= 1.15f;
+		}
+		else if (lowerSurf == "water" || lowerSurf == "puddle")
+		{
+			pitch = 0.70f;
+			volScale *= 0.9f;
+		}
+
+		return PostEvent("footstep_player", worldPos, volScale, pitch, false, false);
+	}
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AudioTypes.h"
+#include "AudioRtpc.h"
 #include "AudioCommandQueue.h"
 #include "AudioBuffer.h"
 #include "VoicePool.h"
@@ -191,6 +192,17 @@ namespace World::Audio
 		void BroadcastSoundStimulus(const SoundStimulus& stimulus);
 
 		// Audio Profiler & Telemetry
+		// RTPC Parameter controls
+		AudioRtpcManager& GetRtpcManager() noexcept { return m_RtpcManager; }
+		const AudioRtpcManager& GetRtpcManager() const noexcept { return m_RtpcManager; }
+		void SetGlobalParameter(const std::string& name, float value);
+		float GetGlobalParameter(const std::string& name) const;
+		void SetVoiceParameter(VoiceHandle handle, const std::string& name, float value);
+		float GetVoiceParameter(VoiceHandle handle, const std::string& name) const;
+
+		// Footstep sound system with surface material adaptation
+		VoiceHandle PlayFootstep(const std::string& surface, const glm::vec3& worldPos = glm::vec3(0.0f), float volume = 1.0f);
+
 		AudioProfiler& GetProfiler() noexcept { return m_Profiler; }
 		const AudioProfiler& GetProfiler() const noexcept { return m_Profiler; }
 
@@ -227,6 +239,7 @@ namespace World::Audio
 
 		std::unique_ptr<IAudioBackend> m_Backend;
 		VoicePool m_VoicePool;
+		AudioRtpcManager m_RtpcManager;
 		MixerGraph m_Mixer;
 		InteractiveMusicManager m_Music;
 		AiAudioStudioManager m_AiStudio;

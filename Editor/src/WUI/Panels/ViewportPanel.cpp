@@ -19,6 +19,9 @@ namespace World
 	namespace
 	{
 		static bool s_ShowAllAudioGizmos = false;
+		static bool s_AudioGizmoActive = false;
+		static float s_AudioGizmoBeforeMin = 1.0f;
+		static float s_AudioGizmoBeforeMax = 25.0f;
 		static const char* OrthoAxisShortName(World::OrthographicAxis axis)
 		{
 			switch (axis)
@@ -958,6 +961,39 @@ namespace World
 				auto& light = selected.GetComponent<FreeformLight2DComponent>();
 				const bool lightUsing = ManipulateFreeformLight2D(m_Host.GetGizmoCamera(), transform, light, sceneRect, ctx, !m_Host.IsReadOnlyMode());
 				if (lightUsing) nowUsing = true;
+			}
+			if (selected.HasComponent<AudioSourceComponent>())
+			{
+				auto& audioSrc = selected.GetComponent<AudioSourceComponent>();
+				if (audioSrc.Spatial3D)
+				{
+					const float beforeMin = audioSrc.MinDistance;
+					const float beforeMax = audioSrc.MaxDistance;
+					const bool audioUsing = Wui::ManipulateAudioSource3D(m_Host.GetGizmoCamera(), transform,
+						audioSrc.MinDistance, audioSrc.MaxDistance, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+					if (audioUsing)
+					{
+						nowUsing = true;
+						if (!s_AudioGizmoActive)
+						{
+							s_AudioGizmoActive = true;
+							s_AudioGizmoBeforeMin = beforeMin;
+							s_AudioGizmoBeforeMax = beforeMax;
+						}
+						if (audioSrc.MinDistance != beforeMin || audioSrc.MaxDistance != beforeMax)
+						{
+							m_Host.MarkDocumentDirty();
+						}
+					}
+					else if (s_AudioGizmoActive)
+					{
+						s_AudioGizmoActive = false;
+						if (audioSrc.MinDistance != s_AudioGizmoBeforeMin || audioSrc.MaxDistance != s_AudioGizmoBeforeMax)
+						{
+							m_Host.MarkDocumentDirty();
+						}
+					}
+				}
 			}
 			gizmoEngaged = nowUsing;
 			if (!m_GizmoActive && nowUsing)
@@ -2048,3 +2084,4 @@ namespace World
 		(void)theme;
 	}
 }
+

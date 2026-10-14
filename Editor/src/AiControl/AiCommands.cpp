@@ -3525,6 +3525,47 @@ namespace World
 			result = out.str();
 			return true;
 		}
+		if (cmd == "audio.set_param" || cmd == "audio.setParam")
+		{
+			std::string name = arg("name");
+			if (name.empty())
+				name = arg("param");
+			if (name.empty())
+			{
+				result = "{\"error\":\"Missing parameter name\"}";
+				return false;
+			}
+			float val = 0.0f;
+			if (args.count("value"))
+				val = std::strtof(arg("value").c_str(), nullptr);
+			else if (args.count("val"))
+				val = std::strtof(arg("val").c_str(), nullptr);
+
+			Audio::AudioSystem::Get().SetGlobalParameter(name, val);
+
+			std::ostringstream out;
+			out << "{\"name\":\"" << JsonEscape(name) << "\",\"value\":" << val << "}";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "audio.get_param" || cmd == "audio.getParam")
+		{
+			std::string name = arg("name");
+			if (name.empty())
+				name = arg("param");
+			if (name.empty())
+			{
+				result = "{\"error\":\"Missing parameter name\"}";
+				return false;
+			}
+
+			const float val = Audio::AudioSystem::Get().GetGlobalParameter(name);
+
+			std::ostringstream out;
+			out << "{\"name\":\"" << JsonEscape(name) << "\",\"value\":" << val << "}";
+			result = out.str();
+			return true;
+		}
 		if (cmd == "audio.list_events" || cmd == "audio.listEvents")
 		{
 			auto& audio = Audio::AudioSystem::Get();

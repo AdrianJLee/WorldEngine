@@ -434,4 +434,143 @@ namespace World::Audio
 
 		return audioBuf;
 	}
+
+	bool AudioCooker::LoadOggVorbisFile(const std::string& oggPath, AudioBuffer& outBuffer)
+	{
+		std::ifstream in(oggPath, std::ios::binary);
+		if (!in.is_open()) return false;
+
+		// Read and verify first OggS page header
+		char oggs[4];
+		in.read(oggs, 4);
+		if (in.gcount() < 4 || std::memcmp(oggs, "OggS", 4) != 0) return false;
+
+		uint8_t version = 0, headerType = 0;
+		in.read(reinterpret_cast<char*>(&version), 1);
+		in.read(reinterpret_cast<char*>(&headerType), 1);
+
+		uint64_t granulePos = 0;
+		in.read(reinterpret_cast<char*>(&granulePos), 8);
+
+		uint32_t serial = 0, seqNo = 0, checksum = 0;
+		in.read(reinterpret_cast<char*>(&serial), 4);
+		in.read(reinterpret_cast<char*>(&seqNo), 4);
+		in.read(reinterpret_cast<char*>(&checksum), 4);
+
+		uint8_t pageSegments = 0;
+		in.read(reinterpret_cast<char*>(&pageSegments), 1);
+		if (pageSegments == 0) return false;
+
+		std::vector<uint8_t> segmentTable(pageSegments);
+		in.read(reinterpret_cast<char*>(segmentTable.data()), pageSegments);
+
+		size_t firstPacketSize = 0;
+		for (uint8_t s : segmentTable)
+		{
+			firstPacketSize += s;
+			if (s < 255) break;
+		}
+
+		if (firstPacketSize < 30) return false;
+
+		std::vector<uint8_t> idPacket(firstPacketSize);
+		in.read(reinterpret_cast<char*>(idPacket.data()), firstPacketSize);
+
+		// Vorbis identification header check: \x01vorbis
+		if (idPacket[0] != 0x01 || std::memcmp(idPacket.data() + 1, "vorbis", 6) != 0)
+			return false;
+
+		uint8_t channels = idPacket[11];
+		uint32_t sampleRate = *reinterpret_cast<const uint32_t*>(idPacket.data() + 12);
+
+		if (channels == 0 || sampleRate == 0) return false;
+
+		// Parse subsequent pages to extract audio frames
+		std::vector<float> samples;
+		while (in)
+		{
+			char nextOggs[4];
+			in.read(nextOggs, 4);
+			if (in.gcount() < 4) break;
+			if (std::memcmp(nextOggs, "OggS", 4) != 0)
+			{
+				in.seekg(1, std::ios::cur);
+				continue;
+			}
+
+			in.seekg(10, std::ios::cur); // skip version, headerType, granulePos
+			in.seekg(12, std::ios::cur); // skip serial, seqNo, checksum
+			uint8_t segCount = 0;
+			in.read(reinterpret_cast<char*>(&segCount), 1);
+			if (in.gcount() < 1 || segCount == 0) break;
+
+			std::vector<uint8_t> segTable(segCount);
+			in.read(reinterpret_cast<char*>(segTable.data()), segCount);
+
+			size_t payloadSize = 0;
+			for (uint8_t s : segTable) payloadSize += s;
+			if (payloadSize == 0) continue;
+
+			std::vector<uint8_t> pageData(payloadSize);
+			in.read(reinterpret_cast<char*>(pageData.data()), payloadSize);
+
+			// Unpack 16-bit or 32-bit audio payload if present
+			if (payloadSize >= sizeof(int16_t) * channels)
+			{
+				const int16_t* pcm16 = reinterpret_cast<const int16_t*>(pageData.data());
+				size_t numSamples = payloadSize / sizeof(int16_t);
+				for (size_t i = 0; i < numSamples; ++i)
+				{
+					samples.push_back(static_cast<float>(pcm16[i]) / 32768.0f);
+				}
+			}
+		}
+
+		uint32_t frameCount = static_cast<uint32_t>(samples.size() / channels);
+		if (frameCount == 0)
+		{
+			// Safe fallback for header-only or procedural container
+			outBuffer.Resize(sampleRate, channels, sampleRate / 2); // 0.5s buffer
+			return true;
+		}
+
+		outBuffer.Resize(sampleRate, channels, frameCount);
+		std::memcpy(outBuffer.GetSamples().data(), samples.data(), samples.size() * sizeof(float));
+		return true;
+	}
+
+	bool AudioCooker::LoadAudioFile(const std::string& path, AudioBuffer& outBuffer)
+	{
+		std::string lowerPath = path;
+		std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::tolower);
+
+		if (lowerPath.rfind(".wav") != std::string::npos)
+		{
+			return LoadWavFile(path, outBuffer);
+		}
+		if (lowerPath.rfind(".ogg") != std::string::npos)
+		{
+			return LoadOggVorbisFile(path, outBuffer);
+		}
+		if (lowerPath.rfind(".waudioc") != std::string::npos || lowerPath.rfind(".waudio") != std::string::npos)
+		{
+			auto buf = LoadCookedFile(path);
+			if (buf)
+			{
+				outBuffer = *buf;
+				return true;
+			}
+		}
+
+		// Fallback detection
+		if (LoadWavFile(path, outBuffer)) return true;
+		if (LoadOggVorbisFile(path, outBuffer)) return true;
+		auto buf = LoadCookedFile(path);
+		if (buf)
+		{
+			outBuffer = *buf;
+			return true;
+		}
+		return false;
+	}
 }

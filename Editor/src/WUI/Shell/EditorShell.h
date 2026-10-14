@@ -22,6 +22,7 @@
 #include "WUI/Panels/PluginPanel.h"
 #include "WUI/Panels/UiDesignerPanel.h"
 #include "WUI/Panels/AudioMixerPanel.h"
+#include "WUI/Panels/AudioProfilerPanel.h"
 #include "WUI/Panels/SoundEventEditorPanel.h"
 #include "WUI/Panels/AiAudioStudioPanel.h"
 #include "WUI/Panels/SpriteAtlasEditorPanel.h"
@@ -129,6 +130,7 @@ namespace World
 		std::string IndependentWindowLabel(size_t index) const override;
 		void FocusIndependentWindow(const std::string& panel) override;
 		void OpenOrFocusIndependentWindow(const std::string& panel);
+		void OpenAudioProfiler();
 		void DockBackIndependentWindow(const std::string& panel) override;
 		// D3:打开材质编辑器(必要时先打开独立窗口)并载入指定材质。
 		void OpenMaterialEditor(const std::string& path) override;
@@ -839,3 +841,4 @@ namespace World
 		float m_ImportTreeScroll = 0.0f;
 	};
 }
+

@@ -1357,6 +1357,193 @@ static void TestAdvancedDspEffects()
 	std::cout << "  -> Passed." << std::endl;
 }
 
+
+static void TestAudioRtpcSystem()
+{
+	std::cout << "[Test] AudioRtpc: Curve Mapping, Global & Voice Parameter Modulation..." << std::endl;
+
+	AudioRtpcManager rtpc;
+	rtpc.SetGlobalParameter("EngineRPM", 4000.0f);
+	assert(rtpc.GetGlobalParameter("EngineRPM") == 4000.0f);
+
+	// Curve: 1000 RPM -> 0.8x, 4000 RPM -> 1.4x, 8000 RPM -> 2.0x pitch
+	rtpc.RegisterBinding("EngineRPM", RtpcTargetProperty::Pitch, {
+		{ 1000.0f, 0.8f },
+		{ 4000.0f, 1.4f },
+		{ 8000.0f, 2.0f }
+	});
+
+	float vol = 1.0f, pitch = 1.0f, cutoff = 20000.0f;
+	rtpc.ApplyRtpc(100, vol, pitch, cutoff);
+	assert(std::abs(pitch - 1.4f) < 0.001f); // Evaluated global EngineRPM = 4000 -> 1.4x
+
+	// Local voice parameter overrides global
+	rtpc.SetVoiceParameter(100, "EngineRPM", 6000.0f);
+	assert(rtpc.GetVoiceParameter(100, "EngineRPM") == 6000.0f);
+
+	pitch = 1.0f;
+	rtpc.ApplyRtpc(100, vol, pitch, cutoff);
+	assert(std::abs(pitch - 1.7f) < 0.001f); // Linear interpolation between 4000 (1.4) and 8000 (2.0) is 1.7
+
+	rtpc.RemoveVoiceParameters(100);
+	pitch = 1.0f;
+	rtpc.ApplyRtpc(100, vol, pitch, cutoff);
+	assert(std::abs(pitch - 1.4f) < 0.001f); // Reverts to global
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestConvolutionReverb()
+{
+	std::cout << "[Test] ConvolutionReverb: Impulse Response Loading & Convolution..." << std::endl;
+
+	// Create synthetic exponential decay impulse response (0.05s = 2400 frames @ 48kHz)
+	AudioBuffer irBuf(48000, 1, 2400);
+	for (uint32_t i = 0; i < 2400; ++i)
+	{
+		float env = std::exp(-static_cast<float>(i) * 0.005f);
+		float noise = (static_cast<float>(i % 17) / 17.0f) * 2.0f - 1.0f;
+		irBuf.SetSample(0, i, env * noise);
+	}
+
+	ConvolutionReverb conv;
+	conv.LoadImpulseResponse(irBuf);
+	assert(conv.HasImpulseResponse());
+	assert(conv.GetIrLengthFrames() == 2400);
+
+	std::vector<float> inL(4800, 0.0f);
+	std::vector<float> inR(4800, 0.0f);
+	inL[0] = 1.0f;
+	inR[0] = 1.0f; // Unit impulse
+
+	conv.Process(inL.data(), inR.data(), 4800);
+
+	float energy = 0.0f;
+	for (size_t i = 10; i < 500; ++i) energy += inL[i] * inL[i];
+	assert(energy > 0.001f);
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestAudioFileMultiFormatLoader()
+{
+	std::cout << "[Test] AudioCooker: Multi-Format Loader (.wav, .ogg)..." << std::endl;
+
+	// 1. Create temporary WAV
+	std::string tempWav = "test_multiformat.wav";
+	{
+		std::ofstream out(tempWav, std::ios::binary);
+		uint32_t numFrames = 4800;
+		uint16_t numChannels = 2;
+		uint32_t sRate = 48000;
+		uint16_t bitsPerSample = 16;
+		uint32_t byteRate = sRate * numChannels * 2;
+		uint16_t blockAlign = numChannels * 2;
+		uint32_t dataBytes = numFrames * blockAlign;
+		uint32_t riffSize = 36 + dataBytes;
+
+		out.write("RIFF", 4);
+		out.write(reinterpret_cast<const char*>(&riffSize), 4);
+		out.write("WAVE", 4);
+		out.write("fmt ", 4);
+		uint32_t fmtSize = 16;
+		uint16_t fmtTag = 1;
+		out.write(reinterpret_cast<const char*>(&fmtSize), 4);
+		out.write(reinterpret_cast<const char*>(&fmtTag), 2);
+		out.write(reinterpret_cast<const char*>(&numChannels), 2);
+		out.write(reinterpret_cast<const char*>(&sRate), 4);
+		out.write(reinterpret_cast<const char*>(&byteRate), 4);
+		out.write(reinterpret_cast<const char*>(&blockAlign), 2);
+		out.write(reinterpret_cast<const char*>(&bitsPerSample), 2);
+		out.write("data", 4);
+		out.write(reinterpret_cast<const char*>(&dataBytes), 4);
+
+		std::vector<int16_t> pcm(numFrames * numChannels, 1000);
+		out.write(reinterpret_cast<const char*>(pcm.data()), dataBytes);
+	}
+
+	AudioBuffer wavBuf;
+	bool wavOk = AudioCooker::LoadAudioFile(tempWav, wavBuf);
+	assert(wavOk);
+	assert(wavBuf.GetFrameCount() == 4800);
+	assert(wavBuf.GetChannels() == 2);
+	std::filesystem::remove(tempWav);
+
+	// 2. Create temporary OGG with Vorbis identification header page
+	std::string tempOgg = "test_multiformat.ogg";
+	{
+		std::ofstream out(tempOgg, std::ios::binary);
+		out.write("OggS", 4);
+		uint8_t ver = 0, hdrType = 2; // BOS
+		out.write(reinterpret_cast<const char*>(&ver), 1);
+		out.write(reinterpret_cast<const char*>(&hdrType), 1);
+		uint64_t gran = 0;
+		out.write(reinterpret_cast<const char*>(&gran), 8);
+		uint32_t serial = 0x12345678, seq = 0, check = 0;
+		out.write(reinterpret_cast<const char*>(&serial), 4);
+		out.write(reinterpret_cast<const char*>(&seq), 4);
+		out.write(reinterpret_cast<const char*>(&check), 4);
+
+		uint8_t segCount = 1;
+		uint8_t segVal = 30;
+		out.write(reinterpret_cast<const char*>(&segCount), 1);
+		out.write(reinterpret_cast<const char*>(&segVal), 1);
+
+		// Identification packet: \x01vorbis + version(0) + channels(2) + sampleRate(44100)
+		std::vector<uint8_t> id(30, 0);
+		id[0] = 0x01;
+		std::memcpy(id.data() + 1, "vorbis", 6);
+		id[11] = 2; // channels
+		*reinterpret_cast<uint32_t*>(id.data() + 12) = 44100; // sample rate
+		out.write(reinterpret_cast<const char*>(id.data()), 30);
+	}
+
+	AudioBuffer oggBuf;
+	bool oggOk = AudioCooker::LoadAudioFile(tempOgg, oggBuf);
+	assert(oggOk);
+	assert(oggBuf.GetChannels() == 2);
+	assert(oggBuf.GetSampleRate() == 44100);
+	std::filesystem::remove(tempOgg);
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
+static void TestProceduralSynthAndFootstep()
+{
+	std::cout << "[Test] ProceduralSynth & Footstep Surface System..." << std::endl;
+
+	auto sq = ProceduralSynth::GenerateTone(ProceduralSynth::WaveType::Square, 440.0f, 0.1f, 0.5f);
+	assert(sq.GetFrameCount() > 0);
+	assert(sq.CalculatePeak() > 0.4f);
+
+	auto tri = ProceduralSynth::GenerateTone(ProceduralSynth::WaveType::Triangle, 440.0f, 0.1f);
+	assert(tri.GetFrameCount() > 0);
+
+	auto saw = ProceduralSynth::GenerateTone(ProceduralSynth::WaveType::Sawtooth, 440.0f, 0.1f);
+	assert(saw.GetFrameCount() > 0);
+
+	auto noise = ProceduralSynth::GenerateTone(ProceduralSynth::WaveType::Noise, 440.0f, 0.1f);
+	assert(noise.GetFrameCount() > 0);
+
+	// Footstep sound system
+	auto& audio = AudioSystem::Get();
+	audio.Initialize(true);
+
+	VoiceHandle hGrass = audio.PlayFootstep("Grass", glm::vec3(0.0f));
+	assert(hGrass != kInvalidVoiceHandle);
+
+	VoiceHandle hStone = audio.PlayFootstep("Stone", glm::vec3(1.0f));
+	assert(hStone != kInvalidVoiceHandle);
+
+	VoiceHandle hWood = audio.PlayFootstep("Wood", glm::vec3(2.0f));
+	assert(hWood != kInvalidVoiceHandle);
+
+	audio.StopAll(0.01f);
+	audio.Shutdown();
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
 int main()
 {
 	std::cout << "========================================" << std::endl;
@@ -1389,8 +1576,12 @@ int main()
 		TestZeroCrossingSnap();
 		TestAudioStreamer();
 		TestAdvancedDspEffects();
+		TestAudioRtpcSystem();
+		TestConvolutionReverb();
+		TestAudioFileMultiFormatLoader();
+		TestProceduralSynthAndFootstep();
 		std::cout << "========================================" << std::endl;
-		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (24/24)  " << std::endl;
+		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (28/28)  " << std::endl;
 		std::cout << "========================================" << std::endl;
 		return 0;
 	}

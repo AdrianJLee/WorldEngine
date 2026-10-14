@@ -576,6 +576,30 @@ function Audio:BroadcastAiStimulus(x, y, z, radius, loudness, tag) end
 ---@return table
 function Audio:GetProfilerStats() end
 
+---Set a global RTPC parameter value to drive sound curves and mixer state.
+---@param name string RTPC parameter name.
+---@param value number RTPC parameter value.
+function Audio:SetParameter(name, value) end
+
+---Set a local RTPC parameter value on a specific voice instance.
+---@param voiceHandle number Voice handle returned by PostEvent.
+---@param name string Local RTPC parameter name.
+---@param value number Local RTPC parameter value.
+function Audio:SetVoiceParameter(voiceHandle, name, value) end
+
+---Get current global RTPC parameter value.
+---@param name string RTPC parameter name.
+---@return number
+function Audio:GetParameter(name) end
+
+---Play a surface-specific footstep sound event; returns a voice handle or 0 on failure.
+---@param surface string Surface material name ('Grass', 'Stone', 'Wood', etc.).
+---@param x number? World X position (default 0).
+---@param y number? World Y position (default 0).
+---@param z number? World Z position (default 0).
+---@return number
+function Audio:PlayFootstep(surface, x, y, z) end
+
 -- Global service table 'Music': read-only; there is no runtime constructor.
 ---Read-only interactive music service table for playback and transitions.
 ---@class Music

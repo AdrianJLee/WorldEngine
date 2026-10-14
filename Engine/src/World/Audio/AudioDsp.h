@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AudioTypes.h"
+#include "AudioBuffer.h"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -342,5 +343,50 @@ namespace World::Audio
 		size_t m_WritePosLeft { 0 };
 		size_t m_WritePosRight { 0 };
 		float m_LastSampleRate { 0.0f };
+	};
+
+	class WLD_API ConvolutionReverb
+	{
+	public:
+		ConvolutionReverb() = default;
+
+		void LoadImpulseResponse(const AudioBuffer& irBuffer);
+		bool HasImpulseResponse() const noexcept { return !m_IrSamples.empty(); }
+		size_t GetIrLengthFrames() const noexcept { return m_IrSamples.size(); }
+
+		void SetWetDryMix(float mix01) noexcept { m_WetDryMix = std::clamp(mix01, 0.0f, 1.0f); }
+		float GetWetDryMix() const noexcept { return m_WetDryMix; }
+
+		void Reset() noexcept;
+		void Process(float* inOutLeft, float* inOutRight, uint32_t frameCount);
+
+	private:
+		std::vector<float> m_IrSamples;
+		std::vector<float> m_HistoryL;
+		std::vector<float> m_HistoryR;
+		size_t m_HistoryPos { 0 };
+		float m_WetDryMix { 0.4f };
+	};
+
+	class WLD_API ProceduralSynth
+	{
+	public:
+		enum class WaveType : uint8_t
+		{
+			Sine = 0,
+			Square = 1,
+			Triangle = 2,
+			Sawtooth = 3,
+			Pulse = 4,
+			Noise = 5
+		};
+
+		static AudioBuffer GenerateTone(
+			WaveType type,
+			float freqHz,
+			float durationSec,
+			float dutyCycle = 0.5f,
+			float volume = 0.5f,
+			uint32_t sampleRate = kDefaultSampleRate);
 	};
 }

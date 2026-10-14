@@ -50,6 +50,10 @@ namespace World::Wui
 		const TransformComponent& transform, glm::vec2& offset, glm::vec2& size,
 		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation = true);
 
+	WLD_API bool ManipulateAudioSource3D(const GizmoCamera& camera,
+		const TransformComponent& transform, float& minDistance, float& maxDistance,
+		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation = true);
+
 	WLD_API bool ManipulateCircleCollider2D(const GizmoCamera& camera,
 		const TransformComponent& transform, glm::vec2& offset, float& radius,
 		const WuiRect& viewport, WuiContext& ctx, bool allowManipulation = true);

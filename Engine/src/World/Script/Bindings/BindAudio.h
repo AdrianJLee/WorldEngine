@@ -3,6 +3,7 @@
 #include "World/Core/Export.h"
 #include <glm/vec3.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,4 +30,11 @@ namespace World
 	// 获取最近广播的 AI 声学刺激记录 (供 C++ AI 感知系统与单元测试消费)
 	WLD_API std::vector<AiStimulusRecord> GetRecentAiStimuli();
 	WLD_API void ClearRecentAiStimuli();
+
+	// RTPC 实时参数控制与查询 (供全局与声部参数映射及单元测试消费)
+	WLD_API void SetAudioParameter(const std::string& name, float value);
+	WLD_API float GetAudioParameter(const std::string& name);
+	WLD_API void SetVoiceAudioParameter(uint32_t voiceHandle, const std::string& name, float value);
+	WLD_API float GetVoiceAudioParameter(uint32_t voiceHandle, const std::string& name);
+	WLD_API void ClearAudioParameters();
 }

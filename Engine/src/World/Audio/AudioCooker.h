@@ -29,6 +29,8 @@ namespace World::Audio
 		static bool ParseCookedBinary(const uint8_t* data, size_t size, AudioBuffer& outBuffer, AudioCookSettings& outSettings);
 
 		static bool LoadWavFile(const std::string& wavPath, AudioBuffer& outBuffer);
+		static bool LoadOggVorbisFile(const std::string& oggPath, AudioBuffer& outBuffer);
+		static bool LoadAudioFile(const std::string& path, AudioBuffer& outBuffer);
 		static bool CookFile(const std::string& sourceWavPath, const std::string& outputCookedPath, const AudioCookSettings& settings);
 		static std::shared_ptr<AudioBuffer> LoadCookedFile(const std::string& cookedPath);
 

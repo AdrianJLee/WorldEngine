@@ -21,6 +21,8 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <cctype>
+#include <unordered_map>
 #include <vector>
 
 namespace World
@@ -30,6 +32,9 @@ namespace World
 		std::mutex s_AiStimulusMutex;
 		std::vector<AiStimulusRecord> s_RecentAiStimuli;
 		constexpr std::size_t kMaxRecentAiStimuli = 128;
+		std::mutex s_AudioParameterMutex;
+		std::unordered_map<std::string, float> s_GlobalParameters;
+		std::unordered_map<uint32_t, std::unordered_map<std::string, float>> s_VoiceParameters;
 		const char* TypeNameOf(const ScriptValue& value)
 		{
 			return value.TypeName();
@@ -483,6 +488,113 @@ namespace World
 			return ScriptValue::Nil();
 		}
 
+		ScriptValue AudioSetParameterImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[19];
+			CheckArgumentCount("Audio", method, count, 2);
+			const std::string name = RequireString("Audio", method, args, count, 0);
+			const double value = RequireNumber("Audio", method, args, count, 1);
+
+			SetAudioParameter(name, static_cast<float>(value));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioSetVoiceParameterImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[20];
+			CheckArgumentCount("Audio", method, count, 3);
+			const double voiceHandle = RequireNumber("Audio", method, args, count, 0);
+			const std::string name = RequireString("Audio", method, args, count, 1);
+			const double value = RequireNumber("Audio", method, args, count, 2);
+
+			SetVoiceAudioParameter(static_cast<uint32_t>(voiceHandle), name, static_cast<float>(value));
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue AudioGetParameterImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[21];
+			CheckArgumentCount("Audio", method, count, 1);
+			const std::string name = RequireString("Audio", method, args, count, 0);
+
+			float val = GetAudioParameter(name);
+			return ScriptValue::Number(static_cast<double>(val));
+		}
+
+		ScriptValue AudioPlayFootstepImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[22];
+			CheckArgumentCount("Audio", method, count, 1);
+			const std::string surface = RequireString("Audio", method, args, count, 0);
+			const double x = OptionalNumber("Audio", method, args, count, 1, 0.0);
+			const double y = OptionalNumber("Audio", method, args, count, 2, 0.0);
+			const double z = OptionalNumber("Audio", method, args, count, 3, 0.0);
+
+			std::string lowerSurface = surface;
+			std::transform(lowerSurface.begin(), lowerSurface.end(), lowerSurface.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+			std::string eventId = "footstep_" + lowerSurface;
+			auto& audioSystem = Audio::AudioSystem::Get();
+
+			if (!audioSystem.FindSoundEvent(eventId) && !audioSystem.FindSoundEvent(surface))
+			{
+				if (const auto* baseEvt = audioSystem.FindSoundEvent("footstep_player"))
+				{
+					Audio::SoundEvent surfaceEvent(eventId, Audio::kBusSfx);
+					surfaceEvent.GetSpatial().is3D = true;
+					surfaceEvent.GetSpatial().minDistance = 1.0f;
+					surfaceEvent.GetSpatial().maxDistance = 20.0f;
+					if (lowerSurface == "stone" || lowerSurface == "concrete" || lowerSurface == "rock")
+					{
+						surfaceEvent.SetVolumeRange(0.9f, 1.1f);
+						surfaceEvent.SetPitchRangeSemitones(1.0f, 3.0f);
+					}
+					else if (lowerSurface == "wood")
+					{
+						surfaceEvent.SetVolumeRange(0.85f, 1.05f);
+						surfaceEvent.SetPitchRangeSemitones(-1.0f, 1.0f);
+					}
+					else if (lowerSurface == "metal")
+					{
+						surfaceEvent.SetVolumeRange(0.9f, 1.1f);
+						surfaceEvent.SetPitchRangeSemitones(3.0f, 5.0f);
+					}
+					else
+					{
+						surfaceEvent.SetVolumeRange(0.8f, 1.0f);
+						surfaceEvent.SetPitchRangeSemitones(-1.5f, 1.5f);
+					}
+
+					if (baseEvt->GetRootContainer() && !baseEvt->GetRootContainer()->variations.empty())
+					{
+						surfaceEvent.GetRootContainer()->variations = baseEvt->GetRootContainer()->variations;
+					}
+					else
+					{
+						surfaceEvent.GetRootContainer()->variations.push_back({ "assets/audio/sfx/footstep_grass.waudio", 1.0f });
+					}
+					audioSystem.RegisterSoundEvent(surfaceEvent);
+				}
+				else
+				{
+					eventId = "footstep_player";
+				}
+			}
+
+			const std::string chosenEvent = audioSystem.FindSoundEvent(eventId) ? eventId :
+				(audioSystem.FindSoundEvent(surface) ? surface : "footstep_player");
+
+			Audio::VoiceHandle handle = audioSystem.PostEvent(
+				chosenEvent,
+				glm::vec3(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)));
+			return ScriptValue::Number(static_cast<double>(handle));
+		}
+
 		ScriptValue MusicPlayImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
@@ -616,6 +728,28 @@ namespace World
 			{ "loudness", "number", ScriptServiceArgType::Number, true, "Loudness factor between 0.0 and 1.0." },
 			{ "tag", "string", ScriptServiceArgType::String, true, "Semantic stimulus tag." },
 		};
+
+		static const ScriptServiceParam audioSetParameterParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "RTPC parameter name." },
+			{ "value", "number", ScriptServiceArgType::Number, true, "RTPC parameter value." },
+		};
+
+		static const ScriptServiceParam audioSetVoiceParameterParams[] = {
+			{ "voiceHandle", "number", ScriptServiceArgType::Number, true, "Voice handle returned by PostEvent." },
+			{ "name", "string", ScriptServiceArgType::String, true, "Local RTPC parameter name." },
+			{ "value", "number", ScriptServiceArgType::Number, true, "Local RTPC parameter value." },
+		};
+
+		static const ScriptServiceParam audioGetParameterParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "RTPC parameter name." },
+		};
+
+		static const ScriptServiceParam audioPlayFootstepParams[] = {
+			{ "surface", "string", ScriptServiceArgType::String, true, "Surface material name ('Grass', 'Stone', 'Wood', etc.)." },
+			{ "x", "number", ScriptServiceArgType::Number, false, "World X position (default 0)." },
+			{ "y", "number", ScriptServiceArgType::Number, false, "World Y position (default 0)." },
+			{ "z", "number", ScriptServiceArgType::Number, false, "World Z position (default 0)." },
+		};
 		static const ScriptServiceMethod audioMethods[] = {
 			{ "PostEvent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -729,6 +863,30 @@ namespace World
 				return AudioGetProfilerStatsImpl(args, count);
 			}, nullptr, 0, 0, "table",
 				"Get real-time audio profiler metrics including active voice counts, clipping, and DSP time." },
+
+			{ "SetParameter", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioSetParameterImpl(args, count);
+			}, audioSetParameterParams, 2, 2, "",
+				"Set a global RTPC parameter value to drive sound curves and mixer state." },
+
+			{ "SetVoiceParameter", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioSetVoiceParameterImpl(args, count);
+			}, audioSetVoiceParameterParams, 3, 3, "",
+				"Set a local RTPC parameter value on a specific voice instance." },
+
+			{ "GetParameter", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioGetParameterImpl(args, count);
+			}, audioGetParameterParams, 1, 1, "number",
+				"Get current global RTPC parameter value." },
+
+			{ "PlayFootstep", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioPlayFootstepImpl(args, count);
+			}, audioPlayFootstepParams, 4, 4, "number",
+				"Play a surface-specific footstep sound event; returns a voice handle or 0 on failure." },
 		};
 
 		static const ScriptServiceParam musicPlayParams[] = {
@@ -872,5 +1030,100 @@ namespace World
 	{
 		std::lock_guard<std::mutex> lock(s_AiStimulusMutex);
 		s_RecentAiStimuli.clear();
+	}
+
+	void SetAudioParameter(const std::string& name, float value)
+	{
+		{
+			std::lock_guard<std::mutex> lock(s_AudioParameterMutex);
+			s_GlobalParameters[name] = value;
+		}
+
+		if (name == "MasterVolume" || name == "master_volume")
+		{
+			Audio::AudioSystem::Get().SetBusVolume(Audio::kBusMaster, value);
+		}
+		else if (name == "MusicVolume" || name == "music_volume")
+		{
+			Audio::AudioSystem::Get().SetBusVolume(Audio::kBusMusic, value);
+		}
+		else if (name == "SfxVolume" || name == "sfx_volume")
+		{
+			Audio::AudioSystem::Get().SetBusVolume(Audio::kBusSfx, value);
+		}
+		else if (name == "VoiceVolume" || name == "voice_volume")
+		{
+			Audio::AudioSystem::Get().SetBusVolume(Audio::kBusVoice, value);
+		}
+		else if (name == "AmbienceVolume" || name == "ambience_volume")
+		{
+			Audio::AudioSystem::Get().SetBusVolume(Audio::kBusAmbience, value);
+		}
+	}
+
+	float GetAudioParameter(const std::string& name)
+	{
+		std::lock_guard<std::mutex> lock(s_AudioParameterMutex);
+		auto it = s_GlobalParameters.find(name);
+		if (it != s_GlobalParameters.end())
+			return it->second;
+		return 0.0f;
+	}
+
+	void SetVoiceAudioParameter(uint32_t voiceHandle, const std::string& name, float value)
+	{
+		{
+			std::lock_guard<std::mutex> lock(s_AudioParameterMutex);
+			s_VoiceParameters[voiceHandle][name] = value;
+		}
+
+		auto* voice = Audio::AudioSystem::Get().GetVoicePool().FindVoice(static_cast<Audio::VoiceHandle>(voiceHandle));
+		if (voice && voice->IsActive())
+		{
+			if (name == "Volume" || name == "volume" || name == "gain")
+			{
+				voice->SetVolume(value);
+			}
+			else if (name == "Pitch" || name == "pitch")
+			{
+				voice->SetPitch(value);
+			}
+			else if (name == "Occlusion" || name == "occlusion")
+			{
+				Audio::AudioSystem::Get().SetVoiceOcclusion(static_cast<Audio::VoiceHandle>(voiceHandle), value);
+			}
+			else if (name == "VolumetricRadius" || name == "volumetric_radius" || name == "radius")
+			{
+				Audio::AudioSystem::Get().SetVoiceVolumetricRadius(static_cast<Audio::VoiceHandle>(voiceHandle), value);
+			}
+			else if (name == "Looping" || name == "looping" || name == "loop")
+			{
+				Audio::AudioSystem::Get().SetVoiceLooping(static_cast<Audio::VoiceHandle>(voiceHandle), value > 0.5f);
+			}
+			else if (name == "Bitcrusher" || name == "bitcrusher")
+			{
+				voice->SetBitcrusher(value > 0.5f);
+			}
+		}
+	}
+
+	float GetVoiceAudioParameter(uint32_t voiceHandle, const std::string& name)
+	{
+		std::lock_guard<std::mutex> lock(s_AudioParameterMutex);
+		auto vit = s_VoiceParameters.find(voiceHandle);
+		if (vit != s_VoiceParameters.end())
+		{
+			auto pit = vit->second.find(name);
+			if (pit != vit->second.end())
+				return pit->second;
+		}
+		return 0.0f;
+	}
+
+	void ClearAudioParameters()
+	{
+		std::lock_guard<std::mutex> lock(s_AudioParameterMutex);
+		s_GlobalParameters.clear();
+		s_VoiceParameters.clear();
 	}
 }

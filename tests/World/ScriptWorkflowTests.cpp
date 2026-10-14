@@ -597,6 +597,152 @@ namespace
 		CHECK(result.IsBoolean());
 	}
 
+	void AudioServiceBindingsExposeRtpcAndFootstep()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		CHECK(audioTables != nullptr);
+		CHECK(serviceCount == 2);
+		CHECK(std::string(audioTables[0].Name) == "Audio");
+
+		const ScriptServiceMethod* setParameter = nullptr;
+		const ScriptServiceMethod* setVoiceParameter = nullptr;
+		const ScriptServiceMethod* getParameter = nullptr;
+		const ScriptServiceMethod* playFootstep = nullptr;
+
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			const std::string name = audioTables[0].Methods[i].Name;
+			if (name == "SetParameter")
+				setParameter = &audioTables[0].Methods[i];
+			else if (name == "SetVoiceParameter")
+				setVoiceParameter = &audioTables[0].Methods[i];
+			else if (name == "GetParameter")
+				getParameter = &audioTables[0].Methods[i];
+			else if (name == "PlayFootstep")
+				playFootstep = &audioTables[0].Methods[i];
+		}
+
+		CHECK(setParameter != nullptr);
+		CHECK(setParameter->ParamCount == 2);
+		CHECK(std::string(setParameter->Params[0].Name) == "name");
+		CHECK(std::string(setParameter->Params[1].Name) == "value");
+		CHECK(std::string(setParameter->ReturnType) == "");
+
+		CHECK(setVoiceParameter != nullptr);
+		CHECK(setVoiceParameter->ParamCount == 3);
+		CHECK(std::string(setVoiceParameter->Params[0].Name) == "voiceHandle");
+		CHECK(std::string(setVoiceParameter->Params[1].Name) == "name");
+		CHECK(std::string(setVoiceParameter->Params[2].Name) == "value");
+		CHECK(std::string(setVoiceParameter->ReturnType) == "");
+
+		CHECK(getParameter != nullptr);
+		CHECK(getParameter->ParamCount == 1);
+		CHECK(std::string(getParameter->Params[0].Name) == "name");
+		CHECK(std::string(getParameter->ReturnType) == "number");
+
+		CHECK(playFootstep != nullptr);
+		CHECK(playFootstep->ParamCount == 4);
+		CHECK(std::string(playFootstep->Params[0].Name) == "surface");
+		CHECK(playFootstep->Params[0].Required);
+		CHECK(std::string(playFootstep->Params[1].Name) == "x");
+		CHECK(!playFootstep->Params[1].Required);
+		CHECK(std::string(playFootstep->Params[2].Name) == "y");
+		CHECK(!playFootstep->Params[2].Required);
+		CHECK(std::string(playFootstep->Params[3].Name) == "z");
+		CHECK(!playFootstep->Params[3].Required);
+		CHECK(std::string(playFootstep->ReturnType) == "number");
+	}
+
+	void AudioRtpcAndFootstepFunctionality()
+	{
+		ClearAudioParameters();
+		CHECK(std::abs(GetAudioParameter("RainIntensity") - 0.0f) < 0.001f);
+
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		const ScriptServiceMethod* setParamMethod = nullptr;
+		const ScriptServiceMethod* getParamMethod = nullptr;
+		const ScriptServiceMethod* setVoiceParamMethod = nullptr;
+		const ScriptServiceMethod* playFootstepMethod = nullptr;
+
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			const std::string name = audioTables[0].Methods[i].Name;
+			if (name == "SetParameter")
+				setParamMethod = &audioTables[0].Methods[i];
+			else if (name == "GetParameter")
+				getParamMethod = &audioTables[0].Methods[i];
+			else if (name == "SetVoiceParameter")
+				setVoiceParamMethod = &audioTables[0].Methods[i];
+			else if (name == "PlayFootstep")
+				playFootstepMethod = &audioTables[0].Methods[i];
+		}
+
+		CHECK(setParamMethod != nullptr);
+		CHECK(getParamMethod != nullptr);
+		CHECK(setVoiceParamMethod != nullptr);
+		CHECK(playFootstepMethod != nullptr);
+
+		// Test SetParameter & GetParameter via script binding function
+		const ScriptValue setArgs[] = {
+			ScriptValue::String("RainIntensity"),
+			ScriptValue::Number(0.75)
+		};
+		ScriptValue setRes = setParamMethod->Function(setArgs, 2);
+		CHECK(setRes.IsNil());
+
+		const ScriptValue getArgs[] = {
+			ScriptValue::String("RainIntensity")
+		};
+		ScriptValue getRes = getParamMethod->Function(getArgs, 1);
+		CHECK(getRes.IsNumber());
+		double paramVal = 0.0;
+		CHECK(getRes.AsNumber(&paramVal));
+		CHECK(std::abs(paramVal - 0.75) < 0.001);
+
+		// Direct C++ API verification
+		CHECK(std::abs(GetAudioParameter("RainIntensity") - 0.75f) < 0.001f);
+
+		// Test SetVoiceParameter
+		const ScriptValue voiceArgs[] = {
+			ScriptValue::Number(1001.0),
+			ScriptValue::String("Cutoff"),
+			ScriptValue::Number(1200.0)
+		};
+		ScriptValue voiceRes = setVoiceParamMethod->Function(voiceArgs, 3);
+		CHECK(voiceRes.IsNil());
+		CHECK(std::abs(GetVoiceAudioParameter(1001, "Cutoff") - 1200.0f) < 0.001f);
+
+		// Test PlayFootstep with surface materials Grass, Stone, Wood
+		const ScriptValue stepGrass[] = {
+			ScriptValue::String("Grass"),
+			ScriptValue::Number(1.0),
+			ScriptValue::Number(0.0),
+			ScriptValue::Number(2.0)
+		};
+		ScriptValue grassRes = playFootstepMethod->Function(stepGrass, 4);
+		CHECK(grassRes.IsNumber());
+
+		const ScriptValue stepStone[] = {
+			ScriptValue::String("Stone")
+		};
+		ScriptValue stoneRes = playFootstepMethod->Function(stepStone, 1);
+		CHECK(stoneRes.IsNumber());
+
+		const ScriptValue stepWood[] = {
+			ScriptValue::String("Wood"),
+			ScriptValue::Number(5.0),
+			ScriptValue::Number(1.0)
+		};
+		ScriptValue woodRes = playFootstepMethod->Function(stepWood, 3);
+		CHECK(woodRes.IsNumber());
+
+		ClearAudioParameters();
+		CHECK(std::abs(GetAudioParameter("RainIntensity") - 0.0f) < 0.001f);
+		CHECK(std::abs(GetVoiceAudioParameter(1001, "Cutoff") - 0.0f) < 0.001f);
+	}
+
 	int RunAll()
 	{
 		const std::pair<const char*, void(*)()> tests[] = {
@@ -605,6 +751,8 @@ namespace
 			{ "Audio service descriptors expose rhythm beat, FFT spectrum, AI stimulus, and profiler", AudioServiceBindingsExposeRhythmFftAndAiStimulus },
 			{ "Audio BroadcastAiStimulus records acoustic stimuli with tag and coordinates", AudioBroadcastAiStimulusRecordsCorrectly },
 			{ "Audio IsBeat returns valid boolean state", AudioIsBeatReturnsBoolean },
+			{ "Audio service descriptors expose RTPC parameter control and surface footstep", AudioServiceBindingsExposeRtpcAndFootstep },
+			{ "Audio SetParameter, GetParameter, SetVoiceParameter, and PlayFootstep execute correctly", AudioRtpcAndFootstepFunctionality },
 			{ "ResolveScriptDiskPath hits a real disk file", ResolveDiskPathHitsRealFile },
 			{ "ResolveScriptDiskPath rejects invalid logical paths", ResolveDiskPathRejectsInvalidPaths },
 			{ "ResolveScriptDiskPath rejects a missing file", ResolveDiskPathRejectsMissingFile },

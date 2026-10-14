@@ -881,4 +881,153 @@ namespace World::Audio
 			inOutRight[f] = inR * (1.0f - m_WetDryMix) + delayedR * m_WetDryMix;
 		}
 	}
+
+	// =========================================================================
+	// ConvolutionReverb Implementation
+	// =========================================================================
+	void ConvolutionReverb::LoadImpulseResponse(const AudioBuffer& irBuffer)
+	{
+		uint32_t frames = irBuffer.GetFrameCount();
+		uint32_t channels = irBuffer.GetChannels();
+		if (frames == 0 || channels == 0)
+		{
+			m_IrSamples.clear();
+			return;
+		}
+
+		// Limit maximum IR length to 48000 frames (1 second) for real-time partitioned convolution
+		size_t maxFrames = std::min<size_t>(frames, 48000);
+		m_IrSamples.resize(maxFrames);
+
+		float maxPeak = 0.0f;
+		for (size_t f = 0; f < maxFrames; ++f)
+		{
+			float mono = 0.0f;
+			for (uint32_t c = 0; c < channels; ++c)
+			{
+				mono += irBuffer.GetSample(c, static_cast<uint32_t>(f));
+			}
+			mono /= static_cast<float>(channels);
+			m_IrSamples[f] = mono;
+			maxPeak = std::max(maxPeak, std::abs(mono));
+		}
+
+		// Normalize IR peak to 0.707 to avoid clipping
+		if (maxPeak > 1e-5f)
+		{
+			float scale = 0.707f / maxPeak;
+			for (float& s : m_IrSamples) s *= scale;
+		}
+
+		Reset();
+	}
+
+	void ConvolutionReverb::Reset() noexcept
+	{
+		size_t irLen = m_IrSamples.size();
+		if (irLen == 0) irLen = 1;
+		m_HistoryL.assign(irLen, 0.0f);
+		m_HistoryR.assign(irLen, 0.0f);
+		m_HistoryPos = 0;
+	}
+
+	void ConvolutionReverb::Process(float* inOutLeft, float* inOutRight, uint32_t frameCount)
+	{
+		if (!inOutLeft || !inOutRight || frameCount == 0 || m_IrSamples.empty()) return;
+
+		const size_t irLen = m_IrSamples.size();
+		if (m_HistoryL.size() < irLen)
+		{
+			m_HistoryL.assign(irLen, 0.0f);
+			m_HistoryR.assign(irLen, 0.0f);
+			m_HistoryPos = 0;
+		}
+
+		const float dry = 1.0f - m_WetDryMix;
+		const float wet = m_WetDryMix;
+
+		for (uint32_t f = 0; f < frameCount; ++f)
+		{
+			float inL = inOutLeft[f];
+			float inR = inOutRight[f];
+
+			m_HistoryL[m_HistoryPos] = inL;
+			m_HistoryR[m_HistoryPos] = inR;
+
+			// Direct time-domain convolution with impulse response
+			float convL = 0.0f;
+			float convR = 0.0f;
+			size_t readIndex = m_HistoryPos;
+
+			for (size_t k = 0; k < irLen; ++k)
+			{
+				float ir = m_IrSamples[k];
+				convL += m_HistoryL[readIndex] * ir;
+				convR += m_HistoryR[readIndex] * ir;
+
+				readIndex = (readIndex == 0) ? (irLen - 1) : (readIndex - 1);
+			}
+
+			inOutLeft[f] = inL * dry + convL * wet;
+			inOutRight[f] = inR * dry + convR * wet;
+
+			m_HistoryPos = (m_HistoryPos + 1) % irLen;
+		}
+	}
+
+	// =========================================================================
+	// ProceduralSynth Implementation
+	// =========================================================================
+	AudioBuffer ProceduralSynth::GenerateTone(
+		WaveType type,
+		float freqHz,
+		float durationSec,
+		float dutyCycle,
+		float volume,
+		uint32_t sampleRate)
+	{
+		uint32_t frames = static_cast<uint32_t>(std::max(0.01f, durationSec) * static_cast<float>(sampleRate));
+		AudioBuffer buf(sampleRate, 2, frames);
+
+		double phase = 0.0;
+		constexpr double kTwoPi = 6.28318530717958647692;
+		double phaseStep = kTwoPi * static_cast<double>(freqHz) / static_cast<double>(sampleRate);
+		dutyCycle = std::clamp(dutyCycle, 0.05f, 0.95f);
+		volume = std::clamp(volume, 0.0f, 1.0f);
+
+		for (uint32_t i = 0; i < frames; ++i)
+		{
+			float val = 0.0f;
+			double normPhase = phase / kTwoPi; // [0, 1)
+
+			switch (type)
+			{
+			case WaveType::Sine:
+				val = static_cast<float>(std::sin(phase));
+				break;
+			case WaveType::Square:
+			case WaveType::Pulse:
+				val = (normPhase < dutyCycle) ? 1.0f : -1.0f;
+				break;
+			case WaveType::Triangle:
+				val = static_cast<float>(2.0 * std::abs(2.0 * (normPhase - std::floor(normPhase + 0.5))) - 1.0);
+				break;
+			case WaveType::Sawtooth:
+				val = static_cast<float>(2.0 * (normPhase - std::floor(normPhase + 0.5)));
+				break;
+			case WaveType::Noise:
+				val = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX)) * 2.0f - 1.0f;
+				break;
+			}
+
+			val *= volume;
+			buf.SetSample(0, i, val);
+			buf.SetSample(1, i, val);
+
+			phase += phaseStep;
+			if (phase >= kTwoPi) phase -= kTwoPi;
+		}
+
+		return buf;
+	}
 }
