@@ -1,15 +1,32 @@
 #include "EngineBridge.h"
+#include "World/Plugins/PluginManager.h"
+#include "World/Core/WorldContext.h"
 #include "World/WUI/WuiJson.h"
 #include "World/Utils/Paths.h"
 
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
-#include <iostream>
+#include <filesystem>
 #include <sstream>
+
+#if defined(_WIN32)
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  pragma comment(lib, "ws2_32.lib")
+#endif
+
+#ifndef WLD_REPO_ROOT
+#  define WLD_REPO_ROOT "."
+#endif
+#ifndef WLD_OUTPUT_DIR
+#  define WLD_OUTPUT_DIR ""
+#endif
+#ifndef WLD_BUILD_TYPE
+#  define WLD_BUILD_TYPE "Debug"
+#endif
 
 namespace World::Mcp
 {
+	namespace fs = std::filesystem;
+
 	namespace
 	{
 		void InitWinsock()
@@ -36,6 +53,29 @@ namespace World::Mcp
 			closesocket(static_cast<SOCKET>(m_Socket));
 			m_Socket = ~0ull;
 		}
+
+		if (m_PluginManager)
+		{
+			World::Agent::WeAgentCore::Get().ResetToMinimalPolicy();
+		}
+	}
+
+	void EngineBridge::LoadHeadlessPlugins()
+	{
+		if (m_PluginManager)
+			return;
+
+		m_Context = std::make_unique<World::WorldContext>();
+		m_PluginManager = std::make_unique<World::Plugins::PluginManager>();
+
+		const fs::path engineRoot = fs::path(WLD_REPO_ROOT) / "plugins";
+		const fs::path projectRoot = World::Paths::ProjectDir() / "plugins";
+		const fs::path devEnginePluginBinRoot = fs::path(WLD_REPO_ROOT)
+			/ WLD_OUTPUT_DIR / "bin" / WLD_BUILD_TYPE / "plugins" / WLD_BUILD_TYPE;
+
+		std::string discoverErr;
+		m_PluginManager->Discover(engineRoot, projectRoot, { devEnginePluginBinRoot });
+		m_PluginManager->LoadAll(*m_Context);
 	}
 
 	bool EngineBridge::TryConnectSocket(uint16_t port)
@@ -80,8 +120,9 @@ namespace World::Mcp
 				return true;
 		}
 
-		// 离线/内置进程通道生效 (无外部编辑器运行时走本地 CommandRegistry)
+		// 离线/内置进程通道生效: 自动加载 we-studio, we-gen, we-ai-assistant 插件
 		m_ConnectedToRemote = false;
+		LoadHeadlessPlugins();
 		return true;
 	}
 
@@ -108,50 +149,56 @@ namespace World::Mcp
 			return false;
 		}
 
-		std::string buffer;
-		char chunk[4096];
-		while (buffer.find('\n') == std::string::npos)
+		// 接收单行响应
+		char buf[4096];
+		int bytes = recv(s, buf, sizeof(buf) - 1, 0);
+		if (bytes <= 0)
 		{
-			int received = recv(s, chunk, sizeof(chunk) - 1, 0);
-			if (received <= 0)
-			{
-				m_ConnectedToRemote = false;
-				return false;
-			}
-			chunk[received] = '\0';
-			buffer.append(chunk, received);
+			m_ConnectedToRemote = false;
+			return false;
 		}
+		buf[bytes] = '\0';
 
-		std::string err;
-		auto respOpt = JsonValue::Parse(buffer, &err);
-		if (!respOpt || respOpt->type != JsonValue::Type::Object)
+		std::string respLine(buf);
+		auto jsonOpt = JsonValue::Parse(respLine, nullptr);
+		if (!jsonOpt)
 		{
-			outError = "Failed to parse JSON response from remote editor: " + err;
+			outError = "Malformed JSON from remote editor: " + respLine;
 			return false;
 		}
 
-		const auto* okVal = respOpt->Find("ok");
-		const bool ok = okVal ? okVal->AsBool(false) : false;
+		const auto* okVal = jsonOpt->Find("ok");
+		bool ok = okVal ? okVal->AsBool() : false;
 
-		const auto* resVal = respOpt->Find("result");
-		if (resVal) outResult = resVal->AsString();
-
-		const auto* errVal = respOpt->Find("error");
-		if (errVal) outError = errVal->AsString();
-
-		return ok;
+		if (ok)
+		{
+			const auto* resVal = jsonOpt->Find("result");
+			outResult = resVal ? resVal->AsString() : "";
+			return true;
+		}
+		else
+		{
+			const auto* errVal = jsonOpt->Find("error");
+			outError = errVal ? errVal->AsString() : "Remote command failed";
+			return false;
+		}
 	}
 
 	bool EngineBridge::Dispatch(const std::string& cmd, const std::map<std::string, std::string>& args, std::string& outResult, std::string& outError)
 	{
-		// 1. 若连接到远程 Editor 实例，优先转发
 		if (m_ConnectedToRemote)
 		{
 			if (SendSocketCommand(cmd, args, outResult, outError))
 				return true;
 		}
 
-		// 2. 本地引擎内核派发
+		// 确保插件已加载
+		if (!m_PluginManager)
+		{
+			LoadHeadlessPlugins();
+		}
+
+		// 统一走引擎命令注册表
 		return Ai::CommandRegistry::Get().Dispatch(cmd, args, outResult, outError);
 	}
 }

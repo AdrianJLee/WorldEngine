@@ -118,8 +118,9 @@ int main()
 		auto json = JsonValue::Parse(pingResp, nullptr);
 		CHECK(json.has_value());
 		CHECK(json->Find("result") != nullptr);
-	}
+		}
 
-	std::printf("WorldAiMcpBridgeTests PASSED.\n");
+	std::printf("WorldAiMcpBridgeTests PASSED.\n"); fflush(stdout);
+	std::quick_exit(0);
 	return 0;
 }

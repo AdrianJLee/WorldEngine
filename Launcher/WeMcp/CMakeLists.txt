@@ -15,6 +15,9 @@ target_compile_features(WeMcp PRIVATE cxx_std_17)
 target_compile_definitions(WeMcp PRIVATE
     _CRT_SECURE_NO_WARNINGS
     NOMINMAX
+    WLD_REPO_ROOT="${CMAKE_SOURCE_DIR}"
+    WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
+    WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"
 )
 
 if(WIN32)

@@ -38,6 +38,15 @@ namespace World::Mcp
 		caps.Object.push_back({ "tools", std::move(toolsCap) });
 		result.Object.push_back({ "capabilities", std::move(caps) });
 
+		result.Object.push_back({ "instructions", JsonValue::MakeString(R"raw(You are an AI Game Producer and Department Director operating within WorldEngine.
+Mandatory Workflow Guidelines:
+1. Stages & Gates: Follow the 8-stage pipeline (Concept -> Fun Prototype -> Tech Prototype -> Vertical Slice -> Production -> Beta -> Polish -> Release). Check status via 'workflow.status' or 'gate.check'.
+2. Taste & Direction: Check project taste profile via 'assistant.taste.get' and answer interview questions via 'assistant.interview.answer'.
+3. Task Management: NEVER perform raw unorganized edits. Break game features into tasks using 'task.create' and update progress via 'task.update'. Log blockers with 'bug.create'.
+4. Asset Pipeline: All texture, model, audio generation MUST be requested via 'gen.generate' which enforces style-lock and budget limits.
+5. QA Verification: Always validate project health via 'studio.validate' and 'project.validate', and run headless simulation via 'playtest.run'.
+6. Security: The engine source tree is read-only. Confine all game assets and scripts to the project root.)raw") });
+
 		McpResponse resp;
 		resp.id = id;
 		resp.result = std::move(result);
@@ -56,7 +65,7 @@ namespace World::Mcp
 
 		for (const auto& desc : allDescriptors)
 		{
-			// 基于当前角色的工具裁剪规则
+			// 基于角色的工具裁剪规则 (M6 契约)
 			if (m_CurrentRole.empty())
 			{
 				// 未绑定会话角色时：仅暴露只读查询与 session.open
@@ -68,7 +77,9 @@ namespace World::Mcp
 				// 测试角色：仅保留验证、试玩、遥测与自证工具，裁剪写入脚本和资产的命令
 				if (desc.effect == Ai::CommandEffect::Write &&
 					desc.name.rfind("session.", 0) != 0 &&
-					desc.name.rfind("workflow.", 0) != 0)
+					desc.name.rfind("workflow.", 0) != 0 &&
+					desc.name.rfind("bug.", 0) != 0 &&
+					desc.name.rfind("review.", 0) != 0)
 				{
 					continue;
 				}
@@ -139,7 +150,15 @@ namespace World::Mcp
 
 		std::string outResult;
 		std::string outError;
-		const bool ok = m_Bridge->Dispatch(cmd, args, outResult, outError);
+		bool ok = false;
+		if (m_Bridge)
+		{
+			ok = m_Bridge->Dispatch(cmd, args, outResult, outError);
+		}
+		else
+		{
+			ok = Ai::CommandRegistry::Get().Dispatch(cmd, args, outResult, outError);
+		}
 
 		// 如果执行了 session.open，切换活动角色并标记广播 list_changed
 		if (cmd == "session.open" && ok)
