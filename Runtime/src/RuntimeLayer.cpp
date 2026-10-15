@@ -1,4 +1,5 @@
 #include "RuntimeLayer.h"
+#include "World/Events/KeyEvent.h"
 #include "GameHud.h"
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/Log.h"
@@ -158,6 +159,20 @@ namespace World
 		// 每帧只需要喂相机(见 OnUiFrame)。未启用 `.wui` 时本调用可省。
 		if (m_UiHost.Enabled())
 			m_UiHost.SetWorldPositionResolver(m_Host.GetWorldPositionResolver());
+
+		// 调试 HUD 默认关闭以呈现游戏原本模样；可通过环境变量 WLD_RUNTIME_HUD 或启动参数 --hud 开启
+		if (const char* hudEnv = std::getenv("WLD_RUNTIME_HUD"))
+		{
+			m_ShowGameHud = (std::strcmp(hudEnv, "1") == 0 || std::strcmp(hudEnv, "true") == 0);
+		}
+		for (int index = 1; index < __argc; ++index)
+		{
+			if (__argv[index] && (std::strcmp(__argv[index], "--hud") == 0 || std::strcmp(__argv[index], "--show-hud") == 0))
+			{
+				m_ShowGameHud = true;
+				break;
+			}
+		}
 
 		// GameHost 内部:清单中存在同一场景的关卡时走 LevelService(加载状态机/进度),否则退回路径加载。
 		m_Host.LoadLevel(scenePath, true);
@@ -355,11 +370,15 @@ namespace World
 			// 未启用 `.wui` 时本调用零成本(不 stat)。
 			m_UiHost.PollDocumentChanges();
 			m_UiHost.DrawFrame(wuiContext, input);
-			// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
-			// 会触发结构写断言并抛异常。
-			const Scene* activeScene = m_Host.GetScene().get();
-			const size_t entityCount = activeScene ? activeScene->GetRegistry().view<UUIDComponent>().size() : 0;
-			DrawGameHud(wuiContext, entityCount);
+			// 游戏原本模样:左上角示例调试 HUD 默认不绘制，仅在主动开启(F3 或 --hud/WLD_RUNTIME_HUD)时展示
+			if (m_ShowGameHud)
+			{
+				// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
+				// 会触发结构写断言并抛异常。
+				const Scene* activeScene = m_Host.GetScene().get();
+				const size_t entityCount = activeScene ? activeScene->GetRegistry().view<UUIDComponent>().size() : 0;
+				DrawGameHud(wuiContext, entityCount);
+			}
 			// T5c 流式加载界面:资产还在后台解析时覆盖在最上层(真实进度,不是假动画)。
 			// 顺序在 HUD 之后 = 加载期间盖住 HUD,解析完自然消失 —— 不需要"关掉加载界面"的状态机。
 			if (const std::size_t pending = m_Host.PendingAssetLoads(); pending > 0)
@@ -503,6 +522,7 @@ namespace World
 		EventDispatcher dispatcher(event);
 		// 拦截窗口 Resize 事件以动态更新相机投影矩阵
 		dispatcher.Dispatch<WindowResizeEvent>(WLD_BIND_EVENT_FN(RuntimeLayer::OnWindowResize));
+		dispatcher.Dispatch<KeyPressedEvent>(WLD_BIND_EVENT_FN(RuntimeLayer::OnKeyPressed));
 	}
 	bool RuntimeLayer::OnWindowResize(WindowResizeEvent& e)
 	{
@@ -512,6 +532,17 @@ namespace World
 
 		if (const Ref<Scene> scene = m_Host.GetScene())
 			scene->OnViewportResize(e.GetWidth(), e.GetHeight());
+		return false;
+	}
+	bool RuntimeLayer::OnKeyPressed(KeyPressedEvent& e)
+	{
+		// F3 快捷键切换调试 HUD 显示/隐藏
+		if (e.GetRepeatCount() == 0 && e.GetKeyCode() == KeyCodes::F3)
+		{
+			m_ShowGameHud = !m_ShowGameHud;
+			WLD_CORE_INFO("[runtime] Debug HUD {0}", m_ShowGameHud ? "enabled" : "disabled");
+			return true;
+		}
 		return false;
 	}
 

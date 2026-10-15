@@ -1,5 +1,6 @@
 #pragma once
 #include "World.h"
+#include "World/Events/KeyEvent.h"
 #include "World/Gameplay/Runtime/GameHost.h"
 // GameUI(M7b):UiHost 已提升到引擎(Editor 与 Runtime 共用同一实现)。
 #include "World/UI/UiHost.h"
@@ -27,6 +28,7 @@ namespace World
 		virtual void OnEvent(Event& event) override;
 	private:
 		bool OnWindowResize(WindowResizeEvent& e);
+		bool OnKeyPressed(KeyPressedEvent& e);
 		void CaptureFrameIfRequested();
 		// W3c:UI 阶段的开发钩子(脚本点击注入 / present 抓图),语义见 RuntimeLayer.cpp。
 		void ApplyDevUiActions();
@@ -54,5 +56,7 @@ namespace World
 		uint32_t m_PendingWidth = 0;
 		uint32_t m_PendingHeight = 0;
 		float m_ResizeDelay = 0.0f;
+		// 调试 HUD 开关(默认关闭以呈现游戏原本模样，支持 F3 或 WLD_RUNTIME_HUD/--hud 切换)
+		bool m_ShowGameHud = false;
 	};
 }

@@ -23,7 +23,7 @@ Nodes:
       border: "#3C4450FF"
       radius: 6
     Anchor:
-      # 右上角锚定:避开左下角的示例 Game HUD(DrawGameHud 的固定面板)。
+      # 右上角锚定:避开左上角示例 Game HUD(默认已隐藏，可通过 F3 或 --hud 呼出)。
       Min: [1, 0]
       Max: [1, 0]
       Pivot: [1, 0]
