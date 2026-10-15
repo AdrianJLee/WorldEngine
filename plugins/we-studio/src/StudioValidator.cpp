@@ -1,3 +1,4 @@
+#include "AgentsDocGenerator.h"
 #include "StudioValidator.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/WUI/WuiJson.h"
@@ -80,5 +81,25 @@ namespace World::Studio
 			return true;
 		};
 		reg.RegisterCommand(std::move(desc));
-	}
+
+		// studio.generate_agents_doc
+		CommandDescriptor docCmd;
+		docCmd.name = "studio.generate_agents_doc";
+		docCmd.description = "Generate project AGENTS.md and CLAUDE.md guidelines from studio policy.";
+		docCmd.effect = CommandEffect::Write;
+		docCmd.scope = CommandScope::Both;
+		docCmd.owner = "plugin:we-studio";
+		docCmd.paramsSchema = R"raw({"type":"object","properties":{"root":{"type":"string"}}})raw";
+		docCmd.resultSchema = R"raw({"type":"object","properties":{"generated":{"type":"boolean"}}})raw";
+		docCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& /*error*/)
+		{
+			const std::string root = args.count("root") ? args.at("root") : "";
+			StudioPolicy policy;
+			const bool ok = AgentsDocGenerator::WriteToProject(root, policy);
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "generated", JsonValue::MakeBool(ok) });
+			result = r.Dump();
+			return ok;
+		};
+		reg.RegisterCommand(std::move(docCmd));}
 }

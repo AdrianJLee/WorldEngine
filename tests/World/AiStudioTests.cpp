@@ -206,10 +206,27 @@ int main()
 		StudioValidator::RegisterCommands(reg);
 
 		CHECK(reg.HasCommand("task.create"));
+		CHECK(reg.HasCommand("task.update"));
 		CHECK(reg.HasCommand("task.list"));
 		CHECK(reg.HasCommand("bug.create"));
+		CHECK(reg.HasCommand("bug.update"));
 		CHECK(reg.HasCommand("bug.list"));
+		CHECK(reg.HasCommand("review.submit"));
+		CHECK(reg.HasCommand("studio.generate_agents_doc"));
 		CHECK(reg.HasCommand("studio.validate"));
+
+		// 验证 review.submit 与 task.update/bug.update 派发
+		std::string taskRes, bugRes, reviewRes, docRes, err;
+		CHECK(reg.Dispatch("task.create", { {"title", "TestTask"}, {"role", "programmer"}, {"root", tempProj.string()} }, taskRes, err));
+		auto tJson = JsonValue::Parse(taskRes, nullptr);
+		CHECK(tJson.has_value());
+		std::string tId = tJson->Find("task_id")->AsString();
+
+		CHECK(reg.Dispatch("task.update", { {"task_id", tId}, {"status", "in_progress"}, {"root", tempProj.string()} }, taskRes, err));
+		CHECK(reg.Dispatch("review.submit", { {"task_id", tId}, {"reviewer", "qa"}, {"verdict", "blocker"}, {"comments", "Bug found"}, {"root", tempProj.string()} }, reviewRes, err));
+
+		CHECK(reg.Dispatch("studio.generate_agents_doc", { {"root", tempProj.string()} }, docRes, err));
+		CHECK(fs::exists(tempProj / "AGENTS.md"));
 
 		std::string result;
 		std::string error;

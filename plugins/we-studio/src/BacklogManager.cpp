@@ -445,5 +445,107 @@ namespace World::Studio
 			return true;
 		};
 		reg.RegisterCommand(std::move(bugListCmd));
+
+		// 5. task.update
+		CommandDescriptor taskUpdateCmd;
+		taskUpdateCmd.name = "task.update";
+		taskUpdateCmd.description = "Update task status (open, in_progress, review, done) and notes.";
+		taskUpdateCmd.effect = CommandEffect::Write;
+		taskUpdateCmd.scope = CommandScope::Both;
+		taskUpdateCmd.owner = "plugin:we-studio";
+		taskUpdateCmd.paramsSchema = R"raw({"type":"object","properties":{"task_id":{"type":"string"},"status":{"type":"string"},"notes":{"type":"string"}},"required":["task_id","status"]})raw";
+		taskUpdateCmd.resultSchema = R"raw({"type":"object","properties":{"updated":{"type":"boolean"}}})raw";
+		taskUpdateCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string id = args.count("task_id") ? args.at("task_id") : (args.count("id") ? args.at("id") : "");
+			const std::string status = args.count("status") ? args.at("status") : "";
+			if (id.empty() || status.empty())
+			{
+				error = "Missing required task_id or status";
+				return false;
+			}
+			const std::string notes = args.count("notes") ? args.at("notes") : "";
+			const std::string root = args.count("root") ? args.at("root") : "";
+
+			const bool ok = Get().UpdateTask(root, id, status, notes);
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "updated", JsonValue::MakeBool(ok) });
+			result = r.Dump();
+			return ok;
+		};
+		reg.RegisterCommand(std::move(taskUpdateCmd));
+
+		// 6. bug.update
+		CommandDescriptor bugUpdateCmd;
+		bugUpdateCmd.name = "bug.update";
+		bugUpdateCmd.description = "Update bug status (open, in_progress, resolved, closed) and resolution.";
+		bugUpdateCmd.effect = CommandEffect::Write;
+		bugUpdateCmd.scope = CommandScope::Both;
+		bugUpdateCmd.owner = "plugin:we-studio";
+		bugUpdateCmd.paramsSchema = R"raw({"type":"object","properties":{"bug_id":{"type":"string"},"status":{"type":"string"},"resolution":{"type":"string"}},"required":["bug_id","status"]})raw";
+		bugUpdateCmd.resultSchema = R"raw({"type":"object","properties":{"updated":{"type":"boolean"}}})raw";
+		bugUpdateCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string id = args.count("bug_id") ? args.at("bug_id") : (args.count("id") ? args.at("id") : "");
+			const std::string status = args.count("status") ? args.at("status") : "";
+			if (id.empty() || status.empty())
+			{
+				error = "Missing required bug_id or status";
+				return false;
+			}
+			const std::string res = args.count("resolution") ? args.at("resolution") : "";
+			const std::string root = args.count("root") ? args.at("root") : "";
+
+			const bool ok = Get().UpdateBug(root, id, status, res);
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "updated", JsonValue::MakeBool(ok) });
+			result = r.Dump();
+			return ok;
+		};
+		reg.RegisterCommand(std::move(bugUpdateCmd));
+
+		// 7. review.submit
+		CommandDescriptor reviewSubmitCmd;
+		reviewSubmitCmd.name = "review.submit";
+		reviewSubmitCmd.description = "Submit role/department review for task (verdict: approved, rejected, blocker).";
+		reviewSubmitCmd.effect = CommandEffect::Write;
+		reviewSubmitCmd.scope = CommandScope::Both;
+		reviewSubmitCmd.owner = "plugin:we-studio";
+		reviewSubmitCmd.paramsSchema = R"raw({"type":"object","properties":{"task_id":{"type":"string"},"reviewer":{"type":"string"},"verdict":{"type":"string"},"comments":{"type":"string"}},"required":["task_id","reviewer","verdict"]})raw";
+		reviewSubmitCmd.resultSchema = R"raw({"type":"object","properties":{"submitted":{"type":"boolean"},"blocking":{"type":"boolean"}}})raw";
+		reviewSubmitCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string taskId = args.count("task_id") ? args.at("task_id") : "";
+			const std::string reviewer = args.count("reviewer") ? args.at("reviewer") : "";
+			const std::string verdict = args.count("verdict") ? args.at("verdict") : "";
+			if (taskId.empty() || reviewer.empty() || verdict.empty())
+			{
+				error = "Missing required task_id, reviewer, or verdict";
+				return false;
+			}
+			const std::string comments = args.count("comments") ? args.at("comments") : "";
+			const std::string root = args.count("root") ? args.at("root") : "";
+
+			const bool isBlocker = (verdict == "blocker");
+			if (isBlocker)
+			{
+				StudioBug b;
+				b.title = "Review Blocker for " + taskId + ": " + comments;
+				b.severity = "blocker";
+				b.role = reviewer;
+				b.status = "open";
+				Get().CreateBug(root, b);
+			}
+
+			std::string newStatus = (verdict == "approved") ? "done" : "review";
+			Get().UpdateTask(root, taskId, newStatus, "Review by " + reviewer + ": " + verdict + " (" + comments + ")");
+
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "submitted", JsonValue::MakeBool(true) });
+			r.Object.push_back({ "blocking", JsonValue::MakeBool(isBlocker) });
+			result = r.Dump();
+			return true;
+		};
+		reg.RegisterCommand(std::move(reviewSubmitCmd));
 	}
 }
