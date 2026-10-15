@@ -1,0 +1,10 @@
+prompt_template: "{prompt}, clean pixel art, 16-bit, game ready"
+negative_prompt: "blurry, photographic, 3d render"
+palette:
+  - "#1a1c23"
+  - "#0eaf9b"
+  - "#f79617"
+  - "#e43b44"
+seed_min: 10000
+seed_max: 99999
+reference_hash: "empty_template_baseline"

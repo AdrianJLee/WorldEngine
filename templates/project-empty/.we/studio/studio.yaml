@@ -1,0 +1,7 @@
+version: 1.0.0
+extends: default
+collaboration_mode: managed
+ethics:
+  dark_patterns_ban: true
+unattributed_edits:
+  policy: block

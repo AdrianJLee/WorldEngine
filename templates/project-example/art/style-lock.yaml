@@ -1,0 +1,10 @@
+prompt_template: "{prompt}, stylized 3d, vibrant lighting, clean silhouette"
+negative_prompt: "noisy, blurry, low resolution, photorealistic"
+palette:
+  - "#20222b"
+  - "#00a896"
+  - "#028090"
+  - "#f0f3f4"
+seed_min: 10000
+seed_max: 99999
+reference_hash: "default_visual_benchmark"
