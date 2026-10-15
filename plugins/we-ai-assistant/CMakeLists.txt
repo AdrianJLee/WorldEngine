@@ -2,6 +2,7 @@ add_library(WePlugin_we-ai-assistant SHARED
     src/AssistantPlugin.cpp
     src/InterviewSystem.cpp
     src/AssistantEngine.cpp
+    src/LlmClient.cpp
 )
 
 set_target_properties(WePlugin_we-ai-assistant PROPERTIES
@@ -18,6 +19,8 @@ target_include_directories(WePlugin_we-ai-assistant PRIVATE
 )
 target_link_libraries(WePlugin_we-ai-assistant PRIVATE
     World
+    winhttp
+    crypt32
 )
 target_compile_definitions(WePlugin_we-ai-assistant PRIVATE
     _CRT_SECURE_NO_WARNINGS

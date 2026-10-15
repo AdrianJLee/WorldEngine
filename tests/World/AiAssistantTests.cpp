@@ -4,6 +4,7 @@
 // 引入 we-ai-assistant 插件源码进行单元测试
 #include "../../plugins/we-ai-assistant/src/InterviewSystem.h"
 #include "../../plugins/we-ai-assistant/src/AssistantEngine.h"
+#include "../../plugins/we-ai-assistant/src/LlmClient.h"
 
 #include <cassert>
 #include <cstdio>
@@ -96,6 +97,30 @@ int main()
 		CHECK(json.has_value());
 		CHECK(json->Find("role")->AsString() == "producer");
 		CHECK(!json->Find("reply")->AsString().empty());
+	}
+
+	// 3a. 验证 LlmClient 凭据 DPAPI 存取与 URL 解析
+	{
+		auto& llm = LlmClient::Get();
+
+		// URL 解析测试
+		std::wstring host, path;
+		WORD port = 0;
+		bool isHttps = false;
+		CHECK(LlmClient::ParseUrl("https://api.openai.com/v1/chat/completions", host, port, path, isHttps));
+		CHECK(isHttps);
+		CHECK(port == 443);
+
+		CHECK(LlmClient::ParseUrl("http://localhost:11434/v1/chat/completions", host, port, path, isHttps));
+		CHECK(!isHttps);
+		CHECK(port == 11434);
+
+		// DPAPI 密钥存取测试
+		CHECK(llm.SaveApiKeyToDpapi("sk-test-fake-key-for-dpapi"));
+		CHECK(llm.HasDpapiApiKey());
+		CHECK(llm.LoadApiKeyFromDpapi() == "sk-test-fake-key-for-dpapi");
+		CHECK(llm.DeleteDpapiApiKey());
+		CHECK(!llm.HasDpapiApiKey());
 	}
 
 	// 3b. 验证 "做个游戏" 意图一键立项全流程触发

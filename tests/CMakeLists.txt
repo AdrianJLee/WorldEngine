@@ -2158,9 +2158,10 @@ add_executable(WorldAiAssistantTests
     World/AiAssistantTests.cpp
     ${CMAKE_SOURCE_DIR}/plugins/we-ai-assistant/src/InterviewSystem.cpp
     ${CMAKE_SOURCE_DIR}/plugins/we-ai-assistant/src/AssistantEngine.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-ai-assistant/src/LlmClient.cpp
 )
 target_include_directories(WorldAiAssistantTests PRIVATE ${CMAKE_SOURCE_DIR}/plugins/we-ai-assistant/src)
-target_link_libraries(WorldAiAssistantTests PRIVATE World)
+target_link_libraries(WorldAiAssistantTests PRIVATE World winhttp crypt32)
 target_compile_features(WorldAiAssistantTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldAiAssistantTests PRIVATE
     _CRT_SECURE_NO_WARNINGS

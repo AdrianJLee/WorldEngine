@@ -1,5 +1,6 @@
 #include "AssistantEngine.h"
 #include "InterviewSystem.h"
+#include "LlmClient.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/Agent/WeAgentCore.h"
 #include "World/WUI/WuiJson.h"
@@ -19,6 +20,7 @@ namespace World::Assistant
 	{
 		const std::string role = roleId.empty() ? "producer" : roleId;
 		auto& reg = World::Ai::CommandRegistry::Get();
+		auto& llm = LlmClient::Get();
 		const fs::path projDir = Paths::ProjectDir();
 
 		std::ostringstream reply;
@@ -96,9 +98,54 @@ namespace World::Assistant
 				  << "3. 📜 已生成首个玩家控制器脚本 (assets/scripts/PlayerController.luau)\n"
 				  << "4. 👥 40 专业职能库已就绪，全员上岗！\n\n"
 				  << "👉 您现在可以切换到【Studio Workflow (工作流看板)】查看首批任务并点击【▶ 开始进行】！";
+
+			JsonValue root;
+			root.type = JsonValue::Type::Object;
+			root.Object.push_back({ "role", JsonValue::MakeString(role) });
+			root.Object.push_back({ "reply", JsonValue::MakeString(reply.str()) });
+			return root.Dump();
 		}
-		// 1. 意图探测: 任务创建 (e.g. "创建任务: xxx" / "任务: xxx" / "task: xxx" / "做个主角" / "加个跳跃")
-		else if (message.find("创建任务") != std::string::npos || message.rfind("任务:", 0) == 0 || message.rfind("task:", 0) == 0
+
+		// 尝试优先走真正的外部大模型 API 推理 (OpenAI / DeepSeek / 本地 Ollama)
+		const bool hasLlmKey = llm.HasDpapiApiKey() || !llm.GetConfig().apiKey.empty()
+			|| (std::getenv("OPENAI_API_KEY") != nullptr) || (std::getenv("DEEPSEEK_API_KEY") != nullptr);
+		const bool isLocalOllama = (llm.GetConfig().endpoint.find("localhost") != std::string::npos
+			|| llm.GetConfig().endpoint.find("127.0.0.1") != std::string::npos);
+
+		if (hasLlmKey || isLocalOllama)
+		{
+			// 组装系统 Prompt 与项目上下文
+			auto stage = World::Agent::WeAgentCore::Get().GetCurrentStage();
+			std::string tasteProfile = InterviewSystem::Get().GetTasteProfile("");
+
+			std::ostringstream sysPrompt;
+			sysPrompt << "You are the " << role << " in WorldEngine game studio. "
+					  << "Current project stage is " << World::Agent::WorkflowStageToString(stage) << ". "
+					  << "Project taste profile:\n" << tasteProfile << "\n"
+					  << "Answer concisely and professionally. If user asks to create tasks, give concrete actionable specifications.";
+
+			std::vector<LlmMessage> messages = {
+				{ "system", sysPrompt.str() },
+				{ "user", message }
+			};
+
+			LlmResult llmRes = llm.Chat(messages);
+			if (llmRes.success && !llmRes.content.empty())
+			{
+				std::string modelTag = " [" + llm.GetConfig().model + "]";
+				std::string finalReply = "【" + role + modelTag + "】\n" + llmRes.content;
+
+				JsonValue root;
+				root.type = JsonValue::Type::Object;
+				root.Object.push_back({ "role", JsonValue::MakeString(role) });
+				root.Object.push_back({ "reply", JsonValue::MakeString(finalReply) });
+				root.Object.push_back({ "model", JsonValue::MakeString(llm.GetConfig().model) });
+				return root.Dump();
+			}
+		}
+
+		// 离线/后备规则意图处理
+		if (message.find("创建任务") != std::string::npos || message.rfind("任务:", 0) == 0 || message.rfind("task:", 0) == 0
 			|| message.find("做个主角") != std::string::npos || message.find("加个跳跃") != std::string::npos)
 		{
 			std::string title = message;
@@ -108,7 +155,6 @@ namespace World::Assistant
 			{
 				title = title.substr(colon + 1);
 			}
-			// 去除首尾空白
 			while (!title.empty() && (title.front() == ' ' || title.front() == '\t')) title.erase(0, 1);
 			while (!title.empty() && (title.back() == ' ' || title.back() == '\t')) title.pop_back();
 
@@ -134,7 +180,6 @@ namespace World::Assistant
 				reply << "【" << role << "】尝试创建任务失败: " << err;
 			}
 		}
-		// 2. 意图探测: 门禁与自检 (e.g. "门禁", "验证", "validate", "自检")
 		else if (message.find("门禁") != std::string::npos || message.find("验证") != std::string::npos || message.find("validate") != std::string::npos)
 		{
 			std::string res, err;
@@ -151,7 +196,6 @@ namespace World::Assistant
 				reply << "【QA 质检总监】门禁检验发现未通过项，需整改: " << err;
 			}
 		}
-		// 3. 意图探测: 阶段与进度 (e.g. "进度", "阶段", "stage")
 		else if (message.find("进度") != std::string::npos || message.find("阶段") != std::string::npos || message.find("stage") != std::string::npos)
 		{
 			auto stage = World::Agent::WeAgentCore::Get().GetCurrentStage();
@@ -160,33 +204,11 @@ namespace World::Assistant
 				  << "👥 组织架构: 4 级体系已就绪，40 专业职能库已加载\n"
 				  << "📌 可以在【工作流看板】中点击任务推进研发，或继续输入指令！";
 		}
-		// 4. 常规对话根据角色进行专业业务指导
 		else
 		{
-			if (role == "producer")
-			{
-				reply << "【L1 制作人】收到指导: 「" << message << "」。\n"
-					  << "已协调各部门总监。您可以输入“做个游戏”一键开启完整立项流程，或输入“创建任务: 具体内容”下发具体工作！";
-			}
-			else if (role == "qa" || role == "qa_director")
-			{
-				reply << "【QA 质检总监】收到指令: 「" << message << "」。\n"
-					  << "QA 部保持独立直属制作人。目前监控中无 Blocker 级缺陷，随时可输入“运行门禁”或点击“Run Studio Validation”执行自动化回归。";
-			}
-			else if (role == "tech_director")
-			{
-				reply << "【技术总监】收到指令: 「" << message << "」。\n"
-					  << "底层引擎与 Luau 脚本沙箱状态健康。代码改动受 WriteGuard 沙箱严格约束，杜绝误动引擎源码。";
-			}
-			else if (role == "creative_director")
-			{
-				reply << "【创意总监】收到指导: 「" << message << "」。\n"
-					  << "核心循环设计以“找乐(Fun)”为唯一准绳，严禁过度堆砌系统。建议先做 1 个可玩操作盒验证第一手感！";
-			}
-			else
-			{
-				reply << "【" << role << "】收到指令: 「" << message << "」，任务已记录在当前工作流中。";
-			}
+			reply << "【" << role << " (离线规则响应)】收到指令: 「" << message << "」。\n"
+				  << "已协调各部门总监。您可以输入“做个游戏”一键开启完整立项流程，或输入“创建任务: 具体内容”下发具体工作！\n\n"
+				  << "💡 [提示]: 当前运行在离线后备模式。如需启用 GPT-4o / DeepSeek / 本地 Ollama 真实大模型深度推理，请在顶部「⚙️ 模型设置」标签页填入 API Key 或配置本地模型端点。";
 		}
 
 		JsonValue root;
@@ -206,8 +228,8 @@ namespace World::Assistant
 		chatCmd.effect = CommandEffect::Read;
 		chatCmd.scope = CommandScope::Both;
 		chatCmd.owner = "plugin:we-ai-assistant";
-		chatCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"},\"role\":{\"type\":\"string\"}},\"required\":[\"message\"]}";
-		chatCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"reply\":{\"type\":\"string\"},\"role\":{\"type\":\"string\"}}}";
+		chatCmd.paramsSchema = R"raw({"type":"object","properties":{"message":{"type":"string"},"role":{"type":"string"},"model":{"type":"string"}},"required":["message"]})raw";
+		chatCmd.resultSchema = R"raw({"type":"object","properties":{"reply":{"type":"string"},"role":{"type":"string"}}})raw";
 		chatCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
 		{
 			const std::string msg = args.count("message") ? args.at("message") : "";

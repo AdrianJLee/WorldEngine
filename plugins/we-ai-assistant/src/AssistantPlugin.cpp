@@ -1,6 +1,7 @@
 #include "World/Plugins/WePluginApi.h"
 #include "InterviewSystem.h"
 #include "AssistantEngine.h"
+#include "LlmClient.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/Core/WorldContext.h"
 #include "World/WUI/WuiJson.h"
@@ -44,7 +45,12 @@ namespace
 	};
 
 	char g_InputBuffer[512] = "";
+	char g_EndpointBuffer[256] = "https://api.openai.com/v1/chat/completions";
+	char g_ModelBuffer[128] = "gpt-4o";
+	char g_ApiKeyBuffer[256] = "";
+
 	std::string g_LastStatus = "系统就绪。";
+	std::string g_TestPingResult = "未测试连接。";
 
 	void SendUserMessage(const std::string& msg)
 	{
@@ -93,11 +99,11 @@ namespace
 		if (!ui || !uiContext || !ui->Label || !ui->Button || !ui->Separator)
 			return 1;
 
-		// 1. 顶部 Tab 导航
-		static const char* kTabNames[] = { "💬 职能对话", "📋 制作人访谈", "🎨 品味档案" };
+		// 1. 顶部 Tab 导航 (4 标签: 对话 / 访谈 / 品味 / 模型设置)
+		static const char* kTabNames[] = { "💬 职能对话", "📋 制作人访谈", "🎨 品味档案", "⚙️ 模型设置" };
 		if (ui->TabBar)
 		{
-			ui->TabBar(uiContext, "assistant_tabs", kTabNames, 3, &g_ActiveTab);
+			ui->TabBar(uiContext, "assistant_tabs", kTabNames, 4, &g_ActiveTab);
 		}
 		else
 		{
@@ -108,21 +114,21 @@ namespace
 		// ==================== Tab 0: 职能对话 ====================
 		if (g_ActiveTab == 0)
 		{
-			// 角色选择条 (单行 TabBar，紧凑不占高度)
+			// 角色选择条
 			static const char* kRoles[] = { "制作人", "创意总监", "技术总监", "QA总监" };
 			if (ui->TabBar)
 			{
 				ui->TabBar(uiContext, "role_tab_bar", kRoles, 4, &g_SelectedRoleIdx);
 			}
 
-			// 输入框放在最顶部显眼位置，绝对不会被聊天记录挤到看不见
+			// 输入框置顶
 			bool submit = false;
 			if (ui->TextInput)
 			{
 				submit = ui->TextInput(uiContext, "input_chat_msg", g_InputBuffer, sizeof(g_InputBuffer));
 			}
 
-			// 发送与一键开干按钮
+			// 发送与动作按钮
 			if (ui->Button(uiContext, "btn_send_chat", "🚀 发送指令 (Send)") || submit)
 			{
 				std::string msg(g_InputBuffer);
@@ -208,6 +214,106 @@ namespace
 			ui->Separator(uiContext);
 
 			ui->Label(uiContext, "所有美术生成、策划文案、角色启闭均受上述档案统一约束。");
+		}
+		// ==================== Tab 3: 模型设置 ====================
+		else if (g_ActiveTab == 3)
+		{
+			auto& llm = LlmClient::Get();
+
+			if (ui->LabelColored)
+				ui->LabelColored(uiContext, "=== LLM 大模型推理服务接入与凭据托管 ===", 4 /*Accent*/);
+			else
+				ui->Label(uiContext, "=== LLM 大模型推理服务接入与凭据托管 ===");
+
+			// 预设快捷填入
+			if (ui->Button(uiContext, "preset_openai", "快速预设: OpenAI (GPT-4o)"))
+			{
+				std::strncpy(g_EndpointBuffer, "https://api.openai.com/v1/chat/completions", sizeof(g_EndpointBuffer));
+				std::strncpy(g_ModelBuffer, "gpt-4o", sizeof(g_ModelBuffer));
+			}
+			if (ui->Button(uiContext, "preset_deepseek", "快速预设: DeepSeek (deepseek-chat)"))
+			{
+				std::strncpy(g_EndpointBuffer, "https://api.deepseek.com/chat/completions", sizeof(g_EndpointBuffer));
+				std::strncpy(g_ModelBuffer, "deepseek-chat", sizeof(g_ModelBuffer));
+			}
+			if (ui->Button(uiContext, "preset_ollama", "快速预设: 本地 Ollama (http://localhost:11434, 免Key)"))
+			{
+				std::strncpy(g_EndpointBuffer, "http://localhost:11434/v1/chat/completions", sizeof(g_EndpointBuffer));
+				std::strncpy(g_ModelBuffer, "qwen2.5", sizeof(g_ModelBuffer));
+			}
+			ui->Separator(uiContext);
+
+			ui->Label(uiContext, "API 端点 (Endpoint URL):");
+			if (ui->TextInput)
+			{
+				ui->TextInput(uiContext, "input_endpoint", g_EndpointBuffer, sizeof(g_EndpointBuffer));
+			}
+
+			ui->Label(uiContext, "模型标识 (Model Identifier):");
+			if (ui->TextInput)
+			{
+				ui->TextInput(uiContext, "input_model", g_ModelBuffer, sizeof(g_ModelBuffer));
+			}
+
+			ui->Label(uiContext, "API Key (输入后点保存，将通过 Windows DPAPI 强加密):");
+			if (ui->TextInput)
+			{
+				ui->TextInput(uiContext, "input_api_key", g_ApiKeyBuffer, sizeof(g_ApiKeyBuffer));
+			}
+
+			if (ui->Button(uiContext, "btn_save_dpapi", "💾 保存 API Key (Windows DPAPI 加密托管)"))
+			{
+				std::string key(g_ApiKeyBuffer);
+				if (!key.empty())
+				{
+					llm.SaveApiKeyToDpapi(key);
+					g_ApiKeyBuffer[0] = 0;
+					g_TestPingResult = "API Key 已成功通过 Windows DPAPI 加密保存到 local/credentials/llm_key.bin！";
+				}
+			}
+
+			// 同步配置并测试
+			if (ui->Button(uiContext, "btn_test_ping", "🔌 测试模型连通性 (Ping Test)"))
+			{
+				LlmConfig cfg = llm.GetConfig();
+				cfg.endpoint = g_EndpointBuffer;
+				cfg.model = g_ModelBuffer;
+				llm.SetConfig(cfg);
+
+				std::vector<LlmMessage> testMsgs = {
+					{ "system", "You are a test ping agent." },
+					{ "user", "Ping. Reply exactly 'PONG' and your model name in 10 words." }
+				};
+
+				LlmResult res = llm.Chat(testMsgs);
+				if (res.success)
+				{
+					g_TestPingResult = "✅ 连接成功！模型应答: " + res.content;
+				}
+				else
+				{
+					g_TestPingResult = "❌ 连接失败: " + res.error;
+				}
+			}
+
+			if (ui->Button(uiContext, "btn_clear_key", "🗑️ 清除 DPAPI 已存密钥"))
+			{
+				llm.DeleteDpapiApiKey();
+				g_TestPingResult = "已删除本地 DPAPI 加密密钥。";
+			}
+
+			ui->Separator(uiContext);
+			std::string keyStatus = llm.HasDpapiApiKey() ? "🟢 DPAPI 密钥状态: 已保存加密凭据" : "⚪ DPAPI 密钥状态: 未配置 (运行在离线规则/本地模式)";
+			if (ui->LabelColored)
+			{
+				ui->LabelColored(uiContext, keyStatus.c_str(), llm.HasDpapiApiKey() ? 1 /*Success*/ : 2 /*Warning*/);
+				ui->LabelColored(uiContext, g_TestPingResult.c_str(), 0 /*Default*/);
+			}
+			else
+			{
+				ui->Label(uiContext, keyStatus.c_str());
+				ui->Label(uiContext, g_TestPingResult.c_str());
+			}
 		}
 
 		return 0;
