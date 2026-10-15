@@ -1,0 +1,9 @@
+id: designer
+name: 策划
+tier: L3
+department: creative
+kind: maker
+duties: [玩法找乐, 规则设定]
+outputs: [rules_sheet]
+write: ["design/**"]
+commands: [schema.*, task.*]

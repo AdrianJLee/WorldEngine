@@ -1,0 +1,449 @@
+#include "BacklogManager.h"
+#include "World/Ai/CommandRegistry.h"
+#include "World/WUI/WuiJson.h"
+#include "World/Utils/Paths.h"
+
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
+namespace World::Studio
+{
+	namespace fs = std::filesystem;
+	using namespace World::Wui;
+
+	std::string StudioTask::ToMarkdown() const
+	{
+		std::ostringstream ss;
+		ss << "---\n";
+		ss << "id: " << id << "\n";
+		ss << "title: " << title << "\n";
+		ss << "role: " << role << "\n";
+		ss << "stage: " << stage << "\n";
+		ss << "status: " << status << "\n";
+		ss << "outputs: [";
+		for (size_t i = 0; i < outputs.size(); ++i)
+		{
+			if (i) ss << ", ";
+			ss << outputs[i];
+		}
+		ss << "]\n";
+		ss << "---\n\n";
+		ss << description << "\n";
+		return ss.str();
+	}
+
+	std::string StudioTask::ToJson() const
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+		root.Object.push_back({ "id", JsonValue::MakeString(id) });
+		root.Object.push_back({ "title", JsonValue::MakeString(title) });
+		root.Object.push_back({ "role", JsonValue::MakeString(role) });
+		root.Object.push_back({ "stage", JsonValue::MakeString(stage) });
+		root.Object.push_back({ "status", JsonValue::MakeString(status) });
+		root.Object.push_back({ "description", JsonValue::MakeString(description) });
+
+		JsonValue outArr; outArr.type = JsonValue::Type::Array;
+		for (const auto& o : outputs) outArr.Array.push_back(JsonValue::MakeString(o));
+		root.Object.push_back({ "outputs", std::move(outArr) });
+
+		return root.Dump();
+	}
+
+	std::string StudioBug::ToMarkdown() const
+	{
+		std::ostringstream ss;
+		ss << "---\n";
+		ss << "id: " << id << "\n";
+		ss << "title: " << title << "\n";
+		ss << "severity: " << severity << "\n";
+		ss << "status: " << status << "\n";
+		ss << "role: " << role << "\n";
+		ss << "entity: " << entity << "\n";
+		ss << "asset: " << asset << "\n";
+		ss << "---\n\n";
+		ss << repro << "\n";
+		return ss.str();
+	}
+
+	std::string StudioBug::ToJson() const
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+		root.Object.push_back({ "id", JsonValue::MakeString(id) });
+		root.Object.push_back({ "title", JsonValue::MakeString(title) });
+		root.Object.push_back({ "severity", JsonValue::MakeString(severity) });
+		root.Object.push_back({ "status", JsonValue::MakeString(status) });
+		root.Object.push_back({ "role", JsonValue::MakeString(role) });
+		root.Object.push_back({ "entity", JsonValue::MakeString(entity) });
+		root.Object.push_back({ "asset", JsonValue::MakeString(asset) });
+		root.Object.push_back({ "repro", JsonValue::MakeString(repro) });
+		return root.Dump();
+	}
+
+	BacklogManager& BacklogManager::Get()
+	{
+		static BacklogManager instance;
+		return instance;
+	}
+
+	std::string BacklogManager::CreateTask(const std::string& projectRoot, const StudioTask& task)
+	{
+		const fs::path root = fs::u8path(projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot);
+		const fs::path backlogDir = root / ".we" / "studio" / "backlog";
+
+		std::error_code ec;
+		fs::create_directories(backlogDir, ec);
+
+		StudioTask t = task;
+		if (t.id.empty())
+		{
+			const auto now = std::chrono::system_clock::now().time_since_epoch().count();
+			t.id = "TASK-" + std::to_string(now) + "-" + std::to_string(++m_TaskCounter);
+		}
+
+		const fs::path filePath = backlogDir / (t.id + ".md");
+		std::ofstream f(filePath);
+		if (f)
+		{
+			f << t.ToMarkdown();
+		}
+
+		return t.id;
+	}
+
+	bool BacklogManager::UpdateTask(const std::string& projectRoot, const std::string& taskId, const std::string& status, const std::string& notes)
+	{
+		const fs::path root = fs::u8path(projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot);
+		const fs::path filePath = root / ".we" / "studio" / "backlog" / (taskId + ".md");
+
+		if (!fs::exists(filePath))
+			return false;
+
+		std::ifstream in(filePath);
+		std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		in.close();
+
+		// 更新 status 字段
+		const size_t pos = content.find("status: ");
+		if (pos != std::string::npos)
+		{
+			const size_t eol = content.find('\n', pos);
+			if (eol != std::string::npos)
+			{
+				content.replace(pos, eol - pos, "status: " + status);
+			}
+		}
+
+		if (!notes.empty())
+		{
+			content += "\n\n## Update Notes\n" + notes + "\n";
+		}
+
+		std::ofstream out(filePath, std::ios::trunc);
+		if (out)
+		{
+			out << content;
+			return true;
+		}
+
+		return false;
+	}
+
+	std::vector<StudioTask> BacklogManager::ListTasks(const std::string& projectRoot, const std::string& statusFilter, const std::string& roleFilter) const
+	{
+		std::vector<StudioTask> list;
+		const fs::path root = fs::u8path(projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot);
+		const fs::path backlogDir = root / ".we" / "studio" / "backlog";
+
+		if (!fs::exists(backlogDir))
+			return list;
+
+		std::error_code ec;
+		for (const auto& entry : fs::directory_iterator(backlogDir, ec))
+		{
+			if (!entry.is_regular_file() || entry.path().extension() != ".md")
+				continue;
+
+			std::ifstream f(entry.path());
+			std::string line;
+			StudioTask t;
+			t.id = entry.path().stem().string();
+
+			bool inFrontMatter = false;
+			while (std::getline(f, line))
+			{
+				if (line == "---")
+				{
+					inFrontMatter = !inFrontMatter;
+					continue;
+				}
+				if (inFrontMatter)
+				{
+					if (line.rfind("title: ", 0) == 0) t.title = line.substr(7);
+					else if (line.rfind("role: ", 0) == 0) t.role = line.substr(6);
+					else if (line.rfind("stage: ", 0) == 0) t.stage = line.substr(7);
+					else if (line.rfind("status: ", 0) == 0) t.status = line.substr(8);
+				}
+				else
+				{
+					t.description += line + "\n";
+				}
+			}
+
+			if (!statusFilter.empty() && t.status != statusFilter)
+				continue;
+			if (!roleFilter.empty() && t.role != roleFilter)
+				continue;
+
+			list.push_back(std::move(t));
+		}
+
+		return list;
+	}
+
+	std::string BacklogManager::CreateBug(const std::string& projectRoot, const StudioBug& bug)
+	{
+		const fs::path root = fs::u8path(projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot);
+		const fs::path bugsDir = root / ".we" / "studio" / "bugs";
+
+		std::error_code ec;
+		fs::create_directories(bugsDir, ec);
+
+		StudioBug b = bug;
+		if (b.id.empty())
+		{
+			const auto now = std::chrono::system_clock::now().time_since_epoch().count();
+			b.id = "BUG-" + std::to_string(now) + "-" + std::to_string(++m_BugCounter);
+		}
+
+		const fs::path filePath = bugsDir / (b.id + ".md");
+		std::ofstream f(filePath);
+		if (f)
+		{
+			f << b.ToMarkdown();
+		}
+
+		return b.id;
+	}
+
+	bool BacklogManager::UpdateBug(const std::string& projectRoot, const std::string& bugId, const std::string& status, const std::string& resolution)
+	{
+		const fs::path root = fs::u8path(projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot);
+		const fs::path filePath = root / ".we" / "studio" / "bugs" / (bugId + ".md");
+
+		if (!fs::exists(filePath))
+			return false;
+
+		std::ifstream in(filePath);
+		std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		in.close();
+
+		const size_t pos = content.find("status: ");
+		if (pos != std::string::npos)
+		{
+			const size_t eol = content.find('\n', pos);
+			if (eol != std::string::npos)
+			{
+				content.replace(pos, eol - pos, "status: " + status);
+			}
+		}
+
+		if (!resolution.empty())
+		{
+			content += "\n\n## Resolution\n" + resolution + "\n";
+		}
+
+		std::ofstream out(filePath, std::ios::trunc);
+		if (out)
+		{
+			out << content;
+			return true;
+		}
+
+		return false;
+	}
+
+	std::vector<StudioBug> BacklogManager::ListBugs(const std::string& projectRoot, const std::string& severityFilter, const std::string& statusFilter) const
+	{
+		std::vector<StudioBug> list;
+		const fs::path root = fs::u8path(projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot);
+		const fs::path bugsDir = root / ".we" / "studio" / "bugs";
+
+		if (!fs::exists(bugsDir))
+			return list;
+
+		std::error_code ec;
+		for (const auto& entry : fs::directory_iterator(bugsDir, ec))
+		{
+			if (!entry.is_regular_file() || entry.path().extension() != ".md")
+				continue;
+
+			std::ifstream f(entry.path());
+			std::string line;
+			StudioBug b;
+			b.id = entry.path().stem().string();
+
+			bool inFrontMatter = false;
+			while (std::getline(f, line))
+			{
+				if (line == "---")
+				{
+					inFrontMatter = !inFrontMatter;
+					continue;
+				}
+				if (inFrontMatter)
+				{
+					if (line.rfind("title: ", 0) == 0) b.title = line.substr(7);
+					else if (line.rfind("severity: ", 0) == 0) b.severity = line.substr(10);
+					else if (line.rfind("status: ", 0) == 0) b.status = line.substr(8);
+					else if (line.rfind("role: ", 0) == 0) b.role = line.substr(6);
+					else if (line.rfind("entity: ", 0) == 0) b.entity = line.substr(8);
+					else if (line.rfind("asset: ", 0) == 0) b.asset = line.substr(7);
+				}
+				else
+				{
+					b.repro += line + "\n";
+				}
+			}
+
+			if (!severityFilter.empty() && b.severity != severityFilter)
+				continue;
+			if (!statusFilter.empty() && b.status != statusFilter)
+				continue;
+
+			list.push_back(std::move(b));
+		}
+
+		return list;
+	}
+
+	void BacklogManager::RegisterCommands(World::Ai::CommandRegistry& reg)
+	{
+		using namespace World::Ai;
+
+		// 1. task.create
+		CommandDescriptor taskCreateCmd;
+		taskCreateCmd.name = "task.create";
+		taskCreateCmd.description = "Create a project backlog work item (.we/studio/backlog/<id>.md).";
+		taskCreateCmd.effect = CommandEffect::Write;
+		taskCreateCmd.scope = CommandScope::Both;
+		taskCreateCmd.owner = "plugin:we-studio";
+		taskCreateCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"role\":{\"type\":\"string\"},\"stage\":{\"type\":\"string\"},\"desc\":{\"type\":\"string\"}},\"required\":[\"title\",\"role\"]}";
+		taskCreateCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"task_id\":{\"type\":\"string\"}}}";
+		taskCreateCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			StudioTask t;
+			t.title = args.count("title") ? args.at("title") : "";
+			t.role = args.count("role") ? args.at("role") : "";
+			if (t.title.empty() || t.role.empty())
+			{
+				error = "Missing required title or role";
+				return false;
+			}
+			t.stage = args.count("stage") ? args.at("stage") : "prototype";
+			t.description = args.count("desc") ? args.at("desc") : "";
+			const std::string root = args.count("root") ? args.at("root") : "";
+
+			const std::string id = Get().CreateTask(root, t);
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "task_id", JsonValue::MakeString(id) });
+			result = r.Dump();
+			return true;
+		};
+		reg.RegisterCommand(std::move(taskCreateCmd));
+
+		// 2. task.list
+		CommandDescriptor taskListCmd;
+		taskListCmd.name = "task.list";
+		taskListCmd.description = "List backlog tasks with optional status/role filter.";
+		taskListCmd.effect = CommandEffect::Read;
+		taskListCmd.scope = CommandScope::Both;
+		taskListCmd.owner = "plugin:we-studio";
+		taskListCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"status\":{\"type\":\"string\"},\"role\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}}}";
+		taskListCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"tasks\":{\"type\":\"array\"}}}";
+		taskListCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& /*error*/)
+		{
+			const std::string root = args.count("root") ? args.at("root") : "";
+			const std::string status = args.count("status") ? args.at("status") : "";
+			const std::string role = args.count("role") ? args.at("role") : "";
+
+			const auto list = Get().ListTasks(root, status, role);
+			JsonValue r; r.type = JsonValue::Type::Object;
+			JsonValue arr; arr.type = JsonValue::Type::Array;
+			for (const auto& item : list)
+			{
+				auto opt = JsonValue::Parse(item.ToJson(), nullptr);
+				if (opt) arr.Array.push_back(std::move(*opt));
+			}
+			r.Object.push_back({ "tasks", std::move(arr) });
+			result = r.Dump();
+			return true;
+		};
+		reg.RegisterCommand(std::move(taskListCmd));
+
+		// 3. bug.create
+		CommandDescriptor bugCreateCmd;
+		bugCreateCmd.name = "bug.create";
+		bugCreateCmd.description = "File a project bug (.we/studio/bugs/<id>.md).";
+		bugCreateCmd.effect = CommandEffect::Write;
+		bugCreateCmd.scope = CommandScope::Both;
+		bugCreateCmd.owner = "plugin:we-studio";
+		bugCreateCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"severity\":{\"type\":\"string\"},\"repro\":{\"type\":\"string\"}},\"required\":[\"title\"]}";
+		bugCreateCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"bug_id\":{\"type\":\"string\"}}}";
+		bugCreateCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			StudioBug b;
+			b.title = args.count("title") ? args.at("title") : "";
+			if (b.title.empty())
+			{
+				error = "Missing required title";
+				return false;
+			}
+			b.severity = args.count("severity") ? args.at("severity") : "major";
+			b.repro = args.count("repro") ? args.at("repro") : "";
+			b.role = args.count("role") ? args.at("role") : "qa";
+			b.entity = args.count("entity") ? args.at("entity") : "";
+			b.asset = args.count("asset") ? args.at("asset") : "";
+			const std::string root = args.count("root") ? args.at("root") : "";
+
+			const std::string id = Get().CreateBug(root, b);
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "bug_id", JsonValue::MakeString(id) });
+			result = r.Dump();
+			return true;
+		};
+		reg.RegisterCommand(std::move(bugCreateCmd));
+
+		// 4. bug.list
+		CommandDescriptor bugListCmd;
+		bugListCmd.name = "bug.list";
+		bugListCmd.description = "List filed bugs with optional severity/status filter.";
+		bugListCmd.effect = CommandEffect::Read;
+		bugListCmd.scope = CommandScope::Both;
+		bugListCmd.owner = "plugin:we-studio";
+		bugListCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"severity\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}}}";
+		bugListCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"bugs\":{\"type\":\"array\"}}}";
+		bugListCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& /*error*/)
+		{
+			const std::string root = args.count("root") ? args.at("root") : "";
+			const std::string sev = args.count("severity") ? args.at("severity") : "";
+			const std::string status = args.count("status") ? args.at("status") : "";
+
+			const auto list = Get().ListBugs(root, sev, status);
+			JsonValue r; r.type = JsonValue::Type::Object;
+			JsonValue arr; arr.type = JsonValue::Type::Array;
+			for (const auto& item : list)
+			{
+				auto opt = JsonValue::Parse(item.ToJson(), nullptr);
+				if (opt) arr.Array.push_back(std::move(*opt));
+			}
+			r.Object.push_back({ "bugs", std::move(arr) });
+			result = r.Dump();
+			return true;
+		};
+		reg.RegisterCommand(std::move(bugListCmd));
+	}
+}

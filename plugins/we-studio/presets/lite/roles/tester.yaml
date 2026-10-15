@@ -1,0 +1,9 @@
+id: tester
+name: 测试
+tier: L3
+department: qa
+kind: maker+reviewer
+duties: [手感调优, 冒烟验证]
+outputs: [signoff]
+write: ["qa/**"]
+commands: [playtest.*, bug.*, task.*]

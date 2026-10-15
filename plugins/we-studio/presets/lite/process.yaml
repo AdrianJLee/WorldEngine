@@ -1,0 +1,46 @@
+version: 1.0.0
+preset: lite
+name: Game Jam Fast Package (5 Roles / 4 Stages)
+stages:
+  - index: 0
+    id: concept
+    name: 极速概念
+    lead: producer
+    participants: [designer, artist, programmer, tester]
+    outputs: [one_page_gdd]
+    gate:
+      required_outputs: [one_page_gdd]
+      reviewers: [producer]
+
+  - index: 1
+    id: prototype
+    name: 原型实现
+    lead: programmer
+    participants: [designer, artist, tester]
+    outputs: [playable_build]
+    gate:
+      required_outputs: [playable_build]
+      self_validations: [project.validate, playtest.run]
+      reviewers: [designer, tester]
+
+  - index: 2
+    id: polish
+    name: 试玩与手感调优
+    lead: tester
+    participants: [designer, programmer, artist]
+    outputs: [tuning_signoff]
+    gate:
+      required_outputs: [tuning_signoff]
+      self_validations: [playtest.run]
+      reviewers: [tester]
+
+  - index: 3
+    id: release
+    name: 极速打包上架
+    lead: producer
+    participants: [programmer]
+    outputs: [jam_package]
+    gate:
+      required_outputs: [jam_package]
+      self_validations: [build.package]
+      reviewers: [producer]

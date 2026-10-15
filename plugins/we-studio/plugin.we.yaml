@@ -1,0 +1,22 @@
+id: engine.we-studio
+name: WorldEngine Studio
+version: 1.0.0
+abi: 1
+entry: WePluginQuery
+engine: ">=2.0"
+scope: engine
+ship: never
+provides:
+  - workflow.policy
+  - workflow.backlog
+  - editor.ui
+contributes:
+  commands:
+    - task.create
+    - task.update
+    - task.list
+    - bug.create
+    - bug.update
+    - bug.list
+    - review.submit
+    - studio.validate

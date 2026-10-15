@@ -1,0 +1,16 @@
+id: art_director
+name: 艺术总监
+tier: L2
+department: art
+reports_to: producer
+kind: maker+reviewer
+duties: [视觉基准确立, 风格锁维护, 美术资产抽检]
+outputs: [art_style_lock, palette_spec]
+write: ["art/**", "assets/materials/**"]
+commands: [asset.*, task.*, review.*, capture.*]
+reviews: [concept_artist_2d, modeler_3d_prop, character_artist, tech_artist]
+activation:
+  category: mandatory
+  genres: [all]
+  wake_stages: [0, 1, 2, 3, 4]
+  default_state: active

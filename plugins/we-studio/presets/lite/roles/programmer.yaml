@@ -1,0 +1,9 @@
+id: programmer
+name: 程序
+tier: L3
+department: tech
+kind: maker
+duties: [脚本编码, 场景组装]
+outputs: [scripts, prefabs]
+write: ["assets/scripts/**", "assets/scenes/**"]
+commands: [schema.*, api.luau_stubs, scene.*, playtest.*]

@@ -1,0 +1,16 @@
+id: game_designer
+name: 核心策划
+tier: L3
+department: creative
+reports_to: creative_director
+kind: maker
+duties: [系统设计, 数值平衡, 规则清单, 验收断言]
+outputs: [gdd, datatable, acceptance_criteria]
+write: ["design/**", "data/**"]
+commands: [schema.*, task.*, scene.query]
+reviews: [gameplay_programmer]
+activation:
+  category: mandatory
+  genres: [all]
+  wake_stages: [1, 2, 3, 4, 5]
+  default_state: active

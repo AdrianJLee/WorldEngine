@@ -1,0 +1,12 @@
+version: 1.0.0
+dark_patterns_ban:
+  enabled: true
+  rules:
+    - id: no_forced_grind
+      description: 禁止通过人为陡增难度数值强制玩家等待或付费
+    - id: transparent_drop_rates
+      description: 随机与掉落概率必须公示且算法透明
+    - id: clear_exit
+      description: 用户可随时存档退出，禁止阻碍离开的心理陷阱
+    - id: ethical_monetization
+      description: 任何商业化设计必须经体验总监与出品人双重道德伦理审查

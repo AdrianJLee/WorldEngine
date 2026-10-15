@@ -1,0 +1,16 @@
+id: gameplay_tester
+name: 玩法测试
+tier: L3
+department: qa
+reports_to: qa_director
+kind: maker
+duties: [用例编写, 自动化断言注入, 边界探索, Bug提交]
+outputs: [test_cases, bug_reports, playtest_asserts]
+write: ["qa/**"]
+commands: [playtest.*, bug.*, capture.*, task.*]
+reviews: []
+activation:
+  category: mandatory
+  genres: [all]
+  wake_stages: [2, 3, 4, 5]
+  default_state: active

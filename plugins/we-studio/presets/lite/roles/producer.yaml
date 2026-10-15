@@ -1,0 +1,9 @@
+id: producer
+name: 制作人
+tier: L1
+department: management
+kind: host
+duties: [极速统筹, 阶段把控]
+outputs: [one_page_gdd]
+write: ["docs/**"]
+commands: [workflow.*, session.*, task.*]

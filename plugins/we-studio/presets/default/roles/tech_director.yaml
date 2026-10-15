@@ -1,0 +1,16 @@
+id: tech_director
+name: 技术总监
+tier: L2
+department: tech
+reports_to: producer
+kind: maker+reviewer
+duties: [架构方案评审, 性能预算制定, 引擎缺口把控]
+outputs: [tech_spec, perf_budget]
+write: ["src/**", "config/**"]
+commands: [task.*, review.*, engine.*, prof.*]
+reviews: [gameplay_programmer, engine_programmer]
+activation:
+  category: mandatory
+  genres: [all]
+  wake_stages: [0, 1, 2, 3, 4, 5]
+  default_state: active

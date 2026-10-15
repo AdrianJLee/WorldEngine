@@ -1,0 +1,9 @@
+id: artist
+name: 美术
+tier: L3
+department: art
+kind: maker
+duties: [精灵与贴图制作, 视觉包装]
+outputs: [art_assets]
+write: ["assets/**"]
+commands: [asset.*, task.*]
