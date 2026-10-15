@@ -173,6 +173,80 @@ namespace World
 			}
 			return false;
 		}
+
+		void UiLabelColored(void* uiContext, const char* text, int tone)
+		{
+			auto* state = DrawStateOf(uiContext);
+			if (!state || !text || OutOfRoom(*state))
+				return;
+			Wui::WuiColor col = state->Theme.Text;
+			if (tone == 1) col = state->Theme.Success;
+			else if (tone == 2) col = state->Theme.Warning;
+			else if (tone == 3) col = state->Theme.Danger;
+			else if (tone == 4) col = state->Theme.Accent;
+			else if (tone == 5) col = state->Theme.TextMuted;
+
+			Wui::Label(*state->Ctx, { state->Rect.X + kPluginPanelPad, state->Cursor }, text,
+				col, state->Theme.FontSizeBody);
+
+			const std::string autoId = "#" + std::to_string(state->TextIndex++);
+			Wui::WuiAccessNode node;
+			node.Id = ControlId(*state, autoId.c_str(), "label");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = state->Panel.DisplayId;
+			node.Kind = "label";
+			node.Label = text;
+			node.Rect = { state->Rect.X + kPluginPanelPad, state->Cursor,
+				std::max(10.0f, state->Rect.W - kPluginPanelPad * 2.0f), kPluginPanelLabelHeight };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+			Advance(*state, kPluginPanelLabelHeight);
+		}
+
+		bool UiTextInput(void* uiContext, const char* id, char* buffer, uint32_t capacity)
+		{
+			auto* state = DrawStateOf(uiContext);
+			if (!state || !buffer || capacity == 0 || OutOfRoom(*state))
+				return false;
+			const Wui::WuiRect rect { state->Rect.X + kPluginPanelPad, state->Cursor,
+				std::max(100.0f, state->Rect.W - kPluginPanelPad * 2.0f), kPluginPanelControlHeight };
+			std::string stdBuf(buffer);
+			const bool submitted = Wui::TextField(*state->Ctx, ControlId(*state, id, "text_input"), rect,
+				stdBuf, state->Theme);
+			if (!stdBuf.empty())
+			{
+				std::strncpy(buffer, stdBuf.c_str(), capacity - 1);
+				buffer[capacity - 1] = 0;
+			}
+			else
+			{
+				buffer[0] = 0;
+			}
+			Advance(*state, kPluginPanelControlHeight);
+			return submitted;
+		}
+
+		bool UiTabBar(void* uiContext, const char* id, const char* const* tabs, uint32_t count, int* active)
+		{
+			auto* state = DrawStateOf(uiContext);
+			if (!state || !tabs || count == 0 || !active || OutOfRoom(*state))
+				return false;
+			std::vector<std::string> tabList;
+			tabList.reserve(count);
+			for (uint32_t i = 0; i < count; ++i)
+				tabList.push_back(tabs[i] ? tabs[i] : "");
+			const Wui::WuiRect rect { state->Rect.X + kPluginPanelPad, state->Cursor,
+				std::max(100.0f, state->Rect.W - kPluginPanelPad * 2.0f), kPluginPanelControlHeight };
+			int currentActive = *active;
+			const bool changed = Wui::TabBar(*state->Ctx, ControlId(*state, id, "tab_bar"), rect,
+				tabList, currentActive, state->Theme);
+			if (changed)
+				*active = currentActive;
+			Advance(*state, kPluginPanelControlHeight + 4.0f);
+			return changed;
+		}
 	}
 
 	PluginEditorHost::PluginEditorHost(EditorShell& shell) : m_Shell(shell) {}
@@ -259,6 +333,9 @@ namespace World
 		ui.Separator = &UiSeparator;
 		ui.Checkbox = &UiCheckbox;
 		ui.InvokeCommand = &UiInvokeCommand;
+		ui.LabelColored = &UiLabelColored;
+		ui.TextInput = &UiTextInput;
+		ui.TabBar = &UiTabBar;
 
 		RegisterPanelRootNode(state);
 		const int result = (draw)(userData, &ui, &state);

@@ -274,6 +274,10 @@ namespace World::Plugins
 	// 从面板里触发宿主命令面里的一条命令(宿主按命令名解析;成功 = true)。
 	// 用于"按钮 → 命令"：插件面板把按钮点击转成命令调用,执行统计与 AI 通道同源。
 	using WeEditorUiInvokeCommandFn = bool (*)(void* uiContext, const char* commandId);
+	// 追加控件回调(只含 C 类型;tone: 0=默认文本, 1=成功/推荐, 2=警告, 3=危险, 4=强调, 5=灰度次要):
+	using WeEditorUiLabelColoredFn = void (*)(void* uiContext, const char* text, int tone);
+	using WeEditorUiTextInputFn = bool (*)(void* uiContext, const char* id, char* buffer, uint32_t capacity);
+	using WeEditorUiTabBarFn = bool (*)(void* uiContext, const char* id, const char* const* tabs, uint32_t count, int* active);
 
 	// 首期小组件表(宿主提供;函数指针可为 null = 该控件不可用)。
 	struct WeEditorUiApi
@@ -291,6 +295,11 @@ namespace World::Plugins
 		WeEditorUiCheckboxFn Checkbox = nullptr;
 		// 命令面(可空 = 宿主未接命令面;面板按钮据此给可读提示而不是静默失败)。
 		WeEditorUiInvokeCommandFn InvokeCommand = nullptr;
+
+		// 增强交互控件面 (尾部追加字段，自检覆盖到对应字段再调用)
+		WeEditorUiLabelColoredFn LabelColored = nullptr;
+		WeEditorUiTextInputFn TextInput = nullptr;
+		WeEditorUiTabBarFn TabBar = nullptr;
 	};
 
 	// 命令描述(只含 C 类型)。Callback 由宿主在命令面里调用(命令被执行时);

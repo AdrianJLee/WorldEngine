@@ -8,7 +8,7 @@
 
 #include <memory>
 #include <string>
-#include <cstddef>
+#include <vector>
 
 #if defined(_WIN32)
 #  define WE_PLUGIN_EXPORT extern "C" __declspec(dllexport)
@@ -30,34 +30,201 @@ namespace
 		return s_Host;
 	}
 
-	std::string g_StudioStatus = "Studio workflow active. Gates and roles ready.";
+	int g_StudioActiveTab = 0;
+	char g_NewTaskBuffer[256] = "";
+	char g_NewBugBuffer[256] = "";
+	std::string g_ValidationReport = "点击下方按钮运行全量门禁自检。";
+	int g_ValidationTone = 0;
 
 	int DrawStudioPanel(void* /*userData*/, const WeEditorUiApi* ui, void* uiContext)
 	{
 		if (!ui || !uiContext || !ui->Label || !ui->Button || !ui->Separator)
 			return 1;
 
-		ui->Label(uiContext, "=== WorldEngine Studio Workflow ===");
-		ui->Separator(uiContext);
-
-		ui->Label(uiContext, "Preset: default (40 Roles / 8-Stage Pipeline)");
-		ui->Label(uiContext, "Backlog: .we/studio/backlog/ | Bugs: .we/studio/bugs/");
-		ui->Separator(uiContext);
-
-		ui->Label(uiContext, g_StudioStatus.c_str());
-
-		if (ui->Button(uiContext, "btn_validate", "Run Studio Validation (studio.validate)"))
+		// 1. 顶部 Tab 导航
+		static const char* kTabs[] = { "📋 任务看板", "🐛 缺陷跟踪", "🛡️ 门禁自检" };
+		if (ui->TabBar)
 		{
-			std::string res, err;
-			auto& reg = World::Ai::CommandRegistry::Get();
-			if (reg.Dispatch("studio.validate", {}, res, err))
-			{
-				g_StudioStatus = "Validation OK: " + res;
-			}
+			ui->TabBar(uiContext, "studio_tabs", kTabs, 3, &g_StudioActiveTab);
+		}
+		else
+		{
+			ui->Label(uiContext, "=== WorldEngine Studio Workflow ===");
+		}
+		ui->Separator(uiContext);
+
+		// ==================== Tab 0: 任务看板 ====================
+		if (g_StudioActiveTab == 0)
+		{
+			auto& bm = BacklogManager::Get();
+			auto tasks = bm.ListTasks("");
+
+			std::string countStr = "当前待办/执行中任务数量: " + std::to_string(tasks.size());
+			if (ui->LabelColored)
+				ui->LabelColored(uiContext, countStr.c_str(), 4 /*Accent*/);
 			else
+				ui->Label(uiContext, countStr.c_str());
+
+			// 显示前 5 条任务
+			size_t maxShow = std::min<size_t>(tasks.size(), 5);
+			for (size_t i = 0; i < maxShow; ++i)
 			{
-				g_StudioStatus = "Validation Failed: " + err;
+				const auto& t = tasks[i];
+				std::string tLine = "[" + t.status + "] " + t.id + ": " + t.title + " (" + t.role + ")";
+				int tone = (t.status == "done" ? 1 /*Success*/ : (t.status == "in_progress" ? 4 /*Accent*/ : 0));
+				if (ui->LabelColored)
+					ui->LabelColored(uiContext, tLine.c_str(), tone);
+				else
+					ui->Label(uiContext, tLine.c_str());
+
+				if (t.status == "open")
+				{
+					std::string btnId = "btn_start_" + t.id;
+					if (ui->Button(uiContext, btnId.c_str(), "▶ 开始进行 (In Progress)"))
+					{
+						bm.UpdateTask("", t.id, "in_progress", "Started via Editor UI");
+					}
+				}
+				else if (t.status == "in_progress")
+				{
+					std::string btnId = "btn_done_" + t.id;
+					if (ui->Button(uiContext, btnId.c_str(), "✔ 完成交付 (Done)"))
+					{
+						bm.UpdateTask("", t.id, "done", "Completed via Editor UI");
+					}
+				}
 			}
+
+			ui->Separator(uiContext);
+			ui->Label(uiContext, "--- 创建新研发任务 ---");
+			if (ui->TextInput)
+			{
+				ui->TextInput(uiContext, "input_task_title", g_NewTaskBuffer, sizeof(g_NewTaskBuffer));
+			}
+
+			if (ui->Button(uiContext, "btn_create_task", "➕ 创建任务 (Create Task)"))
+			{
+				std::string title(g_NewTaskBuffer);
+				if (!title.empty())
+				{
+					StudioTask newTask;
+					newTask.title = title;
+					newTask.role = "gameplay_programmer";
+					newTask.stage = "0";
+					newTask.status = "open";
+					bm.CreateTask("", newTask);
+					g_NewTaskBuffer[0] = 0;
+				}
+			}
+		}
+		// ==================== Tab 1: 缺陷跟踪 ====================
+		else if (g_StudioActiveTab == 1)
+		{
+			auto& bm = BacklogManager::Get();
+			auto bugs = bm.ListBugs("");
+
+			std::string bugCount = "未闭环 Bug 总数: " + std::to_string(bugs.size());
+			if (ui->LabelColored)
+				ui->LabelColored(uiContext, bugCount.c_str(), bugs.empty() ? 1 /*Success*/ : 3 /*Danger*/);
+			else
+				ui->Label(uiContext, bugCount.c_str());
+
+			size_t maxShow = std::min<size_t>(bugs.size(), 5);
+			for (size_t i = 0; i < maxShow; ++i)
+			{
+				const auto& b = bugs[i];
+				std::string bLine = "[" + b.severity + "] " + b.id + ": " + b.title + " -> " + b.status;
+				int tone = (b.severity == "blocker" ? 3 /*Danger*/ : 2 /*Warning*/);
+				if (ui->LabelColored)
+					ui->LabelColored(uiContext, bLine.c_str(), tone);
+				else
+					ui->Label(uiContext, bLine.c_str());
+
+				if (b.status != "closed")
+				{
+					std::string btnId = "btn_close_bug_" + b.id;
+					if (ui->Button(uiContext, btnId.c_str(), "✔ 关闭/修复该缺陷"))
+					{
+						bm.UpdateBug("", b.id, "closed", "Resolved via Editor UI");
+					}
+				}
+			}
+
+			ui->Separator(uiContext);
+			ui->Label(uiContext, "--- 快速登记缺陷 ---");
+			if (ui->TextInput)
+			{
+				ui->TextInput(uiContext, "input_bug_title", g_NewBugBuffer, sizeof(g_NewBugBuffer));
+			}
+
+			if (ui->Button(uiContext, "btn_report_blocker", "🚨 登记 Blocker 阻断缺陷"))
+			{
+				std::string title(g_NewBugBuffer);
+				if (!title.empty())
+				{
+					StudioBug bug;
+					bug.title = title;
+					bug.severity = "blocker";
+					bug.status = "open";
+					bug.role = "qa";
+					bm.CreateBug("", bug);
+					g_NewBugBuffer[0] = 0;
+				}
+			}
+			if (ui->Button(uiContext, "btn_report_major", "⚠️ 登记 Major 普通缺陷"))
+			{
+				std::string title(g_NewBugBuffer);
+				if (!title.empty())
+				{
+					StudioBug bug;
+					bug.title = title;
+					bug.severity = "major";
+					bug.status = "open";
+					bug.role = "qa";
+					bm.CreateBug("", bug);
+					g_NewBugBuffer[0] = 0;
+				}
+			}
+		}
+		// ==================== Tab 2: 门禁自检 ====================
+		else if (g_StudioActiveTab == 2)
+		{
+			auto stage = World::Agent::WeAgentCore::Get().GetCurrentStage();
+			std::string stageInfo = "流水线阶段: " + std::string(World::Agent::WorkflowStageToString(stage))
+				+ " (Stage " + std::to_string(static_cast<int>(stage)) + ") | 预设: default (40 Roles)";
+			if (ui->LabelColored)
+				ui->LabelColored(uiContext, stageInfo.c_str(), 4 /*Accent*/);
+			else
+				ui->Label(uiContext, stageInfo.c_str());
+
+			ui->Separator(uiContext);
+			ui->Label(uiContext, "【质量门禁检查矩阵】");
+			ui->Label(uiContext, "1. 阶段工件完备性 (GDD / Tech Spec / Assets)");
+			ui->Label(uiContext, "2. 阻断缺陷清零 (Zero Blocker Bugs)");
+			ui->Label(uiContext, "3. 写入守卫审计 (WriteGuard Sandbox)");
+			ui->Label(uiContext, "4. 引擎源码指纹保护 (Engine Tree Integrity)");
+			ui->Separator(uiContext);
+
+			if (ui->Button(uiContext, "btn_run_validate", "🛡️ 立即运行全量门禁校验 (studio.validate)"))
+			{
+				std::string res, err;
+				auto& reg = World::Ai::CommandRegistry::Get();
+				if (reg.Dispatch("studio.validate", {}, res, err))
+				{
+					g_ValidationReport = "✅ 门禁通过！项目工件完备，0 个 Blocker 缺陷，无越权改动。允许推进到下一研发阶段。";
+					g_ValidationTone = 1; // Success
+				}
+				else
+				{
+					g_ValidationReport = "❌ 门禁阻断: " + err;
+					g_ValidationTone = 3; // Danger
+				}
+			}
+
+			if (ui->LabelColored)
+				ui->LabelColored(uiContext, g_ValidationReport.c_str(), g_ValidationTone);
+			else
+				ui->Label(uiContext, g_ValidationReport.c_str());
 		}
 
 		return 0;
