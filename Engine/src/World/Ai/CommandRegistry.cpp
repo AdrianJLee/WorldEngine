@@ -3,6 +3,8 @@
 #include "World/Ai/SelfValidation.h"
 #include "World/Ai/PlaytestRunner.h"
 #include "World/Ai/ProjectPackager.h"
+#include "World/Ai/WriteGuard.h"
+#include "World/Ai/ChangesetTracker.h"
 #include "World/WUI/WuiJson.h"
 
 #include <algorithm>
@@ -80,6 +82,7 @@ namespace World::Ai
 		SelfValidation::RegisterCommands(*this);
 		PlaytestRunner::RegisterCommands(*this);
 		ProjectPackager::RegisterCommands(*this);
+		ChangesetTracker::RegisterCommands(*this);
 	}
 
 	bool CommandRegistry::RegisterCommand(CommandDescriptor desc)
