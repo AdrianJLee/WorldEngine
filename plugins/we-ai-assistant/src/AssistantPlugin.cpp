@@ -31,7 +31,7 @@ namespace
 
 	// 状态维护
 	int g_ActiveTab = 0;
-	std::string g_SelectedRole = "producer"; // producer | creative_director | tech_director | qa_director
+	int g_SelectedRoleIdx = 0; // 0=producer, 1=creative_director, 2=tech_director, 3=qa_director
 
 	struct ChatEntry
 	{
@@ -40,7 +40,7 @@ namespace
 		bool isUser = false;
 	};
 	std::vector<ChatEntry> g_ChatHistory = {
-		{ "L1 制作人", "您好，出品人！我是您的 AI 执行制作人。在下方输入需求或点击快捷指令，我将组织各部门推进游戏制作。", false }
+		{ "L1 制作人", "您好，出品人！我是您的 AI 执行制作人。\n点击下方「🎮 一键做个游戏」或输入需求，我将立即为您建立立项工程并下发任务！", false }
 	};
 
 	char g_InputBuffer[512] = "";
@@ -50,12 +50,17 @@ namespace
 	{
 		if (msg.empty()) return;
 		g_ChatHistory.push_back({ "出品人 (您)", msg, true });
-		if (g_ChatHistory.size() > 6)
+		if (g_ChatHistory.size() > 4)
 		{
 			g_ChatHistory.erase(g_ChatHistory.begin());
 		}
 
-		std::string rawJson = AssistantEngine::Chat(msg, g_SelectedRole);
+		std::string roleName = "producer";
+		if (g_SelectedRoleIdx == 1) roleName = "creative_director";
+		else if (g_SelectedRoleIdx == 2) roleName = "tech_director";
+		else if (g_SelectedRoleIdx == 3) roleName = "qa_director";
+
+		std::string rawJson = AssistantEngine::Chat(msg, roleName);
 		std::string replyText = rawJson;
 		auto parsed = World::Wui::JsonValue::Parse(rawJson, nullptr);
 		if (parsed && parsed->type == World::Wui::JsonValue::Type::Object)
@@ -71,16 +76,16 @@ namespace
 		}
 
 		std::string senderName = "L1 制作人";
-		if (g_SelectedRole == "creative_director") senderName = "创意总监";
-		else if (g_SelectedRole == "tech_director") senderName = "技术总监";
-		else if (g_SelectedRole == "qa_director" || g_SelectedRole == "qa") senderName = "QA 质检总监";
+		if (g_SelectedRoleIdx == 1) senderName = "创意总监";
+		else if (g_SelectedRoleIdx == 2) senderName = "技术总监";
+		else if (g_SelectedRoleIdx == 3) senderName = "QA 质检总监";
 
 		g_ChatHistory.push_back({ senderName, replyText, false });
-		if (g_ChatHistory.size() > 6)
+		if (g_ChatHistory.size() > 4)
 		{
 			g_ChatHistory.erase(g_ChatHistory.begin());
 		}
-		g_LastStatus = "指令已执行并回显。";
+		g_LastStatus = "已执行: " + msg;
 	}
 
 	int DrawAssistantPanel(void* /*userData*/, const WeEditorUiApi* ui, void* uiContext)
@@ -103,43 +108,22 @@ namespace
 		// ==================== Tab 0: 职能对话 ====================
 		if (g_ActiveTab == 0)
 		{
-			// 角色选择指示
-			std::string roleBar = "当前对话总监: " + g_SelectedRole + "  | 切换: ";
-			if (ui->LabelColored)
-				ui->LabelColored(uiContext, roleBar.c_str(), 4 /*Accent*/);
-			else
-				ui->Label(uiContext, roleBar.c_str());
-
-			if (ui->Button(uiContext, "role_prod", "制作人")) g_SelectedRole = "producer";
-			if (ui->Button(uiContext, "role_cd", "创意总监")) g_SelectedRole = "creative_director";
-			if (ui->Button(uiContext, "role_td", "技术总监")) g_SelectedRole = "tech_director";
-			if (ui->Button(uiContext, "role_qa", "QA总监")) g_SelectedRole = "qa_director";
-			ui->Separator(uiContext);
-
-			// 对话历史
-			for (size_t i = 0; i < g_ChatHistory.size(); ++i)
+			// 角色选择条 (单行 TabBar，紧凑不占高度)
+			static const char* kRoles[] = { "制作人", "创意总监", "技术总监", "QA总监" };
+			if (ui->TabBar)
 			{
-				const auto& item = g_ChatHistory[i];
-				std::string line = (item.isUser ? "👤 " : "🤖 ") + item.sender + ": " + item.text;
-				if (ui->LabelColored)
-				{
-					ui->LabelColored(uiContext, line.c_str(), item.isUser ? 4 /*Accent*/ : 0 /*Default*/);
-				}
-				else
-				{
-					ui->Label(uiContext, line.c_str());
-				}
+				ui->TabBar(uiContext, "role_tab_bar", kRoles, 4, &g_SelectedRoleIdx);
 			}
-			ui->Separator(uiContext);
 
-			// 输入框与发送按钮
+			// 输入框放在最顶部显眼位置，绝对不会被聊天记录挤到看不见
 			bool submit = false;
 			if (ui->TextInput)
 			{
 				submit = ui->TextInput(uiContext, "input_chat_msg", g_InputBuffer, sizeof(g_InputBuffer));
 			}
 
-			if (ui->Button(uiContext, "btn_send_chat", "发送指令 (Send)") || submit)
+			// 发送与一键开干按钮
+			if (ui->Button(uiContext, "btn_send_chat", "🚀 发送指令 (Send)") || submit)
 			{
 				std::string msg(g_InputBuffer);
 				if (!msg.empty())
@@ -149,14 +133,32 @@ namespace
 				}
 			}
 
-			// 快速指令 Chip 按钮
-			if (ui->Button(uiContext, "chip_task", "⚡ 快速指令: 创建核心手感任务"))
+			if (ui->Button(uiContext, "btn_make_game_quick", "🎮 一键做个游戏 (Kickoff Project)"))
 			{
-				SendUserMessage("创建任务: 打磨主角跳跃初速度与两段跳手感");
+				SendUserMessage("做个游戏");
 			}
-			if (ui->Button(uiContext, "chip_gate", "🛡️ 快速指令: 运行项目门禁验证"))
+
+			if (ui->Button(uiContext, "btn_gate_quick", "🛡️ 运行项目门禁自检"))
 			{
 				SendUserMessage("运行门禁");
+			}
+			ui->Separator(uiContext);
+
+			// 对话历史
+			for (size_t i = 0; i < g_ChatHistory.size(); ++i)
+			{
+				const auto& item = g_ChatHistory[i];
+				std::string header = (item.isUser ? "👤 " : "🤖 ") + item.sender + ":";
+				if (ui->LabelColored)
+				{
+					ui->LabelColored(uiContext, header.c_str(), item.isUser ? 4 /*Accent*/ : 1 /*Success*/);
+					ui->LabelColored(uiContext, item.text.c_str(), 0 /*Default*/);
+				}
+				else
+				{
+					ui->Label(uiContext, header.c_str());
+					ui->Label(uiContext, item.text.c_str());
+				}
 			}
 		}
 		// ==================== Tab 1: 制作人访谈 ====================

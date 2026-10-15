@@ -31,7 +31,7 @@ void EditorShell::EnsurePluginPanelFromId(const std::string& panelId){
 			m_Panels.push_back(panelId);
 		// 默认尺寸:插件面板要装下几行控件与按钮(与插件管理器同量级)。
 		if (m_LastFloatRects.find(panelId) == m_LastFloatRects.end())
-			m_LastFloatRects[panelId] = Wui::WuiRect { 200.0f, 140.0f, 520.0f, 360.0f };
+			m_LastFloatRects[panelId] = Wui::WuiRect { 200.0f, 120.0f, 540.0f, 520.0f };
 		if (!m_Layout.FindFloatMemory(panelId, nullptr))
 			m_Layout.FloatMemory.push_back({ panelId, m_LastFloatRects[panelId] });
 	}

@@ -98,6 +98,15 @@ int main()
 		CHECK(!json->Find("reply")->AsString().empty());
 	}
 
+	// 3b. 验证 "做个游戏" 意图一键立项全流程触发
+	{
+		std::string kickoffResp = AssistantEngine::Chat("做个游戏", "producer");
+		CHECK(!kickoffResp.empty());
+		auto json = JsonValue::Parse(kickoffResp, nullptr);
+		CHECK(json.has_value());
+		CHECK(json->Find("reply")->AsString().find("已为您一键启动游戏立项全流程") != std::string::npos);
+	}
+
 	// 4. 验证 CommandRegistry 集成与统一派发
 	{
 		auto& reg = CommandRegistry::Get();

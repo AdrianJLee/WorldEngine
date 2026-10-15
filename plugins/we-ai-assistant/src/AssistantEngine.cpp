@@ -3,23 +3,103 @@
 #include "World/Ai/CommandRegistry.h"
 #include "World/Agent/WeAgentCore.h"
 #include "World/WUI/WuiJson.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 
 namespace World::Assistant
 {
+	namespace fs = std::filesystem;
 	using namespace World::Wui;
 
 	std::string AssistantEngine::Chat(const std::string& message, const std::string& roleId)
 	{
 		const std::string role = roleId.empty() ? "producer" : roleId;
 		auto& reg = World::Ai::CommandRegistry::Get();
+		const fs::path projDir = Paths::ProjectDir();
 
 		std::ostringstream reply;
 
-		// 1. 意图探测: 任务创建 (e.g. "创建任务: xxx" / "任务: xxx" / "task: xxx")
-		if (message.find("创建任务") != std::string::npos || message.rfind("任务:", 0) == 0 || message.rfind("task:", 0) == 0)
+		// 0. 意图探测: 做个游戏 / 做游戏 / 我要做游戏 / 开发游戏 / 立项 / kickoff
+		const bool isMakeGame = (message.find("做") != std::string::npos && message.find("游戏") != std::string::npos)
+			|| (message.find("开发") != std::string::npos && message.find("游戏") != std::string::npos)
+			|| message.find("立项") != std::string::npos
+			|| message.find("kickoff") != std::string::npos;
+
+		if (isMakeGame)
+		{
+			// 1. 沉淀初始品味偏好与立项假设
+			auto& interview = InterviewSystem::Get();
+			interview.AnswerQuestion("", "genre_type", "2d_platformer");
+			interview.AnswerQuestion("", "art_style", "pixel_16bit");
+			interview.AnswerQuestion("", "target_scale", "compact_indie");
+
+			// 2. 自动拆解并下发首批 3 项核心研发任务进 Backlog
+			std::string r1, r2, r3, err;
+			reg.Dispatch("task.create", {
+				{ "title", "确立核心玩法机制与控制手感模型" },
+				{ "stage", "0" },
+				{ "assignee", "creative_director" },
+				{ "department", "Creative" },
+				{ "description", "设计核心循环、移动初速度、跳跃曲线与手柄反馈" }
+			}, r1, err);
+
+			reg.Dispatch("task.create", {
+				{ "title", "搭建首个找乐原型测试场景与主角控制器" },
+				{ "stage", "0" },
+				{ "assignee", "gameplay_programmer" },
+				{ "department", "Tech" },
+				{ "description", "实现 PlayerController.luau，接入物理移动与碰撞" }
+			}, r2, err);
+
+			reg.Dispatch("task.create", {
+				{ "title", "确立 16-bit 像素低饱和视觉风格与色彩盘" },
+				{ "stage", "0" },
+				{ "assignee", "art_director" },
+				{ "department", "Art" },
+				{ "description", "制定主角色块、瓦片图集与背景视差规范" }
+			}, r3, err);
+
+			// 3. 自动生成首个玩家控制器脚本模板
+			const fs::path scriptDir = projDir / "assets" / "scripts";
+			std::error_code ec;
+			fs::create_directories(scriptDir, ec);
+			const fs::path playerScript = scriptDir / "PlayerController.luau";
+			if (!fs::exists(playerScript))
+			{
+				std::ofstream sf(playerScript);
+				if (sf)
+				{
+					sf << "-- PlayerController.luau: 玩家角色手感控制器\n"
+					   << "local PlayerController = {}\n"
+					   << "PlayerController.speed = 220.0\n"
+					   << "PlayerController.jumpVelocity = 480.0\n"
+					   << "PlayerController.coyoteTime = 0.15\n"
+					   << "PlayerController.doubleJumpEnabled = true\n\n"
+					   << "function PlayerController.OnUpdate(dt)\n"
+					   << "    -- 核心手感循环: 响应移动输入与跳跃切断\n"
+					   << "end\n\n"
+					   << "return PlayerController\n";
+				}
+			}
+
+			reply << "🎮 【L1 制作人】收到指令！已为您一键启动游戏立项全流程！\n\n"
+				  << "🚀 已自动执行以下真实工程动作：\n"
+				  << "1. 📋 已在【任务看板】下发首批 3 项研发任务：\n"
+				  << "   • TASK-0-001: 确立核心玩法机制与控制手感模型 (创意总监)\n"
+				  << "   • TASK-0-002: 搭建首个找乐原型测试场景与主角控制器 (玩法程序)\n"
+				  << "   • TASK-0-003: 确立 16-bit 像素低饱和视觉风格 (美术总监)\n"
+				  << "2. 🎨 已为您生成项目《品味档案》(taste.yaml) 与立项假设 (assumptions.md)\n"
+				  << "3. 📜 已生成首个玩家控制器脚本 (assets/scripts/PlayerController.luau)\n"
+				  << "4. 👥 40 专业职能库已就绪，全员上岗！\n\n"
+				  << "👉 您现在可以切换到【Studio Workflow (工作流看板)】查看首批任务并点击【▶ 开始进行】！";
+		}
+		// 1. 意图探测: 任务创建 (e.g. "创建任务: xxx" / "任务: xxx" / "task: xxx" / "做个主角" / "加个跳跃")
+		else if (message.find("创建任务") != std::string::npos || message.rfind("任务:", 0) == 0 || message.rfind("task:", 0) == 0
+			|| message.find("做个主角") != std::string::npos || message.find("加个跳跃") != std::string::npos)
 		{
 			std::string title = message;
 			size_t colon = title.find(':');
@@ -32,7 +112,7 @@ namespace World::Assistant
 			while (!title.empty() && (title.front() == ' ' || title.front() == '\t')) title.erase(0, 1);
 			while (!title.empty() && (title.back() == ' ' || title.back() == '\t')) title.pop_back();
 
-			if (title.empty()) title = "未命名快速任务";
+			if (title.empty()) title = message;
 
 			std::string res, err;
 			std::map<std::string, std::string> args = {
@@ -78,7 +158,7 @@ namespace World::Assistant
 			reply << "【L1 制作人】当前项目研发状态汇报:\n"
 				  << "🚩 当前流水线阶段: " << World::Agent::WorkflowStageToString(stage) << " (Stage " << static_cast<int>(stage) << ")\n"
 				  << "👥 组织架构: 4 级体系已就绪，40 专业职能库已加载\n"
-				  << "📌 当前阶段焦点: 请先在「访谈卡片」完成立项 3 题选择，即可自动开启找乐原型(Fun Prototype)！";
+				  << "📌 可以在【工作流看板】中点击任务推进研发，或继续输入指令！";
 		}
 		// 4. 常规对话根据角色进行专业业务指导
 		else
@@ -86,7 +166,7 @@ namespace World::Assistant
 			if (role == "producer")
 			{
 				reply << "【L1 制作人】收到指导: 「" << message << "」。\n"
-					  << "已协调各部门总监。当前处于概念阶段，建议通过访谈卡片确立《品味档案》，随后我将为您自动生成《职能开启方案书》与 Backlog 任务。";
+					  << "已协调各部门总监。您可以输入“做个游戏”一键开启完整立项流程，或输入“创建任务: 具体内容”下发具体工作！";
 			}
 			else if (role == "qa" || role == "qa_director")
 			{

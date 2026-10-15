@@ -96,22 +96,27 @@ namespace World
 			auto* state = DrawStateOf(uiContext);
 			if (!state || OutOfRoom(*state) || !text)
 				return;
-			Wui::Label(*state->Ctx, { state->Rect.X + kPluginPanelPad, state->Cursor }, text,
-				state->Theme.Text, state->Theme.FontSizeBody);
-			const std::string autoId = "#" + std::to_string(state->TextIndex++);
-			Wui::WuiAccessNode node;
-			node.Id = ControlId(*state, autoId.c_str(), "label");
-			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-			node.Panel = state->Panel.DisplayId;
-			node.Kind = "label";
-			node.Label = text;
-			node.Rect = { state->Rect.X + kPluginPanelPad, state->Cursor,
-				std::max(10.0f, state->Rect.W - kPluginPanelPad * 2.0f), kPluginPanelLabelHeight };
-			node.Enabled = true;
-			node.Interactive = false;
-			node.Visible = true;
-			Wui::WuiAccessibility::Get().Register(node);
-			Advance(*state, kPluginPanelLabelHeight);
+
+			std::string_view sv(text);
+			size_t start = 0;
+			while (start < sv.size())
+			{
+				if (OutOfRoom(*state)) break;
+				size_t newline = sv.find((char)10, start);
+				std::string line = (newline == std::string_view::npos)
+					? std::string(sv.substr(start))
+					: std::string(sv.substr(start, newline - start));
+
+				if (!line.empty())
+				{
+					Wui::Label(*state->Ctx, { state->Rect.X + kPluginPanelPad, state->Cursor }, line,
+						state->Theme.Text, state->Theme.FontSizeBody);
+				}
+				Advance(*state, kPluginPanelLabelHeight);
+
+				if (newline == std::string_view::npos) break;
+				start = newline + 1;
+			}
 		}
 
 		bool UiButton(void* uiContext, const char* id, const char* label)
@@ -186,23 +191,26 @@ namespace World
 			else if (tone == 4) col = state->Theme.Accent;
 			else if (tone == 5) col = state->Theme.TextMuted;
 
-			Wui::Label(*state->Ctx, { state->Rect.X + kPluginPanelPad, state->Cursor }, text,
-				col, state->Theme.FontSizeBody);
+			std::string_view sv(text);
+			size_t start = 0;
+			while (start < sv.size())
+			{
+				if (OutOfRoom(*state)) break;
+				size_t newline = sv.find((char)10, start);
+				std::string line = (newline == std::string_view::npos)
+					? std::string(sv.substr(start))
+					: std::string(sv.substr(start, newline - start));
 
-			const std::string autoId = "#" + std::to_string(state->TextIndex++);
-			Wui::WuiAccessNode node;
-			node.Id = ControlId(*state, autoId.c_str(), "label");
-			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-			node.Panel = state->Panel.DisplayId;
-			node.Kind = "label";
-			node.Label = text;
-			node.Rect = { state->Rect.X + kPluginPanelPad, state->Cursor,
-				std::max(10.0f, state->Rect.W - kPluginPanelPad * 2.0f), kPluginPanelLabelHeight };
-			node.Enabled = true;
-			node.Interactive = false;
-			node.Visible = true;
-			Wui::WuiAccessibility::Get().Register(node);
-			Advance(*state, kPluginPanelLabelHeight);
+				if (!line.empty())
+				{
+					Wui::Label(*state->Ctx, { state->Rect.X + kPluginPanelPad, state->Cursor }, line,
+						col, state->Theme.FontSizeBody);
+				}
+				Advance(*state, kPluginPanelLabelHeight);
+
+				if (newline == std::string_view::npos) break;
+				start = newline + 1;
+			}
 		}
 
 		bool UiTextInput(void* uiContext, const char* id, char* buffer, uint32_t capacity)
