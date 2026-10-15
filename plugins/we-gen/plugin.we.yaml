@@ -1,0 +1,19 @@
+id: engine.we-gen
+name: WorldEngine Gen
+version: 1.0.0
+abi: 1
+entry: WePluginQuery
+engine: ">=2.0"
+scope: engine
+ship: never
+provides:
+  - asset.generator
+  - credential.manager
+  - style.lock
+contributes:
+  commands:
+    - gen.generate
+    - gen.style_lock.get
+    - gen.style_lock.set
+    - gen.budget.get
+    - gen.budget.set
