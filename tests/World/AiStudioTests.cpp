@@ -1,4 +1,5 @@
 ﻿#include "World/Agent/WeAgentCore.h"
+#include "World/Plugins/PluginManifest.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/WUI/WuiJson.h"
 
@@ -173,7 +174,32 @@ int main()
 		CHECK(fs::exists(tempProj / "CLAUDE.md"));
 	}
 
-	// 7. 验证 CommandRegistry 集成
+	// 7. 验证三大 AI 插件清单 plugin.we.yaml 合法性 (杜绝 contributes 未知 face 报错)
+	{
+		using namespace World::Plugins;
+		const fs::path manifests[] = {
+			fs::current_path() / "plugins" / "we-studio" / "plugin.we.yaml",
+			fs::current_path() / "plugins" / "we-gen" / "plugin.we.yaml",
+			fs::current_path() / "plugins" / "we-ai-assistant" / "plugin.we.yaml"
+		};
+
+		for (const auto& mPath : manifests)
+		{
+			CHECK(fs::exists(mPath));
+			PluginManifest manifest;
+			std::string err;
+			const bool ok = PluginManifest::Load(mPath, PluginScope::Engine, &manifest, &err);
+			if (!ok)
+			{
+				std::fprintf(stderr, "Manifest validation failed for %s: %s\n", mPath.string().c_str(), err.c_str());
+			}
+			CHECK(ok);
+			CHECK(!manifest.Id.empty());
+			CHECK(manifest.Scope == PluginScope::Engine);
+		}
+	}
+
+	// 8. 验证 CommandRegistry 集成
 	{
 		auto& reg = CommandRegistry::Get();
 		BacklogManager::RegisterCommands(reg);

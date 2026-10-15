@@ -10,9 +10,3 @@ provides:
   - editor.panel
   - llm.provider
   - interview.system
-contributes:
-  commands:
-    - assistant.chat
-    - assistant.interview.get
-    - assistant.interview.answer
-    - assistant.taste.get
