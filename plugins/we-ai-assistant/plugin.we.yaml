@@ -1,0 +1,18 @@
+id: engine.we-ai-assistant
+name: WorldEngine AI Assistant
+version: 1.0.0
+abi: 1
+entry: WePluginQuery
+engine: ">=2.0"
+scope: engine
+ship: never
+provides:
+  - editor.panel
+  - llm.provider
+  - interview.system
+contributes:
+  commands:
+    - assistant.chat
+    - assistant.interview.get
+    - assistant.interview.answer
+    - assistant.taste.get
