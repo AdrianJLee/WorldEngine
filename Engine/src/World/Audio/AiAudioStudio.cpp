@@ -13,6 +13,7 @@
 #endif
 #include <windows.h>
 #include <winhttp.h>
+#include <sapi.h>
 #endif
 
 namespace World::Audio
@@ -516,7 +517,8 @@ namespace World::Audio
 		return weights;
 	}
 
-	TtsSynthesisResult LocalEdgeOnnxProvider::SynthesizeDialogue(
+	
+TtsSynthesisResult LocalEdgeOnnxProvider::SynthesizeDialogue(
 		const std::string& dialogueText,
 		const TimbreProfile& timbre,
 		VoiceEmotion emotion,
@@ -530,92 +532,52 @@ namespace World::Audio
 			return res;
 		}
 
-		size_t charCount = dialogueText.size();
-		float baseDuration = std::max(0.6f, static_cast<float>(charCount) * 0.08f);
-		float speed = std::clamp(timbre.rateScale, 0.5f, 2.0f);
-		float duration = baseDuration / speed;
-
-		float baseFreq = 140.0f;
-		if (timbre.presetName.find("Female") != std::string::npos || timbre.presetName.find("Elf") != std::string::npos) baseFreq = 220.0f;
-		else if (timbre.presetName.find("Old") != std::string::npos || timbre.presetName.find("Deep") != std::string::npos) baseFreq = 95.0f;
-		else if (timbre.presetName.find("Goblin") != std::string::npos) baseFreq = 280.0f;
-
-		float pitchRatio = PitchSemitonesToRatio(timbre.pitchShiftSemi);
-		float carrierFreq = baseFreq * pitchRatio;
-
-		float vibratoDepth = 0.0f;
-		float harmonicWarmth = timbre.warmth;
-		switch (emotion)
+		std::string refPath = timbre.referenceAudioPath.empty() ? ("assets/audio/voices/" + timbre.characterId + "_ref.wav") : timbre.referenceAudioPath;
+		if (std::filesystem::exists(refPath))
 		{
-		case VoiceEmotion::Angry:
-			carrierFreq *= (1.0f + 0.15f * emotionIntensity);
-			harmonicWarmth += 0.3f * emotionIntensity;
-			break;
-		case VoiceEmotion::Whisper:
-			carrierFreq *= (1.0f - 0.1f * emotionIntensity);
-			harmonicWarmth -= 0.4f * emotionIntensity;
-			break;
-		case VoiceEmotion::Sad:
-			carrierFreq *= (1.0f - 0.12f * emotionIntensity);
-			vibratoDepth = 2.5f * emotionIntensity;
-			break;
-		case VoiceEmotion::Happy:
-			carrierFreq *= (1.0f + 0.08f * emotionIntensity);
-			vibratoDepth = 1.5f * emotionIntensity;
-			break;
-		default:
-			break;
+			AudioCooker::LoadWavFile(refPath, res.audio);
+			res.success = (res.audio.GetFrameCount() > 0);
+			res.debugMessage = "[离线参考干音库] 成功载入真实对白样本: " + timbre.characterId;
 		}
 
-		uint32_t sampleRate = kDefaultSampleRate;
-		uint32_t totalFrames = static_cast<uint32_t>(duration * static_cast<float>(sampleRate));
-		res.audio.Resize(sampleRate, 1, totalFrames);
-
-		constexpr double kTwoPi = 6.28318530717958647692;
-		double phase = 0.0;
-		double vibratoPhase = 0.0;
-
-		for (uint32_t i = 0; i < totalFrames; ++i)
+		if (!res.success || res.audio.GetFrameCount() == 0)
 		{
-			float t = static_cast<float>(i) / static_cast<float>(sampleRate);
-			float env = 1.0f;
-			if (t < 0.08f) env = t / 0.08f;
-			else if (t > duration - 0.15f) env = (duration - t) / 0.15f;
-
-			float currentFreq = carrierFreq + vibratoDepth * static_cast<float>(std::sin(vibratoPhase));
-			double phaseStep = kTwoPi * static_cast<double>(currentFreq) / static_cast<double>(sampleRate);
-
-			float s1 = static_cast<float>(std::sin(phase));
-			float s2 = static_cast<float>(std::sin(phase * 2.0)) * (0.5f * harmonicWarmth);
-			float s3 = static_cast<float>(std::sin(phase * 3.0)) * (0.25f * harmonicWarmth);
-			float voiceSample = (s1 + s2 + s3) * env * 0.45f;
-
-			res.audio.SetSample(0, i, voiceSample);
-			phase += phaseStep;
-			if (phase >= kTwoPi) phase -= kTwoPi;
-			vibratoPhase += kTwoPi * 5.0 / static_cast<double>(sampleRate);
-			if (vibratoPhase >= kTwoPi) vibratoPhase -= kTwoPi;
+			float dur = std::max(0.6f, static_cast<float>(dialogueText.size()) * 0.08f);
+			uint32_t sampleRate = kDefaultSampleRate;
+			uint32_t frames = static_cast<uint32_t>(dur * static_cast<float>(sampleRate));
+			res.audio.Resize(sampleRate, 1, frames);
+			for (uint32_t i = 0; i < frames; ++i)
+			{
+				float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+				float env = (t < 0.08f) ? (t / 0.08f) : ((t > dur - 0.15f) ? ((dur - t) / 0.15f) : 1.0f);
+				res.audio.SetSample(0, i, std::sin(t * 440.0f) * env * 0.05f);
+			}
+			res.success = true;
+			res.debugMessage = "[合成预览模式] Synthesized preview: " + timbre.characterId;
 		}
 
-		float timeStep = 0.12f / speed;
-		float curTime = 0.04f;
+		float durSec = static_cast<float>(res.audio.GetFrameCount()) / static_cast<float>(res.audio.GetSampleRate());
+		float timeStep = 0.0333f; // 30fps
+		float curTime = 0.0f;
 		const char* samplePhonemes[] = { "AA", "IH", "OW", "M", "T", "S", "EE" };
 		size_t phonemeCount = sizeof(samplePhonemes) / sizeof(samplePhonemes[0]);
 		size_t pIndex = 0;
 
-		while (curTime < duration - 0.05f)
+		while (curTime < durSec)
 		{
+			uint32_t frameIdx = static_cast<uint32_t>(curTime * static_cast<float>(res.audio.GetSampleRate()));
+			frameIdx = std::min(frameIdx, res.audio.GetFrameCount() - 1);
+			float amp = std::abs(res.audio.GetSample(0, frameIdx));
+
 			PhonemeViseme pv;
 			pv.timeSeconds = curTime;
 			pv.phoneme = samplePhonemes[pIndex % phonemeCount];
-			pv.visemeWeight = 0.8f + 0.2f * std::sin(curTime * 10.0f);
+			pv.visemeWeight = std::clamp(amp * 3.0f, 0.1f, 1.0f);
 			res.lipSyncTrack.push_back(pv);
 			curTime += timeStep;
 			++pIndex;
 		}
 
-		res.success = true;
-		res.debugMessage = "[合成预览模式 (Procedural Preview)] Synthesized with timbre: " + timbre.characterId;
 		return res;
 	}
 
@@ -1088,7 +1050,16 @@ namespace World::Audio
 			t.rateScale = rate;
 			t.warmth = warmth;
 			t.roughness = rough;
-			t.latentEmbedding.resize(256, 0.05f);
+			t.referenceAudioPath = "assets/audio/voices/" + std::string(id) + "_ref.wav";
+			AudioBuffer refBuf;
+			if (AudioCooker::LoadWavFile(t.referenceAudioPath, refBuf))
+			{
+				TimbreProfile::ExtractAcousticFeatures(refBuf, t.latentEmbedding);
+			}
+			else
+			{
+				t.latentEmbedding.resize(256, 0.05f);
+			}
 			RegisterTimbre(t);
 			t.SaveToFile("assets/audio/voices/" + std::string(id) + ".wvoice");
 		};

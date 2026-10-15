@@ -142,6 +142,7 @@ namespace World
 		// P4-U13c:打开 prefab **资产窗口**(看/管理:实体树 + 组件摘要 + 引用资产 + 场景实例)。
 		// 与 `.wmodel` 预览同款:创建后默认附加到主窗口。编辑仍走 OpenPrefabEditor(文档会话)。
 		virtual void OpenPrefabWindow(const std::string& logicalPath) { (void)logicalPath; }
+		virtual void OpenAiStudio() { FocusIndependentWindow("ai_audio_studio"); }
 		// 实例化到当前场景(世界原点;成功时选中实例根并标脏)。失败给出可读原因。
 		virtual bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr)
 		{

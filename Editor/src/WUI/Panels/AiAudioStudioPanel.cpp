@@ -41,7 +41,7 @@ namespace World
 
 		// Re-probe button
 		Wui::WuiRect btnProbe { rect.X + rect.W - 100.0f, rect.Y + 10.0f, 85.0f, 24.0f };
-		if (Wui::Button(ctx, Wui::HashId("ai.btn.probe"), btnProbe, "⟳ 探测服务", theme))
+		if (Wui::Button(ctx, Wui::HashId("ai.btn.probe"), btnProbe, "探测服务", theme))
 		{
 			studio.ProbeBackend(m_SidecarHost, static_cast<uint16_t>(m_SidecarPort));
 		}
@@ -50,10 +50,10 @@ namespace World
 		float tabY = rect.Y + 48.0f;
 		const Wui::WuiRect tabArea { rect.X + 14.0f, tabY, rect.W - 28.0f, 28.0f };
 		std::vector<std::string> tabs = {
-			"🎙 角色对白与口型 (Dialogue)",
-			"💥 AI 音效生成 (SFX)",
-			"🎵 音乐分轨与循环 (BGM)",
-			"📖 专有名词词典与配置 (Config)"
+			"角色对白与口型 (Dialogue)",
+			"AI 音效生成 (SFX)",
+			"音乐分轨与循环 (BGM)",
+			"专有名词词典与配置 (Config)"
 		};
 		Wui::TabBar(ctx, Wui::HashId("ai.studio.tabs"), tabArea, tabs, m_ActiveTab, theme);
 

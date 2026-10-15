@@ -726,6 +726,12 @@ namespace World
 		Wui::BarSurface(ctx, headerRect, theme.PanelHeader, theme.Border);
 		Wui::Label(ctx, { rect.X + 8.0f, rect.Y + 6.0f }, "工程音频库 (Audio Library)", theme.Text, 13.0f);
 
+		const Wui::WuiRect btnStudio { rect.X + rect.W - 205.0f, rect.Y + 3.0f, 200.0f, 22.0f };
+		if (Wui::Button(ctx, Wui::HashId("lib.btn.open_ai_studio"), btnStudio, "打开 AI 音频工作站", theme))
+		{
+			host.OpenAiStudio();
+		}
+
 		// Search box
 		const Wui::WuiRect searchRect { rect.X + 6.0f, rect.Y + 34.0f, rect.W - 12.0f, 24.0f };
 		Wui::TextFieldA11y a11y { "搜索音频", "搜索声音名称..." };

@@ -1299,6 +1299,10 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 			m_Layout.IsFloating("audio_mixer"),
 			[this] { OpenOrFocusIndependentWindow("audio_mixer"); }, false,
 			Wui::Tr("menu.audio.manager.tooltip", "打开音频管理器: 统一管理工程音频库、试听播放器与游戏全局音量") });
+		audioEntries.push_back({ Wui::Tr("menu.audio.studio", "AI 音频工作站 (AI Audio Studio)"),
+			m_Layout.IsFloating("ai_audio_studio"),
+			[this] { OpenOrFocusIndependentWindow("ai_audio_studio"); }, false,
+			Wui::Tr("menu.audio.studio.tooltip", "打开 AI 音频生成工坊: 角色对白、ARKit 52 口型、AI 短音效与背景音乐切点") });
 		audioEntries.push_back({ Wui::Tr("menu.audio.profiler", "音频分析器 (Audio Profiler)"),
 			m_Layout.IsFloating("audio_profiler"),
 			[this] { OpenOrFocusIndependentWindow("audio_profiler"); }, false,
