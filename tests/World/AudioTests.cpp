@@ -1,4 +1,4 @@
-﻿#include "World/Audio/AudioSystem.h"
+#include "World/Audio/AudioSystem.h"
 #include "World/Audio/AudioCommandQueue.h"
 #include "World/Audio/AudioNullBackend.h"
 #include "World/Audio/AudioDsp.h"
@@ -1830,6 +1830,111 @@ static void TestGenreSuitesAndAiCuration()
 	std::cout << "  -> Passed." << std::endl;
 }
 
+static void TestAiAudioStudioSidecarAndCloning()
+{
+	std::cout << "[Test] AI Studio: Sidecar Client, Cloning, Phoneme Dict, ARKit52 & SFX Variations..." << std::endl;
+
+	// 1. In-Memory WAV Encode and Decode roundtrip
+	AudioBuffer srcBuf = AudioBuffer::GenerateSineWave(440.0f, 1.0f, 0.5f);
+	auto wavBytes = AudioCooker::EncodeWavToBytes(srcBuf);
+	assert(!wavBytes.empty());
+	assert(wavBytes.size() > 44);
+
+	AudioBuffer decodedBuf;
+	bool decOk = AudioCooker::DecodeWavFromBytes(wavBytes.data(), wavBytes.size(), decodedBuf);
+	assert(decOk);
+	assert(decodedBuf.GetFrameCount() == srcBuf.GetFrameCount());
+	assert(decodedBuf.GetChannels() == srcBuf.GetChannels());
+
+	// 2. Timbre Profile .wvoice persistence and acoustic vector extraction (6.1.1)
+	TimbreProfile kingProfile;
+	kingProfile.characterId = "Old_King";
+	kingProfile.presetName = "Deep_Old_Male";
+	kingProfile.pitchShiftSemi = -3.5f;
+	kingProfile.rateScale = 0.9f;
+	kingProfile.warmth = 0.8f;
+	kingProfile.roughness = 0.4f;
+
+	bool extractOk = TimbreProfile::ExtractAcousticFeatures(srcBuf, kingProfile.latentEmbedding);
+	assert(extractOk);
+	assert(kingProfile.latentEmbedding.size() == 256);
+
+	std::string voicePath = "build/test_old_king.wvoice";
+	assert(kingProfile.SaveToFile(voicePath));
+
+	TimbreProfile loadedProfile;
+	assert(loadedProfile.LoadFromFile(voicePath));
+	assert(loadedProfile.characterId == "Old_King");
+	assert(loadedProfile.latentEmbedding.size() == 256);
+	assert(std::abs(loadedProfile.pitchShiftSemi - (-3.5f)) < 0.01f);
+
+	// 3. Phoneme Dictionary YAML & Overrides (6.1.2)
+	PhonemeDictionary::SetWordOverride("泰达希尔", "tai da xi er");
+	assert(PhonemeDictionary::GetWordOverride("泰达希尔") == "tai da xi er");
+
+	std::string dictPath = "build/test_phoneme_dict.yaml";
+	assert(PhonemeDictionary::SaveDictionary(dictPath));
+	assert(PhonemeDictionary::LoadDictionary(dictPath));
+
+	std::string parsedDictText = PhonemeDictionary::ParsePronunciationMarkup("守卫泰达希尔的荣光！");
+	assert(parsedDictText.find("[tai da xi er]") != std::string::npos);
+
+	// 4. ARKit 52 Lip-Sync Trajectory & Evaluation (6.1.4)
+	std::vector<PhonemeViseme> visemeTrack = {
+		{ 0.05f, "AA", 0.9f },
+		{ 0.20f, "OW", 0.8f },
+		{ 0.40f, "M", 1.0f }
+	};
+	std::string wlipPath = "build/test_lipsync.wlip";
+	assert(LipSyncTrajectory::SaveWlip(wlipPath, visemeTrack));
+
+	std::vector<PhonemeViseme> loadedTrack;
+	assert(LipSyncTrajectory::LoadWlip(wlipPath, loadedTrack));
+	assert(loadedTrack.size() == 3);
+
+	auto weightsAA = LipSyncTrajectory::EvaluateBlendShapes(loadedTrack, 0.06f);
+	assert(weightsAA["jawOpen"] > 0.5f);
+
+	auto weightsOW = LipSyncTrajectory::EvaluateBlendShapes(loadedTrack, 0.22f);
+	assert(weightsOW["mouthPucker"] > 0.4f);
+
+	auto weightsM = LipSyncTrajectory::EvaluateBlendShapes(loadedTrack, 0.42f);
+	assert(weightsM["jawOpen"] < 0.01f);
+
+	// 5. SFX 4-Variation Candidate Generation (6.2.1)
+	LocalEdgeOnnxProvider localProvider;
+	auto sfxVars = localProvider.GenerateSfxMulti("sci-fi plasma laser blast", 1.2f, 4);
+	assert(sfxVars.size() == 4);
+	for (size_t i = 0; i < 4; ++i)
+	{
+		assert(sfxVars[i].audio.GetFrameCount() > 0);
+		assert(sfxVars[i].variationIndex == i + 1);
+		assert(sfxVars[i].lufs <= -15.0f);
+	}
+
+	// 6. BGM Zero-Crossing Seamless Loop Points (6.2.2)
+	AudioBuffer bgmBuf = AudioBuffer::GenerateSineWave(120.0f, 10.0f, 0.5f);
+	auto loopPts = localProvider.DetectBgmLoop(bgmBuf, 1.0f, 8.0f);
+	assert(loopPts.valid);
+	assert(loopPts.confidence > 0.9f);
+	assert(loopPts.startSeconds >= 0.9f && loopPts.startSeconds <= 1.2f);
+	assert(loopPts.endSeconds >= 7.8f && loopPts.endSeconds <= 8.2f);
+
+	// 7. Sidecar Probe & Fallback Grace (6.3)
+	AiAudioStudioManager studioMgr;
+	auto mode = studioMgr.ProbeBackend("127.0.0.1", 8090);
+	if (studioMgr.IsSidecarAlive())
+	{
+		assert(mode == AiStudioProviderMode::SidecarService);
+	}
+	else
+	{
+		assert(mode == AiStudioProviderMode::LocalProcedural);
+	}
+
+	std::cout << "  -> Passed." << std::endl;
+}
+
 int main()
 {
 	std::cout << "========================================" << std::endl;
@@ -1870,8 +1975,9 @@ int main()
 		TestAuxReverbAndVoiceVirtualization();
 		TestNextGenAcousticsAndRooms();
 		TestGenreSuitesAndAiCuration();
+		TestAiAudioStudioSidecarAndCloning();
 		std::cout << "========================================" << std::endl;
-		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (32/32)  " << std::endl;
+		std::cout << " ALL AUDIO SYSTEM TESTS PASSED (33/33)  " << std::endl;
 		std::cout << "========================================" << std::endl;
 		return 0;
 	}

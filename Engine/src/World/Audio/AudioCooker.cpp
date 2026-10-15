@@ -287,6 +287,140 @@ namespace World::Audio
 		}
 	}
 
+	std::vector<uint8_t> AudioCooker::EncodeWavToBytes(const AudioBuffer& buffer)
+	{
+		uint32_t channels = buffer.GetChannels();
+		uint32_t frames = buffer.GetFrameCount();
+		uint32_t sampleRate = buffer.GetSampleRate();
+		if (channels == 0 || frames == 0) return {};
+
+		uint32_t dataSize = frames * channels * sizeof(int16_t);
+		uint32_t fileSize = 36 + dataSize;
+		std::vector<uint8_t> bytes(44 + dataSize);
+
+		// RIFF header
+		std::memcpy(&bytes[0], "RIFF", 4);
+		std::memcpy(&bytes[4], &fileSize, 4);
+		std::memcpy(&bytes[8], "WAVE", 4);
+
+		// fmt subchunk
+		std::memcpy(&bytes[12], "fmt ", 4);
+		uint32_t subchunk1Size = 16;
+		std::memcpy(&bytes[16], &subchunk1Size, 4);
+		uint16_t audioFormat = 1; // PCM
+		std::memcpy(&bytes[20], &audioFormat, 2);
+		uint16_t numChannels = static_cast<uint16_t>(channels);
+		std::memcpy(&bytes[22], &numChannels, 2);
+		std::memcpy(&bytes[24], &sampleRate, 4);
+		uint32_t byteRate = sampleRate * channels * 2;
+		std::memcpy(&bytes[28], &byteRate, 4);
+		uint16_t blockAlign = static_cast<uint16_t>(channels * 2);
+		std::memcpy(&bytes[32], &blockAlign, 2);
+		uint16_t bitsPerSample = 16;
+		std::memcpy(&bytes[34], &bitsPerSample, 2);
+
+		// data subchunk
+		std::memcpy(&bytes[36], "data", 4);
+		std::memcpy(&bytes[40], &dataSize, 4);
+
+		int16_t* pcm = reinterpret_cast<int16_t*>(&bytes[44]);
+		size_t sampleIdx = 0;
+		for (uint32_t i = 0; i < frames; ++i)
+		{
+			for (uint32_t ch = 0; ch < channels; ++ch)
+			{
+				float s = buffer.GetSample(ch, i);
+				float clamped = std::clamp(s, -1.0f, 1.0f);
+				pcm[sampleIdx++] = static_cast<int16_t>(clamped * 32767.0f);
+			}
+		}
+		return bytes;
+	}
+
+	bool AudioCooker::SaveWavFile(const std::string& wavPath, const AudioBuffer& buffer)
+	{
+		auto bytes = EncodeWavToBytes(buffer);
+		if (bytes.empty()) return false;
+		std::ofstream out(wavPath, std::ios::binary);
+		if (!out.is_open()) return false;
+		out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+		return true;
+	}
+
+	bool AudioCooker::DecodeWavFromBytes(const uint8_t* data, size_t size, AudioBuffer& outBuffer)
+	{
+		if (!data || size < 44) return false;
+		if (std::memcmp(data, "RIFF", 4) != 0 || std::memcmp(data + 8, "WAVE", 4) != 0) return false;
+
+		size_t offset = 12;
+		uint16_t audioFormat = 1;
+		uint16_t channels = 1;
+		uint32_t sampleRate = 48000;
+		uint16_t bitsPerSample = 16;
+		const uint8_t* pcmData = nullptr;
+		uint32_t pcmDataSize = 0;
+
+		while (offset + 8 <= size)
+		{
+			char chunkId[5] = { 0 };
+			std::memcpy(chunkId, data + offset, 4);
+			uint32_t chunkSize = 0;
+			std::memcpy(&chunkSize, data + offset + 4, 4);
+			offset += 8;
+
+			if (std::strcmp(chunkId, "fmt ") == 0 && chunkSize >= 16)
+			{
+				std::memcpy(&audioFormat, data + offset, 2);
+				std::memcpy(&channels, data + offset + 2, 2);
+				std::memcpy(&sampleRate, data + offset + 4, 4);
+				std::memcpy(&bitsPerSample, data + offset + 14, 2);
+			}
+			else if (std::strcmp(chunkId, "data") == 0)
+			{
+				pcmData = data + offset;
+				pcmDataSize = chunkSize;
+				break;
+			}
+			offset += chunkSize;
+		}
+
+		if (!pcmData || pcmDataSize == 0 || channels == 0 || sampleRate == 0) return false;
+
+		uint32_t bytesPerSample = bitsPerSample / 8;
+		if (bytesPerSample == 0) return false;
+		uint32_t totalSamples = pcmDataSize / bytesPerSample;
+		uint32_t frames = totalSamples / channels;
+
+		outBuffer.Resize(sampleRate, channels, frames);
+
+		if (bitsPerSample == 16)
+		{
+			const int16_t* src = reinterpret_cast<const int16_t*>(pcmData);
+			for (uint32_t i = 0; i < frames; ++i)
+			{
+				for (uint32_t ch = 0; ch < channels; ++ch)
+				{
+					float s = static_cast<float>(src[i * channels + ch]) / 32768.0f;
+					outBuffer.SetSample(ch, i, s);
+				}
+			}
+			return true;
+		}
+		else if (bitsPerSample == 32 && audioFormat == 3) // Float32
+		{
+			const float* src = reinterpret_cast<const float*>(pcmData);
+			for (uint32_t i = 0; i < frames; ++i)
+			{
+				for (uint32_t ch = 0; ch < channels; ++ch)
+				{
+					outBuffer.SetSample(ch, i, src[i * channels + ch]);
+				}
+			}
+			return true;
+		}
+		return false;
+	}
+
 	bool AudioCooker::LoadWavFile(const std::string& wavPath, AudioBuffer& outBuffer)
 	{
 		std::ifstream in(wavPath, std::ios::binary);

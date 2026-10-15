@@ -1,4 +1,4 @@
-﻿set(WE_THIRD_PARTY "${WLD_ENGINE_ROOT}/third_party")
+set(WE_THIRD_PARTY "${WLD_ENGINE_ROOT}/third_party")
 
 # PROJ-8/T2:WLD_ENGINE_ROOT = 引擎仓库根(根 CMakeLists 定义;子项目模式下 ≠ CMAKE_SOURCE_DIR)。
 # 单独配置 Engine 时兜底成它的上一级目录,保持"第三方/引擎路径锚在引擎仓库"的语义。
@@ -244,6 +244,7 @@ target_link_libraries(World PRIVATE
     # 此前由已移除的第三方 UI 依赖传递链接,现需显式声明。
     imm32
     winmm
+    winhttp
     cgltf
     Luau.VM
     Luau.Compiler

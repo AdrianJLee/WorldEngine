@@ -1131,7 +1131,7 @@ namespace World
 		// Sync initial volumes with audio graph
 		if (!m_GlobalBusesSynced)
 		{
-			for (uint32_t b = 0; b < 5; ++b)
+			for (uint32_t b = 0; b < 6; ++b)
 			{
 				const auto* bus = audio.GetMixerGraph().FindBus(b);
 				if (bus)
@@ -1161,16 +1161,19 @@ namespace World
 
 		gY += 30.0f;
 
-		// 5 Global Volume Sliders
+		// 6 Global Volume Sliders
 		const char* busIcons[] = {
 			"主音量 (Master)",
 			"背景音乐 (Music)",
 			"游戏音效 (SFX)",
 			"角色语音 (Voice)",
-			"界面音效 (UI)"
+			"界面音效 (UI)",
+			"环境音效 (Ambience)"
 		};
+		constexpr int kBusCount = static_cast<int>(sizeof(busIcons) / sizeof(busIcons[0]));
+		static_assert(kBusCount == 6, "busIcons size mismatch with kBusCount");
 
-		for (int b = 0; b < 6; ++b)
+		for (int b = 0; b < kBusCount; ++b)
 		{
 			const Wui::WuiRect rowRect { rect.X + 8.0f, gY, rect.W - 16.0f, 22.0f };
 

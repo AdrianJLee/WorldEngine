@@ -3815,6 +3815,81 @@ namespace World
 			result = out.str();
 			return true;
 		}
+
+		if (cmd == "audio.ai_get_status")
+		{
+			auto& studio = Audio::AudioSystem::Get().GetAiStudio();
+			auto timbres = studio.GetRegisteredTimbreIds();
+			bool sidecarAlive = studio.IsSidecarAlive();
+			auto mode = studio.GetCurrentMode();
+
+			std::ostringstream out;
+			out << "{\"success\":true,\"sidecar_alive\":" << (sidecarAlive ? "true" : "false")
+				<< ",\"mode\":\"" << (mode == Audio::AiStudioProviderMode::SidecarService ? "sidecar" : "local_procedural") << "\""
+				<< ",\"timbre_count\":" << timbres.size()
+				<< ",\"dict_entries\":" << Audio::PhonemeDictionary::GetAllOverrides().size()
+				<< "}";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "audio.ai_synthesize")
+		{
+			auto& studio = Audio::AudioSystem::Get().GetAiStudio();
+			std::string charId = arg("character", "Old_King");
+			std::string text = arg("text", "为了王国的荣耀，全军出击！");
+			std::string emoStr = arg("emotion", "Neutral");
+			float intensity = args.count("intensity") ? std::strtof(arg("intensity").c_str(), nullptr) : 0.7f;
+
+			Audio::VoiceEmotion emo = Audio::VoiceEmotion::Neutral;
+			if (emoStr == "Angry") emo = Audio::VoiceEmotion::Angry;
+			else if (emoStr == "Whisper") emo = Audio::VoiceEmotion::Whisper;
+			else if (emoStr == "Sad") emo = Audio::VoiceEmotion::Sad;
+			else if (emoStr == "Happy") emo = Audio::VoiceEmotion::Happy;
+			else if (emoStr == "Heroic") emo = Audio::VoiceEmotion::Heroic;
+
+			auto synthRes = studio.SynthesizeLine(charId, text, emo, intensity);
+			std::ostringstream out;
+			out << "{\"success\":" << (synthRes.success ? "true" : "false")
+				<< ",\"frames\":" << synthRes.audio.GetFrameCount()
+				<< ",\"phonemes\":" << synthRes.lipSyncTrack.size()
+				<< ",\"message\":\"" << JsonEscape(synthRes.debugMessage) << "\"}";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "audio.ai_sfx")
+		{
+			auto& studio = Audio::AudioSystem::Get().GetAiStudio();
+			std::string prompt = arg("prompt", "sci-fi laser cannon");
+			float duration = args.count("duration") ? std::strtof(arg("duration").c_str(), nullptr) : 1.5f;
+			uint32_t count = args.count("variations") ? static_cast<uint32_t>(std::strtoul(arg("variations").c_str(), nullptr, 10)) : 4;
+
+			auto vars = studio.GenerateSfxMulti(prompt, duration, count);
+			std::ostringstream out;
+			out << "{\"success\":true,\"variation_count\":" << vars.size()
+				<< ",\"prompt\":\"" << JsonEscape(prompt) << "\""
+				<< ",\"lufs\":-16.0}";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "audio.ai_bgm_loop")
+		{
+			auto& studio = Audio::AudioSystem::Get().GetAiStudio();
+			float minSec = args.count("min_sec") ? std::strtof(arg("min_sec").c_str(), nullptr) : 2.0f;
+			float maxSec = args.count("max_sec") ? std::strtof(arg("max_sec").c_str(), nullptr) : 28.5f;
+
+			Audio::AudioBuffer dummy = Audio::AudioBuffer::GenerateSineWave(220.0f, 30.0f, 0.5f);
+			auto loopPts = studio.DetectBgmLoop(dummy, minSec, maxSec);
+
+			std::ostringstream out;
+			out << "{\"success\":true,\"loop_start\":" << loopPts.startSeconds
+				<< ",\"loop_end\":" << loopPts.endSeconds
+				<< ",\"confidence\":" << loopPts.confidence << "}";
+			result = out.str();
+			return true;
+		}
 		// ---- 录制 / 回放(把一次通道会话变成可复现脚本) ----
 		if (cmd == "record.start" || cmd == "record.stop" || cmd == "replay")
 		{

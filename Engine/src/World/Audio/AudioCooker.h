@@ -28,6 +28,9 @@ namespace World::Audio
 		static std::vector<uint8_t> CookToBinary(const AudioBuffer& sourceBuffer, const AudioCookSettings& settings);
 		static bool ParseCookedBinary(const uint8_t* data, size_t size, AudioBuffer& outBuffer, AudioCookSettings& outSettings);
 
+		static bool SaveWavFile(const std::string& wavPath, const AudioBuffer& buffer);
+		static std::vector<uint8_t> EncodeWavToBytes(const AudioBuffer& buffer);
+		static bool DecodeWavFromBytes(const uint8_t* data, size_t size, AudioBuffer& outBuffer);
 		static bool LoadWavFile(const std::string& wavPath, AudioBuffer& outBuffer);
 		static bool LoadOggVorbisFile(const std::string& oggPath, AudioBuffer& outBuffer);
 		static bool LoadAudioFile(const std::string& path, AudioBuffer& outBuffer);
