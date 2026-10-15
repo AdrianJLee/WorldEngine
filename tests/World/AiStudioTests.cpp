@@ -116,7 +116,7 @@ int main()
 		task.description = "Boss performs 3-hit combo and laser beam.";
 		const std::string taskId = backlog.CreateTask(tempProj.string(), task);
 		CHECK(!taskId.empty());
-		CHECK(fs::exists(tempProj / ".we" / "studio" / "backlog" / (taskId + ".md")));
+		CHECK(fs::exists(tempProj / ".we" / "studio" / "backlog" / "tech" / (taskId + ".md")));
 
 		auto tasks = backlog.ListTasks(tempProj.string(), "open");
 		CHECK(tasks.size() == 1);

@@ -19,9 +19,14 @@ namespace World::Studio
 		ss << "---\n";
 		ss << "id: " << id << "\n";
 		ss << "title: " << title << "\n";
+		ss << "department: " << department << "\n";
 		ss << "role: " << role << "\n";
 		ss << "stage: " << stage << "\n";
 		ss << "status: " << status << "\n";
+		if (!acceptanceCriteria.empty())
+		{
+			ss << "acceptance_criteria: \"" << acceptanceCriteria << "\"\n";
+		}
 		ss << "outputs: [";
 		for (size_t i = 0; i < outputs.size(); ++i)
 		{
@@ -30,7 +35,11 @@ namespace World::Studio
 		}
 		ss << "]\n";
 		ss << "---\n\n";
-		ss << description << "\n";
+		ss << "## 任务目标与技术规范\n" << description << "\n";
+		if (!acceptanceCriteria.empty())
+		{
+			ss << "\n## 验收准则与门禁指标 (Definition of Done)\n- " << acceptanceCriteria << "\n";
+		}
 		return ss.str();
 	}
 
@@ -83,6 +92,29 @@ namespace World::Studio
 		return root.Dump();
 	}
 
+	namespace
+	{
+		std::string MapRoleToDepartment(const std::string& role)
+		{
+			std::string r = role;
+			std::transform(r.begin(), r.end(), r.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+			if (r.find("creative") != std::string::npos || r.find("designer") != std::string::npos || r.find("narrative") != std::string::npos)
+				return "creative";
+			if (r.find("programmer") != std::string::npos || r.find("tech") != std::string::npos || r.find("engine") != std::string::npos || r.find("graphics") != std::string::npos)
+				return "tech";
+			if (r.find("art") != std::string::npos || r.find("vfx") != std::string::npos || r.find("ui") != std::string::npos || r.find("concept") != std::string::npos)
+				return "art";
+			if (r.find("audio") != std::string::npos || r.find("composer") != std::string::npos || r.find("experience") != std::string::npos || r.find("sound") != std::string::npos)
+				return "experience";
+			if (r.find("qa") != std::string::npos || r.find("test") != std::string::npos)
+				return "qa";
+			if (r.find("market") != std::string::npos || r.find("publish") != std::string::npos || r.find("ops") != std::string::npos)
+				return "publishing";
+			return "general";
+		}
+	}
+
 	BacklogManager& BacklogManager::Get()
 	{
 		static BacklogManager instance;
@@ -94,17 +126,24 @@ namespace World::Studio
 		const fs::path root = fs::u8path(projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot);
 		const fs::path backlogDir = root / ".we" / "studio" / "backlog";
 
-		std::error_code ec;
-		fs::create_directories(backlogDir, ec);
-
 		StudioTask t = task;
+		if (t.department.empty())
+		{
+			t.department = MapRoleToDepartment(t.role);
+		}
+
+		// 按专业部门归口存放: .we/studio/backlog/<department>/
+		const fs::path deptDir = backlogDir / t.department;
+		std::error_code ec;
+		fs::create_directories(deptDir, ec);
+
 		if (t.id.empty())
 		{
 			const auto now = std::chrono::system_clock::now().time_since_epoch().count();
 			t.id = "TASK-" + std::to_string(now) + "-" + std::to_string(++m_TaskCounter);
 		}
 
-		const fs::path filePath = backlogDir / (t.id + ".md");
+		const fs::path filePath = deptDir / (t.id + ".md");
 		std::ofstream f(filePath);
 		if (f)
 		{
@@ -117,7 +156,22 @@ namespace World::Studio
 	bool BacklogManager::UpdateTask(const std::string& projectRoot, const std::string& taskId, const std::string& status, const std::string& notes)
 	{
 		const fs::path root = fs::u8path(projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot);
-		const fs::path filePath = root / ".we" / "studio" / "backlog" / (taskId + ".md");
+		const fs::path backlogDir = root / ".we" / "studio" / "backlog";
+
+		fs::path filePath = backlogDir / (taskId + ".md");
+		if (!fs::exists(filePath))
+		{
+			// 递归在部门子目录中查找任务文件
+			std::error_code ec;
+			for (const auto& entry : fs::recursive_directory_iterator(backlogDir, ec))
+			{
+				if (entry.is_regular_file() && entry.path().stem() == taskId)
+				{
+					filePath = entry.path();
+					break;
+				}
+			}
+		}
 
 		if (!fs::exists(filePath))
 			return false;
@@ -162,7 +216,7 @@ namespace World::Studio
 			return list;
 
 		std::error_code ec;
-		for (const auto& entry : fs::directory_iterator(backlogDir, ec))
+		for (const auto& entry : fs::recursive_directory_iterator(backlogDir, ec))
 		{
 			if (!entry.is_regular_file() || entry.path().extension() != ".md")
 				continue;
@@ -171,6 +225,10 @@ namespace World::Studio
 			std::string line;
 			StudioTask t;
 			t.id = entry.path().stem().string();
+			if (entry.path().parent_path() != backlogDir)
+			{
+				t.department = entry.path().parent_path().filename().string();
+			}
 
 			bool inFrontMatter = false;
 			while (std::getline(f, line))

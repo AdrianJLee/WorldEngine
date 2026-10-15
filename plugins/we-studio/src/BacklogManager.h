@@ -16,9 +16,11 @@ namespace World::Studio
 	{
 		std::string id;
 		std::string title;
+		std::string department;
 		std::string role;
 		std::string stage;
 		std::string status = "open"; // open | in_progress | review | done
+		std::string acceptanceCriteria;
 		std::vector<std::string> outputs;
 		std::string description;
 
