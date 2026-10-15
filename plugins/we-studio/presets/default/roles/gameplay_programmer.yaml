@@ -1,16 +1,13 @@
 id: gameplay_programmer
-name: 玩法程序
+name: 核心玩法程序
 tier: L3
 department: tech
-reports_to: tech_director
+reports_to: technical_director
 kind: maker
-duties: [玩法逻辑实现, 角色控制器, 状态机编写, 实体装配]
-outputs: [gameplay_scripts, entity_prefabs]
-write: ["assets/scripts/**", "assets/prefabs/**", "assets/scenes/**"]
-commands: [schema.*, api.luau_stubs, scene.*, play.*, task.*]
-reviews: []
+duties: [角色控制器, 游戏循环, 玩法状态机, 交互逻辑]
+write: [assets/scripts/**, assets/prefabs/**]
+commands: []
 activation:
   category: mandatory
-  genres: [all]
   wake_stages: [2, 3, 4, 5]
   default_state: active

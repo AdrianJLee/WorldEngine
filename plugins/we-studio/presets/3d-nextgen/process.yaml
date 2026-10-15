@@ -1,0 +1,39 @@
+version: 1.0.0
+preset: 3d-nextgen
+name: 3D 次世代写实包 (PBR/高模/大世界流送)
+stages:
+  - index: 0
+    id: concept
+    name: 次世代愿景与技术预研
+    lead: producer
+    outputs: [brief, tech_spike]
+    gate:
+      required_outputs: [brief]
+      reviewers: [producer, technical_director]
+  - index: 1
+    id: vertical_slice
+    name: 空间灰盒与高精切片
+    lead: technical_director
+    outputs: [vertical_slice_build, pbr_benchmark]
+    gate:
+      required_outputs: [vertical_slice_build]
+      self_validations: [project.validate, asset.validate, playtest.run]
+      reviewers: [art_director, technical_director, qa_lead]
+  - index: 2
+    id: production
+    name: 高模雕刻与大世界流送量产
+    lead: producer
+    outputs: [streamed_world]
+    gate:
+      required_outputs: [streamed_world]
+      self_validations: [project.validate, asset.validate]
+      reviewers: [producer, qa_lead]
+  - index: 3
+    id: launch
+    name: 次世代打包优化
+    lead: producer
+    outputs: [shipping_package]
+    gate:
+      required_outputs: [shipping_package]
+      self_validations: [build.package]
+      reviewers: [producer]

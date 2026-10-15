@@ -1,0 +1,12 @@
+template_id: acceptance
+name: Acceptance Assertion Spec
+tier: L3_qa
+fields:
+  - id: test_scene
+    label: 目标测试关卡
+  - id: simulation_frames
+    label: 运行步进帧数
+  - id: assertions
+    label: 场景与实体断言列表
+  - id: perf_budget
+    label: 性能与帧率基准

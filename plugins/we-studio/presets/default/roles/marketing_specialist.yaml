@@ -1,0 +1,13 @@
+id: marketing_specialist
+name: 宣发与商店素材专员
+tier: L3
+department: publishing
+reports_to: producer
+kind: maker
+duties: [宣传PV分镜, 高清游戏截图, 应用商店元数据包装, 本地化文案]
+write: [marketing/**, docs/storefront/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [6, 7]
+  default_state: active

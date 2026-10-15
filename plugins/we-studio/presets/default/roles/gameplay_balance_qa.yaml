@@ -1,0 +1,13 @@
+id: gameplay_balance_qa
+name: 玩法与平衡测试QA
+tier: L3
+department: qa
+reports_to: qa_lead
+kind: maker
+duties: [难度阶梯分析, 数值极限压测, 死锁与通关可行性验证]
+write: [qa/reports/balance/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [2, 3, 4, 5]
+  default_state: active

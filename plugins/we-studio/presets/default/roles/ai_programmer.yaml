@@ -1,0 +1,13 @@
+id: ai_programmer
+name: 游戏AI程序
+tier: L3
+department: tech
+reports_to: technical_director
+kind: maker
+duties: [行为树, HTN规划, 视听觉感知系统, NavMesh寻路避障]
+write: [scripts/ai/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [2, 3, 4, 5]
+  default_state: active

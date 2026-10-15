@@ -1,0 +1,39 @@
+version: 1.0.0
+preset: strategy
+name: 重数值策略包 (数值循环/SLG/卡牌构筑)
+stages:
+  - index: 0
+    id: concept
+    name: 数值模型与规则立项
+    lead: economy_designer
+    outputs: [brief, math_model]
+    gate:
+      required_outputs: [brief]
+      reviewers: [producer, creative_director]
+  - index: 1
+    id: prototype
+    name: 核心决策循环原型
+    lead: system_designer
+    outputs: [strategy_prototype]
+    gate:
+      required_outputs: [strategy_prototype]
+      self_validations: [project.validate, playtest.run]
+      reviewers: [economy_designer, qa_lead]
+  - index: 2
+    id: production
+    name: 配置表与关卡AI量产
+    lead: producer
+    outputs: [datatables, balance_signoff]
+    gate:
+      required_outputs: [datatables]
+      self_validations: [project.validate]
+      reviewers: [producer, qa_lead]
+  - index: 3
+    id: launch
+    name: 策略封版
+    lead: producer
+    outputs: [shipping_package]
+    gate:
+      required_outputs: [shipping_package]
+      self_validations: [build.package]
+      reviewers: [producer]

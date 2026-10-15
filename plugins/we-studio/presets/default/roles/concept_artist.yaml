@@ -1,0 +1,13 @@
+id: concept_artist
+name: 概念设计与原画
+tier: L3
+department: art
+reports_to: art_director
+kind: maker
+duties: [原画设计, 概念图, 情绪板Moodboard, 色彩脚本]
+write: [art/concept/**, design/art-bible/**]
+commands: []
+activation:
+  category: phased
+  wake_stages: [0, 1, 2]
+  default_state: active

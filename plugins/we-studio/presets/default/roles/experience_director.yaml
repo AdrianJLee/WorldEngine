@@ -1,0 +1,13 @@
+id: experience_director
+name: 体验总监
+tier: L2
+department: experience
+reports_to: producer
+kind: reviewer
+duties: [动机闭环, 心流通道, 难度梯度, 守住反黑暗模式伦理底线]
+write: [design/experience/**, qa/surveys/**]
+commands: []
+activation:
+  category: mandatory
+  wake_stages: [0, 1, 2, 3, 5]
+  default_state: active

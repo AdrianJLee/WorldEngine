@@ -1,0 +1,13 @@
+id: netcode_security_qa
+name: 弱网与联机安全QA
+tier: L3
+department: qa
+reports_to: qa_lead
+kind: maker
+duties: [弱网丢包模拟, 协议篡改注入, 并发抗压极限测试]
+write: [qa/reports/network/**]
+commands: []
+activation:
+  category: genre_specific
+  wake_stages: [3, 4, 5]
+  default_state: active

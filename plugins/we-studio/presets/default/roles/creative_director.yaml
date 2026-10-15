@@ -4,13 +4,10 @@ tier: L2
 department: creative
 reports_to: producer
 kind: maker+reviewer
-duties: [世界观构想, 核心玩法愿景, 策划产出评审]
-outputs: [vision_pitch, core_loop_spec]
-write: ["design/**"]
-commands: [task.*, review.*, schema.list]
-reviews: [game_designer, level_designer, combat_designer]
+duties: [核心幻想, 卖点与差异化, 体验目标, 策划裁决]
+write: [design/pitch/**, design/**]
+commands: []
 activation:
   category: mandatory
-  genres: [all]
   wake_stages: [0, 1, 2, 3, 5]
   default_state: active

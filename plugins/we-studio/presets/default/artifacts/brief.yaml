@@ -1,0 +1,19 @@
+template_id: brief
+name: Game Project Brief
+tier: L0_to_L1
+fields:
+  - id: genre
+    label: 核心品类
+    tier: required
+  - id: platforms
+    label: 目标平台与操作方式
+    tier: required
+  - id: target_audience
+    label: 目标受众与年龄段
+    tier: required
+  - id: art_style
+    label: 视觉与美术风格
+    tier: defaultable
+  - id: scale
+    label: 单局时长与规模
+    tier: defaultable

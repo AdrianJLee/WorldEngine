@@ -1,0 +1,13 @@
+id: network_programmer
+name: 网络与同步程序
+tier: L3
+department: tech
+reports_to: technical_director
+kind: maker
+duties: [状态同步/帧同步, 航位预测, 延迟补偿, 断线重连, 反作弊]
+write: [scripts/network/**, scripts/netcode/**]
+commands: []
+activation:
+  category: genre_specific
+  wake_stages: [2, 3, 4, 5]
+  default_state: active

@@ -1,0 +1,39 @@
+version: 1.0.0
+preset: multiplayer
+name: 多人联机对战包 (状态同步/预测/抗延迟)
+stages:
+  - index: 0
+    id: concept
+    name: 联机网络架构立项
+    lead: technical_director
+    outputs: [brief, netcode_spec]
+    gate:
+      required_outputs: [brief]
+      reviewers: [producer, technical_director]
+  - index: 1
+    id: prototype
+    name: 回环同步与弱网原型
+    lead: network_programmer
+    outputs: [multiplayer_prototype]
+    gate:
+      required_outputs: [multiplayer_prototype]
+      self_validations: [project.validate, playtest.run]
+      reviewers: [technical_director, qa_lead]
+  - index: 2
+    id: production
+    name: 对战机制与反作弊量产
+    lead: producer
+    outputs: [dedicated_server_build]
+    gate:
+      required_outputs: [dedicated_server_build]
+      self_validations: [project.validate, build.package]
+      reviewers: [producer, qa_lead]
+  - index: 3
+    id: launch
+    name: 服务器与客户端联合封版
+    lead: producer
+    outputs: [shipping_package]
+    gate:
+      required_outputs: [shipping_package]
+      self_validations: [build.package]
+      reviewers: [producer]

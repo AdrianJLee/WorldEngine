@@ -1,0 +1,13 @@
+id: audio_designer
+name: 音频总监/音效设计
+tier: L3
+department: experience
+reports_to: experience_director
+kind: maker
+duties: [Foley拟音, 打击音效, 环境声学, HRTF空间音频定位]
+write: [audio/sfx/**, audio/banks/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [2, 3, 4, 5]
+  default_state: active

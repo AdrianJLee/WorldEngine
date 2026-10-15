@@ -1,0 +1,13 @@
+id: ui_artist
+name: UI/GUI视觉设计师
+tier: L3
+department: art
+reports_to: art_director
+kind: maker
+duties: [界面视觉风格, HUD排版, 矢量图标, 动效转场, 字体排印]
+write: [ui/**, assets/ui/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [2, 3, 4, 5]
+  default_state: active

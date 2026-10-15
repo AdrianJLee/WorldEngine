@@ -1,0 +1,13 @@
+id: technical_director
+name: 技术总监
+tier: L2
+department: tech
+reports_to: producer
+kind: maker+reviewer
+duties: [架构选型, 技术方案论证, 接口解耦, 技术债审查]
+write: [scripts/core/**, config/**]
+commands: []
+activation:
+  category: mandatory
+  wake_stages: [0, 1, 2, 3, 4, 5]
+  default_state: active

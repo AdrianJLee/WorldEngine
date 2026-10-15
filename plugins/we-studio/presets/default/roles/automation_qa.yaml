@@ -1,0 +1,13 @@
+id: automation_qa
+name: 自动化测试工程师
+tier: L3
+department: qa
+reports_to: qa_lead
+kind: maker
+duties: [playtest.run断言编写, 无头回归集维护, 输入回放录制, CI冒烟门禁]
+write: [qa/tests/**, qa/replays/**]
+commands: []
+activation:
+  category: mandatory
+  wake_stages: [2, 3, 4, 5]
+  default_state: active

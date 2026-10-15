@@ -1,0 +1,13 @@
+id: 2d_animator
+name: 2D骨骼动画师
+tier: L3
+department: art
+reports_to: art_director
+kind: maker
+duties: [骨骼绑定, 插值形变, 蒙皮权重, 状态动画]
+write: [art/2d/skeletons/**, assets/animations/2d/**]
+commands: []
+activation:
+  category: genre_specific
+  wake_stages: [2, 3, 4]
+  default_state: active

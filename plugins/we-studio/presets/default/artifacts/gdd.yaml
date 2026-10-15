@@ -1,0 +1,12 @@
+template_id: gdd
+name: Game Design Document
+tier: L3_creative
+fields:
+  - id: core_loop
+    label: 核心游戏循环
+  - id: player_mechanics
+    label: 角色操作与手感
+  - id: state_machines
+    label: 核心状态机与流转
+  - id: acceptance_criteria
+    label: 自动化测试断言规范

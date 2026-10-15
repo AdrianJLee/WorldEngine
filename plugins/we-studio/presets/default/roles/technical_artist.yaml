@@ -1,0 +1,13 @@
+id: technical_artist
+name: 技术美术TA
+tier: L3
+department: art
+reports_to: art_director
+kind: maker+reviewer
+duties: [Slang着色器开发, PBR/NPR材质图, 绑定蒙皮, LOD规范, 光照烘焙]
+write: [shaders/**, materials/**, scripts/tools/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [1, 2, 3, 4, 5]
+  default_state: active

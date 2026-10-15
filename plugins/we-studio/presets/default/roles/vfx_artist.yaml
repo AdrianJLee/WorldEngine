@@ -1,0 +1,13 @@
+id: vfx_artist
+name: 特效美术
+tier: L3
+department: art
+reports_to: art_director
+kind: maker
+duties: [序列帧粒子, GPU粒子, 流体解算, 体积光与后处理]
+write: [assets/vfx/**, shaders/vfx/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [3, 4, 5]
+  default_state: active

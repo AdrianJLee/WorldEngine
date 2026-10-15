@@ -1,0 +1,13 @@
+﻿id: graphics_programmer
+name: 图形与渲染程序
+tier: L3
+department: tech
+reports_to: technical_director
+kind: maker
+duties: [前向延迟渲染, 光追管线, 体积云雾, Slang着色器集成优化]
+write: [shaders/**, materials/**, art/graphics/**]
+commands: []
+activation:
+  category: genre_specific
+  wake_stages: [2, 3, 4, 5]
+  default_state: active

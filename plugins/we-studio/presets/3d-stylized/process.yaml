@@ -1,0 +1,39 @@
+version: 1.0.0
+preset: 3d-stylized
+name: 3D 风格化包 (卡通渲染/NPR/描边/二次元)
+stages:
+  - index: 0
+    id: concept
+    name: 风格化美学立项
+    lead: art_director
+    outputs: [brief, npr_style_lock]
+    gate:
+      required_outputs: [brief]
+      reviewers: [producer, art_director]
+  - index: 1
+    id: prototype
+    name: 卡通着色器与玩法原型
+    lead: gameplay_programmer
+    outputs: [stylized_prototype]
+    gate:
+      required_outputs: [stylized_prototype]
+      self_validations: [project.validate, playtest.run]
+      reviewers: [art_director, qa_lead]
+  - index: 2
+    id: production
+    name: 风格化角色与场景量产
+    lead: producer
+    outputs: [stylized_assets]
+    gate:
+      required_outputs: [stylized_assets]
+      self_validations: [project.validate, asset.validate]
+      reviewers: [producer, qa_lead]
+  - index: 3
+    id: launch
+    name: 发行打包
+    lead: producer
+    outputs: [shipping_package]
+    gate:
+      required_outputs: [shipping_package]
+      self_validations: [build.package]
+      reviewers: [producer]

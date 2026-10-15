@@ -1,4 +1,4 @@
-#include "World/Agent/WeAgentCore.h"
+﻿#include "World/Agent/WeAgentCore.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/WUI/WuiJson.h"
 
@@ -44,7 +44,7 @@ int main()
 		CHECK(defaultPolicy.GetRoles().count("qa_director") == 1);
 	}
 
-	// 2. 验证极速预设包 lite (Game Jam 5 角色 / 4 阶段)
+	// 2. 验证极速预设包 lite (Game Jam 5 角色 / 4 阶段) 与其余 5 大品类预设包
 	{
 		StudioPolicy litePolicy("lite");
 		CHECK(litePolicy.GetStages().size() == 4);
@@ -54,6 +54,22 @@ int main()
 		CHECK(litePolicy.GetRoles().count("artist") == 1);
 		CHECK(litePolicy.GetRoles().count("programmer") == 1);
 		CHECK(litePolicy.GetRoles().count("tester") == 1);
+
+		// 验证其余 5 大品类预设均能正常加载阶段
+		StudioPolicy p2d("2d-standard");
+		CHECK(p2d.GetStages().size() == 4);
+
+		StudioPolicy p3d("3d-nextgen");
+		CHECK(p3d.GetStages().size() == 4);
+
+		StudioPolicy pStyle("3d-stylized");
+		CHECK(pStyle.GetStages().size() == 4);
+
+		StudioPolicy pNet("multiplayer");
+		CHECK(pNet.GetStages().size() == 4);
+
+		StudioPolicy pStrat("strategy");
+		CHECK(pStrat.GetStages().size() == 4);
 	}
 
 	// 3. 验证基于角色与阶段的权限判定与动态休眠

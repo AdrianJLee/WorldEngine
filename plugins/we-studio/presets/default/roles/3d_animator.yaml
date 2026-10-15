@@ -1,0 +1,13 @@
+id: 3d_animator
+name: 3D动画与动捕工程师
+tier: L3
+department: art
+reports_to: art_director
+kind: maker
+duties: [关键帧动画, 混合树, 动捕数据清洗, 骨骼重定向, 根运动]
+write: [assets/animations/3d/**]
+commands: []
+activation:
+  category: genre_specific
+  wake_stages: [3, 4, 5]
+  default_state: active

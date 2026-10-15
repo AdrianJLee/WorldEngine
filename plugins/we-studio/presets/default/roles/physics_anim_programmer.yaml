@@ -1,0 +1,13 @@
+id: physics_anim_programmer
+name: 动画与物理程序
+tier: L3
+department: tech
+reports_to: technical_director
+kind: maker
+duties: [动画混合, 反向动力学IK, 布娃娃Ragdoll, 刚体约束, 布料模拟]
+write: [scripts/physics/**, scripts/anim/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [2, 3, 4]
+  default_state: active

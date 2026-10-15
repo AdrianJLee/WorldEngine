@@ -1,0 +1,13 @@
+id: monetization_designer
+name: 商业化策划
+tier: L3
+department: publishing
+reports_to: producer
+kind: maker
+duties: [变现模型, 商业化数值, 通行证, 受体验总监严格伦理审查]
+write: [design/monetization/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [1, 3, 4]
+  default_state: active

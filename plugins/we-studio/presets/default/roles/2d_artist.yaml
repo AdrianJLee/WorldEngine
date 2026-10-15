@@ -1,0 +1,13 @@
+id: 2d_artist
+name: 2D美术与像素画师
+tier: L3
+department: art
+reports_to: art_director
+kind: maker
+duties: [像素精灵, 序列帧图集, Tilemap瓦片, 手绘背景, 立绘插画]
+write: [art/2d/**, assets/textures/**]
+commands: []
+activation:
+  category: genre_specific
+  wake_stages: [2, 3, 4, 5]
+  default_state: active

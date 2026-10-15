@@ -1,0 +1,13 @@
+id: composer
+name: 作曲与配乐
+tier: L3
+department: experience
+reports_to: experience_director
+kind: maker
+duties: [原创BGM, 主题音乐, 自适应分层互动音乐系统]
+write: [audio/music/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [2, 3, 4]
+  default_state: active

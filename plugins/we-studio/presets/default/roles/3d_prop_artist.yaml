@@ -1,0 +1,13 @@
+id: 3d_prop_artist
+name: 3D次世代道具美术
+tier: L3
+department: art
+reports_to: art_director
+kind: maker
+duties: [高模雕刻, 拓扑减面, UV展开, Substance PBR材质烘焙]
+write: [art/3d/props/**, assets/models/props/**]
+commands: []
+activation:
+  category: genre_specific
+  wake_stages: [3, 4]
+  default_state: active

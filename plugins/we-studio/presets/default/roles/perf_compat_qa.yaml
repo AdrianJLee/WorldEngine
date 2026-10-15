@@ -1,0 +1,13 @@
+id: perf_compat_qa
+name: 性能与兼容性QA
+tier: L3
+department: qa
+reports_to: qa_lead
+kind: maker
+duties: [帧率稳定性测试, DrawCall/Bandwidth监控, 内存泄漏分析, 多档硬件压测]
+write: [qa/perf/**, qa/profiles/**]
+commands: []
+activation:
+  category: dynamic
+  wake_stages: [3, 4, 5, 6]
+  default_state: active
