@@ -1,5 +1,6 @@
-#include "wldpch.h"
+﻿#include "wldpch.h"
 #include "World/Ai/CommandRegistry.h"
+#include "World/Ai/SelfValidation.h"
 #include "World/WUI/WuiJson.h"
 
 #include <algorithm>
@@ -73,7 +74,8 @@ namespace World::Ai
 			return true;
 		};
 
-		m_Commands[capabilitiesCmd.name] = std::move(capabilitiesCmd);
+				RegisterCommand(std::move(capabilitiesCmd));
+		SelfValidation::RegisterCommands(*this);
 	}
 
 	bool CommandRegistry::RegisterCommand(CommandDescriptor desc)
@@ -190,11 +192,13 @@ namespace World::Ai
 			item.Object.push_back({ "owner", JsonValue::MakeString(desc.owner) });
 
 			// 解析 paramsSchema，如果非法则作为空对象包装
-			auto parsedParams = JsonValue::Parse(desc.paramsSchema, nullptr);
+			std::string errParams;
+			auto parsedParams = JsonValue::Parse(desc.paramsSchema, &errParams);
 			item.Object.push_back({ "params_schema", parsedParams.has_value() ? std::move(*parsedParams) : JsonValue::Parse("{}", nullptr).value() });
 
 			// 解析 resultSchema
-			auto parsedResult = JsonValue::Parse(desc.resultSchema, nullptr);
+			std::string errResult;
+			auto parsedResult = JsonValue::Parse(desc.resultSchema, &errResult);
 			item.Object.push_back({ "result_schema", parsedResult.has_value() ? std::move(*parsedResult) : JsonValue::Parse("{}", nullptr).value() });
 
 			capsArray.Array.push_back(std::move(item));
@@ -218,8 +222,10 @@ namespace World::Ai
 
 	void CommandRegistry::ResetAll()
 	{
-		std::lock_guard<std::mutex> lock(m_Mutex);
-		m_Commands.clear();
+		{
+			std::lock_guard<std::mutex> lock(m_Mutex);
+			m_Commands.clear();
+		}
 		RegisterBuiltinCommands();
 	}
 }
