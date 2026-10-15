@@ -1,6 +1,8 @@
 ﻿#include "wldpch.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/Ai/SelfValidation.h"
+#include "World/Ai/PlaytestRunner.h"
+#include "World/Ai/ProjectPackager.h"
 #include "World/WUI/WuiJson.h"
 
 #include <algorithm>
@@ -76,6 +78,8 @@ namespace World::Ai
 
 				RegisterCommand(std::move(capabilitiesCmd));
 		SelfValidation::RegisterCommands(*this);
+		PlaytestRunner::RegisterCommands(*this);
+		ProjectPackager::RegisterCommands(*this);
 	}
 
 	bool CommandRegistry::RegisterCommand(CommandDescriptor desc)
