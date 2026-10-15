@@ -30,9 +30,20 @@ set_target_properties(WeMcp PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Launcher"
 )
 
-# 兼容保留 we-mcp.exe 产物副本，确保外部脚本与旧路径配置无缝兼容
+# 1. 复制 WorldRuntime.dll 到 WeMcp.exe 所在目录，保证随处可执行
+add_custom_command(TARGET WeMcp POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:World>"
+        "$<TARGET_FILE_DIR:WeMcp>"
+    COMMENT "Copying WorldRuntime.dll next to WeMcp.exe"
+    VERBATIM
+)
+
+# 2. 兼容生成 we-mcp.exe 产物副本，确保新旧路径与外部工具配置无缝兼容
 add_custom_command(TARGET WeMcp POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:WeMcp>"
         "$<TARGET_FILE_DIR:WeMcp>/we-mcp$<TARGET_FILE_SUFFIX:WeMcp>"
+    COMMENT "Mirroring WeMcp.exe to we-mcp.exe"
+    VERBATIM
 )
