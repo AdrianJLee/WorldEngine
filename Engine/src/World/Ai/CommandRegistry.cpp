@@ -5,6 +5,7 @@
 #include "World/Ai/ProjectPackager.h"
 #include "World/Ai/WriteGuard.h"
 #include "World/Ai/ChangesetTracker.h"
+#include "World/Agent/WeAgentCore.h"
 #include "World/WUI/WuiJson.h"
 
 #include <algorithm>
@@ -83,6 +84,7 @@ namespace World::Ai
 		PlaytestRunner::RegisterCommands(*this);
 		ProjectPackager::RegisterCommands(*this);
 		ChangesetTracker::RegisterCommands(*this);
+		Agent::WeAgentCore::RegisterCommands(*this);
 	}
 
 	bool CommandRegistry::RegisterCommand(CommandDescriptor desc)
