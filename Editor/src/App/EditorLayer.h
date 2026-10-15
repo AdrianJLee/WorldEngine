@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <cstddef>
 #include "World.h"
@@ -601,6 +601,7 @@ namespace World
 		// 命令分发:在主线程帧内执行,结果/错误以文本返回给控制通道。
 		bool ExecuteAiCommand(const std::string& cmd, const std::map<std::string, std::string>& args,
 			std::string& result, std::string& error);
+		void EnsureAiCommandsRegistered();
 		std::string DescribeAiScene() const;
 		// 录制:把一次通道会话写成可回放的 JSON 行脚本(record.start/stop)。
 		void StartAiRecording(const std::string& path);

@@ -1,4 +1,4 @@
-#include "wldpch.h"
+﻿#include "wldpch.h"
 #include "World/Core/StringPool.h"
 
 #include "App/EditorLayer.h"
@@ -25,6 +25,7 @@
 #include "World/Audio/AudioSystem.h"
 #include "World/Audio/SoundEvent.h"
 #include "World/Audio/AudioNullBackend.h"
+#include "World/Ai/CommandRegistry.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -1066,9 +1067,114 @@ namespace World
 		return out.str();
 	}
 
+		void EditorLayer::EnsureAiCommandsRegistered()
+	{
+		static bool s_Registered = false;
+		if (s_Registered)
+			return;
+		s_Registered = true;
+
+		auto& reg = World::Ai::CommandRegistry::Get();
+
+		auto addCmd = [&](const std::string& name, const std::string& desc,
+			World::Ai::CommandEffect effect, World::Ai::CommandScope scope,
+			const std::string& paramsSchema = "{}", const std::string& resultSchema = "{}")
+		{
+			World::Ai::CommandDescriptor d;
+			d.name = name;
+			d.description = desc;
+			d.effect = effect;
+			d.scope = scope;
+			d.owner = "engine";
+			d.paramsSchema = paramsSchema;
+			d.resultSchema = resultSchema;
+			reg.RegisterCommand(std::move(d));
+		};
+
+		using World::Ai::CommandEffect;
+		using World::Ai::CommandScope;
+
+		// UI 控制族
+		addCmd("ui.open", "Open a panel by id or path.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}");
+		addCmd("ui.close", "Close an open panel by id.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}");
+		addCmd("ui.invoke", "Invoke an accessible UI widget by id or label.", CommandEffect::Exec, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"label\":{\"type\":\"string\"},\"value\":{\"type\":\"string\"}}}");
+		addCmd("ui.type", "Type text into an editable UI widget.", CommandEffect::Exec, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}}}");
+		addCmd("ui.key", "Inject a virtual key event into UI.", CommandEffect::Exec, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"key\":{\"type\":\"string\"}}}");
+		addCmd("ui.tree", "Dump the accessibility tree hierarchy for a window.", CommandEffect::Read, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"window\":{\"type\":\"string\"}}}");
+		addCmd("ui.windows", "List all active windows and accessibility roots.", CommandEffect::Read, CommandScope::EditorOnly);
+		addCmd("ui.resize", "Resize window or viewport.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"width\":{\"type\":\"number\"},\"height\":{\"type\":\"number\"}}}");
+		addCmd("ui.toggle", "Toggle an expandable panel or section.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("ui.detach", "Detach a panel into a floating window.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("ui.focus", "Set focus to a specific panel.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("ui.activate", "Activate a tab or panel in shell.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("ui.layout.get", "Get current WUI dock layout json.", CommandEffect::Read, CommandScope::EditorOnly);
+
+		// 场景与实体族
+		addCmd("scene.list", "List entities in current scene.", CommandEffect::Read, CommandScope::Both);
+		addCmd("scene.select", "Select entity by id or name.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("scene.get", "Get entity component values.", CommandEffect::Read, CommandScope::Both);
+		addCmd("scene.set", "Set component field value on an entity.", CommandEffect::Write, CommandScope::Both);
+		addCmd("scene.open", "Open scene file by path.", CommandEffect::Write, CommandScope::Both);
+		addCmd("scene.save", "Save active scene.", CommandEffect::Write, CommandScope::Both);
+		addCmd("scene.query", "Query entities by component predicate.", CommandEffect::Read, CommandScope::Both);
+
+		// 材质族
+		addCmd("material.get", "Get material parameters by path.", CommandEffect::Read, CommandScope::Both);
+		addCmd("material.set", "Set material property by path and field name.", CommandEffect::Write, CommandScope::Both);
+
+		// 资产族
+		addCmd("asset.create_atlas", "Create sprite atlas asset.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.create_anim", "Create sprite animation asset.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.create_tilemap", "Create tilemap asset.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.open_material", "Open material in editor.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.import_gltf", "Import glTF model into project.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.create_prefab", "Create prefab asset from entity selection.", CommandEffect::Write, CommandScope::Both);
+		addCmd("asset.open_prefab", "Open prefab asset for inspection.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.edit_prefab", "Edit prefab entity component.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.save_prefab", "Save prefab asset.", CommandEffect::Write, CommandScope::Both);
+		addCmd("asset.instance_prefab", "Instantiate prefab into active scene.", CommandEffect::Write, CommandScope::Both);
+
+		// 走带与试玩族
+		addCmd("play.enter", "Enter Play/Simulate mode.", CommandEffect::Exec, CommandScope::EditorOnly);
+		addCmd("play.exit", "Exit Play/Simulate mode.", CommandEffect::Exec, CommandScope::EditorOnly);
+		addCmd("play.pause", "Pause play simulation.", CommandEffect::Exec, CommandScope::EditorOnly);
+		addCmd("play.resume", "Resume play simulation.", CommandEffect::Exec, CommandScope::EditorOnly);
+
+		// 音频族
+		addCmd("audio.post", "Post a sound event by name.", CommandEffect::Exec, CommandScope::Both);
+		addCmd("audio.post_combo", "Post a sound event with combo pitch escalation.", CommandEffect::Exec, CommandScope::Both);
+		addCmd("audio.stop_all", "Stop all active audio voices.", CommandEffect::Exec, CommandScope::Both);
+		addCmd("audio.list_events", "List all registered sound events.", CommandEffect::Read, CommandScope::Both);
+		addCmd("audio.capture", "Capture active audio buffer for verification.", CommandEffect::Exec, CommandScope::Both);
+		addCmd("audio.get_stats", "Get audio subsystem memory and voice stats.", CommandEffect::Read, CommandScope::Both);
+		addCmd("audio.validate", "Validate sound events and assets closure.", CommandEffect::Read, CommandScope::Both);
+
+		// 截屏与遥测
+		addCmd("capture.screen", "Capture entire editor window frame.", CommandEffect::Read, CommandScope::EditorOnly);
+		addCmd("capture.scene", "Capture viewport scene color buffer.", CommandEffect::Read, CommandScope::Both);
+		addCmd("capture.float", "Capture specific floating window frame.", CommandEffect::Read, CommandScope::EditorOnly);
+		addCmd("capture.texture", "Capture asset preview texture buffer.", CommandEffect::Read, CommandScope::EditorOnly);
+		addCmd("state.dump", "Dump full editor and scene state JSON.", CommandEffect::Read, CommandScope::Both);
+		addCmd("stats.scene", "Get active scene render and entity statistics.", CommandEffect::Read, CommandScope::Both);
+		addCmd("prof.stats", "Get frame profiler metrics.", CommandEffect::Read, CommandScope::Both);
+		addCmd("prof.memory", "Get memory attribution dump.", CommandEffect::Read, CommandScope::Both);
+		addCmd("log.tail", "Tail recent engine logs.", CommandEffect::Read, CommandScope::Both);
+		addCmd("ops.tail", "Tail recent user operations.", CommandEffect::Read, CommandScope::Both);
+		addCmd("record.start", "Start recording AI commands to script file.", CommandEffect::Exec, CommandScope::Both);
+		addCmd("record.stop", "Stop recording AI commands.", CommandEffect::Exec, CommandScope::Both);
+		addCmd("replay", "Replay AI script file.", CommandEffect::Exec, CommandScope::Both);
+		addCmd("quit", "Exit editor application.", CommandEffect::Exec, CommandScope::Both);
+	}
+
 	bool EditorLayer::ExecuteAiCommand(const std::string& cmd, const std::map<std::string, std::string>& args,
 		std::string& result, std::string& error)
 	{
+		EnsureAiCommandsRegistered();
+
+		if (cmd == "ai.capabilities")
+		{
+			return World::Ai::CommandRegistry::Get().Dispatch(cmd, args, result, error);
+		}
 		auto arg = [&](const char* key, const std::string& fallback = std::string()) -> std::string
 		{
 			const auto found = args.find(key);
