@@ -229,6 +229,80 @@ namespace World::Ai
 			}
 		}
 
+		// 5. 关卡实体与预制体资产引用完整性检查 (自证死链与 1x1 白块)
+		size_t entitiesChecked = 0;
+		size_t textureRefsChecked = 0;
+		if (fs::exists(assetsDir))
+		{
+			std::error_code ec;
+			for (const auto& entry : fs::recursive_directory_iterator(assetsDir, ec))
+			{
+				if (!entry.is_regular_file())
+					continue;
+
+				const auto ext = entry.path().extension().string();
+				if (ext != ".entity" && ext != ".wprefab")
+					continue;
+
+				++entitiesChecked;
+
+				std::ifstream f(entry.path());
+				if (!f) continue;
+
+				std::string line;
+				int lineNum = 0;
+				while (std::getline(f, line))
+				{
+					++lineNum;
+					size_t pos = line.find("Texture:");
+					if (pos == std::string::npos)
+						pos = line.find("AlbedoTexture:");
+					if (pos == std::string::npos)
+						pos = line.find("NormalTexture:");
+
+					if (pos != std::string::npos)
+					{
+						std::string val = line.substr(pos + (line[pos] == 'A' ? 14 : (line[pos] == 'N' ? 14 : 8)));
+						while (!val.empty() && (val.front() == ' ' || val.front() == '	' || val.front() == 34 || val.front() == 39)) val.erase(0, 1);
+						while (!val.empty() && (val.back() == ' ' || val.back() == '	' || val.back() == 34 || val.back() == 39)) val.pop_back();
+
+						if (!val.empty())
+						{
+							++textureRefsChecked;
+
+							// 判定 1: 冗余 assets/ 前缀检测 (导致引擎多拼一层 assets/ 变成 1x1 白块)
+							if (val.rfind("assets/", 0) == 0 || val.rfind("assets\\", 0) == 0)
+							{
+								std::string stripped = val.substr(7);
+								report.errors.push_back({
+									"ERR_TEXTURE_REDUNDANT_PREFIX",
+									entry.path().string(),
+									lineNum,
+									"Redundant 'assets/' prefix in texture path '" + val + "'. Path must be relative to content root ('" + stripped + "')."
+								});
+							}
+							else
+							{
+								// 判定 2: 目标文件在 assets/ 相对路径下是否存在
+								fs::path texFile = assetsDir / fs::u8path(val);
+								if (!fs::exists(texFile))
+								{
+									report.errors.push_back({
+										"ERR_TEXTURE_NOT_FOUND",
+										entry.path().string(),
+										lineNum,
+										"Texture file '" + val + "' not found on disk at '" + texFile.string() + "'."
+									});
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		report.metrics["entities_checked"] = std::to_string(entitiesChecked);
+		report.metrics["texture_refs_checked"] = std::to_string(textureRefsChecked);
+
 		report.valid = report.errors.empty();
 		return report;
 	}

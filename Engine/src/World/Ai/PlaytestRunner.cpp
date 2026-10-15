@@ -192,6 +192,22 @@ namespace World::Ai
 					}
 				}
 			}
+			else if (assertStr == "no_void_fall")
+			{
+				for (auto [e, trans, tag] : targetScene->GetRegistry().view<TransformComponent, TagComponent>().each())
+				{
+					if (trans.Location.y < -35.0f)
+					{
+						result.failures.push_back("Assertion failed: no_void_fall (Entity '" + StringPool::Get().NameOf(tag.Tag) + "' fell to Y=" + std::to_string(trans.Location.y) + ")");
+						result.pass = false;
+						break;
+					}
+				}
+			}
+			else if (assertStr == "no_crashes")
+			{
+				// Handled by simulation try-catch
+			}
 		}
 
 		const double avgStepMs = result.framesSimulated > 0 ? (durationMs / result.framesSimulated) : 0.0;
