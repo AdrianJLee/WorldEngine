@@ -2077,10 +2077,10 @@ set_tests_properties(World.AiAgentCore PROPERTIES
 # M6: AI MCP 协议网桥与动态工具裁剪 (McpServer, EngineBridge, JSON-RPC 2.0) 单元测试
 add_executable(WorldAiMcpBridgeTests
     World/AiMcpBridgeTests.cpp
-    ${CMAKE_SOURCE_DIR}/tools/we-mcp/src/EngineBridge.cpp
-    ${CMAKE_SOURCE_DIR}/tools/we-mcp/src/McpServer.cpp
+    ${CMAKE_SOURCE_DIR}/Launcher/WeMcp/src/EngineBridge.cpp
+    ${CMAKE_SOURCE_DIR}/Launcher/WeMcp/src/McpServer.cpp
 )
-target_include_directories(WorldAiMcpBridgeTests PRIVATE ${CMAKE_SOURCE_DIR}/tools/we-mcp/src)
+target_include_directories(WorldAiMcpBridgeTests PRIVATE ${CMAKE_SOURCE_DIR}/Launcher/WeMcp/src)
 target_link_libraries(WorldAiMcpBridgeTests PRIVATE World ws2_32)
 target_compile_features(WorldAiMcpBridgeTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldAiMcpBridgeTests PRIVATE

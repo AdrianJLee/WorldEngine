@@ -68,3 +68,8 @@ foreach(wld_launcher_target IN ITEMS WeEdit WePlay)
     set_target_properties(${wld_launcher_target} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Launcher")
 endforeach()
+
+# AI 原生外部 MCP 独立小程序启动器 (WeMcp.exe / we-mcp.exe)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/WeMcp/CMakeLists.txt")
+    add_subdirectory(WeMcp)
+endif()

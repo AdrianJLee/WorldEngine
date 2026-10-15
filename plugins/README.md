@@ -23,7 +23,7 @@
 
 ### 协同工作拓扑（两扇门，一条线）
 ```
-外部 AI (Codex/Claude) ─MCP─▶ tools/we-mcp.exe ─┐
+外部 AI (Codex/Claude) ─MCP─▶ Launcher/WeMcp.exe (we-mcp.exe) ─┐
                                                ├─▶ CommandRegistry ─▶ WeAgentCore (守卫/门禁/状态机)
 编辑器内交互面板 ───────────▶ we-ai-assistant ──┘       ▲
                                                         │ 提供 40 角色/流程规则

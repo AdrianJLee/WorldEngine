@@ -2,8 +2,8 @@
 #include "World/WUI/WuiJson.h"
 
 // 直接包含 McpServer 实现文件与头文件以方便纯单元测试
-#include "../../tools/we-mcp/src/McpServer.h"
-#include "../../tools/we-mcp/src/McpProtocol.h"
+#include "../../Launcher/WeMcp/src/McpServer.h"
+#include "../../Launcher/WeMcp/src/McpProtocol.h"
 
 #include <cassert>
 #include <cstdio>

@@ -72,9 +72,7 @@ else()
     # PROJ-3/T2:项目侧小启动器(WeEdit.exe / WePlay.exe)——零引擎依赖,可单独复制进项目目录。
     add_subdirectory(Launcher)
 
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/we-mcp/CMakeLists.txt")
-        add_subdirectory(tools/we-mcp)
-    endif()
+
 
     add_dependencies(Runtime Game)
     add_dependencies(Editor Runtime)
