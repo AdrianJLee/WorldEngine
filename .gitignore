@@ -1,15 +1,18 @@
-# Directories
+﻿# Directories
 .vs/
 # 构建产物目录:任何层级都挡(历史出现过 in-source 构建,如 Engine/vendor/Glad/bin)。
 bin/
 bin-int/
 # 例外:第三方 CLI 工具目录允许自带 bin/(见 vendor/README.md 的"工具 vs 源码"判据)。
-!vendor/tools/**/bin/
+!vendor/tools/*
+!/tools/we-mcp//**/bin/
 # 实验性第三方包整包不入库(体积大):采纳时按 vendor/README.md 落"pin + FETCH"或小 CLI 子集
-# (先例:vendor/tools/slang 的 CLI 子集,2026-09-30 经用户批准入库)。
+# (先例:vendor/tools/*
+!/tools/we-mcp//slang 的 CLI 子集,2026-09-30 经用户批准入库)。
 vendor/slang/
 # slangc 运行时在自身 bin/ 目录生成的 GLSL 模块缓存(上游发布包不含;删除后自动重建)。
-vendor/tools/slang/bin/*.bin
+vendor/tools/*
+!/tools/we-mcp//slang/bin/*.bin
 
 # Files
 *.user
@@ -21,8 +24,10 @@ build
 .vscode
 docs
 # 只忽略**根级** tools/(过程层与本机工具面);不要用裸目录名——裸名会在任意深度命中
-# (历史:`World/tools/` 这类同名声明的目录会被静默吞掉;2026-09-23 修;模块目录已改名 Engine/)。
-/tools
+# (历史:`World/tools/*
+!/tools/we-mcp//` 这类同名声明的目录会被静默吞掉;2026-09-23 修;模块目录已改名 Engine/)。
+/tools/*
+!/tools/we-mcp/
 AGENTS.md
 # 本机状态(编辑器偏好/布局/窗口/最近使用组件):不入库;整个目录可删,删后自动重建。
 /local/
