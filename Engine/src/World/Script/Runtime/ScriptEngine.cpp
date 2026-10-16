@@ -13,6 +13,7 @@
 #include "World/Script/Bindings/BindAudio.h"
 #include "World/Script/Bindings/BindPhysics.h"
 #include "World/Script/Bindings/BindCamera.h"
+#include "World/Script/Bindings/BindGameplay.h"
 #include "World/Script/Runtime/HotReload.h"
 #include "World/Script/Vm/LuauVm.h"
 #include "World/Script/Runtime/PluginScriptLibrary.h"
@@ -2183,6 +2184,9 @@ namespace World
 			// 摄像机与后处理全局服务面 (Camera/PostProcess 只读全局表;见 Script/BindCamera.h)。
 			if (!RegisterCameraBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the camera & post-process bindings: " + error);
+			// Gameplay 全局服务面 (Health/SmartObject 只读全局表;见 Script/BindGameplay.h)。
+			if (!RegisterGameplayBindings(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the gameplay bindings: " + error);
 			// W3c:UI 面(只读全局表 `ui`;宿主入口 DrawScriptUi 见 Script/BindUI.h)。
 			if (!RegisterUiBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the UI bindings: " + error);
@@ -2383,6 +2387,10 @@ namespace World
 		const ScriptServiceBinding* cameraTables = CameraServiceBindings(&cameraCount);
 		for (std::size_t index = 0; index < cameraCount; ++index)
 			serviceList.push_back(&cameraTables[index]);
+		std::size_t gpCount = 0;
+		const ScriptServiceBinding* gpTables = GameplayCoreServiceBindings(&gpCount);
+		for (std::size_t index = 0; index < gpCount; ++index)
+			serviceList.push_back(&gpTables[index]);
 		// W3c:UI 块渲染在服务块之后、组件块之前(与脚本可见的全局表顺序一致)。
 		std::size_t uiCount = 0;
 		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);

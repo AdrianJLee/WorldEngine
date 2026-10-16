@@ -48,6 +48,8 @@ struct World::PhysicsMaterialComponent
 struct World::CharacterControllerComponent
 struct World::VirtualCameraComponent
 struct World::PostProcessComponent
+struct World::HealthComponent
+struct World::SmartObjectComponent
 struct World::UUID
 struct World::CameraSettings
 enum World::MeshRendererComponent::PrimitiveShape
@@ -57,3 +59,4 @@ enum World::CameraSettings::ProjectionType
 enum World::RigidBody3DComponent::MotionType
 enum World::MeshCollider3DComponent::ColliderMode
 enum World::PhysMatCombineMode
+enum World::SmartObjectSlotState

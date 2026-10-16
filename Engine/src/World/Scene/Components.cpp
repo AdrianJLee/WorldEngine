@@ -79,4 +79,14 @@ namespace World
 		"PostProcessComponent must stay trivially copyable");
 	static_assert(sizeof(PostProcessComponent) <= 64,
 		"PostProcessComponent must stay within one cache line");
+
+	static_assert(std::is_trivially_copyable_v<HealthComponent>,
+		"HealthComponent must stay trivially copyable");
+	static_assert(sizeof(HealthComponent) <= 64,
+		"HealthComponent must stay within one cache line");
+
+	static_assert(std::is_trivially_copyable_v<SmartObjectComponent>,
+		"SmartObjectComponent must stay trivially copyable");
+	static_assert(sizeof(SmartObjectComponent) <= 64,
+		"SmartObjectComponent must stay within one cache line");
 }

@@ -58,6 +58,8 @@ const TypeSchema& WeSchemaOf_PhysicsMaterialComponent();
 const TypeSchema& WeSchemaOf_CharacterControllerComponent();
 const TypeSchema& WeSchemaOf_VirtualCameraComponent();
 const TypeSchema& WeSchemaOf_PostProcessComponent();
+const TypeSchema& WeSchemaOf_HealthComponent();
+const TypeSchema& WeSchemaOf_SmartObjectComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -67,6 +69,7 @@ const EnumSchema& WeEnumSchemaOf_ProjectionType();
 const EnumSchema& WeEnumSchemaOf_MotionType();
 const EnumSchema& WeEnumSchemaOf_ColliderMode();
 const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode();
+const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState();
 
 	namespace
 	{
@@ -10371,6 +10374,443 @@ struct GeneratedAccess<World::PostProcessComponent>
 };
 
 template <>
+struct GeneratedAccess<World::HealthComponent>
+{
+    static Value Get_CurrentHealth(const void* instance)
+    {
+        const World::HealthComponent* self = static_cast<const World::HealthComponent*>(instance);
+        return Value(self->CurrentHealth);
+    }
+    static void Set_CurrentHealth(void* instance, const Value& value)
+    {
+        World::HealthComponent* self = static_cast<World::HealthComponent*>(instance);
+        self->CurrentHealth = std::get<float>(value);
+    }
+    static Value Get_MaxHealth(const void* instance)
+    {
+        const World::HealthComponent* self = static_cast<const World::HealthComponent*>(instance);
+        return Value(self->MaxHealth);
+    }
+    static void Set_MaxHealth(void* instance, const Value& value)
+    {
+        World::HealthComponent* self = static_cast<World::HealthComponent*>(instance);
+        self->MaxHealth = std::get<float>(value);
+    }
+    static Value Get_Shield(const void* instance)
+    {
+        const World::HealthComponent* self = static_cast<const World::HealthComponent*>(instance);
+        return Value(self->Shield);
+    }
+    static void Set_Shield(void* instance, const Value& value)
+    {
+        World::HealthComponent* self = static_cast<World::HealthComponent*>(instance);
+        self->Shield = std::get<float>(value);
+    }
+    static Value Get_MaxShield(const void* instance)
+    {
+        const World::HealthComponent* self = static_cast<const World::HealthComponent*>(instance);
+        return Value(self->MaxShield);
+    }
+    static void Set_MaxShield(void* instance, const Value& value)
+    {
+        World::HealthComponent* self = static_cast<World::HealthComponent*>(instance);
+        self->MaxShield = std::get<float>(value);
+    }
+    static Value Get_Armor(const void* instance)
+    {
+        const World::HealthComponent* self = static_cast<const World::HealthComponent*>(instance);
+        return Value(self->Armor);
+    }
+    static void Set_Armor(void* instance, const Value& value)
+    {
+        World::HealthComponent* self = static_cast<World::HealthComponent*>(instance);
+        self->Armor = std::get<float>(value);
+    }
+    static Value Get_InvulnerableDuration(const void* instance)
+    {
+        const World::HealthComponent* self = static_cast<const World::HealthComponent*>(instance);
+        return Value(self->InvulnerableDuration);
+    }
+    static void Set_InvulnerableDuration(void* instance, const Value& value)
+    {
+        World::HealthComponent* self = static_cast<World::HealthComponent*>(instance);
+        self->InvulnerableDuration = std::get<float>(value);
+    }
+    static Value Get_IsDead(const void* instance)
+    {
+        const World::HealthComponent* self = static_cast<const World::HealthComponent*>(instance);
+        return Value(self->IsDead);
+    }
+    static void Set_IsDead(void* instance, const Value& value)
+    {
+        World::HealthComponent* self = static_cast<World::HealthComponent*>(instance);
+        self->IsDead = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_CurrentHealth()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xEC180B4B572EB93Dull },
+            "CurrentHealth",
+            Kind::Float,
+            &Get_CurrentHealth,
+            &Set_CurrentHealth,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current health points.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxHealth()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9CC5DDF2B44C264Aull },
+            "MaxHealth",
+            Kind::Float,
+            &Get_MaxHealth,
+            &Set_MaxHealth,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(10000.000000f), false, false, "Maximum health points.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Shield()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7931B4D83A05CE27ull },
+            "Shield",
+            Kind::Float,
+            &Get_Shield,
+            &Set_Shield,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current protective shield points.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxShield()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x618820DA50D280BDull },
+            "MaxShield",
+            Kind::Float,
+            &Get_MaxShield,
+            &Set_MaxShield,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10000.000000f), false, false, "Maximum protective shield points.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Armor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE7C07C2C5553DFD1ull },
+            "Armor",
+            Kind::Float,
+            &Get_Armor,
+            &Set_Armor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1000.000000f), false, false, "Armor points for damage reduction formula.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_InvulnerableDuration()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5F71678647911DDDull },
+            "InvulnerableDuration",
+            Kind::Float,
+            &Get_InvulnerableDuration,
+            &Set_InvulnerableDuration,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5.000000f), false, false, "I-Frame invulnerability duration upon receiving damage.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IsDead()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2F31B104F48DFAECull },
+            "IsDead",
+            Kind::Bool,
+            &Get_IsDead,
+            &Set_IsDead,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "True if entity health reached zero.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::HealthComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::HealthComponent" },
+            "HealthComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::HealthComponent),
+            TypeCategory::Component,
+            {
+                Field_CurrentHealth(),
+                Field_MaxHealth(),
+                Field_Shield(),
+                Field_MaxShield(),
+                Field_Armor(),
+                Field_InvulnerableDuration(),
+                Field_IsDead(),
+            },
+            &StorageBindingOf(),
+            "Gameplay",
+            "Entity health, shields, armor damage mitigation, and invulnerability frames.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::SmartObjectComponent>
+{
+    static Value Get_SlotOffset(const void* instance)
+    {
+        const World::SmartObjectComponent* self = static_cast<const World::SmartObjectComponent*>(instance);
+        return Value(self->SlotOffset);
+    }
+    static void Set_SlotOffset(void* instance, const Value& value)
+    {
+        World::SmartObjectComponent* self = static_cast<World::SmartObjectComponent*>(instance);
+        self->SlotOffset = std::get<glm::vec3>(value);
+    }
+    static Value Get_FacingAngleDeg(const void* instance)
+    {
+        const World::SmartObjectComponent* self = static_cast<const World::SmartObjectComponent*>(instance);
+        return Value(self->FacingAngleDeg);
+    }
+    static void Set_FacingAngleDeg(void* instance, const Value& value)
+    {
+        World::SmartObjectComponent* self = static_cast<World::SmartObjectComponent*>(instance);
+        self->FacingAngleDeg = std::get<float>(value);
+    }
+    static Value Get_CooldownDuration(const void* instance)
+    {
+        const World::SmartObjectComponent* self = static_cast<const World::SmartObjectComponent*>(instance);
+        return Value(self->CooldownDuration);
+    }
+    static void Set_CooldownDuration(void* instance, const Value& value)
+    {
+        World::SmartObjectComponent* self = static_cast<World::SmartObjectComponent*>(instance);
+        self->CooldownDuration = std::get<float>(value);
+    }
+    static Value Get_InteractionDistance(const void* instance)
+    {
+        const World::SmartObjectComponent* self = static_cast<const World::SmartObjectComponent*>(instance);
+        return Value(self->InteractionDistance);
+    }
+    static void Set_InteractionDistance(void* instance, const Value& value)
+    {
+        World::SmartObjectComponent* self = static_cast<World::SmartObjectComponent*>(instance);
+        self->InteractionDistance = std::get<float>(value);
+    }
+    static Value Get_SlotState(const void* instance)
+    {
+        const World::SmartObjectComponent* self = static_cast<const World::SmartObjectComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->SlotState));
+    }
+    static void Set_SlotState(void* instance, const Value& value)
+    {
+        World::SmartObjectComponent* self = static_cast<World::SmartObjectComponent*>(instance);
+        self->SlotState = static_cast<World::SmartObjectSlotState>(std::get<uint64_t>(value));
+    }
+    static const EnumSchema* GetEnum_SlotState()
+    {
+        return &WeEnumSchemaOf_SmartObjectSlotState();
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::SmartObjectComponent* self = static_cast<const World::SmartObjectComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::SmartObjectComponent* self = static_cast<World::SmartObjectComponent*>(instance);
+        self->Enabled = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_SlotOffset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF20D42AD413A547Full },
+            "SlotOffset",
+            Kind::Vec3,
+            &Get_SlotOffset,
+            &Set_SlotOffset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Interaction slot offset relative to object transform.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FacingAngleDeg()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x92AE97341AA90FC3ull },
+            "FacingAngleDeg",
+            Kind::Float,
+            &Get_FacingAngleDeg,
+            &Set_FacingAngleDeg,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(360.000000f), false, false, "Expected facing direction angle in degrees upon using slot.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CooldownDuration()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x58C87C0E95272619ull },
+            "CooldownDuration",
+            Kind::Float,
+            &Get_CooldownDuration,
+            &Set_CooldownDuration,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(60.000000f), false, false, "Cooldown duration after use in seconds.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_InteractionDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFA56F65D30E3F73Bull },
+            "InteractionDistance",
+            Kind::Float,
+            &Get_InteractionDistance,
+            &Set_InteractionDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(10.000000f), false, false, "Maximum radius allowing interaction.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SlotState()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x12CC168FEE03CD9ull },
+            "SlotState",
+            Kind::Enum,
+            &Get_SlotState,
+            &Set_SlotState,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_SlotState,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current reservation state (Available, Claimed, InUse, Cooldown).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF92FC6AA3E56D89ull },
+            "Enabled",
+            Kind::Bool,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this smart object is actively available for interaction.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::SmartObjectComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::SmartObjectComponent" },
+            "SmartObjectComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::SmartObjectComponent),
+            TypeCategory::Component,
+            {
+                Field_SlotOffset(),
+                Field_FacingAngleDeg(),
+                Field_CooldownDuration(),
+                Field_InteractionDistance(),
+                Field_SlotState(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Gameplay",
+            "Smart Object interaction slot: position alignment, claim/use reservation state machine, and cooldown.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -10813,6 +11253,26 @@ struct GeneratedEnum<World::PhysMatCombineMode>
     }
 };
 
+template <>
+struct GeneratedEnum<World::SmartObjectSlotState>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "SmartObjectSlotState",
+            false,
+            1,
+            {
+                { "Available", static_cast<int64_t>(World::SmartObjectSlotState::Available) },
+                { "Claimed", static_cast<int64_t>(World::SmartObjectSlotState::Claimed) },
+                { "InUse", static_cast<int64_t>(World::SmartObjectSlotState::InUse) },
+                { "Cooldown", static_cast<int64_t>(World::SmartObjectSlotState::Cooldown) },
+            },
+        };
+        return schema;
+    }
+};
+
 const TypeSchema& WeSchemaOf_UUIDComponent() { return GeneratedAccess<World::UUIDComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
@@ -10863,6 +11323,8 @@ const TypeSchema& WeSchemaOf_PhysicsMaterialComponent() { return GeneratedAccess
 const TypeSchema& WeSchemaOf_CharacterControllerComponent() { return GeneratedAccess<World::CharacterControllerComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_VirtualCameraComponent() { return GeneratedAccess<World::VirtualCameraComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PostProcessComponent() { return GeneratedAccess<World::PostProcessComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_HealthComponent() { return GeneratedAccess<World::HealthComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_SmartObjectComponent() { return GeneratedAccess<World::SmartObjectComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -10872,6 +11334,7 @@ const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::
 const EnumSchema& WeEnumSchemaOf_MotionType() { return GeneratedEnum<World::RigidBody3DComponent::MotionType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode() { return GeneratedEnum<World::PhysMatCombineMode>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState() { return GeneratedEnum<World::SmartObjectSlotState>::WeEnumSchema(); }
 
 	bool RegisterWorldSchemaModule(SchemaRegistry& registry)
 	{
@@ -10883,6 +11346,7 @@ const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode() { return GeneratedEnum<Wor
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_MotionType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ColliderMode()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_PhysMatCombineMode()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_SmartObjectSlotState()) != SchemaRegistry::Status::Ok) ok = false;
 		const std::vector<TypeSchema> schemas = {
 			WeSchemaOf_UUIDComponent(),
 			WeSchemaOf_TagComponent(),
@@ -10934,6 +11398,8 @@ const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode() { return GeneratedEnum<Wor
 			WeSchemaOf_CharacterControllerComponent(),
 			WeSchemaOf_VirtualCameraComponent(),
 			WeSchemaOf_PostProcessComponent(),
+			WeSchemaOf_HealthComponent(),
+			WeSchemaOf_SmartObjectComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

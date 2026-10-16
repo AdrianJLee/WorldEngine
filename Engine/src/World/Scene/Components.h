@@ -38,6 +38,87 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	struct HealthComponent
+	{
+		float CurrentHealth = 100.0f;                // 4B
+		float MaxHealth = 100.0f;                    // 4B
+		float Shield = 0.0f;                         // 4B
+		float MaxShield = 0.0f;                      // 4B
+		float Armor = 0.0f;                          // 4B
+		float InvulnerableDuration = 0.5f;           // 4B
+		float InvulnerableTimer = 0.0f;              // 4B
+		uint8_t IsDead = 0;                          // 1B
+		uint8_t _Padding[3] { 0 };                   // 3B
+
+		HealthComponent() = default;
+
+		WE_SCHEMA_BODY(World, HealthComponent, Component)
+			WE_SCHEMA_META(Category("Gameplay"),
+				Doc("Entity health, shields, armor damage mitigation, and invulnerability frames."))
+			WE_FIELD(CurrentHealth, Float,
+				Doc("Current health points."));
+			WE_FIELD(MaxHealth, Float, Range(1.0f, 10000.0f),
+				Doc("Maximum health points."));
+			WE_FIELD(Shield, Float,
+				Doc("Current protective shield points."));
+			WE_FIELD(MaxShield, Float, Range(0.0f, 10000.0f),
+				Doc("Maximum protective shield points."));
+			WE_FIELD(Armor, Float, Range(0.0f, 1000.0f),
+				Doc("Armor points for damage reduction formula."));
+			WE_FIELD(InvulnerableDuration, Float, Range(0.0f, 5.0f),
+				Doc("I-Frame invulnerability duration upon receiving damage."));
+			WE_FIELD(IsDead, Bool,
+				Doc("True if entity health reached zero."));
+		WE_SCHEMA_END
+	};
+
+	enum class SmartObjectSlotState : uint8_t
+	{
+		Available = 0,
+		Claimed = 1,
+		InUse = 2,
+		Cooldown = 3
+	};
+	WE_ENUM_SCHEMA(World, SmartObjectSlotState, UInt8)
+		WE_ENUM_VALUE(Available);
+		WE_ENUM_VALUE(Claimed);
+		WE_ENUM_VALUE(InUse);
+		WE_ENUM_VALUE(Cooldown);
+	WE_ENUM_END
+
+	struct SmartObjectComponent
+	{
+		glm::vec3 SlotOffset { 0.0f, 0.0f, 0.0f };   // 12B
+		float FacingAngleDeg = 0.0f;                 // 4B
+		float CooldownDuration = 3.0f;               // 4B
+		float CooldownTimer = 0.0f;                  // 4B
+		float InteractionDistance = 2.0f;            // 4B
+		uint32_t ActivityTag = 0;                    // 4B
+		uint32_t ClaimedByEntity = 0;                // 4B
+		SmartObjectSlotState SlotState = SmartObjectSlotState::Available; // 1B
+		uint8_t Enabled = 1;                         // 1B
+		uint8_t _Padding[6] { 0 };                   // 6B
+
+		SmartObjectComponent() = default;
+
+		WE_SCHEMA_BODY(World, SmartObjectComponent, Component)
+			WE_SCHEMA_META(Category("Gameplay"),
+				Doc("Smart Object interaction slot: position alignment, claim/use reservation state machine, and cooldown."))
+			WE_FIELD(SlotOffset, Vec3,
+				Doc("Interaction slot offset relative to object transform."));
+			WE_FIELD(FacingAngleDeg, Float, Range(0.0f, 360.0f),
+				Doc("Expected facing direction angle in degrees upon using slot."));
+			WE_FIELD(CooldownDuration, Float, Range(0.0f, 60.0f),
+				Doc("Cooldown duration after use in seconds."));
+			WE_FIELD(InteractionDistance, Float, Range(0.1f, 10.0f),
+				Doc("Maximum radius allowing interaction."));
+			WE_FIELD(SlotState, Enum, Of(SmartObjectSlotState),
+				Doc("Current reservation state (Available, Claimed, InUse, Cooldown)."));
+			WE_FIELD(Enabled, Bool,
+				Doc("Whether this smart object is actively available for interaction."));
+		WE_SCHEMA_END
+	};
+
 	struct TagComponent
 	{
 		// 实体名 = **驻留名字标识**(NameId,4B POD),不是 std::string:

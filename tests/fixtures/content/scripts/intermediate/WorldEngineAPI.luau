@@ -1088,6 +1088,16 @@ function ui:isOpen() end
 ---@field DirectionIntensity number
 ---@field Intensity number
 
+-- Component fields are exposed through Entity:GetComponent("HealthComponent"); there is no runtime global named HealthComponent.
+---@class HealthComponent
+---@field IsDead boolean
+---@field InvulnerableDuration number
+---@field MaxShield number
+---@field Shield number
+---@field MaxHealth number
+---@field Armor number
+---@field CurrentHealth number
+
 -- Component fields are exposed through Entity:GetComponent("HierarchyComponent"); there is no runtime global named HierarchyComponent.
 ---@class HierarchyComponent
 ---@field Parent number
@@ -1286,6 +1296,15 @@ function ui:isOpen() end
 ---@field Speed number
 ---@field Time number
 
+-- Component fields are exposed through Entity:GetComponent("SmartObjectComponent"); there is no runtime global named SmartObjectComponent.
+---@class SmartObjectComponent
+---@field SlotState number
+---@field Enabled boolean
+---@field CooldownDuration number
+---@field FacingAngleDeg number
+---@field SlotOffset vec3
+---@field InteractionDistance number
+
 -- Component fields are exposed through Entity:GetComponent("SphereCollider3DComponent"); there is no runtime global named SphereCollider3DComponent.
 ---@class SphereCollider3DComponent
 ---@field Offset vec3
@@ -1420,6 +1439,8 @@ function ui:isOpen() end
 ---@field FreeformLight2D string Short alias for "FreeformLight2DComponent".
 ---@field GlobalLight2DComponent string Registered component type name "GlobalLight2DComponent".
 ---@field GlobalLight2D string Short alias for "GlobalLight2DComponent".
+---@field HealthComponent string Registered component type name "HealthComponent".
+---@field Health string Short alias for "HealthComponent".
 ---@field HierarchyComponent string Registered component type name "HierarchyComponent".
 ---@field Hierarchy string Short alias for "HierarchyComponent".
 ---@field JointComponent string Registered component type name "JointComponent".
@@ -1462,6 +1483,8 @@ function ui:isOpen() end
 ---@field ShadowCaster2D string Short alias for "ShadowCaster2DComponent".
 ---@field SkinnedMeshRendererComponent string Registered component type name "SkinnedMeshRendererComponent".
 ---@field SkinnedMeshRenderer string Short alias for "SkinnedMeshRendererComponent".
+---@field SmartObjectComponent string Registered component type name "SmartObjectComponent".
+---@field SmartObject string Short alias for "SmartObjectComponent".
 ---@field SphereCollider3DComponent string Registered component type name "SphereCollider3DComponent".
 ---@field SphereCollider3D string Short alias for "SphereCollider3DComponent".
 ---@field SpriteAnimatorComponent string Registered component type name "SpriteAnimatorComponent".
