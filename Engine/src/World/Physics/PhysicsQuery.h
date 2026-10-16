@@ -1,5 +1,6 @@
 #pragma once
 
+#include "World/Asset/ProjectManifest.h"
 #include "World/Core/Export.h"
 #include "World/Physics/PhysicsSettings.h"
 #include "World/Scene/Entity.h"
@@ -26,6 +27,11 @@ namespace World::Physics
 		float PenetrationDepth = 0.0f;
 	};
 
+	struct TraceHit : public RaycastHit
+	{
+		Asset::CollisionResponse Response = Asset::CollisionResponse::Ignore;
+	};
+
 	class WLD_API PhysicsQuerySystem
 	{
 	public:
@@ -39,6 +45,10 @@ namespace World::Physics
 		// 按通道进行射线检测
 		static RaycastHit RaycastChannel(Scene& scene, const glm::vec3& origin, const glm::vec3& direction,
 		                                 std::string_view channelName, float maxDistance = 1000.0f);
+
+		// 按 Trace 追踪通道进行三态射线检测 (若阻挡则返回最近 Hit, 穿透/忽略则继续穿过)
+		static TraceHit RaycastTrace(Scene& scene, const glm::vec3& origin, const glm::vec3& direction,
+		                             std::string_view traceChannel, float maxDistance = 1000.0f);
 
 		// 2D 射线检测别名: 强制在 XY 平面 (忽略 Z 轴)
 		static RaycastHit Raycast2D(Scene& scene, const glm::vec2& origin, const glm::vec2& direction,

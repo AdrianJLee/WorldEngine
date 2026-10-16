@@ -47,9 +47,15 @@ namespace World
 		bool m_PhysicsChanged = false;
 		Asset::StreamingSettings m_Streaming;
 		bool m_StreamingChanged = false;
-		// 碰撞矩阵配置状态
+		// 碰撞矩阵与预设体系配置状态 (64 通道 / 三态响应 / 预设体系)
+		int m_CollisionSubTab = 0; // 0 = Matrix Grid, 1 = Collision Profiles
+		int m_ChannelFilter = 0;   // 0 = Object Channels, 1 = Trace Channels, 2 = All Channels
+		int m_ProfileChannelFilter = 0; // 0 = All Channels, 1 = Object Channels, 2 = Trace Channels
+		int m_SelectedProfile = 0; // 当前选中的 Collision Profile 下标
 		float m_CollisionScrollY = 0.0f;
 		float m_ChannelsScrollY = 0.0f;
+		float m_ProfileScrollY = 0.0f;
+		float m_ProfileListScrollY = 0.0f;
 		bool m_CollisionTriangleOnly = false;
 		bool m_ShowAllChannels = false;
 		// P4-UX11:启动与内容(renderer / start_scene / content_root)—— 来自 project.we.yaml,
@@ -75,8 +81,12 @@ namespace World
 		void RegisterImportSettings();
 		// P4-U4:关卡 manifest 的 `World:` 块(关卡级设置;绑当前文档关卡)。
 		void RegisterWorldSettings();
+		void EnsureDefaultProfiles();
 		// 可视化碰撞矩阵设置页渲染
 		void RenderCollisionTab(Wui::WuiContext& ctx, const Wui::WuiRect& page,
+			const Wui::WuiTheme& theme, PanelHost& host);
+		// 碰撞预设体系页渲染
+		void RenderCollisionProfiles(Wui::WuiContext& ctx, const Wui::WuiRect& page,
 			const Wui::WuiTheme& theme, PanelHost& host);
 	};
 }

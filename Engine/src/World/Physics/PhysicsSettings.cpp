@@ -93,4 +93,29 @@ namespace World
 	{
 		return Store().Channels.FindChannelIndex(name);
 	}
+
+	uint64_t PhysicsSettings::GetMask64ForChannel(uint8_t channel)
+	{
+		return Store().Channels.GetMask64(channel);
+	}
+
+	Asset::CollisionResponse PhysicsSettings::GetCollisionResponse(uint8_t channelA, uint8_t channelB)
+	{
+		return Store().Channels.GetCollisionResponse(channelA, channelB);
+	}
+
+	void PhysicsSettings::SetCollisionResponse(uint8_t channelA, uint8_t channelB, Asset::CollisionResponse response)
+	{
+		Store().Channels.SetCollisionResponse(channelA, channelB, response);
+	}
+
+	Asset::CollisionResponse PhysicsSettings::EvaluateInteraction(uint8_t channelA, uint8_t channelB)
+	{
+		return Store().Channels.EvaluateInteraction(channelA, channelB);
+	}
+
+	const Asset::CollisionProfile* PhysicsSettings::FindProfile(std::string_view name)
+	{
+		return Store().Channels.FindProfile(name);
+	}
 }

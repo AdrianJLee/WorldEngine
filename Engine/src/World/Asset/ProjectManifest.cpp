@@ -11,23 +11,176 @@
 
 namespace World::Asset
 {
+	CollisionResponseContainer::CollisionResponseContainer(CollisionResponse defaultResponse)
+	{
+		SetAll(defaultResponse);
+	}
+
+	CollisionResponse CollisionResponseContainer::GetResponse(uint8_t channel) const
+	{
+		if (channel >= 64) return CollisionResponse::Ignore;
+		if (channel < 32)
+		{
+			uint64_t val = (Low >> (channel * 2)) & 0x3ull;
+			return static_cast<CollisionResponse>(val);
+		}
+		else
+		{
+			uint8_t ch = channel - 32;
+			uint64_t val = (High >> (ch * 2)) & 0x3ull;
+			return static_cast<CollisionResponse>(val);
+		}
+	}
+
+	void CollisionResponseContainer::SetResponse(uint8_t channel, CollisionResponse response)
+	{
+		if (channel >= 64) return;
+		uint64_t respVal = static_cast<uint64_t>(response) & 0x3ull;
+		if (channel < 32)
+		{
+			uint64_t shift = channel * 2;
+			Low &= ~(0x3ull << shift);
+			Low |= (respVal << shift);
+		}
+		else
+		{
+			uint64_t shift = (channel - 32) * 2;
+			High &= ~(0x3ull << shift);
+			High |= (respVal << shift);
+		}
+	}
+
+	void CollisionResponseContainer::SetAll(CollisionResponse response)
+	{
+		uint64_t respVal = static_cast<uint64_t>(response) & 0x3ull;
+		uint64_t pattern = 0;
+		for (size_t i = 0; i < 32; ++i)
+		{
+			pattern |= (respVal << (i * 2));
+		}
+		Low = pattern;
+		High = pattern;
+	}
+
 	CollisionChannelConfig::CollisionChannelConfig()
 	{
-		ChannelNames[0] = "Default";
-		ChannelNames[1] = "Static";
-		ChannelNames[2] = "Pawn";
-		ChannelNames[3] = "Visibility";
-		ChannelNames[4] = "Projectile";
-		ChannelNames[5] = "Trigger";
-		ChannelNames[6] = "Water";
-		ChannelNames[7] = "Vehicle";
+		// 1. 预设 12 个工业级基础 Object 通道 (0..47)
+		ChannelNames[0] = "Default";      ChannelTypes[0] = CollisionChannelType::Object;
+		ChannelNames[1] = "Static";       ChannelTypes[1] = CollisionChannelType::Object;
+		ChannelNames[2] = "Pawn";         ChannelTypes[2] = CollisionChannelType::Object;
+		ChannelNames[3] = "Dynamic";      ChannelTypes[3] = CollisionChannelType::Object;
+		ChannelNames[4] = "TriggerZone";  ChannelTypes[4] = CollisionChannelType::Object;
+		ChannelNames[5] = "Water";        ChannelTypes[5] = CollisionChannelType::Object;
+		ChannelNames[6] = "Destructible"; ChannelTypes[6] = CollisionChannelType::Object;
+		ChannelNames[7] = "Vehicle";      ChannelTypes[7] = CollisionChannelType::Object;
+		ChannelNames[8] = "Ragdoll";      ChannelTypes[8] = CollisionChannelType::Object;
+		ChannelNames[9] = "Foliage";      ChannelTypes[9] = CollisionChannelType::Object;
+		ChannelNames[10] = "Debris";      ChannelTypes[10] = CollisionChannelType::Object;
+		ChannelNames[11] = "Shield";      ChannelTypes[11] = CollisionChannelType::Object;
 
+		// 2. 预设 8 个工业级基础 Trace 检测通道 (48..63)
+		ChannelNames[48] = "Visibility";      ChannelTypes[48] = CollisionChannelType::Trace;
+		ChannelNames[49] = "Camera";          ChannelTypes[49] = CollisionChannelType::Trace;
+		ChannelNames[50] = "WeaponBullet";    ChannelTypes[50] = CollisionChannelType::Trace;
+		ChannelNames[51] = "WeaponLaser";     ChannelTypes[51] = CollisionChannelType::Trace;
+		ChannelNames[52] = "Interact";        ChannelTypes[52] = CollisionChannelType::Trace;
+		ChannelNames[53] = "AiSight";         ChannelTypes[53] = CollisionChannelType::Trace;
+		ChannelNames[54] = "AudioOcclusion";  ChannelTypes[54] = CollisionChannelType::Trace;
+		ChannelNames[55] = "GroundSnap";      ChannelTypes[55] = CollisionChannelType::Trace;
+
+		// 3. 初始化全部三态矩阵: 默认所有通道对所有通道都是 Block
 		for (size_t i = 0; i < kMaxChannels; ++i)
 		{
-			ChannelMasks[i] = 0xFFFFFFFF;
+			Matrix[i].SetAll(CollisionResponse::Block);
 		}
-		// Trigger does not block static world geometry by default
-		SetCollision(5, 1, false);
+
+		// 4. 特殊语义初值:
+		// TriggerZone(4) 对 Static(1) 忽略，对 Pawn(2) / Vehicle(7) 为 Overlap
+		SetCollisionResponse(4, 1, CollisionResponse::Ignore);
+		SetCollisionResponse(4, 2, CollisionResponse::Overlap);
+		SetCollisionResponse(4, 7, CollisionResponse::Overlap);
+
+		// Foliage(9) 对 Pawn(2) 为 Overlap (草丛穿透)
+		SetCollisionResponse(9, 2, CollisionResponse::Overlap);
+
+		// Water(5) 对 Pawn(2) / Vehicle(7) 为 Overlap (水坑穿透)
+		SetCollisionResponse(5, 2, CollisionResponse::Overlap);
+		SetCollisionResponse(5, 7, CollisionResponse::Overlap);
+
+		// Debris(10) 对 Pawn(2) 忽略 (物理碎屑不挡人)
+		SetCollisionResponse(10, 2, CollisionResponse::Ignore);
+
+		// Trace 通道默认响应:
+		// Visibility(48) 穿透 TriggerZone, Water, Foliage, Debris
+		SetCollisionResponse(48, 4, CollisionResponse::Ignore);
+		SetCollisionResponse(48, 5, CollisionResponse::Ignore);
+		SetCollisionResponse(48, 9, CollisionResponse::Ignore);
+		SetCollisionResponse(48, 10, CollisionResponse::Ignore);
+
+		// Camera(49) 穿透 Pawn, Vehicle, TriggerZone, Water, Foliage, Debris (防第三人称贴脸穿模)
+		SetCollisionResponse(49, 2, CollisionResponse::Ignore);
+		SetCollisionResponse(49, 7, CollisionResponse::Ignore);
+		SetCollisionResponse(49, 4, CollisionResponse::Ignore);
+		SetCollisionResponse(49, 5, CollisionResponse::Ignore);
+		SetCollisionResponse(49, 9, CollisionResponse::Ignore);
+		SetCollisionResponse(49, 10, CollisionResponse::Ignore);
+
+		// WeaponBullet(50) 穿透 TriggerZone, Water, Debris
+		SetCollisionResponse(50, 4, CollisionResponse::Ignore);
+		SetCollisionResponse(50, 5, CollisionResponse::Ignore);
+		SetCollisionResponse(50, 10, CollisionResponse::Ignore);
+
+		// 5. 初始化内置 Collision Profiles
+		CollisionProfile blockAll;
+		blockAll.Name = "BlockAll";
+		blockAll.ObjectType = 0;
+		blockAll.Responses.SetAll(CollisionResponse::Block);
+		Profiles.push_back(blockAll);
+
+		CollisionProfile overlapAll;
+		overlapAll.Name = "OverlapAll";
+		overlapAll.ObjectType = 0;
+		overlapAll.Responses.SetAll(CollisionResponse::Overlap);
+		Profiles.push_back(overlapAll);
+
+		CollisionProfile pawnProfile;
+		pawnProfile.Name = "Pawn";
+		pawnProfile.ObjectType = 2; // Pawn
+		pawnProfile.Responses.SetAll(CollisionResponse::Block);
+		pawnProfile.Responses.SetResponse(4, CollisionResponse::Overlap); // TriggerZone
+		pawnProfile.Responses.SetResponse(9, CollisionResponse::Overlap); // Foliage
+		pawnProfile.Responses.SetResponse(49, CollisionResponse::Ignore); // Camera
+		Profiles.push_back(pawnProfile);
+
+		CollisionProfile glass;
+		glass.Name = "Glass";
+		glass.ObjectType = 1; // Static
+		glass.Responses.SetAll(CollisionResponse::Block);
+		glass.Responses.SetResponse(48, CollisionResponse::Ignore); // Visibility 透视
+		glass.Responses.SetResponse(49, CollisionResponse::Ignore); // Camera 相机穿透
+		Profiles.push_back(glass);
+
+		CollisionProfile invisibleWall;
+		invisibleWall.Name = "InvisibleWall";
+		invisibleWall.ObjectType = 1; // Static
+		invisibleWall.Responses.SetAll(CollisionResponse::Ignore);
+		invisibleWall.Responses.SetResponse(2, CollisionResponse::Block); // 只阻挡 Pawn
+		invisibleWall.Responses.SetResponse(7, CollisionResponse::Block); // 阻挡 Vehicle
+		Profiles.push_back(invisibleWall);
+
+		CollisionProfile triggerOnly;
+		triggerOnly.Name = "TriggerOnly";
+		triggerOnly.ObjectType = 4; // TriggerZone
+		triggerOnly.Responses.SetAll(CollisionResponse::Ignore);
+		triggerOnly.Responses.SetResponse(2, CollisionResponse::Overlap); // Pawn Overlap
+		triggerOnly.Responses.SetResponse(7, CollisionResponse::Overlap); // Vehicle Overlap
+		Profiles.push_back(triggerOnly);
+
+		CollisionProfile noCollision;
+		noCollision.Name = "NoCollision";
+		noCollision.ObjectType = 0;
+		noCollision.Responses.SetAll(CollisionResponse::Ignore);
+		Profiles.push_back(noCollision);
 	}
 
 	CollisionChannelConfig CollisionChannelConfig::Default()
@@ -38,7 +191,8 @@ namespace World::Asset
 	bool CollisionChannelConfig::IsDefault() const
 	{
 		const CollisionChannelConfig def = Default();
-		return ChannelNames == def.ChannelNames && ChannelMasks == def.ChannelMasks;
+		return ChannelNames == def.ChannelNames && ChannelTypes == def.ChannelTypes &&
+		       Matrix == def.Matrix && Profiles == def.Profiles;
 	}
 
 	bool CollisionChannelConfig::SetChannelName(uint8_t index, std::string_view name)
@@ -54,31 +208,67 @@ namespace World::Asset
 		return ChannelNames[index];
 	}
 
-	void CollisionChannelConfig::SetCollision(uint8_t channelA, uint8_t channelB, bool collide)
+	bool CollisionChannelConfig::SetChannelType(uint8_t index, CollisionChannelType type)
+	{
+		if (index >= kMaxChannels) return false;
+		ChannelTypes[index] = type;
+		return true;
+	}
+
+	CollisionChannelType CollisionChannelConfig::GetChannelType(uint8_t index) const
+	{
+		if (index >= kMaxChannels) return CollisionChannelType::Object;
+		return ChannelTypes[index];
+	}
+
+	void CollisionChannelConfig::SetCollisionResponse(uint8_t channelA, uint8_t channelB, CollisionResponse response)
 	{
 		if (channelA >= kMaxChannels || channelB >= kMaxChannels) return;
-		if (collide)
-		{
-			ChannelMasks[channelA] |= (1u << channelB);
-			ChannelMasks[channelB] |= (1u << channelA);
-		}
-		else
-		{
-			ChannelMasks[channelA] &= ~(1u << channelB);
-			ChannelMasks[channelB] &= ~(1u << channelA);
-		}
+		Matrix[channelA].SetResponse(channelB, response);
+		Matrix[channelB].SetResponse(channelA, response);
+	}
+
+	CollisionResponse CollisionChannelConfig::GetCollisionResponse(uint8_t channelA, uint8_t channelB) const
+	{
+		if (channelA >= kMaxChannels || channelB >= kMaxChannels) return CollisionResponse::Ignore;
+		return Matrix[channelA].GetResponse(channelB);
+	}
+
+	CollisionResponse CollisionChannelConfig::EvaluateInteraction(uint8_t channelA, uint8_t channelB) const
+	{
+		if (channelA >= kMaxChannels || channelB >= kMaxChannels) return CollisionResponse::Ignore;
+		CollisionResponse a_to_b = Matrix[channelA].GetResponse(channelB);
+		CollisionResponse b_to_a = Matrix[channelB].GetResponse(channelA);
+		return CollisionResponseContainer::Combine(a_to_b, b_to_a);
+	}
+
+	void CollisionChannelConfig::SetCollision(uint8_t channelA, uint8_t channelB, bool collide)
+	{
+		SetCollisionResponse(channelA, channelB, collide ? CollisionResponse::Block : CollisionResponse::Ignore);
 	}
 
 	bool CollisionChannelConfig::GetCollision(uint8_t channelA, uint8_t channelB) const
 	{
-		if (channelA >= kMaxChannels || channelB >= kMaxChannels) return false;
-		return (ChannelMasks[channelA] & (1u << channelB)) != 0;
+		return EvaluateInteraction(channelA, channelB) == CollisionResponse::Block;
 	}
 
 	uint32_t CollisionChannelConfig::GetMask(uint8_t channel) const
 	{
-		if (channel >= kMaxChannels) return 0xFFFFFFFF;
-		return ChannelMasks[channel];
+		return static_cast<uint32_t>(GetMask64(channel) & 0xFFFFFFFFull);
+	}
+
+	uint64_t CollisionChannelConfig::GetMask64(uint8_t channel) const
+	{
+		if (channel >= kMaxChannels) return 0xFFFFFFFFFFFFFFFFull;
+		uint64_t mask = 0;
+		for (size_t i = 0; i < kMaxChannels; ++i)
+		{
+			if (EvaluateInteraction(channel, static_cast<uint8_t>(i)) == CollisionResponse::Block)
+			{
+				mask |= (1ull << i);
+			}
+		}
+		return mask;
 	}
 
 	int CollisionChannelConfig::FindChannelIndex(std::string_view name) const
@@ -90,6 +280,17 @@ namespace World::Asset
 				return static_cast<int>(i);
 		}
 		return -1;
+	}
+
+	const CollisionProfile* CollisionChannelConfig::FindProfile(std::string_view name) const
+	{
+		if (name.empty()) return nullptr;
+		for (const auto& profile : Profiles)
+		{
+			if (profile.Name == name)
+				return &profile;
+		}
+		return nullptr;
 	}
 
 	namespace
@@ -890,7 +1091,21 @@ namespace World::Asset
 							uint32_t idx = it->first.as<uint32_t>();
 							if (idx < CollisionChannelConfig::kMaxChannels)
 							{
-								manifest.Physics.Channels.SetChannelName(static_cast<uint8_t>(idx), it->second.as<std::string>());
+								if (it->second.IsScalar())
+								{
+									manifest.Physics.Channels.SetChannelName(static_cast<uint8_t>(idx), it->second.as<std::string>());
+								}
+								else if (it->second.IsMap())
+								{
+									if (it->second["name"])
+										manifest.Physics.Channels.SetChannelName(static_cast<uint8_t>(idx), it->second["name"].as<std::string>());
+									if (it->second["type"])
+									{
+										std::string t = it->second["type"].as<std::string>();
+										manifest.Physics.Channels.SetChannelType(static_cast<uint8_t>(idx),
+											t == "trace" ? CollisionChannelType::Trace : CollisionChannelType::Object);
+									}
+								}
 							}
 						}
 					}
@@ -904,7 +1119,22 @@ namespace World::Asset
 							uint32_t idx = it->first.as<uint32_t>();
 							if (idx < CollisionChannelConfig::kMaxChannels)
 							{
-								manifest.Physics.Channels.ChannelMasks[idx] = it->second.as<uint32_t>();
+								if (it->second.IsMap())
+								{
+									if (it->second["low"])
+										manifest.Physics.Channels.Matrix[idx].Low = it->second["low"].as<uint64_t>();
+									if (it->second["high"])
+										manifest.Physics.Channels.Matrix[idx].High = it->second["high"].as<uint64_t>();
+								}
+								else if (it->second.IsScalar())
+								{
+									uint32_t mask32 = it->second.as<uint32_t>();
+									for (uint8_t b = 0; b < 32; ++b)
+									{
+										manifest.Physics.Channels.Matrix[idx].SetResponse(b,
+											(mask32 & (1u << b)) ? CollisionResponse::Block : CollisionResponse::Ignore);
+									}
+								}
 							}
 						}
 					}
@@ -1098,7 +1328,10 @@ namespace World::Asset
 				{
 					if (!copy.Physics.Channels.ChannelNames[i].empty())
 					{
-						out << YAML::Key << i << YAML::Value << copy.Physics.Channels.ChannelNames[i];
+						out << YAML::Key << i << YAML::Value << YAML::BeginMap;
+						out << YAML::Key << "name" << YAML::Value << copy.Physics.Channels.ChannelNames[i];
+						out << YAML::Key << "type" << YAML::Value << (copy.Physics.Channels.ChannelTypes[i] == CollisionChannelType::Trace ? "trace" : "object");
+						out << YAML::EndMap;
 					}
 				}
 				out << YAML::EndMap;
@@ -1108,7 +1341,10 @@ namespace World::Asset
 				{
 					if (!copy.Physics.Channels.ChannelNames[i].empty())
 					{
-						out << YAML::Key << i << YAML::Value << copy.Physics.Channels.ChannelMasks[i];
+						out << YAML::Key << i << YAML::Value << YAML::BeginMap;
+						out << YAML::Key << "low" << YAML::Value << copy.Physics.Channels.Matrix[i].Low;
+						out << YAML::Key << "high" << YAML::Value << copy.Physics.Channels.Matrix[i].High;
+						out << YAML::EndMap;
 					}
 				}
 				out << YAML::EndMap;

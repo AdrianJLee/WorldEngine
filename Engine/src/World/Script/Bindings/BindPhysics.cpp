@@ -454,7 +454,7 @@ namespace World
 
 			const std::string channelName = RequireString("Physics", method, args, count, 0);
 			const int idx = PhysicsSettings::FindChannelIndex(channelName);
-			if (idx < 0 || idx >= 32)
+			if (idx < 0 || idx >= 64)
 			{
 				return ScriptValue::Number(static_cast<double>(0xFFFFFFFFu));
 			}
@@ -472,7 +472,7 @@ namespace World
 			const double b = RequireNumber("Physics", method, args, count, 1);
 			const bool collide = RequireBool("Physics", method, args, count, 2);
 
-			if (a >= 0.0 && a < 32.0 && b >= 0.0 && b < 32.0)
+			if (a >= 0.0 && a < 64.0 && b >= 0.0 && b < 64.0)
 			{
 				PhysicsSettings::SetChannelCollision(
 					static_cast<uint8_t>(static_cast<int>(a)),
@@ -490,7 +490,7 @@ namespace World
 
 			const double a = RequireNumber("Physics", method, args, count, 0);
 			const double b = RequireNumber("Physics", method, args, count, 1);
-			if (a < 0.0 || a >= 32.0 || b < 0.0 || b >= 32.0)
+			if (a < 0.0 || a >= 64.0 || b < 0.0 || b >= 64.0)
 			{
 				return ScriptValue::Boolean(false);
 			}
@@ -507,7 +507,7 @@ namespace World
 			CheckArgumentCount("Physics", method, count, 1);
 
 			const double index = RequireNumber("Physics", method, args, count, 0);
-			if (index < 0.0 || index >= 32.0)
+			if (index < 0.0 || index >= 64.0)
 			{
 				return ScriptValue::String("");
 			}
@@ -525,6 +525,144 @@ namespace World
 			const std::string name = RequireString("Physics", method, args, count, 0);
 			const int index = PhysicsSettings::FindChannelIndex(name);
 			return ScriptValue::Number(static_cast<double>(index));
+		}
+
+		ScriptValue PhysicsGetCollisionResponseImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[13];
+			CheckArgumentCount("Physics", method, count, 2);
+
+			const double a = RequireNumber("Physics", method, args, count, 0);
+			const double b = RequireNumber("Physics", method, args, count, 1);
+			if (a < 0.0 || a >= 64.0 || b < 0.0 || b >= 64.0)
+			{
+				return ScriptValue::Number(0.0);
+			}
+			const Asset::CollisionResponse resp = PhysicsSettings::GetCollisionResponse(
+				static_cast<uint8_t>(static_cast<int>(a)),
+				static_cast<uint8_t>(static_cast<int>(b)));
+			return ScriptValue::Number(static_cast<double>(static_cast<uint8_t>(resp)));
+		}
+
+		ScriptValue PhysicsSetCollisionResponseImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[14];
+			CheckArgumentCount("Physics", method, count, 3);
+
+			const double a = RequireNumber("Physics", method, args, count, 0);
+			const double b = RequireNumber("Physics", method, args, count, 1);
+			const double resp = RequireNumber("Physics", method, args, count, 2);
+
+			if (a >= 0.0 && a < 64.0 && b >= 0.0 && b < 64.0)
+			{
+				const uint8_t respVal = static_cast<uint8_t>(std::clamp(static_cast<int>(resp), 0, 2));
+				PhysicsSettings::SetCollisionResponse(
+					static_cast<uint8_t>(static_cast<int>(a)),
+					static_cast<uint8_t>(static_cast<int>(b)),
+					static_cast<Asset::CollisionResponse>(respVal));
+			}
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue PhysicsEvaluateInteractionImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[15];
+			CheckArgumentCount("Physics", method, count, 2);
+
+			const double a = RequireNumber("Physics", method, args, count, 0);
+			const double b = RequireNumber("Physics", method, args, count, 1);
+			if (a < 0.0 || a >= 64.0 || b < 0.0 || b >= 64.0)
+			{
+				return ScriptValue::Number(0.0);
+			}
+			const Asset::CollisionResponse resp = PhysicsSettings::EvaluateInteraction(
+				static_cast<uint8_t>(static_cast<int>(a)),
+				static_cast<uint8_t>(static_cast<int>(b)));
+			return ScriptValue::Number(static_cast<double>(static_cast<uint8_t>(resp)));
+		}
+
+		ScriptValue PhysicsGetProfileImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[16];
+			CheckArgumentCount("Physics", method, count, 1);
+
+			const std::string name = RequireString("Physics", method, args, count, 0);
+			const Asset::CollisionProfile* profile = PhysicsSettings::FindProfile(name);
+			if (!profile)
+			{
+				return ScriptValue::Nil();
+			}
+
+			ScriptTableRef result = ScriptEngine::GetState().CreateTable();
+			result.SetField("Name", ScriptValue::String(profile->Name));
+			result.SetField("name", ScriptValue::String(profile->Name));
+			result.SetField("ObjectType", ScriptValue::Number(static_cast<double>(profile->ObjectType)));
+			result.SetField("objectType", ScriptValue::Number(static_cast<double>(profile->ObjectType)));
+			const std::string_view objTypeName = PhysicsSettings::GetChannelName(profile->ObjectType);
+			result.SetField("ObjectTypeName", ScriptValue::String(std::string(objTypeName)));
+			result.SetField("objectTypeName", ScriptValue::String(std::string(objTypeName)));
+
+			return result.ToValue();
+		}
+
+		ScriptValue PhysicsRaycastTraceImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[17];
+			CheckArgumentCount("Physics", method, count, 7);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene)
+				throw std::logic_error("Physics.RaycastTrace requires an active scene");
+
+			const float ox = static_cast<float>(RequireNumber("Physics", method, args, count, 0));
+			const float oy = static_cast<float>(RequireNumber("Physics", method, args, count, 1));
+			const float oz = static_cast<float>(RequireNumber("Physics", method, args, count, 2));
+			const float dx = static_cast<float>(RequireNumber("Physics", method, args, count, 3));
+			const float dy = static_cast<float>(RequireNumber("Physics", method, args, count, 4));
+			const float dz = static_cast<float>(RequireNumber("Physics", method, args, count, 5));
+			const std::string traceChannel = RequireString("Physics", method, args, count, 6);
+			const float maxDist = static_cast<float>(OptionalNumber("Physics", method, args, count, 7, 1000.0));
+
+			Physics::TraceHit hit = Physics::PhysicsQuerySystem::RaycastTrace(*scene, glm::vec3(ox, oy, oz), glm::vec3(dx, dy, dz), traceChannel, maxDist);
+
+			ScriptTableRef result = ScriptEngine::GetState().CreateTable();
+			result.SetField("Hit", ScriptValue::Boolean(hit.Hit));
+			result.SetField("hit", ScriptValue::Boolean(hit.Hit));
+			result.SetField("Distance", ScriptValue::Number(static_cast<double>(hit.Distance)));
+			result.SetField("distance", ScriptValue::Number(static_cast<double>(hit.Distance)));
+
+			ScriptTableRef pt = ScriptEngine::GetState().CreateTable();
+			pt.SetField("x", ScriptValue::Number(static_cast<double>(hit.Point.x)));
+			pt.SetField("y", ScriptValue::Number(static_cast<double>(hit.Point.y)));
+			pt.SetField("z", ScriptValue::Number(static_cast<double>(hit.Point.z)));
+			pt.SetArrayElement(1, ScriptValue::Number(static_cast<double>(hit.Point.x)));
+			pt.SetArrayElement(2, ScriptValue::Number(static_cast<double>(hit.Point.y)));
+			pt.SetArrayElement(3, ScriptValue::Number(static_cast<double>(hit.Point.z)));
+			result.SetField("Point", pt.ToValue());
+			result.SetField("point", pt.ToValue());
+
+			ScriptTableRef norm = ScriptEngine::GetState().CreateTable();
+			norm.SetField("x", ScriptValue::Number(static_cast<double>(hit.Normal.x)));
+			norm.SetField("y", ScriptValue::Number(static_cast<double>(hit.Normal.y)));
+			norm.SetField("z", ScriptValue::Number(static_cast<double>(hit.Normal.z)));
+			norm.SetArrayElement(1, ScriptValue::Number(static_cast<double>(hit.Normal.x)));
+			norm.SetArrayElement(2, ScriptValue::Number(static_cast<double>(hit.Normal.y)));
+			norm.SetArrayElement(3, ScriptValue::Number(static_cast<double>(hit.Normal.z)));
+			result.SetField("Normal", norm.ToValue());
+			result.SetField("normal", norm.ToValue());
+
+			const double entId = (hit.Hit && hit.Entity != entt::null) ? static_cast<double>(static_cast<uint32_t>(hit.Entity)) : 0.0;
+			result.SetField("Entity", ScriptValue::Number(entId));
+			result.SetField("entity", ScriptValue::Number(entId));
+
+			result.SetField("Response", ScriptValue::Number(static_cast<double>(static_cast<uint8_t>(hit.Response))));
+			result.SetField("response", ScriptValue::Number(static_cast<double>(static_cast<uint8_t>(hit.Response))));
+
+			return result.ToValue();
 		}
 
 		// ---- 参数与方法描述 ----
@@ -598,22 +736,53 @@ namespace World
 		};
 
 		static const ScriptServiceParam physicsSetChannelCollisionParams[] = {
-			{ "channelA", "number", ScriptServiceArgType::Number, true, "First collision channel index (0..31)." },
-			{ "channelB", "number", ScriptServiceArgType::Number, true, "Second collision channel index (0..31)." },
+			{ "channelA", "number", ScriptServiceArgType::Number, true, "First collision channel index (0..63)." },
+			{ "channelB", "number", ScriptServiceArgType::Number, true, "Second collision channel index (0..63)." },
 			{ "collide", "boolean", ScriptServiceArgType::Boolean, true, "Whether the two channels should collide." },
 		};
 
 		static const ScriptServiceParam physicsGetChannelCollisionParams[] = {
-			{ "channelA", "number", ScriptServiceArgType::Number, true, "First collision channel index (0..31)." },
-			{ "channelB", "number", ScriptServiceArgType::Number, true, "Second collision channel index (0..31)." },
+			{ "channelA", "number", ScriptServiceArgType::Number, true, "First collision channel index (0..63)." },
+			{ "channelB", "number", ScriptServiceArgType::Number, true, "Second collision channel index (0..63)." },
 		};
 
 		static const ScriptServiceParam physicsGetChannelNameParams[] = {
-			{ "index", "number", ScriptServiceArgType::Number, true, "Collision channel index (0..31)." },
+			{ "index", "number", ScriptServiceArgType::Number, true, "Collision channel index (0..63)." },
 		};
 
 		static const ScriptServiceParam physicsFindChannelParams[] = {
 			{ "name", "string", ScriptServiceArgType::String, true, "Collision channel name." },
+		};
+
+		static const ScriptServiceParam physicsGetCollisionResponseParams[] = {
+			{ "channelA", "number", ScriptServiceArgType::Number, true, "First collision channel index (0..63)." },
+			{ "channelB", "number", ScriptServiceArgType::Number, true, "Second collision channel index (0..63)." },
+		};
+
+		static const ScriptServiceParam physicsSetCollisionResponseParams[] = {
+			{ "channelA", "number", ScriptServiceArgType::Number, true, "First collision channel index (0..63)." },
+			{ "channelB", "number", ScriptServiceArgType::Number, true, "Second collision channel index (0..63)." },
+			{ "response", "number", ScriptServiceArgType::Number, true, "Collision response: 0 (Ignore), 1 (Overlap), 2 (Block)." },
+		};
+
+		static const ScriptServiceParam physicsEvaluateInteractionParams[] = {
+			{ "channelA", "number", ScriptServiceArgType::Number, true, "First collision channel index (0..63)." },
+			{ "channelB", "number", ScriptServiceArgType::Number, true, "Second collision channel index (0..63)." },
+		};
+
+		static const ScriptServiceParam physicsGetProfileParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "Collision profile name." },
+		};
+
+		static const ScriptServiceParam physicsRaycastTraceParams[] = {
+			{ "originX", "number", ScriptServiceArgType::Number, true, "Ray origin X in world units." },
+			{ "originY", "number", ScriptServiceArgType::Number, true, "Ray origin Y in world units." },
+			{ "originZ", "number", ScriptServiceArgType::Number, true, "Ray origin Z in world units." },
+			{ "dirX", "number", ScriptServiceArgType::Number, true, "Ray direction X." },
+			{ "dirY", "number", ScriptServiceArgType::Number, true, "Ray direction Y." },
+			{ "dirZ", "number", ScriptServiceArgType::Number, true, "Ray direction Z." },
+			{ "traceChannel", "string", ScriptServiceArgType::String, true, "Trace channel name (e.g. Visibility, Camera, WeaponBullet)." },
+			{ "maxDist", "number", ScriptServiceArgType::Number, false, "Maximum ray distance (default 1000.0)." },
 		};
 
 		static const ScriptServiceMethod physicsMethods[] = {
@@ -693,7 +862,37 @@ namespace World
 			{
 				return PhysicsFindChannelImpl(args, count);
 			}, physicsFindChannelParams, 1, 1, "number",
-				"Find the index (0..31) of a collision channel by name. Returns -1 if not found." },
+				"Find the index (0..63) of a collision channel by name. Returns -1 if not found." },
+
+			{ "GetCollisionResponse", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsGetCollisionResponseImpl(args, count);
+			}, physicsGetCollisionResponseParams, 2, 2, "number",
+				"Get the collision response between two channels (0=Ignore, 1=Overlap, 2=Block)." },
+
+			{ "SetCollisionResponse", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsSetCollisionResponseImpl(args, count);
+			}, physicsSetCollisionResponseParams, 3, 3, "",
+				"Set the collision response between two channels (0=Ignore, 1=Overlap, 2=Block) symmetrically." },
+
+			{ "EvaluateInteraction", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsEvaluateInteractionImpl(args, count);
+			}, physicsEvaluateInteractionParams, 2, 2, "number",
+				"Evaluate the arbitration interaction response between two channels min(A->B, B->A)." },
+
+			{ "GetProfile", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsGetProfileImpl(args, count);
+			}, physicsGetProfileParams, 1, 1, "table",
+				"Get profile information { Name, ObjectType, ObjectTypeName } or nil if not found." },
+
+			{ "RaycastTrace", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsRaycastTraceImpl(args, count);
+			}, physicsRaycastTraceParams, 8, 8, "table",
+				"Perform a 3D raycast trace against scene colliders evaluating trace channel response. Returns { Hit, Distance, Point, Normal, Entity, Response }." },
 		};
 
 		static const ScriptServiceBinding physicsServiceBindingsTable[] = {

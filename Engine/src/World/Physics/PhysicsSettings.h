@@ -22,7 +22,13 @@ namespace World
 		static bool GetChannelCollision(uint8_t channelA, uint8_t channelB);
 		static void SetChannelCollision(uint8_t channelA, uint8_t channelB, bool collide);
 		static uint32_t GetMaskForChannel(uint8_t channel);
+		static uint64_t GetMask64ForChannel(uint8_t channel);
 		static int FindChannelIndex(std::string_view name);
+
+		static Asset::CollisionResponse GetCollisionResponse(uint8_t channelA, uint8_t channelB);
+		static void SetCollisionResponse(uint8_t channelA, uint8_t channelB, Asset::CollisionResponse response);
+		static Asset::CollisionResponse EvaluateInteraction(uint8_t channelA, uint8_t channelB);
+		static const Asset::CollisionProfile* FindProfile(std::string_view name);
 		// 与 RenderSettings::LoadFromProject 一起调用(渲染器初始化时装载一次)。
 		static bool LoadFromProject(const std::filesystem::path& workingDirectory);
 	};

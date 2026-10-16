@@ -1,6 +1,8 @@
 #include "wldpch.h"
 #include "World/Physics/PhysicsQuery.h"
 #include "World/Physics/PhysicsSettings.h"
+#include "World/Asset/ProjectManifest.h"
+#include "World/Core/StringPool.h"
 #include "World/Scene/Components.h"
 
 #include <algorithm>
@@ -435,6 +437,117 @@ namespace World::Physics
 	{
 		const uint32_t mask = GetChannelMask(channelName);
 		return Raycast(scene, origin, direction, maxDistance, mask);
+	}
+
+	TraceHit PhysicsQuerySystem::RaycastTrace(Scene& scene, const glm::vec3& origin, const glm::vec3& direction,
+	                                         std::string_view traceChannel, float maxDistance)
+	{
+		float dirLen = glm::length(direction);
+		if (dirLen < 1e-6f || maxDistance <= 0.0f)
+			return TraceHit {};
+
+		const int idx = PhysicsSettings::FindChannelIndex(traceChannel);
+		if (idx < 0)
+			return TraceHit {};
+
+		const uint8_t traceIdx = static_cast<uint8_t>(idx);
+		glm::vec3 normDir = direction / dirLen;
+		auto colliders = CollectColliders(scene, 0xFFFFFFFF);
+
+		const auto& reg = scene.GetRegistry();
+
+		TraceHit bestHit;
+		bestHit.Distance = maxDistance + 1.0f;
+		bestHit.Response = Asset::CollisionResponse::Ignore;
+
+		for (const auto& col : colliders)
+		{
+			uint8_t entityObjChannel = 0;
+			const Asset::CollisionProfile* profile = nullptr;
+
+			if (const auto* tag = reg.try_get<TagComponent>(col.Entity))
+			{
+				std::string_view name = StringPool::Get().NameOf(tag->Tag);
+				profile = PhysicsSettings::FindProfile(name);
+				if (!profile)
+				{
+					int chIdx = PhysicsSettings::FindChannelIndex(name);
+					if (chIdx >= 0)
+					{
+						entityObjChannel = static_cast<uint8_t>(chIdx);
+					}
+				}
+			}
+
+			if (profile)
+			{
+				entityObjChannel = profile->ObjectType;
+			}
+			else if (col.Layer != 0)
+			{
+				for (uint8_t i = 0; i < 32; ++i)
+				{
+					if (col.Layer & (1u << i))
+					{
+						entityObjChannel = i;
+						break;
+					}
+				}
+			}
+
+			Asset::CollisionResponse response = Asset::CollisionResponse::Block;
+			if (profile)
+			{
+				response = profile->Responses.GetResponse(traceIdx);
+			}
+			else
+			{
+				response = PhysicsSettings::EvaluateInteraction(traceIdx, entityObjChannel);
+			}
+
+			if (response != Asset::CollisionResponse::Block)
+			{
+				// Ray ignores the entity and passes through
+				continue;
+			}
+
+			float dist = 0.0f;
+			glm::vec3 normal(0.0f, 1.0f, 0.0f);
+			glm::vec3 hitPoint(0.0f);
+			bool hit = false;
+
+			switch (col.Type)
+			{
+			case ColliderType::Box:
+				hit = IntersectRayOBB(origin, normDir, col.Center, col.HalfExtents, col.Orientation, maxDistance, dist, normal, hitPoint);
+				break;
+			case ColliderType::Sphere:
+				hit = IntersectRaySphere(origin, normDir, col.Center, col.Radius, maxDistance, dist, normal, hitPoint);
+				break;
+			case ColliderType::Capsule:
+				hit = IntersectRayCapsule(origin, normDir, col.Center, col.Radius, col.HalfHeight, col.Orientation, maxDistance, dist, normal, hitPoint);
+				break;
+			}
+
+			if (hit && dist < bestHit.Distance)
+			{
+				bestHit.Entity = col.Entity;
+				bestHit.Point = hitPoint;
+				bestHit.Normal = normal;
+				bestHit.Distance = dist;
+				bestHit.Hit = true;
+				bestHit.Response = Asset::CollisionResponse::Block;
+			}
+		}
+
+		if (!bestHit.Hit)
+		{
+			bestHit.Distance = 0.0f;
+			bestHit.Entity = entt::null;
+			bestHit.Response = Asset::CollisionResponse::Ignore;
+		}
+
+		return bestHit;
 	}
 
 	ShapeCastHit PhysicsQuerySystem::SphereCast(Scene& scene, const glm::vec3& origin, float radius,

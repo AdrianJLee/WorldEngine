@@ -58,12 +58,71 @@ namespace World::Asset
 		static constexpr float MaxRenderScale = 2.0f;
 	};
 
-	// 具名碰撞通道配置 (Named Collision Channels & Matrix)
+	// 三态碰撞响应枚举 (Three-State Collision Response)
+	enum class CollisionResponse : uint8_t
+	{
+		Ignore  = 0, // 00: 穿透，无物理接触，无重叠事件
+		Overlap = 1, // 01: 穿透，不阻挡，触发 OnOverlapBegin / OnOverlapEnd 事件
+		Block   = 2  // 10: 刚体硬性碰撞阻挡 / 角色滑行，触发 OnHit
+	};
+
+	// 碰撞通道类型 (Object 实体通道 vs Trace 检测通道)
+	enum class CollisionChannelType : uint8_t
+	{
+		Object = 0, // 实体通道 (挂在刚体/碰撞体上: Static, Pawn, Dynamic, TriggerZone, Water...)
+		Trace  = 1  // 空间检测通道 (射线/扫掠追踪: Visibility, Camera, WeaponBullet, Interact...)
+	};
+
+	// 128-bit 紧凑三态位图容器 (每个通道 2 bits，共 64 个通道，恰好 16 字节)
+	struct WLD_API CollisionResponseContainer
+	{
+		uint64_t Low = 0;  // 通道 0..31 (每通道 2 位)
+		uint64_t High = 0; // 通道 32..63 (每通道 2 位)
+
+		CollisionResponseContainer() = default;
+		explicit CollisionResponseContainer(CollisionResponse defaultResponse);
+
+		CollisionResponse GetResponse(uint8_t channel) const;
+		void SetResponse(uint8_t channel, CollisionResponse response);
+		void SetAll(CollisionResponse response);
+
+		bool operator==(const CollisionResponseContainer& other) const
+		{
+			return Low == other.Low && High == other.High;
+		}
+		bool operator!=(const CollisionResponseContainer& other) const { return !(*this == other); }
+
+		// 双向仲裁: 取两者较小值 min(A->B, B->A)
+		static CollisionResponse Combine(CollisionResponse a, CollisionResponse b)
+		{
+			return static_cast<CollisionResponse>(std::min(static_cast<uint8_t>(a), static_cast<uint8_t>(b)));
+		}
+	};
+
+	// 碰撞预设 (Collision Profile: 一键赋予物体整套碰撞形态与通道响应)
+	struct WLD_API CollisionProfile
+	{
+		std::string Name;
+		uint8_t ObjectType = 0; // 该预设绑定的 Object Channel
+		CollisionResponseContainer Responses;
+
+		bool operator==(const CollisionProfile& other) const
+		{
+			return Name == other.Name && ObjectType == other.ObjectType && Responses == other.Responses;
+		}
+		bool operator!=(const CollisionProfile& other) const { return !(*this == other); }
+	};
+
+	// 64 通道具名配置、三态响应矩阵与预设体系
 	struct WLD_API CollisionChannelConfig
 	{
-		static constexpr size_t kMaxChannels = 32;
+		static constexpr size_t kMaxChannels = 64;
+		static constexpr size_t kTraceChannelStart = 48; // 0..47 Object 通道, 48..63 Trace 通道
+
 		std::array<std::string, kMaxChannels> ChannelNames {};
-		std::array<uint32_t, kMaxChannels> ChannelMasks {};
+		std::array<CollisionChannelType, kMaxChannels> ChannelTypes {};
+		std::array<CollisionResponseContainer, kMaxChannels> Matrix {};
+		std::vector<CollisionProfile> Profiles;
 
 		CollisionChannelConfig();
 		static CollisionChannelConfig Default();
@@ -72,10 +131,21 @@ namespace World::Asset
 		bool SetChannelName(uint8_t index, std::string_view name);
 		std::string_view GetChannelName(uint8_t index) const;
 
+		bool SetChannelType(uint8_t index, CollisionChannelType type);
+		CollisionChannelType GetChannelType(uint8_t index) const;
+
+		void SetCollisionResponse(uint8_t channelA, uint8_t channelB, CollisionResponse response);
+		CollisionResponse GetCollisionResponse(uint8_t channelA, uint8_t channelB) const;
+		CollisionResponse EvaluateInteraction(uint8_t channelA, uint8_t channelB) const;
+
+		// 兼容接口
 		void SetCollision(uint8_t channelA, uint8_t channelB, bool collide);
 		bool GetCollision(uint8_t channelA, uint8_t channelB) const;
 		uint32_t GetMask(uint8_t channel) const;
+		uint64_t GetMask64(uint8_t channel) const;
+
 		int FindChannelIndex(std::string_view name) const;
+		const CollisionProfile* FindProfile(std::string_view name) const;
 	};
 
 	// P4-1:物理设置(project.we.yaml 的 `physics:` 区块)。
@@ -95,7 +165,7 @@ namespace World::Asset
 			       std::fabs(Gravity - other.Gravity) < 1e-4f &&
 			       Multithreaded == other.Multithreaded &&
 			       Channels.ChannelNames == other.Channels.ChannelNames &&
-			       Channels.ChannelMasks == other.Channels.ChannelMasks;
+			       Channels.Matrix == other.Channels.Matrix;
 		}
 		bool operator!=(const PhysicsSettingsData& other) const { return !(*this == other); }
 	};
