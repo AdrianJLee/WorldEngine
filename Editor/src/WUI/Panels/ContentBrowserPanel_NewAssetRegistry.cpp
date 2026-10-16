@@ -1,3 +1,4 @@
+#include "World/Physics/PhysicsMaterial.h"
 #include "World/Audio/SoundEvent.h"
 #include "World/Renderer/TextureAtlas.h"
 #include "World/Renderer/SpriteAnimation.h"
@@ -58,6 +59,26 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 		// Material(U25-M2 起):走**新建向导** —— 模板 / 名称 / 目录 / 实时落点全部在确认前可见,
 		// 创建成功后由向导自己选中新资产并在材质编辑器里打开它。这里只负责把向导排进下一帧
 		// (注册表回调也可能从快捷键路径进来,那时没有 WuiContext)。
+		add("physics_material", "Physics Material (物理材质)", ".wphysmat", 28, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				PhysicsMaterial mat;
+				mat.Id = "PhysMat_Default";
+				mat.Friction = 0.5f;
+				mat.Restitution = 0.0f;
+				mat.FrictionCombine = PhysMatCombineMode::Average;
+				mat.RestitutionCombine = PhysMatCombineMode::Average;
+
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "physics_material", ".wphysmat");
+				if (!mat.SaveToFile(target.string()))
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-physics-material");
+				return true;
+			});
 		add("material", "Material", ".wmat", 10, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{

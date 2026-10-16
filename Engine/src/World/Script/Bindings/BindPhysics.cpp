@@ -4,6 +4,8 @@
 #include "World/Physics/CharacterController.h"
 #include "World/Physics/PhysicsQuery.h"
 #include "World/Physics/PhysicsSettings.h"
+#include "World/Physics/PhysicsMaterial.h"
+#include "World/Utils/Paths.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
@@ -665,6 +667,111 @@ namespace World
 			return result.ToValue();
 		}
 
+		ScriptValue PhysicsLoadMaterialImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[18];
+			CheckArgumentCount("Physics", method, count, 1);
+
+			const std::string path = RequireString("Physics", method, args, count, 0);
+			std::filesystem::path p(path);
+			if (!p.is_absolute() && !std::filesystem::exists(p))
+			{
+				std::filesystem::path assetPath = World::Paths::AssetRoot() / p;
+				if (std::filesystem::exists(assetPath))
+					p = assetPath;
+				else if (path.rfind("assets/", 0) == 0 || path.rfind("assets\\", 0) == 0)
+				{
+					std::filesystem::path stripped = World::Paths::AssetRoot() / path.substr(7);
+					if (std::filesystem::exists(stripped))
+						p = stripped;
+				}
+			}
+
+			PhysicsMaterial mat;
+			if (!PhysicsMaterial::LoadFromFile(p.string(), mat))
+				return ScriptValue::Nil();
+
+			ScriptTableRef result = ScriptEngine::GetState().CreateTable();
+			result.SetField("Id", ScriptValue::String(mat.Id));
+			result.SetField("Friction", ScriptValue::Number(static_cast<double>(mat.Friction)));
+			result.SetField("Restitution", ScriptValue::Number(static_cast<double>(mat.Restitution)));
+			result.SetField("FrictionCombine", ScriptValue::Number(static_cast<double>(static_cast<uint8_t>(mat.FrictionCombine))));
+			result.SetField("RestitutionCombine", ScriptValue::Number(static_cast<double>(static_cast<uint8_t>(mat.RestitutionCombine))));
+			return result.ToValue();
+		}
+
+		ScriptValue PhysicsApplyMaterialImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[19];
+			CheckArgumentCount("Physics", method, count, 2);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene)
+				throw std::logic_error("Physics.ApplyMaterial requires an active scene");
+
+			entt::entity ent = RequireEntityId("Physics", method, args, count, 0);
+			auto& reg = scene->GetRegistry();
+			if (!reg.valid(ent))
+				return ScriptValue::Boolean(false);
+
+			PhysicsMaterial mat;
+			std::string path;
+			ScriptTableRef tbl;
+			if (args[1].AsString(&path))
+			{
+				std::filesystem::path p(path);
+				if (!p.is_absolute() && !std::filesystem::exists(p))
+				{
+					std::filesystem::path assetPath = World::Paths::AssetRoot() / p;
+					if (std::filesystem::exists(assetPath))
+						p = assetPath;
+					else if (path.rfind("assets/", 0) == 0 || path.rfind("assets\\", 0) == 0)
+					{
+						std::filesystem::path stripped = World::Paths::AssetRoot() / path.substr(7);
+						if (std::filesystem::exists(stripped))
+							p = stripped;
+					}
+				}
+				if (!PhysicsMaterial::LoadFromFile(p.string(), mat))
+					return ScriptValue::Boolean(false);
+			}
+			else if (args[1].AsTable(&tbl))
+			{
+				ScriptValue vF = tbl.GetField("Friction");
+				double dF = 0.0;
+				if (vF.AsNumber(&dF)) mat.Friction = static_cast<float>(dF);
+
+				ScriptValue vR = tbl.GetField("Restitution");
+				double dR = 0.0;
+				if (vR.AsNumber(&dR)) mat.Restitution = static_cast<float>(dR);
+
+				ScriptValue vFC = tbl.GetField("FrictionCombine");
+				double dFC = 0.0;
+				if (vFC.AsNumber(&dFC)) mat.FrictionCombine = static_cast<PhysMatCombineMode>(static_cast<uint8_t>(dFC));
+
+				ScriptValue vRC = tbl.GetField("RestitutionCombine");
+				double dRC = 0.0;
+				if (vRC.AsNumber(&dRC)) mat.RestitutionCombine = static_cast<PhysMatCombineMode>(static_cast<uint8_t>(dRC));
+			}
+			else
+			{
+				return ScriptValue::Boolean(false);
+			}
+
+			auto* comp = reg.try_get<PhysicsMaterialComponent>(ent);
+			if (!comp)
+			{
+				comp = &reg.emplace<PhysicsMaterialComponent>(ent);
+			}
+			comp->Friction = mat.Friction;
+			comp->Restitution = mat.Restitution;
+			comp->FrictionCombine = mat.FrictionCombine;
+			comp->RestitutionCombine = mat.RestitutionCombine;
+
+			return ScriptValue::Boolean(true);
+		}
+
 		// ---- 参数与方法描述 ----
 
 		static const ScriptServiceParam physicsRaycastParams[] = {
@@ -785,6 +892,15 @@ namespace World
 			{ "maxDist", "number", ScriptServiceArgType::Number, false, "Maximum ray distance (default 1000.0)." },
 		};
 
+		static const ScriptServiceParam physicsLoadMaterialParams[] = {
+			{ "path", "string", ScriptServiceArgType::String, true, "Path to .wphysmat file." },
+		};
+
+		static const ScriptServiceParam physicsApplyMaterialParams[] = {
+			{ "entity", "number", ScriptServiceArgType::Number, true, "Target entity ID." },
+			{ "material", "string|table", ScriptServiceArgType::String | ScriptServiceArgType::Table, true, "Path to .wphysmat file or table { Friction, Restitution, ... }." },
+		};
+
 		static const ScriptServiceMethod physicsMethods[] = {
 			{ "Raycast", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -893,6 +1009,18 @@ namespace World
 				return PhysicsRaycastTraceImpl(args, count);
 			}, physicsRaycastTraceParams, 8, 8, "table",
 				"Perform a 3D raycast trace against scene colliders evaluating trace channel response. Returns { Hit, Distance, Point, Normal, Entity, Response }." },
+
+			{ "LoadMaterial", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsLoadMaterialImpl(args, count);
+			}, physicsLoadMaterialParams, 1, 1, "table",
+				"Load a physical material asset (.wphysmat). Returns { Id, Friction, Restitution, FrictionCombine, RestitutionCombine } or nil." },
+
+			{ "ApplyMaterial", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsApplyMaterialImpl(args, count);
+			}, physicsApplyMaterialParams, 2, 2, "boolean",
+				"Apply physical material (.wphysmat path or table) to entity's PhysicsMaterialComponent. Returns boolean success." },
 		};
 
 		static const ScriptServiceBinding physicsServiceBindingsTable[] = {

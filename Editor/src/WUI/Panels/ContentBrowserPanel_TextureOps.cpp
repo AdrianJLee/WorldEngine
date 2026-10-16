@@ -1179,6 +1179,7 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 				case EditorAssetKind::Folder: slice.TypeLabel = Wui::Tr("asset.file.folder", "Folder"); break;
 				case EditorAssetKind::Scene: slice.TypeLabel = Wui::Tr("asset.file.scene", "Scene"); break;
 				case EditorAssetKind::Material: slice.TypeLabel = Wui::Tr("asset.file.material", "Material"); break;
+				case EditorAssetKind::PhysicsMaterial: slice.TypeLabel = Wui::Tr("asset.file.physics_material", "Physics Material"); break;
 				case EditorAssetKind::Shader:
 					// Slang-B1:唯一扩展名 `.slang` → 一个类型名。
 					slice.TypeLabel = Wui::Tr("asset.file.shader", "Material Shader");
@@ -1570,7 +1571,7 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 			{
 				items = {
 					// CPPSRC-1:项目源码根下"Open"就是"用 Visual Studio 打开"(双击同一条路径)。
-					{ contextOpensInVs ? openInVsLabel : std::string("Open"),
+					{ contextExtension == ".wphysmat" ? std::string("Edit Physics Material (编辑物理材质)") : (contextOpensInVs ? openInVsLabel : std::string("Open")),
 						[this] { OpenItem(m_Model.ContextMenuPath); }, true, std::string(),
 						contextOpensInVs ? std::string("open-vs") : std::string() },
 					{ "Cut", [this] { Cut(); } },

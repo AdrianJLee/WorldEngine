@@ -474,6 +474,16 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 			m_Host.OpenTilemapEditor(logical);
 			WLD_CORE_INFO("[tilemap] editor opened: {0}", logical);
 		}
+		else if (LowerExtension(path) == ".wphysmat")
+		{
+			// M1: 物理材质资产双击 → 打开物理材质编辑器
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			m_Host.OpenPhysicsMaterialEditor(logical);
+			WLD_CORE_INFO("[physmat] editor opened: {0}", logical);
+		}
 		else if (path.extension() == ".gltf" || path.extension() == ".glb")
 		{
 			// P1b D5:glTF 双击 → 导入(.wmodel/.wmat/贴图)并**打开模型预览**(不实例化)。

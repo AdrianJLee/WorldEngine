@@ -235,6 +235,11 @@ namespace World
 					if (surf->Enabled)
 						shapeDef.material.tangentSpeed = surf->Speed;
 				}
+				if (const auto* physMat = registry.try_get<PhysicsMaterialComponent>(entity))
+				{
+					shapeDef.material.friction = std::max(0.0f, physMat->Friction);
+					shapeDef.material.restitution = std::max(0.0f, physMat->Restitution);
+				}
 			};
 			if (const auto* composite = registry.try_get<CompositeCollider2DComponent>(entity))
 			{

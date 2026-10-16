@@ -722,6 +722,17 @@ TilemapEditorPanel* EditorShell::FindTilemapPanel(const std::string& logicalPath
 	return nullptr;
 }
 
+void EditorShell::OpenPhysicsMaterialEditor(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	if (!path.empty())
+	{
+		PhysicsMaterialEditorPanel::RequestOpenAsset(path);
+	}
+	OpenOrFocusIndependentWindow("physics_material_editor");
+}
+
 
 	// ---- P1b D5:模型预览面板(动态实例,id = "model:<逻辑路径>")----
 

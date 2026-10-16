@@ -1,3 +1,5 @@
+#include "World/Physics/PhysicsMaterial.h"
+#include <filesystem>
 #include "wldpch.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Components.h"
@@ -62,6 +64,8 @@ int main()
 			assert(type(Physics.MoveAndSlide) == "function", "Physics.MoveAndSlide must be a function")
 			assert(type(Physics.CanJump) == "function", "Physics.CanJump must be a function")
 			assert(type(Physics.TryJump) == "function", "Physics.TryJump must be a function")
+			assert(type(Physics.LoadMaterial) == "function", "Physics.LoadMaterial must be a function")
+			assert(type(Physics.ApplyMaterial) == "function", "Physics.ApplyMaterial must be a function")
 		)", "PhysicsTableCheck");
 
 		// 只读保护测试
@@ -101,6 +105,14 @@ int main()
 		uint32_t kccId = static_cast<uint32_t>(static_cast<entt::entity>(kccEntity));
 		uint32_t box3DId = static_cast<uint32_t>(static_cast<entt::entity>(box3D));
 		uint32_t box2DId = static_cast<uint32_t>(static_cast<entt::entity>(box2D));
+
+		PhysicsMaterial scriptMat;
+		scriptMat.Id = "ice_mat";
+		scriptMat.Friction = 0.08f;
+		scriptMat.Restitution = 0.92f;
+		scriptMat.FrictionCombine = PhysMatCombineMode::Minimum;
+		scriptMat.RestitutionCombine = PhysMatCombineMode::Maximum;
+		scriptMat.SaveToFile("test_script_material.wphysmat");
 
 		std::string setupScript = "KCC_ID = " + std::to_string(kccId) + "\n" +
 		                          "BOX3D_ID = " + std::to_string(box3DId) + "\n" +
@@ -189,6 +201,30 @@ assert(math.abs(hit.Distance - 4.0) < 0.05, "Raycast distance mismatch")
 			assert(type(disp.y) == "number", "MoveAndSlide result y must be number")
 			assert(type(disp.z) == "number", "MoveAndSlide result z must be number")
 		)", "MoveAndSlideScriptTest");
+
+		// 8.5. 物理材质加载与应用测试
+		RunOk(R"lua(
+			local mat = Physics.LoadMaterial("test_script_material.wphysmat")
+			assert(type(mat) == "table", "Physics.LoadMaterial should return table")
+			assert(mat.Id == "ice_mat", "Material Id mismatch")
+			assert(math.abs(mat.Friction - 0.08) < 0.01, "Material Friction mismatch")
+			assert(math.abs(mat.Restitution - 0.92) < 0.01, "Material Restitution mismatch")
+			assert(mat.FrictionCombine == 1, "FrictionCombine mismatch (1=Minimum)")
+			assert(mat.RestitutionCombine == 3, "RestitutionCombine mismatch (3=Maximum)")
+
+			local applied = Physics.ApplyMaterial(BOX3D_ID, "test_script_material.wphysmat")
+			assert(applied == true, "ApplyMaterial should succeed")
+
+			local appliedTbl = Physics.ApplyMaterial(BOX2D_ID, {
+				Friction = 0.35,
+				Restitution = 0.5,
+				FrictionCombine = 2,
+				RestitutionCombine = 0
+			})
+			assert(appliedTbl == true, "ApplyMaterial with table should succeed")
+		)lua", "PhysicsMaterialScriptTest", __LINE__);
+
+		std::filesystem::remove("test_script_material.wphysmat");
 
 		// 9. 参数错误与边界校验
 		RUN_FAIL(R"(

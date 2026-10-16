@@ -251,6 +251,7 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		m_PanelRegistry.emplace("audio_mixer", std::make_unique<AudioMixerPanel>());
 		m_PanelRegistry.emplace("ai_audio_studio", std::make_unique<AiAudioStudioPanel>());
 		m_PanelRegistry.emplace("audio_profiler", std::make_unique<AudioProfilerPanel>());
+		m_PanelRegistry.emplace("physics_material_editor", std::make_unique<PhysicsMaterialEditorPanel>());
 		// PLUG-T3:插件管理器面板(数据/动作都走 EditorShell → EditorLayer;项目形态才注册)。
 		if (!m_LauncherMode)
 			m_PanelRegistry.emplace("plugins", std::make_unique<PluginsPanel>(*this));

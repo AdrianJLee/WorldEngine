@@ -26,6 +26,7 @@
 #include "World/Audio/SoundEvent.h"
 #include "World/Audio/AudioNullBackend.h"
 #include "World/Ai/CommandRegistry.h"
+#include "World/Physics/PhysicsMaterial.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -1153,7 +1154,9 @@ namespace World
 		addCmd("asset.create_atlas", "Create sprite atlas asset.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("asset.create_anim", "Create sprite animation asset.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("asset.create_tilemap", "Create tilemap asset.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.create_physmat", "Create a .wphysmat physical material asset.", CommandEffect::Write, CommandScope::Both);
 		addCmd("asset.open_material", "Open material in editor.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.open_physmat", "Open physics material in editor.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("asset.import_gltf", "Import glTF model into project.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("asset.create_prefab", "Create prefab asset from entity selection.", CommandEffect::Write, CommandScope::Both);
 		addCmd("asset.open_prefab", "Open prefab asset for inspection.", CommandEffect::Write, CommandScope::EditorOnly);
@@ -3075,6 +3078,50 @@ namespace World
 			result = "animation stopped: " + path;
 			return true;
 		}
+		if (cmd == "asset.create_physmat")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path (e.g. assets/materials/Ice.wphysmat)";
+				return false;
+			}
+			const float friction = args.count("friction") ? std::strtof(arg("friction").c_str(), nullptr) : 0.5f;
+			const float restitution = args.count("restitution") ? std::strtof(arg("restitution").c_str(), nullptr) : 0.0f;
+			const std::string fCombStr = args.count("friction_combine") ? arg("friction_combine") : "Average";
+			const std::string rCombStr = args.count("restitution_combine") ? arg("restitution_combine") : "Average";
+
+			std::filesystem::path outPath(path);
+			if (!outPath.is_absolute())
+			{
+				if (path.rfind("assets/", 0) == 0 || path.rfind("assets\\", 0) == 0)
+					outPath = World::Paths::AssetRoot() / path.substr(7);
+				else
+					outPath = World::Paths::AssetRoot() / outPath;
+			}
+			std::filesystem::create_directories(outPath.parent_path());
+
+			World::PhysicsMaterial mat;
+			mat.Id = args.count("id") ? arg("id") : outPath.stem().string();
+			mat.Friction = friction;
+			mat.Restitution = restitution;
+			auto parseMode = [](const std::string& s) {
+				if (s == "Minimum" || s == "min") return World::PhysMatCombineMode::Minimum;
+				if (s == "Multiply" || s == "mul") return World::PhysMatCombineMode::Multiply;
+				if (s == "Maximum" || s == "max") return World::PhysMatCombineMode::Maximum;
+				return World::PhysMatCombineMode::Average;
+			};
+			mat.FrictionCombine = parseMode(fCombStr);
+			mat.RestitutionCombine = parseMode(rCombStr);
+
+			if (!mat.SaveToFile(outPath.string()))
+			{
+				error = "failed to save physics material to " + outPath.string();
+				return false;
+			}
+			result = "created physics material asset: " + outPath.string();
+			return true;
+		}
 		if (cmd == "asset.create_tilemap")
 		{
 			const std::string path = arg("path");
@@ -3247,6 +3294,18 @@ namespace World
 			const bool enabled = !args.count("enabled") || (arg("enabled") == "true" || arg("enabled") == "1");
 			SetEditingCollider(enabled);
 			result = enabled ? "edit_collider=on" : "edit_collider=off";
+			return true;
+		}
+		if (cmd == "asset.open_physmat")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			m_Shell.OpenPhysicsMaterialEditor(path);
+			result = "opened physics material editor for " + path;
 			return true;
 		}
 		if (cmd == "asset.open_material")

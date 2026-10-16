@@ -26,7 +26,7 @@ namespace World
 			return AssetCategory::Texture;
 		}
 
-		if (ext == ".wmat" || ext == ".mat" || ext == ".material")
+		if (ext == ".wmat" || ext == ".mat" || ext == ".material" || ext == ".wphysmat" || ext == ".physmat")
 		{
 			return AssetCategory::Material;
 		}

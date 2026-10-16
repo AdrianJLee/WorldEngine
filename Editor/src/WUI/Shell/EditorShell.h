@@ -28,6 +28,7 @@
 #include "WUI/Panels/SpriteAtlasEditorPanel.h"
 #include "WUI/Panels/SpriteAnimationEditorPanel.h"
 #include "WUI/Panels/TilemapEditorPanel.h"
+#include "WUI/Panels/PhysicsMaterialEditorPanel.h"
 #include "WUI/Shell/PluginEditorHost.h"
 #include "WUI/Shell/FloatWindowHost.h"
 #include "Project/ProjectLauncher.h"
@@ -142,6 +143,7 @@ namespace World
 		SpriteAtlasEditorPanel* FindAtlasPanel(const std::string& logicalPath);
 		SpriteAnimationEditorPanel* FindAnimationPanel(const std::string& logicalPath);
 		void OpenTilemapEditor(const std::string& logicalPath) override;
+		void OpenPhysicsMaterialEditor(const std::string& logicalPath) override;
 		void EnsureTilemapPanelFromId(const std::string& panelId);
 		TilemapEditorPanel* FindTilemapPanel(const std::string& logicalPath);
 		// 动态材质面板(每个材质一个 "material:<path>" 面板):从布局存档恢复时按 id 建实例。

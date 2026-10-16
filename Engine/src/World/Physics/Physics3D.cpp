@@ -499,8 +499,16 @@ namespace World
 				settings.mIsSensor = rigidBody.IsSensor;
 				// P7 CCD:RigidBody3DComponent::Ccd ⇒ Jolt 运动质量档(Discrete / LinearCast)。
 				settings.mMotionQuality = rigidBody.Ccd ? JPH::EMotionQuality::LinearCast : JPH::EMotionQuality::Discrete;
-				settings.mFriction = std::max(0.0f, rigidBody.Friction);
-				settings.mRestitution = std::max(0.0f, rigidBody.Restitution);
+				if (const auto* physMat = registry.try_get<PhysicsMaterialComponent>(entity))
+				{
+					settings.mFriction = std::max(0.0f, physMat->Friction);
+					settings.mRestitution = std::max(0.0f, physMat->Restitution);
+				}
+				else
+				{
+					settings.mFriction = std::max(0.0f, rigidBody.Friction);
+					settings.mRestitution = std::max(0.0f, rigidBody.Restitution);
+				}
 				settings.mLinearDamping = std::max(0.0f, rigidBody.LinearDamping);
 				settings.mAngularDamping = std::max(0.0f, rigidBody.AngularDamping);
 				settings.mGravityFactor = rigidBody.UseGravity ? 1.0f : 0.0f;

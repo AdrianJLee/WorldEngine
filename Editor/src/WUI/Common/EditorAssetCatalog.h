@@ -23,6 +23,7 @@ namespace World
 			if (assetType == "SpriteAtlas" || assetType == "TextureAtlas" || assetType == "Atlas") return EditorAssetKind::SpriteAtlas;
 			if (assetType == "SpriteAnimation" || assetType == "Animation2D") return EditorAssetKind::SpriteAnimation;
 			if (assetType == "Tilemap" || assetType == "TileMap") return EditorAssetKind::Tilemap;
+			if (assetType == "PhysicsMaterial" || assetType == "PhysMat" || assetType == "PhysicalMaterial") return EditorAssetKind::PhysicsMaterial;
 			// Slang-B1:表面函数(Material Shader)—— 唯一扩展名 `.slang`(Slang-B1se 起
 			// 旧扩展名不再进资产列表)。与 `.wmat` 实例分开的资产类型,供"Shader"字段/
 			// 参数表按名字取路径列表时使用。
@@ -79,6 +80,7 @@ namespace World
 				case EditorAssetKind::SpriteAtlas: return LowerExtension(path) == ".watlas";
 				case EditorAssetKind::SpriteAnimation: return LowerExtension(path) == ".wanim";
 				case EditorAssetKind::Tilemap: return LowerExtension(path) == ".wtilemap";
+				case EditorAssetKind::PhysicsMaterial: return LowerExtension(path) == ".wphysmat";
 				default: return false;
 			}
 		}
