@@ -53,4 +53,44 @@ namespace World
 		Apply(manifest);
 		return true;
 	}
+
+	const Asset::CollisionChannelConfig& PhysicsSettings::GetChannels()
+	{
+		return Store().Channels;
+	}
+
+	Asset::CollisionChannelConfig& PhysicsSettings::MutableChannels()
+	{
+		return Store().Channels;
+	}
+
+	std::string_view PhysicsSettings::GetChannelName(uint8_t index)
+	{
+		return Store().Channels.GetChannelName(index);
+	}
+
+	bool PhysicsSettings::SetChannelName(uint8_t index, std::string_view name)
+	{
+		return Store().Channels.SetChannelName(index, name);
+	}
+
+	bool PhysicsSettings::GetChannelCollision(uint8_t channelA, uint8_t channelB)
+	{
+		return Store().Channels.GetCollision(channelA, channelB);
+	}
+
+	void PhysicsSettings::SetChannelCollision(uint8_t channelA, uint8_t channelB, bool collide)
+	{
+		Store().Channels.SetCollision(channelA, channelB, collide);
+	}
+
+	uint32_t PhysicsSettings::GetMaskForChannel(uint8_t channel)
+	{
+		return Store().Channels.GetMask(channel);
+	}
+
+	int PhysicsSettings::FindChannelIndex(std::string_view name)
+	{
+		return Store().Channels.FindChannelIndex(name);
+	}
 }

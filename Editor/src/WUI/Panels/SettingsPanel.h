@@ -29,8 +29,8 @@ namespace World
 		bool m_Initialized = false;
 		// P4-UX12:整个面板由设置注册表渲染(描述符在 RegisterProjectSettings 里注册一次)。
 		bool m_Registered = false;
-		// P4-U4(2026-09-21):另外两个作用域也进同一个面板(页签切换)。
-		//   tab 0 = Project(渲染/物理/启动/发行包),1 = Import Defaults,2 = World(场景级)。
+		// P4-U4(2026-09-21):四个作用域进同一个面板(页签切换)。
+		//   tab 0 = Project(渲染/物理/启动/发行包), 1 = Import Defaults, 2 = Collision Matrix, 3 = World(场景级)。
 		int m_Tab = 0;
 		bool m_ImportRegistered = false;
 		bool m_WorldRegistered = false;
@@ -47,6 +47,11 @@ namespace World
 		bool m_PhysicsChanged = false;
 		Asset::StreamingSettings m_Streaming;
 		bool m_StreamingChanged = false;
+		// 碰撞矩阵配置状态
+		float m_CollisionScrollY = 0.0f;
+		float m_ChannelsScrollY = 0.0f;
+		bool m_CollisionTriangleOnly = false;
+		bool m_ShowAllChannels = false;
 		// P4-UX11:启动与内容(renderer / start_scene / content_root)—— 来自 project.we.yaml,
 		// 以前只能手改文件;这三项各自生效时机不同(见面板 tooltip 与重启入口)。
 		struct StartupSettings
@@ -70,5 +75,8 @@ namespace World
 		void RegisterImportSettings();
 		// P4-U4:关卡 manifest 的 `World:` 块(关卡级设置;绑当前文档关卡)。
 		void RegisterWorldSettings();
+		// 可视化碰撞矩阵设置页渲染
+		void RenderCollisionTab(Wui::WuiContext& ctx, const Wui::WuiRect& page,
+			const Wui::WuiTheme& theme, PanelHost& host);
 	};
 }

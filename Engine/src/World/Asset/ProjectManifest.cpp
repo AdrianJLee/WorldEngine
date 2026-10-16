@@ -11,6 +11,87 @@
 
 namespace World::Asset
 {
+	CollisionChannelConfig::CollisionChannelConfig()
+	{
+		ChannelNames[0] = "Default";
+		ChannelNames[1] = "Static";
+		ChannelNames[2] = "Pawn";
+		ChannelNames[3] = "Visibility";
+		ChannelNames[4] = "Projectile";
+		ChannelNames[5] = "Trigger";
+		ChannelNames[6] = "Water";
+		ChannelNames[7] = "Vehicle";
+
+		for (size_t i = 0; i < kMaxChannels; ++i)
+		{
+			ChannelMasks[i] = 0xFFFFFFFF;
+		}
+		// Trigger does not block static world geometry by default
+		SetCollision(5, 1, false);
+	}
+
+	CollisionChannelConfig CollisionChannelConfig::Default()
+	{
+		return CollisionChannelConfig();
+	}
+
+	bool CollisionChannelConfig::IsDefault() const
+	{
+		const CollisionChannelConfig def = Default();
+		return ChannelNames == def.ChannelNames && ChannelMasks == def.ChannelMasks;
+	}
+
+	bool CollisionChannelConfig::SetChannelName(uint8_t index, std::string_view name)
+	{
+		if (index >= kMaxChannels) return false;
+		ChannelNames[index] = std::string(name);
+		return true;
+	}
+
+	std::string_view CollisionChannelConfig::GetChannelName(uint8_t index) const
+	{
+		if (index >= kMaxChannels) return "";
+		return ChannelNames[index];
+	}
+
+	void CollisionChannelConfig::SetCollision(uint8_t channelA, uint8_t channelB, bool collide)
+	{
+		if (channelA >= kMaxChannels || channelB >= kMaxChannels) return;
+		if (collide)
+		{
+			ChannelMasks[channelA] |= (1u << channelB);
+			ChannelMasks[channelB] |= (1u << channelA);
+		}
+		else
+		{
+			ChannelMasks[channelA] &= ~(1u << channelB);
+			ChannelMasks[channelB] &= ~(1u << channelA);
+		}
+	}
+
+	bool CollisionChannelConfig::GetCollision(uint8_t channelA, uint8_t channelB) const
+	{
+		if (channelA >= kMaxChannels || channelB >= kMaxChannels) return false;
+		return (ChannelMasks[channelA] & (1u << channelB)) != 0;
+	}
+
+	uint32_t CollisionChannelConfig::GetMask(uint8_t channel) const
+	{
+		if (channel >= kMaxChannels) return 0xFFFFFFFF;
+		return ChannelMasks[channel];
+	}
+
+	int CollisionChannelConfig::FindChannelIndex(std::string_view name) const
+	{
+		if (name.empty()) return -1;
+		for (size_t i = 0; i < kMaxChannels; ++i)
+		{
+			if (ChannelNames[i] == name)
+				return static_cast<int>(i);
+		}
+		return -1;
+	}
+
 	namespace
 	{
 		// 相对路径校验:非空、非绝对、无盘符、无 ".." 段,统一用 '/'。
@@ -799,6 +880,35 @@ namespace World::Asset
 					manifest.Physics.Gravity = physics["gravity"].as<float>(manifest.Physics.Gravity);
 				if (physics["multithreaded"])
 					manifest.Physics.Multithreaded = physics["multithreaded"].as<bool>(manifest.Physics.Multithreaded);
+
+				if (const YAML::Node channelsNode = physics["channels"])
+				{
+					if (channelsNode.IsMap())
+					{
+						for (auto it = channelsNode.begin(); it != channelsNode.end(); ++it)
+						{
+							uint32_t idx = it->first.as<uint32_t>();
+							if (idx < CollisionChannelConfig::kMaxChannels)
+							{
+								manifest.Physics.Channels.SetChannelName(static_cast<uint8_t>(idx), it->second.as<std::string>());
+							}
+						}
+					}
+				}
+				if (const YAML::Node matrixNode = physics["matrix"])
+				{
+					if (matrixNode.IsMap())
+					{
+						for (auto it = matrixNode.begin(); it != matrixNode.end(); ++it)
+						{
+							uint32_t idx = it->first.as<uint32_t>();
+							if (idx < CollisionChannelConfig::kMaxChannels)
+							{
+								manifest.Physics.Channels.ChannelMasks[idx] = it->second.as<uint32_t>();
+							}
+						}
+					}
+				}
 			}
 			// Level 2.0:流送设置。缺块 = 保持 StreamingSettings 默认(与旧清单逐字节兼容)。
 			if (const YAML::Node streaming = root["streaming"])
@@ -981,6 +1091,28 @@ namespace World::Asset
 			out << YAML::Key << "gravity" << YAML::Value << copy.Physics.Gravity;
 			// JOBSYS:与 fixed_step_hz / gravity 同款,全量序列化(新清单)时始终写出来。
 			out << YAML::Key << "multithreaded" << YAML::Value << copy.Physics.Multithreaded;
+			if (!copy.Physics.Channels.IsDefault())
+			{
+				out << YAML::Key << "channels" << YAML::Value << YAML::BeginMap;
+				for (size_t i = 0; i < CollisionChannelConfig::kMaxChannels; ++i)
+				{
+					if (!copy.Physics.Channels.ChannelNames[i].empty())
+					{
+						out << YAML::Key << i << YAML::Value << copy.Physics.Channels.ChannelNames[i];
+					}
+				}
+				out << YAML::EndMap;
+
+				out << YAML::Key << "matrix" << YAML::Value << YAML::BeginMap;
+				for (size_t i = 0; i < CollisionChannelConfig::kMaxChannels; ++i)
+				{
+					if (!copy.Physics.Channels.ChannelNames[i].empty())
+					{
+						out << YAML::Key << i << YAML::Value << copy.Physics.Channels.ChannelMasks[i];
+					}
+				}
+				out << YAML::EndMap;
+			}
 			out << YAML::EndMap;
 			// P4-U4:导入默认值(缺省时不写,保持旧清单形态;只有非默认才落盘)。
 			if (ModelImportSettings::Hash(copy.ImportDefaults)

@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <string>
+#include <array>
 #include <vector>
 
 namespace World::Asset
@@ -57,8 +58,28 @@ namespace World::Asset
 		static constexpr float MaxRenderScale = 2.0f;
 	};
 
+	// 具名碰撞通道配置 (Named Collision Channels & Matrix)
+	struct WLD_API CollisionChannelConfig
+	{
+		static constexpr size_t kMaxChannels = 32;
+		std::array<std::string, kMaxChannels> ChannelNames {};
+		std::array<uint32_t, kMaxChannels> ChannelMasks {};
+
+		CollisionChannelConfig();
+		static CollisionChannelConfig Default();
+		bool IsDefault() const;
+
+		bool SetChannelName(uint8_t index, std::string_view name);
+		std::string_view GetChannelName(uint8_t index) const;
+
+		void SetCollision(uint8_t channelA, uint8_t channelB, bool collide);
+		bool GetCollision(uint8_t channelA, uint8_t channelB) const;
+		uint32_t GetMask(uint8_t channel) const;
+		int FindChannelIndex(std::string_view name) const;
+	};
+
 	// P4-1:物理设置(project.we.yaml 的 `physics:` 区块)。
-	struct PhysicsSettingsData
+	struct WLD_API PhysicsSettingsData
 	{
 		uint32_t FixedStepHz = 60;   // 固定步长频率(1..240)
 		float Gravity = -9.81f;      // 重力加速度(Y 轴,有限值)
@@ -66,6 +87,17 @@ namespace World::Asset
 		// 取舍:多线程改变约束求解的作业完成顺序 ⇒ **不再保证** P4/P5/P6/P7 已交付的
 		// "同真实时间不同帧率逐位相同";要吞吐才打开,要可复现保持关闭(默认)。
 		bool Multithreaded = false;
+		CollisionChannelConfig Channels;
+
+		bool operator==(const PhysicsSettingsData& other) const
+		{
+			return FixedStepHz == other.FixedStepHz &&
+			       std::fabs(Gravity - other.Gravity) < 1e-4f &&
+			       Multithreaded == other.Multithreaded &&
+			       Channels.ChannelNames == other.Channels.ChannelNames &&
+			       Channels.ChannelMasks == other.Channels.ChannelMasks;
+		}
+		bool operator!=(const PhysicsSettingsData& other) const { return !(*this == other); }
 	};
 
 	// PLUG-T5:插件打包设置(project.we.yaml 的 `plugins:` 区块)。

@@ -3,6 +3,7 @@
 
 #include "World/Physics/CharacterController.h"
 #include "World/Physics/PhysicsQuery.h"
+#include "World/Physics/PhysicsSettings.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
@@ -116,6 +117,28 @@ namespace World
 					", got " + TypeNameOf(args[index]));
 			double result = fallback;
 			args[index].AsNumber(&result);
+			return result;
+		}
+
+		std::string RequireString(const std::string& table, const ScriptServiceMethod& method,
+			const ScriptValue* args, std::size_t argCount, std::size_t index)
+		{
+			const ScriptValue& value = RequireArg(table, method, args, argCount, index);
+			std::string result;
+			if (!value.AsString(&result))
+				throw std::logic_error(MethodSignature(table, method) + ": argument " + std::to_string(index + 1) +
+					" ('" + method.Params[index].Name + "') must be " + method.Params[index].LuaType);
+			return result;
+		}
+
+		bool RequireBool(const std::string& table, const ScriptServiceMethod& method,
+			const ScriptValue* args, std::size_t argCount, std::size_t index)
+		{
+			const ScriptValue& value = RequireArg(table, method, args, argCount, index);
+			bool result = false;
+			if (!value.AsBool(&result))
+				throw std::logic_error(MethodSignature(table, method) + ": argument " + std::to_string(index + 1) +
+					" ('" + method.Params[index].Name + "') must be " + method.Params[index].LuaType);
 			return result;
 		}
 
@@ -423,6 +446,87 @@ namespace World
 			return ScriptValue::Boolean(CharacterControllerSystem::TryJump(*kcc, jumpSpeed));
 		}
 
+		ScriptValue PhysicsGetChannelMaskImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[8];
+			CheckArgumentCount("Physics", method, count, 1);
+
+			const std::string channelName = RequireString("Physics", method, args, count, 0);
+			const int idx = PhysicsSettings::FindChannelIndex(channelName);
+			if (idx < 0 || idx >= 32)
+			{
+				return ScriptValue::Number(static_cast<double>(0xFFFFFFFFu));
+			}
+			const uint32_t mask = PhysicsSettings::GetMaskForChannel(static_cast<uint8_t>(idx));
+			return ScriptValue::Number(static_cast<double>(mask));
+		}
+
+		ScriptValue PhysicsSetChannelCollisionImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[9];
+			CheckArgumentCount("Physics", method, count, 3);
+
+			const double a = RequireNumber("Physics", method, args, count, 0);
+			const double b = RequireNumber("Physics", method, args, count, 1);
+			const bool collide = RequireBool("Physics", method, args, count, 2);
+
+			if (a >= 0.0 && a < 32.0 && b >= 0.0 && b < 32.0)
+			{
+				PhysicsSettings::SetChannelCollision(
+					static_cast<uint8_t>(static_cast<int>(a)),
+					static_cast<uint8_t>(static_cast<int>(b)),
+					collide);
+			}
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue PhysicsGetChannelCollisionImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[10];
+			CheckArgumentCount("Physics", method, count, 2);
+
+			const double a = RequireNumber("Physics", method, args, count, 0);
+			const double b = RequireNumber("Physics", method, args, count, 1);
+			if (a < 0.0 || a >= 32.0 || b < 0.0 || b >= 32.0)
+			{
+				return ScriptValue::Boolean(false);
+			}
+			const bool result = PhysicsSettings::GetChannelCollision(
+				static_cast<uint8_t>(static_cast<int>(a)),
+				static_cast<uint8_t>(static_cast<int>(b)));
+			return ScriptValue::Boolean(result);
+		}
+
+		ScriptValue PhysicsGetChannelNameImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[11];
+			CheckArgumentCount("Physics", method, count, 1);
+
+			const double index = RequireNumber("Physics", method, args, count, 0);
+			if (index < 0.0 || index >= 32.0)
+			{
+				return ScriptValue::String("");
+			}
+			const std::string_view name = PhysicsSettings::GetChannelName(
+				static_cast<uint8_t>(static_cast<int>(index)));
+			return ScriptValue::String(std::string(name));
+		}
+
+		ScriptValue PhysicsFindChannelImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[12];
+			CheckArgumentCount("Physics", method, count, 1);
+
+			const std::string name = RequireString("Physics", method, args, count, 0);
+			const int index = PhysicsSettings::FindChannelIndex(name);
+			return ScriptValue::Number(static_cast<double>(index));
+		}
+
 		// ---- 参数与方法描述 ----
 
 		static const ScriptServiceParam physicsRaycastParams[] = {
@@ -489,6 +593,29 @@ namespace World
 			{ "jumpSpeed", "number", ScriptServiceArgType::Number, true, "Vertical jump speed." },
 		};
 
+		static const ScriptServiceParam physicsGetChannelMaskParams[] = {
+			{ "channelName", "string", ScriptServiceArgType::String, true, "Collision channel name." },
+		};
+
+		static const ScriptServiceParam physicsSetChannelCollisionParams[] = {
+			{ "channelA", "number", ScriptServiceArgType::Number, true, "First collision channel index (0..31)." },
+			{ "channelB", "number", ScriptServiceArgType::Number, true, "Second collision channel index (0..31)." },
+			{ "collide", "boolean", ScriptServiceArgType::Boolean, true, "Whether the two channels should collide." },
+		};
+
+		static const ScriptServiceParam physicsGetChannelCollisionParams[] = {
+			{ "channelA", "number", ScriptServiceArgType::Number, true, "First collision channel index (0..31)." },
+			{ "channelB", "number", ScriptServiceArgType::Number, true, "Second collision channel index (0..31)." },
+		};
+
+		static const ScriptServiceParam physicsGetChannelNameParams[] = {
+			{ "index", "number", ScriptServiceArgType::Number, true, "Collision channel index (0..31)." },
+		};
+
+		static const ScriptServiceParam physicsFindChannelParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "Collision channel name." },
+		};
+
 		static const ScriptServiceMethod physicsMethods[] = {
 			{ "Raycast", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -537,6 +664,36 @@ namespace World
 				return PhysicsTryJumpImpl(args, count);
 			}, physicsTryJumpParams, 2, 2, "boolean",
 				"Attempt jump with jump buffer and coyote time evaluation. Returns true if jump executed." },
+
+			{ "GetChannelMask", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsGetChannelMaskImpl(args, count);
+			}, physicsGetChannelMaskParams, 1, 1, "number",
+				"Get the 32-bit collision mask for a channel by name. Returns 0xFFFFFFFF if not found." },
+
+			{ "SetChannelCollision", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsSetChannelCollisionImpl(args, count);
+			}, physicsSetChannelCollisionParams, 3, 3, "",
+				"Set whether two collision channels collide." },
+
+			{ "GetChannelCollision", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsGetChannelCollisionImpl(args, count);
+			}, physicsGetChannelCollisionParams, 2, 2, "boolean",
+				"Check whether two collision channels collide." },
+
+			{ "GetChannelName", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsGetChannelNameImpl(args, count);
+			}, physicsGetChannelNameParams, 1, 1, "string",
+				"Get the display name of a collision channel index." },
+
+			{ "FindChannel", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsFindChannelImpl(args, count);
+			}, physicsFindChannelParams, 1, 1, "number",
+				"Find the index (0..31) of a collision channel by name. Returns -1 if not found." },
 		};
 
 		static const ScriptServiceBinding physicsServiceBindingsTable[] = {

@@ -1,11 +1,13 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Physics/PhysicsSettings.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 
 #include <entt.hpp>
 #include <glm/glm.hpp>
+#include <string_view>
 #include <vector>
 
 namespace World::Physics
@@ -27,9 +29,16 @@ namespace World::Physics
 	class WLD_API PhysicsQuerySystem
 	{
 	public:
+		// 根据通道名获取碰撞掩码 (若未找到则返回 0xFFFFFFFF)
+		static uint32_t GetChannelMask(std::string_view channelName);
+
 		// 射线检测: 从 origin 出发沿 direction 探测最大 maxDistance
 		static RaycastHit Raycast(Scene& scene, const glm::vec3& origin, const glm::vec3& direction,
 		                          float maxDistance = 1000.0f, uint32_t layerMask = 0xFFFFFFFF);
+
+		// 按通道进行射线检测
+		static RaycastHit RaycastChannel(Scene& scene, const glm::vec3& origin, const glm::vec3& direction,
+		                                 std::string_view channelName, float maxDistance = 1000.0f);
 
 		// 2D 射线检测别名: 强制在 XY 平面 (忽略 Z 轴)
 		static RaycastHit Raycast2D(Scene& scene, const glm::vec2& origin, const glm::vec2& direction,

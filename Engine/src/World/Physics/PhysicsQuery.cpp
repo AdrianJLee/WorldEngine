@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Physics/PhysicsQuery.h"
+#include "World/Physics/PhysicsSettings.h"
 #include "World/Scene/Components.h"
 
 #include <algorithm>
@@ -360,6 +361,16 @@ namespace World::Physics
 		}
 	}
 
+	uint32_t PhysicsQuerySystem::GetChannelMask(std::string_view channelName)
+	{
+		const int idx = PhysicsSettings::FindChannelIndex(channelName);
+		if (idx >= 0)
+		{
+			return PhysicsSettings::GetMaskForChannel(static_cast<uint8_t>(idx));
+		}
+		return 0xFFFFFFFF;
+	}
+
 	RaycastHit PhysicsQuerySystem::Raycast(Scene& scene, const glm::vec3& origin, const glm::vec3& direction,
 	                                      float maxDistance, uint32_t layerMask)
 	{
@@ -417,6 +428,13 @@ namespace World::Physics
 		glm::vec3 o3(origin.x, origin.y, 0.0f);
 		glm::vec3 d3(direction.x, direction.y, 0.0f);
 		return Raycast(scene, o3, d3, maxDistance, layerMask);
+	}
+
+	RaycastHit PhysicsQuerySystem::RaycastChannel(Scene& scene, const glm::vec3& origin, const glm::vec3& direction,
+	                                             std::string_view channelName, float maxDistance)
+	{
+		const uint32_t mask = GetChannelMask(channelName);
+		return Raycast(scene, origin, direction, maxDistance, mask);
 	}
 
 	ShapeCastHit PhysicsQuerySystem::SphereCast(Scene& scene, const glm::vec3& origin, float radius,

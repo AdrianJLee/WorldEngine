@@ -698,6 +698,331 @@ namespace World
 		}
 	}
 
+	void SettingsPanel::RenderCollisionTab(Wui::WuiContext& ctx, const Wui::WuiRect& page,
+		const Wui::WuiTheme& theme, PanelHost& host)
+	{
+		(void)host;
+		// 1. 搜集当前激活具名通道 (ChannelNames[i] 非空)
+		std::vector<uint8_t> activeChannels;
+		activeChannels.reserve(Asset::CollisionChannelConfig::kMaxChannels);
+		int nextFreeSlot = -1;
+		for (uint8_t i = 0; i < static_cast<uint8_t>(Asset::CollisionChannelConfig::kMaxChannels); ++i)
+		{
+			if (!m_Physics.Channels.ChannelNames[i].empty())
+			{
+				activeChannels.push_back(i);
+			}
+			else if (nextFreeSlot == -1)
+			{
+				nextFreeSlot = static_cast<int>(i);
+			}
+		}
+		if (activeChannels.empty())
+		{
+			m_Physics.Channels.ChannelNames[0] = "Default";
+			activeChannels.push_back(0);
+		}
+
+		// 2. 顶部工具栏 (Reset Defaults / All Collide / None Collide / View Mode)
+		const float barH = 28.0f;
+		const Wui::WuiRect toolBarRect { page.X, page.Y, page.W, barH };
+		float curX = toolBarRect.X;
+
+		if (Wui::Button(ctx, Wui::HashId("settings.collision.reset"),
+			{ curX, toolBarRect.Y + 2.0f, 112.0f, 24.0f },
+			Wui::Tr("settings.collision.reset", "Reset Defaults"), theme))
+		{
+			m_Physics.Channels = Asset::CollisionChannelConfig::Default();
+			PhysicsSettings::Set(m_Physics);
+			m_PendingSave = true;
+			m_LastChangeSeconds = SettingsNowSeconds();
+			m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
+			m_StatusIsError = false;
+		}
+		Wui::Tooltip(ctx, { curX, toolBarRect.Y + 2.0f, 112.0f, 24.0f },
+			Wui::Tr("settings.collision.reset.tooltip",
+				"Reset all collision channels and matrix to factory defaults"));
+		curX += 116.0f;
+
+		if (Wui::Button(ctx, Wui::HashId("settings.collision.all_collide"),
+			{ curX, toolBarRect.Y + 2.0f, 96.0f, 24.0f },
+			Wui::Tr("settings.collision.all_collide", "All Collide"), theme))
+		{
+			for (size_t i = 0; i < Asset::CollisionChannelConfig::kMaxChannels; ++i)
+			{
+				if (!m_Physics.Channels.ChannelNames[i].empty())
+					m_Physics.Channels.ChannelMasks[i] = 0xFFFFFFFF;
+			}
+			PhysicsSettings::Set(m_Physics);
+			m_PendingSave = true;
+			m_LastChangeSeconds = SettingsNowSeconds();
+			m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
+			m_StatusIsError = false;
+		}
+		Wui::Tooltip(ctx, { curX, toolBarRect.Y + 2.0f, 96.0f, 24.0f },
+			Wui::Tr("settings.collision.all_collide.tooltip",
+				"Enable collision between all active channels (sets masks to 0xFFFFFFFF)"));
+		curX += 100.0f;
+
+		if (Wui::Button(ctx, Wui::HashId("settings.collision.none_collide"),
+			{ curX, toolBarRect.Y + 2.0f, 96.0f, 24.0f },
+			Wui::Tr("settings.collision.none_collide", "None Collide"), theme))
+		{
+			for (size_t i = 0; i < Asset::CollisionChannelConfig::kMaxChannels; ++i)
+			{
+				if (!m_Physics.Channels.ChannelNames[i].empty())
+					m_Physics.Channels.ChannelMasks[i] = 0;
+			}
+			PhysicsSettings::Set(m_Physics);
+			m_PendingSave = true;
+			m_LastChangeSeconds = SettingsNowSeconds();
+			m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
+			m_StatusIsError = false;
+		}
+		Wui::Tooltip(ctx, { curX, toolBarRect.Y + 2.0f, 96.0f, 24.0f },
+			Wui::Tr("settings.collision.none_collide.tooltip",
+				"Disable collision between all channels (clears cross-channel masks)"));
+		curX += 100.0f;
+
+		const std::string viewLabel = m_CollisionTriangleOnly
+			? Wui::Tr("settings.collision.view_triangle", "View: Triangle")
+			: Wui::Tr("settings.collision.view_full", "View: Full Grid");
+		if (Wui::Button(ctx, Wui::HashId("settings.collision.view_mode"),
+			{ curX, toolBarRect.Y + 2.0f, 108.0f, 24.0f }, viewLabel, theme))
+		{
+			m_CollisionTriangleOnly = !m_CollisionTriangleOnly;
+		}
+		Wui::Tooltip(ctx, { curX, toolBarRect.Y + 2.0f, 108.0f, 24.0f },
+			Wui::Tr("settings.collision.view_mode.tooltip",
+				"Toggle between Full Matrix (symmetric sync) and Lower Triangle view"));
+		curX += 112.0f;
+
+		char chCountBuf[64] = {};
+		std::snprintf(chCountBuf, sizeof(chCountBuf), "%d / 32 Channels",
+			static_cast<int>(activeChannels.size()));
+		Wui::Label(ctx, { curX + 4.0f, toolBarRect.Y + 6.0f }, chCountBuf, theme.TextMuted, 12.0f);
+
+		// 3. 内容区分割:左侧通道列表(0..31),右侧碰撞矩阵(N x N)
+		const float contentTop = page.Y + 32.0f;
+		const float contentH = std::max(60.0f, page.H - 32.0f);
+		const bool narrow = page.W < 560.0f;
+		const float listW = narrow ? page.W : 220.0f;
+		const float listH = narrow ? 130.0f : contentH;
+		const Wui::WuiRect listRect { page.X, contentTop, listW, listH };
+
+		const float matrixX = narrow ? page.X : page.X + listW + 12.0f;
+		const float matrixY = narrow ? contentTop + listH + 8.0f : contentTop;
+		const float matrixW = narrow ? page.W : page.W - listW - 12.0f;
+		const float matrixH = narrow ? std::max(60.0f, contentH - listH - 8.0f) : contentH;
+		const Wui::WuiRect matrixRect { matrixX, matrixY, matrixW, matrixH };
+
+		// --- 通道列表 Channels (0..31) ---
+		{
+			Wui::Label(ctx, { listRect.X + 2.0f, listRect.Y + 3.0f },
+				Wui::Tr("settings.collision.channels", "Channels (0..31)"), theme.Text, 13.0f);
+
+			const std::string filterLabel = m_ShowAllChannels
+				? Wui::Tr("settings.collision.show_all", "All 32")
+				: Wui::Tr("settings.collision.show_active", "Active");
+			if (Wui::Button(ctx, Wui::HashId("settings.collision.ch.filter"),
+				{ listRect.X + listRect.W - 110.0f, listRect.Y, 52.0f, 20.0f }, filterLabel, theme))
+			{
+				m_ShowAllChannels = !m_ShowAllChannels;
+			}
+			Wui::Tooltip(ctx, { listRect.X + listRect.W - 110.0f, listRect.Y, 52.0f, 20.0f },
+				Wui::Tr("settings.collision.ch.filter.tooltip",
+					"Toggle between active channels and all 32 channel slots"));
+
+			if (nextFreeSlot != -1)
+			{
+				if (Wui::Button(ctx, Wui::HashId("settings.collision.ch.add"),
+					{ listRect.X + listRect.W - 54.0f, listRect.Y, 54.0f, 20.0f },
+					Wui::Tr("settings.collision.add", "+ Add"), theme))
+				{
+					m_Physics.Channels.SetChannelName(static_cast<uint8_t>(nextFreeSlot),
+						"Channel_" + std::to_string(nextFreeSlot));
+					PhysicsSettings::Set(m_Physics);
+					m_PendingSave = true;
+					m_LastChangeSeconds = SettingsNowSeconds();
+					m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
+					m_StatusIsError = false;
+				}
+				Wui::Tooltip(ctx, { listRect.X + listRect.W - 54.0f, listRect.Y, 54.0f, 20.0f },
+					Wui::Tr("settings.collision.add.tooltip", "Activate next available channel slot"));
+			}
+
+			const float listBodyTop = listRect.Y + 24.0f;
+			const float listBodyHeight = std::max(20.0f, listRect.H - 24.0f);
+			const Wui::WuiRect listViewport { listRect.X, listBodyTop, listRect.W, listBodyHeight };
+
+			std::vector<uint8_t> channelsToDisplay;
+			if (m_ShowAllChannels)
+			{
+				channelsToDisplay.reserve(Asset::CollisionChannelConfig::kMaxChannels);
+				for (uint8_t i = 0; i < static_cast<uint8_t>(Asset::CollisionChannelConfig::kMaxChannels); ++i)
+					channelsToDisplay.push_back(i);
+			}
+			else
+			{
+				channelsToDisplay = activeChannels;
+				if (nextFreeSlot != -1)
+					channelsToDisplay.push_back(static_cast<uint8_t>(nextFreeSlot));
+			}
+
+			const float totalListContentH = static_cast<float>(channelsToDisplay.size()) * 24.0f;
+			Wui::BeginScrollArea(ctx, listViewport, totalListContentH, m_ChannelsScrollY, theme,
+				Wui::HashId("settings.collision.ch.scroll"));
+
+			for (size_t itemIdx = 0; itemIdx < channelsToDisplay.size(); ++itemIdx)
+			{
+				const uint8_t chIdx = channelsToDisplay[itemIdx];
+				const float rowY = listViewport.Y + static_cast<float>(itemIdx) * 24.0f - m_ChannelsScrollY;
+				if (rowY + 24.0f < listViewport.Y || rowY > listViewport.Y + listViewport.H)
+					continue;
+
+				const bool isActive = !m_Physics.Channels.ChannelNames[chIdx].empty();
+				char badge[16] = {};
+				std::snprintf(badge, sizeof(badge), "#%u", static_cast<unsigned>(chIdx));
+				Wui::Label(ctx, { listViewport.X + 2.0f, rowY + 3.0f }, badge,
+					isActive ? theme.Text : theme.TextDisabled, 11.0f);
+
+				const bool canClear = isActive && chIdx > 0;
+				const float fieldW = listViewport.W - 28.0f - (canClear ? 24.0f : 4.0f);
+				const Wui::WuiRect fieldRect { listViewport.X + 26.0f, rowY + 2.0f, fieldW, 20.0f };
+				const Wui::WuiId fieldId = Wui::HashId(("settings.collision.ch." + std::to_string(chIdx)).c_str());
+				std::string& buf = ctx.Persist<std::string>(
+					Wui::HashId(("settings.collision.ch." + std::to_string(chIdx) + ".buf").c_str()),
+					m_Physics.Channels.ChannelNames[chIdx]);
+
+				if (ctx.Focus() != fieldId)
+					buf = m_Physics.Channels.ChannelNames[chIdx];
+
+				if (Wui::TextField(ctx, fieldId, fieldRect, buf, theme) && buf != m_Physics.Channels.ChannelNames[chIdx])
+				{
+					m_Physics.Channels.SetChannelName(chIdx, buf);
+					PhysicsSettings::Set(m_Physics);
+					m_PendingSave = true;
+					m_LastChangeSeconds = SettingsNowSeconds();
+					m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
+					m_StatusIsError = false;
+				}
+
+				if (canClear)
+				{
+					const Wui::WuiRect clearRect { listViewport.X + listViewport.W - 22.0f, rowY + 2.0f, 20.0f, 20.0f };
+					if (Wui::Button(ctx, Wui::HashId(("settings.collision.ch.del." + std::to_string(chIdx)).c_str()),
+						clearRect, "x", theme))
+					{
+						m_Physics.Channels.ChannelNames[chIdx].clear();
+						buf.clear();
+						PhysicsSettings::Set(m_Physics);
+						m_PendingSave = true;
+						m_LastChangeSeconds = SettingsNowSeconds();
+						m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
+						m_StatusIsError = false;
+					}
+					Wui::Tooltip(ctx, clearRect, Wui::Tr("settings.collision.clear_channel", "Deactivate channel"));
+				}
+			}
+			Wui::EndScrollArea(ctx);
+		}
+
+		// --- 碰撞网格矩阵 N x N ---
+		{
+			const size_t N = activeChannels.size();
+			constexpr float kRowHeaderW = 96.0f;
+			constexpr float kColW = 44.0f;
+			constexpr float kHeaderH = 24.0f;
+			constexpr float kRowH = 24.0f;
+
+			// 固定列标题栏
+			const Wui::WuiRect colHeaderBar { matrixRect.X, matrixRect.Y, matrixRect.W, kHeaderH };
+			Wui::Label(ctx, { matrixRect.X + 4.0f, matrixRect.Y + 4.0f },
+				Wui::Tr("settings.collision.matrix_col", "Channel"), theme.TextMuted, 11.0f);
+
+			for (size_t c = 0; c < N; ++c)
+			{
+				const uint8_t chB = activeChannels[c];
+				const float colX = matrixRect.X + kRowHeaderW + static_cast<float>(c) * kColW;
+				const Wui::WuiRect colHeaderRect { colX, matrixRect.Y, kColW, kHeaderH };
+
+				std::string colName = m_Physics.Channels.ChannelNames[chB];
+				std::string shortName = colName.size() > 4 ? colName.substr(0, 3) + "." : colName;
+				std::string colLabel = "#" + std::to_string(chB) + " " + shortName;
+
+				Wui::Label(ctx, { colX + 2.0f, matrixRect.Y + 4.0f }, colLabel, theme.TextMuted, 11.0f);
+				Wui::Tooltip(ctx, colHeaderRect,
+					"Channel #" + std::to_string(chB) + ": " + colName);
+			}
+
+			// 可滚动数据行区域
+			const float rowsTop = matrixRect.Y + kHeaderH + 2.0f;
+			const float rowsH = std::max(20.0f, matrixRect.H - kHeaderH - 2.0f);
+			const Wui::WuiRect rowsViewport { matrixRect.X, rowsTop, matrixRect.W, rowsH };
+
+			const float totalRowsH = static_cast<float>(N) * kRowH;
+			Wui::BeginScrollArea(ctx, rowsViewport, totalRowsH, m_CollisionScrollY, theme,
+				Wui::HashId("settings.collision.matrix.scroll"));
+
+			for (size_t r = 0; r < N; ++r)
+			{
+				const float rowY = rowsViewport.Y + static_cast<float>(r) * kRowH - m_CollisionScrollY;
+				if (rowY + kRowH < rowsViewport.Y || rowY > rowsViewport.Y + rowsViewport.H)
+					continue;
+
+				const uint8_t chA = activeChannels[r];
+				const Wui::WuiRect rowHeaderRect { rowsViewport.X, rowY, kRowHeaderW, kRowH };
+
+				std::string rName = m_Physics.Channels.ChannelNames[chA];
+				std::string shortRName = rName.size() > 8 ? rName.substr(0, 7) + "." : rName;
+				std::string rowLabel = "#" + std::to_string(chA) + " " + shortRName;
+
+				Wui::Label(ctx, { rowsViewport.X + 4.0f, rowY + 4.0f }, rowLabel, theme.Text, 11.0f);
+				Wui::Tooltip(ctx, rowHeaderRect,
+					"Channel #" + std::to_string(chA) + ": " + rName);
+
+				for (size_t c = 0; c < N; ++c)
+				{
+					const uint8_t chB = activeChannels[c];
+					const float cellX = rowsViewport.X + kRowHeaderW + static_cast<float>(c) * kColW;
+					const Wui::WuiRect cellRect { cellX, rowY, kColW, kRowH };
+
+					if (m_CollisionTriangleOnly && c > r)
+					{
+						Wui::Label(ctx, { cellX + (kColW - 6.0f) * 0.5f, rowY + 4.0f },
+							"-", theme.TextDisabled, 11.0f);
+						continue;
+					}
+
+					bool current = m_Physics.Channels.GetCollision(chA, chB);
+					bool checkVal = current;
+					const Wui::WuiId cellId = Wui::HashId(
+						("settings.collision.cell." + std::to_string(chA) + "." + std::to_string(chB)).c_str());
+					const float checkX = cellX + (kColW - 16.0f) * 0.5f;
+					const Wui::WuiRect checkRect { checkX, rowY, 16.0f, kRowH };
+
+					if (Wui::Checkbox(ctx, cellId, checkRect, "", checkVal, theme))
+					{
+						m_Physics.Channels.SetCollision(chA, chB, checkVal);
+						PhysicsSettings::Set(m_Physics);
+						m_PendingSave = true;
+						m_LastChangeSeconds = SettingsNowSeconds();
+						m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
+						m_StatusIsError = false;
+					}
+
+					const std::string responseStr = current ? "Collide" : "Ignore";
+					Wui::Tooltip(ctx, cellRect,
+						m_Physics.Channels.ChannelNames[chA] + " (#" + std::to_string(chA) +
+						") ↔ " + m_Physics.Channels.ChannelNames[chB] + " (#" + std::to_string(chB) +
+						"): " + responseStr);
+				}
+			}
+
+			Wui::EndScrollArea(ctx);
+		}
+	}
+
 	void SettingsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
@@ -751,6 +1076,7 @@ namespace World
 			const std::vector<std::string> tabs {
 				Wui::Tr("panel.settings.tab.project", "Project"),
 				Wui::Tr("panel.settings.tab.imports", "Import Defaults"),
+				Wui::Tr("panel.settings.tab.collision", "Collision Matrix"),
 				Wui::Tr("panel.settings.tab.world", "World"),
 			};
 			const Wui::WuiRect tabRect { rect.X + pad, rect.Y + 4.0f, rect.W - pad * 2.0f, tabHeight };
@@ -785,6 +1111,10 @@ namespace World
 				m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
 				m_StatusIsError = false;
 			}
+		}
+		else if (m_Tab == 2)
+		{
+			RenderCollisionTab(ctx, page, theme, host);
 		}
 		else
 		{
