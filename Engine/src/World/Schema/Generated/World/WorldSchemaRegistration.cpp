@@ -60,6 +60,7 @@ const TypeSchema& WeSchemaOf_VirtualCameraComponent();
 const TypeSchema& WeSchemaOf_PostProcessComponent();
 const TypeSchema& WeSchemaOf_HealthComponent();
 const TypeSchema& WeSchemaOf_SmartObjectComponent();
+const TypeSchema& WeSchemaOf_ParticleSystemComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -70,6 +71,8 @@ const EnumSchema& WeEnumSchemaOf_MotionType();
 const EnumSchema& WeEnumSchemaOf_ColliderMode();
 const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode();
 const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState();
+const EnumSchema& WeEnumSchemaOf_ParticleEmitterType();
+const EnumSchema& WeEnumSchemaOf_ParticleRenderMode();
 
 	namespace
 	{
@@ -10811,6 +10814,506 @@ struct GeneratedAccess<World::SmartObjectComponent>
 };
 
 template <>
+struct GeneratedAccess<World::ParticleSystemComponent>
+{
+    static Value Get_Gravity(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->Gravity);
+    }
+    static void Set_Gravity(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->Gravity = std::get<glm::vec3>(value);
+    }
+    static Value Get_EmissionRate(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->EmissionRate);
+    }
+    static void Set_EmissionRate(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->EmissionRate = std::get<float>(value);
+    }
+    static Value Get_Lifetime(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->Lifetime);
+    }
+    static void Set_Lifetime(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->Lifetime = std::get<float>(value);
+    }
+    static Value Get_Speed(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->Speed);
+    }
+    static void Set_Speed(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->Speed = std::get<float>(value);
+    }
+    static Value Get_SpeedVariance(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->SpeedVariance);
+    }
+    static void Set_SpeedVariance(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->SpeedVariance = std::get<float>(value);
+    }
+    static Value Get_SizeStart(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->SizeStart);
+    }
+    static void Set_SizeStart(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->SizeStart = std::get<float>(value);
+    }
+    static Value Get_SizeEnd(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->SizeEnd);
+    }
+    static void Set_SizeEnd(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->SizeEnd = std::get<float>(value);
+    }
+    static Value Get_ColorStart(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->ColorStart);
+    }
+    static void Set_ColorStart(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->ColorStart = std::get<uint32_t>(value);
+    }
+    static Value Get_ColorEnd(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->ColorEnd);
+    }
+    static void Set_ColorEnd(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->ColorEnd = std::get<uint32_t>(value);
+    }
+    static Value Get_MaxParticles(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->MaxParticles);
+    }
+    static void Set_MaxParticles(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->MaxParticles = std::get<uint32_t>(value);
+    }
+    static Value Get_EmitterType(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->EmitterType));
+    }
+    static void Set_EmitterType(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->EmitterType = static_cast<World::ParticleEmitterType>(std::get<uint64_t>(value));
+    }
+    static const EnumSchema* GetEnum_EmitterType()
+    {
+        return &WeEnumSchemaOf_ParticleEmitterType();
+    }
+    static Value Get_RenderMode(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->RenderMode));
+    }
+    static void Set_RenderMode(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->RenderMode = static_cast<World::ParticleRenderMode>(std::get<uint64_t>(value));
+    }
+    static const EnumSchema* GetEnum_RenderMode()
+    {
+        return &WeEnumSchemaOf_ParticleRenderMode();
+    }
+    static Value Get_LockToXYPlane(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->LockToXYPlane);
+    }
+    static void Set_LockToXYPlane(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->LockToXYPlane = std::get<bool>(value);
+    }
+    static Value Get_Looping(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->Looping);
+    }
+    static void Set_Looping(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->Looping = std::get<bool>(value);
+    }
+    static Value Get_PlayOnAwake(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->PlayOnAwake);
+    }
+    static void Set_PlayOnAwake(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->PlayOnAwake = std::get<bool>(value);
+    }
+    static Value Get_IsPlaying(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->IsPlaying);
+    }
+    static void Set_IsPlaying(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->IsPlaying = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Gravity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x895C415159BC9FCFull },
+            "Gravity",
+            Kind::Vec3,
+            &Get_Gravity,
+            &Set_Gravity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Gravity vector applied to moving particles.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EmissionRate()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x95B8BCABA2BD2EFAull },
+            "EmissionRate",
+            Kind::Float,
+            &Get_EmissionRate,
+            &Set_EmissionRate,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5000.000000f), false, false, "Emission rate in particles per second.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Lifetime()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x249DDFA82A1C179Cull },
+            "Lifetime",
+            Kind::Float,
+            &Get_Lifetime,
+            &Set_Lifetime,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.050000f), std::optional<float>(60.000000f), false, false, "Particle base lifetime in seconds.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Speed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF3B8FF6603031672ull },
+            "Speed",
+            Kind::Float,
+            &Get_Speed,
+            &Set_Speed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Initial particle emission speed.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SpeedVariance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4CCF34180C8D1B05ull },
+            "SpeedVariance",
+            Kind::Float,
+            &Get_SpeedVariance,
+            &Set_SpeedVariance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(50.000000f), false, false, "Random initial speed variance.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SizeStart()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5D625FD42ABB176Eull },
+            "SizeStart",
+            Kind::Float,
+            &Get_SizeStart,
+            &Set_SizeStart,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.010000f), std::optional<float>(50.000000f), false, false, "Initial particle diameter size.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SizeEnd()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA173B4200C31BB5Bull },
+            "SizeEnd",
+            Kind::Float,
+            &Get_SizeEnd,
+            &Set_SizeEnd,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(50.000000f), false, false, "Final particle diameter size at end of life.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ColorStart()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x472F35356E1DBF76ull },
+            "ColorStart",
+            Kind::UInt32,
+            &Get_ColorStart,
+            &Set_ColorStart,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Initial packed RGBA particle color.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ColorEnd()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCA84153E429704F3ull },
+            "ColorEnd",
+            Kind::UInt32,
+            &Get_ColorEnd,
+            &Set_ColorEnd,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Final packed RGBA particle color at end of life.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxParticles()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFB25A8C96D14CC66ull },
+            "MaxParticles",
+            Kind::UInt32,
+            &Get_MaxParticles,
+            &Set_MaxParticles,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(10000.000000f), false, false, "Maximum active particle capacity for this system.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EmitterType()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2E459AC2E452F30Full },
+            "EmitterType",
+            Kind::Enum,
+            &Get_EmitterType,
+            &Set_EmitterType,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_EmitterType,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Shape emitter volume (Point, Line, Box, Sphere, Cone, Circle).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_RenderMode()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x152674A0F30ED0D4ull },
+            "RenderMode",
+            Kind::Enum,
+            &Get_RenderMode,
+            &Set_RenderMode,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_RenderMode,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Render geometry mode (Billboard or Quad2D).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LockToXYPlane()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x86A969DE32681440ull },
+            "LockToXYPlane",
+            Kind::Bool,
+            &Get_LockToXYPlane,
+            &Set_LockToXYPlane,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Lock all particle simulation and velocity to the 2D XY plane.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Looping()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD982D092264178D3ull },
+            "Looping",
+            Kind::Bool,
+            &Get_Looping,
+            &Set_Looping,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Looping particle emission.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_PlayOnAwake()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x35D583EC782CDEE3ull },
+            "PlayOnAwake",
+            Kind::Bool,
+            &Get_PlayOnAwake,
+            &Set_PlayOnAwake,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically begin emitting when scene starts.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IsPlaying()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x69F6CE7BA59351EFull },
+            "IsPlaying",
+            Kind::Bool,
+            &Get_IsPlaying,
+            &Set_IsPlaying,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Currently emitting particles.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::ParticleSystemComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::ParticleSystemComponent" },
+            "ParticleSystemComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::ParticleSystemComponent),
+            TypeCategory::Component,
+            {
+                Field_Gravity(),
+                Field_EmissionRate(),
+                Field_Lifetime(),
+                Field_Speed(),
+                Field_SpeedVariance(),
+                Field_SizeStart(),
+                Field_SizeEnd(),
+                Field_ColorStart(),
+                Field_ColorEnd(),
+                Field_MaxParticles(),
+                Field_EmitterType(),
+                Field_RenderMode(),
+                Field_LockToXYPlane(),
+                Field_Looping(),
+                Field_PlayOnAwake(),
+                Field_IsPlaying(),
+            },
+            &StorageBindingOf(),
+            "Renderer",
+            "Unified 2D and 3D particle system component with shape emitters, lifetime curves and XY locking.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -11273,6 +11776,46 @@ struct GeneratedEnum<World::SmartObjectSlotState>
     }
 };
 
+template <>
+struct GeneratedEnum<World::ParticleEmitterType>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "ParticleEmitterType",
+            false,
+            1,
+            {
+                { "Point", static_cast<int64_t>(World::ParticleEmitterType::Point) },
+                { "Line", static_cast<int64_t>(World::ParticleEmitterType::Line) },
+                { "Box", static_cast<int64_t>(World::ParticleEmitterType::Box) },
+                { "Sphere", static_cast<int64_t>(World::ParticleEmitterType::Sphere) },
+                { "Cone", static_cast<int64_t>(World::ParticleEmitterType::Cone) },
+                { "Circle", static_cast<int64_t>(World::ParticleEmitterType::Circle) },
+            },
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedEnum<World::ParticleRenderMode>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "ParticleRenderMode",
+            false,
+            1,
+            {
+                { "Billboard", static_cast<int64_t>(World::ParticleRenderMode::Billboard) },
+                { "Quad2D", static_cast<int64_t>(World::ParticleRenderMode::Quad2D) },
+            },
+        };
+        return schema;
+    }
+};
+
 const TypeSchema& WeSchemaOf_UUIDComponent() { return GeneratedAccess<World::UUIDComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
@@ -11325,6 +11868,7 @@ const TypeSchema& WeSchemaOf_VirtualCameraComponent() { return GeneratedAccess<W
 const TypeSchema& WeSchemaOf_PostProcessComponent() { return GeneratedAccess<World::PostProcessComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_HealthComponent() { return GeneratedAccess<World::HealthComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SmartObjectComponent() { return GeneratedAccess<World::SmartObjectComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_ParticleSystemComponent() { return GeneratedAccess<World::ParticleSystemComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -11335,6 +11879,8 @@ const EnumSchema& WeEnumSchemaOf_MotionType() { return GeneratedEnum<World::Rigi
 const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode() { return GeneratedEnum<World::PhysMatCombineMode>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState() { return GeneratedEnum<World::SmartObjectSlotState>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_ParticleEmitterType() { return GeneratedEnum<World::ParticleEmitterType>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_ParticleRenderMode() { return GeneratedEnum<World::ParticleRenderMode>::WeEnumSchema(); }
 
 	bool RegisterWorldSchemaModule(SchemaRegistry& registry)
 	{
@@ -11347,6 +11893,8 @@ const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState() { return GeneratedEnum<W
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ColliderMode()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_PhysMatCombineMode()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_SmartObjectSlotState()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleEmitterType()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleRenderMode()) != SchemaRegistry::Status::Ok) ok = false;
 		const std::vector<TypeSchema> schemas = {
 			WeSchemaOf_UUIDComponent(),
 			WeSchemaOf_TagComponent(),
@@ -11400,6 +11948,7 @@ const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState() { return GeneratedEnum<W
 			WeSchemaOf_PostProcessComponent(),
 			WeSchemaOf_HealthComponent(),
 			WeSchemaOf_SmartObjectComponent(),
+			WeSchemaOf_ParticleSystemComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

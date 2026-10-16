@@ -1139,6 +1139,25 @@ function ui:isOpen() end
 ---@field RepeatY boolean
 ---@field RepeatX boolean
 
+-- Component fields are exposed through Entity:GetComponent("ParticleSystemComponent"); there is no runtime global named ParticleSystemComponent.
+---@class ParticleSystemComponent
+---@field RenderMode number
+---@field Lifetime number
+---@field EmitterType number
+---@field PlayOnAwake boolean
+---@field ColorStart number
+---@field SpeedVariance number
+---@field SizeStart number
+---@field IsPlaying boolean
+---@field LockToXYPlane boolean
+---@field Gravity vec3
+---@field EmissionRate number
+---@field SizeEnd number
+---@field ColorEnd number
+---@field Looping boolean
+---@field Speed number
+---@field MaxParticles number
+
 -- Component fields are exposed through Entity:GetComponent("PartitionVolumeComponent"); there is no runtime global named PartitionVolumeComponent.
 ---@class PartitionVolumeComponent
 ---@field Active boolean
@@ -1453,6 +1472,8 @@ function ui:isOpen() end
 ---@field MeshRenderer string Short alias for "MeshRendererComponent".
 ---@field ParallaxLayerComponent string Registered component type name "ParallaxLayerComponent".
 ---@field ParallaxLayer string Short alias for "ParallaxLayerComponent".
+---@field ParticleSystemComponent string Registered component type name "ParticleSystemComponent".
+---@field ParticleSystem string Short alias for "ParticleSystemComponent".
 ---@field PartitionVolumeComponent string Registered component type name "PartitionVolumeComponent".
 ---@field PartitionVolume string Short alias for "PartitionVolumeComponent".
 ---@field PhysicsMaterialComponent string Registered component type name "PhysicsMaterialComponent".

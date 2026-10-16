@@ -50,6 +50,7 @@ struct World::VirtualCameraComponent
 struct World::PostProcessComponent
 struct World::HealthComponent
 struct World::SmartObjectComponent
+struct World::ParticleSystemComponent
 struct World::UUID
 struct World::CameraSettings
 enum World::MeshRendererComponent::PrimitiveShape
@@ -60,3 +61,5 @@ enum World::RigidBody3DComponent::MotionType
 enum World::MeshCollider3DComponent::ColliderMode
 enum World::PhysMatCombineMode
 enum World::SmartObjectSlotState
+enum World::ParticleEmitterType
+enum World::ParticleRenderMode

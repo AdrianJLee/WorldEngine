@@ -1,0 +1,113 @@
+#include "wldpch.h"
+#include "World/Asset/AssetThumbnailCache.h"
+
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+
+namespace World
+{
+	AssetThumbnailCache& AssetThumbnailCache::Get()
+	{
+		static AssetThumbnailCache s_Instance;
+		return s_Instance;
+	}
+
+	AssetCategory AssetThumbnailCache::DetectCategory(std::string_view path)
+	{
+		std::filesystem::path fsPath(path);
+		std::string ext = fsPath.extension().string();
+		std::transform(ext.begin(), ext.end(), ext.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+		if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" ||
+		    ext == ".bmp" || ext == ".dds" || ext == ".hdr" || ext == ".webp")
+		{
+			return AssetCategory::Texture;
+		}
+
+		if (ext == ".wmat" || ext == ".mat" || ext == ".material")
+		{
+			return AssetCategory::Material;
+		}
+
+		if (ext == ".obj" || ext == ".fbx" || ext == ".gltf" || ext == ".glb" ||
+		    ext == ".mesh" || ext == ".wmodel")
+		{
+			return AssetCategory::Mesh;
+		}
+
+		if (ext == ".prefab" || ext == ".wprefab")
+		{
+			return AssetCategory::Prefab;
+		}
+
+		if (ext == ".luau" || ext == ".lua")
+		{
+			return AssetCategory::Script;
+		}
+
+		if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac")
+		{
+			return AssetCategory::Audio;
+		}
+
+		if (ext == ".wscene" || ext == ".scene" || ext == ".wlevel" || ext == ".level")
+		{
+			return AssetCategory::Level;
+		}
+
+		return AssetCategory::Unknown;
+	}
+
+	void AssetThumbnailCache::RegisterThumbnail(const std::string& path, const ThumbnailInfo& info)
+	{
+		ThumbnailInfo stored = info;
+		stored.Path = path;
+		if (stored.Category == AssetCategory::Unknown)
+			stored.Category = DetectCategory(path);
+
+		m_Thumbnails[path] = std::move(stored);
+	}
+
+	bool AssetThumbnailCache::HasThumbnail(const std::string& path) const
+	{
+		return m_Thumbnails.find(path) != m_Thumbnails.end();
+	}
+
+	const ThumbnailInfo* AssetThumbnailCache::GetThumbnail(const std::string& path) const
+	{
+		auto it = m_Thumbnails.find(path);
+		if (it != m_Thumbnails.end())
+			return &it->second;
+		return nullptr;
+	}
+
+	ThumbnailInfo& AssetThumbnailCache::GetOrCreateThumbnail(const std::string& path)
+	{
+		auto it = m_Thumbnails.find(path);
+		if (it != m_Thumbnails.end())
+			return it->second;
+
+		ThumbnailInfo info;
+		info.Path = path;
+		info.Category = DetectCategory(path);
+		info.TextureId = 0;
+		info.Width = 64;
+		info.Height = 64;
+		info.IsReady = false;
+
+		auto [insertedIt, success] = m_Thumbnails.emplace(path, std::move(info));
+		return insertedIt->second;
+	}
+
+	void AssetThumbnailCache::Clear()
+	{
+		m_Thumbnails.clear();
+	}
+
+	size_t AssetThumbnailCache::Count() const
+	{
+		return m_Thumbnails.size();
+	}
+}

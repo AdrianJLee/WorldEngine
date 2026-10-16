@@ -86,6 +86,94 @@ namespace World
 		WE_ENUM_VALUE(Cooldown);
 	WE_ENUM_END
 
+	enum class ParticleEmitterType : uint8_t
+	{
+		Point = 0,
+		Line = 1,
+		Box = 2,
+		Sphere = 3,
+		Cone = 4,
+		Circle = 5
+	};
+	WE_ENUM_SCHEMA(World, ParticleEmitterType, UInt8)
+		WE_ENUM_VALUE(Point);
+		WE_ENUM_VALUE(Line);
+		WE_ENUM_VALUE(Box);
+		WE_ENUM_VALUE(Sphere);
+		WE_ENUM_VALUE(Cone);
+		WE_ENUM_VALUE(Circle);
+	WE_ENUM_END
+
+	enum class ParticleRenderMode : uint8_t
+	{
+		Billboard = 0,
+		Quad2D = 1
+	};
+	WE_ENUM_SCHEMA(World, ParticleRenderMode, UInt8)
+		WE_ENUM_VALUE(Billboard);
+		WE_ENUM_VALUE(Quad2D);
+	WE_ENUM_END
+
+	struct ParticleSystemComponent
+	{
+		glm::vec3 Gravity { 0.0f, -9.8f, 0.0f };   // 12B
+		float EmissionRate = 50.0f;                 // 4B
+		float Lifetime = 2.0f;                     // 4B
+		float Speed = 5.0f;                        // 4B
+		float SpeedVariance = 1.0f;                // 4B
+		float SizeStart = 0.5f;                    // 4B
+		float SizeEnd = 0.1f;                      // 4B
+		uint32_t ColorStart = 0xFFFFFFFF;          // 4B
+		uint32_t ColorEnd = 0x00FFFFFF;            // 4B
+		uint32_t MaxParticles = 1000;              // 4B
+		ParticleEmitterType EmitterType = ParticleEmitterType::Point; // 1B
+		ParticleRenderMode RenderMode = ParticleRenderMode::Billboard;// 1B
+		uint8_t LockToXYPlane = 0;                 // 1B
+		uint8_t Looping = 1;                       // 1B
+		uint8_t PlayOnAwake = 1;                   // 1B
+		uint8_t IsPlaying = 1;                     // 1B
+		uint8_t _Padding[10] { 0 };                // 10B
+
+		ParticleSystemComponent() = default;
+
+		WE_SCHEMA_BODY(World, ParticleSystemComponent, Component)
+			WE_SCHEMA_META(Category("Renderer"),
+				Doc("Unified 2D and 3D particle system component with shape emitters, lifetime curves and XY locking."))
+			WE_FIELD(Gravity, Vec3,
+				Doc("Gravity vector applied to moving particles."));
+			WE_FIELD(EmissionRate, Float, Range(0.0f, 5000.0f),
+				Doc("Emission rate in particles per second."));
+			WE_FIELD(Lifetime, Float, Range(0.05f, 60.0f),
+				Doc("Particle base lifetime in seconds."));
+			WE_FIELD(Speed, Float, Range(0.0f, 100.0f),
+				Doc("Initial particle emission speed."));
+			WE_FIELD(SpeedVariance, Float, Range(0.0f, 50.0f),
+				Doc("Random initial speed variance."));
+			WE_FIELD(SizeStart, Float, Range(0.01f, 50.0f),
+				Doc("Initial particle diameter size."));
+			WE_FIELD(SizeEnd, Float, Range(0.0f, 50.0f),
+				Doc("Final particle diameter size at end of life."));
+			WE_FIELD(ColorStart, UInt32,
+				Doc("Initial packed RGBA particle color."));
+			WE_FIELD(ColorEnd, UInt32,
+				Doc("Final packed RGBA particle color at end of life."));
+			WE_FIELD(MaxParticles, UInt32, Range(1, 10000),
+				Doc("Maximum active particle capacity for this system."));
+			WE_FIELD(EmitterType, Enum, Of(ParticleEmitterType),
+				Doc("Shape emitter volume (Point, Line, Box, Sphere, Cone, Circle)."));
+			WE_FIELD(RenderMode, Enum, Of(ParticleRenderMode),
+				Doc("Render geometry mode (Billboard or Quad2D)."));
+			WE_FIELD(LockToXYPlane, Bool,
+				Doc("Lock all particle simulation and velocity to the 2D XY plane."));
+			WE_FIELD(Looping, Bool,
+				Doc("Looping particle emission."));
+			WE_FIELD(PlayOnAwake, Bool,
+				Doc("Automatically begin emitting when scene starts."));
+			WE_FIELD(IsPlaying, Bool,
+				Doc("Currently emitting particles."));
+		WE_SCHEMA_END
+	};
+
 	struct SmartObjectComponent
 	{
 		glm::vec3 SlotOffset { 0.0f, 0.0f, 0.0f };   // 12B
