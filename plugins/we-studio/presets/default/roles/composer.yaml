@@ -4,10 +4,14 @@ tier: L3
 department: experience
 reports_to: experience_director
 kind: maker
+guide: "guides/experience_director.md"
 duties: [原创BGM, 主题音乐, 自适应分层互动音乐系统]
+outputs: [composer_deliverable, experience_spec]
 write: [audio/music/**]
-commands: []
+commands: ["task.*", "docs.search", "schema.*", "datatable.*", "changeset.*", "gen.*", "asset.*"]
+reviews: []
 activation:
   category: dynamic
+  genres: [all]
   wake_stages: [2, 3, 4]
   default_state: active

@@ -1,7 +1,5 @@
-version: 1.0.0
 extends: default
 collaboration_mode: managed
-ethics:
-  dark_patterns_ban: true
-unattributed_edits:
-  policy: block
+unattributed_changes: block
+forbid_dark_patterns: true
+on_engine_gap: report_and_workaround

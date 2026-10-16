@@ -394,8 +394,77 @@ namespace World::Ai
 				});
 			}
 		}
-		// 3. 纹理规范与预算检测
-		else if (ext == ".png" || ext == ".jpg" || ext == ".tga" || ext == ".wtex")
+
+		// 3. 纹理真实签名与规格校验
+		else if (ext == ".png")
+		{
+			std::ifstream pf(fullPath, std::ios::binary);
+			char sig[28] = { 0 };
+			pf.read(sig, 28);
+			const size_t bytesRead = static_cast<size_t>(pf.gcount());
+
+			if (bytesRead >= 28 && std::memcmp(sig, "WORLDENGINE_GENERATED_ASSET:", 28) == 0)
+			{
+				report.errors.push_back({
+					"ERR_ASSET_CORRUPTED",
+					fullPath.string(),
+					0,
+					"File is a raw text placeholder rather than a valid binary PNG image."
+				});
+			}
+			else if (bytesRead < 8 || std::memcmp(sig, "\x89PNG\r\n\x1a\n", 8) != 0)
+			{
+				report.errors.push_back({
+					"ERR_ASSET_CORRUPTED",
+					fullPath.string(),
+					0,
+					"Invalid PNG binary file signature (magic header mismatch)."
+				});
+			}
+			else if (bytesRead >= 24)
+			{
+				uint32_t w = (static_cast<uint8_t>(sig[16]) << 24) | (static_cast<uint8_t>(sig[17]) << 16) | (static_cast<uint8_t>(sig[18]) << 8) | static_cast<uint8_t>(sig[19]);
+				uint32_t h = (static_cast<uint8_t>(sig[20]) << 24) | (static_cast<uint8_t>(sig[21]) << 16) | (static_cast<uint8_t>(sig[22]) << 8) | static_cast<uint8_t>(sig[23]);
+				report.metrics["width"] = std::to_string(w);
+				report.metrics["height"] = std::to_string(h);
+				if (w > 4096 || h > 4096)
+				{
+					report.warnings.push_back("Texture dimensions exceed 4096px budget recommendation (" + std::to_string(w) + "x" + std::to_string(h) + ").");
+				}
+			}
+
+			if (fileSize > 64 * 1024 * 1024)
+			{
+				report.warnings.push_back("Texture exceeds 64MB budget recommendation.");
+			}
+		}
+		else if (ext == ".obj")
+		{
+			std::ifstream mf(fullPath);
+			std::string line;
+			size_t verts = 0, faces = 0;
+			while (std::getline(mf, line))
+			{
+				if (line.rfind("v ", 0) == 0) ++verts;
+				else if (line.rfind("f ", 0) == 0) ++faces;
+			}
+			report.metrics["vertices"] = std::to_string(verts);
+			report.metrics["faces"] = std::to_string(faces);
+			if (faces == 0)
+			{
+				report.errors.push_back({
+					"ERR_MESH_EMPTY",
+					fullPath.string(),
+					0,
+					"3D mesh file contains zero polygonal faces."
+				});
+			}
+			else if (faces > 100000)
+			{
+				report.warnings.push_back("3D mesh face count (" + std::to_string(faces) + ") exceeds default art budget (100k).");
+			}
+		}
+		else if (ext == ".jpg" || ext == ".tga" || ext == ".wtex")
 		{
 			if (fileSize > 64 * 1024 * 1024)
 			{
@@ -669,3 +738,7 @@ namespace World::Ai
 		reg.RegisterCommand(std::move(stubsCmd));
 	}
 }
+
+
+
+

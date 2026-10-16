@@ -112,6 +112,15 @@ namespace World::Ai
 			mod.wasCreated = false;
 			mod.hashBefore = FingerprintValidator::ComputeFileSha256(fullPath);
 
+			// 读取原始内容 (<= 256KB) 用于 Diff
+			std::ifstream origIn(fullPath, std::ios::binary);
+			if (origIn)
+			{
+				std::ostringstream ss;
+				ss << origIn.rdbuf();
+				mod.contentBefore = ss.str();
+			}
+
 			// 备份原文件
 			const fs::path backupTarget = backupBase / relativePath;
 			fs::create_directories(backupTarget.parent_path(), ec);
@@ -123,6 +132,7 @@ namespace World::Ai
 			mod.wasCreated = true;
 			mod.hashBefore = "";
 			mod.backupPath = "";
+			mod.contentBefore = "";
 		}
 
 		// 2. 写入新内容
@@ -136,6 +146,7 @@ namespace World::Ai
 		outFile.write(newContent.data(), newContent.size());
 		outFile.close();
 
+		mod.contentAfter = newContent;
 		mod.hashAfter = FingerprintValidator::ComputeStringSha256(newContent);
 		cs.files.push_back(std::move(mod));
 
@@ -197,6 +208,49 @@ namespace World::Ai
 
 		cs.reverted = true;
 		return true;
+	}
+
+	std::string ChangesetTracker::GetChangesetDiff(const std::string& changesetId) const
+	{
+		std::lock_guard<std::mutex> lock(m_Mutex);
+		auto it = m_Changesets.find(changesetId);
+		if (it == m_Changesets.end())
+			return "Changeset '" + changesetId + "' not found.";
+
+		const auto& cs = it->second;
+		std::ostringstream ss;
+		ss << "# Changeset: " << cs.id << " (" << cs.description << ")\n";
+		ss << "# Role: " << cs.role << " | Files: " << cs.files.size() << "\n\n";
+
+		for (const auto& f : cs.files)
+		{
+			ss << "--- a/" << f.relativePath << "\n";
+			ss << "+++ b/" << f.relativePath << "\n";
+			if (f.wasCreated)
+			{
+				std::stringstream ls(f.contentAfter);
+				std::string l;
+				while (std::getline(ls, l))
+					ss << "+" << l << "\n";
+			}
+			else
+			{
+				ss << "@@ modified (" << (f.hashBefore.size() >= 8 ? f.hashBefore.substr(0, 8) : "") << " -> "
+				   << (f.hashAfter.size() >= 8 ? f.hashAfter.substr(0, 8) : "") << ") @@\n";
+				std::stringstream bs(f.contentBefore), as(f.contentAfter);
+				std::string bl, al;
+				while (std::getline(bs, bl) || std::getline(as, al))
+				{
+					if (bl != al)
+					{
+						if (!bl.empty()) ss << "-" << bl << "\n";
+						if (!al.empty()) ss << "+" << al << "\n";
+					}
+				}
+			}
+			ss << "\n";
+		}
+		return ss.str();
 	}
 
 	const Changeset* ChangesetTracker::GetChangeset(const std::string& changesetId) const
@@ -318,5 +372,32 @@ namespace World::Ai
 			return true;
 		};
 		reg.RegisterCommand(std::move(listCmd));
+
+		// 5. changeset.diff
+		CommandDescriptor diffCmd;
+		diffCmd.name = "changeset.diff";
+		diffCmd.description = "Get unified diff preview for a staged changeset.";
+		diffCmd.effect = CommandEffect::Read;
+		diffCmd.scope = CommandScope::Both;
+		diffCmd.owner = "engine";
+		diffCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}";
+		diffCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"diff\":{\"type\":\"string\"}}}";
+		diffCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string id = args.count("id") ? args.at("id") : "";
+			if (id.empty())
+			{
+				error = "Missing required argument 'id'";
+				return false;
+			}
+			const std::string diff = Get().GetChangesetDiff(id);
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "diff", JsonValue::MakeString(diff) });
+			result = r.Dump();
+			return true;
+		};
+		reg.RegisterCommand(std::move(diffCmd));
 	}
 }
+
+

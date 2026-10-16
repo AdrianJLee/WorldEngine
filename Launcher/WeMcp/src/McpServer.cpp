@@ -1,5 +1,6 @@
 #include "McpServer.h"
 #include "World/Ai/CommandRegistry.h"
+#include "World/Agent/WeAgentCore.h"
 #include <sstream>
 
 namespace World::Mcp
@@ -40,12 +41,13 @@ namespace World::Mcp
 
 		result.Object.push_back({ "instructions", JsonValue::MakeString(R"raw(You are an AI Game Producer and Department Director operating within WorldEngine.
 Mandatory Workflow Guidelines:
-1. Stages & Gates: Follow the 8-stage pipeline (Concept -> Fun Prototype -> Tech Prototype -> Vertical Slice -> Production -> Beta -> Polish -> Release). Check status via 'workflow.status' or 'gate.check'.
-2. Taste & Direction: Check project taste profile via 'assistant.taste.get' and answer interview questions via 'assistant.interview.answer'.
-3. Task Management: NEVER perform raw unorganized edits. Break game features into tasks using 'task.create' and update progress via 'task.update'. Log blockers with 'bug.create'.
-4. Asset Pipeline: All texture, model, audio generation MUST be requested via 'gen.generate' which enforces style-lock and budget limits.
-5. QA Verification: Always validate project health via 'studio.validate' and 'project.validate', and run headless simulation via 'playtest.run'.
-6. Security: The engine source tree is read-only. Confine all game assets and scripts to the project root.)raw") });
+1. Session & Role First: Always open a session via 'session.open' with your assigned role before executing write/exec tools.
+2. Stages & Gates: Follow the 8-stage pipeline. Check status via 'workflow.status' or 'gate.check'.
+3. Taste & Direction: Check project taste profile via 'assistant.taste.get' and answer interview questions via 'assistant.interview.answer'.
+4. Task Management: Break game features into tasks using 'task.create', update via 'task.update', and submit independent review via 'review.submit' (self-review is forbidden). Log blockers with 'bug.create'.
+5. Asset Pipeline: All texture, model, audio generation MUST be requested via 'gen.generate' which enforces style-lock and budget limits.
+6. QA Verification: Always validate project health via 'studio.validate' and 'project.validate', and run headless simulation via 'playtest.run'.
+7. Security: The engine source tree is read-only. Confine all game assets and scripts to the project root.)raw") });
 
 		McpResponse resp;
 		resp.id = id;
@@ -57,6 +59,44 @@ Mandatory Workflow Guidelines:
 	{
 		auto allDescriptors = Ai::CommandRegistry::Get().GetAllDescriptors();
 
+		// 若已连接远端宿主，同步拉取远端 ai.capabilities 合并编辑器专属命令
+		if (m_Bridge && m_Bridge->IsConnectedToRemote())
+		{
+			std::string capRes, capErr;
+			if (m_Bridge->Dispatch("ai.capabilities", {}, capRes, capErr))
+			{
+				auto parsedCaps = JsonValue::Parse(capRes, nullptr);
+				if (parsedCaps && parsedCaps->type == JsonValue::Type::Object)
+				{
+					const auto* arr = parsedCaps->Find("capabilities");
+					if (arr && arr->type == JsonValue::Type::Array)
+					{
+						for (const auto& item : arr->Array)
+						{
+							const auto* nVal = item.Find("name");
+							if (!nVal) continue;
+							const std::string cName = nVal->AsString();
+							if (Ai::CommandRegistry::Get().HasCommand(cName))
+								continue;
+
+							Ai::CommandDescriptor d;
+							d.name = cName;
+							if (const auto* descVal = item.Find("description")) d.description = descVal->AsString();
+							if (const auto* effVal = item.Find("effect")) d.effect = Ai::StringToCommandEffect(effVal->AsString());
+							if (const auto* scpVal = item.Find("scope")) d.scope = Ai::StringToCommandScope(scpVal->AsString());
+							if (const auto* pSchema = item.Find("params_schema")) d.paramsSchema = pSchema->Dump();
+							allDescriptors.push_back(std::move(d));
+						}
+					}
+				}
+			}
+		}
+
+		auto& core = Agent::WeAgentCore::Get();
+		const auto currentStage = core.GetCurrentStage();
+		const auto policy = core.GetPolicy();
+		const bool readOnlyFallback = (m_Bridge && m_Bridge->IsReadOnlyFallback());
+
 		JsonValue result;
 		result.type = JsonValue::Type::Object;
 
@@ -65,23 +105,45 @@ Mandatory Workflow Guidelines:
 
 		for (const auto& desc : allDescriptors)
 		{
-			// 基于角色的工具裁剪规则 (M6 契约)
-			if (m_CurrentRole.empty())
+			// 1. 只读降级模式或未绑定会话角色时：仅暴露只读查询与 session.open
+			if (readOnlyFallback || m_CurrentRole.empty())
 			{
-				// 未绑定会话角色时：仅暴露只读查询与 session.open
 				if (desc.effect != Ai::CommandEffect::Read && desc.name != "session.open")
 					continue;
 			}
-			else if (m_CurrentRole == "qa" || m_CurrentRole == "tester")
+			else
 			{
-				// 测试角色：仅保留验证、试玩、遥测与自证工具，裁剪写入脚本和资产的命令
-				if (desc.effect == Ai::CommandEffect::Write &&
-					desc.name.rfind("session.", 0) != 0 &&
-					desc.name.rfind("workflow.", 0) != 0 &&
-					desc.name.rfind("bug.", 0) != 0 &&
-					desc.name.rfind("review.", 0) != 0)
+				// 2. 检查角色运行期状态 (D13: DORMANT / DISABLED 休眠角色不分配写与执行工具)
+				const auto roleState = core.GetRoleState(m_CurrentRole);
+				if (roleState != Agent::RoleRuntimeState::Active)
 				{
-					continue;
+					if (desc.effect != Ai::CommandEffect::Read && desc.name.rfind("session.", 0) != 0)
+						continue;
+				}
+
+				// 3. QA / 测试类角色强制过滤代码与资产写入工具 (§3.2)
+				const bool isQaRole = (m_CurrentRole == "qa" || m_CurrentRole == "tester" ||
+					m_CurrentRole.find("qa") != std::string::npos ||
+					m_CurrentRole.find("tester") != std::string::npos);
+				if (isQaRole)
+				{
+					if (desc.effect == Ai::CommandEffect::Write &&
+						desc.name.rfind("session.", 0) != 0 &&
+						desc.name.rfind("workflow.", 0) != 0 &&
+						desc.name.rfind("bug.", 0) != 0 &&
+						desc.name.rfind("review.", 0) != 0)
+					{
+						continue;
+					}
+				}
+
+				// 4. 委托当前激活的 IWorkflowPolicy 按 (角色 × 阶段) 动态判定命令白名单
+				if (policy && desc.effect != Ai::CommandEffect::Read &&
+					desc.name.rfind("session.", 0) != 0 &&
+					desc.name != "workflow.status")
+				{
+					if (!policy->CanRoleExecuteCommand(m_CurrentRole, currentStage, desc.name))
+						continue;
 				}
 			}
 
@@ -90,7 +152,6 @@ Mandatory Workflow Guidelines:
 			tool.Object.push_back({ "name", JsonValue::MakeString(desc.name) });
 			tool.Object.push_back({ "description", JsonValue::MakeString(desc.description) });
 
-			// inputSchema
 			std::string err;
 			auto parsedSchema = JsonValue::Parse(desc.paramsSchema, &err);
 			if (parsedSchema && parsedSchema->type == JsonValue::Type::Object)
@@ -148,6 +209,12 @@ Mandatory Workflow Guidelines:
 			}
 		}
 
+		// §3.1 自动注入当前活动会话 Token
+		if (!m_CurrentSessionToken.empty() && !args.count("session"))
+		{
+			args["session"] = m_CurrentSessionToken;
+		}
+
 		std::string outResult;
 		std::string outError;
 		bool ok = false;
@@ -160,12 +227,34 @@ Mandatory Workflow Guidelines:
 			ok = Ai::CommandRegistry::Get().Dispatch(cmd, args, outResult, outError);
 		}
 
-		// 如果执行了 session.open，切换活动角色并标记广播 list_changed
-		if (cmd == "session.open" && ok)
+		// §3.2 会话切换、关闭、阶段推进/回退或职能开关变更后，更新状态并广播 notifications/tools/list_changed
+		if (ok)
 		{
-			if (args.count("role"))
+			if (cmd == "session.open")
 			{
-				m_CurrentRole = args.at("role");
+				if (args.count("role"))
+					m_CurrentRole = args.at("role");
+
+				auto parsedRes = JsonValue::Parse(outResult, nullptr);
+				if (parsedRes && parsedRes->type == JsonValue::Type::Object)
+				{
+					if (const auto* tokVal = parsedRes->Find("token"))
+						m_CurrentSessionToken = tokVal->AsString();
+				}
+
+				if (outShouldNotifyListChanged)
+					*outShouldNotifyListChanged = true;
+			}
+			else if (cmd == "session.close")
+			{
+				m_CurrentSessionToken.clear();
+				m_CurrentRole.clear();
+				if (outShouldNotifyListChanged)
+					*outShouldNotifyListChanged = true;
+			}
+			else if (cmd == "workflow.advance" || cmd == "workflow.rollback" ||
+			         cmd == "role.set_state" || cmd == "role.generate_plan")
+			{
 				if (outShouldNotifyListChanged)
 					*outShouldNotifyListChanged = true;
 			}
@@ -241,7 +330,6 @@ Mandatory Workflow Guidelines:
 			return resp.ToJson();
 		}
 
-		// 未知方法
 		McpResponse resp;
 		resp.id = id;
 		resp.isError = true;

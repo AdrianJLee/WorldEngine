@@ -584,6 +584,21 @@ namespace World::Studio
 			const std::string comments = args.count("comments") ? args.at("comments") : "";
 			const std::string root = args.count("root") ? args.at("root") : "";
 
+			// §3.4 执行与验收分离：拦截自审自签
+			auto allTasks = Get().ListTasks(root);
+			for (const auto& t : allTasks)
+			{
+				if (t.id == taskId)
+				{
+					if (t.role == reviewer)
+					{
+						error = "Self-review is forbidden by §3.4: reviewer '" + reviewer + "' cannot review their own task '" + taskId + "'.";
+						return false;
+					}
+					break;
+				}
+			}
+
 			const bool isBlocker = (verdict == "blocker");
 			if (isBlocker)
 			{
@@ -607,3 +622,6 @@ namespace World::Studio
 		reg.RegisterCommand(std::move(reviewSubmitCmd));
 	}
 }
+
+
+

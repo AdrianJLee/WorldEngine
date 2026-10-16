@@ -2,6 +2,8 @@
 #include "InterviewSystem.h"
 #include "LlmClient.h"
 #include "World/Ai/CommandRegistry.h"
+#include "World/Ai/ChangesetTracker.h"
+#include "World/Ai/WriteGuard.h"
 #include "World/Agent/WeAgentCore.h"
 #include "World/WUI/WuiJson.h"
 #include "World/Utils/Paths.h"
@@ -15,6 +17,82 @@ namespace World::Assistant
 {
 	namespace fs = std::filesystem;
 	using namespace World::Wui;
+
+	namespace
+	{
+		std::mutex s_StateMutex;
+		PermissionMode s_PermissionMode = PermissionMode::PreviewBeforeApply;
+		CollaborationMode s_CollaborationMode = CollaborationMode::Managed;
+		std::map<std::string, std::vector<LlmMessage>> s_RoleHistories;
+	}
+
+	void AssistantEngine::SetPermissionMode(PermissionMode mode)
+	{
+		std::lock_guard<std::mutex> lock(s_StateMutex);
+		s_PermissionMode = mode;
+	}
+
+	PermissionMode AssistantEngine::GetPermissionMode()
+	{
+		std::lock_guard<std::mutex> lock(s_StateMutex);
+		return s_PermissionMode;
+	}
+
+	const char* AssistantEngine::PermissionModeToString(PermissionMode mode)
+	{
+		switch (mode)
+		{
+		case PermissionMode::ReadOnlySuggest:    return "READ_ONLY";
+		case PermissionMode::PreviewBeforeApply: return "PREVIEW_BEFORE_APPLY";
+		case PermissionMode::StageAutoApply:     return "STAGE_AUTO_APPLY";
+		default:                                 return "PREVIEW_BEFORE_APPLY";
+		}
+	}
+
+	void AssistantEngine::SetCollaborationMode(CollaborationMode mode)
+	{
+		std::lock_guard<std::mutex> lock(s_StateMutex);
+		s_CollaborationMode = mode;
+	}
+
+	CollaborationMode AssistantEngine::GetCollaborationMode()
+	{
+		std::lock_guard<std::mutex> lock(s_StateMutex);
+		return s_CollaborationMode;
+	}
+
+	const char* AssistantEngine::CollaborationModeToString(CollaborationMode mode)
+	{
+		switch (mode)
+		{
+		case CollaborationMode::Managed:       return "MANAGED";
+		case CollaborationMode::Collaborative: return "COLLABORATIVE";
+		case CollaborationMode::Expert:        return "EXPERT";
+		default:                               return "MANAGED";
+		}
+	}
+
+	std::vector<LlmMessage> AssistantEngine::GetRoleHistory(const std::string& roleId)
+	{
+		std::lock_guard<std::mutex> lock(s_StateMutex);
+		auto it = s_RoleHistories.find(roleId);
+		if (it != s_RoleHistories.end())
+			return it->second;
+		return {};
+	}
+
+	void AssistantEngine::AppendRoleMessage(const std::string& roleId, const std::string& senderRole, const std::string& content)
+	{
+		std::lock_guard<std::mutex> lock(s_StateMutex);
+		s_RoleHistories[roleId].push_back({ senderRole, content });
+	}
+
+	void AssistantEngine::ClearRoleHistory(const std::string& roleId)
+	{
+		std::lock_guard<std::mutex> lock(s_StateMutex);
+		if (roleId.empty()) s_RoleHistories.clear();
+		else s_RoleHistories.erase(roleId);
+	}
 
 	std::string AssistantEngine::Chat(const std::string& message, const std::string& roleId)
 	{
@@ -39,53 +117,62 @@ namespace World::Assistant
 			interview.AnswerQuestion("", "art_style", "pixel_16bit");
 			interview.AnswerQuestion("", "target_scale", "compact_indie");
 
-			// 2. 自动拆解并下发首批 3 项核心研发任务进 Backlog
+			// 2. 自动拆解并下发首批 3 项核心研发任务进 Backlog (同时传入 role 与 assignee，desc 与 description)
 			std::string r1, r2, r3, err;
 			reg.Dispatch("task.create", {
 				{ "title", "确立核心玩法机制与控制手感模型" },
 				{ "stage", "0" },
+				{ "role", "creative_director" },
 				{ "assignee", "creative_director" },
 				{ "department", "Creative" },
+				{ "desc", "设计核心循环、移动初速度、跳跃曲线与手柄反馈" },
 				{ "description", "设计核心循环、移动初速度、跳跃曲线与手柄反馈" }
 			}, r1, err);
 
 			reg.Dispatch("task.create", {
 				{ "title", "搭建首个找乐原型测试场景与主角控制器" },
 				{ "stage", "0" },
+				{ "role", "gameplay_programmer" },
 				{ "assignee", "gameplay_programmer" },
 				{ "department", "Tech" },
+				{ "desc", "实现 PlayerController.luau，接入物理移动与碰撞" },
 				{ "description", "实现 PlayerController.luau，接入物理移动与碰撞" }
 			}, r2, err);
 
 			reg.Dispatch("task.create", {
 				{ "title", "确立 16-bit 像素低饱和视觉风格与色彩盘" },
 				{ "stage", "0" },
+				{ "role", "art_director" },
 				{ "assignee", "art_director" },
 				{ "department", "Art" },
+				{ "desc", "制定主角色块、瓦片图集与背景视差规范" },
 				{ "description", "制定主角色块、瓦片图集与背景视差规范" }
 			}, r3, err);
 
-			// 3. 自动生成首个玩家控制器脚本模板
-			const fs::path scriptDir = projDir / "assets" / "scripts";
-			std::error_code ec;
-			fs::create_directories(scriptDir, ec);
-			const fs::path playerScript = scriptDir / "PlayerController.luau";
-			if (!fs::exists(playerScript))
+			// 3. 自动生成首个玩家控制器脚本模板 (经由 ChangesetTracker 与 WriteGuard 安全落盘)
+			const std::string scriptRel = "assets/scripts/PlayerController.luau";
+			const std::string scriptCode = "-- PlayerController.luau: 玩家角色手感控制器\n"
+				"local PlayerController = {}\n"
+				"PlayerController.speed = 220.0\n"
+				"PlayerController.jumpVelocity = 480.0\n"
+				"PlayerController.coyoteTime = 0.15\n"
+				"PlayerController.doubleJumpEnabled = true\n\n"
+				"function PlayerController.OnUpdate(dt)\n"
+				"    -- 核心手感循环: 响应移动输入与跳跃切断\n"
+				"end\n\n"
+				"return PlayerController\n";
+
+			const std::string csId = Ai::ChangesetTracker::Get().BeginChangeset(projDir.string(), "gameplay_programmer", "Scaffold PlayerController.luau");
+			std::string csErr;
+			if (!Ai::ChangesetTracker::Get().StageFileWrite(csId, projDir.string(), scriptRel, scriptCode, csErr))
 			{
-				std::ofstream sf(playerScript);
-				if (sf)
-				{
-					sf << "-- PlayerController.luau: 玩家角色手感控制器\n"
-					   << "local PlayerController = {}\n"
-					   << "PlayerController.speed = 220.0\n"
-					   << "PlayerController.jumpVelocity = 480.0\n"
-					   << "PlayerController.coyoteTime = 0.15\n"
-					   << "PlayerController.doubleJumpEnabled = true\n\n"
-					   << "function PlayerController.OnUpdate(dt)\n"
-					   << "    -- 核心手感循环: 响应移动输入与跳跃切断\n"
-					   << "end\n\n"
-					   << "return PlayerController\n";
-				}
+				// 测试环境下无项目清单时的本地安全写入
+				const fs::path pScript = projDir / scriptRel;
+				std::error_code ec;
+				fs::create_directories(pScript.parent_path(), ec);
+				std::ofstream sf(pScript);
+				if (sf) sf << scriptCode;
+				Ai::WriteGuard::Get().RecordWrite(pScript.string(), projDir.string(), "gameplay_programmer", "kickoff");
 			}
 
 			reply << "🎮 【L1 制作人】收到指令！已为您一键启动游戏立项全流程！\n\n"
@@ -243,5 +330,60 @@ namespace World::Assistant
 			return true;
 		};
 		reg.RegisterCommand(std::move(chatCmd));
+
+		// 2. assistant.mode.set
+		CommandDescriptor setModeCmd;
+		setModeCmd.name = "assistant.mode.set";
+		setModeCmd.description = "Set AI assistant permission mode and collaboration mode.";
+		setModeCmd.effect = CommandEffect::Write;
+		setModeCmd.scope = CommandScope::Both;
+		setModeCmd.owner = "plugin:we-ai-assistant";
+		setModeCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"permission\":{\"type\":\"string\"},\"collaboration\":{\"type\":\"string\"}}}";
+		setModeCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"permission\":{\"type\":\"string\"},\"collaboration\":{\"type\":\"string\"}}}";
+		setModeCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& /*error*/)
+		{
+			if (args.count("permission"))
+			{
+				const std::string p = args.at("permission");
+				if (p == "read_only" || p == "0") SetPermissionMode(PermissionMode::ReadOnlySuggest);
+				else if (p == "stage_auto" || p == "2") SetPermissionMode(PermissionMode::StageAutoApply);
+				else SetPermissionMode(PermissionMode::PreviewBeforeApply);
+			}
+			if (args.count("collaboration"))
+			{
+				const std::string c = args.at("collaboration");
+				if (c == "collaborative" || c == "1") SetCollaborationMode(CollaborationMode::Collaborative);
+				else if (c == "expert" || c == "2") SetCollaborationMode(CollaborationMode::Expert);
+				else SetCollaborationMode(CollaborationMode::Managed);
+			}
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "permission", JsonValue::MakeString(PermissionModeToString(GetPermissionMode())) });
+			r.Object.push_back({ "collaboration", JsonValue::MakeString(CollaborationModeToString(GetCollaborationMode())) });
+			result = r.Dump();
+			return true;
+		};
+		reg.RegisterCommand(std::move(setModeCmd));
+
+		// 3. assistant.mode.get
+		CommandDescriptor getModeCmd;
+		getModeCmd.name = "assistant.mode.get";
+		getModeCmd.description = "Get AI assistant permission mode and collaboration mode.";
+		getModeCmd.effect = CommandEffect::Read;
+		getModeCmd.scope = CommandScope::Both;
+		getModeCmd.owner = "plugin:we-ai-assistant";
+		getModeCmd.paramsSchema = "{\"type\":\"object\"}";
+		getModeCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"permission\":{\"type\":\"string\"},\"collaboration\":{\"type\":\"string\"}}}";
+		getModeCmd.handler = [](const std::map<std::string, std::string>& /*args*/, std::string& result, std::string& /*error*/)
+		{
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "permission", JsonValue::MakeString(PermissionModeToString(GetPermissionMode())) });
+			r.Object.push_back({ "collaboration", JsonValue::MakeString(CollaborationModeToString(GetCollaborationMode())) });
+			result = r.Dump();
+			return true;
+		};
+		reg.RegisterCommand(std::move(getModeCmd));
 	}
 }
+
+
+

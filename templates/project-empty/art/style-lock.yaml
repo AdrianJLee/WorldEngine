@@ -1,5 +1,5 @@
-prompt_template: "{prompt}, clean pixel art, 16-bit, game ready"
-negative_prompt: "blurry, photographic, 3d render"
+prompt_template: "{prompt}, stylized crisp game art, coherent lighting, clean silhouette"
+negative_prompt: "blurry, watermark, text artifacts, broken topology, inconsistent palette"
 palette:
   - "#1a1c23"
   - "#0eaf9b"
@@ -7,4 +7,4 @@ palette:
   - "#e43b44"
 seed_min: 10000
 seed_max: 99999
-reference_hash: "empty_template_baseline"
+reference_hash: "sha256:default_style_lock_v1"

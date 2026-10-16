@@ -1,10 +1,10 @@
-prompt_template: "{prompt}, stylized 3d, vibrant lighting, clean silhouette"
-negative_prompt: "noisy, blurry, low resolution, photorealistic"
+prompt_template: "{prompt}, stylized crisp game art, coherent lighting, clean silhouette"
+negative_prompt: "blurry, watermark, text artifacts, broken topology, inconsistent palette"
 palette:
-  - "#20222b"
-  - "#00a896"
-  - "#028090"
-  - "#f0f3f4"
+  - "#1a1c23"
+  - "#0eaf9b"
+  - "#f79617"
+  - "#e43b44"
 seed_min: 10000
 seed_max: 99999
-reference_hash: "default_visual_benchmark"
+reference_hash: "sha256:default_style_lock_v1"

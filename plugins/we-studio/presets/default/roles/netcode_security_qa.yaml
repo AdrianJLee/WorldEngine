@@ -4,10 +4,14 @@ tier: L3
 department: qa
 reports_to: qa_lead
 kind: maker
+guide: "guides/qa_lead.md"
 duties: [弱网丢包模拟, 协议篡改注入, 并发抗压极限测试]
+outputs: [netcode_security_qa_deliverable, qa_spec]
 write: [qa/reports/network/**]
-commands: []
+commands: ["project.validate", "asset.validate", "playtest.run", "bug.*", "review.submit", "task.list", "ui.tree", "scene.list", "scene.get", "scene.query", "prof.*"]
+reviews: []
 activation:
   category: genre_specific
+  genres: [multiplayer]
   wake_stages: [3, 4, 5]
   default_state: active

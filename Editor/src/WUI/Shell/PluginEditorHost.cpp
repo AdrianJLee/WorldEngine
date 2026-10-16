@@ -2,32 +2,34 @@
 #include "WUI/Shell/PluginEditorHost.h"
 
 #include "WUI/Shell/EditorShell.h"
-
+#include "World/Plugins/PluginManager.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiWidgets.h"
-#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
-#include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace World
 {
 	namespace
 	{
-		// ---- 面板 Draw 上下文(只读句柄;插件只原样回传给 WeEditorUiApi 的函数)----
-		//
-		// 小组件表按 Draw 调用顺序**垂直排列**:每个控件占一行(Label/Separator 更矮),
-		// 由本结构里的游标推进;面板高度不够时停止绘制(插件面板首期不做滚动)。
-	struct PluginPanelDrawState
-	{
+		// 单次面板绘制的宿主状态:通过 WeEditorUiApi.UserData 传给每个 C 回调,
+		// 栈上存活、只在本帧 draw 调用期间有效。
+		// 支持垂直滚动(s_PanelScrollY / s_PanelContentH)与裁剪保护,容纳长列表/任务/对话面板。
+		struct PluginPanelDrawState
+		{
 			PluginEditorHost* Host = nullptr;
 			Plugins::PluginManager* Manager = nullptr;
 			Wui::WuiContext* Ctx = nullptr;
 			Wui::WuiRect Rect { 0, 0, 0, 0 };
+			Wui::WuiRect Body { 0, 0, 0, 0 };
 			Wui::WuiTheme Theme;
 			Plugins::PluginEditorPanel Panel;
+			float StartY = 0.0f;
+			float ScrollY = 0.0f;
 			float Cursor = 0.0f;
 			bool Broken = false;
 			// 无 id 的 Label 自动编号(`plugin.panel.<插件>.<面板>.#<n>`),让每个文本行都有
@@ -35,11 +37,16 @@ namespace World
 			uint32_t TextIndex = 0;
 		};
 
+		static std::unordered_map<std::string, float> s_PanelScrollY;
+		static std::unordered_map<std::string, float> s_PanelContentH;
+
 		inline constexpr float kPluginPanelPad = 10.0f;
 		inline constexpr float kPluginPanelRowGap = 4.0f;
 		inline constexpr float kPluginPanelControlHeight = 24.0f;
 		inline constexpr float kPluginPanelLabelHeight = 18.0f;
 		inline constexpr float kPluginPanelSeparatorHeight = 13.0f;
+		inline constexpr float kPluginScrollbarWidth = 6.0f;
+		inline constexpr float kPluginMaxContentSpan = 24000.0f;
 
 		PluginPanelDrawState* DrawStateOf(void* uiContext)
 		{
@@ -60,7 +67,8 @@ namespace World
 			const std::string label = text ? text : "";
 			const float measured = state.Ctx->MeasureTextWidth(label, state.Theme.FontSizeBody,
 				Wui::WuiFontFamily::Ui);
-			return std::min(std::max(measured + 18.0f, 88.0f), std::max(88.0f, state.Rect.W - 20.0f));
+			const float maxAvail = std::max(88.0f, state.Rect.W - kPluginPanelPad * 2.0f - kPluginScrollbarWidth);
+			return std::min(std::max(measured + 18.0f, 88.0f), maxAvail);
 		}
 
 		void Advance(PluginPanelDrawState& state, float height)
@@ -70,7 +78,7 @@ namespace World
 
 		bool OutOfRoom(const PluginPanelDrawState& state)
 		{
-			return state.Cursor > state.Rect.Y + state.Rect.H - kPluginPanelPad;
+			return (state.Cursor - state.StartY) > kPluginMaxContentSpan;
 		}
 
 		void RegisterPanelRootNode(PluginPanelDrawState& state)
@@ -140,7 +148,7 @@ namespace World
 			const float y = state->Cursor + kPluginPanelSeparatorHeight * 0.5f;
 			Wui::LineSegment(*state->Ctx,
 				{ state->Rect.X + kPluginPanelPad, y },
-				{ state->Rect.X + std::max(10.0f, state->Rect.W - kPluginPanelPad), y },
+				{ state->Rect.X + std::max(10.0f, state->Rect.W - kPluginPanelPad - kPluginScrollbarWidth), y },
 				state->Theme.Border, 1.0f);
 			Advance(*state, kPluginPanelSeparatorHeight);
 		}
@@ -219,7 +227,7 @@ namespace World
 			if (!state || !buffer || capacity == 0 || OutOfRoom(*state))
 				return false;
 			const Wui::WuiRect rect { state->Rect.X + kPluginPanelPad, state->Cursor,
-				std::max(100.0f, state->Rect.W - kPluginPanelPad * 2.0f), kPluginPanelControlHeight };
+				std::max(100.0f, state->Rect.W - kPluginPanelPad * 2.0f - kPluginScrollbarWidth), kPluginPanelControlHeight };
 			std::string stdBuf(buffer);
 			const bool submitted = Wui::TextField(*state->Ctx, ControlId(*state, id, "text_input"), rect,
 				stdBuf, state->Theme);
@@ -246,7 +254,7 @@ namespace World
 			for (uint32_t i = 0; i < count; ++i)
 				tabList.push_back(tabs[i] ? tabs[i] : "");
 			const Wui::WuiRect rect { state->Rect.X + kPluginPanelPad, state->Cursor,
-				std::max(100.0f, state->Rect.W - kPluginPanelPad * 2.0f), kPluginPanelControlHeight };
+				std::max(100.0f, state->Rect.W - kPluginPanelPad * 2.0f - kPluginScrollbarWidth), kPluginPanelControlHeight };
 			int currentActive = *active;
 			const bool changed = Wui::TabBar(*state->Ctx, ControlId(*state, id, "tab_bar"), rect,
 				tabList, currentActive, state->Theme);
@@ -331,7 +339,28 @@ namespace World
 		state.Rect = m_Shell.CurrentPluginPanelRect();
 		state.Theme = Wui::CurrentTheme();
 		state.Panel = panel;
-		state.Cursor = state.Rect.Y + kPluginPanelPad + kPluginPanelLabelHeight;
+
+		const float topInset = kPluginPanelPad + kPluginPanelLabelHeight;
+		state.Body = Wui::WuiRect {
+			state.Rect.X,
+			state.Rect.Y + topInset,
+			state.Rect.W,
+			std::max(1.0f, state.Rect.H - topInset)
+		};
+
+		float& scrollY = s_PanelScrollY[panel.DisplayId];
+		const float prevContentH = s_PanelContentH[panel.DisplayId];
+		const float prevMaxScroll = std::max(0.0f, prevContentH - state.Body.H);
+
+		if (state.Body.Contains(state.Ctx->Input().MousePos) && state.Ctx->Input().Wheel != 0.0f)
+		{
+			scrollY -= state.Ctx->Input().Wheel * 36.0f;
+		}
+		scrollY = std::max(0.0f, std::min(scrollY, prevMaxScroll));
+
+		state.ScrollY = scrollY;
+		state.StartY = state.Body.Y - scrollY;
+		state.Cursor = state.StartY;
 
 		Plugins::WeEditorUiApi ui;
 		ui.UserData = &state;
@@ -346,7 +375,33 @@ namespace World
 		ui.TabBar = &UiTabBar;
 
 		RegisterPanelRootNode(state);
+		state.Ctx->PushClipRect(state.Body);
 		const int result = (draw)(userData, &ui, &state);
+		state.Ctx->PopClipRect();
+
+		const float totalContentH = std::max(0.0f, (state.Cursor - state.StartY) + kPluginPanelPad);
+		s_PanelContentH[panel.DisplayId] = totalContentH;
+		const float maxScroll = std::max(0.0f, totalContentH - state.Body.H);
+		scrollY = std::max(0.0f, std::min(scrollY, maxScroll));
+
+		if (totalContentH > state.Body.H + 1.0f)
+		{
+			const Wui::WuiRect scrollBarRect {
+				state.Body.X + state.Body.W - kPluginScrollbarWidth - 2.0f,
+				state.Body.Y + 2.0f,
+				kPluginScrollbarWidth,
+				std::max(12.0f, state.Body.H - 4.0f)
+			};
+			Wui::ScrollBar(*state.Ctx,
+				Wui::HashId((panel.DisplayId + ".scrollbar").c_str()),
+				scrollBarRect,
+				totalContentH,
+				state.Body.H,
+				scrollY,
+				state.Theme,
+				false);
+		}
+
 		if (result != 0)
 			WLD_CORE_ERROR("[plugin] editor panel '{0}' draw returned {1} (contract violation)",
 				panel.DisplayId, result);
@@ -388,3 +443,4 @@ namespace World
 		return manager->InvokeEditorCommand(commandName, error);
 	}
 }
+

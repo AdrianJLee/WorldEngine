@@ -4,10 +4,14 @@ tier: L3
 department: art
 reports_to: art_director
 kind: maker
+guide: "guides/art_director.md"
 duties: [写实解剖雕刻, Blendshapes, 毛发Grooming, 布料折痕模拟]
+outputs: [3d_character_artist_deliverable, art_spec]
 write: [art/3d/characters/**, assets/models/characters/**]
-commands: []
+commands: ["gen.*", "asset.*", "material.*", "changeset.*", "task.*", "docs.search"]
+reviews: []
 activation:
   category: genre_specific
+  genres: [3d-nextgen, 3d-stylized, action_3d]
   wake_stages: [3, 4]
   default_state: active

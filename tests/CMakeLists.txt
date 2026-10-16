@@ -1,4 +1,4 @@
-﻿# P2 W1:Luau 运行时封装(沙箱/错误定位),headless 可跑。
+# P2 W1:Luau 运行时封装(沙箱/错误定位),headless 可跑。
 add_executable(WorldLuauVmTests World/LuauVmTests.cpp)
 target_link_libraries(WorldLuauVmTests PRIVATE World)
 target_compile_features(WorldLuauVmTests PRIVATE cxx_std_17)
@@ -2191,4 +2191,44 @@ foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests World
     add_dependencies(${_we_test_target} WeCopyRuntimeDllForTests)
 endforeach()
 
+
+
+# M9: AI 原生游戏开发端到端全链路闭环集成测试
+add_executable(WorldAiEndToEndWorkflowTests
+    World/AiEndToEndWorkflowTests.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/StudioPolicy.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/BacklogManager.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/StudioValidator.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/AgentsDocGenerator.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-gen/src/BudgetGuard.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-gen/src/CredentialManager.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-gen/src/StyleLock.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-gen/src/GenPipeline.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-ai-assistant/src/InterviewSystem.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-ai-assistant/src/AssistantEngine.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/we-ai-assistant/src/LlmClient.cpp
+)
+target_include_directories(WorldAiEndToEndWorkflowTests PRIVATE
+    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src
+    ${CMAKE_SOURCE_DIR}/plugins/we-gen/src
+    ${CMAKE_SOURCE_DIR}/plugins/we-ai-assistant/src
+)
+target_link_libraries(WorldAiEndToEndWorkflowTests PRIVATE World yaml-cpp crypt32 winhttp ws2_32)
+target_compile_features(WorldAiEndToEndWorkflowTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldAiEndToEndWorkflowTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldAiEndToEndWorkflowTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldAiEndToEndWorkflowTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.AiEndToEndWorkflow COMMAND WorldAiEndToEndWorkflowTests)
+set_tests_properties(World.AiEndToEndWorkflow PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
 

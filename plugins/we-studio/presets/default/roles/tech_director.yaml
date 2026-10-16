@@ -4,11 +4,12 @@ tier: L2
 department: tech
 reports_to: producer
 kind: maker+reviewer
+guide: "guides/technical_director.md"
 duties: [架构方案评审, 性能预算制定, 引擎缺口把控]
 outputs: [tech_spec, perf_budget]
 write: ["src/**", "config/**"]
-commands: [task.*, review.*, engine.*, prof.*]
-reviews: [gameplay_programmer, engine_programmer]
+commands: ["*"]
+reviews: [gameplay_programmer, engine_programmer, graphics_programmer, tools_programmer]
 activation:
   category: mandatory
   genres: [all]

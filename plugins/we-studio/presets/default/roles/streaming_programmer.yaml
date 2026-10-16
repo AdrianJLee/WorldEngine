@@ -4,10 +4,14 @@ tier: L3
 department: tech
 reports_to: technical_director
 kind: maker
+guide: "guides/technical_director.md"
 duties: [大世界流送, HLOD分级调度, 视锥遮挡剔除, 显存热度管理]
+outputs: [streaming_programmer_deliverable, tech_spec]
 write: [scripts/streaming/**, scenes/streaming/**]
-commands: []
+commands: ["schema.*", "api.luau_stubs", "project.validate", "playtest.run", "build.package", "changeset.*", "scene.*", "engine.request_change", "task.*", "docs.search"]
+reviews: []
 activation:
   category: genre_specific
+  genres: [3d-nextgen, open_world]
   wake_stages: [3, 4, 5]
   default_state: active

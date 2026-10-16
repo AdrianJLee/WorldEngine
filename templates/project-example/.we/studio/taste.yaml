@@ -1,0 +1,7 @@
+genre_type: "2d_platformer"
+art_style: "stylized_pixel_hd"
+pacing: "responsive_tight"
+camera_perspective: "side_scroller_2d"
+reference_games:
+  - "Celeste"
+  - "Hollow Knight"

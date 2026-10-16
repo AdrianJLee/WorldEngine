@@ -4,10 +4,14 @@ tier: L2
 department: creative
 reports_to: producer
 kind: maker+reviewer
+guide: "guides/creative_director.md"
 duties: [核心幻想, 卖点与差异化, 体验目标, 策划裁决]
+outputs: [creative_director_deliverable, creative_spec]
 write: [design/pitch/**, design/**]
-commands: []
+commands: ["*"]
+reviews: [system_designer, combat_designer, level_designer, economy_designer, narrative_designer, worldbuilder, game_designer]
 activation:
   category: mandatory
+  genres: [all]
   wake_stages: [0, 1, 2, 3, 5]
   default_state: active

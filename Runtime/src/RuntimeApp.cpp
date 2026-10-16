@@ -26,34 +26,72 @@ namespace World
 			return std::filesystem::path(executablePathBuffer).parent_path();
 		}
 
-		// PROJ-1 P4:启动参数 `--project <dir>`(也可写 `--project=<dir>`)。
+		// PROJ-1 P4:启动参数 `--project <dir>`(也可写 `--project=<dir>`)以及 `--ai-control=<port>` / `--headless`。
 		// 必须在 Application 构造**之前**生效:基类构造函数里就会 MountProjectContent()
 		// 定位项目清单,放进 RuntimeApp 构造函数体已经太晚。优先级高于 WLD_PROJECT_DIR
 		// 环境变量(Paths 内部保证),语义与编辑器侧 --project 一致。
 		void ApplyCommandLineProject()
 		{
+			if (const char* envPort = std::getenv("WLD_RUNTIME_AI_PORT"))
+			{
+				const int parsed = std::atoi(envPort);
+				if (parsed > 0)
+					SetRuntimeAiControlPort(parsed);
+			}
+
+			bool headless = false;
 			for (int index = 1; index < __argc; ++index)
 			{
 				const char* argument = __argv[index];
 				if (!argument)
 					continue;
+				if (std::strcmp(argument, "--headless") == 0)
+				{
+					headless = true;
+					_putenv_s("WLD_HEADLESS", "1");
+					continue;
+				}
+				if (std::strncmp(argument, "--ai-control=", 13) == 0)
+				{
+					const int port = std::atoi(argument + 13);
+					if (port > 0)
+						SetRuntimeAiControlPort(port);
+					continue;
+				}
+				if (std::strcmp(argument, "--ai-control") == 0)
+				{
+					if (index + 1 < __argc && __argv[index + 1] && __argv[index + 1][0] >= '0' && __argv[index + 1][0] <= '9')
+					{
+						SetRuntimeAiControlPort(std::atoi(__argv[++index]));
+					}
+					else
+					{
+						SetRuntimeAiControlPort(8089);
+					}
+					continue;
+				}
 				if (std::strcmp(argument, "--project") == 0)
 				{
 					if (index + 1 >= __argc || !__argv[index + 1] || !__argv[index + 1][0])
 					{
 						WLD_CORE_WARN("[runtime] --project 缺少目录参数,忽略");
-						return;
+						continue;
 					}
-					World::Paths::SetProjectDirOverride(__argv[index + 1]);
+					World::Paths::SetProjectDirOverride(__argv[++index]);
 					WLD_CORE_INFO("[runtime] --project override: {0}", World::Paths::ProjectDir().string());
-					return;
+					continue;
 				}
 				if (std::strncmp(argument, "--project=", 10) == 0)
 				{
 					World::Paths::SetProjectDirOverride(argument + 10);
 					WLD_CORE_INFO("[runtime] --project override: {0}", World::Paths::ProjectDir().string());
-					return;
+					continue;
 				}
+			}
+
+			if (headless && GetRuntimeAiControlPort() <= 0)
+			{
+				SetRuntimeAiControlPort(8089);
 			}
 		}
 
@@ -95,9 +133,6 @@ namespace World
 		RuntimeApp(World::WorldContext& context)
 			:Application("Runtime", context)
 		{
-			// 内容挂载(VFS + 着色器产物解析)已由 Application 统一完成:
-			// 必须在 Renderer::Init 之前,发行形态才能从内容包读着色器。
-			// 语言层必须在 RuntimeLayer 构造(OnAttach 会取文案)之前注册好。
 			RegisterRuntimeLocalizationLayers();
 			Audio::AudioSystem::Get().Initialize(false);
 			PushLayer(WLD_ENGINE_NEW(RuntimeLayer));
@@ -111,7 +146,6 @@ namespace World
 
 	Application* CreateApplication(World::WorldContext& context)
 	{
-		// 项目根覆盖(如果有)必须先于 Application 构造 —— 那一步就会挂载项目内容。
 		ApplyCommandLineProject();
 		return new RuntimeApp(context);
 	}

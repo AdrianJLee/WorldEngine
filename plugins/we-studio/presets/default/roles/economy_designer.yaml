@@ -4,10 +4,14 @@ tier: L3
 department: creative
 reports_to: creative_director
 kind: maker
+guide: "guides/creative_director.md"
 duties: [经济循环, 战斗公式, 掉落概率, 成长曲线, 数值极限模拟]
+outputs: [economy_designer_deliverable, creative_spec]
 write: [design/balance/**, data/**]
-commands: []
+commands: ["task.*", "docs.search", "schema.*", "datatable.*", "changeset.*", "scene.list", "scene.get", "scene.query"]
+reviews: []
 activation:
   category: dynamic
+  genres: [strategy, rpg, multiplayer]
   wake_stages: [1, 2, 3, 4, 5]
   default_state: active

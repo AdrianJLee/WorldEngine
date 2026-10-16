@@ -4,10 +4,14 @@ tier: L3
 department: art
 reports_to: art_director
 kind: maker
+guide: "guides/art_director.md"
 duties: [骨骼绑定, 插值形变, 蒙皮权重, 状态动画]
+outputs: [2d_animator_deliverable, art_spec]
 write: [art/2d/skeletons/**, assets/animations/2d/**]
-commands: []
+commands: ["gen.*", "asset.*", "material.*", "changeset.*", "task.*", "docs.search"]
+reviews: []
 activation:
   category: genre_specific
+  genres: [2d-standard, 2d_platformer, metroidvania]
   wake_stages: [2, 3, 4]
   default_state: active

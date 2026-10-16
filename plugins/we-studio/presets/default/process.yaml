@@ -8,6 +8,7 @@ stages:
     lead: producer
     participants: [creative_director, art_director, experience_director]
     outputs: [brief, gdd_high_level, vision_pitch]
+    rollback_to: []
     gate:
       required_outputs: [brief]
       reviewers: [producer]
@@ -16,73 +17,80 @@ stages:
     id: feasibility
     name: 可行性论证与风格锁
     lead: creative_director
-    participants: [art_director, tech_director, concept_artist_2d]
+    participants: [art_director, technical_director, tech_director, concept_artist]
     outputs: [tech_spike, art_style_lock, budget_plan]
+    rollback_to: [concept]
     gate:
       required_outputs: [art_style_lock]
-      reviewers: [art_director, tech_director]
+      reviewers: [art_director, technical_director]
 
   - index: 2
     id: prototype
     name: 核心玩法找乐原型
-    lead: game_designer
-    participants: [gameplay_programmer, level_designer, sound_designer, gameplay_tester]
+    lead: system_designer
+    participants: [game_designer, gameplay_programmer, level_designer, audio_designer, automation_qa, gameplay_tester]
     outputs: [playable_prototype, greybox_level, test_asserts]
+    rollback_to: [concept, feasibility]
     gate:
       required_outputs: [playable_prototype]
       self_validations: [project.validate, playtest.run]
-      reviewers: [creative_director, qa_director]
+      reviewers: [creative_director, qa_lead]
 
   - index: 3
     id: vertical_slice
     name: 垂直切片 (完整品质样板)
     lead: producer
-    participants: [all]
+    participants: [creative_director, art_director, technical_director, experience_director, qa_lead]
     outputs: [vertical_slice_build, art_benchmark, performance_profile]
+    rollback_to: [feasibility, prototype]
     gate:
       required_outputs: [vertical_slice_build]
       self_validations: [project.validate, asset.validate, playtest.run]
-      reviewers: [producer, creative_director, art_director, tech_director, qa_director]
+      reviewers: [producer, creative_director, art_director, technical_director, qa_lead]
 
   - index: 4
     id: production
     name: 资产与内容量产
     lead: producer
-    participants: [all]
+    participants: [creative_director, art_director, technical_director, qa_lead]
     outputs: [all_levels, full_assets, feature_complete]
+    rollback_to: [prototype, vertical_slice]
     gate:
       required_outputs: [all_levels]
       self_validations: [project.validate, asset.validate, build.package]
-      reviewers: [producer, qa_director]
+      reviewers: [producer, qa_lead]
 
   - index: 5
     id: beta
     name: 优化、Bug修复与体验打磨
-    lead: qa_director
-    participants: [gameplay_tester, performance_tester, gameplay_programmer, ui_ux_designer]
+    lead: qa_lead
+    participants: [gameplay_tester, perf_compat_qa, gameplay_programmer, ux_designer]
     outputs: [zero_blocker_report, performance_signoff, polish_checklist]
+    rollback_to: [vertical_slice, production]
     gate:
       required_outputs: [zero_blocker_report]
       self_validations: [playtest.run, project.validate]
-      reviewers: [qa_director, tech_director]
+      reviewers: [qa_lead, technical_director]
 
   - index: 6
     id: launch
     name: 发行与打包上架
-    lead: publishing_director
-    participants: [producer, localization_lead, build_engineer]
+    lead: producer
+    participants: [marketing_specialist, narrative_designer, tools_programmer]
     outputs: [shipping_package, release_notes, store_assets]
+    rollback_to: [production, beta]
     gate:
       required_outputs: [shipping_package]
       self_validations: [build.package]
-      reviewers: [producer, publishing_director]
+      reviewers: [producer, qa_lead]
 
   - index: 7
     id: liveops
     name: 持续运营与更新
     lead: producer
-    participants: [community_manager, gameplay_programmer, gameplay_tester]
+    participants: [liveops_designer, gameplay_programmer, gameplay_balance_qa]
     outputs: [patch_plan, telemetry_report]
+    rollback_to: [beta, launch]
     gate:
       required_outputs: []
       reviewers: [producer]

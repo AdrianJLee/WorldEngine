@@ -4,10 +4,14 @@ tier: L3
 department: art
 reports_to: art_director
 kind: maker+reviewer
+guide: "guides/art_director.md"
 duties: [Slang着色器开发, PBR/NPR材质图, 绑定蒙皮, LOD规范, 光照烘焙]
+outputs: [technical_artist_deliverable, art_spec]
 write: [shaders/**, materials/**, scripts/tools/**]
-commands: []
+commands: ["gen.*", "asset.*", "material.*", "changeset.*", "task.*", "docs.search"]
+reviews: []
 activation:
   category: dynamic
+  genres: [all]
   wake_stages: [1, 2, 3, 4, 5]
   default_state: active

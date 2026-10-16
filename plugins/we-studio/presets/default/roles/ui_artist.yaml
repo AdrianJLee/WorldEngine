@@ -4,10 +4,14 @@ tier: L3
 department: art
 reports_to: art_director
 kind: maker
+guide: "guides/art_director.md"
 duties: [界面视觉风格, HUD排版, 矢量图标, 动效转场, 字体排印]
+outputs: [ui_artist_deliverable, art_spec]
 write: [ui/**, assets/ui/**]
-commands: []
+commands: ["gen.*", "asset.*", "material.*", "changeset.*", "task.*", "docs.search"]
+reviews: []
 activation:
   category: dynamic
+  genres: [all]
   wake_stages: [2, 3, 4, 5]
   default_state: active

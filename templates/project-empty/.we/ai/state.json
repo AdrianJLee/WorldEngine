@@ -1,0 +1,15 @@
+{
+  "current_stage": "concept",
+  "active_session_token": "",
+  "overridden_blockers": [],
+  "role_states": {
+    "producer": "ACTIVE",
+    "creative_director": "ACTIVE",
+    "art_director": "ACTIVE",
+    "experience_director": "ACTIVE",
+    "technical_director": "ACTIVE",
+    "qa_lead": "ACTIVE",
+    "automation_qa": "ACTIVE",
+    "gameplay_programmer": "ACTIVE"
+  }
+}

@@ -87,7 +87,7 @@ namespace
 		else if (g_SelectedRoleIdx == 3) senderName = "QA 质检总监";
 
 		g_ChatHistory.push_back({ senderName, replyText, false });
-		if (g_ChatHistory.size() > 4)
+		if (g_ChatHistory.size() > 50)
 		{
 			g_ChatHistory.erase(g_ChatHistory.begin());
 		}
@@ -374,3 +374,4 @@ WE_PLUGIN_EXPORT const WePlugin* WePluginQuery(uint32_t hostAbiVersion)
 	static const WePlugin plugin = MakePlugin();
 	return &plugin;
 }
+

@@ -292,3 +292,4 @@ WE_PLUGIN_EXPORT const WePlugin* WePluginQuery(uint32_t hostAbiVersion)
 	static const WePlugin plugin = MakePlugin();
 	return &plugin;
 }
+

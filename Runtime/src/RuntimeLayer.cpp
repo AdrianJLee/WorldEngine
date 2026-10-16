@@ -1,26 +1,47 @@
+#if defined(_WIN32)
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  pragma comment(lib, "ws2_32.lib")
+#endif
+
 #include "RuntimeLayer.h"
 #include "World/Events/KeyEvent.h"
 #include "GameHud.h"
+#include "World/Agent/WeAgentCore.h"
+#include "World/Ai/CommandRegistry.h"
+#include "World/Ai/PlaytestRunner.h"
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/Log.h"
+#include "World/Core/StringPool.h"
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/Runtime/GameApp.h"
 #include "World/Plugins/PluginManager.h"
+#include "World/Profiling/Telemetry.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
+#include "World/Scene/Components.h"
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/UI/UiCommandRouter.h"
+#include "World/Utils/Paths.h"
+#include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiTextureRegistry.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <filesystem>
+#include <mutex>
+#include <sstream>
 #include <string>
+#include <thread>
 
 namespace World
 {
@@ -176,10 +197,17 @@ namespace World
 
 		// GameHost 内部:清单中存在同一场景的关卡时走 LevelService(加载状态机/进度),否则退回路径加载。
 		m_Host.LoadLevel(scenePath, true);
+
+		World::Agent::WeAgentCore::Get().SetProjectRoot(World::Paths::ProjectDir().string());
+		if (GetRuntimeAiControlPort() > 0)
+		{
+			StartAiControlServer();
+		}
 	}
 	void RuntimeLayer::OnDetach()
 	{
 		WLD_TRACE_FUNCTION();
+		StopAiControlServer();
 		// 顺序与改造前一致:先停运行时并释放场景,再关闭渲染器。
 		m_Host.StopRuntime();
 		m_Host.Shutdown();
@@ -266,8 +294,12 @@ namespace World
 			}
 			m_UiHost.ClearCommands();
 		}
+		m_LastFrameDeltaSeconds = ts.GetSeconds();
 		// 场景更新(OnUpdateRuntime)+ 主相机提交渲染都在 GameHost 内完成,顺序与改造前一致。
 		m_Host.Tick(ts, true);
+
+		// Runtime AI 控制通道:在主线程每帧泵送执行排队请求。
+		PumpAiControlRequests();
 
 		// 渲染基线捕获(仅开发验证):WLD_CAPTURE_FRAMES=N 后读默认帧缓冲写 PPM。
 		CaptureFrameIfRequested();
@@ -543,6 +575,613 @@ namespace World
 			WLD_CORE_INFO("[runtime] Debug HUD {0}", m_ShowGameHud ? "enabled" : "disabled");
 			return true;
 		}
+		return false;
+	}
+
+	namespace
+	{
+		int& RuntimeAiPortStorage()
+		{
+			static int s_Port = 0;
+			return s_Port;
+		}
+
+		std::string EscapeJsonString(const std::string& text)
+		{
+			std::string escaped;
+			escaped.reserve(text.size() + 8);
+			for (char c : text)
+			{
+				switch (c)
+				{
+				case '"': escaped += "\\\""; break;
+				case '\\': escaped += "\\\\"; break;
+				case '\n': escaped += "\\n"; break;
+				case '\r': escaped += "\\r"; break;
+				case '\t': escaped += "\\t"; break;
+				default: escaped += c; break;
+				}
+			}
+			return escaped;
+		}
+
+#if defined(_WIN32)
+		void EnsureRuntimeWinsock()
+		{
+			static bool s_Initialized = false;
+			if (!s_Initialized)
+			{
+				WSADATA data {};
+				WSAStartup(MAKEWORD(2, 2), &data);
+				s_Initialized = true;
+			}
+		}
+
+		int WaitSocketSlice(SOCKET sock, bool readable, bool writable)
+		{
+			fd_set readSet;
+			fd_set writeSet;
+			FD_ZERO(&readSet);
+			FD_ZERO(&writeSet);
+			if (readable)
+				FD_SET(sock, &readSet);
+			if (writable)
+				FD_SET(sock, &writeSet);
+			timeval timeout { 0, 100 * 1000 };
+			return select(0, readable ? &readSet : nullptr, writable ? &writeSet : nullptr, nullptr, &timeout);
+		}
+
+		bool SendAllSlice(SOCKET client, const std::atomic<bool>& running, const std::string& payload)
+		{
+			size_t sent = 0;
+			int stopSlices = 0;
+			while (sent < payload.size())
+			{
+				const bool stopping = !running.load();
+				if (stopping && stopSlices >= 2)
+					return false;
+				const int writable = WaitSocketSlice(client, false, true);
+				if (stopping)
+					++stopSlices;
+				if (writable < 0)
+					return false;
+				if (writable == 0)
+					continue;
+				const int written = send(client, payload.data() + sent, static_cast<int>(payload.size() - sent), 0);
+				if (written <= 0)
+					return false;
+				sent += static_cast<size_t>(written);
+			}
+			return true;
+		}
+#endif
+	}
+
+	void SetRuntimeAiControlPort(int port)
+	{
+		RuntimeAiPortStorage() = port;
+	}
+
+	int GetRuntimeAiControlPort()
+	{
+		if (RuntimeAiPortStorage() <= 0)
+		{
+			if (const char* envPort = std::getenv("WLD_RUNTIME_AI_PORT"))
+			{
+				const int parsed = std::atoi(envPort);
+				if (parsed > 0)
+					RuntimeAiPortStorage() = parsed;
+			}
+		}
+		return RuntimeAiPortStorage();
+	}
+
+	struct RuntimeLayer::RuntimeAiServerState
+	{
+		struct PendingRequest
+		{
+			uint64_t Id = 0;
+			std::string Command;
+			std::map<std::string, std::string> Args;
+			std::string Response;
+			bool Done = false;
+			std::mutex Mutex;
+			std::condition_variable Cv;
+		};
+
+		std::atomic<bool> Running { false };
+		uint16_t Port = 0;
+		uintptr_t ListenSocket = static_cast<uintptr_t>(~0ull);
+		std::thread ListenThread;
+		std::mutex QueueMutex;
+		std::deque<std::shared_ptr<PendingRequest>> Queue;
+	};
+
+	void RuntimeLayer::StartAiControlServer()
+	{
+#if defined(_WIN32)
+		const int port = GetRuntimeAiControlPort();
+		if (port <= 0)
+			return;
+		if (m_AiServer && m_AiServer->Running.load())
+			return;
+
+		EnsureRuntimeWinsock();
+		const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+		if (listener == INVALID_SOCKET)
+		{
+			WLD_CORE_ERROR("[runtime-ai] socket() failed: {0}", WSAGetLastError());
+			return;
+		}
+
+		BOOL reuseAddr = TRUE;
+		setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuseAddr), sizeof(reuseAddr));
+
+		sockaddr_in address {};
+		address.sin_family = AF_INET;
+		address.sin_port = htons(static_cast<uint16_t>(port));
+		address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
+		{
+			WLD_CORE_ERROR("[runtime-ai] bind 127.0.0.1:{0} failed: {1}", port, WSAGetLastError());
+			closesocket(listener);
+			return;
+		}
+		if (listen(listener, 4) != 0)
+		{
+			WLD_CORE_ERROR("[runtime-ai] listen failed: {0}", WSAGetLastError());
+			closesocket(listener);
+			return;
+		}
+
+		m_AiServer = std::make_unique<RuntimeAiServerState>();
+		m_AiServer->Port = static_cast<uint16_t>(port);
+		m_AiServer->ListenSocket = static_cast<uintptr_t>(listener);
+		m_AiServer->Running.store(true);
+
+		RuntimeAiServerState* server = m_AiServer.get();
+		m_AiServer->ListenThread = std::thread([server]()
+		{
+			while (server->Running.load())
+			{
+				const SOCKET listenSock = static_cast<SOCKET>(server->ListenSocket);
+				if (listenSock == INVALID_SOCKET)
+					break;
+				const int readable = WaitSocketSlice(listenSock, true, false);
+				if (readable <= 0)
+				{
+					if (readable < 0)
+						break;
+					continue;
+				}
+				if (!server->Running.load())
+					break;
+				const SOCKET client = accept(listenSock, nullptr, nullptr);
+				if (client == INVALID_SOCKET)
+					continue;
+
+				std::string buffer;
+				char chunk[4096];
+				bool alive = true;
+				while (alive && server->Running.load())
+				{
+					const int clientReady = WaitSocketSlice(client, true, false);
+					if (clientReady < 0)
+						break;
+					if (clientReady == 0)
+						continue;
+					const int received = recv(client, chunk, sizeof(chunk), 0);
+					if (received <= 0)
+						break;
+					buffer.append(chunk, static_cast<size_t>(received));
+
+					size_t newline = 0;
+					while ((newline = buffer.find('\n')) != std::string::npos)
+					{
+						std::string line = buffer.substr(0, newline);
+						buffer.erase(0, newline + 1);
+						while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+							line.pop_back();
+						if (line.empty())
+							continue;
+
+						std::string parseError;
+						auto parsedOpt = Wui::JsonValue::Parse(line, &parseError);
+						std::string response;
+						if (!parsedOpt || parsedOpt->type != Wui::JsonValue::Type::Object)
+						{
+							response = "{\"id\":0,\"seq\":0,\"ok\":false,\"error\":\"bad json: " + EscapeJsonString(parseError) + "\"}\n";
+						}
+						else
+						{
+							auto req = std::make_shared<RuntimeAiServerState::PendingRequest>();
+							for (const auto& kv : parsedOpt->Object)
+							{
+								if (kv.first == "id" || kv.first == "seq")
+								{
+									req->Id = static_cast<uint64_t>(kv.second.AsNumber(std::strtod(kv.second.AsString().c_str(), nullptr)));
+								}
+								else if (kv.first == "cmd")
+								{
+									req->Command = kv.second.AsString();
+								}
+								else if (kv.first == "args" && kv.second.type == Wui::JsonValue::Type::Object)
+								{
+									for (const auto& argKv : kv.second.Object)
+									{
+										req->Args[argKv.first] = (argKv.second.type == Wui::JsonValue::Type::String)
+											? argKv.second.AsString()
+											: argKv.second.Dump();
+									}
+								}
+								else
+								{
+									req->Args[kv.first] = (kv.second.type == Wui::JsonValue::Type::String)
+										? kv.second.AsString()
+										: kv.second.Dump();
+								}
+							}
+
+							bool stopping = false;
+							{
+								std::lock_guard<std::mutex> lock(server->QueueMutex);
+								stopping = !server->Running.load();
+								if (!stopping)
+									server->Queue.push_back(req);
+							}
+							if (stopping)
+							{
+								response = "{\"id\":" + std::to_string(req->Id) + ",\"seq\":" + std::to_string(req->Id)
+									+ ",\"ok\":false,\"error\":\"server stopping\"}\n";
+							}
+							else
+							{
+								std::unique_lock<std::mutex> lock(req->Mutex);
+								if (!req->Cv.wait_for(lock, std::chrono::seconds(10), [&] { return req->Done; }))
+								{
+									response = "{\"id\":" + std::to_string(req->Id) + ",\"seq\":" + std::to_string(req->Id)
+										+ ",\"ok\":false,\"error\":\"timeout waiting for runtime main thread\"}\n";
+								}
+								else
+								{
+									response = req->Response + "\n";
+								}
+							}
+						}
+
+						if (!SendAllSlice(client, server->Running, response))
+						{
+							alive = false;
+							break;
+						}
+					}
+				}
+				closesocket(client);
+			}
+		});
+
+		WLD_CORE_INFO("[runtime-ai] control channel listening on 127.0.0.1:{0}", port);
+#endif
+	}
+
+	void RuntimeLayer::StopAiControlServer()
+	{
+#if defined(_WIN32)
+		if (!m_AiServer)
+			return;
+		if (m_AiServer->Running.exchange(false))
+		{
+			std::deque<std::shared_ptr<RuntimeAiServerState::PendingRequest>> pending;
+			{
+				std::lock_guard<std::mutex> lock(m_AiServer->QueueMutex);
+				pending.swap(m_AiServer->Queue);
+			}
+			for (const auto& req : pending)
+			{
+				{
+					std::lock_guard<std::mutex> lock(req->Mutex);
+					if (!req->Done)
+					{
+						req->Done = true;
+						req->Response = "{\"id\":" + std::to_string(req->Id) + ",\"seq\":" + std::to_string(req->Id)
+							+ ",\"ok\":false,\"error\":\"server stopping\"}";
+					}
+				}
+				req->Cv.notify_all();
+			}
+			if (m_AiServer->ListenThread.joinable())
+				m_AiServer->ListenThread.join();
+			if (m_AiServer->ListenSocket != static_cast<uintptr_t>(~0ull))
+			{
+				closesocket(static_cast<SOCKET>(m_AiServer->ListenSocket));
+				m_AiServer->ListenSocket = static_cast<uintptr_t>(~0ull);
+			}
+		}
+		m_AiServer.reset();
+#endif
+	}
+
+	void RuntimeLayer::PumpAiControlRequests()
+	{
+		if (!m_AiServer || !m_AiServer->Running.load())
+			return;
+
+		for (;;)
+		{
+			std::shared_ptr<RuntimeAiServerState::PendingRequest> req;
+			{
+				std::lock_guard<std::mutex> lock(m_AiServer->QueueMutex);
+				if (m_AiServer->Queue.empty())
+					break;
+				req = m_AiServer->Queue.front();
+				m_AiServer->Queue.pop_front();
+			}
+
+			std::string result;
+			std::string error;
+			bool ok = false;
+			try
+			{
+				ok = ExecuteRuntimeAiCommand(req->Command, req->Args, result, error);
+			}
+			catch (const std::exception& ex)
+			{
+				ok = false;
+				error = std::string("runtime command threw: ") + ex.what();
+			}
+			catch (...)
+			{
+				ok = false;
+				error = "runtime command threw an unknown exception";
+			}
+
+			std::ostringstream out;
+			out << "{\"id\":" << req->Id << ",\"seq\":" << req->Id << ",\"ok\":" << (ok ? "true" : "false");
+			if (ok)
+				out << ",\"result\":\"" << EscapeJsonString(result) << "\"";
+			else
+				out << ",\"error\":\"" << EscapeJsonString(error) << "\"";
+			out << "}";
+
+			{
+				std::lock_guard<std::mutex> lock(req->Mutex);
+				req->Response = out.str();
+				req->Done = true;
+			}
+			req->Cv.notify_all();
+		}
+	}
+
+	bool RuntimeLayer::ExecuteRuntimeAiCommand(const std::string& cmd,
+		const std::map<std::string, std::string>& args,
+		std::string& result,
+		std::string& error)
+	{
+		auto arg = [&](const char* key, const std::string& fallback = std::string()) -> std::string
+		{
+			const auto it = args.find(key);
+			return it != args.end() ? it->second : fallback;
+		};
+
+		if (cmd == "scene.list")
+		{
+			std::ostringstream out;
+			out << "[";
+			bool first = true;
+			if (const Ref<Scene> scenePtr = m_Host.GetScene())
+			{
+				const Scene& scene = *scenePtr;
+				const entt::registry& registry = scene.GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+				{
+					if (!first)
+						out << ",";
+					first = false;
+					const std::string& tag = StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag);
+					out << "{\"handle\":" << static_cast<uint32_t>(handle)
+						<< ",\"name\":\"" << EscapeJsonString(tag) << "\"";
+					if (const auto* tr = registry.try_get<TransformComponent>(handle))
+					{
+						out << ",\"location\":[" << tr->Location.x << "," << tr->Location.y << "," << tr->Location.z << "]";
+					}
+					out << "}";
+				}
+			}
+			out << "]";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "scene.get")
+		{
+			const Ref<Scene> scenePtr = m_Host.GetScene();
+			if (!scenePtr)
+			{
+				error = "no active runtime scene";
+				return false;
+			}
+			const Scene& scene = *scenePtr;
+			const entt::registry& registry = scene.GetRegistry();
+			entt::entity target = entt::null;
+
+			if (!arg("handle").empty())
+			{
+				const auto candidate = static_cast<entt::entity>(std::strtoul(arg("handle").c_str(), nullptr, 10));
+				if (registry.valid(candidate))
+					target = candidate;
+			}
+			else if (!arg("name").empty())
+			{
+				const std::string wanted = arg("name");
+				for (auto handle : registry.view<TagComponent>())
+				{
+					if (StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == wanted)
+					{
+						target = handle;
+						break;
+					}
+				}
+			}
+
+			if (target == entt::null || !registry.valid(target))
+			{
+				error = "entity not found (specify handle or name)";
+				return false;
+			}
+
+			std::ostringstream out;
+			out << "{\"handle\":" << static_cast<uint32_t>(target);
+			if (const auto* tag = registry.try_get<TagComponent>(target))
+				out << ",\"name\":\"" << EscapeJsonString(StringPool::Get().NameOf(tag->Tag)) << "\"";
+			if (const auto* tr = registry.try_get<TransformComponent>(target))
+			{
+				const glm::vec3 loc = tr->Location;
+				const glm::vec3 rot = tr->GetEulerAngles();
+				const glm::vec3 scl = tr->Scale;
+				out << ",\"location\":[" << loc.x << "," << loc.y << "," << loc.z << "]"
+					<< ",\"rotation\":[" << rot.x << "," << rot.y << "," << rot.z << "]"
+					<< ",\"scale\":[" << scl.x << "," << scl.y << "," << scl.z << "]";
+			}
+			out << "}";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "scene.query")
+		{
+			const std::string filterName = arg("name");
+			const std::string filterComp = arg("component");
+			std::ostringstream out;
+			out << "[";
+			bool first = true;
+			if (const Ref<Scene> scenePtr = m_Host.GetScene())
+			{
+				const Scene& scene = *scenePtr;
+				const entt::registry& registry = scene.GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+				{
+					const std::string& tag = StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag);
+					if (!filterName.empty() && tag.find(filterName) == std::string::npos)
+						continue;
+					if (!filterComp.empty())
+					{
+						bool hasComp = false;
+						if (filterComp == "TagComponent" || filterComp == "Tag")
+							hasComp = registry.all_of<TagComponent>(handle);
+						else if (filterComp == "TransformComponent" || filterComp == "Transform")
+							hasComp = registry.all_of<TransformComponent>(handle);
+						else if (filterComp == "MeshRendererComponent" || filterComp == "MeshRenderer")
+							hasComp = registry.all_of<MeshRendererComponent>(handle);
+						else if (filterComp == "CameraComponent" || filterComp == "Camera")
+							hasComp = registry.all_of<CameraComponent>(handle);
+						else
+							hasComp = true;
+						if (!hasComp)
+							continue;
+					}
+					if (!first)
+						out << ",";
+					first = false;
+					out << "{\"handle\":" << static_cast<uint32_t>(handle)
+						<< ",\"name\":\"" << EscapeJsonString(tag) << "\"";
+					if (const auto* tr = registry.try_get<TransformComponent>(handle))
+					{
+						out << ",\"location\":[" << tr->Location.x << "," << tr->Location.y << "," << tr->Location.z << "]";
+					}
+					out << "}";
+				}
+			}
+			out << "]";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "prof.stats")
+		{
+			const float dt = std::max(0.0001f, m_LastFrameDeltaSeconds);
+			const float fps = 1.0f / dt;
+			const float frameMs = dt * 1000.0f;
+			size_t entityCount = 0;
+			if (const Ref<Scene> scenePtr = m_Host.GetScene())
+			{
+				const Scene& scene = *scenePtr;
+				entityCount = scene.GetRegistry().view<TagComponent>().size();
+			}
+			const auto telemetry = Profiling::Telemetry::GetStats();
+			std::ostringstream out;
+			out << "{\"fps\":" << fps
+				<< ",\"frameMs\":" << frameMs
+				<< ",\"entityCount\":" << entityCount
+				<< ",\"frameIndex\":" << telemetry.FrameIndex
+				<< ",\"p50Ms\":" << telemetry.Frame.P50Ms
+				<< ",\"p95Ms\":" << telemetry.Frame.P95Ms
+				<< ",\"jankCount\":" << telemetry.Frame.JankCount
+				<< "}";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "capture.frame" || cmd == "capture.screen" || cmd == "capture.scene")
+		{
+			const std::string rawPath = arg("path", "runtime_capture.ppm");
+			if (rawPath.empty())
+			{
+				error = "missing path parameter";
+				return false;
+			}
+			const std::filesystem::path capturePath = std::filesystem::u8path(rawPath);
+			if (capturePath.has_parent_path())
+			{
+				std::error_code ec;
+				std::filesystem::create_directories(capturePath.parent_path(), ec);
+			}
+			Renderer::RequestPresentCapture(nullptr, capturePath,
+				Application::Get().GetWindow().GetWidth(), Application::Get().GetWindow().GetHeight());
+			result = "{\"status\":\"queued\",\"path\":\"" + EscapeJsonString(capturePath.string()) + "\"}";
+			return true;
+		}
+
+		if (cmd == "playtest.run")
+		{
+			const World::Ai::PlaytestConfig cfg = World::Ai::PlaytestRunner::ParseConfig(args);
+			const World::Ai::PlaytestResult playRes = World::Ai::PlaytestRunner::Run(cfg, m_Host.GetScene().get());
+			result = playRes.ToJson();
+			if (!playRes.pass && !playRes.failures.empty())
+				error = playRes.failures.front();
+			return playRes.pass;
+		}
+
+		if (cmd == "state.dump")
+		{
+			size_t entityCount = 0;
+			if (const Ref<Scene> scenePtr = m_Host.GetScene())
+			{
+				const Scene& scene = *scenePtr;
+				entityCount = scene.GetRegistry().view<TagComponent>().size();
+			}
+			const float dt = std::max(0.0001f, m_LastFrameDeltaSeconds);
+			std::ostringstream out;
+			out << "{\"host\":\"runtime\",\"entityCount\":" << entityCount
+				<< ",\"fps\":" << (1.0f / dt)
+				<< ",\"window\":[" << Application::Get().GetWindow().GetWidth() << ","
+				<< Application::Get().GetWindow().GetHeight() << "]}";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "quit")
+		{
+			Application::Get().Close();
+			result = "closing";
+			return true;
+		}
+
+		if (World::Ai::CommandRegistry::Get().HasCommand(cmd))
+		{
+			return World::Ai::CommandRegistry::Get().Dispatch(cmd, args, result, error);
+		}
+
+		error = "unknown runtime command '" + cmd + "'";
 		return false;
 	}
 

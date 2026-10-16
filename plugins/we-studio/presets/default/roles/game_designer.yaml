@@ -4,10 +4,11 @@ tier: L3
 department: creative
 reports_to: creative_director
 kind: maker
+guide: "guides/creative_director.md"
 duties: [系统设计, 数值平衡, 规则清单, 验收断言]
 outputs: [gdd, datatable, acceptance_criteria]
 write: ["design/**", "data/**"]
-commands: [schema.*, task.*, scene.query]
+commands: ["task.*", "docs.search", "schema.*", "datatable.*", "changeset.*", "scene.list", "scene.get", "scene.query"]
 reviews: [gameplay_programmer]
 activation:
   category: mandatory

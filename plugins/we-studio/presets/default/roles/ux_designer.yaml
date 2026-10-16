@@ -4,10 +4,14 @@ tier: L3
 department: experience
 reports_to: experience_director
 kind: maker
+guide: "guides/experience_director.md"
 duties: [输入映射, 手柄触觉震动, 智能相机算法, 无障碍规范]
+outputs: [ux_designer_deliverable, experience_spec]
 write: [design/ux/**, ui/**, Input.weinput]
-commands: []
+commands: ["task.*", "docs.search", "schema.*", "datatable.*", "changeset.*", "scene.list", "scene.get", "scene.query"]
+reviews: []
 activation:
   category: mandatory
+  genres: [all]
   wake_stages: [1, 2, 3, 4, 5]
   default_state: active

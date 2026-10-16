@@ -26,7 +26,8 @@ namespace World::Ai
 		int frames = 60;
 		float fixedDeltaTime = 1.0f / 60.0f;
 		std::vector<PlaytestInputEvent> inputs;
-		std::vector<std::string> asserts; // 断言列表 (如 "entity_count > 0", "entity:Player exists")
+		std::vector<std::string> asserts; // 断言列表 (如 "entity_count > 0", "entity:Player exists", "component:TransformComponent exists", "luau:...")
+		std::vector<std::string> captures; // 帧截图或快照输出路径
 	};
 
 	struct WLD_API PlaytestResult
@@ -35,6 +36,7 @@ namespace World::Ai
 		int framesSimulated = 0;
 		std::vector<std::string> failures;
 		std::vector<std::string> logs;
+		std::vector<std::string> captures;
 		std::map<std::string, double> perf;
 
 		std::string ToJson() const;

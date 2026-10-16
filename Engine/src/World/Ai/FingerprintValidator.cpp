@@ -162,6 +162,37 @@ namespace World::Ai
 			}
 		}
 
+		// 检查指纹清单 (若存在 engine-fingerprint.sha256 账本)
+		const fs::path manifestPath = fs::current_path() / ".we" / "ai" / "engine-fingerprint.sha256";
+		if (fs::exists(manifestPath))
+		{
+			std::ifstream mf(manifestPath);
+			std::string line;
+			while (std::getline(mf, line))
+			{
+				if (line.size() < 66 || line[0] == '#') continue;
+				const std::string expectedHash = line.substr(0, 64);
+				std::string relFile = line.substr(65);
+				while (!relFile.empty() && (relFile.front() == ' ' || relFile.front() == '\t')) relFile.erase(0, 1);
+				while (!relFile.empty() && (relFile.back() == ' ' || relFile.back() == '\t' || relFile.back() == '\r')) relFile.pop_back();
+
+				const fs::path target = fs::current_path() / fs::u8path(relFile);
+				if (!fs::exists(target))
+				{
+					outViolations.push_back("MISSING: " + relFile);
+				}
+				else
+				{
+					const std::string curHash = ComputeFileSha256(target);
+					if (curHash != expectedHash)
+					{
+						outViolations.push_back("MODIFIED: " + relFile);
+					}
+				}
+			}
+		}
+
 		return outViolations.empty();
 	}
 }
+

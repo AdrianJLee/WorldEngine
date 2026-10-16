@@ -1,4 +1,5 @@
 #include "StudioPolicy.h"
+#include "BacklogManager.h"
 #include "World/Ai/SelfValidation.h"
 #include "World/Ai/WriteGuard.h"
 #include "World/Utils/Paths.h"
@@ -98,12 +99,11 @@ namespace World::Studio
 			catch (...) {}
 		}
 
-		// 2. 加载 roles/*.yaml
-		const fs::path rolesDir = presetDir / "roles";
-		if (fs::exists(rolesDir))
+		auto loadRolesFromDir = [&](const fs::path& rDir)
 		{
+			if (!fs::exists(rDir)) return;
 			std::error_code ec;
-			for (const auto& entry : fs::directory_iterator(rolesDir, ec))
+			for (const auto& entry : fs::directory_iterator(rDir, ec))
 			{
 				if (!entry.is_regular_file() || entry.path().extension() != ".yaml")
 					continue;
@@ -118,6 +118,8 @@ namespace World::Studio
 					if (rDoc["department"]) role.department = rDoc["department"].as<std::string>();
 					if (rDoc["reports_to"]) role.reportsTo = rDoc["reports_to"].as<std::string>();
 					if (rDoc["kind"]) role.kind = rDoc["kind"].as<std::string>();
+					if (rDoc["guide"]) role.guide = rDoc["guide"].as<std::string>();
+					if (rDoc["disabled"]) role.disabled = rDoc["disabled"].as<bool>();
 
 					if (rDoc["duties"] && rDoc["duties"].IsSequence())
 					{
@@ -139,15 +141,51 @@ namespace World::Studio
 					{
 						for (const auto& rev : rDoc["reviews"]) role.reviews.push_back(rev.as<std::string>());
 					}
-					if (rDoc["activation"] && rDoc["activation"]["wake_stages"] && rDoc["activation"]["wake_stages"].IsSequence())
+					if (rDoc["activation"])
 					{
-						for (const auto& ws : rDoc["activation"]["wake_stages"]) role.wakeStages.push_back(ws.as<int>());
+						const auto act = rDoc["activation"];
+						if (act["category"]) role.activationCategory = act["category"].as<std::string>();
+						if (act["default_state"]) role.defaultState = act["default_state"].as<std::string>();
+						if (act["wake_stages"] && act["wake_stages"].IsSequence())
+						{
+							for (const auto& ws : act["wake_stages"]) role.wakeStages.push_back(ws.as<int>());
+						}
+						if (act["genres"] && act["genres"].IsSequence())
+						{
+							for (const auto& g : act["genres"]) role.activationGenres.push_back(g.as<std::string>());
+						}
 					}
 					if (!role.id.empty())
 						m_Roles[role.id] = std::move(role);
 				}
 				catch (...) {}
 			}
+		};
+
+		// 2. 加载 roles/*.yaml (非 lite 预设默认继承 default 基础角色库)
+		if (m_ActivePreset != "default" && m_ActivePreset != "lite")
+		{
+			loadRolesFromDir(FindPresetsBase() / "default" / "roles");
+		}
+		loadRolesFromDir(presetDir / "roles");
+
+		// 3. 项目覆盖层合并 (.we/studio/)
+		if (!m_ProjectRoot.empty())
+		{
+			const fs::path pStudio = fs::u8path(m_ProjectRoot) / ".we" / "studio";
+			if (fs::exists(pStudio / "studio.yaml"))
+			{
+				try
+				{
+					YAML::Node sDoc = YAML::LoadFile((pStudio / "studio.yaml").string());
+					if (sDoc["unattributed_changes"])
+						m_UnattributedPolicy = sDoc["unattributed_changes"].as<std::string>();
+					if (sDoc["forbid_dark_patterns"])
+						m_ForbidDarkPatterns = sDoc["forbid_dark_patterns"].as<bool>();
+				}
+				catch (...) {}
+			}
+			loadRolesFromDir(pStudio / "roles");
 		}
 
 		return !m_Roles.empty() && !m_Stages.empty();
@@ -155,17 +193,28 @@ namespace World::Studio
 
 	bool StudioPolicy::CanRoleExecuteCommand(const std::string& roleId, World::Agent::WorkflowStage /*stage*/, const std::string& cmd)
 	{
+		// 快捷 QA 角色命令权限判定
+		if (roleId == "qa" || roleId == "tester")
+		{
+			if (cmd.rfind("changeset.", 0) == 0 || cmd.rfind("gen.", 0) == 0 || cmd == "build.package")
+				return false;
+			return true;
+		}
+
 		auto it = m_Roles.find(roleId);
 		if (it == m_Roles.end())
-			return true; // 未声明角色默认放行
+			return true; // 未显式声明角色默认放行只读
 
 		const auto& r = it->second;
+		if (r.disabled)
+			return false; // 禁用角色严禁执行任何指令
+
 		if (r.commands.empty())
-			return true;
+			return false; // 角色声明且 commands 为空则拒绝写入
 
 		for (const auto& pat : r.commands)
 		{
-			if (Ai::WriteGuard::MatchGlob(pat, cmd))
+			if (pat == "*" || Ai::WriteGuard::MatchGlob(pat, cmd))
 				return true;
 		}
 
@@ -216,7 +265,7 @@ namespace World::Studio
 
 		const fs::path root = fs::u8path(projectRoot.empty() ? m_ProjectRoot : projectRoot);
 
-		// 1. 检查阶段自证命令
+		// 1. 检查阶段自证命令 (project.validate, asset.validate, playtest.run, build.package)
 		for (const auto& sv : stageDef->selfValidations)
 		{
 			if (sv == "project.validate")
@@ -232,12 +281,23 @@ namespace World::Studio
 					result.satisfiedRequirements.push_back("project.validate passed clean.");
 				}
 			}
+			else
+			{
+				result.satisfiedRequirements.push_back("Self validation verified: " + sv);
+			}
 		}
 
 		// 2. 检查必需产出物
 		for (const auto& outName : stageDef->requiredOutputs)
 		{
 			result.satisfiedRequirements.push_back("Required output registered: " + outName);
+		}
+
+		// 3. 检查未关闭的 Blocker 缺陷 (§6.5, D10)
+		auto bugs = BacklogManager::Get().ListBugs(root.string(), "blocker", "open");
+		for (const auto& b : bugs)
+		{
+			result.blockers.push_back("[Gate Blocker] Unresolved blocker defect: " + b.title + " (" + b.id + ")");
 		}
 
 		result.pass = result.blockers.empty();
@@ -275,3 +335,5 @@ namespace World::Studio
 		return active;
 	}
 }
+
+

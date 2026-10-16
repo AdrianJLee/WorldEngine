@@ -4,10 +4,14 @@ tier: L3
 department: qa
 reports_to: qa_lead
 kind: maker
+guide: "guides/qa_lead.md"
 duties: [playtest.run断言编写, 无头回归集维护, 输入回放录制, CI冒烟门禁]
+outputs: [automation_qa_deliverable, qa_spec]
 write: [qa/tests/**, qa/replays/**]
-commands: []
+commands: ["project.validate", "asset.validate", "playtest.run", "bug.*", "review.submit", "task.list", "ui.tree", "scene.list", "scene.get", "scene.query", "prof.*"]
+reviews: []
 activation:
   category: mandatory
+  genres: [all]
   wake_stages: [2, 3, 4, 5]
   default_state: active

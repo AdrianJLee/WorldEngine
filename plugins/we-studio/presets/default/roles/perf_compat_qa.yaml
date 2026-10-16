@@ -4,10 +4,14 @@ tier: L3
 department: qa
 reports_to: qa_lead
 kind: maker
+guide: "guides/qa_lead.md"
 duties: [帧率稳定性测试, DrawCall/Bandwidth监控, 内存泄漏分析, 多档硬件压测]
+outputs: [perf_compat_qa_deliverable, qa_spec]
 write: [qa/perf/**, qa/profiles/**]
-commands: []
+commands: ["project.validate", "asset.validate", "playtest.run", "bug.*", "review.submit", "task.list", "ui.tree", "scene.list", "scene.get", "scene.query", "prof.*"]
+reviews: []
 activation:
   category: dynamic
+  genres: [all]
   wake_stages: [3, 4, 5, 6]
   default_state: active

@@ -4,10 +4,14 @@ tier: L2
 department: qa
 reports_to: producer
 kind: reviewer
+guide: "guides/qa_lead.md"
 duties: [测试策略规划, 自动化测试标准, 版本质量风险评估, 封版独立签字]
+outputs: [qa_lead_deliverable, qa_spec]
 write: [qa/**]
-commands: []
+commands: ["project.validate", "asset.validate", "playtest.run", "bug.*", "review.submit", "task.list", "ui.tree", "scene.list", "scene.get", "scene.query", "prof.*"]
+reviews: [automation_qa, gameplay_balance_qa, perf_compat_qa, netcode_security_qa, gameplay_tester]
 activation:
   category: mandatory
+  genres: [all]
   wake_stages: [2, 3, 4, 5, 6]
   default_state: active

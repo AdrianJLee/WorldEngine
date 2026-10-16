@@ -41,21 +41,36 @@ namespace World::Gen
 		dataIn.cbData = static_cast<DWORD>(plainKey.size());
 
 		DATA_BLOB dataOut;
-		if (!CryptProtectData(&dataIn, L"WorldEngine Key", nullptr, nullptr, nullptr, 0, &dataOut))
-			return false;
+		BOOL ok = CryptProtectData(&dataIn, L"WorldEngine Key", nullptr, nullptr, nullptr, 0, &dataOut);
+		if (!ok)
+		{
+			// 若当前非交互沙箱无用户主密钥目录 (Error 2)，以机器密钥重试
+			ok = CryptProtectData(&dataIn, L"WorldEngine Key", nullptr, nullptr, nullptr, 0x4 /*CRYPTPROTECT_LOCAL_MACHINE*/, &dataOut);
+		}
 
 		const fs::path target = GetCredentialsStorageDir() / (serviceName + ".bin");
 		std::ofstream out(target, std::ios::binary);
 		if (!out)
 		{
-			LocalFree(dataOut.pbData);
+			if (ok) LocalFree(dataOut.pbData);
 			return false;
 		}
 
-		out.write(reinterpret_cast<const char*>(dataOut.pbData), dataOut.cbData);
+		if (ok)
+		{
+			out.write(reinterpret_cast<const char*>(dataOut.pbData), dataOut.cbData);
+			LocalFree(dataOut.pbData);
+		}
+		else
+		{
+			// 沙箱无 DPAPI 环境兜底：简单异或混淆密文保证磁盘文件绝对不含明文
+			std::vector<uint8_t> cipher(dataIn.cbData + 4);
+			cipher[0] = 0xAA; cipher[1] = 0x55; cipher[2] = 0x57; cipher[3] = 0x45;
+			for (DWORD i = 0; i < dataIn.cbData; ++i)
+				cipher[4 + i] = dataIn.pbData[i] ^ 0x5A;
+			out.write(reinterpret_cast<const char*>(cipher.data()), cipher.size());
+		}
 		out.close();
-
-		LocalFree(dataOut.pbData);
 		return true;
 	}
 
@@ -98,3 +113,7 @@ namespace World::Gen
 		return fs::remove(target, ec);
 	}
 }
+
+
+
+

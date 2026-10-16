@@ -4,10 +4,14 @@ tier: L3
 department: publishing
 reports_to: producer
 kind: maker
+guide: "guides/experience_director.md"
 duties: [运营活动模板, 签到体系, 赛季任务, 长线留存闭环]
+outputs: [liveops_designer_deliverable, publishing_spec]
 write: [design/liveops/**, data/events/**]
-commands: []
+commands: ["task.*", "docs.search", "schema.*", "datatable.*", "changeset.*", "scene.list", "scene.get", "scene.query"]
+reviews: []
 activation:
   category: dynamic
+  genres: [multiplayer, liveops]
   wake_stages: [4, 5, 7]
   default_state: active

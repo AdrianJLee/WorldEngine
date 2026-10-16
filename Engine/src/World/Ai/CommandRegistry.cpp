@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/Ai/SelfValidation.h"
 #include "World/Ai/PlaytestRunner.h"
@@ -141,7 +141,7 @@ namespace World::Ai
 		std::string& result,
 		std::string& error)
 	{
-		CommandDescriptor::Handler handler;
+		CommandDescriptor desc;
 		{
 			std::lock_guard<std::mutex> lock(m_Mutex);
 			auto it = m_Commands.find(name);
@@ -150,16 +150,76 @@ namespace World::Ai
 				error = "unknown command '" + name + "'";
 				return false;
 			}
-			handler = it->second.handler;
+			desc = it->second;
 		}
 
-		if (!handler)
+		if (!desc.handler)
 		{
 			error = "handler not implemented for command '" + name + "'";
 			return false;
 		}
 
-		return handler(args, result, error);
+		// 会话与策略守卫
+		std::string token = args.count("session") ? args.at("session") : "";
+		if (token.empty())
+		{
+			token = Agent::WeAgentCore::Get().GetActiveSessionToken();
+		}
+
+		if (!token.empty())
+		{
+			const auto* sess = Agent::WeAgentCore::Get().GetSession(token);
+			if (sess)
+			{
+				// 1. 角色运行期状态检查 (D13)
+				const auto roleState = Agent::WeAgentCore::Get().GetRoleState(sess->roleId);
+				if (roleState != Agent::RoleRuntimeState::Active && desc.effect != CommandEffect::Read && name.rfind("session.", 0) != 0)
+				{
+					error = "Forbidden (D13): role '" + sess->roleId + "' is currently " +
+						Agent::RoleRuntimeStateToString(roleState) + "; cannot execute non-read command '" + name + "'";
+					return false;
+				}
+
+				// 2. 策略白名单检查
+				auto policy = Agent::WeAgentCore::Get().GetPolicy();
+				if (policy && desc.effect != CommandEffect::Read &&
+					name.rfind("session.", 0) != 0 &&
+					name != "workflow.status" &&
+					name != "ai.capabilities")
+				{
+					if (!policy->CanRoleExecuteCommand(sess->roleId, sess->activeStage, name))
+					{
+						error = "Forbidden by policy: role '" + sess->roleId + "' cannot execute command '" + name +
+							"' in stage " + Agent::WorkflowStageToString(sess->activeStage);
+						return false;
+					}
+				}
+
+				// 3. 写入守卫与通道写入记录
+				if (desc.effect == CommandEffect::Write)
+				{
+					std::string pathArg;
+					if (args.count("path")) pathArg = args.at("path");
+					else if (args.count("target")) pathArg = args.at("target");
+					else if (args.count("file")) pathArg = args.at("file");
+
+					if (!pathArg.empty())
+					{
+						std::string guardReason;
+						WritePermission perm;
+						perm.roleId = sess->roleId;
+						if (!WriteGuard::Get().CanWrite(pathArg, sess->projectRoot, &perm, guardReason))
+						{
+							error = guardReason;
+							return false;
+						}
+						WriteGuard::Get().RecordWrite(pathArg, sess->projectRoot, sess->roleId, sess->token);
+					}
+				}
+			}
+		}
+
+		return desc.handler(args, result, error);
 	}
 
 	std::string CommandRegistry::ExportCapabilities(const std::string& filterScope,
@@ -238,3 +298,4 @@ namespace World::Ai
 		RegisterBuiltinCommands();
 	}
 }
+

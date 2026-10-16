@@ -4,10 +4,14 @@ tier: L3
 department: experience
 reports_to: experience_director
 kind: maker
+guide: "guides/experience_director.md"
 duties: [Foley拟音, 打击音效, 环境声学, HRTF空间音频定位]
+outputs: [audio_designer_deliverable, experience_spec]
 write: [audio/sfx/**, audio/banks/**]
-commands: []
+commands: ["task.*", "docs.search", "schema.*", "datatable.*", "changeset.*", "gen.*", "asset.*"]
+reviews: []
 activation:
   category: dynamic
+  genres: [all]
   wake_stages: [2, 3, 4, 5]
   default_state: active

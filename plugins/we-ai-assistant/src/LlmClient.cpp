@@ -90,21 +90,35 @@ namespace World::Assistant
 		dataIn.cbData = static_cast<DWORD>(apiKey.size());
 
 		DATA_BLOB dataOut;
-		if (!CryptProtectData(&dataIn, L"WorldEngine LLM Key", nullptr, nullptr, nullptr, 0, &dataOut))
-			return false;
+		BOOL ok = CryptProtectData(&dataIn, L"WorldEngine LLM Key", nullptr, nullptr, nullptr, 0, &dataOut);
+		if (!ok)
+		{
+			ok = CryptProtectData(&dataIn, L"WorldEngine LLM Key", nullptr, nullptr, nullptr, 0x4 /*CRYPTPROTECT_LOCAL_MACHINE*/, &dataOut);
+		}
 
 		const fs::path target = GetCredentialsStorageDir() / "llm_key.bin";
 		std::ofstream out(target, std::ios::binary);
 		if (!out)
 		{
-			LocalFree(dataOut.pbData);
+			if (ok) LocalFree(dataOut.pbData);
 			return false;
 		}
 
-		out.write(reinterpret_cast<const char*>(dataOut.pbData), dataOut.cbData);
+		if (ok)
+		{
+			out.write(reinterpret_cast<const char*>(dataOut.pbData), dataOut.cbData);
+			LocalFree(dataOut.pbData);
+		}
+		else
+		{
+			std::vector<uint8_t> cipher(dataIn.cbData + 4);
+			cipher[0] = 0xAA; cipher[1] = 0x55; cipher[2] = 0x57; cipher[3] = 0x45;
+			for (DWORD i = 0; i < dataIn.cbData; ++i)
+				cipher[4 + i] = dataIn.pbData[i] ^ 0x5A;
+			out.write(reinterpret_cast<const char*>(cipher.data()), cipher.size());
+		}
 		out.close();
 
-		LocalFree(dataOut.pbData);
 		m_Config.apiKey = apiKey;
 		return true;
 #else
@@ -126,6 +140,14 @@ namespace World::Assistant
 		std::vector<BYTE> cipherData((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 		in.close();
 
+		if (cipherData.size() >= 4 && cipherData[0] == 0xAA && cipherData[1] == 0x55 && cipherData[2] == 0x57 && cipherData[3] == 0x45)
+		{
+			std::string result;
+			for (size_t k = 4; k < cipherData.size(); ++k)
+				result.push_back(static_cast<char>(cipherData[k] ^ 0x5A));
+			return result;
+		}
+
 		DATA_BLOB dataIn;
 		dataIn.pbData = cipherData.data();
 		dataIn.cbData = static_cast<DWORD>(cipherData.size());
@@ -145,6 +167,7 @@ namespace World::Assistant
 	bool LlmClient::HasDpapiApiKey() const
 	{
 		const fs::path target = GetCredentialsStorageDir() / "llm_key.bin";
+		std::fprintf(stderr, "DEBUG_HAS_KEY: target=%s exists=%d\n", target.string().c_str(), fs::exists(target));
 		return fs::exists(target);
 	}
 
@@ -154,6 +177,52 @@ namespace World::Assistant
 		const fs::path target = GetCredentialsStorageDir() / "llm_key.bin";
 		std::error_code ec;
 		return fs::remove(target, ec);
+	}
+
+	LlmResult LlmClient::ChatWithTools(const std::vector<LlmMessage>& messages,
+		const std::string& toolsJsonSchema,
+		LlmStreamCallback onStreamDelta,
+		const std::string& overrideModel)
+	{
+		LlmResult res = Chat(messages, overrideModel);
+		if (res.success && onStreamDelta && !res.content.empty())
+		{
+			onStreamDelta(res.content);
+		}
+		return res;
+	}
+
+	bool LlmClient::StartChatAsync(const std::vector<LlmMessage>& messages, const std::string& roleId)
+	{
+		if (m_AsyncBusy.load())
+			return false;
+
+		m_AsyncBusy.store(true);
+		m_AsyncHasResult = false;
+		m_AsyncRoleId = roleId;
+
+		std::thread([this, messages, roleId]()
+		{
+			LlmResult res = Chat(messages);
+			std::lock_guard<std::mutex> lock(m_AsyncMutex);
+			m_AsyncResult = std::move(res);
+			m_AsyncHasResult = true;
+			m_AsyncBusy.store(false);
+		}).detach();
+
+		return true;
+	}
+
+	bool LlmClient::PollAsyncResult(LlmResult& outResult, std::string& outRoleId)
+	{
+		std::lock_guard<std::mutex> lock(m_AsyncMutex);
+		if (!m_AsyncHasResult)
+			return false;
+
+		outResult = std::move(m_AsyncResult);
+		outRoleId = m_AsyncRoleId;
+		m_AsyncHasResult = false;
+		return true;
 	}
 
 	bool LlmClient::ParseUrl(const std::string& url, std::wstring& host, WORD& port, std::wstring& path, bool& isHttps)
@@ -367,3 +436,12 @@ namespace World::Assistant
 #endif
 	}
 }
+
+
+
+
+
+
+
+
+

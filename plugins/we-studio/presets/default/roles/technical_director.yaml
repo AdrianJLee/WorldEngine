@@ -4,10 +4,14 @@ tier: L2
 department: tech
 reports_to: producer
 kind: maker+reviewer
+guide: "guides/technical_director.md"
 duties: [架构选型, 技术方案论证, 接口解耦, 技术债审查]
+outputs: [technical_director_deliverable, tech_spec]
 write: [scripts/core/**, config/**]
-commands: []
+commands: ["*"]
+reviews: [gameplay_programmer, ai_programmer, physics_anim_programmer, network_programmer, engine_programmer, graphics_programmer, streaming_programmer, tools_programmer]
 activation:
   category: mandatory
+  genres: [all]
   wake_stages: [0, 1, 2, 3, 4, 5]
   default_state: active

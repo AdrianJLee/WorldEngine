@@ -4,10 +4,14 @@ tier: L3
 department: creative
 reports_to: creative_director
 kind: maker
+guide: "guides/creative_director.md"
 duties: [战斗循环, 连招与手感, 判定框与帧数据, 动作混合与打击感]
+outputs: [combat_designer_deliverable, creative_spec]
 write: [design/combat/**, data/combat/**]
-commands: []
+commands: ["task.*", "docs.search", "schema.*", "datatable.*", "changeset.*", "scene.list", "scene.get", "scene.query"]
+reviews: []
 activation:
   category: dynamic
+  genres: [all]
   wake_stages: [2, 3, 4, 5]
   default_state: active

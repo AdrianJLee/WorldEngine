@@ -18,6 +18,8 @@ namespace World::Ai
 		bool wasCreated = false;  // 原文件是否不存在（即为新创建文件）
 		std::string hashBefore;
 		std::string hashAfter;
+		std::string contentBefore;
+		std::string contentAfter;
 	};
 
 	struct WLD_API Changeset
@@ -59,6 +61,9 @@ namespace World::Ai
 		bool RevertChangeset(const std::string& changesetId,
 			const std::string& projectRoot,
 			std::string& outError);
+
+		// 生成变更集可读 Unified Diff 预览
+		std::string GetChangesetDiff(const std::string& changesetId) const;
 
 		// 获取变更集详情
 		const Changeset* GetChangeset(const std::string& changesetId) const;

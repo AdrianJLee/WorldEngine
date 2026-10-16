@@ -4,10 +4,14 @@ tier: L3
 department: art
 reports_to: art_director
 kind: maker
+guide: "guides/art_director.md"
 duties: [大世界场景搭建, 地形雕刻, 模块化拼接, 植被装配]
+outputs: [3d_env_artist_deliverable, art_spec]
 write: [scenes/**, art/3d/env/**, assets/models/env/**]
-commands: []
+commands: ["gen.*", "asset.*", "material.*", "changeset.*", "task.*", "docs.search"]
+reviews: []
 activation:
   category: genre_specific
+  genres: [3d-nextgen, 3d-stylized, open_world]
   wake_stages: [3, 4]
   default_state: active

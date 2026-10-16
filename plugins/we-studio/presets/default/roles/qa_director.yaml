@@ -4,11 +4,12 @@ tier: L2
 department: qa
 reports_to: producer
 kind: reviewer
+guide: "guides/qa_lead.md"
 duties: [门禁准入判定, 冒烟与回归方案, 缺陷评级裁决]
 outputs: [test_plan, gate_signoff, zero_blocker_report]
 write: ["qa/**", "docs/qa/**"]
-commands: [gate.*, task.*, bug.*, playtest.*, project.validate, asset.validate]
-reviews: [gameplay_programmer, game_designer]
+commands: ["project.validate", "asset.validate", "playtest.run", "bug.*", "review.submit", "task.list", "ui.tree", "scene.list", "scene.get", "scene.query", "prof.*"]
+reviews: [gameplay_programmer, game_designer, gameplay_tester, automation_qa]
 activation:
   category: mandatory
   genres: [all]

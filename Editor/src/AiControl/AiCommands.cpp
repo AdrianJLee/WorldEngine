@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Core/StringPool.h"
 
 #include "App/EditorLayer.h"
@@ -1067,8 +1067,15 @@ namespace World
 		return out.str();
 	}
 
-		void EditorLayer::EnsureAiCommandsRegistered()
+	namespace
 	{
+		thread_local bool s_InEditorCommandDispatch = false;
+		EditorLayer* s_ActiveEditorLayer = nullptr;
+	}
+
+	void EditorLayer::EnsureAiCommandsRegistered()
+	{
+		s_ActiveEditorLayer = this;
 		static bool s_Registered = false;
 		if (s_Registered)
 			return;
@@ -1088,6 +1095,26 @@ namespace World
 			d.owner = "engine";
 			d.paramsSchema = paramsSchema;
 			d.resultSchema = resultSchema;
+			d.handler = [name](const std::map<std::string, std::string>& cmdArgs,
+				std::string& outResult, std::string& outError) -> bool
+			{
+				if (!s_ActiveEditorLayer)
+				{
+					outError = "editor layer is not active";
+					return false;
+				}
+				if (s_InEditorCommandDispatch)
+				{
+					outError = "re-entrant editor command dispatch blocked for '" + name + "'";
+					return false;
+				}
+				struct ScopedEditorDispatchGuard
+				{
+					ScopedEditorDispatchGuard() { s_InEditorCommandDispatch = true; }
+					~ScopedEditorDispatchGuard() { s_InEditorCommandDispatch = false; }
+				} guard;
+				return s_ActiveEditorLayer->ExecuteAiCommand(name, cmdArgs, outResult, outError);
+			};
 			reg.RegisterCommand(std::move(d));
 		};
 
@@ -4055,6 +4082,58 @@ namespace World
 			}
 			result = "replayed executed=" + std::to_string(executed) + " skipped=" + std::to_string(skipped);
 			return true;
+		}
+		if (cmd == "scene.query")
+		{
+			const std::string filterName = arg("name");
+			const std::string filterComp = arg("component");
+			std::ostringstream out;
+			out << "[";
+			bool first = true;
+			if (m_ActiveScene)
+			{
+				const Scene& scene = *m_ActiveScene;
+				const entt::registry& registry = scene.GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+				{
+					const std::string& tag = StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag);
+					if (!filterName.empty() && tag.find(filterName) == std::string::npos)
+						continue;
+					if (!filterComp.empty())
+					{
+						bool hasComp = false;
+						if (filterComp == "TagComponent" || filterComp == "Tag")
+							hasComp = registry.all_of<TagComponent>(handle);
+						else if (filterComp == "TransformComponent" || filterComp == "Transform")
+							hasComp = registry.all_of<TransformComponent>(handle);
+						else if (filterComp == "MeshRendererComponent" || filterComp == "MeshRenderer")
+							hasComp = registry.all_of<MeshRendererComponent>(handle);
+						else if (filterComp == "CameraComponent" || filterComp == "Camera")
+							hasComp = registry.all_of<CameraComponent>(handle);
+						else
+							hasComp = true;
+						if (!hasComp)
+							continue;
+					}
+					if (!first)
+						out << ",";
+					first = false;
+					out << "{\"handle\":" << static_cast<uint32_t>(handle)
+						<< ",\"name\":\"" << JsonEscape(tag) << "\"";
+					if (const auto* tr = registry.try_get<TransformComponent>(handle))
+					{
+						out << ",\"location\":[" << tr->Location.x << "," << tr->Location.y << "," << tr->Location.z << "]";
+					}
+					out << "}";
+				}
+			}
+			out << "]";
+			result = out.str();
+			return true;
+		}
+		if (!s_InEditorCommandDispatch && World::Ai::CommandRegistry::Get().HasCommand(cmd))
+		{
+			return World::Ai::CommandRegistry::Get().Dispatch(cmd, args, result, error);
 		}
 		error = "unknown command '" + cmd + "'";
 		return false;

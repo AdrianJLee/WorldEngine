@@ -1,4 +1,5 @@
 #include "World/Audio/AudioSystem.h"
+#include "World/Agent/WeAgentCore.h"
 #include "EditorLayer_Internal.h"
 #include "World/Platform/Windows/WindowsIme.h"
 
@@ -213,6 +214,8 @@ void EditorLayer::ProcessPluginReloadRequests(){
 
 void EditorLayer::OnAttach(){
 		WLD_TRACE_FUNCTION();
+		World::Agent::WeAgentCore::Get().SetProjectRoot(Paths::ProjectDir().string());
+		EnsureAiCommandsRegistered();
 		// AI 控制通道:只有显式 --ai-control=<port> 时才监听(默认关闭,零行为变化)。
 		if (const int aiPort = Editor::AiControlPort(); aiPort > 0)
 		{

@@ -4,10 +4,14 @@ tier: L3
 department: art
 reports_to: art_director
 kind: maker
+guide: "guides/art_director.md"
 duties: [原画设计, 概念图, 情绪板Moodboard, 色彩脚本]
+outputs: [concept_artist_deliverable, art_spec]
 write: [art/concept/**, design/art-bible/**]
-commands: []
+commands: ["gen.*", "asset.*", "material.*", "changeset.*", "task.*", "docs.search"]
+reviews: []
 activation:
   category: phased
+  genres: [all]
   wake_stages: [0, 1, 2]
   default_state: active

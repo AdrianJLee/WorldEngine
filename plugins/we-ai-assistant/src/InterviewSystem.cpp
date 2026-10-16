@@ -118,22 +118,25 @@ namespace World::Assistant
 		if (!fs::exists(root))
 			return false;
 
-		// 1. 沉淀进 taste.yaml
-		const fs::path tastePath = root / "taste.yaml";
-		std::ofstream tf(tastePath, std::ios::app);
-		if (tf)
-		{
-			tf << questionId << ": \"" << optionId << "\"\n";
-		}
+		std::error_code ec;
+		fs::create_directories(root / ".we" / "studio", ec);
 
-		// 2. 沉淀进 assumptions.md
-		const fs::path assumptionsPath = root / "assumptions.md";
-		std::ofstream af(assumptionsPath, std::ios::app);
-		if (af)
-		{
-			const auto now = std::chrono::system_clock::now().time_since_epoch().count();
-			af << "- **[Assumption " << now << "]** `" << questionId << "`: Selected `" << optionId << "`.\n";
-		}
+		// 1. 沉淀进 taste.yaml (同时写入规范目录 .we/studio/ 与项目根目录以确保完全兼容)
+		auto writeTaste = [&](const fs::path& p) {
+			std::ofstream tf(p, std::ios::app);
+			if (tf) tf << questionId << ": \"" << optionId << "\"\n";
+		};
+		writeTaste(root / "taste.yaml");
+		writeTaste(root / ".we" / "studio" / "taste.yaml");
+
+		// 2. 沉淀进 assumptions.md (同时写入规范目录 .we/studio/ 与项目根目录)
+		const auto now = std::chrono::system_clock::now().time_since_epoch().count();
+		auto writeAssumptions = [&](const fs::path& p) {
+			std::ofstream af(p, std::ios::app);
+			if (af) af << "- **[Assumption " << now << "]** `" << questionId << "`: Selected `" << optionId << "`.\n";
+		};
+		writeAssumptions(root / "assumptions.md");
+		writeAssumptions(root / ".we" / "studio" / "assumptions.md");
 
 		return true;
 	}
@@ -141,11 +144,13 @@ namespace World::Assistant
 	std::string InterviewSystem::GetTasteProfile(const std::string& projectRoot) const
 	{
 		const fs::path root = fs::u8path(projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot);
-		const fs::path tastePath = root / "taste.yaml";
+		const fs::path tasteStd = root / ".we" / "studio" / "taste.yaml";
+		const fs::path tasteRoot = root / "taste.yaml";
 
-		if (fs::exists(tastePath))
+		const fs::path target = fs::exists(tasteStd) ? tasteStd : (fs::exists(tasteRoot) ? tasteRoot : fs::path());
+		if (!target.empty())
 		{
-			std::ifstream f(tastePath);
+			std::ifstream f(target);
 			return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 		}
 		return "taste_profile: default\n";
@@ -222,3 +227,4 @@ namespace World::Assistant
 		reg.RegisterCommand(std::move(tasteCmd));
 	}
 }
+

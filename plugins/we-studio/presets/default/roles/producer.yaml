@@ -4,10 +4,14 @@ tier: L1
 department: management
 reports_to: publisher
 kind: host
+guide: "guides/producer.md"
 duties: [访谈立项, 阶段推进, 职能开关裁决, 部门协调, 汇报与风险预警]
+outputs: [producer_deliverable, management_spec]
 write: [production/**, .we/studio/backlog/**]
-commands: []
+commands: ["*"]
+reviews: [creative_director, art_director, experience_director, technical_director, tech_director, qa_lead, qa_director]
 activation:
   category: mandatory
+  genres: [all]
   wake_stages: [0, 1, 2, 3, 4, 5, 6, 7]
   default_state: active

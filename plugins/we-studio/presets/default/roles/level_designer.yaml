@@ -4,10 +4,14 @@ tier: L3
 department: creative
 reports_to: creative_director
 kind: maker
+guide: "guides/creative_director.md"
 duties: [关卡节奏, 空间引导, 难度心流, 场景灰盒白模, 视线诱导]
+outputs: [level_designer_deliverable, creative_spec]
 write: [scenes/**, design/levels/**]
-commands: []
+commands: ["task.*", "docs.search", "schema.*", "datatable.*", "changeset.*", "scene.list", "scene.get", "scene.query"]
+reviews: []
 activation:
   category: dynamic
+  genres: [all]
   wake_stages: [2, 3, 4, 5]
   default_state: active

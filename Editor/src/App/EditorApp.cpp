@@ -116,6 +116,7 @@ namespace World
 		//   注意 `-scene` 不算辅助参数:渲染后端切换的重启命令带它,必须继续进编辑器形态。
 		bool launcherFlag = false;
 		bool editorIntent = false;
+		bool headlessMode = false;
 		for (const std::string& argument : arguments)
 		{
 			if (argument == "--launcher")
@@ -123,15 +124,30 @@ namespace World
 				launcherFlag = true;
 				continue;
 			}
-			if (argument.rfind("--ai-control=", 0) == 0)
+			if (argument == "--headless")
+			{
+				headlessMode = true;
+				editorIntent = true;
+				continue;
+			}
+			if (argument.rfind("--ai-control=", 0) == 0 || argument == "--ai-control")
 				continue;   // 自动化辅助参数:不改变"启动器形态"的判定
 			editorIntent = true;
 		}
-		const bool launcherMode = !projectExplicit && (launcherFlag || !editorIntent);
+		if (headlessMode)
+		{
+			_putenv_s("WLD_HEADLESS", "1");
+		}
+		const bool launcherMode = !projectExplicit && !headlessMode && (launcherFlag || !editorIntent);
 		// 注意:不能写成 `i + 1 < size` 的配对循环 —— `--ai-control=` 这类**自带数值**的
 		// 单个参数会让循环体一次都不执行(实测:通道端口永远是 0,脚本连不上)。
 		for (size_t i = 0; i < arguments.size(); ++i)
 		{
+			if (arguments[i] == "--headless")
+			{
+				_putenv_s("WLD_HEADLESS", "1");
+				continue;
+			}
 			// 渲染后端切换后的自动重启会把当前场景带回来。
 			if (arguments[i] == "-scene" && i + 1 < arguments.size())
 			{
@@ -142,6 +158,14 @@ namespace World
 			if (arguments[i].rfind("--ai-control=", 0) == 0)
 			{
 				World::Editor::SetAiControlPort(std::atoi(arguments[i].c_str() + std::strlen("--ai-control=")));
+				continue;
+			}
+			if (arguments[i] == "--ai-control")
+			{
+				if (i + 1 < arguments.size() && !arguments[i + 1].empty() && arguments[i + 1][0] >= '0' && arguments[i + 1][0] <= '9')
+					World::Editor::SetAiControlPort(std::atoi(arguments[++i].c_str()));
+				else
+					World::Editor::SetAiControlPort(8089);
 				continue;
 			}
 			// P1b D5:无窗口 glTF 导入 —— `--import-gltf <file> [--out <dir>] [--logical <dir>]`。
@@ -254,6 +278,11 @@ namespace World
 			}
 			std::fprintf(stderr, "[cook] FAILED: %s\n", cooked.Error.c_str());
 			std::exit(1);
+		}
+
+		if (headlessMode && World::Editor::AiControlPort() <= 0)
+		{
+			World::Editor::SetAiControlPort(8089);
 		}
 
 		// P4-UX1:编辑器偏好(用户级)必须在 EditorShell 构造之前装载 —— 面板标题/主题/字号

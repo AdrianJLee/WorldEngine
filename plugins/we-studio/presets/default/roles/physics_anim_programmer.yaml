@@ -4,10 +4,14 @@ tier: L3
 department: tech
 reports_to: technical_director
 kind: maker
+guide: "guides/technical_director.md"
 duties: [动画混合, 反向动力学IK, 布娃娃Ragdoll, 刚体约束, 布料模拟]
+outputs: [physics_anim_programmer_deliverable, tech_spec]
 write: [scripts/physics/**, scripts/anim/**]
-commands: []
+commands: ["schema.*", "api.luau_stubs", "project.validate", "playtest.run", "build.package", "changeset.*", "scene.*", "engine.request_change", "task.*", "docs.search"]
+reviews: []
 activation:
   category: dynamic
+  genres: [all]
   wake_stages: [2, 3, 4]
   default_state: active
