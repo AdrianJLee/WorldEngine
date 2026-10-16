@@ -2179,6 +2179,139 @@ set_tests_properties(World.AiAssistant PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+# M1: 物理材质资产系统 (.wphysmat) 单元测试
+add_executable(WorldPhysicsMaterialTests World/PhysicsMaterialTests.cpp)
+target_link_libraries(WorldPhysicsMaterialTests PRIVATE World)
+target_compile_features(WorldPhysicsMaterialTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldPhysicsMaterialTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldPhysicsMaterialTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldPhysicsMaterialTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.PhysicsMaterial COMMAND WorldPhysicsMaterialTests)
+set_tests_properties(World.PhysicsMaterial PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+# M1: 统一空间几何探测 (Raycast, SphereCast, Overlap) 单元测试
+add_executable(WorldPhysicsQueryTests World/PhysicsQueryTests.cpp)
+target_link_libraries(WorldPhysicsQueryTests PRIVATE World)
+target_compile_features(WorldPhysicsQueryTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldPhysicsQueryTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldPhysicsQueryTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldPhysicsQueryTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.PhysicsQuery COMMAND WorldPhysicsQueryTests)
+set_tests_properties(World.PhysicsQuery PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+# M1: 运动学角色控制器 (KCC / Move-and-Slide / Coyote / JumpBuffer / Slope) 单元测试
+add_executable(WorldCharacterControllerTests World/CharacterControllerTests.cpp)
+target_link_libraries(WorldCharacterControllerTests PRIVATE World)
+target_compile_features(WorldCharacterControllerTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldCharacterControllerTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldCharacterControllerTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldCharacterControllerTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.CharacterController COMMAND WorldCharacterControllerTests)
+set_tests_properties(World.CharacterController PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+# M1: Luau 物理服务绑定 (Physics.*) 单元测试
+add_executable(WorldPhysicsScriptTests World/PhysicsScriptTests.cpp)
+target_link_libraries(WorldPhysicsScriptTests PRIVATE World)
+target_compile_features(WorldPhysicsScriptTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldPhysicsScriptTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldPhysicsScriptTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldPhysicsScriptTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.PhysicsScript COMMAND WorldPhysicsScriptTests)
+set_tests_properties(World.PhysicsScript PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+# M2: Luau 摄像机与后处理服务绑定 (Camera.* / PostProcess.*) 单元测试
+add_executable(WorldCameraPostProcessScriptTests World/CameraPostProcessScriptTests.cpp)
+target_link_libraries(WorldCameraPostProcessScriptTests PRIVATE World)
+target_compile_features(WorldCameraPostProcessScriptTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldCameraPostProcessScriptTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldCameraPostProcessScriptTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldCameraPostProcessScriptTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.CameraPostProcessScript COMMAND WorldCameraPostProcessScriptTests)
+set_tests_properties(World.CameraPostProcessScript PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+# M2: C++ 虚拟相机单元测试
+add_executable(WorldVirtualCameraTests World/VirtualCameraTests.cpp)
+target_link_libraries(WorldVirtualCameraTests PRIVATE World)
+target_compile_features(WorldVirtualCameraTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldVirtualCameraTests PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+if(WIN32)
+    target_compile_definitions(WorldVirtualCameraTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldVirtualCameraTests PRIVATE /utf-8)
+endif()
+add_test(NAME World.VirtualCamera COMMAND WorldVirtualCameraTests)
+set_tests_properties(World.VirtualCamera PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 90)
+
+# M2: C++ 全屏后处理单元测试
+add_executable(WorldPostProcessTests World/PostProcessTests.cpp)
+target_link_libraries(WorldPostProcessTests PRIVATE World)
+target_compile_features(WorldPostProcessTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldPostProcessTests PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+if(WIN32)
+    target_compile_definitions(WorldPostProcessTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldPostProcessTests PRIVATE /utf-8)
+endif()
+add_test(NAME World.PostProcess COMMAND WorldPostProcessTests)
+set_tests_properties(World.PostProcess PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 90)
+
 add_custom_target(WeCopyRuntimeDllForTests
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:World>"
@@ -2187,7 +2320,7 @@ add_custom_target(WeCopyRuntimeDllForTests
     VERBATIM
 )
 
-foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldLevelStreamingTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests WorldUiDocumentTests WorldUiPaintTests WorldUiNavInputTests WorldUiBindAnimTests WorldUiWorldTests WorldUiScrollTests WorldUiPointerGateTests WorldUiInputInteractTests WorldUiThemeTests WorldUiBindingSourcesTests WorldUiPropertyCoverageTests WorldUiHotReloadTests WorldAudioTests WorldTextureAtlasTests WorldSpriteAnimationTests WorldTilemapTests WorldParallaxAndPixelCameraTests WorldPhysics2DExtensionsTests WorldTilemapAdvancedTests WorldLighting2DTests WorldAiCommandTests WorldAiSelfValidationTests WorldAiPlaytestTests WorldAiWriteGuardTests WorldAiAgentCoreTests WorldAiMcpBridgeTests WorldAiStudioTests WorldAiGenTests WorldAiAssistantTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldLevelStreamingTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests WorldUiDocumentTests WorldUiPaintTests WorldUiNavInputTests WorldUiBindAnimTests WorldUiWorldTests WorldUiScrollTests WorldUiPointerGateTests WorldUiInputInteractTests WorldUiThemeTests WorldUiBindingSourcesTests WorldUiPropertyCoverageTests WorldUiHotReloadTests WorldAudioTests WorldTextureAtlasTests WorldSpriteAnimationTests WorldTilemapTests WorldParallaxAndPixelCameraTests WorldPhysics2DExtensionsTests WorldTilemapAdvancedTests WorldLighting2DTests WorldAiCommandTests WorldAiSelfValidationTests WorldAiPlaytestTests WorldAiWriteGuardTests WorldAiAgentCoreTests WorldAiMcpBridgeTests WorldAiStudioTests WorldAiGenTests WorldAiAssistantTests WorldPhysicsMaterialTests WorldPhysicsQueryTests WorldCharacterControllerTests WorldPhysicsScriptTests WorldCameraPostProcessScriptTests WorldVirtualCameraTests WorldPostProcessTests ${_we_optional_test_targets})
     add_dependencies(${_we_test_target} WeCopyRuntimeDllForTests)
 endforeach()
 

@@ -1704,4 +1704,170 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	enum class PhysMatCombineMode : uint8_t
+	{
+		Average = 0,
+		Minimum = 1,
+		Multiply = 2,
+		Maximum = 3
+	};
+	WE_ENUM_SCHEMA(World, PhysMatCombineMode, UInt8)
+		WE_ENUM_VALUE(Average);
+		WE_ENUM_VALUE(Minimum);
+		WE_ENUM_VALUE(Multiply);
+		WE_ENUM_VALUE(Maximum);
+	WE_ENUM_END
+
+	struct PhysicsMaterialComponent
+	{
+		float Friction = 0.5f;
+		float Restitution = 0.0f;
+		PhysMatCombineMode FrictionCombine = PhysMatCombineMode::Average;
+		PhysMatCombineMode RestitutionCombine = PhysMatCombineMode::Average;
+		uint8_t _Padding[6] { 0, 0, 0, 0, 0, 0 };
+
+		PhysicsMaterialComponent() = default;
+
+		WE_SCHEMA_BODY(World, PhysicsMaterialComponent, Component)
+			WE_SCHEMA_META(Category("Physics"),
+				Doc("Physics Material properties for friction, bounciness and combine algorithms."))
+			WE_FIELD(Friction, Float, Range(0.0f, 2.0f),
+				Doc("Surface friction coefficient."));
+			WE_FIELD(Restitution, Float, Range(0.0f, 1.0f),
+				Doc("Surface elasticity / bounciness coefficient."));
+			WE_FIELD(FrictionCombine, Enum, Of(PhysMatCombineMode),
+				Doc("Friction combine mode when contacting another surface."));
+			WE_FIELD(RestitutionCombine, Enum, Of(PhysMatCombineMode),
+				Doc("Restitution combine mode when contacting another surface."));
+		WE_SCHEMA_END
+	};
+
+	struct CharacterControllerComponent
+	{
+		glm::vec3 Velocity { 0.0f };             // 12B
+
+		float StepOffset = 0.3f;                 // 4B
+		float SlopeLimitDeg = 45.0f;             // 4B
+		float SkinWidth = 0.02f;                 // 4B
+		float CoyoteDuration = 0.12f;            // 4B
+		float JumpBufferDuration = 0.10f;        // 4B
+		float CoyoteTimer = 0.0f;                // 4B
+		float JumpBufferTimer = 0.0f;            // 4B
+		float GravityScale = 1.0f;               // 4B
+		uint8_t Grounded = 0;                    // 1B
+		uint8_t IsSliding = 0;                   // 1B
+		uint8_t LockZPlane = 0;                  // 1B
+		uint8_t CollisionFlags = 0;              // 1B
+		uint32_t CollisionMask = 0xFFFFFFFF;     // 4B
+		uint32_t CollisionLayer = 1;             // 4B
+		uint8_t _Padding[8] { 0 };               // 8B
+
+		CharacterControllerComponent() = default;
+
+		WE_SCHEMA_BODY(World, CharacterControllerComponent, Component)
+			WE_SCHEMA_META(Category("Physics"),
+				Doc("Kinematic Character Controller for unified 2D and 3D Move-and-Slide, slope limiting, and jump buffering."))
+			WE_FIELD(Velocity, Vec3,
+				Doc("Current movement velocity."));
+			WE_FIELD(StepOffset, Float, Range(0.0f, 1.0f),
+				Doc("Maximum vertical step-up obstacle height."));
+			WE_FIELD(SlopeLimitDeg, Float, Range(0.0f, 89.0f),
+				Doc("Maximum walkable slope angle in degrees."));
+			WE_FIELD(SkinWidth, Float, Range(0.001f, 0.1f),
+				Doc("Small margin outward to prevent collision tunneling."));
+			WE_FIELD(CoyoteDuration, Float, Range(0.0f, 0.5f),
+				Doc("Coyote time window (seconds) allowing jumping after leaving a ledge."));
+			WE_FIELD(JumpBufferDuration, Float, Range(0.0f, 0.5f),
+				Doc("Jump buffer window (seconds) queuing jump requests before landing."));
+			WE_FIELD(GravityScale, Float, Range(0.0f, 5.0f),
+				Doc("Gravity scale factor."));
+			WE_FIELD(Grounded, Bool,
+				Doc("True if currently standing firmly on the ground."));
+			WE_FIELD(IsSliding, Bool,
+				Doc("True if currently sliding down a steep slope exceeding SlopeLimitDeg."));
+			WE_FIELD(LockZPlane, Bool,
+				Doc("True if movement is constrained to 2D XY plane."));
+		WE_SCHEMA_END
+	};
+
+	struct VirtualCameraComponent
+	{
+		glm::vec3 FollowOffset { 0.0f, 0.0f, 10.0f };   // 12B
+		glm::vec3 Damping { 0.1f, 0.1f, 0.1f };          // 12B
+		glm::vec2 DeadZone { 0.1f, 0.1f };              // 8B
+		float LookaheadTime = 0.0f;                     // 4B
+		float ScreenShakeTrauma = 0.0f;                 // 4B
+		float ScreenShakeFrequency = 15.0f;             // 4B
+		float ScreenShakeDecay = 1.0f;                  // 4B
+		int32_t Priority = 10;                          // 4B
+		uint32_t FollowTarget = 0;                      // 4B
+		uint16_t Flags = 1;                             // 2B (bit 0: Active, bit 1: Confine, bit 2: LockZ)
+		uint8_t _Padding[6] { 0 };                      // 6B
+
+		VirtualCameraComponent() = default;
+
+		WE_SCHEMA_BODY(World, VirtualCameraComponent, Component)
+			WE_SCHEMA_META(Category("Camera"),
+				Doc("Cinemachine-style virtual camera for smooth target tracking, deadzone, lookahead, and screen shake."))
+			WE_FIELD(FollowOffset, Vec3,
+				Doc("Offset from target position."));
+			WE_FIELD(Damping, Vec3,
+				Doc("Smooth damping factor for tracking."));
+			WE_FIELD(DeadZone, Vec2,
+				Doc("Normalized screen-space deadzone half-extents."));
+			WE_FIELD(LookaheadTime, Float, Range(0.0f, 2.0f),
+				Doc("Target velocity lookahead prediction time in seconds."));
+			WE_FIELD(ScreenShakeTrauma, Float, Range(0.0f, 1.0f),
+				Doc("Current screen shake trauma value [0, 1]."));
+			WE_FIELD(ScreenShakeFrequency, Float, Range(1.0f, 50.0f),
+				Doc("Screen shake frequency in Hz."));
+			WE_FIELD(ScreenShakeDecay, Float, Range(0.1f, 10.0f),
+				Doc("Rate at which trauma decays per second."));
+			WE_FIELD(Priority, Int32,
+				Doc("Virtual camera activation priority."));
+		WE_SCHEMA_END
+	};
+
+	struct PostProcessComponent
+	{
+		glm::vec4 OutlineColor { 1.0f, 1.0f, 0.0f, 1.0f }; // 16B
+		float FlashWhiteIntensity = 0.0f;                  // 4B
+		float FlashWhiteDecay = 5.0f;                      // 4B
+		float OutlineWidth = 0.0f;                         // 4B
+		float DissolveProgress = 0.0f;                     // 4B
+		float BloomIntensity = 0.0f;                       // 4B
+		float BloomThreshold = 1.0f;                       // 4B
+		float VignetteIntensity = 0.0f;                    // 4B
+		float ChromaticAberration = 0.0f;                  // 4B
+		uint8_t Enabled = 1;                               // 1B
+		uint8_t LutEnabled = 0;                            // 1B
+		uint8_t _Padding[6] { 0 };                        // 10B
+
+		PostProcessComponent() = default;
+
+		WE_SCHEMA_BODY(World, PostProcessComponent, Component)
+			WE_SCHEMA_META(Category("Rendering"),
+				Doc("Fullscreen post-processing volume settings: hit flash, outline, dissolve, bloom, and color grading."))
+			WE_FIELD(OutlineColor, Vec4,
+				Doc("Outline silhouette edge color."));
+			WE_FIELD(FlashWhiteIntensity, Float, Range(0.0f, 1.0f),
+				Doc("Flash-white hit reaction intensity."));
+			WE_FIELD(FlashWhiteDecay, Float, Range(0.1f, 20.0f),
+				Doc("Flash-white decay speed per second."));
+			WE_FIELD(OutlineWidth, Float, Range(0.0f, 10.0f),
+				Doc("Silhouette outline width in pixels."));
+			WE_FIELD(DissolveProgress, Float, Range(0.0f, 1.0f),
+				Doc("Dissolve effect cutoff progress [0, 1]."));
+			WE_FIELD(BloomIntensity, Float, Range(0.0f, 5.0f),
+				Doc("Dual-Kawase bloom glow intensity."));
+			WE_FIELD(BloomThreshold, Float, Range(0.0f, 5.0f),
+				Doc("Luminance threshold for bloom extraction."));
+			WE_FIELD(VignetteIntensity, Float, Range(0.0f, 1.0f),
+				Doc("Vignette border darkening intensity."));
+			WE_FIELD(ChromaticAberration, Float, Range(0.0f, 1.0f),
+				Doc("Radial chromatic aberration color fringing amount."));
+			WE_FIELD(Enabled, Bool,
+				Doc("Master toggle for post-processing volume."));
+		WE_SCHEMA_END
+	};
 }

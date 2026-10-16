@@ -90,6 +90,10 @@ namespace
 		{ "World::LevelEntityComponent",          4 },
 		{ "World::AudioSourceComponent",         40 },
 		{ "World::AudioListenerComponent",        8 },
+		{ "World::PhysicsMaterialComponent",     16 },
+		{ "World::CharacterControllerComponent", 64 },
+		{ "World::VirtualCameraComponent",       64 },
+		{ "World::PostProcessComponent",         56 },
 	};
 
 	// 非 schema 组件:不在注册表里,预算与豁免由 ComponentLayoutBudget.h 的编译期断言覆盖。

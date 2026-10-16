@@ -59,4 +59,24 @@ namespace World
 		"SkinnedMeshRendererComponent must stay trivially copyable (no heap members)");
 	static_assert(sizeof(SkinnedMeshRendererComponent) <= 64,
 		"SkinnedMeshRendererComponent must fit one cache line (two AssetRef + one NameId + scalars)");
+
+	static_assert(std::is_trivially_copyable_v<PhysicsMaterialComponent>,
+		"PhysicsMaterialComponent must stay trivially copyable");
+	static_assert(sizeof(PhysicsMaterialComponent) <= 64,
+		"PhysicsMaterialComponent must stay within one cache line");
+
+	static_assert(std::is_trivially_copyable_v<CharacterControllerComponent>,
+		"CharacterControllerComponent must stay trivially copyable");
+	static_assert(sizeof(CharacterControllerComponent) <= 64,
+		"CharacterControllerComponent must stay within one cache line");
+
+	static_assert(std::is_trivially_copyable_v<VirtualCameraComponent>,
+		"VirtualCameraComponent must stay trivially copyable");
+	static_assert(sizeof(VirtualCameraComponent) <= 64,
+		"VirtualCameraComponent must stay within one cache line");
+
+	static_assert(std::is_trivially_copyable_v<PostProcessComponent>,
+		"PostProcessComponent must stay trivially copyable");
+	static_assert(sizeof(PostProcessComponent) <= 64,
+		"PostProcessComponent must stay within one cache line");
 }

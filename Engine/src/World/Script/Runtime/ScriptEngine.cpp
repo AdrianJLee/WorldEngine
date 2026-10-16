@@ -11,6 +11,8 @@
 #include "World/Script/Bindings/BindUI.h"
 #include "World/Script/Bindings/BindServices.h"
 #include "World/Script/Bindings/BindAudio.h"
+#include "World/Script/Bindings/BindPhysics.h"
+#include "World/Script/Bindings/BindCamera.h"
 #include "World/Script/Runtime/HotReload.h"
 #include "World/Script/Vm/LuauVm.h"
 #include "World/Script/Runtime/PluginScriptLibrary.h"
@@ -2175,6 +2177,12 @@ namespace World
 			// 音频与音乐全局服务面 (Audio/Music 只读全局表;见 Script/BindAudio.h)。
 			if (!RegisterAudioBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the audio bindings: " + error);
+			// 物理全局服务面 (Physics 只读全局表;见 Script/BindPhysics.h)。
+			if (!RegisterPhysicsBindings(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the physics bindings: " + error);
+			// 摄像机与后处理全局服务面 (Camera/PostProcess 只读全局表;见 Script/BindCamera.h)。
+			if (!RegisterCameraBindings(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the camera & post-process bindings: " + error);
 			// W3c:UI 面(只读全局表 `ui`;宿主入口 DrawScriptUi 见 Script/BindUI.h)。
 			if (!RegisterUiBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the UI bindings: " + error);
@@ -2365,6 +2373,16 @@ namespace World
 		const ScriptServiceBinding* audioTables = AudioServiceBindings(&audioCount);
 		for (std::size_t index = 0; index < audioCount; ++index)
 			serviceList.push_back(&audioTables[index]);
+		// 物理全局服务面 (Physics 只读全局表)
+		std::size_t physicsCount = 0;
+		const ScriptServiceBinding* physicsTables = PhysicsServiceBindings(&physicsCount);
+		for (std::size_t index = 0; index < physicsCount; ++index)
+			serviceList.push_back(&physicsTables[index]);
+		// 摄像机与后处理全局服务面 (Camera / PostProcess 只读全局表)
+		std::size_t cameraCount = 0;
+		const ScriptServiceBinding* cameraTables = CameraServiceBindings(&cameraCount);
+		for (std::size_t index = 0; index < cameraCount; ++index)
+			serviceList.push_back(&cameraTables[index]);
 		// W3c:UI 块渲染在服务块之后、组件块之前(与脚本可见的全局表顺序一致)。
 		std::size_t uiCount = 0;
 		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);
@@ -2405,3 +2423,4 @@ namespace World
 
 
 }
+

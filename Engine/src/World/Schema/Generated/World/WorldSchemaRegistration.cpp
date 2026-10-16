@@ -54,6 +54,10 @@ const TypeSchema& WeSchemaOf_PartitionVolumeComponent();
 const TypeSchema& WeSchemaOf_LevelEntityComponent();
 const TypeSchema& WeSchemaOf_AudioSourceComponent();
 const TypeSchema& WeSchemaOf_AudioListenerComponent();
+const TypeSchema& WeSchemaOf_PhysicsMaterialComponent();
+const TypeSchema& WeSchemaOf_CharacterControllerComponent();
+const TypeSchema& WeSchemaOf_VirtualCameraComponent();
+const TypeSchema& WeSchemaOf_PostProcessComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -62,6 +66,7 @@ const EnumSchema& WeEnumSchemaOf_JointKind();
 const EnumSchema& WeEnumSchemaOf_ProjectionType();
 const EnumSchema& WeEnumSchemaOf_MotionType();
 const EnumSchema& WeEnumSchemaOf_ColliderMode();
+const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode();
 
 	namespace
 	{
@@ -9318,6 +9323,1054 @@ struct GeneratedAccess<World::AudioListenerComponent>
 };
 
 template <>
+struct GeneratedAccess<World::PhysicsMaterialComponent>
+{
+    static Value Get_Friction(const void* instance)
+    {
+        const World::PhysicsMaterialComponent* self = static_cast<const World::PhysicsMaterialComponent*>(instance);
+        return Value(self->Friction);
+    }
+    static void Set_Friction(void* instance, const Value& value)
+    {
+        World::PhysicsMaterialComponent* self = static_cast<World::PhysicsMaterialComponent*>(instance);
+        self->Friction = std::get<float>(value);
+    }
+    static Value Get_Restitution(const void* instance)
+    {
+        const World::PhysicsMaterialComponent* self = static_cast<const World::PhysicsMaterialComponent*>(instance);
+        return Value(self->Restitution);
+    }
+    static void Set_Restitution(void* instance, const Value& value)
+    {
+        World::PhysicsMaterialComponent* self = static_cast<World::PhysicsMaterialComponent*>(instance);
+        self->Restitution = std::get<float>(value);
+    }
+    static Value Get_FrictionCombine(const void* instance)
+    {
+        const World::PhysicsMaterialComponent* self = static_cast<const World::PhysicsMaterialComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->FrictionCombine));
+    }
+    static void Set_FrictionCombine(void* instance, const Value& value)
+    {
+        World::PhysicsMaterialComponent* self = static_cast<World::PhysicsMaterialComponent*>(instance);
+        self->FrictionCombine = static_cast<World::PhysMatCombineMode>(std::get<uint64_t>(value));
+    }
+    static const EnumSchema* GetEnum_FrictionCombine()
+    {
+        return &WeEnumSchemaOf_PhysMatCombineMode();
+    }
+    static Value Get_RestitutionCombine(const void* instance)
+    {
+        const World::PhysicsMaterialComponent* self = static_cast<const World::PhysicsMaterialComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->RestitutionCombine));
+    }
+    static void Set_RestitutionCombine(void* instance, const Value& value)
+    {
+        World::PhysicsMaterialComponent* self = static_cast<World::PhysicsMaterialComponent*>(instance);
+        self->RestitutionCombine = static_cast<World::PhysMatCombineMode>(std::get<uint64_t>(value));
+    }
+    static const EnumSchema* GetEnum_RestitutionCombine()
+    {
+        return &WeEnumSchemaOf_PhysMatCombineMode();
+    }
+    static const FieldSchema& Field_Friction()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC95E5CFB06D627E4ull },
+            "Friction",
+            Kind::Float,
+            &Get_Friction,
+            &Set_Friction,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(2.000000f), false, false, "Surface friction coefficient.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Restitution()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3562F4FF9FA33726ull },
+            "Restitution",
+            Kind::Float,
+            &Get_Restitution,
+            &Set_Restitution,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Surface elasticity / bounciness coefficient.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FrictionCombine()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5DBBAE06A4A32535ull },
+            "FrictionCombine",
+            Kind::Enum,
+            &Get_FrictionCombine,
+            &Set_FrictionCombine,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_FrictionCombine,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Friction combine mode when contacting another surface.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_RestitutionCombine()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFB8BCA1199888073ull },
+            "RestitutionCombine",
+            Kind::Enum,
+            &Get_RestitutionCombine,
+            &Set_RestitutionCombine,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_RestitutionCombine,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Restitution combine mode when contacting another surface.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::PhysicsMaterialComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::PhysicsMaterialComponent" },
+            "PhysicsMaterialComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::PhysicsMaterialComponent),
+            TypeCategory::Component,
+            {
+                Field_Friction(),
+                Field_Restitution(),
+                Field_FrictionCombine(),
+                Field_RestitutionCombine(),
+            },
+            &StorageBindingOf(),
+            "Physics",
+            "Physics Material properties for friction, bounciness and combine algorithms.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::CharacterControllerComponent>
+{
+    static Value Get_Velocity(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->Velocity);
+    }
+    static void Set_Velocity(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->Velocity = std::get<glm::vec3>(value);
+    }
+    static Value Get_StepOffset(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->StepOffset);
+    }
+    static void Set_StepOffset(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->StepOffset = std::get<float>(value);
+    }
+    static Value Get_SlopeLimitDeg(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->SlopeLimitDeg);
+    }
+    static void Set_SlopeLimitDeg(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->SlopeLimitDeg = std::get<float>(value);
+    }
+    static Value Get_SkinWidth(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->SkinWidth);
+    }
+    static void Set_SkinWidth(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->SkinWidth = std::get<float>(value);
+    }
+    static Value Get_CoyoteDuration(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->CoyoteDuration);
+    }
+    static void Set_CoyoteDuration(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->CoyoteDuration = std::get<float>(value);
+    }
+    static Value Get_JumpBufferDuration(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->JumpBufferDuration);
+    }
+    static void Set_JumpBufferDuration(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->JumpBufferDuration = std::get<float>(value);
+    }
+    static Value Get_GravityScale(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->GravityScale);
+    }
+    static void Set_GravityScale(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->GravityScale = std::get<float>(value);
+    }
+    static Value Get_Grounded(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->Grounded);
+    }
+    static void Set_Grounded(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->Grounded = std::get<bool>(value);
+    }
+    static Value Get_IsSliding(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->IsSliding);
+    }
+    static void Set_IsSliding(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->IsSliding = std::get<bool>(value);
+    }
+    static Value Get_LockZPlane(const void* instance)
+    {
+        const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
+        return Value(self->LockZPlane);
+    }
+    static void Set_LockZPlane(void* instance, const Value& value)
+    {
+        World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
+        self->LockZPlane = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Velocity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7A5A0A42BE96D402ull },
+            "Velocity",
+            Kind::Vec3,
+            &Get_Velocity,
+            &Set_Velocity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current movement velocity.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_StepOffset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1E906F1723BC2324ull },
+            "StepOffset",
+            Kind::Float,
+            &Get_StepOffset,
+            &Set_StepOffset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Maximum vertical step-up obstacle height.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SlopeLimitDeg()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8C0F8C1EB582B99Dull },
+            "SlopeLimitDeg",
+            Kind::Float,
+            &Get_SlopeLimitDeg,
+            &Set_SlopeLimitDeg,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(89.000000f), false, false, "Maximum walkable slope angle in degrees.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SkinWidth()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD4BF2E417EEC0A44ull },
+            "SkinWidth",
+            Kind::Float,
+            &Get_SkinWidth,
+            &Set_SkinWidth,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.001000f), std::optional<float>(0.100000f), false, false, "Small margin outward to prevent collision tunneling.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CoyoteDuration()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3E4F02C52DE54FB4ull },
+            "CoyoteDuration",
+            Kind::Float,
+            &Get_CoyoteDuration,
+            &Set_CoyoteDuration,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(0.500000f), false, false, "Coyote time window (seconds) allowing jumping after leaving a ledge.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_JumpBufferDuration()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFA3F61B4FE468DA7ull },
+            "JumpBufferDuration",
+            Kind::Float,
+            &Get_JumpBufferDuration,
+            &Set_JumpBufferDuration,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(0.500000f), false, false, "Jump buffer window (seconds) queuing jump requests before landing.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_GravityScale()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8428F405A91BFA81ull },
+            "GravityScale",
+            Kind::Float,
+            &Get_GravityScale,
+            &Set_GravityScale,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5.000000f), false, false, "Gravity scale factor.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Grounded()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7F92B92A15A5DCFull },
+            "Grounded",
+            Kind::Bool,
+            &Get_Grounded,
+            &Set_Grounded,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "True if currently standing firmly on the ground.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IsSliding()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBCB16C1CF57A191ull },
+            "IsSliding",
+            Kind::Bool,
+            &Get_IsSliding,
+            &Set_IsSliding,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "True if currently sliding down a steep slope exceeding SlopeLimitDeg.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LockZPlane()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x76DAEB96CADA398Aull },
+            "LockZPlane",
+            Kind::Bool,
+            &Get_LockZPlane,
+            &Set_LockZPlane,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "True if movement is constrained to 2D XY plane.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::CharacterControllerComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::CharacterControllerComponent" },
+            "CharacterControllerComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::CharacterControllerComponent),
+            TypeCategory::Component,
+            {
+                Field_Velocity(),
+                Field_StepOffset(),
+                Field_SlopeLimitDeg(),
+                Field_SkinWidth(),
+                Field_CoyoteDuration(),
+                Field_JumpBufferDuration(),
+                Field_GravityScale(),
+                Field_Grounded(),
+                Field_IsSliding(),
+                Field_LockZPlane(),
+            },
+            &StorageBindingOf(),
+            "Physics",
+            "Kinematic Character Controller for unified 2D and 3D Move-and-Slide, slope limiting, and jump buffering.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::VirtualCameraComponent>
+{
+    static Value Get_FollowOffset(const void* instance)
+    {
+        const World::VirtualCameraComponent* self = static_cast<const World::VirtualCameraComponent*>(instance);
+        return Value(self->FollowOffset);
+    }
+    static void Set_FollowOffset(void* instance, const Value& value)
+    {
+        World::VirtualCameraComponent* self = static_cast<World::VirtualCameraComponent*>(instance);
+        self->FollowOffset = std::get<glm::vec3>(value);
+    }
+    static Value Get_Damping(const void* instance)
+    {
+        const World::VirtualCameraComponent* self = static_cast<const World::VirtualCameraComponent*>(instance);
+        return Value(self->Damping);
+    }
+    static void Set_Damping(void* instance, const Value& value)
+    {
+        World::VirtualCameraComponent* self = static_cast<World::VirtualCameraComponent*>(instance);
+        self->Damping = std::get<glm::vec3>(value);
+    }
+    static Value Get_DeadZone(const void* instance)
+    {
+        const World::VirtualCameraComponent* self = static_cast<const World::VirtualCameraComponent*>(instance);
+        return Value(self->DeadZone);
+    }
+    static void Set_DeadZone(void* instance, const Value& value)
+    {
+        World::VirtualCameraComponent* self = static_cast<World::VirtualCameraComponent*>(instance);
+        self->DeadZone = std::get<glm::vec2>(value);
+    }
+    static Value Get_LookaheadTime(const void* instance)
+    {
+        const World::VirtualCameraComponent* self = static_cast<const World::VirtualCameraComponent*>(instance);
+        return Value(self->LookaheadTime);
+    }
+    static void Set_LookaheadTime(void* instance, const Value& value)
+    {
+        World::VirtualCameraComponent* self = static_cast<World::VirtualCameraComponent*>(instance);
+        self->LookaheadTime = std::get<float>(value);
+    }
+    static Value Get_ScreenShakeTrauma(const void* instance)
+    {
+        const World::VirtualCameraComponent* self = static_cast<const World::VirtualCameraComponent*>(instance);
+        return Value(self->ScreenShakeTrauma);
+    }
+    static void Set_ScreenShakeTrauma(void* instance, const Value& value)
+    {
+        World::VirtualCameraComponent* self = static_cast<World::VirtualCameraComponent*>(instance);
+        self->ScreenShakeTrauma = std::get<float>(value);
+    }
+    static Value Get_ScreenShakeFrequency(const void* instance)
+    {
+        const World::VirtualCameraComponent* self = static_cast<const World::VirtualCameraComponent*>(instance);
+        return Value(self->ScreenShakeFrequency);
+    }
+    static void Set_ScreenShakeFrequency(void* instance, const Value& value)
+    {
+        World::VirtualCameraComponent* self = static_cast<World::VirtualCameraComponent*>(instance);
+        self->ScreenShakeFrequency = std::get<float>(value);
+    }
+    static Value Get_ScreenShakeDecay(const void* instance)
+    {
+        const World::VirtualCameraComponent* self = static_cast<const World::VirtualCameraComponent*>(instance);
+        return Value(self->ScreenShakeDecay);
+    }
+    static void Set_ScreenShakeDecay(void* instance, const Value& value)
+    {
+        World::VirtualCameraComponent* self = static_cast<World::VirtualCameraComponent*>(instance);
+        self->ScreenShakeDecay = std::get<float>(value);
+    }
+    static Value Get_Priority(const void* instance)
+    {
+        const World::VirtualCameraComponent* self = static_cast<const World::VirtualCameraComponent*>(instance);
+        return Value(self->Priority);
+    }
+    static void Set_Priority(void* instance, const Value& value)
+    {
+        World::VirtualCameraComponent* self = static_cast<World::VirtualCameraComponent*>(instance);
+        self->Priority = std::get<int32_t>(value);
+    }
+    static const FieldSchema& Field_FollowOffset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x89C49B56DA7567Cull },
+            "FollowOffset",
+            Kind::Vec3,
+            &Get_FollowOffset,
+            &Set_FollowOffset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Offset from target position.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Damping()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE6A3DD7E509EABCull },
+            "Damping",
+            Kind::Vec3,
+            &Get_Damping,
+            &Set_Damping,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Smooth damping factor for tracking.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_DeadZone()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4DCFB9B6CDAEB706ull },
+            "DeadZone",
+            Kind::Vec2,
+            &Get_DeadZone,
+            &Set_DeadZone,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Normalized screen-space deadzone half-extents.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec2(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LookaheadTime()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1644CE6FA5E5B87Bull },
+            "LookaheadTime",
+            Kind::Float,
+            &Get_LookaheadTime,
+            &Set_LookaheadTime,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(2.000000f), false, false, "Target velocity lookahead prediction time in seconds.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ScreenShakeTrauma()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9101C4B5013AD5B6ull },
+            "ScreenShakeTrauma",
+            Kind::Float,
+            &Get_ScreenShakeTrauma,
+            &Set_ScreenShakeTrauma,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Current screen shake trauma value [0, 1].", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ScreenShakeFrequency()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF8344AE59170F0BEull },
+            "ScreenShakeFrequency",
+            Kind::Float,
+            &Get_ScreenShakeFrequency,
+            &Set_ScreenShakeFrequency,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(50.000000f), false, false, "Screen shake frequency in Hz.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ScreenShakeDecay()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCA691F4314D3A26ull },
+            "ScreenShakeDecay",
+            Kind::Float,
+            &Get_ScreenShakeDecay,
+            &Set_ScreenShakeDecay,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(10.000000f), false, false, "Rate at which trauma decays per second.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Priority()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xAF257A2F474F1EAEull },
+            "Priority",
+            Kind::Int32,
+            &Get_Priority,
+            &Set_Priority,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Virtual camera activation priority.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<int32_t>(0)),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::VirtualCameraComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::VirtualCameraComponent" },
+            "VirtualCameraComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::VirtualCameraComponent),
+            TypeCategory::Component,
+            {
+                Field_FollowOffset(),
+                Field_Damping(),
+                Field_DeadZone(),
+                Field_LookaheadTime(),
+                Field_ScreenShakeTrauma(),
+                Field_ScreenShakeFrequency(),
+                Field_ScreenShakeDecay(),
+                Field_Priority(),
+            },
+            &StorageBindingOf(),
+            "Camera",
+            "Cinemachine-style virtual camera for smooth target tracking, deadzone, lookahead, and screen shake.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::PostProcessComponent>
+{
+    static Value Get_OutlineColor(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->OutlineColor);
+    }
+    static void Set_OutlineColor(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->OutlineColor = std::get<glm::vec4>(value);
+    }
+    static Value Get_FlashWhiteIntensity(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->FlashWhiteIntensity);
+    }
+    static void Set_FlashWhiteIntensity(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->FlashWhiteIntensity = std::get<float>(value);
+    }
+    static Value Get_FlashWhiteDecay(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->FlashWhiteDecay);
+    }
+    static void Set_FlashWhiteDecay(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->FlashWhiteDecay = std::get<float>(value);
+    }
+    static Value Get_OutlineWidth(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->OutlineWidth);
+    }
+    static void Set_OutlineWidth(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->OutlineWidth = std::get<float>(value);
+    }
+    static Value Get_DissolveProgress(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->DissolveProgress);
+    }
+    static void Set_DissolveProgress(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->DissolveProgress = std::get<float>(value);
+    }
+    static Value Get_BloomIntensity(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->BloomIntensity);
+    }
+    static void Set_BloomIntensity(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->BloomIntensity = std::get<float>(value);
+    }
+    static Value Get_BloomThreshold(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->BloomThreshold);
+    }
+    static void Set_BloomThreshold(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->BloomThreshold = std::get<float>(value);
+    }
+    static Value Get_VignetteIntensity(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->VignetteIntensity);
+    }
+    static void Set_VignetteIntensity(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->VignetteIntensity = std::get<float>(value);
+    }
+    static Value Get_ChromaticAberration(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->ChromaticAberration);
+    }
+    static void Set_ChromaticAberration(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->ChromaticAberration = std::get<float>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
+        self->Enabled = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_OutlineColor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8886017477867D60ull },
+            "OutlineColor",
+            Kind::Vec4,
+            &Get_OutlineColor,
+            &Set_OutlineColor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Outline silhouette edge color.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec4(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FlashWhiteIntensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4CE79EE7665E2FFBull },
+            "FlashWhiteIntensity",
+            Kind::Float,
+            &Get_FlashWhiteIntensity,
+            &Set_FlashWhiteIntensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Flash-white hit reaction intensity.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FlashWhiteDecay()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCDBAEF523329D748ull },
+            "FlashWhiteDecay",
+            Kind::Float,
+            &Get_FlashWhiteDecay,
+            &Set_FlashWhiteDecay,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(20.000000f), false, false, "Flash-white decay speed per second.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_OutlineWidth()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4D476D7897F76077ull },
+            "OutlineWidth",
+            Kind::Float,
+            &Get_OutlineWidth,
+            &Set_OutlineWidth,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "Silhouette outline width in pixels.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_DissolveProgress()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9053CBEA47478DE5ull },
+            "DissolveProgress",
+            Kind::Float,
+            &Get_DissolveProgress,
+            &Set_DissolveProgress,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Dissolve effect cutoff progress [0, 1].", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_BloomIntensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1C77028C879CDFFDull },
+            "BloomIntensity",
+            Kind::Float,
+            &Get_BloomIntensity,
+            &Set_BloomIntensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5.000000f), false, false, "Dual-Kawase bloom glow intensity.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_BloomThreshold()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2679BFEB39E406Full },
+            "BloomThreshold",
+            Kind::Float,
+            &Get_BloomThreshold,
+            &Set_BloomThreshold,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5.000000f), false, false, "Luminance threshold for bloom extraction.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_VignetteIntensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x200481C3DAD70F60ull },
+            "VignetteIntensity",
+            Kind::Float,
+            &Get_VignetteIntensity,
+            &Set_VignetteIntensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Vignette border darkening intensity.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ChromaticAberration()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xED5BC9B5A51DA542ull },
+            "ChromaticAberration",
+            Kind::Float,
+            &Get_ChromaticAberration,
+            &Set_ChromaticAberration,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Radial chromatic aberration color fringing amount.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x957C504EFDA914AEull },
+            "Enabled",
+            Kind::Bool,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Master toggle for post-processing volume.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::PostProcessComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::PostProcessComponent" },
+            "PostProcessComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::PostProcessComponent),
+            TypeCategory::Component,
+            {
+                Field_OutlineColor(),
+                Field_FlashWhiteIntensity(),
+                Field_FlashWhiteDecay(),
+                Field_OutlineWidth(),
+                Field_DissolveProgress(),
+                Field_BloomIntensity(),
+                Field_BloomThreshold(),
+                Field_VignetteIntensity(),
+                Field_ChromaticAberration(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Rendering",
+            "Fullscreen post-processing volume settings: hit flash, outline, dissolve, bloom, and color grading.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -9740,6 +10793,26 @@ struct GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>
     }
 };
 
+template <>
+struct GeneratedEnum<World::PhysMatCombineMode>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "PhysMatCombineMode",
+            false,
+            1,
+            {
+                { "Average", static_cast<int64_t>(World::PhysMatCombineMode::Average) },
+                { "Minimum", static_cast<int64_t>(World::PhysMatCombineMode::Minimum) },
+                { "Multiply", static_cast<int64_t>(World::PhysMatCombineMode::Multiply) },
+                { "Maximum", static_cast<int64_t>(World::PhysMatCombineMode::Maximum) },
+            },
+        };
+        return schema;
+    }
+};
+
 const TypeSchema& WeSchemaOf_UUIDComponent() { return GeneratedAccess<World::UUIDComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
@@ -9786,6 +10859,10 @@ const TypeSchema& WeSchemaOf_PartitionVolumeComponent() { return GeneratedAccess
 const TypeSchema& WeSchemaOf_LevelEntityComponent() { return GeneratedAccess<World::LevelEntityComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_AudioSourceComponent() { return GeneratedAccess<World::AudioSourceComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_AudioListenerComponent() { return GeneratedAccess<World::AudioListenerComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_PhysicsMaterialComponent() { return GeneratedAccess<World::PhysicsMaterialComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_CharacterControllerComponent() { return GeneratedAccess<World::CharacterControllerComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_VirtualCameraComponent() { return GeneratedAccess<World::VirtualCameraComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_PostProcessComponent() { return GeneratedAccess<World::PostProcessComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -9794,6 +10871,7 @@ const EnumSchema& WeEnumSchemaOf_JointKind() { return GeneratedEnum<World::Joint
 const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::CameraSettings::ProjectionType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_MotionType() { return GeneratedEnum<World::RigidBody3DComponent::MotionType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode() { return GeneratedEnum<World::PhysMatCombineMode>::WeEnumSchema(); }
 
 	bool RegisterWorldSchemaModule(SchemaRegistry& registry)
 	{
@@ -9804,6 +10882,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ProjectionType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_MotionType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ColliderMode()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_PhysMatCombineMode()) != SchemaRegistry::Status::Ok) ok = false;
 		const std::vector<TypeSchema> schemas = {
 			WeSchemaOf_UUIDComponent(),
 			WeSchemaOf_TagComponent(),
@@ -9851,6 +10930,10 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_LevelEntityComponent(),
 			WeSchemaOf_AudioSourceComponent(),
 			WeSchemaOf_AudioListenerComponent(),
+			WeSchemaOf_PhysicsMaterialComponent(),
+			WeSchemaOf_CharacterControllerComponent(),
+			WeSchemaOf_VirtualCameraComponent(),
+			WeSchemaOf_PostProcessComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

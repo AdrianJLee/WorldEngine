@@ -44,6 +44,10 @@ struct World::PartitionVolumeComponent
 struct World::LevelEntityComponent
 struct World::AudioSourceComponent
 struct World::AudioListenerComponent
+struct World::PhysicsMaterialComponent
+struct World::CharacterControllerComponent
+struct World::VirtualCameraComponent
+struct World::PostProcessComponent
 struct World::UUID
 struct World::CameraSettings
 enum World::MeshRendererComponent::PrimitiveShape
@@ -52,5 +56,4 @@ enum World::JointComponent::JointKind
 enum World::CameraSettings::ProjectionType
 enum World::RigidBody3DComponent::MotionType
 enum World::MeshCollider3DComponent::ColliderMode
-
-
+enum World::PhysMatCombineMode

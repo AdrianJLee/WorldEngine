@@ -1009,6 +1009,19 @@ function ui:isOpen() end
 ---@field Restitution number
 ---@field Loop boolean
 
+-- Component fields are exposed through Entity:GetComponent("CharacterControllerComponent"); there is no runtime global named CharacterControllerComponent.
+---@class CharacterControllerComponent
+---@field Grounded boolean
+---@field IsSliding boolean
+---@field StepOffset number
+---@field CoyoteDuration number
+---@field LockZPlane boolean
+---@field Velocity vec3
+---@field GravityScale number
+---@field SlopeLimitDeg number
+---@field SkinWidth number
+---@field JumpBufferDuration number
+
 -- Component fields are exposed through Entity:GetComponent("CircleCollider2DComponent"); there is no runtime global named CircleCollider2DComponent.
 ---@class CircleCollider2DComponent
 ---@field Restitution number
@@ -1123,6 +1136,13 @@ function ui:isOpen() end
 ---@field HalfExtents vec3
 ---@field OverrideStreamingRadius number
 
+-- Component fields are exposed through Entity:GetComponent("PhysicsMaterialComponent"); there is no runtime global named PhysicsMaterialComponent.
+---@class PhysicsMaterialComponent
+---@field Restitution number
+---@field FrictionCombine number
+---@field Friction number
+---@field RestitutionCombine number
+
 -- Component fields are exposed through Entity:GetComponent("PixelPerfectCameraComponent"); there is no runtime global named PixelPerfectCameraComponent.
 ---@class PixelPerfectCameraComponent
 ---@field ReferenceResolution vec2
@@ -1169,6 +1189,19 @@ function ui:isOpen() end
 ---@field Offset vec2
 ---@field Points string
 ---@field Density number
+
+-- Component fields are exposed through Entity:GetComponent("PostProcessComponent"); there is no runtime global named PostProcessComponent.
+---@class PostProcessComponent
+---@field BloomThreshold number
+---@field BloomIntensity number
+---@field VignetteIntensity number
+---@field FlashWhiteIntensity number
+---@field OutlineWidth number
+---@field OutlineColor vec4
+---@field DissolveProgress number
+---@field Enabled boolean
+---@field FlashWhiteDecay number
+---@field ChromaticAberration number
 
 -- Component fields are exposed through Entity:GetComponent("PrismaticJoint2DComponent"); there is no runtime global named PrismaticJoint2DComponent.
 ---@class PrismaticJoint2DComponent
@@ -1320,6 +1353,17 @@ function ui:isOpen() end
 ---@field Linear vec3
 ---@field Angular vec3
 
+-- Component fields are exposed through Entity:GetComponent("VirtualCameraComponent"); there is no runtime global named VirtualCameraComponent.
+---@class VirtualCameraComponent
+---@field FollowOffset vec3
+---@field ScreenShakeDecay number
+---@field Damping vec3
+---@field LookaheadTime number
+---@field DeadZone vec2
+---@field ScreenShakeTrauma number
+---@field Priority number
+---@field ScreenShakeFrequency number
+
 -- Component fields are exposed through Entity:GetComponent("WheelJoint2DComponent"); there is no runtime global named WheelJoint2DComponent.
 ---@class WheelJoint2DComponent
 ---@field Hertz number
@@ -1360,6 +1404,8 @@ function ui:isOpen() end
 ---@field CapsuleCollider3D string Short alias for "CapsuleCollider3DComponent".
 ---@field ChainCollider2DComponent string Registered component type name "ChainCollider2DComponent".
 ---@field ChainCollider2D string Short alias for "ChainCollider2DComponent".
+---@field CharacterControllerComponent string Registered component type name "CharacterControllerComponent".
+---@field CharacterController string Short alias for "CharacterControllerComponent".
 ---@field CircleCollider2DComponent string Registered component type name "CircleCollider2DComponent".
 ---@field CircleCollider2D string Short alias for "CircleCollider2DComponent".
 ---@field CircleRendererComponent string Registered component type name "CircleRendererComponent".
@@ -1388,6 +1434,8 @@ function ui:isOpen() end
 ---@field ParallaxLayer string Short alias for "ParallaxLayerComponent".
 ---@field PartitionVolumeComponent string Registered component type name "PartitionVolumeComponent".
 ---@field PartitionVolume string Short alias for "PartitionVolumeComponent".
+---@field PhysicsMaterialComponent string Registered component type name "PhysicsMaterialComponent".
+---@field PhysicsMaterial string Short alias for "PhysicsMaterialComponent".
 ---@field PixelPerfectCameraComponent string Registered component type name "PixelPerfectCameraComponent".
 ---@field PixelPerfectCamera string Short alias for "PixelPerfectCameraComponent".
 ---@field PlatformEffector2DComponent string Registered component type name "PlatformEffector2DComponent".
@@ -1398,6 +1446,8 @@ function ui:isOpen() end
 ---@field PointLight string Short alias for "PointLightComponent".
 ---@field PolygonCollider2DComponent string Registered component type name "PolygonCollider2DComponent".
 ---@field PolygonCollider2D string Short alias for "PolygonCollider2DComponent".
+---@field PostProcessComponent string Registered component type name "PostProcessComponent".
+---@field PostProcess string Short alias for "PostProcessComponent".
 ---@field PrismaticJoint2DComponent string Registered component type name "PrismaticJoint2DComponent".
 ---@field PrismaticJoint2D string Short alias for "PrismaticJoint2DComponent".
 ---@field RevoluteJoint2DComponent string Registered component type name "RevoluteJoint2DComponent".
@@ -1430,6 +1480,8 @@ function ui:isOpen() end
 ---@field UUID string Short alias for "UUIDComponent".
 ---@field VelocityComponent string Registered component type name "VelocityComponent".
 ---@field Velocity string Short alias for "VelocityComponent".
+---@field VirtualCameraComponent string Registered component type name "VirtualCameraComponent".
+---@field VirtualCamera string Short alias for "VirtualCameraComponent".
 ---@field WheelJoint2DComponent string Registered component type name "WheelJoint2DComponent".
 ---@field WheelJoint2D string Short alias for "WheelJoint2DComponent".
 Comp = {}
