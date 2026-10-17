@@ -1,5 +1,6 @@
 #include "WUI/Panels/ViewportPanel_ToolGizmos.h"
 #include "World/Command/CommandHistory.h"
+#include "World/Scene/SelectionFilter.h"
 #include "wldpch.h"
 #include "WUI/Panels/ViewportPanel.h"
 
@@ -414,7 +415,27 @@ namespace World
 		}
 
 		// ③ 右岛 (Right Island - 覆盖层与状态徽章)
-		// 从左至右内含: [图层下拉] + [分割线] + [Grid] + [Part] + [Lock] + [分割线] + [状态徽章]
+		// 从左至右内含: [选择过滤] + [分割线] + [图层下拉] + [分割线] + [Grid] + [Part] + [Lock] + [分割线] + [状态徽章]
+		SelectionFilter& selFilter = m_Host.GetSelectionFilter();
+		size_t selectableLayersCount = 0;
+		size_t lockedLayersCount = 0;
+		const uint32_t allFilterLayers[] = {
+			Layer_Actor, Layer_Light, Layer_Trigger, Layer_Collider,
+			Layer_Decor, Layer_Background, Layer_UI
+		};
+		constexpr size_t kTotalFilterLayers = 7;
+		for (uint32_t mask : allFilterLayers)
+		{
+			if (selFilter.IsLayerSelectable(mask) && !selFilter.IsLayerLocked(mask))
+				selectableLayersCount++;
+			if (selFilter.IsLayerLocked(mask))
+				lockedLayersCount++;
+		}
+
+		char filterBtnLabel[64] = {};
+		std::snprintf(filterBtnLabel, sizeof(filterBtnLabel), "%s: %zu/%zu ▼",
+			Wui::Tr("viewport.filter.dropdown", "过滤").c_str(), selectableLayersCount, kTotalFilterLayers);
+		const float filterBtnW = std::max(64.0f, ctx.MeasureTextWidth(filterBtnLabel, 12.0f) + 16.0f);
 		const std::vector<Level::DataLayerDefinition>& dataLayers = m_Host.GetLevelDataLayers();
 		const uint32_t activeLayers = m_Host.GetActiveDataLayers();
 		const bool hasDataLayers = !dataLayers.empty();
@@ -453,6 +474,7 @@ namespace World
 
 		// 计算右岛理想总宽度
 		float naturalRightIslandW = 4.0f;
+		naturalRightIslandW += filterBtnW + 3.0f + 8.0f + 3.0f; // 过滤按钮 + 分割线
 		if (hasDataLayers)
 		{
 			naturalRightIslandW += layersBtnW + 3.0f + 8.0f + 3.0f;
@@ -488,6 +510,34 @@ namespace World
 		float rightCursor = rightIslandRect.X + 4.0f;
 		const float rightBtnY = rightIslandRect.Y + 4.0f;
 		const float rightLimit = rightIslandRect.X + rightIslandRect.W - 4.0f;
+
+		// 0) 选择过滤器下拉按钮 (Selection Filter)
+		Wui::WuiRect filterBtnRect {};
+		if (!play && rightCursor + filterBtnW <= rightLimit)
+		{
+			filterBtnRect = { rightCursor, rightBtnY, filterBtnW, kBtnH };
+			Wui::Tooltip(ctx, filterBtnRect, Wui::Tr("viewport.filter.hint",
+				"Selection Filter: control which entity layers can be picked/selected in the viewport."));
+			auto filterTheme = theme;
+			if (selectableLayersCount < kTotalFilterLayers || lockedLayersCount > 0)
+			{
+				filterTheme.ButtonBg = theme.ActiveBg;
+				filterTheme.Border = theme.Warning;
+			}
+			if (Wui::Button(ctx, Wui::HashId("viewport.filter_dropdown"), filterBtnRect, filterBtnLabel, filterTheme))
+			{
+				ctx.OpenPopup(Wui::HashId("viewport.filter.popup"));
+			}
+			ctx.RegisterOverlayRect(filterBtnRect);
+			rightCursor += filterBtnW + 3.0f;
+
+			if (rightCursor + 8.0f <= rightLimit)
+			{
+				const Wui::WuiRect sepRect { rightCursor, rightIslandRect.Y, 8.0f, kIslandH };
+				Wui::ToolbarSeparator(ctx, sepRect, theme);
+				rightCursor += 8.0f + 3.0f;
+			}
+		}
 
 		// 1) 数据层多选下拉按钮
 		Wui::WuiRect layersBtnRect {};
@@ -846,6 +896,127 @@ namespace World
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(layersPopup);
 		}
+
+		// ⑥ 选择过滤器弹层 (Selection Filter Popup: 视口防误选快速配置与图层锁定)
+		const Wui::WuiId filterPopup = Wui::HashId("viewport.filter.popup");
+		if (ctx.IsPopupOpen(filterPopup))
+		{
+			SelectionFilter& curFilter = m_Host.GetSelectionFilter();
+			const float popupW = 260.0f;
+			const float popupRowH = 22.0f;
+			const float popupH = 28.0f + 26.0f + 4.0f + 20.0f + 7 * popupRowH + 8.0f + 26.0f + 10.0f;
+			const float popupX = filterBtnRect.W > 0.0f
+				? std::min(filterBtnRect.X, sceneRect.X + sceneRect.W - popupW - kChromePad)
+				: (sceneRect.X + sceneRect.W - popupW - kChromePad);
+			const float popupY = rightIslandRect.Y + rightIslandRect.H + 3.0f;
+			const Wui::WuiRect panel { popupX, popupY, popupW, popupH };
+			Wui::DrawPanelSurface(ctx, panel, theme);
+			ctx.RegisterOverlayRect(panel);
+
+			float rowY = panel.Y + 6.0f;
+			Wui::Label(ctx, { panel.X + 8.0f, rowY + 2.0f },
+				Wui::Tr("viewport.filter.title", "选择过滤器 (Selection Filter)"), theme.TextMuted, 12.0f);
+			rowY += 22.0f;
+
+			// 快捷预设按钮组: [全选] [仅角色] [锁BG] [重置]
+			const float presetBtnW = (panel.W - 16.0f - 9.0f) / 4.0f;
+			float pBtnX = panel.X + 8.0f;
+			if (Wui::Button(ctx, Wui::HashId("viewport.filter.preset_all"), { pBtnX, rowY, presetBtnW, 22.0f }, "全选", theme))
+			{
+				curFilter.Reset();
+			}
+			pBtnX += presetBtnW + 3.0f;
+			if (Wui::Button(ctx, Wui::HashId("viewport.filter.preset_actors"), { pBtnX, rowY, presetBtnW, 22.0f }, "仅角色", theme))
+			{
+				for (uint32_t mask : allFilterLayers)
+					curFilter.SetLayerSelectable(mask, mask == Layer_Actor);
+			}
+			pBtnX += presetBtnW + 3.0f;
+			if (Wui::Button(ctx, Wui::HashId("viewport.filter.preset_lock_bg"), { pBtnX, rowY, presetBtnW, 22.0f }, "锁BG", theme))
+			{
+				curFilter.SetLayerLocked(Layer_Background, true);
+				curFilter.SetLayerLocked(Layer_Decor, true);
+			}
+			pBtnX += presetBtnW + 3.0f;
+			if (Wui::Button(ctx, Wui::HashId("viewport.filter.preset_reset"), { pBtnX, rowY, presetBtnW, 22.0f }, "重置", theme))
+			{
+				curFilter.Reset();
+			}
+			rowY += 26.0f;
+
+			// 分割线
+			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 4.0f;
+
+			// 表头: 图层 / 可选 / 锁定
+			Wui::Label(ctx, { panel.X + 12.0f, rowY + 2.0f }, "图层", theme.TextMuted, 11.0f);
+			Wui::Label(ctx, { panel.X + 144.0f, rowY + 2.0f }, "可选", theme.TextMuted, 11.0f);
+			Wui::Label(ctx, { panel.X + 204.0f, rowY + 2.0f }, "锁定", theme.TextMuted, 11.0f);
+			rowY += 18.0f;
+
+			struct LayerDef {
+				const char* Name;
+				uint32_t Mask;
+				const char* Tip;
+			};
+			const LayerDef layerDefs[] = {
+				{ "Actor (角色/逻辑)",     Layer_Actor,      "动态刚体、角色控制器、玩家与怪物" },
+				{ "Light (光源)",          Layer_Light,      "方向光、点光源、2D 多边形光" },
+				{ "Trigger (触发器)",      Layer_Trigger,    "碰撞传感器 (IsSensor)、区域触发盒" },
+				{ "Collider (碰撞体)",     Layer_Collider,   "静态碰撞盒、刚体外壳" },
+				{ "Decor (地块/装饰)",     Layer_Decor,      "Tilemap 瓦片地图、静态装饰物" },
+				{ "Background (背景/视差)", Layer_Background, "2D 视差层、远景贴图、天空盒" },
+				{ "UI (画布/HUD)",         Layer_UI,         "世界空间 UI、HUD 元素" }
+			};
+
+			Wui::WuiId baseId = Wui::HashId("viewport.filter.layer_items");
+			for (const auto& item : layerDefs)
+			{
+				const Wui::WuiRect rowRect { panel.X + 6.0f, rowY, panel.W - 12.0f, popupRowH };
+				Wui::Tooltip(ctx, rowRect, item.Tip);
+
+				// 图层名称
+				Wui::Label(ctx, { panel.X + 10.0f, rowY + 3.0f }, item.Name, theme.Text, 12.0f);
+
+				// 可选复选框
+				bool selectable = curFilter.IsLayerSelectable(item.Mask);
+				const bool prevSelectable = selectable;
+				Wui::WuiRect selRect { panel.X + 140.0f, rowY + 1.0f, 50.0f, 20.0f };
+				if (Wui::Checkbox(ctx, baseId++, selRect, "选", selectable, theme))
+				{
+					if (selectable != prevSelectable)
+						curFilter.SetLayerSelectable(item.Mask, selectable);
+				}
+
+				// 锁定复选框
+				bool locked = curFilter.IsLayerLocked(item.Mask);
+				const bool prevLocked = locked;
+				Wui::WuiRect lockRect { panel.X + 200.0f, rowY + 1.0f, 50.0f, 20.0f };
+				if (Wui::Checkbox(ctx, baseId++, lockRect, "锁", locked, theme))
+				{
+					if (locked != prevLocked)
+						curFilter.SetLayerLocked(item.Mask, locked);
+				}
+
+				rowY += popupRowH;
+			}
+
+			// 底部操作: 打开独立管理面板
+			rowY += 4.0f;
+			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 4.0f;
+
+			const Wui::WuiRect moreBtn { panel.X + 8.0f, rowY, panel.W - 16.0f, 22.0f };
+			if (Wui::Button(ctx, Wui::HashId("viewport.filter.open_panel"), moreBtn, "打开完整图层面板...", theme))
+			{
+				m_Host.FocusIndependentWindow("selection_filter");
+				ctx.ClosePopup(filterPopup);
+			}
+
+			ctx.ClosePopupsOnOutsideClick({ filterPopup }, panel);
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+				ctx.ClosePopup(filterPopup);
+		}
 		// U22(用户 §5.5「所有视口类窗口都要有坐标系来表明方向」):主视口右下角
 		// 半透明三轴指示(X 红 / Y 绿 / Z 蓝),朝向取**当前画面用的相机基** ——
 		// Play 下是场景主相机、2D 下是正交相机(此时 Z 投影为点,自然只剩 X/Y)。
@@ -899,32 +1070,36 @@ namespace World
 			const TransformComponent before = transform;
 			bool nowUsing = false;
 
+			const uint32_t entLayer = SelectionFilter::ClassifyEntityLayer(selected, *selected.GetScene());
+			const bool isLocked = m_Host.GetSelectionFilter().IsLayerLocked(entLayer);
+			const bool allowManipulation = !m_Host.IsReadOnlyMode() && !isLocked;
+
 			if (m_Host.IsEditingCollider())
 			{
 				if (selected.HasComponent<BoxCollider2DComponent>())
 				{
 					auto& box = selected.GetComponent<BoxCollider2DComponent>();
-					nowUsing = Wui::ManipulateBoxCollider2D(m_Host.GetGizmoCamera(), transform, box.Offset, box.Size, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+					nowUsing = Wui::ManipulateBoxCollider2D(m_Host.GetGizmoCamera(), transform, box.Offset, box.Size, sceneRect, ctx, allowManipulation);
 				}
 				else if (selected.HasComponent<CircleCollider2DComponent>())
 				{
 					auto& circle = selected.GetComponent<CircleCollider2DComponent>();
-					nowUsing = Wui::ManipulateCircleCollider2D(m_Host.GetGizmoCamera(), transform, circle.Offset, circle.Radius, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+					nowUsing = Wui::ManipulateCircleCollider2D(m_Host.GetGizmoCamera(), transform, circle.Offset, circle.Radius, sceneRect, ctx, allowManipulation);
 				}
 				else if (selected.HasComponent<CapsuleCollider2DComponent>())
 				{
 					auto& cap = selected.GetComponent<CapsuleCollider2DComponent>();
-					nowUsing = Wui::ManipulateCapsuleCollider2D(m_Host.GetGizmoCamera(), transform, cap.Offset, cap.Radius, cap.Length, cap.Direction, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+					nowUsing = Wui::ManipulateCapsuleCollider2D(m_Host.GetGizmoCamera(), transform, cap.Offset, cap.Radius, cap.Length, cap.Direction, sceneRect, ctx, allowManipulation);
 				}
 				else if (selected.HasComponent<PolygonCollider2DComponent>())
 				{
 					auto& poly = selected.GetComponent<PolygonCollider2DComponent>();
-					nowUsing = ManipulatePolygonCollider2D(m_Host.GetGizmoCamera(), transform, poly, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+					nowUsing = ManipulatePolygonCollider2D(m_Host.GetGizmoCamera(), transform, poly, sceneRect, ctx, allowManipulation);
 				}
 				else if (selected.HasComponent<ChainCollider2DComponent>())
 				{
 					auto& chain = selected.GetComponent<ChainCollider2DComponent>();
-					nowUsing = ManipulateChainCollider2D(m_Host.GetGizmoCamera(), transform, chain, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+					nowUsing = ManipulateChainCollider2D(m_Host.GetGizmoCamera(), transform, chain, sceneRect, ctx, allowManipulation);
 				}
 			}
 			else if (m_Host.GetGizmoOperation() == Wui::GizmoOperation::Rect)
@@ -934,7 +1109,7 @@ namespace World
 				if (selected.HasComponent<SpriteComponent>())
 				{
 					auto& spr = selected.GetComponent<SpriteComponent>();
-					nowUsing = Wui::ManipulateRect2D(m_Host.GetGizmoCamera(), transform, spr.Pivot, baseSize, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+					nowUsing = Wui::ManipulateRect2D(m_Host.GetGizmoCamera(), transform, spr.Pivot, baseSize, sceneRect, ctx, allowManipulation);
 				}
 				else if (selected.HasComponent<TilemapComponent>())
 				{
@@ -949,18 +1124,18 @@ namespace World
 							mapH = static_cast<float>(tm->GetHeight()) * (tmComp.CellSize.y > 0.0f ? tmComp.CellSize.y : tm->GetCellSize().y);
 						}
 					}
-					nowUsing = Wui::ManipulateRect2D(m_Host.GetGizmoCamera(), transform, pivot, { mapW, mapH }, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+					nowUsing = Wui::ManipulateRect2D(m_Host.GetGizmoCamera(), transform, pivot, { mapW, mapH }, sceneRect, ctx, allowManipulation);
 				}
 				else
 				{
-					nowUsing = Wui::ManipulateRect2D(m_Host.GetGizmoCamera(), transform, pivot, baseSize, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+					nowUsing = Wui::ManipulateRect2D(m_Host.GetGizmoCamera(), transform, pivot, baseSize, sceneRect, ctx, allowManipulation);
 				}
 			}
 			else
 			{
 				nowUsing = Wui::ManipulateGizmo(m_Host.GetGizmoCamera(),
 					m_Host.GetGizmoOperation(), transform, sceneRect, ctx,
-					/*allowManipulation=*/!m_Host.IsReadOnlyMode());
+					/*allowManipulation=*/allowManipulation);
 			}
 			if (nowUsing && m_Host.IsPixelSnapEnabled())
 			{
@@ -971,7 +1146,7 @@ namespace World
 			if (selected.HasComponent<FreeformLight2DComponent>())
 			{
 				auto& light = selected.GetComponent<FreeformLight2DComponent>();
-				const bool lightUsing = ManipulateFreeformLight2D(m_Host.GetGizmoCamera(), transform, light, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+				const bool lightUsing = ManipulateFreeformLight2D(m_Host.GetGizmoCamera(), transform, light, sceneRect, ctx, allowManipulation);
 				if (lightUsing) nowUsing = true;
 			}
 			if (selected.HasComponent<AudioSourceComponent>())
@@ -982,7 +1157,7 @@ namespace World
 					const float beforeMin = audioSrc.MinDistance;
 					const float beforeMax = audioSrc.MaxDistance;
 					const bool audioUsing = Wui::ManipulateAudioSource3D(m_Host.GetGizmoCamera(), transform,
-						audioSrc.MinDistance, audioSrc.MaxDistance, sceneRect, ctx, !m_Host.IsReadOnlyMode());
+						audioSrc.MinDistance, audioSrc.MaxDistance, sceneRect, ctx, allowManipulation);
 					if (audioUsing)
 					{
 						nowUsing = true;

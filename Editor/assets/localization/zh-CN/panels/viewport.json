@@ -45,5 +45,13 @@
   "viewport.partition.hint": "开关大世界空间分区与流送区块辅助网格。",
   "viewport.layers.title": "关卡数据层",
   "viewport.layers.all": "全部显示",
-  "viewport.layers.base_only": "仅Base"
+  "viewport.layers.base_only": "仅Base",
+  "viewport.filter.dropdown": "过滤",
+  "viewport.filter.hint": "视口选择过滤器: 控制视口内哪些图层的实体可以被鼠标点选。点击展开配置。",
+  "viewport.filter.title": "选择过滤器 (Selection Filter)",
+  "viewport.layers.dropdown": "图层",
+  "viewport.grid.short": "Grid",
+  "viewport.partition.short": "Part",
+  "viewport.2d.short": "Lock",
+  "viewport.snap.short": "Snap"
 }

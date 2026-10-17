@@ -1074,7 +1074,17 @@ Entity EditorLayer::GetEntityAtMousePosition(glm::vec2 viewportLocal){
 
 		Entity result = pixelData == -1 ? Entity() : Entity(m_ActiveScene.get(), (entt::entity)pixelData);
 
-		return result.IsValid() && !m_ActiveScene->IsPendingDestroy(result) ? result : Entity{};
+		if (result.IsValid() && !m_ActiveScene->IsPendingDestroy(result))
+		{
+			if (!m_SelectionFilter.CanSelectEntity(result, *m_ActiveScene))
+			{
+				if (std::getenv("WLD_TRACE_UI"))
+					WLD_CORE_INFO("[ui] pick filtered out entity={0}", static_cast<uint32_t>(static_cast<entt::entity>(result)));
+				return Entity{};
+			}
+			return result;
+		}
+		return Entity{};
 	}
 
 

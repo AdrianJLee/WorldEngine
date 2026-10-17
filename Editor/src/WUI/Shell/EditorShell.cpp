@@ -703,6 +703,10 @@ CommandHistory& EditorShell::GetCommandHistory(){
 		return m_Editor.GetCommandHistory();
 	}
 
+SelectionFilter& EditorShell::GetSelectionFilter(){
+		return m_Editor.GetSelectionFilter();
+	}
+
 void EditorShell::PushCommand(std::unique_ptr<IEditorCommand> cmd){
 		m_Editor.GetCommandHistory().Push(std::move(cmd));
 	}

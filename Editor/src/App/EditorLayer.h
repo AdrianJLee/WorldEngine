@@ -13,6 +13,7 @@
 #include "Document/EditorDocument.h"
 #include "World/UI/UiHost.h"
 #include "World/Command/CommandHistory.h"
+#include "World/Scene/SelectionFilter.h"
 #include "World/WUI/WuiCommand.h"
 #include "World/WUI/WuiGizmo.h"
 #include "WUI/Shell/EditorShell.h"
@@ -237,6 +238,8 @@ namespace World
 		Wui::WuiCommandRegistry& Commands() { return m_Commands; }
 		CommandHistory& GetCommandHistory() { return m_CommandHistory; }
 		const CommandHistory& GetCommandHistory() const { return m_CommandHistory; }
+		SelectionFilter& GetSelectionFilter() { return m_SelectionFilter; }
+		const SelectionFilter& GetSelectionFilter() const { return m_SelectionFilter; }
 
 		// ---- P2 W5b:脚本热重载(编辑器侧接线)----
 		// 唯一的重载入口:帧边界轮询、属性面板 Reload 按钮、AI 通道 script.reload 共用。
@@ -580,6 +583,7 @@ namespace World
 		TransformComponent m_GizmoDragBefore;
 
 		CommandHistory m_CommandHistory;
+		SelectionFilter m_SelectionFilter;
 		Wui::WuiCommandRegistry m_Commands;
 		EditorShell m_Shell;
 		// GameUI(M7b):Play/Simulate 期间由它把 `.wui` 驱动的游戏 UI 画进视口面板的场景矩形,

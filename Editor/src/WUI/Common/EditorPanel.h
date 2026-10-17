@@ -9,6 +9,7 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 #include "World/Command/CommandHistory.h"
+#include "World/Scene/SelectionFilter.h"
 
 #include <cstdint>
 #include <string>
@@ -96,6 +97,7 @@ namespace World
 		// 未打开文档时为空。关卡面板据此拒绝"删掉正在编辑的关卡"这类会留下悬空引用的操作。
 		virtual std::string GetOpenDocumentPath() const { return {}; }
 		virtual CommandHistory& GetCommandHistory() = 0;
+		virtual SelectionFilter& GetSelectionFilter() = 0;
 		virtual void PushCommand(std::unique_ptr<IEditorCommand> cmd) = 0;
 		virtual Wui::WuiTheme& Theme() = 0;
 		// 图标纹理 id(与 ViewportHost 一致;0 = 无图标)。

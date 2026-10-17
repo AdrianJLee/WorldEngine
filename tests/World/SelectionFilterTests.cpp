@@ -114,6 +114,90 @@ static void TestCanSelectEntity()
 	std::cout << "[PASS] TestCanSelectEntity\n";
 }
 
+static void TestPresetsAndMultiLayerInteraction()
+{
+	SelectionFilter filter;
+	const uint32_t allLayers[] = {
+		Layer_Actor, Layer_Light, Layer_Trigger, Layer_Collider,
+		Layer_Decor, Layer_Background, Layer_UI
+	};
+
+	// Preset: Actors Only
+	for (uint32_t mask : allLayers)
+		filter.SetLayerSelectable(mask, mask == Layer_Actor);
+
+	assert(filter.IsLayerSelectable(Layer_Actor));
+	assert(!filter.IsLayerSelectable(Layer_Light));
+	assert(!filter.IsLayerSelectable(Layer_Trigger));
+	assert(!filter.IsLayerSelectable(Layer_Collider));
+	assert(!filter.IsLayerSelectable(Layer_Decor));
+	assert(!filter.IsLayerSelectable(Layer_Background));
+	assert(!filter.IsLayerSelectable(Layer_UI));
+
+	// Preset: Lock BG & Decor
+	filter.Reset();
+	filter.SetLayerLocked(Layer_Background, true);
+	filter.SetLayerLocked(Layer_Decor, true);
+	assert(filter.IsLayerLocked(Layer_Background));
+	assert(filter.IsLayerLocked(Layer_Decor));
+	assert(!filter.IsLayerLocked(Layer_Actor));
+
+	// Reset
+	filter.Reset();
+	assert(filter.GetSelectableMask() == Layer_All);
+	assert(filter.GetLockedMask() == 0);
+
+	std::cout << "[PASS] TestPresetsAndMultiLayerInteraction\n";
+}
+
+static void TestViewportPickingFilterWorkflow()
+{
+	WorldContext context;
+	Scene scene(context);
+	SelectionFilter filter;
+
+	Entity bg = Entity::CreateEntity(&scene, "Parallax_Sky");
+	bg.AddComponent<ParallaxLayerComponent>();
+
+	Entity tree = Entity::CreateEntity(&scene, "Forest_Tilemap");
+	tree.AddComponent<TilemapComponent>();
+
+	Entity player = Entity::CreateEntity(&scene, "Player_Hero");
+	player.AddComponent<CharacterControllerComponent>();
+
+	Entity torch = Entity::CreateEntity(&scene, "Cave_Torch");
+	torch.AddComponent<PointLightComponent>();
+
+	// Default: all entities can be selected
+	assert(filter.CanSelectEntity(bg, scene));
+	assert(filter.CanSelectEntity(tree, scene));
+	assert(filter.CanSelectEntity(player, scene));
+	assert(filter.CanSelectEntity(torch, scene));
+
+	// 1. Lock BG & Decor -> bg and tree cannot be selected in viewport
+	filter.SetLayerLocked(Layer_Background, true);
+	filter.SetLayerLocked(Layer_Decor, true);
+	assert(!filter.CanSelectEntity(bg, scene));
+	assert(!filter.CanSelectEntity(tree, scene));
+	assert(filter.CanSelectEntity(player, scene));
+	assert(filter.CanSelectEntity(torch, scene));
+
+	// 2. Set Actors Only -> only player can be selected
+	const uint32_t allLayers[] = {
+		Layer_Actor, Layer_Light, Layer_Trigger, Layer_Collider,
+		Layer_Decor, Layer_Background, Layer_UI
+	};
+	for (uint32_t mask : allLayers)
+		filter.SetLayerSelectable(mask, mask == Layer_Actor);
+
+	assert(!filter.CanSelectEntity(bg, scene));
+	assert(!filter.CanSelectEntity(tree, scene));
+	assert(!filter.CanSelectEntity(torch, scene));
+	assert(filter.CanSelectEntity(player, scene));
+
+	std::cout << "[PASS] TestViewportPickingFilterWorkflow\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -122,6 +206,8 @@ int main()
 	TestMaskOperations();
 	TestEntityClassification();
 	TestCanSelectEntity();
+	TestPresetsAndMultiLayerInteraction();
+	TestViewportPickingFilterWorkflow();
 
 	std::cout << "All WorldSelectionFilterTests passed successfully.\n";
 	return 0;

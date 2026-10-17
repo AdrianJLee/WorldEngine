@@ -21,6 +21,7 @@ namespace World
 	void SelectionFilterPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
+		SelectionFilter& filter = host.GetSelectionFilter();
 		Wui::WuiId baseId = 0x520000;
 
 		float y = rect.Y + 8.0f;
@@ -35,7 +36,7 @@ namespace World
 		{
 			for (const auto& l : m_Layers)
 			{
-				m_Filter.SetLayerSelectable(l.Mask, true);
+				filter.SetLayerSelectable(l.Mask, true);
 			}
 		}
 		btnX += 80.0f;
@@ -44,7 +45,7 @@ namespace World
 		{
 			for (const auto& l : m_Layers)
 			{
-				m_Filter.SetLayerSelectable(l.Mask, false);
+				filter.SetLayerSelectable(l.Mask, false);
 			}
 		}
 		btnX += 80.0f;
@@ -53,14 +54,14 @@ namespace World
 		{
 			for (const auto& l : m_Layers)
 			{
-				m_Filter.SetLayerLocked(l.Mask, false);
+				filter.SetLayerLocked(l.Mask, false);
 			}
 		}
 		btnX += 80.0f;
 
 		if (Wui::Button(ctx, baseId++, { btnX, y, 54.0f, 22.0f }, "Reset", theme))
 		{
-			m_Filter.Reset();
+			filter.Reset();
 		}
 		y += 30.0f;
 
@@ -91,40 +92,40 @@ namespace World
 			Wui::Tooltip(ctx, labelHoverRect, layer.Description);
 
 			// 可选 (Selectable)
-			bool selectable = (m_Filter.GetSelectableMask() & layer.Mask) != 0;
+			bool selectable = (filter.GetSelectableMask() & layer.Mask) != 0;
 			bool prevSelectable = selectable;
 			Wui::WuiRect selectRect { rect.X + 140.0f, y, 70.0f, 22.0f };
 			if (Wui::Checkbox(ctx, baseId++, selectRect, "Sel", selectable, theme))
 			{
 				if (selectable != prevSelectable)
 				{
-					m_Filter.SetLayerSelectable(layer.Mask, selectable);
+					filter.SetLayerSelectable(layer.Mask, selectable);
 				}
 			}
 			if (selectable) selectableCount++;
 
 			// 可见 (Visible)
-			bool visible = m_Filter.IsLayerVisible(layer.Mask);
+			bool visible = filter.IsLayerVisible(layer.Mask);
 			bool prevVisible = visible;
 			Wui::WuiRect visRect { rect.X + 230.0f, y, 65.0f, 22.0f };
 			if (Wui::Checkbox(ctx, baseId++, visRect, "Vis", visible, theme))
 			{
 				if (visible != prevVisible)
 				{
-					m_Filter.SetLayerVisible(layer.Mask, visible);
+					filter.SetLayerVisible(layer.Mask, visible);
 				}
 			}
 			if (visible) visibleCount++;
 
 			// 锁定 (Locked)
-			bool locked = m_Filter.IsLayerLocked(layer.Mask);
+			bool locked = filter.IsLayerLocked(layer.Mask);
 			bool prevLocked = locked;
 			Wui::WuiRect lockRect { rect.X + 310.0f, y, 65.0f, 22.0f };
 			if (Wui::Checkbox(ctx, baseId++, lockRect, "Lock", locked, theme))
 			{
 				if (locked != prevLocked)
 				{
-					m_Filter.SetLayerLocked(layer.Mask, locked);
+					filter.SetLayerLocked(layer.Mask, locked);
 				}
 			}
 			if (locked) lockedCount++;
@@ -140,5 +141,6 @@ namespace World
 		std::snprintf(summaryBuf, sizeof(summaryBuf), "Active Selectable: %d/%zu  |  Visible: %d/%zu  |  Locked: %d/%zu",
 			selectableCount, m_Layers.size(), visibleCount, m_Layers.size(), lockedCount, m_Layers.size());
 		Wui::Label(ctx, { rect.X + 16.0f, y }, summaryBuf, theme.TextMuted, theme.FontSizeSmall);
+		m_Filter = filter;
 	}
 }

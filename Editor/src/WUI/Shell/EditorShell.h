@@ -104,6 +104,7 @@ namespace World
 		void OpenScene(const std::filesystem::path& path) override;
 		std::string GetOpenDocumentPath() const override;
 		CommandHistory& GetCommandHistory() override;
+		SelectionFilter& GetSelectionFilter() override;
 		void PushCommand(std::unique_ptr<IEditorCommand> cmd) override;
 		// 面板排队"打开这个文档",在帧边界真正执行(见 EditorShell::OpenScene 的说明)。
 		std::filesystem::path m_PendingOpenDocument;

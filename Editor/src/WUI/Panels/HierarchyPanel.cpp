@@ -5,6 +5,7 @@
 
 #include "World/Core/KeyCodes.h"
 #include "World/Command/CommandHistory.h"
+#include "World/Scene/SelectionFilter.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Asset/ProjectManifest.h"
@@ -242,7 +243,9 @@ namespace World
 				const bool hasChildren = !Hierarchy::ChildrenOf(registry, entity).empty();
 				const bool collapsed = m_Collapsed.find(static_cast<uint32_t>(static_cast<entt::entity>(entity)))
 					!= m_Collapsed.end();
-				row->Text = std::string(hasChildren ? (collapsed ? "+ " : "- ") : "  ") + labelOf(entity);
+				const uint32_t entLayer = SelectionFilter::ClassifyEntityLayer(entity, *scene);
+				const bool isEntLocked = host.GetSelectionFilter().IsLayerLocked(entLayer);
+				row->Text = std::string(hasChildren ? (collapsed ? "+ " : "- ") : "  ") + labelOf(entity) + (isEntLocked ? " [L]" : "");
 				// P4-U5a:行进无障碍树 —— id 用实体 handle(稳定,重排后仍是同一行),
 				// value 给脚本一个可以直接喂给 scene.select / 属性面板的句柄。
 				row->SetId(Wui::HashId(("hierarchy.row." + std::to_string(
@@ -254,6 +257,8 @@ namespace World
 					"Click to select this entity (shows in the Properties panel)");
 				row->AccessTooltip = prefabRow && index < prefabTips.size() && !prefabTips[index].empty()
 					? prefabTips[index] + " — " + selectionHint : selectionHint;
+				if (isEntLocked)
+					row->AccessTooltip = "[Locked] " + row->AccessTooltip;
 				row->OnClick = [&host, entity]
 				{
 					if (std::getenv("WLD_TRACE_UI"))
