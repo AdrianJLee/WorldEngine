@@ -1380,6 +1380,9 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		appendPanels(/*independent=*/true);
 		windowEntries.push_back({ Wui::Tr("menu.window.docked", "Docked Panels"), false, {}, true });
 		appendPanels(/*independent=*/false);
+		windowEntries.push_back({ Wui::Tr("menu.window.asset_picker", "资产选择器 (Asset Picker)…"), false,
+			[this] { OpenAssetPicker("Asset Picker", AssetCategory::Unknown, [this](const std::string& path) { OpenAsset(path); }); }, false,
+			Wui::Tr("menu.window.asset_picker.tooltip", "打开资产选择器: 浏览、搜索并检视工程中的所有资产与实时缩略图") });
 		windowEntries.push_back({ Wui::Tr("menu.window.reset_layout", "Reset Layout"), false, [this, &ctx] { ResetLayout(ctx); } });
 		drawMenu(menuWindow, "menu.window", windowEntries);
 
@@ -1652,6 +1655,9 @@ void EditorShell::DrawModals(Wui::WuiContext& ctx){
 		// ---- PROJ-2/T1:项目启动器(启动态窗口级模态;其它模态在前时让位) ----
 		DrawProjectLauncherModal(ctx);
 
+		// ---- 资产选择器模态弹窗 ----
+		DrawAssetPickerModal(ctx);
+
 		const Wui::WuiId unsaved = Wui::HashId("modal.unsaved");
 		if (m_Editor.ShowUnsavedModal()) ctx.SetModal(unsaved);
 		else if (ctx.Modal() == unsaved) ctx.ClearModal();
@@ -1842,5 +1848,18 @@ bool AssetDropBridge::TakeDrop(const std::string& owner, const std::string& sink
 		}
 
 }
-}
 
+void EditorShell::DrawAssetPickerModal(Wui::WuiContext& ctx){
+		const Wui::WuiId modalId = Wui::HashId("modal.asset_picker");
+		if (m_AssetPickerModal.IsOpen())
+			ctx.SetModal(modalId);
+		else if (ctx.Modal() == modalId)
+			ctx.ClearModal();
+		if (!m_AssetPickerModal.IsOpen())
+			return;
+
+		const glm::vec2 vp = ctx.ViewportSize();
+		m_AssetPickerModal.OnRender(ctx, { 0.0f, 0.0f, vp.x, vp.y }, *this);
+	}
+
+}

@@ -115,6 +115,10 @@ namespace World
 		m_EditCellH = m_Tilemap->GetCellSize().y;
 
 		EnsureAtlasAndTextureLoaded();
+		if (m_Tilemap && !m_Tilemap->GetRuleTilePath().empty())
+		{
+			LoadRuleTileAsset(m_Tilemap->GetRuleTilePath());
+		}
 		if (m_Atlas && m_Atlas->GetSubTextureCount() > 0)
 		{
 			if (m_SelectedTileId < 1 || m_SelectedTileId > static_cast<int>(m_Atlas->GetSubTextureCount()))
@@ -140,6 +144,7 @@ namespace World
 		if (!m_EditName.empty())
 			m_Tilemap->SetName(m_EditName);
 		m_Tilemap->SetAtlasPath(m_EditAtlasPath);
+		m_Tilemap->SetRuleTilePath(m_ActiveRuleTilePath);
 		const uint32_t targetW = static_cast<uint32_t>(std::clamp<int64_t>(m_EditGridW, 1, 128));
 		const uint32_t targetH = static_cast<uint32_t>(std::clamp<int64_t>(m_EditGridH, 1, 128));
 		if (targetW != m_Tilemap->GetWidth() || targetH != m_Tilemap->GetHeight())
@@ -223,6 +228,77 @@ namespace World
 		rt.AddRule({ { X, T, X,  T, T,  X, T, X }, centerTile });
 
 		m_ActiveRuleTile = std::make_shared<RuleTile>(std::move(rt));
+	}
+
+	
+	bool TilemapEditorPanel::LoadRuleTileAsset(const std::string& path, std::string* message)
+	{
+		std::string normalized = path;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		if (normalized.rfind("assets/", 0) == 0 || normalized.rfind("assets\\", 0) == 0)
+			normalized = normalized.substr(7);
+
+		std::filesystem::path p(normalized);
+		std::filesystem::path phys;
+		if (std::filesystem::exists(p)) phys = p;
+		else if (std::filesystem::exists(Paths::AssetRoot() / p)) phys = Paths::AssetRoot() / p;
+		else if (std::filesystem::exists(Paths::ProjectDir() / p)) phys = Paths::ProjectDir() / p;
+
+		auto rt = RuleTile::LoadFromFile(phys.string());
+		if (!rt)
+		{
+			m_StatusFeedback = "无法载入规则瓦片资产: " + normalized;
+			if (message) *message = m_StatusFeedback;
+			return false;
+		}
+
+		m_ActiveRuleTile = rt;
+		m_ActiveRuleTilePath = normalized;
+		if (m_Tilemap)
+			m_Tilemap->SetRuleTilePath(normalized);
+
+		// 解析规则反填 11 个槽位
+		const auto& rules = m_ActiveRuleTile->GetRules();
+		for (const auto& rule : rules)
+		{
+			const auto& n = rule.Neighbors;
+			if (n[0] == 2 && n[1] == 2 && n[2] == 2 && n[3] == 2 && n[4] == 2 && n[5] == 2 && n[6] == 2 && n[7] == 2)
+				m_RuleSlotTiles[9] = rule.OutputTileId;
+			else if (n[0] == 2 && n[1] == 2 && n[3] == 2 && n[4] == 1 && n[6] == 1)
+				m_RuleSlotTiles[0] = rule.OutputTileId;
+			else if (n[1] == 2 && n[2] == 2 && n[3] == 1 && n[4] == 2 && n[6] == 1)
+				m_RuleSlotTiles[2] = rule.OutputTileId;
+			else if (n[1] == 1 && n[3] == 2 && n[5] == 2 && n[6] == 2 && n[4] == 1)
+				m_RuleSlotTiles[6] = rule.OutputTileId;
+			else if (n[1] == 1 && n[3] == 1 && n[4] == 2 && n[6] == 2 && n[7] == 2)
+				m_RuleSlotTiles[8] = rule.OutputTileId;
+			else if (n[1] == 2 && n[3] == 1 && n[4] == 1 && n[6] == 1)
+				m_RuleSlotTiles[1] = rule.OutputTileId;
+			else if (n[1] == 1 && n[3] == 1 && n[4] == 1 && n[6] == 2)
+				m_RuleSlotTiles[7] = rule.OutputTileId;
+			else if (n[1] == 1 && n[3] == 2 && n[4] == 1 && n[6] == 1)
+				m_RuleSlotTiles[3] = rule.OutputTileId;
+			else if (n[1] == 1 && n[3] == 1 && n[4] == 2 && n[6] == 1)
+				m_RuleSlotTiles[5] = rule.OutputTileId;
+			else if (n[1] == 1 && n[3] == 1 && n[4] == 1 && n[6] == 1)
+			{
+				if (n[0] == 2 || n[2] == 2 || n[5] == 2 || n[7] == 2)
+					m_RuleSlotTiles[10] = rule.OutputTileId;
+				else
+					m_RuleSlotTiles[4] = rule.OutputTileId;
+			}
+		}
+
+		m_AutoTileMode = true;
+		if (m_Tilemap)
+		{
+			m_Tilemap->ApplyRuleTile(*m_ActiveRuleTile);
+			m_Dirty = true;
+		}
+
+		m_StatusFeedback = "已绑定规则瓦片资产: " + std::filesystem::path(normalized).filename().string();
+		if (message) *message = m_StatusFeedback;
+		return true;
 	}
 
 	void TilemapEditorPanel::PaintCell(uint32_t x, uint32_t y, uint16_t tileId, bool setSolid)
@@ -565,6 +641,73 @@ namespace World
 		lY += 28.0f;
 
 		// Visual 3x3 Auto-Tile Rule Matrix (自动拼接九宫格规则可视化与点击绑定)
+		// 规则瓦片资产绑定下拉框 (对齐图集资产风格，支持搜索、选择与一键打开工作台)
+		Wui::Label(ctx, { leftCol.X + 10.0f, lY + 3.0f }, "规则资产:", theme.TextMuted, 11.0f);
+		const float openRtBtnW = 60.0f;
+		const float clearRtBtnW = 22.0f;
+		const Wui::WuiRect rtComboRect { leftCol.X + 66.0f, lY, leftCol.W - 74.0f - openRtBtnW - clearRtBtnW - 6.0f, 22.0f };
+		Wui::Tooltip(ctx, rtComboRect, "下拉选择项目中绑定的 .wruletile 规则瓦片资产；选择后自动执行拓扑匹配 (tilemap.field.ruletile_combo)");
+
+		const auto& rtPaths = Editor::AssetCatalog::PathsForName("RuleTile");
+		std::vector<std::string> rtOptions;
+		rtOptions.push_back("(none - 使用内存九宫格)");
+		for (const auto& p : rtPaths)
+			rtOptions.push_back(p);
+		int rtSelected = 0;
+		if (!m_ActiveRuleTilePath.empty())
+		{
+			const auto foundRt = std::find(rtOptions.begin() + 1, rtOptions.end(), m_ActiveRuleTilePath);
+			if (foundRt != rtOptions.end())
+			{
+				rtSelected = static_cast<int>(foundRt - rtOptions.begin());
+			}
+			else
+			{
+				rtOptions.push_back(m_ActiveRuleTilePath);
+				rtSelected = static_cast<int>(rtOptions.size()) - 1;
+			}
+		}
+		const int beforeRtPick = rtSelected;
+		if (Wui::SearchableCombo(ctx, Wui::HashId("tilemap.field.ruletile_combo"), rtComboRect, "", rtOptions, rtSelected, theme)
+			&& rtSelected != beforeRtPick)
+		{
+			if (rtSelected <= 0)
+			{
+				m_ActiveRuleTilePath.clear();
+				m_ActiveRuleTile.reset();
+				if (m_Tilemap) m_Tilemap->SetRuleTilePath("");
+				m_Dirty = true;
+				m_StatusFeedback = "已恢复为内存自定九宫格模式";
+			}
+			else
+			{
+				const std::string& pickedPath = rtOptions[static_cast<size_t>(rtSelected)];
+				LoadRuleTileAsset(pickedPath);
+			}
+		}
+
+		// 打开规则编辑器按钮
+		const Wui::WuiRect btnOpenRt { rtComboRect.X + rtComboRect.W + 3.0f, lY, openRtBtnW, 22.0f };
+		Wui::Tooltip(ctx, btnOpenRt, "在专属工作台中打开当前规则瓦片资产 (tilemap.btn.open_ruletile)");
+		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.open_ruletile"), btnOpenRt, "打开规则", theme))
+		{
+			if (!m_ActiveRuleTilePath.empty())
+				host.OpenRuleTileEditor(m_ActiveRuleTilePath);
+		}
+
+		// 清除绑定按钮
+		const Wui::WuiRect btnClearRt { btnOpenRt.X + btnOpenRt.W + 3.0f, lY, clearRtBtnW, 22.0f };
+		Wui::Tooltip(ctx, btnClearRt, "清除规则瓦片资产绑定，恢复为内存九宫格");
+		if (Wui::Button(ctx, Wui::HashId("tilemap.btn.clear_ruletile"), btnClearRt, "✕", theme))
+		{
+			m_ActiveRuleTilePath.clear();
+			m_ActiveRuleTile.reset();
+			if (m_Tilemap) m_Tilemap->SetRuleTilePath("");
+			m_Dirty = true;
+			m_StatusFeedback = "已恢复为内存自定九宫格模式";
+		}
+		lY += 26.0f;
+
 		Wui::Label(ctx, { leftCol.X + 10.0f, lY }, "⚡ 自动拼接九宫格规则 (点选下方瓦片后点击方位绑定):", theme.Accent, 11.0f);
 		lY += 18.0f;
 		Wui::Label(ctx, { leftCol.X + 10.0f, lY }, "逻辑: 检测上下左右是否有相邻瓦片，无邻居侧自动切换为边缘/转角切片", theme.TextMuted, 10.0f);

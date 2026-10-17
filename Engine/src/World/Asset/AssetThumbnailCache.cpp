@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Asset/AssetThumbnailCache.h"
+#include "World/WUI/WuiContext.h"
 
 #include <algorithm>
 #include <cctype>
@@ -21,7 +22,8 @@ namespace World
 			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
 		if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" ||
-		    ext == ".bmp" || ext == ".dds" || ext == ".hdr" || ext == ".webp")
+		    ext == ".bmp" || ext == ".dds" || ext == ".hdr" || ext == ".webp" || ext == ".wtex" ||
+		    ext == ".watlas" || ext == ".wanim" || ext == ".wtilemap" || ext == ".wruletile")
 		{
 			return AssetCategory::Texture;
 		}
@@ -47,7 +49,8 @@ namespace World
 			return AssetCategory::Script;
 		}
 
-		if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac")
+		if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac" ||
+		    ext == ".waudio" || ext == ".wsound" || ext == ".wmixer" || ext == ".wvoice")
 		{
 			return AssetCategory::Audio;
 		}
@@ -55,6 +58,21 @@ namespace World
 		if (ext == ".wscene" || ext == ".scene" || ext == ".wlevel" || ext == ".level")
 		{
 			return AssetCategory::Level;
+		}
+
+		if (ext == ".wcurve")
+		{
+			return AssetCategory::Curve;
+		}
+
+		if (ext == ".slang")
+		{
+			return AssetCategory::Shader;
+		}
+
+		if (ext == ".wui")
+		{
+			return AssetCategory::UI;
 		}
 
 		return AssetCategory::Unknown;
@@ -81,6 +99,37 @@ namespace World
 		if (it != m_Thumbnails.end())
 			return &it->second;
 		return nullptr;
+	}
+
+	ThumbnailInfo* AssetThumbnailCache::GetThumbnail(const std::string& path)
+	{
+		auto it = m_Thumbnails.find(path);
+		if (it != m_Thumbnails.end())
+			return &it->second;
+		return nullptr;
+	}
+
+	uint64_t AssetThumbnailCache::GetOrCreateTextureId(const std::string& path)
+	{
+		auto it = m_Thumbnails.find(path);
+		if (it != m_Thumbnails.end() && it->second.TextureId != 0)
+			return it->second.TextureId;
+
+		AssetCategory cat = (it != m_Thumbnails.end() && it->second.Category != AssetCategory::Unknown)
+			? it->second.Category : DetectCategory(path);
+
+		if (cat == AssetCategory::Texture)
+		{
+			uint64_t id = Wui::ResolveTextureWithHook(path);
+			if (id != 0)
+			{
+				ThumbnailInfo& info = (it != m_Thumbnails.end()) ? it->second : GetOrCreateThumbnail(path);
+				info.TextureId = id;
+				info.IsReady = true;
+				return id;
+			}
+		}
+		return 0;
 	}
 
 	ThumbnailInfo& AssetThumbnailCache::GetOrCreateThumbnail(const std::string& path)

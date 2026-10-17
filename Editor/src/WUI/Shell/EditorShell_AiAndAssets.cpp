@@ -1,4 +1,9 @@
 #include "EditorShell_Internal.h"
+#include "WUI/Panels/AudioMixerPanel.h"
+#include "WUI/Panels/PhysicsMaterialEditorPanel.h"
+#include "WUI/Panels/TextureSettingsPanel.h"
+#include "WUI/Panels/UiDesignerPanel.h"
+#include "WUI/Common/EditorAssetTypes.h"
 
 namespace World
 {
@@ -720,6 +725,160 @@ TilemapEditorPanel* EditorShell::FindTilemapPanel(const std::string& logicalPath
 	if (it != m_PanelRegistry.end())
 		return dynamic_cast<TilemapEditorPanel*>(it->second.get());
 	return nullptr;
+}
+
+void EditorShell::OpenRuleTileEditor(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	if (path.empty()) return;
+	const std::string panelId = "ruletile:" + path;
+	if (m_PanelRegistry.find(panelId) == m_PanelRegistry.end())
+	{
+		auto panel = std::make_unique<RuleTileEditorPanel>(path);
+		m_PanelRegistry.emplace(panelId, std::move(panel));
+		m_Panels.push_back(panelId);
+		m_Layout.FloatMemory.push_back({ panelId, Wui::WuiRect { 220.0f, 150.0f, 960.0f, 620.0f } });
+	}
+	OpenPanelAttached(panelId);
+}
+
+void EditorShell::EnsureRuleTilePanelFromId(const std::string& panelId)
+{
+	if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
+		return;
+	if (panelId.rfind("ruletile:", 0) != 0)
+		return;
+	const std::string path = panelId.substr(9);
+	auto panel = std::make_unique<RuleTileEditorPanel>(path);
+	m_PanelRegistry.emplace(panelId, std::move(panel));
+	if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
+		m_Panels.push_back(panelId);
+}
+
+RuleTileEditorPanel* EditorShell::FindRuleTilePanel(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	const std::string panelId = "ruletile:" + path;
+	auto it = m_PanelRegistry.find(panelId);
+	if (it != m_PanelRegistry.end())
+		return dynamic_cast<RuleTileEditorPanel*>(it->second.get());
+	return nullptr;
+}
+
+
+void EditorShell::OpenAsset(const std::string& rawPath)
+{
+	if (rawPath.empty())
+		return;
+
+	std::string path = rawPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+
+	std::filesystem::path p(path);
+	std::filesystem::path physPath;
+	if (std::filesystem::exists(p))
+		physPath = std::filesystem::absolute(p);
+	else if (std::filesystem::exists(Paths::AssetRoot() / p))
+		physPath = std::filesystem::absolute(Paths::AssetRoot() / p);
+	else if (std::filesystem::exists(Paths::ProjectDir() / p))
+		physPath = std::filesystem::absolute(Paths::ProjectDir() / p);
+
+	std::string logical = path;
+	if (!physPath.empty())
+	{
+		std::error_code ec;
+		std::filesystem::path rel = std::filesystem::relative(physPath, Paths::AssetRoot(), ec);
+		if (!ec && !rel.empty())
+			logical = rel.generic_string();
+	}
+	else
+	{
+		const std::string prefix = "assets/";
+		if (logical.rfind(prefix, 0) == 0)
+			logical = logical.substr(prefix.size());
+	}
+
+	const std::string ext = LowerExtension(physPath.empty() ? p : physPath);
+
+	if (ext == ".wlevel")
+	{
+		OpenScene(physPath.empty() ? p : physPath);
+		Notify("已载入关卡: " + logical);
+	}
+	else if (ext == ".wmat" || ext == ".slang")
+	{
+		OpenMaterialEditor(logical);
+		Notify("已在材质编辑器中打开: " + logical);
+	}
+	else if (ext == ".watlas")
+	{
+		OpenAtlasEditor(logical);
+		Notify("已在图集编辑器中打开: " + logical);
+	}
+	else if (ext == ".wanim")
+	{
+		OpenAnimationEditor(logical);
+		Notify("已在序列帧动画编辑器中打开: " + logical);
+	}
+	else if (ext == ".wtilemap")
+	{
+		OpenTilemapEditor(logical);
+		Notify("已在瓦片地图编辑器中打开: " + logical);
+	}
+	else if (ext == ".wruletile")
+	{
+		OpenRuleTileEditor(logical);
+		Notify("已在规则瓦片工作台中打开: " + logical);
+	}
+	else if (ext == ".wphysmat")
+	{
+		OpenPhysicsMaterialEditor(logical);
+		Notify("已在物理材质编辑器中打开: " + logical);
+	}
+	else if (ext == ".wcurve")
+	{
+		OpenCurveEditor(logical);
+		Notify("已在贝塞尔曲线编辑器中打开: " + logical);
+	}
+	else if (ext == ".lua" || ext == ".luau")
+	{
+		OpenScriptEditor(logical);
+		Notify("已在脚本编辑器中打开: " + logical);
+	}
+	else if (ext == ".wmodel" || ext == ".obj" || ext == ".gltf" || ext == ".glb")
+	{
+		OpenModelPreview(logical);
+		Notify("已打开 3D 模型资产预览: " + logical);
+	}
+	else if (ext == ".wprefab")
+	{
+		OpenPrefabWindow(logical);
+		Notify("已打开预制体资产窗口: " + logical);
+	}
+	else if (ext == ".wsound" || ext == ".waudio" || ext == ".wmixer" || ext == ".wvoice" || ext == ".wav" || ext == ".ogg" || ext == ".mp3")
+	{
+		AudioMixerPanel::RequestOpenAsset(physPath.empty() ? path : physPath.generic_string());
+		OpenOrFocusIndependentWindow("audio_mixer");
+		Notify("已在音频调音台载入: " + logical);
+	}
+	else if (ext == ".wui")
+	{
+		UiDesignerPanel::RequestOpenPath(logical);
+		AiActivatePanel("ui_designer", nullptr);
+		Notify("已在 UI 设计器中打开: " + logical);
+	}
+	else if (ext == ".wtex" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp")
+	{
+		Editor::TextureSettingsRequests::Get().Request(logical, Editor::TextureSettingsRequests::Kind::Open);
+		AiActivatePanel("texture_settings", nullptr);
+		Notify("已在纹理面板中打开: " + logical);
+	}
+	else
+	{
+		Notify("已选中资产: " + logical);
+	}
 }
 
 void EditorShell::OpenPhysicsMaterialEditor(const std::string& logicalPath)

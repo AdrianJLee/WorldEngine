@@ -18,7 +18,10 @@ namespace World
 		Prefab = 4,
 		Script = 5,
 		Audio = 6,
-		Level = 7
+		Level = 7,
+		Curve = 8,
+		Shader = 9,
+		UI = 10
 	};
 
 	struct ThumbnailInfo
@@ -41,6 +44,8 @@ namespace World
 		void RegisterThumbnail(const std::string& path, const ThumbnailInfo& info);
 		bool HasThumbnail(const std::string& path) const;
 		const ThumbnailInfo* GetThumbnail(const std::string& path) const;
+		ThumbnailInfo* GetThumbnail(const std::string& path);
+		uint64_t GetOrCreateTextureId(const std::string& path);
 		ThumbnailInfo& GetOrCreateThumbnail(const std::string& path);
 		void Clear();
 		size_t Count() const;

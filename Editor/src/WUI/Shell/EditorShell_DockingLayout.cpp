@@ -409,7 +409,8 @@ void EditorShell::OnRender(Wui::WuiContext& ctx){
 			// PLUG-AUTH-1:"新建插件"模态(目标/模板/名称/ID/落盘)同样封锁下层命中。
 			|| m_NewPluginOpen
 			// PROJ-2/T1:项目启动器(启动态窗口级模态)同样封锁下层命中。
-			|| m_Editor.ShowProjectLauncher();
+			|| m_Editor.ShowProjectLauncher()
+			|| m_AssetPickerModal.IsOpen();
 		// P4-U6b:面板级模态(属性面板的"添加组件"居中窗口)与 shell 模态同一条封锁路径;
 		// 渲染该面板之前会解开(RenderTabs),画完再封回去。
 		const bool panelModalOpen = !m_PanelModalOwner.empty();

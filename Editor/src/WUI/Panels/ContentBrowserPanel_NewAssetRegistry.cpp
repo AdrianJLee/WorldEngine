@@ -297,6 +297,28 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				return true;
 			});
 
+		add("ruletile", "2D Rule Tile (规则瓦片)", ".wruletile", 43, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				RuleTile rt = RuleTile::CreateStandard47Template("new_ruletile", "assets/textures/characters/dungeon_atlas.watlas", 1);
+				std::string yaml = rt.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_ruletile", ".wruletile");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				out.close();
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-ruletile");
+				std::error_code ec;
+				const std::filesystem::path rel = std::filesystem::relative(target, m_Model.Root, ec);
+				m_Host.OpenRuleTileEditor(ec ? target.generic_string() : rel.generic_string());
+				return true;
+			});
+
 	}
 
 

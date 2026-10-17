@@ -1403,7 +1403,7 @@ void EditorShell::DrawProjectLauncherModal(Wui::WuiContext& ctx){
 			|| m_NewLuaSystemOpen
 			|| m_ImportModalOpen ||
 			m_PrefabPendingAction != PrefabPendingAction::None || m_Editor.ShowUnsavedModal() ||
-			m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress();
+			m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress() || m_AssetPickerModal.IsOpen();
 		const bool visible = m_Editor.ShowProjectLauncher() && !blockedByOtherModal;
 		// PROJ-7/T3b:刚回到前台的那一帧吞掉点击/Esc(理由见头文件 m_LauncherModalVisible 注释):
 		// 向导的"取消"与启动器按钮在同一帧收口时,上一次输入的落点会命中启动器按钮。

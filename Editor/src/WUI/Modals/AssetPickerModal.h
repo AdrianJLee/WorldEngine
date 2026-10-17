@@ -13,7 +13,7 @@ namespace World
 	class PanelHost;
 
 	// 资产选择器模态弹窗 (AssetPickerModal)
-	// 支持按类别过滤、模糊关键词搜索、网格与列表双视图、实时缩略图选择
+	// 真实项目资产驱动，支持按类别过滤、模糊关键词搜索、实时大图缩略图网格与列表双视图
 	class AssetPickerModal
 	{
 	public:
@@ -27,6 +27,7 @@ namespace World
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 
 		const std::string& GetSelectedItem() const { return m_SelectedItem; }
+		size_t AssetCount() const { return m_AllAssets.size(); }
 
 	private:
 		struct AssetItem
@@ -36,7 +37,7 @@ namespace World
 			AssetCategory Category = AssetCategory::Unknown;
 		};
 
-		void PopulateDefaultAssets();
+		void PopulateProjectAssets();
 		bool MatchesFilter(const AssetItem& item) const;
 
 		bool m_IsOpen = false;
@@ -51,5 +52,8 @@ namespace World
 
 		std::vector<AssetItem> m_AllAssets;
 		std::vector<std::string> m_CategoryNames;
+		double m_LastClickTime = 0.0;
+		std::string m_LastClickedItem;
+		float m_ScrollOffset = 0.0f;
 	};
 }

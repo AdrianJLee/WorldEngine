@@ -474,6 +474,16 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 			m_Host.OpenTilemapEditor(logical);
 			WLD_CORE_INFO("[tilemap] editor opened: {0}", logical);
 		}
+		else if (LowerExtension(path) == ".wruletile")
+		{
+			// 规则瓦片资产双击 → 打开专属规则瓦片工作台
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			m_Host.OpenRuleTileEditor(logical);
+			WLD_CORE_INFO("[ruletile] editor opened: {0}", logical);
+		}
 		else if (LowerExtension(path) == ".wphysmat")
 		{
 			// M1: 物理材质资产双击 → 打开物理材质编辑器

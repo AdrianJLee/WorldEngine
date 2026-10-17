@@ -462,6 +462,8 @@ namespace World
 		out << YAML::BeginMap;
 		out << YAML::Key << "Tilemap" << YAML::Value << m_Name;
 		out << YAML::Key << "AtlasPath" << YAML::Value << m_AtlasPath;
+		if (!m_RuleTilePath.empty())
+			out << YAML::Key << "RuleTilePath" << YAML::Value << m_RuleTilePath;
 	out << YAML::Key << "GridType" << YAML::Value << TilemapGridUtils::GetGridTypeName(m_GridType);
 		out << YAML::Key << "Width" << YAML::Value << m_Width;
 		out << YAML::Key << "Height" << YAML::Value << m_Height;
@@ -508,6 +510,8 @@ namespace World
 
 			if (data["AtlasPath"])
 				m_AtlasPath = data["AtlasPath"].as<std::string>();
+			if (data["RuleTilePath"])
+				m_RuleTilePath = data["RuleTilePath"].as<std::string>();
 			if (data["GridType"])
 				m_GridType = TilemapGridUtils::ParseGridTypeName(data["GridType"].as<std::string>().c_str());
 			if (data["Width"])

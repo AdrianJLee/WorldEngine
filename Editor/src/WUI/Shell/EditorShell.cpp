@@ -346,6 +346,8 @@ EditorShell::PanelForm EditorShell::FormOf(const std::string& panel) const{
 			return PanelForm::Independent;
 		if (panel.compare(0, std::strlen(kTilemapPanelPrefix), kTilemapPanelPrefix) == 0)
 			return PanelForm::Independent;
+		if (panel.compare(0, std::strlen(kRuleTilePanelPrefix), kRuleTilePanelPrefix) == 0)
+			return PanelForm::Independent;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
 				return spec.Form;
@@ -1338,6 +1340,11 @@ void EditorShell::OpenCurveEditor(const std::string& logicalPath)
 		}
 	}
 	OpenOrFocusIndependentWindow("curve_editor");
+}
+
+void EditorShell::OpenAssetPicker(std::string_view title, AssetCategory category, std::function<void(const std::string&)> onSelect)
+{
+	m_AssetPickerModal.Open(title, category, std::move(onSelect));
 }
 
 }

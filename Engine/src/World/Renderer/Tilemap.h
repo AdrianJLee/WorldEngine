@@ -35,6 +35,9 @@ namespace World
 		const std::string& GetAtlasPath() const noexcept { return m_AtlasPath; }
 		void SetAtlasPath(std::string path) { m_AtlasPath = std::move(path); }
 
+		const std::string& GetRuleTilePath() const noexcept { return m_RuleTilePath; }
+		void SetRuleTilePath(std::string path) { m_RuleTilePath = std::move(path); }
+
 		uint32_t GetWidth() const noexcept { return m_Width; }
 		uint32_t GetHeight() const noexcept { return m_Height; }
 		void Resize(uint32_t width, uint32_t height);
@@ -83,6 +86,7 @@ namespace World
 	private:
 		std::string m_Name { "NewTilemap" };
 		std::string m_AtlasPath;
+		std::string m_RuleTilePath;
 		uint32_t m_Width { 16 };
 		uint32_t m_Height { 16 };
 		glm::vec2 m_CellSize { 1.0f, 1.0f };

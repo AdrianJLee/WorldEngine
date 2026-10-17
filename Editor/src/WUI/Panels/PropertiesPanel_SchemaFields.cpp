@@ -735,12 +735,39 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 						// 注意类型:beforePick 必须是 int —— 写成 bool 时 selected(1) != true 恒为 false,
 						// "选到第 1 个资产"就永远不会写回(实测踩过)。
 						const int beforePick = selected;
-						if (Wui::SearchableCombo(ctx, fid, ctrl, "", options, selected, theme)
+						const float btnW = 26.0f;
+						const Wui::WuiRect comboRect { ctrl.X, ctrl.Y, std::max(20.0f, ctrl.W - btnW - 3.0f), ctrl.H };
+						const Wui::WuiRect pickBtnRect { ctrl.X + ctrl.W - btnW, ctrl.Y, btnW, ctrl.H };
+
+						if (Wui::SearchableCombo(ctx, fid, comboRect, "", options, selected, theme)
 							&& selected != beforePick)
 						{
 							value = selected <= 0 ? std::string() : options[static_cast<size_t>(selected)];
 							fieldChanged = true;
 						}
+
+						Wui::Tooltip(ctx, pickBtnRect, Wui::Tr("panel.properties.browse_asset", "打开资产选择器浏览并选择"));
+						if (Wui::Button(ctx, fid ^ 0xABCD, pickBtnRect, "...", theme))
+						{
+							AssetCategory cat = AssetCategory::Unknown;
+							if (assetType == "Texture" || assetType == "Texture2D" || assetType == "TextureSource") cat = AssetCategory::Texture;
+							else if (assetType == "Material" || assetType == "PhysicsMaterial") cat = AssetCategory::Material;
+							else if (assetType == "Model" || assetType == "Mesh" || assetType == "ModelSource") cat = AssetCategory::Mesh;
+							else if (assetType == "Prefab") cat = AssetCategory::Prefab;
+							else if (assetType == "Script") cat = AssetCategory::Script;
+							else if (assetType == "Audio" || assetType == "Sound") cat = AssetCategory::Audio;
+							else if (assetType == "Scene" || assetType == "Level") cat = AssetCategory::Level;
+							else if (assetType == "Curve") cat = AssetCategory::Curve;
+
+							m_Host.OpenAssetPicker("Select " + assetType, cat, [instance, field, this, typeName](const std::string& picked) {
+								if (field.Set)
+								{
+									field.Set(instance, Schema::Value(picked));
+									m_Host.MarkDocumentDirty();
+								}
+							});
+						}
+
 						RegisterNode(Wui::HashId(idText.c_str()), "searchable-combo", ctrl, labelText,
 							current, reachable(ctrl), fieldDoc);
 						break;

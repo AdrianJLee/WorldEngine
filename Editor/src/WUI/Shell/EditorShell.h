@@ -28,8 +28,10 @@
 #include "WUI/Panels/SpriteAtlasEditorPanel.h"
 #include "WUI/Panels/SpriteAnimationEditorPanel.h"
 #include "WUI/Panels/TilemapEditorPanel.h"
+#include "WUI/Panels/RuleTileEditorPanel.h"
 #include "WUI/Panels/PhysicsMaterialEditorPanel.h"
 #include "WUI/Panels/CurveEditorPanel.h"
+#include "WUI/Modals/AssetPickerModal.h"
 #include "WUI/Shell/PluginEditorHost.h"
 #include "WUI/Shell/FloatWindowHost.h"
 #include "Project/ProjectLauncher.h"
@@ -147,8 +149,13 @@ namespace World
 		SpriteAtlasEditorPanel* FindAtlasPanel(const std::string& logicalPath);
 		SpriteAnimationEditorPanel* FindAnimationPanel(const std::string& logicalPath);
 		void OpenTilemapEditor(const std::string& logicalPath) override;
+		void OpenRuleTileEditor(const std::string& logicalPath) override;
+		void EnsureRuleTilePanelFromId(const std::string& panelId);
+		RuleTileEditorPanel* FindRuleTilePanel(const std::string& logicalPath);
 		void OpenPhysicsMaterialEditor(const std::string& logicalPath) override;
 		void OpenCurveEditor(const std::string& logicalPath) override;
+		void OpenAssetPicker(std::string_view title, AssetCategory category, std::function<void(const std::string&)> onSelect) override;
+		void OpenAsset(const std::string& path) override;
 		void EnsureTilemapPanelFromId(const std::string& panelId);
 		TilemapEditorPanel* FindTilemapPanel(const std::string& logicalPath);
 		// 动态材质面板(每个材质一个 "material:<path>" 面板):从布局存档恢复时按 id 建实例。
@@ -631,6 +638,8 @@ namespace World
 		// 动作本身走 ProjectScaffolder::EnsureBuildEntryPoints(纯逻辑 + 落盘),结果模态
 		// 显示"补了什么/跳过了什么" + 可复制的两条指引命令。
 		void DrawBuildEntryModal(Wui::WuiContext& ctx);
+		void DrawAssetPickerModal(Wui::WuiContext& ctx);
+		AssetPickerModal m_AssetPickerModal;
 		bool m_BuildEntryOpen = false;
 		Editor::ProjectScaffolder::BuildEntryResult m_BuildEntryResult;
 

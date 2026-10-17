@@ -159,6 +159,7 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 		constexpr const char* kAtlasPanelPrefix = "atlas:";
 		constexpr const char* kAnimPanelPrefix = "anim:";
 		constexpr const char* kTilemapPanelPrefix = "tilemap:";
+		constexpr const char* kRuleTilePanelPrefix = "ruletile:";
 	}
 
 	// ---- CPPT-6-ED-NEWSCRIPT + PECS-T8/T11:File ▸ New C++ …(组件 / 系统 / 空 同一个向导)----

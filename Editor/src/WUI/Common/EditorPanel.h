@@ -10,6 +10,7 @@
 #include "World/Scene/Scene.h"
 #include "World/Command/CommandHistory.h"
 #include "World/Scene/SelectionFilter.h"
+#include "World/Asset/AssetThumbnailCache.h"
 
 #include <cstdint>
 #include <string>
@@ -140,8 +141,11 @@ namespace World
 		virtual void OpenAtlasEditor(const std::string& logicalPath) { (void)logicalPath; }
 		virtual void OpenAnimationEditor(const std::string& logicalPath) { (void)logicalPath; }
 		virtual void OpenTilemapEditor(const std::string& logicalPath) { (void)logicalPath; }
+		virtual void OpenRuleTileEditor(const std::string& logicalPath) { (void)logicalPath; }
 		virtual void OpenPhysicsMaterialEditor(const std::string& logicalPath) { (void)logicalPath; }
 		virtual void OpenCurveEditor(const std::string& logicalPath) { (void)logicalPath; }
+		virtual void OpenAssetPicker(std::string_view title, AssetCategory category, std::function<void(const std::string&)> onSelect) { (void)title; (void)category; (void)onSelect; }
+		virtual void OpenAsset(const std::string& path) { (void)path; }
 		// ---- W8:脚本面板(Panels/ScriptsPanel)协作;默认空实现 = 宿主未接线 ----
 		// P4-U13:prefab 资产(内容浏览器双击/右键共用)。
 		// 打开编辑:把 .wprefab 当**文档**打开(顶部横幅标明"正在编辑 Prefab",保存 = 写回资产)。

@@ -1,4 +1,5 @@
 #include "ContentBrowserPanel_Internal.h"
+#include "WUI/Common/AssetThumbnailRenderer.h"
 
 namespace World
 {
@@ -248,18 +249,20 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 
 			// 图标:悬停时绕自身中心轻微放大,名称/信息的基线不动。
 			const float iconSize = kSliceIconSize * (hovered ? kSliceHoverIconScale : 1.0f);
-			const uint64_t icon = slice.IsDir ? m_DirIconId : m_FileIconId;
-			// M18(GameUI):网格图标染色表 —— `.slang` 代码蓝、`.wui` 紫罗兰;其余类型保持原色(白),
-			// 即"没有专属 tint 的类型"逐字段不变(`.wd`/`.wmat`/`.wmodel`/`.wprefab` 等)。
-			const Wui::WuiColor iconTint = slice.Kind == EditorAssetKind::Shader ? kShaderIconTint
-				: (slice.Kind == EditorAssetKind::UiDocument ? kUiIconTint
-					: Wui::WuiColor { 1, 1, 1, 1 });
-			if (icon != 0)
-				// W3.6:染色图标走库件 `Wui::Icon`(命令逐字段等价:矩形/uv/tint 都不变;
-				// 保留 icon != 0 守卫 ⇒ 不改变"无图不画"的既有行为,空图兜底不在这条路径上)。
-				Wui::Icon(ctx, { cell.X + cell.W * 0.5f - iconSize * 0.5f,
-						cell.Y + gap - (iconSize - kSliceIconSize) * 0.5f, iconSize, iconSize },
-					icon, { 0, 1, 1, -1 }, iconTint, theme);
+			const Wui::WuiRect thumbRect { cell.X + cell.W * 0.5f - iconSize * 0.5f,
+					cell.Y + gap - (iconSize - kSliceIconSize) * 0.5f, iconSize, iconSize };
+			if (!slice.IsDir)
+			{
+				std::error_code ec;
+				std::filesystem::path rel = std::filesystem::relative(slice.Path, m_Model.Root, ec);
+				std::string logical = (!ec && !rel.empty()) ? rel.generic_string() : slice.Path.filename().generic_string();
+				AssetCategory cat = AssetThumbnailCache::DetectCategory(logical);
+				Editor::AssetThumbnailRenderer::DrawThumbnail(ctx, thumbRect, logical, cat, theme);
+			}
+			else if (m_DirIconId != 0)
+			{
+				Wui::Icon(ctx, thumbRect, m_DirIconId, { 0, 1, 1, -1 }, { 1, 1, 1, 1 }, theme);
+			}
 
 			// Slang-B1:着色器的常驻类型徽标(与 prefab 徽标同一套画法;代码蓝底)。
 			if (slice.Kind == EditorAssetKind::Shader)

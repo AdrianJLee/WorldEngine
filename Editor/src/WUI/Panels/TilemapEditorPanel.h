@@ -86,6 +86,8 @@ namespace World
 		// [0:↖左上, 1:↑上边, 2:↗右上, 3:←左边, 4:■中心, 5:→右边, 6:↙左下, 7:↓下边, 8:↘右下, 9:●孤立, 10:✚内角]
 		uint16_t m_RuleSlotTiles[11] { 2, 6, 3, 8, 1, 9, 4, 7, 5, 16, 10 };
 		void RebuildRuleTileFromSlots();
+		std::string m_ActiveRuleTilePath;
+		bool LoadRuleTileAsset(const std::string& path, std::string* message = nullptr);
 		bool m_Dirty { false };
 		std::string m_StatusFeedback;
 

@@ -37,6 +37,8 @@ namespace World
 		SpriteAtlas,    // .watlas (2D 图集)
 		SpriteAnimation,// .wanim (2D 序列帧动画)
 		Tilemap,        // .wtilemap (2D 瓦片地图)
+		RuleTile,       // .wruletile (2D 规则瓦片)
+		Curve,          // .wcurve (贝塞尔曲线资产)
 		PhysicsMaterial,// .wphysmat (物理材质资产:摩擦力/弹性/合并模式)
 		Folder,
 		// 兼容别名:P4 之前的代码把"贴图"叫 Texture(= 源图)。新代码请用上面两个名字。
@@ -122,6 +124,10 @@ namespace World
 			return { EditorAssetKind::SpriteAnimation, "Sprite Animation" };
 		if (extension == ".wtilemap")
 			return { EditorAssetKind::Tilemap, "Tilemap" };
+		if (extension == ".wruletile")
+			return { EditorAssetKind::RuleTile, "Rule Tile", "asset.file.rule_tile" };
+		if (extension == ".wcurve")
+			return { EditorAssetKind::Curve, "Curve", "asset.file.curve" };
 		if (extension == ".wphysmat")
 			return { EditorAssetKind::PhysicsMaterial, "Physics Material", "asset.file.physics_material" };
 		if (extension == ".wui")
