@@ -252,6 +252,8 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		m_PanelRegistry.emplace("ai_audio_studio", std::make_unique<AiAudioStudioPanel>());
 		m_PanelRegistry.emplace("audio_profiler", std::make_unique<AudioProfilerPanel>());
 		m_PanelRegistry.emplace("physics_material_editor", std::make_unique<PhysicsMaterialEditorPanel>());
+m_PanelRegistry.emplace("curve_editor", std::make_unique<CurveEditorPanel>());
+m_PanelRegistry.emplace("selection_filter", std::make_unique<SelectionFilterPanel>());
 		// PLUG-T3:插件管理器面板(数据/动作都走 EditorShell → EditorLayer;项目形态才注册)。
 		if (!m_LauncherMode)
 			m_PanelRegistry.emplace("plugins", std::make_unique<PluginsPanel>(*this));
@@ -1239,6 +1241,9 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 			{ "plugins",         { "panel.plugins.title", "Plugins" } },
 			{ "texture_settings", { "panel.texture_settings", "Texture Settings" } },
 			{ "audio_profiler",  { "panel.audio_profiler", "音频分析器 (Audio Profiler)" } },
+			{ "physics_material_editor", { "panel.physics_material_editor", "Physics Material Editor" } },
+			{ "curve_editor",    { "panel.curve_editor", "Curve Editor" } },
+			{ "selection_filter", { "panel.selection_filter", "Selection Filter" } },
 		};
 		(void)kTitles;
 		// PLUG-T3b:插件面板标题来自插件注册(不受本地化表约束;卸载后注册表为空,回退到 id)。

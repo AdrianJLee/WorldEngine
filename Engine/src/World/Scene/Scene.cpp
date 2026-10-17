@@ -20,6 +20,8 @@
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/VirtualCameraSystem.h"
 #include "World/Renderer/PostProcess/PostProcessPasses.h"
+#include "World/Renderer/ParticleSystem.h"
+#include "World/Script/Bindings/BindParticle.h"
 #include <box2d/box2d.h>
 #include <algorithm>
 #include <chrono>
@@ -2321,6 +2323,21 @@ namespace World
 		if (ScriptEngine::IsInitialized())
 			ScriptEngine::PollSystemScriptReload(*this, ts.GetSeconds());
 		RunFrameSystems(ts);
+				{
+			const auto& reg = static_cast<const Scene&>(*this).GetRegistry();
+			float dt = ts.GetSeconds();
+			auto& partSys = GetGlobalParticleSystem();
+			for (auto entity : reg.view<ParticleSystemComponent>())
+			{
+				auto& comp = const_cast<entt::registry&>(reg).get<ParticleSystemComponent>(entity);
+				if (!comp.IsPlaying) continue;
+				glm::vec3 pos(0.0f);
+				if (const auto* tc = reg.try_get<TransformComponent>(entity))
+					pos = tc->Location;
+				auto& pool = partSys.GetPoolForEntity(static_cast<uint32_t>(entity), comp.MaxParticles);
+				pool.Update(dt, comp, pos);
+			}
+		}
 		Audio::AudioSystem::Get().Update(ts.GetSeconds(), this);
 		FlushStructuralChanges();
 	}
@@ -2330,6 +2347,22 @@ namespace World
 		BeginFrame();
 		EnsureDefaultFrameSystems();
 		RunFrameSystems(ts);
+		{
+			const auto& reg = static_cast<const Scene&>(*this).GetRegistry();
+			float dt = ts.GetSeconds();
+			auto& partSys = GetGlobalParticleSystem();
+			for (auto entity : reg.view<ParticleSystemComponent>())
+			{
+				auto& comp = const_cast<entt::registry&>(reg).get<ParticleSystemComponent>(entity);
+				if (!comp.IsPlaying) continue;
+				glm::vec3 pos(0.0f);
+				if (const auto* tc = reg.try_get<TransformComponent>(entity))
+					pos = tc->Location;
+				auto& pool = partSys.GetPoolForEntity(static_cast<uint32_t>(entity), comp.MaxParticles);
+				pool.Update(dt, comp, pos);
+			}
+		}
+
 	}
 
 	void Scene::OnRuntimeStart()

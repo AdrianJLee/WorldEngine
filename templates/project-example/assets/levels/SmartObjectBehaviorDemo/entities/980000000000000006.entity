@@ -1,0 +1,25 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000006
+  World::TagComponent:
+    Tag: AI Agent
+  World::TransformComponent:
+    Location: [0, 0.9, 0]
+    Rotation: [0, 0, 0]
+    Scale: [0.9, 1.8, 0.9]
+  World::HealthComponent:
+    CurrentHealth: 100
+    MaxHealth: 100
+    Shield: 0
+    MaxShield: 0
+    Armor: 0
+    InvulnerableDuration: 0.2
+    IsDead: false
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.25, 0.6, 1, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

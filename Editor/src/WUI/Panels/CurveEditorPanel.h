@@ -13,7 +13,7 @@ namespace World
 		CurveEditorPanel();
 		~CurveEditorPanel() override = default;
 
-		const char* Id() const override { return "CurveEditor"; }
+		const char* Id() const override { return "curve_editor"; }
 		const char* Title() const override { return "Curve Editor"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 

@@ -104,11 +104,11 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double emitCount = RequireNum("Particle", method, args, count, 1);
 
-			auto* comp = scene->GetRegistry().try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
-			const auto* tc = scene->GetRegistry().try_get<TransformComponent>(ent);
+			const auto* tc = static_cast<const Scene*>(scene)->GetRegistry().try_get<TransformComponent>(ent);
 			glm::vec3 pos = tc ? tc->Location : glm::vec3(0.0f);
 			glm::quat rot = tc ? tc->Rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
@@ -126,7 +126,7 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[1];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 
-			auto* comp = scene->GetRegistry().try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
@@ -142,7 +142,7 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[2];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 
-			auto* comp = scene->GetRegistry().try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
@@ -158,7 +158,7 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[3];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 
-			auto* comp = scene->GetRegistry().try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
@@ -176,7 +176,7 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[4];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 
-			auto* comp = scene->GetRegistry().try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
 			if (!comp)
 				return ScriptValue::Number(0.0);
 
@@ -193,7 +193,7 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			bool locked = RequireBool("Particle", method, args, count, 1);
 
-			auto* comp = scene->GetRegistry().try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
@@ -210,7 +210,7 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double rate = RequireNum("Particle", method, args, count, 1);
 
-			auto* comp = scene->GetRegistry().try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
@@ -227,7 +227,7 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double speed = RequireNum("Particle", method, args, count, 1);
 
-			auto* comp = scene->GetRegistry().try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
@@ -244,7 +244,7 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double lifetime = RequireNum("Particle", method, args, count, 1);
 
-			auto* comp = scene->GetRegistry().try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 

@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000002
+  World::TagComponent:
+    Tag: SunLight
+  World::TransformComponent:
+    Location: [0, 15, 0]
+    Rotation: [-50, 30, 0]
+    Scale: [1, 1, 1]
+  World::DirectionalLightComponent:
+    Color: [1, 0.96, 0.9, 1]
+    Intensity: 1.3
+    CastShadows: false
+  World::LevelEntityComponent:
+    DataLayerMask: 1

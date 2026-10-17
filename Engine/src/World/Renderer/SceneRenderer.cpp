@@ -5,6 +5,8 @@
 
 #include "World/RHI/RhiFramebufferBridge.h"
 #include "World/Renderer/PostProcess/PostProcessPasses.h"
+#include "World/Renderer/ParticleSystem.h"
+#include "World/Script/Bindings/BindParticle.h"
 
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
@@ -2425,6 +2427,20 @@ namespace World
 			const glm::vec3 center = tr.Location;
 			Renderer2D::DrawLineCore(center - glm::vec3(halfW * 0.4f * sign, 0.0f, 0.0f),
 				center + glm::vec3(halfW * 0.4f * sign, 0.0f, 0.0f), { 0.95f, 0.85f, 0.2f, 0.9f }, static_cast<uint32_t>(entity));
+		}
+	// M5: 2D & 3D 粒子系统四边形绘制
+		auto& partSys = GetGlobalParticleSystem();
+		for (auto entity : m_ActiveScene->m_Registry.view<ParticleSystemComponent>())
+		{
+			const auto& comp = m_ActiveScene->m_Registry.get<ParticleSystemComponent>(entity);
+			uint32_t entId = static_cast<uint32_t>(entity);
+			if (!partSys.HasPoolForEntity(entId)) continue;
+			auto& pool = partSys.GetPoolForEntity(entId, comp.MaxParticles);
+			for (const auto& p : pool.GetParticles())
+			{
+				if (!p.Active) continue;
+				Renderer2D::DrawRotatedQuad(p.Position, p.Size, p.Rotation, p.Color);
+			}
 		}
 	}
 

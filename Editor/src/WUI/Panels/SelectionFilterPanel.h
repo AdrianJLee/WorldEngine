@@ -12,7 +12,7 @@ namespace World
 		SelectionFilterPanel();
 		~SelectionFilterPanel() override = default;
 
-		const char* Id() const override { return "SelectionFilter"; }
+		const char* Id() const override { return "selection_filter"; }
 		const char* Title() const override { return "Selection Filter"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 

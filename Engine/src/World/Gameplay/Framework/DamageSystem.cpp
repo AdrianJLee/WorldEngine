@@ -71,7 +71,7 @@ namespace World::Gameplay
 
 	void DamageSystem::Update(Scene& scene, float dt)
 	{
-		auto& reg = scene.GetRegistry();
+		auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
 		for (auto entity : reg.view<HealthComponent>())
 		{
 			auto& health = reg.get<HealthComponent>(entity);
@@ -84,7 +84,7 @@ namespace World::Gameplay
 
 	float DamageSystem::ApplyDamage(Scene& scene, const DamageEvent& event)
 	{
-		auto& reg = scene.GetRegistry();
+		auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
 		if (!reg.valid(event.Target) || event.Amount <= 0.0f)
 			return 0.0f;
 

@@ -422,7 +422,7 @@ namespace World
 
 			entt::entity ent = RequireEntityId("Physics", method, args, count, 0);
 
-			const auto* kcc = scene->GetRegistry().try_get<CharacterControllerComponent>(ent);
+			const auto* kcc = static_cast<const Scene*>(scene)->GetRegistry().try_get<CharacterControllerComponent>(ent);
 			if (!kcc)
 				return ScriptValue::Boolean(false);
 
@@ -441,7 +441,7 @@ namespace World
 			entt::entity ent = RequireEntityId("Physics", method, args, count, 0);
 			const float jumpSpeed = static_cast<float>(RequireNumber("Physics", method, args, count, 1));
 
-			auto* kcc = scene->GetRegistry().try_get<CharacterControllerComponent>(ent);
+			auto* kcc = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<CharacterControllerComponent>(ent);
 			if (!kcc)
 				return ScriptValue::Boolean(false);
 
@@ -710,7 +710,7 @@ namespace World
 				throw std::logic_error("Physics.ApplyMaterial requires an active scene");
 
 			entt::entity ent = RequireEntityId("Physics", method, args, count, 0);
-			auto& reg = scene->GetRegistry();
+			auto& reg = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry());
 			if (!reg.valid(ent))
 				return ScriptValue::Boolean(false);
 

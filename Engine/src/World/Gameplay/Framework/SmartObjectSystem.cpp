@@ -10,7 +10,7 @@ namespace World::Gameplay
 {
 	bool SmartObjectSystem::ClaimSlot(Scene& scene, entt::entity smartObject, entt::entity claimer)
 	{
-		auto& reg = scene.GetRegistry();
+		auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
 		auto* so = reg.try_get<SmartObjectComponent>(smartObject);
 		if (!so || so->Enabled == 0 || so->SlotState != SmartObjectSlotState::Available)
 			return false;
@@ -22,7 +22,7 @@ namespace World::Gameplay
 
 	bool SmartObjectSystem::UseSlot(Scene& scene, entt::entity smartObject, entt::entity user)
 	{
-		auto& reg = scene.GetRegistry();
+		auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
 		auto* so = reg.try_get<SmartObjectComponent>(smartObject);
 		if (!so || so->Enabled == 0)
 			return false;
@@ -45,7 +45,7 @@ namespace World::Gameplay
 
 	bool SmartObjectSystem::ReleaseSlot(Scene& scene, entt::entity smartObject)
 	{
-		auto& reg = scene.GetRegistry();
+		auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
 		auto* so = reg.try_get<SmartObjectComponent>(smartObject);
 		if (!so || so->SlotState == SmartObjectSlotState::Available)
 			return false;
@@ -85,7 +85,7 @@ namespace World::Gameplay
 	entt::entity SmartObjectSystem::FindNearestAvailableSlot(Scene& scene, const glm::vec3& searchPos,
 	                                                        uint32_t activityTag, float maxRange)
 	{
-		auto& reg = scene.GetRegistry();
+		const auto& reg = static_cast<const Scene&>(scene).GetRegistry();
 		entt::entity bestEntity = entt::null;
 		float bestDistSq = maxRange * maxRange;
 
@@ -112,7 +112,7 @@ namespace World::Gameplay
 
 	void SmartObjectSystem::Update(Scene& scene, float dt)
 	{
-		auto& reg = scene.GetRegistry();
+		auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
 		for (auto entity : reg.view<SmartObjectComponent>())
 		{
 			auto& so = reg.get<SmartObjectComponent>(entity);

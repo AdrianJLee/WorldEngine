@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000003
+  World::TagComponent:
+    Tag: Ground Plane
+  World::TransformComponent:
+    Location: [0, -0.1, 0]
+    Rotation: [0, 0, 0]
+    Scale: [30, 0.2, 30]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.18, 0.2, 0.22, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

@@ -77,7 +77,7 @@ namespace World
 			const auto& method = GameplayCoreServiceBindings(nullptr)[0].Methods[0];
 			entt::entity ent = RequireEntityId("Health", method, args, count, 0);
 
-			const auto* health = scene->GetRegistry().try_get<HealthComponent>(ent);
+			const auto* health = static_cast<const Scene*>(scene)->GetRegistry().try_get<HealthComponent>(ent);
 			if (!health) return ScriptValue::Nil();
 
 			ScriptTableRef res = ScriptEngine::GetState().CreateTable();
@@ -128,7 +128,7 @@ namespace World
 			entt::entity ent = RequireEntityId("Health", method, args, count, 0);
 			uint8_t mode = static_cast<uint8_t>(RequireNum("Health", method, args, count, 1));
 
-			auto* health = scene->GetRegistry().try_get<HealthComponent>(ent);
+			auto* health = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<HealthComponent>(ent);
 			if (!health) return ScriptValue::Boolean(false);
 
 			health->MitigationMode = mode;
@@ -144,7 +144,7 @@ namespace World
 			entt::entity ent = RequireEntityId("Health", method, args, count, 0);
 			float amount = static_cast<float>(RequireNum("Health", method, args, count, 1));
 
-			auto* health = scene->GetRegistry().try_get<HealthComponent>(ent);
+			auto* health = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<HealthComponent>(ent);
 			if (!health) return ScriptValue::Number(0.0);
 
 			float healed = Gameplay::DamageSystem::Heal(*health, amount);
@@ -191,7 +191,7 @@ namespace World
 			if (!scene) throw std::logic_error("SmartObject.GetState requires an active scene");
 			const auto& method = GameplayCoreServiceBindings(nullptr)[1].Methods[3];
 			entt::entity so = RequireEntityId("SmartObject", method, args, count, 0);
-			const auto* comp = scene->GetRegistry().try_get<SmartObjectComponent>(so);
+			const auto* comp = static_cast<const Scene*>(scene)->GetRegistry().try_get<SmartObjectComponent>(so);
 			if (!comp) return ScriptValue::Nil();
 			return ScriptValue::Number(static_cast<double>(static_cast<uint8_t>(comp->SlotState)));
 		}

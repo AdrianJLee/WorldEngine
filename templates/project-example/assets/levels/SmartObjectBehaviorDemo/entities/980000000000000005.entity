@@ -1,0 +1,24 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000005
+  World::TagComponent:
+    Tag: Smart Rest Bench
+  World::TransformComponent:
+    Location: [6, 0.4, 0]
+    Rotation: [0, 0, 0]
+    Scale: [1.8, 0.8, 1.0]
+  World::SmartObjectComponent:
+    SlotOffset: [0, 0, 1.5]
+    FacingAngleDeg: 0
+    CooldownDuration: 3.0
+    InteractionDistance: 2.0
+    SlotState: 0
+    Enabled: true
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.95, 0.65, 0.15, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

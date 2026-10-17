@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000005
+  World::TagComponent:
+    Tag: Stage Floor
+  World::TransformComponent:
+    Location: [0, -0.25, 0]
+    Rotation: [0, 0, 0]
+    Scale: [16, 0.5, 8]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.15, 0.18, 0.22, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1
