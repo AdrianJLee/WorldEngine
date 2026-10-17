@@ -1,12 +1,12 @@
-#include <glm/vec2.hpp>
 #include "wldpch.h"
+#include <glm/vec2.hpp>
 #include "WUI/Panels/PhysicsMaterialEditorPanel.h"
 
 #include "World/Core/Log.h"
 #include "World/Utils/Paths.h"
 #include "World/Core/KeyCodes.h"
-#include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -140,60 +140,6 @@ namespace World
 		}
 	}
 
-	void PhysicsMaterialEditorPanel::ApplyPreset(const std::string& name)
-	{
-		if (name == "Default")
-		{
-			m_Material.Id = "PhysMat_Default";
-			m_Material.Friction = 0.5f;
-			m_Material.Restitution = 0.0f;
-			m_Material.FrictionCombine = PhysMatCombineMode::Average;
-			m_Material.RestitutionCombine = PhysMatCombineMode::Average;
-		}
-		else if (name == "Ice")
-		{
-			m_Material.Id = "PhysMat_Ice";
-			m_Material.Friction = 0.05f;
-			m_Material.Restitution = 0.05f;
-			m_Material.FrictionCombine = PhysMatCombineMode::Minimum;
-			m_Material.RestitutionCombine = PhysMatCombineMode::Minimum;
-		}
-		else if (name == "Rubber")
-		{
-			m_Material.Id = "PhysMat_BouncyRubber";
-			m_Material.Friction = 0.85f;
-			m_Material.Restitution = 0.90f;
-			m_Material.FrictionCombine = PhysMatCombineMode::Average;
-			m_Material.RestitutionCombine = PhysMatCombineMode::Maximum;
-		}
-		else if (name == "Metal")
-		{
-			m_Material.Id = "PhysMat_Metal";
-			m_Material.Friction = 0.40f;
-			m_Material.Restitution = 0.15f;
-			m_Material.FrictionCombine = PhysMatCombineMode::Average;
-			m_Material.RestitutionCombine = PhysMatCombineMode::Average;
-		}
-		else if (name == "Wood")
-		{
-			m_Material.Id = "PhysMat_Wood";
-			m_Material.Friction = 0.60f;
-			m_Material.Restitution = 0.10f;
-			m_Material.FrictionCombine = PhysMatCombineMode::Average;
-			m_Material.RestitutionCombine = PhysMatCombineMode::Average;
-		}
-		else if (name == "Mud")
-		{
-			m_Material.Id = "PhysMat_Mud";
-			m_Material.Friction = 1.30f;
-			m_Material.Restitution = 0.0f;
-			m_Material.FrictionCombine = PhysMatCombineMode::Maximum;
-			m_Material.RestitutionCombine = PhysMatCombineMode::Minimum;
-		}
-		m_Dirty = true;
-		m_StatusFeedback = "已应用预设: " + name;
-	}
-
 	bool PhysicsMaterialEditorPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
 	{
 		(void)shift;
@@ -266,38 +212,11 @@ namespace World
 			m_StatusFeedback = "已在资源管理器中定位: " + full.string();
 		}
 
-		curY += 42.0f;
+		curY += 44.0f;
 
-		// 2. Presets Quick Toolbar
-		const Wui::WuiRect presetBar { rect.X + padX, curY, contentW, 32.0f };
-		Wui::PanelBackground(ctx, presetBar, theme.ContentBg, 4.0f);
-		Wui::Label(ctx, { presetBar.X + 8.0f, presetBar.Y + 8.0f }, "快速预设:", theme.TextMuted, 11.5f);
-
-		float pX = presetBar.X + 70.0f;
-		const struct { const char* Name; const char* Tag; } kPresets[] = {
-			{ "默认 (Default)", "Default" },
-			{ "冰面 (Ice)", "Ice" },
-			{ "高弹橡胶 (Rubber)", "Rubber" },
-			{ "金属 (Metal)", "Metal" },
-			{ "木材 (Wood)", "Wood" },
-			{ "泥泞 (Mud)", "Mud" }
-		};
-
-		for (size_t i = 0; i < 6; ++i)
-		{
-			const Wui::WuiRect pBtnRect { pX, presetBar.Y + 4.0f, 96.0f, 24.0f };
-			if (Wui::Button(ctx, Wui::HashId(("pmat.preset." + std::to_string(i)).c_str()), pBtnRect, kPresets[i].Name, theme))
-			{
-				ApplyPreset(kPresets[i].Tag);
-			}
-			pX += 102.0f;
-		}
-
-		curY += 38.0f;
-
-		// 3. Main Parameter Configuration Card
+		// 2. Main Parameter Configuration Card
 		const float cardW = contentW;
-		const Wui::WuiRect cardRect { rect.X + padX, curY, cardW, 205.0f };
+		const Wui::WuiRect cardRect { rect.X + padX, curY, cardW, 145.0f };
 		Wui::PanelBackground(ctx, cardRect, theme.ContentBg, 6.0f);
 
 		float rowY = cardRect.Y + 12.0f;
@@ -305,17 +224,7 @@ namespace World
 		const float fieldX = cardRect.X + 180.0f;
 		const float fieldW = cardW - 200.0f;
 
-		// Row 1: Identifier Id
-		Wui::Label(ctx, { labelX, rowY + 3.0f }, "材质标识 (Id):", theme.Text, 12.0f);
-		const Wui::WuiRect idFieldRect { fieldX, rowY, fieldW, 22.0f };
-		std::string oldId = m_Material.Id;
-		if (Wui::TextField(ctx, Wui::HashId("pmat.field.id"), idFieldRect, m_Material.Id, theme) && m_Material.Id != oldId)
-		{
-			m_Dirty = true;
-		}
-		rowY += 32.0f;
-
-		// Row 2: Friction
+		// Row 1: Friction
 		std::ostringstream ssF;
 		ssF << std::fixed << std::setprecision(2) << m_Material.Friction;
 		std::string fText = "滑动摩擦力 (Friction): " + ssF.str();
@@ -330,7 +239,7 @@ namespace World
 		}
 		rowY += 32.0f;
 
-		// Row 3: Restitution
+		// Row 2: Restitution
 		std::ostringstream ssR;
 		ssR << std::fixed << std::setprecision(2) << m_Material.Restitution;
 		std::string rText = "弹性系数 (Restitution): " + ssR.str();
@@ -345,7 +254,7 @@ namespace World
 		}
 		rowY += 32.0f;
 
-		// Row 4: Friction Combine Mode
+		// Row 3: Friction Combine Mode
 		Wui::Label(ctx, { labelX, rowY + 3.0f }, "摩擦力合并规则:", theme.Text, 12.0f);
 		const Wui::WuiRect fcComboRect { fieldX, rowY, fieldW, 22.0f };
 		const std::vector<std::string> combineOptions = {
@@ -363,7 +272,7 @@ namespace World
 		}
 		rowY += 32.0f;
 
-		// Row 5: Restitution Combine Mode
+		// Row 4: Restitution Combine Mode
 		Wui::Label(ctx, { labelX, rowY + 3.0f }, "弹性恢复合并规则:", theme.Text, 12.0f);
 		const Wui::WuiRect rcComboRect { fieldX, rowY, fieldW, 22.0f };
 		int curRc = static_cast<int>(m_Material.RestitutionCombine);
@@ -374,9 +283,9 @@ namespace World
 			m_Dirty = true;
 		}
 
-		curY += 215.0f;
+		curY += 155.0f;
 
-		// 4. Live Collision Simulation & Audition Card
+		// 3. Live Collision Simulation & Audition Card
 		const Wui::WuiRect simCard { rect.X + padX, curY, contentW, 115.0f };
 		Wui::PanelBackground(ctx, simCard, theme.ContentBg, 6.0f);
 
@@ -411,7 +320,7 @@ namespace World
 
 		curY += 125.0f;
 
-		// 5. Project Materials Quick Switcher
+		// 4. Project Materials Quick Switcher
 		if (!m_AvailableAssets.empty())
 		{
 			const Wui::WuiRect switchBar { rect.X + padX, curY, contentW, 30.0f };
@@ -438,7 +347,7 @@ namespace World
 			curY += 34.0f;
 		}
 
-		// 6. Bottom Status Feedback
+		// 5. Bottom Status Feedback
 		if (!m_StatusFeedback.empty())
 		{
 			const Wui::WuiRect statusRect { rect.X + padX, curY, contentW, 24.0f };

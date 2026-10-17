@@ -18,6 +18,8 @@
 #include "World/Gameplay/Framework/TimerSystem.h"
 #include "World/Physics/Physics3D.h"
 #include "World/Audio/AudioSystem.h"
+#include "World/Renderer/VirtualCameraSystem.h"
+#include "World/Renderer/PostProcess/PostProcessPasses.h"
 #include <box2d/box2d.h>
 #include <algorithm>
 #include <chrono>
@@ -2288,7 +2290,12 @@ namespace World
 		// 可变阶段(每帧一次):世界矩阵传播/相机/动画/抽取 —— 表现层,看到的是本帧
 		// **最后一次**物理步之后的位姿(GameApp 的顺序是 Fixed(0..N) → Update → Late → PreRender)。
 		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
-		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); } });
+		RegisterFrameSystem({ "virtual-camera-system", false, [this](Timestep ts) { VirtualCameraSystem::Update(*this, ts.GetSeconds()); },
+			Gameplay::SystemPhase::Late, { "transform-system" } });
+		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); },
+			Gameplay::SystemPhase::Late, { "virtual-camera-system" } });
+		RegisterFrameSystem({ "post-process-system", false, [this](Timestep ts) { PostProcessPipeline::Update(*this, ts.GetSeconds()); },
+			Gameplay::SystemPhase::PreRender, {} });
 		// PURE-ECS:骨骼动画采样进 `PreRender` 阶段 —— 它必须排在 transform-system 之后、
 		// 渲染之前;进管线后它出现在 Systems Pipeline 里,用户系统也能用 `after` 排序它。
 		// 幂等:编辑态不跑帧系统,由 SceneRenderer 兜底跑同一个 EnsureAnimationAdvanced。

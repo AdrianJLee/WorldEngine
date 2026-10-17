@@ -40,7 +40,7 @@ namespace World
 		float ox = std::sin(time * f * 1.11f) * std::cos(time * f * 0.73f);
 		float oy = std::cos(time * f * 1.37f) * std::sin(time * f * 0.91f);
 		float oz = std::sin(time * f * 0.83f);
-		return glm::vec3(ox, oy, oz) * shake * 0.5f;
+		return glm::vec3(ox, oy, oz * 0.2f) * shake * 2.8f;
 	}
 
 	glm::vec2 VirtualCameraSystem::ApplyDeadZone(const glm::vec2& currentOffset, const glm::vec2& deadZoneHalfExtents)
@@ -62,7 +62,7 @@ namespace World
 	void VirtualCameraSystem::Update(Scene& scene, float dt)
 	{
 		s_GlobalTime += dt;
-		auto& reg = scene.GetRegistry();
+		auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
 
 		entt::entity bestVcamEntity = entt::null;
 		int32_t bestPriority = std::numeric_limits<int32_t>::min();
@@ -74,6 +74,19 @@ namespace World
 			{
 				bestPriority = vcam.Priority;
 				bestVcamEntity = entity;
+			}
+		}
+
+		if (bestVcamEntity == entt::null)
+		{
+			for (auto entity : reg.view<VirtualCameraComponent>())
+			{
+				auto& vcam = reg.get<VirtualCameraComponent>(entity);
+				if (vcam.Priority > bestPriority)
+				{
+					bestPriority = vcam.Priority;
+					bestVcamEntity = entity;
+				}
 			}
 		}
 
@@ -121,7 +134,6 @@ namespace World
 				glm::vec3 idealTarget = targetPos + vcam.FollowOffset + targetVel * vcam.LookaheadTime;
 				desiredPos = SmoothDamp(currentCamPos, idealTarget, s_CurrentVelocity, vcam.Damping.x, dt);
 			}
-
 			desiredPos += shakeOffset;
 
 			if ((vcam.Flags & VirtualCameraFlags::LockZ) != 0)

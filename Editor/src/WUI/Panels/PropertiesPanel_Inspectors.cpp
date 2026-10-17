@@ -1,3 +1,4 @@
+#include "World/Physics/PhysicsMaterial.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/Tilemap.h"
 #include "World/Scene/Components.h"
@@ -43,6 +44,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawTransformInspector(ctx, rect, *static_cast<TransformComponent*>(instance), schema,
 				visibleRect, &changedFields);
 		// 自定义检查器:Primary / Fixed Aspect Ratio + 投影类型下拉 + 对应参数组。
+		else if (schema.Id.Name == "World::PhysicsMaterialComponent")
+			height = DrawPhysicsMaterialInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::CameraComponent")
 			height = DrawCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::AudioSourceComponent")
@@ -517,6 +520,89 @@ float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiR
 		return y + 2.0f;
 	}
 
+
+float PropertiesPanel::DrawPhysicsMaterialInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	auto* comp = static_cast<World::PhysicsMaterialComponent*>(instance);
+	std::string oldPath;
+	if (comp && comp->Material.HasPath())
+	{
+		oldPath = StringPool::Get().PathOf(comp->Material.Path);
+	}
+
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 4.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	if (comp)
+	{
+		std::string currentPath;
+		if (comp->Material.HasPath())
+		{
+			currentPath = StringPool::Get().PathOf(comp->Material.Path);
+		}
+
+		if (!currentPath.empty() && currentPath != oldPath)
+		{
+			std::filesystem::path full = currentPath;
+			if (!full.is_absolute())
+			{
+				if (currentPath.rfind("assets/", 0) == 0 || currentPath.rfind("assets\\", 0) == 0)
+					full = World::Paths::AssetRoot() / currentPath.substr(7);
+				else
+					full = World::Paths::AssetRoot() / full;
+			}
+			PhysicsMaterial mat;
+			if (PhysicsMaterial::LoadFromFile(full.string(), mat))
+			{
+				comp->Friction = mat.Friction;
+				comp->Restitution = mat.Restitution;
+				comp->FrictionCombine = mat.FrictionCombine;
+				comp->RestitutionCombine = mat.RestitutionCombine;
+				m_Host.MarkDocumentDirty();
+			}
+		}
+
+		if (!currentPath.empty())
+		{
+			const float btnW = 160.0f;
+			const Wui::WuiRect editBtnRect { rect.X + 8.0f, y, btnW, 22.0f };
+			Wui::Tooltip(ctx, editBtnRect, "在物理材质编辑器中打开此资产进行微调");
+			if (Wui::Button(ctx, Wui::HashId("pmat.inspector.open"), editBtnRect, "✏ 打开物理材质编辑器", theme))
+			{
+				m_Host.OpenPhysicsMaterialEditor(currentPath);
+			}
+
+			const Wui::WuiRect syncBtnRect { rect.X + 8.0f + btnW + 6.0f, y, 130.0f, 22.0f };
+			Wui::Tooltip(ctx, syncBtnRect, "从磁盘资产文件重新载入摩擦力与弹性数值");
+			if (Wui::Button(ctx, Wui::HashId("pmat.inspector.sync"), syncBtnRect, "↻ 从资产同步数值", theme))
+			{
+				std::filesystem::path full = currentPath;
+				if (!full.is_absolute())
+				{
+					if (currentPath.rfind("assets/", 0) == 0 || currentPath.rfind("assets\\", 0) == 0)
+						full = World::Paths::AssetRoot() / currentPath.substr(7);
+					else
+						full = World::Paths::AssetRoot() / full;
+				}
+				PhysicsMaterial mat;
+			if (PhysicsMaterial::LoadFromFile(full.string(), mat))
+			{
+				comp->Friction = mat.Friction;
+				comp->Restitution = mat.Restitution;
+				comp->FrictionCombine = mat.FrictionCombine;
+				comp->RestitutionCombine = mat.RestitutionCombine;
+				m_Host.MarkDocumentDirty();
+			}
+			}
+			y += 26.0f;
+		}
+	}
+
+	return (y - rect.Y);
+}
 
 float PropertiesPanel::DrawAudioSourceInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,

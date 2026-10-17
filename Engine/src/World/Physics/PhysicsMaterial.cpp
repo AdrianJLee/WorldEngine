@@ -58,7 +58,6 @@ namespace World
 	{
 		YAML::Emitter out;
 		out << YAML::BeginMap;
-		out << YAML::Key << "Id" << YAML::Value << Id;
 		out << YAML::Key << "Friction" << YAML::Value << Friction;
 		out << YAML::Key << "Restitution" << YAML::Value << Restitution;
 		out << YAML::Key << "FrictionCombine" << YAML::Value << CombineModeToString(FrictionCombine);
@@ -80,8 +79,6 @@ namespace World
 			if (!root || !root.IsMap())
 				return false;
 
-			if (root["Id"])
-				outMaterial.Id = root["Id"].as<std::string>();
 			if (root["Friction"])
 				outMaterial.Friction = root["Friction"].as<float>();
 			if (root["Restitution"])

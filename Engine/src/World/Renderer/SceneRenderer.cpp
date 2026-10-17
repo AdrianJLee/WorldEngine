@@ -4,6 +4,7 @@
 #include "World/Renderer/Lighting2D.h"
 
 #include "World/RHI/RhiFramebufferBridge.h"
+#include "World/Renderer/PostProcess/PostProcessPasses.h"
 
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
@@ -1396,6 +1397,45 @@ namespace World
 		RenderGroundGrid(camera, cameraTransform);
 		Render2DLighting(camera, cameraTransform);
 		RenderGeometry(camera, cameraTransform);
+
+		// M2: Fullscreen Post-Processing Passes (Flash White Overlay)
+		if (m_ActiveScene)
+		{
+			PostProcessUniforms pp = PostProcessPipeline::GetActiveUniforms(*m_ActiveScene);
+			if (pp.Enabled && pp.FlashWhiteIntensity > 0.001f)
+			{
+				const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+				const glm::vec3 camForward = -glm::normalize(glm::vec3(cameraTransform[2]));
+				const glm::vec3 camUp = glm::normalize(glm::vec3(cameraTransform[1]));
+				const glm::vec3 camRight = glm::normalize(glm::vec3(cameraTransform[0]));
+
+				const bool isOrtho = (std::abs(camera.GetProjectionMatrix()[3][3] - 1.0f) < 1e-4f);
+				float h = 100.0f;
+				float w = 100.0f;
+				float dist = 1.0f;
+
+				if (isOrtho)
+				{
+					h = 2.0f / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[1][1]));
+					w = 2.0f / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[0][0]));
+				}
+				else
+				{
+					dist = 0.3f;
+					h = 2.0f * dist / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[1][1]));
+					w = 2.0f * dist / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[0][0]));
+				}
+
+				glm::mat4 quadTr(1.0f);
+				quadTr[0] = glm::vec4(camRight * (w * 2.5f), 0.0f);
+				quadTr[1] = glm::vec4(camUp * (h * 2.5f), 0.0f);
+				quadTr[2] = glm::vec4(-camForward, 0.0f);
+				quadTr[3] = glm::vec4(camPos + camForward * dist, 1.0f);
+
+				glm::vec4 flashColor(1.0f, 1.0f, 1.0f, std::min(1.0f, pp.FlashWhiteIntensity * 0.95f));
+				Renderer2D::DrawQuad(quadTr, nullptr, 1.0f, flashColor);
+			}
+		}
 
 		Renderer2D::EndScene();
 		m_CommandBuffers[slot]->EndRenderPass();

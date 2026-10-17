@@ -26,7 +26,6 @@ namespace World
 
 	private:
 		void RefreshAvailableAssets();
-		void ApplyPreset(const std::string& name);
 
 		static std::string s_PendingOpenPath;
 		std::string m_LoadedPath;

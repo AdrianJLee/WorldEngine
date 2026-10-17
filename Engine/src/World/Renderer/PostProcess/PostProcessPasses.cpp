@@ -9,7 +9,7 @@ namespace World
 {
 	void PostProcessPipeline::Update(Scene& scene, float dt)
 	{
-		auto& reg = scene.GetRegistry();
+		auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
 		for (auto entity : reg.view<PostProcessComponent>())
 		{
 			auto& pp = reg.get<PostProcessComponent>(entity);
@@ -22,23 +22,13 @@ namespace World
 
 	void PostProcessPipeline::FlashWhite(Scene& scene, float intensity, float decay)
 	{
-		auto& reg = scene.GetRegistry();
-		bool found = false;
+		auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
 		for (auto entity : reg.view<PostProcessComponent>())
 		{
 			auto& pp = reg.get<PostProcessComponent>(entity);
 			pp.FlashWhiteIntensity = intensity;
 			pp.FlashWhiteDecay = decay;
-			found = true;
 			break;
-		}
-
-		if (!found)
-		{
-			entt::entity e = reg.create();
-			auto& pp = reg.emplace<PostProcessComponent>(e);
-			pp.FlashWhiteIntensity = intensity;
-			pp.FlashWhiteDecay = decay;
 		}
 	}
 

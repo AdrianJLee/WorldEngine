@@ -693,7 +693,6 @@ namespace World
 				return ScriptValue::Nil();
 
 			ScriptTableRef result = ScriptEngine::GetState().CreateTable();
-			result.SetField("Id", ScriptValue::String(mat.Id));
 			result.SetField("Friction", ScriptValue::Number(static_cast<double>(mat.Friction)));
 			result.SetField("Restitution", ScriptValue::Number(static_cast<double>(mat.Restitution)));
 			result.SetField("FrictionCombine", ScriptValue::Number(static_cast<double>(static_cast<uint8_t>(mat.FrictionCombine))));

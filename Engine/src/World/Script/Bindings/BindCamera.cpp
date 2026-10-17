@@ -153,7 +153,8 @@ namespace World
 			VirtualCameraComponent* bestCam = nullptr;
 			int32_t maxPriority = std::numeric_limits<int32_t>::min();
 
-			auto view = scene.GetRegistry().view<VirtualCameraComponent>();
+			auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
+			auto view = reg.view<VirtualCameraComponent>();
 			for (auto entity : view)
 			{
 				auto& vcam = view.get<VirtualCameraComponent>(entity);
@@ -196,14 +197,8 @@ namespace World
 
 		void ForEachPostProcess(Scene& scene, const std::function<void(PostProcessComponent&)>& fn)
 		{
-			auto view = scene.GetRegistry().view<PostProcessComponent>();
-			if (view.begin() == view.end())
-			{
-				Entity entity = Entity::CreateEntity(&scene, "PostProcessVolume");
-				auto& pp = entity.AddComponent<PostProcessComponent>();
-				fn(pp);
-				return;
-			}
+			auto& reg = const_cast<entt::registry&>(static_cast<const Scene&>(scene).GetRegistry());
+			auto view = reg.view<PostProcessComponent>();
 			for (auto entity : view)
 			{
 				fn(view.get<PostProcessComponent>(entity));
@@ -297,7 +292,8 @@ namespace World
 			glm::vec3 pos(0.0f);
 			bool found = false;
 
-			auto primaryCamView = scene->GetRegistry().view<CameraComponent, TransformComponent>();
+			const auto& reg = static_cast<const Scene*>(scene)->GetRegistry();
+			auto primaryCamView = reg.view<CameraComponent, TransformComponent>();
 			for (auto ent : primaryCamView)
 			{
 				const auto& cam = primaryCamView.get<CameraComponent>(ent);
@@ -321,7 +317,7 @@ namespace World
 
 			if (!found)
 			{
-				auto vcamView = scene->GetRegistry().view<VirtualCameraComponent, TransformComponent>();
+				auto vcamView = reg.view<VirtualCameraComponent, TransformComponent>();
 				for (auto ent : vcamView)
 				{
 					const auto& vcam = vcamView.get<VirtualCameraComponent>(ent);
@@ -355,7 +351,6 @@ namespace World
 			const float intensity = static_cast<float>(OptionalNumber("PostProcess", method, args, count, 0, 1.0));
 			const float decay = static_cast<float>(OptionalNumber("PostProcess", method, args, count, 1, 5.0));
 
-			GetOrCreatePostProcess(*scene);
 			PostProcessPipeline::FlashWhite(*scene, intensity, decay);
 			return ScriptValue::Nil();
 		}

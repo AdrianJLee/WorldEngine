@@ -9331,6 +9331,26 @@ struct GeneratedAccess<World::AudioListenerComponent>
 template <>
 struct GeneratedAccess<World::PhysicsMaterialComponent>
 {
+    static Value Get_Material(const void* instance)
+    {
+        const World::PhysicsMaterialComponent* self = static_cast<const World::PhysicsMaterialComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Material)>>::GetPath(self->Material));
+    }
+    static void Set_Material(void* instance, const Value& value)
+    {
+        World::PhysicsMaterialComponent* self = static_cast<World::PhysicsMaterialComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Material)>>::SetPath(self->Material, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_Material(const void* instance)
+    {
+        const World::PhysicsMaterialComponent* self = static_cast<const World::PhysicsMaterialComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Material)>>::GetIdentity(self->Material);
+    }
+    static void SetAssetIdentity_Material(void* instance, uint64_t identity)
+    {
+        World::PhysicsMaterialComponent* self = static_cast<World::PhysicsMaterialComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Material)>>::SetIdentity(self->Material, identity);
+    }
     static Value Get_Friction(const void* instance)
     {
         const World::PhysicsMaterialComponent* self = static_cast<const World::PhysicsMaterialComponent*>(instance);
@@ -9378,6 +9398,31 @@ struct GeneratedAccess<World::PhysicsMaterialComponent>
     static const EnumSchema* GetEnum_RestitutionCombine()
     {
         return &WeEnumSchemaOf_PhysMatCombineMode();
+    }
+    static const FieldSchema& Field_Material()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBF3764535F15D28Bull },
+            "Material",
+            Kind::Asset,
+            &Get_Material,
+            &Set_Material,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "PhysicsMaterial",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Path to .wphysmat physical material asset.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_Material,
+            &SetAssetIdentity_Material,
+        };
+        return schema;
     }
     static const FieldSchema& Field_Friction()
     {
@@ -9465,6 +9510,7 @@ struct GeneratedAccess<World::PhysicsMaterialComponent>
             sizeof(World::PhysicsMaterialComponent),
             TypeCategory::Component,
             {
+                Field_Material(),
                 Field_Friction(),
                 Field_Restitution(),
                 Field_FrictionCombine(),

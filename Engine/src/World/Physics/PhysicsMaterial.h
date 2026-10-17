@@ -10,7 +10,6 @@ namespace World
 {
 	struct WLD_API PhysicsMaterial
 	{
-		std::string Id = "default";
 		float Friction = 0.5f;
 		float Restitution = 0.0f;
 		PhysMatCombineMode FrictionCombine = PhysMatCombineMode::Average;

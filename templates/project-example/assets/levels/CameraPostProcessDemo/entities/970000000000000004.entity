@@ -1,0 +1,27 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000004
+  World::TagComponent:
+    Tag: Hero Character
+  World::TransformComponent:
+    Location: [0, 1.2, 0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::CharacterControllerComponent:
+    Velocity: [0, 0, 0]
+    StepOffset: 0.3
+    SlopeLimitDeg: 45
+    SkinWidth: 0.02
+    CoyoteDuration: 0.15
+    JumpBufferDuration: 0.15
+    GravityScale: 1
+    Grounded: true
+    LockZPlane: false
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.2, 0.65, 1, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

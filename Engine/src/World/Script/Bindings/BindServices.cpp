@@ -1,5 +1,9 @@
 #include "wldpch.h"
 #include "World/Script/Bindings/BindServices.h"
+#include "World/Core/Input.h"
+#include "World/Core/Application.h"
+#include "World/Core/KeyCodes.h"
+#include <cctype>
 
 #include "World/Gameplay/Runtime/GameApp.h"
 #include "World/Gameplay/Framework/InputMap.h"
@@ -798,7 +802,49 @@ namespace World
 		return true;
 	}
 
-	const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
+			ScriptValue InputIsKeyPressedImpl(const ScriptValue* args, std::size_t count)
+		{
+			if (count == 0 || args[0].IsNil())
+				return ScriptValue::Boolean(false);
+
+			int keyCode = -1;
+			if (args[0].IsNumber())
+			{
+				double num = 0.0;
+				args[0].AsNumber(&num);
+				keyCode = static_cast<int>(num);
+			}
+			else if (args[0].IsString())
+			{
+				std::string str;
+				args[0].AsString(&str);
+				for (char& c : str) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+				if (str == "SPACE") keyCode = KeyCodes::Space;
+				else if (str == "F") keyCode = KeyCodes::F;
+				else if (str == "A") keyCode = KeyCodes::A;
+				else if (str == "D") keyCode = KeyCodes::D;
+				else if (str == "W") keyCode = KeyCodes::W;
+				else if (str == "S") keyCode = KeyCodes::S;
+				else if (str == "ESCAPE" || str == "ESC") keyCode = KeyCodes::Escape;
+				else if (str == "ENTER" || str == "RETURN") keyCode = KeyCodes::Enter;
+				else if (str == "LEFT") keyCode = KeyCodes::Left;
+				else if (str == "RIGHT") keyCode = KeyCodes::Right;
+				else if (str == "UP") keyCode = KeyCodes::Up;
+				else if (str == "DOWN") keyCode = KeyCodes::Down;
+				else if (str.length() == 1 && str[0] >= 'A' && str[0] <= 'Z')
+					keyCode = KeyCodes::A + (str[0] - 'A');
+			}
+
+			if (keyCode >= 0)
+			{
+				if (!Application::HasInstance())
+					return ScriptValue::Boolean(false);
+				return ScriptValue::Boolean(World::Input::IsKeyPressed(keyCode));
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 	{
 		// 方法描述是纯数据;方法体是独立函数,因此可以在描述表里直接引用、无需数组自引用。
 		// 描述表必须是 static:GameplayServiceBindings() 每次调用返回同一份只读描述,
@@ -820,6 +866,9 @@ namespace World
 		static const ScriptServiceParam inputAxis[] = {
 			{ "axis", "string", ScriptServiceArgType::String, true, "Registered axis name." },
 			{ "player", "integer", ScriptServiceArgType::Number, false, "Player slot; 0 is the primary player." },
+		};
+				static const ScriptServiceParam inputKeyParam[] = {
+			{ "key", "string|number", ScriptServiceArgType::String | ScriptServiceArgType::Number, true, "Key name ('Space', 'F', 'A', 'D') or integer keycode." },
 		};
 		static const ScriptServiceMethod inputMethods[] = {
 			// 方法体先包装成 ScriptNativeFunction:描述表是静态的,函数指针需要显式构造。
@@ -878,6 +927,11 @@ namespace World
 				return InputHasContextImpl(args, count);
 			}, inputContextName, 1, 1, "boolean",
 				"Whether a mapping context is currently active." },
+			{ "IsKeyPressed", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputIsKeyPressedImpl(args, count);
+			}, inputKeyParam, 1, 1, "boolean",
+				"Direct hardware key poll (key name like 'Space', 'F' or keycode number). Returns true while key is held." },
 		};
 
 		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。
@@ -1056,10 +1110,10 @@ namespace World
 				"Last save/load error; empty when the last operation succeeded." },
 		};
 		static const ScriptServiceBinding services[] = {
-			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, 10 },
-			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, 14 },
-			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, 7 },
-			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, 6 },
+			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, sizeof(inputMethods) / sizeof(inputMethods[0]) },
+			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, sizeof(levelMethods) / sizeof(levelMethods[0]) },
+			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, sizeof(saveMethods) / sizeof(saveMethods[0]) },
+			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, sizeof(timeMethods) / sizeof(timeMethods[0]) },
 		};
 		if (count)
 			*count = sizeof(services) / sizeof(services[0]);

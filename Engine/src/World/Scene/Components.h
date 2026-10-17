@@ -1889,6 +1889,7 @@ namespace World
 
 	struct PhysicsMaterialComponent
 	{
+		AssetRef Material;
 		float Friction = 0.5f;
 		float Restitution = 0.0f;
 		PhysMatCombineMode FrictionCombine = PhysMatCombineMode::Average;
@@ -1900,6 +1901,8 @@ namespace World
 		WE_SCHEMA_BODY(World, PhysicsMaterialComponent, Component)
 			WE_SCHEMA_META(Category("Physics"),
 				Doc("Physics Material properties for friction, bounciness and combine algorithms."))
+			WE_FIELD(Material, Asset, Of("PhysicsMaterial"),
+				Doc("Path to .wphysmat physical material asset."));
 			WE_FIELD(Friction, Float, Range(0.0f, 2.0f),
 				Doc("Surface friction coefficient."));
 			WE_FIELD(Restitution, Float, Range(0.0f, 1.0f),

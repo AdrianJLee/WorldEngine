@@ -90,7 +90,7 @@ namespace
 		{ "World::LevelEntityComponent",          4 },
 		{ "World::AudioSourceComponent",         40 },
 		{ "World::AudioListenerComponent",        8 },
-		{ "World::PhysicsMaterialComponent",     16 },
+		{ "World::PhysicsMaterialComponent",     32 },
 		{ "World::CharacterControllerComponent", 64 },
 		{ "World::VirtualCameraComponent",       64 },
 		{ "World::PostProcessComponent",         56 },

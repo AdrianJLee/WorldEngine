@@ -1,0 +1,7 @@
+Id: CameraPostProcessDemo
+Name: M2 Camera & PostProcess Showcase
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Base_World
+    DefaultActive: true

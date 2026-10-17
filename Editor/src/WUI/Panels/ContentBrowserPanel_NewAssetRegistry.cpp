@@ -63,7 +63,6 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 			[this](const std::filesystem::path& dir, std::string* error)
 			{
 				PhysicsMaterial mat;
-				mat.Id = "PhysMat_Default";
 				mat.Friction = 0.5f;
 				mat.Restitution = 0.0f;
 				mat.FrictionCombine = PhysMatCombineMode::Average;

@@ -69,6 +69,9 @@ int main()
 			assert(type(PostProcess.SetVignette) == "function", "PostProcess.SetVignette must be a function")
 			assert(type(PostProcess.SetBloom) == "function", "PostProcess.SetBloom must be a function")
 			assert(type(PostProcess.SetChromaticAberration) == "function", "PostProcess.SetChromaticAberration must be a function")
+			assert(type(Input.IsKeyPressed) == "function", "Input.IsKeyPressed must be a function")
+			assert(Input.IsKeyPressed("Space") == false, "Space should not be pressed in headless")
+			assert(Input.IsKeyPressed(32) == false, "Keycode 32 should not be pressed in headless")
 		)", "TableCheck");
 
 		// 只读保护测试

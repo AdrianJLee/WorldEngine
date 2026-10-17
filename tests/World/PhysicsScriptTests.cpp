@@ -107,7 +107,6 @@ int main()
 		uint32_t box2DId = static_cast<uint32_t>(static_cast<entt::entity>(box2D));
 
 		PhysicsMaterial scriptMat;
-		scriptMat.Id = "ice_mat";
 		scriptMat.Friction = 0.08f;
 		scriptMat.Restitution = 0.92f;
 		scriptMat.FrictionCombine = PhysMatCombineMode::Minimum;
@@ -206,7 +205,6 @@ assert(math.abs(hit.Distance - 4.0) < 0.05, "Raycast distance mismatch")
 		RunOk(R"lua(
 			local mat = Physics.LoadMaterial("test_script_material.wphysmat")
 			assert(type(mat) == "table", "Physics.LoadMaterial should return table")
-			assert(mat.Id == "ice_mat", "Material Id mismatch")
 			assert(math.abs(mat.Friction - 0.08) < 0.01, "Material Friction mismatch")
 			assert(math.abs(mat.Restitution - 0.92) < 0.01, "Material Restitution mismatch")
 			assert(mat.FrictionCombine == 1, "FrictionCombine mismatch (1=Minimum)")

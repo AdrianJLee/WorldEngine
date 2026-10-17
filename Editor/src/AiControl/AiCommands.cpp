@@ -3102,7 +3102,6 @@ namespace World
 			std::filesystem::create_directories(outPath.parent_path());
 
 			World::PhysicsMaterial mat;
-			mat.Id = args.count("id") ? arg("id") : outPath.stem().string();
 			mat.Friction = friction;
 			mat.Restitution = restitution;
 			auto parseMode = [](const std::string& s) {

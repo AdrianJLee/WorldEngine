@@ -38,7 +38,6 @@ static void TestSerialization()
 	const std::string testPath = "test_material.wphysmat";
 
 	PhysicsMaterial original;
-	original.Id = "ice_surface";
 	original.Friction = 0.05f;
 	original.Restitution = 0.85f;
 	original.FrictionCombine = PhysMatCombineMode::Minimum;
@@ -52,7 +51,6 @@ static void TestSerialization()
 	bool loadedOk = PhysicsMaterial::LoadFromFile(testPath, loaded);
 	assert(loadedOk);
 
-	assert(loaded.Id == "ice_surface");
 	assert(std::abs(loaded.Friction - 0.05f) < 1e-5f);
 	assert(std::abs(loaded.Restitution - 0.85f) < 1e-5f);
 	assert(loaded.FrictionCombine == PhysMatCombineMode::Minimum);
