@@ -90,10 +90,14 @@ static void TestLutPrecomputation()
 	std::cout << "[PASS] TestLutPrecomputation\n";
 }
 
+#include <crtdbg.h>
+
 int main()
 {
+	_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
 	Log::Init();
-	std::cout << "Running WorldCurveEditorTests...\n";
+	std::cout << "Running WorldCurveEditorTests...\n" << std::flush;
 
 	TestKeyframeManagement();
 	TestLinearEvaluation();

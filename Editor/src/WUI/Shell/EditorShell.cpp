@@ -1322,5 +1322,21 @@ void EditorShell::OpenAudioProfiler()
 	OpenOrFocusIndependentWindow("audio_profiler");
 }
 
+void EditorShell::OpenCurveEditor(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	auto it = m_PanelRegistry.find("curve_editor");
+	if (it != m_PanelRegistry.end())
+	{
+		auto* panel = dynamic_cast<CurveEditorPanel*>(it->second.get());
+		if (panel && !path.empty())
+		{
+			panel->LoadAsset(path);
+		}
+	}
+	OpenOrFocusIndependentWindow("curve_editor");
+}
+
 }
 

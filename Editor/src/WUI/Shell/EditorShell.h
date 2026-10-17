@@ -148,6 +148,7 @@ namespace World
 		SpriteAnimationEditorPanel* FindAnimationPanel(const std::string& logicalPath);
 		void OpenTilemapEditor(const std::string& logicalPath) override;
 		void OpenPhysicsMaterialEditor(const std::string& logicalPath) override;
+		void OpenCurveEditor(const std::string& logicalPath) override;
 		void EnsureTilemapPanelFromId(const std::string& panelId);
 		TilemapEditorPanel* FindTilemapPanel(const std::string& logicalPath);
 		// 动态材质面板(每个材质一个 "material:<path>" 面板):从布局存档恢复时按 id 建实例。

@@ -1,8 +1,11 @@
+
+#include "World/Math/Curve/CubicBezierCurve.h"
 #include "World/Physics/PhysicsMaterial.h"
 #include "World/Audio/SoundEvent.h"
 #include "World/Renderer/TextureAtlas.h"
 #include "World/Renderer/SpriteAnimation.h"
 #include "World/Renderer/Tilemap.h"
+#include "World/Math/Curve/CubicBezierCurve.h"
 #include <fstream>
 #include "ContentBrowserPanel_Internal.h"
 
@@ -76,6 +79,21 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				}
 				NotifyAssetWritten(target);
 				SelectCreated(target, "new-physics-material");
+				return true;
+			});
+		// 曲线资产(.wcurve):工业级曲线资产
+		add("curve", "Curve (曲线资产)", ".wcurve", 29, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "curve", ".wcurve");
+				CubicBezierCurve curve = CubicBezierCurve::EaseInOut();
+				if (!curve.SaveToFile(target.string()))
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-curve");
 				return true;
 			});
 		add("material", "Material", ".wmat", 10, false,
@@ -605,3 +623,4 @@ void ContentBrowserPanel::RefreshContents(){
 	}
 
 }
+

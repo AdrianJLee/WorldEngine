@@ -3,6 +3,7 @@
 #include "World/Core/Export.h"
 #include <cstdint>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace World
@@ -13,6 +14,14 @@ namespace World
 		Aligned = 1,
 		Clamped = 2,
 		Broken = 3
+	};
+
+	enum class CurveExtrapolation : uint8_t
+	{
+		Clamp = 0,    // 保持边界首末值
+		Cycle = 1,    // 周期循环 (t 自动取模)
+		PingPong = 2, // 往返反弹
+		Linear = 3    // 按端点切线斜率线性向外延伸
 	};
 
 	struct Keyframe
@@ -31,6 +40,9 @@ namespace World
 	class WLD_API CubicBezierCurve
 	{
 	public:
+		CurveExtrapolation PreExtrapolation = CurveExtrapolation::Clamp;
+		CurveExtrapolation PostExtrapolation = CurveExtrapolation::Clamp;
+
 		CubicBezierCurve() = default;
 		~CubicBezierCurve() = default;
 
@@ -44,6 +56,14 @@ namespace World
 		const std::vector<Keyframe>& GetKeyframes() const { return m_Keyframes; }
 
 		float Evaluate(float time) const;
+
+		void AutoSmoothTangents();
+		int FindNearestKeyframe(float time, float value, float timeTol = 0.05f, float valTol = 0.05f) const;
+
+		bool SaveToFile(const std::string& filepath) const;
+		bool LoadFromFile(const std::string& filepath);
+		std::string SerializeToYaml() const;
+		bool DeserializeFromYaml(const std::string& yaml);
 
 		void PrecomputeLut(size_t sampleCount = 256);
 		float EvaluateFastLut(float normalizedT) const;

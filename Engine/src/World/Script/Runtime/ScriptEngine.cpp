@@ -16,6 +16,7 @@
 #include "World/Script/Bindings/BindGameplay.h"
 #include "World/Script/Bindings/BindStreaming.h"
 #include "World/Script/Bindings/BindParticle.h"
+#include "World/Script/Bindings/BindCurve.h"
 #include "World/Script/Runtime/HotReload.h"
 #include "World/Script/Vm/LuauVm.h"
 #include "World/Script/Runtime/PluginScriptLibrary.h"
@@ -2195,6 +2196,9 @@ namespace World
 			// 粒子模拟全局服务面 (Particle 只读全局表;见 Script/BindParticle.h)。
 			if (!RegisterParticleBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the particle bindings: " + error);
+			// 曲线求值与预设全局服务面 (Curve 只读全局表;见 Script/Bindings/BindCurve.h)。
+			if (!RegisterCurveBindings(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the curve bindings: " + error);
 			// W3c:UI 面(只读全局表 `ui`;宿主入口 DrawScriptUi 见 Script/BindUI.h)。
 			if (!RegisterUiBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the UI bindings: " + error);
@@ -2408,6 +2412,11 @@ namespace World
 		const ScriptServiceBinding* particleTables = ParticleServiceBindings(&particleCount);
 		for (std::size_t index = 0; index < particleCount; ++index)
 			serviceList.push_back(&particleTables[index]);
+		// 曲线求值全局服务面 (Curve 只读全局表)
+		std::size_t curveCount = 0;
+		const ScriptServiceBinding* curveTables = CurveServiceBindings(&curveCount);
+		for (std::size_t index = 0; index < curveCount; ++index)
+			serviceList.push_back(&curveTables[index]);
 		// W3c:UI 块渲染在服务块之后、组件块之前(与脚本可见的全局表顺序一致)。
 		std::size_t uiCount = 0;
 		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);
@@ -2448,4 +2457,3 @@ namespace World
 
 
 }
-
