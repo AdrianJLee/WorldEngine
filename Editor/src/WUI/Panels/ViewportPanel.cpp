@@ -353,6 +353,10 @@ namespace World
 		const Wui::GizmoOperation activeGizmo = m_Host.GetGizmoOperation();
 
 		// 左岛全宽: 内衬4 + viewButtonW + 间隙3 + 分割线8 + 间隙3 + 5*22 + 4*2 + 内衬4
+		Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
+		Wui::WuiRect leftIslandRect { sceneRect.X + kChromePad, sceneRect.Y + kChromePad, 0.0f, 0.0f };
+		if (!play)
+		{
 		const float fullLeftIslandW = 4.0f + viewButtonW + 3.0f + 8.0f + 3.0f + (5 * gizmoBtnW + 4 * 2.0f) + 4.0f;
 		const float leftIslandX = sceneRect.X + kChromePad;
 		const float leftIslandY = sceneRect.Y + kChromePad;
@@ -405,6 +409,7 @@ namespace World
 			}
 			ctx.RegisterOverlayRect(gBtnRect);
 			leftCursor += gizmoBtnW + 2.0f;
+		}
 		}
 
 		// ③ 右岛 (Right Island - 覆盖层与状态徽章)
@@ -471,9 +476,12 @@ namespace World
 			rightIslandW = std::max(0.0f, (sceneRect.X + sceneRect.W - kChromePad) - rightIslandX);
 		}
 
-		const Wui::WuiRect rightIslandRect { rightIslandX, sceneRect.Y + kChromePad, rightIslandW, kIslandH };
-		Wui::Toolbar(ctx, rightIslandRect, theme, 6.0f, 0.85f);
-		ctx.RegisterOverlayRect(rightIslandRect);
+		Wui::WuiRect rightIslandRect { rightIslandX, sceneRect.Y + kChromePad, rightIslandW, kIslandH };
+		if (!play)
+		{
+			Wui::Toolbar(ctx, rightIslandRect, theme, 6.0f, 0.85f);
+			ctx.RegisterOverlayRect(rightIslandRect);
+		}
 
 		// 右岛内部控件由左向右整齐排布
 		float rightCursor = rightIslandRect.X + 4.0f;
@@ -482,7 +490,7 @@ namespace World
 
 		// 1) 数据层多选下拉按钮
 		Wui::WuiRect layersBtnRect {};
-		if (hasDataLayers && rightCursor + layersBtnW <= rightLimit)
+		if (!play && hasDataLayers && rightCursor + layersBtnW <= rightLimit)
 		{
 			layersBtnRect = { rightCursor, rightBtnY, layersBtnW, kBtnH };
 			Wui::Tooltip(ctx, layersBtnRect, Wui::Tr("viewport.layers.hint", "Manage data layer visibility."));
@@ -502,7 +510,7 @@ namespace World
 		}
 
 		// 2) 网格开关 (Grid) - 开启时背景变亮 (ActiveBg + Accent 边框)，严禁带有生硬的 : ON / : OFF
-		if (rightCursor + gridBtnW <= rightLimit)
+		if (!play && rightCursor + gridBtnW <= rightLimit)
 		{
 			const Wui::WuiRect gridBtn { rightCursor, rightBtnY, gridBtnW, kBtnH };
 			const bool gridOn = m_Host.IsReferenceGridEnabled();
@@ -522,7 +530,7 @@ namespace World
 		}
 
 		// 3) 分区开关 (Part) - 开启时高亮，严禁带有 : ON / : OFF
-		if (rightCursor + partBtnW <= rightLimit)
+		if (!play && rightCursor + partBtnW <= rightLimit)
 		{
 			const Wui::WuiRect partBtn { rightCursor, rightBtnY, partBtnW, kBtnH };
 			Wui::Tooltip(ctx, partBtn, Wui::Tr("viewport.partition.hint", "Toggle world partition & streaming chunk overlay."));
@@ -541,7 +549,7 @@ namespace World
 		}
 
 		// 4) 视角旋转锁定 (Lock) - 开启时高亮，严禁带有 : ON / : OFF
-		if (rightCursor + lockBtnW <= rightLimit)
+		if (!play && rightCursor + lockBtnW <= rightLimit)
 		{
 			const Wui::WuiRect mode2dBtn { rightCursor, rightBtnY, lockBtnW, kBtnH };
 			const bool is2D = m_Host.Is2DMode();
@@ -561,7 +569,7 @@ namespace World
 		}
 
 		// 4b) 2D 像素网格吸附开关 (Snap)
-		if (rightCursor + snapBtnW <= rightLimit)
+		if (!play && rightCursor + snapBtnW <= rightLimit)
 		{
 			const Wui::WuiRect snapBtn { rightCursor, rightBtnY, snapBtnW, kBtnH };
 			const bool isSnap = m_Host.IsPixelSnapEnabled();
@@ -581,7 +589,7 @@ namespace World
 		}
 
 		// 5) 分割线
-		if (rightCursor + 8.0f <= rightLimit)
+		if (!play && rightCursor + 8.0f <= rightLimit)
 		{
 			const Wui::WuiRect sepRect { rightCursor, rightIslandRect.Y, 8.0f, kIslandH };
 			Wui::ToolbarSeparator(ctx, sepRect, theme);
@@ -841,6 +849,8 @@ namespace World
 		// 半透明三轴指示(X 红 / Y 绿 / Z 蓝),朝向取**当前画面用的相机基** ——
 		// Play 下是场景主相机、2D 下是正交相机(此时 Z 投影为点,自然只剩 X/Y)。
 		{
+		if (!play)
+		{
 			const Wui::GizmoCamera axisCamera = m_Host.GetGizmoCamera();
 			const Wui::WuiRect axisRect = ViewChrome::DrawAxisIndicator(ctx, sceneRect,
 				axisCamera.Right, axisCamera.Up);
@@ -855,6 +865,7 @@ namespace World
 					"They follow the viewport camera; in 2D orthographic views only X and Y are visible."));
 			// 与其它悬浮层同一条口径:指示器下面的拾取/gizmo 不吃这一下的点击。
 			ctx.RegisterOverlayRect(axisRect);
+		}
 		}
 		ctx.PopOverlay();
 
@@ -880,7 +891,7 @@ namespace World
 		// 否则点箭头会被"点空白清空选择"吃掉,表现为"拖不动箭头"。
 		bool gizmoEngaged = false;
 		Entity selected = m_Host.GetSelectedEntity();
-		if (selected.IsValid() && selected.GetScene() == m_Host.GetActiveScene().get() &&
+		if (!play && selected.IsValid() && selected.GetScene() == m_Host.GetActiveScene().get() &&
 			selected.HasComponent<TransformComponent>() && m_Host.HasRenderedScene())
 		{
 			auto& transform = selected.GetComponent<TransformComponent>();
@@ -1016,7 +1027,7 @@ namespace World
 			m_Host.GetCameraPreviewTextureId() != 0 && !previewLabel.empty();
 		// 相机预览小窗挡住的位置不参与拾取(避免"点预览把背后物体选走")。
 		const bool overPreview = previewVisible && ctx.IsHovered(previewRect);
-		if (ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview && !overBanner)
+		if (!play && ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview && !overBanner)
 		{
 			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
 			const Entity picked = m_Host.PickEntityAt(local);
@@ -1041,7 +1052,7 @@ namespace World
 		if (selected.IsValid() && selected.HasComponent<CameraComponent>() &&
 			selected.HasComponent<TransformComponent>())
 			selectedCamera = selected;
-		if (m_Host.HasRenderedScene() && selectedCamera.IsValid())
+		if (!play && m_Host.HasRenderedScene() && selectedCamera.IsValid())
 		{
 			const Wui::GizmoCamera frustumCamera = m_Host.GetGizmoCamera();
 			const Ref<Scene> frustumScene = m_Host.GetActiveScene();
@@ -1157,7 +1168,7 @@ namespace World
 			const bool showAllLights = prefs.ViewportLightRangesAll;
 			const bool showAllColliders = prefs.ViewportColliderOutlinesAll;
 			const Ref<Scene> overlayScene = m_Host.GetActiveScene();
-			if (overlayScene && m_Host.HasRenderedScene())
+			if (!play && overlayScene && m_Host.HasRenderedScene())
 			{
 				const entt::registry& registry = static_cast<const Scene*>(overlayScene.get())->GetRegistry();
 				const Wui::GizmoCamera overlayCamera = m_Host.GetGizmoCamera();
@@ -1547,7 +1558,7 @@ namespace World
 		const bool showGrid = m_Host.IsReferenceGridEnabled();
 		const bool isElevationView = (currentVp == World::ViewportViewpoint::Front || currentVp == World::ViewportViewpoint::Back ||
 			currentVp == World::ViewportViewpoint::Right || currentVp == World::ViewportViewpoint::Left);
-		if (showGrid && isOrtho && isElevationView)
+		if (!play && showGrid && isOrtho && isElevationView)
 		{
 			Wui::ClipScope gridClip(ctx, sceneRect);
 			const float orthoSpan = std::max(0.1f, levelCam.OrthographicSize);
@@ -1941,7 +1952,7 @@ namespace World
 				"Layers: [%s] | Entities: %zu", layersText.c_str(), entityCount);
 
 		// ⑤ 视口状态信息卡片下沉至右下角 (避免遮挡顶部工具栏与 3D AxisGizmo 坐标系)
-		const bool hasHudData = (hudLine1[0] != '\0' || entityCount > 0 || !m_Host.GetLevelDataLayers().empty());
+		const bool hasHudData = (!play && (hudLine1[0] != '\0' || entityCount > 0 || !m_Host.GetLevelDataLayers().empty()));
 		if (hasHudData)
 		{
 			const float text1W = ctx.MeasureTextWidth(hudLine1, 11.5f);

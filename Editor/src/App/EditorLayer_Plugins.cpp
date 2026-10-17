@@ -659,7 +659,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 		if (m_FlySpeedFeedbackTimer > 0.0f)
 			m_FlySpeedFeedbackTimer -= ts.GetSeconds();
 
-		if (m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Pan && m_EditorCamera3D.Is2DMode())
+		if (m_SceneState != SceneState::Play && m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Pan && m_EditorCamera3D.Is2DMode())
 		{
 			// 2D 模式下按住右键时, WASD 键平移相机 (A/D = 左右, W/S = 上下)
 			float speed = 12.0f * m_FlySpeedScale;
@@ -680,7 +680,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 			}
 		}
 
-		if (m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Orbit)
+		if (m_SceneState != SceneState::Play && m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Orbit)
 		{
 			float speed = 12.0f * m_FlySpeedScale; // 基础飞行速度乘以滚轮速度倍率
 			if (Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift))
@@ -1472,7 +1472,7 @@ void EditorLayer::ExportOperationLog(){
 void EditorLayer::OnEvent(Event& event){
 		WLD_TRACE_FUNCTION();
 
-		if (m_ViewportFocused && m_ViewportHovered)
+		if (m_SceneState != SceneState::Play && m_ViewportFocused && m_ViewportHovered)
 		{
 			EventDispatcher cameraDispatcher(event);
 			cameraDispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e)
