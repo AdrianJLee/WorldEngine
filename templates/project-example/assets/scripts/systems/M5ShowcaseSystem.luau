@@ -53,47 +53,55 @@ local function EvaluateBounceEase(t: number): number
 end
 
 ecs:AddSystem("M5ShowcaseSystem", "Update", function(dt: number)
+    -- 若尚未绑定展示实体，扫描当前场景
+    if not fireEmitterEntity and not sparkEmitterEntity and not bouncerEntity then
+        local q = ecs:Query({ "TagComponent", "TransformComponent" })
+        q:Each(function(e, tag, tr)
+            if tag.Tag == "Fire Particle Emitter" then
+                fireEmitterEntity = e
+                fireEmitterId = e:GetID()
+            elseif tag.Tag == "Spark Fountain Emitter" then
+                sparkEmitterEntity = e
+                sparkEmitterId = e:GetID()
+            elseif tag.Tag == "Curve Animated Bouncer" then
+                bouncerEntity = e
+                bouncerId = e:GetID()
+            end
+        end)
+
+        -- 若当前场景非 M5Showcase（无相关实体），静默早退
+        if not fireEmitterEntity and not sparkEmitterEntity and not bouncerEntity then
+            return
+        end
+
+        if not initialized then
+            initialized = true
+            print("[M5-SHOWCASE] ════════════════════════════════════════════════════════════════")
+            print("[M5-SHOWCASE] Milestone M5 粒子系统与编辑器通用工具套件实机演示启动")
+            if fireEmitterId then print(string.format("[M5-SHOWCASE] 发现火焰粒子发射器 [ID: %d]", fireEmitterId)) end
+            if sparkEmitterId then print(string.format("[M5-SHOWCASE] 发现火花喷泉发射器 [ID: %d]", sparkEmitterId)) end
+            if bouncerId then print(string.format("[M5-SHOWCASE] 发现曲线动画弹跳体 [ID: %d]", bouncerId)) end
+            print("[M5-SHOWCASE] 交互控制说明:")
+            print("[M5-SHOWCASE]   [Space 空格] -> 瞬发粒子爆炸喷射 (Burst 80 颗粒子)")
+            print("[M5-SHOWCASE]   [1 键]       -> 加快粒子发射速率 (+30/s)")
+            print("[M5-SHOWCASE]   [2 键]       -> 降低粒子发射速率 (-30/s)")
+            print("[M5-SHOWCASE]   [3 键]       -> 切换 2D XY平面锁定 / 3D 自由空间模拟")
+            print("[M5-SHOWCASE]   [菜单栏 Window] -> 可打开 Curve Editor (曲线编辑器) 与 Selection Filter (选择过滤器)")
+            print("[M5-SHOWCASE] ════════════════════════════════════════════════════════════════")
+        end
+    end
+
     logTimer = logTimer + dt
     curveTime = curveTime + dt
     if curveTime > curveDuration then
         curveTime = curveTime - curveDuration
     end
 
-    -- 1. 初次初始化: 绑定场景实体
-    if not initialized then
-        initialized = true
-        print("[M5-SHOWCASE] ════════════════════════════════════════════════════════════════")
-        print("[M5-SHOWCASE] Milestone M5 粒子系统与编辑器通用工具套件实机演示启动")
-
-        local q = ecs:Query({ "TagComponent", "TransformComponent" })
-        q:Each(function(e, tag, tr)
-            if tag.Tag == "Fire Particle Emitter" then
-                fireEmitterEntity = e
-                fireEmitterId = e:GetID()
-                print(string.format("[M5-SHOWCASE] 发现火焰粒子发射器 [ID: %d]", fireEmitterId))
-            elseif tag.Tag == "Spark Fountain Emitter" then
-                sparkEmitterEntity = e
-                sparkEmitterId = e:GetID()
-                print(string.format("[M5-SHOWCASE] 发现火花喷泉发射器 [ID: %d]", sparkEmitterId))
-            elseif tag.Tag == "Curve Animated Bouncer" then
-                bouncerEntity = e
-                bouncerId = e:GetID()
-                print(string.format("[M5-SHOWCASE] 发现曲线动画弹跳体 [ID: %d]", bouncerId))
-            end
-        end)
-
-        print("[M5-SHOWCASE] 交互控制说明:")
-        print("[M5-SHOWCASE]   [Space 空格] -> 瞬发粒子爆炸喷射 (Burst 80 颗粒子)")
-        print("[M5-SHOWCASE]   [1 键]       -> 加快粒子发射速率 (+30/s)")
-        print("[M5-SHOWCASE]   [2 键]       -> 降低粒子发射速率 (-30/s)")
-        print("[M5-SHOWCASE]   [3 键]       -> 切换 2D XY平面锁定 / 3D 自由空间模拟")
-        print("[M5-SHOWCASE]   [菜单栏 Window] -> 可打开 Curve Editor (曲线编辑器) 与 Selection Filter (选择过滤器)")
-        print("[M5-SHOWCASE] ════════════════════════════════════════════════════════════════")
-    end
-
     -- 2. 交互键盘响应
-    -- 空格键: 爆发粒子喷射
-    local spaceDown = Input.IsKeyPressed(32) -- Space
+    local spaceDown = false
+    if Input.IsKeyPressed then
+        spaceDown = Input.IsKeyPressed(32) or Input.IsKeyPressed("Space")
+    end
     if spaceDown and not lastSpaceKey then
         if sparkEmitterId then
             Particle.Emit(sparkEmitterId, 80)
@@ -102,8 +110,10 @@ ecs:AddSystem("M5ShowcaseSystem", "Update", function(dt: number)
     end
     lastSpaceKey = spaceDown
 
-    -- 1 键: 增加发射速率
-    local key1Down = Input.IsKeyPressed(49) -- '1'
+    local key1Down = false
+    if Input.IsKeyPressed then
+        key1Down = Input.IsKeyPressed(49) or Input.IsKeyPressed("1")
+    end
     if key1Down and not lastKey1 then
         currentRate = math.min(currentRate + 30.0, 500.0)
         if fireEmitterId then
@@ -113,8 +123,10 @@ ecs:AddSystem("M5ShowcaseSystem", "Update", function(dt: number)
     end
     lastKey1 = key1Down
 
-    -- 2 键: 降低发射速率
-    local key2Down = Input.IsKeyPressed(50) -- '2'
+    local key2Down = false
+    if Input.IsKeyPressed then
+        key2Down = Input.IsKeyPressed(50) or Input.IsKeyPressed("2")
+    end
     if key2Down and not lastKey2 then
         currentRate = math.max(currentRate - 30.0, 10.0)
         if fireEmitterId then
@@ -124,8 +136,10 @@ ecs:AddSystem("M5ShowcaseSystem", "Update", function(dt: number)
     end
     lastKey2 = key2Down
 
-    -- 3 键: 切换 2D XY 平面锁定
-    local key3Down = Input.IsKeyPressed(51) -- '3'
+    local key3Down = false
+    if Input.IsKeyPressed then
+        key3Down = Input.IsKeyPressed(51) or Input.IsKeyPressed("3")
+    end
     if key3Down and not lastKey3 then
         is2DLocked = not is2DLocked
         if fireEmitterId then

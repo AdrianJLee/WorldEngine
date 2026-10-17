@@ -182,7 +182,7 @@ local function BuildBehaviorTree()
 
         -- 节点 3: 动作 - 移动接近并使用 (Use) 智能对象
         CreateAction(function(dt)
-            if not targetSmartObjectId or not aiAgentId then
+            if not targetSmartObjectId or not aiAgentId or not aiAgentEntity then
                 return NodeStatus.Failure
             end
 
@@ -243,18 +243,24 @@ local function BuildBehaviorTree()
             return NodeStatus.Success
         end
 
+        if not aiAgentEntity then
+            return NodeStatus.Failure
+        end
+
         local tr = aiAgentEntity:GetComponent("TransformComponent")
         if not tr then return NodeStatus.Failure end
 
         -- 在 [-3, 3] 区间往复巡逻
-        tr.Location.x = tr.Location.x + patrolDir * patrolSpeed * dt
-        if tr.Location.x > patrolRightLimit then
-            tr.Location.x = patrolRightLimit
+        local loc = tr.Location
+        loc.x = loc.x + patrolDir * patrolSpeed * dt
+        if loc.x > patrolRightLimit then
+            loc.x = patrolRightLimit
             patrolDir = -1.0
-        elseif tr.Location.x < patrolLeftLimit then
-            tr.Location.x = patrolLeftLimit
+        elseif loc.x < patrolLeftLimit then
+            loc.x = patrolLeftLimit
             patrolDir = 1.0
         end
+        tr.Location = loc
 
         return NodeStatus.Success
     end)
@@ -270,60 +276,71 @@ end
 -- 4. ECS 帧逻辑系统注册
 -- -----------------------------------------------------------------------------
 ecs:AddSystem("SmartObjectBehaviorDemoSystem", "Update", function(dt: number)
-    logTimer = logTimer + dt
-
-    -- 1. 初次启动：扫描场景实体与初始化行为树
-    if not initialized then
-        initialized = true
-        print("[M3-AI-DEMO] ════════════════════════════════════════════════════════════════")
-        print("[M3-AI-DEMO] 智能交互对象 (Smart Object) 与通用行为树 (BT) & 有限状态机 (FSM) 演示启动")
-
+    -- 如果尚未绑定有效实体，尝试在当前场景中查找 AI Agent
+    if not aiAgentEntity or not aiAgentId then
         local q = ecs:Query({ "TagComponent", "TransformComponent" })
         q:Each(function(e, tag, tr)
             if tag.Tag == "AI Agent" then
                 aiAgentEntity = e
                 aiAgentId = e:GetID()
-                print(string.format("[M3-AI-DEMO] 找到 AI Agent 实体 [ID: %d], 初始位置=(%.1f, %.1f, %.1f)",
-                    aiAgentId, tr.Location.x, tr.Location.y, tr.Location.z))
             elseif tag.Tag == "Smart Health Station" then
                 healthStationEntity = e
                 healthStationId = e:GetID()
-                print(string.format("[M3-AI-DEMO] 找到 医疗充能站 [ID: %d], 坐标=(%.1f, %.1f, %.1f)",
-                    healthStationId, tr.Location.x, tr.Location.y, tr.Location.z))
             elseif tag.Tag == "Smart Rest Bench" then
                 restBenchEntity = e
                 restBenchId = e:GetID()
-                print(string.format("[M3-AI-DEMO] 找到 休息长椅   [ID: %d], 坐标=(%.1f, %.1f, %.1f)",
-                    restBenchId, tr.Location.x, tr.Location.y, tr.Location.z))
             end
         end)
 
-        behaviorTreeRoot = BuildBehaviorTree()
-        print("[M3-AI-DEMO] 行为树构建完成: [Selector (Root)] -> [Sequence (Low-HP Emergency)] / [Action (Patrol)]")
-        print("[M3-AI-DEMO] 交互控制操作说明:")
-        print("[M3-AI-DEMO]   [H 键] -> 对 AI Agent 施加 50 点伤害，将血量扣至 50 以下，触发紧急避险行为树分支")
-        print("[M3-AI-DEMO]   [R 键] -> 重置 AI Agent 生命值为 100 满血")
-        print("[M3-AI-DEMO] ════════════════════════════════════════════════════════════════")
+        -- 若当前场景无 AI Agent（如默认打开的关卡），静默早退，不执行 AI 逻辑，不抛任何异常
+        if not aiAgentEntity or not aiAgentId then
+            return
+        end
+
+        if not initialized then
+            initialized = true
+            print("[M3-AI-DEMO] ════════════════════════════════════════════════════════════════")
+            print("[M3-AI-DEMO] 智能交互对象 (Smart Object) 与通用行为树 (BT) & 有限状态机 (FSM) 演示启动")
+            print(string.format("[M3-AI-DEMO] 找到 AI Agent 实体 [ID: %d]", aiAgentId))
+            if healthStationId then
+                print(string.format("[M3-AI-DEMO] 找到 医疗充能站 [ID: %d]", healthStationId))
+            end
+            behaviorTreeRoot = BuildBehaviorTree()
+            print("[M3-AI-DEMO] 行为树构建完成: [Selector (Root)] -> [Sequence (Low-HP Emergency)] / [Action (Patrol)]")
+            print("[M3-AI-DEMO] 交互控制操作说明:")
+            print("[M3-AI-DEMO]   [H 键] -> 对 AI Agent 施加 50 点伤害，将血量扣至 50 以下，触发紧急避险行为树分支")
+            print("[M3-AI-DEMO]   [R 键] -> 重置 AI Agent 生命值为 100 满血")
+            print("[M3-AI-DEMO] ════════════════════════════════════════════════════════════════")
+        end
     end
 
+    logTimer = logTimer + dt
+
     -- 2. 键盘交互响应 (检测 H 键扣血 / R 键重置)
-    local hDown = Input.IsKeyPressed(72) -- 'H' key (ASCII 72)
+    local hDown = false
+    if Input.IsKeyPressed then
+        hDown = Input.IsKeyPressed(72) or Input.IsKeyPressed("H")
+    end
     if hDown and not lastHKey then
         if aiAgentId then
             local dealt = Health.Damage(aiAgentId, 50.0, 0)
             local info = Health.Get(aiAgentId)
             print(string.format("[M3-AI-DEMO] >>> [用户按下 H 键] 施加 %.1f 点伤害! Agent 当前剩余生命值: %.1f",
-                dealt, info.CurrentHealth))
+                dealt, info and info.CurrentHealth or 0.0))
         end
     end
     lastHKey = hDown
 
-    local rDown = Input.IsKeyPressed(82) -- 'R' key (ASCII 82)
+    local rDown = false
+    if Input.IsKeyPressed then
+        rDown = Input.IsKeyPressed(82) or Input.IsKeyPressed("R")
+    end
     if rDown and not lastRKey then
         if aiAgentId then
             Health.Heal(aiAgentId, 100.0)
             local info = Health.Get(aiAgentId)
-            print(string.format("[M3-AI-DEMO] >>> [用户按下 R 键] 生命值已重置满血: %.1f", info.CurrentHealth))
+            print(string.format("[M3-AI-DEMO] >>> [用户按下 R 键] 生命值已重置满血: %.1f",
+                info and info.CurrentHealth or 100.0))
         end
     end
     lastRKey = rDown
@@ -333,8 +350,8 @@ ecs:AddSystem("SmartObjectBehaviorDemoSystem", "Update", function(dt: number)
         behaviorTreeRoot:Tick(dt)
     end
 
-    -- 4. 周期性状态 HUD 输出 (每 2 秒打印一次现场决策快照)
-    if logTimer >= 2.0 then
+    -- 4. 周期性状态 HUD 输出 (每 2.5 秒打印一次现场决策快照)
+    if logTimer >= 2.5 then
         logTimer = 0.0
         local hpStr = "N/A"
         if aiAgentId then
