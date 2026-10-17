@@ -66,6 +66,11 @@ int main()
 			local healed = Health.Heal(HERO_ID, 10.0)
 			assert(healed == 10.0, "Healed amount mismatch")
 
+			-- Mitigation mode test
+			assert(Health.SetMitigationMode(HERO_ID, 1) == true, "SetMitigationMode should succeed")
+			local modeInfo = Health.Get(HERO_ID)
+			assert(modeInfo.MitigationMode == 1, "MitigationMode should be 1")
+
 			-- SmartObject API tests
 			local state = SmartObject.GetState(BENCH_ID)
 			assert(state == 0, "Initial slot state must be Available (0)")

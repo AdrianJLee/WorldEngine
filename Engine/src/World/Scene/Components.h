@@ -48,7 +48,9 @@ namespace World
 		float InvulnerableDuration = 0.5f;           // 4B
 		float InvulnerableTimer = 0.0f;              // 4B
 		uint8_t IsDead = 0;                          // 1B
-		uint8_t _Padding[3] { 0 };                   // 3B
+		uint8_t MitigationMode = 0;                  // 1B (0: Hyperbolic, 1: Flat, 2: Percentage, 3: Custom)
+		uint8_t Flags = 0;                           // 1B
+		uint8_t _Padding[1] { 0 };                   // 1B
 
 		HealthComponent() = default;
 

@@ -86,6 +86,7 @@ namespace World
 			res.SetField("Shield", ScriptValue::Number(health->Shield));
 			res.SetField("MaxShield", ScriptValue::Number(health->MaxShield));
 			res.SetField("Armor", ScriptValue::Number(health->Armor));
+			res.SetField("MitigationMode", ScriptValue::Number(static_cast<double>(health->MitigationMode)));
 			res.SetField("IsDead", ScriptValue::Boolean(health->IsDead != 0));
 			res.SetField("Invulnerable", ScriptValue::Boolean(health->InvulnerableTimer > 0.0f));
 			return res.ToValue();
@@ -100,14 +101,38 @@ namespace World
 			entt::entity ent = RequireEntityId("Health", method, args, count, 0);
 			float amount = static_cast<float>(RequireNum("Health", method, args, count, 1));
 			uint8_t dmgType = (count >= 3 && args[2].IsNumber()) ? static_cast<uint8_t>(RequireNum("Health", method, args, count, 2)) : 0;
+			uint32_t flags = (count >= 4 && args[3].IsNumber()) ? static_cast<uint32_t>(RequireNum("Health", method, args, count, 3)) : 0;
 
 			Gameplay::DamageEvent event;
 			event.Target = ent;
 			event.Amount = amount;
 			event.Type = static_cast<Gameplay::DamageType>(dmgType);
+			event.Flags = flags;
+			if (count >= 5 && args[4].IsString())
+			{
+				std::string tagStr;
+				args[4].AsString(&tagStr);
+				event.Tag = StringPool::Get().InternName(tagStr);
+			}
 
 			float dealt = Gameplay::DamageSystem::ApplyDamage(*scene, event);
 			return ScriptValue::Number(dealt);
+		}
+
+		ScriptValue HealthSetMitigationModeImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) throw std::logic_error("Health.SetMitigationMode requires an active scene");
+			const auto& method = GameplayCoreServiceBindings(nullptr)[0].Methods[3];
+			entt::entity ent = RequireEntityId("Health", method, args, count, 0);
+			uint8_t mode = static_cast<uint8_t>(RequireNum("Health", method, args, count, 1));
+
+			auto* health = scene->GetRegistry().try_get<HealthComponent>(ent);
+			if (!health) return ScriptValue::Boolean(false);
+
+			health->MitigationMode = mode;
+			return ScriptValue::Boolean(true);
 		}
 
 		ScriptValue HealthHealImpl(const ScriptValue* args, std::size_t count)
@@ -194,17 +219,24 @@ namespace World
 		static const ScriptServiceParam healthDamageParams[] = {
 			{ "targetId", "number", ScriptServiceArgType::Number, true, "Target entity ID." },
 			{ "amount", "number", ScriptServiceArgType::Number, true, "Raw damage amount." },
-			{ "damageType", "number", ScriptServiceArgType::Number, false, "Damage type (0=Physical, 1=Fire, 2=TrueDamage)." }
+			{ "damageType", "number", ScriptServiceArgType::Number, false, "Damage type (0=Physical, 1=Fire, 2=TrueDamage, 3=Custom)." },
+			{ "flags", "number", ScriptServiceArgType::Number, false, "Damage flags (1=IgnoreArmor, 2=IgnoreShield, 4=IgnoreInvulnerability)." },
+			{ "tag", "string", ScriptServiceArgType::String, false, "Optional damage tag name (e.g. Damage.Fire)." }
 		};
 		static const ScriptServiceParam healthHealParams[] = {
 			{ "targetId", "number", ScriptServiceArgType::Number, true, "Target entity ID." },
 			{ "amount", "number", ScriptServiceArgType::Number, true, "Healing amount." }
 		};
+		static const ScriptServiceParam healthModeParams[] = {
+			{ "targetId", "number", ScriptServiceArgType::Number, true, "Target entity ID." },
+			{ "mode", "number", ScriptServiceArgType::Number, true, "Mitigation mode (0=Hyperbolic, 1=Flat, 2=Percentage)." }
+		};
 
 		static const ScriptServiceMethod healthMethods[] = {
 			{ "Get", [](const ScriptValue* args, std::size_t count) { return HealthGetImpl(args, count); }, healthGetParams, 1, 1, "table", "Query entity health status." },
-			{ "Damage", [](const ScriptValue* args, std::size_t count) { return HealthDamageImpl(args, count); }, healthDamageParams, 3, 2, "number", "Apply mitigated damage to target entity." },
-			{ "Heal", [](const ScriptValue* args, std::size_t count) { return HealthHealImpl(args, count); }, healthHealParams, 2, 2, "number", "Heal target entity up to MaxHealth." }
+			{ "Damage", [](const ScriptValue* args, std::size_t count) { return HealthDamageImpl(args, count); }, healthDamageParams, 5, 2, "number", "Apply mitigated damage to target entity." },
+			{ "Heal", [](const ScriptValue* args, std::size_t count) { return HealthHealImpl(args, count); }, healthHealParams, 2, 2, "number", "Heal target entity up to MaxHealth." },
+			{ "SetMitigationMode", [](const ScriptValue* args, std::size_t count) { return HealthSetMitigationModeImpl(args, count); }, healthModeParams, 2, 2, "boolean", "Set damage mitigation formula mode (0=Hyperbolic, 1=Flat, 2=Percentage)." }
 		};
 
 		static const ScriptServiceParam soSlotParams[] = {

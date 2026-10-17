@@ -328,6 +328,11 @@ function Input:PopContext(name) end
 ---@return boolean
 function Input:HasContext(name) end
 
+---Direct hardware key poll (key name like 'Space', 'F' or keycode number). Returns true while key is held.
+---@param key string|number Key name ('Space', 'F', 'A', 'D') or integer keycode.
+---@return boolean
+function Input:IsKeyPressed(key) end
+
 -- Global service table 'Level': read-only; there is no runtime constructor.
 ---Read-only level/flow service table; scene handles and host callbacks are not exposed.
 ---@class Level
@@ -1169,6 +1174,7 @@ function ui:isOpen() end
 ---@class PhysicsMaterialComponent
 ---@field Restitution number
 ---@field FrictionCombine number
+---@field Material string
 ---@field Friction number
 ---@field RestitutionCombine number
 
