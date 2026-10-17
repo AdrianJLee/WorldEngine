@@ -513,7 +513,21 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 			{
 				case Schema::Kind::Bool:
 				{
-					bool b = std::get<bool>(value);
+					bool b = false;
+					if (std::holds_alternative<bool>(value))
+						b = std::get<bool>(value);
+					else if (std::holds_alternative<uint8_t>(value))
+						b = std::get<uint8_t>(value) != 0;
+					else if (std::holds_alternative<int8_t>(value))
+						b = std::get<int8_t>(value) != 0;
+					else if (std::holds_alternative<uint32_t>(value))
+						b = std::get<uint32_t>(value) != 0;
+					else if (std::holds_alternative<int32_t>(value))
+						b = std::get<int32_t>(value) != 0;
+					else if (std::holds_alternative<uint64_t>(value))
+						b = std::get<uint64_t>(value) != 0;
+					else if (std::holds_alternative<int64_t>(value))
+						b = std::get<int64_t>(value) != 0;
 					const bool before = b;
 					Checkbox(ctx, fid, ctrl, "", b, theme);
 					fieldChanged = b != before;
@@ -527,9 +541,13 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 				case Schema::Kind::Int32:
 				case Schema::Kind::Int64:
 				{
-					int64_t raw = field.K == Schema::Kind::Int8 ? std::get<int8_t>(value)
-						: field.K == Schema::Kind::Int16 ? std::get<int16_t>(value)
-						: field.K == Schema::Kind::Int32 ? std::get<int32_t>(value) : std::get<int64_t>(value);
+					int64_t raw = 0;
+					if (std::holds_alternative<int8_t>(value)) raw = std::get<int8_t>(value);
+					else if (std::holds_alternative<int16_t>(value)) raw = std::get<int16_t>(value);
+					else if (std::holds_alternative<int32_t>(value)) raw = std::get<int32_t>(value);
+					else if (std::holds_alternative<int64_t>(value)) raw = std::get<int64_t>(value);
+					else if (std::holds_alternative<uint64_t>(value)) raw = static_cast<int64_t>(std::get<uint64_t>(value));
+					else if (std::holds_alternative<uint32_t>(value)) raw = static_cast<int64_t>(std::get<uint32_t>(value));
 					const int64_t before = raw;
 					const int64_t lo = field.Meta.Min.has_value() ? static_cast<int64_t>(*field.Meta.Min) : INT64_MIN;
 					const int64_t hi = field.Meta.Max.has_value() ? static_cast<int64_t>(*field.Meta.Max) : INT64_MAX;
@@ -554,9 +572,13 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 				case Schema::Kind::UInt32:
 				case Schema::Kind::UInt64:
 				{
-					uint64_t raw = field.K == Schema::Kind::UInt8 ? std::get<uint8_t>(value)
-						: field.K == Schema::Kind::UInt16 ? std::get<uint16_t>(value)
-						: field.K == Schema::Kind::UInt32 ? std::get<uint32_t>(value) : std::get<uint64_t>(value);
+					uint64_t raw = 0;
+					if (std::holds_alternative<uint8_t>(value)) raw = std::get<uint8_t>(value);
+					else if (std::holds_alternative<uint16_t>(value)) raw = std::get<uint16_t>(value);
+					else if (std::holds_alternative<uint32_t>(value)) raw = std::get<uint32_t>(value);
+					else if (std::holds_alternative<uint64_t>(value)) raw = std::get<uint64_t>(value);
+					else if (std::holds_alternative<int64_t>(value)) raw = static_cast<uint64_t>(std::get<int64_t>(value));
+					else if (std::holds_alternative<int32_t>(value)) raw = static_cast<uint64_t>(std::get<int32_t>(value));
 					int64_t signedRaw = static_cast<int64_t>(raw);
 					const int64_t before = signedRaw;
 					const int64_t lo = field.Meta.Min.has_value() ? static_cast<int64_t>(*field.Meta.Min) : 0;

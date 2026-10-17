@@ -482,32 +482,32 @@ struct GeneratedAccess<World::SpriteComponent>
     static Value Get_FlipX(const void* instance)
     {
         const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
-        return Value(self->FlipX);
+        return Value(static_cast<bool>(self->FlipX));
     }
     static void Set_FlipX(void* instance, const Value& value)
     {
         World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
-        self->FlipX = std::get<bool>(value);
+        self->FlipX = static_cast<decltype(self->FlipX)>(std::get<bool>(value));
     }
     static Value Get_FlipY(const void* instance)
     {
         const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
-        return Value(self->FlipY);
+        return Value(static_cast<bool>(self->FlipY));
     }
     static void Set_FlipY(void* instance, const Value& value)
     {
         World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
-        self->FlipY = std::get<bool>(value);
+        self->FlipY = static_cast<decltype(self->FlipY)>(std::get<bool>(value));
     }
     static Value Get_EnableYSort(const void* instance)
     {
         const World::SpriteComponent* self = static_cast<const World::SpriteComponent*>(instance);
-        return Value(self->EnableYSort);
+        return Value(static_cast<bool>(self->EnableYSort));
     }
     static void Set_EnableYSort(void* instance, const Value& value)
     {
         World::SpriteComponent* self = static_cast<World::SpriteComponent*>(instance);
-        self->EnableYSort = std::get<bool>(value);
+        self->EnableYSort = static_cast<decltype(self->EnableYSort)>(std::get<bool>(value));
     }
     static Value Get_DrawMode(const void* instance)
     {
@@ -855,22 +855,22 @@ struct GeneratedAccess<World::SpriteAnimatorComponent>
     static Value Get_Playing(const void* instance)
     {
         const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
-        return Value(self->Playing);
+        return Value(static_cast<bool>(self->Playing));
     }
     static void Set_Playing(void* instance, const Value& value)
     {
         World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
-        self->Playing = std::get<bool>(value);
+        self->Playing = static_cast<decltype(self->Playing)>(std::get<bool>(value));
     }
     static Value Get_Finished(const void* instance)
     {
         const World::SpriteAnimatorComponent* self = static_cast<const World::SpriteAnimatorComponent*>(instance);
-        return Value(self->Finished);
+        return Value(static_cast<bool>(self->Finished));
     }
     static void Set_Finished(void* instance, const Value& value)
     {
         World::SpriteAnimatorComponent* self = static_cast<World::SpriteAnimatorComponent*>(instance);
-        self->Finished = std::get<bool>(value);
+        self->Finished = static_cast<decltype(self->Finished)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Animation()
     {
@@ -1103,22 +1103,22 @@ struct GeneratedAccess<World::TilemapComponent>
     static Value Get_GenerateCollision(const void* instance)
     {
         const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
-        return Value(self->GenerateCollision);
+        return Value(static_cast<bool>(self->GenerateCollision));
     }
     static void Set_GenerateCollision(void* instance, const Value& value)
     {
         World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
-        self->GenerateCollision = std::get<bool>(value);
+        self->GenerateCollision = static_cast<decltype(self->GenerateCollision)>(std::get<bool>(value));
     }
     static Value Get_ShowGrid(const void* instance)
     {
         const World::TilemapComponent* self = static_cast<const World::TilemapComponent*>(instance);
-        return Value(self->ShowGrid);
+        return Value(static_cast<bool>(self->ShowGrid));
     }
     static void Set_ShowGrid(void* instance, const Value& value)
     {
         World::TilemapComponent* self = static_cast<World::TilemapComponent*>(instance);
-        self->ShowGrid = std::get<bool>(value);
+        self->ShowGrid = static_cast<decltype(self->ShowGrid)>(std::get<bool>(value));
     }
     static Value Get_GridType(const void* instance)
     {
@@ -1735,12 +1735,12 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
     static Value Get_Playing(const void* instance)
     {
         const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(self->Playing);
+        return Value(static_cast<bool>(self->Playing));
     }
     static void Set_Playing(void* instance, const Value& value)
     {
         World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        self->Playing = std::get<bool>(value);
+        self->Playing = static_cast<decltype(self->Playing)>(std::get<bool>(value));
     }
     static Value Get_Speed(const void* instance)
     {
@@ -1755,12 +1755,12 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
     static Value Get_Loop(const void* instance)
     {
         const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(self->Loop);
+        return Value(static_cast<bool>(self->Loop));
     }
     static void Set_Loop(void* instance, const Value& value)
     {
         World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        self->Loop = std::get<bool>(value);
+        self->Loop = static_cast<decltype(self->Loop)>(std::get<bool>(value));
     }
     static Value Get_Time(const void* instance)
     {
@@ -1981,12 +1981,12 @@ struct GeneratedAccess<World::HierarchyComponent>
     static Value Get_InheritTransform(const void* instance)
     {
         const World::HierarchyComponent* self = static_cast<const World::HierarchyComponent*>(instance);
-        return Value(self->InheritTransform);
+        return Value(static_cast<bool>(self->InheritTransform));
     }
     static void Set_InheritTransform(void* instance, const Value& value)
     {
         World::HierarchyComponent* self = static_cast<World::HierarchyComponent*>(instance);
-        self->InheritTransform = std::get<bool>(value);
+        self->InheritTransform = static_cast<decltype(self->InheritTransform)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Parent()
     {
@@ -2069,22 +2069,22 @@ struct GeneratedAccess<World::CameraComponent>
     static Value Get_Primary(const void* instance)
     {
         const World::CameraComponent* self = static_cast<const World::CameraComponent*>(instance);
-        return Value(self->Primary);
+        return Value(static_cast<bool>(self->Primary));
     }
     static void Set_Primary(void* instance, const Value& value)
     {
         World::CameraComponent* self = static_cast<World::CameraComponent*>(instance);
-        self->Primary = std::get<bool>(value);
+        self->Primary = static_cast<decltype(self->Primary)>(std::get<bool>(value));
     }
     static Value Get_FixedAspectRatio(const void* instance)
     {
         const World::CameraComponent* self = static_cast<const World::CameraComponent*>(instance);
-        return Value(self->FixedAspectRatio);
+        return Value(static_cast<bool>(self->FixedAspectRatio));
     }
     static void Set_FixedAspectRatio(void* instance, const Value& value)
     {
         World::CameraComponent* self = static_cast<World::CameraComponent*>(instance);
-        self->FixedAspectRatio = std::get<bool>(value);
+        self->FixedAspectRatio = static_cast<decltype(self->FixedAspectRatio)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Camera()
     {
@@ -2204,22 +2204,22 @@ struct GeneratedAccess<World::PixelPerfectCameraComponent>
     static Value Get_SnapToPixelGrid(const void* instance)
     {
         const World::PixelPerfectCameraComponent* self = static_cast<const World::PixelPerfectCameraComponent*>(instance);
-        return Value(self->SnapToPixelGrid);
+        return Value(static_cast<bool>(self->SnapToPixelGrid));
     }
     static void Set_SnapToPixelGrid(void* instance, const Value& value)
     {
         World::PixelPerfectCameraComponent* self = static_cast<World::PixelPerfectCameraComponent*>(instance);
-        self->SnapToPixelGrid = std::get<bool>(value);
+        self->SnapToPixelGrid = static_cast<decltype(self->SnapToPixelGrid)>(std::get<bool>(value));
     }
     static Value Get_UpscaleRT(const void* instance)
     {
         const World::PixelPerfectCameraComponent* self = static_cast<const World::PixelPerfectCameraComponent*>(instance);
-        return Value(self->UpscaleRT);
+        return Value(static_cast<bool>(self->UpscaleRT));
     }
     static void Set_UpscaleRT(void* instance, const Value& value)
     {
         World::PixelPerfectCameraComponent* self = static_cast<World::PixelPerfectCameraComponent*>(instance);
-        self->UpscaleRT = std::get<bool>(value);
+        self->UpscaleRT = static_cast<decltype(self->UpscaleRT)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_ReferenceResolution()
     {
@@ -2377,22 +2377,22 @@ struct GeneratedAccess<World::ParallaxLayerComponent>
     static Value Get_RepeatX(const void* instance)
     {
         const World::ParallaxLayerComponent* self = static_cast<const World::ParallaxLayerComponent*>(instance);
-        return Value(self->RepeatX);
+        return Value(static_cast<bool>(self->RepeatX));
     }
     static void Set_RepeatX(void* instance, const Value& value)
     {
         World::ParallaxLayerComponent* self = static_cast<World::ParallaxLayerComponent*>(instance);
-        self->RepeatX = std::get<bool>(value);
+        self->RepeatX = static_cast<decltype(self->RepeatX)>(std::get<bool>(value));
     }
     static Value Get_RepeatY(const void* instance)
     {
         const World::ParallaxLayerComponent* self = static_cast<const World::ParallaxLayerComponent*>(instance);
-        return Value(self->RepeatY);
+        return Value(static_cast<bool>(self->RepeatY));
     }
     static void Set_RepeatY(void* instance, const Value& value)
     {
         World::ParallaxLayerComponent* self = static_cast<World::ParallaxLayerComponent*>(instance);
-        self->RepeatY = std::get<bool>(value);
+        self->RepeatY = static_cast<decltype(self->RepeatY)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_ScrollFactor()
     {
@@ -2550,12 +2550,12 @@ struct GeneratedAccess<World::DirectionalLightComponent>
     static Value Get_CastShadow(const void* instance)
     {
         const World::DirectionalLightComponent* self = static_cast<const World::DirectionalLightComponent*>(instance);
-        return Value(self->CastShadow);
+        return Value(static_cast<bool>(self->CastShadow));
     }
     static void Set_CastShadow(void* instance, const Value& value)
     {
         World::DirectionalLightComponent* self = static_cast<World::DirectionalLightComponent*>(instance);
-        self->CastShadow = std::get<bool>(value);
+        self->CastShadow = static_cast<decltype(self->CastShadow)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Color()
     {
@@ -2955,32 +2955,32 @@ struct GeneratedAccess<World::PointLight2DComponent>
     static Value Get_CastShadows(const void* instance)
     {
         const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
-        return Value(self->CastShadows);
+        return Value(static_cast<bool>(self->CastShadows));
     }
     static void Set_CastShadows(void* instance, const Value& value)
     {
         World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
-        self->CastShadows = std::get<bool>(value);
+        self->CastShadows = static_cast<decltype(self->CastShadows)>(std::get<bool>(value));
     }
     static Value Get_AffectAllLayers(const void* instance)
     {
         const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
-        return Value(self->AffectAllLayers);
+        return Value(static_cast<bool>(self->AffectAllLayers));
     }
     static void Set_AffectAllLayers(void* instance, const Value& value)
     {
         World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
-        self->AffectAllLayers = std::get<bool>(value);
+        self->AffectAllLayers = static_cast<decltype(self->AffectAllLayers)>(std::get<bool>(value));
     }
     static Value Get_Enabled(const void* instance)
     {
         const World::PointLight2DComponent* self = static_cast<const World::PointLight2DComponent*>(instance);
-        return Value(self->Enabled);
+        return Value(static_cast<bool>(self->Enabled));
     }
     static void Set_Enabled(void* instance, const Value& value)
     {
         World::PointLight2DComponent* self = static_cast<World::PointLight2DComponent*>(instance);
-        self->Enabled = std::get<bool>(value);
+        self->Enabled = static_cast<decltype(self->Enabled)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Color()
     {
@@ -3291,22 +3291,22 @@ struct GeneratedAccess<World::GlobalLight2DComponent>
     static Value Get_AffectAllLayers(const void* instance)
     {
         const World::GlobalLight2DComponent* self = static_cast<const World::GlobalLight2DComponent*>(instance);
-        return Value(self->AffectAllLayers);
+        return Value(static_cast<bool>(self->AffectAllLayers));
     }
     static void Set_AffectAllLayers(void* instance, const Value& value)
     {
         World::GlobalLight2DComponent* self = static_cast<World::GlobalLight2DComponent*>(instance);
-        self->AffectAllLayers = std::get<bool>(value);
+        self->AffectAllLayers = static_cast<decltype(self->AffectAllLayers)>(std::get<bool>(value));
     }
     static Value Get_Enabled(const void* instance)
     {
         const World::GlobalLight2DComponent* self = static_cast<const World::GlobalLight2DComponent*>(instance);
-        return Value(self->Enabled);
+        return Value(static_cast<bool>(self->Enabled));
     }
     static void Set_Enabled(void* instance, const Value& value)
     {
         World::GlobalLight2DComponent* self = static_cast<World::GlobalLight2DComponent*>(instance);
-        self->Enabled = std::get<bool>(value);
+        self->Enabled = static_cast<decltype(self->Enabled)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Color()
     {
@@ -3532,32 +3532,32 @@ struct GeneratedAccess<World::ShadowCaster2DComponent>
     static Value Get_SelfShadows(const void* instance)
     {
         const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
-        return Value(self->SelfShadows);
+        return Value(static_cast<bool>(self->SelfShadows));
     }
     static void Set_SelfShadows(void* instance, const Value& value)
     {
         World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
-        self->SelfShadows = std::get<bool>(value);
+        self->SelfShadows = static_cast<decltype(self->SelfShadows)>(std::get<bool>(value));
     }
     static Value Get_CastShadows(const void* instance)
     {
         const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
-        return Value(self->CastShadows);
+        return Value(static_cast<bool>(self->CastShadows));
     }
     static void Set_CastShadows(void* instance, const Value& value)
     {
         World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
-        self->CastShadows = std::get<bool>(value);
+        self->CastShadows = static_cast<decltype(self->CastShadows)>(std::get<bool>(value));
     }
     static Value Get_ShowGizmo(const void* instance)
     {
         const World::ShadowCaster2DComponent* self = static_cast<const World::ShadowCaster2DComponent*>(instance);
-        return Value(self->ShowGizmo);
+        return Value(static_cast<bool>(self->ShowGizmo));
     }
     static void Set_ShowGizmo(void* instance, const Value& value)
     {
         World::ShadowCaster2DComponent* self = static_cast<World::ShadowCaster2DComponent*>(instance);
-        self->ShowGizmo = std::get<bool>(value);
+        self->ShowGizmo = static_cast<decltype(self->ShowGizmo)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Offset()
     {
@@ -3811,32 +3811,32 @@ struct GeneratedAccess<World::FreeformLight2DComponent>
     static Value Get_AffectAllLayers(const void* instance)
     {
         const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
-        return Value(self->AffectAllLayers);
+        return Value(static_cast<bool>(self->AffectAllLayers));
     }
     static void Set_AffectAllLayers(void* instance, const Value& value)
     {
         World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
-        self->AffectAllLayers = std::get<bool>(value);
+        self->AffectAllLayers = static_cast<decltype(self->AffectAllLayers)>(std::get<bool>(value));
     }
     static Value Get_CastShadows(const void* instance)
     {
         const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
-        return Value(self->CastShadows);
+        return Value(static_cast<bool>(self->CastShadows));
     }
     static void Set_CastShadows(void* instance, const Value& value)
     {
         World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
-        self->CastShadows = std::get<bool>(value);
+        self->CastShadows = static_cast<decltype(self->CastShadows)>(std::get<bool>(value));
     }
     static Value Get_Enabled(const void* instance)
     {
         const World::FreeformLight2DComponent* self = static_cast<const World::FreeformLight2DComponent*>(instance);
-        return Value(self->Enabled);
+        return Value(static_cast<bool>(self->Enabled));
     }
     static void Set_Enabled(void* instance, const Value& value)
     {
         World::FreeformLight2DComponent* self = static_cast<World::FreeformLight2DComponent*>(instance);
-        self->Enabled = std::get<bool>(value);
+        self->Enabled = static_cast<decltype(self->Enabled)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Color()
     {
@@ -4035,12 +4035,12 @@ struct GeneratedAccess<World::RigidBody2DComponent>
     static Value Get_FixedRotation(const void* instance)
     {
         const World::RigidBody2DComponent* self = static_cast<const World::RigidBody2DComponent*>(instance);
-        return Value(self->FixedRotation);
+        return Value(static_cast<bool>(self->FixedRotation));
     }
     static void Set_FixedRotation(void* instance, const Value& value)
     {
         World::RigidBody2DComponent* self = static_cast<World::RigidBody2DComponent*>(instance);
-        self->FixedRotation = std::get<bool>(value);
+        self->FixedRotation = static_cast<decltype(self->FixedRotation)>(std::get<bool>(value));
     }
     static Value Get_Layer(const void* instance)
     {
@@ -4065,12 +4065,12 @@ struct GeneratedAccess<World::RigidBody2DComponent>
     static Value Get_Ccd(const void* instance)
     {
         const World::RigidBody2DComponent* self = static_cast<const World::RigidBody2DComponent*>(instance);
-        return Value(self->Ccd);
+        return Value(static_cast<bool>(self->Ccd));
     }
     static void Set_Ccd(void* instance, const Value& value)
     {
         World::RigidBody2DComponent* self = static_cast<World::RigidBody2DComponent*>(instance);
-        self->Ccd = std::get<bool>(value);
+        self->Ccd = static_cast<decltype(self->Ccd)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Type()
     {
@@ -4248,22 +4248,22 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
     static Value Get_ShowCollider(const void* instance)
     {
         const World::BoxCollider2DComponent* self = static_cast<const World::BoxCollider2DComponent*>(instance);
-        return Value(self->ShowCollider);
+        return Value(static_cast<bool>(self->ShowCollider));
     }
     static void Set_ShowCollider(void* instance, const Value& value)
     {
         World::BoxCollider2DComponent* self = static_cast<World::BoxCollider2DComponent*>(instance);
-        self->ShowCollider = std::get<bool>(value);
+        self->ShowCollider = static_cast<decltype(self->ShowCollider)>(std::get<bool>(value));
     }
     static Value Get_IsSensor(const void* instance)
     {
         const World::BoxCollider2DComponent* self = static_cast<const World::BoxCollider2DComponent*>(instance);
-        return Value(self->IsSensor);
+        return Value(static_cast<bool>(self->IsSensor));
     }
     static void Set_IsSensor(void* instance, const Value& value)
     {
         World::BoxCollider2DComponent* self = static_cast<World::BoxCollider2DComponent*>(instance);
-        self->IsSensor = std::get<bool>(value);
+        self->IsSensor = static_cast<decltype(self->IsSensor)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Offset()
     {
@@ -4479,22 +4479,22 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
     static Value Get_ShowCollider(const void* instance)
     {
         const World::CircleCollider2DComponent* self = static_cast<const World::CircleCollider2DComponent*>(instance);
-        return Value(self->ShowCollider);
+        return Value(static_cast<bool>(self->ShowCollider));
     }
     static void Set_ShowCollider(void* instance, const Value& value)
     {
         World::CircleCollider2DComponent* self = static_cast<World::CircleCollider2DComponent*>(instance);
-        self->ShowCollider = std::get<bool>(value);
+        self->ShowCollider = static_cast<decltype(self->ShowCollider)>(std::get<bool>(value));
     }
     static Value Get_IsSensor(const void* instance)
     {
         const World::CircleCollider2DComponent* self = static_cast<const World::CircleCollider2DComponent*>(instance);
-        return Value(self->IsSensor);
+        return Value(static_cast<bool>(self->IsSensor));
     }
     static void Set_IsSensor(void* instance, const Value& value)
     {
         World::CircleCollider2DComponent* self = static_cast<World::CircleCollider2DComponent*>(instance);
-        self->IsSensor = std::get<bool>(value);
+        self->IsSensor = static_cast<decltype(self->IsSensor)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Offset()
     {
@@ -4730,22 +4730,22 @@ struct GeneratedAccess<World::CapsuleCollider2DComponent>
     static Value Get_ShowCollider(const void* instance)
     {
         const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
-        return Value(self->ShowCollider);
+        return Value(static_cast<bool>(self->ShowCollider));
     }
     static void Set_ShowCollider(void* instance, const Value& value)
     {
         World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
-        self->ShowCollider = std::get<bool>(value);
+        self->ShowCollider = static_cast<decltype(self->ShowCollider)>(std::get<bool>(value));
     }
     static Value Get_IsSensor(const void* instance)
     {
         const World::CapsuleCollider2DComponent* self = static_cast<const World::CapsuleCollider2DComponent*>(instance);
-        return Value(self->IsSensor);
+        return Value(static_cast<bool>(self->IsSensor));
     }
     static void Set_IsSensor(void* instance, const Value& value)
     {
         World::CapsuleCollider2DComponent* self = static_cast<World::CapsuleCollider2DComponent*>(instance);
-        self->IsSensor = std::get<bool>(value);
+        self->IsSensor = static_cast<decltype(self->IsSensor)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Offset()
     {
@@ -4999,22 +4999,22 @@ struct GeneratedAccess<World::PolygonCollider2DComponent>
     static Value Get_ShowCollider(const void* instance)
     {
         const World::PolygonCollider2DComponent* self = static_cast<const World::PolygonCollider2DComponent*>(instance);
-        return Value(self->ShowCollider);
+        return Value(static_cast<bool>(self->ShowCollider));
     }
     static void Set_ShowCollider(void* instance, const Value& value)
     {
         World::PolygonCollider2DComponent* self = static_cast<World::PolygonCollider2DComponent*>(instance);
-        self->ShowCollider = std::get<bool>(value);
+        self->ShowCollider = static_cast<decltype(self->ShowCollider)>(std::get<bool>(value));
     }
     static Value Get_IsSensor(const void* instance)
     {
         const World::PolygonCollider2DComponent* self = static_cast<const World::PolygonCollider2DComponent*>(instance);
-        return Value(self->IsSensor);
+        return Value(static_cast<bool>(self->IsSensor));
     }
     static void Set_IsSensor(void* instance, const Value& value)
     {
         World::PolygonCollider2DComponent* self = static_cast<World::PolygonCollider2DComponent*>(instance);
-        self->IsSensor = std::get<bool>(value);
+        self->IsSensor = static_cast<decltype(self->IsSensor)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Offset()
     {
@@ -5220,32 +5220,32 @@ struct GeneratedAccess<World::ChainCollider2DComponent>
     static Value Get_Loop(const void* instance)
     {
         const World::ChainCollider2DComponent* self = static_cast<const World::ChainCollider2DComponent*>(instance);
-        return Value(self->Loop);
+        return Value(static_cast<bool>(self->Loop));
     }
     static void Set_Loop(void* instance, const Value& value)
     {
         World::ChainCollider2DComponent* self = static_cast<World::ChainCollider2DComponent*>(instance);
-        self->Loop = std::get<bool>(value);
+        self->Loop = static_cast<decltype(self->Loop)>(std::get<bool>(value));
     }
     static Value Get_ShowCollider(const void* instance)
     {
         const World::ChainCollider2DComponent* self = static_cast<const World::ChainCollider2DComponent*>(instance);
-        return Value(self->ShowCollider);
+        return Value(static_cast<bool>(self->ShowCollider));
     }
     static void Set_ShowCollider(void* instance, const Value& value)
     {
         World::ChainCollider2DComponent* self = static_cast<World::ChainCollider2DComponent*>(instance);
-        self->ShowCollider = std::get<bool>(value);
+        self->ShowCollider = static_cast<decltype(self->ShowCollider)>(std::get<bool>(value));
     }
     static Value Get_IsSensor(const void* instance)
     {
         const World::ChainCollider2DComponent* self = static_cast<const World::ChainCollider2DComponent*>(instance);
-        return Value(self->IsSensor);
+        return Value(static_cast<bool>(self->IsSensor));
     }
     static void Set_IsSensor(void* instance, const Value& value)
     {
         World::ChainCollider2DComponent* self = static_cast<World::ChainCollider2DComponent*>(instance);
-        self->IsSensor = std::get<bool>(value);
+        self->IsSensor = static_cast<decltype(self->IsSensor)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Offset()
     {
@@ -5451,22 +5451,22 @@ struct GeneratedAccess<World::CompositeCollider2DComponent>
     static Value Get_IsSensor(const void* instance)
     {
         const World::CompositeCollider2DComponent* self = static_cast<const World::CompositeCollider2DComponent*>(instance);
-        return Value(self->IsSensor);
+        return Value(static_cast<bool>(self->IsSensor));
     }
     static void Set_IsSensor(void* instance, const Value& value)
     {
         World::CompositeCollider2DComponent* self = static_cast<World::CompositeCollider2DComponent*>(instance);
-        self->IsSensor = std::get<bool>(value);
+        self->IsSensor = static_cast<decltype(self->IsSensor)>(std::get<bool>(value));
     }
     static Value Get_ShowCollider(const void* instance)
     {
         const World::CompositeCollider2DComponent* self = static_cast<const World::CompositeCollider2DComponent*>(instance);
-        return Value(self->ShowCollider);
+        return Value(static_cast<bool>(self->ShowCollider));
     }
     static void Set_ShowCollider(void* instance, const Value& value)
     {
         World::CompositeCollider2DComponent* self = static_cast<World::CompositeCollider2DComponent*>(instance);
-        self->ShowCollider = std::get<bool>(value);
+        self->ShowCollider = static_cast<decltype(self->ShowCollider)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Density()
     {
@@ -5633,32 +5633,32 @@ struct GeneratedAccess<World::PlatformEffector2DComponent>
     static Value Get_OneWay(const void* instance)
     {
         const World::PlatformEffector2DComponent* self = static_cast<const World::PlatformEffector2DComponent*>(instance);
-        return Value(self->OneWay);
+        return Value(static_cast<bool>(self->OneWay));
     }
     static void Set_OneWay(void* instance, const Value& value)
     {
         World::PlatformEffector2DComponent* self = static_cast<World::PlatformEffector2DComponent*>(instance);
-        self->OneWay = std::get<bool>(value);
+        self->OneWay = static_cast<decltype(self->OneWay)>(std::get<bool>(value));
     }
     static Value Get_UseSideFriction(const void* instance)
     {
         const World::PlatformEffector2DComponent* self = static_cast<const World::PlatformEffector2DComponent*>(instance);
-        return Value(self->UseSideFriction);
+        return Value(static_cast<bool>(self->UseSideFriction));
     }
     static void Set_UseSideFriction(void* instance, const Value& value)
     {
         World::PlatformEffector2DComponent* self = static_cast<World::PlatformEffector2DComponent*>(instance);
-        self->UseSideFriction = std::get<bool>(value);
+        self->UseSideFriction = static_cast<decltype(self->UseSideFriction)>(std::get<bool>(value));
     }
     static Value Get_UseSideBounce(const void* instance)
     {
         const World::PlatformEffector2DComponent* self = static_cast<const World::PlatformEffector2DComponent*>(instance);
-        return Value(self->UseSideBounce);
+        return Value(static_cast<bool>(self->UseSideBounce));
     }
     static void Set_UseSideBounce(void* instance, const Value& value)
     {
         World::PlatformEffector2DComponent* self = static_cast<World::PlatformEffector2DComponent*>(instance);
-        self->UseSideBounce = std::get<bool>(value);
+        self->UseSideBounce = static_cast<decltype(self->UseSideBounce)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_SurfaceArc()
     {
@@ -5858,32 +5858,32 @@ struct GeneratedAccess<World::DistanceJoint2DComponent>
     static Value Get_EnableLimit(const void* instance)
     {
         const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
-        return Value(self->EnableLimit);
+        return Value(static_cast<bool>(self->EnableLimit));
     }
     static void Set_EnableLimit(void* instance, const Value& value)
     {
         World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
-        self->EnableLimit = std::get<bool>(value);
+        self->EnableLimit = static_cast<decltype(self->EnableLimit)>(std::get<bool>(value));
     }
     static Value Get_EnableSpring(const void* instance)
     {
         const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
-        return Value(self->EnableSpring);
+        return Value(static_cast<bool>(self->EnableSpring));
     }
     static void Set_EnableSpring(void* instance, const Value& value)
     {
         World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
-        self->EnableSpring = std::get<bool>(value);
+        self->EnableSpring = static_cast<decltype(self->EnableSpring)>(std::get<bool>(value));
     }
     static Value Get_EnableCollision(const void* instance)
     {
         const World::DistanceJoint2DComponent* self = static_cast<const World::DistanceJoint2DComponent*>(instance);
-        return Value(self->EnableCollision);
+        return Value(static_cast<bool>(self->EnableCollision));
     }
     static void Set_EnableCollision(void* instance, const Value& value)
     {
         World::DistanceJoint2DComponent* self = static_cast<World::DistanceJoint2DComponent*>(instance);
-        self->EnableCollision = std::get<bool>(value);
+        self->EnableCollision = static_cast<decltype(self->EnableCollision)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_ConnectedEntity()
     {
@@ -6178,32 +6178,32 @@ struct GeneratedAccess<World::RevoluteJoint2DComponent>
     static Value Get_EnableLimit(const void* instance)
     {
         const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
-        return Value(self->EnableLimit);
+        return Value(static_cast<bool>(self->EnableLimit));
     }
     static void Set_EnableLimit(void* instance, const Value& value)
     {
         World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
-        self->EnableLimit = std::get<bool>(value);
+        self->EnableLimit = static_cast<decltype(self->EnableLimit)>(std::get<bool>(value));
     }
     static Value Get_EnableMotor(const void* instance)
     {
         const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
-        return Value(self->EnableMotor);
+        return Value(static_cast<bool>(self->EnableMotor));
     }
     static void Set_EnableMotor(void* instance, const Value& value)
     {
         World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
-        self->EnableMotor = std::get<bool>(value);
+        self->EnableMotor = static_cast<decltype(self->EnableMotor)>(std::get<bool>(value));
     }
     static Value Get_EnableCollision(const void* instance)
     {
         const World::RevoluteJoint2DComponent* self = static_cast<const World::RevoluteJoint2DComponent*>(instance);
-        return Value(self->EnableCollision);
+        return Value(static_cast<bool>(self->EnableCollision));
     }
     static void Set_EnableCollision(void* instance, const Value& value)
     {
         World::RevoluteJoint2DComponent* self = static_cast<World::RevoluteJoint2DComponent*>(instance);
-        self->EnableCollision = std::get<bool>(value);
+        self->EnableCollision = static_cast<decltype(self->EnableCollision)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_ConnectedEntity()
     {
@@ -6508,32 +6508,32 @@ struct GeneratedAccess<World::PrismaticJoint2DComponent>
     static Value Get_EnableLimit(const void* instance)
     {
         const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
-        return Value(self->EnableLimit);
+        return Value(static_cast<bool>(self->EnableLimit));
     }
     static void Set_EnableLimit(void* instance, const Value& value)
     {
         World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
-        self->EnableLimit = std::get<bool>(value);
+        self->EnableLimit = static_cast<decltype(self->EnableLimit)>(std::get<bool>(value));
     }
     static Value Get_EnableMotor(const void* instance)
     {
         const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
-        return Value(self->EnableMotor);
+        return Value(static_cast<bool>(self->EnableMotor));
     }
     static void Set_EnableMotor(void* instance, const Value& value)
     {
         World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
-        self->EnableMotor = std::get<bool>(value);
+        self->EnableMotor = static_cast<decltype(self->EnableMotor)>(std::get<bool>(value));
     }
     static Value Get_EnableCollision(const void* instance)
     {
         const World::PrismaticJoint2DComponent* self = static_cast<const World::PrismaticJoint2DComponent*>(instance);
-        return Value(self->EnableCollision);
+        return Value(static_cast<bool>(self->EnableCollision));
     }
     static void Set_EnableCollision(void* instance, const Value& value)
     {
         World::PrismaticJoint2DComponent* self = static_cast<World::PrismaticJoint2DComponent*>(instance);
-        self->EnableCollision = std::get<bool>(value);
+        self->EnableCollision = static_cast<decltype(self->EnableCollision)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_ConnectedEntity()
     {
@@ -6877,32 +6877,32 @@ struct GeneratedAccess<World::WheelJoint2DComponent>
     static Value Get_EnableLimit(const void* instance)
     {
         const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
-        return Value(self->EnableLimit);
+        return Value(static_cast<bool>(self->EnableLimit));
     }
     static void Set_EnableLimit(void* instance, const Value& value)
     {
         World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
-        self->EnableLimit = std::get<bool>(value);
+        self->EnableLimit = static_cast<decltype(self->EnableLimit)>(std::get<bool>(value));
     }
     static Value Get_EnableMotor(const void* instance)
     {
         const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
-        return Value(self->EnableMotor);
+        return Value(static_cast<bool>(self->EnableMotor));
     }
     static void Set_EnableMotor(void* instance, const Value& value)
     {
         World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
-        self->EnableMotor = std::get<bool>(value);
+        self->EnableMotor = static_cast<decltype(self->EnableMotor)>(std::get<bool>(value));
     }
     static Value Get_EnableCollision(const void* instance)
     {
         const World::WheelJoint2DComponent* self = static_cast<const World::WheelJoint2DComponent*>(instance);
-        return Value(self->EnableCollision);
+        return Value(static_cast<bool>(self->EnableCollision));
     }
     static void Set_EnableCollision(void* instance, const Value& value)
     {
         World::WheelJoint2DComponent* self = static_cast<World::WheelJoint2DComponent*>(instance);
-        self->EnableCollision = std::get<bool>(value);
+        self->EnableCollision = static_cast<decltype(self->EnableCollision)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_ConnectedEntity()
     {
@@ -7232,32 +7232,32 @@ struct GeneratedAccess<World::AreaEffector2DComponent>
     static Value Get_UseGlobalCoordinates(const void* instance)
     {
         const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
-        return Value(self->UseGlobalCoordinates);
+        return Value(static_cast<bool>(self->UseGlobalCoordinates));
     }
     static void Set_UseGlobalCoordinates(void* instance, const Value& value)
     {
         World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
-        self->UseGlobalCoordinates = std::get<bool>(value);
+        self->UseGlobalCoordinates = static_cast<decltype(self->UseGlobalCoordinates)>(std::get<bool>(value));
     }
     static Value Get_AffectsInertia(const void* instance)
     {
         const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
-        return Value(self->AffectsInertia);
+        return Value(static_cast<bool>(self->AffectsInertia));
     }
     static void Set_AffectsInertia(void* instance, const Value& value)
     {
         World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
-        self->AffectsInertia = std::get<bool>(value);
+        self->AffectsInertia = static_cast<decltype(self->AffectsInertia)>(std::get<bool>(value));
     }
     static Value Get_Enabled(const void* instance)
     {
         const World::AreaEffector2DComponent* self = static_cast<const World::AreaEffector2DComponent*>(instance);
-        return Value(self->Enabled);
+        return Value(static_cast<bool>(self->Enabled));
     }
     static void Set_Enabled(void* instance, const Value& value)
     {
         World::AreaEffector2DComponent* self = static_cast<World::AreaEffector2DComponent*>(instance);
-        self->Enabled = std::get<bool>(value);
+        self->Enabled = static_cast<decltype(self->Enabled)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_ForceDirection()
     {
@@ -7492,12 +7492,12 @@ struct GeneratedAccess<World::BuoyancyEffector2DComponent>
     static Value Get_Enabled(const void* instance)
     {
         const World::BuoyancyEffector2DComponent* self = static_cast<const World::BuoyancyEffector2DComponent*>(instance);
-        return Value(self->Enabled);
+        return Value(static_cast<bool>(self->Enabled));
     }
     static void Set_Enabled(void* instance, const Value& value)
     {
         World::BuoyancyEffector2DComponent* self = static_cast<World::BuoyancyEffector2DComponent*>(instance);
-        self->Enabled = std::get<bool>(value);
+        self->Enabled = static_cast<decltype(self->Enabled)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Density()
     {
@@ -7664,12 +7664,12 @@ struct GeneratedAccess<World::SurfaceEffector2DComponent>
     static Value Get_Enabled(const void* instance)
     {
         const World::SurfaceEffector2DComponent* self = static_cast<const World::SurfaceEffector2DComponent*>(instance);
-        return Value(self->Enabled);
+        return Value(static_cast<bool>(self->Enabled));
     }
     static void Set_Enabled(void* instance, const Value& value)
     {
         World::SurfaceEffector2DComponent* self = static_cast<World::SurfaceEffector2DComponent*>(instance);
-        self->Enabled = std::get<bool>(value);
+        self->Enabled = static_cast<decltype(self->Enabled)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Speed()
     {
@@ -7823,12 +7823,12 @@ struct GeneratedAccess<World::RigidBody3DComponent>
     static Value Get_UseGravity(const void* instance)
     {
         const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
-        return Value(self->UseGravity);
+        return Value(static_cast<bool>(self->UseGravity));
     }
     static void Set_UseGravity(void* instance, const Value& value)
     {
         World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
-        self->UseGravity = std::get<bool>(value);
+        self->UseGravity = static_cast<decltype(self->UseGravity)>(std::get<bool>(value));
     }
     static Value Get_Layer(const void* instance)
     {
@@ -7853,22 +7853,22 @@ struct GeneratedAccess<World::RigidBody3DComponent>
     static Value Get_IsSensor(const void* instance)
     {
         const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
-        return Value(self->IsSensor);
+        return Value(static_cast<bool>(self->IsSensor));
     }
     static void Set_IsSensor(void* instance, const Value& value)
     {
         World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
-        self->IsSensor = std::get<bool>(value);
+        self->IsSensor = static_cast<decltype(self->IsSensor)>(std::get<bool>(value));
     }
     static Value Get_Ccd(const void* instance)
     {
         const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
-        return Value(self->Ccd);
+        return Value(static_cast<bool>(self->Ccd));
     }
     static void Set_Ccd(void* instance, const Value& value)
     {
         World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
-        self->Ccd = std::get<bool>(value);
+        self->Ccd = static_cast<decltype(self->Ccd)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Type()
     {
@@ -8473,12 +8473,12 @@ struct GeneratedAccess<World::JointComponent>
     static Value Get_EnableCollision(const void* instance)
     {
         const World::JointComponent* self = static_cast<const World::JointComponent*>(instance);
-        return Value(self->EnableCollision);
+        return Value(static_cast<bool>(self->EnableCollision));
     }
     static void Set_EnableCollision(void* instance, const Value& value)
     {
         World::JointComponent* self = static_cast<World::JointComponent*>(instance);
-        self->EnableCollision = std::get<bool>(value);
+        self->EnableCollision = static_cast<decltype(self->EnableCollision)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Connected()
     {
@@ -8800,12 +8800,12 @@ struct GeneratedAccess<World::PartitionVolumeComponent>
     static Value Get_Active(const void* instance)
     {
         const World::PartitionVolumeComponent* self = static_cast<const World::PartitionVolumeComponent*>(instance);
-        return Value(self->Active);
+        return Value(static_cast<bool>(self->Active));
     }
     static void Set_Active(void* instance, const Value& value)
     {
         World::PartitionVolumeComponent* self = static_cast<World::PartitionVolumeComponent*>(instance);
-        self->Active = std::get<bool>(value);
+        self->Active = static_cast<decltype(self->Active)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_HalfExtents()
     {
@@ -9031,32 +9031,32 @@ struct GeneratedAccess<World::AudioSourceComponent>
     static Value Get_Spatial3D(const void* instance)
     {
         const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
-        return Value(self->Spatial3D);
+        return Value(static_cast<bool>(self->Spatial3D));
     }
     static void Set_Spatial3D(void* instance, const Value& value)
     {
         World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
-        self->Spatial3D = std::get<bool>(value);
+        self->Spatial3D = static_cast<decltype(self->Spatial3D)>(std::get<bool>(value));
     }
     static Value Get_Looping(const void* instance)
     {
         const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
-        return Value(self->Looping);
+        return Value(static_cast<bool>(self->Looping));
     }
     static void Set_Looping(void* instance, const Value& value)
     {
         World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
-        self->Looping = std::get<bool>(value);
+        self->Looping = static_cast<decltype(self->Looping)>(std::get<bool>(value));
     }
     static Value Get_PlayOnAwake(const void* instance)
     {
         const World::AudioSourceComponent* self = static_cast<const World::AudioSourceComponent*>(instance);
-        return Value(self->PlayOnAwake);
+        return Value(static_cast<bool>(self->PlayOnAwake));
     }
     static void Set_PlayOnAwake(void* instance, const Value& value)
     {
         World::AudioSourceComponent* self = static_cast<World::AudioSourceComponent*>(instance);
-        self->PlayOnAwake = std::get<bool>(value);
+        self->PlayOnAwake = static_cast<decltype(self->PlayOnAwake)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Sound()
     {
@@ -9258,12 +9258,12 @@ struct GeneratedAccess<World::AudioListenerComponent>
     static Value Get_Active(const void* instance)
     {
         const World::AudioListenerComponent* self = static_cast<const World::AudioListenerComponent*>(instance);
-        return Value(self->Active);
+        return Value(static_cast<bool>(self->Active));
     }
     static void Set_Active(void* instance, const Value& value)
     {
         World::AudioListenerComponent* self = static_cast<World::AudioListenerComponent*>(instance);
-        self->Active = std::get<bool>(value);
+        self->Active = static_cast<decltype(self->Active)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_VolumeScale()
     {
@@ -9602,32 +9602,32 @@ struct GeneratedAccess<World::CharacterControllerComponent>
     static Value Get_Grounded(const void* instance)
     {
         const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
-        return Value(self->Grounded);
+        return Value(static_cast<bool>(self->Grounded));
     }
     static void Set_Grounded(void* instance, const Value& value)
     {
         World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
-        self->Grounded = std::get<bool>(value);
+        self->Grounded = static_cast<decltype(self->Grounded)>(std::get<bool>(value));
     }
     static Value Get_IsSliding(const void* instance)
     {
         const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
-        return Value(self->IsSliding);
+        return Value(static_cast<bool>(self->IsSliding));
     }
     static void Set_IsSliding(void* instance, const Value& value)
     {
         World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
-        self->IsSliding = std::get<bool>(value);
+        self->IsSliding = static_cast<decltype(self->IsSliding)>(std::get<bool>(value));
     }
     static Value Get_LockZPlane(const void* instance)
     {
         const World::CharacterControllerComponent* self = static_cast<const World::CharacterControllerComponent*>(instance);
-        return Value(self->LockZPlane);
+        return Value(static_cast<bool>(self->LockZPlane));
     }
     static void Set_LockZPlane(void* instance, const Value& value)
     {
         World::CharacterControllerComponent* self = static_cast<World::CharacterControllerComponent*>(instance);
-        self->LockZPlane = std::get<bool>(value);
+        self->LockZPlane = static_cast<decltype(self->LockZPlane)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Velocity()
     {
@@ -10200,12 +10200,12 @@ struct GeneratedAccess<World::PostProcessComponent>
     static Value Get_Enabled(const void* instance)
     {
         const World::PostProcessComponent* self = static_cast<const World::PostProcessComponent*>(instance);
-        return Value(self->Enabled);
+        return Value(static_cast<bool>(self->Enabled));
     }
     static void Set_Enabled(void* instance, const Value& value)
     {
         World::PostProcessComponent* self = static_cast<World::PostProcessComponent*>(instance);
-        self->Enabled = std::get<bool>(value);
+        self->Enabled = static_cast<decltype(self->Enabled)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_OutlineColor()
     {
@@ -10488,12 +10488,12 @@ struct GeneratedAccess<World::HealthComponent>
     static Value Get_IsDead(const void* instance)
     {
         const World::HealthComponent* self = static_cast<const World::HealthComponent*>(instance);
-        return Value(self->IsDead);
+        return Value(static_cast<bool>(self->IsDead));
     }
     static void Set_IsDead(void* instance, const Value& value)
     {
         World::HealthComponent* self = static_cast<World::HealthComponent*>(instance);
-        self->IsDead = std::get<bool>(value);
+        self->IsDead = static_cast<decltype(self->IsDead)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_CurrentHealth()
     {
@@ -10713,12 +10713,12 @@ struct GeneratedAccess<World::SmartObjectComponent>
     static Value Get_Enabled(const void* instance)
     {
         const World::SmartObjectComponent* self = static_cast<const World::SmartObjectComponent*>(instance);
-        return Value(self->Enabled);
+        return Value(static_cast<bool>(self->Enabled));
     }
     static void Set_Enabled(void* instance, const Value& value)
     {
         World::SmartObjectComponent* self = static_cast<World::SmartObjectComponent*>(instance);
-        self->Enabled = std::get<bool>(value);
+        self->Enabled = static_cast<decltype(self->Enabled)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_SlotOffset()
     {
@@ -10993,42 +10993,42 @@ struct GeneratedAccess<World::ParticleSystemComponent>
     static Value Get_LockToXYPlane(const void* instance)
     {
         const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->LockToXYPlane);
+        return Value(static_cast<bool>(self->LockToXYPlane));
     }
     static void Set_LockToXYPlane(void* instance, const Value& value)
     {
         World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->LockToXYPlane = std::get<bool>(value);
+        self->LockToXYPlane = static_cast<decltype(self->LockToXYPlane)>(std::get<bool>(value));
     }
     static Value Get_Looping(const void* instance)
     {
         const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->Looping);
+        return Value(static_cast<bool>(self->Looping));
     }
     static void Set_Looping(void* instance, const Value& value)
     {
         World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->Looping = std::get<bool>(value);
+        self->Looping = static_cast<decltype(self->Looping)>(std::get<bool>(value));
     }
     static Value Get_PlayOnAwake(const void* instance)
     {
         const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->PlayOnAwake);
+        return Value(static_cast<bool>(self->PlayOnAwake));
     }
     static void Set_PlayOnAwake(void* instance, const Value& value)
     {
         World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->PlayOnAwake = std::get<bool>(value);
+        self->PlayOnAwake = static_cast<decltype(self->PlayOnAwake)>(std::get<bool>(value));
     }
     static Value Get_IsPlaying(const void* instance)
     {
         const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->IsPlaying);
+        return Value(static_cast<bool>(self->IsPlaying));
     }
     static void Set_IsPlaying(void* instance, const Value& value)
     {
         World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->IsPlaying = std::get<bool>(value);
+        self->IsPlaying = static_cast<decltype(self->IsPlaying)>(std::get<bool>(value));
     }
     static const FieldSchema& Field_Gravity()
     {

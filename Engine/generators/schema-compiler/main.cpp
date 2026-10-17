@@ -1105,6 +1105,8 @@ namespace
 				if (options.Entity32)
 					out << "        return Value(static_cast<uint64_t>(static_cast<uint32_t>(self->"
 						<< field.Name << ")));\n    }\n";
+				else if (field.Kind == "Bool")
+					out << "        return Value(static_cast<bool>(self->" << field.Name << "));\n    }\n";
 				else
 					out << "        return Value(self->" << field.Name << ");\n    }\n";
 				out << "    static void Set_" << field.Name << "(void* instance, const Value& value)\n";
@@ -1115,6 +1117,8 @@ namespace
 					out << "        self->" << field.Name << " = raw == static_cast<uint64_t>(entt::null)\n";
 					out << "            ? entt::null : static_cast<entt::entity>(static_cast<uint32_t>(raw));\n    }\n";
 				}
+				else if (field.Kind == "Bool")
+					out << "        self->" << field.Name << " = static_cast<decltype(self->" << field.Name << ")>(std::get<bool>(value));\n    }\n";
 				else
 					out << "        self->" << field.Name << " = std::get<" << cpp << ">(value);\n    }\n";
 			}

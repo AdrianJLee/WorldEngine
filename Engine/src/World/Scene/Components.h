@@ -47,7 +47,7 @@ namespace World
 		float Armor = 0.0f;                          // 4B
 		float InvulnerableDuration = 0.5f;           // 4B
 		float InvulnerableTimer = 0.0f;              // 4B
-		uint8_t IsDead = 0;                          // 1B
+		bool IsDead = false;                         // 1B
 		uint8_t MitigationMode = 0;                  // 1B (0: Hyperbolic, 1: Flat, 2: Percentage, 3: Custom)
 		uint8_t Flags = 0;                           // 1B
 		uint8_t _Padding[1] { 0 };                   // 1B
@@ -130,10 +130,10 @@ namespace World
 		uint32_t MaxParticles = 1000;              // 4B
 		ParticleEmitterType EmitterType = ParticleEmitterType::Point; // 1B
 		ParticleRenderMode RenderMode = ParticleRenderMode::Billboard;// 1B
-		uint8_t LockToXYPlane = 0;                 // 1B
-		uint8_t Looping = 1;                       // 1B
-		uint8_t PlayOnAwake = 1;                   // 1B
-		uint8_t IsPlaying = 1;                     // 1B
+		bool LockToXYPlane = false;                // 1B
+		bool Looping = true;                       // 1B
+		bool PlayOnAwake = true;                   // 1B
+		bool IsPlaying = true;                     // 1B
 		uint8_t _Padding[10] { 0 };                // 10B
 
 		ParticleSystemComponent() = default;
@@ -186,7 +186,7 @@ namespace World
 		uint32_t ActivityTag = 0;                    // 4B
 		uint32_t ClaimedByEntity = 0;                // 4B
 		SmartObjectSlotState SlotState = SmartObjectSlotState::Available; // 1B
-		uint8_t Enabled = 1;                         // 1B
+		bool Enabled = true;                         // 1B
 		uint8_t _Padding[6] { 0 };                   // 6B
 
 		SmartObjectComponent() = default;
@@ -1928,9 +1928,9 @@ namespace World
 		float CoyoteTimer = 0.0f;                // 4B
 		float JumpBufferTimer = 0.0f;            // 4B
 		float GravityScale = 1.0f;               // 4B
-		uint8_t Grounded = 0;                    // 1B
-		uint8_t IsSliding = 0;                   // 1B
-		uint8_t LockZPlane = 0;                  // 1B
+		bool Grounded = false;                   // 1B
+		bool IsSliding = false;                  // 1B
+		bool LockZPlane = false;                 // 1B
 		uint8_t CollisionFlags = 0;              // 1B
 		uint32_t CollisionMask = 0xFFFFFFFF;     // 4B
 		uint32_t CollisionLayer = 1;             // 4B
@@ -2013,8 +2013,8 @@ namespace World
 		float BloomThreshold = 1.0f;                       // 4B
 		float VignetteIntensity = 0.0f;                    // 4B
 		float ChromaticAberration = 0.0f;                  // 4B
-		uint8_t Enabled = 1;                               // 1B
-		uint8_t LutEnabled = 0;                            // 1B
+		bool Enabled = true;                               // 1B
+		bool LutEnabled = false;                           // 1B
 		uint8_t _Padding[6] { 0 };                        // 10B
 
 		PostProcessComponent() = default;
