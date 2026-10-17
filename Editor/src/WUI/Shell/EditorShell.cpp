@@ -699,6 +699,14 @@ void EditorShell::DuplicateSelectedEntity(){
 		m_Editor.DuplicateSelectedEntity();
 	}
 
+CommandHistory& EditorShell::GetCommandHistory(){
+		return m_Editor.GetCommandHistory();
+	}
+
+void EditorShell::PushCommand(std::unique_ptr<IEditorCommand> cmd){
+		m_Editor.GetCommandHistory().Push(std::move(cmd));
+	}
+
 
 void EditorShell::OpenScene(const std::filesystem::path& path){
 		// 面板的"打开"一律**推迟到帧边界**(见 EditorShell_DockingLayout 的待办消费)。
@@ -709,7 +717,10 @@ void EditorShell::OpenScene(const std::filesystem::path& path){
 		// `std::terminate: bad allocation`)。帧边界执行与菜单/快捷键路径同一时序,
 		// 面板只负责"排队",不负责"换文档"。
 		if (!path.empty())
+		{
+			m_Editor.GetCommandHistory().Clear();
 			m_PendingOpenDocument = path;
+		}
 	}
 
 

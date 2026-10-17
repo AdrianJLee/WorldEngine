@@ -12,6 +12,7 @@
 #include "World/Modules/GameModuleReload.h"
 #include "Document/EditorDocument.h"
 #include "World/UI/UiHost.h"
+#include "World/Command/CommandHistory.h"
 #include "World/WUI/WuiCommand.h"
 #include "World/WUI/WuiGizmo.h"
 #include "WUI/Shell/EditorShell.h"
@@ -234,6 +235,8 @@ namespace World
 		// 非 Play/Simulate,或没有加载到 `.wui`,或视口面板本帧未渲染 = 零操作。
 		void DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputState& input);
 		Wui::WuiCommandRegistry& Commands() { return m_Commands; }
+		CommandHistory& GetCommandHistory() { return m_CommandHistory; }
+		const CommandHistory& GetCommandHistory() const { return m_CommandHistory; }
 
 		// ---- P2 W5b:脚本热重载(编辑器侧接线)----
 		// 唯一的重载入口:帧边界轮询、属性面板 Reload 按钮、AI 通道 script.reload 共用。
@@ -576,6 +579,7 @@ namespace World
 		bool m_GizmoDragging = false;
 		TransformComponent m_GizmoDragBefore;
 
+		CommandHistory m_CommandHistory;
 		Wui::WuiCommandRegistry m_Commands;
 		EditorShell m_Shell;
 		// GameUI(M7b):Play/Simulate 期间由它把 `.wui` 驱动的游戏 UI 画进视口面板的场景矩形,

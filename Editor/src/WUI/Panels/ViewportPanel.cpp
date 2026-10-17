@@ -1,4 +1,5 @@
 #include "WUI/Panels/ViewportPanel_ToolGizmos.h"
+#include "World/Command/CommandHistory.h"
 #include "wldpch.h"
 #include "WUI/Panels/ViewportPanel.h"
 
@@ -1017,7 +1018,10 @@ namespace World
 				m_GizmoActive = false;
 				const auto& after = selected.GetComponent<TransformComponent>();
 				if (after.Location != m_GizmoBefore.Location || after.Rotation != m_GizmoBefore.Rotation || after.Scale != m_GizmoBefore.Scale)
+				{
+					m_Host.PushCommand(std::make_unique<EntityTransformCommand>(selected, m_GizmoBefore, after, "Gizmo Transform"));
 					m_Host.MarkDocumentDirty();
+				}
 			}
 		}
 		const Wui::WuiRect previewRect = CameraPreviewRect(sceneRect);

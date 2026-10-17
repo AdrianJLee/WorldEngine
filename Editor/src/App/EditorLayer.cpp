@@ -230,9 +230,31 @@ EditorLayer::EditorLayer(bool projectExplicit, bool launcherMode) : Layer("Edito
 		m_ProjectExplicit = projectExplicit;
 		// PROJ-3/T1:纯启动器模式(宿主已在 Application 构造前挡住项目挂载,见 LauncherBootScope)。
 		m_LauncherMode = launcherMode;
-		m_Commands.Register({ Wui::HashId("cmd.new"), "New", KeyCodes::N, true, false, [this] { NewScene(); } });
-		m_Commands.Register({ Wui::HashId("cmd.open"), "Open", KeyCodes::O, true, false, [this] { OpenScene(); } });
+		m_Commands.Register({ Wui::HashId("cmd.new"), "New", KeyCodes::N, true, false, [this] { m_CommandHistory.Clear(); NewScene(); } });
+		m_Commands.Register({ Wui::HashId("cmd.open"), "Open", KeyCodes::O, true, false, [this] { m_CommandHistory.Clear(); OpenScene(); } });
 		m_Commands.Register({ Wui::HashId("cmd.save"), "Save", KeyCodes::S, true, false, [this] { SaveScene(); } });
+		m_Commands.Register({ Wui::HashId("cmd.undo"), "Undo", KeyCodes::Z, true, false, [this] {
+			if (m_CommandHistory.CanUndo())
+			{
+				std::string name(m_CommandHistory.GetUndoName());
+				if (m_CommandHistory.Undo())
+				{
+					MarkDocumentDirty();
+					WLD_CORE_INFO("Undo: {0}", name);
+				}
+			}
+		} });
+		m_Commands.Register({ Wui::HashId("cmd.redo"), "Redo", KeyCodes::Y, true, false, [this] {
+			if (m_CommandHistory.CanRedo())
+			{
+				std::string name(m_CommandHistory.GetRedoName());
+				if (m_CommandHistory.Redo())
+				{
+					MarkDocumentDirty();
+					WLD_CORE_INFO("Redo: {0}", name);
+				}
+			}
+		} });
 		m_Commands.Register({ Wui::HashId("cmd.duplicate"), "Duplicate", KeyCodes::D, true, false, [this] { DuplicateSelectedEntity(); } });
 		m_Commands.Register({ Wui::HashId("cmd.gizmo_none"), "Gizmo None", KeyCodes::Q, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::None); } });
 		m_Commands.Register({ Wui::HashId("cmd.gizmo_move"), "Gizmo Move", KeyCodes::W, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Translate); } });

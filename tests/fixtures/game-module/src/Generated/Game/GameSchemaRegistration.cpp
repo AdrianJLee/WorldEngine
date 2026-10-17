@@ -39,12 +39,12 @@ struct GeneratedAccess<World::SampleDataComponent>
     static Value Get_Enabled(const void* instance)
     {
         const World::SampleDataComponent* self = static_cast<const World::SampleDataComponent*>(instance);
-        return Value(self->Enabled);
+        return Value(static_cast<bool>(self->Enabled));
     }
     static void Set_Enabled(void* instance, const Value& value)
     {
         World::SampleDataComponent* self = static_cast<World::SampleDataComponent*>(instance);
-        self->Enabled = std::get<bool>(value);
+        self->Enabled = static_cast<decltype(self->Enabled)>(std::get<bool>(value));
     }
     static Value Get_Offset(const void* instance)
     {

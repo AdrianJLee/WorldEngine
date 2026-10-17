@@ -1,4 +1,5 @@
 #include "World/Audio/AudioSystem.h"
+#include "World/Command/CommandHistory.h"
 #include "EditorShell_Internal.h"
 
 namespace World
@@ -865,6 +866,7 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		};
 
 		const Wui::WuiId menuFile = Wui::HashId("menu.file");
+		const Wui::WuiId menuEdit = Wui::HashId("menu.edit");
 		const Wui::WuiId menuWindow = Wui::HashId("menu.window");
 		const Wui::WuiId menuRun = Wui::HashId("menu.run");
 		if (!m_MenuBar)
@@ -891,6 +893,23 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 						m_Ctx->ClosePopup(menuFile);
 				};
 			m_MenuBar->Add(m_FileButton, { 60, 60, 0, 22, 0 });
+			m_EditButton = std::make_shared<Wui::WuiButton>();
+			m_EditButton->SetId(menuEdit);
+			m_EditButton->Label = Wui::Tr("menu.edit", "Edit");
+			m_EditButton->OnClick = [this, menuEdit]
+				{
+					const bool opening = m_OpenMenu != menuEdit;
+					m_OpenMenu = opening ? menuEdit : 0;
+					if (opening)
+					{
+						m_Ctx->CloseAllPopups();
+						m_MenuHeaderRect = m_EditButton->Rect();
+						m_Ctx->OpenPopup(menuEdit);
+					}
+					else
+						m_Ctx->ClosePopup(menuEdit);
+				};
+			m_MenuBar->Add(m_EditButton, { 60, 60, 0, 22, 0 });
 			m_WindowButton = std::make_shared<Wui::WuiButton>();
 			m_WindowButton->SetId(menuWindow);
 			m_WindowButton->Label = Wui::Tr("menu.window", "Window");
@@ -1054,8 +1073,8 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		};
 
 		std::vector<MenuEntry> fileEntries;
-		fileEntries.push_back({ Wui::Tr("menu.file.new", "New"), false, [this] { m_Editor.NewScene(); } });
-		fileEntries.push_back({ Wui::Tr("menu.file.open", "Open"), false, [this] { m_Editor.OpenScene(); } });
+		fileEntries.push_back({ Wui::Tr("menu.file.new", "New"), false, [this] { m_Editor.GetCommandHistory().Clear(); m_Editor.NewScene(); } });
+		fileEntries.push_back({ Wui::Tr("menu.file.open", "Open"), false, [this] { m_Editor.GetCommandHistory().Clear(); m_Editor.OpenScene(); } });
 		fileEntries.push_back({ Wui::Tr("menu.file.save", "Save"), false, [this] { m_Editor.SaveScene(); } });
 		// PROJ-2/T1:File ▸ Open Project…(选目录 → 校验 project.we.yaml → 重启到该项目)。
 		// 原生对话框推迟到下一帧开头(见 OnRender 的 m_OpenProjectBrowsePending 分支)。
@@ -1236,6 +1255,90 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 			[this] { m_Editor.ExportOperationLog(); } });
 		fileEntries.push_back({ Wui::Tr("menu.file.exit", "Exit"), false, [this] { m_Editor.CloseAction(); } });
 		drawMenu(menuFile, "menu.file", fileEntries);
+
+		std::vector<MenuEntry> editEntries;
+		auto& cmdHistory = m_Editor.GetCommandHistory();
+		const bool canUndo = cmdHistory.CanUndo();
+		const bool canRedo = cmdHistory.CanRedo();
+
+		std::string undoLabel = "Undo";
+		if (canUndo && !cmdHistory.GetUndoName().empty())
+			undoLabel += " " + std::string(cmdHistory.GetUndoName());
+		undoLabel += " (Ctrl+Z)";
+
+		std::string redoLabel = "Redo";
+		if (canRedo && !cmdHistory.GetRedoName().empty())
+			redoLabel += " " + std::string(cmdHistory.GetRedoName());
+		redoLabel += " (Ctrl+Y)";
+
+		editEntries.push_back({
+			undoLabel, false,
+			[this]
+			{
+				auto& history = m_Editor.GetCommandHistory();
+				if (history.CanUndo())
+				{
+					const std::string name(history.GetUndoName());
+					if (history.Undo())
+					{
+						m_Editor.MarkDocumentDirty();
+						WLD_CORE_INFO("Undo: {0}", name);
+					}
+				}
+			},
+			false, "", Wui::HashId("menu.edit.undo"), canUndo
+		});
+
+		editEntries.push_back({
+			redoLabel, false,
+			[this]
+			{
+				auto& history = m_Editor.GetCommandHistory();
+				if (history.CanRedo())
+				{
+					const std::string name(history.GetRedoName());
+					if (history.Redo())
+					{
+						m_Editor.MarkDocumentDirty();
+						WLD_CORE_INFO("Redo: {0}", name);
+					}
+				}
+			},
+			false, "", Wui::HashId("menu.edit.redo"), canRedo
+		});
+
+		editEntries.push_back({
+			Wui::Tr("menu.edit.clear_history", "Clear History"), false,
+			[this] { m_Editor.GetCommandHistory().Clear(); },
+			false, "", Wui::HashId("menu.edit.clear_history"), canUndo || canRedo
+		});
+
+		const bool hasSelected = m_Editor.GetSelectedEntity().IsValid();
+		editEntries.push_back({
+			Wui::Tr("menu.edit.duplicate", "Duplicate Selected (Ctrl+D)"), false,
+			[this] { m_Editor.DuplicateSelectedEntity(); },
+			false, "", Wui::HashId("menu.edit.duplicate"), hasSelected
+		});
+
+		editEntries.push_back({
+			Wui::Tr("menu.edit.delete", "Delete Selected (Delete)"), false,
+			[this]
+			{
+				if (auto selected = m_Editor.GetSelectedEntity(); selected.IsValid())
+				{
+					if (auto scene = m_Editor.GetActiveScene())
+					{
+						m_Editor.GetCommandHistory().PushAndExecute(
+							std::make_unique<EntityDestroyCommand>(selected, "Destroy Entity"));
+						m_Editor.SetSelectedEntity({});
+						m_Editor.MarkDocumentDirty();
+					}
+				}
+			},
+			false, "", Wui::HashId("menu.edit.delete"), hasSelected
+		});
+
+		drawMenu(menuEdit, "menu.edit", editEntries);
 
 		// PROJ-2/T1:运行 ▸ 启动项目(Runtime)—— 独立 Runtime 进程跑当前项目的 start_scene,
 		// 不重启编辑器、不需要先进 Play。

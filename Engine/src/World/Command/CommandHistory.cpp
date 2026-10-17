@@ -1,6 +1,12 @@
 #include "wldpch.h"
 #include "World/Command/CommandHistory.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Scene.h"
+#include "World/Scene/SceneSerializer.h"
+#include "World/Scene/Hierarchy.h"
+#include "World/Core/StringPool.h"
+
+#include <algorithm>
 
 namespace World
 {
@@ -96,7 +102,8 @@ namespace World
 		const glm::vec3& oldPos, const glm::quat& oldRot, const glm::vec3& oldScale,
 		const glm::vec3& newPos, const glm::quat& newRot, const glm::vec3& newScale,
 		std::string_view name)
-		: m_Entity(entity)
+		: m_Scene(entity.IsValid() ? entity.GetScene() : nullptr)
+		, m_Entity(entity)
 		, m_OldPosition(oldPos)
 		, m_OldRotation(oldRot)
 		, m_OldScale(oldScale)
@@ -105,13 +112,18 @@ namespace World
 		, m_NewScale(newScale)
 		, m_Name(name)
 	{
+		if (entity.IsValid() && entity.HasComponent<UUIDComponent>())
+		{
+			m_EntityUUID = entity.GetComponent<UUIDComponent>().ID;
+		}
 	}
 
 	EntityTransformCommand::EntityTransformCommand(Entity entity,
 		const TransformComponent& oldTransform,
 		const TransformComponent& newTransform,
 		std::string_view name)
-		: m_Entity(entity)
+		: m_Scene(entity.IsValid() ? entity.GetScene() : nullptr)
+		, m_Entity(entity)
 		, m_OldPosition(oldTransform.Location)
 		, m_OldRotation(oldTransform.Rotation)
 		, m_OldScale(oldTransform.Scale)
@@ -120,29 +132,62 @@ namespace World
 		, m_NewScale(newTransform.Scale)
 		, m_Name(name)
 	{
+		if (entity.IsValid() && entity.HasComponent<UUIDComponent>())
+		{
+			m_EntityUUID = entity.GetComponent<UUIDComponent>().ID;
+		}
+	}
+
+	Entity EntityTransformCommand::ResolveEntity() const
+	{
+		if (m_Entity.IsValid())
+		{
+			return m_Entity;
+		}
+		if (m_Scene && static_cast<uint64_t>(m_EntityUUID) != 0)
+		{
+			for (const auto handle : m_Scene->GetRegistry().view<UUIDComponent>())
+			{
+				if (m_Scene->GetRegistry().get<UUIDComponent>(handle).ID == m_EntityUUID)
+				{
+					m_Entity = Entity(m_Scene, handle);
+					return m_Entity;
+				}
+			}
+		}
+		return Entity();
+	}
+
+	Entity EntityTransformCommand::GetEntity() const
+	{
+		return ResolveEntity();
 	}
 
 	void EntityTransformCommand::Execute()
 	{
-		if (m_Entity.IsValid() && m_Entity.HasComponent<TransformComponent>())
+		Entity entity = ResolveEntity();
+		if (entity.IsValid() && entity.HasComponent<TransformComponent>())
 		{
-			auto& tc = m_Entity.GetComponent<TransformComponent>();
+			auto& tc = entity.GetComponent<TransformComponent>();
 			tc.Location = m_NewPosition;
 			tc.Rotation = m_NewRotation;
 			tc.Scale = m_NewScale;
 			tc.Flags |= (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
+			m_Entity = entity;
 		}
 	}
 
 	void EntityTransformCommand::Undo()
 	{
-		if (m_Entity.IsValid() && m_Entity.HasComponent<TransformComponent>())
+		Entity entity = ResolveEntity();
+		if (entity.IsValid() && entity.HasComponent<TransformComponent>())
 		{
-			auto& tc = m_Entity.GetComponent<TransformComponent>();
+			auto& tc = entity.GetComponent<TransformComponent>();
 			tc.Location = m_OldPosition;
 			tc.Rotation = m_OldRotation;
 			tc.Scale = m_OldScale;
 			tc.Flags |= (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
+			m_Entity = entity;
 		}
 	}
 
@@ -157,6 +202,491 @@ namespace World
 	}
 
 	size_t EntityTransformCommand::GetMemorySize() const
+	{
+		return sizeof(*this) + m_Name.capacity();
+	}
+
+	// =========================================================================
+	// EntityCreateCommand
+	// =========================================================================
+
+	EntityCreateCommand::EntityCreateCommand(Entity entity, std::string_view name)
+		: m_Entity(entity)
+		, m_Name(name)
+	{
+		if (entity.IsValid())
+		{
+			m_Scene = entity.GetScene();
+			if (entity.HasComponent<UUIDComponent>())
+			{
+				m_EntityUUID = entity.GetComponent<UUIDComponent>().ID;
+			}
+			if (entity.HasComponent<TagComponent>())
+			{
+				m_EntityName = StringPool::Get().NameOf(entity.GetComponent<TagComponent>().Tag);
+			}
+			if (entity.HasComponent<HierarchyComponent>())
+			{
+				entt::entity parentHandle = entity.GetComponent<HierarchyComponent>().Parent;
+				if (parentHandle != entt::null && m_Scene && m_Scene->GetRegistry().valid(parentHandle))
+				{
+					if (m_Scene->GetRegistry().all_of<UUIDComponent>(parentHandle))
+					{
+						m_ParentUUID = m_Scene->GetRegistry().get<UUIDComponent>(parentHandle).ID;
+					}
+				}
+			}
+			SceneSerializer::SerializeEntityDocumentToYaml(entity, &m_SnapshotYaml);
+		}
+	}
+
+	EntityCreateCommand::EntityCreateCommand(Scene* scene, const std::string& entityName,
+		const UUID& parentUuid, std::string_view name)
+		: m_Scene(scene)
+		, m_EntityUUID(UUID())
+		, m_ParentUUID(parentUuid)
+		, m_EntityName(entityName)
+		, m_Name(name)
+	{
+	}
+
+	Entity EntityCreateCommand::ResolveEntity() const
+	{
+		if (m_Entity.IsValid())
+		{
+			return m_Entity;
+		}
+		return ResolveEntityByUUID(m_EntityUUID);
+	}
+
+	Entity EntityCreateCommand::ResolveEntityByUUID(const UUID& uuid) const
+	{
+		if (!m_Scene || static_cast<uint64_t>(uuid) == 0)
+		{
+			return Entity();
+		}
+		for (const auto handle : m_Scene->GetRegistry().view<UUIDComponent>())
+		{
+			if (m_Scene->GetRegistry().get<UUIDComponent>(handle).ID == uuid)
+			{
+				return Entity(m_Scene, handle);
+			}
+		}
+		return Entity();
+	}
+
+	Entity EntityCreateCommand::GetEntity() const
+	{
+		return ResolveEntity();
+	}
+
+	void EntityCreateCommand::Execute()
+	{
+		if (!m_Scene)
+		{
+			return;
+		}
+
+		Entity live = ResolveEntity();
+		if (live.IsValid())
+		{
+			if (m_SnapshotYaml.empty())
+			{
+				SceneSerializer::SerializeEntityDocumentToYaml(live, &m_SnapshotYaml);
+			}
+			m_Entity = live;
+			return;
+		}
+
+		if (!m_SnapshotYaml.empty())
+		{
+			std::string error;
+			size_t count = SceneSerializer::AppendEntityYaml(*m_Scene, m_SnapshotYaml, &error);
+			if (count > 0)
+			{
+				if (static_cast<uint64_t>(m_ParentUUID) != 0)
+				{
+					Entity parent = ResolveEntityByUUID(m_ParentUUID);
+					Entity child = ResolveEntityByUUID(m_EntityUUID);
+					if (parent.IsValid() && child.IsValid())
+					{
+						Hierarchy::SetParent(m_Scene->GetRegistry(),
+							static_cast<entt::entity>(child),
+							static_cast<entt::entity>(parent));
+					}
+				}
+				SceneSerializer::FinalizeEntityImport(*m_Scene);
+				m_Entity = ResolveEntityByUUID(m_EntityUUID);
+			}
+		}
+		else
+		{
+			Entity created = Entity::CreateEntity(m_Scene, m_EntityName, m_EntityUUID);
+			m_Entity = created;
+			if (static_cast<uint64_t>(m_ParentUUID) != 0)
+			{
+				Entity parent = ResolveEntityByUUID(m_ParentUUID);
+				if (parent.IsValid())
+				{
+					Hierarchy::SetParent(m_Scene->GetRegistry(),
+						static_cast<entt::entity>(created),
+						static_cast<entt::entity>(parent));
+					Hierarchy::UpdateWorldTransforms(m_Scene->GetRegistry());
+				}
+			}
+			SceneSerializer::SerializeEntityDocumentToYaml(created, &m_SnapshotYaml);
+		}
+	}
+
+	void EntityCreateCommand::Undo()
+	{
+		if (!m_Scene)
+		{
+			return;
+		}
+
+		Entity live = ResolveEntity();
+		if (live.IsValid())
+		{
+			SceneSerializer::SerializeEntityDocumentToYaml(live, &m_SnapshotYaml);
+			Entity::DestroyEntity(m_Scene, live);
+			m_Scene->FlushStructuralChanges();
+			m_Entity = Entity();
+		}
+	}
+
+	void EntityCreateCommand::Redo()
+	{
+		Execute();
+	}
+
+	std::string_view EntityCreateCommand::GetName() const
+	{
+		return m_Name;
+	}
+
+	size_t EntityCreateCommand::GetMemorySize() const
+	{
+		return sizeof(*this) + m_Name.capacity() + m_EntityName.capacity() + m_SnapshotYaml.capacity();
+	}
+
+	// =========================================================================
+	// EntityDestroyCommand
+	// =========================================================================
+
+	EntityDestroyCommand::EntityDestroyCommand(Entity entity, std::string_view name)
+		: m_Entity(entity)
+		, m_Name(name)
+	{
+		if (entity.IsValid())
+		{
+			m_Scene = entity.GetScene();
+			if (entity.HasComponent<UUIDComponent>())
+			{
+				m_EntityUUID = entity.GetComponent<UUIDComponent>().ID;
+			}
+			if (entity.HasComponent<TagComponent>())
+			{
+				m_EntityName = StringPool::Get().NameOf(entity.GetComponent<TagComponent>().Tag);
+			}
+			if (entity.HasComponent<HierarchyComponent>())
+			{
+				entt::entity parentHandle = entity.GetComponent<HierarchyComponent>().Parent;
+				if (parentHandle != entt::null && m_Scene && m_Scene->GetRegistry().valid(parentHandle))
+				{
+					if (m_Scene->GetRegistry().all_of<UUIDComponent>(parentHandle))
+					{
+						m_ParentUUID = m_Scene->GetRegistry().get<UUIDComponent>(parentHandle).ID;
+					}
+				}
+			}
+			SceneSerializer::SerializeEntityDocumentToYaml(entity, &m_SnapshotYaml);
+		}
+	}
+
+	Entity EntityDestroyCommand::ResolveEntity() const
+	{
+		if (m_Entity.IsValid())
+		{
+			return m_Entity;
+		}
+		return ResolveEntityByUUID(m_EntityUUID);
+	}
+
+	Entity EntityDestroyCommand::ResolveEntityByUUID(const UUID& uuid) const
+	{
+		if (!m_Scene || static_cast<uint64_t>(uuid) == 0)
+		{
+			return Entity();
+		}
+		for (const auto handle : m_Scene->GetRegistry().view<UUIDComponent>())
+		{
+			if (m_Scene->GetRegistry().get<UUIDComponent>(handle).ID == uuid)
+			{
+				return Entity(m_Scene, handle);
+			}
+		}
+		return Entity();
+	}
+
+	Entity EntityDestroyCommand::GetEntity() const
+	{
+		return ResolveEntity();
+	}
+
+	void EntityDestroyCommand::Execute()
+	{
+		if (!m_Scene)
+		{
+			return;
+		}
+
+		Entity live = ResolveEntity();
+		if (live.IsValid())
+		{
+			if (m_SnapshotYaml.empty())
+			{
+				SceneSerializer::SerializeEntityDocumentToYaml(live, &m_SnapshotYaml);
+			}
+			Entity::DestroyEntity(m_Scene, live);
+			m_Scene->FlushStructuralChanges();
+			m_Entity = Entity();
+		}
+	}
+
+	void EntityDestroyCommand::Undo()
+	{
+		if (!m_Scene || m_SnapshotYaml.empty())
+		{
+			return;
+		}
+
+		Entity existing = ResolveEntityByUUID(m_EntityUUID);
+		if (existing.IsValid())
+		{
+			m_Entity = existing;
+			return;
+		}
+
+		std::string error;
+		size_t count = SceneSerializer::AppendEntityYaml(*m_Scene, m_SnapshotYaml, &error);
+		if (count > 0)
+		{
+			if (static_cast<uint64_t>(m_ParentUUID) != 0)
+			{
+				Entity parent = ResolveEntityByUUID(m_ParentUUID);
+				Entity child = ResolveEntityByUUID(m_EntityUUID);
+				if (parent.IsValid() && child.IsValid())
+				{
+					Hierarchy::SetParent(m_Scene->GetRegistry(),
+						static_cast<entt::entity>(child),
+						static_cast<entt::entity>(parent));
+				}
+			}
+			SceneSerializer::FinalizeEntityImport(*m_Scene);
+			m_Entity = ResolveEntityByUUID(m_EntityUUID);
+		}
+	}
+
+	void EntityDestroyCommand::Redo()
+	{
+		Execute();
+	}
+
+	std::string_view EntityDestroyCommand::GetName() const
+	{
+		return m_Name;
+	}
+
+	size_t EntityDestroyCommand::GetMemorySize() const
+	{
+		return sizeof(*this) + m_Name.capacity() + m_EntityName.capacity() + m_SnapshotYaml.capacity();
+	}
+
+	// =========================================================================
+	// EntityReparentCommand
+	// =========================================================================
+
+	EntityReparentCommand::EntityReparentCommand(Entity entity, Entity newParent, std::string_view name)
+		: m_Entity(entity)
+		, m_Name(name)
+	{
+		if (entity.IsValid())
+		{
+			m_Scene = entity.GetScene();
+			if (entity.HasComponent<UUIDComponent>())
+			{
+				m_EntityUUID = entity.GetComponent<UUIDComponent>().ID;
+			}
+			if (entity.HasComponent<HierarchyComponent>())
+			{
+				entt::entity oldParentHandle = entity.GetComponent<HierarchyComponent>().Parent;
+				if (oldParentHandle != entt::null && m_Scene && m_Scene->GetRegistry().valid(oldParentHandle))
+				{
+					if (m_Scene->GetRegistry().all_of<UUIDComponent>(oldParentHandle))
+					{
+						m_OldParentUUID = m_Scene->GetRegistry().get<UUIDComponent>(oldParentHandle).ID;
+					}
+				}
+			}
+		}
+
+		if (newParent.IsValid())
+		{
+			if (!m_Scene)
+			{
+				m_Scene = newParent.GetScene();
+			}
+			if (newParent.HasComponent<UUIDComponent>())
+			{
+				m_NewParentUUID = newParent.GetComponent<UUIDComponent>().ID;
+			}
+		}
+	}
+
+	EntityReparentCommand::EntityReparentCommand(Entity entity, const UUID& newParentUuid, std::string_view name)
+		: m_Entity(entity)
+		, m_NewParentUUID(newParentUuid)
+		, m_Name(name)
+	{
+		if (entity.IsValid())
+		{
+			m_Scene = entity.GetScene();
+			if (entity.HasComponent<UUIDComponent>())
+			{
+				m_EntityUUID = entity.GetComponent<UUIDComponent>().ID;
+			}
+			if (entity.HasComponent<HierarchyComponent>())
+			{
+				entt::entity oldParentHandle = entity.GetComponent<HierarchyComponent>().Parent;
+				if (oldParentHandle != entt::null && m_Scene && m_Scene->GetRegistry().valid(oldParentHandle))
+				{
+					if (m_Scene->GetRegistry().all_of<UUIDComponent>(oldParentHandle))
+					{
+						m_OldParentUUID = m_Scene->GetRegistry().get<UUIDComponent>(oldParentHandle).ID;
+					}
+				}
+			}
+		}
+	}
+
+	EntityReparentCommand::EntityReparentCommand(Scene* scene, const UUID& entityUuid, const UUID& newParentUuid, std::string_view name)
+		: m_Scene(scene)
+		, m_EntityUUID(entityUuid)
+		, m_NewParentUUID(newParentUuid)
+		, m_Name(name)
+	{
+		if (m_Scene && static_cast<uint64_t>(m_EntityUUID) != 0)
+		{
+			Entity ent = ResolveEntityByUUID(m_EntityUUID);
+			if (ent.IsValid() && ent.HasComponent<HierarchyComponent>())
+			{
+				entt::entity oldParentHandle = ent.GetComponent<HierarchyComponent>().Parent;
+				if (oldParentHandle != entt::null && m_Scene && m_Scene->GetRegistry().valid(oldParentHandle))
+				{
+					if (m_Scene->GetRegistry().all_of<UUIDComponent>(oldParentHandle))
+					{
+						m_OldParentUUID = m_Scene->GetRegistry().get<UUIDComponent>(oldParentHandle).ID;
+					}
+				}
+			}
+		}
+	}
+
+	Entity EntityReparentCommand::ResolveEntity() const
+	{
+		if (m_Entity.IsValid())
+		{
+			return m_Entity;
+		}
+		return ResolveEntityByUUID(m_EntityUUID);
+	}
+
+	Entity EntityReparentCommand::ResolveEntityByUUID(const UUID& uuid) const
+	{
+		if (!m_Scene || static_cast<uint64_t>(uuid) == 0)
+		{
+			return Entity();
+		}
+		for (const auto handle : m_Scene->GetRegistry().view<UUIDComponent>())
+		{
+			if (m_Scene->GetRegistry().get<UUIDComponent>(handle).ID == uuid)
+			{
+				return Entity(m_Scene, handle);
+			}
+		}
+		return Entity();
+	}
+
+	Entity EntityReparentCommand::GetEntity() const
+	{
+		return ResolveEntity();
+	}
+
+	bool EntityReparentCommand::ApplyParent(const UUID& parentUuid)
+	{
+		Entity child = ResolveEntity();
+		if (!child.IsValid() || !m_Scene)
+		{
+			return false;
+		}
+
+		entt::registry& registry = m_Scene->GetRegistry();
+		entt::entity childHandle = static_cast<entt::entity>(child);
+
+		if (static_cast<uint64_t>(parentUuid) == 0)
+		{
+			Hierarchy::ClearParent(registry, childHandle);
+			Hierarchy::UpdateWorldTransforms(registry);
+			if (child.HasComponent<TransformComponent>())
+			{
+				child.GetComponent<TransformComponent>().SetDirty();
+			}
+			m_Entity = child;
+			return true;
+		}
+
+		Entity parent = ResolveEntityByUUID(parentUuid);
+		if (!parent.IsValid())
+		{
+			return false;
+		}
+
+		entt::entity parentHandle = static_cast<entt::entity>(parent);
+		bool ok = Hierarchy::SetParent(registry, childHandle, parentHandle);
+		if (ok)
+		{
+			Hierarchy::UpdateWorldTransforms(registry);
+			if (child.HasComponent<TransformComponent>())
+			{
+				child.GetComponent<TransformComponent>().SetDirty();
+			}
+			m_Entity = child;
+		}
+		return ok;
+	}
+
+	void EntityReparentCommand::Execute()
+	{
+		ApplyParent(m_NewParentUUID);
+	}
+
+	void EntityReparentCommand::Undo()
+	{
+		ApplyParent(m_OldParentUUID);
+	}
+
+	void EntityReparentCommand::Redo()
+	{
+		Execute();
+	}
+
+	std::string_view EntityReparentCommand::GetName() const
+	{
+		return m_Name;
+	}
+
+	size_t EntityReparentCommand::GetMemorySize() const
 	{
 		return sizeof(*this) + m_Name.capacity();
 	}
@@ -364,3 +894,4 @@ namespace World
 		return total;
 	}
 }
+

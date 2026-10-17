@@ -1,3 +1,4 @@
+#include "World/Command/CommandHistory.h"
 #include "World/Physics/PhysicsMaterial.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/Tilemap.h"
@@ -162,6 +163,25 @@ float PropertiesPanel::DrawTransformInspector(Wui::WuiContext& ctx, const Wui::W
 			return 66.0f;
 		}
 
+		static struct
+		{
+			bool Active = false;
+			TransformComponent Before;
+			Entity EntityHandle;
+		} s_EditState;
+
+		Entity selectedEntity = m_Host.GetSelectedEntity();
+		if (selectedEntity != s_EditState.EntityHandle)
+		{
+			s_EditState.Active = false;
+			s_EditState.EntityHandle = selectedEntity;
+		}
+
+		if (!s_EditState.Active)
+		{
+			s_EditState.Before = transform;
+		}
+
 		bool changed = false;
 		// Rotation 面板按度数显示;写回统一走 SetTransform(同步四元数与状态)。
 		glm::vec3 rotationDegrees = glm::degrees(transform.GetEulerAngles());
@@ -181,6 +201,7 @@ float PropertiesPanel::DrawTransformInspector(Wui::WuiContext& ctx, const Wui::W
 		changed |= locationChanged || rotationChanged || scaleChanged;
 		if (changed)
 		{
+			s_EditState.Active = true;
 			transform.SetTransform(transform.Location, glm::radians(rotationDegrees), transform.Scale);
 			m_Host.MarkDocumentDirty();
 			if (changedFields)
@@ -188,6 +209,26 @@ float PropertiesPanel::DrawTransformInspector(Wui::WuiContext& ctx, const Wui::W
 				if (locationChanged) changedFields->push_back(typeName + ".Location");
 				if (rotationChanged) changedFields->push_back(typeName + ".Rotation");
 				if (scaleChanged) changedFields->push_back(typeName + ".Scale");
+			}
+		}
+
+		if (s_EditState.Active)
+		{
+			const bool mouseReleased = ctx.Input().MouseReleased[0];
+			const bool enterPressed = ctx.IsKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Enter);
+			const bool commitWithoutDrag = !ctx.Input().MouseDown[0] && changed;
+
+			if (mouseReleased || enterPressed || commitWithoutDrag)
+			{
+				if (selectedEntity.IsValid() && (
+					transform.Location != s_EditState.Before.Location ||
+					transform.Rotation != s_EditState.Before.Rotation ||
+					transform.Scale != s_EditState.Before.Scale))
+				{
+					m_Host.PushCommand(std::make_unique<EntityTransformCommand>(
+						selectedEntity, s_EditState.Before, transform, "Inspect Transform"));
+				}
+				s_EditState.Active = false;
 			}
 		}
 		return locationHeight + rotationHeight + scaleHeight;

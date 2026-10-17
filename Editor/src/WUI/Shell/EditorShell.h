@@ -103,6 +103,8 @@ namespace World
 		void DuplicateSelectedEntity() override;
 		void OpenScene(const std::filesystem::path& path) override;
 		std::string GetOpenDocumentPath() const override;
+		CommandHistory& GetCommandHistory() override;
+		void PushCommand(std::unique_ptr<IEditorCommand> cmd) override;
 		// 面板排队"打开这个文档",在帧边界真正执行(见 EditorShell::OpenScene 的说明)。
 		std::filesystem::path m_PendingOpenDocument;
 		Wui::WuiTheme& Theme() override { return m_Theme; }
@@ -814,6 +816,7 @@ namespace World
 		// 菜单栏(保留模式树)。
 		std::shared_ptr<Wui::WuiBox> m_MenuBar;
 		std::shared_ptr<Wui::WuiButton> m_FileButton;
+		std::shared_ptr<Wui::WuiButton> m_EditButton;
 		// P4-U6b:View 菜单(相机模式/预览 + 范围可视化开关)。
 		std::shared_ptr<Wui::WuiButton> m_WindowButton;
 		std::shared_ptr<Wui::WuiButton> m_AudioButton;

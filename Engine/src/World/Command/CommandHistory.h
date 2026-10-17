@@ -1,6 +1,7 @@
-#pragma once
+﻿#pragma once
 
 #include "World/Core/Core.h"
+#include "World/Core/UUID.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
 
@@ -15,6 +16,8 @@
 
 namespace World
 {
+	class Scene;
+
 	// 抽象编辑器命令接口 (IEditorCommand)
 	class WLD_API IEditorCommand
 	{
@@ -78,7 +81,8 @@ namespace World
 		std::string_view GetName() const override;
 		size_t GetMemorySize() const override;
 
-		Entity GetEntity() const { return m_Entity; }
+		Entity GetEntity() const;
+		const UUID& GetEntityUUID() const { return m_EntityUUID; }
 		const glm::vec3& GetOldPosition() const { return m_OldPosition; }
 		const glm::quat& GetOldRotation() const { return m_OldRotation; }
 		const glm::vec3& GetOldScale() const { return m_OldScale; }
@@ -87,13 +91,126 @@ namespace World
 		const glm::vec3& GetNewScale() const { return m_NewScale; }
 
 	private:
-		Entity m_Entity;
+		Entity ResolveEntity() const;
+
+	private:
+		Scene* m_Scene = nullptr;
+		mutable Entity m_Entity;
+		UUID m_EntityUUID { 0 };
 		glm::vec3 m_OldPosition { 0.0f };
 		glm::quat m_OldRotation { 1.0f, 0.0f, 0.0f, 0.0f };
 		glm::vec3 m_OldScale { 1.0f };
 		glm::vec3 m_NewPosition { 0.0f };
 		glm::quat m_NewRotation { 1.0f, 0.0f, 0.0f, 0.0f };
 		glm::vec3 m_NewScale { 1.0f };
+		std::string m_Name;
+	};
+
+	// 实体创建命令 (EntityCreateCommand)
+	// 记录创建出的实体 UUID、父实体 UUID（若有）、实体名称与 YAML 快照
+	// Undo: 将实体从场景销毁; Redo: 从 YAML 原地恢复所有组件与 UUID
+	class WLD_API EntityCreateCommand : public IEditorCommand
+	{
+	public:
+		explicit EntityCreateCommand(Entity entity, std::string_view name = "Create Entity");
+		EntityCreateCommand(Scene* scene, const std::string& entityName = "Empty Entity",
+			const UUID& parentUuid = UUID(0), std::string_view name = "Create Entity");
+		~EntityCreateCommand() override = default;
+
+		void Execute() override;
+		void Undo() override;
+		void Redo() override;
+		std::string_view GetName() const override;
+		size_t GetMemorySize() const override;
+
+		Entity GetEntity() const;
+		const UUID& GetEntityUUID() const { return m_EntityUUID; }
+		const UUID& GetParentUUID() const { return m_ParentUUID; }
+		const std::string& GetEntityName() const { return m_EntityName; }
+		const std::string& GetSnapshotYaml() const { return m_SnapshotYaml; }
+
+	private:
+		Entity ResolveEntity() const;
+		Entity ResolveEntityByUUID(const UUID& uuid) const;
+
+	private:
+		Scene* m_Scene = nullptr;
+		mutable Entity m_Entity;
+		UUID m_EntityUUID { 0 };
+		UUID m_ParentUUID { 0 };
+		std::string m_EntityName;
+		std::string m_SnapshotYaml;
+		std::string m_Name;
+	};
+
+	// 实体销毁命令 (EntityDestroyCommand)
+	// 构造时接受待删除的 Entity，捕获其实体完整状态、UUID 与 YAML 快照
+	// Execute/Redo: 调用场景销毁实体; Undo: 从 YAML 快照原地恢复原 UUID 与所有组件
+	class WLD_API EntityDestroyCommand : public IEditorCommand
+	{
+	public:
+		explicit EntityDestroyCommand(Entity entity, std::string_view name = "Destroy Entity");
+		~EntityDestroyCommand() override = default;
+
+		void Execute() override;
+		void Undo() override;
+		void Redo() override;
+		std::string_view GetName() const override;
+		size_t GetMemorySize() const override;
+
+		Entity GetEntity() const;
+		const UUID& GetEntityUUID() const { return m_EntityUUID; }
+		const UUID& GetParentUUID() const { return m_ParentUUID; }
+		const std::string& GetEntityName() const { return m_EntityName; }
+		const std::string& GetSnapshotYaml() const { return m_SnapshotYaml; }
+
+	private:
+		Entity ResolveEntity() const;
+		Entity ResolveEntityByUUID(const UUID& uuid) const;
+
+	private:
+		Scene* m_Scene = nullptr;
+		mutable Entity m_Entity;
+		UUID m_EntityUUID { 0 };
+		UUID m_ParentUUID { 0 };
+		std::string m_EntityName;
+		std::string m_SnapshotYaml;
+		std::string m_Name;
+	};
+
+	// 实体层级重设命令 (EntityReparentCommand)
+	// 记录实体句柄、旧父实体 UUID 与新父实体 UUID
+	// Execute/Redo/Undo: 原子更新 HierarchyComponent 与场景层级树
+	class WLD_API EntityReparentCommand : public IEditorCommand
+	{
+	public:
+		EntityReparentCommand(Entity entity, Entity newParent, std::string_view name = "Reparent Entity");
+		EntityReparentCommand(Entity entity, const UUID& newParentUuid, std::string_view name = "Reparent Entity");
+		EntityReparentCommand(Scene* scene, const UUID& entityUuid, const UUID& newParentUuid, std::string_view name = "Reparent Entity");
+		~EntityReparentCommand() override = default;
+
+		void Execute() override;
+		void Undo() override;
+		void Redo() override;
+		std::string_view GetName() const override;
+		size_t GetMemorySize() const override;
+
+		Entity GetEntity() const;
+		const UUID& GetEntityUUID() const { return m_EntityUUID; }
+		const UUID& GetOldParentUUID() const { return m_OldParentUUID; }
+		const UUID& GetNewParentUUID() const { return m_NewParentUUID; }
+
+	private:
+		bool ApplyParent(const UUID& parentUuid);
+		Entity ResolveEntity() const;
+		Entity ResolveEntityByUUID(const UUID& uuid) const;
+
+	private:
+		Scene* m_Scene = nullptr;
+		mutable Entity m_Entity;
+		UUID m_EntityUUID { 0 };
+		UUID m_OldParentUUID { 0 };
+		UUID m_NewParentUUID { 0 };
 		std::string m_Name;
 	};
 

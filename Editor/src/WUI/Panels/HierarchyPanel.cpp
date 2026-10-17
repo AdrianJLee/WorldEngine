@@ -4,6 +4,7 @@
 #include "WUI/Common/EditorAssetCatalog.h"
 
 #include "World/Core/KeyCodes.h"
+#include "World/Command/CommandHistory.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Asset/ProjectManifest.h"
@@ -323,6 +324,19 @@ namespace World
 				Wui::Tooltip(ctx, rowRect, tip);
 		}
 
+		const bool hoveredPanel = ctx.IsHovered(rect);
+		if (hoveredPanel && ctx.IsKeyPressed(KeyCodes::Delete))
+		{
+			Entity selected = host.GetSelectedEntity();
+			if (selected.IsValid() && selected.GetScene() == scene.get())
+			{
+				host.GetCommandHistory().PushAndExecute(
+					std::make_unique<EntityDestroyCommand>(selected, "Destroy Entity"));
+				host.SetSelectedEntity({});
+				host.MarkDocumentDirty();
+			}
+		}
+
 		// ---- U2d:场景里没有任何实体 → 统一空状态 ----
 		// 只替换"列表内容"的表达;拖拽设父/拖入 .wprefab/空白处右键等既有入口全部保留在下面。
 		if (entities.empty())
@@ -343,6 +357,7 @@ namespace World
 					{ created = Entity::CreateEntity(&s, "Empty Entity"); }) && created.IsValid())
 				{
 					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Entity"));
 					host.MarkDocumentDirty();
 				}
 			}
@@ -570,13 +585,21 @@ namespace World
 					nextItem(), "Duplicate", theme))
 				{
 					host.DuplicateSelectedEntity();
+					host.MarkDocumentDirty();
 					ctx.CloseAllPopups();
 				}
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.delete"),
 					nextItem(), "Delete", theme))
 				{
-					Entity::DestroyEntity(scene.get(), m_Context);
-					host.MarkDocumentDirty();
+					Entity toDelete = m_Context;
+					if (toDelete.IsValid() && toDelete.GetScene() == scene.get())
+					{
+						host.GetCommandHistory().PushAndExecute(
+							std::make_unique<EntityDestroyCommand>(toDelete, "Destroy Entity"));
+						if (host.GetSelectedEntity() == toDelete)
+							host.SetSelectedEntity({});
+						host.MarkDocumentDirty();
+					}
 					ctx.CloseAllPopups();
 				}
 				// W3b-2:重设父级/解挂。拖拽交互需要行控件支持拖拽(UI 组件库改动,单独排期),
@@ -724,6 +747,7 @@ namespace World
 				if (scene->DeferStructuralChange([&created](Scene& s) { created = Entity::CreateEntity(&s, "Empty Entity"); }) && created.IsValid())
 				{
 					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Entity"));
 					host.MarkDocumentDirty();
 				}
 				ctx.CloseAllPopups();
@@ -740,6 +764,7 @@ namespace World
 					}) && created.IsValid())
 				{
 					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Camera"));
 					host.MarkDocumentDirty();
 				}
 				ctx.CloseAllPopups();
@@ -757,8 +782,14 @@ namespace World
 			{
 				if (hasSelection)
 				{
-					Entity::DestroyEntity(scene.get(), host.GetSelectedEntity());
-					host.MarkDocumentDirty();
+					Entity toDelete = host.GetSelectedEntity();
+					if (toDelete.IsValid() && toDelete.GetScene() == scene.get())
+					{
+						host.GetCommandHistory().PushAndExecute(
+							std::make_unique<EntityDestroyCommand>(toDelete, "Destroy Entity"));
+						host.SetSelectedEntity({});
+						host.MarkDocumentDirty();
+					}
 				}
 				ctx.CloseAllPopups();
 			}

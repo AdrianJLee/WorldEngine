@@ -251,6 +251,7 @@ void EditorShell::OnRender(Wui::WuiContext& ctx){
 		{
 			const std::filesystem::path pending = m_PendingOpenDocument;
 			m_PendingOpenDocument.clear();
+			m_Editor.GetCommandHistory().Clear();
 			m_Editor.OpenScene(pending);
 		}		if (m_NewProjectBrowsePending)
 		{
@@ -332,26 +333,54 @@ void EditorShell::OnRender(Wui::WuiContext& ctx){
 			&& (ctx.IsKeyPressed(KeyCodes::Y) || (ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z)));
 		if (undoKey)
 		{
-			// 名字必须在 Undo() **之前**取:Undo() 会把 m_Index 回退,退到栈底时
-			// UndoName() 原本读的是 `m_Entries[SIZE_MAX]` —— Debug 下直接弹
-			// "vector subscript out of range" 断言框(用户口径的"Ctrl+Z 崩溃")。
-			// 与 UI 设计器(先取名字、再 Undo)同一口径。
-			auto& history = ctx.History();
-			if (history.CanUndo())
+			auto& cmdHistory = m_Editor.GetCommandHistory();
+			if (cmdHistory.CanUndo())
 			{
-				const std::string undone = history.UndoName();
-				if (history.Undo())
-					ctx.RecordOp("undo", "undo", undone, "");
+				const std::string name(cmdHistory.GetUndoName());
+				if (cmdHistory.Undo())
+				{
+					m_Editor.MarkDocumentDirty();
+					WLD_CORE_INFO("Undo: {0}", name);
+					ctx.RecordOp("undo", "undo", name, "");
+				}
+			}
+			else
+			{
+				// 名字必须在 Undo() **之前**取:Undo() 会把 m_Index 回退,退到栈底时
+				// UndoName() 原本读的是 `m_Entries[SIZE_MAX]` —— Debug 下直接弹
+				// "vector subscript out of range" 断言框(用户口径的"Ctrl+Z 崩溃")。
+				// 与 UI 设计器(先取名字、再 Undo)同一口径。
+				auto& history = ctx.History();
+				if (history.CanUndo())
+				{
+					const std::string undone = history.UndoName();
+					if (history.Undo())
+						ctx.RecordOp("undo", "undo", undone, "");
+				}
 			}
 		}
 		else if (redoKey)
 		{
-			auto& history = ctx.History();
-			if (history.CanRedo())
+			auto& cmdHistory = m_Editor.GetCommandHistory();
+			if (cmdHistory.CanRedo())
 			{
-				const std::string redone = history.RedoName();
-				if (history.Redo())
-					ctx.RecordOp("undo", "redo", redone, "");
+				const std::string name(cmdHistory.GetRedoName());
+				if (cmdHistory.Redo())
+				{
+					m_Editor.MarkDocumentDirty();
+					WLD_CORE_INFO("Redo: {0}", name);
+					ctx.RecordOp("undo", "redo", name, "");
+				}
+			}
+			else
+			{
+				auto& history = ctx.History();
+				if (history.CanRedo())
+				{
+					const std::string redone = history.RedoName();
+					if (history.Redo())
+						ctx.RecordOp("undo", "redo", redone, "");
+				}
 			}
 		}
 		const glm::vec2 viewport = ctx.ViewportSize();
