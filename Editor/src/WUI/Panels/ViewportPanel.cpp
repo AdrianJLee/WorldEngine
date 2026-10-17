@@ -904,7 +904,7 @@ namespace World
 			SelectionFilter& curFilter = m_Host.GetSelectionFilter();
 			const float popupW = 260.0f;
 			const float popupRowH = 22.0f;
-			const float popupH = 28.0f + 26.0f + 4.0f + 20.0f + 7 * popupRowH + 8.0f + 26.0f + 10.0f;
+			const float popupH = 28.0f + 26.0f + 4.0f + 20.0f + 7 * popupRowH + 8.0f;
 			const float popupX = filterBtnRect.W > 0.0f
 				? std::min(filterBtnRect.X, sceneRect.X + sceneRect.W - popupW - kChromePad)
 				: (sceneRect.X + sceneRect.W - popupW - kChromePad);
@@ -1001,17 +1001,7 @@ namespace World
 				rowY += popupRowH;
 			}
 
-			// 底部操作: 打开独立管理面板
-			rowY += 4.0f;
-			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
-			rowY += 4.0f;
 
-			const Wui::WuiRect moreBtn { panel.X + 8.0f, rowY, panel.W - 16.0f, 22.0f };
-			if (Wui::Button(ctx, Wui::HashId("viewport.filter.open_panel"), moreBtn, "打开完整图层面板...", theme))
-			{
-				m_Host.FocusIndependentWindow("selection_filter");
-				ctx.ClosePopup(filterPopup);
-			}
 
 			ctx.ClosePopupsOnOutsideClick({ filterPopup }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))

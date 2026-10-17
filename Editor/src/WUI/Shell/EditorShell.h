@@ -30,7 +30,6 @@
 #include "WUI/Panels/TilemapEditorPanel.h"
 #include "WUI/Panels/PhysicsMaterialEditorPanel.h"
 #include "WUI/Panels/CurveEditorPanel.h"
-#include "WUI/Panels/SelectionFilterPanel.h"
 #include "WUI/Shell/PluginEditorHost.h"
 #include "WUI/Shell/FloatWindowHost.h"
 #include "Project/ProjectLauncher.h"

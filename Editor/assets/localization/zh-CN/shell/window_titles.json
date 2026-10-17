@@ -23,7 +23,6 @@
     "panel.ai_audio_studio",
     "panel.physics_material_editor",
     "panel.curve_editor",
-    "panel.selection_filter",
     "panel.audio_profiler"
   ],
   "panel.hierarchy": "层级",
@@ -46,6 +45,5 @@
   "panel.ai_audio_studio": "AI 音频工坊",
   "panel.physics_material_editor": "物理材质编辑器",
   "panel.curve_editor": "曲线编辑器",
-  "panel.selection_filter": "选择过滤器",
   "panel.audio_profiler": "音频分析器"
 }
