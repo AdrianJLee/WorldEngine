@@ -3,6 +3,13 @@
 #include "World/Core/Export.h"
 #include "World/Scene/Components.h"
 #include "World/RHI/Rhi.h"
+#include "World/Math/Curve/CubicBezierCurve.h"
+#include "World/Math/Curve/ColorGradient.h"
+#include "World/Renderer/ParticleBuffer.h"
+#include "World/Math/Simd/CurlNoise.h"
+#include "World/Renderer/ParticleRibbon.h"
+#include "World/Renderer/ParticleMesh.h"
+#include "World/Renderer/ParticleLight.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -198,6 +205,47 @@ namespace World
 		const ParticleCollisionEventQueue& GetEventQueue() const { return m_EventQueue; }
 		ParticleCollisionEventQueue& GetEventQueueMut() { return m_EventQueue; }
 
+		void SetSizeCurve(const CubicBezierCurve& curve) { m_SizeCurve = curve; m_HasSizeCurve = true; }
+		void ClearSizeCurve() { m_HasSizeCurve = false; }
+		bool HasSizeCurve() const { return m_HasSizeCurve; }
+		const CubicBezierCurve& GetSizeCurve() const { return m_SizeCurve; }
+
+		void SetSpeedCurve(const CubicBezierCurve& curve) { m_SpeedCurve = curve; m_HasSpeedCurve = true; }
+		void ClearSpeedCurve() { m_HasSpeedCurve = false; }
+		bool HasSpeedCurve() const { return m_HasSpeedCurve; }
+		const CubicBezierCurve& GetSpeedCurve() const { return m_SpeedCurve; }
+
+		void SetColorGradient(const ColorGradient& gradient) { m_ColorGradient = gradient; m_HasColorGradient = true; }
+		void ClearColorGradient() { m_HasColorGradient = false; }
+		bool HasColorGradient() const { return m_HasColorGradient; }
+		const ColorGradient& GetColorGradient() const { return m_ColorGradient; }
+
+		ParticleBuffer& GetBufferMut() { return m_Buffer; }
+		void SyncSoABuffer() const;
+		const ParticleSoA& GetSoA() const;
+		const ParticleBuffer& GetBuffer() const;
+
+		void SetCurlNoise(float strength, float frequency = 1.0f, uint32_t octaves = 1)
+		{
+			m_CurlNoiseStrength = strength;
+			m_CurlNoiseFrequency = frequency;
+			m_CurlNoiseOctaves = octaves;
+		}
+		float GetCurlNoiseStrength() const { return m_CurlNoiseStrength; }
+		float GetCurlNoiseFrequency() const { return m_CurlNoiseFrequency; }
+		uint32_t GetCurlNoiseOctaves() const { return m_CurlNoiseOctaves; }
+
+		void SetRibbonEnabled(bool enabled) { m_RibbonEnabled = enabled; }
+		bool IsRibbonEnabled() const { return m_RibbonEnabled; }
+		ParticleRibbon& GetRibbon() { return m_Ribbon; }
+		const ParticleRibbon& GetRibbon() const { return m_Ribbon; }
+
+		ParticleMeshBatch& GetMeshBatch() { return m_MeshBatch; }
+		const ParticleMeshBatch& GetMeshBatch() const { return m_MeshBatch; }
+
+		ParticleLightExtractor& GetLightExtractor() { return m_LightExtractor; }
+		const ParticleLightExtractor& GetLightExtractor() const { return m_LightExtractor; }
+
 		void AddSubEmitter(const SubEmitterConfig& config);
 		const std::vector<SubEmitterConfig>& GetSubEmitters() const { return m_SubEmitters; }
 		void ClearSubEmitters() { m_SubEmitters.clear(); }
@@ -220,6 +268,13 @@ namespace World
 
 	private:
 		std::vector<Particle> m_Particles;
+		mutable ParticleBuffer m_Buffer;
+		CubicBezierCurve m_SizeCurve;
+		bool m_HasSizeCurve = false;
+		CubicBezierCurve m_SpeedCurve;
+		bool m_HasSpeedCurve = false;
+		ColorGradient m_ColorGradient;
+		bool m_HasColorGradient = false;
 		ParticleMaterialSettings m_Material {};
 		ParticleCollisionSettings m_Collision {};
 		ParticleCollisionEventQueue m_EventQueue {};
@@ -233,6 +288,15 @@ namespace World
 		float m_TurbulenceFrequency = 1.0f;
 		std::vector<ParticleBurst> m_Bursts;
 		float m_SimElapsedTime = 0.0f;
+
+		float m_CurlNoiseStrength = 0.0f;
+		float m_CurlNoiseFrequency = 1.0f;
+		uint32_t m_CurlNoiseOctaves = 1;
+
+		bool m_RibbonEnabled = false;
+		ParticleRibbon m_Ribbon;
+		ParticleMeshBatch m_MeshBatch;
+		ParticleLightExtractor m_LightExtractor;
 
 		size_t m_ActiveCount = 0;
 		size_t m_NextFreeIndex = 0;

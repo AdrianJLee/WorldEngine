@@ -9,6 +9,7 @@
 namespace World
 {
 	ParticlePool::ParticlePool(size_t capacity)
+		: m_Buffer(capacity)
 	{
 		m_Particles.resize(capacity);
 		m_ActiveCount = 0;
@@ -72,6 +73,8 @@ namespace World
 
 	void ParticlePool::Reset()
 	{
+		m_Buffer.Clear();
+		m_Ribbon.Clear();
 		m_ActiveCount = 0;
 		m_NextFreeIndex = 0;
 		m_EmissionAccumulator = 0.0f;
@@ -144,9 +147,10 @@ namespace World
 		size_t emitted = 0;
 		const size_t capacity = m_Particles.size();
 
-		for (size_t i = 0; i < capacity && emitted < count; ++i)
+		for (size_t searched = 0; searched < capacity && emitted < count; ++searched)
 		{
-			size_t idx = (m_NextFreeIndex + i) % capacity;
+			size_t idx = m_NextFreeIndex;
+			m_NextFreeIndex = (m_NextFreeIndex + 1) % capacity;
 			if (m_Particles[idx].Active) continue;
 
 			Particle& p = m_Particles[idx];
@@ -227,7 +231,6 @@ namespace World
 
 			m_ActiveCount++;
 			emitted++;
-			m_NextFreeIndex = (idx + 1) % capacity;
 
 			TriggerSubEmitters(SubEmitterTrigger::OnBirth, p.Position, worldDir, p.Velocity);
 		}
@@ -330,6 +333,13 @@ namespace World
 				p.Velocity += turb * (m_TurbulenceStrength * dt);
 			}
 
+			// Apply 3D Curl Noise fluid turbulence force
+			if (m_CurlNoiseStrength > 1e-4f)
+			{
+				glm::vec3 curl = Math::Simd::ComputeCurlNoise(p.Position, m_CurlNoiseFrequency, m_CurlNoiseOctaves);
+				p.Velocity += curl * (m_CurlNoiseStrength * dt);
+			}
+
 			p.Velocity += (comp.Gravity + p.Acceleration) * dt;
 			p.Position += p.Velocity * dt;
 			p.Rotation += p.AngularVelocity * dt;
@@ -381,13 +391,45 @@ namespace World
 			float t = 1.0f - (p.Life / p.MaxLife);
 			t = glm::clamp(t, 0.0f, 1.0f);
 
-			p.Color = glm::mix(cStart, cEnd, t);
+			if (m_HasColorGradient)
+			{
+				p.Color = m_ColorGradient.EvaluateFastLut(t);
+			}
+			else
+			{
+				p.Color = glm::mix(cStart, cEnd, t);
+			}
 			p.Color.r *= emissive;
 			p.Color.g *= emissive;
 			p.Color.b *= emissive;
 
-			float s = glm::mix(comp.SizeStart, comp.SizeEnd, t);
+			float s = 1.0f;
+			if (m_HasSizeCurve)
+			{
+				float curveVal = m_SizeCurve.EvaluateFastLut(t);
+				if (std::abs(comp.SizeStart - comp.SizeEnd) > 1e-5f)
+					s = glm::mix(comp.SizeStart, comp.SizeEnd, curveVal);
+				else if (std::abs(comp.SizeStart - 1.0f) > 1e-5f)
+					s = curveVal * comp.SizeStart;
+				else
+					s = curveVal;
+			}
+			else
+			{
+				s = glm::mix(comp.SizeStart, comp.SizeEnd, t);
+			}
 			p.Size = glm::vec2(s);
+
+			if (m_HasSpeedCurve)
+			{
+				float speedFactor = m_SpeedCurve.EvaluateFastLut(t);
+				float curSpeedSq = glm::dot(p.Velocity, p.Velocity);
+				if (curSpeedSq > 1e-6f)
+				{
+					float curSpeed = std::sqrt(curSpeedSq);
+					p.Velocity = (p.Velocity / curSpeed) * (curSpeed * speedFactor);
+				}
+			}
 
 			if (totalFrames > 1u)
 			{
@@ -406,6 +448,21 @@ namespace World
 			else
 			{
 				p.SubUVFrameIndex = 0u;
+			}
+		}
+
+		SyncSoABuffer();
+
+		if (m_RibbonEnabled)
+		{
+			m_Ribbon.Update(dt);
+			for (const auto& p : m_Particles)
+			{
+				if (p.Active && p.Life > 0.0f)
+				{
+					m_Ribbon.AddPoint(p.Position, p.Color, p.Size.x, p.MaxLife);
+					break;
+				}
 			}
 		}
 
@@ -731,4 +788,45 @@ namespace World
 		return s_GlobalInstance;
 	}
 
+
+	void ParticlePool::SyncSoABuffer() const
+	{
+		m_Buffer.Clear();
+		for (const auto& p : m_Particles)
+		{
+			if (!p.Active) continue;
+			size_t soaIdx = m_Buffer.Allocate();
+			if (soaIdx == static_cast<size_t>(-1)) break;
+			auto& soa = m_Buffer.GetSoA();
+			soa.PosX[soaIdx] = p.Position.x;
+			soa.PosY[soaIdx] = p.Position.y;
+			soa.PosZ[soaIdx] = p.Position.z;
+			soa.VelX[soaIdx] = p.Velocity.x;
+			soa.VelY[soaIdx] = p.Velocity.y;
+			soa.VelZ[soaIdx] = p.Velocity.z;
+			soa.ColorR[soaIdx] = p.Color.r;
+			soa.ColorG[soaIdx] = p.Color.g;
+			soa.ColorB[soaIdx] = p.Color.b;
+			soa.ColorA[soaIdx] = p.Color.a;
+			soa.SizeX[soaIdx] = p.Size.x;
+			soa.SizeY[soaIdx] = p.Size.y;
+			soa.Rotation[soaIdx] = p.Rotation;
+			soa.AngularVelocity[soaIdx] = p.AngularVelocity;
+			soa.Life[soaIdx] = p.Life;
+			soa.MaxLife[soaIdx] = p.MaxLife;
+			soa.SubUVFrameIndex[soaIdx] = p.SubUVFrameIndex;
+		}
+	}
+
+	const ParticleSoA& ParticlePool::GetSoA() const
+	{
+		SyncSoABuffer();
+		return m_Buffer.GetSoA();
+	}
+
+	const ParticleBuffer& ParticlePool::GetBuffer() const
+	{
+		SyncSoABuffer();
+		return m_Buffer;
+	}
 }

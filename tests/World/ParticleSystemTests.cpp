@@ -1,4 +1,13 @@
 #include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/ParticleBuffer.h"
+#include "World/Math/Curve/CubicBezierCurve.h"
+#include "World/Math/Curve/ColorGradient.h"
+#include "World/Math/Simd/ParticleSimdBatch.h"
+#include "World/Math/Simd/CurlNoise.h"
+#include "World/Renderer/GpuParticleSystem.h"
+#include "World/Renderer/ParticleRibbon.h"
+#include "World/Renderer/ParticleMesh.h"
+#include "World/Renderer/ParticleLight.h"
 #include "World/Scene/Components.h"
 #include "World/Core/Log.h"
 
@@ -505,6 +514,426 @@ static void TestFacingModes()
 	std::cout << "[PASS] TestFacingModes\n";
 }
 
+static void TestColorGradientLut()
+{
+	ColorGradient grad;
+	grad.AddColorStop(0.0f, glm::vec3(1.0f, 0.0f, 0.0f));
+	grad.AddColorStop(0.5f, glm::vec3(0.0f, 1.0f, 0.0f));
+	grad.AddColorStop(1.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+	grad.AddAlphaStop(0.0f, 1.0f);
+	grad.AddAlphaStop(1.0f, 0.0f);
+
+	assert(grad.ColorStopCount() == 3);
+	assert(grad.AlphaStopCount() == 2);
+
+	grad.PrecomputeLut(256);
+	assert(grad.GetLut().size() == 256);
+
+	const glm::vec4 c0 = grad.EvaluateFastLut(0.0f);
+	assert(std::abs(c0.r - 1.0f) < 1e-4f);
+	assert(std::abs(c0.g - 0.0f) < 1e-4f);
+	assert(std::abs(c0.b - 0.0f) < 1e-4f);
+	assert(std::abs(c0.a - 1.0f) < 1e-4f);
+
+	const glm::vec4 cMid = grad.EvaluateFastLut(0.5f);
+	assert(std::abs(cMid.r - 0.0f) < 1e-2f);
+	assert(std::abs(cMid.g - 1.0f) < 1e-2f);
+	assert(std::abs(cMid.b - 0.0f) < 1e-2f);
+	assert(std::abs(cMid.a - 0.5f) < 1e-2f);
+
+	const glm::vec4 c1 = grad.EvaluateFastLut(1.0f);
+	assert(std::abs(c1.r - 0.0f) < 1e-4f);
+	assert(std::abs(c1.g - 0.0f) < 1e-4f);
+	assert(std::abs(c1.b - 1.0f) < 1e-4f);
+	assert(std::abs(c1.a - 0.0f) < 1e-4f);
+
+	// Presets
+	ColorGradient fire = ColorGradient::DefaultFire();
+	assert(fire.ColorStopCount() >= 4);
+	assert(fire.AlphaStopCount() >= 4);
+	assert(fire.GetLut().size() == 256);
+
+	ColorGradient smoke = ColorGradient::DefaultSmoke();
+	assert(smoke.ColorStopCount() >= 4);
+	assert(smoke.AlphaStopCount() >= 4);
+
+	// YAML roundtrip
+	const std::string yaml = grad.SerializeToYaml();
+	assert(!yaml.empty());
+	ColorGradient deserialized;
+	const bool loadOk = deserialized.DeserializeFromYaml(yaml);
+	assert(loadOk);
+	assert(deserialized.ColorStopCount() == 3);
+	assert(deserialized.AlphaStopCount() == 2);
+
+	const glm::vec4 cDeserMid = deserialized.EvaluateFastLut(0.5f);
+	assert(std::abs(cDeserMid.g - 1.0f) < 1e-2f);
+	assert(std::abs(cDeserMid.a - 0.5f) < 1e-2f);
+
+	std::cout << "[PASS] TestColorGradientLut\n";
+}
+
+static void TestParticleSoABatchSimd()
+{
+	// 1. Direct SIMD 8-batch verification against analytical step
+	float px[8], py[8], pz[8];
+	float vx[8], vy[8], vz[8];
+	float life[8];
+
+	for (size_t i = 0; i < 8; ++i)
+	{
+		px[i] = static_cast<float>(i * 2);
+		py[i] = 10.0f;
+		pz[i] = 0.0f;
+		vx[i] = 1.0f;
+		vy[i] = 0.0f;
+		vz[i] = -0.5f;
+		life[i] = 2.0f;
+	}
+
+	World::Math::Simd::ParticleBatchParams params;
+	params.Dt = 0.1f;
+	params.DragFactor = 0.95f;
+	params.GravityX = 0.0f;
+	params.GravityY = -9.8f;
+	params.GravityZ = 0.0f;
+
+	World::Math::Simd::StepParticlesSimd8(px, py, pz, vx, vy, vz, life, params);
+
+	for (size_t i = 0; i < 8; ++i)
+	{
+		const float expectedLife = 2.0f - 0.1f;
+		const float expectedVy = 0.0f * 0.95f + (-9.8f) * 0.1f;
+		const float expectedPy = 10.0f + expectedVy * 0.1f;
+		const float expectedVx = 1.0f * 0.95f;
+		const float expectedPx = static_cast<float>(i * 2) + expectedVx * 0.1f;
+
+		assert(std::abs(life[i] - expectedLife) < 1e-4f);
+		assert(std::abs(vy[i] - expectedVy) < 1e-4f);
+		assert(std::abs(py[i] - expectedPy) < 1e-4f);
+		assert(std::abs(vx[i] - expectedVx) < 1e-4f);
+		assert(std::abs(px[i] - expectedPx) < 1e-4f);
+	}
+
+	// 2. High-level ParticleBuffer and SoA lifecycle & batch update
+	ParticleBuffer buffer(32);
+	assert(buffer.Capacity() == 32);
+	assert(buffer.ActiveCount() == 0);
+
+	for (size_t i = 0; i < 16; ++i)
+	{
+		size_t idx = buffer.Allocate();
+		assert(idx == i);
+		buffer.GetSoA().PosX[idx] = static_cast<float>(i);
+		buffer.GetSoA().PosY[idx] = 5.0f;
+		buffer.GetSoA().PosZ[idx] = 0.0f;
+		buffer.GetSoA().VelX[idx] = 0.0f;
+		buffer.GetSoA().VelY[idx] = 2.0f;
+		buffer.GetSoA().VelZ[idx] = 0.0f;
+		buffer.GetSoA().Life[idx] = 1.0f;
+		buffer.GetSoA().MaxLife[idx] = 1.0f;
+	}
+	assert(buffer.ActiveCount() == 16);
+
+	ParticleBufferUpdateParams bParams;
+	bParams.Dt = 0.05f;
+	bParams.Gravity = glm::vec3(0.0f, -10.0f, 0.0f);
+	bParams.LinearDrag = 0.0f;
+
+	buffer.UpdateStep(bParams);
+	assert(buffer.ActiveCount() == 16);
+
+	for (size_t i = 0; i < 16; ++i)
+	{
+		assert(std::abs(buffer.GetSoA().Life[i] - 0.95f) < 1e-4f);
+		assert(std::abs(buffer.GetSoA().VelY[i] - (2.0f - 10.0f * 0.05f)) < 1e-4f);
+	}
+
+	// 3. SwapAndPop death cleanup
+	buffer.Kill(0);
+	assert(buffer.ActiveCount() == 15);
+
+	std::cout << "[PASS] TestParticleSoABatchSimd\n";
+}
+
+static void TestParticleCurveEvolution()
+{
+	ParticlePool pool(10);
+
+	// Setup EaseIn size curve
+	CubicBezierCurve sizeCurve = CubicBezierCurve::EaseIn();
+	pool.SetSizeCurve(sizeCurve);
+	assert(pool.HasSizeCurve());
+
+	// Setup ColorGradient
+	ColorGradient grad;
+	grad.AddColorStop(0.0f, glm::vec3(1.0f, 0.0f, 0.0f));
+	grad.AddColorStop(1.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+	grad.AddAlphaStop(0.0f, 1.0f);
+	grad.AddAlphaStop(1.0f, 0.0f);
+	grad.PrecomputeLut(256);
+	pool.SetColorGradient(grad);
+	assert(pool.HasColorGradient());
+
+	// Setup SpeedCurve
+	CubicBezierCurve speedCurve = CubicBezierCurve::Linear();
+	pool.SetSpeedCurve(speedCurve);
+	assert(pool.HasSpeedCurve());
+
+	ParticleSystemComponent comp;
+	comp.Lifetime = 1.0f;
+	comp.Speed = 0.0f;
+	comp.EmissionRate = 0.0f;
+	comp.IsPlaying = 1;
+	comp.SizeStart = 1.0f;
+	comp.SizeEnd = 1.0f;
+
+	pool.Emit(1, comp, glm::vec3(0.0f));
+	assert(pool.ActiveCount() == 1);
+
+	// Advance to half life (t = 0.5)
+	pool.Update(0.5f, comp, glm::vec3(0.0f));
+
+	const auto& particles = pool.GetParticles();
+	assert(particles[0].Active);
+	assert(std::abs(particles[0].Life - 0.5f) < 1e-3f);
+
+	// Assert Color from ColorGradient
+	const glm::vec4 expectedCol = grad.EvaluateFastLut(0.5f);
+	assert(std::abs(particles[0].Color.r - expectedCol.r) < 0.05f);
+	assert(std::abs(particles[0].Color.b - expectedCol.b) < 0.05f);
+	assert(std::abs(particles[0].Color.a - expectedCol.a) < 0.05f);
+
+	// Assert Size from SizeCurve
+	const float expectedSize = sizeCurve.EvaluateFastLut(0.5f);
+	assert(std::abs(particles[0].Size.x - expectedSize) < 0.05f);
+
+	// Verify SoA buffer also captured active particles
+	assert(pool.GetBuffer().ActiveCount() == 1);
+	assert(std::abs(pool.GetSoA().Life[0] - 0.5f) < 1e-3f);
+	assert(std::abs(pool.GetSoA().ColorR[0] - expectedCol.r) < 0.05f);
+	assert(std::abs(pool.GetSoA().SizeX[0] - expectedSize) < 0.05f);
+
+	std::cout << "[PASS] TestParticleCurveEvolution\n";
+}
+
+static void TestCurlNoiseDivergenceFree()
+{
+	const glm::vec3 samplePoints[] = {
+		{ 0.0f, 0.0f, 0.0f },
+		{ 1.5f, 2.7f, -3.1f },
+		{ -10.2f, 4.8f, 15.3f },
+		{ 100.0f, -50.0f, 25.0f },
+		{ 0.123f, -0.456f, 0.789f }
+	};
+
+	constexpr float delta = 1e-3f;
+	constexpr float inv2delta = 0.5f / delta;
+
+	for (const auto& pt : samplePoints)
+	{
+		glm::vec3 vx_plus  = Math::Simd::ComputeCurlNoise(pt + glm::vec3(delta, 0.0f, 0.0f), 1.0f, 1u);
+		glm::vec3 vx_minus = Math::Simd::ComputeCurlNoise(pt - glm::vec3(delta, 0.0f, 0.0f), 1.0f, 1u);
+
+		glm::vec3 vy_plus  = Math::Simd::ComputeCurlNoise(pt + glm::vec3(0.0f, delta, 0.0f), 1.0f, 1u);
+		glm::vec3 vy_minus = Math::Simd::ComputeCurlNoise(pt - glm::vec3(0.0f, delta, 0.0f), 1.0f, 1u);
+
+		glm::vec3 vz_plus  = Math::Simd::ComputeCurlNoise(pt + glm::vec3(0.0f, 0.0f, delta), 1.0f, 1u);
+		glm::vec3 vz_minus = Math::Simd::ComputeCurlNoise(pt - glm::vec3(0.0f, 0.0f, delta), 1.0f, 1u);
+
+		float dvx_dx = (vx_plus.x - vx_minus.x) * inv2delta;
+		float dvy_dy = (vy_plus.y - vy_minus.y) * inv2delta;
+		float dvz_dz = (vz_plus.z - vz_minus.z) * inv2delta;
+
+		float divergence = dvx_dx + dvy_dy + dvz_dz;
+		assert(std::abs(divergence) < 5e-3f);
+	}
+
+	float posX[4] = { 0.0f, 1.0f, 2.0f, 3.0f };
+	float posY[4] = { 0.0f, 0.5f, 1.0f, 1.5f };
+	float posZ[4] = { 0.0f, -0.5f, -1.0f, -1.5f };
+	float curlX[4] = { 0.0f };
+	float curlY[4] = { 0.0f };
+	float curlZ[4] = { 0.0f };
+
+	Math::Simd::ComputeCurlNoiseBatch(posX, posY, posZ, curlX, curlY, curlZ, 4, 1.0f, 1u);
+	for (size_t i = 0; i < 4; ++i)
+	{
+		glm::vec3 expected = Math::Simd::ComputeCurlNoise(glm::vec3(posX[i], posY[i], posZ[i]), 1.0f, 1u);
+		assert(std::abs(curlX[i] - expected.x) < 1e-5f);
+		assert(std::abs(curlY[i] - expected.y) < 1e-5f);
+		assert(std::abs(curlZ[i] - expected.z) < 1e-5f);
+	}
+
+	std::cout << "[PASS] TestCurlNoiseDivergenceFree\n";
+}
+
+static void TestRibbonTrailGeneration()
+{
+	RibbonConfig config;
+	config.InitialWidth = 1.0f;
+	config.MaxAge = 2.0f;
+	config.TextureTileLength = 5.0f;
+	config.SubdivisionsPerSegment = 3;
+	config.TaperWidthOverLife = true;
+	config.FadeAlphaOverLife = true;
+
+	ParticleRibbon ribbon(config);
+
+	for (int i = 0; i < 5; ++i)
+	{
+		float angle = static_cast<float>(i) * 0.3f;
+		glm::vec3 pos(std::cos(angle) * 5.0f, static_cast<float>(i) * 2.0f, std::sin(angle) * 5.0f);
+		glm::vec4 color(1.0f, 0.5f, 0.2f, 1.0f);
+		ribbon.AddPoint(pos, color, 1.0f, 2.0f);
+	}
+
+	assert(ribbon.GetControlPointCount() == 5);
+
+	glm::vec3 cameraPos(0.0f, 5.0f, 15.0f);
+	std::vector<ParticleVertex> vertices;
+	std::vector<uint32_t> indices;
+
+	ribbon.GenerateMesh(cameraPos, vertices, indices);
+
+	assert(!vertices.empty());
+	assert(!indices.empty());
+	assert(indices.size() % 3 == 0);
+	assert(vertices.size() % 2 == 0);
+
+	for (size_t i = 0; i < vertices.size(); i += 2)
+	{
+		assert(std::abs(vertices[i].UV.x - 0.0f) < 1e-4f);
+		assert(std::abs(vertices[i + 1].UV.x - 1.0f) < 1e-4f);
+		assert(vertices[i].UV.y >= 0.0f);
+		assert(std::abs(vertices[i].UV.y - vertices[i + 1].UV.y) < 1e-4f);
+	}
+
+	ribbon.Update(2.5f);
+	assert(ribbon.GetControlPointCount() == 0);
+
+	std::cout << "[PASS] TestRibbonTrailGeneration\n";
+}
+
+static void TestMeshParticleBatch()
+{
+	ParticlePool pool(100);
+	ParticleSystemComponent comp;
+	comp.Lifetime = 2.0f;
+	comp.Speed = 5.0f;
+	comp.SizeStart = 2.0f;
+	comp.SizeEnd = 2.0f;
+
+	pool.Emit(10, comp, glm::vec3(0.0f, 5.0f, 0.0f));
+	assert(pool.ActiveCount() == 10);
+
+	ParticleMeshConfig meshConfig;
+	meshConfig.MeshScale = glm::vec3(1.5f);
+	meshConfig.AlignToVelocity = true;
+	meshConfig.ScaleWithParticleSize = true;
+
+	ParticleMeshBatch batch(meshConfig);
+	batch.BuildInstances(pool);
+
+	assert(batch.GetInstanceCount() == 10);
+
+	const auto& instances = batch.GetInstances();
+	for (const auto& inst : instances)
+	{
+		glm::vec3 translation(inst.Transform[3][0], inst.Transform[3][1], inst.Transform[3][2]);
+		assert(glm::length(translation) >= 0.0f);
+
+		float det = glm::determinant(inst.Transform);
+		assert(det > 1.0f);
+		assert(inst.Color.a > 0.0f);
+	}
+
+	ParticleMeshBatch soaBatch(meshConfig);
+	soaBatch.BuildInstancesFromSoA(pool.GetSoA());
+	assert(soaBatch.GetInstanceCount() == 10);
+
+	std::cout << "[PASS] TestMeshParticleBatch\n";
+}
+
+static void TestParticleLightExtraction()
+{
+	ParticlePool pool(50);
+	ParticleSystemComponent comp;
+	comp.Lifetime = 3.0f;
+	comp.Speed = 0.0f;
+	comp.SizeStart = 1.0f;
+	comp.SizeEnd = 1.0f;
+
+	pool.Emit(10, comp, glm::vec3(0.0f));
+
+	auto& particles = pool.GetParticlesMut();
+	particles[0].Color = glm::vec4(1.0f, 0.8f, 0.2f, 1.0f);
+	particles[1].Color = glm::vec4(0.1f, 0.9f, 1.0f, 1.0f);
+	particles[2].Color = glm::vec4(1.0f, 0.1f, 0.1f, 1.0f);
+	for (size_t i = 3; i < 10; ++i)
+	{
+		particles[i].Color = glm::vec4(0.05f, 0.05f, 0.05f, 0.5f);
+	}
+
+	ParticleLightConfig lightConfig;
+	lightConfig.IntensityThreshold = 0.5f;
+	lightConfig.MaxLights = 16;
+	lightConfig.RangeMultiplier = 10.0f;
+	lightConfig.IntensityScale = 2.0f;
+
+	ParticleLightExtractor extractor(lightConfig);
+	std::vector<PointLightData> extractedLights;
+	size_t count = extractor.ExtractLights(pool, extractedLights);
+
+	assert(count == 3);
+	assert(extractedLights.size() == 3);
+	assert(extractedLights[0].Intensity >= extractedLights[1].Intensity);
+	assert(extractedLights[1].Intensity >= extractedLights[2].Intensity);
+	assert(extractedLights[0].Range >= 5.0f);
+
+	std::vector<PointLightData> sceneLights;
+	sceneLights.push_back(PointLightData { glm::vec3(1.0f), 1.0f, glm::vec3(0.0f), 10.0f });
+	extractor.InjectIntoLightRig(pool, sceneLights, 4);
+
+	assert(sceneLights.size() == 4);
+
+	std::cout << "[PASS] TestParticleLightExtraction\n";
+}
+
+static void TestGpuParticleSystem()
+{
+	GpuParticleSystem gpuSys(nullptr, 1000);
+	assert(gpuSys.GetMaxParticles() == 1000);
+	assert(gpuSys.GetActiveCount() == 0);
+
+	GpuParticle proto;
+	proto.PositionLife = glm::vec4(0.0f, 10.0f, 0.0f, 2.0f);
+	proto.VelocityMaxLife = glm::vec4(0.0f, 5.0f, 0.0f, 2.0f);
+	proto.Color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+	proto.SizeRotation = glm::vec4(1.0f, 1.0f, 0.0f, 0.5f);
+
+	gpuSys.Emit(50, proto);
+	assert(gpuSys.GetActiveCount() == 50);
+	assert(gpuSys.GetIndirectCommand().InstanceCount == 50);
+	assert(gpuSys.GetIndirectCommand().VertexCount == 4);
+
+	GpuSimulationParams params;
+	params.GravityDt = glm::vec4(0.0f, -9.8f, 0.0f, 0.1f);
+	params.DragTurbulence = glm::vec4(0.05f, 0.0f, 1.0f, 1.0f);
+
+	gpuSys.Simulate(0.1f, params);
+
+	assert(gpuSys.GetActiveCount() == 50);
+
+	std::vector<GpuParticle> readback;
+	gpuSys.ReadbackParticles(readback);
+	assert(readback.size() == 50);
+	assert(readback[0].PositionLife.w < 2.0f);
+	assert(readback[0].PositionLife.y != 10.0f);
+
+	std::cout << "[PASS] TestGpuParticleSystem\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -524,6 +953,14 @@ int main()
 	TestParticleOneShotSpawn();
 	TestForceDynamicsAndBursts();
 	TestFacingModes();
+	TestColorGradientLut();
+	TestParticleSoABatchSimd();
+	TestParticleCurveEvolution();
+	TestCurlNoiseDivergenceFree();
+	TestRibbonTrailGeneration();
+	TestMeshParticleBatch();
+	TestParticleLightExtraction();
+	TestGpuParticleSystem();
 
 	std::cout << "All WorldParticleSystemTests passed successfully.\n";
 	return 0;

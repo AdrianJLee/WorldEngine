@@ -3,6 +3,8 @@
 #include "WUI/Common/EditorPanel.h"
 #include "World/Renderer/ParticleAsset.h"
 #include "World/Renderer/ParticleSystem.h"
+#include "World/Math/Curve/ColorGradient.h"
+#include "World/Math/Curve/CubicBezierCurve.h"
 
 #include <glm/glm.hpp>
 #include <string>
@@ -34,6 +36,15 @@ namespace World
 		void SaveAsset();
 		void NewAsset();
 
+		// 商业级预设库开箱即用 (Industrial Preset Library)
+		void LoadPresetCampfire();
+		void LoadPresetSparksBurst();
+		void LoadPresetSmokePlume();
+		void LoadPresetBlizzard();
+		void LoadPresetMagicPortal();
+		void LoadPresetEnergyBeam();
+		void LoadPreset(const std::string& presetName);
+
 		void ApplyCodeToAsset();
 		void SyncCodeFromAsset();
 
@@ -46,6 +57,9 @@ namespace World
 		void RefreshAvailableAssets();
 		void SyncSimulationFromAsset();
 		void StepSimulation(float dt);
+		void EnsurePerEmitterState();
+		bool IsEmitterActive(size_t index) const;
+		void ScrubToTime(float time);
 
 		static std::string s_PendingOpenPath;
 		std::string m_LoadedPath;
@@ -65,16 +79,32 @@ namespace World
 		float m_OrbitYaw = 0.785f;    // ~45 度
 		float m_OrbitPitch = 0.45f;   // ~25 度
 		glm::vec3 m_CameraFocus { 0.0f, 1.0f, 0.0f };
+		glm::vec3 m_TargetCameraFocus { 0.0f, 1.0f, 0.0f };
 		bool m_IsOrbiting = false;
 		glm::vec2 m_LastMousePos { 0.0f };
 
-		// 走带控制状态机
+		// 走带控制状态机 & 时间轴 Scrubbing
 		bool m_IsPlaying = true;
 		float m_PlaybackSpeed = 1.0f;
 		float m_SimTime = 0.0f;
+		float m_TimelineDuration = 5.0f;
+		bool m_IsScrubbing = false;
+
+		// 视口 Overdraw 热力图透视模式 (Heatmap Mode)
+		bool m_HeatmapMode = false;
 
 		// 内部实时物理推演池 (Live Simulation Pools)
 		std::vector<std::unique_ptr<ParticlePool>> m_LivePools;
+
+		// 每发射器独立状态 (Solo/Mute, ColorGradient, SizeCurve)
+		std::vector<bool> m_EmitterSolo;
+		std::vector<bool> m_EmitterMute;
+		std::vector<ColorGradient> m_EmitterGradients;
+		std::vector<CubicBezierCurve> m_EmitterSizeCurves;
+		std::vector<std::string> m_EmitterCurveType;
+
+		// 右侧检视区滚动状态
+		float m_InspectorScrollY = 0.0f;
 
 		// 7 大模块卡片折叠状态 (对齐方案 2.4 M4 规范)
 		bool m_CardSpawningExpanded = true;
