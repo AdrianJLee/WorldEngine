@@ -2533,18 +2533,49 @@ void ParticleEditorPanel::NewAsset()
 			const float ndcY = clip.y * invW;
 			outScreen.x = vpRect.X + (ndcX * 0.5f + 0.5f) * vpRect.W;
 			outScreen.y = vpRect.Y + (-ndcY * 0.5f + 0.5f) * vpRect.H;
-			return (outScreen.x >= vpRect.X - 100.0f && outScreen.x <= vpRect.X + vpRect.W + 100.0f &&
-			        outScreen.y >= vpRect.Y - 100.0f && outScreen.y <= vpRect.Y + vpRect.H + 100.0f);
+			return true;
 		};
 
-		auto drawProjectedSegment = [&](const glm::vec3& a, const glm::vec3& b, const Wui::WuiColor& col, float thickness) {
-			glm::vec2 s0, s1;
-			if (projectPoint(a, s0) && projectPoint(b, s1))
+		auto drawProjectedSegment = [&](const glm::vec3& worldA, const glm::vec3& worldB, const Wui::WuiColor& col, float thickness) {
+			constexpr float kMinW = 0.05f;
+			glm::vec4 a = vpMat * glm::vec4(worldA, 1.0f);
+			glm::vec4 b = vpMat * glm::vec4(worldB, 1.0f);
+
+			// 两端都在相机近平面后方 -> 整段剔除
+			if (a.w < kMinW && b.w < kMinW)
+				return;
+
+			// 遵循 perspective-line-clipping-w-overflow 知识契约：在齐次裁剪空间对近平面进行线段裁剪
+			if (a.w < kMinW)
 			{
-				if (ClipLineSegment2D(s0, s1, vpRect.X, vpRect.X + vpRect.W, vpRect.Y, vpRect.Y + vpRect.H))
-				{
-					Wui::LineSegment(ctx, s0, s1, col, thickness);
-				}
+				const float t = (kMinW - a.w) / (b.w - a.w);
+				a = glm::mix(a, b, t);
+			}
+			else if (b.w < kMinW)
+			{
+				const float t = (kMinW - b.w) / (a.w - b.w);
+				b = glm::mix(b, a, t);
+			}
+
+			const glm::vec3 ndcA = glm::vec3(a) / a.w;
+			const glm::vec3 ndcB = glm::vec3(b) / b.w;
+
+			glm::vec2 s0 {
+				vpRect.X + (ndcA.x * 0.5f + 0.5f) * vpRect.W,
+				vpRect.Y + (-ndcA.y * 0.5f + 0.5f) * vpRect.H
+			};
+			glm::vec2 s1 {
+				vpRect.X + (ndcB.x * 0.5f + 0.5f) * vpRect.W,
+				vpRect.Y + (-ndcB.y * 0.5f + 0.5f) * vpRect.H
+			};
+
+			if (std::isnan(s0.x) || std::isnan(s0.y) || std::isnan(s1.x) || std::isnan(s1.y))
+				return;
+
+			// 视口矩形 2D 几何裁剪
+			if (ClipLineSegment2D(s0, s1, vpRect.X, vpRect.X + vpRect.W, vpRect.Y, vpRect.Y + vpRect.H))
+			{
+				Wui::LineSegment(ctx, s0, s1, col, thickness);
 			}
 		};
 
@@ -2949,13 +2980,13 @@ void ParticleEditorPanel::NewAsset()
 		const Wui::WuiColor axisXGridCol { 0.70f, 0.30f, 0.30f, 0.65f };
 		const Wui::WuiColor axisZGridCol { 0.30f, 0.50f, 0.80f, 0.65f };
 
-		for (int line = -4; line <= 4; ++line)
+		for (int line = -5; line <= 5; ++line)
 		{
 			const float coord = static_cast<float>(line) * 1.0f;
-			drawProjectedSegment(glm::vec3(coord, 0.0f, -4.0f), glm::vec3(coord, 0.0f, 4.0f),
+			drawProjectedSegment(glm::vec3(coord, 0.0f, -5.0f), glm::vec3(coord, 0.0f, 5.0f),
 				(line == 0 ? axisZGridCol : gridCol), (line == 0 ? 1.4f : 1.0f));
 
-			drawProjectedSegment(glm::vec3(-4.0f, 0.0f, coord), glm::vec3(4.0f, 0.0f, coord),
+			drawProjectedSegment(glm::vec3(-5.0f, 0.0f, coord), glm::vec3(5.0f, 0.0f, coord),
 				(line == 0 ? axisXGridCol : gridCol), (line == 0 ? 1.4f : 1.0f));
 		}
 
