@@ -2436,10 +2436,53 @@ namespace World
 			uint32_t entId = static_cast<uint32_t>(entity);
 			if (!partSys.HasPoolForEntity(entId)) continue;
 			auto& pool = partSys.GetPoolForEntity(entId, comp.MaxParticles);
+			const auto& matSettings = pool.GetMaterialSettings();
+			Rhi::Handle<Rhi::Texture> particleTex = matSettings.TextureHandle;
+			if (!particleTex && !matSettings.TexturePath.empty())
+			{
+				const AssetRef texRef { StringPool::Get().InternPath(matSettings.TexturePath), AssetId() };
+				particleTex = ResolveTextureAsset(texRef);
+			}
+			const bool useSubUV = (matSettings.SubUVTilesX * matSettings.SubUVTilesY) > 1u
+				|| ((comp.VfxFlags & ParticleVfxFlag_SubUVEnabled) != 0);
+			const ParticleBlendMode blendMode = (comp.BlendMode != ParticleBlendMode::AlphaBlend)
+				? comp.BlendMode
+				: matSettings.BlendMode;
 			for (const auto& p : pool.GetParticles())
 			{
 				if (!p.Active) continue;
-				Renderer2D::DrawRotatedQuad(p.Position, p.Size, p.Rotation, p.Color);
+				glm::vec4 drawColor = p.Color;
+				if (blendMode == ParticleBlendMode::Additive)
+				{
+					const float boost = std::max(1.0f, matSettings.EmissiveBoost);
+					drawColor.r *= boost;
+					drawColor.g *= boost;
+					drawColor.b *= boost;
+				}
+				else if (blendMode == ParticleBlendMode::Opaque)
+				{
+					drawColor.a = 1.0f;
+				}
+
+				if (particleTex || useSubUV)
+				{
+					const glm::vec4 uvRect = World::ComputeSubUVRect(
+						p.SubUVFrameIndex, matSettings.SubUVTilesX, matSettings.SubUVTilesY);
+					const glm::vec2 uvCoords[4] = {
+						{ uvRect.x, uvRect.y },
+						{ uvRect.z, uvRect.y },
+						{ uvRect.z, uvRect.w },
+						{ uvRect.x, uvRect.w }
+					};
+					const glm::mat4 quadTransform = glm::translate(glm::mat4(1.0f), p.Position)
+						* glm::rotate(glm::mat4(1.0f), p.Rotation, glm::vec3(0.0f, 0.0f, 1.0f))
+						* glm::scale(glm::mat4(1.0f), glm::vec3(p.Size.x, p.Size.y, 1.0f));
+					Renderer2D::DrawQuadCore(quadTransform, particleTex, drawColor, uvCoords, 1.0f, static_cast<int>(entId), nullptr, matSettings.SortingLayer);
+				}
+				else
+				{
+					Renderer2D::DrawRotatedQuad(p.Position, p.Size, p.Rotation, drawColor);
+				}
 			}
 		}
 	}

@@ -92,6 +92,6 @@ namespace World
 
 	static_assert(std::is_trivially_copyable_v<ParticleSystemComponent>,
 		"ParticleSystemComponent must stay trivially copyable");
-	static_assert(sizeof(ParticleSystemComponent) <= 64,
+	static_assert(sizeof(ParticleSystemComponent) == 64,
 		"ParticleSystemComponent must stay within one cache line");
 }

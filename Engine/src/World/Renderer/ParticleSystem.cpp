@@ -13,6 +13,36 @@ namespace World
 		m_ActiveCount = 0;
 		m_NextFreeIndex = 0;
 		m_EmissionAccumulator = 0.0f;
+		m_InitialSeed = 0x12345678u;
+		m_RngState = m_InitialSeed;
+	}
+
+	void ParticlePool::SetSeed(uint32_t seed)
+	{
+		m_InitialSeed = (seed != 0u) ? seed : 0x12345678u;
+		m_RngState = m_InitialSeed;
+	}
+
+	glm::vec4 ComputeSubUVRect(uint32_t frameIndex, uint32_t tilesX, uint32_t tilesY)
+	{
+		const uint32_t safeTilesX = std::max(1u, tilesX);
+		const uint32_t safeTilesY = std::max(1u, tilesY);
+		const uint32_t totalFrames = safeTilesX * safeTilesY;
+		const uint32_t clampedFrame = frameIndex % totalFrames;
+		const uint32_t frameX = clampedFrame % safeTilesX;
+		const uint32_t frameY = clampedFrame / safeTilesX;
+		const float uSize = 1.0f / static_cast<float>(safeTilesX);
+		const float vSize = 1.0f / static_cast<float>(safeTilesY);
+		const float uMin = static_cast<float>(frameX) * uSize;
+		const float vMin = static_cast<float>(frameY) * vSize;
+		return glm::vec4(uMin, vMin, uMin + uSize, vMin + vSize);
+	}
+
+	float ComputeSoftParticleFade(float sceneDepth, float particleDepth, float fadeDistance)
+	{
+		if (fadeDistance <= 1e-5f)
+			return (sceneDepth >= particleDepth) ? 1.0f : 0.0f;
+		return std::clamp((sceneDepth - particleDepth) / fadeDistance, 0.0f, 1.0f);
 	}
 
 	float ParticlePool::RandomFloat()
@@ -39,10 +69,13 @@ namespace World
 		m_ActiveCount = 0;
 		m_NextFreeIndex = 0;
 		m_EmissionAccumulator = 0.0f;
+		m_RngState = m_InitialSeed;
 		for (auto& p : m_Particles)
 		{
 			p.Active = false;
 			p.Life = 0.0f;
+			p.SubUVFrameIndex = 0;
+			p.InitialFrameOffset = 0;
 		}
 	}
 
@@ -174,7 +207,23 @@ namespace World
 			}
 
 			p.Color = UnpackColor(comp.ColorStart);
+			const float emissive = std::max(0.0f, m_Material.EmissiveBoost);
+			p.Color.r *= emissive;
+			p.Color.g *= emissive;
+			p.Color.b *= emissive;
 			p.Size = glm::vec2(comp.SizeStart);
+
+			const uint32_t totalFrames = std::max(1u, m_Material.SubUVTilesX * m_Material.SubUVTilesY);
+			const bool randomStart = m_Material.SubUVRandomStartFrame || ((comp.VfxFlags & ParticleVfxFlag_SubUVRandomStart) != 0);
+			if (randomStart && totalFrames > 1u)
+			{
+				p.InitialFrameOffset = static_cast<uint32_t>(RandomFloat() * static_cast<float>(totalFrames)) % totalFrames;
+			}
+			else
+			{
+				p.InitialFrameOffset = 0u;
+			}
+			p.SubUVFrameIndex = p.InitialFrameOffset;
 
 			m_ActiveCount++;
 			emitted++;
@@ -184,6 +233,11 @@ namespace World
 
 	void ParticlePool::Update(float dt, const ParticleSystemComponent& comp, const glm::vec3& emitterPos)
 	{
+		Update(dt, comp, emitterPos, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+	}
+
+	void ParticlePool::Update(float dt, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot)
+	{
 		if (comp.IsPlaying != 0 && comp.EmissionRate > 0.0f)
 		{
 			m_EmissionAccumulator += comp.EmissionRate * dt;
@@ -191,12 +245,14 @@ namespace World
 			if (toEmit > 0)
 			{
 				m_EmissionAccumulator -= static_cast<float>(toEmit);
-				Emit(toEmit, comp, emitterPos);
+				Emit(toEmit, comp, emitterPos, emitterRot);
 			}
 		}
 
 		const glm::vec4 cStart = UnpackColor(comp.ColorStart);
 		const glm::vec4 cEnd = UnpackColor(comp.ColorEnd);
+		const float emissive = std::max(0.0f, m_Material.EmissiveBoost);
+		const uint32_t totalFrames = std::max(1u, m_Material.SubUVTilesX * m_Material.SubUVTilesY);
 
 		for (auto& p : m_Particles)
 		{
@@ -225,9 +281,31 @@ namespace World
 			t = glm::clamp(t, 0.0f, 1.0f);
 
 			p.Color = glm::mix(cStart, cEnd, t);
+			p.Color.r *= emissive;
+			p.Color.g *= emissive;
+			p.Color.b *= emissive;
 
 			float s = glm::mix(comp.SizeStart, comp.SizeEnd, t);
 			p.Size = glm::vec2(s);
+
+			if (totalFrames > 1u)
+			{
+				if (m_Material.SubUVFrameRate > 0.0f)
+				{
+					const float elapsed = std::max(0.0f, p.MaxLife - p.Life);
+					const uint32_t step = static_cast<uint32_t>(elapsed * m_Material.SubUVFrameRate);
+					p.SubUVFrameIndex = (p.InitialFrameOffset + step) % totalFrames;
+				}
+				else
+				{
+					const uint32_t lifeFrame = std::min(totalFrames - 1u, static_cast<uint32_t>(t * static_cast<float>(totalFrames)));
+					p.SubUVFrameIndex = (p.InitialFrameOffset + lifeFrame) % totalFrames;
+				}
+			}
+			else
+			{
+				p.SubUVFrameIndex = 0u;
+			}
 		}
 	}
 
@@ -257,20 +335,39 @@ namespace World
 			const glm::vec3 p2 = rotate2D( halfSize.x,  halfSize.y);
 			const glm::vec3 p3 = rotate2D(-halfSize.x,  halfSize.y);
 
-			outVertices.push_back({ p0, p.Color, glm::vec2(0.0f, 0.0f) });
-			outVertices.push_back({ p1, p.Color, glm::vec2(1.0f, 0.0f) });
-			outVertices.push_back({ p2, p.Color, glm::vec2(1.0f, 1.0f) });
+			const glm::vec4 uvRect = ComputeSubUVRect(p.SubUVFrameIndex, m_Material.SubUVTilesX, m_Material.SubUVTilesY);
+			const glm::vec2 uv0(uvRect.x, uvRect.y);
+			const glm::vec2 uv1(uvRect.z, uvRect.y);
+			const glm::vec2 uv2(uvRect.z, uvRect.w);
+			const glm::vec2 uv3(uvRect.x, uvRect.w);
 
-			outVertices.push_back({ p0, p.Color, glm::vec2(0.0f, 0.0f) });
-			outVertices.push_back({ p2, p.Color, glm::vec2(1.0f, 1.0f) });
-			outVertices.push_back({ p3, p.Color, glm::vec2(0.0f, 1.0f) });
+			outVertices.push_back({ p0, p.Color, uv0, 1.0f });
+			outVertices.push_back({ p1, p.Color, uv1, 1.0f });
+			outVertices.push_back({ p2, p.Color, uv2, 1.0f });
+
+			outVertices.push_back({ p0, p.Color, uv0, 1.0f });
+			outVertices.push_back({ p2, p.Color, uv2, 1.0f });
+			outVertices.push_back({ p3, p.Color, uv3, 1.0f });
 		}
 	}
 
 	void ParticlePool::GenerateBillboardVertices(const glm::vec3& cameraPos, const glm::vec3& cameraUp, std::vector<ParticleVertex>& outVertices) const
 	{
+		GenerateBillboardVerticesWithDepth(cameraPos, cameraUp, glm::vec3(0.0f, 0.0f, -1.0f), 1e6f, outVertices);
+	}
+
+	void ParticlePool::GenerateBillboardVerticesWithDepth(
+		const glm::vec3& cameraPos,
+		const glm::vec3& cameraUp,
+		const glm::vec3& cameraForward,
+		float sceneReferenceDepth,
+		std::vector<ParticleVertex>& outVertices) const
+	{
 		outVertices.clear();
 		outVertices.reserve(m_ActiveCount * 6);
+
+		const float fwdLen2 = glm::dot(cameraForward, cameraForward);
+		const glm::vec3 fwd = fwdLen2 > 1e-6f ? glm::normalize(cameraForward) : glm::vec3(0.0f, 0.0f, -1.0f);
 
 		for (const auto& p : m_Particles)
 		{
@@ -302,13 +399,29 @@ namespace World
 			const glm::vec3 p2 = p.Position + right * halfSize.x + up * halfSize.y;
 			const glm::vec3 p3 = p.Position - right * halfSize.x + up * halfSize.y;
 
-			outVertices.push_back({ p0, p.Color, glm::vec2(0.0f, 0.0f) });
-			outVertices.push_back({ p1, p.Color, glm::vec2(1.0f, 0.0f) });
-			outVertices.push_back({ p2, p.Color, glm::vec2(1.0f, 1.0f) });
+			const glm::vec4 uvRect = ComputeSubUVRect(p.SubUVFrameIndex, m_Material.SubUVTilesX, m_Material.SubUVTilesY);
+			const glm::vec2 uv0(uvRect.x, uvRect.y);
+			const glm::vec2 uv1(uvRect.z, uvRect.y);
+			const glm::vec2 uv2(uvRect.z, uvRect.w);
+			const glm::vec2 uv3(uvRect.x, uvRect.w);
 
-			outVertices.push_back({ p0, p.Color, glm::vec2(0.0f, 0.0f) });
-			outVertices.push_back({ p2, p.Color, glm::vec2(1.0f, 1.0f) });
-			outVertices.push_back({ p3, p.Color, glm::vec2(0.0f, 1.0f) });
+			float fade = 1.0f;
+			if (m_Material.SoftParticlesEnabled)
+			{
+				const float particleDepth = glm::dot(p.Position - cameraPos, fwd);
+				fade = ComputeSoftParticleFade(sceneReferenceDepth, particleDepth, m_Material.SoftParticleFadeDistance);
+			}
+
+			glm::vec4 finalColor = p.Color;
+			finalColor.a *= fade;
+
+			outVertices.push_back({ p0, finalColor, uv0, fade });
+			outVertices.push_back({ p1, finalColor, uv1, fade });
+			outVertices.push_back({ p2, finalColor, uv2, fade });
+
+			outVertices.push_back({ p0, finalColor, uv0, fade });
+			outVertices.push_back({ p2, finalColor, uv2, fade });
+			outVertices.push_back({ p3, finalColor, uv3, fade });
 		}
 	}
 
@@ -327,6 +440,18 @@ namespace World
 	bool ParticleSystem::HasPoolForEntity(uint32_t entityId) const
 	{
 		return m_Pools.find(entityId) != m_Pools.end();
+	}
+
+	ParticlePool* ParticleSystem::GetPool(uint32_t entityId)
+	{
+		auto it = m_Pools.find(entityId);
+		return (it != m_Pools.end()) ? it->second.get() : nullptr;
+	}
+
+	const ParticlePool* ParticleSystem::GetPool(uint32_t entityId) const
+	{
+		auto it = m_Pools.find(entityId);
+		return (it != m_Pools.end()) ? it->second.get() : nullptr;
 	}
 
 	void ParticleSystem::RemoveEntity(uint32_t entityId)

@@ -252,6 +252,113 @@ namespace World
 			return ScriptValue::Boolean(true);
 		}
 
+		ScriptValue ParticleSetSeedImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) throw std::logic_error("Particle.SetSeed requires an active scene");
+			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[9];
+			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
+			double seedVal = RequireNum("Particle", method, args, count, 1);
+
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			if (!comp)
+				return ScriptValue::Boolean(false);
+
+			auto& pool = GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles);
+			pool.SetSeed(static_cast<uint32_t>(seedVal));
+			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).SetSeed(static_cast<uint32_t>(seedVal));
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue ParticleSetSubUVImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) throw std::logic_error("Particle.SetSubUV requires an active scene");
+			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[10];
+			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
+			double tilesX = RequireNum("Particle", method, args, count, 1);
+			double tilesY = RequireNum("Particle", method, args, count, 2);
+			double frameRate = (count > 3 && !args[3].IsNil()) ? RequireNum("Particle", method, args, count, 3) : 0.0;
+			bool randomStart = (count > 4 && !args[4].IsNil()) ? RequireBool("Particle", method, args, count, 4) : false;
+
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			if (!comp)
+				return ScriptValue::Boolean(false);
+
+			const uint32_t tx = std::max(1u, static_cast<uint32_t>(tilesX));
+			const uint32_t ty = std::max(1u, static_cast<uint32_t>(tilesY));
+			if (tx * ty > 1u)
+				comp->VfxFlags |= ParticleVfxFlag_SubUVEnabled;
+			else
+				comp->VfxFlags &= static_cast<uint8_t>(~ParticleVfxFlag_SubUVEnabled);
+
+			if (randomStart)
+				comp->VfxFlags |= ParticleVfxFlag_SubUVRandomStart;
+			else
+				comp->VfxFlags &= static_cast<uint8_t>(~ParticleVfxFlag_SubUVRandomStart);
+
+			auto applyPool = [&](ParticlePool& pool) {
+				auto& mat = pool.GetMaterialSettingsMut();
+				mat.SubUVTilesX = tx;
+				mat.SubUVTilesY = ty;
+				mat.SubUVFrameRate = static_cast<float>(frameRate);
+				mat.SubUVRandomStartFrame = randomStart;
+			};
+			applyPool(GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles));
+			applyPool(s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles));
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue ParticleSetSoftParticlesImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) throw std::logic_error("Particle.SetSoftParticles requires an active scene");
+			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[11];
+			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
+			bool enabled = RequireBool("Particle", method, args, count, 1);
+			double fadeDist = (count > 2 && !args[2].IsNil()) ? RequireNum("Particle", method, args, count, 2) : 0.5;
+
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			if (!comp)
+				return ScriptValue::Boolean(false);
+
+			if (enabled)
+				comp->VfxFlags |= ParticleVfxFlag_SoftParticle;
+			else
+				comp->VfxFlags &= static_cast<uint8_t>(~ParticleVfxFlag_SoftParticle);
+
+			auto applyPool = [&](ParticlePool& pool) {
+				auto& mat = pool.GetMaterialSettingsMut();
+				mat.SoftParticlesEnabled = enabled;
+				mat.SoftParticleFadeDistance = std::max(0.001f, static_cast<float>(fadeDist));
+			};
+			applyPool(GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles));
+			applyPool(s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles));
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue ParticleSetEmissiveBoostImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) throw std::logic_error("Particle.SetEmissiveBoost requires an active scene");
+			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[12];
+			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
+			double boost = RequireNum("Particle", method, args, count, 1);
+
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			if (!comp)
+				return ScriptValue::Boolean(false);
+
+			const float clampedBoost = std::max(0.0f, static_cast<float>(boost));
+			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).GetMaterialSettingsMut().EmissiveBoost = clampedBoost;
+			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).GetMaterialSettingsMut().EmissiveBoost = clampedBoost;
+			return ScriptValue::Boolean(true);
+		}
+
 		static const ScriptServiceParam emitParams[] = {
 			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
 			{ "count", "number", ScriptServiceArgType::Number, true, "Number of particles to emit." }
@@ -275,6 +382,26 @@ namespace World
 			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
 			{ "lifetime", "number", ScriptServiceArgType::Number, true, "Particle base lifetime in seconds." }
 		};
+		static const ScriptServiceParam seedParams[] = {
+			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
+			{ "seed", "number", ScriptServiceArgType::Number, true, "Deterministic PRNG seed for particle replay." }
+		};
+		static const ScriptServiceParam subUVParams[] = {
+			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
+			{ "tilesX", "number", ScriptServiceArgType::Number, true, "Sub-UV horizontal grid columns." },
+			{ "tilesY", "number", ScriptServiceArgType::Number, true, "Sub-UV vertical grid rows." },
+			{ "frameRate", "number", ScriptServiceArgType::Number, false, "Flipbook playback FPS (0 = map over particle lifetime)." },
+			{ "randomStart", "boolean", ScriptServiceArgType::Boolean, false, "Pick random initial frame per particle." }
+		};
+		static const ScriptServiceParam softParticleParams[] = {
+			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
+			{ "enabled", "boolean", ScriptServiceArgType::Boolean, true, "Enable soft particle depth fade." },
+			{ "fadeDistance", "number", ScriptServiceArgType::Number, false, "Depth fade transition distance." }
+		};
+		static const ScriptServiceParam emissiveParams[] = {
+			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
+			{ "boost", "number", ScriptServiceArgType::Number, true, "HDR emissive multiplier for Bloom." }
+		};
 
 		static const ScriptServiceMethod particleMethods[] = {
 			{ "Emit", [](const ScriptValue* args, std::size_t count) { return ParticleEmitImpl(args, count); }, emitParams, 2, 2, "boolean", "Emit particles from entity's ParticleSystemComponent." },
@@ -285,7 +412,11 @@ namespace World
 			{ "SetLockToXY", [](const ScriptValue* args, std::size_t count) { return ParticleSetLockToXYImpl(args, count); }, lockParams, 2, 2, "boolean", "Lock or unlock particle motion to 2D XY plane." },
 			{ "SetEmissionRate", [](const ScriptValue* args, std::size_t count) { return ParticleSetEmissionRateImpl(args, count); }, rateParams, 2, 2, "boolean", "Set particle emission rate." },
 			{ "SetSpeed", [](const ScriptValue* args, std::size_t count) { return ParticleSetSpeedImpl(args, count); }, speedParams, 2, 2, "boolean", "Set particle emission speed." },
-			{ "SetLifetime", [](const ScriptValue* args, std::size_t count) { return ParticleSetLifetimeImpl(args, count); }, lifetimeParams, 2, 2, "boolean", "Set particle lifetime in seconds." }
+			{ "SetLifetime", [](const ScriptValue* args, std::size_t count) { return ParticleSetLifetimeImpl(args, count); }, lifetimeParams, 2, 2, "boolean", "Set particle lifetime in seconds." },
+			{ "SetSeed", [](const ScriptValue* args, std::size_t count) { return ParticleSetSeedImpl(args, count); }, seedParams, 2, 2, "boolean", "Set deterministic PRNG seed for particle replay." },
+			{ "SetSubUV", [](const ScriptValue* args, std::size_t count) { return ParticleSetSubUVImpl(args, count); }, subUVParams, 3, 5, "boolean", "Configure Sub-UV flipbook grid and frame rate." },
+			{ "SetSoftParticles", [](const ScriptValue* args, std::size_t count) { return ParticleSetSoftParticlesImpl(args, count); }, softParticleParams, 2, 3, "boolean", "Configure soft particle depth fade." },
+			{ "SetEmissiveBoost", [](const ScriptValue* args, std::size_t count) { return ParticleSetEmissiveBoostImpl(args, count); }, emissiveParams, 2, 2, "boolean", "Set HDR emissive multiplier for Bloom." }
 		};
 
 		static const ScriptServiceBinding particleBindingsTable[] = {

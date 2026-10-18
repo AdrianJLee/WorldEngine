@@ -1,0 +1,14 @@
+FormatVersion: 1
+PreExtrapolation: Cycle
+PostExtrapolation: Clamp
+Keyframes:
+  - Time: 0.4833332
+    Value: 0
+    InTangent: 1
+    OutTangent: 1
+    Mode: Aligned
+  - Time: 1
+    Value: 1
+    InTangent: 1
+    OutTangent: 1
+    Mode: Aligned

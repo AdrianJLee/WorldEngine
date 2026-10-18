@@ -178,6 +178,135 @@ static void TestParticleSystemManager()
 	std::cout << "[PASS] TestParticleSystemManager\n";
 }
 
+static void TestSubUVFlipbookAndRect()
+{
+	// 4x4 grid check
+	const glm::vec4 rect0 = ComputeSubUVRect(0, 4, 4);
+	assert(std::abs(rect0.x - 0.0f) < 1e-5f);
+	assert(std::abs(rect0.y - 0.0f) < 1e-5f);
+	assert(std::abs(rect0.z - 0.25f) < 1e-5f);
+	assert(std::abs(rect0.w - 0.25f) < 1e-5f);
+
+	const glm::vec4 rect5 = ComputeSubUVRect(5, 4, 4); // row 1, col 1
+	assert(std::abs(rect5.x - 0.25f) < 1e-5f);
+	assert(std::abs(rect5.y - 0.25f) < 1e-5f);
+	assert(std::abs(rect5.z - 0.50f) < 1e-5f);
+	assert(std::abs(rect5.w - 0.50f) < 1e-5f);
+
+	// Lifecycle Sub-UV progression & vertex UV check
+	ParticlePool pool(16);
+	ParticleMaterialSettings& mat = pool.GetMaterialSettings();
+	mat.SubUVTilesX = 2;
+	mat.SubUVTilesY = 2;
+	mat.SubUVFrameRate = 0.0f; // map over normalized lifetime
+	mat.SubUVRandomStartFrame = false;
+
+	ParticleSystemComponent comp;
+	comp.Lifetime = 1.0f;
+	comp.EmissionRate = 0.0f;
+	comp.IsPlaying = 0;
+	comp.Speed = 0.0f;
+	comp.SpeedVariance = 0.0f;
+
+	pool.Emit(1, comp, glm::vec3(0.0f), glm::vec3(0.0f));
+	assert(pool.GetParticles()[0].SubUVFrameIndex == 0u);
+
+	// Advance past 60% of lifetime -> frame 2 (out of 4 frames: 0, 1, 2, 3)
+	pool.Update(0.60f, comp, glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+	assert(pool.GetParticles()[0].SubUVFrameIndex == 2u);
+
+	std::vector<ParticleVertex> verts;
+	pool.GenerateQuadVertices(verts);
+	assert(verts.size() == 6);
+	// Frame 2 in 2x2 grid is col=0, row=1 -> u in [0, 0.5], v in [0.5, 1.0]
+	assert(std::abs(verts[0].UV.x - 0.0f) < 1e-5f);
+	assert(std::abs(verts[0].UV.y - 0.5f) < 1e-5f);
+	assert(std::abs(verts[2].UV.x - 0.5f) < 1e-5f);
+	assert(std::abs(verts[2].UV.y - 1.0f) < 1e-5f);
+
+	std::cout << "[PASS] TestSubUVFlipbookAndRect\n";
+}
+
+static void TestSoftParticleDepthFadeAndEmissive()
+{
+	// Soft particle depth fade math
+	assert(std::abs(ComputeSoftParticleFade(10.0f, 10.0f, 1.0f) - 0.0f) < 1e-5f);
+	assert(std::abs(ComputeSoftParticleFade(10.5f, 10.0f, 1.0f) - 0.5f) < 1e-5f);
+	assert(std::abs(ComputeSoftParticleFade(12.0f, 10.0f, 1.0f) - 1.0f) < 1e-5f);
+
+	ParticlePool pool(8);
+	ParticleMaterialSettings& mat = pool.GetMaterialSettings();
+	mat.EmissiveBoost = 3.5f;
+	mat.SoftParticlesEnabled = true;
+	mat.SoftParticleFadeDistance = 2.0f;
+
+	ParticleSystemComponent comp;
+	comp.Lifetime = 2.0f;
+	comp.EmissionRate = 0.0f;
+	comp.IsPlaying = 0;
+	comp.Speed = 0.0f;
+	comp.SpeedVariance = 0.0f;
+	comp.ColorStart = 0xFFFFFFFFu;
+	comp.ColorEnd = 0xFFFFFFFFu;
+
+	pool.Emit(1, comp, glm::vec3(0.0f, 0.0f, -5.0f), glm::vec3(0.0f));
+	pool.Update(0.1f, comp, glm::vec3(0.0f, 0.0f, -5.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+
+	// HDR Emissive boost: RGB > 1.0f while Alpha stays <= 1.0f
+	const Particle& p = pool.GetParticles()[0];
+	assert(p.Color.r > 3.0f && p.Color.g > 3.0f && p.Color.b > 3.0f);
+	assert(std::abs(p.Color.a - 1.0f) < 1e-4f);
+
+	// Camera at origin looking down -Z: particleDepth = 5.0, sceneDepth = 5.5, fadeDist = 2.0 -> fade = 0.25
+	std::vector<ParticleVertex> verts;
+	pool.GenerateBillboardVerticesWithDepth(
+		glm::vec3(0.0f),
+		glm::vec3(0.0f, 1.0f, 0.0f),
+		glm::vec3(0.0f, 0.0f, -1.0f),
+		5.5f,
+		verts);
+	assert(verts.size() == 6);
+	assert(std::abs(verts[0].SoftFadeFactor - 0.25f) < 1e-4f);
+	assert(std::abs(verts[0].Color.a - 0.25f) < 1e-4f);
+
+	std::cout << "[PASS] TestSoftParticleDepthFadeAndEmissive\n";
+}
+
+static void TestDeterministicSeedReplay()
+{
+	ParticleSystemComponent comp;
+	comp.EmitterType = ParticleEmitterType::Cone;
+	comp.Speed = 8.0f;
+	comp.SpeedVariance = 3.0f;
+	comp.Lifetime = 2.0f;
+	comp.EmissionRate = 0.0f;
+	comp.IsPlaying = 0;
+	comp.VfxFlags = ParticleVfxFlag_SubUVRandomStart;
+
+	ParticlePool poolA(32);
+	poolA.GetMaterialSettings().SubUVTilesX = 4;
+	poolA.GetMaterialSettings().SubUVTilesY = 4;
+	poolA.SetSeed(20261017u);
+	poolA.Emit(16, comp, glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(0.0f));
+	poolA.Update(0.16f, comp, glm::vec3(1.0f, 2.0f, 3.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+
+	ParticlePool poolB(32);
+	poolB.GetMaterialSettings().SubUVTilesX = 4;
+	poolB.GetMaterialSettings().SubUVTilesY = 4;
+	poolB.SetSeed(20261017u);
+	poolB.Emit(16, comp, glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(0.0f));
+	poolB.Update(0.16f, comp, glm::vec3(1.0f, 2.0f, 3.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+
+	for (size_t i = 0; i < 16; ++i)
+	{
+		assert(poolA.GetParticles()[i].Position == poolB.GetParticles()[i].Position);
+		assert(poolA.GetParticles()[i].Velocity == poolB.GetParticles()[i].Velocity);
+		assert(poolA.GetParticles()[i].SubUVFrameIndex == poolB.GetParticles()[i].SubUVFrameIndex);
+	}
+
+	std::cout << "[PASS] TestDeterministicSeedReplay\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -189,6 +318,9 @@ int main()
 	TestLockToXYPlane();
 	TestVertexGeneration();
 	TestParticleSystemManager();
+	TestSubUVFlipbookAndRect();
+	TestSoftParticleDepthFadeAndEmissive();
+	TestDeterministicSeedReplay();
 
 	std::cout << "All WorldParticleSystemTests passed successfully.\n";
 	return 0;

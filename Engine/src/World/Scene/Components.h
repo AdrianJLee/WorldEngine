@@ -116,8 +116,32 @@ namespace World
 		WE_ENUM_VALUE(Quad2D);
 	WE_ENUM_END
 
+	enum class ParticleBlendMode : uint8_t
+	{
+		AlphaBlend = 0,
+		Additive = 1,
+		Multiply = 2,
+		Opaque = 3
+	};
+	WE_ENUM_SCHEMA(World, ParticleBlendMode, UInt8)
+		WE_ENUM_VALUE(AlphaBlend);
+		WE_ENUM_VALUE(Additive);
+		WE_ENUM_VALUE(Multiply);
+		WE_ENUM_VALUE(Opaque);
+	WE_ENUM_END
+
+	enum ParticleVfxFlags : uint8_t
+	{
+		ParticleVfxFlag_None             = 0,
+		ParticleVfxFlag_SoftParticle     = 1 << 0,
+		ParticleVfxFlag_CollisionEnabled = 1 << 1,
+		ParticleVfxFlag_SubUVEnabled     = 1 << 2,
+		ParticleVfxFlag_SubUVRandomStart = 1 << 3
+	};
+
 	struct ParticleSystemComponent
 	{
+		uint64_t AssetGuid = 0;                     // 8B (Offset 0: R1 8B-aligned handle)
 		glm::vec3 Gravity { 0.0f, -9.8f, 0.0f };   // 12B
 		float EmissionRate = 50.0f;                 // 4B
 		float Lifetime = 2.0f;                     // 4B
@@ -130,17 +154,20 @@ namespace World
 		uint32_t MaxParticles = 1000;              // 4B
 		ParticleEmitterType EmitterType = ParticleEmitterType::Point; // 1B
 		ParticleRenderMode RenderMode = ParticleRenderMode::Billboard;// 1B
+		ParticleBlendMode BlendMode = ParticleBlendMode::AlphaBlend;  // 1B
+		uint8_t VfxFlags = ParticleVfxFlag_None;   // 1B
 		bool LockToXYPlane = false;                // 1B
 		bool Looping = true;                       // 1B
 		bool PlayOnAwake = true;                   // 1B
 		bool IsPlaying = true;                     // 1B
-		uint8_t _Padding[10] { 0 };                // 10B
 
 		ParticleSystemComponent() = default;
 
 		WE_SCHEMA_BODY(World, ParticleSystemComponent, Component)
 			WE_SCHEMA_META(Category("Renderer"),
 				Doc("Unified 2D and 3D particle system component with shape emitters, lifetime curves and XY locking."))
+			WE_FIELD(AssetGuid, UInt64,
+				Doc("Bound VFX asset GUID (0 uses inline component parameters)."));
 			WE_FIELD(Gravity, Vec3,
 				Doc("Gravity vector applied to moving particles."));
 			WE_FIELD(EmissionRate, Float, Range(0.0f, 5000.0f),
@@ -165,6 +192,10 @@ namespace World
 				Doc("Shape emitter volume (Point, Line, Box, Sphere, Cone, Circle)."));
 			WE_FIELD(RenderMode, Enum, Of(ParticleRenderMode),
 				Doc("Render geometry mode (Billboard or Quad2D)."));
+			WE_FIELD(BlendMode, Enum, Of(ParticleBlendMode),
+				Doc("Particle material blend mode (AlphaBlend, Additive, Multiply, Opaque)."));
+			WE_FIELD(VfxFlags, UInt8,
+				Doc("Bitmask flags for SoftParticle, CollisionEnabled, SubUVEnabled, SubUVRandomStart."));
 			WE_FIELD(LockToXYPlane, Bool,
 				Doc("Lock all particle simulation and velocity to the 2D XY plane."));
 			WE_FIELD(Looping, Bool,

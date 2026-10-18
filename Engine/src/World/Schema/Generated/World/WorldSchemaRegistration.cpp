@@ -73,6 +73,7 @@ const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode();
 const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState();
 const EnumSchema& WeEnumSchemaOf_ParticleEmitterType();
 const EnumSchema& WeEnumSchemaOf_ParticleRenderMode();
+const EnumSchema& WeEnumSchemaOf_ParticleBlendMode();
 
 	namespace
 	{
@@ -10862,6 +10863,16 @@ struct GeneratedAccess<World::SmartObjectComponent>
 template <>
 struct GeneratedAccess<World::ParticleSystemComponent>
 {
+    static Value Get_AssetGuid(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->AssetGuid);
+    }
+    static void Set_AssetGuid(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->AssetGuid = std::get<uint64_t>(value);
+    }
     static Value Get_Gravity(const void* instance)
     {
         const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
@@ -10990,6 +11001,30 @@ struct GeneratedAccess<World::ParticleSystemComponent>
     {
         return &WeEnumSchemaOf_ParticleRenderMode();
     }
+    static Value Get_BlendMode(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->BlendMode));
+    }
+    static void Set_BlendMode(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->BlendMode = static_cast<World::ParticleBlendMode>(std::get<uint64_t>(value));
+    }
+    static const EnumSchema* GetEnum_BlendMode()
+    {
+        return &WeEnumSchemaOf_ParticleBlendMode();
+    }
+    static Value Get_VfxFlags(const void* instance)
+    {
+        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        return Value(self->VfxFlags);
+    }
+    static void Set_VfxFlags(void* instance, const Value& value)
+    {
+        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        self->VfxFlags = std::get<uint8_t>(value);
+    }
     static Value Get_LockToXYPlane(const void* instance)
     {
         const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
@@ -11029,6 +11064,24 @@ struct GeneratedAccess<World::ParticleSystemComponent>
     {
         World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
         self->IsPlaying = static_cast<decltype(self->IsPlaying)>(std::get<bool>(value));
+    }
+    static const FieldSchema& Field_AssetGuid()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5D75AC4CB961CFF0ull },
+            "AssetGuid",
+            Kind::UInt64,
+            &Get_AssetGuid,
+            &Set_AssetGuid,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bound VFX asset GUID (0 uses inline component parameters).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
     }
     static const FieldSchema& Field_Gravity()
     {
@@ -11246,6 +11299,42 @@ struct GeneratedAccess<World::ParticleSystemComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_BlendMode()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8C8DB0D9FD8FB835ull },
+            "BlendMode",
+            Kind::Enum,
+            &Get_BlendMode,
+            &Set_BlendMode,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_BlendMode,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Particle material blend mode (AlphaBlend, Additive, Multiply, Opaque).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_VfxFlags()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBE4EDC8493C96C0Cull },
+            "VfxFlags",
+            Kind::UInt8,
+            &Get_VfxFlags,
+            &Set_VfxFlags,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bitmask flags for SoftParticle, CollisionEnabled, SubUVEnabled, SubUVRandomStart.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint8_t>(0)),
+        };
+        return schema;
+    }
     static const FieldSchema& Field_LockToXYPlane()
     {
         static const FieldSchema schema = {
@@ -11332,6 +11421,7 @@ struct GeneratedAccess<World::ParticleSystemComponent>
             sizeof(World::ParticleSystemComponent),
             TypeCategory::Component,
             {
+                Field_AssetGuid(),
                 Field_Gravity(),
                 Field_EmissionRate(),
                 Field_Lifetime(),
@@ -11344,6 +11434,8 @@ struct GeneratedAccess<World::ParticleSystemComponent>
                 Field_MaxParticles(),
                 Field_EmitterType(),
                 Field_RenderMode(),
+                Field_BlendMode(),
+                Field_VfxFlags(),
                 Field_LockToXYPlane(),
                 Field_Looping(),
                 Field_PlayOnAwake(),
@@ -11862,6 +11954,26 @@ struct GeneratedEnum<World::ParticleRenderMode>
     }
 };
 
+template <>
+struct GeneratedEnum<World::ParticleBlendMode>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "ParticleBlendMode",
+            false,
+            1,
+            {
+                { "AlphaBlend", static_cast<int64_t>(World::ParticleBlendMode::AlphaBlend) },
+                { "Additive", static_cast<int64_t>(World::ParticleBlendMode::Additive) },
+                { "Multiply", static_cast<int64_t>(World::ParticleBlendMode::Multiply) },
+                { "Opaque", static_cast<int64_t>(World::ParticleBlendMode::Opaque) },
+            },
+        };
+        return schema;
+    }
+};
+
 const TypeSchema& WeSchemaOf_UUIDComponent() { return GeneratedAccess<World::UUIDComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
@@ -11927,6 +12039,7 @@ const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode() { return GeneratedEnum<Wor
 const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState() { return GeneratedEnum<World::SmartObjectSlotState>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ParticleEmitterType() { return GeneratedEnum<World::ParticleEmitterType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ParticleRenderMode() { return GeneratedEnum<World::ParticleRenderMode>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_ParticleBlendMode() { return GeneratedEnum<World::ParticleBlendMode>::WeEnumSchema(); }
 
 	bool RegisterWorldSchemaModule(SchemaRegistry& registry)
 	{
@@ -11941,6 +12054,7 @@ const EnumSchema& WeEnumSchemaOf_ParticleRenderMode() { return GeneratedEnum<Wor
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_SmartObjectSlotState()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleEmitterType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleRenderMode()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleBlendMode()) != SchemaRegistry::Status::Ok) ok = false;
 		const std::vector<TypeSchema> schemas = {
 			WeSchemaOf_UUIDComponent(),
 			WeSchemaOf_TagComponent(),

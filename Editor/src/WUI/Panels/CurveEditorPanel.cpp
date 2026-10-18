@@ -96,22 +96,53 @@ namespace World
 		FrameAll();
 	}
 
+	std::filesystem::path CurveEditorPanel::ResolvePhysicalPath(const std::string& path) const
+	{
+		std::string normalized = path;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		if (normalized.empty())
+			normalized = "curves/new_curve.wcurve";
+
+		std::string logical = normalized;
+		if (logical.rfind("assets/", 0) == 0 || logical.rfind("assets\\", 0) == 0)
+			logical = logical.substr(7);
+
+		std::filesystem::path p(normalized);
+		if (p.is_absolute() && std::filesystem::exists(p))
+			return p;
+
+		// 资产内容根优先：统一保存在 <ProjectRoot>/assets/curves 之下
+		std::filesystem::path fromAsset = Paths::AssetRoot() / logical;
+		if (std::filesystem::exists(fromAsset))
+			return fromAsset;
+
+		// 历史兼容兜底（老项目根下遗留文件）
+		std::filesystem::path fromProj = Paths::ProjectDir() / logical;
+		if (std::filesystem::exists(fromProj))
+			return fromProj;
+
+		// 默认落盘位置：必须在资产内容根目录内部
+		return fromAsset;
+	}
+
 	void CurveEditorPanel::LoadAsset(const std::string& logicalPath)
 	{
-		std::filesystem::path fullPath = Paths::ProjectDir() / logicalPath;
-		if (!std::filesystem::exists(fullPath))
-			fullPath = Paths::AssetRoot() / logicalPath;
-		if (!std::filesystem::exists(fullPath))
-			fullPath = logicalPath;
+		std::filesystem::path fullPath = ResolvePhysicalPath(logicalPath);
 
 		CubicBezierCurve loaded;
 		if (LoadCurveFromFile(fullPath.string(), loaded))
 		{
 			m_Curve = loaded;
-			m_LoadedPath = logicalPath;
+			std::error_code ec;
+			std::filesystem::path rel = std::filesystem::relative(fullPath, Paths::AssetRoot(), ec);
+			if (!ec && !rel.empty() && rel.string().find("..") == std::string::npos)
+				m_LoadedPath = rel.generic_string();
+			else
+				m_LoadedPath = logicalPath;
+
 			m_IsDirty = false;
 			m_SelectedKeyframeIndex = 0;
-			m_StatusFeedback = "Loaded: " + logicalPath;
+			m_StatusFeedback = "Loaded: " + m_LoadedPath;
 			UpdateTitle();
 			FrameAll();
 		}
@@ -127,13 +158,15 @@ namespace World
 		{
 			m_LoadedPath = "curves/new_curve.wcurve";
 		}
-		std::filesystem::path fullPath = Paths::ProjectDir() / m_LoadedPath;
-		if (!fullPath.is_absolute())
+
+		std::filesystem::path fullPath = ResolvePhysicalPath(m_LoadedPath);
+		// 严禁写到项目根目录！必须确保保存在资产内容根 (Paths::AssetRoot()) 之下
+		if (!fullPath.is_absolute() || fullPath.string().find(Paths::AssetRoot().string()) == std::string::npos)
 		{
-			if (m_LoadedPath.rfind("assets/", 0) == 0 || m_LoadedPath.rfind("assets\\", 0) == 0)
-				fullPath = Paths::AssetRoot() / m_LoadedPath.substr(7);
-			else
-				fullPath = Paths::AssetRoot() / m_LoadedPath;
+			std::string sub = m_LoadedPath;
+			if (sub.rfind("assets/", 0) == 0 || sub.rfind("assets\\", 0) == 0)
+				sub = sub.substr(7);
+			fullPath = Paths::AssetRoot() / sub;
 		}
 
 		std::error_code ec;
@@ -142,6 +175,9 @@ namespace World
 		if (SaveCurveToFile(fullPath.string(), m_Curve))
 		{
 			m_IsDirty = false;
+			std::filesystem::path rel = std::filesystem::relative(fullPath, Paths::AssetRoot(), ec);
+			if (!ec && !rel.empty() && rel.string().find("..") == std::string::npos)
+				m_LoadedPath = rel.generic_string();
 			m_StatusFeedback = "Saved: " + m_LoadedPath;
 			UpdateTitle();
 			return true;

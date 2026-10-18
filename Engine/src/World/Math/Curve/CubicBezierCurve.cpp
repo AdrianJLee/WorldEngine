@@ -63,21 +63,27 @@ namespace World
 				return {};
 			std::error_code ec;
 			std::filesystem::path p(filepath);
-			if (std::filesystem::exists(p, ec))
+			if (p.is_absolute() && std::filesystem::exists(p, ec))
 				return p;
-			std::filesystem::path fromProj = Paths::ProjectDir() / p;
-			if (std::filesystem::exists(fromProj, ec))
-				return fromProj;
-			std::filesystem::path fromAsset = Paths::AssetRoot() / p;
+
+			std::string stripped = filepath;
+			if (stripped.rfind("assets/", 0) == 0 || stripped.rfind("assets\\", 0) == 0)
+				stripped = stripped.substr(7);
+
+			// 优先资产内容根 (Paths::AssetRoot(), 即 <ProjectRoot>/assets)
+			std::filesystem::path fromAsset = Paths::AssetRoot() / stripped;
 			if (std::filesystem::exists(fromAsset, ec))
 				return fromAsset;
-			if (filepath.rfind("assets/", 0) == 0 || filepath.rfind("assets\\", 0) == 0)
-			{
-				std::filesystem::path stripped = Paths::AssetRoot() / filepath.substr(7);
-				if (std::filesystem::exists(stripped, ec))
-					return stripped;
-			}
-			return p;
+
+			// 历史兼容兜底（老路径可能遗留在项目根目录）
+			std::filesystem::path fromProj = Paths::ProjectDir() / stripped;
+			if (std::filesystem::exists(fromProj, ec))
+				return fromProj;
+
+			if (std::filesystem::exists(p, ec))
+				return p;
+
+			return fromAsset;
 		}
 	}
 

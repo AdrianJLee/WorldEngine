@@ -38,6 +38,7 @@ namespace World
 		void SetSelectedTangentStep();
 
 	private:
+		std::filesystem::path ResolvePhysicalPath(const std::string& path) const;
 		void UpdateTitle();
 		float TimeToScreenX(float t, const Wui::WuiRect& r) const;
 		float ValueToScreenY(float v, const Wui::WuiRect& r) const;

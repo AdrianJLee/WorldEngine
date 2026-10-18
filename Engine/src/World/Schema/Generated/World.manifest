@@ -63,3 +63,4 @@ enum World::PhysMatCombineMode
 enum World::SmartObjectSlotState
 enum World::ParticleEmitterType
 enum World::ParticleRenderMode
+enum World::ParticleBlendMode
