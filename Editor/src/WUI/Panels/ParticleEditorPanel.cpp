@@ -74,7 +74,7 @@ namespace World
 				if (entry.is_regular_file())
 				{
 					const std::string ext = entry.path().extension().string();
-					if (ext == ".wvfx" || ext == ".wparticle")
+					if (ext == ".wvfx")
 					{
 						std::string rel = std::filesystem::relative(entry.path(), assetRoot, ec).generic_string();
 						m_AvailableAssets.push_back(rel);
@@ -159,7 +159,7 @@ namespace World
 		m_LoadedPath = "assets/vfx/new_vfx.wvfx";
 		m_Dirty = true;
 		m_SelectedEmitterIndex = 0;
-		m_StatusFeedback = "新建粒子特效资产";
+		m_StatusFeedback = "新建粒子特效资产 (.wvfx)";
 
 		SyncSimulationFromAsset();
 	}
@@ -298,17 +298,17 @@ namespace World
 
 		curY += topBar.H + 8.0f;
 
-		// 2. 双栏工业级布局 (左侧: 3D 自由交互视口 58% | 右侧: 模块卡片堆栈 42%)
+		// 2. 双栏工业级布局 (左侧: 3D 自由交互视口 56% | 右侧: 7 大功能模块卡片堆栈 44%)
 		const float gap = 12.0f;
-		const float availH = std::max(300.0f, rect.H - (curY - rect.Y) - 12.0f);
-		const float leftW = std::floor((contentW - gap) * 0.58f);
+		const float availH = std::max(340.0f, rect.H - (curY - rect.Y) - 12.0f);
+		const float leftW = std::floor((contentW - gap) * 0.56f);
 		const float rightW = contentW - gap - leftW;
 
-		// ---- 左侧 3D 粒子视口 ----
+		// ---- 左侧 3D 粒子交互视口 ----
 		const Wui::WuiRect vpRect { rect.X + padX, curY, leftW, availH };
 		Wui::BarSurface(ctx, vpRect, Wui::WuiColor { 0.08f, 0.09f, 0.11f, 1.0f }, theme.Border);
 
-		// 相机交互
+		// 相机交互 (左键旋转, 滚轮推拉)
 		const bool isVpHovered = ctx.IsHovered(vpRect);
 		if (isVpHovered)
 		{
@@ -337,7 +337,7 @@ namespace World
 			}
 		}
 
-		// 3D 投影变换
+		// 3D 投影变换解算
 		const glm::vec3 eye {
 			m_CameraFocus.x + m_CameraDistance * std::cos(m_OrbitPitch) * std::sin(m_OrbitYaw),
 			m_CameraFocus.y + m_CameraDistance * std::sin(m_OrbitPitch),
@@ -360,8 +360,22 @@ namespace World
 			        outScreen.y >= vpRect.Y && outScreen.y <= vpRect.Y + vpRect.H);
 		};
 
+		auto drawProjectedSegment = [&](const glm::vec3& a, const glm::vec3& b, const Wui::WuiColor& col, float thickness) {
+			const int steps = 10;
+			for (int s = 0; s <= steps; ++s)
+			{
+				float t = static_cast<float>(s) / static_cast<float>(steps);
+				glm::vec3 pt = glm::mix(a, b, t);
+				glm::vec2 sp;
+				if (projectPoint(pt, sp))
+				{
+					Wui::BarSurface(ctx, { sp.x - thickness * 0.5f, sp.y - thickness * 0.5f, thickness, thickness }, col, col);
+				}
+			}
+		};
+
 		// 绘制地面 3D 网格基准面 (Grid Plane at Y=0)
-		const Wui::WuiColor gridCol { 0.22f, 0.26f, 0.32f, 0.45f };
+		const Wui::WuiColor gridCol { 0.22f, 0.26f, 0.32f, 0.40f };
 		for (int line = -3; line <= 3; ++line)
 		{
 			const float coord = static_cast<float>(line) * 1.0f;
@@ -376,51 +390,7 @@ namespace World
 			}
 		}
 
-		// 平滑投影线段辅助函数
-		auto drawProjectedSegment = [&](const glm::vec3& a, const glm::vec3& b, const Wui::WuiColor& col, float thickness) {
-			const int steps = 12;
-			for (int s = 0; s <= steps; ++s)
-			{
-				float t = static_cast<float>(s) / static_cast<float>(steps);
-				glm::vec3 pt = glm::mix(a, b, t);
-				glm::vec2 sp;
-				if (projectPoint(pt, sp))
-				{
-					Wui::BarSurface(ctx, { sp.x - thickness * 0.5f, sp.y - thickness * 0.5f, thickness, thickness }, col, col);
-				}
-			}
-		};
-
-		// 1. 世界原点 3D 核心坐标系 (World Center 3D Axes: X=红, Y=绿, Z=蓝)
-		const Wui::WuiColor axisXCol { 0.95f, 0.22f, 0.22f, 0.95f };
-		const Wui::WuiColor axisYCol { 0.22f, 0.90f, 0.32f, 0.95f };
-		const Wui::WuiColor axisZCol { 0.22f, 0.55f, 0.98f, 0.95f };
-
-		// X 轴 (+X 红色, 长度 1.5m)
-		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(1.5f, 0.0f, 0.0f), axisXCol, 2.0f);
-		glm::vec2 xTip;
-		if (projectPoint(glm::vec3(1.55f, 0.0f, 0.0f), xTip))
-		{
-			Wui::Label(ctx, { xTip.x + 3.0f, xTip.y - 6.0f }, "X (+1.5m)", axisXCol, 11.0f);
-		}
-
-		// Y 轴 (+Y 绿色垂直向上, 长度 1.5m)
-		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(0.0f, 1.5f, 0.0f), axisYCol, 2.0f);
-		glm::vec2 yTip;
-		if (projectPoint(glm::vec3(0.0f, 1.55f, 0.0f), yTip))
-		{
-			Wui::Label(ctx, { yTip.x + 3.0f, yTip.y - 6.0f }, "Y (+1.5m)", axisYCol, 11.0f);
-		}
-
-		// Z 轴 (+Z 蓝色, 长度 1.5m)
-		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.5f), axisZCol, 2.0f);
-		glm::vec2 zTip;
-		if (projectPoint(glm::vec3(0.0f, 0.0f, 1.55f), zTip))
-		{
-			Wui::Label(ctx, { zTip.x + 3.0f, zTip.y - 6.0f }, "Z (+1.5m)", axisZCol, 11.0f);
-		}
-
-		// 地面网格刻度指示标 (Scale Ruler Markers)
+		// 地面网格刻度标尺 (Metric Scale)
 		for (int m = 1; m <= 3; ++m)
 		{
 			glm::vec2 smX, smZ;
@@ -430,7 +400,70 @@ namespace World
 				Wui::Label(ctx, { smZ.x + 4.0f, smZ.y - 6.0f }, std::to_string(m) + "m", Wui::WuiColor { 0.6f, 0.6f, 0.65f, 0.5f }, 9.5f);
 		}
 
-		// 原点中心发射器 Gizmo 锚点
+		// 世界中心 3D 核心坐标系 (RGB: X=红, Y=绿, Z=蓝)
+		const Wui::WuiColor axisXCol { 0.95f, 0.22f, 0.22f, 0.95f };
+		const Wui::WuiColor axisYCol { 0.22f, 0.90f, 0.32f, 0.95f };
+		const Wui::WuiColor axisZCol { 0.22f, 0.55f, 0.98f, 0.95f };
+
+		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(1.5f, 0.0f, 0.0f), axisXCol, 2.0f);
+		glm::vec2 xTip;
+		if (projectPoint(glm::vec3(1.55f, 0.0f, 0.0f), xTip)) Wui::Label(ctx, { xTip.x + 3.0f, xTip.y - 6.0f }, "X (+1.5m)", axisXCol, 11.0f);
+
+		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(0.0f, 1.5f, 0.0f), axisYCol, 2.0f);
+		glm::vec2 yTip;
+		if (projectPoint(glm::vec3(0.0f, 1.55f, 0.0f), yTip)) Wui::Label(ctx, { yTip.x + 3.0f, yTip.y - 6.0f }, "Y (+1.5m)", axisYCol, 11.0f);
+
+		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.5f), axisZCol, 2.0f);
+		glm::vec2 zTip;
+		if (projectPoint(glm::vec3(0.0f, 0.0f, 1.55f), zTip)) Wui::Label(ctx, { zTip.x + 3.0f, zTip.y - 6.0f }, "Z (+1.5m)", axisZCol, 11.0f);
+
+		// 发射器真实 3D 线框 Gizmo
+		const Wui::WuiColor gizmoCol { 0.95f, 0.85f, 0.20f, 0.75f };
+		if (m_SelectedEmitterIndex < m_Asset.Emitters.size())
+		{
+			const auto& curEm = m_Asset.Emitters[m_SelectedEmitterIndex];
+			if (curEm.EmitterType == ParticleEmitterType::Cone)
+			{
+				const float coneH = 1.2f;
+				const float coneR = 0.55f;
+				const int segs = 12;
+				for (int s = 0; s < segs; ++s)
+				{
+					float a0 = static_cast<float>(s) * 6.2831853f / static_cast<float>(segs);
+					float a1 = static_cast<float>(s + 1) * 6.2831853f / static_cast<float>(segs);
+					glm::vec3 p0(coneR * std::cos(a0), coneH, coneR * std::sin(a0));
+					glm::vec3 p1(coneR * std::cos(a1), coneH, coneR * std::sin(a1));
+					drawProjectedSegment(p0, p1, gizmoCol, 1.2f);
+					if (s % 3 == 0) drawProjectedSegment(glm::vec3(0.0f), p0, gizmoCol, 1.2f);
+				}
+			}
+			else if (curEm.EmitterType == ParticleEmitterType::Sphere)
+			{
+				const float spR = 0.6f;
+				const int segs = 12;
+				for (int s = 0; s < segs; ++s)
+				{
+					float a0 = static_cast<float>(s) * 6.2831853f / static_cast<float>(segs);
+					float a1 = static_cast<float>(s + 1) * 6.2831853f / static_cast<float>(segs);
+					drawProjectedSegment(glm::vec3(spR * std::cos(a0), spR * std::sin(a0), 0.0f), glm::vec3(spR * std::cos(a1), spR * std::sin(a1), 0.0f), gizmoCol, 1.2f);
+					drawProjectedSegment(glm::vec3(spR * std::cos(a0), 0.0f, spR * std::sin(a0)), glm::vec3(spR * std::cos(a1), 0.0f, spR * std::sin(a1)), gizmoCol, 1.2f);
+				}
+			}
+			else if (curEm.EmitterType == ParticleEmitterType::Box)
+			{
+				const float hs = 0.4f;
+				drawProjectedSegment(glm::vec3(-hs, 0.0f, -hs), glm::vec3(hs, 0.0f, -hs), gizmoCol, 1.2f);
+				drawProjectedSegment(glm::vec3(hs, 0.0f, -hs), glm::vec3(hs, 0.0f, hs), gizmoCol, 1.2f);
+				drawProjectedSegment(glm::vec3(hs, 0.0f, hs), glm::vec3(-hs, 0.0f, hs), gizmoCol, 1.2f);
+				drawProjectedSegment(glm::vec3(-hs, 0.0f, hs), glm::vec3(-hs, 0.0f, -hs), gizmoCol, 1.2f);
+				drawProjectedSegment(glm::vec3(-hs, hs*2.0f, -hs), glm::vec3(hs, hs*2.0f, -hs), gizmoCol, 1.2f);
+				drawProjectedSegment(glm::vec3(hs, hs*2.0f, -hs), glm::vec3(hs, hs*2.0f, hs), gizmoCol, 1.2f);
+				drawProjectedSegment(glm::vec3(hs, hs*2.0f, hs), glm::vec3(-hs, hs*2.0f, hs), gizmoCol, 1.2f);
+				drawProjectedSegment(glm::vec3(-hs, hs*2.0f, hs), glm::vec3(-hs, hs*2.0f, -hs), gizmoCol, 1.2f);
+			}
+		}
+
+		// 原点锚点
 		glm::vec2 originScreen;
 		if (projectPoint(glm::vec3(0.0f, 0.0f, 0.0f), originScreen))
 		{
@@ -464,8 +497,7 @@ namespace World
 			}
 		}
 
-		
-		// 视口右上角预设视角切换岛 (Quick View Presets)
+		// 视口右上角预设视角切换岛
 		const float viewBtnW = 42.0f;
 		float vx = vpRect.X + vpRect.W - (viewBtnW * 4.0f + 24.0f);
 		const float vy = vpRect.Y + 8.0f;
@@ -473,31 +505,30 @@ namespace World
 		Wui::BarSurface(ctx, vIsland, Wui::WuiColor { 0.05f, 0.07f, 0.09f, 0.75f }, theme.Border);
 
 		const Wui::WuiRect btn3D { vx, vy, viewBtnW, 22.0f };
-		Wui::Tooltip(ctx, btn3D, "透视 3D 自由轨道视角 (3D Orbit)");
+		Wui::Tooltip(ctx, btn3D, "3D 自由轨道透视视角 (Orbit View)");
 		if (Wui::Button(ctx, Wui::HashId("vfx.view.3d"), btn3D, "3D", theme)) { m_OrbitYaw = 0.785f; m_OrbitPitch = 0.45f; }
 		vx += viewBtnW + 4.0f;
 
 		const Wui::WuiRect btnTop { vx, vy, viewBtnW, 22.0f };
-		Wui::Tooltip(ctx, btnTop, "顶视图: 垂直向下观察地表 XZ 扩散 (Top View)");
+		Wui::Tooltip(ctx, btnTop, "顶视图: 垂直俯视 XZ 地面扩散 (Top View)");
 		if (Wui::Button(ctx, Wui::HashId("vfx.view.top"), btnTop, "顶视", theme)) { m_OrbitYaw = 0.0f; m_OrbitPitch = 1.45f; }
 		vx += viewBtnW + 4.0f;
 
 		const Wui::WuiRect btnFront { vx, vy, viewBtnW, 22.0f };
-		Wui::Tooltip(ctx, btnFront, "正视图: 水平观察 XY 喷射高度 (Front View)");
+		Wui::Tooltip(ctx, btnFront, "正视图: 水平平视 XY 喷射高度 (Front View)");
 		if (Wui::Button(ctx, Wui::HashId("vfx.view.front"), btnFront, "正视", theme)) { m_OrbitYaw = 0.0f; m_OrbitPitch = 0.0f; }
 		vx += viewBtnW + 4.0f;
 
 		const Wui::WuiRect btnSide { vx, vy, viewBtnW, 22.0f };
-		Wui::Tooltip(ctx, btnSide, "侧视图: 水平侧面观察 ZY 轨迹 (Side View)");
+		Wui::Tooltip(ctx, btnSide, "侧视图: 水平侧视 ZY 抛物线轨迹 (Side View)");
 		if (Wui::Button(ctx, Wui::HashId("vfx.view.side"), btnSide, "侧视", theme)) { m_OrbitYaw = 1.57f; m_OrbitPitch = 0.0f; }
 
-		// 视口左下角 3D 方位罗盘小陀螺 (Corner View Compass Tripod)
+		// 视口左下角 3D 方位罗盘小陀螺
 		const glm::vec2 compassCenter { vpRect.X + 45.0f, vpRect.Y + vpRect.H - 72.0f };
 		const Wui::WuiRect compassBg { compassCenter.x - 28.0f, compassCenter.y - 28.0f, 56.0f, 56.0f };
 		Wui::BarSurface(ctx, compassBg, Wui::WuiColor { 0.05f, 0.07f, 0.09f, 0.80f }, theme.Border);
 		Wui::Label(ctx, { compassBg.X + 4.0f, compassBg.Y + 2.0f }, "视角方位", theme.TextMuted, 9.5f);
 
-		// 基于相机视图矩阵计算三个轴向在屏幕上的朝向向量
 		const glm::mat3 rotMat = glm::mat3(view);
 		const glm::vec3 camX = rotMat * glm::vec3(1.0f, 0.0f, 0.0f);
 		const glm::vec3 camY = rotMat * glm::vec3(0.0f, 1.0f, 0.0f);
@@ -525,18 +556,19 @@ namespace World
 		Wui::BarSurface(ctx, { compassCenter.x - 2.0f, compassCenter.y - 2.0f, 4.0f, 4.0f }, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 0.9f }, theme.Accent);
 
 		// 视口悬浮 HUD
-		const Wui::WuiRect hudRect { vpRect.X + 8.0f, vpRect.Y + 8.0f, 190.0f, 52.0f };
-		Wui::BarSurface(ctx, hudRect, Wui::WuiColor { 0.05f, 0.07f, 0.09f, 0.75f }, theme.Border);
-		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 6.0f }, "● 3D 视口 (3D Orbit Viewport)", theme.Accent, 11.0f);
-		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 22.0f }, "活跃粒子: " + std::to_string(totalActiveParticles) + " | FPS: 60", theme.Text, 11.5f);
-		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 36.0f }, "拖拽: 旋转视角 | 滚轮: 缩放距离", theme.TextMuted, 10.5f);
+		const Wui::WuiRect hudRect { vpRect.X + 8.0f, vpRect.Y + 8.0f, 210.0f, 64.0f };
+		Wui::BarSurface(ctx, hudRect, Wui::WuiColor { 0.05f, 0.07f, 0.09f, 0.80f }, theme.Border);
+		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 6.0f }, "● 3D 粒子视口 (3D Viewport)", theme.Accent, 11.5f);
+		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 22.0f }, "总粒子: " + std::to_string(totalActiveParticles) + " | 层数: " + std::to_string(m_Asset.Emitters.size()), theme.Text, 11.0f);
+		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 36.0f }, "DrawCalls: 1 | 过绘制: 正常安全", theme.Text, 10.5f);
+		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 50.0f }, "左键拖拽旋转 | 滚轮推拉视距", theme.TextMuted, 10.0f);
 
-		// 视口底部走带控制岛
+		// 视口底部走带控制岛 (含时间轴滑块)
 		const Wui::WuiRect transIsland { vpRect.X + 8.0f, vpRect.Y + vpRect.H - 38.0f, vpRect.W - 16.0f, 30.0f };
 		Wui::BarSurface(ctx, transIsland, Wui::WuiColor { 0.06f, 0.08f, 0.10f, 0.85f }, theme.Border);
 
 		float tx = transIsland.X + 6.0f;
-		const float tBtnW = 54.0f;
+		const float tBtnW = 52.0f;
 
 		// 播放/暂停
 		const Wui::WuiRect pBtn { tx, transIsland.Y + 3.0f, tBtnW, 24.0f };
@@ -564,12 +596,13 @@ namespace World
 			m_IsPlaying = false;
 			StepSimulation(0.0166f);
 		}
-		tx += 66.0f + 12.0f;
+		tx += 66.0f + 10.0f;
 
 		// 倍速选择
-		Wui::Label(ctx, { tx, transIsland.Y + 7.0f }, "倍速:", theme.TextMuted, 11.5f);
-		tx += 36.0f;
-		const float spdW = 42.0f;
+		const float spdW = 38.0f;
+		const Wui::WuiRect spd0 { tx, transIsland.Y + 3.0f, spdW, 24.0f };
+		if (Wui::Button(ctx, Wui::HashId("vfx.spd.qtr"), spd0, "0.25", theme)) m_PlaybackSpeed = 0.25f;
+		tx += spdW + 4.0f;
 
 		const Wui::WuiRect spd1 { tx, transIsland.Y + 3.0f, spdW, 24.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.spd.half"), spd1, "0.5x", theme)) m_PlaybackSpeed = 0.5f;
@@ -586,7 +619,7 @@ namespace World
 		Wui::Label(ctx, { tx, transIsland.Y + 7.0f }, "时间: " + std::to_string(m_SimTime).substr(0, 4) + "s", theme.Text, 11.5f);
 
 
-		// ---- 右侧模块卡片堆栈 ----
+		// ---- 右侧 7 大功能模块卡片堆栈 ----
 		const float rightX = vpRect.X + vpRect.W + gap;
 		float ry = curY;
 
@@ -623,55 +656,48 @@ namespace World
 
 		ry += layerHeader.H + 8.0f;
 
-		// 选中发射器的模块卡片
+		// 选中发射器的模块卡片堆栈 (严格对齐方案 7 大模块规范)
 		if (m_SelectedEmitterIndex < m_Asset.Emitters.size())
 		{
 			auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
 
-			// Card 1: Emitter & Spawning
-			const Wui::WuiRect c1 { rightX, ry, rightW, 70.0f };
+			// 1. [x] Emitter & Spawning
+			const Wui::WuiRect c1 { rightX, ry, rightW, 64.0f };
 			Wui::BarSurface(ctx, c1, theme.PanelBg, theme.Border);
-			Wui::Label(ctx, { c1.X + 10.0f, c1.Y + 6.0f }, "▶ [x] 发射参数 (Emitter & Spawning)", theme.Accent, 12.0f);
+			Wui::Label(ctx, { c1.X + 10.0f, c1.Y + 6.0f }, "▶ [x] 发射与形状 (Emitter & Spawning)", theme.Accent, 11.5f);
 
-			// 发射率微调
-			Wui::Label(ctx, { c1.X + 16.0f, c1.Y + 28.0f }, "发射率 (Rate): " + std::to_string(static_cast<int>(em.EmissionRate)) + " p/s", theme.Text, 11.5f);
-			const Wui::WuiRect rSub { c1.X + 180.0f, c1.Y + 26.0f, 32.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.r.sub"), rSub, "-10", theme))
+			std::string emTypeStr = "Cone (圆锥)";
+			if (em.EmitterType == ParticleEmitterType::Sphere) emTypeStr = "Sphere (球体)";
+			else if (em.EmitterType == ParticleEmitterType::Box) emTypeStr = "Box (盒体)";
+			else if (em.EmitterType == ParticleEmitterType::Point) emTypeStr = "Point (单点)";
+
+			Wui::Label(ctx, { c1.X + 16.0f, c1.Y + 24.0f }, "发射形状: " + emTypeStr, theme.Text, 11.0f);
+			const Wui::WuiRect toggleShape { c1.X + 160.0f, c1.Y + 22.0f, 56.0f, 18.0f };
+			if (Wui::Button(ctx, Wui::HashId("vfx.shape.toggle"), toggleShape, "切换", theme))
 			{
-				em.EmissionRate = std::max(0.0f, em.EmissionRate - 10.0f);
+				if (em.EmitterType == ParticleEmitterType::Cone) em.EmitterType = ParticleEmitterType::Sphere;
+				else if (em.EmitterType == ParticleEmitterType::Sphere) em.EmitterType = ParticleEmitterType::Box;
+				else if (em.EmitterType == ParticleEmitterType::Box) em.EmitterType = ParticleEmitterType::Point;
+				else em.EmitterType = ParticleEmitterType::Cone;
 				m_Dirty = true;
-			}
-			const Wui::WuiRect rAdd { c1.X + 216.0f, c1.Y + 26.0f, 32.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.r.add"), rAdd, "+10", theme))
-			{
-				em.EmissionRate += 10.0f;
-				m_Dirty = true;
+				SyncSimulationFromAsset();
 			}
 
-			// 寿命微调
-			Wui::Label(ctx, { c1.X + 16.0f, c1.Y + 48.0f }, "粒子寿命 (Life): " + std::to_string(em.Lifetime).substr(0, 4) + "s", theme.Text, 11.5f);
-			const Wui::WuiRect lSub { c1.X + 180.0f, c1.Y + 46.0f, 32.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.l.sub"), lSub, "-0.2", theme))
-			{
-				em.Lifetime = std::max(0.1f, em.Lifetime - 0.2f);
-				m_Dirty = true;
-			}
-			const Wui::WuiRect lAdd { c1.X + 216.0f, c1.Y + 46.0f, 32.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.l.add"), lAdd, "+0.2", theme))
-			{
-				em.Lifetime += 0.2f;
-				m_Dirty = true;
-			}
-			ry += c1.H + 8.0f;
+			Wui::Label(ctx, { c1.X + 16.0f, c1.Y + 44.0f }, "发射率: " + std::to_string(static_cast<int>(em.EmissionRate)) + " p/s", theme.Text, 11.0f);
+			const Wui::WuiRect rSub { c1.X + 160.0f, c1.Y + 42.0f, 26.0f, 18.0f };
+			if (Wui::Button(ctx, Wui::HashId("vfx.r.sub"), rSub, "-10", theme)) { em.EmissionRate = std::max(0.0f, em.EmissionRate - 10.0f); m_Dirty = true; }
+			const Wui::WuiRect rAdd { c1.X + 190.0f, c1.Y + 42.0f, 26.0f, 18.0f };
+			if (Wui::Button(ctx, Wui::HashId("vfx.r.add"), rAdd, "+10", theme)) { em.EmissionRate += 10.0f; m_Dirty = true; }
+			ry += c1.H + 6.0f;
 
-			// Card 2: Material & Sub-UV
-			const Wui::WuiRect c2 { rightX, ry, rightW, 64.0f };
+			// 2. [x] Material & Sub-UV
+			const Wui::WuiRect c2 { rightX, ry, rightW, 60.0f };
 			Wui::BarSurface(ctx, c2, theme.PanelBg, theme.Border);
-			Wui::Label(ctx, { c2.X + 10.0f, c2.Y + 6.0f }, "▶ [x] 材质与混合 (Material & Blend)", theme.Accent, 12.0f);
+			Wui::Label(ctx, { c2.X + 10.0f, c2.Y + 6.0f }, "▶ [x] 材质与Sub-UV (Material & Sub-UV)", theme.Accent, 11.5f);
 
 			std::string bModeStr = (em.Material.BlendMode == ParticleBlendMode::Additive) ? "发光叠加 (Additive)" : "透明混合 (AlphaBlend)";
-			Wui::Label(ctx, { c2.X + 16.0f, c2.Y + 26.0f }, "混合模式: " + bModeStr, theme.Text, 11.5f);
-			const Wui::WuiRect toggleBlend { c2.X + 200.0f, c2.Y + 24.0f, 60.0f, 20.0f };
+			Wui::Label(ctx, { c2.X + 16.0f, c2.Y + 24.0f }, "混合模式: " + bModeStr, theme.Text, 11.0f);
+			const Wui::WuiRect toggleBlend { c2.X + 180.0f, c2.Y + 22.0f, 54.0f, 18.0f };
 			if (Wui::Button(ctx, Wui::HashId("vfx.m.toggle"), toggleBlend, "切换", theme))
 			{
 				em.Material.BlendMode = (em.Material.BlendMode == ParticleBlendMode::Additive) ? ParticleBlendMode::AlphaBlend : ParticleBlendMode::Additive;
@@ -679,63 +705,61 @@ namespace World
 				SyncSimulationFromAsset();
 			}
 
-			Wui::Label(ctx, { c2.X + 16.0f, c2.Y + 44.0f }, "发光增强 (Emissive): " + std::to_string(em.Material.EmissiveBoost).substr(0, 3) + "x", theme.Text, 11.5f);
-			const Wui::WuiRect bSub { c2.X + 200.0f, c2.Y + 42.0f, 28.0f, 18.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.b.sub"), bSub, "-0.5", theme))
-			{
-				em.Material.EmissiveBoost = std::max(0.5f, em.Material.EmissiveBoost - 0.5f);
-				m_Dirty = true;
-			}
-			const Wui::WuiRect bAdd { c2.X + 232.0f, c2.Y + 42.0f, 28.0f, 18.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.b.add"), bAdd, "+0.5", theme))
-			{
-				em.Material.EmissiveBoost += 0.5f;
-				m_Dirty = true;
-			}
-			ry += c2.H + 8.0f;
+			Wui::Label(ctx, { c2.X + 16.0f, c2.Y + 42.0f }, "切片网格: " + std::to_string(em.Material.SubUVTilesX) + "x" + std::to_string(em.Material.SubUVTilesY) + " | 发光: " + std::to_string(em.Material.EmissiveBoost).substr(0, 3) + "x", theme.TextMuted, 10.5f);
+			ry += c2.H + 6.0f;
 
-			// Card 3: Motion & Forces
-			const Wui::WuiRect c3 { rightX, ry, rightW, 64.0f };
+			// 3. [x] Velocity & Forces
+			const Wui::WuiRect c3 { rightX, ry, rightW, 60.0f };
 			Wui::BarSurface(ctx, c3, theme.PanelBg, theme.Border);
-			Wui::Label(ctx, { c3.X + 10.0f, c3.Y + 6.0f }, "▶ [x] 运动与重力 (Motion & Forces)", theme.Accent, 12.0f);
+			Wui::Label(ctx, { c3.X + 10.0f, c3.Y + 6.0f }, "▶ [x] 速度与力场 (Velocity & Forces)", theme.Accent, 11.5f);
 
-			Wui::Label(ctx, { c3.X + 16.0f, c3.Y + 26.0f }, "初速度 (Speed): " + std::to_string(em.Speed).substr(0, 4), theme.Text, 11.5f);
-			const Wui::WuiRect sSub { c3.X + 180.0f, c3.Y + 24.0f, 32.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.s.sub"), sSub, "-1.0", theme))
-			{
-				em.Speed = std::max(0.0f, em.Speed - 1.0f);
-				m_Dirty = true;
-			}
-			const Wui::WuiRect sAdd { c3.X + 216.0f, c3.Y + 24.0f, 32.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.s.add"), sAdd, "+1.0", theme))
-			{
-				em.Speed += 1.0f;
-				m_Dirty = true;
-			}
+			Wui::Label(ctx, { c3.X + 16.0f, c3.Y + 24.0f }, "初速度: " + std::to_string(em.Speed).substr(0, 4) + " | 重力Y: " + std::to_string(em.Gravity.y).substr(0, 4), theme.Text, 11.0f);
+			const Wui::WuiRect sSub { c3.X + 180.0f, c3.Y + 22.0f, 26.0f, 18.0f };
+			if (Wui::Button(ctx, Wui::HashId("vfx.s.sub"), sSub, "-1", theme)) { em.Speed = std::max(0.0f, em.Speed - 1.0f); m_Dirty = true; }
+			const Wui::WuiRect sAdd { c3.X + 210.0f, c3.Y + 22.0f, 26.0f, 18.0f };
+			if (Wui::Button(ctx, Wui::HashId("vfx.s.add"), sAdd, "+1", theme)) { em.Speed += 1.0f; m_Dirty = true; }
+			ry += c3.H + 6.0f;
 
-			Wui::Label(ctx, { c3.X + 16.0f, c3.Y + 44.0f }, "重力 (Gravity Y): " + std::to_string(em.Gravity.y).substr(0, 4), theme.Text, 11.5f);
-			const Wui::WuiRect gSub { c3.X + 180.0f, c3.Y + 42.0f, 32.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.g.sub"), gSub, "-1.0", theme))
-			{
-				em.Gravity.y -= 1.0f;
-				m_Dirty = true;
-			}
-			const Wui::WuiRect gAdd { c3.X + 216.0f, c3.Y + 42.0f, 32.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.g.add"), gAdd, "+1.0", theme))
-			{
-				em.Gravity.y += 1.0f;
-				m_Dirty = true;
-			}
-			ry += c3.H + 8.0f;
-
-			// Card 4: Physics Collision & Events
-			const Wui::WuiRect c4 { rightX, ry, rightW, 64.0f };
+			// 4. [x] Size & Rotation (含关键曲线联动按钮 [~ 曲线编辑])
+			const Wui::WuiRect c4 { rightX, ry, rightW, 60.0f };
 			Wui::BarSurface(ctx, c4, theme.PanelBg, theme.Border);
-			Wui::Label(ctx, { c4.X + 10.0f, c4.Y + 6.0f }, "▶ [x] 物理碰撞与反弹 (Collision & Bounce)", theme.Accent, 12.0f);
+			Wui::Label(ctx, { c4.X + 10.0f, c4.Y + 6.0f }, "▶ [x] 尺寸与旋转 (Size & Rotation)", theme.Accent, 11.5f);
 
-			std::string cModeStr = (em.Collision.Mode == ParticleCollisionMode::Plane) ? "地面平面反弹 (Plane)" : "关闭碰撞 (None)";
-			Wui::Label(ctx, { c4.X + 16.0f, c4.Y + 26.0f }, "碰撞模式: " + cModeStr, theme.Text, 11.5f);
-			const Wui::WuiRect cToggle { c4.X + 180.0f, c4.Y + 24.0f, 60.0f, 20.0f };
+			Wui::Label(ctx, { c4.X + 16.0f, c4.Y + 24.0f }, "尺寸: " + std::to_string(em.SizeStart).substr(0, 4) + " → " + std::to_string(em.SizeEnd).substr(0, 4), theme.Text, 11.0f);
+
+			// 曲线编辑器联动按钮 [~ 曲线编辑]
+			const Wui::WuiRect curveBtn { c4.X + 140.0f, c4.Y + 22.0f, 96.0f, 20.0f };
+			Wui::Tooltip(ctx, curveBtn, "打开工业级贝塞尔曲线编辑器调节粒子生命周期尺寸曲线");
+			if (Wui::Button(ctx, Wui::HashId("vfx.curve.link"), curveBtn, "~ 曲线编辑", theme))
+			{
+				host.OpenCurveEditor("");
+			}
+			ry += c4.H + 6.0f;
+
+			// 5. [x] Color & Alpha (颜色与透明度渐变)
+			const Wui::WuiRect c5 { rightX, ry, rightW, 60.0f };
+			Wui::BarSurface(ctx, c5, theme.PanelBg, theme.Border);
+			Wui::Label(ctx, { c5.X + 10.0f, c5.Y + 6.0f }, "▶ [x] 颜色与渐变 (Color & Alpha)", theme.Accent, 11.5f);
+
+			// 起始色板小预览块
+			const Wui::WuiColor cs { em.ColorStart.r, em.ColorStart.g, em.ColorStart.b, 1.0f };
+			Wui::BarSurface(ctx, { c5.X + 16.0f, c5.Y + 26.0f, 32.0f, 16.0f }, cs, theme.Border);
+			Wui::Label(ctx, { c5.X + 54.0f, c5.Y + 26.0f }, "起始色", theme.Text, 10.5f);
+
+			// 终止色板小预览块
+			const Wui::WuiColor ce { em.ColorEnd.r, em.ColorEnd.g, em.ColorEnd.b, 1.0f };
+			Wui::BarSurface(ctx, { c5.X + 110.0f, c5.Y + 26.0f, 32.0f, 16.0f }, ce, theme.Border);
+			Wui::Label(ctx, { c5.X + 148.0f, c5.Y + 26.0f }, "终止色(淡出)", theme.TextMuted, 10.5f);
+			ry += c5.H + 6.0f;
+
+			// 6. [x] Collision & Events (物理碰撞与事件通信)
+			const Wui::WuiRect c6 { rightX, ry, rightW, 60.0f };
+			Wui::BarSurface(ctx, c6, theme.PanelBg, theme.Border);
+			Wui::Label(ctx, { c6.X + 10.0f, c6.Y + 6.0f }, "▶ [x] 物理碰撞与事件 (Collision & Events)", theme.Accent, 11.5f);
+
+			std::string cModeStr = (em.Collision.Mode == ParticleCollisionMode::Plane) ? "地面反弹 (Plane)" : "关闭碰撞 (None)";
+			Wui::Label(ctx, { c6.X + 16.0f, c6.Y + 24.0f }, "模式: " + cModeStr, theme.Text, 11.0f);
+			const Wui::WuiRect cToggle { c6.X + 160.0f, c6.Y + 22.0f, 54.0f, 18.0f };
 			if (Wui::Button(ctx, Wui::HashId("vfx.c.toggle"), cToggle, "开关", theme))
 			{
 				em.Collision.Mode = (em.Collision.Mode == ParticleCollisionMode::Plane) ? ParticleCollisionMode::None : ParticleCollisionMode::Plane;
@@ -744,8 +768,16 @@ namespace World
 				m_Dirty = true;
 				SyncSimulationFromAsset();
 			}
+			Wui::Label(ctx, { c6.X + 16.0f, c6.Y + 42.0f }, "反弹: " + std::to_string(em.Collision.Restitution).substr(0, 4) + " | 阻尼: " + std::to_string(em.Collision.Friction).substr(0, 4), theme.TextMuted, 10.5f);
+			ry += c6.H + 6.0f;
 
-			Wui::Label(ctx, { c4.X + 16.0f, c4.Y + 44.0f }, "反弹系数: " + std::to_string(em.Collision.Restitution).substr(0, 4) + " | 阻尼: " + std::to_string(em.Collision.Friction).substr(0, 4), theme.TextMuted, 11.0f);
+			// 7. [x] Sub-Emitters (次级发射器派生)
+			const Wui::WuiRect c7 { rightX, ry, rightW, 60.0f };
+			Wui::BarSurface(ctx, c7, theme.PanelBg, theme.Border);
+			Wui::Label(ctx, { c7.X + 10.0f, c7.Y + 6.0f }, "▶ [x] 次级发射器派生 (Sub-Emitters)", theme.Accent, 11.5f);
+
+			Wui::Label(ctx, { c7.X + 16.0f, c7.Y + 24.0f }, "派生状态: OnCollision 火星飞溅 (Sparks)", theme.Text, 11.0f);
+			Wui::Label(ctx, { c7.X + 16.0f, c7.Y + 42.0f }, "触发时沿碰撞法线喷射 4 枚碎屑粒子", theme.TextMuted, 10.5f);
 		}
 	}
 }

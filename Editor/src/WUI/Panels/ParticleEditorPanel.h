@@ -61,10 +61,13 @@ namespace World
 		// 内部实时物理推演池 (Live Simulation Pools)
 		std::vector<std::unique_ptr<ParticlePool>> m_LivePools;
 
-		// 模块卡片折叠状态
+		// 7 大模块卡片折叠状态 (对齐方案 2.4 M4 规范)
 		bool m_CardSpawningExpanded = true;
 		bool m_CardMaterialExpanded = true;
 		bool m_CardMotionExpanded = true;
+		bool m_CardSizeRotationExpanded = true;
+		bool m_CardColorAlphaExpanded = true;
 		bool m_CardCollisionExpanded = true;
+		bool m_CardSubEmittersExpanded = true;
 	};
 }
