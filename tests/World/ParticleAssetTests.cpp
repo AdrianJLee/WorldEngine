@@ -229,6 +229,33 @@ static void TestParticleAssetNewDynamicsAndBursts()
 	std::cout << "[PASS] TestParticleAssetNewDynamicsAndBursts\n";
 }
 
+static void TestParticleAssetShowcasePresets3D()
+{
+	const char* presetFiles[] = {
+		"tests/fixtures/content/vfx/flame_tornado_3d.wvfx",
+		"tests/fixtures/content/vfx/lightning_plasma_beam_3d.wvfx",
+		"tests/fixtures/content/vfx/orbital_magic_shield_3d.wvfx",
+		"tests/fixtures/content/vfx/meteor_impact_explosion_3d.wvfx",
+		"tests/fixtures/content/vfx/blizzard_frost_nova_3d.wvfx"
+	};
+
+	for (const char* file : presetFiles)
+	{
+		ParticleAsset asset;
+		bool ok = ParticleAssetSerializer::Deserialize(file, asset);
+		assert(ok && "Preset file must deserialize successfully");
+		assert(!asset.Name.empty());
+		assert(!asset.Emitters.empty());
+		for (const auto& em : asset.Emitters)
+		{
+			assert(!em.Name.empty());
+			assert(em.MaxParticles > 0);
+		}
+	}
+
+	std::cout << "[PASS] TestParticleAssetShowcasePresets3D\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -238,6 +265,7 @@ int main()
 	TestParticleAssetBackwardCompatibilitySingleEmitter();
 	TestParticleAssetRegistry();
 	TestParticleAssetNewDynamicsAndBursts();
+	TestParticleAssetShowcasePresets3D();
 
 	std::cout << "All WorldParticleAssetTests passed successfully.\n";
 	return 0;

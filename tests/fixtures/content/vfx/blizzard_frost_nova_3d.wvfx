@@ -1,0 +1,91 @@
+FormatVersion: 1
+Name: BlizzardFrostNova3D
+Guid: 3005
+Seed: 9999
+Duration: 0
+Looping: true
+WarmupTime: 0.5
+LOD:
+  CullDistance: 70
+  PauseWhenOffscreen: true
+Emitters:
+  - Name: IceCrystalShockwave
+    Enabled: true
+    MaxParticles: 500
+    Lifetime: 1.8
+    EmissionRate: 120
+    Emitter:
+      Type: Ring
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 4.0
+    Motion:
+      Speed: 9.0
+      SpeedVariance: 1.5
+      Gravity: [0, -0.2, 0]
+      LinearDrag: 0.8
+    Evolution:
+      SizeStart: 0.35
+      SizeEnd: 0.08
+      ColorStart: [0.6, 0.9, 1.0, 1.0]
+      ColorEnd: [0.1, 0.4, 0.85, 0.0]
+    Collision:
+      Mode: None
+  - Name: FreezingFogTurbulence
+    Enabled: true
+    MaxParticles: 350
+    Lifetime: 3.2
+    EmissionRate: 60
+    Emitter:
+      Type: Cylinder
+      LockToXY: false
+    Material:
+      BlendMode: AlphaBlend
+      FacingMode: Billboard
+      EmissiveBoost: 1.2
+      SoftParticle: true
+      FadeDistance: 0.7
+    Motion:
+      Speed: 2.5
+      SpeedVariance: 1.0
+      Gravity: [0, -0.4, 0]
+      LinearDrag: 0.4
+      VortexStrength: 1.8
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 2.2
+      TurbulenceFrequency: 1.8
+    Evolution:
+      SizeStart: 0.6
+      SizeEnd: 2.8
+      ColorStart: [0.75, 0.88, 0.98, 0.65]
+      ColorEnd: [0.35, 0.55, 0.85, 0.0]
+    Collision:
+      Mode: None
+  - Name: DriftingSnowEmbers
+    Enabled: true
+    MaxParticles: 450
+    Lifetime: 4.0
+    EmissionRate: 70
+    Emitter:
+      Type: Box
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: Billboard
+      EmissiveBoost: 2.8
+    Motion:
+      Speed: 1.5
+      SpeedVariance: 0.8
+      Gravity: [0, -1.2, 0]
+      LinearDrag: 0.1
+      TurbulenceStrength: 1.5
+      TurbulenceFrequency: 2.0
+    Evolution:
+      SizeStart: 0.12
+      SizeEnd: 0.04
+      ColorStart: [0.85, 0.95, 1.0, 1.0]
+      ColorEnd: [0.4, 0.7, 1.0, 0.0]
+    Collision:
+      Mode: None

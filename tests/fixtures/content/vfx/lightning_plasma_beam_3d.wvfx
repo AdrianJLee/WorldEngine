@@ -1,0 +1,89 @@
+FormatVersion: 1
+Name: LightningPlasmaBeam3D
+Guid: 3002
+Seed: 2048
+Duration: 4.0
+Looping: true
+WarmupTime: 0.0
+LOD:
+  CullDistance: 100
+  PauseWhenOffscreen: true
+Emitters:
+  - Name: BeamCore
+    Enabled: true
+    MaxParticles: 500
+    Lifetime: 0.35
+    EmissionRate: 200
+    Emitter:
+      Type: Line
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 6.0
+    Motion:
+      Speed: 25.0
+      SpeedVariance: 2.0
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.0
+    Evolution:
+      SizeStart: 0.3
+      SizeEnd: 0.1
+      ColorStart: [0.3, 0.7, 1.0, 1.0]
+      ColorEnd: [0.1, 0.3, 0.9, 0.0]
+    Collision:
+      Mode: None
+  - Name: SpiralDischarge
+    Enabled: true
+    MaxParticles: 400
+    Lifetime: 0.5
+    EmissionRate: 120
+    Emitter:
+      Type: Cylinder
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 4.5
+    Motion:
+      Speed: 15.0
+      SpeedVariance: 4.0
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.1
+      VortexStrength: 8.0
+      VortexAxis: [0, 0, 1]
+      TurbulenceStrength: 3.5
+      TurbulenceFrequency: 4.0
+    Evolution:
+      SizeStart: 0.18
+      SizeEnd: 0.02
+      ColorStart: [0.6, 0.85, 1.0, 1.0]
+      ColorEnd: [0.2, 0.4, 1.0, 0.0]
+    Collision:
+      Mode: None
+  - Name: ImpactSparks
+    Enabled: true
+    MaxParticles: 300
+    Lifetime: 0.8
+    EmissionRate: 80
+    Emitter:
+      Type: Sphere
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 5.0
+    Motion:
+      Speed: 12.0
+      SpeedVariance: 6.0
+      Gravity: [0, -9.8, 0]
+      LinearDrag: 0.3
+    Evolution:
+      SizeStart: 0.12
+      SizeEnd: 0.01
+      ColorStart: [0.8, 0.95, 1.0, 1.0]
+      ColorEnd: [0.1, 0.5, 1.0, 0.0]
+    Collision:
+      Mode: Plane
+      Restitution: 0.6
+      Friction: 0.15

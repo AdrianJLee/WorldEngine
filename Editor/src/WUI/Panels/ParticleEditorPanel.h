@@ -19,6 +19,86 @@ namespace World
 		Code = 1
 	};
 
+	enum class ParticleViewportDisplayMode : uint8_t
+	{
+		Lit = 0,
+		Unlit = 1,
+		Heatmap = 2,
+		Bounds = 3
+	};
+
+	enum class CurveTarget : uint8_t
+	{
+		Size = 0,
+		Alpha = 1,
+		Speed = 2
+	};
+
+	enum class ParticleGizmoHandleId : int
+	{
+		None = -1,
+		ConeBaseRadius = 1,
+		ConeTopAngle = 2,
+		ConeHeight = 3,
+		SphereRadiusX = 10,
+		SphereRadiusY = 11,
+		SphereRadiusZ = 12,
+		BoxExtentPosX = 20,
+		BoxExtentNegX = 21,
+		BoxExtentPosY = 22,
+		BoxExtentNegY = 23,
+		BoxExtentPosZ = 24,
+		BoxExtentNegZ = 25
+	};
+
+	// 每发射器高级扩展特征状态 (Niagara / VFX Graph 级模块化参数)
+	struct EmitterExtendedState
+	{
+		// 模块 1: 生成与生命周期拓展
+		float LifetimeVariance = 0.2f;
+
+		// 模块 2: 空间形状与位置拓展
+		float ConeAngle = 30.0f;
+		float ConeRadius = 0.5f;
+		float ConeHeight = 1.5f;
+		float SphereRadius = 1.0f;
+		glm::vec3 BoxExtents { 1.0f, 1.0f, 1.0f };
+
+		// 模块 3: 动力学、流体与扰动场拓展
+		float CurlNoiseStrength = 0.0f;
+		float CurlNoiseFrequency = 1.0f;
+		uint32_t CurlNoiseOctaves = 1;
+
+		glm::vec3 PointAttractorCenter { 0.0f, 1.0f, 0.0f };
+		float PointAttractorStrength = 0.0f;
+		float PointAttractorRadius = 5.0f;
+
+		// 模块 4: 初始旋转与角速度
+		float InitialRotationDeg = 0.0f;
+		float AngularVelocityDeg = 0.0f;
+
+		// 模块 6: 多元渲染器拓展 (Ribbon, Mesh, Light)
+		bool RibbonEnabled = false;
+		float RibbonLength = 1.0f;
+		float RibbonWidth = 0.1f;
+
+		bool MeshEnabled = false;
+		int MeshType = 0; // 0=Cube, 1=Pyramid, 2=Sphere
+
+		bool LightEnabled = false;
+		float LightRadius = 3.0f;
+		float LightIntensity = 1.0f;
+
+		// 模块挂载与折叠状态
+		bool ModuleBurstEnabled = true;
+		bool ModuleCurlNoiseEnabled = false;
+		bool ModuleAttractorEnabled = false;
+		bool ModuleRibbonEnabled = false;
+		bool ModuleMeshEnabled = false;
+		bool ModuleLightEnabled = false;
+		bool OutlinerModulesExpanded = false;
+	};
+
 	class ParticleEditorPanel final : public EditorPanel
 	{
 	public:
@@ -26,7 +106,7 @@ namespace World
 		~ParticleEditorPanel() override;
 
 		const char* Id() const override { return "particle_editor"; }
-		const char* Title() const override { return "视觉特效编辑器 (VFX System Editor)"; }
+		const char* Title() const override { return "视觉特效系统 (WorldVFX Studio 2.0)"; }
 
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
@@ -36,7 +116,21 @@ namespace World
 		void SaveAsset();
 		void NewAsset();
 
-		// 商业级预设库开箱即用 (Industrial Preset Library)
+		// 撤销 / 重做事务历史 (Undo / Redo)
+		void PushUndoSnapshot();
+		void Undo();
+		void Redo();
+		bool CanUndo() const noexcept { return !m_UndoStack.empty(); }
+		bool CanRedo() const noexcept { return !m_RedoStack.empty(); }
+
+		// 5 大高水准官方 3D 特效案例集 (Industrial 3D Showcase Presets)
+		void LoadPresetFlameTornado3D();
+		void LoadPresetLightningPlasmaBeam3D();
+		void LoadPresetOrbitalMagicShield3D();
+		void LoadPresetMeteorImpactExplosion3D();
+		void LoadPresetBlizzardFrostNova3D();
+
+		// 经典预设保持兼容
 		void LoadPresetCampfire();
 		void LoadPresetSparksBurst();
 		void LoadPresetSmokePlume();
@@ -44,6 +138,17 @@ namespace World
 		void LoadPresetMagicPortal();
 		void LoadPresetEnergyBeam();
 		void LoadPreset(const std::string& presetName);
+
+		// 发射器大纲管理核心操作 (Outliner Operations)
+		void AddEmitterFromTemplate(const std::string& templateType);
+		void CloneSelectedEmitter();
+		void DeleteSelectedEmitter();
+		void MoveEmitterUp();
+		void MoveEmitterDown();
+
+		// 视口相机与空间聚焦操作 (Camera Navigation & Focus)
+		void ResetCamera();
+		void FocusSelectedEmitter();
 
 		void ApplyCodeToAsset();
 		void SyncCodeFromAsset();
@@ -59,7 +164,20 @@ namespace World
 		void StepSimulation(float dt);
 		void EnsurePerEmitterState();
 		bool IsEmitterActive(size_t index) const;
+		bool IsEmitterLocked(size_t index) const;
 		void ScrubToTime(float time);
+
+		// 四分区布局子渲染函数
+		void RenderTopBar(Wui::WuiContext& ctx, const Wui::WuiRect& barRect, const Wui::WuiTheme& theme, PanelHost& host);
+		void RenderOutliner(Wui::WuiContext& ctx, const Wui::WuiRect& outlinerRect, const Wui::WuiTheme& theme);
+		void RenderViewport(Wui::WuiContext& ctx, const Wui::WuiRect& vpRect, const Wui::WuiTheme& theme, PanelHost& host);
+		void RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRect& timelineRect, const Wui::WuiTheme& theme, PanelHost& host);
+		void RenderInspector(Wui::WuiContext& ctx, const Wui::WuiRect& inspectorRect, const Wui::WuiTheme& theme, PanelHost& host);
+		void RenderContextMenu(Wui::WuiContext& ctx, const Wui::WuiTheme& theme);
+
+		// 视口定向万向节与曲线工作台辅助渲染
+		void RenderOrientationGimbal(Wui::WuiContext& ctx, const Wui::WuiRect& vpRect, const glm::mat4& viewMat, const Wui::WuiTheme& theme);
+		void RenderInteractiveCurveWorkbench(Wui::WuiContext& ctx, const Wui::WuiRect& canvasRect, const Wui::WuiTheme& theme);
 
 		static std::string s_PendingOpenPath;
 		std::string m_LoadedPath;
@@ -69,10 +187,30 @@ namespace World
 		std::vector<std::string> m_AvailableAssets;
 		size_t m_SelectedEmitterIndex = 0;
 
+		// 事务快照撤销/重做栈
+		std::vector<ParticleAsset> m_UndoStack;
+		std::vector<ParticleAsset> m_RedoStack;
+		std::vector<std::vector<EmitterExtendedState>> m_UndoExtendedStack;
+		std::vector<std::vector<EmitterExtendedState>> m_RedoExtendedStack;
+
 		ParticleEditorViewMode m_ViewMode = ParticleEditorViewMode::Visual;
 		std::string m_CodeBuffer;
 		float m_CodeScrollY = 0.0f;
 		int m_SelectedCodeLine = -1;
+
+		// 现代多分区布局与 Splitters 尺寸 (Outliner 拓宽至 270px 消除截字)
+		float m_OutlinerWidth = 270.0f;
+		float m_TimelineHeight = 220.0f;
+		float m_InspectorWidth = 340.0f;
+
+		// 左侧大纲与搜索过滤
+		std::string m_FilterText;
+		float m_OutlinerScrollY = 0.0f;
+
+		// 就地重命名状态 (Inline Rename)
+		int m_RenamingEmitterIndex = -1;
+		char m_RenameBuffer[64] = {};
+		bool m_NewEmitterMenuOpen = false;
 
 		// 3D 自由轨道相机状态
 		float m_CameraDistance = 6.0f;
@@ -81,7 +219,18 @@ namespace World
 		glm::vec3 m_CameraFocus { 0.0f, 1.0f, 0.0f };
 		glm::vec3 m_TargetCameraFocus { 0.0f, 1.0f, 0.0f };
 		bool m_IsOrbiting = false;
+		bool m_IsPanning = false;
 		glm::vec2 m_LastMousePos { 0.0f };
+
+		// 视口显示模式与直接操纵 Gizmo
+		ParticleViewportDisplayMode m_DisplayMode = ParticleViewportDisplayMode::Lit;
+		bool m_HeatmapMode = false;
+		bool m_BoundsMode = false;
+		int m_HoveredGizmoHandle = -1;
+		int m_ActiveGizmoHandle = -1;
+		bool m_IsDraggingGizmo = false;
+		float m_GizmoDragInitialParam = 0.0f;
+		glm::vec2 m_GizmoDragStartPos { 0.0f };
 
 		// 走带控制状态机 & 时间轴 Scrubbing
 		bool m_IsPlaying = true;
@@ -89,30 +238,52 @@ namespace World
 		float m_SimTime = 0.0f;
 		float m_TimelineDuration = 5.0f;
 		bool m_IsScrubbing = false;
+		bool m_TimelineCurvesExpanded = true; // 默认展开内置贝塞尔工作台
 
-		// 视口 Overdraw 热力图透视模式 (Heatmap Mode)
-		bool m_HeatmapMode = false;
+		// 交互式曲线工作台核心状态 (Curve Workbench Interactive State)
+		CurveTarget m_ActiveCurveTarget = CurveTarget::Size;
+		int m_SelectedKeyframeIndex = 0;
+		bool m_IsDraggingKeyframe = false;
+		bool m_IsDraggingInHandle = false;
+		bool m_IsDraggingOutHandle = false;
+		glm::vec2 m_DragStartMouse { 0.0f };
+		float m_DragKeyframeStartTime = 0.0f;
+		float m_DragKeyframeStartVal = 0.0f;
+		bool m_HoveredInHandle = false;
+		bool m_HoveredOutHandle = false;
+		int m_HoveredKeyframeIndex = -1;
 
 		// 内部实时物理推演池 (Live Simulation Pools)
 		std::vector<std::unique_ptr<ParticlePool>> m_LivePools;
 
-		// 每发射器独立状态 (Solo/Mute, ColorGradient, SizeCurve)
+		// 每发射器独立状态 (Solo/Mute/Lock, ColorGradient, Curves, ExtendedState)
 		std::vector<bool> m_EmitterSolo;
 		std::vector<bool> m_EmitterMute;
+		std::vector<bool> m_EmitterLocked;
 		std::vector<ColorGradient> m_EmitterGradients;
 		std::vector<CubicBezierCurve> m_EmitterSizeCurves;
+		std::vector<CubicBezierCurve> m_EmitterAlphaCurves;
+		std::vector<CubicBezierCurve> m_EmitterSpeedCurves;
 		std::vector<std::string> m_EmitterCurveType;
+		std::vector<EmitterExtendedState> m_EmitterExtended;
 
-		// 右侧检视区滚动状态
+		// 右键上下文菜单与剪贴板
+		bool m_ContextMenuOpen = false;
+		glm::vec2 m_ContextMenuPos { 0.0f };
+		size_t m_ContextMenuTargetEmitter = 0;
+		int m_ContextMenuTargetCard = -1;
+		ParticleEmitterLayer m_CopiedEmitter;
+		bool m_HasCopiedEmitter = false;
+
+		// 右侧检视区滚动与模块卡片状态
 		float m_InspectorScrollY = 0.0f;
-
-		// 7 大模块卡片折叠状态 (对齐方案 2.4 M4 规范)
 		bool m_CardSpawningExpanded = true;
-		bool m_CardMaterialExpanded = true;
-		bool m_CardMotionExpanded = true;
+		bool m_CardShapeExpanded = true;
+		bool m_CardForcesExpanded = true;
 		bool m_CardSizeRotationExpanded = true;
 		bool m_CardColorAlphaExpanded = true;
+		bool m_CardRenderersExpanded = true;
 		bool m_CardCollisionExpanded = true;
-		bool m_CardSubEmittersExpanded = true;
+		bool m_AddModulePopupOpen = false;
 	};
 }

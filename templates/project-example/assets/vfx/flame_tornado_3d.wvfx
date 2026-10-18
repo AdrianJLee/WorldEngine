@@ -1,0 +1,97 @@
+FormatVersion: 1
+Name: FlameTornado3D
+Guid: 3001
+Seed: 1337
+Duration: 0
+Looping: true
+WarmupTime: 0.5
+LOD:
+  CullDistance: 80
+  PauseWhenOffscreen: true
+Emitters:
+  - Name: VortexCore
+    Enabled: true
+    MaxParticles: 600
+    Lifetime: 2.2
+    EmissionRate: 150
+    Emitter:
+      Type: Cone
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 3.5
+    Motion:
+      Speed: 6.5
+      SpeedVariance: 1.5
+      Gravity: [0, 8.0, 0]
+      LinearDrag: 0.2
+      VortexStrength: 4.5
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 2.0
+      TurbulenceFrequency: 1.8
+    Evolution:
+      SizeStart: 0.45
+      SizeEnd: 0.05
+      ColorStart: [1.0, 0.65, 0.15, 1.0]
+      ColorEnd: [0.95, 0.1, 0.0, 0.0]
+    Collision:
+      Mode: None
+  - Name: SwirlingEmbers
+    Enabled: true
+    MaxParticles: 400
+    Lifetime: 2.8
+    EmissionRate: 80
+    Emitter:
+      Type: Cylinder
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 5.0
+    Motion:
+      Speed: 8.0
+      SpeedVariance: 2.5
+      Gravity: [0, 5.0, 0]
+      LinearDrag: 0.1
+      VortexStrength: 6.0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 2.5
+      TurbulenceFrequency: 2.2
+    Evolution:
+      SizeStart: 0.15
+      SizeEnd: 0.02
+      ColorStart: [1.0, 0.9, 0.4, 1.0]
+      ColorEnd: [1.0, 0.3, 0.0, 0.0]
+    Collision:
+      Mode: None
+  - Name: RisingSmokeColumn
+    Enabled: true
+    MaxParticles: 250
+    Lifetime: 3.5
+    EmissionRate: 35
+    Emitter:
+      Type: Cone
+      LockToXY: false
+    Material:
+      BlendMode: AlphaBlend
+      FacingMode: Billboard
+      EmissiveBoost: 1.0
+      SoftParticle: true
+      FadeDistance: 0.8
+    Motion:
+      Speed: 4.0
+      SpeedVariance: 1.0
+      Gravity: [0, 6.0, 0]
+      LinearDrag: 0.6
+      VortexStrength: 2.0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 1.8
+      TurbulenceFrequency: 1.2
+    Evolution:
+      SizeStart: 0.5
+      SizeEnd: 2.5
+      ColorStart: [0.25, 0.22, 0.20, 0.6]
+      ColorEnd: [0.08, 0.08, 0.08, 0.0]
+    Collision:
+      Mode: None

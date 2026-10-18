@@ -1,0 +1,95 @@
+FormatVersion: 1
+Name: MeteorImpactExplosion3D
+Guid: 3004
+Seed: 7777
+Duration: 3.5
+Looping: false
+WarmupTime: 0.0
+LOD:
+  CullDistance: 120
+  PauseWhenOffscreen: true
+Emitters:
+  - Name: GroundShockwaveRing
+    Enabled: true
+    MaxParticles: 350
+    Lifetime: 1.2
+    EmissionRate: 0
+    Bursts:
+      - { Time: 0.0, Count: 250 }
+    Emitter:
+      Type: Ring
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: Horizontal
+      EmissiveBoost: 4.0
+    Motion:
+      Speed: 14.0
+      SpeedVariance: 2.0
+      Gravity: [0, -0.5, 0]
+      LinearDrag: 1.8
+    Evolution:
+      SizeStart: 0.5
+      SizeEnd: 3.5
+      ColorStart: [1.0, 0.8, 0.3, 1.0]
+      ColorEnd: [0.8, 0.1, 0.0, 0.0]
+    Collision:
+      Mode: None
+  - Name: BouncingDebrisSparks
+    Enabled: true
+    MaxParticles: 400
+    Lifetime: 2.2
+    EmissionRate: 0
+    Bursts:
+      - { Time: 0.02, Count: 220 }
+    Emitter:
+      Type: Cone
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 5.5
+    Motion:
+      Speed: 16.0
+      SpeedVariance: 6.0
+      Gravity: [0, -18.0, 0]
+      LinearDrag: 0.3
+    Evolution:
+      SizeStart: 0.2
+      SizeEnd: 0.03
+      ColorStart: [1.0, 0.9, 0.4, 1.0]
+      ColorEnd: [0.9, 0.2, 0.0, 0.0]
+    Collision:
+      Mode: Plane
+      Restitution: 0.55
+      Friction: 0.25
+  - Name: FireballCloud
+    Enabled: true
+    MaxParticles: 200
+    Lifetime: 1.6
+    EmissionRate: 0
+    Bursts:
+      - { Time: 0.01, Count: 120 }
+    Emitter:
+      Type: Sphere
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: Billboard
+      EmissiveBoost: 3.5
+      SoftParticle: true
+      FadeDistance: 0.6
+    Motion:
+      Speed: 5.0
+      SpeedVariance: 2.0
+      Gravity: [0, 4.0, 0]
+      LinearDrag: 1.2
+      TurbulenceStrength: 1.5
+      TurbulenceFrequency: 1.5
+    Evolution:
+      SizeStart: 0.8
+      SizeEnd: 3.2
+      ColorStart: [1.0, 0.65, 0.1, 1.0]
+      ColorEnd: [0.6, 0.05, 0.0, 0.0]
+    Collision:
+      Mode: None

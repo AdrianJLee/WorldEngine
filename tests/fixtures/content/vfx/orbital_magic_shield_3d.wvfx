@@ -1,0 +1,91 @@
+FormatVersion: 1
+Name: OrbitalMagicShield3D
+Guid: 3003
+Seed: 4096
+Duration: 0
+Looping: true
+WarmupTime: 0.5
+LOD:
+  CullDistance: 60
+  PauseWhenOffscreen: true
+Emitters:
+  - Name: RuneRingOrbital
+    Enabled: true
+    MaxParticles: 450
+    Lifetime: 2.5
+    EmissionRate: 90
+    Emitter:
+      Type: Ring
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: Billboard
+      EmissiveBoost: 3.8
+    Motion:
+      Speed: 2.0
+      SpeedVariance: 0.2
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.05
+      VortexStrength: 3.0
+      VortexAxis: [0, 1, 0]
+    Evolution:
+      SizeStart: 0.25
+      SizeEnd: 0.08
+      ColorStart: [0.2, 0.95, 0.85, 1.0]
+      ColorEnd: [0.05, 0.4, 0.8, 0.0]
+    Collision:
+      Mode: None
+  - Name: OrbitingLightPoints
+    Enabled: true
+    MaxParticles: 120
+    Lifetime: 3.0
+    EmissionRate: 20
+    Emitter:
+      Type: Sphere
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: Billboard
+      EmissiveBoost: 5.5
+    Motion:
+      Speed: 3.5
+      SpeedVariance: 0.5
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.0
+      VortexStrength: 4.5
+      VortexAxis: [0, 1, 0]
+    Evolution:
+      SizeStart: 0.35
+      SizeEnd: 0.05
+      ColorStart: [0.4, 1.0, 0.7, 1.0]
+      ColorEnd: [0.1, 0.8, 0.5, 0.0]
+    Collision:
+      Mode: None
+  - Name: ShieldCoreSphere
+    Enabled: true
+    MaxParticles: 350
+    Lifetime: 1.8
+    EmissionRate: 60
+    Emitter:
+      Type: Sphere
+      LockToXY: false
+    Material:
+      BlendMode: Additive
+      FacingMode: Billboard
+      EmissiveBoost: 2.2
+      SoftParticle: true
+      FadeDistance: 0.4
+    Motion:
+      Speed: 0.8
+      SpeedVariance: 0.3
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.5
+      TurbulenceStrength: 0.8
+      TurbulenceFrequency: 1.5
+    Evolution:
+      SizeStart: 0.4
+      SizeEnd: 0.9
+      ColorStart: [0.15, 0.85, 0.95, 0.8]
+      ColorEnd: [0.05, 0.25, 0.7, 0.0]
+    Collision:
+      Mode: None
