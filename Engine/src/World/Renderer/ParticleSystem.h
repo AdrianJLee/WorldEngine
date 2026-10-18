@@ -244,4 +244,6 @@ namespace World
 		std::unordered_map<uint32_t, std::unique_ptr<ParticlePool>> m_Pools;
 		std::vector<OneShotEmitter> m_OneShots;
 	};
+
+	WLD_API ParticleSystem& GetGlobalParticleSystem();
 }

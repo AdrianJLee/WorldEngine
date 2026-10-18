@@ -112,8 +112,8 @@ namespace World
 			glm::vec3 pos = tc ? tc->Location : glm::vec3(0.0f);
 			glm::quat rot = tc ? tc->Rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
-			auto& pool = s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles);
-			pool.Emit(static_cast<std::size_t>(std::max(0.0, emitCount)), *comp, pos, rot);
+			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).Emit(static_cast<std::size_t>(std::max(0.0, emitCount)), *comp, pos, rot);
+			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).Emit(static_cast<std::size_t>(std::max(0.0, emitCount)), *comp, pos, rot);
 
 			return ScriptValue::Boolean(true);
 		}
@@ -162,8 +162,8 @@ namespace World
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
-			auto& pool = s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles);
-			pool.Reset();
+			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).Reset();
+			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).Reset();
 			comp->IsPlaying = 1;
 			return ScriptValue::Boolean(true);
 		}
@@ -625,10 +625,7 @@ namespace World
 		}
 	}
 
-	ParticleSystem& GetGlobalParticleSystem()
-	{
-		return s_ParticleSystem;
-	}
+
 
 	const ScriptServiceBinding* ParticleServiceBindings(std::size_t* count)
 	{

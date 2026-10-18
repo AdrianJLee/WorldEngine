@@ -30,6 +30,7 @@
 #include "WUI/Panels/TilemapEditorPanel.h"
 #include "WUI/Panels/RuleTileEditorPanel.h"
 #include "WUI/Panels/PhysicsMaterialEditorPanel.h"
+#include "WUI/Panels/ParticleEditorPanel.h"
 #include "WUI/Panels/CurveEditorPanel.h"
 #include "WUI/Modals/AssetPickerModal.h"
 #include "WUI/Shell/PluginEditorHost.h"
@@ -153,6 +154,7 @@ namespace World
 		void EnsureRuleTilePanelFromId(const std::string& panelId);
 		RuleTileEditorPanel* FindRuleTilePanel(const std::string& logicalPath);
 		void OpenPhysicsMaterialEditor(const std::string& logicalPath) override;
+		void OpenParticleEditor(const std::string& logicalPath) override;
 		void OpenCurveEditor(const std::string& logicalPath) override;
 		void OpenAssetPicker(std::string_view title, AssetCategory category, std::function<void(const std::string&)> onSelect) override;
 		void OpenAsset(const std::string& path) override;

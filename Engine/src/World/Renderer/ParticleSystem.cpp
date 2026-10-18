@@ -586,4 +586,11 @@ namespace World
 		}
 		return total;
 	}
+
+	ParticleSystem& GetGlobalParticleSystem()
+	{
+		static ParticleSystem s_GlobalInstance;
+		return s_GlobalInstance;
+	}
+
 }

@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Ai/CommandRegistry.h"
+#include "World/Ai/VfxCommands.h"
 #include "World/Ai/SelfValidation.h"
 #include "World/Ai/PlaytestRunner.h"
 #include "World/Ai/ProjectPackager.h"
@@ -85,6 +86,7 @@ namespace World::Ai
 		ProjectPackager::RegisterCommands(*this);
 		ChangesetTracker::RegisterCommands(*this);
 		Agent::WeAgentCore::RegisterCommands(*this);
+		VfxCommands::RegisterCommands(*this);
 	}
 
 	bool CommandRegistry::RegisterCommand(CommandDescriptor desc)

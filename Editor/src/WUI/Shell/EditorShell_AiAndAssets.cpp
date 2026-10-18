@@ -1,6 +1,7 @@
 #include "EditorShell_Internal.h"
 #include "WUI/Panels/AudioMixerPanel.h"
 #include "WUI/Panels/PhysicsMaterialEditorPanel.h"
+#include "WUI/Panels/ParticleEditorPanel.h"
 #include "WUI/Panels/TextureSettingsPanel.h"
 #include "WUI/Panels/UiDesignerPanel.h"
 #include "WUI/Common/EditorAssetTypes.h"
@@ -842,6 +843,11 @@ void EditorShell::OpenAsset(const std::string& rawPath)
 		OpenCurveEditor(logical);
 		Notify("已在贝塞尔曲线编辑器中打开: " + logical);
 	}
+	else if (ext == ".wvfx" || ext == ".wparticle")
+	{
+		OpenParticleEditor(logical);
+		Notify("已在粒子系统编辑器中打开: " + logical);
+	}
 	else if (ext == ".lua" || ext == ".luau")
 	{
 		OpenScriptEditor(logical);
@@ -890,6 +896,17 @@ void EditorShell::OpenPhysicsMaterialEditor(const std::string& logicalPath)
 		PhysicsMaterialEditorPanel::RequestOpenAsset(path);
 	}
 	OpenOrFocusIndependentWindow("physics_material_editor");
+}
+
+void EditorShell::OpenParticleEditor(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	if (!path.empty())
+	{
+		ParticleEditorPanel::RequestOpenAsset(path);
+	}
+	OpenOrFocusIndependentWindow("particle_editor");
 }
 
 
