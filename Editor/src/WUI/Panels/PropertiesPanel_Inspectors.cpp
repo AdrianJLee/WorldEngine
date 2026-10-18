@@ -2,6 +2,7 @@
 #include "World/Physics/PhysicsMaterial.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/Tilemap.h"
+#include "World/Renderer/ParticleSystem.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include <unordered_set>
@@ -47,6 +48,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 		// 自定义检查器:Primary / Fixed Aspect Ratio + 投影类型下拉 + 对应参数组。
 		else if (schema.Id.Name == "World::PhysicsMaterialComponent")
 			height = DrawPhysicsMaterialInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::ParticleSystemComponent")
+			height = DrawParticleSystemInspector(ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::CameraComponent")
 			height = DrawCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::AudioSourceComponent")
@@ -2354,6 +2357,38 @@ float PropertiesPanel::DrawSurfaceEffector2DInspector(Wui::WuiContext& ctx, cons
 	y += 28.0f;
 
 	return (y + 6.0f) - rect.Y;
+}
+
+float PropertiesPanel::DrawParticleSystemInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	auto* comp = static_cast<World::ParticleSystemComponent*>(instance);
+	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 4.0f;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+
+	if (comp)
+	{
+		const float btnW = 200.0f;
+		const Wui::WuiRect editBtnRect { rect.X + 8.0f, y, btnW, 22.0f };
+		Wui::Tooltip(ctx, editBtnRect, "在独立的工业级粒子系统编辑器中打开并编辑多发射器栈与走带预览");
+		if (Wui::Button(ctx, Wui::HashId("vfx.insp.open"), editBtnRect, "✨ 打开粒子特效编辑器", theme))
+		{
+			m_Host.OpenParticleEditor("");
+		}
+
+		const Wui::WuiRect burstBtnRect { rect.X + 8.0f + btnW + 6.0f, y, 90.0f, 22.0f };
+		Wui::Tooltip(ctx, burstBtnRect, "立即单次喷射 25 枚粒子");
+		if (Wui::Button(ctx, Wui::HashId("vfx.insp.burst"), burstBtnRect, "+25 喷射", theme))
+		{
+			auto& pool = GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(static_cast<entt::entity>(entity)), comp->MaxParticles);
+			pool.Emit(25, *comp, glm::vec3(0.0f));
+		}
+		y += 26.0f;
+	}
+
+	return (y - rect.Y);
 }
 
 }

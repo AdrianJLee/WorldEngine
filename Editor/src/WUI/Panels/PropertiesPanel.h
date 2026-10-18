@@ -78,7 +78,10 @@ namespace World
 		float DrawLevelEntityInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
-				float DrawPhysicsMaterialInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+				float DrawParticleSystemInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
+		float DrawPhysicsMaterialInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
 		float DrawAudioSourceInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
