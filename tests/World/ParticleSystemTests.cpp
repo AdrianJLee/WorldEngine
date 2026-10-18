@@ -307,6 +307,128 @@ static void TestDeterministicSeedReplay()
 	std::cout << "[PASS] TestDeterministicSeedReplay\n";
 }
 
+
+static void TestParticlePlaneCollisionAndBounce()
+{
+	ParticlePool pool(16);
+	ParticleCollisionSettings col;
+	col.Mode = ParticleCollisionMode::Plane;
+	col.PlaneOrigin = glm::vec3(0.0f);
+	col.PlaneNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+	col.Restitution = 0.8f;
+	col.Friction = 0.2f;
+	col.KillOnHit = false;
+	col.EnableEvents = true; // explicitly enable event queue capture for this test
+	pool.SetCollisionSettings(col);
+
+	ParticleSystemComponent comp;
+	comp.Lifetime = 5.0f;
+	comp.EmissionRate = 0.0f;
+	comp.IsPlaying = 0;
+	comp.Speed = 0.0f;
+	comp.SpeedVariance = 0.0f;
+	comp.Gravity = glm::vec3(0.0f);
+
+	// Emit 1 particle directly downwards towards plane at Y=0
+	pool.Emit(1, comp, glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f));
+	pool.GetParticlesMut()[0].Velocity = glm::vec3(2.0f, -10.0f, 0.0f);
+
+	// Update 0.6s -> moves to Y = 5 - 6 = -1 (hits plane at Y=0)
+	pool.Update(0.6f, comp, glm::vec3(0.0f));
+
+	assert(pool.GetEventQueue().HasHits());
+	assert(pool.GetEventQueue().Size() == 1);
+	const auto& hit = pool.GetEventQueue().GetHits()[0];
+	assert(std::abs(hit.Position.y) < 1e-4f);
+	assert(std::abs(hit.Normal.y - 1.0f) < 1e-4f);
+
+	// Particle should have bounced upwards with restitution 0.8: Vy = 10 * 0.8 = 8.0
+	const auto& p = pool.GetParticles()[0];
+	assert(p.Active);
+	assert(p.Velocity.y > 7.5f && p.Velocity.y < 8.5f);
+	// Horizontal velocity attenuated by friction 0.2: Vx = 2.0 * 0.8 = 1.6
+	assert(p.Velocity.x > 1.5f && p.Velocity.x < 1.7f);
+
+	// Test KillOnHit
+	ParticlePool killPool(16);
+	col.KillOnHit = true;
+	killPool.SetCollisionSettings(col);
+	killPool.Emit(1, comp, glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f));
+	killPool.GetParticlesMut()[0].Velocity = glm::vec3(0.0f, -10.0f, 0.0f);
+	killPool.Update(0.6f, comp, glm::vec3(0.0f));
+	assert(killPool.GetEventQueue().HasHits());
+	assert(!killPool.GetParticles()[0].Active);
+	assert(killPool.ActiveCount() == 0);
+
+	
+	// Test Zero-Overhead Opt-In: when EnableEvents == false, bounce occurs but event queue stays completely empty
+	ParticlePool zeroQueuePool(16);
+	col.KillOnHit = false;
+	col.EnableEvents = false;
+	zeroQueuePool.SetCollisionSettings(col);
+	zeroQueuePool.Emit(1, comp, glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f));
+	zeroQueuePool.GetParticlesMut()[0].Velocity = glm::vec3(0.0f, -10.0f, 0.0f);
+	zeroQueuePool.Update(0.6f, comp, glm::vec3(0.0f));
+	assert(!zeroQueuePool.GetEventQueue().HasHits());
+	assert(zeroQueuePool.GetEventQueue().Size() == 0);
+	assert(zeroQueuePool.GetParticles()[0].Velocity.y > 7.5f); // Bounced properly with 0 queue overhead!
+	std::cout << "[PASS] TestParticlePlaneCollisionAndBounce\n";
+}
+
+static void TestParticleSubEmitters()
+{
+	ParticlePool pool(16);
+	ParticleCollisionSettings col;
+	col.Mode = ParticleCollisionMode::Plane;
+	col.KillOnHit = true;
+	pool.SetCollisionSettings(col);
+
+	SubEmitterConfig sub;
+	sub.Trigger = SubEmitterTrigger::OnCollision;
+	sub.EmitCount = 6;
+	sub.SpawnTemplate.Lifetime = 1.0f;
+	sub.SpawnTemplate.Speed = 5.0f;
+	pool.AddSubEmitter(sub);
+
+	ParticleSystemComponent comp;
+	comp.Lifetime = 5.0f;
+	comp.EmissionRate = 0.0f;
+	comp.IsPlaying = 0;
+	comp.Speed = 0.0f;
+	comp.Gravity = glm::vec3(0.0f);
+
+	pool.Emit(1, comp, glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f));
+	pool.GetParticlesMut()[0].Velocity = glm::vec3(0.0f, -5.0f, 0.0f);
+
+	// Advance 0.5s -> hits ground and triggers OnCollision sub-emitter
+	pool.Update(0.5f, comp, glm::vec3(0.0f));
+	assert(pool.GetSecondaryPool() != nullptr);
+	assert(pool.GetSecondaryPool()->ActiveCount() == 6);
+
+	std::cout << "[PASS] TestParticleSubEmitters\n";
+}
+
+static void TestParticleOneShotSpawn()
+{
+	ParticleSystem sys;
+	ParticleSystemComponent comp;
+	comp.MaxParticles = 20;
+	comp.Lifetime = 0.5f;
+	comp.Speed = 4.0f;
+
+	ParticleMaterialSettings mat;
+	sys.SpawnOneShot(comp, mat, glm::vec3(1.0f, 2.0f, 3.0f));
+	assert(sys.GetOneShots().size() == 1);
+	assert(sys.ActiveOneShotCount() > 0);
+
+	// Advance past lifetime -> one-shot should automatically clean up
+	sys.UpdateOneShots(0.6f);
+	assert(sys.GetOneShots().empty());
+	assert(sys.ActiveOneShotCount() == 0);
+
+	std::cout << "[PASS] TestParticleOneShotSpawn\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -321,6 +443,9 @@ int main()
 	TestSubUVFlipbookAndRect();
 	TestSoftParticleDepthFadeAndEmissive();
 	TestDeterministicSeedReplay();
+	TestParticlePlaneCollisionAndBounce();
+	TestParticleSubEmitters();
+	TestParticleOneShotSpawn();
 
 	std::cout << "All WorldParticleSystemTests passed successfully.\n";
 	return 0;

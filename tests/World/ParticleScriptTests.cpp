@@ -188,6 +188,28 @@ int main()
 			Particle.SetLockToXY(EMITTER_ID)
 		)", "SetLockToXYFewArgsFail");
 
+		
+		// 13. M2 新增脚本接口测试 (SetCollision, SpawnOneShot, AddSubEmitter)
+		RUN_OK(R"(
+			assert(type(Particle.SetCollision) == "function", "Particle.SetCollision must exist")
+			assert(type(Particle.GetCollisionHitCount) == "function", "Particle.GetCollisionHitCount must exist")
+			assert(type(Particle.FlushCollisionHits) == "function", "Particle.FlushCollisionHits must exist")
+			assert(type(Particle.SpawnOneShot) == "function", "Particle.SpawnOneShot must exist")
+			assert(type(Particle.AddSubEmitter) == "function", "Particle.AddSubEmitter must exist")
+
+			local okCol = Particle.SetCollision(EMITTER_ID, 1, 0.75, 0.15, false)
+			assert(okCol == true, "SetCollision should succeed")
+
+			local okSub = Particle.AddSubEmitter(EMITTER_ID, 1, 8)
+			assert(okSub == true, "AddSubEmitter should succeed")
+
+			local okOneShot = Particle.SpawnOneShot(0, 10, 0, 40, 6, 1.5)
+			assert(okOneShot == true, "SpawnOneShot should succeed")
+
+			local hits = Particle.GetCollisionHitCount(EMITTER_ID)
+			assert(type(hits) == "number", "GetCollisionHitCount should return number")
+		)", "M2ScriptAPICheck");
+
 		// 12. 无场景时调用异常测试
 		ScriptEngine::SetActiveScene(nullptr);
 

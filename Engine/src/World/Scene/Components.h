@@ -136,7 +136,8 @@ namespace World
 		ParticleVfxFlag_SoftParticle     = 1 << 0,
 		ParticleVfxFlag_CollisionEnabled = 1 << 1,
 		ParticleVfxFlag_SubUVEnabled     = 1 << 2,
-		ParticleVfxFlag_SubUVRandomStart = 1 << 3
+		ParticleVfxFlag_SubUVRandomStart = 1 << 3,
+		ParticleVfxFlag_CollisionEvents  = 1 << 4
 	};
 
 	struct ParticleSystemComponent

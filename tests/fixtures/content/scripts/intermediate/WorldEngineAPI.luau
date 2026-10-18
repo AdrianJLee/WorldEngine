@@ -1153,11 +1153,14 @@ function ui:isOpen() end
 ---@field ColorStart number
 ---@field SpeedVariance number
 ---@field SizeStart number
+---@field AssetGuid number
 ---@field IsPlaying boolean
 ---@field LockToXYPlane boolean
 ---@field Gravity vec3
+---@field BlendMode number
 ---@field EmissionRate number
 ---@field SizeEnd number
+---@field VfxFlags number
 ---@field ColorEnd number
 ---@field Looping boolean
 ---@field Speed number

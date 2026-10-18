@@ -359,6 +359,146 @@ namespace World
 			return ScriptValue::Boolean(true);
 		}
 
+		ScriptValue ParticleSetCollisionImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) throw std::logic_error("Particle.SetCollision requires an active scene");
+			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[13];
+			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
+			double modeVal = (count > 1 && !args[1].IsNil()) ? RequireNum("Particle", method, args, count, 1) : 1.0;
+			double restitution = (count > 2 && !args[2].IsNil()) ? RequireNum("Particle", method, args, count, 2) : 0.5;
+			double friction = (count > 3 && !args[3].IsNil()) ? RequireNum("Particle", method, args, count, 3) : 0.1;
+			bool killOnHit = (count > 4 && !args[4].IsNil()) ? RequireBool("Particle", method, args, count, 4) : false;
+			bool enableEvents = (count > 5 && !args[5].IsNil()) ? RequireBool("Particle", method, args, count, 5) : false;
+
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			if (!comp)
+				return ScriptValue::Boolean(false);
+
+			if (enableEvents)
+				comp->VfxFlags |= ParticleVfxFlag_CollisionEvents;
+			else
+				comp->VfxFlags &= static_cast<uint8_t>(~ParticleVfxFlag_CollisionEvents);
+
+			ParticleCollisionSettings col;
+			col.Mode = (modeVal >= 1.0) ? ParticleCollisionMode::Plane : ParticleCollisionMode::None;
+			col.Restitution = static_cast<float>(restitution);
+			col.Friction = static_cast<float>(friction);
+			col.KillOnHit = killOnHit;
+			col.EnableEvents = enableEvents;
+			col.PlaneOrigin = glm::vec3(0.0f);
+			col.PlaneNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+
+			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).SetCollisionSettings(col);
+			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).SetCollisionSettings(col);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue ParticleGetCollisionHitCountImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) throw std::logic_error("Particle.GetCollisionHitCount requires an active scene");
+			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[14];
+			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
+
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			if (!comp)
+				return ScriptValue::Number(0.0);
+
+			auto* pool = GetGlobalParticleSystem().GetPool(static_cast<uint32_t>(ent));
+			if (!pool) pool = s_ParticleSystem.GetPool(static_cast<uint32_t>(ent));
+			if (!pool)
+				return ScriptValue::Number(0.0);
+
+			return ScriptValue::Number(static_cast<double>(pool->GetEventQueue().Size()));
+		}
+
+		ScriptValue ParticleFlushCollisionHitsImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) throw std::logic_error("Particle.FlushCollisionHits requires an active scene");
+			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[15];
+			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
+
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			if (!comp)
+				return ScriptValue::Number(0.0);
+
+			size_t hitsCount = 0;
+			auto* pool1 = GetGlobalParticleSystem().GetPool(static_cast<uint32_t>(ent));
+			if (pool1) hitsCount += pool1->GetEventQueueMut().Flush().size();
+			auto* pool2 = s_ParticleSystem.GetPool(static_cast<uint32_t>(ent));
+			if (pool2) hitsCount += pool2->GetEventQueueMut().Flush().size();
+
+			return ScriptValue::Number(static_cast<double>(hitsCount));
+		}
+
+		
+		inline double GetOptionalNum(const ScriptValue* args, std::size_t count, std::size_t idx, double fallback)
+		{
+			if (idx < count && !args[idx].IsNil())
+			{
+				double val = fallback;
+				if (args[idx].AsNumber(&val)) return val;
+			}
+			return fallback;
+		}
+
+		ScriptValue ParticleSpawnOneShotImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			double x = GetOptionalNum(args, count, 0, 0.0);
+			double y = GetOptionalNum(args, count, 1, 0.0);
+			double z = GetOptionalNum(args, count, 2, 0.0);
+			double particleCount = GetOptionalNum(args, count, 3, 30.0);
+			double speed = GetOptionalNum(args, count, 4, 5.0);
+			double life = GetOptionalNum(args, count, 5, 1.0);
+
+			ParticleSystemComponent comp;
+			comp.MaxParticles = static_cast<uint32_t>(particleCount);
+			comp.Speed = static_cast<float>(speed);
+			comp.Lifetime = static_cast<float>(life);
+			comp.EmissionRate = 0.0f;
+			comp.IsPlaying = 1;
+			comp.EmitterType = ParticleEmitterType::Sphere;
+
+			ParticleMaterialSettings mat;
+			GetGlobalParticleSystem().SpawnOneShot(comp, mat, glm::vec3(x, y, z));
+			s_ParticleSystem.SpawnOneShot(comp, mat, glm::vec3(x, y, z));
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue ParticleAddSubEmitterImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) throw std::logic_error("Particle.AddSubEmitter requires an active scene");
+			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[17];
+			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
+			double triggerVal = (count > 1 && !args[1].IsNil()) ? RequireNum("Particle", method, args, count, 1) : 1.0;
+			double emitCount = (count > 2 && !args[2].IsNil()) ? RequireNum("Particle", method, args, count, 2) : 4.0;
+
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			if (!comp)
+				return ScriptValue::Boolean(false);
+
+			SubEmitterConfig sub;
+			sub.Trigger = (triggerVal <= 0.0) ? SubEmitterTrigger::OnBirth : ((triggerVal >= 2.0) ? SubEmitterTrigger::OnDeath : SubEmitterTrigger::OnCollision);
+			sub.EmitCount = static_cast<uint32_t>(emitCount);
+			sub.SpawnTemplate.Lifetime = 0.5f;
+			sub.SpawnTemplate.Speed = 3.0f;
+			sub.SpawnTemplate.SizeStart = 0.2f;
+			sub.SpawnTemplate.SizeEnd = 0.05f;
+
+			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).AddSubEmitter(sub);
+			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).AddSubEmitter(sub);
+			return ScriptValue::Boolean(true);
+		}
+
+
 		static const ScriptServiceParam emitParams[] = {
 			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
 			{ "count", "number", ScriptServiceArgType::Number, true, "Number of particles to emit." }
@@ -402,6 +542,27 @@ namespace World
 			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
 			{ "boost", "number", ScriptServiceArgType::Number, true, "HDR emissive multiplier for Bloom." }
 		};
+		static const ScriptServiceParam collisionParams[] = {
+			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
+			{ "mode", "number", ScriptServiceArgType::Number, false, "Collision mode: 0=None, 1=Plane." },
+			{ "restitution", "number", ScriptServiceArgType::Number, false, "Restitution bounce coefficient in [0, 1]." },
+			{ "friction", "number", ScriptServiceArgType::Number, false, "Surface friction coefficient in [0, 1]." },
+			{ "killOnHit", "boolean", ScriptServiceArgType::Boolean, false, "Kill particle on collision." }
+		};
+		static const ScriptServiceParam oneShotParams[] = {
+			{ "x", "number", ScriptServiceArgType::Number, true, "X world position." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "Y world position." },
+			{ "z", "number", ScriptServiceArgType::Number, true, "Z world position." },
+			{ "count", "number", ScriptServiceArgType::Number, false, "Number of burst particles." },
+			{ "speed", "number", ScriptServiceArgType::Number, false, "Initial burst speed." },
+			{ "lifetime", "number", ScriptServiceArgType::Number, false, "Particle lifetime." }
+		};
+		static const ScriptServiceParam subEmitterParams[] = {
+			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
+			{ "trigger", "number", ScriptServiceArgType::Number, true, "Trigger type: 0=OnBirth, 1=OnCollision, 2=OnDeath." },
+			{ "count", "number", ScriptServiceArgType::Number, false, "Number of secondary particles to spawn." }
+		};
+
 
 		static const ScriptServiceMethod particleMethods[] = {
 			{ "Emit", [](const ScriptValue* args, std::size_t count) { return ParticleEmitImpl(args, count); }, emitParams, 2, 2, "boolean", "Emit particles from entity's ParticleSystemComponent." },
@@ -416,7 +577,12 @@ namespace World
 			{ "SetSeed", [](const ScriptValue* args, std::size_t count) { return ParticleSetSeedImpl(args, count); }, seedParams, 2, 2, "boolean", "Set deterministic PRNG seed for particle replay." },
 			{ "SetSubUV", [](const ScriptValue* args, std::size_t count) { return ParticleSetSubUVImpl(args, count); }, subUVParams, 3, 5, "boolean", "Configure Sub-UV flipbook grid and frame rate." },
 			{ "SetSoftParticles", [](const ScriptValue* args, std::size_t count) { return ParticleSetSoftParticlesImpl(args, count); }, softParticleParams, 2, 3, "boolean", "Configure soft particle depth fade." },
-			{ "SetEmissiveBoost", [](const ScriptValue* args, std::size_t count) { return ParticleSetEmissiveBoostImpl(args, count); }, emissiveParams, 2, 2, "boolean", "Set HDR emissive multiplier for Bloom." }
+			{ "SetEmissiveBoost", [](const ScriptValue* args, std::size_t count) { return ParticleSetEmissiveBoostImpl(args, count); }, emissiveParams, 2, 2, "boolean", "Set HDR emissive multiplier for Bloom." },
+			{ "SetCollision", [](const ScriptValue* args, std::size_t count) { return ParticleSetCollisionImpl(args, count); }, collisionParams, 1, 5, "boolean", "Configure physics plane collision and bounce properties." },
+			{ "GetCollisionHitCount", [](const ScriptValue* args, std::size_t count) { return ParticleGetCollisionHitCountImpl(args, count); }, singleEntityParams, 1, 1, "number", "Get pending collision hits count." },
+			{ "FlushCollisionHits", [](const ScriptValue* args, std::size_t count) { return ParticleFlushCollisionHitsImpl(args, count); }, singleEntityParams, 1, 1, "number", "Flush and return buffered collision hits count." },
+			{ "SpawnOneShot", [](const ScriptValue* args, std::size_t count) { return ParticleSpawnOneShotImpl(args, count); }, oneShotParams, 3, 6, "boolean", "Spawn an entity-less one-shot particle burst." },
+			{ "AddSubEmitter", [](const ScriptValue* args, std::size_t count) { return ParticleAddSubEmitterImpl(args, count); }, subEmitterParams, 2, 3, "boolean", "Register a secondary emitter triggered on birth, collision, or death." }
 		};
 
 		static const ScriptServiceBinding particleBindingsTable[] = {

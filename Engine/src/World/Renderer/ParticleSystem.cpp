@@ -17,6 +17,11 @@ namespace World
 		m_RngState = m_InitialSeed;
 	}
 
+	ParticlePool::~ParticlePool() = default;
+
+	ParticlePool::ParticlePool(ParticlePool&&) noexcept = default;
+	ParticlePool& ParticlePool::operator=(ParticlePool&&) noexcept = default;
+
 	void ParticlePool::SetSeed(uint32_t seed)
 	{
 		m_InitialSeed = (seed != 0u) ? seed : 0x12345678u;
@@ -59,7 +64,7 @@ namespace World
 	glm::vec3 ParticlePool::RandomUnitVector()
 	{
 		float z = RandomFloatSigned();
-		float a = RandomFloat() * 6.28318530717958647692f;
+		float a = RandomFloat() * 6.28318530718f;
 		float r = std::sqrt(std::max(0.0f, 1.0f - z * z));
 		return glm::vec3(r * std::cos(a), r * std::sin(a), z);
 	}
@@ -70,6 +75,10 @@ namespace World
 		m_NextFreeIndex = 0;
 		m_EmissionAccumulator = 0.0f;
 		m_RngState = m_InitialSeed;
+		m_EventQueue.Clear();
+		if (m_SecondaryPool)
+			m_SecondaryPool->Reset();
+
 		for (auto& p : m_Particles)
 		{
 			p.Active = false;
@@ -79,18 +88,59 @@ namespace World
 		}
 	}
 
+	void ParticlePool::AddSubEmitter(const SubEmitterConfig& config)
+	{
+		m_SubEmitters.push_back(config);
+		if (!m_SecondaryPool)
+		{
+			m_SecondaryPool = std::make_unique<ParticlePool>(512);
+			m_SecondaryPool->SetSeed(m_InitialSeed + 1337u);
+		}
+	}
+
+	void ParticlePool::TriggerSubEmitters(SubEmitterTrigger trigger, const glm::vec3& pos, const glm::vec3& normal, const glm::vec3& vel)
+	{
+		if (m_SubEmitters.empty()) return;
+
+		for (const auto& sub : m_SubEmitters)
+		{
+			if (sub.Trigger != trigger) continue;
+			if (!m_SecondaryPool)
+			{
+				m_SecondaryPool = std::make_unique<ParticlePool>(512);
+				m_SecondaryPool->SetSeed(m_InitialSeed + 1337u);
+			}
+
+			m_SecondaryPool->SetMaterialSettings(sub.MaterialTemplate);
+			ParticleSystemComponent burstComp = sub.SpawnTemplate;
+			burstComp.IsPlaying = 1;
+			burstComp.Looping = 0;
+			burstComp.EmissionRate = 0.0f;
+
+			glm::vec3 emitDir = (glm::length(normal) > 1e-4f) ? glm::normalize(normal) : glm::vec3(0.0f, 1.0f, 0.0f);
+			m_SecondaryPool->Emit(sub.EmitCount, burstComp, pos, emitDir);
+
+			if (std::abs(sub.InheritVelocityRatio) > 1e-4f)
+			{
+				auto& secParts = m_SecondaryPool->GetParticlesMut();
+				for (auto& sp : secParts)
+				{
+					if (sp.Active)
+						sp.Velocity += vel * sub.InheritVelocityRatio;
+				}
+			}
+		}
+	}
+
 	void ParticlePool::Emit(size_t count, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::vec3& emitterRotEuler)
 	{
-		glm::quat rot = glm::quat(glm::radians(emitterRotEuler));
-		Emit(count, comp, emitterPos, rot);
+		Emit(count, comp, emitterPos, glm::quat(emitterRotEuler));
 	}
 
 	void ParticlePool::Emit(size_t count, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot)
 	{
-		if (m_Particles.empty() || count == 0) return;
-
-		const size_t capacity = m_Particles.size();
 		size_t emitted = 0;
+		const size_t capacity = m_Particles.size();
 
 		for (size_t i = 0; i < capacity && emitted < count; ++i)
 		{
@@ -99,111 +149,59 @@ namespace World
 
 			Particle& p = m_Particles[idx];
 			p.Active = true;
-			p.MaxLife = comp.Lifetime > 0.0f ? comp.Lifetime : 1.0f;
-			p.Life = p.MaxLife;
-			p.Rotation = 0.0f;
-			p.AngularVelocity = 0.0f;
+			p.Life = comp.Lifetime;
+			p.MaxLife = comp.Lifetime;
 
-			glm::vec3 offset(0.0f);
-			glm::vec3 dir(0.0f, 1.0f, 0.0f);
+			glm::vec3 localDir(0.0f, 1.0f, 0.0f);
+			glm::vec3 localOffset(0.0f);
 
 			switch (comp.EmitterType)
 			{
 			case ParticleEmitterType::Point:
-			{
-				offset = glm::vec3(0.0f);
-				if (comp.LockToXYPlane != 0)
-				{
-					float ang = RandomFloat() * 6.28318530717958647692f;
-					dir = glm::vec3(std::cos(ang), std::sin(ang), 0.0f);
-				}
-				else
-				{
-					dir = RandomUnitVector();
-				}
+				localDir = RandomUnitVector();
 				break;
-			}
-			case ParticleEmitterType::Line:
-			{
-				float t = RandomFloatSigned();
-				offset = glm::vec3(t, 0.0f, 0.0f);
-				dir = glm::vec3(0.0f, 1.0f, 0.0f);
-				break;
-			}
 			case ParticleEmitterType::Box:
-			{
-				offset = glm::vec3(RandomFloatSigned(), RandomFloatSigned(), comp.LockToXYPlane != 0 ? 0.0f : RandomFloatSigned());
-				float len = glm::length(offset);
-				dir = len > 1e-5f ? offset / len : glm::vec3(0.0f, 1.0f, 0.0f);
+				localOffset = glm::vec3(RandomFloatSigned(), RandomFloatSigned(), RandomFloatSigned()) * 0.5f;
+				localDir = glm::vec3(0.0f, 1.0f, 0.0f);
 				break;
-			}
 			case ParticleEmitterType::Sphere:
-			{
-				if (comp.LockToXYPlane != 0)
-				{
-					float ang = RandomFloat() * 6.28318530717958647692f;
-					float r = std::sqrt(RandomFloat());
-					offset = glm::vec3(std::cos(ang) * r, std::sin(ang) * r, 0.0f);
-					dir = glm::vec3(std::cos(ang), std::sin(ang), 0.0f);
-				}
-				else
-				{
-					offset = RandomUnitVector() * std::cbrt(RandomFloat());
-					float len = glm::length(offset);
-					dir = len > 1e-5f ? offset / len : glm::vec3(0.0f, 1.0f, 0.0f);
-				}
+				localDir = RandomUnitVector();
+				localOffset = localDir * RandomFloat() * 0.5f;
 				break;
-			}
 			case ParticleEmitterType::Cone:
 			{
-				constexpr float coneAngle = 0.52359877f; // ~30 deg
-				if (comp.LockToXYPlane != 0)
-				{
-					float ang = RandomFloatSigned() * coneAngle;
-					dir = glm::vec3(std::sin(ang), std::cos(ang), 0.0f);
-				}
-				else
-				{
-					float theta = RandomFloat() * 6.28318530717958647692f;
-					float phi = RandomFloat() * coneAngle;
-					dir = glm::vec3(std::sin(phi) * std::cos(theta), std::cos(phi), std::sin(phi) * std::sin(theta));
-				}
-				offset = glm::vec3(0.0f);
-				break;
-			}
-			case ParticleEmitterType::Circle:
-			{
-				float ang = RandomFloat() * 6.28318530717958647692f;
-				float r = std::sqrt(RandomFloat());
-				offset = glm::vec3(std::cos(ang) * r, std::sin(ang) * r, 0.0f);
-				dir = glm::vec3(std::cos(ang), std::sin(ang), 0.0f);
+				float angle = RandomFloat() * 0.5f;
+				float phi = RandomFloat() * 6.28318530718f;
+				localDir = glm::vec3(std::sin(angle) * std::cos(phi), std::cos(angle), std::sin(angle) * std::sin(phi));
 				break;
 			}
 			default:
-				offset = glm::vec3(0.0f);
-				dir = glm::vec3(0.0f, 1.0f, 0.0f);
+				localDir = RandomUnitVector();
 				break;
 			}
 
-			offset = emitterRot * offset;
-			dir = emitterRot * dir;
-			if (glm::dot(dir, dir) > 1e-6f)
-				dir = glm::normalize(dir);
-			else
-				dir = glm::vec3(0.0f, 1.0f, 0.0f);
+			if (comp.LockToXYPlane)
+			{
+				localDir.z = 0.0f;
+				localOffset.z = 0.0f;
+				if (glm::length(localDir) > 1e-4f)
+					localDir = glm::normalize(localDir);
+				else
+					localDir = glm::vec3(0.0f, 1.0f, 0.0f);
+			}
 
-			p.Position = emitterPos + offset;
-
+			glm::vec3 worldDir = emitterRot * localDir;
 			float speed = comp.Speed + RandomFloatSigned() * comp.SpeedVariance;
-			if (speed < 0.0f) speed = 0.0f;
-			p.Velocity = dir * speed;
-			p.Acceleration = comp.Gravity;
+			p.Position = emitterPos + (emitterRot * localOffset);
+			p.Velocity = worldDir * speed;
+			p.Acceleration = glm::vec3(0.0f);
+			p.Rotation = RandomFloat() * 6.28318530718f;
+			p.AngularVelocity = RandomFloatSigned() * 2.0f;
 
-			if (comp.LockToXYPlane != 0)
+			if (comp.LockToXYPlane)
 			{
 				p.Position.z = emitterPos.z;
 				p.Velocity.z = 0.0f;
-				p.Acceleration.z = 0.0f;
 			}
 
 			p.Color = UnpackColor(comp.ColorStart);
@@ -228,6 +226,8 @@ namespace World
 			m_ActiveCount++;
 			emitted++;
 			m_NextFreeIndex = (idx + 1) % capacity;
+
+			TriggerSubEmitters(SubEmitterTrigger::OnBirth, p.Position, worldDir, p.Velocity);
 		}
 	}
 
@@ -254,8 +254,16 @@ namespace World
 		const float emissive = std::max(0.0f, m_Material.EmissiveBoost);
 		const uint32_t totalFrames = std::max(1u, m_Material.SubUVTilesX * m_Material.SubUVTilesY);
 
-		for (auto& p : m_Particles)
+		const bool hasPlaneCollision = (m_Collision.Mode == ParticleCollisionMode::Plane);
+		const glm::vec3 planeNorm = (glm::length(m_Collision.PlaneNormal) > 1e-4f)
+			? glm::normalize(m_Collision.PlaneNormal)
+			: glm::vec3(0.0f, 1.0f, 0.0f);
+		const float restitution = std::clamp(m_Collision.Restitution, 0.0f, 1.0f);
+		const float friction = std::clamp(m_Collision.Friction, 0.0f, 1.0f);
+
+		for (size_t idx = 0; idx < m_Particles.size(); ++idx)
 		{
+			auto& p = m_Particles[idx];
 			if (!p.Active) continue;
 
 			p.Life -= dt;
@@ -263,18 +271,56 @@ namespace World
 			{
 				p.Active = false;
 				if (m_ActiveCount > 0) m_ActiveCount--;
+				TriggerSubEmitters(SubEmitterTrigger::OnDeath, p.Position, glm::vec3(0.0f, 1.0f, 0.0f), p.Velocity);
 				continue;
 			}
 
-			p.Velocity += p.Acceleration * dt;
+			p.Velocity += (comp.Gravity + p.Acceleration) * dt;
 			p.Position += p.Velocity * dt;
 			p.Rotation += p.AngularVelocity * dt;
 
-			if (comp.LockToXYPlane != 0)
+			if (comp.LockToXYPlane)
 			{
 				p.Position.z = emitterPos.z;
 				p.Velocity.z = 0.0f;
-				p.Acceleration.z = 0.0f;
+			}
+
+			if (hasPlaneCollision)
+			{
+				const float dist = glm::dot(p.Position - m_Collision.PlaneOrigin, planeNorm);
+				const float velAlongNorm = glm::dot(p.Velocity, planeNorm);
+				if (dist <= 0.0f && velAlongNorm < 0.0f)
+				{
+					const bool needEvent = m_Collision.EnableEvents || (m_Collision.DamageAmount > 0.0f);
+					if (needEvent)
+					{
+						ParticleHitRecord hit;
+						hit.Position = p.Position - dist * planeNorm;
+						hit.Normal = planeNorm;
+						hit.Velocity = p.Velocity;
+						hit.HitEntityId = 0;
+						hit.ParticleIndex = static_cast<uint32_t>(idx);
+						m_EventQueue.Enqueue(hit);
+					}
+
+					const glm::vec3 hitPos = p.Position - dist * planeNorm;
+					TriggerSubEmitters(SubEmitterTrigger::OnCollision, hitPos, planeNorm, p.Velocity);
+
+					if (m_Collision.KillOnHit)
+					{
+						p.Active = false;
+						p.Life = 0.0f;
+						if (m_ActiveCount > 0) m_ActiveCount--;
+						continue;
+					}
+					else
+					{
+						const glm::vec3 vn = velAlongNorm * planeNorm;
+						const glm::vec3 vt = p.Velocity - vn;
+						p.Velocity = -vn * restitution + vt * (1.0f - friction);
+						p.Position = hitPos + planeNorm * 0.001f;
+					}
+				}
 			}
 
 			float t = 1.0f - (p.Life / p.MaxLife);
@@ -307,12 +353,21 @@ namespace World
 				p.SubUVFrameIndex = 0u;
 			}
 		}
+
+		if (m_SecondaryPool && m_SecondaryPool->ActiveCount() > 0)
+		{
+			ParticleSystemComponent dummyComp;
+			dummyComp.IsPlaying = 1;
+			dummyComp.EmissionRate = 0.0f;
+			m_SecondaryPool->Update(dt, dummyComp, glm::vec3(0.0f));
+		}
 	}
 
 	void ParticlePool::GenerateQuadVertices(std::vector<ParticleVertex>& outVertices) const
 	{
 		outVertices.clear();
-		outVertices.reserve(m_ActiveCount * 6);
+		size_t totalCount = m_ActiveCount + (m_SecondaryPool ? m_SecondaryPool->ActiveCount() : 0);
+		outVertices.reserve(totalCount * 6);
 
 		for (const auto& p : m_Particles)
 		{
@@ -324,8 +379,8 @@ namespace World
 
 			auto rotate2D = [&](float x, float y) -> glm::vec3 {
 				return glm::vec3(
-					x * cosR - y * sinR + p.Position.x,
-					x * sinR + y * cosR + p.Position.y,
+					p.Position.x + (x * cosR - y * sinR),
+					p.Position.y + (x * sinR + y * cosR),
 					p.Position.z
 				);
 			};
@@ -349,6 +404,13 @@ namespace World
 			outVertices.push_back({ p2, p.Color, uv2, 1.0f });
 			outVertices.push_back({ p3, p.Color, uv3, 1.0f });
 		}
+
+		if (m_SecondaryPool && m_SecondaryPool->ActiveCount() > 0)
+		{
+			std::vector<ParticleVertex> secVerts;
+			m_SecondaryPool->GenerateQuadVertices(secVerts);
+			outVertices.insert(outVertices.end(), secVerts.begin(), secVerts.end());
+		}
 	}
 
 	void ParticlePool::GenerateBillboardVertices(const glm::vec3& cameraPos, const glm::vec3& cameraUp, std::vector<ParticleVertex>& outVertices) const
@@ -364,7 +426,8 @@ namespace World
 		std::vector<ParticleVertex>& outVertices) const
 	{
 		outVertices.clear();
-		outVertices.reserve(m_ActiveCount * 6);
+		size_t totalCount = m_ActiveCount + (m_SecondaryPool ? m_SecondaryPool->ActiveCount() : 0);
+		outVertices.reserve(totalCount * 6);
 
 		const float fwdLen2 = glm::dot(cameraForward, cameraForward);
 		const glm::vec3 fwd = fwdLen2 > 1e-6f ? glm::normalize(cameraForward) : glm::vec3(0.0f, 0.0f, -1.0f);
@@ -423,6 +486,13 @@ namespace World
 			outVertices.push_back({ p2, finalColor, uv2, fade });
 			outVertices.push_back({ p3, finalColor, uv3, fade });
 		}
+
+		if (m_SecondaryPool && m_SecondaryPool->ActiveCount() > 0)
+		{
+			std::vector<ParticleVertex> secVerts;
+			m_SecondaryPool->GenerateBillboardVerticesWithDepth(cameraPos, cameraUp, cameraForward, sceneReferenceDepth, secVerts);
+			outVertices.insert(outVertices.end(), secVerts.begin(), secVerts.end());
+		}
 	}
 
 	ParticlePool& ParticleSystem::GetPoolForEntity(uint32_t entityId, size_t capacity)
@@ -462,5 +532,58 @@ namespace World
 	void ParticleSystem::ClearAll()
 	{
 		m_Pools.clear();
+		m_OneShots.clear();
+	}
+
+	void ParticleSystem::SpawnOneShot(const ParticleSystemComponent& comp, const ParticleMaterialSettings& mat,
+		const glm::vec3& position, const glm::quat& rotation)
+	{
+		const size_t capacity = std::max(comp.MaxParticles, 64u);
+		auto pool = std::make_unique<ParticlePool>(capacity);
+		pool->SetMaterialSettings(mat);
+		ParticleSystemComponent burstComp = comp;
+		burstComp.IsPlaying = 1;
+		burstComp.Looping = 0;
+		burstComp.EmissionRate = 0.0f;
+		pool->Emit(std::max(comp.MaxParticles, 16u), burstComp, position, rotation);
+
+		OneShotEmitter emitter;
+		emitter.Pool = std::move(pool);
+		emitter.Comp = burstComp;
+		emitter.Elapsed = 0.0f;
+		m_OneShots.push_back(std::move(emitter));
+	}
+
+	void ParticleSystem::UpdateOneShots(float dt)
+	{
+		for (auto it = m_OneShots.begin(); it != m_OneShots.end(); )
+		{
+			it->Elapsed += dt;
+			if (it->Pool)
+			{
+				it->Pool->Update(dt, it->Comp, glm::vec3(0.0f));
+				if (it->Pool->ActiveCount() == 0)
+				{
+					it = m_OneShots.erase(it);
+					continue;
+				}
+			}
+			else
+			{
+				it = m_OneShots.erase(it);
+				continue;
+			}
+			++it;
+		}
+	}
+
+	size_t ParticleSystem::ActiveOneShotCount() const
+	{
+		size_t total = 0;
+		for (const auto& os : m_OneShots)
+		{
+			if (os.Pool) total += os.Pool->ActiveCount();
+		}
+		return total;
 	}
 }

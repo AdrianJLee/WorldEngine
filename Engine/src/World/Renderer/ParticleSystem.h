@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <memory>
 #include <cstdint>
+#include <algorithm>
 
 namespace World
 {
@@ -28,6 +29,70 @@ namespace World
 		float SoftParticleFadeDistance = 0.5f;
 		float EmissiveBoost = 1.0f;        // HDR multiplier (>= 1.0 triggers bloom)
 		int32_t SortingLayer = 0;
+	};
+
+	enum class ParticleCollisionMode : uint8_t
+	{
+		None = 0,
+		Plane = 1,
+		WorldRaycast = 2
+	};
+
+	struct ParticleCollisionSettings
+	{
+		ParticleCollisionMode Mode = ParticleCollisionMode::None;
+		float Restitution = 0.5f;       // 反弹弹性 (0=无反弹, 1=完全弹性)
+		float Friction = 0.1f;          // 切向摩擦阻尼 (0=无摩擦, 1=完全阻滞)
+		bool KillOnHit = false;         // 碰撞后粒子立即消亡
+		bool EnableEvents = false;      // 通信开关: 是否捕获并入队碰撞事件 (默认关闭, 零队列开销)
+		glm::vec3 PlaneOrigin { 0.0f }; // 平面点
+		glm::vec3 PlaneNormal { 0.0f, 1.0f, 0.0f }; // 平面法线
+		uint32_t CollisionLayerMask = 0xFFFFFFFF;   // 场景射线图层掩码
+		float DamageAmount = 0.0f;      // 碰撞伤害值
+	};
+
+	struct ParticleHitRecord
+	{
+		glm::vec3 Position { 0.0f };
+		glm::vec3 Normal { 0.0f, 1.0f, 0.0f };
+		glm::vec3 Velocity { 0.0f };
+		uint32_t HitEntityId = 0;
+		uint32_t ParticleIndex = 0;
+	};
+
+	class WLD_API ParticleCollisionEventQueue
+	{
+	public:
+		void Enqueue(const ParticleHitRecord& record) { m_Buffer.push_back(record); }
+		const std::vector<ParticleHitRecord>& GetHits() const { return m_Buffer; }
+		std::vector<ParticleHitRecord> Flush()
+		{
+			std::vector<ParticleHitRecord> hits = std::move(m_Buffer);
+			m_Buffer.clear();
+			return hits;
+		}
+		void Clear() { m_Buffer.clear(); }
+		bool HasHits() const { return !m_Buffer.empty(); }
+		size_t Size() const { return m_Buffer.size(); }
+
+	private:
+		std::vector<ParticleHitRecord> m_Buffer;
+	};
+
+	enum class SubEmitterTrigger : uint8_t
+	{
+		OnBirth = 0,
+		OnCollision = 1,
+		OnDeath = 2
+	};
+
+	struct SubEmitterConfig
+	{
+		SubEmitterTrigger Trigger = SubEmitterTrigger::OnCollision;
+		uint32_t EmitCount = 4;
+		float InheritVelocityRatio = 0.2f;
+		ParticleSystemComponent SpawnTemplate {};
+		ParticleMaterialSettings MaterialTemplate {};
 	};
 
 	struct Particle
@@ -74,12 +139,12 @@ namespace World
 	{
 	public:
 		explicit ParticlePool(size_t capacity = 1000);
-		~ParticlePool() = default;
+		~ParticlePool();
 
 		ParticlePool(const ParticlePool&) = delete;
 		ParticlePool& operator=(const ParticlePool&) = delete;
-		ParticlePool(ParticlePool&&) noexcept = default;
-		ParticlePool& operator=(ParticlePool&&) noexcept = default;
+		ParticlePool(ParticlePool&&) noexcept;
+		ParticlePool& operator=(ParticlePool&&) noexcept;
 
 		size_t Capacity() const { return m_Particles.size(); }
 		size_t ActiveCount() const { return m_ActiveCount; }
@@ -92,6 +157,20 @@ namespace World
 		const ParticleMaterialSettings& GetMaterialSettings() const { return m_Material; }
 		ParticleMaterialSettings& GetMaterialSettings() { return m_Material; }
 		ParticleMaterialSettings& GetMaterialSettingsMut() { return m_Material; }
+
+		void SetCollisionSettings(const ParticleCollisionSettings& col) { m_Collision = col; }
+		const ParticleCollisionSettings& GetCollisionSettings() const { return m_Collision; }
+		ParticleCollisionSettings& GetCollisionSettings() { return m_Collision; }
+		ParticleCollisionSettings& GetCollisionSettingsMut() { return m_Collision; }
+
+		const ParticleCollisionEventQueue& GetEventQueue() const { return m_EventQueue; }
+		ParticleCollisionEventQueue& GetEventQueueMut() { return m_EventQueue; }
+
+		void AddSubEmitter(const SubEmitterConfig& config);
+		const std::vector<SubEmitterConfig>& GetSubEmitters() const { return m_SubEmitters; }
+		void ClearSubEmitters() { m_SubEmitters.clear(); }
+		ParticlePool* GetSecondaryPool() { return m_SecondaryPool.get(); }
+		const ParticlePool* GetSecondaryPool() const { return m_SecondaryPool.get(); }
 
 		void Emit(size_t count, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot);
 		void Emit(size_t count, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::vec3& emitterRotEuler = glm::vec3(0.0f));
@@ -110,6 +189,11 @@ namespace World
 	private:
 		std::vector<Particle> m_Particles;
 		ParticleMaterialSettings m_Material {};
+		ParticleCollisionSettings m_Collision {};
+		ParticleCollisionEventQueue m_EventQueue {};
+		std::vector<SubEmitterConfig> m_SubEmitters;
+		std::unique_ptr<ParticlePool> m_SecondaryPool;
+
 		size_t m_ActiveCount = 0;
 		size_t m_NextFreeIndex = 0;
 		float m_EmissionAccumulator = 0.0f;
@@ -119,6 +203,14 @@ namespace World
 		float RandomFloat();
 		float RandomFloatSigned();
 		glm::vec3 RandomUnitVector();
+		void TriggerSubEmitters(SubEmitterTrigger trigger, const glm::vec3& pos, const glm::vec3& normal, const glm::vec3& vel);
+	};
+
+	struct OneShotEmitter
+	{
+		std::unique_ptr<ParticlePool> Pool;
+		ParticleSystemComponent Comp;
+		float Elapsed = 0.0f;
 	};
 
 	class WLD_API ParticleSystem
@@ -140,7 +232,16 @@ namespace World
 		void ClearAll();
 		size_t PoolCount() const { return m_Pools.size(); }
 
+		void SpawnOneShot(const ParticleSystemComponent& comp, const ParticleMaterialSettings& mat,
+			const glm::vec3& position, const glm::quat& rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+		void UpdateOneShots(float dt);
+		const std::vector<OneShotEmitter>& GetOneShots() const { return m_OneShots; }
+		std::vector<OneShotEmitter>& GetOneShotsMut() { return m_OneShots; }
+		size_t ActiveOneShotCount() const;
+		void ClearOneShots() { m_OneShots.clear(); }
+
 	private:
 		std::unordered_map<uint32_t, std::unique_ptr<ParticlePool>> m_Pools;
+		std::vector<OneShotEmitter> m_OneShots;
 	};
 }
