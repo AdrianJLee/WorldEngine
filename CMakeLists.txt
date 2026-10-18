@@ -32,7 +32,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #   `Scene` 成员,崩在物理调试绘制里(见 Engine/src/World/Core/RuntimeContract.h)。
 #   构建必须要么整体成功、要么明确失败,不能悄悄留下混合树。
 if(MSVC)
-    add_compile_options(/FS)
+    add_compile_options(/FS "/utf-8")
 endif()
 
 # --- 查找 Vulkan SDK(可选):headers+volk 已 vendor,SDK 仅用于可选验证层

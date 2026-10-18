@@ -5,9 +5,14 @@ extern World::Application* World::CreateApplication(World::WorldContext& context
 #include "World/Core/RuntimeContract.h"
 
 #include <cstdio>
+#include <windows.h>
 
 int main(int argc, char** argv)
 {
+#if defined(_WIN32)
+	::SetConsoleOutputCP(CP_UTF8);
+	::SetConsoleCP(CP_UTF8);
+#endif
 	World::Log::Init();
 
 	// 宿主(Editor / Runtime)与 WorldRuntime.dll 的布局契约:世代不一致时**干净退出**,
@@ -30,7 +35,5 @@ int main(int argc, char** argv)
 	auto app = World::CreateApplication(context);
 	app->Run();
 	delete app;
-
-
 }
 #endif

@@ -5,9 +5,11 @@
 #include "spdlog/sinks/rotating_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
+#include <clocale>
 #include <deque>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 
 #if defined(_WIN32)
@@ -74,6 +76,13 @@ namespace World
 
 	void Log::Init()
 	{
+#if defined(_WIN32)
+		// 切换 Windows 控制台代码页为 UTF-8 (65001)，根治控制台中文乱码
+		::SetConsoleOutputCP(CP_UTF8);
+		::SetConsoleCP(CP_UTF8);
+#endif
+		std::setlocale(LC_ALL, ".UTF-8");
+
 		spdlog::set_pattern("%^[%T] %n: %v%$");
 		// 最近日志缓冲:与 stdout sink 并存(不改既有输出行为)。
 		std::shared_ptr<RecentLinesSink> recent = std::make_shared<RecentLinesSink>();
@@ -126,6 +135,39 @@ namespace World
 		}
 		try
 		{
+			// 自动保证日志文件首部包含 UTF-8 BOM (\xEF\xBB\xBF)，
+			// 确保 Windows 记事本、PowerShell 及各文本查看器自动识别为 UTF-8 编码，彻底根治文件中文乱码
+			std::error_code ec;
+			if (!std::filesystem::exists(logPath, ec) || std::filesystem::file_size(logPath, ec) == 0)
+			{
+				std::filesystem::create_directories(logPath.parent_path(), ec);
+				std::ofstream bomFile(logPath, std::ios::binary);
+				if (bomFile.is_open())
+				{
+					const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+					bomFile.write(reinterpret_cast<const char*>(bom), sizeof(bom));
+					bomFile.close();
+				}
+			}
+			else
+			{
+				std::ifstream checkFile(logPath, std::ios::binary);
+				unsigned char header[3] = {};
+				checkFile.read(reinterpret_cast<char*>(header), 3);
+				checkFile.close();
+				if (!(header[0] == 0xEF && header[1] == 0xBB && header[2] == 0xBF))
+				{
+					std::ifstream inFile(logPath, std::ios::binary);
+					std::string content((std::istreambuf_iterator<char>(inFile)), std::istreambuf_iterator<char>());
+					inFile.close();
+					std::ofstream outFile(logPath, std::ios::binary | std::ios::trunc);
+					const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+					outFile.write(reinterpret_cast<const char*>(bom), sizeof(bom));
+					outFile.write(content.data(), content.size());
+					outFile.close();
+				}
+			}
+
 			auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
 				logPath.string(), 5 * 1024 * 1024, 3);
 			fileSink->set_pattern("%^[%Y-%m-%d %T] %n: %v%$");
