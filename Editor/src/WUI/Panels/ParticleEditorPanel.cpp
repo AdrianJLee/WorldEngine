@@ -376,11 +376,65 @@ namespace World
 			}
 		}
 
-		// 绘制中心发射器 Gizmo
+		// 平滑投影线段辅助函数
+		auto drawProjectedSegment = [&](const glm::vec3& a, const glm::vec3& b, const Wui::WuiColor& col, float thickness) {
+			const int steps = 12;
+			for (int s = 0; s <= steps; ++s)
+			{
+				float t = static_cast<float>(s) / static_cast<float>(steps);
+				glm::vec3 pt = glm::mix(a, b, t);
+				glm::vec2 sp;
+				if (projectPoint(pt, sp))
+				{
+					Wui::BarSurface(ctx, { sp.x - thickness * 0.5f, sp.y - thickness * 0.5f, thickness, thickness }, col, col);
+				}
+			}
+		};
+
+		// 1. 世界原点 3D 核心坐标系 (World Center 3D Axes: X=红, Y=绿, Z=蓝)
+		const Wui::WuiColor axisXCol { 0.95f, 0.22f, 0.22f, 0.95f };
+		const Wui::WuiColor axisYCol { 0.22f, 0.90f, 0.32f, 0.95f };
+		const Wui::WuiColor axisZCol { 0.22f, 0.55f, 0.98f, 0.95f };
+
+		// X 轴 (+X 红色, 长度 1.5m)
+		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(1.5f, 0.0f, 0.0f), axisXCol, 2.0f);
+		glm::vec2 xTip;
+		if (projectPoint(glm::vec3(1.55f, 0.0f, 0.0f), xTip))
+		{
+			Wui::Label(ctx, { xTip.x + 3.0f, xTip.y - 6.0f }, "X (+1.5m)", axisXCol, 11.0f);
+		}
+
+		// Y 轴 (+Y 绿色垂直向上, 长度 1.5m)
+		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(0.0f, 1.5f, 0.0f), axisYCol, 2.0f);
+		glm::vec2 yTip;
+		if (projectPoint(glm::vec3(0.0f, 1.55f, 0.0f), yTip))
+		{
+			Wui::Label(ctx, { yTip.x + 3.0f, yTip.y - 6.0f }, "Y (+1.5m)", axisYCol, 11.0f);
+		}
+
+		// Z 轴 (+Z 蓝色, 长度 1.5m)
+		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.5f), axisZCol, 2.0f);
+		glm::vec2 zTip;
+		if (projectPoint(glm::vec3(0.0f, 0.0f, 1.55f), zTip))
+		{
+			Wui::Label(ctx, { zTip.x + 3.0f, zTip.y - 6.0f }, "Z (+1.5m)", axisZCol, 11.0f);
+		}
+
+		// 地面网格刻度指示标 (Scale Ruler Markers)
+		for (int m = 1; m <= 3; ++m)
+		{
+			glm::vec2 smX, smZ;
+			if (projectPoint(glm::vec3(static_cast<float>(m), 0.0f, 0.0f), smX))
+				Wui::Label(ctx, { smX.x - 8.0f, smX.y + 4.0f }, std::to_string(m) + "m", Wui::WuiColor { 0.6f, 0.6f, 0.65f, 0.5f }, 9.5f);
+			if (projectPoint(glm::vec3(0.0f, 0.0f, static_cast<float>(m)), smZ))
+				Wui::Label(ctx, { smZ.x + 4.0f, smZ.y - 6.0f }, std::to_string(m) + "m", Wui::WuiColor { 0.6f, 0.6f, 0.65f, 0.5f }, 9.5f);
+		}
+
+		// 原点中心发射器 Gizmo 锚点
 		glm::vec2 originScreen;
 		if (projectPoint(glm::vec3(0.0f, 0.0f, 0.0f), originScreen))
 		{
-			Wui::BarSurface(ctx, { originScreen.x - 3.0f, originScreen.y - 3.0f, 6.0f, 6.0f }, theme.Accent, theme.Accent);
+			Wui::BarSurface(ctx, { originScreen.x - 4.0f, originScreen.y - 4.0f, 8.0f, 8.0f }, theme.Accent, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f });
 		}
 
 		// 实时渲染粒子四边形
@@ -409,6 +463,66 @@ namespace World
 				}
 			}
 		}
+
+		
+		// 视口右上角预设视角切换岛 (Quick View Presets)
+		const float viewBtnW = 42.0f;
+		float vx = vpRect.X + vpRect.W - (viewBtnW * 4.0f + 24.0f);
+		const float vy = vpRect.Y + 8.0f;
+		const Wui::WuiRect vIsland { vx - 4.0f, vy - 2.0f, viewBtnW * 4.0f + 20.0f, 26.0f };
+		Wui::BarSurface(ctx, vIsland, Wui::WuiColor { 0.05f, 0.07f, 0.09f, 0.75f }, theme.Border);
+
+		const Wui::WuiRect btn3D { vx, vy, viewBtnW, 22.0f };
+		Wui::Tooltip(ctx, btn3D, "透视 3D 自由轨道视角 (3D Orbit)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.view.3d"), btn3D, "3D", theme)) { m_OrbitYaw = 0.785f; m_OrbitPitch = 0.45f; }
+		vx += viewBtnW + 4.0f;
+
+		const Wui::WuiRect btnTop { vx, vy, viewBtnW, 22.0f };
+		Wui::Tooltip(ctx, btnTop, "顶视图: 垂直向下观察地表 XZ 扩散 (Top View)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.view.top"), btnTop, "顶视", theme)) { m_OrbitYaw = 0.0f; m_OrbitPitch = 1.45f; }
+		vx += viewBtnW + 4.0f;
+
+		const Wui::WuiRect btnFront { vx, vy, viewBtnW, 22.0f };
+		Wui::Tooltip(ctx, btnFront, "正视图: 水平观察 XY 喷射高度 (Front View)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.view.front"), btnFront, "正视", theme)) { m_OrbitYaw = 0.0f; m_OrbitPitch = 0.0f; }
+		vx += viewBtnW + 4.0f;
+
+		const Wui::WuiRect btnSide { vx, vy, viewBtnW, 22.0f };
+		Wui::Tooltip(ctx, btnSide, "侧视图: 水平侧面观察 ZY 轨迹 (Side View)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.view.side"), btnSide, "侧视", theme)) { m_OrbitYaw = 1.57f; m_OrbitPitch = 0.0f; }
+
+		// 视口左下角 3D 方位罗盘小陀螺 (Corner View Compass Tripod)
+		const glm::vec2 compassCenter { vpRect.X + 45.0f, vpRect.Y + vpRect.H - 72.0f };
+		const Wui::WuiRect compassBg { compassCenter.x - 28.0f, compassCenter.y - 28.0f, 56.0f, 56.0f };
+		Wui::BarSurface(ctx, compassBg, Wui::WuiColor { 0.05f, 0.07f, 0.09f, 0.80f }, theme.Border);
+		Wui::Label(ctx, { compassBg.X + 4.0f, compassBg.Y + 2.0f }, "视角方位", theme.TextMuted, 9.5f);
+
+		// 基于相机视图矩阵计算三个轴向在屏幕上的朝向向量
+		const glm::mat3 rotMat = glm::mat3(view);
+		const glm::vec3 camX = rotMat * glm::vec3(1.0f, 0.0f, 0.0f);
+		const glm::vec3 camY = rotMat * glm::vec3(0.0f, 1.0f, 0.0f);
+		const glm::vec3 camZ = rotMat * glm::vec3(0.0f, 0.0f, 1.0f);
+
+		const float armLen = 20.0f;
+		const glm::vec2 sX = compassCenter + glm::vec2(camX.x, -camX.y) * armLen;
+		const glm::vec2 sY = compassCenter + glm::vec2(camY.x, -camY.y) * armLen;
+		const glm::vec2 sZ = compassCenter + glm::vec2(camZ.x, -camZ.y) * armLen;
+
+		auto drawCompassArm = [&](const glm::vec2& tip, const Wui::WuiColor& c, const char* name) {
+			const int segs = 6;
+			for (int i = 0; i <= segs; ++i)
+			{
+				float t = static_cast<float>(i) / static_cast<float>(segs);
+				glm::vec2 p = glm::mix(compassCenter, tip, t);
+				Wui::BarSurface(ctx, { p.x - 1.0f, p.y - 1.0f, 2.0f, 2.0f }, c, c);
+			}
+			Wui::Label(ctx, { tip.x + (tip.x >= compassCenter.x ? 2.0f : -8.0f), tip.y - 5.0f }, name, c, 10.5f);
+		};
+
+		drawCompassArm(sX, axisXCol, "X");
+		drawCompassArm(sY, axisYCol, "Y");
+		drawCompassArm(sZ, axisZCol, "Z");
+		Wui::BarSurface(ctx, { compassCenter.x - 2.0f, compassCenter.y - 2.0f, 4.0f, 4.0f }, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 0.9f }, theme.Accent);
 
 		// 视口悬浮 HUD
 		const Wui::WuiRect hudRect { vpRect.X + 8.0f, vpRect.Y + 8.0f, 190.0f, 52.0f };
