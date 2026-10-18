@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/ParticleAsset.h"
 
 #include <cmath>
 #include <algorithm>
@@ -74,6 +75,7 @@ namespace World
 		m_ActiveCount = 0;
 		m_NextFreeIndex = 0;
 		m_EmissionAccumulator = 0.0f;
+		m_SimElapsedTime = 0.0f;
 		m_RngState = m_InitialSeed;
 		m_EventQueue.Clear();
 		if (m_SecondaryPool)
@@ -238,14 +240,36 @@ namespace World
 
 	void ParticlePool::Update(float dt, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot)
 	{
-		if (comp.IsPlaying != 0 && comp.EmissionRate > 0.0f)
+		float prevTime = m_SimElapsedTime;
+		m_SimElapsedTime += dt;
+
+		if (comp.IsPlaying != 0)
 		{
-			m_EmissionAccumulator += comp.EmissionRate * dt;
-			size_t toEmit = static_cast<size_t>(m_EmissionAccumulator);
-			if (toEmit > 0)
+			for (const auto& burst : m_Bursts)
 			{
-				m_EmissionAccumulator -= static_cast<float>(toEmit);
-				Emit(toEmit, comp, emitterPos, emitterRot);
+				if (burst.Count > 0)
+				{
+					bool fire = false;
+					if (burst.Time <= 0.0f && prevTime <= 0.0f)
+						fire = true;
+					else if (burst.Time > 0.0f && prevTime < burst.Time && m_SimElapsedTime >= burst.Time)
+						fire = true;
+					if (fire)
+					{
+						Emit(burst.Count, comp, emitterPos, emitterRot);
+					}
+				}
+			}
+
+			if (comp.EmissionRate > 0.0f)
+			{
+				m_EmissionAccumulator += comp.EmissionRate * dt;
+				size_t toEmit = static_cast<size_t>(m_EmissionAccumulator);
+				if (toEmit > 0)
+				{
+					m_EmissionAccumulator -= static_cast<float>(toEmit);
+					Emit(toEmit, comp, emitterPos, emitterRot);
+				}
 			}
 		}
 
@@ -273,6 +297,37 @@ namespace World
 				if (m_ActiveCount > 0) m_ActiveCount--;
 				TriggerSubEmitters(SubEmitterTrigger::OnDeath, p.Position, glm::vec3(0.0f, 1.0f, 0.0f), p.Velocity);
 				continue;
+			}
+
+			// Apply Linear Drag damping
+			if (m_LinearDrag > 0.0f)
+			{
+				p.Velocity *= std::max(0.0f, 1.0f - m_LinearDrag * dt);
+			}
+
+			// Apply Vortex Swirl angular force
+			if (std::abs(m_VortexStrength) > 1e-4f)
+			{
+				glm::vec3 relPos = p.Position - emitterPos;
+				glm::vec3 tangent = glm::cross(m_VortexAxis, relPos);
+				float tLen = glm::length(tangent);
+				if (tLen > 1e-4f)
+				{
+					p.Velocity += (tangent / tLen) * (m_VortexStrength * dt);
+				}
+			}
+
+			// Apply Turbulence noise force
+			if (m_TurbulenceStrength > 1e-4f)
+			{
+				float freq = m_TurbulenceFrequency > 1e-4f ? m_TurbulenceFrequency : 1.0f;
+				glm::vec3 sp = p.Position * freq;
+				glm::vec3 turb(
+					std::sin(sp.y * 1.7f + p.Life * 2.1f) + std::cos(sp.z * 1.3f),
+					std::sin(sp.z * 1.9f + p.Life * 2.3f) + std::cos(sp.x * 1.1f),
+					std::sin(sp.x * 1.5f + p.Life * 2.5f) + std::cos(sp.y * 1.4f)
+				);
+				p.Velocity += turb * (m_TurbulenceStrength * dt);
 			}
 
 			p.Velocity += (comp.Gravity + p.Acceleration) * dt;
@@ -437,30 +492,62 @@ namespace World
 			if (!p.Active) continue;
 
 			const glm::vec2 halfSize = p.Size * 0.5f;
-			const glm::vec3 toCam = cameraPos - p.Position;
-			const float dist2 = glm::dot(toCam, toCam);
-			const glm::vec3 normal = dist2 > 1e-6f ? glm::normalize(toCam) : glm::vec3(0.0f, 0.0f, 1.0f);
+			glm::vec3 right(1.0f, 0.0f, 0.0f);
+			glm::vec3 up(0.0f, 1.0f, 0.0f);
 
-			glm::vec3 right = glm::cross(cameraUp, normal);
-			const float rightDist2 = glm::dot(right, right);
-			right = rightDist2 > 1e-6f ? glm::normalize(right) : glm::vec3(1.0f, 0.0f, 0.0f);
-
-			glm::vec3 up = glm::cross(normal, right);
-
-			if (std::abs(p.Rotation) > 1e-6f)
+			if (m_Material.FacingMode == ParticleRenderMode::StretchedVelocity)
 			{
-				const float cosR = std::cos(p.Rotation);
-				const float sinR = std::sin(p.Rotation);
-				const glm::vec3 newRight = right * cosR + up * sinR;
-				const glm::vec3 newUp = -right * sinR + up * cosR;
-				right = newRight;
-				up = newUp;
+				float speed = glm::length(p.Velocity);
+				glm::vec3 velDir = speed > 1e-4f ? (p.Velocity / speed) : glm::vec3(0.0f, 1.0f, 0.0f);
+				const glm::vec3 toCam = cameraPos - p.Position;
+				const float dist2 = glm::dot(toCam, toCam);
+				const glm::vec3 normal = dist2 > 1e-6f ? glm::normalize(toCam) : glm::vec3(0.0f, 0.0f, 1.0f);
+				right = glm::cross(velDir, normal);
+				float rLen = glm::length(right);
+				right = (rLen > 1e-4f ? (right / rLen) : glm::vec3(1.0f, 0.0f, 0.0f)) * halfSize.x;
+				up = velDir * (halfSize.y * (1.0f + speed * 0.12f));
+			}
+			else if (m_Material.FacingMode == ParticleRenderMode::HorizontalQuad)
+			{
+				right = glm::vec3(halfSize.x, 0.0f, 0.0f);
+				up = glm::vec3(0.0f, 0.0f, halfSize.y);
+				if (std::abs(p.Rotation) > 1e-6f)
+				{
+					const float cosR = std::cos(p.Rotation);
+					const float sinR = std::sin(p.Rotation);
+					right = glm::vec3(halfSize.x * cosR, 0.0f, halfSize.x * sinR);
+					up = glm::vec3(-halfSize.y * sinR, 0.0f, halfSize.y * cosR);
+				}
+			}
+			else
+			{
+				const glm::vec3 toCam = cameraPos - p.Position;
+				const float dist2 = glm::dot(toCam, toCam);
+				const glm::vec3 normal = dist2 > 1e-6f ? glm::normalize(toCam) : glm::vec3(0.0f, 0.0f, 1.0f);
+
+				right = glm::cross(cameraUp, normal);
+				const float rightDist2 = glm::dot(right, right);
+				right = rightDist2 > 1e-6f ? glm::normalize(right) : glm::vec3(1.0f, 0.0f, 0.0f);
+
+				up = glm::cross(normal, right);
+
+				if (std::abs(p.Rotation) > 1e-6f)
+				{
+					const float cosR = std::cos(p.Rotation);
+					const float sinR = std::sin(p.Rotation);
+					const glm::vec3 newRight = right * cosR + up * sinR;
+					const glm::vec3 newUp = -right * sinR + up * cosR;
+					right = newRight;
+					up = newUp;
+				}
+				right *= halfSize.x;
+				up *= halfSize.y;
 			}
 
-			const glm::vec3 p0 = p.Position - right * halfSize.x - up * halfSize.y;
-			const glm::vec3 p1 = p.Position + right * halfSize.x - up * halfSize.y;
-			const glm::vec3 p2 = p.Position + right * halfSize.x + up * halfSize.y;
-			const glm::vec3 p3 = p.Position - right * halfSize.x + up * halfSize.y;
+			const glm::vec3 p0 = p.Position - right - up;
+			const glm::vec3 p1 = p.Position + right - up;
+			const glm::vec3 p2 = p.Position + right + up;
+			const glm::vec3 p3 = p.Position - right + up;
 
 			const glm::vec4 uvRect = ComputeSubUVRect(p.SubUVFrameIndex, m_Material.SubUVTilesX, m_Material.SubUVTilesY);
 			const glm::vec2 uv0(uvRect.x, uvRect.y);
@@ -533,6 +620,57 @@ namespace World
 	{
 		m_Pools.clear();
 		m_OneShots.clear();
+	}
+
+	void ParticleSystem::SpawnOneShotAsset(const ParticleAsset& asset, const glm::vec3& position, const glm::quat& rotation)
+	{
+		for (const auto& em : asset.Emitters)
+		{
+			if (!em.Enabled) continue;
+
+			const size_t capacity = std::max(em.MaxParticles, 64u);
+			auto pool = std::make_unique<ParticlePool>(capacity);
+			pool->SetSeed(asset.Seed);
+			pool->SetMaterialSettings(em.Material);
+			pool->SetCollisionSettings(em.Collision);
+			pool->SetLinearDrag(em.LinearDrag);
+			pool->SetVortex(em.VortexStrength, em.VortexAxis);
+			pool->SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
+
+			ParticleSystemComponent comp;
+			comp.MaxParticles = em.MaxParticles;
+			comp.Lifetime = em.Lifetime;
+			comp.EmissionRate = em.EmissionRate;
+			comp.Speed = em.Speed;
+			comp.SpeedVariance = em.SpeedVariance;
+			comp.Gravity = em.Gravity;
+			comp.SizeStart = em.SizeStart;
+			comp.SizeEnd = em.SizeEnd;
+			comp.EmitterType = em.EmitterType;
+			comp.RenderMode = em.FacingMode;
+			comp.BlendMode = em.Material.BlendMode;
+			comp.LockToXYPlane = em.LockToXY;
+			comp.IsPlaying = 1;
+			comp.Looping = asset.Looping ? 1 : 0;
+			comp.ColorStart = 0xFFFFFFFF;
+			comp.ColorEnd = 0x00FFFFFF;
+
+			if (!em.Bursts.empty())
+			{
+				for (const auto& b : em.Bursts)
+					pool->AddBurst(b.Time, b.Count);
+			}
+			else
+			{
+				pool->Emit(std::min(em.MaxParticles, 32u), comp, position, rotation);
+			}
+
+			OneShotEmitter emitter;
+			emitter.Pool = std::move(pool);
+			emitter.Comp = comp;
+			emitter.Elapsed = 0.0f;
+			m_OneShots.push_back(std::move(emitter));
+		}
 	}
 
 	void ParticleSystem::SpawnOneShot(const ParticleSystemComponent& comp, const ParticleMaterialSettings& mat,

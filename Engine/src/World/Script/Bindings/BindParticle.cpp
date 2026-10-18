@@ -2,6 +2,7 @@
 #include "World/Script/Bindings/BindParticle.h"
 
 #include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/ParticleAsset.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
@@ -92,6 +93,17 @@ namespace World
 				return n != 0.0;
 			}
 			throw std::logic_error(table + "." + method.Name + ": argument " + std::to_string(index + 1) + " must be boolean");
+		}
+
+		std::string RequireString(const std::string& table, const ScriptServiceMethod& method,
+		                          const ScriptValue* args, std::size_t count, std::size_t index)
+		{
+			if (index >= count || args[index].IsNil())
+				throw std::logic_error(table + "." + method.Name + ": missing string argument " + std::to_string(index + 1));
+			std::string str;
+			if (!args[index].AsString(&str))
+				throw std::logic_error(table + "." + method.Name + ": argument " + std::to_string(index + 1) + " must be string");
+			return str;
 		}
 
 		// ---- Particle Implementation Methods ----
@@ -499,6 +511,203 @@ namespace World
 		}
 
 
+		// ---- VFX Authoring & Playback Implementation Methods ----
+		ScriptValue VfxCreateImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[0];
+			std::string name = RequireString("VFX", method, args, count, 0);
+
+			ParticleAsset asset;
+			asset.Name = name;
+			static uint64_t s_CreateGuid = 10000;
+			asset.Guid = ++s_CreateGuid;
+			uint64_t guid = ParticleAssetRegistry::Get().RegisterAssetFromMemory(name, asset);
+			return ScriptValue::Number(static_cast<double>(guid));
+		}
+
+		ScriptValue VfxCompileFromYamlImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[1];
+			std::string yaml = RequireString("VFX", method, args, count, 0);
+
+			ParticleAsset asset;
+			if (!ParticleAssetSerializer::DeserializeFromString(yaml, asset))
+			{
+				throw std::logic_error("VFX.CompileFromYaml: YAML syntax or schema error; failed to parse VFX definition");
+			}
+			if (asset.Guid == 0)
+			{
+				static uint64_t s_CompileGuid = 20000;
+				asset.Guid = ++s_CompileGuid;
+			}
+			uint64_t guid = ParticleAssetRegistry::Get().RegisterAssetFromMemory(asset.Name, asset);
+			return ScriptValue::Number(static_cast<double>(guid));
+		}
+
+		ScriptValue VfxToYamlImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[2];
+			double guidNum = RequireNum("VFX", method, args, count, 0);
+			uint64_t guid = static_cast<uint64_t>(guidNum);
+
+			const auto* asset = ParticleAssetRegistry::Get().GetAsset(guid);
+			if (!asset)
+			{
+				throw std::logic_error("VFX.ToYaml: asset not found for GUID " + std::to_string(guid));
+			}
+			return ScriptValue::String(ParticleAssetSerializer::SerializeToString(*asset));
+		}
+
+		ScriptValue VfxLoadImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[3];
+			std::string path = RequireString("VFX", method, args, count, 0);
+
+			uint64_t guid = ParticleAssetRegistry::Get().RegisterAsset(path);
+			if (guid == 0)
+			{
+				throw std::logic_error("VFX.Load: failed to load or parse asset file at " + path);
+			}
+			return ScriptValue::Number(static_cast<double>(guid));
+		}
+
+		ScriptValue VfxSpawnImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[4];
+			double guidNum = RequireNum("VFX", method, args, count, 0);
+			double x = RequireNum("VFX", method, args, count, 1);
+			double y = RequireNum("VFX", method, args, count, 2);
+			double z = RequireNum("VFX", method, args, count, 3);
+
+			uint64_t guid = static_cast<uint64_t>(guidNum);
+			const auto* asset = ParticleAssetRegistry::Get().GetAsset(guid);
+			if (!asset)
+			{
+				return ScriptValue::Boolean(false);
+			}
+
+			glm::vec3 pos(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+			GetGlobalParticleSystem().SpawnOneShotAsset(*asset, pos);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue VfxAddEmitterImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[5];
+			double guidNum = RequireNum("VFX", method, args, count, 0);
+			std::string name = RequireString("VFX", method, args, count, 1);
+
+			uint64_t guid = static_cast<uint64_t>(guidNum);
+			auto* asset = ParticleAssetRegistry::Get().GetAssetMut(guid);
+			if (!asset)
+			{
+				throw std::logic_error("VFX.AddEmitter: asset not found for GUID " + std::to_string(guid));
+			}
+
+			ParticleEmitterLayer em;
+			em.Name = name;
+			asset->Emitters.push_back(em);
+			return ScriptValue::Number(static_cast<double>(asset->Emitters.size() - 1));
+		}
+
+		ScriptValue VfxSetForcesImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[6];
+			double guidNum = RequireNum("VFX", method, args, count, 0);
+			double idx = RequireNum("VFX", method, args, count, 1);
+			double gx = (count > 2 && !args[2].IsNil()) ? RequireNum("VFX", method, args, count, 2) : 0.0;
+			double gy = (count > 3 && !args[3].IsNil()) ? RequireNum("VFX", method, args, count, 3) : -9.8;
+			double gz = (count > 4 && !args[4].IsNil()) ? RequireNum("VFX", method, args, count, 4) : 0.0;
+			double drag = (count > 5 && !args[5].IsNil()) ? RequireNum("VFX", method, args, count, 5) : 0.0;
+			double vortex = (count > 6 && !args[6].IsNil()) ? RequireNum("VFX", method, args, count, 6) : 0.0;
+			double turb = (count > 7 && !args[7].IsNil()) ? RequireNum("VFX", method, args, count, 7) : 0.0;
+
+			uint64_t guid = static_cast<uint64_t>(guidNum);
+			auto* asset = ParticleAssetRegistry::Get().GetAssetMut(guid);
+			if (!asset) throw std::logic_error("VFX.SetForces: asset not found for GUID " + std::to_string(guid));
+
+			size_t emIdx = static_cast<size_t>(idx);
+			if (emIdx >= asset->Emitters.size()) throw std::logic_error("VFX.SetForces: emitter index out of range");
+
+			auto& em = asset->Emitters[emIdx];
+			em.Gravity = glm::vec3(static_cast<float>(gx), static_cast<float>(gy), static_cast<float>(gz));
+			em.LinearDrag = static_cast<float>(drag);
+			em.VortexStrength = static_cast<float>(vortex);
+			em.TurbulenceStrength = static_cast<float>(turb);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue VfxSetMaterialImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[7];
+			double guidNum = RequireNum("VFX", method, args, count, 0);
+			double idx = RequireNum("VFX", method, args, count, 1);
+			std::string blendStr = RequireString("VFX", method, args, count, 2);
+			std::string facingStr = (count > 3 && !args[3].IsNil()) ? RequireString("VFX", method, args, count, 3) : "Billboard";
+			double emissive = (count > 4 && !args[4].IsNil()) ? RequireNum("VFX", method, args, count, 4) : 1.0;
+
+			uint64_t guid = static_cast<uint64_t>(guidNum);
+			auto* asset = ParticleAssetRegistry::Get().GetAssetMut(guid);
+			if (!asset) throw std::logic_error("VFX.SetMaterial: asset not found for GUID " + std::to_string(guid));
+
+			size_t emIdx = static_cast<size_t>(idx);
+			if (emIdx >= asset->Emitters.size()) throw std::logic_error("VFX.SetMaterial: emitter index out of range");
+
+			auto& em = asset->Emitters[emIdx];
+			if (blendStr == "Additive") em.Material.BlendMode = ParticleBlendMode::Additive;
+			else if (blendStr == "Multiply") em.Material.BlendMode = ParticleBlendMode::Multiply;
+			else if (blendStr == "Opaque") em.Material.BlendMode = ParticleBlendMode::Opaque;
+			else em.Material.BlendMode = ParticleBlendMode::AlphaBlend;
+
+			if (facingStr == "StretchedVelocity") em.FacingMode = ParticleRenderMode::StretchedVelocity;
+			else if (facingStr == "HorizontalQuad") em.FacingMode = ParticleRenderMode::HorizontalQuad;
+			else em.FacingMode = ParticleRenderMode::Billboard;
+			em.Material.FacingMode = em.FacingMode;
+
+			em.Material.EmissiveBoost = static_cast<float>(emissive);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue VfxAddBurstImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[8];
+			double guidNum = RequireNum("VFX", method, args, count, 0);
+			double idx = RequireNum("VFX", method, args, count, 1);
+			double time = RequireNum("VFX", method, args, count, 2);
+			double bCount = RequireNum("VFX", method, args, count, 3);
+
+			uint64_t guid = static_cast<uint64_t>(guidNum);
+			auto* asset = ParticleAssetRegistry::Get().GetAssetMut(guid);
+			if (!asset) throw std::logic_error("VFX.AddBurst: asset not found for GUID " + std::to_string(guid));
+
+			size_t emIdx = static_cast<size_t>(idx);
+			if (emIdx >= asset->Emitters.size()) throw std::logic_error("VFX.AddBurst: emitter index out of range");
+
+			asset->Emitters[emIdx].Bursts.push_back({ static_cast<float>(time), static_cast<uint32_t>(bCount) });
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue VfxGetEmitterCountImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const auto& method = VfxServiceBindings(nullptr)[0].Methods[9];
+			double guidNum = RequireNum("VFX", method, args, count, 0);
+
+			uint64_t guid = static_cast<uint64_t>(guidNum);
+			const auto* asset = ParticleAssetRegistry::Get().GetAsset(guid);
+			if (!asset) return ScriptValue::Number(0.0);
+			return ScriptValue::Number(static_cast<double>(asset->Emitters.size()));
+		}
+
 		static const ScriptServiceParam emitParams[] = {
 			{ "entityId", "number", ScriptServiceArgType::Number, true, "Target entity ID or Entity object." },
 			{ "count", "number", ScriptServiceArgType::Number, true, "Number of particles to emit." }
@@ -575,14 +784,80 @@ namespace World
 			{ "SetSpeed", [](const ScriptValue* args, std::size_t count) { return ParticleSetSpeedImpl(args, count); }, speedParams, 2, 2, "boolean", "Set particle emission speed." },
 			{ "SetLifetime", [](const ScriptValue* args, std::size_t count) { return ParticleSetLifetimeImpl(args, count); }, lifetimeParams, 2, 2, "boolean", "Set particle lifetime in seconds." },
 			{ "SetSeed", [](const ScriptValue* args, std::size_t count) { return ParticleSetSeedImpl(args, count); }, seedParams, 2, 2, "boolean", "Set deterministic PRNG seed for particle replay." },
-			{ "SetSubUV", [](const ScriptValue* args, std::size_t count) { return ParticleSetSubUVImpl(args, count); }, subUVParams, 3, 5, "boolean", "Configure Sub-UV flipbook grid and frame rate." },
-			{ "SetSoftParticles", [](const ScriptValue* args, std::size_t count) { return ParticleSetSoftParticlesImpl(args, count); }, softParticleParams, 2, 3, "boolean", "Configure soft particle depth fade." },
+			{ "SetSubUV", [](const ScriptValue* args, std::size_t count) { return ParticleSetSubUVImpl(args, count); }, subUVParams, 5, 3, "boolean", "Configure Sub-UV flipbook grid and frame rate." },
+			{ "SetSoftParticles", [](const ScriptValue* args, std::size_t count) { return ParticleSetSoftParticlesImpl(args, count); }, softParticleParams, 3, 2, "boolean", "Configure soft particle depth fade." },
 			{ "SetEmissiveBoost", [](const ScriptValue* args, std::size_t count) { return ParticleSetEmissiveBoostImpl(args, count); }, emissiveParams, 2, 2, "boolean", "Set HDR emissive multiplier for Bloom." },
-			{ "SetCollision", [](const ScriptValue* args, std::size_t count) { return ParticleSetCollisionImpl(args, count); }, collisionParams, 1, 5, "boolean", "Configure physics plane collision and bounce properties." },
+			{ "SetCollision", [](const ScriptValue* args, std::size_t count) { return ParticleSetCollisionImpl(args, count); }, collisionParams, 5, 1, "boolean", "Configure physics plane collision and bounce properties." },
 			{ "GetCollisionHitCount", [](const ScriptValue* args, std::size_t count) { return ParticleGetCollisionHitCountImpl(args, count); }, singleEntityParams, 1, 1, "number", "Get pending collision hits count." },
 			{ "FlushCollisionHits", [](const ScriptValue* args, std::size_t count) { return ParticleFlushCollisionHitsImpl(args, count); }, singleEntityParams, 1, 1, "number", "Flush and return buffered collision hits count." },
-			{ "SpawnOneShot", [](const ScriptValue* args, std::size_t count) { return ParticleSpawnOneShotImpl(args, count); }, oneShotParams, 3, 6, "boolean", "Spawn an entity-less one-shot particle burst." },
-			{ "AddSubEmitter", [](const ScriptValue* args, std::size_t count) { return ParticleAddSubEmitterImpl(args, count); }, subEmitterParams, 2, 3, "boolean", "Register a secondary emitter triggered on birth, collision, or death." }
+			{ "SpawnOneShot", [](const ScriptValue* args, std::size_t count) { return ParticleSpawnOneShotImpl(args, count); }, oneShotParams, 6, 3, "boolean", "Spawn an entity-less one-shot particle burst." },
+			{ "AddSubEmitter", [](const ScriptValue* args, std::size_t count) { return ParticleAddSubEmitterImpl(args, count); }, subEmitterParams, 3, 2, "boolean", "Register a secondary emitter triggered on birth, collision, or death." }
+		};
+
+		static const ScriptServiceParam vfxCreateParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "Asset name identifier." }
+		};
+		static const ScriptServiceParam vfxCompileParams[] = {
+			{ "yaml", "string", ScriptServiceArgType::String, true, "YAML asset text to parse and compile." }
+		};
+		static const ScriptServiceParam vfxToYamlParams[] = {
+			{ "guid", "number", ScriptServiceArgType::Number, true, "Asset GUID." }
+		};
+		static const ScriptServiceParam vfxLoadParams[] = {
+			{ "path", "string", ScriptServiceArgType::String, true, "Asset file path." }
+		};
+		static const ScriptServiceParam vfxSpawnParams[] = {
+			{ "guid", "number", ScriptServiceArgType::Number, true, "Asset GUID." },
+			{ "x", "number", ScriptServiceArgType::Number, true, "World position X." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "World position Y." },
+			{ "z", "number", ScriptServiceArgType::Number, true, "World position Z." }
+		};
+		static const ScriptServiceParam vfxAddEmitterParams[] = {
+			{ "guid", "number", ScriptServiceArgType::Number, true, "Asset GUID." },
+			{ "name", "string", ScriptServiceArgType::String, true, "Emitter layer name." }
+		};
+		static const ScriptServiceParam vfxSetForcesParams[] = {
+			{ "guid", "number", ScriptServiceArgType::Number, true, "Asset GUID." },
+			{ "emitterIndex", "number", ScriptServiceArgType::Number, true, "Emitter layer index." },
+			{ "gravityX", "number", ScriptServiceArgType::Number, false, "Gravity X acceleration." },
+			{ "gravityY", "number", ScriptServiceArgType::Number, false, "Gravity Y acceleration." },
+			{ "gravityZ", "number", ScriptServiceArgType::Number, false, "Gravity Z acceleration." },
+			{ "drag", "number", ScriptServiceArgType::Number, false, "Linear drag damping." },
+			{ "vortex", "number", ScriptServiceArgType::Number, false, "Vortex swirl strength." },
+			{ "turb", "number", ScriptServiceArgType::Number, false, "Turbulence strength." }
+		};
+		static const ScriptServiceParam vfxSetMaterialParams[] = {
+			{ "guid", "number", ScriptServiceArgType::Number, true, "Asset GUID." },
+			{ "emitterIndex", "number", ScriptServiceArgType::Number, true, "Emitter layer index." },
+			{ "blendMode", "string", ScriptServiceArgType::String, true, "Blend mode (AlphaBlend/Additive/Multiply/Opaque)." },
+			{ "facingMode", "string", ScriptServiceArgType::String, false, "Facing mode (Billboard/StretchedVelocity/HorizontalQuad)." },
+			{ "emissive", "number", ScriptServiceArgType::Number, false, "HDR emissive boost multiplier." }
+		};
+		static const ScriptServiceParam vfxAddBurstParams[] = {
+			{ "guid", "number", ScriptServiceArgType::Number, true, "Asset GUID." },
+			{ "emitterIndex", "number", ScriptServiceArgType::Number, true, "Emitter layer index." },
+			{ "time", "number", ScriptServiceArgType::Number, true, "Burst trigger time in seconds." },
+			{ "count", "number", ScriptServiceArgType::Number, true, "Burst particle count." }
+		};
+		static const ScriptServiceParam vfxGetEmitterCountParams[] = {
+			{ "guid", "number", ScriptServiceArgType::Number, true, "Asset GUID." }
+		};
+
+		static const ScriptServiceMethod vfxMethods[] = {
+			{ "Create", [](const ScriptValue* a, std::size_t c) { return VfxCreateImpl(a, c); }, vfxCreateParams, 1, 1, "number", "Create a new in-memory VFX asset." },
+			{ "CompileFromYaml", [](const ScriptValue* a, std::size_t c) { return VfxCompileFromYamlImpl(a, c); }, vfxCompileParams, 1, 1, "number", "Compile VFX definition directly from YAML text into memory." },
+			{ "ToYaml", [](const ScriptValue* a, std::size_t c) { return VfxToYamlImpl(a, c); }, vfxToYamlParams, 1, 1, "string", "Serialize VFX asset definition to YAML string." },
+			{ "Load", [](const ScriptValue* a, std::size_t c) { return VfxLoadImpl(a, c); }, vfxLoadParams, 1, 1, "number", "Load and register VFX asset from disk file." },
+			{ "Spawn", [](const ScriptValue* a, std::size_t c) { return VfxSpawnImpl(a, c); }, vfxSpawnParams, 4, 4, "boolean", "Spawn and play multi-emitter VFX instance at world coordinates." },
+			{ "AddEmitter", [](const ScriptValue* a, std::size_t c) { return VfxAddEmitterImpl(a, c); }, vfxAddEmitterParams, 2, 2, "number", "Add an emitter layer to a VFX asset." },
+			{ "SetForces", [](const ScriptValue* a, std::size_t c) { return VfxSetForcesImpl(a, c); }, vfxSetForcesParams, 8, 2, "boolean", "Configure gravity, drag, vortex, and turbulence on an emitter layer." },
+			{ "SetMaterial", [](const ScriptValue* a, std::size_t c) { return VfxSetMaterialImpl(a, c); }, vfxSetMaterialParams, 5, 3, "boolean", "Configure blend mode, facing mode, and emissive boost on an emitter layer." },
+			{ "AddBurst", [](const ScriptValue* a, std::size_t c) { return VfxAddBurstImpl(a, c); }, vfxAddBurstParams, 4, 4, "boolean", "Add a timed burst event to an emitter layer." },
+			{ "GetEmitterCount", [](const ScriptValue* a, std::size_t c) { return VfxGetEmitterCountImpl(a, c); }, vfxGetEmitterCountParams, 1, 1, "number", "Get emitter count in VFX asset." }
+		};
+
+		static const ScriptServiceBinding vfxBindingsTable[] = {
+			{ "VFX", "Industrial Visual Effects (VFX) authoring, asset compilation and playback service.", vfxMethods, sizeof(vfxMethods)/sizeof(vfxMethods[0]) }
 		};
 
 		static const ScriptServiceBinding particleBindingsTable[] = {
@@ -627,6 +902,12 @@ namespace World
 
 
 
+	const ScriptServiceBinding* VfxServiceBindings(std::size_t* count)
+	{
+		if (count) *count = sizeof(vfxBindingsTable) / sizeof(vfxBindingsTable[0]);
+		return vfxBindingsTable;
+	}
+
 	const ScriptServiceBinding* ParticleServiceBindings(std::size_t* count)
 	{
 		if (count) *count = sizeof(particleBindingsTable) / sizeof(particleBindingsTable[0]);
@@ -642,6 +923,15 @@ namespace World
 			if (!RegisterServiceTable(bindings, services[index], error))
 				return false;
 		}
+
+		std::size_t vfxCount = 0;
+		const ScriptServiceBinding* vfxServices = VfxServiceBindings(&vfxCount);
+		for (std::size_t index = 0; index < vfxCount; ++index)
+		{
+			if (!RegisterServiceTable(bindings, vfxServices[index], error))
+				return false;
+		}
+
 		if (error) error->clear();
 		return true;
 	}

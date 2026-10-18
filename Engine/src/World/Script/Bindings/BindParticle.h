@@ -19,6 +19,9 @@ namespace World
 	// 粒子系统服务面 API 描述表 (只读全局表 Particle), 供运行时注册与存根生成共用
 	WLD_API const ScriptServiceBinding* ParticleServiceBindings(std::size_t* count);
 
+	// VFX 服务面 API 描述表 (只读全局表 VFX), 供运行时注册与存根生成共用
+	WLD_API const ScriptServiceBinding* VfxServiceBindings(std::size_t* count);
+
 	// 全局粒子模拟系统实例
 	WLD_API ParticleSystem& GetGlobalParticleSystem();
 

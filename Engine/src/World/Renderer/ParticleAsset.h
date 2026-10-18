@@ -18,12 +18,19 @@ namespace World
 		float Lifetime = 2.0f;
 		float EmissionRate = 50.0f;
 		ParticleEmitterType EmitterType = ParticleEmitterType::Point;
+		bool Enabled = true;
+		ParticleRenderMode FacingMode = ParticleRenderMode::Billboard;
 		bool LockToXY = false;
 
 		ParticleMaterialSettings Material;
 		ParticleCollisionSettings Collision;
 
 		glm::vec3 Gravity { 0.0f, -9.8f, 0.0f };
+		float LinearDrag = 0.0f;
+		float VortexStrength = 0.0f;
+		glm::vec3 VortexAxis { 0.0f, 1.0f, 0.0f };
+		float TurbulenceStrength = 0.0f;
+		float TurbulenceFrequency = 1.0f;
 		float Speed = 5.0f;
 		float SpeedVariance = 1.0f;
 		float SizeStart = 0.5f;
@@ -31,6 +38,7 @@ namespace World
 		glm::vec4 ColorStart { 1.0f };
 		glm::vec4 ColorEnd { 1.0f, 1.0f, 1.0f, 0.0f };
 
+		std::vector<ParticleBurst> Bursts;
 		std::vector<SubEmitterConfig> SubEmitters;
 	};
 
@@ -40,6 +48,9 @@ namespace World
 		std::string Name = "UnnamedVFX";
 		std::string AssetPath;
 		uint32_t Seed = 1337;
+		float Duration = 0.0f;
+		bool Looping = true;
+		float WarmupTime = 0.0f;
 		float CullDistance = 60.0f;
 		bool PauseWhenOffscreen = true;
 
@@ -66,6 +77,7 @@ namespace World
 		uint64_t RegisterAsset(const std::string& filepath);
 		uint64_t RegisterAssetFromMemory(const std::string& name, const ParticleAsset& asset);
 		const ParticleAsset* GetAsset(uint64_t guid) const;
+		ParticleAsset* GetAssetMut(uint64_t guid);
 		const ParticleAsset* GetAssetByPath(const std::string& path) const;
 		void Clear();
 		size_t Count() const { return m_Assets.size(); }

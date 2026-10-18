@@ -28,6 +28,26 @@ namespace World
 		return ParticleBlendMode::AlphaBlend;
 	}
 
+		static std::string FacingModeToString(ParticleRenderMode mode)
+	{
+		switch (mode)
+		{
+		case ParticleRenderMode::StretchedVelocity: return "StretchedVelocity";
+		case ParticleRenderMode::HorizontalQuad:    return "HorizontalQuad";
+		case ParticleRenderMode::Quad2D:            return "Quad2D";
+		case ParticleRenderMode::Billboard:
+		default: return "Billboard";
+		}
+	}
+
+	static ParticleRenderMode StringToFacingMode(const std::string& str)
+	{
+		if (str == "StretchedVelocity") return ParticleRenderMode::StretchedVelocity;
+		if (str == "HorizontalQuad")    return ParticleRenderMode::HorizontalQuad;
+		if (str == "Quad2D")            return ParticleRenderMode::Quad2D;
+		return ParticleRenderMode::Billboard;
+	}
+
 	static std::string EmitterTypeToString(ParticleEmitterType type)
 	{
 		switch (type)
@@ -73,6 +93,7 @@ namespace World
 		out << YAML::Key << "MaxParticles" << YAML::Value << em.MaxParticles;
 		out << YAML::Key << "Lifetime" << YAML::Value << em.Lifetime;
 		out << YAML::Key << "EmissionRate" << YAML::Value << em.EmissionRate;
+		out << YAML::Key << "Enabled" << YAML::Value << em.Enabled;
 
 		out << YAML::Key << "Emitter" << YAML::Value << YAML::BeginMap;
 		out << YAML::Key << "Type" << YAML::Value << EmitterTypeToString(em.EmitterType);
@@ -82,6 +103,7 @@ namespace World
 		out << YAML::Key << "Material" << YAML::Value << YAML::BeginMap;
 		out << YAML::Key << "TexturePath" << YAML::Value << em.Material.TexturePath;
 		out << YAML::Key << "BlendMode" << YAML::Value << BlendModeToString(em.Material.BlendMode);
+		out << YAML::Key << "FacingMode" << YAML::Value << FacingModeToString(em.FacingMode);
 		out << YAML::Key << "EmissiveBoost" << YAML::Value << em.Material.EmissiveBoost;
 		out << YAML::Key << "SoftParticle" << YAML::Value << em.Material.SoftParticlesEnabled;
 		out << YAML::Key << "FadeDistance" << YAML::Value << em.Material.SoftParticleFadeDistance;
@@ -98,6 +120,12 @@ namespace World
 		out << YAML::Key << "SpeedVariance" << YAML::Value << em.SpeedVariance;
 		out << YAML::Key << "Gravity" << YAML::Value << YAML::Flow << YAML::BeginSeq
 			<< em.Gravity.x << em.Gravity.y << em.Gravity.z << YAML::EndSeq;
+		out << YAML::Key << "LinearDrag" << YAML::Value << em.LinearDrag;
+		out << YAML::Key << "VortexStrength" << YAML::Value << em.VortexStrength;
+		out << YAML::Key << "VortexAxis" << YAML::Value << YAML::Flow << YAML::BeginSeq
+			<< em.VortexAxis.x << em.VortexAxis.y << em.VortexAxis.z << YAML::EndSeq;
+		out << YAML::Key << "TurbulenceStrength" << YAML::Value << em.TurbulenceStrength;
+		out << YAML::Key << "TurbulenceFrequency" << YAML::Value << em.TurbulenceFrequency;
 		out << YAML::EndMap;
 
 		out << YAML::Key << "Evolution" << YAML::Value << YAML::BeginMap;
@@ -121,6 +149,18 @@ namespace World
 			<< em.Collision.PlaneNormal.x << em.Collision.PlaneNormal.y << em.Collision.PlaneNormal.z << YAML::EndSeq;
 		out << YAML::EndMap;
 
+		if (!em.Bursts.empty())
+		{
+			out << YAML::Key << "Bursts" << YAML::Value << YAML::BeginSeq;
+			for (const auto& b : em.Bursts)
+			{
+				out << YAML::BeginMap;
+				out << YAML::Key << "Time" << YAML::Value << b.Time;
+				out << YAML::Key << "Count" << YAML::Value << b.Count;
+				out << YAML::EndMap;
+			}
+			out << YAML::EndSeq;
+		}
 		out << YAML::EndMap;
 	}
 
@@ -130,6 +170,7 @@ namespace World
 		if (node["MaxParticles"]) em.MaxParticles = node["MaxParticles"].as<uint32_t>();
 		if (node["Lifetime"]) em.Lifetime = node["Lifetime"].as<float>();
 		if (node["EmissionRate"]) em.EmissionRate = node["EmissionRate"].as<float>();
+		if (node["Enabled"]) em.Enabled = node["Enabled"].as<bool>();
 
 		if (const auto emNode = node["Emitter"])
 		{
@@ -141,6 +182,8 @@ namespace World
 		{
 			if (matNode["TexturePath"]) em.Material.TexturePath = matNode["TexturePath"].as<std::string>();
 			if (matNode["BlendMode"]) em.Material.BlendMode = StringToBlendMode(matNode["BlendMode"].as<std::string>());
+			if (matNode["FacingMode"]) em.FacingMode = StringToFacingMode(matNode["FacingMode"].as<std::string>());
+			em.Material.FacingMode = em.FacingMode;
 			if (matNode["EmissiveBoost"]) em.Material.EmissiveBoost = matNode["EmissiveBoost"].as<float>();
 			if (matNode["SoftParticle"]) em.Material.SoftParticlesEnabled = matNode["SoftParticle"].as<bool>();
 			if (matNode["FadeDistance"]) em.Material.SoftParticleFadeDistance = matNode["FadeDistance"].as<float>();
@@ -158,6 +201,18 @@ namespace World
 		{
 			if (motNode["Speed"]) em.Speed = motNode["Speed"].as<float>();
 			if (motNode["SpeedVariance"]) em.SpeedVariance = motNode["SpeedVariance"].as<float>();
+			if (motNode["LinearDrag"]) em.LinearDrag = motNode["LinearDrag"].as<float>();
+			if (motNode["VortexStrength"]) em.VortexStrength = motNode["VortexStrength"].as<float>();
+			if (motNode["VortexAxis"] && motNode["VortexAxis"].IsSequence() && motNode["VortexAxis"].size() >= 3)
+			{
+				em.VortexAxis = glm::vec3(
+					motNode["VortexAxis"][0].as<float>(),
+					motNode["VortexAxis"][1].as<float>(),
+					motNode["VortexAxis"][2].as<float>()
+				);
+			}
+			if (motNode["TurbulenceStrength"]) em.TurbulenceStrength = motNode["TurbulenceStrength"].as<float>();
+			if (motNode["TurbulenceFrequency"]) em.TurbulenceFrequency = motNode["TurbulenceFrequency"].as<float>();
 			if (motNode["Gravity"] && motNode["Gravity"].IsSequence() && motNode["Gravity"].size() >= 3)
 			{
 				em.Gravity = glm::vec3(
@@ -216,6 +271,18 @@ namespace World
 				);
 			}
 		}
+
+		if (const auto burstsNode = node["Bursts"])
+		{
+			em.Bursts.clear();
+			for (const auto& bNode : burstsNode)
+			{
+				ParticleBurst b;
+				if (bNode["Time"]) b.Time = bNode["Time"].as<float>();
+				if (bNode["Count"]) b.Count = bNode["Count"].as<uint32_t>();
+				em.Bursts.push_back(b);
+			}
+		}
 	}
 
 	std::string ParticleAssetSerializer::SerializeToString(const ParticleAsset& asset)
@@ -226,6 +293,9 @@ namespace World
 		out << YAML::Key << "Name" << YAML::Value << asset.Name;
 		out << YAML::Key << "Guid" << YAML::Value << asset.Guid;
 		out << YAML::Key << "Seed" << YAML::Value << asset.Seed;
+		out << YAML::Key << "Duration" << YAML::Value << asset.Duration;
+		out << YAML::Key << "Looping" << YAML::Value << asset.Looping;
+		out << YAML::Key << "WarmupTime" << YAML::Value << asset.WarmupTime;
 
 		out << YAML::Key << "LOD" << YAML::Value << YAML::BeginMap;
 		out << YAML::Key << "CullDistance" << YAML::Value << asset.CullDistance;
@@ -276,6 +346,9 @@ namespace World
 		if (data["Name"]) outAsset.Name = data["Name"].as<std::string>();
 		if (data["Guid"]) outAsset.Guid = data["Guid"].as<uint64_t>();
 		if (data["Seed"]) outAsset.Seed = data["Seed"].as<uint32_t>();
+		if (data["Duration"]) outAsset.Duration = data["Duration"].as<float>();
+		if (data["Looping"]) outAsset.Looping = data["Looping"].as<bool>();
+		if (data["WarmupTime"]) outAsset.WarmupTime = data["WarmupTime"].as<float>();
 
 		if (const auto lodNode = data["LOD"])
 		{
@@ -362,7 +435,8 @@ namespace World
 
 	uint64_t ParticleAssetRegistry::RegisterAssetFromMemory(const std::string& pathOrName, const ParticleAsset& asset)
 	{
-		uint64_t guid = asset.Guid != 0 ? asset.Guid : std::hash<std::string>{}(pathOrName);
+		uint64_t guid = asset.Guid != 0 ? asset.Guid : (static_cast<uint64_t>(std::hash<std::string>{}(pathOrName)) & 0x000FFFFFFFFFFFFFULL);
+		if (guid == 0) guid = 1;
 		ParticleAsset copy = asset;
 		copy.Guid = guid;
 		copy.AssetPath = pathOrName;
@@ -371,6 +445,13 @@ namespace World
 		m_Assets[guid] = std::move(copy);
 		m_PathToGuid[pathOrName] = guid;
 		return guid;
+	}
+
+	ParticleAsset* ParticleAssetRegistry::GetAssetMut(uint64_t guid)
+	{
+		auto it = m_Assets.find(guid);
+		if (it != m_Assets.end()) return &it->second;
+		return nullptr;
 	}
 
 	const ParticleAsset* ParticleAssetRegistry::GetAsset(uint64_t guid) const

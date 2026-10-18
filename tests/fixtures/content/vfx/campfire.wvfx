@@ -1,0 +1,137 @@
+FormatVersion: 1
+Name: Campfire
+Guid: 1001
+Seed: 1337
+Duration: 0
+Looping: true
+WarmupTime: 0.5
+LOD:
+  CullDistance: 60
+  PauseWhenOffscreen: true
+Emitters:
+  - Name: CoreFlame
+    Enabled: true
+    MaxParticles: 400
+    Lifetime: 1.4
+    EmissionRate: 75
+    Emitter:
+      Type: Cone
+      LockToXY: false
+    Material:
+      TexturePath: ""
+      BlendMode: Additive
+      FacingMode: Billboard
+      EmissiveBoost: 2.5
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 3.2
+      SpeedVariance: 0.6
+      Gravity: [0, 2.5, 0]
+      LinearDrag: 0.4
+      VortexStrength: 0.5
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 1.2
+      TurbulenceFrequency: 1.5
+    Evolution:
+      SizeStart: 0.65
+      SizeEnd: 0.12
+      ColorStart: [1, 0.7, 0.2, 1]
+      ColorEnd: [0.9, 0.1, 0, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+  - Name: SmokePuff
+    Enabled: true
+    MaxParticles: 200
+    Lifetime: 2.5
+    EmissionRate: 25
+    Emitter:
+      Type: Cone
+      LockToXY: false
+    Material:
+      TexturePath: ""
+      BlendMode: AlphaBlend
+      FacingMode: Billboard
+      EmissiveBoost: 1
+      SoftParticle: true
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 1.8
+      SpeedVariance: 0.4
+      Gravity: [0, 1.2, 0]
+      LinearDrag: 0.8
+      VortexStrength: 0.2
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0.8
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.3
+      SizeEnd: 1.4
+      ColorStart: [0.35, 0.35, 0.35, 0.55]
+      ColorEnd: [0.15, 0.15, 0.15, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+  - Name: FloatingEmbers
+    Enabled: true
+    MaxParticles: 250
+    Lifetime: 2
+    EmissionRate: 35
+    Emitter:
+      Type: Sphere
+      LockToXY: false
+    Material:
+      TexturePath: ""
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 3.5
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 4.5
+      SpeedVariance: 1.2
+      Gravity: [0, 0.8, 0]
+      LinearDrag: 0.15
+      VortexStrength: 1.8
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 1.6
+      TurbulenceFrequency: 2
+    Evolution:
+      SizeStart: 0.12
+      SizeEnd: 0.02
+      ColorStart: [1, 0.9, 0.4, 1]
+      ColorEnd: [1, 0.2, 0, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]

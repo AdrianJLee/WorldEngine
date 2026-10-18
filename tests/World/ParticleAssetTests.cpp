@@ -169,6 +169,66 @@ static void TestParticleAssetRegistry()
 	std::cout << "[PASS] TestParticleAssetRegistry\n";
 }
 
+static void TestParticleAssetNewDynamicsAndBursts()
+{
+	ParticleAsset original;
+	original.Name = "ExplosionComplete";
+	original.Guid = 555666777ULL;
+	original.Seed = 2026;
+	original.Duration = 2.5f;
+	original.Looping = false;
+	original.WarmupTime = 0.1f;
+
+	ParticleEmitterLayer fireball;
+	fireball.Name = "Fireball";
+	fireball.Enabled = true;
+	fireball.MaxParticles = 500;
+	fireball.Lifetime = 1.2f;
+	fireball.EmissionRate = 0.0f;
+	fireball.FacingMode = ParticleRenderMode::StretchedVelocity;
+	fireball.Material.BlendMode = ParticleBlendMode::Additive;
+	fireball.LinearDrag = 1.5f;
+	fireball.VortexStrength = 2.8f;
+	fireball.VortexAxis = glm::vec3(0.0f, 1.0f, 0.0f);
+	fireball.TurbulenceStrength = 3.2f;
+	fireball.TurbulenceFrequency = 2.0f;
+	fireball.Bursts.push_back({ 0.0f, 40 });
+	fireball.Bursts.push_back({ 0.3f, 60 });
+	original.Emitters.push_back(fireball);
+
+	std::string yamlStr = ParticleAssetSerializer::SerializeToString(original);
+	assert(!yamlStr.empty());
+	assert(yamlStr.find("Duration: 2.5") != std::string::npos);
+	assert(yamlStr.find("Looping: false") != std::string::npos);
+	assert(yamlStr.find("WarmupTime: 0.1") != std::string::npos);
+	assert(yamlStr.find("FacingMode: StretchedVelocity") != std::string::npos);
+	assert(yamlStr.find("LinearDrag: 1.5") != std::string::npos);
+	assert(yamlStr.find("VortexStrength:") != std::string::npos);
+	assert(yamlStr.find("TurbulenceStrength:") != std::string::npos);
+
+	ParticleAsset deserialized;
+	bool ok = ParticleAssetSerializer::DeserializeFromString(yamlStr, deserialized);
+	assert(ok);
+	assert(deserialized.Name == "ExplosionComplete");
+	assert(std::abs(deserialized.Duration - 2.5f) < 1e-4f);
+	assert(deserialized.Looping == false);
+	assert(std::abs(deserialized.WarmupTime - 0.1f) < 1e-4f);
+
+	assert(deserialized.Emitters.size() == 1);
+	const auto& em = deserialized.Emitters[0];
+	assert(em.Name == "Fireball");
+	assert(em.FacingMode == ParticleRenderMode::StretchedVelocity);
+	assert(std::abs(em.LinearDrag - 1.5f) < 1e-4f);
+	assert(std::abs(em.VortexStrength - 2.8f) < 1e-4f);
+	assert(std::abs(em.TurbulenceStrength - 3.2f) < 1e-4f);
+	assert(std::abs(em.TurbulenceFrequency - 2.0f) < 1e-4f);
+	assert(em.Bursts.size() == 2);
+	assert(std::abs(em.Bursts[0].Time - 0.0f) < 1e-4f && em.Bursts[0].Count == 40);
+	assert(std::abs(em.Bursts[1].Time - 0.3f) < 1e-4f && em.Bursts[1].Count == 60);
+
+	std::cout << "[PASS] TestParticleAssetNewDynamicsAndBursts\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -177,6 +237,7 @@ int main()
 	TestParticleAssetSerializationRoundtrip();
 	TestParticleAssetBackwardCompatibilitySingleEmitter();
 	TestParticleAssetRegistry();
+	TestParticleAssetNewDynamicsAndBursts();
 
 	std::cout << "All WorldParticleAssetTests passed successfully.\n";
 	return 0;

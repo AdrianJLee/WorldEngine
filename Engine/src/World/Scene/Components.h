@@ -109,11 +109,15 @@ namespace World
 	enum class ParticleRenderMode : uint8_t
 	{
 		Billboard = 0,
-		Quad2D = 1
+		Quad2D = 1,
+		StretchedVelocity = 2,
+		HorizontalQuad = 3
 	};
 	WE_ENUM_SCHEMA(World, ParticleRenderMode, UInt8)
 		WE_ENUM_VALUE(Billboard);
 		WE_ENUM_VALUE(Quad2D);
+		WE_ENUM_VALUE(StretchedVelocity);
+		WE_ENUM_VALUE(HorizontalQuad);
 	WE_ENUM_END
 
 	enum class ParticleBlendMode : uint8_t

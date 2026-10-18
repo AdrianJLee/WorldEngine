@@ -11,6 +11,12 @@
 
 namespace World
 {
+	enum class ParticleEditorViewMode : uint8_t
+	{
+		Visual = 0,
+		Code = 1
+	};
+
 	class ParticleEditorPanel final : public EditorPanel
 	{
 	public:
@@ -18,7 +24,7 @@ namespace World
 		~ParticleEditorPanel() override;
 
 		const char* Id() const override { return "particle_editor"; }
-		const char* Title() const override { return "粒子系统编辑器 (Particle System Editor)"; }
+		const char* Title() const override { return "视觉特效编辑器 (VFX System Editor)"; }
 
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
@@ -28,9 +34,13 @@ namespace World
 		void SaveAsset();
 		void NewAsset();
 
+		void ApplyCodeToAsset();
+		void SyncCodeFromAsset();
+
 		const std::string& GetLoadedPath() const noexcept { return m_LoadedPath; }
 		const ParticleAsset& GetAsset() const noexcept { return m_Asset; }
 		bool IsDirty() const noexcept { return m_Dirty; }
+		ParticleEditorViewMode GetViewMode() const noexcept { return m_ViewMode; }
 
 	private:
 		void RefreshAvailableAssets();
@@ -44,6 +54,11 @@ namespace World
 		std::string m_StatusFeedback;
 		std::vector<std::string> m_AvailableAssets;
 		size_t m_SelectedEmitterIndex = 0;
+
+		ParticleEditorViewMode m_ViewMode = ParticleEditorViewMode::Visual;
+		std::string m_CodeBuffer;
+		float m_CodeScrollY = 0.0f;
+		int m_SelectedCodeLine = -1;
 
 		// 3D 自由轨道相机状态
 		float m_CameraDistance = 6.0f;

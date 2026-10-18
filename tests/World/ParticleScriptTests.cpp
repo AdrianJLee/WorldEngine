@@ -210,6 +210,64 @@ int main()
 			assert(type(hits) == "number", "GetCollisionHitCount should return number")
 		)", "M2ScriptAPICheck");
 
+				// 14. VFX 全能编程式特效与 YAML 脚本服务测试
+		RUN_OK(R"(
+			assert(type(VFX) == "table", "VFX table must exist")
+			assert(type(VFX.Create) == "function", "VFX.Create must exist")
+			assert(type(VFX.CompileFromYaml) == "function", "VFX.CompileFromYaml must exist")
+			assert(type(VFX.ToYaml) == "function", "VFX.ToYaml must exist")
+			assert(type(VFX.Load) == "function", "VFX.Load must exist")
+			assert(type(VFX.Spawn) == "function", "VFX.Spawn must exist")
+			assert(type(VFX.AddEmitter) == "function", "VFX.AddEmitter must exist")
+			assert(type(VFX.SetForces) == "function", "VFX.SetForces must exist")
+			assert(type(VFX.SetMaterial) == "function", "VFX.SetMaterial must exist")
+			assert(type(VFX.AddBurst) == "function", "VFX.AddBurst must exist")
+			assert(type(VFX.GetEmitterCount) == "function", "VFX.GetEmitterCount must exist")
+
+			local guid = VFX.Create("LuauMagicShield")
+			assert(type(guid) == "number" and guid > 0, "VFX.Create must return valid GUID")
+			assert(VFX.GetEmitterCount(guid) == 0, "New VFX should have 0 emitters")
+
+			local idx0 = VFX.AddEmitter(guid, "ShieldRing")
+			assert(idx0 == 0, "First emitter index should be 0")
+			assert(VFX.GetEmitterCount(guid) == 1, "Emitter count should be 1")
+
+			local okForces = VFX.SetForces(guid, idx0, 0, 0, 0, 0.2, 4.5, 1.2)
+			assert(okForces == true, "SetForces should succeed")
+
+			local okMat = VFX.SetMaterial(guid, idx0, "Additive", "HorizontalQuad", 3.0)
+			assert(okMat == true, "SetMaterial should succeed")
+
+			local okBurst = VFX.AddBurst(guid, idx0, 0.0, 50)
+			assert(okBurst == true, "AddBurst should succeed")
+
+			local yamlOut = VFX.ToYaml(guid)
+			assert(type(yamlOut) == "string", "ToYaml should return string")
+			assert(string.find(yamlOut, "ShieldRing") ~= nil, "YAML must contain emitter name")
+			assert(string.find(yamlOut, "HorizontalQuad") ~= nil, "YAML must contain facing mode")
+			assert(string.find(yamlOut, "VortexStrength: 4.5") ~= nil, "YAML must contain vortex strength")
+
+			local directYaml = [[FormatVersion: 1
+Name: DirectCompiledTorch
+Seed: 404
+Emitters:
+  - Name: FlameCore
+    EmissionRate: 60
+    Motion:
+      LinearDrag: 0.8
+]]
+			local compiledGuid = VFX.CompileFromYaml(directYaml)
+			assert(type(compiledGuid) == "number" and compiledGuid > 0, "CompileFromYaml must succeed")
+			assert(VFX.GetEmitterCount(compiledGuid) == 1, "Compiled VFX must have 1 emitter")
+
+			local okSpawn = VFX.Spawn(compiledGuid, 10.0, 20.0, 30.0)
+			assert(okSpawn == true, "VFX.Spawn must succeed")
+		)", "VfxScriptAPITest");
+
+		RUN_FAIL(R"(
+			VFX.NewField = 123
+		)", "VfxReadOnlyProtectionFail");
+
 		// 12. 无场景时调用异常测试
 		ScriptEngine::SetActiveScene(nullptr);
 

@@ -2407,11 +2407,15 @@ namespace World
 		const ScriptServiceBinding* strTables = StreamingServiceBindings(&strCount);
 		for (std::size_t index = 0; index < strCount; ++index)
 			serviceList.push_back(&strTables[index]);
-		// 粒子模拟全局服务面 (Particle 只读全局表)
+		// 粒子模拟与 VFX 复合特效全局服务面 (Particle / VFX 只读全局表)
 		std::size_t particleCount = 0;
 		const ScriptServiceBinding* particleTables = ParticleServiceBindings(&particleCount);
 		for (std::size_t index = 0; index < particleCount; ++index)
 			serviceList.push_back(&particleTables[index]);
+		std::size_t vfxCount = 0;
+		const ScriptServiceBinding* vfxTables = VfxServiceBindings(&vfxCount);
+		for (std::size_t index = 0; index < vfxCount; ++index)
+			serviceList.push_back(&vfxTables[index]);
 		// 曲线求值全局服务面 (Curve 只读全局表)
 		std::size_t curveCount = 0;
 		const ScriptServiceBinding* curveTables = CurveServiceBindings(&curveCount);

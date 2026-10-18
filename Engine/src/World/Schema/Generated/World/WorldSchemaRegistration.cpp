@@ -11948,6 +11948,8 @@ struct GeneratedEnum<World::ParticleRenderMode>
             {
                 { "Billboard", static_cast<int64_t>(World::ParticleRenderMode::Billboard) },
                 { "Quad2D", static_cast<int64_t>(World::ParticleRenderMode::Quad2D) },
+                { "StretchedVelocity", static_cast<int64_t>(World::ParticleRenderMode::StretchedVelocity) },
+                { "HorizontalQuad", static_cast<int64_t>(World::ParticleRenderMode::HorizontalQuad) },
             },
         };
         return schema;

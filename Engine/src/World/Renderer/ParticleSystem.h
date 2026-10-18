@@ -15,6 +15,12 @@
 
 namespace World
 {
+	struct ParticleBurst
+	{
+		float Time = 0.0f;
+		uint32_t Count = 10;
+	};
+
 	// M1 Material, Sub-UV Flipbook, Soft Particle & HDR Emissive settings per emitter/pool
 	struct ParticleMaterialSettings
 	{
@@ -25,6 +31,7 @@ namespace World
 		float SubUVFrameRate = 0.0f;       // 0 = map lifetime [0,1] across total frames; >0 = fixed FPS
 		bool SubUVRandomStartFrame = false;
 		ParticleBlendMode BlendMode = ParticleBlendMode::AlphaBlend;
+		ParticleRenderMode FacingMode = ParticleRenderMode::Billboard;
 		bool SoftParticlesEnabled = false;
 		float SoftParticleFadeDistance = 0.5f;
 		float EmissiveBoost = 1.0f;        // HDR multiplier (>= 1.0 triggers bloom)
@@ -163,6 +170,31 @@ namespace World
 		ParticleCollisionSettings& GetCollisionSettings() { return m_Collision; }
 		ParticleCollisionSettings& GetCollisionSettingsMut() { return m_Collision; }
 
+		void SetLinearDrag(float drag) { m_LinearDrag = std::max(0.0f, drag); }
+		float GetLinearDrag() const { return m_LinearDrag; }
+
+		void SetVortex(float strength, const glm::vec3& axis = glm::vec3(0.0f, 1.0f, 0.0f))
+		{
+			m_VortexStrength = strength;
+			m_VortexAxis = (glm::length(axis) > 1e-4f) ? glm::normalize(axis) : glm::vec3(0.0f, 1.0f, 0.0f);
+		}
+		float GetVortexStrength() const { return m_VortexStrength; }
+		const glm::vec3& GetVortexAxis() const { return m_VortexAxis; }
+
+		void SetTurbulence(float strength, float frequency = 1.0f)
+		{
+			m_TurbulenceStrength = strength;
+			m_TurbulenceFrequency = frequency;
+		}
+		float GetTurbulenceStrength() const { return m_TurbulenceStrength; }
+		float GetTurbulenceFrequency() const { return m_TurbulenceFrequency; }
+
+		void AddBurst(float time, uint32_t count) { m_Bursts.push_back({ time, count }); }
+		void ClearBursts() { m_Bursts.clear(); }
+		const std::vector<ParticleBurst>& GetBursts() const { return m_Bursts; }
+		std::vector<ParticleBurst>& GetBurstsMut() { return m_Bursts; }
+		float GetSimElapsedTime() const { return m_SimElapsedTime; }
+
 		const ParticleCollisionEventQueue& GetEventQueue() const { return m_EventQueue; }
 		ParticleCollisionEventQueue& GetEventQueueMut() { return m_EventQueue; }
 
@@ -194,6 +226,14 @@ namespace World
 		std::vector<SubEmitterConfig> m_SubEmitters;
 		std::unique_ptr<ParticlePool> m_SecondaryPool;
 
+		float m_LinearDrag = 0.0f;
+		float m_VortexStrength = 0.0f;
+		glm::vec3 m_VortexAxis { 0.0f, 1.0f, 0.0f };
+		float m_TurbulenceStrength = 0.0f;
+		float m_TurbulenceFrequency = 1.0f;
+		std::vector<ParticleBurst> m_Bursts;
+		float m_SimElapsedTime = 0.0f;
+
 		size_t m_ActiveCount = 0;
 		size_t m_NextFreeIndex = 0;
 		float m_EmissionAccumulator = 0.0f;
@@ -212,6 +252,8 @@ namespace World
 		ParticleSystemComponent Comp;
 		float Elapsed = 0.0f;
 	};
+
+	struct ParticleAsset;
 
 	class WLD_API ParticleSystem
 	{
@@ -232,6 +274,7 @@ namespace World
 		void ClearAll();
 		size_t PoolCount() const { return m_Pools.size(); }
 
+		void SpawnOneShotAsset(const ParticleAsset& asset, const glm::vec3& position, const glm::quat& rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 		void SpawnOneShot(const ParticleSystemComponent& comp, const ParticleMaterialSettings& mat,
 			const glm::vec3& position, const glm::quat& rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 		void UpdateOneShots(float dt);

@@ -429,6 +429,82 @@ static void TestParticleOneShotSpawn()
 	std::cout << "[PASS] TestParticleOneShotSpawn\n";
 }
 
+static void TestForceDynamicsAndBursts()
+{
+	ParticlePool pool(100);
+	ParticleSystemComponent comp;
+	comp.Lifetime = 2.0f;
+	comp.Speed = 0.0f;
+	comp.EmissionRate = 0.0f;
+	comp.IsPlaying = 1;
+
+	pool.AddBurst(0.0f, 15);
+	pool.AddBurst(0.5f, 25);
+
+	pool.Update(0.016f, comp, glm::vec3(0.0f));
+	assert(pool.ActiveCount() == 15);
+
+	pool.Update(0.384f, comp, glm::vec3(0.0f));
+	assert(pool.ActiveCount() == 15);
+
+	pool.Update(0.15f, comp, glm::vec3(0.0f));
+	assert(pool.ActiveCount() == 40);
+
+	// Linear Drag
+	ParticlePool dragPool(10);
+	dragPool.SetLinearDrag(1.0f);
+	comp.Speed = 0.0f;
+	dragPool.Emit(1, comp, glm::vec3(0.0f));
+	dragPool.GetParticlesMut()[0].Velocity = glm::vec3(10.0f, 0.0f, 0.0f);
+
+	dragPool.Update(0.5f, comp, glm::vec3(0.0f));
+	assert(dragPool.GetParticles()[0].Velocity.x > 4.5f && dragPool.GetParticles()[0].Velocity.x < 5.5f);
+
+	// Vortex Swirl
+	ParticlePool vortexPool(10);
+	vortexPool.SetVortex(4.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+	vortexPool.Emit(1, comp, glm::vec3(0.0f));
+	vortexPool.GetParticlesMut()[0].Position = glm::vec3(2.0f, 0.0f, 0.0f);
+	vortexPool.GetParticlesMut()[0].Velocity = glm::vec3(0.0f);
+
+	vortexPool.Update(0.5f, comp, glm::vec3(0.0f));
+	assert(vortexPool.GetParticles()[0].Velocity.z < -0.5f);
+
+	std::cout << "[PASS] TestForceDynamicsAndBursts\n";
+}
+
+static void TestFacingModes()
+{
+	ParticlePool pool(10);
+	ParticleSystemComponent comp;
+	comp.Lifetime = 2.0f;
+	comp.EmissionRate = 0.0f;
+	comp.IsPlaying = 1;
+
+	ParticleMaterialSettings mat;
+	mat.FacingMode = ParticleRenderMode::StretchedVelocity;
+	pool.SetMaterialSettings(mat);
+
+	pool.Emit(1, comp, glm::vec3(0.0f));
+	pool.GetParticlesMut()[0].Velocity = glm::vec3(0.0f, 10.0f, 0.0f);
+
+	std::vector<ParticleVertex> verts;
+	pool.GenerateBillboardVertices(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f, 1.0f, 0.0f), verts);
+	assert(verts.size() == 6);
+
+	mat.FacingMode = ParticleRenderMode::HorizontalQuad;
+	pool.SetMaterialSettings(mat);
+	verts.clear();
+	pool.GenerateBillboardVertices(glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f), verts);
+	assert(verts.size() == 6);
+	for (const auto& v : verts)
+	{
+		assert(std::abs(v.Position.y) < 1e-4f);
+	}
+
+	std::cout << "[PASS] TestFacingModes\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -446,6 +522,8 @@ int main()
 	TestParticlePlaneCollisionAndBounce();
 	TestParticleSubEmitters();
 	TestParticleOneShotSpawn();
+	TestForceDynamicsAndBursts();
+	TestFacingModes();
 
 	std::cout << "All WorldParticleSystemTests passed successfully.\n";
 	return 0;
