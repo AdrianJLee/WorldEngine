@@ -1176,9 +1176,9 @@ void ParticleEditorPanel::NewAsset()
 		tbX += modMenuBtnW + 8.0f;
 
 		// -------------------------------------------------------------------------
-		// 工作区视图模式自由切换 (Visual Stack vs Scratch Pad vs Full Shader vs YAML)
+		// 工作区视图模式自由切换 (纯净二合一: 视口堆栈 vs 代码模块编写器)
 		// -------------------------------------------------------------------------
-		const float visualBtnW = 100.0f;
+		const float visualBtnW = 106.0f;
 		const Wui::WuiRect visualModeBtn { tbX, barRect.Y + 6.0f, visualBtnW, 24.0f };
 		Wui::Tooltip(ctx, visualModeBtn, "切换到 3D 自由视口与 Niagara 级模块化参数堆栈 (Visual Modules Stack)");
 		if (Wui::Button(ctx, Wui::HashId("vfx.mode.visual"), visualModeBtn,
@@ -1188,7 +1188,7 @@ void ParticleEditorPanel::NewAsset()
 		}
 		tbX += visualBtnW + 4.0f;
 
-		const float scratchBtnW = 118.0f;
+		const float scratchBtnW = 132.0f;
 		const Wui::WuiRect scratchModeBtn { tbX, barRect.Y + 6.0f, scratchBtnW, 24.0f };
 		Wui::Tooltip(ctx, scratchModeBtn, "打开项目全局代码自定义模块工作区 (Scratch Pad Code Studio)");
 		if (Wui::Button(ctx, Wui::HashId("vfx.mode.scratch"), scratchModeBtn,
@@ -1201,35 +1201,10 @@ void ParticleEditorPanel::NewAsset()
 				if (!m_ProjectCustomModules.empty())
 					OpenExistingCustomModule(0);
 				else
-					OpenCustomModuleEditor();
+					LoadCustomModuleTemplate(0);
 			}
 		}
-		tbX += scratchBtnW + 4.0f;
-
-		const float shaderBtnW = 112.0f;
-		const Wui::WuiRect shaderModeBtn { tbX, barRect.Y + 6.0f, shaderBtnW, 24.0f };
-		Wui::Tooltip(ctx, shaderModeBtn, "切换到统一 Slang 计算着色器源码视图，支持全屏编码与即时热重载 (Ctrl+Enter)");
-		if (Wui::Button(ctx, Wui::HashId("vfx.mode.shader"), shaderModeBtn,
-			m_ViewMode == ParticleEditorViewMode::SlangShader ? "[统一 Slang]" : "  统一 Slang", theme))
-		{
-			m_ViewMode = ParticleEditorViewMode::SlangShader;
-			if (m_SlangShaderBuffer.empty())
-			{
-				SyncSlangShaderFromModules();
-			}
-		}
-		tbX += shaderBtnW + 4.0f;
-
-		const float dataBtnW = 96.0f;
-		const Wui::WuiRect dataModeBtn { tbX, barRect.Y + 6.0f, dataBtnW, 24.0f };
-		Wui::Tooltip(ctx, dataModeBtn, "切换到底层资产声明式清单 (YAML Data Manifest)");
-		if (Wui::Button(ctx, Wui::HashId("vfx.mode.data"), dataModeBtn,
-			m_ViewMode == ParticleEditorViewMode::DataManifest ? "[资产(YAML)]" : "  资产(YAML)", theme))
-		{
-			m_ViewMode = ParticleEditorViewMode::DataManifest;
-			SyncCodeFromAsset();
-		}
-		tbX += dataBtnW + 12.0f;
+		tbX += scratchBtnW + 16.0f;
 
 		// 资产名称与状态反馈
 		if (!m_StatusFeedback.empty())
@@ -3090,9 +3065,189 @@ void ParticleEditorPanel::NewAsset()
 	// 项目全局自定义 Slang 模块与设计器实现 (Niagara Scratch Pad Studio)
 	// =========================================================================
 
+	std::vector<std::pair<std::string, VfxModule>> ParticleEditorPanel::GetBuiltinModuleTemplates()
+	{
+		std::vector<std::pair<std::string, VfxModule>> list;
+
+		// 范例 1: 正弦波动力学 (Sine Wave Motion)
+		{
+			VfxModule m;
+			m.Id = "mod.custom.sine_wave";
+			m.Name = "正弦波动力学 (Sine Wave)";
+			m.Description = "利用正交分量简谐波对粒子施加周期性横向推力与垂直浮动";
+			m.Stage = VfxModuleStage::Update;
+			m.Enabled = true;
+			m.IsCustom = true;
+			m.Parameters = {
+				{ "WaveFreq", VfxParamType::Float, 3.0f, {}, 0, false, 0.1f, 20.0f, 0.1f, "正弦波动频率 (rad/s)", true, "WaveFreq" },
+				{ "WaveAmp", VfxParamType::Float, 2.5f, {}, 0, false, 0.0f, 15.0f, 0.1f, "波动横向振幅推力 (m/s^2)", true, "WaveAmp" }
+			};
+			m.SlangSource = "// =============================================================================\n"
+			                "// [Slang 模块范例: 正弦波动力学 (Sine Wave Motion)]\n"
+			                "// 阶段: Update (每帧对存活粒子执行动力学解算)\n"
+			                "// 可用字段: p.Position, p.Velocity, p.Color, p.Size, p.Life, p.MaxLife, dt\n"
+			                "// 外部动态参数: u_WaveFreq, u_WaveAmp\n"
+			                "// =============================================================================\n\n"
+			                "// 计算随粒子存活时间与 Y 轴高度波动的复合相位\n"
+			                "float phase = p.Life * u_WaveFreq + p.Position.y * 1.5f;\n"
+			                "float wave = sin(phase);\n\n"
+			                "// 施加正弦横向加速度 (速度累加) 与平滑垂直微浮\n"
+			                "p.Velocity.x += wave * (u_WaveAmp * dt);\n"
+			                "p.Position.y += cos(phase) * (0.25f * dt);\n";
+			list.push_back({ m.Name, m });
+		}
+
+		// 范例 2: 3D 旋转涡流场 (Vortex Swirl Field)
+		{
+			VfxModule m;
+			m.Id = "mod.custom.vortex_swirl";
+			m.Name = "3D 旋转涡流场 (Vortex Swirl)";
+			m.Description = "围绕世界 Y 轴旋转切向力场并配合向心吸附力";
+			m.Stage = VfxModuleStage::Update;
+			m.Enabled = true;
+			m.IsCustom = true;
+			m.Parameters = {
+				{ "SwirlGain", VfxParamType::Float, 4.0f, {}, 0, false, 0.0f, 30.0f, 0.2f, "旋转切向速度增益", true, "SwirlGain" },
+				{ "InwardPull", VfxParamType::Float, 1.2f, {}, 0, false, -10.0f, 10.0f, 0.1f, "中心吸引/排斥力强度", true, "InwardPull" }
+			};
+			m.SlangSource = "// =============================================================================\n"
+			                "// [Slang 模块范例: 3D 旋转涡流场 (Vortex Swirl Field)]\n"
+			                "// 围绕世界坐标 Y 轴生成螺旋切向扭矩并结合向心吸力\n"
+			                "// =============================================================================\n\n"
+			                "float3 r = float3(p.Position.x, 0.0f, p.Position.z);\n"
+			                "float dist = length(r);\n"
+			                "if (dist > 0.05f)\n"
+			                "{\n"
+			                "    float3 tangent = cross(float3(0, 1, 0), normalize(r));\n"
+			                "    // 切向加速\n"
+			                "    p.Velocity += tangent * (u_SwirlGain * dt);\n"
+			                "    // 向心吸引\n"
+			                "    p.Velocity -= normalize(r) * (u_InwardPull * dt);\n"
+			                "}\n";
+			list.push_back({ m.Name, m });
+		}
+
+		// 范例 3: 李萨如 3D 空间轨迹 (Lissajous Motion)
+		{
+			VfxModule m;
+			m.Id = "mod.custom.lissajous";
+			m.Name = "李萨如空间轨迹 (Lissajous Motion)";
+			m.Description = "双频正交简谐运动生成优雅且复杂的 3D 周期性轨迹";
+			m.Stage = VfxModuleStage::Update;
+			m.Enabled = true;
+			m.IsCustom = true;
+			m.Parameters = {
+				{ "FreqX", VfxParamType::Float, 2.0f, {}, 0, false, 0.1f, 10.0f, 0.1f, "X 轴振荡频率", true, "FreqX" },
+				{ "FreqZ", VfxParamType::Float, 3.0f, {}, 0, false, 0.1f, 10.0f, 0.1f, "Z 轴振荡频率", true, "FreqZ" },
+				{ "ChaosGain", VfxParamType::Float, 3.0f, {}, 0, false, 0.0f, 20.0f, 0.1f, "复合推力强度", true, "ChaosGain" }
+			};
+			m.SlangSource = "// =============================================================================\n"
+			                "// [Slang 模块范例: 李萨如 3D 空间轨迹 (Lissajous Curve)]\n"
+			                "// 使用双频正交简谐运动生成优雅的非线性复杂运动路径\n"
+			                "// =============================================================================\n\n"
+			                "float3 lissajous = float3(\n"
+			                "    sin(p.Life * u_FreqX),\n"
+			                "    cos(p.Life * (u_FreqX + u_FreqZ) * 0.5f) * 0.5f,\n"
+			                "    sin(p.Life * u_FreqZ)\n"
+			                ");\n"
+			                "p.Velocity += lissajous * (u_ChaosGain * dt);\n";
+			list.push_back({ m.Name, m });
+		}
+
+		// 范例 4: 圆环发射分布 (Spawn Ring Distribution)
+		{
+			VfxModule m;
+			m.Id = "mod.custom.spawn_ring";
+			m.Name = "圆环发射分布 (Spawn Ring)";
+			m.Description = "出生初始化阶段将粒子均匀分布于 3D 水平圆环边缘并赋予初速度";
+			m.Stage = VfxModuleStage::Spawn;
+			m.Enabled = true;
+			m.IsCustom = true;
+			m.Parameters = {
+				{ "RingRadius", VfxParamType::Float, 1.5f, {}, 0, false, 0.1f, 10.0f, 0.1f, "生成圆环外径 (m)", true, "RingRadius" },
+				{ "InitialSpeed", VfxParamType::Float, 4.0f, {}, 0, false, 0.0f, 30.0f, 0.2f, "垂直喷射初速度 (m/s)", true, "InitialSpeed" }
+			};
+			m.SlangSource = "// =============================================================================\n"
+			                "// [Slang 模块范例: 圆环发射分布 (Spawn Ring Distribution)]\n"
+			                "// 阶段: Spawn (粒子出生初始化，仅执行一次)\n"
+			                "// 在 3D 空间水平圆环边缘随机分布生成粒子并赋予向上的初速度\n"
+			                "// =============================================================================\n\n"
+			                "float u = Hash1D(particleId * 11u + 3u);\n"
+			                "float phi = 6.2831853f * u;\n\n"
+			                "p.Position = float3(cos(phi) * u_RingRadius, 0.0f, sin(phi) * u_RingRadius);\n"
+			                "p.Velocity = float3(0.0f, u_InitialSpeed, 0.0f);\n";
+			list.push_back({ m.Name, m });
+		}
+
+		// 范例 5: 3D 旋度流体湍流 (Curl Noise Turbulence)
+		{
+			VfxModule m;
+			m.Id = "mod.custom.curl_turbulence";
+			m.Name = "3D 旋度流体湍流 (Curl Turbulence)";
+			m.Description = "利用无散度 3D Curl Noise 模拟烟雾/流体涡旋真实物理湍流";
+			m.Stage = VfxModuleStage::Update;
+			m.Enabled = true;
+			m.IsCustom = true;
+			m.Parameters = {
+				{ "NoiseScale", VfxParamType::Float, 0.8f, {}, 0, false, 0.1f, 5.0f, 0.05f, "流体噪波空间尺度", true, "NoiseScale" },
+				{ "NoiseGain", VfxParamType::Float, 6.0f, {}, 0, false, 0.0f, 50.0f, 0.2f, "湍流力加速度乘子", true, "NoiseGain" }
+			};
+			m.SlangSource = "// =============================================================================\n"
+			                "// [Slang 模块范例: 3D 旋度流体湍流 (Curl Noise Turbulence)]\n"
+			                "// 利用内置辅助函数 CurlNoise3D(float3 pos) 生成完全无散度物理流体场\n"
+			                "// =============================================================================\n\n"
+			                "float3 turbulence = CurlNoise3D(p.Position * u_NoiseScale);\n"
+			                "p.Velocity += turbulence * (u_NoiseGain * dt);\n";
+			list.push_back({ m.Name, m });
+		}
+
+		// 范例 6: 空间点引力黑洞 (Point Attractor)
+		{
+			VfxModule m;
+			m.Id = "mod.custom.attractor";
+			m.Name = "空间点引力黑洞 (Point Attractor)";
+			m.Description = "经典平方反比万有引力吸引子";
+			m.Stage = VfxModuleStage::Update;
+			m.Enabled = true;
+			m.IsCustom = true;
+			m.Parameters = {
+				{ "AttractorStrength", VfxParamType::Float, 8.0f, {}, 0, false, 0.0f, 50.0f, 0.5f, "引力黑洞强度", true, "AttractorStrength" },
+				{ "MinDistance", VfxParamType::Float, 0.2f, {}, 0, false, 0.05f, 2.0f, 0.02f, "奇点防发散软化半径", true, "MinDistance" }
+			};
+			m.SlangSource = "// =============================================================================\n"
+			                "// [Slang 模块范例: 空间点引力黑洞 (Point Attractor)]\n"
+			                "// 经典万有引力平方反比律 (F = G * M / r^2) 物理吸引场\n"
+			                "// =============================================================================\n\n"
+			                "float3 center = float3(0.0f, 1.0f, 0.0f);\n"
+			                "float3 toCenter = center - p.Position;\n"
+			                "float r2 = max(dot(toCenter, toCenter), u_MinDistance * u_MinDistance);\n"
+			                "float3 force = normalize(toCenter) * (u_AttractorStrength / r2);\n\n"
+			                "p.Velocity += force * dt;\n";
+			list.push_back({ m.Name, m });
+		}
+
+		return list;
+	}
+
 	void ParticleEditorPanel::RefreshProjectCustomModules()
 	{
 		m_ProjectCustomModules = VfxModuleLibrary::LoadProjectCustomModules();
+	}
+
+	void ParticleEditorPanel::LoadCustomModuleTemplate(int index)
+	{
+		auto templates = GetBuiltinModuleTemplates();
+		if (index < 0 || index >= static_cast<int>(templates.size())) return;
+
+		m_SelectedProjectModuleIndex = -1;
+		m_EditingCustomModule = templates[index].second;
+		m_EditingCustomModule.Id = "mod.custom." + std::to_string(rand() % 1000000);
+		m_CustomModuleCompileError.clear();
+		m_CustomModuleCompileSuccess = false;
+		m_NewParamNameBuffer = "MyParam";
+		m_NewParamTypeIndex = 0;
+		m_ViewMode = ParticleEditorViewMode::CustomModule;
+		m_StatusFeedback = "已载入官方基础范例: " + templates[index].first;
 	}
 
 	void ParticleEditorPanel::OpenExistingCustomModule(size_t index)
@@ -3109,26 +3264,11 @@ void ParticleEditorPanel::NewAsset()
 
 	void ParticleEditorPanel::OpenCustomModuleEditor(const std::string& defaultName)
 	{
-		m_SelectedProjectModuleIndex = -1;
-		m_CustomModuleCompileError.clear();
-		m_CustomModuleCompileSuccess = false;
-		m_EditingCustomModule = VfxModule();
-		m_EditingCustomModule.Id = "mod.custom." + std::to_string(rand() % 1000000);
-		m_EditingCustomModule.Name = defaultName.empty() ? "新自定义动力学块 (Custom Slang)" : defaultName;
-		m_EditingCustomModule.Description = "用户编写的项目全局 Slang 计算代码块，可在全项目任意特效中组装";
-		m_EditingCustomModule.Stage = VfxModuleStage::Update;
-		m_EditingCustomModule.Enabled = true;
-		m_EditingCustomModule.IsCustom = true;
-
-		m_EditingCustomModule.Parameters = {
-			{ "SpeedGain", VfxParamType::Float, 2.0f, {}, 0, false, 0.0f, 50.0f, 0.1f, "自定义增益乘子", true, "SpeedGain" },
-			{ "WaveFrequency", VfxParamType::Float, 1.5f, {}, 0, false, 0.1f, 20.0f, 0.1f, "波动频率", true, "WaveFrequency" }
-		};
-
-		m_EditingCustomModule.SlangSource = "// 自定义 Slang 计算代码 (Project-Global Custom Module)\n// 可用内置字段: p.Position, p.Velocity, p.Color, p.Size, p.Life, dt\nfloat dist = length(p.Position);\np.Velocity += cross(float3(0, 1, 0), p.Position) * (u_SpeedGain * dt);\np.Position.y += sin(p.Life * u_WaveFrequency) * (0.5f * dt);\n";
-		m_NewParamNameBuffer = "Param" + std::to_string(m_EditingCustomModule.Parameters.size() + 1);
-		m_NewParamTypeIndex = 0;
-		m_ViewMode = ParticleEditorViewMode::CustomModule;
+		LoadCustomModuleTemplate(0);
+		if (!defaultName.empty())
+		{
+			m_EditingCustomModule.Name = defaultName;
+		}
 	}
 
 	void ParticleEditorPanel::RenderCustomModuleWorkspace(Wui::WuiContext& ctx, const Wui::WuiRect& workRect, const Wui::WuiTheme& theme, PanelHost& host)
@@ -3136,114 +3276,374 @@ void ParticleEditorPanel::NewAsset()
 		(void)host;
 		Wui::BarSurface(ctx, workRect, theme.PanelBg, theme.Border);
 
-		// =========================================================================
-		// 1. 左侧栏: 项目全局模块库列表 (260px)
-		// =========================================================================
-		const float leftW = 260.0f;
-		const Wui::WuiRect leftRect { workRect.X, workRect.Y, leftW, workRect.H };
-		Wui::BarSurface(ctx, leftRect, theme.PanelBg, theme.Border);
-
-		// 标头
-		const Wui::WuiRect lHead { leftRect.X, leftRect.Y, leftRect.W, 28.0f };
-		Wui::BarSurface(ctx, lHead, theme.PanelHeader, theme.Border);
-		Wui::Label(ctx, { lHead.X + 8.0f, lHead.Y + 7.0f }, "项目全局模块库 (Project Modules)", theme.Accent, 11.0f);
-
-		// 操作工具栏
-		float lty = leftRect.Y + 34.0f;
-		const Wui::WuiRect newModBtn { leftRect.X + 8.0f, lty, 110.0f, 22.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.sc.l_new"), newModBtn, "+ 新建代码模块", theme))
+		// -------------------------------------------------------------------------
+		// 快捷键监听: Ctrl+Enter (实时编译校验)
+		// -------------------------------------------------------------------------
+		if (ctx.Input().Ctrl && ctx.WasKeyTriggered(KeyCodes::Enter))
 		{
-			OpenCustomModuleEditor("新自定义动力学块 (Custom Slang)");
+			std::string testShader = VfxComputeGenerator::GenerateComputeShaderSource(
+				"CustomTest", { m_EditingCustomModule }, {}, {}
+			);
+			std::string err;
+			bool ok = VfxComputeGenerator::ValidateAndCompile(testShader, &err);
+			if (ok)
+			{
+				m_CustomModuleCompileSuccess = true;
+				m_CustomModuleCompileError.clear();
+				m_StatusFeedback = "Slang 代码校验通过 (Ctrl+Enter)！";
+			}
+			else
+			{
+				m_CustomModuleCompileSuccess = false;
+				m_CustomModuleCompileError = err.empty() ? "语法校验未通过" : err;
+			}
 		}
 
-		const Wui::WuiRect refreshBtn { leftRect.X + 124.0f, lty, 78.0f, 22.0f };
+		// =========================================================================
+		// 三栏工业级专业布局: 左侧模块库(240px) | 中间代码编辑器(Flex) | 右侧属性参数(310px)
+		// =========================================================================
+		const float leftW = 240.0f;
+		const float rightW = 310.0f;
+		const float splitW = 4.0f;
+		const float centerW = std::max(380.0f, workRect.W - leftW - rightW - splitW * 2.0f);
+
+		const Wui::WuiRect leftRect { workRect.X, workRect.Y, leftW, workRect.H };
+		const Wui::WuiRect centerRect { workRect.X + leftW + splitW, workRect.Y, centerW, workRect.H };
+		const Wui::WuiRect rightRect { workRect.X + leftW + splitW + centerW + splitW, workRect.Y, rightW, workRect.H };
+
+		// -------------------------------------------------------------------------
+		// 1. 左侧栏: 模块库与范例模板 (Library & Templates)
+		// -------------------------------------------------------------------------
+		Wui::BarSurface(ctx, leftRect, theme.PanelBg, theme.Border);
+		const Wui::WuiRect lHead { leftRect.X, leftRect.Y, leftRect.W, 28.0f };
+		Wui::BarSurface(ctx, lHead, theme.PanelHeader, theme.Border);
+		Wui::Label(ctx, { lHead.X + 8.0f, lHead.Y + 7.0f }, "模块库与范例 (Library)", theme.Accent, 11.0f);
+
+		float lty = leftRect.Y + 34.0f;
+		const Wui::WuiRect newModBtn { leftRect.X + 6.0f, lty, 98.0f, 22.0f };
+		if (Wui::Button(ctx, Wui::HashId("vfx.sc.l_new"), newModBtn, "+ 新建模版", theme))
+		{
+			LoadCustomModuleTemplate(0);
+		}
+
+		const Wui::WuiRect refreshBtn { leftRect.X + 110.0f, lty, 76.0f, 22.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.sc.l_refresh"), refreshBtn, "刷新磁盘", theme))
 		{
 			RefreshProjectCustomModules();
 		}
 		lty += 28.0f;
 
-		// 列表滚动区
-		const Wui::WuiRect listRect { leftRect.X + 6.0f, lty, leftRect.W - 12.0f, leftRect.H - (lty - leftRect.Y) - 8.0f };
-		float totalListH = std::max(listRect.H, static_cast<float>(m_ProjectCustomModules.size() * 36.0f + 20.0f));
-		Wui::BeginScrollArea(ctx, listRect, totalListH, m_CustomModuleListScrollY, theme, Wui::HashId("vfx.sc.list_scroll"));
+		// 库滚动区域
+		const Wui::WuiRect listRect { leftRect.X + 4.0f, lty, leftRect.W - 8.0f, leftRect.H - (lty - leftRect.Y) - 6.0f };
+		auto templates = GetBuiltinModuleTemplates();
+		float totalListH = static_cast<float>(templates.size() * 32.0f + m_ProjectCustomModules.size() * 34.0f + 80.0f);
+		Wui::BeginScrollArea(ctx, listRect, totalListH, m_CustomModuleListScrollY, theme, Wui::HashId("vfx.sc.lib_scroll"));
 		float ly = listRect.Y - m_CustomModuleListScrollY;
+
+		// 分组 A: 官方预设基础范例
+		Wui::Label(ctx, { listRect.X + 6.0f, ly + 2.0f }, "--- 官方基础范例 (6) ---", theme.Accent, 9.5f);
+		ly += 18.0f;
+
+		for (size_t tIdx = 0; tIdx < templates.size(); ++tIdx)
+		{
+			const auto& tmpl = templates[tIdx];
+			const Wui::WuiRect tItem { listRect.X, ly, listRect.W, 26.0f };
+			Wui::BarSurface(ctx, tItem, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.8f }, theme.Border);
+
+			bool isSpawn = (tmpl.second.Stage == VfxModuleStage::Spawn);
+			Wui::Label(ctx, { tItem.X + 4.0f, tItem.Y + 6.0f }, isSpawn ? "[Spawn]" : "[Update]", isSpawn ? Wui::WuiColor { 0.95f, 0.72f, 0.25f, 1.0f } : theme.Accent, 9.0f);
+
+			const Wui::WuiRect selBtn { tItem.X + 50.0f, tItem.Y + 2.0f, tItem.W - 54.0f, 22.0f };
+			if (Wui::Button(ctx, Wui::HashId(("vfx.sc.tmpl_" + std::to_string(tIdx)).c_str()), selBtn, tmpl.first.c_str(), theme))
+			{
+				LoadCustomModuleTemplate(static_cast<int>(tIdx));
+			}
+			ly += 28.0f;
+		}
+
+		ly += 10.0f;
+		// 分组 B: 项目自定义模块
+		std::string projTitle = "--- 项目已保存模块 (" + std::to_string(m_ProjectCustomModules.size()) + ") ---";
+		Wui::Label(ctx, { listRect.X + 6.0f, ly + 2.0f }, projTitle, theme.Accent, 9.5f);
+		ly += 18.0f;
 
 		if (m_ProjectCustomModules.empty())
 		{
-			Wui::Label(ctx, { listRect.X + 8.0f, ly + 14.0f }, "当前项目无自定义模块\n点击上方 [+ 新建代码模块] 创建", theme.TextMuted, 10.0f);
+			Wui::Label(ctx, { listRect.X + 8.0f, ly + 4.0f }, "(暂无已保存项目模块)", theme.TextMuted, 9.5f);
+			ly += 22.0f;
 		}
 		else
 		{
-			for (size_t i = 0; i < m_ProjectCustomModules.size(); ++i)
+			for (size_t pIdx = 0; pIdx < m_ProjectCustomModules.size(); ++pIdx)
 			{
-				const auto& mod = m_ProjectCustomModules[i];
-				const Wui::WuiRect itemRect { listRect.X, ly, listRect.W, 30.0f };
-				bool isSel = (m_SelectedProjectModuleIndex == static_cast<int>(i));
-				Wui::BarSurface(ctx, itemRect, isSel ? theme.Selection : Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.8f }, isSel ? theme.Accent : theme.Border);
+				const auto& mod = m_ProjectCustomModules[pIdx];
+				const Wui::WuiRect pItem { listRect.X, ly, listRect.W, 28.0f };
+				bool isSel = (m_SelectedProjectModuleIndex == static_cast<int>(pIdx));
+				Wui::BarSurface(ctx, pItem, isSel ? theme.Selection : Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.8f }, isSel ? theme.Accent : theme.Border);
 
 				bool isSpawn = (mod.Stage == VfxModuleStage::Spawn);
-				Wui::Label(ctx, { itemRect.X + 4.0f, itemRect.Y + 7.0f }, isSpawn ? "[Spawn]" : "[Update]", isSpawn ? Wui::WuiColor { 0.95f, 0.72f, 0.25f, 1.0f } : theme.Accent, 9.5f);
+				Wui::Label(ctx, { pItem.X + 4.0f, pItem.Y + 7.0f }, isSpawn ? "[Spawn]" : "[Update]", isSpawn ? Wui::WuiColor { 0.95f, 0.72f, 0.25f, 1.0f } : theme.Accent, 9.0f);
 
-				const Wui::WuiRect selBtn { itemRect.X + 54.0f, itemRect.Y + 4.0f, itemRect.W - 80.0f, 22.0f };
-				if (Wui::Button(ctx, Wui::HashId(("vfx.sc.mod_item_" + std::to_string(i)).c_str()), selBtn, mod.Name.c_str(), theme))
+				const Wui::WuiRect selBtn { pItem.X + 50.0f, pItem.Y + 3.0f, pItem.W - 74.0f, 22.0f };
+				if (Wui::Button(ctx, Wui::HashId(("vfx.sc.pmod_" + std::to_string(pIdx)).c_str()), selBtn, mod.Name.c_str(), theme))
 				{
-					OpenExistingCustomModule(i);
+					OpenExistingCustomModule(pIdx);
 				}
 
-				const Wui::WuiRect delBtn { itemRect.X + itemRect.W - 22.0f, itemRect.Y + 5.0f, 18.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId(("vfx.sc.mod_del_" + std::to_string(i)).c_str()), delBtn, "X", theme))
+				const Wui::WuiRect delBtn { pItem.X + pItem.W - 22.0f, pItem.Y + 4.0f, 18.0f, 20.0f };
+				if (Wui::Button(ctx, Wui::HashId(("vfx.sc.pdel_" + std::to_string(pIdx)).c_str()), delBtn, "X", theme))
 				{
 					VfxModuleLibrary::DeleteProjectCustomModule(mod.Name);
 					RefreshProjectCustomModules();
-					if (m_SelectedProjectModuleIndex == static_cast<int>(i))
+					if (m_SelectedProjectModuleIndex == static_cast<int>(pIdx))
 						m_SelectedProjectModuleIndex = -1;
 					break;
 				}
-				ly += 34.0f;
+				ly += 30.0f;
 			}
 		}
 		Wui::EndScrollArea(ctx);
 
-		// =========================================================================
-		// 2. 右侧工作区: 模块源码设计器与即时编译器 (Scratch Pad Studio)
-		// =========================================================================
-		const float rightX = leftRect.X + leftW + 4.0f;
-		const float rightW = workRect.W - leftW - 4.0f;
-		const Wui::WuiRect rightRect { rightX, workRect.Y, rightW, workRect.H };
+		// -------------------------------------------------------------------------
+		// 2. 中间核心工作区: Slang 源码编辑器 (The Code Editor In The Center)
+		// -------------------------------------------------------------------------
+		Wui::BarSurface(ctx, centerRect, theme.PanelBg, theme.Border);
+
+		// 中间顶部操作标头
+		const Wui::WuiRect cHead { centerRect.X, centerRect.Y, centerRect.W, 32.0f };
+		Wui::BarSurface(ctx, cHead, theme.PanelHeader, theme.Border);
+		std::string editorTitle = "代码编辑核心 (Center Editor) - " + m_EditingCustomModule.Name;
+		Wui::Label(ctx, { cHead.X + 10.0f, cHead.Y + 8.0f }, editorTitle, theme.Accent, 11.5f);
+
+		float cbx = cHead.X + cHead.W - 8.0f;
+
+		// 编译验证按钮
+		cbx -= 144.0f;
+		const Wui::WuiRect compileBtn { cbx, cHead.Y + 5.0f, 140.0f, 22.0f };
+		Wui::Tooltip(ctx, compileBtn, "运行实时 Slang 编译器快速检查语法与类型错误 (快捷键: Ctrl+Enter)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.sc.c_compile"), compileBtn, "[编译验证 (Ctrl+Enter)]", theme))
+		{
+			std::string testShader = VfxComputeGenerator::GenerateComputeShaderSource(
+				"CustomTest", { m_EditingCustomModule }, {}, {}
+			);
+			std::string err;
+			bool ok = VfxComputeGenerator::ValidateAndCompile(testShader, &err);
+			if (ok)
+			{
+				m_CustomModuleCompileSuccess = true;
+				m_CustomModuleCompileError.clear();
+				m_StatusFeedback = "Slang 代码校验通过 (Ctrl+Enter)！";
+			}
+			else
+			{
+				m_CustomModuleCompileSuccess = false;
+				m_CustomModuleCompileError = err.empty() ? "语法校验未通过" : err;
+			}
+		}
+
+		// 重置为模板按钮
+		cbx -= 96.0f;
+		const Wui::WuiRect resetBtn { cbx, cHead.Y + 5.0f, 92.0f, 22.0f };
+		Wui::Tooltip(ctx, resetBtn, "重置当前代码与参数为标准正弦波范例模板");
+		if (Wui::Button(ctx, Wui::HashId("vfx.sc.c_reset"), resetBtn, "重置为范例", theme))
+		{
+			LoadCustomModuleTemplate(0);
+		}
+
+		// 常用语法片段快速插入条 (Snippet Bar)
+		float cy = centerRect.Y + 36.0f;
+		const Wui::WuiRect snipBar { centerRect.X, cy, centerRect.W, 24.0f };
+		Wui::BarSurface(ctx, snipBar, Wui::WuiColor { 0.08f, 0.09f, 0.12f, 0.95f }, theme.Border);
+		float sx = snipBar.X + 6.0f;
+		Wui::Label(ctx, { sx, snipBar.Y + 5.0f }, "常用片段:", theme.TextMuted, 9.5f);
+		sx += 56.0f;
+
+		const auto renderSnippetBtn = [&](const char* id, const char* label, const char* snippet, float bw = 70.0f) {
+			const Wui::WuiRect sBtn { sx, snipBar.Y + 2.0f, bw, 20.0f };
+			Wui::Tooltip(ctx, sBtn, "快速在代码末尾插入常用 Slang 语法片段");
+			if (Wui::Button(ctx, Wui::HashId(id), sBtn, label, theme))
+			{
+				m_EditingCustomModule.SlangSource += snippet;
+			}
+			sx += bw + 3.0f;
+		};
+
+		renderSnippetBtn("vfx.snip.pos", "+ Position", "p.Position", 68.0f);
+		renderSnippetBtn("vfx.snip.vel", "+ Velocity", "p.Velocity", 66.0f);
+		renderSnippetBtn("vfx.snip.col", "+ Color", "p.Color", 54.0f);
+		renderSnippetBtn("vfx.snip.life", "+ Life", "p.Life", 48.0f);
+		renderSnippetBtn("vfx.snip.dt", "+ dt", "dt", 36.0f);
+		renderSnippetBtn("vfx.snip.norm", "+ norm()", "normalize()", 62.0f);
+		renderSnippetBtn("vfx.snip.cross", "+ cross()", "cross(a, b)", 64.0f);
+		renderSnippetBtn("vfx.snip.sin", "+ sin()", "sin(x)", 50.0f);
+		renderSnippetBtn("vfx.snip.noise", "+ CurlNoise3D", "CurlNoise3D(p.Position)", 92.0f);
+
+		cy += 28.0f;
+
+		// 行号栏 + 代码框尺寸分配
+		const float diagH = 100.0f;
+		const float refH = 22.0f;
+		const float codeH = std::max(220.0f, centerRect.H - (cy - centerRect.Y) - diagH - refH - 12.0f);
+
+		const float gutterW = 32.0f;
+		const Wui::WuiRect gutterRect { centerRect.X, cy, gutterW, codeH };
+		const Wui::WuiRect codeBox { centerRect.X + gutterW + 2.0f, cy, centerRect.W - gutterW - 2.0f, codeH };
+
+		// 行号槽背景
+		Wui::BarSurface(ctx, gutterRect, Wui::WuiColor { 0.08f, 0.09f, 0.12f, 0.95f }, theme.Border);
+		// 代码主框背景
+		Wui::BarSurface(ctx, codeBox, Wui::WuiColor { 0.04f, 0.05f, 0.07f, 1.0f }, theme.Border);
+
+		// 计算行数并在行号栏输出
+		int lineCount = 1;
+		for (char ch : m_EditingCustomModule.SlangSource)
+		{
+			if (ch == '\n') lineCount++;
+		}
+		float gy = gutterRect.Y + 4.0f;
+		for (int l = 1; l <= std::min(lineCount, 32); ++l)
+		{
+			Wui::Label(ctx, { gutterRect.X + 6.0f, gy }, std::to_string(l), Wui::WuiColor { 0.40f, 0.45f, 0.55f, 0.8f }, 9.0f);
+			gy += 18.0f;
+		}
+
+		// 主代码文本编辑框
+		Wui::TextField(ctx, Wui::HashId("vfx.sc.code_editor"), codeBox, m_EditingCustomModule.SlangSource, theme);
+		cy += codeH + 4.0f;
+
+		// 内置字段与变量说明条
+		Wui::Label(ctx, { centerRect.X + 6.0f, cy + 2.0f },
+			"可用内置字段: p.Position (float3), p.Velocity (float3), p.Color (float4), p.Size, p.Life | 输入: dt, particleId | 变量: u_<参数名>",
+			theme.TextMuted, 9.5f);
+		cy += refH;
+
+		// 编译诊断输出面板 (Diagnostic Output Window)
+		const Wui::WuiRect diagBox { centerRect.X, cy, centerRect.W, diagH };
+		Wui::BarSurface(ctx, diagBox, Wui::WuiColor { 0.08f, 0.09f, 0.12f, 0.98f }, theme.Border);
+		const Wui::WuiRect diagHead { diagBox.X, diagBox.Y, diagBox.W, 22.0f };
+		Wui::BarSurface(ctx, diagHead, theme.PanelHeader, theme.Border);
+		Wui::Label(ctx, { diagHead.X + 8.0f, diagHead.Y + 4.0f }, "Slang 编译器输出与状态 (Compiler Diagnostic):", theme.Accent, 10.0f);
+
+		if (!m_CustomModuleCompileError.empty())
+		{
+			const Wui::WuiRect errRect { diagBox.X + 6.0f, diagHead.Y + 26.0f, diagBox.W - 12.0f, diagBox.H - 32.0f };
+			Wui::BarSurface(ctx, errRect, Wui::WuiColor { 0.35f, 0.12f, 0.12f, 0.95f }, theme.Warning);
+			Wui::Label(ctx, { errRect.X + 8.0f, errRect.Y + 6.0f }, "[Slang 语法错误] " + m_CustomModuleCompileError.substr(0, 120), theme.Warning, 9.5f);
+		}
+		else if (m_CustomModuleCompileSuccess)
+		{
+			const Wui::WuiRect okRect { diagBox.X + 6.0f, diagHead.Y + 26.0f, diagBox.W - 12.0f, diagBox.H - 32.0f };
+			Wui::BarSurface(ctx, okRect, Wui::WuiColor { 0.12f, 0.30f, 0.18f, 0.95f }, theme.Accent);
+			Wui::Label(ctx, { okRect.X + 8.0f, okRect.Y + 6.0f }, "[编译成功] Slang 计算内核已通过 SPIR-V 1.3 校验，模块可安全用于实机渲染与物理推演！", theme.Accent, 10.0f);
+		}
+		else
+		{
+			Wui::Label(ctx, { diagBox.X + 12.0f, diagHead.Y + 34.0f }, "代码编写器就绪 - 可按 Ctrl+Enter 或点击右上角 [编译验证] 测试 Slang 实时校验。", theme.TextMuted, 9.5f);
+		}
+
+		// -------------------------------------------------------------------------
+		// 3. 右侧栏: 模块属性与动态参数检视器 (Inspector & Parameters)
+		// -------------------------------------------------------------------------
 		Wui::BarSurface(ctx, rightRect, theme.PanelBg, theme.Border);
 
-		// 右侧顶部操作栏
-		const Wui::WuiRect rHead { rightRect.X, rightRect.Y, rightRect.W, 36.0f };
+		const Wui::WuiRect rHead { rightRect.X, rightRect.Y, rightRect.W, 28.0f };
 		Wui::BarSurface(ctx, rHead, theme.PanelHeader, theme.Border);
-		std::string titleStr = "Slang 模块设计器 (Scratch Pad) - " + m_EditingCustomModule.Name;
-		Wui::Label(ctx, { rHead.X + 12.0f, rHead.Y + 10.0f }, titleStr, theme.Accent, 12.0f);
+		Wui::Label(ctx, { rHead.X + 8.0f, rHead.Y + 7.0f }, "模块属性与参数 (Inspector)", theme.Accent, 11.0f);
 
-		float rbx = rHead.X + rHead.W - 12.0f;
+		// 右侧检视区滚动区域
+		const float bottomBtnsH = 110.0f;
+		const Wui::WuiRect rContent { rightRect.X + 4.0f, rightRect.Y + 32.0f, rightRect.W - 8.0f, rightRect.H - 32.0f - bottomBtnsH };
+		float totalParamH = static_cast<float>(m_EditingCustomModule.Parameters.size() * 32.0f + 260.0f);
+		Wui::BeginScrollArea(ctx, rContent, totalParamH, m_CustomModuleParamsScrollY, theme, Wui::HashId("vfx.sc.param_scroll"));
+		float ry = rContent.Y - m_CustomModuleParamsScrollY;
 
-		// 返回按钮
-		rbx -= 100.0f;
-		const Wui::WuiRect backBtn { rbx, rHead.Y + 6.0f, 96.0f, 24.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.sc.r_back"), backBtn, "返回视口与堆栈", theme))
+		const float pLabelW = 68.0f;
+		const float pValX = rContent.X + pLabelW + 6.0f;
+		const float pValW = rContent.W - pLabelW - 12.0f;
+
+		// 模块名称
+		Wui::Label(ctx, { rContent.X + 2.0f, ry + 3.0f }, "模块名称:", theme.TextMuted, 10.0f);
+		std::string modName = m_EditingCustomModule.Name;
+		if (Wui::TextField(ctx, Wui::HashId("vfx.sc.r_name"), { pValX, ry, pValW, 20.0f }, modName, theme))
 		{
-			m_ViewMode = ParticleEditorViewMode::Visual;
+			m_EditingCustomModule.Name = modName;
+		}
+		ry += 26.0f;
+
+		// 执行阶段
+		Wui::Label(ctx, { rContent.X + 2.0f, ry + 3.0f }, "执行阶段:", theme.TextMuted, 10.0f);
+		static const std::vector<std::string> s_StageOpts = { "Update (粒子动力学更新)", "Spawn (粒子出生初始化)" };
+		int stageIdx = (m_EditingCustomModule.Stage == VfxModuleStage::Spawn) ? 1 : 0;
+		if (Wui::Combo(ctx, Wui::HashId("vfx.sc.r_stage"), { pValX, ry, pValW, 20.0f }, "", s_StageOpts, stageIdx, theme))
+		{
+			m_EditingCustomModule.Stage = (stageIdx == 1) ? VfxModuleStage::Spawn : VfxModuleStage::Update;
+		}
+		ry += 26.0f;
+
+		// 模块描述
+		Wui::Label(ctx, { rContent.X + 2.0f, ry + 3.0f }, "模块说明:", theme.TextMuted, 10.0f);
+		std::string modDesc = m_EditingCustomModule.Description;
+		if (Wui::TextField(ctx, Wui::HashId("vfx.sc.r_desc"), { pValX, ry, pValW, 20.0f }, modDesc, theme))
+		{
+			m_EditingCustomModule.Description = modDesc;
+		}
+		ry += 32.0f;
+
+		// 动态 Uniform 参数列表
+		Wui::Label(ctx, { rContent.X + 2.0f, ry + 3.0f }, "输入参数 (Dynamic Uniforms):", theme.Accent, 10.5f);
+		ry += 22.0f;
+
+		for (size_t pIdx = 0; pIdx < m_EditingCustomModule.Parameters.size(); ++pIdx)
+		{
+			auto& p = m_EditingCustomModule.Parameters[pIdx];
+			const Wui::WuiRect pRow { rContent.X, ry, rContent.W, 26.0f };
+			Wui::BarSurface(ctx, pRow, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.9f }, theme.Border);
+
+			std::string typeStr = (p.Type == VfxParamType::Float) ? "[Float]" : ((p.Type == VfxParamType::Vec3) ? "[Vec3]" : "[Color]");
+			Wui::Label(ctx, { pRow.X + 6.0f, pRow.Y + 5.0f }, typeStr + " " + p.Name + " (" + p.GetUniformName() + ")", theme.Text, 9.5f);
+
+			const Wui::WuiRect delPBtn { pRow.X + pRow.W - 22.0f, pRow.Y + 3.0f, 18.0f, 20.0f };
+			if (Wui::Button(ctx, Wui::HashId((std::string("vfx.sc.delp_") + std::to_string(pIdx)).c_str()), delPBtn, "X", theme))
+			{
+				m_EditingCustomModule.Parameters.erase(m_EditingCustomModule.Parameters.begin() + pIdx);
+				break;
+			}
+			ry += 30.0f;
 		}
 
-		// 装配到发射器按钮
-		rbx -= 150.0f;
-		const Wui::WuiRect addEmBtn { rbx, rHead.Y + 6.0f, 144.0f, 24.0f };
-		Wui::Tooltip(ctx, addEmBtn, "将当前自定义 Slang 模块装配至选中的特效发射器");
-		if (Wui::Button(ctx, Wui::HashId("vfx.sc.r_add_em"), addEmBtn, "[+ 装配至当前发射器]", theme))
-		{
-			AddModuleToSelectedEmitter(m_EditingCustomModule);
-			SyncSimulationFromAsset();
-			m_ViewMode = ParticleEditorViewMode::Visual;
-			m_StatusFeedback = "模块 [" + m_EditingCustomModule.Name + "] 已成功装配至发射器！";
-		}
+		// 添加新参数行
+		const Wui::WuiRect addParamBox { rContent.X, ry, rContent.W, 58.0f };
+		Wui::BarSurface(ctx, addParamBox, Wui::WuiColor { 0.08f, 0.09f, 0.12f, 0.9f }, theme.Border);
+		Wui::Label(ctx, { addParamBox.X + 6.0f, addParamBox.Y + 4.0f }, "+ 添加新输入参数:", theme.TextMuted, 9.5f);
 
-		// 编译并保存为项目全局模块按钮
-		rbx -= 208.0f;
-		const Wui::WuiRect saveModBtn { rbx, rHead.Y + 6.0f, 202.0f, 24.0f };
+		const Wui::WuiRect pNameRect { addParamBox.X + 6.0f, addParamBox.Y + 28.0f, 100.0f, 22.0f };
+		Wui::TextField(ctx, Wui::HashId("vfx.sc.newp_name"), pNameRect, m_NewParamNameBuffer, theme);
+
+		static const std::vector<std::string> s_ParamTypeOpts = { "Float", "Vec3", "Color" };
+		const Wui::WuiRect pTypeRect { addParamBox.X + 110.0f, addParamBox.Y + 28.0f, 80.0f, 22.0f };
+		Wui::Combo(ctx, Wui::HashId("vfx.sc.newp_type"), pTypeRect, "", s_ParamTypeOpts, m_NewParamTypeIndex, theme);
+
+		const Wui::WuiRect addPBtn { addParamBox.X + 194.0f, addParamBox.Y + 28.0f, 70.0f, 22.0f };
+		if (Wui::Button(ctx, Wui::HashId("vfx.sc.addp_btn"), addPBtn, "+ 添加", theme))
+		{
+			if (!m_NewParamNameBuffer.empty())
+			{
+				VfxModuleParam newP;
+				newP.Name = m_NewParamNameBuffer;
+				newP.Type = (m_NewParamTypeIndex == 0) ? VfxParamType::Float : ((m_NewParamTypeIndex == 1) ? VfxParamType::Vec3 : VfxParamType::Vec4);
+				newP.FloatVal = 1.0f;
+				newP.VecVal = glm::vec4(1.0f);
+				newP.IsExposed = true;
+				newP.ExposedName = newP.Name;
+				m_EditingCustomModule.Parameters.push_back(newP);
+				m_NewParamNameBuffer = "Param" + std::to_string(m_EditingCustomModule.Parameters.size() + 1);
+			}
+		}
+		Wui::EndScrollArea(ctx);
+
+		// 右侧底部动作按钮区
+		float bY = rightRect.Y + rightRect.H - bottomBtnsH + 6.0f;
+		const Wui::WuiRect saveModBtn { rightRect.X + 6.0f, bY, rightRect.W - 12.0f, 28.0f };
 		Wui::Tooltip(ctx, saveModBtn, "验证并编译 Slang 源码，通过后将模块持久化保存至 assets/vfx/modules/ 供全项目任何特效使用");
 		if (Wui::Button(ctx, Wui::HashId("vfx.sc.r_save_mod"), saveModBtn, "[编译并保存为项目全局模块]", theme))
 		{
@@ -3266,131 +3666,24 @@ void ParticleEditorPanel::NewAsset()
 				m_CustomModuleCompileError = err.empty() ? "语法校验未通过" : err;
 			}
 		}
+		bY += 32.0f;
 
-		// 模块详细设计编辑区
-		const Wui::WuiRect editorContentRect { rightRect.X + 12.0f, rightRect.Y + 44.0f, rightRect.W - 24.0f, rightRect.H - 52.0f };
-		float totalEditH = 760.0f;
-		Wui::BeginScrollArea(ctx, editorContentRect, totalEditH, m_CustomModuleEditorScrollY, theme, Wui::HashId("vfx.sc.editor_scroll"));
-		float ry = editorContentRect.Y - m_CustomModuleEditorScrollY;
-
-		const float labelW = 80.0f;
-		const float rowValX = editorContentRect.X + labelW + 10.0f;
-		const float rowValW = std::min(500.0f, editorContentRect.W - labelW - 20.0f);
-
-		// 模块名称
-		Wui::Label(ctx, { editorContentRect.X, ry + 3.0f }, "模块名称:", theme.TextMuted, 10.5f);
-		std::string modName = m_EditingCustomModule.Name;
-		if (Wui::TextField(ctx, Wui::HashId("vfx.sc.name"), { rowValX, ry, rowValW, 20.0f }, modName, theme))
+		const Wui::WuiRect addEmBtn { rightRect.X + 6.0f, bY, rightRect.W - 12.0f, 28.0f };
+		Wui::Tooltip(ctx, addEmBtn, "将当前自定义 Slang 模块装配至选中的特效发射器");
+		if (Wui::Button(ctx, Wui::HashId("vfx.sc.r_add_em"), addEmBtn, "[+ 装配至当前发射器]", theme))
 		{
-			m_EditingCustomModule.Name = modName;
+			AddModuleToSelectedEmitter(m_EditingCustomModule);
+			SyncSimulationFromAsset();
+			m_ViewMode = ParticleEditorViewMode::Visual;
+			m_StatusFeedback = "模块 [" + m_EditingCustomModule.Name + "] 已成功装配至发射器！";
 		}
-		ry += 26.0f;
+		bY += 32.0f;
 
-		// 执行阶段
-		Wui::Label(ctx, { editorContentRect.X, ry + 3.0f }, "执行阶段:", theme.TextMuted, 10.5f);
-		static const std::vector<std::string> s_StageOpts = { "Update (粒子动力学更新阶段)", "Spawn (粒子出生初始化阶段)" };
-		int stageIdx = (m_EditingCustomModule.Stage == VfxModuleStage::Spawn) ? 1 : 0;
-		if (Wui::Combo(ctx, Wui::HashId("vfx.sc.stage"), { rowValX, ry, rowValW, 20.0f }, "", s_StageOpts, stageIdx, theme))
+		const Wui::WuiRect backBtn { rightRect.X + 6.0f, bY, rightRect.W - 12.0f, 24.0f };
+		if (Wui::Button(ctx, Wui::HashId("vfx.sc.r_back"), backBtn, "返回视口与堆栈", theme))
 		{
-			m_EditingCustomModule.Stage = (stageIdx == 1) ? VfxModuleStage::Spawn : VfxModuleStage::Update;
+			m_ViewMode = ParticleEditorViewMode::Visual;
 		}
-		ry += 26.0f;
-
-		// 模块描述
-		Wui::Label(ctx, { editorContentRect.X, ry + 3.0f }, "模块描述:", theme.TextMuted, 10.5f);
-		std::string modDesc = m_EditingCustomModule.Description;
-		if (Wui::TextField(ctx, Wui::HashId("vfx.sc.desc"), { rowValX, ry, rowValW, 20.0f }, modDesc, theme))
-		{
-			m_EditingCustomModule.Description = modDesc;
-		}
-		ry += 32.0f;
-
-		// 参数列表
-		Wui::Label(ctx, { editorContentRect.X, ry + 3.0f }, "输入参数列表 (Dynamic Uniform Parameters):", theme.Accent, 11.0f);
-		ry += 24.0f;
-
-		for (size_t pIdx = 0; pIdx < m_EditingCustomModule.Parameters.size(); ++pIdx)
-		{
-			auto& p = m_EditingCustomModule.Parameters[pIdx];
-			const Wui::WuiRect pRow { editorContentRect.X, ry, editorContentRect.W, 24.0f };
-			Wui::BarSurface(ctx, pRow, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.9f }, theme.Border);
-
-			std::string typeStr = (p.Type == VfxParamType::Float) ? "[Float]" : ((p.Type == VfxParamType::Vec3) ? "[Vec3]" : "[Color]");
-			Wui::Label(ctx, { pRow.X + 8.0f, pRow.Y + 4.0f }, typeStr + "  " + p.Name + " (绑定: " + p.GetUniformName() + ")", theme.Text, 10.0f);
-
-			const Wui::WuiRect delPBtn { pRow.X + pRow.W - 24.0f, pRow.Y + 2.0f, 20.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId((std::string("vfx.sc.delp_") + std::to_string(pIdx)).c_str()), delPBtn, "X", theme))
-			{
-				m_EditingCustomModule.Parameters.erase(m_EditingCustomModule.Parameters.begin() + pIdx);
-				break;
-			}
-			ry += 28.0f;
-		}
-
-		// 添加新参数行
-		const Wui::WuiRect addParamBox { editorContentRect.X, ry, editorContentRect.W, 28.0f };
-		Wui::BarSurface(ctx, addParamBox, Wui::WuiColor { 0.08f, 0.09f, 0.12f, 0.9f }, theme.Border);
-		float aX = addParamBox.X + 6.0f;
-		Wui::Label(ctx, { aX, addParamBox.Y + 6.0f }, "+ 新参数:", theme.TextMuted, 10.0f);
-		aX += 60.0f;
-
-		const Wui::WuiRect pNameRect { aX, addParamBox.Y + 4.0f, 130.0f, 20.0f };
-		Wui::TextField(ctx, Wui::HashId("vfx.sc.newp_name"), pNameRect, m_NewParamNameBuffer, theme);
-		aX += 136.0f;
-
-		static const std::vector<std::string> s_ParamTypeOpts = { "Float", "Vec3", "Color" };
-		const Wui::WuiRect pTypeRect { aX, addParamBox.Y + 4.0f, 90.0f, 20.0f };
-		Wui::Combo(ctx, Wui::HashId("vfx.sc.newp_type"), pTypeRect, "", s_ParamTypeOpts, m_NewParamTypeIndex, theme);
-		aX += 96.0f;
-
-		const Wui::WuiRect addPBtn { aX, addParamBox.Y + 4.0f, 74.0f, 20.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.sc.addp_btn"), addPBtn, "+ 添加参数", theme))
-		{
-			if (!m_NewParamNameBuffer.empty())
-			{
-				VfxModuleParam newP;
-				newP.Name = m_NewParamNameBuffer;
-				newP.Type = (m_NewParamTypeIndex == 0) ? VfxParamType::Float : ((m_NewParamTypeIndex == 1) ? VfxParamType::Vec3 : VfxParamType::Vec4);
-				newP.FloatVal = 1.0f;
-				newP.VecVal = glm::vec4(1.0f);
-				newP.IsExposed = true;
-				newP.ExposedName = newP.Name;
-				m_EditingCustomModule.Parameters.push_back(newP);
-				m_NewParamNameBuffer = "Param" + std::to_string(m_EditingCustomModule.Parameters.size() + 1);
-			}
-		}
-		ry += 38.0f;
-
-		// Slang 源码编辑区
-		Wui::Label(ctx, { editorContentRect.X, ry + 3.0f }, "Slang 计算着色器源码 (Compute Code):", theme.Accent, 11.0f);
-		ry += 22.0f;
-
-		const Wui::WuiRect hintRect { editorContentRect.X, ry, editorContentRect.W, 20.0f };
-		Wui::Label(ctx, { hintRect.X + 4.0f, hintRect.Y + 3.0f }, "可用内置粒子字段: p.Position, p.Velocity, p.Color, p.Size, p.Life, dt | 辅助函数: Hash1D, Noise3D, CurlNoise3D | 参数: u_<参数名>", theme.TextMuted, 9.5f);
-		ry += 24.0f;
-
-		const Wui::WuiRect codeBox { editorContentRect.X, ry, editorContentRect.W, 240.0f };
-		Wui::BarSurface(ctx, codeBox, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f }, theme.Border);
-		Wui::TextField(ctx, Wui::HashId("vfx.sc.code_editor"), codeBox, m_EditingCustomModule.SlangSource, theme);
-		ry += 246.0f;
-
-		// 编译状态提示
-		if (!m_CustomModuleCompileError.empty())
-		{
-			const Wui::WuiRect errRect { editorContentRect.X, ry, editorContentRect.W, 28.0f };
-			Wui::BarSurface(ctx, errRect, Wui::WuiColor { 0.35f, 0.12f, 0.12f, 0.95f }, theme.Warning);
-			Wui::Label(ctx, { errRect.X + 8.0f, errRect.Y + 6.0f }, "[Slang 语法/编译错误] " + m_CustomModuleCompileError.substr(0, 100), theme.Warning, 9.5f);
-			ry += 34.0f;
-		}
-		else if (m_CustomModuleCompileSuccess)
-		{
-			const Wui::WuiRect okRect { editorContentRect.X, ry, editorContentRect.W, 28.0f };
-			Wui::BarSurface(ctx, okRect, Wui::WuiColor { 0.12f, 0.30f, 0.18f, 0.95f }, theme.Accent);
-			Wui::Label(ctx, { okRect.X + 8.0f, okRect.Y + 6.0f }, "[编译成功] 模块已通过 Slang 编译器校验，保存为项目全局模块并在全项目可用！", theme.Accent, 10.0f);
-			ry += 34.0f;
-		}
-
-		Wui::EndScrollArea(ctx);
 	}
 
 	void ParticleEditorPanel::RenderInspector(Wui::WuiContext& ctx, const Wui::WuiRect& inspectorRect, const Wui::WuiTheme& theme, PanelHost& host)

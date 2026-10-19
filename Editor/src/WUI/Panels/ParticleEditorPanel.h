@@ -224,10 +224,14 @@ namespace World
 		bool m_CustomModuleCompileSuccess = false;
 		float m_CustomModuleListScrollY = 0.0f;
 		float m_CustomModuleEditorScrollY = 0.0f;
+		float m_CustomModuleParamsScrollY = 0.0f;
+		bool m_TemplateMenuOpen = false;
 
 		void RefreshProjectCustomModules();
 		void OpenCustomModuleEditor(const std::string& defaultName = "");
 		void OpenExistingCustomModule(size_t index);
+		void LoadCustomModuleTemplate(int templateIndex);
+		static std::vector<std::pair<std::string, VfxModule>> GetBuiltinModuleTemplates();
 		void RenderCustomModuleWorkspace(Wui::WuiContext& ctx, const Wui::WuiRect& workRect, const Wui::WuiTheme& theme, PanelHost& host);
 
 		// 现代多分区布局与 Splitters 尺寸 (Outliner 拓宽至 270px 消除截字)
