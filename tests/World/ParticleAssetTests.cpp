@@ -234,25 +234,569 @@ static void TestParticleAssetNewDynamicsAndBursts()
 
 static void TestParticleAssetShowcasePresets3D()
 {
-	const char* presetFiles[] = {
-		"tests/fixtures/content/vfx/flame_tornado_3d.wvfx",
-		"tests/fixtures/content/vfx/lightning_plasma_beam_3d.wvfx",
-		"tests/fixtures/content/vfx/orbital_magic_shield_3d.wvfx",
-		"tests/fixtures/content/vfx/meteor_impact_explosion_3d.wvfx",
-		"tests/fixtures/content/vfx/blizzard_frost_nova_3d.wvfx"
+	std::cout << "Building and Verifying Commercial 3D VFX Showcase Presets with Pure Niagara Modular Stacks...\n";
+
+	// 1. OrbitalMagicShield3D
+	ParticleAsset shieldAsset;
+	shieldAsset.Name = "OrbitalMagicShield3D";
+	shieldAsset.Duration = 5.0f;
+	shieldAsset.Looping = true;
+	{
+		// Emitter 1: RunicGroundCircle
+		ParticleEmitterLayer em1;
+		em1.Name = "RunicShieldRing";
+		em1.MaxParticles = 1;
+		em1.Lifetime = 9999.0f;
+		em1.EmissionRate = 0.0f;
+		em1.FacingMode = ParticleRenderMode::HorizontalQuad;
+		em1.Bursts = { { 0.0f, 1u } };
+		em1.Material.TexturePath = "textures/particles/magic_rune.wtex";
+		em1.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em1.Material.BlendMode = ParticleBlendMode::Additive;
+		em1.Material.EmissiveBoost = 2.5f;
+		em1.Modules = {
+			VfxModuleLibrary::CreateSpawnBurstModule(1, 0.0f),
+			VfxModuleLibrary::CreateInitParticleModule(9999.0f, 2.5f, 2.5f),
+			VfxModuleLibrary::CreatePointSpawnModule(),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, true, 2.5f)
+		};
+		shieldAsset.Emitters.push_back(em1);
+
+		// Emitter 2: OrbitingEnergySpheres
+		ParticleEmitterLayer em2;
+		em2.Name = "OrbitingEnergySpheres";
+		em2.MaxParticles = 60;
+		em2.Lifetime = 2.2f;
+		em2.EmissionRate = 30.0f;
+		em2.FacingMode = ParticleRenderMode::Billboard;
+		em2.Material.TexturePath = "textures/particles/spark_glow.wtex";
+		em2.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em2.Material.BlendMode = ParticleBlendMode::Additive;
+		em2.Material.EmissiveBoost = 3.5f;
+		em2.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(30.0f),
+			VfxModuleLibrary::CreateInitParticleModule(2.2f, 0.22f, 0.06f),
+			VfxModuleLibrary::CreateRingSpawnModule(1.8f, 0.0f),
+			VfxModuleLibrary::CreateOrbitModule(3.5f, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.8f, 0.0f }),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.22f, 0.06f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(0.4f, 0.9f, 1.0f, 1.0f), glm::vec4(0.8f, 0.3f, 1.0f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 3.5f)
+		};
+		shieldAsset.Emitters.push_back(em2);
+
+		// Emitter 3: ShieldBarrierPulse
+		ParticleEmitterLayer em3;
+		em3.Name = "ShieldBarrierPulse";
+		em3.MaxParticles = 80;
+		em3.Lifetime = 1.8f;
+		em3.EmissionRate = 20.0f;
+		em3.FacingMode = ParticleRenderMode::Billboard;
+		em3.Material.TexturePath = "textures/particles/flame_soft.wtex";
+		em3.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em3.Material.BlendMode = ParticleBlendMode::Additive;
+		em3.Material.EmissiveBoost = 2.0f;
+		em3.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(20.0f),
+			VfxModuleLibrary::CreateInitParticleModule(1.8f, 0.5f, 1.8f),
+			VfxModuleLibrary::CreateSphereSpawnModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.5f, 1.8f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(0.5f, 0.2f, 1.0f, 0.6f), glm::vec4(0.2f, 0.7f, 1.0f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 2.0f)
+		};
+		shieldAsset.Emitters.push_back(em3);
+	}
+
+	// 2. FlameTornado3D
+	ParticleAsset tornadoAsset;
+	tornadoAsset.Name = "FlameTornado3D";
+	tornadoAsset.Duration = 5.0f;
+	tornadoAsset.Looping = true;
+	{
+		// Emitter 1: CoreFireVortex
+		ParticleEmitterLayer em1;
+		em1.Name = "CoreFireVortex";
+		em1.MaxParticles = 450;
+		em1.Lifetime = 1.5f;
+		em1.EmissionRate = 85.0f;
+		em1.Material.TexturePath = "textures/particles/flame_soft.wtex";
+		em1.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em1.Material.BlendMode = ParticleBlendMode::Additive;
+		em1.Material.EmissiveBoost = 3.2f;
+		em1.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(85.0f),
+			VfxModuleLibrary::CreateInitParticleModule(1.5f, 0.45f, 0.1f),
+			VfxModuleLibrary::CreateConeSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateVortexModule(),
+			VfxModuleLibrary::CreateCurlNoiseModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.45f, 0.1f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(1.0f, 0.75f, 0.2f, 1.0f), glm::vec4(0.9f, 0.1f, 0.0f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 3.2f)
+		};
+		if (auto* g = em1.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 4.5f, 0.0f, 0.0f));
+		if (auto* v = em1.FindModule("mod.update.vortex")) v->SetFloat("VortexSpeed", 8.0f);
+		if (auto* n = em1.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 4.5f);
+		if (auto* d = em1.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.35f);
+		tornadoAsset.Emitters.push_back(em1);
+
+		// Emitter 2: SwirlingSparks
+		ParticleEmitterLayer em2;
+		em2.Name = "SwirlingSparks";
+		em2.MaxParticles = 300;
+		em2.Lifetime = 1.2f;
+		em2.EmissionRate = 50.0f;
+		em2.FacingMode = ParticleRenderMode::StretchedVelocity;
+		em2.Material.TexturePath = "textures/particles/spark_glow.wtex";
+		em2.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em2.Material.BlendMode = ParticleBlendMode::Additive;
+		em2.Material.EmissiveBoost = 4.5f;
+		em2.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(50.0f),
+			VfxModuleLibrary::CreateInitParticleModule(1.2f, 0.12f, 0.02f),
+			VfxModuleLibrary::CreateConeSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateVortexModule(),
+			VfxModuleLibrary::CreateCurlNoiseModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.12f, 0.02f),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 4.5f)
+		};
+		if (auto* g = em2.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 5.0f, 0.0f, 0.0f));
+		if (auto* v = em2.FindModule("mod.update.vortex")) v->SetFloat("VortexSpeed", 12.0f);
+		if (auto* n = em2.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 6.0f);
+		if (auto* r = em2.FindModule("mod.render.sprite")) r->SetFloat("FacingMode", static_cast<float>(ParticleRenderMode::StretchedVelocity));
+		tornadoAsset.Emitters.push_back(em2);
+
+		// Emitter 3: RisingSmokePillar
+		ParticleEmitterLayer em3;
+		em3.Name = "RisingSmokePillar";
+		em3.MaxParticles = 200;
+		em3.Lifetime = 3.0f;
+		em3.EmissionRate = 25.0f;
+		em3.Material.TexturePath = "textures/particles/smoke_puff.wtex";
+		em3.Material.MaterialPath = "materials/particles/particle_alpha.wmat";
+		em3.Material.BlendMode = ParticleBlendMode::AlphaBlend;
+		em3.Material.EmissiveBoost = 1.0f;
+		em3.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(25.0f),
+			VfxModuleLibrary::CreateInitParticleModule(3.0f, 0.4f, 2.2f),
+			VfxModuleLibrary::CreateConeSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateVortexModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.4f, 2.2f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(0.25f, 0.25f, 0.25f, 0.6f), glm::vec4(0.08f, 0.08f, 0.08f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(false, false, 1.0f)
+		};
+		if (auto* g = em3.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 2.5f, 0.0f, 0.0f));
+		if (auto* v = em3.FindModule("mod.update.vortex")) v->SetFloat("VortexSpeed", 3.0f);
+		if (auto* d = em3.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.6f);
+		tornadoAsset.Emitters.push_back(em3);
+	}
+
+	// 3. MeteorImpactExplosion3D
+	ParticleAsset meteorAsset;
+	meteorAsset.Name = "MeteorImpactExplosion3D";
+	meteorAsset.Duration = 2.5f;
+	meteorAsset.Looping = false;
+	{
+		// Emitter 1: BlastShockwave
+		ParticleEmitterLayer em1;
+		em1.Name = "BlastShockwave";
+		em1.MaxParticles = 1;
+		em1.Lifetime = 0.75f;
+		em1.EmissionRate = 0.0f;
+		em1.FacingMode = ParticleRenderMode::HorizontalQuad;
+		em1.Bursts = { { 0.0f, 1u } };
+		em1.Material.TexturePath = "textures/particles/shockwave_ring.wtex";
+		em1.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em1.Material.BlendMode = ParticleBlendMode::Additive;
+		em1.Material.EmissiveBoost = 3.5f;
+		em1.Modules = {
+			VfxModuleLibrary::CreateSpawnBurstModule(1, 0.0f),
+			VfxModuleLibrary::CreateInitParticleModule(0.75f, 0.6f, 7.5f),
+			VfxModuleLibrary::CreatePointSpawnModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.6f, 7.5f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(1.0f, 0.85f, 0.4f, 1.0f), glm::vec4(0.9f, 0.2f, 0.0f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, true, 3.5f)
+		};
+		meteorAsset.Emitters.push_back(em1);
+
+		// Emitter 2: CoreFireball
+		ParticleEmitterLayer em2;
+		em2.Name = "CoreFireball";
+		em2.MaxParticles = 60;
+		em2.Lifetime = 1.0f;
+		em2.EmissionRate = 0.0f;
+		em2.Bursts = { { 0.0f, 45u } };
+		em2.Material.TexturePath = "textures/particles/flame_soft.wtex";
+		em2.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em2.Material.BlendMode = ParticleBlendMode::Additive;
+		em2.Material.EmissiveBoost = 4.0f;
+		em2.Modules = {
+			VfxModuleLibrary::CreateSpawnBurstModule(45, 0.0f),
+			VfxModuleLibrary::CreateInitParticleModule(1.0f, 0.5f, 2.5f),
+			VfxModuleLibrary::CreateSphereSpawnModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.5f, 2.5f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(1.0f, 0.9f, 0.5f, 1.0f), glm::vec4(0.8f, 0.1f, 0.0f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 4.0f)
+		};
+		if (auto* s = em2.FindModule("mod.spawn.sphere")) { s->SetFloat("SphereRadius", 0.3f); s->SetFloat("OutwardSpeed", 12.0f); }
+		if (auto* d = em2.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 1.8f);
+		meteorAsset.Emitters.push_back(em2);
+
+		// Emitter 3: FlyingSparksAndDebris
+		ParticleEmitterLayer em3;
+		em3.Name = "FlyingSparksAndDebris";
+		em3.MaxParticles = 80;
+		em3.Lifetime = 1.3f;
+		em3.EmissionRate = 0.0f;
+		em3.FacingMode = ParticleRenderMode::StretchedVelocity;
+		em3.Bursts = { { 0.0f, 65u } };
+		em3.Material.TexturePath = "textures/particles/spark_glow.wtex";
+		em3.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em3.Material.BlendMode = ParticleBlendMode::Additive;
+		em3.Material.EmissiveBoost = 4.5f;
+		em3.Modules = {
+			VfxModuleLibrary::CreateSpawnBurstModule(65, 0.0f),
+			VfxModuleLibrary::CreateInitParticleModule(1.3f, 0.15f, 0.02f),
+			VfxModuleLibrary::CreateSphereSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.15f, 0.02f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(1.0f, 0.9f, 0.4f, 1.0f), glm::vec4(1.0f, 0.2f, 0.0f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 4.5f)
+		};
+		if (auto* s = em3.FindModule("mod.spawn.sphere")) { s->SetFloat("SphereRadius", 0.2f); s->SetFloat("OutwardSpeed", 15.0f); }
+		if (auto* g = em3.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, -14.0f, 0.0f, 0.0f));
+		if (auto* d = em3.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.2f);
+		if (auto* r = em3.FindModule("mod.render.sprite")) r->SetFloat("FacingMode", static_cast<float>(ParticleRenderMode::StretchedVelocity));
+		meteorAsset.Emitters.push_back(em3);
+
+		// Emitter 4: ExplosionSmoke
+		ParticleEmitterLayer em4;
+		em4.Name = "ExplosionSmoke";
+		em4.MaxParticles = 40;
+		em4.Lifetime = 3.5f;
+		em4.EmissionRate = 0.0f;
+		em4.Bursts = { { 0.05f, 30u } };
+		em4.Material.TexturePath = "textures/particles/smoke_puff.wtex";
+		em4.Material.MaterialPath = "materials/particles/particle_alpha.wmat";
+		em4.Material.BlendMode = ParticleBlendMode::AlphaBlend;
+		em4.Material.EmissiveBoost = 1.0f;
+		em4.Modules = {
+			VfxModuleLibrary::CreateSpawnBurstModule(30, 0.05f),
+			VfxModuleLibrary::CreateInitParticleModule(3.5f, 0.4f, 2.8f),
+			VfxModuleLibrary::CreateConeSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateCurlNoiseModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.4f, 2.8f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(0.3f, 0.3f, 0.3f, 0.75f), glm::vec4(0.1f, 0.1f, 0.1f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(false, false, 1.0f)
+		};
+		if (auto* g = em4.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 1.8f, 0.0f, 0.0f));
+		if (auto* n = em4.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 3.0f);
+		if (auto* d = em4.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.8f);
+		meteorAsset.Emitters.push_back(em4);
+	}
+
+	// 4. LightningPlasmaBeam3D
+	ParticleAsset beamAsset;
+	beamAsset.Name = "LightningPlasmaBeam3D";
+	beamAsset.Duration = 3.0f;
+	beamAsset.Looping = true;
+	{
+		// Emitter 1: PlasmaBeamCore
+		ParticleEmitterLayer em1;
+		em1.Name = "PlasmaBeamCore";
+		em1.MaxParticles = 150;
+		em1.Lifetime = 0.5f;
+		em1.EmissionRate = 140.0f;
+		em1.FacingMode = ParticleRenderMode::StretchedVelocity;
+		em1.Material.TexturePath = "textures/particles/electric_beam.wtex";
+		em1.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em1.Material.BlendMode = ParticleBlendMode::Additive;
+		em1.Material.EmissiveBoost = 4.5f;
+		em1.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(140.0f),
+			VfxModuleLibrary::CreateInitParticleModule(0.5f, 0.3f, 0.08f),
+			VfxModuleLibrary::CreatePointSpawnModule(),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 4.5f)
+		};
+		if (auto* p = em1.FindModule("mod.spawn.point")) p->SetFloat("PointSpeed", 24.0f);
+		if (auto* r = em1.FindModule("mod.render.sprite")) r->SetFloat("FacingMode", static_cast<float>(ParticleRenderMode::StretchedVelocity));
+		beamAsset.Emitters.push_back(em1);
+
+		// Emitter 2: SpiralElectricArcs
+		ParticleEmitterLayer em2;
+		em2.Name = "SpiralElectricArcs";
+		em2.MaxParticles = 80;
+		em2.Lifetime = 0.8f;
+		em2.EmissionRate = 60.0f;
+		em2.Material.TexturePath = "textures/particles/spark_glow.wtex";
+		em2.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em2.Material.BlendMode = ParticleBlendMode::Additive;
+		em2.Material.EmissiveBoost = 3.5f;
+		em2.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(60.0f),
+			VfxModuleLibrary::CreateInitParticleModule(0.8f, 0.15f, 0.03f),
+			VfxModuleLibrary::CreateRingSpawnModule(0.45f, 0.0f),
+			VfxModuleLibrary::CreateJitterModule(2.5f, 35.0f),
+			VfxModuleLibrary::CreateVortexModule(),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 3.5f)
+		};
+		if (auto* v = em2.FindModule("mod.update.vortex")) v->SetFloat("VortexSpeed", 8.0f);
+		beamAsset.Emitters.push_back(em2);
+
+		// Emitter 3: ScatterImpactSparks
+		ParticleEmitterLayer em3;
+		em3.Name = "ScatterImpactSparks";
+		em3.MaxParticles = 100;
+		em3.Lifetime = 0.9f;
+		em3.EmissionRate = 45.0f;
+		em3.FacingMode = ParticleRenderMode::StretchedVelocity;
+		em3.Material.TexturePath = "textures/particles/spark_glow.wtex";
+		em3.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em3.Material.BlendMode = ParticleBlendMode::Additive;
+		em3.Material.EmissiveBoost = 4.0f;
+		em3.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(45.0f),
+			VfxModuleLibrary::CreateInitParticleModule(0.9f, 0.1f, 0.01f),
+			VfxModuleLibrary::CreateSphereSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 4.0f)
+		};
+		if (auto* s = em3.FindModule("mod.spawn.sphere")) { s->SetFloat("SphereRadius", 0.1f); s->SetFloat("OutwardSpeed", 7.0f); }
+		if (auto* g = em3.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, -9.8f, 0.0f, 0.0f));
+		if (auto* d = em3.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.2f);
+		if (auto* r = em3.FindModule("mod.render.sprite")) r->SetFloat("FacingMode", static_cast<float>(ParticleRenderMode::StretchedVelocity));
+		beamAsset.Emitters.push_back(em3);
+	}
+
+	// 5. BlizzardFrostNova3D
+	ParticleAsset blizzardAsset;
+	blizzardAsset.Name = "BlizzardFrostNova3D";
+	blizzardAsset.Duration = 5.0f;
+	blizzardAsset.Looping = true;
+	{
+		// Emitter 1: FrostBlastRing
+		ParticleEmitterLayer em1;
+		em1.Name = "FrostBlastRing";
+		em1.MaxParticles = 1;
+		em1.Lifetime = 1.2f;
+		em1.EmissionRate = 0.0f;
+		em1.FacingMode = ParticleRenderMode::HorizontalQuad;
+		em1.Bursts = { { 0.0f, 1u } };
+		em1.Material.TexturePath = "textures/particles/shockwave_ring.wtex";
+		em1.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em1.Material.BlendMode = ParticleBlendMode::Additive;
+		em1.Material.EmissiveBoost = 3.0f;
+		em1.Modules = {
+			VfxModuleLibrary::CreateSpawnBurstModule(1, 0.0f),
+			VfxModuleLibrary::CreateInitParticleModule(1.2f, 0.5f, 6.0f),
+			VfxModuleLibrary::CreatePointSpawnModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.5f, 6.0f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(0.4f, 0.85f, 1.0f, 1.0f), glm::vec4(0.1f, 0.3f, 0.8f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, true, 3.0f)
+		};
+		blizzardAsset.Emitters.push_back(em1);
+
+		// Emitter 2: IceCrystals
+		ParticleEmitterLayer em2;
+		em2.Name = "IceCrystals";
+		em2.MaxParticles = 250;
+		em2.Lifetime = 2.5f;
+		em2.EmissionRate = 80.0f;
+		em2.Material.TexturePath = "textures/particles/spark_glow.wtex";
+		em2.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em2.Material.BlendMode = ParticleBlendMode::Additive;
+		em2.Material.EmissiveBoost = 2.2f;
+		em2.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(80.0f),
+			VfxModuleLibrary::CreateInitParticleModule(2.5f, 0.12f, 0.03f),
+			VfxModuleLibrary::CreateBoxSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateVortexModule(),
+			VfxModuleLibrary::CreateCurlNoiseModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 2.2f)
+		};
+		if (auto* g = em2.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, -1.8f, 0.0f, 0.0f));
+		if (auto* v = em2.FindModule("mod.update.vortex")) v->SetFloat("VortexSpeed", 3.0f);
+		if (auto* n = em2.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 2.5f);
+		if (auto* d = em2.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.3f);
+		blizzardAsset.Emitters.push_back(em2);
+
+		// Emitter 3: SubZeroFog
+		ParticleEmitterLayer em3;
+		em3.Name = "SubZeroFog";
+		em3.MaxParticles = 120;
+		em3.Lifetime = 3.0f;
+		em3.EmissionRate = 30.0f;
+		em3.Material.TexturePath = "textures/particles/smoke_puff.wtex";
+		em3.Material.MaterialPath = "materials/particles/particle_alpha.wmat";
+		em3.Material.BlendMode = ParticleBlendMode::AlphaBlend;
+		em3.Material.EmissiveBoost = 1.0f;
+		em3.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(30.0f),
+			VfxModuleLibrary::CreateInitParticleModule(3.0f, 0.6f, 2.2f),
+			VfxModuleLibrary::CreateRingSpawnModule(2.2f, 0.0f),
+			VfxModuleLibrary::CreateCurlNoiseModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.6f, 2.2f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(0.4f, 0.7f, 0.95f, 0.5f), glm::vec4(0.2f, 0.5f, 0.9f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(false, false, 1.0f)
+		};
+		if (auto* n = em3.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 1.5f);
+		blizzardAsset.Emitters.push_back(em3);
+	}
+
+	// 6. Campfire
+	ParticleAsset campfireAsset;
+	campfireAsset.Name = "Campfire";
+	campfireAsset.Duration = 4.0f;
+	campfireAsset.Looping = true;
+	{
+		// Emitter 1: CampfireFlame
+		ParticleEmitterLayer em1;
+		em1.Name = "CampfireFlame";
+		em1.MaxParticles = 200;
+		em1.Lifetime = 1.2f;
+		em1.EmissionRate = 50.0f;
+		em1.Material.TexturePath = "textures/particles/flame_soft.wtex";
+		em1.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em1.Material.BlendMode = ParticleBlendMode::Additive;
+		em1.Material.EmissiveBoost = 3.0f;
+		em1.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(50.0f),
+			VfxModuleLibrary::CreateInitParticleModule(1.2f, 0.45f, 0.08f),
+			VfxModuleLibrary::CreateConeSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateCurlNoiseModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.45f, 0.08f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(1.0f, 0.7f, 0.15f, 1.0f), glm::vec4(0.9f, 0.1f, 0.0f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 3.0f)
+		};
+		if (auto* c = em1.FindModule("mod.spawn.cone")) { c->SetFloat("ConeAngle", 14.0f); c->SetFloat("ConeRadius", 0.18f); c->SetFloat("InitialSpeed", 2.5f); }
+		if (auto* g = em1.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 3.0f, 0.0f, 0.0f));
+		if (auto* n = em1.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 2.5f);
+		if (auto* d = em1.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.3f);
+		campfireAsset.Emitters.push_back(em1);
+
+		// Emitter 2: RisingSmoke
+		ParticleEmitterLayer em2;
+		em2.Name = "RisingSmoke";
+		em2.MaxParticles = 100;
+		em2.Lifetime = 3.5f;
+		em2.EmissionRate = 15.0f;
+		em2.Material.TexturePath = "textures/particles/smoke_puff.wtex";
+		em2.Material.MaterialPath = "materials/particles/particle_alpha.wmat";
+		em2.Material.BlendMode = ParticleBlendMode::AlphaBlend;
+		em2.Material.EmissiveBoost = 0.8f;
+		em2.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(15.0f),
+			VfxModuleLibrary::CreateInitParticleModule(3.5f, 0.3f, 1.8f),
+			VfxModuleLibrary::CreateConeSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateCurlNoiseModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.3f, 1.8f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(0.35f, 0.35f, 0.35f, 0.6f), glm::vec4(0.1f, 0.1f, 0.1f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(false, false, 0.8f)
+		};
+		if (auto* c = em2.FindModule("mod.spawn.cone")) { c->SetFloat("ConeAngle", 20.0f); c->SetFloat("ConeRadius", 0.25f); c->SetFloat("InitialSpeed", 1.8f); }
+		if (auto* g = em2.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 1.8f, 0.0f, 0.0f));
+		if (auto* n = em2.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 2.0f);
+		if (auto* d = em2.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.55f);
+		campfireAsset.Emitters.push_back(em2);
+
+		// Emitter 3: FloatingEmbers
+		ParticleEmitterLayer em3;
+		em3.Name = "FloatingEmbers";
+		em3.MaxParticles = 80;
+		em3.Lifetime = 2.0f;
+		em3.EmissionRate = 12.0f;
+		em3.Material.TexturePath = "textures/particles/spark_glow.wtex";
+		em3.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+		em3.Material.BlendMode = ParticleBlendMode::Additive;
+		em3.Material.EmissiveBoost = 4.0f;
+		em3.Modules = {
+			VfxModuleLibrary::CreateSpawnRateModule(12.0f),
+			VfxModuleLibrary::CreateInitParticleModule(2.0f, 0.08f, 0.01f),
+			VfxModuleLibrary::CreateConeSpawnModule(),
+			VfxModuleLibrary::CreateGravityModule(),
+			VfxModuleLibrary::CreateCurlNoiseModule(),
+			VfxModuleLibrary::CreateLinearDragModule(),
+			VfxModuleLibrary::CreateScaleOverLifeModule(0.08f, 0.01f),
+			VfxModuleLibrary::CreateColorOverLifeModule(glm::vec4(1.0f, 0.85f, 0.3f, 1.0f), glm::vec4(0.8f, 0.2f, 0.0f, 0.0f)),
+			VfxModuleLibrary::CreateSolveVelocityModule(),
+			VfxModuleLibrary::CreateSpriteRendererModule(true, false, 4.0f)
+		};
+		if (auto* c = em3.FindModule("mod.spawn.cone")) { c->SetFloat("ConeAngle", 22.0f); c->SetFloat("ConeRadius", 0.15f); c->SetFloat("InitialSpeed", 3.2f); }
+		if (auto* g = em3.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 1.2f, 0.0f, 0.0f));
+		if (auto* n = em3.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 3.5f);
+		if (auto* d = em3.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.25f);
+		campfireAsset.Emitters.push_back(em3);
+	}
+
+	const std::pair<const char*, const ParticleAsset*> allAssets[] = {
+		{ "orbital_magic_shield_3d.wvfx", &shieldAsset },
+		{ "flame_tornado_3d.wvfx", &tornadoAsset },
+		{ "meteor_impact_explosion_3d.wvfx", &meteorAsset },
+		{ "lightning_plasma_beam_3d.wvfx", &beamAsset },
+		{ "blizzard_frost_nova_3d.wvfx", &blizzardAsset },
+		{ "campfire.wvfx", &campfireAsset }
 	};
 
-	for (const char* file : presetFiles)
+	std::error_code ec;
+	std::filesystem::create_directories("Engine/content/vfx", ec);
+	std::filesystem::create_directories("tests/fixtures/content/vfx", ec);
+
+	for (const auto& [filename, pAsset] : allAssets)
 	{
-		ParticleAsset asset;
-		bool ok = ParticleAssetSerializer::Deserialize(file, asset);
-		assert(ok && "Preset file must deserialize successfully");
-		assert(!asset.Name.empty());
-		assert(!asset.Emitters.empty());
-		for (const auto& em : asset.Emitters)
+		std::string enginePath = std::string("Engine/content/vfx/") + filename;
+		std::string fixturePath = std::string("tests/fixtures/content/vfx/") + filename;
+
+		bool ok1 = ParticleAssetSerializer::Serialize(*pAsset, enginePath);
+		assert(ok1 && "Failed to serialize to engine content vfx");
+
+		bool ok2 = ParticleAssetSerializer::Serialize(*pAsset, fixturePath);
+		assert(ok2 && "Failed to serialize to tests fixture vfx");
+
+		// 反序列化并断言每个发射器都完整持有模块堆栈
+		ParticleAsset loaded;
+		bool ok3 = ParticleAssetSerializer::Deserialize(enginePath, loaded);
+		assert(ok3 && "Failed to deserialize newly generated VFX asset");
+		assert(loaded.Name == pAsset->Name);
+		assert(loaded.Emitters.size() == pAsset->Emitters.size());
+
+		for (size_t i = 0; i < loaded.Emitters.size(); ++i)
 		{
-			assert(!em.Name.empty());
-			assert(em.MaxParticles > 0);
+			const auto& em = loaded.Emitters[i];
+			assert(!em.Modules.empty() && "Commercial VFX preset emitter must contain non-empty Niagara modules!");
+			assert(em.Modules.size() >= 4 && "Each emitter in showcase VFX must contain full modular pipeline!");
 		}
 	}
 

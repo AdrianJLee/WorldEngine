@@ -1,91 +1,974 @@
 FormatVersion: 1
 Name: BlizzardFrostNova3D
-Guid: 3005
-Seed: 9999
-Duration: 0
+Guid: 0
+Seed: 1337
+Duration: 5
 Looping: true
-WarmupTime: 0.5
+WarmupTime: 0
 LOD:
-  CullDistance: 70
+  CullDistance: 60
   PauseWhenOffscreen: true
 Emitters:
-  - Name: IceCrystalShockwave
+  - Name: FrostBlastRing
+    MaxParticles: 1
+    Lifetime: 1.20000005
+    EmissionRate: 0
+    EmissionMode: 0
+    SingleCount: 1
     Enabled: true
-    MaxParticles: 500
-    Lifetime: 1.8
-    EmissionRate: 120
     Emitter:
-      Type: Ring
+      Type: Point
       LockToXY: false
+      MeshPath: ""
     Material:
+      TexturePath: textures/particles/shockwave_ring.wtex
+      MaterialPath: materials/particles/particle_additive.wmat
       BlendMode: Additive
-      FacingMode: StretchedVelocity
-      EmissiveBoost: 4.0
+      FacingMode: HorizontalQuad
+      EmissiveBoost: 3
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
     Motion:
-      Speed: 9.0
-      SpeedVariance: 1.5
-      Gravity: [0, -0.2, 0]
-      LinearDrag: 0.8
+      Speed: 5
+      SpeedVariance: 1
+      Gravity: [0, -9.80000019, 0]
+      LinearDrag: 0
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
     Evolution:
-      SizeStart: 0.35
-      SizeEnd: 0.08
-      ColorStart: [0.6, 0.9, 1.0, 1.0]
-      ColorEnd: [0.1, 0.4, 0.85, 0.0]
+      SizeStart: 0.5
+      SizeEnd: 0.100000001
+      ColorStart: [1, 1, 1, 1]
+      ColorEnd: [1, 1, 1, 0]
     Collision:
       Mode: None
-  - Name: FreezingFogTurbulence
+      Restitution: 0.5
+      Friction: 0.100000001
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+    Bursts:
+      - Time: 0
+        Count: 1
+    UseCustomShaderOverride: false
+    Modules:
+      - Id: mod.emitter.spawn_burst
+        Name: 瞬态爆发/单体 (Spawn Burst)
+        Description: 在指定时间瞬间爆发生成固定数量图元 (Count=1 用于法阵/护盾/光环，零发射流开销)
+        Stage: Emitter
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpawnBurst]\n    // 在指定时间瞬间生成指定数量的粒子或单体网格图元\n"
+        Parameters:
+          - Name: SpawnCount
+            Type: 0
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 1
+            Max: 10000
+            Step: 1
+            Tooltip: 瞬时生成图元数量 (1 为单体法阵/护盾)
+            IsExposed: true
+            ExposedName: BurstCount
+          - Name: SpawnTime
+            Type: 0
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 60
+            Step: 0.0500000007
+            Tooltip: 爆发触发时间 (秒)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.spawn.init_particle
+        Name: 粒子初始化 (Initialize Particle)
+        Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: InitializeParticle]\n    p.MaxLife = u_Lifetime;\n    p.Life = u_Lifetime;\n    p.Size = float2(u_SizeStart);\n    p.Color = u_ColorStart;\n"
+        Parameters:
+          - Name: Lifetime
+            Type: 0
+            FloatVal: 1.20000005
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.0500000007
+            Max: 60
+            Step: 0.0500000007
+            Tooltip: 粒子存活基准寿命 (秒)
+            IsExposed: true
+            ExposedName: Lifetime
+          - Name: SizeStart
+            Type: 0
+            FloatVal: 0.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 诞生初始尺寸
+            IsExposed: true
+            ExposedName: SizeStart
+          - Name: SizeEnd
+            Type: 0
+            FloatVal: 6
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 消亡终末尺寸
+            IsExposed: true
+            ExposedName: SizeEnd
+          - Name: ColorStart
+            Type: 3
+            FloatVal: 0
+            VecVal: [1, 0.800000012, 0.300000012, 1]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 初始 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            FloatVal: 0
+            VecVal: [1, 0.200000003, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 消亡 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.spawn.point
+        Name: 单点发射 (Point Spawn)
+        Description: 从单一原点向指定方向发射粒子
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: PointSpawn]\n    p.Position = float3(0.0f);\n    p.Velocity = float3(0.0f, u_Speed, 0.0f);\n"
+        Parameters:
+          - Name: Speed
+            Type: 0
+            FloatVal: 5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 50
+            Step: 0.200000003
+            Tooltip: 发射速度
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.scale_over_life
+        Name: 尺寸随寿命缩放 (Scale Over Life)
+        Description: 基于归一化存活进度 (0~1) 控制粒子尺寸膨胀扩散或缩小消亡
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Scale Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Size = lerp(u_StartScale, u_EndScale, normLife);\n"
+        Parameters:
+          - Name: StartScale
+            Type: 0
+            FloatVal: 0.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 初始尺寸乘子
+            IsExposed: false
+            ExposedName: ""
+          - Name: EndScale
+            Type: 0
+            FloatVal: 6
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 消亡前终止尺寸乘子
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.color_over_life
+        Name: 色彩淡入淡出 (Color Over Life)
+        Description: 基于粒子存活进度进行色彩与透明度渐变过渡
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Color Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Color = lerp(u_ColorStart, u_ColorEnd, normLife);\n"
+        Parameters:
+          - Name: ColorStart
+            Type: 3
+            FloatVal: 1
+            VecVal: [0.400000006, 0.850000024, 1, 1]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 初始出生颜色 (RGBA)
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            FloatVal: 1
+            VecVal: [0.100000001, 0.300000012, 0.800000012, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 终止消亡颜色 (RGBA)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.solve_velocity
+        Name: "物理积分与生命周期 (Solve Velocity & Life)"
+        Description: 欧拉物理速度积分更新位置，递减生命周期并计算归一化时间
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SolveVelocity] 物理欧拉积分与消亡\n    p.Position += p.Velocity * dt;\n    p.Life -= dt;\n    if (u_SpeedDamping > 0.001f)\n        p.Velocity *= max(0.0f, 1.0f - u_SpeedDamping * dt);\n"
+        Parameters:
+          - Name: SpeedDamping
+            Type: 0
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 5
+            Step: 0.0500000007
+            Tooltip: 物理速度阻尼
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.render.sprite
+        Name: 精灵渲染器 (Sprite Renderer)
+        Description: 配置图元混合模式 (加法/半透)、自发光强度与面片朝向 (相机对齐/水平地面)
+        Stage: Render
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpriteRenderer]\n    // 驱动 GPU 混合模式与几何着色器面片顶点朝向生成\n"
+        Parameters:
+          - Name: BlendMode
+            Type: 0
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 混合模式 (0=半透 AlphaBlend, 1=加法 Additive)
+            IsExposed: false
+            ExposedName: ""
+          - Name: FacingMode
+            Type: 0
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 面片朝向 (0=Billboard相机对齐, 1=Horizontal地面水平)
+            IsExposed: false
+            ExposedName: ""
+          - Name: EmissiveBoost
+            Type: 0
+            FloatVal: 3
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.100000001
+            Max: 20
+            Step: 0.100000001
+            Tooltip: HDR 自发光倍率 (促发辉光 Bloom)
+            IsExposed: true
+            ExposedName: EmissiveBoost
+  - Name: IceCrystals
+    MaxParticles: 250
+    Lifetime: 2.5
+    EmissionRate: 80
+    EmissionMode: 0
+    SingleCount: 1
     Enabled: true
-    MaxParticles: 350
-    Lifetime: 3.2
-    EmissionRate: 60
     Emitter:
-      Type: Cylinder
+      Type: Point
       LockToXY: false
+      MeshPath: ""
     Material:
+      TexturePath: textures/particles/spark_glow.wtex
+      MaterialPath: materials/particles/particle_additive.wmat
+      BlendMode: Additive
+      FacingMode: Billboard
+      EmissiveBoost: 2.20000005
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 5
+      SpeedVariance: 1
+      Gravity: [0, -9.80000019, 0]
+      LinearDrag: 0
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.5
+      SizeEnd: 0.100000001
+      ColorStart: [1, 1, 1, 1]
+      ColorEnd: [1, 1, 1, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.100000001
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+    UseCustomShaderOverride: false
+    Modules:
+      - Id: mod.emitter.spawn_rate
+        Name: 持续发射 (Spawn Rate)
+        Description: 控制每秒持续发射的粒子数量 (火焰/浓烟/喷泉/火花流)
+        Stage: Emitter
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpawnRate]\n    // 由系统发射调度器根据 SpawnRate 与 dt 累积并生成新图元\n"
+        Parameters:
+          - Name: SpawnRate
+            Type: 0
+            FloatVal: 80
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20000
+            Step: 1
+            Tooltip: 每秒持续发射粒子数 (/s)
+            IsExposed: true
+            ExposedName: EmissionRate
+      - Id: mod.spawn.init_particle
+        Name: 粒子初始化 (Initialize Particle)
+        Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: InitializeParticle]\n    p.MaxLife = u_Lifetime;\n    p.Life = u_Lifetime;\n    p.Size = float2(u_SizeStart);\n    p.Color = u_ColorStart;\n"
+        Parameters:
+          - Name: Lifetime
+            Type: 0
+            FloatVal: 2.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.0500000007
+            Max: 60
+            Step: 0.0500000007
+            Tooltip: 粒子存活基准寿命 (秒)
+            IsExposed: true
+            ExposedName: Lifetime
+          - Name: SizeStart
+            Type: 0
+            FloatVal: 0.119999997
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 诞生初始尺寸
+            IsExposed: true
+            ExposedName: SizeStart
+          - Name: SizeEnd
+            Type: 0
+            FloatVal: 0.0299999993
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 消亡终末尺寸
+            IsExposed: true
+            ExposedName: SizeEnd
+          - Name: ColorStart
+            Type: 3
+            FloatVal: 0
+            VecVal: [1, 0.800000012, 0.300000012, 1]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 初始 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            FloatVal: 0
+            VecVal: [1, 0.200000003, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 消亡 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.spawn.box
+        Name: 立方盒发射 (Box Spawn)
+        Description: 在三维包围盒体积内随机生成粒子分布
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: BoxSpawn]\n    p.Position = float3(\n        (Hash1D(particleId * 5 + 0) * 2.0f - 1.0f) * u_BoxExtents.x,\n        (Hash1D(particleId * 5 + 1) * 2.0f - 1.0f) * u_BoxExtents.y,\n        (Hash1D(particleId * 5 + 2) * 2.0f - 1.0f) * u_BoxExtents.z\n    );\n    p.Velocity = float3(0.0f, u_Speed, 0.0f);\n"
+        Parameters:
+          - Name: BoxExtents
+            Type: 2
+            FloatVal: 0
+            VecVal: [1, 1, 1, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.0500000007
+            Max: 20
+            Step: 0.100000001
+            Tooltip: 包围盒半尺寸 [X, Y, Z]
+            IsExposed: false
+            ExposedName: ""
+          - Name: Speed
+            Type: 0
+            FloatVal: 2
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 30
+            Step: 0.100000001
+            Tooltip: 向上漂移速度
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.gravity
+        Name: 重力场 (Gravity Force)
+        Description: 对粒子施加恒定三维重力加速度向量
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: GravityForce]\n    p.Velocity += u_Gravity.xyz * dt;\n"
+        Parameters:
+          - Name: Gravity
+            Type: 2
+            FloatVal: 0
+            VecVal: [0, -1.79999995, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -50
+            Max: 50
+            Step: 0.200000003
+            Tooltip: 三维重力向量 [Gx, Gy, Gz]
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.vortex
+        Name: 轴向旋转涡流 (Vortex Field)
+        Description: 围绕指定三维轴线驱动粒子做切向飞旋龙卷运动
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: VortexField] 轴向切向旋转\n    float3 normAxis = normalize(u_VortexAxis.xyz);\n    float3 tangential = cross(normAxis, p.Position);\n    p.Velocity += tangential * (u_VortexStrength * dt);\n"
+        Parameters:
+          - Name: VortexAxis
+            Type: 2
+            FloatVal: 0
+            VecVal: [0, 1, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -1
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 涡流旋转轴向量
+            IsExposed: false
+            ExposedName: ""
+          - Name: VortexStrength
+            Type: 0
+            FloatVal: 4
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -30
+            Max: 30
+            Step: 0.200000003
+            Tooltip: 旋转切向角速度强度
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.curl_noise
+        Name: 3D 旋度噪声场 (Curl Noise Turbulence)
+        Description: 基于无散度 3D 旋度噪声向量场驱动真实的流体涡流混沌运动
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: CurlNoiseTurbulence] 3D 无散度流体涡流场\n    float3 curl = CurlNoise3D(p.Position * u_NoiseFrequency);\n    p.Velocity += curl * (u_NoiseStrength * dt);\n"
+        Parameters:
+          - Name: NoiseStrength
+            Type: 0
+            FloatVal: 3
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 30
+            Step: 0.200000003
+            Tooltip: 噪声场作用力强度
+            IsExposed: true
+            ExposedName: TurbulenceStrength
+          - Name: NoiseFrequency
+            Type: 0
+            FloatVal: 0.800000012
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.0500000007
+            Max: 10
+            Step: 0.0500000007
+            Tooltip: 空间采样频率 (波长缩放)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.drag
+        Name: 空气阻力 (Air Drag)
+        Description: 模拟流体介质空气阻尼，阻碍粒子高速运动
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: LinearDrag]\n    p.Velocity *= max(0.0f, 1.0f - u_LinearDrag * dt);\n"
+        Parameters:
+          - Name: LinearDrag
+            Type: 0
+            FloatVal: 0.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 10
+            Step: 0.0500000007
+            Tooltip: 空气阻尼系数
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.solve_velocity
+        Name: "物理积分与生命周期 (Solve Velocity & Life)"
+        Description: 欧拉物理速度积分更新位置，递减生命周期并计算归一化时间
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SolveVelocity] 物理欧拉积分与消亡\n    p.Position += p.Velocity * dt;\n    p.Life -= dt;\n    if (u_SpeedDamping > 0.001f)\n        p.Velocity *= max(0.0f, 1.0f - u_SpeedDamping * dt);\n"
+        Parameters:
+          - Name: SpeedDamping
+            Type: 0
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 5
+            Step: 0.0500000007
+            Tooltip: 物理速度阻尼
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.render.sprite
+        Name: 精灵渲染器 (Sprite Renderer)
+        Description: 配置图元混合模式 (加法/半透)、自发光强度与面片朝向 (相机对齐/水平地面)
+        Stage: Render
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpriteRenderer]\n    // 驱动 GPU 混合模式与几何着色器面片顶点朝向生成\n"
+        Parameters:
+          - Name: BlendMode
+            Type: 0
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 混合模式 (0=半透 AlphaBlend, 1=加法 Additive)
+            IsExposed: false
+            ExposedName: ""
+          - Name: FacingMode
+            Type: 0
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 面片朝向 (0=Billboard相机对齐, 1=Horizontal地面水平)
+            IsExposed: false
+            ExposedName: ""
+          - Name: EmissiveBoost
+            Type: 0
+            FloatVal: 2.20000005
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.100000001
+            Max: 20
+            Step: 0.100000001
+            Tooltip: HDR 自发光倍率 (促发辉光 Bloom)
+            IsExposed: true
+            ExposedName: EmissiveBoost
+  - Name: SubZeroFog
+    MaxParticles: 120
+    Lifetime: 3
+    EmissionRate: 30
+    EmissionMode: 0
+    SingleCount: 1
+    Enabled: true
+    Emitter:
+      Type: Point
+      LockToXY: false
+      MeshPath: ""
+    Material:
+      TexturePath: textures/particles/smoke_puff.wtex
+      MaterialPath: materials/particles/particle_alpha.wmat
       BlendMode: AlphaBlend
       FacingMode: Billboard
-      EmissiveBoost: 1.2
-      SoftParticle: true
-      FadeDistance: 0.7
+      EmissiveBoost: 1
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
     Motion:
-      Speed: 2.5
-      SpeedVariance: 1.0
-      Gravity: [0, -0.4, 0]
-      LinearDrag: 0.4
-      VortexStrength: 1.8
+      Speed: 5
+      SpeedVariance: 1
+      Gravity: [0, -9.80000019, 0]
+      LinearDrag: 0
+      VortexStrength: 0
       VortexAxis: [0, 1, 0]
-      TurbulenceStrength: 2.2
-      TurbulenceFrequency: 1.8
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
     Evolution:
-      SizeStart: 0.6
-      SizeEnd: 2.8
-      ColorStart: [0.75, 0.88, 0.98, 0.65]
-      ColorEnd: [0.35, 0.55, 0.85, 0.0]
+      SizeStart: 0.5
+      SizeEnd: 0.100000001
+      ColorStart: [1, 1, 1, 1]
+      ColorEnd: [1, 1, 1, 0]
     Collision:
       Mode: None
-  - Name: DriftingSnowEmbers
-    Enabled: true
-    MaxParticles: 450
-    Lifetime: 4.0
-    EmissionRate: 70
-    Emitter:
-      Type: Box
-      LockToXY: false
-    Material:
-      BlendMode: Additive
-      FacingMode: Billboard
-      EmissiveBoost: 2.8
-    Motion:
-      Speed: 1.5
-      SpeedVariance: 0.8
-      Gravity: [0, -1.2, 0]
-      LinearDrag: 0.1
-      TurbulenceStrength: 1.5
-      TurbulenceFrequency: 2.0
-    Evolution:
-      SizeStart: 0.12
-      SizeEnd: 0.04
-      ColorStart: [0.85, 0.95, 1.0, 1.0]
-      ColorEnd: [0.4, 0.7, 1.0, 0.0]
-    Collision:
-      Mode: None
+      Restitution: 0.5
+      Friction: 0.100000001
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+    UseCustomShaderOverride: false
+    Modules:
+      - Id: mod.emitter.spawn_rate
+        Name: 持续发射 (Spawn Rate)
+        Description: 控制每秒持续发射的粒子数量 (火焰/浓烟/喷泉/火花流)
+        Stage: Emitter
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpawnRate]\n    // 由系统发射调度器根据 SpawnRate 与 dt 累积并生成新图元\n"
+        Parameters:
+          - Name: SpawnRate
+            Type: 0
+            FloatVal: 30
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20000
+            Step: 1
+            Tooltip: 每秒持续发射粒子数 (/s)
+            IsExposed: true
+            ExposedName: EmissionRate
+      - Id: mod.spawn.init_particle
+        Name: 粒子初始化 (Initialize Particle)
+        Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: InitializeParticle]\n    p.MaxLife = u_Lifetime;\n    p.Life = u_Lifetime;\n    p.Size = float2(u_SizeStart);\n    p.Color = u_ColorStart;\n"
+        Parameters:
+          - Name: Lifetime
+            Type: 0
+            FloatVal: 3
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.0500000007
+            Max: 60
+            Step: 0.0500000007
+            Tooltip: 粒子存活基准寿命 (秒)
+            IsExposed: true
+            ExposedName: Lifetime
+          - Name: SizeStart
+            Type: 0
+            FloatVal: 0.600000024
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 诞生初始尺寸
+            IsExposed: true
+            ExposedName: SizeStart
+          - Name: SizeEnd
+            Type: 0
+            FloatVal: 2.20000005
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 消亡终末尺寸
+            IsExposed: true
+            ExposedName: SizeEnd
+          - Name: ColorStart
+            Type: 3
+            FloatVal: 0
+            VecVal: [1, 0.800000012, 0.300000012, 1]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 初始 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            FloatVal: 0
+            VecVal: [1, 0.200000003, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 消亡 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.spawn.ring
+        Name: 圆环发射 (Ring Spawn)
+        Description: 在 3D 水平圆环边缘几何分布生成粒子 (法阵/护盾/光环/冰霜新星)
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: RingSpawn] 水平圆环边缘几何分布\n    float u = Hash1D(particleId * 11u + 3u);\n    float phi = 6.2831853f * u;\n    p.Position = float3(cos(phi) * u_RingRadius, 0.0f, sin(phi) * u_RingRadius);\n    p.Velocity = float3(0.0f, u_InitialSpeed, 0.0f);\n"
+        Parameters:
+          - Name: RingRadius
+            Type: 0
+            FloatVal: 2.20000005
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.100000001
+            Max: 20
+            Step: 0.100000001
+            Tooltip: 圆环生成半径 (m)
+            IsExposed: false
+            ExposedName: ""
+          - Name: InitialSpeed
+            Type: 0
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 50
+            Step: 0.200000003
+            Tooltip: 垂直发射速率 (m/s)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.curl_noise
+        Name: 3D 旋度噪声场 (Curl Noise Turbulence)
+        Description: 基于无散度 3D 旋度噪声向量场驱动真实的流体涡流混沌运动
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: CurlNoiseTurbulence] 3D 无散度流体涡流场\n    float3 curl = CurlNoise3D(p.Position * u_NoiseFrequency);\n    p.Velocity += curl * (u_NoiseStrength * dt);\n"
+        Parameters:
+          - Name: NoiseStrength
+            Type: 0
+            FloatVal: 3
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 30
+            Step: 0.200000003
+            Tooltip: 噪声场作用力强度
+            IsExposed: true
+            ExposedName: TurbulenceStrength
+          - Name: NoiseFrequency
+            Type: 0
+            FloatVal: 0.800000012
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.0500000007
+            Max: 10
+            Step: 0.0500000007
+            Tooltip: 空间采样频率 (波长缩放)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.scale_over_life
+        Name: 尺寸随寿命缩放 (Scale Over Life)
+        Description: 基于归一化存活进度 (0~1) 控制粒子尺寸膨胀扩散或缩小消亡
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Scale Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Size = lerp(u_StartScale, u_EndScale, normLife);\n"
+        Parameters:
+          - Name: StartScale
+            Type: 0
+            FloatVal: 0.600000024
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 初始尺寸乘子
+            IsExposed: false
+            ExposedName: ""
+          - Name: EndScale
+            Type: 0
+            FloatVal: 2.20000005
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 消亡前终止尺寸乘子
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.color_over_life
+        Name: 色彩淡入淡出 (Color Over Life)
+        Description: 基于粒子存活进度进行色彩与透明度渐变过渡
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Color Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Color = lerp(u_ColorStart, u_ColorEnd, normLife);\n"
+        Parameters:
+          - Name: ColorStart
+            Type: 3
+            FloatVal: 1
+            VecVal: [0.400000006, 0.699999988, 0.949999988, 0.5]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 初始出生颜色 (RGBA)
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            FloatVal: 1
+            VecVal: [0.200000003, 0.5, 0.899999976, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 终止消亡颜色 (RGBA)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.solve_velocity
+        Name: "物理积分与生命周期 (Solve Velocity & Life)"
+        Description: 欧拉物理速度积分更新位置，递减生命周期并计算归一化时间
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SolveVelocity] 物理欧拉积分与消亡\n    p.Position += p.Velocity * dt;\n    p.Life -= dt;\n    if (u_SpeedDamping > 0.001f)\n        p.Velocity *= max(0.0f, 1.0f - u_SpeedDamping * dt);\n"
+        Parameters:
+          - Name: SpeedDamping
+            Type: 0
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 5
+            Step: 0.0500000007
+            Tooltip: 物理速度阻尼
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.render.sprite
+        Name: 精灵渲染器 (Sprite Renderer)
+        Description: 配置图元混合模式 (加法/半透)、自发光强度与面片朝向 (相机对齐/水平地面)
+        Stage: Render
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpriteRenderer]\n    // 驱动 GPU 混合模式与几何着色器面片顶点朝向生成\n"
+        Parameters:
+          - Name: BlendMode
+            Type: 0
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 混合模式 (0=半透 AlphaBlend, 1=加法 Additive)
+            IsExposed: false
+            ExposedName: ""
+          - Name: FacingMode
+            Type: 0
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 面片朝向 (0=Billboard相机对齐, 1=Horizontal地面水平)
+            IsExposed: false
+            ExposedName: ""
+          - Name: EmissiveBoost
+            Type: 0
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.100000001
+            Max: 20
+            Step: 0.100000001
+            Tooltip: HDR 自发光倍率 (促发辉光 Bloom)
+            IsExposed: true
+            ExposedName: EmissiveBoost

@@ -2321,6 +2321,9 @@ namespace World
 				glm::vec3 attractorCenter(0.0f);
 				float attractorStrength = 0.0f;
 				float attractorMinDist = 0.2f;
+				float orbitSpeed = 0.0f;
+				glm::vec3 orbitAxis(0.0f, 1.0f, 0.0f);
+				glm::vec3 orbitCenter(0.0f);
 
 				for (const auto& mod : em.Modules)
 				{
@@ -2402,6 +2405,30 @@ namespace World
 					{
 						customDamping = mod.GetFloat("SpeedDamping", 0.0f);
 					}
+					else if (mod.Id == "mod.spawn.ring")
+					{
+						emComp.EmitterType = ParticleEmitterType::Circle;
+					}
+					else if (mod.Id == "mod.update.scale_over_life")
+					{
+						emComp.SizeStart = mod.GetFloat("StartScale", emComp.SizeStart);
+						emComp.SizeEnd = mod.GetFloat("EndScale", emComp.SizeEnd);
+					}
+					else if (mod.Id == "mod.update.color_over_life")
+					{
+						const auto* pCS = mod.FindParam("ColorStart");
+						if (pCS) emComp.ColorStart = PackColor(pCS->VecVal);
+						const auto* pCE = mod.FindParam("ColorEnd");
+						if (pCE) emComp.ColorEnd = PackColor(pCE->VecVal);
+					}
+					else if (mod.Id == "mod.update.orbit")
+					{
+						orbitSpeed = mod.GetFloat("OrbitSpeed", 0.0f);
+						const auto* pAx = mod.FindParam("OrbitAxis");
+						if (pAx) orbitAxis = glm::vec3(pAx->VecVal);
+						const auto* pC = mod.FindParam("OrbitCenter");
+						if (pC) orbitCenter = glm::vec3(pC->VecVal);
+					}
 					// 3. 渲染器设置模块 (Render Stage)
 					else if (mod.Id == "mod.render.sprite")
 					{
@@ -2449,6 +2476,21 @@ namespace World
 					{
 						if (!p.Active) continue;
 						p.Velocity *= std::max(0.0f, 1.0f - customDamping * simDt);
+					}
+				}
+
+				if (std::abs(orbitSpeed) > 1e-4f)
+				{
+					for (auto& p : pool.GetParticlesMut())
+					{
+						if (!p.Active) continue;
+						glm::vec3 toC = p.Position - orbitCenter;
+						float dist = glm::length(toC);
+						if (dist > 0.01f)
+						{
+							glm::vec3 tangent = glm::normalize(glm::cross(orbitAxis, toC));
+							p.Velocity = tangent * orbitSpeed;
+						}
 					}
 				}
 

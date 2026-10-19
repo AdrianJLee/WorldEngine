@@ -89,6 +89,7 @@ namespace World
 		static VfxModule CreateSphereSpawnModule();
 		static VfxModule CreateBoxSpawnModule();
 		static VfxModule CreatePointSpawnModule();
+		static VfxModule CreateRingSpawnModule(float radius = 1.5f, float initialSpeed = 0.0f);
 
 		// Update 阶段标准模块
 		static VfxModule CreateGravityModule();
@@ -97,6 +98,10 @@ namespace World
 		static VfxModule CreatePointAttractorModule();
 		static VfxModule CreateVortexModule();
 		static VfxModule CreateSolveVelocityModule();
+		static VfxModule CreateScaleOverLifeModule(float startScale = 1.0f, float endScale = 0.0f);
+		static VfxModule CreateColorOverLifeModule(const glm::vec4& colorStart = glm::vec4(1.0f), const glm::vec4& colorEnd = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
+		static VfxModule CreateOrbitModule(float speed = 3.0f, const glm::vec3& axis = { 0.0f, 1.0f, 0.0f }, const glm::vec3& center = { 0.0f, 0.0f, 0.0f });
+		static VfxModule CreateJitterModule(float jitterStrength = 2.0f, float jitterSpeed = 20.0f);
 
 		// Render 阶段标准模块 (渲染器与材质设定)
 		static VfxModule CreateSpriteRendererModule(bool additive = true, bool horizontal = false, float emissive = 2.0f);

@@ -408,6 +408,114 @@ namespace World
 		return m;
 	}
 
+	VfxModule VfxModuleLibrary::CreateRingSpawnModule(float radius, float initialSpeed)
+	{
+		VfxModule m;
+		m.Id = "mod.spawn.ring";
+		m.Name = "圆环发射 (Ring Spawn)";
+		m.Description = "在 3D 水平圆环边缘几何分布生成粒子 (法阵/护盾/光环/冰霜新星)";
+		m.Stage = VfxModuleStage::Spawn;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "RingRadius", VfxParamType::Float, radius, {}, 0, false, 0.1f, 20.0f, 0.1f, "圆环生成半径 (m)" },
+			{ "InitialSpeed", VfxParamType::Float, initialSpeed, {}, 0, false, 0.0f, 50.0f, 0.2f, "垂直发射速率 (m/s)" }
+		};
+		m.SlangSource = R"(
+    // [Module: RingSpawn] 水平圆环边缘几何分布
+    float u = Hash1D(particleId * 11u + 3u);
+    float phi = 6.2831853f * u;
+    p.Position = float3(cos(phi) * u_RingRadius, 0.0f, sin(phi) * u_RingRadius);
+    p.Velocity = float3(0.0f, u_InitialSpeed, 0.0f);
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateScaleOverLifeModule(float startScale, float endScale)
+	{
+		VfxModule m;
+		m.Id = "mod.update.scale_over_life";
+		m.Name = "尺寸随寿命缩放 (Scale Over Life)";
+		m.Description = "基于归一化存活进度 (0~1) 控制粒子尺寸膨胀扩散或缩小消亡";
+		m.Stage = VfxModuleStage::Update;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "StartScale", VfxParamType::Float, startScale, {}, 0, false, 0.0f, 20.0f, 0.05f, "初始尺寸乘子" },
+			{ "EndScale", VfxParamType::Float, endScale, {}, 0, false, 0.0f, 20.0f, 0.05f, "消亡前终止尺寸乘子" }
+		};
+		m.SlangSource = R"(
+    // [Module: Scale Over Life]
+    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);
+    p.Size = lerp(u_StartScale, u_EndScale, normLife);
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateColorOverLifeModule(const glm::vec4& colorStart, const glm::vec4& colorEnd)
+	{
+		VfxModule m;
+		m.Id = "mod.update.color_over_life";
+		m.Name = "色彩淡入淡出 (Color Over Life)";
+		m.Description = "基于粒子存活进度进行色彩与透明度渐变过渡";
+		m.Stage = VfxModuleStage::Update;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "ColorStart", VfxParamType::Vec4, 1.0f, colorStart, 0, false, 0.0f, 1.0f, 0.01f, "初始出生颜色 (RGBA)" },
+			{ "ColorEnd", VfxParamType::Vec4, 1.0f, colorEnd, 0, false, 0.0f, 1.0f, 0.01f, "终止消亡颜色 (RGBA)" }
+		};
+		m.SlangSource = R"(
+    // [Module: Color Over Life]
+    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);
+    p.Color = lerp(u_ColorStart, u_ColorEnd, normLife);
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateOrbitModule(float speed, const glm::vec3& axis, const glm::vec3& center)
+	{
+		VfxModule m;
+		m.Id = "mod.update.orbit";
+		m.Name = "中心轴轨道公转 (Orbit Around Center)";
+		m.Description = "围绕指定空间中心点与旋转轴进行稳定圆周轨道旋转运动 (护盾/光环/符文)";
+		m.Stage = VfxModuleStage::Update;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "OrbitSpeed", VfxParamType::Float, speed, {}, 0, false, -30.0f, 30.0f, 0.2f, "轨道公转切向角速率" },
+			{ "OrbitAxis", VfxParamType::Vec3, 1.0f, glm::vec4(axis, 0.0f), 0, false, -1.0f, 1.0f, 0.1f, "公转旋转主轴" },
+			{ "OrbitCenter", VfxParamType::Vec3, 1.0f, glm::vec4(center, 0.0f), 0, false, -50.0f, 50.0f, 0.5f, "空间轨道几何中心点" }
+		};
+		m.SlangSource = R"(
+    // [Module: Orbit Around Center]
+    float3 toCenter = p.Position - u_OrbitCenter.xyz;
+    float dist = length(toCenter);
+    if (dist > 0.01f)
+    {
+        float3 tangent = cross(u_OrbitAxis.xyz, normalize(toCenter));
+        p.Velocity = tangent * u_OrbitSpeed;
+    }
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateJitterModule(float jitterStrength, float jitterSpeed)
+	{
+		VfxModule m;
+		m.Id = "mod.update.jitter";
+		m.Name = "高频抖动电弧 (Jitter / Electric Arc)";
+		m.Description = "高频空间位移扰动，模拟雷电折线、电弧颤动与能量颤抖";
+		m.Stage = VfxModuleStage::Update;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "JitterStrength", VfxParamType::Float, jitterStrength, {}, 0, false, 0.0f, 10.0f, 0.1f, "抖动偏移幅度" },
+			{ "JitterSpeed", VfxParamType::Float, jitterSpeed, {}, 0, false, 1.0f, 100.0f, 1.0f, "抖动高频振荡速率" }
+		};
+		m.SlangSource = R"(
+    // [Module: Jitter / Electric Arc]
+    float3 jNoise = Noise3D(p.Position * 4.0f + float3(p.Life * u_JitterSpeed, 0, 0));
+    p.Position += jNoise * (u_JitterStrength * dt);
+)";
+		return m;
+	}
+
 	std::vector<VfxModule> VfxModuleLibrary::GetBuiltinModules()
 	{
 		return {
@@ -418,11 +526,16 @@ namespace World
 			CreateSphereSpawnModule(),
 			CreateBoxSpawnModule(),
 			CreatePointSpawnModule(),
+			CreateRingSpawnModule(),
 			CreateGravityModule(),
 			CreateLinearDragModule(),
 			CreateCurlNoiseModule(),
 			CreatePointAttractorModule(),
 			CreateVortexModule(),
+			CreateOrbitModule(),
+			CreateScaleOverLifeModule(),
+			CreateColorOverLifeModule(),
+			CreateJitterModule(),
 			CreateSolveVelocityModule(),
 			CreateSpriteRendererModule(),
 			CreateCustomSlangModule("自定义模拟代码块 (Custom Slang Block)")
