@@ -234,7 +234,6 @@ void ParticleEditorPanel::NewAsset()
 		ParticleEmitterLayer em;
 		em.Enabled = true;
 
-
 		if (templateType == "Fountain")
 		{
 			em.Name = "Fountain_" + std::to_string(m_Asset.Emitters.size() + 1);
@@ -245,124 +244,211 @@ void ParticleEditorPanel::NewAsset()
 			em.Speed = 8.0f;
 			em.SpeedVariance = 1.5f;
 			em.Gravity = glm::vec3(0.0f, -9.8f, 0.0f);
-			em.LinearDrag = 0.1f;
+			em.LinearDrag = 0.15f;
 			em.SizeStart = 0.25f;
 			em.SizeEnd = 0.05f;
 			em.ColorStart = glm::vec4(0.3f, 0.8f, 1.0f, 1.0f);
 			em.ColorEnd = glm::vec4(0.05f, 0.2f, 0.9f, 0.0f);
 			em.Material.BlendMode = ParticleBlendMode::Additive;
 			em.Material.EmissiveBoost = 2.5f;
+
+			em.Modules = {
+				VfxModuleLibrary::CreateSpawnRateModule(80.0f),
+				VfxModuleLibrary::CreateInitParticleModule(2.5f, 0.25f, 0.05f),
+				VfxModuleLibrary::CreateConeSpawnModule(),
+				VfxModuleLibrary::CreateGravityModule(),
+				VfxModuleLibrary::CreateLinearDragModule(),
+				VfxModuleLibrary::CreateSolveVelocityModule(),
+				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 2.5f)
+			};
+			if (auto* g = em.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, -9.8f, 0.0f, 0.0f));
+			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.15f);
+			if (auto* c = em.FindModule("mod.spawn.cone")) { c->SetFloat("ConeAngle", 25.0f); c->SetFloat("ConeRadius", 0.35f); c->SetFloat("InitialSpeed", 8.0f); }
 		}
 		else if (templateType == "Fire")
 		{
 			em.Name = "Fire_" + std::to_string(m_Asset.Emitters.size() + 1);
 			em.MaxParticles = 450;
-			em.Lifetime = 1.5f;
-			em.EmissionRate = 70.0f;
+			em.Lifetime = 1.4f;
+			em.EmissionRate = 65.0f;
 			em.EmitterType = ParticleEmitterType::Cone;
-			em.Speed = 4.0f;
+			em.Speed = 3.5f;
 			em.SpeedVariance = 0.8f;
-			em.Gravity = glm::vec3(0.0f, 3.0f, 0.0f);
-			em.LinearDrag = 0.3f;
+			em.Gravity = glm::vec3(0.0f, 3.5f, 0.0f);
+			em.LinearDrag = 0.35f;
 			em.VortexStrength = 3.0f;
-			em.SizeStart = 0.6f;
+			em.SizeStart = 0.45f;
 			em.SizeEnd = 0.1f;
 			em.ColorStart = glm::vec4(1.0f, 0.8f, 0.2f, 1.0f);
 			em.ColorEnd = glm::vec4(0.9f, 0.1f, 0.0f, 0.0f);
 			em.Material.BlendMode = ParticleBlendMode::Additive;
 			em.Material.EmissiveBoost = 3.0f;
+
+			em.Modules = {
+				VfxModuleLibrary::CreateSpawnRateModule(65.0f),
+				VfxModuleLibrary::CreateInitParticleModule(1.4f, 0.45f, 0.1f),
+				VfxModuleLibrary::CreateConeSpawnModule(),
+				VfxModuleLibrary::CreateGravityModule(),
+				VfxModuleLibrary::CreateLinearDragModule(),
+				VfxModuleLibrary::CreateVortexModule(),
+				VfxModuleLibrary::CreateCurlNoiseModule(),
+				VfxModuleLibrary::CreateSolveVelocityModule(),
+				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 3.0f)
+			};
+			if (auto* g = em.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 3.5f, 0.0f, 0.0f));
+			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.35f);
+			if (auto* c = em.FindModule("mod.spawn.cone")) { c->SetFloat("ConeAngle", 18.0f); c->SetFloat("ConeRadius", 0.25f); c->SetFloat("InitialSpeed", 3.5f); }
+			if (auto* v = em.FindModule("mod.update.vortex")) v->SetFloat("VortexSpeed", 3.0f);
+			if (auto* n = em.FindModule("mod.update.noise")) { n->SetFloat("NoiseGain", 4.0f); n->SetFloat("NoiseScale", 1.0f); }
 		}
 		else if (templateType == "Sparks")
 		{
 			em.Name = "Sparks_" + std::to_string(m_Asset.Emitters.size() + 1);
-			em.MaxParticles = 300;
-			em.Lifetime = 1.2f;
-			em.EmissionRate = 60.0f;
+			em.MaxParticles = 350;
+			em.Lifetime = 1.0f;
+			em.EmissionRate = 40.0f;
 			em.EmitterType = ParticleEmitterType::Point;
 			em.FacingMode = ParticleRenderMode::StretchedVelocity;
-			em.Speed = 9.0f;
-			em.SpeedVariance = 2.0f;
+			em.Speed = 10.0f;
+			em.SpeedVariance = 2.5f;
 			em.Gravity = glm::vec3(0.0f, -12.0f, 0.0f);
 			em.LinearDrag = 0.2f;
-			em.Collision.Mode = ParticleCollisionMode::Plane;
-			em.Collision.Restitution = 0.75f;
-			em.SizeStart = 0.15f;
+			em.SizeStart = 0.12f;
 			em.SizeEnd = 0.02f;
-			em.ColorStart = glm::vec4(1.0f, 0.9f, 0.4f, 1.0f);
+			em.ColorStart = glm::vec4(1.0f, 0.9f, 0.3f, 1.0f);
 			em.ColorEnd = glm::vec4(1.0f, 0.2f, 0.0f, 0.0f);
 			em.Material.BlendMode = ParticleBlendMode::Additive;
-			em.Material.EmissiveBoost = 4.5f;
+			em.Material.EmissiveBoost = 4.0f;
+
+			em.Modules = {
+				VfxModuleLibrary::CreateSpawnBurstModule(50, 0.0f),
+				VfxModuleLibrary::CreateSpawnRateModule(40.0f),
+				VfxModuleLibrary::CreateInitParticleModule(1.0f, 0.12f, 0.02f),
+				VfxModuleLibrary::CreateSphereSpawnModule(),
+				VfxModuleLibrary::CreateGravityModule(),
+				VfxModuleLibrary::CreateLinearDragModule(),
+				VfxModuleLibrary::CreateSolveVelocityModule(),
+				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 4.0f)
+			};
+			if (auto* g = em.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, -12.0f, 0.0f, 0.0f));
+			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.2f);
+			if (auto* s = em.FindModule("mod.spawn.sphere")) { s->SetFloat("SphereRadius", 0.2f); s->SetFloat("OutwardSpeed", 10.0f); }
+			if (auto* r = em.FindModule("mod.render.sprite")) r->SetFloat("FacingMode", static_cast<float>(ParticleRenderMode::StretchedVelocity));
 		}
 		else if (templateType == "Smoke")
 		{
 			em.Name = "Smoke_" + std::to_string(m_Asset.Emitters.size() + 1);
 			em.MaxParticles = 250;
-			em.Lifetime = 3.0f;
-			em.EmissionRate = 30.0f;
+			em.Lifetime = 3.2f;
+			em.EmissionRate = 25.0f;
 			em.EmitterType = ParticleEmitterType::Cone;
-			em.Speed = 2.0f;
+			em.Speed = 1.8f;
 			em.SpeedVariance = 0.5f;
-			em.Gravity = glm::vec3(0.0f, 1.5f, 0.0f);
-			em.LinearDrag = 0.8f;
+			em.Gravity = glm::vec3(0.0f, 1.2f, 0.0f);
+			em.LinearDrag = 0.75f;
 			em.SizeStart = 0.35f;
 			em.SizeEnd = 2.0f;
-			em.ColorStart = glm::vec4(0.35f, 0.35f, 0.35f, 0.65f);
-			em.ColorEnd = glm::vec4(0.12f, 0.12f, 0.12f, 0.0f);
+			em.ColorStart = glm::vec4(0.4f, 0.4f, 0.4f, 0.7f);
+			em.ColorEnd = glm::vec4(0.15f, 0.15f, 0.15f, 0.0f);
 			em.Material.BlendMode = ParticleBlendMode::AlphaBlend;
+
+			em.Modules = {
+				VfxModuleLibrary::CreateSpawnRateModule(25.0f),
+				VfxModuleLibrary::CreateInitParticleModule(3.2f, 0.35f, 2.0f),
+				VfxModuleLibrary::CreateConeSpawnModule(),
+				VfxModuleLibrary::CreateGravityModule(),
+				VfxModuleLibrary::CreateLinearDragModule(),
+				VfxModuleLibrary::CreateCurlNoiseModule(),
+				VfxModuleLibrary::CreateSolveVelocityModule(),
+				VfxModuleLibrary::CreateSpriteRendererModule(false, false, 1.0f)
+			};
+			if (auto* g = em.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 1.2f, 0.0f, 0.0f));
+			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.75f);
+			if (auto* c = em.FindModule("mod.spawn.cone")) { c->SetFloat("ConeAngle", 28.0f); c->SetFloat("ConeRadius", 0.4f); c->SetFloat("InitialSpeed", 1.8f); }
+			if (auto* n = em.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 3.2f);
+			if (auto* r = em.FindModule("mod.render.sprite")) r->SetFloat("BlendMode", static_cast<float>(ParticleBlendMode::AlphaBlend));
 		}
 		else if (templateType == "Beam")
 		{
 			em.Name = "Beam_" + std::to_string(m_Asset.Emitters.size() + 1);
 			em.MaxParticles = 400;
-			em.Lifetime = 0.7f;
-			em.EmissionRate = 180.0f;
+			em.Lifetime = 0.6f;
+			em.EmissionRate = 120.0f;
 			em.EmitterType = ParticleEmitterType::Point;
 			em.FacingMode = ParticleRenderMode::StretchedVelocity;
 			em.Speed = 18.0f;
 			em.SpeedVariance = 1.0f;
 			em.Gravity = glm::vec3(0.0f);
-			em.SizeStart = 0.3f;
-			em.SizeEnd = 0.05f;
+			em.SizeStart = 0.28f;
+			em.SizeEnd = 0.06f;
 			em.ColorStart = glm::vec4(0.3f, 0.9f, 1.0f, 1.0f);
 			em.ColorEnd = glm::vec4(0.1f, 0.3f, 1.0f, 0.0f);
 			em.Material.BlendMode = ParticleBlendMode::Additive;
-			em.Material.EmissiveBoost = 4.5f;
+			em.Material.EmissiveBoost = 4.0f;
+
+			em.Modules = {
+				VfxModuleLibrary::CreateSpawnRateModule(120.0f),
+				VfxModuleLibrary::CreateInitParticleModule(0.6f, 0.28f, 0.06f),
+				VfxModuleLibrary::CreatePointSpawnModule(),
+				VfxModuleLibrary::CreateSolveVelocityModule(),
+				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 4.0f)
+			};
+			if (auto* p = em.FindModule("mod.spawn.point")) p->SetFloat("PointSpeed", 18.0f);
+			if (auto* r = em.FindModule("mod.render.sprite")) r->SetFloat("FacingMode", static_cast<float>(ParticleRenderMode::StretchedVelocity));
 		}
-		else if (templateType == "Ribbon")
+		else if (templateType == "Vortex")
 		{
-			em.Name = "Ribbon_" + std::to_string(m_Asset.Emitters.size() + 1);
-			em.MaxParticles = 200;
-			em.Lifetime = 1.8f;
-			em.EmissionRate = 40.0f;
+			em.Name = "Vortex_" + std::to_string(m_Asset.Emitters.size() + 1);
+			em.MaxParticles = 400;
+			em.Lifetime = 2.0f;
+			em.EmissionRate = 70.0f;
 			em.EmitterType = ParticleEmitterType::Sphere;
-			em.Speed = 3.0f;
-			em.SpeedVariance = 0.5f;
-			em.Gravity = glm::vec3(0.0f, 0.5f, 0.0f);
-			em.SizeStart = 0.2f;
-			em.SizeEnd = 0.02f;
-			em.ColorStart = glm::vec4(0.2f, 1.0f, 0.8f, 1.0f);
-			em.ColorEnd = glm::vec4(0.0f, 0.4f, 0.8f, 0.0f);
+			em.Speed = 2.0f;
+			em.Gravity = glm::vec3(0.0f);
+			em.LinearDrag = 0.2f;
+			em.SizeStart = 0.25f;
+			em.SizeEnd = 0.05f;
+			em.ColorStart = glm::vec4(0.6f, 0.2f, 1.0f, 1.0f);
+			em.ColorEnd = glm::vec4(0.1f, 0.05f, 0.5f, 0.0f);
+			em.Material.BlendMode = ParticleBlendMode::Additive;
+			em.Material.EmissiveBoost = 2.5f;
+
+			em.Modules = {
+				VfxModuleLibrary::CreateSpawnRateModule(70.0f),
+				VfxModuleLibrary::CreateInitParticleModule(2.0f, 0.25f, 0.05f),
+				VfxModuleLibrary::CreateSphereSpawnModule(),
+				VfxModuleLibrary::CreatePointAttractorModule(),
+				VfxModuleLibrary::CreateVortexModule(),
+				VfxModuleLibrary::CreateLinearDragModule(),
+				VfxModuleLibrary::CreateSolveVelocityModule(),
+				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 2.5f)
+			};
+			if (auto* s = em.FindModule("mod.spawn.sphere")) { s->SetFloat("SphereRadius", 1.8f); s->SetFloat("OutwardSpeed", 1.0f); }
+			if (auto* a = em.FindModule("mod.update.attractor")) { a->SetFloat("AttractorStrength", 10.0f); a->SetFloat("AttractorRadius", 2.5f); }
+			if (auto* v = em.FindModule("mod.update.vortex")) v->SetFloat("VortexSpeed", 5.5f);
+		}
+		else if (templateType == "BurstRing")
+		{
+			em.Name = "Shockwave_" + std::to_string(m_Asset.Emitters.size() + 1);
+			em.MaxParticles = 60;
+			em.Lifetime = 2.0f;
+			em.EmissionRate = 0.0f;
+			em.Bursts = { { 0.0f, 1u } };
+			em.FacingMode = ParticleRenderMode::HorizontalQuad;
+			em.SizeStart = 0.8f;
+			em.SizeEnd = 2.5f;
+			em.ColorStart = glm::vec4(1.0f, 0.85f, 0.3f, 1.0f);
+			em.ColorEnd = glm::vec4(0.9f, 0.3f, 0.0f, 0.0f);
 			em.Material.BlendMode = ParticleBlendMode::Additive;
 			em.Material.EmissiveBoost = 3.0f;
-		}
-		else if (templateType == "Mesh")
-		{
-			em.Name = "MeshDebris_" + std::to_string(m_Asset.Emitters.size() + 1);
-			em.MaxParticles = 150;
-			em.Lifetime = 2.0f;
-			em.EmissionRate = 25.0f;
-			em.EmitterType = ParticleEmitterType::Box;
-			em.Speed = 5.0f;
-			em.SpeedVariance = 2.0f;
-			em.Gravity = glm::vec3(0.0f, -9.8f, 0.0f);
-			em.LinearDrag = 0.3f;
-			em.Collision.Mode = ParticleCollisionMode::Plane;
-			em.Collision.Restitution = 0.5f;
-			em.SizeStart = 0.25f;
-			em.SizeEnd = 0.25f;
-			em.ColorStart = glm::vec4(0.9f, 0.4f, 1.0f, 1.0f);
-			em.ColorEnd = glm::vec4(0.4f, 0.1f, 0.8f, 0.0f);
-			em.Material.BlendMode = ParticleBlendMode::Additive;
+
+			em.Modules = {
+				VfxModuleLibrary::CreateSpawnBurstModule(1, 0.0f),
+				VfxModuleLibrary::CreateInitParticleModule(2.0f, 0.8f, 2.5f),
+				VfxModuleLibrary::CreatePointSpawnModule(),
+				VfxModuleLibrary::CreateSolveVelocityModule(),
+				VfxModuleLibrary::CreateSpriteRendererModule(true, true, 3.0f)
+			};
 		}
 		else // Empty
 		{
@@ -378,27 +464,24 @@ void ParticleEditorPanel::NewAsset()
 			em.SizeEnd = 0.05f;
 			em.ColorStart = glm::vec4(1.0f);
 			em.ColorEnd = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
-		}
+			em.Material.BlendMode = ParticleBlendMode::Additive;
 
+			em.Modules = {
+				VfxModuleLibrary::CreateSpawnRateModule(50.0f),
+				VfxModuleLibrary::CreateInitParticleModule(2.0f, 0.3f, 0.05f),
+				VfxModuleLibrary::CreatePointSpawnModule(),
+				VfxModuleLibrary::CreateSolveVelocityModule(),
+				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 2.0f)
+			};
+		}
 
 		m_Asset.Emitters.push_back(em);
 		m_SelectedEmitterIndex = m_Asset.Emitters.size() - 1;
 		m_Dirty = true;
-		m_StatusFeedback = "新建发射器: " + em.Name;
+		m_StatusFeedback = "已从模块化模板新建发射器: " + em.Name;
 		EnsurePerEmitterState();
-		if (templateType == "Ribbon" && !m_EmitterExtended.empty())
-		{
-			m_EmitterExtended.back().RibbonEnabled = true;
-			m_EmitterExtended.back().ModuleRibbonEnabled = true;
-		}
-		else if (templateType == "Mesh" && !m_EmitterExtended.empty())
-		{
-			m_EmitterExtended.back().MeshEnabled = true;
-			m_EmitterExtended.back().ModuleMeshEnabled = true;
-		}
 		SyncSimulationFromAsset();
 	}
-
 
 	void ParticleEditorPanel::CloneSelectedEmitter()
 	{
@@ -1305,34 +1388,34 @@ void ParticleEditorPanel::NewAsset()
 				const char* Id;
 				const char* Label;
 				const char* Type;
+				const char* Tooltip;
 			} tEntries[] = {
-				{ "vfx.t.fount", "[喷泉] Fountain", "Fountain" },
-				{ "vfx.t.fire", "[火焰] Fire", "Fire" },
-				{ "vfx.t.spark", "[火花] Sparks", "Sparks" },
-				{ "vfx.t.smoke", "[浓烟] Smoke", "Smoke" },
-				{ "vfx.t.beam", "[光束] Beam", "Beam" },
-				{ "vfx.t.ribb", "~ 拖尾 (Ribbon)", "Ribbon" },
-				{ "vfx.t.mesh", "[碎屑] Mesh", "Mesh" },
-				{ "vfx.t.empty", "[空模板] Empty", "Empty" }
+				{ "vfx.t.fount", "✦ 喷泉水流", "Fountain", "圆锥喷射 + 重力抛物线物理流" },
+				{ "vfx.t.fire", "✦ 火焰气流", "Fire", "热升浮力 + 旋转微涡流 + 旋度扰动" },
+				{ "vfx.t.spark", "✦ 迸发火花", "Sparks", "球形爆发 + 速度拉伸朝向 + 高重力" },
+				{ "vfx.t.smoke", "✦ 膨胀浓烟", "Smoke", "半透明混合 + 空气阻力 + 尺寸膨胀" },
+				{ "vfx.t.beam", "✦ 穿透光束", "Beam", "高密度持续线性喷射 + 速度拉伸" },
+				{ "vfx.t.vortex", "✦ 旋转涡流", "Vortex", "中心引力黑洞 + 强旋流吸引子" },
+				{ "vfx.t.burst", "✦ 爆发光环", "BurstRing", "水平贴地光环 + 单次爆发扩散" },
+				{ "vfx.t.empty", "✦ 空白堆栈", "Empty", "纯净基础空白模块化发射器" }
 			};
 
-
-			float my = menuRect.Y + 4.0f;
+			float my = menuRect.Y + 6.0f;
 			for (size_t t = 0; t < 8; ++t)
 			{
 				const float colW = (menuRect.W - 12.0f) * 0.5f;
 				const float mx = menuRect.X + 4.0f + (t % 2) * (colW + 4.0f);
-				if (t > 0 && t % 2 == 0) my += 28.0f;
+				if (t > 0 && t % 2 == 0) my += 29.0f;
 
-
-				const Wui::WuiRect btnR { mx, my, colW, 24.0f };
+				const Wui::WuiRect btnR { mx, my, colW, 25.0f };
+				Wui::Tooltip(ctx, btnR, tEntries[t].Tooltip);
 				if (Wui::Button(ctx, Wui::HashId(tEntries[t].Id), btnR, tEntries[t].Label, theme))
 				{
 					AddEmitterFromTemplate(tEntries[t].Type);
 					m_NewEmitterMenuOpen = false;
 				}
 			}
-			listY += 136.0f;
+			listY += 140.0f;
 		}
 
 

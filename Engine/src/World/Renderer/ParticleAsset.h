@@ -58,6 +58,17 @@ namespace World
 		bool UseCustomShaderOverride = false;
 
 		void EnsureDefaultModules();
+
+		VfxModule* FindModule(const std::string& id)
+		{
+			for (auto& m : Modules) { if (m.Id == id) return &m; }
+			return nullptr;
+		}
+		const VfxModule* FindModule(const std::string& id) const
+		{
+			for (const auto& m : Modules) { if (m.Id == id) return &m; }
+			return nullptr;
+		}
 	};
 
 	struct WLD_API ParticleAsset
