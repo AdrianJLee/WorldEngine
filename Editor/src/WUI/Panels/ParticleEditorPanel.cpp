@@ -1566,13 +1566,13 @@ void ParticleEditorPanel::NewAsset()
 			PushUndoSnapshot();
 			m_Asset = std::move(parsed);
 			m_Dirty = true;
-			m_StatusFeedback = "✓ YAML 代码已成功编译应用到视口";
+			m_StatusFeedback = "[成功] YAML 代码已成功编译应用到视口";
 			EnsurePerEmitterState();
 			SyncSimulationFromAsset();
 		}
 		else
 		{
-			m_StatusFeedback = "✗ YAML 代码格式错误，请检查语法";
+			m_StatusFeedback = "[错误] YAML 代码格式错误，请检查语法";
 		}
 	}
 
@@ -1673,7 +1673,7 @@ void ParticleEditorPanel::NewAsset()
 			float cx = codeToolbar.X + 8.0f;
 			const Wui::WuiRect applyBtn { cx, codeToolbar.Y + 4.0f, 130.0f, 24.0f };
 			Wui::Tooltip(ctx, applyBtn, "编译并应用当前 YAML 代码到视口与特效系统 (Ctrl+Enter)");
-			if (Wui::Button(ctx, Wui::HashId("vfx.code.apply"), applyBtn, "▶ 应用代码 (Ctrl+Enter)", theme))
+			if (Wui::Button(ctx, Wui::HashId("vfx.code.apply"), applyBtn, "[运行] 应用代码 (Ctrl+Enter)", theme))
 			{
 				ApplyCodeToAsset();
 			}
@@ -1854,7 +1854,7 @@ void ParticleEditorPanel::NewAsset()
 		const bool canUndo = CanUndo();
 		const Wui::WuiRect undoBtn { tbX, barRect.Y + 6.0f, 48.0f, 24.0f };
 		Wui::Tooltip(ctx, undoBtn, canUndo ? "撤销上一步操作 (Ctrl+Z)" : "撤销栈为空");
-		if (Wui::Button(ctx, Wui::HashId("vfx.bar.undo"), undoBtn, "↶撤销", theme) && canUndo)
+		if (Wui::Button(ctx, Wui::HashId("vfx.bar.undo"), undoBtn, "撤销 (Z)", theme) && canUndo)
 		{
 			Undo();
 		}
@@ -1864,7 +1864,7 @@ void ParticleEditorPanel::NewAsset()
 		const bool canRedo = CanRedo();
 		const Wui::WuiRect redoBtn { tbX, barRect.Y + 6.0f, 48.0f, 24.0f };
 		Wui::Tooltip(ctx, redoBtn, canRedo ? "重做下一步操作 (Ctrl+Y / Ctrl+Shift+Z)" : "重做栈为空");
-		if (Wui::Button(ctx, Wui::HashId("vfx.bar.redo"), redoBtn, "↷重做", theme) && canRedo)
+		if (Wui::Button(ctx, Wui::HashId("vfx.bar.redo"), redoBtn, "重做 (Y)", theme) && canRedo)
 		{
 			Redo();
 		}
@@ -1875,7 +1875,7 @@ void ParticleEditorPanel::NewAsset()
 		const Wui::WuiRect visualModeBtn { tbX, barRect.Y + 6.0f, modeBtnW, 24.0f };
 		Wui::Tooltip(ctx, visualModeBtn, "切换到参数可视化模块工作区");
 		if (Wui::Button(ctx, Wui::HashId("vfx.mode.visual"), visualModeBtn,
-			m_ViewMode == ParticleEditorViewMode::Visual ? "[● 检视]" : "  检视", theme))
+			m_ViewMode == ParticleEditorViewMode::Visual ? "[检视]" : "  检视", theme))
 		{
 			m_ViewMode = ParticleEditorViewMode::Visual;
 		}
@@ -1885,7 +1885,7 @@ void ParticleEditorPanel::NewAsset()
 		const Wui::WuiRect codeModeBtn { tbX, barRect.Y + 6.0f, modeBtnW, 24.0f };
 		Wui::Tooltip(ctx, codeModeBtn, "切换到声明式代码/YAML 编辑视图，热重载实时生效");
 		if (Wui::Button(ctx, Wui::HashId("vfx.mode.code"), codeModeBtn,
-			m_ViewMode == ParticleEditorViewMode::Code ? "[● 代码]" : "  代码", theme))
+			m_ViewMode == ParticleEditorViewMode::Code ? "[代码]" : "  代码", theme))
 		{
 			m_ViewMode = ParticleEditorViewMode::Code;
 			SyncCodeFromAsset();
@@ -1904,11 +1904,11 @@ void ParticleEditorPanel::NewAsset()
 			const char* Name;
 			const char* Tip;
 		} presets[] = {
-			{ "vfx.p.tornado", "🔥龙卷火", "FlameTornado3D", "3D 火焰龙卷风: 圆锥内焰 + 强 3D 涡流飞旋火星 + 旋度噪声上升浓烟" },
-			{ "vfx.p.plasma", "⚡等离子束", "LightningPlasmaBeam3D", "3D 等离子闪电束: 核心高能光束 + 空间螺旋放电电弧 + 撞击点剧烈反弹火花" },
-			{ "vfx.p.shield", "🔮魔法护盾", "OrbitalMagicShield3D", "3D 环形魔法护盾: 空间符文旋转球环 + 轨道自发光动态点光源 + 脉冲能量内核" },
-			{ "vfx.p.meteor", "💥流星撞击", "MeteorImpactExplosion3D", "3D 流星陨石高爆: 瞬态扩散冲击波 + 撞地反弹重力碎石 + 爆心火球 + 升腾黑烟" },
-			{ "vfx.p.blizzard", "❄️冰霜新星", "BlizzardFrostNova3D", "3D 暴风雪冰霜新星: 爆发冰晶冲击波 + 地表旋转冷气雾 + 悬浮漫游冰霜雪花" }
+			{ "vfx.p.tornado", "龙卷火", "FlameTornado3D", "3D 火焰龙卷风: 圆锥内焰 + 强 3D 涡流飞旋火星 + 旋度噪声上升浓烟" },
+			{ "vfx.p.plasma", "等离子束", "LightningPlasmaBeam3D", "3D 等离子闪电束: 核心高能光束 + 空间螺旋放电电弧 + 撞击点剧烈反弹火花" },
+			{ "vfx.p.shield", "魔法护盾", "OrbitalMagicShield3D", "3D 环形魔法护盾: 空间符文旋转球环 + 轨道自发光动态点光源 + 脉冲能量内核" },
+			{ "vfx.p.meteor", "流星撞击", "MeteorImpactExplosion3D", "3D 流星陨石高爆: 瞬态扩散冲击波 + 撞地反弹重力碎石 + 爆心火球 + 升腾黑烟" },
+			{ "vfx.p.blizzard", "冰霜新星", "BlizzardFrostNova3D", "3D 暴风雪冰霜新星: 爆发冰晶冲击波 + 地表旋转冷气雾 + 悬浮漫游冰霜雪花" }
 		};
 
 
@@ -1930,9 +1930,9 @@ void ParticleEditorPanel::NewAsset()
 
 		if (!m_StatusFeedback.empty())
 		{
-			Wui::WuiColor fbColor = (m_StatusFeedback.find("✓") != std::string::npos || m_StatusFeedback.find("成功") != std::string::npos)
+			Wui::WuiColor fbColor = (m_StatusFeedback.find("成功") != std::string::npos || m_StatusFeedback.find("成功") != std::string::npos)
 				? Wui::WuiColor { 0.3f, 0.85f, 0.4f, 1.0f }
-				: (m_StatusFeedback.find("✗") != std::string::npos || m_StatusFeedback.find("失败") != std::string::npos)
+				: (m_StatusFeedback.find("失败") != std::string::npos || m_StatusFeedback.find("失败") != std::string::npos)
 					? Wui::WuiColor { 0.95f, 0.3f, 0.3f, 1.0f }
 					: theme.TextMuted;
 			Wui::Label(ctx, { tbX + 8.0f, barRect.Y + 10.0f }, m_StatusFeedback, fbColor, 10.5f);
@@ -1964,7 +1964,7 @@ void ParticleEditorPanel::NewAsset()
 		Wui::SearchField(ctx, Wui::HashId("vfx.outliner.search"), searchRect, m_FilterText, "过滤发射器... Q", theme);
 
 
-		// 顶部功能工具栏: [+ 新建] [克隆] [删除] [▲] [▼] (24px)
+		// 顶部功能工具栏: [+ 新建] [克隆] [删除] [^] [v] (24px)
 		float toolY = outlinerRect.Y + 58.0f;
 		float tx = outlinerRect.X + 6.0f;
 
@@ -2000,7 +2000,7 @@ void ParticleEditorPanel::NewAsset()
 		const bool canUp = (m_SelectedEmitterIndex > 0);
 		const Wui::WuiRect upBtn { tx, toolY, 26.0f, 22.0f };
 		Wui::Tooltip(ctx, upBtn, "上移图层层级");
-		if (Wui::Button(ctx, Wui::HashId("vfx.out.up"), upBtn, "▲", theme) && canUp)
+		if (Wui::Button(ctx, Wui::HashId("vfx.out.up"), upBtn, "[^]", theme) && canUp)
 		{
 			MoveEmitterUp();
 		}
@@ -2010,7 +2010,7 @@ void ParticleEditorPanel::NewAsset()
 		const bool canDown = (m_SelectedEmitterIndex + 1 < m_Asset.Emitters.size());
 		const Wui::WuiRect downBtn { tx, toolY, 26.0f, 22.0f };
 		Wui::Tooltip(ctx, downBtn, "下移图层层级");
-		if (Wui::Button(ctx, Wui::HashId("vfx.out.down"), downBtn, "▼", theme) && canDown)
+		if (Wui::Button(ctx, Wui::HashId("vfx.out.down"), downBtn, "[v]", theme) && canDown)
 		{
 			MoveEmitterDown();
 		}
@@ -2029,14 +2029,14 @@ void ParticleEditorPanel::NewAsset()
 				const char* Label;
 				const char* Type;
 			} tEntries[] = {
-				{ "vfx.t.fount", "✦ 喷泉 (Fountain)", "Fountain" },
-				{ "vfx.t.fire", "🔥 火焰 (Fire)", "Fire" },
-				{ "vfx.t.spark", "⚡ 火花 (Sparks)", "Sparks" },
-				{ "vfx.t.smoke", "☁ 浓烟 (Smoke)", "Smoke" },
-				{ "vfx.t.beam", "═ 光束 (Beam)", "Beam" },
+				{ "vfx.t.fount", "[喷泉] Fountain", "Fountain" },
+				{ "vfx.t.fire", "[火焰] Fire", "Fire" },
+				{ "vfx.t.spark", "[火花] Sparks", "Sparks" },
+				{ "vfx.t.smoke", "[浓烟] Smoke", "Smoke" },
+				{ "vfx.t.beam", "[光束] Beam", "Beam" },
 				{ "vfx.t.ribb", "~ 拖尾 (Ribbon)", "Ribbon" },
-				{ "vfx.t.mesh", "■ 碎屑 (Mesh)", "Mesh" },
-				{ "vfx.t.empty", "○ 空模板 (Empty)", "Empty" }
+				{ "vfx.t.mesh", "[碎屑] Mesh", "Mesh" },
+				{ "vfx.t.empty", "[空模板] Empty", "Empty" }
 			};
 
 
@@ -2062,7 +2062,7 @@ void ParticleEditorPanel::NewAsset()
 		// 根系统节点条目 (Root System Node)
 		const Wui::WuiRect sysRow { outlinerRect.X + 4.0f, listY, outlinerRect.W - 8.0f, 24.0f };
 		Wui::BarSurface(ctx, sysRow, theme.PanelHeader, theme.Border);
-		std::string sysTitle = "◆ " + m_Asset.Name;
+		std::string sysTitle = "[系统] " + m_Asset.Name;
 		if (sysTitle.size() > 22) sysTitle = sysTitle.substr(0, 20) + "..";
 		Wui::Label(ctx, { sysRow.X + 6.0f, sysRow.Y + 5.0f }, sysTitle, theme.Text, 11.0f);
 		std::string durStr = std::to_string(m_TimelineDuration).substr(0, 3) + "s" + (m_Asset.Looping ? " ⟳" : "");
@@ -2108,12 +2108,12 @@ void ParticleEditorPanel::NewAsset()
 
 			// 发射器类型彩色徽标 (Type Icon)
 			Wui::WuiColor iconCol { 1.0f, 0.55f, 0.15f, 1.0f }; // 默认火苗橙 (Sprite)
-			std::string iconStr = "●";
+			std::string iconStr = "[S]";
 			if (i < m_EmitterExtended.size())
 			{
 				if (m_EmitterExtended[i].RibbonEnabled) { iconCol = Wui::WuiColor { 0.15f, 0.85f, 0.95f, 1.0f }; iconStr = "~"; }
-				else if (m_EmitterExtended[i].MeshEnabled) { iconCol = Wui::WuiColor { 0.75f, 0.40f, 0.95f, 1.0f }; iconStr = "■"; }
-				else if (m_EmitterExtended[i].LightEnabled) { iconCol = Wui::WuiColor { 1.0f, 0.85f, 0.20f, 1.0f }; iconStr = "☼"; }
+				else if (m_EmitterExtended[i].MeshEnabled) { iconCol = Wui::WuiColor { 0.75f, 0.40f, 0.95f, 1.0f }; iconStr = "[M]"; }
+				else if (m_EmitterExtended[i].LightEnabled) { iconCol = Wui::WuiColor { 1.0f, 0.85f, 0.20f, 1.0f }; iconStr = "[L]"; }
 			}
 			Wui::Label(ctx, { rowRect.X + 4.0f, rowRect.Y + 5.0f }, iconStr, iconCol, 11.5f);
 
@@ -2247,7 +2247,7 @@ void ParticleEditorPanel::NewAsset()
 			{
 				const Wui::WuiRect modRow { listRect.X + 16.0f, rowY, listRect.W - 20.0f, 18.0f };
 				std::string shapeName = (em.EmitterType == ParticleEmitterType::Cone) ? "Cone" : (em.EmitterType == ParticleEmitterType::Sphere ? "Sphere" : (em.EmitterType == ParticleEmitterType::Box ? "Box" : "Point"));
-				std::string modSummary = "├─ ✦Spawn(" + std::to_string((int)em.EmissionRate) + "p/s) ❖" + shapeName + " ⚡Forces";
+				std::string modSummary = "|-- Spawn(" + std::to_string((int)em.EmissionRate) + "p/s) | " + shapeName + " | Forces";
 				Wui::Label(ctx, { modRow.X, modRow.Y + 2.0f }, modSummary, Wui::WuiColor { 0.45f, 0.55f, 0.65f, 0.85f }, 9.5f);
 				rowY += 20.0f;
 			}
@@ -3248,7 +3248,7 @@ void ParticleEditorPanel::NewAsset()
 
 		const Wui::WuiRect heatBtn { vx, vy, 60.0f, 22.0f };
 		Wui::Tooltip(ctx, heatBtn, "切换视口 Overdraw 填充率热力图透视");
-		if (Wui::Button(ctx, Wui::HashId("vfx.view.heatmap"), heatBtn, m_HeatmapMode ? "[●热力图]" : "  热力图", theme))
+		if (Wui::Button(ctx, Wui::HashId("vfx.view.heatmap"), heatBtn, m_HeatmapMode ? "[热力图]" : "  热力图", theme))
 		{
 			m_HeatmapMode = !m_HeatmapMode;
 		}
@@ -3256,7 +3256,7 @@ void ParticleEditorPanel::NewAsset()
 
 		const Wui::WuiRect boundsBtn { vx, vy, 60.0f, 22.0f };
 		Wui::Tooltip(ctx, boundsBtn, "切换视口粒子系统 AABB 包围盒显示");
-		if (Wui::Button(ctx, Wui::HashId("vfx.view.bounds"), boundsBtn, m_BoundsMode ? "[●包围盒]" : "  包围盒", theme))
+		if (Wui::Button(ctx, Wui::HashId("vfx.view.bounds"), boundsBtn, m_BoundsMode ? "[包围盒]" : "  包围盒", theme))
 		{
 			m_BoundsMode = !m_BoundsMode;
 		}
@@ -3283,22 +3283,22 @@ void ParticleEditorPanel::NewAsset()
 		Wui::WuiColor overdrawCol;
 		if (totalActiveParticles < 400)
 		{
-			overdrawAlert = "🟢 低 / Low (良好)";
+			overdrawAlert = "[低] 良好 (Low)";
 			overdrawCol = Wui::WuiColor { 0.3f, 0.85f, 0.4f, 1.0f };
 		}
 		else if (totalActiveParticles < 1200)
 		{
-			overdrawAlert = "🟡 中 / Moderate (重叠预警)";
+			overdrawAlert = "[中] 重叠预警 (Moderate)";
 			overdrawCol = Wui::WuiColor { 0.95f, 0.8f, 0.2f, 1.0f };
 		}
 		else
 		{
-			overdrawAlert = "🔴 极高 / Critical (严重填充瓶颈)";
+			overdrawAlert = "[极高] 严重瓶颈 (Critical)";
 			overdrawCol = Wui::WuiColor { 0.95f, 0.3f, 0.3f, 1.0f };
 		}
 
 		Wui::BarSurface(ctx, hudRect, Wui::WuiColor { 0.05f, 0.07f, 0.09f, 0.85f }, theme.Border);
-		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 6.0f }, "● 3D 复合特效视口 (VFX Viewport)", theme.Accent, 11.5f);
+		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 6.0f }, "3D 复合特效视口 (VFX Viewport)", theme.Accent, 11.5f);
 		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 22.0f },
 			"活跃粒子: " + std::to_string(totalActiveParticles) + " | 发射层: " + std::to_string(activeEmitterCount) + "/" + std::to_string(m_Asset.Emitters.size()) + " | 预估 DC: " + std::to_string(estDrawCalls),
 			theme.Text, 10.5f);
@@ -3747,7 +3747,7 @@ void ParticleEditorPanel::NewAsset()
 		const Wui::WuiRect curveToggleBtn { timelineRect.X + timelineRect.W - curveToggleW - 8.0f, ty, curveToggleW, 22.0f };
 		Wui::Tooltip(ctx, curveToggleBtn, "折叠/展开内置完全可交互关键帧贝塞尔曲线工作台");
 		if (Wui::Button(ctx, Wui::HashId("vfx.tl.curvetoggle"), curveToggleBtn,
-			m_TimelineCurvesExpanded ? "▼ 内置曲线台" : "▶ 内置曲线台", theme))
+			m_TimelineCurvesExpanded ? "[v] 内置曲线台" : "[>] 内置曲线台", theme))
 		{
 			m_TimelineCurvesExpanded = !m_TimelineCurvesExpanded;
 		}
@@ -3845,7 +3845,7 @@ void ParticleEditorPanel::NewAsset()
 		{
 			const Wui::WuiRect lockBanner { inspectorRect.X + 6.0f, curY, inspectorRect.W - 12.0f, 22.0f };
 			Wui::BarSurface(ctx, lockBanner, Wui::WuiColor { 0.25f, 0.18f, 0.08f, 0.9f }, theme.Warning);
-			Wui::Label(ctx, { lockBanner.X + 8.0f, lockBanner.Y + 4.0f }, "🔒 当前发射器已加锁 (只读保护中)", theme.Warning, 10.5f);
+			Wui::Label(ctx, { lockBanner.X + 8.0f, lockBanner.Y + 4.0f }, "[锁定] 当前发射器已加锁 (只读保护中)", theme.Warning, 10.5f);
 			curY += 26.0f;
 		}
 
@@ -3927,7 +3927,7 @@ void ParticleEditorPanel::NewAsset()
 
 		const Wui::WuiRect c1Header { c1.X, c1.Y, c1.W, 26.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.card1.fold"), c1Header,
-			m_CardSpawningExpanded ? "▼ [1] 生成与脉冲 (Spawn & Burst)" : "▶ [1] 生成与脉冲 (Spawn & Burst)", theme))
+			m_CardSpawningExpanded ? "[v] [1] 生成与脉冲 (Spawn & Burst)" : "[>] [1] 生成与脉冲 (Spawn & Burst)", theme))
 		{
 			m_CardSpawningExpanded = !m_CardSpawningExpanded;
 		}
@@ -3949,7 +3949,7 @@ void ParticleEditorPanel::NewAsset()
 
 
 			// 多段 Burst 脉冲列表管理 (Multi-Burst Table)
-			Wui::Label(ctx, { c1.X + 12.0f, rowY + 3.0f }, "● 脉冲爆发列表 (Bursts):", theme.Accent, 10.5f);
+			Wui::Label(ctx, { c1.X + 12.0f, rowY + 3.0f }, "脉冲爆发列表 (Bursts):", theme.Accent, 10.5f);
 			const Wui::WuiRect addBurstBtn { c1.X + c1.W - 84.0f, rowY, 74.0f, 20.0f };
 			Wui::Tooltip(ctx, addBurstBtn, "向当前发射器添加一个瞬间脉冲爆发点");
 			if (Wui::Button(ctx, Wui::HashId("vfx.burst.add"), addBurstBtn, "+添加脉冲", theme))
@@ -3983,7 +3983,7 @@ void ParticleEditorPanel::NewAsset()
 
 
 				const Wui::WuiRect delBurstBtn { bRow.X + bRow.W - 32.0f, bRow.Y, 28.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId(("vfx.b.del." + std::to_string(b)).c_str()), delBurstBtn, "✕", theme))
+				if (Wui::Button(ctx, Wui::HashId(("vfx.b.del." + std::to_string(b)).c_str()), delBurstBtn, "X", theme))
 				{
 					PushUndoSnapshot();
 					em.Bursts.erase(em.Bursts.begin() + b);
@@ -4007,7 +4007,7 @@ void ParticleEditorPanel::NewAsset()
 
 		const Wui::WuiRect c2Header { c2.X, c2.Y, c2.W, 26.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.card2.fold"), c2Header,
-			m_CardShapeExpanded ? "▼ [2] 空间形状与位置 (Shape & Location)" : "▶ [2] 空间形状与位置 (Shape & Location)", theme))
+			m_CardShapeExpanded ? "[v] [2] 空间形状与位置 (Shape & Location)" : "[>] [2] 空间形状与位置 (Shape & Location)", theme))
 		{
 			m_CardShapeExpanded = !m_CardShapeExpanded;
 		}
@@ -4085,7 +4085,7 @@ void ParticleEditorPanel::NewAsset()
 
 		const Wui::WuiRect c3Header { c3.X, c3.Y, c3.W, 26.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.card3.fold"), c3Header,
-			m_CardForcesExpanded ? "▼ [3] 动力学、流体与力场 (Forces & Fields)" : "▶ [3] 动力学、流体与力场 (Forces & Fields)", theme))
+			m_CardForcesExpanded ? "[v] [3] 动力学、流体与力场 (Forces & Fields)" : "[>] [3] 动力学、流体与力场 (Forces & Fields)", theme))
 		{
 			m_CardForcesExpanded = !m_CardForcesExpanded;
 		}
@@ -4125,7 +4125,7 @@ void ParticleEditorPanel::NewAsset()
 
 		const Wui::WuiRect c4Header { c4.X, c4.Y, c4.W, 26.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.card4.fold"), c4Header,
-			m_CardSizeRotationExpanded ? "▼ [4] 尺寸与旋转 (Size & Rotation)" : "▶ [4] 尺寸与旋转 (Size & Rotation)", theme))
+			m_CardSizeRotationExpanded ? "[v] [4] 尺寸与旋转 (Size & Rotation)" : "[>] [4] 尺寸与旋转 (Size & Rotation)", theme))
 		{
 			m_CardSizeRotationExpanded = !m_CardSizeRotationExpanded;
 		}
@@ -4173,7 +4173,7 @@ void ParticleEditorPanel::NewAsset()
 
 		const Wui::WuiRect c5Header { c5.X, c5.Y, c5.W, 26.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.card5.fold"), c5Header,
-			m_CardColorAlphaExpanded ? "▼ [5] 颜色与 HDR 辉光 (Color & Emissive)" : "▶ [5] 颜色与 HDR 辉光 (Color & Emissive)", theme))
+			m_CardColorAlphaExpanded ? "[v] [5] 颜色与 HDR 辉光 (Color & Emissive)" : "[>] [5] 颜色与 HDR 辉光 (Color & Emissive)", theme))
 		{
 			m_CardColorAlphaExpanded = !m_CardColorAlphaExpanded;
 		}
@@ -4228,7 +4228,7 @@ void ParticleEditorPanel::NewAsset()
 
 		const Wui::WuiRect c6Header { c6.X, c6.Y, c6.W, 26.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.card6.fold"), c6Header,
-			m_CardRenderersExpanded ? "▼ [6] 多元渲染器切换 (Renderers)" : "▶ [6] 多元渲染器切换 (Renderers)", theme))
+			m_CardRenderersExpanded ? "[v] [6] 多元渲染器切换 (Renderers)" : "[>] [6] 多元渲染器切换 (Renderers)", theme))
 		{
 			m_CardRenderersExpanded = !m_CardRenderersExpanded;
 		}
@@ -4308,7 +4308,7 @@ void ParticleEditorPanel::NewAsset()
 
 		const Wui::WuiRect c7Header { c7.X, c7.Y, c7.W, 26.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.card7.fold"), c7Header,
-			m_CardCollisionExpanded ? "▼ [7] 物理碰撞与次级事件 (Collision & Events)" : "▶ [7] 物理碰撞与次级事件 (Collision & Events)", theme))
+			m_CardCollisionExpanded ? "[v] [7] 物理碰撞与次级事件 (Collision & Events)" : "[>] [7] 物理碰撞与次级事件 (Collision & Events)", theme))
 		{
 			m_CardCollisionExpanded = !m_CardCollisionExpanded;
 		}
