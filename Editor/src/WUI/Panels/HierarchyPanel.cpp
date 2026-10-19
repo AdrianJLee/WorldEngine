@@ -743,7 +743,7 @@ namespace World
 		if (ctx.IsPopupOpen(blankPopup))
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect panel { m_BlankMenuPos.x, m_BlankMenuPos.y, 190, 4 * 22 + 8 };
+			const Wui::WuiRect panel { m_BlankMenuPos.x, m_BlankMenuPos.y, 190, 5 * 22 + 8 };
 			DrawPanelSurface(ctx, panel, theme);
 			const bool hasSelection = host.GetSelectedEntity().IsValid() && host.GetSelectedEntity().GetScene() == scene.get();
 			if (MenuItem(ctx, Wui::HashId("hierarchy.create"), { panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Create Empty Entity", true, theme))
@@ -774,7 +774,23 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), { panel.X + 4, panel.Y + 48, panel.W - 8, 22 }, "Duplicate Selected", hasSelection, theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createvfx"), { panel.X + 4, panel.Y + 48, panel.W - 8, 22 }, "Create VFX Entity", true, theme))
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "VFX Entity");
+						created.AddComponent<TransformComponent>();
+						created.AddComponent<VfxComponent>();
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create VFX Entity"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), { panel.X + 4, panel.Y + 70, panel.W - 8, 22 }, "Duplicate Selected", hasSelection, theme))
 			{
 				if (hasSelection)
 				{
@@ -783,7 +799,7 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.deletesel"), { panel.X + 4, panel.Y + 70, panel.W - 8, 22 }, "Delete Selected", hasSelection, theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.deletesel"), { panel.X + 4, panel.Y + 92, panel.W - 8, 22 }, "Delete Selected", hasSelection, theme))
 			{
 				if (hasSelection)
 				{

@@ -1,5 +1,7 @@
 #include "wldpch.h"
 #include "World/Renderer/ParticleAsset.h"
+#include "World/Utils/Paths.h"
+#include <filesystem>
 
 #include <yaml-cpp/yaml.h>
 #include <fstream>
@@ -98,10 +100,12 @@ namespace World
 		out << YAML::Key << "Emitter" << YAML::Value << YAML::BeginMap;
 		out << YAML::Key << "Type" << YAML::Value << EmitterTypeToString(em.EmitterType);
 		out << YAML::Key << "LockToXY" << YAML::Value << em.LockToXY;
+		out << YAML::Key << "MeshPath" << YAML::Value << em.MeshPath;
 		out << YAML::EndMap;
 
 		out << YAML::Key << "Material" << YAML::Value << YAML::BeginMap;
 		out << YAML::Key << "TexturePath" << YAML::Value << em.Material.TexturePath;
+		out << YAML::Key << "MaterialPath" << YAML::Value << em.Material.MaterialPath;
 		out << YAML::Key << "BlendMode" << YAML::Value << BlendModeToString(em.Material.BlendMode);
 		out << YAML::Key << "FacingMode" << YAML::Value << FacingModeToString(em.FacingMode);
 		out << YAML::Key << "EmissiveBoost" << YAML::Value << em.Material.EmissiveBoost;
@@ -178,9 +182,12 @@ namespace World
 			if (emNode["LockToXY"]) em.LockToXY = emNode["LockToXY"].as<bool>();
 		}
 
+		if (node["MeshPath"]) em.MeshPath = node["MeshPath"].as<std::string>();
+
 		if (const auto matNode = node["Material"])
 		{
 			if (matNode["TexturePath"]) em.Material.TexturePath = matNode["TexturePath"].as<std::string>();
+			if (matNode["MaterialPath"]) em.Material.MaterialPath = matNode["MaterialPath"].as<std::string>();
 			if (matNode["BlendMode"]) em.Material.BlendMode = StringToBlendMode(matNode["BlendMode"].as<std::string>());
 			if (matNode["FacingMode"]) em.FacingMode = StringToFacingMode(matNode["FacingMode"].as<std::string>());
 			em.Material.FacingMode = em.FacingMode;
@@ -414,14 +421,71 @@ namespace World
 		return s_Instance;
 	}
 
+	std::filesystem::path ResolveVfxDiskPath(const std::string& path)
+	{
+		std::error_code ec;
+		std::filesystem::path p(path);
+		if (std::filesystem::exists(p, ec) && std::filesystem::is_regular_file(p, ec))
+			return std::filesystem::absolute(p);
+
+		// Check relative to AssetRoot
+		const auto& assetRoot = World::Paths::AssetRoot();
+		if (!assetRoot.empty())
+		{
+			std::filesystem::path fromAssetRoot = assetRoot / p;
+			if (std::filesystem::exists(fromAssetRoot, ec) && std::filesystem::is_regular_file(fromAssetRoot, ec))
+				return std::filesystem::absolute(fromAssetRoot);
+		}
+
+		// Check stripping "assets/"
+		std::string s = p.generic_string();
+		if (s.rfind("assets/", 0) == 0)
+		{
+			std::string sub = s.substr(7);
+			std::filesystem::path fromAssetRoot = assetRoot / sub;
+			if (std::filesystem::exists(fromAssetRoot, ec) && std::filesystem::is_regular_file(fromAssetRoot, ec))
+				return std::filesystem::absolute(fromAssetRoot);
+		}
+
+		// Check projects/assets
+		std::filesystem::path fromProj = std::filesystem::current_path() / "projects" / "assets" / p;
+		if (std::filesystem::exists(fromProj, ec) && std::filesystem::is_regular_file(fromProj, ec))
+			return std::filesystem::absolute(fromProj);
+
+		// Check relative to EngineContentRoot
+		const auto& engineRoot = World::Paths::EngineContentRoot();
+		if (!engineRoot.empty())
+		{
+			std::filesystem::path fromEngine = engineRoot / p;
+			if (std::filesystem::exists(fromEngine, ec) && std::filesystem::is_regular_file(fromEngine, ec))
+				return std::filesystem::absolute(fromEngine);
+
+			if (s.rfind("engine/", 0) == 0 || s.rfind("Engine/", 0) == 0)
+			{
+				std::string sub = s.substr(7);
+				std::filesystem::path fromSub = engineRoot / sub;
+				if (std::filesystem::exists(fromSub, ec) && std::filesystem::is_regular_file(fromSub, ec))
+					return std::filesystem::absolute(fromSub);
+			}
+		}
+
+		// Check templates/project-example/assets
+		std::filesystem::path fromTpl = std::filesystem::current_path() / "templates" / "project-example" / "assets" / p;
+		if (std::filesystem::exists(fromTpl, ec) && std::filesystem::is_regular_file(fromTpl, ec))
+			return std::filesystem::absolute(fromTpl);
+
+		return p;
+	}
+
 	uint64_t ParticleAssetRegistry::RegisterAsset(const std::string& filepath)
 	{
 		auto it = m_PathToGuid.find(filepath);
 		if (it != m_PathToGuid.end())
 			return it->second;
 
+		std::filesystem::path diskPath = ResolveVfxDiskPath(filepath);
 		ParticleAsset asset;
-		if (!ParticleAssetSerializer::Deserialize(filepath, asset))
+		if (!ParticleAssetSerializer::Deserialize(diskPath.string(), asset))
 			return 0;
 
 		uint64_t guid = asset.Guid != 0 ? asset.Guid : std::hash<std::string>{}(filepath);
@@ -430,6 +494,8 @@ namespace World
 
 		m_Assets[guid] = std::move(asset);
 		m_PathToGuid[filepath] = guid;
+		m_PathToGuid[diskPath.string()] = guid;
+		m_PathToGuid[diskPath.generic_string()] = guid;
 		return guid;
 	}
 
@@ -465,6 +531,12 @@ namespace World
 		auto it = m_PathToGuid.find(path);
 		if (it != m_PathToGuid.end())
 			return GetAsset(it->second);
+
+		// Lazy auto-load on first access by path
+		uint64_t guid = const_cast<ParticleAssetRegistry*>(this)->RegisterAsset(path);
+		if (guid != 0)
+			return GetAsset(guid);
+
 		return nullptr;
 	}
 

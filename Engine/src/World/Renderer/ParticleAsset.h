@@ -21,6 +21,7 @@ namespace World
 		bool Enabled = true;
 		ParticleRenderMode FacingMode = ParticleRenderMode::Billboard;
 		bool LockToXY = false;
+		std::string MeshPath;
 
 		ParticleMaterialSettings Material;
 		ParticleCollisionSettings Collision;
@@ -68,6 +69,9 @@ namespace World
 		static std::string SerializeToString(const ParticleAsset& asset);
 		static bool DeserializeFromString(const std::string& yamlString, ParticleAsset& outAsset);
 	};
+
+	// 解析 VFX 资产在磁盘上的绝对路径(优先项目内容根，次之引擎全局内容库 Engine/content/vfx/)
+	WLD_API std::filesystem::path ResolveVfxDiskPath(const std::string& path);
 
 	class WLD_API ParticleAssetRegistry
 	{

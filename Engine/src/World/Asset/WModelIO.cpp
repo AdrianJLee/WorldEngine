@@ -944,9 +944,14 @@ namespace World::Asset::WModelIO
 					return true;
 				}
 			}
-			// P4-U12:模型逻辑路径只相对**内容根**(当前项目根/assets);不再回退 Game/ 或 Editor/。
+			// P4-U12:模型逻辑路径只相对**内容根**(当前项目根/assets);支持解析引擎内容库中的共享网格模型。
+			std::string stripped = path;
+			if (stripped.rfind("engine/", 0) == 0 || stripped.rfind("Engine/", 0) == 0)
+				stripped = stripped.substr(7);
 			const std::filesystem::path candidates[] = {
 				World::Paths::AssetRoot() / path,
+				World::Paths::EngineContentRoot() / path,
+				World::Paths::EngineContentRoot() / stripped,
 			};
 			for (const std::filesystem::path& candidate : candidates)
 			{

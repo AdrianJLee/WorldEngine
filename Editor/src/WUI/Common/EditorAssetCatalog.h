@@ -11,6 +11,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 namespace World
 {
@@ -44,6 +45,8 @@ namespace World
 			if (assetType == "UiDocument" || assetType == "UIDocument"
 				|| assetType == "UI Document")
 				return EditorAssetKind::UiDocument;
+			if (assetType == "VFX" || assetType == "Particle" || assetType == "VisualEffect" || assetType == "Effect")
+				return EditorAssetKind::VFX;
 			return EditorAssetKind::Unknown;
 		}
 
@@ -85,6 +88,7 @@ namespace World
 				case EditorAssetKind::RuleTile: return LowerExtension(path) == ".wruletile";
 				case EditorAssetKind::Curve: return LowerExtension(path) == ".wcurve";
 				case EditorAssetKind::PhysicsMaterial: return LowerExtension(path) == ".wphysmat";
+				case EditorAssetKind::VFX: return LowerExtension(path) == ".wvfx" || LowerExtension(path) == ".wparticle";
 				default: return false;
 			}
 		}
@@ -95,17 +99,45 @@ namespace World
 			if (kind == EditorAssetKind::Unknown || kind == EditorAssetKind::Folder)
 				return paths;
 			std::error_code ec;
-			const std::filesystem::path root = World::Paths::AssetRoot();
-			if (!std::filesystem::exists(root, ec))
+			std::vector<std::filesystem::path> searchRoots;
+			const std::filesystem::path primaryRoot = World::Paths::AssetRoot();
+			if (std::filesystem::exists(primaryRoot, ec))
+				searchRoots.push_back(primaryRoot);
+
+			const std::filesystem::path projAssets = std::filesystem::current_path() / "projects" / "assets";
+			if (std::filesystem::exists(projAssets, ec))
+				searchRoots.push_back(projAssets);
+
+			const std::filesystem::path templateAssets = std::filesystem::current_path() / "templates" / "project-example" / "assets";
+			if (std::filesystem::exists(templateAssets, ec))
+				searchRoots.push_back(templateAssets);
+
+			const std::filesystem::path engineRoot = World::Paths::EngineContentRoot();
+			if (std::filesystem::exists(engineRoot, ec))
+				searchRoots.push_back(engineRoot);
+
+			if (searchRoots.empty())
 				return paths;
-			for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root,
-				std::filesystem::directory_options::skip_permission_denied, ec))
+
+			std::unordered_set<std::string> seen;
+			for (const auto& root : searchRoots)
 			{
-				if (!entry.is_regular_file(ec) || !MatchesKind(kind, entry.path()))
-					continue;
-				const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, ec);
-				if (!ec)
-					paths.push_back(relative.generic_string());
+				for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root,
+					std::filesystem::directory_options::skip_permission_denied, ec))
+				{
+					if (!entry.is_regular_file(ec) || !MatchesKind(kind, entry.path()))
+						continue;
+					const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, ec);
+					if (!ec)
+					{
+						std::string rel = (root == engineRoot) ? ("engine/" + relative.generic_string()) : relative.generic_string();
+						if (!seen.count(rel))
+						{
+							seen.insert(rel);
+							paths.push_back(rel);
+						}
+					}
+				}
 			}
 			std::sort(paths.begin(), paths.end());
 			return paths;

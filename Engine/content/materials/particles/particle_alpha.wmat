@@ -1,0 +1,12 @@
+# WorldEngine 粒子专用透明渐变材质
+FormatVersion: 3
+AssetId: 0x0A2B3C4D5E6F7002
+Name: "Particle AlphaBlend"
+BaseColor: [1, 1, 1, 1]
+Metallic: 0
+Roughness: 0.8
+Emissive: [0, 0, 0]
+AlbedoTexture: "textures/particles/smoke_puff.wtex"
+NormalTexture: ""
+BlendMode: Transparent
+DoubleSided: true

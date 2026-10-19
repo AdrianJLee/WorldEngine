@@ -89,7 +89,7 @@ namespace World::Ai
 				float z = args.count("z") ? std::stof(args.at("z")) : 0.0f;
 				uint32_t count = args.count("count") ? static_cast<uint32_t>(std::stoul(args.at("count"))) : 32u;
 
-				World::ParticleSystemComponent comp;
+				World::ParticleEmitterConfig comp;
 				comp.MaxParticles = count;
 				comp.Speed = 4.0f;
 				comp.Lifetime = 1.0f;
@@ -165,7 +165,7 @@ namespace World::Ai
 				World::ParticlePool pool(128);
 				pool.SetSeed(seed);
 
-				World::ParticleSystemComponent comp;
+				World::ParticleEmitterConfig comp;
 				comp.Lifetime = 0.5f;
 				comp.EmissionRate = 60.0f;
 				comp.Speed = 5.0f;

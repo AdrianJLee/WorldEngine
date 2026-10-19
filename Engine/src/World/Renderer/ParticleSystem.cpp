@@ -117,7 +117,7 @@ namespace World
 			}
 
 			m_SecondaryPool->SetMaterialSettings(sub.MaterialTemplate);
-			ParticleSystemComponent burstComp = sub.SpawnTemplate;
+			ParticleEmitterConfig burstComp = sub.SpawnTemplate;
 			burstComp.IsPlaying = 1;
 			burstComp.Looping = 0;
 			burstComp.EmissionRate = 0.0f;
@@ -137,12 +137,12 @@ namespace World
 		}
 	}
 
-	void ParticlePool::Emit(size_t count, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::vec3& emitterRotEuler)
+	void ParticlePool::Emit(size_t count, const ParticleEmitterConfig& comp, const glm::vec3& emitterPos, const glm::vec3& emitterRotEuler)
 	{
 		Emit(count, comp, emitterPos, glm::quat(emitterRotEuler));
 	}
 
-	void ParticlePool::Emit(size_t count, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot)
+	void ParticlePool::Emit(size_t count, const ParticleEmitterConfig& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot)
 	{
 		size_t emitted = 0;
 		const size_t capacity = m_Particles.size();
@@ -236,12 +236,12 @@ namespace World
 		}
 	}
 
-	void ParticlePool::Update(float dt, const ParticleSystemComponent& comp, const glm::vec3& emitterPos)
+	void ParticlePool::Update(float dt, const ParticleEmitterConfig& comp, const glm::vec3& emitterPos)
 	{
 		Update(dt, comp, emitterPos, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 	}
 
-	void ParticlePool::Update(float dt, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot)
+	void ParticlePool::Update(float dt, const ParticleEmitterConfig& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot)
 	{
 		float prevTime = m_SimElapsedTime;
 		m_SimElapsedTime += dt;
@@ -468,7 +468,7 @@ namespace World
 
 		if (m_SecondaryPool && m_SecondaryPool->ActiveCount() > 0)
 		{
-			ParticleSystemComponent dummyComp;
+			ParticleEmitterConfig dummyComp;
 			dummyComp.IsPlaying = 1;
 			dummyComp.EmissionRate = 0.0f;
 			m_SecondaryPool->Update(dt, dummyComp, glm::vec3(0.0f));
@@ -694,7 +694,7 @@ namespace World
 			pool->SetVortex(em.VortexStrength, em.VortexAxis);
 			pool->SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
 
-			ParticleSystemComponent comp;
+			ParticleEmitterConfig comp;
 			comp.MaxParticles = em.MaxParticles;
 			comp.Lifetime = em.Lifetime;
 			comp.EmissionRate = em.EmissionRate;
@@ -730,13 +730,13 @@ namespace World
 		}
 	}
 
-	void ParticleSystem::SpawnOneShot(const ParticleSystemComponent& comp, const ParticleMaterialSettings& mat,
+	void ParticleSystem::SpawnOneShot(const ParticleEmitterConfig& comp, const ParticleMaterialSettings& mat,
 		const glm::vec3& position, const glm::quat& rotation)
 	{
 		const size_t capacity = std::max(comp.MaxParticles, 64u);
 		auto pool = std::make_unique<ParticlePool>(capacity);
 		pool->SetMaterialSettings(mat);
-		ParticleSystemComponent burstComp = comp;
+		ParticleEmitterConfig burstComp = comp;
 		burstComp.IsPlaying = 1;
 		burstComp.Looping = 0;
 		burstComp.EmissionRate = 0.0f;

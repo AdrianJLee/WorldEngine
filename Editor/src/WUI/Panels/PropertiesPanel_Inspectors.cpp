@@ -3,6 +3,7 @@
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/Tilemap.h"
 #include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/ParticleAsset.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include <unordered_set>
@@ -48,8 +49,9 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 		// 自定义检查器:Primary / Fixed Aspect Ratio + 投影类型下拉 + 对应参数组。
 		else if (schema.Id.Name == "World::PhysicsMaterialComponent")
 			height = DrawPhysicsMaterialInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
-		else if (schema.Id.Name == "World::ParticleSystemComponent")
-			height = DrawParticleSystemInspector(ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::VfxComponent")
+			height = DrawVfxInspector(ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+
 		else if (schema.Id.Name == "World::CameraComponent")
 			height = DrawCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::AudioSourceComponent")
@@ -2359,36 +2361,74 @@ float PropertiesPanel::DrawSurfaceEffector2DInspector(Wui::WuiContext& ctx, cons
 	return (y + 6.0f) - rect.Y;
 }
 
-float PropertiesPanel::DrawParticleSystemInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, void* instance,
+float PropertiesPanel::DrawVfxInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, void* instance,
 	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 	std::vector<std::string>* changedFields)
 {
-	auto* comp = static_cast<World::ParticleSystemComponent*>(instance);
-	float height = DrawSchemaFields(ctx, rect.Y, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
-	float y = rect.Y + height + 4.0f;
+	auto* comp = static_cast<World::VfxComponent*>(instance);
+	const Wui::WuiId base = Wui::HashId(schema.DisplayName.c_str());
+	float height = DrawSchemaFields(ctx, base, rect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+	float y = rect.Y + height + 6.0f;
 	const Wui::WuiTheme& theme = m_Host.Theme();
 
 	if (comp)
 	{
-		const float btnW = 200.0f;
-		const Wui::WuiRect editBtnRect { rect.X + 8.0f, y, btnW, 22.0f };
-		Wui::Tooltip(ctx, editBtnRect, "在独立的工业级粒子系统编辑器中打开并编辑多发射器栈与走带预览");
-		if (Wui::Button(ctx, Wui::HashId("vfx.insp.open"), editBtnRect, "✨ 打开粒子特效编辑器", theme))
+		// 1. 资产状态提示与跳转 VFX 工作台
+		const Wui::WuiRect openBtnRect { rect.X + 8.0f, y, 220.0f, 24.0f };
+		Wui::Tooltip(ctx, openBtnRect, "在独立的 WorldVFX 工作台中可视化编排多发射器、拖尾、3D模型与光照");
+		if (Wui::Button(ctx, Wui::HashId("vfx.comp.open_studio"), openBtnRect, "[打开] 打开 VFX 特效工作台", theme))
 		{
-			m_Host.OpenParticleEditor("");
+			const std::string logical = comp->Effect.HasPath() ? StringPool::Get().PathOf(comp->Effect.Path) : "";
+			m_Host.OpenParticleEditor(logical);
 		}
+		y += 28.0f;
 
-		const Wui::WuiRect burstBtnRect { rect.X + 8.0f + btnW + 6.0f, y, 90.0f, 22.0f };
-		Wui::Tooltip(ctx, burstBtnRect, "立即单次喷射 25 枚粒子");
-		if (Wui::Button(ctx, Wui::HashId("vfx.insp.burst"), burstBtnRect, "+25 喷射", theme))
+		// 2. 走带控制 (Transport Controls)
+		Wui::Label(ctx, { rect.X + 8.0f, y + 3.0f }, "走带控制 (Transport):", theme.Accent, 11.0f);
+		float bx = rect.X + 140.0f;
+		const float bw = 46.0f;
+
+		const Wui::WuiRect playBtn { bx, y, bw, 22.0f };
+		Wui::Tooltip(ctx, playBtn, "开始/继续播放特效");
+		if (Wui::Button(ctx, Wui::HashId("vfx.comp.play"), playBtn, "[播]", theme))
 		{
-			auto& pool = GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(static_cast<entt::entity>(entity)), comp->MaxParticles);
-			pool.Emit(25, *comp, glm::vec3(0.0f));
+			comp->PlaybackState = VfxPlaybackState::Playing;
+			if (changedFields) changedFields->push_back("PlaybackState");
 		}
-		y += 26.0f;
+		bx += bw + 4.0f;
+
+		const Wui::WuiRect pauseBtn { bx, y, bw, 22.0f };
+		Wui::Tooltip(ctx, pauseBtn, "暂停特效模拟");
+		if (Wui::Button(ctx, Wui::HashId("vfx.comp.pause"), pauseBtn, "[停]", theme))
+		{
+			comp->PlaybackState = VfxPlaybackState::Paused;
+			if (changedFields) changedFields->push_back("PlaybackState");
+		}
+		bx += bw + 4.0f;
+
+		const Wui::WuiRect resetBtn { bx, y, bw, 22.0f };
+		Wui::Tooltip(ctx, resetBtn, "重置特效模拟回溯到起点");
+		if (Wui::Button(ctx, Wui::HashId("vfx.comp.reset"), resetBtn, "[复位]", theme))
+		{
+			uint32_t entId = static_cast<uint32_t>(static_cast<entt::entity>(entity));
+			for (size_t i = 0; i < 8; ++i)
+			{
+				uint32_t poolId = (entId << 8) | static_cast<uint32_t>(i);
+				if (GetGlobalParticleSystem().HasPoolForEntity(poolId))
+					GetGlobalParticleSystem().GetPoolForEntity(poolId).Reset();
+			}
+			comp->PlaybackState = VfxPlaybackState::Playing;
+			if (changedFields) changedFields->push_back("PlaybackState");
+		}
+		y += 28.0f;
+
+		// 提示：预设与内容资产已统一迁入内容浏览器【引擎内容库 (Engine)】与 Effect 下拉选择器
+		Wui::Label(ctx, { rect.X + 8.0f, y + 3.0f }, "提示: 官方特效资产请在上方资产选择器或内容浏览器 [引擎内容库] 中选取", theme.TextMuted, 10.0f);
+		y += 18.0f;
 	}
 
 	return (y - rect.Y);
 }
+
 
 }

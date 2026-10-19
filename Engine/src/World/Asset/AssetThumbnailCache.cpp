@@ -75,6 +75,11 @@ namespace World
 			return AssetCategory::UI;
 		}
 
+		if (ext == ".wvfx" || ext == ".wparticle")
+		{
+			return AssetCategory::VFX;
+		}
+
 		return AssetCategory::Unknown;
 	}
 

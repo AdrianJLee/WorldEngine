@@ -40,6 +40,7 @@ namespace World
 		RuleTile,       // .wruletile (2D 规则瓦片)
 		Curve,          // .wcurve (贝塞尔曲线资产)
 		PhysicsMaterial,// .wphysmat (物理材质资产:摩擦力/弹性/合并模式)
+		VFX,            // .wvfx / .wparticle (视觉特效资产)
 		Folder,
 		// 兼容别名:P4 之前的代码把"贴图"叫 Texture(= 源图)。新代码请用上面两个名字。
 		// **必须放在最后**:枚举值按"上一个枚举项"自增,别名插在中间会把后面的项顶成重复值
@@ -132,6 +133,8 @@ namespace World
 			return { EditorAssetKind::PhysicsMaterial, "Physics Material", "asset.file.physics_material" };
 		if (extension == ".wui")
 			return { EditorAssetKind::UiDocument, "UI Document" };
+		if (extension == ".wvfx" || extension == ".wparticle")
+			return { EditorAssetKind::VFX, "VFX Effect", "asset.file.vfx" };
 		// M4-TEX P4:内容根的图片是**源图**(材质引用它;产物 `<源图>.wtexc` 由它烘出来);
 		// `.wtex` 才是可编辑的纹理**资产**(设置 + `source:`)。
 		if (extension == ".wtex")

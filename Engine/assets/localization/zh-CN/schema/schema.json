@@ -174,5 +174,7 @@
   "schema.component.AudioSourceComponent": "音频源组件 (Audio Source)",
   "schema.component.AudioSourceComponent.doc": "3D/2D 音频发声源：发声事件 (.wsound) 或剪辑，支持 3D 距离衰减与空间声像定位。",
   "schema.component.AudioListenerComponent": "音频监听者 (Audio Listener)",
-  "schema.component.AudioListenerComponent.doc": "音频监听者：接收世界中 3D 空间声音并输出到声卡 (通常挂载在主相机上)。"
+  "schema.component.AudioListenerComponent.doc": "音频监听者：接收世界中 3D 空间声音并输出到声卡 (通常挂载在主相机上)。",
+  "schema.component.VfxComponent": "视觉特效组件 (VFX)",
+  "schema.component.VfxComponent.doc": "商业级视觉特效实例组件：绑定 .wvfx 特效资产，统一调度多发射器、拖尾、3D模型与动态光源，支持时间线走带与全局参数覆盖。"
 }

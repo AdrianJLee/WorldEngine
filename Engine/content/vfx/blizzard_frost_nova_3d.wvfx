@@ -1,0 +1,129 @@
+# WorldEngine Particle Asset
+FormatVersion: 2
+Name: "BlizzardFrostNova3D"
+WarmupTime: 0
+Looping: true
+Emitters:
+  - Name: "FrostBlastRing"
+    Enabled: true
+    MaxParticles: 80
+    Lifetime: 1.8
+    EmissionRate: 30
+    EmitterType: Point
+    FacingMode: HorizontalQuad
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/shockwave_ring.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 2.5
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 1
+      SpeedVariance: 0.3
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.8
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.6
+      SizeEnd: 4.8
+      ColorStart: [0.4, 0.85, 1, 1]
+      ColorEnd: [0.1, 0.3, 0.9, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "IceCrystals"
+    Enabled: true
+    MaxParticles: 400
+    Lifetime: 2.2
+    EmissionRate: 150
+    EmitterType: Sphere
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/spark_glow.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 2.8
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 6
+      SpeedVariance: 2
+      Gravity: [0, -1.5, 0]
+      LinearDrag: 0.3
+      VortexStrength: 10
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 3
+      TurbulenceFrequency: 1.5
+    Evolution:
+      SizeStart: 0.22
+      SizeEnd: 0.04
+      ColorStart: [0.7, 0.95, 1, 1]
+      ColorEnd: [0.2, 0.6, 1, 0]
+    Collision:
+      Mode: Plane
+      Restitution: 0.5
+      Friction: 0.2
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "SubZeroFog"
+    Enabled: true
+    MaxParticles: 200
+    Lifetime: 3.5
+    EmissionRate: 50
+    EmitterType: Sphere
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/smoke_puff.wtex"
+      MaterialPath: "materials/particles/particle_alpha.wmat"
+      BlendMode: AlphaBlend
+      EmissiveBoost: 1
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 2
+      SpeedVariance: 0.8
+      Gravity: [0, -0.3, 0]
+      LinearDrag: 0.6
+      VortexStrength: 5
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 2
+      TurbulenceFrequency: 0.7
+    Evolution:
+      SizeStart: 0.8
+      SizeEnd: 3.2
+      ColorStart: [0.75, 0.85, 0.95, 0.5]
+      ColorEnd: [0.5, 0.6, 0.8, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0

@@ -3,6 +3,10 @@
 #include "WUI/Common/EditorPanel.h"
 #include "World/Renderer/ParticleAsset.h"
 #include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/SceneRenderer.h"
+#include "World/Scene/Scene.h"
+#include "World/Scene/Entity.h"
+#include "World/WUI/WuiTextureRegistry.h"
 #include "World/Math/Curve/ColorGradient.h"
 #include "World/Math/Curve/CubicBezierCurve.h"
 
@@ -252,6 +256,16 @@ namespace World
 		bool m_HoveredInHandle = false;
 		bool m_HoveredOutHandle = false;
 		int m_HoveredKeyframeIndex = -1;
+
+		void EnsurePreviewResources();
+		void ReleasePreviewResources();
+
+		Ref<SceneRenderer> m_PreviewRenderer;
+		Rhi::Device* m_PreviewGpuDevice = nullptr;
+		Ref<Scene> m_PreviewScene;
+		Entity m_PreviewEntity;
+		uint32_t m_PreviewTextureId = 0;
+		uint32_t m_UiTextureGeneration = ~0u;
 
 		// 内部实时物理推演池 (Live Simulation Pools)
 		std::vector<std::unique_ptr<ParticlePool>> m_LivePools;

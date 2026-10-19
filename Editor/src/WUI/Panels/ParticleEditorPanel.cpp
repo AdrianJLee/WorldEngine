@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "WUI/Panels/ParticleEditorPanel.h"
+#include "World/Core/Application.h"
 #include "WUI/Panels/ViewportPanel.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -114,7 +115,10 @@ void ParticleEditorPanel::RequestOpenAsset(const std::string& path)
 	}
 
 
-	ParticleEditorPanel::~ParticleEditorPanel() = default;
+	ParticleEditorPanel::~ParticleEditorPanel()
+	{
+		ReleasePreviewResources();
+	}
 
 
 void ParticleEditorPanel::PushUndoSnapshot()
@@ -238,6 +242,7 @@ void ParticleEditorPanel::NewAsset()
 		coreFlame.EmitterType = ParticleEmitterType::Cone;
 		coreFlame.FacingMode = ParticleRenderMode::Billboard;
 		coreFlame.Material.BlendMode = ParticleBlendMode::Additive;
+		coreFlame.Material.TexturePath = "textures/particles/flame_soft.wtex";
 		coreFlame.Material.EmissiveBoost = 3.6f;
 		coreFlame.Speed = 6.2f;
 		coreFlame.SpeedVariance = 1.2f;
@@ -263,6 +268,7 @@ void ParticleEditorPanel::NewAsset()
 		sparks.EmitterType = ParticleEmitterType::Cone;
 		sparks.FacingMode = ParticleRenderMode::StretchedVelocity;
 		sparks.Material.BlendMode = ParticleBlendMode::Additive;
+		sparks.Material.TexturePath = "textures/particles/spark_glow.wtex";
 		sparks.Material.EmissiveBoost = 5.2f;
 		sparks.Speed = 8.5f;
 		sparks.SpeedVariance = 2.5f;
@@ -442,6 +448,7 @@ void ParticleEditorPanel::NewAsset()
 		runeRing.EmitterType = ParticleEmitterType::Sphere;
 		runeRing.FacingMode = ParticleRenderMode::Billboard;
 		runeRing.Material.BlendMode = ParticleBlendMode::Additive;
+		runeRing.Material.TexturePath = "textures/particles/magic_rune.wtex";
 		runeRing.Material.EmissiveBoost = 3.8f;
 		runeRing.Speed = 2.0f;
 		runeRing.SpeedVariance = 0.5f;
@@ -541,6 +548,7 @@ void ParticleEditorPanel::NewAsset()
 		shockwave.EmitterType = ParticleEmitterType::Circle;
 		shockwave.FacingMode = ParticleRenderMode::HorizontalQuad;
 		shockwave.Material.BlendMode = ParticleBlendMode::Additive;
+		shockwave.Material.TexturePath = "textures/particles/shockwave_ring.wtex";
 		shockwave.Material.EmissiveBoost = 4.0f;
 		shockwave.Speed = 6.5f;
 		shockwave.SpeedVariance = 0.5f;
@@ -1332,24 +1340,82 @@ void ParticleEditorPanel::NewAsset()
 	void ParticleEditorPanel::RefreshAvailableAssets()
 	{
 		m_AvailableAssets.clear();
-		std::filesystem::path assetRoot = World::Paths::AssetRoot();
 		std::error_code ec;
+		std::unordered_set<std::string> seen;
+
+		// 1. 项目资产 (Project Assets)
+		std::filesystem::path assetRoot = World::Paths::AssetRoot();
 		if (std::filesystem::exists(assetRoot, ec))
 		{
 			for (const auto& entry : std::filesystem::recursive_directory_iterator(assetRoot, ec))
 			{
-				if (entry.is_regular_file() && entry.path().extension() == ".wvfx")
+				if (entry.is_regular_file(ec) && entry.path().extension() == ".wvfx")
 				{
 					std::string rel = std::filesystem::relative(entry.path(), assetRoot, ec).generic_string();
-					m_AvailableAssets.push_back(rel);
+					if (!seen.count(rel))
+					{
+						seen.insert(rel);
+						m_AvailableAssets.push_back(rel);
+					}
+				}
+			}
+		}
+
+		// 2. 引擎全局内容库 (Engine Content)
+		std::filesystem::path engineRoot = World::Paths::EngineContentRoot();
+		if (!engineRoot.empty() && std::filesystem::exists(engineRoot, ec))
+		{
+			for (const auto& entry : std::filesystem::recursive_directory_iterator(engineRoot, ec))
+			{
+				if (entry.is_regular_file(ec) && entry.path().extension() == ".wvfx")
+				{
+					std::string rel = "engine/" + std::filesystem::relative(entry.path(), engineRoot, ec).generic_string();
+					if (!seen.count(rel))
+					{
+						seen.insert(rel);
+						m_AvailableAssets.push_back(rel);
+					}
 				}
 			}
 		}
 	}
 
 
+	void ParticleEditorPanel::EnsurePreviewResources()
+	{
+		const Rhi::Handle<Rhi::Device>& device = Renderer::GetDevice();
+		if (!device) return;
+		if (m_PreviewGpuDevice == device.get() && m_PreviewRenderer) return;
+
+		ReleasePreviewResources();
+		m_PreviewGpuDevice = device.get();
+		m_PreviewRenderer = CreateRef<SceneRenderer>();
+		m_PreviewRenderer->Init();
+
+		m_PreviewScene = CreateRef<Scene>(Application::Get().GetContext());
+		m_PreviewEntity = Entity::CreateEntity(m_PreviewScene.get(), "VfxPreviewEntity");
+		m_PreviewEntity.AddComponent<TransformComponent>();
+		auto& vfx = m_PreviewEntity.AddComponent<VfxComponent>();
+		vfx.Effect.Path = StringPool::Get().InternPath("__vfx_editor_preview__.wvfx");
+		vfx.PlaybackState = VfxPlaybackState::Playing;
+
+		ParticleAssetRegistry::Get().RegisterAssetFromMemory("__vfx_editor_preview__.wvfx", m_Asset);
+	}
+
+	void ParticleEditorPanel::ReleasePreviewResources()
+	{
+		if (m_PreviewRenderer)
+		{
+			m_PreviewRenderer->Shutdown();
+			m_PreviewRenderer.reset();
+		}
+		m_PreviewScene.reset();
+		m_PreviewEntity = {};
+		m_PreviewGpuDevice = nullptr;
+	}
 	void ParticleEditorPanel::SyncSimulationFromAsset()
 	{
+		ParticleAssetRegistry::Get().RegisterAssetFromMemory("__vfx_editor_preview__.wvfx", m_Asset);
 		EnsurePerEmitterState();
 		m_LivePools.clear();
 		m_SimTime = 0.0f;
@@ -1404,11 +1470,12 @@ void ParticleEditorPanel::NewAsset()
 
 	void ParticleEditorPanel::StepSimulation(float dt)
 	{
+		EnsurePreviewResources();
+
 		if (m_LivePools.size() != m_Asset.Emitters.size())
 		{
 			SyncSimulationFromAsset();
 		}
-
 
 		m_SimTime += dt * m_PlaybackSpeed;
 		if (m_Asset.Looping && m_TimelineDuration > 0.1f)
@@ -1419,17 +1486,20 @@ void ParticleEditorPanel::NewAsset()
 			}
 		}
 
+		if (m_PreviewScene)
+		{
+			EditorCamera dummyCam;
+			m_PreviewScene->OnUpdateEditor(Timestep(dt * m_PlaybackSpeed), dummyCam);
+		}
 
 		for (size_t i = 0; i < m_Asset.Emitters.size() && i < m_LivePools.size(); ++i)
 		{
 			if (!IsEmitterActive(i)) continue;
 
-
 			const auto& em = m_Asset.Emitters[i];
 			auto& pool = m_LivePools[i];
 
-
-			ParticleSystemComponent comp;
+			ParticleEmitterConfig comp;
 			comp.EmissionRate = em.EmissionRate;
 			comp.Lifetime = em.Lifetime;
 			comp.Speed = em.Speed;
@@ -1437,6 +1507,8 @@ void ParticleEditorPanel::NewAsset()
 			comp.Gravity = em.Gravity;
 			comp.SizeStart = em.SizeStart;
 			comp.SizeEnd = em.SizeEnd;
+			comp.ColorStart = PackColor(em.ColorStart);
+			comp.ColorEnd = PackColor(em.ColorEnd);
 			comp.MaxParticles = em.MaxParticles;
 			comp.EmitterType = em.EmitterType;
 			comp.RenderMode = em.FacingMode;
@@ -1444,6 +1516,7 @@ void ParticleEditorPanel::NewAsset()
 			comp.LockToXYPlane = em.LockToXY;
 			comp.Looping = m_Asset.Looping;
 			comp.IsPlaying = true;
+			pool->SetMaterialSettings(em.Material);
 
 
 			// 点引力场物理推演更新 (Point Attractor Force Simulation)
@@ -1492,13 +1565,12 @@ void ParticleEditorPanel::NewAsset()
 	void ParticleEditorPanel::LoadAsset(const std::string& path)
 	{
 		std::filesystem::path fullPath = path;
-		if (!fullPath.is_absolute())
+		std::error_code ec;
+		if (!fullPath.is_absolute() || !std::filesystem::exists(fullPath, ec))
 		{
-			fullPath = World::Paths::AssetRoot() / path;
+			fullPath = ResolveVfxDiskPath(path);
 		}
 
-
-		std::error_code ec;
 		std::string normalized = std::filesystem::relative(fullPath, World::Paths::AssetRoot(), ec).generic_string();
 		if (normalized.empty()) normalized = path;
 
@@ -3051,58 +3123,55 @@ void ParticleEditorPanel::NewAsset()
 			}
 		}
 
-		std::sort(drawItems.begin(), drawItems.end(), [](const ParticleDrawItem& a, const ParticleDrawItem& b) {
-			return a.CamDistSq > b.CamDistSq;
-		});
-
-		for (const auto& item : drawItems)
+		// 3. GPU 原生 3D SceneRenderer 渲染视口画面 (True Hardware Scene Rendering)
+		EnsurePreviewResources();
+		if (m_PreviewRenderer && m_PreviewScene)
 		{
-			glm::vec2 pScreen;
-			if (projectPoint(item.Position, pScreen))
+			const uint32_t targetW = std::max(1u, static_cast<uint32_t>(vpRect.W));
+			const uint32_t targetH = std::max(1u, static_cast<uint32_t>(vpRect.H));
+			m_PreviewRenderer->OnResize(targetW, targetH);
+
+			SceneRendererOptions options;
+			options.ShowGrid = false;
+			Camera previewCam(proj);
+			m_PreviewRenderer->BeginScene(m_PreviewScene.get(), options);
+			m_PreviewRenderer->SubmitScene(previewCam, glm::inverse(view));
+			m_PreviewRenderer->EndScene();
+
+			const Rhi::Handle<Rhi::Texture>& color = m_PreviewRenderer->GetColorTexture();
+			if (color)
 			{
-				const glm::vec4 clip = vpMat * glm::vec4(item.Position, 1.0f);
-				const float pSize = std::clamp(item.Size.x * 320.0f / clip.w, 3.0f, 32.0f);
+				Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
+				if (m_PreviewTextureId == 0)
+				{
+					m_PreviewTextureId = registry.Register(color);
+					m_UiTextureGeneration = registry.Generation();
+				}
+				else if (registry.Generation() != m_UiTextureGeneration)
+				{
+					registry.Update(m_PreviewTextureId, color);
+					m_UiTextureGeneration = registry.Generation();
+				}
+			}
 
-				Wui::WuiColor col;
-				if (m_HeatmapMode)
-				{
-					col = Wui::WuiColor { 1.0f, 0.15f, 0.15f, 0.18f };
-				}
-				else if (m_DisplayMode == ParticleViewportDisplayMode::Unlit)
-				{
-					col = Wui::WuiColor {
-						std::clamp(item.Color.r, 0.0f, 1.0f),
-						std::clamp(item.Color.g, 0.0f, 1.0f),
-						std::clamp(item.Color.b, 0.0f, 1.0f),
-						1.0f
-					};
-				}
-				else
-				{
-					col = Wui::WuiColor {
-						std::clamp(item.Color.r, 0.0f, 1.0f),
-						std::clamp(item.Color.g, 0.0f, 1.0f),
-						std::clamp(item.Color.b, 0.0f, 1.0f),
-						std::clamp(item.Color.a, 0.0f, 1.0f)
-					};
-				}
+			if (m_PreviewTextureId != 0)
+			{
+				Wui::Image(ctx, vpRect, m_PreviewTextureId, ViewChrome::kPreviewImageUv, theme);
+			}
+		}
 
-				if (item.BlendMode == ParticleBlendMode::Additive && !m_HeatmapMode)
+		// 热力图分析模式调试覆盖层
+		if (m_HeatmapMode)
+		{
+			for (const auto& item : drawItems)
+			{
+				glm::vec2 pScreen;
+				if (projectPoint(item.Position, pScreen))
 				{
-					const float haloSize = pSize;
-					const Wui::WuiRect haloRect { pScreen.x - haloSize * 0.5f, pScreen.y - haloSize * 0.5f, haloSize, haloSize };
-					const Wui::WuiColor haloCol { col.R, col.G, col.B, col.A * 0.35f };
-					Wui::BarSurface(ctx, haloRect, haloCol, haloCol);
-
-					const float coreSize = pSize * 0.5f;
-					const Wui::WuiRect coreRect { pScreen.x - coreSize * 0.5f, pScreen.y - coreSize * 0.5f, coreSize, coreSize };
-					const Wui::WuiColor coreCol { std::min(1.0f, col.R * 1.3f), std::min(1.0f, col.G * 1.3f), std::min(1.0f, col.B * 1.3f), col.A * 0.9f };
-					Wui::BarSurface(ctx, coreRect, coreCol, coreCol);
-				}
-				else
-				{
+					const glm::vec4 clip = vpMat * glm::vec4(item.Position, 1.0f);
+					const float pSize = std::clamp(item.Size.x * 320.0f / clip.w, 3.0f, 32.0f);
 					const Wui::WuiRect pRect { pScreen.x - pSize * 0.5f, pScreen.y - pSize * 0.5f, pSize, pSize };
-					Wui::BarSurface(ctx, pRect, col, col);
+					Wui::BarSurface(ctx, pRect, { 1.0f, 0.15f, 0.15f, 0.22f }, { 1.0f, 0.15f, 0.15f, 0.22f });
 				}
 			}
 		}
@@ -4164,16 +4233,16 @@ void ParticleEditorPanel::NewAsset()
 
 
 		// -------------------------------------------------------------
-		// 模块 5: 颜色与 HDR 辉光 (Color & Emissive)
+		// 模块 5: 材质、贴图与 HDR 辉光 (Material, Texture & Color)
 		// -------------------------------------------------------------
-		const float c5H = m_CardColorAlphaExpanded ? 150.0f : 28.0f;
+		const float c5H = m_CardColorAlphaExpanded ? 204.0f : 28.0f;
 		const Wui::WuiRect c5 { inspectorRect.X + 4.0f, cy, inspectorRect.W - 8.0f, c5H };
 		Wui::BarSurface(ctx, c5, theme.PanelBg, theme.Border);
 
 
 		const Wui::WuiRect c5Header { c5.X, c5.Y, c5.W, 26.0f };
 		if (Wui::Button(ctx, Wui::HashId("vfx.card5.fold"), c5Header,
-			m_CardColorAlphaExpanded ? "[v] [5] 颜色与 HDR 辉光 (Color & Emissive)" : "[>] [5] 颜色与 HDR 辉光 (Color & Emissive)", theme))
+			m_CardColorAlphaExpanded ? "[v] [5] 材质、贴图与色彩 (Material & Texture)" : "[>] [5] 材质、贴图与色彩 (Material & Texture)", theme))
 		{
 			m_CardColorAlphaExpanded = !m_CardColorAlphaExpanded;
 		}
@@ -4183,6 +4252,60 @@ void ParticleEditorPanel::NewAsset()
 		{
 			float rowY = c5.Y + 28.0f;
 
+			// 贴图资产选择行
+			std::string texName = em.Material.TexturePath.empty() ? "(纯白高光)" : std::filesystem::path(em.Material.TexturePath).filename().string();
+			Wui::Label(ctx, { c5.X + 12.0f, rowY + 3.0f }, "粒子贴图: " + texName, theme.Text, 10.5f);
+			if (!isLocked)
+			{
+				const Wui::WuiRect btnTex { c5.X + c5.W - 54.0f, rowY, 46.0f, 20.0f };
+				if (Wui::Button(ctx, Wui::HashId("vfx.m.tex_cycle"), btnTex, "更换", theme))
+				{
+					PushUndoSnapshot();
+					static const char* s_TexList[] = {
+						"",
+						"textures/particles/flame_soft.wtex",
+						"textures/particles/spark_glow.wtex",
+						"textures/particles/smoke_puff.wtex",
+						"textures/particles/magic_rune.wtex",
+						"textures/particles/shockwave_ring.wtex",
+						"textures/particles/electric_beam.wtex",
+						"textures/particles/fire_flipbook_4x4.wtex"
+					};
+					int curIdx = 0;
+					for (int ti = 0; ti < 8; ++ti) {
+						if (em.Material.TexturePath == s_TexList[ti]) { curIdx = ti; break; }
+					}
+					em.Material.TexturePath = s_TexList[(curIdx + 1) % 8];
+					if (em.Material.TexturePath.find("fire_flipbook") != std::string::npos) {
+						em.Material.SubUVTilesX = 4;
+						em.Material.SubUVTilesY = 4;
+					}
+					m_Dirty = true;
+					SyncSimulationFromAsset();
+				}
+			}
+			rowY += 24.0f;
+
+			// 材质资产选择行
+			std::string matName = em.Material.MaterialPath.empty() ? "(内置管线)" : std::filesystem::path(em.Material.MaterialPath).filename().string();
+			Wui::Label(ctx, { c5.X + 12.0f, rowY + 3.0f }, "着色材质: " + matName, theme.Text, 10.5f);
+			if (!isLocked)
+			{
+				const Wui::WuiRect btnMat { c5.X + c5.W - 54.0f, rowY, 46.0f, 20.0f };
+				if (Wui::Button(ctx, Wui::HashId("vfx.m.mat_cycle"), btnMat, "切换", theme))
+				{
+					PushUndoSnapshot();
+					if (em.Material.MaterialPath.empty())
+						em.Material.MaterialPath = "materials/particles/particle_additive.wmat";
+					else if (em.Material.MaterialPath.find("additive") != std::string::npos)
+						em.Material.MaterialPath = "materials/particles/particle_alpha.wmat";
+					else
+						em.Material.MaterialPath = "";
+					m_Dirty = true;
+					SyncSimulationFromAsset();
+				}
+			}
+			rowY += 24.0f;
 
 			std::string bModeStr = (em.Material.BlendMode == ParticleBlendMode::Additive) ? "叠加 (Additive)" : "透明 (AlphaBlend)";
 			Wui::Label(ctx, { c5.X + 12.0f, rowY + 3.0f }, "混合模式: " + bModeStr, theme.Text, 10.5f);
@@ -4221,7 +4344,7 @@ void ParticleEditorPanel::NewAsset()
 		// -------------------------------------------------------------
 		// 模块 6: 多元渲染器 (Renderers)
 		// -------------------------------------------------------------
-		const float c6H = m_CardRenderersExpanded ? 160.0f : 28.0f;
+		const float c6H = m_CardRenderersExpanded ? 190.0f : 28.0f;
 		const Wui::WuiRect c6 { inspectorRect.X + 4.0f, cy, inspectorRect.W - 8.0f, c6H };
 		Wui::BarSurface(ctx, c6, theme.PanelBg, theme.Border);
 
@@ -4277,6 +4400,27 @@ void ParticleEditorPanel::NewAsset()
 			{
 				renderDragFloatRow("vfx.rib.len", "拖尾长度", "m", ext.RibbonLength, 1.0f, 0.1f, 0.1f, 20.0f, "Ribbon 拖尾带物理存留延展长度", rowY);
 				renderDragFloatRow("vfx.rib.w", "带体宽度", "m", ext.RibbonWidth, 0.1f, 0.02f, 0.01f, 5.0f, "Ribbon 拖尾横向几何面宽度", rowY);
+			}
+			else if (ext.MeshEnabled)
+			{
+				std::string mName = em.MeshPath.empty() ? "(内置立方体碎块)" : std::filesystem::path(em.MeshPath).filename().string();
+				Wui::Label(ctx, { c6.X + 12.0f, rowY + 3.0f }, "网格模型: " + mName, theme.Text, 10.5f);
+				if (!isLocked)
+				{
+					const Wui::WuiRect btnMesh { c6.X + c6.W - 54.0f, rowY, 46.0f, 20.0f };
+					if (Wui::Button(ctx, Wui::HashId("vfx.m.mesh_cycle"), btnMesh, "更换", theme))
+					{
+						PushUndoSnapshot();
+						if (em.MeshPath.empty())
+							em.MeshPath = "models/debris_shard.wmodel";
+						else
+							em.MeshPath = "";
+						m_Dirty = true;
+						SyncSimulationFromAsset();
+					}
+				}
+				rowY += 24.0f;
+				renderDragFloatRow("vfx.msh.sc", "模型缩放", "x", em.SizeStart, 0.5f, 0.05f, 0.01f, 10.0f, "3D 网格粒子实例整体几何体缩放倍数", rowY);
 			}
 			else if (ext.LightEnabled)
 			{

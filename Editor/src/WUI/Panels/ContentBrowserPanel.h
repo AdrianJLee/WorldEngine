@@ -40,6 +40,7 @@ namespace World
 		Content = 0,
 		ProjectSources = 1,
 		ProjectPlugins = 2,
+		EngineContent = 3,
 	};
 
 	// 目录树节点(缓存扫描结果,避免每帧全量扫盘)。
@@ -61,6 +62,7 @@ namespace World
 		std::filesystem::path ContentRoot = World::Paths::AssetRoot();
 		std::filesystem::path SourceRoot;
 		std::filesystem::path PluginsRoot;
+		std::filesystem::path EngineContentRoot = World::Paths::EngineContentRoot();
 		BrowserRootScope Scope = BrowserRootScope::Content;
 		std::filesystem::path Current;
 		char Search[256] = { 0 };
@@ -321,14 +323,17 @@ namespace World
 			std::string Search;   // 搜索框是 char[256],这里按字符串存(切根时逐字节还原)
 		};
 			// 索引 = static_cast<int>(BrowserRootScope)。
-			RootState m_RootStates[3];
-			bool m_RootStatesReady[3] { false, false, false };
+			RootState m_RootStates[4];
+			bool m_RootStatesReady[4] { false, false, false, false };
 		void CaptureRootState(BrowserRootScope scope);
 		void ApplyRootState(BrowserRootScope scope);
 			// `<项目根>/src`(没有项目时为空路径)。
 			std::filesystem::path ProjectSourceRoot() const;
 			// `<项目根>/plugins`(没有项目时为空路径);可用性判定与项目 C++ 根同一口径。
 			std::filesystem::path ProjectPluginsRoot() const;
+			// 引擎全局内容库根目录。
+			std::filesystem::path EngineContentRoot() const;
+			bool EngineContentAvailable() const;
 			// 某一个根的绝对路径(运行期值优先,空则回退到编译期解析)。
 			std::filesystem::path RootPathFor(BrowserRootScope scope) const;
 			// 持久化 `scope` 字段的键名(与 LoadState/SaveState 同一份口径)。

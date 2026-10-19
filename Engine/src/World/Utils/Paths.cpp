@@ -21,6 +21,9 @@ namespace World::Paths
 			std::filesystem::path ProjectDir;              // 解析结果:ProjectDir() 返回它的引用
 			bool AssetResolved = false;
 			std::filesystem::path AssetRoot;               // 解析结果:AssetRoot() 返回它的引用
+			std::filesystem::path EngineContentOverride;   // SetEngineContentRootOverride(空 = 无覆盖)
+			bool EngineContentResolved = false;
+			std::filesystem::path EngineContentRoot;       // 解析结果:EngineContentRoot() 返回它的引用
 		};
 
 		PathsState& State()
@@ -122,5 +125,41 @@ namespace World::Paths
 		std::lock_guard<std::mutex> lock(state.Mutex);
 		state.AssetOverride = NormalizeDirectory(dir);
 		state.AssetResolved = false;
+	}
+
+	const std::filesystem::path& EngineContentRoot()
+	{
+		PathsState& state = State();
+		std::lock_guard<std::mutex> lock(state.Mutex);
+		if (!state.EngineContentResolved)
+		{
+			if (!state.EngineContentOverride.empty())
+			{
+				state.EngineContentRoot = state.EngineContentOverride;
+			}
+			else
+			{
+				std::filesystem::path repoRoot(WLD_REPO_ROOT);
+				std::filesystem::path candidate = repoRoot / "Engine" / "content";
+				std::error_code ec;
+				if (!std::filesystem::exists(candidate, ec))
+				{
+					std::filesystem::path localCandidate = std::filesystem::current_path() / "Engine" / "content";
+					if (std::filesystem::exists(localCandidate, ec))
+						candidate = localCandidate;
+				}
+				state.EngineContentRoot = NormalizeDirectory(candidate);
+			}
+			state.EngineContentResolved = true;
+		}
+		return state.EngineContentRoot;
+	}
+
+	void SetEngineContentRootOverride(const std::filesystem::path& dir)
+	{
+		PathsState& state = State();
+		std::lock_guard<std::mutex> lock(state.Mutex);
+		state.EngineContentOverride = NormalizeDirectory(dir);
+		state.EngineContentResolved = false;
 	}
 }

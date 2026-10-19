@@ -1,0 +1,129 @@
+# WorldEngine Particle Asset
+FormatVersion: 2
+Name: "FlameTornado3D"
+WarmupTime: 0
+Looping: true
+Emitters:
+  - Name: "CoreFireVortex"
+    Enabled: true
+    MaxParticles: 600
+    Lifetime: 2.2
+    EmissionRate: 150
+    EmitterType: Circle
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/flame_soft.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 2.5
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 4.5
+      SpeedVariance: 1.5
+      Gravity: [0, 6, 0]
+      LinearDrag: 0.2
+      VortexStrength: 18
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 2.5
+      TurbulenceFrequency: 1.2
+    Evolution:
+      SizeStart: 0.75
+      SizeEnd: 0.15
+      ColorStart: [1, 0.65, 0.15, 1]
+      ColorEnd: [0.9, 0.1, 0, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "SwirlingSparks"
+    Enabled: true
+    MaxParticles: 350
+    Lifetime: 1.6
+    EmissionRate: 100
+    EmitterType: Circle
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/spark_glow.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 3.5
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 6
+      SpeedVariance: 2
+      Gravity: [0, 5, 0]
+      LinearDrag: 0.1
+      VortexStrength: 24
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 3
+      TurbulenceFrequency: 1.5
+    Evolution:
+      SizeStart: 0.2
+      SizeEnd: 0.03
+      ColorStart: [1, 0.95, 0.5, 1]
+      ColorEnd: [1, 0.3, 0, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "RisingSmokePillar"
+    Enabled: true
+    MaxParticles: 250
+    Lifetime: 3.0
+    EmissionRate: 50
+    EmitterType: Circle
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/smoke_puff.wtex"
+      MaterialPath: "materials/particles/particle_alpha.wmat"
+      BlendMode: AlphaBlend
+      EmissiveBoost: 1
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 3
+      SpeedVariance: 0.8
+      Gravity: [0, 3, 0]
+      LinearDrag: 0.5
+      VortexStrength: 8
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 3
+      TurbulenceFrequency: 0.8
+    Evolution:
+      SizeStart: 0.4
+      SizeEnd: 2.6
+      ColorStart: [0.25, 0.23, 0.2, 0.65]
+      ColorEnd: [0.1, 0.1, 0.1, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0

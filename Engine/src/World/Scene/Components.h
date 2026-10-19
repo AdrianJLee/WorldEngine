@@ -134,81 +134,62 @@ namespace World
 		WE_ENUM_VALUE(Opaque);
 	WE_ENUM_END
 
-	enum ParticleVfxFlags : uint8_t
+
+
+	enum class VfxPlaybackState : uint8_t
 	{
-		ParticleVfxFlag_None             = 0,
-		ParticleVfxFlag_SoftParticle     = 1 << 0,
-		ParticleVfxFlag_CollisionEnabled = 1 << 1,
-		ParticleVfxFlag_SubUVEnabled     = 1 << 2,
-		ParticleVfxFlag_SubUVRandomStart = 1 << 3,
-		ParticleVfxFlag_CollisionEvents  = 1 << 4
+		Stopped = 0,
+		Playing = 1,
+		Paused = 2
 	};
+	WE_ENUM_SCHEMA(World, VfxPlaybackState, UInt8)
+		WE_ENUM_VALUE(Stopped);
+		WE_ENUM_VALUE(Playing);
+		WE_ENUM_VALUE(Paused);
+	WE_ENUM_END
 
-	struct ParticleSystemComponent
+	struct VfxComponent
 	{
-		uint64_t AssetGuid = 0;                     // 8B (Offset 0: R1 8B-aligned handle)
-		glm::vec3 Gravity { 0.0f, -9.8f, 0.0f };   // 12B
-		float EmissionRate = 50.0f;                 // 4B
-		float Lifetime = 2.0f;                     // 4B
-		float Speed = 5.0f;                        // 4B
-		float SpeedVariance = 1.0f;                // 4B
-		float SizeStart = 0.5f;                    // 4B
-		float SizeEnd = 0.1f;                      // 4B
-		uint32_t ColorStart = 0xFFFFFFFF;          // 4B
-		uint32_t ColorEnd = 0x00FFFFFF;            // 4B
-		uint32_t MaxParticles = 1000;              // 4B
-		ParticleEmitterType EmitterType = ParticleEmitterType::Point; // 1B
-		ParticleRenderMode RenderMode = ParticleRenderMode::Billboard;// 1B
-		ParticleBlendMode BlendMode = ParticleBlendMode::AlphaBlend;  // 1B
-		uint8_t VfxFlags = ParticleVfxFlag_None;   // 1B
-		bool LockToXYPlane = false;                // 1B
-		bool Looping = true;                       // 1B
-		bool PlayOnAwake = true;                   // 1B
-		bool IsPlaying = true;                     // 1B
+		AssetRef Effect;                                // 16B (Offset 0: R1 8B-aligned reference to .wvfx asset)
+		glm::vec4 TintColor { 1.0f, 1.0f, 1.0f, 1.0f }; // 16B (Offset 16: RGBA tint color & HDR emissive boost)
+		float PlaybackSpeed = 1.0f;                    // 4B (Offset 32: Simulation rate multiplier 0.0=paused, 1.0=normal)
+		float Intensity = 1.0f;                        // 4B (Offset 36: Master emission rate & density multiplier)
+		float WarmupTime = 0.0f;                       // 4B (Offset 40: Pre-simulation time on spawn in seconds)
+		float CullDistance = 60.0f;                    // 4B (Offset 44: Camera culling distance in meters)
+		uint32_t Seed = 0;                             // 4B (Offset 48: Deterministic PRNG seed, 0 = random)
+		VfxPlaybackState PlaybackState = VfxPlaybackState::Playing; // 1B (Offset 52: Active playback state)
+		bool PlayOnAwake = true;                       // 1B (Offset 53: Auto start playing on scene start)
+		bool Looping = true;                           // 1B (Offset 54: Loop playback sequence)
+		bool PauseWhenOffscreen = true;                // 1B (Offset 55: Freeze simulation when culled by camera)
+		uint8_t _Padding[8] { 0 };                     // 8B (Offset 56..63: Explicit padding to 64B)
 
-		ParticleSystemComponent() = default;
+		VfxComponent() = default;
 
-		WE_SCHEMA_BODY(World, ParticleSystemComponent, Component)
+		WE_SCHEMA_BODY(World, VfxComponent, Component)
 			WE_SCHEMA_META(Category("Renderer"),
-				Doc("Unified 2D and 3D particle system component with shape emitters, lifetime curves and XY locking."))
-			WE_FIELD(AssetGuid, UInt64,
-				Doc("Bound VFX asset GUID (0 uses inline component parameters)."));
-			WE_FIELD(Gravity, Vec3,
-				Doc("Gravity vector applied to moving particles."));
-			WE_FIELD(EmissionRate, Float, Range(0.0f, 5000.0f),
-				Doc("Emission rate in particles per second."));
-			WE_FIELD(Lifetime, Float, Range(0.05f, 60.0f),
-				Doc("Particle base lifetime in seconds."));
-			WE_FIELD(Speed, Float, Range(0.0f, 100.0f),
-				Doc("Initial particle emission speed."));
-			WE_FIELD(SpeedVariance, Float, Range(0.0f, 50.0f),
-				Doc("Random initial speed variance."));
-			WE_FIELD(SizeStart, Float, Range(0.01f, 50.0f),
-				Doc("Initial particle diameter size."));
-			WE_FIELD(SizeEnd, Float, Range(0.0f, 50.0f),
-				Doc("Final particle diameter size at end of life."));
-			WE_FIELD(ColorStart, UInt32,
-				Doc("Initial packed RGBA particle color."));
-			WE_FIELD(ColorEnd, UInt32,
-				Doc("Final packed RGBA particle color at end of life."));
-			WE_FIELD(MaxParticles, UInt32, Range(1, 10000),
-				Doc("Maximum active particle capacity for this system."));
-			WE_FIELD(EmitterType, Enum, Of(ParticleEmitterType),
-				Doc("Shape emitter volume (Point, Line, Box, Sphere, Cone, Circle)."));
-			WE_FIELD(RenderMode, Enum, Of(ParticleRenderMode),
-				Doc("Render geometry mode (Billboard or Quad2D)."));
-			WE_FIELD(BlendMode, Enum, Of(ParticleBlendMode),
-				Doc("Particle material blend mode (AlphaBlend, Additive, Multiply, Opaque)."));
-			WE_FIELD(VfxFlags, UInt8,
-				Doc("Bitmask flags for SoftParticle, CollisionEnabled, SubUVEnabled, SubUVRandomStart."));
-			WE_FIELD(LockToXYPlane, Bool,
-				Doc("Lock all particle simulation and velocity to the 2D XY plane."));
-			WE_FIELD(Looping, Bool,
-				Doc("Looping particle emission."));
+				Doc("Next-generation unified VFX component for multi-emitter assets, ribbons, meshes and dynamic lights."))
+			WE_FIELD(Effect, Asset, Of("VFX"),
+				Doc("Bound .wvfx VFX asset defining emitters, ribbons, meshes and dynamic lights."));
+			WE_FIELD(TintColor, Vec4, Color(),
+				Doc("Global tint color and HDR emissive boost applied to all emitters."));
+			WE_FIELD(PlaybackSpeed, Float, Range(0.0f, 10.0f),
+				Doc("Simulation playback speed multiplier (0.0 = paused, 1.0 = normal)."));
+			WE_FIELD(Intensity, Float, Range(0.0f, 10.0f),
+				Doc("Master emission rate and particle density multiplier."));
+			WE_FIELD(WarmupTime, Float, Range(0.0f, 30.0f),
+				Doc("Pre-simulation time in seconds on spawn so effect begins fully formed."));
+			WE_FIELD(CullDistance, Float, Range(1.0f, 1000.0f),
+				Doc("Camera distance in meters beyond which particle simulation is paused."));
+			WE_FIELD(Seed, UInt32,
+				Doc("Deterministic seed for reproducible simulation (0 uses randomized seed)."));
+			WE_FIELD(PlaybackState, Enum, Of(VfxPlaybackState),
+				Doc("Current playback state (Playing, Paused, Stopped)."));
 			WE_FIELD(PlayOnAwake, Bool,
-				Doc("Automatically begin emitting when scene starts."));
-			WE_FIELD(IsPlaying, Bool,
-				Doc("Currently emitting particles."));
+				Doc("Automatically begin playback when the scene starts."));
+			WE_FIELD(Looping, Bool,
+				Doc("Loop the VFX sequence continuously."));
+			WE_FIELD(PauseWhenOffscreen, Bool,
+				Doc("Pause simulation when bounding volume is outside camera view frustum."));
 		WE_SCHEMA_END
 	};
 

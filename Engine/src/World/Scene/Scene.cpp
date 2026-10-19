@@ -21,6 +21,7 @@
 #include "World/Renderer/VirtualCameraSystem.h"
 #include "World/Renderer/PostProcess/PostProcessPasses.h"
 #include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/ParticleAsset.h"
 #include "World/Script/Bindings/BindParticle.h"
 #include <box2d/box2d.h>
 #include <algorithm>
@@ -2263,12 +2264,73 @@ namespace World
 		m_RenderExtractSink->ExtractScene(*this, deltaSeconds);
 	}
 
-	void Scene::OnUpdateEditor(Timestep, const EditorCamera&)
+	void Scene::OnUpdateEditor(Timestep ts, const EditorCamera&)
 	{
 		AssertOwnerThread();
 		// 编辑态不跑帧系统,但"本帧一次"的步骤仍要按帧推进:
 		// 渲染前由 EnsureWorldTransforms / EnsureAnimationAdvanced 兜底执行(见 SceneRenderer)。
 		BeginFrame();
+
+		// VFX 编辑态实时视口模拟 (Live Editor Viewport VFX Simulation)
+		{
+			const auto& reg = static_cast<const Scene&>(*this).GetRegistry();
+			float dt = ts.GetSeconds();
+			dt = std::clamp(dt, 0.001f, 0.1f);
+			auto& partSys = GetGlobalParticleSystem();
+			for (auto entity : reg.view<VfxComponent>())
+			{
+				auto& vfx = const_cast<entt::registry&>(reg).get<VfxComponent>(entity);
+				if (vfx.PlaybackState != VfxPlaybackState::Playing) continue;
+				if (!vfx.Effect.HasPath()) continue;
+
+				const std::string& path = StringPool::Get().PathOf(vfx.Effect.Path);
+				const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
+				if (!asset)
+				{
+					uint64_t guid = ParticleAssetRegistry::Get().RegisterAsset(path);
+					asset = ParticleAssetRegistry::Get().GetAsset(guid);
+				}
+				if (!asset) continue;
+
+				glm::vec3 pos(0.0f);
+				glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
+				if (const auto* tc = reg.try_get<TransformComponent>(entity))
+				{
+					pos = tc->Location;
+					rot = tc->Rotation;
+				}
+
+				for (size_t i = 0; i < asset->Emitters.size(); ++i)
+				{
+					const auto& em = asset->Emitters[i];
+					if (!em.Enabled) continue;
+					uint32_t poolId = (static_cast<uint32_t>(entity) << 8) | static_cast<uint32_t>(i);
+					auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
+					if (vfx.Seed != 0) pool.SetSeed(vfx.Seed);
+					pool.SetMaterialSettings(em.Material);
+					pool.SetCollisionSettings(em.Collision);
+					pool.SetLinearDrag(em.LinearDrag);
+					pool.SetVortex(em.VortexStrength, em.VortexAxis);
+					pool.SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
+
+					ParticleEmitterConfig emComp;
+					emComp.EmissionRate = em.EmissionRate * vfx.Intensity;
+					emComp.Lifetime = em.Lifetime;
+					emComp.Speed = em.Speed;
+					emComp.SpeedVariance = em.SpeedVariance;
+					emComp.SizeStart = em.SizeStart;
+					emComp.SizeEnd = em.SizeEnd;
+					emComp.ColorStart = PackColor(em.ColorStart);
+					emComp.ColorEnd = PackColor(em.ColorEnd);
+					emComp.Gravity = em.Gravity;
+					emComp.EmitterType = em.EmitterType;
+					emComp.RenderMode = em.FacingMode;
+					emComp.BlendMode = em.Material.BlendMode;
+					emComp.IsPlaying = 1;
+					pool.Update(dt * vfx.PlaybackSpeed, emComp, pos, rot);
+				}
+			}
+		}
 	}
 	// 内置帧系统:运行/模拟更新保持"脚本 + 物理"的原有顺序与语义,标记为独占(主线程)。
 	// 宿主可再注册 parallel-safe 系统(不得触碰注册表结构),它们会在内置阶段之前并行执行。
@@ -2327,16 +2389,60 @@ namespace World
 			const auto& reg = static_cast<const Scene&>(*this).GetRegistry();
 			float dt = ts.GetSeconds();
 			auto& partSys = GetGlobalParticleSystem();
-			for (auto entity : reg.view<ParticleSystemComponent>())
+			for (auto entity : reg.view<VfxComponent>())
 			{
-				auto& comp = const_cast<entt::registry&>(reg).get<ParticleSystemComponent>(entity);
-				if (!comp.IsPlaying) continue;
+				auto& vfx = const_cast<entt::registry&>(reg).get<VfxComponent>(entity);
+				if (vfx.PlaybackState != VfxPlaybackState::Playing) continue;
+				if (!vfx.Effect.HasPath()) continue;
+
+				const std::string path = StringPool::Get().PathOf(vfx.Effect.Path);
+				const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
+				if (!asset)
+				{
+					uint64_t guid = ParticleAssetRegistry::Get().RegisterAsset(path);
+					asset = ParticleAssetRegistry::Get().GetAsset(guid);
+				}
+				if (!asset) continue;
+
 				glm::vec3 pos(0.0f);
+				glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
 				if (const auto* tc = reg.try_get<TransformComponent>(entity))
+				{
 					pos = tc->Location;
-				auto& pool = partSys.GetPoolForEntity(static_cast<uint32_t>(entity), comp.MaxParticles);
-				pool.Update(dt, comp, pos);
+					rot = tc->Rotation;
+				}
+
+				for (size_t i = 0; i < asset->Emitters.size(); ++i)
+				{
+					const auto& em = asset->Emitters[i];
+					if (!em.Enabled) continue;
+					uint32_t poolId = (static_cast<uint32_t>(entity) << 8) | static_cast<uint32_t>(i);
+					auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
+					if (vfx.Seed != 0) pool.SetSeed(vfx.Seed);
+					pool.SetMaterialSettings(em.Material);
+					pool.SetCollisionSettings(em.Collision);
+					pool.SetLinearDrag(em.LinearDrag);
+					pool.SetVortex(em.VortexStrength, em.VortexAxis);
+					pool.SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
+
+					ParticleEmitterConfig emComp;
+					emComp.EmissionRate = em.EmissionRate * vfx.Intensity;
+					emComp.Lifetime = em.Lifetime;
+					emComp.Speed = em.Speed;
+					emComp.SpeedVariance = em.SpeedVariance;
+					emComp.SizeStart = em.SizeStart;
+					emComp.SizeEnd = em.SizeEnd;
+					emComp.ColorStart = PackColor(em.ColorStart);
+					emComp.ColorEnd = PackColor(em.ColorEnd);
+					emComp.Gravity = em.Gravity;
+					emComp.EmitterType = em.EmitterType;
+					emComp.RenderMode = em.FacingMode;
+					emComp.BlendMode = em.Material.BlendMode;
+					emComp.IsPlaying = 1;
+					pool.Update(dt * vfx.PlaybackSpeed, emComp, pos, rot);
+				}
 			}
+
 		}
 		Audio::AudioSystem::Get().Update(ts.GetSeconds(), this);
 		FlushStructuralChanges();
@@ -2351,16 +2457,60 @@ namespace World
 			const auto& reg = static_cast<const Scene&>(*this).GetRegistry();
 			float dt = ts.GetSeconds();
 			auto& partSys = GetGlobalParticleSystem();
-			for (auto entity : reg.view<ParticleSystemComponent>())
+			for (auto entity : reg.view<VfxComponent>())
 			{
-				auto& comp = const_cast<entt::registry&>(reg).get<ParticleSystemComponent>(entity);
-				if (!comp.IsPlaying) continue;
+				auto& vfx = const_cast<entt::registry&>(reg).get<VfxComponent>(entity);
+				if (vfx.PlaybackState != VfxPlaybackState::Playing) continue;
+				if (!vfx.Effect.HasPath()) continue;
+
+				const std::string path = StringPool::Get().PathOf(vfx.Effect.Path);
+				const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
+				if (!asset)
+				{
+					uint64_t guid = ParticleAssetRegistry::Get().RegisterAsset(path);
+					asset = ParticleAssetRegistry::Get().GetAsset(guid);
+				}
+				if (!asset) continue;
+
 				glm::vec3 pos(0.0f);
+				glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
 				if (const auto* tc = reg.try_get<TransformComponent>(entity))
+				{
 					pos = tc->Location;
-				auto& pool = partSys.GetPoolForEntity(static_cast<uint32_t>(entity), comp.MaxParticles);
-				pool.Update(dt, comp, pos);
+					rot = tc->Rotation;
+				}
+
+				for (size_t i = 0; i < asset->Emitters.size(); ++i)
+				{
+					const auto& em = asset->Emitters[i];
+					if (!em.Enabled) continue;
+					uint32_t poolId = (static_cast<uint32_t>(entity) << 8) | static_cast<uint32_t>(i);
+					auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
+					if (vfx.Seed != 0) pool.SetSeed(vfx.Seed);
+					pool.SetMaterialSettings(em.Material);
+					pool.SetCollisionSettings(em.Collision);
+					pool.SetLinearDrag(em.LinearDrag);
+					pool.SetVortex(em.VortexStrength, em.VortexAxis);
+					pool.SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
+
+					ParticleEmitterConfig emComp;
+					emComp.EmissionRate = em.EmissionRate * vfx.Intensity;
+					emComp.Lifetime = em.Lifetime;
+					emComp.Speed = em.Speed;
+					emComp.SpeedVariance = em.SpeedVariance;
+					emComp.SizeStart = em.SizeStart;
+					emComp.SizeEnd = em.SizeEnd;
+					emComp.ColorStart = PackColor(em.ColorStart);
+					emComp.ColorEnd = PackColor(em.ColorEnd);
+					emComp.Gravity = em.Gravity;
+					emComp.EmitterType = em.EmitterType;
+					emComp.RenderMode = em.FacingMode;
+					emComp.BlendMode = em.Material.BlendMode;
+					emComp.IsPlaying = 1;
+					pool.Update(dt * vfx.PlaybackSpeed, emComp, pos, rot);
+				}
 			}
+
 		}
 
 	}

@@ -24,7 +24,7 @@ static void TestPoolInitializationAndCapacity()
 	assert(pool.Capacity() == 500);
 	assert(pool.ActiveCount() == 0);
 
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 2.0f;
 	comp.Speed = 5.0f;
 
@@ -40,7 +40,7 @@ static void TestPoolInitializationAndCapacity()
 static void TestGeometricEmissionAndShapes()
 {
 	ParticlePool pool(100);
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 1.0f;
 	comp.Speed = 10.0f;
 
@@ -67,7 +67,7 @@ static void TestGeometricEmissionAndShapes()
 static void TestParticleUpdateAndLifetime()
 {
 	ParticlePool pool(100);
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 1.0f;
 	comp.Speed = 0.0f;
 	comp.Gravity = glm::vec3(0.0f, -10.0f, 0.0f);
@@ -104,7 +104,7 @@ static void TestParticleUpdateAndLifetime()
 static void TestLockToXYPlane()
 {
 	ParticlePool pool(100);
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 2.0f;
 	comp.Speed = 5.0f;
 	comp.SpeedVariance = 2.0f;
@@ -142,7 +142,7 @@ static void TestLockToXYPlane()
 static void TestVertexGeneration()
 {
 	ParticlePool pool(50);
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 2.0f;
 	comp.Speed = 0.0f;
 	comp.EmissionRate = 0.0f;
@@ -210,7 +210,7 @@ static void TestSubUVFlipbookAndRect()
 	mat.SubUVFrameRate = 0.0f; // map over normalized lifetime
 	mat.SubUVRandomStartFrame = false;
 
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 1.0f;
 	comp.EmissionRate = 0.0f;
 	comp.IsPlaying = 0;
@@ -249,7 +249,7 @@ static void TestSoftParticleDepthFadeAndEmissive()
 	mat.SoftParticlesEnabled = true;
 	mat.SoftParticleFadeDistance = 2.0f;
 
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 2.0f;
 	comp.EmissionRate = 0.0f;
 	comp.IsPlaying = 0;
@@ -283,7 +283,7 @@ static void TestSoftParticleDepthFadeAndEmissive()
 
 static void TestDeterministicSeedReplay()
 {
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.EmitterType = ParticleEmitterType::Cone;
 	comp.Speed = 8.0f;
 	comp.SpeedVariance = 3.0f;
@@ -330,7 +330,7 @@ static void TestParticlePlaneCollisionAndBounce()
 	col.EnableEvents = true; // explicitly enable event queue capture for this test
 	pool.SetCollisionSettings(col);
 
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 5.0f;
 	comp.EmissionRate = 0.0f;
 	comp.IsPlaying = 0;
@@ -399,7 +399,7 @@ static void TestParticleSubEmitters()
 	sub.SpawnTemplate.Speed = 5.0f;
 	pool.AddSubEmitter(sub);
 
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 5.0f;
 	comp.EmissionRate = 0.0f;
 	comp.IsPlaying = 0;
@@ -420,7 +420,7 @@ static void TestParticleSubEmitters()
 static void TestParticleOneShotSpawn()
 {
 	ParticleSystem sys;
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.MaxParticles = 20;
 	comp.Lifetime = 0.5f;
 	comp.Speed = 4.0f;
@@ -441,7 +441,7 @@ static void TestParticleOneShotSpawn()
 static void TestForceDynamicsAndBursts()
 {
 	ParticlePool pool(100);
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 2.0f;
 	comp.Speed = 0.0f;
 	comp.EmissionRate = 0.0f;
@@ -485,7 +485,7 @@ static void TestForceDynamicsAndBursts()
 static void TestFacingModes()
 {
 	ParticlePool pool(10);
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 2.0f;
 	comp.EmissionRate = 0.0f;
 	comp.IsPlaying = 1;
@@ -680,7 +680,7 @@ static void TestParticleCurveEvolution()
 	pool.SetSpeedCurve(speedCurve);
 	assert(pool.HasSpeedCurve());
 
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 1.0f;
 	comp.Speed = 0.0f;
 	comp.EmissionRate = 0.0f;
@@ -818,7 +818,7 @@ static void TestRibbonTrailGeneration()
 static void TestMeshParticleBatch()
 {
 	ParticlePool pool(100);
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 2.0f;
 	comp.Speed = 5.0f;
 	comp.SizeStart = 2.0f;
@@ -858,7 +858,7 @@ static void TestMeshParticleBatch()
 static void TestParticleLightExtraction()
 {
 	ParticlePool pool(50);
-	ParticleSystemComponent comp;
+	ParticleEmitterConfig comp;
 	comp.Lifetime = 3.0f;
 	comp.Speed = 0.0f;
 	comp.SizeStart = 1.0f;
@@ -934,11 +934,33 @@ static void TestGpuParticleSystem()
 	std::cout << "[PASS] TestGpuParticleSystem\n";
 }
 
+static void TestVfxComponentContract()
+{
+	static_assert(sizeof(VfxComponent) == 64, "VfxComponent must be 64 bytes");
+	static_assert(std::is_trivially_copyable_v<VfxComponent>, "VfxComponent must be trivially copyable");
+
+	VfxComponent vfx;
+	assert(!vfx.Effect.HasPath());
+	assert(vfx.PlaybackSpeed == 1.0f);
+	assert(vfx.Intensity == 1.0f);
+	assert(vfx.WarmupTime == 0.0f);
+	assert(vfx.CullDistance == 60.0f);
+	assert(vfx.PlaybackState == VfxPlaybackState::Playing);
+	assert(vfx.Looping == true);
+	assert(vfx.PlayOnAwake == true);
+
+	vfx.PlaybackState = VfxPlaybackState::Paused;
+	assert(vfx.PlaybackState == VfxPlaybackState::Paused);
+
+	std::cout << "[PASS] TestVfxComponentContract\n";
+}
+
 int main()
 {
 	Log::Init();
 	std::cout << "Running WorldParticleSystemTests...\n";
 
+	TestVfxComponentContract();
 	TestPoolInitializationAndCapacity();
 	TestGeometricEmissionAndShapes();
 	TestParticleUpdateAndLifetime();

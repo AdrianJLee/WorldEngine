@@ -1,0 +1,129 @@
+# WorldEngine Particle Asset
+FormatVersion: 2
+Name: "OrbitalMagicShield3D"
+WarmupTime: 0
+Looping: true
+Emitters:
+  - Name: "RunicShieldRing"
+    Enabled: true
+    MaxParticles: 400
+    Lifetime: 3.5
+    EmissionRate: 80
+    EmitterType: Circle
+    FacingMode: HorizontalQuad
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/magic_rune.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 2.5
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 0.8
+      SpeedVariance: 0.2
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.2
+      VortexStrength: 12
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0.2
+      TurbulenceFrequency: 0.5
+    Evolution:
+      SizeStart: 0.6
+      SizeEnd: 0.6
+      ColorStart: [0.75, 0.25, 1, 1]
+      ColorEnd: [0.2, 0.8, 1, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "OrbitingEnergySpheres"
+    Enabled: true
+    MaxParticles: 200
+    Lifetime: 2.5
+    EmissionRate: 60
+    EmitterType: Circle
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/spark_glow.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 3.0
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 1.5
+      SpeedVariance: 0.3
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.1
+      VortexStrength: 16
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0.5
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.35
+      SizeEnd: 0.1
+      ColorStart: [1, 0.9, 0.3, 1]
+      ColorEnd: [1, 0.4, 0.1, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "ShieldBarrierPulse"
+    Enabled: true
+    MaxParticles: 80
+    Lifetime: 2.0
+    EmissionRate: 15
+    EmitterType: Point
+    FacingMode: HorizontalQuad
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/shockwave_ring.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 2.0
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 0.2
+      SpeedVariance: 0.1
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.5
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.5
+      SizeEnd: 3.2
+      ColorStart: [0.3, 0.6, 1, 0.85]
+      ColorEnd: [0.1, 0.2, 0.8, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0

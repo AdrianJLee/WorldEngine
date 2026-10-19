@@ -1144,28 +1144,6 @@ function ui:isOpen() end
 ---@field RepeatY boolean
 ---@field RepeatX boolean
 
--- Component fields are exposed through Entity:GetComponent("ParticleSystemComponent"); there is no runtime global named ParticleSystemComponent.
----@class ParticleSystemComponent
----@field RenderMode number
----@field Lifetime number
----@field EmitterType number
----@field PlayOnAwake boolean
----@field ColorStart number
----@field SpeedVariance number
----@field SizeStart number
----@field AssetGuid number
----@field IsPlaying boolean
----@field LockToXYPlane boolean
----@field Gravity vec3
----@field BlendMode number
----@field EmissionRate number
----@field SizeEnd number
----@field VfxFlags number
----@field ColorEnd number
----@field Looping boolean
----@field Speed number
----@field MaxParticles number
-
 -- Component fields are exposed through Entity:GetComponent("PartitionVolumeComponent"); there is no runtime global named PartitionVolumeComponent.
 ---@class PartitionVolumeComponent
 ---@field Active boolean
@@ -1400,6 +1378,20 @@ function ui:isOpen() end
 ---@field Linear vec3
 ---@field Angular vec3
 
+-- Component fields are exposed through Entity:GetComponent("VfxComponent"); there is no runtime global named VfxComponent.
+---@class VfxComponent
+---@field PlayOnAwake boolean
+---@field TintColor vec4
+---@field Intensity number
+---@field WarmupTime number
+---@field Effect string
+---@field Seed number
+---@field PauseWhenOffscreen boolean
+---@field Looping boolean
+---@field PlaybackSpeed number
+---@field CullDistance number
+---@field PlaybackState number
+
 -- Component fields are exposed through Entity:GetComponent("VirtualCameraComponent"); there is no runtime global named VirtualCameraComponent.
 ---@class VirtualCameraComponent
 ---@field FollowOffset vec3
@@ -1481,8 +1473,6 @@ function ui:isOpen() end
 ---@field MeshRenderer string Short alias for "MeshRendererComponent".
 ---@field ParallaxLayerComponent string Registered component type name "ParallaxLayerComponent".
 ---@field ParallaxLayer string Short alias for "ParallaxLayerComponent".
----@field ParticleSystemComponent string Registered component type name "ParticleSystemComponent".
----@field ParticleSystem string Short alias for "ParticleSystemComponent".
 ---@field PartitionVolumeComponent string Registered component type name "PartitionVolumeComponent".
 ---@field PartitionVolume string Short alias for "PartitionVolumeComponent".
 ---@field PhysicsMaterialComponent string Registered component type name "PhysicsMaterialComponent".
@@ -1533,6 +1523,8 @@ function ui:isOpen() end
 ---@field UUID string Short alias for "UUIDComponent".
 ---@field VelocityComponent string Registered component type name "VelocityComponent".
 ---@field Velocity string Short alias for "VelocityComponent".
+---@field VfxComponent string Registered component type name "VfxComponent".
+---@field Vfx string Short alias for "VfxComponent".
 ---@field VirtualCameraComponent string Registered component type name "VirtualCameraComponent".
 ---@field VirtualCamera string Short alias for "VirtualCameraComponent".
 ---@field WheelJoint2DComponent string Registered component type name "WheelJoint2DComponent".

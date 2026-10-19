@@ -371,6 +371,8 @@ void ContentBrowserPanel::SaveState(){
 				roots.Object.push_back({ "projectSources", writeBucket(BrowserRootScope::ProjectSources) });
 			if (m_RootStatesReady[static_cast<int>(BrowserRootScope::ProjectPlugins)])
 				roots.Object.push_back({ "projectPlugins", writeBucket(BrowserRootScope::ProjectPlugins) });
+			if (m_RootStatesReady[static_cast<int>(BrowserRootScope::EngineContent)])
+				roots.Object.push_back({ "engineContent", writeBucket(BrowserRootScope::EngineContent) });
 			root.Object.push_back({ "roots", std::move(roots) });
 			std::ofstream stream(m_StatePath, std::ios::binary | std::ios::trunc);
 			if (stream)
@@ -442,6 +444,8 @@ void ContentBrowserPanel::LoadState(){
 				// v3(PLUG-T3):第三个根的项目插件桶;v2 存档没有这一段 —— 缺省即"从未进过该根"。
 				if (const Wui::JsonValue* plugins = roots->Find("projectPlugins"))
 					readBucket(*plugins, BrowserRootScope::ProjectPlugins);
+				if (const Wui::JsonValue* engine = roots->Find("engineContent"))
+					readBucket(*engine, BrowserRootScope::EngineContent);
 			}
 			else
 			{

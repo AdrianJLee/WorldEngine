@@ -1,0 +1,170 @@
+# WorldEngine Particle Asset
+FormatVersion: 2
+Name: "MeteorImpactExplosion3D"
+WarmupTime: 0
+Looping: true
+Emitters:
+  - Name: "BlastShockwave"
+    Enabled: true
+    MaxParticles: 60
+    Lifetime: 1.2
+    EmissionRate: 20
+    EmitterType: Point
+    FacingMode: HorizontalQuad
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/shockwave_ring.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 2.5
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 0.5
+      SpeedVariance: 0.2
+      Gravity: [0, 0, 0]
+      LinearDrag: 1.2
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.5
+      SizeEnd: 5.5
+      ColorStart: [1, 0.85, 0.4, 1]
+      ColorEnd: [1, 0.2, 0, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "CoreFireball"
+    Enabled: true
+    MaxParticles: 350
+    Lifetime: 1.5
+    EmissionRate: 150
+    EmitterType: Sphere
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/flame_soft.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 3.0
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 7
+      SpeedVariance: 3.5
+      Gravity: [0, 2, 0]
+      LinearDrag: 0.8
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 2
+      TurbulenceFrequency: 1.5
+    Evolution:
+      SizeStart: 0.6
+      SizeEnd: 2.2
+      ColorStart: [1, 0.9, 0.3, 1]
+      ColorEnd: [0.8, 0.15, 0, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "FlyingSparksAndDebris"
+    Enabled: true
+    MaxParticles: 250
+    Lifetime: 2.0
+    EmissionRate: 100
+    EmitterType: Sphere
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/spark_glow.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 2.8
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 14
+      SpeedVariance: 6
+      Gravity: [0, -12, 0]
+      LinearDrag: 0.2
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 1
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.22
+      SizeEnd: 0.03
+      ColorStart: [1, 0.7, 0.2, 1]
+      ColorEnd: [1, 0.1, 0, 0]
+    Collision:
+      Mode: Plane
+      Restitution: 0.7
+      Friction: 0.15
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "ExplosionSmoke"
+    Enabled: true
+    MaxParticles: 200
+    Lifetime: 3.0
+    EmissionRate: 60
+    EmitterType: Sphere
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/smoke_puff.wtex"
+      MaterialPath: "materials/particles/particle_alpha.wmat"
+      BlendMode: AlphaBlend
+      EmissiveBoost: 1
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 4
+      SpeedVariance: 1.5
+      Gravity: [0, 1.8, 0]
+      LinearDrag: 1.0
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 2.5
+      TurbulenceFrequency: 0.8
+    Evolution:
+      SizeStart: 0.5
+      SizeEnd: 3.5
+      ColorStart: [0.3, 0.28, 0.25, 0.7]
+      ColorEnd: [0.1, 0.1, 0.1, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0

@@ -116,7 +116,7 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double emitCount = RequireNum("Particle", method, args, count, 1);
 
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
@@ -124,8 +124,14 @@ namespace World
 			glm::vec3 pos = tc ? tc->Location : glm::vec3(0.0f);
 			glm::quat rot = tc ? tc->Rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
-			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).Emit(static_cast<std::size_t>(std::max(0.0, emitCount)), *comp, pos, rot);
-			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).Emit(static_cast<std::size_t>(std::max(0.0, emitCount)), *comp, pos, rot);
+			ParticleEmitterConfig cfg;
+			cfg.Lifetime = 2.0f;
+			cfg.Speed = 5.0f * comp->PlaybackSpeed;
+			cfg.EmissionRate = 0.0f;
+			cfg.IsPlaying = 1;
+
+			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), 1000).Emit(static_cast<std::size_t>(std::max(0.0, emitCount)), cfg, pos, rot);
+			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), 1000).Emit(static_cast<std::size_t>(std::max(0.0, emitCount)), cfg, pos, rot);
 
 			return ScriptValue::Boolean(true);
 		}
@@ -138,11 +144,11 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[1];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
-			comp->IsPlaying = 1;
+			comp->PlaybackState = VfxPlaybackState::Playing;
 			return ScriptValue::Boolean(true);
 		}
 
@@ -154,11 +160,11 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[2];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
-			comp->IsPlaying = 0;
+			comp->PlaybackState = VfxPlaybackState::Stopped;
 			return ScriptValue::Boolean(true);
 		}
 
@@ -170,13 +176,13 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[3];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
 			if (!comp)
 				return ScriptValue::Boolean(false);
 
-			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).Reset();
-			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).Reset();
-			comp->IsPlaying = 1;
+			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), 1000).Reset();
+			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), 1000).Reset();
+			comp->PlaybackState = VfxPlaybackState::Playing;
 			return ScriptValue::Boolean(true);
 		}
 
@@ -188,11 +194,11 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[4];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
 			if (!comp)
 				return ScriptValue::Number(0.0);
 
-			auto& pool = s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles);
+			auto& pool = s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), 1000);
 			return ScriptValue::Number(static_cast<double>(pool.ActiveCount()));
 		}
 
@@ -204,12 +210,9 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[5];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			bool locked = RequireBool("Particle", method, args, count, 1);
-
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			comp->LockToXYPlane = locked ? 1 : 0;
+			(void)locked;
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
 			return ScriptValue::Boolean(true);
 		}
 
@@ -222,11 +225,9 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double rate = RequireNum("Particle", method, args, count, 1);
 
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			comp->EmissionRate = static_cast<float>(rate);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
+			comp->Intensity = static_cast<float>(rate) / 30.0f;
 			return ScriptValue::Boolean(true);
 		}
 
@@ -239,11 +240,9 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double speed = RequireNum("Particle", method, args, count, 1);
 
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			comp->Speed = static_cast<float>(speed);
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
+			comp->PlaybackSpeed = static_cast<float>(speed) / 5.0f;
 			return ScriptValue::Boolean(true);
 		}
 
@@ -255,12 +254,9 @@ namespace World
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[8];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double lifetime = RequireNum("Particle", method, args, count, 1);
-
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			comp->Lifetime = static_cast<float>(lifetime);
+			(void)lifetime;
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
 			return ScriptValue::Boolean(true);
 		}
 
@@ -273,13 +269,9 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double seedVal = RequireNum("Particle", method, args, count, 1);
 
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			auto& pool = GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles);
-			pool.SetSeed(static_cast<uint32_t>(seedVal));
-			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).SetSeed(static_cast<uint32_t>(seedVal));
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
+			comp->Seed = static_cast<uint32_t>(seedVal);
 			return ScriptValue::Boolean(true);
 		}
 
@@ -290,36 +282,9 @@ namespace World
 			if (!scene) throw std::logic_error("Particle.SetSubUV requires an active scene");
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[10];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
-			double tilesX = RequireNum("Particle", method, args, count, 1);
-			double tilesY = RequireNum("Particle", method, args, count, 2);
-			double frameRate = (count > 3 && !args[3].IsNil()) ? RequireNum("Particle", method, args, count, 3) : 0.0;
-			bool randomStart = (count > 4 && !args[4].IsNil()) ? RequireBool("Particle", method, args, count, 4) : false;
-
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			const uint32_t tx = std::max(1u, static_cast<uint32_t>(tilesX));
-			const uint32_t ty = std::max(1u, static_cast<uint32_t>(tilesY));
-			if (tx * ty > 1u)
-				comp->VfxFlags |= ParticleVfxFlag_SubUVEnabled;
-			else
-				comp->VfxFlags &= static_cast<uint8_t>(~ParticleVfxFlag_SubUVEnabled);
-
-			if (randomStart)
-				comp->VfxFlags |= ParticleVfxFlag_SubUVRandomStart;
-			else
-				comp->VfxFlags &= static_cast<uint8_t>(~ParticleVfxFlag_SubUVRandomStart);
-
-			auto applyPool = [&](ParticlePool& pool) {
-				auto& mat = pool.GetMaterialSettingsMut();
-				mat.SubUVTilesX = tx;
-				mat.SubUVTilesY = ty;
-				mat.SubUVFrameRate = static_cast<float>(frameRate);
-				mat.SubUVRandomStartFrame = randomStart;
-			};
-			applyPool(GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles));
-			applyPool(s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles));
+			(void)args; (void)count;
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
 			return ScriptValue::Boolean(true);
 		}
 
@@ -330,25 +295,9 @@ namespace World
 			if (!scene) throw std::logic_error("Particle.SetSoftParticles requires an active scene");
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[11];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
-			bool enabled = RequireBool("Particle", method, args, count, 1);
-			double fadeDist = (count > 2 && !args[2].IsNil()) ? RequireNum("Particle", method, args, count, 2) : 0.5;
-
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			if (enabled)
-				comp->VfxFlags |= ParticleVfxFlag_SoftParticle;
-			else
-				comp->VfxFlags &= static_cast<uint8_t>(~ParticleVfxFlag_SoftParticle);
-
-			auto applyPool = [&](ParticlePool& pool) {
-				auto& mat = pool.GetMaterialSettingsMut();
-				mat.SoftParticlesEnabled = enabled;
-				mat.SoftParticleFadeDistance = std::max(0.001f, static_cast<float>(fadeDist));
-			};
-			applyPool(GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles));
-			applyPool(s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles));
+			(void)args; (void)count;
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
 			return ScriptValue::Boolean(true);
 		}
 
@@ -361,13 +310,9 @@ namespace World
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
 			double boost = RequireNum("Particle", method, args, count, 1);
 
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			const float clampedBoost = std::max(0.0f, static_cast<float>(boost));
-			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).GetMaterialSettingsMut().EmissiveBoost = clampedBoost;
-			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).GetMaterialSettingsMut().EmissiveBoost = clampedBoost;
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
+			comp->Intensity = static_cast<float>(boost);
 			return ScriptValue::Boolean(true);
 		}
 
@@ -378,32 +323,9 @@ namespace World
 			if (!scene) throw std::logic_error("Particle.SetCollision requires an active scene");
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[13];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
-			double modeVal = (count > 1 && !args[1].IsNil()) ? RequireNum("Particle", method, args, count, 1) : 1.0;
-			double restitution = (count > 2 && !args[2].IsNil()) ? RequireNum("Particle", method, args, count, 2) : 0.5;
-			double friction = (count > 3 && !args[3].IsNil()) ? RequireNum("Particle", method, args, count, 3) : 0.1;
-			bool killOnHit = (count > 4 && !args[4].IsNil()) ? RequireBool("Particle", method, args, count, 4) : false;
-			bool enableEvents = (count > 5 && !args[5].IsNil()) ? RequireBool("Particle", method, args, count, 5) : false;
-
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			if (enableEvents)
-				comp->VfxFlags |= ParticleVfxFlag_CollisionEvents;
-			else
-				comp->VfxFlags &= static_cast<uint8_t>(~ParticleVfxFlag_CollisionEvents);
-
-			ParticleCollisionSettings col;
-			col.Mode = (modeVal >= 1.0) ? ParticleCollisionMode::Plane : ParticleCollisionMode::None;
-			col.Restitution = static_cast<float>(restitution);
-			col.Friction = static_cast<float>(friction);
-			col.KillOnHit = killOnHit;
-			col.EnableEvents = enableEvents;
-			col.PlaneOrigin = glm::vec3(0.0f);
-			col.PlaneNormal = glm::vec3(0.0f, 1.0f, 0.0f);
-
-			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).SetCollisionSettings(col);
-			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).SetCollisionSettings(col);
+			(void)args; (void)count;
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
 			return ScriptValue::Boolean(true);
 		}
 
@@ -411,20 +333,13 @@ namespace World
 		{
 			NormalizeArgs(args, count);
 			Scene* scene = ScriptEngine::GetActiveScene();
-			if (!scene) throw std::logic_error("Particle.GetCollisionHitCount requires an active scene");
+			if (!scene) throw std::logic_error("Particle.GetCollisionHitsCount requires an active scene");
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[14];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
-
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Number(0.0);
-
-			auto* pool = GetGlobalParticleSystem().GetPool(static_cast<uint32_t>(ent));
-			if (!pool) pool = s_ParticleSystem.GetPool(static_cast<uint32_t>(ent));
-			if (!pool)
-				return ScriptValue::Number(0.0);
-
-			return ScriptValue::Number(static_cast<double>(pool->GetEventQueue().Size()));
+			(void)args; (void)count;
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Number(0.0);
+			return ScriptValue::Number(0.0);
 		}
 
 		ScriptValue ParticleFlushCollisionHitsImpl(const ScriptValue* args, std::size_t count)
@@ -434,21 +349,12 @@ namespace World
 			if (!scene) throw std::logic_error("Particle.FlushCollisionHits requires an active scene");
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[15];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
-
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Number(0.0);
-
-			size_t hitsCount = 0;
-			auto* pool1 = GetGlobalParticleSystem().GetPool(static_cast<uint32_t>(ent));
-			if (pool1) hitsCount += pool1->GetEventQueueMut().Flush().size();
-			auto* pool2 = s_ParticleSystem.GetPool(static_cast<uint32_t>(ent));
-			if (pool2) hitsCount += pool2->GetEventQueueMut().Flush().size();
-
-			return ScriptValue::Number(static_cast<double>(hitsCount));
+			(void)args; (void)count;
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Number(0.0);
+			return ScriptValue::Number(0.0);
 		}
 
-		
 		inline double GetOptionalNum(const ScriptValue* args, std::size_t count, std::size_t idx, double fallback)
 		{
 			if (idx < count && !args[idx].IsNil())
@@ -469,8 +375,7 @@ namespace World
 			double speed = GetOptionalNum(args, count, 4, 5.0);
 			double life = GetOptionalNum(args, count, 5, 1.0);
 
-			ParticleSystemComponent comp;
-			comp.MaxParticles = static_cast<uint32_t>(particleCount);
+			ParticleEmitterConfig comp;
 			comp.Speed = static_cast<float>(speed);
 			comp.Lifetime = static_cast<float>(life);
 			comp.EmissionRate = 0.0f;
@@ -490,26 +395,11 @@ namespace World
 			if (!scene) throw std::logic_error("Particle.AddSubEmitter requires an active scene");
 			const auto& method = ParticleServiceBindings(nullptr)[0].Methods[17];
 			entt::entity ent = RequireEntityId("Particle", method, args, count, 0);
-			double triggerVal = (count > 1 && !args[1].IsNil()) ? RequireNum("Particle", method, args, count, 1) : 1.0;
-			double emitCount = (count > 2 && !args[2].IsNil()) ? RequireNum("Particle", method, args, count, 2) : 4.0;
-
-			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<ParticleSystemComponent>(ent);
-			if (!comp)
-				return ScriptValue::Boolean(false);
-
-			SubEmitterConfig sub;
-			sub.Trigger = (triggerVal <= 0.0) ? SubEmitterTrigger::OnBirth : ((triggerVal >= 2.0) ? SubEmitterTrigger::OnDeath : SubEmitterTrigger::OnCollision);
-			sub.EmitCount = static_cast<uint32_t>(emitCount);
-			sub.SpawnTemplate.Lifetime = 0.5f;
-			sub.SpawnTemplate.Speed = 3.0f;
-			sub.SpawnTemplate.SizeStart = 0.2f;
-			sub.SpawnTemplate.SizeEnd = 0.05f;
-
-			GetGlobalParticleSystem().GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).AddSubEmitter(sub);
-			s_ParticleSystem.GetPoolForEntity(static_cast<uint32_t>(ent), comp->MaxParticles).AddSubEmitter(sub);
+			(void)args; (void)count;
+			auto* comp = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry()).try_get<VfxComponent>(ent);
+			if (!comp) return ScriptValue::Boolean(false);
 			return ScriptValue::Boolean(true);
 		}
-
 
 		// ---- VFX Authoring & Playback Implementation Methods ----
 		ScriptValue VfxCreateImpl(const ScriptValue* args, std::size_t count)
@@ -774,7 +664,7 @@ namespace World
 
 
 		static const ScriptServiceMethod particleMethods[] = {
-			{ "Emit", [](const ScriptValue* args, std::size_t count) { return ParticleEmitImpl(args, count); }, emitParams, 2, 2, "boolean", "Emit particles from entity's ParticleSystemComponent." },
+			{ "Emit", [](const ScriptValue* args, std::size_t count) { return ParticleEmitImpl(args, count); }, emitParams, 2, 2, "boolean", "Emit particles from entity's VfxComponent." },
 			{ "Play", [](const ScriptValue* args, std::size_t count) { return ParticlePlayImpl(args, count); }, singleEntityParams, 1, 1, "boolean", "Start or resume particle emission." },
 			{ "Stop", [](const ScriptValue* args, std::size_t count) { return ParticleStopImpl(args, count); }, singleEntityParams, 1, 1, "boolean", "Stop particle emission." },
 			{ "Restart", [](const ScriptValue* args, std::size_t count) { return ParticleRestartImpl(args, count); }, singleEntityParams, 1, 1, "boolean", "Reset particle pool and restart emission." },

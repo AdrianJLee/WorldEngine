@@ -31,6 +31,15 @@ namespace World
 				World::Paths::AssetRoot() / path;
 			if (std::filesystem::exists(candidate, ec))
 				return candidate;
+			std::string s = path;
+			if (s.rfind("engine/", 0) == 0 || s.rfind("Engine/", 0) == 0)
+				s = s.substr(7);
+			std::filesystem::path engCand1 = World::Paths::EngineContentRoot() / path;
+			if (std::filesystem::exists(engCand1, ec))
+				return engCand1;
+			std::filesystem::path engCand2 = World::Paths::EngineContentRoot() / s;
+			if (std::filesystem::exists(engCand2, ec))
+				return engCand2;
 			return {};
 		}
 

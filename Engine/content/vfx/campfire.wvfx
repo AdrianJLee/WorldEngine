@@ -1,0 +1,129 @@
+# WorldEngine Particle Asset
+FormatVersion: 2
+Name: "Campfire"
+WarmupTime: 0
+Looping: true
+Emitters:
+  - Name: "CampfireFlame"
+    Enabled: true
+    MaxParticles: 300
+    Lifetime: 1.8
+    EmissionRate: 100
+    EmitterType: Cone
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/flame_soft.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 2.2
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 2.5
+      SpeedVariance: 0.8
+      Gravity: [0, 3.5, 0]
+      LinearDrag: 0.3
+      VortexStrength: 3
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 1.2
+      TurbulenceFrequency: 1.5
+    Evolution:
+      SizeStart: 0.6
+      SizeEnd: 0.1
+      ColorStart: [1, 0.75, 0.2, 1]
+      ColorEnd: [0.9, 0.15, 0, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "RisingSmoke"
+    Enabled: true
+    MaxParticles: 150
+    Lifetime: 3.2
+    EmissionRate: 35
+    EmitterType: Cone
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/smoke_puff.wtex"
+      MaterialPath: "materials/particles/particle_alpha.wmat"
+      BlendMode: AlphaBlend
+      EmissiveBoost: 1
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 1.8
+      SpeedVariance: 0.5
+      Gravity: [0, 2.2, 0]
+      LinearDrag: 0.8
+      VortexStrength: 1.5
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 1.8
+      TurbulenceFrequency: 0.8
+    Evolution:
+      SizeStart: 0.35
+      SizeEnd: 2.2
+      ColorStart: [0.35, 0.35, 0.35, 0.6]
+      ColorEnd: [0.1, 0.1, 0.1, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "FloatingEmbers"
+    Enabled: true
+    MaxParticles: 100
+    Lifetime: 2.5
+    EmissionRate: 30
+    EmitterType: Cone
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/spark_glow.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 3.0
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 2.0
+      SpeedVariance: 1.0
+      Gravity: [0, 1.8, 0]
+      LinearDrag: 0.2
+      VortexStrength: 2.0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 2.5
+      TurbulenceFrequency: 1.2
+    Evolution:
+      SizeStart: 0.12
+      SizeEnd: 0.02
+      ColorStart: [1, 0.9, 0.3, 1]
+      ColorEnd: [1, 0.2, 0, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0

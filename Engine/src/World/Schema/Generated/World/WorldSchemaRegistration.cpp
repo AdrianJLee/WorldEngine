@@ -60,7 +60,7 @@ const TypeSchema& WeSchemaOf_VirtualCameraComponent();
 const TypeSchema& WeSchemaOf_PostProcessComponent();
 const TypeSchema& WeSchemaOf_HealthComponent();
 const TypeSchema& WeSchemaOf_SmartObjectComponent();
-const TypeSchema& WeSchemaOf_ParticleSystemComponent();
+const TypeSchema& WeSchemaOf_VfxComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -74,6 +74,7 @@ const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState();
 const EnumSchema& WeEnumSchemaOf_ParticleEmitterType();
 const EnumSchema& WeEnumSchemaOf_ParticleRenderMode();
 const EnumSchema& WeEnumSchemaOf_ParticleBlendMode();
+const EnumSchema& WeEnumSchemaOf_VfxPlaybackState();
 
 	namespace
 	{
@@ -10861,520 +10862,287 @@ struct GeneratedAccess<World::SmartObjectComponent>
 };
 
 template <>
-struct GeneratedAccess<World::ParticleSystemComponent>
+struct GeneratedAccess<World::VfxComponent>
 {
-    static Value Get_AssetGuid(const void* instance)
+    static Value Get_Effect(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->AssetGuid);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Effect)>>::GetPath(self->Effect));
     }
-    static void Set_AssetGuid(void* instance, const Value& value)
+    static void Set_Effect(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->AssetGuid = std::get<uint64_t>(value);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Effect)>>::SetPath(self->Effect, std::get<std::string>(value));
     }
-    static Value Get_Gravity(const void* instance)
+    static uint64_t GetAssetIdentity_Effect(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->Gravity);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Effect)>>::GetIdentity(self->Effect);
     }
-    static void Set_Gravity(void* instance, const Value& value)
+    static void SetAssetIdentity_Effect(void* instance, uint64_t identity)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->Gravity = std::get<glm::vec3>(value);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Effect)>>::SetIdentity(self->Effect, identity);
     }
-    static Value Get_EmissionRate(const void* instance)
+    static Value Get_TintColor(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->EmissionRate);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(self->TintColor);
     }
-    static void Set_EmissionRate(void* instance, const Value& value)
+    static void Set_TintColor(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->EmissionRate = std::get<float>(value);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        self->TintColor = std::get<glm::vec4>(value);
     }
-    static Value Get_Lifetime(const void* instance)
+    static Value Get_PlaybackSpeed(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->Lifetime);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(self->PlaybackSpeed);
     }
-    static void Set_Lifetime(void* instance, const Value& value)
+    static void Set_PlaybackSpeed(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->Lifetime = std::get<float>(value);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        self->PlaybackSpeed = std::get<float>(value);
     }
-    static Value Get_Speed(const void* instance)
+    static Value Get_Intensity(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->Speed);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(self->Intensity);
     }
-    static void Set_Speed(void* instance, const Value& value)
+    static void Set_Intensity(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->Speed = std::get<float>(value);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        self->Intensity = std::get<float>(value);
     }
-    static Value Get_SpeedVariance(const void* instance)
+    static Value Get_WarmupTime(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->SpeedVariance);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(self->WarmupTime);
     }
-    static void Set_SpeedVariance(void* instance, const Value& value)
+    static void Set_WarmupTime(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->SpeedVariance = std::get<float>(value);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        self->WarmupTime = std::get<float>(value);
     }
-    static Value Get_SizeStart(const void* instance)
+    static Value Get_CullDistance(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->SizeStart);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(self->CullDistance);
     }
-    static void Set_SizeStart(void* instance, const Value& value)
+    static void Set_CullDistance(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->SizeStart = std::get<float>(value);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        self->CullDistance = std::get<float>(value);
     }
-    static Value Get_SizeEnd(const void* instance)
+    static Value Get_Seed(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->SizeEnd);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(self->Seed);
     }
-    static void Set_SizeEnd(void* instance, const Value& value)
+    static void Set_Seed(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->SizeEnd = std::get<float>(value);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        self->Seed = std::get<uint32_t>(value);
     }
-    static Value Get_ColorStart(const void* instance)
+    static Value Get_PlaybackState(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->ColorStart);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->PlaybackState));
     }
-    static void Set_ColorStart(void* instance, const Value& value)
+    static void Set_PlaybackState(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->ColorStart = std::get<uint32_t>(value);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        self->PlaybackState = static_cast<World::VfxPlaybackState>(std::get<uint64_t>(value));
     }
-    static Value Get_ColorEnd(const void* instance)
+    static const EnumSchema* GetEnum_PlaybackState()
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->ColorEnd);
-    }
-    static void Set_ColorEnd(void* instance, const Value& value)
-    {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->ColorEnd = std::get<uint32_t>(value);
-    }
-    static Value Get_MaxParticles(const void* instance)
-    {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->MaxParticles);
-    }
-    static void Set_MaxParticles(void* instance, const Value& value)
-    {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->MaxParticles = std::get<uint32_t>(value);
-    }
-    static Value Get_EmitterType(const void* instance)
-    {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(static_cast<uint64_t>(self->EmitterType));
-    }
-    static void Set_EmitterType(void* instance, const Value& value)
-    {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->EmitterType = static_cast<World::ParticleEmitterType>(std::get<uint64_t>(value));
-    }
-    static const EnumSchema* GetEnum_EmitterType()
-    {
-        return &WeEnumSchemaOf_ParticleEmitterType();
-    }
-    static Value Get_RenderMode(const void* instance)
-    {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(static_cast<uint64_t>(self->RenderMode));
-    }
-    static void Set_RenderMode(void* instance, const Value& value)
-    {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->RenderMode = static_cast<World::ParticleRenderMode>(std::get<uint64_t>(value));
-    }
-    static const EnumSchema* GetEnum_RenderMode()
-    {
-        return &WeEnumSchemaOf_ParticleRenderMode();
-    }
-    static Value Get_BlendMode(const void* instance)
-    {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(static_cast<uint64_t>(self->BlendMode));
-    }
-    static void Set_BlendMode(void* instance, const Value& value)
-    {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->BlendMode = static_cast<World::ParticleBlendMode>(std::get<uint64_t>(value));
-    }
-    static const EnumSchema* GetEnum_BlendMode()
-    {
-        return &WeEnumSchemaOf_ParticleBlendMode();
-    }
-    static Value Get_VfxFlags(const void* instance)
-    {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(self->VfxFlags);
-    }
-    static void Set_VfxFlags(void* instance, const Value& value)
-    {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->VfxFlags = std::get<uint8_t>(value);
-    }
-    static Value Get_LockToXYPlane(const void* instance)
-    {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(static_cast<bool>(self->LockToXYPlane));
-    }
-    static void Set_LockToXYPlane(void* instance, const Value& value)
-    {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->LockToXYPlane = static_cast<decltype(self->LockToXYPlane)>(std::get<bool>(value));
-    }
-    static Value Get_Looping(const void* instance)
-    {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(static_cast<bool>(self->Looping));
-    }
-    static void Set_Looping(void* instance, const Value& value)
-    {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->Looping = static_cast<decltype(self->Looping)>(std::get<bool>(value));
+        return &WeEnumSchemaOf_VfxPlaybackState();
     }
     static Value Get_PlayOnAwake(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
         return Value(static_cast<bool>(self->PlayOnAwake));
     }
     static void Set_PlayOnAwake(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
         self->PlayOnAwake = static_cast<decltype(self->PlayOnAwake)>(std::get<bool>(value));
     }
-    static Value Get_IsPlaying(const void* instance)
+    static Value Get_Looping(const void* instance)
     {
-        const World::ParticleSystemComponent* self = static_cast<const World::ParticleSystemComponent*>(instance);
-        return Value(static_cast<bool>(self->IsPlaying));
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(static_cast<bool>(self->Looping));
     }
-    static void Set_IsPlaying(void* instance, const Value& value)
+    static void Set_Looping(void* instance, const Value& value)
     {
-        World::ParticleSystemComponent* self = static_cast<World::ParticleSystemComponent*>(instance);
-        self->IsPlaying = static_cast<decltype(self->IsPlaying)>(std::get<bool>(value));
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        self->Looping = static_cast<decltype(self->Looping)>(std::get<bool>(value));
     }
-    static const FieldSchema& Field_AssetGuid()
+    static Value Get_PauseWhenOffscreen(const void* instance)
+    {
+        const World::VfxComponent* self = static_cast<const World::VfxComponent*>(instance);
+        return Value(static_cast<bool>(self->PauseWhenOffscreen));
+    }
+    static void Set_PauseWhenOffscreen(void* instance, const Value& value)
+    {
+        World::VfxComponent* self = static_cast<World::VfxComponent*>(instance);
+        self->PauseWhenOffscreen = static_cast<decltype(self->PauseWhenOffscreen)>(std::get<bool>(value));
+    }
+    static const FieldSchema& Field_Effect()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x5D75AC4CB961CFF0ull },
-            "AssetGuid",
-            Kind::UInt64,
-            &Get_AssetGuid,
-            &Set_AssetGuid,
+            FieldId{ 0xB0CFAB1DA7AFD813ull },
+            "Effect",
+            Kind::Asset,
+            &Get_Effect,
+            &Set_Effect,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
+            "VFX",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bound .wvfx VFX asset defining emitters, ribbons, meshes and dynamic lights.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bound VFX asset GUID (0 uses inline component parameters).", false, "", {  }, "", std::nullopt },
-            Value(static_cast<uint64_t>(0)),
+            nullptr,
+            &GetAssetIdentity_Effect,
+            &SetAssetIdentity_Effect,
         };
         return schema;
     }
-    static const FieldSchema& Field_Gravity()
+    static const FieldSchema& Field_TintColor()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x895C415159BC9FCFull },
-            "Gravity",
-            Kind::Vec3,
-            &Get_Gravity,
-            &Set_Gravity,
+            FieldId{ 0x815EC9DF83A64ABEull },
+            "TintColor",
+            Kind::Vec4,
+            &Get_TintColor,
+            &Set_TintColor,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Gravity vector applied to moving particles.", false, "", {  }, "", std::nullopt },
-            Value(glm::vec3(0.0f)),
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Global tint color and HDR emissive boost applied to all emitters.", true, "", {  }, "", std::nullopt },
+            Value(glm::vec4(0.0f)),
         };
         return schema;
     }
-    static const FieldSchema& Field_EmissionRate()
+    static const FieldSchema& Field_PlaybackSpeed()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x95B8BCABA2BD2EFAull },
-            "EmissionRate",
+            FieldId{ 0xF5E6AADD7D128116ull },
+            "PlaybackSpeed",
             Kind::Float,
-            &Get_EmissionRate,
-            &Set_EmissionRate,
+            &Get_PlaybackSpeed,
+            &Set_PlaybackSpeed,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5000.000000f), false, false, "Emission rate in particles per second.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "Simulation playback speed multiplier (0.0 = paused, 1.0 = normal).", false, "", {  }, "", std::nullopt },
             Value(0.0f),
         };
         return schema;
     }
-    static const FieldSchema& Field_Lifetime()
+    static const FieldSchema& Field_Intensity()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x249DDFA82A1C179Cull },
-            "Lifetime",
+            FieldId{ 0x8F5BAB13DF7F900Full },
+            "Intensity",
             Kind::Float,
-            &Get_Lifetime,
-            &Set_Lifetime,
+            &Get_Intensity,
+            &Set_Intensity,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.050000f), std::optional<float>(60.000000f), false, false, "Particle base lifetime in seconds.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "Master emission rate and particle density multiplier.", false, "", {  }, "", std::nullopt },
             Value(0.0f),
         };
         return schema;
     }
-    static const FieldSchema& Field_Speed()
+    static const FieldSchema& Field_WarmupTime()
     {
         static const FieldSchema schema = {
-            FieldId{ 0xF3B8FF6603031672ull },
-            "Speed",
+            FieldId{ 0xAECC7AA48B2F28B7ull },
+            "WarmupTime",
             Kind::Float,
-            &Get_Speed,
-            &Set_Speed,
+            &Get_WarmupTime,
+            &Set_WarmupTime,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Initial particle emission speed.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(30.000000f), false, false, "Pre-simulation time in seconds on spawn so effect begins fully formed.", false, "", {  }, "", std::nullopt },
             Value(0.0f),
         };
         return schema;
     }
-    static const FieldSchema& Field_SpeedVariance()
+    static const FieldSchema& Field_CullDistance()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x4CCF34180C8D1B05ull },
-            "SpeedVariance",
+            FieldId{ 0xF6583308FB17272Dull },
+            "CullDistance",
             Kind::Float,
-            &Get_SpeedVariance,
-            &Set_SpeedVariance,
+            &Get_CullDistance,
+            &Set_CullDistance,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(50.000000f), false, false, "Random initial speed variance.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(1000.000000f), false, false, "Camera distance in meters beyond which particle simulation is paused.", false, "", {  }, "", std::nullopt },
             Value(0.0f),
         };
         return schema;
     }
-    static const FieldSchema& Field_SizeStart()
+    static const FieldSchema& Field_Seed()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x5D625FD42ABB176Eull },
-            "SizeStart",
-            Kind::Float,
-            &Get_SizeStart,
-            &Set_SizeStart,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.010000f), std::optional<float>(50.000000f), false, false, "Initial particle diameter size.", false, "", {  }, "", std::nullopt },
-            Value(0.0f),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_SizeEnd()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xA173B4200C31BB5Bull },
-            "SizeEnd",
-            Kind::Float,
-            &Get_SizeEnd,
-            &Set_SizeEnd,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(50.000000f), false, false, "Final particle diameter size at end of life.", false, "", {  }, "", std::nullopt },
-            Value(0.0f),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_ColorStart()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x472F35356E1DBF76ull },
-            "ColorStart",
+            FieldId{ 0xC0F8EBF8182BB3B7ull },
+            "Seed",
             Kind::UInt32,
-            &Get_ColorStart,
-            &Set_ColorStart,
+            &Get_Seed,
+            &Set_Seed,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Initial packed RGBA particle color.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Deterministic seed for reproducible simulation (0 uses randomized seed).", false, "", {  }, "", std::nullopt },
             Value(static_cast<uint32_t>(0)),
         };
         return schema;
     }
-    static const FieldSchema& Field_ColorEnd()
+    static const FieldSchema& Field_PlaybackState()
     {
         static const FieldSchema schema = {
-            FieldId{ 0xCA84153E429704F3ull },
-            "ColorEnd",
-            Kind::UInt32,
-            &Get_ColorEnd,
-            &Set_ColorEnd,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Final packed RGBA particle color at end of life.", false, "", {  }, "", std::nullopt },
-            Value(static_cast<uint32_t>(0)),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_MaxParticles()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xFB25A8C96D14CC66ull },
-            "MaxParticles",
-            Kind::UInt32,
-            &Get_MaxParticles,
-            &Set_MaxParticles,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(10000.000000f), false, false, "Maximum active particle capacity for this system.", false, "", {  }, "", std::nullopt },
-            Value(static_cast<uint32_t>(0)),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_EmitterType()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x2E459AC2E452F30Full },
-            "EmitterType",
+            FieldId{ 0xFF81BBFC4F34E88Cull },
+            "PlaybackState",
             Kind::Enum,
-            &Get_EmitterType,
-            &Set_EmitterType,
+            &Get_PlaybackState,
+            &Set_PlaybackState,
             nullptr,
             nullptr,
             nullptr,
-            &GetEnum_EmitterType,
+            &GetEnum_PlaybackState,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Shape emitter volume (Point, Line, Box, Sphere, Cone, Circle).", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current playback state (Playing, Paused, Stopped).", false, "", {  }, "", std::nullopt },
             Value(static_cast<uint64_t>(0)),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_RenderMode()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x152674A0F30ED0D4ull },
-            "RenderMode",
-            Kind::Enum,
-            &Get_RenderMode,
-            &Set_RenderMode,
-            nullptr,
-            nullptr,
-            nullptr,
-            &GetEnum_RenderMode,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Render geometry mode (Billboard or Quad2D).", false, "", {  }, "", std::nullopt },
-            Value(static_cast<uint64_t>(0)),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_BlendMode()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x8C8DB0D9FD8FB835ull },
-            "BlendMode",
-            Kind::Enum,
-            &Get_BlendMode,
-            &Set_BlendMode,
-            nullptr,
-            nullptr,
-            nullptr,
-            &GetEnum_BlendMode,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Particle material blend mode (AlphaBlend, Additive, Multiply, Opaque).", false, "", {  }, "", std::nullopt },
-            Value(static_cast<uint64_t>(0)),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_VfxFlags()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xBE4EDC8493C96C0Cull },
-            "VfxFlags",
-            Kind::UInt8,
-            &Get_VfxFlags,
-            &Set_VfxFlags,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bitmask flags for SoftParticle, CollisionEnabled, SubUVEnabled, SubUVRandomStart.", false, "", {  }, "", std::nullopt },
-            Value(static_cast<uint8_t>(0)),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_LockToXYPlane()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x86A969DE32681440ull },
-            "LockToXYPlane",
-            Kind::Bool,
-            &Get_LockToXYPlane,
-            &Set_LockToXYPlane,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Lock all particle simulation and velocity to the 2D XY plane.", false, "", {  }, "", std::nullopt },
-            Value(false),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_Looping()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xD982D092264178D3ull },
-            "Looping",
-            Kind::Bool,
-            &Get_Looping,
-            &Set_Looping,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Looping particle emission.", false, "", {  }, "", std::nullopt },
-            Value(false),
         };
         return schema;
     }
     static const FieldSchema& Field_PlayOnAwake()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x35D583EC782CDEE3ull },
+            FieldId{ 0x7EF4C453FEC43348ull },
             "PlayOnAwake",
             Kind::Bool,
             &Get_PlayOnAwake,
@@ -11384,66 +11152,76 @@ struct GeneratedAccess<World::ParticleSystemComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically begin emitting when scene starts.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically begin playback when the scene starts.", false, "", {  }, "", std::nullopt },
             Value(false),
         };
         return schema;
     }
-    static const FieldSchema& Field_IsPlaying()
+    static const FieldSchema& Field_Looping()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x69F6CE7BA59351EFull },
-            "IsPlaying",
+            FieldId{ 0xCF7AAA8D3646F8D4ull },
+            "Looping",
             Kind::Bool,
-            &Get_IsPlaying,
-            &Set_IsPlaying,
+            &Get_Looping,
+            &Set_Looping,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Currently emitting particles.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Loop the VFX sequence continuously.", false, "", {  }, "", std::nullopt },
+            Value(false),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_PauseWhenOffscreen()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC9B5F52A984B7F01ull },
+            "PauseWhenOffscreen",
+            Kind::Bool,
+            &Get_PauseWhenOffscreen,
+            &Set_PauseWhenOffscreen,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Pause simulation when bounding volume is outside camera view frustum.", false, "", {  }, "", std::nullopt },
             Value(false),
         };
         return schema;
     }
     static const StorageBinding& StorageBindingOf()
     {
-        static const StorageBinding binding = MakeComponentStorage<World::ParticleSystemComponent>();
+        static const StorageBinding binding = MakeComponentStorage<World::VfxComponent>();
         return binding;
     }
     static const TypeSchema& WeSchema()
     {
         static const TypeSchema schema = {
-            TypeId{ "World::ParticleSystemComponent" },
-            "ParticleSystemComponent",
+            TypeId{ "World::VfxComponent" },
+            "VfxComponent",
             WE_SCHEMA_ABI_VERSION,
-            sizeof(World::ParticleSystemComponent),
+            sizeof(World::VfxComponent),
             TypeCategory::Component,
             {
-                Field_AssetGuid(),
-                Field_Gravity(),
-                Field_EmissionRate(),
-                Field_Lifetime(),
-                Field_Speed(),
-                Field_SpeedVariance(),
-                Field_SizeStart(),
-                Field_SizeEnd(),
-                Field_ColorStart(),
-                Field_ColorEnd(),
-                Field_MaxParticles(),
-                Field_EmitterType(),
-                Field_RenderMode(),
-                Field_BlendMode(),
-                Field_VfxFlags(),
-                Field_LockToXYPlane(),
-                Field_Looping(),
+                Field_Effect(),
+                Field_TintColor(),
+                Field_PlaybackSpeed(),
+                Field_Intensity(),
+                Field_WarmupTime(),
+                Field_CullDistance(),
+                Field_Seed(),
+                Field_PlaybackState(),
                 Field_PlayOnAwake(),
-                Field_IsPlaying(),
+                Field_Looping(),
+                Field_PauseWhenOffscreen(),
             },
             &StorageBindingOf(),
             "Renderer",
-            "Unified 2D and 3D particle system component with shape emitters, lifetime curves and XY locking.",
+            "Next-generation unified VFX component for multi-emitter assets, ribbons, meshes and dynamic lights.",
             false,
             false,
         };
@@ -11976,6 +11754,25 @@ struct GeneratedEnum<World::ParticleBlendMode>
     }
 };
 
+template <>
+struct GeneratedEnum<World::VfxPlaybackState>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "VfxPlaybackState",
+            false,
+            1,
+            {
+                { "Stopped", static_cast<int64_t>(World::VfxPlaybackState::Stopped) },
+                { "Playing", static_cast<int64_t>(World::VfxPlaybackState::Playing) },
+                { "Paused", static_cast<int64_t>(World::VfxPlaybackState::Paused) },
+            },
+        };
+        return schema;
+    }
+};
+
 const TypeSchema& WeSchemaOf_UUIDComponent() { return GeneratedAccess<World::UUIDComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
@@ -12028,7 +11825,7 @@ const TypeSchema& WeSchemaOf_VirtualCameraComponent() { return GeneratedAccess<W
 const TypeSchema& WeSchemaOf_PostProcessComponent() { return GeneratedAccess<World::PostProcessComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_HealthComponent() { return GeneratedAccess<World::HealthComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SmartObjectComponent() { return GeneratedAccess<World::SmartObjectComponent>::WeSchema(); }
-const TypeSchema& WeSchemaOf_ParticleSystemComponent() { return GeneratedAccess<World::ParticleSystemComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_VfxComponent() { return GeneratedAccess<World::VfxComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -12042,6 +11839,7 @@ const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState() { return GeneratedEnum<W
 const EnumSchema& WeEnumSchemaOf_ParticleEmitterType() { return GeneratedEnum<World::ParticleEmitterType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ParticleRenderMode() { return GeneratedEnum<World::ParticleRenderMode>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ParticleBlendMode() { return GeneratedEnum<World::ParticleBlendMode>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World::VfxPlaybackState>::WeEnumSchema(); }
 
 	bool RegisterWorldSchemaModule(SchemaRegistry& registry)
 	{
@@ -12057,6 +11855,7 @@ const EnumSchema& WeEnumSchemaOf_ParticleBlendMode() { return GeneratedEnum<Worl
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleEmitterType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleRenderMode()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleBlendMode()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_VfxPlaybackState()) != SchemaRegistry::Status::Ok) ok = false;
 		const std::vector<TypeSchema> schemas = {
 			WeSchemaOf_UUIDComponent(),
 			WeSchemaOf_TagComponent(),
@@ -12110,7 +11909,7 @@ const EnumSchema& WeEnumSchemaOf_ParticleBlendMode() { return GeneratedEnum<Worl
 			WeSchemaOf_PostProcessComponent(),
 			WeSchemaOf_HealthComponent(),
 			WeSchemaOf_SmartObjectComponent(),
-			WeSchemaOf_ParticleSystemComponent(),
+			WeSchemaOf_VfxComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

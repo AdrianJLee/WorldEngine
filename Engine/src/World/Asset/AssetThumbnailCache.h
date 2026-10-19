@@ -21,7 +21,8 @@ namespace World
 		Level = 7,
 		Curve = 8,
 		Shader = 9,
-		UI = 10
+		UI = 10,
+		VFX = 11
 	};
 
 	struct ThumbnailInfo

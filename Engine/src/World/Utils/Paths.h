@@ -31,5 +31,9 @@ namespace World
 		WLD_API const std::filesystem::path& AssetRoot();
 		// 覆盖内容根(空 = 清除)。一般不必单独设置:项目根一变就跟随。
 		WLD_API void SetAssetRootOverride(const std::filesystem::path& dir);
+		// 引擎全局内容库根目录:默认 <repo>/Engine/content/
+		WLD_API const std::filesystem::path& EngineContentRoot();
+		// 覆盖引擎全局内容库根目录(空 = 清除)。
+		WLD_API void SetEngineContentRootOverride(const std::filesystem::path& dir);
 	}
 }

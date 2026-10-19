@@ -60,8 +60,13 @@ namespace World
 			// P4-U12:删掉早先"Game/ 与 Editor/ 也算内容根"的旧布局回退 —— 内容根只有一个,
 			// 多候选会让"路径写错却恰好命中旧目录"变成静默成功。
 			std::error_code ec;
-			const std::filesystem::path diskPath =
-				World::Paths::AssetRoot() / path;
+			std::filesystem::path diskPath = World::Paths::AssetRoot() / path;
+			if (!std::filesystem::exists(diskPath, ec))
+			{
+				std::filesystem::path engPath = World::Paths::EngineContentRoot() / path;
+				if (std::filesystem::exists(engPath, ec))
+					diskPath = engPath;
+			}
 			return stbi_load(diskPath.string().c_str(), &width, &height, &channels, desiredChannels);
 		}
 
@@ -78,9 +83,16 @@ namespace World
 			}
 
 			const std::filesystem::path requested(path);
-			const std::filesystem::path diskPath = requested.is_absolute()
+			std::filesystem::path diskPath = requested.is_absolute()
 				? requested
 				: World::Paths::AssetRoot() / path;
+			std::error_code ec;
+			if (!requested.is_absolute() && !std::filesystem::exists(diskPath, ec))
+			{
+				std::filesystem::path engPath = World::Paths::EngineContentRoot() / path;
+				if (std::filesystem::exists(engPath, ec))
+					diskPath = engPath;
+			}
 
 			std::ifstream input(diskPath, std::ios::binary | std::ios::ate);
 			if (!input)
@@ -185,7 +197,20 @@ namespace World
 		{
 			std::filesystem::path assetFile(path);
 			if (!assetFile.is_absolute())
-				assetFile = World::Paths::AssetRoot() / path;
+			{
+				std::error_code ec;
+				std::filesystem::path cand = World::Paths::AssetRoot() / path;
+				if (std::filesystem::exists(cand, ec))
+					assetFile = cand;
+				else
+				{
+					std::filesystem::path engCand = World::Paths::EngineContentRoot() / path;
+					if (std::filesystem::exists(engCand, ec))
+						assetFile = engCand;
+					else
+						assetFile = cand;
+				}
+			}
 			TextureAssetFile asset;
 			std::string containerError;
 			if (LoadTextureAssetFile(assetFile, asset, containerError) && !asset.Payload.empty())
@@ -294,7 +319,20 @@ namespace World
 		{
 			std::filesystem::path assetFile(path);
 			if (!assetFile.is_absolute())
-				assetFile = World::Paths::AssetRoot() / path;
+			{
+				std::error_code ec;
+				std::filesystem::path cand = World::Paths::AssetRoot() / path;
+				if (std::filesystem::exists(cand, ec))
+					assetFile = cand;
+				else
+				{
+					std::filesystem::path engCand = World::Paths::EngineContentRoot() / path;
+					if (std::filesystem::exists(engCand, ec))
+						assetFile = engCand;
+					else
+						assetFile = cand;
+				}
+			}
 			TextureAssetFile container;
 			std::string containerError;
 			if (LoadTextureAssetFile(assetFile, container, containerError) && !container.Payload.empty())

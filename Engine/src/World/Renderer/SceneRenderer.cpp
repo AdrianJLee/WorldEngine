@@ -6,6 +6,7 @@
 #include "World/RHI/RhiFramebufferBridge.h"
 #include "World/Renderer/PostProcess/PostProcessPasses.h"
 #include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/ParticleAsset.h"
 #include "World/Script/Bindings/BindParticle.h"
 
 #include "World/Renderer/Renderer.h"
@@ -1399,6 +1400,7 @@ namespace World
 		RenderGroundGrid(camera, cameraTransform);
 		Render2DLighting(camera, cameraTransform);
 		RenderGeometry(camera, cameraTransform);
+		RenderParticles(camera, cameraTransform);
 
 		// M2: Fullscreen Post-Processing Passes (Flash White Overlay)
 		if (m_ActiveScene)
@@ -2047,7 +2049,7 @@ namespace World
 		}
 	}
 
-	void SceneRenderer::RenderDebug(const Camera&, const glm::mat4&)
+	void SceneRenderer::RenderDebug(const Camera& camera, const glm::mat4& cameraTransform)
 	{
 		auto view = m_ActiveScene->m_Registry.view<CircleCollider2DComponent>();
 		for (auto entity : view)
@@ -2428,60 +2430,103 @@ namespace World
 			Renderer2D::DrawLineCore(center - glm::vec3(halfW * 0.4f * sign, 0.0f, 0.0f),
 				center + glm::vec3(halfW * 0.4f * sign, 0.0f, 0.0f), { 0.95f, 0.85f, 0.2f, 0.9f }, static_cast<uint32_t>(entity));
 		}
-	// M5: 2D & 3D 粒子系统四边形绘制
-		auto& partSys = GetGlobalParticleSystem();
-		for (auto entity : m_ActiveScene->m_Registry.view<ParticleSystemComponent>())
-		{
-			const auto& comp = m_ActiveScene->m_Registry.get<ParticleSystemComponent>(entity);
-			uint32_t entId = static_cast<uint32_t>(entity);
-			if (!partSys.HasPoolForEntity(entId)) continue;
-			auto& pool = partSys.GetPoolForEntity(entId, comp.MaxParticles);
-			const auto& matSettings = pool.GetMaterialSettings();
-			Rhi::Handle<Rhi::Texture> particleTex = matSettings.TextureHandle;
-			if (!particleTex && !matSettings.TexturePath.empty())
-			{
-				const AssetRef texRef { StringPool::Get().InternPath(matSettings.TexturePath), AssetId() };
-				particleTex = ResolveTextureAsset(texRef);
-			}
-			const bool useSubUV = (matSettings.SubUVTilesX * matSettings.SubUVTilesY) > 1u
-				|| ((comp.VfxFlags & ParticleVfxFlag_SubUVEnabled) != 0);
-			const ParticleBlendMode blendMode = (comp.BlendMode != ParticleBlendMode::AlphaBlend)
-				? comp.BlendMode
-				: matSettings.BlendMode;
-			for (const auto& p : pool.GetParticles())
-			{
-				if (!p.Active) continue;
-				glm::vec4 drawColor = p.Color;
-				if (blendMode == ParticleBlendMode::Additive)
-				{
-					const float boost = std::max(1.0f, matSettings.EmissiveBoost);
-					drawColor.r *= boost;
-					drawColor.g *= boost;
-					drawColor.b *= boost;
-				}
-				else if (blendMode == ParticleBlendMode::Opaque)
-				{
-					drawColor.a = 1.0f;
-				}
+	}
 
-				if (particleTex || useSubUV)
+	void SceneRenderer::RenderParticles(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		WLD_TRACE_FUNCTION();
+		if (!m_ActiveScene) return;
+
+		auto& partSys = GetGlobalParticleSystem();
+
+		// 3D 相机对齐基准基底 (Billboard Basis)
+		const glm::vec3 camRight = glm::normalize(glm::vec3(cameraTransform[0]));
+		const glm::vec3 camUp = glm::normalize(glm::vec3(cameraTransform[1]));
+		const glm::vec3 camForward = -glm::normalize(glm::vec3(cameraTransform[2]));
+
+		glm::mat4 billboardRot(1.0f);
+		billboardRot[0] = glm::vec4(camRight, 0.0f);
+		billboardRot[1] = glm::vec4(camUp, 0.0f);
+		billboardRot[2] = glm::vec4(-camForward, 0.0f);
+
+		for (auto entity : m_ActiveScene->m_Registry.view<VfxComponent>())
+		{
+			const auto& vfx = m_ActiveScene->m_Registry.get<VfxComponent>(entity);
+			if (vfx.PlaybackState == VfxPlaybackState::Stopped) continue;
+			if (!vfx.Effect.HasPath()) continue;
+
+			const std::string path = StringPool::Get().PathOf(vfx.Effect.Path);
+			const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
+			if (!asset) continue;
+
+			uint32_t entId = static_cast<uint32_t>(entity);
+			for (size_t i = 0; i < asset->Emitters.size(); ++i)
+			{
+				const auto& em = asset->Emitters[i];
+				if (!em.Enabled) continue;
+				uint32_t poolId = (entId << 8) | static_cast<uint32_t>(i);
+				if (!partSys.HasPoolForEntity(poolId)) continue;
+				auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
+				const auto& matSettings = pool.GetMaterialSettings();
+				Rhi::Handle<Rhi::Texture> particleTex = matSettings.TextureHandle;
+				if (!particleTex && !matSettings.TexturePath.empty())
 				{
-					const glm::vec4 uvRect = World::ComputeSubUVRect(
-						p.SubUVFrameIndex, matSettings.SubUVTilesX, matSettings.SubUVTilesY);
-					const glm::vec2 uvCoords[4] = {
-						{ uvRect.x, uvRect.y },
-						{ uvRect.z, uvRect.y },
-						{ uvRect.z, uvRect.w },
-						{ uvRect.x, uvRect.w }
-					};
-					const glm::mat4 quadTransform = glm::translate(glm::mat4(1.0f), p.Position)
-						* glm::rotate(glm::mat4(1.0f), p.Rotation, glm::vec3(0.0f, 0.0f, 1.0f))
-						* glm::scale(glm::mat4(1.0f), glm::vec3(p.Size.x, p.Size.y, 1.0f));
-					Renderer2D::DrawQuadCore(quadTransform, particleTex, drawColor, uvCoords, 1.0f, static_cast<int>(entId), nullptr, matSettings.SortingLayer);
+					const AssetRef texRef { StringPool::Get().InternPath(matSettings.TexturePath), AssetId() };
+					particleTex = ResolveTextureAsset(texRef);
 				}
-				else
+				const bool useSubUV = (matSettings.SubUVTilesX * matSettings.SubUVTilesY) > 1u;
+				const ParticleBlendMode blendMode = matSettings.BlendMode;
+				const bool isAdditive = (blendMode == ParticleBlendMode::Additive);
+
+				for (const auto& p : pool.GetParticles())
 				{
-					Renderer2D::DrawRotatedQuad(p.Position, p.Size, p.Rotation, drawColor);
+					if (!p.Active) continue;
+					glm::vec4 drawColor = p.Color * vfx.TintColor;
+					if (blendMode == ParticleBlendMode::Opaque)
+					{
+						drawColor.a = 1.0f;
+					}
+
+					glm::mat4 quadTransform;
+					if (em.FacingMode == ParticleRenderMode::HorizontalQuad)
+					{
+						quadTransform = glm::translate(glm::mat4(1.0f), p.Position)
+							* glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f))
+							* glm::rotate(glm::mat4(1.0f), p.Rotation, glm::vec3(0.0f, 0.0f, 1.0f))
+							* glm::scale(glm::mat4(1.0f), glm::vec3(p.Size.x, p.Size.y, 1.0f));
+					}
+					else if (em.FacingMode == ParticleRenderMode::Quad2D)
+					{
+						quadTransform = glm::translate(glm::mat4(1.0f), p.Position)
+							* glm::rotate(glm::mat4(1.0f), p.Rotation, glm::vec3(0.0f, 0.0f, 1.0f))
+							* glm::scale(glm::mat4(1.0f), glm::vec3(p.Size.x, p.Size.y, 1.0f));
+					}
+					else
+					{
+						// Default: Billboard facing 3D camera
+						quadTransform = glm::translate(glm::mat4(1.0f), p.Position)
+							* billboardRot
+							* glm::rotate(glm::mat4(1.0f), p.Rotation, glm::vec3(0.0f, 0.0f, 1.0f))
+							* glm::scale(glm::mat4(1.0f), glm::vec3(p.Size.x, p.Size.y, 1.0f));
+					}
+
+					// 传入 -60000 保证粒子保持自发光纯色，不被场景 2D 环境光衰减污染
+					if (particleTex || useSubUV)
+					{
+						const glm::vec4 uvRect = World::ComputeSubUVRect(
+							p.SubUVFrameIndex, matSettings.SubUVTilesX, matSettings.SubUVTilesY);
+						const glm::vec2 uvCoords[4] = {
+							{ uvRect.x, uvRect.y },
+							{ uvRect.z, uvRect.y },
+							{ uvRect.z, uvRect.w },
+							{ uvRect.x, uvRect.w }
+						};
+						Renderer2D::DrawQuadCore(quadTransform, particleTex, drawColor, uvCoords, 1.0f, static_cast<int>(entId), nullptr, -60000, isAdditive);
+					}
+					else
+					{
+						Renderer2D::DrawQuadCore(quadTransform, nullptr, drawColor, nullptr, 1.0f, static_cast<int>(entId), nullptr, -60000, isAdditive);
+					}
 				}
 			}
 		}

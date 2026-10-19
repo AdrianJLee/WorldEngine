@@ -80,6 +80,7 @@ namespace World
 		void ApplyRenderScale();
 		void RecordSubmit(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity);
 		void RenderGeometry(const Camera& camera, const glm::mat4& cameraTransform);
+		void RenderParticles(const Camera& camera, const glm::mat4& cameraTransform);
 		void Render2DLighting(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderDebug(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderGroundGrid(const Camera& camera, const glm::mat4& cameraTransform);

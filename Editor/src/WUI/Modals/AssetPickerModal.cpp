@@ -1,3 +1,4 @@
+#include <unordered_set>
 #include "wldpch.h"
 #include "WUI/Modals/AssetPickerModal.h"
 #include "WUI/Common/AssetThumbnailRenderer.h"
@@ -46,6 +47,7 @@ namespace World
 			case AssetCategory::Curve:    return { 0.20f, 0.80f, 0.75f, 1.0f }; // Teal
 			case AssetCategory::Shader:   return { 0.50f, 0.50f, 0.95f, 1.0f }; // Indigo
 			case AssetCategory::UI:       return { 0.85f, 0.35f, 0.70f, 1.0f }; // Magenta
+			case AssetCategory::VFX:      return { 1.0f, 0.45f, 0.15f, 1.0f }; // Orange
 			default:                      return { 0.55f, 0.55f, 0.55f, 1.0f }; // Gray
 			}
 		}
@@ -64,13 +66,27 @@ namespace World
 			case AssetCategory::Curve:    return "CURVE";
 			case AssetCategory::Shader:   return "SHADER";
 			case AssetCategory::UI:       return "UI";
+			case AssetCategory::VFX:      return "VFX";
 			default:                      return "MISC";
 			}
 		}
 	}
 
 	AssetPickerModal::AssetPickerModal()
-		: m_CategoryNames({ "All", "Texture", "Material", "Mesh", "Prefab", "Script", "Audio", "Level", "Curve", "Shader", "UI" })
+		: m_CategoryNames({
+			"全部 (All)",
+			"贴图 (Texture)",
+			"材质 (Material)",
+			"网格 (Mesh)",
+			"预制体 (Prefab)",
+			"脚本 (Script)",
+			"音频 (Audio)",
+			"关卡 (Level)",
+			"曲线 (Curve)",
+			"着色器 (Shader)",
+			"界面 (UI)",
+			"特效 (VFX)"
+		})
 	{
 		PopulateProjectAssets();
 	}
@@ -79,39 +95,59 @@ namespace World
 	{
 		m_AllAssets.clear();
 		std::error_code ec;
-		std::filesystem::path root = World::Paths::AssetRoot();
-		if (!std::filesystem::exists(root, ec))
-		{
-			root = std::filesystem::current_path() / "assets";
-			if (!std::filesystem::exists(root, ec))
-				root = std::filesystem::current_path() / "projects" / "assets";
-		}
+		std::vector<std::filesystem::path> searchRoots;
 
-		if (!std::filesystem::exists(root, ec))
+		std::filesystem::path primary = World::Paths::AssetRoot();
+		if (std::filesystem::exists(primary, ec))
+			searchRoots.push_back(primary);
+
+		std::filesystem::path projAssets = std::filesystem::current_path() / "projects" / "assets";
+		if (std::filesystem::exists(projAssets, ec))
+			searchRoots.push_back(projAssets);
+
+		std::filesystem::path templateAssets = std::filesystem::current_path() / "templates" / "project-example" / "assets";
+		if (std::filesystem::exists(templateAssets, ec))
+			searchRoots.push_back(templateAssets);
+
+		std::filesystem::path engineRoot = World::Paths::EngineContentRoot();
+		if (std::filesystem::exists(engineRoot, ec))
+			searchRoots.push_back(engineRoot);
+
+		if (searchRoots.empty())
 			return;
 
 		auto& thumbCache = AssetThumbnailCache::Get();
+		std::unordered_set<std::string> seenPaths;
 
-		for (const auto& entry : std::filesystem::recursive_directory_iterator(root,
-			std::filesystem::directory_options::skip_permission_denied, ec))
+		for (const auto& root : searchRoots)
 		{
-			if (ec || !entry.is_regular_file(ec))
-				continue;
+			for (const auto& entry : std::filesystem::recursive_directory_iterator(root,
+				std::filesystem::directory_options::skip_permission_denied, ec))
+			{
+				if (ec || !entry.is_regular_file(ec))
+					continue;
 
-			const std::filesystem::path rel = std::filesystem::relative(entry.path(), root, ec);
-			if (ec || rel.empty())
-				continue;
+				const std::filesystem::path rel = std::filesystem::relative(entry.path(), root, ec);
+				if (ec || rel.empty())
+					continue;
 
-			std::string logical = rel.generic_string();
-			AssetCategory cat = AssetThumbnailCache::DetectCategory(logical);
+				std::string logical = (root == engineRoot) ? ("engine/" + rel.generic_string()) : rel.generic_string();
+				if (seenPaths.count(logical))
+					continue;
+				seenPaths.insert(logical);
 
-			AssetItem item;
-			item.Path = logical;
-			item.Name = rel.filename().string();
-			item.Category = cat;
-			m_AllAssets.push_back(std::move(item));
+				AssetCategory cat = AssetThumbnailCache::DetectCategory(logical);
+				if (cat == AssetCategory::Unknown)
+					continue;
 
-			thumbCache.GetOrCreateThumbnail(logical);
+				AssetItem item;
+				item.Path = logical;
+				item.Name = rel.filename().string();
+				item.Category = cat;
+				m_AllAssets.push_back(std::move(item));
+
+				thumbCache.GetOrCreateThumbnail(logical);
+			}
 		}
 
 		std::sort(m_AllAssets.begin(), m_AllAssets.end(), [](const AssetItem& a, const AssetItem& b) {
@@ -239,22 +275,46 @@ namespace World
 		}
 		curY += 32.0f;
 
-		// 搜索栏与视图切换 (4px 栅格)
-		Wui::Label(ctx, { modalRect.X + 16.0f, curY + 4.0f }, "Search:", theme.TextMuted, theme.FontSizeBody);
-		const Wui::WuiRect searchRect { modalRect.X + 76.0f, curY, modalRect.W - 194.0f, 24.0f };
+		// 搜索栏与下拉选择器 + 视图切换 (第一行)
+		Wui::Label(ctx, { modalRect.X + 16.0f, curY + 4.0f }, "搜索:", theme.TextMuted, theme.FontSizeBody);
+		const float catComboW = 160.0f;
+		const float viewToggleW = 86.0f;
+		const float searchW = modalRect.W - 32.0f - 52.0f - catComboW - viewToggleW - 16.0f;
+
+		const Wui::WuiRect searchRect { modalRect.X + 56.0f, curY, searchW, 24.0f };
 		Wui::TextField(ctx, baseId++, searchRect, m_SearchQuery, theme);
 
-		const Wui::WuiRect viewToggleRect { modalRect.X + modalRect.W - 106.0f, curY, 90.0f, 24.0f };
+		const Wui::WuiRect catComboRect { searchRect.X + searchRect.W + 8.0f, curY, catComboW, 24.0f };
+		Wui::Combo(ctx, baseId++, catComboRect, "分类", m_CategoryNames, m_SelectedCategoryIndex, theme);
+
+		const Wui::WuiRect viewToggleRect { catComboRect.X + catComboRect.W + 8.0f, curY, viewToggleW, 24.0f };
 		if (Wui::Button(ctx, baseId++, viewToggleRect, (m_ViewMode == 0 ? "网格视图" : "列表视图"), theme))
 		{
 			m_ViewMode = 1 - m_ViewMode;
 		}
-		curY += 30.0f;
+		curY += 28.0f;
 
-		// 类别选择分段器
-		const Wui::WuiRect catRect { modalRect.X + 16.0f, curY, modalRect.W - 32.0f, 24.0f };
-		Wui::Segmented(ctx, baseId++, catRect, m_CategoryNames, m_SelectedCategoryIndex, theme);
-		curY += 30.0f;
+		// 快速分类过滤胶囊标签栏 (第二行: 12 大分类一览无余)
+		const char* shortLabels[] = {
+			"全部", "贴图", "材质", "网格", "预制体", "脚本", "音频", "关卡", "曲线", "着色器", "界面", "特效"
+		};
+		const float btnPad = 4.0f;
+		const float totalW = modalRect.W - 32.0f;
+		const float pillW = (totalW - btnPad * 11.0f) / 12.0f;
+		for (int i = 0; i < 12; ++i)
+		{
+			const Wui::WuiRect pillRect { modalRect.X + 16.0f + static_cast<float>(i) * (pillW + btnPad), curY, pillW, 22.0f };
+			const bool isSelected = (m_SelectedCategoryIndex == i);
+			if (isSelected)
+			{
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, pillRect, theme.Accent, 3.0f });
+			}
+			if (Wui::Button(ctx, baseId++, pillRect, shortLabels[i], theme))
+			{
+				m_SelectedCategoryIndex = i;
+			}
+		}
+		curY += 28.0f;
 
 		// 资产内容列表显示区 (带剪裁与滚动条)
 		const float listAreaHeight = modalRect.H - 146.0f;

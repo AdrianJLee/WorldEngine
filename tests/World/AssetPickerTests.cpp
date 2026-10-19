@@ -18,6 +18,8 @@ static void TestCategoryDetection()
 	assert(AssetThumbnailCache::DetectCategory("assets/audio/explosion.wav") == AssetCategory::Audio);
 	assert(AssetThumbnailCache::DetectCategory("assets/scenes/level01.wscene") == AssetCategory::Level);
 	assert(AssetThumbnailCache::DetectCategory("assets/misc/readme.txt") == AssetCategory::Unknown);
+	assert(AssetThumbnailCache::DetectCategory("assets/vfx/flame_tornado.wvfx") == AssetCategory::VFX);
+	assert(AssetThumbnailCache::DetectCategory("assets/vfx/sparks.wparticle") == AssetCategory::VFX);
 
 	std::cout << "[PASS] TestCategoryDetection\n";
 }

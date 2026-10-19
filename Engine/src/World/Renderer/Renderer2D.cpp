@@ -92,7 +92,8 @@ namespace World
 			const std::vector<Rhi::VertexAttribute>& attributes, uint32_t stride,
 			Rhi::PrimitiveTopology topology,
 			const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout,
-			float lineWidth = 1.0f)
+			float lineWidth = 1.0f,
+			bool additive = false)
 		{
 			Rhi::PipelineDesc desc;
 			desc.Shader = shader;
@@ -116,11 +117,22 @@ namespace World
 			// 深度测试开启(可被 3D 前景遮挡),关闭深度写入避免 2D 同平面 Z-fighting 与相互深度剔除产生撕裂
 			desc.DepthStencil.DepthTest = true;
 			desc.DepthStencil.DepthWrite = false;
-			desc.Blends.push_back({
-				true,
-				Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
-				Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
-				0xF });
+			if (additive)
+			{
+				desc.Blends.push_back({
+					true,
+					Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::One, Rhi::BlendOp::Add,
+					Rhi::BlendFactor::One, Rhi::BlendFactor::One, Rhi::BlendOp::Add,
+					0xF });
+			}
+			else
+			{
+				desc.Blends.push_back({
+					true,
+					Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
+					Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
+					0xF });
+			}
 			desc.DebugName = shader->GetDesc().DebugName;
 			return desc;
 		}
@@ -194,6 +206,7 @@ namespace World
 		struct Renderer2DData
 		{
 			Batch<QuadVertex> Quads;
+			Batch<QuadVertex> QuadsAdditive;
 			Batch<CircleVertex> Circles;
 			Batch<LineVertex> Lines;
 
@@ -222,10 +235,10 @@ namespace World
 
 		template <typename Vertex, uint32_t MaxIndices>
 		void CreateBatchPipeline(Batch<Vertex>& batch, const Rhi::Handle<Rhi::Shader>& shader,
-			const BatchSpec& spec, const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout)
+			const BatchSpec& spec, const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout, bool additive = false)
 		{
 			batch.Pipeline = Renderer::GetDevice()->CreatePipeline(
-				MakePipeline(shader, spec.Attributes, sizeof(Vertex), spec.Topology, textureLayout, spec.LineWidth));
+				MakePipeline(shader, spec.Attributes, sizeof(Vertex), spec.Topology, textureLayout, spec.LineWidth, additive));
 		}
 
 		template <typename Vertex, uint32_t MaxIndices>
@@ -273,9 +286,9 @@ namespace World
 		template <typename Vertex, uint32_t MaxIndices>
 		void CreateBatch(Batch<Vertex>& batch, const Rhi::Handle<Rhi::Shader>& shader,
 			const BatchSpec& spec, const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout,
-			uint32_t maxVertices)
+			uint32_t maxVertices, bool additive = false)
 		{
-			CreateBatchPipeline<Vertex, MaxIndices>(batch, shader, spec, textureLayout);
+			CreateBatchPipeline<Vertex, MaxIndices>(batch, shader, spec, textureLayout, additive);
 			CreateBatchBuffers<Vertex, MaxIndices>(batch, spec, maxVertices);
 		}
 
@@ -404,7 +417,9 @@ namespace World
 
 		const auto quadShader = CreateRendererShader(kQuadShaderPath, "Renderer2D-Quad");
 		CreateBatch<QuadVertex, MaxQuads * 6>(s_Data.Quads, quadShader, QuadBatchSpec(),
-			s_Data.TextureLayout, MaxQuads * 4);
+			s_Data.TextureLayout, MaxQuads * 4, false);
+		CreateBatch<QuadVertex, MaxQuads * 6>(s_Data.QuadsAdditive, quadShader, QuadBatchSpec(),
+			s_Data.TextureLayout, MaxQuads * 4, true);
 
 		const auto circleShader = CreateRendererShader(kCircleShaderPath, "Renderer2D-Circle");
 		CreateBatch<CircleVertex, MaxCircles * 6>(s_Data.Circles, circleShader, CircleBatchSpec(),
@@ -449,14 +464,17 @@ namespace World
 		const BatchSpec& lineSpec = LineBatchSpec();
 		const Rhi::Handle<Rhi::Pipeline> quadPipeline = Renderer::GetDevice()->CreatePipeline(
 			MakePipeline(quadShader, quadSpec.Attributes, sizeof(QuadVertex),
-				quadSpec.Topology, s_Data.TextureLayout, quadSpec.LineWidth));
+				quadSpec.Topology, s_Data.TextureLayout, quadSpec.LineWidth, false));
+		const Rhi::Handle<Rhi::Pipeline> quadAdditivePipeline = Renderer::GetDevice()->CreatePipeline(
+			MakePipeline(quadShader, quadSpec.Attributes, sizeof(QuadVertex),
+				quadSpec.Topology, s_Data.TextureLayout, quadSpec.LineWidth, true));
 		const Rhi::Handle<Rhi::Pipeline> circlePipeline = Renderer::GetDevice()->CreatePipeline(
 			MakePipeline(circleShader, circleSpec.Attributes, sizeof(CircleVertex),
 				circleSpec.Topology, s_Data.TextureLayout, circleSpec.LineWidth));
 		const Rhi::Handle<Rhi::Pipeline> linePipeline = Renderer::GetDevice()->CreatePipeline(
 			MakePipeline(lineShader, lineSpec.Attributes, sizeof(LineVertex),
 				lineSpec.Topology, s_Data.TextureLayout, lineSpec.LineWidth));
-		if (!quadPipeline || !circlePipeline || !linePipeline)
+		if (!quadPipeline || !quadAdditivePipeline || !circlePipeline || !linePipeline)
 		{
 			if (error) *error = "pipeline creation failed (Renderer2D)";
 			return 0;
@@ -464,12 +482,14 @@ namespace World
 
 		// 3) 提交:替换 + 旧管线延迟释放。
 		const Rhi::Handle<Rhi::Pipeline> oldQuad = s_Data.Quads.Pipeline;
+		const Rhi::Handle<Rhi::Pipeline> oldQuadAdd = s_Data.QuadsAdditive.Pipeline;
 		const Rhi::Handle<Rhi::Pipeline> oldCircle = s_Data.Circles.Pipeline;
 		const Rhi::Handle<Rhi::Pipeline> oldLine = s_Data.Lines.Pipeline;
 		s_Data.Quads.Pipeline = quadPipeline;
+		s_Data.QuadsAdditive.Pipeline = quadAdditivePipeline;
 		s_Data.Circles.Pipeline = circlePipeline;
 		s_Data.Lines.Pipeline = linePipeline;
-		Renderer::QueueRelease([oldQuad, oldCircle, oldLine]() {});
+		Renderer::QueueRelease([oldQuad, oldQuadAdd, oldCircle, oldLine]() {});
 		return 3;
 	}
 
@@ -489,6 +509,7 @@ namespace World
 			batch.IndexCount = 0;
 		};
 		release(s_Data.Quads);
+		release(s_Data.QuadsAdditive);
 		release(s_Data.Circles);
 		release(s_Data.Lines);
 
@@ -537,6 +558,7 @@ namespace World
 	{
 		s_Data.TextureSlotIndex = 1;
 		ResetBatch(s_Data.Quads);
+		ResetBatch(s_Data.QuadsAdditive);
 		ResetBatch(s_Data.Circles);
 		ResetBatch(s_Data.Lines);
 	}
@@ -600,17 +622,18 @@ namespace World
 
 		flushBatch(s_Data.Lines);
 		flushBatch(s_Data.Quads);
+		flushBatch(s_Data.QuadsAdditive);
 		flushBatch(s_Data.Circles);
 	}
 
 	void Renderer2D::DrawQuadCore(const glm::mat4& transform, const Rhi::Handle<Rhi::Texture>& texture,
 		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID,
-		const Rhi::Handle<Rhi::Texture>& normalTexture, int32_t sortingLayer)
+		const Rhi::Handle<Rhi::Texture>& normalTexture, int32_t sortingLayer, bool additive)
 	{
 		WLD_TRACE_FUNCTION();
 		glm::vec3 transformedPositions[4];
 		ComputeQuadPositions(transform, transformedPositions);
-		DrawQuadPositions(transformedPositions, texture, color, texCoords, tilingFactor, entityID, normalTexture, sortingLayer);
+		DrawQuadPositions(transformedPositions, texture, color, texCoords, tilingFactor, entityID, normalTexture, sortingLayer, additive);
 	}
 
 	// 只做"每实体独立"的顶点变换:可在工作线程调用(只读 s_Data.VertexPositions)。
@@ -633,10 +656,11 @@ namespace World
 	// 批次状态机部分(纹理槽/批缓冲指针):必须在主线程按原顺序执行。
 	void Renderer2D::DrawQuadPositions(const glm::vec3 positions[4], const Rhi::Handle<Rhi::Texture>& texture,
 		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID,
-		const Rhi::Handle<Rhi::Texture>& normalTexture, int32_t sortingLayer)
+		const Rhi::Handle<Rhi::Texture>& normalTexture, int32_t sortingLayer, bool additive)
 	{
 		WLD_TRACE_FUNCTION();
-		if (s_Data.Quads.IndexCount >= MaxQuads * 6)
+		auto& targetBatch = additive ? s_Data.QuadsAdditive : s_Data.Quads;
+		if (targetBatch.IndexCount >= MaxQuads * 6)
 			NextBatch();
 
 		constexpr glm::vec2 defaultTexCoords[] = {
@@ -674,17 +698,17 @@ namespace World
 
 		for (uint32_t i = 0; i < 4; i++)
 		{
-			s_Data.Quads.Ptr->Position = positions[i];
-			s_Data.Quads.Ptr->Color = color;
-			s_Data.Quads.Ptr->TexCoord = actualTexCoords[i];
-			s_Data.Quads.Ptr->TexIndex = textureIndex;
-			s_Data.Quads.Ptr->TilingFactor = tilingFactor;
-			s_Data.Quads.Ptr->EntityID = entityID;
-			s_Data.Quads.Ptr->NormalTexIndex = normalIndex;
-			s_Data.Quads.Ptr->SortingLayer = sortLayerFloat;
-			s_Data.Quads.Ptr++;
+			targetBatch.Ptr->Position = positions[i];
+			targetBatch.Ptr->Color = color;
+			targetBatch.Ptr->TexCoord = actualTexCoords[i];
+			targetBatch.Ptr->TexIndex = textureIndex;
+			targetBatch.Ptr->TilingFactor = tilingFactor;
+			targetBatch.Ptr->EntityID = entityID;
+			targetBatch.Ptr->NormalTexIndex = normalIndex;
+			targetBatch.Ptr->SortingLayer = sortLayerFloat;
+			targetBatch.Ptr++;
 		}
-		s_Data.Quads.IndexCount += 6;
+		targetBatch.IndexCount += 6;
 		s_Data.Stats.QuadCount++;
 	}
 

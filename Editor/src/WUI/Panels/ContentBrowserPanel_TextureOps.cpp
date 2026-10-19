@@ -699,14 +699,17 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 		const float kRootRowH = 22.0f;
 		const bool sourcesAvailable = ProjectSourcesAvailable();
 		const bool pluginsAvailable = ProjectPluginsAvailable();
-		const float treeListTop = treeRect.Y + kRootRowH * 3.0f + 1.0f;
+		const bool engineAvailable = EngineContentAvailable();
+		const float treeListTop = treeRect.Y + kRootRowH * 4.0f + 1.0f;
 		const Wui::WuiRect treeListRect { treeRect.X, treeListTop, treeRect.W,
 			std::max(0.0f, treeRect.H - (treeListTop - treeRect.Y)) };
 		{
 			const Wui::WuiRect contentRow { treeRect.X, treeRect.Y, treeRect.W, kRootRowH };
-			const Wui::WuiRect sourcesRow { treeRect.X, treeRect.Y + kRootRowH, treeRect.W, kRootRowH };
-			const Wui::WuiRect pluginsRow { treeRect.X, treeRect.Y + kRootRowH * 2.0f, treeRect.W, kRootRowH };
-			const std::string contentLabel = Wui::Tr("panel.content_browser.root.content", "Content");
+			const Wui::WuiRect engineRow { treeRect.X, treeRect.Y + kRootRowH, treeRect.W, kRootRowH };
+			const Wui::WuiRect sourcesRow { treeRect.X, treeRect.Y + kRootRowH * 2.0f, treeRect.W, kRootRowH };
+			const Wui::WuiRect pluginsRow { treeRect.X, treeRect.Y + kRootRowH * 3.0f, treeRect.W, kRootRowH };
+			const std::string contentLabel = Wui::Tr("panel.content_browser.root.content", "项目内容 (Content)");
+			const std::string engineLabel = Wui::Tr("panel.content_browser.root.engine_content", "引擎内容库 (Engine)");
 			const std::string sourcesLabel = Wui::Tr("panel.content_browser.root.project_sources", "Project C++");
 			const std::string pluginsLabel = Wui::Tr("panel.content_browser.root.project_plugins", "Project Plugins");
 			const std::string contentTooltip = Wui::Tr("panel.content_browser.root.content.tooltip",
@@ -769,6 +772,9 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 			if (rootRow(contentRow, BrowserRootScope::Content, "browser.root.content", contentLabel,
 					contentTooltip, m_Model.ContentRoot, true))
 				SwitchRoot(BrowserRootScope::Content);
+			if (rootRow(engineRow, BrowserRootScope::EngineContent, "browser.root.engine-content", engineLabel,
+					"引擎全局内容库: 包含工业级粒子特效 (.wvfx)、材质 (.wmat)、粒子贴图与3D模型，所有项目均可直接复用", EngineContentRoot(), engineAvailable))
+				SwitchRoot(BrowserRootScope::EngineContent);
 			if (rootRow(sourcesRow, BrowserRootScope::ProjectSources, "browser.root.project-sources",
 					sourcesLabel, sourcesTooltip, ProjectSourceRoot(), sourcesAvailable))
 				SwitchRoot(BrowserRootScope::ProjectSources);
@@ -872,7 +878,9 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 					&& m_Model.Scope != BrowserRootScope::ProjectPlugins)
 				{
 					const std::filesystem::path rel = node.Path.lexically_relative(m_Model.Root);
-					ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
+					const std::string dragRel = (m_Model.Scope == BrowserRootScope::EngineContent)
+						? ("engine/" + rel.generic_string()) : rel.generic_string();
+					ctx.BeginDrag(Wui::HashId(("browser.drag." + dragRel).c_str()), "file:" + dragRel);
 					ctx.SetCursor(Wui::WuiCursor::Hand);
 				}
 				if (fileDrag && hovered)
@@ -1293,7 +1301,9 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 				&& m_Model.Scope != BrowserRootScope::ProjectPlugins)
 			{
 				const std::filesystem::path rel = path.lexically_relative(m_Model.Root);
-				ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
+				const std::string dragRel = (m_Model.Scope == BrowserRootScope::EngineContent)
+					? ("engine/" + rel.generic_string()) : rel.generic_string();
+				ctx.BeginDrag(Wui::HashId(("browser.drag." + dragRel).c_str()), "file:" + dragRel);
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 			}
 			if (ctx.IsDoubleClicked(itemRect))

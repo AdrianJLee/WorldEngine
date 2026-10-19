@@ -754,29 +754,21 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 			// P4-U29:绘制延后到帧末(命中/遮挡登记仍在此处当场生效)。
 			WuiDeferredPopupScope deferred(ctx);
 			const float itemH = 22.0f;
-			const WuiRect panel { rect.X, rect.Y + rect.H + 2.0f, rect.W, itemH * options.size() + 8.0f };
+			const float panelH = itemH * static_cast<float>(options.size()) + 8.0f;
+			const bool flipUp = (rect.Y + rect.H + panelH > ctx.Input().ViewportSize.y) && (rect.Y - panelH > 0.0f);
+			const WuiRect panel { rect.X, flipUp ? rect.Y - panelH - 2.0f : rect.Y + rect.H + 2.0f, rect.W, panelH };
 			DrawPanelSurface(ctx, panel, theme);
 			for (size_t i = 0; i < options.size(); ++i)
 			{
 				const WuiRect item { panel.X + 4.0f, panel.Y + 4.0f + itemH * static_cast<float>(i), panel.W - 8.0f, itemH };
-				// P4-UX5:每个条目登记一个无障碍节点(验证者指出 MSAA/阴影贴图这类下拉的选项
-				// 点不到 —— 只有触发器登记过)。节点 id = ComboOptionId(parent, i),弹层关闭时
-				// 本段代码不执行,下一帧 BeginFrame 清掉本窗口旧节点 → 节点随弹层自然消失。
-				// 点击等价性:ui.invoke 只是把点击注入条目矩形中心,WuiScriptedInput 按坐标注入
-				// hover/press/release;条目自己的 ctx.IsHovered/IsClicked 读的仍是面板输入状态,
-				// 与用户鼠标点同一行完全同一条路径(与 Checkbox/MenuItem 的可脚本化方式一致)。
 				RegisterAccessNode(ComboOptionId(id, i), "combo-option", item,
 					options[i], (selected >= 0 && i == static_cast<size_t>(selected)) ? "true" : "false");
 				if (ctx.IsHovered(item))
 				{
 					ctx.Commands().push_back({ WuiDrawKind::Rect, item, theme.ButtonHover, 2.0f });
-					// ③ 弹层内光标归弹层:候选行是弹层自己的可点控件,显式声明 Hand,
-					// 不再让"更早绘制的控件"留下的光标形状代表弹层。
 					ctx.SetCursor(WuiCursor::Hand);
 				}
-				// P4-U28:条目在 release 帧确认(press+release 必须落在同一项)—— 在条目上
-				// 按下后拖到弹层外松手不会选中;关闭那一帧的 release 也不会被下层控件认领。
-				if (ctx.IsClickCompleted(ComboOptionId(id, i), item))
+				if ((ctx.IsHovered(item) && ctx.Input().MouseClicked[0]) || ctx.IsClickCompleted(ComboOptionId(id, i), item))
 				{
 					selected = static_cast<int>(i);
 					changed = true;
@@ -948,7 +940,7 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 				15.0f, false });
 			ctx.Commands().push_back({ WuiDrawKind::ClipPop });
 			// P4-U28:与 Combo 同一条 release 确认口径(拖出弹层后松手不选中)。
-			if (ctx.IsClickCompleted(ComboOptionId(id, static_cast<size_t>(optionIndex)), item))
+			if ((ctx.IsHovered(item) && ctx.Input().MouseClicked[0]) || ctx.IsClickCompleted(ComboOptionId(id, static_cast<size_t>(optionIndex)), item))
 			{
 				if (std::getenv("WLD_TRACE_UI"))
 					WLD_CORE_INFO("[ui] search-combo row clicked: id={0} option={1} label='{2}'",

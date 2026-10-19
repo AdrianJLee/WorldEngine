@@ -90,8 +90,8 @@ namespace World
 	static_assert(sizeof(SmartObjectComponent) <= 64,
 		"SmartObjectComponent must stay within one cache line");
 
-	static_assert(std::is_trivially_copyable_v<ParticleSystemComponent>,
-		"ParticleSystemComponent must stay trivially copyable");
-	static_assert(sizeof(ParticleSystemComponent) == 64,
-		"ParticleSystemComponent must stay within one cache line");
+	static_assert(std::is_trivially_copyable_v<VfxComponent>,
+		"VfxComponent must stay trivially copyable");
+	static_assert(sizeof(VfxComponent) == 64,
+		"VfxComponent must stay within one cache line");
 }

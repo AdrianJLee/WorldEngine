@@ -1,0 +1,129 @@
+# WorldEngine Particle Asset
+FormatVersion: 2
+Name: "LightningPlasmaBeam3D"
+WarmupTime: 0
+Looping: true
+Emitters:
+  - Name: "PlasmaBeamCore"
+    Enabled: true
+    MaxParticles: 400
+    Lifetime: 0.8
+    EmissionRate: 180
+    EmitterType: Point
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/electric_beam.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 3.5
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 18
+      SpeedVariance: 2
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.05
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 1.2
+      TurbulenceFrequency: 2
+    Evolution:
+      SizeStart: 0.45
+      SizeEnd: 0.1
+      ColorStart: [0.2, 0.85, 1, 1]
+      ColorEnd: [0.05, 0.35, 1, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "SpiralElectricArcs"
+    Enabled: true
+    MaxParticles: 300
+    Lifetime: 1.2
+    EmissionRate: 120
+    EmitterType: Point
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/spark_glow.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 3.0
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 12
+      SpeedVariance: 3
+      Gravity: [0, 0, 0]
+      LinearDrag: 0.2
+      VortexStrength: 25
+      VortexAxis: [0, 0, 1]
+      TurbulenceStrength: 4.5
+      TurbulenceFrequency: 2.5
+    Evolution:
+      SizeStart: 0.25
+      SizeEnd: 0.04
+      ColorStart: [0.85, 0.3, 1, 1]
+      ColorEnd: [0.1, 0.9, 1, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0
+  - Name: "ScatterImpactSparks"
+    Enabled: true
+    MaxParticles: 200
+    Lifetime: 1.5
+    EmissionRate: 80
+    EmitterType: Point
+    FacingMode: Billboard
+    LockToXY: false
+    MeshPath: ""
+    Material:
+      TexturePath: "textures/particles/spark_glow.wtex"
+      MaterialPath: "materials/particles/particle_additive.wmat"
+      BlendMode: Additive
+      EmissiveBoost: 2.8
+      SoftParticlesEnabled: false
+      SoftParticleFadeDistance: 0.5
+      SubUVTilesX: 1
+      SubUVTilesY: 1
+      SubUVFrameRate: 0
+      SubUVRandomStartFrame: false
+      SortingLayer: -60000
+    Dynamics:
+      Speed: 10
+      SpeedVariance: 4
+      Gravity: [0, -9.8, 0]
+      LinearDrag: 0.3
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 1
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.18
+      SizeEnd: 0.02
+      ColorStart: [0.5, 1, 0.95, 1]
+      ColorEnd: [0.1, 0.3, 1, 0]
+    Collision:
+      Mode: Plane
+      Restitution: 0.85
+      Friction: 0.15
+      PlaneNormal: [0, 1, 0]
+      PlaneD: 0

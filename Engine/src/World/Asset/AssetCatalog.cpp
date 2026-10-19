@@ -237,6 +237,12 @@ namespace World
 		const std::string root = Paths::AssetRoot().string();
 		const std::size_t identified = catalog.Scan(root);
 		WLD_CORE_INFO("[asset] 资产目录已建立: {0} 项(跳过 {1}) ← {2}", identified, catalog.Skipped(), root);
+		const std::string engineRoot = Paths::EngineContentRoot().string();
+		if (!engineRoot.empty() && engineRoot != root)
+		{
+			const std::size_t engineIdentified = catalog.Scan(engineRoot);
+			WLD_CORE_INFO("[asset] 引擎全局内容库已索引: {0} 项 ← {1}", engineIdentified, engineRoot);
+		}
 		return catalog;
 	}
 

@@ -32,6 +32,7 @@ namespace World
 	struct ParticleMaterialSettings
 	{
 		std::string TexturePath;
+		std::string MaterialPath;
 		Rhi::Handle<Rhi::Texture> TextureHandle {};
 		uint32_t SubUVTilesX = 1;
 		uint32_t SubUVTilesY = 1;
@@ -93,6 +94,37 @@ namespace World
 		std::vector<ParticleHitRecord> m_Buffer;
 	};
 
+	enum ParticleVfxFlags : uint8_t
+	{
+		ParticleVfxFlag_None             = 0,
+		ParticleVfxFlag_SoftParticle     = 1 << 0,
+		ParticleVfxFlag_CollisionEnabled = 1 << 1,
+		ParticleVfxFlag_SubUVEnabled     = 1 << 2,
+		ParticleVfxFlag_SubUVRandomStart = 1 << 3,
+		ParticleVfxFlag_CollisionEvents  = 1 << 4
+	};
+
+	struct ParticleEmitterConfig
+	{
+		float Lifetime = 2.0f;
+		float EmissionRate = 50.0f;
+		float Speed = 5.0f;
+		float SpeedVariance = 1.0f;
+		float SizeStart = 0.5f;
+		float SizeEnd = 0.1f;
+		uint32_t ColorStart = 0xFFFFFFFF;
+		uint32_t ColorEnd = 0x00FFFFFF;
+		uint32_t MaxParticles = 1000;
+		glm::vec3 Gravity { 0.0f, -9.8f, 0.0f };
+		ParticleEmitterType EmitterType = ParticleEmitterType::Point;
+		ParticleRenderMode RenderMode = ParticleRenderMode::Billboard;
+		ParticleBlendMode BlendMode = ParticleBlendMode::AlphaBlend;
+		uint8_t VfxFlags = ParticleVfxFlag_None;
+		bool LockToXYPlane = false;
+		bool Looping = true;
+		bool IsPlaying = true;
+	};
+
 	enum class SubEmitterTrigger : uint8_t
 	{
 		OnBirth = 0,
@@ -105,7 +137,7 @@ namespace World
 		SubEmitterTrigger Trigger = SubEmitterTrigger::OnCollision;
 		uint32_t EmitCount = 4;
 		float InheritVelocityRatio = 0.2f;
-		ParticleSystemComponent SpawnTemplate {};
+		ParticleEmitterConfig SpawnTemplate {};
 		ParticleMaterialSettings MaterialTemplate {};
 	};
 
@@ -147,6 +179,15 @@ namespace World
 			static_cast<float>((c >> 16) & 0xFF) / 255.0f,
 			static_cast<float>((c >> 24) & 0xFF) / 255.0f
 		);
+	}
+
+	inline uint32_t PackColor(const glm::vec4& c)
+	{
+		uint32_t r = static_cast<uint32_t>(glm::clamp(c.r, 0.0f, 1.0f) * 255.0f);
+		uint32_t g = static_cast<uint32_t>(glm::clamp(c.g, 0.0f, 1.0f) * 255.0f);
+		uint32_t b = static_cast<uint32_t>(glm::clamp(c.b, 0.0f, 1.0f) * 255.0f);
+		uint32_t a = static_cast<uint32_t>(glm::clamp(c.a, 0.0f, 1.0f) * 255.0f);
+		return r | (g << 8) | (b << 16) | (a << 24);
 	}
 
 	class WLD_API ParticlePool
@@ -252,11 +293,11 @@ namespace World
 		ParticlePool* GetSecondaryPool() { return m_SecondaryPool.get(); }
 		const ParticlePool* GetSecondaryPool() const { return m_SecondaryPool.get(); }
 
-		void Emit(size_t count, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot);
-		void Emit(size_t count, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::vec3& emitterRotEuler = glm::vec3(0.0f));
+		void Emit(size_t count, const ParticleEmitterConfig& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot);
+		void Emit(size_t count, const ParticleEmitterConfig& comp, const glm::vec3& emitterPos, const glm::vec3& emitterRotEuler = glm::vec3(0.0f));
 
-		void Update(float dt, const ParticleSystemComponent& comp, const glm::vec3& emitterPos);
-		void Update(float dt, const ParticleSystemComponent& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot);
+		void Update(float dt, const ParticleEmitterConfig& comp, const glm::vec3& emitterPos);
+		void Update(float dt, const ParticleEmitterConfig& comp, const glm::vec3& emitterPos, const glm::quat& emitterRot);
 
 		void GenerateQuadVertices(std::vector<ParticleVertex>& outVertices) const;
 		void GenerateBillboardVertices(const glm::vec3& cameraPos, const glm::vec3& cameraUp, std::vector<ParticleVertex>& outVertices) const;
@@ -313,7 +354,7 @@ namespace World
 	struct OneShotEmitter
 	{
 		std::unique_ptr<ParticlePool> Pool;
-		ParticleSystemComponent Comp;
+		ParticleEmitterConfig Comp;
 		float Elapsed = 0.0f;
 	};
 
@@ -339,7 +380,7 @@ namespace World
 		size_t PoolCount() const { return m_Pools.size(); }
 
 		void SpawnOneShotAsset(const ParticleAsset& asset, const glm::vec3& position, const glm::quat& rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-		void SpawnOneShot(const ParticleSystemComponent& comp, const ParticleMaterialSettings& mat,
+		void SpawnOneShot(const ParticleEmitterConfig& comp, const ParticleMaterialSettings& mat,
 			const glm::vec3& position, const glm::quat& rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 		void UpdateOneShots(float dt);
 		const std::vector<OneShotEmitter>& GetOneShots() const { return m_OneShots; }

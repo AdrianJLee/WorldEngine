@@ -14,6 +14,7 @@ std::string ContentBrowserPanel::ScopeKey(BrowserRootScope scope){
 		{
 			case BrowserRootScope::ProjectSources: return "projectSources";
 			case BrowserRootScope::ProjectPlugins: return "projectPlugins";
+			case BrowserRootScope::EngineContent: return "engineContent";
 			default: return "content";
 		}
 	}
@@ -26,9 +27,19 @@ std::filesystem::path ContentBrowserPanel::RootPathFor(BrowserRootScope scope) c
 				? ProjectSourceRoot() : m_Model.SourceRoot;
 			case BrowserRootScope::ProjectPlugins: return m_Model.PluginsRoot.empty()
 				? ProjectPluginsRoot() : m_Model.PluginsRoot;
+			case BrowserRootScope::EngineContent: return m_Model.EngineContentRoot.empty()
+				? EngineContentRoot() : m_Model.EngineContentRoot;
 			default: return m_Model.ContentRoot;
 		}
 	}
+
+std::filesystem::path ContentBrowserPanel::EngineContentRoot() const{
+	return World::Paths::EngineContentRoot();
+}
+
+bool ContentBrowserPanel::EngineContentAvailable() const{
+	return !EngineContentRoot().empty();
+}
 
 
 std::filesystem::path ContentBrowserPanel::ProjectSourceRoot() const{
@@ -158,10 +169,13 @@ bool ContentBrowserPanel::SwitchRoot(RootScope scope){
 		m_Model.ContentRoot = World::Paths::AssetRoot();
 		m_Model.SourceRoot = ProjectSourceRoot();
 		m_Model.PluginsRoot = ProjectPluginsRoot();
+		m_Model.EngineContentRoot = World::Paths::EngineContentRoot();
 		if (scope == BrowserRootScope::ProjectSources && !ProjectSourcesAvailable())
 			return false;   // 没项目 / 没有 <项目根>/src:调用方给可读提示,状态一律不动
 		if (scope == BrowserRootScope::ProjectPlugins && !ProjectPluginsAvailable())
 			return false;   // 没项目 / 没有 <项目根>/plugins:同上(与项目 C++ 根同口径)
+		if (scope == BrowserRootScope::EngineContent && !EngineContentAvailable())
+			return false;
 		if (scope == m_Model.Scope)
 			return true;    // 幂等
 		CaptureRootState(m_Model.Scope);

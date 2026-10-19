@@ -758,6 +758,7 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 							else if (assetType == "Audio" || assetType == "Sound") cat = AssetCategory::Audio;
 							else if (assetType == "Scene" || assetType == "Level") cat = AssetCategory::Level;
 							else if (assetType == "Curve") cat = AssetCategory::Curve;
+							else if (assetType == "VFX") cat = AssetCategory::VFX;
 
 							m_Host.OpenAssetPicker("Select " + assetType, cat, [instance, field, this, typeName](const std::string& picked) {
 								if (field.Set)
