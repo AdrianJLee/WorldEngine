@@ -22,8 +22,9 @@ namespace World
 	enum class ParticleEditorViewMode : uint8_t
 	{
 		Visual = 0,         // 可视化模块堆栈与 3D 视口 (Niagara Stack + Viewport)
-		SlangShader = 1,    // 统一 Slang 计算着色器源码与即时热重载 (Slang Compute Code & Hot Reload)
-		DataManifest = 2    // 声明式资产数据清单 (YAML Data Manifest)
+		CustomModule = 1,   // 项目全局代码自定义模块工作区 (Scratch Pad Studio)
+		SlangShader = 2,    // 统一 Slang 计算着色器源码与即时热重载 (Slang Compute Code & Hot Reload)
+		DataManifest = 3    // 声明式资产数据清单 (YAML Data Manifest)
 	};
 
 	enum class ParticleViewportDisplayMode : uint8_t
@@ -209,17 +210,23 @@ namespace World
 		bool m_AddModuleMenuOpen = false;
 		std::unordered_map<std::string, bool> m_ModuleSourceExpanded;
 
-		// 自定义 Slang 模块代码编写器状态 (Niagara Scratch Pad)
-		bool m_CustomModuleEditorOpen = false;
+		// 项目全局代码自定义模块与编写器状态 (Niagara Scratch Pad)
+		bool m_CustomModuleMenuOpen = false;
+		std::vector<VfxModule> m_ProjectCustomModules;
+		int m_SelectedProjectModuleIndex = -1;
 		VfxModule m_EditingCustomModule;
 		std::string m_NewParamNameBuffer;
 		int m_NewParamTypeIndex = 0; // 0=Float, 1=Vec3, 2=Color
 		float m_NewParamDefaultFloat = 1.0f;
 		std::string m_CustomModuleCompileError;
 		bool m_CustomModuleCompileSuccess = false;
+		float m_CustomModuleListScrollY = 0.0f;
+		float m_CustomModuleEditorScrollY = 0.0f;
 
+		void RefreshProjectCustomModules();
 		void OpenCustomModuleEditor(const std::string& defaultName = "");
-		void RenderCustomModuleEditor(Wui::WuiContext& ctx, const Wui::WuiRect& scrollAreaRect, float& cy, const Wui::WuiTheme& theme);
+		void OpenExistingCustomModule(size_t index);
+		void RenderCustomModuleWorkspace(Wui::WuiContext& ctx, const Wui::WuiRect& workRect, const Wui::WuiTheme& theme, PanelHost& host);
 
 		// 现代多分区布局与 Splitters 尺寸 (Outliner 拓宽至 270px 消除截字)
 		float m_OutlinerWidth = 270.0f;

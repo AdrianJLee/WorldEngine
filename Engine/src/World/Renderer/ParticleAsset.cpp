@@ -213,7 +213,7 @@ namespace World
 				out << YAML::Key << "Id" << YAML::Value << mod.Id;
 				out << YAML::Key << "Name" << YAML::Value << mod.Name;
 				out << YAML::Key << "Description" << YAML::Value << mod.Description;
-				out << YAML::Key << "Stage" << YAML::Value << (mod.Stage == VfxModuleStage::Spawn ? "Spawn" : (mod.Stage == VfxModuleStage::Update ? "Update" : "Render"));
+				out << YAML::Key << "Stage" << YAML::Value << (mod.Stage == VfxModuleStage::Emitter ? "Emitter" : (mod.Stage == VfxModuleStage::Spawn ? "Spawn" : (mod.Stage == VfxModuleStage::Update ? "Update" : "Render")));
 				out << YAML::Key << "Enabled" << YAML::Value << mod.Enabled;
 				out << YAML::Key << "IsCustom" << YAML::Value << mod.IsCustom;
 				out << YAML::Key << "SlangSource" << YAML::Value << mod.SlangSource;
@@ -390,7 +390,8 @@ out << YAML::EndMap;
 					if (mNode["Stage"])
 					{
 						std::string st = mNode["Stage"].as<std::string>();
-						if (st == "Spawn") mod.Stage = VfxModuleStage::Spawn;
+						if (st == "Emitter") mod.Stage = VfxModuleStage::Emitter;
+						else if (st == "Spawn") mod.Stage = VfxModuleStage::Spawn;
 						else if (st == "Render") mod.Stage = VfxModuleStage::Render;
 						else mod.Stage = VfxModuleStage::Update;
 					}

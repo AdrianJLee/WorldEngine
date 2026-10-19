@@ -322,6 +322,54 @@ static void TestModularPipelineCustomSlangModule()
 	std::cout << "[PASS] TestModularPipelineCustomSlangModule\n";
 }
 
+static void TestProjectGlobalCustomModuleRoundtrip()
+{
+	std::cout << "Testing Project-Global Custom Slang Module Serialization and Library...\n";
+
+	VfxModule customMod = VfxModuleLibrary::CreateCustomSlangModule("SpiralVortexTest");
+	customMod.Stage = VfxModuleStage::Update;
+	customMod.Parameters.push_back({ "SwirlRate", VfxParamType::Float, 5.5f, {}, 0, false, 0.0f, 20.0f, 0.1f, "旋涡率", true, "SwirlRate" });
+	customMod.SlangSource = "p.Velocity += cross(float3(0,1,0), p.Position) * (u_SwirlRate * dt);\n";
+
+	// 1. YAML 单体序列化与反序列化
+	std::string yaml = customMod.SerializeToYaml();
+	assert(!yaml.empty());
+	assert(yaml.find("SpiralVortexTest") != std::string::npos);
+	assert(yaml.find("SwirlRate") != std::string::npos);
+
+	VfxModule deserialized;
+	bool ok = VfxModule::DeserializeFromYaml(yaml, deserialized);
+	assert(ok);
+	assert(deserialized.Name == "SpiralVortexTest");
+	assert(deserialized.IsCustom == true);
+	assert(deserialized.Stage == VfxModuleStage::Update);
+	assert(deserialized.Parameters.size() == 2); // default + new
+
+	// 2. 项目全局磁盘存储与管理
+	bool saved = VfxModuleLibrary::SaveProjectCustomModule(customMod);
+	assert(saved);
+
+	auto loadedList = VfxModuleLibrary::LoadProjectCustomModules();
+	bool found = false;
+	for (const auto& m : loadedList)
+	{
+		if (m.Name == "SpiralVortexTest")
+		{
+			found = true;
+			assert(m.IsCustom == true);
+			assert(m.SlangSource.find("SwirlRate") != std::string::npos);
+			break;
+		}
+	}
+	assert(found);
+
+	// 3. 清理测试文件
+	bool deleted = VfxModuleLibrary::DeleteProjectCustomModule("SpiralVortexTest");
+	assert(deleted);
+
+	std::cout << "[PASS] TestProjectGlobalCustomModuleRoundtrip\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -333,6 +381,7 @@ int main()
 	TestParticleAssetNewDynamicsAndBursts();
 	TestModularPipelineSlangGeneration();
 	TestModularPipelineCustomSlangModule();
+	TestProjectGlobalCustomModuleRoundtrip();
 	TestParticleAssetShowcasePresets3D();
 
 	std::cout << "All WorldParticleAssetTests passed successfully.\n";

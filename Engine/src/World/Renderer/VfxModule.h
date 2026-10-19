@@ -3,6 +3,7 @@
 #include "World/Core/Export.h"
 #include <glm/glm.hpp>
 #include <string>
+#include <filesystem>
 #include <vector>
 #include <unordered_map>
 #include <cstdint>
@@ -67,6 +68,9 @@ namespace World
 		glm::vec4 GetVec4(const std::string& name, const glm::vec4& def = glm::vec4(0.0f)) const;
 		void SetFloat(const std::string& name, float v);
 		void SetVec4(const std::string& name, const glm::vec4& v);
+
+		std::string SerializeToYaml() const;
+		static bool DeserializeFromYaml(const std::string& yamlStr, VfxModule& outMod);
 	};
 
 	class WLD_API VfxModuleLibrary
@@ -102,5 +106,11 @@ namespace World
 
 		// 默认工业级标准发射器模块堆栈 (Cone + Gravity + Drag + Noise + Solve)
 		static std::vector<VfxModule> CreateDefaultEmitterModuleStack();
+
+		// 项目全局自定义模块持久化与库管理 (Project-Global Custom Slang Modules)
+		static std::filesystem::path GetProjectModulesDirectory();
+		static std::vector<VfxModule> LoadProjectCustomModules();
+		static bool SaveProjectCustomModule(const VfxModule& mod);
+		static bool DeleteProjectCustomModule(const std::string& moduleIdOrName);
 	};
 }

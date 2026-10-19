@@ -1,5 +1,11 @@
 #include "wldpch.h"
 #include "World/Renderer/VfxModule.h"
+#include "World/Utils/Paths.h"
+#include <yaml-cpp/yaml.h>
+#include <fstream>
+#include <sstream>
+#include <filesystem>
+
 
 namespace World
 {
@@ -435,5 +441,232 @@ namespace World
 			CreateSolveVelocityModule(),
 			CreateSpriteRendererModule(true, false, 2.0f)
 		};
+	}
+
+	// =========================================================================
+	// 模块序列化与持久化实现 (YAML Serialization & Deserialization)
+	// =========================================================================
+
+	std::string VfxModule::SerializeToYaml() const
+	{
+		YAML::Emitter out;
+		out << YAML::BeginMap;
+		out << YAML::Key << "Id" << YAML::Value << Id;
+		out << YAML::Key << "Name" << YAML::Value << Name;
+		out << YAML::Key << "Description" << YAML::Value << Description;
+		out << YAML::Key << "Stage" << YAML::Value << (Stage == VfxModuleStage::Emitter ? "Emitter" : (Stage == VfxModuleStage::Spawn ? "Spawn" : (Stage == VfxModuleStage::Update ? "Update" : "Render")));
+		out << YAML::Key << "Enabled" << YAML::Value << Enabled;
+		out << YAML::Key << "IsCustom" << YAML::Value << IsCustom;
+		out << YAML::Key << "SlangSource" << YAML::Value << SlangSource;
+
+		if (!Parameters.empty())
+		{
+			out << YAML::Key << "Parameters" << YAML::Value << YAML::BeginSeq;
+			for (const auto& p : Parameters)
+			{
+				out << YAML::BeginMap;
+				out << YAML::Key << "Name" << YAML::Value << p.Name;
+				out << YAML::Key << "Type" << YAML::Value << static_cast<int>(p.Type);
+				out << YAML::Key << "FloatVal" << YAML::Value << p.FloatVal;
+				out << YAML::Key << "VecVal" << YAML::Value << YAML::Flow << YAML::BeginSeq << p.VecVal.x << p.VecVal.y << p.VecVal.z << p.VecVal.w << YAML::EndSeq;
+				out << YAML::Key << "IntVal" << YAML::Value << p.IntVal;
+				out << YAML::Key << "BoolVal" << YAML::Value << p.BoolVal;
+				out << YAML::Key << "Min" << YAML::Value << p.Min;
+				out << YAML::Key << "Max" << YAML::Value << p.Max;
+				out << YAML::Key << "Step" << YAML::Value << p.Step;
+				out << YAML::Key << "Tooltip" << YAML::Value << p.Tooltip;
+				out << YAML::Key << "IsExposed" << YAML::Value << p.IsExposed;
+				out << YAML::Key << "ExposedName" << YAML::Value << p.ExposedName;
+				out << YAML::EndMap;
+			}
+			out << YAML::EndSeq;
+		}
+		out << YAML::EndMap;
+		return out.c_str();
+	}
+
+	bool VfxModule::DeserializeFromYaml(const std::string& yamlStr, VfxModule& outMod)
+	{
+		try
+		{
+			YAML::Node mNode = YAML::Load(yamlStr);
+			if (!mNode.IsMap()) return false;
+			if (mNode["Id"]) outMod.Id = mNode["Id"].as<std::string>();
+			if (mNode["Name"]) outMod.Name = mNode["Name"].as<std::string>();
+			if (mNode["Description"]) outMod.Description = mNode["Description"].as<std::string>();
+			if (mNode["Stage"])
+			{
+				std::string st = mNode["Stage"].as<std::string>();
+				if (st == "Emitter") outMod.Stage = VfxModuleStage::Emitter;
+				else if (st == "Spawn") outMod.Stage = VfxModuleStage::Spawn;
+				else if (st == "Render") outMod.Stage = VfxModuleStage::Render;
+				else outMod.Stage = VfxModuleStage::Update;
+			}
+			if (mNode["Enabled"]) outMod.Enabled = mNode["Enabled"].as<bool>();
+			if (mNode["IsCustom"]) outMod.IsCustom = mNode["IsCustom"].as<bool>();
+			if (mNode["SlangSource"]) outMod.SlangSource = mNode["SlangSource"].as<std::string>();
+
+			outMod.Parameters.clear();
+			if (const auto pSeq = mNode["Parameters"])
+			{
+				if (pSeq.IsSequence())
+				{
+					for (size_t j = 0; j < pSeq.size(); ++j)
+					{
+						const auto pNode = pSeq[j];
+						VfxModuleParam p;
+						if (pNode["Name"]) p.Name = pNode["Name"].as<std::string>();
+						if (pNode["Type"]) p.Type = static_cast<VfxParamType>(pNode["Type"].as<int>());
+						if (pNode["FloatVal"]) p.FloatVal = pNode["FloatVal"].as<float>();
+						if (pNode["VecVal"] && pNode["VecVal"].IsSequence() && pNode["VecVal"].size() >= 4)
+						{
+							p.VecVal = glm::vec4(
+								pNode["VecVal"][0].as<float>(),
+								pNode["VecVal"][1].as<float>(),
+								pNode["VecVal"][2].as<float>(),
+								pNode["VecVal"][3].as<float>()
+							);
+						}
+						if (pNode["IntVal"]) p.IntVal = pNode["IntVal"].as<int>();
+						if (pNode["BoolVal"]) p.BoolVal = pNode["BoolVal"].as<bool>();
+						if (pNode["Min"]) p.Min = pNode["Min"].as<float>();
+						if (pNode["Max"]) p.Max = pNode["Max"].as<float>();
+						if (pNode["Step"]) p.Step = pNode["Step"].as<float>();
+						if (pNode["Tooltip"]) p.Tooltip = pNode["Tooltip"].as<std::string>();
+						if (pNode["IsExposed"]) p.IsExposed = pNode["IsExposed"].as<bool>();
+						if (pNode["ExposedName"]) p.ExposedName = pNode["ExposedName"].as<std::string>();
+						outMod.Parameters.push_back(p);
+					}
+				}
+			}
+			return true;
+		}
+		catch (...)
+		{
+			return false;
+		}
+	}
+
+	// =========================================================================
+	// 项目全局自定义模块持久化与库管理实现 (Project-Global Custom Slang Modules)
+	// =========================================================================
+
+	std::filesystem::path VfxModuleLibrary::GetProjectModulesDirectory()
+	{
+		return Paths::AssetRoot() / "vfx" / "modules";
+	}
+
+	std::vector<VfxModule> VfxModuleLibrary::LoadProjectCustomModules()
+	{
+		std::vector<VfxModule> result;
+		std::error_code ec;
+
+		const auto scanDir = [&](const std::filesystem::path& dir) {
+			if (!std::filesystem::exists(dir, ec)) return;
+			for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
+			{
+				if (entry.is_regular_file(ec) && entry.path().extension() == ".wvfxmod")
+				{
+					std::ifstream in(entry.path());
+					if (in.is_open())
+					{
+						std::stringstream ss;
+						ss << in.rdbuf();
+						VfxModule mod;
+						if (VfxModule::DeserializeFromYaml(ss.str(), mod))
+						{
+							mod.IsCustom = true;
+							if (mod.Id.empty())
+							{
+								mod.Id = "mod.custom." + entry.path().stem().string();
+							}
+							bool exists = false;
+							for (const auto& existing : result)
+							{
+								if (existing.Id == mod.Id || existing.Name == mod.Name)
+								{
+									exists = true;
+									break;
+								}
+							}
+							if (!exists)
+							{
+								result.push_back(mod);
+							}
+						}
+					}
+				}
+			}
+		};
+
+		// 优先扫描当前项目资产目录: assets/vfx/modules/
+		scanDir(GetProjectModulesDirectory());
+
+		// 其次扫描引擎内容库目录: Engine/content/vfx/modules/
+		scanDir(Paths::EngineContentRoot() / "vfx" / "modules");
+
+		return result;
+	}
+
+	bool VfxModuleLibrary::SaveProjectCustomModule(const VfxModule& mod)
+	{
+		std::error_code ec;
+		auto dir = GetProjectModulesDirectory();
+		std::filesystem::create_directories(dir, ec);
+
+		std::string safeName;
+		for (char c : mod.Name)
+		{
+			if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
+				safeName += '_';
+			else
+				safeName += c;
+		}
+		if (safeName.empty())
+		{
+			safeName = mod.Id.empty() ? "CustomModule" : mod.Id;
+		}
+
+		auto filepath = dir / (safeName + ".wvfxmod");
+		std::ofstream out(filepath);
+		if (!out.is_open()) return false;
+
+		out << mod.SerializeToYaml();
+		return true;
+	}
+
+	bool VfxModuleLibrary::DeleteProjectCustomModule(const std::string& moduleIdOrName)
+	{
+		std::error_code ec;
+		auto dir = GetProjectModulesDirectory();
+		if (!std::filesystem::exists(dir, ec)) return false;
+
+		for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
+		{
+			if (entry.is_regular_file(ec) && entry.path().extension() == ".wvfxmod")
+			{
+				if (entry.path().stem().string() == moduleIdOrName)
+				{
+					return std::filesystem::remove(entry.path(), ec);
+				}
+
+				std::ifstream in(entry.path());
+				if (in.is_open())
+				{
+					std::stringstream ss;
+					ss << in.rdbuf();
+					in.close();
+					VfxModule mod;
+					if (VfxModule::DeserializeFromYaml(ss.str(), mod))
+					{
+						if (mod.Id == moduleIdOrName || mod.Name == moduleIdOrName)
+						{
+							return std::filesystem::remove(entry.path(), ec);
+						}
+					}
+				}
+			}
+		}
+		return false;
 	}
 }
