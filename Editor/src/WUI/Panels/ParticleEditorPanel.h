@@ -273,6 +273,7 @@ namespace World
 		Entity m_PreviewEntity;
 		uint32_t m_PreviewTextureId = 0;
 		uint32_t m_UiTextureGeneration = ~0u;
+		Rhi::Handle<Rhi::Texture> m_CurrentRenderedTexture;
 
 		// 内部实时物理推演池 (Live Simulation Pools)
 		std::vector<std::unique_ptr<ParticlePool>> m_LivePools;

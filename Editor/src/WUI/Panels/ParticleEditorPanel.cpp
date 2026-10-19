@@ -217,6 +217,7 @@ void ParticleEditorPanel::NewAsset()
 		m_Dirty = false;
 		m_SelectedEmitterIndex = 0;
 		m_StatusFeedback = "已新建特效资产";
+		m_IsPlaying = true;
 		EnsurePerEmitterState();
 		SyncSimulationFromAsset();
 	}
@@ -679,6 +680,7 @@ void ParticleEditorPanel::NewAsset()
 		m_PreviewScene.reset();
 		m_PreviewEntity = {};
 		m_PreviewGpuDevice = nullptr;
+		m_CurrentRenderedTexture = {};
 	}
 	void ParticleEditorPanel::SyncSimulationFromAsset()
 	{
@@ -686,6 +688,13 @@ void ParticleEditorPanel::NewAsset()
 		EnsurePerEmitterState();
 		m_LivePools.clear();
 		m_SimTime = 0.0f;
+
+		if (m_PreviewEntity.IsValid() && m_PreviewEntity.HasComponent<VfxComponent>())
+		{
+			auto& vfx = m_PreviewEntity.GetComponent<VfxComponent>();
+			vfx.PlaybackState = VfxPlaybackState::Playing;
+			vfx.Effect.Path = StringPool::Get().InternPath("__vfx_editor_preview__.wvfx");
+		}
 
 
 		for (size_t i = 0; i < m_Asset.Emitters.size(); ++i)
@@ -745,11 +754,19 @@ void ParticleEditorPanel::NewAsset()
 		}
 
 		m_SimTime += dt * m_PlaybackSpeed;
-		if (m_Asset.Looping && m_TimelineDuration > 0.1f)
+		const float maxDuration = std::max(0.5f, m_TimelineDuration);
+		if (m_SimTime > maxDuration)
 		{
-			if (m_SimTime > m_TimelineDuration)
+			// 编辑器视口在到达时间轴末尾后自动平滑回绕，保持粒子始终处于动态演变中
+			m_SimTime = std::fmod(m_SimTime, maxDuration);
+			if (!m_Asset.Looping)
 			{
-				m_SimTime = std::fmod(m_SimTime, m_TimelineDuration);
+				// 单次爆发特效回绕时重新激活实体播放，确保视口特效绝不静止卡死
+				if (m_PreviewEntity.IsValid() && m_PreviewEntity.HasComponent<VfxComponent>())
+				{
+					auto& vfx = m_PreviewEntity.GetComponent<VfxComponent>();
+					vfx.PlaybackState = VfxPlaybackState::Playing;
+				}
 			}
 		}
 
@@ -854,6 +871,7 @@ void ParticleEditorPanel::NewAsset()
 			m_Dirty = false;
 			m_SelectedEmitterIndex = 0;
 			m_StatusFeedback = "成功加载: " + normalized;
+			m_IsPlaying = true;
 			EnsurePerEmitterState();
 			SyncSimulationFromAsset();
 		}
@@ -2283,12 +2301,12 @@ void ParticleEditorPanel::NewAsset()
 				if (m_PreviewTextureId == 0)
 				{
 					m_PreviewTextureId = registry.Register(color);
-					m_UiTextureGeneration = registry.Generation();
+					m_CurrentRenderedTexture = color;
 				}
-				else if (registry.Generation() != m_UiTextureGeneration)
+				else if (m_CurrentRenderedTexture != color)
 				{
 					registry.Update(m_PreviewTextureId, color);
-					m_UiTextureGeneration = registry.Generation();
+					m_CurrentRenderedTexture = color;
 				}
 			}
 
