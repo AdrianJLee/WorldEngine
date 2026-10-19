@@ -354,7 +354,7 @@ namespace World
 		m.Enabled = true;
 		m.Parameters = {
 			{ "SpawnCount", VfxParamType::Float, static_cast<float>(count), {}, 0, false, 1.0f, 10000.0f, 1.0f, "瞬时生成图元数量 (1 为单体法阵/护盾)", true, "BurstCount" },
-			{ "SpawnTime", VfxParamType::Float, time, {}, 0, false, 0.0f, 60.0f, 0.05f, "爆发触发时间 (秒)" }
+			{ "SpawnTime", VfxParamType::Float, time, {}, 0, false, 0.0f, 99999.0f, 0.1f, "爆发触发时间 (秒)" }
 		};
 		m.SlangSource = R"(
     // [Module: SpawnBurst]
@@ -372,7 +372,7 @@ namespace World
 		m.Stage = VfxModuleStage::Spawn;
 		m.Enabled = true;
 		m.Parameters = {
-			{ "Lifetime", VfxParamType::Float, lifetime, {}, 0, false, 0.05f, 60.0f, 0.05f, "粒子存活基准寿命 (秒)", true, "Lifetime" },
+			{ "Lifetime", VfxParamType::Float, lifetime, {}, 0, false, 0.01f, 99999.0f, 0.1f, "粒子存活基准寿命 (秒)", true, "Lifetime" },
 			{ "SizeStart", VfxParamType::Float, sizeStart, {}, 0, false, 0.01f, 20.0f, 0.05f, "诞生初始尺寸", true, "SizeStart" },
 			{ "SizeEnd", VfxParamType::Float, sizeEnd, {}, 0, false, 0.01f, 20.0f, 0.05f, "消亡终末尺寸", true, "SizeEnd" },
 			{ "ColorStart", VfxParamType::Vec4, 0.0f, glm::vec4(1.0f, 0.8f, 0.3f, 1.0f), 0, false, 0.0f, 1.0f, 0.05f, "初始 RGBA 颜色" },
@@ -384,6 +384,95 @@ namespace World
     p.Life = u_Lifetime;
     p.Size = float2(u_SizeStart);
     p.Color = u_ColorStart;
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateRotationOverLifeModule(float rotSpeed, float initRot)
+	{
+		VfxModule m;
+		m.Id = "mod.update.rotation_over_life";
+		m.Name = "平面旋转与角速度 (Rotation Over Life)";
+		m.Description = "控制粒子初始旋转朝向与随寿命演进的持续角速度 (rad/s)";
+		m.Stage = VfxModuleStage::Update;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "RotationSpeed", VfxParamType::Float, rotSpeed, {}, 0, false, -30.0f, 30.0f, 0.1f, "自转角速度 (rad/s)" },
+			{ "InitialRotation", VfxParamType::Float, initRot, {}, 0, false, -3.14159f, 3.14159f, 0.05f, "初始旋转角度 (rad)" }
+		};
+		m.SlangSource = R"(
+    // [Module: Rotation Over Life]
+    p.Rotation += u_RotationSpeed * dt;
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateVortexTornadoModule(float vortexStrength, float upwardBuoyancy, float coneExpansion)
+	{
+		VfxModule m;
+		m.Id = "mod.update.vortex_tornado";
+		m.Name = "龙卷风涡流与热浮力 (Vortex Tornado)";
+		m.Description = "模拟真实龙卷风动力学：切向旋转、高度锥形扩张与向上强热升浮力";
+		m.Stage = VfxModuleStage::Update;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "VortexStrength", VfxParamType::Float, vortexStrength, {}, 0, false, -50.0f, 50.0f, 0.5f, "切向旋转角速度强度" },
+			{ "UpwardBuoyancy", VfxParamType::Float, upwardBuoyancy, {}, 0, false, 0.0f, 30.0f, 0.2f, "向上垂直热升浮力加速度" },
+			{ "ConeExpansion", VfxParamType::Float, coneExpansion, {}, 0, false, 0.0f, 5.0f, 0.05f, "随高度锥形扩张系数 (dr/dy)" }
+		};
+		m.SlangSource = R"(
+    // [Module: Vortex Tornado]
+    float r = length(p.Position.xz);
+    if (r > 0.01f)
+    {
+        float3 tangent = cross(float3(0.0f, 1.0f, 0.0f), normalize(float3(p.Position.x, 0.0f, p.Position.z)));
+        p.Velocity.xz += tangent.xz * (u_VortexStrength * dt);
+    }
+    p.Velocity.y += u_UpwardBuoyancy * dt;
+    p.Velocity.xz += normalize(p.Position.xz) * (u_ConeExpansion * max(0.0f, p.Velocity.y) * dt);
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateShockwaveExpansionModule(float expansionSpeed, float maxRadius, float dissipationRate)
+	{
+		VfxModule m;
+		m.Id = "mod.update.shockwave_expansion";
+		m.Name = "冲击波扩散衰减 (Shockwave Expansion)";
+		m.Description = "模拟地表冲击波光环从原点快速径向扩张扩散，并伴随缓出透明度衰减";
+		m.Stage = VfxModuleStage::Update;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "ExpansionSpeed", VfxParamType::Float, expansionSpeed, {}, 0, false, 0.1f, 30.0f, 0.2f, "冲击波尺寸扩张速率 (m/s)" },
+			{ "MaxRadius", VfxParamType::Float, maxRadius, {}, 0, false, 0.5f, 50.0f, 0.5f, "最大扩散外圈尺寸" },
+			{ "DissipationRate", VfxParamType::Float, dissipationRate, {}, 0, false, 0.0f, 10.0f, 0.1f, "透明度衰减消散速率" }
+		};
+		m.SlangSource = R"(
+    // [Module: Shockwave Expansion]
+    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);
+    p.Size = float2(lerp(0.5f, u_MaxRadius, sqrt(normLife)));
+    p.Color.a *= max(0.0f, 1.0f - normLife * u_DissipationRate);
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateFlipbookModule(uint32_t tilesX, uint32_t tilesY, float fps, bool loop)
+	{
+		VfxModule m;
+		m.Id = "mod.render.flipbook";
+		m.Name = "序列帧动画驱动 (SubUV Flipbook)";
+		m.Description = "按时间或存活进度步进 UV 帧切片序号 (支持 4x4 火焰、烟雾爆破)";
+		m.Stage = VfxModuleStage::Render;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "TilesX", VfxParamType::Float, static_cast<float>(tilesX), {}, 0, false, 1.0f, 16.0f, 1.0f, "横向切片列数" },
+			{ "TilesY", VfxParamType::Float, static_cast<float>(tilesY), {}, 0, false, 1.0f, 16.0f, 1.0f, "纵向切片行数" },
+			{ "FPS", VfxParamType::Float, fps, {}, 0, false, 1.0f, 60.0f, 1.0f, "帧率播放速度" },
+			{ "AnimationMode", VfxParamType::Float, loop ? 0.0f : 1.0f, {}, 0, false, 0.0f, 1.0f, 1.0f, "动画模式 (0=FPS循环, 1=随寿命单次归一化)" }
+		};
+		m.SlangSource = R"(
+    // [Module: Flipbook]
+    // 由 CPU 与 GPU 渲染器根据 TilesX/TilesY 驱动 SubUVFrameIndex
 )";
 		return m;
 	}
@@ -536,6 +625,10 @@ namespace World
 			CreateScaleOverLifeModule(),
 			CreateColorOverLifeModule(),
 			CreateJitterModule(),
+			CreateRotationOverLifeModule(),
+			CreateVortexTornadoModule(),
+			CreateShockwaveExpansionModule(),
+			CreateFlipbookModule(),
 			CreateSolveVelocityModule(),
 			CreateSpriteRendererModule(),
 			CreateCustomSlangModule("自定义模拟代码块 (Custom Slang Block)")
@@ -551,6 +644,10 @@ namespace World
 			CreateGravityModule(),
 			CreateLinearDragModule(),
 			CreateCurlNoiseModule(),
+			CreateRotationOverLifeModule(),
+			CreateVortexTornadoModule(),
+			CreateShockwaveExpansionModule(),
+			CreateFlipbookModule(),
 			CreateSolveVelocityModule(),
 			CreateSpriteRendererModule(true, false, 2.0f)
 		};

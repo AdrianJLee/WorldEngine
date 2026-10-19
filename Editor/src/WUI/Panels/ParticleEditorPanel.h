@@ -336,5 +336,9 @@ namespace World
 		bool m_CardRenderersExpanded = true;
 		bool m_CardCollisionExpanded = true;
 		bool m_AddModulePopupOpen = false;
+
+		int m_CurvingModuleIndex = -1;
+		void RenderSystemInspector(Wui::WuiContext& ctx, const Wui::WuiRect& inspectorRect, const Wui::WuiTheme& theme);
+		void UpdateLiveSimulationSettings();
 	};
 }

@@ -11,7 +11,7 @@ LOD:
 Emitters:
   - Name: FrostBlastRing
     MaxParticles: 1
-    Lifetime: 1.20000005
+    Lifetime: 1.5
     EmissionRate: 0
     EmissionMode: 0
     SingleCount: 1
@@ -25,7 +25,7 @@ Emitters:
       MaterialPath: materials/particles/particle_additive.wmat
       BlendMode: Additive
       FacingMode: HorizontalQuad
-      EmissiveBoost: 3
+      EmissiveBoost: 3.5
       SoftParticle: false
       FadeDistance: 0.5
       SubUV:
@@ -87,8 +87,8 @@ Emitters:
             IntVal: 0
             BoolVal: false
             Min: 0
-            Max: 60
-            Step: 0.0500000007
+            Max: 99999
+            Step: 0.100000001
             Tooltip: 爆发触发时间 (秒)
             IsExposed: false
             ExposedName: ""
@@ -102,13 +102,13 @@ Emitters:
         Parameters:
           - Name: Lifetime
             Type: 0
-            FloatVal: 1.20000005
+            FloatVal: 1.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: 0.0500000007
-            Max: 60
-            Step: 0.0500000007
+            Min: 0.00999999978
+            Max: 99999
+            Step: 0.100000001
             Tooltip: 粒子存活基准寿命 (秒)
             IsExposed: true
             ExposedName: Lifetime
@@ -126,7 +126,7 @@ Emitters:
             ExposedName: SizeStart
           - Name: SizeEnd
             Type: 0
-            FloatVal: 6
+            FloatVal: 7
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -180,36 +180,48 @@ Emitters:
             Tooltip: 发射速度
             IsExposed: false
             ExposedName: ""
-      - Id: mod.update.scale_over_life
-        Name: 尺寸随寿命缩放 (Scale Over Life)
-        Description: 基于归一化存活进度 (0~1) 控制粒子尺寸膨胀扩散或缩小消亡
+      - Id: mod.update.shockwave_expansion
+        Name: 冲击波扩散衰减 (Shockwave Expansion)
+        Description: 模拟地表冲击波光环从原点快速径向扩张扩散，并伴随缓出透明度衰减
         Stage: Update
         Enabled: true
         IsCustom: false
-        SlangSource: "\n    // [Module: Scale Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Size = lerp(u_StartScale, u_EndScale, normLife);\n"
+        SlangSource: "\n    // [Module: Shockwave Expansion]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Size = float2(lerp(0.5f, u_MaxRadius, sqrt(normLife)));\n    p.Color.a *= max(0.0f, 1.0f - normLife * u_DissipationRate);\n"
         Parameters:
-          - Name: StartScale
-            Type: 0
-            FloatVal: 0.5
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 20
-            Step: 0.0500000007
-            Tooltip: 初始尺寸乘子
-            IsExposed: false
-            ExposedName: ""
-          - Name: EndScale
+          - Name: ExpansionSpeed
             Type: 0
             FloatVal: 6
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
+            Min: 0.100000001
+            Max: 30
+            Step: 0.200000003
+            Tooltip: 冲击波尺寸扩张速率 (m/s)
+            IsExposed: false
+            ExposedName: ""
+          - Name: MaxRadius
+            Type: 0
+            FloatVal: 7
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.5
+            Max: 50
+            Step: 0.5
+            Tooltip: 最大扩散外圈尺寸
+            IsExposed: false
+            ExposedName: ""
+          - Name: DissipationRate
+            Type: 0
+            FloatVal: 1.20000005
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
             Min: 0
-            Max: 20
-            Step: 0.0500000007
-            Tooltip: 消亡前终止尺寸乘子
+            Max: 10
+            Step: 0.100000001
+            Tooltip: 透明度衰减消散速率
             IsExposed: false
             ExposedName: ""
       - Id: mod.update.color_over_life
@@ -223,7 +235,7 @@ Emitters:
           - Name: ColorStart
             Type: 3
             FloatVal: 1
-            VecVal: [0.400000006, 0.850000024, 1, 1]
+            VecVal: [0.600000024, 0.899999976, 1, 1]
             IntVal: 0
             BoolVal: false
             Min: 0
@@ -235,7 +247,7 @@ Emitters:
           - Name: ColorEnd
             Type: 3
             FloatVal: 1
-            VecVal: [0.100000001, 0.300000012, 0.800000012, 0]
+            VecVal: [0.100000001, 0.400000006, 0.800000012, 0]
             IntVal: 0
             BoolVal: false
             Min: 0
@@ -298,7 +310,7 @@ Emitters:
             ExposedName: ""
           - Name: EmissiveBoost
             Type: 0
-            FloatVal: 3
+            FloatVal: 3.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -308,10 +320,10 @@ Emitters:
             Tooltip: HDR 自发光倍率 (促发辉光 Bloom)
             IsExposed: true
             ExposedName: EmissiveBoost
-  - Name: IceCrystals
-    MaxParticles: 250
-    Lifetime: 2.5
-    EmissionRate: 80
+  - Name: HexagonalIceCrystals
+    MaxParticles: 120
+    Lifetime: 2.20000005
+    EmissionRate: 60
     EmissionMode: 0
     SingleCount: 1
     Enabled: true
@@ -320,11 +332,11 @@ Emitters:
       LockToXY: false
       MeshPath: ""
     Material:
-      TexturePath: textures/particles/spark_glow.wtex
+      TexturePath: textures/particles/ice_crystal.wtex
       MaterialPath: materials/particles/particle_additive.wmat
       BlendMode: Additive
       FacingMode: Billboard
-      EmissiveBoost: 2.20000005
+      EmissiveBoost: 3.5
       SoftParticle: false
       FadeDistance: 0.5
       SubUV:
@@ -366,7 +378,7 @@ Emitters:
         Parameters:
           - Name: SpawnRate
             Type: 0
-            FloatVal: 80
+            FloatVal: 60
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -386,19 +398,19 @@ Emitters:
         Parameters:
           - Name: Lifetime
             Type: 0
-            FloatVal: 2.5
+            FloatVal: 2.20000005
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: 0.0500000007
-            Max: 60
-            Step: 0.0500000007
+            Min: 0.00999999978
+            Max: 99999
+            Step: 0.100000001
             Tooltip: 粒子存活基准寿命 (秒)
             IsExposed: true
             ExposedName: Lifetime
           - Name: SizeStart
             Type: 0
-            FloatVal: 0.119999997
+            FloatVal: 0.349999994
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -410,7 +422,7 @@ Emitters:
             ExposedName: SizeStart
           - Name: SizeEnd
             Type: 0
-            FloatVal: 0.0299999993
+            FloatVal: 0.0799999982
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -444,120 +456,112 @@ Emitters:
             Tooltip: 消亡 RGBA 颜色
             IsExposed: false
             ExposedName: ""
-      - Id: mod.spawn.box
-        Name: 立方盒发射 (Box Spawn)
-        Description: 在三维包围盒体积内随机生成粒子分布
+      - Id: mod.spawn.ring
+        Name: 圆环发射 (Ring Spawn)
+        Description: 在 3D 水平圆环边缘几何分布生成粒子 (法阵/护盾/光环/冰霜新星)
         Stage: Spawn
         Enabled: true
         IsCustom: false
-        SlangSource: "\n    // [Module: BoxSpawn]\n    p.Position = float3(\n        (Hash1D(particleId * 5 + 0) * 2.0f - 1.0f) * u_BoxExtents.x,\n        (Hash1D(particleId * 5 + 1) * 2.0f - 1.0f) * u_BoxExtents.y,\n        (Hash1D(particleId * 5 + 2) * 2.0f - 1.0f) * u_BoxExtents.z\n    );\n    p.Velocity = float3(0.0f, u_Speed, 0.0f);\n"
+        SlangSource: "\n    // [Module: RingSpawn] 水平圆环边缘几何分布\n    float u = Hash1D(particleId * 11u + 3u);\n    float phi = 6.2831853f * u;\n    p.Position = float3(cos(phi) * u_RingRadius, 0.0f, sin(phi) * u_RingRadius);\n    p.Velocity = float3(0.0f, u_InitialSpeed, 0.0f);\n"
         Parameters:
-          - Name: BoxExtents
-            Type: 2
-            FloatVal: 0
-            VecVal: [1, 1, 1, 0]
+          - Name: RingRadius
+            Type: 0
+            FloatVal: 0.5
+            VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: 0.0500000007
+            Min: 0.100000001
             Max: 20
             Step: 0.100000001
-            Tooltip: 包围盒半尺寸 [X, Y, Z]
+            Tooltip: 圆环生成半径 (m)
             IsExposed: false
             ExposedName: ""
-          - Name: Speed
+          - Name: InitialSpeed
             Type: 0
-            FloatVal: 2
+            FloatVal: 0.300000012
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
             Min: 0
-            Max: 30
-            Step: 0.100000001
-            Tooltip: 向上漂移速度
-            IsExposed: false
-            ExposedName: ""
-      - Id: mod.update.gravity
-        Name: 重力场 (Gravity Force)
-        Description: 对粒子施加恒定三维重力加速度向量
-        Stage: Update
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: GravityForce]\n    p.Velocity += u_Gravity.xyz * dt;\n"
-        Parameters:
-          - Name: Gravity
-            Type: 2
-            FloatVal: 0
-            VecVal: [0, -1.79999995, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: -50
             Max: 50
             Step: 0.200000003
-            Tooltip: 三维重力向量 [Gx, Gy, Gz]
+            Tooltip: 垂直发射速率 (m/s)
             IsExposed: false
             ExposedName: ""
-      - Id: mod.update.vortex
-        Name: 轴向旋转涡流 (Vortex Field)
-        Description: 围绕指定三维轴线驱动粒子做切向飞旋龙卷运动
+      - Id: mod.update.orbit
+        Name: 中心轴轨道公转 (Orbit Around Center)
+        Description: 围绕指定空间中心点与旋转轴进行稳定圆周轨道旋转运动 (护盾/光环/符文)
         Stage: Update
         Enabled: true
         IsCustom: false
-        SlangSource: "\n    // [Module: VortexField] 轴向切向旋转\n    float3 normAxis = normalize(u_VortexAxis.xyz);\n    float3 tangential = cross(normAxis, p.Position);\n    p.Velocity += tangential * (u_VortexStrength * dt);\n"
+        SlangSource: "\n    // [Module: Orbit Around Center]\n    float3 toCenter = p.Position - u_OrbitCenter.xyz;\n    float dist = length(toCenter);\n    if (dist > 0.01f)\n    {\n        float3 tangent = cross(u_OrbitAxis.xyz, normalize(toCenter));\n        p.Velocity = tangent * u_OrbitSpeed;\n    }\n"
         Parameters:
-          - Name: VortexAxis
-            Type: 2
-            FloatVal: 0
-            VecVal: [0, 1, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: -1
-            Max: 1
-            Step: 0.0500000007
-            Tooltip: 涡流旋转轴向量
-            IsExposed: false
-            ExposedName: ""
-          - Name: VortexStrength
+          - Name: OrbitSpeed
             Type: 0
-            FloatVal: 4
+            FloatVal: 2.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
             Min: -30
             Max: 30
             Step: 0.200000003
-            Tooltip: 旋转切向角速度强度
+            Tooltip: 轨道公转切向角速率
             IsExposed: false
             ExposedName: ""
-      - Id: mod.update.curl_noise
-        Name: 3D 旋度噪声场 (Curl Noise Turbulence)
-        Description: 基于无散度 3D 旋度噪声向量场驱动真实的流体涡流混沌运动
+          - Name: OrbitAxis
+            Type: 2
+            FloatVal: 1
+            VecVal: [0, 1, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -1
+            Max: 1
+            Step: 0.100000001
+            Tooltip: 公转旋转主轴
+            IsExposed: false
+            ExposedName: ""
+          - Name: OrbitCenter
+            Type: 2
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -50
+            Max: 50
+            Step: 0.5
+            Tooltip: 空间轨道几何中心点
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.rotation_over_life
+        Name: 平面旋转与角速度 (Rotation Over Life)
+        Description: 控制粒子初始旋转朝向与随寿命演进的持续角速度 (rad/s)
         Stage: Update
         Enabled: true
         IsCustom: false
-        SlangSource: "\n    // [Module: CurlNoiseTurbulence] 3D 无散度流体涡流场\n    float3 curl = CurlNoise3D(p.Position * u_NoiseFrequency);\n    p.Velocity += curl * (u_NoiseStrength * dt);\n"
+        SlangSource: "\n    // [Module: Rotation Over Life]\n    p.Rotation += u_RotationSpeed * dt;\n"
         Parameters:
-          - Name: NoiseStrength
+          - Name: RotationSpeed
             Type: 0
-            FloatVal: 3
+            FloatVal: 2.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: 0
+            Min: -30
             Max: 30
-            Step: 0.200000003
-            Tooltip: 噪声场作用力强度
-            IsExposed: true
-            ExposedName: TurbulenceStrength
-          - Name: NoiseFrequency
+            Step: 0.100000001
+            Tooltip: 自转角速度 (rad/s)
+            IsExposed: false
+            ExposedName: ""
+          - Name: InitialRotation
             Type: 0
-            FloatVal: 0.800000012
+            FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: 0.0500000007
-            Max: 10
+            Min: -3.14159012
+            Max: 3.14159012
             Step: 0.0500000007
-            Tooltip: 空间采样频率 (波长缩放)
+            Tooltip: 初始旋转角度 (rad)
             IsExposed: false
             ExposedName: ""
       - Id: mod.update.drag
@@ -570,7 +574,7 @@ Emitters:
         Parameters:
           - Name: LinearDrag
             Type: 0
-            FloatVal: 0.5
+            FloatVal: 0.400000006
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -578,6 +582,38 @@ Emitters:
             Max: 10
             Step: 0.0500000007
             Tooltip: 空气阻尼系数
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.color_over_life
+        Name: 色彩淡入淡出 (Color Over Life)
+        Description: 基于粒子存活进度进行色彩与透明度渐变过渡
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Color Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Color = lerp(u_ColorStart, u_ColorEnd, normLife);\n"
+        Parameters:
+          - Name: ColorStart
+            Type: 3
+            FloatVal: 1
+            VecVal: [0.800000012, 0.949999988, 1, 1]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 初始出生颜色 (RGBA)
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            FloatVal: 1
+            VecVal: [0.300000012, 0.699999988, 1, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 终止消亡颜色 (RGBA)
             IsExposed: false
             ExposedName: ""
       - Id: mod.update.solve_velocity
@@ -634,7 +670,7 @@ Emitters:
             ExposedName: ""
           - Name: EmissiveBoost
             Type: 0
-            FloatVal: 2.20000005
+            FloatVal: 3.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -646,7 +682,7 @@ Emitters:
             ExposedName: EmissiveBoost
   - Name: SubZeroFog
     MaxParticles: 120
-    Lifetime: 3
+    Lifetime: 2.5
     EmissionRate: 30
     EmissionMode: 0
     SingleCount: 1
@@ -722,13 +758,13 @@ Emitters:
         Parameters:
           - Name: Lifetime
             Type: 0
-            FloatVal: 3
+            FloatVal: 2.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: 0.0500000007
-            Max: 60
-            Step: 0.0500000007
+            Min: 0.00999999978
+            Max: 99999
+            Step: 0.100000001
             Tooltip: 粒子存活基准寿命 (秒)
             IsExposed: true
             ExposedName: Lifetime
@@ -746,7 +782,7 @@ Emitters:
             ExposedName: SizeStart
           - Name: SizeEnd
             Type: 0
-            FloatVal: 2.20000005
+            FloatVal: 2.4000001
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -790,7 +826,7 @@ Emitters:
         Parameters:
           - Name: RingRadius
             Type: 0
-            FloatVal: 2.20000005
+            FloatVal: 1.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -802,7 +838,7 @@ Emitters:
             ExposedName: ""
           - Name: InitialSpeed
             Type: 0
-            FloatVal: 0
+            FloatVal: 0.100000001
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -812,36 +848,68 @@ Emitters:
             Tooltip: 垂直发射速率 (m/s)
             IsExposed: false
             ExposedName: ""
-      - Id: mod.update.curl_noise
-        Name: 3D 旋度噪声场 (Curl Noise Turbulence)
-        Description: 基于无散度 3D 旋度噪声向量场驱动真实的流体涡流混沌运动
+      - Id: mod.update.vortex
+        Name: 轴向旋转涡流 (Vortex Field)
+        Description: 围绕指定三维轴线驱动粒子做切向飞旋龙卷运动
         Stage: Update
         Enabled: true
         IsCustom: false
-        SlangSource: "\n    // [Module: CurlNoiseTurbulence] 3D 无散度流体涡流场\n    float3 curl = CurlNoise3D(p.Position * u_NoiseFrequency);\n    p.Velocity += curl * (u_NoiseStrength * dt);\n"
+        SlangSource: "\n    // [Module: VortexField] 轴向切向旋转\n    float3 normAxis = normalize(u_VortexAxis.xyz);\n    float3 tangential = cross(normAxis, p.Position);\n    p.Velocity += tangential * (u_VortexStrength * dt);\n"
         Parameters:
-          - Name: NoiseStrength
+          - Name: VortexAxis
+            Type: 2
+            FloatVal: 0
+            VecVal: [0, 1, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -1
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 涡流旋转轴向量
+            IsExposed: false
+            ExposedName: ""
+          - Name: VortexStrength
             Type: 0
-            FloatVal: 3
+            FloatVal: 2
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: 0
+            Min: -30
             Max: 30
             Step: 0.200000003
-            Tooltip: 噪声场作用力强度
-            IsExposed: true
-            ExposedName: TurbulenceStrength
-          - Name: NoiseFrequency
+            Tooltip: 旋转切向角速度强度
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.rotation_over_life
+        Name: 平面旋转与角速度 (Rotation Over Life)
+        Description: 控制粒子初始旋转朝向与随寿命演进的持续角速度 (rad/s)
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Rotation Over Life]\n    p.Rotation += u_RotationSpeed * dt;\n"
+        Parameters:
+          - Name: RotationSpeed
             Type: 0
-            FloatVal: 0.800000012
+            FloatVal: 0.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: 0.0500000007
-            Max: 10
+            Min: -30
+            Max: 30
+            Step: 0.100000001
+            Tooltip: 自转角速度 (rad/s)
+            IsExposed: false
+            ExposedName: ""
+          - Name: InitialRotation
+            Type: 0
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -3.14159012
+            Max: 3.14159012
             Step: 0.0500000007
-            Tooltip: 空间采样频率 (波长缩放)
+            Tooltip: 初始旋转角度 (rad)
             IsExposed: false
             ExposedName: ""
       - Id: mod.update.scale_over_life
@@ -866,7 +934,7 @@ Emitters:
             ExposedName: ""
           - Name: EndScale
             Type: 0
-            FloatVal: 2.20000005
+            FloatVal: 2.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -887,7 +955,7 @@ Emitters:
           - Name: ColorStart
             Type: 3
             FloatVal: 1
-            VecVal: [0.400000006, 0.699999988, 0.949999988, 0.5]
+            VecVal: [0.600000024, 0.800000012, 0.949999988, 0.449999988]
             IntVal: 0
             BoolVal: false
             Min: 0
@@ -899,7 +967,7 @@ Emitters:
           - Name: ColorEnd
             Type: 3
             FloatVal: 1
-            VecVal: [0.200000003, 0.5, 0.899999976, 0]
+            VecVal: [0.400000006, 0.600000024, 0.899999976, 0]
             IntVal: 0
             BoolVal: false
             Min: 0

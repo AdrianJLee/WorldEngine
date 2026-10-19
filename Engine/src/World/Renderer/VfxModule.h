@@ -104,6 +104,11 @@ namespace World
 		static VfxModule CreateJitterModule(float jitterStrength = 2.0f, float jitterSpeed = 20.0f);
 
 		// Render 阶段标准模块 (渲染器与材质设定)
+				static VfxModule CreateRotationOverLifeModule(float rotSpeed = 1.5f, float initRot = 0.0f);
+		static VfxModule CreateVortexTornadoModule(float vortexStrength = 6.0f, float upwardBuoyancy = 4.0f, float coneExpansion = 0.5f);
+		static VfxModule CreateShockwaveExpansionModule(float expansionSpeed = 5.0f, float maxRadius = 8.0f, float dissipationRate = 1.2f);
+		static VfxModule CreateFlipbookModule(uint32_t tilesX = 4, uint32_t tilesY = 4, float fps = 16.0f, bool loop = true);
+
 		static VfxModule CreateSpriteRendererModule(bool additive = true, bool horizontal = false, float emissive = 2.0f);
 
 		// 自定义 Slang 代码块工厂

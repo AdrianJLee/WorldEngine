@@ -436,7 +436,7 @@ out << YAML::EndMap;
 			}
 		}
 
-		if (em.Modules.empty())
+		if (!node["Modules"] && em.Modules.empty())
 		{
 			em.EnsureDefaultModules();
 		}

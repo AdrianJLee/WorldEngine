@@ -2442,7 +2442,74 @@ namespace World
 						mat.EmissiveBoost = mod.GetFloat("EmissiveBoost", 2.0f);
 						pool.SetMaterialSettings(mat);
 					}
-					else if (mod.IsCustom)
+					else if (mod.Id == "mod.update.rotation_over_life")
+					{
+						float rotSpeed = mod.GetFloat("RotationSpeed", 0.0f);
+						if (std::abs(rotSpeed) > 1e-4f)
+						{
+							float simDt = dt * vfx.PlaybackSpeed;
+							for (auto& p : pool.GetParticlesMut())
+							{
+								if (!p.Active) continue;
+								p.Rotation += rotSpeed * simDt;
+							}
+						}
+					}
+					else if (mod.Id == "mod.update.vortex_tornado")
+					{
+						float vStrength = mod.GetFloat("VortexStrength", 6.0f);
+						float uBuoyancy = mod.GetFloat("UpwardBuoyancy", 4.0f);
+						float cExpand = mod.GetFloat("ConeExpansion", 0.5f);
+						float simDt = dt * vfx.PlaybackSpeed;
+						for (auto& p : pool.GetParticlesMut())
+						{
+							if (!p.Active) continue;
+							p.Velocity.y += uBuoyancy * simDt;
+							float r = glm::length(glm::vec2(p.Position.x, p.Position.z));
+							if (r > 0.01f)
+							{
+								glm::vec2 tang(-p.Position.z / r, p.Position.x / r);
+								p.Velocity.x += tang.x * (vStrength * simDt);
+								p.Velocity.z += tang.y * (vStrength * simDt);
+								p.Velocity.x += (p.Position.x / r) * (cExpand * std::max(0.0f, p.Velocity.y) * simDt);
+								p.Velocity.z += (p.Position.z / r) * (cExpand * std::max(0.0f, p.Velocity.y) * simDt);
+							}
+						}
+					}
+					else if (mod.Id == "mod.update.shockwave_expansion")
+					{
+						float expSpd = mod.GetFloat("ExpansionSpeed", 5.0f);
+						float maxR = mod.GetFloat("MaxRadius", 8.0f);
+						float dissRate = mod.GetFloat("DissipationRate", 1.2f);
+						float simDt = dt * vfx.PlaybackSpeed;
+						for (auto& p : pool.GetParticlesMut())
+						{
+							if (!p.Active) continue;
+							float normLife = std::clamp(1.0f - (p.Life / std::max(0.001f, p.MaxLife)), 0.0f, 1.0f);
+							float curR = glm::mix(0.5f, maxR, std::sqrt(normLife));
+							p.Size = glm::vec2(curR);
+							p.Color.a *= std::max(0.0f, 1.0f - normLife * dissRate * simDt);
+						}
+					}
+					else if (mod.Id == "mod.render.flipbook")
+					{
+						uint32_t tX = static_cast<uint32_t>(mod.GetFloat("TilesX", 4.0f));
+						uint32_t tY = static_cast<uint32_t>(mod.GetFloat("TilesY", 4.0f));
+						float fps = mod.GetFloat("FPS", 16.0f);
+						int animMode = static_cast<int>(mod.GetFloat("AnimationMode", 0.0f));
+						auto mat = pool.GetMaterialSettings();
+						mat.SubUVTilesX = tX;
+						mat.SubUVTilesY = tY;
+						pool.SetMaterialSettings(mat);
+						uint32_t totalF = std::max(1u, tX * tY);
+						for (auto& p : pool.GetParticlesMut())
+						{
+							if (!p.Active) continue;
+							float progress = (animMode == 1) ? (1.0f - p.Life / std::max(0.001f, p.MaxLife)) : ((p.MaxLife - p.Life) * fps / totalF);
+							p.SubUVFrameIndex = static_cast<uint32_t>(progress * totalF) % totalF;
+						}
+					}
+										else if (mod.IsCustom)
 					{
 						for (const auto& param : mod.Parameters)
 						{

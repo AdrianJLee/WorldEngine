@@ -262,7 +262,7 @@ void ParticleEditorPanel::NewAsset()
 				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 2.5f)
 			};
 			if (auto* g = em.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, -9.8f, 0.0f, 0.0f));
-			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.15f);
+			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("LinearDrag", 0.15f);
 			if (auto* c = em.FindModule("mod.spawn.cone")) { c->SetFloat("ConeAngle", 25.0f); c->SetFloat("ConeRadius", 0.35f); c->SetFloat("InitialSpeed", 8.0f); }
 		}
 		else if (templateType == "Fire")
@@ -296,10 +296,10 @@ void ParticleEditorPanel::NewAsset()
 				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 3.0f)
 			};
 			if (auto* g = em.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 3.5f, 0.0f, 0.0f));
-			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.35f);
+			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("LinearDrag", 0.35f);
 			if (auto* c = em.FindModule("mod.spawn.cone")) { c->SetFloat("ConeAngle", 18.0f); c->SetFloat("ConeRadius", 0.25f); c->SetFloat("InitialSpeed", 3.5f); }
-			if (auto* v = em.FindModule("mod.update.vortex")) v->SetFloat("VortexSpeed", 3.0f);
-			if (auto* n = em.FindModule("mod.update.noise")) { n->SetFloat("NoiseGain", 4.0f); n->SetFloat("NoiseScale", 1.0f); }
+			if (auto* v = em.FindModule("mod.update.vortex")) v->SetFloat("VortexStrength", 3.0f);
+			if (auto* n = em.FindModule("mod.update.curl_noise")) { n->SetFloat("NoiseStrength", 4.0f); n->SetFloat("NoiseScale", 1.0f); }
 		}
 		else if (templateType == "Sparks")
 		{
@@ -331,7 +331,7 @@ void ParticleEditorPanel::NewAsset()
 				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 4.0f)
 			};
 			if (auto* g = em.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, -12.0f, 0.0f, 0.0f));
-			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.2f);
+			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("LinearDrag", 0.2f);
 			if (auto* s = em.FindModule("mod.spawn.sphere")) { s->SetFloat("SphereRadius", 0.2f); s->SetFloat("OutwardSpeed", 10.0f); }
 			if (auto* r = em.FindModule("mod.render.sprite")) r->SetFloat("FacingMode", static_cast<float>(ParticleRenderMode::StretchedVelocity));
 		}
@@ -363,9 +363,9 @@ void ParticleEditorPanel::NewAsset()
 				VfxModuleLibrary::CreateSpriteRendererModule(false, false, 1.0f)
 			};
 			if (auto* g = em.FindModule("mod.update.gravity")) g->SetVec4("Gravity", glm::vec4(0.0f, 1.2f, 0.0f, 0.0f));
-			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("DragCoefficient", 0.75f);
+			if (auto* d = em.FindModule("mod.update.drag")) d->SetFloat("LinearDrag", 0.75f);
 			if (auto* c = em.FindModule("mod.spawn.cone")) { c->SetFloat("ConeAngle", 28.0f); c->SetFloat("ConeRadius", 0.4f); c->SetFloat("InitialSpeed", 1.8f); }
-			if (auto* n = em.FindModule("mod.update.noise")) n->SetFloat("NoiseGain", 3.2f);
+			if (auto* n = em.FindModule("mod.update.curl_noise")) n->SetFloat("NoiseStrength", 3.2f);
 			if (auto* r = em.FindModule("mod.render.sprite")) r->SetFloat("BlendMode", static_cast<float>(ParticleBlendMode::AlphaBlend));
 		}
 		else if (templateType == "Beam")
@@ -425,7 +425,7 @@ void ParticleEditorPanel::NewAsset()
 			};
 			if (auto* s = em.FindModule("mod.spawn.sphere")) { s->SetFloat("SphereRadius", 1.8f); s->SetFloat("OutwardSpeed", 1.0f); }
 			if (auto* a = em.FindModule("mod.update.attractor")) { a->SetFloat("AttractorStrength", 10.0f); a->SetFloat("AttractorRadius", 2.5f); }
-			if (auto* v = em.FindModule("mod.update.vortex")) v->SetFloat("VortexSpeed", 5.5f);
+			if (auto* v = em.FindModule("mod.update.vortex")) v->SetFloat("VortexStrength", 5.5f);
 		}
 		else if (templateType == "BurstRing")
 		{
@@ -466,13 +466,7 @@ void ParticleEditorPanel::NewAsset()
 			em.ColorEnd = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
 			em.Material.BlendMode = ParticleBlendMode::Additive;
 
-			em.Modules = {
-				VfxModuleLibrary::CreateSpawnRateModule(50.0f),
-				VfxModuleLibrary::CreateInitParticleModule(2.0f, 0.3f, 0.05f),
-				VfxModuleLibrary::CreatePointSpawnModule(),
-				VfxModuleLibrary::CreateSolveVelocityModule(),
-				VfxModuleLibrary::CreateSpriteRendererModule(true, false, 2.0f)
-			};
+			em.Modules.clear();
 		}
 
 		m_Asset.Emitters.push_back(em);
@@ -1420,11 +1414,29 @@ void ParticleEditorPanel::NewAsset()
 
 
 		// 根系统节点条目 (Root System Node)
+		const bool isSysSelected = (m_SelectedEmitterIndex >= m_Asset.Emitters.size());
 		const Wui::WuiRect sysRow { outlinerRect.X + 4.0f, listY, outlinerRect.W - 8.0f, 24.0f };
-		Wui::BarSurface(ctx, sysRow, theme.PanelHeader, theme.Border);
+		if (isSysSelected)
+		{
+			Wui::BarSurface(ctx, sysRow, theme.Selection, theme.Accent);
+		}
+		else if (ctx.IsHovered(sysRow))
+		{
+			Wui::BarSurface(ctx, sysRow, theme.HoverBg, theme.Border);
+		}
+		else
+		{
+			Wui::BarSurface(ctx, sysRow, theme.PanelHeader, theme.Border);
+		}
+
+		if (ctx.IsHovered(sysRow) && ctx.Input().MouseClicked[0])
+		{
+			m_SelectedEmitterIndex = static_cast<size_t>(-1);
+		}
+
 		std::string sysTitle = "[系统] " + m_Asset.Name;
 		if (sysTitle.size() > 22) sysTitle = sysTitle.substr(0, 20) + "..";
-		Wui::Label(ctx, { sysRow.X + 6.0f, sysRow.Y + 5.0f }, sysTitle, theme.Text, 11.0f);
+		Wui::Label(ctx, { sysRow.X + 6.0f, sysRow.Y + 5.0f }, sysTitle, isSysSelected ? theme.Text : theme.TextMuted, 11.0f);
 		std::string durStr = std::to_string(m_TimelineDuration).substr(0, 3) + "s" + (m_Asset.Looping ? " [循环]" : "");
 		Wui::Label(ctx, { sysRow.X + sysRow.W - 46.0f, sysRow.Y + 5.0f }, durStr, theme.TextMuted, 9.5f);
 		listY += 26.0f;
@@ -1551,7 +1563,7 @@ void ParticleEditorPanel::NewAsset()
 			Wui::Tooltip(ctx, sRect, "独奏该发射器 (Solo) - 仅模拟与显示此图层");
 			if (Wui::Button(ctx, Wui::HashId(("vfx.out.solo." + std::to_string(i)).c_str()), sRect, isSolo ? "[S]" : "S", theme))
 			{
-				m_EmitterSolo[i] = !m_EmitterSolo[i];
+				m_EmitterSolo[i] = !m_EmitterSolo[i]; UpdateLiveSimulationSettings();
 			}
 			if (isSolo)
 			{
@@ -1566,7 +1578,7 @@ void ParticleEditorPanel::NewAsset()
 			Wui::Tooltip(ctx, mRect, "静音该发射器 (Mute) - 隐藏并暂停此图层推演");
 			if (Wui::Button(ctx, Wui::HashId(("vfx.out.mute." + std::to_string(i)).c_str()), mRect, isMute ? "[M]" : "M", theme))
 			{
-				m_EmitterMute[i] = !m_EmitterMute[i];
+				m_EmitterMute[i] = !m_EmitterMute[i]; UpdateLiveSimulationSettings();
 			}
 			if (isMute)
 			{
@@ -2662,6 +2674,14 @@ void ParticleEditorPanel::NewAsset()
 		const float hy = canvasRect.Y + 4.0f;
 
 
+		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
+		if (m_CurvingModuleIndex >= 0 && m_CurvingModuleIndex < static_cast<int>(em.Modules.size()))
+		{
+			std::string modLabel = "当前关联模块: [" + em.Modules[m_CurvingModuleIndex].Name + "]";
+			Wui::Label(ctx, { hx, hy + 2.0f }, modLabel, theme.Accent, 10.0f);
+			hx += 220.0f;
+		}
+
 		Wui::Label(ctx, { hx, hy + 2.0f }, "曲线通道:", theme.TextMuted, 10.0f);
 		hx += 52.0f;
 
@@ -3046,10 +3066,32 @@ void ParticleEditorPanel::NewAsset()
 		tx += 56.0f;
 
 
-		// 模拟时间数显
+		// 模拟时间数显与可交互生命周期总时长调节
 		std::string timeStr = std::to_string(m_SimTime).substr(0, 4) + "s / " + std::to_string(m_TimelineDuration).substr(0, 3) + "s";
 		Wui::Label(ctx, { tx, ty + 4.0f }, timeStr, theme.Text, 10.5f);
 		tx += 80.0f;
+
+		Wui::Label(ctx, { tx, ty + 4.0f }, "周期:", theme.TextMuted, 10.0f);
+		tx += 34.0f;
+		const Wui::WuiRect durBox { tx, ty + 1.0f, 54.0f, 20.0f };
+		Wui::Tooltip(ctx, durBox, "可拖拽或双击设置特效系统的总时长/生命周期 (秒)");
+		if (Wui::DragFloat(ctx, Wui::HashId("vfx.tl.duration"), durBox, m_TimelineDuration, 0.2f, 0.1f, 3600.0f, theme))
+		{
+			m_Asset.Duration = m_TimelineDuration;
+			m_Dirty = true;
+		}
+		tx += 58.0f;
+
+		const Wui::WuiRect loopBtn { tx, ty + 1.0f, 50.0f, 20.0f };
+		Wui::Tooltip(ctx, loopBtn, "切换系统为循环播放或到达周期后结束");
+		if (Wui::Button(ctx, Wui::HashId("vfx.tl.loop"), loopBtn, m_Asset.Looping ? "[循环]" : "[单次]", theme))
+		{
+			PushUndoSnapshot();
+			m_Asset.Looping = !m_Asset.Looping;
+			m_Dirty = true;
+			SyncSimulationFromAsset();
+		}
+		tx += 54.0f;
 
 
 		// 倍速快捷切换按钮: 0.1, 0.25, 0.5, 1x, 2x, 4x
@@ -3923,6 +3965,135 @@ void ParticleEditorPanel::NewAsset()
 	}
 
 
+	void ParticleEditorPanel::UpdateLiveSimulationSettings()
+	{
+		// 1. 同步预览内存资产与发射器激活状态 (Solo / Mute)
+		ParticleAsset previewAsset = m_Asset;
+		for (size_t i = 0; i < previewAsset.Emitters.size(); ++i)
+		{
+			previewAsset.Emitters[i].Enabled = IsEmitterActive(i);
+		}
+		ParticleAssetRegistry::Get().RegisterAssetFromMemory("__vfx_editor_preview__.wvfx", previewAsset);
+
+		// 2. 动态就地刷新各个活体池材质与动力学配置，绝不清空存活粒子与重置推演时间
+		for (size_t i = 0; i < m_Asset.Emitters.size() && i < m_LivePools.size(); ++i)
+		{
+			const auto& em = m_Asset.Emitters[i];
+			auto& pool = m_LivePools[i];
+			if (!IsEmitterActive(i))
+			{
+				pool->Reset();
+				continue;
+			}
+
+			pool->SetMaterialSettings(em.Material);
+			pool->SetCollisionSettings(em.Collision);
+			pool->SetLinearDrag(em.LinearDrag);
+			pool->SetVortex(em.VortexStrength, em.VortexAxis);
+			pool->SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
+		}
+	}
+
+	void ParticleEditorPanel::RenderSystemInspector(Wui::WuiContext& ctx, const Wui::WuiRect& inspectorRect, const Wui::WuiTheme& theme)
+	{
+		const Wui::WuiRect headRect { inspectorRect.X, inspectorRect.Y, inspectorRect.W, 28.0f };
+		Wui::BarSurface(ctx, headRect, theme.PanelHeader, theme.Border);
+		Wui::Label(ctx, { headRect.X + 8.0f, headRect.Y + 7.0f }, "VFX 特效系统全局概览与设置 (System Overview)", theme.Accent, 11.5f);
+
+		float curY = inspectorRect.Y + 32.0f;
+		const float scrollAreaH = inspectorRect.H - (curY - inspectorRect.Y) - 4.0f;
+		const Wui::WuiRect scrollAreaRect { inspectorRect.X, curY, inspectorRect.W, scrollAreaH };
+
+		float totalContentH = 340.0f + static_cast<float>(m_Asset.Emitters.size() * 30.0f);
+		Wui::BeginScrollArea(ctx, scrollAreaRect, totalContentH, m_InspectorScrollY, theme, Wui::HashId("vfx.sys.inspector.scroll"));
+		float cy = scrollAreaRect.Y - m_InspectorScrollY;
+
+		// 1. 系统基础配置
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 4.0f }, "系统基础属性 (System Settings)", theme.Accent, 11.0f);
+		cy += 24.0f;
+
+		// 系统名称
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "系统名称:", theme.TextMuted, 10.0f);
+		const Wui::WuiRect nameBox { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
+		std::string sysName = m_Asset.Name;
+		if (Wui::TextField(ctx, Wui::HashId("vfx.sys.name"), nameBox, sysName, theme))
+		{
+			m_Asset.Name = sysName;
+			m_Dirty = true;
+		}
+		cy += 24.0f;
+
+		// 系统总周期 (Duration)
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "总周期时长 (秒):", theme.TextMuted, 10.0f);
+		const Wui::WuiRect durBox { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
+		if (Wui::DragFloat(ctx, Wui::HashId("vfx.sys.dur"), durBox, m_TimelineDuration, 0.2f, 0.1f, 3600.0f, theme))
+		{
+			m_Asset.Duration = m_TimelineDuration;
+			m_Dirty = true;
+		}
+		cy += 24.0f;
+
+		// 循环播放
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "循环播放:", theme.TextMuted, 10.0f);
+		const Wui::WuiRect loopBox { inspectorRect.X + 110.0f, cy, 20.0f, 20.0f };
+		bool loop = m_Asset.Looping;
+		if (Wui::Checkbox(ctx, Wui::HashId("vfx.sys.loop"), loopBox, "", loop, theme))
+		{
+			PushUndoSnapshot();
+			m_Asset.Looping = loop;
+			m_Dirty = true;
+			SyncSimulationFromAsset();
+		}
+		cy += 24.0f;
+
+		// 预热时间
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "预热时间 (秒):", theme.TextMuted, 10.0f);
+		const Wui::WuiRect warmBox { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
+		if (Wui::DragFloat(ctx, Wui::HashId("vfx.sys.warmup"), warmBox, m_Asset.WarmupTime, 0.1f, 0.0f, 60.0f, theme))
+		{
+			m_Dirty = true;
+		}
+		cy += 24.0f;
+
+		// LOD 剔除距离
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "剔除距离 (m):", theme.TextMuted, 10.0f);
+		const Wui::WuiRect cullBox { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
+		if (Wui::DragFloat(ctx, Wui::HashId("vfx.sys.cull"), cullBox, m_Asset.CullDistance, 1.0f, 0.0f, 1000.0f, theme))
+		{
+			m_Dirty = true;
+		}
+		cy += 24.0f;
+
+		// 离屏暂停
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "离屏暂停推演:", theme.TextMuted, 10.0f);
+		const Wui::WuiRect pauseBox { inspectorRect.X + 110.0f, cy, 20.0f, 20.0f };
+		bool pauseOff = m_Asset.PauseWhenOffscreen;
+		if (Wui::Checkbox(ctx, Wui::HashId("vfx.sys.pauseoff"), pauseBox, "", pauseOff, theme))
+		{
+			m_Asset.PauseWhenOffscreen = pauseOff;
+			m_Dirty = true;
+		}
+		cy += 30.0f;
+
+		// 2. 发射器图层概况
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 4.0f }, "包含发射器图层 (" + std::to_string(m_Asset.Emitters.size()) + ")", theme.Accent, 11.0f);
+		cy += 24.0f;
+		for (size_t eIdx = 0; eIdx < m_Asset.Emitters.size(); ++eIdx)
+		{
+			const auto& e = m_Asset.Emitters[eIdx];
+			const Wui::WuiRect eCard { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, 22.0f };
+			Wui::BarSurface(ctx, eCard, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.8f }, theme.Border);
+			std::string eDesc = e.Name + " (" + std::to_string(e.Modules.size()) + " 模块, " + std::to_string(e.MaxParticles) + " 粒子)";
+			Wui::Label(ctx, { eCard.X + 6.0f, eCard.Y + 3.0f }, eDesc, e.Enabled ? theme.Text : theme.TextMuted, 10.0f);
+			if (ctx.IsHovered(eCard) && ctx.Input().MouseClicked[0])
+			{
+				m_SelectedEmitterIndex = eIdx;
+			}
+			cy += 26.0f;
+		}
+
+		Wui::EndScrollArea(ctx);
+	}
 	void ParticleEditorPanel::RenderInspector(Wui::WuiContext& ctx, const Wui::WuiRect& inspectorRect, const Wui::WuiTheme& theme, PanelHost& host)
 	{
 		(void)host;
@@ -3937,7 +4108,7 @@ void ParticleEditorPanel::NewAsset()
 
 		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size())
 		{
-			Wui::Label(ctx, { inspectorRect.X + 16.0f, inspectorRect.Y + 40.0f }, "未选择有效发射器图层", theme.TextMuted, 11.0f);
+			RenderSystemInspector(ctx, inspectorRect, theme);
 			return;
 		}
 
@@ -3965,25 +4136,31 @@ void ParticleEditorPanel::NewAsset()
 		const Wui::WuiRect scrollAreaRect { inspectorRect.X, curY, inspectorRect.W, scrollAreaH };
 
 
-		// 动态统计展开卡片高度总和
-		float totalCardsHeight = 0.0f;
-		totalCardsHeight += (m_CardSpawningExpanded ? (180.0f + em.Bursts.size() * 26.0f) : 28.0f) + 6.0f;
-		totalCardsHeight += (m_CardShapeExpanded ? 150.0f : 28.0f) + 6.0f;
-		totalCardsHeight += (m_CardForcesExpanded ? 240.0f : 28.0f) + 6.0f;
-		totalCardsHeight += (m_CardSizeRotationExpanded ? 140.0f : 28.0f) + 6.0f;
-		totalCardsHeight += (m_CardColorAlphaExpanded ? 150.0f : 28.0f) + 6.0f;
-		totalCardsHeight += (m_CardRenderersExpanded ? 160.0f : 28.0f) + 6.0f;
-		totalCardsHeight += (m_CardCollisionExpanded ? 130.0f : 28.0f) + 40.0f;
-
+		// 动态统计展开卡片真实高度总和
+		float totalCardsHeight = 160.0f; // 基础配置
+		totalCardsHeight += 64.0f;       // 模块堆栈标题
+		if (m_AddModuleMenuOpen)
+		{
+			totalCardsHeight += 290.0f + static_cast<float>(m_ProjectCustomModules.size() * 24.0f);
+		}
+		for (size_t mIdx = 0; mIdx < em.Modules.size(); ++mIdx)
+		{
+			const auto& mod = em.Modules[mIdx];
+			float cardH = 32.0f;
+			const std::string modKey = mod.Id + "_" + std::to_string(mIdx);
+			if (m_ModuleSourceExpanded[modKey]) cardH += 130.0f;
+			if (mod.Enabled) cardH += mod.Parameters.size() * 26.0f;
+			if (mod.Id == "mod.update.scale_over_life" || mod.Id == "mod.update.color_over_life" ||
+			    mod.Id == "mod.update.rotation_over_life" || mod.Id == "mod.update.shockwave_expansion")
+			{
+				cardH += 26.0f;
+			}
+			totalCardsHeight += cardH + 8.0f;
+		}
+		totalCardsHeight += 80.0f;
 
 		Wui::BeginScrollArea(ctx, scrollAreaRect, totalCardsHeight, m_InspectorScrollY, theme, Wui::HashId("vfx.inspector.scroll"));
 		float cy = scrollAreaRect.Y - m_InspectorScrollY;
-
-
-
-		// 封装 DragFloat 行与复位指示器
-		
-		em.EnsureDefaultModules();
 
 		// -------------------------------------------------------------
 		// 1. 发射器基础配置 (Base Emitter Properties)
@@ -4006,10 +4183,10 @@ void ParticleEditorPanel::NewAsset()
 		// 生命周期
 		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "基准寿命 (秒):", theme.TextMuted, 10.0f);
 		const Wui::WuiRect lifeRect { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
-		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.life"), lifeRect, em.Lifetime, 0.05f, 0.05f, 60.0f, theme))
+		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.life"), lifeRect, em.Lifetime, 0.1f, 0.01f, 99999.0f, theme))
 		{
 			m_Dirty = true;
-			SyncSimulationFromAsset();
+			UpdateLiveSimulationSettings();
 		}
 		cy += 24.0f;
 
@@ -4019,7 +4196,7 @@ void ParticleEditorPanel::NewAsset()
 		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.rate"), rateRect, em.EmissionRate, 1.0f, 0.0f, 20000.0f, theme))
 		{
 			m_Dirty = true;
-			SyncSimulationFromAsset();
+			UpdateLiveSimulationSettings();
 		}
 		cy += 24.0f;
 
@@ -4069,7 +4246,7 @@ void ParticleEditorPanel::NewAsset()
 		if (m_AddModuleMenuOpen)
 		{
 			const float itemH = 22.0f;
-			const float menuH = 194.0f + (m_ProjectCustomModules.empty() ? 24.0f : static_cast<float>(m_ProjectCustomModules.size() * 24.0f));
+			const float menuH = 282.0f + (m_ProjectCustomModules.empty() ? 24.0f : static_cast<float>(m_ProjectCustomModules.size() * 24.0f));
 			const Wui::WuiRect menuRect { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, menuH };
 			Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.14f, 0.16f, 0.20f, 0.98f }, theme.Accent);
 
@@ -4092,6 +4269,10 @@ void ParticleEditorPanel::NewAsset()
 			renderMenuItem("vfx.add.c", "+ 3D 旋度流体噪声 (Curl Noise)", VfxModuleLibrary::CreateCurlNoiseModule());
 			renderMenuItem("vfx.add.a", "+ 点引力/黑洞吸引子 (Point Attractor)", VfxModuleLibrary::CreatePointAttractorModule());
 			renderMenuItem("vfx.add.v", "+ 旋转涡流场 (Vortex Field)", VfxModuleLibrary::CreateVortexModule());
+			renderMenuItem("vfx.add.rot", "+ 平面旋转与角速度 (Rotation Over Life)", VfxModuleLibrary::CreateRotationOverLifeModule());
+			renderMenuItem("vfx.add.tor", "+ 龙卷风涡流与热浮力 (Vortex Tornado)", VfxModuleLibrary::CreateVortexTornadoModule());
+			renderMenuItem("vfx.add.shk", "+ 冲击波扩散衰减 (Shockwave Expansion)", VfxModuleLibrary::CreateShockwaveExpansionModule());
+			renderMenuItem("vfx.add.flp", "+ 序列帧动画驱动 (SubUV Flipbook)", VfxModuleLibrary::CreateFlipbookModule());
 			renderMenuItem("vfx.add.s", "+ 物理欧拉积分与消亡 (Solve Velocity)", VfxModuleLibrary::CreateSolveVelocityModule());
 
 			my += 4.0f;
@@ -4155,7 +4336,6 @@ void ParticleEditorPanel::NewAsset()
 		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size()) return;
 		PushUndoSnapshot();
 		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
-		em.EnsureDefaultModules();
 		em.Modules.push_back(module);
 		m_Dirty = true;
 		SyncSlangShaderFromModules();
@@ -4205,7 +4385,6 @@ void ParticleEditorPanel::NewAsset()
 	{
 		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size()) return;
 		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
-		em.EnsureDefaultModules();
 
 		m_SlangShaderBuffer = VfxComputeGenerator::GenerateComputeShaderSource(
 			em.Name,
@@ -4252,9 +4431,12 @@ void ParticleEditorPanel::NewAsset()
 
 		const std::string modKey = mod.Id + "_" + std::to_string(modIdx);
 		const bool isSourceExpanded = m_ModuleSourceExpanded[modKey];
+		const bool isCurveMod = (mod.Id == "mod.update.scale_over_life" || mod.Id == "mod.update.color_over_life" ||
+		                         mod.Id == "mod.update.rotation_over_life" || mod.Id == "mod.update.shockwave_expansion");
 
 		if (isSourceExpanded) cardContentH += 130.0f;
 		if (mod.Enabled) cardContentH += mod.Parameters.size() * 26.0f;
+		if (mod.Enabled && isCurveMod) cardContentH += 26.0f;
 
 		const Wui::WuiRect cardRect { cardX, curY, cardW, cardContentH };
 		Wui::BarSurface(ctx, cardRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.95f }, theme.Border);
@@ -4342,6 +4524,49 @@ void ParticleEditorPanel::NewAsset()
 
 		float fieldY = cardRect.Y + headerH + 4.0f;
 
+		// 曲线展开与预设快捷操作栏 (适用于支持随寿命调制的模块)
+		if (mod.Enabled && isCurveMod)
+		{
+			const Wui::WuiRect cvBar { cardRect.X + 8.0f, fieldY, cardRect.W - 16.0f, 22.0f };
+			Wui::BarSurface(ctx, cvBar, Wui::WuiColor { 0.08f, 0.10f, 0.14f, 0.9f }, theme.Border);
+			Wui::Label(ctx, { cvBar.X + 6.0f, cvBar.Y + 3.0f }, "曲线调制:", theme.Accent, 9.5f);
+
+			float cbx = cvBar.X + 58.0f;
+			const struct CVShort { const char* id; const char* label; const char* type; } cvPresets[] = {
+				{ "p.lin", "线性", "Linear" },
+				{ "p.in", "淡入", "EaseIn" },
+				{ "p.out", "淡出", "EaseOut" },
+				{ "p.inout", "平滑", "EaseInOut" },
+				{ "p.bell", "钟形", "Bell" }
+			};
+			for (const auto& cp : cvPresets)
+			{
+				const Wui::WuiRect cBtnR { cbx, cvBar.Y + 2.0f, 32.0f, 18.0f };
+				if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mcp_") + cp.id + "_" + std::to_string(modIdx)).c_str()), cBtnR, cp.label, theme))
+				{
+					PushUndoSnapshot();
+					if (mod.Id == "mod.update.scale_over_life")
+					{
+						if (std::string(cp.type) == "Linear") { mod.SetFloat("StartScale", 1.0f); mod.SetFloat("EndScale", 0.0f); }
+						else if (std::string(cp.type) == "EaseIn") { mod.SetFloat("StartScale", 0.0f); mod.SetFloat("EndScale", 1.2f); }
+						else if (std::string(cp.type) == "EaseOut") { mod.SetFloat("StartScale", 1.5f); mod.SetFloat("EndScale", 0.1f); }
+					}
+					m_Dirty = true;
+					UpdateLiveSimulationSettings();
+				}
+				cbx += 35.0f;
+			}
+
+			const Wui::WuiRect cvOpenBtn { cvBar.X + cvBar.W - 74.0f, cvBar.Y + 2.0f, 70.0f, 18.0f };
+			const bool isThisCurving = (m_TimelineCurvesExpanded && m_CurvingModuleIndex == static_cast<int>(modIdx));
+			if (Wui::Button(ctx, Wui::HashId((std::string("vfx.cv_open_") + std::to_string(modIdx)).c_str()), cvOpenBtn, isThisCurving ? "[收起曲线]" : "[曲线工作台]", theme))
+			{
+				m_CurvingModuleIndex = static_cast<int>(modIdx);
+				m_TimelineCurvesExpanded = !isThisCurving;
+			}
+			fieldY += 26.0f;
+		}
+
 		// 2. 参数调节列表 (带悬浮提示、通用调色板与下拉枚举)
 		if (mod.Enabled)
 		{
@@ -4404,7 +4629,7 @@ void ParticleEditorPanel::NewAsset()
 					{
 						param.FloatVal = static_cast<float>(selected);
 						m_Dirty = true;
-						SyncSimulationFromAsset();
+						UpdateLiveSimulationSettings();
 					}
 				}
 				// 【需求 2: Color 变量使用通用调色板 ColorField】
@@ -4414,7 +4639,7 @@ void ParticleEditorPanel::NewAsset()
 					if (Wui::ColorField(ctx, Wui::HashId((std::string("vfx.cf_") + std::to_string(modIdx * 100 + pIdx)).c_str()), valRect, param.VecVal, theme))
 					{
 						m_Dirty = true;
-						SyncSimulationFromAsset();
+						UpdateLiveSimulationSettings();
 					}
 				}
 				else if (param.Type == VfxParamType::Float)
@@ -4427,7 +4652,7 @@ void ParticleEditorPanel::NewAsset()
 							m_Asset.UserParamsFloat[param.ExposedName.empty() ? param.Name : param.ExposedName] = param.FloatVal;
 						}
 						m_Dirty = true;
-						SyncSimulationFromAsset();
+						UpdateLiveSimulationSettings();
 					}
 				}
 				else if (param.Type == VfxParamType::Vec3)
@@ -4436,17 +4661,17 @@ void ParticleEditorPanel::NewAsset()
 					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.v3x_") + std::to_string(modIdx * 100 + pIdx)).c_str()), { valRect.X, valRect.Y, subW, valRect.H }, param.VecVal.x, param.Step, param.Min, param.Max, theme))
 					{
 						m_Dirty = true;
-						SyncSimulationFromAsset();
+						UpdateLiveSimulationSettings();
 					}
 					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.v3y_") + std::to_string(modIdx * 100 + pIdx)).c_str()), { valRect.X + subW + 4.0f, valRect.Y, subW, valRect.H }, param.VecVal.y, param.Step, param.Min, param.Max, theme))
 					{
 						m_Dirty = true;
-						SyncSimulationFromAsset();
+						UpdateLiveSimulationSettings();
 					}
 					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.v3z_") + std::to_string(modIdx * 100 + pIdx)).c_str()), { valRect.X + (subW + 4.0f) * 2.0f, valRect.Y, subW, valRect.H }, param.VecVal.z, param.Step, param.Min, param.Max, theme))
 					{
 						m_Dirty = true;
-						SyncSimulationFromAsset();
+						UpdateLiveSimulationSettings();
 					}
 				}
 
