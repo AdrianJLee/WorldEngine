@@ -11,9 +11,10 @@ namespace World
 {
 	enum class VfxModuleStage : uint8_t
 	{
-		Spawn = 0,
-		Update = 1,
-		Render = 2
+		Emitter = 0, // 发射控制阶段 (Spawn Rate / Spawn Burst)
+		Spawn = 1,   // 粒子出生初始化阶段 (Initialize Particle / Shape Distribution)
+		Update = 2,  // 粒子动力学受力与更新阶段 (Forces / Drag / Turbulence / Solve)
+		Render = 3   // 渲染器阶段 (Sprite / Mesh Renderer / BlendMode)
 	};
 
 	enum class VfxParamType : uint8_t
@@ -74,7 +75,12 @@ namespace World
 		// 获取全部内建标准模块清单 (全部基于原生 Slang 代码实现)
 		static std::vector<VfxModule> GetBuiltinModules();
 
-		// Spawn 阶段标准模块
+		// Emitter 阶段标准模块 (发射与生成控制)
+		static VfxModule CreateSpawnRateModule(float rate = 50.0f);
+		static VfxModule CreateSpawnBurstModule(uint32_t count = 1, float time = 0.0f);
+
+		// Particle Spawn 阶段标准模块 (初始化与几何分布)
+		static VfxModule CreateInitParticleModule(float lifetime = 2.0f, float sizeStart = 0.3f, float sizeEnd = 0.05f);
 		static VfxModule CreateConeSpawnModule();
 		static VfxModule CreateSphereSpawnModule();
 		static VfxModule CreateBoxSpawnModule();
@@ -87,6 +93,9 @@ namespace World
 		static VfxModule CreatePointAttractorModule();
 		static VfxModule CreateVortexModule();
 		static VfxModule CreateSolveVelocityModule();
+
+		// Render 阶段标准模块 (渲染器与材质设定)
+		static VfxModule CreateSpriteRendererModule(bool additive = true, bool horizontal = false, float emissive = 2.0f);
 
 		// 自定义 Slang 代码块工厂
 		static VfxModule CreateCustomSlangModule(const std::string& customName = "CustomSimulationBlock");

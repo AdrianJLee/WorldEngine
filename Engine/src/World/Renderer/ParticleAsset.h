@@ -12,12 +12,21 @@
 
 namespace World
 {
+	enum class VfxEmissionMode : uint8_t
+	{
+		Continuous = 0, // 持续发射 (Continuous Rate: 火焰/浓烟/火花/喷泉)
+		Burst = 1,      // 单次/循环瞬时爆发 (Instant Burst: 冲击波/闪光)
+		Single = 2      // 单体常驻/非粒子 (Single Mesh/Decal/Shield: 法阵/护盾/光环网格，零持续粒子发射)
+	};
+
 	struct WLD_API ParticleEmitterLayer
 	{
 		std::string Name = "Emitter";
 		uint32_t MaxParticles = 500;
 		float Lifetime = 2.0f;
 		float EmissionRate = 50.0f;
+		VfxEmissionMode EmissionMode = VfxEmissionMode::Continuous;
+		uint32_t SingleCount = 1; // 单体常驻或瞬时爆发时的数量 (默认 1)
 		ParticleEmitterType EmitterType = ParticleEmitterType::Point;
 		bool Enabled = true;
 		ParticleRenderMode FacingMode = ParticleRenderMode::Billboard;

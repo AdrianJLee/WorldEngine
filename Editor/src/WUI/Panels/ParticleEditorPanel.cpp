@@ -34,7 +34,7 @@ void ParticleEditorPanel::RequestOpenAsset(const std::string& path)
 	}
 
 
-	// 2D [marker] Cohen-Sutherland æ¿§
+	// 2D [marker] Cohen-Sutherland 
 	static bool ClipLineSegment2D(glm::vec2& p0, glm::vec2& p1, float minX, float maxX, float minY, float maxY)
 	{
 		auto computeOutCode = [minX, maxX, minY, maxY](const glm::vec2& p) -> int {
@@ -1322,7 +1322,7 @@ void ParticleEditorPanel::NewAsset()
 		std::string sysTitle = "[系统] " + m_Asset.Name;
 		if (sysTitle.size() > 22) sysTitle = sysTitle.substr(0, 20) + "..";
 		Wui::Label(ctx, { sysRow.X + 6.0f, sysRow.Y + 5.0f }, sysTitle, theme.Text, 11.0f);
-		std::string durStr = std::to_string(m_TimelineDuration).substr(0, 3) + "s" + (m_Asset.Looping ? " ⟳" : "");
+		std::string durStr = std::to_string(m_TimelineDuration).substr(0, 3) + "s" + (m_Asset.Looping ? " [循环]" : "");
 		Wui::Label(ctx, { sysRow.X + sysRow.W - 46.0f, sysRow.Y + 5.0f }, durStr, theme.TextMuted, 9.5f);
 		listY += 26.0f;
 
@@ -1873,166 +1873,84 @@ void ParticleEditorPanel::NewAsset()
 			EnsurePerEmitterState();
 			auto& ext = m_EmitterExtended[m_SelectedEmitterIndex];
 
-			if (curEm.EmitterType == ParticleEmitterType::Cone)
+			const VfxModule* activeSpawnMod = nullptr;
+			for (const auto& mod : curEm.Modules)
 			{
-				const float rBase = std::max(0.01f, ext.ConeRadius);
-				const float h = std::max(0.1f, ext.ConeHeight);
-				const float halfAngleRad = glm::radians(std::clamp(ext.ConeAngle * 0.5f, 0.0f, 85.0f));
-				const float rTop = rBase + h * std::tan(halfAngleRad);
-
-				char buf[64];
-				std::snprintf(buf, sizeof(buf), "底面半径: %.2fm (左键拖拽调整)", ext.ConeRadius);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::ConeBaseRadius),
-					glm::vec3(rBase, 0.0f, 0.0f),
-					glm::vec3(1.0f, 0.0f, 0.0f),
-					ext.ConeRadius,
-					Wui::WuiColor { 1.0f, 0.85f, 0.20f, 1.0f },
-					buf,
-					"R",
-					0.01f, 20.0f, false
-				});
-
-				std::snprintf(buf, sizeof(buf), "圆锥张角: %.1f° (左键拖拽调整)", ext.ConeAngle);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::ConeTopAngle),
-					glm::vec3(rTop, h, 0.0f),
-					glm::vec3(1.0f, 0.0f, 0.0f),
-					ext.ConeAngle,
-					Wui::WuiColor { 0.25f, 0.85f, 1.0f, 1.0f },
-					buf,
-					"A",
-					0.0f, 120.0f, true
-				});
-
-				std::snprintf(buf, sizeof(buf), "圆锥高度: %.2fm (左键拖拽调整)", ext.ConeHeight);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::ConeHeight),
-					glm::vec3(0.0f, h, 0.0f),
-					glm::vec3(0.0f, 1.0f, 0.0f),
-					ext.ConeHeight,
-					Wui::WuiColor { 0.35f, 0.95f, 0.45f, 1.0f },
-					buf,
-					"H",
-					0.1f, 30.0f, false
-				});
+				if (mod.Enabled && (mod.Id == "mod.spawn.cone" || mod.Id == "mod.spawn.sphere" || mod.Id == "mod.spawn.box" || mod.Id == "mod.spawn.point"))
+				{
+					activeSpawnMod = &mod;
+					break;
+				}
 			}
-			else if (curEm.EmitterType == ParticleEmitterType::Sphere || curEm.EmitterType == ParticleEmitterType::Circle)
+
+			if (activeSpawnMod)
 			{
-				const float spR = std::max(0.05f, ext.SphereRadius);
-				char buf[64];
-				std::snprintf(buf, sizeof(buf), "球体半径 X: %.2fm (左键拖拽调整)", ext.SphereRadius);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::SphereRadiusX),
-					glm::vec3(spR, 0.0f, 0.0f),
-					glm::vec3(1.0f, 0.0f, 0.0f),
-					ext.SphereRadius,
-					Wui::WuiColor { 0.95f, 0.30f, 0.30f, 1.0f },
-					buf,
-					"X",
-					0.05f, 20.0f, false
-				});
+				if (activeSpawnMod->Id == "mod.spawn.cone")
+				{
+					float cRadius = activeSpawnMod->GetFloat("ConeRadius", 0.5f);
+					float cAngle = activeSpawnMod->GetFloat("ConeAngle", 30.0f);
+					const float rBase = std::max(0.01f, cRadius);
+					const float h = 1.5f;
+					const float halfAngleRad = glm::radians(std::clamp(cAngle * 0.5f, 0.0f, 85.0f));
+					const float rTop = rBase + h * std::tan(halfAngleRad);
 
-				std::snprintf(buf, sizeof(buf), "球体半径 Y: %.2fm (左键拖拽调整)", ext.SphereRadius);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::SphereRadiusY),
-					glm::vec3(0.0f, spR, 0.0f),
-					glm::vec3(0.0f, 1.0f, 0.0f),
-					ext.SphereRadius,
-					Wui::WuiColor { 0.30f, 0.95f, 0.40f, 1.0f },
-					buf,
-					"Y",
-					0.05f, 20.0f, false
-				});
+					char buf[64];
+					std::snprintf(buf, sizeof(buf), "圆锥底面半径: %.2fm (拖拽调整)", rBase);
+					handles.push_back({
+						static_cast<int>(ParticleGizmoHandleId::ConeBaseRadius),
+						glm::vec3(rBase, 0.0f, 0.0f),
+						glm::vec3(1.0f, 0.0f, 0.0f),
+						rBase,
+						Wui::WuiColor { 1.0f, 0.85f, 0.20f, 1.0f },
+						buf,
+						"R",
+						0.01f, 20.0f, false
+					});
 
-				std::snprintf(buf, sizeof(buf), "球体半径 Z: %.2fm (左键拖拽调整)", ext.SphereRadius);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::SphereRadiusZ),
-					glm::vec3(0.0f, 0.0f, spR),
-					glm::vec3(0.0f, 0.0f, 1.0f),
-					ext.SphereRadius,
-					Wui::WuiColor { 0.30f, 0.60f, 1.0f, 1.0f },
-					buf,
-					"Z",
-					0.05f, 20.0f, false
-				});
-			}
-			else if (curEm.EmitterType == ParticleEmitterType::Box)
-			{
-				const glm::vec3 extents = glm::max(ext.BoxExtents, glm::vec3(0.05f));
-				char buf[64];
-
-				std::snprintf(buf, sizeof(buf), "盒体尺寸 +X: %.2fm (左键拖拽调整)", ext.BoxExtents.x);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::BoxExtentPosX),
-					glm::vec3(extents.x, 0.0f, 0.0f),
-					glm::vec3(1.0f, 0.0f, 0.0f),
-					ext.BoxExtents.x,
-					Wui::WuiColor { 0.95f, 0.30f, 0.30f, 1.0f },
-					buf,
-					"+X",
-					0.05f, 20.0f, false
-				});
-
-				std::snprintf(buf, sizeof(buf), "盒体尺寸 -X: %.2fm (左键拖拽调整)", ext.BoxExtents.x);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::BoxExtentNegX),
-					glm::vec3(-extents.x, 0.0f, 0.0f),
-					glm::vec3(-1.0f, 0.0f, 0.0f),
-					ext.BoxExtents.x,
-					Wui::WuiColor { 0.95f, 0.50f, 0.50f, 1.0f },
-					buf,
-					"-X",
-					0.05f, 20.0f, false
-				});
-
-				std::snprintf(buf, sizeof(buf), "盒体尺寸 +Y: %.2fm (左键拖拽调整)", ext.BoxExtents.y);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::BoxExtentPosY),
-					glm::vec3(0.0f, extents.y, 0.0f),
-					glm::vec3(0.0f, 1.0f, 0.0f),
-					ext.BoxExtents.y,
-					Wui::WuiColor { 0.30f, 0.95f, 0.40f, 1.0f },
-					buf,
-					"+Y",
-					0.05f, 20.0f, false
-				});
-
-				std::snprintf(buf, sizeof(buf), "盒体尺寸 -Y: %.2fm (左键拖拽调整)", ext.BoxExtents.y);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::BoxExtentNegY),
-					glm::vec3(0.0f, -extents.y, 0.0f),
-					glm::vec3(0.0f, -1.0f, 0.0f),
-					ext.BoxExtents.y,
-					Wui::WuiColor { 0.50f, 0.95f, 0.60f, 1.0f },
-					buf,
-					"-Y",
-					0.05f, 20.0f, false
-				});
-
-				std::snprintf(buf, sizeof(buf), "盒体尺寸 +Z: %.2fm (左键拖拽调整)", ext.BoxExtents.z);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::BoxExtentPosZ),
-					glm::vec3(0.0f, 0.0f, extents.z),
-					glm::vec3(0.0f, 0.0f, 1.0f),
-					ext.BoxExtents.z,
-					Wui::WuiColor { 0.30f, 0.60f, 1.0f, 1.0f },
-					buf,
-					"+Z",
-					0.05f, 20.0f, false
-				});
-
-				std::snprintf(buf, sizeof(buf), "盒体尺寸 -Z: %.2fm (左键拖拽调整)", ext.BoxExtents.z);
-				handles.push_back({
-					static_cast<int>(ParticleGizmoHandleId::BoxExtentNegZ),
-					glm::vec3(0.0f, 0.0f, -extents.z),
-					glm::vec3(0.0f, 0.0f, -1.0f),
-					ext.BoxExtents.z,
-					Wui::WuiColor { 0.50f, 0.75f, 1.0f, 1.0f },
-					buf,
-					"-Z",
-					0.05f, 20.0f, false
-				});
+					std::snprintf(buf, sizeof(buf), "圆锥张角: %.1f度 (拖拽调整)", cAngle);
+					handles.push_back({
+						static_cast<int>(ParticleGizmoHandleId::ConeTopAngle),
+						glm::vec3(rTop, h, 0.0f),
+						glm::vec3(1.0f, 0.0f, 0.0f),
+						cAngle,
+						Wui::WuiColor { 0.25f, 0.85f, 1.0f, 1.0f },
+						buf,
+						"A",
+						0.0f, 120.0f, true
+					});
+				}
+				else if (activeSpawnMod->Id == "mod.spawn.sphere")
+				{
+					float spR = std::max(0.05f, activeSpawnMod->GetFloat("SphereRadius", 1.0f));
+					char buf[64];
+					std::snprintf(buf, sizeof(buf), "球体生成半径: %.2fm (拖拽调整)", spR);
+					handles.push_back({
+						static_cast<int>(ParticleGizmoHandleId::SphereRadiusX),
+						glm::vec3(spR, 0.0f, 0.0f),
+						glm::vec3(1.0f, 0.0f, 0.0f),
+						spR,
+						Wui::WuiColor { 0.25f, 0.85f, 1.0f, 1.0f },
+						buf,
+						"R",
+						0.05f, 30.0f, false
+					});
+				}
+				else if (activeSpawnMod->Id == "mod.spawn.box")
+				{
+					glm::vec3 e(1.0f);
+					const auto* pB = activeSpawnMod->FindParam("BoxExtents");
+					if (pB) e = glm::max(glm::vec3(pB->VecVal), glm::vec3(0.05f));
+					handles.push_back({
+						static_cast<int>(ParticleGizmoHandleId::BoxExtentPosX),
+						glm::vec3(e.x, 0.0f, 0.0f),
+						glm::vec3(1.0f, 0.0f, 0.0f),
+						e.x,
+						Wui::WuiColor { 1.0f, 0.35f, 0.35f, 1.0f },
+						"包围盒宽度 X (拖拽调整)",
+						"X",
+						0.05f, 30.0f, false
+					});
+				}
 			}
 		}
 
@@ -2087,9 +2005,19 @@ void ParticleEditorPanel::NewAsset()
 					}
 				}
 
-				if (activeItem && m_SelectedEmitterIndex < m_EmitterExtended.size())
+				if (activeItem && m_SelectedEmitterIndex < m_Asset.Emitters.size())
 				{
-					auto& ext = m_EmitterExtended[m_SelectedEmitterIndex];
+					auto& curEm = m_Asset.Emitters[m_SelectedEmitterIndex];
+					VfxModule* activeSpawnMod = nullptr;
+					for (auto& mod : curEm.Modules)
+					{
+						if (mod.Enabled && (mod.Id == "mod.spawn.cone" || mod.Id == "mod.spawn.sphere" || mod.Id == "mod.spawn.box"))
+						{
+							activeSpawnMod = &mod;
+							break;
+						}
+					}
+
 					glm::vec2 s0, s1;
 					projectPoint(activeItem->WorldPos, s0);
 					projectPoint(activeItem->WorldPos + activeItem->DragDir, s1);
@@ -2106,46 +2034,39 @@ void ParticleEditorPanel::NewAsset()
 						proj = d.x - d.y;
 					}
 
-					if (activeItem->IsAngle)
+					if (activeSpawnMod)
 					{
-						const float deltaAngle = proj * 0.35f;
-						ext.ConeAngle = std::clamp(m_GizmoDragInitialParam + deltaAngle, activeItem->MinVal, activeItem->MaxVal);
-					}
-					else
-					{
-						const float deltaDist = proj * (m_CameraDistance * 0.0025f);
-						const float newVal = std::clamp(m_GizmoDragInitialParam + deltaDist, activeItem->MinVal, activeItem->MaxVal);
-						switch (static_cast<ParticleGizmoHandleId>(activeItem->Id))
+						if (activeItem->IsAngle)
 						{
-						case ParticleGizmoHandleId::ConeBaseRadius:
-							ext.ConeRadius = newVal;
-							break;
-						case ParticleGizmoHandleId::ConeHeight:
-							ext.ConeHeight = newVal;
-							break;
-						case ParticleGizmoHandleId::SphereRadiusX:
-						case ParticleGizmoHandleId::SphereRadiusY:
-						case ParticleGizmoHandleId::SphereRadiusZ:
-							ext.SphereRadius = newVal;
-							break;
-						case ParticleGizmoHandleId::BoxExtentPosX:
-						case ParticleGizmoHandleId::BoxExtentNegX:
-							ext.BoxExtents.x = newVal;
-							break;
-						case ParticleGizmoHandleId::BoxExtentPosY:
-						case ParticleGizmoHandleId::BoxExtentNegY:
-							ext.BoxExtents.y = newVal;
-							break;
-						case ParticleGizmoHandleId::BoxExtentPosZ:
-						case ParticleGizmoHandleId::BoxExtentNegZ:
-							ext.BoxExtents.z = newVal;
-							break;
-						default:
-							break;
+							const float deltaAngle = proj * 0.35f;
+							float newAng = std::clamp(m_GizmoDragInitialParam + deltaAngle, activeItem->MinVal, activeItem->MaxVal);
+							activeSpawnMod->SetFloat("ConeAngle", newAng);
 						}
+						else
+						{
+							const float deltaDist = proj * (m_CameraDistance * 0.0025f);
+							const float newVal = std::clamp(m_GizmoDragInitialParam + deltaDist, activeItem->MinVal, activeItem->MaxVal);
+							switch (static_cast<ParticleGizmoHandleId>(activeItem->Id))
+							{
+							case ParticleGizmoHandleId::ConeBaseRadius:
+								activeSpawnMod->SetFloat("ConeRadius", newVal);
+								break;
+							case ParticleGizmoHandleId::SphereRadiusX:
+							case ParticleGizmoHandleId::SphereRadiusY:
+							case ParticleGizmoHandleId::SphereRadiusZ:
+								activeSpawnMod->SetFloat("SphereRadius", newVal);
+								break;
+							case ParticleGizmoHandleId::BoxExtentPosX:
+								if (auto* pB = activeSpawnMod->FindParam("BoxExtents"))
+									pB->VecVal.x = newVal;
+								break;
+							default:
+								break;
+							}
+						}
+						m_Dirty = true;
+						SyncSimulationFromAsset();
 					}
-					m_Dirty = true;
-					SyncSimulationFromAsset();
 				}
 			}
 			else
@@ -2362,47 +2283,69 @@ void ParticleEditorPanel::NewAsset()
 			EnsurePerEmitterState();
 			const auto& ext = m_EmitterExtended[m_SelectedEmitterIndex];
 
-			if (curEm.EmitterType == ParticleEmitterType::Cone)
+			const VfxModule* activeSpawnMod = nullptr;
+			for (const auto& mod : curEm.Modules)
 			{
-				const float rBase = std::max(0.01f, ext.ConeRadius);
-				const float h = std::max(0.1f, ext.ConeHeight);
-				const float halfAngleRad = glm::radians(std::clamp(ext.ConeAngle * 0.5f, 0.0f, 85.0f));
-				const float rTop = rBase + h * std::tan(halfAngleRad);
-
-				drawProjectedCircle(glm::vec3(0.0f, 0.0f, 0.0f), rBase, glm::vec3(0.0f, 1.0f, 0.0f), gizmoWireCol, 1.5f, 24);
-				drawProjectedCircle(glm::vec3(0.0f, h, 0.0f), rTop, glm::vec3(0.0f, 1.0f, 0.0f), gizmoWireCol, 1.5f, 24);
-
-				drawProjectedSegment(glm::vec3(rBase, 0.0f, 0.0f), glm::vec3(rTop, h, 0.0f), gizmoWireCol, 1.2f);
-				drawProjectedSegment(glm::vec3(-rBase, 0.0f, 0.0f), glm::vec3(-rTop, h, 0.0f), gizmoWireCol, 1.2f);
-				drawProjectedSegment(glm::vec3(0.0f, 0.0f, rBase), glm::vec3(0.0f, h, rTop), gizmoWireCol, 1.2f);
-				drawProjectedSegment(glm::vec3(0.0f, 0.0f, -rBase), glm::vec3(0.0f, h, -rTop), gizmoWireCol, 1.2f);
-
-				drawProjectedSegment(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, h, 0.0f), Wui::WuiColor { 0.95f, 0.85f, 0.20f, 0.40f }, 1.0f);
+				if (mod.Enabled && (mod.Id == "mod.spawn.cone" || mod.Id == "mod.spawn.sphere" || mod.Id == "mod.spawn.box" || mod.Id == "mod.spawn.point"))
+				{
+					activeSpawnMod = &mod;
+					break;
+				}
 			}
-			else if (curEm.EmitterType == ParticleEmitterType::Sphere || curEm.EmitterType == ParticleEmitterType::Circle)
-			{
-				const float spR = std::max(0.05f, ext.SphereRadius);
-				drawProjectedCircle(glm::vec3(0.0f), spR, glm::vec3(0.0f, 1.0f, 0.0f), gizmoWireCol, 1.4f, 24);
-				drawProjectedCircle(glm::vec3(0.0f), spR, glm::vec3(0.0f, 0.0f, 1.0f), gizmoWireCol, 1.4f, 24);
-				drawProjectedCircle(glm::vec3(0.0f), spR, glm::vec3(1.0f, 0.0f, 0.0f), gizmoWireCol, 1.4f, 24);
-			}
-			else if (curEm.EmitterType == ParticleEmitterType::Box)
-			{
-				const glm::vec3 e = glm::max(ext.BoxExtents, glm::vec3(0.05f));
-				drawProjectedSegment(glm::vec3(-e.x, -e.y, -e.z), glm::vec3(e.x, -e.y, -e.z), gizmoWireCol, 1.3f);
-				drawProjectedSegment(glm::vec3(e.x, -e.y, -e.z), glm::vec3(e.x, e.y, -e.z), gizmoWireCol, 1.3f);
-				drawProjectedSegment(glm::vec3(e.x, e.y, -e.z), glm::vec3(-e.x, e.y, -e.z), gizmoWireCol, 1.3f);
-				drawProjectedSegment(glm::vec3(-e.x, e.y, -e.z), glm::vec3(-e.x, -e.y, -e.z), gizmoWireCol, 1.3f);
 
-				drawProjectedSegment(glm::vec3(-e.x, -e.y, e.z), glm::vec3(e.x, -e.y, e.z), gizmoWireCol, 1.3f);
-				drawProjectedSegment(glm::vec3(e.x, -e.y, e.z), glm::vec3(e.x, e.y, e.z), gizmoWireCol, 1.3f);
-				drawProjectedSegment(glm::vec3(e.x, e.y, e.z), glm::vec3(-e.x, e.y, e.z), gizmoWireCol, 1.3f);
-				drawProjectedSegment(glm::vec3(-e.x, e.y, e.z), glm::vec3(-e.x, -e.y, e.z), gizmoWireCol, 1.3f);
+			if (activeSpawnMod)
+			{
+				if (activeSpawnMod->Id == "mod.spawn.cone")
+				{
+					const float rBase = std::max(0.01f, activeSpawnMod->GetFloat("ConeRadius", 0.5f));
+					const float cAngle = activeSpawnMod->GetFloat("ConeAngle", 30.0f);
+					const float h = 1.5f;
+					const float halfAngleRad = glm::radians(std::clamp(cAngle * 0.5f, 0.0f, 85.0f));
+					const float rTop = rBase + h * std::tan(halfAngleRad);
 
-				drawProjectedSegment(glm::vec3(-e.x, -e.y, -e.z), glm::vec3(-e.x, -e.y, e.z), gizmoWireCol, 1.3f);
-				drawProjectedSegment(glm::vec3(e.x, -e.y, -e.z), glm::vec3(e.x, -e.y, e.z), gizmoWireCol, 1.3f);
-				drawProjectedSegment(glm::vec3(e.x, e.y, -e.z), glm::vec3(e.x, e.y, e.z), gizmoWireCol, 1.3f);
-				drawProjectedSegment(glm::vec3(-e.x, e.y, -e.z), glm::vec3(-e.x, e.y, e.z), gizmoWireCol, 1.3f);
+					drawProjectedCircle(glm::vec3(0.0f, 0.0f, 0.0f), rBase, glm::vec3(0.0f, 1.0f, 0.0f), gizmoWireCol, 1.5f, 24);
+					drawProjectedCircle(glm::vec3(0.0f, h, 0.0f), rTop, glm::vec3(0.0f, 1.0f, 0.0f), gizmoWireCol, 1.5f, 24);
+
+					drawProjectedSegment(glm::vec3(rBase, 0.0f, 0.0f), glm::vec3(rTop, h, 0.0f), gizmoWireCol, 1.2f);
+					drawProjectedSegment(glm::vec3(-rBase, 0.0f, 0.0f), glm::vec3(-rTop, h, 0.0f), gizmoWireCol, 1.2f);
+					drawProjectedSegment(glm::vec3(0.0f, 0.0f, rBase), glm::vec3(0.0f, h, rTop), gizmoWireCol, 1.2f);
+					drawProjectedSegment(glm::vec3(0.0f, 0.0f, -rBase), glm::vec3(0.0f, h, -rTop), gizmoWireCol, 1.2f);
+				}
+				else if (activeSpawnMod->Id == "mod.spawn.sphere")
+				{
+					const float spR = std::max(0.05f, activeSpawnMod->GetFloat("SphereRadius", 1.0f));
+					drawProjectedCircle(glm::vec3(0.0f), spR, glm::vec3(0.0f, 1.0f, 0.0f), gizmoWireCol, 1.4f, 24);
+					drawProjectedCircle(glm::vec3(0.0f), spR, glm::vec3(0.0f, 0.0f, 1.0f), gizmoWireCol, 1.4f, 24);
+					drawProjectedCircle(glm::vec3(0.0f), spR, glm::vec3(1.0f, 0.0f, 0.0f), gizmoWireCol, 1.4f, 24);
+				}
+				else if (activeSpawnMod->Id == "mod.spawn.box")
+				{
+					glm::vec3 e(1.0f);
+					const auto* pB = activeSpawnMod->FindParam("BoxExtents");
+					if (pB) e = glm::max(glm::vec3(pB->VecVal), glm::vec3(0.05f));
+
+					drawProjectedSegment(glm::vec3(-e.x, -e.y, -e.z), glm::vec3(e.x, -e.y, -e.z), gizmoWireCol, 1.3f);
+					drawProjectedSegment(glm::vec3(e.x, -e.y, -e.z), glm::vec3(e.x, e.y, -e.z), gizmoWireCol, 1.3f);
+					drawProjectedSegment(glm::vec3(e.x, e.y, -e.z), glm::vec3(-e.x, e.y, -e.z), gizmoWireCol, 1.3f);
+					drawProjectedSegment(glm::vec3(-e.x, e.y, -e.z), glm::vec3(-e.x, -e.y, -e.z), gizmoWireCol, 1.3f);
+
+					drawProjectedSegment(glm::vec3(-e.x, -e.y, e.z), glm::vec3(e.x, -e.y, e.z), gizmoWireCol, 1.3f);
+					drawProjectedSegment(glm::vec3(e.x, -e.y, e.z), glm::vec3(e.x, e.y, e.z), gizmoWireCol, 1.3f);
+					drawProjectedSegment(glm::vec3(e.x, e.y, e.z), glm::vec3(-e.x, e.y, e.z), gizmoWireCol, 1.3f);
+					drawProjectedSegment(glm::vec3(-e.x, e.y, e.z), glm::vec3(-e.x, -e.y, e.z), gizmoWireCol, 1.3f);
+
+					drawProjectedSegment(glm::vec3(-e.x, -e.y, -e.z), glm::vec3(-e.x, -e.y, e.z), gizmoWireCol, 1.3f);
+					drawProjectedSegment(glm::vec3(e.x, -e.y, -e.z), glm::vec3(e.x, -e.y, e.z), gizmoWireCol, 1.3f);
+					drawProjectedSegment(glm::vec3(e.x, e.y, -e.z), glm::vec3(e.x, e.y, e.z), gizmoWireCol, 1.3f);
+					drawProjectedSegment(glm::vec3(-e.x, e.y, -e.z), glm::vec3(-e.x, e.y, e.z), gizmoWireCol, 1.3f);
+				}
+				else if (activeSpawnMod->Id == "mod.spawn.point")
+				{
+					const float pSize = 0.25f;
+					drawProjectedSegment(glm::vec3(-pSize, 0.0f, 0.0f), glm::vec3(pSize, 0.0f, 0.0f), gizmoWireCol, 1.5f);
+					drawProjectedSegment(glm::vec3(0.0f, -pSize, 0.0f), glm::vec3(0.0f, pSize, 0.0f), gizmoWireCol, 1.5f);
+					drawProjectedSegment(glm::vec3(0.0f, 0.0f, -pSize), glm::vec3(0.0f, 0.0f, pSize), gizmoWireCol, 1.5f);
+				}
 			}
 
 			for (const auto& h : handles)
@@ -3038,6 +2981,181 @@ void ParticleEditorPanel::NewAsset()
 	// =========================================================================
 
 
+		// =========================================================================
+	// 自定义 Slang 模块代码编写器 (Niagara Scratch Pad 实现)
+	// =========================================================================
+
+	void ParticleEditorPanel::OpenCustomModuleEditor(const std::string& defaultName)
+	{
+		m_CustomModuleEditorOpen = true;
+		m_CustomModuleCompileError.clear();
+		m_CustomModuleCompileSuccess = false;
+		m_EditingCustomModule = VfxModule();
+		m_EditingCustomModule.Id = "mod.custom." + std::to_string(rand() % 1000000);
+		m_EditingCustomModule.Name = defaultName.empty() ? "自定义动力学块 (Custom Slang)" : defaultName;
+		m_EditingCustomModule.Description = "用户编写的原生 Slang 计算代码块，可自由编写数学公式、场与动力学";
+		m_EditingCustomModule.Stage = VfxModuleStage::Update;
+		m_EditingCustomModule.Enabled = true;
+		m_EditingCustomModule.IsCustom = true;
+
+		m_EditingCustomModule.Parameters = {
+			{ "SpeedGain", VfxParamType::Float, 2.0f, {}, 0, false, 0.0f, 50.0f, 0.1f, "自定义增益乘子", true, "SpeedGain" },
+			{ "WaveFrequency", VfxParamType::Float, 1.5f, {}, 0, false, 0.1f, 20.0f, 0.1f, "波动频率", true, "WaveFrequency" }
+		};
+
+		m_EditingCustomModule.SlangSource = "// 自定义 Slang 计算代码\n// 内置可用: p.Position, p.Velocity, p.Color, p.Size, p.Life, p.MaxLife, dt\nfloat dist = length(p.Position);\np.Velocity += cross(float3(0, 1, 0), p.Position) * (u_SpeedGain * dt);\np.Position.y += sin(p.Life * u_WaveFrequency) * (0.5f * dt);\n";
+		m_NewParamNameBuffer = "MyParam";
+		m_NewParamTypeIndex = 0;
+	}
+
+	void ParticleEditorPanel::RenderCustomModuleEditor(Wui::WuiContext& ctx, const Wui::WuiRect& scrollAreaRect, float& cy, const Wui::WuiTheme& theme)
+	{
+		const float leftX = scrollAreaRect.X + 10.0f;
+		const float valX = leftX + 90.0f;
+		const float valW = scrollAreaRect.W - 110.0f;
+
+		// 标头栏
+		const Wui::WuiRect barHeader { leftX, cy, scrollAreaRect.W - 20.0f, 28.0f };
+		Wui::BarSurface(ctx, barHeader, theme.PanelHeader, theme.Border);
+		Wui::Label(ctx, { barHeader.X + 8.0f, barHeader.Y + 7.0f }, "自定义 Slang 模块编写器 (Scratch Pad)", theme.Accent, 11.0f);
+
+		// 返回按钮
+		const Wui::WuiRect backBtn { barHeader.X + barHeader.W - 74.0f, barHeader.Y + 4.0f, 68.0f, 20.0f };
+		if (Wui::Button(ctx, Wui::HashId("vfx.sc.back"), backBtn, "返回堆栈", theme))
+		{
+			m_CustomModuleEditorOpen = false;
+			return;
+		}
+		cy += 34.0f;
+
+		// 模块基本信息
+		Wui::Label(ctx, { leftX, cy + 3.0f }, "模块名称:", theme.TextMuted, 10.0f);
+		std::string modName = m_EditingCustomModule.Name;
+		if (Wui::TextField(ctx, Wui::HashId("vfx.sc.name"), { valX, cy, valW, 20.0f }, modName, theme))
+		{
+			m_EditingCustomModule.Name = modName;
+		}
+		cy += 24.0f;
+
+		// 阶段选择
+		Wui::Label(ctx, { leftX, cy + 3.0f }, "执行阶段:", theme.TextMuted, 10.0f);
+		static const std::vector<std::string> s_StageOpts = { "Update (粒子动力学更新阶段)", "Spawn (粒子出生初始化阶段)" };
+		int stageIdx = (m_EditingCustomModule.Stage == VfxModuleStage::Spawn) ? 1 : 0;
+		if (Wui::Combo(ctx, Wui::HashId("vfx.sc.stage"), { valX, cy, valW, 20.0f }, "", s_StageOpts, stageIdx, theme))
+		{
+			m_EditingCustomModule.Stage = (stageIdx == 1) ? VfxModuleStage::Spawn : VfxModuleStage::Update;
+		}
+		cy += 28.0f;
+
+		// 参数定义列表
+		Wui::Label(ctx, { leftX, cy + 3.0f }, "输入参数列表 (Parameters):", theme.Accent, 10.5f);
+		cy += 22.0f;
+
+		for (size_t pIdx = 0; pIdx < m_EditingCustomModule.Parameters.size(); ++pIdx)
+		{
+			auto& p = m_EditingCustomModule.Parameters[pIdx];
+			const Wui::WuiRect pRow { leftX, cy, scrollAreaRect.W - 20.0f, 24.0f };
+			Wui::BarSurface(ctx, pRow, Wui::WuiColor { 0.10f, 0.12f, 0.15f, 0.9f }, theme.Border);
+
+			std::string typeStr = (p.Type == VfxParamType::Float) ? "[Float]" : ((p.Type == VfxParamType::Vec3) ? "[Vec3]" : "[Color]");
+			Wui::Label(ctx, { pRow.X + 6.0f, pRow.Y + 4.0f }, typeStr + " " + p.Name, theme.Text, 10.0f);
+
+			// 删除参数按钮
+			const Wui::WuiRect delPBtn { pRow.X + pRow.W - 24.0f, pRow.Y + 2.0f, 20.0f, 20.0f };
+			if (Wui::Button(ctx, Wui::HashId((std::string("vfx.sc.delp_") + std::to_string(pIdx)).c_str()), delPBtn, "X", theme))
+			{
+				m_EditingCustomModule.Parameters.erase(m_EditingCustomModule.Parameters.begin() + pIdx);
+				break;
+			}
+			cy += 26.0f;
+		}
+
+		// 添加新参数行
+		const Wui::WuiRect addParamBox { leftX, cy, scrollAreaRect.W - 20.0f, 28.0f };
+		Wui::BarSurface(ctx, addParamBox, Wui::WuiColor { 0.14f, 0.16f, 0.20f, 0.95f }, theme.Border);
+		float aX = addParamBox.X + 4.0f;
+
+		Wui::TextField(ctx, Wui::HashId("vfx.sc.newp_name"), { aX, addParamBox.Y + 4.0f, 90.0f, 20.0f }, m_NewParamNameBuffer, theme);
+		aX += 94.0f;
+
+		static const std::vector<std::string> s_ParamTypeOpts = { "Float", "Vec3", "Color" };
+		Wui::Combo(ctx, Wui::HashId("vfx.sc.newp_type"), { aX, addParamBox.Y + 4.0f, 75.0f, 20.0f }, "", s_ParamTypeOpts, m_NewParamTypeIndex, theme);
+		aX += 79.0f;
+
+		const Wui::WuiRect addPBtn { aX, addParamBox.Y + 4.0f, 70.0f, 20.0f };
+		if (Wui::Button(ctx, Wui::HashId("vfx.sc.addp_btn"), addPBtn, "+ 加参数", theme))
+		{
+			if (!m_NewParamNameBuffer.empty())
+			{
+				VfxModuleParam newP;
+				newP.Name = m_NewParamNameBuffer;
+				newP.Type = (m_NewParamTypeIndex == 0) ? VfxParamType::Float : ((m_NewParamTypeIndex == 1) ? VfxParamType::Vec3 : VfxParamType::Vec4);
+				newP.FloatVal = 1.0f;
+				newP.VecVal = glm::vec4(1.0f);
+				newP.IsExposed = true;
+				newP.ExposedName = newP.Name;
+				m_EditingCustomModule.Parameters.push_back(newP);
+				m_NewParamNameBuffer = "Param" + std::to_string(m_EditingCustomModule.Parameters.size() + 1);
+			}
+		}
+		cy += 34.0f;
+
+		// Slang 源码编辑区
+		Wui::Label(ctx, { leftX, cy + 3.0f }, "Slang 计算代码 (Compute Code):", theme.Accent, 10.5f);
+		cy += 20.0f;
+
+		const Wui::WuiRect hintRect { leftX, cy, scrollAreaRect.W - 20.0f, 20.0f };
+		Wui::Label(ctx, { hintRect.X + 4.0f, hintRect.Y + 3.0f }, "变量: p.Position, p.Velocity, p.Color, p.Size, p.Life, dt", theme.TextMuted, 9.5f);
+		cy += 22.0f;
+
+		const Wui::WuiRect codeBox { leftX, cy, scrollAreaRect.W - 20.0f, 150.0f };
+		Wui::BarSurface(ctx, codeBox, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f }, theme.Border);
+		Wui::TextField(ctx, Wui::HashId("vfx.sc.code_editor"), codeBox, m_EditingCustomModule.SlangSource, theme);
+		cy += 156.0f;
+
+		// 编译状态提示
+		if (!m_CustomModuleCompileError.empty())
+		{
+			const Wui::WuiRect errRect { leftX, cy, scrollAreaRect.W - 20.0f, 24.0f };
+			Wui::BarSurface(ctx, errRect, Wui::WuiColor { 0.35f, 0.12f, 0.12f, 0.9f }, theme.Warning);
+			Wui::Label(ctx, { errRect.X + 6.0f, errRect.Y + 4.0f }, "[Slang语法错误] " + m_CustomModuleCompileError.substr(0, 50), theme.Warning, 9.5f);
+			cy += 28.0f;
+		}
+		else if (m_CustomModuleCompileSuccess)
+		{
+			const Wui::WuiRect okRect { leftX, cy, scrollAreaRect.W - 20.0f, 24.0f };
+			Wui::BarSurface(ctx, okRect, Wui::WuiColor { 0.12f, 0.30f, 0.18f, 0.9f }, theme.Accent);
+			Wui::Label(ctx, { okRect.X + 6.0f, okRect.Y + 4.0f }, "[编译成功] 模块已加入堆栈并在视口中热重载生效！", theme.Accent, 10.0f);
+			cy += 28.0f;
+		}
+
+		// 编译并保存加入模块堆栈按钮
+		const Wui::WuiRect applyBtn { leftX, cy, scrollAreaRect.W - 20.0f, 26.0f };
+		Wui::BarSurface(ctx, applyBtn, theme.Selection, theme.Accent);
+		if (Wui::Button(ctx, Wui::HashId("vfx.sc.apply_btn"), applyBtn, "[编译并加入当前模块堆栈]", theme))
+		{
+			std::string testShader = VfxComputeGenerator::GenerateComputeShaderSource(
+				"CustomTest", { m_EditingCustomModule }, {}, {}
+			);
+			std::string err;
+			bool ok = VfxComputeGenerator::ValidateAndCompile(testShader, &err);
+			if (ok)
+			{
+				m_CustomModuleCompileSuccess = true;
+				m_CustomModuleCompileError.clear();
+				AddModuleToSelectedEmitter(m_EditingCustomModule);
+				m_CustomModuleEditorOpen = false;
+				m_StatusFeedback = "自定义 Slang 模块已成功编译并装配进堆栈！";
+			}
+			else
+			{
+				m_CustomModuleCompileSuccess = false;
+				m_CustomModuleCompileError = err.empty() ? "语法校验未通过" : err;
+			}
+		}
+		cy += 32.0f;
+	}
+
 	void ParticleEditorPanel::RenderInspector(Wui::WuiContext& ctx, const Wui::WuiRect& inspectorRect, const Wui::WuiTheme& theme, PanelHost& host)
 	{
 		(void)host;
@@ -3094,6 +3212,14 @@ void ParticleEditorPanel::NewAsset()
 		Wui::BeginScrollArea(ctx, scrollAreaRect, totalCardsHeight, m_InspectorScrollY, theme, Wui::HashId("vfx.inspector.scroll"));
 		float cy = scrollAreaRect.Y - m_InspectorScrollY;
 
+		// 0. 若打开了自定义 Slang 模块编写器 -> 渲染真正的代码写新模块界面 (Scratch Pad)
+		if (m_CustomModuleEditorOpen)
+		{
+			RenderCustomModuleEditor(ctx, scrollAreaRect, cy, theme);
+			Wui::EndScrollArea(ctx);
+			return;
+		}
+
 
 		// 封装 DragFloat 行与复位指示器
 		
@@ -3137,14 +3263,23 @@ void ParticleEditorPanel::NewAsset()
 		}
 		cy += 24.0f;
 
-		// 混合模式
+		// 混合模式 (需求 1: 全量采用下拉列表枚举)
 		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "混合模式:", theme.TextMuted, 10.0f);
-		const Wui::WuiRect blendRect { inspectorRect.X + 110.0f, cy, 100.0f, 20.0f };
-		const char* blendName = (em.Material.BlendMode == ParticleBlendMode::Additive) ? "加法 (Additive)" : "半透 (AlphaBlend)";
-		if (Wui::Button(ctx, Wui::HashId("vfx.em.blend"), blendRect, blendName, theme))
+		static const std::vector<std::string> s_BaseBlendOptions = {
+			"半透 (AlphaBlend)",
+			"加法 (Additive)",
+			"正片叠底 (Multiply)",
+			"不透明 (Opaque)"
+		};
+		int curBlendIdx = (em.Material.BlendMode == ParticleBlendMode::Additive) ? 1 : ((em.Material.BlendMode == ParticleBlendMode::Multiply) ? 2 : ((em.Material.BlendMode == ParticleBlendMode::Opaque) ? 3 : 0));
+		const Wui::WuiRect blendRect { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
+		if (Wui::Combo(ctx, Wui::HashId("vfx.em.blend.combo"), blendRect, "", s_BaseBlendOptions, curBlendIdx, theme))
 		{
 			PushUndoSnapshot();
-			em.Material.BlendMode = (em.Material.BlendMode == ParticleBlendMode::Additive) ? ParticleBlendMode::AlphaBlend : ParticleBlendMode::Additive;
+			if (curBlendIdx == 1) em.Material.BlendMode = ParticleBlendMode::Additive;
+			else if (curBlendIdx == 2) em.Material.BlendMode = ParticleBlendMode::Multiply;
+			else if (curBlendIdx == 3) em.Material.BlendMode = ParticleBlendMode::Opaque;
+			else em.Material.BlendMode = ParticleBlendMode::AlphaBlend;
 			m_Dirty = true;
 			SyncSimulationFromAsset();
 		}
@@ -3168,10 +3303,10 @@ void ParticleEditorPanel::NewAsset()
 		btnX += 84.0f;
 
 		const Wui::WuiRect addCustomBtn { btnX, stackHeaderRect.Y + 4.0f, 82.0f, 20.0f };
-		Wui::Tooltip(ctx, addCustomBtn, "新建一个完全由用户手写 Slang 源码的动力学计算代码块");
-		if (Wui::Button(ctx, Wui::HashId("vfx.stk.add_custom"), addCustomBtn, "+ 自定义代码", theme))
+		Wui::Tooltip(ctx, addCustomBtn, "打开自定义 Slang 模块编辑器，用代码编写全新的计算模块");
+		if (Wui::Button(ctx, Wui::HashId("vfx.stk.add_custom"), addCustomBtn, "+ 代码编写", theme))
 		{
-			AddModuleToSelectedEmitter(VfxModuleLibrary::CreateCustomSlangModule("自定义动力学块 (Custom Slang)"));
+			OpenCustomModuleEditor("新自定义模块 (New Slang Module)");
 		}
 		cy += 34.0f;
 
@@ -3203,14 +3338,20 @@ void ParticleEditorPanel::NewAsset()
 		}
 
 		// 遍历渲染模块卡片
+		const float cardX = inspectorRect.X + 12.0f;
 		const float cardW = inspectorRect.W - 24.0f;
 		for (size_t mIdx = 0; mIdx < em.Modules.size(); ++mIdx)
 		{
-			RenderModuleCard(ctx, em.Modules[mIdx], mIdx, cy, cardW, theme);
+			RenderModuleCard(ctx, em.Modules[mIdx], mIdx, cardX, cy, cardW, theme);
 		}
 
 		cy += 20.0f;
-Wui::EndScrollArea(ctx);
+		Wui::EndScrollArea(ctx);
+
+		// 【优化 1: 独立滚动条】当卡片内容超出视口时，在右侧清晰显示并支持鼠标直接拖拽
+		const float scrollbarW = 6.0f;
+		const Wui::WuiRect scrollbarRect { inspectorRect.X + inspectorRect.W - scrollbarW - 2.0f, curY, scrollbarW, scrollAreaH };
+		Wui::ScrollBar(ctx, Wui::HashId("vfx.insp.scrollbar"), scrollbarRect, totalCardsHeight, scrollAreaH, m_InspectorScrollY, theme, false);
 	}
 
 
@@ -3313,27 +3454,19 @@ Wui::EndScrollArea(ctx);
 		}
 	}
 
-	void ParticleEditorPanel::RenderModuleCard(Wui::WuiContext& ctx, VfxModule& mod, size_t modIdx, float& curY, float cardW, const Wui::WuiTheme& theme)
+	void ParticleEditorPanel::RenderModuleCard(Wui::WuiContext& ctx, VfxModule& mod, size_t modIdx, float cardX, float& curY, float cardW, const Wui::WuiTheme& theme)
 	{
 		const float cardPad = 8.0f;
 		const float headerH = 26.0f;
 		float cardContentH = headerH + 6.0f;
 
-		// 检查 Slang 源码是否在卡片内就地展开
 		const std::string modKey = mod.Id + "_" + std::to_string(modIdx);
 		const bool isSourceExpanded = m_ModuleSourceExpanded[modKey];
 
-		if (isSourceExpanded)
-		{
-			cardContentH += 130.0f;
-		}
+		if (isSourceExpanded) cardContentH += 130.0f;
+		if (mod.Enabled) cardContentH += mod.Parameters.size() * 26.0f;
 
-		if (mod.Enabled)
-		{
-			cardContentH += mod.Parameters.size() * 26.0f;
-		}
-
-		const Wui::WuiRect cardRect { 0.0f, curY, cardW, cardContentH };
+		const Wui::WuiRect cardRect { cardX, curY, cardW, cardContentH };
 		Wui::BarSurface(ctx, cardRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.95f }, theme.Border);
 
 		// 1. 头部标题行
@@ -3350,23 +3483,39 @@ Wui::EndScrollArea(ctx);
 		}
 		hx += 20.0f;
 
-		// 阶段徽章
-		const bool isSpawn = (mod.Stage == VfxModuleStage::Spawn);
-		const Wui::WuiColor badgeCol = isSpawn ? Wui::WuiColor { 0.2f, 0.6f, 0.85f, 1.0f } : Wui::WuiColor { 0.9f, 0.55f, 0.2f, 1.0f };
-		const char* badgeText = isSpawn ? "[Spawn]" : "[Update]";
+		// 阶段徽章 (Emitter:深蓝, Spawn:青色, Update:橙色, Render:紫色)
+		Wui::WuiColor badgeCol { 0.9f, 0.55f, 0.2f, 1.0f };
+		const char* badgeText = "[Update]";
+		if (mod.Stage == VfxModuleStage::Emitter)
+		{
+			badgeCol = Wui::WuiColor { 0.25f, 0.55f, 0.95f, 1.0f };
+			badgeText = "[Emitter]";
+		}
+		else if (mod.Stage == VfxModuleStage::Spawn)
+		{
+			badgeCol = Wui::WuiColor { 0.15f, 0.80f, 0.85f, 1.0f };
+			badgeText = "[Spawn]";
+		}
+		else if (mod.Stage == VfxModuleStage::Render)
+		{
+			badgeCol = Wui::WuiColor { 0.75f, 0.35f, 0.95f, 1.0f };
+			badgeText = "[Render]";
+		}
 		Wui::Label(ctx, { hx, hy + 3.0f }, badgeText, badgeCol, 9.5f);
-		hx += 48.0f;
+		hx += 52.0f;
 
-		// 模块名称与自定义标示
+		// 模块名称行与悬浮提示
+		const Wui::WuiRect modTitleRect { hx, hy, cardRect.W - 190.0f, 22.0f };
+		Wui::Tooltip(ctx, modTitleRect, mod.Description.empty() ? mod.Name : mod.Description);
 		Wui::Label(ctx, { hx, hy + 3.0f }, mod.Name, mod.Enabled ? theme.Text : theme.TextMuted, 10.5f);
 
-		// 右侧操作按钮组 (上移, 下移, 源码, 删除)
+		// 右侧操作工具栏 (上移, 下移, 源码, 删除)
 		float rx = cardRect.X + cardRect.W - 22.0f;
 
 		// 删除按钮
 		const Wui::WuiRect delBtn { rx, hy, 18.0f, 20.0f };
 		Wui::Tooltip(ctx, delBtn, "从堆栈中移除此模块");
-		if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.del_") + std::to_string(modIdx)).c_str()), delBtn, "✕", theme))
+		if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.del_") + std::to_string(modIdx)).c_str()), delBtn, "X", theme))
 		{
 			RemoveModuleFromSelectedEmitter(modIdx);
 			return;
@@ -3375,26 +3524,26 @@ Wui::EndScrollArea(ctx);
 
 		// 源码展开按钮
 		const Wui::WuiRect srcBtn { rx - 20.0f, hy, 38.0f, 20.0f };
-		Wui::Tooltip(ctx, srcBtn, isSourceExpanded ? "折叠此模块的 Slang 源码" : "就地展开编辑此模块的 Slang 源码");
+		Wui::Tooltip(ctx, srcBtn, isSourceExpanded ? "折叠此模块的 Slang 计算源码" : "就地展开编辑此模块的 Slang 计算源码");
 		if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.src_") + std::to_string(modIdx)).c_str()), srcBtn, isSourceExpanded ? "收起" : "源码", theme))
 		{
 			m_ModuleSourceExpanded[modKey] = !isSourceExpanded;
 		}
 		rx -= 44.0f;
 
-		// 下移按钮
-		const Wui::WuiRect dnBtn { rx, hy, 18.0f, 20.0f };
-		Wui::Tooltip(ctx, dnBtn, "下移执行顺序");
+		// 【需求 1: 下移按钮使用标准符号 ↓】
+		const Wui::WuiRect dnBtn { rx, hy, 20.0f, 20.0f };
+		Wui::Tooltip(ctx, dnBtn, "下移执行顺序 (在当前阶段向后执行)");
 		if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.dn_") + std::to_string(modIdx)).c_str()), dnBtn, "↓", theme))
 		{
 			MoveModuleDown(modIdx);
 			return;
 		}
-		rx -= 20.0f;
+		rx -= 22.0f;
 
-		// 上移按钮
-		const Wui::WuiRect upBtn { rx, hy, 18.0f, 20.0f };
-		Wui::Tooltip(ctx, upBtn, "上移执行顺序");
+		// 【需求 1: 上移按钮使用标准符号 ↑】
+		const Wui::WuiRect upBtn { rx, hy, 20.0f, 20.0f };
+		Wui::Tooltip(ctx, upBtn, "上移执行顺序 (在当前阶段优先执行)");
 		if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.up_") + std::to_string(modIdx)).c_str()), upBtn, "↑", theme))
 		{
 			MoveModuleUp(modIdx);
@@ -3403,7 +3552,7 @@ Wui::EndScrollArea(ctx);
 
 		float fieldY = cardRect.Y + headerH + 4.0f;
 
-		// 2. 参数调节列表 (带暴露参数开关)
+		// 2. 参数调节列表 (带悬浮提示、通用调色板与下拉枚举)
 		if (mod.Enabled)
 		{
 			for (size_t pIdx = 0; pIdx < mod.Parameters.size(); ++pIdx)
@@ -3411,13 +3560,16 @@ Wui::EndScrollArea(ctx);
 				auto& param = mod.Parameters[pIdx];
 				const float rowH = 24.0f;
 
-				// 参数标签
+				// 参数标签与悬浮提示
+				const Wui::WuiRect labelRect { cardRect.X + 10.0f, fieldY, 95.0f, 20.0f };
+				Wui::Tooltip(ctx, labelRect, param.Tooltip.empty() ? param.Name : param.Tooltip);
 				Wui::Label(ctx, { cardRect.X + 12.0f, fieldY + 3.0f }, param.Name + ":", theme.TextMuted, 10.0f);
 
-				// 暴露开关按钮 [暴] (Expose to System)
-				const Wui::WuiRect expBtn { cardRect.X + cardRect.W - 32.0f, fieldY, 24.0f, 20.0f };
-				Wui::Tooltip(ctx, expBtn, param.IsExposed ? "已暴露为特效系统外部参数 (点击取消暴露)" : "将此参数暴露给特效系统 (外部组件/Inspector 可调)");
-				const char* expLabel = param.IsExposed ? "暴" : "隐";
+				// 暴露开关符号按钮 [●] 与 [○]
+				const Wui::WuiRect expBtn { cardRect.X + cardRect.W - 28.0f, fieldY, 22.0f, 20.0f };
+				Wui::Tooltip(ctx, expBtn, param.IsExposed ? "已暴露为系统外部公开参数 (可在外部 Inspector / 脚本驱动)" : "点击将此参数暴露给系统 (公开展现在外部 Inspector 中)");
+				const char* expLabel = param.IsExposed ? "●" : "○";
+				if (param.IsExposed) Wui::BarSurface(ctx, expBtn, Wui::WuiColor { 0.28f, 0.24f, 0.12f, 0.95f }, theme.Accent);
 				if (Wui::Button(ctx, Wui::HashId((std::string("vfx.p.exp_") + std::to_string(modIdx * 100 + pIdx)).c_str()), expBtn, expLabel, theme))
 				{
 					PushUndoSnapshot();
@@ -3434,11 +3586,50 @@ Wui::EndScrollArea(ctx);
 					SyncSlangShaderFromModules();
 				}
 
-				// 参数输入拖拽控件
-				const float valW = cardRect.W - 160.0f;
+				// 参数输入控件区域
+				const float valW = cardRect.W - 150.0f;
 				const Wui::WuiRect valRect { cardRect.X + 110.0f, fieldY, valW, 20.0f };
-				if (param.Type == VfxParamType::Float)
+
+				// 【需求 3: 所有 Mode 类型的变量必须使用下拉列表枚举 Combo】
+				if (param.Name.find("Mode") != std::string::npos || param.Name == "FacingMode" || param.Name == "BlendMode")
 				{
+					std::vector<std::string> comboOpts;
+					if (param.Name == "BlendMode")
+					{
+						comboOpts = { "半透 (AlphaBlend)", "加法 (Additive)", "正片叠底 (Multiply)", "不透明 (Opaque)" };
+					}
+					else if (param.Name == "FacingMode")
+					{
+						comboOpts = { "相机对齐 (Billboard)", "2D四边形 (Quad2D)", "拉伸速度 (StretchedVelocity)", "地面水平法阵 (HorizontalQuad)" };
+					}
+					else
+					{
+						comboOpts = { "模式 0", "模式 1", "模式 2" };
+					}
+
+					int selected = static_cast<int>(param.FloatVal);
+					if (selected < 0 || selected >= static_cast<int>(comboOpts.size())) selected = 0;
+					Wui::Tooltip(ctx, valRect, param.Tooltip.empty() ? (param.Name + " 下拉枚举选择") : param.Tooltip);
+					if (Wui::Combo(ctx, Wui::HashId((std::string("vfx.combo_") + std::to_string(modIdx * 100 + pIdx)).c_str()), valRect, "", comboOpts, selected, theme))
+					{
+						param.FloatVal = static_cast<float>(selected);
+						m_Dirty = true;
+						SyncSimulationFromAsset();
+					}
+				}
+				// 【需求 2: Color 变量使用通用调色板 ColorField】
+				else if (param.Type == VfxParamType::Vec4 && param.Name.find("Color") != std::string::npos)
+				{
+					Wui::Tooltip(ctx, valRect, param.Tooltip.empty() ? (param.Name + ": 点击打开通用调色板 (支持色轮/HEX/透明度)") : param.Tooltip);
+					if (Wui::ColorField(ctx, Wui::HashId((std::string("vfx.cf_") + std::to_string(modIdx * 100 + pIdx)).c_str()), valRect, param.VecVal, theme))
+					{
+						m_Dirty = true;
+						SyncSimulationFromAsset();
+					}
+				}
+				else if (param.Type == VfxParamType::Float)
+				{
+					Wui::Tooltip(ctx, valRect, param.Tooltip.empty() ? param.Name : param.Tooltip);
 					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.val_") + std::to_string(modIdx * 100 + pIdx)).c_str()), valRect, param.FloatVal, param.Step, param.Min, param.Max, theme))
 					{
 						if (param.IsExposed)
@@ -3451,7 +3642,18 @@ Wui::EndScrollArea(ctx);
 				}
 				else if (param.Type == VfxParamType::Vec3)
 				{
-					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.v3_") + std::to_string(modIdx * 100 + pIdx)).c_str()), valRect, param.VecVal.y, param.Step, param.Min, param.Max, theme))
+					const float subW = (valW - 8.0f) / 3.0f;
+					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.v3x_") + std::to_string(modIdx * 100 + pIdx)).c_str()), { valRect.X, valRect.Y, subW, valRect.H }, param.VecVal.x, param.Step, param.Min, param.Max, theme))
+					{
+						m_Dirty = true;
+						SyncSimulationFromAsset();
+					}
+					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.v3y_") + std::to_string(modIdx * 100 + pIdx)).c_str()), { valRect.X + subW + 4.0f, valRect.Y, subW, valRect.H }, param.VecVal.y, param.Step, param.Min, param.Max, theme))
+					{
+						m_Dirty = true;
+						SyncSimulationFromAsset();
+					}
+					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.v3z_") + std::to_string(modIdx * 100 + pIdx)).c_str()), { valRect.X + (subW + 4.0f) * 2.0f, valRect.Y, subW, valRect.H }, param.VecVal.z, param.Step, param.Min, param.Max, theme))
 					{
 						m_Dirty = true;
 						SyncSimulationFromAsset();
@@ -3508,7 +3710,7 @@ Wui::EndScrollArea(ctx);
 		// 从模块重新生成
 		const Wui::WuiRect syncBtn { cx, toolbar.Y + 6.0f, 120.0f, 24.0f };
 		Wui::Tooltip(ctx, syncBtn, "丢弃手写覆盖，从当前模块堆栈重新生成统一着色器");
-		if (Wui::Button(ctx, Wui::HashId("vfx.slang.sync"), syncBtn, "⟳ 从模块堆栈生成", theme))
+		if (Wui::Button(ctx, Wui::HashId("vfx.slang.sync"), syncBtn, "[循环] 从模块堆栈生成", theme))
 		{
 			SyncSlangShaderFromModules();
 		}
@@ -3597,7 +3799,7 @@ Wui::EndScrollArea(ctx);
 
 		const Wui::WuiRect syncBtn { cx, codeToolbar.Y + 6.0f, 120.0f, 24.0f };
 		Wui::Tooltip(ctx, syncBtn, "从当前视口与模块参数重新生成 YAML 数据清单");
-		if (Wui::Button(ctx, Wui::HashId("vfx.data.sync"), syncBtn, "⟳ 从视口重新生成", theme))
+		if (Wui::Button(ctx, Wui::HashId("vfx.data.sync"), syncBtn, "[循环] 从视口重新生成", theme))
 		{
 			SyncCodeFromAsset();
 		}

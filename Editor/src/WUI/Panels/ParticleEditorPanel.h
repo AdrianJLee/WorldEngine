@@ -140,7 +140,7 @@ namespace World
 
 		void RenderSlangShaderView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme, PanelHost& host);
 		void RenderDataView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme, PanelHost& host);
-		void RenderModuleCard(Wui::WuiContext& ctx, VfxModule& mod, size_t modIdx, float& curY, float cardW, const Wui::WuiTheme& theme);
+		void RenderModuleCard(Wui::WuiContext& ctx, VfxModule& mod, size_t modIdx, float cardX, float& curY, float cardW, const Wui::WuiTheme& theme);
 
 		// 发射器大纲管理核心操作 (Outliner Operations)
 		void AddEmitterFromTemplate(const std::string& templateType);
@@ -208,6 +208,18 @@ namespace World
 		bool m_SlangCompileSuccess = false;
 		bool m_AddModuleMenuOpen = false;
 		std::unordered_map<std::string, bool> m_ModuleSourceExpanded;
+
+		// 自定义 Slang 模块代码编写器状态 (Niagara Scratch Pad)
+		bool m_CustomModuleEditorOpen = false;
+		VfxModule m_EditingCustomModule;
+		std::string m_NewParamNameBuffer;
+		int m_NewParamTypeIndex = 0; // 0=Float, 1=Vec3, 2=Color
+		float m_NewParamDefaultFloat = 1.0f;
+		std::string m_CustomModuleCompileError;
+		bool m_CustomModuleCompileSuccess = false;
+
+		void OpenCustomModuleEditor(const std::string& defaultName = "");
+		void RenderCustomModuleEditor(Wui::WuiContext& ctx, const Wui::WuiRect& scrollAreaRect, float& cy, const Wui::WuiTheme& theme);
 
 		// 现代多分区布局与 Splitters 尺寸 (Outliner 拓宽至 270px 消除截字)
 		float m_OutlinerWidth = 270.0f;

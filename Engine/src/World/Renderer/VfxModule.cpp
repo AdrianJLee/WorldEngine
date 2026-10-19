@@ -316,9 +316,98 @@ namespace World
 		return m;
 	}
 
+		// =========================================================================
+	// 标准一等公民模块 (First-Class Niagara Modules)
+	// =========================================================================
+
+	VfxModule VfxModuleLibrary::CreateSpawnRateModule(float rate)
+	{
+		VfxModule m;
+		m.Id = "mod.emitter.spawn_rate";
+		m.Name = "持续发射 (Spawn Rate)";
+		m.Description = "控制每秒持续发射的粒子数量 (火焰/浓烟/喷泉/火花流)";
+		m.Stage = VfxModuleStage::Emitter;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "SpawnRate", VfxParamType::Float, rate, {}, 0, false, 0.0f, 20000.0f, 1.0f, "每秒持续发射粒子数 (/s)", true, "EmissionRate" }
+		};
+		m.SlangSource = R"(
+    // [Module: SpawnRate]
+    // 由系统发射调度器根据 SpawnRate 与 dt 累积并生成新图元
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateSpawnBurstModule(uint32_t count, float time)
+	{
+		VfxModule m;
+		m.Id = "mod.emitter.spawn_burst";
+		m.Name = "瞬态爆发/单体 (Spawn Burst)";
+		m.Description = "在指定时间瞬间爆发生成固定数量图元 (Count=1 用于法阵/护盾/光环，零发射流开销)";
+		m.Stage = VfxModuleStage::Emitter;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "SpawnCount", VfxParamType::Float, static_cast<float>(count), {}, 0, false, 1.0f, 10000.0f, 1.0f, "瞬时生成图元数量 (1 为单体法阵/护盾)", true, "BurstCount" },
+			{ "SpawnTime", VfxParamType::Float, time, {}, 0, false, 0.0f, 60.0f, 0.05f, "爆发触发时间 (秒)" }
+		};
+		m.SlangSource = R"(
+    // [Module: SpawnBurst]
+    // 在指定时间瞬间生成指定数量的粒子或单体网格图元
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateInitParticleModule(float lifetime, float sizeStart, float sizeEnd)
+	{
+		VfxModule m;
+		m.Id = "mod.spawn.init_particle";
+		m.Name = "粒子初始化 (Initialize Particle)";
+		m.Description = "设定图元诞生时的基准生命周期、初始尺寸与渐变颜色";
+		m.Stage = VfxModuleStage::Spawn;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "Lifetime", VfxParamType::Float, lifetime, {}, 0, false, 0.05f, 60.0f, 0.05f, "粒子存活基准寿命 (秒)", true, "Lifetime" },
+			{ "SizeStart", VfxParamType::Float, sizeStart, {}, 0, false, 0.01f, 20.0f, 0.05f, "诞生初始尺寸", true, "SizeStart" },
+			{ "SizeEnd", VfxParamType::Float, sizeEnd, {}, 0, false, 0.01f, 20.0f, 0.05f, "消亡终末尺寸", true, "SizeEnd" },
+			{ "ColorStart", VfxParamType::Vec4, 0.0f, glm::vec4(1.0f, 0.8f, 0.3f, 1.0f), 0, false, 0.0f, 1.0f, 0.05f, "初始 RGBA 颜色" },
+			{ "ColorEnd", VfxParamType::Vec4, 0.0f, glm::vec4(1.0f, 0.2f, 0.0f, 0.0f), 0, false, 0.0f, 1.0f, 0.05f, "消亡 RGBA 颜色" }
+		};
+		m.SlangSource = R"(
+    // [Module: InitializeParticle]
+    p.MaxLife = u_Lifetime;
+    p.Life = u_Lifetime;
+    p.Size = float2(u_SizeStart);
+    p.Color = u_ColorStart;
+)";
+		return m;
+	}
+
+	VfxModule VfxModuleLibrary::CreateSpriteRendererModule(bool additive, bool horizontal, float emissive)
+	{
+		VfxModule m;
+		m.Id = "mod.render.sprite";
+		m.Name = "精灵渲染器 (Sprite Renderer)";
+		m.Description = "配置图元混合模式 (加法/半透)、自发光强度与面片朝向 (相机对齐/水平地面)";
+		m.Stage = VfxModuleStage::Render;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "BlendMode", VfxParamType::Float, additive ? 1.0f : 0.0f, {}, 0, false, 0.0f, 1.0f, 1.0f, "混合模式 (0=半透 AlphaBlend, 1=加法 Additive)" },
+			{ "FacingMode", VfxParamType::Float, horizontal ? 1.0f : 0.0f, {}, 0, false, 0.0f, 1.0f, 1.0f, "面片朝向 (0=Billboard相机对齐, 1=Horizontal地面水平)" },
+			{ "EmissiveBoost", VfxParamType::Float, emissive, {}, 0, false, 0.1f, 20.0f, 0.1f, "HDR 自发光倍率 (促发辉光 Bloom)", true, "EmissiveBoost" }
+		};
+		m.SlangSource = R"(
+    // [Module: SpriteRenderer]
+    // 驱动 GPU 混合模式与几何着色器面片顶点朝向生成
+)";
+		return m;
+	}
+
 	std::vector<VfxModule> VfxModuleLibrary::GetBuiltinModules()
 	{
 		return {
+			CreateSpawnRateModule(),
+			CreateSpawnBurstModule(),
+			CreateInitParticleModule(),
 			CreateConeSpawnModule(),
 			CreateSphereSpawnModule(),
 			CreateBoxSpawnModule(),
@@ -329,6 +418,7 @@ namespace World
 			CreatePointAttractorModule(),
 			CreateVortexModule(),
 			CreateSolveVelocityModule(),
+			CreateSpriteRendererModule(),
 			CreateCustomSlangModule("自定义模拟代码块 (Custom Slang Block)")
 		};
 	}
@@ -336,11 +426,14 @@ namespace World
 	std::vector<VfxModule> VfxModuleLibrary::CreateDefaultEmitterModuleStack()
 	{
 		return {
+			CreateSpawnRateModule(50.0f),
+			CreateInitParticleModule(2.0f, 0.4f, 0.05f),
 			CreateConeSpawnModule(),
 			CreateGravityModule(),
 			CreateLinearDragModule(),
 			CreateCurlNoiseModule(),
-			CreateSolveVelocityModule()
+			CreateSolveVelocityModule(),
+			CreateSpriteRendererModule(true, false, 2.0f)
 		};
 	}
 }

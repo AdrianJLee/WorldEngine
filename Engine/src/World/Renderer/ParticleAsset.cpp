@@ -125,6 +125,8 @@ namespace World
 		out << YAML::Key << "MaxParticles" << YAML::Value << em.MaxParticles;
 		out << YAML::Key << "Lifetime" << YAML::Value << em.Lifetime;
 		out << YAML::Key << "EmissionRate" << YAML::Value << em.EmissionRate;
+		out << YAML::Key << "EmissionMode" << YAML::Value << static_cast<int>(em.EmissionMode);
+		out << YAML::Key << "SingleCount" << YAML::Value << em.SingleCount;
 		out << YAML::Key << "Enabled" << YAML::Value << em.Enabled;
 
 		out << YAML::Key << "Emitter" << YAML::Value << YAML::BeginMap;
@@ -251,6 +253,8 @@ out << YAML::EndMap;
 		if (node["MaxParticles"]) em.MaxParticles = node["MaxParticles"].as<uint32_t>();
 		if (node["Lifetime"]) em.Lifetime = node["Lifetime"].as<float>();
 		if (node["EmissionRate"]) em.EmissionRate = node["EmissionRate"].as<float>();
+		if (node["EmissionMode"]) em.EmissionMode = static_cast<VfxEmissionMode>(node["EmissionMode"].as<int>());
+		if (node["SingleCount"]) em.SingleCount = node["SingleCount"].as<uint32_t>();
 		if (node["Enabled"]) em.Enabled = node["Enabled"].as<bool>();
 
 		if (const auto emNode = node["Emitter"])

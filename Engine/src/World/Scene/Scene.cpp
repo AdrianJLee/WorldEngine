@@ -2264,76 +2264,216 @@ namespace World
 		m_RenderExtractSink->ExtractScene(*this, deltaSeconds);
 	}
 
-	void Scene::OnUpdateEditor(Timestep ts, const EditorCamera&)
+	static void SimulateSceneVfx(entt::registry& reg, float dt)
 	{
-		AssertOwnerThread();
-		// 编辑态不跑帧系统,但"本帧一次"的步骤仍要按帧推进:
-		// 渲染前由 EnsureWorldTransforms / EnsureAnimationAdvanced 兜底执行(见 SceneRenderer)。
-		BeginFrame();
-
-		// VFX 编辑态实时视口模拟 (Live Editor Viewport VFX Simulation)
+		dt = std::clamp(dt, 0.001f, 0.1f);
+		auto& partSys = GetGlobalParticleSystem();
+		for (auto entity : reg.view<VfxComponent>())
 		{
-			const auto& reg = static_cast<const Scene&>(*this).GetRegistry();
-			float dt = ts.GetSeconds();
-			dt = std::clamp(dt, 0.001f, 0.1f);
-			auto& partSys = GetGlobalParticleSystem();
-			for (auto entity : reg.view<VfxComponent>())
+			auto& vfx = reg.get<VfxComponent>(entity);
+			if (vfx.PlaybackState != VfxPlaybackState::Playing) continue;
+			if (!vfx.Effect.HasPath()) continue;
+
+			const std::string& path = StringPool::Get().PathOf(vfx.Effect.Path);
+			const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
+			if (!asset)
 			{
-				auto& vfx = const_cast<entt::registry&>(reg).get<VfxComponent>(entity);
-				if (vfx.PlaybackState != VfxPlaybackState::Playing) continue;
-				if (!vfx.Effect.HasPath()) continue;
+				uint64_t guid = ParticleAssetRegistry::Get().RegisterAsset(path);
+				asset = ParticleAssetRegistry::Get().GetAsset(guid);
+			}
+			if (!asset) continue;
 
-				const std::string& path = StringPool::Get().PathOf(vfx.Effect.Path);
-				const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
-				if (!asset)
+			glm::vec3 pos(0.0f);
+			glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
+			if (const auto* tc = reg.try_get<TransformComponent>(entity))
+			{
+				pos = tc->Location;
+				rot = tc->Rotation;
+			}
+
+			for (size_t i = 0; i < asset->Emitters.size(); ++i)
+			{
+				const auto& em = asset->Emitters[i];
+				if (!em.Enabled) continue;
+				uint32_t poolId = (static_cast<uint32_t>(entity) << 8) | static_cast<uint32_t>(i);
+				auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
+				if (vfx.Seed != 0) pool.SetSeed(vfx.Seed);
+				pool.SetMaterialSettings(em.Material);
+				pool.SetCollisionSettings(em.Collision);
+
+				ParticleEmitterConfig emComp;
+				emComp.EmissionRate = (em.EmissionMode == VfxEmissionMode::Continuous) ? (em.EmissionRate * vfx.Intensity) : 0.0f;
+				emComp.Lifetime = em.Lifetime;
+				emComp.Speed = em.Speed;
+				emComp.SpeedVariance = em.SpeedVariance;
+				emComp.SizeStart = em.SizeStart;
+				emComp.SizeEnd = em.SizeEnd;
+				emComp.ColorStart = PackColor(em.ColorStart);
+				emComp.ColorEnd = PackColor(em.ColorEnd);
+				emComp.Gravity = em.Gravity;
+				emComp.EmitterType = em.EmitterType;
+				emComp.RenderMode = em.FacingMode;
+				emComp.BlendMode = em.Material.BlendMode;
+				emComp.IsPlaying = 1;
+
+				// 【模块化动力学驱动】真正读取 em.Modules 堆栈并驱动全局粒子池！
+				float customDamping = 0.0f;
+				glm::vec3 attractorCenter(0.0f);
+				float attractorStrength = 0.0f;
+				float attractorMinDist = 0.2f;
+
+				for (const auto& mod : em.Modules)
 				{
-					uint64_t guid = ParticleAssetRegistry::Get().RegisterAsset(path);
-					asset = ParticleAssetRegistry::Get().GetAsset(guid);
-				}
-				if (!asset) continue;
+					if (!mod.Enabled) continue;
 
-				glm::vec3 pos(0.0f);
-				glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
-				if (const auto* tc = reg.try_get<TransformComponent>(entity))
+					// 0. 发射与生成控制模块 (Emitter Stage)
+					if (mod.Id == "mod.emitter.spawn_rate")
+					{
+						emComp.EmissionRate = mod.GetFloat("SpawnRate", 50.0f) * vfx.Intensity;
+					}
+					else if (mod.Id == "mod.emitter.spawn_burst")
+					{
+						uint32_t bCount = static_cast<uint32_t>(mod.GetFloat("SpawnCount", 1.0f));
+						if (pool.ActiveCount() == 0)
+						{
+							pool.Emit(bCount > 0 ? bCount : 1, emComp, pos, rot);
+						}
+					}
+
+					// 1. 粒子初始化与几何分布模块 (Spawn Stage)
+					else if (mod.Id == "mod.spawn.init_particle")
+					{
+						emComp.Lifetime = mod.GetFloat("Lifetime", 2.0f);
+						emComp.SizeStart = mod.GetFloat("SizeStart", 0.3f);
+						emComp.SizeEnd = mod.GetFloat("SizeEnd", 0.05f);
+						const auto* pCS = mod.FindParam("ColorStart");
+						if (pCS) emComp.ColorStart = PackColor(pCS->VecVal);
+						const auto* pCE = mod.FindParam("ColorEnd");
+						if (pCE) emComp.ColorEnd = PackColor(pCE->VecVal);
+					}
+					else if (mod.Id == "mod.spawn.cone")
+					{
+						emComp.EmitterType = ParticleEmitterType::Cone;
+						emComp.Speed = mod.GetFloat("InitialSpeed", em.Speed);
+						emComp.SpeedVariance = mod.GetFloat("SpeedVariance", em.SpeedVariance);
+					}
+					else if (mod.Id == "mod.spawn.sphere")
+					{
+						emComp.EmitterType = ParticleEmitterType::Sphere;
+						emComp.Speed = mod.GetFloat("OutwardSpeed", em.Speed);
+					}
+					else if (mod.Id == "mod.spawn.box")
+					{
+						emComp.EmitterType = ParticleEmitterType::Box;
+						emComp.Speed = mod.GetFloat("Speed", em.Speed);
+					}
+					else if (mod.Id == "mod.spawn.point")
+					{
+						emComp.EmitterType = ParticleEmitterType::Point;
+						emComp.Speed = mod.GetFloat("Speed", em.Speed);
+					}
+					else if (mod.Id == "mod.update.gravity")
+					{
+						const auto* pG = mod.FindParam("Gravity");
+						if (pG) emComp.Gravity = glm::vec3(pG->VecVal.x, pG->VecVal.y, pG->VecVal.z);
+					}
+					else if (mod.Id == "mod.update.drag")
+					{
+						pool.SetLinearDrag(mod.GetFloat("LinearDrag", 0.0f));
+					}
+					else if (mod.Id == "mod.update.curl_noise")
+					{
+						pool.SetCurlNoise(mod.GetFloat("NoiseStrength", 0.0f), mod.GetFloat("NoiseFrequency", 1.0f), 2);
+					}
+					else if (mod.Id == "mod.update.vortex")
+					{
+						const auto* pAx = mod.FindParam("VortexAxis");
+						glm::vec3 vAxis = pAx ? glm::vec3(pAx->VecVal) : glm::vec3(0.0f, 1.0f, 0.0f);
+						pool.SetVortex(mod.GetFloat("VortexStrength", 0.0f), vAxis);
+					}
+					else if (mod.Id == "mod.update.attractor")
+					{
+						const auto* pC = mod.FindParam("AttractorCenter");
+						attractorCenter = pC ? glm::vec3(pC->VecVal) : glm::vec3(0.0f, 1.0f, 0.0f);
+						attractorStrength = mod.GetFloat("AttractorStrength", 0.0f);
+						attractorMinDist = std::max(0.05f, mod.GetFloat("MinDistance", 0.2f));
+					}
+					else if (mod.Id == "mod.update.solve_velocity")
+					{
+						customDamping = mod.GetFloat("SpeedDamping", 0.0f);
+					}
+					// 3. 渲染器设置模块 (Render Stage)
+					else if (mod.Id == "mod.render.sprite")
+					{
+						int bMode = static_cast<int>(mod.GetFloat("BlendMode", 1.0f));
+						emComp.BlendMode = (bMode == 1) ? ParticleBlendMode::Additive : ParticleBlendMode::AlphaBlend;
+						int fMode = static_cast<int>(mod.GetFloat("FacingMode", 0.0f));
+						emComp.RenderMode = (fMode == 1) ? ParticleRenderMode::HorizontalQuad : ParticleRenderMode::Billboard;
+						auto mat = pool.GetMaterialSettings();
+						mat.BlendMode = emComp.BlendMode;
+						mat.FacingMode = emComp.RenderMode;
+						mat.EmissiveBoost = mod.GetFloat("EmissiveBoost", 2.0f);
+						pool.SetMaterialSettings(mat);
+					}
+					else if (mod.IsCustom)
+					{
+						for (const auto& param : mod.Parameters)
+						{
+							if (param.Name.find("Gravity") != std::string::npos && param.Type == VfxParamType::Vec3)
+								emComp.Gravity += glm::vec3(param.VecVal);
+							else if (param.Name.find("Drag") != std::string::npos && param.Type == VfxParamType::Float)
+								pool.SetLinearDrag(pool.GetLinearDrag() + param.FloatVal);
+						}
+					}
+				}
+
+				// 点引力黑洞向心加速度计算
+				if (std::abs(attractorStrength) > 1e-4f)
 				{
-					pos = tc->Location;
-					rot = tc->Rotation;
+					float simDt = dt * vfx.PlaybackSpeed;
+					for (auto& p : pool.GetParticlesMut())
+					{
+						if (!p.Active) continue;
+						glm::vec3 toCenter = attractorCenter - p.Position;
+						float distSq = std::max(glm::dot(toCenter, toCenter), attractorMinDist * attractorMinDist);
+						glm::vec3 pullDir = glm::normalize(toCenter);
+						p.Velocity += pullDir * (attractorStrength / distSq) * simDt;
+					}
 				}
 
-				for (size_t i = 0; i < asset->Emitters.size(); ++i)
+				// 速度阻尼
+				if (customDamping > 0.001f)
 				{
-					const auto& em = asset->Emitters[i];
-					if (!em.Enabled) continue;
-					uint32_t poolId = (static_cast<uint32_t>(entity) << 8) | static_cast<uint32_t>(i);
-					auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
-					if (vfx.Seed != 0) pool.SetSeed(vfx.Seed);
-					pool.SetMaterialSettings(em.Material);
-					pool.SetCollisionSettings(em.Collision);
-					pool.SetLinearDrag(em.LinearDrag);
-					pool.SetVortex(em.VortexStrength, em.VortexAxis);
-					pool.SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
-
-					ParticleEmitterConfig emComp;
-					emComp.EmissionRate = em.EmissionRate * vfx.Intensity;
-					emComp.Lifetime = em.Lifetime;
-					emComp.Speed = em.Speed;
-					emComp.SpeedVariance = em.SpeedVariance;
-					emComp.SizeStart = em.SizeStart;
-					emComp.SizeEnd = em.SizeEnd;
-					emComp.ColorStart = PackColor(em.ColorStart);
-					emComp.ColorEnd = PackColor(em.ColorEnd);
-					emComp.Gravity = em.Gravity;
-					emComp.EmitterType = em.EmitterType;
-					emComp.RenderMode = em.FacingMode;
-					emComp.BlendMode = em.Material.BlendMode;
-					emComp.IsPlaying = 1;
-					pool.Update(dt * vfx.PlaybackSpeed, emComp, pos, rot);
+					float simDt = dt * vfx.PlaybackSpeed;
+					for (auto& p : pool.GetParticlesMut())
+					{
+						if (!p.Active) continue;
+						p.Velocity *= std::max(0.0f, 1.0f - customDamping * simDt);
+					}
 				}
+
+				// 单体常驻或瞬态爆发初始化 (当池内无活跃粒子时自动生成)
+				if (em.EmissionMode == VfxEmissionMode::Single && pool.ActiveCount() == 0)
+				{
+					pool.Emit(em.SingleCount > 0 ? em.SingleCount : 1, emComp, pos, rot);
+				}
+				else if (em.EmissionMode == VfxEmissionMode::Burst && pool.ActiveCount() == 0)
+				{
+					pool.Emit(em.SingleCount > 0 ? em.SingleCount : 20, emComp, pos, rot);
+				}
+
+				pool.Update(dt * vfx.PlaybackSpeed, emComp, pos, rot);
 			}
 		}
 	}
-	// 内置帧系统:运行/模拟更新保持"脚本 + 物理"的原有顺序与语义,标记为独占(主线程)。
-	// 宿主可再注册 parallel-safe 系统(不得触碰注册表结构),它们会在内置阶段之前并行执行。
+
+	void Scene::OnUpdateEditor(Timestep ts, const EditorCamera&)
+	{
+		AssertOwnerThread();
+		BeginFrame();
+		SimulateSceneVfx(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
+	}
+
 	void Scene::EnsureDefaultFrameSystems()
 	{
 		if (!m_FrameSystemDefinitions.empty())
@@ -2381,69 +2521,10 @@ namespace World
 	{
 		BeginFrame();
 		EnsureDefaultFrameSystems();
-		// Pure ECS:系统脚本热重载 —— 每帧轮询 scripts/systems/,变化过的文件整份重跑。
 		if (ScriptEngine::IsInitialized())
 			ScriptEngine::PollSystemScriptReload(*this, ts.GetSeconds());
 		RunFrameSystems(ts);
-				{
-			const auto& reg = static_cast<const Scene&>(*this).GetRegistry();
-			float dt = ts.GetSeconds();
-			auto& partSys = GetGlobalParticleSystem();
-			for (auto entity : reg.view<VfxComponent>())
-			{
-				auto& vfx = const_cast<entt::registry&>(reg).get<VfxComponent>(entity);
-				if (vfx.PlaybackState != VfxPlaybackState::Playing) continue;
-				if (!vfx.Effect.HasPath()) continue;
-
-				const std::string path = StringPool::Get().PathOf(vfx.Effect.Path);
-				const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
-				if (!asset)
-				{
-					uint64_t guid = ParticleAssetRegistry::Get().RegisterAsset(path);
-					asset = ParticleAssetRegistry::Get().GetAsset(guid);
-				}
-				if (!asset) continue;
-
-				glm::vec3 pos(0.0f);
-				glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
-				if (const auto* tc = reg.try_get<TransformComponent>(entity))
-				{
-					pos = tc->Location;
-					rot = tc->Rotation;
-				}
-
-				for (size_t i = 0; i < asset->Emitters.size(); ++i)
-				{
-					const auto& em = asset->Emitters[i];
-					if (!em.Enabled) continue;
-					uint32_t poolId = (static_cast<uint32_t>(entity) << 8) | static_cast<uint32_t>(i);
-					auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
-					if (vfx.Seed != 0) pool.SetSeed(vfx.Seed);
-					pool.SetMaterialSettings(em.Material);
-					pool.SetCollisionSettings(em.Collision);
-					pool.SetLinearDrag(em.LinearDrag);
-					pool.SetVortex(em.VortexStrength, em.VortexAxis);
-					pool.SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
-
-					ParticleEmitterConfig emComp;
-					emComp.EmissionRate = em.EmissionRate * vfx.Intensity;
-					emComp.Lifetime = em.Lifetime;
-					emComp.Speed = em.Speed;
-					emComp.SpeedVariance = em.SpeedVariance;
-					emComp.SizeStart = em.SizeStart;
-					emComp.SizeEnd = em.SizeEnd;
-					emComp.ColorStart = PackColor(em.ColorStart);
-					emComp.ColorEnd = PackColor(em.ColorEnd);
-					emComp.Gravity = em.Gravity;
-					emComp.EmitterType = em.EmitterType;
-					emComp.RenderMode = em.FacingMode;
-					emComp.BlendMode = em.Material.BlendMode;
-					emComp.IsPlaying = 1;
-					pool.Update(dt * vfx.PlaybackSpeed, emComp, pos, rot);
-				}
-			}
-
-		}
+		SimulateSceneVfx(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
 		Audio::AudioSystem::Get().Update(ts.GetSeconds(), this);
 		FlushStructuralChanges();
 	}
@@ -2453,66 +2534,7 @@ namespace World
 		BeginFrame();
 		EnsureDefaultFrameSystems();
 		RunFrameSystems(ts);
-		{
-			const auto& reg = static_cast<const Scene&>(*this).GetRegistry();
-			float dt = ts.GetSeconds();
-			auto& partSys = GetGlobalParticleSystem();
-			for (auto entity : reg.view<VfxComponent>())
-			{
-				auto& vfx = const_cast<entt::registry&>(reg).get<VfxComponent>(entity);
-				if (vfx.PlaybackState != VfxPlaybackState::Playing) continue;
-				if (!vfx.Effect.HasPath()) continue;
-
-				const std::string path = StringPool::Get().PathOf(vfx.Effect.Path);
-				const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
-				if (!asset)
-				{
-					uint64_t guid = ParticleAssetRegistry::Get().RegisterAsset(path);
-					asset = ParticleAssetRegistry::Get().GetAsset(guid);
-				}
-				if (!asset) continue;
-
-				glm::vec3 pos(0.0f);
-				glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
-				if (const auto* tc = reg.try_get<TransformComponent>(entity))
-				{
-					pos = tc->Location;
-					rot = tc->Rotation;
-				}
-
-				for (size_t i = 0; i < asset->Emitters.size(); ++i)
-				{
-					const auto& em = asset->Emitters[i];
-					if (!em.Enabled) continue;
-					uint32_t poolId = (static_cast<uint32_t>(entity) << 8) | static_cast<uint32_t>(i);
-					auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
-					if (vfx.Seed != 0) pool.SetSeed(vfx.Seed);
-					pool.SetMaterialSettings(em.Material);
-					pool.SetCollisionSettings(em.Collision);
-					pool.SetLinearDrag(em.LinearDrag);
-					pool.SetVortex(em.VortexStrength, em.VortexAxis);
-					pool.SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
-
-					ParticleEmitterConfig emComp;
-					emComp.EmissionRate = em.EmissionRate * vfx.Intensity;
-					emComp.Lifetime = em.Lifetime;
-					emComp.Speed = em.Speed;
-					emComp.SpeedVariance = em.SpeedVariance;
-					emComp.SizeStart = em.SizeStart;
-					emComp.SizeEnd = em.SizeEnd;
-					emComp.ColorStart = PackColor(em.ColorStart);
-					emComp.ColorEnd = PackColor(em.ColorEnd);
-					emComp.Gravity = em.Gravity;
-					emComp.EmitterType = em.EmitterType;
-					emComp.RenderMode = em.FacingMode;
-					emComp.BlendMode = em.Material.BlendMode;
-					emComp.IsPlaying = 1;
-					pool.Update(dt * vfx.PlaybackSpeed, emComp, pos, rot);
-				}
-			}
-
-		}
-
+		SimulateSceneVfx(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
 	}
 
 	void Scene::OnRuntimeStart()
