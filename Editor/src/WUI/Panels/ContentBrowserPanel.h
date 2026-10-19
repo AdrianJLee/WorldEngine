@@ -225,6 +225,9 @@ namespace World
 		// idPrefix 决定子菜单项的无障碍 id(如 "browser.toolbar.menu.new." / "browser.blank.new.")。
 		Wui::WuiRect RenderNewAssetItems(Wui::WuiContext& ctx, const char* idPrefix,
 			const Wui::WuiRect& parentMenu, const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme);
+		Wui::WuiRect RenderNewAssetSubmenu(Wui::WuiContext& ctx, const char* idPrefix,
+			const Wui::WuiRect& parentRow, const std::vector<std::string>& typeIds,
+			const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme);
 		// 失败提示统一入口(面板不自己弹模态)。
 		void NotifyAssetFailure(const std::string& error);
 		// ---- U25-M2 ---- 
@@ -426,6 +429,8 @@ namespace World
 		glm::vec2 m_ToolbarMenuPos { 0, 0 };
 		// P4-UX16:"New ▶" 子菜单当前归属(0 = 未展开;1 = 工具条 `…` 菜单;2 = 内容区空白右键菜单)。
 		int m_NewMenuOwner = 0;
+		std::string m_ActiveNewAssetCategory;
+		float m_NewAssetScrollY = 0.0f;
 		// OnShortcut 在渲染之外触发 → 只排队,真正的动作在下一帧的 OnRender 里做(那时有 ctx)。
 		// 1 = 打开"新建"列表,2 = 直接新建文件夹。
 		int m_PendingNewShortcut = 0;

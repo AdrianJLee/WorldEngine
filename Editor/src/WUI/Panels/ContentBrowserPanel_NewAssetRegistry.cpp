@@ -454,40 +454,66 @@ bool ContentBrowserPanel::RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId row
 	}
 
 
-Wui::WuiRect ContentBrowserPanel::RenderNewAssetItems(Wui::WuiContext& ctx, const char* idPrefix, const Wui::WuiRect& parentMenu, const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme){
-		// 清单 = 资产类型注册表(排序在注册表里定:Folder 恒第一 → SortOrder → Id)。
-		// 这里**没有任何按类型分支** —— 新类型注册进来就自动出现在菜单里。
-		const std::vector<AssetTypeDesc> types = AssetTypeRegistry::Get().Sorted();
-		if (types.empty())
-			return {};
+
+	struct NewAssetCategory
+	{
+		std::string Id;
+		std::string Label;
+		std::vector<std::string> TypeIds;
+	};
+
+	static const std::vector<NewAssetCategory> s_NewAssetCategories = {
+		{ "material", "材质与着色 (Material & Shader)  ▶", { "material", "shader" } },
+		{ "vfx", "视觉特效 (Visual Effects)  ▶", { "vfx" } },
+		{ "2d", "2D 精灵系统 (2D Sprites & Tiles)  ▶", { "sprite_atlas", "sprite_animation", "tilemap", "ruletile" } },
+		{ "audio", "音频系统 (Audio System)  ▶", { "sound_event", "audio_mixer", "voice_profile" } },
+		{ "physics", "物理与数学 (Physics & Math)  ▶", { "physics_material", "curve" } },
+		{ "script", "脚本与代码 (Scripts & Logic)  ▶", { "script" } },
+		{ "ui", "用户界面 (User Interface)  ▶", { "ui" } }
+	};
+
+	Wui::WuiRect ContentBrowserPanel::RenderNewAssetSubmenu(Wui::WuiContext& ctx, const char* idPrefix,
+		const Wui::WuiRect& parentRow, const std::vector<std::string>& typeIds,
+		const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme)
+	{
+		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
+		std::vector<const AssetTypeDesc*> items;
+		for (const auto& tid : typeIds)
+		{
+			if (const auto* desc = registry.Find(tid))
+			{
+				items.push_back(desc);
+			}
+		}
+
+		if (items.empty()) return {};
 
 		const float itemH = 22.0f;
-		Wui::WuiRect panel { parentMenu.X + parentMenu.W - 4.0f, parentMenu.Y + 4.0f, 236.0f,
-			itemH * static_cast<float>(types.size()) + 8.0f };
-		// 贴边翻转:右侧放不下就摆到父菜单左侧;再夹进面板可视区(子菜单永远不出画面)。
-		if (panel.X + panel.W > clampArea.X + clampArea.W - 4.0f)
-			panel.X = parentMenu.X - panel.W + 4.0f;
-		panel.X = std::max(clampArea.X + 4.0f,
-			std::min(panel.X, clampArea.X + clampArea.W - panel.W - 4.0f));
-		panel.Y = std::max(clampArea.Y + 4.0f,
-			std::min(panel.Y, clampArea.Y + clampArea.H - panel.H - 4.0f));
-		Wui::DrawPanelSurface(ctx, panel, theme);
-		// P4-U7:子菜单往父菜单右侧伸出,父菜单矩形的遮挡区盖不住它 —— 子菜单矩形必须
-		// 自己登记(下一帧树/切片不会吃掉落在子菜单上的点击)。
-		ctx.RegisterOverlayRect(panel);
+		const float subW = 230.0f;
+		const float subH = itemH * static_cast<float>(items.size()) + 8.0f;
+
+		Wui::WuiRect subPanel { parentRow.X + parentRow.W - 2.0f, parentRow.Y - 2.0f, subW, subH };
+
+		// 贴边翻转: 如果右侧超出可视区，向左翻转
+		if (subPanel.X + subPanel.W > clampArea.X + clampArea.W - 4.0f)
+			subPanel.X = parentRow.X - subPanel.W + 2.0f;
+		subPanel.X = std::max(clampArea.X + 4.0f, std::min(subPanel.X, clampArea.X + clampArea.W - subPanel.W - 4.0f));
+		subPanel.Y = std::max(clampArea.Y + 4.0f, std::min(subPanel.Y, clampArea.Y + clampArea.H - subPanel.H - 4.0f));
+
+		Wui::DrawPanelSurface(ctx, subPanel, theme);
+		ctx.RegisterOverlayRect(subPanel);
 
 		const std::string tooltip = Wui::Tr("panel.content_browser.new.tooltip", "Create in the current folder");
-		for (size_t index = 0; index < types.size(); ++index)
+
+		for (size_t i = 0; i < items.size(); ++i)
 		{
-			const AssetTypeDesc& desc = types[index];
-			const Wui::WuiRect row { panel.X + 4.0f, panel.Y + 4.0f + itemH * static_cast<float>(index),
-				panel.W - 8.0f, itemH };
-			const std::string label = Wui::Tr(("asset.type." + desc.Id).c_str(), desc.Label.c_str());
-			const Wui::WuiId itemId = Wui::HashId((std::string(idPrefix) + desc.Id).c_str());
+			const auto* desc = items[i];
+			const Wui::WuiRect row { subPanel.X + 4.0f, subPanel.Y + 4.0f + itemH * static_cast<float>(i), subPanel.W - 8.0f, itemH };
+			const std::string label = Wui::Tr(("asset.type." + desc->Id).c_str(), desc->Label.c_str());
+			const Wui::WuiId itemId = Wui::HashId((std::string(idPrefix) + "sub." + desc->Id).c_str());
+
 			const bool clicked = Wui::MenuItem(ctx, itemId, row, label, true, theme);
-			// MenuItem 登记的无障碍节点只有"文字标签";这里用同一个 id 再登记一次(后写覆盖),
-			// 把**扩展名**与**创建位置**写进 Value/Tooltip —— 右侧那行扩展名提示是画出来的,
-			// 读屏与脚本读不到,必须同时进节点(用户 2026-09-18:「引擎的 UI 对 AI 要无障碍」)。
+
 			{
 				Wui::WuiAccessNode node;
 				node.Id = itemId;
@@ -495,34 +521,184 @@ Wui::WuiRect ContentBrowserPanel::RenderNewAssetItems(Wui::WuiContext& ctx, cons
 				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 				node.Kind = "menu-item";
 				node.Label = label;
-				// 文件夹没有扩展名 → 值写明 "(folder)",脚本据此区分"目录"与"文件类型"。
-				node.Value = desc.Extension.empty() ? "(folder)" : desc.Extension;
+				node.Value = desc->Extension.empty() ? "(folder)" : desc->Extension;
 				node.Tooltip = tooltip;
 				node.Rect = row;
 				Wui::WuiAccessibility::Get().Register(node);
 			}
+
 			if (clicked)
 			{
 				std::string error;
-				if (!CreateAssetFromRegistry(desc.Id, &error))
+				if (!CreateAssetFromRegistry(desc->Id, &error))
 					NotifyAssetFailure(error);
 				m_NewMenuOwner = 0;
+				m_ActiveNewAssetCategory.clear();
 				ctx.CloseAllPopups();
 				break;
 			}
-			// 右侧扩展名提示(材料 → .wmat / 关卡 → .wlevel / 脚本 → .lua),一眼可辨且与"另存为"同名。
-			if (!desc.Extension.empty())
+
+			if (!desc->Extension.empty())
 			{
-				const float textWidth = ctx.MeasureTextWidth(desc.Extension, 12.0f);
+				const float textWidth = ctx.MeasureTextWidth(desc->Extension, 12.0f);
 				Wui::Label(ctx, { row.X + row.W - textWidth - 8.0f, row.Y + (row.H - 15.0f) * 0.5f },
-					desc.Extension, theme.TextMuted, 12.0f);
+					desc->Extension, theme.TextMuted, 12.0f);
 			}
 			Wui::Tooltip(ctx, row, tooltip);
 		}
-		return panel;
+
+		return subPanel;
 	}
 
+	Wui::WuiRect ContentBrowserPanel::RenderNewAssetItems(Wui::WuiContext& ctx, const char* idPrefix,
+		const Wui::WuiRect& parentMenu, const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme)
+	{
+		const std::vector<AssetTypeDesc> allTypes = AssetTypeRegistry::Get().Sorted();
+		if (allTypes.empty()) return {};
 
+		const float itemH = 22.0f;
+		const float menuW = 240.0f;
+
+		// 收集未被分类归纳的额外资产类型 (向后完全兜底)
+		std::vector<const AssetTypeDesc*> uncategorized;
+		std::set<std::string> categorizedIds;
+		for (const auto& cat : s_NewAssetCategories)
+		{
+			for (const auto& tid : cat.TypeIds)
+				categorizedIds.insert(tid);
+		}
+
+		for (const auto& desc : allTypes)
+		{
+			if (desc.Id != "folder" && categorizedIds.find(desc.Id) == categorizedIds.end())
+			{
+				uncategorized.push_back(&desc);
+			}
+		}
+
+		// 总行数 = 1 (Folder) + 1 (Divider) + 分类总数 + 未分类项数
+		const size_t totalVisualRows = 1 + 1 + s_NewAssetCategories.size() + uncategorized.size();
+		const float totalDesiredH = static_cast<float>(totalVisualRows) * itemH + 12.0f;
+
+		// 自适应高度限制 (防止小窗口/矮面板穿透底部)
+		const float maxAllowedH = std::min(totalDesiredH, std::max(120.0f, clampArea.H - 12.0f));
+
+		Wui::WuiRect panel { parentMenu.X + parentMenu.W - 4.0f, parentMenu.Y + 4.0f, menuW, maxAllowedH };
+
+		// 贴边翻转
+		if (panel.X + panel.W > clampArea.X + clampArea.W - 4.0f)
+			panel.X = parentMenu.X - panel.W + 4.0f;
+		panel.X = std::max(clampArea.X + 4.0f, std::min(panel.X, clampArea.X + clampArea.W - panel.W - 4.0f));
+		panel.Y = std::max(clampArea.Y + 4.0f, std::min(panel.Y, clampArea.Y + clampArea.H - panel.H - 4.0f));
+
+		Wui::DrawPanelSurface(ctx, panel, theme);
+		ctx.RegisterOverlayRect(panel);
+
+		// 滚轮自适应滑动保护
+		const float maxScroll = std::max(0.0f, totalDesiredH - panel.H);
+		if (panel.Contains(ctx.Input().MousePos) && std::abs(ctx.Input().Wheel) > 0.01f)
+		{
+			m_NewAssetScrollY = std::clamp(m_NewAssetScrollY - ctx.Input().Wheel * 24.0f, 0.0f, maxScroll);
+		}
+
+		float curY = panel.Y + 4.0f - m_NewAssetScrollY;
+
+		// 1. 文件夹 (Folder 恒排第一项)
+		{
+			const Wui::WuiRect row { panel.X + 4.0f, curY, panel.W - 8.0f, itemH };
+			if (row.Y + row.H > panel.Y && row.Y < panel.Y + panel.H)
+			{
+				const std::string label = "新建文件夹 (Folder)";
+				const Wui::WuiId fId = Wui::HashId((std::string(idPrefix) + "folder").c_str());
+				if (Wui::MenuItem(ctx, fId, row, label, true, theme))
+				{
+					std::string error;
+					if (!CreateAssetFromRegistry("folder", &error))
+						NotifyAssetFailure(error);
+					m_NewMenuOwner = 0;
+					m_ActiveNewAssetCategory.clear();
+					ctx.CloseAllPopups();
+					return panel;
+				}
+				if (ctx.IsHovered(row))
+				{
+					m_ActiveNewAssetCategory.clear();
+				}
+			}
+			curY += itemH;
+		}
+
+		// 2. 分割线
+		{
+			const float divY = curY + 2.0f;
+			if (divY > panel.Y && divY < panel.Y + panel.H)
+			{
+				Wui::LineSegment(ctx, { panel.X + 8.0f, divY }, { panel.X + panel.W - 8.0f, divY }, theme.Border, 1.0f);
+			}
+			curY += 6.0f;
+		}
+
+		Wui::WuiRect activeSubmenuParentRow {};
+		std::vector<std::string> activeSubmenuTypeIds;
+
+		// 3. 渲染分类子菜单项
+		for (size_t cIdx = 0; cIdx < s_NewAssetCategories.size(); ++cIdx)
+		{
+			const auto& cat = s_NewAssetCategories[cIdx];
+			const Wui::WuiRect row { panel.X + 4.0f, curY, panel.W - 8.0f, itemH };
+
+			if (row.Y + row.H > panel.Y && row.Y < panel.Y + panel.H)
+			{
+				const Wui::WuiId catId = Wui::HashId((std::string(idPrefix) + "cat." + cat.Id).c_str());
+				const bool isCurrentActive = (m_ActiveNewAssetCategory == cat.Id);
+
+				const bool clicked = Wui::MenuItem(ctx, catId, row, cat.Label, true, theme);
+				if (clicked || ctx.IsHovered(row))
+				{
+					m_ActiveNewAssetCategory = cat.Id;
+				}
+
+				if (m_ActiveNewAssetCategory == cat.Id)
+				{
+					activeSubmenuParentRow = row;
+					activeSubmenuTypeIds = cat.TypeIds;
+				}
+			}
+			curY += itemH;
+		}
+
+		// 4. 渲染未分类的额外资产项 (如有)
+		for (size_t uIdx = 0; uIdx < uncategorized.size(); ++uIdx)
+		{
+			const auto* desc = uncategorized[uIdx];
+			const Wui::WuiRect row { panel.X + 4.0f, curY, panel.W - 8.0f, itemH };
+
+			if (row.Y + row.H > panel.Y && row.Y < panel.Y + panel.H)
+			{
+				const std::string label = Wui::Tr(("asset.type." + desc->Id).c_str(), desc->Label.c_str());
+				const Wui::WuiId itemId = Wui::HashId((std::string(idPrefix) + "uncat." + desc->Id).c_str());
+				if (Wui::MenuItem(ctx, itemId, row, label, true, theme))
+				{
+					std::string error;
+					if (!CreateAssetFromRegistry(desc->Id, &error))
+						NotifyAssetFailure(error);
+					m_NewMenuOwner = 0;
+					m_ActiveNewAssetCategory.clear();
+					ctx.CloseAllPopups();
+					return panel;
+				}
+			}
+			curY += itemH;
+		}
+
+		// 5. 渲染激活的二级子菜单
+		if (!m_ActiveNewAssetCategory.empty() && !activeSubmenuTypeIds.empty())
+		{
+			RenderNewAssetSubmenu(ctx, idPrefix, activeSubmenuParentRow, activeSubmenuTypeIds, clampArea, theme);
+		}
+
+		return panel;
+	}
 void ContentBrowserPanel::NotifyAssetFailure(const std::string& error){
 		const std::string text = Wui::Tr("panel.content_browser.new.failed", "Could not create asset: ") + error;
 		WLD_CORE_ERROR("[content-browser] {0}", text);
