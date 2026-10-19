@@ -178,6 +178,7 @@ namespace World
 		void RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRect& timelineRect, const Wui::WuiTheme& theme, PanelHost& host);
 		void RenderInspector(Wui::WuiContext& ctx, const Wui::WuiRect& inspectorRect, const Wui::WuiTheme& theme, PanelHost& host);
 		void RenderContextMenu(Wui::WuiContext& ctx, const Wui::WuiTheme& theme);
+		void RenderCustomModuleMenu(Wui::WuiContext& ctx, const Wui::WuiTheme& theme);
 
 		// 视口定向万向节与曲线工作台辅助渲染
 		void RenderOrientationGimbal(Wui::WuiContext& ctx, const Wui::WuiRect& vpRect, const glm::mat4& viewMat, const Wui::WuiTheme& theme);
@@ -212,6 +213,7 @@ namespace World
 
 		// 项目全局代码自定义模块与编写器状态 (Niagara Scratch Pad)
 		bool m_CustomModuleMenuOpen = false;
+		glm::vec2 m_CustomModuleMenuPos { 0.0f };
 		std::vector<VfxModule> m_ProjectCustomModules;
 		int m_SelectedProjectModuleIndex = -1;
 		VfxModule m_EditingCustomModule;

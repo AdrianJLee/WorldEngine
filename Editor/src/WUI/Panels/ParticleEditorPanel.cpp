@@ -1107,8 +1107,9 @@ void ParticleEditorPanel::NewAsset()
 		}
 
 
-		// 右键上下文菜单 (若激活则在最顶层绘制)
+		// 右键上下文菜单与下拉菜单 (最顶层绘制，绝不被任何视口或分区遮挡)
 		RenderContextMenu(ctx, theme);
+		RenderCustomModuleMenu(ctx, theme);
 	}
 
 
@@ -1160,14 +1161,15 @@ void ParticleEditorPanel::NewAsset()
 		// -------------------------------------------------------------------------
 		// 项目全局代码自定义模块菜单栏入口 (VFX Editor Menu Bar - Custom Slang Modules)
 		// -------------------------------------------------------------------------
-		const float modMenuBtnW = 148.0f;
+		const float modMenuBtnW = 152.0f;
 		const Wui::WuiRect modMenuBtn { tbX, barRect.Y + 6.0f, modMenuBtnW, 24.0f };
 		Wui::Tooltip(ctx, modMenuBtn, "项目全局代码自定义模块菜单，管理和编写全局 Slang 动力学模块 (Scratch Pad)");
-		if (Wui::Button(ctx, Wui::HashId("vfx.bar.mod_menu"), modMenuBtn, "代码模块 (Scratch Pad) ▾", theme))
+		if (Wui::Button(ctx, Wui::HashId("vfx.bar.mod_menu"), modMenuBtn, "代码模块 (Scratch Pad) ▼", theme))
 		{
 			m_CustomModuleMenuOpen = !m_CustomModuleMenuOpen;
 			if (m_CustomModuleMenuOpen)
 			{
+				m_CustomModuleMenuPos = { modMenuBtn.X, barRect.Y + barRect.H + 2.0f };
 				RefreshProjectCustomModules();
 			}
 		}
@@ -1240,64 +1242,7 @@ void ParticleEditorPanel::NewAsset()
 			Wui::Label(ctx, { tbX + 8.0f, barRect.Y + 10.0f }, m_StatusFeedback, fbColor, 10.5f);
 		}
 
-		// 菜单栏下拉弹窗: 项目代码模块 (Project Custom Slang Modules Menu)
-		if (m_CustomModuleMenuOpen)
-		{
-			const float menuW = 260.0f;
-			const float menuH = 68.0f + 24.0f * (std::max<size_t>(1, m_ProjectCustomModules.size()) + 1);
-			const Wui::WuiRect menuRect { modMenuBtn.X, barRect.Y + barRect.H + 2.0f, menuW, menuH };
-			Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.14f, 0.16f, 0.20f, 0.98f }, theme.Accent);
 
-			float my = menuRect.Y + 6.0f;
-
-			const Wui::WuiRect newModItem { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 22.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.bar.mod.new"), newModItem, "+ 新建项目代码模块 (Scratch Pad)", theme))
-			{
-				m_CustomModuleMenuOpen = false;
-				OpenCustomModuleEditor("新自定义动力学块 (Custom Slang)");
-				m_ViewMode = ParticleEditorViewMode::CustomModule;
-			}
-			my += 26.0f;
-
-			const Wui::WuiRect manageItem { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 22.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.bar.mod.manage"), manageItem, "管理全部项目代码模块...", theme))
-			{
-				m_CustomModuleMenuOpen = false;
-				m_ViewMode = ParticleEditorViewMode::CustomModule;
-			}
-			my += 28.0f;
-
-			std::string modLabel = "--- 项目全局模块 (" + std::to_string(m_ProjectCustomModules.size()) + ") ---";
-			Wui::Label(ctx, { menuRect.X + 8.0f, my + 3.0f }, modLabel, theme.Accent, 9.5f);
-			my += 20.0f;
-
-			if (m_ProjectCustomModules.empty())
-			{
-				Wui::Label(ctx, { menuRect.X + 12.0f, my + 3.0f }, "(暂无项目模块，点击上方新建)", theme.TextMuted, 9.5f);
-				my += 22.0f;
-			}
-			else
-			{
-				for (size_t i = 0; i < m_ProjectCustomModules.size(); ++i)
-				{
-					const auto& mod = m_ProjectCustomModules[i];
-					const Wui::WuiRect modItem { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 22.0f };
-					std::string btnText = "[★] " + mod.Name;
-					if (Wui::Button(ctx, Wui::HashId(("vfx.bar.mod_sel_" + std::to_string(i)).c_str()), modItem, btnText.c_str(), theme))
-					{
-						m_CustomModuleMenuOpen = false;
-						OpenExistingCustomModule(i);
-						m_ViewMode = ParticleEditorViewMode::CustomModule;
-					}
-					my += 24.0f;
-				}
-			}
-
-			if (ctx.Input().MouseClicked[0] && !ctx.IsHovered(menuRect) && !ctx.IsHovered(modMenuBtn))
-			{
-				m_CustomModuleMenuOpen = false;
-			}
-		}
 	}
 
 	void ParticleEditorPanel::RenderOutliner(Wui::WuiContext& ctx, const Wui::WuiRect& outlinerRect, const Wui::WuiTheme& theme)
@@ -1675,6 +1620,68 @@ void ParticleEditorPanel::NewAsset()
 		if (ctx.Input().MouseClicked[0] && !ctx.IsHovered(menuRect))
 		{
 			m_ContextMenuOpen = false;
+		}
+	}
+
+	void ParticleEditorPanel::RenderCustomModuleMenu(Wui::WuiContext& ctx, const Wui::WuiTheme& theme)
+	{
+		if (!m_CustomModuleMenuOpen) return;
+
+		const float menuW = 270.0f;
+		const float itemH = 24.0f;
+		const float menuH = 68.0f + itemH * (std::max<size_t>(1, m_ProjectCustomModules.size()) + 1);
+		const Wui::WuiRect menuRect { m_CustomModuleMenuPos.x, m_CustomModuleMenuPos.y, menuW, menuH };
+		Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.98f }, theme.Accent);
+
+		float my = menuRect.Y + 6.0f;
+
+		const Wui::WuiRect newModItem { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 22.0f };
+		if (Wui::Button(ctx, Wui::HashId("vfx.bar.mod.new"), newModItem, "+ 新建项目代码模块 (Scratch Pad)", theme))
+		{
+			m_CustomModuleMenuOpen = false;
+			OpenCustomModuleEditor("新自定义动力学块 (Custom Slang)");
+			m_ViewMode = ParticleEditorViewMode::CustomModule;
+		}
+		my += 26.0f;
+
+		const Wui::WuiRect manageItem { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 22.0f };
+		if (Wui::Button(ctx, Wui::HashId("vfx.bar.mod.manage"), manageItem, "管理全部项目代码模块...", theme))
+		{
+			m_CustomModuleMenuOpen = false;
+			m_ViewMode = ParticleEditorViewMode::CustomModule;
+		}
+		my += 28.0f;
+
+		std::string modLabel = "--- 项目全局模块 (" + std::to_string(m_ProjectCustomModules.size()) + ") ---";
+		Wui::Label(ctx, { menuRect.X + 8.0f, my + 3.0f }, modLabel, theme.Accent, 9.5f);
+		my += 20.0f;
+
+		if (m_ProjectCustomModules.empty())
+		{
+			Wui::Label(ctx, { menuRect.X + 12.0f, my + 3.0f }, "(暂无项目模块，点击上方新建)", theme.TextMuted, 9.5f);
+		}
+		else
+		{
+			for (size_t i = 0; i < m_ProjectCustomModules.size(); ++i)
+			{
+				const auto& mod = m_ProjectCustomModules[i];
+				const Wui::WuiRect modItem { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 22.0f };
+				std::string btnText = "[★] " + mod.Name;
+				if (Wui::Button(ctx, Wui::HashId(("vfx.bar.mod_sel_" + std::to_string(i)).c_str()), modItem, btnText.c_str(), theme))
+				{
+					m_CustomModuleMenuOpen = false;
+					OpenExistingCustomModule(i);
+					m_ViewMode = ParticleEditorViewMode::CustomModule;
+				}
+				my += 24.0f;
+			}
+		}
+
+		// 点击菜单外部以及触发按钮外部时关闭
+		const Wui::WuiRect triggerBtnRect { m_CustomModuleMenuPos.x, m_CustomModuleMenuPos.y - 30.0f, 160.0f, 28.0f };
+		if (ctx.Input().MouseClicked[0] && !ctx.IsHovered(menuRect) && !ctx.IsHovered(triggerBtnRect))
+		{
+			m_CustomModuleMenuOpen = false;
 		}
 	}
 
