@@ -1779,7 +1779,7 @@ void ParticleEditorPanel::NewAsset()
 		const glm::vec3 eye = m_CameraFocus - camForward * m_CameraDistance;
 		const glm::mat4 view = glm::lookAt(eye, m_CameraFocus, glm::vec3(0.0f, 1.0f, 0.0f));
 		const float aspect = std::max(0.1f, vpRect.W / std::max(1.0f, vpRect.H));
-		const glm::mat4 proj = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+		const glm::mat4 proj = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 1000.0f);
 		const glm::mat4 vpMat = proj * view;
 
 		auto projectPoint = [&](const glm::vec3& p, glm::vec2& outScreen) -> bool {
