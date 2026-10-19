@@ -9,6 +9,8 @@
 #include "World/Scene/Scene.h"
 #include "World/Scene/Entity.h"
 #include "World/WUI/WuiTextureRegistry.h"
+#include "World/WUI/WuiTextBuffer.h"
+#include "World/WUI/WuiCodeEditor.h"
 #include "World/Math/Curve/ColorGradient.h"
 #include "World/Math/Curve/CubicBezierCurve.h"
 
@@ -224,6 +226,8 @@ namespace World
 		bool m_CustomModuleCompileSuccess = false;
 		float m_CustomModuleListScrollY = 0.0f;
 		float m_CustomModuleEditorScrollY = 0.0f;
+		Wui::WuiTextBuffer m_CustomModuleCodeBuffer;
+		int m_CustomModuleErrorLine = -1;
 		float m_CustomModuleParamsScrollY = 0.0f;
 		bool m_TemplateMenuOpen = false;
 
