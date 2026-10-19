@@ -1,5 +1,8 @@
 #include "wldpch.h"
 #include "World/Renderer/ParticleAsset.h"
+#include "World/Renderer/VfxModule.h"
+#include "World/Renderer/VfxComputeGenerator.h"
+
 #include "World/Core/Log.h"
 
 #include <iostream>
@@ -256,6 +259,69 @@ static void TestParticleAssetShowcasePresets3D()
 	std::cout << "[PASS] TestParticleAssetShowcasePresets3D\n";
 }
 
+
+static void TestModularPipelineSlangGeneration()
+{
+	std::vector<VfxModule> modules = VfxModuleLibrary::CreateDefaultEmitterModuleStack();
+	assert(!modules.empty());
+	assert(modules.size() >= 4);
+
+	std::unordered_map<std::string, float> userFloats;
+	userFloats["ChaosGain"] = 2.5f;
+	std::unordered_map<std::string, glm::vec4> userVecs;
+	userVecs["BlackHolePos"] = glm::vec4(0.0f, 5.0f, 0.0f, 0.0f);
+
+	std::string slangCode = VfxComputeGenerator::GenerateComputeShaderSource("VortexCore", modules, userFloats, userVecs);
+	assert(!slangCode.empty());
+	assert(slangCode.find("void CS_Spawn") != std::string::npos);
+	assert(slangCode.find("void CS_Update") != std::string::npos);
+	assert(slangCode.find("u_ChaosGain") != std::string::npos);
+	assert(slangCode.find("u_BlackHolePos") != std::string::npos);
+	assert(slangCode.find("CurlNoise3D") != std::string::npos);
+
+	std::cout << "[PASS] TestModularPipelineSlangGeneration\n";
+}
+
+static void TestModularPipelineCustomSlangModule()
+{
+	ParticleAsset asset;
+	asset.Name = "CustomLorenzVfx";
+	asset.Guid = 88887777ULL;
+
+	ParticleEmitterLayer layer;
+	layer.Name = "LorenzChaosEmitter";
+
+	VfxModule customMod = VfxModuleLibrary::CreateCustomSlangModule("LorenzAttractor");
+	customMod.SlangSource = R"(
+    float3 lorenz = float3(
+        10.0f * (p.Position.y - p.Position.x),
+        p.Position.x * (28.0f - p.Position.z) - p.Position.y,
+        p.Position.x * p.Position.y - 2.666f * p.Position.z
+    );
+    p.Velocity += lorenz * (u_ChaosGain * dt);
+)";
+	customMod.Parameters.push_back({ "ChaosGain", VfxParamType::Float, 3.2f, {}, 0, false, 0.0f, 10.0f, 0.1f, "混沌增益", true, "ChaosGain" });
+	layer.Modules.push_back(customMod);
+
+	asset.Emitters.push_back(layer);
+
+	std::string yamlStr = ParticleAssetSerializer::SerializeToString(asset);
+	assert(!yamlStr.empty());
+	assert(yamlStr.find("LorenzAttractor") != std::string::npos);
+	assert(yamlStr.find("ChaosGain") != std::string::npos);
+
+	ParticleAsset deserialized;
+	bool ok = ParticleAssetSerializer::DeserializeFromString(yamlStr, deserialized);
+	assert(ok);
+	assert(deserialized.Emitters.size() == 1);
+	assert(deserialized.Emitters[0].Modules.size() == 1);
+	assert(deserialized.Emitters[0].Modules[0].Name == "LorenzAttractor");
+	assert(deserialized.Emitters[0].Modules[0].IsCustom == true);
+	assert(deserialized.Emitters[0].Modules[0].SlangSource.find("lorenz") != std::string::npos);
+
+	std::cout << "[PASS] TestModularPipelineCustomSlangModule\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -265,6 +331,8 @@ int main()
 	TestParticleAssetBackwardCompatibilitySingleEmitter();
 	TestParticleAssetRegistry();
 	TestParticleAssetNewDynamicsAndBursts();
+	TestModularPipelineSlangGeneration();
+	TestModularPipelineCustomSlangModule();
 	TestParticleAssetShowcasePresets3D();
 
 	std::cout << "All WorldParticleAssetTests passed successfully.\n";

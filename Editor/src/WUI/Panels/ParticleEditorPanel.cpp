@@ -5,6 +5,8 @@
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/Renderer/ParticleAsset.h"
+#include "World/Renderer/VfxModule.h"
+#include "World/Renderer/VfxComputeGenerator.h"
 #include "World/Renderer/ParticleSystem.h"
 #include "World/RHI/Rhi.h"
 #include "World/Scene/Components.h"
@@ -111,7 +113,7 @@ void ParticleEditorPanel::RequestOpenAsset(const std::string& path)
 	ParticleEditorPanel::ParticleEditorPanel()
 	{
 		NewAsset();
-		LoadPresetFlameTornado3D();
+		NewAsset();
 	}
 
 
@@ -200,11 +202,14 @@ void ParticleEditorPanel::NewAsset()
 		defaultEmitter.SizeEnd = 0.05f;
 		defaultEmitter.ColorStart = glm::vec4(1.0f, 0.6f, 0.2f, 1.0f);
 		defaultEmitter.ColorEnd = glm::vec4(1.0f, 0.1f, 0.0f, 0.0f);
+		defaultEmitter.Material.TexturePath = "engine/textures/particles/flame_soft.wtex";
+		defaultEmitter.Material.MaterialPath = "engine/materials/particles/particle_additive.wmat";
 		defaultEmitter.Material.BlendMode = ParticleBlendMode::Additive;
 		defaultEmitter.Material.EmissiveBoost = 2.0f;
 
 
 		m_Asset.Emitters.clear();
+		defaultEmitter.EnsureDefaultModules();
 		m_Asset.Emitters.push_back(defaultEmitter);
 
 
@@ -218,745 +223,7 @@ void ParticleEditorPanel::NewAsset()
 
 
 	// =========================================================================
-	// 5 大高水准官方 3D 特效案例集 (Industrial 3D Showcase Presets)
-	// =========================================================================
-
-
-	void ParticleEditorPanel::LoadPresetFlameTornado3D()
-	{
-		m_Asset = ParticleAsset();
-		m_Asset.Name = "FlameTornado3D";
-		m_Asset.Seed = 2026;
-		m_Asset.Looping = true;
-		m_Asset.WarmupTime = 0.8f;
-		m_TimelineDuration = 5.0f;
-
-
-		// 1. 龙卷风核心内焰 (Core Flame Vortex)
-		ParticleEmitterLayer coreFlame;
-		coreFlame.Name = "CoreFlameVortex";
-		coreFlame.Enabled = true;
-		coreFlame.MaxParticles = 650;
-		coreFlame.Lifetime = 1.8f;
-		coreFlame.EmissionRate = 120.0f;
-		coreFlame.EmitterType = ParticleEmitterType::Cone;
-		coreFlame.FacingMode = ParticleRenderMode::Billboard;
-		coreFlame.Material.BlendMode = ParticleBlendMode::Additive;
-		coreFlame.Material.TexturePath = "textures/particles/flame_soft.wtex";
-		coreFlame.Material.EmissiveBoost = 3.6f;
-		coreFlame.Speed = 6.2f;
-		coreFlame.SpeedVariance = 1.2f;
-		coreFlame.Gravity = glm::vec3(0.0f, 4.0f, 0.0f);
-		coreFlame.LinearDrag = 0.35f;
-		coreFlame.VortexStrength = 22.0f;
-		coreFlame.VortexAxis = glm::vec3(0.0f, 1.0f, 0.0f);
-		coreFlame.TurbulenceStrength = 2.0f;
-		coreFlame.TurbulenceFrequency = 1.2f;
-		coreFlame.SizeStart = 0.75f;
-		coreFlame.SizeEnd = 0.15f;
-		coreFlame.ColorStart = glm::vec4(1.0f, 0.75f, 0.25f, 1.0f);
-		coreFlame.ColorEnd = glm::vec4(0.95f, 0.15f, 0.02f, 0.0f);
-
-
-		// 2. 高速飞旋火星群 (Spiraling Fiery Sparks)
-		ParticleEmitterLayer sparks;
-		sparks.Name = "SpiralingSparks";
-		sparks.Enabled = true;
-		sparks.MaxParticles = 400;
-		sparks.Lifetime = 2.2f;
-		sparks.EmissionRate = 75.0f;
-		sparks.EmitterType = ParticleEmitterType::Cone;
-		sparks.FacingMode = ParticleRenderMode::StretchedVelocity;
-		sparks.Material.BlendMode = ParticleBlendMode::Additive;
-		sparks.Material.TexturePath = "textures/particles/spark_glow.wtex";
-		sparks.Material.EmissiveBoost = 5.2f;
-		sparks.Speed = 8.5f;
-		sparks.SpeedVariance = 2.5f;
-		sparks.Gravity = glm::vec3(0.0f, 2.0f, 0.0f);
-		sparks.LinearDrag = 0.15f;
-		sparks.VortexStrength = 28.0f;
-		sparks.VortexAxis = glm::vec3(0.0f, 1.0f, 0.0f);
-		sparks.TurbulenceStrength = 2.8f;
-		sparks.TurbulenceFrequency = 1.5f;
-		sparks.SizeStart = 0.16f;
-		sparks.SizeEnd = 0.02f;
-		sparks.ColorStart = glm::vec4(1.0f, 0.95f, 0.5f, 1.0f);
-		sparks.ColorEnd = glm::vec4(1.0f, 0.3f, 0.0f, 0.0f);
-
-
-		// 3. 旋度噪声扰动升腾浓烟 (Rising Smoke Funnel)
-		ParticleEmitterLayer smoke;
-		smoke.Name = "RisingSmokeFunnel";
-		smoke.Enabled = true;
-		smoke.MaxParticles = 300;
-		smoke.Lifetime = 3.2f;
-		smoke.EmissionRate = 35.0f;
-		smoke.EmitterType = ParticleEmitterType::Cone;
-		smoke.FacingMode = ParticleRenderMode::Billboard;
-		smoke.Material.BlendMode = ParticleBlendMode::AlphaBlend;
-		smoke.Material.SoftParticlesEnabled = true;
-		smoke.Material.SoftParticleFadeDistance = 0.6f;
-		smoke.Material.EmissiveBoost = 1.0f;
-		smoke.Speed = 3.0f;
-		smoke.SpeedVariance = 0.8f;
-		smoke.Gravity = glm::vec3(0.0f, 2.5f, 0.0f);
-		smoke.LinearDrag = 0.7f;
-		smoke.VortexStrength = 14.0f;
-		smoke.VortexAxis = glm::vec3(0.0f, 1.0f, 0.0f);
-		smoke.TurbulenceStrength = 3.2f;
-		smoke.TurbulenceFrequency = 0.8f;
-		smoke.SizeStart = 0.4f;
-		smoke.SizeEnd = 2.4f;
-		smoke.ColorStart = glm::vec4(0.30f, 0.28f, 0.25f, 0.65f);
-		smoke.ColorEnd = glm::vec4(0.12f, 0.12f, 0.12f, 0.0f);
-
-
-		m_Asset.Emitters.clear();
-		m_Asset.Emitters.push_back(coreFlame);
-		m_Asset.Emitters.push_back(sparks);
-		m_Asset.Emitters.push_back(smoke);
-
-
-		m_LoadedPath = "vfx/presets/FlameTornado3D.wvfx";
-		m_Dirty = false;
-		m_SelectedEmitterIndex = 0;
-		m_StatusFeedback = "已加载案例: 3D 火焰龙卷风 (FlameTornado3D)";
-		EnsurePerEmitterState();
-		if (!m_EmitterExtended.empty())
-		{
-			m_EmitterExtended[0].CurlNoiseStrength = 2.0f;
-			m_EmitterExtended[1].CurlNoiseStrength = 2.5f;
-			m_EmitterExtended[2].CurlNoiseStrength = 3.5f;
-			m_EmitterExtended[2].ModuleCurlNoiseEnabled = true;
-		}
-		SyncSimulationFromAsset();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetLightningPlasmaBeam3D()
-	{
-		m_Asset = ParticleAsset();
-		m_Asset.Name = "LightningPlasmaBeam3D";
-		m_Asset.Seed = 31415;
-		m_Asset.Looping = true;
-		m_Asset.WarmupTime = 0.3f;
-		m_TimelineDuration = 4.0f;
-
-
-		// 1. 核心高能等离子光束 (Electric Core Beam)
-		ParticleEmitterLayer coreBeam;
-		coreBeam.Name = "ElectricCoreBeam";
-		coreBeam.Enabled = true;
-		coreBeam.MaxParticles = 550;
-		coreBeam.Lifetime = 0.8f;
-		coreBeam.EmissionRate = 220.0f;
-		coreBeam.EmitterType = ParticleEmitterType::Point;
-		coreBeam.FacingMode = ParticleRenderMode::StretchedVelocity;
-		coreBeam.Material.BlendMode = ParticleBlendMode::Additive;
-		coreBeam.Material.EmissiveBoost = 4.8f;
-		coreBeam.Speed = 16.0f;
-		coreBeam.SpeedVariance = 2.0f;
-		coreBeam.Gravity = glm::vec3(0.0f);
-		coreBeam.LinearDrag = 0.05f;
-		coreBeam.SizeStart = 0.35f;
-		coreBeam.SizeEnd = 0.08f;
-		coreBeam.ColorStart = glm::vec4(0.2f, 0.85f, 1.0f, 1.0f);
-		coreBeam.ColorEnd = glm::vec4(0.05f, 0.4f, 1.0f, 0.0f);
-
-
-		// 2. 空间螺旋放电电弧带 (Plasma Arc Spiral)
-		ParticleEmitterLayer arcSpiral;
-		arcSpiral.Name = "PlasmaArcSpiral";
-		arcSpiral.Enabled = true;
-		arcSpiral.MaxParticles = 450;
-		arcSpiral.Lifetime = 1.0f;
-		arcSpiral.EmissionRate = 140.0f;
-		arcSpiral.EmitterType = ParticleEmitterType::Point;
-		arcSpiral.FacingMode = ParticleRenderMode::Billboard;
-		arcSpiral.Material.BlendMode = ParticleBlendMode::Additive;
-		arcSpiral.Material.EmissiveBoost = 4.2f;
-		arcSpiral.Speed = 14.0f;
-		arcSpiral.SpeedVariance = 3.5f;
-		arcSpiral.Gravity = glm::vec3(0.0f);
-		arcSpiral.LinearDrag = 0.1f;
-		arcSpiral.VortexStrength = 18.0f;
-		arcSpiral.VortexAxis = glm::vec3(0.0f, 0.0f, 1.0f);
-		arcSpiral.TurbulenceStrength = 4.0f;
-		arcSpiral.TurbulenceFrequency = 2.5f;
-		arcSpiral.SizeStart = 0.22f;
-		arcSpiral.SizeEnd = 0.04f;
-		arcSpiral.ColorStart = glm::vec4(0.85f, 0.3f, 1.0f, 1.0f);
-		arcSpiral.ColorEnd = glm::vec4(0.2f, 0.9f, 1.0f, 0.0f);
-
-
-		// 3. 目标击中点剧烈反弹火花 (Impact Scatter Sparks)
-		ParticleEmitterLayer impactSparks;
-		impactSparks.Name = "ImpactScatterSparks";
-		impactSparks.Enabled = true;
-		impactSparks.MaxParticles = 350;
-		impactSparks.Lifetime = 1.4f;
-		impactSparks.EmissionRate = 90.0f;
-		impactSparks.EmitterType = ParticleEmitterType::Sphere;
-		impactSparks.FacingMode = ParticleRenderMode::StretchedVelocity;
-		impactSparks.Material.BlendMode = ParticleBlendMode::Additive;
-		impactSparks.Material.EmissiveBoost = 5.0f;
-		impactSparks.Speed = 8.0f;
-		impactSparks.SpeedVariance = 3.0f;
-		impactSparks.Gravity = glm::vec3(0.0f, -9.8f, 0.0f);
-		impactSparks.LinearDrag = 0.3f;
-		impactSparks.Collision.Mode = ParticleCollisionMode::Plane;
-		impactSparks.Collision.Restitution = 0.85f;
-		impactSparks.Collision.Friction = 0.15f;
-		impactSparks.SizeStart = 0.14f;
-		impactSparks.SizeEnd = 0.02f;
-		impactSparks.ColorStart = glm::vec4(0.5f, 1.0f, 0.95f, 1.0f);
-		impactSparks.ColorEnd = glm::vec4(0.1f, 0.3f, 1.0f, 0.0f);
-
-
-		m_Asset.Emitters.clear();
-		m_Asset.Emitters.push_back(coreBeam);
-		m_Asset.Emitters.push_back(arcSpiral);
-		m_Asset.Emitters.push_back(impactSparks);
-
-
-		m_LoadedPath = "vfx/presets/LightningPlasmaBeam3D.wvfx";
-		m_Dirty = false;
-		m_SelectedEmitterIndex = 0;
-		m_StatusFeedback = "已加载案例: 3D 等离子闪电束 (LightningPlasmaBeam3D)";
-		EnsurePerEmitterState();
-		SyncSimulationFromAsset();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetOrbitalMagicShield3D()
-	{
-		m_Asset = ParticleAsset();
-		m_Asset.Name = "OrbitalMagicShield3D";
-		m_Asset.Seed = 777;
-		m_Asset.Looping = true;
-		m_Asset.WarmupTime = 0.5f;
-		m_TimelineDuration = 6.0f;
-
-
-		// 1. 外层空间符文旋转球环 (Orbital Rune Spheres)
-		ParticleEmitterLayer runeRing;
-		runeRing.Name = "OrbitalRuneSpheres";
-		runeRing.Enabled = true;
-		runeRing.MaxParticles = 480;
-		runeRing.Lifetime = 2.8f;
-		runeRing.EmissionRate = 80.0f;
-		runeRing.EmitterType = ParticleEmitterType::Sphere;
-		runeRing.FacingMode = ParticleRenderMode::Billboard;
-		runeRing.Material.BlendMode = ParticleBlendMode::Additive;
-		runeRing.Material.TexturePath = "textures/particles/magic_rune.wtex";
-		runeRing.Material.EmissiveBoost = 3.8f;
-		runeRing.Speed = 2.0f;
-		runeRing.SpeedVariance = 0.5f;
-		runeRing.Gravity = glm::vec3(0.0f);
-		runeRing.LinearDrag = 0.2f;
-		runeRing.VortexStrength = 15.0f;
-		runeRing.VortexAxis = glm::vec3(0.0f, 1.0f, 0.0f);
-		runeRing.SizeStart = 0.28f;
-		runeRing.SizeEnd = 0.12f;
-		runeRing.ColorStart = glm::vec4(0.8f, 0.25f, 1.0f, 1.0f);
-		runeRing.ColorEnd = glm::vec4(0.2f, 0.8f, 1.0f, 0.0f);
-
-
-		// 2. 轨道自发光粒子动态点光源 (Orbiting Point Lights)
-		ParticleEmitterLayer lightOrbs;
-		lightOrbs.Name = "OrbitingPointLights";
-		lightOrbs.Enabled = true;
-		lightOrbs.MaxParticles = 120;
-		lightOrbs.Lifetime = 3.5f;
-		lightOrbs.EmissionRate = 25.0f;
-		lightOrbs.EmitterType = ParticleEmitterType::Circle;
-		lightOrbs.FacingMode = ParticleRenderMode::Billboard;
-		lightOrbs.Material.BlendMode = ParticleBlendMode::Additive;
-		lightOrbs.Material.EmissiveBoost = 5.5f;
-		lightOrbs.Speed = 3.5f;
-		lightOrbs.SpeedVariance = 0.2f;
-		lightOrbs.Gravity = glm::vec3(0.0f);
-		lightOrbs.VortexStrength = 10.0f;
-		lightOrbs.VortexAxis = glm::vec3(0.0f, 1.0f, 0.0f);
-		lightOrbs.SizeStart = 0.45f;
-		lightOrbs.SizeEnd = 0.15f;
-		lightOrbs.ColorStart = glm::vec4(1.0f, 0.9f, 0.3f, 1.0f);
-		lightOrbs.ColorEnd = glm::vec4(1.0f, 0.4f, 0.1f, 0.0f);
-
-
-		// 3. 脉冲能量内核 (Pulsing Shield Core)
-		ParticleEmitterLayer shieldCore;
-		shieldCore.Name = "PulsingShieldCore";
-		shieldCore.Enabled = true;
-		shieldCore.MaxParticles = 300;
-		shieldCore.Lifetime = 2.0f;
-		shieldCore.EmissionRate = 60.0f;
-		shieldCore.EmitterType = ParticleEmitterType::Sphere;
-		shieldCore.FacingMode = ParticleRenderMode::Billboard;
-		shieldCore.Material.BlendMode = ParticleBlendMode::Additive;
-		shieldCore.Material.EmissiveBoost = 2.8f;
-		shieldCore.Speed = 0.8f;
-		shieldCore.SpeedVariance = 0.3f;
-		shieldCore.Gravity = glm::vec3(0.0f);
-		shieldCore.LinearDrag = 0.5f;
-		shieldCore.SizeStart = 1.2f;
-		shieldCore.SizeEnd = 0.2f;
-		shieldCore.ColorStart = glm::vec4(0.3f, 0.6f, 1.0f, 0.85f);
-		shieldCore.ColorEnd = glm::vec4(0.1f, 0.2f, 0.8f, 0.0f);
-
-
-		m_Asset.Emitters.clear();
-		m_Asset.Emitters.push_back(runeRing);
-		m_Asset.Emitters.push_back(lightOrbs);
-		m_Asset.Emitters.push_back(shieldCore);
-
-
-		m_LoadedPath = "vfx/presets/OrbitalMagicShield3D.wvfx";
-		m_Dirty = false;
-		m_SelectedEmitterIndex = 0;
-		m_StatusFeedback = "已加载案例: 3D 环形魔法护盾 (OrbitalMagicShield3D)";
-		EnsurePerEmitterState();
-		if (m_EmitterExtended.size() >= 2)
-		{
-			m_EmitterExtended[1].LightEnabled = true;
-			m_EmitterExtended[1].LightRadius = 4.5f;
-			m_EmitterExtended[1].LightIntensity = 2.5f;
-			m_EmitterExtended[1].ModuleLightEnabled = true;
-		}
-		SyncSimulationFromAsset();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetMeteorImpactExplosion3D()
-	{
-		m_Asset = ParticleAsset();
-		m_Asset.Name = "MeteorImpactExplosion3D";
-		m_Asset.Seed = 8888;
-		m_Asset.Looping = true;
-		m_Asset.WarmupTime = 0.0f;
-		m_TimelineDuration = 4.5f;
-
-
-		// 1. 地面瞬态冲击波扩散环 (Ground Shockwave Ring)
-		ParticleEmitterLayer shockwave;
-		shockwave.Name = "GroundShockwave";
-		shockwave.Enabled = true;
-		shockwave.MaxParticles = 180;
-		shockwave.Lifetime = 1.2f;
-		shockwave.EmissionRate = 0.0f;
-		shockwave.Bursts.push_back({ 0.0f, 40 });
-		shockwave.EmitterType = ParticleEmitterType::Circle;
-		shockwave.FacingMode = ParticleRenderMode::HorizontalQuad;
-		shockwave.Material.BlendMode = ParticleBlendMode::Additive;
-		shockwave.Material.TexturePath = "textures/particles/shockwave_ring.wtex";
-		shockwave.Material.EmissiveBoost = 4.0f;
-		shockwave.Speed = 6.5f;
-		shockwave.SpeedVariance = 0.5f;
-		shockwave.Gravity = glm::vec3(0.0f);
-		shockwave.LinearDrag = 1.2f;
-		shockwave.SizeStart = 0.5f;
-		shockwave.SizeEnd = 4.8f;
-		shockwave.ColorStart = glm::vec4(1.0f, 0.85f, 0.4f, 1.0f);
-		shockwave.ColorEnd = glm::vec4(1.0f, 0.2f, 0.0f, 0.0f);
-
-
-		// 2. 爆心炽热火球 (Core Explosion Fireball)
-		ParticleEmitterLayer fireball;
-		fireball.Name = "CoreExplosionFireball";
-		fireball.Enabled = true;
-		fireball.MaxParticles = 450;
-		fireball.Lifetime = 1.6f;
-		fireball.EmissionRate = 0.0f;
-		fireball.Bursts.push_back({ 0.0f, 160 });
-		fireball.EmitterType = ParticleEmitterType::Sphere;
-		fireball.FacingMode = ParticleRenderMode::Billboard;
-		fireball.Material.BlendMode = ParticleBlendMode::Additive;
-		fireball.Material.EmissiveBoost = 4.5f;
-		fireball.Speed = 9.0f;
-		fireball.SpeedVariance = 3.5f;
-		fireball.Gravity = glm::vec3(0.0f, 1.0f, 0.0f);
-		fireball.LinearDrag = 2.2f;
-		fireball.SizeStart = 1.8f;
-		fireball.SizeEnd = 0.1f;
-		fireball.ColorStart = glm::vec4(1.0f, 0.95f, 0.6f, 1.0f);
-		fireball.ColorEnd = glm::vec4(0.9f, 0.15f, 0.0f, 0.0f);
-
-
-		// 3. 撞地反弹重力碎石火星 (Bouncing Debris Sparks)
-		ParticleEmitterLayer debris;
-		debris.Name = "BouncingDebrisSparks";
-		debris.Enabled = true;
-		debris.MaxParticles = 300;
-		debris.Lifetime = 2.5f;
-		debris.EmissionRate = 0.0f;
-		debris.Bursts.push_back({ 0.02f, 90 });
-		debris.EmitterType = ParticleEmitterType::Cone;
-		debris.FacingMode = ParticleRenderMode::StretchedVelocity;
-		debris.Material.BlendMode = ParticleBlendMode::Additive;
-		debris.Material.EmissiveBoost = 5.0f;
-		debris.Speed = 12.0f;
-		debris.SpeedVariance = 4.0f;
-		debris.Gravity = glm::vec3(0.0f, -14.0f, 0.0f);
-		debris.LinearDrag = 0.25f;
-		debris.Collision.Mode = ParticleCollisionMode::Plane;
-		debris.Collision.Restitution = 0.65f;
-		debris.Collision.Friction = 0.25f;
-		debris.SizeStart = 0.18f;
-		debris.SizeEnd = 0.03f;
-		debris.ColorStart = glm::vec4(1.0f, 0.7f, 0.2f, 1.0f);
-		debris.ColorEnd = glm::vec4(1.0f, 0.1f, 0.0f, 0.0f);
-
-
-		// 4. 升腾黑烟蘑菇云 (Rising Mushroom Smoke)
-		ParticleEmitterLayer smoke;
-		smoke.Name = "RisingMushroomSmoke";
-		smoke.Enabled = true;
-		smoke.MaxParticles = 320;
-		smoke.Lifetime = 3.5f;
-		smoke.EmissionRate = 0.0f;
-		smoke.Bursts.push_back({ 0.05f, 110 });
-		smoke.EmitterType = ParticleEmitterType::Cone;
-		smoke.FacingMode = ParticleRenderMode::Billboard;
-		smoke.Material.BlendMode = ParticleBlendMode::AlphaBlend;
-		smoke.Material.SoftParticlesEnabled = true;
-		smoke.Material.EmissiveBoost = 1.0f;
-		smoke.Speed = 4.5f;
-		smoke.SpeedVariance = 1.5f;
-		smoke.Gravity = glm::vec3(0.0f, 2.8f, 0.0f);
-		smoke.LinearDrag = 1.5f;
-		smoke.TurbulenceStrength = 2.5f;
-		smoke.SizeStart = 0.6f;
-		smoke.SizeEnd = 3.2f;
-		smoke.ColorStart = glm::vec4(0.25f, 0.22f, 0.20f, 0.75f);
-		smoke.ColorEnd = glm::vec4(0.08f, 0.08f, 0.08f, 0.0f);
-
-
-		m_Asset.Emitters.clear();
-		m_Asset.Emitters.push_back(shockwave);
-		m_Asset.Emitters.push_back(fireball);
-		m_Asset.Emitters.push_back(debris);
-		m_Asset.Emitters.push_back(smoke);
-
-
-		m_LoadedPath = "vfx/presets/MeteorImpactExplosion3D.wvfx";
-		m_Dirty = false;
-		m_SelectedEmitterIndex = 0;
-		m_StatusFeedback = "已加载案例: 3D 流星陨石撞击高爆 (MeteorImpactExplosion3D)";
-		EnsurePerEmitterState();
-		SyncSimulationFromAsset();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetBlizzardFrostNova3D()
-	{
-		m_Asset = ParticleAsset();
-		m_Asset.Name = "BlizzardFrostNova3D";
-		m_Asset.Seed = 10086;
-		m_Asset.Looping = true;
-		m_Asset.WarmupTime = 0.5f;
-		m_TimelineDuration = 5.0f;
-
-
-		// 1. 向外爆发冰晶冲击波 (Frost Shockwave Nova)
-		ParticleEmitterLayer shockwave;
-		shockwave.Name = "FrostShockwaveNova";
-		shockwave.Enabled = true;
-		shockwave.MaxParticles = 250;
-		shockwave.Lifetime = 1.5f;
-		shockwave.EmissionRate = 0.0f;
-		shockwave.Bursts.push_back({ 0.0f, 60 });
-		shockwave.EmitterType = ParticleEmitterType::Circle;
-		shockwave.FacingMode = ParticleRenderMode::HorizontalQuad;
-		shockwave.Material.BlendMode = ParticleBlendMode::Additive;
-		shockwave.Material.EmissiveBoost = 3.5f;
-		shockwave.Speed = 7.0f;
-		shockwave.SpeedVariance = 0.8f;
-		shockwave.Gravity = glm::vec3(0.0f);
-		shockwave.LinearDrag = 1.0f;
-		shockwave.SizeStart = 0.4f;
-		shockwave.SizeEnd = 4.2f;
-		shockwave.ColorStart = glm::vec4(0.7f, 0.95f, 1.0f, 1.0f);
-		shockwave.ColorEnd = glm::vec4(0.1f, 0.4f, 0.9f, 0.0f);
-
-
-		// 2. 低温地表旋转冷气雾 (Ground Swirling Cold Mist)
-		ParticleEmitterLayer mist;
-		mist.Name = "GroundSwirlingMist";
-		mist.Enabled = true;
-		mist.MaxParticles = 400;
-		mist.Lifetime = 2.8f;
-		mist.EmissionRate = 60.0f;
-		mist.EmitterType = ParticleEmitterType::Cone;
-		mist.FacingMode = ParticleRenderMode::Billboard;
-		mist.Material.BlendMode = ParticleBlendMode::AlphaBlend;
-		mist.Material.SoftParticlesEnabled = true;
-		mist.Material.EmissiveBoost = 1.2f;
-		mist.Speed = 2.2f;
-		mist.SpeedVariance = 0.5f;
-		mist.Gravity = glm::vec3(0.0f, 0.3f, 0.0f);
-		mist.LinearDrag = 0.6f;
-		mist.VortexStrength = 8.5f;
-		mist.VortexAxis = glm::vec3(0.0f, 1.0f, 0.0f);
-		mist.TurbulenceStrength = 2.0f;
-		mist.SizeStart = 0.5f;
-		mist.SizeEnd = 2.2f;
-		mist.ColorStart = glm::vec4(0.85f, 0.92f, 1.0f, 0.55f);
-		mist.ColorEnd = glm::vec4(0.5f, 0.7f, 0.9f, 0.0f);
-
-
-		// 3. 悬浮漫游冰霜雪花 (Floating Frost Flakes)
-		ParticleEmitterLayer flakes;
-		flakes.Name = "FloatingFrostFlakes";
-		flakes.Enabled = true;
-		flakes.MaxParticles = 500;
-		flakes.Lifetime = 3.5f;
-		flakes.EmissionRate = 85.0f;
-		flakes.EmitterType = ParticleEmitterType::Box;
-		flakes.FacingMode = ParticleRenderMode::Billboard;
-		flakes.Material.BlendMode = ParticleBlendMode::Additive;
-		flakes.Material.EmissiveBoost = 3.0f;
-		flakes.Speed = 1.8f;
-		flakes.SpeedVariance = 0.8f;
-		flakes.Gravity = glm::vec3(0.0f, -1.2f, 0.0f);
-		flakes.LinearDrag = 0.9f;
-		flakes.TurbulenceStrength = 1.8f;
-		flakes.TurbulenceFrequency = 1.0f;
-		flakes.SizeStart = 0.12f;
-		flakes.SizeEnd = 0.06f;
-		flakes.ColorStart = glm::vec4(0.95f, 0.98f, 1.0f, 1.0f);
-		flakes.ColorEnd = glm::vec4(0.4f, 0.7f, 1.0f, 0.0f);
-
-
-		m_Asset.Emitters.clear();
-		m_Asset.Emitters.push_back(shockwave);
-		m_Asset.Emitters.push_back(mist);
-		m_Asset.Emitters.push_back(flakes);
-
-
-		m_LoadedPath = "vfx/presets/BlizzardFrostNova3D.wvfx";
-		m_Dirty = false;
-		m_SelectedEmitterIndex = 0;
-		m_StatusFeedback = "已加载案例: 3D 暴风雪冰霜新星 (BlizzardFrostNova3D)";
-		EnsurePerEmitterState();
-		SyncSimulationFromAsset();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetCampfire()
-	{
-		m_Asset = ParticleAsset();
-		m_Asset.Name = "Campfire_Compound";
-		m_Asset.Seed = 1337;
-		m_Asset.Looping = true;
-		m_Asset.WarmupTime = 0.5f;
-		m_TimelineDuration = 5.0f;
-
-
-		ParticleEmitterLayer flame;
-		flame.Name = "CoreFlame";
-		flame.Enabled = true;
-		flame.MaxParticles = 450;
-		flame.Lifetime = 1.4f;
-		flame.EmissionRate = 80.0f;
-		flame.EmitterType = ParticleEmitterType::Cone;
-		flame.FacingMode = ParticleRenderMode::Billboard;
-		flame.Material.BlendMode = ParticleBlendMode::Additive;
-		flame.Material.EmissiveBoost = 2.8f;
-		flame.Speed = 3.2f;
-		flame.SpeedVariance = 0.6f;
-		flame.Gravity = glm::vec3(0.0f, 2.5f, 0.0f);
-		flame.LinearDrag = 0.4f;
-		flame.TurbulenceStrength = 1.2f;
-		flame.SizeStart = 0.65f;
-		flame.SizeEnd = 0.12f;
-		flame.ColorStart = glm::vec4(1.0f, 0.7f, 0.2f, 1.0f);
-		flame.ColorEnd = glm::vec4(0.9f, 0.1f, 0.0f, 0.0f);
-
-
-		ParticleEmitterLayer smoke;
-		smoke.Name = "RisingSmoke";
-		smoke.Enabled = true;
-		smoke.MaxParticles = 220;
-		smoke.Lifetime = 2.5f;
-		smoke.EmissionRate = 28.0f;
-		smoke.EmitterType = ParticleEmitterType::Cone;
-		smoke.FacingMode = ParticleRenderMode::Billboard;
-		smoke.Material.BlendMode = ParticleBlendMode::AlphaBlend;
-		smoke.Material.SoftParticlesEnabled = true;
-		smoke.Material.EmissiveBoost = 1.0f;
-		smoke.Speed = 1.8f;
-		smoke.SpeedVariance = 0.4f;
-		smoke.Gravity = glm::vec3(0.0f, 1.4f, 0.0f);
-		smoke.LinearDrag = 0.8f;
-		smoke.TurbulenceStrength = 0.9f;
-		smoke.SizeStart = 0.3f;
-		smoke.SizeEnd = 1.5f;
-		smoke.ColorStart = glm::vec4(0.35f, 0.35f, 0.35f, 0.6f);
-		smoke.ColorEnd = glm::vec4(0.15f, 0.15f, 0.15f, 0.0f);
-
-
-		ParticleEmitterLayer embers;
-		embers.Name = "FloatingEmbers";
-		embers.Enabled = true;
-		embers.MaxParticles = 260;
-		embers.Lifetime = 2.0f;
-		embers.EmissionRate = 35.0f;
-		embers.EmitterType = ParticleEmitterType::Sphere;
-		embers.FacingMode = ParticleRenderMode::StretchedVelocity;
-		embers.Material.BlendMode = ParticleBlendMode::Additive;
-		embers.Material.EmissiveBoost = 3.8f;
-		embers.Speed = 4.5f;
-		embers.SpeedVariance = 1.2f;
-		embers.Gravity = glm::vec3(0.0f, 0.8f, 0.0f);
-		embers.LinearDrag = 0.15f;
-		embers.VortexStrength = 1.8f;
-		embers.TurbulenceStrength = 1.6f;
-		embers.SizeStart = 0.12f;
-		embers.SizeEnd = 0.02f;
-		embers.ColorStart = glm::vec4(1.0f, 0.9f, 0.4f, 1.0f);
-		embers.ColorEnd = glm::vec4(1.0f, 0.2f, 0.0f, 0.0f);
-
-
-		m_Asset.Emitters.push_back(flame);
-		m_Asset.Emitters.push_back(smoke);
-		m_Asset.Emitters.push_back(embers);
-
-
-		m_LoadedPath = "vfx/campfire.wvfx";
-		m_Dirty = false;
-		m_SelectedEmitterIndex = 0;
-		m_StatusFeedback = "已加载预设: 营火 (Campfire)";
-		EnsurePerEmitterState();
-		SyncSimulationFromAsset();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetSparksBurst()
-	{
-		m_Asset = ParticleAsset();
-		m_Asset.Name = "Sparks_Burst";
-		m_Asset.Seed = 42;
-		m_Asset.Looping = true;
-		m_Asset.WarmupTime = 0.0f;
-		m_TimelineDuration = 3.0f;
-
-
-		ParticleEmitterLayer sparks;
-		sparks.Name = "ImpactSparks";
-		sparks.Enabled = true;
-		sparks.MaxParticles = 300;
-		sparks.Lifetime = 1.2f;
-		sparks.EmissionRate = 60.0f;
-		sparks.EmitterType = ParticleEmitterType::Point;
-		sparks.FacingMode = ParticleRenderMode::StretchedVelocity;
-		sparks.Material.BlendMode = ParticleBlendMode::Additive;
-		sparks.Material.EmissiveBoost = 4.0f;
-		sparks.Speed = 8.0f;
-		sparks.SpeedVariance = 2.5f;
-		sparks.Gravity = glm::vec3(0.0f, -9.8f, 0.0f);
-		sparks.LinearDrag = 0.2f;
-		sparks.Collision.Mode = ParticleCollisionMode::Plane;
-		sparks.Collision.Restitution = 0.7f;
-		sparks.Collision.Friction = 0.1f;
-		sparks.SizeStart = 0.15f;
-		sparks.SizeEnd = 0.02f;
-		sparks.ColorStart = glm::vec4(1.0f, 0.8f, 0.2f, 1.0f);
-		sparks.ColorEnd = glm::vec4(1.0f, 0.1f, 0.0f, 0.0f);
-
-
-		m_Asset.Emitters.push_back(sparks);
-		m_LoadedPath = "vfx/sparks.wvfx";
-		m_Dirty = false;
-		m_SelectedEmitterIndex = 0;
-		m_StatusFeedback = "已加载预设: 火星飞溅 (SparksBurst)";
-		EnsurePerEmitterState();
-		SyncSimulationFromAsset();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetSmokePlume()
-	{
-		m_Asset = ParticleAsset();
-		m_Asset.Name = "Smoke_Plume";
-		m_Asset.Seed = 999;
-		m_Asset.Looping = true;
-		m_Asset.WarmupTime = 0.5f;
-		m_TimelineDuration = 6.0f;
-
-
-		ParticleEmitterLayer smoke;
-		smoke.Name = "DenseSmoke";
-		smoke.Enabled = true;
-		smoke.MaxParticles = 400;
-		smoke.Lifetime = 3.5f;
-		smoke.EmissionRate = 45.0f;
-		smoke.EmitterType = ParticleEmitterType::Cone;
-		smoke.FacingMode = ParticleRenderMode::Billboard;
-		smoke.Material.BlendMode = ParticleBlendMode::AlphaBlend;
-		smoke.Material.SoftParticlesEnabled = true;
-		smoke.Material.EmissiveBoost = 1.0f;
-		smoke.Speed = 2.5f;
-		smoke.SpeedVariance = 0.5f;
-		smoke.Gravity = glm::vec3(0.0f, 1.8f, 0.0f);
-		smoke.LinearDrag = 0.6f;
-		smoke.VortexStrength = 2.0f;
-		smoke.TurbulenceStrength = 1.5f;
-		smoke.SizeStart = 0.4f;
-		smoke.SizeEnd = 2.8f;
-		smoke.ColorStart = glm::vec4(0.3f, 0.3f, 0.3f, 0.7f);
-		smoke.ColorEnd = glm::vec4(0.1f, 0.1f, 0.1f, 0.0f);
-
-
-		m_Asset.Emitters.push_back(smoke);
-		m_LoadedPath = "vfx/smoke.wvfx";
-		m_Dirty = false;
-		m_SelectedEmitterIndex = 0;
-		m_StatusFeedback = "已加载预设: 浓烟羽流 (SmokePlume)";
-		EnsurePerEmitterState();
-		SyncSimulationFromAsset();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetBlizzard()
-	{
-		LoadPresetBlizzardFrostNova3D();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetMagicPortal()
-	{
-		LoadPresetOrbitalMagicShield3D();
-	}
-
-
-	void ParticleEditorPanel::LoadPresetEnergyBeam()
-	{
-		LoadPresetLightningPlasmaBeam3D();
-	}
-
-
-	void ParticleEditorPanel::LoadPreset(const std::string& name)
-	{
-		PushUndoSnapshot();
-		if (name == "FlameTornado3D") LoadPresetFlameTornado3D();
-		else if (name == "LightningPlasmaBeam3D") LoadPresetLightningPlasmaBeam3D();
-		else if (name == "OrbitalMagicShield3D") LoadPresetOrbitalMagicShield3D();
-		else if (name == "MeteorImpactExplosion3D") LoadPresetMeteorImpactExplosion3D();
-		else if (name == "BlizzardFrostNova3D") LoadPresetBlizzardFrostNova3D();
-		else if (name == "Campfire") LoadPresetCampfire();
-		else if (name == "SparksBurst") LoadPresetSparksBurst();
-		else if (name == "SmokePlume") LoadPresetSmokePlume();
-		else if (name == "Blizzard") LoadPresetBlizzard();
-		else if (name == "MagicPortal") LoadPresetMagicPortal();
-		else if (name == "EnergyBeam") LoadPresetEnergyBeam();
-		else LoadPresetFlameTornado3D();
-	}
-
-
-	// =========================================================================
-	// 发射器大纲管理核心操作 (Outliner Operations)
-	// =========================================================================
-
+	
 
 	void ParticleEditorPanel::AddEmitterFromTemplate(const std::string& templateType)
 	{
@@ -1735,84 +1002,15 @@ void ParticleEditorPanel::NewAsset()
 		// =========================================================================
 		// 2. 主工作区模式分流 (Visual vs Code)
 		// =========================================================================
-		if (m_ViewMode == ParticleEditorViewMode::Code)
+		if (m_ViewMode == ParticleEditorViewMode::SlangShader)
 		{
-			// ======== 代码编辑模式 (YAML Code Editor) ========
-			const Wui::WuiRect codeToolbar { rect.X + padX, curY, contentW, 32.0f };
-			Wui::BarSurface(ctx, codeToolbar, theme.PanelHeader, theme.Border);
-
-
-			float cx = codeToolbar.X + 8.0f;
-			const Wui::WuiRect applyBtn { cx, codeToolbar.Y + 4.0f, 130.0f, 24.0f };
-			Wui::Tooltip(ctx, applyBtn, "编译并应用当前 YAML 代码到视口与特效系统 (Ctrl+Enter)");
-			if (Wui::Button(ctx, Wui::HashId("vfx.code.apply"), applyBtn, "[运行] 应用代码 (Ctrl+Enter)", theme))
-			{
-				ApplyCodeToAsset();
-			}
-			cx += 136.0f;
-
-
-			const Wui::WuiRect syncBtn { cx, codeToolbar.Y + 4.0f, 100.0f, 24.0f };
-			Wui::Tooltip(ctx, syncBtn, "从当前视口与模块参数重新生成 YAML 代码");
-			if (Wui::Button(ctx, Wui::HashId("vfx.code.sync"), syncBtn, "⟳ 从视口同步", theme))
-			{
-				SyncCodeFromAsset();
-			}
-			cx += 106.0f;
-
-
-			const Wui::WuiRect snipBurst { cx, codeToolbar.Y + 4.0f, 54.0f, 24.0f };
-			Wui::Tooltip(ctx, snipBurst, "插入爆发 Bursts 片段代码");
-			if (Wui::Button(ctx, Wui::HashId("vfx.snip.burst"), snipBurst, "+爆发", theme))
-			{
-				m_CodeBuffer += "\n    Bursts:\n      - Time: 0.0\n        Count: 30\n";
-				ApplyCodeToAsset();
-			}
-			cx += 58.0f;
-
-
-			const Wui::WuiRect snipVortex { cx, codeToolbar.Y + 4.0f, 54.0f, 24.0f };
-			Wui::Tooltip(ctx, snipVortex, "插入涡流 Vortex 片段代码");
-			if (Wui::Button(ctx, Wui::HashId("vfx.snip.vortex"), snipVortex, "+涡流", theme))
-			{
-				m_CodeBuffer += "\n    VortexStrength: 3.5\n    VortexAxis: [0.0, 1.0, 0.0]\n";
-				ApplyCodeToAsset();
-			}
-
-
-			const Wui::WuiRect codeBox { rect.X + padX, curY + 36.0f, contentW, availH - 36.0f };
-			Wui::BarSurface(ctx, codeBox, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f }, theme.Border);
-
-
-			std::istringstream stream(m_CodeBuffer);
-			std::string line;
-			int lineIdx = 0;
-			float lineY = codeBox.Y + 8.0f;
-			const float lineHeight = 18.0f;
-
-
-			while (std::getline(stream, line) && lineY < codeBox.Y + codeBox.H - 16.0f)
-			{
-				lineIdx++;
-				if (lineY >= codeBox.Y + 4.0f)
-				{
-					Wui::Label(ctx, { codeBox.X + 8.0f, lineY }, std::to_string(lineIdx), Wui::WuiColor { 0.35f, 0.40f, 0.48f, 0.8f }, 9.5f);
-					Wui::WuiColor textCol = theme.Text;
-					if (line.find(":") != std::string::npos && line.find("-") == std::string::npos)
-					{
-						if (line.find("Emitters") != std::string::npos || line.find("Name") != std::string::npos)
-							textCol = theme.Accent;
-						else
-							textCol = Wui::WuiColor { 0.85f, 0.85f, 0.9f, 1.0f };
-					}
-					else if (line.find("-") != std::string::npos)
-					{
-						textCol = Wui::WuiColor { 0.95f, 0.8f, 0.3f, 1.0f };
-					}
-					Wui::Label(ctx, { codeBox.X + 36.0f, lineY }, line, textCol, 10.5f);
-				}
-				lineY += lineHeight;
-			}
+			const Wui::WuiRect workRect { rect.X + padX, curY, contentW, availH };
+			RenderSlangShaderView(ctx, workRect, theme, host);
+		}
+		else if (m_ViewMode == ParticleEditorViewMode::DataManifest)
+		{
+			const Wui::WuiRect workRect { rect.X + padX, curY, contentW, availH };
+			RenderDataView(ctx, workRect, theme, host);
 		}
 		else
 		{
@@ -1896,22 +1094,18 @@ void ParticleEditorPanel::NewAsset()
 		(void)host;
 		Wui::BarSurface(ctx, barRect, theme.PanelHeader, theme.Border);
 
-
 		Wui::Label(ctx, { barRect.X + 10.0f, barRect.Y + 9.0f }, "视觉特效系统 (WorldVFX Studio 2.0)", theme.Accent, 12.5f);
-
 
 		float tbX = barRect.X + 225.0f;
 
-
 		const Wui::WuiRect newBtn { tbX, barRect.Y + 6.0f, 44.0f, 24.0f };
-		Wui::Tooltip(ctx, newBtn, "新建复合特效工程 (New VFX Asset)");
+		Wui::Tooltip(ctx, newBtn, "新建纯净默认特效资产 (New VFX Asset)");
 		if (Wui::Button(ctx, Wui::HashId("vfx.bar.new"), newBtn, "新建", theme))
 		{
 			PushUndoSnapshot();
 			NewAsset();
 		}
 		tbX += 48.0f;
-
 
 		const Wui::WuiRect saveBtn { tbX, barRect.Y + 6.0f, 44.0f, 24.0f };
 		Wui::Tooltip(ctx, saveBtn, "保存当前特效到 .wvfx 资产文件 (Ctrl+S)");
@@ -1920,7 +1114,6 @@ void ParticleEditorPanel::NewAsset()
 			SaveAsset();
 		}
 		tbX += 50.0f;
-
 
 		// 撤销 / 重做按钮组
 		const bool canUndo = CanUndo();
@@ -1932,7 +1125,6 @@ void ParticleEditorPanel::NewAsset()
 		}
 		tbX += 52.0f;
 
-
 		const bool canRedo = CanRedo();
 		const Wui::WuiRect redoBtn { tbX, barRect.Y + 6.0f, 48.0f, 24.0f };
 		Wui::Tooltip(ctx, redoBtn, canRedo ? "重做下一步操作 (Ctrl+Y / Ctrl+Shift+Z)" : "重做栈为空");
@@ -1940,82 +1132,57 @@ void ParticleEditorPanel::NewAsset()
 		{
 			Redo();
 		}
-		tbX += 54.0f;
+		tbX += 56.0f;
 
-
-		const float modeBtnW = 68.0f;
-		const Wui::WuiRect visualModeBtn { tbX, barRect.Y + 6.0f, modeBtnW, 24.0f };
-		Wui::Tooltip(ctx, visualModeBtn, "切换到参数可视化模块工作区");
+		// -------------------------------------------------------------------------
+		// 统一纯 Slang 模块化自由切换选项卡 (Visual Modules Stack vs Full Slang Shader)
+		// -------------------------------------------------------------------------
+		const float visualBtnW = 120.0f;
+		const Wui::WuiRect visualModeBtn { tbX, barRect.Y + 6.0f, visualBtnW, 24.0f };
+		Wui::Tooltip(ctx, visualModeBtn, "切换到 3D 自由视口与 Niagara 级模块化参数堆栈 (Visual Modules Stack)");
 		if (Wui::Button(ctx, Wui::HashId("vfx.mode.visual"), visualModeBtn,
-			m_ViewMode == ParticleEditorViewMode::Visual ? "[检视]" : "  检视", theme))
+			m_ViewMode == ParticleEditorViewMode::Visual ? "[视口与模块堆栈]" : "  视口与模块堆栈", theme))
 		{
 			m_ViewMode = ParticleEditorViewMode::Visual;
 		}
-		tbX += modeBtnW + 4.0f;
+		tbX += visualBtnW + 4.0f;
 
-
-		const Wui::WuiRect codeModeBtn { tbX, barRect.Y + 6.0f, modeBtnW, 24.0f };
-		Wui::Tooltip(ctx, codeModeBtn, "切换到声明式代码/YAML 编辑视图，热重载实时生效");
-		if (Wui::Button(ctx, Wui::HashId("vfx.mode.code"), codeModeBtn,
-			m_ViewMode == ParticleEditorViewMode::Code ? "[代码]" : "  代码", theme))
+		const float shaderBtnW = 132.0f;
+		const Wui::WuiRect shaderModeBtn { tbX, barRect.Y + 6.0f, shaderBtnW, 24.0f };
+		Wui::Tooltip(ctx, shaderModeBtn, "切换到统一 Slang 计算着色器源码视图，支持全屏编码与即时热重载 (Ctrl+Enter)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.mode.shader"), shaderModeBtn,
+			m_ViewMode == ParticleEditorViewMode::SlangShader ? "[统一 Slang 着色器]" : "  统一 Slang 着色器", theme))
 		{
-			m_ViewMode = ParticleEditorViewMode::Code;
-			SyncCodeFromAsset();
-		}
-		tbX += modeBtnW + 10.0f;
-
-
-		// 5 大高水准 3D 特效案例集一键切换 (Industrial 3D Showcase Presets)
-		Wui::Label(ctx, { tbX, barRect.Y + 10.0f }, "3D案例:", theme.TextMuted, 10.5f);
-		tbX += 45.0f;
-
-
-		const struct PresetEntry {
-			const char* Id;
-			const char* Label;
-			const char* Name;
-			const char* Tip;
-		} presets[] = {
-			{ "vfx.p.tornado", "龙卷火", "FlameTornado3D", "3D 火焰龙卷风: 圆锥内焰 + 强 3D 涡流飞旋火星 + 旋度噪声上升浓烟" },
-			{ "vfx.p.plasma", "等离子束", "LightningPlasmaBeam3D", "3D 等离子闪电束: 核心高能光束 + 空间螺旋放电电弧 + 撞击点剧烈反弹火花" },
-			{ "vfx.p.shield", "魔法护盾", "OrbitalMagicShield3D", "3D 环形魔法护盾: 空间符文旋转球环 + 轨道自发光动态点光源 + 脉冲能量内核" },
-			{ "vfx.p.meteor", "流星撞击", "MeteorImpactExplosion3D", "3D 流星陨石高爆: 瞬态扩散冲击波 + 撞地反弹重力碎石 + 爆心火球 + 升腾黑烟" },
-			{ "vfx.p.blizzard", "冰霜新星", "BlizzardFrostNova3D", "3D 暴风雪冰霜新星: 爆发冰晶冲击波 + 地表旋转冷气雾 + 悬浮漫游冰霜雪花" }
-		};
-
-
-		for (const auto& p : presets)
-		{
-			const float pBtnW = 72.0f;
-			if (tbX + pBtnW + 10.0f < barRect.X + barRect.W - 140.0f)
+			m_ViewMode = ParticleEditorViewMode::SlangShader;
+			if (m_SlangShaderBuffer.empty())
 			{
-				const Wui::WuiRect pRect { tbX, barRect.Y + 6.0f, pBtnW, 24.0f };
-				Wui::Tooltip(ctx, pRect, p.Tip);
-				if (Wui::Button(ctx, Wui::HashId(p.Id), pRect, p.Label, theme))
-				{
-					LoadPreset(p.Name);
-				}
-				tbX += pBtnW + 3.0f;
+				SyncSlangShaderFromModules();
 			}
 		}
+		tbX += shaderBtnW + 4.0f;
 
+		const float dataBtnW = 112.0f;
+		const Wui::WuiRect dataModeBtn { tbX, barRect.Y + 6.0f, dataBtnW, 24.0f };
+		Wui::Tooltip(ctx, dataModeBtn, "切换到底层资产声明式清单 (YAML Data Manifest)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.mode.data"), dataModeBtn,
+			m_ViewMode == ParticleEditorViewMode::DataManifest ? "[资产数据(YAML)]" : "  资产数据(YAML)", theme))
+		{
+			m_ViewMode = ParticleEditorViewMode::DataManifest;
+			SyncCodeFromAsset();
+		}
+		tbX += dataBtnW + 12.0f;
 
+		// 资产名称与状态反馈
 		if (!m_StatusFeedback.empty())
 		{
-			Wui::WuiColor fbColor = (m_StatusFeedback.find("成功") != std::string::npos || m_StatusFeedback.find("成功") != std::string::npos)
+			Wui::WuiColor fbColor = (m_StatusFeedback.find("成功") != std::string::npos || m_StatusFeedback.find("已") != std::string::npos)
 				? Wui::WuiColor { 0.3f, 0.85f, 0.4f, 1.0f }
-				: (m_StatusFeedback.find("失败") != std::string::npos || m_StatusFeedback.find("失败") != std::string::npos)
+				: (m_StatusFeedback.find("失败") != std::string::npos || m_StatusFeedback.find("错误") != std::string::npos)
 					? Wui::WuiColor { 0.95f, 0.3f, 0.3f, 1.0f }
 					: theme.TextMuted;
 			Wui::Label(ctx, { tbX + 8.0f, barRect.Y + 10.0f }, m_StatusFeedback, fbColor, 10.5f);
 		}
 	}
-
-
-	// =========================================================================
-	// 左侧发射器大纲管理 (Outliner)
-	// =========================================================================
-
 
 	void ParticleEditorPanel::RenderOutliner(Wui::WuiContext& ctx, const Wui::WuiRect& outlinerRect, const Wui::WuiTheme& theme)
 	{
@@ -3046,37 +2213,9 @@ void ParticleEditorPanel::NewAsset()
 		}
 
 		// =========================================================================
-		// 6. 低饱和度专业 3D 地面参考网格与原点坐标指示
 		// =========================================================================
-		const Wui::WuiColor gridCol { 0.20f, 0.23f, 0.28f, 0.35f };
-		const Wui::WuiColor axisXGridCol { 0.70f, 0.30f, 0.30f, 0.65f };
-		const Wui::WuiColor axisZGridCol { 0.30f, 0.50f, 0.80f, 0.65f };
-
-		for (int line = -5; line <= 5; ++line)
-		{
-			const float coord = static_cast<float>(line) * 1.0f;
-			drawProjectedSegment(glm::vec3(coord, 0.0f, -5.0f), glm::vec3(coord, 0.0f, 5.0f),
-				(line == 0 ? axisZGridCol : gridCol), (line == 0 ? 1.4f : 1.0f));
-
-			drawProjectedSegment(glm::vec3(-5.0f, 0.0f, coord), glm::vec3(5.0f, 0.0f, coord),
-				(line == 0 ? axisXGridCol : gridCol), (line == 0 ? 1.4f : 1.0f));
-		}
-
-		for (int m = 1; m <= 3; ++m)
-		{
-			glm::vec2 smX, smZ;
-			if (projectPoint(glm::vec3(static_cast<float>(m), 0.0f, 0.0f), smX))
-			{
-				if (smX.x >= vpRect.X && smX.x <= vpRect.X + vpRect.W && smX.y >= vpRect.Y && smX.y <= vpRect.Y + vpRect.H)
-					Wui::Label(ctx, { smX.x - 8.0f, smX.y + 4.0f }, std::to_string(m) + "m", Wui::WuiColor { 0.6f, 0.6f, 0.65f, 0.5f }, 9.5f);
-			}
-			if (projectPoint(glm::vec3(0.0f, 0.0f, static_cast<float>(m)), smZ))
-			{
-				if (smZ.x >= vpRect.X && smZ.x <= vpRect.X + vpRect.W && smZ.y >= vpRect.Y && smZ.y <= vpRect.Y + vpRect.H)
-					Wui::Label(ctx, { smZ.x + 4.0f, smZ.y - 6.0f }, std::to_string(m) + "m", Wui::WuiColor { 0.6f, 0.6f, 0.65f, 0.5f }, 9.5f);
-			}
-		}
-
+		// 6. 3D 原点坐标指示 (地面参考网格已由 GPU SceneRenderer 原生渲染)
+		// =========================================================================
 		const Wui::WuiColor axisXCol { 0.95f, 0.22f, 0.22f, 0.95f };
 		const Wui::WuiColor axisYCol { 0.22f, 0.90f, 0.32f, 0.95f };
 		const Wui::WuiColor axisZCol { 0.22f, 0.55f, 0.98f, 0.95f };
@@ -3084,8 +2223,7 @@ void ParticleEditorPanel::NewAsset()
 		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(1.2f, 0.0f, 0.0f), axisXCol, 2.0f);
 		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(0.0f, 1.2f, 0.0f), axisYCol, 2.0f);
 		drawProjectedSegment(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.2f), axisZCol, 2.0f);
-
-		// =========================================================================
+		
 		// 7. 真实粒子群推演与深度排序绘制 (消灭虚影与黑边)
 		// =========================================================================
 		struct ParticleDrawItem
@@ -3132,7 +2270,7 @@ void ParticleEditorPanel::NewAsset()
 			m_PreviewRenderer->OnResize(targetW, targetH);
 
 			SceneRendererOptions options;
-			options.ShowGrid = false;
+			options.ShowGrid = true;
 			Camera previewCam(proj);
 			m_PreviewRenderer->BeginScene(m_PreviewScene.get(), options);
 			m_PreviewRenderer->SubmitScene(previewCam, glm::inverse(view));
@@ -3940,558 +3078,554 @@ void ParticleEditorPanel::NewAsset()
 
 
 		// 封装 DragFloat 行与复位指示器
-		auto renderDragFloatRow = [&](const char* fieldId, const char* label, const char* unit,
-			float& val, float defaultVal, float speed, float minVal, float maxVal, const char* tip, float& y)
-		{
-			const float rowH = 22.0f;
-			const float labelW = 96.0f;
-			const float resetW = 20.0f;
-			const float ctrlW = inspectorRect.W - 24.0f - labelW - resetW - 8.0f;
-			const float rx = inspectorRect.X + 12.0f;
-
-
-			std::string labelWithUnit = std::string(label) + (unit[0] ? (" (" + std::string(unit) + ")") : "");
-			Wui::Label(ctx, { rx, y + 4.0f }, labelWithUnit, theme.Text, 10.5f);
-			Wui::Tooltip(ctx, { rx, y, labelW, rowH }, tip);
-
-
-			if (!isLocked)
-			{
-				float oldVal = val;
-				Wui::DragFloat(ctx, Wui::HashId(fieldId), { rx + labelW + 4.0f, y, ctrlW, rowH }, val, speed, minVal, maxVal, theme);
-				if (std::abs(val - oldVal) > 0.0001f)
-				{
-					m_Dirty = true;
-					SyncSimulationFromAsset();
-				}
-			}
-			else
-			{
-				std::ostringstream ss;
-				ss << std::fixed << std::setprecision(2) << val;
-				Wui::Label(ctx, { rx + labelW + 4.0f, y + 4.0f }, ss.str(), theme.TextDisabled, 10.5f);
-			}
-
-
-			bool modified = std::abs(val - defaultVal) > 0.001f;
-			const Wui::WuiRect resetRect { rx + labelW + 4.0f + ctrlW + 4.0f, y, resetW, rowH };
-			if (!isLocked && Wui::ResetDefaultButton(ctx, Wui::HashId((std::string(fieldId) + ".rst").c_str()), resetRect, modified, theme, "", "恢复默认值 (" + std::to_string(defaultVal) + ")"))
-			{
-				PushUndoSnapshot();
-				val = defaultVal;
-				m_Dirty = true;
-				SyncSimulationFromAsset();
-			}
-			y += rowH + 4.0f;
-		};
-
+		
+		em.EnsureDefaultModules();
 
 		// -------------------------------------------------------------
-		// 模块 1: 生成与生命周期 (Spawn & Burst)
+		// 1. 发射器基础配置 (Base Emitter Properties)
 		// -------------------------------------------------------------
-		const float c1H = m_CardSpawningExpanded ? (180.0f + em.Bursts.size() * 26.0f) : 28.0f;
-		const Wui::WuiRect c1 { inspectorRect.X + 4.0f, cy, inspectorRect.W - 8.0f, c1H };
-		Wui::BarSurface(ctx, c1, theme.PanelBg, theme.Border);
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 4.0f }, "发射器基础属性 (Emitter Base)", theme.Accent, 11.0f);
+		cy += 24.0f;
 
-
-		const Wui::WuiRect c1Header { c1.X, c1.Y, c1.W, 26.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.card1.fold"), c1Header,
-			m_CardSpawningExpanded ? "[v] [1] 生成与脉冲 (Spawn & Burst)" : "[>] [1] 生成与脉冲 (Spawn & Burst)", theme))
+		// 最大粒子数
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "最大粒子数:", theme.TextMuted, 10.0f);
+		float maxP = static_cast<float>(em.MaxParticles);
+		const Wui::WuiRect mpRect { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
+		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.maxp"), mpRect, maxP, 10.0f, 10.0f, 100000.0f, theme))
 		{
-			m_CardSpawningExpanded = !m_CardSpawningExpanded;
-		}
-
-
-		if (m_CardSpawningExpanded)
-		{
-			float rowY = c1.Y + 28.0f;
-			renderDragFloatRow("vfx.em.rate", "发射速率", "p/s", em.EmissionRate, 50.0f, 1.0f, 0.0f, 5000.0f, "每秒发射新粒子数量", rowY);
-
-
-			float maxP = static_cast<float>(em.MaxParticles);
-			renderDragFloatRow("vfx.em.max", "粒子容量", "p", maxP, 500.0f, 10.0f, 10.0f, 50000.0f, "当前发射器最大粒子承载池容量", rowY);
 			em.MaxParticles = static_cast<uint32_t>(maxP);
+			m_Dirty = true;
+			SyncSimulationFromAsset();
+		}
+		cy += 24.0f;
 
+		// 生命周期
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "基准寿命 (秒):", theme.TextMuted, 10.0f);
+		const Wui::WuiRect lifeRect { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
+		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.life"), lifeRect, em.Lifetime, 0.05f, 0.05f, 60.0f, theme))
+		{
+			m_Dirty = true;
+			SyncSimulationFromAsset();
+		}
+		cy += 24.0f;
 
-			renderDragFloatRow("vfx.em.life", "基础寿命", "s", em.Lifetime, 2.0f, 0.05f, 0.05f, 60.0f, "单颗粒子存活基准时长", rowY);
-			renderDragFloatRow("vfx.em.lifevar", "寿命扰动", "±s", ext.LifetimeVariance, 0.2f, 0.05f, 0.0f, 10.0f, "粒子随机寿命浮动方差", rowY);
+		// 发射速率
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "发射速率 (/s):", theme.TextMuted, 10.0f);
+		const Wui::WuiRect rateRect { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
+		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.rate"), rateRect, em.EmissionRate, 1.0f, 0.0f, 20000.0f, theme))
+		{
+			m_Dirty = true;
+			SyncSimulationFromAsset();
+		}
+		cy += 24.0f;
 
+		// 混合模式
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "混合模式:", theme.TextMuted, 10.0f);
+		const Wui::WuiRect blendRect { inspectorRect.X + 110.0f, cy, 100.0f, 20.0f };
+		const char* blendName = (em.Material.BlendMode == ParticleBlendMode::Additive) ? "加法 (Additive)" : "半透 (AlphaBlend)";
+		if (Wui::Button(ctx, Wui::HashId("vfx.em.blend"), blendRect, blendName, theme))
+		{
+			PushUndoSnapshot();
+			em.Material.BlendMode = (em.Material.BlendMode == ParticleBlendMode::Additive) ? ParticleBlendMode::AlphaBlend : ParticleBlendMode::Additive;
+			m_Dirty = true;
+			SyncSimulationFromAsset();
+		}
+		cy += 30.0f;
 
-			// 多段 Burst 脉冲列表管理 (Multi-Burst Table)
-			Wui::Label(ctx, { c1.X + 12.0f, rowY + 3.0f }, "脉冲爆发列表 (Bursts):", theme.Accent, 10.5f);
-			const Wui::WuiRect addBurstBtn { c1.X + c1.W - 84.0f, rowY, 74.0f, 20.0f };
-			Wui::Tooltip(ctx, addBurstBtn, "向当前发射器添加一个瞬间脉冲爆发点");
-			if (Wui::Button(ctx, Wui::HashId("vfx.burst.add"), addBurstBtn, "+添加脉冲", theme))
-			{
-				PushUndoSnapshot();
-				em.Bursts.push_back({ 0.0f, 30 });
-				m_Dirty = true;
-				SyncSimulationFromAsset();
-			}
-			rowY += 24.0f;
+		// -------------------------------------------------------------
+		// 2. Niagara 级模块堆栈 (Modules Stack - All Native Slang Code)
+		// -------------------------------------------------------------
+		const Wui::WuiRect stackHeaderRect { inspectorRect.X + 8.0f, cy, inspectorRect.W - 16.0f, 28.0f };
+		Wui::BarSurface(ctx, stackHeaderRect, theme.PanelHeader, theme.Border);
+		Wui::Label(ctx, { stackHeaderRect.X + 8.0f, stackHeaderRect.Y + 7.0f }, "模块堆栈 (Modules Stack - Slang 代码)", theme.Accent, 11.5f);
 
+		// 右侧添加模块操作按钮
+		float btnX = stackHeaderRect.X + stackHeaderRect.W - 170.0f;
+		const Wui::WuiRect addPresetBtn { btnX, stackHeaderRect.Y + 4.0f, 80.0f, 20.0f };
+		Wui::Tooltip(ctx, addPresetBtn, "添加预设标准 Slang 模块 (重力/阻力/旋度噪声/引力黑洞等)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.stk.add_preset"), addPresetBtn, "+ 添加模块", theme))
+		{
+			m_AddModuleMenuOpen = !m_AddModuleMenuOpen;
+		}
+		btnX += 84.0f;
 
-			for (size_t b = 0; b < em.Bursts.size(); ++b)
-			{
-				auto& burst = em.Bursts[b];
-				const Wui::WuiRect bRow { c1.X + 10.0f, rowY, c1.W - 20.0f, 22.0f };
-				std::string bTitle = "#" + std::to_string(b + 1) + ":";
-				Wui::Label(ctx, { bRow.X, bRow.Y + 3.0f }, bTitle, theme.TextMuted, 9.5f);
+		const Wui::WuiRect addCustomBtn { btnX, stackHeaderRect.Y + 4.0f, 82.0f, 20.0f };
+		Wui::Tooltip(ctx, addCustomBtn, "新建一个完全由用户手写 Slang 源码的动力学计算代码块");
+		if (Wui::Button(ctx, Wui::HashId("vfx.stk.add_custom"), addCustomBtn, "+ 自定义代码", theme))
+		{
+			AddModuleToSelectedEmitter(VfxModuleLibrary::CreateCustomSlangModule("自定义动力学块 (Custom Slang)"));
+		}
+		cy += 34.0f;
 
+		// 添加模块弹出菜单
+		if (m_AddModuleMenuOpen)
+		{
+			const Wui::WuiRect menuRect { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, 150.0f };
+			Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.16f, 0.18f, 0.22f, 0.98f }, theme.Accent);
 
-				Wui::DragFloat(ctx, Wui::HashId(("vfx.b.t." + std::to_string(b)).c_str()),
-					{ bRow.X + 24.0f, bRow.Y, 75.0f, 20.0f }, burst.Time, 0.05f, 0.0f, m_TimelineDuration, theme);
-				Wui::Tooltip(ctx, { bRow.X + 24.0f, bRow.Y, 75.0f, 20.0f }, "爆发触发时间 (s)");
-
-
-				float bCount = static_cast<float>(burst.Count);
-				Wui::DragFloat(ctx, Wui::HashId(("vfx.b.c." + std::to_string(b)).c_str()),
-					{ bRow.X + 104.0f, bRow.Y, 65.0f, 20.0f }, bCount, 5.0f, 1.0f, 5000.0f, theme);
-				burst.Count = static_cast<uint32_t>(bCount);
-				Wui::Tooltip(ctx, { bRow.X + 104.0f, bRow.Y, 65.0f, 20.0f }, "爆发粒子数量 (p)");
-
-
-				const Wui::WuiRect delBurstBtn { bRow.X + bRow.W - 32.0f, bRow.Y, 28.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId(("vfx.b.del." + std::to_string(b)).c_str()), delBurstBtn, "X", theme))
+			float my = menuRect.Y + 4.0f;
+			const auto renderMenuItem = [&](const char* id, const char* label, const VfxModule& mod) {
+				const Wui::WuiRect itemRect { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 20.0f };
+				if (Wui::Button(ctx, Wui::HashId(id), itemRect, label, theme))
 				{
-					PushUndoSnapshot();
-					em.Bursts.erase(em.Bursts.begin() + b);
-					m_Dirty = true;
-					SyncSimulationFromAsset();
-					break;
+					AddModuleToSelectedEmitter(mod);
+					m_AddModuleMenuOpen = false;
 				}
-				rowY += 24.0f;
-			}
-		}
-		cy += c1H + 6.0f;
+				my += 22.0f;
+			};
 
+			renderMenuItem("vfx.add.g", "+ 重力场 (Gravity Force)", VfxModuleLibrary::CreateGravityModule());
+			renderMenuItem("vfx.add.d", "+ 空气阻力 (Linear Drag)", VfxModuleLibrary::CreateLinearDragModule());
+			renderMenuItem("vfx.add.c", "+ 3D 旋度流体噪声 (Curl Noise)", VfxModuleLibrary::CreateCurlNoiseModule());
+			renderMenuItem("vfx.add.a", "+ 点引力/黑洞吸引子 (Point Attractor)", VfxModuleLibrary::CreatePointAttractorModule());
+			renderMenuItem("vfx.add.v", "+ 旋转涡流场 (Vortex Field)", VfxModuleLibrary::CreateVortexModule());
+			renderMenuItem("vfx.add.s", "+ 物理欧拉积分与消亡 (Solve Velocity)", VfxModuleLibrary::CreateSolveVelocityModule());
 
-		// -------------------------------------------------------------
-		// 模块 2: 空间形状与位置 (Shape & Location)
-		// -------------------------------------------------------------
-		const float c2H = m_CardShapeExpanded ? 150.0f : 28.0f;
-		const Wui::WuiRect c2 { inspectorRect.X + 4.0f, cy, inspectorRect.W - 8.0f, c2H };
-		Wui::BarSurface(ctx, c2, theme.PanelBg, theme.Border);
-
-
-		const Wui::WuiRect c2Header { c2.X, c2.Y, c2.W, 26.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.card2.fold"), c2Header,
-			m_CardShapeExpanded ? "[v] [2] 空间形状与位置 (Shape & Location)" : "[>] [2] 空间形状与位置 (Shape & Location)", theme))
-		{
-			m_CardShapeExpanded = !m_CardShapeExpanded;
+			cy += menuRect.H + 8.0f;
 		}
 
-
-		if (m_CardShapeExpanded)
+		// 遍历渲染模块卡片
+		const float cardW = inspectorRect.W - 24.0f;
+		for (size_t mIdx = 0; mIdx < em.Modules.size(); ++mIdx)
 		{
-			float rowY = c2.Y + 28.0f;
-			std::string emTypeStr = "Cone (圆锥)";
-			if (em.EmitterType == ParticleEmitterType::Sphere) emTypeStr = "Sphere (球体)";
-			else if (em.EmitterType == ParticleEmitterType::Box) emTypeStr = "Box (盒体)";
-			else if (em.EmitterType == ParticleEmitterType::Circle) emTypeStr = "Circle (圆环)";
-			else if (em.EmitterType == ParticleEmitterType::Point) emTypeStr = "Point (单点)";
+			RenderModuleCard(ctx, em.Modules[mIdx], mIdx, cy, cardW, theme);
+		}
+
+		cy += 20.0f;
+Wui::EndScrollArea(ctx);
+	}
 
 
-			Wui::Label(ctx, { c2.X + 12.0f, rowY + 3.0f }, "空间形状: " + emTypeStr, theme.Text, 10.5f);
-			if (!isLocked)
+
+	// =========================================================================
+	// 纯 Slang 模块化着色器堆栈与热重载实现 (Slang Modular Pipeline)
+	// =========================================================================
+
+	void ParticleEditorPanel::AddModuleToSelectedEmitter(const VfxModule& module)
+	{
+		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size()) return;
+		PushUndoSnapshot();
+		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
+		em.EnsureDefaultModules();
+		em.Modules.push_back(module);
+		m_Dirty = true;
+		SyncSlangShaderFromModules();
+		SyncSimulationFromAsset();
+		m_StatusFeedback = "已添加模块: " + module.Name;
+	}
+
+	void ParticleEditorPanel::RemoveModuleFromSelectedEmitter(size_t moduleIndex)
+	{
+		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size()) return;
+		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
+		if (moduleIndex >= em.Modules.size()) return;
+		PushUndoSnapshot();
+		const std::string name = em.Modules[moduleIndex].Name;
+		em.Modules.erase(em.Modules.begin() + moduleIndex);
+		m_Dirty = true;
+		SyncSlangShaderFromModules();
+		SyncSimulationFromAsset();
+		m_StatusFeedback = "已移除模块: " + name;
+	}
+
+	void ParticleEditorPanel::MoveModuleUp(size_t moduleIndex)
+	{
+		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size() || moduleIndex == 0) return;
+		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
+		if (moduleIndex >= em.Modules.size()) return;
+		PushUndoSnapshot();
+		std::swap(em.Modules[moduleIndex], em.Modules[moduleIndex - 1]);
+		m_Dirty = true;
+		SyncSlangShaderFromModules();
+		SyncSimulationFromAsset();
+	}
+
+	void ParticleEditorPanel::MoveModuleDown(size_t moduleIndex)
+	{
+		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size()) return;
+		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
+		if (moduleIndex + 1 >= em.Modules.size()) return;
+		PushUndoSnapshot();
+		std::swap(em.Modules[moduleIndex], em.Modules[moduleIndex + 1]);
+		m_Dirty = true;
+		SyncSlangShaderFromModules();
+		SyncSimulationFromAsset();
+	}
+
+	void ParticleEditorPanel::SyncSlangShaderFromModules()
+	{
+		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size()) return;
+		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
+		em.EnsureDefaultModules();
+
+		m_SlangShaderBuffer = VfxComputeGenerator::GenerateComputeShaderSource(
+			em.Name,
+			em.Modules,
+			m_Asset.UserParamsFloat,
+			m_Asset.UserParamsVec4
+		);
+		m_SlangCompileError.clear();
+		m_SlangCompileSuccess = true;
+		m_StatusFeedback = "已从模块堆栈生成最新统一 Slang 计算着色器";
+	}
+
+	void ParticleEditorPanel::CompileAndApplySlangShader()
+	{
+		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size()) return;
+		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
+
+		std::string err;
+		const bool ok = VfxComputeGenerator::ValidateAndCompile(m_SlangShaderBuffer, &err);
+		if (ok)
+		{
+			PushUndoSnapshot();
+			em.UseCustomShaderOverride = true;
+			em.CustomSlangShaderOverride = m_SlangShaderBuffer;
+			m_SlangCompileSuccess = true;
+			m_SlangCompileError.clear();
+			m_Dirty = true;
+			SyncSimulationFromAsset();
+			m_StatusFeedback = "[成功] Slang 计算着色器已即时热重载生效！";
+		}
+		else
+		{
+			m_SlangCompileSuccess = false;
+			m_SlangCompileError = err;
+			m_StatusFeedback = "[编译错误] Slang 语法诊断失败，请检查错误提示";
+		}
+	}
+
+	void ParticleEditorPanel::RenderModuleCard(Wui::WuiContext& ctx, VfxModule& mod, size_t modIdx, float& curY, float cardW, const Wui::WuiTheme& theme)
+	{
+		const float cardPad = 8.0f;
+		const float headerH = 26.0f;
+		float cardContentH = headerH + 6.0f;
+
+		// 检查 Slang 源码是否在卡片内就地展开
+		const std::string modKey = mod.Id + "_" + std::to_string(modIdx);
+		const bool isSourceExpanded = m_ModuleSourceExpanded[modKey];
+
+		if (isSourceExpanded)
+		{
+			cardContentH += 130.0f;
+		}
+
+		if (mod.Enabled)
+		{
+			cardContentH += mod.Parameters.size() * 26.0f;
+		}
+
+		const Wui::WuiRect cardRect { 0.0f, curY, cardW, cardContentH };
+		Wui::BarSurface(ctx, cardRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.95f }, theme.Border);
+
+		// 1. 头部标题行
+		float hx = cardRect.X + 6.0f;
+		const float hy = cardRect.Y + 3.0f;
+
+		// 启用复选框
+		const Wui::WuiRect enCheck { hx, hy + 2.0f, 16.0f, 16.0f };
+		if (Wui::Checkbox(ctx, Wui::HashId((std::string("vfx.mod.en_") + std::to_string(modIdx)).c_str()), enCheck, "", mod.Enabled, theme))
+		{
+			PushUndoSnapshot();
+			SyncSlangShaderFromModules();
+			SyncSimulationFromAsset();
+		}
+		hx += 20.0f;
+
+		// 阶段徽章
+		const bool isSpawn = (mod.Stage == VfxModuleStage::Spawn);
+		const Wui::WuiColor badgeCol = isSpawn ? Wui::WuiColor { 0.2f, 0.6f, 0.85f, 1.0f } : Wui::WuiColor { 0.9f, 0.55f, 0.2f, 1.0f };
+		const char* badgeText = isSpawn ? "[Spawn]" : "[Update]";
+		Wui::Label(ctx, { hx, hy + 3.0f }, badgeText, badgeCol, 9.5f);
+		hx += 48.0f;
+
+		// 模块名称与自定义标示
+		Wui::Label(ctx, { hx, hy + 3.0f }, mod.Name, mod.Enabled ? theme.Text : theme.TextMuted, 10.5f);
+
+		// 右侧操作按钮组 (上移, 下移, 源码, 删除)
+		float rx = cardRect.X + cardRect.W - 22.0f;
+
+		// 删除按钮
+		const Wui::WuiRect delBtn { rx, hy, 18.0f, 20.0f };
+		Wui::Tooltip(ctx, delBtn, "从堆栈中移除此模块");
+		if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.del_") + std::to_string(modIdx)).c_str()), delBtn, "✕", theme))
+		{
+			RemoveModuleFromSelectedEmitter(modIdx);
+			return;
+		}
+		rx -= 22.0f;
+
+		// 源码展开按钮
+		const Wui::WuiRect srcBtn { rx - 20.0f, hy, 38.0f, 20.0f };
+		Wui::Tooltip(ctx, srcBtn, isSourceExpanded ? "折叠此模块的 Slang 源码" : "就地展开编辑此模块的 Slang 源码");
+		if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.src_") + std::to_string(modIdx)).c_str()), srcBtn, isSourceExpanded ? "收起" : "源码", theme))
+		{
+			m_ModuleSourceExpanded[modKey] = !isSourceExpanded;
+		}
+		rx -= 44.0f;
+
+		// 下移按钮
+		const Wui::WuiRect dnBtn { rx, hy, 18.0f, 20.0f };
+		Wui::Tooltip(ctx, dnBtn, "下移执行顺序");
+		if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.dn_") + std::to_string(modIdx)).c_str()), dnBtn, "↓", theme))
+		{
+			MoveModuleDown(modIdx);
+			return;
+		}
+		rx -= 20.0f;
+
+		// 上移按钮
+		const Wui::WuiRect upBtn { rx, hy, 18.0f, 20.0f };
+		Wui::Tooltip(ctx, upBtn, "上移执行顺序");
+		if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.up_") + std::to_string(modIdx)).c_str()), upBtn, "↑", theme))
+		{
+			MoveModuleUp(modIdx);
+			return;
+		}
+
+		float fieldY = cardRect.Y + headerH + 4.0f;
+
+		// 2. 参数调节列表 (带暴露参数开关)
+		if (mod.Enabled)
+		{
+			for (size_t pIdx = 0; pIdx < mod.Parameters.size(); ++pIdx)
 			{
-				const Wui::WuiRect toggleShape { c2.X + c2.W - 54.0f, rowY, 46.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId("vfx.shape.toggle"), toggleShape, "切换", theme))
+				auto& param = mod.Parameters[pIdx];
+				const float rowH = 24.0f;
+
+				// 参数标签
+				Wui::Label(ctx, { cardRect.X + 12.0f, fieldY + 3.0f }, param.Name + ":", theme.TextMuted, 10.0f);
+
+				// 暴露开关按钮 [暴] (Expose to System)
+				const Wui::WuiRect expBtn { cardRect.X + cardRect.W - 32.0f, fieldY, 24.0f, 20.0f };
+				Wui::Tooltip(ctx, expBtn, param.IsExposed ? "已暴露为特效系统外部参数 (点击取消暴露)" : "将此参数暴露给特效系统 (外部组件/Inspector 可调)");
+				const char* expLabel = param.IsExposed ? "暴" : "隐";
+				if (Wui::Button(ctx, Wui::HashId((std::string("vfx.p.exp_") + std::to_string(modIdx * 100 + pIdx)).c_str()), expBtn, expLabel, theme))
 				{
 					PushUndoSnapshot();
-					if (em.EmitterType == ParticleEmitterType::Cone) em.EmitterType = ParticleEmitterType::Sphere;
-					else if (em.EmitterType == ParticleEmitterType::Sphere) em.EmitterType = ParticleEmitterType::Box;
-					else if (em.EmitterType == ParticleEmitterType::Box) em.EmitterType = ParticleEmitterType::Circle;
-					else if (em.EmitterType == ParticleEmitterType::Circle) em.EmitterType = ParticleEmitterType::Point;
-					else em.EmitterType = ParticleEmitterType::Cone;
-					m_Dirty = true;
-					SyncSimulationFromAsset();
-				}
-			}
-			rowY += 24.0f;
-
-
-			if (em.EmitterType == ParticleEmitterType::Cone)
-			{
-				renderDragFloatRow("vfx.s.cone.ang", "圆锥开角", "°", ext.ConeAngle, 30.0f, 1.0f, 0.0f, 120.0f, "发射圆锥散射张角", rowY);
-				renderDragFloatRow("vfx.s.cone.rad", "底面半径", "m", ext.ConeRadius, 0.5f, 0.05f, 0.01f, 20.0f, "圆锥基座底面圆环半径", rowY);
-				renderDragFloatRow("vfx.s.cone.h", "圆锥高度", "m", ext.ConeHeight, 1.5f, 0.1f, 0.1f, 30.0f, "圆锥体基准参考高度", rowY);
-			}
-			else if (em.EmitterType == ParticleEmitterType::Sphere || em.EmitterType == ParticleEmitterType::Circle)
-			{
-				renderDragFloatRow("vfx.s.sph.rad", "球环半径", "m", ext.SphereRadius, 1.0f, 0.05f, 0.01f, 20.0f, "球体表面/圆环发射半径", rowY);
-			}
-			else if (em.EmitterType == ParticleEmitterType::Box)
-			{
-				renderDragFloatRow("vfx.s.box.x", "尺寸 X", "m", ext.BoxExtents.x, 1.0f, 0.05f, 0.01f, 20.0f, "盒体发射范围 X 半宽", rowY);
-				renderDragFloatRow("vfx.s.box.y", "尺寸 Y", "m", ext.BoxExtents.y, 1.0f, 0.05f, 0.01f, 20.0f, "盒体发射范围 Y 半高", rowY);
-				renderDragFloatRow("vfx.s.box.z", "尺寸 Z", "m", ext.BoxExtents.z, 1.0f, 0.05f, 0.01f, 20.0f, "盒体发射范围 Z 半深", rowY);
-			}
-
-
-			// 平面约束
-			const Wui::WuiRect xyChk { c2.X + 12.0f, rowY + 2.0f, 18.0f, 18.0f };
-			bool lockXY = em.LockToXY;
-			if (Wui::Checkbox(ctx, Wui::HashId("vfx.s.lockxy"), xyChk, "", lockXY, theme))
-			{
-				PushUndoSnapshot();
-				em.LockToXY = lockXY;
-				m_Dirty = true;
-				SyncSimulationFromAsset();
-			}
-			Wui::Label(ctx, { c2.X + 34.0f, rowY + 3.0f }, "约束在 2D XY 平面模拟 (Lock to XY)", theme.TextMuted, 10.0f);
-		}
-		cy += c2H + 6.0f;
-
-
-		// -------------------------------------------------------------
-		// 模块 3: 动力学、流体与扰动场 (Forces & Fields)
-		// -------------------------------------------------------------
-		const float c3H = m_CardForcesExpanded ? 240.0f : 28.0f;
-		const Wui::WuiRect c3 { inspectorRect.X + 4.0f, cy, inspectorRect.W - 8.0f, c3H };
-		Wui::BarSurface(ctx, c3, theme.PanelBg, theme.Border);
-
-
-		const Wui::WuiRect c3Header { c3.X, c3.Y, c3.W, 26.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.card3.fold"), c3Header,
-			m_CardForcesExpanded ? "[v] [3] 动力学、流体与力场 (Forces & Fields)" : "[>] [3] 动力学、流体与力场 (Forces & Fields)", theme))
-		{
-			m_CardForcesExpanded = !m_CardForcesExpanded;
-		}
-
-
-		if (m_CardForcesExpanded)
-		{
-			float rowY = c3.Y + 28.0f;
-			renderDragFloatRow("vfx.f.spd", "初始速度", "m/s", em.Speed, 5.0f, 0.2f, 0.0f, 100.0f, "粒子喷射初始线速度", rowY);
-			renderDragFloatRow("vfx.f.spdv", "速度方差", "m/s", em.SpeedVariance, 1.0f, 0.1f, 0.0f, 20.0f, "初速度随机扰动范围", rowY);
-			renderDragFloatRow("vfx.f.grav", "竖直重力", "m/s²", em.Gravity.y, -9.8f, 0.5f, -50.0f, 50.0f, "竖直重力作用系数 (向上为正向喷发)", rowY);
-			renderDragFloatRow("vfx.f.drag", "空气阻力", "x", em.LinearDrag, 0.0f, 0.05f, 0.0f, 10.0f, "速度衰减线性空气阻尼系数", rowY);
-
-
-			// 3D 旋度噪声场 (Curl Noise Force)
-			renderDragFloatRow("vfx.f.curl", "3D 旋度噪声", "x", ext.CurlNoiseStrength, 0.0f, 0.2f, 0.0f, 20.0f, "3D Curl Noise 向量场流体涡流强度", rowY);
-			renderDragFloatRow("vfx.f.curlf", "噪声频率", "Hz", ext.CurlNoiseFrequency, 1.0f, 0.1f, 0.1f, 10.0f, "空间旋度噪声采样空间频率", rowY);
-
-
-			// 三维旋涡力场 (Vortex Force)
-			renderDragFloatRow("vfx.f.vort", "三维旋涡力", "x", em.VortexStrength, 0.0f, 0.5f, 0.0f, 50.0f, "绕中心旋转的涡流力场角加速度", rowY);
-
-
-			// 空间点引力场 (Point Attractor Force)
-			renderDragFloatRow("vfx.f.attr", "空间点引力", "x", ext.PointAttractorStrength, 0.0f, 0.5f, -50.0f, 50.0f, "引力中心拉扯力场 (负值排斥, 正值吸引)", rowY);
-		}
-		cy += c3H + 6.0f;
-
-
-		// -------------------------------------------------------------
-		// 模块 4: 尺寸与旋转 (Size & Rotation)
-		// -------------------------------------------------------------
-		const float c4H = m_CardSizeRotationExpanded ? 140.0f : 28.0f;
-		const Wui::WuiRect c4 { inspectorRect.X + 4.0f, cy, inspectorRect.W - 8.0f, c4H };
-		Wui::BarSurface(ctx, c4, theme.PanelBg, theme.Border);
-
-
-		const Wui::WuiRect c4Header { c4.X, c4.Y, c4.W, 26.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.card4.fold"), c4Header,
-			m_CardSizeRotationExpanded ? "[v] [4] 尺寸与旋转 (Size & Rotation)" : "[>] [4] 尺寸与旋转 (Size & Rotation)", theme))
-		{
-			m_CardSizeRotationExpanded = !m_CardSizeRotationExpanded;
-		}
-
-
-		if (m_CardSizeRotationExpanded)
-		{
-			float rowY = c4.Y + 28.0f;
-			renderDragFloatRow("vfx.sz.start", "起始尺寸", "m", em.SizeStart, 0.5f, 0.05f, 0.01f, 20.0f, "粒子生成时刻初始尺寸", rowY);
-			renderDragFloatRow("vfx.sz.end", "终止尺寸", "m", em.SizeEnd, 0.1f, 0.05f, 0.0f, 20.0f, "粒子消亡时刻终止尺寸", rowY);
-
-
-			std::string fModeStr = (em.FacingMode == ParticleRenderMode::StretchedVelocity) ? "速度拉伸 (Stretched)" : (em.FacingMode == ParticleRenderMode::HorizontalQuad ? "贴地水平 (Horizontal)" : "相机对齐 (Billboard)");
-			Wui::Label(ctx, { c4.X + 12.0f, rowY + 3.0f }, "朝向模式: " + fModeStr, theme.Text, 10.5f);
-			if (!isLocked)
-			{
-				const Wui::WuiRect toggleFacing { c4.X + c4.W - 54.0f, rowY, 46.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId("vfx.m.facing"), toggleFacing, "切换", theme))
-				{
-					PushUndoSnapshot();
-					if (em.FacingMode == ParticleRenderMode::Billboard) em.FacingMode = ParticleRenderMode::StretchedVelocity;
-					else if (em.FacingMode == ParticleRenderMode::StretchedVelocity) em.FacingMode = ParticleRenderMode::HorizontalQuad;
-					else em.FacingMode = ParticleRenderMode::Billboard;
-					em.Material.FacingMode = em.FacingMode;
-					m_Dirty = true;
-					SyncSimulationFromAsset();
-				}
-			}
-			rowY += 24.0f;
-
-
-			renderDragFloatRow("vfx.r.rot", "初始旋转", "°", ext.InitialRotationDeg, 0.0f, 5.0f, 0.0f, 360.0f, "粒子生成时刻初始旋转偏角", rowY);
-			renderDragFloatRow("vfx.r.angvel", "角速度", "°/s", ext.AngularVelocityDeg, 0.0f, 5.0f, -720.0f, 720.0f, "粒子绕法向旋转自转角速度", rowY);
-		}
-		cy += c4H + 6.0f;
-
-
-		// -------------------------------------------------------------
-		// 模块 5: 材质、贴图与 HDR 辉光 (Material, Texture & Color)
-		// -------------------------------------------------------------
-		const float c5H = m_CardColorAlphaExpanded ? 204.0f : 28.0f;
-		const Wui::WuiRect c5 { inspectorRect.X + 4.0f, cy, inspectorRect.W - 8.0f, c5H };
-		Wui::BarSurface(ctx, c5, theme.PanelBg, theme.Border);
-
-
-		const Wui::WuiRect c5Header { c5.X, c5.Y, c5.W, 26.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.card5.fold"), c5Header,
-			m_CardColorAlphaExpanded ? "[v] [5] 材质、贴图与色彩 (Material & Texture)" : "[>] [5] 材质、贴图与色彩 (Material & Texture)", theme))
-		{
-			m_CardColorAlphaExpanded = !m_CardColorAlphaExpanded;
-		}
-
-
-		if (m_CardColorAlphaExpanded)
-		{
-			float rowY = c5.Y + 28.0f;
-
-			// 贴图资产选择行
-			std::string texName = em.Material.TexturePath.empty() ? "(纯白高光)" : std::filesystem::path(em.Material.TexturePath).filename().string();
-			Wui::Label(ctx, { c5.X + 12.0f, rowY + 3.0f }, "粒子贴图: " + texName, theme.Text, 10.5f);
-			if (!isLocked)
-			{
-				const Wui::WuiRect btnTex { c5.X + c5.W - 54.0f, rowY, 46.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId("vfx.m.tex_cycle"), btnTex, "更换", theme))
-				{
-					PushUndoSnapshot();
-					static const char* s_TexList[] = {
-						"",
-						"textures/particles/flame_soft.wtex",
-						"textures/particles/spark_glow.wtex",
-						"textures/particles/smoke_puff.wtex",
-						"textures/particles/magic_rune.wtex",
-						"textures/particles/shockwave_ring.wtex",
-						"textures/particles/electric_beam.wtex",
-						"textures/particles/fire_flipbook_4x4.wtex"
-					};
-					int curIdx = 0;
-					for (int ti = 0; ti < 8; ++ti) {
-						if (em.Material.TexturePath == s_TexList[ti]) { curIdx = ti; break; }
-					}
-					em.Material.TexturePath = s_TexList[(curIdx + 1) % 8];
-					if (em.Material.TexturePath.find("fire_flipbook") != std::string::npos) {
-						em.Material.SubUVTilesX = 4;
-						em.Material.SubUVTilesY = 4;
-					}
-					m_Dirty = true;
-					SyncSimulationFromAsset();
-				}
-			}
-			rowY += 24.0f;
-
-			// 材质资产选择行
-			std::string matName = em.Material.MaterialPath.empty() ? "(内置管线)" : std::filesystem::path(em.Material.MaterialPath).filename().string();
-			Wui::Label(ctx, { c5.X + 12.0f, rowY + 3.0f }, "着色材质: " + matName, theme.Text, 10.5f);
-			if (!isLocked)
-			{
-				const Wui::WuiRect btnMat { c5.X + c5.W - 54.0f, rowY, 46.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId("vfx.m.mat_cycle"), btnMat, "切换", theme))
-				{
-					PushUndoSnapshot();
-					if (em.Material.MaterialPath.empty())
-						em.Material.MaterialPath = "materials/particles/particle_additive.wmat";
-					else if (em.Material.MaterialPath.find("additive") != std::string::npos)
-						em.Material.MaterialPath = "materials/particles/particle_alpha.wmat";
-					else
-						em.Material.MaterialPath = "";
-					m_Dirty = true;
-					SyncSimulationFromAsset();
-				}
-			}
-			rowY += 24.0f;
-
-			std::string bModeStr = (em.Material.BlendMode == ParticleBlendMode::Additive) ? "叠加 (Additive)" : "透明 (AlphaBlend)";
-			Wui::Label(ctx, { c5.X + 12.0f, rowY + 3.0f }, "混合模式: " + bModeStr, theme.Text, 10.5f);
-			if (!isLocked)
-			{
-				const Wui::WuiRect toggleBlend { c5.X + c5.W - 54.0f, rowY, 46.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId("vfx.m.blend"), toggleBlend, "切换", theme))
-				{
-					PushUndoSnapshot();
-					em.Material.BlendMode = (em.Material.BlendMode == ParticleBlendMode::Additive) ? ParticleBlendMode::AlphaBlend : ParticleBlendMode::Additive;
-					m_Dirty = true;
-					SyncSimulationFromAsset();
-				}
-			}
-			rowY += 24.0f;
-
-
-			// 起始色与终止色色块
-			const Wui::WuiColor cs { em.ColorStart.r, em.ColorStart.g, em.ColorStart.b, 1.0f };
-			Wui::BarSurface(ctx, { c5.X + 12.0f, rowY, 24.0f, 16.0f }, cs, theme.Border);
-			Wui::Label(ctx, { c5.X + 40.0f, rowY }, "起始颜色", theme.Text, 10.5f);
-
-
-			const Wui::WuiColor ce { em.ColorEnd.r, em.ColorEnd.g, em.ColorEnd.b, 1.0f };
-			Wui::BarSurface(ctx, { c5.X + 110.0f, rowY, 24.0f, 16.0f }, ce, theme.Border);
-			Wui::Label(ctx, { c5.X + 138.0f, rowY }, "终止颜色", theme.Text, 10.5f);
-			rowY += 24.0f;
-
-
-			renderDragFloatRow("vfx.c.emiss", "HDR 辉光", "x", em.Material.EmissiveBoost, 1.0f, 0.2f, 1.0f, 10.0f, "HDR 发光乘数，>=1.0 触发 Bloom 辉光泛光", rowY);
-			renderDragFloatRow("vfx.m.fade", "软粒子渐变", "m", em.Material.SoftParticleFadeDistance, 0.5f, 0.05f, 0.0f, 5.0f, "与场景几何相交时的淡入淡出软化距离", rowY);
-		}
-		cy += c5H + 6.0f;
-
-
-		// -------------------------------------------------------------
-		// 模块 6: 多元渲染器 (Renderers)
-		// -------------------------------------------------------------
-		const float c6H = m_CardRenderersExpanded ? 190.0f : 28.0f;
-		const Wui::WuiRect c6 { inspectorRect.X + 4.0f, cy, inspectorRect.W - 8.0f, c6H };
-		Wui::BarSurface(ctx, c6, theme.PanelBg, theme.Border);
-
-
-		const Wui::WuiRect c6Header { c6.X, c6.Y, c6.W, 26.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.card6.fold"), c6Header,
-			m_CardRenderersExpanded ? "[v] [6] 多元渲染器切换 (Renderers)" : "[>] [6] 多元渲染器切换 (Renderers)", theme))
-		{
-			m_CardRenderersExpanded = !m_CardRenderersExpanded;
-		}
-
-
-		if (m_CardRenderersExpanded)
-		{
-			float rowY = c6.Y + 28.0f;
-			std::string rendType = "Sprite (常规序列帧)";
-			if (ext.RibbonEnabled) rendType = "Ribbon (带状拖尾体)";
-			else if (ext.MeshEnabled) rendType = "Mesh (3D 网格粒子)";
-			else if (ext.LightEnabled) rendType = "Light (动态点光源)";
-
-
-			Wui::Label(ctx, { c6.X + 12.0f, rowY + 3.0f }, "渲染器: " + rendType, theme.Text, 10.5f);
-			if (!isLocked)
-			{
-				const Wui::WuiRect toggleRend { c6.X + c6.W - 54.0f, rowY, 46.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId("vfx.rend.toggle"), toggleRend, "切换", theme))
-				{
-					PushUndoSnapshot();
-					if (!ext.RibbonEnabled && !ext.MeshEnabled && !ext.LightEnabled)
+					param.IsExposed = !param.IsExposed;
+					if (param.IsExposed)
 					{
-						ext.RibbonEnabled = true; ext.ModuleRibbonEnabled = true;
-					}
-					else if (ext.RibbonEnabled)
-					{
-						ext.RibbonEnabled = false; ext.MeshEnabled = true; ext.ModuleMeshEnabled = true;
-					}
-					else if (ext.MeshEnabled)
-					{
-						ext.MeshEnabled = false; ext.LightEnabled = true; ext.ModuleLightEnabled = true;
+						if (param.ExposedName.empty()) param.ExposedName = param.Name;
+						m_Asset.UserParamsFloat[param.ExposedName] = param.FloatVal;
 					}
 					else
 					{
-						ext.LightEnabled = false;
+						m_Asset.UserParamsFloat.erase(param.ExposedName);
 					}
-					m_Dirty = true;
-					SyncSimulationFromAsset();
+					SyncSlangShaderFromModules();
 				}
-			}
-			rowY += 24.0f;
 
-
-			if (ext.RibbonEnabled)
-			{
-				renderDragFloatRow("vfx.rib.len", "拖尾长度", "m", ext.RibbonLength, 1.0f, 0.1f, 0.1f, 20.0f, "Ribbon 拖尾带物理存留延展长度", rowY);
-				renderDragFloatRow("vfx.rib.w", "带体宽度", "m", ext.RibbonWidth, 0.1f, 0.02f, 0.01f, 5.0f, "Ribbon 拖尾横向几何面宽度", rowY);
-			}
-			else if (ext.MeshEnabled)
-			{
-				std::string mName = em.MeshPath.empty() ? "(内置立方体碎块)" : std::filesystem::path(em.MeshPath).filename().string();
-				Wui::Label(ctx, { c6.X + 12.0f, rowY + 3.0f }, "网格模型: " + mName, theme.Text, 10.5f);
-				if (!isLocked)
+				// 参数输入拖拽控件
+				const float valW = cardRect.W - 160.0f;
+				const Wui::WuiRect valRect { cardRect.X + 110.0f, fieldY, valW, 20.0f };
+				if (param.Type == VfxParamType::Float)
 				{
-					const Wui::WuiRect btnMesh { c6.X + c6.W - 54.0f, rowY, 46.0f, 20.0f };
-					if (Wui::Button(ctx, Wui::HashId("vfx.m.mesh_cycle"), btnMesh, "更换", theme))
+					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.val_") + std::to_string(modIdx * 100 + pIdx)).c_str()), valRect, param.FloatVal, param.Step, param.Min, param.Max, theme))
 					{
-						PushUndoSnapshot();
-						if (em.MeshPath.empty())
-							em.MeshPath = "models/debris_shard.wmodel";
-						else
-							em.MeshPath = "";
+						if (param.IsExposed)
+						{
+							m_Asset.UserParamsFloat[param.ExposedName.empty() ? param.Name : param.ExposedName] = param.FloatVal;
+						}
 						m_Dirty = true;
 						SyncSimulationFromAsset();
 					}
 				}
-				rowY += 24.0f;
-				renderDragFloatRow("vfx.msh.sc", "模型缩放", "x", em.SizeStart, 0.5f, 0.05f, 0.01f, 10.0f, "3D 网格粒子实例整体几何体缩放倍数", rowY);
-			}
-			else if (ext.LightEnabled)
-			{
-				renderDragFloatRow("vfx.lit.r", "光源半径", "m", ext.LightRadius, 3.0f, 0.2f, 0.1f, 30.0f, "每个粒子向场景发射的点光源照亮范围", rowY);
-				renderDragFloatRow("vfx.lit.int", "光照强度", "lux", ext.LightIntensity, 1.0f, 0.1f, 0.1f, 20.0f, "动态点光源光强乘数", rowY);
-			}
-			else
-			{
-				float tilesX = static_cast<float>(em.Material.SubUVTilesX);
-				renderDragFloatRow("vfx.sub.x", "Sub-UV 列数", "cols", tilesX, 1.0f, 1.0f, 1.0f, 16.0f, "Flipbook 序列帧纹理横向分块数", rowY);
-				em.Material.SubUVTilesX = static_cast<uint32_t>(tilesX);
-
-
-				float tilesY = static_cast<float>(em.Material.SubUVTilesY);
-				renderDragFloatRow("vfx.sub.y", "Sub-UV 行数", "rows", tilesY, 1.0f, 1.0f, 1.0f, 16.0f, "Flipbook 序列帧纹理纵向分块数", rowY);
-				em.Material.SubUVTilesY = static_cast<uint32_t>(tilesY);
-			}
-		}
-		cy += c6H + 6.0f;
-
-
-		// -------------------------------------------------------------
-		// 模块 7: 碰撞与次级事件 (Collision & Sub-Emitters)
-		// -------------------------------------------------------------
-		const float c7H = m_CardCollisionExpanded ? 130.0f : 28.0f;
-		const Wui::WuiRect c7 { inspectorRect.X + 4.0f, cy, inspectorRect.W - 8.0f, c7H };
-		Wui::BarSurface(ctx, c7, theme.PanelBg, theme.Border);
-
-
-		const Wui::WuiRect c7Header { c7.X, c7.Y, c7.W, 26.0f };
-		if (Wui::Button(ctx, Wui::HashId("vfx.card7.fold"), c7Header,
-			m_CardCollisionExpanded ? "[v] [7] 物理碰撞与次级事件 (Collision & Events)" : "[>] [7] 物理碰撞与次级事件 (Collision & Events)", theme))
-		{
-			m_CardCollisionExpanded = !m_CardCollisionExpanded;
-		}
-
-
-		if (m_CardCollisionExpanded)
-		{
-			float rowY = c7.Y + 28.0f;
-			std::string colModeStr = (em.Collision.Mode == ParticleCollisionMode::Plane) ? "地面反弹 (Plane)" : "无碰撞 (None)";
-			Wui::Label(ctx, { c7.X + 12.0f, rowY + 3.0f }, "碰撞模式: " + colModeStr, theme.Text, 10.5f);
-			if (!isLocked)
-			{
-				const Wui::WuiRect toggleCol { c7.X + c7.W - 54.0f, rowY, 46.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId("vfx.col.toggle"), toggleCol, "切换", theme))
+				else if (param.Type == VfxParamType::Vec3)
 				{
-					PushUndoSnapshot();
-					em.Collision.Mode = (em.Collision.Mode == ParticleCollisionMode::Plane) ? ParticleCollisionMode::None : ParticleCollisionMode::Plane;
-					m_Dirty = true;
-					SyncSimulationFromAsset();
+					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.v3_") + std::to_string(modIdx * 100 + pIdx)).c_str()), valRect, param.VecVal.y, param.Step, param.Min, param.Max, theme))
+					{
+						m_Dirty = true;
+						SyncSimulationFromAsset();
+					}
 				}
+
+				fieldY += rowH + 2.0f;
 			}
-			rowY += 24.0f;
-
-
-			renderDragFloatRow("vfx.col.rest", "弹性系数", "x", em.Collision.Restitution, 0.5f, 0.05f, 0.0f, 1.0f, "法向碰撞反弹弹性 (0=无反弹, 1=完全弹性)", rowY);
-			renderDragFloatRow("vfx.col.fric", "摩擦阻尼", "x", em.Collision.Friction, 0.1f, 0.02f, 0.0f, 1.0f, "碰撞切向摩擦减速系数", rowY);
 		}
-		cy += c7H + 10.0f;
 
-
-		// 底部 [+ 添加新模块...] 按钮
-		const Wui::WuiRect addModBtn { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, 26.0f };
-		Wui::Tooltip(ctx, addModBtn, "动态挂载或卸载高阶粒子功能模块 (Niagara Module Feature Stack)");
-		if (Wui::Button(ctx, Wui::HashId("vfx.mod.add"), addModBtn, "+ 添加/卸载高级模块 (Add Module...)", theme))
+		// 3. 就地展开的 Slang 源码编辑器
+		if (isSourceExpanded)
 		{
-			m_AddModulePopupOpen = !m_AddModulePopupOpen;
+			const Wui::WuiRect srcBox { cardRect.X + 8.0f, fieldY, cardRect.W - 16.0f, 120.0f };
+			Wui::BarSurface(ctx, srcBox, Wui::WuiColor { 0.06f, 0.07f, 0.09f, 1.0f }, theme.Border);
+
+			std::istringstream stream(mod.SlangSource);
+			std::string line;
+			float lineY = srcBox.Y + 4.0f;
+			while (std::getline(stream, line) && lineY < srcBox.Y + srcBox.H - 14.0f)
+			{
+				Wui::WuiColor col = theme.Text;
+				if (line.find("//") != std::string::npos) col = Wui::WuiColor { 0.45f, 0.65f, 0.45f, 0.85f };
+				else if (line.find("Velocity") != std::string::npos || line.find("Position") != std::string::npos)
+					col = theme.Accent;
+				Wui::Label(ctx, { srcBox.X + 6.0f, lineY }, line, col, 9.5f);
+				lineY += 14.0f;
+			}
+			fieldY += 126.0f;
 		}
 
-
-		Wui::EndScrollArea(ctx);
+		curY += cardContentH + 6.0f;
 	}
-}
+
+	void ParticleEditorPanel::RenderSlangShaderView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme, PanelHost& host)
+	{
+		(void)host;
+		const Wui::WuiRect toolbar { rect.X, rect.Y, rect.W, 36.0f };
+		Wui::BarSurface(ctx, toolbar, theme.PanelHeader, theme.Border);
+
+		float cx = toolbar.X + 10.0f;
+		Wui::Label(ctx, { cx, toolbar.Y + 10.0f }, "统一 Slang 计算着色器 (Unified Slang Compute Shader)", theme.Accent, 11.5f);
+		cx += 360.0f;
+
+		// 编译并即时热重载按钮
+		const Wui::WuiRect applyBtn { cx, toolbar.Y + 6.0f, 160.0f, 24.0f };
+		Wui::Tooltip(ctx, applyBtn, "即时编译 Slang 源码并在 GPU 视口与实体上热重载生效 (Ctrl+Enter)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.slang.apply"), applyBtn, "[运行] 编译并热重载 (Ctrl+Enter)", theme))
+		{
+			CompileAndApplySlangShader();
+		}
+		cx += 166.0f;
+
+		// 从模块重新生成
+		const Wui::WuiRect syncBtn { cx, toolbar.Y + 6.0f, 120.0f, 24.0f };
+		Wui::Tooltip(ctx, syncBtn, "丢弃手写覆盖，从当前模块堆栈重新生成统一着色器");
+		if (Wui::Button(ctx, Wui::HashId("vfx.slang.sync"), syncBtn, "⟳ 从模块堆栈生成", theme))
+		{
+			SyncSlangShaderFromModules();
+		}
+		cx += 128.0f;
+
+		// 编译状态与诊断显示
+		if (!m_SlangCompileError.empty())
+		{
+			Wui::Label(ctx, { cx, toolbar.Y + 10.0f }, "[编译错误] " + m_SlangCompileError.substr(0, 60), Wui::WuiColor { 0.95f, 0.3f, 0.3f, 1.0f }, 10.0f);
+		}
+		else if (m_SlangCompileSuccess)
+		{
+			Wui::Label(ctx, { cx, toolbar.Y + 10.0f }, "[就绪] Slang 模块化计算着色器已热重载生效 (SPIR-V 1.3)", Wui::WuiColor { 0.3f, 0.85f, 0.4f, 1.0f }, 10.0f);
+		}
+
+		// 源码文本查看编辑框
+		const Wui::WuiRect codeBox { rect.X, rect.Y + 40.0f, rect.W, rect.H - 40.0f };
+		Wui::BarSurface(ctx, codeBox, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f }, theme.Border);
+
+		if (m_SlangShaderBuffer.empty())
+		{
+			SyncSlangShaderFromModules();
+		}
+
+		std::istringstream stream(m_SlangShaderBuffer);
+		std::string line;
+		int lineIdx = 0;
+		float lineY = codeBox.Y + 8.0f - m_SlangScrollY;
+		const float lineHeight = 18.0f;
+
+		const glm::vec2 mousePos = ctx.Input().MousePos;
+		const bool hovered = (mousePos.x >= codeBox.X && mousePos.x <= codeBox.X + codeBox.W &&
+		                      mousePos.y >= codeBox.Y && mousePos.y <= codeBox.Y + codeBox.H);
+		if (hovered && std::abs(ctx.Input().Wheel) > 0.01f)
+		{
+			m_SlangScrollY = std::max(0.0f, m_SlangScrollY - ctx.Input().Wheel * 36.0f);
+		}
+
+		while (std::getline(stream, line))
+		{
+			lineIdx++;
+			if (lineY >= codeBox.Y && lineY <= codeBox.Y + codeBox.H - lineHeight)
+			{
+				Wui::Label(ctx, { codeBox.X + 8.0f, lineY }, std::to_string(lineIdx), Wui::WuiColor { 0.35f, 0.40f, 0.48f, 0.8f }, 9.5f);
+
+				Wui::WuiColor textCol = theme.Text;
+				if (line.find("//") != std::string::npos)
+				{
+					textCol = Wui::WuiColor { 0.40f, 0.65f, 0.45f, 0.85f };
+				}
+				else if (line.find("struct") != std::string::npos || line.find("float") != std::string::npos ||
+				         line.find("uint") != std::string::npos || line.find("void") != std::string::npos ||
+				         line.find("cbuffer") != std::string::npos)
+				{
+					textCol = Wui::WuiColor { 0.35f, 0.65f, 0.95f, 1.0f };
+				}
+				else if (line.find("[numthreads") != std::string::npos || line.find("[[vk") != std::string::npos)
+				{
+					textCol = Wui::WuiColor { 0.95f, 0.60f, 0.20f, 1.0f };
+				}
+				else if (line.find("CS_Spawn") != std::string::npos || line.find("CS_Update") != std::string::npos)
+				{
+					textCol = theme.Accent;
+				}
+
+				Wui::Label(ctx, { codeBox.X + 42.0f, lineY }, line, textCol, 10.5f);
+			}
+			lineY += lineHeight;
+		}
+	}
+
+	void ParticleEditorPanel::RenderDataView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme, PanelHost& host)
+	{
+		(void)host;
+		const Wui::WuiRect codeToolbar { rect.X, rect.Y, rect.W, 36.0f };
+		Wui::BarSurface(ctx, codeToolbar, theme.PanelHeader, theme.Border);
+
+		float cx = codeToolbar.X + 8.0f;
+		const Wui::WuiRect applyBtn { cx, codeToolbar.Y + 6.0f, 150.0f, 24.0f };
+		Wui::Tooltip(ctx, applyBtn, "解析并应用当前底层 YAML 声明式配置到视口与特效系统 (Ctrl+Enter)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.data.apply"), applyBtn, "[应用] 应用数据 (Ctrl+Enter)", theme))
+		{
+			ApplyCodeToAsset();
+		}
+		cx += 156.0f;
+
+		const Wui::WuiRect syncBtn { cx, codeToolbar.Y + 6.0f, 120.0f, 24.0f };
+		Wui::Tooltip(ctx, syncBtn, "从当前视口与模块参数重新生成 YAML 数据清单");
+		if (Wui::Button(ctx, Wui::HashId("vfx.data.sync"), syncBtn, "⟳ 从视口重新生成", theme))
+		{
+			SyncCodeFromAsset();
+		}
+		cx += 128.0f;
+
+		Wui::Label(ctx, { cx, codeToolbar.Y + 10.0f }, "说明: 此处为底层序列化清单 (Data Manifest)，代码控制请切换至 [统一 Slang 着色器]", theme.TextMuted, 10.0f);
+
+		const Wui::WuiRect codeBox { rect.X, rect.Y + 40.0f, rect.W, rect.H - 40.0f };
+		Wui::BarSurface(ctx, codeBox, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f }, theme.Border);
+
+		std::istringstream stream(m_CodeBuffer);
+		std::string line;
+		int lineIdx = 0;
+		float lineY = codeBox.Y + 8.0f - m_CodeScrollY;
+		const float lineHeight = 18.0f;
+
+		const glm::vec2 mousePos = ctx.Input().MousePos;
+		const bool hovered = (mousePos.x >= codeBox.X && mousePos.x <= codeBox.X + codeBox.W &&
+		                      mousePos.y >= codeBox.Y && mousePos.y <= codeBox.Y + codeBox.H);
+		if (hovered && std::abs(ctx.Input().Wheel) > 0.01f)
+		{
+			m_CodeScrollY = std::max(0.0f, m_CodeScrollY - ctx.Input().Wheel * 36.0f);
+		}
+
+		while (std::getline(stream, line))
+		{
+			lineIdx++;
+			if (lineY >= codeBox.Y && lineY <= codeBox.Y + codeBox.H - lineHeight)
+			{
+				Wui::Label(ctx, { codeBox.X + 8.0f, lineY }, std::to_string(lineIdx), Wui::WuiColor { 0.35f, 0.40f, 0.48f, 0.8f }, 9.5f);
+				Wui::WuiColor textCol = theme.Text;
+				if (line.find(":") != std::string::npos && line.find("-") == std::string::npos)
+				{
+					if (line.find("Emitters") != std::string::npos || line.find("Name") != std::string::npos)
+						textCol = theme.Accent;
+					else
+						textCol = Wui::WuiColor { 0.85f, 0.85f, 0.9f, 1.0f };
+				}
+				else if (line.find("-") != std::string::npos)
+				{
+					textCol = Wui::WuiColor { 0.95f, 0.8f, 0.3f, 1.0f };
+				}
+				Wui::Label(ctx, { codeBox.X + 36.0f, lineY }, line, textCol, 10.5f);
+			}
+			lineY += lineHeight;
+		}
+	}
+
+} // namespace World

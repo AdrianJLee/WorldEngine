@@ -2,6 +2,7 @@
 
 #include "World/Core/Export.h"
 #include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/VfxModule.h"
 
 #include <string>
 #include <vector>
@@ -11,7 +12,7 @@
 
 namespace World
 {
-	struct ParticleEmitterLayer
+	struct WLD_API ParticleEmitterLayer
 	{
 		std::string Name = "Emitter";
 		uint32_t MaxParticles = 500;
@@ -41,9 +42,16 @@ namespace World
 
 		std::vector<ParticleBurst> Bursts;
 		std::vector<SubEmitterConfig> SubEmitters;
+
+		// 工业级 Slang 模块化着色器堆栈与自定义代码 (Slang Modular Pipeline)
+		std::vector<VfxModule> Modules;
+		std::string CustomSlangShaderOverride;
+		bool UseCustomShaderOverride = false;
+
+		void EnsureDefaultModules();
 	};
 
-	struct ParticleAsset
+	struct WLD_API ParticleAsset
 	{
 		uint64_t Guid = 0;
 		std::string Name = "UnnamedVFX";

@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Renderer/ParticleAsset.h"
+#include "World/Renderer/VfxModule.h"
 #include "World/Utils/Paths.h"
 #include <filesystem>
 
@@ -10,6 +11,35 @@
 
 namespace World
 {
+	void ParticleEmitterLayer::EnsureDefaultModules()
+	{
+		if (!Modules.empty()) return;
+		Modules = VfxModuleLibrary::CreateDefaultEmitterModuleStack();
+
+		// 同步当前发射器参数到标准模块
+		for (auto& mod : Modules)
+		{
+			if (mod.Id == "mod.update.gravity")
+			{
+				mod.SetVec4("Gravity", glm::vec4(Gravity, 0.0f));
+			}
+			else if (mod.Id == "mod.update.drag")
+			{
+				mod.SetFloat("LinearDrag", LinearDrag);
+			}
+			else if (mod.Id == "mod.update.curl_noise")
+			{
+				mod.SetFloat("NoiseStrength", TurbulenceStrength);
+				mod.SetFloat("NoiseFrequency", TurbulenceFrequency);
+			}
+			else if (mod.Id == "mod.spawn.cone")
+			{
+				mod.SetFloat("InitialSpeed", Speed);
+				mod.SetFloat("SpeedVariance", SpeedVariance);
+			}
+		}
+	}
+
 	static std::string BlendModeToString(ParticleBlendMode mode)
 	{
 		switch (mode)
@@ -165,7 +195,54 @@ namespace World
 			}
 			out << YAML::EndSeq;
 		}
-		out << YAML::EndMap;
+		
+		out << YAML::Key << "UseCustomShaderOverride" << YAML::Value << em.UseCustomShaderOverride;
+		if (!em.CustomSlangShaderOverride.empty())
+		{
+			out << YAML::Key << "CustomSlangShaderOverride" << YAML::Value << em.CustomSlangShaderOverride;
+		}
+
+		if (!em.Modules.empty())
+		{
+			out << YAML::Key << "Modules" << YAML::Value << YAML::BeginSeq;
+			for (const auto& mod : em.Modules)
+			{
+				out << YAML::BeginMap;
+				out << YAML::Key << "Id" << YAML::Value << mod.Id;
+				out << YAML::Key << "Name" << YAML::Value << mod.Name;
+				out << YAML::Key << "Description" << YAML::Value << mod.Description;
+				out << YAML::Key << "Stage" << YAML::Value << (mod.Stage == VfxModuleStage::Spawn ? "Spawn" : (mod.Stage == VfxModuleStage::Update ? "Update" : "Render"));
+				out << YAML::Key << "Enabled" << YAML::Value << mod.Enabled;
+				out << YAML::Key << "IsCustom" << YAML::Value << mod.IsCustom;
+				out << YAML::Key << "SlangSource" << YAML::Value << mod.SlangSource;
+
+				if (!mod.Parameters.empty())
+				{
+					out << YAML::Key << "Parameters" << YAML::Value << YAML::BeginSeq;
+					for (const auto& p : mod.Parameters)
+					{
+						out << YAML::BeginMap;
+						out << YAML::Key << "Name" << YAML::Value << p.Name;
+						out << YAML::Key << "Type" << YAML::Value << static_cast<int>(p.Type);
+						out << YAML::Key << "FloatVal" << YAML::Value << p.FloatVal;
+						out << YAML::Key << "VecVal" << YAML::Value << YAML::Flow << YAML::BeginSeq << p.VecVal.x << p.VecVal.y << p.VecVal.z << p.VecVal.w << YAML::EndSeq;
+						out << YAML::Key << "IntVal" << YAML::Value << p.IntVal;
+						out << YAML::Key << "BoolVal" << YAML::Value << p.BoolVal;
+						out << YAML::Key << "Min" << YAML::Value << p.Min;
+						out << YAML::Key << "Max" << YAML::Value << p.Max;
+						out << YAML::Key << "Step" << YAML::Value << p.Step;
+						out << YAML::Key << "Tooltip" << YAML::Value << p.Tooltip;
+						out << YAML::Key << "IsExposed" << YAML::Value << p.IsExposed;
+						out << YAML::Key << "ExposedName" << YAML::Value << p.ExposedName;
+						out << YAML::EndMap;
+					}
+					out << YAML::EndSeq;
+				}
+				out << YAML::EndMap;
+			}
+			out << YAML::EndSeq;
+		}
+out << YAML::EndMap;
 	}
 
 	static void ParseEmitterLayer(const YAML::Node& node, ParticleEmitterLayer& em)
@@ -289,6 +366,74 @@ namespace World
 				if (bNode["Count"]) b.Count = bNode["Count"].as<uint32_t>();
 				em.Bursts.push_back(b);
 			}
+		}
+
+		if (node["UseCustomShaderOverride"]) em.UseCustomShaderOverride = node["UseCustomShaderOverride"].as<bool>();
+		if (node["CustomSlangShaderOverride"]) em.CustomSlangShaderOverride = node["CustomSlangShaderOverride"].as<std::string>();
+
+		if (const auto modSeq = node["Modules"])
+		{
+			if (modSeq.IsSequence())
+			{
+				em.Modules.clear();
+				for (size_t i = 0; i < modSeq.size(); ++i)
+				{
+					const auto mNode = modSeq[i];
+					VfxModule mod;
+					if (mNode["Id"]) mod.Id = mNode["Id"].as<std::string>();
+					if (mNode["Name"]) mod.Name = mNode["Name"].as<std::string>();
+					if (mNode["Description"]) mod.Description = mNode["Description"].as<std::string>();
+					if (mNode["Stage"])
+					{
+						std::string st = mNode["Stage"].as<std::string>();
+						if (st == "Spawn") mod.Stage = VfxModuleStage::Spawn;
+						else if (st == "Render") mod.Stage = VfxModuleStage::Render;
+						else mod.Stage = VfxModuleStage::Update;
+					}
+					if (mNode["Enabled"]) mod.Enabled = mNode["Enabled"].as<bool>();
+					if (mNode["IsCustom"]) mod.IsCustom = mNode["IsCustom"].as<bool>();
+					if (mNode["SlangSource"]) mod.SlangSource = mNode["SlangSource"].as<std::string>();
+
+					if (const auto pSeq = mNode["Parameters"])
+					{
+						if (pSeq.IsSequence())
+						{
+							for (size_t j = 0; j < pSeq.size(); ++j)
+							{
+								const auto pNode = pSeq[j];
+								VfxModuleParam p;
+								if (pNode["Name"]) p.Name = pNode["Name"].as<std::string>();
+								if (pNode["Type"]) p.Type = static_cast<VfxParamType>(pNode["Type"].as<int>());
+								if (pNode["FloatVal"]) p.FloatVal = pNode["FloatVal"].as<float>();
+								if (pNode["VecVal"] && pNode["VecVal"].IsSequence() && pNode["VecVal"].size() >= 4)
+								{
+									p.VecVal = glm::vec4(
+										pNode["VecVal"][0].as<float>(),
+										pNode["VecVal"][1].as<float>(),
+										pNode["VecVal"][2].as<float>(),
+										pNode["VecVal"][3].as<float>()
+									);
+								}
+								if (pNode["IntVal"]) p.IntVal = pNode["IntVal"].as<int>();
+								if (pNode["BoolVal"]) p.BoolVal = pNode["BoolVal"].as<bool>();
+								if (pNode["Min"]) p.Min = pNode["Min"].as<float>();
+								if (pNode["Max"]) p.Max = pNode["Max"].as<float>();
+								if (pNode["Step"]) p.Step = pNode["Step"].as<float>();
+								if (pNode["Tooltip"]) p.Tooltip = pNode["Tooltip"].as<std::string>();
+								if (pNode["IsExposed"]) p.IsExposed = pNode["IsExposed"].as<bool>();
+								if (pNode["ExposedName"]) p.ExposedName = pNode["ExposedName"].as<std::string>();
+								mod.Parameters.push_back(p);
+							}
+						}
+					}
+					em.Modules.push_back(mod);
+				}
+			}
+		}
+
+		if (em.Modules.empty())
+		{
+			em.EnsureDefaultModules();
 		}
 	}
 

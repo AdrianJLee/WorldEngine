@@ -2,6 +2,8 @@
 
 #include "WUI/Common/EditorPanel.h"
 #include "World/Renderer/ParticleAsset.h"
+#include "World/Renderer/VfxModule.h"
+#include "World/Renderer/VfxComputeGenerator.h"
 #include "World/Renderer/ParticleSystem.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Scene/Scene.h"
@@ -19,8 +21,9 @@ namespace World
 {
 	enum class ParticleEditorViewMode : uint8_t
 	{
-		Visual = 0,
-		Code = 1
+		Visual = 0,         // 可视化模块堆栈与 3D 视口 (Niagara Stack + Viewport)
+		SlangShader = 1,    // 统一 Slang 计算着色器源码与即时热重载 (Slang Compute Code & Hot Reload)
+		DataManifest = 2    // 声明式资产数据清单 (YAML Data Manifest)
 	};
 
 	enum class ParticleViewportDisplayMode : uint8_t
@@ -127,21 +130,17 @@ namespace World
 		bool CanUndo() const noexcept { return !m_UndoStack.empty(); }
 		bool CanRedo() const noexcept { return !m_RedoStack.empty(); }
 
-		// 5 大高水准官方 3D 特效案例集 (Industrial 3D Showcase Presets)
-		void LoadPresetFlameTornado3D();
-		void LoadPresetLightningPlasmaBeam3D();
-		void LoadPresetOrbitalMagicShield3D();
-		void LoadPresetMeteorImpactExplosion3D();
-		void LoadPresetBlizzardFrostNova3D();
+		// 纯 Slang 模块化着色器堆栈与热重载操作 (Slang Modular Pipeline Operations)
+		void AddModuleToSelectedEmitter(const VfxModule& module);
+		void RemoveModuleFromSelectedEmitter(size_t moduleIndex);
+		void MoveModuleUp(size_t moduleIndex);
+		void MoveModuleDown(size_t moduleIndex);
+		void CompileAndApplySlangShader();
+		void SyncSlangShaderFromModules();
 
-		// 经典预设保持兼容
-		void LoadPresetCampfire();
-		void LoadPresetSparksBurst();
-		void LoadPresetSmokePlume();
-		void LoadPresetBlizzard();
-		void LoadPresetMagicPortal();
-		void LoadPresetEnergyBeam();
-		void LoadPreset(const std::string& presetName);
+		void RenderSlangShaderView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme, PanelHost& host);
+		void RenderDataView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme, PanelHost& host);
+		void RenderModuleCard(Wui::WuiContext& ctx, VfxModule& mod, size_t modIdx, float& curY, float cardW, const Wui::WuiTheme& theme);
 
 		// 发射器大纲管理核心操作 (Outliner Operations)
 		void AddEmitterFromTemplate(const std::string& templateType);
@@ -200,7 +199,15 @@ namespace World
 		ParticleEditorViewMode m_ViewMode = ParticleEditorViewMode::Visual;
 		std::string m_CodeBuffer;
 		float m_CodeScrollY = 0.0f;
+		float m_SlangScrollY = 0.0f;
 		int m_SelectedCodeLine = -1;
+
+		// Slang 计算着色器即时编译与热重载状态
+		std::string m_SlangShaderBuffer;
+		std::string m_SlangCompileError;
+		bool m_SlangCompileSuccess = false;
+		bool m_AddModuleMenuOpen = false;
+		std::unordered_map<std::string, bool> m_ModuleSourceExpanded;
 
 		// 现代多分区布局与 Splitters 尺寸 (Outliner 拓宽至 270px 消除截字)
 		float m_OutlinerWidth = 270.0f;
