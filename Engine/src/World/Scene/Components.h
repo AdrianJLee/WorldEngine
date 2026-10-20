@@ -2123,4 +2123,58 @@ namespace World
 	static_assert(offsetof(TerrainComponent, HoleCutoutEnabled) == 46, "HoleCutoutEnabled offset mismatch");
 	static_assert(offsetof(TerrainComponent, EnableCollision) == 47, "EnableCollision offset mismatch");
 
+
+	struct FoliageComponent
+	{
+		AssetRef FoliageAsset;                            // 16B (offset 0)
+		float MaxCullDistance { 150.0f };                 // 4B  (offset 16)
+		float FadeRange { 20.0f };                        // 4B  (offset 20)
+		float WindStrength { 1.0f };                      // 4B  (offset 24)
+		float WindFrequency { 1.0f };                     // 4B  (offset 28)
+		uint32_t InstanceCount { 0 };                     // 4B  (offset 32)
+		uint8_t CastShadow { 1 };                         // 1B  (offset 36)
+		uint8_t ReceiveShadow { 1 };                      // 1B  (offset 37)
+		uint8_t AlignToNormal { 1 };                      // 1B  (offset 38)
+		uint8_t EnableWind { 1 };                         // 1B  (offset 39)
+		uint8_t _Padding[8] { 0 };                        // 8B  (offset 40)
+
+		FoliageComponent() = default;
+
+		WE_SCHEMA_BODY(World, FoliageComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/Foliage"),
+				Doc("GPU-instanced foliage and vegetation scatter cluster."))
+			WE_FIELD(FoliageAsset, Asset, Of("Foliage"),
+				Doc("Reference to the .wfoliage asset."));
+			WE_FIELD(MaxCullDistance, Float, Range(10.0f, 1000.0f), Default(150.0f),
+				Doc("Maximum view distance in meters before foliage is culled."));
+			WE_FIELD(FadeRange, Float, Range(1.0f, 100.0f), Default(20.0f),
+				Doc("Transition range for screen-door dither distance fade."));
+			WE_FIELD(WindStrength, Float, Range(0.0f, 10.0f), Default(1.0f),
+				Doc("Global wind bend strength multiplier."));
+			WE_FIELD(WindFrequency, Float, Range(0.1f, 10.0f), Default(1.0f),
+				Doc("Wind wave oscillation frequency."));
+			WE_FIELD(InstanceCount, UInt32, Default(0),
+				Doc("Total number of active foliage instances."));
+			WE_FIELD(CastShadow, UInt8, Default(1),
+				Doc("Whether foliage instances cast shadows."));
+			WE_FIELD(ReceiveShadow, UInt8, Default(1),
+				Doc("Whether foliage instances receive shadows."));
+			WE_FIELD(AlignToNormal, UInt8, Default(1),
+				Doc("Whether foliage rotates to align with ground/surface normals."));
+			WE_FIELD(EnableWind, UInt8, Default(1),
+				Doc("Whether wind sway vertex animation is active."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(FoliageComponent) == 48, "FoliageComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<FoliageComponent>, "FoliageComponent must be trivially copyable");
+	static_assert(offsetof(FoliageComponent, FoliageAsset) == 0, "FoliageAsset offset mismatch");
+	static_assert(offsetof(FoliageComponent, MaxCullDistance) == 16, "MaxCullDistance offset mismatch");
+	static_assert(offsetof(FoliageComponent, FadeRange) == 20, "FadeRange offset mismatch");
+	static_assert(offsetof(FoliageComponent, WindStrength) == 24, "WindStrength offset mismatch");
+	static_assert(offsetof(FoliageComponent, WindFrequency) == 28, "WindFrequency offset mismatch");
+	static_assert(offsetof(FoliageComponent, InstanceCount) == 32, "InstanceCount offset mismatch");
+	static_assert(offsetof(FoliageComponent, CastShadow) == 36, "CastShadow offset mismatch");
+	static_assert(offsetof(FoliageComponent, ReceiveShadow) == 37, "ReceiveShadow offset mismatch");
+	static_assert(offsetof(FoliageComponent, AlignToNormal) == 38, "AlignToNormal offset mismatch");
+	static_assert(offsetof(FoliageComponent, EnableWind) == 39, "EnableWind offset mismatch");
 }

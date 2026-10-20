@@ -28,6 +28,7 @@
 #include "WUI/Panels/SettingsPanel.h"
 #include "WUI/Panels/PreferencesPanel.h"
 #include "WUI/Panels/TerrainPanel.h"
+#include "WUI/Panels/FoliagePanel.h"
 #include "World/WUI/WuiLocalization.h"
 
 #include <algorithm>
@@ -144,6 +145,7 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 			{ "curve_editor",    EditorShell::PanelForm::Independent, { 180.0f, 180.0f, 760.0f, 480.0f } },
 			{ "particle_editor", EditorShell::PanelForm::Independent, { 160.0f, 140.0f, 840.0f, 580.0f } },
 			{ "terrain_editor",  EditorShell::PanelForm::Independent, { 160.0f, 140.0f, 860.0f, 600.0f } },
+			{ "foliage_editor",  EditorShell::PanelForm::Independent, { 160.0f, 140.0f, 860.0f, 580.0f } },
 			// 注:D3 材质编辑器是**动态面板**(每个材质一个 "material:<path>" 实例),
 			// 不在这张静态声明表里,由 IsMaterialPanel/EditorShell::OpenMaterialEditor 处理。
 		};
@@ -259,6 +261,7 @@ std::string NewCppEmptyTemplateSource(const std::string& name);
 	{
 	}
 }
+
 
 
 

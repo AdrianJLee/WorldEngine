@@ -29,6 +29,7 @@
 #include "World/Renderer/FrameExtract.h"
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Terrain/TerrainRenderer.h"
+#include "World/Foliage/FoliageRenderer.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/Systems/TransformSystem.h"
@@ -1435,6 +1436,7 @@ namespace World
 		}
 		RenderGroundGrid(camera, cameraTransform);
 		RenderTerrain(camera, cameraTransform);
+		RenderFoliage(camera, cameraTransform);
 		Render2DLighting(camera, cameraTransform);
 		RenderGeometry(camera, cameraTransform);
 		RenderParticles(camera, cameraTransform);
@@ -2948,4 +2950,36 @@ namespace World
 		}
 	}
 
+
+	void SceneRenderer::RenderFoliage(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		if (!m_ActiveScene)
+			return;
+
+		const uint32_t slot = FrameSlot();
+		FoliageRenderer::SetContext(m_CommandBuffers[slot], m_GlobalDescriptorSets[slot]);
+
+		auto foliageView = m_ActiveScene->m_Registry.view<TransformComponent, FoliageComponent>();
+		static float s_FoliageTime = 0.0f;
+		s_FoliageTime += 0.016f;
+
+		const glm::vec3 cameraPos = glm::vec3(cameraTransform[3]);
+		const glm::mat4 viewProj = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+
+		for (auto entity : foliageView)
+		{
+			if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+				continue;
+
+			const auto& [transform, comp] = foliageView.get<TransformComponent, FoliageComponent>(entity);
+			auto data = FoliageRenderer::GetOrCreateFoliageData(comp.FoliageAsset);
+			if (data)
+			{
+				FoliageRenderer::RenderFoliage(*data, comp, cameraPos, viewProj, s_FoliageTime);
+			}
+		}
+	}
+
+
 }
+

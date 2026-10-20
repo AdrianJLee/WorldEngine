@@ -2652,3 +2652,23 @@ set_tests_properties(World.Terrain PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldFoliageTests World/FoliageTests.cpp)
+target_link_libraries(WorldFoliageTests PRIVATE World)
+target_compile_features(WorldFoliageTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldFoliageTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldFoliageTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldFoliageTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Foliage COMMAND WorldFoliageTests)
+set_tests_properties(World.Foliage PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)

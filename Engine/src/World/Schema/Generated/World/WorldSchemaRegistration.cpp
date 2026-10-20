@@ -62,6 +62,7 @@ const TypeSchema& WeSchemaOf_HealthComponent();
 const TypeSchema& WeSchemaOf_SmartObjectComponent();
 const TypeSchema& WeSchemaOf_VfxComponent();
 const TypeSchema& WeSchemaOf_TerrainComponent();
+const TypeSchema& WeSchemaOf_FoliageComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -11624,6 +11625,341 @@ struct GeneratedAccess<World::TerrainComponent>
 };
 
 template <>
+struct GeneratedAccess<World::FoliageComponent>
+{
+    static Value Get_FoliageAsset(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->FoliageAsset)>>::GetPath(self->FoliageAsset));
+    }
+    static void Set_FoliageAsset(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->FoliageAsset)>>::SetPath(self->FoliageAsset, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_FoliageAsset(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->FoliageAsset)>>::GetIdentity(self->FoliageAsset);
+    }
+    static void SetAssetIdentity_FoliageAsset(void* instance, uint64_t identity)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->FoliageAsset)>>::SetIdentity(self->FoliageAsset, identity);
+    }
+    static Value Get_MaxCullDistance(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(self->MaxCullDistance);
+    }
+    static void Set_MaxCullDistance(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        self->MaxCullDistance = std::get<float>(value);
+    }
+    static Value Get_FadeRange(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(self->FadeRange);
+    }
+    static void Set_FadeRange(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        self->FadeRange = std::get<float>(value);
+    }
+    static Value Get_WindStrength(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(self->WindStrength);
+    }
+    static void Set_WindStrength(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        self->WindStrength = std::get<float>(value);
+    }
+    static Value Get_WindFrequency(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(self->WindFrequency);
+    }
+    static void Set_WindFrequency(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        self->WindFrequency = std::get<float>(value);
+    }
+    static Value Get_InstanceCount(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(self->InstanceCount);
+    }
+    static void Set_InstanceCount(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        self->InstanceCount = std::get<uint32_t>(value);
+    }
+    static Value Get_CastShadow(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(self->CastShadow);
+    }
+    static void Set_CastShadow(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        self->CastShadow = std::get<uint8_t>(value);
+    }
+    static Value Get_ReceiveShadow(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(self->ReceiveShadow);
+    }
+    static void Set_ReceiveShadow(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        self->ReceiveShadow = std::get<uint8_t>(value);
+    }
+    static Value Get_AlignToNormal(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(self->AlignToNormal);
+    }
+    static void Set_AlignToNormal(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        self->AlignToNormal = std::get<uint8_t>(value);
+    }
+    static Value Get_EnableWind(const void* instance)
+    {
+        const World::FoliageComponent* self = static_cast<const World::FoliageComponent*>(instance);
+        return Value(self->EnableWind);
+    }
+    static void Set_EnableWind(void* instance, const Value& value)
+    {
+        World::FoliageComponent* self = static_cast<World::FoliageComponent*>(instance);
+        self->EnableWind = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_FoliageAsset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCAE5A346D7864E84ull },
+            "FoliageAsset",
+            Kind::Asset,
+            &Get_FoliageAsset,
+            &Set_FoliageAsset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Foliage",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Reference to the .wfoliage asset.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_FoliageAsset,
+            &SetAssetIdentity_FoliageAsset,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxCullDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC1D48E5B59E179AAull },
+            "MaxCullDistance",
+            Kind::Float,
+            &Get_MaxCullDistance,
+            &Set_MaxCullDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(10.000000f), std::optional<float>(1000.000000f), false, false, "Maximum view distance in meters before foliage is culled.", false, "", {  }, "", std::nullopt },
+            Value(150.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FadeRange()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x87B53F07D952CFF4ull },
+            "FadeRange",
+            Kind::Float,
+            &Get_FadeRange,
+            &Set_FadeRange,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(100.000000f), false, false, "Transition range for screen-door dither distance fade.", false, "", {  }, "", std::nullopt },
+            Value(20.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WindStrength()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2A6ADA48BAF262A6ull },
+            "WindStrength",
+            Kind::Float,
+            &Get_WindStrength,
+            &Set_WindStrength,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "Global wind bend strength multiplier.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WindFrequency()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6C73BCBD1741646Bull },
+            "WindFrequency",
+            Kind::Float,
+            &Get_WindFrequency,
+            &Set_WindFrequency,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(10.000000f), false, false, "Wind wave oscillation frequency.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_InstanceCount()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4834B852AC660C15ull },
+            "InstanceCount",
+            Kind::UInt32,
+            &Get_InstanceCount,
+            &Set_InstanceCount,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Total number of active foliage instances.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CastShadow()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xAF97C0AFA9047732ull },
+            "CastShadow",
+            Kind::UInt8,
+            &Get_CastShadow,
+            &Set_CastShadow,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether foliage instances cast shadows.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ReceiveShadow()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2A07F4707457221Eull },
+            "ReceiveShadow",
+            Kind::UInt8,
+            &Get_ReceiveShadow,
+            &Set_ReceiveShadow,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether foliage instances receive shadows.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AlignToNormal()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA290FE7372B83630ull },
+            "AlignToNormal",
+            Kind::UInt8,
+            &Get_AlignToNormal,
+            &Set_AlignToNormal,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether foliage rotates to align with ground/surface normals.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableWind()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x57C8CA521FD78B70ull },
+            "EnableWind",
+            Kind::UInt8,
+            &Get_EnableWind,
+            &Set_EnableWind,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether wind sway vertex animation is active.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::FoliageComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::FoliageComponent" },
+            "FoliageComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::FoliageComponent),
+            TypeCategory::Component,
+            {
+                Field_FoliageAsset(),
+                Field_MaxCullDistance(),
+                Field_FadeRange(),
+                Field_WindStrength(),
+                Field_WindFrequency(),
+                Field_InstanceCount(),
+                Field_CastShadow(),
+                Field_ReceiveShadow(),
+                Field_AlignToNormal(),
+                Field_EnableWind(),
+            },
+            &StorageBindingOf(),
+            "Rendering/Foliage",
+            "GPU-instanced foliage and vegetation scatter cluster.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -12221,6 +12557,7 @@ const TypeSchema& WeSchemaOf_HealthComponent() { return GeneratedAccess<World::H
 const TypeSchema& WeSchemaOf_SmartObjectComponent() { return GeneratedAccess<World::SmartObjectComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_VfxComponent() { return GeneratedAccess<World::VfxComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TerrainComponent() { return GeneratedAccess<World::TerrainComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_FoliageComponent() { return GeneratedAccess<World::FoliageComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -12306,6 +12643,7 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_SmartObjectComponent(),
 			WeSchemaOf_VfxComponent(),
 			WeSchemaOf_TerrainComponent(),
+			WeSchemaOf_FoliageComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};
