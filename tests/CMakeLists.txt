@@ -2672,3 +2672,23 @@ set_tests_properties(World.Foliage PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldLighting3DTests World/Lighting3DTests.cpp)
+target_link_libraries(WorldLighting3DTests PRIVATE World)
+target_compile_features(WorldLighting3DTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldLighting3DTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldLighting3DTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldLighting3DTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Lighting3D COMMAND WorldLighting3DTests)
+set_tests_properties(World.Lighting3D PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)

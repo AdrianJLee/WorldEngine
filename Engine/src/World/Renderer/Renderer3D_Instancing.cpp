@@ -258,6 +258,10 @@ void Renderer3D::InvalidateMaterialCache(){
 
 	// ---- D4:灯光收集/打包(纯函数部分) ----
 LightRig Renderer3D::BuildLightRig(const std::vector<DirectionalLightData>& directionalLights, const std::vector<PointLightData>& pointLights, const AmbientLightData* ambient, bool glDepthConvention){
+		return BuildLightRig(directionalLights, pointLights, {}, ambient, glDepthConvention);
+	}
+
+LightRig Renderer3D::BuildLightRig(const std::vector<DirectionalLightData>& directionalLights, const std::vector<PointLightData>& pointLights, const std::vector<SpotLightData>& spotLights, const AmbientLightData* ambient, bool glDepthConvention){
 		LightRig rig;
 		// 深度约定:Vulkan 的裁剪空间 z∈[0,1] 直接就是深度缓冲值;GL 的 z∈[-1,1] 会被
 		// 硬编码的 window-depth 映射成 (z+1)/2。着色器按这个标志换算(见 u_LightCounts.z)。
@@ -311,9 +315,27 @@ LightRig Renderer3D::BuildLightRig(const std::vector<DirectionalLightData>& dire
 			light.DirectionRange = { source.Range, 0.0f, 0.0f, 0.0f };
 		}
 
+				const uint32_t spotCount = std::min<uint32_t>(static_cast<uint32_t>(spotLights.size()), (slot < 8 ? 8u - slot : 0u));
+		for (uint32_t index = 0; index < spotCount; ++index)
+		{
+			const SpotLightData& source = spotLights[index];
+			LightUniforms::Light& light = rig.Uniforms.Lights[slot++];
+			light.PositionType = { source.Position.x, source.Position.y, source.Position.z, 2.0f }; // w = 2 -> 聚光灯
+			light.ColorIntensity = { source.Color.r, source.Color.g, source.Color.b, source.Intensity };
+			const glm::vec3 direction = glm::length(source.Direction) > 1e-5f
+				? glm::normalize(source.Direction) : glm::vec3(0.0f, -1.0f, 0.0f);
+			light.DirectionRange = { direction.x, direction.y, direction.z, source.Range };
+			const float cosInner = std::cos(glm::radians(std::clamp(source.InnerConeAngle, 0.0f, 89.0f)));
+			const float cosOuter = std::cos(glm::radians(std::clamp(source.OuterConeAngle, source.InnerConeAngle + 0.1f, 90.0f)));
+			light.SpotAngles = { cosInner, cosOuter, 0.0f, 0.0f };
+			if (source.CastShadow)
+				rig.ShadowCaster = true;
+		}
+
 		rig.DirectionalLights = directionalCount;
 		rig.PointLights = pointCount;
-		rig.TotalLights = directionalCount + pointCount;
+		rig.SpotLights = spotCount;
+		rig.TotalLights = directionalCount + pointCount + spotCount;
 		// 截断数按**场景来源**计:默认主光是引擎注入的观感补偿,不算来源、也不算被丢弃。
 		const uint32_t sourceDirectional = static_cast<uint32_t>(directionalLights.size());
 		const uint32_t sourcePoint = static_cast<uint32_t>(pointLights.size());
@@ -321,9 +343,11 @@ LightRig Renderer3D::BuildLightRig(const std::vector<DirectionalLightData>& dire
 			+ (sourcePoint - std::min(sourcePoint, maxPoint));
 		rig.Uniforms.LightCounts.x = directionalCount;
 		rig.Uniforms.LightCounts.y = pointCount;
+		rig.Uniforms.LightCounts.w = spotCount;
 		// D8a2:阴影贴图边长参与 PCF 纹素换算,必须与 Init 创建的资源一致(项目清单可改)。
 		rig.Uniforms.ShadowParams.z = static_cast<float>(GetShadowMapSize());
 		return rig;
 	}
 
 }
+

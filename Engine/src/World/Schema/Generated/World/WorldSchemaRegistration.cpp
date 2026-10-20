@@ -63,6 +63,7 @@ const TypeSchema& WeSchemaOf_SmartObjectComponent();
 const TypeSchema& WeSchemaOf_VfxComponent();
 const TypeSchema& WeSchemaOf_TerrainComponent();
 const TypeSchema& WeSchemaOf_FoliageComponent();
+const TypeSchema& WeSchemaOf_SpotLight3DComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -11960,6 +11961,208 @@ struct GeneratedAccess<World::FoliageComponent>
 };
 
 template <>
+struct GeneratedAccess<World::SpotLight3DComponent>
+{
+    static Value Get_Color(const void* instance)
+    {
+        const World::SpotLight3DComponent* self = static_cast<const World::SpotLight3DComponent*>(instance);
+        return Value(self->Color);
+    }
+    static void Set_Color(void* instance, const Value& value)
+    {
+        World::SpotLight3DComponent* self = static_cast<World::SpotLight3DComponent*>(instance);
+        self->Color = std::get<glm::vec3>(value);
+    }
+    static Value Get_Intensity(const void* instance)
+    {
+        const World::SpotLight3DComponent* self = static_cast<const World::SpotLight3DComponent*>(instance);
+        return Value(self->Intensity);
+    }
+    static void Set_Intensity(void* instance, const Value& value)
+    {
+        World::SpotLight3DComponent* self = static_cast<World::SpotLight3DComponent*>(instance);
+        self->Intensity = std::get<float>(value);
+    }
+    static Value Get_Range(const void* instance)
+    {
+        const World::SpotLight3DComponent* self = static_cast<const World::SpotLight3DComponent*>(instance);
+        return Value(self->Range);
+    }
+    static void Set_Range(void* instance, const Value& value)
+    {
+        World::SpotLight3DComponent* self = static_cast<World::SpotLight3DComponent*>(instance);
+        self->Range = std::get<float>(value);
+    }
+    static Value Get_InnerConeAngle(const void* instance)
+    {
+        const World::SpotLight3DComponent* self = static_cast<const World::SpotLight3DComponent*>(instance);
+        return Value(self->InnerConeAngle);
+    }
+    static void Set_InnerConeAngle(void* instance, const Value& value)
+    {
+        World::SpotLight3DComponent* self = static_cast<World::SpotLight3DComponent*>(instance);
+        self->InnerConeAngle = std::get<float>(value);
+    }
+    static Value Get_OuterConeAngle(const void* instance)
+    {
+        const World::SpotLight3DComponent* self = static_cast<const World::SpotLight3DComponent*>(instance);
+        return Value(self->OuterConeAngle);
+    }
+    static void Set_OuterConeAngle(void* instance, const Value& value)
+    {
+        World::SpotLight3DComponent* self = static_cast<World::SpotLight3DComponent*>(instance);
+        self->OuterConeAngle = std::get<float>(value);
+    }
+    static Value Get_CastShadow(const void* instance)
+    {
+        const World::SpotLight3DComponent* self = static_cast<const World::SpotLight3DComponent*>(instance);
+        return Value(self->CastShadow);
+    }
+    static void Set_CastShadow(void* instance, const Value& value)
+    {
+        World::SpotLight3DComponent* self = static_cast<World::SpotLight3DComponent*>(instance);
+        self->CastShadow = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_Color()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x36CE77175B5A1590ull },
+            "Color",
+            Kind::Vec3,
+            &Get_Color,
+            &Set_Color,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false, "Linear color of the spot light.", true, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Intensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB3DCB00B46A7AFC2ull },
+            "Intensity",
+            Kind::Float,
+            &Get_Intensity,
+            &Set_Intensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Brightness multiplier.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Range()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBEBCA6BCEED3F28Aull },
+            "Range",
+            Kind::Float,
+            &Get_Range,
+            &Set_Range,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::optional<float>(0.100000f), std::optional<float>(1000.000000f), false, false, "Maximum illumination range in meters.", false, "", {  }, "", std::nullopt },
+            Value(20.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_InnerConeAngle()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1B1A5EA9F4854D0Bull },
+            "InnerConeAngle",
+            Kind::Float,
+            &Get_InnerConeAngle,
+            &Set_InnerConeAngle,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(89.000000f), false, false, "Inner cone half-angle in degrees where light is at full intensity.", false, "", {  }, "", std::nullopt },
+            Value(30.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_OuterConeAngle()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2F6EDE1E60AE729Eull },
+            "OuterConeAngle",
+            Kind::Float,
+            &Get_OuterConeAngle,
+            &Set_OuterConeAngle,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::optional<float>(0.100000f), std::optional<float>(90.000000f), false, false, "Outer cone half-angle in degrees where light attenuates to zero.", false, "", {  }, "", std::nullopt },
+            Value(45.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CastShadow()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBBDA935B38698E06ull },
+            "CastShadow",
+            Kind::UInt8,
+            &Get_CastShadow,
+            &Set_CastShadow,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false, "Whether this spot light casts shadows.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::SpotLight3DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::SpotLight3DComponent" },
+            "SpotLight3DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::SpotLight3DComponent),
+            TypeCategory::Component,
+            {
+                Field_Color(),
+                Field_Intensity(),
+                Field_Range(),
+                Field_InnerConeAngle(),
+                Field_OuterConeAngle(),
+                Field_CastShadow(),
+            },
+            &StorageBindingOf(),
+            "Rendering/Light",
+            "3D spot light with distance range, cone angles and penumbra falloff.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -12558,6 +12761,7 @@ const TypeSchema& WeSchemaOf_SmartObjectComponent() { return GeneratedAccess<Wor
 const TypeSchema& WeSchemaOf_VfxComponent() { return GeneratedAccess<World::VfxComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TerrainComponent() { return GeneratedAccess<World::TerrainComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_FoliageComponent() { return GeneratedAccess<World::FoliageComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_SpotLight3DComponent() { return GeneratedAccess<World::SpotLight3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -12644,6 +12848,7 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_VfxComponent(),
 			WeSchemaOf_TerrainComponent(),
 			WeSchemaOf_FoliageComponent(),
+			WeSchemaOf_SpotLight3DComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

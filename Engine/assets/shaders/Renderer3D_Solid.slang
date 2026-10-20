@@ -332,3 +332,4 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     output.EntityID = (int)round(input.v_EntityId);
     return output;
 }
+

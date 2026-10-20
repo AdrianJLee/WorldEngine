@@ -7,7 +7,17 @@ using namespace Renderer3DDetail;
 
 
 void Renderer3D::ApplyShadowCaster(LightRig& rig, const glm::mat4& lightViewProjection){
-		rig.Uniforms.ShadowViewProjection = lightViewProjection;
+		rig.Uniforms.ShadowViewProjections[0] = lightViewProjection;
+		rig.Uniforms.ShadowViewProjections[1] = lightViewProjection;
+		rig.Uniforms.ShadowViewProjections[2] = lightViewProjection;
+		rig.Uniforms.ShadowViewProjections[3] = lightViewProjection;
+		rig.Uniforms.ShadowParams.x = 1.0f;
+	}
+
+void Renderer3D::ApplyShadowCascades(LightRig& rig, const glm::mat4 cascades[4], const glm::vec4& splits){
+		for (int i = 0; i < 4; ++i)
+			rig.Uniforms.ShadowViewProjections[i] = cascades[i];
+		rig.Uniforms.CascadeSplits = splits;
 		rig.Uniforms.ShadowParams.x = 1.0f;
 	}
 
@@ -208,3 +218,5 @@ uint32_t Renderer3D::GetMaxPointLights(){
 	}
 
 }
+
+

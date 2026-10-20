@@ -15,45 +15,45 @@ namespace World
 {
 	// P1b D4:灯光 UBO 的 CPU 镜像(std140,与 Renderer3D_Solid.slang 的 cbuffer LightUniforms
 	// 逐字段对应;数组元素 48 字节)。总大小 64+16+16+16+8*48 = 496。
-	struct LightUniforms
+		struct LightUniforms
 	{
 		struct Light
 		{
-			// xyz = 位置(点光)/ w = 0 点光 | 1 方向光。
+			// xyz = 位置(点光/聚光)/ w = 0 点光 | 1 方向光 | 2 聚光灯。
 			glm::vec4 PositionType { 0.0f, 0.0f, 0.0f, 0.0f };
 			// rgb = 线性色, a = 强度。
 			glm::vec4 ColorIntensity { 1.0f, 1.0f, 1.0f, 1.0f };
-			// 方向光:xyz = 传播方向(已归一化);点光:x = 范围。
+			// 方向光:xyz = 传播方向(已归一化);点光:x = 范围;聚光灯:xyz = 方向, w = 范围。
 			glm::vec4 DirectionRange { 0.0f, -1.0f, 0.0f, 0.0f };
+			// 聚光灯参数: x = cos(InnerAngle), y = cos(OuterAngle), zw = 保留。
+			glm::vec4 SpotAngles { 0.0f, 0.0f, 0.0f, 0.0f };
 		};
 
-		// 方向光正交矩阵(阴影通道写深度用同一矩阵;主通道用它算投影坐标)。
-		glm::mat4 ShadowViewProjection { 1.0f };
+		// 4 级 CSM 级联正交投影矩阵(64B * 4 = 256B)
+		glm::mat4 ShadowViewProjections[4] { glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f) };
+		// 4 级视锥切片深度距离 (米)
+		glm::vec4 CascadeSplits { 10.0f, 30.0f, 80.0f, 200.0f };
 		// x = 启用阴影, y = 深度 bias, z = 贴图边长, w = PCF 半径(纹素)。
 		glm::vec4 ShadowParams { 0.0f, 0.0f, 2048.0f, 1.0f };
 		// rgb = 环境光线性色, a = 强度(无 AmbientLightComponent 时为 0.25 灰默认值)。
 		glm::vec4 Ambient { 0.25f, 0.25f, 0.25f, 1.0f };
-		// x = 方向光数, y = 点光数, z = 深度约定(0 = Vulkan 的 [0,1] 裁剪深度,
-		// 1 = OpenGL 的 [-1,1] 裁剪深度 → 深度缓冲存 (z+1)/2), w = 保留。
+		// x = 方向光数, y = 点光数, z = 深度约定(0 = Vulkan [0,1], 1 = OpenGL [-1,1]), w = 聚光灯数。
 		glm::uvec4 LightCounts { 0u, 0u, 0u, 0u };
 		Light Lights[8];
 	};
-	static_assert(sizeof(LightUniforms) == 496, "LightUniforms must match Renderer3D_Solid.slang (std140)");
-	// 数据布局门禁 C(标准 docs/dev/performance-and-data-layout.md §4.3 硬规则 1):
-	// 跨边界结构体除了整尺寸,还必须逐字段钉住偏移。整尺寸断言抓不住"成员顺序变了但总大小不变"
-	// —— 那是 std140 与着色器逐字段错位、画面静默出错而 CPU 侧看不出来的情形。
-	static_assert(offsetof(LightUniforms, ShadowViewProjection) == 0, "std140: ShadowViewProjection must stay first");
-	static_assert(offsetof(LightUniforms, ShadowParams) == 64, "std140: ShadowParams at 64");
-	static_assert(offsetof(LightUniforms, Ambient) == 80, "std140: Ambient at 80");
-	static_assert(offsetof(LightUniforms, LightCounts) == 96, "std140: LightCounts at 96");
-	static_assert(offsetof(LightUniforms, Lights) == 112, "std140: Lights[8] at 112 (8 x 48 = 384)");
-	static_assert(sizeof(LightUniforms::Light) == 48, "std140: one Light is 48 bytes (3 x vec4)");
+	static_assert(sizeof(LightUniforms) == 832, "LightUniforms must match Renderer3D_Solid.slang (std140, 832 bytes)");
+	static_assert(offsetof(LightUniforms, ShadowViewProjections) == 0, "std140: ShadowViewProjections at 0 (256B)");
+	static_assert(offsetof(LightUniforms, CascadeSplits) == 256, "std140: CascadeSplits at 256");
+	static_assert(offsetof(LightUniforms, ShadowParams) == 272, "std140: ShadowParams at 272");
+	static_assert(offsetof(LightUniforms, Ambient) == 288, "std140: Ambient at 288");
+	static_assert(offsetof(LightUniforms, LightCounts) == 304, "std140: LightCounts at 304");
+	static_assert(offsetof(LightUniforms, Lights) == 320, "std140: Lights[8] at 320 (8 x 64 = 512B)");
+	static_assert(sizeof(LightUniforms::Light) == 64, "std140: one Light is 64 bytes (4 x vec4)");
 	static_assert(offsetof(LightUniforms::Light, PositionType) == 0, "std140: Light.PositionType at 0");
 	static_assert(offsetof(LightUniforms::Light, ColorIntensity) == 16, "std140: Light.ColorIntensity at 16");
 	static_assert(offsetof(LightUniforms::Light, DirectionRange) == 32, "std140: Light.DirectionRange at 32");
+	static_assert(offsetof(LightUniforms::Light, SpotAngles) == 48, "std140: Light.SpotAngles at 48");
 
-	// 收集阶段得到的灯光数据(SceneRenderer 从组件填充;打包由 BuildLightRig 完成,
-	// 因此上限/归一化/默认值都是纯函数,可在 headless 测试里直接断言)。
 	struct DirectionalLightData
 	{
 		glm::vec3 Color { 1.0f, 1.0f, 1.0f };
@@ -70,6 +70,17 @@ namespace World
 		float Range = 10.0f;
 	};
 
+	struct SpotLightData
+	{
+		glm::vec3 Color { 1.0f, 1.0f, 1.0f };
+		float Intensity = 1.0f;
+		glm::vec3 Position { 0.0f, 0.0f, 0.0f };
+		float Range = 20.0f;
+		glm::vec3 Direction { 0.0f, -1.0f, 0.0f };
+		float InnerConeAngle = 30.0f;
+		float OuterConeAngle = 45.0f;
+		bool CastShadow = false;
+	};
 	struct AmbientLightData
 	{
 		glm::vec3 Color { 1.0f, 1.0f, 1.0f };
@@ -81,6 +92,7 @@ namespace World
 		LightUniforms Uniforms;
 		uint32_t DirectionalLights = 0;
 		uint32_t PointLights = 0;
+		uint32_t SpotLights = 0;
 		uint32_t TotalLights = 0;
 		uint32_t DroppedLights = 0;
 		bool ShadowCaster = false;   // 是否有"主方向光 + CastShadow"
@@ -135,8 +147,12 @@ namespace World
 		static LightRig BuildLightRig(const std::vector<DirectionalLightData>& directionalLights,
 			const std::vector<PointLightData>& pointLights, const AmbientLightData* ambient,
 			bool glDepthConvention);
+		static LightRig BuildLightRig(const std::vector<DirectionalLightData>& directionalLights,
+			const std::vector<PointLightData>& pointLights, const std::vector<SpotLightData>& spotLights, const AmbientLightData* ambient,
+			bool glDepthConvention);
 		// 让主方向光(CastShadow)参与阴影:写入正交光源矩阵并启用 u_ShadowParams.x。
 		static void ApplyShadowCaster(LightRig& rig, const glm::mat4& lightViewProjection);
+		static void ApplyShadowCascades(LightRig& rig, const glm::mat4 cascades[4], const glm::vec4& splits);
 		// 本帧灯光统计(编辑器 Stats 面板 + 自动化日志):数量上限、截断数与阴影通道 CPU 耗时;
 		// 数量/阴影开关变化或首帧时打一行 [lighting]。
 		static void ReportLighting(const LightRig& rig, double shadowPassMilliseconds);
@@ -332,3 +348,7 @@ namespace World
 			bool reservedPalette = false);
 	};
 }
+
+
+
+

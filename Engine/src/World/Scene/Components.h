@@ -788,6 +788,44 @@ namespace World
 
 	// 场景级环境光:多盏时**第一盏**生效;没有该组件时用 0.25 灰默认值
 	// (与 D4 之前的占位实现同观感,既有场景不会突然全黑)。
+
+	struct SpotLight3DComponent
+	{
+		glm::vec3 Color { 1.0f, 1.0f, 1.0f };      // 12B (offset 0)
+		float Intensity = 1.0f;                    // 4B  (offset 12)
+		float Range = 20.0f;                       // 4B  (offset 16)
+		float InnerConeAngle = 30.0f;              // 4B  (offset 20)
+		float OuterConeAngle = 45.0f;              // 4B  (offset 24)
+		uint8_t CastShadow = 0;                    // 1B  (offset 28)
+		uint8_t _Padding[3] { 0 };                 // 3B  (offset 29)
+
+		SpotLight3DComponent() = default;
+
+		WE_SCHEMA_BODY(World, SpotLight3DComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/Light"),
+				Doc("3D spot light with distance range, cone angles and penumbra falloff."))
+			WE_FIELD(Color, Vec3, Group("Light"), Color(),
+				Doc("Linear color of the spot light."));
+			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f),
+				Doc("Brightness multiplier."));
+			WE_FIELD(Range, Float, Group("Light"), Range(0.1f, 1000.0f), Default(20.0f),
+				Doc("Maximum illumination range in meters."));
+			WE_FIELD(InnerConeAngle, Float, Group("Light"), Range(0.0f, 89.0f), Default(30.0f),
+				Doc("Inner cone half-angle in degrees where light is at full intensity."));
+			WE_FIELD(OuterConeAngle, Float, Group("Light"), Range(0.1f, 90.0f), Default(45.0f),
+				Doc("Outer cone half-angle in degrees where light attenuates to zero."));
+			WE_FIELD(CastShadow, UInt8, Group("Light"), Default(0),
+				Doc("Whether this spot light casts shadows."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(SpotLight3DComponent) == 32, "SpotLight3DComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<SpotLight3DComponent>, "SpotLight3DComponent must be trivially copyable");
+	static_assert(offsetof(SpotLight3DComponent, Color) == 0, "Color offset mismatch");
+	static_assert(offsetof(SpotLight3DComponent, Intensity) == 12, "Intensity offset mismatch");
+	static_assert(offsetof(SpotLight3DComponent, Range) == 16, "Range offset mismatch");
+	static_assert(offsetof(SpotLight3DComponent, InnerConeAngle) == 20, "InnerConeAngle offset mismatch");
+	static_assert(offsetof(SpotLight3DComponent, OuterConeAngle) == 24, "OuterConeAngle offset mismatch");
+	static_assert(offsetof(SpotLight3DComponent, CastShadow) == 28, "CastShadow offset mismatch");
 	struct AmbientLightComponent
 	{
 		glm::vec3 Color { 1.0f, 1.0f, 1.0f };
@@ -2178,3 +2216,4 @@ namespace World
 	static_assert(offsetof(FoliageComponent, AlignToNormal) == 38, "AlignToNormal offset mismatch");
 	static_assert(offsetof(FoliageComponent, EnableWind) == 39, "EnableWind offset mismatch");
 }
+

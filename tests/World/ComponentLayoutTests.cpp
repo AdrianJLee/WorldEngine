@@ -60,6 +60,7 @@ namespace
 		{ "World::ParallaxLayerComponent",        32 },
 		{ "World::DirectionalLightComponent",    32 },
 		{ "World::PointLightComponent",          20 },
+		{ "World::SpotLight3DComponent",          32 },
 		{ "World::AmbientLightComponent",        16 },
 		{ "World::PointLight2DComponent",        48 },
 		{ "World::GlobalLight2DComponent",       36 },
@@ -195,6 +196,7 @@ int main()
 		return 1;
 	}
 }
+
 
 
 

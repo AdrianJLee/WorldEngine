@@ -13,11 +13,13 @@ struct Light
     float4 PositionType;
     float4 ColorIntensity;
     float4 DirectionRange;
+    float4 SpotAngles;
 };
 
 struct LightUniforms
 {
-    float4x4 ShadowViewProjection;
+    float4x4 ShadowViewProjections[4];
+    float4 CascadeSplits;
     float4 ShadowParams;
     float4 Ambient;
     uint4 LightCounts;
@@ -159,3 +161,4 @@ float4 PSMain(PSInput input) : SV_Target
     float3 finalColor = ambient + directLight;
     return float4(finalColor, albedo.a);
 }
+

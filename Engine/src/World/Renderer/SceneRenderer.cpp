@@ -30,6 +30,7 @@
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Terrain/TerrainRenderer.h"
 #include "World/Foliage/FoliageRenderer.h"
+#include "World/Renderer/CSM.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/Systems/TransformSystem.h"
@@ -2982,4 +2983,5 @@ namespace World
 
 
 }
+
 
