@@ -765,6 +765,7 @@ bool EditorShell::SelectContentAsset(const std::string& logicalPath, const char*
 		// (与打开导入位置模态前同一条处理)。
 		if (!m_Layout.Contains(panel))
 			DockPanelBackToTree(panel);
+		AiActivatePanel(panel, nullptr);
 		const auto found = m_PanelRegistry.find(panel);
 		if (found == m_PanelRegistry.end())
 			return false;
@@ -898,6 +899,7 @@ bool EditorShell::RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope
 		const std::string panel = "content_browser";
 		if (!m_Layout.Contains(panel))
 			DockPanelBackToTree(panel);
+		AiActivatePanel(panel, nullptr);
 		const auto found = m_PanelRegistry.find(panel);
 		if (found == m_PanelRegistry.end())
 			return fail("content browser panel is not registered");

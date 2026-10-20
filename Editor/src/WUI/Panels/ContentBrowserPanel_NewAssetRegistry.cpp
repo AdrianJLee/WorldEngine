@@ -403,13 +403,78 @@ bool ContentBrowserPanel::SelectAsset(const std::string& logicalPath, const char
 		std::replace(normalized.begin(), normalized.end(), '\\', '/');
 		if (normalized.empty())
 			return false;
-		const std::filesystem::path absolute = m_Model.Root / std::filesystem::path(normalized);
+
 		std::error_code ec;
-		if (!std::filesystem::exists(absolute, ec))
+		std::filesystem::path targetAbsolute;
+		BrowserRootScope targetScope = BrowserRootScope::Content;
+
+		// 1. 判断是否带有 "engine/" 前缀
+		if (normalized.rfind("engine/", 0) == 0)
+		{
+			std::string stripped = normalized.substr(7);
+			std::filesystem::path cand = EngineContentRoot() / std::filesystem::path(stripped);
+			if (std::filesystem::exists(cand, ec))
+			{
+				targetAbsolute = cand;
+				targetScope = BrowserRootScope::EngineContent;
+			}
+		}
+
+		// 2. 判断是否在当前项目内容根下
+		if (targetAbsolute.empty())
+		{
+			std::filesystem::path cand = World::Paths::AssetRoot() / std::filesystem::path(normalized);
+			if (std::filesystem::exists(cand, ec))
+			{
+				targetAbsolute = cand;
+				targetScope = BrowserRootScope::Content;
+			}
+		}
+
+		// 3. 判断是否在引擎全局内容根下
+		if (targetAbsolute.empty() && EngineContentAvailable())
+		{
+			std::filesystem::path cand = EngineContentRoot() / std::filesystem::path(normalized);
+			if (std::filesystem::exists(cand, ec))
+			{
+				targetAbsolute = cand;
+				targetScope = BrowserRootScope::EngineContent;
+			}
+		}
+
+		// 4. 绝对路径回退判定
+		if (targetAbsolute.empty())
+		{
+			std::filesystem::path absPath(normalized);
+			if (std::filesystem::exists(absPath, ec))
+			{
+				targetAbsolute = absPath;
+				if (EngineContentAvailable() && targetAbsolute.generic_string().find(EngineContentRoot().generic_string()) != std::string::npos)
+				{
+					targetScope = BrowserRootScope::EngineContent;
+				}
+				else
+				{
+					targetScope = BrowserRootScope::Content;
+				}
+			}
+		}
+
+		if (targetAbsolute.empty())
 			return false;
-		if (absolute.parent_path() != m_Model.Current)
-			Navigate(absolute.parent_path());
-		SelectCreated(absolute, op);
+
+		// 切换到目标根(项目内容库或引擎内容库)
+		if (m_Model.Scope != targetScope)
+		{
+			SwitchRoot(targetScope);
+		}
+
+		// 导航至所在目录并高亮选中该资产条目
+		if (targetAbsolute.parent_path() != m_Model.Current)
+		{
+			Navigate(targetAbsolute.parent_path());
+		}
+		SelectCreated(targetAbsolute, op);
 		return true;
 	}
 
