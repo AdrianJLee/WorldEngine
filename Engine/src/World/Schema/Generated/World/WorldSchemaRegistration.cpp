@@ -61,6 +61,7 @@ const TypeSchema& WeSchemaOf_PostProcessComponent();
 const TypeSchema& WeSchemaOf_HealthComponent();
 const TypeSchema& WeSchemaOf_SmartObjectComponent();
 const TypeSchema& WeSchemaOf_VfxComponent();
+const TypeSchema& WeSchemaOf_TerrainComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -11230,6 +11231,399 @@ struct GeneratedAccess<World::VfxComponent>
 };
 
 template <>
+struct GeneratedAccess<World::TerrainComponent>
+{
+    static Value Get_TerrainAsset(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->TerrainAsset)>>::GetPath(self->TerrainAsset));
+    }
+    static void Set_TerrainAsset(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->TerrainAsset)>>::SetPath(self->TerrainAsset, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_TerrainAsset(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->TerrainAsset)>>::GetIdentity(self->TerrainAsset);
+    }
+    static void SetAssetIdentity_TerrainAsset(void* instance, uint64_t identity)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->TerrainAsset)>>::SetIdentity(self->TerrainAsset, identity);
+    }
+    static Value Get_CellSize(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->CellSize);
+    }
+    static void Set_CellSize(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->CellSize = std::get<float>(value);
+    }
+    static Value Get_HeightScale(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->HeightScale);
+    }
+    static void Set_HeightScale(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->HeightScale = std::get<float>(value);
+    }
+    static Value Get_MinHeight(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->MinHeight);
+    }
+    static void Set_MinHeight(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->MinHeight = std::get<float>(value);
+    }
+    static Value Get_MaxHeight(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->MaxHeight);
+    }
+    static void Set_MaxHeight(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->MaxHeight = std::get<float>(value);
+    }
+    static Value Get_ChunkResolution(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->ChunkResolution);
+    }
+    static void Set_ChunkResolution(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->ChunkResolution = std::get<uint32_t>(value);
+    }
+    static Value Get_LodDistanceRatio(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->LodDistanceRatio);
+    }
+    static void Set_LodDistanceRatio(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->LodDistanceRatio = std::get<float>(value);
+    }
+    static Value Get_LayerCount(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->LayerCount);
+    }
+    static void Set_LayerCount(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->LayerCount = std::get<uint32_t>(value);
+    }
+    static Value Get_CastShadow(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->CastShadow);
+    }
+    static void Set_CastShadow(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->CastShadow = std::get<uint8_t>(value);
+    }
+    static Value Get_ReceiveShadow(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->ReceiveShadow);
+    }
+    static void Set_ReceiveShadow(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->ReceiveShadow = std::get<uint8_t>(value);
+    }
+    static Value Get_HoleCutoutEnabled(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->HoleCutoutEnabled);
+    }
+    static void Set_HoleCutoutEnabled(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->HoleCutoutEnabled = std::get<uint8_t>(value);
+    }
+    static Value Get_EnableCollision(const void* instance)
+    {
+        const World::TerrainComponent* self = static_cast<const World::TerrainComponent*>(instance);
+        return Value(self->EnableCollision);
+    }
+    static void Set_EnableCollision(void* instance, const Value& value)
+    {
+        World::TerrainComponent* self = static_cast<World::TerrainComponent*>(instance);
+        self->EnableCollision = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_TerrainAsset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x637A287E65D70CF8ull },
+            "TerrainAsset",
+            Kind::Asset,
+            &Get_TerrainAsset,
+            &Set_TerrainAsset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Terrain",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Reference to the .wterrain data asset containing heightfield and splatmap data.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_TerrainAsset,
+            &SetAssetIdentity_TerrainAsset,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CellSize()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE52DE5B258A8FE42ull },
+            "CellSize",
+            Kind::Float,
+            &Get_CellSize,
+            &Set_CellSize,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(100.000000f), false, false, "World space grid cell spacing in units.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_HeightScale()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBA811240223B2F02ull },
+            "HeightScale",
+            Kind::Float,
+            &Get_HeightScale,
+            &Set_HeightScale,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.010000f), std::optional<float>(100.000000f), false, false, "Vertical scaling multiplier applied to heights.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MinHeight()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4EE55531F4FE996Eull },
+            "MinHeight",
+            Kind::Float,
+            &Get_MinHeight,
+            &Set_MinHeight,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Minimum terrain elevation bound.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxHeight()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9D6BF3D0F230A088ull },
+            "MaxHeight",
+            Kind::Float,
+            &Get_MaxHeight,
+            &Set_MaxHeight,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Maximum terrain elevation bound.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ChunkResolution()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6D71437B6042845Eull },
+            "ChunkResolution",
+            Kind::UInt32,
+            &Get_ChunkResolution,
+            &Set_ChunkResolution,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(8.000000f), std::optional<float>(256.000000f), false, false, "Vertex resolution per terrain chunk quad (e.g. 64x64).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LodDistanceRatio()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFAD01FC630C5AC40ull },
+            "LodDistanceRatio",
+            Kind::Float,
+            &Get_LodDistanceRatio,
+            &Set_LodDistanceRatio,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.500000f), std::optional<float>(10.000000f), false, false, "Distance transition ratio for chunk CDLOD transitions.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LayerCount()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x50FBF1D58145DA5Full },
+            "LayerCount",
+            Kind::UInt32,
+            &Get_LayerCount,
+            &Set_LayerCount,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(4.000000f), false, false, "Number of active splat material layers (1 to 4).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CastShadow()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7ACEF818C6E81524ull },
+            "CastShadow",
+            Kind::UInt8,
+            &Get_CastShadow,
+            &Set_CastShadow,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the terrain casts shadows into the scene.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ReceiveShadow()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE3E09D5EA4792C10ull },
+            "ReceiveShadow",
+            Kind::UInt8,
+            &Get_ReceiveShadow,
+            &Set_ReceiveShadow,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the terrain receives shadow maps.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_HoleCutoutEnabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5467E9C9596A4BEAull },
+            "HoleCutoutEnabled",
+            Kind::UInt8,
+            &Get_HoleCutoutEnabled,
+            &Set_HoleCutoutEnabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Enable cave/tunnel hole cutout rendering.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableCollision()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x945A977F02015420ull },
+            "EnableCollision",
+            Kind::UInt8,
+            &Get_EnableCollision,
+            &Set_EnableCollision,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Enable 3D heightfield physics collision.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::TerrainComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::TerrainComponent" },
+            "TerrainComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::TerrainComponent),
+            TypeCategory::Component,
+            {
+                Field_TerrainAsset(),
+                Field_CellSize(),
+                Field_HeightScale(),
+                Field_MinHeight(),
+                Field_MaxHeight(),
+                Field_ChunkResolution(),
+                Field_LodDistanceRatio(),
+                Field_LayerCount(),
+                Field_CastShadow(),
+                Field_ReceiveShadow(),
+                Field_HoleCutoutEnabled(),
+                Field_EnableCollision(),
+            },
+            &StorageBindingOf(),
+            "Rendering/Terrain",
+            "3D heightfield terrain component with LOD chunks, multi-layer splat blending and collision.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -11826,6 +12220,7 @@ const TypeSchema& WeSchemaOf_PostProcessComponent() { return GeneratedAccess<Wor
 const TypeSchema& WeSchemaOf_HealthComponent() { return GeneratedAccess<World::HealthComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SmartObjectComponent() { return GeneratedAccess<World::SmartObjectComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_VfxComponent() { return GeneratedAccess<World::VfxComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_TerrainComponent() { return GeneratedAccess<World::TerrainComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -11910,6 +12305,7 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_HealthComponent(),
 			WeSchemaOf_SmartObjectComponent(),
 			WeSchemaOf_VfxComponent(),
+			WeSchemaOf_TerrainComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

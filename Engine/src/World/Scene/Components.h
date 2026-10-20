@@ -14,6 +14,7 @@
 #include <any>
 #include <box2d/id.h>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <glm/glm.hpp>
@@ -2061,4 +2062,65 @@ namespace World
 				Doc("Master toggle for post-processing volume."));
 		WE_SCHEMA_END
 	};
+	struct TerrainComponent
+	{
+		AssetRef TerrainAsset;                           // 16B (offset 0)
+		float CellSize { 1.0f };                         // 4B  (offset 16)
+		float HeightScale { 1.0f };                      // 4B  (offset 20)
+		float MinHeight { 0.0f };                        // 4B  (offset 24)
+		float MaxHeight { 256.0f };                      // 4B  (offset 28)
+		uint32_t ChunkResolution { 64 };                 // 4B  (offset 32)
+		float LodDistanceRatio { 1.5f };                 // 4B  (offset 36)
+		uint32_t LayerCount { 4 };                       // 4B  (offset 40)
+		uint8_t CastShadow { 1 };                        // 1B  (offset 44)
+		uint8_t ReceiveShadow { 1 };                     // 1B  (offset 45)
+		uint8_t HoleCutoutEnabled { 1 };                 // 1B  (offset 46)
+		uint8_t EnableCollision { 1 };                   // 1B  (offset 47)
+
+		TerrainComponent() = default;
+
+		WE_SCHEMA_BODY(World, TerrainComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/Terrain"),
+				Doc("3D heightfield terrain component with LOD chunks, multi-layer splat blending and collision."))
+			WE_FIELD(TerrainAsset, Asset, Of("Terrain"),
+				Doc("Reference to the .wterrain data asset containing heightfield and splatmap data."));
+			WE_FIELD(CellSize, Float, Range(0.1f, 100.0f),
+				Doc("World space grid cell spacing in units."));
+			WE_FIELD(HeightScale, Float, Range(0.01f, 100.0f),
+				Doc("Vertical scaling multiplier applied to heights."));
+			WE_FIELD(MinHeight, Float,
+				Doc("Minimum terrain elevation bound."));
+			WE_FIELD(MaxHeight, Float,
+				Doc("Maximum terrain elevation bound."));
+			WE_FIELD(ChunkResolution, UInt32, Range(8, 256),
+				Doc("Vertex resolution per terrain chunk quad (e.g. 64x64)."));
+			WE_FIELD(LodDistanceRatio, Float, Range(0.5f, 10.0f),
+				Doc("Distance transition ratio for chunk CDLOD transitions."));
+			WE_FIELD(LayerCount, UInt32, Range(1, 4),
+				Doc("Number of active splat material layers (1 to 4)."));
+			WE_FIELD(CastShadow, UInt8, Default(1),
+				Doc("Whether the terrain casts shadows into the scene."));
+			WE_FIELD(ReceiveShadow, UInt8, Default(1),
+				Doc("Whether the terrain receives shadow maps."));
+			WE_FIELD(HoleCutoutEnabled, UInt8, Default(1),
+				Doc("Enable cave/tunnel hole cutout rendering."));
+			WE_FIELD(EnableCollision, UInt8, Default(1),
+				Doc("Enable 3D heightfield physics collision."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(TerrainComponent) == 48, "TerrainComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<TerrainComponent>, "TerrainComponent must be trivially copyable");
+	static_assert(offsetof(TerrainComponent, TerrainAsset) == 0, "TerrainAsset offset mismatch");
+	static_assert(offsetof(TerrainComponent, CellSize) == 16, "CellSize offset mismatch");
+	static_assert(offsetof(TerrainComponent, HeightScale) == 20, "HeightScale offset mismatch");
+	static_assert(offsetof(TerrainComponent, MinHeight) == 24, "MinHeight offset mismatch");
+	static_assert(offsetof(TerrainComponent, MaxHeight) == 28, "MaxHeight offset mismatch");
+	static_assert(offsetof(TerrainComponent, ChunkResolution) == 32, "ChunkResolution offset mismatch");
+	static_assert(offsetof(TerrainComponent, LodDistanceRatio) == 36, "LodDistanceRatio offset mismatch");
+	static_assert(offsetof(TerrainComponent, LayerCount) == 40, "LayerCount offset mismatch");
+	static_assert(offsetof(TerrainComponent, CastShadow) == 44, "CastShadow offset mismatch");
+	static_assert(offsetof(TerrainComponent, ReceiveShadow) == 45, "ReceiveShadow offset mismatch");
+	static_assert(offsetof(TerrainComponent, HoleCutoutEnabled) == 46, "HoleCutoutEnabled offset mismatch");
+	static_assert(offsetof(TerrainComponent, EnableCollision) == 47, "EnableCollision offset mismatch");
+
 }

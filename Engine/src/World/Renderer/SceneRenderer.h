@@ -84,6 +84,7 @@ namespace World
 		void Render2DLighting(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderDebug(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderGroundGrid(const Camera& camera, const glm::mat4& cameraTransform);
+		void RenderTerrain(const Camera& camera, const glm::mat4& cameraTransform);
 		// D5:网格/材质资产加载失败只警告一次(按路径去重),避免逐帧刷屏。
 		void WarnOnce(const std::string& key, const std::string& message);
 		// L2 驻留层入口。世界资源表存在时经 AssetRegistry 解析(记账 + 可回收);

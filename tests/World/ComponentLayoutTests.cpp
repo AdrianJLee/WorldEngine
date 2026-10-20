@@ -97,6 +97,7 @@ namespace
 		{ "World::HealthComponent",              32 },
 		{ "World::SmartObjectComponent",         44 },
 		{ "World::VfxComponent",                 64 },
+		{ "World::TerrainComponent",             48 },
 	};
 
 	// 非 schema 组件:不在注册表里,预算与豁免由 ComponentLayoutBudget.h 的编译期断言覆盖。

@@ -28,6 +28,7 @@
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/FrameExtract.h"
 #include "World/Renderer/TransformInterpolation.h"
+#include "World/Terrain/TerrainRenderer.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/Systems/TransformSystem.h"
@@ -45,6 +46,14 @@
 
 namespace World
 {
+	namespace Detail
+	{
+		template <typename T, typename = void>
+		struct IsCompleteType : std::false_type {};
+
+		template <typename T>
+		struct IsCompleteType<T, std::void_t<decltype(sizeof(T))>> : std::true_type {};
+	}
 	namespace
 	{
 		// 并行阈值:低于此规模时串行更快(调度/缓存开销 > 收益)。实测口径见
@@ -1114,6 +1123,33 @@ namespace World
 						Renderer3D::SubmitShadowSubmesh(draw.MeshAsset, draw.SubmeshIndex, *draw.Model);
 				}
 			}
+			if constexpr (Detail::IsCompleteType<TerrainComponent>::value)
+			{
+				if (m_ActiveScene)
+				{
+					auto terrainView = m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>();
+					for (auto entity : terrainView)
+					{
+						if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+							continue;
+						const auto& [transform, comp] = terrainView.get<TransformComponent, TerrainComponent>(entity);
+						if (comp.CastShadow == 0)
+							continue;
+						auto data = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+						if (data)
+						{
+							TerrainRenderSettings settings;
+							settings.Transform = transform.GetLocalMatrix();
+							settings.ChunkResolution = comp.ChunkResolution;
+							settings.LodDistanceRatio = comp.LodDistanceRatio;
+							settings.CastShadow = true;
+							settings.HoleCutoutEnabled = (comp.HoleCutoutEnabled != 0);
+							settings.EntityId = static_cast<int32_t>(entity);
+							TerrainRenderer::RenderTerrainShadow(*data, settings);
+						}
+					}
+				}
+			}
 			Renderer3D::EndShadowPass();
 			m_CommandBuffers[slot]->EndRenderPass();
 			shadowPassMilliseconds = std::chrono::duration<double, std::milli>(
@@ -1398,6 +1434,7 @@ namespace World
 			RenderDebug(camera, cameraTransform);
 		}
 		RenderGroundGrid(camera, cameraTransform);
+		RenderTerrain(camera, cameraTransform);
 		Render2DLighting(camera, cameraTransform);
 		RenderGeometry(camera, cameraTransform);
 		RenderParticles(camera, cameraTransform);
@@ -2870,6 +2907,43 @@ namespace World
 				if (alpha <= 0.01f) continue;
 				Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z),
 					glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+			}
+		}
+	}
+
+
+
+	void SceneRenderer::RenderTerrain(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		if (!m_ActiveScene)
+			return;
+
+		const uint32_t slot = FrameSlot();
+		TerrainRenderer::SetContext(m_CommandBuffers[slot], m_GlobalDescriptorSets[slot]);
+
+		if constexpr (Detail::IsCompleteType<TerrainComponent>::value)
+		{
+			auto terrainView = m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>();
+			for (auto entity : terrainView)
+			{
+				if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+					continue;
+
+				const auto& [transform, comp] = terrainView.get<TransformComponent, TerrainComponent>(entity);
+				auto data = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+				if (data)
+				{
+					TerrainRenderSettings settings;
+					settings.Transform = transform.GetLocalMatrix();
+					settings.ChunkResolution = comp.ChunkResolution;
+					settings.LodDistanceRatio = comp.LodDistanceRatio;
+					settings.CastShadow = (comp.CastShadow != 0);
+					settings.ReceiveShadow = (comp.ReceiveShadow != 0);
+					settings.HoleCutoutEnabled = (comp.HoleCutoutEnabled != 0);
+					settings.EntityId = static_cast<int32_t>(entity);
+
+					TerrainRenderer::RenderTerrain(*data, settings, camera, cameraTransform);
+				}
 			}
 		}
 	}

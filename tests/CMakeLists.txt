@@ -2632,3 +2632,23 @@ set_tests_properties(World.AiEndToEndWorkflow PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 120
 )
+
+add_executable(WorldTerrainTests World/TerrainTests.cpp)
+target_link_libraries(WorldTerrainTests PRIVATE World)
+target_compile_features(WorldTerrainTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldTerrainTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldTerrainTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldTerrainTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Terrain COMMAND WorldTerrainTests)
+set_tests_properties(World.Terrain PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)

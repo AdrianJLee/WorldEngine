@@ -51,6 +51,7 @@ struct World::PostProcessComponent
 struct World::HealthComponent
 struct World::SmartObjectComponent
 struct World::VfxComponent
+struct World::TerrainComponent
 struct World::UUID
 struct World::CameraSettings
 enum World::MeshRendererComponent::PrimitiveShape
