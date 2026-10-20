@@ -4137,7 +4137,7 @@ void ParticleEditorPanel::NewAsset()
 
 
 		// 动态统计展开卡片真实高度总和
-		float totalCardsHeight = 340.0f; // 基础配置 + 材质与贴图
+		float totalCardsHeight = 120.0f; // 纯粹基础生命周期属性
 		totalCardsHeight += 64.0f;       // 模块堆栈标题
 		if (m_AddModuleMenuOpen)
 		{
@@ -4154,6 +4154,10 @@ void ParticleEditorPanel::NewAsset()
 			    mod.Id == "mod.update.rotation_over_life" || mod.Id == "mod.update.shockwave_expansion")
 			{
 				cardH += 26.0f;
+			}
+			if (mod.Id == "mod.render.sprite")
+			{
+				cardH += 184.0f;
 			}
 			totalCardsHeight += cardH + 8.0f;
 		}
@@ -4198,212 +4202,7 @@ void ParticleEditorPanel::NewAsset()
 			m_Dirty = true;
 			UpdateLiveSimulationSettings();
 		}
-		cy += 24.0f;
-
-		// 混合模式 (需求 1: 全量采用下拉列表枚举)
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "混合模式:", theme.TextMuted, 10.0f);
-		static const std::vector<std::string> s_BaseBlendOptions = {
-			"半透 (AlphaBlend)",
-			"加法 (Additive)",
-			"正片叠底 (Multiply)",
-			"不透明 (Opaque)"
-		};
-		int curBlendIdx = (em.Material.BlendMode == ParticleBlendMode::Additive) ? 1 : ((em.Material.BlendMode == ParticleBlendMode::Multiply) ? 2 : ((em.Material.BlendMode == ParticleBlendMode::Opaque) ? 3 : 0));
-		const Wui::WuiRect blendRect { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
-		if (Wui::Combo(ctx, Wui::HashId("vfx.em.blend.combo"), blendRect, "", s_BaseBlendOptions, curBlendIdx, theme))
-		{
-			PushUndoSnapshot();
-			if (curBlendIdx == 1) em.Material.BlendMode = ParticleBlendMode::Additive;
-			else if (curBlendIdx == 2) em.Material.BlendMode = ParticleBlendMode::Multiply;
-			else if (curBlendIdx == 3) em.Material.BlendMode = ParticleBlendMode::Opaque;
-			else em.Material.BlendMode = ParticleBlendMode::AlphaBlend;
-			m_Dirty = true;
-			SyncSimulationFromAsset();
-		}
-		cy += 30.0f;
-
-				// -------------------------------------------------------------
-		// 2. 材质与贴图配置 (Material & Texture Settings)
-		// -------------------------------------------------------------
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 4.0f }, "材质与贴图配置 (Material & Texture)", theme.Accent, 11.0f);
-		cy += 24.0f;
-
-		// 粒子贴图槽位 (Texture Slot)
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "粒子贴图 (Texture):", theme.TextMuted, 10.0f);
-		const float slotW = inspectorRect.W - 130.0f;
-		const Wui::WuiRect texSlotRect { inspectorRect.X + 110.0f, cy, slotW, 22.0f };
-		Wui::BarSurface(ctx, texSlotRect, Wui::WuiColor { 0.08f, 0.10f, 0.13f, 0.95f }, theme.Border);
-
-		std::string texDisplay = em.Material.TexturePath.empty() ? "(默认白色无贴图)" : em.Material.TexturePath;
-		if (texDisplay.size() > 26) texDisplay = "..." + texDisplay.substr(texDisplay.size() - 23);
-		Wui::Label(ctx, { texSlotRect.X + 6.0f, texSlotRect.Y + 4.0f }, texDisplay, em.Material.TexturePath.empty() ? theme.TextMuted : theme.Text, 9.5f);
-		Wui::Tooltip(ctx, texSlotRect, em.Material.TexturePath.empty() ? "未指定贴图（默认使用 1x1 白图，可点击右侧按钮选择）" : ("当前贴图路径: " + em.Material.TexturePath));
-
-		// 选择贴图按钮
-		const Wui::WuiRect pickTexBtn { texSlotRect.X + texSlotRect.W - 64.0f, texSlotRect.Y + 1.0f, 42.0f, 20.0f };
-		if (!isLocked && Wui::Button(ctx, Wui::HashId("vfx.em.pick_tex"), pickTexBtn, "选择..", theme))
-		{
-			host.OpenAssetPicker("选择粒子贴图 (Particle Texture)", AssetCategory::Texture, [this](const std::string& picked) {
-				if (m_SelectedEmitterIndex < m_Asset.Emitters.size())
-				{
-					PushUndoSnapshot();
-					m_Asset.Emitters[m_SelectedEmitterIndex].Material.TexturePath = picked;
-					m_Dirty = true;
-					UpdateLiveSimulationSettings();
-				}
-			});
-		}
-
-		// 清除贴图按钮
-		const Wui::WuiRect clrTexBtn { texSlotRect.X + texSlotRect.W - 20.0f, texSlotRect.Y + 1.0f, 18.0f, 20.0f };
-		if (!isLocked && Wui::Button(ctx, Wui::HashId("vfx.em.clr_tex"), clrTexBtn, "X", theme))
-		{
-			PushUndoSnapshot();
-			em.Material.TexturePath.clear();
-			m_Dirty = true;
-			UpdateLiveSimulationSettings();
-		}
-		cy += 26.0f;
-
-		// 常用内建粒子贴图快捷选取栏 (Quick Preset Bar)
-		{
-			const Wui::WuiRect qBar { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, 22.0f };
-			Wui::BarSurface(ctx, qBar, Wui::WuiColor { 0.06f, 0.08f, 0.10f, 0.9f }, theme.Border);
-			Wui::Label(ctx, { qBar.X + 6.0f, qBar.Y + 3.0f }, "常用贴图:", theme.Accent, 9.5f);
-
-			float qbx = qBar.X + 62.0f;
-			const struct TexPresetItem { const char* id; const char* name; const char* path; } texPresets[] = {
-				{ "qflame", "火焰", "textures/particles/flame_soft.wtex" },
-				{ "qspark", "火星", "textures/particles/spark_glow.wtex" },
-				{ "qsmoke", "烟雾", "textures/particles/smoke_puff.wtex" },
-				{ "qrune",  "法阵", "textures/particles/magic_rune.wtex" },
-				{ "qring",  "光环", "textures/particles/shockwave_ring.wtex" },
-				{ "qbeam",  "电弧", "textures/particles/electric_beam.wtex" },
-				{ "qice",   "冰晶", "textures/particles/ice_crystal.wtex" },
-				{ "qflip",  "4x4火", "textures/particles/fire_flipbook_4x4.wtex" }
-			};
-
-			for (const auto& tp : texPresets)
-			{
-				const float tBtnW = (std::string(tp.id) == "qflip") ? 42.0f : 32.0f;
-				if (qbx + tBtnW < qBar.X + qBar.W - 4.0f)
-				{
-					const Wui::WuiRect tBtnR { qbx, qBar.Y + 2.0f, tBtnW, 18.0f };
-					const bool isCurTex = (em.Material.TexturePath == tp.path);
-					if (isCurTex) Wui::BarSurface(ctx, tBtnR, theme.Selection, theme.Accent);
-					Wui::Tooltip(ctx, tBtnR, "一键应用内置贴图: " + std::string(tp.path));
-					if (!isLocked && Wui::Button(ctx, Wui::HashId((std::string("vfx.tp_") + tp.id).c_str()), tBtnR, tp.name, theme))
-					{
-						PushUndoSnapshot();
-						em.Material.TexturePath = tp.path;
-						if (std::string(tp.id) == "qflip")
-						{
-							em.Material.SubUVTilesX = 4;
-							em.Material.SubUVTilesY = 4;
-						}
-						m_Dirty = true;
-						UpdateLiveSimulationSettings();
-					}
-					qbx += tBtnW + 3.0f;
-				}
-			}
-			cy += 26.0f;
-		}
-
-		// 粒子材质槽位 (Material Slot)
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "粒子材质 (Material):", theme.TextMuted, 10.0f);
-		const Wui::WuiRect matSlotRect { inspectorRect.X + 110.0f, cy, slotW, 22.0f };
-		Wui::BarSurface(ctx, matSlotRect, Wui::WuiColor { 0.08f, 0.10f, 0.13f, 0.95f }, theme.Border);
-
-		std::string matDisplay = em.Material.MaterialPath.empty() ? "(默认着色器材质)" : em.Material.MaterialPath;
-		if (matDisplay.size() > 26) matDisplay = "..." + matDisplay.substr(matDisplay.size() - 23);
-		Wui::Label(ctx, { matSlotRect.X + 6.0f, matSlotRect.Y + 4.0f }, matDisplay, em.Material.MaterialPath.empty() ? theme.TextMuted : theme.Text, 9.5f);
-		Wui::Tooltip(ctx, matSlotRect, em.Material.MaterialPath.empty() ? "使用通用粒子渲染管线 (可点击右侧按钮指定自定义 .wmat)" : ("当前材质路径: " + em.Material.MaterialPath));
-
-		// 选择材质按钮
-		const Wui::WuiRect pickMatBtn { matSlotRect.X + matSlotRect.W - 64.0f, matSlotRect.Y + 1.0f, 42.0f, 20.0f };
-		if (!isLocked && Wui::Button(ctx, Wui::HashId("vfx.em.pick_mat"), pickMatBtn, "选择..", theme))
-		{
-			host.OpenAssetPicker("选择粒子材质 (Particle Material)", AssetCategory::Material, [this](const std::string& picked) {
-				if (m_SelectedEmitterIndex < m_Asset.Emitters.size())
-				{
-					PushUndoSnapshot();
-					m_Asset.Emitters[m_SelectedEmitterIndex].Material.MaterialPath = picked;
-					m_Dirty = true;
-					UpdateLiveSimulationSettings();
-				}
-			});
-		}
-
-		// 清除材质按钮
-		const Wui::WuiRect clrMatBtn { matSlotRect.X + matSlotRect.W - 20.0f, matSlotRect.Y + 1.0f, 18.0f, 20.0f };
-		if (!isLocked && Wui::Button(ctx, Wui::HashId("vfx.em.clr_mat"), clrMatBtn, "X", theme))
-		{
-			PushUndoSnapshot();
-			em.Material.MaterialPath.clear();
-			m_Dirty = true;
-			UpdateLiveSimulationSettings();
-		}
-		cy += 26.0f;
-
-		// HDR 自发光倍率 (Emissive Boost)
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "自发光倍率 (HDR):", theme.TextMuted, 10.0f);
-		const Wui::WuiRect emissiveRect { inspectorRect.X + 110.0f, cy, slotW, 20.0f };
-		Wui::Tooltip(ctx, emissiveRect, "HDR 自发光倍率 (促进辉光 Bloom 泛光)");
-		if (!isLocked && Wui::DragFloat(ctx, Wui::HashId("vfx.em.emissive"), emissiveRect, em.Material.EmissiveBoost, 0.1f, 0.1f, 20.0f, theme))
-		{
-			m_Dirty = true;
-			UpdateLiveSimulationSettings();
-		}
-		cy += 24.0f;
-
-		// 面片朝向 (Facing Mode)
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "面片朝向 (Facing):", theme.TextMuted, 10.0f);
-		static const std::vector<std::string> s_FacingOptions = {
-			"相机对齐 (Billboard)",
-			"地面水平法阵 (HorizontalQuad)",
-			"拉伸速度 (StretchedVelocity)",
-			"2D四边形 (Quad2D)"
-		};
-		int curFacingIdx = (em.FacingMode == ParticleRenderMode::HorizontalQuad) ? 1 :
-		                   ((em.FacingMode == ParticleRenderMode::StretchedVelocity) ? 2 :
-		                   ((em.FacingMode == ParticleRenderMode::Quad2D) ? 3 : 0));
-		const Wui::WuiRect facingRect { inspectorRect.X + 110.0f, cy, slotW, 20.0f };
-		if (!isLocked && Wui::Combo(ctx, Wui::HashId("vfx.em.facing.combo"), facingRect, "", s_FacingOptions, curFacingIdx, theme))
-		{
-			PushUndoSnapshot();
-			if (curFacingIdx == 1) em.FacingMode = ParticleRenderMode::HorizontalQuad;
-			else if (curFacingIdx == 2) em.FacingMode = ParticleRenderMode::StretchedVelocity;
-			else if (curFacingIdx == 3) em.FacingMode = ParticleRenderMode::Quad2D;
-			else em.FacingMode = ParticleRenderMode::Billboard;
-			em.Material.FacingMode = em.FacingMode;
-			m_Dirty = true;
-			UpdateLiveSimulationSettings();
-		}
-		cy += 24.0f;
-
-		// SubUV 序列切片行与列
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "SubUV 序列切片:", theme.TextMuted, 10.0f);
-		const float subUvHalfW = (slotW - 6.0f) * 0.5f;
-		float fTilesX = static_cast<float>(em.Material.SubUVTilesX);
-		float fTilesY = static_cast<float>(em.Material.SubUVTilesY);
-		const Wui::WuiRect uvXRect { inspectorRect.X + 110.0f, cy, subUvHalfW, 20.0f };
-		const Wui::WuiRect uvYRect { inspectorRect.X + 110.0f + subUvHalfW + 6.0f, cy, subUvHalfW, 20.0f };
-		Wui::Tooltip(ctx, uvXRect, "SubUV 横向切片列数 (例如 4)");
-		if (!isLocked && Wui::DragFloat(ctx, Wui::HashId("vfx.em.subuv.x"), uvXRect, fTilesX, 1.0f, 1.0f, 16.0f, theme))
-		{
-			em.Material.SubUVTilesX = static_cast<uint32_t>(fTilesX);
-			m_Dirty = true;
-			UpdateLiveSimulationSettings();
-		}
-		Wui::Tooltip(ctx, uvYRect, "SubUV 纵向切片行数 (例如 4)");
-		if (!isLocked && Wui::DragFloat(ctx, Wui::HashId("vfx.em.subuv.y"), uvYRect, fTilesY, 1.0f, 1.0f, 16.0f, theme))
-		{
-			em.Material.SubUVTilesY = static_cast<uint32_t>(fTilesY);
-			m_Dirty = true;
-			UpdateLiveSimulationSettings();
-		}
-		cy += 30.0f;
+		cy += 28.0f;
 
 		// -------------------------------------------------------------
 		// 2. Niagara 级模块堆栈 (Modules Stack - All Native Slang Code)
@@ -4429,7 +4228,7 @@ void ParticleEditorPanel::NewAsset()
 		if (m_AddModuleMenuOpen)
 		{
 			const float itemH = 22.0f;
-			const float menuH = 282.0f + (m_ProjectCustomModules.empty() ? 24.0f : static_cast<float>(m_ProjectCustomModules.size() * 24.0f));
+			const float menuH = 304.0f + (m_ProjectCustomModules.empty() ? 24.0f : static_cast<float>(m_ProjectCustomModules.size() * 24.0f));
 			const Wui::WuiRect menuRect { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, menuH };
 			Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.14f, 0.16f, 0.20f, 0.98f }, theme.Accent);
 
@@ -4457,6 +4256,7 @@ void ParticleEditorPanel::NewAsset()
 			renderMenuItem("vfx.add.shk", "+ 冲击波扩散衰减 (Shockwave Expansion)", VfxModuleLibrary::CreateShockwaveExpansionModule());
 			renderMenuItem("vfx.add.flp", "+ 序列帧动画驱动 (SubUV Flipbook)", VfxModuleLibrary::CreateFlipbookModule());
 			renderMenuItem("vfx.add.s", "+ 物理欧拉积分与消亡 (Solve Velocity)", VfxModuleLibrary::CreateSolveVelocityModule());
+			renderMenuItem("vfx.add.rend_sprite", "+ [Render] 精灵渲染器 (Sprite Renderer)", VfxModuleLibrary::CreateSpriteRendererModule());
 
 			my += 4.0f;
 			std::string projHeader = "--- 项目全局代码模块 (" + std::to_string(m_ProjectCustomModules.size()) + ") ---";
@@ -4618,9 +4418,16 @@ void ParticleEditorPanel::NewAsset()
 		                         mod.Id == "mod.update.rotation_over_life" || mod.Id == "mod.update.shockwave_expansion");
 
 		if (isSourceExpanded) cardContentH += 130.0f;
-		if (mod.Enabled) cardContentH += mod.Parameters.size() * 26.0f;
 		if (mod.Enabled && isCurveMod) cardContentH += 26.0f;
-		if (mod.Enabled && mod.Id == "mod.render.sprite") cardContentH += 26.0f;
+		if (mod.Enabled && mod.Id == "mod.render.sprite")
+		{
+			// 精灵渲染器专属卡片高度: 材质槽(26) + 贴图槽(26) + 常用栏(26) + 混合模式(24) + 面片朝向(24) + 自发光(24) + SubUV(24) + 边距
+			cardContentH += 184.0f;
+		}
+		else if (mod.Enabled)
+		{
+			cardContentH += mod.Parameters.size() * 26.0f;
+		}
 
 		const Wui::WuiRect cardRect { cardX, curY, cardW, cardContentH };
 		Wui::BarSurface(ctx, cardRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.95f }, theme.Border);
@@ -4708,19 +4515,60 @@ void ParticleEditorPanel::NewAsset()
 
 		float fieldY = cardRect.Y + headerH + 4.0f;
 
-		// 精灵渲染器贴图快捷槽位
+		// =============================================================
+		// 对齐虚幻 Niagara 与 Unity VFX 工业标准:
+		// 贴图与材质完全归属于 [Render 阶段] 精灵渲染器模块内部
+		// =============================================================
 		if (mod.Id == "mod.render.sprite" && mod.Enabled && m_SelectedEmitterIndex < m_Asset.Emitters.size())
 		{
 			auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
-			const Wui::WuiRect sTexRect { cardRect.X + 8.0f, fieldY, cardRect.W - 16.0f, 22.0f };
-			Wui::BarSurface(ctx, sTexRect, Wui::WuiColor { 0.08f, 0.10f, 0.14f, 0.9f }, theme.Border);
-			std::string tName = em.Material.TexturePath.empty() ? "(默认白色无贴图)" : em.Material.TexturePath;
-			if (tName.size() > 22) tName = "..." + tName.substr(tName.size() - 19);
-			Wui::Label(ctx, { sTexRect.X + 6.0f, sTexRect.Y + 4.0f }, "绑定贴图: " + tName, theme.Accent, 9.5f);
+			const bool isLocked = IsEmitterLocked(m_SelectedEmitterIndex);
+			const float slotW = cardRect.W - 130.0f;
 
-			const Wui::WuiRect pBtn { sTexRect.X + sTexRect.W - 54.0f, sTexRect.Y + 1.0f, 50.0f, 20.0f };
-			Wui::Tooltip(ctx, pBtn, "打开资产选择器更换粒子贴图");
-			if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mod.pick_tex_") + std::to_string(modIdx)).c_str()), pBtn, "更换..", theme))
+			// 1. 材质资产槽位 (Material Slot)
+			Wui::Label(ctx, { cardRect.X + 10.0f, fieldY + 3.0f }, "粒子材质 (Material):", theme.TextMuted, 10.0f);
+			const Wui::WuiRect matSlotRect { cardRect.X + 110.0f, fieldY, slotW, 22.0f };
+			Wui::BarSurface(ctx, matSlotRect, Wui::WuiColor { 0.08f, 0.10f, 0.13f, 0.95f }, theme.Border);
+			std::string matDisplay = em.Material.MaterialPath.empty() ? "(默认通用粒子材质)" : em.Material.MaterialPath;
+			if (matDisplay.size() > 24) matDisplay = "..." + matDisplay.substr(matDisplay.size() - 21);
+			Wui::Label(ctx, { matSlotRect.X + 6.0f, matSlotRect.Y + 4.0f }, matDisplay, em.Material.MaterialPath.empty() ? theme.TextMuted : theme.Text, 9.5f);
+			Wui::Tooltip(ctx, matSlotRect, em.Material.MaterialPath.empty() ? "使用通用粒子渲染管线 (可点击右侧按钮指定自定义 .wmat)" : ("当前材质路径: " + em.Material.MaterialPath));
+
+			const Wui::WuiRect pickMatBtn { matSlotRect.X + matSlotRect.W - 64.0f, matSlotRect.Y + 1.0f, 42.0f, 20.0f };
+			if (!isLocked && Wui::Button(ctx, Wui::HashId((std::string("vfx.rend.p_mat_") + std::to_string(modIdx)).c_str()), pickMatBtn, "选择..", theme))
+			{
+				host.OpenAssetPicker("选择粒子材质 (Particle Material)", AssetCategory::Material, [this](const std::string& picked) {
+					if (m_SelectedEmitterIndex < m_Asset.Emitters.size())
+					{
+						PushUndoSnapshot();
+						m_Asset.Emitters[m_SelectedEmitterIndex].Material.MaterialPath = picked;
+						m_Dirty = true;
+						UpdateLiveSimulationSettings();
+					}
+				});
+			}
+
+			const Wui::WuiRect clrMatBtn { matSlotRect.X + matSlotRect.W - 20.0f, matSlotRect.Y + 1.0f, 18.0f, 20.0f };
+			if (!isLocked && Wui::Button(ctx, Wui::HashId((std::string("vfx.rend.c_mat_") + std::to_string(modIdx)).c_str()), clrMatBtn, "X", theme))
+			{
+				PushUndoSnapshot();
+				em.Material.MaterialPath.clear();
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+			fieldY += 26.0f;
+
+			// 2. 贴图资产槽位 (Texture Slot)
+			Wui::Label(ctx, { cardRect.X + 10.0f, fieldY + 3.0f }, "粒子贴图 (Texture):", theme.TextMuted, 10.0f);
+			const Wui::WuiRect texSlotRect { cardRect.X + 110.0f, fieldY, slotW, 22.0f };
+			Wui::BarSurface(ctx, texSlotRect, Wui::WuiColor { 0.08f, 0.10f, 0.13f, 0.95f }, theme.Border);
+			std::string texDisplay = em.Material.TexturePath.empty() ? "(默认白色无贴图)" : em.Material.TexturePath;
+			if (texDisplay.size() > 24) texDisplay = "..." + texDisplay.substr(texDisplay.size() - 21);
+			Wui::Label(ctx, { texSlotRect.X + 6.0f, texSlotRect.Y + 4.0f }, texDisplay, em.Material.TexturePath.empty() ? theme.TextMuted : theme.Text, 9.5f);
+			Wui::Tooltip(ctx, texSlotRect, em.Material.TexturePath.empty() ? "未指定贴图（默认使用 1x1 白图，可点击右侧按钮选择）" : ("当前贴图路径: " + em.Material.TexturePath));
+
+			const Wui::WuiRect pickTexBtn { texSlotRect.X + texSlotRect.W - 64.0f, texSlotRect.Y + 1.0f, 42.0f, 20.0f };
+			if (!isLocked && Wui::Button(ctx, Wui::HashId((std::string("vfx.rend.p_tex_") + std::to_string(modIdx)).c_str()), pickTexBtn, "选择..", theme))
 			{
 				host.OpenAssetPicker("选择粒子贴图 (Particle Texture)", AssetCategory::Texture, [this](const std::string& picked) {
 					if (m_SelectedEmitterIndex < m_Asset.Emitters.size())
@@ -4731,6 +4579,146 @@ void ParticleEditorPanel::NewAsset()
 						UpdateLiveSimulationSettings();
 					}
 				});
+			}
+
+			const Wui::WuiRect clrTexBtn { texSlotRect.X + texSlotRect.W - 20.0f, texSlotRect.Y + 1.0f, 18.0f, 20.0f };
+			if (!isLocked && Wui::Button(ctx, Wui::HashId((std::string("vfx.rend.c_tex_") + std::to_string(modIdx)).c_str()), clrTexBtn, "X", theme))
+			{
+				PushUndoSnapshot();
+				em.Material.TexturePath.clear();
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+			fieldY += 26.0f;
+
+			// 3. 常用内建粒子贴图快捷选取栏 (Quick Preset Bar)
+			{
+				const Wui::WuiRect qBar { cardRect.X + 10.0f, fieldY, cardRect.W - 20.0f, 22.0f };
+				Wui::BarSurface(ctx, qBar, Wui::WuiColor { 0.06f, 0.08f, 0.10f, 0.9f }, theme.Border);
+				Wui::Label(ctx, { qBar.X + 6.0f, qBar.Y + 3.0f }, "常用贴图:", theme.Accent, 9.5f);
+
+				float qbx = qBar.X + 62.0f;
+				const struct TexPresetItem { const char* id; const char* name; const char* path; } texPresets[] = {
+					{ "qflame", "火焰", "textures/particles/flame_soft.wtex" },
+					{ "qspark", "火星", "textures/particles/spark_glow.wtex" },
+					{ "qsmoke", "烟雾", "textures/particles/smoke_puff.wtex" },
+					{ "qrune",  "法阵", "textures/particles/magic_rune.wtex" },
+					{ "qring",  "光环", "textures/particles/shockwave_ring.wtex" },
+					{ "qbeam",  "电弧", "textures/particles/electric_beam.wtex" },
+					{ "qice",   "冰晶", "textures/particles/ice_crystal.wtex" },
+					{ "qflip",  "4x4火", "textures/particles/fire_flipbook_4x4.wtex" }
+				};
+
+				for (const auto& tp : texPresets)
+				{
+					const float tBtnW = (std::string(tp.id) == "qflip") ? 42.0f : 32.0f;
+					if (qbx + tBtnW < qBar.X + qBar.W - 4.0f)
+					{
+						const Wui::WuiRect tBtnR { qbx, qBar.Y + 2.0f, tBtnW, 18.0f };
+						const bool isCurTex = (em.Material.TexturePath == tp.path);
+						if (isCurTex) Wui::BarSurface(ctx, tBtnR, theme.Selection, theme.Accent);
+						Wui::Tooltip(ctx, tBtnR, "一键应用内置贴图: " + std::string(tp.path));
+						if (!isLocked && Wui::Button(ctx, Wui::HashId((std::string("vfx.rend_tp_") + tp.id + "_" + std::to_string(modIdx)).c_str()), tBtnR, tp.name, theme))
+						{
+							PushUndoSnapshot();
+							em.Material.TexturePath = tp.path;
+							if (std::string(tp.id) == "qflip")
+							{
+								em.Material.SubUVTilesX = 4;
+								em.Material.SubUVTilesY = 4;
+							}
+							m_Dirty = true;
+							UpdateLiveSimulationSettings();
+						}
+						qbx += tBtnW + 3.0f;
+					}
+				}
+				fieldY += 26.0f;
+			}
+
+			// 4. 混合模式 (Blend Mode)
+			Wui::Label(ctx, { cardRect.X + 10.0f, fieldY + 3.0f }, "混合模式 (Blend):", theme.TextMuted, 10.0f);
+			static const std::vector<std::string> s_RendBlendOpts = {
+				"半透 (AlphaBlend)",
+				"加法 (Additive)",
+				"正片叠底 (Multiply)",
+				"不透明 (Opaque)"
+			};
+			int curBlendIdx = (em.Material.BlendMode == ParticleBlendMode::Additive) ? 1 :
+			                  ((em.Material.BlendMode == ParticleBlendMode::Multiply) ? 2 :
+			                  ((em.Material.BlendMode == ParticleBlendMode::Opaque) ? 3 : 0));
+			const Wui::WuiRect blendRect { cardRect.X + 110.0f, fieldY, slotW, 20.0f };
+			if (!isLocked && Wui::Combo(ctx, Wui::HashId((std::string("vfx.rend.bld_") + std::to_string(modIdx)).c_str()), blendRect, "", s_RendBlendOpts, curBlendIdx, theme))
+			{
+				PushUndoSnapshot();
+				if (curBlendIdx == 1) em.Material.BlendMode = ParticleBlendMode::Additive;
+				else if (curBlendIdx == 2) em.Material.BlendMode = ParticleBlendMode::Multiply;
+				else if (curBlendIdx == 3) em.Material.BlendMode = ParticleBlendMode::Opaque;
+				else em.Material.BlendMode = ParticleBlendMode::AlphaBlend;
+				mod.SetFloat("BlendMode", static_cast<float>(curBlendIdx));
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+			fieldY += 24.0f;
+
+			// 5. 面片朝向 (Facing Mode)
+			Wui::Label(ctx, { cardRect.X + 10.0f, fieldY + 3.0f }, "面片朝向 (Facing):", theme.TextMuted, 10.0f);
+			static const std::vector<std::string> s_RendFacingOpts = {
+				"相机对齐 (Billboard)",
+				"地面水平法阵 (HorizontalQuad)",
+				"拉伸速度 (StretchedVelocity)",
+				"2D四边形 (Quad2D)"
+			};
+			int curFacingIdx = (em.FacingMode == ParticleRenderMode::HorizontalQuad) ? 1 :
+			                   ((em.FacingMode == ParticleRenderMode::StretchedVelocity) ? 2 :
+			                   ((em.FacingMode == ParticleRenderMode::Quad2D) ? 3 : 0));
+			const Wui::WuiRect facingRect { cardRect.X + 110.0f, fieldY, slotW, 20.0f };
+			if (!isLocked && Wui::Combo(ctx, Wui::HashId((std::string("vfx.rend.fc_") + std::to_string(modIdx)).c_str()), facingRect, "", s_RendFacingOpts, curFacingIdx, theme))
+			{
+				PushUndoSnapshot();
+				if (curFacingIdx == 1) em.FacingMode = ParticleRenderMode::HorizontalQuad;
+				else if (curFacingIdx == 2) em.FacingMode = ParticleRenderMode::StretchedVelocity;
+				else if (curFacingIdx == 3) em.FacingMode = ParticleRenderMode::Quad2D;
+				else em.FacingMode = ParticleRenderMode::Billboard;
+				em.Material.FacingMode = em.FacingMode;
+				mod.SetFloat("FacingMode", static_cast<float>(curFacingIdx));
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+			fieldY += 24.0f;
+
+			// 6. HDR 自发光倍率 (Emissive Boost)
+			Wui::Label(ctx, { cardRect.X + 10.0f, fieldY + 3.0f }, "自发光倍率 (HDR):", theme.TextMuted, 10.0f);
+			const Wui::WuiRect emissiveRect { cardRect.X + 110.0f, fieldY, slotW, 20.0f };
+			Wui::Tooltip(ctx, emissiveRect, "HDR 自发光倍率 (促发 Bloom 辉光泛光)");
+			if (!isLocked && Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.rend.emiss_") + std::to_string(modIdx)).c_str()), emissiveRect, em.Material.EmissiveBoost, 0.1f, 0.1f, 20.0f, theme))
+			{
+				mod.SetFloat("EmissiveBoost", em.Material.EmissiveBoost);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+			fieldY += 24.0f;
+
+			// 7. SubUV 序列切片 (SubUV Flipbook Grid)
+			Wui::Label(ctx, { cardRect.X + 10.0f, fieldY + 3.0f }, "SubUV 序列切片:", theme.TextMuted, 10.0f);
+			const float subUvHalfW = (slotW - 6.0f) * 0.5f;
+			float fTilesX = static_cast<float>(em.Material.SubUVTilesX);
+			float fTilesY = static_cast<float>(em.Material.SubUVTilesY);
+			const Wui::WuiRect uvXRect { cardRect.X + 110.0f, fieldY, subUvHalfW, 20.0f };
+			const Wui::WuiRect uvYRect { cardRect.X + 110.0f + subUvHalfW + 6.0f, fieldY, subUvHalfW, 20.0f };
+			Wui::Tooltip(ctx, uvXRect, "SubUV 横向切片列数 (例如 4)");
+			if (!isLocked && Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.rend.uvx_") + std::to_string(modIdx)).c_str()), uvXRect, fTilesX, 1.0f, 1.0f, 16.0f, theme))
+			{
+				em.Material.SubUVTilesX = static_cast<uint32_t>(fTilesX);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+			Wui::Tooltip(ctx, uvYRect, "SubUV 纵向切片行数 (例如 4)");
+			if (!isLocked && Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.rend.uvy_") + std::to_string(modIdx)).c_str()), uvYRect, fTilesY, 1.0f, 1.0f, 16.0f, theme))
+			{
+				em.Material.SubUVTilesY = static_cast<uint32_t>(fTilesY);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
 			}
 			fieldY += 26.0f;
 		}
