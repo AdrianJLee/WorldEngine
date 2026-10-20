@@ -2692,3 +2692,23 @@ set_tests_properties(World.Lighting3D PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldAnimGraphTests World/AnimGraphTests.cpp)
+target_link_libraries(WorldAnimGraphTests PRIVATE World)
+target_compile_features(WorldAnimGraphTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldAnimGraphTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldAnimGraphTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldAnimGraphTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.AnimGraph COMMAND WorldAnimGraphTests)
+set_tests_properties(World.AnimGraph PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)

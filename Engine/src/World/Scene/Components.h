@@ -2215,5 +2215,50 @@ namespace World
 	static_assert(offsetof(FoliageComponent, ReceiveShadow) == 37, "ReceiveShadow offset mismatch");
 	static_assert(offsetof(FoliageComponent, AlignToNormal) == 38, "AlignToNormal offset mismatch");
 	static_assert(offsetof(FoliageComponent, EnableWind) == 39, "EnableWind offset mismatch");
-}
 
+	struct AnimGraphComponent
+	{
+		AssetRef AnimGraphAsset;                          // 16B (offset 0)
+		float PlaybackSpeed { 1.0f };                     // 4B  (offset 16)
+		float RootMotionWeight { 1.0f };                  // 4B  (offset 20)
+		float FootIkWeight { 1.0f };                      // 4B  (offset 24)
+		uint32_t CurrentStateHash { 0 };                  // 4B  (offset 28)
+		uint8_t EnableRootMotion { 1 };                   // 1B  (offset 32)
+		uint8_t EnableFootIk { 1 };                       // 1B  (offset 33)
+		uint8_t EnableUpperBodyLayer { 0 };               // 1B  (offset 34)
+		uint8_t _Padding[13] { 0 };                       // 13B (offset 35)
+
+		AnimGraphComponent() = default;
+
+		WE_SCHEMA_BODY(World, AnimGraphComponent, Component)
+			WE_SCHEMA_META(Category("Animation"),
+				Doc("3D animation graph state machine with blend spaces, root motion and foot IK."))
+			WE_FIELD(AnimGraphAsset, Asset, Of("AnimGraph"),
+				Doc("Reference to the .wanimgraph asset."));
+			WE_FIELD(PlaybackSpeed, Float, Range(0.0f, 10.0f), Default(1.0f),
+				Doc("Playback speed multiplier."));
+			WE_FIELD(RootMotionWeight, Float, Range(0.0f, 1.0f), Default(1.0f),
+				Doc("Blend weight of root motion displacement into character transform."));
+			WE_FIELD(FootIkWeight, Float, Range(0.0f, 1.0f), Default(1.0f),
+				Doc("Blend weight of foot ground-alignment inverse kinematics."));
+			WE_FIELD(CurrentStateHash, UInt32, Default(0),
+				Doc("Hash of current active state node (readback)."));
+			WE_FIELD(EnableRootMotion, UInt8, Default(1),
+				Doc("Whether root motion extraction is enabled."));
+			WE_FIELD(EnableFootIk, UInt8, Default(1),
+				Doc("Whether two-bone foot IK is enabled."));
+			WE_FIELD(EnableUpperBodyLayer, UInt8, Default(0),
+				Doc("Whether upper body bone masking layer is active."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(AnimGraphComponent) == 48, "AnimGraphComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<AnimGraphComponent>, "AnimGraphComponent must be trivially copyable");
+	static_assert(offsetof(AnimGraphComponent, AnimGraphAsset) == 0, "AnimGraphAsset offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, PlaybackSpeed) == 16, "PlaybackSpeed offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, RootMotionWeight) == 20, "RootMotionWeight offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, FootIkWeight) == 24, "FootIkWeight offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, CurrentStateHash) == 28, "CurrentStateHash offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, EnableRootMotion) == 32, "EnableRootMotion offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, EnableFootIk) == 33, "EnableFootIk offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, EnableUpperBodyLayer) == 34, "EnableUpperBodyLayer offset mismatch");
+}
