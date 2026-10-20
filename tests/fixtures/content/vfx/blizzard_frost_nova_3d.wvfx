@@ -2,16 +2,16 @@ FormatVersion: 1
 Name: BlizzardFrostNova3D
 Guid: 0
 Seed: 1337
-Duration: 5
-Looping: true
+Duration: 3.5
+Looping: false
 WarmupTime: 0
 LOD:
   CullDistance: 60
   PauseWhenOffscreen: true
 Emitters:
-  - Name: FrostBlastRing
+  - Name: FrostShockwaveRing
     MaxParticles: 1
-    Lifetime: 1.5
+    Lifetime: 0.800000012
     EmissionRate: 0
     EmitterDuration: 0
     EmitterLooping: true
@@ -27,7 +27,7 @@ Emitters:
       MaterialPath: materials/particles/particle_additive.wmat
       BlendMode: Additive
       FacingMode: HorizontalQuad
-      EmissiveBoost: 3.5
+      EmissiveBoost: 4.5
       SoftParticle: false
       FadeDistance: 0.5
       SubUV:
@@ -36,19 +36,19 @@ Emitters:
         FPS: 0
         RandomStart: false
     Motion:
-      Speed: 5
-      SpeedVariance: 1
-      Gravity: [0, -9.80000019, 0]
+      Speed: 0
+      SpeedVariance: 0
+      Gravity: [0, 0, 0]
       LinearDrag: 0
       VortexStrength: 0
       VortexAxis: [0, 1, 0]
       TurbulenceStrength: 0
       TurbulenceFrequency: 1
     Evolution:
-      SizeStart: 0.5
-      SizeEnd: 0.100000001
-      ColorStart: [1, 1, 1, 1]
-      ColorEnd: [1, 1, 1, 0]
+      SizeStart: 0.400000006
+      SizeEnd: 5.19999981
+      ColorStart: [0.400000006, 0.850000024, 1, 0.949999988]
+      ColorEnd: [0.100000001, 0.349999994, 0.850000024, 0]
     Collision:
       Mode: None
       Restitution: 0.5
@@ -192,7 +192,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1.5
+            FloatVal: 0.800000012
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -223,7 +223,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0.5
+            FloatVal: 0.400000006
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -254,7 +254,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 7
+            FloatVal: 5.19999981
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -425,7 +425,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 7
+            FloatVal: 5.19999981
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -456,7 +456,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1.20000005
+            FloatVal: 1.39999998
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -496,7 +496,1590 @@ Emitters:
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
-            VecVal: [0.600000024, 0.899999976, 1, 1]
+            VecVal: [0.400000006, 0.850000024, 1, 0.949999988]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 初始出生颜色 (RGBA)
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1
+            VecVal: [0.100000001, 0.349999994, 0.850000024, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 终止消亡颜色 (RGBA)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.solve_velocity
+        Name: "物理积分与生命周期 (Solve Velocity & Life)"
+        Description: 欧拉物理速度积分更新位置，递减生命周期并计算归一化时间
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SolveVelocity] 物理欧拉积分与消亡\n    p.Position += p.Velocity * dt;\n    p.Life -= dt;\n    if (u_SpeedDamping > 0.001f)\n        p.Velocity *= max(0.0f, 1.0f - u_SpeedDamping * dt);\n"
+        Parameters:
+          - Name: SpeedDamping
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 5
+            Step: 0.0500000007
+            Tooltip: 物理速度阻尼
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.render.sprite
+        Name: 精灵渲染器 (Sprite Renderer)
+        Description: 配置图元混合模式 (加法/半透)、自发光强度与面片朝向 (相机对齐/水平地面)
+        Stage: Render
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpriteRenderer]\n    // 驱动 GPU 混合模式与几何着色器面片顶点朝向生成\n"
+        Parameters:
+          - Name: BlendMode
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 混合模式 (0=半透 AlphaBlend, 1=加法 Additive)
+            IsExposed: false
+            ExposedName: ""
+          - Name: FacingMode
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 面片朝向 (0=Billboard相机对齐, 1=Horizontal地面水平)
+            IsExposed: false
+            ExposedName: ""
+          - Name: EmissiveBoost
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 4.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.100000001
+            Max: 20
+            Step: 0.100000001
+            Tooltip: HDR 自发光倍率 (促发辉光 Bloom)
+            IsExposed: true
+            ExposedName: EmissiveBoost
+  - Name: IceCrystalShards
+    MaxParticles: 60
+    Lifetime: 1.39999998
+    EmissionRate: 0
+    EmitterDuration: 0
+    EmitterLooping: true
+    EmissionMode: 0
+    SingleCount: 1
+    Enabled: true
+    Emitter:
+      Type: Cone
+      LockToXY: false
+      MeshPath: ""
+    Material:
+      TexturePath: textures/particles/ice_crystal.wtex
+      MaterialPath: materials/particles/particle_additive.wmat
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 4.19999981
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 6.5
+      SpeedVariance: 2
+      Gravity: [0, -4.5, 0]
+      LinearDrag: 1.20000005
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.180000007
+      SizeEnd: 0.0299999993
+      ColorStart: [0.850000024, 0.980000019, 1, 1]
+      ColorEnd: [0.200000003, 0.600000024, 1, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.100000001
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+    Bursts:
+      - Time: 0.0199999996
+        Count: 40
+    UseCustomShaderOverride: false
+    Modules:
+      - Id: mod.emitter.spawn_burst
+        Name: 瞬态爆发/单体 (Spawn Burst)
+        Description: 在指定时间瞬间爆发生成固定数量图元 (Count=1 用于法阵/护盾/光环，零发射流开销)
+        Stage: Emitter
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpawnBurst]\n    // 在指定时间瞬间生成指定数量的粒子或单体网格图元\n"
+        Parameters:
+          - Name: SpawnCount
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 40
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 1
+            Max: 10000
+            Step: 1
+            Tooltip: 瞬时生成图元数量 (1 为单体法阵/护盾)
+            IsExposed: true
+            ExposedName: BurstCount
+          - Name: SpawnTime
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.0199999996
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 99999
+            Step: 0.100000001
+            Tooltip: 爆发触发时间 (秒)
+            IsExposed: false
+            ExposedName: ""
+          - Name: MaxParticles
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 500
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 1
+            Max: 100000
+            Step: 10
+            Tooltip: 最大粒子容量 (Max Particles)
+            IsExposed: true
+            ExposedName: MaxParticles
+      - Id: mod.spawn.init_particle
+        Name: 粒子初始化 (Initialize Particle)
+        Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: InitializeParticle]\n    p.MaxLife = u_Lifetime;\n    p.Life = u_Lifetime;\n    p.Size = float2(u_SizeStart);\n    p.Color = u_ColorStart;\n"
+        Parameters:
+          - Name: Lifetime
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1.39999998
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 99999
+            Step: 0.100000001
+            Tooltip: 粒子存活基准寿命 (秒)
+            IsExposed: true
+            ExposedName: Lifetime
+          - Name: SizeStart
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.180000007
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 诞生初始尺寸
+            IsExposed: true
+            ExposedName: SizeStart
+          - Name: SizeEnd
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.0299999993
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 消亡终末尺寸
+            IsExposed: true
+            ExposedName: SizeEnd
+          - Name: ColorStart
+            Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0
+            VecVal: [1, 0.800000012, 0.300000012, 1]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 初始 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0
+            VecVal: [1, 0.200000003, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 消亡 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.spawn.cone
+        Name: 圆锥发射 (Cone Spawn)
+        Description: 按圆锥顶角与底面半径空间分布发射粒子并赋予初始初速度
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: ConeSpawn] 圆锥发射空间分布算法\n    float angleRad = radians(u_ConeAngle);\n    float u = Hash1D(particleId * 3 + 1);\n    float v = Hash1D(particleId * 3 + 2);\n    float phi = 6.2831853f * u;\n    float sinTheta = sin(angleRad) * sqrt(v);\n    float cosTheta = sqrt(max(0.0f, 1.0f - sinTheta * sinTheta));\n    float3 localDir = float3(sinTheta * cos(phi), cosTheta, sinTheta * sin(phi));\n    \n    float diskR = u_ConeRadius * sqrt(Hash1D(particleId * 3 + 0));\n    float diskPhi = 6.2831853f * Hash1D(particleId * 3 + 7);\n    p.Position = float3(diskR * cos(diskPhi), 0.0f, diskR * sin(diskPhi));\n    \n    float speed = u_InitialSpeed + (Hash1D(particleId * 7 + 3) * 2.0f - 1.0f) * u_SpeedVariance;\n    p.Velocity = localDir * speed;\n"
+        Parameters:
+          - Name: ConeAngle
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 40
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 90
+            Step: 1
+            Tooltip: 圆锥半角 (度)
+            IsExposed: false
+            ExposedName: ""
+          - Name: ConeRadius
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.25
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 10
+            Step: 0.0500000007
+            Tooltip: 底部圆盘半径 (米)
+            IsExposed: false
+            ExposedName: ""
+          - Name: InitialSpeed
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 6.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 50
+            Step: 0.200000003
+            Tooltip: 发射初始基准速率 (m/s)
+            IsExposed: false
+            ExposedName: ""
+          - Name: SpeedVariance
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20
+            Step: 0.100000001
+            Tooltip: 发射速度随机扰动范围
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.gravity
+        Name: 重力场 (Gravity Force)
+        Description: 对粒子施加恒定三维重力加速度向量
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: GravityForce]\n    p.Velocity += u_Gravity.xyz * dt;\n"
+        Parameters:
+          - Name: Gravity
+            Type: 2
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0
+            VecVal: [0, -4.5, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -50
+            Max: 50
+            Step: 0.200000003
+            Tooltip: 三维重力向量 [Gx, Gy, Gz]
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.drag
+        Name: 空气阻力 (Air Drag)
+        Description: 模拟流体介质空气阻尼，阻碍粒子高速运动
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: LinearDrag]\n    p.Velocity *= max(0.0f, 1.0f - u_LinearDrag * dt);\n"
+        Parameters:
+          - Name: LinearDrag
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1.20000005
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 10
+            Step: 0.0500000007
+            Tooltip: 空气阻尼系数
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.scale_over_life
+        Name: 尺寸随寿命缩放 (Scale Over Life)
+        Description: 基于归一化存活进度 (0~1) 控制粒子尺寸膨胀扩散或缩小消亡
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Scale Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Size = lerp(u_StartScale, u_EndScale, normLife);\n"
+        Parameters:
+          - Name: StartScale
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.180000007
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 初始尺寸乘子
+            IsExposed: false
+            ExposedName: ""
+          - Name: EndScale
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.0299999993
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 消亡前终止尺寸乘子
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.color_over_life
+        Name: 色彩淡入淡出 (Color Over Life)
+        Description: 基于粒子存活进度进行色彩与透明度渐变过渡
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Color Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Color = lerp(u_ColorStart, u_ColorEnd, normLife);\n"
+        Parameters:
+          - Name: ColorStart
+            Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1
+            VecVal: [0.850000024, 0.980000019, 1, 1]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 初始出生颜色 (RGBA)
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1
+            VecVal: [0.200000003, 0.600000024, 1, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.00999999978
+            Tooltip: 终止消亡颜色 (RGBA)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.solve_velocity
+        Name: "物理积分与生命周期 (Solve Velocity & Life)"
+        Description: 欧拉物理速度积分更新位置，递减生命周期并计算归一化时间
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SolveVelocity] 物理欧拉积分与消亡\n    p.Position += p.Velocity * dt;\n    p.Life -= dt;\n    if (u_SpeedDamping > 0.001f)\n        p.Velocity *= max(0.0f, 1.0f - u_SpeedDamping * dt);\n"
+        Parameters:
+          - Name: SpeedDamping
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 5
+            Step: 0.0500000007
+            Tooltip: 物理速度阻尼
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.render.sprite
+        Name: 精灵渲染器 (Sprite Renderer)
+        Description: 配置图元混合模式 (加法/半透)、自发光强度与面片朝向 (相机对齐/水平地面)
+        Stage: Render
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpriteRenderer]\n    // 驱动 GPU 混合模式与几何着色器面片顶点朝向生成\n"
+        Parameters:
+          - Name: BlendMode
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 混合模式 (0=半透 AlphaBlend, 1=加法 Additive)
+            IsExposed: false
+            ExposedName: ""
+          - Name: FacingMode
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 2
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 1
+            Tooltip: 面片朝向 (0=Billboard相机对齐, 1=Horizontal地面水平)
+            IsExposed: false
+            ExposedName: ""
+          - Name: EmissiveBoost
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 4.19999981
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.100000001
+            Max: 20
+            Step: 0.100000001
+            Tooltip: HDR 自发光倍率 (促发辉光 Bloom)
+            IsExposed: true
+            ExposedName: EmissiveBoost
+  - Name: SubZeroMistWave
+    MaxParticles: 60
+    Lifetime: 1.60000002
+    EmissionRate: 0
+    EmitterDuration: 0
+    EmitterLooping: true
+    EmissionMode: 0
+    SingleCount: 1
+    Enabled: true
+    Emitter:
+      Type: Point
+      LockToXY: false
+      MeshPath: ""
+    Material:
+      TexturePath: textures/particles/smoke_puff.wtex
+      MaterialPath: materials/particles/particle_alphablend.wmat
+      BlendMode: AlphaBlend
+      FacingMode: HorizontalQuad
+      EmissiveBoost: 1
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 2.5
+      SpeedVariance: 0
+      Gravity: [0, 0, 0]
+      LinearDrag: 1.79999995
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.400000006
+      SizeEnd: 1.5
+      ColorStart: [0.5, 0.850000024, 1, 0.349999994]
+      ColorEnd: [0.100000001, 0.400000006, 0.800000012, 0]
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.100000001
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+    Bursts:
+      - Time: 0.0299999993
+        Count: 25
+    UseCustomShaderOverride: false
+    Modules:
+      - Id: mod.emitter.spawn_burst
+        Name: 瞬态爆发/单体 (Spawn Burst)
+        Description: 在指定时间瞬间爆发生成固定数量图元 (Count=1 用于法阵/护盾/光环，零发射流开销)
+        Stage: Emitter
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: SpawnBurst]\n    // 在指定时间瞬间生成指定数量的粒子或单体网格图元\n"
+        Parameters:
+          - Name: SpawnCount
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 25
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 1
+            Max: 10000
+            Step: 1
+            Tooltip: 瞬时生成图元数量 (1 为单体法阵/护盾)
+            IsExposed: true
+            ExposedName: BurstCount
+          - Name: SpawnTime
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.0299999993
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 99999
+            Step: 0.100000001
+            Tooltip: 爆发触发时间 (秒)
+            IsExposed: false
+            ExposedName: ""
+          - Name: MaxParticles
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 500
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 1
+            Max: 100000
+            Step: 10
+            Tooltip: 最大粒子容量 (Max Particles)
+            IsExposed: true
+            ExposedName: MaxParticles
+      - Id: mod.spawn.init_particle
+        Name: 粒子初始化 (Initialize Particle)
+        Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: InitializeParticle]\n    p.MaxLife = u_Lifetime;\n    p.Life = u_Lifetime;\n    p.Size = float2(u_SizeStart);\n    p.Color = u_ColorStart;\n"
+        Parameters:
+          - Name: Lifetime
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1.60000002
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 99999
+            Step: 0.100000001
+            Tooltip: 粒子存活基准寿命 (秒)
+            IsExposed: true
+            ExposedName: Lifetime
+          - Name: SizeStart
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.400000006
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 诞生初始尺寸
+            IsExposed: true
+            ExposedName: SizeStart
+          - Name: SizeEnd
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.00999999978
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 消亡终末尺寸
+            IsExposed: true
+            ExposedName: SizeEnd
+          - Name: ColorStart
+            Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0
+            VecVal: [1, 0.800000012, 0.300000012, 1]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 初始 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+          - Name: ColorEnd
+            Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0
+            VecVal: [1, 0.200000003, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 1
+            Step: 0.0500000007
+            Tooltip: 消亡 RGBA 颜色
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.spawn.ring
+        Name: 圆环发射 (Ring Spawn)
+        Description: 在 3D 水平圆环边缘几何分布生成粒子 (法阵/护盾/光环/冰霜新星)
+        Stage: Spawn
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: RingSpawn] 水平圆环边缘几何分布\n    float u = Hash1D(particleId * 11u + 3u);\n    float phi = 6.2831853f * u;\n    p.Position = float3(cos(phi) * u_RingRadius, 0.0f, sin(phi) * u_RingRadius);\n    p.Velocity = float3(0.0f, u_InitialSpeed, 0.0f);\n"
+        Parameters:
+          - Name: RingRadius
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.800000012
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.100000001
+            Max: 20
+            Step: 0.100000001
+            Tooltip: 圆环生成半径 (m)
+            IsExposed: false
+            ExposedName: ""
+          - Name: InitialSpeed
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 2.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 50
+            Step: 0.200000003
+            Tooltip: 垂直发射速率 (m/s)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.drag
+        Name: 空气阻力 (Air Drag)
+        Description: 模拟流体介质空气阻尼，阻碍粒子高速运动
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: LinearDrag]\n    p.Velocity *= max(0.0f, 1.0f - u_LinearDrag * dt);\n"
+        Parameters:
+          - Name: LinearDrag
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1.79999995
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 10
+            Step: 0.0500000007
+            Tooltip: 空气阻尼系数
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.rotation_over_life
+        Name: 平面旋转与角速度 (Rotation Over Life)
+        Description: 控制粒子初始旋转朝向与随寿命演进的持续角速度 (rad/s)
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Rotation Over Life]\n    p.Rotation += u_RotationSpeed * dt;\n"
+        Parameters:
+          - Name: RotationSpeed
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -30
+            Max: 30
+            Step: 0.100000001
+            Tooltip: 自转角速度 (rad/s)
+            IsExposed: false
+            ExposedName: ""
+          - Name: InitialRotation
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: -3.14159012
+            Max: 3.14159012
+            Step: 0.0500000007
+            Tooltip: 初始旋转角度 (rad)
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.scale_over_life
+        Name: 尺寸随寿命缩放 (Scale Over Life)
+        Description: 基于归一化存活进度 (0~1) 控制粒子尺寸膨胀扩散或缩小消亡
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Scale Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Size = lerp(u_StartScale, u_EndScale, normLife);\n"
+        Parameters:
+          - Name: StartScale
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 0.400000006
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 初始尺寸乘子
+            IsExposed: false
+            ExposedName: ""
+          - Name: EndScale
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1.5
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0
+            Max: 20
+            Step: 0.0500000007
+            Tooltip: 消亡前终止尺寸乘子
+            IsExposed: false
+            ExposedName: ""
+      - Id: mod.update.color_over_life
+        Name: 色彩淡入淡出 (Color Over Life)
+        Description: 基于粒子存活进度进行色彩与透明度渐变过渡
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: Color Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Color = lerp(u_ColorStart, u_ColorEnd, normLife);\n"
+        Parameters:
+          - Name: ColorStart
+            Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1
+            VecVal: [0.5, 0.850000024, 1, 0.349999994]
             IntVal: 0
             BoolVal: false
             Min: 0
@@ -604,7 +2187,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1
+            FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -666,7 +2249,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 3.5
+            FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -676,10 +2259,10 @@ Emitters:
             Tooltip: HDR 自发光倍率 (促发辉光 Bloom)
             IsExposed: true
             ExposedName: EmissiveBoost
-  - Name: HexagonalIceCrystals
-    MaxParticles: 120
-    Lifetime: 2.20000005
-    EmissionRate: 60
+  - Name: BlizzardFlurries
+    MaxParticles: 140
+    Lifetime: 2
+    EmissionRate: 50
     EmitterDuration: 0
     EmitterLooping: true
     EmissionMode: 0
@@ -690,11 +2273,11 @@ Emitters:
       LockToXY: false
       MeshPath: ""
     Material:
-      TexturePath: textures/particles/ice_crystal.wtex
+      TexturePath: textures/particles/spark_glow.wtex
       MaterialPath: materials/particles/particle_additive.wmat
       BlendMode: Additive
       FacingMode: Billboard
-      EmissiveBoost: 3.5
+      EmissiveBoost: 3.5999999
       SoftParticle: false
       FadeDistance: 0.5
       SubUV:
@@ -703,19 +2286,19 @@ Emitters:
         FPS: 0
         RandomStart: false
     Motion:
-      Speed: 5
-      SpeedVariance: 1
-      Gravity: [0, -9.80000019, 0]
-      LinearDrag: 0
-      VortexStrength: 0
+      Speed: 1.20000005
+      SpeedVariance: 0
+      Gravity: [0, -0.600000024, 0]
+      LinearDrag: 0.400000006
+      VortexStrength: 4.19999981
       VortexAxis: [0, 1, 0]
       TurbulenceStrength: 0
       TurbulenceFrequency: 1
     Evolution:
-      SizeStart: 0.5
-      SizeEnd: 0.100000001
-      ColorStart: [1, 1, 1, 1]
-      ColorEnd: [1, 1, 1, 0]
+      SizeStart: 0.0500000007
+      SizeEnd: 0.0149999997
+      ColorStart: [0.899999976, 0.959999979, 1, 1]
+      ColorEnd: [0.400000006, 0.699999988, 1, 0]
     Collision:
       Mode: None
       Restitution: 0.5
@@ -755,7 +2338,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 60
+            FloatVal: 50
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -825,7 +2408,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 2.20000005
+            FloatVal: 2
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -856,7 +2439,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0.349999994
+            FloatVal: 0.0500000007
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -887,7 +2470,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0.0799999982
+            FloatVal: 0.0149999997
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -988,7 +2571,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0.5
+            FloatVal: 1.79999995
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -999,616 +2582,6 @@ Emitters:
             IsExposed: false
             ExposedName: ""
           - Name: InitialSpeed
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0.300000012
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 50
-            Step: 0.200000003
-            Tooltip: 垂直发射速率 (m/s)
-            IsExposed: false
-            ExposedName: ""
-      - Id: mod.update.orbit
-        Name: 中心轴轨道公转 (Orbit Around Center)
-        Description: 围绕指定空间中心点与旋转轴进行稳定圆周轨道旋转运动 (护盾/光环/符文)
-        Stage: Update
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: Orbit Around Center]\n    float3 toCenter = p.Position - u_OrbitCenter.xyz;\n    float dist = length(toCenter);\n    if (dist > 0.01f)\n    {\n        float3 tangent = cross(u_OrbitAxis.xyz, normalize(toCenter));\n        p.Velocity = tangent * u_OrbitSpeed;\n    }\n"
-        Parameters:
-          - Name: OrbitSpeed
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 2.5
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: -30
-            Max: 30
-            Step: 0.200000003
-            Tooltip: 轨道公转切向角速率
-            IsExposed: false
-            ExposedName: ""
-          - Name: OrbitAxis
-            Type: 2
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1
-            VecVal: [0, 1, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: -1
-            Max: 1
-            Step: 0.100000001
-            Tooltip: 公转旋转主轴
-            IsExposed: false
-            ExposedName: ""
-          - Name: OrbitCenter
-            Type: 2
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: -50
-            Max: 50
-            Step: 0.5
-            Tooltip: 空间轨道几何中心点
-            IsExposed: false
-            ExposedName: ""
-      - Id: mod.update.rotation_over_life
-        Name: 平面旋转与角速度 (Rotation Over Life)
-        Description: 控制粒子初始旋转朝向与随寿命演进的持续角速度 (rad/s)
-        Stage: Update
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: Rotation Over Life]\n    p.Rotation += u_RotationSpeed * dt;\n"
-        Parameters:
-          - Name: RotationSpeed
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 2.5
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: -30
-            Max: 30
-            Step: 0.100000001
-            Tooltip: 自转角速度 (rad/s)
-            IsExposed: false
-            ExposedName: ""
-          - Name: InitialRotation
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: -3.14159012
-            Max: 3.14159012
-            Step: 0.0500000007
-            Tooltip: 初始旋转角度 (rad)
-            IsExposed: false
-            ExposedName: ""
-      - Id: mod.update.drag
-        Name: 空气阻力 (Air Drag)
-        Description: 模拟流体介质空气阻尼，阻碍粒子高速运动
-        Stage: Update
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: LinearDrag]\n    p.Velocity *= max(0.0f, 1.0f - u_LinearDrag * dt);\n"
-        Parameters:
-          - Name: LinearDrag
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0.400000006
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 10
-            Step: 0.0500000007
-            Tooltip: 空气阻尼系数
-            IsExposed: false
-            ExposedName: ""
-      - Id: mod.update.color_over_life
-        Name: 色彩淡入淡出 (Color Over Life)
-        Description: 基于粒子存活进度进行色彩与透明度渐变过渡
-        Stage: Update
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: Color Over Life]\n    float normLife = clamp(1.0f - (p.Life / max(0.001f, p.MaxLife)), 0.0f, 1.0f);\n    p.Color = lerp(u_ColorStart, u_ColorEnd, normLife);\n"
-        Parameters:
-          - Name: ColorStart
-            Type: 3
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1
-            VecVal: [0.800000012, 0.949999988, 1, 1]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 1
-            Step: 0.00999999978
-            Tooltip: 初始出生颜色 (RGBA)
-            IsExposed: false
-            ExposedName: ""
-          - Name: ColorEnd
-            Type: 3
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1
-            VecVal: [0.300000012, 0.699999988, 1, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 1
-            Step: 0.00999999978
-            Tooltip: 终止消亡颜色 (RGBA)
-            IsExposed: false
-            ExposedName: ""
-      - Id: mod.update.solve_velocity
-        Name: "物理积分与生命周期 (Solve Velocity & Life)"
-        Description: 欧拉物理速度积分更新位置，递减生命周期并计算归一化时间
-        Stage: Update
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: SolveVelocity] 物理欧拉积分与消亡\n    p.Position += p.Velocity * dt;\n    p.Life -= dt;\n    if (u_SpeedDamping > 0.001f)\n        p.Velocity *= max(0.0f, 1.0f - u_SpeedDamping * dt);\n"
-        Parameters:
-          - Name: SpeedDamping
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 5
-            Step: 0.0500000007
-            Tooltip: 物理速度阻尼
-            IsExposed: false
-            ExposedName: ""
-      - Id: mod.render.sprite
-        Name: 精灵渲染器 (Sprite Renderer)
-        Description: 配置图元混合模式 (加法/半透)、自发光强度与面片朝向 (相机对齐/水平地面)
-        Stage: Render
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: SpriteRenderer]\n    // 驱动 GPU 混合模式与几何着色器面片顶点朝向生成\n"
-        Parameters:
-          - Name: BlendMode
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 1
-            Step: 1
-            Tooltip: 混合模式 (0=半透 AlphaBlend, 1=加法 Additive)
-            IsExposed: false
-            ExposedName: ""
-          - Name: FacingMode
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 1
-            Step: 1
-            Tooltip: 面片朝向 (0=Billboard相机对齐, 1=Horizontal地面水平)
-            IsExposed: false
-            ExposedName: ""
-          - Name: EmissiveBoost
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 3.5
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0.100000001
-            Max: 20
-            Step: 0.100000001
-            Tooltip: HDR 自发光倍率 (促发辉光 Bloom)
-            IsExposed: true
-            ExposedName: EmissiveBoost
-  - Name: SubZeroFog
-    MaxParticles: 120
-    Lifetime: 2.5
-    EmissionRate: 30
-    EmitterDuration: 0
-    EmitterLooping: true
-    EmissionMode: 0
-    SingleCount: 1
-    Enabled: true
-    Emitter:
-      Type: Point
-      LockToXY: false
-      MeshPath: ""
-    Material:
-      TexturePath: textures/particles/smoke_puff.wtex
-      MaterialPath: materials/particles/particle_alpha.wmat
-      BlendMode: AlphaBlend
-      FacingMode: Billboard
-      EmissiveBoost: 1
-      SoftParticle: false
-      FadeDistance: 0.5
-      SubUV:
-        TilesX: 1
-        TilesY: 1
-        FPS: 0
-        RandomStart: false
-    Motion:
-      Speed: 5
-      SpeedVariance: 1
-      Gravity: [0, -9.80000019, 0]
-      LinearDrag: 0
-      VortexStrength: 0
-      VortexAxis: [0, 1, 0]
-      TurbulenceStrength: 0
-      TurbulenceFrequency: 1
-    Evolution:
-      SizeStart: 0.5
-      SizeEnd: 0.100000001
-      ColorStart: [1, 1, 1, 1]
-      ColorEnd: [1, 1, 1, 0]
-    Collision:
-      Mode: None
-      Restitution: 0.5
-      Friction: 0.100000001
-      KillOnHit: false
-      EnableEvents: false
-      PlaneOrigin: [0, 0, 0]
-      PlaneNormal: [0, 1, 0]
-    UseCustomShaderOverride: false
-    Modules:
-      - Id: mod.emitter.spawn_rate
-        Name: 持续发射 (Spawn Rate)
-        Description: 控制每秒持续发射的粒子数量与最大粒子容量 (火焰/浓烟/喷泉/火花流)
-        Stage: Emitter
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: SpawnRate]\n    // 由系统发射调度器根据 SpawnRate 与 dt 累积并生成新图元\n"
-        Parameters:
-          - Name: SpawnRate
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 30
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 20000
-            Step: 1
-            Tooltip: 每秒持续发射粒子数 (/s)
-            IsExposed: true
-            ExposedName: EmissionRate
-          - Name: MaxParticles
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 500
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 1
-            Max: 100000
-            Step: 10
-            Tooltip: 最大粒子容量 (Max Particles)
-            IsExposed: true
-            ExposedName: MaxParticles
-      - Id: mod.spawn.init_particle
-        Name: 粒子初始化 (Initialize Particle)
-        Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
-        Stage: Spawn
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: InitializeParticle]\n    p.MaxLife = u_Lifetime;\n    p.Life = u_Lifetime;\n    p.Size = float2(u_SizeStart);\n    p.Color = u_ColorStart;\n"
-        Parameters:
-          - Name: Lifetime
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 2.5
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0.00999999978
-            Max: 99999
-            Step: 0.100000001
-            Tooltip: 粒子存活基准寿命 (秒)
-            IsExposed: true
-            ExposedName: Lifetime
-          - Name: SizeStart
             Type: 0
             Mode: 0
             RandomMin: 0
@@ -1630,169 +2603,6 @@ Emitters:
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.600000024
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0.00999999978
-            Max: 20
-            Step: 0.0500000007
-            Tooltip: 诞生初始尺寸
-            IsExposed: true
-            ExposedName: SizeStart
-          - Name: SizeEnd
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 2.4000001
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0.00999999978
-            Max: 20
-            Step: 0.0500000007
-            Tooltip: 消亡终末尺寸
-            IsExposed: true
-            ExposedName: SizeEnd
-          - Name: ColorStart
-            Type: 3
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0
-            VecVal: [1, 0.800000012, 0.300000012, 1]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 1
-            Step: 0.0500000007
-            Tooltip: 初始 RGBA 颜色
-            IsExposed: false
-            ExposedName: ""
-          - Name: ColorEnd
-            Type: 3
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0
-            VecVal: [1, 0.200000003, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0
-            Max: 1
-            Step: 0.0500000007
-            Tooltip: 消亡 RGBA 颜色
-            IsExposed: false
-            ExposedName: ""
-      - Id: mod.spawn.ring
-        Name: 圆环发射 (Ring Spawn)
-        Description: 在 3D 水平圆环边缘几何分布生成粒子 (法阵/护盾/光环/冰霜新星)
-        Stage: Spawn
-        Enabled: true
-        IsCustom: false
-        SlangSource: "\n    // [Module: RingSpawn] 水平圆环边缘几何分布\n    float u = Hash1D(particleId * 11u + 3u);\n    float phi = 6.2831853f * u;\n    p.Position = float3(cos(phi) * u_RingRadius, 0.0f, sin(phi) * u_RingRadius);\n    p.Velocity = float3(0.0f, u_InitialSpeed, 0.0f);\n"
-        Parameters:
-          - Name: RingRadius
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1.5
-            VecVal: [0, 0, 0, 0]
-            IntVal: 0
-            BoolVal: false
-            Min: 0.100000001
-            Max: 20
-            Step: 0.100000001
-            Tooltip: 圆环生成半径 (m)
-            IsExposed: false
-            ExposedName: ""
-          - Name: InitialSpeed
-            Type: 0
-            Mode: 0
-            RandomMin: 0
-            RandomMax: 1
-            RandomMinVec: [0, 0, 0, 0]
-            RandomMaxVec: [1, 1, 1, 1]
-            SplitAxes: false
-            SplitColor: false
-            ActiveAxisCurveChannel: 0
-            ActiveColorCurveChannel: 0
-            CurveExpanded: true
-            AlphaCurveExpanded: false
-            AxisMode: [0, 0, 0]
-            AxisRandomMin: [-10, -10, -10]
-            AxisRandomMax: [10, 10, 10]
-            AxisCurveExpanded: [false, false, false]
-            ColorMode: [0, 0, 0, 0]
-            ColorRandomMin: [0, 0, 0, 0]
-            ColorRandomMax: [1, 1, 1, 1]
-            ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0.100000001
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -1862,7 +2672,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 2
+            FloatVal: 4.19999981
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -1872,15 +2682,15 @@ Emitters:
             Tooltip: 旋转切向角速度强度
             IsExposed: false
             ExposedName: ""
-      - Id: mod.update.rotation_over_life
-        Name: 平面旋转与角速度 (Rotation Over Life)
-        Description: 控制粒子初始旋转朝向与随寿命演进的持续角速度 (rad/s)
+      - Id: mod.update.curl_noise
+        Name: 3D 旋度噪声场 (Curl Noise Turbulence)
+        Description: 基于无散度 3D 旋度噪声向量场驱动真实的流体涡流混沌运动
         Stage: Update
         Enabled: true
         IsCustom: false
-        SlangSource: "\n    // [Module: Rotation Over Life]\n    p.Rotation += u_RotationSpeed * dt;\n"
+        SlangSource: "\n    // [Module: CurlNoiseTurbulence] 3D 无散度流体涡流场\n    float3 curl = CurlNoise3D(p.Position * u_NoiseFrequency);\n    p.Velocity += curl * (u_NoiseStrength * dt);\n"
         Parameters:
-          - Name: RotationSpeed
+          - Name: NoiseStrength
             Type: 0
             Mode: 0
             RandomMin: 0
@@ -1901,18 +2711,57 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0.5
+            FloatVal: 1.79999995
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: -30
+            Min: 0
             Max: 30
-            Step: 0.100000001
-            Tooltip: 自转角速度 (rad/s)
+            Step: 0.200000003
+            Tooltip: 噪声场作用力强度
+            IsExposed: true
+            ExposedName: TurbulenceStrength
+          - Name: NoiseFrequency
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
+            FloatVal: 1.39999998
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 0.0500000007
+            Max: 10
+            Step: 0.0500000007
+            Tooltip: 空间采样频率 (波长缩放)
             IsExposed: false
             ExposedName: ""
-          - Name: InitialRotation
-            Type: 0
+      - Id: mod.update.gravity
+        Name: 重力场 (Gravity Force)
+        Description: 对粒子施加恒定三维重力加速度向量
+        Stage: Update
+        Enabled: true
+        IsCustom: false
+        SlangSource: "\n    // [Module: GravityForce]\n    p.Velocity += u_Gravity.xyz * dt;\n"
+        Parameters:
+          - Name: Gravity
+            Type: 2
             Mode: 0
             RandomMin: 0
             RandomMax: 1
@@ -1933,13 +2782,13 @@ Emitters:
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
-            VecVal: [0, 0, 0, 0]
+            VecVal: [0, -0.600000024, 0, 0]
             IntVal: 0
             BoolVal: false
-            Min: -3.14159012
-            Max: 3.14159012
-            Step: 0.0500000007
-            Tooltip: 初始旋转角度 (rad)
+            Min: -50
+            Max: 50
+            Step: 0.200000003
+            Tooltip: 三维重力向量 [Gx, Gy, Gz]
             IsExposed: false
             ExposedName: ""
       - Id: mod.update.scale_over_life
@@ -1971,7 +2820,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0.600000024
+            FloatVal: 0.0500000007
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -2002,7 +2851,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 2.5
+            FloatVal: 0.0149999997
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -2042,7 +2891,7 @@ Emitters:
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
-            VecVal: [0.600000024, 0.800000012, 0.949999988, 0.449999988]
+            VecVal: [0.899999976, 0.959999979, 1, 1]
             IntVal: 0
             BoolVal: false
             Min: 0
@@ -2073,7 +2922,7 @@ Emitters:
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
-            VecVal: [0.400000006, 0.600000024, 0.899999976, 0]
+            VecVal: [0.400000006, 0.699999988, 1, 0]
             IntVal: 0
             BoolVal: false
             Min: 0
@@ -2150,7 +2999,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 0
+            FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false
@@ -2212,7 +3061,7 @@ Emitters:
             ColorRandomMin: [0, 0, 0, 0]
             ColorRandomMax: [1, 1, 1, 1]
             ColorCurveExpanded: [false, false, false, false]
-            FloatVal: 1
+            FloatVal: 3.5999999
             VecVal: [0, 0, 0, 0]
             IntVal: 0
             BoolVal: false

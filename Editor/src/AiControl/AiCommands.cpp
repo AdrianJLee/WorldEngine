@@ -1780,12 +1780,20 @@ namespace World
 		}
 		if (cmd == "ui.open")
 		{
-			const std::string panel = normalizePanel(arg("panel"));
+			std::string panel = arg("panel");
 			if (panel.empty())
 			{
 				error = "missing panel";
 				return false;
 			}
+			if (panel.rfind("vfx:", 0) == 0 || panel.find(".wvfx") != std::string::npos || panel.find(".wparticle") != std::string::npos)
+			{
+				std::string vfxPath = (panel.rfind("vfx:", 0) == 0) ? panel.substr(4) : panel;
+				m_Shell.OpenParticleEditor(vfxPath);
+				result = "opened " + panel;
+				return true;
+			}
+			panel = normalizePanel(panel);
 			m_Shell.OpenOrFocusIndependentWindow(panel);
 			result = "opened " + panel;
 			return true;
@@ -1936,16 +1944,25 @@ namespace World
 				return false;
 			}
 			const std::string kind = arg("kind", "material-preview");
-			if (kind != "material-preview")
+			if (kind != "material-preview" && kind != "vfx-preview" && kind != "particle-preview")
 			{
-				error = "unsupported texture kind '" + kind + "' (supported: material-preview)";
+				error = "unsupported texture kind '" + kind + "' (supported: material-preview, vfx-preview)";
 				return false;
 			}
-			const std::string panel = normalizePanel(arg("panel"));
+			std::string panel = arg("panel");
 			if (panel.empty())
 			{
-				error = "missing panel (e.g. material:materials/glass_red.wmat)";
-				return false;
+				if (kind == "vfx-preview" || kind == "particle-preview")
+					panel = "particle_editor";
+				else
+				{
+					error = "missing panel (e.g. material:materials/glass_red.wmat)";
+					return false;
+				}
+			}
+			else
+			{
+				panel = normalizePanel(panel);
 			}
 			if (!m_Shell.AiRequestPreviewCapture(panel, path.string()))
 			{

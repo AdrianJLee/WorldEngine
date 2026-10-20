@@ -6,6 +6,7 @@
 #include "WUI/Panels/ViewportPanel.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/Renderer/Renderer.h"
 #include "World/Renderer/ParticleAsset.h"
 #include "World/Renderer/VfxModule.h"
 #include "World/Renderer/VfxComputeGenerator.h"
@@ -607,70 +608,17 @@ void ParticleEditorPanel::NewAsset()
 	void ParticleEditorPanel::EnsurePerEmitterState()
 	{
 		const size_t count = m_Asset.Emitters.size();
-		if (m_EmitterSolo.size() < count) m_EmitterSolo.resize(count, false);
-		if (m_EmitterMute.size() < count) m_EmitterMute.resize(count, false);
-		if (m_EmitterLocked.size() < count) m_EmitterLocked.resize(count, false);
-		if (m_EmitterCurveType.size() < count) m_EmitterCurveType.resize(count, "Linear");
-		if (m_EmitterExtended.size() < count) m_EmitterExtended.resize(count);
-
-
-		while (m_EmitterGradients.size() < count)
-		{
-			ColorGradient g;
-			g.AddColorStop(0.0f, glm::vec3(1.0f, 0.7f, 0.2f));
-			g.AddColorStop(1.0f, glm::vec3(0.9f, 0.1f, 0.0f));
-			g.AddAlphaStop(0.0f, 0.0f);
-			g.AddAlphaStop(0.15f, 1.0f);
-			g.AddAlphaStop(0.85f, 0.9f);
-			g.AddAlphaStop(1.0f, 0.0f);
-			g.PrecomputeLut(256);
-			m_EmitterGradients.push_back(std::move(g));
-		}
-
-
-		while (m_EmitterSizeCurves.size() < count)
-		{
-			CubicBezierCurve c = CubicBezierCurve::EaseOut();
-			c.PrecomputeLut(256);
-			m_EmitterSizeCurves.push_back(std::move(c));
-		}
-
-
-		while (m_EmitterAlphaCurves.size() < count)
-		{
-			CubicBezierCurve a = CubicBezierCurve::Linear();
-			a.Clear();
-			a.AddKeyframe({ 0.0f, 0.0f });
-			a.AddKeyframe({ 0.2f, 1.0f });
-			a.AddKeyframe({ 0.8f, 1.0f });
-			a.AddKeyframe({ 1.0f, 0.0f });
-			a.AutoSmoothTangents();
-			a.PrecomputeLut(256);
-			m_EmitterAlphaCurves.push_back(std::move(a));
-		}
-
-
-		while (m_EmitterSpeedCurves.size() < count)
-		{
-			CubicBezierCurve s = CubicBezierCurve::Linear();
-			s.PrecomputeLut(256);
-			m_EmitterSpeedCurves.push_back(std::move(s));
-		}
-
-		while (m_EmitterRotationCurves.size() < count)
-		{
-			CubicBezierCurve r = CubicBezierCurve::Linear();
-			r.PrecomputeLut(256);
-			m_EmitterRotationCurves.push_back(std::move(r));
-		}
-
-		while (m_EmitterShockwaveCurves.size() < count)
-		{
-			CubicBezierCurve sw = CubicBezierCurve::EaseOut();
-			sw.PrecomputeLut(256);
-			m_EmitterShockwaveCurves.push_back(std::move(sw));
-		}
-
+		m_EmitterSolo.resize(count, false);
+		m_EmitterMute.resize(count, false);
+		m_EmitterLocked.resize(count, false);
+		m_EmitterCurveType.resize(count, "Linear");
+		m_EmitterExtended.resize(count);
+		m_EmitterGradients.resize(count);
+		m_EmitterSizeCurves.resize(count);
+		m_EmitterAlphaCurves.resize(count);
+		m_EmitterSpeedCurves.resize(count);
+		m_EmitterRotationCurves.resize(count);
+		m_EmitterShockwaveCurves.resize(count);
 
 		if (m_SelectedEmitterIndex >= count && count > 0)
 		{
@@ -809,11 +757,7 @@ void ParticleEditorPanel::NewAsset()
 			const auto& em = m_Asset.Emitters[i];
 			auto pool = std::make_unique<ParticlePool>(std::max<size_t>(100, em.MaxParticles));
 			pool->SetSeed(m_Asset.Seed + static_cast<uint32_t>(i * 101));
-			pool->SetMaterialSettings(em.Material);
-			pool->SetCollisionSettings(em.Collision);
-			pool->SetLinearDrag(em.LinearDrag);
-			pool->SetVortex(em.VortexStrength, em.VortexAxis);
-			pool->SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
+			ParticleSystem::ConfigurePoolFromEmitter(pool.get(), em, m_Asset);
 
 
 			if (i < m_EmitterExtended.size())
@@ -827,9 +771,7 @@ void ParticleEditorPanel::NewAsset()
 			}
 
 
-			if (i < m_EmitterSizeCurves.size()) pool->SetSizeCurve(m_EmitterSizeCurves[i]);
-			if (i < m_EmitterSpeedCurves.size()) pool->SetSpeedCurve(m_EmitterSpeedCurves[i]);
-			if (i < m_EmitterGradients.size()) pool->SetColorGradient(m_EmitterGradients[i]);
+			// 发射器参数与模块堆栈已由 ConfigurePoolFromEmitter 纯正驱动，绝不使用硬编码渐变/曲线二次覆盖
 
 
 			pool->ClearBursts();
@@ -1004,10 +946,31 @@ void ParticleEditorPanel::NewAsset()
 			m_LoadedPath = normalized;
 			m_Dirty = false;
 			m_SelectedEmitterIndex = 0;
-			m_StatusFeedback = "成功加载: " + normalized;
+			m_TimelineDuration = (m_Asset.Duration > 0.0f) ? m_Asset.Duration : 5.0f;
+			m_SimTime = 0.0f;
 			m_IsPlaying = true;
+
+			// 彻底清空面板级临时状态，杜绝跨特效污染与错位残留
+			m_EmitterSolo.clear();
+			m_EmitterMute.clear();
+			m_EmitterLocked.clear();
+			m_EmitterCurveType.clear();
+			m_EmitterExtended.clear();
+			m_EmitterGradients.clear();
+			m_EmitterSizeCurves.clear();
+			m_EmitterAlphaCurves.clear();
+			m_EmitterSpeedCurves.clear();
+			m_EmitterRotationCurves.clear();
+			m_EmitterShockwaveCurves.clear();
+
+			if (m_PreviewEntity.IsValid())
+			{
+				GetGlobalParticleSystem().RemoveEntity(static_cast<uint32_t>(m_PreviewEntity));
+			}
+
 			EnsurePerEmitterState();
 			SyncSimulationFromAsset();
+			m_StatusFeedback = "成功加载: " + normalized;
 		}
 		else
 		{
@@ -2448,6 +2411,13 @@ void ParticleEditorPanel::NewAsset()
 			m_PreviewRenderer->EndScene();
 
 			const Rhi::Handle<Rhi::Texture>& color = m_PreviewRenderer->GetColorTexture();
+			if (!m_PendingPreviewCapture.empty() && color)
+			{
+				Renderer::CaptureTexture(m_PendingPreviewCapture, color,
+					static_cast<uint32_t>(vpRect.W), static_cast<uint32_t>(vpRect.H));
+				WLD_CORE_INFO("[ai] vfx preview capture written: {0}", m_PendingPreviewCapture);
+				m_PendingPreviewCapture.clear();
+			}
 			if (color)
 			{
 				Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();

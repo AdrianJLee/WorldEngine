@@ -2409,6 +2409,16 @@ namespace World
 						emComp.EmitterType = ParticleEmitterType::Point;
 						emComp.Speed = mod.GetFloat("Speed", em.Speed);
 					}
+					else if (mod.Id == "mod.spawn.beam")
+					{
+						glm::vec3 bStart(0.0f, 0.4f, 0.0f);
+						glm::vec3 bEnd(0.0f, 0.4f, 8.0f);
+						float bJitter = 0.25f;
+						if (const auto* pS = mod.FindParam("BeamStart")) bStart = glm::vec3(pS->VecVal);
+						if (const auto* pE = mod.FindParam("BeamEnd")) bEnd = glm::vec3(pE->VecVal);
+						if (const auto* pJ = mod.FindParam("JitterStrength")) bJitter = pJ->FloatVal;
+						pool.SetBeamMode(true, bStart, bEnd, bJitter);
+					}
 					else if (mod.Id == "mod.update.gravity")
 					{
 						const auto* pG = mod.FindParam("Gravity");

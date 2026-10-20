@@ -958,7 +958,7 @@ static void TestVfxComponentContract()
 int main()
 {
 	Log::Init();
-	std::cout << "Running WorldParticleSystemTests...\n";
+	std::cout << "Running WorldParticleSystemTests..." << std::endl;
 
 	TestVfxComponentContract();
 	TestPoolInitializationAndCapacity();

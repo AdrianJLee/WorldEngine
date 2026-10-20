@@ -2490,10 +2490,43 @@ namespace World
 					glm::mat4 quadTransform;
 					if (em.FacingMode == ParticleRenderMode::HorizontalQuad)
 					{
-						quadTransform = glm::translate(glm::mat4(1.0f), p.Position)
+						glm::vec3 pos = p.Position;
+						if (pos.y <= 0.001f) pos.y += 0.02f;
+						quadTransform = glm::translate(glm::mat4(1.0f), pos)
 							* glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f))
 							* glm::rotate(glm::mat4(1.0f), p.Rotation, glm::vec3(0.0f, 0.0f, 1.0f))
 							* glm::scale(glm::mat4(1.0f), glm::vec3(p.Size.x, p.Size.y, 1.0f));
+					}
+					else if (em.FacingMode == ParticleRenderMode::StretchedVelocity)
+					{
+						glm::vec3 vel = p.Velocity;
+						float speed = glm::length(vel);
+						glm::vec3 velDir = (speed > 1e-4f) ? (vel / speed) : camForward;
+
+						glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+						glm::vec3 toCam = camPos - p.Position;
+						float toCamLen = glm::length(toCam);
+						toCam = (toCamLen > 1e-4f) ? (toCam / toCamLen) : -camForward;
+
+						glm::vec3 side = glm::cross(velDir, toCam);
+						float sideLen = glm::length(side);
+						if (sideLen > 1e-4f)
+							side /= sideLen;
+						else
+							side = camRight;
+
+						glm::vec3 facing = glm::cross(side, velDir);
+
+						float stretchLen = std::max(p.Size.y, p.Size.x * 2.5f);
+						if (speed > 0.5f)
+							stretchLen = std::max(stretchLen, speed * 0.12f);
+
+						quadTransform = glm::mat4(1.0f);
+						quadTransform[0] = glm::vec4(side * p.Size.x, 0.0f);
+						quadTransform[1] = glm::vec4(velDir * stretchLen, 0.0f);
+						quadTransform[2] = glm::vec4(facing, 0.0f);
+						quadTransform[3] = glm::vec4(p.Position, 1.0f);
+						quadTransform = quadTransform * glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 					}
 					else if (em.FacingMode == ParticleRenderMode::Quad2D)
 					{

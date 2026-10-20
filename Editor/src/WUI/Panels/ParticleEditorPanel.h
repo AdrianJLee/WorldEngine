@@ -121,6 +121,7 @@ namespace World
 		const char* Title() const override { return "视觉特效系统 (WorldVFX Studio 2.0)"; }
 
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
+		void RequestPreviewCapture(const std::string& path) { m_PendingPreviewCapture = path; }
 		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
 
 		static void RequestOpenAsset(const std::string& path);
@@ -197,6 +198,7 @@ namespace World
 		ParticleAsset m_Asset;
 		bool m_Dirty = false;
 		std::string m_StatusFeedback;
+		std::string m_PendingPreviewCapture;
 		std::vector<std::string> m_AvailableAssets;
 		size_t m_SelectedEmitterIndex = 0;
 

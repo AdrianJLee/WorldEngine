@@ -320,6 +320,11 @@ bool EditorShell::AiRequestPreviewCapture(const std::string& panel, const std::s
 			material->RequestPreviewCapture(path);
 			return true;
 		}
+		if (auto* particle = dynamic_cast<ParticleEditorPanel*>(found->second.get()))
+		{
+			particle->RequestPreviewCapture(path);
+			return true;
+		}
 		return false;
 	}
 

@@ -521,6 +521,43 @@ namespace World
 		return m;
 	}
 
+	
+	VfxModule VfxModuleLibrary::CreateBeamSpawnModule(const glm::vec3& start, const glm::vec3& end, float jitterStrength, float jitterFreq)
+	{
+		VfxModule m;
+		m.Id = "mod.spawn.beam";
+		m.Name = "等离子电弧光束 (Plasma Lightning Beam)";
+		m.Description = "在起点与终点间沿轴线连续生成贯通等离子光束与高压折线电弧 (激光束/特斯拉电弧)";
+		m.Stage = VfxModuleStage::Spawn;
+		m.Enabled = true;
+		m.Parameters = {
+			{ "BeamStart", VfxParamType::Vec3, 0.0f, glm::vec4(start, 0.0f), 0, false, -50.0f, 50.0f, 0.1f, "光束发射起点 (Start)" },
+			{ "BeamEnd", VfxParamType::Vec3, 0.0f, glm::vec4(end, 0.0f), 0, false, -50.0f, 50.0f, 0.1f, "光束击中终点 (Target)" },
+			{ "JitterStrength", VfxParamType::Float, jitterStrength, {}, 0, false, 0.0f, 5.0f, 0.05f, "闪电电弧曲折抖动幅度 (m)" },
+			{ "JitterFreq", VfxParamType::Float, jitterFreq, {}, 0, false, 1.0f, 100.0f, 1.0f, "电弧折线频率" }
+		};
+		m.SlangSource = R"(
+    // [Module: BeamSpawn] 贯通等离子光束与高压折线电弧
+    float t = Hash1D(particleId * 17u + 5u);
+    float3 beamDir = u_BeamEnd - u_BeamStart;
+    float beamLen = length(beamDir);
+    float3 beamNorm = (beamLen > 1e-4f) ? (beamDir / beamLen) : float3(0, 0, 1);
+    float3 upRef = (abs(beamNorm.y) > 0.9f) ? float3(1, 0, 0) : float3(0, 1, 0);
+    float3 perpU = normalize(cross(beamNorm, upRef));
+    float3 perpV = cross(beamNorm, perpU);
+
+    float envelope = sin(t * 3.14159265f);
+    float seedX = Hash1D(particleId * 31u + 7u) * 6.28318f;
+    float seedY = Hash1D(particleId * 47u + 13u) * 6.28318f;
+    float jx = sin(t * u_JitterFreq + seedX);
+    float jy = cos(t * u_JitterFreq * 1.37f + seedY);
+
+    p.Position = lerp(u_BeamStart, u_BeamEnd, t) + (perpU * jx + perpV * jy) * (u_JitterStrength * envelope);
+    p.Velocity = beamNorm * 15.0f;
+)";
+		return m;
+	}
+
 	VfxModule VfxModuleLibrary::CreateScaleOverLifeModule(float startScale, float endScale)
 	{
 		VfxModule m;

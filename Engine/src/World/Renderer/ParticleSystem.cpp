@@ -181,6 +181,21 @@ namespace World
 				localDir = glm::vec3(std::sin(angle) * std::cos(phi), std::cos(angle), std::sin(angle) * std::sin(phi));
 				break;
 			}
+			case ParticleEmitterType::Circle:
+			{
+				float theta = RandomFloat() * 6.28318530718f;
+				float rad = (m_CircleRadius > 0.01f) ? m_CircleRadius : 1.5f;
+				localOffset = glm::vec3(std::cos(theta) * rad, 0.0f, std::sin(theta) * rad);
+				localDir = glm::vec3(std::cos(theta), 0.0f, std::sin(theta));
+				break;
+			}
+			case ParticleEmitterType::Line:
+			{
+				float tLine = RandomFloatSigned();
+				localOffset = glm::vec3(tLine * 1.0f, 0.0f, 0.0f);
+				localDir = glm::vec3(0.0f, 1.0f, 0.0f);
+				break;
+			}
 			default:
 				localDir = RandomUnitVector();
 				break;
@@ -200,6 +215,28 @@ namespace World
 			float speed = comp.Speed + RandomFloatSigned() * comp.SpeedVariance;
 			p.Position = emitterPos + (emitterRot * localOffset);
 			p.Velocity = worldDir * speed;
+
+			if (m_BeamEnabled)
+			{
+				float t = (count > 1) ? (static_cast<float>(emitted) / static_cast<float>(count - 1)) : RandomFloat();
+				t = glm::clamp(t + RandomFloatSigned() * 0.015f, 0.0f, 1.0f);
+
+				glm::vec3 beamDir = m_BeamEnd - m_BeamStart;
+				float beamLen = glm::length(beamDir);
+				glm::vec3 beamNorm = (beamLen > 1e-4f) ? (beamDir / beamLen) : glm::vec3(0.0f, 0.0f, 1.0f);
+				glm::vec3 upRef = (std::abs(beamNorm.y) > 0.9f) ? glm::vec3(1.0f, 0.0f, 0.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+				glm::vec3 perpU = glm::normalize(glm::cross(beamNorm, upRef));
+				glm::vec3 perpV = glm::cross(beamNorm, perpU);
+
+				float envelope = std::sin(t * 3.14159265f);
+				float jx = RandomFloatSigned() * m_BeamJitter * envelope;
+				float jy = RandomFloatSigned() * m_BeamJitter * envelope;
+
+				p.Position = glm::mix(m_BeamStart, m_BeamEnd, t) + (perpU * jx + perpV * jy);
+				p.Velocity = beamNorm * std::max(12.0f, comp.Speed);
+				p.Rotation = 0.0f;
+				p.AngularVelocity = 0.0f;
+			}
 			p.Acceleration = glm::vec3(0.0f);
 			p.Rotation = RandomFloat() * 6.28318530718f;
 			p.AngularVelocity = RandomFloatSigned() * 2.0f;
@@ -383,6 +420,25 @@ namespace World
 				p.Velocity += curl * (m_CurlNoiseStrength * dt);
 			}
 
+			// Apply Vortex Tornado (旋风涡流、上升热浮力与倒圆锥高度扩张)
+			if (m_VortexTornadoEnabled)
+			{
+				glm::vec3 relPos = p.Position - emitterPos;
+				float r = glm::length(glm::vec2(relPos.x, relPos.z));
+				if (r > 0.01f)
+				{
+					glm::vec3 normXZ = glm::normalize(glm::vec3(relPos.x, 0.0f, relPos.z));
+					glm::vec3 tangent = glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), normXZ);
+					p.Velocity += tangent * (m_TornadoVortexStrength * dt);
+				}
+				p.Velocity.y += m_TornadoUpwardBuoyancy * dt;
+				if (r > 0.001f && p.Velocity.y > 0.0f)
+				{
+					glm::vec3 normXZ = glm::normalize(glm::vec3(relPos.x, 0.0f, relPos.z));
+					p.Velocity += normXZ * (m_TornadoConeExpansion * p.Velocity.y * dt);
+				}
+			}
+
 			glm::vec3 effGravity = comp.Gravity;
 			if (m_HasGravityAxisCurves)
 			{
@@ -398,6 +454,17 @@ namespace World
 			p.Velocity += (effGravity + p.Acceleration) * dt;
 			p.Position += p.Velocity * dt;
 			p.Rotation += p.AngularVelocity * dt;
+
+			// Apply Orbit angular motion (围绕 OrbitCenter 和 OrbitAxis 做精准三维立体公转)
+			if (m_OrbitEnabled && std::abs(m_OrbitSpeed) > 1e-4f)
+			{
+				glm::vec3 relPos = p.Position - m_OrbitCenter;
+				float angle = m_OrbitSpeed * dt;
+				glm::quat rotQuat = glm::angleAxis(angle, m_OrbitAxis);
+				glm::vec3 newRelPos = rotQuat * relPos;
+				p.Position = m_OrbitCenter + newRelPos;
+				p.Velocity = (newRelPos - relPos) / std::max(1e-4f, dt);
+			}
 
 			if (comp.LockToXYPlane)
 			{
@@ -486,6 +553,15 @@ namespace World
 				s = glm::mix(comp.SizeStart, comp.SizeEnd, t);
 			}
 			p.Size = glm::vec2(s);
+
+			// Apply Shockwave expansion & dissipation
+			if (m_ShockwaveEnabled)
+			{
+				float expT = std::sqrt(t);
+				float curRad = glm::mix(m_ShockwaveStartRadius, m_ShockwaveMaxRadius, expT);
+				p.Size = glm::vec2(curRad);
+				p.Color.a *= std::max(0.0f, 1.0f - t * m_ShockwaveDissipationRate);
+			}
 
 			if (m_HasSpeedCurve)
 			{
@@ -738,12 +814,131 @@ namespace World
 	void ParticleSystem::RemoveEntity(uint32_t entityId)
 	{
 		m_Pools.erase(entityId);
+		for (uint32_t i = 0; i < 64; ++i)
+		{
+			uint32_t poolId = (entityId << 8) | i;
+			m_Pools.erase(poolId);
+		}
 	}
 
 	void ParticleSystem::ClearAll()
 	{
 		m_Pools.clear();
 		m_OneShots.clear();
+	}
+
+	void ParticleSystem::ConfigurePoolFromEmitter(ParticlePool* pool, const ParticleEmitterLayer& em, const ParticleAsset& asset)
+	{
+		if (!pool) return;
+
+		pool->SetMaterialSettings(em.Material);
+		pool->SetCollisionSettings(em.Collision);
+		pool->SetLinearDrag(em.LinearDrag);
+		pool->SetVortex(em.VortexStrength, em.VortexAxis);
+		pool->SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
+
+		for (const auto& mod : em.Modules)
+		{
+			if (!mod.Enabled) continue;
+
+			if (mod.Id == "mod.spawn.beam")
+			{
+				glm::vec3 bStart(0.0f, 0.4f, 0.0f);
+				glm::vec3 bEnd(0.0f, 0.4f, 8.0f);
+				float bJitter = 0.25f;
+				if (const auto* pS = mod.FindParam("BeamStart")) bStart = glm::vec3(pS->VecVal);
+				if (const auto* pE = mod.FindParam("BeamEnd")) bEnd = glm::vec3(pE->VecVal);
+				if (const auto* pJ = mod.FindParam("JitterStrength")) bJitter = pJ->FloatVal;
+				pool->SetBeamMode(true, bStart, bEnd, bJitter);
+			}
+			else if (mod.Id == "mod.update.orbit")
+			{
+				float oSpeed = mod.GetFloat("OrbitSpeed", 3.0f);
+				glm::vec3 oAxis(0.0f, 1.0f, 0.0f);
+				glm::vec3 oCenter(0.0f);
+				if (const auto* pAx = mod.FindParam("OrbitAxis")) oAxis = glm::vec3(pAx->VecVal);
+				if (const auto* pC = mod.FindParam("OrbitCenter")) oCenter = glm::vec3(pC->VecVal);
+				pool->SetOrbitMode(true, oSpeed, oAxis, oCenter);
+			}
+			else if (mod.Id == "mod.update.vortex_tornado")
+			{
+				float vStrength = mod.GetFloat("VortexStrength", 6.0f);
+				float uBuoyancy = mod.GetFloat("UpwardBuoyancy", 4.0f);
+				float cExpand = mod.GetFloat("ConeExpansion", 0.5f);
+				pool->SetVortexTornadoMode(true, vStrength, uBuoyancy, cExpand);
+			}
+			else if (mod.Id == "mod.update.shockwave_expansion")
+			{
+				float maxRadius = mod.GetFloat("MaxRadius", 8.0f);
+				float dissRate = mod.GetFloat("DissipationRate", 1.2f);
+				pool->SetShockwaveMode(true, 0.2f, maxRadius, dissRate);
+			}
+			else if (mod.Id == "mod.spawn.ring")
+			{
+				float rRad = mod.GetFloat("RingRadius", 1.5f);
+				pool->SetCircleRadius(rRad);
+			}
+			else if (mod.Id == "mod.update.curl_noise")
+			{
+				float nStr = mod.GetFloat("NoiseStrength", 1.0f);
+				float nFreq = mod.GetFloat("NoiseFrequency", 1.0f);
+				pool->SetCurlNoise(nStr, nFreq, 2);
+			}
+			else if (mod.Id == "mod.update.drag")
+			{
+				pool->SetLinearDrag(mod.GetFloat("LinearDrag", em.LinearDrag));
+			}
+			else if (mod.Id == "mod.update.gravity")
+			{
+				if (const auto* pG = mod.FindParam("Gravity"))
+				{
+					if (pG->SplitAxes)
+					{
+						pool->SetGravityAxisCurves(pG->AxisCurve[0], pG->AxisCurve[1], pG->AxisCurve[2]);
+					}
+					else if (pG->Mode == VfxParamMode::Curve)
+					{
+						pool->SetGravityCurve(pG->Curve);
+					}
+				}
+			}
+			else if (mod.Id == "mod.spawn.init_particle" || mod.Id == "mod.update.color_over_life")
+			{
+				for (const auto& p : mod.Parameters)
+				{
+					if (p.Name == "ColorStart" || p.Name == "ColorEnd")
+					{
+						if (p.SplitColor || p.Mode == VfxParamMode::Curve)
+						{
+							pool->SetColorCurves(p.ColorCurves[0], p.ColorCurves[1], p.ColorCurves[2], p.ColorCurves[3]);
+						}
+						else if (p.Mode == VfxParamMode::Curve)
+						{
+							pool->SetColorCurve(p.Curve);
+						}
+					}
+					else if (p.Name == "SizeStart" || p.Name == "StartScale")
+					{
+						if (p.Mode == VfxParamMode::Curve)
+						{
+							pool->SetSizeCurve(p.Curve);
+						}
+					}
+				}
+			}
+		}
+
+		pool->ClearBursts();
+		for (const auto& b : em.Bursts)
+		{
+			pool->AddBurst(b.Time, b.Count);
+		}
+
+		pool->ClearSubEmitters();
+		for (const auto& s : em.SubEmitters)
+		{
+			pool->AddSubEmitter(s);
+		}
 	}
 
 	void ParticleSystem::SpawnOneShotAsset(const ParticleAsset& asset, const glm::vec3& position, const glm::quat& rotation)
@@ -755,11 +950,7 @@ namespace World
 			const size_t capacity = std::max(em.MaxParticles, 64u);
 			auto pool = std::make_unique<ParticlePool>(capacity);
 			pool->SetSeed(asset.Seed);
-			pool->SetMaterialSettings(em.Material);
-			pool->SetCollisionSettings(em.Collision);
-			pool->SetLinearDrag(em.LinearDrag);
-			pool->SetVortex(em.VortexStrength, em.VortexAxis);
-			pool->SetTurbulence(em.TurbulenceStrength, em.TurbulenceFrequency);
+			ConfigurePoolFromEmitter(pool.get(), em, asset);
 
 			ParticleEmitterConfig comp;
 			comp.MaxParticles = em.MaxParticles;

@@ -271,6 +271,7 @@ namespace World
 		static VfxModule CreateBoxSpawnModule();
 		static VfxModule CreatePointSpawnModule();
 		static VfxModule CreateRingSpawnModule(float radius = 1.5f, float initialSpeed = 0.0f);
+		static VfxModule CreateBeamSpawnModule(const glm::vec3& start = glm::vec3(0.0f, 0.4f, 0.0f), const glm::vec3& end = glm::vec3(0.0f, 0.4f, 8.0f), float jitterStrength = 0.25f, float jitterFreq = 24.0f);
 
 		// Update 阶段标准模块
 		static VfxModule CreateGravityModule();

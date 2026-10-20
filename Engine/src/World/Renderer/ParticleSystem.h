@@ -315,6 +315,51 @@ float EmitterDuration = 0.0f; // 发射器激活持续时间 (0.0f 表示跟随�
 		float GetCurlNoiseFrequency() const { return m_CurlNoiseFrequency; }
 		uint32_t GetCurlNoiseOctaves() const { return m_CurlNoiseOctaves; }
 
+		void SetBeamMode(bool enabled, const glm::vec3& start = glm::vec3(0.0f, 0.4f, 0.0f), const glm::vec3& end = glm::vec3(0.0f, 0.4f, 8.0f), float jitter = 0.25f)
+		{
+			m_BeamEnabled = enabled;
+			m_BeamStart = start;
+			m_BeamEnd = end;
+			m_BeamJitter = jitter;
+		}
+		bool IsBeamMode() const { return m_BeamEnabled; }
+		const glm::vec3& GetBeamStart() const { return m_BeamStart; }
+		const glm::vec3& GetBeamEnd() const { return m_BeamEnd; }
+		float GetBeamJitter() const { return m_BeamJitter; }
+
+		void SetOrbitMode(bool enabled, float speed = 3.0f, const glm::vec3& axis = glm::vec3(0.0f, 1.0f, 0.0f), const glm::vec3& center = glm::vec3(0.0f))
+		{
+			m_OrbitEnabled = enabled;
+			m_OrbitSpeed = speed;
+			m_OrbitAxis = (glm::length(axis) > 1e-4f) ? glm::normalize(axis) : glm::vec3(0.0f, 1.0f, 0.0f);
+			m_OrbitCenter = center;
+		}
+		bool IsOrbitMode() const { return m_OrbitEnabled; }
+		float GetOrbitSpeed() const { return m_OrbitSpeed; }
+		const glm::vec3& GetOrbitAxis() const { return m_OrbitAxis; }
+		const glm::vec3& GetOrbitCenter() const { return m_OrbitCenter; }
+
+		void SetVortexTornadoMode(bool enabled, float vortexStrength = 6.0f, float upwardBuoyancy = 4.0f, float coneExpansion = 0.5f)
+		{
+			m_VortexTornadoEnabled = enabled;
+			m_TornadoVortexStrength = vortexStrength;
+			m_TornadoUpwardBuoyancy = upwardBuoyancy;
+			m_TornadoConeExpansion = coneExpansion;
+		}
+		bool IsVortexTornadoMode() const { return m_VortexTornadoEnabled; }
+
+		void SetShockwaveMode(bool enabled, float startRadius = 0.5f, float maxRadius = 8.0f, float dissipationRate = 1.2f)
+		{
+			m_ShockwaveEnabled = enabled;
+			m_ShockwaveStartRadius = startRadius;
+			m_ShockwaveMaxRadius = maxRadius;
+			m_ShockwaveDissipationRate = dissipationRate;
+		}
+		bool IsShockwaveMode() const { return m_ShockwaveEnabled; }
+
+		void SetCircleRadius(float radius) { m_CircleRadius = std::max(0.01f, radius); }
+		float GetCircleRadius() const { return m_CircleRadius; }
+
 		void SetRibbonEnabled(bool enabled) { m_RibbonEnabled = enabled; }
 		bool IsRibbonEnabled() const { return m_RibbonEnabled; }
 		ParticleRibbon& GetRibbon() { return m_Ribbon; }
@@ -381,6 +426,28 @@ float EmitterDuration = 0.0f; // 发射器激活持续时间 (0.0f 表示跟随�
 		float m_CurlNoiseFrequency = 1.0f;
 		uint32_t m_CurlNoiseOctaves = 1;
 
+		bool m_BeamEnabled = false;
+		glm::vec3 m_BeamStart { 0.0f, 0.4f, 0.0f };
+		glm::vec3 m_BeamEnd { 0.0f, 0.4f, 8.0f };
+		float m_BeamJitter = 0.25f;
+
+		bool m_OrbitEnabled = false;
+		float m_OrbitSpeed = 3.0f;
+		glm::vec3 m_OrbitAxis { 0.0f, 1.0f, 0.0f };
+		glm::vec3 m_OrbitCenter { 0.0f, 0.0f, 0.0f };
+
+		bool m_VortexTornadoEnabled = false;
+		float m_TornadoVortexStrength = 6.0f;
+		float m_TornadoUpwardBuoyancy = 4.0f;
+		float m_TornadoConeExpansion = 0.5f;
+
+		bool m_ShockwaveEnabled = false;
+		float m_ShockwaveStartRadius = 0.5f;
+		float m_ShockwaveMaxRadius = 8.0f;
+		float m_ShockwaveDissipationRate = 1.2f;
+
+		float m_CircleRadius = 1.5f;
+
 		bool m_RibbonEnabled = false;
 		ParticleRibbon m_Ribbon;
 		ParticleMeshBatch m_MeshBatch;
@@ -405,6 +472,7 @@ float EmitterDuration = 0.0f; // 发射器激活持续时间 (0.0f 表示跟随�
 		float Elapsed = 0.0f;
 	};
 
+	struct ParticleEmitterLayer;
 	struct ParticleAsset;
 
 	class WLD_API ParticleSystem
@@ -426,6 +494,7 @@ float EmitterDuration = 0.0f; // 发射器激活持续时间 (0.0f 表示跟随�
 		void ClearAll();
 		size_t PoolCount() const { return m_Pools.size(); }
 
+		static void ConfigurePoolFromEmitter(ParticlePool* pool, const ParticleEmitterLayer& em, const ParticleAsset& asset);
 		void SpawnOneShotAsset(const ParticleAsset& asset, const glm::vec3& position, const glm::quat& rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 		void SpawnOneShot(const ParticleEmitterConfig& comp, const ParticleMaterialSettings& mat,
 			const glm::vec3& position, const glm::quat& rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f));

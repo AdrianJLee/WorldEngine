@@ -591,6 +591,54 @@ out << YAML::EndMap;
 				em.ColorStart = initMod->GetVec4("ColorStart", em.ColorStart);
 				em.ColorEnd = initMod->GetVec4("ColorEnd", em.ColorEnd);
 			}
+			if (const auto* gMod = em.FindModule("mod.update.gravity"))
+			{
+				em.Gravity = glm::vec3(gMod->GetVec4("Gravity", glm::vec4(em.Gravity, 0.0f)));
+			}
+			if (const auto* dMod = em.FindModule("mod.update.drag"))
+			{
+				em.LinearDrag = dMod->GetFloat("LinearDrag", em.LinearDrag);
+			}
+			if (const auto* vMod = em.FindModule("mod.update.vortex"))
+			{
+				em.VortexStrength = vMod->GetFloat("VortexStrength", em.VortexStrength);
+			}
+			if (const auto* vtMod = em.FindModule("mod.update.vortex_tornado"))
+			{
+				em.VortexStrength = vtMod->GetFloat("VortexStrength", em.VortexStrength);
+			}
+			if (const auto* turbMod = em.FindModule("mod.update.turbulence"))
+			{
+				em.TurbulenceStrength = turbMod->GetFloat("TurbulenceStrength", em.TurbulenceStrength);
+			}
+			if (const auto* spMod = em.FindModule("mod.spawn.point"))
+			{
+				em.Speed = spMod->GetFloat("PointSpeed", em.Speed);
+				em.EmitterType = ParticleEmitterType::Point;
+			}
+			else if (const auto* scMod = em.FindModule("mod.spawn.cone"))
+			{
+				em.Speed = scMod->GetFloat("InitialSpeed", em.Speed);
+				em.EmitterType = ParticleEmitterType::Cone;
+			}
+			else if (const auto* ssMod = em.FindModule("mod.spawn.sphere"))
+			{
+				em.Speed = ssMod->GetFloat("OutwardSpeed", em.Speed);
+				em.EmitterType = ParticleEmitterType::Sphere;
+			}
+			else if (const auto* srMod = em.FindModule("mod.spawn.ring"))
+			{
+				em.Speed = srMod->GetFloat("RingSpeed", em.Speed);
+				em.EmitterType = ParticleEmitterType::Circle;
+			}
+			else if (const auto* sbMod = em.FindModule("mod.spawn.box"))
+			{
+				em.EmitterType = ParticleEmitterType::Box;
+			}
+			if (const auto* renMod = em.FindModule("mod.render.sprite"))
+			{
+				em.Material.EmissiveBoost = renMod->GetFloat("EmissiveBoost", em.Material.EmissiveBoost);
+			}
 		}
 	}
 
@@ -762,6 +810,20 @@ out << YAML::EndMap;
 			if (std::filesystem::exists(fromEngine, ec) && std::filesystem::is_regular_file(fromEngine, ec))
 				return std::filesystem::absolute(fromEngine);
 
+			if (s.rfind("engine/content/", 0) == 0 || s.rfind("Engine/content/", 0) == 0)
+			{
+				std::string sub = s.substr(15);
+				std::filesystem::path fromSub = engineRoot / sub;
+				if (std::filesystem::exists(fromSub, ec) && std::filesystem::is_regular_file(fromSub, ec))
+					return std::filesystem::absolute(fromSub);
+			}
+			if (s.rfind("content/", 0) == 0 || s.rfind("Content/", 0) == 0)
+			{
+				std::string sub = s.substr(8);
+				std::filesystem::path fromSub = engineRoot / sub;
+				if (std::filesystem::exists(fromSub, ec) && std::filesystem::is_regular_file(fromSub, ec))
+					return std::filesystem::absolute(fromSub);
+			}
 			if (s.rfind("engine/", 0) == 0 || s.rfind("Engine/", 0) == 0)
 			{
 				std::string sub = s.substr(7);

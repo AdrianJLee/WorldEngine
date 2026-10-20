@@ -30,7 +30,42 @@ namespace World
 
 		// 返回加载到的像素(交给 stbi_image_free),失败返回 nullptr。
 		// desiredChannels = 4:统一按 RGBA8 解码,调用方无需再做格式转换。
-		stbi_uc* LoadPixels(const std::string& path, bool flipVertically, int desiredChannels,
+		
+	static std::filesystem::path ResolveTextureDiskPath(const std::string& path)
+	{
+		const std::filesystem::path requested(path);
+		if (requested.is_absolute())
+			return requested;
+
+		std::error_code ec;
+		std::filesystem::path diskPath = World::Paths::AssetRoot() / path;
+		if (std::filesystem::exists(diskPath, ec))
+			return diskPath;
+
+		std::string norm = path;
+		if (norm.rfind("engine/content/", 0) == 0 || norm.rfind("Engine/content/", 0) == 0)
+			norm = norm.substr(15);
+		else if (norm.rfind("engine/", 0) == 0 || norm.rfind("Engine/", 0) == 0)
+			norm = norm.substr(7);
+		else if (norm.rfind("content/", 0) == 0 || norm.rfind("Content/", 0) == 0)
+			norm = norm.substr(8);
+
+		const auto& engRoot = World::Paths::EngineContentRoot();
+		if (!engRoot.empty())
+		{
+			std::filesystem::path engPath = engRoot / norm;
+			if (std::filesystem::exists(engPath, ec))
+				return engPath;
+
+			std::filesystem::path engPathOrig = engRoot / path;
+			if (std::filesystem::exists(engPathOrig, ec))
+				return engPathOrig;
+		}
+
+		return diskPath;
+	}
+
+	stbi_uc* LoadPixels(const std::string& path, bool flipVertically, int desiredChannels,
 			int& width, int& height, int& channels)
 		{
 			stbi_set_flip_vertically_on_load(flipVertically ? 1 : 0);
@@ -59,14 +94,7 @@ namespace World
 			// 相对路径 = 当前项目内容根里的资产逻辑路径,与材质路径书写约定一致。
 			// P4-U12:删掉早先"Game/ 与 Editor/ 也算内容根"的旧布局回退 —— 内容根只有一个,
 			// 多候选会让"路径写错却恰好命中旧目录"变成静默成功。
-			std::error_code ec;
-			std::filesystem::path diskPath = World::Paths::AssetRoot() / path;
-			if (!std::filesystem::exists(diskPath, ec))
-			{
-				std::filesystem::path engPath = World::Paths::EngineContentRoot() / path;
-				if (std::filesystem::exists(engPath, ec))
-					diskPath = engPath;
-			}
+			std::filesystem::path diskPath = ResolveTextureDiskPath(path);
 			return stbi_load(diskPath.string().c_str(), &width, &height, &channels, desiredChannels);
 		}
 
@@ -82,17 +110,7 @@ namespace World
 					return true;
 			}
 
-			const std::filesystem::path requested(path);
-			std::filesystem::path diskPath = requested.is_absolute()
-				? requested
-				: World::Paths::AssetRoot() / path;
-			std::error_code ec;
-			if (!requested.is_absolute() && !std::filesystem::exists(diskPath, ec))
-			{
-				std::filesystem::path engPath = World::Paths::EngineContentRoot() / path;
-				if (std::filesystem::exists(engPath, ec))
-					diskPath = engPath;
-			}
+			std::filesystem::path diskPath = ResolveTextureDiskPath(path);
 
 			std::ifstream input(diskPath, std::ios::binary | std::ios::ate);
 			if (!input)
@@ -195,22 +213,7 @@ namespace World
 		// 旧式(只有 `source:`)没有 payload,继续走下面的既有解析。
 		if (IsTextureAssetPath(path))
 		{
-			std::filesystem::path assetFile(path);
-			if (!assetFile.is_absolute())
-			{
-				std::error_code ec;
-				std::filesystem::path cand = World::Paths::AssetRoot() / path;
-				if (std::filesystem::exists(cand, ec))
-					assetFile = cand;
-				else
-				{
-					std::filesystem::path engCand = World::Paths::EngineContentRoot() / path;
-					if (std::filesystem::exists(engCand, ec))
-						assetFile = engCand;
-					else
-						assetFile = cand;
-				}
-			}
+			std::filesystem::path assetFile = ResolveTextureDiskPath(path);
 			TextureAssetFile asset;
 			std::string containerError;
 			if (LoadTextureAssetFile(assetFile, asset, containerError) && !asset.Payload.empty())
