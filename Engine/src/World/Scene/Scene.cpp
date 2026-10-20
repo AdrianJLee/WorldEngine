@@ -2353,9 +2353,40 @@ namespace World
 						emComp.SizeStart = mod.GetFloat("SizeStart", 0.3f);
 						emComp.SizeEnd = mod.GetFloat("SizeEnd", 0.05f);
 						const auto* pCS = mod.FindParam("ColorStart");
-						if (pCS) emComp.ColorStart = PackColor(pCS->VecVal);
+						if (pCS)
+						{
+							if (pCS->Mode == VfxParamMode::RandomRange)
+							{
+								emComp.ColorStart = PackColor(pCS->RandomMinVec);
+								emComp.ColorStartMax = PackColor(pCS->RandomMaxVec);
+							}
+							else
+							{
+								emComp.ColorStart = PackColor(pCS->VecVal);
+								emComp.ColorStartMax = 0;
+							}
+							if (pCS->SplitColor || pCS->Mode == VfxParamMode::Curve)
+							{
+								pool.SetColorCurves(pCS->ColorCurves[0], pCS->ColorCurves[1], pCS->ColorCurves[2], pCS->ColorCurves[3]);
+							}
+							else if (pCS->Mode == VfxParamMode::Curve)
+							{
+								pool.SetColorCurve(pCS->Curve);
+							}
+						}
 						const auto* pCE = mod.FindParam("ColorEnd");
-						if (pCE) emComp.ColorEnd = PackColor(pCE->VecVal);
+						if (pCE)
+						{
+							if (pCE->Mode == VfxParamMode::RandomRange)
+							{
+								float r = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+								emComp.ColorEnd = PackColor(glm::mix(pCE->RandomMinVec, pCE->RandomMaxVec, r));
+							}
+							else
+							{
+								emComp.ColorEnd = PackColor(pCE->VecVal);
+							}
+						}
 					}
 					else if (mod.Id == "mod.spawn.cone")
 					{
@@ -2381,7 +2412,27 @@ namespace World
 					else if (mod.Id == "mod.update.gravity")
 					{
 						const auto* pG = mod.FindParam("Gravity");
-						if (pG) emComp.Gravity = glm::vec3(pG->VecVal.x, pG->VecVal.y, pG->VecVal.z);
+						if (pG)
+						{
+							if (pG->SplitAxes)
+							{
+								pool.SetGravityAxisCurves(pG->AxisCurve[0], pG->AxisCurve[1], pG->AxisCurve[2]);
+								emComp.Gravity = glm::vec3(pG->VecVal);
+							}
+							else if (pG->Mode == VfxParamMode::RandomRange)
+							{
+								float r = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+								emComp.Gravity = glm::mix(glm::vec3(pG->RandomMinVec), glm::vec3(pG->RandomMaxVec), r);
+							}
+							else
+							{
+								emComp.Gravity = glm::vec3(pG->VecVal.x, pG->VecVal.y, pG->VecVal.z);
+							}
+							if (!pG->SplitAxes && pG->Mode == VfxParamMode::Curve)
+							{
+								pool.SetGravityCurve(pG->Curve);
+							}
+						}
 					}
 					else if (mod.Id == "mod.update.drag")
 					{
@@ -2423,6 +2474,17 @@ namespace World
 						if (pCS) emComp.ColorStart = PackColor(pCS->VecVal);
 						const auto* pCE = mod.FindParam("ColorEnd");
 						if (pCE) emComp.ColorEnd = PackColor(pCE->VecVal);
+						for (const auto& p : mod.Parameters)
+						{
+							if (p.SplitColor || p.Mode == VfxParamMode::Curve)
+							{
+								pool.SetColorCurves(p.ColorCurves[0], p.ColorCurves[1], p.ColorCurves[2], p.ColorCurves[3]);
+							}
+							else if (p.Mode == VfxParamMode::Curve)
+							{
+								pool.SetColorCurve(p.Curve);
+							}
+						}
 					}
 					else if (mod.Id == "mod.update.orbit")
 					{

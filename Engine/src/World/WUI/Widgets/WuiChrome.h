@@ -45,6 +45,11 @@ namespace World::Wui
 		const std::string& trailing = std::string(), const std::string& tooltip = std::string(),
 		float fontSize = 14.0f);
 
+	// ---- P1c-LIB: 树状展开/折叠指示箭头 (对齐商业引擎细节面板/Niagara 树状折叠) ----
+	// 居中几何绘制, 悬停轻量背景高亮与手型光标, 无闲置灰框与文字粘连
+	WLD_API bool TreeChevron(WuiContext& ctx, WuiId id, const WuiRect& rect, bool expanded,
+		const WuiTheme& theme, const std::string& tooltip = std::string());
+
 	// ---- P1c-LIB1:徽标 / 染色图标 / 即时裁剪作用域(面板缺件 → 库件) ----
 
 	// 文本徽标:纯填充底 + 居中文字。着色器/Prefab 这类"类型徽标"、实例条上的强调字标

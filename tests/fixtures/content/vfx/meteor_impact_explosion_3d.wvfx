@@ -75,6 +75,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -90,6 +106,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -105,6 +137,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 500
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -128,6 +176,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -143,6 +207,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.600000024
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -158,6 +238,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 8.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -173,6 +269,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [1, 0.800000012, 0.300000012, 1]
             IntVal: 0
@@ -188,6 +300,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -211,6 +339,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -234,6 +378,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 7.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -249,6 +409,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 8.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -264,6 +440,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1.39999998
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -287,6 +479,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [1, 0.899999976, 0.5, 1]
             IntVal: 0
@@ -302,6 +510,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0.800000012, 0.200000003, 0, 0]
             IntVal: 0
@@ -325,6 +549,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -348,6 +588,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -363,6 +619,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -378,6 +650,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 4
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -454,6 +742,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 45
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -469,6 +773,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -484,6 +804,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 500
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -507,6 +843,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -522,6 +874,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.800000012
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -537,6 +905,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 3.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -552,6 +936,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [1, 0.800000012, 0.300000012, 1]
             IntVal: 0
@@ -567,6 +967,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -590,6 +1006,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.400000006
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -605,6 +1037,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 8
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -628,6 +1076,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 3
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -651,6 +1115,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.800000012
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -666,6 +1146,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 3.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -689,6 +1185,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [1, 1, 0.899999976, 1]
             IntVal: 0
@@ -704,6 +1216,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0.899999976, 0.150000006, 0, 0]
             IntVal: 0
@@ -727,6 +1255,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -750,6 +1294,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -765,6 +1325,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -780,6 +1356,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 4.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -856,6 +1448,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 80
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -871,6 +1479,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.0199999996
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -886,6 +1510,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 500
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -909,6 +1549,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1.60000002
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -924,6 +1580,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.150000006
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -939,6 +1611,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.0199999996
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -954,6 +1642,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [1, 0.800000012, 0.300000012, 1]
             IntVal: 0
@@ -969,6 +1673,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -992,6 +1712,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.300000012
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1007,6 +1743,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 16
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1030,6 +1782,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, -14, 0, 0]
             IntVal: 0
@@ -1053,6 +1821,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.800000012
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1076,6 +1860,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.150000006
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1091,6 +1891,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.0199999996
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1114,6 +1930,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [1, 0.949999988, 0.400000006, 1]
             IntVal: 0
@@ -1129,6 +1961,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -1152,6 +2000,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1175,6 +2039,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1190,6 +2070,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 2
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1205,6 +2101,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1281,6 +2193,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 30
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1296,6 +2224,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.0799999982
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1311,6 +2255,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 500
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1334,6 +2294,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 3.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1349,6 +2325,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.699999988
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1364,6 +2356,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 4.19999981
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1379,6 +2387,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [1, 0.800000012, 0.300000012, 1]
             IntVal: 0
@@ -1394,6 +2418,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -1417,6 +2457,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 20
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1432,6 +2488,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1447,6 +2519,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 4
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1462,6 +2550,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1485,6 +2589,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 1.5, 0, 0]
             IntVal: 0
@@ -1508,6 +2628,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1.20000005
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1531,6 +2667,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.600000024
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1546,6 +2698,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1569,6 +2737,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0.699999988
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1584,6 +2768,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 4.19999981
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1607,6 +2807,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0.300000012, 0.280000001, 0.280000001, 0.699999988]
             IntVal: 0
@@ -1622,6 +2838,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0.100000001, 0.100000001, 0.100000001, 0]
             IntVal: 0
@@ -1645,6 +2877,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1668,6 +2916,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1683,6 +2947,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1698,6 +2978,22 @@ Emitters:
             Mode: 0
             RandomMin: 0
             RandomMax: 1
+            RandomMinVec: [0, 0, 0, 0]
+            RandomMaxVec: [1, 1, 1, 1]
+            SplitAxes: false
+            SplitColor: false
+            ActiveAxisCurveChannel: 0
+            ActiveColorCurveChannel: 0
+            CurveExpanded: true
+            AlphaCurveExpanded: false
+            AxisMode: [0, 0, 0]
+            AxisRandomMin: [-10, -10, -10]
+            AxisRandomMax: [10, 10, 10]
+            AxisCurveExpanded: [false, false, false]
+            ColorMode: [0, 0, 0, 0]
+            ColorRandomMin: [0, 0, 0, 0]
+            ColorRandomMax: [1, 1, 1, 1]
+            ColorCurveExpanded: [false, false, false, false]
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0

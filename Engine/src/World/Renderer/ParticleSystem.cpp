@@ -210,7 +210,18 @@ namespace World
 				p.Velocity.z = 0.0f;
 			}
 
-			p.Color = UnpackColor(comp.ColorStart);
+			if (comp.ColorStartMax != 0)
+			{
+				glm::vec4 cMin = UnpackColor(comp.ColorStart);
+				glm::vec4 cMax = UnpackColor(comp.ColorStartMax);
+				float cr = RandomFloat();
+				p.BaseColor = glm::mix(cMin, cMax, cr);
+			}
+			else
+			{
+				p.BaseColor = UnpackColor(comp.ColorStart);
+			}
+			p.Color = p.BaseColor;
 			const float emissive = std::max(0.0f, m_Material.EmissiveBoost);
 			p.Color.r *= emissive;
 			p.Color.g *= emissive;
@@ -332,6 +343,8 @@ namespace World
 				continue;
 			}
 
+			const float t = glm::clamp(1.0f - (p.Life / std::max(0.0001f, p.MaxLife)), 0.0f, 1.0f);
+
 			// Apply Linear Drag damping
 			if (m_LinearDrag > 0.0f)
 			{
@@ -370,7 +383,19 @@ namespace World
 				p.Velocity += curl * (m_CurlNoiseStrength * dt);
 			}
 
-			p.Velocity += (comp.Gravity + p.Acceleration) * dt;
+			glm::vec3 effGravity = comp.Gravity;
+			if (m_HasGravityAxisCurves)
+			{
+				effGravity.x *= m_GravityAxisCurves[0].EvaluateFastLut(t);
+				effGravity.y *= m_GravityAxisCurves[1].EvaluateFastLut(t);
+				effGravity.z *= m_GravityAxisCurves[2].EvaluateFastLut(t);
+			}
+			else if (m_HasGravityCurve)
+			{
+				float gFactor = m_GravityCurve.EvaluateFastLut(t);
+				effGravity *= gFactor;
+			}
+			p.Velocity += (effGravity + p.Acceleration) * dt;
 			p.Position += p.Velocity * dt;
 			p.Rotation += p.AngularVelocity * dt;
 
@@ -418,10 +443,22 @@ namespace World
 				}
 			}
 
-			float t = 1.0f - (p.Life / p.MaxLife);
-			t = glm::clamp(t, 0.0f, 1.0f);
+			// (t is computed at start of loop)
 
-			if (m_HasColorGradient)
+			if (m_HasColorCurves)
+			{
+				p.Color.r = glm::clamp(p.BaseColor.r * m_ColorCurves[0].EvaluateFastLut(t), 0.0f, 10.0f);
+				p.Color.g = glm::clamp(p.BaseColor.g * m_ColorCurves[1].EvaluateFastLut(t), 0.0f, 10.0f);
+				p.Color.b = glm::clamp(p.BaseColor.b * m_ColorCurves[2].EvaluateFastLut(t), 0.0f, 10.0f);
+				p.Color.a = glm::clamp(p.BaseColor.a * m_ColorCurves[3].EvaluateFastLut(t), 0.0f, 1.0f);
+			}
+			else if (m_HasColorCurve)
+			{
+				float cFactor = m_ColorCurve.EvaluateFastLut(t);
+				p.Color = p.BaseColor;
+				p.Color.a = glm::clamp(p.BaseColor.a * cFactor, 0.0f, 1.0f);
+			}
+			else if (m_HasColorGradient)
 			{
 				p.Color = m_ColorGradient.EvaluateFastLut(t);
 			}

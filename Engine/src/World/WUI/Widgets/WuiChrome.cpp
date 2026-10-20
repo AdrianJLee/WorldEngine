@@ -143,6 +143,84 @@ namespace World::Wui
 		return toggled;
 	}
 
+	bool TreeChevron(WuiContext& ctx, WuiId id, const WuiRect& rect, bool expanded,
+		const WuiTheme& theme, const std::string& tooltip)
+	{
+		const bool focused = id != 0 && ctx.Focus() == id;
+		const bool hovered = ctx.IsHovered(rect);
+		const bool pressed = hovered && ctx.Input().MouseDown[0];
+
+		if (hovered)
+		{
+			ctx.SetCursor(WuiCursor::Hand);
+			if (!tooltip.empty())
+				Tooltip(ctx, rect, tooltip);
+		}
+
+		// 悬停/按下微底色(平时无灰框,悬停时呈极轻圆角高亮)
+		if (pressed)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ActiveBg, 3.0f });
+		}
+		else if (hovered)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.HoverBg, 3.0f });
+		}
+
+		// 几何三角形绝对居中绘制 (对齐 UE Niagara / Details 细节面板展开箭头)
+		// 避免字体渲染中 ▶/▼ 因 fallback 字形、bearing 和 measure 不准导致的严重偏右及边缘溢出问题
+		const float cx = std::round(rect.X + rect.W * 0.5f);
+		const float cy = std::round(rect.Y + rect.H * 0.5f);
+		const WuiColor iconColor = pressed ? theme.Accent : (hovered ? theme.Text : (expanded ? theme.Text : theme.TextMuted));
+
+		WuiDrawCommand cmd;
+		cmd.Kind = WuiDrawKind::Quad;
+		cmd.Color = iconColor;
+
+		if (expanded)
+		{
+			// 展开态：尖头朝下 ▼ (底宽 8px, 高 5px, 顶点对称居中)
+			const float halfBase = 4.0f;
+			cmd.Vertices[0] = { cx - halfBase, cy - 2.5f };
+			cmd.Vertices[1] = { cx + halfBase, cy - 2.5f };
+			cmd.Vertices[2] = { cx, cy + 2.5f };
+			cmd.Vertices[3] = cmd.Vertices[2];
+		}
+		else
+		{
+			// 折叠态：尖头朝右 ▶ (底高 8px, 宽 5px, 顶点对称居中)
+			const float halfBase = 4.0f;
+			cmd.Vertices[0] = { cx - 2.5f, cy - halfBase };
+			cmd.Vertices[1] = { cx + 2.5f, cy };
+			cmd.Vertices[2] = { cx - 2.5f, cy + halfBase };
+			cmd.Vertices[3] = cmd.Vertices[2];
+		}
+		ctx.Commands().push_back(std::move(cmd));
+
+		if (id != 0)
+		{
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = expanded ? "collapse" : "expand";
+			node.Value = expanded ? "open" : "closed";
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+
+			ctx.RegisterFocusable(id, rect);
+			DrawFocusRing(ctx, rect, id, theme);
+		}
+
+		const bool keyActivated = focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		return (hovered && ctx.Input().MouseClicked[0]) || keyActivated;
+	}
+
 	// ---- P1c-LIB1:徽标 / 染色图标(ClipScope 是纯 RAII,定义在头文件里) ----
 
 	void Badge(WuiContext& ctx, const WuiRect& rect, const std::string& text, const WuiColor& fill,

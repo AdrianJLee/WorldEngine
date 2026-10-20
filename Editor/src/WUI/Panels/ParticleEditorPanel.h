@@ -189,6 +189,8 @@ namespace World
 		void RenderOrientationGimbal(Wui::WuiContext& ctx, const Wui::WuiRect& vpRect, const glm::mat4& viewMat, const Wui::WuiTheme& theme);
 		void RenderInteractiveCurveWorkbench(Wui::WuiContext& ctx, const Wui::WuiRect& canvasRect, const Wui::WuiTheme& theme);
 		void RenderEmbeddedCurveEditor(Wui::WuiContext& ctx, VfxModuleParam& param, size_t modIdx, size_t pIdx, const Wui::WuiRect& areaRect, const Wui::WuiTheme& theme);
+		void RenderEmbeddedCurveEditor(Wui::WuiContext& ctx, CubicBezierCurve& curve, size_t modIdx, size_t pIdx, size_t subIdx, const Wui::WuiRect& areaRect, const Wui::WuiTheme& theme);
+		void RenderMultiCurveEditor(Wui::WuiContext& ctx, CubicBezierCurve* curves, int curveCount, int& activeChannel, const std::vector<std::string>& channelNames, const std::vector<Wui::WuiColor>& channelColors, size_t modIdx, size_t pIdx, const Wui::WuiRect& areaRect, const Wui::WuiTheme& theme);
 
 		static std::string s_PendingOpenPath;
 		std::string m_LoadedPath;
@@ -270,6 +272,7 @@ namespace World
 		ParticleViewportDisplayMode m_DisplayMode = ParticleViewportDisplayMode::Lit;
 		bool m_HeatmapMode = false;
 		bool m_BoundsMode = false;
+		bool m_ShowSpawnGizmo = true; // 控制发射器空间形态范围框线框显示开关 (Cone / Sphere / Box / Ring)
 		int m_HoveredGizmoHandle = -1;
 		int m_ActiveGizmoHandle = -1;
 		bool m_IsDraggingGizmo = false;

@@ -123,8 +123,12 @@ namespace World
 		bool LockToXYPlane = false;
 		bool Looping = true;
 		bool IsPlaying = true;
-		float EmitterDuration = 0.0f; // 发射器激活持续时间 (0.0f 表示跟随系统全局周期)
+float EmitterDuration = 0.0f; // 发射器激活持续时间 (0.0f 表示跟随系统全局周期)
 		float Duration = 0.0f;        // 系统总周期/循环时长 (0.0f 表示跟随系统默认)
+		uint32_t ColorStartMax = 0;   // 0 表示固定 ColorStart，非 0 表示在 [ColorStart, ColorStartMax] 区间随机采样生成初始色
+		uint32_t ColorEndMax = 0;
+		glm::vec3 GravityMax { 0.0f }; // 重力上限 (非零时在 [Gravity, GravityMax] 间随机)
+		bool HasGravityRange = false;
 	};
 
 	enum class SubEmitterTrigger : uint8_t
@@ -149,6 +153,7 @@ namespace World
 		glm::vec3 Velocity { 0.0f };
 		glm::vec3 Acceleration { 0.0f };
 		glm::vec4 Color { 1.0f };
+		glm::vec4 BaseColor { 1.0f };
 		glm::vec2 Size { 1.0f };
 		float Rotation = 0.0f;
 		float AngularVelocity = 0.0f;
@@ -260,6 +265,37 @@ namespace World
 		const CubicBezierCurve& GetSpeedCurve() const { return m_SpeedCurve; }
 
 		void SetColorGradient(const ColorGradient& gradient) { m_ColorGradient = gradient; m_HasColorGradient = true; }
+		void SetColorCurve(const CubicBezierCurve& curve) { m_ColorCurve = curve; m_HasColorCurve = true; }
+		void ClearColorCurve() { m_HasColorCurve = false; }
+		bool HasColorCurve() const { return m_HasColorCurve; }
+		const CubicBezierCurve& GetColorCurve() const { return m_ColorCurve; }
+
+		void SetColorCurves(const CubicBezierCurve& cr, const CubicBezierCurve& cg, const CubicBezierCurve& cb, const CubicBezierCurve& ca)
+		{
+			m_ColorCurves[0] = cr;
+			m_ColorCurves[1] = cg;
+			m_ColorCurves[2] = cb;
+			m_ColorCurves[3] = ca;
+			m_HasColorCurves = true;
+		}
+		void ClearColorCurves() { m_HasColorCurves = false; }
+		bool HasColorCurves() const { return m_HasColorCurves; }
+		const CubicBezierCurve& GetColorCurveChannel(int c) const { return m_ColorCurves[c >= 0 && c < 4 ? c : 0]; }
+
+		void SetGravityCurve(const CubicBezierCurve& curve) { m_GravityCurve = curve; m_HasGravityCurve = true; }
+		void ClearGravityCurve() { m_HasGravityCurve = false; }
+		bool HasGravityCurve() const { return m_HasGravityCurve; }
+		const CubicBezierCurve& GetGravityCurve() const { return m_GravityCurve; }
+
+		void SetGravityAxisCurves(const CubicBezierCurve& cx, const CubicBezierCurve& cy, const CubicBezierCurve& cz)
+		{
+			m_GravityAxisCurves[0] = cx;
+			m_GravityAxisCurves[1] = cy;
+			m_GravityAxisCurves[2] = cz;
+			m_HasGravityAxisCurves = true;
+		}
+		void ClearGravityAxisCurves() { m_HasGravityAxisCurves = false; }
+		bool HasGravityAxisCurves() const { return m_HasGravityAxisCurves; }
 		void ClearColorGradient() { m_HasColorGradient = false; }
 		bool HasColorGradient() const { return m_HasColorGradient; }
 		const ColorGradient& GetColorGradient() const { return m_ColorGradient; }
@@ -319,6 +355,14 @@ namespace World
 		bool m_HasSpeedCurve = false;
 		ColorGradient m_ColorGradient;
 		bool m_HasColorGradient = false;
+		CubicBezierCurve m_ColorCurve;
+		bool m_HasColorCurve = false;
+		CubicBezierCurve m_ColorCurves[4];
+		bool m_HasColorCurves = false;
+		CubicBezierCurve m_GravityCurve;
+		bool m_HasGravityCurve = false;
+		CubicBezierCurve m_GravityAxisCurves[3];
+		bool m_HasGravityAxisCurves = false;
 		ParticleMaterialSettings m_Material {};
 		ParticleCollisionSettings m_Collision {};
 		ParticleCollisionEventQueue m_EventQueue {};

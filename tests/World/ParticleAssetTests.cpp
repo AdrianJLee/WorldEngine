@@ -955,6 +955,148 @@ static void TestProjectGlobalCustomModuleRoundtrip()
 	std::cout << "[PASS] TestProjectGlobalCustomModuleRoundtrip\n";
 }
 
+static void TestNiagaraMultiChannelParametersAndCurves()
+{
+	std::cout << "Testing Niagara Multi-Channel Parameter Splitting and Multi-Curve Evaluation...\n";
+
+	// 1. 向量参数：整体多线曲线控制 vs 拆解 3 通道数 (X / Y / Z)
+	{
+		VfxModuleParam vecParam;
+		vecParam.Name = "Velocity";
+		vecParam.Type = VfxParamType::Vec3;
+		vecParam.VecVal = glm::vec4(10.0f, 20.0f, 30.0f, 0.0f);
+		vecParam.Mode = VfxParamMode::Curve;
+		vecParam.EnsureAxisCurves();
+
+		// 设置 X 曲线 (10 -> 20), Y 曲线 (0 -> 10), Z 曲线 (30 -> 10)
+		vecParam.AxisCurve[0] = CubicBezierCurve::Linear();
+		vecParam.AxisCurve[0].GetKeyframeMut(0).Value = 10.0f;
+		vecParam.AxisCurve[0].GetKeyframeMut(1).Value = 20.0f;
+		vecParam.AxisCurve[0].PrecomputeLut(256);
+
+		vecParam.AxisCurve[1] = CubicBezierCurve::Linear();
+		vecParam.AxisCurve[1].GetKeyframeMut(0).Value = 0.0f;
+		vecParam.AxisCurve[1].GetKeyframeMut(1).Value = 10.0f;
+		vecParam.AxisCurve[1].PrecomputeLut(256);
+
+		vecParam.AxisCurve[2] = CubicBezierCurve::Linear();
+		vecParam.AxisCurve[2].GetKeyframeMut(0).Value = 30.0f;
+		vecParam.AxisCurve[2].GetKeyframeMut(1).Value = 10.0f;
+		vecParam.AxisCurve[2].PrecomputeLut(256);
+
+		glm::vec3 vMid = vecParam.EvaluateVec3(0.5f);
+		assert(std::abs(vMid.x - 15.0f) < 0.2f);
+		assert(std::abs(vMid.y - 5.0f) < 0.2f);
+		assert(std::abs(vMid.z - 20.0f) < 0.2f);
+
+		// 拆解模式
+		vecParam.SplitAxes = true;
+		vecParam.AxisMode[0] = VfxParamMode::Constant;
+		vecParam.VecVal.x = 99.0f;
+		glm::vec3 vSplit = vecParam.EvaluateVec3(0.5f);
+		assert(std::abs(vSplit.x - 99.0f) < 0.01f);
+	}
+
+	// 2. 颜色参数：整体四线曲线控制 vs 拆解 4 通道数 (R / G / B / A)
+	{
+		VfxModuleParam colParam;
+		colParam.Name = "ColorStart";
+		colParam.Type = VfxParamType::Vec4;
+		colParam.VecVal = glm::vec4(1.0f, 0.5f, 0.2f, 1.0f);
+		colParam.Mode = VfxParamMode::Curve;
+		colParam.EnsureColorCurves();
+
+		// R (1 -> 0), G (0.5 -> 1), B (0.2 -> 0.8), A (1 -> 0)
+		colParam.ColorCurves[0] = CubicBezierCurve::Linear();
+		colParam.ColorCurves[0].GetKeyframeMut(0).Value = 1.0f;
+		colParam.ColorCurves[0].GetKeyframeMut(1).Value = 0.0f;
+		colParam.ColorCurves[0].PrecomputeLut(256);
+
+		colParam.ColorCurves[1] = CubicBezierCurve::Linear();
+		colParam.ColorCurves[1].GetKeyframeMut(0).Value = 0.5f;
+		colParam.ColorCurves[1].GetKeyframeMut(1).Value = 1.0f;
+		colParam.ColorCurves[1].PrecomputeLut(256);
+
+		colParam.ColorCurves[2] = CubicBezierCurve::Linear();
+		colParam.ColorCurves[2].GetKeyframeMut(0).Value = 0.2f;
+		colParam.ColorCurves[2].GetKeyframeMut(1).Value = 0.8f;
+		colParam.ColorCurves[2].PrecomputeLut(256);
+
+		colParam.ColorCurves[3] = CubicBezierCurve::Linear();
+		colParam.ColorCurves[3].GetKeyframeMut(0).Value = 1.0f;
+		colParam.ColorCurves[3].GetKeyframeMut(1).Value = 0.0f;
+		colParam.ColorCurves[3].PrecomputeLut(256);
+
+		glm::vec4 cMid = colParam.EvaluateColor(0.5f);
+		assert(std::abs(cMid.r - 0.5f) < 0.1f);
+		assert(std::abs(cMid.g - 0.75f) < 0.1f);
+		assert(std::abs(cMid.b - 0.5f) < 0.1f);
+		assert(std::abs(cMid.a - 0.5f) < 0.1f);
+
+		// 拆解模式
+		colParam.SplitColor = true;
+		colParam.ColorMode[0] = VfxParamMode::Constant;
+		colParam.VecVal.r = 0.88f;
+		glm::vec4 cSplit = colParam.EvaluateColor(0.5f);
+		assert(std::abs(cSplit.r - 0.88f) < 0.01f);
+	}
+
+	// 3. YAML 序列化与反序列化 Roundtrip 校验
+	{
+		ParticleAsset asset;
+		asset.Name = "MultiChannelTest";
+		ParticleEmitterLayer em;
+		em.Name = "Emitter0";
+
+		VfxModule testMod;
+		testMod.Id = "mod.test.multichannel";
+		testMod.Name = "多通道参数测试模块";
+
+		VfxModuleParam pVec;
+		pVec.Name = "ForceVec";
+		pVec.Type = VfxParamType::Vec3;
+		pVec.SplitAxes = true;
+		pVec.AxisMode[0] = VfxParamMode::Curve;
+		pVec.AxisMode[1] = VfxParamMode::RandomRange;
+		pVec.AxisRandomMin[1] = -5.0f;
+		pVec.AxisRandomMax[1] = 5.0f;
+		pVec.EnsureAxisCurves();
+
+		VfxModuleParam pCol;
+		pCol.Name = "ParticleColor";
+		pCol.Type = VfxParamType::Vec4;
+		pCol.SplitColor = true;
+		pCol.ColorMode[0] = VfxParamMode::Curve;
+		pCol.ColorMode[3] = VfxParamMode::Curve;
+		pCol.EnsureColorCurves();
+
+		testMod.Parameters.push_back(pVec);
+		testMod.Parameters.push_back(pCol);
+		em.Modules.push_back(testMod);
+		asset.Emitters.push_back(em);
+
+		std::string yaml = ParticleAssetSerializer::SerializeToString(asset);
+		ParticleAsset loaded;
+		bool ok = ParticleAssetSerializer::DeserializeFromString(yaml, loaded);
+		assert(ok);
+		assert(loaded.Emitters.size() == 1);
+		assert(loaded.Emitters[0].Modules.size() == 1);
+
+		const auto& loadedParams = loaded.Emitters[0].Modules[0].Parameters;
+		assert(loadedParams.size() == 2);
+		assert(loadedParams[0].SplitAxes == true);
+		assert(loadedParams[0].AxisMode[0] == VfxParamMode::Curve);
+		assert(loadedParams[0].AxisMode[1] == VfxParamMode::RandomRange);
+		assert(std::abs(loadedParams[0].AxisRandomMin[1] - (-5.0f)) < 0.01f);
+
+		assert(loadedParams[1].SplitColor == true);
+		assert(loadedParams[1].ColorMode[0] == VfxParamMode::Curve);
+		assert(loadedParams[1].ColorMode[3] == VfxParamMode::Curve);
+	}
+
+	std::cout << "[PASS] TestNiagaraMultiChannelParametersAndCurves\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -968,6 +1110,7 @@ int main()
 	TestModularPipelineCustomSlangModule();
 	TestProjectGlobalCustomModuleRoundtrip();
 	TestParticleAssetShowcasePresets3D();
+	TestNiagaraMultiChannelParametersAndCurves();
 
 	std::cout << "All WorldParticleAssetTests passed successfully.\n";
 	return 0;

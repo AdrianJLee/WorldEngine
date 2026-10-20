@@ -682,6 +682,16 @@ namespace World
 				out << YAML::Key << "Mode" << YAML::Value << static_cast<int>(p.Mode);
 				out << YAML::Key << "RandomMin" << YAML::Value << p.RandomMin;
 				out << YAML::Key << "RandomMax" << YAML::Value << p.RandomMax;
+				out << YAML::Key << "RandomMinVec" << YAML::Value << YAML::Flow << YAML::BeginSeq << p.RandomMinVec.x << p.RandomMinVec.y << p.RandomMinVec.z << p.RandomMinVec.w << YAML::EndSeq;
+				out << YAML::Key << "RandomMaxVec" << YAML::Value << YAML::Flow << YAML::BeginSeq << p.RandomMaxVec.x << p.RandomMaxVec.y << p.RandomMaxVec.z << p.RandomMaxVec.w << YAML::EndSeq;
+				out << YAML::Key << "SplitAxes" << YAML::Value << p.SplitAxes;
+				out << YAML::Key << "SplitColor" << YAML::Value << p.SplitColor;
+				out << YAML::Key << "CurveExpanded" << YAML::Value << p.CurveExpanded;
+				out << YAML::Key << "AlphaCurveExpanded" << YAML::Value << p.AlphaCurveExpanded;
+				if (p.SplitColor && p.AlphaCurve.KeyframeCount() > 0)
+				{
+					out << YAML::Key << "AlphaCurveYaml" << YAML::Value << p.AlphaCurve.SerializeToYaml();
+				}
 				if (p.Mode == VfxParamMode::Curve && p.Curve.KeyframeCount() > 0)
 				{
 					out << YAML::Key << "CurveYaml" << YAML::Value << p.Curve.SerializeToYaml();
@@ -739,8 +749,31 @@ namespace World
 						if (pNode["Mode"]) p.Mode = static_cast<VfxParamMode>(pNode["Mode"].as<int>());
 						if (pNode["RandomMin"]) p.RandomMin = pNode["RandomMin"].as<float>();
 						if (pNode["RandomMax"]) p.RandomMax = pNode["RandomMax"].as<float>();
+						if (pNode["RandomMinVec"] && pNode["RandomMinVec"].IsSequence() && pNode["RandomMinVec"].size() >= 4)
+						{
+							p.RandomMinVec = glm::vec4(
+								pNode["RandomMinVec"][0].as<float>(),
+								pNode["RandomMinVec"][1].as<float>(),
+								pNode["RandomMinVec"][2].as<float>(),
+								pNode["RandomMinVec"][3].as<float>()
+							);
+						}
+						if (pNode["RandomMaxVec"] && pNode["RandomMaxVec"].IsSequence() && pNode["RandomMaxVec"].size() >= 4)
+						{
+							p.RandomMaxVec = glm::vec4(
+								pNode["RandomMaxVec"][0].as<float>(),
+								pNode["RandomMaxVec"][1].as<float>(),
+								pNode["RandomMaxVec"][2].as<float>(),
+								pNode["RandomMaxVec"][3].as<float>()
+							);
+						}
 						if (pNode["CurveYaml"]) p.Curve.DeserializeFromYaml(pNode["CurveYaml"].as<std::string>());
 						p.EnsureCurve();
+						if (pNode["SplitAxes"]) p.SplitAxes = pNode["SplitAxes"].as<bool>();
+						if (pNode["SplitColor"]) p.SplitColor = pNode["SplitColor"].as<bool>();
+						if (pNode["CurveExpanded"]) p.CurveExpanded = pNode["CurveExpanded"].as<bool>();
+						if (pNode["AlphaCurveExpanded"]) p.AlphaCurveExpanded = pNode["AlphaCurveExpanded"].as<bool>();
+						if (pNode["AlphaCurveYaml"]) p.AlphaCurve.DeserializeFromYaml(pNode["AlphaCurveYaml"].as<std::string>());
 						if (pNode["FloatVal"]) p.FloatVal = pNode["FloatVal"].as<float>();
 						if (pNode["VecVal"] && pNode["VecVal"].IsSequence() && pNode["VecVal"].size() >= 4)
 						{
