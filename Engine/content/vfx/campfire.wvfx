@@ -13,6 +13,8 @@ Emitters:
     MaxParticles: 200
     Lifetime: 1.20000005
     EmissionRate: 45
+    EmitterDuration: 0
+    EmitterLooping: true
     EmissionMode: 0
     SingleCount: 1
     Enabled: true
@@ -59,7 +61,7 @@ Emitters:
     Modules:
       - Id: mod.emitter.spawn_rate
         Name: 持续发射 (Spawn Rate)
-        Description: 控制每秒持续发射的粒子数量 (火焰/浓烟/喷泉/火花流)
+        Description: 控制每秒持续发射的粒子数量与最大粒子容量 (火焰/浓烟/喷泉/火花流)
         Stage: Emitter
         Enabled: true
         IsCustom: false
@@ -67,6 +69,9 @@ Emitters:
         Parameters:
           - Name: SpawnRate
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 45
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -77,6 +82,21 @@ Emitters:
             Tooltip: 每秒持续发射粒子数 (/s)
             IsExposed: true
             ExposedName: EmissionRate
+          - Name: MaxParticles
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            FloatVal: 500
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 1
+            Max: 100000
+            Step: 10
+            Tooltip: 最大粒子容量 (Max Particles)
+            IsExposed: true
+            ExposedName: MaxParticles
       - Id: mod.spawn.init_particle
         Name: 粒子初始化 (Initialize Particle)
         Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
@@ -87,6 +107,9 @@ Emitters:
         Parameters:
           - Name: Lifetime
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1.20000005
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -99,6 +122,9 @@ Emitters:
             ExposedName: Lifetime
           - Name: SizeStart
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.449999988
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -111,6 +137,9 @@ Emitters:
             ExposedName: SizeStart
           - Name: SizeEnd
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.150000006
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -123,6 +152,9 @@ Emitters:
             ExposedName: SizeEnd
           - Name: ColorStart
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [1, 0.800000012, 0.300000012, 1]
             IntVal: 0
@@ -135,6 +167,9 @@ Emitters:
             ExposedName: ""
           - Name: ColorEnd
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -155,6 +190,9 @@ Emitters:
         Parameters:
           - Name: ConeAngle
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 12
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -167,6 +205,9 @@ Emitters:
             ExposedName: ""
           - Name: ConeRadius
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.180000007
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -179,6 +220,9 @@ Emitters:
             ExposedName: ""
           - Name: InitialSpeed
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1.60000002
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -191,6 +235,9 @@ Emitters:
             ExposedName: ""
           - Name: SpeedVariance
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -211,6 +258,9 @@ Emitters:
         Parameters:
           - Name: Gravity
             Type: 2
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 3.20000005, 0, 0]
             IntVal: 0
@@ -231,6 +281,9 @@ Emitters:
         Parameters:
           - Name: NoiseStrength
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 2
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -243,6 +296,9 @@ Emitters:
             ExposedName: TurbulenceStrength
           - Name: NoiseFrequency
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1.20000005
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -263,6 +319,9 @@ Emitters:
         Parameters:
           - Name: TilesX
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 4
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -275,6 +334,9 @@ Emitters:
             ExposedName: ""
           - Name: TilesY
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 4
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -287,6 +349,9 @@ Emitters:
             ExposedName: ""
           - Name: FPS
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 16
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -299,6 +364,9 @@ Emitters:
             ExposedName: ""
           - Name: AnimationMode
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -319,6 +387,9 @@ Emitters:
         Parameters:
           - Name: StartScale
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.449999988
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -331,6 +402,9 @@ Emitters:
             ExposedName: ""
           - Name: EndScale
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.150000006
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -351,6 +425,9 @@ Emitters:
         Parameters:
           - Name: ColorStart
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [1, 0.850000024, 0.300000012, 1]
             IntVal: 0
@@ -363,6 +440,9 @@ Emitters:
             ExposedName: ""
           - Name: ColorEnd
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0.899999976, 0.150000006, 0, 0]
             IntVal: 0
@@ -383,6 +463,9 @@ Emitters:
         Parameters:
           - Name: SpeedDamping
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -403,6 +486,9 @@ Emitters:
         Parameters:
           - Name: BlendMode
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -415,6 +501,9 @@ Emitters:
             ExposedName: ""
           - Name: FacingMode
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -427,6 +516,9 @@ Emitters:
             ExposedName: ""
           - Name: EmissiveBoost
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 3.20000005
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -441,6 +533,8 @@ Emitters:
     MaxParticles: 100
     Lifetime: 3
     EmissionRate: 18
+    EmitterDuration: 0
+    EmitterLooping: true
     EmissionMode: 0
     SingleCount: 1
     Enabled: true
@@ -487,7 +581,7 @@ Emitters:
     Modules:
       - Id: mod.emitter.spawn_rate
         Name: 持续发射 (Spawn Rate)
-        Description: 控制每秒持续发射的粒子数量 (火焰/浓烟/喷泉/火花流)
+        Description: 控制每秒持续发射的粒子数量与最大粒子容量 (火焰/浓烟/喷泉/火花流)
         Stage: Emitter
         Enabled: true
         IsCustom: false
@@ -495,6 +589,9 @@ Emitters:
         Parameters:
           - Name: SpawnRate
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 18
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -505,6 +602,21 @@ Emitters:
             Tooltip: 每秒持续发射粒子数 (/s)
             IsExposed: true
             ExposedName: EmissionRate
+          - Name: MaxParticles
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            FloatVal: 500
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 1
+            Max: 100000
+            Step: 10
+            Tooltip: 最大粒子容量 (Max Particles)
+            IsExposed: true
+            ExposedName: MaxParticles
       - Id: mod.spawn.init_particle
         Name: 粒子初始化 (Initialize Particle)
         Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
@@ -515,6 +627,9 @@ Emitters:
         Parameters:
           - Name: Lifetime
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 3
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -527,6 +642,9 @@ Emitters:
             ExposedName: Lifetime
           - Name: SizeStart
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.349999994
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -539,6 +657,9 @@ Emitters:
             ExposedName: SizeStart
           - Name: SizeEnd
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1.79999995
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -551,6 +672,9 @@ Emitters:
             ExposedName: SizeEnd
           - Name: ColorStart
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [1, 0.800000012, 0.300000012, 1]
             IntVal: 0
@@ -563,6 +687,9 @@ Emitters:
             ExposedName: ""
           - Name: ColorEnd
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -583,6 +710,9 @@ Emitters:
         Parameters:
           - Name: ConeAngle
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 16
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -595,6 +725,9 @@ Emitters:
             ExposedName: ""
           - Name: ConeRadius
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.150000006
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -607,6 +740,9 @@ Emitters:
             ExposedName: ""
           - Name: InitialSpeed
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1.20000005
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -619,6 +755,9 @@ Emitters:
             ExposedName: ""
           - Name: SpeedVariance
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -639,6 +778,9 @@ Emitters:
         Parameters:
           - Name: Gravity
             Type: 2
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 1.20000005, 0, 0]
             IntVal: 0
@@ -659,6 +801,9 @@ Emitters:
         Parameters:
           - Name: LinearDrag
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.800000012
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -679,6 +824,9 @@ Emitters:
         Parameters:
           - Name: RotationSpeed
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.699999988
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -691,6 +839,9 @@ Emitters:
             ExposedName: ""
           - Name: InitialRotation
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -711,6 +862,9 @@ Emitters:
         Parameters:
           - Name: StartScale
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.349999994
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -723,6 +877,9 @@ Emitters:
             ExposedName: ""
           - Name: EndScale
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 2
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -743,6 +900,9 @@ Emitters:
         Parameters:
           - Name: ColorStart
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0.400000006, 0.379999995, 0.360000014, 0.5]
             IntVal: 0
@@ -755,6 +915,9 @@ Emitters:
             ExposedName: ""
           - Name: ColorEnd
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0.150000006, 0.150000006, 0.150000006, 0]
             IntVal: 0
@@ -775,6 +938,9 @@ Emitters:
         Parameters:
           - Name: SpeedDamping
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -795,6 +961,9 @@ Emitters:
         Parameters:
           - Name: BlendMode
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -807,6 +976,9 @@ Emitters:
             ExposedName: ""
           - Name: FacingMode
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -819,6 +991,9 @@ Emitters:
             ExposedName: ""
           - Name: EmissiveBoost
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.800000012
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -833,6 +1008,8 @@ Emitters:
     MaxParticles: 80
     Lifetime: 2
     EmissionRate: 22
+    EmitterDuration: 0
+    EmitterLooping: true
     EmissionMode: 0
     SingleCount: 1
     Enabled: true
@@ -879,7 +1056,7 @@ Emitters:
     Modules:
       - Id: mod.emitter.spawn_rate
         Name: 持续发射 (Spawn Rate)
-        Description: 控制每秒持续发射的粒子数量 (火焰/浓烟/喷泉/火花流)
+        Description: 控制每秒持续发射的粒子数量与最大粒子容量 (火焰/浓烟/喷泉/火花流)
         Stage: Emitter
         Enabled: true
         IsCustom: false
@@ -887,6 +1064,9 @@ Emitters:
         Parameters:
           - Name: SpawnRate
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 22
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -897,6 +1077,21 @@ Emitters:
             Tooltip: 每秒持续发射粒子数 (/s)
             IsExposed: true
             ExposedName: EmissionRate
+          - Name: MaxParticles
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            FloatVal: 500
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 1
+            Max: 100000
+            Step: 10
+            Tooltip: 最大粒子容量 (Max Particles)
+            IsExposed: true
+            ExposedName: MaxParticles
       - Id: mod.spawn.init_particle
         Name: 粒子初始化 (Initialize Particle)
         Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
@@ -907,6 +1102,9 @@ Emitters:
         Parameters:
           - Name: Lifetime
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 2
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -919,6 +1117,9 @@ Emitters:
             ExposedName: Lifetime
           - Name: SizeStart
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.0799999982
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -931,6 +1132,9 @@ Emitters:
             ExposedName: SizeStart
           - Name: SizeEnd
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.0149999997
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -943,6 +1147,9 @@ Emitters:
             ExposedName: SizeEnd
           - Name: ColorStart
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [1, 0.800000012, 0.300000012, 1]
             IntVal: 0
@@ -955,6 +1162,9 @@ Emitters:
             ExposedName: ""
           - Name: ColorEnd
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -975,6 +1185,9 @@ Emitters:
         Parameters:
           - Name: ConeAngle
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 20
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -987,6 +1200,9 @@ Emitters:
             ExposedName: ""
           - Name: ConeRadius
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.119999997
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -999,6 +1215,9 @@ Emitters:
             ExposedName: ""
           - Name: InitialSpeed
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 2.4000001
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1011,6 +1230,9 @@ Emitters:
             ExposedName: ""
           - Name: SpeedVariance
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1031,6 +1253,9 @@ Emitters:
         Parameters:
           - Name: Gravity
             Type: 2
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 1.79999995, 0, 0]
             IntVal: 0
@@ -1051,6 +1276,9 @@ Emitters:
         Parameters:
           - Name: NoiseStrength
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 2.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1063,6 +1291,9 @@ Emitters:
             ExposedName: TurbulenceStrength
           - Name: NoiseFrequency
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1.5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1083,6 +1314,9 @@ Emitters:
         Parameters:
           - Name: StartScale
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.0799999982
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1095,6 +1329,9 @@ Emitters:
             ExposedName: ""
           - Name: EndScale
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.0149999997
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1115,6 +1352,9 @@ Emitters:
         Parameters:
           - Name: ColorStart
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [1, 0.850000024, 0.25, 1]
             IntVal: 0
@@ -1127,6 +1367,9 @@ Emitters:
             ExposedName: ""
           - Name: ColorEnd
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -1147,6 +1390,9 @@ Emitters:
         Parameters:
           - Name: SpeedDamping
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1167,6 +1413,9 @@ Emitters:
         Parameters:
           - Name: BlendMode
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1179,6 +1428,9 @@ Emitters:
             ExposedName: ""
           - Name: FacingMode
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1191,6 +1443,9 @@ Emitters:
             ExposedName: ""
           - Name: EmissiveBoost
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 4
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1205,6 +1460,8 @@ Emitters:
     MaxParticles: 1
     Lifetime: 9999
     EmissionRate: 0
+    EmitterDuration: 0
+    EmitterLooping: true
     EmissionMode: 0
     SingleCount: 1
     Enabled: true
@@ -1262,6 +1519,9 @@ Emitters:
         Parameters:
           - Name: SpawnCount
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1274,6 +1534,9 @@ Emitters:
             ExposedName: BurstCount
           - Name: SpawnTime
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1284,6 +1547,21 @@ Emitters:
             Tooltip: 爆发触发时间 (秒)
             IsExposed: false
             ExposedName: ""
+          - Name: MaxParticles
+            Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
+            FloatVal: 500
+            VecVal: [0, 0, 0, 0]
+            IntVal: 0
+            BoolVal: false
+            Min: 1
+            Max: 100000
+            Step: 10
+            Tooltip: 最大粒子容量 (Max Particles)
+            IsExposed: true
+            ExposedName: MaxParticles
       - Id: mod.spawn.init_particle
         Name: 粒子初始化 (Initialize Particle)
         Description: 设定图元诞生时的基准生命周期、初始尺寸与渐变颜色
@@ -1294,6 +1572,9 @@ Emitters:
         Parameters:
           - Name: Lifetime
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 9999
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1306,6 +1587,9 @@ Emitters:
             ExposedName: Lifetime
           - Name: SizeStart
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.899999976
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1318,6 +1602,9 @@ Emitters:
             ExposedName: SizeStart
           - Name: SizeEnd
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0.899999976
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1330,6 +1617,9 @@ Emitters:
             ExposedName: SizeEnd
           - Name: ColorStart
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [1, 0.800000012, 0.300000012, 1]
             IntVal: 0
@@ -1342,6 +1632,9 @@ Emitters:
             ExposedName: ""
           - Name: ColorEnd
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [1, 0.200000003, 0, 0]
             IntVal: 0
@@ -1362,6 +1655,9 @@ Emitters:
         Parameters:
           - Name: Speed
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 5
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1382,6 +1678,9 @@ Emitters:
         Parameters:
           - Name: ColorStart
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [1, 0.449999988, 0.0500000007, 0.800000012]
             IntVal: 0
@@ -1394,6 +1693,9 @@ Emitters:
             ExposedName: ""
           - Name: ColorEnd
             Type: 3
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [1, 0.449999988, 0.0500000007, 0.800000012]
             IntVal: 0
@@ -1414,6 +1716,9 @@ Emitters:
         Parameters:
           - Name: SpeedDamping
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 0
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1434,6 +1739,9 @@ Emitters:
         Parameters:
           - Name: BlendMode
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1446,6 +1754,9 @@ Emitters:
             ExposedName: ""
           - Name: FacingMode
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 1
             VecVal: [0, 0, 0, 0]
             IntVal: 0
@@ -1458,6 +1769,9 @@ Emitters:
             ExposedName: ""
           - Name: EmissiveBoost
             Type: 0
+            Mode: 0
+            RandomMin: 0
+            RandomMax: 1
             FloatVal: 2.79999995
             VecVal: [0, 0, 0, 0]
             IntVal: 0

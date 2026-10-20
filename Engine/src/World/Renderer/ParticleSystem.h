@@ -123,6 +123,8 @@ namespace World
 		bool LockToXYPlane = false;
 		bool Looping = true;
 		bool IsPlaying = true;
+		float EmitterDuration = 0.0f; // 发射器激活持续时间 (0.0f 表示跟随系统全局周期)
+		float Duration = 0.0f;        // 系统总周期/循环时长 (0.0f 表示跟随系统默认)
 	};
 
 	enum class SubEmitterTrigger : uint8_t
@@ -242,6 +244,7 @@ namespace World
 		const std::vector<ParticleBurst>& GetBursts() const { return m_Bursts; }
 		std::vector<ParticleBurst>& GetBurstsMut() { return m_Bursts; }
 		float GetSimElapsedTime() const { return m_SimElapsedTime; }
+		void SetSimElapsedTime(float t) { m_SimElapsedTime = std::max(0.0f, t); }
 
 		const ParticleCollisionEventQueue& GetEventQueue() const { return m_EventQueue; }
 		ParticleCollisionEventQueue& GetEventQueueMut() { return m_EventQueue; }

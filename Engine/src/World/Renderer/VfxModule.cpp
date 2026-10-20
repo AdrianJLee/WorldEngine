@@ -326,16 +326,17 @@ namespace World
 	// 标准一等公民模块 (First-Class Niagara Modules)
 	// =========================================================================
 
-	VfxModule VfxModuleLibrary::CreateSpawnRateModule(float rate)
+	VfxModule VfxModuleLibrary::CreateSpawnRateModule(float rate, uint32_t maxParticles)
 	{
 		VfxModule m;
 		m.Id = "mod.emitter.spawn_rate";
 		m.Name = "持续发射 (Spawn Rate)";
-		m.Description = "控制每秒持续发射的粒子数量 (火焰/浓烟/喷泉/火花流)";
+		m.Description = "控制每秒持续发射的粒子数量与最大粒子容量 (火焰/浓烟/喷泉/火花流)";
 		m.Stage = VfxModuleStage::Emitter;
 		m.Enabled = true;
 		m.Parameters = {
-			{ "SpawnRate", VfxParamType::Float, rate, {}, 0, false, 0.0f, 20000.0f, 1.0f, "每秒持续发射粒子数 (/s)", true, "EmissionRate" }
+			{ "SpawnRate", VfxParamType::Float, rate, {}, 0, false, 0.0f, 20000.0f, 1.0f, "每秒持续发射粒子数 (/s)", true, "EmissionRate" },
+			{ "MaxParticles", VfxParamType::Float, static_cast<float>(maxParticles), {}, 0, false, 1.0f, 100000.0f, 10.0f, "最大粒子容量 (Max Particles)", true, "MaxParticles" }
 		};
 		m.SlangSource = R"(
     // [Module: SpawnRate]
@@ -344,7 +345,7 @@ namespace World
 		return m;
 	}
 
-	VfxModule VfxModuleLibrary::CreateSpawnBurstModule(uint32_t count, float time)
+	VfxModule VfxModuleLibrary::CreateSpawnBurstModule(uint32_t count, float time, uint32_t maxParticles)
 	{
 		VfxModule m;
 		m.Id = "mod.emitter.spawn_burst";
@@ -354,7 +355,8 @@ namespace World
 		m.Enabled = true;
 		m.Parameters = {
 			{ "SpawnCount", VfxParamType::Float, static_cast<float>(count), {}, 0, false, 1.0f, 10000.0f, 1.0f, "瞬时生成图元数量 (1 为单体法阵/护盾)", true, "BurstCount" },
-			{ "SpawnTime", VfxParamType::Float, time, {}, 0, false, 0.0f, 99999.0f, 0.1f, "爆发触发时间 (秒)" }
+			{ "SpawnTime", VfxParamType::Float, time, {}, 0, false, 0.0f, 99999.0f, 0.1f, "爆发触发时间 (秒)" },
+			{ "MaxParticles", VfxParamType::Float, static_cast<float>(maxParticles), {}, 0, false, 1.0f, 100000.0f, 10.0f, "最大粒子容量 (Max Particles)", true, "MaxParticles" }
 		};
 		m.SlangSource = R"(
     // [Module: SpawnBurst]
@@ -677,6 +679,13 @@ namespace World
 				out << YAML::BeginMap;
 				out << YAML::Key << "Name" << YAML::Value << p.Name;
 				out << YAML::Key << "Type" << YAML::Value << static_cast<int>(p.Type);
+				out << YAML::Key << "Mode" << YAML::Value << static_cast<int>(p.Mode);
+				out << YAML::Key << "RandomMin" << YAML::Value << p.RandomMin;
+				out << YAML::Key << "RandomMax" << YAML::Value << p.RandomMax;
+				if (p.Mode == VfxParamMode::Curve && p.Curve.KeyframeCount() > 0)
+				{
+					out << YAML::Key << "CurveYaml" << YAML::Value << p.Curve.SerializeToYaml();
+				}
 				out << YAML::Key << "FloatVal" << YAML::Value << p.FloatVal;
 				out << YAML::Key << "VecVal" << YAML::Value << YAML::Flow << YAML::BeginSeq << p.VecVal.x << p.VecVal.y << p.VecVal.z << p.VecVal.w << YAML::EndSeq;
 				out << YAML::Key << "IntVal" << YAML::Value << p.IntVal;
@@ -727,6 +736,11 @@ namespace World
 						VfxModuleParam p;
 						if (pNode["Name"]) p.Name = pNode["Name"].as<std::string>();
 						if (pNode["Type"]) p.Type = static_cast<VfxParamType>(pNode["Type"].as<int>());
+						if (pNode["Mode"]) p.Mode = static_cast<VfxParamMode>(pNode["Mode"].as<int>());
+						if (pNode["RandomMin"]) p.RandomMin = pNode["RandomMin"].as<float>();
+						if (pNode["RandomMax"]) p.RandomMax = pNode["RandomMax"].as<float>();
+						if (pNode["CurveYaml"]) p.Curve.DeserializeFromYaml(pNode["CurveYaml"].as<std::string>());
+						p.EnsureCurve();
 						if (pNode["FloatVal"]) p.FloatVal = pNode["FloatVal"].as<float>();
 						if (pNode["VecVal"] && pNode["VecVal"].IsSequence() && pNode["VecVal"].size() >= 4)
 						{

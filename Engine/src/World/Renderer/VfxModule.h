@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Math/Curve/CubicBezierCurve.h"
 #include <glm/glm.hpp>
 #include <string>
 #include <filesystem>
@@ -28,6 +29,13 @@ namespace World
 		Int = 5
 	};
 
+	enum class VfxParamMode : uint8_t
+	{
+		Constant = 0,    // 常量模式
+		RandomRange = 1, // 随机区间模式
+		Curve = 2        // 随时间/寿命变化曲线模式
+	};
+
 	struct WLD_API VfxModuleParam
 	{
 		std::string Name;
@@ -40,14 +48,39 @@ namespace World
 		float Max = 100.0f;
 		float Step = 0.1f;
 		std::string Tooltip;
-		
+
 		// 外部与运行时参数化支持
 		bool IsExposed = false;          // 是否暴露为系统级参数 (外部/Inspector/Lua 可调)
 		std::string ExposedName;         // 暴露名 (为空时默认采用 Name)
 
+		// 动态求值模式与内嵌曲线 (置于末尾保证 C++17 聚合初始化后向兼容)
+		VfxParamMode Mode = VfxParamMode::Constant;
+		float RandomMin = 0.0f;
+		float RandomMax = 1.0f;
+		CubicBezierCurve Curve;       // 随时间/寿命变化的专属内嵌曲线
+		bool CurveExpanded = true;    // 是否展开内嵌曲线编辑器
+
 		std::string GetUniformName() const
 		{
 			return "u_" + (IsExposed && !ExposedName.empty() ? ExposedName : Name);
+		}
+
+		void EnsureCurve()
+		{
+			if (Curve.KeyframeCount() == 0)
+			{
+				Curve = CubicBezierCurve::EaseOut();
+				Curve.PrecomputeLut(256);
+			}
+		}
+
+		float Evaluate(float normalizedTime) const
+		{
+			if (Mode == VfxParamMode::Curve)
+			{
+				return Curve.Evaluate(normalizedTime);
+			}
+			return FloatVal;
 		}
 	};
 
@@ -80,8 +113,8 @@ namespace World
 		static std::vector<VfxModule> GetBuiltinModules();
 
 		// Emitter 阶段标准模块 (发射与生成控制)
-		static VfxModule CreateSpawnRateModule(float rate = 50.0f);
-		static VfxModule CreateSpawnBurstModule(uint32_t count = 1, float time = 0.0f);
+		static VfxModule CreateSpawnRateModule(float rate = 50.0f, uint32_t maxParticles = 500);
+		static VfxModule CreateSpawnBurstModule(uint32_t count = 1, float time = 0.0f, uint32_t maxParticles = 500);
 
 		// Particle Spawn 阶段标准模块 (初始化与几何分布)
 		static VfxModule CreateInitParticleModule(float lifetime = 2.0f, float sizeStart = 0.3f, float sizeEnd = 0.05f);

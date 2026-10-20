@@ -497,6 +497,8 @@ void ParticleEditorPanel::NewAsset()
 		m_EmitterSizeCurves[newIdx] = m_EmitterSizeCurves[m_SelectedEmitterIndex];
 		m_EmitterAlphaCurves[newIdx] = m_EmitterAlphaCurves[m_SelectedEmitterIndex];
 		m_EmitterSpeedCurves[newIdx] = m_EmitterSpeedCurves[m_SelectedEmitterIndex];
+		m_EmitterRotationCurves[newIdx] = m_EmitterRotationCurves[m_SelectedEmitterIndex];
+		m_EmitterShockwaveCurves[newIdx] = m_EmitterShockwaveCurves[m_SelectedEmitterIndex];
 		m_EmitterCurveType[newIdx] = m_EmitterCurveType[m_SelectedEmitterIndex];
 		m_EmitterExtended[newIdx] = m_EmitterExtended[m_SelectedEmitterIndex];
 
@@ -530,6 +532,8 @@ void ParticleEditorPanel::NewAsset()
 		if (m_SelectedEmitterIndex < m_EmitterSizeCurves.size()) m_EmitterSizeCurves.erase(m_EmitterSizeCurves.begin() + m_SelectedEmitterIndex);
 		if (m_SelectedEmitterIndex < m_EmitterAlphaCurves.size()) m_EmitterAlphaCurves.erase(m_EmitterAlphaCurves.begin() + m_SelectedEmitterIndex);
 		if (m_SelectedEmitterIndex < m_EmitterSpeedCurves.size()) m_EmitterSpeedCurves.erase(m_EmitterSpeedCurves.begin() + m_SelectedEmitterIndex);
+		if (m_SelectedEmitterIndex < m_EmitterRotationCurves.size()) m_EmitterRotationCurves.erase(m_EmitterRotationCurves.begin() + m_SelectedEmitterIndex);
+		if (m_SelectedEmitterIndex < m_EmitterShockwaveCurves.size()) m_EmitterShockwaveCurves.erase(m_EmitterShockwaveCurves.begin() + m_SelectedEmitterIndex);
 		if (m_SelectedEmitterIndex < m_EmitterCurveType.size()) m_EmitterCurveType.erase(m_EmitterCurveType.begin() + m_SelectedEmitterIndex);
 		if (m_SelectedEmitterIndex < m_EmitterExtended.size()) m_EmitterExtended.erase(m_EmitterExtended.begin() + m_SelectedEmitterIndex);
 
@@ -559,6 +563,8 @@ void ParticleEditorPanel::NewAsset()
 		std::swap(m_EmitterSizeCurves[m_SelectedEmitterIndex], m_EmitterSizeCurves[prev]);
 		std::swap(m_EmitterAlphaCurves[m_SelectedEmitterIndex], m_EmitterAlphaCurves[prev]);
 		std::swap(m_EmitterSpeedCurves[m_SelectedEmitterIndex], m_EmitterSpeedCurves[prev]);
+		std::swap(m_EmitterRotationCurves[m_SelectedEmitterIndex], m_EmitterRotationCurves[prev]);
+		std::swap(m_EmitterShockwaveCurves[m_SelectedEmitterIndex], m_EmitterShockwaveCurves[prev]);
 		std::swap(m_EmitterCurveType[m_SelectedEmitterIndex], m_EmitterCurveType[prev]);
 		std::swap(m_EmitterExtended[m_SelectedEmitterIndex], m_EmitterExtended[prev]);
 
@@ -585,6 +591,8 @@ void ParticleEditorPanel::NewAsset()
 		std::swap(m_EmitterSizeCurves[m_SelectedEmitterIndex], m_EmitterSizeCurves[next]);
 		std::swap(m_EmitterAlphaCurves[m_SelectedEmitterIndex], m_EmitterAlphaCurves[next]);
 		std::swap(m_EmitterSpeedCurves[m_SelectedEmitterIndex], m_EmitterSpeedCurves[next]);
+		std::swap(m_EmitterRotationCurves[m_SelectedEmitterIndex], m_EmitterRotationCurves[next]);
+		std::swap(m_EmitterShockwaveCurves[m_SelectedEmitterIndex], m_EmitterShockwaveCurves[next]);
 		std::swap(m_EmitterCurveType[m_SelectedEmitterIndex], m_EmitterCurveType[next]);
 		std::swap(m_EmitterExtended[m_SelectedEmitterIndex], m_EmitterExtended[next]);
 
@@ -647,6 +655,20 @@ void ParticleEditorPanel::NewAsset()
 			CubicBezierCurve s = CubicBezierCurve::Linear();
 			s.PrecomputeLut(256);
 			m_EmitterSpeedCurves.push_back(std::move(s));
+		}
+
+		while (m_EmitterRotationCurves.size() < count)
+		{
+			CubicBezierCurve r = CubicBezierCurve::Linear();
+			r.PrecomputeLut(256);
+			m_EmitterRotationCurves.push_back(std::move(r));
+		}
+
+		while (m_EmitterShockwaveCurves.size() < count)
+		{
+			CubicBezierCurve sw = CubicBezierCurve::EaseOut();
+			sw.PrecomputeLut(256);
+			m_EmitterShockwaveCurves.push_back(std::move(sw));
 		}
 
 
@@ -763,7 +785,13 @@ void ParticleEditorPanel::NewAsset()
 	}
 	void ParticleEditorPanel::SyncSimulationFromAsset()
 	{
-		ParticleAssetRegistry::Get().RegisterAssetFromMemory("__vfx_editor_preview__.wvfx", m_Asset);
+		ParticleAsset previewAsset = m_Asset;
+		previewAsset.Duration = m_TimelineDuration;
+		for (size_t i = 0; i < previewAsset.Emitters.size(); ++i)
+		{
+			previewAsset.Emitters[i].Enabled = IsEmitterActive(i);
+		}
+		ParticleAssetRegistry::Get().RegisterAssetFromMemory("__vfx_editor_preview__.wvfx", previewAsset);
 		EnsurePerEmitterState();
 		m_LivePools.clear();
 		m_SimTime = 0.0f;
@@ -834,18 +862,30 @@ void ParticleEditorPanel::NewAsset()
 
 		m_SimTime += dt * m_PlaybackSpeed;
 		const float maxDuration = std::max(0.5f, m_TimelineDuration);
-		if (m_SimTime > maxDuration)
+		if (m_SimTime >= maxDuration)
 		{
-			// 编辑器视口在到达时间轴末尾后自动平滑回绕，保持粒子始终处于动态演变中
-			m_SimTime = std::fmod(m_SimTime, maxDuration);
-			if (!m_Asset.Looping)
+			if (m_Asset.Looping)
 			{
-				// 单次爆发特效回绕时重新激活实体播放，确保视口特效绝不静止卡死
-				if (m_PreviewEntity.IsValid() && m_PreviewEntity.HasComponent<VfxComponent>())
+				m_SimTime = std::fmod(m_SimTime, maxDuration);
+				for (auto& pool : m_LivePools)
 				{
-					auto& vfx = m_PreviewEntity.GetComponent<VfxComponent>();
-					vfx.PlaybackState = VfxPlaybackState::Playing;
+					pool->SetSimElapsedTime(m_SimTime);
 				}
+				if (m_PreviewEntity.IsValid())
+				{
+					uint32_t entId = static_cast<uint32_t>(m_PreviewEntity);
+					for (size_t i = 0; i < m_Asset.Emitters.size(); ++i)
+					{
+						uint32_t poolId = (entId << 8) | static_cast<uint32_t>(i);
+						if (auto* p = GetGlobalParticleSystem().GetPool(poolId))
+							p->SetSimElapsedTime(m_SimTime);
+					}
+				}
+			}
+			else
+			{
+				m_SimTime = maxDuration;
+				m_IsPlaying = false;
 			}
 		}
 
@@ -878,7 +918,16 @@ void ParticleEditorPanel::NewAsset()
 			comp.BlendMode = em.Material.BlendMode;
 			comp.LockToXYPlane = em.LockToXY;
 			comp.Looping = m_Asset.Looping;
-			comp.IsPlaying = true;
+			comp.IsPlaying = m_IsPlaying;
+			comp.EmitterDuration = em.EmitterDuration;
+			comp.Duration = m_TimelineDuration;
+
+			// 若设置了发射激活时长 (EmitterDuration > 0)，超出该区间时平滑停止发射新粒子，让存活粒子自然衰亡
+			if (em.EmitterDuration > 0.0f && m_SimTime > em.EmitterDuration)
+			{
+				comp.EmissionRate = 0.0f;
+			}
+
 			pool->SetMaterialSettings(em.Material);
 
 
@@ -912,16 +961,22 @@ void ParticleEditorPanel::NewAsset()
 	void ParticleEditorPanel::ScrubToTime(float targetTime)
 	{
 		targetTime = std::clamp(targetTime, 0.0f, m_TimelineDuration);
-		SyncSimulationFromAsset();
-		const float stepDt = 0.0333f;
-		float current = 0.0f;
-		while (current < targetTime)
-		{
-			float dt = std::min(stepDt, targetTime - current);
-			StepSimulation(dt);
-			current += dt;
-		}
 		m_SimTime = targetTime;
+		for (auto& pool : m_LivePools)
+		{
+			pool->SetSimElapsedTime(m_SimTime);
+		}
+		if (m_PreviewEntity.IsValid())
+		{
+			uint32_t entId = static_cast<uint32_t>(m_PreviewEntity);
+			for (size_t i = 0; i < m_Asset.Emitters.size(); ++i)
+			{
+				uint32_t poolId = (entId << 8) | static_cast<uint32_t>(i);
+				if (auto* p = GetGlobalParticleSystem().GetPool(poolId))
+					p->SetSimElapsedTime(m_SimTime);
+			}
+		}
+		UpdateLiveSimulationSettings();
 	}
 
 
@@ -1125,7 +1180,7 @@ void ParticleEditorPanel::NewAsset()
 			// 限制分区尺寸在合理区间内 (大纲拓宽至 270px 消除截字)
 			m_OutlinerWidth = std::clamp(m_OutlinerWidth, 200.0f, 450.0f);
 			m_InspectorWidth = std::clamp(m_InspectorWidth, 260.0f, 520.0f);
-			m_TimelineHeight = std::clamp(m_TimelineHeight, 140.0f, 400.0f);
+			m_TimelineHeight = std::clamp(m_TimelineHeight, 50.0f, 160.0f);
 
 
 			const float splitterThickness = 4.0f;
@@ -2665,60 +2720,87 @@ void ParticleEditorPanel::NewAsset()
 	{
 		Wui::BarSurface(ctx, canvasRect, Wui::WuiColor { 0.03f, 0.04f, 0.06f, 1.0f }, theme.Border);
 
-
 		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size()) return;
-
-
-		// 1. 目标曲线选择器与预设工具栏 (Target Selector & Preset Bar)
-		float hx = canvasRect.X + 6.0f;
-		const float hy = canvasRect.Y + 4.0f;
-
-
 		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
-		if (m_CurvingModuleIndex >= 0 && m_CurvingModuleIndex < static_cast<int>(em.Modules.size()))
-		{
-			std::string modLabel = "当前关联模块: [" + em.Modules[m_CurvingModuleIndex].Name + "]";
-			Wui::Label(ctx, { hx, hy + 2.0f }, modLabel, theme.Accent, 10.0f);
-			hx += 220.0f;
-		}
 
-		Wui::Label(ctx, { hx, hy + 2.0f }, "曲线通道:", theme.TextMuted, 10.0f);
-		hx += 52.0f;
+		// -------------------------------------------------------------
+		// 1. 左侧曲线通道树 (Left Curve Channels Tree - Niagara Style)
+		// -------------------------------------------------------------
+		const float treeW = 165.0f;
+		const Wui::WuiRect treeRect { canvasRect.X, canvasRect.Y, treeW, canvasRect.H };
+		Wui::BarSurface(ctx, treeRect, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 0.98f }, theme.Border);
 
+		const Wui::WuiRect treeHeader { treeRect.X, treeRect.Y, treeRect.W, 26.0f };
+		Wui::BarSurface(ctx, treeHeader, theme.PanelHeader, theme.Border);
+		Wui::Label(ctx, { treeHeader.X + 8.0f, treeHeader.Y + 6.0f }, "曲线通道 (Channels)", theme.Accent, 10.5f);
 
-		const struct TargetDef {
+		struct ChannelDef {
 			CurveTarget Target;
 			const char* Id;
 			const char* Label;
-		} targets[] = {
-			{ CurveTarget::Size, "vfx.c.tgt.size", "尺寸随寿命 (Size)" },
-			{ CurveTarget::Alpha, "vfx.c.tgt.alpha", "透明度随寿命 (Alpha)" },
-			{ CurveTarget::Speed, "vfx.c.tgt.speed", "速度随寿命 (Speed)" }
+			const char* ModId;
+			Wui::WuiColor Color;
+		} channels[] = {
+			{ CurveTarget::Size,      "vfx.c.ch.size",  "尺寸随寿命 (Scale)",    "mod.update.scale_over_life",     Wui::WuiColor { 0.2f, 0.8f, 1.0f, 1.0f } },
+			{ CurveTarget::Alpha,     "vfx.c.ch.alpha", "透明度随寿命 (Alpha)",  "mod.update.color_over_life",     Wui::WuiColor { 1.0f, 0.85f, 0.2f, 1.0f } },
+			{ CurveTarget::Rotation,  "vfx.c.ch.rot",   "自转角速度 (Rotation)", "mod.update.rotation_over_life",  Wui::WuiColor { 0.3f, 0.9f, 0.4f, 1.0f } },
+			{ CurveTarget::Shockwave, "vfx.c.ch.shock", "扩散缓动 (Shockwave)",  "mod.update.shockwave_expansion", Wui::WuiColor { 0.95f, 0.35f, 0.85f, 1.0f } },
+			{ CurveTarget::Speed,     "vfx.c.ch.speed", "速度动力学 (Speed)",    "mod.update.solve_velocity",      Wui::WuiColor { 1.0f, 0.55f, 0.2f, 1.0f } }
 		};
 
-
-		for (const auto& td : targets)
+		float cy = treeRect.Y + 30.0f;
+		for (const auto& ch : channels)
 		{
-			const float btnW = 110.0f;
-			const Wui::WuiRect tRect { hx, hy, btnW, 20.0f };
-			const bool isCur = (m_ActiveCurveTarget == td.Target);
-			if (Wui::Button(ctx, Wui::HashId(td.Id), tRect, td.Label, theme))
-			{
-				m_ActiveCurveTarget = td.Target;
-				m_SelectedKeyframeIndex = 0;
-			}
+			const bool isCur = (m_ActiveCurveTarget == ch.Target);
+			const bool hasMod = (em.FindModule(ch.ModId) != nullptr);
+
+			const Wui::WuiRect chRow { treeRect.X + 4.0f, cy, treeRect.W - 8.0f, 24.0f };
 			if (isCur)
 			{
-				Wui::LineSegment(ctx, { tRect.X, tRect.Y + tRect.H }, { tRect.X + tRect.W, tRect.Y + tRect.H }, theme.Accent, 2.0f);
+				Wui::BarSurface(ctx, chRow, Wui::WuiColor { 0.16f, 0.22f, 0.30f, 0.95f }, theme.Accent);
 			}
-			hx += btnW + 4.0f;
+			else if (ctx.IsHovered(chRow))
+			{
+				Wui::BarSurface(ctx, chRow, Wui::WuiColor { 0.10f, 0.12f, 0.15f, 0.8f }, theme.Border);
+			}
+
+			// 色标圆点与标签
+			Wui::Label(ctx, { chRow.X + 6.0f, chRow.Y + 4.0f }, "●", ch.Color, 10.0f);
+			Wui::Label(ctx, { chRow.X + 20.0f, chRow.Y + 4.0f }, ch.Label, isCur ? theme.Text : (hasMod ? theme.Text : theme.TextMuted), 9.5f);
+
+			if (ctx.IsHovered(chRow) && ctx.Input().MouseClicked[0])
+			{
+				m_ActiveCurveTarget = ch.Target;
+				m_SelectedKeyframeIndex = 0;
+			}
+			cy += 26.0f;
 		}
 
+		// -------------------------------------------------------------
+		// 2. 右侧曲线图表与预设工具栏 (Right Graph Canvas & Toolbar)
+		// -------------------------------------------------------------
+		const float graphX = treeRect.X + treeW + 4.0f;
+		const float graphW = canvasRect.W - treeW - 8.0f;
+		const Wui::WuiRect toolbarRect { graphX, canvasRect.Y, graphW, 26.0f };
+		Wui::BarSurface(ctx, toolbarRect, theme.PanelHeader, theme.Border);
 
-		hx += 10.0f;
-		Wui::Label(ctx, { hx, hy + 2.0f }, "一键预设:", theme.TextMuted, 10.0f);
-		hx += 50.0f;
+		CubicBezierCurve* activeCurve = nullptr;
+		Wui::WuiColor activeChannelCol = theme.Accent;
+		std::string activeName = "尺寸随寿命 (Scale)";
+		if (m_ActiveCurveTarget == CurveTarget::Size) { activeCurve = &m_EmitterSizeCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 0.2f, 0.8f, 1.0f, 1.0f }; activeName = "尺寸随寿命 (Scale)"; }
+		else if (m_ActiveCurveTarget == CurveTarget::Alpha) { activeCurve = &m_EmitterAlphaCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 1.0f, 0.85f, 0.2f, 1.0f }; activeName = "透明度随寿命 (Alpha)"; }
+		else if (m_ActiveCurveTarget == CurveTarget::Rotation) { activeCurve = &m_EmitterRotationCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 0.3f, 0.9f, 0.4f, 1.0f }; activeName = "自转角速度 (Rotation)"; }
+		else if (m_ActiveCurveTarget == CurveTarget::Shockwave) { activeCurve = &m_EmitterShockwaveCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 0.95f, 0.35f, 0.85f, 1.0f }; activeName = "扩散缓动 (Shockwave)"; }
+		else { activeCurve = &m_EmitterSpeedCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 1.0f, 0.55f, 0.2f, 1.0f }; activeName = "速度动力学 (Speed)"; }
 
+		float hx = toolbarRect.X + 8.0f;
+		Wui::Label(ctx, { hx, toolbarRect.Y + 6.0f }, "当前编辑:", theme.TextMuted, 10.0f);
+		hx += 54.0f;
+		Wui::Label(ctx, { hx, toolbarRect.Y + 6.0f }, activeName, activeChannelCol, 10.0f);
+		hx += 140.0f;
+
+		Wui::Label(ctx, { hx, toolbarRect.Y + 6.0f }, "一键预设:", theme.TextMuted, 10.0f);
+		hx += 52.0f;
 
 		const struct PresetBarEntry {
 			const char* Id;
@@ -2733,19 +2815,12 @@ void ParticleEditorPanel::NewAsset()
 			{ "vfx.p.bounce", "反弹", "Bounce" }
 		};
 
-
-		CubicBezierCurve* activeCurve = nullptr;
-		if (m_ActiveCurveTarget == CurveTarget::Size) activeCurve = &m_EmitterSizeCurves[m_SelectedEmitterIndex];
-		else if (m_ActiveCurveTarget == CurveTarget::Alpha) activeCurve = &m_EmitterAlphaCurves[m_SelectedEmitterIndex];
-		else activeCurve = &m_EmitterSpeedCurves[m_SelectedEmitterIndex];
-
-
 		for (const auto& cp : cPresets)
 		{
 			const float pW = 42.0f;
-			if (hx + pW < canvasRect.X + canvasRect.W - 10.0f)
+			if (hx + pW < toolbarRect.X + toolbarRect.W - 100.0f)
 			{
-				const Wui::WuiRect pRect { hx, hy, pW, 20.0f };
+				const Wui::WuiRect pRect { hx, toolbarRect.Y + 3.0f, pW, 20.0f };
 				if (Wui::Button(ctx, Wui::HashId(cp.Id), pRect, cp.Label, theme))
 				{
 					PushUndoSnapshot();
@@ -2770,17 +2845,26 @@ void ParticleEditorPanel::NewAsset()
 			}
 		}
 
+		// 自动平滑切线
+		const Wui::WuiRect smoothBtn { toolbarRect.X + toolbarRect.W - 86.0f, toolbarRect.Y + 3.0f, 80.0f, 20.0f };
+		Wui::Tooltip(ctx, smoothBtn, "根据相邻点自动平滑所有关键帧切线斜率 (Auto Tangents)");
+		if (Wui::Button(ctx, Wui::HashId("vfx.c.smooth"), smoothBtn, "自动平滑", theme))
+		{
+			PushUndoSnapshot();
+			activeCurve->AutoSmoothTangents();
+			activeCurve->PrecomputeLut(256);
+			m_Dirty = true;
+			SyncSimulationFromAsset();
+		}
 
-		// 2. 曲线交互绘制主画布 (Plot Area)
+		// 3. 曲线交互绘制主画布 (Plot Area)
 		const float plotTop = canvasRect.Y + 28.0f;
 		const float plotH = canvasRect.H - 34.0f;
-		const Wui::WuiRect plotRect { canvasRect.X + 35.0f, plotTop + 4.0f, canvasRect.W - 45.0f, plotH - 18.0f };
+		const Wui::WuiRect plotRect { graphX + 35.0f, plotTop + 4.0f, graphW - 45.0f, plotH - 18.0f };
 		Wui::BarSurface(ctx, plotRect, Wui::WuiColor { 0.02f, 0.03f, 0.04f, 1.0f }, Wui::WuiColor { 0.15f, 0.18f, 0.22f, 0.8f });
-
 
 		// 绘制纵横标准标尺网格线 (横轴 Time 0.0~1.0s, 纵轴 Value 0.0~1.0)
 		const Wui::WuiColor gridLineCol { 0.15f, 0.18f, 0.24f, 0.45f };
-
 
 		for (int step = 0; step <= 4; ++step)
 		{
@@ -2790,13 +2874,11 @@ void ParticleEditorPanel::NewAsset()
 			std::string tLabel = std::to_string(frac).substr(0, 4) + "s";
 			Wui::Label(ctx, { gx - 8.0f, plotRect.Y + plotRect.H + 2.0f }, tLabel, Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 9.0f);
 
-
 			float gy = plotRect.Y + (1.0f - frac) * plotRect.H;
 			Wui::LineSegment(ctx, { plotRect.X, gy }, { plotRect.X + plotRect.W, gy }, gridLineCol, 1.0f);
 			std::string vLabel = std::to_string(frac).substr(0, 4);
-			Wui::Label(ctx, { canvasRect.X + 4.0f, gy - 5.0f }, vLabel, Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 9.0f);
+			Wui::Label(ctx, { graphX + 4.0f, gy - 5.0f }, vLabel, Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 9.0f);
 		}
-
 
 		auto timeToScreenX = [&](float t) -> float {
 			return plotRect.X + std::clamp(t, 0.0f, 1.0f) * plotRect.W;
@@ -2811,30 +2893,26 @@ void ParticleEditorPanel::NewAsset()
 			return std::clamp(1.0f - (sy - plotRect.Y) / plotRect.H, 0.0f, 1.0f);
 		};
 
-
-		// 3. 绘制平滑连续贝塞尔曲线 (Continuous Bezier Curve Spline)
-		const int samples = 36;
+		// 绘制平滑连续贝塞尔曲线 (Continuous Bezier Curve Spline)
+		const int samples = 40;
 		glm::vec2 prevPt { timeToScreenX(0.0f), valToScreenY(activeCurve->Evaluate(0.0f)) };
 		for (int s = 1; s <= samples; ++s)
 		{
 			float t = static_cast<float>(s) / static_cast<float>(samples);
 			float v = activeCurve->Evaluate(t);
 			glm::vec2 curPt { timeToScreenX(t), valToScreenY(v) };
-			Wui::LineSegment(ctx, prevPt, curPt, theme.Accent, 2.0f);
+			Wui::LineSegment(ctx, prevPt, curPt, activeChannelCol, 2.0f);
 			prevPt = curPt;
 		}
 
-
-		// 4. 关键帧节点与切线手柄交互渲染 (Keyframe Nodes & Tangent Handles)
+		// 关键帧节点与切线手柄交互渲染 (Keyframe Nodes & Tangent Handles)
 		const glm::vec2 mousePos = ctx.Input().MousePos;
 		const bool inPlot = ctx.IsHovered(plotRect);
-
 
 		const bool hasSelectedKf = (m_SelectedKeyframeIndex >= 0 && m_SelectedKeyframeIndex < static_cast<int>(activeCurve->KeyframeCount()));
 		glm::vec2 selectedKfScreenPt { 0.0f };
 		glm::vec2 inHandleScreenPos { 0.0f };
 		glm::vec2 outHandleScreenPos { 0.0f };
-
 
 		if (hasSelectedKf)
 		{
@@ -2844,15 +2922,12 @@ void ParticleEditorPanel::NewAsset()
 			float inAngle = std::atan(selKf.InTangent);
 			float outAngle = std::atan(selKf.OutTangent);
 
-
 			inHandleScreenPos = selectedKfScreenPt + glm::vec2(-std::cos(inAngle), std::sin(inAngle)) * handleArmPixels;
 			outHandleScreenPos = selectedKfScreenPt + glm::vec2(std::cos(outAngle), -std::sin(outAngle)) * handleArmPixels;
-
 
 			// 绘制切线臂 (入切线蓝，出切线橙)
 			Wui::LineSegment(ctx, selectedKfScreenPt, inHandleScreenPos, Wui::WuiColor { 0.25f, 0.65f, 1.0f, 0.9f }, 1.5f);
 			Wui::LineSegment(ctx, selectedKfScreenPt, outHandleScreenPos, Wui::WuiColor { 1.0f, 0.65f, 0.2f, 0.9f }, 1.5f);
-
 
 			// 入切线端点手柄
 			const Wui::WuiRect inHRect { inHandleScreenPos.x - 4.0f, inHandleScreenPos.y - 4.0f, 8.0f, 8.0f };
@@ -2860,14 +2935,12 @@ void ParticleEditorPanel::NewAsset()
 			Wui::BarSurface(ctx, inHRect, m_HoveredInHandle ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 0.25f, 0.65f, 1.0f, 1.0f }, theme.Border);
 			Wui::Tooltip(ctx, inHRect, "入切线斜率手柄 (拖拽以调节)");
 
-
 			// 出切线端点手柄
 			const Wui::WuiRect outHRect { outHandleScreenPos.x - 4.0f, outHandleScreenPos.y - 4.0f, 8.0f, 8.0f };
 			m_HoveredOutHandle = ctx.IsHovered(outHRect);
 			Wui::BarSurface(ctx, outHRect, m_HoveredOutHandle ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 1.0f, 0.65f, 0.2f, 1.0f }, theme.Border);
 			Wui::Tooltip(ctx, outHRect, "出切线斜率手柄 (拖拽以调节)");
 		}
-
 
 		// 绘制各关键帧控制点 (菱形 Diamond)
 		m_HoveredKeyframeIndex = -1;
@@ -2878,15 +2951,12 @@ void ParticleEditorPanel::NewAsset()
 			const bool isSel = (static_cast<int>(k) == m_SelectedKeyframeIndex);
 			const bool isHover = (glm::distance(mousePos, kp) <= 8.0f);
 
-
 			if (isHover) m_HoveredKeyframeIndex = static_cast<int>(k);
-
 
 			const float dSize = isSel ? 9.0f : (isHover ? 8.0f : 6.0f);
 			const Wui::WuiRect dRect { kp.x - dSize * 0.5f, kp.y - dSize * 0.5f, dSize, dSize };
-			const Wui::WuiColor kfCol = isSel ? Wui::WuiColor { 0.2f, 0.95f, 0.85f, 1.0f } : (isHover ? Wui::WuiColor { 1.0f, 0.85f, 0.2f, 1.0f } : theme.Accent);
+			const Wui::WuiColor kfCol = isSel ? Wui::WuiColor { 0.2f, 0.95f, 0.85f, 1.0f } : (isHover ? Wui::WuiColor { 1.0f, 0.85f, 0.2f, 1.0f } : activeChannelCol);
 			Wui::BarSurface(ctx, dRect, kfCol, theme.Border);
-
 
 			if (isHover)
 			{
@@ -2895,8 +2965,7 @@ void ParticleEditorPanel::NewAsset()
 			}
 		}
 
-
-		// 5. 鼠标交互判定: 拖拽关键帧 / 拖拽切线手柄 / 空白双击加点 / 右键删点
+		// 鼠标交互判定: 拖拽关键帧 / 拖拽切线手柄 / 空白双击加点 / 右键删点
 		if (inPlot && ctx.Input().MouseClicked[0])
 		{
 			bool hit = false;
@@ -2914,26 +2983,23 @@ void ParticleEditorPanel::NewAsset()
 				}
 			}
 
-
 			if (!hit && m_HoveredKeyframeIndex >= 0)
 			{
 				m_SelectedKeyframeIndex = m_HoveredKeyframeIndex;
 				m_IsDraggingKeyframe = true;
 				m_DragStartMouse = mousePos;
-				const auto& kf = activeCurve->GetKeyframe(m_SelectedKeyframeIndex);
-				m_DragKeyframeStartTime = kf.Time;
-				m_DragKeyframeStartVal = kf.Value;
+				const auto& selKf = activeCurve->GetKeyframe(m_SelectedKeyframeIndex);
+				m_DragKeyframeStartTime = selKf.Time;
+				m_DragKeyframeStartVal = selKf.Value;
 				hit = true;
 			}
 
-
-			// 双击空白处新增关键帧
-			if (!hit && ctx.Input().MouseDoubleClicked[0])
+			if (!hit)
 			{
-				float newT = screenXToTime(mousePos.x);
-				float newV = screenYToVal(mousePos.y);
 				PushUndoSnapshot();
-				size_t newIdx = activeCurve->AddKeyframe(Keyframe(newT, newV));
+				float newTime = screenXToTime(mousePos.x);
+				float newVal = screenYToVal(mousePos.y);
+				size_t newIdx = activeCurve->AddKeyframe(Keyframe(newTime, newVal));
 				activeCurve->AutoSmoothTangents();
 				activeCurve->PrecomputeLut(256);
 				m_SelectedKeyframeIndex = static_cast<int>(newIdx);
@@ -2942,67 +3008,55 @@ void ParticleEditorPanel::NewAsset()
 			}
 		}
 
-
-		// 拖拽过程更新
-		if (ctx.Input().MouseDown[0] && hasSelectedKf)
+		if (m_IsDraggingInHandle && ctx.Input().MouseDown[0] && hasSelectedKf)
 		{
-			auto& mutKf = activeCurve->GetKeyframeMut(m_SelectedKeyframeIndex);
-
-
-			if (m_IsDraggingKeyframe)
+			glm::vec2 delta = mousePos - selectedKfScreenPt;
+			if (std::abs(delta.x) > 1e-4f)
 			{
-				mutKf.Time = screenXToTime(mousePos.x);
-				mutKf.Value = screenYToVal(mousePos.y);
+				float slope = -delta.y / (-delta.x);
+				activeCurve->GetKeyframeMut(m_SelectedKeyframeIndex).InTangent = slope;
 				activeCurve->PrecomputeLut(256);
 				m_Dirty = true;
 				SyncSimulationFromAsset();
 			}
-			else if (m_IsDraggingInHandle)
+		}
+		else if (m_IsDraggingOutHandle && ctx.Input().MouseDown[0] && hasSelectedKf)
+		{
+			glm::vec2 delta = mousePos - selectedKfScreenPt;
+			if (std::abs(delta.x) > 1e-4f)
 			{
-				float dt = screenXToTime(mousePos.x) - mutKf.Time;
-				float dv = screenYToVal(mousePos.y) - mutKf.Value;
-				if (std::abs(dt) > 1e-4f)
-				{
-					mutKf.InTangent = dv / dt;
-					if (mutKf.Mode == TangentMode::Aligned) mutKf.OutTangent = mutKf.InTangent;
-					activeCurve->PrecomputeLut(256);
-					m_Dirty = true;
-					SyncSimulationFromAsset();
-				}
+				float slope = -delta.y / delta.x;
+				activeCurve->GetKeyframeMut(m_SelectedKeyframeIndex).OutTangent = slope;
+				activeCurve->PrecomputeLut(256);
+				m_Dirty = true;
+				SyncSimulationFromAsset();
 			}
-			else if (m_IsDraggingOutHandle)
-			{
-				float dt = screenXToTime(mousePos.x) - mutKf.Time;
-				float dv = screenYToVal(mousePos.y) - mutKf.Value;
-				if (std::abs(dt) > 1e-4f)
-				{
-					mutKf.OutTangent = dv / dt;
-					if (mutKf.Mode == TangentMode::Aligned) mutKf.InTangent = mutKf.OutTangent;
-					activeCurve->PrecomputeLut(256);
-					m_Dirty = true;
-					SyncSimulationFromAsset();
-				}
-			}
+		}
+		else if (m_IsDraggingKeyframe && ctx.Input().MouseDown[0] && hasSelectedKf)
+		{
+			float newTime = screenXToTime(mousePos.x);
+			float newVal = screenYToVal(mousePos.y);
+			auto& kf = activeCurve->GetKeyframeMut(m_SelectedKeyframeIndex);
+			kf.Time = newTime;
+			kf.Value = newVal;
+			activeCurve->PrecomputeLut(256);
+			m_Dirty = true;
+			SyncSimulationFromAsset();
 		}
 		else
 		{
-			if (m_IsDraggingKeyframe || m_IsDraggingInHandle || m_IsDraggingOutHandle)
-			{
-				m_IsDraggingKeyframe = false;
-				m_IsDraggingInHandle = false;
-				m_IsDraggingOutHandle = false;
-				PushUndoSnapshot();
-			}
+			m_IsDraggingInHandle = false;
+			m_IsDraggingOutHandle = false;
+			m_IsDraggingKeyframe = false;
 		}
 
-
-		// 右键关键帧弹出删除
 		if (inPlot && ctx.Input().MouseClicked[1] && m_HoveredKeyframeIndex >= 0)
 		{
 			if (activeCurve->KeyframeCount() > 2)
 			{
 				PushUndoSnapshot();
-				activeCurve->RemoveKeyframe(m_HoveredKeyframeIndex);
+				activeCurve->RemoveKeyframe(static_cast<size_t>(m_HoveredKeyframeIndex));
+				activeCurve->AutoSmoothTangents();
 				activeCurve->PrecomputeLut(256);
 				m_SelectedKeyframeIndex = std::max(0, m_HoveredKeyframeIndex - 1);
 				m_Dirty = true;
@@ -3011,13 +3065,7 @@ void ParticleEditorPanel::NewAsset()
 		}
 	}
 
-
-	// =========================================================================
-	// 时间轴控制器与多轨道显示 (Timeline)
-	// =========================================================================
-
-
-	void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRect& timelineRect, const Wui::WuiTheme& theme, PanelHost& host)
+void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRect& timelineRect, const Wui::WuiTheme& theme, PanelHost& host)
 	{
 		(void)host;
 		Wui::BarSurface(ctx, timelineRect, Wui::WuiColor { 0.06f, 0.08f, 0.10f, 0.95f }, theme.Border);
@@ -3117,20 +3165,15 @@ void ParticleEditorPanel::NewAsset()
 		}
 
 
-		// 曲线工作台展开切换按钮
-		const float curveToggleW = 130.0f;
-		const Wui::WuiRect curveToggleBtn { timelineRect.X + timelineRect.W - curveToggleW - 8.0f, ty, curveToggleW, 22.0f };
-		Wui::Tooltip(ctx, curveToggleBtn, "折叠/展开内置完全可交互关键帧贝塞尔曲线工作台");
-		if (Wui::Button(ctx, Wui::HashId("vfx.tl.curvetoggle"), curveToggleBtn,
-			m_TimelineCurvesExpanded ? "[v] 内置曲线台" : "[>] 内置曲线台", theme))
-		{
-			m_TimelineCurvesExpanded = !m_TimelineCurvesExpanded;
-		}
+		// 嵌入式曲线模式说明徽标
+		const float curveHintW = 150.0f;
+		const Wui::WuiRect curveHintRect { timelineRect.X + timelineRect.W - curveHintW - 8.0f, ty, curveHintW, 22.0f };
+		Wui::Label(ctx, { curveHintRect.X + 4.0f, curveHintRect.Y + 4.0f }, "[曲线已内嵌至属性卡片]", theme.TextMuted, 9.5f);
 
 
 		// 第 2 行: 时间轴多轨道显示 (Multi-Track Timeline)
 		float trackTopY = timelineRect.Y + 30.0f;
-		const float trackAreaH = m_TimelineCurvesExpanded ? 52.0f : (timelineRect.H - 36.0f);
+		const float trackAreaH = timelineRect.H - 34.0f;
 		const Wui::WuiRect trackAreaRect { timelineRect.X + 8.0f, trackTopY, timelineRect.W - 16.0f, trackAreaH };
 		Wui::BarSurface(ctx, trackAreaRect, Wui::WuiColor { 0.04f, 0.05f, 0.07f, 0.95f }, theme.Border);
 
@@ -3146,15 +3189,50 @@ void ParticleEditorPanel::NewAsset()
 
 		// 轨道 0: Master System Track
 		float laneY = trackAreaRect.Y + 18.0f;
-		const float laneH = 16.0f;
+		const float laneH = 14.0f;
 		const Wui::WuiRect masterLane { trackAreaRect.X + 4.0f, laneY, trackAreaRect.W - 8.0f, laneH };
-		Wui::Label(ctx, { masterLane.X + 2.0f, masterLane.Y + 2.0f }, "Master", theme.Accent, 9.5f);
-		const Wui::WuiRect masterBar { masterLane.X + 66.0f, masterLane.Y + 2.0f, masterLane.W - 68.0f, laneH - 4.0f };
+		Wui::Label(ctx, { masterLane.X + 2.0f, masterLane.Y + 1.0f }, "Master", theme.Accent, 9.0f);
+		const Wui::WuiRect masterBar { masterLane.X + 66.0f, masterLane.Y + 1.0f, masterLane.W - 68.0f, laneH - 2.0f };
 		Wui::BarSurface(ctx, masterBar, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.8f }, theme.Border);
 		if (normTime > 0.0f)
 		{
 			Wui::BarSurface(ctx, { masterBar.X, masterBar.Y, masterBar.W * normTime, masterBar.H },
 				Wui::WuiColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, 0.35f }, theme.Accent);
+		}
+
+		// 轨道 1: Selected Emitter Track (发射激活期 + 粒子衰亡期多级可视化)
+		if (m_SelectedEmitterIndex < m_Asset.Emitters.size())
+		{
+			const auto& selEm = m_Asset.Emitters[m_SelectedEmitterIndex];
+			float emLaneY = laneY + laneH + 2.0f;
+			const float emLaneH = 14.0f;
+			const Wui::WuiRect emLane { trackAreaRect.X + 4.0f, emLaneY, trackAreaRect.W - 8.0f, emLaneH };
+			std::string emShortName = selEm.Name.substr(0, 10);
+			Wui::Label(ctx, { emLane.X + 2.0f, emLane.Y + 1.0f }, emShortName, theme.TextMuted, 9.0f);
+			const Wui::WuiRect emBar { emLane.X + 66.0f, emLane.Y + 1.0f, emLane.W - 68.0f, emLaneH - 2.0f };
+			Wui::BarSurface(ctx, emBar, Wui::WuiColor { 0.08f, 0.10f, 0.14f, 0.8f }, theme.Border);
+
+			// 发射激活期 (Spawn Window: 实色高亮条)
+			float spawnDur = (selEm.EmitterDuration > 0.0f) ? std::min(selEm.EmitterDuration, m_TimelineDuration) : m_TimelineDuration;
+			float spawnRatio = std::clamp(spawnDur / m_TimelineDuration, 0.0f, 1.0f);
+			if (spawnRatio > 0.0f)
+			{
+				const Wui::WuiRect spawnBarRect { emBar.X, emBar.Y, emBar.W * spawnRatio, emBar.H };
+				Wui::BarSurface(ctx, spawnBarRect, Wui::WuiColor { 0.18f, 0.45f, 0.85f, 0.65f }, theme.Accent);
+				Wui::Tooltip(ctx, spawnBarRect, "发射激活窗口: 0.0s - " + std::to_string(spawnDur).substr(0, 3) + "s (在此区间内持续生成粒子)");
+			}
+
+			// 粒子寿命衰亡期 (Decay Tail: 半透明条)
+			float tailEnd = std::min(m_TimelineDuration, spawnDur + selEm.Lifetime);
+			float tailStartRatio = spawnRatio;
+			float tailEndRatio = std::clamp(tailEnd / m_TimelineDuration, 0.0f, 1.0f);
+			float tailW = emBar.W * (tailEndRatio - tailStartRatio);
+			if (tailW > 1.0f)
+			{
+				const Wui::WuiRect tailBarRect { emBar.X + emBar.W * tailStartRatio, emBar.Y, tailW, emBar.H };
+				Wui::BarSurface(ctx, tailBarRect, Wui::WuiColor { 0.15f, 0.30f, 0.55f, 0.35f }, Wui::WuiColor { 0.3f, 0.5f, 0.8f, 0.5f });
+				Wui::Tooltip(ctx, tailBarRect, "粒子存活衰亡期: " + std::to_string(spawnDur).substr(0, 3) + "s - " + std::to_string(tailEnd).substr(0, 3) + "s (发射停止，残余粒子演变消亡)");
+			}
 		}
 
 
@@ -3164,22 +3242,27 @@ void ParticleEditorPanel::NewAsset()
 			Wui::WuiColor { 1.0f, 0.88f, 0.25f, 1.0f }, 2.0f);
 
 
-		// 时间轴 Scrubbing 交互判定
-		if (ctx.IsHovered(trackAreaRect) && ctx.Input().MouseDown[0])
+		// 时间轴 Scrubbing 交互判定 (支持跨边界平滑拖拽且不破坏 Solo / Mute)
+		if (ctx.IsHovered(trackAreaRect) && ctx.Input().MouseClicked[0])
 		{
-			const float scrubFrac = std::clamp((ctx.Input().MousePos.x - rulerRect.X) / rulerRect.W, 0.0f, 1.0f);
-			ScrubToTime(scrubFrac * m_TimelineDuration);
+			m_IsScrubbing = true;
+		}
+		if (m_IsScrubbing)
+		{
+			if (ctx.Input().MouseDown[0])
+			{
+				const float scrubFrac = std::clamp((ctx.Input().MousePos.x - rulerRect.X) / rulerRect.W, 0.0f, 1.0f);
+				m_SimTime = scrubFrac * m_TimelineDuration;
+				UpdateLiveSimulationSettings();
+			}
+			else
+			{
+				m_IsScrubbing = false;
+			}
 		}
 
 
-		// 第 3 行: 完全可交互的内置贝塞尔曲线工作台
-		if (m_TimelineCurvesExpanded)
-		{
-			const float curveAreaY = trackTopY + trackAreaH + 4.0f;
-			const float curveAreaH = timelineRect.H - (curveAreaY - timelineRect.Y) - 4.0f;
-			const Wui::WuiRect curveCanvasRect { timelineRect.X + 8.0f, curveAreaY, timelineRect.W - 16.0f, curveAreaH };
-			RenderInteractiveCurveWorkbench(ctx, curveCanvasRect, theme);
-		}
+
 	}
 
 
@@ -3967,6 +4050,63 @@ void ParticleEditorPanel::NewAsset()
 
 	void ParticleEditorPanel::UpdateLiveSimulationSettings()
 	{
+		// 从模块参数向发射器底层物理缓存做双向同步 (SpawnRate / MaxParticles / Lifetime)
+		for (size_t i = 0; i < m_Asset.Emitters.size(); ++i)
+		{
+			auto& em = m_Asset.Emitters[i];
+			if (const auto* rateMod = em.FindModule("mod.emitter.spawn_rate"))
+			{
+				em.EmissionRate = rateMod->GetFloat("SpawnRate", em.EmissionRate);
+				em.MaxParticles = static_cast<uint32_t>(rateMod->GetFloat("MaxParticles", static_cast<float>(em.MaxParticles)));
+			}
+			else if (const auto* burstMod = em.FindModule("mod.emitter.spawn_burst"))
+			{
+				em.MaxParticles = static_cast<uint32_t>(burstMod->GetFloat("MaxParticles", static_cast<float>(em.MaxParticles)));
+			}
+			if (const auto* initMod = em.FindModule("mod.spawn.init_particle"))
+			{
+				em.Lifetime = initMod->GetFloat("Lifetime", em.Lifetime);
+				em.SizeStart = initMod->GetFloat("SizeStart", em.SizeStart);
+				em.SizeEnd = initMod->GetFloat("SizeEnd", em.SizeEnd);
+				em.ColorStart = initMod->GetVec4("ColorStart", em.ColorStart);
+				em.ColorEnd = initMod->GetVec4("ColorEnd", em.ColorEnd);
+			}
+
+			// 内嵌曲线同步到推演缓存
+			if (const auto* scaleMod = em.FindModule("mod.update.scale_over_life"))
+			{
+				for (const auto& p : scaleMod->Parameters)
+				{
+					if (p.Mode == VfxParamMode::Curve && i < m_EmitterSizeCurves.size())
+						m_EmitterSizeCurves[i] = p.Curve;
+				}
+			}
+			if (const auto* colorMod = em.FindModule("mod.update.color_over_life"))
+			{
+				for (const auto& p : colorMod->Parameters)
+				{
+					if (p.Mode == VfxParamMode::Curve && i < m_EmitterAlphaCurves.size())
+						m_EmitterAlphaCurves[i] = p.Curve;
+				}
+			}
+			if (const auto* rotMod = em.FindModule("mod.update.rotation_over_life"))
+			{
+				for (const auto& p : rotMod->Parameters)
+				{
+					if (p.Mode == VfxParamMode::Curve && i < m_EmitterRotationCurves.size())
+						m_EmitterRotationCurves[i] = p.Curve;
+				}
+			}
+			if (const auto* shockMod = em.FindModule("mod.update.shockwave_expansion"))
+			{
+				for (const auto& p : shockMod->Parameters)
+				{
+					if (p.Mode == VfxParamMode::Curve && i < m_EmitterShockwaveCurves.size())
+						m_EmitterShockwaveCurves[i] = p.Curve;
+				}
+			}
+		}
+
 		// 1. 同步预览内存资产与发射器激活状态 (Solo / Mute)
 		ParticleAsset previewAsset = m_Asset;
 		for (size_t i = 0; i < previewAsset.Emitters.size(); ++i)
@@ -4099,12 +4239,10 @@ void ParticleEditorPanel::NewAsset()
 		(void)host;
 		Wui::BarSurface(ctx, inspectorRect, theme.PanelBg, theme.Border);
 
-
 		// 检视器顶部标题栏
 		const Wui::WuiRect headRect { inspectorRect.X, inspectorRect.Y, inspectorRect.W, 28.0f };
 		Wui::BarSurface(ctx, headRect, theme.PanelHeader, theme.Border);
-		Wui::Label(ctx, { headRect.X + 8.0f, headRect.Y + 7.0f }, "参数检视器 (Details Inspector)", theme.Accent, 11.5f);
-
+		Wui::Label(ctx, { headRect.X + 8.0f, headRect.Y + 7.0f }, "Niagara 发射器堆栈 (Emitter Stack Details)", theme.Accent, 11.5f);
 
 		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size())
 		{
@@ -4112,14 +4250,11 @@ void ParticleEditorPanel::NewAsset()
 			return;
 		}
 
-
 		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
 		const bool isLocked = IsEmitterLocked(m_SelectedEmitterIndex);
 		auto& ext = m_EmitterExtended[m_SelectedEmitterIndex];
 
-
 		float curY = inspectorRect.Y + 32.0f;
-
 
 		// 锁定提示条 (若图层被加锁锁定防误触)
 		if (isLocked)
@@ -4130,36 +4265,20 @@ void ParticleEditorPanel::NewAsset()
 			curY += 26.0f;
 		}
 
-
 		// 检视器滚动区域
 		const float scrollAreaH = inspectorRect.H - (curY - inspectorRect.Y) - 4.0f;
 		const Wui::WuiRect scrollAreaRect { inspectorRect.X, curY, inspectorRect.W, scrollAreaH };
 
-
-		// 动态统计展开卡片真实高度总和
-		float totalCardsHeight = 120.0f; // 纯粹基础生命周期属性
-		totalCardsHeight += 64.0f;       // 模块堆栈标题
-		if (m_AddModuleMenuOpen)
+		// 动态统计展开卡片真实高度总和 (4 阶段堆栈 + 卡片)
+		float totalCardsHeight = 90.0f;
+		totalCardsHeight += 4 * 38.0f; // 4 个阶段标头及边距
+		if (m_AddModuleStageTarget >= 0)
 		{
-			totalCardsHeight += 290.0f + static_cast<float>(m_ProjectCustomModules.size() * 24.0f);
+			totalCardsHeight += 280.0f;
 		}
 		for (size_t mIdx = 0; mIdx < em.Modules.size(); ++mIdx)
 		{
-			const auto& mod = em.Modules[mIdx];
-			float cardH = 32.0f;
-			const std::string modKey = mod.Id + "_" + std::to_string(mIdx);
-			if (m_ModuleSourceExpanded[modKey]) cardH += 130.0f;
-			if (mod.Enabled) cardH += mod.Parameters.size() * 26.0f;
-			if (mod.Id == "mod.update.scale_over_life" || mod.Id == "mod.update.color_over_life" ||
-			    mod.Id == "mod.update.rotation_over_life" || mod.Id == "mod.update.shockwave_expansion")
-			{
-				cardH += 26.0f;
-			}
-			if (mod.Id == "mod.render.sprite")
-			{
-				cardH += 152.0f;
-			}
-			totalCardsHeight += cardH + 8.0f;
+			totalCardsHeight += GetModuleCardHeight(em.Modules[mIdx], mIdx) + 8.0f;
 		}
 		totalCardsHeight += 80.0f;
 
@@ -4167,148 +4286,172 @@ void ParticleEditorPanel::NewAsset()
 		float cy = scrollAreaRect.Y - m_InspectorScrollY;
 
 		// -------------------------------------------------------------
-		// 1. 发射器基础配置 (Base Emitter Properties)
+		// 1. 发射器概览与生命周期 (Emitter Summary & Lifecycle)
 		// -------------------------------------------------------------
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 4.0f }, "发射器基础属性 (Emitter Base)", theme.Accent, 11.0f);
-		cy += 24.0f;
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 4.0f }, "发射器概览 (Emitter Summary)", theme.Accent, 11.0f);
+		cy += 22.0f;
 
-		// 最大粒子数
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "最大粒子数:", theme.TextMuted, 10.0f);
-		float maxP = static_cast<float>(em.MaxParticles);
-		const Wui::WuiRect mpRect { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
-		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.maxp"), mpRect, maxP, 10.0f, 10.0f, 100000.0f, theme))
+		// 发射激活状态
+		const Wui::WuiRect activeToggleRect { inspectorRect.X + 12.0f, cy, 70.0f, 20.0f };
+		if (Wui::Checkbox(ctx, Wui::HashId("vfx.em.enabled"), activeToggleRect, "激活", em.Enabled, theme))
 		{
-			em.MaxParticles = static_cast<uint32_t>(maxP);
 			m_Dirty = true;
-			SyncSimulationFromAsset();
+			UpdateLiveSimulationSettings();
 		}
-		cy += 24.0f;
 
-		// 生命周期
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "基准寿命 (秒):", theme.TextMuted, 10.0f);
-		const Wui::WuiRect lifeRect { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
-		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.life"), lifeRect, em.Lifetime, 0.1f, 0.01f, 99999.0f, theme))
+		// 发射激活持续时间 (0.0s 表示跟随系统总时长)
+		Wui::Label(ctx, { inspectorRect.X + 88.0f, cy + 3.0f }, "发射时长:", theme.TextMuted, 10.0f);
+		const Wui::WuiRect durRect { inspectorRect.X + 145.0f, cy, inspectorRect.W - 165.0f, 20.0f };
+		Wui::Tooltip(ctx, durRect, "发射器在周期内的发射激活时间 (0.0s 表示跟随系统全局周期持续发射)");
+		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.duration"), durRect, em.EmitterDuration, 0.1f, 0.0f, 3600.0f, theme))
 		{
 			m_Dirty = true;
 			UpdateLiveSimulationSettings();
 		}
 		cy += 24.0f;
 
-		// 发射速率
-		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 3.0f }, "发射速率 (/s):", theme.TextMuted, 10.0f);
-		const Wui::WuiRect rateRect { inspectorRect.X + 110.0f, cy, inspectorRect.W - 130.0f, 20.0f };
-		if (Wui::DragFloat(ctx, Wui::HashId("vfx.em.rate"), rateRect, em.EmissionRate, 1.0f, 0.0f, 20000.0f, theme))
-		{
-			m_Dirty = true;
-			UpdateLiveSimulationSettings();
-		}
-		cy += 28.0f;
+		// 紧凑徽标信息条 (Summary Chip)
+		std::string capInfo = "容量: " + std::to_string(em.MaxParticles) + " | 速率: " + std::to_string(static_cast<int>(em.EmissionRate)) + "/s | 寿命: " + std::to_string(em.Lifetime).substr(0, 3) + "s | 模块数: " + std::to_string(em.Modules.size());
+		Wui::Label(ctx, { inspectorRect.X + 12.0f, cy + 2.0f }, capInfo, theme.TextMuted, 9.5f);
+		cy += 24.0f;
 
 		// -------------------------------------------------------------
-		// 2. Niagara 级模块堆栈 (Modules Stack - All Native Slang Code)
+		// 2. Niagara 4 阶段模块堆栈 (4-Stage Modular Emitter Stack)
 		// -------------------------------------------------------------
-		const Wui::WuiRect stackHeaderRect { inspectorRect.X + 8.0f, cy, inspectorRect.W - 16.0f, 28.0f };
-		Wui::BarSurface(ctx, stackHeaderRect, theme.PanelHeader, theme.Border);
-		Wui::Label(ctx, { stackHeaderRect.X + 8.0f, stackHeaderRect.Y + 7.0f }, "模块堆栈 (Modules Stack - Slang 代码)", theme.Accent, 11.5f);
+		struct StageSectionDef {
+			VfxModuleStage Stage;
+			const char* Tag;
+			const char* Title;
+			const char* Subtitle;
+			Wui::WuiColor Color;
+		} stageDefs[] = {
+			{ VfxModuleStage::Emitter, "[EMITTER UPDATE]", "发射器更新阶段", "控制每秒持续发射与瞬态爆发生成", Wui::WuiColor { 0.25f, 0.55f, 0.95f, 1.0f } },
+			{ VfxModuleStage::Spawn,   "[PARTICLE SPAWN]",  "粒子诞生初始化阶段", "设定图元诞生时的基准寿命与空间分布", Wui::WuiColor { 0.25f, 0.80f, 0.45f, 1.0f } },
+			{ VfxModuleStage::Update,  "[PARTICLE UPDATE]", "粒子动力学每帧更新阶段", "每帧推演计算受力、曲线渐变与物理求解", Wui::WuiColor { 0.95f, 0.65f, 0.20f, 1.0f } },
+			{ VfxModuleStage::Render,  "[RENDER]",          "渲染器阶段", "设定材质、贴图、面片朝向与视觉管线", Wui::WuiColor { 0.80f, 0.35f, 0.90f, 1.0f } }
+		};
 
-		// 右侧添加模块操作按钮 (仅保留标准/全局模块添加按钮，代码自定义模块移入菜单栏)
-		const Wui::WuiRect addPresetBtn { stackHeaderRect.X + stackHeaderRect.W - 88.0f, stackHeaderRect.Y + 4.0f, 84.0f, 20.0f };
-		Wui::Tooltip(ctx, addPresetBtn, "添加标准或项目全局 Slang 动力学模块 (代码编写请点击菜单栏 [代码模块])");
-		if (Wui::Button(ctx, Wui::HashId("vfx.stk.add_preset"), addPresetBtn, "+ 添加模块", theme))
-		{
-			m_AddModuleMenuOpen = !m_AddModuleMenuOpen;
-			if (m_AddModuleMenuOpen)
-			{
-				RefreshProjectCustomModules();
-			}
-		}
-		cy += 34.0f;
-
-		// 添加模块弹出菜单 (支持内建标准 Slang 模块 + 项目全局代码自定义模块)
-		if (m_AddModuleMenuOpen)
-		{
-			const float itemH = 22.0f;
-			const float menuH = 304.0f + (m_ProjectCustomModules.empty() ? 24.0f : static_cast<float>(m_ProjectCustomModules.size() * 24.0f));
-			const Wui::WuiRect menuRect { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, menuH };
-			Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.14f, 0.16f, 0.20f, 0.98f }, theme.Accent);
-
-			float my = menuRect.Y + 4.0f;
-			const auto renderMenuItem = [&](const char* id, const char* label, const VfxModule& mod) {
-				const Wui::WuiRect itemRect { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 20.0f };
-				if (Wui::Button(ctx, Wui::HashId(id), itemRect, label, theme))
-				{
-					AddModuleToSelectedEmitter(mod);
-					m_AddModuleMenuOpen = false;
-				}
-				my += itemH;
-			};
-
-			Wui::Label(ctx, { menuRect.X + 8.0f, my + 3.0f }, "--- 内建标准 Slang 模块 ---", theme.Accent, 9.5f);
-			my += 18.0f;
-
-			renderMenuItem("vfx.add.g", "+ 重力场 (Gravity Force)", VfxModuleLibrary::CreateGravityModule());
-			renderMenuItem("vfx.add.d", "+ 空气阻力 (Linear Drag)", VfxModuleLibrary::CreateLinearDragModule());
-			renderMenuItem("vfx.add.c", "+ 3D 旋度流体噪声 (Curl Noise)", VfxModuleLibrary::CreateCurlNoiseModule());
-			renderMenuItem("vfx.add.a", "+ 点引力/黑洞吸引子 (Point Attractor)", VfxModuleLibrary::CreatePointAttractorModule());
-			renderMenuItem("vfx.add.v", "+ 旋转涡流场 (Vortex Field)", VfxModuleLibrary::CreateVortexModule());
-			renderMenuItem("vfx.add.rot", "+ 平面旋转与角速度 (Rotation Over Life)", VfxModuleLibrary::CreateRotationOverLifeModule());
-			renderMenuItem("vfx.add.tor", "+ 龙卷风涡流与热浮力 (Vortex Tornado)", VfxModuleLibrary::CreateVortexTornadoModule());
-			renderMenuItem("vfx.add.shk", "+ 冲击波扩散衰减 (Shockwave Expansion)", VfxModuleLibrary::CreateShockwaveExpansionModule());
-			renderMenuItem("vfx.add.flp", "+ 序列帧动画驱动 (SubUV Flipbook)", VfxModuleLibrary::CreateFlipbookModule());
-			renderMenuItem("vfx.add.s", "+ 物理欧拉积分与消亡 (Solve Velocity)", VfxModuleLibrary::CreateSolveVelocityModule());
-			renderMenuItem("vfx.add.rend_sprite", "+ [Render] 精灵渲染器 (Sprite Renderer)", VfxModuleLibrary::CreateSpriteRendererModule());
-
-			my += 4.0f;
-			std::string projHeader = "--- 项目全局代码模块 (" + std::to_string(m_ProjectCustomModules.size()) + ") ---";
-			Wui::Label(ctx, { menuRect.X + 8.0f, my + 3.0f }, projHeader, theme.Accent, 9.5f);
-			my += 18.0f;
-
-			if (m_ProjectCustomModules.empty())
-			{
-				Wui::Label(ctx, { menuRect.X + 12.0f, my + 3.0f }, "(暂无项目模块 - 前往顶部菜单栏编写)", theme.TextMuted, 9.0f);
-				my += 22.0f;
-			}
-			else
-			{
-				for (size_t pModIdx = 0; pModIdx < m_ProjectCustomModules.size(); ++pModIdx)
-				{
-					const auto& pMod = m_ProjectCustomModules[pModIdx];
-					std::string pId = "vfx.add.proj_" + std::to_string(pModIdx);
-					std::string pLabel = "[★] " + pMod.Name;
-					renderMenuItem(pId.c_str(), pLabel.c_str(), pMod);
-				}
-			}
-
-			// 底部快捷通道
-			my += 2.0f;
-			const Wui::WuiRect scratchPadLink { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("vfx.add.goto_scratch"), scratchPadLink, "→ 在菜单栏编写新代码模块 (Scratch Pad)", theme))
-			{
-				m_AddModuleMenuOpen = false;
-				OpenCustomModuleEditor();
-			}
-
-			cy += menuRect.H + 8.0f;
-		}
-
-		// 遍历渲染模块卡片
 		const float cardX = inspectorRect.X + 12.0f;
 		const float cardW = inspectorRect.W - 24.0f;
-		for (size_t mIdx = 0; mIdx < em.Modules.size(); ++mIdx)
+
+		for (size_t s = 0; s < 4; ++s)
 		{
-			RenderModuleCard(ctx, em.Modules[mIdx], mIdx, cardX, cy, cardW, theme, host);
+			const auto& sd = stageDefs[s];
+			const Wui::WuiRect stageHeadRect { inspectorRect.X + 8.0f, cy, inspectorRect.W - 16.0f, 26.0f };
+			Wui::BarSurface(ctx, stageHeadRect, theme.PanelHeader, sd.Color);
+
+			// 阶段彩色徽标 + 阶段名称
+			Wui::Label(ctx, { stageHeadRect.X + 8.0f, stageHeadRect.Y + 5.0f }, sd.Tag, sd.Color, 10.5f);
+			Wui::Label(ctx, { stageHeadRect.X + 128.0f, stageHeadRect.Y + 5.0f }, sd.Title, theme.Text, 10.0f);
+
+			// 阶段添加模块按钮 [+]
+			const Wui::WuiRect addBtn { stageHeadRect.X + stageHeadRect.W - 68.0f, stageHeadRect.Y + 3.0f, 62.0f, 20.0f };
+			Wui::Tooltip(ctx, addBtn, "为此阶段添加专属 Slang 动力学或渲染模块");
+			if (Wui::Button(ctx, Wui::HashId(("vfx.stg.add_" + std::to_string(s)).c_str()), addBtn, "+ 添加", theme))
+			{
+				m_AddModuleStageTarget = (m_AddModuleStageTarget == static_cast<int>(s)) ? -1 : static_cast<int>(s);
+				if (m_AddModuleStageTarget >= 0) RefreshProjectCustomModules();
+			}
+			cy += 30.0f;
+
+			// 阶段专属添加模块菜单
+			if (m_AddModuleStageTarget == static_cast<int>(s))
+			{
+				float menuH = 70.0f;
+				if (s == 0) menuH = 68.0f;
+				else if (s == 1) menuH = 150.0f;
+				else if (s == 2) menuH = 260.0f + static_cast<float>(m_ProjectCustomModules.size() * 22.0f);
+				else if (s == 3) menuH = 68.0f;
+
+				const Wui::WuiRect menuRect { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, menuH };
+				Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.14f, 0.16f, 0.20f, 0.98f }, sd.Color);
+
+				float my = menuRect.Y + 4.0f;
+				const auto renderMenuItem = [&](const char* id, const char* label, const VfxModule& mod) {
+					const Wui::WuiRect itemRect { menuRect.X + 4.0f, my, menuRect.W - 8.0f, 20.0f };
+					if (Wui::Button(ctx, Wui::HashId(id), itemRect, label, theme))
+					{
+						AddModuleToSelectedEmitter(mod);
+						m_AddModuleStageTarget = -1;
+					}
+					my += 22.0f;
+				};
+
+				if (s == 0) // Emitter Update
+				{
+					renderMenuItem("vfx.stg0.rate", "+ 持续发射 (Spawn Rate)", VfxModuleLibrary::CreateSpawnRateModule(50.0f, 500));
+					renderMenuItem("vfx.stg0.burst", "+ 瞬态爆发/单体 (Spawn Burst)", VfxModuleLibrary::CreateSpawnBurstModule(1, 0.0f, 500));
+				}
+				else if (s == 1) // Particle Spawn
+				{
+					renderMenuItem("vfx.stg1.init", "+ 粒子初始化 (Initialize Particle)", VfxModuleLibrary::CreateInitParticleModule(2.0f, 0.3f, 0.05f));
+					renderMenuItem("vfx.stg1.cone", "+ 圆锥几何分布 (Cone Location)", VfxModuleLibrary::CreateConeSpawnModule());
+					renderMenuItem("vfx.stg1.sphere", "+ 球体几何分布 (Sphere Location)", VfxModuleLibrary::CreateSphereSpawnModule());
+					renderMenuItem("vfx.stg1.box", "+ 盒体几何分布 (Box Location)", VfxModuleLibrary::CreateBoxSpawnModule());
+					renderMenuItem("vfx.stg1.ring", "+ 圆环几何分布 (Ring Location)", VfxModuleLibrary::CreateRingSpawnModule());
+					renderMenuItem("vfx.stg1.point", "+ 单点几何分布 (Point Location)", VfxModuleLibrary::CreatePointSpawnModule());
+				}
+				else if (s == 2) // Particle Update
+				{
+					renderMenuItem("vfx.stg2.scale", "+ 尺寸随寿命缩放 (Scale Over Life)", VfxModuleLibrary::CreateScaleOverLifeModule());
+					renderMenuItem("vfx.stg2.color", "+ 颜色透明度随寿命 (Color Over Life)", VfxModuleLibrary::CreateColorOverLifeModule());
+					renderMenuItem("vfx.stg2.rot", "+ 平面自转角速度 (Rotation Over Life)", VfxModuleLibrary::CreateRotationOverLifeModule());
+					renderMenuItem("vfx.stg2.shock", "+ 冲击波扩散衰减 (Shockwave Expansion)", VfxModuleLibrary::CreateShockwaveExpansionModule());
+					renderMenuItem("vfx.stg2.grav", "+ 重力加速度场 (Gravity Force)", VfxModuleLibrary::CreateGravityModule());
+					renderMenuItem("vfx.stg2.drag", "+ 线性空气阻力 (Linear Drag)", VfxModuleLibrary::CreateLinearDragModule());
+					renderMenuItem("vfx.stg2.noise", "+ 3D 卷现流体噪声 (Curl Noise)", VfxModuleLibrary::CreateCurlNoiseModule());
+					renderMenuItem("vfx.stg2.tornado", "+ 龙卷风涡流与热浮力 (Vortex Tornado)", VfxModuleLibrary::CreateVortexTornadoModule());
+					renderMenuItem("vfx.stg2.attract", "+ 点引力/黑洞吸引子 (Point Attractor)", VfxModuleLibrary::CreatePointAttractorModule());
+					renderMenuItem("vfx.stg2.solve", "+ 动力学欧拉解算 (Solve Velocity)", VfxModuleLibrary::CreateSolveVelocityModule());
+
+					if (!m_ProjectCustomModules.empty())
+					{
+						for (size_t pModIdx = 0; pModIdx < m_ProjectCustomModules.size(); ++pModIdx)
+						{
+							const auto& pMod = m_ProjectCustomModules[pModIdx];
+							std::string pId = "vfx.stg2.proj_" + std::to_string(pModIdx);
+							std::string pLabel = "[★] " + pMod.Name;
+							renderMenuItem(pId.c_str(), pLabel.c_str(), pMod);
+						}
+					}
+				}
+				else if (s == 3) // Render
+				{
+					renderMenuItem("vfx.stg3.sprite", "+ 精灵渲染器 (Sprite Renderer)", VfxModuleLibrary::CreateSpriteRendererModule());
+					renderMenuItem("vfx.stg3.flipbook", "+ 序列帧动画驱动 (SubUV Flipbook)", VfxModuleLibrary::CreateFlipbookModule());
+				}
+
+				cy += menuH + 8.0f;
+			}
+
+			// 渲染该阶段下的所有模块卡片
+			size_t modCountInStage = 0;
+			for (size_t mIdx = 0; mIdx < em.Modules.size(); ++mIdx)
+			{
+				if (em.Modules[mIdx].Stage == sd.Stage)
+				{
+					RenderModuleCard(ctx, em.Modules[mIdx], mIdx, cardX, cy, cardW, theme, host);
+					modCountInStage++;
+				}
+			}
+
+			if (modCountInStage == 0)
+			{
+				Wui::Label(ctx, { inspectorRect.X + 16.0f, cy + 3.0f }, "[空阶段 - 点击上方 '+ 添加' 为该阶段添加模块]", theme.TextMuted, 9.5f);
+				cy += 22.0f;
+			}
+
+			cy += 8.0f;
 		}
 
 		cy += 20.0f;
 		Wui::EndScrollArea(ctx);
 
-		// 【优化 1: 独立滚动条】当卡片内容超出视口时，在右侧清晰显示并支持鼠标直接拖拽
+		// 独立滚动条
 		const float scrollbarW = 6.0f;
 		const Wui::WuiRect scrollbarRect { inspectorRect.X + inspectorRect.W - scrollbarW - 2.0f, curY, scrollbarW, scrollAreaH };
 		Wui::ScrollBar(ctx, Wui::HashId("vfx.insp.scrollbar"), scrollbarRect, totalCardsHeight, scrollAreaH, m_InspectorScrollY, theme, false);
 	}
-
-
 
 	// =========================================================================
 	// 纯 Slang 模块化着色器堆栈与热重载实现 (Slang Modular Pipeline)
@@ -4406,31 +4549,478 @@ void ParticleEditorPanel::NewAsset()
 		}
 	}
 
-	void ParticleEditorPanel::RenderModuleCard(Wui::WuiContext& ctx, VfxModule& mod, size_t modIdx, float cardX, float& curY, float cardW, const Wui::WuiTheme& theme, PanelHost& host)
+		void ParticleEditorPanel::RenderEmbeddedCurveEditor(Wui::WuiContext& ctx, VfxModuleParam& param, size_t modIdx, size_t pIdx, const Wui::WuiRect& areaRect, const Wui::WuiTheme& theme)
 	{
-		const float cardPad = 8.0f;
+		param.EnsureCurve();
+		auto& curve = param.Curve;
+
+		Wui::BarSurface(ctx, areaRect, Wui::WuiColor { 0.04f, 0.05f, 0.07f, 0.98f }, theme.Border);
+
+		const bool isThisCurveActive = (m_InlineCurveModIdx == static_cast<int>(modIdx) && m_InlineCurveParamIdx == static_cast<int>(pIdx));
+		const bool hasSelKf = (isThisCurveActive && m_InlineCurveKfIdx >= 0 && m_InlineCurveKfIdx < static_cast<int>(curve.KeyframeCount()));
+
+		// =========================================================================
+		// 1. 顶部切线模式与关键帧工具栏 (Tangent Modes & Keyframe Tools - No presets!)
+		// =========================================================================
+		const float tbH = 20.0f;
+		const Wui::WuiRect tbRect { areaRect.X + 4.0f, areaRect.Y + 2.0f, areaRect.W - 8.0f, tbH };
+		float hx = tbRect.X;
+
+		Wui::Label(ctx, { hx, tbRect.Y + 3.0f }, "切线模式:", theme.Accent, 9.5f);
+		hx += 52.0f;
+
+		// 4 大专业切线模式按钮: [平直 (Flat)] [平滑 (Auto)] [线性 (Linear)] [断开 (Broken)]
+		const struct TangentModeBtn {
+			TangentMode mode;
+			const char* label;
+			const char* tip;
+		} tModeBtns[] = {
+			{ TangentMode::Clamped, "平直", "水平平直切线 (斜率归零，常用于峰值或波谷)" },
+			{ TangentMode::Aligned, "平滑", "平滑连续切线 (前后切线共线连续，默认自然过渡)" },
+			{ TangentMode::Free,    "线性", "线性直线过渡 (向相邻关键帧直接拉出直线)" },
+			{ TangentMode::Broken,  "断开", "断开前后切线 (入切线与出切线独立旋转，可做弹跳尖角)" }
+		};
+
+		for (const auto& tb : tModeBtns)
+		{
+			const float btnW = 38.0f;
+			const Wui::WuiRect bRect { hx, tbRect.Y, btnW, 18.0f };
+			bool isCurrentMode = false;
+			if (hasSelKf)
+			{
+				isCurrentMode = (curve.GetKeyframe(m_InlineCurveKfIdx).Mode == tb.mode);
+			}
+			if (isCurrentMode)
+			{
+				Wui::BarSurface(ctx, bRect, Wui::WuiColor { 0.20f, 0.45f, 0.65f, 0.95f }, theme.Accent);
+			}
+			Wui::Tooltip(ctx, bRect, tb.tip);
+			std::string tbId = "vfx.ecv.tm_" + std::string(tb.label) + "_" + std::to_string(modIdx * 100 + pIdx);
+			if (Wui::Button(ctx, Wui::HashId(tbId.c_str()), bRect, tb.label, theme))
+			{
+				if (hasSelKf)
+				{
+					PushUndoSnapshot();
+					auto& kf = curve.GetKeyframeMut(m_InlineCurveKfIdx);
+					kf.Mode = tb.mode;
+					if (tb.mode == TangentMode::Clamped)
+					{
+						kf.InTangent = 0.0f;
+						kf.OutTangent = 0.0f;
+					}
+					else if (tb.mode == TangentMode::Aligned)
+					{
+						curve.AutoSmoothTangents();
+					}
+					else if (tb.mode == TangentMode::Free)
+					{
+						// 线性斜率
+						if (m_InlineCurveKfIdx + 1 < static_cast<int>(curve.KeyframeCount()))
+						{
+							const auto& nextKf = curve.GetKeyframe(m_InlineCurveKfIdx + 1);
+							float dt = nextKf.Time - kf.Time;
+							if (dt > 1e-4f) kf.OutTangent = (nextKf.Value - kf.Value) / dt;
+						}
+						if (m_InlineCurveKfIdx > 0)
+						{
+							const auto& prevKf = curve.GetKeyframe(m_InlineCurveKfIdx - 1);
+							float dt = kf.Time - prevKf.Time;
+							if (dt > 1e-4f) kf.InTangent = (kf.Value - prevKf.Value) / dt;
+						}
+					}
+					curve.PrecomputeLut(256);
+					m_Dirty = true;
+					UpdateLiveSimulationSettings();
+				}
+			}
+			hx += btnW + 2.0f;
+		}
+
+		// 右侧关键帧操作按钮: [+ 加点] [- 删点]
+		const float toolBtnW = 42.0f;
+		float toolX = tbRect.X + tbRect.W - (toolBtnW * 2 + 4.0f);
+
+		// [+ 加点]
+		const Wui::WuiRect addKfBtn { toolX, tbRect.Y, toolBtnW, 18.0f };
+		Wui::Tooltip(ctx, addKfBtn, "在曲线中段添加新关键帧节点 (双击画布空白处也可加点)");
+		std::string addKfId = "vfx.ecv.add_" + std::to_string(modIdx * 100 + pIdx);
+		if (Wui::Button(ctx, Wui::HashId(addKfId.c_str()), addKfBtn, "+加点", theme))
+		{
+			PushUndoSnapshot();
+			float t = 0.5f;
+			float v = curve.Evaluate(t);
+			size_t nIdx = curve.AddKeyframe(Keyframe(t, v));
+			curve.AutoSmoothTangents();
+			curve.PrecomputeLut(256);
+			m_InlineCurveModIdx = static_cast<int>(modIdx);
+			m_InlineCurveParamIdx = static_cast<int>(pIdx);
+			m_InlineCurveKfIdx = static_cast<int>(nIdx);
+			m_Dirty = true;
+			UpdateLiveSimulationSettings();
+		}
+		toolX += toolBtnW + 2.0f;
+
+		// [- 删点]
+		const bool canDeleteKf = (hasSelKf && curve.KeyframeCount() > 2);
+		const Wui::WuiRect delKfBtn { toolX, tbRect.Y, toolBtnW, 18.0f };
+		Wui::Tooltip(ctx, delKfBtn, canDeleteKf ? "删除当前选中的关键帧节点 (右键点击节点也可删除)" : "请先选中要删除的关键帧 (至少保留2个点)");
+		std::string delKfId = "vfx.ecv.del_" + std::to_string(modIdx * 100 + pIdx);
+		if (Wui::Button(ctx, Wui::HashId(delKfId.c_str()), delKfBtn, "-删点", theme))
+		{
+			if (canDeleteKf)
+			{
+				PushUndoSnapshot();
+				curve.RemoveKeyframe(static_cast<size_t>(m_InlineCurveKfIdx));
+				curve.AutoSmoothTangents();
+				curve.PrecomputeLut(256);
+				m_InlineCurveKfIdx = std::max(0, m_InlineCurveKfIdx - 1);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+		}
+
+		// =========================================================================
+		// 2. 关键帧数值与前后斜率精确微调栏 (Keyframe Precision Readouts & Slopes)
+		// =========================================================================
+		const float numRowY = tbRect.Y + tbH + 2.0f;
+		const float numRowH = 20.0f;
+		const Wui::WuiRect numRowRect { areaRect.X + 4.0f, numRowY, areaRect.W - 8.0f, numRowH };
+		Wui::BarSurface(ctx, numRowRect, Wui::WuiColor { 0.07f, 0.09f, 0.12f, 0.9f }, theme.Border);
+
+		if (hasSelKf)
+		{
+			auto& selKf = curve.GetKeyframeMut(m_InlineCurveKfIdx);
+			float nx = numRowRect.X + 4.0f;
+
+			std::string ptTag = "#" + std::to_string(m_InlineCurveKfIdx + 1);
+			Wui::Label(ctx, { nx, numRowRect.Y + 3.0f }, ptTag, theme.Accent, 9.5f);
+			nx += 24.0f;
+
+			// 时间 t
+			Wui::Label(ctx, { nx, numRowRect.Y + 3.0f }, "t:", theme.TextMuted, 9.0f);
+			nx += 12.0f;
+			const Wui::WuiRect tInputRect { nx, numRowRect.Y + 1.0f, 48.0f, 18.0f };
+			Wui::Tooltip(ctx, tInputRect, "关键帧归一化时间 (0.0s 诞生 ~ 1.0s 消亡)");
+			std::string tInputId = "vfx.ecv.kft_" + std::to_string(modIdx * 100 + pIdx);
+			if (Wui::DragFloat(ctx, Wui::HashId(tInputId.c_str()), tInputRect, selKf.Time, 0.01f, 0.0f, 1.0f, theme))
+			{
+				curve.PrecomputeLut(256);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+			nx += 52.0f;
+
+			// 数值 v
+			Wui::Label(ctx, { nx, numRowRect.Y + 3.0f }, "v:", theme.TextMuted, 9.0f);
+			nx += 14.0f;
+			const Wui::WuiRect vInputRect { nx, numRowRect.Y + 1.0f, 52.0f, 18.0f };
+			Wui::Tooltip(ctx, vInputRect, "关键帧在此时间点的对应求值数值");
+			std::string vInputId = "vfx.ecv.kfv_" + std::to_string(modIdx * 100 + pIdx);
+			if (Wui::DragFloat(ctx, Wui::HashId(vInputId.c_str()), vInputRect, selKf.Value, 0.01f, -100.0f, 1000.0f, theme))
+			{
+				curve.PrecomputeLut(256);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+			nx += 56.0f;
+
+			// 前入斜率 (InTangent)
+			Wui::Label(ctx, { nx, numRowRect.Y + 3.0f }, "入斜率:", Wui::WuiColor { 0.35f, 0.75f, 1.0f, 1.0f }, 9.0f);
+			nx += 38.0f;
+			const Wui::WuiRect inSlopeRect { nx, numRowRect.Y + 1.0f, 46.0f, 18.0f };
+			Wui::Tooltip(ctx, inSlopeRect, "进入该关键帧的切线斜率 (In-Tangent Slope)");
+			std::string inSlopeId = "vfx.ecv.inslope_" + std::to_string(modIdx * 100 + pIdx);
+			if (Wui::DragFloat(ctx, Wui::HashId(inSlopeId.c_str()), inSlopeRect, selKf.InTangent, 0.05f, -100.0f, 100.0f, theme))
+			{
+				if (selKf.Mode != TangentMode::Broken)
+				{
+					selKf.OutTangent = selKf.InTangent;
+				}
+				curve.PrecomputeLut(256);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+			nx += 50.0f;
+
+			// 后出斜率 (OutTangent)
+			Wui::Label(ctx, { nx, numRowRect.Y + 3.0f }, "出斜率:", Wui::WuiColor { 1.0f, 0.70f, 0.25f, 1.0f }, 9.0f);
+			nx += 38.0f;
+			const Wui::WuiRect outSlopeRect { nx, numRowRect.Y + 1.0f, 46.0f, 18.0f };
+			Wui::Tooltip(ctx, outSlopeRect, "离开该关键帧的切线斜率 (Out-Tangent Slope)");
+			std::string outSlopeId = "vfx.ecv.outslope_" + std::to_string(modIdx * 100 + pIdx);
+			if (Wui::DragFloat(ctx, Wui::HashId(outSlopeId.c_str()), outSlopeRect, selKf.OutTangent, 0.05f, -100.0f, 100.0f, theme))
+			{
+				if (selKf.Mode != TangentMode::Broken)
+				{
+					selKf.InTangent = selKf.OutTangent;
+				}
+				curve.PrecomputeLut(256);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+		}
+		else
+		{
+			Wui::Label(ctx, { numRowRect.X + 8.0f, numRowRect.Y + 3.0f }, "提示: 点击关键帧节点可查看与调节入斜率、出斜率及精确数值指标", theme.TextMuted, 9.0f);
+		}
+
+		// =========================================================================
+		// 3. 嵌入式贝塞尔曲线画布 (Embedded Curve Canvas with Tangent Arms)
+		// =========================================================================
+		const float plotY = numRowY + numRowH + 3.0f;
+		const float plotH = areaRect.H - (plotY - areaRect.Y) - 4.0f;
+		const Wui::WuiRect plotRect { areaRect.X + 28.0f, plotY, areaRect.W - 36.0f, plotH - 14.0f };
+		Wui::BarSurface(ctx, plotRect, Wui::WuiColor { 0.02f, 0.025f, 0.035f, 1.0f }, Wui::WuiColor { 0.12f, 0.15f, 0.20f, 0.8f });
+
+		// 标尺网格线
+		const Wui::WuiColor gridCol { 0.12f, 0.16f, 0.22f, 0.45f };
+		for (int s = 0; s <= 4; ++s)
+		{
+			float frac = static_cast<float>(s) * 0.25f;
+			float gx = plotRect.X + frac * plotRect.W;
+			Wui::LineSegment(ctx, { gx, plotRect.Y }, { gx, plotRect.Y + plotRect.H }, gridCol, 1.0f);
+			if (s == 0 || s == 2 || s == 4)
+			{
+				std::string tLabel = std::to_string(frac).substr(0, 3) + "s";
+				Wui::Label(ctx, { gx - 6.0f, plotRect.Y + plotRect.H + 1.0f }, tLabel, Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 8.5f);
+			}
+
+			float gy = plotRect.Y + (1.0f - frac) * plotRect.H;
+			Wui::LineSegment(ctx, { plotRect.X, gy }, { plotRect.X + plotRect.W, gy }, gridCol, 1.0f);
+			if (s == 0 || s == 2 || s == 4)
+			{
+				std::string vLabel = std::to_string(frac).substr(0, 3);
+				Wui::Label(ctx, { areaRect.X + 4.0f, gy - 4.0f }, vLabel, Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 8.5f);
+			}
+		}
+
+		auto timeToScreenX = [&](float t) -> float {
+			return plotRect.X + std::clamp(t, 0.0f, 1.0f) * plotRect.W;
+		};
+		auto valToScreenY = [&](float v) -> float {
+			return plotRect.Y + (1.0f - std::clamp(v, 0.0f, 1.0f)) * plotRect.H;
+		};
+		auto screenXToTime = [&](float sx) -> float {
+			return std::clamp((sx - plotRect.X) / plotRect.W, 0.0f, 1.0f);
+		};
+		auto screenYToVal = [&](float sy) -> float {
+			return std::clamp(1.0f - (sy - plotRect.Y) / plotRect.H, 0.0f, 1.0f);
+		};
+
+		// 绘制连续曲线段
+		const int samples = 36;
+		glm::vec2 prevPt { timeToScreenX(0.0f), valToScreenY(curve.Evaluate(0.0f)) };
+		for (int s = 1; s <= samples; ++s)
+		{
+			float t = static_cast<float>(s) / static_cast<float>(samples);
+			float v = curve.Evaluate(t);
+			glm::vec2 curPt { timeToScreenX(t), valToScreenY(v) };
+			Wui::LineSegment(ctx, prevPt, curPt, theme.Accent, 1.8f);
+			prevPt = curPt;
+		}
+
+		// 绘制关键帧切线臂与手柄 (蓝色入切线, 橙色出切线)
+		const glm::vec2 mousePos = ctx.Input().MousePos;
+		const bool inPlot = ctx.IsHovered(plotRect);
+
+		glm::vec2 selectedKfScreenPt { 0.0f };
+		glm::vec2 inHandleScreenPos { 0.0f };
+		glm::vec2 outHandleScreenPos { 0.0f };
+		bool hoveredInArm = false;
+		bool hoveredOutArm = false;
+
+		if (hasSelKf)
+		{
+			const auto& selKf = curve.GetKeyframe(m_InlineCurveKfIdx);
+			selectedKfScreenPt = glm::vec2(timeToScreenX(selKf.Time), valToScreenY(selKf.Value));
+			const float armLength = 28.0f;
+			float inAngle = std::atan(selKf.InTangent);
+			float outAngle = std::atan(selKf.OutTangent);
+
+			inHandleScreenPos = selectedKfScreenPt + glm::vec2(-std::cos(inAngle), std::sin(inAngle)) * armLength;
+			outHandleScreenPos = selectedKfScreenPt + glm::vec2(std::cos(outAngle), -std::sin(outAngle)) * armLength;
+
+			// 绘制切线臂连线
+			Wui::LineSegment(ctx, selectedKfScreenPt, inHandleScreenPos, Wui::WuiColor { 0.35f, 0.75f, 1.0f, 0.9f }, 1.5f);
+			Wui::LineSegment(ctx, selectedKfScreenPt, outHandleScreenPos, Wui::WuiColor { 1.0f, 0.70f, 0.25f, 0.9f }, 1.5f);
+
+			// 入手柄
+			hoveredInArm = (glm::distance(mousePos, inHandleScreenPos) <= 6.0f);
+			Wui::BarSurface(ctx, { inHandleScreenPos.x - 3.5f, inHandleScreenPos.y - 3.5f, 7.0f, 7.0f },
+				hoveredInArm ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 0.35f, 0.75f, 1.0f, 1.0f }, theme.Border);
+
+			// 出手柄
+			hoveredOutArm = (glm::distance(mousePos, outHandleScreenPos) <= 6.0f);
+			Wui::BarSurface(ctx, { outHandleScreenPos.x - 3.5f, outHandleScreenPos.y - 3.5f, 7.0f, 7.0f },
+				hoveredOutArm ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 1.0f, 0.70f, 0.25f, 1.0f }, theme.Border);
+		}
+
+		// 绘制关键帧菱形节点
+		int hoveredKf = -1;
+		for (size_t k = 0; k < curve.KeyframeCount(); ++k)
+		{
+			const auto& kf = curve.GetKeyframe(k);
+			glm::vec2 kp { timeToScreenX(kf.Time), valToScreenY(kf.Value) };
+			const bool isSel = (hasSelKf && m_InlineCurveKfIdx == static_cast<int>(k));
+			const bool isHov = (glm::distance(mousePos, kp) <= 7.0f);
+			if (isHov) hoveredKf = static_cast<int>(k);
+
+			const float dSize = isSel ? 7.5f : (isHov ? 6.5f : 5.0f);
+			const Wui::WuiRect dRect { kp.x - dSize * 0.5f, kp.y - dSize * 0.5f, dSize, dSize };
+			const Wui::WuiColor kfCol = isSel ? Wui::WuiColor { 0.2f, 0.95f, 0.85f, 1.0f } : (isHov ? Wui::WuiColor { 1.0f, 0.85f, 0.2f, 1.0f } : theme.Accent);
+			Wui::BarSurface(ctx, dRect, kfCol, theme.Border);
+
+			if (isSel)
+			{
+				std::string selTip = "t=" + std::to_string(kf.Time).substr(0, 3) + ", v=" + std::to_string(kf.Value).substr(0, 3);
+				Wui::Label(ctx, { kp.x - 22.0f, kp.y - 12.0f }, selTip, Wui::WuiColor { 0.2f, 0.95f, 0.85f, 1.0f }, 8.5f);
+			}
+		}
+
+		// 鼠标点击选择与手柄抓取
+		if (inPlot && ctx.Input().MouseClicked[0])
+		{
+			if (hoveredInArm && hasSelKf)
+			{
+				m_IsDraggingInlineInHandle = true;
+			}
+			else if (hoveredOutArm && hasSelKf)
+			{
+				m_IsDraggingInlineOutHandle = true;
+			}
+			else if (hoveredKf >= 0)
+			{
+				m_InlineCurveModIdx = static_cast<int>(modIdx);
+				m_InlineCurveParamIdx = static_cast<int>(pIdx);
+				m_InlineCurveKfIdx = hoveredKf;
+				m_IsDraggingInlineKf = true;
+			}
+		}
+
+		// 双击空白处新增关键帧
+		if (inPlot && ctx.Input().MouseDoubleClicked[0] && hoveredKf < 0 && !hoveredInArm && !hoveredOutArm)
+		{
+			PushUndoSnapshot();
+			float newT = screenXToTime(mousePos.x);
+			float newV = screenYToVal(mousePos.y);
+			size_t newIdx = curve.AddKeyframe(Keyframe(newT, newV));
+			curve.AutoSmoothTangents();
+			curve.PrecomputeLut(256);
+			m_InlineCurveModIdx = static_cast<int>(modIdx);
+			m_InlineCurveParamIdx = static_cast<int>(pIdx);
+			m_InlineCurveKfIdx = static_cast<int>(newIdx);
+			m_Dirty = true;
+			UpdateLiveSimulationSettings();
+		}
+
+		// 拖拽切线斜率手柄
+		if (hasSelKf && m_IsDraggingInlineInHandle && ctx.Input().MouseDown[0])
+		{
+			glm::vec2 delta = mousePos - selectedKfScreenPt;
+			if (std::abs(delta.x) > 1e-4f)
+			{
+				float slope = -delta.y / (-delta.x);
+				auto& kf = curve.GetKeyframeMut(m_InlineCurveKfIdx);
+				kf.InTangent = slope;
+				if (kf.Mode != TangentMode::Broken) kf.OutTangent = slope;
+				curve.PrecomputeLut(256);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+		}
+		else if (hasSelKf && m_IsDraggingInlineOutHandle && ctx.Input().MouseDown[0])
+		{
+			glm::vec2 delta = mousePos - selectedKfScreenPt;
+			if (std::abs(delta.x) > 1e-4f)
+			{
+				float slope = -delta.y / delta.x;
+				auto& kf = curve.GetKeyframeMut(m_InlineCurveKfIdx);
+				kf.OutTangent = slope;
+				if (kf.Mode != TangentMode::Broken) kf.InTangent = slope;
+				curve.PrecomputeLut(256);
+				m_Dirty = true;
+				UpdateLiveSimulationSettings();
+			}
+		}
+		// 拖拽关键帧位置
+		else if (hasSelKf && m_IsDraggingInlineKf && ctx.Input().MouseDown[0])
+		{
+			float newT = screenXToTime(mousePos.x);
+			float newV = screenYToVal(mousePos.y);
+			auto& kf = curve.GetKeyframeMut(m_InlineCurveKfIdx);
+			kf.Time = newT;
+			kf.Value = newV;
+			curve.PrecomputeLut(256);
+			m_Dirty = true;
+			UpdateLiveSimulationSettings();
+		}
+		else if (!ctx.Input().MouseDown[0])
+		{
+			m_IsDraggingInlineInHandle = false;
+			m_IsDraggingInlineOutHandle = false;
+			m_IsDraggingInlineKf = false;
+		}
+
+		// 右键删除关键帧
+		if (inPlot && ctx.Input().MouseClicked[1] && hoveredKf >= 0 && curve.KeyframeCount() > 2)
+		{
+			PushUndoSnapshot();
+			curve.RemoveKeyframe(static_cast<size_t>(hoveredKf));
+			curve.AutoSmoothTangents();
+			curve.PrecomputeLut(256);
+			m_InlineCurveKfIdx = std::max(0, hoveredKf - 1);
+			m_Dirty = true;
+			UpdateLiveSimulationSettings();
+		}
+	}
+
+	float ParticleEditorPanel::GetModuleCardHeight(const VfxModule& mod, size_t modIdx) const
+	{
 		const float headerH = 26.0f;
-		float cardContentH = headerH + 6.0f;
+		float cardH = headerH + 8.0f; // 34.0f base (header + padding)
 
 		const std::string modKey = mod.Id + "_" + std::to_string(modIdx);
-		const bool isSourceExpanded = m_ModuleSourceExpanded[modKey];
-		const bool isCurveMod = (mod.Id == "mod.update.scale_over_life" || mod.Id == "mod.update.color_over_life" ||
-		                         mod.Id == "mod.update.rotation_over_life" || mod.Id == "mod.update.shockwave_expansion");
-
-		if (isSourceExpanded) cardContentH += 130.0f;
-		if (mod.Enabled && isCurveMod) cardContentH += 26.0f;
-		if (mod.Enabled && mod.Id == "mod.render.sprite")
+		auto it = m_ModuleSourceExpanded.find(modKey);
+		if (it != m_ModuleSourceExpanded.end() && it->second)
 		{
-			// 精灵渲染器专属卡片高度: 材质槽(26) + 贴图槽(26) + 常用栏(26) + 混合模式(24) + 面片朝向(24) + 自发光(24) + SubUV(24) + 边距
-			cardContentH += 152.0f;
-		}
-		else if (mod.Enabled)
-		{
-			cardContentH += mod.Parameters.size() * 26.0f;
+			cardH += 130.0f;
 		}
 
+		if (mod.Enabled)
+		{
+			if (mod.Id == "mod.render.sprite")
+			{
+				// 6 行专属控件: 材质, 贴图, 混合模式, 面片朝向, 自发光倍率, SubUV X/Y
+				cardH += 6 * 24.0f + 6.0f; // 150.0f
+			}
+			else
+			{
+				for (const auto& p : mod.Parameters)
+				{
+					if (p.Type == VfxParamType::Float && p.Mode == VfxParamMode::Curve)
+					{
+						cardH += 24.0f + 140.0f; // 164.0f (标头 24 + 曲线 136 + 4 间距)
+					}
+					else
+					{
+						cardH += 24.0f;
+					}
+				}
+			}
+		}
+
+		return cardH;
+	}
+
+	void ParticleEditorPanel::RenderModuleCard(Wui::WuiContext& ctx, VfxModule& mod, size_t modIdx, float cardX, float& curY, float cardW, const Wui::WuiTheme& theme, PanelHost& host)
+	{
+		const float cardContentH = GetModuleCardHeight(mod, modIdx);
 		const Wui::WuiRect cardRect { cardX, curY, cardW, cardContentH };
 		Wui::BarSurface(ctx, cardRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.95f }, theme.Border);
+
+		const float headerH = 26.0f;
+		const std::string modKey = mod.Id + "_" + std::to_string(modIdx);
+		const bool isSourceExpanded = m_ModuleSourceExpanded[modKey];
 
 		// 1. 头部标题行
 		float hx = cardRect.X + 6.0f;
@@ -4818,54 +5408,10 @@ void ParticleEditorPanel::NewAsset()
 				m_Dirty = true;
 				UpdateLiveSimulationSettings();
 			}
-			fieldY += 26.0f;
+			fieldY += 24.0f;
 		}
-
-		// 曲线展开与预设快捷操作栏 (适用于支持随寿命调制的模块)
-		if (mod.Enabled && isCurveMod)
-		{
-			const Wui::WuiRect cvBar { cardRect.X + 8.0f, fieldY, cardRect.W - 16.0f, 22.0f };
-			Wui::BarSurface(ctx, cvBar, Wui::WuiColor { 0.08f, 0.10f, 0.14f, 0.9f }, theme.Border);
-			Wui::Label(ctx, { cvBar.X + 6.0f, cvBar.Y + 3.0f }, "曲线调制:", theme.Accent, 9.5f);
-
-			float cbx = cvBar.X + 58.0f;
-			const struct CVShort { const char* id; const char* label; const char* type; } cvPresets[] = {
-				{ "p.lin", "线性", "Linear" },
-				{ "p.in", "淡入", "EaseIn" },
-				{ "p.out", "淡出", "EaseOut" },
-				{ "p.inout", "平滑", "EaseInOut" },
-				{ "p.bell", "钟形", "Bell" }
-			};
-			for (const auto& cp : cvPresets)
-			{
-				const Wui::WuiRect cBtnR { cbx, cvBar.Y + 2.0f, 32.0f, 18.0f };
-				if (Wui::Button(ctx, Wui::HashId((std::string("vfx.mcp_") + cp.id + "_" + std::to_string(modIdx)).c_str()), cBtnR, cp.label, theme))
-				{
-					PushUndoSnapshot();
-					if (mod.Id == "mod.update.scale_over_life")
-					{
-						if (std::string(cp.type) == "Linear") { mod.SetFloat("StartScale", 1.0f); mod.SetFloat("EndScale", 0.0f); }
-						else if (std::string(cp.type) == "EaseIn") { mod.SetFloat("StartScale", 0.0f); mod.SetFloat("EndScale", 1.2f); }
-						else if (std::string(cp.type) == "EaseOut") { mod.SetFloat("StartScale", 1.5f); mod.SetFloat("EndScale", 0.1f); }
-					}
-					m_Dirty = true;
-					UpdateLiveSimulationSettings();
-				}
-				cbx += 35.0f;
-			}
-
-			const Wui::WuiRect cvOpenBtn { cvBar.X + cvBar.W - 74.0f, cvBar.Y + 2.0f, 70.0f, 18.0f };
-			const bool isThisCurving = (m_TimelineCurvesExpanded && m_CurvingModuleIndex == static_cast<int>(modIdx));
-			if (Wui::Button(ctx, Wui::HashId((std::string("vfx.cv_open_") + std::to_string(modIdx)).c_str()), cvOpenBtn, isThisCurving ? "[收起曲线]" : "[曲线工作台]", theme))
-			{
-				m_CurvingModuleIndex = static_cast<int>(modIdx);
-				m_TimelineCurvesExpanded = !isThisCurving;
-			}
-			fieldY += 26.0f;
-		}
-
-		// 2. 参数调节列表 (带悬浮提示、通用调色板与下拉枚举)
-		if (mod.Enabled)
+		// 2. 参数调节列表 (带悬浮提示、通用调色板与下拉枚举，排除 SpriteRenderer 避免重复渲染)
+		else if (mod.Enabled)
 		{
 			for (size_t pIdx = 0; pIdx < mod.Parameters.size(); ++pIdx)
 			{
@@ -4928,6 +5474,7 @@ void ParticleEditorPanel::NewAsset()
 						m_Dirty = true;
 						UpdateLiveSimulationSettings();
 					}
+					fieldY += 24.0f;
 				}
 				// 【需求 2: Color 变量使用通用调色板 ColorField】
 				else if (param.Type == VfxParamType::Vec4 && param.Name.find("Color") != std::string::npos)
@@ -4938,18 +5485,56 @@ void ParticleEditorPanel::NewAsset()
 						m_Dirty = true;
 						UpdateLiveSimulationSettings();
 					}
+					fieldY += 24.0f;
 				}
 				else if (param.Type == VfxParamType::Float)
 				{
-					Wui::Tooltip(ctx, valRect, param.Tooltip.empty() ? param.Name : param.Tooltip);
-					if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.val_") + std::to_string(modIdx * 100 + pIdx)).c_str()), valRect, param.FloatVal, param.Step, param.Min, param.Max, theme))
+					// 下拉式求值模式选择器 (Dropdown Mode Combo: 紧凑不拥挤)
+					std::vector<std::string> modeOptions = { "常量", "随机", "曲线~" };
+					int curMode = static_cast<int>(param.Mode);
+					const Wui::WuiRect modeComboRect { cardRect.X + cardRect.W - 96.0f, fieldY, 66.0f, 20.0f };
+					Wui::Tooltip(ctx, modeComboRect, "选择参数求值模式 (常量数值 / 随机区间 / 随寿命曲线)");
+					if (Wui::Combo(ctx, Wui::HashId((std::string("vfx.p.mcombo_") + std::to_string(modIdx * 100 + pIdx)).c_str()), modeComboRect, "", modeOptions, curMode, theme))
 					{
-						if (param.IsExposed)
-						{
-							m_Asset.UserParamsFloat[param.ExposedName.empty() ? param.Name : param.ExposedName] = param.FloatVal;
-						}
+						PushUndoSnapshot();
+						param.Mode = static_cast<VfxParamMode>(curMode);
+						if (param.Mode == VfxParamMode::Curve) param.EnsureCurve();
 						m_Dirty = true;
 						UpdateLiveSimulationSettings();
+					}
+
+					// 输入控件区域
+					const float valW = cardRect.W - 208.0f;
+					const Wui::WuiRect valRect { cardRect.X + 110.0f, fieldY, valW, 20.0f };
+
+					if (param.Mode == VfxParamMode::Constant)
+					{
+						Wui::Tooltip(ctx, valRect, param.Tooltip.empty() ? param.Name : param.Tooltip);
+						if (Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.val_") + std::to_string(modIdx * 100 + pIdx)).c_str()), valRect, param.FloatVal, param.Step, param.Min, param.Max, theme))
+						{
+							if (param.IsExposed)
+							{
+								m_Asset.UserParamsFloat[param.ExposedName.empty() ? param.Name : param.ExposedName] = param.FloatVal;
+							}
+							m_Dirty = true;
+							UpdateLiveSimulationSettings();
+						}
+						fieldY += 24.0f;
+					}
+					else if (param.Mode == VfxParamMode::RandomRange)
+					{
+						const float halfValW = (valW - 6.0f) * 0.5f;
+						Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.rmin_") + std::to_string(modIdx * 100 + pIdx)).c_str()), { valRect.X, valRect.Y, halfValW, valRect.H }, param.RandomMin, param.Step, param.Min, param.Max, theme);
+						Wui::DragFloat(ctx, Wui::HashId((std::string("vfx.mod.rmax_") + std::to_string(modIdx * 100 + pIdx)).c_str()), { valRect.X + halfValW + 6.0f, valRect.Y, halfValW, valRect.H }, param.RandomMax, param.Step, param.Min, param.Max, theme);
+						fieldY += 24.0f;
+					}
+					else if (param.Mode == VfxParamMode::Curve)
+					{
+						fieldY += 24.0f;
+						const float curveBoxH = 136.0f;
+						const Wui::WuiRect inlineCurveRect { cardRect.X + 8.0f, fieldY, cardRect.W - 16.0f, curveBoxH };
+						RenderEmbeddedCurveEditor(ctx, param, modIdx, pIdx, inlineCurveRect, theme);
+						fieldY += curveBoxH + 4.0f;
 					}
 				}
 				else if (param.Type == VfxParamType::Vec3)
@@ -4970,9 +5555,9 @@ void ParticleEditorPanel::NewAsset()
 						m_Dirty = true;
 						UpdateLiveSimulationSettings();
 					}
+					fieldY += 24.0f;
 				}
 
-				fieldY += rowH + 2.0f;
 			}
 		}
 
@@ -4997,7 +5582,7 @@ void ParticleEditorPanel::NewAsset()
 			fieldY += 126.0f;
 		}
 
-		curY += cardContentH + 6.0f;
+		curY += cardContentH + 8.0f;
 	}
 
 	void ParticleEditorPanel::RenderSlangShaderView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme, PanelHost& host)

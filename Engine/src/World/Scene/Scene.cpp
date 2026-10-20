@@ -2314,7 +2314,10 @@ namespace World
 				emComp.EmitterType = em.EmitterType;
 				emComp.RenderMode = em.FacingMode;
 				emComp.BlendMode = em.Material.BlendMode;
-				emComp.IsPlaying = 1;
+				emComp.IsPlaying = (vfx.PlaybackState == VfxPlaybackState::Playing) ? 1 : 0;
+				emComp.Looping = vfx.Looping && asset->Looping;
+				emComp.EmitterDuration = em.EmitterDuration;
+				emComp.Duration = asset->Duration;
 
 				// 【模块化动力学驱动】真正读取 em.Modules 堆栈并驱动全局粒子池！
 				float customDamping = 0.0f;
@@ -2569,6 +2572,18 @@ namespace World
 				else if (em.EmissionMode == VfxEmissionMode::Burst && pool.ActiveCount() == 0)
 				{
 					pool.Emit(em.SingleCount > 0 ? em.SingleCount : 20, emComp, pos, rot);
+				}
+
+				const float curPoolTime = pool.GetSimElapsedTime();
+				const float sysDur = (asset->Duration > 0.0f) ? asset->Duration : 5.0f;
+				const float curCycleTime = (emComp.Looping && sysDur > 0.0f) ? std::fmod(curPoolTime, sysDur) : curPoolTime;
+				if (em.EmitterDuration > 0.0f && curCycleTime > em.EmitterDuration)
+				{
+					emComp.EmissionRate = 0.0f;
+				}
+				if (!emComp.Looping && sysDur > 0.0f && curPoolTime > sysDur)
+				{
+					emComp.EmissionRate = 0.0f;
 				}
 
 				pool.Update(dt * vfx.PlaybackSpeed, emComp, pos, rot);

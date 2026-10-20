@@ -246,6 +246,20 @@ namespace World
 		float prevTime = m_SimElapsedTime;
 		m_SimElapsedTime += dt;
 
+		const float sysDuration = (comp.Duration > 0.0f) ? comp.Duration : 0.0f;
+		float cycleTime = m_SimElapsedTime;
+		float prevCycleTime = prevTime;
+
+		if (comp.Looping && sysDuration > 0.0f)
+		{
+			cycleTime = std::fmod(m_SimElapsedTime, sysDuration);
+			prevCycleTime = std::fmod(prevTime, sysDuration);
+			if (prevCycleTime > cycleTime)
+			{
+				m_EmissionAccumulator = 0.0f;
+			}
+		}
+
 		if (comp.IsPlaying != 0)
 		{
 			for (const auto& burst : m_Bursts)
@@ -253,10 +267,15 @@ namespace World
 				if (burst.Count > 0)
 				{
 					bool fire = false;
-					if (burst.Time <= 0.0f && prevTime <= 0.0f)
+					if (burst.Time <= 0.0f && (prevTime <= 0.0f || (comp.Looping && prevCycleTime > cycleTime)))
 						fire = true;
-					else if (burst.Time > 0.0f && prevTime < burst.Time && m_SimElapsedTime >= burst.Time)
-						fire = true;
+					else if (burst.Time > 0.0f)
+					{
+						if (prevCycleTime < burst.Time && cycleTime >= burst.Time)
+							fire = true;
+						else if (prevCycleTime > cycleTime && (burst.Time <= cycleTime || prevCycleTime < burst.Time))
+							fire = true;
+					}
 					if (fire)
 					{
 						Emit(burst.Count, comp, emitterPos, emitterRot);
@@ -264,7 +283,18 @@ namespace World
 				}
 			}
 
-			if (comp.EmissionRate > 0.0f)
+			bool allowContinuousEmission = true;
+			float activeTime = (comp.Looping && sysDuration > 0.0f) ? cycleTime : m_SimElapsedTime;
+			if (comp.EmitterDuration > 0.0f && activeTime > comp.EmitterDuration)
+			{
+				allowContinuousEmission = false;
+			}
+			if (!comp.Looping && sysDuration > 0.0f && m_SimElapsedTime > sysDuration)
+			{
+				allowContinuousEmission = false;
+			}
+
+			if (allowContinuousEmission && comp.EmissionRate > 0.0f)
 			{
 				m_EmissionAccumulator += comp.EmissionRate * dt;
 				size_t toEmit = static_cast<size_t>(m_EmissionAccumulator);

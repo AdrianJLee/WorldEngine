@@ -19,7 +19,20 @@ namespace World
 		// 同步当前发射器参数到标准模块
 		for (auto& mod : Modules)
 		{
-			if (mod.Id == "mod.update.gravity")
+			if (mod.Id == "mod.emitter.spawn_rate")
+			{
+				mod.SetFloat("SpawnRate", EmissionRate);
+				mod.SetFloat("MaxParticles", static_cast<float>(MaxParticles));
+			}
+			else if (mod.Id == "mod.spawn.init_particle")
+			{
+				mod.SetFloat("Lifetime", Lifetime);
+				mod.SetFloat("SizeStart", SizeStart);
+				mod.SetFloat("SizeEnd", SizeEnd);
+				mod.SetVec4("ColorStart", ColorStart);
+				mod.SetVec4("ColorEnd", ColorEnd);
+			}
+			else if (mod.Id == "mod.update.gravity")
 			{
 				mod.SetVec4("Gravity", glm::vec4(Gravity, 0.0f));
 			}
@@ -125,6 +138,8 @@ namespace World
 		out << YAML::Key << "MaxParticles" << YAML::Value << em.MaxParticles;
 		out << YAML::Key << "Lifetime" << YAML::Value << em.Lifetime;
 		out << YAML::Key << "EmissionRate" << YAML::Value << em.EmissionRate;
+		out << YAML::Key << "EmitterDuration" << YAML::Value << em.EmitterDuration;
+		out << YAML::Key << "EmitterLooping" << YAML::Value << em.EmitterLooping;
 		out << YAML::Key << "EmissionMode" << YAML::Value << static_cast<int>(em.EmissionMode);
 		out << YAML::Key << "SingleCount" << YAML::Value << em.SingleCount;
 		out << YAML::Key << "Enabled" << YAML::Value << em.Enabled;
@@ -226,6 +241,13 @@ namespace World
 						out << YAML::BeginMap;
 						out << YAML::Key << "Name" << YAML::Value << p.Name;
 						out << YAML::Key << "Type" << YAML::Value << static_cast<int>(p.Type);
+						out << YAML::Key << "Mode" << YAML::Value << static_cast<int>(p.Mode);
+						out << YAML::Key << "RandomMin" << YAML::Value << p.RandomMin;
+						out << YAML::Key << "RandomMax" << YAML::Value << p.RandomMax;
+						if (p.Mode == VfxParamMode::Curve && p.Curve.KeyframeCount() > 0)
+						{
+							out << YAML::Key << "CurveYaml" << YAML::Value << p.Curve.SerializeToYaml();
+						}
 						out << YAML::Key << "FloatVal" << YAML::Value << p.FloatVal;
 						out << YAML::Key << "VecVal" << YAML::Value << YAML::Flow << YAML::BeginSeq << p.VecVal.x << p.VecVal.y << p.VecVal.z << p.VecVal.w << YAML::EndSeq;
 						out << YAML::Key << "IntVal" << YAML::Value << p.IntVal;
@@ -253,6 +275,8 @@ out << YAML::EndMap;
 		if (node["MaxParticles"]) em.MaxParticles = node["MaxParticles"].as<uint32_t>();
 		if (node["Lifetime"]) em.Lifetime = node["Lifetime"].as<float>();
 		if (node["EmissionRate"]) em.EmissionRate = node["EmissionRate"].as<float>();
+		if (node["EmitterDuration"]) em.EmitterDuration = node["EmitterDuration"].as<float>();
+		if (node["EmitterLooping"]) em.EmitterLooping = node["EmitterLooping"].as<bool>();
 		if (node["EmissionMode"]) em.EmissionMode = static_cast<VfxEmissionMode>(node["EmissionMode"].as<int>());
 		if (node["SingleCount"]) em.SingleCount = node["SingleCount"].as<uint32_t>();
 		if (node["Enabled"]) em.Enabled = node["Enabled"].as<bool>();
@@ -409,6 +433,11 @@ out << YAML::EndMap;
 								VfxModuleParam p;
 								if (pNode["Name"]) p.Name = pNode["Name"].as<std::string>();
 								if (pNode["Type"]) p.Type = static_cast<VfxParamType>(pNode["Type"].as<int>());
+								if (pNode["Mode"]) p.Mode = static_cast<VfxParamMode>(pNode["Mode"].as<int>());
+								if (pNode["RandomMin"]) p.RandomMin = pNode["RandomMin"].as<float>();
+								if (pNode["RandomMax"]) p.RandomMax = pNode["RandomMax"].as<float>();
+								if (pNode["CurveYaml"]) p.Curve.DeserializeFromYaml(pNode["CurveYaml"].as<std::string>());
+								p.EnsureCurve();
 								if (pNode["FloatVal"]) p.FloatVal = pNode["FloatVal"].as<float>();
 								if (pNode["VecVal"] && pNode["VecVal"].IsSequence() && pNode["VecVal"].size() >= 4)
 								{
@@ -439,6 +468,28 @@ out << YAML::EndMap;
 		if (!node["Modules"] && em.Modules.empty())
 		{
 			em.EnsureDefaultModules();
+		}
+
+		// 若显式包含 Modules 序列，由模块堆栈的参数向发射器底层物理缓存双向同步
+		if (node["Modules"])
+		{
+			if (const auto* rateMod = em.FindModule("mod.emitter.spawn_rate"))
+			{
+				em.EmissionRate = rateMod->GetFloat("SpawnRate", em.EmissionRate);
+				em.MaxParticles = static_cast<uint32_t>(rateMod->GetFloat("MaxParticles", static_cast<float>(em.MaxParticles)));
+			}
+			else if (const auto* burstMod = em.FindModule("mod.emitter.spawn_burst"))
+			{
+				em.MaxParticles = static_cast<uint32_t>(burstMod->GetFloat("MaxParticles", static_cast<float>(em.MaxParticles)));
+			}
+			if (const auto* initMod = em.FindModule("mod.spawn.init_particle"))
+			{
+				em.Lifetime = initMod->GetFloat("Lifetime", em.Lifetime);
+				em.SizeStart = initMod->GetFloat("SizeStart", em.SizeStart);
+				em.SizeEnd = initMod->GetFloat("SizeEnd", em.SizeEnd);
+				em.ColorStart = initMod->GetVec4("ColorStart", em.ColorStart);
+				em.ColorEnd = initMod->GetVec4("ColorEnd", em.ColorEnd);
+			}
 		}
 	}
 

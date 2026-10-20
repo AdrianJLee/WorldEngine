@@ -41,7 +41,9 @@ namespace World
 	{
 		Size = 0,
 		Alpha = 1,
-		Speed = 2
+		Speed = 2,
+		Rotation = 3,
+		Shockwave = 4
 	};
 
 	enum class ParticleGizmoHandleId : int
@@ -143,6 +145,7 @@ namespace World
 
 		void RenderSlangShaderView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme, PanelHost& host);
 		void RenderDataView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme, PanelHost& host);
+		float GetModuleCardHeight(const VfxModule& mod, size_t modIdx) const;
 		void RenderModuleCard(Wui::WuiContext& ctx, VfxModule& mod, size_t modIdx, float cardX, float& curY, float cardW, const Wui::WuiTheme& theme, PanelHost& host);
 
 		// 发射器大纲管理核心操作 (Outliner Operations)
@@ -185,6 +188,7 @@ namespace World
 		// 视口定向万向节与曲线工作台辅助渲染
 		void RenderOrientationGimbal(Wui::WuiContext& ctx, const Wui::WuiRect& vpRect, const glm::mat4& viewMat, const Wui::WuiTheme& theme);
 		void RenderInteractiveCurveWorkbench(Wui::WuiContext& ctx, const Wui::WuiRect& canvasRect, const Wui::WuiTheme& theme);
+		void RenderEmbeddedCurveEditor(Wui::WuiContext& ctx, VfxModuleParam& param, size_t modIdx, size_t pIdx, const Wui::WuiRect& areaRect, const Wui::WuiTheme& theme);
 
 		static std::string s_PendingOpenPath;
 		std::string m_LoadedPath;
@@ -284,6 +288,12 @@ namespace World
 		CurveTarget m_ActiveCurveTarget = CurveTarget::Size;
 		int m_SelectedKeyframeIndex = 0;
 		bool m_IsDraggingKeyframe = false;
+		int m_InlineCurveModIdx = -1;
+		int m_InlineCurveParamIdx = -1;
+		int m_InlineCurveKfIdx = -1;
+		bool m_IsDraggingInlineKf = false;
+		bool m_IsDraggingInlineInHandle = false;
+		bool m_IsDraggingInlineOutHandle = false;
 		bool m_IsDraggingInHandle = false;
 		bool m_IsDraggingOutHandle = false;
 		glm::vec2 m_DragStartMouse { 0.0f };
@@ -315,6 +325,8 @@ namespace World
 		std::vector<CubicBezierCurve> m_EmitterSizeCurves;
 		std::vector<CubicBezierCurve> m_EmitterAlphaCurves;
 		std::vector<CubicBezierCurve> m_EmitterSpeedCurves;
+		std::vector<CubicBezierCurve> m_EmitterRotationCurves;
+		std::vector<CubicBezierCurve> m_EmitterShockwaveCurves;
 		std::vector<std::string> m_EmitterCurveType;
 		std::vector<EmitterExtendedState> m_EmitterExtended;
 
@@ -334,6 +346,8 @@ namespace World
 		bool m_CardSizeRotationExpanded = true;
 		bool m_CardColorAlphaExpanded = true;
 		bool m_CardRenderersExpanded = true;
+		bool m_StageExpanded[4] = { true, true, true, true };
+		int m_AddModuleStageTarget = -1;
 		bool m_CardCollisionExpanded = true;
 		bool m_AddModulePopupOpen = false;
 

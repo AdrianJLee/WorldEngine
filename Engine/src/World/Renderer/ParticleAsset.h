@@ -33,6 +33,9 @@ namespace World
 		bool LockToXY = false;
 		std::string MeshPath;
 
+		float EmitterDuration = 0.0f; // 发射器激活持续时间 (秒，0.0f 表示跟随系统全局周期)
+		bool EmitterLooping = true;   // 发射器自身循环模式
+
 		ParticleMaterialSettings Material;
 		ParticleCollisionSettings Collision;
 
