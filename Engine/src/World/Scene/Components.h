@@ -2337,4 +2337,50 @@ namespace World
 	static_assert(offsetof(NavMeshObstacleComponent, Extents) == 0, "Extents offset mismatch");
 	static_assert(offsetof(NavMeshObstacleComponent, CarveNavMesh) == 12, "CarveNavMesh offset mismatch");
 	static_assert(offsetof(NavMeshObstacleComponent, IsMoving) == 13, "IsMoving offset mismatch");
+
+	struct MeshLODComponent
+	{
+		AssetRef LOD1Mesh;                                // 16B (offset 0)
+		AssetRef LOD2Mesh;                                // 16B (offset 16)
+		float LOD1Distance { 30.0f };                     // 4B  (offset 32)
+		float LOD2Distance { 80.0f };                     // 4B  (offset 36)
+		float CullDistance { 180.0f };                    // 4B  (offset 40)
+		float Hysteresis { 2.0f };                        // 4B  (offset 44)
+		uint8_t CurrentLOD { 0 };                         // 1B  (offset 48)
+		uint8_t EnableCrossFade { 1 };                    // 1B  (offset 49)
+		uint8_t _Padding[14] { 0 };                       // 14B (offset 50)
+
+		MeshLODComponent() = default;
+
+		WE_SCHEMA_BODY(World, MeshLODComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/Mesh"),
+				Doc("Multi-level of detail (LOD) mesh switching with distance culling and hysteresis."))
+			WE_FIELD(LOD1Mesh, Asset, Of("Mesh"),
+				Doc("Intermediate level of detail mesh asset (LOD 1)."));
+			WE_FIELD(LOD2Mesh, Asset, Of("Mesh"),
+				Doc("Distant simplified level of detail mesh asset (LOD 2)."));
+			WE_FIELD(LOD1Distance, Float, Range(1.0f, 1000.0f), Default(30.0f),
+				Doc("Distance in meters to transition from LOD0 to LOD1."));
+			WE_FIELD(LOD2Distance, Float, Range(5.0f, 2000.0f), Default(80.0f),
+				Doc("Distance in meters to transition from LOD1 to LOD2."));
+			WE_FIELD(CullDistance, Float, Range(10.0f, 5000.0f), Default(180.0f),
+				Doc("Maximum distance beyond which all LOD meshes are culled."));
+			WE_FIELD(Hysteresis, Float, Range(0.0f, 20.0f), Default(2.0f),
+				Doc("Distance margin buffer to prevent rapid LOD toggling."));
+			WE_FIELD(CurrentLOD, UInt8, Default(0),
+				Doc("Current active LOD level index (0, 1, or 2)."));
+			WE_FIELD(EnableCrossFade, UInt8, Default(1),
+				Doc("Whether smooth cross-fade transition is enabled."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(MeshLODComponent) == 64, "MeshLODComponent must be exactly 64 bytes");
+	static_assert(std::is_trivially_copyable_v<MeshLODComponent>, "MeshLODComponent must be trivially copyable");
+	static_assert(offsetof(MeshLODComponent, LOD1Mesh) == 0, "LOD1Mesh offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD2Mesh) == 16, "LOD2Mesh offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD1Distance) == 32, "LOD1Distance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD2Distance) == 36, "LOD2Distance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, CullDistance) == 40, "CullDistance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, Hysteresis) == 44, "Hysteresis offset mismatch");
+	static_assert(offsetof(MeshLODComponent, CurrentLOD) == 48, "CurrentLOD offset mismatch");
+	static_assert(offsetof(MeshLODComponent, EnableCrossFade) == 49, "EnableCrossFade offset mismatch");
 }

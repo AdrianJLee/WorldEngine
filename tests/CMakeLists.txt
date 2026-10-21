@@ -2732,3 +2732,23 @@ set_tests_properties(World.NavMesh PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldMeshLODTests World/MeshLODTests.cpp)
+target_link_libraries(WorldMeshLODTests PRIVATE World)
+target_compile_features(WorldMeshLODTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldMeshLODTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldMeshLODTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldMeshLODTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.MeshLOD COMMAND WorldMeshLODTests)
+set_tests_properties(World.MeshLOD PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
