@@ -1,5 +1,5 @@
 // ==========================================
-// WorldEngine Commercial-Grade Landscape PBR Shader
+// WorldEngine Next-Gen Commercial Landscape PBR Shader
 // ==========================================
 //  - Set 0: Global Camera / Light / Shadow (matches Renderer::GetGlobalDescriptorSetLayout)
 //  - Set 1: Per-Terrain Object Uniforms (binding 1: TerrainUniforms 160B std140)
@@ -157,51 +157,60 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     if (u_SlopeParams.w > 0.5f && input.v_Hole > 0.5f)
         discard;
 
-    // 2. 采样 4 层材质 Albedo 与 Normal
+    // 2. 世界坐标连续微观扰动 (消除网格顶点插值造成的像素方格与色块边缘)
+    float2 wp = input.v_WorldPosition.xz;
+    float organicWarp1 = sin(wp.x * 0.35f + wp.y * 0.22f) * cos(wp.y * 0.31f - wp.x * 0.18f);
+    float organicWarp2 = cos(wp.x * 0.85f - wp.y * 0.65f) * sin(wp.y * 0.75f + wp.x * 0.45f);
+    float organicJitter = (organicWarp1 * 0.6f + organicWarp2 * 0.4f) * 0.08f;
+
+    // 3. 采样 4 层 PBR 材质与双频抗平铺
     float2 uv0 = input.v_TexCoord * u_LayerTiling01.xy;
     float2 uv1 = input.v_TexCoord * u_LayerTiling01.zw;
     float2 uv2 = input.v_TexCoord * u_LayerTiling23.xy;
     float2 uv3 = input.v_TexCoord * u_LayerTiling23.zw;
 
+    // 草地双频抗平铺 (Dual-Frequency Anti-Tiling 消除瓷砖重复感)
     float4 col0 = u_Layer0Texture.Sample(uv0);
-    float4 col1 = u_Layer1Texture.Sample(uv1);
-    float4 col2 = u_Layer2Texture.Sample(uv2);
-    float4 col3 = u_Layer3Texture.Sample(uv3);
+    float4 macro0 = u_Layer0Texture.Sample(uv0 * 0.23f + float2(0.41f, 0.63f));
+    float3 c0 = lerp(pow(saturate(col0.rgb), 2.2f), pow(saturate(macro0.rgb), 2.2f), 0.30f);
 
-    // 远距离双频抗平铺采样 (草地与泥土)
-    float4 macro0 = u_Layer0Texture.Sample(uv0 * 0.21f + float2(0.37f, 0.59f));
-    float3 c0 = lerp(pow(saturate(col0.rgb), 2.2f), pow(saturate(macro0.rgb), 2.2f), 0.25f);
-    float3 c1 = pow(saturate(col1.rgb), 2.2f);
-    float3 c2 = pow(saturate(col2.rgb), 2.2f);
-    float3 c3 = pow(saturate(col3.rgb), 2.2f);
+    float3 c1 = pow(saturate(u_Layer1Texture.Sample(uv1).rgb), 2.2f);
+    float3 c2 = pow(saturate(u_Layer2Texture.Sample(uv2).rgb), 2.2f);
+
+    // 沙地双频抗平铺 (自然流沙微波)
+    float4 col3 = u_Layer3Texture.Sample(uv3);
+    float4 macro3 = u_Layer3Texture.Sample(uv3 * 0.19f + float2(0.28f, 0.74f));
+    float3 c3 = lerp(pow(saturate(col3.rgb), 2.2f), pow(saturate(macro3.rgb), 2.2f), 0.25f);
 
     float3 n0 = UnpackNormal(u_Layer0Normal.Sample(uv0));
     float3 n1 = UnpackNormal(u_Layer1Normal.Sample(uv1));
     float3 n2 = UnpackNormal(u_Layer2Normal.Sample(uv2));
     float3 n3 = UnpackNormal(u_Layer3Normal.Sample(uv3));
 
-    // 3. 基于高度图的真实 Splat 混合 (Height-Based Blending)
+    // 4. 连续柔和高度融合 (Smooth Height Blend 消除生硬切断)
     float4 rawWeights = saturate(input.v_SplatWeights);
-    float totalRaw = rawWeights.x + rawWeights.y + rawWeights.z + rawWeights.w;
-    if (totalRaw > 0.0001f)
-        rawWeights /= totalRaw;
+    // 叠加微观有机扰动
+    rawWeights.x = saturate(rawWeights.x + organicJitter);
+    rawWeights.y = saturate(rawWeights.y - organicJitter * 0.5f);
+    float sumRaw = rawWeights.x + rawWeights.y + rawWeights.z + rawWeights.w;
+    if (sumRaw > 0.0001f)
+        rawWeights /= sumRaw;
     else
         rawWeights = float4(1.0f, 0.0f, 0.0f, 0.0f);
 
-    // 从地表材质的亮度与颗粒提取局部微观高度
+    // 提取微观高度
     float h0 = dot(c0, float3(0.299f, 0.587f, 0.114f));
     float h1 = dot(c1, float3(0.299f, 0.587f, 0.114f));
     float h2 = dot(c2, float3(0.299f, 0.587f, 0.114f));
     float h3 = dot(c3, float3(0.299f, 0.587f, 0.114f));
 
-    float4 heightScore = rawWeights + float4(h0, h1, h2, h3) * 0.35f;
-    float maxHeight = max(max(heightScore.x, heightScore.y), max(heightScore.z, heightScore.w));
-    constexpr float kTransitionDepth = 0.20f;
-    float4 blendWeights = max(float4(0.0f), heightScore - (maxHeight - kTransitionDepth));
-    float sumBlend = blendWeights.x + blendWeights.y + blendWeights.z + blendWeights.w;
-    float4 weights = (sumBlend > 1e-4f) ? (blendWeights / sumBlend) : rawWeights;
+    // 采用平滑幂次加权 (Soft Height Blending 代替生硬的 Hard Threshold，彻底消除色块方格感)
+    float4 heightBlend = rawWeights * (float4(h0, h1, h2, h3) * 0.40f + 0.60f);
+    heightBlend = pow(heightBlend, 2.5f);
+    float sumBlend = heightBlend.x + heightBlend.y + heightBlend.z + heightBlend.w;
+    float4 weights = (sumBlend > 0.0001f) ? (heightBlend / sumBlend) : rawWeights;
 
-    // 4. 陡峭山崖三平面无拉伸投影 (Triplanar Cliff Mapping)
+    // 5. 陡峭悬崖三平面无拉伸投影 (Triplanar Cliff Mapping)
     float3 geomNormal = normalize(input.v_Normal);
     float upDot = saturate(dot(geomNormal, float3(0.0f, 1.0f, 0.0f)));
     float slopeThreshold = u_SlopeParams.x; // 默认 0.707f (45度)
@@ -210,13 +219,12 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
 
     if (rockFactor > 0.01f)
     {
-        // 三平面权重 (锐化)
         float3 triWeight = pow(abs(geomNormal), 5.0f);
         triWeight /= max(triWeight.x + triWeight.y + triWeight.z, 1e-4f);
 
-        float2 uvX = input.v_WorldPosition.zy * 0.08f;
-        float2 uvY = input.v_WorldPosition.xz * 0.08f;
-        float2 uvZ = input.v_WorldPosition.xy * 0.08f;
+        float2 uvX = input.v_WorldPosition.zy * 0.07f;
+        float2 uvY = input.v_WorldPosition.xz * 0.07f;
+        float2 uvZ = input.v_WorldPosition.xy * 0.07f;
 
         float3 rockColX = pow(saturate(u_Layer2Texture.Sample(uvX).rgb), 2.2f);
         float3 rockColY = pow(saturate(u_Layer2Texture.Sample(uvY).rgb), 2.2f);
@@ -241,17 +249,17 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
             weights /= finalSum;
     }
 
-    // 5. 混合最终地表 Albedo、切线空间法线与物理粗糙度
+    // 6. 最终地表 Albedo、法线解包与真实粗糙度
     float3 albedo = c0 * weights.x + c1 * weights.y + c2 * weights.z + c3 * weights.w;
 
-    // 宏观色彩空间低频调色 (Macro Color Modulation)
-    float macroLuma = 1.0f + (sin(input.v_WorldPosition.x * 0.015f) * cos(input.v_WorldPosition.z * 0.015f)) * 0.10f;
+    // 宏观大地色调微扰 (Macro Color Variation 消除远山死板单调)
+    float macroLuma = 1.0f + (sin(input.v_WorldPosition.x * 0.012f) * cos(input.v_WorldPosition.z * 0.012f)) * 0.08f;
     albedo *= macroLuma;
 
     float roughness = dot(u_LayerRoughnessMetallic, weights);
     float metallic = 0.0f;
 
-    // 构建规则网格几何切线空间 (TBN)
+    // 规则网格几何切线空间 (TBN)
     float3 tangent = normalize(float3(1.0f, 0.0f, 0.0f) - geomNormal * geomNormal.x);
     if (dot(tangent, tangent) < 1e-4f)
         tangent = float3(1.0f, 0.0f, 0.0f);
@@ -261,12 +269,12 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     float3 blendedTangentNormal = normalize(n0 * weights.x + n1 * weights.y + n2 * weights.z + n3 * weights.w);
     float3 worldNormal = normalize(mul(blendedTangentNormal, TBN));
 
-    // 6. 物理视线与全动态 PBR 光照
+    // 7. 物理视线与全动态 PBR 光照
     float3 viewDirection = normalize(u_CameraPosition.xyz - input.v_WorldPosition);
     if (dot(viewDirection, viewDirection) < 1e-4f)
         viewDirection = float3(0.0f, 1.0f, 0.0f);
 
-    // 天空半球环境光 (天顶天光 + 地面反光)
+    // 次世代半球天空天光 (天顶蔚蓝柔光 + 地表散射反光)
     float3 skyLight = u_Ambient.rgb * (worldNormal.y * 0.35f + 0.65f) * u_Ambient.a;
     float3 litColor = albedo * skyLight;
 

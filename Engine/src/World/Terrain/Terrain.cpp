@@ -1037,37 +1037,38 @@ namespace World
 		if (m_Width < 2 || m_Height < 2)
 			return;
 
-		m_Layers[0].Name = "Grass (草地)";
+		m_Layers[0].Name = "Alpine Grass (高山草甸)";
 		m_Layers[0].AlbedoTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/grass_albedo.png"), AssetId{} };
 		m_Layers[0].NormalTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/grass_normal.png"), AssetId{} };
 		m_Layers[0].Roughness = 0.85f;
 		m_Layers[0].Metallic = 0.0f;
-		m_Layers[0].Tiling = glm::vec2(12.0f, 12.0f);
+		m_Layers[0].Tiling = glm::vec2(16.0f, 16.0f);
 
-		m_Layers[1].Name = "Dirt (泥土)";
+		m_Layers[1].Name = "Forest Dirt (林地黑土)";
 		m_Layers[1].AlbedoTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/dirt_albedo.png"), AssetId{} };
 		m_Layers[1].NormalTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/dirt_normal.png"), AssetId{} };
 		m_Layers[1].Roughness = 0.90f;
 		m_Layers[1].Metallic = 0.0f;
-		m_Layers[1].Tiling = glm::vec2(10.0f, 10.0f);
+		m_Layers[1].Tiling = glm::vec2(14.0f, 14.0f);
 
-		m_Layers[2].Name = "Rock (岩石)";
+		m_Layers[2].Name = "Mountain Rock (花岗岩壁)";
 		m_Layers[2].AlbedoTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/rock_albedo.png"), AssetId{} };
 		m_Layers[2].NormalTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/rock_normal.png"), AssetId{} };
 		m_Layers[2].Roughness = 0.65f;
 		m_Layers[2].Metallic = 0.0f;
-		m_Layers[2].Tiling = glm::vec2(8.0f, 8.0f);
+		m_Layers[2].Tiling = glm::vec2(10.0f, 10.0f);
 
-		m_Layers[3].Name = "Sand (沙地)";
+		m_Layers[3].Name = "Riverbed Sand (河滩细沙)";
 		m_Layers[3].AlbedoTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/sand_albedo.png"), AssetId{} };
 		m_Layers[3].NormalTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/sand_normal.png"), AssetId{} };
-		m_Layers[3].Roughness = 0.95f;
+		m_Layers[3].Roughness = 0.92f;
 		m_Layers[3].Metallic = 0.0f;
-		m_Layers[3].Tiling = glm::vec2(14.0f, 14.0f);
+		m_Layers[3].Tiling = glm::vec2(18.0f, 18.0f);
 
 		const float invW = 1.0f / static_cast<float>(m_Width);
 		const float invH = 1.0f / static_cast<float>(m_Height);
 
+		// 1. 雄浑连绵的次世代自然山系高程生成 (消除生硬阶梯波与尖刺)
 		for (uint32_t z = 0; z < m_Height; ++z)
 		{
 			for (uint32_t x = 0; x < m_Width; ++x)
@@ -1075,38 +1076,65 @@ namespace World
 				float nx = static_cast<float>(x) * invW;
 				float nz = static_cast<float>(z) * invH;
 
-				// 八度 1: 宏观大陆架 (低频大起伏)
-				float continent = (SmoothNoise(nx * 2.5f, nz * 2.5f, seed) - 0.5f) * 16.0f;
+				// 宏观主山体与深谷架构 (低频大尺度)
+				float macroContinent = (SmoothNoise(nx * 1.8f, nz * 1.8f, seed) - 0.5f) * 22.0f;
 
-				// 八度 2: 脊线山脉 (Ridged Multifractal 产生如刀劈斧砍的山脊脊线)
-				float rNoise = SmoothNoise(nx * 5.0f, nz * 5.0f, seed + 101u);
-				float ridge = 1.0f - std::abs(rNoise * 2.0f - 1.0f);
-				ridge = ridge * ridge * 28.0f;
+				// 主山脉脊线 (平滑连续多重分形，产生雄奇陡峭的山脊主峰)
+				float r1 = SmoothNoise(nx * 3.5f + 0.3f, nz * 3.5f + 0.5f, seed + 101u);
+				float ridge1 = 1.0f - std::abs(r1 * 2.0f - 1.0f);
+				ridge1 = ridge1 * ridge1 * (SmoothNoise(nx * 1.2f, nz * 1.2f, seed + 55u) * 26.0f);
 
-				// 八度 3: 山麓丘陵褶皱
-				float hills = (SmoothNoise(nx * 11.0f, nz * 11.0f, seed + 202u) - 0.5f) * 7.5f;
+				// 次级山峦起伏 (中频自然褶皱)
+				float r2 = SmoothNoise(nx * 7.0f, nz * 7.0f, seed + 202u);
+				float hills = (r2 - 0.5f) * 8.0f;
 
-				// 八度 4: 岩层阶地感
-				float terrace = std::sin(nx * 30.0f + nz * 25.0f) * 1.5f;
+				// 微地形山脚坡降
+				float micro = (SmoothNoise(nx * 18.0f, nz * 18.0f, seed + 303u) - 0.5f) * 2.0f;
 
-				// 八度 5: 地表微观碎石扰动
-				float micro = (SmoothNoise(nx * 48.0f, nz * 48.0f, seed + 404u) - 0.5f) * 0.8f;
+				// 基础海拔总和
+				float rawHeight = macroContinent + ridge1 + hills + micro;
 
-				float h = continent + ridge + hills + terrace + micro;
-
-				// 边缘平滑降噪衰减
+				// 边缘平缓落入山谷盆地 (平滑衰减，抬高基准高程至 Y >= 2.5m 彻底杜绝与 Y=0 参考网格穿插)
 				float dx = (nx - 0.5f) * 2.0f;
 				float dz = (nz - 0.5f) * 2.0f;
 				float edgeDist = std::sqrt(dx * dx + dz * dz);
-				float edgeFalloff = glm::clamp(1.0f - (edgeDist - 0.70f) / 0.30f, 0.0f, 1.0f);
-				edgeFalloff = edgeFalloff * edgeFalloff;
+				float edgeFalloff = glm::clamp(1.0f - (edgeDist - 0.65f) / 0.35f, 0.0f, 1.0f);
+				edgeFalloff = edgeFalloff * edgeFalloff * (3.0f - 2.0f * edgeFalloff);
 
-				h = std::max(0.2f, (h + 4.0f) * edgeFalloff);
-				SetHeight(x, z, h);
+				float finalHeight = std::max(2.5f, (rawHeight + 10.0f) * edgeFalloff + 2.5f);
+				SetHeight(x, z, finalHeight);
 			}
 		}
 
-		// 基于坡度与高度自动生成自然法则 Splatmap 权重
+		// 2. 邻域柔化迭代 (Gaussian-like Relaxation 消除网格尖峰噪点)
+		std::vector<float> smoothed(m_Heights.size());
+		for (uint32_t z = 0; z < m_Height; ++z)
+		{
+			for (uint32_t x = 0; x < m_Width; ++x)
+			{
+				float sum = 0.0f;
+				float weight = 0.0f;
+				for (int dz = -1; dz <= 1; ++dz)
+				{
+					for (int dx = -1; dx <= 1; ++dx)
+					{
+						int nx = static_cast<int>(x) + dx;
+						int nz = static_cast<int>(z) + dz;
+						if (nx >= 0 && nx < static_cast<int>(m_Width) && nz >= 0 && nz < static_cast<int>(m_Height))
+						{
+							float w = (dx == 0 && dz == 0) ? 4.0f : ((dx == 0 || dz == 0) ? 2.0f : 1.0f);
+							sum += GetHeight(static_cast<uint32_t>(nx), static_cast<uint32_t>(nz)) * w;
+							weight += w;
+						}
+					}
+				}
+				smoothed[z * m_Width + x] = sum / weight;
+			}
+		}
+		for (size_t i = 0; i < smoothed.size(); ++i)
+			m_Heights[i] = smoothed[i];
+
+		// 3. 次世代生物群落权重分布 (平滑连续过渡，彻底消灭孤立色块与方格感)
 		for (uint32_t z = 0; z < m_Height; ++z)
 		{
 			for (uint32_t x = 0; x < m_Width; ++x)
@@ -1116,30 +1144,40 @@ namespace World
 				float h = GetHeight(x, z);
 				glm::vec3 normal = SampleNormal(worldX, worldZ);
 
+				// 坡度计算: 0.0 为纯平原缓坡，1.0 为90度峭壁
 				float slope = 1.0f - glm::clamp(normal.y, 0.0f, 1.0f);
+
+				// 引入高频有机扰动打破几何单调边界
+				float nx = static_cast<float>(x) * invW;
+				float nz = static_cast<float>(z) * invH;
+				float warp = SmoothNoise(nx * 14.0f, nz * 14.0f, seed + 888u) * 0.12f - 0.06f;
+
 				float grassWeight = 0.0f;
 				float dirtWeight = 0.0f;
 				float rockWeight = 0.0f;
 				float sandWeight = 0.0f;
 
-				if (slope > 0.38f) // 陡坡与悬崖: 裸露坚硬基岩
+				// 陡峭山体与绝壁: 花岗岩壁
+				if (slope + warp > 0.32f)
 				{
-					rockWeight = glm::clamp((slope - 0.38f) / 0.20f, 0.0f, 1.0f);
+					rockWeight = glm::clamp(((slope + warp) - 0.32f) / 0.18f, 0.0f, 1.0f);
 					dirtWeight = 1.0f - rockWeight;
 				}
-				else if (slope > 0.18f) // 缓坡过渡带: 碎石泥土与杂草
+				else if (slope + warp > 0.14f) // 山腰与山麓过渡带: 碎石林土
 				{
-					dirtWeight = glm::clamp((slope - 0.18f) / 0.20f, 0.0f, 1.0f);
+					dirtWeight = glm::clamp(((slope + warp) - 0.14f) / 0.18f, 0.0f, 1.0f);
 					grassWeight = 1.0f - dirtWeight;
 				}
-				else // 平坦平原: 茂盛绿草
+				else // 广阔舒展平原: 茂密高山草甸
 				{
 					grassWeight = 1.0f;
 				}
 
-				if (h < 2.5f)
+				// 蜿蜒溪谷与河滩低地: 仅在低洼且平缓地带自然沉积河滩细沙与卵石
+				if (h < 5.0f && slope < 0.20f)
 				{
-					float sandFactor = glm::clamp((2.5f - h) / 2.0f, 0.0f, 1.0f);
+					float riverWarp = SmoothNoise(nx * 9.0f, nz * 9.0f, seed + 999u) * 1.5f;
+					float sandFactor = glm::clamp((5.0f - (h + riverWarp)) / 2.5f, 0.0f, 0.85f);
 					sandWeight = sandFactor;
 					grassWeight *= (1.0f - sandFactor);
 					dirtWeight *= (1.0f - sandFactor);
