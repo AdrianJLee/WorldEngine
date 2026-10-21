@@ -27,14 +27,16 @@ namespace World
 		glm::vec4 LayerRoughnessMetallic { 0.8f, 0.8f, 0.9f, 0.6f };
 		glm::vec4 SlopeParams { 0.707f, 0.15f, 2.0f, 1.0f };
 		glm::vec4 TerrainParams { 1.0f, -1.0f, 0.0f, 0.0f }; // x=receiveShadow, y=entityId
+		glm::vec4 CameraPosition { 0.0f, 0.0f, 0.0f, 1.0f };
 	};
-	static_assert(sizeof(TerrainUniforms) == 144, "TerrainUniforms must be 144 bytes std140");
+	static_assert(sizeof(TerrainUniforms) == 160, "TerrainUniforms must be 160 bytes std140");
 	static_assert(offsetof(TerrainUniforms, Model) == 0, "Model at offset 0");
 	static_assert(offsetof(TerrainUniforms, LayerTiling01) == 64, "LayerTiling01 at offset 64");
 	static_assert(offsetof(TerrainUniforms, LayerTiling23) == 80, "LayerTiling23 at offset 80");
 	static_assert(offsetof(TerrainUniforms, LayerRoughnessMetallic) == 96, "LayerRoughnessMetallic at offset 96");
 	static_assert(offsetof(TerrainUniforms, SlopeParams) == 112, "SlopeParams at offset 112");
 	static_assert(offsetof(TerrainUniforms, TerrainParams) == 128, "TerrainParams at offset 128");
+	static_assert(offsetof(TerrainUniforms, CameraPosition) == 144, "CameraPosition at offset 144");
 
 	struct TerrainRenderSettings
 	{

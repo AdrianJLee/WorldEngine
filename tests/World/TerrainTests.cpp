@@ -250,27 +250,12 @@ static void TestTerrainSerializationRoundtrip()
 static void GenerateSampleDefaultTerrainAsset()
 {
 	TerrainData terrain(128, 128, 2.0f, 1.0f);
-	terrain.GetLayer(0).Name = "Grass (草地)";
-	terrain.GetLayer(1).Name = "Dirt (泥土)";
-	terrain.GetLayer(2).Name = "Rock (岩石)";
-	terrain.GetLayer(3).Name = "Sand (沙地)";
-
-	for (uint32_t z = 0; z < 128; ++z)
-	{
-		for (uint32_t x = 0; x < 128; ++x)
-		{
-			float fx = static_cast<float>(x) * 0.08f;
-			float fz = static_cast<float>(z) * 0.08f;
-			float h = std::sin(fx) * 6.0f + std::cos(fz) * 5.0f + std::sin(fx * 2.1f + fz * 1.8f) * 2.5f;
-			terrain.SetHeight(x, z, std::max(0.0f, h));
-			if (h > 6.0f)
-				terrain.PaintLayer(static_cast<float>(x) * 2.0f, static_cast<float>(z) * 2.0f, 3.0f, 2, 0.8f, TerrainBrushFalloff::Smooth);
-		}
-	}
+	terrain.GenerateProceduralLandscape(2026);
 	std::filesystem::create_directories("projects/default/assets/terrains");
 	terrain.SaveToFile("projects/default/assets/terrains/default.wterrain");
 	std::cout << "[PASS] GenerateSampleDefaultTerrainAsset\n";
 }
+
 int main()
 {
 	std::cout << "Starting World.Terrain tests...\n";

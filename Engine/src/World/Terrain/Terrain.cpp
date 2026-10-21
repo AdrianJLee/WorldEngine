@@ -1001,4 +1001,168 @@ namespace World
 		stream.write(reinterpret_cast<const char*>(raw16.data()), count * sizeof(uint16_t));
 		return stream.good();
 	}
+
+	namespace
+	{
+		inline float Hash2D(int x, int y, uint32_t seed)
+		{
+			uint32_t n = static_cast<uint32_t>(x) * 374761393u + static_cast<uint32_t>(y) * 668265263u + seed * 1013904223u;
+			n = (n ^ (n >> 13)) * 1274126177u;
+			return static_cast<float>(n % 16777216u) / 16777216.0f;
+		}
+
+		inline float SmoothNoise(float x, float y, uint32_t seed)
+		{
+			int ix = static_cast<int>(std::floor(x));
+			int iy = static_cast<int>(std::floor(y));
+			float fx = x - static_cast<float>(ix);
+			float fy = y - static_cast<float>(iy);
+
+			float ux = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
+			float uy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
+
+			float v00 = Hash2D(ix, iy, seed);
+			float v10 = Hash2D(ix + 1, iy, seed);
+			float v01 = Hash2D(ix, iy + 1, seed);
+			float v11 = Hash2D(ix + 1, iy + 1, seed);
+
+			float v0 = glm::mix(v00, v10, ux);
+			float v1 = glm::mix(v01, v11, ux);
+			return glm::mix(v0, v1, uy);
+		}
+	}
+
+	void TerrainData::GenerateProceduralLandscape(uint32_t seed)
+	{
+		if (m_Width < 2 || m_Height < 2)
+			return;
+
+		m_Layers[0].Name = "Grass (草地)";
+		m_Layers[0].AlbedoTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/grass_albedo.png"), AssetId{} };
+		m_Layers[0].NormalTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/grass_normal.png"), AssetId{} };
+		m_Layers[0].Roughness = 0.85f;
+		m_Layers[0].Metallic = 0.0f;
+		m_Layers[0].Tiling = glm::vec2(12.0f, 12.0f);
+
+		m_Layers[1].Name = "Dirt (泥土)";
+		m_Layers[1].AlbedoTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/dirt_albedo.png"), AssetId{} };
+		m_Layers[1].NormalTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/dirt_normal.png"), AssetId{} };
+		m_Layers[1].Roughness = 0.90f;
+		m_Layers[1].Metallic = 0.0f;
+		m_Layers[1].Tiling = glm::vec2(10.0f, 10.0f);
+
+		m_Layers[2].Name = "Rock (岩石)";
+		m_Layers[2].AlbedoTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/rock_albedo.png"), AssetId{} };
+		m_Layers[2].NormalTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/rock_normal.png"), AssetId{} };
+		m_Layers[2].Roughness = 0.65f;
+		m_Layers[2].Metallic = 0.0f;
+		m_Layers[2].Tiling = glm::vec2(8.0f, 8.0f);
+
+		m_Layers[3].Name = "Sand (沙地)";
+		m_Layers[3].AlbedoTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/sand_albedo.png"), AssetId{} };
+		m_Layers[3].NormalTexture = AssetRef { StringPool::Get().InternPath("textures/terrain/sand_normal.png"), AssetId{} };
+		m_Layers[3].Roughness = 0.95f;
+		m_Layers[3].Metallic = 0.0f;
+		m_Layers[3].Tiling = glm::vec2(14.0f, 14.0f);
+
+		const float invW = 1.0f / static_cast<float>(m_Width);
+		const float invH = 1.0f / static_cast<float>(m_Height);
+
+		for (uint32_t z = 0; z < m_Height; ++z)
+		{
+			for (uint32_t x = 0; x < m_Width; ++x)
+			{
+				float nx = static_cast<float>(x) * invW;
+				float nz = static_cast<float>(z) * invH;
+
+				// 八度 1: 宏观大陆架 (低频大起伏)
+				float continent = (SmoothNoise(nx * 2.5f, nz * 2.5f, seed) - 0.5f) * 16.0f;
+
+				// 八度 2: 脊线山脉 (Ridged Multifractal 产生如刀劈斧砍的山脊脊线)
+				float rNoise = SmoothNoise(nx * 5.0f, nz * 5.0f, seed + 101u);
+				float ridge = 1.0f - std::abs(rNoise * 2.0f - 1.0f);
+				ridge = ridge * ridge * 28.0f;
+
+				// 八度 3: 山麓丘陵褶皱
+				float hills = (SmoothNoise(nx * 11.0f, nz * 11.0f, seed + 202u) - 0.5f) * 7.5f;
+
+				// 八度 4: 岩层阶地感
+				float terrace = std::sin(nx * 30.0f + nz * 25.0f) * 1.5f;
+
+				// 八度 5: 地表微观碎石扰动
+				float micro = (SmoothNoise(nx * 48.0f, nz * 48.0f, seed + 404u) - 0.5f) * 0.8f;
+
+				float h = continent + ridge + hills + terrace + micro;
+
+				// 边缘平滑降噪衰减
+				float dx = (nx - 0.5f) * 2.0f;
+				float dz = (nz - 0.5f) * 2.0f;
+				float edgeDist = std::sqrt(dx * dx + dz * dz);
+				float edgeFalloff = glm::clamp(1.0f - (edgeDist - 0.70f) / 0.30f, 0.0f, 1.0f);
+				edgeFalloff = edgeFalloff * edgeFalloff;
+
+				h = std::max(0.2f, (h + 4.0f) * edgeFalloff);
+				SetHeight(x, z, h);
+			}
+		}
+
+		// 基于坡度与高度自动生成自然法则 Splatmap 权重
+		for (uint32_t z = 0; z < m_Height; ++z)
+		{
+			for (uint32_t x = 0; x < m_Width; ++x)
+			{
+				float worldX = static_cast<float>(x) * m_CellSize;
+				float worldZ = static_cast<float>(z) * m_CellSize;
+				float h = GetHeight(x, z);
+				glm::vec3 normal = SampleNormal(worldX, worldZ);
+
+				float slope = 1.0f - glm::clamp(normal.y, 0.0f, 1.0f);
+				float grassWeight = 0.0f;
+				float dirtWeight = 0.0f;
+				float rockWeight = 0.0f;
+				float sandWeight = 0.0f;
+
+				if (slope > 0.38f) // 陡坡与悬崖: 裸露坚硬基岩
+				{
+					rockWeight = glm::clamp((slope - 0.38f) / 0.20f, 0.0f, 1.0f);
+					dirtWeight = 1.0f - rockWeight;
+				}
+				else if (slope > 0.18f) // 缓坡过渡带: 碎石泥土与杂草
+				{
+					dirtWeight = glm::clamp((slope - 0.18f) / 0.20f, 0.0f, 1.0f);
+					grassWeight = 1.0f - dirtWeight;
+				}
+				else // 平坦平原: 茂盛绿草
+				{
+					grassWeight = 1.0f;
+				}
+
+				if (h < 2.5f)
+				{
+					float sandFactor = glm::clamp((2.5f - h) / 2.0f, 0.0f, 1.0f);
+					sandWeight = sandFactor;
+					grassWeight *= (1.0f - sandFactor);
+					dirtWeight *= (1.0f - sandFactor);
+				}
+
+				float total = grassWeight + dirtWeight + rockWeight + sandWeight;
+				if (total > 0.0001f)
+				{
+					grassWeight /= total;
+					dirtWeight /= total;
+					rockWeight /= total;
+					sandWeight /= total;
+				}
+				else
+				{
+					grassWeight = 1.0f;
+				}
+
+				SetSplatWeights(x, z, glm::vec4(grassWeight, dirtWeight, rockWeight, sandWeight));
+			}
+		}
+
+		m_IsDirty = true;
+	}
+
 }

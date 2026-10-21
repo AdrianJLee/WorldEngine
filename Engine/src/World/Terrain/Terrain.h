@@ -135,6 +135,9 @@ namespace World
 		void ClearDirty() { m_IsDirty = false; }
 
 		// 持久化与导入导出
+		// 商业级自然多八度山脉与侵蚀地貌程序化生成器 (fBm + Ridged Multifractal + 自然权重分布)
+		void GenerateProceduralLandscape(uint32_t seed = 2026);
+
 		bool SaveToFile(const std::string& path) const;
 		bool LoadFromFile(const std::string& path);
 		bool ImportHeightmapRaw16(const std::string& path, uint32_t width, uint32_t height, float minH, float maxH);

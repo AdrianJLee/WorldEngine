@@ -37,6 +37,7 @@ namespace World
 
 			Rhi::Handle<Rhi::Sampler> Sampler;
 			Rhi::Handle<Rhi::Texture> DefaultTextures[4];
+			Rhi::Handle<Rhi::Texture> DefaultNormalTextures[4];
 
 			// 帧槽位 UniformBuffer 与描述符集
 			Rhi::Handle<Rhi::Buffer> UniformBuffers[Renderer::FramesInFlight];
@@ -153,6 +154,11 @@ namespace World
 				matDesc.Bindings.push_back({ 4 + i, Rhi::DescriptorType::CombinedImageSampler,
 					Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
 			}
+			for (uint32_t i = 0; i < 4; ++i)
+			{
+				matDesc.Bindings.push_back({ 8 + i, Rhi::DescriptorType::CombinedImageSampler,
+					Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+			}
 			matDesc.DebugName = "Terrain.MaterialLayout";
 			s_State.MaterialLayout = device->CreateDescriptorSetLayout(matDesc);
 		}
@@ -235,7 +241,31 @@ namespace World
 				if (s_State.DefaultTextures[i])
 					s_State.DefaultTextures[i]->SetData(noiseBuffer.data(), noiseBuffer.size());
 			}
+		
+		// 3b. 默认平坦法线贴图 (128, 128, 255)
+		std::vector<uint8_t> defaultFlatNormal(16 * 16 * 4);
+		for (size_t px = 0; px < 16 * 16; ++px)
+		{
+			defaultFlatNormal[px * 4 + 0] = 128;
+			defaultFlatNormal[px * 4 + 1] = 128;
+			defaultFlatNormal[px * 4 + 2] = 255;
+			defaultFlatNormal[px * 4 + 3] = 255;
 		}
+		for (uint32_t i = 0; i < 4; ++i)
+		{
+			if (!s_State.DefaultNormalTextures[i])
+			{
+				Rhi::TextureDesc normDesc;
+				normDesc.Type = Rhi::TextureType::Texture2D;
+				normDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+				normDesc.Extent = { 16, 16, 1 };
+				normDesc.Usage = Rhi::TextureUsageSampled;
+				normDesc.DebugName = "Terrain.DefaultNormal" + std::to_string(i);
+				s_State.DefaultNormalTextures[i] = device->CreateTexture(normDesc);
+				if (s_State.DefaultNormalTextures[i])
+					s_State.DefaultNormalTextures[i]->SetData(defaultFlatNormal.data(), defaultFlatNormal.size());
+			}
+		}}
 
 		// 4. 创建帧槽位 UniformBuffer 与描述符集
 		for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
@@ -280,6 +310,15 @@ namespace World
 						write.Sampler = s_State.Sampler;
 						writes.push_back(write);
 					}
+					for (uint32_t i = 0; i < 4; ++i)
+					{
+						Rhi::DescriptorWrite write;
+						write.Binding = 8 + i;
+						write.Type = Rhi::DescriptorType::CombinedImageSampler;
+						write.Texture = s_State.DefaultNormalTextures[i];
+						write.Sampler = s_State.Sampler;
+						writes.push_back(write);
+					}
 					s_State.MaterialDescriptorSets[slot]->Update(writes);
 				}
 			}
@@ -300,7 +339,10 @@ namespace World
 		s_State.MaterialLayout = nullptr;
 		s_State.Sampler = nullptr;
 		for (uint32_t i = 0; i < 4; ++i)
+		{
 			s_State.DefaultTextures[i] = nullptr;
+			s_State.DefaultNormalTextures[i] = nullptr;
+		}
 		for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
 		{
 			s_State.UniformBuffers[slot] = nullptr;
@@ -520,21 +562,7 @@ namespace World
 		if (!s_State.DefaultData)
 		{
 			s_State.DefaultData = std::make_shared<TerrainData>(256, 256, cellSize, heightScale);
-			// 赋予平缓的波浪高低起伏，使默认视口所见即为商业级起伏丘陵
-			for (uint32_t z = 0; z < 256; ++z)
-			{
-				for (uint32_t x = 0; x < 256; ++x)
-				{
-					const float fx = static_cast<float>(x) * 0.05f;
-					const float fz = static_cast<float>(z) * 0.05f;
-					const float h = std::sin(fx) * std::cos(fz) * 6.0f + std::sin(fx * 0.5f) * 10.0f;
-					s_State.DefaultData->SetHeight(x, z, h);
-
-					const float grassWeight = std::clamp(1.0f - (h * 0.05f), 0.1f, 1.0f);
-					const float dirtWeight = std::clamp(h * 0.05f, 0.0f, 0.9f);
-					s_State.DefaultData->SetSplatWeights(x, z, glm::vec4(grassWeight, dirtWeight, 0.0f, 0.0f));
-				}
-			}
+			s_State.DefaultData->GenerateProceduralLandscape(2026);
 		}
 		return s_State.DefaultData;
 	}
@@ -590,6 +618,7 @@ namespace World
 		}
 		uniforms.SlopeParams = glm::vec4(settings.SlopeThreshold, settings.SlopeBlendRange, 2.0f, settings.HoleCutoutEnabled ? 1.0f : 0.0f);
 		uniforms.TerrainParams = glm::vec4(settings.ReceiveShadow ? 1.0f : 0.0f, static_cast<float>(settings.EntityId), 0.0f, 0.0f);
+		uniforms.CameraPosition = glm::vec4(cameraPosition, 1.0f);
 
 		if (s_State.UniformBuffers[slot])
 			s_State.UniformBuffers[slot]->SetData(&uniforms, sizeof(uniforms));
@@ -628,7 +657,38 @@ namespace World
 				write.Sampler = s_State.Sampler;
 				writes.push_back(write);
 			}
-			s_State.MaterialDescriptorSets[slot]->Update(writes);
+			
+			for (uint32_t i = 0; i < 4; ++i)
+			{
+				const TerrainLayer& layer = data.GetLayer(i);
+				Rhi::Handle<Rhi::Texture> normTex = nullptr;
+				if (layer.NormalTexture.HasPath())
+				{
+					const std::string& path = StringPool::Get().PathOf(layer.NormalTexture.Path);
+					if (!path.empty())
+						normTex = TextureLibrary::Get().Get(path, /*srgb*/ false);
+				}
+				if (!normTex)
+				{
+					const char* const defaultNormalPaths[4] = {
+						"textures/terrain/grass_normal.png",
+						"textures/terrain/dirt_normal.png",
+						"textures/terrain/rock_normal.png",
+						"textures/terrain/sand_normal.png"
+					};
+					normTex = TextureLibrary::Get().Get(defaultNormalPaths[i], /*srgb*/ false);
+				}
+				if (!normTex)
+					normTex = s_State.DefaultNormalTextures[i];
+
+				Rhi::DescriptorWrite write;
+				write.Binding = 8 + i;
+				write.Type = Rhi::DescriptorType::CombinedImageSampler;
+				write.Texture = normTex;
+				write.Sampler = s_State.Sampler;
+				writes.push_back(write);
+			}
+s_State.MaterialDescriptorSets[slot]->Update(writes);
 		}
 
 		// 3. 绑定管线与描述符集
@@ -746,6 +806,7 @@ namespace World
 		uniforms.Model = settings.Transform;
 		uniforms.SlopeParams = glm::vec4(settings.SlopeThreshold, settings.SlopeBlendRange, 2.0f, settings.HoleCutoutEnabled ? 1.0f : 0.0f);
 		uniforms.TerrainParams = glm::vec4(settings.ReceiveShadow ? 1.0f : 0.0f, static_cast<float>(settings.EntityId), 0.0f, 0.0f);
+		uniforms.CameraPosition = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 
 		if (s_State.UniformBuffers[slot])
 			s_State.UniformBuffers[slot]->SetData(&uniforms, sizeof(uniforms));
