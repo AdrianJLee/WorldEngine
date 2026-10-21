@@ -99,6 +99,8 @@ namespace World
 		virtual std::string GetClipboardText() const { return std::string(); }
 		virtual void SetClipboardText(const std::string& text) { (void)text; }
 		virtual bool IsFocused() const { return false; }
+		virtual void SetCursorLocked(bool locked) { (void)locked; }
+		virtual bool IsCursorLocked() const { return false; }
 
 		// ---- D10:OS 文件拖放(资源管理器 → 窗口)----
 		// 返回自上次调用以来拖入的文件绝对路径并清空队列;没有拖放时返回空 vector。

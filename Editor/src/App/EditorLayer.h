@@ -536,6 +536,9 @@ namespace World
 		float m_FlySpeedScale = 1.0f;
 		float m_FlySpeedFeedbackTimer = 0.0f;
 		glm::vec2 m_Viewport3DLastMouse { 0.0f, 0.0f };
+		double m_SavedCursorX = 0.0;
+		double m_SavedCursorY = 0.0;
+		bool m_CursorIsLocked = false;
 		bool m_Viewport2DDragging = false;
 		glm::vec2 m_Viewport2DLastMouse { 0.0f, 0.0f };
 		bool m_ShowReferenceGrid = true;

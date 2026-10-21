@@ -738,4 +738,25 @@ namespace World
 	{
 		return m_Data.VSync;
 	}
+	void WindowsWindow::SetCursorLocked(bool locked)
+	{
+		if (!m_Window)
+			return;
+
+		if (locked)
+		{
+			glfwGetCursorPos(m_Window, &m_SavedCursorX, &m_SavedCursorY);
+			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+			if (glfwRawMouseMotionSupported())
+				glfwSetInputMode(m_Window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+			m_CursorLocked = true;
+		}
+		else
+		{
+			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+			glfwSetCursorPos(m_Window, m_SavedCursorX, m_SavedCursorY);
+			m_CursorLocked = false;
+		}
+	}
+
 }

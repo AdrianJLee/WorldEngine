@@ -692,6 +692,12 @@ void EditorLayer::OnUpdate(Timestep ts){
 			}
 		}
 
+		if (Application::Get().GetWindow().IsCursorLocked() && !Input::IsMouseButtonPressed(1))
+		{
+			Application::Get().GetWindow().SetCursorLocked(false);
+			m_Viewport3DDragging = Viewport3DDrag::None;
+		}
+
 		if (m_SceneState != SceneState::Play && m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Orbit)
 		{
 			float speed = 12.0f * m_FlySpeedScale; // 基础飞行速度乘以滚轮速度倍率
@@ -1506,11 +1512,29 @@ void EditorLayer::OnEvent(Event& event){
 					m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键 orbit/fly*/ ? Viewport3DDrag::Orbit
 						: (e.GetMouseButton() == 2 /*中键 pan*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
 				}
+
+				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
+				{
+					auto& win = Application::Get().GetWindow();
+					if (!win.IsCursorLocked())
+					{
+						win.SetCursorLocked(true);
+						m_Viewport3DLastMouse = { Input::GetMouseX(), Input::GetMouseY() };
+					}
+				}
 				return false;
 			});
 			cameraDispatcher.Dispatch<MouseButtonReleasedEvent>([this](MouseButtonReleasedEvent& e)
 			{
-				(void)e;
+				if (e.GetMouseButton() == 1)
+				{
+					auto& win = Application::Get().GetWindow();
+					if (win.IsCursorLocked())
+					{
+						win.SetCursorLocked(false);
+						m_Viewport3DLastMouse = { Input::GetMouseX(), Input::GetMouseY() };
+					}
+				}
 				m_Viewport3DDragging = Viewport3DDrag::None;
 				return false;
 			});
@@ -1518,27 +1542,18 @@ void EditorLayer::OnEvent(Event& event){
 			{
 				const float dx = e.GetX() - m_Viewport3DLastMouse.x;
 				const float dy = e.GetY() - m_Viewport3DLastMouse.y;
-				m_Viewport3DLastMouse = { e.GetX(), e.GetY() };
+				m_Viewport3DLastMouse = { Input::GetMouseX(), Input::GetMouseY() };
 
 				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
 				{
 					// 工业级视口灵敏度与方向约定 (对齐 UE5 / Unity):
-					// 灵敏度 0.18 度/像素; 鼠标右移向右转头 (dx); 鼠标上移仰头看天 (dy)
+					// 灵敏度 0.18 度/像素; 鼠标右移向右转动 (dx); 鼠标上移仰头看天 (dy)
 					constexpr float kSensitivity = 0.18f;
 					const float deltaYaw = dx * kSensitivity;
 					const float deltaPitch = dy * kSensitivity;
 
-					const bool altPressed = Input::IsKeyPressed(KeyCodes::LeftAlt) || Input::IsKeyPressed(KeyCodes::RightAlt);
-					if (altPressed)
-					{
-						// Alt + 右键: 围绕目标点 Orbit 轨道环绕旋转
-						m_EditorCamera3D.Orbit(deltaYaw, deltaPitch);
-					}
-					else
-					{
-						// 常规右键拖拽: 商业级相机自身原位旋转 (FPS Free Look / 视口自由环顾)
-						m_EditorCamera3D.RotateInPlace(deltaYaw, deltaPitch);
-					}
+					// 围绕目标旋转轴 (m_Target) 平滑稳定环绕，旋转轴绝对固定不漂移
+					m_EditorCamera3D.Orbit(deltaYaw, deltaPitch);
 				}
 				else if (m_Viewport3DDragging == Viewport3DDrag::Pan)
 				{
