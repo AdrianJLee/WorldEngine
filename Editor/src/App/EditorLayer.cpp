@@ -261,6 +261,9 @@ EditorLayer::EditorLayer(bool projectExplicit, bool launcherMode) : Layer("Edito
 		m_Commands.Register({ Wui::HashId("cmd.gizmo_rotate"), "Gizmo Rotate", KeyCodes::E, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Rotate); } });
 		m_Commands.Register({ Wui::HashId("cmd.gizmo_scale"), "Gizmo Scale", KeyCodes::R, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Scale); } });
 		m_Commands.Register({ Wui::HashId("cmd.gizmo_rect"), "Gizmo Rect", KeyCodes::T, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Rect); } });
+		m_Commands.Register({ Wui::HashId("cmd.mode_select"), "Mode Select", KeyCodes::D1, false, true, [this] { SetEditorToolMode(EditorToolMode::Select); } });
+		m_Commands.Register({ Wui::HashId("cmd.mode_landscape"), "Mode Landscape", KeyCodes::D2, false, true, [this] { SetEditorToolMode(EditorToolMode::Landscape); } });
+		m_Commands.Register({ Wui::HashId("cmd.mode_foliage"), "Mode Foliage", KeyCodes::D3, false, true, [this] { SetEditorToolMode(EditorToolMode::Foliage); } });
 		m_Commands.Register({ Wui::HashId("cmd.toggle_2d_mode"), "Toggle 2D Mode", KeyCodes::D2, false, true, [this] { Set2DMode(!Is2DMode()); } });
 		m_Commands.Register({ Wui::HashId("cmd.focus"), "Focus", KeyCodes::F, false, false, [this] { FocusOnSelectedEntity(); } });
 		m_Commands.Register({ Wui::HashId("cmd.view_top"), "View Top", KeyCodes::D7, false, true, [this] { SetViewportViewpoint(World::ViewportViewpoint::Top); } });
@@ -509,4 +512,27 @@ bool EditorLayer::SetPluginEnabled(const std::string& id, bool enabled, std::str
 		return true;
 	}
 
+}
+
+void EditorLayer::SetEditorToolMode(EditorToolMode mode)
+{
+	m_EditorToolMode = mode;
+	if (mode == EditorToolMode::Landscape)
+	{
+		if (m_EditorCamera3D.Is2DMode())
+		{
+			m_EditorCamera3D.Set2DMode(false);
+			m_EditorCamera.SetOrthographic(false);
+		}
+		m_Shell.OpenOrFocusIndependentWindow("terrain_editor");
+	}
+	else if (mode == EditorToolMode::Foliage)
+	{
+		if (m_EditorCamera3D.Is2DMode())
+		{
+			m_EditorCamera3D.Set2DMode(false);
+			m_EditorCamera.SetOrthographic(false);
+		}
+		m_Shell.OpenOrFocusIndependentWindow("foliage_editor");
+	}
 }

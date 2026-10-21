@@ -201,6 +201,8 @@ namespace World
 		bool IsEditingCollider() const { return m_IsEditingCollider; }
 		void SetEditingCollider(bool editing) { m_IsEditingCollider = editing; }
 		Wui::GizmoOperation GetGizmoOperation() const { return m_CurrentGizmoOperation; }
+		EditorToolMode GetEditorToolMode() const { return m_EditorToolMode; }
+		void SetEditorToolMode(EditorToolMode mode);
 		bool IsPixelSnapEnabled() const { return m_PixelSnapEnabled; }
 		void SetPixelSnapEnabled(bool enabled) { m_PixelSnapEnabled = enabled; }
 		float GetPixelSnapPpu() const { return m_PixelSnapPpu; }
@@ -550,6 +552,7 @@ namespace World
 
 		// Gizmo operation type
 		Wui::GizmoOperation m_CurrentGizmoOperation = Wui::GizmoOperation::None;
+		EditorToolMode m_EditorToolMode = EditorToolMode::Select;
 		bool m_PixelSnapEnabled = false;
 		float m_PixelSnapPpu = 16.0f;
 		bool m_IsEditingCollider = false;

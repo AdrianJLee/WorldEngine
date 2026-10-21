@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "WUI/Common/ViewportHost.h"
 #include "World/Scene/Components.h"
@@ -136,6 +136,8 @@ namespace World
 		}
 	}
 
+	class TerrainData;
+
 	// 视口面板:场景画面、拾取、Gizmo 与播放控制。Gizmo 拖拽前后快照仅用于标脏。
 	class ViewportPanel final : public EditorPanel
 	{
@@ -144,6 +146,7 @@ namespace World
 		const char* Id() const override { return "view"; }
 		const char* Title() const override { return "View"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
+		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
 
 	private:
 		ViewportHost& m_Host;
@@ -157,5 +160,13 @@ namespace World
 		bool m_ShowReferenceGrid = true;
 		bool m_ShowWorldPartition = true;
 		bool& m_ShowSpatialGrid = m_ShowReferenceGrid;
+
+		// 地貌交互笔刷与撤销追踪状态
+		bool m_TerrainStrokeActive = false;
+		std::shared_ptr<TerrainData> m_StrokeTerrain;
+		std::vector<float> m_BeforeHeights;
+		std::vector<uint32_t> m_BeforeSplatmap;
+		std::vector<uint8_t> m_BeforeHoles;
+		uint8_t m_StrokeTab { 0 };
 	};
 }

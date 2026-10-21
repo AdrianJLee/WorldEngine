@@ -1,4 +1,4 @@
-#include "wldpch.h"
+﻿#include "wldpch.h"
 #include "World/Core/StringPool.h"
 #include "WUI/Panels/HierarchyPanel.h"
 #include "WUI/Common/EditorAssetCatalog.h"
@@ -575,7 +575,7 @@ namespace World
 			const Gameplay::PrefabInstanceRecord* contextRecord = OwningRecord(*scene, contextHandle);
 			// 菜单高度 = 条目数 × 22 + 8:实例子树多出"来源说明 + 3 个动作"四行,
 			// 旧实现把这几行画在声明高度之外(面板底图盖不住)。
-			const size_t itemCount = 5u + (contextRecord ? 4u : 0u);
+			const size_t itemCount = 6u + (contextRecord ? 4u : 0u);
 			Wui::WuiRect panel;
 			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 190.0f, itemCount, &panel, theme))
 			{
@@ -637,6 +637,27 @@ namespace World
 					const entt::entity child = m_Context;
 					scene->DeferStructuralChange([child](Scene& s) { Hierarchy::ClearParent(s.GetRegistry(), child); });
 					host.MarkDocumentDirty();
+					ctx.CloseAllPopups();
+				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createterrain_ent"),
+					nextItem(), "Create 3D Landscape (3D 地貌)", theme))
+				{
+					Entity created;
+					if (scene->DeferStructuralChange([&created](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "Landscape");
+							created.AddComponent<TransformComponent>();
+							auto& comp = created.AddComponent<TerrainComponent>();
+							comp.CellSize = 1.0f;
+							comp.HeightScale = 50.0f;
+							comp.ChunkResolution = 64;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Landscape"));
+						host.SetEditorToolMode(EditorToolMode::Landscape);
+						host.MarkDocumentDirty();
+					}
 					ctx.CloseAllPopups();
 				}
 				// P4-U13d:把"做成 prefab"变成一次有回显、可撤销意图的操作 —— 打开居中模态
@@ -743,7 +764,7 @@ namespace World
 		if (ctx.IsPopupOpen(blankPopup))
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect panel { m_BlankMenuPos.x, m_BlankMenuPos.y, 190, 5 * 22 + 8 };
+			const Wui::WuiRect panel { m_BlankMenuPos.x, m_BlankMenuPos.y, 220, 6 * 22 + 8 };
 			DrawPanelSurface(ctx, panel, theme);
 			const bool hasSelection = host.GetSelectedEntity().IsValid() && host.GetSelectedEntity().GetScene() == scene.get();
 			if (MenuItem(ctx, Wui::HashId("hierarchy.create"), { panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Create Empty Entity", true, theme))
@@ -790,7 +811,27 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), { panel.X + 4, panel.Y + 70, panel.W - 8, 22 }, "Duplicate Selected", hasSelection, theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createterrain"), { panel.X + 4, panel.Y + 70, panel.W - 8, 22 }, "Create 3D Landscape (3D 地貌)", true, theme))
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Landscape");
+						created.AddComponent<TransformComponent>();
+						auto& comp = created.AddComponent<TerrainComponent>();
+						comp.CellSize = 1.0f;
+							comp.HeightScale = 50.0f;
+						comp.ChunkResolution = 64;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Landscape"));
+					host.SetEditorToolMode(EditorToolMode::Landscape);
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), { panel.X + 4, panel.Y + 92, panel.W - 8, 22 }, "Duplicate Selected", hasSelection, theme))
 			{
 				if (hasSelection)
 				{
@@ -799,7 +840,7 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.deletesel"), { panel.X + 4, panel.Y + 92, panel.W - 8, 22 }, "Delete Selected", hasSelection, theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.deletesel"), { panel.X + 4, panel.Y + 114, panel.W - 8, 22 }, "Delete Selected", hasSelection, theme))
 			{
 				if (hasSelection)
 				{

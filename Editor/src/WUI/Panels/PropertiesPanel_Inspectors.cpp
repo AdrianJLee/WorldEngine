@@ -1,4 +1,4 @@
-#include "World/Command/CommandHistory.h"
+﻿#include "World/Command/CommandHistory.h"
 #include "World/Physics/PhysicsMaterial.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/Tilemap.h"
@@ -18,6 +18,132 @@ namespace World
 
 using namespace PropertiesPanelDetail;
 
+	static float DrawTerrainInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto* comp = static_cast<TerrainComponent*>(instance);
+		if (!comp)
+			return 0.0f;
+
+		const float pad = theme.Pad;
+		const float startX = rect.X + pad;
+		const float contentW = rect.W - pad * 2.0f;
+		float curY = rect.Y + 4.0f;
+
+		// 1) 醒目大按钮: 进入地貌编辑模式
+		const Wui::WuiRect editBtnRect { startX, curY, contentW, 28.0f };
+		auto editTheme = theme;
+		editTheme.ButtonBg = theme.ActiveBg;
+		editTheme.Border = theme.Accent;
+		if (Wui::Button(ctx, Wui::HashId("inspect.terrain.edit_mode"), editBtnRect,
+			"✦ 进入地貌编辑模式 (Edit Landscape)", editTheme))
+		{
+			host.SetEditorToolMode(EditorToolMode::Landscape);
+			host.FocusIndependentWindow("terrain_editor");
+		}
+		curY += 32.0f;
+
+		// 2) 视口聚焦地貌按钮
+		const Wui::WuiRect focusBtnRect { startX, curY, contentW, 24.0f };
+		if (Wui::Button(ctx, Wui::HashId("inspect.terrain.focus"), focusBtnRect,
+			"⌖ 视口聚焦地貌 (Focus In Viewport)", theme))
+		{
+			host.SetSelectedEntity(entity);
+			host.FocusIndependentWindow("view");
+		}
+		curY += 28.0f;
+
+		// 3) 地貌规格与分块统计
+		Wui::Label(ctx, { startX, curY + 2.0f }, "地貌规格与分块统计", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		// 分块分辨率
+		Wui::Label(ctx, { startX, curY + 2.0f }, "分块分辨率:", theme.Text, theme.FontSizeSmall);
+		int64_t chunkRes = static_cast<int64_t>(comp->ChunkResolution);
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.terrain.chunk_res"),
+			{ startX + 110.0f, curY, contentW - 110.0f, 22.0f }, chunkRes, 16, 256, theme))
+		{
+			comp->ChunkResolution = static_cast<uint32_t>(chunkRes);
+			if (changedFields) changedFields->push_back("ChunkResolution");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 单元格格距
+		Wui::Label(ctx, { startX, curY + 2.0f }, "格距 (CellSize m):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.terrain.cell_size"),
+			{ startX + 110.0f, curY, contentW - 110.0f, 22.0f }, comp->CellSize, 0.1f, 0.1f, 50.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("CellSize");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 高度倍率
+		Wui::Label(ctx, { startX, curY + 2.0f }, "高度倍率 (Scale):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.terrain.height_scale"),
+			{ startX + 110.0f, curY, contentW - 110.0f, 22.0f }, comp->HeightScale, 0.5f, 0.1f, 500.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("HeightScale");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 材质图层总数
+		Wui::Label(ctx, { startX, curY + 2.0f }, "材质图层总数:", theme.Text, theme.FontSizeSmall);
+		int64_t layerCount = static_cast<int64_t>(comp->LayerCount);
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.terrain.layer_count"),
+			{ startX + 110.0f, curY, contentW - 110.0f, 22.0f }, layerCount, 1, 4, theme))
+		{
+			comp->LayerCount = static_cast<uint32_t>(layerCount);
+			if (changedFields) changedFields->push_back("LayerCount");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// CDLOD 距离比
+		Wui::Label(ctx, { startX, curY + 2.0f }, "CDLOD 距离比:", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.terrain.lod_ratio"),
+			{ startX + 110.0f, curY, contentW - 110.0f, 22.0f }, comp->LodDistanceRatio, 0.1f, 0.5f, 10.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("LodDistanceRatio");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 投射阴影
+		bool castShadow = (comp->CastShadow != 0);
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.terrain.cast_shadow"),
+			{ startX, curY, contentW, 22.0f }, "投射阴影 (Cast Shadow)", castShadow, theme))
+		{
+			comp->CastShadow = castShadow ? 1 : 0;
+			if (changedFields) changedFields->push_back("CastShadow");
+			host.MarkDocumentDirty();
+		}
+		curY += 24.0f;
+
+		// 接收阴影
+		bool recvShadow = (comp->ReceiveShadow != 0);
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.terrain.recv_shadow"),
+			{ startX, curY, contentW, 22.0f }, "接收阴影 (Receive Shadow)", recvShadow, theme))
+		{
+			comp->ReceiveShadow = recvShadow ? 1 : 0;
+			if (changedFields) changedFields->push_back("ReceiveShadow");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 关联资产
+		std::string assetPath = "(未绑定)";
+		if (comp->TerrainAsset.HasPath())
+			assetPath = StringPool::Get().PathOf(comp->TerrainAsset.Path);
+		Wui::Label(ctx, { startX, curY }, "关联资产: " + assetPath, theme.TextMuted, theme.FontSizeSmall);
+		curY += 22.0f;
+
+		return curY - rect.Y;
+	}
 
 	// ---- 组件检视器 ----
 
@@ -105,6 +231,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 		// 自定义检查器:关卡数据层归属(勾选替代裸掩码数字);Play/Simulate 只读时退回普通行。
 		else if (schema.Id.Name == "World::LevelEntityComponent" && !m_ReadOnly)
 			height = DrawLevelEntityInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::TerrainComponent")
+			height = DrawTerrainInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
 
 		else

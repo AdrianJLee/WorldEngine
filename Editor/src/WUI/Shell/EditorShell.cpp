@@ -1161,6 +1161,28 @@ Wui::GizmoOperation EditorShell::GetGizmoOperation() const{
 		return m_Editor.GetGizmoOperation();
 	}
 
+EditorToolMode EditorShell::GetEditorToolMode() const {
+		return m_Editor.GetEditorToolMode();
+	}
+
+void EditorShell::SetEditorToolMode(EditorToolMode mode) {
+		m_Editor.SetEditorToolMode(mode);
+	}
+
+TerrainPanel* EditorShell::GetTerrainPanel() {
+		auto it = m_PanelRegistry.find("terrain_editor");
+		if (it != m_PanelRegistry.end())
+			return dynamic_cast<TerrainPanel*>(it->second.get());
+		return nullptr;
+	}
+
+FoliagePanel* EditorShell::GetFoliagePanel() {
+		auto it = m_PanelRegistry.find("foliage_editor");
+		if (it != m_PanelRegistry.end())
+			return dynamic_cast<FoliagePanel*>(it->second.get());
+		return nullptr;
+	}
+
 
 const std::vector<Level::DataLayerDefinition>& EditorShell::GetLevelDataLayers() const{
 		// 当前文档是关卡包时用包 manifest 声明的层;否则视口不显示层开关

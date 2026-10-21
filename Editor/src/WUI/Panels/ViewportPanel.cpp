@@ -1,4 +1,4 @@
-#include "WUI/Panels/ViewportPanel_ToolGizmos.h"
+﻿#include "WUI/Panels/ViewportPanel_ToolGizmos.h"
 #include "World/Command/CommandHistory.h"
 #include "World/Scene/SelectionFilter.h"
 #include "wldpch.h"
@@ -15,6 +15,10 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
 #include "Core/EditorPreferences.h"
+#include "WUI/Panels/TerrainPanel.h"
+#include "World/Terrain/Terrain.h"
+#include "World/Terrain/TerrainRenderer.h"
+#include "World/Core/Input.h"
 
 namespace World
 {
@@ -24,6 +28,92 @@ namespace World
 		static bool s_AudioGizmoActive = false;
 		static float s_AudioGizmoBeforeMin = 1.0f;
 		static float s_AudioGizmoBeforeMax = 25.0f;
+		class TerrainModifyCommand final : public IEditorCommand
+		{
+		public:
+			TerrainModifyCommand(std::shared_ptr<TerrainData> terrain,
+				std::vector<float> beforeHeights,
+				std::vector<uint32_t> beforeSplat,
+				std::vector<uint8_t> beforeHoles,
+				std::vector<float> afterHeights,
+				std::vector<uint32_t> afterSplat,
+				std::vector<uint8_t> afterHoles,
+				std::string_view name = "Terrain Edit")
+				: m_Terrain(std::move(terrain)),
+				  m_BeforeHeights(std::move(beforeHeights)),
+				  m_BeforeSplat(std::move(beforeSplat)),
+				  m_BeforeHoles(std::move(beforeHoles)),
+				  m_AfterHeights(std::move(afterHeights)),
+				  m_AfterSplat(std::move(afterSplat)),
+				  m_AfterHoles(std::move(afterHoles)),
+				  m_Name(name)
+			{}
+
+			void Execute() override
+			{
+				if (m_Terrain)
+					Apply(m_AfterHeights, m_AfterSplat, m_AfterHoles);
+			}
+
+			void Undo() override
+			{
+				if (m_Terrain)
+					Apply(m_BeforeHeights, m_BeforeSplat, m_BeforeHoles);
+			}
+
+			std::string_view GetName() const override { return m_Name; }
+			size_t GetMemorySize() const override
+			{
+				return sizeof(*this) + (m_BeforeHeights.size() + m_AfterHeights.size()) * sizeof(float)
+					+ (m_BeforeSplat.size() + m_AfterSplat.size()) * sizeof(uint32_t)
+					+ (m_BeforeHoles.size() + m_AfterHoles.size()) * sizeof(uint8_t);
+			}
+
+		private:
+			void Apply(const std::vector<float>& h, const std::vector<uint32_t>& s, const std::vector<uint8_t>& holes)
+			{
+				const uint32_t w = m_Terrain->GetWidth();
+				const uint32_t height = m_Terrain->GetHeight();
+				if (h.size() == m_Terrain->GetHeightBuffer().size())
+				{
+					for (uint32_t z = 0; z < height; ++z)
+						for (uint32_t x = 0; x < w; ++x)
+							m_Terrain->SetHeight(x, z, h[z * w + x]);
+				}
+				if (s.size() == m_Terrain->GetSplatmapBuffer().size())
+				{
+					for (uint32_t z = 0; z < height; ++z)
+						for (uint32_t x = 0; x < w; ++x)
+						{
+							uint32_t packed = s[z * w + x];
+							glm::vec4 weights(
+								(packed & 0xFF) / 255.0f,
+								((packed >> 8) & 0xFF) / 255.0f,
+								((packed >> 16) & 0xFF) / 255.0f,
+								((packed >> 24) & 0xFF) / 255.0f
+							);
+							m_Terrain->SetSplatWeights(x, z, weights);
+						}
+				}
+				if (holes.size() == m_Terrain->GetHoleBuffer().size())
+				{
+					for (uint32_t z = 0; z < height; ++z)
+						for (uint32_t x = 0; x < w; ++x)
+							m_Terrain->SetHole(x, z, holes[z * w + x] != 0);
+				}
+				m_Terrain->MarkDirty(0.0f, 0.0f, m_Terrain->GetWorldWidth(), m_Terrain->GetWorldHeight());
+			}
+
+			std::shared_ptr<TerrainData> m_Terrain;
+			std::vector<float> m_BeforeHeights;
+			std::vector<uint32_t> m_BeforeSplat;
+			std::vector<uint8_t> m_BeforeHoles;
+			std::vector<float> m_AfterHeights;
+			std::vector<uint32_t> m_AfterSplat;
+			std::vector<uint8_t> m_AfterHoles;
+			std::string m_Name;
+		};
+
 		static const char* OrthoAxisShortName(World::OrthographicAxis axis)
 		{
 			switch (axis)
@@ -341,6 +431,13 @@ namespace World
 		// 固定最小宽度 140px，防止切换 Lock 或切换 Top/Front/Bottom 时工具栏发生水平位移跳动
 		const float viewButtonW = std::max(140.0f, ctx.MeasureTextWidth(viewLabel, 12.0f) + 16.0f);
 
+		// 视口模式切换器规格 ([Select] [Landscape] [Foliage])
+		const EditorToolMode currentToolMode = m_Host.GetEditorToolMode();
+		const float modeBtnSelectW = 48.0f;
+		const float modeBtnLandscapeW = 74.0f;
+		const float modeBtnFoliageW = 54.0f;
+		const float modeSwitcherW = modeBtnSelectW + 2.0f + modeBtnLandscapeW + 2.0f + modeBtnFoliageW;
+
 		// Gizmo 工具组规格 (Q: 选 / W: 移 / E: 转 / R: 缩 / T: 2D 矩形手柄，22×22px)
 		const float gizmoBtnW = 22.0f;
 		const float gizmoBtnH = 22.0f;
@@ -354,64 +451,128 @@ namespace World
 		};
 		const Wui::GizmoOperation activeGizmo = m_Host.GetGizmoOperation();
 
-		// 左岛全宽: 内衬4 + viewButtonW + 间隙3 + 分割线8 + 间隙3 + 5*22 + 4*2 + 内衬4
+		// 左岛全宽: 内衬4 + viewButtonW + 间隙3 + 分割线8 + 间隙3 + modeSwitcherW + 间隙3 + 分割线8 + 间隙3 + 5*22 + 4*2 + 内衬4
 		Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
 		Wui::WuiRect leftIslandRect { sceneRect.X + kChromePad, sceneRect.Y + kChromePad, 0.0f, 0.0f };
 		if (!play)
 		{
-		const float fullLeftIslandW = 4.0f + viewButtonW + 3.0f + 8.0f + 3.0f + (5 * gizmoBtnW + 4 * 2.0f) + 4.0f;
-		const float leftIslandX = sceneRect.X + kChromePad;
-		const float leftIslandY = sceneRect.Y + kChromePad;
-		// 受中岛左边界严格防护
-		const float maxLeftIslandW = std::max(viewButtonW + 8.0f, pillLeftBound - leftIslandX);
-		const float leftIslandW = std::min(fullLeftIslandW, maxLeftIslandW);
+			const float fullLeftIslandW = 4.0f + viewButtonW + 3.0f + 8.0f + 3.0f + modeSwitcherW + 3.0f + 8.0f + 3.0f + (5 * gizmoBtnW + 4 * 2.0f) + 4.0f;
+			const float leftIslandX = sceneRect.X + kChromePad;
+			const float leftIslandY = sceneRect.Y + kChromePad;
+			// 受中岛左边界严格防护
+			const float maxLeftIslandW = std::max(viewButtonW + 8.0f, pillLeftBound - leftIslandX);
+			const float leftIslandW = std::min(fullLeftIslandW, maxLeftIslandW);
 
-		const Wui::WuiRect leftIslandRect { leftIslandX, leftIslandY, leftIslandW, kIslandH };
-		Wui::Toolbar(ctx, leftIslandRect, theme, 6.0f, 0.85f);
-		ctx.RegisterOverlayRect(leftIslandRect);
+			leftIslandRect = { leftIslandX, leftIslandY, leftIslandW, kIslandH };
+			Wui::Toolbar(ctx, leftIslandRect, theme, 6.0f, 0.85f);
+			ctx.RegisterOverlayRect(leftIslandRect);
 
-		// 左岛内部内容填充
-		const float leftBtnY = leftIslandRect.Y + 4.0f;
-		const Wui::WuiRect viewButton { leftIslandRect.X + 4.0f, leftBtnY, viewButtonW, kBtnH };
-		const std::string viewHint = Wui::Tr("viewport.view.hint",
-			"View options: view mode (3D/2D), camera preview, light ranges, collider outlines.");
-		Wui::Tooltip(ctx, viewButton, viewHint);
-		if (Wui::Button(ctx, Wui::HashId("viewport.view"), viewButton, viewLabel, theme))
-			ctx.OpenPopup(Wui::HashId("viewport.view.popup"));
-		RegisterReadonlyNode(Wui::HashId("viewport.camera.mode"), "text", cameraText,
-			camera3D ? "3d" : "2d", viewButton,
-			Wui::Tr("viewport.camera.hint", "Viewport view mode — switch in the View menu (top-left)."));
-		ctx.RegisterOverlayRect(viewButton);
+			// 左岛内部内容填充
+			const float leftBtnY = leftIslandRect.Y + 4.0f;
+			viewButton = { leftIslandRect.X + 4.0f, leftBtnY, viewButtonW, kBtnH };
+			const std::string viewHint = Wui::Tr("viewport.view.hint",
+				"View options: view mode (3D/2D), camera preview, light ranges, collider outlines.");
+			Wui::Tooltip(ctx, viewButton, viewHint);
+			if (Wui::Button(ctx, Wui::HashId("viewport.view"), viewButton, viewLabel, theme))
+				ctx.OpenPopup(Wui::HashId("viewport.view.popup"));
+			RegisterReadonlyNode(Wui::HashId("viewport.camera.mode"), "text", cameraText,
+				camera3D ? "3d" : "2d", viewButton,
+				Wui::Tr("viewport.camera.hint", "Viewport view mode — switch in the View menu (top-left)."));
+			ctx.RegisterOverlayRect(viewButton);
 
-		float leftCursor = viewButton.X + viewButton.W + 3.0f;
-		if (leftCursor + 8.0f + gizmoBtnW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
-		{
-			const Wui::WuiRect sepRect { leftCursor, leftIslandRect.Y, 8.0f, kIslandH };
-			Wui::ToolbarSeparator(ctx, sepRect, theme);
-			leftCursor += 8.0f + 3.0f;
-		}
-
-		for (int i = 0; i < 5; ++i)
-		{
-			if (leftCursor + gizmoBtnW > leftIslandRect.X + leftIslandRect.W - 4.0f)
-				break;
-
-			const Wui::WuiRect gBtnRect { leftCursor, leftBtnY, gizmoBtnW, gizmoBtnH };
-			Wui::Tooltip(ctx, gBtnRect, gizmoBtns[i].tip);
-
-			auto gizmoTheme = theme;
-			if (activeGizmo == gizmoBtns[i].op)
+			float leftCursor = viewButton.X + viewButton.W + 3.0f;
+			if (leftCursor + 8.0f + modeBtnSelectW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
 			{
-				gizmoTheme.ButtonBg = theme.ActiveBg;
-				gizmoTheme.Border = theme.Accent;
+				const Wui::WuiRect sepRect { leftCursor, leftIslandRect.Y, 8.0f, kIslandH };
+				Wui::ToolbarSeparator(ctx, sepRect, theme);
+				leftCursor += 8.0f + 3.0f;
 			}
-			if (Wui::Button(ctx, Wui::HashId(gizmoBtns[i].id), gBtnRect, gizmoBtns[i].label, gizmoTheme))
+
+			// 模式切换药丸组: [Select] [Landscape] [Foliage]
+			if (leftCursor + modeBtnSelectW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
 			{
-				m_Host.SetGizmoOperation(gizmoBtns[i].op);
+				const Wui::WuiRect selBtnRect { leftCursor, leftBtnY, modeBtnSelectW, kBtnH };
+				auto selTheme = theme;
+				if (currentToolMode == EditorToolMode::Select)
+				{
+					selTheme.ButtonBg = theme.ActiveBg;
+					selTheme.Border = theme.Accent;
+				}
+				Wui::Tooltip(ctx, selBtnRect, "选择与通用变换模式 (Select & Transform) [快捷键 Shift+1]");
+				if (Wui::Button(ctx, Wui::HashId("viewport.mode.select"), selBtnRect, "Select", selTheme))
+				{
+					m_Host.SetEditorToolMode(EditorToolMode::Select);
+				}
+				ctx.RegisterOverlayRect(selBtnRect);
+				leftCursor += modeBtnSelectW + 2.0f;
 			}
-			ctx.RegisterOverlayRect(gBtnRect);
-			leftCursor += gizmoBtnW + 2.0f;
-		}
+
+			if (leftCursor + modeBtnLandscapeW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
+			{
+				const Wui::WuiRect landBtnRect { leftCursor, leftBtnY, modeBtnLandscapeW, kBtnH };
+				auto landTheme = theme;
+				if (currentToolMode == EditorToolMode::Landscape)
+				{
+					landTheme.ButtonBg = theme.ActiveBg;
+					landTheme.Border = theme.Accent;
+				}
+				Wui::Tooltip(ctx, landBtnRect, "3D 地貌雕刻与混绘模式 (Landscape Sculpt & Paint) [快捷键 Shift+2]");
+				if (Wui::Button(ctx, Wui::HashId("viewport.mode.landscape"), landBtnRect, "Landscape", landTheme))
+				{
+					m_Host.SetEditorToolMode(EditorToolMode::Landscape);
+					m_Host.FocusIndependentWindow("terrain_editor");
+				}
+				ctx.RegisterOverlayRect(landBtnRect);
+				leftCursor += modeBtnLandscapeW + 2.0f;
+			}
+
+			if (leftCursor + modeBtnFoliageW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
+			{
+				const Wui::WuiRect folBtnRect { leftCursor, leftBtnY, modeBtnFoliageW, kBtnH };
+				auto folTheme = theme;
+				if (currentToolMode == EditorToolMode::Foliage)
+				{
+					folTheme.ButtonBg = theme.ActiveBg;
+					folTheme.Border = theme.Accent;
+				}
+				Wui::Tooltip(ctx, folBtnRect, "3D 植被散布模式 (Foliage Scatter) [快捷键 Shift+3]");
+				if (Wui::Button(ctx, Wui::HashId("viewport.mode.foliage"), folBtnRect, "Foliage", folTheme))
+				{
+					m_Host.SetEditorToolMode(EditorToolMode::Foliage);
+					m_Host.FocusIndependentWindow("foliage_editor");
+				}
+				ctx.RegisterOverlayRect(folBtnRect);
+				leftCursor += modeBtnFoliageW + 2.0f;
+			}
+
+			if (leftCursor + 8.0f + gizmoBtnW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
+			{
+				const Wui::WuiRect sepRect { leftCursor, leftIslandRect.Y, 8.0f, kIslandH };
+				Wui::ToolbarSeparator(ctx, sepRect, theme);
+				leftCursor += 8.0f + 3.0f;
+			}
+
+			for (int i = 0; i < 5; ++i)
+			{
+				if (leftCursor + gizmoBtnW > leftIslandRect.X + leftIslandRect.W - 4.0f)
+					break;
+
+				const Wui::WuiRect gBtnRect { leftCursor, leftBtnY, gizmoBtnW, gizmoBtnH };
+				Wui::Tooltip(ctx, gBtnRect, gizmoBtns[i].tip);
+
+				auto gizmoTheme = theme;
+				if (activeGizmo == gizmoBtns[i].op)
+				{
+					gizmoTheme.ButtonBg = theme.ActiveBg;
+					gizmoTheme.Border = theme.Accent;
+				}
+				if (Wui::Button(ctx, Wui::HashId(gizmoBtns[i].id), gBtnRect, gizmoBtns[i].label, gizmoTheme))
+				{
+					m_Host.SetGizmoOperation(gizmoBtns[i].op);
+				}
+				ctx.RegisterOverlayRect(gBtnRect);
+				leftCursor += gizmoBtnW + 2.0f;
+			}
 		}
 
 		// ③ 右岛 (Right Island - 覆盖层与状态徽章)
@@ -1196,7 +1357,7 @@ namespace World
 			m_Host.GetCameraPreviewTextureId() != 0 && !previewLabel.empty();
 		// 相机预览小窗挡住的位置不参与拾取(避免"点预览把背后物体选走")。
 		const bool overPreview = previewVisible && ctx.IsHovered(previewRect);
-		if (!play && ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview && !overBanner)
+		if (!play && ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview && !overBanner && m_Host.GetEditorToolMode() == EditorToolMode::Select)
 		{
 			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
 			const Entity picked = m_Host.PickEntityAt(local);
@@ -1206,6 +1367,366 @@ namespace World
 					picked.IsValid() ? static_cast<uint32_t>(static_cast<entt::entity>(picked)) : 0u,
 					picked.IsValid() ? 1 : 0);
 			m_Host.SetSelectedEntity(picked);
+		}
+
+		// ---- 3D 地貌模式快捷键与视口直接交互 (Landscape Direct Interaction) ----
+		const bool isLandscapeMode = (m_Host.GetEditorToolMode() == EditorToolMode::Landscape);
+		if (isLandscapeMode && (focused || hovered))
+		{
+			TerrainPanel* tp = m_Host.GetTerrainPanel();
+			if (tp)
+			{
+				const bool shift = Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift);
+				if (ctx.IsKeyPressed(KeyCodes::LeftBracket))
+				{
+					if (shift)
+						tp->SetBrushStrength(tp->GetBrushStrength() - 0.05f);
+					else
+						tp->SetBrushRadius(tp->GetBrushRadius() - 1.0f);
+				}
+				if (ctx.IsKeyPressed(KeyCodes::RightBracket))
+				{
+					if (shift)
+						tp->SetBrushStrength(tp->GetBrushStrength() + 0.05f);
+					else
+						tp->SetBrushRadius(tp->GetBrushRadius() + 1.0f);
+				}
+			}
+		}
+
+		// Shift+1/2/3 模式快速切换
+		{
+			const bool shift = Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift);
+			if (shift)
+			{
+				if (ctx.IsKeyPressed(KeyCodes::D1))
+					m_Host.SetEditorToolMode(EditorToolMode::Select);
+				else if (ctx.IsKeyPressed(KeyCodes::D2))
+				{
+					m_Host.SetEditorToolMode(EditorToolMode::Landscape);
+					m_Host.FocusIndependentWindow("terrain_editor");
+				}
+				else if (ctx.IsKeyPressed(KeyCodes::D3))
+				{
+					m_Host.SetEditorToolMode(EditorToolMode::Foliage);
+					m_Host.FocusIndependentWindow("foliage_editor");
+				}
+			}
+		}
+
+		if (!play && isLandscapeMode && m_Host.HasRenderedScene())
+		{
+			Entity terrainEntity;
+			Ref<Scene> activeScene = m_Host.GetActiveScene();
+			if (activeScene)
+			{
+				Entity selectedEnt = m_Host.GetSelectedEntity();
+				if (selectedEnt.IsValid() && selectedEnt.GetScene() == activeScene.get() && selectedEnt.HasComponent<TerrainComponent>())
+				{
+					terrainEntity = selectedEnt;
+				}
+				else
+				{
+					const auto& registry = activeScene->GetRegistry();
+					for (auto [handle, comp] : registry.view<TerrainComponent>().each())
+					{
+						terrainEntity = Entity(activeScene.get(), handle);
+						break;
+					}
+				}
+			}
+
+			if (terrainEntity.IsValid())
+			{
+				glm::mat4 terrainWorld = glm::mat4(1.0f);
+				if (terrainEntity.HasComponent<TransformComponent>())
+				{
+					terrainWorld = terrainEntity.GetComponent<TransformComponent>().GetLocalMatrix();
+					if (const auto* wt = terrainEntity.TryGetComponent<WorldTransformComponent>())
+						terrainWorld = wt->Matrix;
+				}
+
+				auto& comp = terrainEntity.GetComponent<TerrainComponent>();
+				std::shared_ptr<TerrainData> terrain = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+
+				TerrainPanel* terrainPanel = m_Host.GetTerrainPanel();
+
+				const glm::vec2 mousePos = ctx.Input().MousePos;
+				const bool mouseInViewport = (mousePos.x >= sceneRect.X && mousePos.x <= sceneRect.X + sceneRect.W &&
+					mousePos.y >= sceneRect.Y && mousePos.y <= sceneRect.Y + sceneRect.H);
+
+				if (terrain && mouseInViewport && !overBanner && !overPreview)
+				{
+					const Wui::GizmoCamera gizmoCamera = m_Host.GetGizmoCamera();
+					const float ndcX = ((mousePos.x - sceneRect.X) / sceneRect.W) * 2.0f - 1.0f;
+					const float ndcY = 1.0f - ((mousePos.y - sceneRect.Y) / sceneRect.H) * 2.0f;
+
+					const glm::mat4 invVP = glm::inverse(gizmoCamera.ViewProjection);
+					glm::vec4 nearPointClip(ndcX, ndcY, -1.0f, 1.0f);
+					glm::vec4 farPointClip(ndcX, ndcY, 1.0f, 1.0f);
+					glm::vec4 nearPointWorld = invVP * nearPointClip;
+					glm::vec4 farPointWorld = invVP * farPointClip;
+					if (std::abs(nearPointWorld.w) > 1e-6f) nearPointWorld /= nearPointWorld.w;
+					if (std::abs(farPointWorld.w) > 1e-6f) farPointWorld /= farPointWorld.w;
+
+					glm::vec3 rayOrigin = gizmoCamera.Position;
+					glm::vec3 rayDir = glm::normalize(glm::vec3(farPointWorld) - rayOrigin);
+					if (gizmoCamera.IsOrthographic)
+					{
+						rayOrigin = glm::vec3(nearPointWorld);
+						rayDir = gizmoCamera.Forward;
+					}
+
+					const glm::mat4 invTerrainWorld = glm::inverse(terrainWorld);
+					const glm::vec3 localOrigin = glm::vec3(invTerrainWorld * glm::vec4(rayOrigin, 1.0f));
+					const glm::vec3 localDir = glm::normalize(glm::vec3(invTerrainWorld * glm::vec4(rayDir, 0.0f)));
+
+					TerrainRaycastHit hit;
+					const bool hasHit = terrain->Raycast(localOrigin, localDir, 2000.0f, hit);
+
+					if (hasHit)
+					{
+						const float R = terrainPanel ? terrainPanel->GetBrushRadius() : 15.0f;
+						const TerrainToolTab toolTab = terrainPanel ? terrainPanel->GetToolTab() : TerrainToolTab::Sculpt;
+						const TerrainSculptMode sculptMode = terrainPanel ? terrainPanel->GetSculptMode() : TerrainSculptMode::Raise;
+						const bool shiftPressed = Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift);
+
+						// 1. 动态 3D 地表贴合外圆环 (32 段)
+						constexpr int kSegments = 32;
+						glm::vec4 outerClips[kSegments];
+						for (int i = 0; i < kSegments; ++i)
+						{
+							const float angle = static_cast<float>(i) / static_cast<float>(kSegments) * 6.2831853f;
+							const float px = hit.Point.x + R * std::cos(angle);
+							const float pz = hit.Point.z + R * std::sin(angle);
+							const float py = terrain->SampleHeight(px, pz) + 0.05f;
+							const glm::vec4 localPos(px, py, pz, 1.0f);
+							outerClips[i] = gizmoCamera.ViewProjection * (terrainWorld * localPos);
+						}
+
+						// 外环高对比高光色
+						Wui::WuiColor outerColor(0.0f, 0.898f, 1.0f, 0.95f); // default Raise 青色 (#00E5FF)
+						if (toolTab == TerrainToolTab::Sculpt)
+						{
+							TerrainSculptMode eff = sculptMode;
+							if (shiftPressed)
+							{
+								if (eff == TerrainSculptMode::Raise) eff = TerrainSculptMode::Lower;
+								else if (eff == TerrainSculptMode::Lower) eff = TerrainSculptMode::Raise;
+							}
+							switch (eff)
+							{
+							case TerrainSculptMode::Raise:   outerColor = Wui::WuiColor(0.0f, 0.898f, 1.0f, 0.95f); break;   // 青色 #00E5FF
+							case TerrainSculptMode::Lower:   outerColor = Wui::WuiColor(1.0f, 0.341f, 0.133f, 0.95f); break;  // 橙红 #FF5722
+							case TerrainSculptMode::Smooth:  outerColor = Wui::WuiColor(0.161f, 0.475f, 1.0f, 0.95f); break;   // 亮蓝 #2979FF
+							case TerrainSculptMode::Flatten: outerColor = Wui::WuiColor(1.0f, 0.757f, 0.027f, 0.95f); break;  // 琥珀色 #FFC107
+							case TerrainSculptMode::Erode:   outerColor = Wui::WuiColor(0.671f, 0.278f, 0.737f, 0.95f); break;  // 紫色 #AB47BC
+							case TerrainSculptMode::Hole:    outerColor = Wui::WuiColor(0.914f, 0.118f, 0.388f, 0.95f); break;  // 玫红 #E91E63
+							default: break;
+							}
+						}
+						else if (toolTab == TerrainToolTab::Paint)
+						{
+							outerColor = shiftPressed ? Wui::WuiColor(0.161f, 0.475f, 1.0f, 0.95f) : Wui::WuiColor(0.463f, 1.0f, 0.012f, 0.95f); // 鲜绿 (#76FF03)
+						}
+
+						for (int i = 0; i < kSegments; ++i)
+						{
+							PushProjectedSegment(ctx, gizmoCamera.ViewProjection, sceneRect,
+								outerClips[i], outerClips[(i + 1) % kSegments], outerColor, 2.4f);
+						}
+
+						// 2. 内衰减细线圆环
+						const float falloffRatio = terrainPanel ? terrainPanel->GetBrushFalloffFactor() : 0.5f;
+						const float innerR = R * (1.0f - falloffRatio);
+						if (innerR > 0.05f)
+						{
+							glm::vec4 innerClips[kSegments];
+							for (int i = 0; i < kSegments; ++i)
+							{
+								const float angle = static_cast<float>(i) / static_cast<float>(kSegments) * 6.2831853f;
+								const float px = hit.Point.x + innerR * std::cos(angle);
+								const float pz = hit.Point.z + innerR * std::sin(angle);
+								const float py = terrain->SampleHeight(px, pz) + 0.05f;
+								const glm::vec4 localPos(px, py, pz, 1.0f);
+								innerClips[i] = gizmoCamera.ViewProjection * (terrainWorld * localPos);
+							}
+							const Wui::WuiColor innerColor(outerColor.R, outerColor.G, outerColor.B, 0.55f);
+							for (int i = 0; i < kSegments; ++i)
+							{
+								PushProjectedSegment(ctx, gizmoCamera.ViewProjection, sceneRect,
+									innerClips[i], innerClips[(i + 1) % kSegments], innerColor, 1.2f);
+							}
+						}
+
+						// 3. 浮动 HUD 胶囊卡片
+						const glm::vec3 worldHit = glm::vec3(terrainWorld * glm::vec4(hit.Point, 1.0f));
+						const glm::vec4 clipHit = gizmoCamera.ViewProjection * glm::vec4(worldHit, 1.0f);
+						if (clipHit.w > 0.15f)
+						{
+							const glm::vec3 ndcHit = glm::vec3(clipHit) / clipHit.w;
+							const glm::vec2 screenHit {
+								sceneRect.X + (ndcHit.x + 1.0f) * 0.5f * sceneRect.W,
+								sceneRect.Y + (1.0f - ndcHit.y) * 0.5f * sceneRect.H
+							};
+							char hudText[128] = {};
+							const float strength = terrainPanel ? terrainPanel->GetBrushStrength() : 0.5f;
+							const int strPct = static_cast<int>(strength * 100.0f);
+							if (toolTab == TerrainToolTab::Sculpt)
+							{
+								const char* modeName = "Raise";
+								TerrainSculptMode eff = sculptMode;
+								if (shiftPressed)
+								{
+									if (eff == TerrainSculptMode::Raise) eff = TerrainSculptMode::Lower;
+									else if (eff == TerrainSculptMode::Lower) eff = TerrainSculptMode::Raise;
+								}
+								switch (eff)
+								{
+								case TerrainSculptMode::Raise: modeName = "Raise"; break;
+								case TerrainSculptMode::Lower: modeName = "Lower"; break;
+								case TerrainSculptMode::Smooth: modeName = "Smooth"; break;
+								case TerrainSculptMode::Flatten: modeName = "Flatten"; break;
+								case TerrainSculptMode::Erode: modeName = "Erode"; break;
+								case TerrainSculptMode::Hole: modeName = "Hole"; break;
+								default: break;
+								}
+								std::snprintf(hudText, sizeof(hudText), "Sculpt: %s | R: %.1fm | S: %d%% | Shift: 反向",
+									modeName, R, strPct);
+							}
+							else if (toolTab == TerrainToolTab::Paint)
+							{
+								const uint32_t layerIdx = terrainPanel ? terrainPanel->GetActivePaintLayer() : 0;
+								const std::string layerName = (terrain && layerIdx < 4) ? terrain->GetLayer(layerIdx).Name : ("Layer " + std::to_string(layerIdx));
+								if (shiftPressed)
+								{
+									std::snprintf(hudText, sizeof(hudText), "Paint: [Smooth 平滑] | R: %.1fm | S: %d%%",
+										R, strPct);
+								}
+								else
+								{
+									std::snprintf(hudText, sizeof(hudText), "Paint: %s | R: %.1fm | S: %d%%",
+										layerName.c_str(), R, strPct);
+								}
+							}
+							else
+							{
+								std::snprintf(hudText, sizeof(hudText), "Terrain | R: %.1fm | S: %d%%", R, strPct);
+							}
+
+							const float fontSz = theme.FontSizeSmall;
+							const float textW = ctx.MeasureTextWidth(hudText, fontSz);
+							const float cardW = textW + 16.0f;
+							const float cardH = 22.0f;
+							float cardX = screenHit.x + 20.0f;
+							float cardY = screenHit.y - 28.0f;
+							if (cardX + cardW > sceneRect.X + sceneRect.W - 10.0f)
+								cardX = screenHit.x - cardW - 10.0f;
+							if (cardY < sceneRect.Y + 10.0f)
+								cardY = sceneRect.Y + 10.0f;
+
+							const Wui::WuiRect hudRect { cardX, cardY, cardW, cardH };
+							Wui::Toolbar(ctx, hudRect, theme, 4.0f, 0.88f);
+							Wui::Label(ctx, { cardX + 8.0f, cardY + 3.0f }, hudText, theme.Text, fontSz);
+						}
+
+						// 4. 视口直接拖拽雕刻与混绘
+						const bool isMouseDown = ctx.Input().MouseDown[0];
+						if (isMouseDown)
+						{
+							if (!m_TerrainStrokeActive)
+							{
+								m_TerrainStrokeActive = true;
+								m_StrokeTerrain = terrain;
+								m_StrokeTab = static_cast<uint8_t>(toolTab);
+								m_BeforeHeights = terrain->GetHeightBuffer();
+								m_BeforeSplatmap = terrain->GetSplatmapBuffer();
+								m_BeforeHoles = terrain->GetHoleBuffer();
+							}
+
+							const float dt = 0.016f;
+							if (toolTab == TerrainToolTab::Sculpt)
+							{
+								TerrainSculptMode eff = sculptMode;
+								if (shiftPressed)
+								{
+									if (eff == TerrainSculptMode::Raise) eff = TerrainSculptMode::Lower;
+									else if (eff == TerrainSculptMode::Lower) eff = TerrainSculptMode::Raise;
+								}
+								const TerrainBrushFalloff falloffType = terrainPanel ? terrainPanel->GetBrushFalloff() : TerrainBrushFalloff::Smooth;
+								const float strength = terrainPanel ? terrainPanel->GetBrushStrength() : 0.5f;
+								switch (eff)
+								{
+								case TerrainSculptMode::Raise:
+									terrain->SculptRaiseLower(hit.Point.x, hit.Point.z, R, strength * 2.0f * dt * 60.0f, falloffType);
+									break;
+								case TerrainSculptMode::Lower:
+									terrain->SculptRaiseLower(hit.Point.x, hit.Point.z, R, -strength * 2.0f * dt * 60.0f, falloffType);
+									break;
+								case TerrainSculptMode::Smooth:
+									terrain->SculptSmooth(hit.Point.x, hit.Point.z, R, strength * 0.5f, falloffType);
+									break;
+								case TerrainSculptMode::Flatten:
+								{
+									const float targetH = terrainPanel ? terrainPanel->GetTargetHeight() : 0.0f;
+									terrain->SculptFlatten(hit.Point.x, hit.Point.z, R, targetH, strength * 0.5f, falloffType);
+									break;
+								}
+								case TerrainSculptMode::Erode:
+									terrain->SculptErode(hit.Point.x, hit.Point.z, R, strength * 0.2f, 1);
+									break;
+								case TerrainSculptMode::Hole:
+									terrain->PaintHole(hit.Point.x, hit.Point.z, R, !shiftPressed);
+									break;
+								default: break;
+								}
+							}
+							else if (toolTab == TerrainToolTab::Paint)
+							{
+								const TerrainBrushFalloff falloffType = terrainPanel ? terrainPanel->GetBrushFalloff() : TerrainBrushFalloff::Smooth;
+								const float strength = terrainPanel ? terrainPanel->GetBrushStrength() : 0.5f;
+								if (shiftPressed)
+								{
+									terrain->SculptSmooth(hit.Point.x, hit.Point.z, R, strength * 0.5f, falloffType);
+								}
+								else
+								{
+									const uint32_t activeLayer = terrainPanel ? terrainPanel->GetActivePaintLayer() : 0;
+									terrain->PaintLayer(hit.Point.x, hit.Point.z, R, activeLayer, strength * 0.5f, falloffType);
+								}
+							}
+							m_Host.MarkDocumentDirty();
+						}
+					}
+				}
+
+				// 鼠标释放那一帧：压入撤销命令
+				if (m_TerrainStrokeActive && !ctx.Input().MouseDown[0])
+				{
+					m_TerrainStrokeActive = false;
+					if (m_StrokeTerrain)
+					{
+						auto afterHeights = m_StrokeTerrain->GetHeightBuffer();
+						auto afterSplat = m_StrokeTerrain->GetSplatmapBuffer();
+						auto afterHoles = m_StrokeTerrain->GetHoleBuffer();
+						if (afterHeights != m_BeforeHeights || afterSplat != m_BeforeSplatmap || afterHoles != m_BeforeHoles)
+						{
+							m_Host.PushCommand(std::make_unique<TerrainModifyCommand>(
+								m_StrokeTerrain,
+								std::move(m_BeforeHeights),
+								std::move(m_BeforeSplatmap),
+								std::move(m_BeforeHoles),
+								std::move(afterHeights),
+								std::move(afterSplat),
+								std::move(afterHoles),
+								m_StrokeTab == static_cast<uint8_t>(TerrainToolTab::Paint) ? "Terrain Paint" : "Terrain Sculpt"
+							));
+							m_Host.MarkDocumentDirty();
+						}
+					}
+					m_StrokeTerrain.reset();
+				}
+			}
 		}
 
 		// 3D 网格实体的选中框:投影单位网格包围盒的 12 条棱(真 3D 线框盒),画在场景图之上。
@@ -2262,6 +2783,56 @@ namespace World
 			Wui::HighlightOutline(ctx, bannerRect, theme.Border, 3.0f, 1.0f);
 		}
 		(void)theme;
+	}
+
+	bool ViewportPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
+	{
+		if (shift && !ctrl && !alt)
+		{
+			if (keyCode == KeyCodes::D1)
+			{
+				m_Host.SetEditorToolMode(EditorToolMode::Select);
+				return true;
+			}
+			if (keyCode == KeyCodes::D2)
+			{
+				m_Host.SetEditorToolMode(EditorToolMode::Landscape);
+				m_Host.FocusIndependentWindow("terrain_editor");
+				return true;
+			}
+			if (keyCode == KeyCodes::D3)
+			{
+				m_Host.SetEditorToolMode(EditorToolMode::Foliage);
+				m_Host.FocusIndependentWindow("foliage_editor");
+				return true;
+			}
+		}
+
+		if (m_Host.GetEditorToolMode() == EditorToolMode::Landscape)
+		{
+			TerrainPanel* tp = m_Host.GetTerrainPanel();
+			if (tp)
+			{
+				if (keyCode == KeyCodes::LeftBracket)
+				{
+					if (shift)
+						tp->SetBrushStrength(tp->GetBrushStrength() - 0.05f);
+					else
+						tp->SetBrushRadius(tp->GetBrushRadius() - 1.0f);
+					return true;
+				}
+				if (keyCode == KeyCodes::RightBracket)
+				{
+					if (shift)
+						tp->SetBrushStrength(tp->GetBrushStrength() + 0.05f);
+					else
+						tp->SetBrushRadius(tp->GetBrushRadius() + 1.0f);
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 }
 

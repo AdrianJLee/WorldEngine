@@ -18,7 +18,16 @@
 
 namespace World
 {
+	enum class EditorToolMode : uint8_t
+	{
+		Select = 0,     // 实体选择与通用变换模式 (Q/W/E/R/T) [Shift+1]
+		Landscape = 1,  // 3D 地貌雕刻与材质混绘模式 [Shift+2]
+		Foliage = 2     // 3D 植被散布模式 [Shift+3]
+	};
+
 	class EditorLayer;
+	class TerrainPanel;
+	class FoliagePanel;
 	namespace Gameplay { class SaveService; }
 
 	// ---- U25-M2:跨窗口资产拖放桥(编辑器侧;不碰核心 WUI)----
@@ -126,6 +135,10 @@ namespace World
 		// D7-1a:视口相机模式(2D/3D)与切换 —— 视口面板用它画切换按钮。
 		virtual bool IsViewportCamera3D() const { return true; }
 		virtual void ToggleViewportCamera3D() {}
+		virtual EditorToolMode GetEditorToolMode() const { return EditorToolMode::Select; }
+		virtual void SetEditorToolMode(EditorToolMode mode) { (void)mode; }
+		virtual TerrainPanel* GetTerrainPanel() { return nullptr; }
+		virtual FoliagePanel* GetFoliagePanel() { return nullptr; }
 		virtual bool IsReferenceGridEnabled() const { return true; }
 		virtual void SetReferenceGridEnabled(bool enabled) {}
 		virtual World::ViewportProjection GetViewportProjection() const { return World::ViewportProjection::Perspective; }

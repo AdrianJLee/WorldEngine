@@ -363,6 +363,10 @@ namespace World
 		EditorCamera& GetEditorCamera() override;
 		Wui::GizmoOperation GetGizmoOperation() const override;
 		void SetGizmoOperation(Wui::GizmoOperation op) override;
+		EditorToolMode GetEditorToolMode() const override;
+		void SetEditorToolMode(EditorToolMode mode) override;
+		TerrainPanel* GetTerrainPanel() override;
+		FoliagePanel* GetFoliagePanel() override;
 		bool Is2DMode() const override;
 		void Set2DMode(bool enabled) override;
 		bool IsPixelSnapEnabled() const override;
