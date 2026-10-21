@@ -2752,3 +2752,23 @@ set_tests_properties(World.MeshLOD PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldDecalTests World/DecalTests.cpp)
+target_link_libraries(WorldDecalTests PRIVATE World)
+target_compile_features(WorldDecalTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldDecalTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldDecalTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldDecalTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Decal COMMAND WorldDecalTests)
+set_tests_properties(World.Decal PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)

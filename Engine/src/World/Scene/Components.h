@@ -2383,4 +2383,76 @@ namespace World
 	static_assert(offsetof(MeshLODComponent, Hysteresis) == 44, "Hysteresis offset mismatch");
 	static_assert(offsetof(MeshLODComponent, CurrentLOD) == 48, "CurrentLOD offset mismatch");
 	static_assert(offsetof(MeshLODComponent, EnableCrossFade) == 49, "EnableCrossFade offset mismatch");
+
+	struct DecalComponent
+	{
+		AssetRef DecalMaterial;                           // 16B (offset 0)
+		glm::vec3 Extents { 1.0f, 1.0f, 1.0f };           // 12B (offset 16)
+		float FadeFactor { 1.0f };                        // 4B  (offset 28)
+		float NormalAngleCutoff { 60.0f };                // 4B  (offset 32)
+		uint8_t AffectTerrain { 1 };                      // 1B  (offset 36)
+		uint8_t AffectMeshes { 1 };                       // 1B  (offset 37)
+		uint8_t _Padding[10] { 0 };                       // 10B (offset 38)
+
+		DecalComponent() = default;
+
+		WE_SCHEMA_BODY(World, DecalComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/Decal"),
+				Doc("3D projected decal box applying blood, bullet holes, footprints, or puddle details."))
+			WE_FIELD(DecalMaterial, Asset, Of("Material"),
+				Doc("Material or texture asset projected by this decal."));
+			WE_FIELD(Extents, Vec3,
+				Doc("Half size extents of the projection box in meters."));
+			WE_FIELD(FadeFactor, Float, Range(0.0f, 1.0f), Default(1.0f),
+				Doc("Decal opacity fade multiplier."));
+			WE_FIELD(NormalAngleCutoff, Float, Range(0.0f, 89.0f), Default(60.0f),
+				Doc("Maximum surface angle in degrees before decal fades out to prevent grazing stretching."));
+			WE_FIELD(AffectTerrain, UInt8, Default(1),
+				Doc("Whether the decal projects onto terrain."));
+			WE_FIELD(AffectMeshes, UInt8, Default(1),
+				Doc("Whether the decal projects onto static meshes."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(DecalComponent) == 48, "DecalComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<DecalComponent>, "DecalComponent must be trivially copyable");
+	static_assert(offsetof(DecalComponent, DecalMaterial) == 0, "DecalMaterial offset mismatch");
+	static_assert(offsetof(DecalComponent, Extents) == 16, "Extents offset mismatch");
+	static_assert(offsetof(DecalComponent, FadeFactor) == 28, "FadeFactor offset mismatch");
+	static_assert(offsetof(DecalComponent, NormalAngleCutoff) == 32, "NormalAngleCutoff offset mismatch");
+	static_assert(offsetof(DecalComponent, AffectTerrain) == 36, "AffectTerrain offset mismatch");
+	static_assert(offsetof(DecalComponent, AffectMeshes) == 37, "AffectMeshes offset mismatch");
+
+	struct ConvexCollider3DComponent
+	{
+		AssetRef MeshSource;                              // 16B (offset 0)
+		uint32_t HullCount { 1 };                         // 4B  (offset 16)
+		uint32_t MaxVerticesPerHull { 32 };               // 4B  (offset 20)
+		float ConcavityThreshold { 0.05f };               // 4B  (offset 24)
+		uint8_t IsTrigger { 0 };                          // 1B  (offset 28)
+		uint8_t _Padding[3] { 0 };                        // 3B  (offset 29)
+
+		ConvexCollider3DComponent() = default;
+
+		WE_SCHEMA_BODY(World, ConvexCollider3DComponent, Component)
+			WE_SCHEMA_META(Category("Physics/3D"),
+				Doc("Compound convex hull collider generated via convex decomposition."))
+			WE_FIELD(MeshSource, Asset, Of("Mesh"),
+				Doc("Source mesh asset decomposed into convex hulls."));
+			WE_FIELD(HullCount, UInt32, Default(1),
+				Doc("Number of convex hull primitives in this compound collider."));
+			WE_FIELD(MaxVerticesPerHull, UInt32, Range(8, 128), Default(32),
+				Doc("Maximum vertex cap per convex hull."));
+			WE_FIELD(ConcavityThreshold, Float, Range(0.001f, 1.0f), Default(0.05f),
+				Doc("Concavity tolerance error before splitting hulls."));
+			WE_FIELD(IsTrigger, UInt8, Default(0),
+				Doc("Whether the collider behaves as a trigger volume."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(ConvexCollider3DComponent) == 32, "ConvexCollider3DComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<ConvexCollider3DComponent>, "ConvexCollider3DComponent must be trivially copyable");
+	static_assert(offsetof(ConvexCollider3DComponent, MeshSource) == 0, "MeshSource offset mismatch");
+	static_assert(offsetof(ConvexCollider3DComponent, HullCount) == 16, "HullCount offset mismatch");
+	static_assert(offsetof(ConvexCollider3DComponent, MaxVerticesPerHull) == 20, "MaxVerticesPerHull offset mismatch");
+	static_assert(offsetof(ConvexCollider3DComponent, ConcavityThreshold) == 24, "ConcavityThreshold offset mismatch");
+	static_assert(offsetof(ConvexCollider3DComponent, IsTrigger) == 28, "IsTrigger offset mismatch");
 }

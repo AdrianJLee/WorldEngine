@@ -68,6 +68,8 @@ const TypeSchema& WeSchemaOf_AnimGraphComponent();
 const TypeSchema& WeSchemaOf_NavMeshAgentComponent();
 const TypeSchema& WeSchemaOf_NavMeshObstacleComponent();
 const TypeSchema& WeSchemaOf_MeshLODComponent();
+const TypeSchema& WeSchemaOf_DecalComponent();
+const TypeSchema& WeSchemaOf_ConvexCollider3DComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -13142,6 +13144,415 @@ struct GeneratedAccess<World::MeshLODComponent>
 };
 
 template <>
+struct GeneratedAccess<World::DecalComponent>
+{
+    static Value Get_DecalMaterial(const void* instance)
+    {
+        const World::DecalComponent* self = static_cast<const World::DecalComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->DecalMaterial)>>::GetPath(self->DecalMaterial));
+    }
+    static void Set_DecalMaterial(void* instance, const Value& value)
+    {
+        World::DecalComponent* self = static_cast<World::DecalComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->DecalMaterial)>>::SetPath(self->DecalMaterial, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_DecalMaterial(const void* instance)
+    {
+        const World::DecalComponent* self = static_cast<const World::DecalComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->DecalMaterial)>>::GetIdentity(self->DecalMaterial);
+    }
+    static void SetAssetIdentity_DecalMaterial(void* instance, uint64_t identity)
+    {
+        World::DecalComponent* self = static_cast<World::DecalComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->DecalMaterial)>>::SetIdentity(self->DecalMaterial, identity);
+    }
+    static Value Get_Extents(const void* instance)
+    {
+        const World::DecalComponent* self = static_cast<const World::DecalComponent*>(instance);
+        return Value(self->Extents);
+    }
+    static void Set_Extents(void* instance, const Value& value)
+    {
+        World::DecalComponent* self = static_cast<World::DecalComponent*>(instance);
+        self->Extents = std::get<glm::vec3>(value);
+    }
+    static Value Get_FadeFactor(const void* instance)
+    {
+        const World::DecalComponent* self = static_cast<const World::DecalComponent*>(instance);
+        return Value(self->FadeFactor);
+    }
+    static void Set_FadeFactor(void* instance, const Value& value)
+    {
+        World::DecalComponent* self = static_cast<World::DecalComponent*>(instance);
+        self->FadeFactor = std::get<float>(value);
+    }
+    static Value Get_NormalAngleCutoff(const void* instance)
+    {
+        const World::DecalComponent* self = static_cast<const World::DecalComponent*>(instance);
+        return Value(self->NormalAngleCutoff);
+    }
+    static void Set_NormalAngleCutoff(void* instance, const Value& value)
+    {
+        World::DecalComponent* self = static_cast<World::DecalComponent*>(instance);
+        self->NormalAngleCutoff = std::get<float>(value);
+    }
+    static Value Get_AffectTerrain(const void* instance)
+    {
+        const World::DecalComponent* self = static_cast<const World::DecalComponent*>(instance);
+        return Value(self->AffectTerrain);
+    }
+    static void Set_AffectTerrain(void* instance, const Value& value)
+    {
+        World::DecalComponent* self = static_cast<World::DecalComponent*>(instance);
+        self->AffectTerrain = std::get<uint8_t>(value);
+    }
+    static Value Get_AffectMeshes(const void* instance)
+    {
+        const World::DecalComponent* self = static_cast<const World::DecalComponent*>(instance);
+        return Value(self->AffectMeshes);
+    }
+    static void Set_AffectMeshes(void* instance, const Value& value)
+    {
+        World::DecalComponent* self = static_cast<World::DecalComponent*>(instance);
+        self->AffectMeshes = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_DecalMaterial()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBB72C6901F453B91ull },
+            "DecalMaterial",
+            Kind::Asset,
+            &Get_DecalMaterial,
+            &Set_DecalMaterial,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Material",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Material or texture asset projected by this decal.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_DecalMaterial,
+            &SetAssetIdentity_DecalMaterial,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Extents()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA146196A21EA1B44ull },
+            "Extents",
+            Kind::Vec3,
+            &Get_Extents,
+            &Set_Extents,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Half size extents of the projection box in meters.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FadeFactor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xDCF420EBE8BC505Aull },
+            "FadeFactor",
+            Kind::Float,
+            &Get_FadeFactor,
+            &Set_FadeFactor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Decal opacity fade multiplier.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_NormalAngleCutoff()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x726A35F8675E509Eull },
+            "NormalAngleCutoff",
+            Kind::Float,
+            &Get_NormalAngleCutoff,
+            &Set_NormalAngleCutoff,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(89.000000f), false, false, "Maximum surface angle in degrees before decal fades out to prevent grazing stretching.", false, "", {  }, "", std::nullopt },
+            Value(60.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AffectTerrain()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x328982D2432283Full },
+            "AffectTerrain",
+            Kind::UInt8,
+            &Get_AffectTerrain,
+            &Set_AffectTerrain,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the decal projects onto terrain.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AffectMeshes()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD37244656CD13DEFull },
+            "AffectMeshes",
+            Kind::UInt8,
+            &Get_AffectMeshes,
+            &Set_AffectMeshes,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the decal projects onto static meshes.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::DecalComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::DecalComponent" },
+            "DecalComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::DecalComponent),
+            TypeCategory::Component,
+            {
+                Field_DecalMaterial(),
+                Field_Extents(),
+                Field_FadeFactor(),
+                Field_NormalAngleCutoff(),
+                Field_AffectTerrain(),
+                Field_AffectMeshes(),
+            },
+            &StorageBindingOf(),
+            "Rendering/Decal",
+            "3D projected decal box applying blood, bullet holes, footprints, or puddle details.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::ConvexCollider3DComponent>
+{
+    static Value Get_MeshSource(const void* instance)
+    {
+        const World::ConvexCollider3DComponent* self = static_cast<const World::ConvexCollider3DComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->MeshSource)>>::GetPath(self->MeshSource));
+    }
+    static void Set_MeshSource(void* instance, const Value& value)
+    {
+        World::ConvexCollider3DComponent* self = static_cast<World::ConvexCollider3DComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->MeshSource)>>::SetPath(self->MeshSource, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_MeshSource(const void* instance)
+    {
+        const World::ConvexCollider3DComponent* self = static_cast<const World::ConvexCollider3DComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->MeshSource)>>::GetIdentity(self->MeshSource);
+    }
+    static void SetAssetIdentity_MeshSource(void* instance, uint64_t identity)
+    {
+        World::ConvexCollider3DComponent* self = static_cast<World::ConvexCollider3DComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->MeshSource)>>::SetIdentity(self->MeshSource, identity);
+    }
+    static Value Get_HullCount(const void* instance)
+    {
+        const World::ConvexCollider3DComponent* self = static_cast<const World::ConvexCollider3DComponent*>(instance);
+        return Value(self->HullCount);
+    }
+    static void Set_HullCount(void* instance, const Value& value)
+    {
+        World::ConvexCollider3DComponent* self = static_cast<World::ConvexCollider3DComponent*>(instance);
+        self->HullCount = std::get<uint32_t>(value);
+    }
+    static Value Get_MaxVerticesPerHull(const void* instance)
+    {
+        const World::ConvexCollider3DComponent* self = static_cast<const World::ConvexCollider3DComponent*>(instance);
+        return Value(self->MaxVerticesPerHull);
+    }
+    static void Set_MaxVerticesPerHull(void* instance, const Value& value)
+    {
+        World::ConvexCollider3DComponent* self = static_cast<World::ConvexCollider3DComponent*>(instance);
+        self->MaxVerticesPerHull = std::get<uint32_t>(value);
+    }
+    static Value Get_ConcavityThreshold(const void* instance)
+    {
+        const World::ConvexCollider3DComponent* self = static_cast<const World::ConvexCollider3DComponent*>(instance);
+        return Value(self->ConcavityThreshold);
+    }
+    static void Set_ConcavityThreshold(void* instance, const Value& value)
+    {
+        World::ConvexCollider3DComponent* self = static_cast<World::ConvexCollider3DComponent*>(instance);
+        self->ConcavityThreshold = std::get<float>(value);
+    }
+    static Value Get_IsTrigger(const void* instance)
+    {
+        const World::ConvexCollider3DComponent* self = static_cast<const World::ConvexCollider3DComponent*>(instance);
+        return Value(self->IsTrigger);
+    }
+    static void Set_IsTrigger(void* instance, const Value& value)
+    {
+        World::ConvexCollider3DComponent* self = static_cast<World::ConvexCollider3DComponent*>(instance);
+        self->IsTrigger = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_MeshSource()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6B4C91E777F5B6A8ull },
+            "MeshSource",
+            Kind::Asset,
+            &Get_MeshSource,
+            &Set_MeshSource,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Mesh",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Source mesh asset decomposed into convex hulls.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_MeshSource,
+            &SetAssetIdentity_MeshSource,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_HullCount()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD4BA2FE903CA1FAEull },
+            "HullCount",
+            Kind::UInt32,
+            &Get_HullCount,
+            &Set_HullCount,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Number of convex hull primitives in this compound collider.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxVerticesPerHull()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x39C3A5AED1FC187Bull },
+            "MaxVerticesPerHull",
+            Kind::UInt32,
+            &Get_MaxVerticesPerHull,
+            &Set_MaxVerticesPerHull,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(8.000000f), std::optional<float>(128.000000f), false, false, "Maximum vertex cap per convex hull.", false, "", {  }, "", std::nullopt },
+            Value(32),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ConcavityThreshold()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4DF41DF16626DD79ull },
+            "ConcavityThreshold",
+            Kind::Float,
+            &Get_ConcavityThreshold,
+            &Set_ConcavityThreshold,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.001000f), std::optional<float>(1.000000f), false, false, "Concavity tolerance error before splitting hulls.", false, "", {  }, "", std::nullopt },
+            Value(0.05f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IsTrigger()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1D6E688733C079A4ull },
+            "IsTrigger",
+            Kind::UInt8,
+            &Get_IsTrigger,
+            &Set_IsTrigger,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the collider behaves as a trigger volume.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::ConvexCollider3DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::ConvexCollider3DComponent" },
+            "ConvexCollider3DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::ConvexCollider3DComponent),
+            TypeCategory::Component,
+            {
+                Field_MeshSource(),
+                Field_HullCount(),
+                Field_MaxVerticesPerHull(),
+                Field_ConcavityThreshold(),
+                Field_IsTrigger(),
+            },
+            &StorageBindingOf(),
+            "Physics/3D",
+            "Compound convex hull collider generated via convex decomposition.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -13745,6 +14156,8 @@ const TypeSchema& WeSchemaOf_AnimGraphComponent() { return GeneratedAccess<World
 const TypeSchema& WeSchemaOf_NavMeshAgentComponent() { return GeneratedAccess<World::NavMeshAgentComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_NavMeshObstacleComponent() { return GeneratedAccess<World::NavMeshObstacleComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshLODComponent() { return GeneratedAccess<World::MeshLODComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_DecalComponent() { return GeneratedAccess<World::DecalComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_ConvexCollider3DComponent() { return GeneratedAccess<World::ConvexCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -13836,6 +14249,8 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_NavMeshAgentComponent(),
 			WeSchemaOf_NavMeshObstacleComponent(),
 			WeSchemaOf_MeshLODComponent(),
+			WeSchemaOf_DecalComponent(),
+			WeSchemaOf_ConvexCollider3DComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};
