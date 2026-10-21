@@ -76,6 +76,9 @@ const TypeSchema& WeSchemaOf_HLODComponent();
 const TypeSchema& WeSchemaOf_RVTComponent();
 const TypeSchema& WeSchemaOf_WaterBodyComponent();
 const TypeSchema& WeSchemaOf_WeatherSystemComponent();
+const TypeSchema& WeSchemaOf_BiomePCGComponent();
+const TypeSchema& WeSchemaOf_EQSComponent();
+const TypeSchema& WeSchemaOf_FoliageInteractionComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -14764,6 +14767,542 @@ struct GeneratedAccess<World::WeatherSystemComponent>
 };
 
 template <>
+struct GeneratedAccess<World::BiomePCGComponent>
+{
+    static Value Get_RuleAsset(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->RuleAsset)>>::GetPath(self->RuleAsset));
+    }
+    static void Set_RuleAsset(void* instance, const Value& value)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->RuleAsset)>>::SetPath(self->RuleAsset, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_RuleAsset(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->RuleAsset)>>::GetIdentity(self->RuleAsset);
+    }
+    static void SetAssetIdentity_RuleAsset(void* instance, uint64_t identity)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->RuleAsset)>>::SetIdentity(self->RuleAsset, identity);
+    }
+    static Value Get_MinElevation(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return Value(self->MinElevation);
+    }
+    static void Set_MinElevation(void* instance, const Value& value)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        self->MinElevation = std::get<float>(value);
+    }
+    static Value Get_MaxElevation(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return Value(self->MaxElevation);
+    }
+    static void Set_MaxElevation(void* instance, const Value& value)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        self->MaxElevation = std::get<float>(value);
+    }
+    static Value Get_MaxSlope(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return Value(self->MaxSlope);
+    }
+    static void Set_MaxSlope(void* instance, const Value& value)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        self->MaxSlope = std::get<float>(value);
+    }
+    static Value Get_MoistureThreshold(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return Value(self->MoistureThreshold);
+    }
+    static void Set_MoistureThreshold(void* instance, const Value& value)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        self->MoistureThreshold = std::get<float>(value);
+    }
+    static Value Get_Seed(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return Value(self->Seed);
+    }
+    static void Set_Seed(void* instance, const Value& value)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        self->Seed = std::get<uint32_t>(value);
+    }
+    static Value Get_AutoDeformTerrain(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return Value(self->AutoDeformTerrain);
+    }
+    static void Set_AutoDeformTerrain(void* instance, const Value& value)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        self->AutoDeformTerrain = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_RuleAsset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x28A95E4F60C10E30ull },
+            "RuleAsset",
+            Kind::Asset,
+            &Get_RuleAsset,
+            &Set_RuleAsset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "PCGRule",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Rule graph definition asset.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_RuleAsset,
+            &SetAssetIdentity_RuleAsset,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MinElevation()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x24E77149936862D1ull },
+            "MinElevation",
+            Kind::Float,
+            &Get_MinElevation,
+            &Set_MinElevation,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5000.000000f), false, false, "Minimum elevation bound in meters.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxElevation()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE3464B396EB78D4Full },
+            "MaxElevation",
+            Kind::Float,
+            &Get_MaxElevation,
+            &Set_MaxElevation,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5000.000000f), false, false, "Maximum elevation bound in meters.", false, "", {  }, "", std::nullopt },
+            Value(1000.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxSlope()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xAE76B71919DB47C7ull },
+            "MaxSlope",
+            Kind::Float,
+            &Get_MaxSlope,
+            &Set_MaxSlope,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(89.000000f), false, false, "Maximum slope angle in degrees where foliage or settlements can spawn.", false, "", {  }, "", std::nullopt },
+            Value(35.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MoistureThreshold()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xDE5B21E09A087FB7ull },
+            "MoistureThreshold",
+            Kind::Float,
+            &Get_MoistureThreshold,
+            &Set_MoistureThreshold,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Minimum moisture humidity threshold.", false, "", {  }, "", std::nullopt },
+            Value(0.3f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Seed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x447253AACC34B7DFull },
+            "Seed",
+            Kind::UInt32,
+            &Get_Seed,
+            &Set_Seed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Procedural pseudorandom seed.", false, "", {  }, "", std::nullopt },
+            Value(1337),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AutoDeformTerrain()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xABEC0982FD1EB241ull },
+            "AutoDeformTerrain",
+            Kind::UInt8,
+            &Get_AutoDeformTerrain,
+            &Set_AutoDeformTerrain,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically cut, fill, and slope terrain along spline roads.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::BiomePCGComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::BiomePCGComponent" },
+            "BiomePCGComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::BiomePCGComponent),
+            TypeCategory::Component,
+            {
+                Field_RuleAsset(),
+                Field_MinElevation(),
+                Field_MaxElevation(),
+                Field_MaxSlope(),
+                Field_MoistureThreshold(),
+                Field_Seed(),
+                Field_AutoDeformTerrain(),
+            },
+            &StorageBindingOf(),
+            "World/PCG",
+            "Procedural Content Generation rules for biomes, vegetation clusters and terrain deformation.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::EQSComponent>
+{
+    static Value Get_QueryCenter(const void* instance)
+    {
+        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
+        return Value(self->QueryCenter);
+    }
+    static void Set_QueryCenter(void* instance, const Value& value)
+    {
+        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
+        self->QueryCenter = std::get<glm::vec3>(value);
+    }
+    static Value Get_QueryRadius(const void* instance)
+    {
+        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
+        return Value(self->QueryRadius);
+    }
+    static void Set_QueryRadius(void* instance, const Value& value)
+    {
+        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
+        self->QueryRadius = std::get<float>(value);
+    }
+    static Value Get_GridSpacing(const void* instance)
+    {
+        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
+        return Value(self->GridSpacing);
+    }
+    static void Set_GridSpacing(void* instance, const Value& value)
+    {
+        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
+        self->GridSpacing = std::get<float>(value);
+    }
+    static Value Get_BestCoverFound(const void* instance)
+    {
+        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
+        return Value(self->BestCoverFound);
+    }
+    static void Set_BestCoverFound(void* instance, const Value& value)
+    {
+        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
+        self->BestCoverFound = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_QueryCenter()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x63E511B7A7E6BE82ull },
+            "QueryCenter",
+            Kind::Vec3,
+            &Get_QueryCenter,
+            &Set_QueryCenter,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Center coordinates of the tactical query in world space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_QueryRadius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC2204973EB1F468Dull },
+            "QueryRadius",
+            Kind::Float,
+            &Get_QueryRadius,
+            &Set_QueryRadius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(200.000000f), false, false, "Query radius in meters.", false, "", {  }, "", std::nullopt },
+            Value(20.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_GridSpacing()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBBC2D5C259C7BDBEull },
+            "GridSpacing",
+            Kind::Float,
+            &Get_GridSpacing,
+            &Set_GridSpacing,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.500000f), std::optional<float>(20.000000f), false, false, "Spacing distance between candidate sample points in meters.", false, "", {  }, "", std::nullopt },
+            Value(2.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_BestCoverFound()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x999386D5C13098CEull },
+            "BestCoverFound",
+            Kind::UInt8,
+            &Get_BestCoverFound,
+            &Set_BestCoverFound,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether an optimal tactical cover point was found.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::EQSComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::EQSComponent" },
+            "EQSComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::EQSComponent),
+            TypeCategory::Component,
+            {
+                Field_QueryCenter(),
+                Field_QueryRadius(),
+                Field_GridSpacing(),
+                Field_BestCoverFound(),
+            },
+            &StorageBindingOf(),
+            "AI/Tactics",
+            "Environment Query System for finding tactical cover points and line-of-sight concealment.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::FoliageInteractionComponent>
+{
+    static Value Get_PushRadius(const void* instance)
+    {
+        const World::FoliageInteractionComponent* self = static_cast<const World::FoliageInteractionComponent*>(instance);
+        return Value(self->PushRadius);
+    }
+    static void Set_PushRadius(void* instance, const Value& value)
+    {
+        World::FoliageInteractionComponent* self = static_cast<World::FoliageInteractionComponent*>(instance);
+        self->PushRadius = std::get<float>(value);
+    }
+    static Value Get_PushStrength(const void* instance)
+    {
+        const World::FoliageInteractionComponent* self = static_cast<const World::FoliageInteractionComponent*>(instance);
+        return Value(self->PushStrength);
+    }
+    static void Set_PushStrength(void* instance, const Value& value)
+    {
+        World::FoliageInteractionComponent* self = static_cast<World::FoliageInteractionComponent*>(instance);
+        self->PushStrength = std::get<float>(value);
+    }
+    static Value Get_RecoverySpeed(const void* instance)
+    {
+        const World::FoliageInteractionComponent* self = static_cast<const World::FoliageInteractionComponent*>(instance);
+        return Value(self->RecoverySpeed);
+    }
+    static void Set_RecoverySpeed(void* instance, const Value& value)
+    {
+        World::FoliageInteractionComponent* self = static_cast<World::FoliageInteractionComponent*>(instance);
+        self->RecoverySpeed = std::get<float>(value);
+    }
+    static Value Get_LeaveTracks(const void* instance)
+    {
+        const World::FoliageInteractionComponent* self = static_cast<const World::FoliageInteractionComponent*>(instance);
+        return Value(self->LeaveTracks);
+    }
+    static void Set_LeaveTracks(void* instance, const Value& value)
+    {
+        World::FoliageInteractionComponent* self = static_cast<World::FoliageInteractionComponent*>(instance);
+        self->LeaveTracks = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_PushRadius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4A57FAC766A8580Full },
+            "PushRadius",
+            Kind::Float,
+            &Get_PushRadius,
+            &Set_PushRadius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(20.000000f), false, false, "Radius around the entity where foliage is pushed and bent.", false, "", {  }, "", std::nullopt },
+            Value(1.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_PushStrength()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7694FA695937FDB4ull },
+            "PushStrength",
+            Kind::Float,
+            &Get_PushStrength,
+            &Set_PushStrength,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5.000000f), false, false, "Force displacement strength of the foliage bend.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_RecoverySpeed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1D427B6B4FEAC895ull },
+            "RecoverySpeed",
+            Kind::Float,
+            &Get_RecoverySpeed,
+            &Set_RecoverySpeed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(20.000000f), false, false, "Elastic spring recovery rate returning foliage upright.", false, "", {  }, "", std::nullopt },
+            Value(3.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LeaveTracks()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6AFA4FD5A1CCADE8ull },
+            "LeaveTracks",
+            Kind::UInt8,
+            &Get_LeaveTracks,
+            &Set_LeaveTracks,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether traversing leaves flattened tracks behind the entity.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::FoliageInteractionComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::FoliageInteractionComponent" },
+            "FoliageInteractionComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::FoliageInteractionComponent),
+            TypeCategory::Component,
+            {
+                Field_PushRadius(),
+                Field_PushStrength(),
+                Field_RecoverySpeed(),
+                Field_LeaveTracks(),
+            },
+            &StorageBindingOf(),
+            "Physics/Foliage",
+            "Physical foliage bending and track deformation when entities traverse vegetation.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -15375,6 +15914,9 @@ const TypeSchema& WeSchemaOf_HLODComponent() { return GeneratedAccess<World::HLO
 const TypeSchema& WeSchemaOf_RVTComponent() { return GeneratedAccess<World::RVTComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_WaterBodyComponent() { return GeneratedAccess<World::WaterBodyComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_WeatherSystemComponent() { return GeneratedAccess<World::WeatherSystemComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_BiomePCGComponent() { return GeneratedAccess<World::BiomePCGComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_EQSComponent() { return GeneratedAccess<World::EQSComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_FoliageInteractionComponent() { return GeneratedAccess<World::FoliageInteractionComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -15474,6 +16016,9 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_RVTComponent(),
 			WeSchemaOf_WaterBodyComponent(),
 			WeSchemaOf_WeatherSystemComponent(),
+			WeSchemaOf_BiomePCGComponent(),
+			WeSchemaOf_EQSComponent(),
+			WeSchemaOf_FoliageInteractionComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

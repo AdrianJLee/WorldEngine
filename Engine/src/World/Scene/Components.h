@@ -2693,4 +2693,108 @@ namespace World
 	static_assert(offsetof(WeatherSystemComponent, Wetness) == 16, "Wetness offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, WindSpeed) == 20, "WindSpeed offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, WindDirection) == 24, "WindDirection offset mismatch");
+
+	struct BiomePCGComponent
+	{
+		AssetRef RuleAsset;                               // 16B (offset 0)
+		float MinElevation { 0.0f };                      // 4B  (offset 16)
+		float MaxElevation { 1000.0f };                   // 4B  (offset 20)
+		float MaxSlope { 35.0f };                         // 4B  (offset 24)
+		float MoistureThreshold { 0.3f };                 // 4B  (offset 28)
+		uint32_t Seed { 1337 };                           // 4B  (offset 32)
+		uint8_t AutoDeformTerrain { 1 };                  // 1B  (offset 36)
+		uint8_t _Padding[11] { 0 };                       // 11B (offset 37..47)
+
+		BiomePCGComponent() = default;
+
+		WE_SCHEMA_BODY(World, BiomePCGComponent, Component)
+			WE_SCHEMA_META(Category("World/PCG"),
+				Doc("Procedural Content Generation rules for biomes, vegetation clusters and terrain deformation."))
+			WE_FIELD(RuleAsset, Asset, Of("PCGRule"),
+				Doc("Rule graph definition asset."));
+			WE_FIELD(MinElevation, Float, Range(0.0f, 5000.0f), Default(0.0f),
+				Doc("Minimum elevation bound in meters."));
+			WE_FIELD(MaxElevation, Float, Range(0.0f, 5000.0f), Default(1000.0f),
+				Doc("Maximum elevation bound in meters."));
+			WE_FIELD(MaxSlope, Float, Range(0.0f, 89.0f), Default(35.0f),
+				Doc("Maximum slope angle in degrees where foliage or settlements can spawn."));
+			WE_FIELD(MoistureThreshold, Float, Range(0.0f, 1.0f), Default(0.3f),
+				Doc("Minimum moisture humidity threshold."));
+			WE_FIELD(Seed, UInt32, Default(1337),
+				Doc("Procedural pseudorandom seed."));
+			WE_FIELD(AutoDeformTerrain, UInt8, Default(1),
+				Doc("Automatically cut, fill, and slope terrain along spline roads."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(BiomePCGComponent) == 48, "BiomePCGComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<BiomePCGComponent>, "BiomePCGComponent must be trivially copyable");
+	static_assert(offsetof(BiomePCGComponent, RuleAsset) == 0, "RuleAsset offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, MinElevation) == 16, "MinElevation offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, MaxElevation) == 20, "MaxElevation offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, MaxSlope) == 24, "MaxSlope offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, MoistureThreshold) == 28, "MoistureThreshold offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, Seed) == 32, "Seed offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, AutoDeformTerrain) == 36, "AutoDeformTerrain offset mismatch");
+
+	struct EQSComponent
+	{
+		glm::vec3 QueryCenter { 0.0f };                   // 12B (offset 0)
+		float QueryRadius { 20.0f };                      // 4B  (offset 12)
+		float GridSpacing { 2.0f };                       // 4B  (offset 16)
+		uint8_t BestCoverFound { 0 };                     // 1B  (offset 20)
+		uint8_t _Padding[11] { 0 };                       // 11B (offset 21..31)
+
+		EQSComponent() = default;
+
+		WE_SCHEMA_BODY(World, EQSComponent, Component)
+			WE_SCHEMA_META(Category("AI/Tactics"),
+				Doc("Environment Query System for finding tactical cover points and line-of-sight concealment."))
+			WE_FIELD(QueryCenter, Vec3,
+				Doc("Center coordinates of the tactical query in world space."));
+			WE_FIELD(QueryRadius, Float, Range(1.0f, 200.0f), Default(20.0f),
+				Doc("Query radius in meters."));
+			WE_FIELD(GridSpacing, Float, Range(0.5f, 20.0f), Default(2.0f),
+				Doc("Spacing distance between candidate sample points in meters."));
+			WE_FIELD(BestCoverFound, UInt8, Default(0),
+				Doc("Whether an optimal tactical cover point was found."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(EQSComponent) == 32, "EQSComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<EQSComponent>, "EQSComponent must be trivially copyable");
+	static_assert(offsetof(EQSComponent, QueryCenter) == 0, "QueryCenter offset mismatch");
+	static_assert(offsetof(EQSComponent, QueryRadius) == 12, "QueryRadius offset mismatch");
+	static_assert(offsetof(EQSComponent, GridSpacing) == 16, "GridSpacing offset mismatch");
+	static_assert(offsetof(EQSComponent, BestCoverFound) == 20, "BestCoverFound offset mismatch");
+
+	struct FoliageInteractionComponent
+	{
+		float PushRadius { 1.5f };                        // 4B  (offset 0)
+		float PushStrength { 1.0f };                      // 4B  (offset 4)
+		float RecoverySpeed { 3.0f };                     // 4B  (offset 8)
+		uint8_t LeaveTracks { 1 };                        // 1B  (offset 12)
+		uint8_t _Padding[19] { 0 };                       // 19B (offset 13..31)
+
+		FoliageInteractionComponent() = default;
+
+		WE_SCHEMA_BODY(World, FoliageInteractionComponent, Component)
+			WE_SCHEMA_META(Category("Physics/Foliage"),
+				Doc("Physical foliage bending and track deformation when entities traverse vegetation."))
+			WE_FIELD(PushRadius, Float, Range(0.1f, 20.0f), Default(1.5f),
+				Doc("Radius around the entity where foliage is pushed and bent."));
+			WE_FIELD(PushStrength, Float, Range(0.0f, 5.0f), Default(1.0f),
+				Doc("Force displacement strength of the foliage bend."));
+			WE_FIELD(RecoverySpeed, Float, Range(0.1f, 20.0f), Default(3.0f),
+				Doc("Elastic spring recovery rate returning foliage upright."));
+			WE_FIELD(LeaveTracks, UInt8, Default(1),
+				Doc("Whether traversing leaves flattened tracks behind the entity."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(FoliageInteractionComponent) == 32, "FoliageInteractionComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<FoliageInteractionComponent>, "FoliageInteractionComponent must be trivially copyable");
+	static_assert(offsetof(FoliageInteractionComponent, PushRadius) == 0, "PushRadius offset mismatch");
+	static_assert(offsetof(FoliageInteractionComponent, PushStrength) == 4, "PushStrength offset mismatch");
+	static_assert(offsetof(FoliageInteractionComponent, RecoverySpeed) == 8, "RecoverySpeed offset mismatch");
+	static_assert(offsetof(FoliageInteractionComponent, LeaveTracks) == 12, "LeaveTracks offset mismatch");
 }
+
+

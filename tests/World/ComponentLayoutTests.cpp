@@ -112,6 +112,9 @@ namespace
 		{ "World::RVTComponent",                    32 },
 		{ "World::WaterBodyComponent",              48 },
 		{ "World::WeatherSystemComponent",          48 },
+		{ "World::BiomePCGComponent",              48 },
+		{ "World::EQSComponent",                    32 },
+		{ "World::FoliageInteractionComponent",     32 },
 	};
 
 	// 非 schema 组件:不在注册表里,预算与豁免由 ComponentLayoutBudget.h 的编译期断言覆盖。
@@ -208,6 +211,7 @@ int main()
 		return 1;
 	}
 }
+
 
 
 

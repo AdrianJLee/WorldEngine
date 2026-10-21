@@ -2832,3 +2832,23 @@ set_tests_properties(World.NextGen3D PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldPCGAndLivingAITests World/PCGAndLivingAITests.cpp)
+target_link_libraries(WorldPCGAndLivingAITests PRIVATE World)
+target_compile_features(WorldPCGAndLivingAITests PRIVATE cxx_std_17)
+target_compile_definitions(WorldPCGAndLivingAITests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldPCGAndLivingAITests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldPCGAndLivingAITests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.PCGAndLivingAI COMMAND WorldPCGAndLivingAITests)
+set_tests_properties(World.PCGAndLivingAI PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
