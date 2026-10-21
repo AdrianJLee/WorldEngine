@@ -76,41 +76,41 @@ PSInput VSMain(VSInput input)
 {
     PSInput output;
 
-    float4x4 instanceModel = float4x4(
-        input.InstanceTransform0,
-        input.InstanceTransform1,
-        input.InstanceTransform2,
-        input.InstanceTransform3
-    );
-
     float3 localPos = input.Position;
 
     // 顶点风场扰动摇摆 (Wind Sway)
-    // 根部坚固锚定 (y <= 0 不动), 随着高度递增呈幂次弯曲
-    float heightFactor = pow(clamp(localPos.y * 0.5f, 0.0f, 2.0f), 1.5f);
+    float heightFactor = pow(clamp(localPos.y * 0.7f, 0.0f, 2.0f), 1.5f);
     float time = u_Foliage.WindParams.z;
     float speed = u_Foliage.WindParams.x;
     float strength = u_Foliage.WindParams.y;
     float phase = input.InstanceParams.x;
 
-    float3 instancePos = float3(instanceModel[3].x, instanceModel[3].y, instanceModel[3].z);
+    float3 instancePos = input.InstanceTransform3.xyz;
     float spatialWave = dot(instancePos.xz, u_Foliage.WindDirection.xz) * 0.15f;
-    float sway = sin(spatialWave + time * speed + phase) * strength;
-    float microFlutter = cos(time * speed * 3.1f + phase * 2.0f) * 0.2f * strength;
+    float sway = sin(spatialWave + time * speed + phase) * strength * 0.35f;
+    float microFlutter = cos(time * speed * 3.1f + phase * 2.0f) * 0.08f * strength;
 
     float3 windOffset = u_Foliage.WindDirection.xyz * (sway + microFlutter) * heightFactor;
     localPos += windOffset;
 
-    float4 worldPos = mul(instanceModel, float4(localPos, 1.0f));
-    output.WorldPos = worldPos.xyz;
+    // 列向量精确线性组合，彻底杜绝转置/行优先歧义
+    float3 worldPos = input.InstanceTransform0.xyz * localPos.x +
+                      input.InstanceTransform1.xyz * localPos.y +
+                      input.InstanceTransform2.xyz * localPos.z +
+                      input.InstanceTransform3.xyz;
+    output.WorldPos = worldPos;
 
-    float3x3 normalMatrix = float3x3(instanceModel[0].xyz, instanceModel[1].xyz, instanceModel[2].xyz);
-    output.Normal = normalize(mul(normalMatrix, input.Normal));
+    float3 worldNormal = normalize(
+        input.InstanceTransform0.xyz * input.Normal.x +
+        input.InstanceTransform1.xyz * input.Normal.y +
+        input.InstanceTransform2.xyz * input.Normal.z
+    );
+    output.Normal = worldNormal;
     output.TexCoord = input.TexCoord;
 
-    output.Position = mul(u_Camera.ViewProjection, worldPos);
+    output.Position = mul(u_Camera.ViewProjection, float4(worldPos, 1.0f));
 
-    float dist = distance(worldPos.xyz, u_Camera.CameraPosition.xyz);
+    float dist = distance(worldPos, u_Camera.CameraPosition.xyz);
     output.Params = float4(dist, input.InstanceParams.y, input.InstanceParams.x, 0.0f);
 
     return output;
@@ -142,7 +142,11 @@ float4 PSMain(PSInput input) : SV_Target
         discard;
 
     float3 N = normalize(input.Normal);
-    float3 ambient = u_Light.Ambient.rgb * u_Light.Ambient.a * albedo.rgb;
+    
+    // 根部接触环境光遮蔽 (Ground Root AO)
+    float rootAO = lerp(0.35f, 1.0f, saturate(1.0f - input.TexCoord.y * 0.85f));
+
+    float3 ambient = u_Light.Ambient.rgb * u_Light.Ambient.a * albedo.rgb * rootAO;
 
     float3 directLight = float3(0.0f);
     uint dirLightCount = u_Light.LightCounts.x;
@@ -152,10 +156,10 @@ float4 PSMain(PSInput input) : SV_Target
         float NdotL = max(dot(N, L), 0.0f);
 
         // 叶片背光透光次表面半透散射 (Subsurface Translucency)
-        float backLight = max(dot(-N, L), 0.0f) * 0.4f;
+        float backLight = max(dot(-N, L), 0.0f) * 0.5f;
 
         float3 lightColor = u_Light.Lights[i].ColorIntensity.rgb * u_Light.Lights[i].ColorIntensity.a;
-        directLight += (NdotL + backLight) * lightColor * albedo.rgb;
+        directLight += (NdotL + backLight) * lightColor * albedo.rgb * rootAO;
     }
 
     float3 finalColor = ambient + directLight;

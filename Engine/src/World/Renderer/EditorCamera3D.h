@@ -38,6 +38,7 @@ namespace World
 
 		// ---- 操作 ----
 		void Orbit(float deltaYawDegrees, float deltaPitchDegrees);
+		void RotateInPlace(float deltaYawDegrees, float deltaPitchDegrees);
 		void Pan(float deltaRight, float deltaUp);
 		void Dolly(float deltaDistance);
 		void FocusOn(const glm::vec3& point, float distance);

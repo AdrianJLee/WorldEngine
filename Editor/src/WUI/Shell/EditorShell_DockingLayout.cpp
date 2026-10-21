@@ -118,9 +118,61 @@ void EditorShell::TogglePanel(Wui::WuiContext& ctx, const std::string& panel){
 		}
 		if (m_Layout.Contains(panel))
 		{
-			if (m_Layout.RemoveTab(panel))
-				RecordDockChange(ctx, "hide", panel, before);
-			return;
+			bool isActiveTab = false;
+			std::function<void(const Wui::DockNode&)> checkActive = [&](const Wui::DockNode& node)
+			{
+				if (node.IsTabs())
+				{
+					if (node.Active < node.Panels.size() && node.Panels[node.Active] == panel)
+						isActiveTab = true;
+					return;
+				}
+				for (const Wui::DockNode& child : node.Children)
+					checkActive(child);
+			};
+			checkActive(m_Layout.Root);
+
+			if (isActiveTab)
+			{
+				if (m_Layout.RemoveTab(panel))
+					RecordDockChange(ctx, "hide", panel, before);
+				return;
+			}
+			else
+			{
+				std::function<bool(Wui::DockNode&)> activateTab = [&](Wui::DockNode& node) -> bool
+				{
+					if (node.IsTabs())
+					{
+						for (size_t i = 0; i < node.Panels.size(); ++i)
+						{
+							if (node.Panels[i] == panel)
+							{
+								node.Active = i;
+								return true;
+							}
+						}
+						return false;
+					}
+					for (Wui::DockNode& child : node.Children)
+					{
+						if (activateTab(child))
+							return true;
+					}
+					return false;
+				};
+				if (activateTab(m_Layout.Root))
+				{
+					m_ActiveWindowTag.clear();
+					SaveLayout();
+					RecordDockChange(ctx, "activate", panel, before);
+					if (panel == "terrain_editor")
+						SetEditorToolMode(EditorToolMode::Landscape);
+					else if (panel == "foliage_editor")
+						SetEditorToolMode(EditorToolMode::Foliage);
+					return;
+				}
+			}
 		}
 		{
 			// 优先回到该面板**上次所在的标签组**(RenderTabs 每帧刷新锚点表);
@@ -138,9 +190,19 @@ void EditorShell::TogglePanel(Wui::WuiContext& ctx, const std::string& panel){
 				fresh.Root.Active = 0;
 				m_Layout = std::move(fresh);
 				RecordDockChange(ctx, "show", panel, before);
+				if (panel == "terrain_editor")
+					SetEditorToolMode(EditorToolMode::Landscape);
+				else if (panel == "foliage_editor")
+					SetEditorToolMode(EditorToolMode::Foliage);
 			}
 			else if (m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
+			{
 				RecordDockChange(ctx, "show", panel, before);
+				if (panel == "terrain_editor")
+					SetEditorToolMode(EditorToolMode::Landscape);
+				else if (panel == "foliage_editor")
+					SetEditorToolMode(EditorToolMode::Foliage);
+			}
 		}
 	}
 

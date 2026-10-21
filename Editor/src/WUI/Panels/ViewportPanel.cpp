@@ -16,6 +16,9 @@
 #include "World/WUI/WuiWidgets.h"
 #include "Core/EditorPreferences.h"
 #include "WUI/Panels/TerrainPanel.h"
+#include "WUI/Panels/FoliagePanel.h"
+#include "World/Foliage/Foliage.h"
+#include "World/Foliage/FoliageRenderer.h"
 #include "World/Terrain/Terrain.h"
 #include "World/Terrain/TerrainRenderer.h"
 #include "World/Core/Input.h"
@@ -458,7 +461,8 @@ namespace World
 			const float leftIslandX = sceneRect.X + kChromePad;
 			const float leftIslandY = sceneRect.Y + kChromePad;
 			// 受中岛左边界严格防护
-			const float maxLeftIslandW = std::max(viewButtonW + 8.0f, pillLeftBound - leftIslandX);
+			const float minGuaranteedW = viewButtonW + 14.0f + modeSwitcherW + 12.0f;
+			const float maxLeftIslandW = std::max(minGuaranteedW, pillLeftBound - leftIslandX);
 			const float leftIslandW = std::min(fullLeftIslandW, maxLeftIslandW);
 
 			leftIslandRect = { leftIslandX, leftIslandY, leftIslandW, kIslandH };
@@ -1727,6 +1731,144 @@ namespace World
 			}
 		}
 
+		// ---- 3D 植被模式 (Foliage Mode) 视口直接操纵与笔刷渲染 ----
+		const bool isFoliageMode = (m_Host.GetEditorToolMode() == EditorToolMode::Foliage);
+		if (isFoliageMode && (focused || hovered))
+		{
+			FoliagePanel* foliagePanel = m_Host.GetFoliagePanel();
+			FoliageData* foliageData = foliagePanel ? foliagePanel->GetActiveFoliage() : nullptr;
+			if (foliagePanel && foliageData)
+			{
+				const bool shift = Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift);
+				if (ctx.IsKeyPressed(KeyCodes::LeftBracket))
+				{
+					if (shift)
+						foliagePanel->SetBrushDensity(std::clamp(foliagePanel->GetBrushDensity() - 0.2f, 0.1f, 10.0f));
+					else
+						foliagePanel->SetBrushRadius(std::clamp(foliagePanel->GetBrushRadius() - 1.0f, 1.0f, 100.0f));
+				}
+				else if (ctx.IsKeyPressed(KeyCodes::RightBracket))
+				{
+					if (shift)
+						foliagePanel->SetBrushDensity(std::clamp(foliagePanel->GetBrushDensity() + 0.2f, 0.1f, 10.0f));
+					else
+						foliagePanel->SetBrushRadius(std::clamp(foliagePanel->GetBrushRadius() + 1.0f, 1.0f, 100.0f));
+				}
+
+				Ref<Scene> activeScene = m_Host.GetActiveScene();
+				std::shared_ptr<TerrainData> terrain = nullptr;
+				glm::mat4 terrainWorld { 1.0f };
+				if (activeScene)
+				{
+					for (auto [handle, comp] : activeScene->GetRegistry().view<TerrainComponent>().each())
+					{
+						Entity e(activeScene.get(), handle);
+						if (e.HasComponent<TransformComponent>())
+						{
+							terrainWorld = e.GetComponent<TransformComponent>().GetLocalMatrix();
+							if (e.HasComponent<WorldTransformComponent>())
+								terrainWorld = e.GetComponent<WorldTransformComponent>().Matrix;
+						}
+						terrain = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+						break;
+					}
+				}
+
+				const glm::vec2 mousePos = ctx.Input().MousePos;
+				const bool mouseInViewport = (mousePos.x >= sceneRect.X && mousePos.x <= sceneRect.X + sceneRect.W &&
+					mousePos.y >= sceneRect.Y && mousePos.y <= sceneRect.Y + sceneRect.H);
+
+				if (terrain && mouseInViewport)
+				{
+					const Wui::GizmoCamera gizmoCamera = m_Host.GetGizmoCamera();
+					const float ndcX = ((mousePos.x - sceneRect.X) / sceneRect.W) * 2.0f - 1.0f;
+					const float ndcY = 1.0f - ((mousePos.y - sceneRect.Y) / sceneRect.H) * 2.0f;
+
+					const glm::mat4 invVP = glm::inverse(gizmoCamera.ViewProjection);
+					glm::vec4 nearPointClip(ndcX, ndcY, -1.0f, 1.0f);
+					glm::vec4 farPointClip(ndcX, ndcY, 1.0f, 1.0f);
+					glm::vec4 nearPointWorld = invVP * nearPointClip;
+					glm::vec4 farPointWorld = invVP * farPointClip;
+					if (std::abs(nearPointWorld.w) > 1e-6f) nearPointWorld /= nearPointWorld.w;
+					if (std::abs(farPointWorld.w) > 1e-6f) farPointWorld /= farPointWorld.w;
+
+					glm::vec3 rayOrigin = gizmoCamera.Position;
+					glm::vec3 rayDir = glm::normalize(glm::vec3(farPointWorld) - rayOrigin);
+					if (gizmoCamera.IsOrthographic)
+					{
+						rayOrigin = glm::vec3(nearPointWorld);
+						rayDir = gizmoCamera.Forward;
+					}
+
+					const glm::mat4 invTerrainWorld = glm::inverse(terrainWorld);
+					const glm::vec3 localOrigin = glm::vec3(invTerrainWorld * glm::vec4(rayOrigin, 1.0f));
+					const glm::vec3 localDir = glm::normalize(glm::vec3(invTerrainWorld * glm::vec4(rayDir, 0.0f)));
+
+					TerrainRaycastHit hit;
+					const bool hasHit = terrain->Raycast(localOrigin, localDir, 2000.0f, hit);
+					if (hasHit)
+					{
+						const float R = foliagePanel->GetBrushRadius();
+						const bool eraseMode = shift || (foliagePanel->GetTool() == FoliageBrushTool::Erase);
+
+						// 32 段贴地光圈
+						constexpr int kSegments = 32;
+						glm::vec4 clips[kSegments];
+						for (int i = 0; i < kSegments; ++i)
+						{
+							const float angle = static_cast<float>(i) / static_cast<float>(kSegments) * 6.2831853f;
+							const float px = hit.Point.x + R * std::cos(angle);
+							const float pz = hit.Point.z + R * std::sin(angle);
+							const float py = terrain->SampleHeight(px, pz) + 0.05f;
+							clips[i] = gizmoCamera.ViewProjection * (terrainWorld * glm::vec4(px, py, pz, 1.0f));
+						}
+
+						const Wui::WuiColor ringColor = eraseMode
+							? Wui::WuiColor { 1.0f, 0.09f, 0.27f, 0.95f }
+							: Wui::WuiColor { 0.0f, 0.90f, 0.46f, 0.95f };
+
+						for (int i = 0; i < kSegments; ++i)
+						{
+							PushProjectedSegment(ctx, gizmoCamera.ViewProjection, sceneRect,
+								clips[i], clips[(i + 1) % kSegments], ringColor, 2.4f);
+						}
+
+						// 浮动 HUD 提示
+						char hudText[128] = {};
+						std::snprintf(hudText, sizeof(hudText), "Foliage: %s | R: %.1fm | D: %.1f | Shift: 擦除",
+							eraseMode ? "[擦除 Erase]" : "[散布 Paint]", R, foliagePanel->GetBrushDensity());
+
+						const float fontSz = theme.FontSizeSmall;
+						const float textW = ctx.MeasureTextWidth(hudText, fontSz);
+						const float cardW = textW + 16.0f;
+						const float cardH = 22.0f;
+						float cardX = mousePos.x + 20.0f;
+						float cardY = mousePos.y - 28.0f;
+						if (cardX + cardW > sceneRect.X + sceneRect.W - 10.0f) cardX = mousePos.x - cardW - 10.0f;
+						if (cardY < sceneRect.Y + 10.0f) cardY = sceneRect.Y + 10.0f;
+
+						Wui::Toolbar(ctx, { cardX, cardY, cardW, cardH }, theme, 4.0f, 0.88f);
+						Wui::Label(ctx, { cardX + 8.0f, cardY + 3.0f }, hudText, theme.Text, fontSz);
+
+						// 视口直接拖拽种草与擦除
+						if (ctx.Input().MouseDown[0])
+						{
+							if (eraseMode)
+							{
+								foliageData->EraseFoliage(hit.Point, R, static_cast<int32_t>(foliagePanel->GetActiveTypeIndex()));
+							}
+							else
+							{
+								foliageData->PaintFoliage(hit.Point, R, foliagePanel->GetBrushDensity(),
+									foliagePanel->GetActiveTypeIndex(), terrain.get());
+							}
+							m_Host.MarkDocumentDirty();
+						}
+					}
+				}
+			}
+		}
+
 		// 3D 网格实体的选中框:投影单位网格包围盒的 12 条棱(真 3D 线框盒),画在场景图之上。
 		// 近的棱更实、远的棱更淡,按相机深度排序(远的先画);整体用 ClipPush 夹在场景图区域内。
 		// 旧实现是 SceneRenderer 里用 Renderer2D 按实体 Transform 画的一个 2D 方块 ——
@@ -2825,6 +2967,30 @@ namespace World
 						tp->SetBrushStrength(tp->GetBrushStrength() + 0.05f);
 					else
 						tp->SetBrushRadius(tp->GetBrushRadius() + 1.0f);
+					return true;
+				}
+			}
+		}
+
+		if (m_Host.GetEditorToolMode() == EditorToolMode::Foliage)
+		{
+			FoliagePanel* fp = m_Host.GetFoliagePanel();
+			if (fp)
+			{
+				if (keyCode == KeyCodes::LeftBracket)
+				{
+					if (shift)
+						fp->SetBrushDensity(std::clamp(fp->GetBrushDensity() - 0.2f, 0.1f, 10.0f));
+					else
+						fp->SetBrushRadius(std::clamp(fp->GetBrushRadius() - 1.0f, 1.0f, 100.0f));
+					return true;
+				}
+				if (keyCode == KeyCodes::RightBracket)
+				{
+					if (shift)
+						fp->SetBrushDensity(std::clamp(fp->GetBrushDensity() + 0.2f, 0.1f, 10.0f));
+					else
+						fp->SetBrushRadius(std::clamp(fp->GetBrushRadius() + 1.0f, 1.0f, 100.0f));
 					return true;
 				}
 			}

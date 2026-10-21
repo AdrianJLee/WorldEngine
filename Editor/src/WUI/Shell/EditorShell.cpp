@@ -1286,6 +1286,8 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 			{ "audio_profiler",  { "panel.audio_profiler", "音频分析器 (Audio Profiler)" } },
 			{ "physics_material_editor", { "panel.physics_material_editor", "Physics Material Editor" } },
 			{ "curve_editor",    { "panel.curve_editor", "Curve Editor" } },
+			{ "terrain_editor",  { "panel.terrain_editor", "地貌" } },
+			{ "foliage_editor",  { "panel.foliage_editor", "植被" } },
 		};
 		(void)kTitles;
 		// PLUG-T3b:插件面板标题来自插件注册(不受本地化表约束;卸载后注册表为空,回退到 id)。

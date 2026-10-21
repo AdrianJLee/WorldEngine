@@ -1354,6 +1354,16 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		// 菜单分组:独立窗口(自带 OS 窗口)与停靠面板分开列,并给出不可点击的分组标题 ——
 		// 之前两类平铺在一起,用户看不出"Gallery/Input Map 是独立窗口,其余是停靠标签"。
 		std::vector<MenuEntry> windowEntries;
+		windowEntries.push_back({ Wui::Tr("menu.window.modes", "Workspace Modes (工作区模式)"), false, {}, true });
+		windowEntries.push_back({ Wui::Tr("menu.window.mode_select", "✦ 选择模式 (Select) [Shift+1]"),
+			GetEditorToolMode() == EditorToolMode::Select,
+			[this] { SetEditorToolMode(EditorToolMode::Select); } });
+		windowEntries.push_back({ Wui::Tr("menu.window.mode_landscape", "✦ 地貌编辑模式 (Landscape) [Shift+2]"),
+			GetEditorToolMode() == EditorToolMode::Landscape,
+			[this] { SetEditorToolMode(EditorToolMode::Landscape); } });
+		windowEntries.push_back({ Wui::Tr("menu.window.mode_foliage", "✦ 植被散布模式 (Foliage) [Shift+3]"),
+			GetEditorToolMode() == EditorToolMode::Foliage,
+			[this] { SetEditorToolMode(EditorToolMode::Foliage); } });
 		// U25-M2:写材质的入口 —— "从零新建一份材质"(模板 + 名称 + 目录 + 实时落点),
 		// 与内容浏览器空白右键的 New ▸ Material… 共用同一个向导(实现全在内容浏览器面板)。
 		windowEntries.push_back({ Wui::Tr("menu.window.new_material", "New Material…"), false,

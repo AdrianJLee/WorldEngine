@@ -170,26 +170,70 @@ namespace World
 			s_State.Sampler = device->CreateSampler(samplerDesc);
 		}
 
-		// 3. 创建 4 层程序化默认纯色纹理 (草地绿、泥土棕、岩石灰、沙地黄)
-		const uint8_t defaultColors[4][4] = {
-			{ 0x38, 0x8E, 0x3C, 0xFF }, // Layer 0: 草地绿色
-			{ 0x5D, 0x40, 0x37, 0xFF }, // Layer 1: 泥土棕色
-			{ 0x78, 0x90, 0x9C, 0xFF }, // Layer 2: 岩石青灰色
-			{ 0xD7, 0xCC, 0x8C, 0xFF }  // Layer 3: 沙地浅黄色
-		};
+		// 3. 创建 4 层工业级 128x128 程序化微噪波纹理 (草地、泥土、岩石、沙地)
+		constexpr uint32_t kNoiseTexDim = 128;
+		std::vector<uint8_t> noiseBuffer(kNoiseTexDim * kNoiseTexDim * 4);
+
 		for (uint32_t i = 0; i < 4; ++i)
 		{
 			if (!s_State.DefaultTextures[i])
 			{
+				for (uint32_t y = 0; y < kNoiseTexDim; ++y)
+				{
+					for (uint32_t x = 0; x < kNoiseTexDim; ++x)
+					{
+						const float fx = static_cast<float>(x);
+						const float fy = static_cast<float>(y);
+						const float n1 = std::sin(fx * 0.15f) * std::cos(fy * 0.15f);
+						const float n2 = std::sin(fx * 0.35f + fy * 0.25f) * 0.5f;
+						const float n3 = std::cos(fx * 0.05f + fy * 0.45f) * 0.3f;
+						const float variation = (n1 + n2 + n3) * 22.0f;
+
+						uint8_t r = 0, g = 0, b = 0;
+						if (i == 0) // 草地
+						{
+							r = static_cast<uint8_t>(std::clamp(55.0f + variation * 0.8f, 0.0f, 255.0f));
+							g = static_cast<uint8_t>(std::clamp(135.0f + variation * 1.2f, 0.0f, 255.0f));
+							b = static_cast<uint8_t>(std::clamp(42.0f + variation * 0.5f, 0.0f, 255.0f));
+						}
+						else if (i == 1) // 泥土
+						{
+							r = static_cast<uint8_t>(std::clamp(88.0f + variation * 1.0f, 0.0f, 255.0f));
+							g = static_cast<uint8_t>(std::clamp(62.0f + variation * 0.8f, 0.0f, 255.0f));
+							b = static_cast<uint8_t>(std::clamp(46.0f + variation * 0.6f, 0.0f, 255.0f));
+						}
+						else if (i == 2) // 岩石
+						{
+							const float strata = std::sin(fx * 0.4f + fy * 0.8f) * 25.0f;
+							r = static_cast<uint8_t>(std::clamp(115.0f + variation + strata, 0.0f, 255.0f));
+							g = static_cast<uint8_t>(std::clamp(120.0f + variation + strata, 0.0f, 255.0f));
+							b = static_cast<uint8_t>(std::clamp(125.0f + variation + strata, 0.0f, 255.0f));
+						}
+						else // 沙地
+						{
+							const float ripple = std::sin(fx * 0.3f + fy * 0.1f) * 15.0f;
+							r = static_cast<uint8_t>(std::clamp(215.0f + variation * 0.6f + ripple, 0.0f, 255.0f));
+							g = static_cast<uint8_t>(std::clamp(195.0f + variation * 0.5f + ripple, 0.0f, 255.0f));
+							b = static_cast<uint8_t>(std::clamp(145.0f + variation * 0.4f + ripple, 0.0f, 255.0f));
+						}
+
+						const size_t idx = (y * kNoiseTexDim + x) * 4;
+						noiseBuffer[idx + 0] = r;
+						noiseBuffer[idx + 1] = g;
+						noiseBuffer[idx + 2] = b;
+						noiseBuffer[idx + 3] = 0xFF;
+					}
+				}
+
 				Rhi::TextureDesc texDesc;
 				texDesc.Type = Rhi::TextureType::Texture2D;
 				texDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
-				texDesc.Extent = { 1, 1, 1 };
+				texDesc.Extent = { kNoiseTexDim, kNoiseTexDim, 1 };
 				texDesc.Usage = Rhi::TextureUsageSampled;
-				texDesc.DebugName = "Terrain.DefaultTexture" + std::to_string(i);
+				texDesc.DebugName = "Terrain.DefaultNoiseTexture" + std::to_string(i);
 				s_State.DefaultTextures[i] = device->CreateTexture(texDesc);
 				if (s_State.DefaultTextures[i])
-					s_State.DefaultTextures[i]->SetData(defaultColors[i], 4);
+					s_State.DefaultTextures[i]->SetData(noiseBuffer.data(), noiseBuffer.size());
 			}
 		}
 
@@ -563,6 +607,16 @@ namespace World
 					const std::string& path = StringPool::Get().PathOf(layer.AlbedoTexture.Path);
 					if (!path.empty())
 						tex = TextureLibrary::Get().Get(path, /*srgb*/ true);
+				}
+				if (!tex)
+				{
+					const char* const defaultRelPaths[4] = {
+						"textures/terrain/grass_albedo.png",
+						"textures/terrain/dirt_albedo.png",
+						"textures/terrain/rock_albedo.png",
+						"textures/terrain/sand_albedo.png"
+					};
+					tex = TextureLibrary::Get().Get(defaultRelPaths[i], /*srgb*/ true);
 				}
 				if (!tex)
 					tex = s_State.DefaultTextures[i];

@@ -42,6 +42,29 @@ namespace World
 		m_Viewpoint = ViewportViewpoint::Free;
 	}
 
+	void EditorCamera3D::RotateInPlace(float deltaYawDegrees, float deltaPitchDegrees)
+	{
+		if (m_Is2DMode)
+			return;
+
+		// 保持当前相机世界位置恒定，只旋转视线朝向 (第一人称自由观察 / Free Look)
+		const glm::vec3 currentPosition = GetPosition();
+
+		m_YawDegrees += deltaYawDegrees;
+		m_PitchDegrees += deltaPitchDegrees;
+		ClampPitch();
+
+		// 根据新的旋转计算新的 Target，使相机世界位置严格保持不变
+		const float yaw = glm::radians(m_YawDegrees);
+		const float pitch = glm::radians(m_PitchDegrees);
+		const glm::vec3 newOffset {
+			std::cos(pitch) * std::sin(yaw),
+			std::sin(pitch),
+			-std::cos(pitch) * std::cos(yaw) };
+		m_Target = currentPosition - newOffset * m_Distance;
+		m_Viewpoint = ViewportViewpoint::Free;
+	}
+
 	void EditorCamera3D::Set2DMode(bool enabled)
 	{
 		// 仅锁定/解锁相机旋转 (Orbit)，不强行篡改用户当前选择的投影或方位 (如 Top 俯视 / Front 横版 / 等轴测角度)

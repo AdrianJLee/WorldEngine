@@ -156,7 +156,9 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     float4 col2 = u_Layer2Texture.Sample(uv2);
     float4 col3 = u_Layer3Texture.Sample(uv3);
 
-    float3 c0 = pow(saturate(col0.rgb), 2.2f);
+    // 远景抗重叠平铺 (Dual-Frequency Anti-Tiling)
+    float4 macro0 = u_Layer0Texture.Sample(uv0 * 0.23f + float2(0.37f, 0.59f));
+    float3 c0 = lerp(pow(saturate(col0.rgb), 2.2f), pow(saturate(macro0.rgb), 2.2f), 0.22f);
     float3 c1 = pow(saturate(col1.rgb), 2.2f);
     float3 c2 = pow(saturate(col2.rgb), 2.2f);
     float3 c3 = pow(saturate(col3.rgb), 2.2f);
@@ -169,14 +171,23 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     else
         weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
 
-    // 4. 自适应坡度混合 (Slope Blend)
-    // 当法线与垂直朝上夹角过大（dot(normal, vec3(0,1,0)) < 0.707，即斜率 > 45 度）时，自动向岩石材质层过渡
+    // 4. 自适应坡度混合 (Slope Blend 与侧立面投影)
     float3 worldNormal = normalize(input.v_Normal);
     float upDot = saturate(dot(worldNormal, float3(0.0f, 1.0f, 0.0f)));
     float slopeThreshold = u_SlopeParams.x; // 默认 0.707f
     float slopeBlendRange = max(u_SlopeParams.y, 0.001f); // 默认 0.15f
     
     float rockFactor = saturate((slopeThreshold - upDot) / slopeBlendRange);
+
+    // 陡峭崖壁无拉伸侧向三平面采样
+    if (rockFactor > 0.01f)
+    {
+        float2 sideUV = (abs(worldNormal.x) > abs(worldNormal.z))
+            ? input.v_WorldPosition.zy * 0.08f
+            : input.v_WorldPosition.xy * 0.08f;
+        float3 rockSide = pow(saturate(u_Layer2Texture.Sample(sideUV).rgb), 2.2f);
+        c2 = lerp(c2, rockSide, rockFactor);
+    }
     
     // 岩石对应 Layer 2 (weights.z)
     weights.x *= (1.0f - rockFactor);
@@ -188,8 +199,18 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     if (finalTotal > 0.0001f)
         weights /= finalTotal;
 
+    // 近景微细节法线微扰动 (Micro-Detail Grain)
+    float3 p = input.v_WorldPosition * 2.8f;
+    float micro1 = sin(p.x * 2.0f + p.z * 1.5f) * cos(p.z * 2.5f);
+    float micro2 = cos(p.x * 4.0f - p.z * 3.0f) * sin(p.z * 5.0f);
+    worldNormal = normalize(worldNormal + float3(micro1 * 0.06f, 0.0f, micro2 * 0.06f));
+
     // 混合 Albedo 与 Roughness
     float3 albedo = c0 * weights.x + c1 * weights.y + c2 * weights.z + c3 * weights.w;
+    // 宏观环境色彩微调制 (Macro Color Variation)
+    float macroLuma = 1.0f + (sin(input.v_WorldPosition.x * 0.02f) * cos(input.v_WorldPosition.z * 0.02f)) * 0.12f;
+    albedo *= macroLuma;
+
     float roughness = dot(u_LayerRoughnessMetallic, weights);
     float metallic = 0.0f;
 

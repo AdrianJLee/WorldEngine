@@ -499,6 +499,12 @@ int main()
 			cam.Orbit(30.0f, 15.0f);
 			CHECK(cam.GetViewpoint() == ViewportViewpoint::Free);
 			CHECK(std::fabs(cam.GetPitch() - 15.0f) < 1e-4f);
+
+			// 12. RotateInPlace 原位旋转不改变相机世界位置
+			const glm::vec3 posBefore = cam.GetPosition();
+			cam.RotateInPlace(40.0f, 20.0f);
+			const glm::vec3 posAfter = cam.GetPosition();
+			CHECK(glm::distance(posBefore, posAfter) < 1e-4f);
 		}
 
 		std::printf("World.Camera3D: all checks passed\n");

@@ -1516,9 +1516,29 @@ void EditorLayer::OnEvent(Event& event){
 			});
 			cameraDispatcher.Dispatch<MouseMovedEvent>([this](MouseMovedEvent& e)
 			{
+				const float dx = e.GetX() - m_Viewport3DLastMouse.x;
+				const float dy = e.GetY() - m_Viewport3DLastMouse.y;
+				m_Viewport3DLastMouse = { e.GetX(), e.GetY() };
+
 				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
 				{
-					m_EditorCamera3D.Orbit(e.GetX() - m_Viewport3DLastMouse.x, e.GetY() - m_Viewport3DLastMouse.y);
+					// 工业级视口灵敏度与方向约定 (对齐 UE5 / Unity):
+					// 灵敏度 0.18 度/像素; 鼠标右移向右转头 (-dx); 鼠标上移仰头看天 (dy)
+					constexpr float kSensitivity = 0.18f;
+					const float deltaYaw = -dx * kSensitivity;
+					const float deltaPitch = dy * kSensitivity;
+
+					const bool altPressed = Input::IsKeyPressed(KeyCodes::LeftAlt) || Input::IsKeyPressed(KeyCodes::RightAlt);
+					if (altPressed)
+					{
+						// Alt + 右键: 围绕目标点 Orbit 轨道环绕旋转
+						m_EditorCamera3D.Orbit(deltaYaw, deltaPitch);
+					}
+					else
+					{
+						// 常规右键拖拽: 商业级相机自身原位旋转 (FPS Free Look / 视口自由环顾)
+						m_EditorCamera3D.RotateInPlace(deltaYaw, deltaPitch);
+					}
 				}
 				else if (m_Viewport3DDragging == Viewport3DDrag::Pan)
 				{
@@ -1531,11 +1551,10 @@ void EditorLayer::OnEvent(Event& event){
 						: (2.0f * m_EditorCamera3D.GetDistance() * std::tan(glm::radians(m_EditorCamera3D.GetFOV()) * 0.5f));
 					const float unitsPerDesignUnit = kPanUnitsPerViewportHeight
 						* viewportHeightWorld / std::max(viewportHeight, 1.0f);
-					const float dx = -(e.GetX() - m_Viewport3DLastMouse.x) / uiScale * unitsPerDesignUnit;
-					const float dy = (e.GetY() - m_Viewport3DLastMouse.y) / uiScale * unitsPerDesignUnit;
-					m_EditorCamera3D.Pan(dx, dy);
+					const float panDx = -dx / uiScale * unitsPerDesignUnit;
+					const float panDy = dy / uiScale * unitsPerDesignUnit;
+					m_EditorCamera3D.Pan(panDx, panDy);
 				}
-				m_Viewport3DLastMouse = { e.GetX(), e.GetY() };
 				return false;
 			});
 			cameraDispatcher.Dispatch<MouseScrolledEvent>([this](MouseScrolledEvent& e)

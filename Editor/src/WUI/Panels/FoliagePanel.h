@@ -29,9 +29,13 @@ namespace World
 		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
 
 		FoliageBrushTool GetTool() const { return m_Tool; }
+		void SetTool(FoliageBrushTool tool) { m_Tool = tool; m_ToolIdx = static_cast<int>(tool); }
 		float GetBrushRadius() const { return m_BrushRadius; }
+		void SetBrushRadius(float r) { m_BrushRadius = std::clamp(r, 0.5f, 100.0f); }
 		float GetBrushDensity() const { return m_BrushDensity; }
+		void SetBrushDensity(float d) { m_BrushDensity = std::clamp(d, 0.1f, 10.0f); }
 		size_t GetActiveTypeIndex() const { return static_cast<size_t>(m_ActiveTypeIdx); }
+		void SetActiveTypeIndex(size_t idx) { m_ActiveTypeIdx = static_cast<int>(idx); }
 
 		FoliageData* GetActiveFoliage() { return m_Foliage.get(); }
 		const FoliageData* GetActiveFoliage() const { return m_Foliage.get(); }

@@ -4,6 +4,8 @@
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/ShaderUtils.h"
+#include "World/Utils/Paths.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Core/StringPool.h"
 #include "World/Core/Log.h"
 
@@ -148,16 +150,51 @@ namespace World
 			sDesc.DebugName = "Foliage.Sampler";
 			s_State.Sampler = device->CreateSampler(sDesc);
 
-			const uint8_t greenColor[4] = { 0x38, 0x8E, 0x3C, 0xFF };
-			Rhi::TextureDesc texDesc;
-			texDesc.Type = Rhi::TextureType::Texture2D;
-			texDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
-			texDesc.Extent = { 1, 1, 1 };
-			texDesc.Usage = Rhi::TextureUsageSampled;
-			texDesc.DebugName = "Foliage.DefaultAlbedo";
-			s_State.DefaultAlbedo = device->CreateTexture(texDesc);
-			if (s_State.DefaultAlbedo)
-				s_State.DefaultAlbedo->SetData(greenColor, 4);
+			Rhi::Handle<Rhi::Texture> tex = TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", /*srgb*/ true);
+			if (tex)
+			{
+				s_State.DefaultAlbedo = tex;
+			}
+			else
+			{
+				constexpr uint32_t kFoliageTexDim = 128;
+				std::vector<uint8_t> foliageBuffer(kFoliageTexDim * kFoliageTexDim * 4, 0);
+
+				for (int b = 0; b < 12; ++b)
+				{
+					const float baseX = 64.0f + (b - 6.0f) * 6.0f;
+					const float bend = (b - 5.5f) * 4.5f;
+					for (uint32_t y = 10; y < kFoliageTexDim - 5; ++y)
+					{
+						const float t = 1.0f - static_cast<float>(y) / static_cast<float>(kFoliageTexDim);
+						const float cx = baseX + bend * (t * t);
+						const float halfW = std::max(1.0f, (1.0f - t * 0.9f) * 4.0f);
+
+						for (int dx = -static_cast<int>(halfW); dx <= static_cast<int>(halfW); ++dx)
+						{
+							const int px = static_cast<int>(cx) + dx;
+							if (px >= 0 && px < static_cast<int>(kFoliageTexDim))
+							{
+								const size_t idx = (y * kFoliageTexDim + px) * 4;
+								foliageBuffer[idx + 0] = static_cast<uint8_t>(35.0f + t * 90.0f);
+								foliageBuffer[idx + 1] = static_cast<uint8_t>(75.0f + t * 135.0f);
+								foliageBuffer[idx + 2] = static_cast<uint8_t>(25.0f + t * 35.0f);
+								foliageBuffer[idx + 3] = 0xFF;
+							}
+						}
+					}
+				}
+
+				Rhi::TextureDesc texDesc;
+				texDesc.Type = Rhi::TextureType::Texture2D;
+				texDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+				texDesc.Extent = { kFoliageTexDim, kFoliageTexDim, 1 };
+				texDesc.Usage = Rhi::TextureUsageSampled;
+				texDesc.DebugName = "Foliage.DefaultAlbedo";
+				s_State.DefaultAlbedo = device->CreateTexture(texDesc);
+				if (s_State.DefaultAlbedo)
+					s_State.DefaultAlbedo->SetData(foliageBuffer.data(), foliageBuffer.size());
+			}
 
 			if (s_State.TextureLayout && s_State.DefaultAlbedo)
 			{
@@ -174,24 +211,34 @@ namespace World
 			}
 		}
 
-		// 3. 内置双面交叉草叶模型
+		// 3. 工业级 3 面交叉自然弯曲草丛模型 (3 quads, 12 vertices, 18 indices)
 		{
-			const FoliageVertex vertices[8] = {
-				{ { -0.5f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-				{ {  0.5f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 1.0f, 1.0f } },
-				{ {  0.5f, 1.5f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f } },
-				{ { -0.5f, 1.5f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f } },
+			constexpr float kPi = 3.1415926535f;
+			FoliageVertex vertices[12];
+			uint32_t indices[18];
 
-				{ { 0.0f, 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f } },
-				{ { 0.0f, 0.0f,  0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 1.0f } },
-				{ { 0.0f, 1.5f,  0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-				{ { 0.0f, 1.5f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f } }
-			};
+			for (int q = 0; q < 3; ++q)
+			{
+				const float angle = static_cast<float>(q) * (kPi / 3.0f);
+				const float cosA = std::cos(angle);
+				const float sinA = std::sin(angle);
+				const glm::vec3 dir(cosA * 0.5f, 0.0f, sinA * 0.5f);
+				const glm::vec3 normal = glm::normalize(glm::vec3(-sinA * 0.4f, 0.85f, cosA * 0.4f));
 
-			const uint32_t indices[12] = {
-				0, 1, 2,  0, 2, 3,
-				4, 5, 6,  4, 6, 7
-			};
+				const int baseV = q * 4;
+				vertices[baseV + 0] = { -dir, normal, { 0.0f, 1.0f } };
+				vertices[baseV + 1] = {  dir, normal, { 1.0f, 1.0f } };
+				vertices[baseV + 2] = {  dir + glm::vec3(0.0f, 1.4f, 0.0f), normal, { 1.0f, 0.0f } };
+				vertices[baseV + 3] = { -dir + glm::vec3(0.0f, 1.4f, 0.0f), normal, { 0.0f, 0.0f } };
+
+				const int baseI = q * 6;
+				indices[baseI + 0] = baseV + 0;
+				indices[baseI + 1] = baseV + 1;
+				indices[baseI + 2] = baseV + 2;
+				indices[baseI + 3] = baseV + 0;
+				indices[baseI + 4] = baseV + 2;
+				indices[baseI + 5] = baseV + 3;
+			}
 
 			Rhi::BufferDesc vbDesc;
 			vbDesc.Size = sizeof(vertices);
@@ -208,7 +255,7 @@ namespace World
 			ibDesc.InitialData = indices;
 			ibDesc.DebugName = "Foliage.DefaultMeshIB";
 			s_State.DefaultMeshIB = device->CreateBuffer(ibDesc);
-			s_State.DefaultMeshIndexCount = 12;
+			s_State.DefaultMeshIndexCount = 18;
 		}
 
 		// 4. 着色器与渲染管线
@@ -299,8 +346,19 @@ namespace World
 		if (it != s_State.FoliageCache.end())
 			return it->second;
 
+		std::filesystem::path resolvedPath = path;
+		if (!std::filesystem::exists(resolvedPath))
+		{
+			resolvedPath = World::Paths::AssetRoot() / path;
+			if (!std::filesystem::exists(resolvedPath))
+				resolvedPath = World::Paths::ProjectFile(path);
+		}
+
 		auto foliage = std::make_shared<FoliageData>();
-		foliage->LoadFromFile(path);
+		if (std::filesystem::exists(resolvedPath))
+		{
+			foliage->LoadFromFile(resolvedPath.string());
+		}
 		s_State.FoliageCache[path] = foliage;
 		return foliage;
 	}
@@ -347,6 +405,19 @@ namespace World
 		uniforms.CullParams = glm::vec4(comp.MaxCullDistance, comp.FadeRange, 0.0f, 0.0f);
 		if (s_State.UniformBuffer)
 			s_State.UniformBuffer->SetData(&uniforms, sizeof(uniforms));
+
+		Rhi::Handle<Rhi::Texture> currentTex = TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", /*srgb*/ true);
+		if (!currentTex)
+			currentTex = s_State.DefaultAlbedo;
+		if (currentTex && s_State.TextureSet)
+		{
+			Rhi::DescriptorWrite w;
+			w.Binding = 4;
+			w.Type = Rhi::DescriptorType::CombinedImageSampler;
+			w.Texture = currentTex;
+			w.Sampler = s_State.Sampler;
+			s_State.TextureSet->Update({ w });
+		}
 
 		cmd->BindPipeline(s_State.Pipeline);
 		if (s_State.CurrentGlobalSet)
