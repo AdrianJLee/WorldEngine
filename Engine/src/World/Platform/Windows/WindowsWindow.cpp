@@ -277,6 +277,17 @@ namespace World
 	{
 		WLD_TRACE_FUNCTION();
 
+		if (m_CursorLocked)
+		{
+			::ClipCursor(nullptr);
+			if (const HWND hwnd = glfwGetWin32Window(m_Window))
+			{
+				if (::GetCapture() == hwnd)
+					::ReleaseCapture();
+			}
+			m_CursorLocked = false;
+		}
+
 		// 第三方输入法(如搜狗)会在进程退出时由系统回调其清理代码并可能崩溃。
 		// 在销毁窗口前禁用线程 IME 并泵空消息,让输入法先完成解挂。
 		// 注意:仅主窗口这么做。附加窗口的销毁发生在主窗口的一帧渲染内部,
@@ -743,16 +754,41 @@ namespace World
 		if (!m_Window)
 			return;
 
+		const HWND hwnd = glfwGetWin32Window(m_Window);
+
 		if (locked)
 		{
 			glfwGetCursorPos(m_Window, &m_SavedCursorX, &m_SavedCursorY);
 			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 			if (glfwRawMouseMotionSupported())
 				glfwSetInputMode(m_Window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+
+			if (hwnd)
+			{
+				RECT clientRect;
+				if (GetClientRect(hwnd, &clientRect))
+				{
+					POINT ul { clientRect.left, clientRect.top };
+					POINT lr { clientRect.right, clientRect.bottom };
+					ClientToScreen(hwnd, &ul);
+					ClientToScreen(hwnd, &lr);
+					RECT clipRect { ul.x, ul.y, lr.x, lr.y };
+					::ClipCursor(&clipRect);
+				}
+				::SetCapture(hwnd);
+			}
+
 			m_CursorLocked = true;
 		}
 		else
 		{
+			if (hwnd)
+			{
+				::ClipCursor(nullptr);
+				if (::GetCapture() == hwnd)
+					::ReleaseCapture();
+			}
+
 			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 			glfwSetCursorPos(m_Window, m_SavedCursorX, m_SavedCursorY);
 			m_CursorLocked = false;

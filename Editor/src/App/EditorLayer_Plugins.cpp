@@ -698,7 +698,7 @@ void EditorLayer::OnUpdate(Timestep ts){
 			m_Viewport3DDragging = Viewport3DDrag::None;
 		}
 
-		if (m_SceneState != SceneState::Play && m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Orbit)
+		if (m_SceneState != SceneState::Play && m_Viewport3DDragging == Viewport3DDrag::Orbit)
 		{
 			float speed = 12.0f * m_FlySpeedScale; // 基础飞行速度乘以滚轮速度倍率
 			if (Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift))
@@ -1490,7 +1490,8 @@ void EditorLayer::ExportOperationLog(){
 void EditorLayer::OnEvent(Event& event){
 		WLD_TRACE_FUNCTION();
 
-		if (m_SceneState != SceneState::Play && m_ViewportFocused && m_ViewportHovered)
+		const bool isNavigating = (m_Viewport3DDragging != Viewport3DDrag::None);
+		if (m_SceneState != SceneState::Play && (isNavigating || (m_ViewportFocused && m_ViewportHovered)))
 		{
 			EventDispatcher cameraDispatcher(event);
 			cameraDispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e)
@@ -1501,7 +1502,7 @@ void EditorLayer::OnEvent(Event& event){
 					m_Viewport3DDragging = Viewport3DDrag::Pan;
 					return true;
 				}
-				// 纯 2D 锁定模式下: 右键为平移(Pan), 彻底禁止 3D Orbit 旋转
+				// 纯 2D 锁定模式下: 右键为平移(Pan), 彻底禁止 3D 旋转
 				if (m_EditorCamera3D.Is2DMode())
 				{
 					m_Viewport3DDragging = (e.GetMouseButton() == 1 || e.GetMouseButton() == 2)
@@ -1542,18 +1543,28 @@ void EditorLayer::OnEvent(Event& event){
 			{
 				const float dx = e.GetX() - m_Viewport3DLastMouse.x;
 				const float dy = e.GetY() - m_Viewport3DLastMouse.y;
-				m_Viewport3DLastMouse = { Input::GetMouseX(), Input::GetMouseY() };
+				m_Viewport3DLastMouse = { e.GetX(), e.GetY() };
 
 				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
 				{
-					// 工业级视口灵敏度与方向约定 (对齐 UE5 / Unity):
-					// 灵敏度 0.18 度/像素; 鼠标右移向右转动 (dx); 鼠标上移仰头看天 (dy)
+					// 工业级视口灵敏度与方向约定 (对齐 UE5 / Unity / Blender):
+					// 灵敏度 0.18 度/像素; 鼠标右移向右转动视线 (-dx); 鼠标上移仰头看天 (dy)
 					constexpr float kSensitivity = 0.18f;
-					const float deltaYaw = dx * kSensitivity;
+					const float deltaYaw = -dx * kSensitivity;
 					const float deltaPitch = dy * kSensitivity;
 
-					// 围绕目标旋转轴 (m_Target) 平滑稳定环绕，旋转轴绝对固定不漂移
-					m_EditorCamera3D.Orbit(deltaYaw, deltaPitch);
+					const bool altPressed = Input::IsKeyPressed(KeyCodes::LeftAlt) || Input::IsKeyPressed(KeyCodes::RightAlt);
+					if (altPressed)
+					{
+						// Alt + 右键: 围绕选中的目标中心 (Focus Target) 轨道公转环绕 (Orbit)
+						m_EditorCamera3D.Orbit(deltaYaw, deltaPitch);
+					}
+					else
+					{
+						// 纯右键拖拽: 商业级相机自身原位旋转 (FPS Free Look / 视口自由环视)
+						// 旋转中心点绝对锁定在相机自身位置，相机原地转头，绝不围绕外部点划大圈
+						m_EditorCamera3D.RotateInPlace(deltaYaw, deltaPitch);
+					}
 				}
 				else if (m_Viewport3DDragging == Viewport3DDrag::Pan)
 				{

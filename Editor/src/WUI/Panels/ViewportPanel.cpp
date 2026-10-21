@@ -1457,7 +1457,7 @@ namespace World
 				const bool mouseInViewport = (mousePos.x >= sceneRect.X && mousePos.x <= sceneRect.X + sceneRect.W &&
 					mousePos.y >= sceneRect.Y && mousePos.y <= sceneRect.Y + sceneRect.H);
 
-				if (terrain && mouseInViewport && !overBanner && !overPreview)
+				if (terrain && mouseInViewport && !overBanner && !overPreview && !m_Host.IsFlyNavigating())
 				{
 					const Wui::GizmoCamera gizmoCamera = m_Host.GetGizmoCamera();
 					const float ndcX = ((mousePos.x - sceneRect.X) / sceneRect.W) * 2.0f - 1.0f;
@@ -1778,7 +1778,7 @@ namespace World
 				const bool mouseInViewport = (mousePos.x >= sceneRect.X && mousePos.x <= sceneRect.X + sceneRect.W &&
 					mousePos.y >= sceneRect.Y && mousePos.y <= sceneRect.Y + sceneRect.H);
 
-				if (terrain && mouseInViewport)
+				if (terrain && mouseInViewport && !m_Host.IsFlyNavigating())
 				{
 					const Wui::GizmoCamera gizmoCamera = m_Host.GetGizmoCamera();
 					const float ndcX = ((mousePos.x - sceneRect.X) / sceneRect.W) * 2.0f - 1.0f;
