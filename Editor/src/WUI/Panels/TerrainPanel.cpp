@@ -143,7 +143,7 @@ namespace World
 		// 3. 顶部信息卡片 (实体名称与网格尺寸)
 		std::string entityTag = "Landscape";
 		if (m_BoundEntity.HasComponent<TagComponent>())
-			entityTag = m_BoundEntity.GetComponent<TagComponent>().Tag;
+			entityTag = StringPool::Get().NameOf(m_BoundEntity.GetComponent<TagComponent>().Tag);
 		char tagBuf[128] = {};
 		std::snprintf(tagBuf, sizeof(tagBuf), "绑定实体: [%s]  分辨率: %ux%u (%.1fm x %.1fm)",
 			entityTag.c_str(), m_Terrain->GetWidth(), m_Terrain->GetHeight(),
@@ -263,7 +263,7 @@ namespace World
 						defaultData.GetLayer(2).Name = "Rock (岩石)";
 						defaultData.GetLayer(3).Name = "Sand (沙地)";
 						defaultData.SaveToFile(path);
-						comp.TerrainAsset = AssetRef::FromPath(path);
+						comp.TerrainAsset.Path = StringPool::Get().InternPath(path);
 					}) && created.IsValid())
 				{
 					host.SetSelectedEntity(created);

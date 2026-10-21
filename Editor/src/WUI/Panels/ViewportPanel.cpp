@@ -1442,8 +1442,8 @@ namespace World
 				if (terrainEntity.HasComponent<TransformComponent>())
 				{
 					terrainWorld = terrainEntity.GetComponent<TransformComponent>().GetLocalMatrix();
-					if (const auto* wt = terrainEntity.TryGetComponent<WorldTransformComponent>())
-						terrainWorld = wt->Matrix;
+					if (terrainEntity.HasComponent<WorldTransformComponent>())
+						terrainWorld = terrainEntity.GetComponent<WorldTransformComponent>().Matrix;
 				}
 
 				auto& comp = terrainEntity.GetComponent<TerrainComponent>();
@@ -1505,7 +1505,7 @@ namespace World
 						}
 
 						// 外环高对比高光色
-						Wui::WuiColor outerColor(0.0f, 0.898f, 1.0f, 0.95f); // default Raise 青色 (#00E5FF)
+						Wui::WuiColor outerColor { 0.0f, 0.898f, 1.0f, 0.95f }; // default Raise 青色 (#00E5FF)
 						if (toolTab == TerrainToolTab::Sculpt)
 						{
 							TerrainSculptMode eff = sculptMode;
@@ -1516,18 +1516,18 @@ namespace World
 							}
 							switch (eff)
 							{
-							case TerrainSculptMode::Raise:   outerColor = Wui::WuiColor(0.0f, 0.898f, 1.0f, 0.95f); break;   // 青色 #00E5FF
-							case TerrainSculptMode::Lower:   outerColor = Wui::WuiColor(1.0f, 0.341f, 0.133f, 0.95f); break;  // 橙红 #FF5722
-							case TerrainSculptMode::Smooth:  outerColor = Wui::WuiColor(0.161f, 0.475f, 1.0f, 0.95f); break;   // 亮蓝 #2979FF
-							case TerrainSculptMode::Flatten: outerColor = Wui::WuiColor(1.0f, 0.757f, 0.027f, 0.95f); break;  // 琥珀色 #FFC107
-							case TerrainSculptMode::Erode:   outerColor = Wui::WuiColor(0.671f, 0.278f, 0.737f, 0.95f); break;  // 紫色 #AB47BC
-							case TerrainSculptMode::Hole:    outerColor = Wui::WuiColor(0.914f, 0.118f, 0.388f, 0.95f); break;  // 玫红 #E91E63
+							case TerrainSculptMode::Raise:   outerColor = Wui::WuiColor{0.0f, 0.898f, 1.0f, 0.95f}; break;   // 青色 #00E5FF
+							case TerrainSculptMode::Lower:   outerColor = Wui::WuiColor{1.0f, 0.341f, 0.133f, 0.95f}; break;  // 橙红 #FF5722
+							case TerrainSculptMode::Smooth:  outerColor = Wui::WuiColor{0.161f, 0.475f, 1.0f, 0.95f}; break;   // 亮蓝 #2979FF
+							case TerrainSculptMode::Flatten: outerColor = Wui::WuiColor{1.0f, 0.757f, 0.027f, 0.95f}; break;  // 琥珀色 #FFC107
+							case TerrainSculptMode::Erode:   outerColor = Wui::WuiColor{0.671f, 0.278f, 0.737f, 0.95f}; break;  // 紫色 #AB47BC
+							case TerrainSculptMode::Hole:    outerColor = Wui::WuiColor{0.914f, 0.118f, 0.388f, 0.95f}; break;  // 玫红 #E91E63
 							default: break;
 							}
 						}
 						else if (toolTab == TerrainToolTab::Paint)
 						{
-							outerColor = shiftPressed ? Wui::WuiColor(0.161f, 0.475f, 1.0f, 0.95f) : Wui::WuiColor(0.463f, 1.0f, 0.012f, 0.95f); // 鲜绿 (#76FF03)
+							outerColor = shiftPressed ? Wui::WuiColor{0.161f, 0.475f, 1.0f, 0.95f} : Wui::WuiColor{0.463f, 1.0f, 0.012f, 0.95f}; // 鲜绿 (#76FF03)
 						}
 
 						for (int i = 0; i < kSegments; ++i)
@@ -1551,7 +1551,7 @@ namespace World
 								const glm::vec4 localPos(px, py, pz, 1.0f);
 								innerClips[i] = gizmoCamera.ViewProjection * (terrainWorld * localPos);
 							}
-							const Wui::WuiColor innerColor(outerColor.R, outerColor.G, outerColor.B, 0.55f);
+							const Wui::WuiColor innerColor { outerColor.R, outerColor.G, outerColor.B, 0.55f };
 							for (int i = 0; i < kSegments; ++i)
 							{
 								PushProjectedSegment(ctx, gizmoCamera.ViewProjection, sceneRect,

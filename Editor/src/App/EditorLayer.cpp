@@ -512,8 +512,6 @@ bool EditorLayer::SetPluginEnabled(const std::string& id, bool enabled, std::str
 		return true;
 	}
 
-}
-
 void EditorLayer::SetEditorToolMode(EditorToolMode mode)
 {
 	m_EditorToolMode = mode;
@@ -524,7 +522,17 @@ void EditorLayer::SetEditorToolMode(EditorToolMode mode)
 			m_EditorCamera3D.Set2DMode(false);
 			m_EditorCamera.SetOrthographic(false);
 		}
+		m_Viewport3D = true;
 		m_Shell.OpenOrFocusIndependentWindow("terrain_editor");
+		if (m_ActiveScene)
+		{
+			auto terrainView = m_ActiveScene->GetRegistry().view<TerrainComponent>();
+			if (!terrainView.empty())
+			{
+				m_SelectedEntity = Entity(m_ActiveScene.get(), *terrainView.begin());
+				FocusOnSelectedEntity();
+			}
+		}
 	}
 	else if (mode == EditorToolMode::Foliage)
 	{
@@ -535,4 +543,6 @@ void EditorLayer::SetEditorToolMode(EditorToolMode mode)
 		}
 		m_Shell.OpenOrFocusIndependentWindow("foliage_editor");
 	}
+}
+
 }

@@ -452,12 +452,24 @@ void EditorLayer::OnAttach(){
 		//   显式 `WLD_VIEWPORT_3D` 优先;否则**项目入口是 Level 2.0 关卡目录**(levels/<名>,
 		//   流送网格与 HUD 挂在 3D 视口上)时默认 3D;传统 `.wd` 单场景保持历史默认(2D),
 		//   不把既有 2D 关卡(如 2DTest)的默认视图翻掉。View 菜单/工具栏可随时切换。
-		const bool startupIsLevelPackage = !startupPath.empty() && std::filesystem::is_directory(startupPath);
+		const bool startupIsLevelPackage = !startupPath.empty() && (std::filesystem::is_directory(startupPath) || startupPath.extension() == ".wlevel" || startupPath.extension() == ".level");
 		m_EditorCamera3D = EditorCamera3D(60.0f, 1.6f / 0.9f, 0.1f, 2000.0f, 12.0f);
 		m_EditorCamera3D.SetViewportSize(1280, 720);
 		m_Viewport3D = std::getenv("WLD_VIEWPORT_3D") != nullptr || startupIsLevelPackage;
 		// 初始朝向对齐正前方(+Z 朝 -Z)
 		m_EditorCamera3D.SetYawPitch(180.0f, 0.0f);
+		if (m_ActiveScene)
+		{
+			auto terrainView = m_ActiveScene->GetRegistry().view<TerrainComponent>();
+			if (!terrainView.empty())
+			{
+				m_Viewport3D = true;
+				m_EditorCamera3D.Set2DMode(false);
+				m_EditorCamera.SetOrthographic(false);
+				m_SelectedEntity = Entity(m_ActiveScene.get(), *terrainView.begin());
+				FocusOnSelectedEntity();
+			}
+		}
 
 		// 开发验证:WLD_HIERARCHY_DEMO=1 现场造一个"父精灵 + 子精灵"的最小层级
 		// (子实体局部偏移 0.4):验证 2D 精灵子节点跟随父节点 —— 渲染路径必须消费

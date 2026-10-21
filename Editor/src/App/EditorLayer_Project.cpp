@@ -1097,7 +1097,15 @@ void EditorLayer::FocusOnSelectedEntity()
 	{
 		targetPos = glm::vec3(EntityWorldMatrix(m_SelectedEntity)[3]);
 
-		if (m_SelectedEntity.HasComponent<MeshRendererComponent>())
+		if (m_SelectedEntity.HasComponent<TerrainComponent>())
+		{
+			const auto& comp = m_SelectedEntity.GetComponent<TerrainComponent>();
+			float extent = 256.0f * comp.CellSize;
+			targetPos += glm::vec3(extent * 0.5f, 15.0f, extent * 0.5f);
+			targetDistance = extent * 0.75f;
+			m_EditorCamera3D.SetYawPitch(215.0f, 28.0f);
+		}
+		else if (m_SelectedEntity.HasComponent<MeshRendererComponent>())
 			targetDistance = 5.0f;
 		else if (m_SelectedEntity.HasComponent<CameraComponent>())
 			targetDistance = 6.0f;

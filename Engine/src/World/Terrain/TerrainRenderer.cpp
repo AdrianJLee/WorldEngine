@@ -7,6 +7,7 @@
 #include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Components.h"
+#include "World/Utils/Paths.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -453,8 +454,16 @@ namespace World
 				if (it != s_State.DataCache.end())
 					return it->second;
 
+				std::filesystem::path resolvedPath = path;
+				if (!std::filesystem::exists(resolvedPath))
+				{
+					resolvedPath = World::Paths::AssetRoot() / path;
+					if (!std::filesystem::exists(resolvedPath))
+						resolvedPath = World::Paths::ProjectFile(path);
+				}
+
 				auto data = std::make_shared<TerrainData>(256, 256, cellSize, heightScale);
-				if (data->LoadFromFile(path))
+				if (data->LoadFromFile(resolvedPath.string()))
 				{
 					s_State.DataCache[path] = data;
 					return data;
