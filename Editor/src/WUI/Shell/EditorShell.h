@@ -137,6 +137,7 @@ namespace World
 		std::string IndependentWindowPanel(size_t index) const override;
 		std::string IndependentWindowLabel(size_t index) const override;
 		void FocusIndependentWindow(const std::string& panel) override;
+		void ActivatePanel(const std::string& panel) override;
 		void OpenOrFocusIndependentWindow(const std::string& panel);
 		void OpenAudioProfiler();
 		void DockBackIndependentWindow(const std::string& panel) override;

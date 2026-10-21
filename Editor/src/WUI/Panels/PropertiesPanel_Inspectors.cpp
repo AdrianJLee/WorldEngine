@@ -41,7 +41,7 @@ using namespace PropertiesPanelDetail;
 			"✦ 进入地貌编辑模式 (Edit Landscape)", editTheme))
 		{
 			host.SetEditorToolMode(EditorToolMode::Landscape);
-			host.FocusIndependentWindow("terrain_editor");
+			host.ActivatePanel("terrain_editor");
 		}
 		curY += 32.0f;
 

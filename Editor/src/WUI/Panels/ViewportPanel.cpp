@@ -426,16 +426,14 @@ namespace World
 		case World::ViewportViewpoint::Left:   vpShort = "Left"; break;
 		}
 		const std::string cameraText = std::string(projName) + " · " + vpShort;
-		const std::string viewLabel = Wui::Tr("viewport.view.button", "View") + ": "
-			+ projName + " · " + vpShort + "  ▼";
-		// 固定最小宽度 140px，防止切换 Lock 或切换 Top/Front/Bottom 时工具栏发生水平位移跳动
-		const float viewButtonW = std::max(140.0f, ctx.MeasureTextWidth(viewLabel, 12.0f) + 16.0f);
+		const std::string viewLabel = std::string(projName) + " · " + vpShort + " ▼";
+		const float viewButtonW = std::max(78.0f, ctx.MeasureTextWidth(viewLabel, 12.0f) + 14.0f);
 
-		// 视口模式切换器规格 ([Select] [Landscape] [Foliage])
+		// 视口模式切换器规格 ([选择] [地貌] [植被])
 		const EditorToolMode currentToolMode = m_Host.GetEditorToolMode();
-		const float modeBtnSelectW = 48.0f;
-		const float modeBtnLandscapeW = 74.0f;
-		const float modeBtnFoliageW = 54.0f;
+		const float modeBtnSelectW = 44.0f;
+		const float modeBtnLandscapeW = 46.0f;
+		const float modeBtnFoliageW = 46.0f;
 		const float modeSwitcherW = modeBtnSelectW + 2.0f + modeBtnLandscapeW + 2.0f + modeBtnFoliageW;
 
 		// Gizmo 工具组规格 (Q: 选 / W: 移 / E: 转 / R: 缩 / T: 2D 矩形手柄，22×22px)
@@ -499,7 +497,7 @@ namespace World
 					selTheme.Border = theme.Accent;
 				}
 				Wui::Tooltip(ctx, selBtnRect, "选择与通用变换模式 (Select & Transform) [快捷键 Shift+1]");
-				if (Wui::Button(ctx, Wui::HashId("viewport.mode.select"), selBtnRect, "Select", selTheme))
+				if (Wui::Button(ctx, Wui::HashId("viewport.mode.select"), selBtnRect, "选择", selTheme))
 				{
 					m_Host.SetEditorToolMode(EditorToolMode::Select);
 				}
@@ -517,10 +515,10 @@ namespace World
 					landTheme.Border = theme.Accent;
 				}
 				Wui::Tooltip(ctx, landBtnRect, "3D 地貌雕刻与混绘模式 (Landscape Sculpt & Paint) [快捷键 Shift+2]");
-				if (Wui::Button(ctx, Wui::HashId("viewport.mode.landscape"), landBtnRect, "Landscape", landTheme))
+				if (Wui::Button(ctx, Wui::HashId("viewport.mode.landscape"), landBtnRect, "地貌", landTheme))
 				{
 					m_Host.SetEditorToolMode(EditorToolMode::Landscape);
-					m_Host.FocusIndependentWindow("terrain_editor");
+					m_Host.ActivatePanel("terrain_editor");
 				}
 				ctx.RegisterOverlayRect(landBtnRect);
 				leftCursor += modeBtnLandscapeW + 2.0f;
@@ -536,10 +534,10 @@ namespace World
 					folTheme.Border = theme.Accent;
 				}
 				Wui::Tooltip(ctx, folBtnRect, "3D 植被散布模式 (Foliage Scatter) [快捷键 Shift+3]");
-				if (Wui::Button(ctx, Wui::HashId("viewport.mode.foliage"), folBtnRect, "Foliage", folTheme))
+				if (Wui::Button(ctx, Wui::HashId("viewport.mode.foliage"), folBtnRect, "植被", folTheme))
 				{
 					m_Host.SetEditorToolMode(EditorToolMode::Foliage);
-					m_Host.FocusIndependentWindow("foliage_editor");
+					m_Host.ActivatePanel("foliage_editor");
 				}
 				ctx.RegisterOverlayRect(folBtnRect);
 				leftCursor += modeBtnFoliageW + 2.0f;
@@ -1404,12 +1402,12 @@ namespace World
 				else if (ctx.IsKeyPressed(KeyCodes::D2))
 				{
 					m_Host.SetEditorToolMode(EditorToolMode::Landscape);
-					m_Host.FocusIndependentWindow("terrain_editor");
+					m_Host.ActivatePanel("terrain_editor");
 				}
 				else if (ctx.IsKeyPressed(KeyCodes::D3))
 				{
 					m_Host.SetEditorToolMode(EditorToolMode::Foliage);
-					m_Host.FocusIndependentWindow("foliage_editor");
+					m_Host.ActivatePanel("foliage_editor");
 				}
 			}
 		}
@@ -2797,13 +2795,13 @@ namespace World
 			if (keyCode == KeyCodes::D2)
 			{
 				m_Host.SetEditorToolMode(EditorToolMode::Landscape);
-				m_Host.FocusIndependentWindow("terrain_editor");
+				m_Host.ActivatePanel("terrain_editor");
 				return true;
 			}
 			if (keyCode == KeyCodes::D3)
 			{
 				m_Host.SetEditorToolMode(EditorToolMode::Foliage);
-				m_Host.FocusIndependentWindow("foliage_editor");
+				m_Host.ActivatePanel("foliage_editor");
 				return true;
 			}
 		}

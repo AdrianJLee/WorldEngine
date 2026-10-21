@@ -523,7 +523,7 @@ void EditorLayer::SetEditorToolMode(EditorToolMode mode)
 			m_EditorCamera.SetOrthographic(false);
 		}
 		m_Viewport3D = true;
-		m_Shell.OpenOrFocusIndependentWindow("terrain_editor");
+		m_Shell.AiActivatePanel("terrain_editor", nullptr);
 		if (m_ActiveScene)
 		{
 			auto terrainView = m_ActiveScene->GetRegistry().view<TerrainComponent>();
@@ -541,7 +541,12 @@ void EditorLayer::SetEditorToolMode(EditorToolMode mode)
 			m_EditorCamera3D.Set2DMode(false);
 			m_EditorCamera.SetOrthographic(false);
 		}
-		m_Shell.OpenOrFocusIndependentWindow("foliage_editor");
+		m_Viewport3D = true;
+		m_Shell.AiActivatePanel("foliage_editor", nullptr);
+	}
+	else if (mode == EditorToolMode::Select)
+	{
+		m_Shell.AiActivatePanel("hierarchy", nullptr);
 	}
 }
 

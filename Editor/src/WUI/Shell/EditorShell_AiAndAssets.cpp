@@ -581,6 +581,10 @@ void EditorShell::FocusIndependentWindow(const std::string& panel){
 			host->Focus();
 	}
 
+void EditorShell::ActivatePanel(const std::string& panel){
+		AiActivatePanel(panel, nullptr);
+	}
+
 
 void EditorShell::OpenMaterialEditor(const std::string& path){
 		// 每个材质一个面板 + 独立窗口:同一材质重复打开只是前置焦点(用户 2026-09-16)。
