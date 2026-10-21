@@ -2772,3 +2772,23 @@ set_tests_properties(World.Decal PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldLevelAuthoringTests World/LevelAuthoringTests.cpp)
+target_link_libraries(WorldLevelAuthoringTests PRIVATE World)
+target_compile_features(WorldLevelAuthoringTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldLevelAuthoringTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldLevelAuthoringTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldLevelAuthoringTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.LevelAuthoring COMMAND WorldLevelAuthoringTests)
+set_tests_properties(World.LevelAuthoring PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)

@@ -2455,4 +2455,78 @@ namespace World
 	static_assert(offsetof(ConvexCollider3DComponent, MaxVerticesPerHull) == 20, "MaxVerticesPerHull offset mismatch");
 	static_assert(offsetof(ConvexCollider3DComponent, ConcavityThreshold) == 24, "ConcavityThreshold offset mismatch");
 	static_assert(offsetof(ConvexCollider3DComponent, IsTrigger) == 28, "IsTrigger offset mismatch");
+
+	struct SplineComponent
+	{
+		AssetRef SplineMeshAsset;                         // 16B (offset 0)
+		float MeshSpacing { 2.0f };                       // 4B  (offset 16)
+		float RoadWidth { 4.0f };                         // 4B  (offset 20)
+		uint8_t ClosedLoop { 0 };                         // 1B  (offset 24)
+		uint8_t GenerateCollision { 1 };                  // 1B  (offset 25)
+		uint8_t ExtrudeRoad { 1 };                        // 1B  (offset 26)
+		uint8_t _Padding[21] { 0 };                       // 21B (offset 27)
+
+		SplineComponent() = default;
+
+		WE_SCHEMA_BODY(World, SplineComponent, Component)
+			WE_SCHEMA_META(Category("Level/Spline"),
+				Doc("3D parametric spline path for roads, rivers, fences and patrol rails."))
+			WE_FIELD(SplineMeshAsset, Asset, Of("Mesh"),
+				Doc("Mesh repeated or extruded along the spline curve."));
+			WE_FIELD(MeshSpacing, Float, Range(0.1f, 100.0f), Default(2.0f),
+				Doc("Distance spacing between extruded mesh segments."));
+			WE_FIELD(RoadWidth, Float, Range(0.1f, 50.0f), Default(4.0f),
+				Doc("Width of the procedural extruded road surface."));
+			WE_FIELD(ClosedLoop, UInt8, Default(0),
+				Doc("Whether the spline connects back into a closed loop."));
+			WE_FIELD(GenerateCollision, UInt8, Default(1),
+				Doc("Whether to generate collision for the extruded surface."));
+			WE_FIELD(ExtrudeRoad, UInt8, Default(1),
+				Doc("Whether to automatically generate an extruded ribbon mesh."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(SplineComponent) == 48, "SplineComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<SplineComponent>, "SplineComponent must be trivially copyable");
+	static_assert(offsetof(SplineComponent, SplineMeshAsset) == 0, "SplineMeshAsset offset mismatch");
+	static_assert(offsetof(SplineComponent, MeshSpacing) == 16, "MeshSpacing offset mismatch");
+	static_assert(offsetof(SplineComponent, RoadWidth) == 20, "RoadWidth offset mismatch");
+	static_assert(offsetof(SplineComponent, ClosedLoop) == 24, "ClosedLoop offset mismatch");
+	static_assert(offsetof(SplineComponent, GenerateCollision) == 25, "GenerateCollision offset mismatch");
+	static_assert(offsetof(SplineComponent, ExtrudeRoad) == 26, "ExtrudeRoad offset mismatch");
+
+	struct WhiteboxComponent
+	{
+		enum class ShapeType : uint8_t { Box = 0, Cylinder = 1, Stairs = 2, Wedge = 3, Arch = 4 };
+		ShapeType Shape { ShapeType::Box };               // 1B  (offset 0)
+		uint8_t Subdivisions { 1 };                       // 1B  (offset 1)
+		uint8_t Steps { 8 };                              // 1B  (offset 2)
+		uint8_t _Padding0 { 0 };                          // 1B  (offset 3)
+		glm::vec3 Dimensions { 2.0f, 2.0f, 2.0f };        // 12B (offset 4)
+		float BevelSize { 0.0f };                         // 4B  (offset 16)
+		uint8_t GenerateCollision { 1 };                  // 1B  (offset 20)
+		uint8_t _Padding[11] { 0 };                       // 11B (offset 21)
+
+		WhiteboxComponent() = default;
+
+		WE_SCHEMA_BODY(World, WhiteboxComponent, Component)
+			WE_SCHEMA_META(Category("Level/Whitebox"),
+				Doc("Procedural geometric prototyping brush (Box, Cylinder, Stairs, Wedge, Arch)."))
+			WE_FIELD(Dimensions, Vec3,
+				Doc("Prototyping brush dimensions in meters (X, Y, Z)."));
+			WE_FIELD(BevelSize, Float, Range(0.0f, 1.0f), Default(0.0f),
+				Doc("Bevel chamfer size applied to polygon edges."));
+			WE_FIELD(Steps, UInt8, Range(1, 64), Default(8),
+				Doc("Number of stair steps (for Stairs shape)."));
+			WE_FIELD(GenerateCollision, UInt8, Default(1),
+				Doc("Whether to generate static collision for the prototype."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(WhiteboxComponent) == 32, "WhiteboxComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<WhiteboxComponent>, "WhiteboxComponent must be trivially copyable");
+	static_assert(offsetof(WhiteboxComponent, Shape) == 0, "Shape offset mismatch");
+	static_assert(offsetof(WhiteboxComponent, Subdivisions) == 1, "Subdivisions offset mismatch");
+	static_assert(offsetof(WhiteboxComponent, Steps) == 2, "Steps offset mismatch");
+	static_assert(offsetof(WhiteboxComponent, Dimensions) == 4, "Dimensions offset mismatch");
+	static_assert(offsetof(WhiteboxComponent, BevelSize) == 16, "BevelSize offset mismatch");
+	static_assert(offsetof(WhiteboxComponent, GenerateCollision) == 20, "GenerateCollision offset mismatch");
 }

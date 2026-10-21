@@ -70,6 +70,8 @@ const TypeSchema& WeSchemaOf_NavMeshObstacleComponent();
 const TypeSchema& WeSchemaOf_MeshLODComponent();
 const TypeSchema& WeSchemaOf_DecalComponent();
 const TypeSchema& WeSchemaOf_ConvexCollider3DComponent();
+const TypeSchema& WeSchemaOf_SplineComponent();
+const TypeSchema& WeSchemaOf_WhiteboxComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -13553,6 +13555,369 @@ struct GeneratedAccess<World::ConvexCollider3DComponent>
 };
 
 template <>
+struct GeneratedAccess<World::SplineComponent>
+{
+    static Value Get_SplineMeshAsset(const void* instance)
+    {
+        const World::SplineComponent* self = static_cast<const World::SplineComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->SplineMeshAsset)>>::GetPath(self->SplineMeshAsset));
+    }
+    static void Set_SplineMeshAsset(void* instance, const Value& value)
+    {
+        World::SplineComponent* self = static_cast<World::SplineComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->SplineMeshAsset)>>::SetPath(self->SplineMeshAsset, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_SplineMeshAsset(const void* instance)
+    {
+        const World::SplineComponent* self = static_cast<const World::SplineComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->SplineMeshAsset)>>::GetIdentity(self->SplineMeshAsset);
+    }
+    static void SetAssetIdentity_SplineMeshAsset(void* instance, uint64_t identity)
+    {
+        World::SplineComponent* self = static_cast<World::SplineComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->SplineMeshAsset)>>::SetIdentity(self->SplineMeshAsset, identity);
+    }
+    static Value Get_MeshSpacing(const void* instance)
+    {
+        const World::SplineComponent* self = static_cast<const World::SplineComponent*>(instance);
+        return Value(self->MeshSpacing);
+    }
+    static void Set_MeshSpacing(void* instance, const Value& value)
+    {
+        World::SplineComponent* self = static_cast<World::SplineComponent*>(instance);
+        self->MeshSpacing = std::get<float>(value);
+    }
+    static Value Get_RoadWidth(const void* instance)
+    {
+        const World::SplineComponent* self = static_cast<const World::SplineComponent*>(instance);
+        return Value(self->RoadWidth);
+    }
+    static void Set_RoadWidth(void* instance, const Value& value)
+    {
+        World::SplineComponent* self = static_cast<World::SplineComponent*>(instance);
+        self->RoadWidth = std::get<float>(value);
+    }
+    static Value Get_ClosedLoop(const void* instance)
+    {
+        const World::SplineComponent* self = static_cast<const World::SplineComponent*>(instance);
+        return Value(self->ClosedLoop);
+    }
+    static void Set_ClosedLoop(void* instance, const Value& value)
+    {
+        World::SplineComponent* self = static_cast<World::SplineComponent*>(instance);
+        self->ClosedLoop = std::get<uint8_t>(value);
+    }
+    static Value Get_GenerateCollision(const void* instance)
+    {
+        const World::SplineComponent* self = static_cast<const World::SplineComponent*>(instance);
+        return Value(self->GenerateCollision);
+    }
+    static void Set_GenerateCollision(void* instance, const Value& value)
+    {
+        World::SplineComponent* self = static_cast<World::SplineComponent*>(instance);
+        self->GenerateCollision = std::get<uint8_t>(value);
+    }
+    static Value Get_ExtrudeRoad(const void* instance)
+    {
+        const World::SplineComponent* self = static_cast<const World::SplineComponent*>(instance);
+        return Value(self->ExtrudeRoad);
+    }
+    static void Set_ExtrudeRoad(void* instance, const Value& value)
+    {
+        World::SplineComponent* self = static_cast<World::SplineComponent*>(instance);
+        self->ExtrudeRoad = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_SplineMeshAsset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x65FACF66B1232C0Full },
+            "SplineMeshAsset",
+            Kind::Asset,
+            &Get_SplineMeshAsset,
+            &Set_SplineMeshAsset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Mesh",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Mesh repeated or extruded along the spline curve.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_SplineMeshAsset,
+            &SetAssetIdentity_SplineMeshAsset,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MeshSpacing()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5775F80F2399A015ull },
+            "MeshSpacing",
+            Kind::Float,
+            &Get_MeshSpacing,
+            &Set_MeshSpacing,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(100.000000f), false, false, "Distance spacing between extruded mesh segments.", false, "", {  }, "", std::nullopt },
+            Value(2.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_RoadWidth()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6DFEBBEE5D2B4EEDull },
+            "RoadWidth",
+            Kind::Float,
+            &Get_RoadWidth,
+            &Set_RoadWidth,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(50.000000f), false, false, "Width of the procedural extruded road surface.", false, "", {  }, "", std::nullopt },
+            Value(4.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ClosedLoop()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xDFA2838D422C1C3Bull },
+            "ClosedLoop",
+            Kind::UInt8,
+            &Get_ClosedLoop,
+            &Set_ClosedLoop,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the spline connects back into a closed loop.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_GenerateCollision()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8B1F6DCFD8D4EBD2ull },
+            "GenerateCollision",
+            Kind::UInt8,
+            &Get_GenerateCollision,
+            &Set_GenerateCollision,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to generate collision for the extruded surface.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ExtrudeRoad()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x75CE16673C4AACD0ull },
+            "ExtrudeRoad",
+            Kind::UInt8,
+            &Get_ExtrudeRoad,
+            &Set_ExtrudeRoad,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to automatically generate an extruded ribbon mesh.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::SplineComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::SplineComponent" },
+            "SplineComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::SplineComponent),
+            TypeCategory::Component,
+            {
+                Field_SplineMeshAsset(),
+                Field_MeshSpacing(),
+                Field_RoadWidth(),
+                Field_ClosedLoop(),
+                Field_GenerateCollision(),
+                Field_ExtrudeRoad(),
+            },
+            &StorageBindingOf(),
+            "Level/Spline",
+            "3D parametric spline path for roads, rivers, fences and patrol rails.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::WhiteboxComponent>
+{
+    static Value Get_Dimensions(const void* instance)
+    {
+        const World::WhiteboxComponent* self = static_cast<const World::WhiteboxComponent*>(instance);
+        return Value(self->Dimensions);
+    }
+    static void Set_Dimensions(void* instance, const Value& value)
+    {
+        World::WhiteboxComponent* self = static_cast<World::WhiteboxComponent*>(instance);
+        self->Dimensions = std::get<glm::vec3>(value);
+    }
+    static Value Get_BevelSize(const void* instance)
+    {
+        const World::WhiteboxComponent* self = static_cast<const World::WhiteboxComponent*>(instance);
+        return Value(self->BevelSize);
+    }
+    static void Set_BevelSize(void* instance, const Value& value)
+    {
+        World::WhiteboxComponent* self = static_cast<World::WhiteboxComponent*>(instance);
+        self->BevelSize = std::get<float>(value);
+    }
+    static Value Get_Steps(const void* instance)
+    {
+        const World::WhiteboxComponent* self = static_cast<const World::WhiteboxComponent*>(instance);
+        return Value(self->Steps);
+    }
+    static void Set_Steps(void* instance, const Value& value)
+    {
+        World::WhiteboxComponent* self = static_cast<World::WhiteboxComponent*>(instance);
+        self->Steps = std::get<uint8_t>(value);
+    }
+    static Value Get_GenerateCollision(const void* instance)
+    {
+        const World::WhiteboxComponent* self = static_cast<const World::WhiteboxComponent*>(instance);
+        return Value(self->GenerateCollision);
+    }
+    static void Set_GenerateCollision(void* instance, const Value& value)
+    {
+        World::WhiteboxComponent* self = static_cast<World::WhiteboxComponent*>(instance);
+        self->GenerateCollision = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_Dimensions()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x852EF3FBC657F543ull },
+            "Dimensions",
+            Kind::Vec3,
+            &Get_Dimensions,
+            &Set_Dimensions,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Prototyping brush dimensions in meters (X, Y, Z).", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_BevelSize()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x51E393B467E61483ull },
+            "BevelSize",
+            Kind::Float,
+            &Get_BevelSize,
+            &Set_BevelSize,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Bevel chamfer size applied to polygon edges.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Steps()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x364494842E947EA1ull },
+            "Steps",
+            Kind::UInt8,
+            &Get_Steps,
+            &Set_Steps,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(64.000000f), false, false, "Number of stair steps (for Stairs shape).", false, "", {  }, "", std::nullopt },
+            Value(8),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_GenerateCollision()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB715E3DC64BA9BA7ull },
+            "GenerateCollision",
+            Kind::UInt8,
+            &Get_GenerateCollision,
+            &Set_GenerateCollision,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to generate static collision for the prototype.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::WhiteboxComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::WhiteboxComponent" },
+            "WhiteboxComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::WhiteboxComponent),
+            TypeCategory::Component,
+            {
+                Field_Dimensions(),
+                Field_BevelSize(),
+                Field_Steps(),
+                Field_GenerateCollision(),
+            },
+            &StorageBindingOf(),
+            "Level/Whitebox",
+            "Procedural geometric prototyping brush (Box, Cylinder, Stairs, Wedge, Arch).",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -14158,6 +14523,8 @@ const TypeSchema& WeSchemaOf_NavMeshObstacleComponent() { return GeneratedAccess
 const TypeSchema& WeSchemaOf_MeshLODComponent() { return GeneratedAccess<World::MeshLODComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_DecalComponent() { return GeneratedAccess<World::DecalComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_ConvexCollider3DComponent() { return GeneratedAccess<World::ConvexCollider3DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_SplineComponent() { return GeneratedAccess<World::SplineComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_WhiteboxComponent() { return GeneratedAccess<World::WhiteboxComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -14251,6 +14618,8 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_MeshLODComponent(),
 			WeSchemaOf_DecalComponent(),
 			WeSchemaOf_ConvexCollider3DComponent(),
+			WeSchemaOf_SplineComponent(),
+			WeSchemaOf_WhiteboxComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};
