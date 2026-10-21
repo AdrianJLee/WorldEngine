@@ -2261,4 +2261,80 @@ namespace World
 	static_assert(offsetof(AnimGraphComponent, EnableRootMotion) == 32, "EnableRootMotion offset mismatch");
 	static_assert(offsetof(AnimGraphComponent, EnableFootIk) == 33, "EnableFootIk offset mismatch");
 	static_assert(offsetof(AnimGraphComponent, EnableUpperBodyLayer) == 34, "EnableUpperBodyLayer offset mismatch");
+
+	struct NavMeshAgentComponent
+	{
+		glm::vec3 Destination { 0.0f };                   // 12B (offset 0)
+		float Speed { 3.5f };                             // 4B  (offset 12)
+		float Acceleration { 8.0f };                      // 4B  (offset 16)
+		float StoppingDistance { 0.2f };                  // 4B  (offset 20)
+		float AgentRadius { 0.5f };                       // 4B  (offset 24)
+		float AgentHeight { 2.0f };                       // 4B  (offset 28)
+		uint8_t HasPath { 0 };                            // 1B  (offset 32)
+		uint8_t ReachedDestination { 0 };                 // 1B  (offset 33)
+		uint8_t AutoRepath { 1 };                         // 1B  (offset 34)
+		uint8_t _Padding[13] { 0 };                       // 13B (offset 35)
+
+		NavMeshAgentComponent() = default;
+
+		WE_SCHEMA_BODY(World, NavMeshAgentComponent, Component)
+			WE_SCHEMA_META(Category("AI/Navigation"),
+				Doc("3D AI NavMesh navigation agent with A* pathfinding and Funnel smoothing."))
+			WE_FIELD(Destination, Vec3,
+				Doc("Target destination in world space."));
+			WE_FIELD(Speed, Float, Range(0.1f, 50.0f), Default(3.5f),
+				Doc("Maximum agent traversal speed in meters/sec."));
+			WE_FIELD(Acceleration, Float, Range(0.1f, 100.0f), Default(8.0f),
+				Doc("Agent acceleration rate."));
+			WE_FIELD(StoppingDistance, Float, Range(0.01f, 10.0f), Default(0.2f),
+				Doc("Distance from target to consider arrival completed."));
+			WE_FIELD(AgentRadius, Float, Range(0.1f, 5.0f), Default(0.5f),
+				Doc("Cylindrical agent radius."));
+			WE_FIELD(AgentHeight, Float, Range(0.1f, 10.0f), Default(2.0f),
+				Doc("Agent height."));
+			WE_FIELD(HasPath, UInt8, Default(0),
+				Doc("Whether the agent currently has a planned path."));
+			WE_FIELD(ReachedDestination, UInt8, Default(0),
+				Doc("Whether the agent reached its target destination."));
+			WE_FIELD(AutoRepath, UInt8, Default(1),
+				Doc("Automatically recalculate path if target moves or obstacle blocks."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(NavMeshAgentComponent) == 48, "NavMeshAgentComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<NavMeshAgentComponent>, "NavMeshAgentComponent must be trivially copyable");
+	static_assert(offsetof(NavMeshAgentComponent, Destination) == 0, "Destination offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, Speed) == 12, "Speed offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, Acceleration) == 16, "Acceleration offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, StoppingDistance) == 20, "StoppingDistance offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, AgentRadius) == 24, "AgentRadius offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, AgentHeight) == 28, "AgentHeight offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, HasPath) == 32, "HasPath offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, ReachedDestination) == 33, "ReachedDestination offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, AutoRepath) == 34, "AutoRepath offset mismatch");
+
+	struct NavMeshObstacleComponent
+	{
+		glm::vec3 Extents { 1.0f, 1.0f, 1.0f };           // 12B (offset 0)
+		uint8_t CarveNavMesh { 1 };                       // 1B  (offset 12)
+		uint8_t IsMoving { 0 };                           // 1B  (offset 13)
+		uint8_t _Padding[18] { 0 };                       // 18B (offset 14)
+
+		NavMeshObstacleComponent() = default;
+
+		WE_SCHEMA_BODY(World, NavMeshObstacleComponent, Component)
+			WE_SCHEMA_META(Category("AI/Navigation"),
+				Doc("Dynamic box obstacle carving holes in 3D NavMesh."))
+			WE_FIELD(Extents, Vec3,
+				Doc("Half extents of the obstacle bounding box in meters."));
+			WE_FIELD(CarveNavMesh, UInt8, Default(1),
+				Doc("Whether to dynamically carve an impassable hole in the NavMesh."));
+			WE_FIELD(IsMoving, UInt8, Default(0),
+				Doc("Whether the obstacle is currently moving."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(NavMeshObstacleComponent) == 32, "NavMeshObstacleComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<NavMeshObstacleComponent>, "NavMeshObstacleComponent must be trivially copyable");
+	static_assert(offsetof(NavMeshObstacleComponent, Extents) == 0, "Extents offset mismatch");
+	static_assert(offsetof(NavMeshObstacleComponent, CarveNavMesh) == 12, "CarveNavMesh offset mismatch");
+	static_assert(offsetof(NavMeshObstacleComponent, IsMoving) == 13, "IsMoving offset mismatch");
 }

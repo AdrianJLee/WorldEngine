@@ -2712,3 +2712,23 @@ set_tests_properties(World.AnimGraph PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldNavMeshTests World/NavMeshTests.cpp)
+target_link_libraries(WorldNavMeshTests PRIVATE World)
+target_compile_features(WorldNavMeshTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldNavMeshTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldNavMeshTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldNavMeshTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.NavMesh COMMAND WorldNavMeshTests)
+set_tests_properties(World.NavMesh PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)

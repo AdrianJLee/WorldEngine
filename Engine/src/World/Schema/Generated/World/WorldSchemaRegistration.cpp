@@ -65,6 +65,8 @@ const TypeSchema& WeSchemaOf_TerrainComponent();
 const TypeSchema& WeSchemaOf_FoliageComponent();
 const TypeSchema& WeSchemaOf_SpotLight3DComponent();
 const TypeSchema& WeSchemaOf_AnimGraphComponent();
+const TypeSchema& WeSchemaOf_NavMeshAgentComponent();
+const TypeSchema& WeSchemaOf_NavMeshObstacleComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -12441,6 +12443,410 @@ struct GeneratedAccess<World::AnimGraphComponent>
 };
 
 template <>
+struct GeneratedAccess<World::NavMeshAgentComponent>
+{
+    static Value Get_Destination(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->Destination);
+    }
+    static void Set_Destination(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->Destination = std::get<glm::vec3>(value);
+    }
+    static Value Get_Speed(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->Speed);
+    }
+    static void Set_Speed(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->Speed = std::get<float>(value);
+    }
+    static Value Get_Acceleration(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->Acceleration);
+    }
+    static void Set_Acceleration(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->Acceleration = std::get<float>(value);
+    }
+    static Value Get_StoppingDistance(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->StoppingDistance);
+    }
+    static void Set_StoppingDistance(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->StoppingDistance = std::get<float>(value);
+    }
+    static Value Get_AgentRadius(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->AgentRadius);
+    }
+    static void Set_AgentRadius(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->AgentRadius = std::get<float>(value);
+    }
+    static Value Get_AgentHeight(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->AgentHeight);
+    }
+    static void Set_AgentHeight(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->AgentHeight = std::get<float>(value);
+    }
+    static Value Get_HasPath(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->HasPath);
+    }
+    static void Set_HasPath(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->HasPath = std::get<uint8_t>(value);
+    }
+    static Value Get_ReachedDestination(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->ReachedDestination);
+    }
+    static void Set_ReachedDestination(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->ReachedDestination = std::get<uint8_t>(value);
+    }
+    static Value Get_AutoRepath(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->AutoRepath);
+    }
+    static void Set_AutoRepath(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->AutoRepath = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_Destination()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBAAB6A65D831830Full },
+            "Destination",
+            Kind::Vec3,
+            &Get_Destination,
+            &Set_Destination,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target destination in world space.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Speed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x22B619289B2F29B0ull },
+            "Speed",
+            Kind::Float,
+            &Get_Speed,
+            &Set_Speed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(50.000000f), false, false, "Maximum agent traversal speed in meters/sec.", false, "", {  }, "", std::nullopt },
+            Value(3.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Acceleration()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x46F16799DD06BB2Dull },
+            "Acceleration",
+            Kind::Float,
+            &Get_Acceleration,
+            &Set_Acceleration,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(100.000000f), false, false, "Agent acceleration rate.", false, "", {  }, "", std::nullopt },
+            Value(8.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_StoppingDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x484D4A92C40A196ull },
+            "StoppingDistance",
+            Kind::Float,
+            &Get_StoppingDistance,
+            &Set_StoppingDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.010000f), std::optional<float>(10.000000f), false, false, "Distance from target to consider arrival completed.", false, "", {  }, "", std::nullopt },
+            Value(0.2f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AgentRadius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2356589D83864A34ull },
+            "AgentRadius",
+            Kind::Float,
+            &Get_AgentRadius,
+            &Set_AgentRadius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(5.000000f), false, false, "Cylindrical agent radius.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AgentHeight()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x604B40D36F1C603Dull },
+            "AgentHeight",
+            Kind::Float,
+            &Get_AgentHeight,
+            &Set_AgentHeight,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(10.000000f), false, false, "Agent height.", false, "", {  }, "", std::nullopt },
+            Value(2.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_HasPath()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x366534CED7503134ull },
+            "HasPath",
+            Kind::UInt8,
+            &Get_HasPath,
+            &Set_HasPath,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the agent currently has a planned path.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ReachedDestination()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x17EDA76A1CBE1E03ull },
+            "ReachedDestination",
+            Kind::UInt8,
+            &Get_ReachedDestination,
+            &Set_ReachedDestination,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the agent reached its target destination.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AutoRepath()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA1C07BEF56B0796Cull },
+            "AutoRepath",
+            Kind::UInt8,
+            &Get_AutoRepath,
+            &Set_AutoRepath,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically recalculate path if target moves or obstacle blocks.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::NavMeshAgentComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::NavMeshAgentComponent" },
+            "NavMeshAgentComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::NavMeshAgentComponent),
+            TypeCategory::Component,
+            {
+                Field_Destination(),
+                Field_Speed(),
+                Field_Acceleration(),
+                Field_StoppingDistance(),
+                Field_AgentRadius(),
+                Field_AgentHeight(),
+                Field_HasPath(),
+                Field_ReachedDestination(),
+                Field_AutoRepath(),
+            },
+            &StorageBindingOf(),
+            "AI/Navigation",
+            "3D AI NavMesh navigation agent with A* pathfinding and Funnel smoothing.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::NavMeshObstacleComponent>
+{
+    static Value Get_Extents(const void* instance)
+    {
+        const World::NavMeshObstacleComponent* self = static_cast<const World::NavMeshObstacleComponent*>(instance);
+        return Value(self->Extents);
+    }
+    static void Set_Extents(void* instance, const Value& value)
+    {
+        World::NavMeshObstacleComponent* self = static_cast<World::NavMeshObstacleComponent*>(instance);
+        self->Extents = std::get<glm::vec3>(value);
+    }
+    static Value Get_CarveNavMesh(const void* instance)
+    {
+        const World::NavMeshObstacleComponent* self = static_cast<const World::NavMeshObstacleComponent*>(instance);
+        return Value(self->CarveNavMesh);
+    }
+    static void Set_CarveNavMesh(void* instance, const Value& value)
+    {
+        World::NavMeshObstacleComponent* self = static_cast<World::NavMeshObstacleComponent*>(instance);
+        self->CarveNavMesh = std::get<uint8_t>(value);
+    }
+    static Value Get_IsMoving(const void* instance)
+    {
+        const World::NavMeshObstacleComponent* self = static_cast<const World::NavMeshObstacleComponent*>(instance);
+        return Value(self->IsMoving);
+    }
+    static void Set_IsMoving(void* instance, const Value& value)
+    {
+        World::NavMeshObstacleComponent* self = static_cast<World::NavMeshObstacleComponent*>(instance);
+        self->IsMoving = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_Extents()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA1A931B512369468ull },
+            "Extents",
+            Kind::Vec3,
+            &Get_Extents,
+            &Set_Extents,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Half extents of the obstacle bounding box in meters.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CarveNavMesh()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA20E28E4D8C1F372ull },
+            "CarveNavMesh",
+            Kind::UInt8,
+            &Get_CarveNavMesh,
+            &Set_CarveNavMesh,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to dynamically carve an impassable hole in the NavMesh.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IsMoving()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x38DDD4ECAD97CD59ull },
+            "IsMoving",
+            Kind::UInt8,
+            &Get_IsMoving,
+            &Set_IsMoving,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the obstacle is currently moving.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::NavMeshObstacleComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::NavMeshObstacleComponent" },
+            "NavMeshObstacleComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::NavMeshObstacleComponent),
+            TypeCategory::Component,
+            {
+                Field_Extents(),
+                Field_CarveNavMesh(),
+                Field_IsMoving(),
+            },
+            &StorageBindingOf(),
+            "AI/Navigation",
+            "Dynamic box obstacle carving holes in 3D NavMesh.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -13041,6 +13447,8 @@ const TypeSchema& WeSchemaOf_TerrainComponent() { return GeneratedAccess<World::
 const TypeSchema& WeSchemaOf_FoliageComponent() { return GeneratedAccess<World::FoliageComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SpotLight3DComponent() { return GeneratedAccess<World::SpotLight3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_AnimGraphComponent() { return GeneratedAccess<World::AnimGraphComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_NavMeshAgentComponent() { return GeneratedAccess<World::NavMeshAgentComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_NavMeshObstacleComponent() { return GeneratedAccess<World::NavMeshObstacleComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -13129,6 +13537,8 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_FoliageComponent(),
 			WeSchemaOf_SpotLight3DComponent(),
 			WeSchemaOf_AnimGraphComponent(),
+			WeSchemaOf_NavMeshAgentComponent(),
+			WeSchemaOf_NavMeshObstacleComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};
