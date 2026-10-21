@@ -387,6 +387,11 @@ namespace World
 		const uint32_t neededSize = static_cast<uint32_t>(visibleInstances.size() * sizeof(FoliageInstanceData));
 		if (!s_State.InstanceBuffer || s_State.InstanceCapacity < neededSize)
 		{
+			if (s_State.InstanceBuffer)
+			{
+				auto oldBuf = std::move(s_State.InstanceBuffer);
+				Renderer::QueueRelease([oldBuf = std::move(oldBuf)]() mutable {});
+			}
 			Rhi::BufferDesc bDesc;
 			bDesc.Size = std::max(neededSize, 65536u);
 			bDesc.Usage = Rhi::BufferUsageVertex;

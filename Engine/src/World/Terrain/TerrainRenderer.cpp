@@ -501,8 +501,22 @@ namespace World
 
 	void TerrainRenderer::ClearCache()
 	{
+		if (s_State.ChunkCache.empty())
+			return;
+
+		std::vector<ChunkGpuMesh> stale;
+		stale.reserve(s_State.ChunkCache.size());
+		for (auto& [key, mesh] : s_State.ChunkCache)
+		{
+			stale.push_back(std::move(mesh));
+		}
 		s_State.ChunkCache.clear();
 		s_State.LastDataPtr = nullptr;
+
+		Renderer::QueueRelease([stale = std::move(stale)]() mutable
+		{
+			stale.clear();
+		});
 	}
 
 	Rhi::Handle<Rhi::Pipeline> TerrainRenderer::GetPipeline()
@@ -707,8 +721,9 @@ s_State.MaterialDescriptorSets[slot]->Update(writes);
 		// 4. Chunk CDLOD 分块生成与提交
 		if (s_State.LastDataPtr != &data || data.IsDirty())
 		{
-			s_State.ChunkCache.clear();
+			ClearCache();
 			s_State.LastDataPtr = &data;
+			const_cast<TerrainData&>(data).ClearDirty();
 		}
 
 		const uint32_t chunkResolution = std::max(16u, settings.ChunkResolution);
@@ -748,6 +763,17 @@ s_State.MaterialDescriptorSets[slot]->Update(writes);
 				auto& chunkMesh = s_State.ChunkCache[chunkKey];
 				if (!chunkMesh.VertexBuffer || !chunkMesh.IndexBuffer || chunkMesh.Lod != targetLod)
 				{
+					if (chunkMesh.VertexBuffer || chunkMesh.IndexBuffer)
+					{
+						auto oldVB = std::move(chunkMesh.VertexBuffer);
+						auto oldIB = std::move(chunkMesh.IndexBuffer);
+						Renderer::QueueRelease([oldVB = std::move(oldVB), oldIB = std::move(oldIB)]() mutable
+						{
+							oldVB = nullptr;
+							oldIB = nullptr;
+						});
+					}
+
 					TerrainChunk chunkData;
 					data.GenerateChunkMesh(cx, cz, chunkResolution, targetLod, chunkData);
 
