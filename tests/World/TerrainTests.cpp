@@ -249,7 +249,7 @@ static void TestTerrainSerializationRoundtrip()
 
 static void GenerateSampleDefaultTerrainAsset()
 {
-	TerrainData terrain(128, 128, 2.0f, 1.0f);
+	TerrainData terrain(256, 256, 2.0f, 1.0f);
 	terrain.GenerateProceduralLandscape(2026);
 	std::filesystem::create_directories("projects/default/assets/terrains");
 	terrain.SaveToFile("projects/default/assets/terrains/default.wterrain");

@@ -1104,7 +1104,7 @@ namespace World
 				float t = glm::clamp(1.0f - (edgeDist - 0.55f) / 0.45f, 0.0f, 1.0f);
 				float edgeFalloff = t * t * (3.0f - 2.0f * t);
 
-				float finalHeight = std::max(2.5f, (rawHeight + 12.0f) * edgeFalloff + 2.5f);
+				float finalHeight = std::max(6.0f, (rawHeight + 14.0f) * edgeFalloff + 6.0f);
 				SetHeight(x, z, finalHeight);
 			}
 		}
