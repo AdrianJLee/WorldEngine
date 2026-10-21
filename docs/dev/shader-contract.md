@@ -115,7 +115,7 @@ float  depth  = u_ShadowMap.SampleLevel(uv, 0.0f).r;      // SampleLevel / Sampl
 | set | binding | 声明 | 内容 |
 | --- | --- | --- | --- |
 | 0 | 0 | `cbuffer CameraUniforms` | `u_ViewProjection` |
-| 0 | 2 | `cbuffer LightUniforms` | 阴影矩阵/参数、`u_Ambient`、`u_LightCounts`、`u_Lights[8]` |
+| 0 | 2 | `cbuffer LightUniforms` | 4级CSM矩阵/切片/参数、`u_Ambient`、`u_LightCounts`、`u_Lights[8]`(832B std140) |
 | 0 | 3 | `Sampler2D u_ShadowMap` | 方向光阴影图 |
 | 1 | 1 | `cbuffer ObjectUniforms` | `u_Model`、`u_BaseColor`、`u_MetallicRoughness`、`u_Emissive`、`u_Flags`、`u_EntityId` |
 | 1 | 3 | `cbuffer BoneUniforms` | `u_Bones[128]` |

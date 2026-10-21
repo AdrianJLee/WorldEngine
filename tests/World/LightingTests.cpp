@@ -177,15 +177,16 @@ namespace
 	//   总大小 496(64 + 16 + 16 + 16 + 8*48)。
 	void LightUniformsLayoutMatchesShader()
 	{
-		CHECK(sizeof(LightUniforms::Light) == 48u);
-		CHECK(sizeof(LightUniforms) == 496u);
-		CHECK(offsetof(LightUniforms, ShadowViewProjection) == 0u);
-		CHECK(offsetof(LightUniforms, ShadowParams) == 64u);
-		CHECK(offsetof(LightUniforms, Ambient) == 80u);
-		CHECK(offsetof(LightUniforms, LightCounts) == 96u);
-		CHECK(offsetof(LightUniforms, Lights) == 112u);
+		CHECK(sizeof(LightUniforms::Light) == 64u);
+		CHECK(sizeof(LightUniforms) == 832u);
+		CHECK(offsetof(LightUniforms, ShadowViewProjections) == 0u);
+		CHECK(offsetof(LightUniforms, CascadeSplits) == 256u);
+		CHECK(offsetof(LightUniforms, ShadowParams) == 272u);
+		CHECK(offsetof(LightUniforms, Ambient) == 288u);
+		CHECK(offsetof(LightUniforms, LightCounts) == 304u);
+		CHECK(offsetof(LightUniforms, Lights) == 320u);
 
-		// 默认值:阴影参数是"关闭 + 2048² + PCF 半径 1",预览/无阴影场景直接可用。
+		// 默认值:阴影参数是关闭 + 2048² + PCF 半径 1,预览/无阴影场景直接可用。
 		const LightUniforms defaults;
 		CHECK(defaults.ShadowParams.x == 0.0f);
 		CHECK(defaults.ShadowParams.z == static_cast<float>(Renderer3D::DefaultShadowMapSize));
@@ -193,7 +194,7 @@ namespace
 		CHECK(Renderer3D::MaxLights == 8u);
 	}
 
-	// 6.阴影开关:只有"保留下来的主方向光 CastShadow = true"才启用;启用后写入正交矩阵。
+	// 6.阴影开关:只有保留下来的主方向光 CastShadow = true 才启用;启用后写入正交矩阵。
 	void ShadowCasterEnablesShadowMatrix()
 	{
 		std::vector<DirectionalLightData> directional(1);
@@ -205,7 +206,7 @@ namespace
 		const glm::mat4 lightViewProjection = glm::mat4(2.0f);
 		Renderer3D::ApplyShadowCaster(rig, lightViewProjection);
 		CHECK(rig.Uniforms.ShadowParams.x == 1.0f);
-		CHECK(rig.Uniforms.ShadowViewProjection == lightViewProjection);
+		CHECK(rig.Uniforms.ShadowViewProjections[0] == lightViewProjection);
 	}
 
 	// 7.组件 schema 往返:registry 查找 + Get/Set + SchemaWriter(YAML)写/读。

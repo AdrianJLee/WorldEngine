@@ -848,11 +848,13 @@ struct GpuLight
     float4 PositionType;
     float4 ColorIntensity;
     float4 DirectionRange;
+    float4 SpotAngles;
 };
 
 [[vk::binding(2, 0)]] cbuffer LightUniforms
 {
-    float4x4 u_ShadowViewProjection;
+    float4x4 u_ShadowViewProjections[4];
+    float4 u_CascadeSplits;
     float4 u_ShadowParams;
     float4 u_Ambient;
     uint4 u_LightCounts;
@@ -903,14 +905,22 @@ float4x4 ComputeSkinPalette(SurfaceSkinnedInput input)
 
 float SampleDirectionalShadow(float3 worldPosition, float3 normal, float3 toLightDirection)
 {
-    const float4 shadowPosition = mul(u_ShadowViewProjection, float4(worldPosition, 1.0f));
-    if (shadowPosition.w <= 0.0f)
-        return 1.0f;
-    const float3 projected = shadowPosition.xyz / shadowPosition.w;
-    const float depth = (u_LightCounts.z > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z;
-    const float2 uv = projected.xy * 0.5f + 0.5f;
+    float4 shadowPosition = mul(u_ShadowViewProjections[0], float4(worldPosition, 1.0f));
+    float3 projected = shadowPosition.xyz / max(shadowPosition.w, 1e-5f);
+    float2 uv = projected.xy * 0.5f + 0.5f;
+
+    for (int c = 0; c < 4; ++c)
+    {
+        shadowPosition = mul(u_ShadowViewProjections[c], float4(worldPosition, 1.0f));
+        projected = shadowPosition.xyz / max(shadowPosition.w, 1e-5f);
+        uv = projected.xy * 0.5f + 0.5f;
+        if (uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f)
+            break;
+    }
+
     if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f)
         return 1.0f;
+    const float depth = (u_LightCounts.z > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z;
     const float cosTheta = saturate(dot(normal, toLightDirection));
     const float bias = max(u_ShadowParams.y * (1.0f - cosTheta), u_ShadowParams.y * 0.25f);
     const float2 texel = u_ShadowParams.w / max(u_ShadowParams.z, 1.0f);
@@ -1085,16 +1095,32 @@ float3 EvaluateEngineLighting(MaterialInputs materialInputs, Surface surface, fl
     const float3 viewDirection = float3(0.0f, 0.0f, 1.0f);
     float3 litColor = albedo * u_Ambient.rgb * u_Ambient.a * saturate(surface.AmbientOcclusion);
 
-    const uint lightCount = min(u_LightCounts.x + u_LightCounts.y, 8u);
+    const uint lightCount = min(u_LightCounts.x + u_LightCounts.y + u_LightCounts.w, 8u);
     for (uint lightIndex = 0; lightIndex < lightCount; ++lightIndex)
     {
         const GpuLight light = u_Lights[lightIndex];
-        const bool isDirectional = light.PositionType.w > 0.5f;
+        const float lightType = light.PositionType.w;
         float3 toLight;
         float attenuation = 1.0f;
-        if (isDirectional)
+        if (lightType > 0.5f && lightType < 1.5f)
         {
             toLight = -normalize(light.DirectionRange.xyz);
+        }
+        else if (lightType > 1.5f)
+        {
+            const float3 offset = light.PositionType.xyz - materialInputs.WorldPosition;
+            const float distanceToLight = length(offset);
+            toLight = distanceToLight > 1e-5f ? offset / distanceToLight : float3(0.0f, 0.0f, 0.0f);
+            const float range = max(light.DirectionRange.w, 1e-4f);
+            const float falloff = saturate(1.0f - distanceToLight / range);
+            attenuation = falloff * falloff;
+
+            const float3 spotDir = normalize(light.DirectionRange.xyz);
+            const float cosAngle = dot(spotDir, -toLight);
+            const float cosInner = light.SpotAngles.x;
+            const float cosOuter = light.SpotAngles.y;
+            const float spotFalloff = saturate((cosAngle - cosOuter) / max(cosInner - cosOuter, 1e-4f));
+            attenuation *= spotFalloff * spotFalloff;
         }
         else
         {
@@ -1107,7 +1133,7 @@ float3 EvaluateEngineLighting(MaterialInputs materialInputs, Surface surface, fl
 
         const float lambert = saturate(dot(shadingNormal, toLight));
         float visibility = 1.0f;
-        if (isDirectional && u_ShadowParams.x > 0.5f)
+        if (lightType > 0.5f && lightType < 1.5f && u_ShadowParams.x > 0.5f)
             visibility = SampleDirectionalShadow(materialInputs.WorldPosition, shadingNormal, toLight);
 
         const float3 radiance = light.ColorIntensity.rgb * light.ColorIntensity.a * attenuation * visibility;

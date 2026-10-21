@@ -73,20 +73,22 @@ struct PS_OUTPUT
 // 布局与 C++ 的 LightUniforms(std140,496 字节)逐字段对应,详见 Renderer3D.h。
 struct GpuLight
 {
-    float4 PositionType;      // xyz = 位置(点光) / w = 0 点光 | 1 方向光
+    float4 PositionType;      // xyz = 位置(点光/聚光) / w = 0 点光 | 1 方向光 | 2 聚光灯
     float4 ColorIntensity;    // rgb = 线性色, a = 强度
-    float4 DirectionRange;    // 方向光:xyz = 传播方向(已归一化);点光:x = 范围
+    float4 DirectionRange;    // 方向光:xyz = 传播方向(已归一化);点光:x = 范围;聚光灯:xyz = 方向, w = 范围
+    float4 SpotAngles;        // 聚光灯参数: x = cos(InnerAngle), y = cos(OuterAngle), zw = 保留
 };
 
 [[vk::binding(2, 0)]] cbuffer LightUniforms
 {
-    float4x4 u_ShadowViewProjection;
+    float4x4 u_ShadowViewProjections[4];
+    float4 u_CascadeSplits;
     // x = 启用阴影, y = 深度 bias, z = 贴图边长, w = PCF 半径(纹素)。
     float4 u_ShadowParams;
     // rgb = 环境光线性色, a = 强度(无 AmbientLightComponent 时是 0.25 灰默认值)。
     float4 u_Ambient;
     // x = 方向光数, y = 点光数, z = 深度约定(0 = Vulkan 的 [0,1] 裁剪深度,
-    // 1 = OpenGL 的 [-1,1] 裁剪深度 → 深度缓冲存 (z+1)/2)。
+    // 1 = OpenGL 的 [-1,1] 裁剪深度 → 深度缓冲存 (z+1)/2), w = 聚光灯数。
     uint4 u_LightCounts;
     GpuLight u_Lights[8];
 };
@@ -213,16 +215,23 @@ VS_OUTPUT VSMainSkinned(VS_SKINNED_INPUT input)
 // 两个后端共用同一份着色器(SceneRenderer 已按后端决定是否补 z 重映射)。
 float SampleDirectionalShadow(float3 worldPosition, float3 normal, float3 toLightDirection)
 {
-    const float4 shadowPosition = mul(u_ShadowViewProjection, float4(worldPosition, 1.0f));
-    if (shadowPosition.w <= 0.0f)
-        return 1.0f;
-    const float3 projected = shadowPosition.xyz / shadowPosition.w;
-    const float depth = (u_LightCounts.z > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z;
-    const float2 uv = projected.xy * 0.5f + 0.5f;
-    // 阴影体积外不投影(ClampToEdge 采样会返回边缘深度,直接判受光更稳)。
+    float4 shadowPosition = mul(u_ShadowViewProjections[0], float4(worldPosition, 1.0f));
+    float3 projected = shadowPosition.xyz / max(shadowPosition.w, 1e-5f);
+    float2 uv = projected.xy * 0.5f + 0.5f;
+
+    for (int c = 0; c < 4; ++c)
+    {
+        shadowPosition = mul(u_ShadowViewProjections[c], float4(worldPosition, 1.0f));
+        projected = shadowPosition.xyz / max(shadowPosition.w, 1e-5f);
+        uv = projected.xy * 0.5f + 0.5f;
+        if (uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f)
+            break;
+    }
+
     if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f)
         return 1.0f;
-    // 斜率相关 bias:掠射角(dot 小)时加深偏移,避免自阴影条纹。
+
+    const float depth = (u_LightCounts.z > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z;
     const float cosTheta = saturate(dot(normal, toLightDirection));
     const float bias = max(u_ShadowParams.y * (1.0f - cosTheta), u_ShadowParams.y * 0.25f);
     const float2 texel = u_ShadowParams.w / max(u_ShadowParams.z, 1.0f);
@@ -282,20 +291,38 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     const float3 viewDirection = float3(0.0f, 0.0f, 1.0f);
     float3 litColor = albedo * u_Ambient.rgb * u_Ambient.a;
 
-    const uint lightCount = u_LightCounts.x + u_LightCounts.y;
-    for (uint lightIndex = 0; lightIndex < lightCount; ++lightIndex)
+    const uint lightCount = u_LightCounts.x + u_LightCounts.y + u_LightCounts.w;
+    for (uint lightIndex = 0; lightIndex < lightCount && lightIndex < 8; ++lightIndex)
     {
         const GpuLight light = u_Lights[lightIndex];
-        const bool isDirectional = light.PositionType.w > 0.5f;
+        const float lightType = light.PositionType.w;
         float3 toLight;
         float attenuation = 1.0f;
-        if (isDirectional)
+        if (lightType > 0.5f && lightType < 1.5f)
         {
-            // DirectionRange.xyz 是光的传播方向(从光源指向场景),入射方向取反。
+            // 方向光: DirectionRange.xyz 是光的传播方向(从光源指向场景),入射方向取反。
             toLight = -normalize(light.DirectionRange.xyz);
+        }
+        else if (lightType > 1.5f)
+        {
+            // 聚光灯
+            const float3 offset = light.PositionType.xyz - input.v_WorldPosition;
+            const float distanceToLight = length(offset);
+            toLight = distanceToLight > 1e-5f ? offset / distanceToLight : float3(0.0f, 0.0f, 0.0f);
+            const float range = max(light.DirectionRange.w, 1e-4f);
+            const float falloff = saturate(1.0f - distanceToLight / range);
+            attenuation = falloff * falloff;
+
+            const float3 spotDir = normalize(light.DirectionRange.xyz);
+            const float cosAngle = dot(spotDir, -toLight);
+            const float cosInner = light.SpotAngles.x;
+            const float cosOuter = light.SpotAngles.y;
+            const float spotFalloff = saturate((cosAngle - cosOuter) / max(cosInner - cosOuter, 1e-4f));
+            attenuation *= spotFalloff * spotFalloff;
         }
         else
         {
+            // 点光
             const float3 offset = light.PositionType.xyz - input.v_WorldPosition;
             const float distanceToLight = length(offset);
             toLight = distanceToLight > 1e-5f ? offset / distanceToLight : float3(0.0f, 0.0f, 0.0f);
@@ -306,7 +333,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
 
         const float lambert = saturate(dot(normal, toLight));
         float visibility = 1.0f;
-        if (isDirectional && u_ShadowParams.x > 0.5f)
+        if (lightType > 0.5f && lightType < 1.5f && u_ShadowParams.x > 0.5f)
             visibility = SampleDirectionalShadow(input.v_WorldPosition, normal, toLight);
 
         const float3 radiance = light.ColorIntensity.rgb * light.ColorIntensity.a * attenuation * visibility;

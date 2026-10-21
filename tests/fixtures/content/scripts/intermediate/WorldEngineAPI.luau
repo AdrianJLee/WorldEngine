@@ -929,6 +929,17 @@ function ui:isOpen() end
 ---@field Intensity number
 ---@field Color vec3
 
+-- Component fields are exposed through Entity:GetComponent("AnimGraphComponent"); there is no runtime global named AnimGraphComponent.
+---@class AnimGraphComponent
+---@field PlaybackSpeed number
+---@field EnableRootMotion number
+---@field EnableFootIk number
+---@field CurrentStateHash number
+---@field EnableUpperBodyLayer number
+---@field AnimGraphAsset string
+---@field RootMotionWeight number
+---@field FootIkWeight number
+
 -- Component fields are exposed through Entity:GetComponent("AreaEffector2DComponent"); there is no runtime global named AreaEffector2DComponent.
 ---@class AreaEffector2DComponent
 ---@field UseGlobalCoordinates boolean
@@ -955,6 +966,16 @@ function ui:isOpen() end
 ---@field Spatial3D boolean
 ---@field PlayOnAwake boolean
 ---@field Looping boolean
+
+-- Component fields are exposed through Entity:GetComponent("BiomePCGComponent"); there is no runtime global named BiomePCGComponent.
+---@class BiomePCGComponent
+---@field MinElevation number
+---@field RuleAsset string
+---@field Seed number
+---@field AutoDeformTerrain number
+---@field MaxSlope number
+---@field MoistureThreshold number
+---@field MaxElevation number
 
 -- Component fields are exposed through Entity:GetComponent("BoxCollider2DComponent"); there is no runtime global named BoxCollider2DComponent.
 ---@class BoxCollider2DComponent
@@ -1052,6 +1073,23 @@ function ui:isOpen() end
 ---@field IsSensor boolean
 ---@field Friction number
 
+-- Component fields are exposed through Entity:GetComponent("ConvexCollider3DComponent"); there is no runtime global named ConvexCollider3DComponent.
+---@class ConvexCollider3DComponent
+---@field IsTrigger number
+---@field MaxVerticesPerHull number
+---@field ConcavityThreshold number
+---@field MeshSource string
+---@field HullCount number
+
+-- Component fields are exposed through Entity:GetComponent("DecalComponent"); there is no runtime global named DecalComponent.
+---@class DecalComponent
+---@field AffectTerrain number
+---@field NormalAngleCutoff number
+---@field Extents vec3
+---@field DecalMaterial string
+---@field AffectMeshes number
+---@field FadeFactor number
+
 -- Component fields are exposed through Entity:GetComponent("DirectionalLightComponent"); there is no runtime global named DirectionalLightComponent.
 ---@class DirectionalLightComponent
 ---@field Color vec3
@@ -1071,6 +1109,33 @@ function ui:isOpen() end
 ---@field EnableSpring boolean
 ---@field EnableCollision boolean
 ---@field EnableLimit boolean
+
+-- Component fields are exposed through Entity:GetComponent("EQSComponent"); there is no runtime global named EQSComponent.
+---@class EQSComponent
+---@field QueryCenter vec3
+---@field BestCoverFound number
+---@field GridSpacing number
+---@field QueryRadius number
+
+-- Component fields are exposed through Entity:GetComponent("FoliageComponent"); there is no runtime global named FoliageComponent.
+---@class FoliageComponent
+---@field ReceiveShadow number
+---@field WindStrength number
+---@field InstanceCount number
+---@field EnableWind number
+---@field WindFrequency number
+---@field FadeRange number
+---@field AlignToNormal number
+---@field CastShadow number
+---@field MaxCullDistance number
+---@field FoliageAsset string
+
+-- Component fields are exposed through Entity:GetComponent("FoliageInteractionComponent"); there is no runtime global named FoliageInteractionComponent.
+---@class FoliageInteractionComponent
+---@field RecoverySpeed number
+---@field PushRadius number
+---@field LeaveTracks number
+---@field PushStrength number
 
 -- Component fields are exposed through Entity:GetComponent("FreeformLight2DComponent"); there is no runtime global named FreeformLight2DComponent.
 ---@class FreeformLight2DComponent
@@ -1092,6 +1157,14 @@ function ui:isOpen() end
 ---@field Color vec3
 ---@field DirectionIntensity number
 ---@field Intensity number
+
+-- Component fields are exposed through Entity:GetComponent("HLODComponent"); there is no runtime global named HLODComponent.
+---@class HLODComponent
+---@field IsActive number
+---@field CullDistance number
+---@field CastShadow number
+---@field ProxyMesh string
+---@field TransitionDistance number
 
 -- Component fields are exposed through Entity:GetComponent("HealthComponent"); there is no runtime global named HealthComponent.
 ---@class HealthComponent
@@ -1128,6 +1201,17 @@ function ui:isOpen() end
 ---@field Mode number
 ---@field Mesh string
 
+-- Component fields are exposed through Entity:GetComponent("MeshLODComponent"); there is no runtime global named MeshLODComponent.
+---@class MeshLODComponent
+---@field Hysteresis number
+---@field LOD1Mesh string
+---@field LOD1Distance number
+---@field CullDistance number
+---@field EnableCrossFade number
+---@field LOD2Mesh string
+---@field LOD2Distance number
+---@field CurrentLOD number
+
 -- Component fields are exposed through Entity:GetComponent("MeshRendererComponent"); there is no runtime global named MeshRendererComponent.
 ---@class MeshRendererComponent
 ---@field Material string
@@ -1135,6 +1219,24 @@ function ui:isOpen() end
 ---@field MeshIndex number
 ---@field Mesh string
 ---@field Primitive number
+
+-- Component fields are exposed through Entity:GetComponent("NavMeshAgentComponent"); there is no runtime global named NavMeshAgentComponent.
+---@class NavMeshAgentComponent
+---@field StoppingDistance number
+---@field ReachedDestination number
+---@field Speed number
+---@field AgentRadius number
+---@field HasPath number
+---@field Acceleration number
+---@field AgentHeight number
+---@field AutoRepath number
+---@field Destination vec3
+
+-- Component fields are exposed through Entity:GetComponent("NavMeshObstacleComponent"); there is no runtime global named NavMeshObstacleComponent.
+---@class NavMeshObstacleComponent
+---@field IsMoving number
+---@field Extents vec3
+---@field CarveNavMesh number
 
 -- Component fields are exposed through Entity:GetComponent("ParallaxLayerComponent"); there is no runtime global named ParallaxLayerComponent.
 ---@class ParallaxLayerComponent
@@ -1233,6 +1335,13 @@ function ui:isOpen() end
 ---@field MotorSpeed number
 ---@field ConnectedEntity number
 
+-- Component fields are exposed through Entity:GetComponent("RVTComponent"); there is no runtime global named RVTComponent.
+---@class RVTComponent
+---@field SoftBlendRadius number
+---@field WriteNormal number
+---@field WriteAlbedo number
+---@field VirtualTexture string
+
 -- Component fields are exposed through Entity:GetComponent("RevoluteJoint2DComponent"); there is no runtime global named RevoluteJoint2DComponent.
 ---@class RevoluteJoint2DComponent
 ---@field EnableCollision boolean
@@ -1316,6 +1425,24 @@ function ui:isOpen() end
 ---@field Offset vec3
 ---@field Radius number
 
+-- Component fields are exposed through Entity:GetComponent("SplineComponent"); there is no runtime global named SplineComponent.
+---@class SplineComponent
+---@field MeshSpacing number
+---@field SplineMeshAsset string
+---@field RoadWidth number
+---@field ExtrudeRoad number
+---@field GenerateCollision number
+---@field ClosedLoop number
+
+-- Component fields are exposed through Entity:GetComponent("SpotLight3DComponent"); there is no runtime global named SpotLight3DComponent.
+---@class SpotLight3DComponent
+---@field InnerConeAngle number
+---@field OuterConeAngle number
+---@field Color vec3
+---@field Intensity number
+---@field CastShadow number
+---@field Range number
+
 -- Component fields are exposed through Entity:GetComponent("SpriteAnimatorComponent"); there is no runtime global named SpriteAnimatorComponent.
 ---@class SpriteAnimatorComponent
 ---@field CurrentTime number
@@ -1350,6 +1477,21 @@ function ui:isOpen() end
 -- Component fields are exposed through Entity:GetComponent("TagComponent"); there is no runtime global named TagComponent.
 ---@class TagComponent
 ---@field Tag string
+
+-- Component fields are exposed through Entity:GetComponent("TerrainComponent"); there is no runtime global named TerrainComponent.
+---@class TerrainComponent
+---@field MinHeight number
+---@field LayerCount number
+---@field HoleCutoutEnabled number
+---@field TerrainAsset string
+---@field ChunkResolution number
+---@field CastShadow number
+---@field EnableCollision number
+---@field MaxHeight number
+---@field HeightScale number
+---@field ReceiveShadow number
+---@field CellSize number
+---@field LodDistanceRatio number
 
 -- Component fields are exposed through Entity:GetComponent("TilemapComponent"); there is no runtime global named TilemapComponent.
 ---@class TilemapComponent
@@ -1403,6 +1545,27 @@ function ui:isOpen() end
 ---@field Priority number
 ---@field ScreenShakeFrequency number
 
+-- Component fields are exposed through Entity:GetComponent("WaterBodyComponent"); there is no runtime global named WaterBodyComponent.
+---@class WaterBodyComponent
+---@field WaveSteepness number
+---@field WaterColor vec3
+---@field WaterClarity number
+---@field WaveSpeed number
+---@field EnableBuoyancy number
+---@field EnableFoam number
+---@field WaveLength number
+
+-- Component fields are exposed through Entity:GetComponent("WeatherSystemComponent"); there is no runtime global named WeatherSystemComponent.
+---@class WeatherSystemComponent
+---@field PrecipitationIntensity number
+---@field WindSpeed number
+---@field EnablePuddles number
+---@field Wetness number
+---@field CloudCoverage number
+---@field CloudDensity number
+---@field WindDirection vec3
+---@field EnableVolumetricCloud number
+
 -- Component fields are exposed through Entity:GetComponent("WheelJoint2DComponent"); there is no runtime global named WheelJoint2DComponent.
 ---@class WheelJoint2DComponent
 ---@field Hertz number
@@ -1419,16 +1582,27 @@ function ui:isOpen() end
 ---@field AnchorOther vec2
 ---@field MotorSpeed number
 
+-- Component fields are exposed through Entity:GetComponent("WhiteboxComponent"); there is no runtime global named WhiteboxComponent.
+---@class WhiteboxComponent
+---@field Steps number
+---@field BevelSize number
+---@field Dimensions vec3
+---@field GenerateCollision number
+
 ---Pure-ECS component name lookup table; provides autocomplete for ecs:Query / entity:GetComponent.
 ---@class Comp
 ---@field AmbientLightComponent string Registered component type name "AmbientLightComponent".
 ---@field AmbientLight string Short alias for "AmbientLightComponent".
+---@field AnimGraphComponent string Registered component type name "AnimGraphComponent".
+---@field AnimGraph string Short alias for "AnimGraphComponent".
 ---@field AreaEffector2DComponent string Registered component type name "AreaEffector2DComponent".
 ---@field AreaEffector2D string Short alias for "AreaEffector2DComponent".
 ---@field AudioListenerComponent string Registered component type name "AudioListenerComponent".
 ---@field AudioListener string Short alias for "AudioListenerComponent".
 ---@field AudioSourceComponent string Registered component type name "AudioSourceComponent".
 ---@field AudioSource string Short alias for "AudioSourceComponent".
+---@field BiomePCGComponent string Registered component type name "BiomePCGComponent".
+---@field BiomePCG string Short alias for "BiomePCGComponent".
 ---@field BoxCollider2DComponent string Registered component type name "BoxCollider2DComponent".
 ---@field BoxCollider2D string Short alias for "BoxCollider2DComponent".
 ---@field BoxCollider3DComponent string Registered component type name "BoxCollider3DComponent".
@@ -1451,14 +1625,26 @@ function ui:isOpen() end
 ---@field CircleRenderer string Short alias for "CircleRendererComponent".
 ---@field CompositeCollider2DComponent string Registered component type name "CompositeCollider2DComponent".
 ---@field CompositeCollider2D string Short alias for "CompositeCollider2DComponent".
+---@field ConvexCollider3DComponent string Registered component type name "ConvexCollider3DComponent".
+---@field ConvexCollider3D string Short alias for "ConvexCollider3DComponent".
+---@field DecalComponent string Registered component type name "DecalComponent".
+---@field Decal string Short alias for "DecalComponent".
 ---@field DirectionalLightComponent string Registered component type name "DirectionalLightComponent".
 ---@field DirectionalLight string Short alias for "DirectionalLightComponent".
 ---@field DistanceJoint2DComponent string Registered component type name "DistanceJoint2DComponent".
 ---@field DistanceJoint2D string Short alias for "DistanceJoint2DComponent".
+---@field EQSComponent string Registered component type name "EQSComponent".
+---@field EQS string Short alias for "EQSComponent".
+---@field FoliageComponent string Registered component type name "FoliageComponent".
+---@field Foliage string Short alias for "FoliageComponent".
+---@field FoliageInteractionComponent string Registered component type name "FoliageInteractionComponent".
+---@field FoliageInteraction string Short alias for "FoliageInteractionComponent".
 ---@field FreeformLight2DComponent string Registered component type name "FreeformLight2DComponent".
 ---@field FreeformLight2D string Short alias for "FreeformLight2DComponent".
 ---@field GlobalLight2DComponent string Registered component type name "GlobalLight2DComponent".
 ---@field GlobalLight2D string Short alias for "GlobalLight2DComponent".
+---@field HLODComponent string Registered component type name "HLODComponent".
+---@field HLOD string Short alias for "HLODComponent".
 ---@field HealthComponent string Registered component type name "HealthComponent".
 ---@field Health string Short alias for "HealthComponent".
 ---@field HierarchyComponent string Registered component type name "HierarchyComponent".
@@ -1469,8 +1655,14 @@ function ui:isOpen() end
 ---@field LevelEntity string Short alias for "LevelEntityComponent".
 ---@field MeshCollider3DComponent string Registered component type name "MeshCollider3DComponent".
 ---@field MeshCollider3D string Short alias for "MeshCollider3DComponent".
+---@field MeshLODComponent string Registered component type name "MeshLODComponent".
+---@field MeshLOD string Short alias for "MeshLODComponent".
 ---@field MeshRendererComponent string Registered component type name "MeshRendererComponent".
 ---@field MeshRenderer string Short alias for "MeshRendererComponent".
+---@field NavMeshAgentComponent string Registered component type name "NavMeshAgentComponent".
+---@field NavMeshAgent string Short alias for "NavMeshAgentComponent".
+---@field NavMeshObstacleComponent string Registered component type name "NavMeshObstacleComponent".
+---@field NavMeshObstacle string Short alias for "NavMeshObstacleComponent".
 ---@field ParallaxLayerComponent string Registered component type name "ParallaxLayerComponent".
 ---@field ParallaxLayer string Short alias for "ParallaxLayerComponent".
 ---@field PartitionVolumeComponent string Registered component type name "PartitionVolumeComponent".
@@ -1491,6 +1683,8 @@ function ui:isOpen() end
 ---@field PostProcess string Short alias for "PostProcessComponent".
 ---@field PrismaticJoint2DComponent string Registered component type name "PrismaticJoint2DComponent".
 ---@field PrismaticJoint2D string Short alias for "PrismaticJoint2DComponent".
+---@field RVTComponent string Registered component type name "RVTComponent".
+---@field RVT string Short alias for "RVTComponent".
 ---@field RevoluteJoint2DComponent string Registered component type name "RevoluteJoint2DComponent".
 ---@field RevoluteJoint2D string Short alias for "RevoluteJoint2DComponent".
 ---@field RigidBody2DComponent string Registered component type name "RigidBody2DComponent".
@@ -1507,6 +1701,10 @@ function ui:isOpen() end
 ---@field SmartObject string Short alias for "SmartObjectComponent".
 ---@field SphereCollider3DComponent string Registered component type name "SphereCollider3DComponent".
 ---@field SphereCollider3D string Short alias for "SphereCollider3DComponent".
+---@field SplineComponent string Registered component type name "SplineComponent".
+---@field Spline string Short alias for "SplineComponent".
+---@field SpotLight3DComponent string Registered component type name "SpotLight3DComponent".
+---@field SpotLight3D string Short alias for "SpotLight3DComponent".
 ---@field SpriteAnimatorComponent string Registered component type name "SpriteAnimatorComponent".
 ---@field SpriteAnimator string Short alias for "SpriteAnimatorComponent".
 ---@field SpriteComponent string Registered component type name "SpriteComponent".
@@ -1515,6 +1713,8 @@ function ui:isOpen() end
 ---@field SurfaceEffector2D string Short alias for "SurfaceEffector2DComponent".
 ---@field TagComponent string Registered component type name "TagComponent".
 ---@field Tag string Short alias for "TagComponent".
+---@field TerrainComponent string Registered component type name "TerrainComponent".
+---@field Terrain string Short alias for "TerrainComponent".
 ---@field TilemapComponent string Registered component type name "TilemapComponent".
 ---@field Tilemap string Short alias for "TilemapComponent".
 ---@field TransformComponent string Registered component type name "TransformComponent".
@@ -1527,8 +1727,14 @@ function ui:isOpen() end
 ---@field Vfx string Short alias for "VfxComponent".
 ---@field VirtualCameraComponent string Registered component type name "VirtualCameraComponent".
 ---@field VirtualCamera string Short alias for "VirtualCameraComponent".
+---@field WaterBodyComponent string Registered component type name "WaterBodyComponent".
+---@field WaterBody string Short alias for "WaterBodyComponent".
+---@field WeatherSystemComponent string Registered component type name "WeatherSystemComponent".
+---@field WeatherSystem string Short alias for "WeatherSystemComponent".
 ---@field WheelJoint2DComponent string Registered component type name "WheelJoint2DComponent".
 ---@field WheelJoint2D string Short alias for "WheelJoint2DComponent".
+---@field WhiteboxComponent string Registered component type name "WhiteboxComponent".
+---@field Whitebox string Short alias for "WhiteboxComponent".
 Comp = {}
 
 ---Alias for Comp.

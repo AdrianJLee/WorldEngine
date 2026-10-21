@@ -26,11 +26,13 @@ struct GpuLight
     float4 PositionType;
     float4 ColorIntensity;
     float4 DirectionRange;
+    float4 SpotAngles;
 };
 
 [[vk::binding(2, 0)]] cbuffer LightUniforms
 {
-    float4x4 u_ShadowViewProjection;
+    float4x4 u_ShadowViewProjections[4];
+    float4 u_CascadeSplits;
     float4 u_ShadowParams;
     float4 u_Ambient;
     uint4 u_LightCounts;
@@ -55,7 +57,7 @@ VS_OUTPUT VSMain(VS_INPUT input)
 {
     VS_OUTPUT output;
     const float4 worldPosition = mul(u_Model, float4(input.a_Position, 1.0f));
-    output.Position = mul(u_ShadowViewProjection, worldPosition);
+    output.Position = mul(u_ShadowViewProjections[0], worldPosition);
     return output;
 }
 
@@ -78,7 +80,7 @@ VS_OUTPUT VSMainInstanced(VS_INSTANCED_INPUT input)
     const float4x4 model = float4x4(input.i_Row0, input.i_Row1,
         input.i_Row2, input.i_Row3);
     const float4 worldPosition = mul(model, float4(input.a_Position, 1.0f));
-    output.Position = mul(u_ShadowViewProjection, worldPosition);
+    output.Position = mul(u_ShadowViewProjections[0], worldPosition);
     return output;
 }
 
@@ -105,7 +107,7 @@ VS_OUTPUT VSMainSkinned(VS_SKINNED_INPUT input)
     const float4 skinnedPosition = mul(blended, float4(input.a_Position, 1.0f));
     const bool hasWeights = any(input.a_Weights != 0.0f) && all(isfinite(skinnedPosition));
     const float4 localPosition = hasWeights ? skinnedPosition : float4(input.a_Position, 1.0f);
-    output.Position = mul(u_ShadowViewProjection, mul(u_Model, localPosition));
+    output.Position = mul(u_ShadowViewProjections[0], mul(u_Model, localPosition));
     return output;
 }
 
