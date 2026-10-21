@@ -1523,9 +1523,9 @@ void EditorLayer::OnEvent(Event& event){
 				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
 				{
 					// 工业级视口灵敏度与方向约定 (对齐 UE5 / Unity):
-					// 灵敏度 0.18 度/像素; 鼠标右移向右转头 (-dx); 鼠标上移仰头看天 (dy)
+					// 灵敏度 0.18 度/像素; 鼠标右移向右转头 (dx); 鼠标上移仰头看天 (dy)
 					constexpr float kSensitivity = 0.18f;
-					const float deltaYaw = -dx * kSensitivity;
+					const float deltaYaw = dx * kSensitivity;
 					const float deltaPitch = dy * kSensitivity;
 
 					const bool altPressed = Input::IsKeyPressed(KeyCodes::LeftAlt) || Input::IsKeyPressed(KeyCodes::RightAlt);
