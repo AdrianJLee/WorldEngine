@@ -1171,7 +1171,7 @@ namespace World
 		// 管线把视口/裁剪都设为动态状态,绑定后必须先设置再绘制
 		// (VUID-vkCmdDrawIndexed-None-07832:动态裁剪未设置时状态未定义)。
 		m_CommandBuffers[slot]->SetScissor({ 0, 0, m_Width, m_Height });
-		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot]);
+		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
 
 		// 开发钩子:WLD_DEBUG_CUBE=1 时在同一渲染通道里提交一个 3D 立方体,
 		// 作为 3D 通道(Pipeline/深度/网格缓冲)在双后端下的冒烟基线(D2b)。

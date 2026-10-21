@@ -636,13 +636,13 @@ namespace World
 
 		auto globalSet = s_State.CurrentGlobalSet;
 		if (globalSet)
-			cmd->BindDescriptorSet(globalSet);
+			cmd->BindDescriptorSet(globalSet, 0);
 
 		if (s_State.ObjectDescriptorSets[slot])
-			cmd->BindDescriptorSet(s_State.ObjectDescriptorSets[slot]);
+			cmd->BindDescriptorSet(s_State.ObjectDescriptorSets[slot], 1);
 
 		if (s_State.MaterialDescriptorSets[slot])
-			cmd->BindDescriptorSet(s_State.MaterialDescriptorSets[slot]);
+			cmd->BindDescriptorSet(s_State.MaterialDescriptorSets[slot], 2);
 
 		// 4. Chunk CDLOD 分块生成与提交
 		if (s_State.LastDataPtr != &data || data.IsDirty())
@@ -754,10 +754,10 @@ namespace World
 
 		auto globalSet = s_State.CurrentGlobalSet;
 		if (globalSet)
-			cmd->BindDescriptorSet(globalSet);
+			cmd->BindDescriptorSet(globalSet, 0);
 
 		if (s_State.ObjectDescriptorSets[slot])
-			cmd->BindDescriptorSet(s_State.ObjectDescriptorSets[slot]);
+			cmd->BindDescriptorSet(s_State.ObjectDescriptorSets[slot], 1);
 
 		const uint32_t chunkResolution = std::max(16u, settings.ChunkResolution);
 		const uint32_t numChunksX = data.GetChunkCountX(chunkResolution);
