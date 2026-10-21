@@ -2529,4 +2529,72 @@ namespace World
 	static_assert(offsetof(WhiteboxComponent, Dimensions) == 4, "Dimensions offset mismatch");
 	static_assert(offsetof(WhiteboxComponent, BevelSize) == 16, "BevelSize offset mismatch");
 	static_assert(offsetof(WhiteboxComponent, GenerateCollision) == 20, "GenerateCollision offset mismatch");
+
+	struct HLODComponent
+	{
+		AssetRef ProxyMesh;                               // 16B (offset 0)
+		float TransitionDistance { 200.0f };              // 4B  (offset 16)
+		float CullDistance { 1000.0f };                   // 4B  (offset 20)
+		uint32_t ChildEntityCount { 0 };                  // 4B  (offset 24)
+		uint8_t IsActive { 0 };                           // 1B  (offset 28)
+		uint8_t CastShadow { 1 };                         // 1B  (offset 29)
+		uint8_t _Padding[18] { 0 };                       // 18B (offset 30)
+
+		HLODComponent() = default;
+
+		WE_SCHEMA_BODY(World, HLODComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/HLOD"),
+				Doc("Hierarchical Level of Detail proxy cluster aggregating distant scene entities."))
+			WE_FIELD(ProxyMesh, Asset, Of("Mesh"),
+				Doc("Combined distant proxy mesh asset."));
+			WE_FIELD(TransitionDistance, Float, Range(50.0f, 5000.0f), Default(200.0f),
+				Doc("Distance in meters where individual entities are hidden and proxy is rendered."));
+			WE_FIELD(CullDistance, Float, Range(100.0f, 20000.0f), Default(1000.0f),
+				Doc("Maximum draw distance of the HLOD proxy."));
+			WE_FIELD(IsActive, UInt8, Default(0),
+				Doc("Whether the HLOD proxy is currently being drawn."));
+			WE_FIELD(CastShadow, UInt8, Default(1),
+				Doc("Whether the proxy casts shadows."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(HLODComponent) == 48, "HLODComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<HLODComponent>, "HLODComponent must be trivially copyable");
+	static_assert(offsetof(HLODComponent, ProxyMesh) == 0, "ProxyMesh offset mismatch");
+	static_assert(offsetof(HLODComponent, TransitionDistance) == 16, "TransitionDistance offset mismatch");
+	static_assert(offsetof(HLODComponent, CullDistance) == 20, "CullDistance offset mismatch");
+	static_assert(offsetof(HLODComponent, ChildEntityCount) == 24, "ChildEntityCount offset mismatch");
+	static_assert(offsetof(HLODComponent, IsActive) == 28, "IsActive offset mismatch");
+	static_assert(offsetof(HLODComponent, CastShadow) == 29, "CastShadow offset mismatch");
+
+	struct RVTComponent
+	{
+		AssetRef VirtualTexture;                          // 16B (offset 0)
+		float SoftBlendRadius { 0.5f };                   // 4B  (offset 16)
+		uint8_t WriteAlbedo { 1 };                        // 1B  (offset 20)
+		uint8_t WriteNormal { 1 };                        // 1B  (offset 21)
+		uint8_t WriteRoughness { 1 };                     // 1B  (offset 22)
+		uint8_t _Padding[9] { 0 };                        // 9B  (offset 23)
+
+		RVTComponent() = default;
+
+		WE_SCHEMA_BODY(World, RVTComponent, Component)
+			WE_SCHEMA_META(Category("Rendering/RVT"),
+				Doc("Runtime Virtual Texture component for ground caching and soft contact blending."))
+			WE_FIELD(VirtualTexture, Asset, Of("Texture"),
+				Doc("Target virtual texture container asset."));
+			WE_FIELD(SoftBlendRadius, Float, Range(0.01f, 10.0f), Default(0.5f),
+				Doc("Edge contact soft blend transition width in meters."));
+			WE_FIELD(WriteAlbedo, UInt8, Default(1),
+				Doc("Whether to write base color to virtual texture."));
+			WE_FIELD(WriteNormal, UInt8, Default(1),
+				Doc("Whether to write surface normal to virtual texture."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(RVTComponent) == 32, "RVTComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<RVTComponent>, "RVTComponent must be trivially copyable");
+	static_assert(offsetof(RVTComponent, VirtualTexture) == 0, "VirtualTexture offset mismatch");
+	static_assert(offsetof(RVTComponent, SoftBlendRadius) == 16, "SoftBlendRadius offset mismatch");
+	static_assert(offsetof(RVTComponent, WriteAlbedo) == 20, "WriteAlbedo offset mismatch");
+	static_assert(offsetof(RVTComponent, WriteNormal) == 21, "WriteNormal offset mismatch");
 }
+

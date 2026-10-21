@@ -72,6 +72,8 @@ const TypeSchema& WeSchemaOf_DecalComponent();
 const TypeSchema& WeSchemaOf_ConvexCollider3DComponent();
 const TypeSchema& WeSchemaOf_SplineComponent();
 const TypeSchema& WeSchemaOf_WhiteboxComponent();
+const TypeSchema& WeSchemaOf_HLODComponent();
+const TypeSchema& WeSchemaOf_RVTComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -13918,6 +13920,357 @@ struct GeneratedAccess<World::WhiteboxComponent>
 };
 
 template <>
+struct GeneratedAccess<World::HLODComponent>
+{
+    static Value Get_ProxyMesh(const void* instance)
+    {
+        const World::HLODComponent* self = static_cast<const World::HLODComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->ProxyMesh)>>::GetPath(self->ProxyMesh));
+    }
+    static void Set_ProxyMesh(void* instance, const Value& value)
+    {
+        World::HLODComponent* self = static_cast<World::HLODComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->ProxyMesh)>>::SetPath(self->ProxyMesh, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_ProxyMesh(const void* instance)
+    {
+        const World::HLODComponent* self = static_cast<const World::HLODComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->ProxyMesh)>>::GetIdentity(self->ProxyMesh);
+    }
+    static void SetAssetIdentity_ProxyMesh(void* instance, uint64_t identity)
+    {
+        World::HLODComponent* self = static_cast<World::HLODComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->ProxyMesh)>>::SetIdentity(self->ProxyMesh, identity);
+    }
+    static Value Get_TransitionDistance(const void* instance)
+    {
+        const World::HLODComponent* self = static_cast<const World::HLODComponent*>(instance);
+        return Value(self->TransitionDistance);
+    }
+    static void Set_TransitionDistance(void* instance, const Value& value)
+    {
+        World::HLODComponent* self = static_cast<World::HLODComponent*>(instance);
+        self->TransitionDistance = std::get<float>(value);
+    }
+    static Value Get_CullDistance(const void* instance)
+    {
+        const World::HLODComponent* self = static_cast<const World::HLODComponent*>(instance);
+        return Value(self->CullDistance);
+    }
+    static void Set_CullDistance(void* instance, const Value& value)
+    {
+        World::HLODComponent* self = static_cast<World::HLODComponent*>(instance);
+        self->CullDistance = std::get<float>(value);
+    }
+    static Value Get_IsActive(const void* instance)
+    {
+        const World::HLODComponent* self = static_cast<const World::HLODComponent*>(instance);
+        return Value(self->IsActive);
+    }
+    static void Set_IsActive(void* instance, const Value& value)
+    {
+        World::HLODComponent* self = static_cast<World::HLODComponent*>(instance);
+        self->IsActive = std::get<uint8_t>(value);
+    }
+    static Value Get_CastShadow(const void* instance)
+    {
+        const World::HLODComponent* self = static_cast<const World::HLODComponent*>(instance);
+        return Value(self->CastShadow);
+    }
+    static void Set_CastShadow(void* instance, const Value& value)
+    {
+        World::HLODComponent* self = static_cast<World::HLODComponent*>(instance);
+        self->CastShadow = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_ProxyMesh()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCB66F56B4CCB60E8ull },
+            "ProxyMesh",
+            Kind::Asset,
+            &Get_ProxyMesh,
+            &Set_ProxyMesh,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Mesh",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Combined distant proxy mesh asset.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_ProxyMesh,
+            &SetAssetIdentity_ProxyMesh,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_TransitionDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFE0D9CE39A7DC3A3ull },
+            "TransitionDistance",
+            Kind::Float,
+            &Get_TransitionDistance,
+            &Set_TransitionDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(50.000000f), std::optional<float>(5000.000000f), false, false, "Distance in meters where individual entities are hidden and proxy is rendered.", false, "", {  }, "", std::nullopt },
+            Value(200.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CullDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x570B29BAE87F0254ull },
+            "CullDistance",
+            Kind::Float,
+            &Get_CullDistance,
+            &Set_CullDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(100.000000f), std::optional<float>(20000.000000f), false, false, "Maximum draw distance of the HLOD proxy.", false, "", {  }, "", std::nullopt },
+            Value(1000.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IsActive()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x47DEB4B2C5065495ull },
+            "IsActive",
+            Kind::UInt8,
+            &Get_IsActive,
+            &Set_IsActive,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the HLOD proxy is currently being drawn.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CastShadow()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x89EB107AAC0C49CCull },
+            "CastShadow",
+            Kind::UInt8,
+            &Get_CastShadow,
+            &Set_CastShadow,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the proxy casts shadows.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::HLODComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::HLODComponent" },
+            "HLODComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::HLODComponent),
+            TypeCategory::Component,
+            {
+                Field_ProxyMesh(),
+                Field_TransitionDistance(),
+                Field_CullDistance(),
+                Field_IsActive(),
+                Field_CastShadow(),
+            },
+            &StorageBindingOf(),
+            "Rendering/HLOD",
+            "Hierarchical Level of Detail proxy cluster aggregating distant scene entities.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::RVTComponent>
+{
+    static Value Get_VirtualTexture(const void* instance)
+    {
+        const World::RVTComponent* self = static_cast<const World::RVTComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->VirtualTexture)>>::GetPath(self->VirtualTexture));
+    }
+    static void Set_VirtualTexture(void* instance, const Value& value)
+    {
+        World::RVTComponent* self = static_cast<World::RVTComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->VirtualTexture)>>::SetPath(self->VirtualTexture, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_VirtualTexture(const void* instance)
+    {
+        const World::RVTComponent* self = static_cast<const World::RVTComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->VirtualTexture)>>::GetIdentity(self->VirtualTexture);
+    }
+    static void SetAssetIdentity_VirtualTexture(void* instance, uint64_t identity)
+    {
+        World::RVTComponent* self = static_cast<World::RVTComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->VirtualTexture)>>::SetIdentity(self->VirtualTexture, identity);
+    }
+    static Value Get_SoftBlendRadius(const void* instance)
+    {
+        const World::RVTComponent* self = static_cast<const World::RVTComponent*>(instance);
+        return Value(self->SoftBlendRadius);
+    }
+    static void Set_SoftBlendRadius(void* instance, const Value& value)
+    {
+        World::RVTComponent* self = static_cast<World::RVTComponent*>(instance);
+        self->SoftBlendRadius = std::get<float>(value);
+    }
+    static Value Get_WriteAlbedo(const void* instance)
+    {
+        const World::RVTComponent* self = static_cast<const World::RVTComponent*>(instance);
+        return Value(self->WriteAlbedo);
+    }
+    static void Set_WriteAlbedo(void* instance, const Value& value)
+    {
+        World::RVTComponent* self = static_cast<World::RVTComponent*>(instance);
+        self->WriteAlbedo = std::get<uint8_t>(value);
+    }
+    static Value Get_WriteNormal(const void* instance)
+    {
+        const World::RVTComponent* self = static_cast<const World::RVTComponent*>(instance);
+        return Value(self->WriteNormal);
+    }
+    static void Set_WriteNormal(void* instance, const Value& value)
+    {
+        World::RVTComponent* self = static_cast<World::RVTComponent*>(instance);
+        self->WriteNormal = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_VirtualTexture()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9705E0B6AEFD8F84ull },
+            "VirtualTexture",
+            Kind::Asset,
+            &Get_VirtualTexture,
+            &Set_VirtualTexture,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Texture",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target virtual texture container asset.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_VirtualTexture,
+            &SetAssetIdentity_VirtualTexture,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SoftBlendRadius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6AA1CC2981932CC7ull },
+            "SoftBlendRadius",
+            Kind::Float,
+            &Get_SoftBlendRadius,
+            &Set_SoftBlendRadius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.010000f), std::optional<float>(10.000000f), false, false, "Edge contact soft blend transition width in meters.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WriteAlbedo()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x83A22778CFA39134ull },
+            "WriteAlbedo",
+            Kind::UInt8,
+            &Get_WriteAlbedo,
+            &Set_WriteAlbedo,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to write base color to virtual texture.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WriteNormal()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6BD12D1E02E0593Eull },
+            "WriteNormal",
+            Kind::UInt8,
+            &Get_WriteNormal,
+            &Set_WriteNormal,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to write surface normal to virtual texture.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::RVTComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::RVTComponent" },
+            "RVTComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::RVTComponent),
+            TypeCategory::Component,
+            {
+                Field_VirtualTexture(),
+                Field_SoftBlendRadius(),
+                Field_WriteAlbedo(),
+                Field_WriteNormal(),
+            },
+            &StorageBindingOf(),
+            "Rendering/RVT",
+            "Runtime Virtual Texture component for ground caching and soft contact blending.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -14525,6 +14878,8 @@ const TypeSchema& WeSchemaOf_DecalComponent() { return GeneratedAccess<World::De
 const TypeSchema& WeSchemaOf_ConvexCollider3DComponent() { return GeneratedAccess<World::ConvexCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SplineComponent() { return GeneratedAccess<World::SplineComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_WhiteboxComponent() { return GeneratedAccess<World::WhiteboxComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_HLODComponent() { return GeneratedAccess<World::HLODComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_RVTComponent() { return GeneratedAccess<World::RVTComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -14620,6 +14975,8 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_ConvexCollider3DComponent(),
 			WeSchemaOf_SplineComponent(),
 			WeSchemaOf_WhiteboxComponent(),
+			WeSchemaOf_HLODComponent(),
+			WeSchemaOf_RVTComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

@@ -2792,3 +2792,23 @@ set_tests_properties(World.LevelAuthoring PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldLargeWorldTests World/LargeWorldTests.cpp)
+target_link_libraries(WorldLargeWorldTests PRIVATE World)
+target_compile_features(WorldLargeWorldTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldLargeWorldTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldLargeWorldTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldLargeWorldTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.LargeWorld COMMAND WorldLargeWorldTests)
+set_tests_properties(World.LargeWorld PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
