@@ -1068,7 +1068,7 @@ namespace World
 		const float invW = 1.0f / static_cast<float>(m_Width);
 		const float invH = 1.0f / static_cast<float>(m_Height);
 
-		// 1. 雄浑连绵的次世代自然山系高程生成 (消除生硬阶梯波与尖刺)
+		// 1. 次世代连绵自然山系高程 (大尺度分形扭曲有机边界，彻底消灭圆形边缘分界线)
 		for (uint32_t z = 0; z < m_Height; ++z)
 		{
 			for (uint32_t x = 0; x < m_Width; ++x)
@@ -1076,37 +1076,40 @@ namespace World
 				float nx = static_cast<float>(x) * invW;
 				float nz = static_cast<float>(z) * invH;
 
-				// 宏观主山体与深谷架构 (低频大尺度)
+				// 宏观主山体与深谷架构
 				float macroContinent = (SmoothNoise(nx * 1.8f, nz * 1.8f, seed) - 0.5f) * 22.0f;
 
-				// 主山脉脊线 (平滑连续多重分形，产生雄奇陡峭的山脊主峰)
+				// 主山脉脊线 (平滑多重分形)
 				float r1 = SmoothNoise(nx * 3.5f + 0.3f, nz * 3.5f + 0.5f, seed + 101u);
 				float ridge1 = 1.0f - std::abs(r1 * 2.0f - 1.0f);
 				ridge1 = ridge1 * ridge1 * (SmoothNoise(nx * 1.2f, nz * 1.2f, seed + 55u) * 26.0f);
 
-				// 次级山峦起伏 (中频自然褶皱)
+				// 次级山峦起伏
 				float r2 = SmoothNoise(nx * 7.0f, nz * 7.0f, seed + 202u);
 				float hills = (r2 - 0.5f) * 8.0f;
 
-				// 微地形山脚坡降
+				// 微观地形起伏
 				float micro = (SmoothNoise(nx * 18.0f, nz * 18.0f, seed + 303u) - 0.5f) * 2.0f;
 
-				// 基础海拔总和
 				float rawHeight = macroContinent + ridge1 + hills + micro;
 
-				// 边缘平缓落入山谷盆地 (平滑衰减，抬高基准高程至 Y >= 2.5m 彻底杜绝与 Y=0 参考网格穿插)
-				float dx = (nx - 0.5f) * 2.0f;
-				float dz = (nz - 0.5f) * 2.0f;
-				float edgeDist = std::sqrt(dx * dx + dz * dz);
-				float edgeFalloff = glm::clamp(1.0f - (edgeDist - 0.65f) / 0.35f, 0.0f, 1.0f);
-				edgeFalloff = edgeFalloff * edgeFalloff * (3.0f - 2.0f * edgeFalloff);
+				// 大尺度双八度分形扭曲 (Domain Warping 消除规则正圆分界线)
+				float warpX = SmoothNoise(nx * 2.2f, nz * 2.2f, seed + 777u) - 0.5f;
+				float warpZ = SmoothNoise(nx * 2.2f + 0.5f, nz * 2.2f + 0.3f, seed + 888u) - 0.5f;
+				float distortedX = (nx - 0.5f) * 2.0f + warpX * 0.45f;
+				float distortedZ = (nz - 0.5f) * 2.0f + warpZ * 0.45f;
+				float edgeDist = std::sqrt(distortedX * distortedX + distortedZ * distortedZ);
 
-				float finalHeight = std::max(2.5f, (rawHeight + 10.0f) * edgeFalloff + 2.5f);
+				// 超平滑 S 型边缘渐变衰减 (消除任何阶跃断层)
+				float t = glm::clamp(1.0f - (edgeDist - 0.55f) / 0.45f, 0.0f, 1.0f);
+				float edgeFalloff = t * t * (3.0f - 2.0f * t);
+
+				float finalHeight = std::max(2.5f, (rawHeight + 12.0f) * edgeFalloff + 2.5f);
 				SetHeight(x, z, finalHeight);
 			}
 		}
 
-		// 2. 邻域柔化迭代 (Gaussian-like Relaxation 消除网格尖峰噪点)
+		// 2. 邻域柔化迭代 (消除网格尖刺)
 		std::vector<float> smoothed(m_Heights.size());
 		for (uint32_t z = 0; z < m_Height; ++z)
 		{
@@ -1134,7 +1137,7 @@ namespace World
 		for (size_t i = 0; i < smoothed.size(); ++i)
 			m_Heights[i] = smoothed[i];
 
-		// 3. 次世代生物群落权重分布 (平滑连续过渡，彻底消灭孤立色块与方格感)
+		// 3. 次世代生物群落自然法则分配 (彻底消除外圈整片沙地色块，消除突兀分界线)
 		for (uint32_t z = 0; z < m_Height; ++z)
 		{
 			for (uint32_t x = 0; x < m_Width; ++x)
@@ -1144,43 +1147,49 @@ namespace World
 				float h = GetHeight(x, z);
 				glm::vec3 normal = SampleNormal(worldX, worldZ);
 
-				// 坡度计算: 0.0 为纯平原缓坡，1.0 为90度峭壁
+				// 坡度计算: 0.0 平原，1.0 垂直悬崖
 				float slope = 1.0f - glm::clamp(normal.y, 0.0f, 1.0f);
 
-				// 引入高频有机扰动打破几何单调边界
+				// 连续多尺度有机扭曲
 				float nx = static_cast<float>(x) * invW;
 				float nz = static_cast<float>(z) * invH;
-				float warp = SmoothNoise(nx * 14.0f, nz * 14.0f, seed + 888u) * 0.12f - 0.06f;
+				float warp1 = SmoothNoise(nx * 12.0f, nz * 12.0f, seed + 888u) * 0.10f - 0.05f;
+				float warp2 = SmoothNoise(nx * 24.0f, nz * 24.0f, seed + 999u) * 0.06f - 0.03f;
+				float effSlope = slope + warp1 + warp2;
 
 				float grassWeight = 0.0f;
 				float dirtWeight = 0.0f;
 				float rockWeight = 0.0f;
 				float sandWeight = 0.0f;
 
-				// 陡峭山体与绝壁: 花岗岩壁
-				if (slope + warp > 0.32f)
+				// 岩石山峰与峭壁 (采用平滑 Hermite 插值过渡)
+				if (effSlope > 0.35f)
 				{
-					rockWeight = glm::clamp(((slope + warp) - 0.32f) / 0.18f, 0.0f, 1.0f);
+					float st = glm::clamp((effSlope - 0.35f) / 0.15f, 0.0f, 1.0f);
+					rockWeight = st * st * (3.0f - 2.0f * st);
 					dirtWeight = 1.0f - rockWeight;
 				}
-				else if (slope + warp > 0.14f) // 山腰与山麓过渡带: 碎石林土
+				else if (effSlope > 0.16f) // 山腰过渡带: 碎石林土
 				{
-					dirtWeight = glm::clamp(((slope + warp) - 0.14f) / 0.18f, 0.0f, 1.0f);
+					float st = glm::clamp((effSlope - 0.16f) / 0.19f, 0.0f, 1.0f);
+					dirtWeight = st * st * (3.0f - 2.0f * st);
 					grassWeight = 1.0f - dirtWeight;
 				}
-				else // 广阔舒展平原: 茂密高山草甸
+				else // 广阔延展的平原与缓坡: 优美高山草甸 (外围平原也是茂盛草甸，彻底消除外圈圆环沙地)
 				{
 					grassWeight = 1.0f;
 				}
 
-				// 蜿蜒溪谷与河滩低地: 仅在低洼且平缓地带自然沉积河滩细沙与卵石
-				if (h < 5.0f && slope < 0.20f)
+				// 真正的峡谷溪流冲积走廊 (Meandering Valley Corridor):
+				// 仅在山脉内蜿蜒低凹的谷底狭长走廊自然沉积碎石河滩与细沙，绝不平铺在四周边界！
+				float riverTrace = std::abs(SmoothNoise(nx * 3.5f + 0.2f, nz * 3.5f + 0.7f, seed + 1234u) - 0.5f);
+				if (riverTrace < 0.07f && effSlope < 0.22f && h < 14.0f)
 				{
-					float riverWarp = SmoothNoise(nx * 9.0f, nz * 9.0f, seed + 999u) * 1.5f;
-					float sandFactor = glm::clamp((5.0f - (h + riverWarp)) / 2.5f, 0.0f, 0.85f);
-					sandWeight = sandFactor;
-					grassWeight *= (1.0f - sandFactor);
-					dirtWeight *= (1.0f - sandFactor);
+					float riverFactor = glm::clamp(1.0f - riverTrace / 0.07f, 0.0f, 1.0f);
+					riverFactor = riverFactor * riverFactor;
+					sandWeight = riverFactor * 0.75f;
+					grassWeight *= (1.0f - sandWeight);
+					dirtWeight *= (1.0f - sandWeight);
 				}
 
 				float total = grassWeight + dirtWeight + rockWeight + sandWeight;
