@@ -2596,5 +2596,101 @@ namespace World
 	static_assert(offsetof(RVTComponent, SoftBlendRadius) == 16, "SoftBlendRadius offset mismatch");
 	static_assert(offsetof(RVTComponent, WriteAlbedo) == 20, "WriteAlbedo offset mismatch");
 	static_assert(offsetof(RVTComponent, WriteNormal) == 21, "WriteNormal offset mismatch");
-}
 
+	struct WaterBodyComponent
+	{
+		enum class WaterType : uint8_t { Ocean = 0, Lake = 1, River = 2 };
+		WaterType Type { WaterType::Ocean };              // 1B  (offset 0)
+		uint8_t EnableFoam { 1 };                         // 1B  (offset 1)
+		uint8_t EnableCaustics { 1 };                     // 1B  (offset 2)
+		uint8_t EnableBuoyancy { 1 };                     // 1B  (offset 3)
+		float WaveSteepness { 0.5f };                     // 4B  (offset 4)
+		float WaveLength { 20.0f };                       // 4B  (offset 8)
+		float WaveSpeed { 2.0f };                         // 4B  (offset 12)
+		float WaterClarity { 15.0f };                     // 4B  (offset 16)
+		glm::vec3 WaterColor { 0.05f, 0.25f, 0.35f };     // 12B (offset 20)
+		uint8_t _Padding[16] { 0 };                       // 16B (offset 32..47)
+
+		WaterBodyComponent() = default;
+
+		WE_SCHEMA_BODY(World, WaterBodyComponent, Component)
+			WE_SCHEMA_META(Category("Environment/Water"),
+				Doc("Dynamic physical ocean, lake or river water body with Gerstner waves and buoyancy."))
+			WE_FIELD(WaveSteepness, Float, Range(0.0f, 1.0f), Default(0.5f),
+				Doc("Steepness sharpness of the Gerstner waves."));
+			WE_FIELD(WaveLength, Float, Range(1.0f, 500.0f), Default(20.0f),
+				Doc("Primary wave wavelength in meters."));
+			WE_FIELD(WaveSpeed, Float, Range(0.0f, 20.0f), Default(2.0f),
+				Doc("Wave propagation speed in meters/second."));
+			WE_FIELD(WaterClarity, Float, Range(0.1f, 100.0f), Default(15.0f),
+				Doc("Depth attenuation distance in meters for optical water absorption."));
+			WE_FIELD(WaterColor, Vec3, Color(),
+				Doc("Deep water absorption tint color."));
+			WE_FIELD(EnableFoam, UInt8, Default(1),
+				Doc("Enable shoreline foam and wave-tip crest foam."));
+			WE_FIELD(EnableBuoyancy, UInt8, Default(1),
+				Doc("Enable physics buoyancy query integration."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(WaterBodyComponent) == 48, "WaterBodyComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<WaterBodyComponent>, "WaterBodyComponent must be trivially copyable");
+	static_assert(offsetof(WaterBodyComponent, Type) == 0, "Type offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, EnableFoam) == 1, "EnableFoam offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, EnableCaustics) == 2, "EnableCaustics offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, EnableBuoyancy) == 3, "EnableBuoyancy offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, WaveSteepness) == 4, "WaveSteepness offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, WaveLength) == 8, "WaveLength offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, WaveSpeed) == 12, "WaveSpeed offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, WaterClarity) == 16, "WaterClarity offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, WaterColor) == 20, "WaterColor offset mismatch");
+
+	struct WeatherSystemComponent
+	{
+		enum class WeatherType : uint8_t { Clear = 0, Overcast = 1, Rain = 2, Storm = 3, Snow = 4 };
+		WeatherType CurrentWeather { WeatherType::Clear }; // 1B  (offset 0)
+		uint8_t EnableVolumetricCloud { 1 };               // 1B  (offset 1)
+		uint8_t EnablePuddles { 1 };                       // 1B  (offset 2)
+		uint8_t _Padding0 { 0 };                           // 1B  (offset 3)
+		float PrecipitationIntensity { 0.0f };             // 4B  (offset 4)
+		float CloudCoverage { 0.3f };                      // 4B  (offset 8)
+		float CloudDensity { 1.0f };                       // 4B  (offset 12)
+		float Wetness { 0.0f };                            // 4B  (offset 16)
+		float WindSpeed { 5.0f };                          // 4B  (offset 20)
+		glm::vec3 WindDirection { 1.0f, 0.0f, 0.0f };     // 12B (offset 24)
+		uint8_t _Padding[12] { 0 };                        // 12B (offset 36..47)
+
+		WeatherSystemComponent() = default;
+
+		WE_SCHEMA_BODY(World, WeatherSystemComponent, Component)
+			WE_SCHEMA_META(Category("Environment/Weather"),
+				Doc("Dynamic atmospheric weather, volumetric clouds, precipitation and ground wetness."))
+			WE_FIELD(PrecipitationIntensity, Float, Range(0.0f, 1.0f), Default(0.0f),
+				Doc("Rain/snow precipitation intensity [0, 1]."));
+			WE_FIELD(CloudCoverage, Float, Range(0.0f, 1.0f), Default(0.3f),
+				Doc("Sky coverage ratio of volumetric clouds."));
+			WE_FIELD(CloudDensity, Float, Range(0.1f, 10.0f), Default(1.0f),
+				Doc("Optical density of raymarched clouds."));
+			WE_FIELD(Wetness, Float, Range(0.0f, 1.0f), Default(0.0f),
+				Doc("Accumulated ground wetness and puddle level [0, 1]."));
+			WE_FIELD(WindSpeed, Float, Range(0.0f, 50.0f), Default(5.0f),
+				Doc("Atmospheric wind velocity in meters/second."));
+			WE_FIELD(WindDirection, Vec3,
+				Doc("Global wind direction vector."));
+			WE_FIELD(EnableVolumetricCloud, UInt8, Default(1),
+				Doc("Enable raymarched volumetric cloud rendering."));
+			WE_FIELD(EnablePuddles, UInt8, Default(1),
+				Doc("Enable ground wetness and procedural puddle accumulation."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(WeatherSystemComponent) == 48, "WeatherSystemComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<WeatherSystemComponent>, "WeatherSystemComponent must be trivially copyable");
+	static_assert(offsetof(WeatherSystemComponent, CurrentWeather) == 0, "CurrentWeather offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, EnableVolumetricCloud) == 1, "EnableVolumetricCloud offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, EnablePuddles) == 2, "EnablePuddles offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, PrecipitationIntensity) == 4, "PrecipitationIntensity offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, CloudCoverage) == 8, "CloudCoverage offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, CloudDensity) == 12, "CloudDensity offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, Wetness) == 16, "Wetness offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, WindSpeed) == 20, "WindSpeed offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, WindDirection) == 24, "WindDirection offset mismatch");
+}

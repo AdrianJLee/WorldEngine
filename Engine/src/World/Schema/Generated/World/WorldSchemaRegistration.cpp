@@ -74,6 +74,8 @@ const TypeSchema& WeSchemaOf_SplineComponent();
 const TypeSchema& WeSchemaOf_WhiteboxComponent();
 const TypeSchema& WeSchemaOf_HLODComponent();
 const TypeSchema& WeSchemaOf_RVTComponent();
+const TypeSchema& WeSchemaOf_WaterBodyComponent();
+const TypeSchema& WeSchemaOf_WeatherSystemComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -14271,6 +14273,497 @@ struct GeneratedAccess<World::RVTComponent>
 };
 
 template <>
+struct GeneratedAccess<World::WaterBodyComponent>
+{
+    static Value Get_WaveSteepness(const void* instance)
+    {
+        const World::WaterBodyComponent* self = static_cast<const World::WaterBodyComponent*>(instance);
+        return Value(self->WaveSteepness);
+    }
+    static void Set_WaveSteepness(void* instance, const Value& value)
+    {
+        World::WaterBodyComponent* self = static_cast<World::WaterBodyComponent*>(instance);
+        self->WaveSteepness = std::get<float>(value);
+    }
+    static Value Get_WaveLength(const void* instance)
+    {
+        const World::WaterBodyComponent* self = static_cast<const World::WaterBodyComponent*>(instance);
+        return Value(self->WaveLength);
+    }
+    static void Set_WaveLength(void* instance, const Value& value)
+    {
+        World::WaterBodyComponent* self = static_cast<World::WaterBodyComponent*>(instance);
+        self->WaveLength = std::get<float>(value);
+    }
+    static Value Get_WaveSpeed(const void* instance)
+    {
+        const World::WaterBodyComponent* self = static_cast<const World::WaterBodyComponent*>(instance);
+        return Value(self->WaveSpeed);
+    }
+    static void Set_WaveSpeed(void* instance, const Value& value)
+    {
+        World::WaterBodyComponent* self = static_cast<World::WaterBodyComponent*>(instance);
+        self->WaveSpeed = std::get<float>(value);
+    }
+    static Value Get_WaterClarity(const void* instance)
+    {
+        const World::WaterBodyComponent* self = static_cast<const World::WaterBodyComponent*>(instance);
+        return Value(self->WaterClarity);
+    }
+    static void Set_WaterClarity(void* instance, const Value& value)
+    {
+        World::WaterBodyComponent* self = static_cast<World::WaterBodyComponent*>(instance);
+        self->WaterClarity = std::get<float>(value);
+    }
+    static Value Get_WaterColor(const void* instance)
+    {
+        const World::WaterBodyComponent* self = static_cast<const World::WaterBodyComponent*>(instance);
+        return Value(self->WaterColor);
+    }
+    static void Set_WaterColor(void* instance, const Value& value)
+    {
+        World::WaterBodyComponent* self = static_cast<World::WaterBodyComponent*>(instance);
+        self->WaterColor = std::get<glm::vec3>(value);
+    }
+    static Value Get_EnableFoam(const void* instance)
+    {
+        const World::WaterBodyComponent* self = static_cast<const World::WaterBodyComponent*>(instance);
+        return Value(self->EnableFoam);
+    }
+    static void Set_EnableFoam(void* instance, const Value& value)
+    {
+        World::WaterBodyComponent* self = static_cast<World::WaterBodyComponent*>(instance);
+        self->EnableFoam = std::get<uint8_t>(value);
+    }
+    static Value Get_EnableBuoyancy(const void* instance)
+    {
+        const World::WaterBodyComponent* self = static_cast<const World::WaterBodyComponent*>(instance);
+        return Value(self->EnableBuoyancy);
+    }
+    static void Set_EnableBuoyancy(void* instance, const Value& value)
+    {
+        World::WaterBodyComponent* self = static_cast<World::WaterBodyComponent*>(instance);
+        self->EnableBuoyancy = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_WaveSteepness()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3CD1B987262946A4ull },
+            "WaveSteepness",
+            Kind::Float,
+            &Get_WaveSteepness,
+            &Set_WaveSteepness,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Steepness sharpness of the Gerstner waves.", false, "", {  }, "", std::nullopt },
+            Value(0.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WaveLength()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC09D3C7921A54214ull },
+            "WaveLength",
+            Kind::Float,
+            &Get_WaveLength,
+            &Set_WaveLength,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(500.000000f), false, false, "Primary wave wavelength in meters.", false, "", {  }, "", std::nullopt },
+            Value(20.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WaveSpeed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x852EBEEA400F6D83ull },
+            "WaveSpeed",
+            Kind::Float,
+            &Get_WaveSpeed,
+            &Set_WaveSpeed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(20.000000f), false, false, "Wave propagation speed in meters/second.", false, "", {  }, "", std::nullopt },
+            Value(2.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WaterClarity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x700E9A451C301388ull },
+            "WaterClarity",
+            Kind::Float,
+            &Get_WaterClarity,
+            &Set_WaterClarity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(100.000000f), false, false, "Depth attenuation distance in meters for optical water absorption.", false, "", {  }, "", std::nullopt },
+            Value(15.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WaterColor()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5CABB67FAF435153ull },
+            "WaterColor",
+            Kind::Vec3,
+            &Get_WaterColor,
+            &Set_WaterColor,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Deep water absorption tint color.", true, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableFoam()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA30D6381E8F72167ull },
+            "EnableFoam",
+            Kind::UInt8,
+            &Get_EnableFoam,
+            &Set_EnableFoam,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Enable shoreline foam and wave-tip crest foam.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableBuoyancy()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x876D99F23D070428ull },
+            "EnableBuoyancy",
+            Kind::UInt8,
+            &Get_EnableBuoyancy,
+            &Set_EnableBuoyancy,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Enable physics buoyancy query integration.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::WaterBodyComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::WaterBodyComponent" },
+            "WaterBodyComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::WaterBodyComponent),
+            TypeCategory::Component,
+            {
+                Field_WaveSteepness(),
+                Field_WaveLength(),
+                Field_WaveSpeed(),
+                Field_WaterClarity(),
+                Field_WaterColor(),
+                Field_EnableFoam(),
+                Field_EnableBuoyancy(),
+            },
+            &StorageBindingOf(),
+            "Environment/Water",
+            "Dynamic physical ocean, lake or river water body with Gerstner waves and buoyancy.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::WeatherSystemComponent>
+{
+    static Value Get_PrecipitationIntensity(const void* instance)
+    {
+        const World::WeatherSystemComponent* self = static_cast<const World::WeatherSystemComponent*>(instance);
+        return Value(self->PrecipitationIntensity);
+    }
+    static void Set_PrecipitationIntensity(void* instance, const Value& value)
+    {
+        World::WeatherSystemComponent* self = static_cast<World::WeatherSystemComponent*>(instance);
+        self->PrecipitationIntensity = std::get<float>(value);
+    }
+    static Value Get_CloudCoverage(const void* instance)
+    {
+        const World::WeatherSystemComponent* self = static_cast<const World::WeatherSystemComponent*>(instance);
+        return Value(self->CloudCoverage);
+    }
+    static void Set_CloudCoverage(void* instance, const Value& value)
+    {
+        World::WeatherSystemComponent* self = static_cast<World::WeatherSystemComponent*>(instance);
+        self->CloudCoverage = std::get<float>(value);
+    }
+    static Value Get_CloudDensity(const void* instance)
+    {
+        const World::WeatherSystemComponent* self = static_cast<const World::WeatherSystemComponent*>(instance);
+        return Value(self->CloudDensity);
+    }
+    static void Set_CloudDensity(void* instance, const Value& value)
+    {
+        World::WeatherSystemComponent* self = static_cast<World::WeatherSystemComponent*>(instance);
+        self->CloudDensity = std::get<float>(value);
+    }
+    static Value Get_Wetness(const void* instance)
+    {
+        const World::WeatherSystemComponent* self = static_cast<const World::WeatherSystemComponent*>(instance);
+        return Value(self->Wetness);
+    }
+    static void Set_Wetness(void* instance, const Value& value)
+    {
+        World::WeatherSystemComponent* self = static_cast<World::WeatherSystemComponent*>(instance);
+        self->Wetness = std::get<float>(value);
+    }
+    static Value Get_WindSpeed(const void* instance)
+    {
+        const World::WeatherSystemComponent* self = static_cast<const World::WeatherSystemComponent*>(instance);
+        return Value(self->WindSpeed);
+    }
+    static void Set_WindSpeed(void* instance, const Value& value)
+    {
+        World::WeatherSystemComponent* self = static_cast<World::WeatherSystemComponent*>(instance);
+        self->WindSpeed = std::get<float>(value);
+    }
+    static Value Get_WindDirection(const void* instance)
+    {
+        const World::WeatherSystemComponent* self = static_cast<const World::WeatherSystemComponent*>(instance);
+        return Value(self->WindDirection);
+    }
+    static void Set_WindDirection(void* instance, const Value& value)
+    {
+        World::WeatherSystemComponent* self = static_cast<World::WeatherSystemComponent*>(instance);
+        self->WindDirection = std::get<glm::vec3>(value);
+    }
+    static Value Get_EnableVolumetricCloud(const void* instance)
+    {
+        const World::WeatherSystemComponent* self = static_cast<const World::WeatherSystemComponent*>(instance);
+        return Value(self->EnableVolumetricCloud);
+    }
+    static void Set_EnableVolumetricCloud(void* instance, const Value& value)
+    {
+        World::WeatherSystemComponent* self = static_cast<World::WeatherSystemComponent*>(instance);
+        self->EnableVolumetricCloud = std::get<uint8_t>(value);
+    }
+    static Value Get_EnablePuddles(const void* instance)
+    {
+        const World::WeatherSystemComponent* self = static_cast<const World::WeatherSystemComponent*>(instance);
+        return Value(self->EnablePuddles);
+    }
+    static void Set_EnablePuddles(void* instance, const Value& value)
+    {
+        World::WeatherSystemComponent* self = static_cast<World::WeatherSystemComponent*>(instance);
+        self->EnablePuddles = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_PrecipitationIntensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC5EE375412CD74Full },
+            "PrecipitationIntensity",
+            Kind::Float,
+            &Get_PrecipitationIntensity,
+            &Set_PrecipitationIntensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Rain/snow precipitation intensity [0, 1].", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CloudCoverage()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6BD9E81D9C0247AEull },
+            "CloudCoverage",
+            Kind::Float,
+            &Get_CloudCoverage,
+            &Set_CloudCoverage,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Sky coverage ratio of volumetric clouds.", false, "", {  }, "", std::nullopt },
+            Value(0.3f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CloudDensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xAC8A7CCDB1741034ull },
+            "CloudDensity",
+            Kind::Float,
+            &Get_CloudDensity,
+            &Set_CloudDensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(10.000000f), false, false, "Optical density of raymarched clouds.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Wetness()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x68CD650B7600589Eull },
+            "Wetness",
+            Kind::Float,
+            &Get_Wetness,
+            &Set_Wetness,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Accumulated ground wetness and puddle level [0, 1].", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WindSpeed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x436C1F204755B464ull },
+            "WindSpeed",
+            Kind::Float,
+            &Get_WindSpeed,
+            &Set_WindSpeed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(50.000000f), false, false, "Atmospheric wind velocity in meters/second.", false, "", {  }, "", std::nullopt },
+            Value(5.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_WindDirection()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE11007DF1400009Eull },
+            "WindDirection",
+            Kind::Vec3,
+            &Get_WindDirection,
+            &Set_WindDirection,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Global wind direction vector.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnableVolumetricCloud()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFC8B6641FD8CA7C1ull },
+            "EnableVolumetricCloud",
+            Kind::UInt8,
+            &Get_EnableVolumetricCloud,
+            &Set_EnableVolumetricCloud,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Enable raymarched volumetric cloud rendering.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EnablePuddles()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x683BF9F615EF9B4Dull },
+            "EnablePuddles",
+            Kind::UInt8,
+            &Get_EnablePuddles,
+            &Set_EnablePuddles,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Enable ground wetness and procedural puddle accumulation.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::WeatherSystemComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::WeatherSystemComponent" },
+            "WeatherSystemComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::WeatherSystemComponent),
+            TypeCategory::Component,
+            {
+                Field_PrecipitationIntensity(),
+                Field_CloudCoverage(),
+                Field_CloudDensity(),
+                Field_Wetness(),
+                Field_WindSpeed(),
+                Field_WindDirection(),
+                Field_EnableVolumetricCloud(),
+                Field_EnablePuddles(),
+            },
+            &StorageBindingOf(),
+            "Environment/Weather",
+            "Dynamic atmospheric weather, volumetric clouds, precipitation and ground wetness.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -14880,6 +15373,8 @@ const TypeSchema& WeSchemaOf_SplineComponent() { return GeneratedAccess<World::S
 const TypeSchema& WeSchemaOf_WhiteboxComponent() { return GeneratedAccess<World::WhiteboxComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_HLODComponent() { return GeneratedAccess<World::HLODComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_RVTComponent() { return GeneratedAccess<World::RVTComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_WaterBodyComponent() { return GeneratedAccess<World::WaterBodyComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_WeatherSystemComponent() { return GeneratedAccess<World::WeatherSystemComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -14977,6 +15472,8 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_WhiteboxComponent(),
 			WeSchemaOf_HLODComponent(),
 			WeSchemaOf_RVTComponent(),
+			WeSchemaOf_WaterBodyComponent(),
+			WeSchemaOf_WeatherSystemComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

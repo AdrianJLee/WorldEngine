@@ -2812,3 +2812,23 @@ set_tests_properties(World.LargeWorld PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldNextGen3DTests World/NextGen3DTests.cpp)
+target_link_libraries(WorldNextGen3DTests PRIVATE World)
+target_compile_features(WorldNextGen3DTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldNextGen3DTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldNextGen3DTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldNextGen3DTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.NextGen3D COMMAND WorldNextGen3DTests)
+set_tests_properties(World.NextGen3D PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
