@@ -65,7 +65,7 @@ namespace World
 
 		// 笔刷散布与擦除算法
 		uint32_t PaintFoliage(const glm::vec3& center, float radius, float density, size_t typeIndex,
-			const TerrainData* terrain = nullptr);
+			const TerrainData* terrain = nullptr, const glm::mat4& terrainTransform = glm::mat4(1.0f));
 		uint32_t EraseFoliage(const glm::vec3& center, float radius, int32_t typeIndex = -1);
 
 		// 视锥与视距剔除

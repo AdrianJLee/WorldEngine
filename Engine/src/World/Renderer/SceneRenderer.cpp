@@ -2808,6 +2808,55 @@ namespace World
 			? std::clamp(1.0f - (camDistToGround - 600.0f) / 400.0f, 0.0f, 1.0f)
 			: 1.0f;
 
+		// 检查场景是否存在 3D 地貌实体：若存在，地网在起伏地貌区域由地貌本身充当基准，裁剪地表穿插以消灭破面虚线
+		bool hasTerrain = false;
+		glm::vec2 terrainMin(0.0f), terrainMax(0.0f);
+		if (m_ActiveScene)
+		{
+			for (auto [handle, trans, comp] : m_ActiveScene->GetRegistry().view<TransformComponent, TerrainComponent>().each())
+			{
+				if (m_ActiveScene->IsEntityInActiveDataLayers(handle))
+				{
+					hasTerrain = true;
+					const auto data = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+					const float w = data ? data->GetWorldWidth() : 512.0f;
+					const float h = data ? data->GetWorldHeight() : 512.0f;
+					terrainMin = glm::vec2(trans.Location.x, trans.Location.z);
+					terrainMax = terrainMin + glm::vec2(w, h);
+					break;
+				}
+			}
+		}
+
+		constexpr float gridY = -0.05f;
+		const auto drawGridLineX = [&](float x, float z0, float z1, const glm::vec4& col) {
+			if (hasTerrain && x >= terrainMin.x && x <= terrainMax.x)
+			{
+				if (z0 < terrainMin.y)
+					Renderer2D::DrawLineCore(glm::vec3(x, gridY, z0), glm::vec3(x, gridY, std::min(z1, terrainMin.y)), col);
+				if (z1 > terrainMax.y)
+					Renderer2D::DrawLineCore(glm::vec3(x, gridY, std::max(z0, terrainMax.y)), glm::vec3(x, gridY, z1), col);
+			}
+			else
+			{
+				Renderer2D::DrawLineCore(glm::vec3(x, gridY, z0), glm::vec3(x, gridY, z1), col);
+			}
+		};
+
+		const auto drawGridLineZ = [&](float z, float x0, float x1, const glm::vec4& col) {
+			if (hasTerrain && z >= terrainMin.y && z <= terrainMax.y)
+			{
+				if (x0 < terrainMin.x)
+					Renderer2D::DrawLineCore(glm::vec3(x0, gridY, z), glm::vec3(std::min(x1, terrainMin.x), gridY, z), col);
+				if (x1 > terrainMax.x)
+					Renderer2D::DrawLineCore(glm::vec3(std::max(x0, terrainMax.x), gridY, z), glm::vec3(x1, gridY, z), col);
+			}
+			else
+			{
+				Renderer2D::DrawLineCore(glm::vec3(x0, gridY, z), glm::vec3(x1, gridY, z), col);
+			}
+		};
+
 		const float macroStep = (dynamicRadius > 1200.0f) ? 100.0f : 50.0f;
 		constexpr float kMajorStep = 10.0f;
 		constexpr float kMinorStep = 1.0f;
@@ -2829,7 +2878,7 @@ namespace World
 				const glm::vec4 color = isZAxis
 					? glm::vec4(0.38f, 0.48f, 0.70f, 0.65f) // Z 轴微弱暗蓝
 					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
-				Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, startZ), glm::vec3(x, 0.0f, endZ), color);
+				drawGridLineX(x, startZ, endZ, color);
 			}
 			for (float z = startZ; z <= endZ + 0.01f; z += macroStep)
 			{
@@ -2841,7 +2890,7 @@ namespace World
 				const glm::vec4 color = isXAxis
 					? glm::vec4(0.68f, 0.38f, 0.38f, 0.65f) // X 轴微弱暗红
 					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
-				Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z), color);
+				drawGridLineZ(z, startX, endX, color);
 			}
 		}
 
@@ -2865,7 +2914,7 @@ namespace World
 				const glm::vec4 color = isZAxis
 					? glm::vec4(0.38f, 0.48f, 0.70f, 0.60f)
 					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
-				Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, startZ), glm::vec3(x, 0.0f, endZ), color);
+				drawGridLineX(x, startZ, endZ, color);
 			}
 			for (float z = startZ; z <= endZ + 0.01f; z += kMajorStep)
 			{
@@ -2878,7 +2927,7 @@ namespace World
 				const glm::vec4 color = isXAxis
 					? glm::vec4(0.68f, 0.38f, 0.38f, 0.60f)
 					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
-				Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z), color);
+				drawGridLineZ(z, startX, endX, color);
 			}
 		}
 
@@ -2898,8 +2947,7 @@ namespace World
 				const float normDist = dist / kMinorRadius;
 				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.18f * minorLodWeight;
 				if (alpha <= 0.01f) continue;
-				Renderer2D::DrawLineCore(glm::vec3(x, 0.0f, startZ), glm::vec3(x, 0.0f, endZ),
-					glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+				drawGridLineX(x, startZ, endZ, glm::vec4(0.42f, 0.50f, 0.60f, alpha));
 			}
 			for (float z = startZ; z <= endZ + 0.01f; z += kMinorStep)
 			{
@@ -2908,8 +2956,7 @@ namespace World
 				const float normDist = dist / kMinorRadius;
 				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.18f * minorLodWeight;
 				if (alpha <= 0.01f) continue;
-				Renderer2D::DrawLineCore(glm::vec3(startX, 0.0f, z), glm::vec3(endX, 0.0f, z),
-					glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+				drawGridLineZ(z, startX, endZ, glm::vec4(0.42f, 0.50f, 0.60f, alpha));
 			}
 		}
 	}

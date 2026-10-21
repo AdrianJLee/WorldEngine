@@ -56,6 +56,12 @@ namespace World::Ai
 		return instance;
 	}
 
+	void CommandRegistry::Shutdown()
+	{
+		std::lock_guard<std::mutex> lock(Get().m_Mutex);
+		Get().m_Commands.clear();
+	}
+
 	CommandRegistry::CommandRegistry()
 	{
 		RegisterBuiltinCommands();
@@ -109,6 +115,18 @@ namespace World::Ai
 			return true;
 		}
 		return false;
+	}
+
+	void CommandRegistry::UnregisterByOwner(const std::string& owner)
+	{
+		std::lock_guard<std::mutex> lock(m_Mutex);
+		for (auto it = m_Commands.begin(); it != m_Commands.end(); )
+		{
+			if (it->second.owner == owner)
+				it = m_Commands.erase(it);
+			else
+				++it;
+		}
 	}
 
 	bool CommandRegistry::HasCommand(const std::string& name) const

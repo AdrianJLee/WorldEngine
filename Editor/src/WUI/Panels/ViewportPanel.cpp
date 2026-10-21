@@ -1853,16 +1853,21 @@ namespace World
 						// 视口直接拖拽种草与擦除
 						if (ctx.Input().MouseDown[0])
 						{
+							const glm::vec3 worldHitPoint = glm::vec3(terrainWorld * glm::vec4(hit.Point, 1.0f));
 							if (eraseMode)
 							{
-								foliageData->EraseFoliage(hit.Point, R, static_cast<int32_t>(foliagePanel->GetActiveTypeIndex()));
+								foliageData->EraseFoliage(worldHitPoint, R, static_cast<int32_t>(foliagePanel->GetActiveTypeIndex()));
 							}
 							else
 							{
-								foliageData->PaintFoliage(hit.Point, R, foliagePanel->GetBrushDensity(),
-									foliagePanel->GetActiveTypeIndex(), terrain.get());
+								foliageData->PaintFoliage(worldHitPoint, R, foliagePanel->GetBrushDensity(),
+									foliagePanel->GetActiveTypeIndex(), terrain.get(), terrainWorld);
 							}
 							m_Host.MarkDocumentDirty();
+						}
+						if (ctx.Input().MouseReleased[0])
+						{
+							foliagePanel->SaveCurrentFoliage();
 						}
 					}
 				}

@@ -55,6 +55,7 @@ namespace World::Ai
 	{
 	public:
 		static CommandRegistry& Get();
+		static void Shutdown();
 
 		CommandRegistry();
 		~CommandRegistry() = default;
@@ -66,6 +67,7 @@ namespace World::Ai
 		// 注册与注销命令
 		bool RegisterCommand(CommandDescriptor desc);
 		bool UnregisterCommand(const std::string& name);
+		void UnregisterByOwner(const std::string& owner);
 		bool HasCommand(const std::string& name) const;
 		const CommandDescriptor* GetDescriptor(const std::string& name) const;
 		std::vector<CommandDescriptor> GetAllDescriptors() const;

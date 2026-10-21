@@ -104,7 +104,7 @@ namespace World
 	}
 
 	uint32_t FoliageData::PaintFoliage(const glm::vec3& center, float radius, float density, size_t typeIndex,
-		const TerrainData* terrain)
+		const TerrainData* terrain, const glm::mat4& terrainTransform)
 	{
 		if (typeIndex >= m_Types.size() || radius <= 0.0f)
 			return 0;
@@ -117,36 +117,44 @@ namespace World
 		std::uniform_real_distribution<float> dist01(0.0f, 1.0f);
 
 		uint32_t spawned = 0;
+		const glm::mat4 invTerrain = glm::inverse(terrainTransform);
 
 		for (uint32_t i = 0; i < candidateCount; ++i)
 		{
 			const float r = radius * std::sqrt(dist01(rng));
 			const float theta = dist01(rng) * 2.0f * kPi;
-			const float worldX = center.x + r * std::cos(theta);
-			const float worldZ = center.z + r * std::sin(theta);
+			float worldX = center.x + r * std::cos(theta);
+			float worldZ = center.z + r * std::sin(theta);
 			float worldY = center.y;
-			glm::vec3 normal(0.0f, 1.0f, 0.0f);
+			glm::vec3 worldNormal(0.0f, 1.0f, 0.0f);
 
 			if (terrain)
 			{
-				if (worldX < 0.0f || worldX > terrain->GetWorldWidth() ||
-					worldZ < 0.0f || worldZ > terrain->GetWorldHeight())
+				const glm::vec3 localPos = glm::vec3(invTerrain * glm::vec4(worldX, 0.0f, worldZ, 1.0f));
+				if (localPos.x < 0.0f || localPos.x > terrain->GetWorldWidth() ||
+					localPos.z < 0.0f || localPos.z > terrain->GetWorldHeight())
 					continue;
 
-				const uint32_t gx = std::clamp(static_cast<uint32_t>(worldX / terrain->GetCellSize()), 0u, terrain->GetWidth() - 1);
-				const uint32_t gz = std::clamp(static_cast<uint32_t>(worldZ / terrain->GetCellSize()), 0u, terrain->GetHeight() - 1);
+				const uint32_t gx = std::clamp(static_cast<uint32_t>(localPos.x / terrain->GetCellSize()), 0u, terrain->GetWidth() - 1);
+				const uint32_t gz = std::clamp(static_cast<uint32_t>(localPos.z / terrain->GetCellSize()), 0u, terrain->GetHeight() - 1);
 				if (terrain->IsHole(gx, gz))
 					continue;
 
-				worldY = terrain->SampleHeight(worldX, worldZ);
-				normal = terrain->SampleNormal(worldX, worldZ);
+				const float localHeight = terrain->SampleHeight(localPos.x, localPos.z);
+				const glm::vec3 localNormal = terrain->SampleNormal(localPos.x, localPos.z);
 
 				// 坡度限制过滤
-				const float slopeDeg = std::acos(std::clamp(normal.y, 0.0f, 1.0f)) * (180.0f / kPi);
+				const float slopeDeg = std::acos(std::clamp(localNormal.y, 0.0f, 1.0f)) * (180.0f / kPi);
 				if (slopeDeg < type.SlopeLimit.x || slopeDeg > type.SlopeLimit.y)
 					continue;
 
-				// 高度限制过滤
+				const glm::vec4 sampledWorld = terrainTransform * glm::vec4(localPos.x, localHeight, localPos.z, 1.0f);
+				worldX = sampledWorld.x;
+				worldY = sampledWorld.y;
+				worldZ = sampledWorld.z;
+				worldNormal = glm::normalize(glm::mat3(terrainTransform) * localNormal);
+
+				// 高度限制过滤 (世界高度)
 				if (worldY < type.HeightLimit.x || worldY > type.HeightLimit.y)
 					continue;
 			}
@@ -156,7 +164,7 @@ namespace World
 			const float yaw = dist01(rng) * type.RandomYaw;
 			const float pitch = (dist01(rng) * 2.0f - 1.0f) * type.PitchVariation;
 
-			glm::mat4 xform = AlignOrientation(type.AlignToNormal ? normal : glm::vec3(0, 1, 0), yaw, pitch, scale);
+			glm::mat4 xform = AlignOrientation(type.AlignToNormal ? worldNormal : glm::vec3(0, 1, 0), yaw, pitch, scale);
 			xform[3] = glm::vec4(worldX, worldY, worldZ, 1.0f);
 
 			FoliageInstanceData inst;

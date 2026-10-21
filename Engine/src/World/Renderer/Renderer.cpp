@@ -8,6 +8,8 @@
 #include "World/Renderer/Legacy/Gfx/Shader.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Terrain/TerrainRenderer.h"
+#include "World/Foliage/FoliageRenderer.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/RHI/Vulkan/VulkanSwapchain.h"
@@ -400,8 +402,11 @@ namespace World
 					hook();
 			}
 		}
+		TerrainRenderer::Shutdown();
+		FoliageRenderer::Shutdown();
 		Renderer2D::Shutdown();
 		Renderer3D::Shutdown();
+		RunDeferredReleases(std::numeric_limits<uint64_t>::max());
 		s_GlobalDescriptorSetLayout = nullptr;
 		s_PresentPass = nullptr;
 		// 主窗口与独立窗口的呈现目标保留对象本身(宿主持有 PresentTarget*),

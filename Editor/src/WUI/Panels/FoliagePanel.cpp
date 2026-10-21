@@ -4,6 +4,7 @@
 #include "World/WUI/WuiWidgets.h"
 #include "World/Core/Log.h"
 #include "World/Core/KeyCodes.h"
+#include "World/Utils/Paths.h"
 
 #include <filesystem>
 
@@ -91,6 +92,32 @@ namespace World
 		return false;
 	}
 
+	bool FoliagePanel::SaveCurrentFoliage()
+	{
+		if (!m_Foliage)
+			return false;
+
+		std::filesystem::path target = m_LoadedPath;
+		if (target.empty())
+		{
+			target = World::Paths::AssetRoot() / "foliage" / "default.wfoliage";
+		}
+		else if (!std::filesystem::exists(target))
+		{
+			std::filesystem::path p1 = World::Paths::AssetRoot() / target;
+			std::filesystem::path p2 = World::Paths::ProjectFile(target.string());
+			if (std::filesystem::exists(p1.parent_path()))
+				target = p1;
+			else if (std::filesystem::exists(p2.parent_path()))
+				target = p2;
+			else
+				target = World::Paths::AssetRoot() / "foliage" / "default.wfoliage";
+		}
+		std::error_code ec;
+		std::filesystem::create_directories(target.parent_path(), ec);
+		return SaveFoliageAsset(target.string());
+	}
+
 	bool FoliagePanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
 	{
 		(void)ctrl;
@@ -128,10 +155,32 @@ namespace World
 		Ref<Scene> activeScene = host.GetActiveScene();
 		if (activeScene)
 		{
+			bool found = false;
 			for (auto [handle, comp] : activeScene->GetRegistry().view<FoliageComponent>().each())
 			{
 				m_Foliage = FoliageRenderer::GetOrCreateFoliageData(comp.FoliageAsset);
+				m_LoadedPath = std::string(StringPool::Get().PathOf(comp.FoliageAsset.Path));
+				found = true;
 				break;
+			}
+			if (!found)
+			{
+				activeScene->DeferStructuralChange([](Scene& s) {
+					Entity fol = Entity::CreateEntity(&s, "Foliage (3D 植被)");
+					fol.AddComponent<TransformComponent>();
+					auto& comp = fol.AddComponent<FoliageComponent>();
+					comp.FoliageAsset = AssetRef { StringPool::Get().InternPath("foliage/default.wfoliage"), AssetId{} };
+					comp.MaxCullDistance = 300.0f;
+					comp.FadeRange = 40.0f;
+					comp.WindStrength = 1.0f;
+					comp.WindFrequency = 1.0f;
+					comp.InstanceCount = 0;
+					comp.CastShadow = 1;
+					comp.ReceiveShadow = 1;
+					comp.AlignToNormal = 1;
+					comp.EnableWind = 1;
+					fol.AddComponent<LevelEntityComponent>(1);
+				});
 			}
 		}
 
@@ -262,7 +311,7 @@ namespace World
 
 		if (Wui::Button(ctx, Wui::HashId("foliage.btn.save_asset"), { startX, curY, contentW, 28.0f }, "保存到 default.wfoliage 资产", theme))
 		{
-			SaveFoliageAsset("projects/assets/foliage/default.wfoliage");
+			SaveCurrentFoliage();
 		}
 		curY += 34.0f;
 	}

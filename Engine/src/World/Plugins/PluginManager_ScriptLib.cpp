@@ -1,3 +1,4 @@
+#include "World/Ai/CommandRegistry.h"
 #include "PluginManager_Internal.h"
 
 namespace World::Plugins
@@ -179,6 +180,19 @@ void PluginManager::WarnContributionDrift(const Record& record){
 
 
 void PluginManager::ReclaimPluginRegistrations(Record& record, World::Schema::SchemaRegistry* schemas){
+		const std::string& pId = record.Entry.Manifest.Id;
+		World::Ai::CommandRegistry::Get().UnregisterByOwner("plugin:" + pId);
+		World::Ai::CommandRegistry::Get().UnregisterByOwner(pId);
+		if (pId.rfind("engine.", 0) == 0)
+		{
+			World::Ai::CommandRegistry::Get().UnregisterByOwner("plugin:" + pId.substr(7));
+			World::Ai::CommandRegistry::Get().UnregisterByOwner(pId.substr(7));
+		}
+		else if (pId.rfind("project.", 0) == 0)
+		{
+			World::Ai::CommandRegistry::Get().UnregisterByOwner("plugin:" + pId.substr(8));
+			World::Ai::CommandRegistry::Get().UnregisterByOwner(pId.substr(8));
+		}
 		const std::string& pluginId = record.Entry.Manifest.Id;
 		for (const std::string& id : record.RegisteredAssetTypes)
 		{

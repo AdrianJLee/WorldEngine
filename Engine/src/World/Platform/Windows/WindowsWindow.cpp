@@ -319,7 +319,13 @@ namespace World
 			if (const HWND hwnd = glfwGetWin32Window(m_Window))
 			{
 				DragAcceptFiles(hwnd, FALSE);
-				SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(m_PrevWndProc));
+#ifdef WLD_PLATFORM_WINDOWS
+				Platform::WindowsIme::SetImeEnabled(hwnd, false);
+#endif
+				if (GetWindowLongPtrW(hwnd, GWLP_WNDPROC) == reinterpret_cast<LONG_PTR>(&WindowsWindow::StaticWndProc))
+				{
+					SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(m_PrevWndProc));
+				}
 				SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
 			}
 			m_PrevWndProc = nullptr;
@@ -327,13 +333,6 @@ namespace World
 
 		glfwDestroyWindow(m_Window);
 		m_Window = nullptr;
-
-		if (!m_Auxiliary)
-			while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
-			{
-				TranslateMessage(&message);
-				DispatchMessageW(&message);
-			}
 	}
 
 	void WindowsWindow::OnUpdate()

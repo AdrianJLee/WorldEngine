@@ -1135,6 +1135,7 @@ namespace World
 		addCmd("ui.detach", "Detach a panel into a floating window.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("ui.focus", "Set focus to a specific panel.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("ui.activate", "Activate a tab or panel in shell.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("viewport.set_tool_mode", "Set editor tool mode (select, landscape, foliage).", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"mode\":{\"type\":\"string\"}}}");
 		addCmd("ui.layout.get", "Get current WUI dock layout json.", CommandEffect::Read, CommandScope::EditorOnly);
 
 		// 场景与实体族
@@ -3271,6 +3272,18 @@ namespace World
 				World::Tilemap::ClearCache();
 			}
 			result = "painted tilemap " + path;
+			return true;
+		}
+		if (cmd == "viewport.set_tool_mode")
+		{
+			const std::string m = arg("mode");
+			if (m == "foliage" || m == "2")
+				m_Shell.SetEditorToolMode(EditorToolMode::Foliage);
+			else if (m == "landscape" || m == "terrain" || m == "1")
+				m_Shell.SetEditorToolMode(EditorToolMode::Landscape);
+			else
+				m_Shell.SetEditorToolMode(EditorToolMode::Select);
+			result = "tool_mode=" + m;
 			return true;
 		}
 		if (cmd == "viewport.set_2d_mode")

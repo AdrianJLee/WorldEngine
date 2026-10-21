@@ -43,6 +43,8 @@ namespace World
 		void ResetDefaultPalette();
 		bool LoadFoliageAsset(const std::string& path);
 		bool SaveFoliageAsset(const std::string& path);
+		bool SaveCurrentFoliage();
+		const std::string& GetLoadedPath() const { return m_LoadedPath; }
 
 	private:
 		void RenderPaintTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host);

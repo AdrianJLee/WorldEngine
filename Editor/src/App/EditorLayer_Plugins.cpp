@@ -1,3 +1,4 @@
+#include "World/Ai/CommandRegistry.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Agent/WeAgentCore.h"
 #include "EditorLayer_Internal.h"
@@ -600,6 +601,7 @@ void EditorLayer::LoadIconTextures(){
 void EditorLayer::OnDetach(){
 		WLD_TRACE_FUNCTION();
 		Audio::AudioSystem::Get().Shutdown();
+		World::Ai::CommandRegistry::Get().UnregisterByOwner("editor");
 		// 控制通道先停:避免关停过程中还有命令进来(Pump 已经不会再被调用)。
 		if (m_AiServer)
 		{
