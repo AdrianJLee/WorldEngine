@@ -1177,9 +1177,9 @@ float MaterialEditorPanel::DrawShaderParams(Wui::WuiContext& ctx, const Wui::Wui
 			const float thumbHeight = std::max(24.0f, trackHeight * (content.H / contentHeight));
 			const float offset = maxScroll > 0.0f ? (m_ScrollY / maxScroll) * (trackHeight - thumbHeight) : 0.0f;
 			const Wui::WuiRect track { content.X + content.W - 3.0f, content.Y + 4.0f, 2.0f, trackHeight };
-			Wui::PanelBackground(ctx, track, Wui::WuiColor { 0.169f, 0.192f, 0.220f, 1.0f }, 1.0f);
+			Wui::PanelBackground(ctx, track, theme.TrackBg, 1.0f);
 			Wui::PanelBackground(ctx, { track.X, track.Y + offset, 2.0f, thumbHeight },
-				Wui::WuiColor { 0.298f, 0.553f, 1.0f, 0.55f }, 1.0f);
+				theme.Selection, 1.0f);
 		}
 		// 拖拽/输入结束那一帧才改写注解:一次拖动 = 一个撤销步(拖动期间每帧都改会把
 		// 撤销历史塞满,也会让解析器每帧重跑)。

@@ -377,7 +377,7 @@ namespace World
 		m_SceneImage->TextureId = m_Host.GetSceneTextureId();
 
 		// 面板底色:纯绘制,不进布局树。
-		Wui::PanelBackground(ctx, rect, { 0.06f, 0.06f, 0.07f, 1 });
+		Wui::PanelBackground(ctx, rect, theme.WindowBg);
 		Wui::LayoutWidgetTree(m_Root, rect);
 		Wui::WuiPaintContext paint(ctx);
 		m_Root->Paint(paint);
@@ -1514,7 +1514,7 @@ namespace World
 						}
 
 						// 外环高对比高光色
-						Wui::WuiColor outerColor { 0.0f, 0.898f, 1.0f, 0.95f }; // default Raise 青色 (#00E5FF)
+						Wui::WuiColor outerColor = theme.Info; // default Raise
 						if (toolTab == TerrainToolTab::Sculpt)
 						{
 							TerrainSculptMode eff = sculptMode;
@@ -1525,18 +1525,18 @@ namespace World
 							}
 							switch (eff)
 							{
-							case TerrainSculptMode::Raise:   outerColor = Wui::WuiColor{0.0f, 0.898f, 1.0f, 0.95f}; break;   // 青色 #00E5FF
-							case TerrainSculptMode::Lower:   outerColor = Wui::WuiColor{1.0f, 0.341f, 0.133f, 0.95f}; break;  // 橙红 #FF5722
-							case TerrainSculptMode::Smooth:  outerColor = Wui::WuiColor{0.161f, 0.475f, 1.0f, 0.95f}; break;   // 亮蓝 #2979FF
-							case TerrainSculptMode::Flatten: outerColor = Wui::WuiColor{1.0f, 0.757f, 0.027f, 0.95f}; break;  // 琥珀色 #FFC107
-							case TerrainSculptMode::Erode:   outerColor = Wui::WuiColor{0.671f, 0.278f, 0.737f, 0.95f}; break;  // 紫色 #AB47BC
-							case TerrainSculptMode::Hole:    outerColor = Wui::WuiColor{0.914f, 0.118f, 0.388f, 0.95f}; break;  // 玫红 #E91E63
+							case TerrainSculptMode::Raise:   outerColor = theme.Info; break;
+							case TerrainSculptMode::Lower:   outerColor = theme.Warning; break;
+							case TerrainSculptMode::Smooth:  outerColor = theme.Accent; break;
+							case TerrainSculptMode::Flatten: outerColor = theme.Warning; break;
+							case TerrainSculptMode::Erode:   outerColor = theme.Accent; break;
+							case TerrainSculptMode::Hole:    outerColor = theme.Danger; break;
 							default: break;
 							}
 						}
 						else if (toolTab == TerrainToolTab::Paint)
 						{
-							outerColor = shiftPressed ? Wui::WuiColor{0.161f, 0.475f, 1.0f, 0.95f} : Wui::WuiColor{0.463f, 1.0f, 0.012f, 0.95f}; // 鲜绿 (#76FF03)
+							outerColor = shiftPressed ? theme.Accent : theme.Success;
 						}
 
 						for (int i = 0; i < kSegments; ++i)
@@ -1830,9 +1830,7 @@ namespace World
 							clips[i] = gizmoCamera.ViewProjection * (terrainWorld * glm::vec4(px, py, pz, 1.0f));
 						}
 
-						const Wui::WuiColor ringColor = eraseMode
-							? Wui::WuiColor { 1.0f, 0.09f, 0.27f, 0.95f }
-							: Wui::WuiColor { 0.0f, 0.90f, 0.46f, 0.95f };
+						const Wui::WuiColor ringColor = eraseMode ? theme.Danger : theme.Success;
 
 						for (int i = 0; i < kSegments; ++i)
 						{
@@ -1994,9 +1992,9 @@ namespace World
 					glm::vec4 clip[8];
 					for (int i = 0; i < 8; ++i)
 						clip[i] = frustumCamera.ViewProjection * (world * glm::vec4 { corners[i], 1.0f });
-					const Wui::WuiColor nearColor { 1.0f, 0.55f, 0.12f, 0.95f };   // 近面(相机所在端)
-					const Wui::WuiColor farColor { 1.0f, 0.55f, 0.12f, 0.38f };    // 远面
-					const Wui::WuiColor axisColor { 1.0f, 0.78f, 0.28f, 0.85f };   // 中轴/方向
+					const Wui::WuiColor nearColor { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.95f };
+					const Wui::WuiColor farColor { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.38f };
+					const Wui::WuiColor axisColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, 0.85f };
 					for (int i = 0; i < 4; ++i)
 					{
 						PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[i], clip[(i + 1) % 4],
@@ -2163,8 +2161,8 @@ namespace World
 					}
 
 					// ---- 碰撞体轮廓(编辑期;MeshCollider3D 无解析形状,按设计不画) ----
-					const Wui::WuiColor colliderColor { 0.20f, 0.90f, 0.40f, 0.55f };
-					const Wui::WuiColor colliderSelected { 0.35f, 1.0f, 0.55f, 0.95f };
+					const Wui::WuiColor colliderColor { theme.Success.R, theme.Success.G, theme.Success.B, 0.55f };
+					const Wui::WuiColor colliderSelected { theme.Success.R, theme.Success.G, theme.Success.B, 0.95f };
 					for (const entt::entity handle : registry.view<TransformComponent>())
 					{
 						const bool isSelected = handle == selectedHandle;
@@ -2278,7 +2276,7 @@ namespace World
 								// 1. MinDistance (全响近场区): 亮青色三轴立体大圆线框
 								if (audioSrc->MinDistance > 0.0f)
 								{
-									const Wui::WuiColor minColor { 0.2f, 0.85f, 0.95f, isSelected ? 0.95f : 0.5f };
+									const Wui::WuiColor minColor { theme.Info.R, theme.Info.G, theme.Info.B, isSelected ? 0.95f : 0.5f };
 									for (int axis = 0; axis < 3; ++axis)
 									{
 										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
@@ -2289,7 +2287,7 @@ namespace World
 								// 2. MaxDistance (衰减截止区): 深蓝色三轴立体大圆线框
 								if (audioSrc->MaxDistance > audioSrc->MinDistance)
 								{
-									const Wui::WuiColor maxColor { 0.35f, 0.55f, 0.95f, isSelected ? 0.75f : 0.35f };
+									const Wui::WuiColor maxColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, isSelected ? 0.75f : 0.35f };
 									for (int axis = 0; axis < 3; ++axis)
 									{
 										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
@@ -2299,7 +2297,7 @@ namespace World
 
 								// 3. 中心扬声器 3 轴十字标: 0.3m 定位十字
 								const float cross = 0.15f; // 0.3m 总跨度
-								const Wui::WuiColor crossColor { 0.2f, 0.85f, 0.95f, isSelected ? 0.95f : 0.5f };
+								const Wui::WuiColor crossColor { theme.Info.R, theme.Info.G, theme.Info.B, isSelected ? 0.95f : 0.5f };
 								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
 									{ -cross, 0.0f, 0.0f }, { cross, 0.0f, 0.0f }, crossColor, isSelected ? 2.0f : 1.2f, &overlayMin, &overlayMax);
 								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
@@ -2314,7 +2312,7 @@ namespace World
 						if (const auto* audioZone = registry.try_get<AudioZoneComponent>(handle))
 						{
 							// 4. AudioZoneComponent 空间混响区域包围盒: 暖金黄色 12 条棱边 AABB 线框
-							const Wui::WuiColor zoneColor { 0.95f, 0.75f, 0.2f, isSelected ? 0.9f : 0.45f };
+							const Wui::WuiColor zoneColor { theme.Warning.R, theme.Warning.G, theme.Warning.B, isSelected ? 0.9f : 0.45f };
 							const float hx = std::max(0.05f, audioZone->HalfExtents[0]);
 							const float hy = std::max(0.05f, audioZone->HalfExtents[1]);
 							const float hz = std::max(0.05f, audioZone->HalfExtents[2]);
@@ -2405,7 +2403,7 @@ namespace World
 				faceVisible[i] = glm::dot(normalWorld, gizmoCamera.Position - centerWorld) > 0.0f;
 			}
 
-			const Wui::WuiColor selectOutlineColor { 1.0f, 0.55f, 0.12f, 1.0f };
+			const Wui::WuiColor selectOutlineColor = theme.Warning;
 			Wui::ClipScope selectionClip(ctx, sceneRect);
 
 			if (plane)
@@ -2474,11 +2472,11 @@ namespace World
 				wc[i] = glm::vec3(p) / (std::abs(p.w) > 1e-6f ? p.w : 1.0f);
 			}
 
-			const Wui::WuiColor minorColor { 0.45f, 0.52f, 0.62f, 0.22f };
-			const Wui::WuiColor majorColor { 0.55f, 0.65f, 0.78f, 0.40f };
-			const Wui::WuiColor xAxisColor { 0.68f, 0.38f, 0.38f, 0.55f };
-			const Wui::WuiColor yAxisColor { 0.38f, 0.68f, 0.38f, 0.55f };
-			const Wui::WuiColor zAxisColor { 0.38f, 0.48f, 0.70f, 0.55f };
+			const Wui::WuiColor minorColor { theme.Border.R, theme.Border.G, theme.Border.B, 0.22f };
+			const Wui::WuiColor majorColor { theme.BorderStrong.R, theme.BorderStrong.G, theme.BorderStrong.B, 0.40f };
+			const Wui::WuiColor xAxisColor { theme.AxisX.R, theme.AxisX.G, theme.AxisX.B, 0.55f };
+			const Wui::WuiColor yAxisColor { theme.AxisY.R, theme.AxisY.G, theme.AxisY.B, 0.55f };
+			const Wui::WuiColor zAxisColor { theme.AxisZ.R, theme.AxisZ.G, theme.AxisZ.B, 0.55f };
 
 			if (currentVp == World::ViewportViewpoint::Front || currentVp == World::ViewportViewpoint::Back)
 			{
@@ -2605,7 +2603,7 @@ namespace World
 			{
 				Wui::ClipScope partClip(ctx, sceneRect);
 				const int32_t gridRadius = std::clamp(static_cast<int32_t>(std::ceil((viewSpan * 1.5f) / chunkSize)), 4, 16);
-				const Wui::WuiColor chunkBorderColor { 0.40f, 0.50f, 0.65f, 0.22f * proximityWeight };
+				const Wui::WuiColor chunkBorderColor { theme.Border.R, theme.Border.G, theme.Border.B, 0.35f * proximityWeight };
 
 				// 1. 全局大世界空间分区棋盘 (支持 XZ / XY / ZY / Isometric / Full3D)
 				for (int32_t da = -gridRadius; da <= gridRadius; ++da)
@@ -2724,7 +2722,7 @@ namespace World
 
 						const glm::vec3 center = tc.Location;
 						const glm::vec3 h = pvc.HalfExtents;
-						const Wui::WuiColor volumeBoxColor { 0.95f, 0.72f, 0.28f, 0.65f };
+						const Wui::WuiColor volumeBoxColor { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.65f };
 
 						const glm::vec3 bCorners[8] = {
 							center + glm::vec3(-h.x, -h.y, -h.z),
@@ -2751,7 +2749,7 @@ namespace World
 
 						// 盒内地表细分网格呈现
 						const float subCell = static_cast<float>(pvc.OverrideCellSize > 0 ? pvc.OverrideCellSize : 16);
-						const Wui::WuiColor subGridColor { 0.95f, 0.80f, 0.35f, 0.28f };
+						const Wui::WuiColor subGridColor { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.28f };
 						const float startX = std::floor((center.x - h.x) / subCell) * subCell;
 						const float endX = std::ceil((center.x + h.x) / subCell) * subCell;
 						const float startZ = std::floor((center.z - h.z) / subCell) * subCell;
@@ -2859,20 +2857,20 @@ namespace World
 				hudH
 			};
 
-			Wui::PanelBackground(ctx, hudRect, Wui::WuiColor { 0.08f, 0.10f, 0.14f, 0.85f }, 6.0f);
-			Wui::HighlightOutline(ctx, hudRect, Wui::WuiColor { 0.20f, 0.25f, 0.32f, 0.70f }, 6.0f, 1.0f);
+			Wui::PanelBackground(ctx, hudRect, theme.CardBg, 6.0f);
+			Wui::HighlightOutline(ctx, hudRect, theme.BorderStrong, 6.0f, 1.0f);
 
 			if (hudLine1[0] != '\0')
 			{
 				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 4.0f }, hudLine1,
-					Wui::WuiColor { 0.38f, 0.82f, 0.95f, 0.95f }, 11.5f);
+					theme.Info, 11.5f);
 				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 22.0f }, hudLine2,
-					Wui::WuiColor { 0.75f, 0.78f, 0.84f, 0.90f }, 11.5f);
+					theme.Text, 11.5f);
 			}
 			else
 			{
 				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 12.0f }, hudLine2,
-					Wui::WuiColor { 0.75f, 0.78f, 0.84f, 0.90f }, 11.5f);
+					theme.Text, 11.5f);
 			}
 
 			ctx.RegisterOverlayRect(hudRect);
@@ -2896,9 +2894,9 @@ namespace World
 				badgeH
 			};
 
-			const Wui::WuiColor badgeBg { 0.06f, 0.10f, 0.16f, 0.92f };
-			const Wui::WuiColor badgeBorder { 0.20f, 0.85f, 0.90f, 0.85f };
-			const Wui::WuiColor badgeTextCol { 0.35f, 0.92f, 1.0f, 1.0f };
+			const Wui::WuiColor badgeBg = theme.CardBg;
+			const Wui::WuiColor badgeBorder = theme.Info;
+			const Wui::WuiColor badgeTextCol = theme.TextBright;
 
 			Wui::PanelBackground(ctx, badgeRect, badgeBg, 14.0f);
 			Wui::HighlightOutline(ctx, badgeRect, badgeBorder, 14.0f, 1.2f);
@@ -2927,7 +2925,7 @@ namespace World
 				if (!physicsLines.empty())
 				{
 					const Wui::GizmoCamera debugCamera = m_Host.GetGizmoCamera();
-					const Wui::WuiColor physicsColor { 0.20f, 0.90f, 0.40f, 0.90f };
+					const Wui::WuiColor physicsColor = theme.Success;
 					{
 						// P1c-W3.4:物理调试线框的裁剪走库件 Wui::ClipScope。
 						Wui::ClipScope physicsClip(ctx, sceneRect);
@@ -2957,7 +2955,7 @@ namespace World
 		if (previewVisible)
 		{
 			const uint64_t previewTexture = m_Host.GetCameraPreviewTextureId();
-			Wui::PanelBackground(ctx, previewRect, { 0.05f, 0.05f, 0.06f, 0.92f }, 3.0f);
+			Wui::PanelBackground(ctx, previewRect, theme.WindowBg, 3.0f);
 			Label(ctx, { previewRect.X + 6.0f, previewRect.Y + 3.0f },
 				"相机: " + previewLabel, theme.Text, 12.0f);
 			// UV 与主视口一致(场景纹理按 {0,1,1,-1} 贴,预览渲染器同一条路径)。
@@ -2970,11 +2968,11 @@ namespace World
 		// ---- W5-L1:文档场景外部改动提示:只提示 + 一键重开,**不自动替换**文档 ----
 		if (bannerVisible)
 		{
-			Wui::PanelBackground(ctx, bannerRect, { 0.30f, 0.24f, 0.08f, 0.96f }, 3.0f);
+			Wui::PanelBackground(ctx, bannerRect, theme.Warning, 3.0f);
 			RegisterReadonlyNode(Wui::HashId("scene.external.changed"), "status", "scene external change",
 				"场景文件已在磁盘上被外部修改(未自动替换)", bannerRect);
 			Label(ctx, { bannerRect.X + 10.0f, bannerRect.Y + 6.0f },
-				"场景已在磁盘上改动", Wui::WuiColor { 1.0f, 0.86f, 0.55f, 1.0f }, 12.0f);
+				"场景已在磁盘上改动", theme.TextBright, 12.0f);
 			if (Button(ctx, Wui::HashId("scene.external.reopen"),
 				{ bannerRect.X + bannerRect.W - 104.0f, bannerRect.Y + 3.0f, 96.0f, 20.0f }, "重新打开", theme))
 				m_Host.ReopenExternalScene();

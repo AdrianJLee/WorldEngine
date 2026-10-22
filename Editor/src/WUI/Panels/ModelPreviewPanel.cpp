@@ -823,7 +823,7 @@ namespace World
 	void ModelPreviewPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
-		Wui::PanelBackground(ctx, rect, { 0.09f, 0.095f, 0.105f, 1.0f });
+		Wui::PanelBackground(ctx, rect, theme.PanelBg);
 
 		// D5b-2:轻量轮询"需要重导"状态(1s 节流):外部改源之后不需要手动刷新。
 		const double now = std::chrono::duration<double>(
@@ -931,7 +931,7 @@ namespace World
 		statusNode.Interactive = false;
 		Wui::WuiAccessibility::Get().Register(statusNode);
 		Wui::Label(ctx, { statusRect.X, statusRect.Y + 1.0f }, statusText,
-			m_NeedsReimport ? Wui::WuiColor { 1.0f, 0.72f, 0.30f, 1.0f } : theme.TextMuted, 11.0f);
+			m_NeedsReimport ? theme.Warning : theme.TextMuted, 11.0f);
 		y += 20.0f;
 		// P1c-W3.6:1px 分隔线 = 纯填充(命令逐字段等价:`PanelBackground` 就是
 		// `{ Rect, rect, color, radius }`)。库里的 `WuiSeparator` 是保留模式占位件
@@ -1159,7 +1159,7 @@ namespace World
 		if (m_SettingsDirty)
 			Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.import_settings.dirty",
 				"Edited — press Reimport to apply (settings are stored inside the .wmodel)."),
-				Wui::WuiColor { 1.0f, 0.72f, 0.30f, 1.0f }, 11.0f);
+				theme.Warning, 11.0f);
 		y += 16.0f;
 		return y - rect.Y;
 	}
@@ -1239,7 +1239,7 @@ namespace World
 				const std::string labelText = EllipsizeToWidthLocal(ctx, label, row.W, 11.0f);
 				// P1c-W3.6:槽行文字走库件 `Wui::Label`(文字命令逐字段等价;缺材质红/悬停 Accent 三态不变)。
 				Wui::Label(ctx, { x, y + 1.0f }, labelText,
-					missing ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f }
+					missing ? theme.Danger
 						: (hovered ? theme.Accent : theme.Text), 11.0f);
 				Wui::WuiAccessNode slotNode;
 				slotNode.Id = Wui::HashId(("model.slot." + std::to_string(index)).c_str());
@@ -1274,7 +1274,7 @@ namespace World
 					const AssetFingerprint fingerprint = FingerprintAsset(texture, nullptr);
 					Wui::Label(ctx, { x + 12.0f, y }, (fingerprint.Exists ? std::string("tex ")
 						: Wui::Tr("panel.model.missing_texture", "[missing] tex ")) + ShortenPath(texture),
-						fingerprint.Exists ? theme.TextDisabled : Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f }, 10.0f);
+						fingerprint.Exists ? theme.TextDisabled : theme.Danger, 10.0f);
 					y += 13.0f;
 				}
 			}
@@ -1331,7 +1331,7 @@ namespace World
 		{
 			y += 4.0f;
 			Wui::LabelWithTerm(ctx, { x, y }, m_Status, std::string(),
-				m_StatusIsError ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.TextMuted, 10.0f, theme, width);
+				m_StatusIsError ? theme.Danger : theme.TextMuted, 10.0f, theme, width);
 			y += 14.0f;
 		}
 		return y - rect.Y;

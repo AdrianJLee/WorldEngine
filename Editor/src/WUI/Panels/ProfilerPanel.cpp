@@ -29,6 +29,7 @@ namespace World
 
 	void ProfilerPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
+		const Wui::WuiTheme& theme = host.Theme();
 		// 数据源:唯一真相(与 prof.stats / 导出 / 无障碍同源)。
 		const Profiling::Telemetry::StatsSnapshot snapshot = Profiling::Telemetry::GetStats();
 
@@ -41,9 +42,9 @@ namespace World
 			// 帧时间曲线:数据由本面板持有(WuiPlot 只读指针,不拷贝)。
 			m_Plot = std::make_shared<Wui::WuiPlot>();
 			m_Plot->Style = Wui::WuiPlot::Kind::Line;
-			m_Plot->LineColor = { 0.35f, 0.75f, 1.0f, 1.0f };
-			m_Plot->FillColor = { 0.35f, 0.75f, 1.0f, 0.16f };
-			m_Plot->ThresholdColor = { 1.0f, 0.45f, 0.35f, 0.9f };
+			m_Plot->LineColor = theme.Info;
+			m_Plot->FillColor = { theme.Info.R, theme.Info.G, theme.Info.B, 0.16f };
+			m_Plot->ThresholdColor = theme.Danger;
 			m_Root->Add(m_Plot, { 0, 1e30f, 0, 120, 0 });
 
 			for (int i = 0; i < kLineCount; ++i)
@@ -72,11 +73,11 @@ namespace World
 		{
 			uint32_t guide = 0;
 			if (snapshot.Frame.P50Ms > 0.0f)
-				m_Plot->Guides[guide++] = { snapshot.Frame.P50Ms, { 0.45f, 0.85f, 0.45f, 0.55f } };
+				m_Plot->Guides[guide++] = { snapshot.Frame.P50Ms, { theme.Success.R, theme.Success.G, theme.Success.B, 0.55f } };
 			if (snapshot.Frame.P95Ms > 0.0f)
-				m_Plot->Guides[guide++] = { snapshot.Frame.P95Ms, { 0.95f, 0.85f, 0.35f, 0.55f } };
+				m_Plot->Guides[guide++] = { snapshot.Frame.P95Ms, { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.55f } };
 			if (snapshot.Frame.P99Ms > 0.0f)
-				m_Plot->Guides[guide++] = { snapshot.Frame.P99Ms, { 0.95f, 0.45f, 0.40f, 0.55f } };
+				m_Plot->Guides[guide++] = { snapshot.Frame.P99Ms, { theme.Danger.R, theme.Danger.G, theme.Danger.B, 0.55f } };
 			m_Plot->GuideCount = guide;
 		}
 
@@ -85,11 +86,11 @@ namespace World
 			m_Lines[index]->Text = text;
 			m_Lines[index]->Color = color;
 		};
-		const Wui::WuiColor normal { 0.85f, 0.88f, 0.92f, 1.0f };
-		const Wui::WuiColor muted { 0.55f, 0.58f, 0.62f, 1.0f };
-		const Wui::WuiColor good { 0.45f, 0.85f, 0.45f, 1.0f };
+		const Wui::WuiColor normal = theme.Text;
+		const Wui::WuiColor muted = theme.TextMuted;
+		const Wui::WuiColor good = theme.Success;
 		// 分节标题:与内存面板同一套(-- X -- 的蓝灰),跨面板保持一致。
-		const Wui::WuiColor head { 0.62f, 0.72f, 0.88f, 1.0f };
+		const Wui::WuiColor head = theme.Accent;
 
 		char buffer[200];
 
@@ -142,7 +143,7 @@ namespace World
 					snapshot.Frame.JankCount, Wui::Tr("profiler.jankFrames", "slow frames").c_str(),
 					Wui::Tr("profiler.thresholdPending", "baseline not ready").c_str());
 			setLine(4, buffer, snapshot.Frame.JankCount > 0
-				? Wui::WuiColor { 1.0f, 0.7f, 0.3f, 1.0f } : good);
+				? theme.Warning : good);
 		}
 
 		// ---- 渲染:画了多少东西 ----
@@ -166,7 +167,7 @@ namespace World
 				Wui::Tr("profiler.lights", "Lights").c_str(), r3.Lights, r3.MaxLights,
 				Wui::Tr("profiler.shadow", "Shadow").c_str(), r3.ShadowPassMilliseconds);
 			const bool overflow = r3.DroppedLights > 0 || scene.DroppedObjects > 0;
-			setLine(8, buffer, overflow ? Wui::WuiColor { 1.0f, 0.7f, 0.3f, 1.0f } : normal);
+			setLine(8, buffer, overflow ? theme.Warning : normal);
 		}
 
 		// ---- 内存 ----
@@ -202,7 +203,7 @@ namespace World
 					Wui::Tr("profiler.capture", "Capture").c_str(),
 					Wui::Tr("profiler.idle", "idle").c_str());
 			setLine(12, buffer, snapshot.Capture.DroppedEvents > 0
-				? Wui::WuiColor { 1.0f, 0.5f, 0.4f, 1.0f } : muted);
+				? theme.Danger : muted);
 		}
 
 		// ---- 热点与瓶颈:当前帧耗时最多的系统(实时回答慢在哪) ----
@@ -248,7 +249,7 @@ namespace World
 
 						const bool isSpike = top1->Milliseconds >= 4.0 ||
 							(snapshot.Frame.LastMs > 0.0f && top1->Milliseconds >= snapshot.Frame.LastMs * 0.35);
-						hotColor = isSpike ? Wui::WuiColor { 1.0f, 0.45f, 0.35f, 1.0f } : normal;
+						hotColor = isSpike ? theme.Danger : normal;
 					}
 				}
 			}

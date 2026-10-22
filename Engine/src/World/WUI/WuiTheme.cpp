@@ -48,6 +48,15 @@ namespace World::Wui
 			theme.FocusRing = theme.Accent;
 			theme.ButtonBg = theme.PanelHeader;
 			theme.ButtonHover = theme.HoverBg;
+			theme.TextBright = { 1.0f, 1.0f, 1.0f, 1.0f };
+			theme.Info = { 0.12f, 0.55f, 0.85f, 1.0f };
+			theme.AxisX = { 0.85f, 0.22f, 0.22f, 1.0f };
+			theme.AxisY = { 0.18f, 0.65f, 0.28f, 1.0f };
+			theme.AxisZ = { 0.18f, 0.45f, 0.88f, 1.0f };
+			theme.ModalBackdrop = { 0.0f, 0.0f, 0.0f, 0.35f };
+			theme.CardBg = { 0.96f, 0.97f, 0.98f, 1.0f };
+			theme.TrackBg = { 0.88f, 0.90f, 0.93f, 1.0f };
+			theme.Transparent = { 0.0f, 0.0f, 0.0f, 0.0f };
 			return theme;
 		}
 

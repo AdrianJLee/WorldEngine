@@ -1307,10 +1307,10 @@ void ParticleEditorPanel::NewAsset()
 		if (!m_StatusFeedback.empty())
 		{
 			Wui::WuiColor fbColor = (m_StatusFeedback.find("成功") != std::string::npos || m_StatusFeedback.find("已") != std::string::npos)
-				? Wui::WuiColor { 0.3f, 0.85f, 0.4f, 1.0f }
-				: (m_StatusFeedback.find("失败") != std::string::npos || m_StatusFeedback.find("错误") != std::string::npos)
-					? Wui::WuiColor { 0.95f, 0.3f, 0.3f, 1.0f }
-					: theme.TextMuted;
+				? theme.Success
+				: ((m_StatusFeedback.find("失败") != std::string::npos || m_StatusFeedback.find("错误") != std::string::npos)
+					? theme.Danger
+					: theme.TextMuted);
 			Wui::Label(ctx, { tbX + 8.0f, barRect.Y + 10.0f }, m_StatusFeedback, fbColor, 10.5f);
 		}
 
@@ -1393,7 +1393,7 @@ void ParticleEditorPanel::NewAsset()
 		if (m_NewEmitterMenuOpen)
 		{
 			const Wui::WuiRect menuRect { outlinerRect.X + 6.0f, listY, outlinerRect.W - 12.0f, 130.0f };
-			Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.98f }, theme.Accent);
+			Wui::BarSurface(ctx, menuRect, theme.PanelHeader, theme.BorderStrong);
 
 
 			const struct TemplateEntry {
@@ -1501,9 +1501,9 @@ void ParticleEditorPanel::NewAsset()
 			std::string iconStr = "[S]";
 			if (i < m_EmitterExtended.size())
 			{
-				if (m_EmitterExtended[i].RibbonEnabled) { iconCol = Wui::WuiColor { 0.15f, 0.85f, 0.95f, 1.0f }; iconStr = "~"; }
-				else if (m_EmitterExtended[i].MeshEnabled) { iconCol = Wui::WuiColor { 0.75f, 0.40f, 0.95f, 1.0f }; iconStr = "[M]"; }
-				else if (m_EmitterExtended[i].LightEnabled) { iconCol = Wui::WuiColor { 1.0f, 0.85f, 0.20f, 1.0f }; iconStr = "[L]"; }
+				if (m_EmitterExtended[i].RibbonEnabled) { iconCol = theme.Info; iconStr = "~"; }
+				else if (m_EmitterExtended[i].MeshEnabled) { iconCol = theme.Accent; iconStr = "[M]"; }
+				else if (m_EmitterExtended[i].LightEnabled) { iconCol = theme.Warning; iconStr = "[L]"; }
 			}
 			Wui::Label(ctx, { rowRect.X + 4.0f, rowRect.Y + 5.0f }, iconStr, iconCol, 11.5f);
 
@@ -1585,7 +1585,7 @@ void ParticleEditorPanel::NewAsset()
 			}
 			if (isSolo)
 			{
-				Wui::LineSegment(ctx, { sRect.X, sRect.Y + sRect.H }, { sRect.X + sRect.W, sRect.Y + sRect.H }, Wui::WuiColor { 1.0f, 0.85f, 0.2f, 1.0f }, 2.0f);
+				Wui::LineSegment(ctx, { sRect.X, sRect.Y + sRect.H }, { sRect.X + sRect.W, sRect.Y + sRect.H }, theme.Warning, 2.0f);
 			}
 			bx += 21.0f;
 
@@ -1600,7 +1600,7 @@ void ParticleEditorPanel::NewAsset()
 			}
 			if (isMute)
 			{
-				Wui::LineSegment(ctx, { mRect.X, mRect.Y + mRect.H }, { mRect.X + mRect.W, mRect.Y + mRect.H }, Wui::WuiColor { 0.95f, 0.25f, 0.25f, 1.0f }, 2.0f);
+				Wui::LineSegment(ctx, { mRect.X, mRect.Y + mRect.H }, { mRect.X + mRect.W, mRect.Y + mRect.H }, theme.Danger, 2.0f);
 			}
 			bx += 21.0f;
 
@@ -1615,7 +1615,7 @@ void ParticleEditorPanel::NewAsset()
 			}
 			if (isLock)
 			{
-				Wui::LineSegment(ctx, { lRect.X, lRect.Y + lRect.H }, { lRect.X + lRect.W, lRect.Y + lRect.H }, Wui::WuiColor { 1.0f, 0.55f, 0.15f, 1.0f }, 2.0f);
+				Wui::LineSegment(ctx, { lRect.X, lRect.Y + lRect.H }, { lRect.X + lRect.W, lRect.Y + lRect.H }, theme.Accent, 2.0f);
 			}
 
 
@@ -1638,7 +1638,7 @@ void ParticleEditorPanel::NewAsset()
 				const Wui::WuiRect modRow { listRect.X + 16.0f, rowY, listRect.W - 20.0f, 18.0f };
 				std::string shapeName = (em.EmitterType == ParticleEmitterType::Cone) ? "Cone" : (em.EmitterType == ParticleEmitterType::Sphere ? "Sphere" : (em.EmitterType == ParticleEmitterType::Box ? "Box" : "Point"));
 				std::string modSummary = "|-- Spawn(" + std::to_string((int)em.EmissionRate) + "p/s) | " + shapeName + " | Forces";
-				Wui::Label(ctx, { modRow.X, modRow.Y + 2.0f }, modSummary, Wui::WuiColor { 0.45f, 0.55f, 0.65f, 0.85f }, 9.5f);
+				Wui::Label(ctx, { modRow.X, modRow.Y + 2.0f }, modSummary, theme.TextMuted, 9.5f);
 				rowY += 20.0f;
 			}
 		}
@@ -1651,7 +1651,7 @@ void ParticleEditorPanel::NewAsset()
 
 
 		const Wui::WuiRect menuRect { m_ContextMenuPos.x, m_ContextMenuPos.y, 116.0f, 150.0f };
-		Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.98f }, theme.Accent);
+		Wui::BarSurface(ctx, menuRect, theme.PanelHeader, theme.BorderStrong);
 
 
 		auto menuBtn = [&](const char* id, const char* label, float y, auto action) {
@@ -1721,7 +1721,7 @@ void ParticleEditorPanel::NewAsset()
 		const float itemH = 24.0f;
 		const float menuH = 68.0f + itemH * (std::max<size_t>(1, m_ProjectCustomModules.size()) + 1);
 		const Wui::WuiRect menuRect { m_CustomModuleMenuPos.x, m_CustomModuleMenuPos.y, menuW, menuH };
-		Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.98f }, theme.Accent);
+		Wui::BarSurface(ctx, menuRect, theme.PanelHeader, theme.BorderStrong);
 
 		float my = menuRect.Y + 6.0f;
 
@@ -1790,7 +1790,7 @@ void ParticleEditorPanel::NewAsset()
 
 		// 万向节半透明底盘
 		const Wui::WuiRect discRect { gimbalCenter.x - gimbalRadius - 6.0f, gimbalCenter.y - gimbalRadius - 6.0f, (gimbalRadius + 6.0f) * 2.0f, (gimbalRadius + 6.0f) * 2.0f };
-		Wui::BarSurface(ctx, discRect, Wui::WuiColor { 0.04f, 0.06f, 0.08f, 0.85f }, Wui::WuiColor { 0.20f, 0.25f, 0.35f, 0.6f });
+		Wui::BarSurface(ctx, discRect, theme.CardBg, theme.Border);
 
 
 		// 提取相机旋转矩阵
@@ -1806,9 +1806,9 @@ void ParticleEditorPanel::NewAsset()
 			glm::vec3 CamVec;
 			glm::vec2 ScreenEnd;
 		} axes[] = {
-			{ "X", glm::vec3(1.0f, 0.0f, 0.0f), Wui::WuiColor { 0.95f, 0.22f, 0.22f, 1.0f }, 1.5708f, 0.0f, glm::vec3(0.0f), glm::vec2(0.0f) },
-			{ "Y", glm::vec3(0.0f, 1.0f, 0.0f), Wui::WuiColor { 0.22f, 0.90f, 0.32f, 1.0f }, 0.0f, 1.45f, glm::vec3(0.0f), glm::vec2(0.0f) },
-			{ "Z", glm::vec3(0.0f, 0.0f, 1.0f), Wui::WuiColor { 0.22f, 0.55f, 0.98f, 1.0f }, 0.0f, 0.0f, glm::vec3(0.0f), glm::vec2(0.0f) }
+			{ "X", glm::vec3(1.0f, 0.0f, 0.0f), theme.AxisX, 1.5708f, 0.0f, glm::vec3(0.0f), glm::vec2(0.0f) },
+			{ "Y", glm::vec3(0.0f, 1.0f, 0.0f), theme.AxisY, 0.0f, 1.45f, glm::vec3(0.0f), glm::vec2(0.0f) },
+			{ "Z", glm::vec3(0.0f, 0.0f, 1.0f), theme.AxisZ, 0.0f, 0.0f, glm::vec3(0.0f), glm::vec2(0.0f) }
 		};
 
 
@@ -1837,8 +1837,8 @@ void ParticleEditorPanel::NewAsset()
 			// 轴端点圆形吸附按钮 (Radius 7px)
 			const Wui::WuiRect handleRect { ax.ScreenEnd.x - 7.0f, ax.ScreenEnd.y - 7.0f, 14.0f, 14.0f };
 			const bool isHover = ctx.IsHovered(handleRect);
-			Wui::BarSurface(ctx, handleRect, isHover ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : ax.Color, ax.Color);
-			Wui::Label(ctx, { handleRect.X + 3.0f, handleRect.Y + 1.0f }, ax.Name, Wui::WuiColor { 0.05f, 0.05f, 0.05f, 1.0f }, 9.0f);
+			Wui::BarSurface(ctx, handleRect, isHover ? theme.TextBright : ax.Color, ax.Color);
+			Wui::Label(ctx, { handleRect.X + 3.0f, handleRect.Y + 1.0f }, ax.Name, theme.CardBg, 9.0f);
 			Wui::Tooltip(ctx, handleRect, std::string("吸附正交视角: +") + ax.Name);
 
 
@@ -1944,7 +1944,7 @@ void ParticleEditorPanel::NewAsset()
 	void ParticleEditorPanel::RenderViewport(Wui::WuiContext& ctx, const Wui::WuiRect& vpRect, const Wui::WuiTheme& theme, PanelHost& host)
 	{
 		(void)host;
-		Wui::BarSurface(ctx, vpRect, Wui::WuiColor { 0.07f, 0.08f, 0.10f, 1.0f }, theme.Border);
+		Wui::BarSurface(ctx, vpRect, theme.WindowBg, theme.Border);
 
 		// 1. 视口浮层 UI 几何区域预先计算 (防止点击 UI 时穿透触发相机拖拽)
 		const float islandW = 478.0f;
@@ -2096,7 +2096,7 @@ void ParticleEditorPanel::NewAsset()
 						glm::vec3(rBase, 0.0f, 0.0f),
 						glm::vec3(1.0f, 0.0f, 0.0f),
 						rBase,
-						Wui::WuiColor { 1.0f, 0.85f, 0.20f, 1.0f },
+						theme.Warning,
 						buf,
 						"R",
 						0.01f, 20.0f, false
@@ -2108,7 +2108,7 @@ void ParticleEditorPanel::NewAsset()
 						glm::vec3(rTop, h, 0.0f),
 						glm::vec3(1.0f, 0.0f, 0.0f),
 						cAngle,
-						Wui::WuiColor { 0.25f, 0.85f, 1.0f, 1.0f },
+						theme.Info,
 						buf,
 						"A",
 						0.0f, 120.0f, true
@@ -2124,7 +2124,7 @@ void ParticleEditorPanel::NewAsset()
 						glm::vec3(spR, 0.0f, 0.0f),
 						glm::vec3(1.0f, 0.0f, 0.0f),
 						spR,
-						Wui::WuiColor { 0.25f, 0.85f, 1.0f, 1.0f },
+						theme.Info,
 						buf,
 						"R",
 						0.05f, 30.0f, false
@@ -2140,7 +2140,7 @@ void ParticleEditorPanel::NewAsset()
 						glm::vec3(e.x, 0.0f, 0.0f),
 						glm::vec3(1.0f, 0.0f, 0.0f),
 						e.x,
-						Wui::WuiColor { 1.0f, 0.35f, 0.35f, 1.0f },
+						theme.AxisX,
 						"包围盒宽度 X (拖拽调整)",
 						"X",
 						0.05f, 30.0f, false
@@ -2563,11 +2563,11 @@ void ParticleEditorPanel::NewAsset()
 						const Wui::WuiRect hRect { sp.x - hSize * 0.5f, sp.y - hSize * 0.5f, hSize, hSize };
 
 						const Wui::WuiColor fillCol = (isActive || isHover)
-							? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }
+							? theme.TextBright
 							: h.Color;
 						const Wui::WuiColor borderCol = (isActive || isHover)
 							? h.Color
-							: Wui::WuiColor { 0.10f, 0.12f, 0.15f, 0.90f };
+							: theme.Border;
 
 						Wui::BarSurface(ctx, hRect, fillCol, borderCol);
 
@@ -2585,7 +2585,7 @@ void ParticleEditorPanel::NewAsset()
 		// =========================================================================
 		RenderOrientationGimbal(ctx, vpRect, view, theme);
 
-		Wui::BarSurface(ctx, vIsland, Wui::WuiColor { 0.05f, 0.07f, 0.09f, 0.85f }, theme.Border);
+		Wui::BarSurface(ctx, vIsland, theme.CardBg, theme.Border);
 
 		const float viewBtnW = 34.0f;
 		const Wui::WuiRect btn3D { vx, vy, viewBtnW, 22.0f };
@@ -2654,20 +2654,20 @@ void ParticleEditorPanel::NewAsset()
 		if (totalActiveParticles < 400)
 		{
 			overdrawAlert = "[低] 良好 (Low)";
-			overdrawCol = Wui::WuiColor { 0.3f, 0.85f, 0.4f, 1.0f };
+			overdrawCol = theme.Success;
 		}
 		else if (totalActiveParticles < 1200)
 		{
 			overdrawAlert = "[中] 重叠预警 (Moderate)";
-			overdrawCol = Wui::WuiColor { 0.95f, 0.8f, 0.2f, 1.0f };
+			overdrawCol = theme.Warning;
 		}
 		else
 		{
 			overdrawAlert = "[极高] 严重瓶颈 (Critical)";
-			overdrawCol = Wui::WuiColor { 0.95f, 0.3f, 0.3f, 1.0f };
+			overdrawCol = theme.Danger;
 		}
 
-		Wui::BarSurface(ctx, hudRect, Wui::WuiColor { 0.05f, 0.07f, 0.09f, 0.85f }, theme.Border);
+		Wui::BarSurface(ctx, hudRect, theme.CardBg, theme.Border);
 		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 6.0f }, "3D 复合特效视口 (VFX Viewport)", theme.Accent, 11.5f);
 		Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 22.0f },
 			"活跃粒子: " + std::to_string(totalActiveParticles) + " | 发射层: " + std::to_string(activeEmitterCount) + "/" + std::to_string(m_Asset.Emitters.size()) + " | 预估 DC: " + std::to_string(estDrawCalls),
@@ -2679,7 +2679,7 @@ void ParticleEditorPanel::NewAsset()
 			"Overdraw 警报: " + overdrawAlert, overdrawCol, 10.5f);
 
 		// 10. 视口底部快捷操作指引条
-		Wui::BarSurface(ctx, hintBarRect, Wui::WuiColor { 0.04f, 0.06f, 0.08f, 0.85f }, theme.Border);
+		Wui::BarSurface(ctx, hintBarRect, theme.CardBg, theme.Border);
 		Wui::Label(ctx, { hintBarRect.X + 8.0f, hintBarRect.Y + 3.0f },
 			"[右键] 旋转  |  [中键/Shift+右键] 平移  |  [滚轮] 缩放  |  [左键] 操纵手柄  |  [F] 聚焦选中",
 			theme.TextMuted, 9.5f);
@@ -2688,7 +2688,7 @@ void ParticleEditorPanel::NewAsset()
 
 	void ParticleEditorPanel::RenderInteractiveCurveWorkbench(Wui::WuiContext& ctx, const Wui::WuiRect& canvasRect, const Wui::WuiTheme& theme)
 	{
-		Wui::BarSurface(ctx, canvasRect, Wui::WuiColor { 0.03f, 0.04f, 0.06f, 1.0f }, theme.Border);
+		Wui::BarSurface(ctx, canvasRect, theme.ContentBg, theme.Border);
 
 		if (m_SelectedEmitterIndex >= m_Asset.Emitters.size()) return;
 		auto& em = m_Asset.Emitters[m_SelectedEmitterIndex];
@@ -2698,7 +2698,7 @@ void ParticleEditorPanel::NewAsset()
 		// -------------------------------------------------------------
 		const float treeW = 165.0f;
 		const Wui::WuiRect treeRect { canvasRect.X, canvasRect.Y, treeW, canvasRect.H };
-		Wui::BarSurface(ctx, treeRect, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 0.98f }, theme.Border);
+		Wui::BarSurface(ctx, treeRect, theme.PanelBg, theme.Border);
 
 		const Wui::WuiRect treeHeader { treeRect.X, treeRect.Y, treeRect.W, 26.0f };
 		Wui::BarSurface(ctx, treeHeader, theme.PanelHeader, theme.Border);
@@ -2711,11 +2711,11 @@ void ParticleEditorPanel::NewAsset()
 			const char* ModId;
 			Wui::WuiColor Color;
 		} channels[] = {
-			{ CurveTarget::Size,      "vfx.c.ch.size",  "尺寸随寿命 (Scale)",    "mod.update.scale_over_life",     Wui::WuiColor { 0.2f, 0.8f, 1.0f, 1.0f } },
-			{ CurveTarget::Alpha,     "vfx.c.ch.alpha", "透明度随寿命 (Alpha)",  "mod.update.color_over_life",     Wui::WuiColor { 1.0f, 0.85f, 0.2f, 1.0f } },
-			{ CurveTarget::Rotation,  "vfx.c.ch.rot",   "自转角速度 (Rotation)", "mod.update.rotation_over_life",  Wui::WuiColor { 0.3f, 0.9f, 0.4f, 1.0f } },
-			{ CurveTarget::Shockwave, "vfx.c.ch.shock", "扩散缓动 (Shockwave)",  "mod.update.shockwave_expansion", Wui::WuiColor { 0.95f, 0.35f, 0.85f, 1.0f } },
-			{ CurveTarget::Speed,     "vfx.c.ch.speed", "速度动力学 (Speed)",    "mod.update.solve_velocity",      Wui::WuiColor { 1.0f, 0.55f, 0.2f, 1.0f } }
+			{ CurveTarget::Size,      "vfx.c.ch.size",  "尺寸随寿命 (Scale)",    "mod.update.scale_over_life",     theme.Info },
+			{ CurveTarget::Alpha,     "vfx.c.ch.alpha", "透明度随寿命 (Alpha)",  "mod.update.color_over_life",     theme.Warning },
+			{ CurveTarget::Rotation,  "vfx.c.ch.rot",   "自转角速度 (Rotation)", "mod.update.rotation_over_life",  theme.Success },
+			{ CurveTarget::Shockwave, "vfx.c.ch.shock", "扩散缓动 (Shockwave)",  "mod.update.shockwave_expansion", theme.Accent },
+			{ CurveTarget::Speed,     "vfx.c.ch.speed", "速度动力学 (Speed)",    "mod.update.solve_velocity",      theme.AxisX }
 		};
 
 		float cy = treeRect.Y + 30.0f;
@@ -2727,11 +2727,11 @@ void ParticleEditorPanel::NewAsset()
 			const Wui::WuiRect chRow { treeRect.X + 4.0f, cy, treeRect.W - 8.0f, 24.0f };
 			if (isCur)
 			{
-				Wui::BarSurface(ctx, chRow, Wui::WuiColor { 0.16f, 0.22f, 0.30f, 0.95f }, theme.Accent);
+				Wui::BarSurface(ctx, chRow, theme.Selection, theme.Accent);
 			}
 			else if (ctx.IsHovered(chRow))
 			{
-				Wui::BarSurface(ctx, chRow, Wui::WuiColor { 0.10f, 0.12f, 0.15f, 0.8f }, theme.Border);
+				Wui::BarSurface(ctx, chRow, theme.HoverBg, theme.Border);
 			}
 
 			// 色标圆点与标签
@@ -2757,11 +2757,11 @@ void ParticleEditorPanel::NewAsset()
 		CubicBezierCurve* activeCurve = nullptr;
 		Wui::WuiColor activeChannelCol = theme.Accent;
 		std::string activeName = "尺寸随寿命 (Scale)";
-		if (m_ActiveCurveTarget == CurveTarget::Size) { activeCurve = &m_EmitterSizeCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 0.2f, 0.8f, 1.0f, 1.0f }; activeName = "尺寸随寿命 (Scale)"; }
-		else if (m_ActiveCurveTarget == CurveTarget::Alpha) { activeCurve = &m_EmitterAlphaCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 1.0f, 0.85f, 0.2f, 1.0f }; activeName = "透明度随寿命 (Alpha)"; }
-		else if (m_ActiveCurveTarget == CurveTarget::Rotation) { activeCurve = &m_EmitterRotationCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 0.3f, 0.9f, 0.4f, 1.0f }; activeName = "自转角速度 (Rotation)"; }
-		else if (m_ActiveCurveTarget == CurveTarget::Shockwave) { activeCurve = &m_EmitterShockwaveCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 0.95f, 0.35f, 0.85f, 1.0f }; activeName = "扩散缓动 (Shockwave)"; }
-		else { activeCurve = &m_EmitterSpeedCurves[m_SelectedEmitterIndex]; activeChannelCol = Wui::WuiColor { 1.0f, 0.55f, 0.2f, 1.0f }; activeName = "速度动力学 (Speed)"; }
+		if (m_ActiveCurveTarget == CurveTarget::Size) { activeCurve = &m_EmitterSizeCurves[m_SelectedEmitterIndex]; activeChannelCol = theme.Info; activeName = "尺寸随寿命 (Scale)"; }
+		else if (m_ActiveCurveTarget == CurveTarget::Alpha) { activeCurve = &m_EmitterAlphaCurves[m_SelectedEmitterIndex]; activeChannelCol = theme.Warning; activeName = "透明度随寿命 (Alpha)"; }
+		else if (m_ActiveCurveTarget == CurveTarget::Rotation) { activeCurve = &m_EmitterRotationCurves[m_SelectedEmitterIndex]; activeChannelCol = theme.Success; activeName = "自转角速度 (Rotation)"; }
+		else if (m_ActiveCurveTarget == CurveTarget::Shockwave) { activeCurve = &m_EmitterShockwaveCurves[m_SelectedEmitterIndex]; activeChannelCol = theme.Accent; activeName = "扩散缓动 (Shockwave)"; }
+		else { activeCurve = &m_EmitterSpeedCurves[m_SelectedEmitterIndex]; activeChannelCol = theme.AxisX; activeName = "速度动力学 (Speed)"; }
 
 		float hx = toolbarRect.X + 8.0f;
 		Wui::Label(ctx, { hx, toolbarRect.Y + 6.0f }, "当前编辑:", theme.TextMuted, 10.0f);
@@ -2831,10 +2831,10 @@ void ParticleEditorPanel::NewAsset()
 		const float plotTop = canvasRect.Y + 28.0f;
 		const float plotH = canvasRect.H - 34.0f;
 		const Wui::WuiRect plotRect { graphX + 35.0f, plotTop + 4.0f, graphW - 45.0f, plotH - 18.0f };
-		Wui::BarSurface(ctx, plotRect, Wui::WuiColor { 0.02f, 0.03f, 0.04f, 1.0f }, Wui::WuiColor { 0.15f, 0.18f, 0.22f, 0.8f });
+		Wui::BarSurface(ctx, plotRect, theme.WindowBg, theme.Border);
 
 		// 绘制纵横标准标尺网格线 (横轴 Time 0.0~1.0s, 纵轴 Value 0.0~1.0)
-		const Wui::WuiColor gridLineCol { 0.15f, 0.18f, 0.24f, 0.45f };
+		const Wui::WuiColor gridLineCol { theme.Border.R, theme.Border.G, theme.Border.B, 0.45f };
 
 		for (int step = 0; step <= 4; ++step)
 		{
@@ -2842,12 +2842,12 @@ void ParticleEditorPanel::NewAsset()
 			float gx = plotRect.X + frac * plotRect.W;
 			Wui::LineSegment(ctx, { gx, plotRect.Y }, { gx, plotRect.Y + plotRect.H }, gridLineCol, 1.0f);
 			std::string tLabel = std::to_string(frac).substr(0, 4) + "s";
-			Wui::Label(ctx, { gx - 8.0f, plotRect.Y + plotRect.H + 2.0f }, tLabel, Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 9.0f);
+			Wui::Label(ctx, { gx - 8.0f, plotRect.Y + plotRect.H + 2.0f }, tLabel, theme.TextMuted, 9.0f);
 
 			float gy = plotRect.Y + (1.0f - frac) * plotRect.H;
 			Wui::LineSegment(ctx, { plotRect.X, gy }, { plotRect.X + plotRect.W, gy }, gridLineCol, 1.0f);
 			std::string vLabel = std::to_string(frac).substr(0, 4);
-			Wui::Label(ctx, { graphX + 4.0f, gy - 5.0f }, vLabel, Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 9.0f);
+			Wui::Label(ctx, { graphX + 4.0f, gy - 5.0f }, vLabel, theme.TextMuted, 9.0f);
 		}
 
 		auto timeToScreenX = [&](float t) -> float {
@@ -2896,19 +2896,19 @@ void ParticleEditorPanel::NewAsset()
 			outHandleScreenPos = selectedKfScreenPt + glm::vec2(std::cos(outAngle), -std::sin(outAngle)) * handleArmPixels;
 
 			// 绘制切线臂 (入切线蓝，出切线橙)
-			Wui::LineSegment(ctx, selectedKfScreenPt, inHandleScreenPos, Wui::WuiColor { 0.25f, 0.65f, 1.0f, 0.9f }, 1.5f);
-			Wui::LineSegment(ctx, selectedKfScreenPt, outHandleScreenPos, Wui::WuiColor { 1.0f, 0.65f, 0.2f, 0.9f }, 1.5f);
+			Wui::LineSegment(ctx, selectedKfScreenPt, inHandleScreenPos, theme.Info, 1.5f);
+			Wui::LineSegment(ctx, selectedKfScreenPt, outHandleScreenPos, theme.Warning, 1.5f);
 
 			// 入切线端点手柄
 			const Wui::WuiRect inHRect { inHandleScreenPos.x - 4.0f, inHandleScreenPos.y - 4.0f, 8.0f, 8.0f };
 			m_HoveredInHandle = ctx.IsHovered(inHRect);
-			Wui::BarSurface(ctx, inHRect, m_HoveredInHandle ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 0.25f, 0.65f, 1.0f, 1.0f }, theme.Border);
+			Wui::BarSurface(ctx, inHRect, m_HoveredInHandle ? theme.TextBright : theme.Info, theme.Border);
 			Wui::Tooltip(ctx, inHRect, "入切线斜率手柄 (拖拽以调节)");
 
 			// 出切线端点手柄
 			const Wui::WuiRect outHRect { outHandleScreenPos.x - 4.0f, outHandleScreenPos.y - 4.0f, 8.0f, 8.0f };
 			m_HoveredOutHandle = ctx.IsHovered(outHRect);
-			Wui::BarSurface(ctx, outHRect, m_HoveredOutHandle ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 1.0f, 0.65f, 0.2f, 1.0f }, theme.Border);
+			Wui::BarSurface(ctx, outHRect, m_HoveredOutHandle ? theme.TextBright : theme.Warning, theme.Border);
 			Wui::Tooltip(ctx, outHRect, "出切线斜率手柄 (拖拽以调节)");
 		}
 
@@ -2925,7 +2925,7 @@ void ParticleEditorPanel::NewAsset()
 
 			const float dSize = isSel ? 9.0f : (isHover ? 8.0f : 6.0f);
 			const Wui::WuiRect dRect { kp.x - dSize * 0.5f, kp.y - dSize * 0.5f, dSize, dSize };
-			const Wui::WuiColor kfCol = isSel ? Wui::WuiColor { 0.2f, 0.95f, 0.85f, 1.0f } : (isHover ? Wui::WuiColor { 1.0f, 0.85f, 0.2f, 1.0f } : activeChannelCol);
+			const Wui::WuiColor kfCol = isSel ? theme.Accent : (isHover ? theme.Warning : activeChannelCol);
 			Wui::BarSurface(ctx, dRect, kfCol, theme.Border);
 
 			if (isHover)
@@ -3038,7 +3038,7 @@ void ParticleEditorPanel::NewAsset()
 void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRect& timelineRect, const Wui::WuiTheme& theme, PanelHost& host)
 	{
 		(void)host;
-		Wui::BarSurface(ctx, timelineRect, Wui::WuiColor { 0.06f, 0.08f, 0.10f, 0.95f }, theme.Border);
+		Wui::BarSurface(ctx, timelineRect, theme.CardBg, theme.Border);
 
 
 		// 第 1 行: 走带控制器 (Transport Bar)
@@ -3145,13 +3145,13 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		float trackTopY = timelineRect.Y + 30.0f;
 		const float trackAreaH = timelineRect.H - 34.0f;
 		const Wui::WuiRect trackAreaRect { timelineRect.X + 8.0f, trackTopY, timelineRect.W - 16.0f, trackAreaH };
-		Wui::BarSurface(ctx, trackAreaRect, Wui::WuiColor { 0.04f, 0.05f, 0.07f, 0.95f }, theme.Border);
+		Wui::BarSurface(ctx, trackAreaRect, theme.ContentBg, theme.Border);
 
 
 		const Wui::WuiRect rulerRect { trackAreaRect.X + 70.0f, trackAreaRect.Y + 2.0f, trackAreaRect.W - 74.0f, 14.0f };
-		Wui::Label(ctx, { rulerRect.X, rulerRect.Y }, "0.0s", Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 9.0f);
-		Wui::Label(ctx, { rulerRect.X + rulerRect.W * 0.5f - 12.0f, rulerRect.Y }, std::to_string(m_TimelineDuration * 0.5f).substr(0, 3) + "s", Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 9.0f);
-		Wui::Label(ctx, { rulerRect.X + rulerRect.W - 24.0f, rulerRect.Y }, std::to_string(m_TimelineDuration).substr(0, 3) + "s", Wui::WuiColor { 0.5f, 0.55f, 0.6f, 0.7f }, 9.0f);
+		Wui::Label(ctx, { rulerRect.X, rulerRect.Y }, "0.0s", theme.TextMuted, 9.0f);
+		Wui::Label(ctx, { rulerRect.X + rulerRect.W * 0.5f - 12.0f, rulerRect.Y }, std::to_string(m_TimelineDuration * 0.5f).substr(0, 3) + "s", theme.TextMuted, 9.0f);
+		Wui::Label(ctx, { rulerRect.X + rulerRect.W - 24.0f, rulerRect.Y }, std::to_string(m_TimelineDuration).substr(0, 3) + "s", theme.TextMuted, 9.0f);
 
 
 		const float normTime = std::clamp(m_SimTime / m_TimelineDuration, 0.0f, 1.0f);
@@ -3163,7 +3163,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		const Wui::WuiRect masterLane { trackAreaRect.X + 4.0f, laneY, trackAreaRect.W - 8.0f, laneH };
 		Wui::Label(ctx, { masterLane.X + 2.0f, masterLane.Y + 1.0f }, "Master", theme.Accent, 9.0f);
 		const Wui::WuiRect masterBar { masterLane.X + 66.0f, masterLane.Y + 1.0f, masterLane.W - 68.0f, laneH - 2.0f };
-		Wui::BarSurface(ctx, masterBar, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.8f }, theme.Border);
+		Wui::BarSurface(ctx, masterBar, theme.ContentBg, theme.Border);
 		if (normTime > 0.0f)
 		{
 			Wui::BarSurface(ctx, { masterBar.X, masterBar.Y, masterBar.W * normTime, masterBar.H },
@@ -3180,7 +3180,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			std::string emShortName = selEm.Name.substr(0, 10);
 			Wui::Label(ctx, { emLane.X + 2.0f, emLane.Y + 1.0f }, emShortName, theme.TextMuted, 9.0f);
 			const Wui::WuiRect emBar { emLane.X + 66.0f, emLane.Y + 1.0f, emLane.W - 68.0f, emLaneH - 2.0f };
-			Wui::BarSurface(ctx, emBar, Wui::WuiColor { 0.08f, 0.10f, 0.14f, 0.8f }, theme.Border);
+			Wui::BarSurface(ctx, emBar, theme.ContentBg, theme.Border);
 
 			// 发射激活期 (Spawn Window: 实色高亮条)
 			float spawnDur = (selEm.EmitterDuration > 0.0f) ? std::min(selEm.EmitterDuration, m_TimelineDuration) : m_TimelineDuration;
@@ -3188,7 +3188,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			if (spawnRatio > 0.0f)
 			{
 				const Wui::WuiRect spawnBarRect { emBar.X, emBar.Y, emBar.W * spawnRatio, emBar.H };
-				Wui::BarSurface(ctx, spawnBarRect, Wui::WuiColor { 0.18f, 0.45f, 0.85f, 0.65f }, theme.Accent);
+				Wui::BarSurface(ctx, spawnBarRect, theme.Selection, theme.Accent);
 				Wui::Tooltip(ctx, spawnBarRect, "发射激活窗口: 0.0s - " + std::to_string(spawnDur).substr(0, 3) + "s (在此区间内持续生成粒子)");
 			}
 
@@ -3200,7 +3200,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			if (tailW > 1.0f)
 			{
 				const Wui::WuiRect tailBarRect { emBar.X + emBar.W * tailStartRatio, emBar.Y, tailW, emBar.H };
-				Wui::BarSurface(ctx, tailBarRect, Wui::WuiColor { 0.15f, 0.30f, 0.55f, 0.35f }, Wui::WuiColor { 0.3f, 0.5f, 0.8f, 0.5f });
+				Wui::BarSurface(ctx, tailBarRect, theme.CardBg, theme.Border);
 				Wui::Tooltip(ctx, tailBarRect, "粒子存活衰亡期: " + std::to_string(spawnDur).substr(0, 3) + "s - " + std::to_string(tailEnd).substr(0, 3) + "s (发射停止，残余粒子演变消亡)");
 			}
 		}
@@ -3209,7 +3209,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		// 播放指针 (Playhead needle)
 		const float needleX = rulerRect.X + rulerRect.W * normTime;
 		Wui::LineSegment(ctx, { needleX, trackAreaRect.Y }, { needleX, trackAreaRect.Y + trackAreaRect.H },
-			Wui::WuiColor { 1.0f, 0.88f, 0.25f, 1.0f }, 2.0f);
+			theme.Warning, 2.0f);
 
 
 		// 时间轴 Scrubbing 交互判定 (支持跨边界平滑拖拽且不破坏 Solo / Mute)
@@ -3568,10 +3568,10 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		{
 			const auto& tmpl = templates[tIdx];
 			const Wui::WuiRect tItem { listRect.X, ly, listRect.W, 26.0f };
-			Wui::BarSurface(ctx, tItem, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.8f }, theme.Border);
+			Wui::BarSurface(ctx, tItem, theme.CardBg, theme.Border);
 
 			bool isSpawn = (tmpl.second.Stage == VfxModuleStage::Spawn);
-			Wui::Label(ctx, { tItem.X + 4.0f, tItem.Y + 6.0f }, isSpawn ? "[Spawn]" : "[Update]", isSpawn ? Wui::WuiColor { 0.95f, 0.72f, 0.25f, 1.0f } : theme.Accent, 9.0f);
+			Wui::Label(ctx, { tItem.X + 4.0f, tItem.Y + 6.0f }, isSpawn ? "[Spawn]" : "[Update]", isSpawn ? theme.Warning : theme.Accent, 9.0f);
 
 			const Wui::WuiRect selBtn { tItem.X + 50.0f, tItem.Y + 2.0f, tItem.W - 54.0f, 22.0f };
 			if (Wui::Button(ctx, Wui::HashId(("vfx.sc.tmpl_" + std::to_string(tIdx)).c_str()), selBtn, tmpl.first.c_str(), theme))
@@ -3598,10 +3598,10 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 				const auto& mod = m_ProjectCustomModules[pIdx];
 				const Wui::WuiRect pItem { listRect.X, ly, listRect.W, 28.0f };
 				bool isSel = (m_SelectedProjectModuleIndex == static_cast<int>(pIdx));
-				Wui::BarSurface(ctx, pItem, isSel ? theme.Selection : Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.8f }, isSel ? theme.Accent : theme.Border);
+				Wui::BarSurface(ctx, pItem, isSel ? theme.Selection : theme.CardBg, isSel ? theme.Accent : theme.Border);
 
 				bool isSpawn = (mod.Stage == VfxModuleStage::Spawn);
-				Wui::Label(ctx, { pItem.X + 4.0f, pItem.Y + 7.0f }, isSpawn ? "[Spawn]" : "[Update]", isSpawn ? Wui::WuiColor { 0.95f, 0.72f, 0.25f, 1.0f } : theme.Accent, 9.0f);
+				Wui::Label(ctx, { pItem.X + 4.0f, pItem.Y + 7.0f }, isSpawn ? "[Spawn]" : "[Update]", isSpawn ? theme.Warning : theme.Accent, 9.0f);
 
 				const Wui::WuiRect selBtn { pItem.X + 50.0f, pItem.Y + 3.0f, pItem.W - 74.0f, 22.0f };
 				if (Wui::Button(ctx, Wui::HashId(("vfx.sc.pmod_" + std::to_string(pIdx)).c_str()), selBtn, mod.Name.c_str(), theme))
@@ -3636,7 +3636,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		bool isSpawnStage = (m_EditingCustomModule.Stage == VfxModuleStage::Spawn);
 		Wui::Label(ctx, { cHead.X + 10.0f + ctx.MeasureTextWidth(editorTitle, 11.5f) + 12.0f, cHead.Y + 8.0f },
 			isSpawnStage ? "[Spawn 出生阶段]" : "[Update 动力学阶段]",
-			isSpawnStage ? Wui::WuiColor { 0.95f, 0.72f, 0.25f, 1.0f } : theme.Accent, 10.0f);
+			isSpawnStage ? theme.Warning : theme.Accent, 10.0f);
 
 		float cbx = cHead.X + cHead.W - 8.0f;
 
@@ -3658,7 +3658,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 
 		float cy = centerRect.Y + 36.0f;
 		const Wui::WuiRect snipBar { centerRect.X, cy, centerRect.W, 24.0f };
-		Wui::BarSurface(ctx, snipBar, Wui::WuiColor { 0.08f, 0.09f, 0.12f, 0.95f }, theme.Border);
+		Wui::BarSurface(ctx, snipBar, theme.CardBg, theme.Border);
 		float sx = snipBar.X + 6.0f;
 		Wui::Label(ctx, { sx, snipBar.Y + 5.0f }, "常用片段:", theme.TextMuted, 9.5f);
 		sx += 56.0f;
@@ -3865,7 +3865,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		cy += refH;
 
 		const Wui::WuiRect diagBox { centerRect.X, cy, centerRect.W, diagH };
-		Wui::BarSurface(ctx, diagBox, Wui::WuiColor { 0.08f, 0.09f, 0.12f, 0.98f }, theme.Border);
+		Wui::BarSurface(ctx, diagBox, theme.ContentBg, theme.Border);
 		const Wui::WuiRect diagHead { diagBox.X, diagBox.Y, diagBox.W, 22.0f };
 		Wui::BarSurface(ctx, diagHead, theme.PanelHeader, theme.Border);
 		Wui::Label(ctx, { diagHead.X + 8.0f, diagHead.Y + 4.0f }, "Slang 编译器输出与诊断 (Compiler Diagnostic):", theme.Accent, 10.0f);
@@ -3873,7 +3873,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		if (!m_CustomModuleCompileError.empty())
 		{
 			const Wui::WuiRect errRect { diagBox.X + 6.0f, diagHead.Y + 26.0f, diagBox.W - 12.0f, diagBox.H - 32.0f };
-			Wui::BarSurface(ctx, errRect, Wui::WuiColor { 0.35f, 0.12f, 0.12f, 0.95f }, theme.Warning);
+			Wui::BarSurface(ctx, errRect, theme.CardBg, theme.Danger);
 			std::string errLabel = (m_CustomModuleErrorLine > 0)
 				? ("[第 " + std::to_string(m_CustomModuleErrorLine) + " 行语法错误] " + m_CustomModuleCompileError.substr(0, 110))
 				: ("[Slang 编译错误] " + m_CustomModuleCompileError.substr(0, 110));
@@ -3882,8 +3882,8 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		else if (m_CustomModuleCompileSuccess)
 		{
 			const Wui::WuiRect okRect { diagBox.X + 6.0f, diagHead.Y + 26.0f, diagBox.W - 12.0f, diagBox.H - 32.0f };
-			Wui::BarSurface(ctx, okRect, Wui::WuiColor { 0.12f, 0.30f, 0.18f, 0.95f }, theme.Accent);
-			Wui::Label(ctx, { okRect.X + 8.0f, okRect.Y + 6.0f }, "[编译成功] Slang 计算内核已通过 SPIR-V 1.3 校验，模块可安全用于实机渲染与物理推演！", theme.Accent, 10.0f);
+			Wui::BarSurface(ctx, okRect, theme.CardBg, theme.Success);
+			Wui::Label(ctx, { okRect.X + 8.0f, okRect.Y + 6.0f }, "[编译成功] Slang 计算内核已通过 SPIR-V 1.3 校验，模块可安全用于实机渲染与物理推演！", theme.Success, 10.0f);
 		}
 		else
 		{
@@ -3941,7 +3941,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		{
 			auto& p = m_EditingCustomModule.Parameters[pIdx];
 			const Wui::WuiRect pRow { rContent.X, ry, rContent.W, 26.0f };
-			Wui::BarSurface(ctx, pRow, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.9f }, theme.Border);
+			Wui::BarSurface(ctx, pRow, theme.CardBg, theme.Border);
 
 			std::string typeStr = (p.Type == VfxParamType::Float) ? "[Float]" : ((p.Type == VfxParamType::Vec3) ? "[Vec3]" : "[Color]");
 			Wui::Label(ctx, { pRow.X + 6.0f, pRow.Y + 5.0f }, typeStr + " " + p.Name + " (" + p.GetUniformName() + ")", theme.Text, 9.5f);
@@ -3956,7 +3956,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		}
 
 		const Wui::WuiRect addParamBox { rContent.X, ry, rContent.W, 58.0f };
-		Wui::BarSurface(ctx, addParamBox, Wui::WuiColor { 0.08f, 0.09f, 0.12f, 0.9f }, theme.Border);
+		Wui::BarSurface(ctx, addParamBox, theme.CardBg, theme.Border);
 		Wui::Label(ctx, { addParamBox.X + 6.0f, addParamBox.Y + 4.0f }, "+ 添加新输入参数:", theme.TextMuted, 9.5f);
 
 		const Wui::WuiRect pNameRect { addParamBox.X + 6.0f, addParamBox.Y + 28.0f, 100.0f, 22.0f };
@@ -4231,7 +4231,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		{
 			const auto& e = m_Asset.Emitters[eIdx];
 			const Wui::WuiRect eCard { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, 22.0f };
-			Wui::BarSurface(ctx, eCard, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.8f }, theme.Border);
+			Wui::BarSurface(ctx, eCard, theme.CardBg, theme.Border);
 			std::string eDesc = e.Name + " (" + std::to_string(e.Modules.size()) + " 模块, " + std::to_string(e.MaxParticles) + " 粒子)";
 			Wui::Label(ctx, { eCard.X + 6.0f, eCard.Y + 3.0f }, eDesc, e.Enabled ? theme.Text : theme.TextMuted, 10.0f);
 			if (ctx.IsHovered(eCard) && ctx.Input().MouseClicked[0])
@@ -4269,7 +4269,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		if (isLocked)
 		{
 			const Wui::WuiRect lockBanner { inspectorRect.X + 6.0f, curY, inspectorRect.W - 12.0f, 22.0f };
-			Wui::BarSurface(ctx, lockBanner, Wui::WuiColor { 0.25f, 0.18f, 0.08f, 0.9f }, theme.Warning);
+			Wui::BarSurface(ctx, lockBanner, theme.CardBg, theme.Warning);
 			Wui::Label(ctx, { lockBanner.X + 8.0f, lockBanner.Y + 4.0f }, "[锁定] 当前发射器已加锁 (只读保护中)", theme.Warning, 10.5f);
 			curY += 26.0f;
 		}
@@ -4334,10 +4334,10 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			const char* Subtitle;
 			Wui::WuiColor Color;
 		} stageDefs[] = {
-			{ VfxModuleStage::Emitter, "[EMITTER UPDATE]", "发射器更新阶段", "控制每秒持续发射与瞬态爆发生成", Wui::WuiColor { 0.25f, 0.55f, 0.95f, 1.0f } },
-			{ VfxModuleStage::Spawn,   "[PARTICLE SPAWN]",  "粒子诞生初始化阶段", "设定图元诞生时的基准寿命与空间分布", Wui::WuiColor { 0.25f, 0.80f, 0.45f, 1.0f } },
-			{ VfxModuleStage::Update,  "[PARTICLE UPDATE]", "粒子动力学每帧更新阶段", "每帧推演计算受力、曲线渐变与物理求解", Wui::WuiColor { 0.95f, 0.65f, 0.20f, 1.0f } },
-			{ VfxModuleStage::Render,  "[RENDER]",          "渲染器阶段", "设定材质、贴图、面片朝向与视觉管线", Wui::WuiColor { 0.80f, 0.35f, 0.90f, 1.0f } }
+			{ VfxModuleStage::Emitter, "[EMITTER UPDATE]", "发射器更新阶段", "控制每秒持续发射与瞬态爆发生成", theme.Info },
+			{ VfxModuleStage::Spawn,   "[PARTICLE SPAWN]",  "粒子诞生初始化阶段", "设定图元诞生时的基准寿命与空间分布", theme.Success },
+			{ VfxModuleStage::Update,  "[PARTICLE UPDATE]", "粒子动力学每帧更新阶段", "每帧推演计算受力、曲线渐变与物理求解", theme.Warning },
+			{ VfxModuleStage::Render,  "[RENDER]",          "渲染器阶段", "设定材质、贴图、面片朝向与视觉管线", theme.Accent }
 		};
 
 		const float cardX = inspectorRect.X + 12.0f;
@@ -4373,7 +4373,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 				else if (s == 3) menuH = 68.0f;
 
 				const Wui::WuiRect menuRect { inspectorRect.X + 12.0f, cy, inspectorRect.W - 24.0f, menuH };
-				Wui::BarSurface(ctx, menuRect, Wui::WuiColor { 0.14f, 0.16f, 0.20f, 0.98f }, sd.Color);
+				Wui::BarSurface(ctx, menuRect, theme.PanelHeader, sd.Color);
 
 				float my = menuRect.Y + 4.0f;
 				const auto renderMenuItem = [&](const char* id, const char* label, const VfxModule& mod) {
@@ -4572,7 +4572,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			curve.PrecomputeLut(256);
 		}
 
-		Wui::BarSurface(ctx, areaRect, Wui::WuiColor { 0.04f, 0.05f, 0.07f, 0.98f }, theme.Border);
+		Wui::BarSurface(ctx, areaRect, theme.ContentBg, theme.Border);
 
 		const int fullParamId = static_cast<int>(pIdx * 10 + subIdx);
 		const bool isThisCurveActive = (m_InlineCurveModIdx == static_cast<int>(modIdx) && m_InlineCurveParamIdx == fullParamId);
@@ -4601,7 +4601,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			bool isCurrentMode = hasSelKf && (curve.GetKeyframe(m_InlineCurveKfIdx).Mode == tb.mode);
 			if (isCurrentMode)
 			{
-				Wui::BarSurface(ctx, bRect, Wui::WuiColor { 0.20f, 0.45f, 0.65f, 0.95f }, theme.Accent);
+				Wui::BarSurface(ctx, bRect, theme.Selection, theme.Accent);
 			}
 			Wui::Tooltip(ctx, bRect, tb.tip);
 			std::string tbId = "vfx.ecv.tm_" + std::string(tb.label) + "_" + std::to_string(modIdx * 100 + pIdx) + "_" + std::to_string(subIdx);
@@ -4695,9 +4695,9 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		const float plotY = curToolbarY + rowH + 2.0f;
 		const float plotH = areaRect.H - (plotY - areaRect.Y) - 3.0f;
 		const Wui::WuiRect plotRect { areaRect.X + 20.0f, plotY, areaRect.W - 26.0f, plotH };
-		Wui::BarSurface(ctx, plotRect, Wui::WuiColor { 0.025f, 0.03f, 0.04f, 1.0f }, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.8f });
+		Wui::BarSurface(ctx, plotRect, theme.WindowBg, theme.Border);
 
-		const Wui::WuiColor gridCol { 0.10f, 0.14f, 0.18f, 0.5f };
+		const Wui::WuiColor gridCol { theme.Border.R, theme.Border.G, theme.Border.B, 0.5f };
 		for (int s = 0; s <= 2; ++s)
 		{
 			float frac = static_cast<float>(s) * 0.5f;
@@ -4706,8 +4706,8 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			float gy = plotRect.Y + (1.0f - frac) * plotRect.H;
 			Wui::LineSegment(ctx, { plotRect.X, gy }, { plotRect.X + plotRect.W, gy }, gridCol, 1.0f);
 		}
-		Wui::Label(ctx, { areaRect.X + 4.0f, plotRect.Y - 2.0f }, "1", Wui::WuiColor { 0.45f, 0.50f, 0.55f, 0.7f }, 8.0f);
-		Wui::Label(ctx, { areaRect.X + 4.0f, plotRect.Y + plotRect.H - 8.0f }, "0", Wui::WuiColor { 0.45f, 0.50f, 0.55f, 0.7f }, 8.0f);
+		Wui::Label(ctx, { areaRect.X + 4.0f, plotRect.Y - 2.0f }, "1", theme.TextMuted, 8.0f);
+		Wui::Label(ctx, { areaRect.X + 4.0f, plotRect.Y + plotRect.H - 8.0f }, "0", theme.TextMuted, 8.0f);
 
 		auto timeToScreenX = [&](float t) -> float {
 			return plotRect.X + std::clamp(t, 0.0f, 1.0f) * plotRect.W;
@@ -4753,8 +4753,8 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			inHandleScreenPos = selectedKfScreenPt + glm::vec2(-std::cos(inAngle), std::sin(inAngle)) * armLength;
 			outHandleScreenPos = selectedKfScreenPt + glm::vec2(std::cos(outAngle), -std::sin(outAngle)) * armLength;
 
-			Wui::LineSegment(ctx, selectedKfScreenPt, inHandleScreenPos, Wui::WuiColor { 0.35f, 0.75f, 1.0f, 0.85f }, 1.2f);
-			Wui::LineSegment(ctx, selectedKfScreenPt, outHandleScreenPos, Wui::WuiColor { 1.0f, 0.70f, 0.25f, 0.85f }, 1.2f);
+			Wui::LineSegment(ctx, selectedKfScreenPt, inHandleScreenPos, theme.Info, 1.2f);
+			Wui::LineSegment(ctx, selectedKfScreenPt, outHandleScreenPos, theme.Warning, 1.2f);
 
 			const float handleRadius = 3.5f;
 			hoveredInArm = (glm::length(mousePos - inHandleScreenPos) <= handleRadius + 2.0f);
@@ -4763,8 +4763,8 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			const Wui::WuiRect inHandleRect { inHandleScreenPos.x - handleRadius, inHandleScreenPos.y - handleRadius, handleRadius * 2.0f, handleRadius * 2.0f };
 			const Wui::WuiRect outHandleRect { outHandleScreenPos.x - handleRadius, outHandleScreenPos.y - handleRadius, handleRadius * 2.0f, handleRadius * 2.0f };
 
-			Wui::BarSurface(ctx, inHandleRect, hoveredInArm ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 0.35f, 0.75f, 1.0f, 1.0f }, Wui::WuiColor { 0.1f, 0.2f, 0.4f, 1.0f });
-			Wui::BarSurface(ctx, outHandleRect, hoveredOutArm ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 1.0f, 0.70f, 0.25f, 1.0f }, Wui::WuiColor { 0.4f, 0.2f, 0.1f, 1.0f });
+			Wui::BarSurface(ctx, inHandleRect, hoveredInArm ? theme.TextBright : theme.Info, theme.Border);
+			Wui::BarSurface(ctx, outHandleRect, hoveredOutArm ? theme.TextBright : theme.Warning, theme.Border);
 		}
 
 		int hoveredKf = -1;
@@ -4779,9 +4779,9 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			if (isHovered) hoveredKf = static_cast<int>(k);
 
 			Wui::WuiColor nodeBg = (hasSelKf && m_InlineCurveKfIdx == static_cast<int>(k))
-				? Wui::WuiColor { 1.0f, 0.95f, 0.30f, 1.0f }
-				: (isHovered ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : theme.Accent);
-			Wui::BarSurface(ctx, nodeRect, nodeBg, Wui::WuiColor { 0.05f, 0.05f, 0.05f, 1.0f });
+				? theme.Warning
+				: (isHovered ? theme.TextBright : theme.Accent);
+			Wui::BarSurface(ctx, nodeRect, nodeBg, theme.Border);
 		}
 
 		static auto s_LastSingleClickTime = std::chrono::steady_clock::now();
@@ -4906,7 +4906,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			}
 		}
 
-		Wui::BarSurface(ctx, areaRect, Wui::WuiColor { 0.04f, 0.05f, 0.07f, 0.98f }, theme.Border);
+		Wui::BarSurface(ctx, areaRect, theme.ContentBg, theme.Border);
 
 		int curTarget = (activeChannel >= 0 && activeChannel < curveCount) ? activeChannel : 0;
 		CubicBezierCurve& curCurve = curves[curTarget];
@@ -4928,11 +4928,11 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			bool isCurSel = (activeChannel == c);
 			if (isCurSel)
 			{
-				Wui::BarSurface(ctx, chBtn, channelColors[c], Wui::WuiColor { 0.1f, 0.1f, 0.1f, 1.0f });
+				Wui::BarSurface(ctx, chBtn, channelColors[c], theme.Border);
 			}
 			else
 			{
-				Wui::BarSurface(ctx, chBtn, Wui::WuiColor { 0.08f, 0.10f, 0.14f, 0.9f }, channelColors[c]);
+				Wui::BarSurface(ctx, chBtn, theme.CardBg, channelColors[c]);
 			}
 			std::string chId = "vfx.mcv.ch_" + std::to_string(c) + "_" + std::to_string(modIdx * 100 + pIdx);
 			std::string shortName = (c < static_cast<int>(channelNames.size())) ? channelNames[c].substr(0, 1) : std::to_string(c);
@@ -4952,7 +4952,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		const Wui::WuiRect allBtn { hx, curToolbarY, allBtnW, 18.0f };
 		if (activeChannel == -1)
 		{
-			Wui::BarSurface(ctx, allBtn, Wui::WuiColor { 0.20f, 0.45f, 0.65f, 0.95f }, theme.Accent);
+			Wui::BarSurface(ctx, allBtn, theme.Selection, theme.Accent);
 		}
 		Wui::Tooltip(ctx, allBtn, "高亮显示全部通道曲线");
 		std::string allId = "vfx.mcv.all_" + std::to_string(modIdx * 100 + pIdx);
@@ -4981,7 +4981,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			bool isCurrentMode = hasSelKf && (curCurve.GetKeyframe(m_InlineCurveKfIdx).Mode == tb.mode);
 			if (isCurrentMode)
 			{
-				Wui::BarSurface(ctx, bRect, Wui::WuiColor { 0.20f, 0.45f, 0.65f, 0.95f }, theme.Accent);
+				Wui::BarSurface(ctx, bRect, theme.Selection, theme.Accent);
 			}
 			Wui::Tooltip(ctx, bRect, tb.tip);
 			std::string tbId = "vfx.mcv.tm_" + std::string(tb.label) + "_" + std::to_string(modIdx * 100 + pIdx);
@@ -5075,9 +5075,9 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		const float plotY = curToolbarY + rowH + 2.0f;
 		const float plotH = areaRect.H - (plotY - areaRect.Y) - 3.0f;
 		const Wui::WuiRect plotRect { areaRect.X + 20.0f, plotY, areaRect.W - 26.0f, plotH };
-		Wui::BarSurface(ctx, plotRect, Wui::WuiColor { 0.025f, 0.03f, 0.04f, 1.0f }, Wui::WuiColor { 0.10f, 0.12f, 0.16f, 0.8f });
+		Wui::BarSurface(ctx, plotRect, theme.WindowBg, theme.Border);
 
-		const Wui::WuiColor gridCol { 0.10f, 0.14f, 0.18f, 0.5f };
+		const Wui::WuiColor gridCol { theme.Border.R, theme.Border.G, theme.Border.B, 0.5f };
 		for (int s = 0; s <= 2; ++s)
 		{
 			float frac = static_cast<float>(s) * 0.5f;
@@ -5086,8 +5086,8 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			float gy = plotRect.Y + (1.0f - frac) * plotRect.H;
 			Wui::LineSegment(ctx, { plotRect.X, gy }, { plotRect.X + plotRect.W, gy }, gridCol, 1.0f);
 		}
-		Wui::Label(ctx, { areaRect.X + 4.0f, plotRect.Y - 2.0f }, "1", Wui::WuiColor { 0.45f, 0.50f, 0.55f, 0.7f }, 8.0f);
-		Wui::Label(ctx, { areaRect.X + 4.0f, plotRect.Y + plotRect.H - 8.0f }, "0", Wui::WuiColor { 0.45f, 0.50f, 0.55f, 0.7f }, 8.0f);
+		Wui::Label(ctx, { areaRect.X + 4.0f, plotRect.Y - 2.0f }, "1", theme.TextMuted, 8.0f);
+		Wui::Label(ctx, { areaRect.X + 4.0f, plotRect.Y + plotRect.H - 8.0f }, "0", theme.TextMuted, 8.0f);
 
 		auto timeToScreenX = [&](float t) -> float {
 			return plotRect.X + std::clamp(t, 0.0f, 1.0f) * plotRect.W;
@@ -5144,8 +5144,8 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			inHandleScreenPos = selectedKfScreenPt + glm::vec2(-std::cos(inAngle), std::sin(inAngle)) * armLength;
 			outHandleScreenPos = selectedKfScreenPt + glm::vec2(std::cos(outAngle), -std::sin(outAngle)) * armLength;
 
-			Wui::LineSegment(ctx, selectedKfScreenPt, inHandleScreenPos, Wui::WuiColor { 0.35f, 0.75f, 1.0f, 0.85f }, 1.2f);
-			Wui::LineSegment(ctx, selectedKfScreenPt, outHandleScreenPos, Wui::WuiColor { 1.0f, 0.70f, 0.25f, 0.85f }, 1.2f);
+			Wui::LineSegment(ctx, selectedKfScreenPt, inHandleScreenPos, theme.Info, 1.2f);
+			Wui::LineSegment(ctx, selectedKfScreenPt, outHandleScreenPos, theme.Warning, 1.2f);
 
 			const float handleRadius = 3.5f;
 			hoveredInArm = (glm::length(mousePos - inHandleScreenPos) <= handleRadius + 2.0f);
@@ -5154,8 +5154,8 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			const Wui::WuiRect inHandleRect { inHandleScreenPos.x - handleRadius, inHandleScreenPos.y - handleRadius, handleRadius * 2.0f, handleRadius * 2.0f };
 			const Wui::WuiRect outHandleRect { outHandleScreenPos.x - handleRadius, outHandleScreenPos.y - handleRadius, handleRadius * 2.0f, handleRadius * 2.0f };
 
-			Wui::BarSurface(ctx, inHandleRect, hoveredInArm ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 0.35f, 0.75f, 1.0f, 1.0f }, Wui::WuiColor { 0.1f, 0.2f, 0.4f, 1.0f });
-			Wui::BarSurface(ctx, outHandleRect, hoveredOutArm ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : Wui::WuiColor { 1.0f, 0.70f, 0.25f, 1.0f }, Wui::WuiColor { 0.4f, 0.2f, 0.1f, 1.0f });
+			Wui::BarSurface(ctx, inHandleRect, hoveredInArm ? theme.TextBright : theme.Info, theme.Border);
+			Wui::BarSurface(ctx, outHandleRect, hoveredOutArm ? theme.TextBright : theme.Warning, theme.Border);
 		}
 
 		int hoveredKf = -1;
@@ -5170,9 +5170,9 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			if (isHovered) hoveredKf = static_cast<int>(k);
 
 			Wui::WuiColor nodeBg = (hasSelKf && m_InlineCurveKfIdx == static_cast<int>(k))
-				? Wui::WuiColor { 1.0f, 0.95f, 0.30f, 1.0f }
-				: (isHovered ? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : channelColors[curTarget]);
-			Wui::BarSurface(ctx, nodeRect, nodeBg, Wui::WuiColor { 0.05f, 0.05f, 0.05f, 1.0f });
+				? theme.Warning
+				: (isHovered ? theme.TextBright : channelColors[curTarget]);
+			Wui::BarSurface(ctx, nodeRect, nodeBg, theme.Border);
 		}
 
 		static auto s_LastMultiClickTime = std::chrono::steady_clock::now();
@@ -5356,7 +5356,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 	{
 		const float cardContentH = GetModuleCardHeight(mod, modIdx);
 		const Wui::WuiRect cardRect { cardX, curY, cardW, cardContentH };
-		Wui::BarSurface(ctx, cardRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.95f }, theme.Border);
+		Wui::BarSurface(ctx, cardRect, theme.CardBg, theme.Border);
 
 		const float headerH = 26.0f;
 		const std::string modKey = mod.Id + "_" + std::to_string(modIdx);
@@ -5381,17 +5381,17 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		const char* badgeText = "[Update]";
 		if (mod.Stage == VfxModuleStage::Emitter)
 		{
-			badgeCol = Wui::WuiColor { 0.25f, 0.55f, 0.95f, 1.0f };
+			badgeCol = theme.Info;
 			badgeText = "[Emitter]";
 		}
 		else if (mod.Stage == VfxModuleStage::Spawn)
 		{
-			badgeCol = Wui::WuiColor { 0.15f, 0.80f, 0.85f, 1.0f };
+			badgeCol = theme.Success;
 			badgeText = "[Spawn]";
 		}
 		else if (mod.Stage == VfxModuleStage::Render)
 		{
-			badgeCol = Wui::WuiColor { 0.75f, 0.35f, 0.95f, 1.0f };
+			badgeCol = theme.Accent;
 			badgeText = "[Render]";
 		}
 		Wui::Label(ctx, { hx, hy + 3.0f }, badgeText, badgeCol, 9.5f);
@@ -5798,7 +5798,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 				const Wui::WuiRect expBtn { cardRect.X + cardRect.W - 28.0f, fieldY, 22.0f, 20.0f };
 				Wui::Tooltip(ctx, expBtn, param.IsExposed ? "已暴露为系统外部公开参数 (可在外部 Inspector / 脚本驱动)" : "点击将此参数暴露给系统 (公开展现并在外部 Inspector 中可调)");
 				const char* expLabel = param.IsExposed ? "●" : "○";
-				if (param.IsExposed) Wui::BarSurface(ctx, expBtn, Wui::WuiColor { 0.28f, 0.24f, 0.12f, 0.95f }, theme.Accent);
+				if (param.IsExposed) Wui::BarSurface(ctx, expBtn, theme.Selection, theme.Accent);
 				if (Wui::Button(ctx, Wui::HashId((std::string("vfx.p.exp_") + std::to_string(modIdx * 100 + pIdx)).c_str()), expBtn, expLabel, theme))
 				{
 					PushUndoSnapshot();
@@ -5916,10 +5916,10 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 								param.EnsureColorCurves();
 								std::vector<std::string> chNames = { "R (红)", "G (绿)", "B (蓝)", "A (透)" };
 								std::vector<Wui::WuiColor> chCols = {
-									Wui::WuiColor { 0.95f, 0.30f, 0.30f, 1.0f },
-									Wui::WuiColor { 0.30f, 0.90f, 0.35f, 1.0f },
-									Wui::WuiColor { 0.30f, 0.60f, 0.98f, 1.0f },
-									Wui::WuiColor { 0.92f, 0.92f, 0.92f, 1.0f }
+									theme.AxisX,
+									theme.AxisY,
+									theme.AxisZ,
+									theme.Text
 								};
 								const float curveBoxH = 112.0f;
 								const Wui::WuiRect inlineCurveRect { cardRect.X + 8.0f, fieldY, cardRect.W - 16.0f, curveBoxH };
@@ -5934,11 +5934,11 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 						fieldY += 24.0f;
 						static const char* s_ColorTreeLabels[4] = { "  ├─ R 红:", "  ├─ G 绿:", "  ├─ B 蓝:", "  └─ A 透:" };
 						static const char* s_ColorIds[4] = { "r", "g", "b", "a" };
-						static const Wui::WuiColor s_ColorChannelCols[4] = {
-							Wui::WuiColor { 0.95f, 0.30f, 0.30f, 1.0f },
-							Wui::WuiColor { 0.30f, 0.90f, 0.35f, 1.0f },
-							Wui::WuiColor { 0.30f, 0.60f, 0.98f, 1.0f },
-							Wui::WuiColor { 0.92f, 0.92f, 0.92f, 1.0f }
+						const Wui::WuiColor s_ColorChannelCols[4] = {
+							theme.AxisX,
+							theme.AxisY,
+							theme.AxisZ,
+						theme.Text
 						};
 						std::vector<std::string> cModeOpts = { "常量", "随机", "曲线~" };
 
@@ -6145,9 +6145,9 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 								param.EnsureAxisCurves();
 								std::vector<std::string> chNames = { "X (红)", "Y (绿)", "Z (蓝)" };
 								std::vector<Wui::WuiColor> chCols = {
-									Wui::WuiColor { 0.95f, 0.30f, 0.30f, 1.0f },
-									Wui::WuiColor { 0.30f, 0.90f, 0.35f, 1.0f },
-									Wui::WuiColor { 0.30f, 0.60f, 0.98f, 1.0f }
+									theme.AxisX,
+									theme.AxisY,
+									theme.AxisZ
 								};
 								const float curveBoxH = 112.0f;
 								const Wui::WuiRect inlineCurveRect { cardRect.X + 8.0f, fieldY, cardRect.W - 16.0f, curveBoxH };
@@ -6162,10 +6162,10 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 						fieldY += 24.0f;
 						static const char* s_AxisTreeLabels[3] = { "  ├─ X 轴:", "  ├─ Y 轴:", "  └─ Z 轴:" };
 						static const char* s_AxisIds[3] = { "x", "y", "z" };
-						static const Wui::WuiColor s_AxisColors[3] = {
-							Wui::WuiColor { 0.95f, 0.30f, 0.30f, 1.0f },
-							Wui::WuiColor { 0.30f, 0.90f, 0.35f, 1.0f },
-							Wui::WuiColor { 0.30f, 0.60f, 0.98f, 1.0f }
+						const Wui::WuiColor s_AxisColors[3] = {
+							theme.AxisX,
+							theme.AxisY,
+						theme.AxisZ
 						};
 						std::vector<std::string> axisModeOpts = { "常量", "随机", "曲线~" };
 
@@ -6235,7 +6235,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		if (isSourceExpanded)
 		{
 			const Wui::WuiRect srcBox { cardRect.X + 8.0f, fieldY, cardRect.W - 16.0f, 120.0f };
-			Wui::BarSurface(ctx, srcBox, Wui::WuiColor { 0.06f, 0.07f, 0.09f, 1.0f }, theme.Border);
+			Wui::BarSurface(ctx, srcBox, theme.ContentBg, theme.Border);
 
 			std::istringstream stream(mod.SlangSource);
 			std::string line;
@@ -6243,7 +6243,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			while (std::getline(stream, line) && lineY < srcBox.Y + srcBox.H - 14.0f)
 			{
 				Wui::WuiColor col = theme.Text;
-				if (line.find("//") != std::string::npos) col = Wui::WuiColor { 0.45f, 0.65f, 0.45f, 0.85f };
+				if (line.find("//") != std::string::npos) col = theme.TextMuted;
 				else if (line.find("Velocity") != std::string::npos || line.find("Position") != std::string::npos)
 					col = theme.Accent;
 				Wui::Label(ctx, { srcBox.X + 6.0f, lineY }, line, col, 9.5f);
@@ -6286,16 +6286,16 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		// 编译状态与诊断显示
 		if (!m_SlangCompileError.empty())
 		{
-			Wui::Label(ctx, { cx, toolbar.Y + 10.0f }, "[编译错误] " + m_SlangCompileError.substr(0, 60), Wui::WuiColor { 0.95f, 0.3f, 0.3f, 1.0f }, 10.0f);
+			Wui::Label(ctx, { cx, toolbar.Y + 10.0f }, "[编译错误] " + m_SlangCompileError.substr(0, 60), theme.Danger, 10.0f);
 		}
 		else if (m_SlangCompileSuccess)
 		{
-			Wui::Label(ctx, { cx, toolbar.Y + 10.0f }, "[就绪] Slang 模块化计算着色器已热重载生效 (SPIR-V 1.3)", Wui::WuiColor { 0.3f, 0.85f, 0.4f, 1.0f }, 10.0f);
+			Wui::Label(ctx, { cx, toolbar.Y + 10.0f }, "[就绪] Slang 模块化计算着色器已热重载生效 (SPIR-V 1.3)", theme.Success, 10.0f);
 		}
 
 		// 源码文本查看编辑框
 		const Wui::WuiRect codeBox { rect.X, rect.Y + 40.0f, rect.W, rect.H - 40.0f };
-		Wui::BarSurface(ctx, codeBox, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f }, theme.Border);
+		Wui::BarSurface(ctx, codeBox, theme.ContentBg, theme.Border);
 
 		if (m_SlangShaderBuffer.empty())
 		{
@@ -6321,22 +6321,22 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			lineIdx++;
 			if (lineY >= codeBox.Y && lineY <= codeBox.Y + codeBox.H - lineHeight)
 			{
-				Wui::Label(ctx, { codeBox.X + 8.0f, lineY }, std::to_string(lineIdx), Wui::WuiColor { 0.35f, 0.40f, 0.48f, 0.8f }, 9.5f);
+				Wui::Label(ctx, { codeBox.X + 8.0f, lineY }, std::to_string(lineIdx), theme.TextDisabled, 9.5f);
 
 				Wui::WuiColor textCol = theme.Text;
 				if (line.find("//") != std::string::npos)
 				{
-					textCol = Wui::WuiColor { 0.40f, 0.65f, 0.45f, 0.85f };
+					textCol = theme.TextMuted;
 				}
 				else if (line.find("struct") != std::string::npos || line.find("float") != std::string::npos ||
 				         line.find("uint") != std::string::npos || line.find("void") != std::string::npos ||
 				         line.find("cbuffer") != std::string::npos)
 				{
-					textCol = Wui::WuiColor { 0.35f, 0.65f, 0.95f, 1.0f };
+					textCol = theme.Info;
 				}
 				else if (line.find("[numthreads") != std::string::npos || line.find("[[vk") != std::string::npos)
 				{
-					textCol = Wui::WuiColor { 0.95f, 0.60f, 0.20f, 1.0f };
+					textCol = theme.Warning;
 				}
 				else if (line.find("CS_Spawn") != std::string::npos || line.find("CS_Update") != std::string::npos)
 				{
@@ -6375,7 +6375,7 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 		Wui::Label(ctx, { cx, codeToolbar.Y + 10.0f }, "说明: 此处为底层序列化清单 (Data Manifest)，代码控制请切换至 [统一 Slang 着色器]", theme.TextMuted, 10.0f);
 
 		const Wui::WuiRect codeBox { rect.X, rect.Y + 40.0f, rect.W, rect.H - 40.0f };
-		Wui::BarSurface(ctx, codeBox, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f }, theme.Border);
+		Wui::BarSurface(ctx, codeBox, theme.ContentBg, theme.Border);
 
 		std::istringstream stream(m_CodeBuffer);
 		std::string line;
@@ -6396,18 +6396,18 @@ void ParticleEditorPanel::RenderTimeline(Wui::WuiContext& ctx, const Wui::WuiRec
 			lineIdx++;
 			if (lineY >= codeBox.Y && lineY <= codeBox.Y + codeBox.H - lineHeight)
 			{
-				Wui::Label(ctx, { codeBox.X + 8.0f, lineY }, std::to_string(lineIdx), Wui::WuiColor { 0.35f, 0.40f, 0.48f, 0.8f }, 9.5f);
+				Wui::Label(ctx, { codeBox.X + 8.0f, lineY }, std::to_string(lineIdx), theme.TextDisabled, 9.5f);
 				Wui::WuiColor textCol = theme.Text;
 				if (line.find(":") != std::string::npos && line.find("-") == std::string::npos)
 				{
 					if (line.find("Emitters") != std::string::npos || line.find("Name") != std::string::npos)
 						textCol = theme.Accent;
 					else
-						textCol = Wui::WuiColor { 0.85f, 0.85f, 0.9f, 1.0f };
+						textCol = theme.Text;
 				}
 				else if (line.find("-") != std::string::npos)
 				{
-					textCol = Wui::WuiColor { 0.95f, 0.8f, 0.3f, 1.0f };
+					textCol = theme.Warning;
 				}
 				Wui::Label(ctx, { codeBox.X + 36.0f, lineY }, line, textCol, 10.5f);
 			}

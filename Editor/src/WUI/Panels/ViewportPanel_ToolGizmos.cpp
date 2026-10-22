@@ -22,6 +22,7 @@ namespace World
 		auto pts = light.GetLocalPolygon();
 		if (pts.size() < 3)
 			return false;
+		const Wui::WuiTheme& theme = Wui::CurrentTheme();
 
 		const glm::quat rot = transform.Rotation;
 		const size_t n = pts.size();
@@ -85,10 +86,8 @@ namespace World
 			const bool isHov = (hovered == static_cast<int>(i));
 			const float r = isHov ? 6.5f : 5.0f;
 			const Wui::WuiRect hRect { screenPts[i].x - r, screenPts[i].y - r, r * 2.0f, r * 2.0f };
-			const Wui::WuiColor hCol = isHov
-				? Wui::WuiColor { 1.0f, 0.92f, 0.25f, 1.0f }
-				: Wui::WuiColor { 0.25f, 0.85f, 1.0f, 0.95f };
-			const Wui::WuiColor borderCol { 1.0f, 1.0f, 1.0f, 0.95f };
+			const Wui::WuiColor hCol = isHov ? theme.Warning : theme.Info;
+			const Wui::WuiColor borderCol = theme.TextBright;
 			Wui::PanelBackground(ctx, hRect, hCol, r);
 			Wui::HighlightOutline(ctx, hRect, borderCol, r, 1.5f);
 		}
@@ -163,6 +162,7 @@ namespace World
 		auto pts = poly.GetPoints();
 		if (pts.size() < 3)
 			return false;
+		const Wui::WuiTheme& theme = Wui::CurrentTheme();
 
 		const glm::quat rot = transform.Rotation;
 		const size_t n = pts.size();
@@ -194,7 +194,7 @@ namespace World
 			return false;
 
 		// 1. 渲染多边形闭合线框 (鲜亮翠绿物理碰撞色)
-		const Wui::WuiColor wireColor { 0.2f, 0.92f, 0.35f, 0.95f };
+		const Wui::WuiColor wireColor = theme.Success;
 		for (size_t i = 0; i < n; ++i)
 		{
 			const glm::vec2& p0 = screenPts[i];
@@ -225,10 +225,8 @@ namespace World
 			const bool isHov = (hovered == static_cast<int>(i));
 			const float r = isHov ? 6.5f : 5.0f;
 			const Wui::WuiRect hRect { screenPts[i].x - r, screenPts[i].y - r, r * 2.0f, r * 2.0f };
-			const Wui::WuiColor hCol = isHov
-				? Wui::WuiColor { 1.0f, 0.92f, 0.25f, 1.0f }
-				: Wui::WuiColor { 0.2f, 0.85f, 0.45f, 0.95f };
-			const Wui::WuiColor borderCol { 1.0f, 1.0f, 1.0f, 0.95f };
+			const Wui::WuiColor hCol = isHov ? theme.Warning : theme.Success;
+			const Wui::WuiColor borderCol = theme.TextBright;
 			Wui::PanelBackground(ctx, hRect, hCol, r);
 			Wui::HighlightOutline(ctx, hRect, borderCol, r, 1.5f);
 		}
@@ -303,6 +301,7 @@ namespace World
 		auto pts = chain.GetPoints();
 		if (pts.size() < 2)
 			return false;
+		const Wui::WuiTheme& theme = Wui::CurrentTheme();
 
 		const glm::quat rot = transform.Rotation;
 		const size_t n = pts.size();
@@ -334,7 +333,7 @@ namespace World
 			return false;
 
 		// 1. 渲染折线轮廓 (清爽亮天蓝)
-		const Wui::WuiColor wireColor { 0.3f, 0.85f, 1.0f, 0.95f };
+		const Wui::WuiColor wireColor = theme.Info;
 		const size_t segmentCount = chain.Loop ? n : (n - 1);
 		for (size_t i = 0; i < segmentCount; ++i)
 		{
@@ -366,10 +365,8 @@ namespace World
 			const bool isHov = (hovered == static_cast<int>(i));
 			const float r = isHov ? 6.5f : 5.0f;
 			const Wui::WuiRect hRect { screenPts[i].x - r, screenPts[i].y - r, r * 2.0f, r * 2.0f };
-			const Wui::WuiColor hCol = isHov
-				? Wui::WuiColor { 1.0f, 0.92f, 0.25f, 1.0f }
-				: Wui::WuiColor { 0.25f, 0.75f, 1.0f, 0.95f };
-			const Wui::WuiColor borderCol { 1.0f, 1.0f, 1.0f, 0.95f };
+			const Wui::WuiColor hCol = isHov ? theme.Warning : theme.Info;
+			const Wui::WuiColor borderCol = theme.TextBright;
 			Wui::PanelBackground(ctx, hRect, hCol, r);
 			Wui::HighlightOutline(ctx, hRect, borderCol, r, 1.5f);
 		}

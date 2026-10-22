@@ -1123,9 +1123,9 @@ float MaterialEditorPanel::DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRe
 			const float offset = maxScroll > 0.0f ? (m_ScrollY / maxScroll) * (trackHeight - thumbHeight) : 0.0f;
 			const Wui::WuiRect track { contentRect.X + contentRect.W - 3.0f, contentRect.Y + 4.0f,
 				2.0f, trackHeight };
-			Wui::PanelBackground(ctx, track, Wui::WuiColor { 0.169f, 0.192f, 0.220f, 1.0f }, 1.0f);
+			Wui::PanelBackground(ctx, track, theme.TrackBg, 1.0f);
 			Wui::PanelBackground(ctx, { track.X, track.Y + offset, 2.0f, thumbHeight },
-				Wui::WuiColor { 0.298f, 0.553f, 1.0f, 0.55f }, 1.0f);
+				theme.Selection, 1.0f);
 		}
 		// M4-TEX-P6a:空态只在"过滤后真的没有任何行"时出现。旧口径用 drawnRows == 0,于是
 		// "shader 参数段把自己撑满视口、内建字段组全在滚动区外"时会在顶部误报
@@ -1143,7 +1143,7 @@ float MaterialEditorPanel::DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRe
 		{
 			const float blockY = rect.Y + rect.H - validationHeight - refsHeight;
 			const Wui::WuiRect blockRect { rect.X, blockY, rect.W, validationHeight };
-			Wui::PanelBackground(ctx, blockRect, { 0.20f, 0.14f, 0.06f, 1.0f }, 4.0f);
+			Wui::PanelBackground(ctx, blockRect, theme.CardBg, 4.0f);
 			const std::string summary = std::to_string(m_Validation.size()) + " "
 				+ Wui::Tr("panel.material.validation.issues", "issue(s)");
 			Wui::Label(ctx, { blockRect.X + 6.0f, blockRect.Y + 3.0f }, summary, theme.Warning, 12.0f);

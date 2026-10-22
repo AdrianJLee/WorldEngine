@@ -34,7 +34,7 @@ namespace World
 			float volumeDb { -96.0f };
 			float lpfHz { 20000.0f };
 			std::string stateStr;
-			Wui::WuiColor stateColor { 1.0f, 1.0f, 1.0f, 1.0f };
+			Wui::WuiColor stateColor {};
 			Entity entity;
 		};
 	}
@@ -82,8 +82,8 @@ namespace World
 			const uint64_t maxUs = profilerSnap.maxMixCpuTimeUs;
 			std::snprintf(buf, sizeof(buf), "%llu \xc2\xb5s", static_cast<unsigned long long>(cpuUs));
 
-			Wui::WuiColor valColor = (cpuUs < 1000) ? Wui::WuiColor{ 0.35f, 0.85f, 0.55f, 1.0f } :
-				((cpuUs < 4500) ? Wui::WuiColor{ 0.95f, 0.80f, 0.25f, 1.0f } : Wui::WuiColor{ 0.95f, 0.35f, 0.35f, 1.0f });
+			Wui::WuiColor valColor = (cpuUs < 1000) ? theme.Success :
+				((cpuUs < 4500) ? theme.Warning : theme.Danger);
 			Wui::Label(ctx, { card.X + 8.0f, card.Y + 26.0f }, buf, valColor, 18.0f);
 
 			const float budgetPct = std::clamp((static_cast<float>(cpuUs) / 5333.3f) * 100.0f, 0.0f, 999.0f);
@@ -101,7 +101,7 @@ namespace World
 			Wui::Label(ctx, { card.X + 8.0f, card.Y + 8.0f }, "物理声道 (Physical Voices)", theme.TextMuted, 11.0f);
 
 			std::snprintf(buf, sizeof(buf), "%u / %u", profilerSnap.activePhysicalVoices, profilerSnap.totalPhysicalVoices);
-			Wui::Label(ctx, { card.X + 8.0f, card.Y + 26.0f }, buf, { 0.25f, 0.85f, 0.95f, 1.0f }, 18.0f);
+			Wui::Label(ctx, { card.X + 8.0f, card.Y + 26.0f }, buf, theme.Info, 18.0f);
 
 			const Wui::WuiRect barBg { card.X + 8.0f, card.Y + 50.0f, card.W - 16.0f, 8.0f };
 			Wui::PanelBackground(ctx, barBg, theme.PanelBg, 2.0f);
@@ -109,7 +109,7 @@ namespace World
 				static_cast<float>(std::max(1u, profilerSnap.totalPhysicalVoices)), 0.0f, 1.0f);
 			if (ratio > 0.005f)
 			{
-				Wui::PanelBackground(ctx, { barBg.X, barBg.Y, barBg.W * ratio, barBg.H }, { 0.25f, 0.85f, 0.95f, 0.95f }, 2.0f);
+				Wui::PanelBackground(ctx, { barBg.X, barBg.Y, barBg.W * ratio, barBg.H }, theme.Info, 2.0f);
 			}
 
 			Wui::Tooltip(ctx, card, "当前执行 3D 空间化与 DSP 滤波运算的物理声部 (上限 64 声道)");
@@ -123,7 +123,7 @@ namespace World
 			Wui::Label(ctx, { card.X + 8.0f, card.Y + 8.0f }, "虚拟等待声道 (Virtual Voices)", theme.TextMuted, 11.0f);
 
 			std::snprintf(buf, sizeof(buf), "%u / %u", profilerSnap.activeVirtualVoices, profilerSnap.totalVirtualVoices);
-			Wui::Label(ctx, { card.X + 8.0f, card.Y + 26.0f }, buf, { 0.75f, 0.50f, 0.95f, 1.0f }, 18.0f);
+			Wui::Label(ctx, { card.X + 8.0f, card.Y + 26.0f }, buf, theme.Accent, 18.0f);
 
 			const Wui::WuiRect barBg { card.X + 8.0f, card.Y + 50.0f, card.W - 16.0f, 8.0f };
 			Wui::PanelBackground(ctx, barBg, theme.PanelBg, 2.0f);
@@ -131,7 +131,7 @@ namespace World
 				static_cast<float>(std::max(1u, profilerSnap.totalVirtualVoices)), 0.0f, 1.0f);
 			if (ratio > 0.005f)
 			{
-				Wui::PanelBackground(ctx, { barBg.X, barBg.Y, barBg.W * ratio, barBg.H }, { 0.75f, 0.50f, 0.95f, 0.95f }, 2.0f);
+				Wui::PanelBackground(ctx, { barBg.X, barBg.Y, barBg.W * ratio, barBg.H }, theme.Accent, 2.0f);
 			}
 
 			Wui::Tooltip(ctx, card, "超出听觉感知或衰减范围的虚拟声部 (仅推进光标, 0 CPU 混音开销)");
@@ -149,8 +149,8 @@ namespace World
 
 			if (isClipped)
 			{
-				Wui::PanelBackground(ctx, ledRect, { 0.95f, 0.20f, 0.20f, 0.95f }, 3.0f);
-				Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 3.0f }, "\xe2\x97\x8f DAC 削波 (Clipping)!", { 1.0f, 1.0f, 1.0f, 1.0f }, 11.0f);
+				Wui::PanelBackground(ctx, ledRect, theme.Danger, 3.0f);
+				Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 3.0f }, "\xe2\x97\x8f DAC 削波 (Clipping)!", theme.TextBright, 11.0f);
 
 				const Wui::WuiRect clearBtn { card.X + 8.0f, card.Y + 50.0f, card.W - 16.0f, 14.0f };
 				if (Wui::Button(ctx, Wui::HashId("profiler.btn.clear_clip"), clearBtn, "清除削波报警", theme))
@@ -160,8 +160,8 @@ namespace World
 			}
 			else
 			{
-				Wui::PanelBackground(ctx, ledRect, { 0.15f, 0.35f, 0.20f, 0.90f }, 3.0f);
-				Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 3.0f }, "\xe2\x97\x8f 输出电平正常 (Normal)", { 0.45f, 0.85f, 0.55f, 0.95f }, 11.0f);
+				Wui::PanelBackground(ctx, ledRect, theme.CardBg, 3.0f);
+				Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 3.0f }, "\xe2\x97\x8f 输出电平正常 (Normal)", theme.Success, 11.0f);
 				Wui::Label(ctx, { card.X + 8.0f, card.Y + 50.0f }, "无数字削波溢出 (Headroom OK)", theme.TextMuted, 10.0f);
 			}
 
@@ -179,13 +179,13 @@ namespace World
 		// Header
 		Wui::Label(ctx, { rect.X + 10.0f, rect.Y + 8.0f },
 			"64 频段全量 FFT 频谱柱状图与实时峰值保持线 (64-Band Real-Time Spectrum & Peak Hold)",
-			{ 0.35f, 0.85f, 0.95f, 1.0f }, 12.0f);
+			theme.Accent, 12.0f);
 
 		char infoBuf[128];
 		const bool beat = audio.IsBeatDetected();
 		std::snprintf(infoBuf, sizeof(infoBuf), "采样率: 48 kHz | 混音块: 256 帧 | 节拍: %s", beat ? "\xe2\x97\x8f BEAT" : "\xe2\x97\x8b IDLE");
 		Wui::Label(ctx, { rect.X + rect.W - 250.0f, rect.Y + 8.0f }, infoBuf,
-			beat ? Wui::WuiColor{ 0.95f, 0.85f, 0.25f, 1.0f } : theme.TextMuted, 11.0f);
+			beat ? theme.Warning : theme.TextMuted, 11.0f);
 
 		// Query 64 bands from FFT analyzer
 		audio.GetSpectrum(m_SpectrumBands, 64);
@@ -232,28 +232,31 @@ namespace World
 			const float bx = rect.X + padX + static_cast<float>(b) * (barW + barGap);
 			const float by = rect.Y + rect.H - botPad - barH;
 
-			// 4-stage color spectrum across frequency range
+			auto mixC = [](const Wui::WuiColor& c1, const Wui::WuiColor& c2, float u, float a) {
+				return Wui::WuiColor{
+					glm::mix(c1.R, c2.R, u),
+					glm::mix(c1.G, c2.G, u),
+					glm::mix(c1.B, c2.B, u),
+					a
+				};
+			};
 			const float t = static_cast<float>(b) / 63.0f;
+			const float alpha = val > 0.03f ? 0.95f : 0.35f;
 			Wui::WuiColor barColor;
-			if (t < 0.25f)
+			if (t < 0.33f)
 			{
-				const float u = t / 0.25f;
-				barColor = { glm::mix(0.15f, 0.20f, u), glm::mix(0.70f, 0.88f, u), glm::mix(0.95f, 0.65f, u), val > 0.03f ? 0.95f : 0.35f };
+				const float u = t / 0.33f;
+				barColor = mixC(theme.Info, theme.Success, u, alpha);
 			}
-			else if (t < 0.50f)
+			else if (t < 0.66f)
 			{
-				const float u = (t - 0.25f) / 0.25f;
-				barColor = { glm::mix(0.20f, 0.40f, u), glm::mix(0.88f, 0.85f, u), glm::mix(0.65f, 0.25f, u), val > 0.03f ? 0.95f : 0.35f };
-			}
-			else if (t < 0.75f)
-			{
-				const float u = (t - 0.50f) / 0.25f;
-				barColor = { glm::mix(0.40f, 0.95f, u), glm::mix(0.85f, 0.75f, u), glm::mix(0.25f, 0.20f, u), val > 0.03f ? 0.95f : 0.35f };
+				const float u = (t - 0.33f) / 0.33f;
+				barColor = mixC(theme.Success, theme.Warning, u, alpha);
 			}
 			else
 			{
-				const float u = (t - 0.75f) / 0.25f;
-				barColor = { glm::mix(0.95f, 0.98f, u), glm::mix(0.75f, 0.30f, u), glm::mix(0.20f, 0.25f, u), val > 0.03f ? 0.95f : 0.35f };
+				const float u = (t - 0.66f) / 0.34f;
+				barColor = mixC(theme.Warning, theme.Danger, u, alpha);
 			}
 
 			// Spectrum bar
@@ -264,7 +267,7 @@ namespace World
 			if (peakVal > 0.02f)
 			{
 				const float peakY = rect.Y + rect.H - botPad - (peakVal * innerH);
-				Wui::PanelBackground(ctx, { bx, peakY, barW, 2.0f }, { 1.0f, 0.95f, 0.55f, 0.95f }, 0.5f);
+				Wui::PanelBackground(ctx, { bx, peakY, barW, 2.0f }, theme.Warning, 0.5f);
 			}
 		}
 
@@ -344,19 +347,19 @@ namespace World
 				{
 				case Audio::VoiceState::Playing:
 					row.stateStr = "Physical";
-					row.stateColor = { 0.25f, 0.85f, 0.95f, 1.0f };
+					row.stateColor = theme.Info;
 					break;
 				case Audio::VoiceState::Virtual:
 					row.stateStr = "Virtual";
-					row.stateColor = { 0.75f, 0.50f, 0.95f, 1.0f };
+					row.stateColor = theme.Accent;
 					break;
 				case Audio::VoiceState::Stopping:
 					row.stateStr = "Stopping";
-					row.stateColor = { 0.95f, 0.65f, 0.25f, 1.0f };
+					row.stateColor = theme.Warning;
 					break;
 				case Audio::VoiceState::Paused:
 					row.stateStr = "Paused";
-					row.stateColor = { 0.65f, 0.65f, 0.65f, 1.0f };
+					row.stateColor = theme.TextMuted;
 					break;
 				default:
 					row.stateStr = "Active";
@@ -397,19 +400,19 @@ namespace World
 					{
 					case Audio::VoiceState::Playing:
 						row.stateStr = "Physical";
-						row.stateColor = { 0.25f, 0.85f, 0.95f, 1.0f };
+						row.stateColor = theme.Info;
 						break;
 					case Audio::VoiceState::Virtual:
 						row.stateStr = "Virtual";
-						row.stateColor = { 0.75f, 0.50f, 0.95f, 1.0f };
+						row.stateColor = theme.Accent;
 						break;
 					case Audio::VoiceState::Stopping:
 						row.stateStr = "Stopping";
-						row.stateColor = { 0.95f, 0.65f, 0.25f, 1.0f };
+						row.stateColor = theme.Warning;
 						break;
 					case Audio::VoiceState::Paused:
 						row.stateStr = "Paused";
-						row.stateColor = { 0.65f, 0.65f, 0.65f, 1.0f };
+						row.stateColor = theme.TextMuted;
 						break;
 					default:
 						row.stateStr = "Active";
@@ -477,7 +480,7 @@ namespace World
 			const bool isHovered = ctx.IsHovered(rowRect);
 
 			// Zebra striping and hover
-			const Wui::WuiColor rowBg = isHovered ? Wui::WuiColor{ theme.ContentBg.R + 0.05f, theme.ContentBg.G + 0.05f, theme.ContentBg.B + 0.05f, 0.95f } :
+			const Wui::WuiColor rowBg = isHovered ? theme.HoverBg :
 				((i % 2 == 1) ? theme.PanelBg : theme.ContentBg);
 			Wui::PanelBackground(ctx, rowRect, rowBg, 2.0f);
 
@@ -516,8 +519,8 @@ namespace World
 
 			// 5. Volume dBFS
 			std::snprintf(cellBuf, sizeof(cellBuf), "%.1f dB", row.volumeDb);
-			const Wui::WuiColor volColor = (row.volumeDb >= 0.0f) ? Wui::WuiColor{ 0.95f, 0.35f, 0.35f, 1.0f } :
-				((row.volumeDb >= -6.0f) ? Wui::WuiColor{ 0.95f, 0.80f, 0.25f, 1.0f } : Wui::WuiColor{ 0.35f, 0.85f, 0.55f, 1.0f });
+			const Wui::WuiColor volColor = (row.volumeDb >= 0.0f) ? theme.Danger :
+				((row.volumeDb >= -6.0f) ? theme.Warning : theme.Success);
 			Wui::Label(ctx, { cellX, rowY + 4.0f }, cellBuf, volColor, 10.5f);
 			cellX += colVolW;
 

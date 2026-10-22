@@ -63,7 +63,7 @@ namespace World::Wui
 		{
 			const float x = m_Rect.X + (m_Rect.W - IconSize) * 0.5f;
 			const float y = m_Rect.Y + (m_Rect.H - IconSize) * 0.5f;
-			const WuiColor tint = Disabled ? WuiColor { 1, 1, 1, 0.4f } : WuiColor { 1, 1, 1, 1 };
+			const WuiColor tint = Disabled ? theme.TextDisabled : theme.TextBright;
 			ctx.Commands().push_back({ WuiDrawKind::Image, { x, y, IconSize, IconSize }, tint, 0.0f, 1.0f, "", 15.0f, false, TextureId, Uv });
 		}
 
@@ -103,7 +103,7 @@ namespace World::Wui
 		const float trackW = 34.0f;
 		const float trackH = 16.0f;
 		const WuiRect track { m_Rect.X + m_Rect.W - trackW, m_Rect.Y + (m_Rect.H - trackH) * 0.5f, trackW, trackH };
-		const WuiColor trackColor = value ? (Disabled ? WuiColor { 0.3f, 0.4f, 0.6f, 1 } : theme.Accent) : theme.ButtonBg;
+		const WuiColor trackColor = value ? (Disabled ? theme.TextDisabled : theme.Accent) : theme.TrackBg;
 		ctx.Commands().push_back({ WuiDrawKind::Rect, track, trackColor, trackH * 0.5f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, track, theme.Border, trackH * 0.5f, 1.0f });
 
@@ -182,8 +182,8 @@ namespace World::Wui
 		}
 
 		const float t = ClampValue((*Value - minValue) / range, 0.0f, 1.0f);
-		const WuiColor trackColor = theme.ButtonBg;
-		const WuiColor fillColor = Disabled ? WuiColor { 0.35f, 0.4f, 0.5f, 1 } : theme.Accent;
+		const WuiColor trackColor = theme.TrackBg;
+		const WuiColor fillColor = Disabled ? theme.TextDisabled : theme.Accent;
 		ctx.Commands().push_back({ WuiDrawKind::Rect, track, trackColor, trackH * 0.5f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { track.X, track.Y, track.W * t, track.H }, fillColor, trackH * 0.5f });
 
@@ -207,7 +207,7 @@ namespace World::Wui
 		const WuiTheme& theme = ThemeOf(Theme);
 
 		if (Selected)
-			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, WuiColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, 0.35f }, 0.0f });
+			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, theme.Selection, 0.0f });
 		else if (Hovered(ctx))
 			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, theme.ButtonHover, 0.0f });
 
@@ -217,7 +217,7 @@ namespace World::Wui
 			const float iconSize = 16.0f;
 			ctx.Commands().push_back({ WuiDrawKind::Image,
 				{ m_Rect.X + 4.0f, m_Rect.Y + (m_Rect.H - iconSize) * 0.5f, iconSize, iconSize },
-				WuiColor { 1, 1, 1, 1 }, 0.0f, 1.0f, "", 15.0f, false, IconTexture, { 0, 0, 1, 1 } });
+				theme.TextBright, 0.0f, 1.0f, "", 15.0f, false, IconTexture, { 0, 0, 1, 1 } });
 			textX = m_Rect.X + 24.0f;
 		}
 
@@ -245,7 +245,7 @@ namespace World::Wui
 		const WuiTheme& theme = ThemeOf(Theme);
 
 		if (Selected)
-			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, WuiColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, 0.35f }, 0.0f });
+			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, theme.Selection, 0.0f });
 		else if (Hovered(ctx))
 			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, theme.ButtonHover, 0.0f });
 

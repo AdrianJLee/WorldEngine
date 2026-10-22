@@ -1438,7 +1438,7 @@ WindowControl WindowControls(WuiContext& ctx, const WuiRect& bar, const WuiTheme
 		{
 			if (ctx.IsHovered(*rect))
 			{
-				const WuiColor bg = rect == &close ? WuiColor { 0.76f, 0.22f, 0.22f, 1 } : theme.ButtonHover;
+				const WuiColor bg = rect == &close ? theme.Danger : theme.ButtonHover;
 				ctx.Commands().push_back({ WuiDrawKind::Rect, *rect, bg, 0.0f });
 				ctx.SetCursor(WuiCursor::Hand);
 			}
@@ -1452,8 +1452,9 @@ WindowControl WindowControls(WuiContext& ctx, const WuiRect& bar, const WuiTheme
 		if (maximized)
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline,
 				{ maximize.X + 9.0f, maximize.Y + maximize.H * 0.5f - 3.0f, 12.0f, 12.0f }, theme.Text, 0.0f, 1.0f });
+		const WuiColor closeText = ctx.IsHovered(close) ? theme.TextBright : theme.Text;
 		ctx.Commands().push_back({ WuiDrawKind::Text,
-			{ close.X + 10.0f, close.Y + close.H * 0.5f - 8.0f, 0, 0 }, theme.Text, 0, 1.0f, "x", 14.0f, false });
+			{ close.X + 10.0f, close.Y + close.H * 0.5f - 8.0f, 0, 0 }, closeText, 0, 1.0f, "x", 14.0f, false });
 
 		if (ctx.IsClicked(minimize))
 			return WindowControl::Minimize;

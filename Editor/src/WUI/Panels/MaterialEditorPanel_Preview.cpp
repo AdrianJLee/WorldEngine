@@ -114,8 +114,8 @@ float MaterialEditorPanel::DrawPreview(Wui::WuiContext& ctx, const Wui::WuiRect&
 				// (见 Engine/src/World/WUI/WuiWidgets.cpp 的同名重载);
 				// 面板不再需要自己拼 WuiDrawCommand(本面板最后一条即时绘制)。
 				Wui::GradientFill(ctx, pixelView,
-					Wui::WuiColor { 0.24f, 0.27f, 0.33f, 1.0f }, Wui::WuiColor { 0.24f, 0.27f, 0.33f, 1.0f },
-					Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f }, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f });
+					theme.HoverBg, theme.HoverBg,
+					theme.WindowBg, theme.WindowBg);
 			}
 			// U22:离屏预览按引擎统一口径贴({0,1,1,-1},与主视口同一行序约定)。
 			// 之前用 {0,0,1,1} 会上下镜像:主光(仰角 +45°)会画到球的下方,

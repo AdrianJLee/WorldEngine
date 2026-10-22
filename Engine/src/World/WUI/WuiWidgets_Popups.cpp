@@ -182,7 +182,7 @@ bool ButtonEx(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string&
 		const bool drawSurface = !flat || hovered || !enabled;
 		const WuiColor fill = !enabled ? theme.PanelBg
 			: (primary ? theme.Accent
-				: (hovered ? theme.ButtonHover : (flat ? WuiColor { 0, 0, 0, 0 } : theme.ButtonBg)));
+				: (hovered ? theme.ButtonHover : (flat ? theme.Transparent : theme.ButtonBg)));
 		if (drawSurface)
 		{
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });

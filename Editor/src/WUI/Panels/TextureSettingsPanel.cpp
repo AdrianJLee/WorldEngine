@@ -1461,7 +1461,7 @@ void TextureSettingsPanel::DrawHeader(Wui::WuiContext& ctx, const Wui::WuiTheme&
 		const float badgeH = badgeSize + 4.0f;
 		const Wui::WuiRect badgeRect { rect.X + rect.W - theme.Pad - badgeW, y, badgeW, badgeH };
 		Wui::Badge(ctx, badgeRect, badgeText, badgeFill,
-			Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
+			theme.TextBright, theme, badgeSize);
 		{
 			Wui::WuiAccessNode node;
 			node.Id = Wui::HashId("texture.status.badge");

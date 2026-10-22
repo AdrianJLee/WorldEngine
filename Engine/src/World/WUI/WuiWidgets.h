@@ -36,6 +36,15 @@ namespace World::Wui
 		WuiColor Danger { 0.973f, 0.318f, 0.286f, 1.0f };        // #F85149
 		WuiColor Selection { 0.298f, 0.553f, 1.0f, 0.22f };      // Accent @22%
 		WuiColor FocusRing { 0.298f, 0.553f, 1.0f, 1.0f };
+		WuiColor TextBright { 1.0f, 1.0f, 1.0f, 1.0f };          // #FFFFFF 纯白强调/徽标文本
+		WuiColor Info { 0.22f, 0.74f, 0.97f, 1.0f };             // #38BDF8 天空蓝通知与提示
+		WuiColor AxisX { 0.92f, 0.32f, 0.32f, 1.0f };            // #EB5252 X轴红色标识
+		WuiColor AxisY { 0.31f, 0.75f, 0.42f, 1.0f };            // #4FBF6B Y轴绿色标识
+		WuiColor AxisZ { 0.25f, 0.53f, 0.97f, 1.0f };            // #4087F7 Z轴蓝色标识
+		WuiColor ModalBackdrop { 0.0f, 0.0f, 0.0f, 0.65f };      // 模态弹窗深色半透遮罩
+		WuiColor CardBg { 0.102f, 0.118f, 0.145f, 1.0f };        // #1A1E25 卡片与轻微凸起层
+		WuiColor TrackBg { 0.141f, 0.161f, 0.196f, 1.0f };       // #242932 滑轨与凹陷底槽
+		WuiColor Transparent { 0.0f, 0.0f, 0.0f, 0.0f };         // 全透明占位
 		// ---- 兼容字段(旧调用点仍在使用) ----
 		WuiColor ButtonBg { 0.133f, 0.153f, 0.184f, 1.0f };
 		WuiColor ButtonHover { 0.165f, 0.188f, 0.220f, 1.0f };

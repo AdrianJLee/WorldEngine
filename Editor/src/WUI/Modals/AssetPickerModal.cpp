@@ -33,22 +33,22 @@ namespace World
 			return it != haystack.end();
 		}
 
-		Wui::WuiColor CategoryColor(AssetCategory cat)
+		Wui::WuiColor CategoryColor(AssetCategory cat, const Wui::WuiTheme& theme)
 		{
 			switch (cat)
 			{
-			case AssetCategory::Texture:  return { 0.20f, 0.60f, 0.90f, 1.0f }; // Blue
-			case AssetCategory::Material: return { 0.15f, 0.75f, 0.85f, 1.0f }; // Cyan
-			case AssetCategory::Mesh:     return { 0.30f, 0.80f, 0.45f, 1.0f }; // Green
-			case AssetCategory::Prefab:   return { 0.75f, 0.40f, 0.85f, 1.0f }; // Purple
-			case AssetCategory::Script:   return { 0.95f, 0.80f, 0.20f, 1.0f }; // Yellow
-			case AssetCategory::Audio:    return { 0.95f, 0.55f, 0.20f, 1.0f }; // Orange
-			case AssetCategory::Level:    return { 0.90f, 0.30f, 0.30f, 1.0f }; // Red
-			case AssetCategory::Curve:    return { 0.20f, 0.80f, 0.75f, 1.0f }; // Teal
-			case AssetCategory::Shader:   return { 0.50f, 0.50f, 0.95f, 1.0f }; // Indigo
-			case AssetCategory::UI:       return { 0.85f, 0.35f, 0.70f, 1.0f }; // Magenta
-			case AssetCategory::VFX:      return { 1.0f, 0.45f, 0.15f, 1.0f }; // Orange
-			default:                      return { 0.55f, 0.55f, 0.55f, 1.0f }; // Gray
+			case AssetCategory::Texture:  return theme.Info;
+			case AssetCategory::Material: return theme.Accent;
+			case AssetCategory::Mesh:     return theme.Success;
+			case AssetCategory::Prefab:   return theme.Warning;
+			case AssetCategory::Script:   return theme.Warning;
+			case AssetCategory::Audio:    return theme.Info;
+			case AssetCategory::Level:    return theme.Danger;
+			case AssetCategory::Curve:    return theme.Info;
+			case AssetCategory::Shader:   return theme.Accent;
+			case AssetCategory::UI:       return theme.Accent;
+			case AssetCategory::VFX:      return theme.Warning;
+			default:                      return theme.TextMuted;
 			}
 		}
 
@@ -247,7 +247,7 @@ namespace World
 		ctx.PushOverlay();
 
 		// 半透明全屏遮罩 + 封锁下层命中
-		Wui::PanelBackground(ctx, rect, Wui::WuiColor { 0.0f, 0.0f, 0.0f, 0.65f }, 0.0f);
+		Wui::PanelBackground(ctx, rect, theme.ModalBackdrop, 0.0f);
 		ctx.RegisterOverlayRect(rect);
 
 		// 模态外框居中排布 (720x520)
@@ -398,7 +398,7 @@ namespace World
 				if (isSelected)
 				{
 					Wui::Badge(ctx, { itemX + cardW - 22.0f, itemY + 4.0f, 18.0f, 16.0f },
-						"✓", theme.Accent, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, 9.0f);
+						"✓", theme.Accent, theme.TextBright, theme, 9.0f);
 				}
 
 				// 边框描边
@@ -434,9 +434,9 @@ namespace World
 						Wui::PanelBackground(ctx, rowRect, theme.HoverBg, 2.0f);
 
 					// 类别胶囊徽标
-					const Wui::WuiColor badgeCol = CategoryColor(item->Category);
+					const Wui::WuiColor badgeCol = CategoryColor(item->Category, theme);
 					Wui::Badge(ctx, { rowRect.X + 4.0f, rowY + 3.0f, 50.0f, 20.0f },
-						CategoryShortName(item->Category), badgeCol, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, 10.0f);
+						CategoryShortName(item->Category), badgeCol, theme.TextBright, theme, 10.0f);
 
 					// 文件名与相对路径
 					Wui::Label(ctx, { rowRect.X + 62.0f, rowY + 5.0f }, item->Name, isSelected ? theme.Text : theme.TextMuted, 12.0f);

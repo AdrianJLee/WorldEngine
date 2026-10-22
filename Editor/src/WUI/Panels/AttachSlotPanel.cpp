@@ -10,8 +10,8 @@ namespace World
 	{
 		const Wui::WuiTheme& theme = host.Theme();
 		const bool highlighted = host.AttachSlotHighlighted();
-		const Wui::WuiColor fill = highlighted ? Wui::WuiColor { 0.3f, 0.5f, 0.9f, 0.30f } : theme.PanelHeader;
-		const Wui::WuiColor border = highlighted ? Wui::WuiColor { 0.45f, 0.65f, 1.0f, 1.0f } : theme.Border;
+		const Wui::WuiColor fill = highlighted ? theme.Selection : theme.PanelHeader;
+		const Wui::WuiColor border = highlighted ? theme.Accent : theme.Border;
 
 		const Wui::WuiRect area { rect.X + 6, rect.Y + 6, rect.W - 12, rect.H - 12 };
 		Wui::PanelBackground(ctx, area, fill, 4.0f);

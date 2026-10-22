@@ -184,7 +184,7 @@ namespace World
 		Wui::Label(ctx, { topBar.X + 12.0f, topBar.Y + 9.0f }, "物理材质编辑器 (Physics Material Editor)", theme.Accent, 13.5f);
 
 		std::string titleTag = m_LoadedPath.empty() ? "[未选择资产]" : (m_LoadedPath + (m_Dirty ? " *" : ""));
-		Wui::Label(ctx, { topBar.X + 270.0f, topBar.Y + 10.0f }, "当前文件: " + titleTag, m_Dirty ? Wui::WuiColor { 1.0f, 0.7f, 0.2f, 1.0f } : theme.TextMuted, 11.5f);
+		Wui::Label(ctx, { topBar.X + 270.0f, topBar.Y + 10.0f }, "当前文件: " + titleTag, m_Dirty ? theme.Warning : theme.TextMuted, 11.5f);
 
 		// Save Button
 		const float btnW = 90.0f;
@@ -316,7 +316,7 @@ namespace World
 		std::ostringstream ssEff;
 		ssEff << "▶ 合成有效摩擦力 = " << std::fixed << std::setprecision(3) << effF
 		      << "    |    ▶ 合成有效反弹弹性 = " << std::fixed << std::setprecision(3) << effR;
-		Wui::Label(ctx, { simCard.X + 16.0f, simY + 3.0f }, ssEff.str(), Wui::WuiColor { 0.3f, 0.85f, 0.45f, 1.0f }, 12.0f);
+		Wui::Label(ctx, { simCard.X + 16.0f, simY + 3.0f }, ssEff.str(), theme.Success, 12.0f);
 
 		curY += 125.0f;
 

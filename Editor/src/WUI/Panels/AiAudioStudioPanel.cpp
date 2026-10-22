@@ -16,13 +16,13 @@ namespace World
 		auto& audio = Audio::AudioSystem::Get();
 		auto& studio = audio.GetAiStudio();
 
-		Wui::PanelBackground(ctx, rect, { 0.12f, 0.13f, 0.15f, 1.0f });
+		Wui::PanelBackground(ctx, rect, theme.PanelBg);
 
 		// --- 1. Top Header Bar ---
 		const Wui::WuiRect topBar { rect.X, rect.Y, rect.W, 44.0f };
-		Wui::BarSurface(ctx, topBar, { 0.15f, 0.16f, 0.19f, 1.0f }, { 0.22f, 0.24f, 0.28f, 1.0f });
+		Wui::BarSurface(ctx, topBar, theme.PanelHeader, theme.Border);
 
-		Wui::Label(ctx, { rect.X + 16.0f, rect.Y + 12.0f }, "AI AUDIO STUDIO", { 0.35f, 0.75f, 0.95f, 1.0f }, 15.0f);
+		Wui::Label(ctx, { rect.X + 16.0f, rect.Y + 12.0f }, "AI AUDIO STUDIO", theme.Accent, 15.0f);
 		Wui::Label(ctx, { rect.X + 155.0f, rect.Y + 14.0f }, "Generative Speech, Lip-Sync, SFX & Music Workstation", theme.TextMuted, 11.5f);
 
 		// Provider Status badge
@@ -30,13 +30,13 @@ namespace World
 		Wui::WuiRect badgeRect { rect.X + rect.W - 380.0f, rect.Y + 10.0f, 270.0f, 24.0f };
 		if (sidecarAlive)
 		{
-			Wui::BarSurface(ctx, badgeRect, { 0.10f, 0.20f, 0.14f, 1.0f }, { 0.25f, 0.75f, 0.40f, 1.0f });
-			Wui::Label(ctx, { badgeRect.X + 8.0f, badgeRect.Y + 5.0f }, "● Mode: Sidecar Service (127.0.0.1:8090) [Online]", { 0.35f, 0.90f, 0.50f, 1.0f }, 10.5f);
+			Wui::BarSurface(ctx, badgeRect, theme.CardBg, theme.Success);
+			Wui::Label(ctx, { badgeRect.X + 8.0f, badgeRect.Y + 5.0f }, "● Mode: Sidecar Service (127.0.0.1:8090) [Online]", theme.Success, 10.5f);
 		}
 		else
 		{
-			Wui::BarSurface(ctx, badgeRect, { 0.22f, 0.18f, 0.10f, 1.0f }, { 0.65f, 0.50f, 0.20f, 1.0f });
-			Wui::Label(ctx, { badgeRect.X + 8.0f, badgeRect.Y + 5.0f }, "● Mode: 本地合成预览 (Procedural) [0 Token]", { 0.95f, 0.75f, 0.30f, 1.0f }, 10.5f);
+			Wui::BarSurface(ctx, badgeRect, theme.CardBg, theme.Warning);
+			Wui::Label(ctx, { badgeRect.X + 8.0f, badgeRect.Y + 5.0f }, "● Mode: 本地合成预览 (Procedural) [0 Token]", theme.Warning, 10.5f);
 		}
 
 		// Re-probe button
@@ -69,7 +69,7 @@ namespace World
 
 			// Left Column: Character Timbres & Shaper
 			const Wui::WuiRect leftCol { rect.X + 14.0f, y, leftColWidth, contentHeight };
-			Wui::BarSurface(ctx, leftCol, { 0.14f, 0.15f, 0.17f, 1.0f }, { 0.20f, 0.22f, 0.26f, 1.0f });
+			Wui::BarSurface(ctx, leftCol, theme.CardBg, theme.Border);
 
 			Wui::Label(ctx, { leftCol.X + 12.0f, leftCol.Y + 10.0f }, "角色音色档案库 (Timbre Profiles)", theme.Text, 13.0f);
 
@@ -88,12 +88,12 @@ namespace World
 				const Wui::WuiRect cRect { leftCol.X + 8.0f, cardY, leftColWidth - 16.0f, 44.0f };
 				bool selected = (m_SelectedTimbreIndex == static_cast<int>(i));
 
-				Wui::WuiColor cardBg = selected ? Wui::WuiColor{ 0.18f, 0.24f, 0.32f, 1.0f } : Wui::WuiColor{ 0.12f, 0.13f, 0.15f, 1.0f };
-				Wui::WuiColor cardBorder = selected ? Wui::WuiColor{ 0.35f, 0.75f, 0.95f, 1.0f } : Wui::WuiColor{ 0.18f, 0.20f, 0.24f, 1.0f };
+				Wui::WuiColor cardBg = selected ? theme.Selection : theme.CardBg;
+				Wui::WuiColor cardBorder = selected ? theme.Accent : theme.Border;
 				Wui::BarSurface(ctx, cRect, cardBg, cardBorder);
 
 				std::string title = std::string(kCards[i].icon) + " " + kCards[i].name;
-				Wui::Label(ctx, { cRect.X + 10.0f, cRect.Y + 6.0f }, title, selected ? Wui::WuiColor{ 0.4f, 0.85f, 1.0f, 1.0f } : theme.Text, 12.0f);
+				Wui::Label(ctx, { cRect.X + 10.0f, cRect.Y + 6.0f }, title, selected ? theme.Accent : theme.Text, 12.0f);
 				Wui::Label(ctx, { cRect.X + 10.0f, cRect.Y + 24.0f }, kCards[i].desc, theme.TextMuted, 10.0f);
 
 				if (Wui::Button(ctx, Wui::HashId(("timbre.card." + std::string(kCards[i].id)).c_str()),
@@ -130,7 +130,7 @@ namespace World
 			// Right Column: Dialogue Script, Prosody & LipSync
 			float rightX = leftCol.X + leftColWidth + colGap;
 			const Wui::WuiRect rightCol { rightX, y, rightColWidth, contentHeight };
-			Wui::BarSurface(ctx, rightCol, { 0.14f, 0.15f, 0.17f, 1.0f }, { 0.20f, 0.22f, 0.26f, 1.0f });
+			Wui::BarSurface(ctx, rightCol, theme.CardBg, theme.Border);
 
 			float rY = rightCol.Y + 10.0f;
 			Wui::Label(ctx, { rightX + 14.0f, rY }, "剧本台词与注音语法 (Script & Pronunciation Syntax)", theme.Text, 13.0f);
@@ -164,7 +164,7 @@ namespace World
 			Wui::Label(ctx, { rightX + 14.0f, rY }, "声波波形示波器 (Audio Waveform Scope)", theme.TextMuted, 11.5f);
 			rY += 18.0f;
 			const Wui::WuiRect scopeRect { rightX + 14.0f, rY, rightColWidth - 28.0f, 48.0f };
-			Wui::BarSurface(ctx, scopeRect, { 0.08f, 0.09f, 0.11f, 1.0f }, { 0.16f, 0.18f, 0.22f, 1.0f });
+			Wui::BarSurface(ctx, scopeRect, theme.ContentBg, theme.Border);
 
 			float midY = scopeRect.Y + scopeRect.H * 0.5f;
 			for (float wx = 4.0f; wx < scopeRect.W - 4.0f; wx += 4.0f)
@@ -172,7 +172,7 @@ namespace World
 				float t = wx / scopeRect.W;
 				float amp = std::sin(t * 30.0f) * std::sin(t * 7.0f) * (scopeRect.H * 0.38f);
 				if (amp < 0.0f) amp = -amp;
-				Wui::PanelBackground(ctx, { scopeRect.X + wx, midY - amp, 2.0f, amp * 2.0f }, { 0.25f, 0.80f, 0.95f, 0.85f });
+				Wui::PanelBackground(ctx, { scopeRect.X + wx, midY - amp, 2.0f, amp * 2.0f }, theme.Accent);
 			}
 			rY += 56.0f;
 
@@ -180,15 +180,15 @@ namespace World
 			Wui::Label(ctx, { rightX + 14.0f, rY }, "面部口型动画对齐视轨 (Lip-Sync ARKit 52 Visemes - .wlip)", theme.TextMuted, 11.5f);
 			rY += 18.0f;
 			const Wui::WuiRect visemeBox { rightX + 14.0f, rY, rightColWidth - 28.0f, 32.0f };
-			Wui::BarSurface(ctx, visemeBox, { 0.10f, 0.11f, 0.13f, 1.0f }, { 0.18f, 0.20f, 0.24f, 1.0f });
+			Wui::BarSurface(ctx, visemeBox, theme.ContentBg, theme.Border);
 
 			const char* samplePhonemes[] = { "0.08s [AA]", "0.22s [IH]", "0.38s [OW]", "0.52s [M]", "0.68s [T]", "0.85s [S]", "1.02s [EE]" };
 			float chipX = visemeBox.X + 6.0f;
 			for (size_t i = 0; i < 7; ++i)
 			{
 				Wui::WuiRect chip { chipX, visemeBox.Y + 5.0f, 68.0f, 22.0f };
-				Wui::BarSurface(ctx, chip, { 0.22f, 0.18f, 0.32f, 1.0f }, { 0.55f, 0.40f, 0.95f, 1.0f });
-				Wui::Label(ctx, { chip.X + 6.0f, chip.Y + 4.0f }, samplePhonemes[i], { 0.85f, 0.75f, 1.0f, 1.0f }, 9.5f);
+				Wui::BarSurface(ctx, chip, theme.HoverBg, theme.BorderStrong);
+				Wui::Label(ctx, { chip.X + 6.0f, chip.Y + 4.0f }, samplePhonemes[i], theme.TextBright, 9.5f);
 				chipX += 74.0f;
 			}
 			rY += 40.0f;
@@ -269,14 +269,14 @@ namespace World
 			if (!m_StatusFeedback.empty())
 			{
 				rY += 34.0f;
-				Wui::Label(ctx, { rightX + 14.0f, rY }, m_StatusFeedback, { 0.35f, 0.85f, 0.45f, 1.0f }, 11.5f);
+				Wui::Label(ctx, { rightX + 14.0f, rY }, m_StatusFeedback, theme.Success, 11.5f);
 			}
 		}
 		else if (m_ActiveTab == 1)
 		{
 			// === TAB 1: AI SFX GENERATOR (6.2.1) ===
 			const Wui::WuiRect sfxBox { rect.X + 14.0f, y, rect.W - 28.0f, contentHeight };
-			Wui::BarSurface(ctx, sfxBox, { 0.14f, 0.15f, 0.17f, 1.0f }, { 0.20f, 0.22f, 0.26f, 1.0f });
+			Wui::BarSurface(ctx, sfxBox, theme.CardBg, theme.Border);
 
 			float sY = sfxBox.Y + 12.0f;
 			Wui::Label(ctx, { sfxBox.X + 16.0f, sY }, "AI 短音效生成工作台 (SFX Prompt Generator - 6.2.1)", theme.Text, 14.0f);
@@ -306,7 +306,7 @@ namespace World
 			Wui::WuiRect durRect { sfxBox.X + 80.0f, sY, 150.0f, 20.0f };
 			Wui::SliderFloat(ctx, Wui::HashId("sfx.slider.dur"), durRect, m_SfxDuration, 0.3f, 6.0f, theme);
 
-			Wui::Label(ctx, { sfxBox.X + 260.0f, sY + 2.0f }, "后处理门禁: [√] Trim Silence  [√] Zero-Crossing Fadeout  [√] -16 LUFS", { 0.4f, 0.85f, 0.5f, 1.0f }, 11.0f);
+			Wui::Label(ctx, { sfxBox.X + 260.0f, sY + 2.0f }, "后处理门禁: [√] Trim Silence  [√] Zero-Crossing Fadeout  [√] -16 LUFS", theme.Success, 11.0f);
 
 			// Generate Button
 			const Wui::WuiRect btnGenSfx { sfxBox.X + sfxBox.W - 220.0f, sY - 2.0f, 205.0f, 28.0f };
@@ -319,7 +319,7 @@ namespace World
 
 			if (!m_SfxStatus.empty())
 			{
-				Wui::Label(ctx, { sfxBox.X + 16.0f, sY }, m_SfxStatus, { 0.35f, 0.85f, 0.45f, 1.0f }, 11.5f);
+				Wui::Label(ctx, { sfxBox.X + 16.0f, sY }, m_SfxStatus, theme.Success, 11.5f);
 				sY += 24.0f;
 			}
 
@@ -334,8 +334,8 @@ namespace World
 				bool hasData = (c < m_SfxCandidates.size());
 				bool isSelected = (m_SelectedCandidateIndex == static_cast<int>(c));
 
-				Wui::WuiColor bg = isSelected ? Wui::WuiColor{ 0.18f, 0.24f, 0.32f, 1.0f } : Wui::WuiColor{ 0.11f, 0.12f, 0.14f, 1.0f };
-				Wui::WuiColor border = isSelected ? Wui::WuiColor{ 0.35f, 0.75f, 0.95f, 1.0f } : Wui::WuiColor{ 0.20f, 0.22f, 0.26f, 1.0f };
+				Wui::WuiColor bg = isSelected ? theme.Selection : theme.CardBg;
+				Wui::WuiColor border = isSelected ? theme.Accent : theme.Border;
 				Wui::BarSurface(ctx, cRect, bg, border);
 
 				std::string title = "候选变体 #" + std::to_string(c + 1);
@@ -349,13 +349,13 @@ namespace World
 
 					// Mini waveform
 					const Wui::WuiRect waveBox { cRect.X + 8.0f, cRect.Y + 48.0f, cRect.W - 16.0f, 32.0f };
-					Wui::BarSurface(ctx, waveBox, { 0.07f, 0.08f, 0.09f, 1.0f }, { 0.15f, 0.16f, 0.18f, 1.0f });
+					Wui::BarSurface(ctx, waveBox, theme.ContentBg, theme.Border);
 					float waveMid = waveBox.Y + waveBox.H * 0.5f;
 					for (float wx = 2.0f; wx < waveBox.W - 2.0f; wx += 4.0f)
 					{
 						float t = wx / waveBox.W;
 						float h = std::abs(std::sin(t * (15.0f + static_cast<float>(c) * 5.0f))) * 12.0f;
-						Wui::PanelBackground(ctx, { waveBox.X + wx, waveMid - h, 2.0f, h * 2.0f }, { 0.3f, 0.8f, 0.5f, 0.8f });
+						Wui::PanelBackground(ctx, { waveBox.X + wx, waveMid - h, 2.0f, h * 2.0f }, theme.Success);
 					}
 
 					// Audition & Bake Buttons
@@ -410,7 +410,7 @@ namespace World
 		{
 			// === TAB 2: BGM LOOPS & STEMS (6.2.2) ===
 			const Wui::WuiRect bgmBox { rect.X + 14.0f, y, rect.W - 28.0f, contentHeight };
-			Wui::BarSurface(ctx, bgmBox, { 0.14f, 0.15f, 0.17f, 1.0f }, { 0.20f, 0.22f, 0.26f, 1.0f });
+			Wui::BarSurface(ctx, bgmBox, theme.CardBg, theme.Border);
 
 			float bY = bgmBox.Y + 12.0f;
 			Wui::Label(ctx, { bgmBox.X + 16.0f, bY }, "背景音乐零交叉循环与多轨分层工作台 (BGM Loops & Vertical Stems - 6.2.2)", theme.Text, 14.0f);
@@ -445,7 +445,7 @@ namespace World
 
 			if (!m_BgmStatus.empty())
 			{
-				Wui::Label(ctx, { bgmBox.X + 16.0f, bY }, m_BgmStatus, { 0.35f, 0.85f, 0.45f, 1.0f }, 11.5f);
+				Wui::Label(ctx, { bgmBox.X + 16.0f, bY }, m_BgmStatus, theme.Success, 11.5f);
 				bY += 24.0f;
 			}
 
@@ -494,7 +494,7 @@ namespace World
 		{
 			// === TAB 3: PHONEME DICTIONARY & CONFIG (6.1.2 & 6.3) ===
 			const Wui::WuiRect cfgBox { rect.X + 14.0f, y, rect.W - 28.0f, contentHeight };
-			Wui::BarSurface(ctx, cfgBox, { 0.14f, 0.15f, 0.17f, 1.0f }, { 0.20f, 0.22f, 0.26f, 1.0f });
+			Wui::BarSurface(ctx, cfgBox, theme.CardBg, theme.Border);
 
 			float cY = cfgBox.Y + 12.0f;
 			Wui::Label(ctx, { cfgBox.X + 16.0f, cY }, "游戏专有名词与多音字词典管理 (Phoneme Dict - 6.1.2)", theme.Text, 14.0f);
@@ -530,7 +530,7 @@ namespace World
 
 			if (!m_DictStatus.empty())
 			{
-				Wui::Label(ctx, { cfgBox.X + 16.0f, cY }, m_DictStatus, { 0.35f, 0.85f, 0.45f, 1.0f }, 11.5f);
+				Wui::Label(ctx, { cfgBox.X + 16.0f, cY }, m_DictStatus, theme.Success, 11.5f);
 				cY += 24.0f;
 			}
 
@@ -539,7 +539,7 @@ namespace World
 			cY += 20.0f;
 
 			const Wui::WuiRect tableBox { cfgBox.X + 16.0f, cY, cfgBox.W - 32.0f, 120.0f };
-			Wui::BarSurface(ctx, tableBox, { 0.10f, 0.11f, 0.13f, 1.0f }, { 0.18f, 0.20f, 0.24f, 1.0f });
+			Wui::BarSurface(ctx, tableBox, theme.ContentBg, theme.Border);
 
 			float rowY = tableBox.Y + 8.0f;
 			int rowCount = 0;

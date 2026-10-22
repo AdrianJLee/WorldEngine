@@ -2003,6 +2003,6 @@ namespace World
 		statusNode.Interactive = false;
 		Wui::WuiAccessibility::Get().Register(statusNode);
 		Wui::Label(ctx, { rect.X + pad, y }, m_Status,
-			m_StatusIsError ? Wui::WuiColor { 0.97f, 0.31f, 0.29f, 1.0f } : theme.TextMuted, 12.0f);
+			m_StatusIsError ? theme.Danger : theme.TextMuted, 12.0f);
 	}
 }

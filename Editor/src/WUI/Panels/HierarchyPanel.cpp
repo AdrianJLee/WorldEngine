@@ -312,7 +312,7 @@ namespace World
 				// 字形原点改按库件居中口径 ((16−tw)/2, (16−11)/2 = 2.5),与手写 (X+3, Y+2) 差 0.5px
 				// ⇒ 字形亚像素重采样(与 W3.4/W3.5 徽标同源,报告给像素级解释)。
 				Wui::Badge(ctx, badge, Wui::Tr("panel.hierarchy.prefab.badge", "预"), theme.Accent,
-					Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, 11.0f, true, badge.H * 0.5f);
+					theme.TextBright, theme, 11.0f, true, badge.H * 0.5f);
 				RegisterAccessNode(Wui::HashId(("hierarchy.prefab.badge." + std::to_string(handle)).c_str()),
 					"prefab-badge", badge,
 					Wui::Tr("panel.hierarchy.prefab.badge.label", "Prefab instance"), tip, true, tip, false);

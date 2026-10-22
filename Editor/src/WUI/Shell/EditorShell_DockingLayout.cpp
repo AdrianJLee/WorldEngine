@@ -1432,7 +1432,7 @@ void EditorShell::DrawAttachBar(Wui::WuiContext& ctx){
 		// 顶部第一行即挂靠栏:也是无边框主窗口的拖动/关闭区域。
 		const Wui::WuiRect bar { 0, 0.0f, viewport.x, m_AttachBarHeight };
 		const Wui::WuiColor fill = m_AttachSlotHighlight
-			? Wui::WuiColor { 0.3f, 0.5f, 0.9f, 0.45f }
+			? m_Theme.Selection
 			: m_Theme.PanelHeader;
 		Wui::BarSurface(ctx, bar, fill, m_Theme.Border);
 

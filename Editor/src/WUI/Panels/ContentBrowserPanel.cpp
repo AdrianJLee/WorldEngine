@@ -261,7 +261,7 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 			}
 			else if (m_DirIconId != 0)
 			{
-				Wui::Icon(ctx, thumbRect, m_DirIconId, { 0, 1, 1, -1 }, { 1, 1, 1, 1 }, theme);
+				Wui::Icon(ctx, thumbRect, m_DirIconId, { 0, 1, 1, -1 }, theme.TextBright, theme);
 			}
 
 			// Slang-B1:着色器的常驻类型徽标(与 prefab 徽标同一套画法;代码蓝底)。
@@ -288,7 +288,7 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 				const float badgeH = badgeSize + 4.0f;
 				// W3.6:同上,prefab 徽标(Accent 底 + 白字)也走 `Wui::Badge`。
 				Wui::Badge(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH }, badge.Text,
-					theme.Accent, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
+					theme.Accent, theme.TextBright, theme, badgeSize);
 			}
 
 			// M18(GameUI):`.wui` 游戏 UI 文档 —— 与 `.wprefab`/`.slang` 同做法:一枚常驻类型徽标
@@ -312,7 +312,7 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 				const float badgeW = ctx.MeasureTextWidth(badgeText, badgeSize) + theme.PadSmall * 2.0f;
 				const float badgeH = badgeSize + 4.0f;
 				Wui::Badge(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH }, badgeText,
-					theme.Warning, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
+					theme.Warning, theme.TextBright, theme, badgeSize);
 				RegisterGeneratedBadgeNode(slice, { cell.X + gap, cell.Y + gap, badgeW, badgeH });
 			}
 
@@ -339,7 +339,7 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 				Wui::Badge(ctx, { badgeX, cell.Y + gap, artifactW, badgeH }, artifactText,
 					fresh ? theme.Success : (broken ? theme.Danger : (slice.TextureArtifact == Editor::TextureArtifactState::Stale
 						? theme.Warning : theme.ActiveBg)),
-					Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
+					theme.TextBright, theme, badgeSize);
 				badgeX += artifactW;
 				RegisterTextureBadgeNode(slice,
 					{ cell.X + gap, cell.Y + gap, std::max(1.0f, badgeX - cell.X - gap), badgeH });
@@ -387,7 +387,7 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 			if (selected)
 			{
 				stroke = hovered
-					? MixColor(theme.Accent, Wui::WuiColor { 1, 1, 1, 1 }, kSelectedHoverLighten)
+					? MixColor(theme.Accent, theme.TextBright, kSelectedHoverLighten)
 					: theme.Accent;
 				thickness = 2.0f;
 			}
@@ -456,7 +456,7 @@ void ContentBrowserPanel::RenderListSlices(Wui::WuiContext& ctx, const Wui::WuiR
 					{ row.X + theme.PadSmall, row.Y + (row.H - kListIconSize) * 0.5f, kListIconSize, kListIconSize },
 					icon, { 0, 1, 1, -1 },
 					slice.Kind == EditorAssetKind::Shader
-						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 }, theme);
+						? kShaderIconTint : theme.TextBright, theme);
 
 			const float nameX = row.X + theme.PadSmall * 2.0f + kListIconSize;
 			const float nameBudget = std::max(0.0f, nameW - (nameX - row.X) - theme.PadSmall);

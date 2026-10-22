@@ -866,7 +866,7 @@ float PropertiesPanel::DrawAudioSourceInspector(Wui::WuiContext& ctx, const Wui:
 	if (hasSound)
 	{
 		std::string statusText = "● 状态: 已就绪" + std::string(comp->Spatial3D ? " [3D 空间声源]" : " [2D 立体声]");
-		Wui::Label(ctx, { rect.X + 14.0f, noticeY }, statusText, { 0.35f, 0.85f, 0.45f, 1.0f }, 10.5f);
+		Wui::Label(ctx, { rect.X + 14.0f, noticeY }, statusText, theme.Success, 10.5f);
 	}
 
 	return (noticeY + 20.0f) - rect.Y;
@@ -1637,14 +1637,14 @@ float PropertiesPanel::DrawCompositeCollider2DInspector(Wui::WuiContext& ctx, co
 	const float cardH = (totalColliders > 0) ? 52.0f : 44.0f;
 	const Wui::WuiRect cardRect { rect.X + 12.0f, y, cardW, cardH };
 	Wui::PanelBackground(ctx, cardRect, theme.PanelBg, 4.0f);
-	Wui::HighlightOutline(ctx, cardRect, (totalColliders > 0) ? Wui::WuiColor { 0.2f, 0.75f, 0.4f, 0.6f } : Wui::WuiColor { 0.4f, 0.4f, 0.45f, 0.5f }, 4.0f, 1.0f);
+	Wui::HighlightOutline(ctx, cardRect, (totalColliders > 0) ? theme.Success : theme.Border, 4.0f, 1.0f);
 
 	if (totalColliders > 0)
 	{
 		std::string summary = "✓ 已聚合 " + std::to_string(totalColliders) + " 个子碰撞体 (Box: " +
 			std::to_string(boxCount) + ", Poly: " + std::to_string(polyCount) +
 			", Circle: " + std::to_string(circleCount) + ", Cap: " + std::to_string(capsuleCount) + ")";
-		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 6.0f }, summary, { 0.35f, 0.88f, 0.45f, 1.0f }, 11.5f);
+		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 6.0f }, summary, theme.Success, 11.5f);
 
 		std::string geomNote = (comp->GeometryType == 0)
 			? "当前合成目标: 多边形实体 (Polygons 模式)"
@@ -1653,7 +1653,7 @@ float PropertiesPanel::DrawCompositeCollider2DInspector(Wui::WuiContext& ctx, co
 	}
 	else
 	{
-		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 6.0f }, "ℹ 暂未聚合到子碰撞体", { 0.9f, 0.75f, 0.25f, 1.0f }, 11.5f);
+		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 6.0f }, "ℹ 暂未聚合到子碰撞体", theme.Warning, 11.5f);
 		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 24.0f }, "提示: 在此实体或其子级添加 Box/Polygon 碰撞体以自动合并", theme.TextMuted, 10.5f);
 	}
 	y += cardH + 8.0f;

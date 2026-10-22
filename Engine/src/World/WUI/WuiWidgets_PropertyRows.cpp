@@ -768,7 +768,7 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 					ctx.Commands().push_back({ WuiDrawKind::Rect, item, theme.ButtonHover, 2.0f });
 					ctx.SetCursor(WuiCursor::Hand);
 				}
-				if ((ctx.IsHovered(item) && ctx.Input().MouseClicked[0]) || ctx.IsClickCompleted(ComboOptionId(id, i), item))
+				if (ctx.IsClickCompleted(ComboOptionId(id, i), item))
 				{
 					selected = static_cast<int>(i);
 					changed = true;
@@ -940,7 +940,7 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 				15.0f, false });
 			ctx.Commands().push_back({ WuiDrawKind::ClipPop });
 			// P4-U28:与 Combo 同一条 release 确认口径(拖出弹层后松手不选中)。
-			if ((ctx.IsHovered(item) && ctx.Input().MouseClicked[0]) || ctx.IsClickCompleted(ComboOptionId(id, static_cast<size_t>(optionIndex)), item))
+			if (ctx.IsClickCompleted(ComboOptionId(id, static_cast<size_t>(optionIndex)), item))
 			{
 				if (std::getenv("WLD_TRACE_UI"))
 					WLD_CORE_INFO("[ui] search-combo row clicked: id={0} option={1} label='{2}'",

@@ -299,12 +299,12 @@ namespace World::Wui
 			return result;
 		}
 
-		const WuiColor closeBg = result.CloseHovered ? theme.Danger : WuiColor { 1.0f, 1.0f, 1.0f, 0.12f };
+		const WuiColor closeBg = result.CloseHovered ? theme.Danger : theme.Transparent;
 		ctx.Commands().push_back({ WuiDrawKind::Rect, result.CloseRect, closeBg, 2.5f });
 		if (result.CloseHovered)
 			ctx.SetCursor(WuiCursor::Hand);
 
-		const WuiColor closeTextColor = result.CloseHovered ? WuiColor { 1.0f, 1.0f, 1.0f, 1.0f } : theme.Text;
+		const WuiColor closeTextColor = result.CloseHovered ? theme.TextBright : theme.Text;
 		PushText(ctx, { result.CloseRect.X + 2.5f, result.CloseRect.Y - 1.0f }, "x", closeTextColor, 11.5f);
 		result.CloseClicked = ctx.IsClicked(result.CloseRect);
 		result.Clicked = !result.CloseClicked && ctx.IsClicked(rect);
@@ -413,11 +413,11 @@ namespace World::Wui
 		}
 		if (textureId != 0)
 			ctx.Commands().push_back({ WuiDrawKind::Image, rect,
-				enabled ? WuiColor { 1, 1, 1, 1 } : WuiColor { 1, 1, 1, 0.4f },
+				enabled ? theme.TextBright : theme.TextDisabled,
 				0.0f, 1.0f, "", 15.0f, false, textureId, uv });
 		else
 			PushText(ctx, { rect.X + 4.0f, rect.Y + rect.H * 0.5f - 8.0f }, fallbackLabel,
-				enabled ? theme.Text : theme.TextMuted, 13.0f);
+				enabled ? theme.Text : theme.TextDisabled, 13.0f);
 		// P1c-a:图标按钮与保留模式 WuiImageButton 同一条 a11y 契约(那条路径一直在登记节点)——
 		// 整块矩形就是按钮,kind=button、label=语义文案、enabled 跟随交互态,AI/脚本按 id 点得到。
 		if (id != 0)
@@ -749,7 +749,7 @@ namespace World::Wui
 				const float icon = 16.0f;
 				ctx.Commands().push_back({ WuiDrawKind::Image,
 					{ row.X + 4.0f, row.Y + (row.H - icon) * 0.5f, icon, icon },
-					WuiColor { 1, 1, 1, item.Disabled ? 0.4f : 1.0f }, 0.0f, 1.0f, "", 15.0f, false, item.Icon, item.Uv });
+					item.Disabled ? theme.TextDisabled : theme.TextBright, 0.0f, 1.0f, "", 15.0f, false, item.Icon, item.Uv });
 				textX = row.X + 24.0f;
 			}
 			PushText(ctx, { textX, row.Y + (row.H - 14.0f) * 0.5f }, item.Label,
@@ -857,7 +857,7 @@ namespace World::Wui
 				if (icon > 4.0f)
 					ctx.Commands().push_back({ WuiDrawKind::Image,
 						{ cell.X + (cell.W - icon) * 0.5f, cell.Y + 8.0f, icon, icon },
-						WuiColor { 1, 1, 1, item.Disabled ? 0.4f : 1.0f }, 0.0f, 1.0f, "", 15.0f, false, item.Icon, item.Uv });
+						item.Disabled ? theme.TextDisabled : theme.TextBright, 0.0f, 1.0f, "", 15.0f, false, item.Icon, item.Uv });
 			}
 			const float labelW = 7.0f * static_cast<float>(item.Label.size());
 			PushText(ctx, { cell.X + std::max(4.0f, (cell.W - labelW) * 0.5f), cell.Y + cell.H - 20.0f },
@@ -994,7 +994,7 @@ namespace World::Wui
 					theme.Accent, 1.0f });
 			}
 			else if (hovered)
-				ctx.Commands().push_back({ WuiDrawKind::Rect, row, WuiColor { 1, 1, 1, 0.06f }, 2.0f });
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.HoverBg, 2.0f });
 
 			if (item.HasChildren)
 			{
@@ -1102,11 +1102,12 @@ namespace World::Wui
 			viewport.Y + viewport.H - size - kMargin, size, size };
 		if (box.W < 24.0f || box.H < 24.0f)
 			return box;
+		const WuiTheme& theme = CurrentTheme();
 		// 半透明底 + 描边:压在预览内容上也读得出来。
 		ctx.Commands().push_back({ WuiDrawKind::Rect, box,
-			WuiColor { 0.04f, 0.05f, 0.07f, 0.42f }, 6.0f });
+			theme.ModalBackdrop, 6.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box,
-			WuiColor { 0.62f, 0.68f, 0.78f, 0.22f }, 6.0f, 1.0f });
+			theme.Border, 6.0f, 1.0f });
 		const glm::vec2 center { box.X + box.W * 0.5f, box.Y + box.H * 0.5f };
 		// 臂长基准 = 盒边长的 38%(三轴总跨度 ≈ 76% 盒宽/高,落在用户口径 70–80%);
 		// 每根轴再按深度在 0.84–1.0 之间做透视缩放。
@@ -1118,9 +1119,9 @@ namespace World::Wui
 		const glm::vec3 axes[3] = { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
 		const char* axisNames[3] = { "X", "Y", "Z" };
 		const WuiColor baseColors[3] = {
-			{ 0.93f, 0.31f, 0.28f, 0.96f },   // X 红
-			{ 0.36f, 0.77f, 0.32f, 0.96f },   // Y 绿
-			{ 0.33f, 0.58f, 0.98f, 0.96f } }; // Z 蓝
+			theme.AxisX,
+			theme.AxisY,
+			theme.AxisZ };
 		// 相机基的右手法向 = 指向观察者(OrbitBasis/lookAt 口径下 = eye 方向)。
 		const glm::vec3 viewNormal = glm::cross(viewRight, viewUp);
 		bool degenerate[3] = { false, false, false };
@@ -1172,7 +1173,7 @@ namespace World::Wui
 				// 空心圆环:先铺一块与盒底同色的圆盘,盖掉从中心穿过的其它轴线 ——
 				// 否则"环里露出别的轴色"会让人误读成实心点(用户口径:不得与其它轴混淆)。
 				ctx.Commands().push_back({ WuiDrawKind::Rect, marker,
-					WuiColor { 0.04f, 0.05f, 0.07f, 0.42f }, kMarkerRadius });
+					theme.ModalBackdrop, kMarkerRadius });
 				ctx.Commands().push_back({ WuiDrawKind::RectOutline, marker, color,
 					kMarkerRadius, kLineWidth });
 			}

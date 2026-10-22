@@ -23,12 +23,7 @@ namespace World::Wui
 		constexpr int kRingSegments = 40;
 		constexpr float kPickTolerance = 8.0f;  // 命中容差(像素)
 
-		const WuiColor kAxisColors[3] = {
-			{ 0.92f, 0.30f, 0.30f, 1.0f },   // X 红
-			{ 0.38f, 0.88f, 0.42f, 1.0f },   // Y 绿
-			{ 0.36f, 0.58f, 0.96f, 1.0f },   // Z 蓝
-		};
-		const WuiColor kHighlight { 1.0f, 0.95f, 0.35f, 1.0f };
+
 
 		glm::vec2 WorldToScreen(const GizmoCamera& camera, const glm::vec3& world, const WuiRect& viewport)
 		{
@@ -224,14 +219,17 @@ namespace World::Wui
 			return glm::dot(axisWorld[a], camera.Forward) > glm::dot(axisWorld[b], camera.Forward);
 		});
 
+		const WuiTheme& theme = CurrentTheme();
+		const WuiColor axisColors[3] = { theme.AxisX, theme.AxisY, theme.AxisZ };
+
 		const bool centralHandle = operation == GizmoOperation::Scale || operation == GizmoOperation::Rotate;
 		if (centralHandle)
-			PushBox(ctx, center, hoveredAxis < 0 ? kAxisColors[1] : kHighlight, kArrowSize);
+			PushBox(ctx, center, hoveredAxis < 0 ? theme.Warning : theme.Accent, kArrowSize);
 
 		for (const int i : order)
 		{
 			const bool hovered = (operation == GizmoOperation::Rotate) ? (hoveredRing == i) : (hoveredAxis == i);
-			const WuiColor color = hovered ? kHighlight : kAxisColors[i];
+			const WuiColor color = hovered ? theme.Accent : axisColors[i];
 			if (operation == GizmoOperation::Rotate)
 			{
 				const auto ring = ringRadiusFor(i);
@@ -475,25 +473,26 @@ namespace World::Wui
 			}
 		}
 
-		// 绘制矩形边框 (青色)
-		const WuiColor rectCol { 0.20f, 0.85f, 0.95f, 0.90f };
+		const WuiTheme& theme = CurrentTheme();
+		// 绘制矩形边框 (信息蓝)
+		const WuiColor rectCol = theme.Info;
 		PushLine(ctx, sBL, sBR, rectCol, 1.8f);
 		PushLine(ctx, sBR, sTR, rectCol, 1.8f);
 		PushLine(ctx, sTR, sTL, rectCol, 1.8f);
 		PushLine(ctx, sTL, sBL, rectCol, 1.8f);
 
-		// 绘制角手柄 (白色方块) 与 边中点手柄 (青色方块)
+		// 绘制角手柄 (纯白方块) 与 边中点手柄 (信息蓝方块)
 		for (int i = 0; i < 4; ++i)
 		{
-			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : WuiColor{ 1.0f, 1.0f, 1.0f, 1.0f }, 8.0f);
+			PushBox(ctx, handles[i], (hovered == i) ? theme.Accent : theme.TextBright, 8.0f);
 		}
 		for (int i = 4; i < 8; ++i)
 		{
-			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : rectCol, 6.0f);
+			PushBox(ctx, handles[i], (hovered == i) ? theme.Accent : rectCol, 6.0f);
 		}
 
-		// 绘制中心 Pivot 锚点手柄 (金黄色十字圆心)
-		PushBox(ctx, sPivot, (hovered == 8) ? kHighlight : WuiColor{ 1.0f, 0.68f, 0.15f, 1.0f }, 7.0f);
+		// 绘制中心 Pivot 锚点手柄 (警告黄十字圆心)
+		PushBox(ctx, sPivot, (hovered == 8) ? theme.Accent : theme.Warning, 7.0f);
 
 		if (!allowManipulation)
 			return false;
@@ -635,8 +634,9 @@ namespace World::Wui
 			}
 		}
 
-		// 绘制碰撞框轮廓 (鲜亮浅绿)
-		const WuiColor colGreen { 0.20f, 0.95f, 0.42f, 0.95f };
+		const WuiTheme& theme = CurrentTheme();
+		// 绘制碰撞框轮廓 (成功绿)
+		const WuiColor colGreen = theme.Success;
 		PushLine(ctx, sBL, sBR, colGreen, 2.0f);
 		PushLine(ctx, sBR, sTR, colGreen, 2.0f);
 		PushLine(ctx, sTR, sTL, colGreen, 2.0f);
@@ -644,8 +644,8 @@ namespace World::Wui
 
 		// 4 边手柄 + 1 中心手柄
 		for (int i = 0; i < 4; ++i)
-			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : colGreen, 7.0f);
-		PushBox(ctx, sCenter, (hovered == 4) ? kHighlight : WuiColor{ 0.95f, 0.85f, 0.20f, 1.0f }, 6.0f);
+			PushBox(ctx, handles[i], (hovered == i) ? theme.Accent : colGreen, 7.0f);
+		PushBox(ctx, sCenter, (hovered == 4) ? theme.Accent : theme.Warning, 6.0f);
 
 		if (!allowManipulation)
 			return false;
@@ -741,8 +741,9 @@ namespace World::Wui
 			}
 		}
 
+		const WuiTheme& theme = CurrentTheme();
 		// 绘制圆形轮廓
-		const WuiColor colGreen { 0.20f, 0.95f, 0.42f, 0.95f };
+		const WuiColor colGreen = theme.Success;
 		constexpr int kSegments = 32;
 		glm::vec2 prevPt = WorldToScreen(camera, centerWorld + glm::vec3(rWorld, 0.0f, 0.0f), viewport);
 		for (int i = 1; i <= kSegments; ++i)
@@ -754,8 +755,8 @@ namespace World::Wui
 		}
 
 		for (int i = 0; i < 4; ++i)
-			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : colGreen, 7.0f);
-		PushBox(ctx, sCenter, (hovered == 4) ? kHighlight : WuiColor{ 0.95f, 0.85f, 0.20f, 1.0f }, 6.0f);
+			PushBox(ctx, handles[i], (hovered == i) ? theme.Accent : colGreen, 7.0f);
+		PushBox(ctx, sCenter, (hovered == 4) ? theme.Accent : theme.Warning, 6.0f);
 
 		if (!allowManipulation)
 			return false;
@@ -863,7 +864,8 @@ namespace World::Wui
 			}
 		}
 
-		const WuiColor colGreen { 0.20f, 0.95f, 0.42f, 0.95f };
+		const WuiTheme& theme = CurrentTheme();
+		const WuiColor colGreen = theme.Success;
 		// 绘制胶囊体两端端点轴线与侧边线
 		if (direction == 0)
 		{
@@ -893,8 +895,8 @@ namespace World::Wui
 		}
 
 		for (int i = 0; i < 4; ++i)
-			PushBox(ctx, handles[i], (hovered == i) ? kHighlight : colGreen, 7.0f);
-		PushBox(ctx, sCenter, (hovered == 4) ? kHighlight : WuiColor{ 0.95f, 0.85f, 0.20f, 1.0f }, 6.0f);
+			PushBox(ctx, handles[i], (hovered == i) ? theme.Accent : colGreen, 7.0f);
+		PushBox(ctx, sCenter, (hovered == 4) ? theme.Accent : theme.Warning, 6.0f);
 
 		if (!allowManipulation)
 			return false;
@@ -999,12 +1001,13 @@ namespace World::Wui
 			}
 		}
 
-		const WuiColor colMin { 0.20f, 0.85f, 0.95f, 0.95f };
-		const WuiColor colMax { 0.35f, 0.55f, 0.95f, 0.85f };
-		PushBox(ctx, sMinRight, (hovered == 0) ? kHighlight : colMin, 7.0f);
-		PushBox(ctx, sMaxRight, (hovered == 1) ? kHighlight : colMax, 7.0f);
-		PushBox(ctx, sMinUp, (hovered == 2) ? kHighlight : colMin, 7.0f);
-		PushBox(ctx, sMaxUp, (hovered == 3) ? kHighlight : colMax, 7.0f);
+		const WuiTheme& theme = CurrentTheme();
+		const WuiColor colMin = theme.Info;
+		const WuiColor colMax = theme.Accent;
+		PushBox(ctx, sMinRight, (hovered == 0) ? theme.Warning : colMin, 7.0f);
+		PushBox(ctx, sMaxRight, (hovered == 1) ? theme.Warning : colMax, 7.0f);
+		PushBox(ctx, sMinUp, (hovered == 2) ? theme.Warning : colMin, 7.0f);
+		PushBox(ctx, sMaxUp, (hovered == 3) ? theme.Warning : colMax, 7.0f);
 
 		static int s_ActiveHandle = -1;
 		if (allowManipulation && ctx.Input().MouseDown[0])

@@ -470,7 +470,7 @@ namespace World
 		if (unitRight > unitLeft && unitBottom > unitTop)
 		{
 			Wui::WuiRect unitRect { unitLeft, unitTop, unitRight - unitLeft, unitBottom - unitTop };
-			Wui::WuiColor unitBg = { theme.HoverBg.R * 0.4f, theme.HoverBg.G * 0.4f, theme.HoverBg.B * 0.4f, 1.0f };
+			Wui::WuiColor unitBg = theme.ContentBg;
 			Wui::PanelBackground(ctx, unitRect, unitBg, 0.0f);
 			DrawClippedLine(ctx, glm::vec2(u0x, u0y), glm::vec2(u1x, u0y), canvasRect, theme.BorderStrong, 1.0f);
 			DrawClippedLine(ctx, glm::vec2(u1x, u0y), glm::vec2(u1x, u1y), canvasRect, theme.BorderStrong, 1.0f);
@@ -647,8 +647,8 @@ namespace World
 			m_HoveredInHandle = inCanvas && (glm::distance(mousePos, inHandleScreenPos) <= 7.0f);
 			m_HoveredOutHandle = inCanvas && (glm::distance(mousePos, outHandleScreenPos) <= 7.0f);
 
-			Wui::WuiColor inColor = m_HoveredInHandle ? theme.Warning : Wui::WuiColor { 0.22f, 0.74f, 0.97f, 1.0f }; // Sky Blue
-			Wui::WuiColor outColor = m_HoveredOutHandle ? theme.Warning : Wui::WuiColor { 0.98f, 0.57f, 0.24f, 1.0f }; // Warm Orange
+			Wui::WuiColor inColor = m_HoveredInHandle ? theme.Warning : theme.Info;
+			Wui::WuiColor outColor = m_HoveredOutHandle ? theme.Warning : theme.Accent;
 
 			DrawClippedLine(ctx, selectedKfScreenPt, inHandleScreenPos, canvasRect, inColor, 1.5f);
 			DrawClippedLine(ctx, selectedKfScreenPt, outHandleScreenPos, canvasRect, outColor, 1.5f);

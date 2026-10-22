@@ -290,9 +290,10 @@ namespace World::Wui
 			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
 		const WuiRect box { m_Rect.X, m_Rect.Y + (m_Rect.H - 18.0f) * 0.5f, 18, 18 };
 		const bool value = Value ? *Value : false;
-		ctx.Commands().push_back({ WuiDrawKind::Rect, box, value ? WuiColor { 0.3f, 0.5f, 0.9f, 1 } : WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 3.0f });
-		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box, WuiColor { 0.3f, 0.3f, 0.32f, 1 }, 3.0f, 1.0f });
-		ctx.Commands().push_back({ WuiDrawKind::Text, { box.X + 24, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 }, WuiColor { 0.82f, 0.84f, 0.87f, 1 }, 0, 1.0f, Label, 15.0f, false });
+		const WuiTheme& theme = CurrentTheme();
+		ctx.Commands().push_back({ WuiDrawKind::Rect, box, value ? theme.Accent : theme.ContentBg, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box, theme.BorderStrong, 3.0f, 1.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Text, { box.X + 24, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, Label, 15.0f, false });
 		PaintFocusRing(context);
 		if (ctx.IsHovered(m_Rect))
 			ctx.SetCursor(WuiCursor::Hand);
@@ -472,9 +473,10 @@ namespace World::Wui
 			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, SelectedFill, 2.0f });
 		else if (hovered)
 			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, HoverFill, 2.0f });
+		const WuiTheme& theme = CurrentTheme();
 		ctx.Commands().push_back({ WuiDrawKind::Text,
 			{ m_Rect.X + 6 + Indent, m_Rect.Y + (m_Rect.H - FontSize) * 0.5f, 0, 0 },
-			WuiColor { 0.82f, 0.84f, 0.87f, 1 }, 0, 1.0f, Text, FontSize, false });
+		theme.Text, 0, 1.0f, Text, FontSize, false });
 		// P4-U5a:行文本必须进无障碍树 —— 否则"看得见、读不到也点不到"(层级面板实测)。
 		if (m_Id != 0)
 		{
@@ -510,13 +512,14 @@ namespace World::Wui
 	void WuiImageButton::Paint(WuiPaintContext& context)
 	{
 		WuiContext& ctx = context.Context();
+		const WuiTheme& theme = CurrentTheme();
 		const bool hovered = ctx.IsHovered(m_Rect);
 		if (hovered)
-			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, WuiColor { 1, 1, 1, 0.08f }, 2.0f });
+			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, theme.HoverBg, 2.0f });
 		if (TextureId && !Dim)
-			ctx.Commands().push_back({ WuiDrawKind::Image, m_Rect, WuiColor { 1, 1, 1, 1 }, 0, 1.0f, "", 15.0f, false, TextureId, Uv });
+			ctx.Commands().push_back({ WuiDrawKind::Image, m_Rect, theme.TextBright, 0, 1.0f, "", 15.0f, false, TextureId, Uv });
 		else if (TextureId)
-			ctx.Commands().push_back({ WuiDrawKind::Image, m_Rect, WuiColor { 1, 1, 1, 0.35f }, 0, 1.0f, "", 15.0f, false, TextureId, Uv });
+			ctx.Commands().push_back({ WuiDrawKind::Image, m_Rect, theme.TextDisabled, 0, 1.0f, "", 15.0f, false, TextureId, Uv });
 		// 无障碍 + 悬停提示(与 WuiButton 同一口径;Dim = 当前状态下不可用/已激活)。
 		if (m_Id != 0)
 		{
@@ -561,11 +564,12 @@ namespace World::Wui
 	void WuiSection::Paint(WuiPaintContext& context)
 	{
 		WuiContext& ctx = context.Context();
+		const WuiTheme& theme = CurrentTheme();
 		const WuiRect header { m_Rect.X, m_Rect.Y, m_Rect.W, 24 };
-		ctx.Commands().push_back({ WuiDrawKind::Rect, header, Open ? WuiColor { 0.27f, 0.28f, 0.31f, 1 } : HeaderFill, 2.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Rect, header, Open ? theme.ActiveBg : HeaderFill, 2.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Text,
 			{ header.X + 6, header.Y + 3, 0, 0 },
-			WuiColor { 0.82f, 0.84f, 0.87f, 1 }, 0, 1.0f, (Open ? "- " : "+ ") + Title, 14.0f, false });
+			theme.Text, 0, 1.0f, (Open ? "- " : "+ ") + Title, 14.0f, false });
 		if (ctx.IsClicked(header))
 		{
 			Open = !Open;

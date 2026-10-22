@@ -792,11 +792,11 @@ namespace World
 			const Wui::WuiRect badgeRect { rowRect.X + rowRect.W - 68.0f, rowRect.Y + 4.0f, 62.0f, 20.0f };
 			if (item.kind == AudioItemKind::SoundEvent)
 			{
-				Wui::Badge(ctx, badgeRect, "音效事件", { 0.15f, 0.45f, 0.75f, 0.40f }, theme.Accent, theme, 10.5f, true, 3.0f);
+				Wui::Badge(ctx, badgeRect, "音效事件", theme.Selection, theme.Accent, theme, 10.5f, true, 3.0f);
 			}
 			else
 			{
-				Wui::Badge(ctx, badgeRect, "音频切片", { 0.75f, 0.45f, 0.15f, 0.40f }, { 0.95f, 0.75f, 0.35f, 1.0f }, theme, 10.5f, true, 3.0f);
+				Wui::Badge(ctx, badgeRect, "音频切片", theme.CardBg, theme.Warning, theme, 10.5f, true, 3.0f);
 			}
 
 			curY += rowHeight + 2.0f;
@@ -925,7 +925,7 @@ namespace World
 			std::snprintf(loopInfoStr, sizeof(loopInfoStr), "循环帧: %u ~ %u %s",
 				lStart, lEnd, m_HasSnappedLoop ? "[已吸附零点]" : "");
 			Wui::Label(ctx, { transportBox.X + 520.0f, btnY + 6.0f }, loopInfoStr,
-				m_HasSnappedLoop ? Wui::WuiColor{ 0.35f, 0.85f, 0.95f, 1.0f } : theme.TextMuted, 11.0f);
+				m_HasSnappedLoop ? theme.Info : theme.TextMuted, 11.0f);
 		}
 
 		// Progress bar & playback time
@@ -1036,7 +1036,7 @@ namespace World
 				Wui::PanelBackground(ctx, varBox, theme.PanelBg, 4.0f);
 
 				float vY = varBox.Y + 8.0f;
-				Wui::Label(ctx, { varBox.X + 12.0f, vY }, "变体音频切片列表 (Variations - 每次触发随机挑一个播放)", { 0.35f, 0.75f, 0.95f, 1.0f }, 12.0f);
+				Wui::Label(ctx, { varBox.X + 12.0f, vY }, "变体音频切片列表 (Variations - 每次触发随机挑一个播放)", theme.Accent, 12.0f);
 
 				// Save button on the right
 				const Wui::WuiRect btnSave { varBox.X + varBox.W - 140.0f, vY - 2.0f, 128.0f, 22.0f };
@@ -1152,7 +1152,7 @@ namespace World
 		float gY = rect.Y + 8.0f;
 
 		// Section Header & Stop All Emergency Button
-		Wui::Label(ctx, { rect.X + 12.0f, gY + 3.0f }, "游戏全局音量控制 (Global Game Volume)", { 0.95f, 0.75f, 0.20f, 1.0f }, 13.0f);
+		Wui::Label(ctx, { rect.X + 12.0f, gY + 3.0f }, "游戏全局音量控制 (Global Game Volume)", theme.Accent, 13.0f);
 
 		const Wui::WuiRect btnStopAll { rect.X + rect.W - 148.0f, gY, 136.0f, 24.0f };
 		Wui::Tooltip(ctx, btnStopAll, "紧急停止: 立即停止游戏与试听中的所有声音");
@@ -1242,7 +1242,7 @@ namespace World
 		Wui::PanelBackground(ctx, vBox, theme.PanelBg, 4.0f);
 
 		float vy = vBox.Y + 10.0f;
-		Wui::Label(ctx, { vBox.X + 12.0f, vy }, "角色音色属性 (Timbre Profile Parameters):", { 0.85f, 0.45f, 0.95f, 1.0f }, 12.5f);
+		Wui::Label(ctx, { vBox.X + 12.0f, vy }, "角色音色属性 (Timbre Profile Parameters):", theme.Accent, 12.5f);
 		vy += 26.0f;
 
 		Wui::Label(ctx, { vBox.X + 12.0f, vy + 2.0f }, "角色标识 (CharacterId): " + m_SelectedTimbre.characterId, theme.Text, 11.5f);
@@ -1342,7 +1342,7 @@ namespace World
 		Wui::PanelBackground(ctx, mBox, theme.PanelBg, 4.0f);
 
 		float my = mBox.Y + 10.0f;
-		Wui::Label(ctx, { mBox.X + 12.0f, my }, "总线架构与默认设计电平 (Mixer Bus Hierarchy):", { 0.95f, 0.75f, 0.20f, 1.0f }, 12.5f);
+		Wui::Label(ctx, { mBox.X + 12.0f, my }, "总线架构与默认设计电平 (Mixer Bus Hierarchy):", theme.Text, 12.5f);
 		my += 24.0f;
 
 		const char* busNames[] = { "Master (主总线)", "Music (背景音乐)", "SFX (场景音效)", "Voice (对白配音)", "UI (界面音效)", "Ambience (环境底噪)" };
@@ -1407,7 +1407,7 @@ namespace World
 		float curY = rect.Y + 8.0f;
 
 		// 1. Header Row: Title + DSP Absolute Timestamp + DAC Clipping LED
-		Wui::Label(ctx, { rect.X + 12.0f, curY }, "音频分析器 (Audio Profiler HUD)", { 0.35f, 0.85f, 0.95f, 1.0f }, 13.0f);
+		Wui::Label(ctx, { rect.X + 12.0f, curY }, "音频分析器 (Audio Profiler HUD)", theme.Accent, 13.0f);
 
 		// DSP Absolute Time
 		char dspStr[64];
@@ -1418,13 +1418,13 @@ namespace World
 		const Wui::WuiRect ledRect { rect.X + rect.W - 96.0f, curY, 86.0f, 18.0f };
 		if (isClipped)
 		{
-			Wui::PanelBackground(ctx, ledRect, { 0.95f, 0.20f, 0.20f, 0.95f }, 3.0f);
-			Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 2.0f }, "● DAC 削波", { 1.0f, 1.0f, 1.0f, 1.0f }, 10.5f);
+			Wui::PanelBackground(ctx, ledRect, theme.Danger, 3.0f);
+			Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 2.0f }, "● DAC 削波", theme.TextBright, 10.5f);
 		}
 		else
 		{
-			Wui::PanelBackground(ctx, ledRect, { 0.15f, 0.32f, 0.20f, 0.90f }, 3.0f);
-			Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 2.0f }, "● 输出正常", { 0.45f, 0.85f, 0.55f, 0.95f }, 10.5f);
+			Wui::PanelBackground(ctx, ledRect, theme.CardBg, 3.0f);
+			Wui::Label(ctx, { ledRect.X + 8.0f, ledRect.Y + 2.0f }, "● 输出正常", theme.Success, 10.5f);
 		}
 		Wui::Tooltip(ctx, ledRect, isClipped ? "警告: 发生 DAC 输出削波失真 (Clipping)！请降低总线增益" : "DAC 输出电平正常，无削波失真");
 
@@ -1445,7 +1445,7 @@ namespace World
 			static_cast<float>(std::max(1u, profilerSnap.totalPhysicalVoices)), 0.0f, 1.0f);
 		if (physRatio > 0.005f)
 		{
-			Wui::PanelBackground(ctx, { physBarBg.X, physBarBg.Y, physBarBg.W * physRatio, physBarBg.H }, { 0.25f, 0.80f, 0.95f, 0.95f }, 2.0f);
+			Wui::PanelBackground(ctx, { physBarBg.X, physBarBg.Y, physBarBg.W * physRatio, physBarBg.H }, theme.Info, 2.0f);
 		}
 
 		// Virtual Voice Bar
@@ -1461,7 +1461,7 @@ namespace World
 			static_cast<float>(std::max(1u, profilerSnap.totalVirtualVoices)), 0.0f, 1.0f);
 		if (virtRatio > 0.005f)
 		{
-			Wui::PanelBackground(ctx, { virtBarBg.X, virtBarBg.Y, virtBarBg.W * virtRatio, virtBarBg.H }, { 0.70f, 0.50f, 0.95f, 0.95f }, 2.0f);
+			Wui::PanelBackground(ctx, { virtBarBg.X, virtBarBg.Y, virtBarBg.W * virtRatio, virtBarBg.H }, theme.Accent, 2.0f);
 		}
 
 		curY += 20.0f;
@@ -1491,24 +1491,31 @@ namespace World
 			float bx = specBox.X + padX + static_cast<float>(b) * (barW + barGap);
 			float by = specBox.Y + specBox.H - padY - barH;
 
-			// Colorful gradient across 32 frequency bands:
-			// Bass (cyan/blue) -> Mid (green/emerald) -> Presence (gold/amber) -> Treble (coral/red)
+			auto mixC = [](const Wui::WuiColor& c1, const Wui::WuiColor& c2, float u, float a) {
+				return Wui::WuiColor{
+					glm::mix(c1.R, c2.R, u),
+					glm::mix(c1.G, c2.G, u),
+					glm::mix(c1.B, c2.B, u),
+					a
+				};
+			};
 			const float t = static_cast<float>(b) / 31.0f;
+			const float alpha = val > 0.03f ? 0.95f : 0.40f;
 			Wui::WuiColor barColor;
 			if (t < 0.33f)
 			{
 				const float u = t / 0.33f;
-				barColor = { glm::mix(0.18f, 0.25f, u), glm::mix(0.75f, 0.88f, u), glm::mix(0.95f, 0.45f, u), val > 0.03f ? 0.95f : 0.40f };
+				barColor = mixC(theme.Info, theme.Success, u, alpha);
 			}
 			else if (t < 0.66f)
 			{
 				const float u = (t - 0.33f) / 0.33f;
-				barColor = { glm::mix(0.25f, 0.95f, u), glm::mix(0.88f, 0.78f, u), glm::mix(0.45f, 0.20f, u), val > 0.03f ? 0.95f : 0.40f };
+				barColor = mixC(theme.Success, theme.Warning, u, alpha);
 			}
 			else
 			{
 				const float u = (t - 0.66f) / 0.34f;
-				barColor = { glm::mix(0.95f, 0.95f, u), glm::mix(0.78f, 0.30f, u), glm::mix(0.20f, 0.35f, u), val > 0.03f ? 0.95f : 0.40f };
+				barColor = mixC(theme.Warning, theme.Danger, u, alpha);
 			}
 
 			Wui::PanelBackground(ctx, { bx, by, barW, barH }, barColor, 1.0f);

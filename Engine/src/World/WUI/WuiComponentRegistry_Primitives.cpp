@@ -107,7 +107,7 @@ void ShowBadge(const WuiComponentDraw& draw){
 			if (accentWidth > 8.0f)
 				Badge(ctx, { accentX, slot.Rect.Y, accentWidth, slot.Rect.H },
 					LocalizedText(draw, "accentText", "Prefab", "预制体"),
-					theme.Accent, WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, fontSize, bold, corner);
+					theme.Accent, theme.TextBright, theme, fontSize, bold, corner);
 		}
 
 

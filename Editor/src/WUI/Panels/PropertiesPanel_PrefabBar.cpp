@@ -139,7 +139,7 @@ void PropertiesPanel::DrawInstanceBar(Wui::WuiContext& ctx, PanelHost& host, con
 		// 字形改用库件的居中口径:水平 (16 − 字形宽)/2、垂直 (16 − 11)/2 = 2.5 —— 与原手写
 		// 的 (X+3.0, Y+2.0) 有 0/0.5px 级的差,已按像素证据记录(见 W3.5 报告 §3)。
 		Wui::Badge(ctx, badge, Wui::Tr("panel.properties.prefab.badge", "预"), theme.Accent,
-			Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, 11.0f, true, badge.H * 0.5f);
+			theme.TextBright, theme, 11.0f, true, badge.H * 0.5f);
 		const float nameX = badge.X + badge.W + 6.0f;
 		Wui::Label(ctx, { nameX, rect.Y + pad + 3.0f }, fileName, theme.Text, 13.0f);
 		const std::string countText = std::to_string(info.Overrides) + " "
