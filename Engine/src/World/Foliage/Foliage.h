@@ -27,6 +27,8 @@ namespace World
 		float CullDistance { 150.0f };        // 独立视距裁剪
 		float WindMultiplier { 1.0f };        // 风力乘数
 		bool AlignToNormal { true };          // 是否对齐地表法线
+		bool PaintingActive { true };         // 参与笔刷混刷开关
+		uint32_t LayerMask { 0xFFFFFFFF };    // 地表材质图层掩码过滤：Bit 0=Layer0/Grass, Bit 1=Layer1/Dirt, Bit 2=Layer2/Rock, Bit 3=Layer3/Sand
 	};
 
 	struct FoliageInstanceData
@@ -60,13 +62,20 @@ namespace World
 
 		// 实例查询与访问
 		size_t GetTotalInstanceCount() const;
+		size_t GetInstanceCountByType(size_t typeIndex) const;
 		const std::vector<FoliageChunk>& GetChunks() const { return m_Chunks; }
 		std::vector<FoliageChunk>& GetChunksMut() { return m_Chunks; }
 
 		// 笔刷散布与擦除算法
 		uint32_t PaintFoliage(const glm::vec3& center, float radius, float density, size_t typeIndex,
 			const TerrainData* terrain = nullptr, const glm::mat4& terrainTransform = glm::mat4(1.0f));
+		uint32_t PaintFoliageMulti(const glm::vec3& center, float radius, float brushDensity,
+			const std::vector<size_t>& activeTypes,
+			const TerrainData* terrain = nullptr, const glm::mat4& terrainTransform = glm::mat4(1.0f));
 		uint32_t EraseFoliage(const glm::vec3& center, float radius, int32_t typeIndex = -1);
+
+		// 地表对齐与重新贴地
+		void RealignToTerrain(const TerrainData* terrain, const glm::mat4& terrainTransform = glm::mat4(1.0f));
 
 		// 视锥与视距剔除
 		void CollectVisibleInstances(const glm::vec3& cameraPos, const glm::mat4& viewProj,

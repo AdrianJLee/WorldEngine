@@ -14,7 +14,7 @@ namespace World
 	namespace
 	{
 		constexpr uint32_t kFoliageMagic = 0x464F4C49; // "FOLI"
-		constexpr uint32_t kFoliageVersion = 1;
+		constexpr uint32_t kFoliageVersion = 2;
 		constexpr float kPi = 3.14159265358979323846f;
 
 		glm::mat4 AlignOrientation(const glm::vec3& normal, float yawDeg, float pitchDeg, float scale)
@@ -83,6 +83,20 @@ namespace World
 		for (const auto& chunk : m_Chunks)
 			total += chunk.Instances.size();
 		return total;
+	}
+
+	size_t FoliageData::GetInstanceCountByType(size_t typeIndex) const
+	{
+		size_t count = 0;
+		for (const auto& chunk : m_Chunks)
+		{
+			for (const auto& inst : chunk.Instances)
+			{
+				if (static_cast<size_t>(inst.Params.w + 0.5f) == typeIndex)
+					++count;
+			}
+		}
+		return count;
 	}
 
 	FoliageChunk& FoliageData::GetOrCreateChunk(int32_t cx, int32_t cz)
@@ -172,6 +186,20 @@ namespace World
 				if (terrain->IsHole(gx, gz))
 					continue;
 
+				// 地貌材质层 LayerMask 过滤 (Bit 0=Layer0/Grass, Bit 1=Layer1/Dirt, Bit 2=Layer2/Rock, Bit 3=Layer3/Sand)
+				if (type.LayerMask != 0xFFFFFFFF)
+				{
+					const glm::vec4 weights = terrain->GetSplatWeights(gx, gz);
+					float allowedWeightSum = 0.0f;
+					if (type.LayerMask & (1u << 0)) allowedWeightSum += weights.x;
+					if (type.LayerMask & (1u << 1)) allowedWeightSum += weights.y;
+					if (type.LayerMask & (1u << 2)) allowedWeightSum += weights.z;
+					if (type.LayerMask & (1u << 3)) allowedWeightSum += weights.w;
+
+					if (allowedWeightSum < 0.25f)
+						continue;
+				}
+
 				const float localHeight = terrain->SampleHeight(localPos.x, localPos.z);
 				const glm::vec3 localNormal = terrain->SampleNormal(localPos.x, localPos.z);
 
@@ -236,6 +264,48 @@ namespace World
 		return spawned;
 	}
 
+	uint32_t FoliageData::PaintFoliageMulti(const glm::vec3& center, float radius, float brushDensity,
+		const std::vector<size_t>& activeTypes,
+		const TerrainData* terrain, const glm::mat4& terrainTransform)
+	{
+		if (activeTypes.empty() || radius <= 0.0f || brushDensity <= 0.0f)
+			return 0;
+
+		std::vector<size_t> validActive;
+		validActive.reserve(activeTypes.size());
+		for (size_t idx : activeTypes)
+		{
+			if (idx < m_Types.size() && m_Types[idx].PaintingActive)
+			{
+				validActive.push_back(idx);
+			}
+		}
+
+		if (validActive.empty())
+			return 0;
+
+		if (validActive.size() == 1)
+			return PaintFoliage(center, radius, brushDensity, validActive[0], terrain, terrainTransform);
+
+		float totalDensityWeight = 0.0f;
+		for (size_t idx : validActive)
+		{
+			totalDensityWeight += std::max(0.01f, m_Types[idx].Density);
+		}
+		if (totalDensityWeight <= 0.0f)
+			totalDensityWeight = static_cast<float>(validActive.size());
+
+		uint32_t totalSpawned = 0;
+		for (size_t idx : validActive)
+		{
+			const float weight = std::max(0.01f, m_Types[idx].Density) / totalDensityWeight;
+			const float effectiveDensity = brushDensity * weight;
+			totalSpawned += PaintFoliage(center, radius, effectiveDensity, idx, terrain, terrainTransform);
+		}
+
+		return totalSpawned;
+	}
+
 	uint32_t FoliageData::EraseFoliage(const glm::vec3& center, float radius, int32_t typeIndex)
 	{
 		if (radius <= 0.0f)
@@ -268,6 +338,76 @@ namespace World
 		}
 
 		return erased;
+	}
+
+	void FoliageData::RealignToTerrain(const TerrainData* terrain, const glm::mat4& terrainTransform)
+	{
+		if (!terrain)
+			return;
+
+		const glm::mat4 invTerrain = glm::inverse(terrainTransform);
+		const glm::mat3 normMat = glm::mat3(terrainTransform);
+
+		for (auto& chunk : m_Chunks)
+		{
+			bool chunkModified = false;
+			for (auto& inst : chunk.Instances)
+			{
+				const size_t typeIdx = static_cast<size_t>(inst.Params.w + 0.5f);
+				if (typeIdx >= m_Types.size())
+					continue;
+
+				const FoliageType& type = m_Types[typeIdx];
+				const glm::vec3 worldPos(inst.Transform[3]);
+				const glm::vec3 localPos = glm::vec3(invTerrain * glm::vec4(worldPos.x, 0.0f, worldPos.z, 1.0f));
+
+				if (localPos.x < 0.0f || localPos.x > terrain->GetWorldWidth() ||
+					localPos.z < 0.0f || localPos.z > terrain->GetWorldHeight())
+					continue;
+
+				const float localHeight = terrain->SampleHeight(localPos.x, localPos.z);
+				const glm::vec3 localNormal = terrain->SampleNormal(localPos.x, localPos.z);
+
+				const glm::vec4 sampledWorld = terrainTransform * glm::vec4(localPos.x, localHeight, localPos.z, 1.0f);
+				const glm::vec3 worldNormal = glm::normalize(normMat * localNormal);
+
+				// 更新世界坐标
+				inst.Transform[3] = glm::vec4(sampledWorld.x, sampledWorld.y, sampledWorld.z, 1.0f);
+
+				// 更新对齐法线旋转
+				const glm::vec3 targetUp = type.AlignToNormal ? worldNormal : glm::vec3(0.0f, 1.0f, 0.0f);
+				const glm::vec3 currentUp = glm::normalize(glm::vec3(inst.Transform[1]));
+				const float dotUp = glm::clamp(glm::dot(currentUp, targetUp), -1.0f, 1.0f);
+
+				if (dotUp < 0.9999f && dotUp > -0.9999f)
+				{
+					const glm::vec3 axis = glm::normalize(glm::cross(currentUp, targetUp));
+					const float angle = std::acos(dotUp);
+					const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), angle, axis);
+					const glm::mat3 newLinear = glm::mat3(rot) * glm::mat3(inst.Transform);
+					inst.Transform[0] = glm::vec4(newLinear[0], 0.0f);
+					inst.Transform[1] = glm::vec4(newLinear[1], 0.0f);
+					inst.Transform[2] = glm::vec4(newLinear[2], 0.0f);
+				}
+				else if (dotUp <= -0.9999f)
+				{
+					glm::vec3 ortho = std::abs(currentUp.x) < 0.9f ? glm::vec3(1.0f, 0.0f, 0.0f) : glm::vec3(0.0f, 0.0f, 1.0f);
+					const glm::vec3 axis = glm::normalize(glm::cross(currentUp, ortho));
+					const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), kPi, axis);
+					const glm::mat3 newLinear = glm::mat3(rot) * glm::mat3(inst.Transform);
+					inst.Transform[0] = glm::vec4(newLinear[0], 0.0f);
+					inst.Transform[1] = glm::vec4(newLinear[1], 0.0f);
+					inst.Transform[2] = glm::vec4(newLinear[2], 0.0f);
+				}
+
+				chunkModified = true;
+			}
+
+			if (chunkModified)
+			{
+				chunk.DirtyBuffer = true;
+			}
+		}
 	}
 
 	void FoliageData::CollectVisibleInstances(const glm::vec3& cameraPos, const glm::mat4&,
@@ -348,6 +488,10 @@ namespace World
 			stream.write(reinterpret_cast<const char*>(&type.WindMultiplier), sizeof(type.WindMultiplier));
 			const uint8_t alignNorm = type.AlignToNormal ? 1 : 0;
 			stream.write(reinterpret_cast<const char*>(&alignNorm), sizeof(alignNorm));
+
+			const uint8_t paintingActive = type.PaintingActive ? 1 : 0;
+			stream.write(reinterpret_cast<const char*>(&paintingActive), sizeof(paintingActive));
+			stream.write(reinterpret_cast<const char*>(&type.LayerMask), sizeof(type.LayerMask));
 		}
 
 		const uint32_t chunkCount = static_cast<uint32_t>(m_Chunks.size());
@@ -382,7 +526,7 @@ namespace World
 		uint32_t version = 0;
 		stream.read(reinterpret_cast<char*>(&magic), sizeof(magic));
 		stream.read(reinterpret_cast<char*>(&version), sizeof(version));
-		if (magic != kFoliageMagic || version != kFoliageVersion)
+		if (magic != kFoliageMagic || version == 0 || version > kFoliageVersion)
 			return false;
 
 		uint32_t typeCount = 0;
@@ -438,6 +582,19 @@ namespace World
 			uint8_t alignNorm = 0;
 			stream.read(reinterpret_cast<char*>(&alignNorm), sizeof(alignNorm));
 			type.AlignToNormal = (alignNorm != 0);
+
+			if (version >= 2)
+			{
+				uint8_t paintingActive = 1;
+				stream.read(reinterpret_cast<char*>(&paintingActive), sizeof(paintingActive));
+				type.PaintingActive = (paintingActive != 0);
+				stream.read(reinterpret_cast<char*>(&type.LayerMask), sizeof(type.LayerMask));
+			}
+			else
+			{
+				type.PaintingActive = true;
+				type.LayerMask = 0xFFFFFFFF;
+			}
 		}
 
 		uint32_t chunkCount = 0;

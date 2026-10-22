@@ -1833,10 +1833,30 @@ namespace World
 								clips[i], clips[(i + 1) % kSegments], ringColor, 2.4f);
 						}
 
+						const std::vector<size_t> activeTypes = foliagePanel->GetActivePaintingTypes();
+						const bool multiSpecies = (activeTypes.size() > 1);
+
 						// 浮动 HUD 提示
-						char hudText[128] = {};
-						std::snprintf(hudText, sizeof(hudText), "Foliage: %s | R: %.1fm | D: %.1f | Shift: 擦除",
-							eraseMode ? "[擦除 Erase]" : "[散布 Paint]", R, foliagePanel->GetBrushDensity());
+						char hudText[160] = {};
+						if (eraseMode)
+						{
+							const bool eraseAll = (foliagePanel->GetEraseTarget() == FoliageEraseTarget::AllSpecies) || ctx.Input().Alt;
+							std::snprintf(hudText, sizeof(hudText), "Foliage: [擦除 Erase] %s | R: %.1fm | Shift: 擦除",
+								eraseAll ? "全部物种" : "选中物种", R);
+						}
+						else if (multiSpecies)
+						{
+							std::snprintf(hudText, sizeof(hudText), "Foliage: [混刷 Multi (%zu种)] | R: %.1fm | D: %.1f | Shift: 擦除",
+								activeTypes.size(), R, foliagePanel->GetBrushDensity());
+						}
+						else
+						{
+							const size_t typeIdx = !activeTypes.empty() ? activeTypes[0] : foliagePanel->GetActiveTypeIndex();
+							std::string typeName = (typeIdx < foliageData->GetTypeCount())
+								? foliageData->GetType(typeIdx).Name : "物种";
+							std::snprintf(hudText, sizeof(hudText), "Foliage: [散布 Paint] %s | R: %.1fm | D: %.1f | Shift: 擦除",
+								typeName.c_str(), R, foliagePanel->GetBrushDensity());
+						}
 
 						const float fontSz = theme.FontSizeSmall;
 						const float textW = ctx.MeasureTextWidth(hudText, fontSz);
@@ -1865,12 +1885,27 @@ namespace World
 							{
 								if (eraseMode)
 								{
-									foliageData->EraseFoliage(worldHitPoint, R, static_cast<int32_t>(foliagePanel->GetActiveTypeIndex()));
+									const bool eraseAll = (foliagePanel->GetEraseTarget() == FoliageEraseTarget::AllSpecies) || ctx.Input().Alt;
+									const int32_t eraseIdx = eraseAll ? -1 : static_cast<int32_t>(foliagePanel->GetActiveTypeIndex());
+									foliageData->EraseFoliage(worldHitPoint, R, eraseIdx);
 								}
 								else
 								{
-									foliageData->PaintFoliage(worldHitPoint, R, foliagePanel->GetBrushDensity(),
-										foliagePanel->GetActiveTypeIndex(), terrain.get(), terrainWorld);
+									if (activeTypes.size() > 1)
+									{
+										foliageData->PaintFoliageMulti(worldHitPoint, R, foliagePanel->GetBrushDensity(),
+											activeTypes, terrain.get(), terrainWorld);
+									}
+									else if (!activeTypes.empty())
+									{
+										foliageData->PaintFoliage(worldHitPoint, R, foliagePanel->GetBrushDensity(),
+											activeTypes[0], terrain.get(), terrainWorld);
+									}
+									else
+									{
+										foliageData->PaintFoliage(worldHitPoint, R, foliagePanel->GetBrushDensity(),
+											foliagePanel->GetActiveTypeIndex(), terrain.get(), terrainWorld);
+									}
 								}
 								s_LastFoliageHit = worldHitPoint;
 								s_FoliagePaintCooldown = 0.0f;
