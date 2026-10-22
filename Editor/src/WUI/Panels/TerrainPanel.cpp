@@ -383,12 +383,19 @@ namespace World
 		Wui::Tooltip(ctx, { startX + halfBtnW + theme.PadSmall, currentY, halfBtnW, btnH }, "移除当前选中的材质图层 (至少保留 1 个图层)");
 		currentY += btnH + 6.0f;
 
-		// 2. 动态图层列表 (可自由增删与点击切换)
+		// 2. 动态图层列表 (双列紧凑自适应排布，防止面板溢出)
 		const uint32_t layerCount = m_Terrain ? m_Terrain->GetLayerCount() : 4;
-		const float itemH = 24.0f;
+		const float colW = (contentWidth - theme.PadSmall) * 0.5f;
+		const float itemH = 26.0f;
 		for (uint32_t i = 0; i < layerCount; ++i)
 		{
-			const Wui::WuiRect itemRect { startX, currentY, contentWidth, itemH };
+			const int row = static_cast<int>(i / 2);
+			const int col = static_cast<int>(i % 2);
+			const Wui::WuiRect itemRect {
+				startX + static_cast<float>(col) * (colW + theme.PadSmall),
+				currentY + static_cast<float>(row) * (itemH + 3.0f),
+				colW, itemH
+			};
 			auto itemTheme = theme;
 			const bool isSelected = (m_ActivePaintLayer == i);
 			if (isSelected)
@@ -412,9 +419,9 @@ namespace World
 				m_PaintLayerIdx = static_cast<int>(i);
 				m_CachedPaintLayer = -1;
 			}
-			currentY += itemH + 3.0f;
 		}
-		currentY += 4.0f;
+		const int totalGridRows = static_cast<int>((layerCount + 1) / 2);
+		currentY += static_cast<float>(totalGridRows) * (itemH + 3.0f) + 4.0f;
 
 		// 3. 材质图层模板库下拉框
 		Wui::Label(ctx, { startX, currentY + 3.0f }, "图层预设:", theme.TextMuted, theme.FontSizeSmall);
@@ -588,10 +595,11 @@ namespace World
 					const uint32_t tw = m_Terrain->GetWidth();
 					const uint32_t th = m_Terrain->GetHeight();
 					glm::vec4 wVec(0.0f);
-					if (m_ActivePaintLayer == 0) wVec.x = 1.0f;
-					else if (m_ActivePaintLayer == 1) wVec.y = 1.0f;
-					else if (m_ActivePaintLayer == 2) wVec.z = 1.0f;
-					else if (m_ActivePaintLayer == 3) wVec.w = 1.0f;
+					const uint32_t ch = m_ActivePaintLayer % 4;
+					if (ch == 0) wVec.x = 1.0f;
+					else if (ch == 1) wVec.y = 1.0f;
+					else if (ch == 2) wVec.z = 1.0f;
+					else if (ch == 3) wVec.w = 1.0f;
 					for (uint32_t z = 0; z < th; ++z)
 					{
 						for (uint32_t x = 0; x < tw; ++x)

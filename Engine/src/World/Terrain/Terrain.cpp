@@ -588,7 +588,7 @@ namespace World
 		if (radius <= 0.0f || strength <= 0.0f || m_CellSize <= 0.0f)
 			return;
 
-		const uint32_t targetLayer = std::min(layerIndex, 3u);
+		const uint32_t targetLayer = layerIndex % 4;
 		const int minX = std::max(0, static_cast<int>(std::floor((worldX - radius) / m_CellSize)));
 		const int maxX = std::min(static_cast<int>(m_Width - 1), static_cast<int>(std::ceil((worldX + radius) / m_CellSize)));
 		const int minZ = std::max(0, static_cast<int>(std::floor((worldZ - radius) / m_CellSize)));

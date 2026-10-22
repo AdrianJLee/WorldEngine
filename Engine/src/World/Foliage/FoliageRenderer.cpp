@@ -45,6 +45,14 @@ namespace World
 			Rhi::Handle<Rhi::Buffer> DefaultMeshIB;
 			uint32_t DefaultMeshIndexCount { 0 };
 
+			Rhi::Handle<Rhi::Buffer> RockMeshVB;
+			Rhi::Handle<Rhi::Buffer> RockMeshIB;
+			uint32_t RockMeshIndexCount { 0 };
+
+			Rhi::Handle<Rhi::Buffer> BushMeshVB;
+			Rhi::Handle<Rhi::Buffer> BushMeshIB;
+			uint32_t BushMeshIndexCount { 0 };
+
 			Rhi::Handle<Rhi::CommandBuffer> CurrentCmdBuffer;
 			Rhi::Handle<Rhi::DescriptorSet> CurrentGlobalSet;
 
@@ -269,6 +277,116 @@ namespace World
 			ibDesc.DebugName = "Foliage.DefaultMeshIB";
 			s_State.DefaultMeshIB = device->CreateBuffer(ibDesc);
 			s_State.DefaultMeshIndexCount = 18;
+		}
+
+		// 3b. 构造真实 3D 碎石几何网格 (Pebble Boulder: 14 vertices, 24 triangles)
+		{
+			FoliageVertex rockVerts[14] = {
+				{ { -0.35f, 0.00f, -0.25f }, { -0.4f, -0.6f, -0.3f }, { 0.2f, 0.2f } },
+				{ {  0.00f, 0.00f, -0.42f }, {  0.0f, -0.7f, -0.5f }, { 0.5f, 0.1f } },
+				{ {  0.38f, 0.00f, -0.20f }, {  0.5f, -0.6f, -0.3f }, { 0.8f, 0.2f } },
+				{ {  0.35f, 0.00f,  0.25f }, {  0.5f, -0.6f,  0.4f }, { 0.8f, 0.8f } },
+				{ { -0.05f, 0.00f,  0.40f }, { -0.1f, -0.7f,  0.5f }, { 0.5f, 0.9f } },
+				{ { -0.38f, 0.00f,  0.18f }, { -0.5f, -0.6f,  0.3f }, { 0.2f, 0.8f } },
+
+				{ { -0.48f, 0.20f, -0.30f }, { -0.8f,  0.3f, -0.4f }, { 0.1f, 0.3f } },
+				{ {  0.05f, 0.24f, -0.52f }, {  0.1f,  0.4f, -0.8f }, { 0.5f, 0.0f } },
+				{ {  0.50f, 0.22f, -0.22f }, {  0.8f,  0.3f, -0.3f }, { 0.9f, 0.3f } },
+				{ {  0.45f, 0.18f,  0.30f }, {  0.8f,  0.2f,  0.5f }, { 0.9f, 0.7f } },
+				{ { -0.08f, 0.22f,  0.48f }, { -0.1f,  0.3f,  0.8f }, { 0.5f, 1.0f } },
+				{ { -0.50f, 0.20f,  0.22f }, { -0.8f,  0.3f,  0.3f }, { 0.1f, 0.7f } },
+
+				{ { -0.12f, 0.38f, -0.08f }, { -0.2f,  0.9f, -0.1f }, { 0.4f, 0.45f } },
+				{ {  0.14f, 0.36f,  0.10f }, {  0.2f,  0.9f,  0.2f }, { 0.6f, 0.55f } },
+			};
+			for (int vi = 0; vi < 14; ++vi) {
+				rockVerts[vi].Normal = glm::normalize(rockVerts[vi].Normal);
+			}
+			const uint32_t rockIndices[72] = {
+				0, 1, 7,   0, 7, 6,
+				1, 2, 8,   1, 8, 7,
+				2, 3, 9,   2, 9, 8,
+				3, 4, 10,  3, 10, 9,
+				4, 5, 11,  4, 11, 10,
+				5, 0, 6,   5, 6, 11,
+				6, 7, 12,  7, 8, 12,  8, 13, 12,
+				8, 9, 13,  9, 10, 13, 10, 11, 13,
+				11, 6, 12, 11, 12, 13,
+				12, 13, 7, 13, 12, 10
+			};
+			Rhi::BufferDesc rVbDesc;
+			rVbDesc.Size = sizeof(rockVerts);
+			rVbDesc.Usage = Rhi::BufferUsageVertex;
+			rVbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
+			rVbDesc.InitialData = rockVerts;
+			rVbDesc.DebugName = "Foliage.RockMeshVB";
+			s_State.RockMeshVB = device->CreateBuffer(rVbDesc);
+
+			Rhi::BufferDesc rIbDesc;
+			rIbDesc.Size = sizeof(rockIndices);
+			rIbDesc.Usage = Rhi::BufferUsageIndex;
+			rIbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
+			rIbDesc.InitialData = rockIndices;
+			rIbDesc.DebugName = "Foliage.RockMeshIB";
+			s_State.RockMeshIB = device->CreateBuffer(rIbDesc);
+			s_State.RockMeshIndexCount = 72;
+		}
+
+		// 3c. 构造真实半球立体灌木叶簇网格 (Hemispherical Bush Dome: 5 quads, 20 vertices, 30 indices)
+		{
+			FoliageVertex bushVerts[20];
+			uint32_t bushIndices[30];
+			constexpr float kPi = 3.1415926535f;
+
+			for (int q = 0; q < 4; ++q)
+			{
+				const float a = static_cast<float>(q) * (kPi * 0.5f) + 0.39f;
+				const float cosA = std::cos(a);
+				const float sinA = std::sin(a);
+				const glm::vec3 outward(cosA, 0.35f, sinA);
+
+				const int bv = q * 4;
+				const glm::vec3 centerBottom = glm::vec3(cosA * 0.25f, 0.05f, sinA * 0.25f);
+				const glm::vec3 rightDir(-sinA * 0.65f, 0.0f, cosA * 0.65f);
+				const glm::vec3 upDir(cosA * 0.45f, 0.95f, sinA * 0.45f);
+
+				bushVerts[bv + 0] = { centerBottom - rightDir, glm::normalize(outward + glm::vec3(0, 0.5f, 0)), { 0.0f, 1.0f } };
+				bushVerts[bv + 1] = { centerBottom + rightDir, glm::normalize(outward + glm::vec3(0, 0.5f, 0)), { 1.0f, 1.0f } };
+				bushVerts[bv + 2] = { centerBottom + rightDir + upDir, glm::normalize(outward + glm::vec3(0, 0.8f, 0)), { 1.0f, 0.0f } };
+				bushVerts[bv + 3] = { centerBottom - rightDir + upDir, glm::normalize(outward + glm::vec3(0, 0.8f, 0)), { 0.0f, 0.0f } };
+
+				const int bi = q * 6;
+				bushIndices[bi + 0] = bv + 0;
+				bushIndices[bi + 1] = bv + 1;
+				bushIndices[bi + 2] = bv + 2;
+				bushIndices[bi + 3] = bv + 0;
+				bushIndices[bi + 4] = bv + 2;
+				bushIndices[bi + 5] = bv + 3;
+			}
+			bushVerts[16] = { { -0.6f, 1.05f, -0.6f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } };
+			bushVerts[17] = { {  0.6f, 1.05f, -0.6f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 0.0f } };
+			bushVerts[18] = { {  0.6f, 1.05f,  0.6f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f } };
+			bushVerts[19] = { { -0.6f, 1.05f,  0.6f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 1.0f } };
+
+			bushIndices[24] = 16; bushIndices[25] = 17; bushIndices[26] = 18;
+			bushIndices[27] = 16; bushIndices[28] = 18; bushIndices[29] = 19;
+
+			Rhi::BufferDesc bVbDesc;
+			bVbDesc.Size = sizeof(bushVerts);
+			bVbDesc.Usage = Rhi::BufferUsageVertex;
+			bVbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
+			bVbDesc.InitialData = bushVerts;
+			bVbDesc.DebugName = "Foliage.BushMeshVB";
+			s_State.BushMeshVB = device->CreateBuffer(bVbDesc);
+
+			Rhi::BufferDesc bIbDesc;
+			bIbDesc.Size = sizeof(bushIndices);
+			bIbDesc.Usage = Rhi::BufferUsageIndex;
+			bIbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
+			bIbDesc.InitialData = bushIndices;
+			bIbDesc.DebugName = "Foliage.BushMeshIB";
+			s_State.BushMeshIB = device->CreateBuffer(bIbDesc);
+			s_State.BushMeshIndexCount = 30;
 		}
 
 		// 4. 着色器与渲染管线
@@ -501,11 +619,14 @@ namespace World
 			}
 			if (!currentTex)
 			{
-				currentTex = (drawInfo.TypeIndex == 1)
-					? TextureLibrary::Get().Get("textures/foliage/wild_flower.png", true)
-					: ((drawInfo.TypeIndex == 3)
-						? TextureLibrary::Get().Get("textures/terrain/rock_albedo.png", true)
-						: TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", true));
+				if (drawInfo.TypeIndex == 1)
+					currentTex = TextureLibrary::Get().Get("textures/foliage/wild_flower.png", true);
+				else if (drawInfo.TypeIndex == 2)
+					currentTex = TextureLibrary::Get().Get("textures/foliage/bush_leaves.png", true);
+				else if (drawInfo.TypeIndex == 3)
+					currentTex = TextureLibrary::Get().Get("textures/terrain/rock_albedo.png", true);
+				else
+					currentTex = TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", true);
 			}
 			if (!currentTex)
 				currentTex = s_State.DefaultAlbedo;
@@ -536,7 +657,30 @@ namespace World
 			if (targetSet)
 				cmd->BindDescriptorSet(targetSet, 2);
 
-			cmd->DrawIndexed(s_State.DefaultMeshIndexCount, drawInfo.InstanceCount, 0, 0, drawInfo.StartInstance);
+			// 按物种几何类型精确绑定专属网格
+			const FoliageType& curType = (drawInfo.TypeIndex < data.GetTypeCount()) ? data.GetType(drawInfo.TypeIndex) : data.GetType(0);
+			const std::string mPath = curType.MeshAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(curType.MeshAsset.Path)) : "";
+			const bool isRock = (drawInfo.TypeIndex == 3 || mPath.find("scatter_pebble") != std::string::npos || curType.Name.find("碎石") != std::string::npos || curType.Name.find("Rock") != std::string::npos);
+			const bool isBush = (drawInfo.TypeIndex == 2 || mPath.find("bush_cluster") != std::string::npos || curType.Name.find("灌木") != std::string::npos || curType.Name.find("Shrub") != std::string::npos);
+
+			if (isRock && s_State.RockMeshVB && s_State.RockMeshIB)
+			{
+				cmd->BindVertexBuffer(0, s_State.RockMeshVB, 0);
+				cmd->BindIndexBuffer(s_State.RockMeshIB, 0, Rhi::IndexType::UInt32);
+				cmd->DrawIndexed(s_State.RockMeshIndexCount, drawInfo.InstanceCount, 0, 0, drawInfo.StartInstance);
+			}
+			else if (isBush && s_State.BushMeshVB && s_State.BushMeshIB)
+			{
+				cmd->BindVertexBuffer(0, s_State.BushMeshVB, 0);
+				cmd->BindIndexBuffer(s_State.BushMeshIB, 0, Rhi::IndexType::UInt32);
+				cmd->DrawIndexed(s_State.BushMeshIndexCount, drawInfo.InstanceCount, 0, 0, drawInfo.StartInstance);
+			}
+			else
+			{
+				cmd->BindVertexBuffer(0, s_State.DefaultMeshVB, 0);
+				cmd->BindIndexBuffer(s_State.DefaultMeshIB, 0, Rhi::IndexType::UInt32);
+				cmd->DrawIndexed(s_State.DefaultMeshIndexCount, drawInfo.InstanceCount, 0, 0, drawInfo.StartInstance);
+			}
 		}
 	}
 }

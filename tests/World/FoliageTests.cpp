@@ -468,7 +468,7 @@ static void GenerateSampleDefaultFoliageAsset()
 	FoliageType shrub;
 	shrub.Name = "2: 矮生灌木 (Forest Shrub)";
 	shrub.MeshAsset.Path = StringPool::Get().InternPath("models/foliage/bush_cluster.wmodel");
-	shrub.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/grass_tuft.png");
+	shrub.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/bush_leaves.png");
 	shrub.Density = 0.6f;
 	shrub.ScaleMinMax = glm::vec2(0.8f, 1.8f);
 	shrub.RandomYaw = 360.0f;

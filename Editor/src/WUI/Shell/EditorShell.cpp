@@ -1167,6 +1167,10 @@ EditorToolMode EditorShell::GetEditorToolMode() const {
 
 void EditorShell::SetEditorToolMode(EditorToolMode mode) {
 		m_Editor.SetEditorToolMode(mode);
+		if (mode == EditorToolMode::Landscape)
+			ActivatePanel("terrain_editor");
+		else if (mode == EditorToolMode::Foliage)
+			ActivatePanel("foliage_editor");
 	}
 
 TerrainPanel* EditorShell::GetTerrainPanel() {

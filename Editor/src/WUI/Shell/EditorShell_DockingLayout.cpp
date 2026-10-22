@@ -1324,7 +1324,12 @@ void EditorShell::RenderTabs(Wui::WuiContext& ctx, Wui::DockNode& node, const Wu
 
 		if (tabResult.Clicked >= 0 && static_cast<size_t>(tabResult.Clicked) < node.Panels.size())
 		{
-			m_Layout.Activate(node.Panels[tabResult.Clicked]);
+			const std::string clickedPanel = node.Panels[tabResult.Clicked];
+			m_Layout.Activate(clickedPanel);
+			if (clickedPanel == "terrain_editor")
+				SetEditorToolMode(EditorToolMode::Landscape);
+			else if (clickedPanel == "foliage_editor")
+				SetEditorToolMode(EditorToolMode::Foliage);
 			// 单纯点击标签不是拖拽:清掉可能残留的拖拽来源记录。
 			m_TabDragPanel.clear();
 		}

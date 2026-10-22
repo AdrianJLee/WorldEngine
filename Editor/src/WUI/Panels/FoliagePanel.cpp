@@ -69,7 +69,7 @@ namespace World
 			FoliageType shrub;
 			shrub.Name = "矮生灌木 (Forest Shrub)";
 			shrub.MeshAsset.Path = StringPool::Get().InternPath("models/foliage/bush_cluster.wmodel");
-			shrub.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/grass_tuft.png");
+			shrub.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/bush_leaves.png");
 			shrub.Density = 0.6f;
 			shrub.ScaleMinMax = glm::vec2(0.8f, 1.8f);
 			shrub.RandomYaw = 360.0f;
@@ -547,6 +547,7 @@ namespace World
 				matOptions.push_back("(none)");
 				matOptions.push_back("textures/foliage/grass_tuft.png");
 				matOptions.push_back("textures/foliage/wild_flower.png");
+				matOptions.push_back("textures/foliage/bush_leaves.png");
 				matOptions.push_back("textures/terrain/grass_albedo.png");
 				matOptions.push_back("textures/terrain/rock_albedo.png");
 				for (const auto& tp : texAssets)
@@ -646,8 +647,9 @@ namespace World
 					}
 				}
 
+				const uint32_t totalLayers = curTerrain ? curTerrain->GetLayerCount() : 4;
 				const float layerChkHalfW = (inspW - theme.PadSmall) * 0.5f;
-				for (uint32_t l = 0; l < 4; ++l)
+				for (uint32_t l = 0; l < totalLayers; ++l)
 				{
 					const int row = static_cast<int>(l / 2);
 					const int col = static_cast<int>(l % 2);
@@ -657,11 +659,13 @@ namespace World
 						layerChkHalfW, 22.0f
 					};
 					bool layerAllowed = (type.LayerMask & (1u << l)) != 0;
-					std::string lName = curTerrain ? curTerrain->GetLayer(l).Name : "";
+					std::string lName;
+					if (curTerrain && l < curTerrain->GetLayerCount())
+						lName = curTerrain->GetLayer(l).Name;
 					if (lName.empty())
 					{
-						const char* defNames[4] = { "草地 (Grass)", "泥土 (Dirt)", "岩石 (Rock)", "沙地 (Sand)" };
-						lName = defNames[l];
+						const char* defNames[4] = { "Alpine Grass (高山草甸)", "Forest Dirt (林地黑土)", "Mountain Rock (花岗岩壁)", "Riverbed Sand (河滩细沙)" };
+						lName = (l < 4) ? defNames[l] : ("图层 " + std::to_string(l));
 					}
 					else if (lName.find(':') != std::string::npos)
 					{
@@ -677,7 +681,8 @@ namespace World
 						host.MarkDocumentDirty();
 					}
 				}
-				curY += 50.0f;
+				const int totalLMaskRows = static_cast<int>((totalLayers + 1) / 2);
+				curY += static_cast<float>(totalLMaskRows) * 24.0f + 4.0f;
 
 				// 8. 独立视距与风力
 				Wui::Label(ctx, { inspX, curY + 4.0f }, "视距/风力:", theme.TextMuted, theme.FontSizeSmall);
