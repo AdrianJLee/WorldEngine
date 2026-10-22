@@ -555,13 +555,13 @@ namespace World::Wui
 	//    空串 = 今天的 options[selected];a11y value / 弹层选项 / 返回值与写回都不受影响。
 	WLD_API bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme,
-		const std::string& displayText = std::string());
+		const std::string& displayText = std::string(), bool showAssetIcons = false);
 	// 可搜索下拉(资源选择用):点击/输入展开带输入框的弹层,按子串过滤选项,
 	// 滚轮滚动结果列表,回车选中第一个匹配项。返回 true 表示本帧选了新值(写入 selected)。
 	// M19a:与 Combo 同一条 `displayText` 口径(闭合态触发器的显示文案;空 = 当前项)。
 	WLD_API bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme,
-		const std::string& displayText = std::string());
+		const std::string& displayText = std::string(), bool showAssetIcons = false);
 	WLD_API bool TreeNode(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool leaf, const WuiTheme& theme);
 
 	// 菜单与弹窗

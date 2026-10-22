@@ -330,9 +330,9 @@ void LineSegment(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, co
 
 std::string EllipsizeMiddleToWidth(const WuiContext& ctx, std::string_view text, float width, float fontSize);
 
-bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme);
+bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme, const std::string& displayText, bool showAssetIcons);
 
-bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme);
+bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme, const std::string& displayText, bool showAssetIcons);
 
 bool TreeNode(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool leaf, const WuiTheme& theme);
 

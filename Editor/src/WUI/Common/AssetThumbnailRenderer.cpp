@@ -469,51 +469,64 @@ namespace World::Editor
 
 
 		void DrawMeshWireframe(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
-
 			const std::string& logicalPath, const Wui::WuiTheme& theme)
-
 		{
-
-			Wui::PanelBackground(ctx, rect, { 0.08f, 0.14f, 0.10f, 1.0f }, 3.0f);
-
-
+			// 背景深冷底色
+			Wui::PanelBackground(ctx, rect, theme.ContentBg, 3.0f);
 
 			const float cx = rect.X + rect.W * 0.5f;
+			const float cy = rect.Y + rect.H * 0.5f + 1.0f;
+			const float r = std::min(rect.W, rect.H) * 0.35f;
 
-			const float cy = rect.Y + rect.H * 0.5f + 2.0f;
+			// 底部接触投影 (柔和深黑椭圆)
+			Wui::PanelBackground(ctx, { cx - r * 0.85f, cy + r * 0.55f, r * 1.70f, r * 0.35f },
+				{ 0.03f, 0.04f, 0.06f, 0.85f }, r * 0.35f);
 
-			const float r = std::min(rect.W, rect.H) * 0.32f;
+			// 等轴测 3D 棱台/立方体网格顶点定义
+			const float dx = r * 0.82f;
+			const float h = r * 0.72f;
 
-			const Wui::WuiColor col { 0.35f, 0.85f, 0.50f, 0.85f };
+			const glm::vec2 vCenter { cx, cy };
+			const glm::vec2 vTop { cx, cy - h };
+			const glm::vec2 vTopLeft { cx - dx, cy - h * 0.35f };
+			const glm::vec2 vTopRight { cx + dx, cy - h * 0.35f };
+			const glm::vec2 vBotLeft { cx - dx, cy + h * 0.45f };
+			const glm::vec2 vBotRight { cx + dx, cy + h * 0.45f };
+			const glm::vec2 vBottom { cx, cy + h * 0.80f };
 
+			// 3D 几何线框主要轮廓 (鲜亮橙黄/琥珀色)
+			Wui::LineSegment(ctx, vTop, vTopRight, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, vTopRight, vCenter, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, vCenter, vTopLeft, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, vTopLeft, vTop, theme.Warning, 1.5f);
 
+			Wui::LineSegment(ctx, vTopLeft, vBotLeft, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, vBotLeft, vBottom, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, vBottom, vCenter, theme.Warning, 1.5f);
 
-			// 3D 几何六棱网格线框
+			Wui::LineSegment(ctx, vTopRight, vBotRight, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, vBotRight, vBottom, theme.Warning, 1.5f);
 
-			for (int i = 0; i < 6; ++i)
+			// 内部拓扑细分骨架线 (传达 3D 多边形网格布线质感)
+			const glm::vec2 vMidTopLeft = (vTop + vTopLeft) * 0.5f;
+			const glm::vec2 vMidTopRight = (vTop + vTopRight) * 0.5f;
+			const glm::vec2 vMidCenterLeft = (vTopLeft + vCenter) * 0.5f;
+			const glm::vec2 vMidCenterRight = (vTopRight + vCenter) * 0.5f;
+			const Wui::WuiColor wireGridCol = { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.40f };
+			Wui::LineSegment(ctx, vMidTopLeft, vMidCenterRight, wireGridCol, 1.0f);
+			Wui::LineSegment(ctx, vMidTopRight, vMidCenterLeft, wireGridCol, 1.0f);
+			Wui::LineSegment(ctx, vTopLeft, vBottom, wireGridCol, 1.0f);
+			Wui::LineSegment(ctx, vTopRight, vBottom, wireGridCol, 1.0f);
 
+			// 关键几何顶点结点 (小圆点提示 3D 几何实体)
+			const glm::vec2 vertices[] = { vTop, vTopLeft, vTopRight, vCenter, vBotLeft, vBotRight, vBottom };
+			for (const auto& pt : vertices)
 			{
-
-				float a0 = static_cast<float>(i) * 3.14159f / 3.0f;
-
-				float a1 = static_cast<float>(i + 1) * 3.14159f / 3.0f;
-
-				glm::vec2 p0 { cx + std::cos(a0) * r, cy + std::sin(a0) * (r * 0.7f) };
-
-				glm::vec2 p1 { cx + std::cos(a1) * r, cy + std::sin(a1) * (r * 0.7f) };
-
-				Wui::LineSegment(ctx, p0, p1, col, 1.5f);
-
-				Wui::LineSegment(ctx, { cx, cy }, p0, { col.R, col.G, col.B, 0.35f }, 1.0f);
-
+				Wui::PanelBackground(ctx, { pt.x - 2.0f, pt.y - 2.0f, 4.0f, 4.0f }, theme.TextBright, 2.0f);
 			}
 
-
-
 			Wui::Badge(ctx, { rect.X + rect.W - 28.0f, rect.Y + 2.0f, 26.0f, 13.0f },
-
-				"3D", { 0.30f, 0.80f, 0.45f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f }, theme, 9.0f);
-
+				"3D", theme.Warning, theme.TextBright, theme, 9.0f);
 		}
 
 

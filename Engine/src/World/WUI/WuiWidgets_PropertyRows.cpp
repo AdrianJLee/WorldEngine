@@ -1,3 +1,4 @@
+#include "World/Asset/AssetThumbnailCache.h"
 #include "WuiWidgets_Internal.h"
 #include "World/WUI/Widgets/WuiChrome.h"   // M50:ClipScope(真裁渲染)
 
@@ -707,7 +708,50 @@ std::string EllipsizeMiddleToWidth(const WuiContext& ctx, std::string_view text,
 	}
 
 
-bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme, const std::string& displayText){
+namespace
+{
+	struct AssetIconSpec
+	{
+		const char* Tag = nullptr;
+		WuiColor Color {};
+	};
+
+	AssetIconSpec GetAssetIconSpec(std::string_view path, const WuiTheme& theme)
+	{
+		if (path.empty())
+			return { nullptr, {} };
+		const AssetCategory cat = AssetThumbnailCache::DetectCategory(path);
+		switch (cat)
+		{
+		case AssetCategory::Texture:
+			return { "TEX", theme.Info };
+		case AssetCategory::Material:
+			return { "MAT", theme.Accent };
+		case AssetCategory::Mesh:
+			return { "3D", theme.Warning };
+		case AssetCategory::Prefab:
+			return { "PFB", theme.Success };
+		case AssetCategory::Script:
+			return { "LUA", theme.Accent };
+		case AssetCategory::Audio:
+			return { "AUD", theme.Warning };
+		case AssetCategory::Level:
+			return { "LVL", theme.Success };
+		case AssetCategory::Curve:
+			return { "CRV", theme.Info };
+		case AssetCategory::Shader:
+			return { "SHD", theme.Danger };
+		case AssetCategory::VFX:
+			return { "VFX", theme.Danger };
+		case AssetCategory::UI:
+			return { "UI", theme.Info };
+		default:
+			return { nullptr, {} };
+		}
+	}
+}
+
+bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme, const std::string& displayText, bool showAssetIcons){
 		const bool focused = ctx.Focus() == id;
 		// CPPT-5(2026-09-28):selected 越界(-1 = 无选中,或 >= size 的陈旧下标)时**不得**索引 options ——
 		// 当前值只在这里做一次受保护计算,a11y 节点与绘制命令共用;selected 仅在新弹层里点选条目时改写。
@@ -728,11 +772,25 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 		// "阴影贴图: 2048" / "界面语言: 简体中文" 这种重复且臃肿的文本。
 		// M4-TEX-P7:当前值超出可用宽(左内边距 6 → 折角左侧再留 4px 呼吸距离)时,只在这条**绘制命令**里
 		// 做中间省略;options / a11y value / 返回值保持完整(搜索、读屏、回显都拿完整路径)。
-		const float valueBudget = caretX - (rect.X + 6.0f) - 4.0f;
+		float valueBudget = caretX - (rect.X + 6.0f) - 4.0f;
 		// M19a:displayText 非空时触发器只画它(如 "Add" 入口的固定文案);空串走与今天
 		// **逐字节一致**的 current 路径(同一条命令、同一文本)。options / a11y value 不受影响。
 		const std::string& triggerText = displayText.empty() ? current : displayText;
-		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
+		float textOffset = 6.0f;
+		if (showAssetIcons)
+		{
+			const AssetIconSpec spec = GetAssetIconSpec(triggerText, theme);
+			if (spec.Tag)
+			{
+				constexpr float badgeW = 28.0f;
+				constexpr float badgeH = 14.0f;
+				Badge(ctx, { rect.X + 4.0f, rect.Y + (rect.H - badgeH) * 0.5f, badgeW, badgeH },
+					spec.Tag, spec.Color, theme.TextBright, theme, 9.0f);
+				textOffset = badgeW + 8.0f;
+				valueBudget = std::max(10.0f, caretX - (rect.X + textOffset) - 4.0f);
+			}
+		}
+		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + textOffset, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
 			theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, triggerText, valueBudget, 15.0f), 15.0f, false });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX, caretY, 7.0f, 1.5f }, theme.TextMuted, 1.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX + 1.5f, caretY + 3.0f, 4.0f, 1.5f }, theme.TextMuted, 1.0f });
@@ -777,8 +835,23 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 				}
 				// M4-TEX-P7:候选行同样只在**绘制命令**里省略(条目没有箭头/滚动条 ⇒ 右侧留 6px 呼吸距离,
 				// 文本不会越过条目矩形);上面的 a11y 节点与点击写回的 selected 仍是完整选项串。
-				ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + 6.0f, item.Y + 3.0f, 0, 0 }, theme.Text, 0, 1.0f,
-					EllipsizeMiddleToWidth(ctx, options[i], item.W - 12.0f, 15.0f), 15.0f, false });
+				float itemTextOffset = 6.0f;
+				float itemBudget = item.W - 12.0f;
+				if (showAssetIcons)
+				{
+					const AssetIconSpec spec = GetAssetIconSpec(options[i], theme);
+					if (spec.Tag)
+					{
+						constexpr float badgeW = 28.0f;
+						constexpr float badgeH = 14.0f;
+						Badge(ctx, { item.X + 4.0f, item.Y + (item.H - badgeH) * 0.5f, badgeW, badgeH },
+							spec.Tag, spec.Color, theme.TextBright, theme, 9.0f);
+						itemTextOffset = badgeW + 8.0f;
+						itemBudget = std::max(10.0f, item.W - itemTextOffset - 6.0f);
+					}
+				}
+				ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + itemTextOffset, item.Y + 3.0f, 0, 0 }, theme.Text, 0, 1.0f,
+					EllipsizeMiddleToWidth(ctx, options[i], itemBudget, 15.0f), 15.0f, false });
 			}
 			ctx.ClosePopupsOnOutsideClick({ id }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
@@ -803,7 +876,7 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 
 	// D3:可搜索下拉。选项多(材质/贴图路径)时,用输入框过滤 + 滚轮滚动选择,
 	// 交互与常见引擎的资源选择器一致。
-bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme, const std::string& displayText){
+bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme, const std::string& displayText, bool showAssetIcons){
 		// 触发器本身也可被 ui.invoke 点击(等价于点开下拉)。
 		const bool focused = ctx.Focus() == id;
 		const std::string current = (selected >= 0 && selected < static_cast<int>(options.size()))
@@ -827,10 +900,24 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 		{
 			// M4-TEX-P7:右侧给 "v"/"^" 箭头(画在 rect.X + rect.W - 18)留 4px 呼吸距离;当前值超宽时
 			// 只在这条**绘制命令**里中间省略 —— 上面的 a11y value(current)保持完整路径。
-			const float valueBudget = (rect.X + rect.W - 22.0f) - (fieldRect.X + 6.0f);
+			float valueBudget = (rect.X + rect.W - 22.0f) - (fieldRect.X + 6.0f);
 			// M19a:与 Combo 同一条口径 —— 非空 displayText 只改闭合态触发器的显示;a11y value(current)不动。
 			const std::string& triggerText = displayText.empty() ? current : displayText;
-			ctx.Commands().push_back({ WuiDrawKind::Text, { fieldRect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
+			float textOffset = 6.0f;
+			if (showAssetIcons)
+			{
+				const AssetIconSpec spec = GetAssetIconSpec(triggerText, theme);
+				if (spec.Tag)
+				{
+					constexpr float badgeW = 28.0f;
+					constexpr float badgeH = 14.0f;
+					Badge(ctx, { fieldRect.X + 4.0f, rect.Y + (rect.H - badgeH) * 0.5f, badgeW, badgeH },
+						spec.Tag, spec.Color, theme.TextBright, theme, 9.0f);
+					textOffset = badgeW + 8.0f;
+					valueBudget = std::max(10.0f, (rect.X + rect.W - 22.0f) - (fieldRect.X + textOffset));
+				}
+			}
+			ctx.Commands().push_back({ WuiDrawKind::Text, { fieldRect.X + textOffset, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
 				theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, triggerText, valueBudget, 15.0f), 15.0f, false });
 		}
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + rect.W - 18.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
@@ -935,8 +1022,23 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 			}
 			// M4-TEX-P7:可见候选行只在**绘制命令**里中间省略(条目右侧留 6px 呼吸距离);上面两个 a11y
 			// 节点(combo-option / combo-item)的 label 仍是完整选项串 —— 脚本按完整路径点选与搜索都不受影响。
-			ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + 6.0f, item.Y + 3.0f, 0, 0 },
-				theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, options[optionIndex], item.W - 12.0f, 15.0f),
+			float itemTextOffset = 6.0f;
+			float itemBudget = item.W - 12.0f;
+			if (showAssetIcons)
+			{
+				const AssetIconSpec spec = GetAssetIconSpec(options[optionIndex], theme);
+				if (spec.Tag)
+				{
+					constexpr float badgeW = 28.0f;
+					constexpr float badgeH = 14.0f;
+					Badge(ctx, { item.X + 4.0f, item.Y + (item.H - badgeH) * 0.5f, badgeW, badgeH },
+						spec.Tag, spec.Color, theme.TextBright, theme, 9.0f);
+					itemTextOffset = badgeW + 8.0f;
+					itemBudget = std::max(10.0f, item.W - itemTextOffset - 6.0f);
+				}
+			}
+			ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + itemTextOffset, item.Y + 3.0f, 0, 0 },
+				theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, options[optionIndex], itemBudget, 15.0f),
 				15.0f, false });
 			ctx.Commands().push_back({ WuiDrawKind::ClipPop });
 			// P4-U28:与 Combo 同一条 release 确认口径(拖出弹层后松手不选中)。

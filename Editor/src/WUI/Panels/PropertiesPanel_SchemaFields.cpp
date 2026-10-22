@@ -1,4 +1,5 @@
 #include "PropertiesPanel_Internal.h"
+#include "WUI/Common/AssetThumbnailRenderer.h"
 
 namespace World
 {
@@ -736,10 +737,54 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 						// "选到第 1 个资产"就永远不会写回(实测踩过)。
 						const int beforePick = selected;
 						const float btnW = 26.0f;
-						const Wui::WuiRect comboRect { ctrl.X, ctrl.Y, std::max(20.0f, ctrl.W - btnW - 3.0f), ctrl.H };
+
+						AssetCategory cat = AssetCategory::Unknown;
+						if (assetType == "Texture" || assetType == "Texture2D" || assetType == "TextureSource") cat = AssetCategory::Texture;
+						else if (assetType == "Material" || assetType == "PhysicsMaterial") cat = AssetCategory::Material;
+						else if (assetType == "Model" || assetType == "Mesh" || assetType == "ModelSource") cat = AssetCategory::Mesh;
+						else if (assetType == "Prefab") cat = AssetCategory::Prefab;
+						else if (assetType == "Script") cat = AssetCategory::Script;
+						else if (assetType == "Audio" || assetType == "Sound") cat = AssetCategory::Audio;
+						else if (assetType == "Scene" || assetType == "Level") cat = AssetCategory::Level;
+						else if (assetType == "Curve") cat = AssetCategory::Curve;
+						else if (assetType == "VFX") cat = AssetCategory::VFX;
+
+						// 材质/模型/贴图专享缩略图方块
+						const bool hasVisualThumb = (cat == AssetCategory::Material || cat == AssetCategory::Mesh || cat == AssetCategory::Texture || cat == AssetCategory::Prefab);
+						const float thumbSize = hasVisualThumb ? ctrl.H : 0.0f;
+						const float thumbPad = hasVisualThumb ? 4.0f : 0.0f;
+						const Wui::WuiRect thumbRect { ctrl.X, ctrl.Y, thumbSize, thumbSize };
+						const Wui::WuiRect comboRect { ctrl.X + thumbSize + thumbPad, ctrl.Y, std::max(20.0f, ctrl.W - thumbSize - thumbPad - btnW - 3.0f), ctrl.H };
 						const Wui::WuiRect pickBtnRect { ctrl.X + ctrl.W - btnW, ctrl.Y, btnW, ctrl.H };
 
-						if (Wui::SearchableCombo(ctx, fid, comboRect, "", options, selected, theme)
+						if (hasVisualThumb)
+						{
+							if (!current.empty())
+							{
+								Editor::AssetThumbnailRenderer::DrawThumbnail(ctx, thumbRect, current, cat, theme);
+								Wui::HighlightOutline(ctx, thumbRect, theme.BorderStrong, 3.0f, 1.0f);
+							}
+							else
+							{
+								Wui::PanelBackground(ctx, thumbRect, theme.ContentBg, 3.0f);
+								Wui::HighlightOutline(ctx, thumbRect, theme.Border, 3.0f, 1.0f);
+								Wui::Label(ctx, { thumbRect.X + thumbSize * 0.5f - 4.0f, thumbRect.Y + (thumbSize - 14.0f) * 0.5f }, "+", theme.TextDisabled, 12.0f);
+							}
+							Wui::Tooltip(ctx, thumbRect, current.empty() ? Wui::Tr("panel.properties.pick_asset", "点击选择资产") : (current + " (点击浏览)"));
+							if (ctx.IsClicked(thumbRect))
+							{
+								m_Host.OpenAssetPicker("Select " + assetType, cat, [instance, field, this, typeName](const std::string& picked) {
+									if (field.Set)
+									{
+										field.Set(instance, Schema::Value(picked));
+										m_Host.MarkDocumentDirty();
+									}
+								});
+							}
+						}
+
+						// 资产在下拉框选择时带有图标 (showAssetIcons = true)
+						if (Wui::SearchableCombo(ctx, fid, comboRect, "", options, selected, theme, "", true)
 							&& selected != beforePick)
 						{
 							value = selected <= 0 ? std::string() : options[static_cast<size_t>(selected)];
@@ -749,17 +794,6 @@ float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, c
 						Wui::Tooltip(ctx, pickBtnRect, Wui::Tr("panel.properties.browse_asset", "打开资产选择器浏览并选择"));
 						if (Wui::Button(ctx, fid ^ 0xABCD, pickBtnRect, "...", theme))
 						{
-							AssetCategory cat = AssetCategory::Unknown;
-							if (assetType == "Texture" || assetType == "Texture2D" || assetType == "TextureSource") cat = AssetCategory::Texture;
-							else if (assetType == "Material" || assetType == "PhysicsMaterial") cat = AssetCategory::Material;
-							else if (assetType == "Model" || assetType == "Mesh" || assetType == "ModelSource") cat = AssetCategory::Mesh;
-							else if (assetType == "Prefab") cat = AssetCategory::Prefab;
-							else if (assetType == "Script") cat = AssetCategory::Script;
-							else if (assetType == "Audio" || assetType == "Sound") cat = AssetCategory::Audio;
-							else if (assetType == "Scene" || assetType == "Level") cat = AssetCategory::Level;
-							else if (assetType == "Curve") cat = AssetCategory::Curve;
-							else if (assetType == "VFX") cat = AssetCategory::VFX;
-
 							m_Host.OpenAssetPicker("Select " + assetType, cat, [instance, field, this, typeName](const std::string& picked) {
 								if (field.Set)
 								{
