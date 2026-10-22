@@ -1,4 +1,6 @@
 #include "World/Asset/AssetThumbnailCache.h"
+#include "World/Utils/Paths.h"
+#include <fstream>
 #include "WuiWidgets_Internal.h"
 #include "World/WUI/Widgets/WuiChrome.h"   // M50:ClipScope(真裁渲染)
 
@@ -760,8 +762,13 @@ namespace
 		uint64_t texId = AssetThumbnailCache::Get().GetOrCreateTextureId(pathStr);
 		if (texId != 0)
 		{
+			const ThumbnailInfo* thumb = AssetThumbnailCache::Get().GetThumbnail(pathStr);
+			const WuiRect uv = (thumb && thumb->IsOffscreenRender)
+				? WuiRect { 0.0f, 1.0f, 1.0f, -1.0f }
+				: WuiRect { 0.0f, 0.0f, 1.0f, 1.0f };
+
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ContentBg, 2.0f });
-			Image(ctx, rect, texId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+			Image(ctx, rect, texId, uv, theme);
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.BorderStrong, 2.0f, 1.0f });
 			return;
 		}
@@ -769,12 +776,37 @@ namespace
 		const AssetCategory cat = AssetThumbnailCache::DetectCategory(path);
 		if (cat == AssetCategory::Material)
 		{
-			// 迷你 3D 材质球缩略图: 阴影底 + 球体 + 左上高光
+			// 迷你 3D 材质球缩略图: 解析材质真实颜色，渲染带有球面漫反射与高光的微缩球
+			WuiColor ballCol = spec.Color;
+			std::filesystem::path fullPath = Paths::AssetRoot() / pathStr;
+			std::ifstream file(fullPath);
+			if (file.is_open())
+			{
+				std::string line;
+				while (std::getline(file, line))
+				{
+					if (line.rfind("BaseColor:", 0) == 0 || line.find("tint:") != std::string::npos)
+					{
+						size_t pos = line.find(':');
+						std::string nums = line.substr(pos + 1);
+						float r = 0, g = 0, b = 0, a = 1;
+						if (std::sscanf(nums.c_str(), " [%f,%f,%f,%f]", &r, &g, &b, &a) >= 3 ||
+						    std::sscanf(nums.c_str(), "%f,%f,%f,%f", &r, &g, &b, &a) >= 3 ||
+						    std::sscanf(nums.c_str(), " [%f %f %f %f]", &r, &g, &b, &a) >= 3 ||
+						    std::sscanf(nums.c_str(), "%f %f %f %f", &r, &g, &b, &a) >= 3)
+						{
+							ballCol = { r, g, b, a };
+						}
+						break;
+					}
+				}
+			}
+
 			const float cx = rect.X + rect.W * 0.5f;
 			const float cy = rect.Y + rect.H * 0.5f;
 			const float r = rect.W * 0.44f;
 			const WuiRect sphereRect { cx - r, cy - r, r * 2.0f, r * 2.0f };
-			ctx.Commands().push_back({ WuiDrawKind::Rect, sphereRect, spec.Color, r });
+			ctx.Commands().push_back({ WuiDrawKind::Rect, sphereRect, ballCol, r });
 			const float hr = r * 0.38f;
 			const WuiRect hlRect { cx - r * 0.45f, cy - r * 0.45f, hr, hr };
 			ctx.Commands().push_back({ WuiDrawKind::Rect, hlRect, theme.TextBright, hr * 0.5f });
@@ -784,7 +816,7 @@ namespace
 
 		if (cat == AssetCategory::Mesh)
 		{
-			// 迷你 3D 等轴测几何立方体缩略图
+			// 迷你 3D 等轴测几何立方体缩略图 (工业级 CAD 风格拓扑线)
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ContentBg, 2.0f });
 			const float cx = rect.X + rect.W * 0.5f;
 			const float cy = rect.Y + rect.H * 0.5f;
@@ -793,12 +825,12 @@ namespace
 			const glm::vec2 bLeft { cx - r * 0.85f, cy + r * 0.5f };
 			const glm::vec2 bRight { cx + r * 0.85f, cy + r * 0.5f };
 			const glm::vec2 center { cx, cy };
-			LineSegment(ctx, top, bRight, spec.Color, 1.2f);
-			LineSegment(ctx, bRight, bLeft, spec.Color, 1.2f);
-			LineSegment(ctx, bLeft, top, spec.Color, 1.2f);
-			LineSegment(ctx, center, top, spec.Color, 1.0f);
-			LineSegment(ctx, center, bLeft, spec.Color, 1.0f);
-			LineSegment(ctx, center, bRight, spec.Color, 1.0f);
+			LineSegment(ctx, top, bRight, theme.Warning, 1.2f);
+			LineSegment(ctx, bRight, bLeft, theme.Warning, 1.2f);
+			LineSegment(ctx, bLeft, top, theme.Warning, 1.2f);
+			LineSegment(ctx, center, top, theme.AxisZ, 1.0f);
+			LineSegment(ctx, center, bLeft, theme.AxisZ, 1.0f);
+			LineSegment(ctx, center, bRight, theme.AxisZ, 1.0f);
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.BorderStrong, 2.0f, 1.0f });
 			return;
 		}

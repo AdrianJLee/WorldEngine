@@ -38,6 +38,7 @@ namespace World
 		// (资产自描述),不再写 `.wimport` 旁路文件。
 		bool Reimport(std::string* message = nullptr);
 		const std::string& StatusText() const { return m_Status; }
+		void RequestPreviewCapture(const std::string& path) { m_PendingPreviewCapture = path; }
 
 	private:
 		void EnsureGpuResources();
@@ -68,6 +69,7 @@ namespace World
 		// 预览播放的是第 0 条 clip(与状态行/时间滑杆同一来源)。
 		float AnimationClipDuration() const;
 
+		std::string m_PendingPreviewCapture;
 		std::string m_PanelId = "model:";
 		std::string m_PanelTitle = "Model";
 		std::string m_LogicalPath;

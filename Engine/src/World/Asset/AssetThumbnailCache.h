@@ -33,6 +33,7 @@ namespace World
 		uint32_t Width = 64;
 		uint32_t Height = 64;
 		bool IsReady = false;
+		bool IsOffscreenRender = false;
 	};
 
 	class WLD_API AssetThumbnailCache

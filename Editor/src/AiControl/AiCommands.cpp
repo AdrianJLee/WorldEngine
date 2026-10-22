@@ -284,13 +284,18 @@ namespace World
 			{
 				const std::filesystem::path temp = std::filesystem::temp_directory_path(ec);
 				const std::filesystem::path cwd = std::filesystem::current_path(ec);
-				if (IsUnder(path, temp) || IsUnder(path, cwd))
+				if (IsUnder(path, temp) || IsUnder(path, cwd) || IsUnder(path, Paths::AssetRoot()) || IsUnder(path, Paths::ProjectDir()))
+				{
+					std::filesystem::create_directories(path.parent_path(), ec);
 					return path;
+				}
 				if (error)
 					*error = "absolute capture paths must live under the temp dir or the working dir";
 				return {};
 			}
-			return std::filesystem::path(WLD_OUTPUT_DIR) / path;
+			std::filesystem::path out = std::filesystem::path(WLD_OUTPUT_DIR) / path;
+			std::filesystem::create_directories(out.parent_path(), ec);
+			return out;
 		}
 
 		bool ParseFloat3(const std::string& text, glm::vec3* out)
@@ -1948,9 +1953,9 @@ namespace World
 				return false;
 			}
 			const std::string kind = arg("kind", "material-preview");
-			if (kind != "material-preview" && kind != "vfx-preview" && kind != "particle-preview")
+			if (kind != "material-preview" && kind != "model-preview" && kind != "mesh-preview" && kind != "vfx-preview" && kind != "particle-preview")
 			{
-				error = "unsupported texture kind '" + kind + "' (supported: material-preview, vfx-preview)";
+				error = "unsupported texture kind '" + kind + "' (supported: material-preview, model-preview, vfx-preview)";
 				return false;
 			}
 			std::string panel = arg("panel");

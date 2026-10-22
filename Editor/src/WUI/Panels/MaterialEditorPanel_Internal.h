@@ -26,6 +26,7 @@
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
+#include "World/Asset/AssetThumbnailCache.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/Widgets/WuiModal.h"
 #include "World/WUI/WuiWidgets.h"

@@ -184,6 +184,20 @@ bool EditorShell::AiActivatePanel(const std::string& panel, std::string* message
 		};
 		if (panel.empty())
 			return fail("unknown panel '" + panel + "'");
+		if (panel.rfind("material:", 0) == 0)
+		{
+			EnsureMaterialPanelFromId(panel);
+			OpenPanelAttached(panel);
+			if (message) *message = "opened and activated " + panel;
+			return true;
+		}
+		if (panel.rfind("model:", 0) == 0)
+		{
+			std::string modelPath = panel.substr(6);
+			OpenModelPreview(modelPath);
+			if (message) *message = "opened and activated " + panel;
+			return true;
+		}
 		if (panel.rfind("atlas:", 0) == 0)
 		{
 			EnsureAtlasPanelFromId(panel);
@@ -318,6 +332,11 @@ bool EditorShell::AiRequestPreviewCapture(const std::string& panel, const std::s
 		if (auto* material = dynamic_cast<MaterialEditorPanel*>(found->second.get()))
 		{
 			material->RequestPreviewCapture(path);
+			return true;
+		}
+		if (auto* model = dynamic_cast<ModelPreviewPanel*>(found->second.get()))
+		{
+			model->RequestPreviewCapture(path);
 			return true;
 		}
 		if (auto* particle = dynamic_cast<ParticleEditorPanel*>(found->second.get()))

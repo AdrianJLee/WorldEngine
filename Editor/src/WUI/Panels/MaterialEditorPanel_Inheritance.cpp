@@ -703,6 +703,18 @@ uint64_t MaterialEditorPanel::RenderPreview(){
 			// 尺寸变化只是换了纹理对象:槽位 id 不变,Update 推进内容代让 WUI 后端丢掉旧 set。
 			registry.Update(m_PreviewTextureId, m_PreviewColor);
 		}
+		if (m_PreviewTextureId != 0 && !m_Path.empty())
+		{
+			ThumbnailInfo info;
+			info.Path = m_Path;
+			info.Category = AssetCategory::Material;
+			info.TextureId = m_PreviewTextureId;
+			info.Width = static_cast<uint32_t>(m_PreviewTargetW);
+			info.Height = static_cast<uint32_t>(m_PreviewTargetH);
+			info.IsReady = true;
+			info.IsOffscreenRender = true;
+			AssetThumbnailCache::Get().RegisterThumbnail(m_Path, info);
+		}
 		return m_PreviewTextureId;
 	}
 

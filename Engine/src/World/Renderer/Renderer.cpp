@@ -1079,6 +1079,8 @@ namespace World
 		glReadPixels(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height),
 			GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
 
+		std::error_code dirEc;
+		std::filesystem::create_directories(path.parent_path(), dirEc);
 		std::ofstream file(path, std::ios::binary | std::ios::trunc);
 		if (!file)
 		{

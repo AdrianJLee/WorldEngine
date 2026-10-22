@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "WUI/Panels/ModelPreviewPanel.h"
+#include "World/Asset/AssetThumbnailCache.h"
 #include "WUI/Panels/ViewportPanel.h"
 
 #include "World/Renderer/MaterialLibrary.h"
@@ -785,6 +786,13 @@ namespace World
 					m_LogicalPath, slotBase, stats.DrawCalls, m_Mesh->GetSubmeshes().size());
 			}
 		}
+		if (!m_PendingPreviewCapture.empty())
+		{
+			if (Renderer::CaptureTexture(m_PendingPreviewCapture, m_PreviewColor,
+				m_PreviewSize, m_PreviewSize))
+				WLD_CORE_INFO("[ai] model preview capture written: {0}", m_PendingPreviewCapture);
+			m_PendingPreviewCapture.clear();
+		}
 		CapturePreviewTextureSequence();
 
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
@@ -795,6 +803,18 @@ namespace World
 				m_PreviewTextureId = registry.Register(m_PreviewColor);
 			else
 				registry.Update(m_PreviewTextureId, m_PreviewColor);
+		}
+		if (m_PreviewTextureId != 0 && !m_LogicalPath.empty())
+		{
+			ThumbnailInfo info;
+			info.Path = m_LogicalPath;
+			info.Category = AssetCategory::Mesh;
+			info.TextureId = m_PreviewTextureId;
+			info.Width = m_PreviewSize;
+			info.Height = m_PreviewSize;
+			info.IsReady = true;
+			info.IsOffscreenRender = true;
+			AssetThumbnailCache::Get().RegisterThumbnail(m_LogicalPath, info);
 		}
 		return m_PreviewTextureId;
 	}

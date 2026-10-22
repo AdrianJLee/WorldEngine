@@ -167,38 +167,6 @@ namespace World
 			}
 		}
 
-		// 3. 材质 (.wmat) 资产: 尝试读取 AlbedoTexture 主贴图作为预览图
-		if (cat == AssetCategory::Material)
-		{
-			std::filesystem::path fullMat = assetRoot / path;
-			std::ifstream file(fullMat);
-			if (file.is_open())
-			{
-				std::string line;
-				while (std::getline(file, line))
-				{
-					if (line.rfind("AlbedoTexture:", 0) == 0)
-					{
-						std::string val = line.substr(14);
-						while (!val.empty() && (val.front() == 32 || val.front() == 34)) val.erase(val.begin());
-						while (!val.empty() && (val.back() == 32 || val.back() == 34 || val.back() == 13)) val.pop_back();
-						if (!val.empty())
-						{
-							uint64_t albId = Wui::ResolveTextureWithHook(val);
-							if (albId != 0)
-							{
-								ThumbnailInfo& info = (it != m_Thumbnails.end()) ? it->second : GetOrCreateThumbnail(path);
-								info.TextureId = albId;
-								info.IsReady = true;
-								return albId;
-							}
-						}
-						break;
-					}
-				}
-			}
-		}
-
 		return 0;
 	}
 

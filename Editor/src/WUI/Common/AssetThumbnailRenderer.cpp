@@ -7,6 +7,7 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include "World/Utils/Paths.h"
+#include "World/Asset/WModelIO.h"
 
 #include "World/Math/Curve/CubicBezierCurve.h"
 
@@ -50,173 +51,163 @@ namespace World::Editor
 
 
 
-		void DrawMaterialBall(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
-
-			const std::string& logicalPath, const Wui::WuiTheme& theme)
-
+		struct MatProps
 		{
+			Wui::WuiColor BaseColor = { 0.85f, 0.85f, 0.85f, 1.0f };
+			float Roughness = 0.5f;
+			float Metallic = 0.0f;
+			float Emissive = 0.0f;
+			std::string AlbedoTex;
+			bool IsTransparent = false;
+		};
 
-			// 背景底色
-
-			Wui::PanelBackground(ctx, rect, { 0.08f, 0.10f, 0.13f, 1.0f }, 3.0f);
-
-
-
-			// 尝试解析 .wmat 属性 (纯文本读取，零外部依赖)
-
-			Wui::WuiColor baseColor { 0.85f, 0.35f, 0.35f, 1.0f };
-
-			float roughness = 0.35f;
-
-			std::string albedoTex;
-
-
-
+		MatProps ParseMaterialProps(const std::string& logicalPath)
+		{
+			MatProps props;
 			std::filesystem::path fullPath = Paths::AssetRoot() / logicalPath;
-
 			std::ifstream file(fullPath);
+			if (!file.is_open())
+				return props;
 
-			if (file.is_open())
-
+			std::string line;
+			while (std::getline(file, line))
 			{
-
-				std::string line;
-
-				while (std::getline(file, line))
-
+				if (line.rfind("BaseColor:", 0) == 0)
 				{
-
-					if (line.rfind("BaseColor:", 0) == 0)
-
+					size_t ob = line.find('[');
+					size_t cb = line.find(']');
+					if (ob != std::string::npos && cb != std::string::npos && cb > ob)
 					{
-
-						size_t ob = line.find('[');
-
-						size_t cb = line.find(']');
-
-						if (ob != std::string::npos && cb != std::string::npos && cb > ob)
-
+						std::string nums = line.substr(ob + 1, cb - ob - 1);
+						float r = 0, g = 0, b = 0, a = 1;
+						if (std::sscanf(nums.c_str(), "%f,%f,%f,%f", &r, &g, &b, &a) >= 3 ||
+						    std::sscanf(nums.c_str(), "%f %f %f %f", &r, &g, &b, &a) >= 3)
 						{
-
-							std::string nums = line.substr(ob + 1, cb - ob - 1);
-
-							float r = 0, g = 0, b = 0, a = 1;
-
-							if (std::sscanf(nums.c_str(), "%f,%f,%f,%f", &r, &g, &b, &a) >= 3 ||
-
-							    std::sscanf(nums.c_str(), "%f %f %f %f", &r, &g, &b, &a) >= 3)
-
-							{
-
-								baseColor = { r, g, b, a };
-
-							}
-
+							props.BaseColor = { r, g, b, a };
+							if (a < 0.95f) props.IsTransparent = true;
 						}
-
 					}
-
-					else if (line.rfind("Roughness:", 0) == 0)
-
-					{
-
-						float rough = 0.5f;
-
-						if (std::sscanf(line.c_str() + 10, "%f", &rough) == 1)
-
-							roughness = rough;
-
-					}
-
-					else if (line.rfind("AlbedoTexture:", 0) == 0)
-
-					{
-
-						std::string val = line.substr(14);
-
-						while (!val.empty() && (val.front() == ' ' || val.front() == '"')) val.erase(val.begin());
-
-						while (!val.empty() && (val.back() == ' ' || val.back() == '"' || val.back() == '\r')) val.pop_back();
-
-						albedoTex = val;
-
-					}
-
 				}
-
+				else if (line.find("tint:") != std::string::npos)
+				{
+					size_t pos = line.find("tint:");
+					std::string nums = line.substr(pos + 5);
+					float r = 0, g = 0, b = 0, a = 1;
+					if (std::sscanf(nums.c_str(), "%f,%f,%f,%f", &r, &g, &b, &a) >= 3 ||
+					    std::sscanf(nums.c_str(), "%f %f %f %f", &r, &g, &b, &a) >= 3)
+					{
+						props.BaseColor = { r, g, b, a };
+						if (a < 0.95f) props.IsTransparent = true;
+					}
+				}
+				else if (line.rfind("Roughness:", 0) == 0 || line.find("roughness:") != std::string::npos)
+				{
+					size_t pos = line.find(':');
+					float rough = 0.5f;
+					if (std::sscanf(line.c_str() + pos + 1, "%f", &rough) == 1)
+						props.Roughness = std::clamp(rough, 0.0f, 1.0f);
+				}
+				else if (line.rfind("Metallic:", 0) == 0 || line.find("metallic:") != std::string::npos)
+				{
+					size_t pos = line.find(':');
+					float metal = 0.0f;
+					if (std::sscanf(line.c_str() + pos + 1, "%f", &metal) == 1)
+						props.Metallic = std::clamp(metal, 0.0f, 1.0f);
+				}
+				else if (line.rfind("Emissive:", 0) == 0 || line.find("emissivePower:") != std::string::npos)
+				{
+					size_t pos = line.find(':');
+					float em = 0.0f;
+					if (std::sscanf(line.c_str() + pos + 1, "%f", &em) == 1)
+						props.Emissive = em;
+				}
+				else if (line.rfind("AlbedoTexture:", 0) == 0 || line.find("albedoMap:") != std::string::npos)
+				{
+					size_t pos = line.find(':');
+					std::string val = line.substr(pos + 1);
+					while (!val.empty() && (static_cast<unsigned char>(val.front()) <= 32 || val.front() == '"')) val.erase(val.begin());
+					while (!val.empty() && (static_cast<unsigned char>(val.back()) <= 32 || val.back() == '"')) val.pop_back();
+					props.AlbedoTex = val;
+				}
+				else if (line.find("Transparent") != std::string::npos)
+				{
+					props.IsTransparent = true;
+				}
 			}
+			return props;
+		}
 
+		void DrawMaterialBall(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+			const std::string& logicalPath, const Wui::WuiTheme& theme)
+		{
+			Wui::GradientFill(ctx, rect, theme.HoverBg, theme.HoverBg, theme.WindowBg, theme.WindowBg);
+			Wui::HighlightOutline(ctx, rect, theme.Border, 3.0f, 1.0f);
 
-
+			const MatProps props = ParseMaterialProps(logicalPath);
 			const float cx = rect.X + rect.W * 0.5f;
-
 			const float cy = rect.Y + rect.H * 0.5f;
+			const float r = std::min(rect.W, rect.H) * 0.38f;
 
-			const float r = std::min(rect.W, rect.H) * 0.36f;
+			Wui::PanelBackground(ctx, { cx - r * 0.75f, cy + r * 0.52f, r * 1.5f, r * 0.34f },
+				theme.ModalBackdrop, r * 0.34f);
 
-
-
-			// 地面阴影 (柔和椭圆)
-
-			Wui::PanelBackground(ctx, { cx - r * 0.75f, cy + r * 0.55f, r * 1.5f, r * 0.35f },
-
-				{ 0.03f, 0.04f, 0.06f, 0.85f }, r * 0.35f);
-
-
-
-			// 材质球基底圆
+			uint64_t albedoTexId = 0;
+			if (!props.AlbedoTex.empty())
+				albedoTexId = Wui::ResolveTextureWithHook(props.AlbedoTex);
 
 			const Wui::WuiRect sphereRect { cx - r, cy - r, r * 2.0f, r * 2.0f };
 
-			Wui::PanelBackground(ctx, sphereRect, baseColor, r);
+			if (albedoTexId != 0)
+			{
+				Wui::Image(ctx, sphereRect, albedoTexId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+				Wui::PanelBackground(ctx, { cx - r * 0.65f, cy - r * 0.65f, r * 1.25f, r * 1.25f },
+					theme.TextBright, r * 0.625f);
+				Wui::HighlightOutline(ctx, sphereRect, theme.BorderStrong, r, 2.0f);
+			}
+			else if (props.IsTransparent)
+			{
+				const Wui::WuiColor glassCol = { props.BaseColor.R, props.BaseColor.G, props.BaseColor.B, 0.45f };
+				Wui::PanelBackground(ctx, sphereRect, glassCol, r);
+				const Wui::WuiColor causticCol = {
+					std::min(1.0f, props.BaseColor.R * 1.3f),
+					std::min(1.0f, props.BaseColor.G * 1.3f),
+					std::min(1.0f, props.BaseColor.B * 1.3f),
+					0.60f
+				};
+				Wui::PanelBackground(ctx, { cx - r * 0.25f, cy + r * 0.15f, r * 0.90f, r * 0.65f },
+					causticCol, r * 0.35f);
+				Wui::HighlightOutline(ctx, sphereRect, theme.TextBright, r, 1.5f);
+			}
+			else
+			{
+				Wui::PanelBackground(ctx, sphereRect, props.BaseColor, r);
+				const Wui::WuiColor highlightCol = {
+					std::min(1.0f, props.BaseColor.R * 1.35f + 0.12f),
+					std::min(1.0f, props.BaseColor.G * 1.35f + 0.12f),
+					std::min(1.0f, props.BaseColor.B * 1.35f + 0.12f),
+					0.65f
+				};
+				Wui::PanelBackground(ctx, { cx - r * 0.72f, cy - r * 0.72f, r * 1.28f, r * 1.28f },
+					highlightCol, r * 0.64f);
+				Wui::HighlightOutline(ctx, sphereRect, theme.Border, r, 1.0f);
+			}
 
+			const float specR = r * 0.30f * (1.0f - props.Roughness * 0.65f);
+			const Wui::WuiColor specCol = props.Metallic > 0.5f ? props.BaseColor : theme.TextBright;
+			Wui::PanelBackground(ctx, { cx - r * 0.40f, cy - r * 0.40f, specR, specR },
+				specCol, specR * 0.5f);
 
+			if (props.Emissive > 0.1f)
+			{
+				Wui::HighlightOutline(ctx, sphereRect, theme.Warning, r, 2.0f);
+			}
 
-			// 3D 漫反射球面高光层 (向左上方偏移)
-
-			const Wui::WuiColor highlightCol {
-
-				std::min(1.0f, baseColor.R * 1.35f + 0.12f),
-
-				std::min(1.0f, baseColor.G * 1.35f + 0.12f),
-
-				std::min(1.0f, baseColor.B * 1.35f + 0.12f),
-
-				0.75f
-
-			};
-
-			Wui::PanelBackground(ctx, { cx - r * 0.75f, cy - r * 0.75f, r * 1.30f, r * 1.30f },
-
-				highlightCol, r * 0.65f);
-
-
-
-			// 镜面高光亮点 (粗糙度越小越锐利)
-
-			const float specR = r * 0.32f * (1.0f - roughness * 0.6f);
-
-			Wui::PanelBackground(ctx, { cx - r * 0.42f, cy - r * 0.42f, specR, specR },
-
-				{ 1.0f, 1.0f, 1.0f, 0.90f }, specR * 0.5f);
-
-
-
-			// 边缘光轮廓
-
-			Wui::HighlightOutline(ctx, sphereRect, { 1.0f, 1.0f, 1.0f, 0.30f }, r, 1.0f);
-
-
-
-			// 右上角微型角标
-
-			Wui::Badge(ctx, { rect.X + rect.W - 30.0f, rect.Y + 2.0f, 28.0f, 13.0f },
-
-				"MAT", { 0.15f, 0.75f, 0.85f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f }, theme, 9.0f);
-
+			if (rect.W >= 36.0f)
+			{
+				Wui::Badge(ctx, { rect.X + rect.W - 30.0f, rect.Y + 2.0f, 28.0f, 13.0f },
+					"MAT", theme.Accent, theme.TextBright, theme, 9.0f);
+			}
 		}
-
-
 
 		void DrawAudioWaveform(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
 
@@ -471,65 +462,93 @@ namespace World::Editor
 		void DrawMeshWireframe(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
 			const std::string& logicalPath, const Wui::WuiTheme& theme)
 		{
-			// 背景深冷底色
 			Wui::PanelBackground(ctx, rect, theme.ContentBg, 3.0f);
+			Wui::HighlightOutline(ctx, rect, theme.Border, 3.0f, 1.0f);
 
 			const float cx = rect.X + rect.W * 0.5f;
-			const float cy = rect.Y + rect.H * 0.5f + 1.0f;
-			const float r = std::min(rect.W, rect.H) * 0.35f;
+			const float cy = rect.Y + rect.H * 0.52f;
+			const float r = std::min(rect.W, rect.H) * 0.36f;
 
-			// 底部接触投影 (柔和深黑椭圆)
 			Wui::PanelBackground(ctx, { cx - r * 0.85f, cy + r * 0.55f, r * 1.70f, r * 0.35f },
-				{ 0.03f, 0.04f, 0.06f, 0.85f }, r * 0.35f);
+				theme.ModalBackdrop, r * 0.35f);
 
-			// 等轴测 3D 棱台/立方体网格顶点定义
-			const float dx = r * 0.82f;
-			const float h = r * 0.72f;
+			const std::filesystem::path fullPath = Paths::AssetRoot() / logicalPath;
+			Asset::WModelData modelData;
+			std::string err;
+			bool loaded = Asset::WModelIO::ReadFile(fullPath.string(), modelData, &err);
 
-			const glm::vec2 vCenter { cx, cy };
-			const glm::vec2 vTop { cx, cy - h };
-			const glm::vec2 vTopLeft { cx - dx, cy - h * 0.35f };
-			const glm::vec2 vTopRight { cx + dx, cy - h * 0.35f };
-			const glm::vec2 vBotLeft { cx - dx, cy + h * 0.45f };
-			const glm::vec2 vBotRight { cx + dx, cy + h * 0.45f };
-			const glm::vec2 vBottom { cx, cy + h * 0.80f };
-
-			// 3D 几何线框主要轮廓 (鲜亮橙黄/琥珀色)
-			Wui::LineSegment(ctx, vTop, vTopRight, theme.Warning, 1.5f);
-			Wui::LineSegment(ctx, vTopRight, vCenter, theme.Warning, 1.5f);
-			Wui::LineSegment(ctx, vCenter, vTopLeft, theme.Warning, 1.5f);
-			Wui::LineSegment(ctx, vTopLeft, vTop, theme.Warning, 1.5f);
-
-			Wui::LineSegment(ctx, vTopLeft, vBotLeft, theme.Warning, 1.5f);
-			Wui::LineSegment(ctx, vBotLeft, vBottom, theme.Warning, 1.5f);
-			Wui::LineSegment(ctx, vBottom, vCenter, theme.Warning, 1.5f);
-
-			Wui::LineSegment(ctx, vTopRight, vBotRight, theme.Warning, 1.5f);
-			Wui::LineSegment(ctx, vBotRight, vBottom, theme.Warning, 1.5f);
-
-			// 内部拓扑细分骨架线 (传达 3D 多边形网格布线质感)
-			const glm::vec2 vMidTopLeft = (vTop + vTopLeft) * 0.5f;
-			const glm::vec2 vMidTopRight = (vTop + vTopRight) * 0.5f;
-			const glm::vec2 vMidCenterLeft = (vTopLeft + vCenter) * 0.5f;
-			const glm::vec2 vMidCenterRight = (vTopRight + vCenter) * 0.5f;
-			const Wui::WuiColor wireGridCol = { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.40f };
-			Wui::LineSegment(ctx, vMidTopLeft, vMidCenterRight, wireGridCol, 1.0f);
-			Wui::LineSegment(ctx, vMidTopRight, vMidCenterLeft, wireGridCol, 1.0f);
-			Wui::LineSegment(ctx, vTopLeft, vBottom, wireGridCol, 1.0f);
-			Wui::LineSegment(ctx, vTopRight, vBottom, wireGridCol, 1.0f);
-
-			// 关键几何顶点结点 (小圆点提示 3D 几何实体)
-			const glm::vec2 vertices[] = { vTop, vTopLeft, vTopRight, vCenter, vBotLeft, vBotRight, vBottom };
-			for (const auto& pt : vertices)
+			glm::vec3 center(0.0f);
+			glm::vec3 extents(1.0f);
+			if (loaded)
 			{
-				Wui::PanelBackground(ctx, { pt.x - 2.0f, pt.y - 2.0f, 4.0f, 4.0f }, theme.TextBright, 2.0f);
+				center = (modelData.Bounds.Min + modelData.Bounds.Max) * 0.5f;
+				extents = glm::max(glm::vec3(0.01f), (modelData.Bounds.Max - modelData.Bounds.Min) * 0.5f);
 			}
 
-			Wui::Badge(ctx, { rect.X + rect.W - 28.0f, rect.Y + 2.0f, 26.0f, 13.0f },
-				"3D", theme.Warning, theme.TextBright, theme, 9.0f);
+			constexpr float cosYaw = 0.8253356f;
+			constexpr float sinYaw = 0.5646425f;
+			constexpr float cosPitch = 0.9689124f;
+			constexpr float sinPitch = 0.2474039f;
+
+			const float maxDim = std::max({ extents.x, extents.y, extents.z });
+			const float scale = (r * 0.95f) / std::max(0.001f, maxDim);
+
+			auto project = [&](const glm::vec3& p) -> glm::vec2
+			{
+				glm::vec3 rel = p - center;
+				float rx = rel.x * cosYaw - rel.z * sinYaw;
+				float rz = rel.x * sinYaw + rel.z * cosYaw;
+				float ry = rel.y * cosPitch - rz * sinPitch;
+				return glm::vec2(cx + rx * scale, cy - ry * scale);
+			};
+
+			const glm::vec3 bMin = center - extents;
+			const glm::vec3 bMax = center + extents;
+
+			const glm::vec2 p000 = project({ bMin.x, bMin.y, bMin.z });
+			const glm::vec2 p001 = project({ bMin.x, bMin.y, bMax.z });
+			const glm::vec2 p010 = project({ bMin.x, bMax.y, bMin.z });
+			const glm::vec2 p011 = project({ bMin.x, bMax.y, bMax.z });
+			const glm::vec2 p100 = project({ bMax.x, bMin.y, bMin.z });
+			const glm::vec2 p101 = project({ bMax.x, bMin.y, bMax.z });
+			const glm::vec2 p110 = project({ bMax.x, bMax.y, bMin.z });
+			const glm::vec2 p111 = project({ bMax.x, bMax.y, bMax.z });
+
+			Wui::LineSegment(ctx, p010, p110, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, p110, p111, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, p111, p011, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, p011, p010, theme.Warning, 1.5f);
+
+			Wui::LineSegment(ctx, p011, p001, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, p111, p101, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, p110, p100, theme.Warning, 1.5f);
+
+			Wui::LineSegment(ctx, p001, p101, theme.Warning, 1.5f);
+			Wui::LineSegment(ctx, p101, p100, theme.Warning, 1.5f);
+
+			if (loaded && !modelData.Vertices.empty())
+			{
+				const size_t vCount = modelData.Vertices.size();
+				const size_t step = std::max<size_t>(1, vCount / 12);
+				for (size_t i = 0; i + step < vCount && i < step * 10; i += step)
+				{
+					const glm::vec2 va = project(modelData.Vertices[i].Position);
+					const glm::vec2 vb = project(modelData.Vertices[i + step].Position);
+					Wui::LineSegment(ctx, va, vb, theme.AxisZ, 1.0f);
+				}
+			}
+			else
+			{
+				Wui::LineSegment(ctx, (p010 + p011) * 0.5f, (p110 + p111) * 0.5f, theme.AxisZ, 1.0f);
+				Wui::LineSegment(ctx, (p011 + p111) * 0.5f, (p001 + p101) * 0.5f, theme.AxisZ, 1.0f);
+			}
+
+			if (rect.W >= 36.0f)
+			{
+				Wui::Badge(ctx, { rect.X + rect.W - 28.0f, rect.Y + 2.0f, 26.0f, 13.0f },
+					"3D", theme.Warning, theme.TextBright, theme, 9.0f);
+			}
 		}
-
-
 
 		void DrawGenericThumbnail(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
 
@@ -618,8 +637,13 @@ namespace World::Editor
 		uint64_t previewTexId = AssetThumbnailCache::Get().GetOrCreateTextureId(logicalPath);
 		if (previewTexId != 0)
 		{
+			const ThumbnailInfo* thumb = AssetThumbnailCache::Get().GetThumbnail(logicalPath);
+			const Wui::WuiRect uv = (thumb && thumb->IsOffscreenRender)
+				? Wui::WuiRect { 0.0f, 1.0f, 1.0f, -1.0f }
+				: Wui::WuiRect { 0.0f, 0.0f, 1.0f, 1.0f };
+
 			Wui::PanelBackground(ctx, rect, theme.ContentBg, 3.0f);
-			Wui::Image(ctx, rect, previewTexId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+			Wui::Image(ctx, rect, previewTexId, uv, theme);
 			Wui::HighlightOutline(ctx, rect, theme.BorderStrong, 3.0f, 1.0f);
 
 			const char* tag = (category == AssetCategory::Material) ? "MAT" :
