@@ -138,13 +138,13 @@ float4 PSMain(PSInput input) : SV_Target
     }
 
     float4 albedo = u_AlbedoTexture.Sample(input.TexCoord);
-    if (albedo.a < 0.25f)
+    if (albedo.a < 0.20f)
         discard;
 
     float3 N = normalize(input.Normal);
     
     // 根部接触环境光遮蔽 (Ground Root AO)
-    float rootAO = lerp(0.35f, 1.0f, saturate(1.0f - input.TexCoord.y * 0.85f));
+    float rootAO = lerp(0.40f, 1.0f, saturate(1.0f - input.TexCoord.y * 0.85f));
 
     float3 ambient = u_Light.Ambient.rgb * u_Light.Ambient.a * albedo.rgb * rootAO;
 
@@ -153,13 +153,14 @@ float4 PSMain(PSInput input) : SV_Target
     for (uint i = 0; i < dirLightCount && i < 8; ++i)
     {
         float3 L = normalize(-u_Light.Lights[i].DirectionRange.xyz);
-        float NdotL = max(dot(N, L), 0.0f);
+        // 双面自然漫反射光照 (Two-sided diffuse)
+        float NdotL = abs(dot(N, L));
 
         // 叶片背光透光次表面半透散射 (Subsurface Translucency)
-        float backLight = max(dot(-N, L), 0.0f) * 0.5f;
+        float backLight = max(dot(-N, L), 0.0f) * 0.35f;
 
         float3 lightColor = u_Light.Lights[i].ColorIntensity.rgb * u_Light.Lights[i].ColorIntensity.a;
-        directLight += (NdotL + backLight) * lightColor * albedo.rgb * rootAO;
+        directLight += (NdotL * 0.75f + backLight) * lightColor * albedo.rgb * rootAO;
     }
 
     float3 finalColor = ambient + directLight;

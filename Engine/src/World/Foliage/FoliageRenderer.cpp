@@ -33,6 +33,7 @@ namespace World
 			// 帧槽位环形化缓冲与描述符集（消除 CPU 写入与 GPU 读取在飞帧间的数据竞态/闪烁）
 			Rhi::Handle<Rhi::DescriptorSet> UniformSets[Renderer::FramesInFlight];
 			Rhi::Handle<Rhi::DescriptorSet> TextureSets[Renderer::FramesInFlight];
+			Rhi::Handle<Rhi::Texture> BoundTextures[Renderer::FramesInFlight];
 			Rhi::Handle<Rhi::Buffer> UniformBuffers[Renderer::FramesInFlight];
 			Rhi::Handle<Rhi::Buffer> InstanceBuffers[Renderer::FramesInFlight];
 			uint32_t InstanceCapacities[Renderer::FramesInFlight] = {};
@@ -148,9 +149,11 @@ namespace World
 			Rhi::SamplerDesc sDesc;
 			sDesc.MinFilter = Rhi::Filter::Linear;
 			sDesc.MagFilter = Rhi::Filter::Linear;
-			sDesc.AddressU = Rhi::SamplerAddressMode::Repeat;
-			sDesc.AddressV = Rhi::SamplerAddressMode::Repeat;
-			sDesc.AddressW = Rhi::SamplerAddressMode::Repeat;
+			sDesc.MipmapMode = Rhi::SamplerMipmapMode::Linear;
+			sDesc.AddressU = Rhi::SamplerAddressMode::ClampToEdge;
+			sDesc.AddressV = Rhi::SamplerAddressMode::ClampToEdge;
+			sDesc.AddressW = Rhi::SamplerAddressMode::ClampToEdge;
+			sDesc.MaxAnisotropy = 4.0f;
 			sDesc.DebugName = "Foliage.Sampler";
 			s_State.Sampler = device->CreateSampler(sDesc);
 
@@ -161,18 +164,18 @@ namespace World
 			}
 			else
 			{
-				constexpr uint32_t kFoliageTexDim = 128;
+				constexpr uint32_t kFoliageTexDim = 512;
 				std::vector<uint8_t> foliageBuffer(kFoliageTexDim * kFoliageTexDim * 4, 0);
 
-				for (int b = 0; b < 12; ++b)
+				for (int b = 0; b < 32; ++b)
 				{
-					const float baseX = 64.0f + (b - 6.0f) * 6.0f;
-					const float bend = (b - 5.5f) * 4.5f;
+					const float baseX = 256.0f + (b - 15.5f) * 12.0f;
+					const float bend = (b - 15.5f) * 8.5f;
 					for (uint32_t y = 10; y < kFoliageTexDim - 5; ++y)
 					{
 						const float t = 1.0f - static_cast<float>(y) / static_cast<float>(kFoliageTexDim);
 						const float cx = baseX + bend * (t * t);
-						const float halfW = std::max(1.0f, (1.0f - t * 0.9f) * 4.0f);
+						const float halfW = std::max(1.5f, (1.0f - std::pow(t, 0.72f)) * 12.0f);
 
 						for (int dx = -static_cast<int>(halfW); dx <= static_cast<int>(halfW); ++dx)
 						{
@@ -180,10 +183,13 @@ namespace World
 							if (px >= 0 && px < static_cast<int>(kFoliageTexDim))
 							{
 								const size_t idx = (y * kFoliageTexDim + px) * 4;
-								foliageBuffer[idx + 0] = static_cast<uint8_t>(35.0f + t * 90.0f);
-								foliageBuffer[idx + 1] = static_cast<uint8_t>(75.0f + t * 135.0f);
-								foliageBuffer[idx + 2] = static_cast<uint8_t>(25.0f + t * 35.0f);
-								foliageBuffer[idx + 3] = 0xFF;
+								const float u = static_cast<float>(dx) / halfW;
+								const float edgeFade = std::min(1.0f, (halfW - std::abs(static_cast<float>(dx))) * 1.5f);
+								const float sideLit = 0.9f + 0.18f * u;
+								foliageBuffer[idx + 0] = static_cast<uint8_t>(std::clamp((30.0f + t * 110.0f) * sideLit, 0.0f, 255.0f));
+								foliageBuffer[idx + 1] = static_cast<uint8_t>(std::clamp((65.0f + t * 135.0f) * sideLit, 0.0f, 255.0f));
+								foliageBuffer[idx + 2] = static_cast<uint8_t>(std::clamp((22.0f + t * 35.0f) * sideLit, 0.0f, 255.0f));
+								foliageBuffer[idx + 3] = static_cast<uint8_t>(255.0f * edgeFade);
 							}
 						}
 					}
@@ -313,6 +319,7 @@ namespace World
 				pDesc.DepthStencil.DepthTest = true;
 				pDesc.DepthStencil.DepthWrite = true;
 				pDesc.DepthStencil.DepthCompare = Rhi::CompareOp::LessOrEqual;
+				pDesc.AlphaToCoverage = true;
 				pDesc.Samples = static_cast<Rhi::SampleCount>(RenderSettings::Msaa());
 				pDesc.DebugName = "Foliage.MainPipeline";
 				s_State.Pipeline = device->CreatePipeline(pDesc);
@@ -332,6 +339,7 @@ namespace World
 			s_State.UniformBuffers[slot] = nullptr;
 			s_State.UniformSets[slot] = nullptr;
 			s_State.TextureSets[slot] = nullptr;
+			s_State.BoundTextures[slot] = nullptr;
 		}
 		s_State = FoliageRenderState {};
 	}
@@ -430,7 +438,7 @@ namespace World
 		Rhi::Handle<Rhi::Texture> currentTex = TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", /*srgb*/ true);
 		if (!currentTex)
 			currentTex = s_State.DefaultAlbedo;
-		if (currentTex && s_State.TextureSets[slot])
+		if (currentTex && s_State.TextureSets[slot] && s_State.BoundTextures[slot] != currentTex)
 		{
 			Rhi::DescriptorWrite w;
 			w.Binding = 4;
@@ -438,6 +446,7 @@ namespace World
 			w.Texture = currentTex;
 			w.Sampler = s_State.Sampler;
 			s_State.TextureSets[slot]->Update({ w });
+			s_State.BoundTextures[slot] = currentTex;
 		}
 
 		cmd->BindPipeline(s_State.Pipeline);

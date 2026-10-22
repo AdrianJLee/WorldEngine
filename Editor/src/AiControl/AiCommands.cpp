@@ -1136,6 +1136,7 @@ namespace World
 		addCmd("ui.focus", "Set focus to a specific panel.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("ui.activate", "Activate a tab or panel in shell.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("viewport.set_tool_mode", "Set editor tool mode (select, landscape, foliage).", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"mode\":{\"type\":\"string\"}}}");
+		addCmd("viewport.set_camera", "Set viewport 3D camera target, distance, yaw and pitch.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("ui.layout.get", "Get current WUI dock layout json.", CommandEffect::Read, CommandScope::EditorOnly);
 
 		// 场景与实体族
@@ -3300,6 +3301,25 @@ namespace World
 			   << ",\"editCollider\":" << (IsEditingCollider() ? "true" : "false")
 			   << ",\"gizmoOp\":" << static_cast<int>(GetGizmoOperation()) << "}";
 			result = ss.str();
+			return true;
+		}
+		if (cmd == "viewport.set_camera")
+		{
+			if (args.count("target_x") && args.count("target_y") && args.count("target_z"))
+			{
+				glm::vec3 target(std::stof(arg("target_x")), std::stof(arg("target_y")), std::stof(arg("target_z")));
+				float dist = args.count("dist") ? std::stof(arg("dist")) : m_EditorCamera3D.GetDistance();
+				m_EditorCamera3D.FocusOn(target, dist);
+			}
+			if (args.count("yaw") && args.count("pitch"))
+			{
+				m_EditorCamera3D.SetYawPitch(std::stof(arg("yaw")), std::stof(arg("pitch")));
+			}
+			if (args.count("dist"))
+			{
+				m_EditorCamera3D.SetDistance(std::stof(arg("dist")));
+			}
+			result = "camera updated";
 			return true;
 		}
 		if (cmd == "viewport.set_gizmo_op")
