@@ -199,6 +199,15 @@ namespace World
 		return m_Layers[std::min(index, 3u)];
 	}
 
+	void TerrainData::SetLayer(uint32_t index, const TerrainLayer& layer)
+	{
+		if (index < 4)
+		{
+			m_Layers[index] = layer;
+			m_IsDirty = true;
+		}
+	}
+
 	bool TerrainData::Raycast(const glm::vec3& rayOrigin, const glm::vec3& rayDir, float maxDistance, TerrainRaycastHit& outHit) const
 	{
 		outHit.Hit = false;

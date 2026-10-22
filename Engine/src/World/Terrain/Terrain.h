@@ -108,6 +108,7 @@ namespace World
 
 		// 材质图层定义 (最多 4 层)
 		TerrainLayer& GetLayer(uint32_t index);
+		void SetLayer(uint32_t index, const TerrainLayer& layer);
 		const TerrainLayer& GetLayer(uint32_t index) const;
 
 		// 空间射线投射

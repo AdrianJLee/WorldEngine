@@ -1,3 +1,6 @@
+#if defined(_WIN32) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 #include "World/Foliage/Foliage.h"
 #include "World/Terrain/Terrain.h"
 #include "World/Scene/Components.h"
@@ -15,6 +18,8 @@ static void TestFoliageInitialization()
 	assert(foliage.GetTypeCount() >= 1);
 	assert(foliage.GetTotalInstanceCount() == 0);
 	assert(foliage.GetChunks().empty());
+	assert(foliage.GetType(0).MeshAsset.Path.IsValid());
+	assert(foliage.GetType(0).MaterialAsset.Path.IsValid());
 
 	FoliageType bush;
 	bush.Name = "Test Bush";
@@ -460,6 +465,10 @@ static void TestFoliageDensitySaturation()
 
 int main()
 {
+#if defined(_WIN32) && defined(_DEBUG)
+	_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
 	std::cout << "Starting World.Foliage tests...\n";
 	TestFoliageInitialization();
 	TestFoliagePaintingWithoutTerrain();

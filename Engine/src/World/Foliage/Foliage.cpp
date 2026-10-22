@@ -43,12 +43,16 @@ namespace World
 	FoliageData::FoliageData()
 	{
 		FoliageType defaultGrass;
-		defaultGrass.Name = "Default Grass";
+		defaultGrass.Name = "0: 翠绿草丛 (Wild Grass)";
+		defaultGrass.MeshAsset.Path = StringPool::Get().InternPath("models/foliage/grass_cluster.wmodel");
+		defaultGrass.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/grass_tuft.png");
 		defaultGrass.Density = 2.0f;
 		defaultGrass.ScaleMinMax = glm::vec2(0.8f, 1.2f);
 		defaultGrass.RandomYaw = 360.0f;
 		defaultGrass.AlignToNormal = true;
 		defaultGrass.SlopeLimit = glm::vec2(0.0f, 40.0f);
+		defaultGrass.PaintingActive = true;
+		defaultGrass.LayerMask = 0x01; // Bit 0: Grass
 		m_Types.push_back(defaultGrass);
 	}
 
@@ -570,6 +574,15 @@ namespace World
 			stream.read(reinterpret_cast<char*>(&matId), sizeof(matId));
 			type.MaterialAsset.Path = matPath.empty() ? PathId() : StringPool::Get().InternPath(matPath);
 			type.MaterialAsset.Identity = AssetId { matId };
+
+			if (!type.MeshAsset.Path.IsValid() || StringPool::Get().PathOf(type.MeshAsset.Path).empty())
+			{
+				type.MeshAsset.Path = StringPool::Get().InternPath(i == 2 ? "models/foliage/bush_cluster.wmodel" : (i == 3 ? "models/foliage/scatter_pebble.wmodel" : "models/foliage/grass_cluster.wmodel"));
+			}
+			if (!type.MaterialAsset.Path.IsValid() || StringPool::Get().PathOf(type.MaterialAsset.Path).empty())
+			{
+				type.MaterialAsset.Path = StringPool::Get().InternPath(i == 1 ? "textures/foliage/wild_flower.png" : (i == 3 ? "textures/terrain/rock_albedo.png" : "textures/foliage/grass_tuft.png"));
+			}
 
 			stream.read(reinterpret_cast<char*>(&type.Density), sizeof(type.Density));
 			stream.read(reinterpret_cast<char*>(&type.ScaleMinMax), sizeof(type.ScaleMinMax));

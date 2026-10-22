@@ -435,7 +435,15 @@ namespace World
 		if (s_State.UniformBuffers[slot])
 			s_State.UniformBuffers[slot]->SetData(&uniforms, sizeof(uniforms));
 
-		Rhi::Handle<Rhi::Texture> currentTex = TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", /*srgb*/ true);
+		Rhi::Handle<Rhi::Texture> currentTex = nullptr;
+		if (data.GetTypeCount() > 0 && data.GetType(0).MaterialAsset.Path.IsValid())
+		{
+			const std::string matPath = std::string(StringPool::Get().PathOf(data.GetType(0).MaterialAsset.Path));
+			if (!matPath.empty())
+				currentTex = TextureLibrary::Get().Get(matPath, /*srgb*/ true);
+		}
+		if (!currentTex)
+			currentTex = TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", /*srgb*/ true);
 		if (!currentTex)
 			currentTex = s_State.DefaultAlbedo;
 		if (currentTex && s_State.TextureSets[slot] && s_State.BoundTextures[slot] != currentTex)
