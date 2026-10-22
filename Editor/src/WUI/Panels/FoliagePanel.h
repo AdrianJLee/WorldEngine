@@ -77,6 +77,7 @@ namespace World
 		float m_BrushRadius { 15.0f };
 		float m_BrushDensity { 2.0f };
 		int m_ActiveTypeIdx { 0 };
+		int m_ExpandedTypeIdx { 0 }; // 内联折叠展开的植物项 (-1 为全部折叠)
 
 		// 属性编辑内联缓存
 		int m_CachedTypeIdx { -1 };

@@ -379,15 +379,28 @@ namespace World
 
 		curY += btnH + 8.0f;
 
-		// 2. 动态植物生态卡片列表
-		const float itemH = 28.0f;
+		// 2. 动态植物生态列表 (直接内联折叠展开参数检视器)
+		const float itemH = 26.0f;
 		for (size_t i = 0; i < typeCount; ++i)
 		{
 			auto& type = m_Foliage->GetType(i);
 			const bool isSelected = (m_ActiveTypeIdx == static_cast<int>(i));
+			const bool isExpanded = (m_ExpandedTypeIdx == static_cast<int>(i));
+
+			// 折叠/展开箭头 [v] / [>] (宽 18px)
+			const Wui::WuiRect foldRect { startX, curY + 2.0f, 18.0f, 22.0f };
+			auto foldTheme = theme;
+			foldTheme.ButtonBg = { 0, 0, 0, 0 };
+			foldTheme.Border = { 0, 0, 0, 0 };
+			foldTheme.Text = isExpanded ? theme.Accent : theme.TextMuted;
+			if (Wui::Button(ctx, Wui::HashId(("foliage.type.fold." + std::to_string(i)).c_str()), foldRect, isExpanded ? "v" : ">", foldTheme))
+			{
+				m_ExpandedTypeIdx = isExpanded ? -1 : static_cast<int>(i);
+				m_ActiveTypeIdx = static_cast<int>(i);
+			}
 
 			// 混刷复选框 [✓] (宽 20px)
-			const Wui::WuiRect chkRect { startX + 2.0f, curY + 2.0f, 20.0f, 22.0f };
+			const Wui::WuiRect chkRect { startX + 20.0f, curY + 2.0f, 20.0f, 22.0f };
 			bool active = type.PaintingActive;
 			if (Wui::Checkbox(ctx, Wui::HashId(("foliage.type.chk." + std::to_string(i)).c_str()), chkRect, "", active, theme))
 			{
@@ -396,10 +409,10 @@ namespace World
 			}
 			Wui::Tooltip(ctx, chkRect, "勾选后参与视口笔刷一笔多物种自然混刷");
 
-			// 实例数徽标 Badge (宽 52px, 紧凑显示)
+			// 名称选择按钮
 			const float badgeW = 52.0f;
-			const float nameBtnX = startX + 26.0f;
-			const float nameBtnW = std::max(50.0f, contentW - 26.0f - badgeW - 4.0f);
+			const float nameBtnX = startX + 44.0f;
+			const float nameBtnW = std::max(50.0f, contentW - 44.0f - badgeW - 4.0f);
 			const Wui::WuiRect nameRect { nameBtnX, curY + 1.0f, nameBtnW, 24.0f };
 
 			auto nameTheme = theme;
@@ -412,6 +425,7 @@ namespace World
 			if (Wui::Button(ctx, Wui::HashId(("foliage.type.sel." + std::to_string(i)).c_str()), nameRect, type.Name, nameTheme))
 			{
 				m_ActiveTypeIdx = static_cast<int>(i);
+				m_ExpandedTypeIdx = static_cast<int>(i);
 			}
 
 			// 实例数徽标 Badge (右对齐)
@@ -421,7 +435,197 @@ namespace World
 			const Wui::WuiRect badgeRect { startX + contentW - badgeW, curY + 1.0f, badgeW, 24.0f };
 			Wui::Label(ctx, { badgeRect.X + 4.0f, badgeRect.Y + 5.0f }, countBuf, isSelected ? theme.Accent : theme.TextMuted, theme.FontSizeCaption);
 
-			curY += itemH + 3.0f;
+			curY += itemH + 2.0f;
+
+			// 若该物种处于展开状态，直接在其正下方内联渲染完整参数检视器
+			if (isExpanded)
+			{
+				const float inspIndent = 12.0f;
+				const float inspX = startX + inspIndent;
+				const float inspW = contentW - inspIndent;
+
+				if (m_CachedTypeIdx != static_cast<int>(i))
+				{
+					m_EditName = type.Name;
+					m_EditMeshPath = type.MeshAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(type.MeshAsset.Path)) : "";
+					m_EditMatPath = type.MaterialAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(type.MaterialAsset.Path)) : "";
+					m_CachedTypeIdx = static_cast<int>(i);
+				}
+
+				// 1. 植物名称
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "名称:", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::TextField(ctx, Wui::HashId(("foliage.insp.name." + std::to_string(i)).c_str()), { inspX + 45.0f, curY, inspW - 45.0f, 22.0f }, m_EditName, theme))
+				{
+					type.Name = m_EditName;
+					host.MarkDocumentDirty();
+				}
+				curY += 26.0f;
+
+				// 2. Mesh 资产绑定 (带 [浏览...] 弹窗选择)
+				const float browseBtnW = 48.0f;
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "Mesh:", theme.TextMuted, theme.FontSizeSmall);
+				const float meshFieldW = std::max(40.0f, inspW - 45.0f - browseBtnW - 4.0f);
+				if (Wui::TextField(ctx, Wui::HashId(("foliage.insp.mesh." + std::to_string(i)).c_str()), { inspX + 45.0f, curY, meshFieldW, 22.0f }, m_EditMeshPath, theme))
+				{
+					type.MeshAsset.Path = m_EditMeshPath.empty() ? PathId() : StringPool::Get().InternPath(m_EditMeshPath);
+					host.MarkDocumentDirty();
+				}
+				if (Wui::Button(ctx, Wui::HashId(("foliage.insp.mesh.brw." + std::to_string(i)).c_str()), { inspX + 45.0f + meshFieldW + 4.0f, curY, browseBtnW, 22.0f }, "浏览...", theme))
+				{
+					host.OpenAssetPicker("选择植被 Mesh 网格模型", AssetCategory::Mesh, [&type, this, &host](const std::string& picked) {
+						type.MeshAsset.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+						m_EditMeshPath = picked;
+						m_StatusFeedback = "已绑定 Mesh: " + picked;
+						host.MarkDocumentDirty();
+					});
+				}
+				curY += 26.0f;
+
+				// 3. 材质资产绑定 (带 [浏览...] 弹窗选择)
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "材质:", theme.TextMuted, theme.FontSizeSmall);
+				const float matFieldW = std::max(40.0f, inspW - 45.0f - browseBtnW - 4.0f);
+				if (Wui::TextField(ctx, Wui::HashId(("foliage.insp.mat." + std::to_string(i)).c_str()), { inspX + 45.0f, curY, matFieldW, 22.0f }, m_EditMatPath, theme))
+				{
+					type.MaterialAsset.Path = m_EditMatPath.empty() ? PathId() : StringPool::Get().InternPath(m_EditMatPath);
+					host.MarkDocumentDirty();
+				}
+				if (Wui::Button(ctx, Wui::HashId(("foliage.insp.mat.brw." + std::to_string(i)).c_str()), { inspX + 45.0f + matFieldW + 4.0f, curY, browseBtnW, 22.0f }, "浏览...", theme))
+				{
+					host.OpenAssetPicker("选择植被材质或贴图", AssetCategory::Material, [&type, this, &host](const std::string& picked) {
+						type.MaterialAsset.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+						m_EditMatPath = picked;
+						m_StatusFeedback = "已绑定材质: " + picked;
+						host.MarkDocumentDirty();
+					});
+				}
+				curY += 26.0f;
+
+				// 4. 密度权重与缩放区间
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "密度权重:", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId(("foliage.insp.dens." + std::to_string(i)).c_str()), { inspX + 65.0f, curY, inspW - 65.0f, 22.0f }, type.Density, 0.1f, 0.1f, 10.0f, theme))
+				{
+					host.MarkDocumentDirty();
+				}
+				curY += 26.0f;
+
+				const float halfFieldW = (inspW - 65.0f - theme.PadSmall) * 0.5f;
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "缩放区间:", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId(("foliage.insp.smin." + std::to_string(i)).c_str()), { inspX + 65.0f, curY, halfFieldW, 22.0f }, type.ScaleMinMax.x, 0.05f, 0.1f, 5.0f, theme))
+				{
+					if (type.ScaleMinMax.x > type.ScaleMinMax.y) type.ScaleMinMax.y = type.ScaleMinMax.x;
+					host.MarkDocumentDirty();
+				}
+				if (Wui::DragFloat(ctx, Wui::HashId(("foliage.insp.smax." + std::to_string(i)).c_str()), { inspX + 65.0f + halfFieldW + theme.PadSmall, curY, halfFieldW, 22.0f }, type.ScaleMinMax.y, 0.05f, 0.1f, 5.0f, theme))
+				{
+					if (type.ScaleMinMax.y < type.ScaleMinMax.x) type.ScaleMinMax.x = type.ScaleMinMax.y;
+					host.MarkDocumentDirty();
+				}
+				curY += 26.0f;
+
+				// 5. 偏航与法线对齐
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "偏航/法线:", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId(("foliage.insp.yaw." + std::to_string(i)).c_str()), { inspX + 65.0f, curY, halfFieldW, 22.0f }, type.RandomYaw, 5.0f, 0.0f, 360.0f, theme))
+				{
+					host.MarkDocumentDirty();
+				}
+				bool alignNorm = type.AlignToNormal;
+				if (Wui::Checkbox(ctx, Wui::HashId(("foliage.insp.anorm." + std::to_string(i)).c_str()), { inspX + 65.0f + halfFieldW + theme.PadSmall, curY, halfFieldW, 22.0f }, "对齐法线", alignNorm, theme))
+				{
+					type.AlignToNormal = alignNorm;
+					host.MarkDocumentDirty();
+				}
+				curY += 26.0f;
+
+				// 6. 坡度与高度限制
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "坡度上限:", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId(("foliage.insp.slope." + std::to_string(i)).c_str()), { inspX + 65.0f, curY, inspW - 65.0f, 22.0f }, type.SlopeLimit.y, 1.0f, 0.0f, 90.0f, theme))
+				{
+					host.MarkDocumentDirty();
+				}
+				curY += 26.0f;
+
+				// 7. 地貌材质层掩码 (LayerMask 动态图层显示)
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "地貌图层过滤 (允许生长的材质层):", theme.Accent, theme.FontSizeSmall);
+				curY += 22.0f;
+
+				// 获取当前地形图层名称
+				Ref<Scene> activeScene = host.GetActiveScene();
+				std::shared_ptr<TerrainData> curTerrain = nullptr;
+				if (activeScene)
+				{
+					for (auto [handle, comp] : activeScene->GetRegistry().view<TerrainComponent>().each())
+					{
+						curTerrain = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+						break;
+					}
+				}
+
+				const float layerChkHalfW = (inspW - theme.PadSmall) * 0.5f;
+				for (uint32_t l = 0; l < 4; ++l)
+				{
+					const int row = static_cast<int>(l / 2);
+					const int col = static_cast<int>(l % 2);
+					const Wui::WuiRect chkR {
+						inspX + static_cast<float>(col) * (layerChkHalfW + theme.PadSmall),
+						curY + static_cast<float>(row) * 24.0f,
+						layerChkHalfW, 22.0f
+					};
+					bool layerAllowed = (type.LayerMask & (1u << l)) != 0;
+					std::string lName = curTerrain ? curTerrain->GetLayer(l).Name : "";
+					if (lName.empty())
+					{
+						const char* defNames[4] = { "草地 (Grass)", "泥土 (Dirt)", "岩石 (Rock)", "沙地 (Sand)" };
+						lName = defNames[l];
+					}
+					else if (lName.find(':') != std::string::npos)
+					{
+						lName = lName.substr(lName.find(':') + 1);
+					}
+					if (Wui::Checkbox(ctx, Wui::HashId(("foliage.insp.lmask." + std::to_string(i) + "." + std::to_string(l)).c_str()),
+						chkR, lName, layerAllowed, theme))
+					{
+						if (layerAllowed)
+							type.LayerMask |= (1u << l);
+						else
+							type.LayerMask &= ~(1u << l);
+						host.MarkDocumentDirty();
+					}
+				}
+				curY += 50.0f;
+
+				// 8. 独立视距与风力
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "视距/风力:", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId(("foliage.insp.cull." + std::to_string(i)).c_str()), { inspX + 65.0f, curY, halfFieldW, 22.0f }, type.CullDistance, 5.0f, 20.0f, 500.0f, theme))
+				{
+					host.MarkDocumentDirty();
+				}
+				if (Wui::DragFloat(ctx, Wui::HashId(("foliage.insp.wind." + std::to_string(i)).c_str()), { inspX + 65.0f + halfFieldW + theme.PadSmall, curY, halfFieldW, 22.0f }, type.WindMultiplier, 0.1f, 0.0f, 3.0f, theme))
+				{
+					host.MarkDocumentDirty();
+				}
+				curY += 28.0f;
+
+				// 9. 单项清空与删除
+				if (Wui::Button(ctx, Wui::HashId(("foliage.insp.clear_inst." + std::to_string(i)).c_str()), { inspX, curY, halfFieldW, 24.0f }, "清空此物种", theme))
+				{
+					m_Foliage->EraseFoliage(glm::vec3(0.0f), 100000.0f, static_cast<int32_t>(i));
+					m_StatusFeedback = "已清空物种 [" + type.Name + "] 的全部场景实例。";
+					host.MarkDocumentDirty();
+				}
+				if (Wui::Button(ctx, Wui::HashId(("foliage.insp.del_type." + std::to_string(i)).c_str()), { inspX + halfFieldW + theme.PadSmall, curY, halfFieldW, 24.0f }, "- 删除此植物", theme))
+				{
+					const std::string delName = type.Name;
+					m_Foliage->RemoveType(i);
+					m_ExpandedTypeIdx = -1;
+					if (m_ActiveTypeIdx >= static_cast<int>(m_Foliage->GetTypeCount()))
+						m_ActiveTypeIdx = static_cast<int>(m_Foliage->GetTypeCount()) - 1;
+					m_CachedTypeIdx = -1;
+					m_StatusFeedback = "已删除植物类型: " + delName;
+					host.MarkDocumentDirty();
+					break;
+				}
+				curY += 32.0f;
+			}
 		}
 
 		if (typeCount == 0)
@@ -464,175 +668,7 @@ namespace World
 		{
 			Wui::Label(ctx, { startX, curY + 2.0f }, "未激活任何散布物种", theme.Warning, theme.FontSizeSmall);
 		}
-		curY += 26.0f;
-
-		// 4. 上下文自适应参数检视器 (Context Inspector)
-		if (m_ActiveTypeIdx >= 0 && static_cast<size_t>(m_ActiveTypeIdx) < typeCount)
-		{
-			auto& t = m_Foliage->GetType(static_cast<size_t>(m_ActiveTypeIdx));
-
-			// 同步编辑缓存
-			if (m_CachedTypeIdx != m_ActiveTypeIdx)
-			{
-				m_EditName = t.Name;
-				m_EditMeshPath = t.MeshAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(t.MeshAsset.Path)) : "";
-				m_EditMatPath = t.MaterialAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(t.MaterialAsset.Path)) : "";
-				m_CachedTypeIdx = m_ActiveTypeIdx;
-			}
-
-			Wui::Label(ctx, { startX, curY + 4.0f }, "植物参数检视器 (Type Inspector)", theme.Accent, theme.FontSizeBody);
-			curY += 26.0f;
-
-			// 名称
-			Wui::Label(ctx, { startX, curY + 4.0f }, "植物名称:", theme.Text, theme.FontSizeSmall);
-			if (Wui::TextField(ctx, Wui::HashId("foliage.insp.name"), { startX + 85.0f, curY, contentW - 85.0f, 22.0f }, m_EditName, theme))
-			{
-				t.Name = m_EditName;
-				host.MarkDocumentDirty();
-			}
-			curY += 28.0f;
-
-			// 资产绑定
-			Wui::Label(ctx, { startX, curY + 4.0f }, "Mesh 资产:", theme.Text, theme.FontSizeSmall);
-			if (Wui::TextField(ctx, Wui::HashId("foliage.insp.mesh"), { startX + 85.0f, curY, contentW - 85.0f, 22.0f }, m_EditMeshPath, theme))
-			{
-				t.MeshAsset.Path = m_EditMeshPath.empty() ? PathId() : StringPool::Get().InternPath(m_EditMeshPath);
-				host.MarkDocumentDirty();
-			}
-			Wui::Tooltip(ctx, { startX + 85.0f, curY, contentW - 85.0f, 22.0f }, "植被三维几何网格模型资产路径 (.wmodel / .obj)");
-			curY += 28.0f;
-
-			Wui::Label(ctx, { startX, curY + 4.0f }, "材质资产:", theme.Text, theme.FontSizeSmall);
-			if (Wui::TextField(ctx, Wui::HashId("foliage.insp.mat"), { startX + 85.0f, curY, contentW - 85.0f, 22.0f }, m_EditMatPath, theme))
-			{
-				t.MaterialAsset.Path = m_EditMatPath.empty() ? PathId() : StringPool::Get().InternPath(m_EditMatPath);
-				host.MarkDocumentDirty();
-			}
-			Wui::Tooltip(ctx, { startX + 85.0f, curY, contentW - 85.0f, 22.0f }, "植被渲染材质定义文件路径 (.wmaterial)");
-			curY += 28.0f;
-
-			// 散布与形态
-			Wui::Label(ctx, { startX, curY + 4.0f }, "相对密度权重:", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.density"), { startX + 95.0f, curY, contentW - 95.0f, 22.0f }, t.Density, 0.1f, 0.1f, 10.0f, theme))
-			{
-				host.MarkDocumentDirty();
-			}
-			Wui::Tooltip(ctx, { startX + 95.0f, curY, contentW - 95.0f, 22.0f }, "多物种一笔混刷时分配给该物种的相对生成概率权重");
-			curY += 28.0f;
-
-			// 缩放区间 Min / Max
-			const float halfFieldW = (contentW - 95.0f - theme.PadSmall) * 0.5f;
-			Wui::Label(ctx, { startX, curY + 4.0f }, "随机缩放区间:", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.scale_min"), { startX + 95.0f, curY, halfFieldW, 22.0f }, t.ScaleMinMax.x, 0.05f, 0.1f, 5.0f, theme))
-			{
-				if (t.ScaleMinMax.x > t.ScaleMinMax.y) t.ScaleMinMax.y = t.ScaleMinMax.x;
-				host.MarkDocumentDirty();
-			}
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.scale_max"), { startX + 95.0f + halfFieldW + theme.PadSmall, curY, halfFieldW, 22.0f }, t.ScaleMinMax.y, 0.05f, 0.1f, 5.0f, theme))
-			{
-				if (t.ScaleMinMax.y < t.ScaleMinMax.x) t.ScaleMinMax.x = t.ScaleMinMax.y;
-				host.MarkDocumentDirty();
-			}
-			curY += 28.0f;
-
-			// 偏航与俯仰随机角
-			Wui::Label(ctx, { startX, curY + 4.0f }, "随机偏航角 (°):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.yaw"), { startX + 95.0f, curY, contentW - 95.0f, 22.0f }, t.RandomYaw, 5.0f, 0.0f, 360.0f, theme))
-			{
-				host.MarkDocumentDirty();
-			}
-			curY += 28.0f;
-
-			Wui::Label(ctx, { startX, curY + 4.0f }, "倾斜随机度 (°):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.pitch"), { startX + 95.0f, curY, contentW - 95.0f, 22.0f }, t.PitchVariation, 1.0f, 0.0f, 30.0f, theme))
-			{
-				host.MarkDocumentDirty();
-			}
-			curY += 28.0f;
-
-			Wui::Label(ctx, { startX, curY + 4.0f }, "贴合法线旋转:", theme.Text, theme.FontSizeSmall);
-			if (Wui::Checkbox(ctx, Wui::HashId("foliage.insp.align_norm"), { startX + 95.0f, curY, 80.0f, 22.0f }, "开启", t.AlignToNormal, theme))
-			{
-				host.MarkDocumentDirty();
-			}
-			curY += 28.0f;
-
-			// 放置过滤规则 (Placement Rules)
-			const float filterHalfW = (contentW - 110.0f - theme.PadSmall) * 0.5f;
-			Wui::Label(ctx, { startX, curY + 4.0f }, "地表坡度限制 (°):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.slope_min"), { startX + 110.0f, curY, filterHalfW, 22.0f }, t.SlopeLimit.x, 1.0f, 0.0f, 90.0f, theme))
-			{
-				if (t.SlopeLimit.x > t.SlopeLimit.y) t.SlopeLimit.y = t.SlopeLimit.x;
-				host.MarkDocumentDirty();
-			}
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.slope_max"), { startX + 110.0f + filterHalfW + theme.PadSmall, curY, filterHalfW, 22.0f }, t.SlopeLimit.y, 1.0f, 0.0f, 90.0f, theme))
-			{
-				if (t.SlopeLimit.y < t.SlopeLimit.x) t.SlopeLimit.x = t.SlopeLimit.y;
-				host.MarkDocumentDirty();
-			}
-			curY += 28.0f;
-
-			Wui::Label(ctx, { startX, curY + 4.0f }, "世界高程区间 (m):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.height_min"), { startX + 110.0f, curY, filterHalfW, 22.0f }, t.HeightLimit.x, 5.0f, -1000.0f, 1000.0f, theme))
-			{
-				if (t.HeightLimit.x > t.HeightLimit.y) t.HeightLimit.y = t.HeightLimit.x;
-				host.MarkDocumentDirty();
-			}
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.height_max"), { startX + 110.0f + filterHalfW + theme.PadSmall, curY, filterHalfW, 22.0f }, t.HeightLimit.y, 5.0f, -1000.0f, 1000.0f, theme))
-			{
-				if (t.HeightLimit.y < t.HeightLimit.x) t.HeightLimit.x = t.HeightLimit.y;
-				host.MarkDocumentDirty();
-			}
-			curY += 28.0f;
-
-			// 地表材质层掩码 (LayerMask 4 个复选框)
-			Wui::Label(ctx, { startX, curY + 4.0f }, "地表材质过滤:", theme.Text, theme.FontSizeSmall);
-			curY += 22.0f;
-
-			const float layerChkW = (contentW - theme.PadSmall * 3.0f) * 0.25f;
-			bool grassOn = (t.LayerMask & 0x01) != 0;
-			bool dirtOn  = (t.LayerMask & 0x02) != 0;
-			bool rockOn  = (t.LayerMask & 0x04) != 0;
-			bool sandOn  = (t.LayerMask & 0x08) != 0;
-
-			if (Wui::Checkbox(ctx, Wui::HashId("foliage.layer.grass"), { startX, curY, layerChkW, 22.0f }, "草地", grassOn, theme))
-			{
-				t.LayerMask = grassOn ? (t.LayerMask | 0x01) : (t.LayerMask & ~0x01);
-				host.MarkDocumentDirty();
-			}
-			if (Wui::Checkbox(ctx, Wui::HashId("foliage.layer.dirt"), { startX + layerChkW + theme.PadSmall, curY, layerChkW, 22.0f }, "泥土", dirtOn, theme))
-			{
-				t.LayerMask = dirtOn ? (t.LayerMask | 0x02) : (t.LayerMask & ~0x02);
-				host.MarkDocumentDirty();
-			}
-			if (Wui::Checkbox(ctx, Wui::HashId("foliage.layer.rock"), { startX + (layerChkW + theme.PadSmall) * 2.0f, curY, layerChkW, 22.0f }, "岩石", rockOn, theme))
-			{
-				t.LayerMask = rockOn ? (t.LayerMask | 0x04) : (t.LayerMask & ~0x04);
-				host.MarkDocumentDirty();
-			}
-			if (Wui::Checkbox(ctx, Wui::HashId("foliage.layer.sand"), { startX + (layerChkW + theme.PadSmall) * 3.0f, curY, layerChkW, 22.0f }, "沙地", sandOn, theme))
-			{
-				t.LayerMask = sandOn ? (t.LayerMask | 0x08) : (t.LayerMask & ~0x08);
-				host.MarkDocumentDirty();
-			}
-			curY += 28.0f;
-
-			// 独立视距与风力
-			Wui::Label(ctx, { startX, curY + 4.0f }, "独立剔除视距 (m):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.cull_dist"), { startX + 115.0f, curY, contentW - 115.0f, 22.0f }, t.CullDistance, 5.0f, 20.0f, 500.0f, theme))
-			{
-				host.MarkDocumentDirty();
-			}
-			curY += 28.0f;
-
-			Wui::Label(ctx, { startX, curY + 4.0f }, "风力摆动乘数:", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("foliage.insp.wind_mult"), { startX + 115.0f, curY, contentW - 115.0f, 22.0f }, t.WindMultiplier, 0.05f, 0.0f, 3.0f, theme))
-			{
-				host.MarkDocumentDirty();
-			}
-			curY += 32.0f;
-		}
-
+		curY += 28.0f;
 		// 5. 批处理工具栏 (Batch Operations)
 		Wui::Label(ctx, { startX, curY + 4.0f }, "批处理与操作 (Batch Tools)", theme.Accent, theme.FontSizeBody);
 		curY += 26.0f;
