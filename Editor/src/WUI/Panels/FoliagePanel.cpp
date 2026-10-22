@@ -1,5 +1,7 @@
 #include "WUI/Panels/FoliagePanel.h"
 #include "WUI/Common/EditorAssetCatalog.h"
+#include "WUI/Common/AssetThumbnailRenderer.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 #include "World/Scene/Components.h"
 #include "World/Foliage/FoliageRenderer.h"
 #include "World/Terrain/TerrainRenderer.h"
@@ -490,9 +492,34 @@ namespace World
 				}
 				curY += 26.0f;
 
-				// 2. Mesh 资产绑定 (纯规范路径，无特化项与假中文)
+				// 2. Mesh 资产绑定与缩略图卡槽
 				Wui::Label(ctx, { inspX, curY + 3.0f }, "Mesh:", theme.TextMuted, theme.FontSizeSmall);
-				const Wui::WuiRect meshComboRect { inspX + 45.0f, curY, inspW - 45.0f, 22.0f };
+				const float thumbSize = 22.0f;
+				const float thumbPad = 4.0f;
+				const Wui::WuiRect meshThumbRect { inspX + 45.0f, curY, thumbSize, thumbSize };
+				const Wui::WuiRect meshComboRect { inspX + 45.0f + thumbSize + thumbPad, curY, inspW - 45.0f - thumbSize - thumbPad, 22.0f };
+
+				if (!m_EditMeshPath.empty() && m_EditMeshPath != "(none)")
+				{
+					Editor::AssetThumbnailRenderer::DrawThumbnail(ctx, meshThumbRect, m_EditMeshPath, AssetCategory::Mesh, theme);
+					Wui::HighlightOutline(ctx, meshThumbRect, theme.BorderStrong, 3.0f, 1.0f);
+				}
+				else
+				{
+					Wui::PanelBackground(ctx, meshThumbRect, theme.ContentBg, 3.0f);
+					Wui::HighlightOutline(ctx, meshThumbRect, theme.Border, 3.0f, 1.0f);
+					Wui::Label(ctx, { meshThumbRect.X + thumbSize * 0.5f - 4.0f, meshThumbRect.Y + (thumbSize - 14.0f) * 0.5f }, "+", theme.TextDisabled, 12.0f);
+				}
+				Wui::Tooltip(ctx, meshThumbRect, m_EditMeshPath.empty() || m_EditMeshPath == "(none)" ? "选择植被 3D Mesh" : (m_EditMeshPath + " (点击浏览)"));
+				if (ctx.IsClicked(meshThumbRect))
+				{
+					host.OpenAssetPicker("选择植被 Mesh 资产", AssetCategory::Mesh, [this, &type, &host](const std::string& picked) {
+						type.MeshAsset.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+						m_EditMeshPath = picked;
+						m_StatusFeedback = "已选择植被 Mesh: " + picked;
+						host.MarkDocumentDirty();
+					});
+				}
 
 				const auto& modelAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Model);
 				const auto& modelSrcs = Editor::AssetCatalog::PathsFor(EditorAssetKind::ModelSource);
@@ -537,9 +564,32 @@ namespace World
 				}
 				curY += 26.0f;
 
-				// 3. 材质资产绑定 (纯规范路径，无假中文与重复项)
+				// 3. 材质资产绑定与缩略图卡槽
 				Wui::Label(ctx, { inspX, curY + 3.0f }, "材质:", theme.TextMuted, theme.FontSizeSmall);
-				const Wui::WuiRect matComboRect { inspX + 45.0f, curY, inspW - 45.0f, 22.0f };
+				const Wui::WuiRect matThumbRect { inspX + 45.0f, curY, thumbSize, thumbSize };
+				const Wui::WuiRect matComboRect { inspX + 45.0f + thumbSize + thumbPad, curY, inspW - 45.0f - thumbSize - thumbPad, 22.0f };
+
+				if (!m_EditMatPath.empty() && m_EditMatPath != "(none)")
+				{
+					Editor::AssetThumbnailRenderer::DrawThumbnail(ctx, matThumbRect, m_EditMatPath, AssetCategory::Unknown, theme);
+					Wui::HighlightOutline(ctx, matThumbRect, theme.BorderStrong, 3.0f, 1.0f);
+				}
+				else
+				{
+					Wui::PanelBackground(ctx, matThumbRect, theme.ContentBg, 3.0f);
+					Wui::HighlightOutline(ctx, matThumbRect, theme.Border, 3.0f, 1.0f);
+					Wui::Label(ctx, { matThumbRect.X + thumbSize * 0.5f - 4.0f, matThumbRect.Y + (thumbSize - 14.0f) * 0.5f }, "+", theme.TextDisabled, 12.0f);
+				}
+				Wui::Tooltip(ctx, matThumbRect, m_EditMatPath.empty() || m_EditMatPath == "(none)" ? "选择植被材质" : (m_EditMatPath + " (点击浏览)"));
+				if (ctx.IsClicked(matThumbRect))
+				{
+					host.OpenAssetPicker("选择植被材质或纹理", AssetCategory::Material, [this, &type, &host](const std::string& picked) {
+						type.MaterialAsset.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+						m_EditMatPath = picked;
+						m_StatusFeedback = "已选择植被材质: " + picked;
+						host.MarkDocumentDirty();
+					});
+				}
 
 				const auto& texAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::TextureSource);
 				const auto& matAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Material);

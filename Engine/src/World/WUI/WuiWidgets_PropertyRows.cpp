@@ -864,8 +864,26 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 		// M19a:displayText 非空时触发器只画它(如 "Add" 入口的固定文案);空串走与今天
 		// **逐字节一致**的 current 路径(同一条命令、同一文本)。options / a11y value 不受影响。
 		const std::string& triggerText = displayText.empty() ? current : displayText;
+		bool renderAssetIcons = showAssetIcons;
+		if (!renderAssetIcons)
+		{
+			if (GetAssetIconSpec(triggerText, theme).Tag != nullptr)
+				renderAssetIcons = true;
+			else
+			{
+				for (const auto& opt : options)
+				{
+					if (GetAssetIconSpec(opt, theme).Tag != nullptr)
+					{
+						renderAssetIcons = true;
+						break;
+					}
+				}
+			}
+		}
+
 		float textOffset = 6.0f;
-		if (showAssetIcons)
+		if (renderAssetIcons)
 		{
 			const AssetIconSpec spec = GetAssetIconSpec(triggerText, theme);
 			if (spec.Tag)
@@ -924,7 +942,7 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 				// 文本不会越过条目矩形);上面的 a11y 节点与点击写回的 selected 仍是完整选项串。
 				float itemTextOffset = 6.0f;
 				float itemBudget = item.W - 12.0f;
-				if (showAssetIcons)
+				if (renderAssetIcons)
 				{
 					const AssetIconSpec spec = GetAssetIconSpec(options[i], theme);
 					if (spec.Tag)
@@ -989,8 +1007,26 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 			float valueBudget = (rect.X + rect.W - 22.0f) - (fieldRect.X + 6.0f);
 			// M19a:与 Combo 同一条口径 —— 非空 displayText 只改闭合态触发器的显示;a11y value(current)不动。
 			const std::string& triggerText = displayText.empty() ? current : displayText;
+			bool renderAssetIcons = showAssetIcons;
+			if (!renderAssetIcons)
+			{
+				if (GetAssetIconSpec(triggerText, theme).Tag != nullptr)
+					renderAssetIcons = true;
+				else
+				{
+					for (const auto& opt : options)
+					{
+						if (GetAssetIconSpec(opt, theme).Tag != nullptr)
+						{
+							renderAssetIcons = true;
+							break;
+						}
+					}
+				}
+			}
+
 			float textOffset = 6.0f;
-			if (showAssetIcons)
+			if (renderAssetIcons)
 			{
 				const AssetIconSpec spec = GetAssetIconSpec(triggerText, theme);
 				if (spec.Tag)
@@ -1109,7 +1145,19 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 			// 节点(combo-option / combo-item)的 label 仍是完整选项串 —— 脚本按完整路径点选与搜索都不受影响。
 			float itemTextOffset = 6.0f;
 			float itemBudget = item.W - 12.0f;
-			if (showAssetIcons)
+			bool renderAssetIcons = showAssetIcons;
+			if (!renderAssetIcons)
+			{
+				for (const auto& opt : options)
+				{
+					if (GetAssetIconSpec(opt, theme).Tag != nullptr)
+					{
+						renderAssetIcons = true;
+						break;
+					}
+				}
+			}
+			if (renderAssetIcons)
 			{
 				const AssetIconSpec spec = GetAssetIconSpec(options[optionIndex], theme);
 				if (spec.Tag)

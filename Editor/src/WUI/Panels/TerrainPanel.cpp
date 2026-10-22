@@ -1,5 +1,7 @@
 #include "WUI/Panels/TerrainPanel.h"
 #include "WUI/Common/EditorAssetCatalog.h"
+#include "WUI/Common/AssetThumbnailRenderer.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/Core/Log.h"
 #include "World/Core/KeyCodes.h"
@@ -492,9 +494,46 @@ namespace World
 			}
 			currentY += 26.0f;
 
-			// 4. Albedo 贴图下拉框 (直接展示规范逻辑相对路径，无假中文与重复项)
+			// 4. Albedo 贴图下拉框与缩略图卡槽
 			Wui::Label(ctx, { startX, currentY + 3.0f }, "Albedo:", theme.TextMuted, theme.FontSizeSmall);
-			const Wui::WuiRect albComboRect { startX + 55.0f, currentY, contentWidth - 55.0f, 22.0f };
+			const float thumbSize = 22.0f;
+			const float thumbPad = 4.0f;
+			const Wui::WuiRect albThumbRect { startX + 55.0f, currentY, thumbSize, thumbSize };
+			const Wui::WuiRect albComboRect { startX + 55.0f + thumbSize + thumbPad, currentY, contentWidth - 55.0f - thumbSize - thumbPad, 22.0f };
+
+			if (!m_EditLayerAlbedo.empty() && m_EditLayerAlbedo != "(none)")
+			{
+				Editor::AssetThumbnailRenderer::DrawThumbnail(ctx, albThumbRect, m_EditLayerAlbedo, AssetCategory::Texture, theme);
+				Wui::HighlightOutline(ctx, albThumbRect, theme.BorderStrong, 3.0f, 1.0f);
+			}
+			else
+			{
+				Wui::PanelBackground(ctx, albThumbRect, theme.ContentBg, 3.0f);
+				Wui::HighlightOutline(ctx, albThumbRect, theme.Border, 3.0f, 1.0f);
+				Wui::Label(ctx, { albThumbRect.X + thumbSize * 0.5f - 4.0f, albThumbRect.Y + (thumbSize - 14.0f) * 0.5f }, "+", theme.TextDisabled, 12.0f);
+			}
+			Wui::Tooltip(ctx, albThumbRect, m_EditLayerAlbedo.empty() || m_EditLayerAlbedo == "(none)" ? "选择 Albedo 贴图" : (m_EditLayerAlbedo + " (点击浏览)"));
+			if (ctx.IsClicked(albThumbRect))
+			{
+				host.OpenAssetPicker("选择地貌 Albedo 贴图", AssetCategory::Texture, [this, &layer, &host](const std::string& picked) {
+					const auto& texPaths = Editor::AssetCatalog::PathsFor(EditorAssetKind::TextureSource);
+					layer.AlbedoTexture.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+					m_EditLayerAlbedo = picked;
+					if (picked.find("_albedo") != std::string::npos)
+					{
+						std::string pairedNorm = picked;
+						size_t pPos = pairedNorm.find("_albedo");
+						pairedNorm.replace(pPos, 7, "_normal");
+						if (std::find(texPaths.begin(), texPaths.end(), pairedNorm) != texPaths.end())
+						{
+							layer.NormalTexture.Path = StringPool::Get().InternPath(pairedNorm);
+							m_EditLayerNormal = pairedNorm;
+						}
+					}
+					m_StatusFeedback = "已选择地貌 Albedo: " + picked;
+					host.MarkDocumentDirty();
+				});
+			}
 
 			const auto& texPaths = Editor::AssetCatalog::PathsFor(EditorAssetKind::TextureSource);
 			std::vector<std::string> albOptions;
@@ -538,9 +577,32 @@ namespace World
 			}
 			currentY += 26.0f;
 
-			// 5. Normal 法线贴图下拉框 (直接展示规范逻辑相对路径)
+			// 5. Normal 法线贴图下拉框与缩略图卡槽
 			Wui::Label(ctx, { startX, currentY + 3.0f }, "Normal:", theme.TextMuted, theme.FontSizeSmall);
-			const Wui::WuiRect normComboRect { startX + 55.0f, currentY, contentWidth - 55.0f, 22.0f };
+			const Wui::WuiRect normThumbRect { startX + 55.0f, currentY, thumbSize, thumbSize };
+			const Wui::WuiRect normComboRect { startX + 55.0f + thumbSize + thumbPad, currentY, contentWidth - 55.0f - thumbSize - thumbPad, 22.0f };
+
+			if (!m_EditLayerNormal.empty() && m_EditLayerNormal != "(none)")
+			{
+				Editor::AssetThumbnailRenderer::DrawThumbnail(ctx, normThumbRect, m_EditLayerNormal, AssetCategory::Texture, theme);
+				Wui::HighlightOutline(ctx, normThumbRect, theme.BorderStrong, 3.0f, 1.0f);
+			}
+			else
+			{
+				Wui::PanelBackground(ctx, normThumbRect, theme.ContentBg, 3.0f);
+				Wui::HighlightOutline(ctx, normThumbRect, theme.Border, 3.0f, 1.0f);
+				Wui::Label(ctx, { normThumbRect.X + thumbSize * 0.5f - 4.0f, normThumbRect.Y + (thumbSize - 14.0f) * 0.5f }, "+", theme.TextDisabled, 12.0f);
+			}
+			Wui::Tooltip(ctx, normThumbRect, m_EditLayerNormal.empty() || m_EditLayerNormal == "(none)" ? "选择 Normal 贴图" : (m_EditLayerNormal + " (点击浏览)"));
+			if (ctx.IsClicked(normThumbRect))
+			{
+				host.OpenAssetPicker("选择地貌 Normal 贴图", AssetCategory::Texture, [this, &layer, &host](const std::string& picked) {
+					layer.NormalTexture.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+					m_EditLayerNormal = picked;
+					m_StatusFeedback = "已选择地貌 Normal: " + picked;
+				host.MarkDocumentDirty();
+				});
+			}
 
 			std::vector<std::string> normOptions;
 			normOptions.push_back("(none)");
