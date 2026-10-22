@@ -883,6 +883,8 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 		}
 
 		float textOffset = 6.0f;
+		const bool hasLocateBtn = renderAssetIcons && !current.empty() && current != "(none)";
+		const float locateBtnW = hasLocateBtn ? 18.0f : 0.0f;
 		if (renderAssetIcons)
 		{
 			const AssetIconSpec spec = GetAssetIconSpec(triggerText, theme);
@@ -892,11 +894,33 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 				DrawAssetMiniThumbnail(ctx, { rect.X + 4.0f, rect.Y + (rect.H - thumbSize) * 0.5f, thumbSize, thumbSize },
 					triggerText, spec, theme);
 				textOffset = thumbSize + 8.0f;
-				valueBudget = std::max(10.0f, caretX - (rect.X + textOffset) - 4.0f);
 			}
 		}
+		valueBudget = std::max(10.0f, (caretX - locateBtnW - 4.0f) - (rect.X + textOffset));
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + textOffset, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
 			theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, triggerText, valueBudget, 15.0f), 15.0f, false });
+		if (hasLocateBtn)
+		{
+			const WuiRect locateRect { caretX - 18.0f, rect.Y + (rect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
+			const bool locHover = ctx.IsHovered(locateRect);
+			if (locHover)
+			{
+				ctx.Commands().push_back({ WuiDrawKind::Rect, locateRect, theme.HoverBg, 2.0f });
+				ctx.SetCursor(WuiCursor::Hand);
+			}
+			const float lcx = locateRect.X + 6.0f;
+			const float lcy = locateRect.Y + 6.0f;
+			const float lr = 3.2f;
+			const WuiColor iconCol = locHover ? theme.Accent : theme.TextMuted;
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, { lcx - lr, lcy - lr, lr * 2.0f, lr * 2.0f }, iconCol, lr, 1.2f });
+			LineSegment(ctx, { lcx + 2.2f, lcy + 2.2f }, { locateRect.X + 13.5f, locateRect.Y + 13.5f }, iconCol, 1.4f);
+			Tooltip(ctx, locateRect, "在内容浏览器中定位资产文件 (Locate in Content Browser)");
+			if (ctx.IsClicked(locateRect))
+			{
+				LocateAssetWithHook(current);
+				ctx.ConsumePointerClick();
+			}
+		}
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX, caretY, 7.0f, 1.5f }, theme.TextMuted, 1.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX + 1.5f, caretY + 3.0f, 4.0f, 1.5f }, theme.TextMuted, 1.0f });
 		DrawFocusRing(ctx, rect, id, theme);
@@ -941,7 +965,9 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 				// M4-TEX-P7:候选行同样只在**绘制命令**里省略(条目没有箭头/滚动条 ⇒ 右侧留 6px 呼吸距离,
 				// 文本不会越过条目矩形);上面的 a11y 节点与点击写回的 selected 仍是完整选项串。
 				float itemTextOffset = 6.0f;
-				float itemBudget = item.W - 12.0f;
+				const bool itemCanLocate = renderAssetIcons && !options[i].empty() && options[i] != "(none)";
+				const float itemLocateW = itemCanLocate ? 18.0f : 0.0f;
+				float itemBudget = item.W - 12.0f - itemLocateW;
 				if (renderAssetIcons)
 				{
 					const AssetIconSpec spec = GetAssetIconSpec(options[i], theme);
@@ -951,11 +977,33 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 						DrawAssetMiniThumbnail(ctx, { item.X + 4.0f, item.Y + (item.H - thumbSize) * 0.5f, thumbSize, thumbSize },
 							options[i], spec, theme);
 						itemTextOffset = thumbSize + 8.0f;
-						itemBudget = std::max(10.0f, item.W - itemTextOffset - 6.0f);
+						itemBudget = std::max(10.0f, item.W - itemTextOffset - 6.0f - itemLocateW);
 					}
 				}
 				ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + itemTextOffset, item.Y + 3.0f, 0, 0 }, theme.Text, 0, 1.0f,
 					EllipsizeMiddleToWidth(ctx, options[i], itemBudget, 15.0f), 15.0f, false });
+				if (itemCanLocate && ctx.IsHovered(item))
+				{
+					const WuiRect locRect { item.X + item.W - 18.0f, item.Y + (item.H - 16.0f) * 0.5f, 16.0f, 16.0f };
+					const bool locHov = ctx.IsHovered(locRect);
+					if (locHov)
+					{
+						ctx.Commands().push_back({ WuiDrawKind::Rect, locRect, theme.HoverBg, 2.0f });
+						ctx.SetCursor(WuiCursor::Hand);
+					}
+					const float lcx = locRect.X + 6.0f;
+					const float lcy = locRect.Y + 6.0f;
+					const float lr = 3.0f;
+					const WuiColor iconCol = locHov ? theme.Accent : theme.TextMuted;
+					ctx.Commands().push_back({ WuiDrawKind::RectOutline, { lcx - lr, lcy - lr, lr * 2.0f, lr * 2.0f }, iconCol, lr, 1.0f });
+					LineSegment(ctx, { lcx + 2.0f, lcy + 2.0f }, { locRect.X + 12.0f, locRect.Y + 12.0f }, iconCol, 1.2f);
+					Tooltip(ctx, locRect, "在内容浏览器中定位资产文件 (Locate in Content Browser)");
+					if (ctx.IsClicked(locRect))
+					{
+						LocateAssetWithHook(options[i]);
+						ctx.ConsumePointerClick();
+					}
+				}
 			}
 			ctx.ClosePopupsOnOutsideClick({ id }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
@@ -1026,6 +1074,8 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 			}
 
 			float textOffset = 6.0f;
+			const bool hasLocateBtn = renderAssetIcons && !current.empty() && current != "(none)";
+			const float locateBtnW = hasLocateBtn ? 18.0f : 0.0f;
 			if (renderAssetIcons)
 			{
 				const AssetIconSpec spec = GetAssetIconSpec(triggerText, theme);
@@ -1035,11 +1085,33 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 					DrawAssetMiniThumbnail(ctx, { fieldRect.X + 4.0f, rect.Y + (rect.H - thumbSize) * 0.5f, thumbSize, thumbSize },
 						triggerText, spec, theme);
 					textOffset = thumbSize + 8.0f;
-					valueBudget = std::max(10.0f, (rect.X + rect.W - 22.0f) - (fieldRect.X + textOffset));
 				}
 			}
+			valueBudget = std::max(10.0f, (rect.X + rect.W - 22.0f - locateBtnW) - (fieldRect.X + textOffset));
 			ctx.Commands().push_back({ WuiDrawKind::Text, { fieldRect.X + textOffset, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
 				theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, triggerText, valueBudget, 15.0f), 15.0f, false });
+			if (hasLocateBtn)
+			{
+				const WuiRect locateRect { rect.X + rect.W - 36.0f, rect.Y + (rect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
+				const bool locHover = ctx.IsHovered(locateRect);
+				if (locHover)
+				{
+					ctx.Commands().push_back({ WuiDrawKind::Rect, locateRect, theme.HoverBg, 2.0f });
+					ctx.SetCursor(WuiCursor::Hand);
+				}
+				const float lcx = locateRect.X + 6.0f;
+				const float lcy = locateRect.Y + 6.0f;
+				const float lr = 3.2f;
+				const WuiColor iconCol = locHover ? theme.Accent : theme.TextMuted;
+				ctx.Commands().push_back({ WuiDrawKind::RectOutline, { lcx - lr, lcy - lr, lr * 2.0f, lr * 2.0f }, iconCol, lr, 1.2f });
+				LineSegment(ctx, { lcx + 2.2f, lcy + 2.2f }, { locateRect.X + 13.5f, locateRect.Y + 13.5f }, iconCol, 1.4f);
+				Tooltip(ctx, locateRect, "在内容浏览器中定位资产文件 (Locate in Content Browser)");
+				if (ctx.IsClicked(locateRect))
+				{
+					LocateAssetWithHook(current);
+					ctx.ConsumePointerClick();
+				}
+			}
 		}
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + rect.W - 18.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
 			theme.TextMuted, 0, 1.0f, open ? "^" : "v", 14.0f, false });
@@ -1144,7 +1216,6 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 			// M4-TEX-P7:可见候选行只在**绘制命令**里中间省略(条目右侧留 6px 呼吸距离);上面两个 a11y
 			// 节点(combo-option / combo-item)的 label 仍是完整选项串 —— 脚本按完整路径点选与搜索都不受影响。
 			float itemTextOffset = 6.0f;
-			float itemBudget = item.W - 12.0f;
 			bool renderAssetIcons = showAssetIcons;
 			if (!renderAssetIcons)
 			{
@@ -1157,6 +1228,9 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 					}
 				}
 			}
+			const bool itemCanLocate = renderAssetIcons && !options[optionIndex].empty() && options[optionIndex] != "(none)";
+			const float itemLocateW = itemCanLocate ? 18.0f : 0.0f;
+			float itemBudget = item.W - 12.0f - itemLocateW;
 			if (renderAssetIcons)
 			{
 				const AssetIconSpec spec = GetAssetIconSpec(options[optionIndex], theme);
@@ -1166,12 +1240,34 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 					DrawAssetMiniThumbnail(ctx, { item.X + 4.0f, item.Y + (item.H - thumbSize) * 0.5f, thumbSize, thumbSize },
 						options[optionIndex], spec, theme);
 					itemTextOffset = thumbSize + 8.0f;
-					itemBudget = std::max(10.0f, item.W - itemTextOffset - 6.0f);
+					itemBudget = std::max(10.0f, item.W - itemTextOffset - 6.0f - itemLocateW);
 				}
 			}
 			ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + itemTextOffset, item.Y + 3.0f, 0, 0 },
 				theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, options[optionIndex], itemBudget, 15.0f),
 				15.0f, false });
+			if (itemCanLocate && ctx.IsHovered(item))
+			{
+				const WuiRect locRect { item.X + item.W - 18.0f, item.Y + (item.H - 16.0f) * 0.5f, 16.0f, 16.0f };
+				const bool locHov = ctx.IsHovered(locRect);
+				if (locHov)
+				{
+					ctx.Commands().push_back({ WuiDrawKind::Rect, locRect, theme.HoverBg, 2.0f });
+					ctx.SetCursor(WuiCursor::Hand);
+				}
+				const float lcx = locRect.X + 6.0f;
+				const float lcy = locRect.Y + 6.0f;
+				const float lr = 3.0f;
+				const WuiColor iconCol = locHov ? theme.Accent : theme.TextMuted;
+				ctx.Commands().push_back({ WuiDrawKind::RectOutline, { lcx - lr, lcy - lr, lr * 2.0f, lr * 2.0f }, iconCol, lr, 1.0f });
+				LineSegment(ctx, { lcx + 2.0f, lcy + 2.0f }, { locRect.X + 12.0f, locRect.Y + 12.0f }, iconCol, 1.2f);
+				Tooltip(ctx, locRect, "在内容浏览器中定位资产文件 (Locate in Content Browser)");
+				if (ctx.IsClicked(locRect))
+				{
+					LocateAssetWithHook(options[optionIndex]);
+					ctx.ConsumePointerClick();
+				}
+			}
 			ctx.Commands().push_back({ WuiDrawKind::ClipPop });
 			// P4-U28:与 Combo 同一条 release 确认口径(拖出弹层后松手不选中)。
 			if (ctx.IsClickCompleted(ComboOptionId(id, static_cast<size_t>(optionIndex)), item))

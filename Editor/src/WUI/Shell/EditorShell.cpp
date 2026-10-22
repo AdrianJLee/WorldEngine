@@ -891,6 +891,53 @@ ContentBrowserPanel* EditorShell::ContentBrowserPanelInstance() const{
 	}
 
 
+bool EditorShell::RevealAsset(const std::string& path){
+	if (path.empty() || path == "(none)")
+		return false;
+
+	std::filesystem::path p(path);
+	std::error_code ec;
+
+	if (!p.is_absolute())
+	{
+		// 1. 项目资产内容根
+		std::filesystem::path assetFull = World::Paths::AssetRoot() / p;
+		if (std::filesystem::exists(assetFull, ec))
+		{
+			std::string msg;
+			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::Content, assetFull, &msg);
+		}
+
+		// 2. 引擎全局内容根
+		std::filesystem::path engineFull = World::Paths::EngineContentRoot() / p;
+		if (std::filesystem::exists(engineFull, ec))
+		{
+			std::string msg;
+			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::EngineContent, engineFull, &msg);
+		}
+
+		// 3. 项目插件根
+		std::filesystem::path pluginFull = World::Paths::ProjectDir() / "plugins" / p;
+		if (std::filesystem::exists(pluginFull, ec))
+		{
+			std::string msg;
+			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::ProjectPlugins, pluginFull, &msg);
+		}
+	}
+	else
+	{
+		if (std::filesystem::exists(p, ec))
+		{
+			if (p.generic_string().find(World::Paths::AssetRoot().generic_string()) != std::string::npos)
+				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::Content, p, nullptr);
+			if (p.generic_string().find(World::Paths::EngineContentRoot().generic_string()) != std::string::npos)
+				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::EngineContent, p, nullptr);
+		}
+	}
+	return false;
+}
+
+
 bool EditorShell::RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope scope, const std::filesystem::path& absolutePath, std::string* message){
 		const auto fail = [message](const std::string& reason)
 		{

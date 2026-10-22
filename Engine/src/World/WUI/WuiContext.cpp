@@ -35,6 +35,17 @@ namespace World::Wui
 			return hook;
 		}
 
+		struct LocateAssetHookState
+		{
+			std::vector<std::pair<void*, WuiLocateAssetFn>> Entries;
+		};
+
+		LocateAssetHookState& LocateHook()
+		{
+			static LocateAssetHookState hook;
+			return hook;
+		}
+
 		// 无钩子时的回退度量:ASCII 0.6em,其余 1.0em(与旧 CursorAtX 的启发式一致,
 		// 但按码点解码,不会把多字节串算成多个 ASCII)。
 		float FallbackAdvance(uint32_t codepoint, float fontSize)
@@ -208,6 +219,31 @@ namespace World::Wui
 		const auto& entries = TextureHook().Entries;
 		if (entries.empty() || !entries.back().second)
 			return 0;   // 未装钩子 = "没有这张图"(调用方按空图槽位画占位框)
+		return entries.back().second(path);
+	}
+
+	void SetLocateAssetHook(void* owner, WuiLocateAssetFn fn)
+	{
+		auto& entries = LocateHook().Entries;
+		entries.erase(std::remove_if(entries.begin(), entries.end(),
+			[&](const auto& entry) { return entry.first == owner; }), entries.end());
+		entries.emplace_back(owner, std::move(fn));
+	}
+
+	void ClearLocateAssetHook(void* owner)
+	{
+		auto& entries = LocateHook().Entries;
+		entries.erase(std::remove_if(entries.begin(), entries.end(),
+			[&](const auto& entry) { return entry.first == owner; }), entries.end());
+	}
+
+	bool LocateAssetWithHook(std::string_view path)
+	{
+		if (path.empty())
+			return false;
+		const auto& entries = LocateHook().Entries;
+		if (entries.empty() || !entries.back().second)
+			return false;
 		return entries.back().second(path);
 	}
 

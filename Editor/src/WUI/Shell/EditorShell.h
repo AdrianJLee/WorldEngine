@@ -159,6 +159,8 @@ namespace World
 		void OpenCurveEditor(const std::string& logicalPath) override;
 		void OpenAssetPicker(std::string_view title, AssetCategory category, std::function<void(const std::string&)> onSelect) override;
 		void OpenAsset(const std::string& path) override;
+		bool RevealAssetInContentBrowser(const std::string& path) override { return RevealAsset(path); }
+		bool RevealAsset(const std::string& path);
 		void EnsureTilemapPanelFromId(const std::string& panelId);
 		TilemapEditorPanel* FindTilemapPanel(const std::string& logicalPath);
 		// 动态材质面板(每个材质一个 "material:<path>" 面板):从布局存档恢复时按 id 建实例。

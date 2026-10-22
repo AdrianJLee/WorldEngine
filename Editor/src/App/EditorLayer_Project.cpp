@@ -839,6 +839,12 @@ void EditorLayer::RegisterUiTextures(){
 				return 0;
 			return Wui::WuiTextureRegistry::Get().Register(texture);
 		});
+
+		Wui::SetLocateAssetHook(this, [this](std::string_view logicalPath) -> bool {
+			if (logicalPath.empty())
+				return false;
+			return m_Shell.RevealAsset(std::string(logicalPath));
+		});
 	}
 
 

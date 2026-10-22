@@ -152,6 +152,12 @@ namespace World::Wui
 	// 未装钩子 / 路径为空 ⇒ 0(可读地表示"没有这张图")。
 	uint64_t WLD_API ResolveTextureWithHook(std::string_view path);
 
+	// 资产定位钩子(内容浏览器定位与文件导航): 宿主装载钩子，核心控件在点击 🔍 定位时调用。
+	using WuiLocateAssetFn = std::function<bool(std::string_view path)>;
+	void WLD_API SetLocateAssetHook(void* owner, WuiLocateAssetFn fn);
+	void WLD_API ClearLocateAssetHook(void* owner);
+	bool WLD_API LocateAssetWithHook(std::string_view path);
+
 	// P4-UX2c:UI 内容缩放(用户反馈"全屏后 UI 还是有点小")。
 	// 语义是"整块 UI 的缩放":布局坐标 = 物理像素 / UiScale,渲染时由视口映射放大,
 	// 文字按 UiScale 栅格化后仍以设计单位摆放。输入坐标必须除以它,否则命中会偏。
