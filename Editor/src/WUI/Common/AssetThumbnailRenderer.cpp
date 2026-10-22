@@ -608,10 +608,32 @@ namespace World::Editor
 
 
 	void AssetThumbnailRenderer::DrawThumbnail(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
-
 		const std::string& logicalPath, AssetCategory category, const Wui::WuiTheme& theme)
-
 	{
+		if (category == AssetCategory::Unknown)
+			category = AssetThumbnailCache::DetectCategory(logicalPath);
+
+		// 0. 优先检测是否存在显式预览图/伴随预览图/GPU已就绪预览纹理
+		// (对于有预览图的, 缩略图应该是真实预览图)
+		uint64_t previewTexId = AssetThumbnailCache::Get().GetOrCreateTextureId(logicalPath);
+		if (previewTexId != 0)
+		{
+			Wui::PanelBackground(ctx, rect, theme.ContentBg, 3.0f);
+			Wui::Image(ctx, rect, previewTexId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+			Wui::HighlightOutline(ctx, rect, theme.BorderStrong, 3.0f, 1.0f);
+
+			const char* tag = (category == AssetCategory::Material) ? "MAT" :
+			                  (category == AssetCategory::Mesh) ? "3D" :
+			                  (category == AssetCategory::Texture) ? "TEX" : nullptr;
+			if (tag && rect.W >= 36.0f)
+			{
+				const Wui::WuiColor tagCol = (category == AssetCategory::Material) ? theme.Accent :
+				                             (category == AssetCategory::Mesh) ? theme.Warning : theme.Info;
+				Wui::Badge(ctx, { rect.X + rect.W - 28.0f, rect.Y + 2.0f, 26.0f, 13.0f },
+					tag, tagCol, theme.TextBright, theme, 9.0f);
+			}
+			return;
+		}
 
 		// 1. 纹理类资产 (Texture / Atlas) -> 优先使用 GPU 纹理直接呈现真实画面
 

@@ -749,6 +749,62 @@ namespace
 			return { nullptr, {} };
 		}
 	}
+
+	void DrawAssetMiniThumbnail(WuiContext& ctx, const WuiRect& rect, std::string_view path,
+		const AssetIconSpec& spec, const WuiTheme& theme)
+	{
+		if (path.empty() || !spec.Tag)
+			return;
+
+		const std::string pathStr(path);
+		uint64_t texId = AssetThumbnailCache::Get().GetOrCreateTextureId(pathStr);
+		if (texId != 0)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ContentBg, 2.0f });
+			Image(ctx, rect, texId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.BorderStrong, 2.0f, 1.0f });
+			return;
+		}
+
+		const AssetCategory cat = AssetThumbnailCache::DetectCategory(path);
+		if (cat == AssetCategory::Material)
+		{
+			// 迷你 3D 材质球缩略图: 阴影底 + 球体 + 左上高光
+			const float cx = rect.X + rect.W * 0.5f;
+			const float cy = rect.Y + rect.H * 0.5f;
+			const float r = rect.W * 0.44f;
+			const WuiRect sphereRect { cx - r, cy - r, r * 2.0f, r * 2.0f };
+			ctx.Commands().push_back({ WuiDrawKind::Rect, sphereRect, spec.Color, r });
+			const float hr = r * 0.38f;
+			const WuiRect hlRect { cx - r * 0.45f, cy - r * 0.45f, hr, hr };
+			ctx.Commands().push_back({ WuiDrawKind::Rect, hlRect, theme.TextBright, hr * 0.5f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, sphereRect, theme.BorderStrong, r, 1.0f });
+			return;
+		}
+
+		if (cat == AssetCategory::Mesh)
+		{
+			// 迷你 3D 等轴测几何立方体缩略图
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ContentBg, 2.0f });
+			const float cx = rect.X + rect.W * 0.5f;
+			const float cy = rect.Y + rect.H * 0.5f;
+			const float r = rect.W * 0.38f;
+			const glm::vec2 top { cx, cy - r };
+			const glm::vec2 bLeft { cx - r * 0.85f, cy + r * 0.5f };
+			const glm::vec2 bRight { cx + r * 0.85f, cy + r * 0.5f };
+			const glm::vec2 center { cx, cy };
+			LineSegment(ctx, top, bRight, spec.Color, 1.2f);
+			LineSegment(ctx, bRight, bLeft, spec.Color, 1.2f);
+			LineSegment(ctx, bLeft, top, spec.Color, 1.2f);
+			LineSegment(ctx, center, top, spec.Color, 1.0f);
+			LineSegment(ctx, center, bLeft, spec.Color, 1.0f);
+			LineSegment(ctx, center, bRight, spec.Color, 1.0f);
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.BorderStrong, 2.0f, 1.0f });
+			return;
+		}
+
+		Badge(ctx, rect, spec.Tag, spec.Color, theme.TextBright, theme, 9.0f);
+	}
 }
 
 bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::vector<std::string>& options, int& selected, const WuiTheme& theme, const std::string& displayText, bool showAssetIcons){
@@ -782,11 +838,10 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 			const AssetIconSpec spec = GetAssetIconSpec(triggerText, theme);
 			if (spec.Tag)
 			{
-				constexpr float badgeW = 28.0f;
-				constexpr float badgeH = 14.0f;
-				Badge(ctx, { rect.X + 4.0f, rect.Y + (rect.H - badgeH) * 0.5f, badgeW, badgeH },
-					spec.Tag, spec.Color, theme.TextBright, theme, 9.0f);
-				textOffset = badgeW + 8.0f;
+				constexpr float thumbSize = 16.0f;
+				DrawAssetMiniThumbnail(ctx, { rect.X + 4.0f, rect.Y + (rect.H - thumbSize) * 0.5f, thumbSize, thumbSize },
+					triggerText, spec, theme);
+				textOffset = thumbSize + 8.0f;
 				valueBudget = std::max(10.0f, caretX - (rect.X + textOffset) - 4.0f);
 			}
 		}
@@ -842,11 +897,10 @@ bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& la
 					const AssetIconSpec spec = GetAssetIconSpec(options[i], theme);
 					if (spec.Tag)
 					{
-						constexpr float badgeW = 28.0f;
-						constexpr float badgeH = 14.0f;
-						Badge(ctx, { item.X + 4.0f, item.Y + (item.H - badgeH) * 0.5f, badgeW, badgeH },
-							spec.Tag, spec.Color, theme.TextBright, theme, 9.0f);
-						itemTextOffset = badgeW + 8.0f;
+						constexpr float thumbSize = 16.0f;
+						DrawAssetMiniThumbnail(ctx, { item.X + 4.0f, item.Y + (item.H - thumbSize) * 0.5f, thumbSize, thumbSize },
+							options[i], spec, theme);
+						itemTextOffset = thumbSize + 8.0f;
 						itemBudget = std::max(10.0f, item.W - itemTextOffset - 6.0f);
 					}
 				}
@@ -909,11 +963,10 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 				const AssetIconSpec spec = GetAssetIconSpec(triggerText, theme);
 				if (spec.Tag)
 				{
-					constexpr float badgeW = 28.0f;
-					constexpr float badgeH = 14.0f;
-					Badge(ctx, { fieldRect.X + 4.0f, rect.Y + (rect.H - badgeH) * 0.5f, badgeW, badgeH },
-						spec.Tag, spec.Color, theme.TextBright, theme, 9.0f);
-					textOffset = badgeW + 8.0f;
+					constexpr float thumbSize = 16.0f;
+					DrawAssetMiniThumbnail(ctx, { fieldRect.X + 4.0f, rect.Y + (rect.H - thumbSize) * 0.5f, thumbSize, thumbSize },
+						triggerText, spec, theme);
+					textOffset = thumbSize + 8.0f;
 					valueBudget = std::max(10.0f, (rect.X + rect.W - 22.0f) - (fieldRect.X + textOffset));
 				}
 			}
@@ -1029,11 +1082,10 @@ bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::
 				const AssetIconSpec spec = GetAssetIconSpec(options[optionIndex], theme);
 				if (spec.Tag)
 				{
-					constexpr float badgeW = 28.0f;
-					constexpr float badgeH = 14.0f;
-					Badge(ctx, { item.X + 4.0f, item.Y + (item.H - badgeH) * 0.5f, badgeW, badgeH },
-						spec.Tag, spec.Color, theme.TextBright, theme, 9.0f);
-					itemTextOffset = badgeW + 8.0f;
+					constexpr float thumbSize = 16.0f;
+					DrawAssetMiniThumbnail(ctx, { item.X + 4.0f, item.Y + (item.H - thumbSize) * 0.5f, thumbSize, thumbSize },
+						options[optionIndex], spec, theme);
+					itemTextOffset = thumbSize + 8.0f;
 					itemBudget = std::max(10.0f, item.W - itemTextOffset - 6.0f);
 				}
 			}
