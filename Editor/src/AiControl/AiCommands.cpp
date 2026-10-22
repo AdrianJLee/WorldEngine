@@ -1807,6 +1807,22 @@ namespace World
 			result = "opened " + panel;
 			return true;
 		}
+		if (cmd == "asset.locate")
+		{
+			std::string p = arg("path");
+			if (p.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			if (m_Shell.RevealAsset(p))
+			{
+				result = "located " + p;
+				return true;
+			}
+			error = "failed to locate asset " + p;
+			return false;
+		}
 		if (cmd == "ui.toggle" || cmd == "ui.close")
 		{
 			const std::string panel = normalizePanel(arg("panel"));

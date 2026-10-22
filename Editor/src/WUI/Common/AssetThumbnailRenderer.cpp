@@ -29,6 +29,39 @@ namespace World::Editor
 
 	{
 
+				std::filesystem::path ResolveAssetDiskPath(const std::string& logicalPath)
+		{
+			std::string p = logicalPath;
+			std::replace(p.begin(), p.end(), '\\', '/');
+			std::error_code ec;
+
+			if (p.rfind("engine/", 0) == 0 || p.rfind("Engine/", 0) == 0)
+			{
+				std::filesystem::path cand = Paths::EngineContentRoot() / p.substr(7);
+				if (std::filesystem::exists(cand, ec))
+					return cand;
+			}
+			if (p.rfind("Engine/content/", 0) == 0 || p.rfind("engine/content/", 0) == 0)
+			{
+				std::filesystem::path cand = Paths::EngineContentRoot() / p.substr(15);
+				if (std::filesystem::exists(cand, ec))
+					return cand;
+			}
+
+			std::filesystem::path projectCand = Paths::AssetRoot() / p;
+			if (std::filesystem::exists(projectCand, ec))
+				return projectCand;
+
+			std::filesystem::path engineCand = Paths::EngineContentRoot() / p;
+			if (std::filesystem::exists(engineCand, ec))
+				return engineCand;
+
+			if (std::filesystem::path(p).is_absolute() && std::filesystem::exists(p, ec))
+				return std::filesystem::path(p);
+
+			return projectCand;
+		}
+
 		uint32_t HashString(std::string_view str)
 
 		{
@@ -64,7 +97,7 @@ namespace World::Editor
 		MatProps ParseMaterialProps(const std::string& logicalPath)
 		{
 			MatProps props;
-			std::filesystem::path fullPath = Paths::AssetRoot() / logicalPath;
+			std::filesystem::path fullPath = ResolveAssetDiskPath(logicalPath);
 			std::ifstream file(fullPath);
 			if (!file.is_open())
 				return props;
@@ -305,7 +338,7 @@ namespace World::Editor
 
 			CubicBezierCurve curve;
 
-			std::filesystem::path fullPath = Paths::AssetRoot() / logicalPath;
+			std::filesystem::path fullPath = ResolveAssetDiskPath(logicalPath);
 
 			if (!curve.LoadFromFile(fullPath.string()))
 
@@ -472,7 +505,7 @@ namespace World::Editor
 			Wui::PanelBackground(ctx, { cx - r * 0.85f, cy + r * 0.55f, r * 1.70f, r * 0.35f },
 				theme.ModalBackdrop, r * 0.35f);
 
-			const std::filesystem::path fullPath = Paths::AssetRoot() / logicalPath;
+			const std::filesystem::path fullPath = ResolveAssetDiskPath(logicalPath);
 			Asset::WModelData modelData;
 			std::string err;
 			bool loaded = Asset::WModelIO::ReadFile(fullPath.string(), modelData, &err);
@@ -675,7 +708,7 @@ namespace World::Editor
 
 			{
 
-				std::filesystem::path atlasFull = Paths::AssetRoot() / logicalPath;
+				std::filesystem::path atlasFull = ResolveAssetDiskPath(logicalPath);
 
 				std::ifstream f(atlasFull);
 

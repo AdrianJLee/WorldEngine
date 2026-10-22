@@ -482,15 +482,27 @@ namespace World
 		const Wui::WuiRect revealRect { modalRect.X + modalRect.W - 270.0f, footerY, btnRevealW, 26.0f };
 		if (!m_SelectedItem.empty())
 		{
-			Wui::Tooltip(ctx, revealRect, "在文件资源管理器中定位当前选中资产所在目录");
+			Wui::Tooltip(ctx, revealRect, "在内容浏览器或文件资源管理器中定位当前选中资产所在目录");
 			if (Wui::Button(ctx, baseId++, revealRect, "定位文件", theme))
 			{
-				std::filesystem::path full = World::Paths::AssetRoot() / m_SelectedItem;
-				if (!std::filesystem::exists(full))
-					full = World::Paths::ProjectDir() / m_SelectedItem;
-				std::string cmd = "start "" explorer.exe /select,"" + full.string() + """;
-				system(cmd.c_str());
-				host.Notify("已在文件资源管理器中定位: " + m_SelectedItem);
+				if (host.RevealAssetInContentBrowser(m_SelectedItem))
+				{
+					host.Notify("已在内容浏览器中定位: " + m_SelectedItem);
+				}
+				else
+				{
+					std::string p = m_SelectedItem;
+					if (p.rfind("engine/", 0) == 0 || p.rfind("Engine/", 0) == 0)
+						p = p.substr(7);
+					std::filesystem::path full = World::Paths::AssetRoot() / m_SelectedItem;
+					if (!std::filesystem::exists(full))
+						full = World::Paths::EngineContentRoot() / p;
+					if (!std::filesystem::exists(full))
+						full = World::Paths::ProjectDir() / m_SelectedItem;
+					std::string cmd = "start "" explorer.exe /select,"" + full.string() + """;
+					system(cmd.c_str());
+					host.Notify("已在文件资源管理器中定位: " + m_SelectedItem);
+				}
 			}
 		}
 

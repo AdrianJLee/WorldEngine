@@ -143,6 +143,7 @@ namespace World
 
 		// 2. 检查是否有磁盘伴随预览图 (例如 path.png 或同名 .png)
 		const std::filesystem::path assetRoot = Paths::AssetRoot();
+		const std::filesystem::path engineRoot = Paths::EngineContentRoot();
 		std::vector<std::string> candidates;
 		candidates.push_back(path + ".png");
 		std::filesystem::path fsPath(path);
@@ -150,11 +151,33 @@ namespace World
 		if (rep != path)
 			candidates.push_back(rep);
 
+		std::string normPath = path;
+		std::replace(normPath.begin(), normPath.end(), '\\', '/');
+		if (normPath.rfind("engine/", 0) == 0 || normPath.rfind("Engine/", 0) == 0)
+		{
+			std::string stripped = normPath.substr(7);
+			candidates.push_back(stripped + ".png");
+			std::filesystem::path sFs(stripped);
+			std::string sRep = sFs.replace_extension(".png").string();
+			if (sRep != stripped)
+				candidates.push_back(sRep);
+		}
+		if (normPath.rfind("Engine/content/", 0) == 0)
+		{
+			std::string stripped = normPath.substr(15);
+			candidates.push_back(stripped + ".png");
+			std::filesystem::path sFs(stripped);
+			std::string sRep = sFs.replace_extension(".png").string();
+			if (sRep != stripped)
+				candidates.push_back(sRep);
+		}
+
 		for (const auto& cand : candidates)
 		{
-			std::filesystem::path fullCand = assetRoot / cand;
+			std::filesystem::path fullCand1 = assetRoot / cand;
+			std::filesystem::path fullCand2 = engineRoot / cand;
 			std::error_code ec;
-			if (std::filesystem::exists(fullCand, ec) || std::filesystem::exists(cand, ec))
+			if (std::filesystem::exists(fullCand1, ec) || std::filesystem::exists(cand, ec))
 			{
 				uint64_t id = Wui::ResolveTextureWithHook(cand);
 				if (id != 0)
@@ -165,8 +188,18 @@ namespace World
 					return id;
 				}
 			}
+			else if (std::filesystem::exists(fullCand2, ec))
+			{
+				uint64_t id = Wui::ResolveTextureWithHook(fullCand2.generic_string());
+				if (id != 0)
+				{
+					ThumbnailInfo& info = (it != m_Thumbnails.end()) ? it->second : GetOrCreateThumbnail(path);
+					info.TextureId = id;
+					info.IsReady = true;
+					return id;
+				}
+			}
 		}
-
 		return 0;
 	}
 

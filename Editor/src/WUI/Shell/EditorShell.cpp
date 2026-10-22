@@ -891,49 +891,110 @@ ContentBrowserPanel* EditorShell::ContentBrowserPanelInstance() const{
 	}
 
 
-bool EditorShell::RevealAsset(const std::string& path){
-	if (path.empty() || path == "(none)")
+bool EditorShell::RevealAsset(const std::string& rawPath){
+	if (rawPath.empty() || rawPath == "(none)")
 		return false;
 
-	std::filesystem::path p(path);
+	std::string path = rawPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+
+	const std::filesystem::path assetRoot = World::Paths::AssetRoot();
+	const std::filesystem::path engineRoot = World::Paths::EngineContentRoot();
+	const std::filesystem::path projectRoot = World::Paths::ProjectDir();
 	std::error_code ec;
 
-	if (!p.is_absolute())
+	// 1. 如果路径以 "engine/" 或 "Engine/" 开头 (如 EditorAssetCatalog 返回的逻辑路径)
+	if (path.rfind("engine/", 0) == 0 || path.rfind("Engine/", 0) == 0)
 	{
-		// 1. 项目资产内容根
-		std::filesystem::path assetFull = World::Paths::AssetRoot() / p;
-		if (std::filesystem::exists(assetFull, ec))
+		std::string stripped = path.substr(7);
+		std::filesystem::path cand = (engineRoot / stripped).lexically_normal();
+		if (std::filesystem::exists(cand, ec))
 		{
 			std::string msg;
-			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::Content, assetFull, &msg);
+			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::EngineContent, cand, &msg);
+		}
+	}
+
+	// 2. 如果路径以 "Engine/content/" 或 "engine/content/" 开头
+	if (path.rfind("Engine/content/", 0) == 0 || path.rfind("engine/content/", 0) == 0)
+	{
+		std::string stripped = path.substr(15);
+		std::filesystem::path cand = (engineRoot / stripped).lexically_normal();
+		if (std::filesystem::exists(cand, ec))
+		{
+			std::string msg;
+			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::EngineContent, cand, &msg);
+		}
+	}
+
+	// 3. 如果路径以 "assets/" 开头 (项目资产前缀)
+	if (path.rfind("assets/", 0) == 0)
+	{
+		std::string stripped = path.substr(7);
+		std::filesystem::path cand = (assetRoot / stripped).lexically_normal();
+		if (std::filesystem::exists(cand, ec))
+		{
+			std::string msg;
+			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::Content, cand, &msg);
+		}
+	}
+
+	// 4. 作为相对路径测试
+	if (!std::filesystem::path(path).is_absolute())
+	{
+		// 4a. 优先在项目资产根 (Project Content) 下寻找
+		std::filesystem::path assetCand = (assetRoot / path).lexically_normal();
+		if (std::filesystem::exists(assetCand, ec))
+		{
+			std::string msg;
+			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::Content, assetCand, &msg);
 		}
 
-		// 2. 引擎全局内容根
-		std::filesystem::path engineFull = World::Paths::EngineContentRoot() / p;
-		if (std::filesystem::exists(engineFull, ec))
+		// 4b. 在引擎全局内容根 (Engine Content) 下寻找 (例如 "models/debris_shard.wmodel")
+		std::filesystem::path engineCand = (engineRoot / path).lexically_normal();
+		if (std::filesystem::exists(engineCand, ec))
 		{
 			std::string msg;
-			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::EngineContent, engineFull, &msg);
+			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::EngineContent, engineCand, &msg);
 		}
 
-		// 3. 项目插件根
-		std::filesystem::path pluginFull = World::Paths::ProjectDir() / "plugins" / p;
-		if (std::filesystem::exists(pluginFull, ec))
+		// 4c. 在项目插件根 (Project Plugins) 下寻找
+		if (!projectRoot.empty())
 		{
-			std::string msg;
-			return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::ProjectPlugins, pluginFull, &msg);
+			std::filesystem::path pluginCand = (projectRoot / "plugins" / path).lexically_normal();
+			if (std::filesystem::exists(pluginCand, ec))
+			{
+				std::string msg;
+				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::ProjectPlugins, pluginCand, &msg);
+			}
+
+			// 4d. 在项目源码根 (Project Sources) 下寻找
+			std::filesystem::path srcCand = (projectRoot / "src" / path).lexically_normal();
+			if (std::filesystem::exists(srcCand, ec))
+			{
+				std::string msg;
+				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::ProjectSources, srcCand, &msg);
+			}
 		}
 	}
 	else
 	{
-		if (std::filesystem::exists(p, ec))
+		// 5. 绝对路径
+		std::filesystem::path absPath = std::filesystem::path(path).lexically_normal();
+		if (std::filesystem::exists(absPath, ec))
 		{
-			if (p.generic_string().find(World::Paths::AssetRoot().generic_string()) != std::string::npos)
-				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::Content, p, nullptr);
-			if (p.generic_string().find(World::Paths::EngineContentRoot().generic_string()) != std::string::npos)
-				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::EngineContent, p, nullptr);
+			std::string absStr = absPath.generic_string();
+			if (!assetRoot.empty() && absStr.find(assetRoot.generic_string()) != std::string::npos)
+				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::Content, absPath, nullptr);
+			if (!engineRoot.empty() && absStr.find(engineRoot.generic_string()) != std::string::npos)
+				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::EngineContent, absPath, nullptr);
+			if (!projectRoot.empty() && absStr.find((projectRoot / "plugins").generic_string()) != std::string::npos)
+				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::ProjectPlugins, absPath, nullptr);
+			if (!projectRoot.empty() && absStr.find((projectRoot / "src").generic_string()) != std::string::npos)
+				return RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::ProjectSources, absPath, nullptr);
 		}
 	}
+
 	return false;
 }
 
