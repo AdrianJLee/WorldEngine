@@ -1215,10 +1215,17 @@ namespace World
 		// 先跑 gizmo:它有"鼠标占用"语义(拖拽中/悬停在手柄上),必须优先于实体拾取 ——
 		// 否则点箭头会被"点空白清空选择"吃掉,表现为"拖不动箭头"。
 		bool gizmoEngaged = false;
+		if (m_Host.GetEditorToolMode() != EditorToolMode::Select)
+		{
+			m_GizmoActive = false;
+		}
+
 		Entity selected = m_Host.GetSelectedEntity();
-		if (!play && selected.IsValid() && selected.GetScene() == m_Host.GetActiveScene().get() &&
+		if (!play && m_Host.GetEditorToolMode() == EditorToolMode::Select && selected.IsValid() && selected.GetScene() == m_Host.GetActiveScene().get() &&
 			selected.HasComponent<TransformComponent>() && m_Host.HasRenderedScene())
 		{
+			Wui::ClipScope viewportClip(ctx, sceneRect);
+
 			auto& transform = selected.GetComponent<TransformComponent>();
 			const TransformComponent before = transform;
 			bool nowUsing = false;

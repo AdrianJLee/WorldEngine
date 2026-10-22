@@ -3,6 +3,7 @@
 // 不再用轴对齐矩形近似(那样斜轴会画成斜边包围盒)。
 #include "wldpch.h"
 #include "World/WUI/WuiGizmo.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -100,9 +101,17 @@ namespace World::Wui
 		if (operation == GizmoOperation::None)
 			return false;
 
+		ClipScope gizmoClip(ctx, viewport);
+
 		const glm::vec2 center = WorldToScreen(camera, transform.Location, viewport);
 		if (center.x < -1e8f)
 			return false;
+
+		if (center.x < viewport.X - 80.0f || center.x > viewport.X + viewport.W + 80.0f ||
+			center.y < viewport.Y - 80.0f || center.y > viewport.Y + viewport.H + 80.0f)
+		{
+			return false;
+		}
 
 		// 轴取**物体自身坐标系**(Local):从已缓存的变换矩阵取列向量并归一化,
 		// 这样箭头方向与物体朝向一致(用户反馈"与世界轴不一致");同时避免依赖欧拉角单位约定。

@@ -279,114 +279,227 @@ namespace World
 			s_State.DefaultMeshIndexCount = 18;
 		}
 
-		// 3b. 构造真实 3D 碎石几何网格 (Pebble Boulder: 14 vertices, 24 triangles)
+		// 3b. Commercial Scatter Rocks 3D Boulder Cluster: 3 boulders, 64 triangles, 192 vertices
 		{
-			FoliageVertex rockVerts[14] = {
-				{ { -0.35f, 0.00f, -0.25f }, { -0.4f, -0.6f, -0.3f }, { 0.2f, 0.2f } },
-				{ {  0.00f, 0.00f, -0.42f }, {  0.0f, -0.7f, -0.5f }, { 0.5f, 0.1f } },
-				{ {  0.38f, 0.00f, -0.20f }, {  0.5f, -0.6f, -0.3f }, { 0.8f, 0.2f } },
-				{ {  0.35f, 0.00f,  0.25f }, {  0.5f, -0.6f,  0.4f }, { 0.8f, 0.8f } },
-				{ { -0.05f, 0.00f,  0.40f }, { -0.1f, -0.7f,  0.5f }, { 0.5f, 0.9f } },
-				{ { -0.38f, 0.00f,  0.18f }, { -0.5f, -0.6f,  0.3f }, { 0.2f, 0.8f } },
+			std::vector<FoliageVertex> rockVerts;
+			std::vector<uint32_t> rockIndices;
+			rockVerts.reserve(192);
+			rockIndices.reserve(192);
 
-				{ { -0.48f, 0.20f, -0.30f }, { -0.8f,  0.3f, -0.4f }, { 0.1f, 0.3f } },
-				{ {  0.05f, 0.24f, -0.52f }, {  0.1f,  0.4f, -0.8f }, { 0.5f, 0.0f } },
-				{ {  0.50f, 0.22f, -0.22f }, {  0.8f,  0.3f, -0.3f }, { 0.9f, 0.3f } },
-				{ {  0.45f, 0.18f,  0.30f }, {  0.8f,  0.2f,  0.5f }, { 0.9f, 0.7f } },
-				{ { -0.08f, 0.22f,  0.48f }, { -0.1f,  0.3f,  0.8f }, { 0.5f, 1.0f } },
-				{ { -0.50f, 0.20f,  0.22f }, { -0.8f,  0.3f,  0.3f }, { 0.1f, 0.7f } },
-
-				{ { -0.12f, 0.38f, -0.08f }, { -0.2f,  0.9f, -0.1f }, { 0.4f, 0.45f } },
-				{ {  0.14f, 0.36f,  0.10f }, {  0.2f,  0.9f,  0.2f }, { 0.6f, 0.55f } },
+			struct BoulderConfig {
+				float cx, cz;
+				float sx, sz;
+				float h;
+				int sides;
+				float rot;
+				float seed;
 			};
-			for (int vi = 0; vi < 14; ++vi) {
-				rockVerts[vi].Normal = glm::normalize(rockVerts[vi].Normal);
+
+			const BoulderConfig configs[3] = {
+				{  0.06f, -0.04f, 0.48f, 0.42f, 0.55f, 6, 0.20f, 1.0f }, // Primary boulder
+				{ -0.44f,  0.24f, 0.28f, 0.26f, 0.34f, 5, 1.40f, 2.3f }, // Secondary boulder
+				{  0.38f,  0.28f, 0.18f, 0.16f, 0.18f, 5, 2.60f, 3.7f }, // Satellite pebble
+			};
+
+			constexpr float kPi = 3.1415926535f;
+
+			for (const auto& cfg : configs)
+			{
+				std::vector<glm::vec3> base(cfg.sides);
+				std::vector<glm::vec3> waist(cfg.sides);
+				std::vector<glm::vec3> shoulder(cfg.sides);
+
+				for (int i = 0; i < cfg.sides; ++i)
+				{
+					const float a = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(cfg.sides) + cfg.rot;
+					const float rBase = 0.85f + 0.22f * std::sin(static_cast<float>(i) * 1.9f + cfg.seed);
+					base[i] = glm::vec3(cfg.cx + cfg.sx * rBase * std::cos(a), 0.0f, cfg.cz + cfg.sz * rBase * std::sin(a));
+
+					const float aW = a + 0.16f;
+					const float rW = 0.95f + 0.18f * std::cos(static_cast<float>(i) * 2.1f + cfg.seed);
+					waist[i] = glm::vec3(cfg.cx + cfg.sx * rW * std::cos(aW), cfg.h * 0.42f, cfg.cz + cfg.sz * rW * std::sin(aW));
+
+					const float aS = a + 0.32f;
+					const float rS = 0.52f + 0.15f * std::sin(static_cast<float>(i) * 2.6f + cfg.seed);
+					shoulder[i] = glm::vec3(cfg.cx + cfg.sx * rS * std::cos(aS), cfg.h * 0.78f, cfg.cz + cfg.sz * rS * std::sin(aS));
+				}
+
+				const glm::vec3 top(cfg.cx + 0.04f * cfg.sx, cfg.h, cfg.cz - 0.04f * cfg.sz);
+
+				auto addFacet = [&](glm::vec3 p0, glm::vec3 p1, glm::vec3 p2) {
+					const uint32_t vStart = static_cast<uint32_t>(rockVerts.size());
+					glm::vec3 n = glm::cross(p1 - p0, p2 - p0);
+					const float len = glm::length(n);
+				n = (len > 1e-6f) ? (n / len) : glm::vec3(0.0f, 1.0f, 0.0f);
+
+					// Ensure outward facet normal
+					const glm::vec3 triCenter = (p0 + p1 + p2) * (1.0f / 3.0f);
+					const glm::vec3 fromCenter = triCenter - glm::vec3(cfg.cx, 0.0f, cfg.cz);
+					if (glm::dot(n, fromCenter) < 0.0f)
+					{
+						std::swap(p1, p2);
+						n = -n;
+					}
+
+					// Planar UV projection
+					const glm::vec2 uv0(p0.x * 0.8f + 0.5f, p0.z * 0.8f + 0.5f);
+					const glm::vec2 uv1(p1.x * 0.8f + 0.5f, p1.z * 0.8f + 0.5f);
+					const glm::vec2 uv2(p2.x * 0.8f + 0.5f, p2.z * 0.8f + 0.5f);
+
+					rockVerts.push_back({ p0, n, uv0 });
+					rockVerts.push_back({ p1, n, uv1 });
+					rockVerts.push_back({ p2, n, uv2 });
+				rockIndices.push_back(vStart + 0);
+				rockIndices.push_back(vStart + 1);
+				rockIndices.push_back(vStart + 2);
+				};
+
+				// Bottom to waist
+				for (int i = 0; i < cfg.sides; ++i)
+				{
+					const int nextI = (i + 1) % cfg.sides;
+					addFacet(base[i], base[nextI], waist[nextI]);
+					addFacet(base[i], waist[nextI], waist[i]);
+				}
+
+				// Waist to shoulder
+				for (int i = 0; i < cfg.sides; ++i)
+				{
+					const int nextI = (i + 1) % cfg.sides;
+					addFacet(waist[i], waist[nextI], shoulder[nextI]);
+					addFacet(waist[i], shoulder[nextI], shoulder[i]);
+				}
+
+				// Shoulder to top
+				for (int i = 0; i < cfg.sides; ++i)
+				{
+					const int nextI = (i + 1) % cfg.sides;
+					addFacet(shoulder[i], shoulder[nextI], top);
+				}
 			}
-			const uint32_t rockIndices[72] = {
-				0, 1, 7,   0, 7, 6,
-				1, 2, 8,   1, 8, 7,
-				2, 3, 9,   2, 9, 8,
-				3, 4, 10,  3, 10, 9,
-				4, 5, 11,  4, 11, 10,
-				5, 0, 6,   5, 6, 11,
-				6, 7, 12,  7, 8, 12,  8, 13, 12,
-				8, 9, 13,  9, 10, 13, 10, 11, 13,
-				11, 6, 12, 11, 12, 13,
-				12, 13, 7, 13, 12, 10
-			};
+
 			Rhi::BufferDesc rVbDesc;
-			rVbDesc.Size = sizeof(rockVerts);
+			rVbDesc.Size = static_cast<uint32_t>(rockVerts.size() * sizeof(FoliageVertex));
 			rVbDesc.Usage = Rhi::BufferUsageVertex;
 			rVbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
-			rVbDesc.InitialData = rockVerts;
+			rVbDesc.InitialData = rockVerts.data();
 			rVbDesc.DebugName = "Foliage.RockMeshVB";
 			s_State.RockMeshVB = device->CreateBuffer(rVbDesc);
 
 			Rhi::BufferDesc rIbDesc;
-			rIbDesc.Size = sizeof(rockIndices);
+			rIbDesc.Size = static_cast<uint32_t>(rockIndices.size() * sizeof(uint32_t));
 			rIbDesc.Usage = Rhi::BufferUsageIndex;
 			rIbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
-			rIbDesc.InitialData = rockIndices;
+			rIbDesc.InitialData = rockIndices.data();
 			rIbDesc.DebugName = "Foliage.RockMeshIB";
 			s_State.RockMeshIB = device->CreateBuffer(rIbDesc);
-			s_State.RockMeshIndexCount = 72;
+			s_State.RockMeshIndexCount = static_cast<uint32_t>(rockIndices.size());
 		}
 
-		// 3c. 构造真实半球立体灌木叶簇网格 (Hemispherical Bush Dome: 5 quads, 20 vertices, 30 indices)
+		// 3c. Commercial Shrub 3D Foliage Dome with Spherical Transferred Normals: 14 quads, 56 vertices, 84 indices
 		{
-			FoliageVertex bushVerts[20];
-			uint32_t bushIndices[30];
+			std::vector<FoliageVertex> bushVerts;
+			std::vector<uint32_t> bushIndices;
+			bushVerts.reserve(56);
+			bushIndices.reserve(84);
 			constexpr float kPi = 3.1415926535f;
 
-			for (int q = 0; q < 4; ++q)
+			auto addQuad = [&](const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& p3,
+				const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec2& uv2, const glm::vec2& uv3) {
+				const uint32_t bv = static_cast<uint32_t>(bushVerts.size());
+				bushVerts.push_back({ p0, glm::vec3(0.0f, 1.0f, 0.0f), uv0 });
+				bushVerts.push_back({ p1, glm::vec3(0.0f, 1.0f, 0.0f), uv1 });
+				bushVerts.push_back({ p2, glm::vec3(0.0f, 1.0f, 0.0f), uv2 });
+				bushVerts.push_back({ p3, glm::vec3(0.0f, 1.0f, 0.0f), uv3 });
+
+				bushIndices.push_back(bv + 0);
+				bushIndices.push_back(bv + 1);
+				bushIndices.push_back(bv + 2);
+				bushIndices.push_back(bv + 0);
+				bushIndices.push_back(bv + 2);
+				bushIndices.push_back(bv + 3);
+			};
+
+			// 1. 8 radial outer canopy quads
+			for (int q = 0; q < 8; ++q)
 			{
-				const float a = static_cast<float>(q) * (kPi * 0.5f) + 0.39f;
+				const float a = static_cast<float>(q) * (kPi * 0.25f) + 0.15f;
 				const float cosA = std::cos(a);
 				const float sinA = std::sin(a);
-				const glm::vec3 outward(cosA, 0.35f, sinA);
+				const glm::vec3 centerBottom(cosA * 0.28f, 0.05f, sinA * 0.28f);
+				const glm::vec3 tangent(-sinA * 0.42f, 0.0f, cosA * 0.42f);
+				const glm::vec3 upOut(cosA * 0.35f, 0.88f, sinA * 0.35f);
 
-				const int bv = q * 4;
-				const glm::vec3 centerBottom = glm::vec3(cosA * 0.25f, 0.05f, sinA * 0.25f);
-				const glm::vec3 rightDir(-sinA * 0.65f, 0.0f, cosA * 0.65f);
-				const glm::vec3 upDir(cosA * 0.45f, 0.95f, sinA * 0.45f);
+				const glm::vec3 p0 = centerBottom - tangent;
+				const glm::vec3 p1 = centerBottom + tangent;
+				const glm::vec3 p2 = centerBottom + tangent + upOut;
+				const glm::vec3 p3 = centerBottom - tangent + upOut;
 
-				bushVerts[bv + 0] = { centerBottom - rightDir, glm::normalize(outward + glm::vec3(0, 0.5f, 0)), { 0.0f, 1.0f } };
-				bushVerts[bv + 1] = { centerBottom + rightDir, glm::normalize(outward + glm::vec3(0, 0.5f, 0)), { 1.0f, 1.0f } };
-				bushVerts[bv + 2] = { centerBottom + rightDir + upDir, glm::normalize(outward + glm::vec3(0, 0.8f, 0)), { 1.0f, 0.0f } };
-				bushVerts[bv + 3] = { centerBottom - rightDir + upDir, glm::normalize(outward + glm::vec3(0, 0.8f, 0)), { 0.0f, 0.0f } };
-
-				const int bi = q * 6;
-				bushIndices[bi + 0] = bv + 0;
-				bushIndices[bi + 1] = bv + 1;
-				bushIndices[bi + 2] = bv + 2;
-				bushIndices[bi + 3] = bv + 0;
-				bushIndices[bi + 4] = bv + 2;
-				bushIndices[bi + 5] = bv + 3;
+				addQuad(p0, p1, p2, p3, { 0.0f, 1.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f });
 			}
-			bushVerts[16] = { { -0.6f, 1.05f, -0.6f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } };
-			bushVerts[17] = { {  0.6f, 1.05f, -0.6f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 0.0f } };
-			bushVerts[18] = { {  0.6f, 1.05f,  0.6f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f } };
-			bushVerts[19] = { { -0.6f, 1.05f,  0.6f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 1.0f } };
 
-			bushIndices[24] = 16; bushIndices[25] = 17; bushIndices[26] = 18;
-			bushIndices[27] = 16; bushIndices[28] = 18; bushIndices[29] = 19;
+			// 2. 4 core cross quads
+			for (int q = 0; q < 4; ++q)
+			{
+				const float a = static_cast<float>(q) * (kPi * 0.25f);
+				const float cosA = std::cos(a);
+				const float sinA = std::sin(a);
+				const glm::vec3 dirVec(cosA * 0.55f, 0.0f, sinA * 0.55f);
+				const glm::vec3 upVec(0.0f, 1.05f, 0.0f);
 
-			Rhi::BufferDesc bVbDesc;
-			bVbDesc.Size = sizeof(bushVerts);
-			bVbDesc.Usage = Rhi::BufferUsageVertex;
-			bVbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
-			bVbDesc.InitialData = bushVerts;
-			bVbDesc.DebugName = "Foliage.BushMeshVB";
-			s_State.BushMeshVB = device->CreateBuffer(bVbDesc);
+				const glm::vec3 p0 = -dirVec + glm::vec3(0.0f, 0.05f, 0.0f);
+				const glm::vec3 p1 =  dirVec + glm::vec3(0.0f, 0.05f, 0.0f);
+				const glm::vec3 p2 =  dirVec + glm::vec3(0.0f, 0.05f, 0.0f) + upVec;
+				const glm::vec3 p3 = -dirVec + glm::vec3(0.0f, 0.05f, 0.0f) + upVec;
 
-			Rhi::BufferDesc bIbDesc;
-			bIbDesc.Size = sizeof(bushIndices);
-			bIbDesc.Usage = Rhi::BufferUsageIndex;
-			bIbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
-			bIbDesc.InitialData = bushIndices;
-			bIbDesc.DebugName = "Foliage.BushMeshIB";
-			s_State.BushMeshIB = device->CreateBuffer(bIbDesc);
-			s_State.BushMeshIndexCount = 30;
+				addQuad(p0, p1, p2, p3, { 0.0f, 1.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f });
+			}
+
+			// 3. 2 crown dome cap quads
+			for (int q = 0; q < 2; ++q)
+			{
+				const float a = static_cast<float>(q) * (kPi * 0.5f) + (kPi * 0.25f);
+				const float cosA = std::cos(a);
+				const float sinA = std::sin(a);
+				const glm::vec3 rightVec(-sinA * 0.45f, 0.0f, cosA * 0.45f);
+				const glm::vec3 fwdVec(cosA * 0.45f, 0.0f, sinA * 0.45f);
+				const float capY = 0.98f + static_cast<float>(q) * 0.04f;
+
+				const glm::vec3 p0 = glm::vec3(0.0f, capY, 0.0f) - rightVec - fwdVec;
+				const glm::vec3 p1 = glm::vec3(0.0f, capY, 0.0f) + rightVec - fwdVec;
+				const glm::vec3 p2 = glm::vec3(0.0f, capY, 0.0f) + rightVec + fwdVec;
+				const glm::vec3 p3 = glm::vec3(0.0f, capY, 0.0f) - rightVec + fwdVec;
+
+				addQuad(p0, p1, p2, p3, { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f });
+			}
+
+			// 4. Spherical Transferred Normals
+			const glm::vec3 sphereOrigin(0.0f, 0.20f, 0.0f);
+			for (auto& v : bushVerts)
+			{
+				glm::vec3 n = v.Position - sphereOrigin;
+				const float len = glm::length(n);
+				n = (len > 1e-5f) ? (n / len) : glm::vec3(0.0f, 1.0f, 0.0f);
+				n.y = std::max(n.y, 0.20f);
+				v.Normal = glm::normalize(n);
+			}
+
+		Rhi::BufferDesc bVbDesc;
+		bVbDesc.Size = static_cast<uint32_t>(bushVerts.size() * sizeof(FoliageVertex));
+		bVbDesc.Usage = Rhi::BufferUsageVertex;
+		bVbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
+		bVbDesc.InitialData = bushVerts.data();
+		bVbDesc.DebugName = "Foliage.BushMeshVB";
+		s_State.BushMeshVB = device->CreateBuffer(bVbDesc);
+
+		Rhi::BufferDesc bIbDesc;
+		bIbDesc.Size = static_cast<uint32_t>(bushIndices.size() * sizeof(uint32_t));
+		bIbDesc.Usage = Rhi::BufferUsageIndex;
+		bIbDesc.Memory = Rhi::MemoryHint::DeviceLocal;
+		bIbDesc.InitialData = bushIndices.data();
+		bIbDesc.DebugName = "Foliage.BushMeshIB";
+		s_State.BushMeshIB = device->CreateBuffer(bIbDesc);
+		s_State.BushMeshIndexCount = static_cast<uint32_t>(bushIndices.size());
 		}
 
 		// 4. 着色器与渲染管线
@@ -583,8 +696,19 @@ namespace World
 			uint32_t InstanceCount;
 		};
 		std::vector<BatchDrawInfo> drawInfos;
-		for (const auto& b : batches)
+		for (auto& b : batches)
 		{
+			const FoliageType& curType = (b.TypeIndex < data.GetTypeCount()) ? data.GetType(b.TypeIndex) : data.GetType(0);
+			const std::string mPath = curType.MeshAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(curType.MeshAsset.Path)) : "";
+			const bool isRock = (b.TypeIndex == 3 || mPath.find("scatter_pebble") != std::string::npos || curType.Name.find("碎石") != std::string::npos || curType.Name.find("Rock") != std::string::npos);
+			if (isRock)
+			{
+				for (auto& inst : b.Instances)
+				{
+					inst.Params.w = 3.0f; // 明确标记为岩石类型 (驱动 Shader 无风力与实体兰伯特光照)
+				}
+			}
+
 			BatchDrawInfo info;
 			info.TypeIndex = b.TypeIndex;
 			info.StartInstance = static_cast<uint32_t>(sortedInstances.size());
@@ -610,6 +734,12 @@ namespace World
 
 		for (const auto& drawInfo : drawInfos)
 		{
+			// 依据植被类型精准匹配专属网格与材质
+			const FoliageType& curType = (drawInfo.TypeIndex < data.GetTypeCount()) ? data.GetType(drawInfo.TypeIndex) : data.GetType(0);
+			const std::string mPath = curType.MeshAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(curType.MeshAsset.Path)) : "";
+			const bool isRock = (drawInfo.TypeIndex == 3 || mPath.find("scatter_pebble") != std::string::npos || curType.Name.find("碎石") != std::string::npos || curType.Name.find("Rock") != std::string::npos);
+			const bool isBush = (drawInfo.TypeIndex == 2 || mPath.find("bush_cluster") != std::string::npos || curType.Name.find("灌木") != std::string::npos || curType.Name.find("Shrub") != std::string::npos);
+
 			Rhi::Handle<Rhi::Texture> currentTex = nullptr;
 			if (drawInfo.TypeIndex < data.GetTypeCount() && data.GetType(drawInfo.TypeIndex).MaterialAsset.Path.IsValid())
 			{
@@ -621,9 +751,9 @@ namespace World
 			{
 				if (drawInfo.TypeIndex == 1)
 					currentTex = TextureLibrary::Get().Get("textures/foliage/wild_flower.png", true);
-				else if (drawInfo.TypeIndex == 2)
+				else if (drawInfo.TypeIndex == 2 || isBush)
 					currentTex = TextureLibrary::Get().Get("textures/foliage/bush_leaves.png", true);
-				else if (drawInfo.TypeIndex == 3)
+				else if (drawInfo.TypeIndex == 3 || isRock)
 					currentTex = TextureLibrary::Get().Get("textures/terrain/rock_albedo.png", true);
 				else
 					currentTex = TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", true);
@@ -656,12 +786,6 @@ namespace World
 
 			if (targetSet)
 				cmd->BindDescriptorSet(targetSet, 2);
-
-			// 按物种几何类型精确绑定专属网格
-			const FoliageType& curType = (drawInfo.TypeIndex < data.GetTypeCount()) ? data.GetType(drawInfo.TypeIndex) : data.GetType(0);
-			const std::string mPath = curType.MeshAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(curType.MeshAsset.Path)) : "";
-			const bool isRock = (drawInfo.TypeIndex == 3 || mPath.find("scatter_pebble") != std::string::npos || curType.Name.find("碎石") != std::string::npos || curType.Name.find("Rock") != std::string::npos);
-			const bool isBush = (drawInfo.TypeIndex == 2 || mPath.find("bush_cluster") != std::string::npos || curType.Name.find("灌木") != std::string::npos || curType.Name.find("Shrub") != std::string::npos);
 
 			if (isRock && s_State.RockMeshVB && s_State.RockMeshIB)
 			{

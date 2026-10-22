@@ -61,7 +61,7 @@ struct PSInput
     float3 WorldPos : POSITION0;
     float3 Normal   : NORMAL;
     float2 TexCoord : TEXCOORD0;
-    float4 Params   : TEXCOORD1; // x=distanceToCamera, y=ditherOffset, z=windPhase, w=unused
+    float4 Params   : TEXCOORD1; // x=distanceToCamera, y=ditherOffset, z=windPhase, w=typeIndex
 };
 
 static const float BayerMatrix4x4[16] = {
@@ -79,7 +79,19 @@ PSInput VSMain(VSInput input)
     float3 localPos = input.Position;
 
     // 顶点风场扰动摇摆 (Wind Sway)
+    float typeIdx = input.InstanceParams.w;
+    bool isRock = (typeIdx > 2.5f && typeIdx < 3.5f);
+    bool isBush = (typeIdx > 1.5f && typeIdx < 2.5f);
+
     float heightFactor = pow(clamp(localPos.y * 0.7f, 0.0f, 2.0f), 1.5f);
+    if (isRock)
+    {
+        heightFactor = 0.0f; // 碎石坚硬无风场摇摆
+    }
+    else if (isBush)
+    {
+        heightFactor *= 0.35f; // 木质灌木具备更高抗弯刚度
+    }
     float time = u_Foliage.WindParams.z;
     float speed = u_Foliage.WindParams.x;
     float strength = u_Foliage.WindParams.y;
@@ -104,8 +116,11 @@ PSInput VSMain(VSInput input)
         input.InstanceTransform2.xyz * input.Normal.z
     );
 
-    // 根部法线微小抬高，彻底消除草丛根部与地表三角面重叠引起的 Z-fighting 闪烁
-    worldPos += worldNormal * 0.02f;
+    // 根部法线微小抬高，彻底消除草丛根部与地表三角面重叠引起的 Z-fighting 闪烁 (实体碎石无需抬升)
+    if (!isRock)
+    {
+        worldPos += worldNormal * 0.02f;
+    }
 
     output.WorldPos = worldPos;
     output.Normal = worldNormal;
@@ -113,7 +128,7 @@ PSInput VSMain(VSInput input)
     output.Position = mul(u_Camera.ViewProjection, float4(worldPos, 1.0f));
 
     float dist = distance(worldPos, u_Camera.CameraPosition.xyz);
-    output.Params = float4(dist, input.InstanceParams.y, input.InstanceParams.x, 0.0f);
+    output.Params = float4(dist, input.InstanceParams.y, input.InstanceParams.x, input.InstanceParams.w);
 
     return output;
 }
@@ -137,14 +152,17 @@ float4 PSMain(PSInput input) : SV_Target
             discard;
     }
 
+    float typeIdx = input.Params.w;
+    bool isRock = (typeIdx > 2.5f && typeIdx < 3.5f);
+
     float4 albedo = u_AlbedoTexture.Sample(input.TexCoord);
-    if (albedo.a < 0.20f)
+    if (!isRock && albedo.a < 0.20f)
         discard;
 
     float3 N = normalize(input.Normal);
     
-    // 根部接触环境光遮蔽 (Ground Root AO)
-    float rootAO = lerp(0.40f, 1.0f, saturate(1.0f - input.TexCoord.y * 0.85f));
+    // 环境光遮蔽: 碎石实体提供坚实地表环境光；植被提供叶片接触 AO
+    float rootAO = isRock ? 0.88f : lerp(0.40f, 1.0f, saturate(1.0f - input.TexCoord.y * 0.85f));
 
     float3 ambient = u_Light.Ambient.rgb * u_Light.Ambient.a * albedo.rgb * rootAO;
 
@@ -153,14 +171,14 @@ float4 PSMain(PSInput input) : SV_Target
     for (uint i = 0; i < dirLightCount && i < 8; ++i)
     {
         float3 L = normalize(-u_Light.Lights[i].DirectionRange.xyz);
-        // 双面自然漫反射光照 (Two-sided diffuse)
-        float NdotL = abs(dot(N, L));
-
-        // 叶片背光透光次表面半透散射 (Subsurface Translucency)
-        float backLight = max(dot(-N, L), 0.0f) * 0.35f;
+        
+        // 实体碎石：真实单面朗伯漫反射光照 (Clamped Lambertian Diffuse)，背光面自然处于背阴处
+        // 植被薄片：双面漫反射 (Two-sided diffuse) + 背光次表面透光 (Subsurface Translucency)
+        float NdotL = isRock ? max(dot(N, L), 0.0f) : abs(dot(N, L));
+        float backLight = isRock ? 0.0f : (max(dot(-N, L), 0.0f) * 0.35f);
 
         float3 lightColor = u_Light.Lights[i].ColorIntensity.rgb * u_Light.Lights[i].ColorIntensity.a;
-        directLight += (NdotL * 0.75f + backLight) * lightColor * albedo.rgb * rootAO;
+        directLight += (NdotL * 0.85f + backLight) * lightColor * albedo.rgb * rootAO;
     }
 
     float3 finalColor = ambient + directLight;
