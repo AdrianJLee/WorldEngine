@@ -490,60 +490,46 @@ namespace World
 				}
 				curY += 26.0f;
 
-				// 2. Mesh 资产绑定 (严格仅过滤 Mesh 网格资产，杜绝弹全资产弹窗)
+				// 2. Mesh 资产绑定 (纯规范路径，无特化项与假中文)
 				Wui::Label(ctx, { inspX, curY + 3.0f }, "Mesh:", theme.TextMuted, theme.FontSizeSmall);
 				const Wui::WuiRect meshComboRect { inspX + 45.0f, curY, inspW - 45.0f, 22.0f };
 
-				std::vector<std::string> meshLabels;
-				std::vector<std::string> meshValues;
-
-				meshLabels.push_back("models/foliage/grass_cluster.wmodel (3-Quad Cross)");
-				meshValues.push_back("models/foliage/grass_cluster.wmodel");
-
-				meshLabels.push_back("(内置) 双面十字草丛 (Cross Quad)");
-				meshValues.push_back("(内置) 双面十字草丛");
-
-				meshLabels.push_back("(内置) 单面立牌草叶 (Single Billboard)");
-				meshValues.push_back("(内置) 单面立牌草叶");
-
-				meshLabels.push_back("models/foliage/bush_cluster.wmodel (Dense Bush 5-Quad)");
-				meshValues.push_back("models/foliage/bush_cluster.wmodel");
-
-				meshLabels.push_back("models/foliage/scatter_pebble.wmodel (Scatter Pebble)");
-				meshValues.push_back("models/foliage/scatter_pebble.wmodel");
-
 				const auto& modelAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Model);
+				const auto& modelSrcs = Editor::AssetCatalog::PathsFor(EditorAssetKind::ModelSource);
+				std::vector<std::string> meshOptions;
+				meshOptions.push_back("(none)");
+				meshOptions.push_back("models/foliage/grass_cluster.wmodel");
+				meshOptions.push_back("models/foliage/bush_cluster.wmodel");
+				meshOptions.push_back("models/foliage/scatter_pebble.wmodel");
 				for (const auto& mp : modelAssets)
 				{
-					meshLabels.push_back(std::filesystem::path(mp).filename().string() + " [" + mp + "]");
-					meshValues.push_back(mp);
+					if (std::find(meshOptions.begin(), meshOptions.end(), mp) == meshOptions.end())
+						meshOptions.push_back(mp);
 				}
-				const auto& modelSrcs = Editor::AssetCatalog::PathsFor(EditorAssetKind::ModelSource);
 				for (const auto& mp : modelSrcs)
 				{
-					meshLabels.push_back(std::filesystem::path(mp).filename().string() + " [" + mp + "]");
-					meshValues.push_back(mp);
+					if (std::find(meshOptions.begin(), meshOptions.end(), mp) == meshOptions.end())
+						meshOptions.push_back(mp);
 				}
 
 				int curMeshIdx = 0;
-				for (size_t mi = 0; mi < meshValues.size(); ++mi)
+				if (!m_EditMeshPath.empty())
 				{
-					if (!meshValues[mi].empty() && meshValues[mi] == m_EditMeshPath)
+					auto it = std::find(meshOptions.begin(), meshOptions.end(), m_EditMeshPath);
+					if (it != meshOptions.end())
 					{
-						curMeshIdx = static_cast<int>(mi);
-						break;
+						curMeshIdx = static_cast<int>(it - meshOptions.begin());
+					}
+					else
+					{
+						meshOptions.push_back(m_EditMeshPath);
+						curMeshIdx = static_cast<int>(meshOptions.size() - 1);
 					}
 				}
-				if (curMeshIdx == 0 && !m_EditMeshPath.empty() && m_EditMeshPath != meshValues[0])
-				{
-					meshLabels.push_back(m_EditMeshPath);
-					meshValues.push_back(m_EditMeshPath);
-					curMeshIdx = static_cast<int>(meshValues.size() - 1);
-				}
 
-				if (Wui::SearchableCombo(ctx, Wui::HashId(("foliage.insp.mesh_combo." + std::to_string(i)).c_str()), meshComboRect, "", meshLabels, curMeshIdx, theme))
+				if (Wui::SearchableCombo(ctx, Wui::HashId(("foliage.insp.mesh_combo." + std::to_string(i)).c_str()), meshComboRect, "", meshOptions, curMeshIdx, theme))
 				{
-					const std::string picked = meshValues[curMeshIdx];
+					const std::string picked = (curMeshIdx <= 0) ? "" : meshOptions[curMeshIdx];
 					type.MeshAsset.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
 					m_EditMeshPath = picked;
 					m_StatusFeedback = "已选择植被 Mesh: " + picked;
@@ -551,67 +537,53 @@ namespace World
 				}
 				curY += 26.0f;
 
-				// 3. 材质资产绑定 (严格仅过滤植被纹理与材质资产，杜绝弹全资产弹窗)
+				// 3. 材质资产绑定 (纯规范路径，无假中文与重复项)
 				Wui::Label(ctx, { inspX, curY + 3.0f }, "材质:", theme.TextMuted, theme.FontSizeSmall);
 				const Wui::WuiRect matComboRect { inspX + 45.0f, curY, inspW - 45.0f, 22.0f };
 
-				std::vector<std::string> matLabels;
-				std::vector<std::string> matValues;
-
-				matLabels.push_back("grass_tuft.png (翠绿草丛)");
-				matValues.push_back("textures/foliage/grass_tuft.png");
-
-				matLabels.push_back("wild_flower.png (雏菊野花)");
-				matValues.push_back("textures/foliage/wild_flower.png");
-
-				matLabels.push_back("grass_albedo.png (草甸地表)");
-				matValues.push_back("textures/terrain/grass_albedo.png");
-
-				matLabels.push_back("rock_albedo.png (岩石碎块)");
-				matValues.push_back("textures/terrain/rock_albedo.png");
-
-				const auto& matAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Material);
-				for (const auto& mp : matAssets)
-				{
-					matLabels.push_back(std::filesystem::path(mp).filename().string() + " [" + mp + "]");
-					matValues.push_back(mp);
-				}
 				const auto& texAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::TextureSource);
+				const auto& matAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Material);
+				std::vector<std::string> matOptions;
+				matOptions.push_back("(none)");
+				matOptions.push_back("textures/foliage/grass_tuft.png");
+				matOptions.push_back("textures/foliage/wild_flower.png");
+				matOptions.push_back("textures/terrain/grass_albedo.png");
+				matOptions.push_back("textures/terrain/rock_albedo.png");
 				for (const auto& tp : texAssets)
 				{
-					if (tp.find("foliage") != std::string::npos &&
-						std::find(matValues.begin(), matValues.end(), tp) == matValues.end())
+					if (std::find(matOptions.begin(), matOptions.end(), tp) == matOptions.end())
+						matOptions.push_back(tp);
+				}
+				for (const auto& mp : matAssets)
+				{
+					if (std::find(matOptions.begin(), matOptions.end(), mp) == matOptions.end())
+						matOptions.push_back(mp);
+				}
+
+				int curMatIdx = 0;
+				if (!m_EditMatPath.empty())
+				{
+					auto it = std::find(matOptions.begin(), matOptions.end(), m_EditMatPath);
+					if (it != matOptions.end())
 					{
-						matLabels.push_back(std::filesystem::path(tp).filename().string() + " [" + tp + "]");
-						matValues.push_back(tp);
+						curMatIdx = static_cast<int>(it - matOptions.begin());
+					}
+					else
+					{
+						matOptions.push_back(m_EditMatPath);
+						curMatIdx = static_cast<int>(matOptions.size() - 1);
 					}
 				}
 
-			int curMatIdx = 0;
-			for (size_t mi = 0; mi < matValues.size(); ++mi)
-			{
-				if (!matValues[mi].empty() && matValues[mi] == m_EditMatPath)
+				if (Wui::SearchableCombo(ctx, Wui::HashId(("foliage.insp.mat_combo." + std::to_string(i)).c_str()), matComboRect, "", matOptions, curMatIdx, theme))
 				{
-					curMatIdx = static_cast<int>(mi);
-					break;
+					const std::string picked = (curMatIdx <= 0) ? "" : matOptions[curMatIdx];
+					type.MaterialAsset.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+					m_EditMatPath = picked;
+					m_StatusFeedback = "已选择植被材质: " + picked;
+					host.MarkDocumentDirty();
 				}
-			}
-			if (curMatIdx == 0 && !m_EditMatPath.empty() && m_EditMatPath != matValues[0])
-			{
-				matLabels.push_back(m_EditMatPath);
-				matValues.push_back(m_EditMatPath);
-				curMatIdx = static_cast<int>(matValues.size() - 1);
-			}
-
-			if (Wui::SearchableCombo(ctx, Wui::HashId(("foliage.insp.mat_combo." + std::to_string(i)).c_str()), matComboRect, "", matLabels, curMatIdx, theme))
-			{
-				const std::string picked = matValues[curMatIdx];
-				type.MaterialAsset.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
-				m_EditMatPath = picked;
-				m_StatusFeedback = "已选择植被材质: " + picked;
-				host.MarkDocumentDirty();
-			}
-			curY += 26.0f;
+				curY += 26.0f;
 
 				// 4. 密度权重与缩放区间
 				Wui::Label(ctx, { inspX, curY + 4.0f }, "密度权重:", theme.TextMuted, theme.FontSizeSmall);

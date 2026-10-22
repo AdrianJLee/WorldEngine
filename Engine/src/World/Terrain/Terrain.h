@@ -107,9 +107,12 @@ namespace World
 		void SetHole(uint32_t x, uint32_t z, bool hole);
 
 		// 材质图层定义 (最多 4 层)
+		uint32_t GetLayerCount() const;
 		TerrainLayer& GetLayer(uint32_t index);
-		void SetLayer(uint32_t index, const TerrainLayer& layer);
 		const TerrainLayer& GetLayer(uint32_t index) const;
+		void SetLayer(uint32_t index, const TerrainLayer& layer);
+		uint32_t AddLayer(const TerrainLayer& layer);
+		bool RemoveLayer(uint32_t index);
 
 		// 空间射线投射
 		bool Raycast(const glm::vec3& rayOrigin, const glm::vec3& rayDir, float maxDistance, TerrainRaycastHit& outHit) const;
@@ -158,6 +161,6 @@ namespace World
 		std::vector<float> m_Heights;
 		std::vector<uint32_t> m_Splatmap; // RGBA 4 channels packed as uint32_t (R=layer0, G=layer1, B=layer2, A=layer3)
 		std::vector<uint8_t> m_HoleMask;  // 0 = solid, 1 = hole
-		TerrainLayer m_Layers[4];
+		std::vector<TerrainLayer> m_Layers;
 	};
 }

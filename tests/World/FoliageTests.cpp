@@ -437,10 +437,65 @@ static void TestFoliageSerializationVersionCompatibility()
 static void GenerateSampleDefaultFoliageAsset()
 {
 	FoliageData foliage;
+	foliage.Clear();
+	while (foliage.GetTypeCount() > 0)
+		foliage.RemoveType(0);
+
+	FoliageType grass;
+	grass.Name = "0: 翠绿草丛 (Wild Grass)";
+	grass.MeshAsset.Path = StringPool::Get().InternPath("models/foliage/grass_cluster.wmodel");
+	grass.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/grass_tuft.png");
+	grass.Density = 3.0f;
+	grass.ScaleMinMax = glm::vec2(0.8f, 1.3f);
+	grass.RandomYaw = 360.0f;
+	grass.AlignToNormal = true;
+	grass.PaintingActive = true;
+	grass.LayerMask = 0x01;
+	foliage.AddType(grass);
+
+	FoliageType flower;
+	flower.Name = "1: 雏菊野花 (Wild Flowers)";
+	flower.MeshAsset.Path = StringPool::Get().InternPath("models/foliage/grass_cluster.wmodel");
+	flower.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/wild_flower.png");
+	flower.Density = 1.0f;
+	flower.ScaleMinMax = glm::vec2(0.6f, 1.0f);
+	flower.RandomYaw = 360.0f;
+	flower.AlignToNormal = true;
+	flower.PaintingActive = true;
+	flower.LayerMask = 0x01;
+	foliage.AddType(flower);
+
+	FoliageType shrub;
+	shrub.Name = "2: 矮生灌木 (Forest Shrub)";
+	shrub.MeshAsset.Path = StringPool::Get().InternPath("models/foliage/bush_cluster.wmodel");
+	shrub.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/grass_tuft.png");
+	shrub.Density = 0.6f;
+	shrub.ScaleMinMax = glm::vec2(0.8f, 1.8f);
+	shrub.RandomYaw = 360.0f;
+	shrub.AlignToNormal = true;
+	shrub.PaintingActive = true;
+	shrub.LayerMask = 0x03;
+	foliage.AddType(shrub);
+
+	FoliageType rock;
+	rock.Name = "3: 地表碎石 (Scatter Rocks)";
+	rock.MeshAsset.Path = StringPool::Get().InternPath("models/foliage/scatter_pebble.wmodel");
+	rock.MaterialAsset.Path = StringPool::Get().InternPath("textures/terrain/rock_albedo.png");
+	rock.Density = 0.4f;
+	rock.ScaleMinMax = glm::vec2(0.5f, 2.0f);
+	rock.RandomYaw = 360.0f;
+	rock.AlignToNormal = true;
+	rock.PaintingActive = true;
+	rock.LayerMask = 0x0E;
+	foliage.AddType(rock);
+
+	foliage.PaintFoliageMulti(glm::vec3(50.0f, 0.0f, 50.0f), 30.0f, 3.0f, { 0, 1, 2, 3 }, nullptr);
+
 	std::filesystem::create_directories("projects/default/assets/foliage");
-	foliage.PaintFoliage(glm::vec3(50.0f, 0.0f, 50.0f), 30.0f, 3.0f, 0, nullptr);
 	foliage.SaveToFile("projects/default/assets/foliage/default.wfoliage");
-	std::cout << "[PASS] GenerateSampleDefaultFoliageAsset\n";
+	std::filesystem::create_directories("templates/project-example/assets/foliage");
+	foliage.SaveToFile("templates/project-example/assets/foliage/default.wfoliage");
+	std::cout << "[PASS] GenerateSampleDefaultFoliageAsset (4 species populated)\n";
 }
 static void TestFoliageDensitySaturation()
 {

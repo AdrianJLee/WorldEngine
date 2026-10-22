@@ -435,40 +435,108 @@ namespace World
 		if (s_State.UniformBuffers[slot])
 			s_State.UniformBuffers[slot]->SetData(&uniforms, sizeof(uniforms));
 
-		Rhi::Handle<Rhi::Texture> currentTex = nullptr;
-		if (data.GetTypeCount() > 0 && data.GetType(0).MaterialAsset.Path.IsValid())
+		// 按物种分组排序，实现每种植物绑定专属纹理与材质进行批次渲染
+		struct TypeBatch {
+			uint32_t TypeIndex;
+			std::vector<FoliageInstanceData> Instances;
+		};
+		std::vector<TypeBatch> batches;
+		std::unordered_map<uint32_t, size_t> typeToBatch;
+		for (const auto& inst : visibleInstances)
 		{
-			const std::string matPath = std::string(StringPool::Get().PathOf(data.GetType(0).MaterialAsset.Path));
-			if (!matPath.empty())
-				currentTex = TextureLibrary::Get().Get(matPath, /*srgb*/ true);
+			const uint32_t ti = static_cast<uint32_t>(inst.Params.w);
+			auto it = typeToBatch.find(ti);
+			if (it == typeToBatch.end())
+			{
+				typeToBatch[ti] = batches.size();
+				batches.push_back({ ti, { inst } });
+			}
+			else
+			{
+				batches[it->second].Instances.push_back(inst);
+			}
 		}
-		if (!currentTex)
-			currentTex = TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", /*srgb*/ true);
-		if (!currentTex)
-			currentTex = s_State.DefaultAlbedo;
-		if (currentTex && s_State.TextureSets[slot] && s_State.BoundTextures[slot] != currentTex)
+
+		std::vector<FoliageInstanceData> sortedInstances;
+		sortedInstances.reserve(visibleInstances.size());
+		struct BatchDrawInfo {
+			uint32_t TypeIndex;
+			uint32_t StartInstance;
+			uint32_t InstanceCount;
+		};
+		std::vector<BatchDrawInfo> drawInfos;
+		for (const auto& b : batches)
 		{
-			Rhi::DescriptorWrite w;
-			w.Binding = 4;
-			w.Type = Rhi::DescriptorType::CombinedImageSampler;
-			w.Texture = currentTex;
-			w.Sampler = s_State.Sampler;
-			s_State.TextureSets[slot]->Update({ w });
-			s_State.BoundTextures[slot] = currentTex;
+			BatchDrawInfo info;
+			info.TypeIndex = b.TypeIndex;
+			info.StartInstance = static_cast<uint32_t>(sortedInstances.size());
+			info.InstanceCount = static_cast<uint32_t>(b.Instances.size());
+			drawInfos.push_back(info);
+			sortedInstances.insert(sortedInstances.end(), b.Instances.begin(), b.Instances.end());
 		}
+
+		if (s_State.InstanceBuffers[slot])
+			s_State.InstanceBuffers[slot]->SetData(sortedInstances.data(), neededSize);
 
 		cmd->BindPipeline(s_State.Pipeline);
 		if (s_State.CurrentGlobalSet)
 			cmd->BindDescriptorSet(s_State.CurrentGlobalSet, 0);
 		if (s_State.UniformSets[slot])
 			cmd->BindDescriptorSet(s_State.UniformSets[slot], 1);
-		if (s_State.TextureSets[slot])
-			cmd->BindDescriptorSet(s_State.TextureSets[slot], 2);
 
 		cmd->BindVertexBuffer(0, s_State.DefaultMeshVB, 0);
 		cmd->BindVertexBuffer(1, s_State.InstanceBuffers[slot], 0);
 		cmd->BindIndexBuffer(s_State.DefaultMeshIB, 0, Rhi::IndexType::UInt32);
 
-		cmd->DrawIndexed(s_State.DefaultMeshIndexCount, static_cast<uint32_t>(visibleInstances.size()), 0, 0, 0);
+		static std::unordered_map<Rhi::Texture*, Rhi::Handle<Rhi::DescriptorSet>> s_TypeTextureSets[Renderer::FramesInFlight];
+
+		for (const auto& drawInfo : drawInfos)
+		{
+			Rhi::Handle<Rhi::Texture> currentTex = nullptr;
+			if (drawInfo.TypeIndex < data.GetTypeCount() && data.GetType(drawInfo.TypeIndex).MaterialAsset.Path.IsValid())
+			{
+				const std::string matPath = std::string(StringPool::Get().PathOf(data.GetType(drawInfo.TypeIndex).MaterialAsset.Path));
+				if (!matPath.empty())
+					currentTex = TextureLibrary::Get().Get(matPath, /*srgb*/ true);
+			}
+			if (!currentTex)
+			{
+				currentTex = (drawInfo.TypeIndex == 1)
+					? TextureLibrary::Get().Get("textures/foliage/wild_flower.png", true)
+					: ((drawInfo.TypeIndex == 3)
+						? TextureLibrary::Get().Get("textures/terrain/rock_albedo.png", true)
+						: TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", true));
+			}
+			if (!currentTex)
+				currentTex = s_State.DefaultAlbedo;
+
+			Rhi::Handle<Rhi::DescriptorSet> targetSet = nullptr;
+			auto it = s_TypeTextureSets[slot].find(currentTex.get());
+			if (it != s_TypeTextureSets[slot].end() && it->second)
+			{
+				targetSet = it->second;
+			}
+			else if (s_State.TextureLayout)
+			{
+				targetSet = device->CreateDescriptorSet(s_State.TextureLayout);
+				if (targetSet)
+				{
+					Rhi::DescriptorWrite w;
+					w.Binding = 4;
+					w.Type = Rhi::DescriptorType::CombinedImageSampler;
+					w.Texture = currentTex;
+					w.Sampler = s_State.Sampler;
+					targetSet->Update({ w });
+					s_TypeTextureSets[slot][currentTex.get()] = targetSet;
+				}
+			}
+			if (!targetSet)
+				targetSet = s_State.TextureSets[slot];
+
+			if (targetSet)
+				cmd->BindDescriptorSet(targetSet, 2);
+
+			cmd->DrawIndexed(s_State.DefaultMeshIndexCount, drawInfo.InstanceCount, 0, 0, drawInfo.StartInstance);
+		}
 	}
 }

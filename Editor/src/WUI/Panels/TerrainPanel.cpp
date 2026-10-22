@@ -344,51 +344,79 @@ namespace World
 		Wui::Label(ctx, { startX, currentY + 4.0f }, "材质图层混绘 (Surface Material Splatmap)", theme.Accent, theme.FontSizeBody);
 		currentY += rowH;
 
-		const float colW = (contentWidth - theme.PadSmall) * 0.5f;
-		const float cardH = 26.0f;
-
-		// 1. 动态图层选择卡片 (名称与当前地貌图层同步，打破固定限制)
-		for (uint32_t i = 0; i < 4; ++i)
+		// 1. 图层增删工具栏 (支持动态扩展与增删图层)
+		const float halfBtnW = (contentWidth - theme.PadSmall) * 0.5f;
+		const float btnH = 22.0f;
+		if (Wui::Button(ctx, Wui::HashId("terrain.layer.add"), { startX, currentY, halfBtnW, btnH }, "+ 添加图层", theme))
 		{
-			const int row = static_cast<int>(i / 2);
-			const int col = static_cast<int>(i % 2);
-			const Wui::WuiRect cardRect {
-				startX + static_cast<float>(col) * (colW + theme.PadSmall),
-				currentY + static_cast<float>(row) * (cardH + 4.0f),
-				colW, cardH
-			};
-		auto cardTheme = theme;
+			if (m_Terrain)
+			{
+				TerrainLayer newLayer;
+				const uint32_t newIdx = m_Terrain->GetLayerCount();
+				newLayer.Name = "图层 " + std::to_string(newIdx);
+				newLayer.Roughness = 0.85f;
+				newLayer.Tiling = glm::vec2(16.0f, 16.0f);
+				newLayer.AlbedoTexture.Path = StringPool::Get().InternPath("textures/terrain/grass_albedo.png");
+				newLayer.NormalTexture.Path = StringPool::Get().InternPath("textures/terrain/grass_normal.png");
+				m_Terrain->AddLayer(newLayer);
+				m_ActivePaintLayer = newIdx;
+				m_CachedPaintLayer = -1;
+				m_StatusFeedback = "已新增地貌材质图层: " + newLayer.Name;
+				host.MarkDocumentDirty();
+			}
+		}
+		Wui::Tooltip(ctx, { startX, currentY, halfBtnW, btnH }, "在地貌中新增一个材质图层，支持配置独立的纹理与平铺参数");
+
+		if (Wui::Button(ctx, Wui::HashId("terrain.layer.remove"), { startX + halfBtnW + theme.PadSmall, currentY, halfBtnW, btnH }, "- 移除图层", theme))
+		{
+			if (m_Terrain && m_Terrain->GetLayerCount() > 1)
+			{
+				const uint32_t toRemove = m_ActivePaintLayer;
+				m_Terrain->RemoveLayer(toRemove);
+				if (m_ActivePaintLayer >= m_Terrain->GetLayerCount())
+					m_ActivePaintLayer = m_Terrain->GetLayerCount() - 1;
+				m_CachedPaintLayer = -1;
+				m_StatusFeedback = "已移除图层 " + std::to_string(toRemove);
+				host.MarkDocumentDirty();
+			}
+		}
+		Wui::Tooltip(ctx, { startX + halfBtnW + theme.PadSmall, currentY, halfBtnW, btnH }, "移除当前选中的材质图层 (至少保留 1 个图层)");
+		currentY += btnH + 6.0f;
+
+		// 2. 动态图层列表 (可自由增删与点击切换)
+		const uint32_t layerCount = m_Terrain ? m_Terrain->GetLayerCount() : 4;
+		const float itemH = 24.0f;
+		for (uint32_t i = 0; i < layerCount; ++i)
+		{
+			const Wui::WuiRect itemRect { startX, currentY, contentWidth, itemH };
+			auto itemTheme = theme;
 			const bool isSelected = (m_ActivePaintLayer == i);
 			if (isSelected)
 			{
-				cardTheme.ButtonBg = theme.ActiveBg;
-				cardTheme.Border = theme.Accent;
-				cardTheme.Text = theme.Accent;
+				itemTheme.ButtonBg = theme.ActiveBg;
+				itemTheme.Border = theme.Accent;
+				itemTheme.Text = theme.Accent;
 			}
 
-			const char* icons[4] = { "✦ ", "■ ", "▲ ", "≈ " };
-			std::string layerTitle;
-			if (m_Terrain)
-			{
-				const auto& l = m_Terrain->GetLayer(i);
-				layerTitle = std::string(icons[i]) + std::to_string(i) + ": " + (l.Name.empty() ? ("图层 " + std::to_string(i)) : l.Name);
-			}
+			const char* icons[6] = { "✦ ", "■ ", "▲ ", "≈ ", "◆ ", "● " };
+			const char* icon = (i < 6) ? icons[i] : "• ";
+			std::string title = std::string(icon) + std::to_string(i) + ": ";
+			if (m_Terrain && i < m_Terrain->GetLayerCount())
+				title += m_Terrain->GetLayer(i).Name.empty() ? ("Layer " + std::to_string(i)) : m_Terrain->GetLayer(i).Name;
 			else
-			{
-				const char* defNames[4] = { "0: 翠绿草地", "1: 松软泥土", "2: 崖壁岩石", "3: 河滩细沙" };
-				layerTitle = std::string(icons[i]) + defNames[i];
-			}
+				title += "Layer " + std::to_string(i);
 
-			if (Wui::Button(ctx, Wui::HashId(("terrain.paint.layer." + std::to_string(i)).c_str()), cardRect, layerTitle, cardTheme))
+			if (Wui::Button(ctx, Wui::HashId(("terrain.paint.layer." + std::to_string(i)).c_str()), itemRect, title, itemTheme))
 			{
 				m_ActivePaintLayer = i;
 				m_PaintLayerIdx = static_cast<int>(i);
-				m_CachedPaintLayer = -1; // 刷新检视器数据
+				m_CachedPaintLayer = -1;
 			}
+			currentY += itemH + 3.0f;
 		}
-		currentY += 2.0f * (cardH + 4.0f) + 6.0f;
+		currentY += 4.0f;
 
-		// 2. 材质图层模板库下拉框 (快速扩展与应用高品质地表材质)
+		// 3. 材质图层模板库下拉框
 		Wui::Label(ctx, { startX, currentY + 3.0f }, "图层预设:", theme.TextMuted, theme.FontSizeSmall);
 		const float presetFieldW = contentWidth - 65.0f;
 		const Wui::WuiRect presetRect { startX + 65.0f, currentY, presetFieldW, 22.0f };
@@ -403,13 +431,13 @@ namespace World
 		};
 		static const TerrainPresetItem kTerrainPresets[] = {
 			{ "套用材质模板库 (Select Preset)...", "", "", "", 0.0f, { 10.0f, 10.0f } },
-			{ "高山草甸 (Alpine Grass) [平铺 16x16, 粗糙 0.85]", "高山草甸 (Alpine Grass)", "textures/terrain/grass_albedo.png", "textures/terrain/grass_normal.png", 0.85f, { 16.0f, 16.0f } },
-			{ "林地黑土 (Forest Dirt) [平铺 14x14, 粗糙 0.90]", "林地黑土 (Forest Dirt)", "textures/terrain/dirt_albedo.png", "textures/terrain/dirt_normal.png", 0.90f, { 14.0f, 14.0f } },
-			{ "花岗岩壁 (Mountain Rock) [平铺 10x10, 粗糙 0.65]", "花岗岩壁 (Mountain Rock)", "textures/terrain/rock_albedo.png", "textures/terrain/rock_normal.png", 0.65f, { 10.0f, 10.0f } },
-			{ "河滩细沙 (Riverbed Sand) [平铺 18x18, 粗糙 0.92]", "河滩细沙 (Riverbed Sand)", "textures/terrain/sand_albedo.png", "textures/terrain/sand_normal.png", 0.92f, { 18.0f, 18.0f } },
-			{ "积雪冰原 (Snow Field) [平铺 12x12, 粗糙 0.50]", "积雪冰原 (Snow Field)", "textures/terrain/grass_albedo.png", "textures/terrain/grass_normal.png", 0.50f, { 12.0f, 12.0f } },
-			{ "泥泞湿地 (Wetland Mud) [平铺 15x15, 粗糙 0.95]", "泥泞湿地 (Wetland Mud)", "textures/terrain/dirt_albedo.png", "textures/terrain/dirt_normal.png", 0.95f, { 15.0f, 15.0f } },
-			{ "碎石砾岩 (Gravel Pebble) [平铺 12x12, 粗糙 0.70]", "碎石砾岩 (Gravel Pebble)", "textures/terrain/rock_albedo.png", "textures/terrain/rock_normal.png", 0.70f, { 12.0f, 12.0f } }
+			{ "Alpine Grass (高山草甸) [16x16, 0.85]", "Alpine Grass", "textures/terrain/grass_albedo.png", "textures/terrain/grass_normal.png", 0.85f, { 16.0f, 16.0f } },
+			{ "Forest Dirt (林地黑土) [14x14, 0.90]", "Forest Dirt", "textures/terrain/dirt_albedo.png", "textures/terrain/dirt_normal.png", 0.90f, { 14.0f, 14.0f } },
+			{ "Mountain Rock (花岗岩壁) [10x10, 0.65]", "Mountain Rock", "textures/terrain/rock_albedo.png", "textures/terrain/rock_normal.png", 0.65f, { 10.0f, 10.0f } },
+			{ "Riverbed Sand (河滩细沙) [18x18, 0.92]", "Riverbed Sand", "textures/terrain/sand_albedo.png", "textures/terrain/sand_normal.png", 0.92f, { 18.0f, 18.0f } },
+			{ "Snow Field (积雪冰原) [12x12, 0.50]", "Snow Field", "textures/terrain/grass_albedo.png", "textures/terrain/grass_normal.png", 0.50f, { 12.0f, 12.0f } },
+			{ "Wetland Mud (泥泞湿地) [15x15, 0.95]", "Wetland Mud", "textures/terrain/dirt_albedo.png", "textures/terrain/dirt_normal.png", 0.95f, { 15.0f, 15.0f } },
+			{ "Gravel Pebble (碎石砾岩) [12x12, 0.70]", "Gravel Pebble", "textures/terrain/rock_albedo.png", "textures/terrain/rock_normal.png", 0.70f, { 12.0f, 12.0f } }
 		};
 		std::vector<std::string> presetLabels;
 		for (const auto& p : kTerrainPresets)
@@ -418,7 +446,7 @@ namespace World
 		int curPresetIdx = 0;
 		if (Wui::Combo(ctx, Wui::HashId("terrain.layer.preset_combo"), presetRect, "", presetLabels, curPresetIdx, theme) && curPresetIdx > 0)
 		{
-			if (m_Terrain && m_ActivePaintLayer < 4)
+			if (m_Terrain && m_ActivePaintLayer < m_Terrain->GetLayerCount())
 			{
 				auto& layer = m_Terrain->GetLayer(m_ActivePaintLayer);
 				const auto& p = kTerrainPresets[curPresetIdx];
@@ -434,7 +462,7 @@ namespace World
 		}
 		currentY += 28.0f;
 
-		if (m_Terrain && m_ActivePaintLayer < 4)
+		if (m_Terrain && m_ActivePaintLayer < m_Terrain->GetLayerCount())
 		{
 			TerrainLayer& layer = m_Terrain->GetLayer(m_ActivePaintLayer);
 			if (m_CachedPaintLayer != static_cast<int>(m_ActivePaintLayer))
@@ -457,56 +485,34 @@ namespace World
 			}
 			currentY += 26.0f;
 
-			// 3. Albedo 贴图下拉框 (严格仅过滤地貌贴图与纹理，杜绝弹全资产弹窗)
+			// 4. Albedo 贴图下拉框 (直接展示规范逻辑相对路径，无假中文与重复项)
 			Wui::Label(ctx, { startX, currentY + 3.0f }, "Albedo:", theme.TextMuted, theme.FontSizeSmall);
 			const Wui::WuiRect albComboRect { startX + 55.0f, currentY, contentWidth - 55.0f, 22.0f };
 
-			std::vector<std::string> albLabels;
-			std::vector<std::string> albValues;
-			albLabels.push_back("(无 / None)");
-			albValues.push_back("");
-
-			albLabels.push_back("grass_albedo.png (高山草甸)");
-			albValues.push_back("textures/terrain/grass_albedo.png");
-
-			albLabels.push_back("dirt_albedo.png (林地黑土)");
-			albValues.push_back("textures/terrain/dirt_albedo.png");
-
-			albLabels.push_back("rock_albedo.png (花岗岩壁)");
-			albValues.push_back("textures/terrain/rock_albedo.png");
-
-			albLabels.push_back("sand_albedo.png (河滩细沙)");
-			albValues.push_back("textures/terrain/sand_albedo.png");
-
-			const auto& allTex = Editor::AssetCatalog::PathsFor(EditorAssetKind::TextureSource);
-			for (const auto& tp : allTex)
-			{
-				if (std::find(albValues.begin(), albValues.end(), tp) == albValues.end())
-				{
-					albLabels.push_back(std::filesystem::path(tp).filename().string() + " [" + tp + "]");
-					albValues.push_back(tp);
-				}
-			}
+			const auto& texPaths = Editor::AssetCatalog::PathsFor(EditorAssetKind::TextureSource);
+			std::vector<std::string> albOptions;
+			albOptions.push_back("(none)");
+			for (const auto& tp : texPaths)
+				albOptions.push_back(tp);
 
 			int curAlbIdx = 0;
-			for (size_t ai = 0; ai < albValues.size(); ++ai)
+			if (!m_EditLayerAlbedo.empty())
 			{
-				if (!albValues[ai].empty() && albValues[ai] == m_EditLayerAlbedo)
+				auto it = std::find(albOptions.begin(), albOptions.end(), m_EditLayerAlbedo);
+				if (it != albOptions.end())
 				{
-					curAlbIdx = static_cast<int>(ai);
-					break;
+					curAlbIdx = static_cast<int>(it - albOptions.begin());
+				}
+				else
+				{
+					albOptions.push_back(m_EditLayerAlbedo);
+					curAlbIdx = static_cast<int>(albOptions.size() - 1);
 				}
 			}
-			if (curAlbIdx == 0 && !m_EditLayerAlbedo.empty())
-			{
-				albLabels.push_back(m_EditLayerAlbedo);
-				albValues.push_back(m_EditLayerAlbedo);
-				curAlbIdx = static_cast<int>(albValues.size() - 1);
-			}
 
-			if (Wui::SearchableCombo(ctx, Wui::HashId("terrain.layer.albedo_combo"), albComboRect, "", albLabels, curAlbIdx, theme))
+			if (Wui::SearchableCombo(ctx, Wui::HashId("terrain.layer.albedo_combo"), albComboRect, "", albOptions, curAlbIdx, theme))
 			{
-				const std::string picked = albValues[curAlbIdx];
+				const std::string picked = (curAlbIdx <= 0) ? "" : albOptions[curAlbIdx];
 				layer.AlbedoTexture.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
 				m_EditLayerAlbedo = picked;
 				if (picked.find("_albedo") != std::string::npos)
@@ -514,67 +520,44 @@ namespace World
 					std::string pairedNorm = picked;
 					size_t pPos = pairedNorm.find("_albedo");
 					pairedNorm.replace(pPos, 7, "_normal");
-					layer.NormalTexture.Path = StringPool::Get().InternPath(pairedNorm);
-					m_EditLayerNormal = pairedNorm;
+					if (std::find(texPaths.begin(), texPaths.end(), pairedNorm) != texPaths.end())
+					{
+						layer.NormalTexture.Path = StringPool::Get().InternPath(pairedNorm);
+						m_EditLayerNormal = pairedNorm;
+					}
 				}
 				m_StatusFeedback = "已选择地貌 Albedo: " + picked;
 				host.MarkDocumentDirty();
 			}
 			currentY += 26.0f;
 
-			// 4. Normal 法线贴图下拉框 (严格仅过滤法线贴图)
+			// 5. Normal 法线贴图下拉框 (直接展示规范逻辑相对路径)
 			Wui::Label(ctx, { startX, currentY + 3.0f }, "Normal:", theme.TextMuted, theme.FontSizeSmall);
 			const Wui::WuiRect normComboRect { startX + 55.0f, currentY, contentWidth - 55.0f, 22.0f };
 
-			std::vector<std::string> normLabels;
-			std::vector<std::string> normValues;
-			normLabels.push_back("(无 / None)");
-			normValues.push_back("");
-
-			normLabels.push_back("grass_normal.png (草甸法线)");
-			normValues.push_back("textures/terrain/grass_normal.png");
-
-			normLabels.push_back("dirt_normal.png (黑土法线)");
-			normValues.push_back("textures/terrain/dirt_normal.png");
-
-			normLabels.push_back("rock_normal.png (岩石法线)");
-			normValues.push_back("textures/terrain/rock_normal.png");
-
-			normLabels.push_back("sand_normal.png (细沙法线)");
-			normValues.push_back("textures/terrain/sand_normal.png");
-
-			normLabels.push_back("flat_normal.wtex (平整法线基准)");
-			normValues.push_back("textures/flat_normal.wtex");
-
-			for (const auto& tp : allTex)
-			{
-				if (tp.find("normal") != std::string::npos &&
-					std::find(normValues.begin(), normValues.end(), tp) == normValues.end())
-				{
-					normLabels.push_back(std::filesystem::path(tp).filename().string() + " [" + tp + "]");
-					normValues.push_back(tp);
-				}
-			}
+			std::vector<std::string> normOptions;
+			normOptions.push_back("(none)");
+			for (const auto& tp : texPaths)
+				normOptions.push_back(tp);
 
 			int curNormIdx = 0;
-			for (size_t ni = 0; ni < normValues.size(); ++ni)
+			if (!m_EditLayerNormal.empty())
 			{
-				if (!normValues[ni].empty() && normValues[ni] == m_EditLayerNormal)
+				auto it = std::find(normOptions.begin(), normOptions.end(), m_EditLayerNormal);
+				if (it != normOptions.end())
 				{
-					curNormIdx = static_cast<int>(ni);
-					break;
+					curNormIdx = static_cast<int>(it - normOptions.begin());
+				}
+				else
+				{
+					normOptions.push_back(m_EditLayerNormal);
+					curNormIdx = static_cast<int>(normOptions.size() - 1);
 				}
 			}
-			if (curNormIdx == 0 && !m_EditLayerNormal.empty())
-			{
-				normLabels.push_back(m_EditLayerNormal);
-				normValues.push_back(m_EditLayerNormal);
-				curNormIdx = static_cast<int>(normValues.size() - 1);
-			}
 
-			if (Wui::SearchableCombo(ctx, Wui::HashId("terrain.layer.normal_combo"), normComboRect, "", normLabels, curNormIdx, theme))
+			if (Wui::SearchableCombo(ctx, Wui::HashId("terrain.layer.normal_combo"), normComboRect, "", normOptions, curNormIdx, theme))
 			{
-				const std::string picked = normValues[curNormIdx];
+				const std::string picked = (curNormIdx <= 0) ? "" : normOptions[curNormIdx];
 				layer.NormalTexture.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
 				m_EditLayerNormal = picked;
 				m_StatusFeedback = "已选择地貌 Normal: " + picked;
@@ -596,7 +579,7 @@ namespace World
 			}
 			currentY += 28.0f;
 
-			// 5. 快捷批量操作与重置按钮
+			// 6. 快捷批量操作与重置按钮
 			const float actBtnW = (contentWidth - 65.0f - theme.PadSmall) * 0.5f;
 			if (Wui::Button(ctx, Wui::HashId("terrain.layer.fill_all"), { startX + 65.0f, currentY, actBtnW, 22.0f }, "全图填充此层", theme))
 			{

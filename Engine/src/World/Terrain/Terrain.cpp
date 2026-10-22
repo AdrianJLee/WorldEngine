@@ -19,6 +19,7 @@ namespace World
 
 	TerrainData::TerrainData()
 	{
+		m_Layers.resize(4);
 		m_Layers[0].Name = "Grass";
 		m_Layers[0].Roughness = 0.8f;
 		m_Layers[0].Metallic = 0.0f;
@@ -48,6 +49,7 @@ namespace World
 		, m_CellSize(std::max(0.001f, cellSize))
 		, m_HeightScale(heightScale)
 	{
+		m_Layers.resize(4);
 		m_Layers[0].Name = "Grass";
 		m_Layers[0].Roughness = 0.8f;
 		m_Layers[0].Metallic = 0.0f;
@@ -189,23 +191,56 @@ namespace World
 		m_IsDirty = true;
 	}
 
+	uint32_t TerrainData::GetLayerCount() const
+	{
+		return static_cast<uint32_t>(m_Layers.size());
+	}
+
 	TerrainLayer& TerrainData::GetLayer(uint32_t index)
 	{
-		return m_Layers[std::min(index, 3u)];
+		if (m_Layers.empty())
+		{
+			static TerrainLayer s_Def;
+			return s_Def;
+		}
+		return m_Layers[std::min(static_cast<size_t>(index), m_Layers.size() - 1)];
 	}
 
 	const TerrainLayer& TerrainData::GetLayer(uint32_t index) const
 	{
-		return m_Layers[std::min(index, 3u)];
+		if (m_Layers.empty())
+		{
+			static TerrainLayer s_Def;
+			return s_Def;
+		}
+		return m_Layers[std::min(static_cast<size_t>(index), m_Layers.size() - 1)];
 	}
 
 	void TerrainData::SetLayer(uint32_t index, const TerrainLayer& layer)
 	{
-		if (index < 4)
+		if (index < m_Layers.size())
 		{
 			m_Layers[index] = layer;
 			m_IsDirty = true;
 		}
+	}
+
+	uint32_t TerrainData::AddLayer(const TerrainLayer& layer)
+	{
+		m_Layers.push_back(layer);
+		m_IsDirty = true;
+		return static_cast<uint32_t>(m_Layers.size() - 1);
+	}
+
+	bool TerrainData::RemoveLayer(uint32_t index)
+	{
+		if (m_Layers.size() > 1 && index < m_Layers.size())
+		{
+			m_Layers.erase(m_Layers.begin() + index);
+			m_IsDirty = true;
+			return true;
+		}
+		return false;
 	}
 
 	bool TerrainData::Raycast(const glm::vec3& rayOrigin, const glm::vec3& rayDir, float maxDistance, TerrainRaycastHit& outHit) const
