@@ -544,12 +544,15 @@ namespace World
 			int curAlbIdx = 0;
 			if (!m_EditLayerAlbedo.empty())
 			{
-				auto it = std::find(albOptions.begin(), albOptions.end(), m_EditLayerAlbedo);
-				if (it != albOptions.end())
-				{
-					curAlbIdx = static_cast<int>(it - albOptions.begin());
+				std::string normAlb = (m_EditLayerAlbedo.rfind("engine/", 0) == 0) ? m_EditLayerAlbedo.substr(7) : m_EditLayerAlbedo;
+				for (size_t ai = 0; ai < albOptions.size(); ++ai) {
+					std::string optNorm = (albOptions[ai].rfind("engine/", 0) == 0) ? albOptions[ai].substr(7) : albOptions[ai];
+					if (optNorm == normAlb) {
+						curAlbIdx = static_cast<int>(ai);
+						break;
+					}
 				}
-				else
+				if (curAlbIdx == 0 && m_EditLayerAlbedo != "(none)")
 				{
 					albOptions.push_back(m_EditLayerAlbedo);
 					curAlbIdx = static_cast<int>(albOptions.size() - 1);
@@ -612,12 +615,15 @@ namespace World
 			int curNormIdx = 0;
 			if (!m_EditLayerNormal.empty())
 			{
-				auto it = std::find(normOptions.begin(), normOptions.end(), m_EditLayerNormal);
-				if (it != normOptions.end())
-				{
-					curNormIdx = static_cast<int>(it - normOptions.begin());
+				std::string normNorm = (m_EditLayerNormal.rfind("engine/", 0) == 0) ? m_EditLayerNormal.substr(7) : m_EditLayerNormal;
+				for (size_t ni = 0; ni < normOptions.size(); ++ni) {
+					std::string optNorm = (normOptions[ni].rfind("engine/", 0) == 0) ? normOptions[ni].substr(7) : normOptions[ni];
+					if (optNorm == normNorm) {
+						curNormIdx = static_cast<int>(ni);
+						break;
+					}
 				}
-				else
+				if (curNormIdx == 0 && m_EditLayerNormal != "(none)")
 				{
 					normOptions.push_back(m_EditLayerNormal);
 					curNormIdx = static_cast<int>(normOptions.size() - 1);

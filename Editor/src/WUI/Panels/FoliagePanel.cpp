@@ -525,29 +525,32 @@ namespace World
 				const auto& modelSrcs = Editor::AssetCatalog::PathsFor(EditorAssetKind::ModelSource);
 				std::vector<std::string> meshOptions;
 				meshOptions.push_back("(none)");
-				meshOptions.push_back("models/foliage/grass_cluster.wmodel");
-				meshOptions.push_back("models/foliage/bush_cluster.wmodel");
-				meshOptions.push_back("models/foliage/scatter_pebble.wmodel");
-				for (const auto& mp : modelAssets)
-				{
-					if (std::find(meshOptions.begin(), meshOptions.end(), mp) == meshOptions.end())
-						meshOptions.push_back(mp);
-				}
-				for (const auto& mp : modelSrcs)
-				{
-					if (std::find(meshOptions.begin(), meshOptions.end(), mp) == meshOptions.end())
-						meshOptions.push_back(mp);
-				}
+				auto addUniqueMesh = [&](const std::string& opt) {
+					std::string optNorm = (opt.rfind("engine/", 0) == 0) ? opt.substr(7) : opt;
+					for (const auto& existing : meshOptions) {
+						std::string exNorm = (existing.rfind("engine/", 0) == 0) ? existing.substr(7) : existing;
+						if (exNorm == optNorm) return;
+					}
+					meshOptions.push_back(opt);
+				};
+				addUniqueMesh("models/foliage/grass_cluster.wmodel");
+				addUniqueMesh("models/foliage/bush_cluster.wmodel");
+				addUniqueMesh("models/foliage/scatter_pebble.wmodel");
+				for (const auto& mp : modelAssets) addUniqueMesh(mp);
+				for (const auto& mp : modelSrcs) addUniqueMesh(mp);
 
 				int curMeshIdx = 0;
 				if (!m_EditMeshPath.empty())
 				{
-					auto it = std::find(meshOptions.begin(), meshOptions.end(), m_EditMeshPath);
-					if (it != meshOptions.end())
-					{
-						curMeshIdx = static_cast<int>(it - meshOptions.begin());
+					std::string normCur = (m_EditMeshPath.rfind("engine/", 0) == 0) ? m_EditMeshPath.substr(7) : m_EditMeshPath;
+					for (size_t mi = 0; mi < meshOptions.size(); ++mi) {
+						std::string optNorm = (meshOptions[mi].rfind("engine/", 0) == 0) ? meshOptions[mi].substr(7) : meshOptions[mi];
+						if (optNorm == normCur) {
+							curMeshIdx = static_cast<int>(mi);
+							break;
+						}
 					}
-					else
+					if (curMeshIdx == 0 && m_EditMeshPath != "(none)")
 					{
 						meshOptions.push_back(m_EditMeshPath);
 						curMeshIdx = static_cast<int>(meshOptions.size() - 1);
@@ -595,31 +598,34 @@ namespace World
 				const auto& matAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Material);
 				std::vector<std::string> matOptions;
 				matOptions.push_back("(none)");
-				matOptions.push_back("textures/foliage/grass_tuft.png");
-				matOptions.push_back("textures/foliage/wild_flower.png");
-				matOptions.push_back("textures/foliage/bush_leaves.png");
-				matOptions.push_back("textures/terrain/grass_albedo.png");
-				matOptions.push_back("textures/terrain/rock_albedo.png");
-				for (const auto& tp : texAssets)
-				{
-					if (std::find(matOptions.begin(), matOptions.end(), tp) == matOptions.end())
-						matOptions.push_back(tp);
-				}
-				for (const auto& mp : matAssets)
-				{
-					if (std::find(matOptions.begin(), matOptions.end(), mp) == matOptions.end())
-						matOptions.push_back(mp);
-				}
+				auto addUniqueMat = [&](const std::string& opt) {
+					std::string optNorm = (opt.rfind("engine/", 0) == 0) ? opt.substr(7) : opt;
+					for (const auto& existing : matOptions) {
+						std::string exNorm = (existing.rfind("engine/", 0) == 0) ? existing.substr(7) : existing;
+						if (exNorm == optNorm) return;
+					}
+					matOptions.push_back(opt);
+				};
+				addUniqueMat("textures/foliage/grass_tuft.png");
+				addUniqueMat("textures/foliage/wild_flower.png");
+				addUniqueMat("textures/foliage/bush_leaves.png");
+				addUniqueMat("textures/terrain/grass_albedo.png");
+				addUniqueMat("textures/terrain/rock_albedo.png");
+				for (const auto& tp : texAssets) addUniqueMat(tp);
+				for (const auto& mp : matAssets) addUniqueMat(mp);
 
 				int curMatIdx = 0;
 				if (!m_EditMatPath.empty())
 				{
-					auto it = std::find(matOptions.begin(), matOptions.end(), m_EditMatPath);
-					if (it != matOptions.end())
-					{
-						curMatIdx = static_cast<int>(it - matOptions.begin());
+					std::string normCur = (m_EditMatPath.rfind("engine/", 0) == 0) ? m_EditMatPath.substr(7) : m_EditMatPath;
+					for (size_t mi = 0; mi < matOptions.size(); ++mi) {
+						std::string optNorm = (matOptions[mi].rfind("engine/", 0) == 0) ? matOptions[mi].substr(7) : matOptions[mi];
+						if (optNorm == normCur) {
+							curMatIdx = static_cast<int>(mi);
+							break;
+						}
 					}
-					else
+					if (curMatIdx == 0 && m_EditMatPath != "(none)")
 					{
 						matOptions.push_back(m_EditMatPath);
 						curMatIdx = static_cast<int>(matOptions.size() - 1);

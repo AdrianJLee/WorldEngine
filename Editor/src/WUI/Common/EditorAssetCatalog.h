@@ -109,7 +109,7 @@ namespace World
 				searchRoots.push_back(projAssets);
 
 			const std::filesystem::path templateAssets = std::filesystem::current_path() / "templates" / "project-example" / "assets";
-			if (std::filesystem::exists(templateAssets, ec))
+			if (searchRoots.empty() && std::filesystem::exists(templateAssets, ec))
 				searchRoots.push_back(templateAssets);
 
 			const std::filesystem::path engineRoot = World::Paths::EngineContentRoot();

@@ -176,11 +176,14 @@ bool ContentBrowserPanel::SwitchRoot(RootScope scope){
 			return false;   // 没项目 / 没有 <项目根>/plugins:同上(与项目 C++ 根同口径)
 		if (scope == BrowserRootScope::EngineContent && !EngineContentAvailable())
 			return false;
-		if (scope == m_Model.Scope)
+		const std::filesystem::path desiredRoot = RootPathFor(scope);
+		if (desiredRoot.empty())
+			return false;
+		if (scope == m_Model.Scope && m_Model.Root == desiredRoot && !m_Model.Current.empty())
 			return true;    // 幂等
 		CaptureRootState(m_Model.Scope);
 		m_Model.Scope = scope;
-		m_Model.Root = RootPathFor(scope);
+		m_Model.Root = desiredRoot;
 		// 瞬态:切根不带走另一个根的右键菜单/重命名/删除确认/剪贴板/新建文件夹输入。
 		m_Model.ContextMenuPath.clear();
 		m_Model.ContextMenuPos = {};
@@ -212,28 +215,59 @@ bool ContentBrowserPanel::RevealPathInRoot(RootScope scope, const std::filesyste
 		if (absolutePath.empty())
 			return false;
 		if (!SwitchRoot(scope))
-			return false;   // 根不可用 / 没有项目:状态一律不动
+			return false;
 		std::error_code error;
 		if (!std::filesystem::exists(absolutePath, error))
 			return false;
-		// 目标必须真的落在当前根下(不做跨根/越界跳转;plugins 根之外的引擎插件不在本根里)。
-		const std::filesystem::path relative = absolutePath.lexically_relative(m_Model.Root);
-		if (relative.empty() || *relative.begin() == "..")
-			return false;
-		// 定位到目标的父目录并选中目标本身(目录 = 在网格里选中该目录,资源管理器同款)。
-		const std::filesystem::path navigateTo = absolutePath.parent_path();
+
+		const std::filesystem::path normTarget = absolutePath.lexically_normal();
+		const std::filesystem::path normRoot = m_Model.Root.lexically_normal();
+		std::string targetStr = normTarget.generic_string();
+		std::string rootStr = normRoot.generic_string();
+		bool isSubPath = false;
+#if defined(_WIN32)
+		std::string targetLower = targetStr;
+		std::string rootLower = rootStr;
+		std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+		std::transform(rootLower.begin(), rootLower.end(), rootLower.begin(), ::tolower);
+		if (targetLower == rootLower)
+			isSubPath = true;
+		else if (targetLower.rfind(rootLower, 0) == 0 && (rootLower.back() == "/"[0] || targetLower[rootLower.size()] == "/"[0]))
+			isSubPath = true;
+#else
+		if (targetStr == rootStr)
+			isSubPath = true;
+		else if (targetStr.rfind(rootStr, 0) == 0 && (rootStr.back() == "/"[0] || targetStr[rootStr.size()] == "/"[0]))
+			isSubPath = true;
+#endif
+		if (!isSubPath)
+		{
+			const std::filesystem::path relative = normTarget.lexically_relative(normRoot);
+			if (relative.empty() || *relative.begin() == "..")
+				return false;
+		}
+
+		const std::filesystem::path navigateTo = normTarget.parent_path();
 		if (!navigateTo.empty() && navigateTo != m_Model.Current
-			&& navigateTo.lexically_relative(m_Model.Root) != std::filesystem::path("..")
 			&& std::filesystem::is_directory(navigateTo, error))
+		{
 			Navigate(navigateTo);
+		}
 		m_Model.Selected.clear();
-		m_Model.Selected.insert(absolutePath);
-		m_Model.LastSelected = absolutePath;
-		Reveal(absolutePath);
+		m_Model.Selected.insert(normTarget);
+		m_Model.LastSelected = normTarget;
+		Reveal(normTarget);
+
+		m_Model.Search[0] = 0;
+		m_Model.SearchEdit.clear();
+		m_Model.SearchResults.clear();
+		m_Model.ContentScroll = 0.0f;
+		m_Model.ListingDirty = true;
+		m_Model.DirTreeDirty = true;
+		m_Model.ListingStamp = {};
+		m_Model.TreeStamp = {};
 		InvalidateContents();
 		SaveState();
-		if (m_Model.Search[0])
-			UpdateSearch();
 		return true;
 	}
 

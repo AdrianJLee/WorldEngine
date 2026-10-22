@@ -179,6 +179,12 @@ bool ModalActionButton(Wui::WuiContext& ctx, Wui::WuiId id, const Wui::WuiRect& 
 }
 
 ContentBrowserPanel::ContentBrowserPanel(PanelHost& host) : m_Host(host), m_StatePath(std::string(WLD_LOCAL_DIR) + "wui-browser.json"){
+		m_Model.ContentRoot = World::Paths::AssetRoot();
+		m_Model.SourceRoot = ProjectSourceRoot();
+		m_Model.PluginsRoot = ProjectPluginsRoot();
+		m_Model.EngineContentRoot = World::Paths::EngineContentRoot();
+		m_Model.Scope = BrowserRootScope::Content;
+		m_Model.Root = m_Model.ContentRoot;
 		m_Model.Current = m_Model.Root;
 		LoadState();
 		RegisterDefaultAssetTypes();
@@ -452,9 +458,14 @@ void ContentBrowserPanel::LoadState(){
 				readBucket(*parsed, BrowserRootScope::Content);
 			}
 			// 构造期恒为内容根:把内容根的桶装回模型(旧版行为逐字保留)。
-			m_Model.Scope = BrowserRootScope::Content;
-			m_Model.Root = m_Model.ContentRoot;
-			ApplyRootState(BrowserRootScope::Content);
+			m_Model.ContentRoot = World::Paths::AssetRoot();
+			m_Model.SourceRoot = ProjectSourceRoot();
+			m_Model.PluginsRoot = ProjectPluginsRoot();
+			m_Model.EngineContentRoot = World::Paths::EngineContentRoot();
+			m_Model.Root = RootPathFor(m_Model.Scope);
+			if (m_Model.Root.empty())
+				m_Model.Root = m_Model.ContentRoot;
+			ApplyRootState(m_Model.Scope);
 		}
 		catch (const std::exception& error)
 		{

@@ -1026,6 +1026,7 @@ bool EditorShell::RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope
 				{ { "path", absolutePath.u8string() } }));
 		}
 		AiActivatePanel(panel, nullptr);
+		Notify("已在内容浏览器中定位: " + absolutePath.filename().string());
 		return true;
 	}
 

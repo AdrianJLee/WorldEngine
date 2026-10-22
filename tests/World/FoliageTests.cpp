@@ -485,7 +485,7 @@ static void GenerateFoliageModelAssets()
 		model.MaterialSlots.push_back("textures/foliage/grass_tuft.png");
 
 		const std::string relPath = "models/foliage/grass_cluster.wmodel";
-		for (const auto& root : { std::string("templates/project-example/assets"), std::string("E:/MyProject/assets"), std::string("Engine/content") })
+		for (const auto& root : { std::string("Engine/content") })
 		{
 			std::filesystem::path outPath = std::filesystem::path(root) / relPath;
 			std::filesystem::create_directories(outPath.parent_path());
@@ -588,7 +588,7 @@ static void GenerateFoliageModelAssets()
 		model.MaterialSlots.push_back("textures/foliage/bush_leaves.png");
 
 		const std::string relPath = "models/foliage/bush_cluster.wmodel";
-		for (const auto& root : { std::string("templates/project-example/assets"), std::string("E:/MyProject/assets"), std::string("Engine/content") })
+		for (const auto& root : { std::string("Engine/content") })
 		{
 			std::filesystem::path outPath = std::filesystem::path(root) / relPath;
 			std::filesystem::create_directories(outPath.parent_path());
@@ -696,7 +696,7 @@ static void GenerateFoliageModelAssets()
 		model.MaterialSlots.push_back("textures/terrain/rock_albedo.png");
 
 		const std::string relPath = "models/foliage/scatter_pebble.wmodel";
-		for (const auto& root : { std::string("templates/project-example/assets"), std::string("E:/MyProject/assets"), std::string("Engine/content") })
+		for (const auto& root : { std::string("Engine/content") })
 		{
 			std::filesystem::path outPath = std::filesystem::path(root) / relPath;
 			std::filesystem::create_directories(outPath.parent_path());
