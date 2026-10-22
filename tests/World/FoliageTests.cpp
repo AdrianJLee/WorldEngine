@@ -4,6 +4,8 @@
 #include "World/Foliage/Foliage.h"
 #include "World/Terrain/Terrain.h"
 #include "World/Scene/Components.h"
+#include "World/Asset/WModelIO.h"
+#include "World/Renderer/Mesh.h"
 
 #include <cassert>
 #include <cmath>
@@ -434,6 +436,277 @@ static void TestFoliageSerializationVersionCompatibility()
 	std::cout << "[PASS] TestFoliageSerializationVersionCompatibility\n";
 }
 
+static void GenerateFoliageModelAssets()
+{
+	constexpr float kPi = 3.1415926535f;
+
+	// 1. grass_cluster.wmodel
+	{
+		Asset::WModelData model;
+		model.Meta.Valid = true;
+		model.Meta.ImporterVersion = 1;
+		model.Meta.Identity = AssetId { 0x47524153530001u }; // "GRASS"
+		model.Meta.HasSettings = true;
+		model.Meta.Scale = 1.0f;
+		model.Meta.SourcePath = "models/foliage/grass_cluster.wmodel";
+
+		for (int q = 0; q < 3; ++q)
+		{
+			const float angle = static_cast<float>(q) * (kPi / 3.0f);
+			const float cosA = std::cos(angle);
+			const float sinA = std::sin(angle);
+			const glm::vec3 dir(cosA * 0.5f, 0.0f, sinA * 0.5f);
+			const glm::vec3 normal = glm::normalize(glm::vec3(-sinA * 0.4f, 0.85f, cosA * 0.4f));
+
+			const uint32_t baseV = static_cast<uint32_t>(model.Vertices.size());
+			model.Vertices.push_back({ -dir, normal, { 0.0f, 1.0f } });
+			model.Vertices.push_back({  dir, normal, { 1.0f, 1.0f } });
+			model.Vertices.push_back({  dir + glm::vec3(0.0f, 1.4f, 0.0f), normal, { 1.0f, 0.0f } });
+			model.Vertices.push_back({ -dir + glm::vec3(0.0f, 1.4f, 0.0f), normal, { 0.0f, 0.0f } });
+
+			model.Indices.push_back(baseV + 0);
+			model.Indices.push_back(baseV + 1);
+			model.Indices.push_back(baseV + 2);
+			model.Indices.push_back(baseV + 0);
+			model.Indices.push_back(baseV + 2);
+			model.Indices.push_back(baseV + 3);
+		}
+
+		model.Bounds.Min = glm::vec3(-0.5f, 0.0f, -0.5f);
+		model.Bounds.Max = glm::vec3(0.5f, 1.4f, 0.5f);
+		model.Submeshes.push_back({ 0, static_cast<uint32_t>(model.Indices.size()), 0 });
+		model.Meshes.push_back({ 0, 1 });
+		Asset::WModelNode rootNode;
+		rootNode.Name = "Root";
+		rootNode.Parent = -1;
+		rootNode.MeshIndex = 0;
+		rootNode.Scale = glm::vec3(1.0f);
+		model.Nodes.push_back(rootNode);
+		model.MaterialSlots.push_back("textures/foliage/grass_tuft.png");
+
+		const std::string relPath = "models/foliage/grass_cluster.wmodel";
+		for (const auto& root : { std::string("templates/project-example/assets"), std::string("E:/MyProject/assets"), std::string("Engine/content") })
+		{
+			std::filesystem::path outPath = std::filesystem::path(root) / relPath;
+			std::filesystem::create_directories(outPath.parent_path());
+			std::string err;
+			Asset::WModelIO::WriteFile(outPath.string(), model, &err);
+		}
+	}
+
+	// 2. bush_cluster.wmodel
+	{
+		Asset::WModelData model;
+		model.Meta.Valid = true;
+		model.Meta.ImporterVersion = 1;
+		model.Meta.Identity = AssetId { 0x425553480001u }; // "BUSH"
+		model.Meta.HasSettings = true;
+		model.Meta.Scale = 1.0f;
+		model.Meta.SourcePath = "models/foliage/bush_cluster.wmodel";
+
+		auto addQuad = [&](const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& p3,
+			const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec2& uv2, const glm::vec2& uv3) {
+			const uint32_t bv = static_cast<uint32_t>(model.Vertices.size());
+			model.Vertices.push_back({ p0, glm::vec3(0.0f, 1.0f, 0.0f), uv0 });
+			model.Vertices.push_back({ p1, glm::vec3(0.0f, 1.0f, 0.0f), uv1 });
+			model.Vertices.push_back({ p2, glm::vec3(0.0f, 1.0f, 0.0f), uv2 });
+			model.Vertices.push_back({ p3, glm::vec3(0.0f, 1.0f, 0.0f), uv3 });
+
+			model.Indices.push_back(bv + 0);
+			model.Indices.push_back(bv + 1);
+			model.Indices.push_back(bv + 2);
+			model.Indices.push_back(bv + 0);
+			model.Indices.push_back(bv + 2);
+			model.Indices.push_back(bv + 3);
+		};
+
+		// 8 radial outer canopy quads
+		for (int q = 0; q < 8; ++q)
+		{
+			const float a = static_cast<float>(q) * (kPi * 0.25f) + 0.15f;
+			const float cosA = std::cos(a);
+			const float sinA = std::sin(a);
+			const glm::vec3 centerBottom(cosA * 0.28f, 0.05f, sinA * 0.28f);
+			const glm::vec3 tangent(-sinA * 0.42f, 0.0f, cosA * 0.42f);
+			const glm::vec3 upOut(cosA * 0.35f, 0.88f, sinA * 0.35f);
+
+			addQuad(centerBottom - tangent, centerBottom + tangent,
+				centerBottom + tangent + upOut, centerBottom - tangent + upOut,
+				{ 0.0f, 1.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f });
+		}
+		// 4 core cross quads
+		for (int q = 0; q < 4; ++q)
+		{
+			const float a = static_cast<float>(q) * (kPi * 0.25f);
+			const float cosA = std::cos(a);
+			const float sinA = std::sin(a);
+			const glm::vec3 dirVec(cosA * 0.55f, 0.0f, sinA * 0.55f);
+			const glm::vec3 upVec(0.0f, 1.05f, 0.0f);
+
+			addQuad(-dirVec + glm::vec3(0.0f, 0.05f, 0.0f), dirVec + glm::vec3(0.0f, 0.05f, 0.0f),
+				dirVec + glm::vec3(0.0f, 0.05f, 0.0f) + upVec, -dirVec + glm::vec3(0.0f, 0.05f, 0.0f) + upVec,
+				{ 0.0f, 1.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f });
+		}
+		// 2 crown dome cap quads
+		for (int q = 0; q < 2; ++q)
+		{
+			const float a = static_cast<float>(q) * (kPi * 0.5f) + (kPi * 0.25f);
+			const float cosA = std::cos(a);
+			const float sinA = std::sin(a);
+			const glm::vec3 rightVec(-sinA * 0.45f, 0.0f, cosA * 0.45f);
+			const glm::vec3 fwdVec(cosA * 0.45f, 0.0f, sinA * 0.45f);
+			const float capY = 0.98f + static_cast<float>(q) * 0.04f;
+
+			addQuad(glm::vec3(0.0f, capY, 0.0f) - rightVec - fwdVec,
+				glm::vec3(0.0f, capY, 0.0f) + rightVec - fwdVec,
+				glm::vec3(0.0f, capY, 0.0f) + rightVec + fwdVec,
+				glm::vec3(0.0f, capY, 0.0f) - rightVec + fwdVec,
+				{ 0.0f, 1.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f });
+		}
+
+		// Spherical transferred normals
+		const glm::vec3 sphereCenter(0.0f, 0.22f, 0.0f);
+		for (auto& v : model.Vertices)
+		{
+			glm::vec3 n = v.Position - sphereCenter;
+			const float len = glm::length(n);
+			n = (len > 1e-5f) ? (n / len) : glm::vec3(0.0f, 1.0f, 0.0f);
+			n.y = std::max(n.y, 0.20f);
+			v.Normal = glm::normalize(n);
+		}
+
+		model.Bounds.Min = glm::vec3(-0.65f, 0.0f, -0.65f);
+		model.Bounds.Max = glm::vec3(0.65f, 1.15f, 0.65f);
+		model.Submeshes.push_back({ 0, static_cast<uint32_t>(model.Indices.size()), 0 });
+		model.Meshes.push_back({ 0, 1 });
+		Asset::WModelNode rootNode;
+		rootNode.Name = "Root";
+		rootNode.Parent = -1;
+		rootNode.MeshIndex = 0;
+		rootNode.Scale = glm::vec3(1.0f);
+		model.Nodes.push_back(rootNode);
+		model.MaterialSlots.push_back("textures/foliage/bush_leaves.png");
+
+		const std::string relPath = "models/foliage/bush_cluster.wmodel";
+		for (const auto& root : { std::string("templates/project-example/assets"), std::string("E:/MyProject/assets"), std::string("Engine/content") })
+		{
+			std::filesystem::path outPath = std::filesystem::path(root) / relPath;
+			std::filesystem::create_directories(outPath.parent_path());
+			std::string err;
+			Asset::WModelIO::WriteFile(outPath.string(), model, &err);
+		}
+	}
+
+	// 3. scatter_pebble.wmodel
+	{
+		Asset::WModelData model;
+		model.Meta.Valid = true;
+		model.Meta.ImporterVersion = 1;
+		model.Meta.Identity = AssetId { 0x524F434B0001u }; // "ROCK"
+		model.Meta.HasSettings = true;
+		model.Meta.Scale = 1.0f;
+		model.Meta.SourcePath = "models/foliage/scatter_pebble.wmodel";
+
+		struct BoulderConfig {
+			float cx, cz;
+			float sx, sz;
+			float h;
+			int sides;
+			float rot;
+			float seed;
+		};
+
+		const BoulderConfig configs[3] = {
+			{  0.06f, -0.04f, 0.48f, 0.42f, 0.55f, 6, 0.20f, 1.0f },
+			{ -0.44f,  0.24f, 0.28f, 0.26f, 0.34f, 5, 1.40f, 2.3f },
+			{  0.38f,  0.28f, 0.18f, 0.16f, 0.18f, 5, 2.60f, 3.7f },
+		};
+
+		for (const auto& cfg : configs)
+		{
+			std::vector<glm::vec3> base(cfg.sides);
+			std::vector<glm::vec3> waist(cfg.sides);
+			std::vector<glm::vec3> shoulder(cfg.sides);
+
+			for (int i = 0; i < cfg.sides; ++i)
+			{
+				const float a = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(cfg.sides) + cfg.rot;
+				const float rBase = 0.85f + 0.22f * std::sin(static_cast<float>(i) * 1.9f + cfg.seed);
+				base[i] = glm::vec3(cfg.cx + cfg.sx * rBase * std::cos(a), 0.0f, cfg.cz + cfg.sz * rBase * std::sin(a));
+
+				const float aW = a + 0.16f;
+				const float rW = 0.95f + 0.18f * std::cos(static_cast<float>(i) * 2.1f + cfg.seed);
+				waist[i] = glm::vec3(cfg.cx + cfg.sx * rW * std::cos(aW), cfg.h * 0.42f, cfg.cz + cfg.sz * rW * std::sin(aW));
+
+				const float aS = a + 0.32f;
+				const float rS = 0.52f + 0.15f * std::sin(static_cast<float>(i) * 2.6f + cfg.seed);
+				shoulder[i] = glm::vec3(cfg.cx + cfg.sx * rS * std::cos(aS), cfg.h * 0.78f, cfg.cz + cfg.sz * rS * std::sin(aS));
+			}
+
+			const glm::vec3 top(cfg.cx + 0.04f * cfg.sx, cfg.h, cfg.cz - 0.04f * cfg.sz);
+
+			auto addFacet = [&](glm::vec3 p0, glm::vec3 p1, glm::vec3 p2) {
+				const uint32_t vStart = static_cast<uint32_t>(model.Vertices.size());
+				glm::vec3 n = glm::cross(p1 - p0, p2 - p0);
+				const float len = glm::length(n);
+				n = (len > 1e-6f) ? (n / len) : glm::vec3(0.0f, 1.0f, 0.0f);
+
+				const glm::vec3 triCenter = (p0 + p1 + p2) * (1.0f / 3.0f);
+				const glm::vec3 fromCenter = triCenter - glm::vec3(cfg.cx, 0.0f, cfg.cz);
+				if (glm::dot(n, fromCenter) < 0.0f)
+				{
+					std::swap(p1, p2);
+					n = -n;
+				}
+
+				auto makeUv = [](const glm::vec3& p) {
+					return glm::vec2(p.x * 1.5f + 0.5f, p.z * 1.5f + 0.5f);
+				};
+
+				model.Vertices.push_back({ p0, n, makeUv(p0) });
+				model.Vertices.push_back({ p1, n, makeUv(p1) });
+				model.Vertices.push_back({ p2, n, makeUv(p2) });
+
+				model.Indices.push_back(vStart + 0);
+				model.Indices.push_back(vStart + 1);
+				model.Indices.push_back(vStart + 2);
+			};
+
+			for (int i = 0; i < cfg.sides; ++i)
+			{
+				const int next = (i + 1) % cfg.sides;
+				addFacet(base[i], waist[i], waist[next]);
+				addFacet(base[i], waist[next], base[next]);
+				addFacet(waist[i], shoulder[i], shoulder[next]);
+				addFacet(waist[i], shoulder[next], waist[next]);
+				addFacet(shoulder[i], top, shoulder[next]);
+			}
+		}
+
+		model.Bounds.Min = glm::vec3(-0.85f, 0.0f, -0.65f);
+		model.Bounds.Max = glm::vec3(0.75f, 0.65f, 0.65f);
+		model.Submeshes.push_back({ 0, static_cast<uint32_t>(model.Indices.size()), 0 });
+		model.Meshes.push_back({ 0, 1 });
+		Asset::WModelNode rootNode;
+		rootNode.Name = "Root";
+		rootNode.Parent = -1;
+		rootNode.MeshIndex = 0;
+		rootNode.Scale = glm::vec3(1.0f);
+		model.Nodes.push_back(rootNode);
+		model.MaterialSlots.push_back("textures/terrain/rock_albedo.png");
+
+		const std::string relPath = "models/foliage/scatter_pebble.wmodel";
+		for (const auto& root : { std::string("templates/project-example/assets"), std::string("E:/MyProject/assets"), std::string("Engine/content") })
+		{
+			std::filesystem::path outPath = std::filesystem::path(root) / relPath;
+			std::filesystem::create_directories(outPath.parent_path());
+			std::string err;
+			Asset::WModelIO::WriteFile(outPath.string(), model, &err);
+		}
+	}
+	std::cout << "[PASS] GenerateFoliageModelAssets (grass_cluster, bush_cluster, scatter_pebble written)\n";
+}
+
 static void GenerateSampleDefaultFoliageAsset()
 {
 	FoliageData foliage;
@@ -537,6 +810,7 @@ int main()
 	TestFoliageRealignToTerrain();
 	TestFoliageGetInstanceCountByType();
 	TestFoliageSerializationVersionCompatibility();
+	GenerateFoliageModelAssets();
 	GenerateSampleDefaultFoliageAsset();
 	std::cout << "All World.Foliage tests passed successfully!\n";
 	return 0;
