@@ -15,6 +15,7 @@
 #include "WUI/Panels/SpriteAtlasEditorPanel.h"
 #include "WUI/Panels/SpriteAnimationEditorPanel.h"
 #include "WUI/Panels/TilemapEditorPanel.h"
+#include "WUI/Panels/TerrainPanel.h"
 #include "World/Scene/Components.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/Runtime/ComponentPropertyModel.h"
@@ -1136,6 +1137,7 @@ namespace World
 		addCmd("ui.focus", "Set focus to a specific panel.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("ui.activate", "Activate a tab or panel in shell.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("viewport.set_tool_mode", "Set editor tool mode (select, landscape, foliage).", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"mode\":{\"type\":\"string\"}}}");
+		addCmd("terrain.set_tab", "Set terrain panel active tab (sculpt, paint, settings).", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("viewport.set_camera", "Set viewport 3D camera target, distance, yaw and pitch.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("ui.layout.get", "Get current WUI dock layout json.", CommandEffect::Read, CommandScope::EditorOnly);
 
@@ -3273,6 +3275,18 @@ namespace World
 				World::Tilemap::ClearCache();
 			}
 			result = "painted tilemap " + path;
+			return true;
+		}
+		if (cmd == "terrain.set_tab")
+		{
+			const std::string t = arg("tab");
+			if (auto* panel = m_Shell.GetTerrainPanel())
+			{
+				if (t == "paint" || t == "1") panel->SetToolTab(TerrainToolTab::Paint);
+				else if (t == "settings" || t == "2") panel->SetToolTab(TerrainToolTab::Settings);
+				else panel->SetToolTab(TerrainToolTab::Sculpt);
+			}
+			result = "tab=" + t;
 			return true;
 		}
 		if (cmd == "viewport.set_tool_mode")

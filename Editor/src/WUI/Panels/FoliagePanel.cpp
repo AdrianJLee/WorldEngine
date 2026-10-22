@@ -33,6 +33,8 @@ namespace World
 
 			FoliageType grass;
 			grass.Name = "翠绿草丛 (Wild Grass)";
+			grass.MeshAsset.Path = StringPool::Get().InternPath("(内置) 3面交叉草丛");
+			grass.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/grass_tuft.png");
 			grass.Density = 3.0f;
 			grass.ScaleMinMax = glm::vec2(0.8f, 1.3f);
 			grass.RandomYaw = 360.0f;
@@ -48,6 +50,8 @@ namespace World
 
 			FoliageType flower;
 			flower.Name = "雏菊野花 (Wild Flowers)";
+			flower.MeshAsset.Path = StringPool::Get().InternPath("(内置) 3面交叉草丛");
+			flower.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/wild_flower.png");
 			flower.Density = 1.0f;
 			flower.ScaleMinMax = glm::vec2(0.6f, 1.0f);
 			flower.RandomYaw = 360.0f;
@@ -63,6 +67,8 @@ namespace World
 
 			FoliageType shrub;
 			shrub.Name = "矮生灌木 (Forest Shrub)";
+			shrub.MeshAsset.Path = StringPool::Get().InternPath("(内置) 3面交叉草丛");
+			shrub.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/grass_tuft.png");
 			shrub.Density = 0.6f;
 			shrub.ScaleMinMax = glm::vec2(0.8f, 1.8f);
 			shrub.RandomYaw = 360.0f;
@@ -78,6 +84,8 @@ namespace World
 
 			FoliageType rock;
 			rock.Name = "地表碎石 (Scatter Rocks)";
+			rock.MeshAsset.Path = StringPool::Get().InternPath("(内置) 3面交叉草丛");
+			rock.MaterialAsset.Path = StringPool::Get().InternPath("textures/foliage/grass_tuft.png");
 			rock.Density = 0.4f;
 			rock.ScaleMinMax = glm::vec2(0.5f, 2.0f);
 			rock.RandomYaw = 360.0f;
@@ -253,6 +261,17 @@ namespace World
 				auto& comp = m_BoundEntity.GetComponent<FoliageComponent>();
 				m_Foliage = FoliageRenderer::GetOrCreateFoliageData(comp.FoliageAsset);
 				m_LoadedPath = std::string(StringPool::Get().PathOf(comp.FoliageAsset.Path));
+				if (m_Foliage)
+				{
+					for (size_t ti = 0; ti < m_Foliage->GetTypeCount(); ++ti)
+					{
+						auto& t = m_Foliage->GetType(ti);
+						if (!t.MeshAsset.Path.IsValid())
+							t.MeshAsset.Path = StringPool::Get().InternPath("(内置) 3面交叉草丛");
+						if (!t.MaterialAsset.Path.IsValid())
+							t.MaterialAsset.Path = StringPool::Get().InternPath(ti == 1 ? "textures/foliage/wild_flower.png" : "textures/foliage/grass_tuft.png");
+					}
+				}
 				comp.InstanceCount = m_Foliage ? static_cast<uint32_t>(m_Foliage->GetTotalInstanceCount()) : 0;
 			}
 		}
@@ -447,8 +466,8 @@ namespace World
 				if (m_CachedTypeIdx != static_cast<int>(i))
 				{
 					m_EditName = type.Name;
-					m_EditMeshPath = type.MeshAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(type.MeshAsset.Path)) : "";
-					m_EditMatPath = type.MaterialAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(type.MaterialAsset.Path)) : "";
+					m_EditMeshPath = type.MeshAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(type.MeshAsset.Path)) : "(内置) 3面交叉草丛";
+					m_EditMatPath = type.MaterialAsset.Path.IsValid() ? std::string(StringPool::Get().PathOf(type.MaterialAsset.Path)) : (i == 1 ? "textures/foliage/wild_flower.png" : "textures/foliage/grass_tuft.png");
 					m_CachedTypeIdx = static_cast<int>(i);
 				}
 

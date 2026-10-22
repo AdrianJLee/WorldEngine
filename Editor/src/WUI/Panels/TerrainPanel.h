@@ -90,6 +90,12 @@ namespace World
 		uint32_t m_ActivePaintLayer { 0 };
 		int m_PaintLayerIdx { 0 };
 
+		// 图层材质编辑缓存
+		int m_CachedPaintLayer { -1 };
+		std::string m_EditLayerName;
+		std::string m_EditLayerAlbedo;
+		std::string m_EditLayerNormal;
+
 		// 新建向导状态
 		int64_t m_WizardResolution { 255 };
 		float m_WizardCellSize { 1.0f };

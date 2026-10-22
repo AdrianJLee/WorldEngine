@@ -336,7 +336,7 @@ namespace World
 		currentY += 22.0f;
 	}
 
-	void TerrainPanel::RenderPaintTab(Wui::WuiContext& ctx, float startX, float& currentY, float contentWidth, const Wui::WuiTheme& theme, PanelHost&)
+	void TerrainPanel::RenderPaintTab(Wui::WuiContext& ctx, float startX, float& currentY, float contentWidth, const Wui::WuiTheme& theme, PanelHost& host)
 	{
 		const float rowH = theme.RowHeight;
 
@@ -375,12 +375,79 @@ namespace World
 		currentY += 6.0f;
 		if (m_Terrain && m_ActivePaintLayer < 4)
 		{
-			const TerrainLayer& layer = m_Terrain->GetLayer(m_ActivePaintLayer);
-			char paramBuf[128] = {};
-			std::snprintf(paramBuf, sizeof(paramBuf), "当前材质规格: 粗糙度=%.2f  贴图平铺=(%.0f, %.0f)",
-				layer.Roughness, layer.Tiling.x, layer.Tiling.y);
-			Wui::Label(ctx, { startX, currentY }, paramBuf, theme.TextMuted, theme.FontSizeSmall);
-			currentY += 22.0f;
+			TerrainLayer& layer = m_Terrain->GetLayer(m_ActivePaintLayer);
+			if (m_CachedPaintLayer != static_cast<int>(m_ActivePaintLayer))
+			{
+				m_EditLayerName = layer.Name;
+				m_EditLayerAlbedo = layer.AlbedoTexture.Path.IsValid() ? std::string(StringPool::Get().PathOf(layer.AlbedoTexture.Path)) : "";
+				m_EditLayerNormal = layer.NormalTexture.Path.IsValid() ? std::string(StringPool::Get().PathOf(layer.NormalTexture.Path)) : "";
+				m_CachedPaintLayer = static_cast<int>(m_ActivePaintLayer);
+			}
+
+			Wui::Label(ctx, { startX, currentY + 4.0f }, "图层材质检视器 (Layer Inspector)", theme.Accent, theme.FontSizeSmall);
+			currentY += 24.0f;
+
+			// 图层名称
+			Wui::Label(ctx, { startX, currentY + 4.0f }, "名称:", theme.TextMuted, theme.FontSizeSmall);
+			if (Wui::TextField(ctx, Wui::HashId("terrain.layer.name"), { startX + 55.0f, currentY, contentWidth - 55.0f, 22.0f }, m_EditLayerName, theme))
+			{
+				layer.Name = m_EditLayerName;
+				host.MarkDocumentDirty();
+			}
+			currentY += 26.0f;
+
+			// Albedo 贴图 (带 [浏览...] 弹窗)
+			const float browseBtnW = 48.0f;
+			Wui::Label(ctx, { startX, currentY + 4.0f }, "Albedo:", theme.TextMuted, theme.FontSizeSmall);
+			const float albFieldW = std::max(40.0f, contentWidth - 55.0f - browseBtnW - 4.0f);
+			if (Wui::TextField(ctx, Wui::HashId("terrain.layer.albedo"), { startX + 55.0f, currentY, albFieldW, 22.0f }, m_EditLayerAlbedo, theme))
+			{
+				layer.AlbedoTexture.Path = m_EditLayerAlbedo.empty() ? PathId() : StringPool::Get().InternPath(m_EditLayerAlbedo);
+				host.MarkDocumentDirty();
+			}
+			if (Wui::Button(ctx, Wui::HashId("terrain.layer.albedo.brw"), { startX + 55.0f + albFieldW + 4.0f, currentY, browseBtnW, 22.0f }, "浏览...", theme))
+			{
+				host.OpenAssetPicker("选择地貌 Albedo 贴图", AssetCategory::Texture, [&layer, this, &host](const std::string& picked) {
+					layer.AlbedoTexture.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+					m_EditLayerAlbedo = picked;
+					m_StatusFeedback = "已更新图层 Albedo: " + picked;
+					host.MarkDocumentDirty();
+				});
+			}
+			currentY += 26.0f;
+
+			// Normal 贴图 (带 [浏览...] 弹窗)
+			Wui::Label(ctx, { startX, currentY + 4.0f }, "Normal:", theme.TextMuted, theme.FontSizeSmall);
+			const float normFieldW = std::max(40.0f, contentWidth - 55.0f - browseBtnW - 4.0f);
+			if (Wui::TextField(ctx, Wui::HashId("terrain.layer.normal"), { startX + 55.0f, currentY, normFieldW, 22.0f }, m_EditLayerNormal, theme))
+			{
+				layer.NormalTexture.Path = m_EditLayerNormal.empty() ? PathId() : StringPool::Get().InternPath(m_EditLayerNormal);
+				host.MarkDocumentDirty();
+			}
+			if (Wui::Button(ctx, Wui::HashId("terrain.layer.normal.brw"), { startX + 55.0f + normFieldW + 4.0f, currentY, browseBtnW, 22.0f }, "浏览...", theme))
+			{
+				host.OpenAssetPicker("选择地貌 Normal 法线贴图", AssetCategory::Texture, [&layer, this, &host](const std::string& picked) {
+					layer.NormalTexture.Path = picked.empty() ? PathId() : StringPool::Get().InternPath(picked);
+					m_EditLayerNormal = picked;
+					m_StatusFeedback = "已更新图层 Normal: " + picked;
+					host.MarkDocumentDirty();
+				});
+			}
+			currentY += 26.0f;
+
+			// 粗糙度与平铺密度
+			const float halfW = (contentWidth - 65.0f - theme.PadSmall) * 0.5f;
+			Wui::Label(ctx, { startX, currentY + 4.0f }, "粗糙/平铺:", theme.TextMuted, theme.FontSizeSmall);
+			if (Wui::DragFloat(ctx, Wui::HashId("terrain.layer.roughness"), { startX + 65.0f, currentY, halfW, 22.0f }, layer.Roughness, 0.05f, 0.0f, 1.0f, theme))
+			{
+				host.MarkDocumentDirty();
+			}
+			if (Wui::DragFloat(ctx, Wui::HashId("terrain.layer.tiling_x"), { startX + 65.0f + halfW + theme.PadSmall, currentY, halfW, 22.0f }, layer.Tiling.x, 0.5f, 0.5f, 100.0f, theme))
+			{
+				layer.Tiling.y = layer.Tiling.x;
+				host.MarkDocumentDirty();
+			}
+			currentY += 28.0f;
 		}
 
 		Wui::Label(ctx, { startX, currentY + 3.0f }, "半径 (m):", theme.Text, theme.FontSizeSmall);
