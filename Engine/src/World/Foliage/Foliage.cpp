@@ -111,7 +111,39 @@ namespace World
 
 		const FoliageType& type = m_Types[typeIndex];
 		const float area = kPi * radius * radius;
-		const uint32_t candidateCount = std::max(1u, static_cast<uint32_t>(area * density * 0.15f));
+		// 目标区域最大容纳实例数（密度上限，避免按住鼠标无限增加）
+		const uint32_t maxAllowed = std::max(1u, static_cast<uint32_t>(area * density * 0.15f));
+
+		const float r2 = radius * radius;
+		uint32_t currentCount = 0;
+		for (const auto& chunk : m_Chunks)
+		{
+			if (center.x + radius < chunk.BoundsMin.x || center.x - radius > chunk.BoundsMax.x ||
+				center.z + radius < chunk.BoundsMin.z || center.z - radius > chunk.BoundsMax.z)
+				continue;
+
+			for (const auto& inst : chunk.Instances)
+			{
+				if (static_cast<int32_t>(inst.Params.w) == static_cast<int32_t>(typeIndex))
+				{
+					const glm::vec3 pos(inst.Transform[3]);
+					const float dx = pos.x - center.x;
+					const float dz = pos.z - center.z;
+					if (dx * dx + dz * dz <= r2)
+						++currentCount;
+				}
+			}
+		}
+
+		if (currentCount >= maxAllowed)
+			return 0;
+
+		const uint32_t budget = maxAllowed - currentCount;
+		const uint32_t candidateCount = std::min(budget, std::max(1u, static_cast<uint32_t>(maxAllowed * 0.35f)));
+
+		// 泊松防重叠最小间距（基于密度自适应），彻底杜绝同点重叠导致的 Z-fighting 闪烁
+		const float minDist = std::max(0.6f, 1.6f / std::sqrt(std::max(0.1f, density)));
+		const float minDist2 = minDist * minDist;
 
 		static std::mt19937 rng(1337);
 		std::uniform_real_distribution<float> dist01(0.0f, 1.0f);
@@ -179,6 +211,23 @@ namespace World
 			const int32_t cx = static_cast<int32_t>(std::floor(worldX / m_ChunkSize));
 			const int32_t cz = static_cast<int32_t>(std::floor(worldZ / m_ChunkSize));
 			FoliageChunk& chunk = GetOrCreateChunk(cx, cz);
+
+			// 检查邻近实例距离，避免同位置扎堆重叠
+			bool tooClose = false;
+			for (const auto& existing : chunk.Instances)
+			{
+				const glm::vec3 ep(existing.Transform[3]);
+				const float edx = ep.x - worldX;
+				const float edz = ep.z - worldZ;
+				if (edx * edx + edz * edz < minDist2)
+				{
+					tooClose = true;
+					break;
+				}
+			}
+			if (tooClose)
+				continue;
+
 			chunk.Instances.push_back(inst);
 			chunk.DirtyBuffer = true;
 			++spawned;

@@ -30,18 +30,19 @@ namespace World
 			Rhi::Handle<Rhi::Pipeline> Pipeline;
 			Rhi::Handle<Rhi::DescriptorSetLayout> UniformLayout;
 			Rhi::Handle<Rhi::DescriptorSetLayout> TextureLayout;
-			Rhi::Handle<Rhi::DescriptorSet> UniformSet;
-			Rhi::Handle<Rhi::DescriptorSet> TextureSet;
-			Rhi::Handle<Rhi::Buffer> UniformBuffer;
+			// 帧槽位环形化缓冲与描述符集（消除 CPU 写入与 GPU 读取在飞帧间的数据竞态/闪烁）
+			Rhi::Handle<Rhi::DescriptorSet> UniformSets[Renderer::FramesInFlight];
+			Rhi::Handle<Rhi::DescriptorSet> TextureSets[Renderer::FramesInFlight];
+			Rhi::Handle<Rhi::Buffer> UniformBuffers[Renderer::FramesInFlight];
+			Rhi::Handle<Rhi::Buffer> InstanceBuffers[Renderer::FramesInFlight];
+			uint32_t InstanceCapacities[Renderer::FramesInFlight] = {};
+
 			Rhi::Handle<Rhi::Texture> DefaultAlbedo;
 			Rhi::Handle<Rhi::Sampler> Sampler;
 
 			Rhi::Handle<Rhi::Buffer> DefaultMeshVB;
 			Rhi::Handle<Rhi::Buffer> DefaultMeshIB;
 			uint32_t DefaultMeshIndexCount { 0 };
-
-			Rhi::Handle<Rhi::Buffer> InstanceBuffer;
-			uint32_t InstanceCapacity { 0 };
 
 			Rhi::Handle<Rhi::CommandBuffer> CurrentCmdBuffer;
 			Rhi::Handle<Rhi::DescriptorSet> CurrentGlobalSet;
@@ -110,25 +111,28 @@ namespace World
 			uDesc.DebugName = "Foliage.UniformLayout";
 			s_State.UniformLayout = device->CreateDescriptorSetLayout(uDesc);
 
-			Rhi::BufferDesc ubDesc;
-			ubDesc.Size = sizeof(FoliageShaderUniforms);
-			ubDesc.Usage = Rhi::BufferUsageUniform;
-			ubDesc.Memory = Rhi::MemoryHint::HostVisible;
-			ubDesc.DebugName = "Foliage.UniformBuffer";
-			s_State.UniformBuffer = device->CreateBuffer(ubDesc);
-
-			if (s_State.UniformLayout && s_State.UniformBuffer)
+			for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
 			{
-				s_State.UniformSet = device->CreateDescriptorSet(s_State.UniformLayout);
-				if (s_State.UniformSet)
+				Rhi::BufferDesc ubDesc;
+				ubDesc.Size = sizeof(FoliageShaderUniforms);
+				ubDesc.Usage = Rhi::BufferUsageUniform;
+				ubDesc.Memory = Rhi::MemoryHint::HostVisible;
+				ubDesc.DebugName = "Foliage.UniformBuffer";
+				s_State.UniformBuffers[slot] = device->CreateBuffer(ubDesc);
+
+				if (s_State.UniformLayout && s_State.UniformBuffers[slot])
 				{
-					Rhi::DescriptorWrite w;
-					w.Binding = 1;
-					w.Type = Rhi::DescriptorType::UniformBuffer;
-					w.Buffer = s_State.UniformBuffer;
-					w.BufferOffset = 0;
-					w.BufferRange = sizeof(FoliageShaderUniforms);
-					s_State.UniformSet->Update({ w });
+					s_State.UniformSets[slot] = device->CreateDescriptorSet(s_State.UniformLayout);
+					if (s_State.UniformSets[slot])
+					{
+						Rhi::DescriptorWrite w;
+						w.Binding = 1;
+						w.Type = Rhi::DescriptorType::UniformBuffer;
+						w.Buffer = s_State.UniformBuffers[slot];
+						w.BufferOffset = 0;
+						w.BufferRange = sizeof(FoliageShaderUniforms);
+						s_State.UniformSets[slot]->Update({ w });
+					}
 				}
 			}
 		}
@@ -198,15 +202,18 @@ namespace World
 
 			if (s_State.TextureLayout && s_State.DefaultAlbedo)
 			{
-				s_State.TextureSet = device->CreateDescriptorSet(s_State.TextureLayout);
-				if (s_State.TextureSet)
+				for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
 				{
-					Rhi::DescriptorWrite w;
-					w.Binding = 4;
-					w.Type = Rhi::DescriptorType::CombinedImageSampler;
-					w.Texture = s_State.DefaultAlbedo;
-					w.Sampler = s_State.Sampler;
-					s_State.TextureSet->Update({ w });
+					s_State.TextureSets[slot] = device->CreateDescriptorSet(s_State.TextureLayout);
+					if (s_State.TextureSets[slot])
+					{
+						Rhi::DescriptorWrite w;
+						w.Binding = 4;
+						w.Type = Rhi::DescriptorType::CombinedImageSampler;
+						w.Texture = s_State.DefaultAlbedo;
+						w.Sampler = s_State.Sampler;
+						s_State.TextureSets[slot]->Update({ w });
+					}
 				}
 			}
 		}
@@ -318,6 +325,14 @@ namespace World
 	void FoliageRenderer::Shutdown()
 	{
 		ClearCache();
+		for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
+		{
+			s_State.InstanceBuffers[slot] = nullptr;
+			s_State.InstanceCapacities[slot] = 0;
+			s_State.UniformBuffers[slot] = nullptr;
+			s_State.UniformSets[slot] = nullptr;
+			s_State.TextureSets[slot] = nullptr;
+		}
 		s_State = FoliageRenderState {};
 	}
 
@@ -384,12 +399,13 @@ namespace World
 		if (visibleInstances.empty())
 			return;
 
+		const uint32_t slot = Renderer::FrameSlot();
 		const uint32_t neededSize = static_cast<uint32_t>(visibleInstances.size() * sizeof(FoliageInstanceData));
-		if (!s_State.InstanceBuffer || s_State.InstanceCapacity < neededSize)
+		if (!s_State.InstanceBuffers[slot] || s_State.InstanceCapacities[slot] < neededSize)
 		{
-			if (s_State.InstanceBuffer)
+			if (s_State.InstanceBuffers[slot])
 			{
-				auto oldBuf = std::move(s_State.InstanceBuffer);
+				auto oldBuf = std::move(s_State.InstanceBuffers[slot]);
 				Renderer::QueueRelease([oldBuf = std::move(oldBuf)]() mutable {});
 			}
 			Rhi::BufferDesc bDesc;
@@ -397,43 +413,43 @@ namespace World
 			bDesc.Usage = Rhi::BufferUsageVertex;
 			bDesc.Memory = Rhi::MemoryHint::HostVisible;
 			bDesc.DebugName = "Foliage.InstanceBuffer";
-			s_State.InstanceBuffer = device->CreateBuffer(bDesc);
-			s_State.InstanceCapacity = bDesc.Size;
+			s_State.InstanceBuffers[slot] = device->CreateBuffer(bDesc);
+			s_State.InstanceCapacities[slot] = bDesc.Size;
 		}
 
-		if (s_State.InstanceBuffer)
-			s_State.InstanceBuffer->SetData(visibleInstances.data(), neededSize);
+		if (s_State.InstanceBuffers[slot])
+			s_State.InstanceBuffers[slot]->SetData(visibleInstances.data(), neededSize);
 
 		FoliageShaderUniforms uniforms;
 		uniforms.WindParams = glm::vec4(comp.WindFrequency, comp.WindStrength, time, 1.0f);
 		uniforms.WindDirection = glm::vec4(1.0f, 0.0f, 0.3f, 0.0f);
 		uniforms.CullParams = glm::vec4(comp.MaxCullDistance, comp.FadeRange, 0.0f, 0.0f);
-		if (s_State.UniformBuffer)
-			s_State.UniformBuffer->SetData(&uniforms, sizeof(uniforms));
+		if (s_State.UniformBuffers[slot])
+			s_State.UniformBuffers[slot]->SetData(&uniforms, sizeof(uniforms));
 
 		Rhi::Handle<Rhi::Texture> currentTex = TextureLibrary::Get().Get("textures/foliage/grass_tuft.png", /*srgb*/ true);
 		if (!currentTex)
 			currentTex = s_State.DefaultAlbedo;
-		if (currentTex && s_State.TextureSet)
+		if (currentTex && s_State.TextureSets[slot])
 		{
 			Rhi::DescriptorWrite w;
 			w.Binding = 4;
 			w.Type = Rhi::DescriptorType::CombinedImageSampler;
 			w.Texture = currentTex;
 			w.Sampler = s_State.Sampler;
-			s_State.TextureSet->Update({ w });
+			s_State.TextureSets[slot]->Update({ w });
 		}
 
 		cmd->BindPipeline(s_State.Pipeline);
 		if (s_State.CurrentGlobalSet)
 			cmd->BindDescriptorSet(s_State.CurrentGlobalSet, 0);
-		if (s_State.UniformSet)
-			cmd->BindDescriptorSet(s_State.UniformSet, 1);
-		if (s_State.TextureSet)
-			cmd->BindDescriptorSet(s_State.TextureSet, 2);
+		if (s_State.UniformSets[slot])
+			cmd->BindDescriptorSet(s_State.UniformSets[slot], 1);
+		if (s_State.TextureSets[slot])
+			cmd->BindDescriptorSet(s_State.TextureSets[slot], 2);
 
 		cmd->BindVertexBuffer(0, s_State.DefaultMeshVB, 0);
-		cmd->BindVertexBuffer(1, s_State.InstanceBuffer, 0);
+		cmd->BindVertexBuffer(1, s_State.InstanceBuffers[slot], 0);
 		cmd->BindIndexBuffer(s_State.DefaultMeshIB, 0, Rhi::IndexType::UInt32);
 
 		cmd->DrawIndexed(s_State.DefaultMeshIndexCount, static_cast<uint32_t>(visibleInstances.size()), 0, 0, 0);

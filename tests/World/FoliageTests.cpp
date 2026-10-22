@@ -180,11 +180,33 @@ static void GenerateSampleDefaultFoliageAsset()
 	foliage.SaveToFile("projects/default/assets/foliage/default.wfoliage");
 	std::cout << "[PASS] GenerateSampleDefaultFoliageAsset\n";
 }
+static void TestFoliageDensitySaturation()
+{
+	FoliageData foliage;
+	const glm::vec3 center(100.0f, 0.0f, 100.0f);
+	const float radius = 10.0f;
+	const float density = 2.0f;
+
+	// Paint 100 times at the exact same location!
+	for (int i = 0; i < 100; ++i)
+	{
+		foliage.PaintFoliage(center, radius, density, 0, nullptr);
+	}
+
+	size_t total = foliage.GetTotalInstanceCount();
+	const float area = 3.1415926535f * radius * radius;
+	const uint32_t maxAllowed = static_cast<uint32_t>(area * density * 0.15f);
+	assert(total <= maxAllowed);
+	assert(total > 0);
+	std::cout << "[PASS] TestFoliageDensitySaturation (100 strokes capped at " << total << "/" << maxAllowed << ")\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.Foliage tests...\n";
 	TestFoliageInitialization();
 	TestFoliagePaintingWithoutTerrain();
+	TestFoliageDensitySaturation();
 	TestFoliagePaintingWithTerrainAndFilters();
 	TestFoliageErasing();
 	TestFoliageCullingAndCollection();

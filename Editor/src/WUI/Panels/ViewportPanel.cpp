@@ -1850,23 +1850,36 @@ namespace World
 						Wui::Toolbar(ctx, { cardX, cardY, cardW, cardH }, theme, 4.0f, 0.88f);
 						Wui::Label(ctx, { cardX + 8.0f, cardY + 3.0f }, hudText, theme.Text, fontSz);
 
-						// 视口直接拖拽种草与擦除
+						// 视口直接拖拽种草与擦除（带笔刷间距与冷却节流，杜绝原地无限重叠）
+						static glm::vec3 s_LastFoliageHit(1e9f);
+						static float s_FoliagePaintCooldown = 0.0f;
+						s_FoliagePaintCooldown += 0.016f;
+
 						if (ctx.Input().MouseDown[0])
 						{
 							const glm::vec3 worldHitPoint = glm::vec3(terrainWorld * glm::vec4(hit.Point, 1.0f));
-							if (eraseMode)
+							const float distMoved = glm::distance(glm::vec2(worldHitPoint.x, worldHitPoint.z),
+								glm::vec2(s_LastFoliageHit.x, s_LastFoliageHit.z));
+
+							if (distMoved >= R * 0.25f || s_FoliagePaintCooldown >= 0.10f)
 							{
-								foliageData->EraseFoliage(worldHitPoint, R, static_cast<int32_t>(foliagePanel->GetActiveTypeIndex()));
+								if (eraseMode)
+								{
+									foliageData->EraseFoliage(worldHitPoint, R, static_cast<int32_t>(foliagePanel->GetActiveTypeIndex()));
+								}
+								else
+								{
+									foliageData->PaintFoliage(worldHitPoint, R, foliagePanel->GetBrushDensity(),
+										foliagePanel->GetActiveTypeIndex(), terrain.get(), terrainWorld);
+								}
+								s_LastFoliageHit = worldHitPoint;
+								s_FoliagePaintCooldown = 0.0f;
+								m_Host.MarkDocumentDirty();
 							}
-							else
-							{
-								foliageData->PaintFoliage(worldHitPoint, R, foliagePanel->GetBrushDensity(),
-									foliagePanel->GetActiveTypeIndex(), terrain.get(), terrainWorld);
-							}
-							m_Host.MarkDocumentDirty();
 						}
 						if (ctx.Input().MouseReleased[0])
 						{
+							s_LastFoliageHit = glm::vec3(1e9f);
 							foliagePanel->SaveCurrentFoliage();
 						}
 					}

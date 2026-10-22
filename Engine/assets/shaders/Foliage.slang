@@ -98,16 +98,18 @@ PSInput VSMain(VSInput input)
                       input.InstanceTransform1.xyz * localPos.y +
                       input.InstanceTransform2.xyz * localPos.z +
                       input.InstanceTransform3.xyz;
-    output.WorldPos = worldPos;
-
     float3 worldNormal = normalize(
         input.InstanceTransform0.xyz * input.Normal.x +
         input.InstanceTransform1.xyz * input.Normal.y +
         input.InstanceTransform2.xyz * input.Normal.z
     );
+
+    // 根部法线微小抬高，彻底消除草丛根部与地表三角面重叠引起的 Z-fighting 闪烁
+    worldPos += worldNormal * 0.02f;
+
+    output.WorldPos = worldPos;
     output.Normal = worldNormal;
     output.TexCoord = input.TexCoord;
-
     output.Position = mul(u_Camera.ViewProjection, float4(worldPos, 1.0f));
 
     float dist = distance(worldPos, u_Camera.CameraPosition.xyz);
@@ -130,15 +132,13 @@ float4 PSMain(PSInput input) : SV_Target
     if (dist > (maxDist - fadeRange))
     {
         float fadeAlpha = 1.0f - (dist - (maxDist - fadeRange)) / fadeRange;
-        int x = int(input.Position.x) % 4;
-        int y = int(input.Position.y) % 4;
-        float threshold = BayerMatrix4x4[y * 4 + x];
-        if (fadeAlpha < threshold)
+        // input.Params.y 是实例固有的稳定随机数 [0..1]，随距离拉远平滑淡出，绝不随相机移动每帧在屏幕像素间跳动闪烁
+        if (fadeAlpha < input.Params.y)
             discard;
     }
 
     float4 albedo = u_AlbedoTexture.Sample(input.TexCoord);
-    if (albedo.a < 0.33f)
+    if (albedo.a < 0.25f)
         discard;
 
     float3 N = normalize(input.Normal);
