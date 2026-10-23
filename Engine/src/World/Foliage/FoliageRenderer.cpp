@@ -57,6 +57,7 @@ namespace World
 			Rhi::Handle<Rhi::DescriptorSet> CurrentGlobalSet;
 
 			std::unordered_map<std::string, std::shared_ptr<FoliageData>> FoliageCache;
+			std::vector<LocalWindGPU> LocalWinds;
 		};
 
 		static FoliageRenderState s_State;
@@ -575,6 +576,47 @@ namespace World
 		s_State = FoliageRenderState {};
 	}
 
+	void FoliageRenderer::AddLocalWind(const glm::vec3& position, float radius, float strength, float speed, float decay, LocalWindType type, const glm::vec3& direction)
+	{
+		LocalWindGPU wind;
+		wind.PositionRadius = glm::vec4(position, radius);
+		glm::vec3 normDir = (glm::length(direction) > 1e-4f) ? glm::normalize(direction) : glm::vec3(1.0f, 0.0f, 0.0f);
+		wind.DirectionStrength = glm::vec4(normDir, strength);
+		wind.Params = glm::vec4(speed, decay, static_cast<float>(type), 0.0f);
+
+		if (s_State.LocalWinds.size() < kMaxLocalWinds)
+		{
+			s_State.LocalWinds.push_back(wind);
+		}
+		else
+		{
+			size_t minIdx = 0;
+			float minStr = s_State.LocalWinds[0].DirectionStrength.w;
+			for (size_t i = 1; i < s_State.LocalWinds.size(); ++i)
+			{
+				if (s_State.LocalWinds[i].DirectionStrength.w < minStr)
+				{
+					minStr = s_State.LocalWinds[i].DirectionStrength.w;
+					minIdx = i;
+				}
+			}
+			if (strength > minStr)
+			{
+				s_State.LocalWinds[minIdx] = wind;
+			}
+		}
+	}
+
+	void FoliageRenderer::ClearLocalWinds()
+	{
+		s_State.LocalWinds.clear();
+	}
+
+	size_t FoliageRenderer::GetLocalWindCount()
+	{
+		return s_State.LocalWinds.size();
+	}
+
 	void FoliageRenderer::ClearCache()
 	{
 		s_State.FoliageCache.clear();
@@ -662,7 +704,12 @@ namespace World
 		FoliageShaderUniforms uniforms;
 		uniforms.WindParams = glm::vec4(comp.WindFrequency, comp.WindStrength, time, 1.0f);
 		uniforms.WindDirection = glm::vec4(1.0f, 0.0f, 0.3f, 0.0f);
-		uniforms.CullParams = glm::vec4(comp.MaxCullDistance, comp.FadeRange, 0.0f, 0.0f);
+		const size_t activeWindCount = std::min(s_State.LocalWinds.size(), kMaxLocalWinds);
+		uniforms.CullParams = glm::vec4(comp.MaxCullDistance, comp.FadeRange, static_cast<float>(activeWindCount), 0.0f);
+		for (size_t wi = 0; wi < activeWindCount; ++wi)
+		{
+			uniforms.LocalWinds[wi] = s_State.LocalWinds[wi];
+		}
 		if (s_State.UniformBuffers[slot])
 			s_State.UniformBuffers[slot]->SetData(&uniforms, sizeof(uniforms));
 

@@ -293,6 +293,9 @@ namespace World
 		// 非空表示该分类路径。
 		bool m_AddCategoryAll = true;
 		std::string m_AddCategoryFilter;
+		float m_AddCategoryScroll = 0.0f;
+		bool m_AddCategoryThumbDragging = false;
+		float m_AddCategoryThumbGrabOffset = 0.0f;
 		// 分区滚动布局(手工绘制/裁剪;滚动偏移按实体句柄持久化在 WuiContext::Persist)。
 		std::vector<SectionEntry> m_Sections;
 		std::vector<std::string> m_LastSchemaNames;

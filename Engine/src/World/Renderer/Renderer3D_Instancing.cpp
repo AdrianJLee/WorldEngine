@@ -179,6 +179,7 @@ uint32_t Renderer3D::SubmitShadowInstanced(const Ref<Mesh>& mesh, uint32_t subme
 		const uint32_t shadowIndex = state.ShadowObjectIndex++;
 		ObjectUniforms uniforms;
 		uniforms.Model = glm::mat4(1.0f);
+		uniforms.EntityId.y = static_cast<int32_t>(state.CurrentShadowCascade);
 		WriteObjectUniforms(state, slot, shadowIndex, uniforms,
 			state.ShadowUniformBuffers[slot][shadowIndex], state.ShadowObjectSets[slot][shadowIndex]);
 		DrawInstancedBatch(state, cached->second, indexCount, firstIndex,
@@ -346,6 +347,12 @@ LightRig Renderer3D::BuildLightRig(const std::vector<DirectionalLightData>& dire
 		rig.Uniforms.LightCounts.w = spotCount;
 		// D8a2:阴影贴图边长参与 PCF 纹素换算,必须与 Init 创建的资源一致(项目清单可改)。
 		rig.Uniforms.ShadowParams.z = static_cast<float>(GetShadowMapSize());
+		const char* csmEnv = std::getenv("WLD_CSM_DEBUG");
+		const bool envDebug = (csmEnv != nullptr && std::strcmp(csmEnv, "0") != 0 && std::strlen(csmEnv) > 0);
+		if (IsCascadeDebugVisualization() || envDebug)
+		{
+			rig.Uniforms.LightCounts.z |= 0x100u;
+		}
 		return rig;
 	}
 

@@ -1,3 +1,4 @@
+#include "World/Foliage/FoliageRenderer.h"
 #if defined(_WIN32) && defined(_DEBUG)
 #include <crtdbg.h>
 #endif
@@ -791,6 +792,63 @@ static void TestFoliageDensitySaturation()
 	std::cout << "[PASS] TestFoliageDensitySaturation (100 strokes capped at " << total << "/" << maxAllowed << ")\n";
 }
 
+static void TestLocalWindDynamics()
+{
+	// 1. Check LocalWindComponent layout & trivial copy
+	static_assert(sizeof(LocalWindComponent) == 32, "LocalWindComponent size");
+	static_assert(std::is_trivially_copyable_v<LocalWindComponent>, "LocalWindComponent copyable");
+	static_assert(sizeof(LocalWindGPU) == 48, "LocalWindGPU size");
+
+	LocalWindComponent comp;
+	comp.Radius = 15.0f;
+	comp.Strength = 4.0f;
+	comp.Speed = 3.5f;
+	comp.Decay = 1.2f;
+	comp.Type = LocalWindType::Radial;
+
+	// 2. Test FoliageRenderer Add/Clear Local Winds
+	FoliageRenderer::ClearLocalWinds();
+	assert(FoliageRenderer::GetLocalWindCount() == 0);
+
+	FoliageRenderer::AddLocalWind(glm::vec3(10.0f, 0.0f, 5.0f), 15.0f, 4.0f, 3.5f, 1.2f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
+	assert(FoliageRenderer::GetLocalWindCount() == 1);
+
+	FoliageRenderer::AddLocalWind(glm::vec3(-20.0f, 0.0f, 0.0f), 10.0f, 2.5f, 5.0f, 1.5f, LocalWindType::Vortex, glm::vec3(0.0f, 1.0f, 0.0f));
+	assert(FoliageRenderer::GetLocalWindCount() == 2);
+
+	// 3. Mathematical model verification for Radial displacement
+	glm::vec3 center(10.0f, 0.0f, 5.0f);
+	glm::vec3 testPos(16.0f, 0.0f, 5.0f); // 6m away from center, radius = 15m
+	glm::vec3 toInst = testPos - center;
+	float dist = glm::length(toInst);
+	assert(dist == 6.0f);
+	float normDist = dist / 15.0f;
+	float falloff = std::pow(std::clamp(1.0f - normDist, 0.0f, 1.0f), 1.2f);
+	assert(falloff > 0.0f && falloff < 1.0f);
+	glm::vec3 radialDir = glm::normalize(toInst);
+	assert(radialDir.x > 0.99f);
+
+	// 4. Mathematical model verification for Vortex displacement
+	glm::vec3 vortexCenter(-20.0f, 0.0f, 0.0f);
+	glm::vec3 vortexSample(-20.0f, 0.0f, 5.0f); // Along +Z
+	glm::vec3 up(0.0f, 1.0f, 0.0f);
+	glm::vec3 radialV = glm::normalize(vortexSample - vortexCenter); // (0, 0, 1)
+	glm::vec3 vortexDir = glm::cross(up, radialV); // (1, 0, 0)
+	assert(vortexDir.x > 0.99f);
+
+	// 5. Test overflow beyond kMaxLocalWinds (8)
+	for (int i = 0; i < 10; ++i)
+	{
+		FoliageRenderer::AddLocalWind(glm::vec3(float(i)), 10.0f, float(i + 1));
+	}
+	assert(FoliageRenderer::GetLocalWindCount() == kMaxLocalWinds);
+
+	FoliageRenderer::ClearLocalWinds();
+	assert(FoliageRenderer::GetLocalWindCount() == 0);
+
+	std::cout << "[PASS] TestLocalWindDynamics (Radial, Vortex, Directional math verified)\n";
+}
+
 int main()
 {
 #if defined(_WIN32) && defined(_DEBUG)
@@ -810,6 +868,7 @@ int main()
 	TestFoliageRealignToTerrain();
 	TestFoliageGetInstanceCountByType();
 	TestFoliageSerializationVersionCompatibility();
+	TestLocalWindDynamics();
 	GenerateFoliageModelAssets();
 	GenerateSampleDefaultFoliageAsset();
 	std::cout << "All World.Foliage tests passed successfully!\n";

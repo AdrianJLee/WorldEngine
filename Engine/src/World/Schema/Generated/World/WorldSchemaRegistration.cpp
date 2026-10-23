@@ -79,6 +79,7 @@ const TypeSchema& WeSchemaOf_WeatherSystemComponent();
 const TypeSchema& WeSchemaOf_BiomePCGComponent();
 const TypeSchema& WeSchemaOf_EQSComponent();
 const TypeSchema& WeSchemaOf_FoliageInteractionComponent();
+const TypeSchema& WeSchemaOf_LocalWindComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -92,6 +93,7 @@ const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState();
 const EnumSchema& WeEnumSchemaOf_ParticleEmitterType();
 const EnumSchema& WeEnumSchemaOf_ParticleRenderMode();
 const EnumSchema& WeEnumSchemaOf_ParticleBlendMode();
+const EnumSchema& WeEnumSchemaOf_LocalWindType();
 const EnumSchema& WeEnumSchemaOf_VfxPlaybackState();
 
 	namespace
@@ -407,7 +409,7 @@ struct GeneratedAccess<World::VelocityComponent>
                 Field_Angular(),
             },
             &StorageBindingOf(),
-            "Movement",
+            "Gameplay",
             "Linear and angular velocity of the entity for ECS movement systems.",
             false,
             false,
@@ -1469,7 +1471,7 @@ struct GeneratedAccess<World::CircleRendererComponent>
                 Field_Fade(),
             },
             &StorageBindingOf(),
-            "Rendering/Mesh",
+            "Rendering/2D",
             "Flat 2D disc: Thickness is the ring width as a fraction of the radius (1 = filled) and Fade is the normalized edge softness.",
             false,
             false,
@@ -1680,7 +1682,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
                 Field_MeshIndex(),
             },
             &StorageBindingOf(),
-            "Rendering/Mesh",
+            "Rendering",
             "Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty Material shades with Color.",
             false,
             false,
@@ -1974,7 +1976,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
                 Field_Time(),
             },
             &StorageBindingOf(),
-            "Rendering/Mesh",
+            "Rendering",
             "Skeleton-driven mesh: an empty AnimationClip plays the first clip and Time is written by the animation system (read-only under Play).",
             false,
             false,
@@ -2179,7 +2181,7 @@ struct GeneratedAccess<World::CameraComponent>
                 Field_FixedAspectRatio(),
             },
             &StorageBindingOf(),
-            "Scene",
+            "Camera",
             "Scene camera settings plus Primary (the camera Play and the runtime render through); FixedAspectRatio keeps the projection from following the viewport size.",
             false,
             false,
@@ -2352,7 +2354,7 @@ struct GeneratedAccess<World::PixelPerfectCameraComponent>
                 Field_UpscaleRT(),
             },
             &StorageBindingOf(),
-            "Rendering/2D",
+            "Camera",
             "Pixel-perfect 2D retro camera: calculates integer-multiple viewport scaling and snaps view translation to pixel grid to eliminate jitter and stretching.",
             false,
             false,
@@ -2669,7 +2671,7 @@ struct GeneratedAccess<World::DirectionalLightComponent>
                 Field_CastShadow(),
             },
             &StorageBindingOf(),
-            "Rendering/Light",
+            "Lighting",
             "Sun-style light: Direction is the propagation direction in world space (normalized when packed) and only the first one casts shadows.",
             false,
             false,
@@ -2784,7 +2786,7 @@ struct GeneratedAccess<World::PointLightComponent>
                 Field_Range(),
             },
             &StorageBindingOf(),
-            "Rendering/Light",
+            "Lighting",
             "Local light with distance falloff: Range is the falloff radius in world units, attenuation saturates as (1 - d/Range)^2, and at most 7 point lights reach the shader.",
             false,
             false,
@@ -2870,7 +2872,7 @@ struct GeneratedAccess<World::AmbientLightComponent>
                 Field_Intensity(),
             },
             &StorageBindingOf(),
-            "Rendering/Light",
+            "Lighting",
             "Global ambient term without a spatial range: only the first ambient light is used and 0.25 grey applies when the scene has none.",
             false,
             false,
@@ -3246,7 +3248,7 @@ struct GeneratedAccess<World::PointLight2DComponent>
                 Field_Enabled(),
             },
             &StorageBindingOf(),
-            "Rendering/2D",
+            "Lighting",
             "2D point/spot light with inner/outer radius attenuation, angular cone falloff, shadow casting, and normal map Z height.",
             false,
             false,
@@ -3477,7 +3479,7 @@ struct GeneratedAccess<World::GlobalLight2DComponent>
                 Field_Enabled(),
             },
             &StorageBindingOf(),
-            "Rendering/2D",
+            "Lighting",
             "2D global ambient and directional light controlling overall 2D scene illumination and normal map directional relief.",
             false,
             false,
@@ -3766,7 +3768,7 @@ struct GeneratedAccess<World::ShadowCaster2DComponent>
                 Field_ShowGizmo(),
             },
             &StorageBindingOf(),
-            "Rendering/2D",
+            "Lighting",
             "2D shadow caster hull that extrudes silhouette shadow geometry away from 2D point lights.",
             false,
             false,
@@ -4026,7 +4028,7 @@ struct GeneratedAccess<World::FreeformLight2DComponent>
                 Field_Enabled(),
             },
             &StorageBindingOf(),
-            "Rendering/2D",
+            "Lighting",
             "2D freeform polygon light: Points defines arbitrary polygon vertices in local space.",
             false,
             false,
@@ -8668,7 +8670,7 @@ struct GeneratedAccess<World::JointComponent>
                 Field_EnableCollision(),
             },
             &StorageBindingOf(),
-            "Physics",
+            "Physics/3D",
             "Constraint between this entity and another body. Fixed welds the two frames, Distance keeps them within a range, Hinge allows rotation around Axis only.",
             false,
             false,
@@ -8919,7 +8921,7 @@ struct GeneratedAccess<World::PartitionVolumeComponent>
                 Field_Active(),
             },
             &StorageBindingOf(),
-            "Level",
+            "Environment",
             "Spatial partition volume that overrides grid cell size and streaming radius for entities inside it.",
             false,
             false,
@@ -8976,7 +8978,7 @@ struct GeneratedAccess<World::LevelEntityComponent>
                 Field_DataLayerMask(),
             },
             &StorageBindingOf(),
-            "Level",
+            "Scene",
             "Level 2.0 data-layer membership: which level data layers this entity belongs to.",
             false,
             true,
@@ -9537,7 +9539,7 @@ struct GeneratedAccess<World::PhysicsMaterialComponent>
                 Field_RestitutionCombine(),
             },
             &StorageBindingOf(),
-            "Physics",
+            "Physics/3D",
             "Physics Material properties for friction, bounciness and combine algorithms.",
             false,
             false,
@@ -9855,7 +9857,7 @@ struct GeneratedAccess<World::CharacterControllerComponent>
                 Field_LockZPlane(),
             },
             &StorageBindingOf(),
-            "Physics",
+            "Physics/3D",
             "Kinematic Character Controller for unified 2D and 3D Move-and-Slide, slope limiting, and jump buffering.",
             false,
             false,
@@ -10433,7 +10435,7 @@ struct GeneratedAccess<World::PostProcessComponent>
                 Field_Enabled(),
             },
             &StorageBindingOf(),
-            "Rendering",
+            "Effects",
             "Fullscreen post-processing volume settings: hit flash, outline, dissolve, bloom, and color grading.",
             false,
             false,
@@ -10870,7 +10872,7 @@ struct GeneratedAccess<World::SmartObjectComponent>
                 Field_Enabled(),
             },
             &StorageBindingOf(),
-            "Gameplay",
+            "AI",
             "Smart Object interaction slot: position alignment, claim/use reservation state machine, and cooldown.",
             false,
             false,
@@ -11238,7 +11240,7 @@ struct GeneratedAccess<World::VfxComponent>
                 Field_PauseWhenOffscreen(),
             },
             &StorageBindingOf(),
-            "Renderer",
+            "Effects",
             "Next-generation unified VFX component for multi-emitter assets, ribbons, meshes and dynamic lights.",
             false,
             false,
@@ -11631,7 +11633,7 @@ struct GeneratedAccess<World::TerrainComponent>
                 Field_EnableCollision(),
             },
             &StorageBindingOf(),
-            "Rendering/Terrain",
+            "Environment",
             "3D heightfield terrain component with LOD chunks, multi-layer splat blending and collision.",
             false,
             false,
@@ -11966,7 +11968,7 @@ struct GeneratedAccess<World::FoliageComponent>
                 Field_EnableWind(),
             },
             &StorageBindingOf(),
-            "Rendering/Foliage",
+            "Environment",
             "GPU-instanced foliage and vegetation scatter cluster.",
             false,
             false,
@@ -12168,7 +12170,7 @@ struct GeneratedAccess<World::SpotLight3DComponent>
                 Field_CastShadow(),
             },
             &StorageBindingOf(),
-            "Rendering/Light",
+            "Lighting",
             "3D spot light with distance range, cone angles and penumbra falloff.",
             false,
             false,
@@ -12734,7 +12736,7 @@ struct GeneratedAccess<World::NavMeshAgentComponent>
                 Field_AutoRepath(),
             },
             &StorageBindingOf(),
-            "AI/Navigation",
+            "AI",
             "3D AI NavMesh navigation agent with A* pathfinding and Funnel smoothing.",
             false,
             false,
@@ -12849,7 +12851,7 @@ struct GeneratedAccess<World::NavMeshObstacleComponent>
                 Field_IsMoving(),
             },
             &StorageBindingOf(),
-            "AI/Navigation",
+            "AI",
             "Dynamic box obstacle carving holes in 3D NavMesh.",
             false,
             false,
@@ -13143,7 +13145,7 @@ struct GeneratedAccess<World::MeshLODComponent>
                 Field_EnableCrossFade(),
             },
             &StorageBindingOf(),
-            "Rendering/Mesh",
+            "Rendering",
             "Multi-level of detail (LOD) mesh switching with distance culling and hysteresis.",
             false,
             false,
@@ -13362,7 +13364,7 @@ struct GeneratedAccess<World::DecalComponent>
                 Field_AffectMeshes(),
             },
             &StorageBindingOf(),
-            "Rendering/Decal",
+            "Rendering",
             "3D projected decal box applying blood, bullet holes, footprints, or puddle details.",
             false,
             false,
@@ -13771,7 +13773,7 @@ struct GeneratedAccess<World::SplineComponent>
                 Field_ExtrudeRoad(),
             },
             &StorageBindingOf(),
-            "Level/Spline",
+            "Rendering",
             "3D parametric spline path for roads, rivers, fences and patrol rails.",
             false,
             false,
@@ -13915,7 +13917,7 @@ struct GeneratedAccess<World::WhiteboxComponent>
                 Field_GenerateCollision(),
             },
             &StorageBindingOf(),
-            "Level/Whitebox",
+            "Rendering",
             "Procedural geometric prototyping brush (Box, Cylinder, Stairs, Wedge, Arch).",
             false,
             false,
@@ -14105,7 +14107,7 @@ struct GeneratedAccess<World::HLODComponent>
                 Field_CastShadow(),
             },
             &StorageBindingOf(),
-            "Rendering/HLOD",
+            "Rendering",
             "Hierarchical Level of Detail proxy cluster aggregating distant scene entities.",
             false,
             false,
@@ -14266,7 +14268,7 @@ struct GeneratedAccess<World::RVTComponent>
                 Field_WriteNormal(),
             },
             &StorageBindingOf(),
-            "Rendering/RVT",
+            "Rendering",
             "Runtime Virtual Texture component for ground caching and soft contact blending.",
             false,
             false,
@@ -14497,7 +14499,7 @@ struct GeneratedAccess<World::WaterBodyComponent>
                 Field_EnableBuoyancy(),
             },
             &StorageBindingOf(),
-            "Environment/Water",
+            "Environment",
             "Dynamic physical ocean, lake or river water body with Gerstner waves and buoyancy.",
             false,
             false,
@@ -14757,7 +14759,7 @@ struct GeneratedAccess<World::WeatherSystemComponent>
                 Field_EnablePuddles(),
             },
             &StorageBindingOf(),
-            "Environment/Weather",
+            "Environment",
             "Dynamic atmospheric weather, volumetric clouds, precipitation and ground wetness.",
             false,
             false,
@@ -15005,7 +15007,7 @@ struct GeneratedAccess<World::BiomePCGComponent>
                 Field_AutoDeformTerrain(),
             },
             &StorageBindingOf(),
-            "World/PCG",
+            "Environment",
             "Procedural Content Generation rules for biomes, vegetation clusters and terrain deformation.",
             false,
             false,
@@ -15149,7 +15151,7 @@ struct GeneratedAccess<World::EQSComponent>
                 Field_BestCoverFound(),
             },
             &StorageBindingOf(),
-            "AI/Tactics",
+            "AI",
             "Environment Query System for finding tactical cover points and line-of-sight concealment.",
             false,
             false,
@@ -15293,8 +15295,243 @@ struct GeneratedAccess<World::FoliageInteractionComponent>
                 Field_LeaveTracks(),
             },
             &StorageBindingOf(),
-            "Physics/Foliage",
+            "Environment",
             "Physical foliage bending and track deformation when entities traverse vegetation.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::LocalWindComponent>
+{
+    static Value Get_Direction(const void* instance)
+    {
+        const World::LocalWindComponent* self = static_cast<const World::LocalWindComponent*>(instance);
+        return Value(self->Direction);
+    }
+    static void Set_Direction(void* instance, const Value& value)
+    {
+        World::LocalWindComponent* self = static_cast<World::LocalWindComponent*>(instance);
+        self->Direction = std::get<glm::vec3>(value);
+    }
+    static Value Get_Radius(const void* instance)
+    {
+        const World::LocalWindComponent* self = static_cast<const World::LocalWindComponent*>(instance);
+        return Value(self->Radius);
+    }
+    static void Set_Radius(void* instance, const Value& value)
+    {
+        World::LocalWindComponent* self = static_cast<World::LocalWindComponent*>(instance);
+        self->Radius = std::get<float>(value);
+    }
+    static Value Get_Strength(const void* instance)
+    {
+        const World::LocalWindComponent* self = static_cast<const World::LocalWindComponent*>(instance);
+        return Value(self->Strength);
+    }
+    static void Set_Strength(void* instance, const Value& value)
+    {
+        World::LocalWindComponent* self = static_cast<World::LocalWindComponent*>(instance);
+        self->Strength = std::get<float>(value);
+    }
+    static Value Get_Speed(const void* instance)
+    {
+        const World::LocalWindComponent* self = static_cast<const World::LocalWindComponent*>(instance);
+        return Value(self->Speed);
+    }
+    static void Set_Speed(void* instance, const Value& value)
+    {
+        World::LocalWindComponent* self = static_cast<World::LocalWindComponent*>(instance);
+        self->Speed = std::get<float>(value);
+    }
+    static Value Get_Decay(const void* instance)
+    {
+        const World::LocalWindComponent* self = static_cast<const World::LocalWindComponent*>(instance);
+        return Value(self->Decay);
+    }
+    static void Set_Decay(void* instance, const Value& value)
+    {
+        World::LocalWindComponent* self = static_cast<World::LocalWindComponent*>(instance);
+        self->Decay = std::get<float>(value);
+    }
+    static Value Get_Type(const void* instance)
+    {
+        const World::LocalWindComponent* self = static_cast<const World::LocalWindComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->Type));
+    }
+    static void Set_Type(void* instance, const Value& value)
+    {
+        World::LocalWindComponent* self = static_cast<World::LocalWindComponent*>(instance);
+        self->Type = static_cast<World::LocalWindType>(std::get<uint64_t>(value));
+    }
+    static const EnumSchema* GetEnum_Type()
+    {
+        return &WeEnumSchemaOf_LocalWindType();
+    }
+    static Value Get_ImpulseActive(const void* instance)
+    {
+        const World::LocalWindComponent* self = static_cast<const World::LocalWindComponent*>(instance);
+        return Value(self->ImpulseActive);
+    }
+    static void Set_ImpulseActive(void* instance, const Value& value)
+    {
+        World::LocalWindComponent* self = static_cast<World::LocalWindComponent*>(instance);
+        self->ImpulseActive = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_Direction()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6620676554B90AFCull },
+            "Direction",
+            Kind::Vec3,
+            &Get_Direction,
+            &Set_Direction,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Primary wind direction or vortex rotation axis.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Radius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB09F3DBA4CC49AA1ull },
+            "Radius",
+            Kind::Float,
+            &Get_Radius,
+            &Set_Radius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.500000f), std::optional<float>(100.000000f), false, false, "Effective spherical/cylindrical radius in meters.", false, "", {  }, "", std::nullopt },
+            Value(10.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Strength()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xDCA729EFE1897F6ull },
+            "Strength",
+            Kind::Float,
+            &Get_Strength,
+            &Set_Strength,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(20.000000f), false, false, "Peak wind displacement force.", false, "", {  }, "", std::nullopt },
+            Value(2.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Speed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC4F71A01EB24506Eull },
+            "Speed",
+            Kind::Float,
+            &Get_Speed,
+            &Set_Speed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(30.000000f), false, false, "Oscillation wave frequency or vortex angular speed.", false, "", {  }, "", std::nullopt },
+            Value(3.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Decay()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB6FDF524106032B3ull },
+            "Decay",
+            Kind::Float,
+            &Get_Decay,
+            &Set_Decay,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.500000f), std::optional<float>(4.000000f), false, false, "Distance attenuation falloff exponent.", false, "", {  }, "", std::nullopt },
+            Value(1.5f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Type()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x71A7CF4651FBD66Bull },
+            "Type",
+            Kind::Enum,
+            &Get_Type,
+            &Set_Type,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_Type,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Wind pattern: Directional (wind tunnel), Radial (blast/downwash), Vortex (swirl).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ImpulseActive()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBF77A77E7CBFE874ull },
+            "ImpulseActive",
+            Kind::UInt8,
+            &Get_ImpulseActive,
+            &Set_ImpulseActive,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this is a decaying transient impulse (e.g. shockwave).", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::LocalWindComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::LocalWindComponent" },
+            "LocalWindComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::LocalWindComponent),
+            TypeCategory::Component,
+            {
+                Field_Direction(),
+                Field_Radius(),
+                Field_Strength(),
+                Field_Speed(),
+                Field_Decay(),
+                Field_Type(),
+                Field_ImpulseActive(),
+            },
+            &StorageBindingOf(),
+            "Environment",
+            "Local dynamic wind source affecting foliage and vegetation (explosions, vortices, wind tunnels).",
             false,
             false,
         };
@@ -15828,6 +16065,25 @@ struct GeneratedEnum<World::ParticleBlendMode>
 };
 
 template <>
+struct GeneratedEnum<World::LocalWindType>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "LocalWindType",
+            false,
+            1,
+            {
+                { "Directional", static_cast<int64_t>(World::LocalWindType::Directional) },
+                { "Radial", static_cast<int64_t>(World::LocalWindType::Radial) },
+                { "Vortex", static_cast<int64_t>(World::LocalWindType::Vortex) },
+            },
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedEnum<World::VfxPlaybackState>
 {
     static const EnumSchema& WeEnumSchema()
@@ -15917,6 +16173,7 @@ const TypeSchema& WeSchemaOf_WeatherSystemComponent() { return GeneratedAccess<W
 const TypeSchema& WeSchemaOf_BiomePCGComponent() { return GeneratedAccess<World::BiomePCGComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_EQSComponent() { return GeneratedAccess<World::EQSComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_FoliageInteractionComponent() { return GeneratedAccess<World::FoliageInteractionComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_LocalWindComponent() { return GeneratedAccess<World::LocalWindComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -15930,6 +16187,7 @@ const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState() { return GeneratedEnum<W
 const EnumSchema& WeEnumSchemaOf_ParticleEmitterType() { return GeneratedEnum<World::ParticleEmitterType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ParticleRenderMode() { return GeneratedEnum<World::ParticleRenderMode>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ParticleBlendMode() { return GeneratedEnum<World::ParticleBlendMode>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_LocalWindType() { return GeneratedEnum<World::LocalWindType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World::VfxPlaybackState>::WeEnumSchema(); }
 
 	bool RegisterWorldSchemaModule(SchemaRegistry& registry)
@@ -15946,6 +16204,7 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleEmitterType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleRenderMode()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleBlendMode()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_LocalWindType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_VfxPlaybackState()) != SchemaRegistry::Status::Ok) ok = false;
 		const std::vector<TypeSchema> schemas = {
 			WeSchemaOf_UUIDComponent(),
@@ -16019,6 +16278,7 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_BiomePCGComponent(),
 			WeSchemaOf_EQSComponent(),
 			WeSchemaOf_FoliageInteractionComponent(),
+			WeSchemaOf_LocalWindComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

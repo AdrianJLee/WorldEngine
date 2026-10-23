@@ -946,97 +946,53 @@ namespace World
 
 		// D8a2:项目清单 `rendering.shadows=false` → 整条阴影通道关掉(投影者不提交、
 		// 主通道不采样)。WLD_NO_SHADOWS=1 同样强制关闭(自动化)。
-		if (!RenderSettings::ShadowsEnabled() && lightRig.ShadowCaster)
+		const bool csmDebugActive = Renderer3D::IsCascadeDebugVisualization() || (std::getenv("WLD_CSM_DEBUG") != nullptr && std::strcmp(std::getenv("WLD_CSM_DEBUG"), "0") != 0);
+		if (!RenderSettings::ShadowsEnabled() && !csmDebugActive && lightRig.ShadowCaster)
 		{
 			lightRig.ShadowCaster = false;
 			lightRig.Uniforms.ShadowParams.x = 0.0f;
 		}
 
-		// 阴影矩阵:主方向光的正交视图(沿传播方向的反方向退到世界包围球外),盒子覆盖
-		// 本帧全部网格实体。没有网格或没有 CastShadow 的主方向光时保持阴影禁用。
-		std::vector<uint32_t> shadowDraws;
+		// 4 级 CSM 级联正交投影与切片深度计算
+		glm::mat4 cascadeVP[4] = { glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f) };
 		if (lightRig.ShadowCaster && !draws.empty())
 		{
-			glm::vec3 boundsMin { FLT_MAX, FLT_MAX, FLT_MAX };
-			glm::vec3 boundsMax { -FLT_MAX, -FLT_MAX, -FLT_MAX };
-			// D8a:直接用收集期算好的世界 AABB(逐子网格,更紧)。
-			// 归约可并行:min/max 满足结合律且**精确可交换**(无浮点累加误差),
-			// 故分块并行后串行合并的结果与串行归约**逐位相同** ⇒ 阴影矩阵不变、像素不变。
-			const size_t boundsCount = draws.size();
-			const uint32_t workerCount = JobSystem::WorkerCount();
-			if (boundsCount >= kParallelBoundsThreshold && workerCount > 1 && JobSystem::IsRunning() &&
-				JobSystem::ParallelAllowed())
+			// 从主相机提取参数
+			const glm::mat4& proj = camera.GetProjectionMatrix();
+			float fovY = glm::radians(60.0f);
+			float aspect = 16.0f / 9.0f;
+			float nearClip = 0.1f;
+			if (proj[1][1] > 0.001f && proj[0][0] > 0.001f)
 			{
-				const uint32_t chunkCount = static_cast<uint32_t>(
-					std::min<size_t>(boundsCount, static_cast<size_t>(workerCount) * 4u));
-				std::vector<glm::vec3> chunkMin(chunkCount, glm::vec3(FLT_MAX));
-				std::vector<glm::vec3> chunkMax(chunkCount, glm::vec3(-FLT_MAX));
-				JobSystem::ParallelFor(chunkCount, 1, [&](uint32_t chunk)
-				{
-					const size_t begin = boundsCount * chunk / chunkCount;
-					const size_t end = boundsCount * (chunk + 1) / chunkCount;
-					glm::vec3 localMin(FLT_MAX);
-					glm::vec3 localMax(-FLT_MAX);
-					for (size_t index = begin; index < end; ++index)
-					{
-						localMin = glm::min(localMin, draws[index].WorldMin);
-						localMax = glm::max(localMax, draws[index].WorldMax);
-					}
-					chunkMin[chunk] = localMin;
-					chunkMax[chunk] = localMax;
-				});
-				for (uint32_t chunk = 0; chunk < chunkCount; ++chunk)
-				{
-					boundsMin = glm::min(boundsMin, chunkMin[chunk]);
-					boundsMax = glm::max(boundsMax, chunkMax[chunk]);
-				}
+				fovY = 2.0f * std::atan(1.0f / proj[1][1]);
+				aspect = proj[1][1] / proj[0][0];
 			}
-			else
+			if (std::abs(proj[2][2] - 1.0f) > 0.001f && std::abs(proj[3][2]) > 0.001f)
 			{
-				for (const FrameMeshDraw& draw : draws)
-				{
-					boundsMin = glm::min(boundsMin, draw.WorldMin);
-					boundsMax = glm::max(boundsMax, draw.WorldMax);
-				}
+				nearClip = std::abs(proj[3][2] / (proj[2][2] - 1.0f));
+				nearClip = std::max(0.05f, std::min(nearClip, 2.0f));
 			}
-			const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-			const float radius = std::max(0.5f, glm::length((boundsMax - boundsMin) * 0.5f));
-			const glm::vec3 direction = glm::vec3(lightRig.Uniforms.Lights[0].DirectionRange);
-			const glm::vec3 up = std::fabs(direction.y) > 0.9f
-				? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
-			const glm::mat4 lightView = glm::lookAt(center - direction * (radius * 2.0f), center, up);
-			const glm::mat4 lightProjection = glm::ortho(-radius, radius, -radius, radius,
-				0.1f, radius * 4.0f);
-			// 与离屏场景同一条投影适配:Vulkan 只补深度范围(z∈[0,1]),不翻 Y ——
-			// 阴影 UV(depth 贴图行序)与主场景纹理同一约定,两个后端像素一致。
-			glm::mat4 shadowViewProjection = AdaptViewProjectionForOffscreen(
-				lightProjection * lightView, Renderer::GetBackendName() == "vulkan");
-			Renderer3D::ApplyShadowCaster(lightRig, shadowViewProjection);
 
-			// D8a:阴影通道按**光源正交视锥**剔除(相机视锥在这里不适用:视锥外的
-			// 投影者仍可能把影子投进画面)。WLD_NO_CULL=1 时不做(与主通道同步 A/B)。
-			if (cullingEnabled)
+			CSMConfig config;
+			config.CascadeCount = 4;
+			config.MaxShadowDistance = 200.0f;
+			config.SplitLambda = 0.85f;
+			config.ShadowResolution = Renderer3D::GetShadowMapSize() / 2;
+
+			const glm::vec3 lightDir = glm::normalize(glm::vec3(lightRig.Uniforms.Lights[0].DirectionRange));
+			std::array<CSMCascade, kMaxShadowCascades> cascades;
+			CSM::BuildCascades(fovY, aspect, nearClip, cameraTransform, lightDir, config, cascades);
+
+			const bool isVulkan = (Renderer::GetBackendName() == "vulkan");
+			glm::vec4 splits(cascades[0].SplitDistance, cascades[1].SplitDistance,
+							 cascades[2].SplitDistance, cascades[3].SplitDistance);
+			for (int i = 0; i < 4; ++i)
 			{
-				const FrustumPlanes lightFrustum = ExtractFrustumPlanes(shadowViewProjection);
-				shadowDraws.reserve(draws.size());
-				for (uint32_t index = 0; index < draws.size(); ++index)
-				{
-					const FrameMeshDraw& draw = draws[index];
-					if (AabbInFrustum(lightFrustum, draw.WorldMin, draw.WorldMax))
-						shadowDraws.push_back(index);
-				}
+				cascadeVP[i] = AdaptViewProjectionForOffscreen(cascades[i].ViewProjection, isVulkan);
 			}
+			Renderer3D::ApplyShadowCascades(lightRig, cascadeVP, splits);
 		}
-		if (!cullingEnabled && lightRig.ShadowCaster)
-		{
-			shadowDraws.clear();
-			shadowDraws.reserve(draws.size());
-			for (uint32_t index = 0; index < draws.size(); ++index)
-				shadowDraws.push_back(index);
-		}
-		shadowCasters = static_cast<uint32_t>(shadowDraws.size());
-		// 阴影通道规模(与 ShadowPassMilliseconds 配套的数字;耗时由 Renderer3D 统计给出)。
-		WLD_TRACE_COUNTER("Scene.ShadowCasters", static_cast<int64_t>(shadowCasters));
+
 		m_LightBuffers[slot]->SetData(&lightRig.Uniforms, sizeof(lightRig.Uniforms));
 
 		// D8a:场景提交前后的 Renderer3D 计数器快照(单调累计)→ 差值即本帧增量。
@@ -1048,7 +1004,7 @@ namespace World
 		BeginGpuTiming(slot);
 
 		// D4:方向光阴影通道(本帧 3D 主通道**之前**,同一命令缓冲):
-		// depth-only 管线把投影者写进 2048² 深度图,主通道按 PCF 采样。
+		// 4 级 CSM 级联正交投影渲染至 2×2 Atlas 深度贴图。
 		// CPU 侧 steady_clock 计时进 Stats/日志("光照数量上限与耗时可见"验收条款)。
 		double shadowPassMilliseconds = 0.0;
 		if (lightRig.Uniforms.ShadowParams.x > 0.5f)
@@ -1059,95 +1015,129 @@ namespace World
 			shadowClears[1].DepthStencil.Depth = 1.0f;
 			m_CommandBuffers[slot]->BeginRenderPass(Renderer3D::GetShadowRenderPass(),
 				Renderer3D::GetShadowFramebuffer(), shadowClears);
-			// set0(相机 + 灯光 UBO):binding 2 提供 u_ShadowViewProjection;
+			// set0(相机 + 灯光 UBO):binding 2 提供 u_ShadowViewProjections;
 			// 阴影管线不用 set2(材质),调用方只绑 0/1。
 			m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
 			Renderer3D::BeginShadowPass(m_CommandBuffers[slot]);
-			// D8b-2:投影者按 (mesh, submesh) 分桶,桶内 ≥4 个实例才合批(阴影不看材质)。
-			std::map<std::pair<const Mesh*, uint32_t>, std::vector<uint32_t>> shadowBuckets;
-			if (RenderSettings::Get().Instancing)
+
+			const float fullSize = static_cast<float>(Renderer3D::GetShadowMapSize());
+			const float halfSize = fullSize * 0.5f;
+
+			for (uint32_t c = 0; c < 4; ++c)
 			{
+				const float quadX = static_cast<float>(c % 2) * halfSize;
+				const float quadY = static_cast<float>(c / 2) * halfSize;
+				m_CommandBuffers[slot]->SetViewport({ quadX, quadY, halfSize, halfSize, 0.0f, 1.0f });
+				m_CommandBuffers[slot]->SetScissor({ static_cast<int32_t>(quadX), static_cast<int32_t>(quadY),
+													 static_cast<uint32_t>(halfSize), static_cast<uint32_t>(halfSize) });
+				Renderer3D::SetShadowCascade(c);
+
+				std::vector<uint32_t> shadowDraws;
+				if (cullingEnabled)
+				{
+					const FrustumPlanes cascadeFrustum = ExtractFrustumPlanes(cascadeVP[c]);
+					shadowDraws.reserve(draws.size());
+					for (uint32_t index = 0; index < draws.size(); ++index)
+					{
+						const FrameMeshDraw& draw = draws[index];
+						if (AabbInFrustum(cascadeFrustum, draw.WorldMin, draw.WorldMax))
+							shadowDraws.push_back(index);
+					}
+				}
+				else
+				{
+					shadowDraws.reserve(draws.size());
+					for (uint32_t index = 0; index < draws.size(); ++index)
+						shadowDraws.push_back(index);
+				}
+				shadowCasters += static_cast<uint32_t>(shadowDraws.size());
+
+				// D8b-2:投影者按 (mesh, submesh) 分桶,桶内 ≥4 个实例才合批(阴影不看材质)。
+				std::map<std::pair<const Mesh*, uint32_t>, std::vector<uint32_t>> shadowBuckets;
+				if (RenderSettings::Get().Instancing)
+				{
+					for (const uint32_t drawIndex : shadowDraws)
+					{
+						const FrameMeshDraw& draw = draws[drawIndex];
+						// D5c-4a:蒙皮投影者不参与实例化合批(调色板逐物体,per-instance 通道里没有它)。
+						if (draw.Skinned)
+							continue;
+						shadowBuckets[{ draw.MeshAsset.get(), draw.SubmeshIndex }].push_back(drawIndex);
+					}
+				}
 				for (const uint32_t drawIndex : shadowDraws)
 				{
 					const FrameMeshDraw& draw = draws[drawIndex];
-					// D5c-4a:蒙皮投影者不参与实例化合批(调色板逐物体,per-instance 通道里没有它)。
+					// D5c-4a:蒙皮投影者走蒙皮入口(否则影子留在绑定姿态)。调色板本帧取不到时:
+					// 布局 1(模型没有 skin 数据)回退静态入口;布局 2 只跳过 —— 静态管线的顶点
+					// 布局是 stride 32,读布局 2 的顶点缓冲会画出垃圾。
 					if (draw.Skinned)
-						continue;
-					shadowBuckets[{ draw.MeshAsset.get(), draw.SubmeshIndex }].push_back(drawIndex);
-				}
-			}
-			for (const uint32_t drawIndex : shadowDraws)
-			{
-				const FrameMeshDraw& draw = draws[drawIndex];
-				// D5c-4a:蒙皮投影者走蒙皮入口(否则影子留在绑定姿态)。调色板本帧取不到时:
-				// 布局 1(模型没有 skin 数据)回退静态入口;布局 2 只跳过 —— 静态管线的顶点
-				// 布局是 stride 32,读布局 2 的顶点缓冲会画出垃圾。
-				if (draw.Skinned)
-				{
-					if (draw.Palette && !draw.Palette->empty())
 					{
-						Renderer3D::SubmitShadowSkinned(draw.MeshAsset, draw.SubmeshIndex, *draw.Model,
-							draw.Palette->data(), static_cast<uint32_t>(draw.Palette->size()));
-						continue;
+						if (draw.Palette && !draw.Palette->empty())
+						{
+							Renderer3D::SubmitShadowSkinned(draw.MeshAsset, draw.SubmeshIndex, *draw.Model,
+								draw.Palette->data(), static_cast<uint32_t>(draw.Palette->size()));
+							continue;
+						}
+						if (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned)
+							continue;
 					}
-					if (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned)
-						continue;
-				}
-				const auto found = shadowBuckets.find({ draw.MeshAsset.get(), draw.SubmeshIndex });
-				if (found != shadowBuckets.end() && found->second.size() >= 4)
-					continue;   // 交给下面的实例化提交
-				// D5:逐 submesh 提交(每条独立对象槽位),多材质模型的投影才完整。
-				if (draw.SubmeshIndex == UINT32_MAX)
-					Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
-				else
-					Renderer3D::SubmitShadowSubmesh(draw.MeshAsset, draw.SubmeshIndex, *draw.Model);
-			}
-			std::vector<glm::mat4> shadowTransforms;
-			for (auto& [key, indices] : shadowBuckets)
-			{
-				if (indices.size() < 4)
-					continue;
-				shadowTransforms.clear();
-				shadowTransforms.reserve(indices.size());
-				for (const uint32_t drawIndex : indices)
-					shadowTransforms.push_back(*draws[drawIndex].Model);
-				const Ref<Mesh>& shadowMesh = draws[indices.front()].MeshAsset;
-				if (Renderer3D::SubmitShadowInstanced(shadowMesh, key.second, shadowTransforms.data(),
-					static_cast<uint32_t>(indices.size())) != 0)
-					continue;
-				// 回退:逐物体补交这一桶(与上面同一条路径)。
-				for (const uint32_t drawIndex : indices)
-				{
-					const FrameMeshDraw& draw = draws[drawIndex];
+					const auto found = shadowBuckets.find({ draw.MeshAsset.get(), draw.SubmeshIndex });
+					if (found != shadowBuckets.end() && found->second.size() >= 4)
+						continue;   // 交给下面的实例化提交
+					// D5:逐 submesh 提交(每条独立对象槽位),多材质模型的投影才完整。
 					if (draw.SubmeshIndex == UINT32_MAX)
 						Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
 					else
 						Renderer3D::SubmitShadowSubmesh(draw.MeshAsset, draw.SubmeshIndex, *draw.Model);
 				}
-			}
-			if constexpr (Detail::IsCompleteType<TerrainComponent>::value)
-			{
-				if (m_ActiveScene)
+				std::vector<glm::mat4> shadowTransforms;
+				for (auto& [key, indices] : shadowBuckets)
 				{
-					auto terrainView = m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>();
-					for (auto entity : terrainView)
+					if (indices.size() < 4)
+						continue;
+					shadowTransforms.clear();
+					shadowTransforms.reserve(indices.size());
+					for (const uint32_t drawIndex : indices)
+						shadowTransforms.push_back(*draws[drawIndex].Model);
+					const Ref<Mesh>& shadowMesh = draws[indices.front()].MeshAsset;
+					if (Renderer3D::SubmitShadowInstanced(shadowMesh, key.second, shadowTransforms.data(),
+						static_cast<uint32_t>(indices.size())) != 0)
+						continue;
+					// 回退:逐物体补交这一桶(与上面同一条路径)。
+					for (const uint32_t drawIndex : indices)
 					{
-						if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
-							continue;
-						const auto& [transform, comp] = terrainView.get<TransformComponent, TerrainComponent>(entity);
-						if (comp.CastShadow == 0)
-							continue;
-						auto data = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
-						if (data)
+						const FrameMeshDraw& draw = draws[drawIndex];
+						if (draw.SubmeshIndex == UINT32_MAX)
+							Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
+						else
+							Renderer3D::SubmitShadowSubmesh(draw.MeshAsset, draw.SubmeshIndex, *draw.Model);
+					}
+				}
+				if constexpr (Detail::IsCompleteType<TerrainComponent>::value)
+				{
+					if (m_ActiveScene)
+					{
+						auto terrainView = m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>();
+						for (auto entity : terrainView)
 						{
-							TerrainRenderSettings settings;
-							settings.Transform = transform.GetLocalMatrix();
-							settings.ChunkResolution = comp.ChunkResolution;
-							settings.LodDistanceRatio = comp.LodDistanceRatio;
-							settings.CastShadow = true;
-							settings.HoleCutoutEnabled = (comp.HoleCutoutEnabled != 0);
-							settings.EntityId = static_cast<int32_t>(entity);
-							TerrainRenderer::RenderTerrainShadow(*data, settings);
+							if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+								continue;
+							const auto& [transform, comp] = terrainView.get<TransformComponent, TerrainComponent>(entity);
+							if (comp.CastShadow == 0)
+								continue;
+							auto data = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+							if (data)
+							{
+								TerrainRenderSettings settings;
+								settings.Transform = transform.GetLocalMatrix();
+								settings.ChunkResolution = comp.ChunkResolution;
+								settings.LodDistanceRatio = comp.LodDistanceRatio;
+								settings.CastShadow = true;
+								settings.HoleCutoutEnabled = (comp.HoleCutoutEnabled != 0);
+								settings.EntityId = static_cast<int32_t>(entity);
+								TerrainRenderer::RenderTerrainShadow(*data, settings, c);
+							}
 						}
 					}
 				}
@@ -1157,6 +1147,7 @@ namespace World
 			shadowPassMilliseconds = std::chrono::duration<double, std::milli>(
 				std::chrono::steady_clock::now() - shadowStart).count();
 		}
+		WLD_TRACE_COUNTER("Scene.ShadowCasters", static_cast<int64_t>(shadowCasters));
 		Renderer3D::ReportLighting(lightRig, shadowPassMilliseconds);
 
 		std::vector<Rhi::ClearValue> clears(3);
@@ -2813,7 +2804,7 @@ namespace World
 		glm::vec2 terrainMin(0.0f), terrainMax(0.0f);
 		if (m_ActiveScene)
 		{
-			for (auto [handle, trans, comp] : m_ActiveScene->GetRegistry().view<TransformComponent, TerrainComponent>().each())
+			for (auto [handle, trans, comp] : m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>().each())
 			{
 				if (m_ActiveScene->IsEntityInActiveDataLayers(handle))
 				{
@@ -3006,6 +2997,20 @@ namespace World
 
 		const uint32_t slot = FrameSlot();
 		FoliageRenderer::SetContext(m_CommandBuffers[slot], m_GlobalDescriptorSets[slot]);
+
+		// Collect active local wind sources from scene entities
+		FoliageRenderer::ClearLocalWinds();
+		auto windView = m_ActiveScene->m_Registry.view<TransformComponent, LocalWindComponent>();
+		for (auto entity : windView)
+		{
+			const auto& [xform, wind] = windView.get<TransformComponent, LocalWindComponent>(entity);
+			glm::mat4 modelMat = xform.GetLocalMatrix();
+			if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
+				modelMat = world->Matrix;
+			const glm::vec3 worldPos = glm::vec3(modelMat[3]);
+			const glm::vec3 worldDir = glm::normalize(glm::mat3(modelMat) * wind.Direction);
+			FoliageRenderer::AddLocalWind(worldPos, wind.Radius, wind.Strength, wind.Speed, wind.Decay, wind.Type, worldDir);
+		}
 
 		auto foliageView = m_ActiveScene->m_Registry.view<TransformComponent, FoliageComponent>();
 		static float s_FoliageTime = 0.0f;

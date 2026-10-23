@@ -812,7 +812,7 @@ s_State.MaterialDescriptorSets[slot]->Update(writes);
 		}
 	}
 
-	void TerrainRenderer::RenderTerrainShadow(const TerrainData& data, const TerrainRenderSettings& settings)
+	void TerrainRenderer::RenderTerrainShadow(const TerrainData& data, const TerrainRenderSettings& settings, uint32_t cascadeIndex)
 	{
 		WLD_TRACE_FUNCTION();
 		EnsureInitialized();
@@ -831,7 +831,7 @@ s_State.MaterialDescriptorSets[slot]->Update(writes);
 		TerrainUniforms uniforms;
 		uniforms.Model = settings.Transform;
 		uniforms.SlopeParams = glm::vec4(settings.SlopeThreshold, settings.SlopeBlendRange, 2.0f, settings.HoleCutoutEnabled ? 1.0f : 0.0f);
-		uniforms.TerrainParams = glm::vec4(settings.ReceiveShadow ? 1.0f : 0.0f, static_cast<float>(settings.EntityId), 0.0f, 0.0f);
+		uniforms.TerrainParams = glm::vec4(settings.ReceiveShadow ? 1.0f : 0.0f, static_cast<float>(settings.EntityId), static_cast<float>(cascadeIndex), 0.0f);
 		uniforms.CameraPosition = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 
 		if (s_State.UniformBuffers[slot])

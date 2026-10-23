@@ -153,6 +153,10 @@ namespace World
 		// 让主方向光(CastShadow)参与阴影:写入正交光源矩阵并启用 u_ShadowParams.x。
 		static void ApplyShadowCaster(LightRig& rig, const glm::mat4& lightViewProjection);
 		static void ApplyShadowCascades(LightRig& rig, const glm::mat4 cascades[4], const glm::vec4& splits);
+		static void SetShadowCascade(uint32_t cascade);
+		static uint32_t GetShadowCascade();
+		static void SetCascadeDebugVisualization(bool enabled);
+		static bool IsCascadeDebugVisualization();
 		// 本帧灯光统计(编辑器 Stats 面板 + 自动化日志):数量上限、截断数与阴影通道 CPU 耗时;
 		// 数量/阴影开关变化或首帧时打一行 [lighting]。
 		static void ReportLighting(const LightRig& rig, double shadowPassMilliseconds);

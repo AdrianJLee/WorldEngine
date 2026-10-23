@@ -94,36 +94,51 @@ float3 UnpackNormal(float4 rawNormal)
     return normalize(n);
 }
 
-// 阴影采样 PCF (3x3 盒式滤波)
-float SampleDirectionalShadow(float3 worldPosition, float3 normal, float3 toLightDirection)
+// 阴影采样 PCF (4 级 CSM 2×2 Atlas 采样与 3x3 盒式滤波)
+float SampleDirectionalShadow(float3 worldPosition, float3 normal, float3 toLightDirection, out int outCascadeIndex)
 {
-    float4 shadowPosition = mul(u_ShadowViewProjections[0], float4(worldPosition, 1.0f));
-    float3 projected = shadowPosition.xyz / max(shadowPosition.w, 1e-5f);
-    float2 uv = projected.xy * 0.5f + 0.5f;
+    outCascadeIndex = -1;
+    float4 shadowPosition = float4(0, 0, 0, 1);
+    float3 projected = float3(0, 0, 0);
+    float2 localUV = float2(-1, -1);
+    int matchedCascade = -1;
 
-    for (int c = 0; c < 4; ++c)
+    [unroll] for (int c = 0; c < 4; ++c)
     {
         shadowPosition = mul(u_ShadowViewProjections[c], float4(worldPosition, 1.0f));
         projected = shadowPosition.xyz / max(shadowPosition.w, 1e-5f);
-        uv = projected.xy * 0.5f + 0.5f;
-        if (uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f)
+        localUV = projected.xy * 0.5f + 0.5f;
+        if (localUV.x >= 0.0f && localUV.x <= 1.0f && localUV.y >= 0.0f && localUV.y <= 1.0f
+            && (((u_LightCounts.z & 1u) > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z) >= 0.0f && (((u_LightCounts.z & 1u) > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z) <= 1.0f)
+        {
+            matchedCascade = c;
             break;
+        }
     }
 
-    if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f)
-        return 1.0f;
+    if (matchedCascade < 0)
+        return 1.0f; // 超出所有级联或视锥外，完全不受阴影遮挡
 
-    const float depth = (u_LightCounts.z > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z;
+    outCascadeIndex = matchedCascade;
+
+    // 映射至 2x2 Atlas 象限
+    const float2 quadOffset = float2(float(matchedCascade % 2) * 0.5f, float(matchedCascade / 2) * 0.5f);
+    const float2 atlasUV = quadOffset + localUV * 0.5f;
+
+    const float depth = (u_LightCounts.z & 1u) > 0u ? (projected.z * 0.5f + 0.5f) : projected.z;
     const float cosTheta = saturate(dot(normal, toLightDirection));
-    const float bias = max(u_ShadowParams.y * (1.0f - cosTheta), u_ShadowParams.y * 0.25f);
-    const float2 texel = u_ShadowParams.w / max(u_ShadowParams.z, 1.0f);
+    const float biasBase = max(u_ShadowParams.y, 0.002f);
+    const float bias = max(biasBase * (1.0f - cosTheta), biasBase * 0.25f);
+    const float2 texel = (u_ShadowParams.w / max(u_ShadowParams.z, 1.0f)) * 0.5f;
+
     float visible = 0.0f;
     [unroll] for (int offsetY = -1; offsetY <= 1; ++offsetY)
     {
         [unroll] for (int offsetX = -1; offsetX <= 1; ++offsetX)
         {
-            const float sampledDepth = u_ShadowMap.Sample(
-                uv + float2(offsetX, offsetY) * texel).r;
+            float2 sampleUV = atlasUV + float2(offsetX, offsetY) * texel;
+            sampleUV = clamp(sampleUV, quadOffset + texel * 0.5f, quadOffset + float2(0.5f, 0.5f) - texel * 0.5f);
+            const float sampledDepth = u_ShadowMap.Sample(sampleUV).r;
             visible += (depth - bias <= sampledDepth) ? 1.0f : 0.0f;
         }
     }
@@ -278,6 +293,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     float3 skyLight = u_Ambient.rgb * (worldNormal.y * 0.35f + 0.65f) * u_Ambient.a;
     float3 litColor = albedo * skyLight;
 
+    int cascadeIndex = -1;
     const uint lightCount = u_LightCounts.x + u_LightCounts.y + u_LightCounts.w;
     for (uint lightIndex = 0; lightIndex < lightCount && lightIndex < 8; ++lightIndex)
     {
@@ -316,9 +332,14 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
 
         const float NdotL = max(dot(worldNormal, toLight), 0.0f);
         float visibility = 1.0f;
-        if (lightType > 0.5f && lightType < 1.5f && u_ShadowParams.x > 0.5f && u_TerrainParams.x > 0.5f)
+        if (lightType > 0.5f && lightType < 1.5f && ((u_ShadowParams.x > 0.5f && u_TerrainParams.x > 0.5f) || (u_LightCounts.z & 0x100u) != 0u))
         {
-            visibility = SampleDirectionalShadow(input.v_WorldPosition, worldNormal, toLight);
+            int cIndex = -1;
+            const float shadowVis = SampleDirectionalShadow(input.v_WorldPosition, worldNormal, toLight, cIndex);
+            if (u_ShadowParams.x > 0.5f && u_TerrainParams.x > 0.5f)
+                visibility = shadowVis;
+            if (cIndex >= 0)
+                cascadeIndex = cIndex;
         }
 
         const float3 radiance = light.ColorIntensity.rgb * light.ColorIntensity.a * attenuation * visibility;
@@ -344,6 +365,33 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
         litColor += (diffuse + specular * radiance) * radiance;
     }
 
+    if ((u_LightCounts.z & 0x100u) != 0u && cascadeIndex < 0)
+    {
+        [unroll] for (int c = 0; c < 4; ++c)
+        {
+            float4 sp = mul(u_ShadowViewProjections[c], float4(input.v_WorldPosition, 1.0f));
+            float3 pr = sp.xyz / max(sp.w, 1e-5f);
+            float2 uv = pr.xy * 0.5f + 0.5f;
+            if (uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f
+                && (((u_LightCounts.z & 1u) > 0u) ? (pr.z * 0.5f + 0.5f) : pr.z) >= 0.0f && (((u_LightCounts.z & 1u) > 0u) ? (pr.z * 0.5f + 0.5f) : pr.z) <= 1.0f)
+            {
+                cascadeIndex = c;
+                break;
+            }
+        }
+    }
+
+    if ((u_LightCounts.z & 0x100u) != 0u && cascadeIndex >= 0)
+    {
+        float3 cascadeTints[4] = {
+            float3(1.0f, 0.25f, 0.25f), // 0: 红色 (近景)
+            float3(0.25f, 1.0f, 0.25f), // 1: 绿色
+            float3(0.25f, 0.5f, 1.0f),  // 2: 蓝色
+            float3(1.0f, 1.0f, 0.25f)   // 3: 黄色 (远景)
+        };
+        litColor *= cascadeTints[clamp(cascadeIndex, 0, 3)];
+    }
+
     output.Color = float4(pow(saturate(litColor), 1.0f / 2.2f), 1.0f);
     output.EntityID = (int)round(input.v_EntityId);
     return output;
@@ -363,7 +411,8 @@ VS_SHADOW_OUTPUT VSShadowMain(VS_INPUT input)
 {
     VS_SHADOW_OUTPUT output;
     float4 worldPos = mul(u_Model, float4(input.a_Position, 1.0f));
-    output.Position = mul(u_ViewProjection, worldPos);
+    uint cascade = (uint)clamp(u_TerrainParams.z, 0.0f, 3.0f);
+    output.Position = mul(u_ShadowViewProjections[cascade], worldPos);
     output.v_Hole = input.a_Hole;
     return output;
 }

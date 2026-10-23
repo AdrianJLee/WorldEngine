@@ -373,6 +373,8 @@ std::string TruncateForPanel(const std::string& text, size_t limit = 72);
 		constexpr float kPickerPad = 4.0f;
 		constexpr size_t kPickerRecentMax = 5;
 		constexpr int kPickerRevealFrames = 5;
+		constexpr float kPickerCategoryRow = 22.0f;           // 左侧分类条目行高
+		constexpr float kPickerCategoryScrollbarWidth = 6.0f; // 侧栏滚动条轨道宽度
 
 		// 选择器里的一行:分组标题(kind="text")或候选项(kind="menu-item")。
 		struct PickerRow

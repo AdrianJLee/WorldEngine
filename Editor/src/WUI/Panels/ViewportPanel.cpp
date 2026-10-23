@@ -1,4 +1,4 @@
-﻿#include "WUI/Panels/ViewportPanel_ToolGizmos.h"
+#include "WUI/Panels/ViewportPanel_ToolGizmos.h"
 #include "World/Command/CommandHistory.h"
 #include "World/Scene/SelectionFilter.h"
 #include "wldpch.h"
@@ -6,11 +6,13 @@
 
 #include "World/WUI/WuiGizmo.h"
 #include "World/Renderer/Tilemap.h"
+#include "World/Renderer/Renderer3D.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Physics/Physics3D.h"
+#include "World/Physics/Physics2DUtils.h"
 #include "World/Audio/AudioComponents.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
@@ -622,6 +624,9 @@ namespace World
 		const std::string partLabel = Wui::Tr("viewport.partition.short", "Part");
 		const float partBtnW = std::max(42.0f, ctx.MeasureTextWidth(partLabel, 12.0f) + 14.0f);
 
+		const std::string csmLabel = Wui::Tr("viewport.csm.short", "CSM");
+		const float csmBtnW = std::max(56.0f, ctx.MeasureTextWidth(csmLabel, 12.0f) + 16.0f);
+
 		const std::string lockLabel = Wui::Tr("viewport.2d.short", "Lock");
 		const float lockBtnW = std::max(42.0f, ctx.MeasureTextWidth(lockLabel, 12.0f) + 14.0f);
 
@@ -644,6 +649,7 @@ namespace World
 		}
 		naturalRightIslandW += gridBtnW + 3.0f;
 		naturalRightIslandW += partBtnW + 3.0f;
+		naturalRightIslandW += csmBtnW + 3.0f;
 		naturalRightIslandW += lockBtnW + 3.0f;
 		const std::string snapLabel = Wui::Tr("viewport.snap.short", "Snap");
 		const float snapBtnW = std::max(42.0f, ctx.MeasureTextWidth(snapLabel, 12.0f) + 14.0f);
@@ -760,6 +766,27 @@ namespace World
 			}
 			ctx.RegisterOverlayRect(partBtn);
 			rightCursor += partBtnW + 3.0f;
+		}
+
+		// 3b) CSM 级联染色调试开关 (CSM) - 开启时高亮，严禁带有 : ON / : OFF
+		if (!play && rightCursor + csmBtnW <= rightLimit)
+		{
+			const Wui::WuiRect csmBtn { rightCursor, rightBtnY, csmBtnW, kBtnH };
+			const bool csmOn = World::Renderer3D::IsCascadeDebugVisualization();
+			Wui::Tooltip(ctx, csmBtn, Wui::Tr("viewport.csm.hint",
+				"Toggle Cascaded Shadow Map (CSM) 4-Cascade Color Debug: Red (C0), Green (C1), Blue (C2), Yellow (C3)."));
+			auto csmTheme = theme;
+			if (csmOn)
+			{
+				csmTheme.ButtonBg = theme.ActiveBg;
+				csmTheme.Border = theme.Accent;
+			}
+			if (Wui::Button(ctx, Wui::HashId("viewport.csm_debug"), csmBtn, csmLabel, csmTheme))
+			{
+				World::Renderer3D::SetCascadeDebugVisualization(!csmOn);
+			}
+			ctx.RegisterOverlayRect(csmBtn);
+			rightCursor += csmBtnW + 3.0f;
 		}
 
 		// 4) 视角旋转锁定 (Lock) - 开启时高亮，严禁带有 : ON / : OFF
@@ -1436,7 +1463,7 @@ namespace World
 				}
 				else
 				{
-					const auto& registry = activeScene->GetRegistry();
+					const auto& registry = std::as_const(*activeScene).GetRegistry();
 					for (auto [handle, comp] : registry.view<TerrainComponent>().each())
 					{
 						terrainEntity = Entity(activeScene.get(), handle);
@@ -1767,7 +1794,7 @@ namespace World
 				glm::mat4 terrainWorld { 1.0f };
 				if (activeScene)
 				{
-					for (auto [handle, comp] : activeScene->GetRegistry().view<TerrainComponent>().each())
+					for (auto [handle, comp] : std::as_const(*activeScene).GetRegistry().view<TerrainComponent>().each())
 					{
 						Entity e(activeScene.get(), handle);
 						if (e.HasComponent<TransformComponent>())
@@ -2155,6 +2182,87 @@ namespace World
 								tip, tip - direction * wing - side2 * wing, color, 2.0f, &overlayMin, &overlayMax);
 							drew = true;
 						}
+						if (const auto* spot = registry.try_get<SpotLight3DComponent>(handle))
+						{
+							const Wui::WuiColor color {
+								glm::clamp(spot->Color.r + spot->Intensity * 0.05f, 0.0f, 1.0f),
+								glm::clamp(spot->Color.g + spot->Intensity * 0.05f, 0.0f, 1.0f),
+								glm::clamp(spot->Color.b + spot->Intensity * 0.05f, 0.0f, 1.0f),
+								alpha
+							};
+							const float range = std::max(0.1f, spot->Range);
+							const float outerAngle = std::clamp(spot->OuterConeAngle, 0.1f, 179.0f);
+							const float innerAngle = std::clamp(spot->InnerConeAngle, 0.1f, outerAngle);
+							const float outerRadius = range * std::tan(glm::radians(outerAngle * 0.5f));
+							const float innerRadius = range * std::tan(glm::radians(innerAngle * 0.5f));
+							const float thickness = isSelected ? 1.8f : 1.1f;
+							const glm::vec3 baseCenter { 0.0f, 0.0f, -range };
+
+							// 1. 原点到端面中心的主光轴线
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								glm::vec3(0.0f), baseCenter, color, thickness * 0.8f, &overlayMin, &overlayMax);
+
+							// 2. 端面外锥圆环与内锥圆环 (位于 Z = -range 截面)
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								baseCenter, outerRadius, 0, color, thickness, &overlayMin, &overlayMax);
+							if (innerRadius > 0.0f && innerRadius < outerRadius)
+							{
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									baseCenter, innerRadius, 0,
+									Wui::WuiColor { color.R, color.G, color.B, color.A * 0.6f }, 1.0f,
+									&overlayMin, &overlayMax);
+							}
+
+							// 3. 4 条从光源原点连接到外圆环四极点(上、下、左、右)的母线
+							const glm::vec3 cardinalPoints[4] = {
+								{  0.0f,         outerRadius, -range },
+								{  0.0f,        -outerRadius, -range },
+								{ -outerRadius,  0.0f,        -range },
+								{  outerRadius,  0.0f,        -range }
+							};
+							for (const auto& cp : cardinalPoints)
+							{
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									glm::vec3(0.0f), cp, color, thickness, &overlayMin, &overlayMax);
+							}
+
+							// 4. 光源位置十字定位标
+							const float cross = glm::clamp(range * 0.05f, 0.05f, 0.5f);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								{ -cross, 0.0f, 0.0f }, { cross, 0.0f, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								{ 0.0f, -cross, 0.0f }, { 0.0f, cross, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
+							drew = true;
+						}
+						if (const auto* point2d = registry.try_get<PointLight2DComponent>(handle))
+						{
+							const Wui::WuiColor color {
+								glm::clamp(point2d->Color.r + point2d->Intensity * 0.05f, 0.0f, 1.0f),
+								glm::clamp(point2d->Color.g + point2d->Intensity * 0.05f, 0.0f, 1.0f),
+								glm::clamp(point2d->Color.b + point2d->Intensity * 0.05f, 0.0f, 1.0f),
+								alpha
+							};
+							const float thickness = isSelected ? 1.6f : 1.1f;
+							if (point2d->OuterRadius > 0.0f)
+							{
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									glm::vec3(0.0f), point2d->OuterRadius, 0, color, thickness, &overlayMin, &overlayMax);
+								if (point2d->InnerRadius > 0.0f && point2d->InnerRadius < point2d->OuterRadius)
+								{
+									PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										glm::vec3(0.0f), point2d->InnerRadius, 0,
+										Wui::WuiColor { color.R, color.G, color.B, color.A * 0.6f }, 1.0f,
+										&overlayMin, &overlayMax);
+								}
+								drew = true;
+							}
+							const float cross = glm::clamp(point2d->OuterRadius * 0.08f, 0.05f, 0.5f);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								{ -cross, 0.0f, 0.0f }, { cross, 0.0f, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								{ 0.0f, -cross, 0.0f }, { 0.0f, cross, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
+							drew = true;
+						}
 						// AmbientLightComponent 是全局语义(没有空间范围)→ 不画,属性行 tooltip 已写明。
 						if (drew)
 							++lightCount;
@@ -2252,6 +2360,109 @@ namespace World
 									color, thickness, &overlayMin, &overlayMax);
 							}
 							drew = true;
+						}
+						if (const auto* cap2d = registry.try_get<CapsuleCollider2DComponent>(handle))
+						{
+							const float r = std::max(0.01f, cap2d->Radius);
+							const float halfLen = std::max(0.0f, cap2d->Length * 0.5f);
+							const glm::vec3 center { cap2d->Offset.x, cap2d->Offset.y, 0.0f };
+							constexpr int kHalfSegments = 16;
+							constexpr float kPi = 3.141592653589793f;
+
+							if (cap2d->Direction == 0) // 垂直胶囊体 (Vertical)
+							{
+								const glm::vec3 cTop = center + glm::vec3(0.0f, halfLen, 0.0f);
+								const glm::vec3 cBottom = center - glm::vec3(0.0f, halfLen, 0.0f);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									cBottom + glm::vec3(-r, 0.0f, 0.0f), cTop + glm::vec3(-r, 0.0f, 0.0f),
+									color, thickness, &overlayMin, &overlayMax);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									cBottom + glm::vec3(r, 0.0f, 0.0f), cTop + glm::vec3(r, 0.0f, 0.0f),
+									color, thickness, &overlayMin, &overlayMax);
+								for (int i = 0; i < kHalfSegments; ++i)
+								{
+									const float a0 = kPi * static_cast<float>(i) / static_cast<float>(kHalfSegments);
+									const float a1 = kPi * static_cast<float>(i + 1) / static_cast<float>(kHalfSegments);
+									const glm::vec3 p0 = cTop + glm::vec3(std::cos(a0) * r, std::sin(a0) * r, 0.0f);
+									const glm::vec3 p1 = cTop + glm::vec3(std::cos(a1) * r, std::sin(a1) * r, 0.0f);
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										p0, p1, color, thickness, &overlayMin, &overlayMax);
+								}
+								for (int i = 0; i < kHalfSegments; ++i)
+								{
+									const float a0 = kPi * (1.0f + static_cast<float>(i) / static_cast<float>(kHalfSegments));
+									const float a1 = kPi * (1.0f + static_cast<float>(i + 1) / static_cast<float>(kHalfSegments));
+									const glm::vec3 p0 = cBottom + glm::vec3(std::cos(a0) * r, std::sin(a0) * r, 0.0f);
+									const glm::vec3 p1 = cBottom + glm::vec3(std::cos(a1) * r, std::sin(a1) * r, 0.0f);
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										p0, p1, color, thickness, &overlayMin, &overlayMax);
+								}
+							}
+							else // 水平胶囊体 (Horizontal)
+							{
+								const glm::vec3 cRight = center + glm::vec3(halfLen, 0.0f, 0.0f);
+								const glm::vec3 cLeft = center - glm::vec3(halfLen, 0.0f, 0.0f);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									cLeft + glm::vec3(0.0f, r, 0.0f), cRight + glm::vec3(0.0f, r, 0.0f),
+									color, thickness, &overlayMin, &overlayMax);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									cLeft + glm::vec3(0.0f, -r, 0.0f), cRight + glm::vec3(0.0f, -r, 0.0f),
+									color, thickness, &overlayMin, &overlayMax);
+								for (int i = 0; i < kHalfSegments; ++i)
+								{
+									const float a0 = -kPi * 0.5f + kPi * static_cast<float>(i) / static_cast<float>(kHalfSegments);
+									const float a1 = -kPi * 0.5f + kPi * static_cast<float>(i + 1) / static_cast<float>(kHalfSegments);
+									const glm::vec3 p0 = cRight + glm::vec3(std::cos(a0) * r, std::sin(a0) * r, 0.0f);
+									const glm::vec3 p1 = cRight + glm::vec3(std::cos(a1) * r, std::sin(a1) * r, 0.0f);
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										p0, p1, color, thickness, &overlayMin, &overlayMax);
+								}
+								for (int i = 0; i < kHalfSegments; ++i)
+								{
+									const float a0 = kPi * 0.5f + kPi * static_cast<float>(i) / static_cast<float>(kHalfSegments);
+									const float a1 = kPi * 0.5f + kPi * static_cast<float>(i + 1) / static_cast<float>(kHalfSegments);
+									const glm::vec3 p0 = cLeft + glm::vec3(std::cos(a0) * r, std::sin(a0) * r, 0.0f);
+									const glm::vec3 p1 = cLeft + glm::vec3(std::cos(a1) * r, std::sin(a1) * r, 0.0f);
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										p0, p1, color, thickness, &overlayMin, &overlayMax);
+								}
+							}
+							drew = true;
+						}
+						if (const auto* poly2d = registry.try_get<PolygonCollider2DComponent>(handle))
+						{
+							const auto pts = poly2d->GetPoints();
+							const glm::vec3 offset { poly2d->Offset.x, poly2d->Offset.y, 0.0f };
+							const size_t ptCount = pts.size();
+							if (ptCount >= 3)
+							{
+								for (size_t i = 0; i < ptCount; ++i)
+								{
+									const glm::vec3 p0 = offset + glm::vec3(pts[i].x, pts[i].y, 0.0f);
+									const glm::vec3 p1 = offset + glm::vec3(pts[(i + 1) % ptCount].x, pts[(i + 1) % ptCount].y, 0.0f);
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										p0, p1, color, thickness, &overlayMin, &overlayMax);
+								}
+								drew = true;
+							}
+						}
+						if (const auto* chain2d = registry.try_get<ChainCollider2DComponent>(handle))
+						{
+							const auto pts = chain2d->GetPoints();
+							const glm::vec3 offset { chain2d->Offset.x, chain2d->Offset.y, 0.0f };
+							const size_t ptCount = pts.size();
+							if (ptCount >= 2)
+							{
+								const size_t segCount = chain2d->Loop ? ptCount : (ptCount - 1);
+								for (size_t i = 0; i < segCount; ++i)
+								{
+									const glm::vec3 p0 = offset + glm::vec3(pts[i].x, pts[i].y, 0.0f);
+									const glm::vec3 p1 = offset + glm::vec3(pts[(i + 1) % ptCount].x, pts[(i + 1) % ptCount].y, 0.0f);
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										p0, p1, color, thickness, &overlayMin, &overlayMax);
+								}
+								drew = true;
+							}
 						}
 						if (drew)
 							++colliderCount;
@@ -2352,6 +2563,249 @@ namespace World
 
 						if (drewAudio)
 							++audioCount;
+					}
+
+					// ---- 局部风场覆盖层 (Local Wind Gizmos: LocalWindComponent) ----
+					int windCount = 0;
+					const bool isFoliageToolMode = (m_Host.GetEditorToolMode() == EditorToolMode::Foliage);
+					for (const entt::entity handle : registry.view<TransformComponent, LocalWindComponent>())
+					{
+						const bool isSelected = (handle == selectedHandle);
+						if (!isSelected && !isFoliageToolMode)
+							continue;
+
+						const auto& [xform, wind] = registry.get<TransformComponent, LocalWindComponent>(handle);
+						const glm::mat4 world = xform.GetLocalMatrix();
+						const float r = std::max(0.1f, wind.Radius);
+
+						// 翡翠青绿高对比度风场主题色 (Emerald Wind Color)
+						const Wui::WuiColor windColor { 0.15f, 0.85f, 0.65f, isSelected ? 0.95f : 0.45f };
+						const Wui::WuiColor innerColor { 0.25f, 0.95f, 0.75f, isSelected ? 0.65f : 0.25f };
+						const float thickness = isSelected ? 1.8f : 1.1f;
+
+						if (wind.Type == LocalWindType::Radial)
+						{
+							// 1. 球形径向冲击波: 3 轴正交立体大圆环 (XY, YZ, ZX)
+							for (int axis = 0; axis < 3; ++axis)
+							{
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+									r, axis, windColor, thickness, &overlayMin, &overlayMax);
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+									r * 0.5f, axis, innerColor, 1.0f, &overlayMin, &overlayMax);
+							}
+							const float arrowLen = r * 0.35f;
+							const glm::vec3 dirs[6] = {
+								{  1.0f,  0.0f,  0.0f }, { -1.0f,  0.0f,  0.0f },
+								{  0.0f,  1.0f,  0.0f }, {  0.0f, -1.0f,  0.0f },
+								{  0.0f,  0.0f,  1.0f }, {  0.0f,  0.0f, -1.0f }
+							};
+							for (const auto& d : dirs)
+							{
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									d * (r * 0.15f), d * (r * 0.15f + arrowLen), windColor, thickness, &overlayMin, &overlayMax);
+							}
+						}
+						else if (wind.Type == LocalWindType::Vortex)
+						{
+							// 2. 切向旋转气旋: 顶、中、底三层水平圆环 + 垂直旋转中轴
+							const glm::vec3 axisDir = (glm::length(wind.Direction) > 1e-4f) ? glm::normalize(wind.Direction) : glm::vec3(0.0f, 1.0f, 0.0f);
+							const float h = r * 0.8f;
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								-axisDir * h, axisDir * h, windColor, thickness * 1.4f, &overlayMin, &overlayMax);
+
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+								r, 1, windColor, thickness, &overlayMin, &overlayMax);
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, axisDir * (h * 0.6f),
+								r * 0.7f, 1, innerColor, 1.0f, &overlayMin, &overlayMax);
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, -axisDir * (h * 0.6f),
+								r * 0.7f, 1, innerColor, 1.0f, &overlayMin, &overlayMax);
+
+							const glm::vec3 tanDirs[4] = {
+								{ r * 0.95f, 0.0f, 0.0f },
+								{ -r * 0.95f, 0.0f, 0.0f },
+								{ 0.0f, 0.0f, r * 0.95f },
+								{ 0.0f, 0.0f, -r * 0.95f }
+							};
+							for (int ti = 0; ti < 4; ++ti)
+							{
+								const glm::vec3 p = tanDirs[ti];
+								const glm::vec3 tan = glm::normalize(glm::cross(axisDir, glm::normalize(p))) * (r * 0.25f);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									p - tan * 0.5f, p + tan * 0.5f, windColor, thickness * 1.5f, &overlayMin, &overlayMax);
+							}
+						}
+						else
+						{
+							// 3. 局域定向风道: 沿风向的圆柱风道与中轴箭头
+							const glm::vec3 dir = (glm::length(wind.Direction) > 1e-4f) ? glm::normalize(wind.Direction) : glm::vec3(1.0f, 0.0f, 0.0f);
+							const float len = r * 1.2f;
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								-dir * (len * 0.5f), dir * (len * 0.5f), windColor, thickness * 1.5f, &overlayMin, &overlayMax);
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, -dir * (len * 0.4f),
+								r * 0.5f, 0, innerColor, 1.0f, &overlayMin, &overlayMax);
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, dir * (len * 0.4f),
+								r * 0.5f, 0, windColor, thickness, &overlayMin, &overlayMax);
+						}
+
+						++windCount;
+					}
+
+					// ---- 空间几何范围组件覆盖层 (DecalComponent, PartitionVolumeComponent, NavMeshObstacleComponent, SmartObjectComponent) ----
+					for (const entt::entity handle : registry.view<TransformComponent>())
+					{
+						const bool isSelected = (handle == selectedHandle);
+						const auto* decal = registry.try_get<DecalComponent>(handle);
+						const auto* partVol = registry.try_get<PartitionVolumeComponent>(handle);
+						const auto* obstacle = registry.try_get<NavMeshObstacleComponent>(handle);
+						const auto* smartObj = registry.try_get<SmartObjectComponent>(handle);
+
+						if (!decal && !partVol && !obstacle && !smartObj)
+							continue;
+
+						// 选中时始终绘制；或者在全局功能开关开启时绘制
+						if (!isSelected && !(partVol && m_ShowWorldPartition) && !(obstacle && showAllColliders))
+							continue;
+
+						const glm::mat4 world = WorldMatrixOf(registry, handle);
+						const float alpha = isSelected ? 0.95f : 0.50f;
+						const float thickness = isSelected ? 1.8f : 1.1f;
+
+						// 1. 贴花投影立体线框盒 (DecalComponent)
+						if (decal)
+						{
+							const Wui::WuiColor decalColor { 1.0f, 0.6f, 0.1f, alpha };
+							const glm::vec3 h = decal->Extents;
+							glm::vec3 corners[8];
+							for (int i = 0; i < 8; ++i)
+							{
+								corners[i] = glm::vec3 {
+									(i & 1) ? h.x : -h.x,
+									(i & 2) ? h.y : -h.y,
+									(i & 4) ? h.z : -h.z
+								};
+							}
+							for (int i = 0; i < 8; ++i)
+							{
+								for (int axis = 0; axis < 3; ++axis)
+								{
+									const int other = i ^ (1 << axis);
+									if (other > i)
+										PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+											corners[i], corners[other], decalColor, thickness, &overlayMin, &overlayMax);
+								}
+							}
+							// 沿前向 -Z 投影导向箭头
+							const float forwardLen = std::max(0.2f, h.z * 1.3f);
+							const glm::vec3 arrowTip { 0.0f, 0.0f, -forwardLen };
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								glm::vec3(0.0f), arrowTip, decalColor, thickness * 1.5f, &overlayMin, &overlayMax);
+							const float headSize = std::clamp(forwardLen * 0.15f, 0.05f, 0.5f);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								arrowTip, arrowTip + glm::vec3(headSize, 0.0f, headSize), decalColor, thickness * 1.4f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								arrowTip, arrowTip + glm::vec3(-headSize, 0.0f, headSize), decalColor, thickness * 1.4f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								arrowTip, arrowTip + glm::vec3(0.0f, headSize, headSize), decalColor, thickness * 1.4f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								arrowTip, arrowTip + glm::vec3(0.0f, -headSize, headSize), decalColor, thickness * 1.4f, &overlayMin, &overlayMax);
+						}
+
+						// 2. 大世界流送分区盒 (PartitionVolumeComponent)
+						if (partVol && partVol->Active)
+						{
+							const Wui::WuiColor partColor { 0.2f, 0.7f, 1.0f, alpha };
+							const glm::vec3 h = partVol->HalfExtents;
+							glm::vec3 corners[8];
+							for (int i = 0; i < 8; ++i)
+							{
+								corners[i] = glm::vec3 {
+									(i & 1) ? h.x : -h.x,
+									(i & 2) ? h.y : -h.y,
+									(i & 4) ? h.z : -h.z
+								};
+							}
+							for (int i = 0; i < 8; ++i)
+							{
+								for (int axis = 0; axis < 3; ++axis)
+								{
+									const int other = i ^ (1 << axis);
+									if (other > i)
+										PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+											corners[i], corners[other], partColor, thickness, &overlayMin, &overlayMax);
+								}
+							}
+						}
+
+						// 3. 动态导航障碍盒 (NavMeshObstacleComponent)
+						if (obstacle)
+						{
+							const Wui::WuiColor obsColor { 0.95f, 0.85f, 0.15f, alpha };
+							const glm::vec3 h = obstacle->Extents;
+							glm::vec3 corners[8];
+							for (int i = 0; i < 8; ++i)
+							{
+								corners[i] = glm::vec3 {
+									(i & 1) ? h.x : -h.x,
+									(i & 2) ? h.y : -h.y,
+									(i & 4) ? h.z : -h.z
+								};
+							}
+							for (int i = 0; i < 8; ++i)
+							{
+								for (int axis = 0; axis < 3; ++axis)
+								{
+									const int other = i ^ (1 << axis);
+									if (other > i)
+										PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+											corners[i], corners[other], obsColor, thickness, &overlayMin, &overlayMax);
+								}
+							}
+						}
+
+						// 4. 智能对象交互距离与槽位范围 (SmartObjectComponent)
+						if (smartObj && smartObj->Enabled)
+						{
+							const Wui::WuiColor smartColor { 0.1f, 0.9f, 0.6f, alpha };
+							const float r = std::max(0.1f, smartObj->InteractionDistance);
+
+							// 实体原点水平面交互大圆环 (XZ 平面)
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								glm::vec3(0.0f), r, 1, smartColor, thickness * 1.3f, &overlayMin, &overlayMax);
+
+							// 3 轴辅助立体圆环 (半透明)
+							const Wui::WuiColor dimSmartColor { smartColor.R, smartColor.G, smartColor.B, smartColor.A * 0.4f };
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								glm::vec3(0.0f), r, 0, dimSmartColor, 1.0f, &overlayMin, &overlayMax);
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								glm::vec3(0.0f), r, 2, dimSmartColor, 1.0f, &overlayMin, &overlayMax);
+
+							// 从原点到槽位偏移的引导线
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								glm::vec3(0.0f), smartObj->SlotOffset, smartColor, thickness, &overlayMin, &overlayMax);
+
+							// 槽位点朝向箭头 (FacingAngleDeg)
+							const float rad = glm::radians(smartObj->FacingAngleDeg);
+							const glm::vec3 facingDir { std::sin(rad), 0.0f, -std::cos(rad) };
+							const glm::vec3 sideDir { std::cos(rad), 0.0f, std::sin(rad) };
+							const float arrowLen = std::clamp(r * 0.4f, 0.3f, 1.2f);
+							const glm::vec3 slotTip = smartObj->SlotOffset + facingDir * arrowLen;
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								smartObj->SlotOffset, slotTip, smartColor, thickness * 1.5f, &overlayMin, &overlayMax);
+
+							const float headLen = arrowLen * 0.25f;
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								slotTip, slotTip - facingDir * headLen + sideDir * (headLen * 0.6f),
+								smartColor, thickness * 1.4f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								slotTip, slotTip - facingDir * headLen - sideDir * (headLen * 0.6f),
+								smartColor, thickness * 1.4f, &overlayMin, &overlayMax);
+
+							// 槽位微型定位十字
+							const float slotCross = 0.1f;
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								smartObj->SlotOffset - sideDir * slotCross, smartObj->SlotOffset + sideDir * slotCross,
+								smartColor, 1.5f, &overlayMin, &overlayMax);
+						}
 					}
 				}
 				// 取证(与相机视锥同口径):脚本可断言"画了几个、覆盖到哪",不靠像素。

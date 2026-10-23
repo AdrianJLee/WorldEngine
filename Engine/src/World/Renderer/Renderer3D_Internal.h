@@ -11,6 +11,7 @@
 #include "World/Renderer/ShaderUtils.h"
 
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -248,6 +249,8 @@ using namespace Renderer3DDetail;   // 等价于拆分前的文件内匿名命�
 			Renderer3D::SceneStatistics SceneStats;
 			// D8a2:阴影贴图边长(Init 时从项目清单取;清单校验保证是 2 的幂)。
 			uint32_t ShadowMapSize = Renderer3D::DefaultShadowMapSize;
+			uint32_t CurrentShadowCascade = 0;
+			bool CascadeDebugVisualization = false;
 		};
 State& GetState();
 

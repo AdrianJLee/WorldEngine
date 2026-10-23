@@ -131,7 +131,7 @@ namespace World
 			}
 			else
 			{
-				const auto& registry = activeScene->GetRegistry();
+				const auto& registry = std::as_const(*activeScene).GetRegistry();
 				for (auto [handle, comp] : registry.view<TerrainComponent>().each())
 				{
 					m_BoundEntity = Entity(activeScene.get(), handle);

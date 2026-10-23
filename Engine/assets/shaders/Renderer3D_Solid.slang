@@ -209,39 +209,57 @@ VS_OUTPUT VSMainSkinned(VS_SKINNED_INPUT input)
     return output;
 }
 
-// 方向光 3×3 PCF:返回 1 = 完全受光,0 = 完全在阴影里。
+// 方向光 4 级 CSM 2×2 Atlas 采样与 3×3 PCF:返回 1 = 完全受光,0 = 完全在阴影里。
+// 级联选择:按世界坐标测试 4 个级联视锥空间投影坐标,优先落入最高精度的近景级联。
 // 深度空间换算必须区分后端:Vulkan 的裁剪空间 z∈[0,1] 就是深度缓冲值;OpenGL 的
-// z∈[-1,1] 会被固定管线映射成 (z+1)/2。由 u_LightCounts.z 在运行时选择,
-// 两个后端共用同一份着色器(SceneRenderer 已按后端决定是否补 z 重映射)。
-float SampleDirectionalShadow(float3 worldPosition, float3 normal, float3 toLightDirection)
+// z∈[-1,1] 会被固定管线映射成 (z+1)/2。由 u_LightCounts.z & 1u 在运行时选择。
+float SampleDirectionalShadow(float3 worldPosition, float3 normal, float3 toLightDirection, out int outCascadeIndex)
 {
-    float4 shadowPosition = mul(u_ShadowViewProjections[0], float4(worldPosition, 1.0f));
-    float3 projected = shadowPosition.xyz / max(shadowPosition.w, 1e-5f);
-    float2 uv = projected.xy * 0.5f + 0.5f;
+    outCascadeIndex = -1;
+    float4 shadowPosition = float4(0, 0, 0, 1);
+    float3 projected = float3(0, 0, 0);
+    float2 localUV = float2(-1, -1);
+    int matchedCascade = -1;
 
-    for (int c = 0; c < 4; ++c)
+    float matchedDepth = 0.0f;
+    [unroll] for (int c = 0; c < 4; ++c)
     {
         shadowPosition = mul(u_ShadowViewProjections[c], float4(worldPosition, 1.0f));
         projected = shadowPosition.xyz / max(shadowPosition.w, 1e-5f);
-        uv = projected.xy * 0.5f + 0.5f;
-        if (uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f)
+        localUV = projected.xy * 0.5f + 0.5f;
+        const float d = ((u_LightCounts.z & 1u) > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z;
+        if (localUV.x >= 0.0f && localUV.x <= 1.0f && localUV.y >= 0.0f && localUV.y <= 1.0f
+            && d >= 0.0f && d <= 1.0f)
+        {
+            matchedCascade = c;
+            matchedDepth = d;
             break;
+        }
     }
 
-    if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f)
-        return 1.0f;
+    if (matchedCascade < 0)
+        return 1.0f; // 超出所有级联或视锥外，完全不受阴影遮挡
 
-    const float depth = (u_LightCounts.z > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z;
+    outCascadeIndex = matchedCascade;
+
+    // 映射至 2x2 Atlas 象限
+    const float2 quadOffset = float2(float(matchedCascade % 2) * 0.5f, float(matchedCascade / 2) * 0.5f);
+    const float2 atlasUV = quadOffset + localUV * 0.5f;
+
+    const float depth = matchedDepth;
     const float cosTheta = saturate(dot(normal, toLightDirection));
-    const float bias = max(u_ShadowParams.y * (1.0f - cosTheta), u_ShadowParams.y * 0.25f);
-    const float2 texel = u_ShadowParams.w / max(u_ShadowParams.z, 1.0f);
+    const float biasBase = max(u_ShadowParams.y, 0.002f);
+    const float bias = max(biasBase * (1.0f - cosTheta), biasBase * 0.25f);
+    const float2 texel = (u_ShadowParams.w / max(u_ShadowParams.z, 1.0f)) * 0.5f;
+
     float visible = 0.0f;
     [unroll] for (int offsetY = -1; offsetY <= 1; ++offsetY)
     {
         [unroll] for (int offsetX = -1; offsetX <= 1; ++offsetX)
         {
-            const float sampledDepth = u_ShadowMap.Sample(
-                uv + float2(offsetX, offsetY) * texel).r;
+            float2 sampleUV = atlasUV + float2(offsetX, offsetY) * texel;
+            sampleUV = clamp(sampleUV, quadOffset + texel * 0.5f, quadOffset + float2(0.5f, 0.5f) - texel * 0.5f);
+            const float sampledDepth = u_ShadowMap.Sample(sampleUV).r;
             visible += (depth - bias <= sampledDepth) ? 1.0f : 0.0f;
         }
     }
@@ -291,6 +309,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     const float3 viewDirection = float3(0.0f, 0.0f, 1.0f);
     float3 litColor = albedo * u_Ambient.rgb * u_Ambient.a;
 
+    int cascadeIndex = -1;
     const uint lightCount = u_LightCounts.x + u_LightCounts.y + u_LightCounts.w;
     for (uint lightIndex = 0; lightIndex < lightCount && lightIndex < 8; ++lightIndex)
     {
@@ -333,8 +352,15 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
 
         const float lambert = saturate(dot(normal, toLight));
         float visibility = 1.0f;
-        if (lightType > 0.5f && lightType < 1.5f && u_ShadowParams.x > 0.5f)
-            visibility = SampleDirectionalShadow(input.v_WorldPosition, normal, toLight);
+        if (lightType > 0.5f && lightType < 1.5f && (u_ShadowParams.x > 0.5f || (u_LightCounts.z & 0x100u) != 0u))
+        {
+            int cIndex = -1;
+            const float shadowVis = SampleDirectionalShadow(input.v_WorldPosition, normal, toLight, cIndex);
+            if (u_ShadowParams.x > 0.5f)
+                visibility = shadowVis;
+            if (cIndex >= 0)
+                cascadeIndex = cIndex;
+        }
 
         const float3 radiance = light.ColorIntensity.rgb * light.ColorIntensity.a * attenuation * visibility;
         const float diffuse = lambert * lerp(1.0f, 0.35f, saturate(u_MetallicRoughness.x));
@@ -345,6 +371,34 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
                 * lerp(0.04f, 1.0f, saturate(u_MetallicRoughness.x))
             : 0.0f;
         litColor += albedo * radiance * diffuse + radiance * specular;
+    }
+
+    if ((u_LightCounts.z & 0x100u) != 0u && cascadeIndex < 0)
+    {
+        [unroll] for (int c = 0; c < 4; ++c)
+        {
+            float4 sp = mul(u_ShadowViewProjections[c], float4(input.v_WorldPosition, 1.0f));
+            float3 pr = sp.xyz / max(sp.w, 1e-5f);
+            float2 uv = pr.xy * 0.5f + 0.5f;
+            const float d = ((u_LightCounts.z & 1u) > 0u) ? (pr.z * 0.5f + 0.5f) : pr.z;
+            if (uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f
+                && d >= 0.0f && d <= 1.0f)
+            {
+                cascadeIndex = c;
+                break;
+            }
+        }
+    }
+
+    if ((u_LightCounts.z & 0x100u) != 0u && cascadeIndex >= 0)
+    {
+        float3 cascadeTints[4] = {
+            float3(1.0f, 0.25f, 0.25f), // 0: 红色 (近景)
+            float3(0.25f, 1.0f, 0.25f), // 1: 绿色
+            float3(0.25f, 0.5f, 1.0f),  // 2: 蓝色
+            float3(1.0f, 1.0f, 0.25f)   // 3: 黄色 (远景)
+        };
+        litColor *= cascadeTints[clamp(cascadeIndex, 0, 3)];
     }
 
     const float3 emissive = pow(saturate(u_Emissive.rgb), 2.2f);

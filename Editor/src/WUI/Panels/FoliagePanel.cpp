@@ -252,7 +252,7 @@ namespace World
 			}
 			else
 			{
-				for (auto [handle, comp] : activeScene->GetRegistry().view<FoliageComponent>().each())
+				for (auto [handle, comp] : std::as_const(*activeScene).GetRegistry().view<FoliageComponent>().each())
 				{
 					m_BoundEntity = Entity(activeScene.get(), handle);
 					break;
@@ -696,7 +696,7 @@ namespace World
 				std::shared_ptr<TerrainData> curTerrain = nullptr;
 				if (activeScene)
 				{
-					for (auto [handle, comp] : activeScene->GetRegistry().view<TerrainComponent>().each())
+					for (auto [handle, comp] : std::as_const(*activeScene).GetRegistry().view<TerrainComponent>().each())
 					{
 						curTerrain = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
 						break;
@@ -830,7 +830,7 @@ namespace World
 			glm::mat4 terrainWorld { 1.0f };
 			if (activeScene)
 			{
-				for (auto [handle, comp] : activeScene->GetRegistry().view<TerrainComponent>().each())
+				for (auto [handle, comp] : std::as_const(*activeScene).GetRegistry().view<TerrainComponent>().each())
 				{
 					Entity e(activeScene.get(), handle);
 					if (e.HasComponent<TransformComponent>())
@@ -888,6 +888,38 @@ namespace World
 			host.MarkDocumentDirty();
 		}
 		curY += 34.0f;
+
+		// 6. 局部风场动力学 (Local Wind Dynamics)
+		Wui::Label(ctx, { startX, curY + 4.0f }, "局部风场动力学 (Local Wind Dynamics)", theme.Accent, theme.FontSizeBody);
+		curY += 26.0f;
+
+		const size_t localWindCount = FoliageRenderer::GetLocalWindCount();
+		char windInfo[128] = {};
+		std::snprintf(windInfo, sizeof(windInfo), "活跃局部风源: %zu / %zu (支持径向冲击/气旋/风道)", localWindCount, kMaxLocalWinds);
+		Wui::Label(ctx, { startX, curY + 2.0f }, windInfo, localWindCount > 0 ? theme.Success : theme.TextMuted, theme.FontSizeSmall);
+		curY += 24.0f;
+
+		if (Wui::Button(ctx, Wui::HashId("foliage.btn.test_impulse"), { startX, curY, halfW, 28.0f }, "💥 触发径向冲击 (Radial)", theme))
+		{
+			FoliageRenderer::AddLocalWind(glm::vec3(0.0f, 0.0f, 0.0f), 18.0f, 4.5f, 3.5f, 1.2f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
+			m_StatusFeedback = "已触发局部径向冲击波 (半径 18m, 强度 4.5)";
+		}
+		Wui::Tooltip(ctx, { startX, curY, halfW, 28.0f }, "触发一次球形径向冲击波，观察植被辐射状倒伏与阻尼回弹");
+
+		if (Wui::Button(ctx, Wui::HashId("foliage.btn.test_vortex"), { startX + halfW + theme.PadSmall, curY, halfW, 28.0f }, "🌪 触发旋转气旋 (Vortex)", theme))
+		{
+			FoliageRenderer::AddLocalWind(glm::vec3(0.0f, 0.0f, 0.0f), 15.0f, 3.8f, 5.0f, 1.5f, LocalWindType::Vortex, glm::vec3(0.0f, 1.0f, 0.0f));
+			m_StatusFeedback = "已触发局部旋转气旋 (半径 15m, 强度 3.8)";
+		}
+		Wui::Tooltip(ctx, { startX + halfW + theme.PadSmall, curY, halfW, 28.0f }, "触发切向旋转气旋，观察植被螺旋扭曲摆动");
+		curY += 32.0f;
+
+		if (Wui::Button(ctx, Wui::HashId("foliage.btn.clear_winds"), { startX, curY, contentW, 24.0f }, "清空测试风源", theme))
+		{
+			FoliageRenderer::ClearLocalWinds();
+			m_StatusFeedback = "已清空所有局部风源";
+		}
+		curY += 32.0f;
 	}
 
 	void FoliagePanel::RenderEraseTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host)

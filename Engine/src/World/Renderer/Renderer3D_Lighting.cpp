@@ -19,6 +19,34 @@ void Renderer3D::ApplyShadowCascades(LightRig& rig, const glm::mat4 cascades[4],
 			rig.Uniforms.ShadowViewProjections[i] = cascades[i];
 		rig.Uniforms.CascadeSplits = splits;
 		rig.Uniforms.ShadowParams.x = 1.0f;
+		rig.Uniforms.ShadowParams.y = 0.0025f;
+		rig.Uniforms.ShadowParams.w = 1.0f;
+		const char* csmEnv = std::getenv("WLD_CSM_DEBUG");
+		const bool envDebug = (csmEnv != nullptr && std::strcmp(csmEnv, "0") != 0 && std::strlen(csmEnv) > 0);
+		if (IsCascadeDebugVisualization() || envDebug)
+		{
+			rig.Uniforms.LightCounts.z |= 0x100u;
+		}
+	}
+
+
+void Renderer3D::SetShadowCascade(uint32_t cascade){
+		GetState().CurrentShadowCascade = cascade;
+	}
+
+
+uint32_t Renderer3D::GetShadowCascade(){
+		return GetState().CurrentShadowCascade;
+	}
+
+
+void Renderer3D::SetCascadeDebugVisualization(bool enabled){
+		GetState().CascadeDebugVisualization = enabled;
+	}
+
+
+bool Renderer3D::IsCascadeDebugVisualization(){
+		return GetState().CascadeDebugVisualization;
 	}
 
 
@@ -123,6 +151,7 @@ uint32_t Renderer3D::SubmitShadow(const Ref<Mesh>& mesh, const glm::mat4& transf
 		// 阴影只需要 u_Model(顶点按 u_ShadowViewProjection × u_Model 变换),其余字段留默认。
 		ObjectUniforms uniforms;
 		uniforms.Model = transform;
+		uniforms.EntityId.y = static_cast<int32_t>(state.CurrentShadowCascade);
 		WriteObjectUniforms(state, slot, index, uniforms,
 			state.ShadowUniformBuffers[slot][index], state.ShadowObjectSets[slot][index]);
 
@@ -158,6 +187,7 @@ uint32_t Renderer3D::SubmitShadowSubmesh(const Ref<Mesh>& mesh, uint32_t submesh
 		// 阴影只需要 u_Model(顶点按 u_ShadowViewProjection × u_Model 变换),其余字段留默认。
 		ObjectUniforms uniforms;
 		uniforms.Model = transform;
+		uniforms.EntityId.y = static_cast<int32_t>(state.CurrentShadowCascade);
 		WriteObjectUniforms(state, slot, index, uniforms,
 			state.ShadowUniformBuffers[slot][index], state.ShadowObjectSets[slot][index]);
 
@@ -174,6 +204,7 @@ void Renderer3D::EndShadowPass(){
 		State& state = GetState();
 		state.CommandBuffer = nullptr;
 		state.ShadowObjectIndex = 0;
+		state.CurrentShadowCascade = 0;
 	}
 
 

@@ -1196,6 +1196,16 @@ function ui:isOpen() end
 ---@class LevelEntityComponent
 ---@field DataLayerMask number
 
+-- Component fields are exposed through Entity:GetComponent("LocalWindComponent"); there is no runtime global named LocalWindComponent.
+---@class LocalWindComponent
+---@field Strength number
+---@field Direction vec3
+---@field Type number
+---@field Radius number
+---@field Decay number
+---@field ImpulseActive number
+---@field Speed number
+
 -- Component fields are exposed through Entity:GetComponent("MeshCollider3DComponent"); there is no runtime global named MeshCollider3DComponent.
 ---@class MeshCollider3DComponent
 ---@field Mode number
@@ -1653,6 +1663,8 @@ function ui:isOpen() end
 ---@field Joint string Short alias for "JointComponent".
 ---@field LevelEntityComponent string Registered component type name "LevelEntityComponent".
 ---@field LevelEntity string Short alias for "LevelEntityComponent".
+---@field LocalWindComponent string Registered component type name "LocalWindComponent".
+---@field LocalWind string Short alias for "LocalWindComponent".
 ---@field MeshCollider3DComponent string Registered component type name "MeshCollider3DComponent".
 ---@field MeshCollider3D string Short alias for "MeshCollider3DComponent".
 ---@field MeshLODComponent string Registered component type name "MeshLODComponent".

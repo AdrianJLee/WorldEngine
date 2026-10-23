@@ -69,6 +69,7 @@ struct World::WeatherSystemComponent
 struct World::BiomePCGComponent
 struct World::EQSComponent
 struct World::FoliageInteractionComponent
+struct World::LocalWindComponent
 struct World::UUID
 struct World::CameraSettings
 enum World::MeshRendererComponent::PrimitiveShape
@@ -82,6 +83,7 @@ enum World::SmartObjectSlotState
 enum World::ParticleEmitterType
 enum World::ParticleRenderMode
 enum World::ParticleBlendMode
+enum World::LocalWindType
 enum World::VfxPlaybackState
 
 

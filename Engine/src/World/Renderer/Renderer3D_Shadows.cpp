@@ -31,7 +31,12 @@ void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const Obje
 			}
 			if (!set)
 				set = Renderer::GetDevice()->CreateDescriptorSet(state.ObjectLayout);
-			buffer->SetData(&uniforms, sizeof(uniforms));
+			ObjectUniforms copy = uniforms;
+			if (&buffer >= &state.ShadowUniformBuffers[0][0] && &buffer <= &state.ShadowUniformBuffers[Renderer::FramesInFlight - 1][kObjectsPerFrame - 1])
+			{
+				copy.EntityId.y = static_cast<int32_t>(state.CurrentShadowCascade);
+			}
+			buffer->SetData(&copy, sizeof(copy));
 			Rhi::DescriptorWrite write;
 			write.Binding = 1;
 			write.Type = Rhi::DescriptorType::UniformBuffer;

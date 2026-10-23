@@ -1464,6 +1464,9 @@ void PropertiesPanel::OpenAddComponentPicker(Wui::WuiContext& ctx){
 		m_AddScroll = 0.0f;
 		m_AddCategoryAll = true;
 		m_AddCategoryFilter.clear();
+		m_AddCategoryScroll = 0.0f;
+		m_AddCategoryThumbDragging = false;
+		m_AddCategoryThumbGrabOffset = 0.0f;
 		m_AddOpenedFrame = ctx.Frame();
 		m_AddOpen = true;
 		const Wui::WuiId modalId = Wui::HashId("prop.add.modal");

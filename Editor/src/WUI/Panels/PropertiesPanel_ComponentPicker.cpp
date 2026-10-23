@@ -174,9 +174,9 @@ void PropertiesPanel::DrawAddComponentPicker(Wui::WuiContext& ctx, Entity entity
 			m_AddHighlight = -1;
 		}
 
-		// ---- 左侧分类栏:全部 + 出现过的 CategoryPath(带计数),点击过滤 ----
+		// ---- 左侧分类栏: 全部 + 出现过的 CategoryPath(带计数),点击过滤 ----
 		// 分栏标签 = 左列(fixed 168px),右列是候选列表;两者等高,都在模态正文区内。
-		// 行数超出栏高时按视口外不绘制/不登记处理(分类数量少,正常不会触发)。
+		// 支持悬停滚轮滚动、可视区间动态裁剪、按需绘制滚动滑块、保证无论多少分类均可 100% 查看。
 		{
 			std::map<std::string, int> counts;
 			int total = 0;
@@ -187,47 +187,115 @@ void PropertiesPanel::DrawAddComponentPicker(Wui::WuiContext& ctx, Entity entity
 				++counts[schema->CategoryPath];
 				++total;
 			}
+
 			// 侧栏底色用列表/输入框的 ContentBg(比模态面板底更深一档,形成"分栏"层次)。
 			Wui::PanelBackground(ctx, sidebarRect, theme.ContentBg, 4.0f);
-			// W3.5:"只裁剪、不滚动"走库件 P1c-LIB1 的 Wui::ClipScope(RAII):
-			// 渲染裁剪(ClipPush/ClipPop)与裁剪栈(PushClipRect/PopClipRect)同进同出 ——
-			// 比原来只发渲染命令多维护 ClipAllows(焦点环/条目剔除)一处,作用域位置逐字对齐
-			// (原来 ClipPop 是本块最后一条语句,现在 = 析构点)。
-			Wui::ClipScope sidebarClip(ctx, sidebarRect);
-			float itemY = sidebarRect.Y + 4.0f;
-			// filter:"" + all=true → 全部;all=false 时 filter 为空 = 未分类,非空 = 该分类。
-			const auto sidebarItem = [&](const std::string& id, const std::string& label,
-				bool all, const std::string& filter, int count)
-			{
-				const Wui::WuiRect item { sidebarRect.X + 4.0f, itemY, sidebarRect.W - 8.0f, 22.0f };
-				itemY += 22.0f;
-				if (item.Y + item.H > sidebarRect.Y + sidebarRect.H + 0.5f)
-					return;   // 栏高之外:不绘制也不登记(与滚动区同一口径)
-				const bool selectedCategory = m_AddCategoryAll == all && m_AddCategoryFilter == filter;
-				if (selectedCategory)
-					Wui::PanelBackground(ctx, item, theme.ActiveBg, 3.0f);
-				const std::string text = label + "  (" + std::to_string(count) + ")";
-				if (Wui::MenuItem(ctx, Wui::HashId(id.c_str()), item, text, true, theme))
-				{
-					m_AddCategoryAll = all;
-					m_AddCategoryFilter = filter;
-					m_AddScroll = 0.0f;
-					m_AddHighlight = -1;
-				}
+
+			// 1. 侧栏内容与滚动范围度量
+			const int totalCategoryItems = 1 + static_cast<int>(counts.size());
+			const float totalSidebarHeight = static_cast<float>(totalCategoryItems) * kPickerCategoryRow + 8.0f;
+			const float maxCategoryScroll = std::max(0.0f, totalSidebarHeight - sidebarRect.H);
+			const bool hasCategoryScrollbar = maxCategoryScroll > 0.0f;
+
+			// 悬停在侧栏时滚轮驱动侧栏滚动 (30px/notch)
+			if (ctx.IsHovered(sidebarRect) && ctx.Input().Wheel != 0.0f)
+				m_AddCategoryScroll -= ctx.Input().Wheel * 30.0f;
+			m_AddCategoryScroll = std::clamp(m_AddCategoryScroll, 0.0f, maxCategoryScroll);
+
+			const float trackW = kPickerCategoryScrollbarWidth;
+			const Wui::WuiRect categoryScrollTrack {
+				sidebarRect.X + sidebarRect.W - trackW - 2.0f,
+				sidebarRect.Y + 2.0f,
+				trackW,
+				sidebarRect.H - 4.0f
 			};
-			sidebarItem("prop.add.cat.all", Wui::Tr("panel.properties.add.all", "All"), true, std::string(), total);
-			for (const auto& [category, count] : counts)
+			const float itemWidth = sidebarRect.W - 8.0f - (hasCategoryScrollbar ? (trackW + 2.0f) : 0.0f);
+
+			// 2. 侧栏裁剪与条目渲染 (RAII ClipScope)
 			{
-				if (category.empty())
-					continue;
-				sidebarItem("prop.add.cat." + CategoryKeyName(category), CategoryLabel(category),
-					false, category, count);
+				Wui::ClipScope sidebarClip(ctx, sidebarRect);
+				float itemY = sidebarRect.Y + 4.0f - m_AddCategoryScroll;
+
+				const auto sidebarItem = [&](const std::string& id, const std::string& label,
+					bool all, const std::string& filter, int count)
+				{
+					const Wui::WuiRect item { sidebarRect.X + 4.0f, itemY, itemWidth, kPickerCategoryRow };
+					itemY += kPickerCategoryRow;
+
+					// 垂直可视区间检查: 仅在条目落在可视区间内才绘制/登记，不再因为单向超过直接 return 导致后续分类全部丢失
+					if (item.Y + item.H < sidebarRect.Y || item.Y > sidebarRect.Y + sidebarRect.H)
+						return;
+
+					const bool selectedCategory = m_AddCategoryAll == all && m_AddCategoryFilter == filter;
+					if (selectedCategory)
+						Wui::PanelBackground(ctx, item, theme.ActiveBg, 3.0f);
+					const std::string text = label + "  (" + std::to_string(count) + ")";
+					if (Wui::MenuItem(ctx, Wui::HashId(id.c_str()), item, text, true, theme))
+					{
+						m_AddCategoryAll = all;
+						m_AddCategoryFilter = filter;
+						m_AddScroll = 0.0f;
+						m_AddHighlight = -1;
+					}
+				};
+
+				sidebarItem("prop.add.cat.all", Wui::Tr("panel.properties.add.all", "All"), true, std::string(), total);
+				for (const auto& [category, count] : counts)
+				{
+					if (category.empty())
+						continue;
+					sidebarItem("prop.add.cat." + CategoryKeyName(category), CategoryLabel(category),
+						false, category, count);
+				}
+				if (counts.count(std::string()) > 0)
+				{
+					sidebarItem("prop.add.cat.uncategorized",
+						Wui::Tr("panel.properties.add.uncategorized", "Uncategorized"), false, std::string(),
+						counts[std::string()]);
+				}
 			}
-			if (counts.count(std::string()) > 0)
-				sidebarItem("prop.add.cat.uncategorized",
-					Wui::Tr("panel.properties.add.uncategorized", "Uncategorized"), false, std::string(),
-					counts[std::string()]);
-			// (析构点 = 原来的 ClipPop:作用域随本块结束)
+
+			// 3. 侧栏精致滚动条 (右侧留出 6px 轨道，支持点击轨道与拖拽滑块定位)
+			if (hasCategoryScrollbar)
+			{
+				const float thumbLength = std::clamp(categoryScrollTrack.H * categoryScrollTrack.H / std::max(1.0f, totalSidebarHeight),
+					20.0f, categoryScrollTrack.H);
+				const float travel = std::max(0.0f, categoryScrollTrack.H - thumbLength);
+				const float fraction = maxCategoryScroll > 0.0f ? std::clamp(m_AddCategoryScroll / maxCategoryScroll, 0.0f, 1.0f) : 0.0f;
+				const Wui::WuiRect thumb {
+					categoryScrollTrack.X,
+					categoryScrollTrack.Y + travel * fraction,
+					categoryScrollTrack.W,
+					thumbLength
+				};
+
+				Wui::PanelBackground(ctx, categoryScrollTrack, theme.PanelHeader, 2.0f);
+				Wui::PanelBackground(ctx, thumb,
+					(m_AddCategoryThumbDragging || ctx.IsHovered(thumb)) ? theme.Accent : theme.ButtonHover, 2.0f);
+
+				if (ctx.IsClicked(thumb))
+				{
+					m_AddCategoryThumbDragging = true;
+					m_AddCategoryThumbGrabOffset = ctx.Input().MousePos.y - thumb.Y;
+				}
+				else if (ctx.IsClicked(categoryScrollTrack))
+				{
+					m_AddCategoryScroll = std::clamp((ctx.Input().MousePos.y - categoryScrollTrack.Y - thumbLength * 0.5f)
+						/ std::max(1.0f, travel) * maxCategoryScroll, 0.0f, maxCategoryScroll);
+				}
+				if (m_AddCategoryThumbDragging)
+				{
+					if (!ctx.Input().MouseDown[0])
+						m_AddCategoryThumbDragging = false;
+					else
+						m_AddCategoryScroll = std::clamp((ctx.Input().MousePos.y - m_AddCategoryThumbGrabOffset - categoryScrollTrack.Y)
+							/ std::max(1.0f, travel) * maxCategoryScroll, 0.0f, maxCategoryScroll);
+				}
+			}
+			else
+			{
+				m_AddCategoryThumbDragging = false;
+			}
 		}
 
 		// ---- 列表:本帧最终搜索词决定行(与用户看到的同帧一致)----
@@ -241,7 +309,9 @@ void PropertiesPanel::DrawAddComponentPicker(Wui::WuiContext& ctx, Entity entity
 		const float maxScroll = std::max(0.0f, rowsHeight - listClip.H);
 		// 滚轮:落在大列表区由 BeginScrollArea 处理;落在模态其它位置(侧栏/搜索框/行间空白)
 		// 同样翻列表 —— 居中模态里"滚轮在哪都翻列表"才符合预期。
-		if (!ctx.IsHovered(listClip) && ctx.IsHovered(frame) && ctx.Input().Wheel != 0.0f)
+		// 滚轮:落在大家表区用 BeginScrollArea 处理;落在模态其它位置(搜索框/行间空白且不在侧栏内)
+		// 同样翻列表 —— 确保滚轮在侧栏时不误滚大列表。
+		if (!ctx.IsHovered(sidebarRect) && !ctx.IsHovered(listClip) && ctx.IsHovered(frame) && ctx.Input().Wheel != 0.0f)
 			m_AddScroll -= ctx.Input().Wheel * 40.0f;
 		if (std::getenv("WLD_TRACE_UI") && ctx.Input().Wheel != 0.0f)
 			WLD_CORE_INFO("[ui] picker wheel {0} at ({1},{2}) listHover={3} frameHover={4} frame=({5},{6},{7},{8}) scroll={9} max={10}",
@@ -491,6 +561,9 @@ void PropertiesPanel::DrawAddComponentPicker(Wui::WuiContext& ctx, Entity entity
 			m_AddScroll = 0.0f;
 			m_AddThumbDragging = false;
 			m_AddThumbGrabOffset = 0.0f;
+			m_AddCategoryScroll = 0.0f;
+			m_AddCategoryThumbDragging = false;
+			m_AddCategoryThumbGrabOffset = 0.0f;
 		}
 	}
 

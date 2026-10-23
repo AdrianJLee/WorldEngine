@@ -70,7 +70,7 @@ namespace World
 		static void RenderTerrain(const TerrainData& data, const TerrainRenderSettings& settings, const glm::mat4& viewProjection, const glm::vec3& cameraPosition);
 
 		// 阴影通道渲染
-		static void RenderTerrainShadow(const TerrainData& data, const TerrainRenderSettings& settings);
+		static void RenderTerrainShadow(const TerrainData& data, const TerrainRenderSettings& settings, uint32_t cascadeIndex = 0);
 
 		// 依据 AssetRef 或默认参数获取/加载 TerrainData
 		static std::shared_ptr<TerrainData> GetOrCreateTerrainData(const AssetRef& asset, float cellSize = 1.0f, float heightScale = 1.0f);

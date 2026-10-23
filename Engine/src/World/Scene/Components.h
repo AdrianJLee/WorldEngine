@@ -167,7 +167,7 @@ namespace World
 		VfxComponent() = default;
 
 		WE_SCHEMA_BODY(World, VfxComponent, Component)
-			WE_SCHEMA_META(Category("Renderer"),
+			WE_SCHEMA_META(Category("Effects"),
 				Doc("Next-generation unified VFX component for multi-emitter assets, ribbons, meshes and dynamic lights."))
 			WE_FIELD(Effect, Asset, Of("VFX"),
 				Doc("Bound .wvfx VFX asset defining emitters, ribbons, meshes and dynamic lights."));
@@ -210,7 +210,7 @@ namespace World
 		SmartObjectComponent() = default;
 
 		WE_SCHEMA_BODY(World, SmartObjectComponent, Component)
-			WE_SCHEMA_META(Category("Gameplay"),
+			WE_SCHEMA_META(Category("AI"),
 				Doc("Smart Object interaction slot: position alignment, claim/use reservation state machine, and cooldown."))
 			WE_FIELD(SlotOffset, Vec3,
 				Doc("Interaction slot offset relative to object transform."));
@@ -319,7 +319,7 @@ namespace World
 			: Linear(linear), Angular(angular) {}
 
 		WE_SCHEMA_BODY(World, VelocityComponent, Component)
-			WE_SCHEMA_META(Category("Movement"),
+			WE_SCHEMA_META(Category("Gameplay"),
 				Doc("Linear and angular velocity of the entity for ECS movement systems."))
 			WE_FIELD(Linear, Vec3, Group("Velocity"),
 				Doc("Linear velocity in world units per second."));
@@ -462,7 +462,7 @@ namespace World
 		float Fade = 0.005f;
 
 		WE_SCHEMA_BODY(World, CircleRendererComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Mesh"),
+			WE_SCHEMA_META(Category("Rendering/2D"),
 				Doc("Flat 2D disc: Thickness is the ring width as a fraction of the radius (1 = filled) and Fade is the normalized edge softness."))
 			WE_FIELD(Color, Vec4, Color(),
 				Doc("Tint multiplied into the disc."));
@@ -566,7 +566,7 @@ namespace World
 		AssetRef Material;
 
 		WE_SCHEMA_BODY(World, MeshRendererComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Mesh"),
+			WE_SCHEMA_META(Category("Rendering"),
 				Doc("Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty Material shades with Color."))
 			// 同上:四个字段 id 已随存档/材质资产落盘(D2c/D3 期间手写),显式钉住。
 			WE_FIELD(Primitive, Enum, Id(0x4D4553485052494D), Of(PrimitiveShape),
@@ -629,7 +629,7 @@ namespace World
 		bool Loop = true;
 
 		WE_SCHEMA_BODY(World, SkinnedMeshRendererComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Mesh"),
+			WE_SCHEMA_META(Category("Rendering"),
 				Doc("Skeleton-driven mesh: an empty AnimationClip plays the first clip and Time is written by the animation system (read-only under Play)."))
 			WE_FIELD(Mesh, Asset, Id(0x534B4D4553485041), Of("Model"),
 				Doc("Skinned model asset (.wmodel); required — this component draws nothing without it."));
@@ -655,7 +655,7 @@ namespace World
 		bool FixedAspectRatio = false;
 
 		WE_SCHEMA_BODY(World, CameraComponent, Component)
-			WE_SCHEMA_META(Category("Scene"),
+			WE_SCHEMA_META(Category("Camera"),
 				Doc("Scene camera settings plus Primary (the camera Play and the runtime render through); FixedAspectRatio keeps the projection from following the viewport size."))
 			WE_FIELD(Camera, Object, Of(CameraSettings));
 			WE_FIELD(Primary, Bool,
@@ -678,7 +678,7 @@ namespace World
 		PixelPerfectCameraComponent() = default;
 
 		WE_SCHEMA_BODY(World, PixelPerfectCameraComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/2D"),
+			WE_SCHEMA_META(Category("Camera"),
 				Doc("Pixel-perfect 2D retro camera: calculates integer-multiple viewport scaling and snaps view translation to pixel grid to eliminate jitter and stretching."))
 			WE_FIELD(ReferenceResolution, IVec2,
 				Doc("Target design reference resolution in pixels (e.g. 320x180, 640x360)."));
@@ -754,7 +754,7 @@ namespace World
 		bool CastShadow = false;
 
 		WE_SCHEMA_BODY(World, DirectionalLightComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Light"),
+			WE_SCHEMA_META(Category("Lighting"),
 				Doc("Sun-style light: Direction is the propagation direction in world space (normalized when packed) and only the first one casts shadows."))
 			WE_FIELD(Color, Vec3, Group("Light"), Color(),
 				Doc("Linear color of the light (values are decoded with pow 2.2 by the shader)."));
@@ -775,7 +775,7 @@ namespace World
 		float Range = 10.0f;
 
 		WE_SCHEMA_BODY(World, PointLightComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Light"),
+			WE_SCHEMA_META(Category("Lighting"),
 				Doc("Local light with distance falloff: Range is the falloff radius in world units, attenuation saturates as (1 - d/Range)^2, and at most 7 point lights reach the shader."))
 			WE_FIELD(Color, Vec3, Group("Light"), Color(),
 				Doc("Linear color of the light (decoded with pow 2.2 by the shader)."));
@@ -802,7 +802,7 @@ namespace World
 		SpotLight3DComponent() = default;
 
 		WE_SCHEMA_BODY(World, SpotLight3DComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Light"),
+			WE_SCHEMA_META(Category("Lighting"),
 				Doc("3D spot light with distance range, cone angles and penumbra falloff."))
 			WE_FIELD(Color, Vec3, Group("Light"), Color(),
 				Doc("Linear color of the spot light."));
@@ -832,7 +832,7 @@ namespace World
 		float Intensity = 0.25f;
 
 		WE_SCHEMA_BODY(World, AmbientLightComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Light"),
+			WE_SCHEMA_META(Category("Lighting"),
 				Doc("Global ambient term without a spatial range: only the first ambient light is used and 0.25 grey applies when the scene has none."))
 			WE_FIELD(Color, Vec3, Group("Light"), Color(),
 				Doc("Linear ambient color added to every surface (decoded with pow 2.2)."));
@@ -860,7 +860,7 @@ namespace World
 		PointLight2DComponent() = default;
 
 		WE_SCHEMA_BODY(World, PointLight2DComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/2D"),
+			WE_SCHEMA_META(Category("Lighting"),
 				Doc("2D point/spot light with inner/outer radius attenuation, angular cone falloff, shadow casting, and normal map Z height."))
 			WE_FIELD(Color, Vec3, Color(),
 				Doc("Linear RGB color of the 2D light."));
@@ -905,7 +905,7 @@ namespace World
 		GlobalLight2DComponent() = default;
 
 		WE_SCHEMA_BODY(World, GlobalLight2DComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/2D"),
+			WE_SCHEMA_META(Category("Lighting"),
 				Doc("2D global ambient and directional light controlling overall 2D scene illumination and normal map directional relief."))
 			WE_FIELD(Color, Vec3, Color(),
 				Doc("Global 2D ambient light color."));
@@ -965,7 +965,7 @@ namespace World
 		}
 
 		WE_SCHEMA_BODY(World, ShadowCaster2DComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/2D"),
+			WE_SCHEMA_META(Category("Lighting"),
 				Doc("2D shadow caster hull that extrudes silhouette shadow geometry away from 2D point lights."))
 			WE_FIELD(Offset, Vec2,
 				Doc("Local 2D center offset of the shadow hull."));
@@ -1027,7 +1027,7 @@ namespace World
 		}
 
 		WE_SCHEMA_BODY(World, FreeformLight2DComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/2D"),
+			WE_SCHEMA_META(Category("Lighting"),
 				Doc("2D freeform polygon light: Points defines arbitrary polygon vertices in local space."))
 			WE_FIELD(Color, Vec4, Color(),
 				Doc("Light tint color and multiplier."));
@@ -1769,7 +1769,7 @@ namespace World
 		// WP3:the 2D b2JointId lives in the Scene-internal table; the component keeps only schema fields.
 
 		WE_SCHEMA_BODY(World, JointComponent, Component)
-			WE_SCHEMA_META(Category("Physics"),
+			WE_SCHEMA_META(Category("Physics/3D"),
 				Doc("Constraint between this entity and another body. Fixed welds the two frames, Distance keeps them within a range, Hinge allows rotation around Axis only."))
 			WE_FIELD(Connected, UInt64, Entity32,
 				Doc("The other body of the joint. Both entities must use the same physics backend (2D or 3D)."));
@@ -1846,7 +1846,7 @@ namespace World
 		}
 
 		WE_SCHEMA_BODY(World, PartitionVolumeComponent, Component)
-			WE_SCHEMA_META(Category("Level"),
+			WE_SCHEMA_META(Category("Environment"),
 				Doc("Spatial partition volume that overrides grid cell size and streaming radius for entities inside it."))
 			WE_FIELD(HalfExtents, Vec3, Id(0x50564C48414C4658),
 				Doc("Half size of the partition volume box in world meters."));
@@ -1867,7 +1867,7 @@ namespace World
 		explicit LevelEntityComponent(uint32_t mask) : DataLayerMask(mask) {}
 
 		WE_SCHEMA_BODY(World, LevelEntityComponent, Component)
-			WE_SCHEMA_META(Category("Level"),
+			WE_SCHEMA_META(Category("Scene"),
 				Doc("Level 2.0 data-layer membership: which level data layers this entity belongs to."),
 				NotInPrefab())
 			WE_FIELD(DataLayerMask, UInt32, Id(0x4C564C4C41594552), Default(1),
@@ -1957,7 +1957,7 @@ namespace World
 		PhysicsMaterialComponent() = default;
 
 		WE_SCHEMA_BODY(World, PhysicsMaterialComponent, Component)
-			WE_SCHEMA_META(Category("Physics"),
+			WE_SCHEMA_META(Category("Physics/3D"),
 				Doc("Physics Material properties for friction, bounciness and combine algorithms."))
 			WE_FIELD(Material, Asset, Of("PhysicsMaterial"),
 				Doc("Path to .wphysmat physical material asset."));
@@ -1995,7 +1995,7 @@ namespace World
 		CharacterControllerComponent() = default;
 
 		WE_SCHEMA_BODY(World, CharacterControllerComponent, Component)
-			WE_SCHEMA_META(Category("Physics"),
+			WE_SCHEMA_META(Category("Physics/3D"),
 				Doc("Kinematic Character Controller for unified 2D and 3D Move-and-Slide, slope limiting, and jump buffering."))
 			WE_FIELD(Velocity, Vec3,
 				Doc("Current movement velocity."));
@@ -2076,7 +2076,7 @@ namespace World
 		PostProcessComponent() = default;
 
 		WE_SCHEMA_BODY(World, PostProcessComponent, Component)
-			WE_SCHEMA_META(Category("Rendering"),
+			WE_SCHEMA_META(Category("Effects"),
 				Doc("Fullscreen post-processing volume settings: hit flash, outline, dissolve, bloom, and color grading."))
 			WE_FIELD(OutlineColor, Vec4,
 				Doc("Outline silhouette edge color."));
@@ -2118,7 +2118,7 @@ namespace World
 		TerrainComponent() = default;
 
 		WE_SCHEMA_BODY(World, TerrainComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Terrain"),
+			WE_SCHEMA_META(Category("Environment"),
 				Doc("3D heightfield terrain component with LOD chunks, multi-layer splat blending and collision."))
 			WE_FIELD(TerrainAsset, Asset, Of("Terrain"),
 				Doc("Reference to the .wterrain data asset containing heightfield and splatmap data."));
@@ -2179,7 +2179,7 @@ namespace World
 		FoliageComponent() = default;
 
 		WE_SCHEMA_BODY(World, FoliageComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Foliage"),
+			WE_SCHEMA_META(Category("Environment"),
 				Doc("GPU-instanced foliage and vegetation scatter cluster."))
 			WE_FIELD(FoliageAsset, Asset, Of("Foliage"),
 				Doc("Reference to the .wfoliage asset."));
@@ -2278,7 +2278,7 @@ namespace World
 		NavMeshAgentComponent() = default;
 
 		WE_SCHEMA_BODY(World, NavMeshAgentComponent, Component)
-			WE_SCHEMA_META(Category("AI/Navigation"),
+			WE_SCHEMA_META(Category("AI"),
 				Doc("3D AI NavMesh navigation agent with A* pathfinding and Funnel smoothing."))
 			WE_FIELD(Destination, Vec3,
 				Doc("Target destination in world space."));
@@ -2322,7 +2322,7 @@ namespace World
 		NavMeshObstacleComponent() = default;
 
 		WE_SCHEMA_BODY(World, NavMeshObstacleComponent, Component)
-			WE_SCHEMA_META(Category("AI/Navigation"),
+			WE_SCHEMA_META(Category("AI"),
 				Doc("Dynamic box obstacle carving holes in 3D NavMesh."))
 			WE_FIELD(Extents, Vec3,
 				Doc("Half extents of the obstacle bounding box in meters."));
@@ -2353,7 +2353,7 @@ namespace World
 		MeshLODComponent() = default;
 
 		WE_SCHEMA_BODY(World, MeshLODComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Mesh"),
+			WE_SCHEMA_META(Category("Rendering"),
 				Doc("Multi-level of detail (LOD) mesh switching with distance culling and hysteresis."))
 			WE_FIELD(LOD1Mesh, Asset, Of("Mesh"),
 				Doc("Intermediate level of detail mesh asset (LOD 1)."));
@@ -2397,7 +2397,7 @@ namespace World
 		DecalComponent() = default;
 
 		WE_SCHEMA_BODY(World, DecalComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/Decal"),
+			WE_SCHEMA_META(Category("Rendering"),
 				Doc("3D projected decal box applying blood, bullet holes, footprints, or puddle details."))
 			WE_FIELD(DecalMaterial, Asset, Of("Material"),
 				Doc("Material or texture asset projected by this decal."));
@@ -2469,7 +2469,7 @@ namespace World
 		SplineComponent() = default;
 
 		WE_SCHEMA_BODY(World, SplineComponent, Component)
-			WE_SCHEMA_META(Category("Level/Spline"),
+			WE_SCHEMA_META(Category("Rendering"),
 				Doc("3D parametric spline path for roads, rivers, fences and patrol rails."))
 			WE_FIELD(SplineMeshAsset, Asset, Of("Mesh"),
 				Doc("Mesh repeated or extruded along the spline curve."));
@@ -2509,7 +2509,7 @@ namespace World
 		WhiteboxComponent() = default;
 
 		WE_SCHEMA_BODY(World, WhiteboxComponent, Component)
-			WE_SCHEMA_META(Category("Level/Whitebox"),
+			WE_SCHEMA_META(Category("Rendering"),
 				Doc("Procedural geometric prototyping brush (Box, Cylinder, Stairs, Wedge, Arch)."))
 			WE_FIELD(Dimensions, Vec3,
 				Doc("Prototyping brush dimensions in meters (X, Y, Z)."));
@@ -2543,7 +2543,7 @@ namespace World
 		HLODComponent() = default;
 
 		WE_SCHEMA_BODY(World, HLODComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/HLOD"),
+			WE_SCHEMA_META(Category("Rendering"),
 				Doc("Hierarchical Level of Detail proxy cluster aggregating distant scene entities."))
 			WE_FIELD(ProxyMesh, Asset, Of("Mesh"),
 				Doc("Combined distant proxy mesh asset."));
@@ -2578,7 +2578,7 @@ namespace World
 		RVTComponent() = default;
 
 		WE_SCHEMA_BODY(World, RVTComponent, Component)
-			WE_SCHEMA_META(Category("Rendering/RVT"),
+			WE_SCHEMA_META(Category("Rendering"),
 				Doc("Runtime Virtual Texture component for ground caching and soft contact blending."))
 			WE_FIELD(VirtualTexture, Asset, Of("Texture"),
 				Doc("Target virtual texture container asset."));
@@ -2614,7 +2614,7 @@ namespace World
 		WaterBodyComponent() = default;
 
 		WE_SCHEMA_BODY(World, WaterBodyComponent, Component)
-			WE_SCHEMA_META(Category("Environment/Water"),
+			WE_SCHEMA_META(Category("Environment"),
 				Doc("Dynamic physical ocean, lake or river water body with Gerstner waves and buoyancy."))
 			WE_FIELD(WaveSteepness, Float, Range(0.0f, 1.0f), Default(0.5f),
 				Doc("Steepness sharpness of the Gerstner waves."));
@@ -2662,7 +2662,7 @@ namespace World
 		WeatherSystemComponent() = default;
 
 		WE_SCHEMA_BODY(World, WeatherSystemComponent, Component)
-			WE_SCHEMA_META(Category("Environment/Weather"),
+			WE_SCHEMA_META(Category("Environment"),
 				Doc("Dynamic atmospheric weather, volumetric clouds, precipitation and ground wetness."))
 			WE_FIELD(PrecipitationIntensity, Float, Range(0.0f, 1.0f), Default(0.0f),
 				Doc("Rain/snow precipitation intensity [0, 1]."));
@@ -2708,7 +2708,7 @@ namespace World
 		BiomePCGComponent() = default;
 
 		WE_SCHEMA_BODY(World, BiomePCGComponent, Component)
-			WE_SCHEMA_META(Category("World/PCG"),
+			WE_SCHEMA_META(Category("Environment"),
 				Doc("Procedural Content Generation rules for biomes, vegetation clusters and terrain deformation."))
 			WE_FIELD(RuleAsset, Asset, Of("PCGRule"),
 				Doc("Rule graph definition asset."));
@@ -2747,7 +2747,7 @@ namespace World
 		EQSComponent() = default;
 
 		WE_SCHEMA_BODY(World, EQSComponent, Component)
-			WE_SCHEMA_META(Category("AI/Tactics"),
+			WE_SCHEMA_META(Category("AI"),
 				Doc("Environment Query System for finding tactical cover points and line-of-sight concealment."))
 			WE_FIELD(QueryCenter, Vec3,
 				Doc("Center coordinates of the tactical query in world space."));
@@ -2777,7 +2777,7 @@ namespace World
 		FoliageInteractionComponent() = default;
 
 		WE_SCHEMA_BODY(World, FoliageInteractionComponent, Component)
-			WE_SCHEMA_META(Category("Physics/Foliage"),
+			WE_SCHEMA_META(Category("Environment"),
 				Doc("Physical foliage bending and track deformation when entities traverse vegetation."))
 			WE_FIELD(PushRadius, Float, Range(0.1f, 20.0f), Default(1.5f),
 				Doc("Radius around the entity where foliage is pushed and bent."));
@@ -2795,6 +2795,61 @@ namespace World
 	static_assert(offsetof(FoliageInteractionComponent, PushStrength) == 4, "PushStrength offset mismatch");
 	static_assert(offsetof(FoliageInteractionComponent, RecoverySpeed) == 8, "RecoverySpeed offset mismatch");
 	static_assert(offsetof(FoliageInteractionComponent, LeaveTracks) == 12, "LeaveTracks offset mismatch");
+
+	enum class LocalWindType : uint8_t
+	{
+		Directional = 0,
+		Radial = 1,
+		Vortex = 2
+	};
+	WE_ENUM_SCHEMA(World, LocalWindType, UInt8)
+		WE_ENUM_VALUE(Directional);
+		WE_ENUM_VALUE(Radial);
+		WE_ENUM_VALUE(Vortex);
+	WE_ENUM_END
+
+	struct LocalWindComponent
+	{
+		glm::vec3 Direction { 1.0f, 0.0f, 0.0f };         // 12B (offset 0..11)
+		float Radius { 10.0f };                           // 4B  (offset 12..15)
+		float Strength { 2.5f };                          // 4B  (offset 16..19)
+		float Speed { 3.0f };                             // 4B  (offset 20..23)
+		float Decay { 1.5f };                             // 4B  (offset 24..27)
+		LocalWindType Type { LocalWindType::Radial };     // 1B  (offset 28)
+		uint8_t ImpulseActive { 0 };                      // 1B  (offset 29)
+		uint8_t _Padding[2] { 0 };                        // 2B  (offset 30..31)
+
+		LocalWindComponent() = default;
+
+		WE_SCHEMA_BODY(World, LocalWindComponent, Component)
+			WE_SCHEMA_META(Category("Environment"),
+				Doc("Local dynamic wind source affecting foliage and vegetation (explosions, vortices, wind tunnels)."));
+			WE_FIELD(Direction, Vec3,
+				Doc("Primary wind direction or vortex rotation axis."));
+			WE_FIELD(Radius, Float, Range(0.5f, 100.0f), Default(10.0f),
+				Doc("Effective spherical/cylindrical radius in meters."));
+			WE_FIELD(Strength, Float, Range(0.0f, 20.0f), Default(2.5f),
+				Doc("Peak wind displacement force."));
+			WE_FIELD(Speed, Float, Range(0.1f, 30.0f), Default(3.0f),
+				Doc("Oscillation wave frequency or vortex angular speed."));
+			WE_FIELD(Decay, Float, Range(0.5f, 4.0f), Default(1.5f),
+				Doc("Distance attenuation falloff exponent."));
+			WE_FIELD(Type, Enum, Of(LocalWindType),
+				Doc("Wind pattern: Directional (wind tunnel), Radial (blast/downwash), Vortex (swirl)."));
+			WE_FIELD(ImpulseActive, UInt8, Default(0),
+				Doc("Whether this is a decaying transient impulse (e.g. shockwave)."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(LocalWindComponent) == 32, "LocalWindComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<LocalWindComponent>, "LocalWindComponent must be trivially copyable");
+	static_assert(offsetof(LocalWindComponent, Direction) == 0, "Direction offset mismatch");
+	static_assert(offsetof(LocalWindComponent, Radius) == 12, "Radius offset mismatch");
+	static_assert(offsetof(LocalWindComponent, Strength) == 16, "Strength offset mismatch");
+	static_assert(offsetof(LocalWindComponent, Speed) == 20, "Speed offset mismatch");
+	static_assert(offsetof(LocalWindComponent, Decay) == 24, "Decay offset mismatch");
+	static_assert(offsetof(LocalWindComponent, Type) == 28, "Type offset mismatch");
+	static_assert(offsetof(LocalWindComponent, ImpulseActive) == 29, "ImpulseActive offset mismatch");
+
 }
 
 

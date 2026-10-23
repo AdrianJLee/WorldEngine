@@ -1,5 +1,5 @@
 // P1b D4:方向光阴影通道(depth-only)。
-//  - set 0, binding 2 = 灯光 UBO(u_ShadowViewProjection;SceneRenderer 每帧写入)
+//  - set 0, binding 2 = 灯光 UBO(u_ShadowViewProjections;SceneRenderer 每帧写入)
 //  - set 1, binding 1 = 每对象 UBO(u_Model,与主通道共用 ObjectLayout)
 //  - set 1, binding 3 = 骨骼调色板 UBO(u_Bones[128],D5c-3b;与主通道共用 ObjectLayout)
 //
@@ -39,10 +39,17 @@ struct GpuLight
     GpuLight u_Lights[8];
 };
 
-// set 1, binding 1:每对象数据(Renderer3D 提交时写入;这里只用到 u_Model)。
+// set 1, binding 1:每对象数据(Renderer3D 提交时写入)。
+// 与 Renderer3D_Solid.slang 的 ObjectUniforms 保持完全一致的 std140 160B 布局。
+// u_EntityId.y 承载当前绘制所处的级联索引 (0..3)。
 [[vk::binding(1, 1)]] cbuffer ObjectUniforms
 {
     float4x4 u_Model;
+    float4 u_BaseColor;
+    float4 u_MetallicRoughness;
+    float4 u_Emissive;
+    float4 u_Flags;
+    int4 u_EntityId; // x = EntityId, y = CascadeIndex
 };
 
 // D5c-3b:set 1, binding 3 = 骨骼调色板(与 Renderer3D_Solid.slang 同布局)。
@@ -57,7 +64,8 @@ VS_OUTPUT VSMain(VS_INPUT input)
 {
     VS_OUTPUT output;
     const float4 worldPosition = mul(u_Model, float4(input.a_Position, 1.0f));
-    output.Position = mul(u_ShadowViewProjections[0], worldPosition);
+    const uint cascade = (uint)clamp(u_EntityId.y, 0, 3);
+    output.Position = mul(u_ShadowViewProjections[cascade], worldPosition);
     return output;
 }
 
@@ -80,7 +88,8 @@ VS_OUTPUT VSMainInstanced(VS_INSTANCED_INPUT input)
     const float4x4 model = float4x4(input.i_Row0, input.i_Row1,
         input.i_Row2, input.i_Row3);
     const float4 worldPosition = mul(model, float4(input.a_Position, 1.0f));
-    output.Position = mul(u_ShadowViewProjections[0], worldPosition);
+    const uint cascade = (uint)clamp(u_EntityId.y, 0, 3);
+    output.Position = mul(u_ShadowViewProjections[cascade], worldPosition);
     return output;
 }
 
@@ -107,7 +116,8 @@ VS_OUTPUT VSMainSkinned(VS_SKINNED_INPUT input)
     const float4 skinnedPosition = mul(blended, float4(input.a_Position, 1.0f));
     const bool hasWeights = any(input.a_Weights != 0.0f) && all(isfinite(skinnedPosition));
     const float4 localPosition = hasWeights ? skinnedPosition : float4(input.a_Position, 1.0f);
-    output.Position = mul(u_ShadowViewProjections[0], mul(u_Model, localPosition));
+    const uint cascade = (uint)clamp(u_EntityId.y, 0, 3);
+    output.Position = mul(u_ShadowViewProjections[cascade], mul(u_Model, localPosition));
     return output;
 }
 
