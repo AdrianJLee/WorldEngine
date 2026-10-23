@@ -83,6 +83,7 @@ local KEY_G = 71
 local KEY_R = 82
 local KEY_TAB = 258
 local KEY_C = 67
+local KEY_M = 77
 local KEY_RIGHT = 262
 local KEY_LEFT = 263
 local KEY_DOWN = 264
@@ -167,7 +168,9 @@ local demoTeleport = nil       -- "slope" | "origin"
 -- 进一步锁定指针（原始鼠标增量，转镜头不会被窗口边缘挡住）。
 -- 停止移动/松开右键后恢复显示，避免 HUD 按钮点不到。
 local cursorLocked = false
-local cursorHidden = false
+local cursorHidden = false       -- 进入 Play 默认隐藏（用户要求）
+local cursorPinnedVisible = false -- 按 M 主动显示后，移动不再把它藏起来
+local previousCursorToggleHeld = false
 local rightMouseHeld = false   -- 右键上一帧状态：按下那一帧的指针跳变要丢弃
 
 local function setCursorLocked(locked)
@@ -523,9 +526,10 @@ local function bind()
         print("[ANIM-SHOWCASE]   WASD / 左摇杆 : 移动        Shift : 奔跑")
         print("[ANIM-SHOWCASE]   Space         : 跳跃        F     : 上半身瞄准层")
         print("[ANIM-SHOWCASE]   R             : 根运动      Tab   : 跟随 / 自由镜头")
-        print("[ANIM-SHOWCASE]   右键拖拽/方向键: 旋转镜头（拖拽时锁定并隐藏光标）  滚轮 : 缩放")
+        print("[ANIM-SHOWCASE]   右键拖拽/方向键: 旋转镜头（鼠标上推 = 抬头）  滚轮 : 缩放")
         print("[ANIM-SHOWCASE]   C             : 朝向模式（跟随镜头 / 朝向移动 / 固定）")
         print("[ANIM-SHOWCASE]   G             : 手部 IK 开 / 关（右手跟随青色目标）")
+        print("[ANIM-SHOWCASE]   M             : 显示 / 隐藏光标（Play 默认隐藏；点 HUD 按钮前按 M）")
         print("[ANIM-SHOWCASE]   提示：坡面朝世界 +X 升高（从起点按 D 即可上坡）。")
         print("[ANIM-SHOWCASE] ============================================================")
     end
@@ -572,6 +576,9 @@ ecs:AddStartupSystem("AnimationShowcaseStartup", function()
     handPhase = 0.0
     previousHandIkHeld = false
     demoHandIkToggle = false
+    -- 进入 Play 立即隐藏光标（下一帧 Update 也会保持隐藏）。
+    cursorPinnedVisible = false
+    setCursorHidden(true)
     bind()
 end)
 
@@ -682,11 +689,12 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
     if keyDown("Right", KEY_RIGHT) then
         yawDeltaDeg = yawDeltaDeg - CAMERA_KEY_YAW_RATE * dt
     end
+    -- camPitch 为正 = 镜头升高俯视。所以"抬头"= 减小 pitch、"低头"= 增大 pitch。
     if keyDown("Up", KEY_UP) then
-        pitchDeltaDeg = pitchDeltaDeg + CAMERA_KEY_PITCH_RATE * dt
+        pitchDeltaDeg = pitchDeltaDeg - CAMERA_KEY_PITCH_RATE * dt
     end
     if keyDown("Down", KEY_DOWN) then
-        pitchDeltaDeg = pitchDeltaDeg - CAMERA_KEY_PITCH_RATE * dt
+        pitchDeltaDeg = pitchDeltaDeg + CAMERA_KEY_PITCH_RATE * dt
     end
 
     -- 右键 = 第三人称环绕：按住时锁定指针，鼠标增量直接驱动镜头。
@@ -697,19 +705,31 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
     -- 锁定指针的那一帧会产生一次"光标居中"跳变，不能把它当成用户拖动。
     if rightHeld and not rightJustPressed then
         local dx, dy = mouseDelta()
-        -- 屏幕右移 = 镜头向右转(camYaw 减小);屏幕上推 = 镜头升高(俯仰增大)。
+        -- 屏幕右移 = 镜头向右转(camYaw 减小)。
+        -- dy 向下为正：鼠标上推(dy<0)应抬头 ⇒ pitch 减小（旧实现用了 -dy，上下是反的）。
         yawDeltaDeg = yawDeltaDeg - dx * CAMERA_MOUSE_SENSITIVITY
-        pitchDeltaDeg = pitchDeltaDeg - dy * CAMERA_MOUSE_SENSITIVITY
+        pitchDeltaDeg = pitchDeltaDeg + dy * CAMERA_MOUSE_SENSITIVITY
     end
 
-    -- 移动时隐藏光标（控制角色时不需要看到指针）；停下即恢复，HUD 仍可点击。
-    -- 只看**物理输入**：控制条按钮驱动的 demoMove 不隐藏光标，否则点完"行走"
-    -- 光标立刻消失、找不到"停止"。
-    local physicalMove = horizontalKey ~= 0.0 or forwardKey ~= 0.0
-        or gamepadX ~= 0.0 or gamepadZ ~= 0.0
-    local controlling = physicalMove or rightHeld
-        or keyDown("Space", KEY_SPACE) or keyDown("LeftShift", KEY_LEFT_SHIFT)
-    setCursorHidden(controlling)
+    -- 光标：进入 Play 即隐藏（第三人称视角不需要指针挡画面）。
+    -- 需要点 HUD 按钮时按 M 显示，再按 M 隐藏；主动显示期间移动不会把它重新藏起来。
+    local cursorToggleHeld = keyDown("M", KEY_M)
+    if cursorToggleHeld and not previousCursorToggleHeld then
+        if cursorHidden then
+            cursorPinnedVisible = true
+            setCursorHidden(false)
+            lastEvent = "光标：显示（M 隐藏）"
+        else
+            cursorPinnedVisible = false
+            setCursorHidden(true)
+            lastEvent = "光标：隐藏（M 显示）"
+        end
+        lastEventTimer = 1.6
+    end
+    previousCursorToggleHeld = cursorToggleHeld
+    if not cursorPinnedVisible then
+        setCursorHidden(true)
+    end
     if demoCameraLeft then
         demoCameraLeft = false
         yawDeltaDeg = yawDeltaDeg + CAMERA_BUTTON_YAW_STEP
@@ -1061,7 +1081,7 @@ ui.onDraw(function()
     ui.text(40, 178, string.format("IK   脚部[%s] 手部[%s]",
         footIkEnabled and "开" or "关", handIkEnabled and "开" or "关"), 14)
     ui.text(40, 200, "WASD 移动   Shift 奔跑   Space 跳跃", 12)
-    ui.text(40, 218, "右键拖拽 / 方向键 转镜头（自动隐藏光标）  滚轮 缩放", 12)
+    ui.text(40, 218, "右键拖拽 / 方向键 转镜头   滚轮 缩放   M 显示光标", 12)
     ui.text(40, 236, "F 瞄准   G 手部 IK   R 根运动   Tab 镜头   C 朝向", 12)
     ui.text(40, 256, "最近操作   " .. lastEvent, 12)
 

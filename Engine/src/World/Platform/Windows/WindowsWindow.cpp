@@ -757,7 +757,6 @@ namespace World
 
 		if (locked)
 		{
-			m_CursorVisible = false;
 			glfwGetCursorPos(m_Window, &m_SavedCursorX, &m_SavedCursorY);
 			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 			if (glfwRawMouseMotionSupported())
@@ -799,7 +798,10 @@ namespace World
 
 	void WindowsWindow::SetCursorVisible(bool visible)
 	{
+		if (m_CursorVisible == visible)
+			return;
 		m_CursorVisible = visible;
+		WLD_CORE_INFO("[cursor] visible={0}", visible ? 1 : 0);
 		if (!m_Window || m_CursorLocked)
 			return;   // 锁定期间由 SetCursorLocked(false) 统一恢复。
 		glfwSetInputMode(m_Window, GLFW_CURSOR,
