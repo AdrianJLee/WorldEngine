@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -31,6 +32,26 @@ namespace
 			throw std::runtime_error(std::string("line ") + std::to_string(line) + ": " + expression);
 	}
 #define CHECK(expression) Check(static_cast<bool>(expression), #expression, __LINE__)
+
+	// 只有第一帧产生鼠标事件，之后什么都不写 —— 模拟 DeviceInputSource 在 raw input
+	// 没有新事件时的行为。InputService 必须把未重新写入的增量归零。
+	class OneShotMouseDeltaSource final : public World::Gameplay::IInputSource
+	{
+	public:
+		void Poll(uint32_t player, World::Gameplay::RawInputState& outState, float dt) override
+		{
+			(void)player;
+			(void)dt;
+			++Polls;
+			if (Polls == 1)
+			{
+				outState.MouseDelta = glm::vec2(17.0f, -9.0f);
+				outState.ScrollDelta = glm::vec2(0.0f, 3.0f);
+			}
+		}
+
+		int Polls = 0;
+	};
 }
 
 int main()
@@ -700,6 +721,26 @@ int main()
 			SampleRawMouseButtons(extra, false, [](int button) { return button == 4; });
 			CHECK(extra.IsMouseButton(4) == true);
 			CHECK(extra.IsMouseButton(3) == false);
+		}
+
+		// 13. 鼠标增量与滚轮是**单帧事件**：输入源不写时不能沿用上一帧的值。
+		// 回归："开始游戏后鼠标停住，镜头仍持续自转"。
+		{
+			InputService service;
+			service.SetInputSource(std::make_shared<OneShotMouseDeltaSource>());
+
+			service.Poll(1.0f / 60.0f);
+			const RawInputState* first = service.GetRawState();
+			CHECK(first != nullptr);
+			CHECK(std::fabs(first->MouseDelta.x - 17.0f) < 1e-4f);
+			CHECK(std::fabs(first->MouseDelta.y + 9.0f) < 1e-4f);
+			CHECK(std::fabs(first->ScrollDelta.y - 3.0f) < 1e-4f);
+
+			service.Poll(1.0f / 60.0f);
+			const RawInputState* second = service.GetRawState();
+			CHECK(second != nullptr);
+			CHECK(second->MouseDelta == glm::vec2(0.0f));
+			CHECK(second->ScrollDelta == glm::vec2(0.0f));
 		}
 
 			std::printf("World.Input: all checks passed (including M0 NameId enhancements)\n");

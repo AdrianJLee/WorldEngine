@@ -32,6 +32,11 @@ namespace World::Gameplay
 		if (!Application::HasInstance())
 			return;
 
+		// 只有前台窗口拥有鼠标。WindowsRawInput 使用 RIDEV_INPUTSINK 时会收到**后台**鼠标
+		// 事件；不过滤的话，切到别的程序后动鼠标，游戏镜头仍会跟着转。失焦时照样把累积量
+		// 读走并丢弃，避免重新获得焦点后一次性补一段大位移。
+		const bool focused = Application::Get().GetWindow().IsForegroundApp();
+
 		// 1. 键鼠状态采样 (遍历 actions 自带绑定、重映射覆盖与全部活跃 contexts)
 		if (GameApp* app = GameApp::TryGet())
 		{
@@ -41,7 +46,7 @@ namespace World::Gameplay
 			// 写 MouseButtons ⇒ 工程输入表没绑右键时 `Input.MouseButton(1)` 永远为 false
 			// （实测：右键拖拽转镜头完全不响应）。这里固定采样前 5 个物理键，
 			// 让脚本的 MouseButton/Look 查询与绑定表解耦。
-			SampleRawMouseButtons(outState, m_PointerCaptured,
+			SampleRawMouseButtons(outState, m_PointerCaptured || !focused,
 				[](int button) { return Input::IsMouseButtonPressed(button); });
 
 			for (const InputAction& action : map.Actions())
@@ -56,7 +61,7 @@ namespace World::Gameplay
 					}
 					else if (b.Device == InputDevice::Mouse)
 					{
-						outState.SetMouseButton(b.Code, !m_PointerCaptured && Input::IsMouseButtonPressed(b.Code));
+						outState.SetMouseButton(b.Code, focused && !m_PointerCaptured && Input::IsMouseButtonPressed(b.Code));
 					}
 				}
 			}
@@ -70,7 +75,7 @@ namespace World::Gameplay
 					}
 					else if (cfg.Binding.Device == InputDevice::Mouse)
 					{
-						outState.SetMouseButton(cfg.Binding.Code, !m_PointerCaptured && Input::IsMouseButtonPressed(cfg.Binding.Code));
+						outState.SetMouseButton(cfg.Binding.Code, focused && !m_PointerCaptured && Input::IsMouseButtonPressed(cfg.Binding.Code));
 					}
 				}
 			}
@@ -79,7 +84,7 @@ namespace World::Gameplay
 		// 2. 指针位置与滚轮
 		const auto pos = Input::GetMousePosition();
 		outState.MousePosition = glm::vec2(pos.first, pos.second);
-		if (!m_PointerCaptured)
+		if (focused && !m_PointerCaptured)
 		{
 			const auto scroll = Input::GetScrollDelta();
 			outState.ScrollDelta = glm::vec2(scroll.first, scroll.second);
@@ -93,9 +98,19 @@ namespace World::Gameplay
 		const int rawX = Platform::WindowsRawInput::GetAccumulatedRawX();
 		const int rawY = Platform::WindowsRawInput::GetAccumulatedRawY();
 		Platform::WindowsRawInput::ResetAccumulated();
-		if (rawX != 0 || rawY != 0)
+		float deltaX = static_cast<float>(rawX);
+		float deltaY = static_cast<float>(rawY);
+		// Raw Input 不可用（远程桌面/安全软件拦截）时退回 GLFW 的捕获态虚拟指针位移。
+		// 两条路径同一帧只取一条，避免重复累加。
+		const auto fallback = Input::ConsumeMouseDelta();
+		if (deltaX == 0.0f && deltaY == 0.0f)
 		{
-			outState.MouseDelta = glm::vec2(static_cast<float>(rawX), static_cast<float>(rawY));
+			deltaX = fallback.first;
+			deltaY = fallback.second;
+		}
+		if (focused && (deltaX != 0.0f || deltaY != 0.0f))
+		{
+			outState.MouseDelta = glm::vec2(deltaX, deltaY);
 		}
 #endif
 

@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Gameplay/Framework/InputSystem.h"
+#include "World/Core/Application.h"
 
 #include <unordered_map>
 #include <utility>
@@ -60,6 +61,11 @@ namespace World::Gameplay
 	{
 		SceneInputState& state = Ensure(scene);
 		const Gameplay::InputSnapshot& source = service.GetSnapshot();
+		// 最终快照层再 Gate 一次：原始增量过滤之后，下面的"坐标差"回退仍可能把
+		// 窗口失焦时的指针跳变当成鼠标移动（实测切到别的程序动鼠标，镜头会跟着转）。
+		// 无窗口夹具（单测/headless）保持可采样。
+		const bool windowAcceptsMouse = !Application::HasInstance()
+			|| Application::Get().GetWindow().IsForegroundApp();
 
 		const bool firstSample = !scene.GetInputSnapshot().Valid;
 
@@ -70,24 +76,32 @@ namespace World::Gameplay
 		snapshot.AxesById = source.AxesById;
 		snapshot.MousePosition = mousePosition;
 		// 鼠标按键位掩码来自原始设备状态(高层 InputSnapshot 只含动作/轴)。
-		if (const Gameplay::RawInputState* raw = service.GetRawState())
-			snapshot.MouseButtons = raw->MouseButtons;
+		if (windowAcceptsMouse)
+		{
+			if (const Gameplay::RawInputState* raw = service.GetRawState())
+				snapshot.MouseButtons = raw->MouseButtons;
+		}
 		// 鼠标视角优先用**原始设备增量**：指针锁定/隐藏时窗口坐标可能不再变化，
 		// 只靠位置差会让镜头在锁定时突然停住。没有原始增量时退回位置差。
 		glm::vec2 pointerDelta(0.0f);
 		bool haveDelta = false;
-		if (const Gameplay::RawInputState* raw = service.GetRawState())
+		if (windowAcceptsMouse)
 		{
-			if (raw->MouseDelta.x != 0.0f || raw->MouseDelta.y != 0.0f)
+			if (const Gameplay::RawInputState* raw = service.GetRawState())
 			{
-				pointerDelta = raw->MouseDelta;
-				haveDelta = true;
+				if (raw->MouseDelta.x != 0.0f || raw->MouseDelta.y != 0.0f)
+				{
+					pointerDelta = raw->MouseDelta;
+					haveDelta = true;
+				}
 			}
 		}
-		if (!haveDelta && !firstSample && state.HasPreviousMouse)
+		if (windowAcceptsMouse && !haveDelta && !firstSample && state.HasPreviousMouse)
 			pointerDelta = mousePosition - state.PreviousMouse;
-		snapshot.MouseDelta = (firstSample && !haveDelta) ? glm::vec2(0.0f) : pointerDelta;
-		snapshot.ScrollDelta = scrollDelta.y;
+		snapshot.MouseDelta = windowAcceptsMouse
+			? ((firstSample && !haveDelta) ? glm::vec2(0.0f) : pointerDelta)
+			: glm::vec2(0.0f);
+		snapshot.ScrollDelta = windowAcceptsMouse ? scrollDelta.y : 0.0f;
 		snapshot.SampledFrame = scene.GetTime().FrameCount;
 		snapshot.Valid = true;
 		scene.SetInputSnapshot(std::move(snapshot));

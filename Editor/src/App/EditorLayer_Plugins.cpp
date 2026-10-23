@@ -673,6 +673,40 @@ void EditorLayer::OnUpdate(Timestep ts){
 		if (m_FlySpeedFeedbackTimer > 0.0f)
 			m_FlySpeedFeedbackTimer -= ts.GetSeconds();
 
+		// Play 启动后的下一帧：把 WUI 焦点从工具栏按钮移回视口（按钮回调不会再覆盖）。
+		if (m_PendingViewportFocus)
+		{
+			m_PendingViewportFocus = false;
+			m_WuiContext.SetFocus(Wui::HashId("viewport"));
+			Wui::WuiTextFocus::Get().Clear();
+			WLD_CORE_INFO("[play] viewport focused for runtime input");
+		}
+
+		// Play 期间 Esc = 释放 / 重新捕获指针（与 UE 的 PIE 口径一致）：
+		// 释放后显示系统光标，可点 HUD 或编辑器按钮；再按一次回到游戏操作。
+		if (m_SceneState == SceneState::Play)
+		{
+			const bool escapeHeld = Input::IsKeyPressed(KeyCodes::Escape);
+			if (escapeHeld && !m_PlayPointerEscHeld)
+			{
+				auto& window = Application::Get().GetWindow();
+				if (window.IsCursorLocked())
+				{
+					window.SetCursorLocked(false);
+					window.SetCursorVisible(true);
+					WLD_CORE_INFO("[play] pointer released for UI (Esc)");
+				}
+				else
+				{
+					window.SetCursorVisible(false);
+					window.SetCursorLocked(true);
+					WLD_CORE_INFO("[play] pointer captured for gameplay (Esc)");
+				}
+				m_PendingViewportFocus = true;
+			}
+			m_PlayPointerEscHeld = escapeHeld;
+		}
+
 		if (m_SceneState != SceneState::Play && m_ViewportFocused && m_ViewportHovered && m_Viewport3DDragging == Viewport3DDrag::Pan && m_EditorCamera3D.Is2DMode())
 		{
 			// 2D 模式下按住右键时, WASD 键平移相机 (A/D = 左右, W/S = 上下)
@@ -694,7 +728,12 @@ void EditorLayer::OnUpdate(Timestep ts){
 			}
 		}
 
-		if (Application::Get().GetWindow().IsCursorLocked() && !Input::IsMouseButtonPressed(1))
+		// 这条兜底只属于编辑器视口：右键失联时把指针还回来。Play/Simulate 下指针归玩法
+		// 脚本所有（第三人称默认捕获，Esc 释放），编辑器不能每帧把它解锁 —— 否则刚捕获就被
+		// 弹回，镜头也会因为脚本仍以为处于捕获态而继续吃鼠标。
+		if (m_SceneState == SceneState::Edit
+			&& Application::Get().GetWindow().IsCursorLocked()
+			&& !Input::IsMouseButtonPressed(1))
 		{
 			Application::Get().GetWindow().SetCursorLocked(false);
 			m_Viewport3DDragging = Viewport3DDrag::None;
@@ -867,9 +906,13 @@ void EditorLayer::OnUpdate(Timestep ts){
 					{
 						const uint32_t windowWidth = Application::Get().GetWindow().GetWidth();
 						const uint32_t windowHeight = Application::Get().GetWindow().GetHeight();
+						// 指针被 Play 捕获时，设备鼠标属于玩法：HUD 不能被“已经隐藏的指针”
+						// 在视口中心悬停/点击。脚本与 AI 注入仍照常叠加（见 Sample 的实现）。
+						const bool pointerCaptured = m_SceneState == SceneState::Play
+							&& Application::Get().GetWindow().IsCursorLocked();
 						const Wui::WuiInputState uiInput = m_UiInputSampler.Sample(
 							glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)),
-							m_UiHost.WindowKey());
+							m_UiHost.WindowKey(), /*applyScriptedInput=*/true, pointerCaptured);
 						m_PlayHost.SetPointerCaptured(m_UiHost.RouteInput(uiInput));
 						// GameUI(M26):命令出口 = `UiCommandRouter` → `EventBus`(`UiCommandEvent`)——
 						// 项目 Lua/C++ 系统订阅它即可响应。M39:与 Runtime 同一口径,把宿主的
@@ -1268,6 +1311,22 @@ void EditorLayer::OnUiFrame(){
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
 		{
+			// Play 捕获指针时，编辑器面板不接收设备鼠标：GLFW 在 disabled 模式下仍会
+			// 发 mouse-move（虚拟光标持续漂移），WUI 会据此点亮工具栏 / 弹出提示，
+			// 表现为“光标看不见了，但移动还在影响别的 UI”。这里把设备指针移出布局，
+			// 清掉按键与滚轮；下面的脚本/AI 注入仍会在之后叠加。
+			if (m_SceneState == SceneState::Play && Application::Get().GetWindow().IsCursorLocked())
+			{
+				input.MousePos = { -10000.0f, -10000.0f };
+				input.Wheel = 0.0f;
+				for (int button = 0; button < 3; ++button)
+				{
+					input.MouseDown[button] = false;
+					input.MouseClicked[button] = false;
+					input.MouseReleased[button] = false;
+					input.MouseDoubleClicked[button] = false;
+				}
+			}
 			// contract.ui-runtime §5:读**本帧同一份**注入快照(BeginFrame 已推进过相位)⇒ 游戏 UI 与
 			// 编辑器面板看到同一次点击。
 			Wui::WuiScriptedInput::Get().Apply(m_UiHost.WindowKey(), input);

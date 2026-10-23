@@ -18,5 +18,11 @@ namespace World
 		static void AccumulateScroll(float xOffset, float yOffset);
 		static std::pair<float, float> GetScrollDelta();
 		static void ResetScrollDelta();
+
+		// 捕获态（指针锁定）下的指针位移兜底。正常路径用 Raw Input；当原始输入
+		// 不可用（远程桌面/安全软件拦截/设备注册失败）时，用 GLFW 在 disabled
+		// 模式下报告的虚拟指针位移，保证鼠标仍能控制镜头。
+		static void AccumulateMouseDelta(float dx, float dy);
+		static std::pair<float, float> ConsumeMouseDelta();
 	};
 }

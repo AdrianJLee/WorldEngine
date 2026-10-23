@@ -1,4 +1,5 @@
 #include "World/Foliage/Foliage.h"
+#include "World/Core/Log.h"
 #include "World/Core/StringPool.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -11,6 +12,26 @@
 
 namespace World
 {
+	namespace
+	{
+		// Play 期间编辑器只读：共享 FoliageData 的写入口统一在这里拦下。
+		bool s_FoliageMutationLocked = false;
+		bool BlockedByPlayLock(const char* operation)
+		{
+			if (!s_FoliageMutationLocked)
+				return false;
+			static bool warned = false;
+			if (!warned)
+			{
+				warned = true;
+				WLD_CORE_WARN("[foliage] '{0}' ignored: Play/Simulate is running (editor data is read-only)", operation);
+			}
+			return true;
+		}
+	}
+
+	void FoliageData::SetMutationLocked(bool locked) { s_FoliageMutationLocked = locked; }
+	bool FoliageData::IsMutationLocked() { return s_FoliageMutationLocked; }
 	namespace
 	{
 		constexpr uint32_t kFoliageMagic = 0x464F4C49; // "FOLI"
@@ -124,6 +145,8 @@ namespace World
 	uint32_t FoliageData::PaintFoliage(const glm::vec3& center, float radius, float density, size_t typeIndex,
 		const TerrainData* terrain, const glm::mat4& terrainTransform)
 	{
+		if (BlockedByPlayLock("PaintFoliage"))
+			return 0;
 		if (typeIndex >= m_Types.size() || radius <= 0.0f)
 			return 0;
 
@@ -272,6 +295,8 @@ namespace World
 		const std::vector<size_t>& activeTypes,
 		const TerrainData* terrain, const glm::mat4& terrainTransform)
 	{
+		if (BlockedByPlayLock("PaintFoliageMulti"))
+			return 0;
 		if (activeTypes.empty() || radius <= 0.0f || brushDensity <= 0.0f)
 			return 0;
 
@@ -312,6 +337,8 @@ namespace World
 
 	uint32_t FoliageData::EraseFoliage(const glm::vec3& center, float radius, int32_t typeIndex)
 	{
+		if (BlockedByPlayLock("EraseFoliage"))
+			return 0;
 		if (radius <= 0.0f)
 			return 0;
 
@@ -346,6 +373,8 @@ namespace World
 
 	void FoliageData::RealignToTerrain(const TerrainData* terrain, const glm::mat4& terrainTransform)
 	{
+		if (BlockedByPlayLock("RealignToTerrain"))
+			return;
 		if (!terrain)
 			return;
 
@@ -444,6 +473,8 @@ namespace World
 
 	void FoliageData::Clear()
 	{
+		if (BlockedByPlayLock("Clear"))
+			return;
 		m_Chunks.clear();
 	}
 

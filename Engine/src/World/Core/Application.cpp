@@ -42,6 +42,9 @@ namespace World
 
 		WLD_CORE_ASSERT(!s_Instance, "Appliicatiion already exists!");
 		s_Instance = this;
+		// 构建戳：排障时先确认"跑的是不是新编出来的 WorldRuntime.dll"。
+		// 编辑器进程一旦启动就持有旧 DLL，重新编译不会热替换；对不上时间戳即需重启进程。
+		WLD_CORE_INFO("[build] engine compiled {0} {1}", __DATE__, __TIME__);
 		m_EngineAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("EngineAllocator", 1024 * 1024 * 50)); // 50 MB
 		// 开发/验证钩子:WLD_WINDOW_SIZE="宽x高" 覆盖主窗口尺寸。编辑器 Play 与打包 Runtime 的
 		// 一致性验收需要两边同分辨率(编辑器的场景目标尺寸由视口面板决定,不是窗口尺寸)。
@@ -204,6 +207,9 @@ namespace World
 
 
 			m_Window->OnUpdate();
+			// 光标隐藏/锁定是"持续意图"而不是一次性事件：每帧对齐一次 OS 图像，
+			// 避免 WUI 悬停形状或系统 WM_SETCURSOR 把箭头重新显示出来。
+			m_Window->SyncCursorState();
 
 			// 帧内临时分配(每线程 arena):工作线程已空闲,统一回卷。
 			FrameArena::ResetAll();
@@ -243,7 +249,21 @@ namespace World
 		dispatcher.Dispatch<MouseButtonReleasedEvent>([](MouseButtonReleasedEvent& ev)
 			{ Wui::WuiRhiBackend::FeedMouseButton(ev.GetMouseButton(), false); return false; });
 		dispatcher.Dispatch<MouseMovedEvent>([](MouseMovedEvent& ev)
-			{ Wui::WuiRhiBackend::FeedMouseMove(ev.GetX(), ev.GetY()); return false; });
+			{
+				Wui::WuiRhiBackend::FeedMouseMove(ev.GetX(), ev.GetY());
+				// 捕获态兜底：GLFW 在 disabled 模式下报告的是**虚拟指针**位置，
+				// 相邻帧差值就是本帧位移。Raw Input 不可用时镜头仍能跟手。
+				static bool s_HadLock = false;
+				static glm::vec2 s_Last { 0.0f };
+				const bool locked = Application::HasInstance()
+					&& Application::Get().GetWindow().IsCursorLocked();
+				const glm::vec2 position { ev.GetX(), ev.GetY() };
+				if (locked && s_HadLock)
+					Input::AccumulateMouseDelta(position.x - s_Last.x, position.y - s_Last.y);
+				s_Last = position;
+				s_HadLock = locked;
+				return false;
+			});
 		dispatcher.Dispatch<MouseScrolledEvent>([](MouseScrolledEvent& ev)
 			{
 				Wui::WuiRhiBackend::FeedMouseScroll(ev.GetXOffset(), ev.GetYOffset());

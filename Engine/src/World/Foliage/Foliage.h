@@ -88,6 +88,12 @@ namespace World
 
 		void Clear();
 
+		// 编辑期/运行期隔离：Play 期间编辑器是“只读查看”，任何笔刷、清空、贴地
+		// 都不能再改这份共享数据（编辑器与播放副本共用同一 FoliageData）。
+		// 由宿主在进入/退出 Play 时设置；被拦下的调用返回 0 / 不产生效果。
+		static void SetMutationLocked(bool locked);
+		static bool IsMutationLocked();
+
 	private:
 		FoliageChunk& GetOrCreateChunk(int32_t cx, int32_t cz);
 

@@ -1407,7 +1407,7 @@ namespace World
 
 		// ---- 3D 地貌模式快捷键与视口直接交互 (Landscape Direct Interaction) ----
 		const bool isLandscapeMode = (m_Host.GetEditorToolMode() == EditorToolMode::Landscape);
-		if (isLandscapeMode && (focused || hovered))
+		if (!play && isLandscapeMode && (focused || hovered))
 		{
 			TerrainPanel* tp = m_Host.GetTerrainPanel();
 			if (tp)
@@ -1767,7 +1767,10 @@ namespace World
 
 		// ---- 3D 植被模式 (Foliage Mode) 视口直接操纵与笔刷渲染 ----
 		const bool isFoliageMode = (m_Host.GetEditorToolMode() == EditorToolMode::Foliage);
-		if (isFoliageMode && (focused || hovered))
+		// Play/Simulate 下这是**运行时画面**：笔刷圈、HUD 与散布/擦除一律不参与。
+		// 旧实现没有这个 gate，运行中左键会直接往播放副本里写植被（并经由共享
+		// FoliageData 改到编辑器资产），表现为“人物一走动植被就在变”。
+		if (!play && !m_Host.IsReadOnlyMode() && isFoliageMode && (focused || hovered))
 		{
 			FoliagePanel* foliagePanel = m_Host.GetFoliagePanel();
 			FoliageData* foliageData = foliagePanel ? foliagePanel->GetActiveFoliage() : nullptr;

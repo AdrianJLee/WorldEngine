@@ -99,12 +99,20 @@ namespace World
 		virtual std::string GetClipboardText() const { return std::string(); }
 		virtual void SetClipboardText(const std::string& text) { (void)text; }
 		virtual bool IsFocused() const { return false; }
+		// 本进程是否处于前台（"前台窗口属于本进程"）。用于输入门控：
+		// GLFW 的 GLFW_FOCUSED 在部分场景（浮窗/自动化/焦点在同一进程的另一个窗口）
+		// 会是 false，但玩家的鼠标仍应能控制游戏；只有切到**别的程序**时才需要屏蔽。
+		virtual bool IsForegroundApp() const { return true; }
 		virtual void SetCursorLocked(bool locked) { (void)locked; }
 		virtual bool IsCursorLocked() const { return false; }
 		// 仅隐藏/显示系统光标，不锁定指针（HUD 与鼠标视角共存时用）。
 		// 锁定期间 SetCursorVisible 只记状态，解锁后按这个状态恢复。
 		virtual void SetCursorVisible(bool visible) { (void)visible; }
 		virtual bool IsCursorVisible() const { return true; }
+		// 每帧调用一次：把"隐藏/锁定"意图强制同步到 OS 光标图像。
+		// 只依赖一次性的 SetCursor 不够 —— WUI 每帧按悬停控件设置光标形状、
+		// 窗口缩放带也会走系统 WM_SETCURSOR，任何一条都可能把箭头重新显示出来。
+		virtual void SyncCursorState() {}
 
 		// ---- D10:OS 文件拖放(资源管理器 → 窗口)----
 		// 返回自上次调用以来拖入的文件绝对路径并清空队列;没有拖放时返回空 vector。

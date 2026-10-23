@@ -655,6 +655,15 @@ namespace World::Gameplay
 		if (m_Players.empty())
 			SetPlayerCount(1);
 
+		// 鼠标增量是"本帧事件"，不是可沿用的设备状态。输入源没有新事件时不会写这两个字段，
+		// 若不在 Poll 前清零，上一帧的 MouseDelta 会一直留在 Current 里：实测表现为鼠标停住后
+		// 镜头仍持续自转（raw input 路径只在非零时赋值，问题尤其明显）。滚轮同口径。
+		for (PlayerState& player : m_Players)
+		{
+			player.Current.MouseDelta = glm::vec2(0.0f);
+			player.Current.ScrollDelta = glm::vec2(0.0f);
+		}
+
 		if (m_InputSource)
 		{
 			if (auto* dev = dynamic_cast<DeviceInputSource*>(m_InputSource.get()))

@@ -762,6 +762,11 @@ void EditorLayer::ApplyPendingPrefabChanges(){
 void EditorLayer::SetSceneState(SceneState state){
 		if (m_SceneState == state) return;
 
+		// 进入 Play 还是离开 Play：两者的光标处置完全不同。离开时才需要收回
+		// 玩法脚本借走的指针；进入时若也"无条件释放"，会在真正捕获之前把光标
+		// 写回 (0,0)（用户实测：点 Play 后鼠标被扔到窗口左上角）。
+		const bool wasPlaying = m_SceneState == SceneState::Play || m_SceneState == SceneState::Simulate;
+
 		// End the previous mode before replacing any scene references.
 		if (m_RuntimeScene)
 		{
@@ -779,9 +784,20 @@ void EditorLayer::SetSceneState(SceneState state){
 		}
 		m_SceneState = SceneState::Edit;
 		m_ScenePaused = false;
-		// 玩法脚本可能隐藏/锁定了光标（第三人称视角）。退出 Play/Simulate 必须
-		// 无条件收回：否则编辑器鼠标消失、右键菜单也点不到。
-		if (Application::HasInstance())
+		m_PendingViewportFocus = false;
+		// 退出 Play/Simulate：恢复进入前的创作工具（植被/地貌覆盖层随之回来）。
+		// 只在**确实是从运行态退出**时恢复；进入 Play 时这里也会执行一次，
+		// 无条件写会把用户当前所在的植被模式覆盖成上一次的旧值。
+		if (wasPlaying)
+		{
+			m_EditorToolMode = m_ToolModeBeforePlay;
+			WLD_CORE_INFO("[play] authoring tool restored (mode={0})", static_cast<int>(m_EditorToolMode));
+		}
+		// Play/Simulate 期间植被数据只读：退出时解除（与运行时共享的同一份数据）。
+		FoliageData::SetMutationLocked(false);
+		// 玩法脚本可能隐藏/锁定了光标（第三人称视角）。只在退出 Play/Simulate 时
+		// 收回：否则编辑器鼠标消失、右键菜单也点不到。
+		if (wasPlaying && Application::HasInstance())
 		{
 			auto& window = Application::Get().GetWindow();
 			window.SetCursorLocked(false);
@@ -798,6 +814,34 @@ void EditorLayer::SetSceneState(SceneState state){
 			Ref<Scene> editorScene = m_Document.GetScene();
 			Scene::CopyScene(editorScene, m_RuntimeScene);
 			m_SceneState = state;
+			// 运行期只允许“选择”语义：植被/地貌的笔刷与覆盖层属于编辑态工具，
+			// 留在运行态会让 Play 画面里出现笔刷圈、甚至把散布写进播放副本。
+			m_ToolModeBeforePlay = m_EditorToolMode;
+			m_EditorToolMode = EditorToolMode::Select;
+			WLD_CORE_INFO("[play] authoring tool suspended (was mode={0}); runtime uses Select",
+				static_cast<int>(m_ToolModeBeforePlay));
+			// Play 接管输入：把 WUI 焦点从工具栏按钮移回视口，并把 OS 焦点还给主窗口。
+			// 点 Play 时焦点停在按钮上，视口一直不是 focused（用户反馈"play 后没有聚焦视口"）；
+			// 而 GLFW 的 disabled 光标模式依赖窗口焦点，失焦时"隐藏指针"不会生效。
+			if (Application::HasInstance())
+			{
+				auto& window = Application::Get().GetWindow();
+				window.Focus();
+				// 引擎级 Play 指针策略（对齐 UE/Unity 的 PIE）：进入 Play 立即捕获并隐藏，
+				// 不依赖项目脚本；退出时无条件还原。这样"没写光标策略"的项目也不会
+				// 出现"点 Play 鼠标还看得见 / 动一下才消失"。
+				if (state == SceneState::Play)
+				{
+					window.SetCursorVisible(false);
+					window.SetCursorLocked(true);
+				}
+				// 编辑器植被数据与播放副本共用同一份 FoliageData：运行期任何笔刷/
+				// 清空/贴地写入都会污染正在运行的画面并落回磁盘。这里统一上锁。
+				FoliageData::SetMutationLocked(true);
+				m_PlayPointerEscHeld = false;
+				// 点击 Play 的按钮回调还会把焦点写回按钮 —— 延到下一帧 OnUpdate 再设视口焦点。
+				m_PendingViewportFocus = true;
+			}
 			// P2 W4:Play 与 Simulate 都接入 GameApp 会话(事件/计时器/输入/关卡同一条路径),
 			// 两者的差别只在视图口使用哪台相机(Simulate 保持编辑器相机)。
 			Gameplay::GameAppDesc desc;

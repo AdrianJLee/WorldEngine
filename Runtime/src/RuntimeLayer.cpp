@@ -267,9 +267,11 @@ namespace World
 		{
 			const uint32_t windowWidth = Application::Get().GetWindow().GetWidth();
 			const uint32_t windowHeight = Application::Get().GetWindow().GetHeight();
+			// 玩法捕获指针时，设备鼠标不再参与游戏 HUD 的悬停/点击（脚本与 AI 注入仍生效）。
+			const bool pointerCaptured = Application::Get().GetWindow().IsCursorLocked();
 			const Wui::WuiInputState uiInput = m_UiInputSampler.Sample(
 				glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)),
-				m_UiHost.WindowKey());
+				m_UiHost.WindowKey(), /*applyScriptedInput=*/true, pointerCaptured);
 			m_Host.SetPointerCaptured(m_UiHost.RouteInput(uiInput));
 			// GameUI(M26):命令出口 = `UiCommandRouter` → `EventBus`(`UiCommandEvent`)——
 			// 项目 Lua/C++ 系统订阅它即可响应(这才是"UI → 逻辑"的出口),引擎不发明玩法语义。
@@ -346,6 +348,19 @@ namespace World
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
 		{
+			// 同上：捕获态下把设备指针移出布局，避免隐藏指针仍在 UI 上产生悬停。
+			if (Application::Get().GetWindow().IsCursorLocked())
+			{
+				input.MousePos = { -10000.0f, -10000.0f };
+				input.Wheel = 0.0f;
+				for (int button = 0; button < 3; ++button)
+				{
+					input.MouseDown[button] = false;
+					input.MouseClicked[button] = false;
+					input.MouseReleased[button] = false;
+					input.MouseDoubleClicked[button] = false;
+				}
+			}
 			// 开发钩子:脚本点击注入 → 本窗口输入状态。必须在 BeginFrame 之后、控件绘制之前,
 			// 走的是和鼠标同一条输入路径(不是测试专用分支)。
 			ApplyDevUiActions();

@@ -65,6 +65,8 @@ namespace World
 		void RealignToTerrain(const TerrainData* terrain, const glm::mat4& terrainWorld);
 
 	private:
+		// Play/Simulate 期间由 OnRender 每帧刷新：只读查看，不写场景、不写资产。
+		bool m_ReadOnly = false;
 		void RenderPaintTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host);
 		void RenderEraseTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host);
 		void RenderSettingsTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host);

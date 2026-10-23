@@ -41,6 +41,9 @@ namespace World
 		// 滚轮增量累积器(仅主线程读写:事件分发与帧采样都在主线程)。
 		float s_ScrollX = 0.0f;
 		float s_ScrollY = 0.0f;
+		// 捕获态指针位移兜底累积器(同线程)。
+		float s_MouseDeltaX = 0.0f;
+		float s_MouseDeltaY = 0.0f;
 	}
 
 	void Input::AccumulateScroll(float xOffset, float yOffset)
@@ -58,5 +61,19 @@ namespace World
 	{
 		s_ScrollX = 0.0f;
 		s_ScrollY = 0.0f;
+	}
+
+	void Input::AccumulateMouseDelta(float dx, float dy)
+	{
+		s_MouseDeltaX += dx;
+		s_MouseDeltaY += dy;
+	}
+
+	std::pair<float, float> Input::ConsumeMouseDelta()
+	{
+		const std::pair<float, float> delta { s_MouseDeltaX, s_MouseDeltaY };
+		s_MouseDeltaX = 0.0f;
+		s_MouseDeltaY = 0.0f;
+		return delta;
 	}
 }

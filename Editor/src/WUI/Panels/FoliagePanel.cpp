@@ -149,8 +149,12 @@ namespace World
 
 	bool FoliagePanel::SaveCurrentFoliage()
 	{
-		if (!m_Foliage)
+		if (m_ReadOnly || !m_Foliage)
+		{
+			if (m_ReadOnly)
+				m_StatusFeedback = "Play 进行中：植被资产只读，停止后再保存。";
 			return false;
+		}
 
 		std::filesystem::path target = m_LoadedPath;
 		if (target.empty())
@@ -175,6 +179,9 @@ namespace World
 
 	bool FoliagePanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
 	{
+		// Play/Simulate：笔刷快捷键不生效（与视口笔刷同一口径）。
+		if (m_ReadOnly)
+			return false;
 		(void)ctrl;
 		(void)alt;
 		if (keyCode == KeyCodes::LeftBracket)
@@ -242,6 +249,10 @@ namespace World
 
 		// 1. 双向绑定场景 FoliageComponent
 		Ref<Scene> activeScene = host.GetActiveScene();
+		// Play/Simulate：面板只读。绝不能在此模式下创建实体或写运行场景的组件 ——
+		// 运行场景是播放副本，写入会污染这次 Play（并经由共享的 FoliageData
+		// 间接改到编辑器里的同一份植被资产）。
+		m_ReadOnly = host.IsReadOnlyMode();
 		m_BoundEntity = {};
 		if (activeScene)
 		{
@@ -259,7 +270,7 @@ namespace World
 				}
 			}
 
-			if (!m_BoundEntity.IsValid())
+			if (!m_BoundEntity.IsValid() && !m_ReadOnly)
 			{
 				activeScene->DeferStructuralChange([](Scene& s) {
 					Entity fol = Entity::CreateEntity(&s, "Foliage (3D 植被)");
@@ -284,7 +295,8 @@ namespace World
 							t.MaterialAsset.Path = StringPool::Get().InternPath(ti == 1 ? "textures/foliage/wild_flower.png" : "textures/foliage/grass_tuft.png");
 					}
 				}
-				comp.InstanceCount = m_Foliage ? static_cast<uint32_t>(m_Foliage->GetTotalInstanceCount()) : 0;
+				if (!m_ReadOnly)
+					comp.InstanceCount = m_Foliage ? static_cast<uint32_t>(m_Foliage->GetTotalInstanceCount()) : 0;
 			}
 		}
 
@@ -302,6 +314,19 @@ namespace World
 			typeCount, totalInstances);
 		Wui::Label(ctx, { startX, curY }, headerBuf, theme.TextMuted, theme.FontSizeSmall);
 		curY += 22.0f;
+
+		// Play 中不提供任何编辑入口：笔刷/清空/保存都会直接改资产。
+		if (m_ReadOnly)
+		{
+			Wui::Label(ctx, { startX, curY + 2.0f },
+				"Play / Simulate 进行中：植被编辑已锁定（停止后继续编辑）",
+				theme.Warning, theme.FontSizeBody);
+			curY += 26.0f;
+			Wui::Label(ctx, { startX, curY },
+				"运行时植被只读：场景中的风场与控制台数据不受编辑器笔刷影响。",
+				theme.TextMuted, theme.FontSizeSmall);
+			return;
+		}
 
 		// 3. 工具模式选项卡: [散布 (Scatter)] [擦除 (Erase)] [环境与优化 (Settings)]
 		const std::vector<std::string> tools = { "生态散布", "擦除管理", "全局风场" };

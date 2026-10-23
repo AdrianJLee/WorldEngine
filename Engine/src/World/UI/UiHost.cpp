@@ -665,13 +665,29 @@ namespace World
 	}
 
 	Wui::WuiInputState UiPlatformInputSampler::Sample(glm::vec2 viewportSize, const std::string& windowKey,
-		bool applyScriptedInput)
+		bool applyScriptedInput, bool suppressDevicePointer)
 	{
 		Wui::WuiInputState state;
 		state.ViewportSize = viewportSize;
 		// 无窗口宿主绝不轮询平台(与 GameHost::Tick 同一守卫):返回零状态、零边沿。
 		if (!Application::HasInstance())
 			return state;
+
+		// Play 捕获指针期间（第三人称视角）：设备鼠标归玩法所有，不能拿来悬停 /
+		// 点击 HUD 与编辑器面板 —— 指针被锁在视口中心，但系统仍持续发 WM_MOUSEMOVE，
+		// 不屏蔽就会出现“鼠标已经看不见了，移动却还在点亮别的 UI”。
+		// 脚本/AI 注入不受影响（下面仍会叠加），否则 ui.invoke 在 Play 下会失效。
+		if (suppressDevicePointer)
+		{
+			if (applyScriptedInput)
+			{
+				Wui::WuiScriptedInput::Get().Apply(windowKey, state);
+			}
+			// 设备指针不采样：把边沿基线清零，指针释放后第一帧不会把"一直按着"当成新按下。
+			for (int button = 0; button < 3; ++button)
+				m_PrevDown[button] = state.MouseDown[button];
+			return state;
+		}
 
 		// 与 `WuiInputCollector::OnMouseMove` 同一换算:平台鼠标是物理像素,UI 布局是设计单位。
 		const float scale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;

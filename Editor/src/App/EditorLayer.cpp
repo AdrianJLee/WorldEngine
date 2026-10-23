@@ -514,6 +514,10 @@ bool EditorLayer::SetPluginEnabled(const std::string& id, bool enabled, std::str
 
 void EditorLayer::SetEditorToolMode(EditorToolMode mode)
 {
+	// Play/Simulate 期间禁止切到创作工具（植被/地貌）：它们会在运行时画面里
+	// 显示笔刷并写播放副本。运行期只有“选择”语义。
+	if (m_SceneState != SceneState::Edit)
+		return;
 	m_EditorToolMode = mode;
 	if (mode == EditorToolMode::Landscape)
 	{

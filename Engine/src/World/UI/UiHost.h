@@ -80,7 +80,7 @@ namespace World
 	{
 	public:
 		Wui::WuiInputState Sample(glm::vec2 viewportSize, const std::string& windowKey = "main",
-			bool applyScriptedInput = true);
+			bool applyScriptedInput = true, bool suppressDevicePointer = false);
 
 	private:
 		bool m_PrevDown[3] = { false, false, false };

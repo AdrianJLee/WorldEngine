@@ -4,8 +4,8 @@
 -- 用户可操作的 AnimGraph 内容示例:
 --   WASD / 左摇杆 LX 移动, Shift 奔跑, Space 跳跃,
 --   F 瞄准(上半身层), R 切换 Root Motion, Tab 切换跟随/自由视角,
---   G 切换手部 IK, 鼠标右键拖拽 / 方向键 旋转第三人称轨道镜头,
---   滚轮缩放, C 切换角色朝向模式.
+--   G 切换手部 IK, 鼠标 / 方向键 旋转第三人称轨道镜头,
+--   滚轮缩放, C 切换角色朝向模式, Esc/M 释放或重新捕获指针.
 --
 -- 设计口径:
 --   * 脚本只写 CharacterControllerComponent.Velocity / Grounded;
@@ -84,6 +84,7 @@ local KEY_R = 82
 local KEY_TAB = 258
 local KEY_C = 67
 local KEY_M = 77
+local KEY_ESCAPE = 256
 local KEY_RIGHT = 262
 local KEY_LEFT = 263
 local KEY_DOWN = 264
@@ -148,7 +149,6 @@ local lastEvent = "就绪"
 local lastEventTimer = 0.0
 local warnedQuat = false
 local warnedMouseDelta = false
-local warnedMouseButton = false
 
 -- 屏幕控制条(鼠标可玩):与键盘输入等价,同时给自动化一个可点击的用户入口。
 local demoMove = 0          -- 0 = 停止, 1 = 前进, -1 = 后退
@@ -164,14 +164,18 @@ local demoCameraRight = false
 local demoCameraReset = false
 local demoTeleport = nil       -- "slope" | "origin"
 
--- 光标策略：游戏进行中隐藏（第三人称视角不需要可见指针），右键拖拽期间
--- 进一步锁定指针（原始鼠标增量，转镜头不会被窗口边缘挡住）。
--- 停止移动/松开右键后恢复显示，避免 HUD 按钮点不到。
+-- 光标策略（对齐主流第三人称游戏）：
+--   * 进入 Play 立即捕获并隐藏指针，鼠标直接控镜头；
+--   * Esc / M 释放指针并显示，便于点击 HUD 或编辑器按钮；
+--   * 再次按 Esc / M 重新捕获；捕获后鼠标直接控镜头，不需要按住任何鼠标键。
+-- 捕获态下用原始鼠标增量，指针不会撞到窗口边缘，也不会离开游戏窗口。
 local cursorLocked = false
-local cursorHidden = false       -- 进入 Play 默认隐藏（用户要求）
-local cursorPinnedVisible = false -- 按 M 主动显示后，移动不再把它藏起来
+local cursorHidden = false
+-- 编辑器 Play 会在启动脚本之前就捕获并隐藏指针（引擎级 PIE 策略）。
+-- 此时 Esc 的释放/重捕获由编辑器负责，脚本只跟随状态，避免同一次按键被处理两遍。
+local engineOwnsPointer = false
 local previousCursorToggleHeld = false
-local rightMouseHeld = false   -- 右键上一帧状态：按下那一帧的指针跳变要丢弃
+local suppressLookFrame = false -- 捕获/释放那一帧的指针跳变不能算进镜头
 
 local function setCursorLocked(locked)
     if cursorLocked == locked then
@@ -191,6 +195,29 @@ local function setCursorHidden(hidden)
     if type(Input.SetCursorVisible) == "function" then
         pcall(Input.SetCursorVisible, not hidden)
     end
+end
+
+local function captureCursor()
+    setCursorHidden(true)
+    setCursorLocked(true)
+    suppressLookFrame = true
+end
+
+local function releaseCursor()
+    setCursorLocked(false)
+    setCursorHidden(false)
+    suppressLookFrame = true
+end
+
+local function engineCursorLocked()
+    if type(Input.CursorLocked) ~= "function" then
+        return nil
+    end
+    local ok, value = pcall(Input.CursorLocked)
+    if ok and type(value) == "boolean" then
+        return value
+    end
+    return nil
 end
 
 local function approach(current, target, rate, dt)
@@ -233,23 +260,11 @@ local function axisValue(name)
     return 0.0
 end
 
-local function mouseButtonDown(button)
-    if type(Input.MouseButton) ~= "function" then
-        if not warnedMouseButton then
-            warnedMouseButton = true
-            print("[ANIM-SHOWCASE] Input.MouseButton unavailable: right-drag camera rotation is disabled until the engine binding lands.")
-        end
-        return false
-    end
-    local ok, value = pcall(Input.MouseButton, button)
-    return ok and value == true
-end
-
 local function mouseDelta()
     if type(Input.MouseDelta) ~= "function" then
         if not warnedMouseDelta then
             warnedMouseDelta = true
-            print("[ANIM-SHOWCASE] Input.MouseDelta unavailable: right-drag camera rotation is disabled until the engine binding lands.")
+            print("[ANIM-SHOWCASE] Input.MouseDelta unavailable: mouse look is disabled until the engine binding lands.")
         end
         return 0.0, 0.0
     end
@@ -526,10 +541,11 @@ local function bind()
         print("[ANIM-SHOWCASE]   WASD / 左摇杆 : 移动        Shift : 奔跑")
         print("[ANIM-SHOWCASE]   Space         : 跳跃        F     : 上半身瞄准层")
         print("[ANIM-SHOWCASE]   R             : 根运动      Tab   : 跟随 / 自由镜头")
-        print("[ANIM-SHOWCASE]   右键拖拽/方向键: 旋转镜头（鼠标上推 = 抬头）  滚轮 : 缩放")
+        print("[ANIM-SHOWCASE]   鼠标移动/方向键: 旋转镜头（上推 = 抬头）  滚轮 : 缩放")
         print("[ANIM-SHOWCASE]   C             : 朝向模式（跟随镜头 / 朝向移动 / 固定）")
         print("[ANIM-SHOWCASE]   G             : 手部 IK 开 / 关（右手跟随青色目标）")
-        print("[ANIM-SHOWCASE]   M             : 显示 / 隐藏光标（Play 默认隐藏；点 HUD 按钮前按 M）")
+        print("[ANIM-SHOWCASE]   Esc / M       : 释放 / 重新捕获指针（释放后可点 HUD 按钮）")
+        print("[ANIM-SHOWCASE] 指针归属: " .. (engineOwnsPointer and "编辑器 Play(引擎持有)" or "脚本持有"))
         print("[ANIM-SHOWCASE]   提示：坡面朝世界 +X 升高（从起点按 D 即可上坡）。")
         print("[ANIM-SHOWCASE] ============================================================")
     end
@@ -537,12 +553,13 @@ local function bind()
 end
 -- Play 会克隆场景(实体句柄全部改变):在运行态启动点重新绑定,停止时解绑。
 -- 代理是查询对象内的享元:进入 Play/换场景后必须重新查询,不能在旧场景上继续用。
-local function unbind()
+local function unbind(skipCursorRelease)
     bound = false
-    rightMouseHeld = false
     -- 停止 Play / 切场景时务必把系统光标还回去，否则编辑器里鼠标会一直消失。
-    setCursorLocked(false)
-    setCursorHidden(false)
+    -- 编辑器自己持有指针时由它的退出路径还原，脚本不越权。
+    if not skipCursorRelease and not engineOwnsPointer then
+        releaseCursor()
+    end
     character = nil
     characterId = nil
     cameraEntity = nil
@@ -555,7 +572,10 @@ local function unbind()
 end
 
 ecs:AddStartupSystem("AnimationShowcaseStartup", function()
-    unbind()
+    -- 必须在 unbind 之前判定归属：编辑器 Play 会先捕获指针，若先 release 再判断，
+    -- 脚本会误以为"编辑器没接管"，从而和编辑器各管一半（Esc 会被切换两次）。
+    local engineAlreadyCaptured = engineCursorLocked() == true
+    unbind(engineAlreadyCaptured)
     foreignScene = false
     speed = 0.0
     dirX = 0.0
@@ -576,9 +596,14 @@ ecs:AddStartupSystem("AnimationShowcaseStartup", function()
     handPhase = 0.0
     previousHandIkHeld = false
     demoHandIkToggle = false
-    -- 进入 Play 立即隐藏光标（下一帧 Update 也会保持隐藏）。
-    cursorPinnedVisible = false
-    setCursorHidden(true)
+    -- 编辑器 Play 已在脚本启动前捕获指针；Runtime（无编辑器）由脚本自己捕获。
+    engineOwnsPointer = engineAlreadyCaptured
+    if engineOwnsPointer then
+        cursorLocked = true
+        cursorHidden = true
+    else
+        captureCursor()
+    end
     bind()
 end)
 
@@ -697,39 +722,36 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         pitchDeltaDeg = pitchDeltaDeg + CAMERA_KEY_PITCH_RATE * dt
     end
 
-    -- 右键 = 第三人称环绕：按住时锁定指针，鼠标增量直接驱动镜头。
-    local rightHeld = mouseButtonDown(1)
-    local rightJustPressed = rightHeld and not rightMouseHeld
-    rightMouseHeld = rightHeld
-    setCursorLocked(rightHeld)
-    -- 锁定指针的那一帧会产生一次"光标居中"跳变，不能把它当成用户拖动。
-    if rightHeld and not rightJustPressed then
+    -- 指针状态每帧与引擎对齐：编辑器 Play / Stop / 切窗口都会改它。
+    local engineLocked = engineCursorLocked()
+    if engineLocked ~= nil then
+        cursorLocked = engineLocked
+    end
+    -- 编辑器持有指针时，Esc 的切换由编辑器处理（脚本再处理一次会立刻切回去）。
+    if not engineOwnsPointer then
+        local cursorToggleHeld = keyDown("Escape", KEY_ESCAPE) or keyDown("M", KEY_M)
+        if cursorToggleHeld and not previousCursorToggleHeld then
+            if cursorLocked then
+                releaseCursor()
+                lastEvent = "指针已释放（Esc / M 重新捕获，可点击 HUD）"
+            else
+                captureCursor()
+                lastEvent = "指针已捕获（Esc / M 释放）"
+            end
+            lastEventTimer = 1.8
+        end
+        previousCursorToggleHeld = cursorToggleHeld
+    end
+
+    -- 捕获态下鼠标直接转镜头（不需要按住任何键）；捕获/释放那一帧的指针跳变要丢弃。
+    if cursorLocked and not suppressLookFrame then
         local dx, dy = mouseDelta()
         -- 屏幕右移 = 镜头向右转(camYaw 减小)。
         -- dy 向下为正：鼠标上推(dy<0)应抬头 ⇒ pitch 减小（旧实现用了 -dy，上下是反的）。
         yawDeltaDeg = yawDeltaDeg - dx * CAMERA_MOUSE_SENSITIVITY
         pitchDeltaDeg = pitchDeltaDeg + dy * CAMERA_MOUSE_SENSITIVITY
     end
-
-    -- 光标：进入 Play 即隐藏（第三人称视角不需要指针挡画面）。
-    -- 需要点 HUD 按钮时按 M 显示，再按 M 隐藏；主动显示期间移动不会把它重新藏起来。
-    local cursorToggleHeld = keyDown("M", KEY_M)
-    if cursorToggleHeld and not previousCursorToggleHeld then
-        if cursorHidden then
-            cursorPinnedVisible = true
-            setCursorHidden(false)
-            lastEvent = "光标：显示（M 隐藏）"
-        else
-            cursorPinnedVisible = false
-            setCursorHidden(true)
-            lastEvent = "光标：隐藏（M 显示）"
-        end
-        lastEventTimer = 1.6
-    end
-    previousCursorToggleHeld = cursorToggleHeld
-    if not cursorPinnedVisible then
-        setCursorHidden(true)
-    end
+    suppressLookFrame = false
     if demoCameraLeft then
         demoCameraLeft = false
         yawDeltaDeg = yawDeltaDeg + CAMERA_BUTTON_YAW_STEP
@@ -1081,7 +1103,7 @@ ui.onDraw(function()
     ui.text(40, 178, string.format("IK   脚部[%s] 手部[%s]",
         footIkEnabled and "开" or "关", handIkEnabled and "开" or "关"), 14)
     ui.text(40, 200, "WASD 移动   Shift 奔跑   Space 跳跃", 12)
-    ui.text(40, 218, "右键拖拽 / 方向键 转镜头   滚轮 缩放   M 显示光标", 12)
+    ui.text(40, 218, "鼠标 / 方向键 转镜头   滚轮 缩放   Esc / M 释放指针", 12)
     ui.text(40, 236, "F 瞄准   G 手部 IK   R 根运动   Tab 镜头   C 朝向", 12)
     ui.text(40, 256, "最近操作   " .. lastEvent, 12)
 

@@ -21,6 +21,7 @@
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/AnimationSystem.h"
+#include "World/Foliage/Foliage.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Script/Runtime/ScriptEngine.h"

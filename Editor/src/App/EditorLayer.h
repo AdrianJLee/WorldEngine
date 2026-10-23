@@ -549,6 +549,11 @@ namespace World
 		glm::vec2 m_ViewportBounds[2] = { {0,0}, {0,0} };
 
 		bool m_ViewportFocused = false, m_ViewportHovered = false;
+		// Play 启动那一帧是在按钮回调里改状态的：按钮随后会把 WUI 焦点写回自己。
+		// 焦点转移必须延到下一帧的 OnUpdate（UI 绘制之前）才不会被覆盖。
+		bool m_PendingViewportFocus = false;
+		// Play 期间指针归编辑器所有：Esc 在"捕获(游戏操作) / 释放(点 UI)"之间切换。
+		bool m_PlayPointerEscHeld = false;
 		bool m_HasRenderedScene = false;
 		// D5c-4a:最近一帧的秒数(渲染在面板绘制里发生,那里拿不到 Timestep)。
 		float m_LastDeltaSeconds = 0.0f;
@@ -556,6 +561,9 @@ namespace World
 		// Gizmo operation type
 		Wui::GizmoOperation m_CurrentGizmoOperation = Wui::GizmoOperation::None;
 		EditorToolMode m_EditorToolMode = EditorToolMode::Select;
+		// 进入 Play/Simulate 前的创作工具（植被/地貌）。运行期强制 Select，
+		// 退出后恢复，避免“Play 里还停留在植被模式”导致笔刷/覆盖层继续工作。
+		EditorToolMode m_ToolModeBeforePlay = EditorToolMode::Select;
 		bool m_PixelSnapEnabled = false;
 		float m_PixelSnapPpu = 16.0f;
 		bool m_IsEditingCollider = false;

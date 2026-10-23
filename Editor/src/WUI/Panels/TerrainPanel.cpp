@@ -153,7 +153,9 @@ namespace World
 		// 2. 若场景不存在任何 TerrainComponent 实体，渲染新建地貌向导
 		if (!m_BoundEntity.IsValid() || !m_Terrain)
 		{
-			RenderWizard(ctx, startX, curY, contentW, theme, host);
+			// Play/Simulate：运行场景里没有地貌也不能新建（那会直接改播放副本）。
+			if (!host.IsReadOnlyMode())
+				RenderWizard(ctx, startX, curY, contentW, theme, host);
 			if (!m_StatusFeedback.empty())
 			{
 				const float statusY = rect.Y + rect.H - 24.0f;
@@ -172,6 +174,14 @@ namespace World
 			m_Terrain->GetWorldWidth(), m_Terrain->GetWorldHeight());
 		Wui::Label(ctx, { startX, curY }, tagBuf, theme.TextMuted, theme.FontSizeSmall);
 		curY += 22.0f;
+
+		if (host.IsReadOnlyMode())
+		{
+			Wui::Label(ctx, { startX, curY + 2.0f },
+				"Play / Simulate 进行中：地貌雕刻已锁定（停止后继续编辑）",
+				theme.Warning, theme.FontSizeBody);
+			return;
+		}
 
 		// 极简三栏选项卡: [雕刻 (Sculpt)] [混绘 (Paint)] [管理 (Manage)]
 		const std::vector<std::string> tabs = { "雕刻", "混绘", "管理" };
