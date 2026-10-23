@@ -2262,6 +2262,98 @@ namespace World
 	static_assert(offsetof(AnimGraphComponent, EnableFootIk) == 33, "EnableFootIk offset mismatch");
 	static_assert(offsetof(AnimGraphComponent, EnableUpperBodyLayer) == 34, "EnableUpperBodyLayer offset mismatch");
 
+	// -----------------------------------------------------------------------
+	// 通用 IK（I1）：两骨链求解（髋→膝→踝 / 肩→肘→腕 …）。
+	//
+	// 设计口径：
+	//   * **通用系统**：TwoBoneIkComponent 只描述"哪条链、目标在哪、权重多少"，
+	//     不关心是脚、手还是尾巴；同一个角色可以挂任意多条链（每条链一个目标实体）。
+	//   * OwnerUuid 指向被驱动的动画实体（UUIDComponent.m_UUID）；求解发生在
+	//     AnimGraph 姿态求值之后、调色板构建之前，与状态机/混合空间正交。
+	//   * TargetUuid 非 0 时用该实体世界位置作为目标（可被动画/关卡脚本移动）；
+	//     否则用 TargetPosition（世界坐标）。
+	//   * 脚步 IK = 通用求解器之上的一个示例驱动（FootIkComponent），不是特例硬编码。
+	// -----------------------------------------------------------------------
+	struct TwoBoneIkComponent
+	{
+		uint64_t OwnerUuid { 0 };                 // 8B  (offset 0)  被驱动实体
+		uint64_t TargetUuid { 0 };                // 8B  (offset 8)  可选目标实体
+		NameId RootBone;                          // 4B  (offset 16) 链根（大腿/上臂）
+		NameId MidBone;                           // 4B  (offset 20) 中间关节（膝/肘）
+		NameId EndBone;                           // 4B  (offset 24) 末端（脚/手）
+		glm::vec3 TargetPosition { 0.0f };        // 12B (offset 28) 世界坐标目标
+		float Weight { 1.0f };                    // 4B  (offset 40)
+		float PoleAngleDeg { 0.0f };              // 4B  (offset 44) 膝/肘朝向微调
+		uint8_t Enabled { 1 };                    // 1B  (offset 48)
+		uint8_t _Padding[7] { 0 };                // 7B  (offset 49)
+
+		WE_SCHEMA_BODY(World, TwoBoneIkComponent, Component)
+			WE_SCHEMA_META(Category("Animation"),
+				Doc("Generic two-bone IK target (hip-knee-ankle or shoulder-elbow-wrist); foot IK is an example built on this."))
+			WE_FIELD(OwnerUuid, UInt64, Default(0),
+				Doc("UUID of the animated entity driven by this IK chain (0 = pick the parent entity)."));
+			WE_FIELD(TargetUuid, UInt64, Default(0),
+				Doc("Optional UUID of a target entity; when non-zero its world position overrides TargetPosition."));
+			WE_FIELD(RootBone, Name,
+				Doc("Chain root bone name (e.g. Thigh.L or UpperArm.R)."));
+			WE_FIELD(MidBone, Name,
+				Doc("Middle joint bone name (e.g. Shin.L or LowerArm.R)."));
+			WE_FIELD(EndBone, Name,
+				Doc("End effector bone name (e.g. Foot.L or Hand.R)."));
+			WE_FIELD(TargetPosition, Vec3,
+				Doc("World-space IK target used when TargetUuid is 0."));
+			WE_FIELD(Weight, Float, Range(0.0f, 1.0f), Default(1.0f),
+				Doc("Blend weight between the animated pose and the IK solution."));
+			WE_FIELD(PoleAngleDeg, Float, Default(0.0f),
+				Doc("Rotates the knee/elbow pole direction around the chain axis, in degrees."));
+			WE_FIELD(Enabled, UInt8, Default(1),
+				Doc("Whether this IK chain is solved."));
+		WE_SCHEMA_END
+	};
+
+	static_assert(sizeof(TwoBoneIkComponent) == 56, "TwoBoneIkComponent must be exactly 56 bytes");
+	static_assert(std::is_trivially_copyable_v<TwoBoneIkComponent>, "TwoBoneIkComponent must be trivially copyable");
+	static_assert(offsetof(TwoBoneIkComponent, OwnerUuid) == 0, "OwnerUuid offset mismatch");
+	static_assert(offsetof(TwoBoneIkComponent, TargetUuid) == 8, "TargetUuid offset mismatch");
+	static_assert(offsetof(TwoBoneIkComponent, RootBone) == 16, "RootBone offset mismatch");
+	static_assert(offsetof(TwoBoneIkComponent, MidBone) == 20, "MidBone offset mismatch");
+	static_assert(offsetof(TwoBoneIkComponent, EndBone) == 24, "EndBone offset mismatch");
+	static_assert(offsetof(TwoBoneIkComponent, TargetPosition) == 28, "TargetPosition offset mismatch");
+	static_assert(offsetof(TwoBoneIkComponent, Weight) == 40, "Weight offset mismatch");
+	static_assert(offsetof(TwoBoneIkComponent, PoleAngleDeg) == 44, "PoleAngleDeg offset mismatch");
+	static_assert(offsetof(TwoBoneIkComponent, Enabled) == 48, "Enabled offset mismatch");
+
+	// 脚步 IK 示例：通用求解器之上的"地形驱动"示例组件。
+	// 它不包含任何求解数学 —— 只是把左右脚的落地目标算出来，再各发一条 TwoBoneIk 请求。
+	struct FootIkComponent
+	{
+		float Weight { 1.0f };                    // 4B  (offset 0)
+		float FootOffset { 0.0f };                // 4B  (offset 4)  脚踝离地微调（m）
+		float MaxPelvisDrop { 0.35f };            // 4B  (offset 8)  示例：骨盆最大下沉（m）
+		uint8_t Enabled { 1 };                    // 1B  (offset 12)
+		uint8_t _Padding[3] { 0 };                // 3B  (offset 13)
+
+		WE_SCHEMA_BODY(World, FootIkComponent, Component)
+			WE_SCHEMA_META(Category("Animation"),
+				Doc("Foot IK example driver built on the generic two-bone IK solver: samples terrain under each foot and issues two IK requests."));
+			WE_FIELD(Weight, Float, Range(0.0f, 1.0f), Default(1.0f),
+				Doc("Blend weight of both foot IK chains."));
+			WE_FIELD(FootOffset, Float, Default(0.0f),
+				Doc("Vertical ankle offset above the sampled ground, in meters."));
+			WE_FIELD(MaxPelvisDrop, Float, Range(0.0f, 1.0f), Default(0.35f),
+				Doc("Example parameter: maximum pelvis drop allowed while keeping both feet planted."));
+			WE_FIELD(Enabled, UInt8, Default(1),
+				Doc("Whether the foot IK example driver is active."));
+		WE_SCHEMA_END
+	};
+
+	static_assert(sizeof(FootIkComponent) == 16, "FootIkComponent must be exactly 16 bytes");
+	static_assert(std::is_trivially_copyable_v<FootIkComponent>, "FootIkComponent must be trivially copyable");
+	static_assert(offsetof(FootIkComponent, Weight) == 0, "FootIk Weight offset mismatch");
+	static_assert(offsetof(FootIkComponent, FootOffset) == 4, "FootIk FootOffset offset mismatch");
+	static_assert(offsetof(FootIkComponent, MaxPelvisDrop) == 8, "FootIk MaxPelvisDrop offset mismatch");
+	static_assert(offsetof(FootIkComponent, Enabled) == 12, "FootIk Enabled offset mismatch");
+
 	struct NavMeshAgentComponent
 	{
 		glm::vec3 Destination { 0.0f };                   // 12B (offset 0)

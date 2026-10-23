@@ -2,7 +2,7 @@
 
 一个打开就能玩的 Milestone 4 示例：通用人物模型站在坡面地形上，WASD 移动、Shift 奔跑、
 Space 跳跃、F 瞄准上半身、R 切换 Root Motion，第三人称轨道镜头跟随角色，
-AnimGraph 状态实时切换。
+AnimGraph 状态实时切换；`G` 可单独开关右手的两骨 IK，直观看到手部跟随移动目标。
 
 ## 打开
 
@@ -22,6 +22,7 @@ AnimGraph 状态实时切换。
 | `Shift` | 奔跑（1.6 → 4.5 m/s） |
 | `Space` / 手柄 A | 跳跃（初速 5.2 m/s，重力 -18 m/s²） |
 | `F` / 手柄 X | 切换上半身瞄准层（Aim / EnableUpperBodyLayer + AimWeight） |
+| `G` | 切换右手 `TwoBoneIkComponent.Enabled`（右手跟随 / 恢复动画姿态） |
 | `R` | 切换 Root Motion：脚本位移 ↔ 动画根位移 |
 | 鼠标右键拖拽 | 旋转第三人称轨道镜头（yaw / pitch，0.12°/px） |
 | `←` / `→` | 镜头左转 / 右转（便于无鼠标验收） |
@@ -30,14 +31,15 @@ AnimGraph 状态实时切换。
 | `C` | 循环角色朝向模式：跟随镜头 → 朝向移动 → 固定朝向(+Z) |
 | `Tab` | 切换镜头跟随 / 自由机位（冻结当前机位） |
 
-左上角中文 HUD 实时显示状态、速度、瞄准、根运动、镜头模式/角度/距离、角色朝向模式
-与最近一次操作。角色朝向为“跟随镜头”时，角色背对镜头，按 `W` 即镜头前方；
+左上角中文 HUD 实时显示状态、速度、瞄准、根运动、镜头模式/角度/距离、角色朝向模式、
+`IK 脚部[开/关] 手部[开/关]` 与最近一次操作。角色朝向为“跟随镜头”时，角色背对镜头，按 `W` 即镜头前方；
 为“朝向移动”时，角色平滑转向世界移动方向；为“固定朝向”时始终面向世界 +Z。
 
 **鼠标控制条**（与键盘完全等价，可直接点击验证）：`行走` / `奔跑` / `停止` / `跳跃` /
 `瞄准` / `根运动` / `镜头[跟随/自由]` / `坡面演示（脚部 IK）` / `重置位置` /
-`镜头左转` / `镜头右转` / `朝向模式` / `镜头复位`。
-`坡面演示` 会把角色瞬移到缓坡上，便于一眼检查双脚贴合与骨盆下沉。
+`镜头左转` / `镜头右转` / `朝向模式` / `镜头复位` / `手部 IK`。
+`坡面演示` 会把角色瞬移到缓坡上，便于一眼检查双脚贴合与骨盆下沉；
+`手部 IK` 与 `G` 等价，按钮上直接显示当前开关状态。
 
 ## 界面语言
 
@@ -49,7 +51,7 @@ AnimGraph 状态实时切换。
 
 | 实体 | UUID | 说明 |
 | --- | --- | --- |
-| `Mannequin Character` | `910000000000000001` | 角色：Transform + SkinnedMeshRenderer + AnimGraph + CharacterController |
+| `Mannequin Character` | `910000000000000001` | 角色：Transform + SkinnedMeshRenderer + AnimGraph + FootIk + CharacterController |
 | `Showcase Camera` | `910000000000000002` | 主相机，FOV 45，near 0.1，far 200 |
 | `Showcase Sun` | `910000000000000003` | 方向光 |
 | `Showcase Terrain` | `910000000000000004` | 地形，48 m 见方，4 层材质，碰撞开启 |
@@ -57,6 +59,8 @@ AnimGraph 状态实时切换。
 | `Showcase Floor` | `910000000000000007` | 安全地面（地形缺失时仍可见、可行走） |
 | `Ramp Marker Low/Mid/High` | `...0008/...0009/...0010` | 坡面上的高度参照桩（贴合真实地形高度） |
 | `Step Reference 1/2/3` | `...0011/...0012/...0013` | 起点旁的 3 级台阶参照（纯视觉，无碰撞） |
+| `Right Hand IK Target` | `910000000000000014` | 右手 IK 目标：青色小球，沿角色右前方做小 8 字运动 |
+| `Right Hand IK` | `910000000000000015` | 通用两骨 IK 代理：`UpperArm.R → LowerArm.R → Hand.R`，驱动角色右手 |
 
 资产依赖：
 
@@ -65,6 +69,27 @@ AnimGraph 状态实时切换。
 - 地形：`terrains/animation_showcase.wterrain`（65×65、cell 1 m、heightScale 1；实体位于 `(-24,0,-24)`）。
   生成公式见 `Engine/generators/mannequin/generate_showcase_terrain.py`：本地 X 30..44
   smoothstep 升高 2.35 m（世界 X 6..20），之后是 plateau roll，再叠加 basin 与 ±0.055 m ripple。
+
+## IK 是通用系统
+
+本示例同时演示两条完全不同的 IK 链，它们都由同一个通用 `TwoBoneIkComponent` 求解：
+
+- **脚部只是示例驱动**：角色实体上的 `FootIkComponent` 每帧采样地形，为左右脚各发一条
+  腿链请求。它本身不含求解数学；`AnimGraphComponent.EnableFootIk` 仅作为兼容回退，
+  角色有 `FootIkComponent` 时以组件为准。
+- **手部证明通用性**：`Right Hand IK` 代理实体描述 `UpperArm.R → LowerArm.R → Hand.R`，
+  目标 `Right Hand IK Target` 每帧沿角色右前方的小 8 字轨迹运动（幅度 ≤ 0.25 m，
+  高度约 1.25..1.35 m）。按 `G` 或点控制条按钮可只关闭这条链。
+- **任意三骨链**：`RootBone / MidBone / EndBone` 可填手臂、腿、尾巴等任意三骨；
+  `OwnerUuid` 指向被驱动角色，`TargetUuid` 指向目标实体（为 0 时改用 `TargetPosition`）。
+
+添加一条新链只需 3 步：
+
+1. 在角色模型上确认三骨链的骨骼名（例如左手 `UpperArm.L / LowerArm.L / Hand.L`）。
+2. 新建一个带 `World::TwoBoneIkComponent` 的代理实体，填写 `OwnerUuid`、
+   `RootBone / MidBone / EndBone`、`Weight` 与 `PoleAngleDeg`，并设 `Enabled: 1`。
+3. 新建一个带 `World::TransformComponent` 的目标实体（可加 `MeshRendererComponent` 便于观察），
+   把它的 UUID 填入 `TargetUuid`；脚本/动画移动目标，末端骨骼就会跟随。
 
 ## 实现说明与已知边界
 
@@ -78,6 +103,9 @@ AnimGraph 状态实时切换。
   否则用与 `generate_showcase_terrain.py` **逐项一致**的解析公式求值，见脚本顶部
   `TERRAIN_ORIGIN_X/Z` 与 `profileGround()`。若主 Agent 调整地形生成公式或地形实体位置，
   必须同步这两处，否则角色根节点会与可见坡面错位（Foot IK 会在腿部补偿，表现为腿被拉长/压短）。
+- **脚步 IK 驱动**：`Mannequin Character` 上的 `FootIkComponent`（`Weight 1.0`、
+  `FootOffset 0.0`、`MaxPelvisDrop 0.35`）是脚步示例的唯一权威开关；
+  `AnimGraphComponent.EnableFootIk` 已设为 `0`，避免两条路径同时求解。
 - **Root Motion**：默认 `EnableRootMotion = 0`，由脚本位移移动角色；按 `R` 打开后
   位置由 clip 根位移驱动。若所选 clip 没有根位移，角色会留在原地，这是契约允许的预期行为，
   日志会明确说明。Root Motion 开启时脚本不再叠加水平位移，避免双倍移动。
@@ -116,6 +144,8 @@ AnimGraph 状态实时切换。
 9. 滚轮拉近/拉远；方向键旋转 yaw/pitch；按 `C` 检查三种朝向模式与 HUD 行。
 10. Tab：镜头冻结；再按 Tab 平滑回到跟随。
 11. 鼠标点 `坡面演示（脚部 IK）`：角色站上缓坡，双脚按各自地面高度贴合。
+12. 按 `G` 或点 `手部 IK`：青色目标小球持续运动时，右手跟随其位置；再按一次恢复动画姿态，
+    HUD 的 `IK 手部[...]` 同步变化。
 
 ## 验收截图
 

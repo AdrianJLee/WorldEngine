@@ -25,8 +25,13 @@ Entity:
     FootIkWeight: 1.0
     CurrentStateHash: 0
     EnableRootMotion: 0
-    EnableFootIk: 1
+    EnableFootIk: 0
     EnableUpperBodyLayer: 0
+  World::FootIkComponent:
+    Weight: 1.0
+    FootOffset: 0.0
+    MaxPelvisDrop: 0.35
+    Enabled: 1
   World::CharacterControllerComponent:
     Velocity: [0, 0, 0]
     StepOffset: 0.35

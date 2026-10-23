@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace World
@@ -95,6 +96,9 @@ namespace World
 			const Wui::WuiTheme& theme);
 		void RenderLayerCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
 			const Wui::WuiTheme& theme);
+		void RenderStateGraph(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderPosePreview(Wui::WuiContext& ctx, const Wui::WuiRect& area, const Wui::WuiTheme& theme);
 		void RenderStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& bar,
 			const Wui::WuiTheme& theme);
 
@@ -108,6 +112,9 @@ namespace World
 		// ---- Live Preview ----
 		void RefreshLiveBinding(PanelHost& host);
 		void PushParameters(PanelHost& host);
+		void UpdateSimulation(float dt);
+		void ResetSimulation();
+		void EnsureSimulationGraph();
 
 		// ---- 模型/Clip ----
 		void RefreshModel(PanelHost& host);
@@ -142,6 +149,8 @@ namespace World
 		float m_StateScroll = 0.0f;
 		float m_LayerScroll = 0.0f;
 		float m_CenterScroll = 0.0f;
+		float m_LayerCardScroll = 0.0f;
+		int m_CenterTab = 0;   // 0 = 状态, 1 = 层
 		Wui::WuiRect m_CanvasRect { 0, 0, 0, 0 };
 		int m_HoverSample = -1;
 		int m_DragSample = -1;
@@ -186,6 +195,27 @@ namespace World
 		entt::entity m_BoundEntity = entt::null;
 		Scene* m_BoundScene = nullptr;
 		std::string m_BoundName;
+
+		// 内部模拟预览：独立的 AnimGraph 副本，不写回资产，也不依赖实体。
+		bool m_Simulate = false;
+		bool m_SimGraphReady = false;
+		AnimGraph m_SimGraph;
+		float m_SimCycleTime = 0.0f;
+
+		// 状态图画布视图态（只保存布局，不进资产）。
+		std::unordered_map<std::string, glm::vec2> m_StateGraphPositions;
+		std::string m_StateGraphDragPending;
+		std::string m_StateGraphDragNode;
+		glm::vec2 m_StateGraphDragStart { 0.0f, 0.0f };
+		glm::vec2 m_StateGraphDragOffset { 0.0f, 0.0f };
+
+		// 层卡片的编辑缓冲（TextField 需要跨帧稳定引用）。
+		bool m_NewParameterRowVisible = false;
+		std::string m_NewParameterBuffer;
+		bool m_LayerMaskAdvancedOpen = false;
+		float m_LayerMaskScroll = 0.0f;
+		std::string m_LayerMaskTextKey;
+		std::string m_LayerMaskTextBuffer;
 
 		// 模型/Clip 缓存(选中实体或模型路径变化时才重读)
 		std::string m_ModelKey;

@@ -4,7 +4,8 @@
 -- 用户可操作的 AnimGraph 内容示例:
 --   WASD / 左摇杆 LX 移动, Shift 奔跑, Space 跳跃,
 --   F 瞄准(上半身层), R 切换 Root Motion, Tab 切换跟随/自由视角,
---   鼠标右键拖拽 / 方向键 旋转第三人称轨道镜头, 滚轮缩放, C 切换角色朝向模式.
+--   G 切换手部 IK, 鼠标右键拖拽 / 方向键 旋转第三人称轨道镜头,
+--   滚轮缩放, C 切换角色朝向模式.
 --
 -- 设计口径:
 --   * 脚本只写 CharacterControllerComponent.Velocity / Grounded;
@@ -24,6 +25,8 @@
 local CHARACTER_TAG = "Mannequin Character"
 local CAMERA_TAG = "Showcase Camera"
 local SHOWCASE_TAG = "Showcase Terrain"
+local RIGHT_HAND_TARGET_TAG = "Right Hand IK Target"
+local RIGHT_HAND_IK_TAG = "Right Hand IK"
 
 local WALK_SPEED = 1.6          -- m/s
 local RUN_SPEED = 4.5           -- m/s
@@ -53,6 +56,16 @@ local WORLD_MAX_X = 38.0
 local WORLD_MIN_Z = -22.0
 local WORLD_MAX_Z = 38.0
 
+-- 手部 IK 示例目标: 角色右前方的一条小 8 字轨迹.
+-- 基准点与 910000000000000014.entity 的初始位置一致(角色在原点、朝向 +Z 时).
+local HAND_MOTION_RATE = 1.2          -- rad/s
+local HAND_BASE_RIGHT = 0.55          -- m, 角色右侧(-X)偏移
+local HAND_BASE_FORWARD = 0.45        -- m, 角色前方(+Z)偏移
+local HAND_BASE_HEIGHT = 1.25         -- m, 相对角色脚底
+local HAND_SWAY_LATERAL = 0.07        -- m, 左右摆动幅度
+local HAND_SWAY_FORWARD = 0.16        -- m, 前后摆动幅度
+local HAND_SWAY_HEIGHT = 0.10         -- m, 0..10 cm 小起伏
+
 -- animation_showcase.wterrain 的解析镜像(与 generate_showcase_terrain.py 同公式):
 --   地形实体位于 (-24,0,-24), 65x65 网格 / cell 1 m / heightScale 1.
 --   本地 X 30..44 smoothstep 升到 2.35 m, 44..64 微起伏, 叠加 ripple 与 basin.
@@ -66,6 +79,7 @@ local KEY_S = 83
 local KEY_SPACE = 32
 local KEY_LEFT_SHIFT = 340
 local KEY_F = 70
+local KEY_G = 71
 local KEY_R = 82
 local KEY_TAB = 258
 local KEY_C = 67
@@ -89,6 +103,8 @@ local cameraEntity = nil
 local charTransform = nil
 local charAnim = nil
 local charController = nil
+local rightHandTargetEntity = nil
+local rightHandIkEntity = nil
 
 local bound = false
 local foreignScene = false
@@ -97,6 +113,7 @@ local warnedAnim = false
 local warnedController = false
 local animationServiceWarned = false
 local startupPrinted = false
+local warnedHandIk = false
 
 local speed = 0.0
 local dirX = 0.0
@@ -107,6 +124,9 @@ local verticalVelocity = 0.0
 local grounded = true
 local aim = false
 local rootMotion = false
+local footIkEnabled = false
+local handIkEnabled = true
+local handPhase = 0.0
 local followCamera = true
 local camYaw = 0.0              -- 弧度, 镜头观察方向(角色前方 = 镜头前方)
 local camPitch = math.rad(CAMERA_INITIAL_PITCH_DEG) -- 弧度, 正值 = 镜头升高俯视
@@ -120,6 +140,7 @@ local orientationMode = ORIENTATION_FOLLOW_CAMERA
 local previousJumpHeld = false
 local previousAimHeld = false
 local previousRootMotionHeld = false
+local previousHandIkHeld = false
 local previousCameraHeld = false
 local previousOrientationHeld = false
 local lastEvent = "就绪"
@@ -134,6 +155,7 @@ local demoRun = false
 local demoJump = false
 local demoAimToggle = false
 local demoRootToggle = false
+local demoHandIkToggle = false
 local demoCameraToggle = false
 local demoOrientationToggle = false
 local demoCameraLeft = false
@@ -359,6 +381,8 @@ local function bind()
     local foundShowcase = false
     local foundAnim = nil
     local foundController = nil
+    local foundHandTarget = nil
+    local foundHandIk = nil
 
     -- 一条查询同时拿到角色所需的四个组件:query 直接给字段代理,
     -- 既避免 GetComponent 的短名歧义,也保证"命中的实体真的挂齐了组件"。
@@ -400,6 +424,23 @@ local function bind()
         end)
     end
 
+    -- 手部 IK 示例: 目标只取 Transform, 代理实体只读取 TwoBoneIkComponent。
+    -- 两条查询都按 Tag 过滤, 因而不会和其它场景中的 IK 链混淆。
+    local handTargetQuery = ecs:Query({ "TagComponent", "TransformComponent" })
+    handTargetQuery:Each(function(entity, tag)
+        if tag.Tag == RIGHT_HAND_TARGET_TAG then
+            foundHandTarget = entity
+        end
+    end)
+
+    local handIkQuery = ecs:Query({ "TagComponent", "TwoBoneIkComponent" })
+    handIkQuery:Each(function(entity, tag, ik)
+        if tag.Tag == RIGHT_HAND_IK_TAG then
+            foundHandIk = entity
+            handIkEnabled = ik.Enabled ~= 0
+        end
+    end)
+
     if foundCharacter == nil then
         if foundShowcase then
             print("[ANIM-SHOWCASE] Level is present but entity '" .. CHARACTER_TAG
@@ -415,6 +456,11 @@ local function bind()
     cameraEntity = foundCamera
     charAnim = foundAnim
     charController = foundController
+    rightHandTargetEntity = foundHandTarget
+    rightHandIkEntity = foundHandIk
+    if rightHandIkEntity == nil then
+        handIkEnabled = false
+    end
 
     if charTransform == nil then
         print("[ANIM-SHOWCASE] '" .. CHARACTER_TAG .. "' has no TransformComponent; showcase system idle.")
@@ -430,6 +476,11 @@ local function bind()
     if charController == nil and not warnedController then
         warnedController = true
         print("[ANIM-SHOWCASE] Missing CharacterControllerComponent on '" .. CHARACTER_TAG .. "': AnimGraphSystem cannot derive Speed/Direction from velocity.")
+    end
+    if (rightHandTargetEntity == nil or rightHandIkEntity == nil) and not warnedHandIk then
+        warnedHandIk = true
+        print("[ANIM-SHOWCASE] Hand IK example is incomplete: expected '" .. RIGHT_HAND_TARGET_TAG
+            .. "' (Transform) and '" .. RIGHT_HAND_IK_TAG .. "' (TwoBoneIkComponent); G toggle is idle.")
     end
     if Animation == nil and not animationServiceWarned then
         animationServiceWarned = true
@@ -447,6 +498,7 @@ local function bind()
         print("[ANIM-SHOWCASE]   R             : 根运动      Tab   : 跟随 / 自由镜头")
         print("[ANIM-SHOWCASE]   右键拖拽/方向键: 旋转镜头    滚轮 : 缩放")
         print("[ANIM-SHOWCASE]   C             : 朝向模式（跟随镜头 / 朝向移动 / 固定）")
+        print("[ANIM-SHOWCASE]   G             : 手部 IK 开 / 关（右手跟随青色目标）")
         print("[ANIM-SHOWCASE]   提示：坡面朝世界 +X 升高（从起点按 D 即可上坡）。")
         print("[ANIM-SHOWCASE] ============================================================")
     end
@@ -462,6 +514,8 @@ local function unbind()
     charTransform = nil
     charAnim = nil
     charController = nil
+    rightHandTargetEntity = nil
+    rightHandIkEntity = nil
     resolveTimer = 1.0
 end
 
@@ -482,6 +536,11 @@ ecs:AddStartupSystem("AnimationShowcaseStartup", function()
     cameraSnapPending = true
     orientationMode = ORIENTATION_FOLLOW_CAMERA
     followCamera = true
+    footIkEnabled = false
+    handIkEnabled = true
+    handPhase = 0.0
+    previousHandIkHeld = false
+    demoHandIkToggle = false
     bind()
 end)
 
@@ -520,6 +579,19 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
     if matchedCharacters == 0 then
         unbind()
         return
+    end
+
+    -- 脚步 IK 现在由角色实体上的 FootIkComponent 驱动; HUD 读取它的实时开关。
+    local footFound = false
+    local footQuery = ecs:Query({ "TagComponent", "FootIkComponent" })
+    footQuery:Each(function(entity, tag, foot)
+        if tag.Tag == CHARACTER_TAG then
+            footFound = true
+            footIkEnabled = foot.Enabled ~= 0
+        end
+    end)
+    if not footFound then
+        footIkEnabled = false
     end
 
     local location = charTransform.Location
@@ -741,6 +813,39 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         print("[ANIM-SHOWCASE] Orientation mode: " .. orientationLabel() .. " (C).")
     end
 
+    -- G / 控制条: 只切换右手链的 TwoBoneIkComponent.Enabled, 不碰动画状态机。
+    local handIkHeld = keyDown("G", KEY_G)
+    local handIkPressed = handIkHeld and not previousHandIkHeld
+    previousHandIkHeld = handIkHeld
+    if demoHandIkToggle then
+        demoHandIkToggle = false
+        handIkPressed = true
+    end
+    if handIkPressed then
+        local handToggleApplied = false
+        local handIkQuery = ecs:Query({ "TagComponent", "TwoBoneIkComponent" })
+        handIkQuery:Each(function(entity, tag, ik)
+            if tag.Tag == RIGHT_HAND_IK_TAG then
+                handIkEnabled = not handIkEnabled
+                ik.Enabled = handIkEnabled and 1 or 0
+                handToggleApplied = true
+            end
+        end)
+        if handToggleApplied then
+            lastEvent = handIkEnabled and "手部 IK：开" or "手部 IK：关"
+            lastEventTimer = 2.0
+            print("[ANIM-SHOWCASE] Hand IK " .. (handIkEnabled and "ON" or "OFF") .. " (G).")
+        else
+            lastEvent = "未找到手部 IK 实体"
+            lastEventTimer = 2.0
+            if not warnedHandIk then
+                warnedHandIk = true
+                print("[ANIM-SHOWCASE] Cannot toggle hand IK: entity '" .. RIGHT_HAND_IK_TAG
+                    .. "' with TwoBoneIkComponent was not found.")
+            end
+        end
+    end
+
     -- ---- 3. Horizontal motion ----------------------------------------------
     -- Root Motion 模式下不叠加脚本位移,否则会与 AnimGraphSystem 的根位移双倍移动.
     if not rootMotion then
@@ -816,6 +921,29 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         charTransform.Location = vec3.new(x, y, z)
     end
 
+    -- ---- 4.6 Hand IK target motion -----------------------------------------
+    -- 目标跟随角色的右前方(而不是世界固定点), 因此转身/移动后右手仍追得到。
+    -- 水平面是 1:2 频率的 8 字, 垂直做 0..10 cm 的小起伏; 各轴幅度均 <= 0.25 m。
+    handPhase = handPhase + dt * HAND_MOTION_RATE
+    if handPhase > math.pi * 2.0 then
+        handPhase = handPhase - math.pi * 2.0
+    end
+    local handLateral = HAND_BASE_RIGHT + HAND_SWAY_LATERAL * math.sin(handPhase)
+    local handForward = HAND_BASE_FORWARD + HAND_SWAY_FORWARD * math.sin(handPhase * 2.0)
+    local handHeight = y + HAND_BASE_HEIGHT + HAND_SWAY_HEIGHT * (0.5 - 0.5 * math.cos(handPhase * 2.0))
+    local charRightX = -math.cos(charYaw)
+    local charRightZ = math.sin(charYaw)
+    local charForwardX = math.sin(charYaw)
+    local charForwardZ = math.cos(charYaw)
+    local handTargetX = x + charRightX * handLateral + charForwardX * handForward
+    local handTargetZ = z + charRightZ * handLateral + charForwardZ * handForward
+    local handTargetQuery = ecs:Query({ "TagComponent", "TransformComponent" })
+    handTargetQuery:Each(function(entity, tag, transform)
+        if tag.Tag == RIGHT_HAND_TARGET_TAG then
+            transform.Location = vec3.new(handTargetX, handHeight, handTargetZ)
+        end
+    end)
+
     if aim then
         pushAimWeight(1.0)
     end
@@ -875,7 +1003,7 @@ ui.onDraw(function()
         return
     end
 
-    ui.panel(24, 24, 392, 470, "动画图内容示例")
+    ui.panel(24, 24, 392, 504, "动画图内容示例")
     ui.text(40, 62, "状态   " .. stateLabel(), 17)
     ui.text(40, 88, string.format("速度   %.2f m/s", speed), 14)
     ui.text(40, 106, "瞄准     " .. (aim and "开（上半身层）" or "关"), 14)
@@ -884,84 +1012,91 @@ ui.onDraw(function()
         cameraModeLabel(), math.floor(wrapDegrees(math.deg(camYaw)) + 0.5),
         math.floor(math.deg(camPitch) + 0.5), cameraDistance), 12)
     ui.text(40, 160, "朝向   " .. orientationLabel(), 14)
-    ui.text(40, 184, "WASD 移动   Shift 奔跑   Space 跳跃", 12)
-    ui.text(40, 202, "右键拖拽 / 方向键 转镜头   滚轮 缩放", 12)
-    ui.text(40, 220, "F 瞄准   R 根运动   Tab 跟随/自由   C 朝向", 12)
-    ui.text(40, 242, "最近操作   " .. lastEvent, 12)
+    ui.text(40, 178, string.format("IK   脚部[%s] 手部[%s]",
+        footIkEnabled and "开" or "关", handIkEnabled and "开" or "关"), 14)
+    ui.text(40, 200, "WASD 移动   Shift 奔跑   Space 跳跃", 12)
+    ui.text(40, 218, "右键拖拽 / 方向键 转镜头   滚轮 缩放", 12)
+    ui.text(40, 236, "F 瞄准   G 手部 IK   R 根运动   Tab 镜头   C 朝向", 12)
+    ui.text(40, 256, "最近操作   " .. lastEvent, 12)
 
     -- 鼠标可玩控制条(与键盘完全等价;也用于自动化点击验证)。
-    if ui.button("demo_walk", 40, 264, 104, 26, (demoMove == 1 and not demoRun) and "行走（开）" or "行走") then
+    if ui.button("demo_walk", 40, 280, 104, 26, (demoMove == 1 and not demoRun) and "行走（开）" or "行走") then
         demoMove = (demoMove == 1) and 0 or 1
         lastEvent = demoMove == 1 and "控制条：行走" or "控制条：停止"
         lastEventTimer = 1.4
     end
-    if ui.button("demo_run", 152, 264, 104, 26, demoRun and "奔跑（开）" or "奔跑") then
+    if ui.button("demo_run", 152, 280, 104, 26, demoRun and "奔跑（开）" or "奔跑") then
         demoRun = not demoRun
         if demoRun then demoMove = 1 end
         lastEvent = demoRun and "控制条：奔跑" or "控制条：恢复行走速度"
         lastEventTimer = 1.4
     end
-    if ui.button("demo_stop", 264, 264, 104, 26, "停止") then
+    if ui.button("demo_stop", 264, 280, 104, 26, "停止") then
         demoMove = 0
         demoRun = false
         lastEvent = "控制条：停止"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_jump", 40, 298, 120, 26, "跳跃") then
+    if ui.button("demo_jump", 40, 314, 120, 26, "跳跃") then
         demoJump = true
         lastEvent = "控制条：跳跃"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_aim", 168, 298, 120, 26, aim and "瞄准（开）" or "瞄准") then
+    if ui.button("demo_aim", 168, 314, 120, 26, aim and "瞄准（开）" or "瞄准") then
         demoAimToggle = true
         lastEvent = "控制条：瞄准"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_root", 40, 332, 156, 26, rootMotion and "根运动（开）" or "根运动") then
+    if ui.button("demo_root", 40, 348, 156, 26, rootMotion and "根运动（开）" or "根运动") then
         demoRootToggle = true
         lastEvent = "控制条：根运动"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_camera", 204, 332, 156, 26, followCamera and "镜头 [跟随]" or "镜头 [自由]") then
+    if ui.button("demo_camera", 204, 348, 156, 26, followCamera and "镜头 [跟随]" or "镜头 [自由]") then
         demoCameraToggle = true
         lastEvent = "控制条：镜头跟随/自由"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_slope", 40, 366, 156, 26, "坡面演示（脚部 IK）") then
+    if ui.button("demo_slope", 40, 382, 156, 26, "坡面演示（脚部 IK）") then
         demoTeleport = "slope"
         demoMove = 0
         demoRun = false
         lastEvent = "控制条：坡面脚部 IK 演示"
         lastEventTimer = 2.0
     end
-    if ui.button("demo_reset", 204, 366, 156, 26, "重置位置") then
+    if ui.button("demo_reset", 204, 382, 156, 26, "重置位置") then
         demoTeleport = "origin"
         demoMove = 0
         demoRun = false
         lastEvent = "控制条：重置到起点"
         lastEventTimer = 2.0
     end
-    if ui.button("demo_cam_left", 40, 400, 104, 26, "镜头左转") then
+    if ui.button("demo_cam_left", 40, 416, 104, 26, "镜头左转") then
         demoCameraLeft = true
         lastEvent = "控制条：镜头左转"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_cam_right", 152, 400, 104, 26, "镜头右转") then
+    if ui.button("demo_cam_right", 152, 416, 104, 26, "镜头右转") then
         demoCameraRight = true
         lastEvent = "控制条：镜头右转"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_orientation", 264, 400, 104, 26, "朝向模式") then
+    if ui.button("demo_orientation", 264, 416, 104, 26, "朝向模式") then
         demoOrientationToggle = true
         lastEvent = "控制条：切换朝向模式"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_cam_reset", 40, 434, 156, 26, "镜头复位") then
+    if ui.button("demo_cam_reset", 40, 450, 156, 26, "镜头复位") then
         demoCameraReset = true
         lastEvent = "控制条：镜头复位"
         lastEventTimer = 1.0
     end
-    ui.text(40, 470, "点击按钮，或使用上方键盘快捷键。", 11)
+    if ui.button("demo_hand_ik", 40, 484, 320, 26, handIkEnabled and "手部 IK（开）" or "手部 IK（关）") then
+        demoHandIkToggle = true
+        lastEvent = "控制条：手部 IK"
+        lastEventTimer = 1.0
+    end
+    ui.text(40, 512, "点击按钮，或使用上方键盘快捷键（G 切换手部 IK）。", 11)
 end)
 
 

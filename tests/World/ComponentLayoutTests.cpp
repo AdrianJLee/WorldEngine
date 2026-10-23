@@ -102,6 +102,8 @@ namespace
 		{ "World::FoliageComponent",             48 },
 		{ "World::LocalWindComponent",           32 },
 		{ "World::AnimGraphComponent",            48 },
+		{ "World::TwoBoneIkComponent",            56 },
+		{ "World::FootIkComponent",               16 },
 		{ "World::NavMeshAgentComponent",          48 },
 		{ "World::NavMeshObstacleComponent",       32 },
 		{ "World::MeshLODComponent",               64 },

@@ -65,6 +65,8 @@ const TypeSchema& WeSchemaOf_TerrainComponent();
 const TypeSchema& WeSchemaOf_FoliageComponent();
 const TypeSchema& WeSchemaOf_SpotLight3DComponent();
 const TypeSchema& WeSchemaOf_AnimGraphComponent();
+const TypeSchema& WeSchemaOf_TwoBoneIkComponent();
+const TypeSchema& WeSchemaOf_FootIkComponent();
 const TypeSchema& WeSchemaOf_NavMeshAgentComponent();
 const TypeSchema& WeSchemaOf_NavMeshObstacleComponent();
 const TypeSchema& WeSchemaOf_MeshLODComponent();
@@ -12457,6 +12459,439 @@ struct GeneratedAccess<World::AnimGraphComponent>
 };
 
 template <>
+struct GeneratedAccess<World::TwoBoneIkComponent>
+{
+    static Value Get_OwnerUuid(const void* instance)
+    {
+        const World::TwoBoneIkComponent* self = static_cast<const World::TwoBoneIkComponent*>(instance);
+        return Value(self->OwnerUuid);
+    }
+    static void Set_OwnerUuid(void* instance, const Value& value)
+    {
+        World::TwoBoneIkComponent* self = static_cast<World::TwoBoneIkComponent*>(instance);
+        self->OwnerUuid = std::get<uint64_t>(value);
+    }
+    static Value Get_TargetUuid(const void* instance)
+    {
+        const World::TwoBoneIkComponent* self = static_cast<const World::TwoBoneIkComponent*>(instance);
+        return Value(self->TargetUuid);
+    }
+    static void Set_TargetUuid(void* instance, const Value& value)
+    {
+        World::TwoBoneIkComponent* self = static_cast<World::TwoBoneIkComponent*>(instance);
+        self->TargetUuid = std::get<uint64_t>(value);
+    }
+    static Value Get_RootBone(const void* instance)
+    {
+        const World::TwoBoneIkComponent* self = static_cast<const World::TwoBoneIkComponent*>(instance);
+        return Value(NameOps<std::remove_reference_t<decltype(self->RootBone)>>::GetName(self->RootBone));
+    }
+    static void Set_RootBone(void* instance, const Value& value)
+    {
+        World::TwoBoneIkComponent* self = static_cast<World::TwoBoneIkComponent*>(instance);
+        NameOps<std::remove_reference_t<decltype(self->RootBone)>>::SetName(self->RootBone, std::get<std::string>(value));
+    }
+    static Value Get_MidBone(const void* instance)
+    {
+        const World::TwoBoneIkComponent* self = static_cast<const World::TwoBoneIkComponent*>(instance);
+        return Value(NameOps<std::remove_reference_t<decltype(self->MidBone)>>::GetName(self->MidBone));
+    }
+    static void Set_MidBone(void* instance, const Value& value)
+    {
+        World::TwoBoneIkComponent* self = static_cast<World::TwoBoneIkComponent*>(instance);
+        NameOps<std::remove_reference_t<decltype(self->MidBone)>>::SetName(self->MidBone, std::get<std::string>(value));
+    }
+    static Value Get_EndBone(const void* instance)
+    {
+        const World::TwoBoneIkComponent* self = static_cast<const World::TwoBoneIkComponent*>(instance);
+        return Value(NameOps<std::remove_reference_t<decltype(self->EndBone)>>::GetName(self->EndBone));
+    }
+    static void Set_EndBone(void* instance, const Value& value)
+    {
+        World::TwoBoneIkComponent* self = static_cast<World::TwoBoneIkComponent*>(instance);
+        NameOps<std::remove_reference_t<decltype(self->EndBone)>>::SetName(self->EndBone, std::get<std::string>(value));
+    }
+    static Value Get_TargetPosition(const void* instance)
+    {
+        const World::TwoBoneIkComponent* self = static_cast<const World::TwoBoneIkComponent*>(instance);
+        return Value(self->TargetPosition);
+    }
+    static void Set_TargetPosition(void* instance, const Value& value)
+    {
+        World::TwoBoneIkComponent* self = static_cast<World::TwoBoneIkComponent*>(instance);
+        self->TargetPosition = std::get<glm::vec3>(value);
+    }
+    static Value Get_Weight(const void* instance)
+    {
+        const World::TwoBoneIkComponent* self = static_cast<const World::TwoBoneIkComponent*>(instance);
+        return Value(self->Weight);
+    }
+    static void Set_Weight(void* instance, const Value& value)
+    {
+        World::TwoBoneIkComponent* self = static_cast<World::TwoBoneIkComponent*>(instance);
+        self->Weight = std::get<float>(value);
+    }
+    static Value Get_PoleAngleDeg(const void* instance)
+    {
+        const World::TwoBoneIkComponent* self = static_cast<const World::TwoBoneIkComponent*>(instance);
+        return Value(self->PoleAngleDeg);
+    }
+    static void Set_PoleAngleDeg(void* instance, const Value& value)
+    {
+        World::TwoBoneIkComponent* self = static_cast<World::TwoBoneIkComponent*>(instance);
+        self->PoleAngleDeg = std::get<float>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::TwoBoneIkComponent* self = static_cast<const World::TwoBoneIkComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::TwoBoneIkComponent* self = static_cast<World::TwoBoneIkComponent*>(instance);
+        self->Enabled = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_OwnerUuid()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xCD596CB85322C2DEull },
+            "OwnerUuid",
+            Kind::UInt64,
+            &Get_OwnerUuid,
+            &Set_OwnerUuid,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "UUID of the animated entity driven by this IK chain (0 = pick the parent entity).", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_TargetUuid()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC9F4A1458674D61Cull },
+            "TargetUuid",
+            Kind::UInt64,
+            &Get_TargetUuid,
+            &Set_TargetUuid,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Optional UUID of a target entity; when non-zero its world position overrides TargetPosition.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_RootBone()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3547F280EA17C784ull },
+            "RootBone",
+            Kind::Name,
+            &Get_RootBone,
+            &Set_RootBone,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Chain root bone name (e.g. Thigh.L or UpperArm.R).", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MidBone()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3A366BFC1EAB5BFAull },
+            "MidBone",
+            Kind::Name,
+            &Get_MidBone,
+            &Set_MidBone,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Middle joint bone name (e.g. Shin.L or LowerArm.R).", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_EndBone()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xAA5DBE62CF9D21E1ull },
+            "EndBone",
+            Kind::Name,
+            &Get_EndBone,
+            &Set_EndBone,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "End effector bone name (e.g. Foot.L or Hand.R).", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_TargetPosition()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC1D8CF3F34CEAE74ull },
+            "TargetPosition",
+            Kind::Vec3,
+            &Get_TargetPosition,
+            &Set_TargetPosition,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "World-space IK target used when TargetUuid is 0.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Weight()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x55D3F27E019E923Eull },
+            "Weight",
+            Kind::Float,
+            &Get_Weight,
+            &Set_Weight,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Blend weight between the animated pose and the IK solution.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_PoleAngleDeg()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9B661BE911ED5269ull },
+            "PoleAngleDeg",
+            Kind::Float,
+            &Get_PoleAngleDeg,
+            &Set_PoleAngleDeg,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Rotates the knee/elbow pole direction around the chain axis, in degrees.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD4CB0F9D60AD0A3ull },
+            "Enabled",
+            Kind::UInt8,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this IK chain is solved.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::TwoBoneIkComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::TwoBoneIkComponent" },
+            "TwoBoneIkComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::TwoBoneIkComponent),
+            TypeCategory::Component,
+            {
+                Field_OwnerUuid(),
+                Field_TargetUuid(),
+                Field_RootBone(),
+                Field_MidBone(),
+                Field_EndBone(),
+                Field_TargetPosition(),
+                Field_Weight(),
+                Field_PoleAngleDeg(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Animation",
+            "Generic two-bone IK target (hip-knee-ankle or shoulder-elbow-wrist); foot IK is an example built on this.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::FootIkComponent>
+{
+    static Value Get_Weight(const void* instance)
+    {
+        const World::FootIkComponent* self = static_cast<const World::FootIkComponent*>(instance);
+        return Value(self->Weight);
+    }
+    static void Set_Weight(void* instance, const Value& value)
+    {
+        World::FootIkComponent* self = static_cast<World::FootIkComponent*>(instance);
+        self->Weight = std::get<float>(value);
+    }
+    static Value Get_FootOffset(const void* instance)
+    {
+        const World::FootIkComponent* self = static_cast<const World::FootIkComponent*>(instance);
+        return Value(self->FootOffset);
+    }
+    static void Set_FootOffset(void* instance, const Value& value)
+    {
+        World::FootIkComponent* self = static_cast<World::FootIkComponent*>(instance);
+        self->FootOffset = std::get<float>(value);
+    }
+    static Value Get_MaxPelvisDrop(const void* instance)
+    {
+        const World::FootIkComponent* self = static_cast<const World::FootIkComponent*>(instance);
+        return Value(self->MaxPelvisDrop);
+    }
+    static void Set_MaxPelvisDrop(void* instance, const Value& value)
+    {
+        World::FootIkComponent* self = static_cast<World::FootIkComponent*>(instance);
+        self->MaxPelvisDrop = std::get<float>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::FootIkComponent* self = static_cast<const World::FootIkComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::FootIkComponent* self = static_cast<World::FootIkComponent*>(instance);
+        self->Enabled = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_Weight()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x519A29DBBEE25494ull },
+            "Weight",
+            Kind::Float,
+            &Get_Weight,
+            &Set_Weight,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Blend weight of both foot IK chains.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_FootOffset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3976483219E9907Bull },
+            "FootOffset",
+            Kind::Float,
+            &Get_FootOffset,
+            &Set_FootOffset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Vertical ankle offset above the sampled ground, in meters.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxPelvisDrop()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xEC982E157EACD486ull },
+            "MaxPelvisDrop",
+            Kind::Float,
+            &Get_MaxPelvisDrop,
+            &Set_MaxPelvisDrop,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Example parameter: maximum pelvis drop allowed while keeping both feet planted.", false, "", {  }, "", std::nullopt },
+            Value(0.35f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC7451E1FAEF4F205ull },
+            "Enabled",
+            Kind::UInt8,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the foot IK example driver is active.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::FootIkComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::FootIkComponent" },
+            "FootIkComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::FootIkComponent),
+            TypeCategory::Component,
+            {
+                Field_Weight(),
+                Field_FootOffset(),
+                Field_MaxPelvisDrop(),
+                Field_Enabled(),
+            },
+            &StorageBindingOf(),
+            "Animation",
+            "Foot IK example driver built on the generic two-bone IK solver: samples terrain under each foot and issues two IK requests.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::NavMeshAgentComponent>
 {
     static Value Get_Destination(const void* instance)
@@ -16159,6 +16594,8 @@ const TypeSchema& WeSchemaOf_TerrainComponent() { return GeneratedAccess<World::
 const TypeSchema& WeSchemaOf_FoliageComponent() { return GeneratedAccess<World::FoliageComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SpotLight3DComponent() { return GeneratedAccess<World::SpotLight3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_AnimGraphComponent() { return GeneratedAccess<World::AnimGraphComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_TwoBoneIkComponent() { return GeneratedAccess<World::TwoBoneIkComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_FootIkComponent() { return GeneratedAccess<World::FootIkComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_NavMeshAgentComponent() { return GeneratedAccess<World::NavMeshAgentComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_NavMeshObstacleComponent() { return GeneratedAccess<World::NavMeshObstacleComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshLODComponent() { return GeneratedAccess<World::MeshLODComponent>::WeSchema(); }
@@ -16264,6 +16701,8 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_FoliageComponent(),
 			WeSchemaOf_SpotLight3DComponent(),
 			WeSchemaOf_AnimGraphComponent(),
+			WeSchemaOf_TwoBoneIkComponent(),
+			WeSchemaOf_FootIkComponent(),
 			WeSchemaOf_NavMeshAgentComponent(),
 			WeSchemaOf_NavMeshObstacleComponent(),
 			WeSchemaOf_MeshLODComponent(),

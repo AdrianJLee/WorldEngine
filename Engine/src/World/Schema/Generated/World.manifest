@@ -55,6 +55,8 @@ struct World::TerrainComponent
 struct World::FoliageComponent
 struct World::SpotLight3DComponent
 struct World::AnimGraphComponent
+struct World::TwoBoneIkComponent
+struct World::FootIkComponent
 struct World::NavMeshAgentComponent
 struct World::NavMeshObstacleComponent
 struct World::MeshLODComponent

@@ -1180,6 +1180,13 @@ function ui:isOpen() end
 ---@field LeaveTracks number
 ---@field PushStrength number
 
+-- Component fields are exposed through Entity:GetComponent("FootIkComponent"); there is no runtime global named FootIkComponent.
+---@class FootIkComponent
+---@field FootOffset number
+---@field Weight number
+---@field Enabled number
+---@field MaxPelvisDrop number
+
 -- Component fields are exposed through Entity:GetComponent("FreeformLight2DComponent"); there is no runtime global named FreeformLight2DComponent.
 ---@class FreeformLight2DComponent
 ---@field Intensity number
@@ -1564,6 +1571,18 @@ function ui:isOpen() end
 ---@field Rotation quat
 ---@field Location vec3
 
+-- Component fields are exposed through Entity:GetComponent("TwoBoneIkComponent"); there is no runtime global named TwoBoneIkComponent.
+---@class TwoBoneIkComponent
+---@field Enabled number
+---@field RootBone string
+---@field MidBone string
+---@field Weight number
+---@field PoleAngleDeg number
+---@field EndBone string
+---@field TargetPosition vec3
+---@field TargetUuid number
+---@field OwnerUuid number
+
 -- Component fields are exposed through Entity:GetComponent("UUIDComponent"); there is no runtime global named UUIDComponent.
 ---@class UUIDComponent
 ---@field ID string read-only
@@ -1692,6 +1711,8 @@ function ui:isOpen() end
 ---@field Foliage string Short alias for "FoliageComponent".
 ---@field FoliageInteractionComponent string Registered component type name "FoliageInteractionComponent".
 ---@field FoliageInteraction string Short alias for "FoliageInteractionComponent".
+---@field FootIkComponent string Registered component type name "FootIkComponent".
+---@field FootIk string Short alias for "FootIkComponent".
 ---@field FreeformLight2DComponent string Registered component type name "FreeformLight2DComponent".
 ---@field FreeformLight2D string Short alias for "FreeformLight2DComponent".
 ---@field GlobalLight2DComponent string Registered component type name "GlobalLight2DComponent".
@@ -1774,6 +1795,8 @@ function ui:isOpen() end
 ---@field Tilemap string Short alias for "TilemapComponent".
 ---@field TransformComponent string Registered component type name "TransformComponent".
 ---@field Transform string Short alias for "TransformComponent".
+---@field TwoBoneIkComponent string Registered component type name "TwoBoneIkComponent".
+---@field TwoBoneIk string Short alias for "TwoBoneIkComponent".
 ---@field UUIDComponent string Registered component type name "UUIDComponent".
 ---@field UUID string Short alias for "UUIDComponent".
 ---@field VelocityComponent string Registered component type name "VelocityComponent".

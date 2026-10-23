@@ -19,6 +19,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -38,7 +39,10 @@ namespace World
 		constexpr float kRowH = 24.0f;
 		constexpr float kStateCardH = 176.0f;
 		constexpr float kBlendCardH = 356.0f;
-		constexpr float kLayerCardH = 168.0f;
+		constexpr float kLayerCardH = 520.0f;
+		// 姿态预览卡：放在中栏（可滚动），窄窗口/右栏折叠时也能看到。
+		constexpr float kPoseCardH = 196.0f;
+		constexpr float kStateGraphH = 180.0f;
 		constexpr float kGap = 8.0f;
 		constexpr float kSampleRowH = 28.0f;
 		constexpr float kTransitionRowH = 56.0f;
@@ -151,6 +155,100 @@ namespace World
 			if (const auto* tag = registry.try_get<TagComponent>(entity))
 				return StringPool::Get().NameOf(tag->Tag);
 			return std::string();
+		}
+
+		struct ModelClipInfo
+		{
+			const Asset::WModelAnimation* Clip = nullptr;
+			float Duration = 0.0f;
+			int Frames = 0;
+		};
+
+		std::string LowerAscii(std::string text)
+		{
+			for (char& ch : text)
+				ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+			return text;
+		}
+
+		bool ContainsTokenNoCase(const std::string& name, const char* token)
+		{
+			return LowerAscii(name).find(LowerAscii(token)) != std::string::npos;
+		}
+
+		ModelClipInfo FindModelClip(const Asset::WModelData& model, const std::string& clipName)
+		{
+			ModelClipInfo info;
+			for (const Asset::WModelAnimation& animation : model.Animations)
+			{
+				if (animation.Name != clipName)
+					continue;
+				info.Clip = &animation;
+				info.Duration = std::max(0.0f, animation.Duration);
+				std::vector<float> times;
+				for (const Asset::WModelAnimationChannel& channel : animation.Channels)
+				{
+					for (const Asset::WModelAnimationKey& key : channel.Keys)
+					{
+						info.Duration = std::max(info.Duration, key.Time);
+						times.push_back(key.Time);
+					}
+				}
+				std::sort(times.begin(), times.end());
+				times.erase(std::unique(times.begin(), times.end(),
+					[](float a, float b) { return std::fabs(a - b) < 0.0005f; }), times.end());
+				if (!times.empty())
+				{
+					info.Frames = static_cast<int>(times.size());
+				}
+				else if (info.Duration > 0.0f)
+				{
+					const float rate = model.Meta.Settings.AnimationSampleRate > 0.0f
+						? model.Meta.Settings.AnimationSampleRate : 30.0f;
+					info.Frames = std::max(1, static_cast<int>(std::round(info.Duration * rate)));
+				}
+				break;
+			}
+			return info;
+		}
+
+		std::string SerializeBoneMask(const std::vector<BoneMaskEntry>& mask)
+		{
+			std::string text;
+			for (size_t i = 0; i < mask.size(); ++i)
+			{
+				if (i > 0)
+					text += ", ";
+				text += mask[i].BoneName + " " + FormatFloat(mask[i].Weight, 2);
+			}
+			return text;
+		}
+
+		std::vector<BoneMaskEntry> ParseBoneMaskText(const std::string& text)
+		{
+			std::vector<BoneMaskEntry> mask;
+			size_t start = 0;
+			while (start < text.size())
+			{
+				size_t comma = text.find(',', start);
+				if (comma == std::string::npos)
+					comma = text.size();
+				const std::string entry = text.substr(start, comma - start);
+				const size_t firstNonSpace = entry.find_first_not_of(" \t");
+				const size_t lastSpace = entry.find_last_of(' ');
+				if (firstNonSpace != std::string::npos && lastSpace != std::string::npos
+					&& lastSpace > firstNonSpace)
+				{
+					BoneMaskEntry bone;
+					bone.BoneName = entry.substr(firstNonSpace, lastSpace - firstNonSpace);
+					bone.Weight = std::clamp(
+						static_cast<float>(std::atof(entry.substr(lastSpace + 1).c_str())), 0.0f, 1.0f);
+					if (!bone.BoneName.empty())
+						mask.push_back(bone);
+				}
+				start = comma + 1;
+			}
+			return mask;
 		}
 
 		// 把 "engine/foo" 解析到引擎内容库,其余解析到当前项目内容根(与内容浏览器同口径)。
@@ -268,6 +366,17 @@ namespace World
 		m_CenterScroll = 0.0f;
 		m_TrianglesDirty = true;
 		m_ParamsInitialized = false;
+		m_SimGraphReady = false;
+		m_SimCycleTime = 0.0f;
+		m_StateGraphPositions.clear();
+		m_StateGraphDragPending.clear();
+		m_StateGraphDragNode.clear();
+		m_NewParameterRowVisible = false;
+		m_NewParameterBuffer.clear();
+		m_LayerMaskAdvancedOpen = false;
+		m_LayerMaskScroll = 0.0f;
+		m_LayerMaskTextKey.clear();
+		m_LayerMaskTextBuffer.clear();
 	}
 
 	std::filesystem::path AnimGraphPanel::ResolvePhysicalPath(const std::string& logicalPath) const
@@ -348,6 +457,17 @@ namespace World
 		m_ParamsInitialized = false;
 		m_NameBufferKey.clear();
 		m_ConditionKey.clear();
+		m_SimGraphReady = false;
+		m_SimCycleTime = 0.0f;
+		m_StateGraphPositions.clear();
+		m_StateGraphDragPending.clear();
+		m_StateGraphDragNode.clear();
+		m_NewParameterRowVisible = false;
+		m_NewParameterBuffer.clear();
+		m_LayerMaskAdvancedOpen = false;
+		m_LayerMaskScroll = 0.0f;
+		m_LayerMaskTextKey.clear();
+		m_LayerMaskTextBuffer.clear();
 		SetStatus(AGTr("status.loaded", "Loaded ") + m_LoadedPath, false);
 	}
 
@@ -403,10 +523,11 @@ namespace World
 			return false;
 		}
 
-		entt::registry& registry = scene->GetRegistry();
 		const entt::entity handle = entity;
-		AnimGraphComponent* component = registry.try_get<AnimGraphComponent>(handle);
-		if (component == nullptr)
+		const entt::registry& readRegistry = static_cast<const Scene&>(*scene).GetRegistry();
+		const bool hasComponent = readRegistry.try_get<AnimGraphComponent>(handle) != nullptr;
+		AnimGraphComponent* component = nullptr;
+		if (!hasComponent)
 		{
 			std::string reason;
 			if (!entity.CanAddComponent(entt::type_id<AnimGraphComponent>().hash(), &reason))
@@ -415,7 +536,28 @@ namespace World
 					+ (reason.empty() ? AGTr("status.scene_running", "scene is running") : reason), true);
 				return false;
 			}
+
+			// Active scenes reject structural writes even when CanAddComponent() only checked
+			// static dependencies. Reject before touching the mutable registry: GetRegistry()
+			// itself throws on the read-only editor path during Play/Simulate.
+			if (scene->IsActive())
+			{
+				SetStatus(AGTr("status.runtime_add_blocked", "运行时不能给实体添加组件，请先停止播放"), true);
+				return false;
+			}
 			component = &entity.AddOrReplaceComponent<AnimGraphComponent>();
+		}
+		else
+		{
+			// Existing component: mutate the component itself, never take a mutable registry.
+			component = static_cast<AnimGraphComponent*>(
+				entity.GetComponent(entt::type_id<AnimGraphComponent>().hash()));
+			if (component == nullptr)
+			{
+				SetStatus(AGTr("status.cannot_add_component", "Cannot add AnimGraphComponent: ")
+					+ AGTr("status.scene_running", "scene is running"), true);
+				return false;
+			}
 		}
 
 		component->AnimGraphAsset = AssetRef { StringPool::Get().InternPath(m_LoadedPath), AssetId {} };
@@ -424,7 +566,7 @@ namespace World
 #endif
 		host.MarkDocumentDirty();
 
-		const bool hasSkin = registry.try_get<SkinnedMeshRendererComponent>(handle) != nullptr;
+		const bool hasSkin = readRegistry.try_get<SkinnedMeshRendererComponent>(handle) != nullptr;
 		SetStatus(hasSkin
 			? AGTr("status.applied", "Applied ") + m_LoadedPath + AGTr("status.applied_suffix", " to the selected entity")
 			: AGTr("status.applied_no_skin", "Applied to the selected entity (no SkinnedMeshRendererComponent yet: nothing will draw)"),
@@ -721,7 +863,7 @@ namespace World
 		Scene* scene = sceneRef.get();
 		if (scene == nullptr || !entity.IsValid() || entity.GetScene() != scene)
 			return {};
-		const auto& registry = scene->GetRegistry();
+		const auto& registry = static_cast<const Scene&>(*scene).GetRegistry();
 		if (const auto* skinned = registry.try_get<SkinnedMeshRendererComponent>(entity))
 		{
 			if (skinned->Mesh.HasPath())
@@ -784,7 +926,7 @@ namespace World
 		{
 			m_BoundEntity = entity;
 			m_BoundScene = scene;
-			m_BoundName = EntityTag(scene->GetRegistry(), entity);
+			m_BoundName = EntityTag(static_cast<const Scene&>(*scene).GetRegistry(), entity);
 			if (m_BoundName.empty())
 				m_BoundName = AGTr("live.entity", "Entity");
 			// 名称 + 实体 ID:同名实体在层级里很常见,只给名字无法确认绑到了哪一个。
@@ -795,6 +937,7 @@ namespace World
 		if (!m_ParamsInitialized)
 		{
 			const auto& defaults = m_Graph.GetParameterDefaults();
+			const bool hasParameters = !defaults.empty();
 			auto readDefault = [&defaults](const char* name)
 			{
 				const auto found = defaults.find(name);
@@ -814,7 +957,7 @@ namespace World
 #if WE_HAS_ANIMGRAPH_SYSTEM
 		if (m_BoundEntity == entt::null || m_BoundScene == nullptr)
 			return;
-		const auto& registry = m_BoundScene->GetRegistry();
+		const auto& registry = static_cast<const Scene&>(*m_BoundScene).GetRegistry();
 		if (registry.try_get<AnimGraphComponent>(m_BoundEntity) == nullptr)
 			return;
 		AnimGraphSystem::SetParameter(m_BoundEntity, "Speed", m_ParamSpeed);
@@ -822,6 +965,67 @@ namespace World
 		AnimGraphSystem::SetParameter(m_BoundEntity, "IsFalling", m_ParamFalling);
 		AnimGraphSystem::SetParameter(m_BoundEntity, "AimWeight", m_ParamAimWeight);
 #endif
+	}
+
+	void AnimGraphPanel::ResetSimulation()
+	{
+		m_SimGraphReady = false;
+		m_SimCycleTime = 0.0f;
+	}
+
+	void AnimGraphPanel::EnsureSimulationGraph()
+	{
+		if (m_SimGraphReady)
+			return;
+		m_SimGraph = m_Graph;
+		if (!m_InitialStateHint.empty() && m_SimGraph.FindState(m_InitialStateHint) != nullptr)
+			m_SimGraph.SetInitialState(m_InitialStateHint);
+		m_SimGraphReady = true;
+		m_SimCycleTime = 0.0f;
+	}
+
+	void AnimGraphPanel::UpdateSimulation(float dt)
+	{
+		if (!m_Simulate)
+			return;
+		EnsureSimulationGraph();
+
+		constexpr float stageSeconds = 2.5f;
+		constexpr int stageCount = 7;
+		m_SimCycleTime = std::fmod(m_SimCycleTime + std::max(0.0f, dt), stageSeconds * stageCount);
+		const int stage = static_cast<int>(m_SimCycleTime / stageSeconds) % stageCount;
+		const float stageTime = std::fmod(m_SimCycleTime, stageSeconds);
+
+		float speed = 0.0f;
+		float direction = 0.0f;
+		float falling = 0.0f;
+		float verticalSpeed = 0.0f;
+		switch (stage)
+		{
+			case 1: speed = 1.6f; break;
+			case 2: speed = 4.5f; break;
+			case 3: speed = 1.6f; direction = 90.0f; break;
+			case 4: speed = 1.6f; direction = -90.0f; break;
+			case 5: speed = 1.6f; direction = 180.0f; break;
+			case 6:
+				falling = 1.0f;
+				verticalSpeed = stageTime < stageSeconds * 0.5f ? 4.5f : -7.0f;
+				break;
+			default: break;
+		}
+
+		m_SimGraph.SetFloat("Speed", speed);
+		m_SimGraph.SetFloat("Direction", direction);
+		m_SimGraph.SetFloat("IsFalling", falling);
+		m_SimGraph.SetFloat("VerticalSpeed", verticalSpeed);
+		m_SimGraph.SetFloat("AimWeight", std::clamp(m_ParamAimWeight, 0.0f, 1.0f));
+		m_SimGraph.Update(dt);
+
+		// 模拟模式仍保持既有 Live Preview 语义：绑定实体时把循环参数继续推给运行时。
+		m_ParamSpeed = speed;
+		m_ParamDirection = direction;
+		m_ParamFalling = falling;
+		m_ParamsInitialized = true;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -905,6 +1109,7 @@ namespace World
 		}
 		ConsumeOpenRequest();
 		RefreshLiveBinding(host);
+		UpdateSimulation(dt);
 		PushParameters(host);
 
 		const float outer = kGap;
@@ -937,7 +1142,7 @@ namespace World
 		if (m_Narrow)
 		{
 			// 右栏折叠为底部条(派工 §3.4):中栏在上、实时区在下,互不重叠。
-			const float liveH = std::min(236.0f, std::max(150.0f, bodyH * 0.42f));
+			const float liveH = std::min(200.0f, std::max(140.0f, bodyH * 0.34f));
 			const Wui::WuiRect centerTop { centerArea.X, centerArea.Y, centerArea.W, std::max(0.0f, bodyH - liveH - kGap) };
 			RenderCenterColumn(ctx, centerTop, host, theme);
 			const Wui::WuiRect liveArea { centerArea.X, centerTop.Y + centerTop.H + kGap, centerArea.W, liveH };
@@ -1280,7 +1485,11 @@ namespace World
 			MarkDirty();
 		}
 
-		const float layersTop = y + kRowH + 1.0f;
+		Wui::Label(ctx, { area.X + theme.Pad, y + kRowH + 2.0f },
+			Wui::EllipsizeMiddleToWidth(ctx, AGTr("layers.hint", "Select a layer, then edit clip / weight / mask in the center column."),
+				area.W - theme.Pad * 2.0f, theme.FontSizeCaption),
+			theme.TextDisabled, theme.FontSizeCaption);
+		const float layersTop = y + kRowH + 16.0f;
 		const Wui::WuiRect layersList { area.X + theme.PadSmall, layersTop,
 			area.W - theme.PadSmall * 2.0f, std::max(40.0f, listBottom - layersTop) };
 		std::vector<std::string> layerNames;
@@ -1311,6 +1520,12 @@ namespace World
 			{
 				m_SelectedLayer = layerNames[static_cast<size_t>(result.Clicked)];
 				m_CenterScroll = 0.0f;
+				m_LayerCardScroll = 0.0f;
+				m_CenterTab = 1;   // 点层 = 直接进入层编辑页
+				m_LayerMaskScroll = 0.0f;
+				m_LayerMaskTextKey.clear();
+				m_NewParameterRowVisible = false;
+				m_NewParameterBuffer.clear();
 			}
 		}
 
@@ -1358,7 +1573,66 @@ namespace World
 		const float transitionsCardH = kRowH + 4.0f
 			+ (kTransitionRowH + theme.PadSmall) * static_cast<float>(transitionCount) + kRowH + theme.PadSmall;
 
-		float contentH = kGap;
+		// 顶部页签「状态 / 层」：窄窗口下中栏可视高度有限，层编辑（尤其是遮罩骨骼列表）
+		// 放在长滚动区底部会让用户找不到（2026-10-23 用户反馈「遮罩如何编辑呢」）。
+		const Wui::WuiRect tabBar { area.X + theme.PadSmall, area.Y,
+			area.W - theme.PadSmall * 2.0f, kRowH };
+		const float tabW = (tabBar.W - theme.PadSmall * 2.0f) / 3.0f;
+		const Wui::WuiRect stateTab { tabBar.X, tabBar.Y, tabW, kRowH };
+		const Wui::WuiRect layerTab { stateTab.X + tabW + theme.PadSmall, tabBar.Y, tabW, kRowH };
+		const Wui::WuiRect poseTab { layerTab.X + tabW + theme.PadSmall, tabBar.Y,
+			tabBar.W - tabW * 2.0f - theme.PadSmall * 2.0f, kRowH };
+		const std::string stateTabLabel = (m_CenterTab == 0 ? "● " : "")
+			+ AGTr("center.tab.state", "状态");
+		const std::string layerTabLabel = (m_CenterTab == 1 ? "● " : "")
+			+ AGTr("center.tab.layer", "层");
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.state"), stateTab, stateTabLabel,
+			theme, true, AGTr("center.tab.state.tooltip", "State properties / blend space / transitions / pose preview."), false))
+			m_CenterTab = 0;
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.layer"), layerTab, layerTabLabel,
+			theme, true, AGTr("center.tab.layer.tooltip", "Additive layers: clip / weight parameter / bone mask."), false))
+			m_CenterTab = 1;
+		const std::string poseTabLabel = (m_CenterTab == 2 ? "● " : "")
+			+ AGTr("center.tab.pose", "姿态");
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.pose"), poseTab, poseTabLabel,
+			theme, true, AGTr("center.tab.pose.tooltip", "Pose preview: the current graph pose (enable 模拟 to play it)."), false))
+			m_CenterTab = 2;
+
+		const Wui::WuiRect contentArea { area.X, tabBar.Y + kRowH + kGap * 0.5f, area.W,
+			std::max(40.0f, area.H - kRowH - kGap * 0.5f) };
+
+		if (m_CenterTab == 2)
+		{
+			// 姿态页：整块给预览，窄窗口也不用滚动。
+			const Wui::WuiRect poseCard { contentArea.X + theme.PadSmall, contentArea.Y + kGap,
+				contentArea.W - theme.PadSmall * 2.0f, std::max(120.0f, contentArea.H - kGap * 2.0f) };
+			RenderPosePreview(ctx, poseCard, theme);
+			return;
+		}
+
+		if (m_CenterTab == 1)
+		{
+			const float layerH = std::max(kLayerCardH, contentArea.H - kGap * 2.0f);
+			const float contentH = layerH + kGap * 2.0f;
+			if (!Wui::BeginScrollArea(ctx, contentArea, contentH, m_LayerCardScroll, theme, 0))
+				return;
+			const Wui::WuiRect layerCard { contentArea.X + theme.PadSmall, contentArea.Y + kGap - m_LayerCardScroll,
+				contentArea.W - theme.PadSmall * 2.0f, layerH };
+			if (m_SelectedLayer.empty())
+			{
+				Wui::EmptyState(ctx, layerCard, "", AGTr("center.layer.empty.title", "No layer selected"),
+					AGTr("center.layer.empty.body", "Pick a layer in the left column, or add one with +."),
+					"", 0, theme);
+			}
+			else
+			{
+				RenderLayerCard(ctx, layerCard, host, theme);
+			}
+			Wui::EndScrollArea(ctx);
+			return;
+		}
+
+		float contentH = kGap + kStateGraphH + kGap;
 		contentH += kStateCardH + kGap;
 		if (state && state->Kind != AnimStateKind::SingleClip)
 		{
@@ -1366,14 +1640,16 @@ namespace World
 			contentH += samplesCardH + kGap;
 		}
 		contentH += transitionsCardH + kGap;
-		if (!m_SelectedLayer.empty())
-			contentH += kLayerCardH + kGap;
 		contentH += kGap;
 
-		if (!Wui::BeginScrollArea(ctx, area, contentH, m_CenterScroll, theme, 0))
+		if (!Wui::BeginScrollArea(ctx, contentArea, contentH, m_CenterScroll, theme, 0))
 			return;
 
-		float y = area.Y + kGap - m_CenterScroll;
+		float y = contentArea.Y + kGap - m_CenterScroll;
+		const Wui::WuiRect stateGraph { area.X + theme.PadSmall, y, area.W - theme.PadSmall * 2.0f, kStateGraphH };
+		RenderStateGraph(ctx, stateGraph, host, theme);
+		y += kStateGraphH + kGap;
+
 		const Wui::WuiRect stateCard { area.X + theme.PadSmall, y, area.W - theme.PadSmall * 2.0f, kStateCardH };
 		RenderStateCard(ctx, stateCard, host, theme);
 		y += kStateCardH + kGap;
@@ -1404,12 +1680,6 @@ namespace World
 		const Wui::WuiRect transitionsCard { area.X + theme.PadSmall, y, area.W - theme.PadSmall * 2.0f, transitionsH };
 		RenderTransitionsCard(ctx, transitionsCard, host, theme);
 		y += transitionsH + kGap;
-
-		if (!m_SelectedLayer.empty())
-		{
-			const Wui::WuiRect layerCard { area.X + theme.PadSmall, y, area.W - theme.PadSmall * 2.0f, kLayerCardH };
-			RenderLayerCard(ctx, layerCard, host, theme);
-		}
 
 		Wui::EndScrollArea(ctx);
 	}
@@ -1813,16 +2083,35 @@ namespace World
 		const float controlW = std::max(40.0f, area.W - theme.Pad * 2.0f - labelW);
 		float y = area.Y + kRowH + 6.0f;
 
-		// Clip
+		// ---- Clip：名字 + 模型片段元数据 + 缺失提示 ----
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, AGTr("layer.clip", "Clip"), theme.TextMuted, theme.FontSizeSmall);
 		{
 			const std::vector<std::string> clips = ClipOptionsForCombo(layer->ClipName);
+			std::vector<std::string> clipLabels;
+			clipLabels.reserve(clips.size());
+			for (const std::string& name : clips)
+			{
+				const ModelClipInfo info = FindModelClip(m_Model, name);
+				if (info.Clip != nullptr)
+				{
+					clipLabels.push_back(name + "    ·  " + AGFmt("layer.clip.meta", "模型片段 · {frames} 帧 / {seconds}s",
+						{ { "frames", std::to_string(info.Frames) }, { "seconds", FormatFloat(info.Duration, 2) } }));
+				}
+				else
+				{
+					clipLabels.push_back(name);
+				}
+			}
 			int clipIndex = 0;
 			const auto found = std::find(clips.begin(), clips.end(), layer->ClipName);
 			if (found != clips.end())
 				clipIndex = static_cast<int>(std::distance(clips.begin(), found));
-			if (Wui::Combo(ctx, Wui::HashId("animgraph.layer.clip"), { controlX, y, controlW, kRowH }, "",
-				clips, clipIndex, theme, layer->ClipName))
+			const bool clipMissing = m_ModelValid && !layer->ClipName.empty()
+				&& FindModelClip(m_Model, layer->ClipName).Clip == nullptr;
+			const float warningW = clipMissing ? 150.0f : 0.0f;
+			const float comboW = std::max(90.0f, controlW - warningW - (clipMissing ? theme.PadSmall : 0.0f));
+			if (Wui::Combo(ctx, Wui::HashId("animgraph.layer.clip"), { controlX, y, comboW, kRowH }, "",
+				clipLabels, clipIndex, theme, layer->ClipName))
 			{
 				PushUndo();
 				std::vector<AnimLayer> updated = m_Graph.GetLayers();
@@ -1832,107 +2121,412 @@ namespace World
 				m_Graph.SetLayers(std::move(updated));
 				MarkDirty();
 			}
-			Wui::Tooltip(ctx, { controlX, y, controlW, kRowH }, AGTr("layer.clip.tooltip", "Clip sampled by this layer."));
+			Wui::Tooltip(ctx, { controlX, y, comboW, kRowH }, AGTr("layer.clip.tooltip", "Clip sampled by this layer."));
+			if (clipMissing)
+			{
+				const Wui::WuiRect warning { controlX + comboW + theme.PadSmall, y, warningW, kRowH };
+				Wui::Label(ctx, { warning.X, warning.Y + 4.0f },
+					Wui::EllipsizeMiddleToWidth(ctx, AGTr("layer.clip.missing", "（模型中没有此片段）"), warning.W,
+						theme.FontSizeCaption), theme.Danger, theme.FontSizeCaption);
+				Wui::Tooltip(ctx, warning, AGTr("layer.clip.missing.tooltip",
+					"该片段在当前模型中不存在，运行时会静默不播放。"));
+			}
 		}
-		y += kRowH + 4.0f;
+		y += kRowH + 2.0f;
 
-		// Weight parameter
+		layer = findLayer();
+		if (layer == nullptr)
+			return;
+		if (!layer->ClipName.empty())
+		{
+			const ModelClipInfo selectedClip = FindModelClip(m_Model, layer->ClipName);
+			const std::string metaLine = selectedClip.Clip != nullptr
+				? AGFmt("layer.clip.selected_meta", "模型片段 · {frames} 帧 / {seconds}s",
+					{ { "frames", std::to_string(selectedClip.Frames) }, { "seconds", FormatFloat(selectedClip.Duration, 2) } })
+				: AGTr("layer.clip.no_model", "选择带模型的角色后显示片段帧数与时长。");
+			Wui::Label(ctx, { controlX, y }, Wui::EllipsizeMiddleToWidth(ctx, metaLine, controlW, theme.FontSizeCaption),
+				theme.TextMuted, theme.FontSizeCaption);
+			Wui::Tooltip(ctx, { controlX, y, controlW, 14.0f }, metaLine);
+		}
+		y += 16.0f;
+
+		const std::string aimExplain = AGTr("layer.aim_explain",
+			"Aim = 模型里的一条动画片段（瞄准姿态），层把它叠加到基础状态上。");
+		Wui::Label(ctx, { controlX, y }, Wui::EllipsizeMiddleToWidth(ctx, aimExplain, controlW, theme.FontSizeCaption),
+			theme.TextMuted, theme.FontSizeCaption);
+		Wui::Tooltip(ctx, { controlX, y, controlW, 14.0f }, aimExplain);
+		y += 20.0f;
+
+		// ---- Weight：参数名（float），不是数值本身 ----
 		layer = findLayer();
 		if (layer == nullptr)
 			return;
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, AGTr("layer.weight", "Weight"), theme.TextMuted, theme.FontSizeSmall);
-		std::string weightBuffer = layer->WeightParameter;
-		Wui::TextFieldA11y weightA11y;
-		weightA11y.Label = AGTr("layer.weight.a11y", "Layer weight parameter");
-		weightA11y.Placeholder = "AimWeight";
-		const Wui::WuiId weightId = Wui::HashId("animgraph.layer.weight");
-		const bool weightSubmitted = Wui::TextField(ctx, weightId, { controlX, y, controlW, kRowH },
-			weightBuffer, theme, nullptr, &weightA11y);
-		if (weightSubmitted && weightBuffer != layer->WeightParameter)
 		{
-			PushUndo();
-			std::vector<AnimLayer> updated = m_Graph.GetLayers();
-			for (AnimLayer& candidate : updated)
-				if (candidate.Name == m_SelectedLayer)
-					candidate.WeightParameter = weightBuffer;
-			m_Graph.SetLayers(std::move(updated));
-			MarkDirty();
-		}
-		Wui::Tooltip(ctx, { controlX, y, controlW, kRowH },
-			AGTr("layer.weight.tooltip", "Parameter that drives this layer's weight (0 = layer off, 1 = full)."));
-		y += kRowH + 4.0f;
+			const auto& defaults = m_Graph.GetParameterDefaults();
+			std::vector<std::string> parameterNames;
+			parameterNames.reserve(defaults.size() + 1);
+			for (const auto& entry : defaults)
+				parameterNames.push_back(entry.first);
+			const bool weightDefined = defaults.find(layer->WeightParameter) != defaults.end();
+			int weightIndex = 0;
+			const auto found = std::find(parameterNames.begin(), parameterNames.end(), layer->WeightParameter);
+			if (found != parameterNames.end())
+				weightIndex = static_cast<int>(std::distance(parameterNames.begin(), found));
+			else if (!layer->WeightParameter.empty())
+			{
+				parameterNames.insert(parameterNames.begin(), layer->WeightParameter);
+				weightIndex = 0;
+			}
+			const bool hasParameters = !defaults.empty() || !layer->WeightParameter.empty();
+			if (parameterNames.empty())
+				parameterNames.push_back(AGTr("layer.weight.no_parameters", "(no parameters)"));
 
-		// Bone mask
+			const float badgeW = 42.0f;
+			const bool compactWeightRow = controlW < 280.0f;
+			const float createW = compactWeightRow ? 28.0f : 96.0f;
+			const float weightComboW = std::max(60.0f, controlW - badgeW - createW - theme.PadSmall * 2.0f);
+			if (Wui::Combo(ctx, Wui::HashId("animgraph.layer.weight.parameter"),
+				{ controlX, y, weightComboW, kRowH }, "", parameterNames, weightIndex, theme,
+				layer->WeightParameter.empty() ? AGTr("layer.weight.pick", "(pick a parameter)") : layer->WeightParameter))
+			{
+				if (hasParameters && static_cast<size_t>(weightIndex) < parameterNames.size())
+				{
+					PushUndo();
+					std::vector<AnimLayer> updated = m_Graph.GetLayers();
+					for (AnimLayer& candidate : updated)
+						if (candidate.Name == m_SelectedLayer)
+							candidate.WeightParameter = parameterNames[static_cast<size_t>(weightIndex)];
+					m_Graph.SetLayers(std::move(updated));
+					MarkDirty();
+				}
+			}
+			Wui::Tooltip(ctx, { controlX, y, weightComboW, kRowH },
+				AGTr("layer.weight.tooltip", "权重 = 驱动本层强度的 float 参数名（0=关闭，1=全叠加），不是数值本身。"));
+
+			const Wui::WuiRect badge { controlX + weightComboW + theme.PadSmall, y + 2.0f, badgeW, kRowH - 4.0f };
+			Wui::Badge(ctx, badge, "float", WithAlpha(theme.Accent, 0.22f), theme.Accent, theme, theme.FontSizeCaption);
+			const Wui::WuiRect create { badge.X + badge.W + theme.PadSmall, y, createW, kRowH };
+			if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.weight.create"), create,
+				compactWeightRow ? std::string("+") : AGTr("layer.weight.create", "＋ 新建参数"), theme, true,
+				AGTr("layer.weight.create.tooltip", "创建一个默认值为 0 的 float 参数，并把它设为当前层的权重参数。"), false))
+			{
+				m_NewParameterRowVisible = !m_NewParameterRowVisible;
+				m_NewParameterBuffer.clear();
+				ctx.SetFocus(m_NewParameterRowVisible
+					? Wui::HashId("animgraph.layer.weight.new_name") : 0);
+			}
+			y += kRowH + 2.0f;
+
+			if (!weightDefined && !layer->WeightParameter.empty())
+			{
+				const std::string warning = AGTr("layer.weight.missing", "（未定义参数，运行时按 0 处理）");
+				Wui::Label(ctx, { controlX, y }, warning, theme.Warning, theme.FontSizeCaption);
+				Wui::Tooltip(ctx, { controlX, y, controlW, 14.0f }, AGTr("layer.weight.missing.tooltip",
+					"当前权重名不在图的参数表中；运行时会按 0 处理，这一层不会产生叠加效果。"));
+				y += 16.0f;
+			}
+
+			if (m_NewParameterRowVisible)
+			{
+				const float cancelW = 54.0f;
+				const float confirmW = 58.0f;
+				const float fieldW = std::max(70.0f, controlW - cancelW - confirmW - theme.PadSmall * 2.0f);
+				const Wui::WuiRect field { controlX, y, fieldW, kRowH };
+				Wui::TextFieldA11y a11y;
+				a11y.Label = AGTr("layer.weight.new_name", "New float parameter name");
+				a11y.Placeholder = AGTr("layer.weight.new_placeholder", "Parameter name, e.g. AimWeight");
+				const Wui::WuiId fieldId = Wui::HashId("animgraph.layer.weight.new_name");
+				const bool submitted = Wui::TextField(ctx, fieldId, field, m_NewParameterBuffer, theme, nullptr, &a11y);
+				const Wui::WuiRect confirm { field.X + field.W + theme.PadSmall, y, confirmW, kRowH };
+				const Wui::WuiRect cancel { confirm.X + confirm.W + theme.PadSmall, y, cancelW, kRowH };
+				const bool createPressed = Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.weight.new_confirm"),
+					confirm, AGTr("layer.weight.new_confirm", "创建"), theme, true,
+					AGTr("layer.weight.new_confirm.tooltip", "创建这个 float 参数（默认值 0）。"), false);
+				const bool cancelPressed = Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.weight.new_cancel"),
+					cancel, AGTr("layer.weight.new_cancel", "取消"), theme, true,
+					AGTr("layer.weight.new_cancel.tooltip", "关闭新建参数输入行。"), true);
+				if (submitted || createPressed)
+				{
+					const size_t first = m_NewParameterBuffer.find_first_not_of(" \t");
+					const size_t last = m_NewParameterBuffer.find_last_not_of(" \t");
+					const std::string name = first == std::string::npos ? std::string()
+						: m_NewParameterBuffer.substr(first, last - first + 1);
+					if (name.empty())
+					{
+						SetStatus(AGTr("layer.weight.new_empty", "参数名不能为空"), true);
+					}
+					else if (m_Graph.GetParameterDefaults().find(name) != m_Graph.GetParameterDefaults().end())
+					{
+						SetStatus(AGFmt("layer.weight.new_exists", "参数“{name}”已存在", { { "name", name } }), true);
+					}
+					else
+					{
+						PushUndo();
+						m_Graph.SetParameterDefault(name, 0.0f);
+						std::vector<AnimLayer> updated = m_Graph.GetLayers();
+						for (AnimLayer& candidate : updated)
+							if (candidate.Name == m_SelectedLayer)
+								candidate.WeightParameter = name;
+						m_Graph.SetLayers(std::move(updated));
+						MarkDirty();
+						SetStatus(AGFmt("layer.weight.new_created", "已创建 float 参数“{name}”（默认值 0）",
+							{ { "name", name } }), false);
+						m_NewParameterRowVisible = false;
+						m_NewParameterBuffer.clear();
+						ctx.SetFocus(0);
+					}
+				}
+				else if (cancelPressed)
+				{
+					m_NewParameterRowVisible = false;
+					m_NewParameterBuffer.clear();
+					ctx.SetFocus(0);
+				}
+				y += kRowH + 4.0f;
+			}
+		}
+
+		// ---- Bone mask：骨骼行 + 预设 + 添加 + 高级文本 ----
 		layer = findLayer();
 		if (layer == nullptr)
 			return;
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, AGTr("layer.mask", "Mask"), theme.TextMuted, theme.FontSizeSmall);
-		std::string maskBuffer;
-		for (size_t i = 0; i < layer->BoneMask.size(); ++i)
+		y += kRowH;
+
+		std::vector<std::string> boneNames;
+		std::vector<std::string> modelBones;
+		if (m_ModelValid)
 		{
-			if (i > 0)
-				maskBuffer += ", ";
-			maskBuffer += layer->BoneMask[i].BoneName + " " + FormatFloat(layer->BoneMask[i].Weight, 2);
-		}
-		Wui::TextFieldA11y maskA11y;
-		maskA11y.Label = AGTr("layer.mask.a11y", "Bone mask");
-		maskA11y.Placeholder = "Spine 0.25, Chest 1.0, Head 1.0";
-		const std::string originalMaskBuffer = maskBuffer;
-		const Wui::WuiId maskId = Wui::HashId("animgraph.layer.mask");
-		const bool maskSubmitted = Wui::TextField(ctx, maskId, { controlX, y, controlW, kRowH }, maskBuffer,
-			theme, nullptr, &maskA11y);
-		if (maskSubmitted && maskBuffer != originalMaskBuffer)
-		{
-			std::vector<BoneMaskEntry> mask;
-			size_t start = 0;
-			while (start < maskBuffer.size())
+			// 只列骨骼节点：挂 mesh 的叶子节点（MannequinMesh 之类）不是骨骼，
+			// 出现在遮罩列表里只会让用户困惑。
+			for (const Asset::WModelNode& node : m_Model.Nodes)
 			{
-				size_t comma = maskBuffer.find(',', start);
-				if (comma == std::string::npos)
-					comma = maskBuffer.size();
-				const std::string entry = maskBuffer.substr(start, comma - start);
-				const size_t firstNonSpace = entry.find_first_not_of(" \t");
-				const size_t lastSpace = entry.find_last_of(' ');
-				if (firstNonSpace != std::string::npos && lastSpace != std::string::npos
-					&& lastSpace > firstNonSpace)
-				{
-					BoneMaskEntry bone;
-					bone.BoneName = entry.substr(firstNonSpace, lastSpace - firstNonSpace);
-					bone.Weight = std::clamp(
-						static_cast<float>(std::atof(entry.substr(lastSpace + 1).c_str())), 0.0f, 1.0f);
-					if (!bone.BoneName.empty())
-						mask.push_back(bone);
-				}
-				start = comma + 1;
+				if (node.Name.empty() || node.MeshIndex >= 0)
+					continue;
+				if (std::find(modelBones.begin(), modelBones.end(), node.Name) == modelBones.end())
+					modelBones.push_back(node.Name);
 			}
+			boneNames = modelBones;
+		}
+		for (const BoneMaskEntry& bone : layer->BoneMask)
+			if (std::find(boneNames.begin(), boneNames.end(), bone.BoneName) == boneNames.end())
+				boneNames.push_back(bone.BoneName);
+
+		auto setMask = [this](std::vector<BoneMaskEntry> mask)
+		{
 			PushUndo();
 			std::vector<AnimLayer> updated = m_Graph.GetLayers();
 			for (AnimLayer& candidate : updated)
 				if (candidate.Name == m_SelectedLayer)
-					candidate.BoneMask = mask;
+					candidate.BoneMask = std::move(mask);
 			m_Graph.SetLayers(std::move(updated));
 			MarkDirty();
-		}
-		Wui::Tooltip(ctx, { controlX, y, controlW, kRowH },
-			AGTr("layer.mask.tooltip", "Bone weights as 'Bone 0.0..1.0' separated by commas. Bones not listed get weight 0."));
+			m_LayerMaskTextKey.clear();
+		};
 
-		// 三行术语说明：卡片底部常驻（窄栏逐行省略，完整文本在 Tooltip 里）。
-		const float explainTop = area.Y + area.H - 46.0f;
-		const Wui::WuiRect explainRect { area.X + theme.Pad, explainTop, area.W - theme.Pad * 2.0f, 40.0f };
-		const char* explainKeys[3] = { "layer.explain.clip", "layer.explain.weight", "layer.explain.mask" };
-		const char* explainFallbacks[3] = {
-			"Clip: the animation stacked over the base pose.",
-			"Weight: float parameter driving layer strength (0 = off, 1 = full).",
-			"Mask: only listed bones blend; unlisted bones get weight 0." };
-		for (int i = 0; i < 3; ++i)
+		const float presetGap = theme.PadSmall;
+		const float presetW = std::max(50.0f, (controlW - presetGap * 2.0f) / 3.0f);
+		const Wui::WuiRect upperButton { controlX, y, presetW, kRowH };
+		const Wui::WuiRect fullButton { upperButton.X + upperButton.W + presetGap, y, presetW, kRowH };
+		const Wui::WuiRect clearButton { fullButton.X + fullButton.W + presetGap, y,
+			std::max(50.0f, controlX + controlW - (fullButton.X + fullButton.W + presetGap)), kRowH };
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.mask.upper"), upperButton,
+			AGTr("layer.mask.upper", "上半身"), theme, !modelBones.empty(),
+			AGTr("layer.mask.upper.tooltip", "勾选 Spine / Chest / Neck / Head / Shoulder / UpperArm / LowerArm / Hand 等上半身骨骼。"), false))
 		{
-			const std::string line = AGTr(explainKeys[i], explainFallbacks[i]);
-			Wui::Label(ctx, { explainRect.X, explainTop + static_cast<float>(i) * 13.0f },
-				Wui::EllipsizeMiddleToWidth(ctx, line, explainRect.W, theme.FontSizeCaption),
-				theme.TextMuted, theme.FontSizeCaption);
+			static const char* kUpperTokens[] = { "Spine", "Chest", "Neck", "Head", "Shoulder",
+				"UpperArm", "LowerArm", "Hand" };
+			std::vector<BoneMaskEntry> mask;
+			for (const std::string& bone : boneNames)
+			{
+				for (const char* token : kUpperTokens)
+				{
+					if (ContainsTokenNoCase(bone, token))
+					{
+						mask.push_back(BoneMaskEntry { bone, 1.0f });
+						break;
+					}
+				}
+			}
+			setMask(std::move(mask));
 		}
-		Wui::Tooltip(ctx, explainRect,
-			AGTr("layer.explain.tooltip", "Clip: the animation stacked over the base pose.\nWeight: float parameter driving layer strength (0 = off, 1 = full).\nMask: only listed bones blend; unlisted bones get weight 0."));
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.mask.full"), fullButton,
+			AGTr("layer.mask.full", "全身"), theme, !modelBones.empty(),
+			AGTr("layer.mask.full.tooltip", "把模型里的全部具名骨骼加入遮罩（权重 1）。"), false))
+		{
+			std::vector<BoneMaskEntry> mask;
+			for (const std::string& bone : modelBones)
+				mask.push_back(BoneMaskEntry { bone, 1.0f });
+			setMask(std::move(mask));
+		}
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.mask.clear"), clearButton,
+			AGTr("layer.mask.clear", "清空"), theme, true,
+			AGTr("layer.mask.clear.tooltip", "清空遮罩；所有骨骼都不再参与这层叠加。"), true))
+		{
+			setMask({});
+		}
+		y += kRowH + 2.0f;
+
+		layer = findLayer();
+		if (layer == nullptr)
+			return;
+		{
+			std::vector<std::string> addOptions { AGTr("layer.mask.add", "＋ 添加骨骼") };
+			std::vector<std::string> unlisted;
+			for (const std::string& bone : boneNames)
+			{
+				const bool present = std::any_of(layer->BoneMask.begin(), layer->BoneMask.end(),
+					[&bone](const BoneMaskEntry& entry) { return entry.BoneName == bone; });
+				if (!present)
+				{
+					unlisted.push_back(bone);
+					addOptions.push_back(bone);
+				}
+			}
+			int addIndex = 0;
+			if (Wui::Combo(ctx, Wui::HashId("animgraph.layer.mask.add"), { controlX, y, controlW, kRowH }, "",
+				addOptions, addIndex, theme, AGTr("layer.mask.add", "＋ 添加骨骼")))
+			{
+				if (addIndex > 0 && static_cast<size_t>(addIndex - 1) < unlisted.size())
+				{
+					std::vector<BoneMaskEntry> mask = layer->BoneMask;
+					mask.push_back(BoneMaskEntry { unlisted[static_cast<size_t>(addIndex - 1)], 1.0f });
+					setMask(std::move(mask));
+				}
+			}
+			Wui::Tooltip(ctx, { controlX, y, controlW, kRowH },
+				AGTr("layer.mask.add.tooltip", "把尚未列出的骨骼加入遮罩（默认权重 1）。"));
+		}
+		y += kRowH + 2.0f;
+
+		const Wui::WuiRect maskList { controlX, y, controlW, 180.0f };
+		Wui::PanelBackground(ctx, maskList, theme.ContentBg, theme.Radius);
+		if (boneNames.size() == 0)
+		{
+			Wui::EmptyState(ctx, maskList, "", AGTr("layer.mask.empty.title", "没有可用骨骼"),
+				AGTr("layer.mask.empty.body", "选择带模型的角色，或使用高级文本手动输入骨骼名。"), "", 0, theme);
+		}
+		else
+		{
+			const float maskContentH = std::max(maskList.H, static_cast<float>(boneNames.size()) * 28.0f);
+			if (Wui::BeginScrollArea(ctx, maskList, maskContentH, m_LayerMaskScroll, theme,
+				Wui::HashId("animgraph.layer.mask.list")))
+			{
+				float rowY = maskList.Y + 2.0f - m_LayerMaskScroll;
+				for (const std::string& bone : boneNames)
+				{
+					const Wui::WuiRect row { maskList.X + 2.0f, rowY, maskList.W - 10.0f, 24.0f };
+					const AnimLayer* liveLayer = findLayer();
+					if (liveLayer == nullptr)
+						break;
+					const auto found = std::find_if(liveLayer->BoneMask.begin(), liveLayer->BoneMask.end(),
+						[&bone](const BoneMaskEntry& entry) { return entry.BoneName == bone; });
+					bool participating = found != liveLayer->BoneMask.end();
+					const bool inModel = std::find(modelBones.begin(), modelBones.end(), bone) != modelBones.end();
+					const std::string label = inModel ? bone : (bone + "  " + AGTr("layer.mask.missing_bone", "（模型中没有此骨骼）"));
+					const float dragW = 88.0f;
+					const Wui::WuiRect checkRect { row.X + 2.0f, row.Y, std::max(80.0f, row.W - dragW - 6.0f), row.H };
+					if (Wui::Checkbox(ctx, Wui::HashId(("animgraph.layer.mask.check." + bone).c_str()),
+						checkRect, label, participating, theme))
+					{
+						std::vector<AnimLayer> updated = m_Graph.GetLayers();
+						for (AnimLayer& candidate : updated)
+						{
+							if (candidate.Name != m_SelectedLayer)
+								continue;
+							candidate.BoneMask.erase(std::remove_if(candidate.BoneMask.begin(), candidate.BoneMask.end(),
+								[&bone](const BoneMaskEntry& entry) { return entry.BoneName == bone; }), candidate.BoneMask.end());
+							if (participating)
+								candidate.BoneMask.push_back(BoneMaskEntry { bone, 1.0f });
+						}
+						PushUndo();
+						m_Graph.SetLayers(std::move(updated));
+						MarkDirty();
+						m_LayerMaskTextKey.clear();
+					}
+					Wui::Tooltip(ctx, checkRect, AGTr("layer.mask.check.tooltip",
+						"勾选表示这根骨骼参与本层叠加；取消勾选即从遮罩移除。"));
+
+					const Wui::WuiRect weightRect { row.X + row.W - dragW, row.Y + 2.0f, dragW - 2.0f, 20.0f };
+					if (participating)
+					{
+						float weight = found != liveLayer->BoneMask.end() ? found->Weight : 1.0f;
+						const float previous = weight;
+						const Wui::WuiId weightId = Wui::HashId(("animgraph.layer.mask.weight." + bone).c_str());
+						if (Wui::DragFloat(ctx, weightId, weightRect, weight, 0.01f, 0.0f, 1.0f, theme)
+							&& std::fabs(weight - previous) > 0.0001f)
+						{
+							weight = std::clamp(std::round(weight / 0.05f) * 0.05f, 0.0f, 1.0f);
+							const bool continuous = ctx.Input().MouseDown[0]
+								&& (ctx.IsHovered(weightRect) || ctx.Focus() == weightId);
+							BeginContinuousEdit("layer.mask." + bone, continuous);
+							std::vector<AnimLayer> updated = m_Graph.GetLayers();
+							for (AnimLayer& candidate : updated)
+								if (candidate.Name == m_SelectedLayer)
+									for (BoneMaskEntry& entry : candidate.BoneMask)
+										if (entry.BoneName == bone)
+											entry.Weight = weight;
+							m_Graph.SetLayers(std::move(updated));
+							MarkDirty();
+							m_LayerMaskTextKey.clear();
+						}
+						Wui::Tooltip(ctx, weightRect, AGTr("layer.mask.weight.tooltip",
+							"本骨在本层的权重（0..1，步进 0.05）。0 = 不参与，1 = 完全叠加。"));
+					}
+					else
+					{
+						Wui::PanelBackground(ctx, weightRect, theme.TrackBg, 3.0f);
+						Wui::Label(ctx, { weightRect.X + 34.0f, weightRect.Y + 2.0f }, "—", theme.TextDisabled, theme.FontSizeCaption);
+						Wui::Tooltip(ctx, weightRect, AGTr("layer.mask.weight.disabled.tooltip",
+							"先勾选这根骨骼，才能编辑它的遮罩权重。"));
+					}
+					rowY += 28.0f;
+				}
+				Wui::EndScrollArea(ctx);
+			}
+		}
+		y += maskList.H + theme.PadSmall;
+
+		layer = findLayer();
+		if (layer == nullptr)
+			return;
+		const Wui::WuiRect advancedHeader { area.X + theme.Pad, y, area.W - theme.Pad * 2.0f, kRowH };
+		Wui::CollapsibleHeader(ctx, Wui::HashId("animgraph.layer.mask.advanced"), advancedHeader,
+			AGTr("layer.mask.advanced", "高级：文本"), m_LayerMaskAdvancedOpen, theme, std::string(), std::string(),
+			AGTr("layer.mask.advanced.tooltip", "以 'Bone 0.0..1.0' 逗号分隔的文本编辑遮罩，与上方骨骼行双向同步。"),
+			theme.FontSizeSmall);
+		y += kRowH + 2.0f;
+		if (m_LayerMaskAdvancedOpen)
+		{
+			const std::string serialized = SerializeBoneMask(layer->BoneMask);
+			const std::string key = m_SelectedLayer + "|" + serialized;
+			if (m_LayerMaskTextKey != key)
+			{
+				m_LayerMaskTextKey = key;
+				m_LayerMaskTextBuffer = serialized;
+			}
+			Wui::TextFieldA11y maskA11y;
+			maskA11y.Label = AGTr("layer.mask.a11y", "Bone mask");
+			maskA11y.Placeholder = AGTr("layer.mask.advanced.placeholder", "Spine 0.25, Chest 1.0, Head 1.0");
+			const bool submitted = Wui::TextField(ctx, Wui::HashId("animgraph.layer.mask.text"),
+				{ controlX, y, controlW, kRowH }, m_LayerMaskTextBuffer, theme, nullptr, &maskA11y);
+			if (submitted)
+			{
+				std::vector<BoneMaskEntry> mask = ParseBoneMaskText(m_LayerMaskTextBuffer);
+				setMask(std::move(mask));
+				m_LayerMaskTextKey.clear();
+			}
+			Wui::Tooltip(ctx, { controlX, y, controlW, kRowH },
+				AGTr("layer.mask.tooltip", "Bone weights as 'Bone 0.0..1.0' separated by commas. Bones not listed get weight 0."));
+			y += kRowH + 4.0f;
+		}
+
+		const std::string maskExplain = AGTr("layer.explain.mask",
+			"Mask: only listed bones blend; unlisted bones get weight 0.");
+		Wui::Label(ctx, { controlX, y }, Wui::EllipsizeMiddleToWidth(ctx, maskExplain, controlW, theme.FontSizeCaption),
+			theme.TextMuted, theme.FontSizeCaption);
+		Wui::Tooltip(ctx, { controlX, y, controlW, 14.0f }, maskExplain);
 	}
 	// 右栏:Live Preview
 	// ---------------------------------------------------------------------------
@@ -1942,9 +2536,12 @@ namespace World
 	{
 		Wui::PanelBackground(ctx, area, theme.CardBg, theme.Radius);
 
-		AnimGraphComponent* component = nullptr;
+		const AnimGraphComponent* component = nullptr;
 		if (m_BoundEntity != entt::null && m_BoundScene != nullptr)
-			component = m_BoundScene->GetRegistry().try_get<AnimGraphComponent>(m_BoundEntity);
+		{
+			const auto& registry = static_cast<const Scene&>(*m_BoundScene).GetRegistry();
+			component = registry.try_get<AnimGraphComponent>(m_BoundEntity);
+		}
 
 		Wui::SectionHeader(ctx, { area.X + theme.Pad, area.Y + 2.0f, area.W - theme.Pad * 2.0f, kRowH },
 			AGTr("live.title", "Live Preview"), theme.Text, theme, theme.FontSizeTitle);
@@ -1953,6 +2550,19 @@ namespace World
 		Wui::Label(ctx, { helpRect.X + 5.0f, helpRect.Y + 1.0f }, "?", theme.TextMuted, theme.FontSizeCaption);
 		Wui::Tooltip(ctx, helpRect,
 			AGTr("live.help.tooltip", "State = the AnimGraph state currently playing.\nIdle (no transition) = no CrossFade is active.\nState time = seconds played in the current state.\nRuntime = Speed / Direction currently fed to the graph."));
+
+		const Wui::WuiRect simulateRect { helpRect.X - 86.0f, area.Y + 2.0f, 78.0f, kRowH };
+		if (Wui::Checkbox(ctx, Wui::HashId("animgraph.live.simulate"), simulateRect,
+			AGTr("live.simulate", "模拟"), m_Simulate, theme))
+		{
+			if (m_Simulate)
+			{
+				ResetSimulation();
+				EnsureSimulationGraph();
+			}
+		}
+		Wui::Tooltip(ctx, simulateRect, AGTr("live.simulate.tooltip",
+			"开启后用内部动画图副本自动循环待机、行走、奔跑、侧移、后退与跳跃/下落；绑定实体时仍同步推送参数。"));
 
 		const float innerX = area.X + theme.Pad;
 		const float innerW = area.W - theme.Pad * 2.0f;
@@ -1985,42 +2595,67 @@ namespace World
 		}
 
 		// ---- 运行时读数(先取一次,布局与绘制共用) ----
-		std::string stateLine = m_BoundEntity == entt::null
-			? AGTr("live.state.no_entity", "State: not selected")
-			: AGTr("live.state.none", "State: -");
+		std::string stateLine = m_Simulate
+			? AGTr("live.sim.state", "State: simulated preview")
+			: (m_BoundEntity == entt::null
+				? AGTr("live.state.no_entity", "State: not selected")
+				: AGTr("live.state.none", "State: -"));
 		std::string progressLabel = AGTr("live.idle", "Idle (no transition)");
 		std::string runtimeError;
 		std::string runtimeParams;
 		float progress = 0.0f;
 		float stateTime = 0.0f;
-#if WE_HAS_ANIMGRAPH_SYSTEM
-		if (m_BoundEntity != entt::null)
+		if (m_Simulate && m_SimGraphReady)
 		{
-			AnimGraphRuntimeInfo info;
-			if (AnimGraphSystem::GetRuntimeInfo(m_BoundEntity, info))
+			const std::string current = m_SimGraph.GetCurrentStateName();
+			stateLine = AGTr("live.state.prefix", "State: ")
+				+ (current.empty() ? AGTr("live.state.none_name", "(none)") : current);
+			if (m_SimGraph.IsInTransition())
 			{
-				stateLine = AGTr("live.state.prefix", "State: ") + (info.CurrentState.empty() ? AGTr("live.state.none_name", "(none)") : info.CurrentState);
-				if (info.InTransition && !info.TargetState.empty())
+				const std::string target = m_SimGraph.GetTransitionTargetState();
+				if (!target.empty())
 				{
-					stateLine += "  ->  " + info.TargetState;
-					progress = std::clamp(info.TransitionProgress, 0.0f, 1.0f);
+					stateLine += "  ->  " + target;
+					progress = std::clamp(m_SimGraph.GetTransitionProgress(), 0.0f, 1.0f);
 					progressLabel = AGFmt("live.crossfade", "Cross-fade {percent}%",
-					{ { "percent", FormatFloat(progress * 100.0f, 0) } });
+						{ { "percent", FormatFloat(progress * 100.0f, 0) } });
 				}
-				stateTime = info.StateTime;
-				runtimeError = info.Error;
-				runtimeParams = AGFmt("live.runtime", "Runtime: Speed {speed} m/s   Direction {direction} deg",
-					{ { "speed", FormatFloat(info.Speed, 2) }, { "direction", FormatFloat(info.Direction, 0) } });
 			}
-			else
-			{
-				stateLine = AGTr("live.state.not_updated", "State: runtime not updated yet");
-			}
+			stateTime = m_SimGraph.GetStateTime();
+			runtimeParams = AGFmt("live.runtime", "Runtime: Speed {speed} m/s   Direction {direction} deg",
+				{ { "speed", FormatFloat(m_ParamSpeed, 2) }, { "direction", FormatFloat(m_ParamDirection, 0) } });
 		}
+		else
+		{
+#if WE_HAS_ANIMGRAPH_SYSTEM
+			if (m_BoundEntity != entt::null)
+			{
+				AnimGraphRuntimeInfo info;
+				if (AnimGraphSystem::GetRuntimeInfo(m_BoundEntity, info))
+				{
+					stateLine = AGTr("live.state.prefix", "State: ") + (info.CurrentState.empty() ? AGTr("live.state.none_name", "(none)") : info.CurrentState);
+					if (info.InTransition && !info.TargetState.empty())
+					{
+						stateLine += "  ->  " + info.TargetState;
+						progress = std::clamp(info.TransitionProgress, 0.0f, 1.0f);
+						progressLabel = AGFmt("live.crossfade", "Cross-fade {percent}%",
+							{ { "percent", FormatFloat(progress * 100.0f, 0) } });
+					}
+					stateTime = info.StateTime;
+					runtimeError = info.Error;
+					runtimeParams = AGFmt("live.runtime", "Runtime: Speed {speed} m/s   Direction {direction} deg",
+						{ { "speed", FormatFloat(info.Speed, 2) }, { "direction", FormatFloat(info.Direction, 0) } });
+				}
+				else
+				{
+					stateLine = AGTr("live.state.not_updated", "State: runtime not updated yet");
+				}
+			}
 #else
-		stateLine = AGTr("live.state.unavailable", "State: animation runtime unavailable");
-		runtimeError = AGTr("live.error.no_system", "AnimGraphSystem is not part of this build yet.");
+			stateLine = AGTr("live.state.unavailable", "State: animation runtime unavailable");
+			runtimeError = AGTr("live.error.no_system", "AnimGraphSystem is not part of this build yet.");
 #endif
+		}
 
 		auto drawReadout = [&](const Wui::WuiRect& readout, bool compact)
 		{
@@ -2097,7 +2732,12 @@ namespace World
 
 		auto drawToggles = [&](float tx, float ty, float totalW, bool horizontal)
 		{
-			if (component == nullptr)
+			if (component == nullptr || m_BoundScene == nullptr)
+				return;
+			Entity boundEntity(m_BoundScene, m_BoundEntity);
+			AnimGraphComponent* writable = static_cast<AnimGraphComponent*>(
+				boundEntity.GetComponent(entt::type_id<AnimGraphComponent>().hash()));
+			if (writable == nullptr)
 				return;
 			bool rootMotion = component->EnableRootMotion != 0;
 			bool footIk = component->EnableFootIk != 0;
@@ -2118,9 +2758,9 @@ namespace World
 					: (i == 1 ? AGTr("toggle.foot_ik.tooltip", "Align both feet to the terrain surface (AnimGraphComponent.EnableFootIk).")
 						: AGTr("toggle.upper_body.tooltip", "Enable additive upper-body layers (AnimGraphComponent.EnableUpperBodyLayer).")));
 			}
-			component->EnableRootMotion = rootMotion ? 1 : 0;
-			component->EnableFootIk = footIk ? 1 : 0;
-			component->EnableUpperBodyLayer = upperBody ? 1 : 0;
+			writable->EnableRootMotion = rootMotion ? 1 : 0;
+			writable->EnableFootIk = footIk ? 1 : 0;
+			writable->EnableUpperBodyLayer = upperBody ? 1 : 0;
 		};
 
 		// 错误信息先算出来:窄条布局要按"剩余高度"决定画到哪一行,错误本身必须占位,

@@ -2736,6 +2736,28 @@ set_tests_properties(World.AnimGraphRuntime PROPERTIES
     TIMEOUT 120
 )
 
+# 通用两骨 IK（可达/钳制/权重/无效链/脚步示例/组件代理；headless）。
+add_executable(WorldIkSystemTests World/IkSystemTests.cpp)
+target_link_libraries(WorldIkSystemTests PRIVATE World)
+target_compile_features(WorldIkSystemTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldIkSystemTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldIkSystemTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldIkSystemTests PRIVATE /utf-8)
+endif()
+add_dependencies(WorldIkSystemTests WeCopyRuntimeDllForTests)
+
+add_test(NAME World.IkSystem COMMAND WorldIkSystemTests)
+set_tests_properties(World.IkSystem PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
 add_executable(WorldNavMeshTests World/NavMeshTests.cpp)
 target_link_libraries(WorldNavMeshTests PRIVATE World)
 target_compile_features(WorldNavMeshTests PRIVATE cxx_std_17)
