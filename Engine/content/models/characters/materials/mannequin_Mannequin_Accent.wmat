@@ -1,0 +1,12 @@
+# WorldEngine 材质资产。颜色为 sRGB 空间取值。
+FormatVersion: 3
+AssetId: 0x915082F7C00616A7
+Name: "Mannequin Accent"
+BaseColor: [0.11139332, 0.244244, 0.27836475, 1]
+Metallic: 0
+Roughness: 0.28
+Emissive: [0.3511192, 0.95323753, 1]
+AlbedoTexture: ""
+NormalTexture: ""
+BlendMode: Opaque
+DoubleSided: false

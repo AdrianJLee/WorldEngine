@@ -542,6 +542,31 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 			m_Host.OpenPhysicsMaterialEditor(logical);
 			WLD_CORE_INFO("[physmat] editor opened: {0}", logical);
 		}
+		else if (LowerExtension(path) == ".wanimgraph")
+		{
+			// M4:动画图双击 → 打开 Anim Graph 面板并载入该资产。
+			// 面板是单实例:先排"按路径打开"待办,再让外壳打开/前置面板(与 .wui 同一套窄通道),
+			// 不在这里另写一份载入逻辑。
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			std::string logical = ec ? path.generic_string() : relative.generic_string();
+			// 引擎内容库里的路径要带 "engine/" 前缀,面板按同一口径解析(项目内容根则不带)。
+			if (m_Model.Scope == BrowserRootScope::EngineContent && logical.rfind("engine/", 0) != 0)
+				logical = "engine/" + logical;
+			auto* shell = dynamic_cast<EditorShell*>(&m_Host);
+			if (shell != nullptr)
+			{
+				shell->OpenAnimGraph(logical);
+				if (m_Ctx)
+					m_Ctx->RecordOp("browser", "open-anim-graph", path.filename().generic_string(), logical);
+			}
+			else
+			{
+				NotifyAssetFailure(Wui::Tr("panel.content_browser.animgraph_unavailable",
+					"Animation Graph is not available in this editor session."));
+			}
+		}
 		else if (LowerExtension(path) == ".wcurve")
 		{
 			// 曲线资产双击 → 打开曲线编辑器

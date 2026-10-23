@@ -143,6 +143,8 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 			{ "audio_profiler",  EditorShell::PanelForm::Independent, { 160.0f, 180.0f, 920.0f, 560.0f } },
 			{ "physics_material_editor", EditorShell::PanelForm::Independent, { 220.0f, 150.0f, 740.0f, 540.0f } },
 			{ "curve_editor",    EditorShell::PanelForm::Independent, { 180.0f, 180.0f, 760.0f, 480.0f } },
+			// M4:Anim Graph 编辑器(单实例;内容浏览器双击 .wanimgraph / Window 菜单 / 文件选择器同一入口)。
+			{ "animgraph",       EditorShell::PanelForm::Independent, { 80.0f, 40.0f, 1120.0f, 680.0f } },
 			{ "particle_editor", EditorShell::PanelForm::Independent, { 160.0f, 140.0f, 840.0f, 580.0f } },
 			{ "terrain_editor",  EditorShell::PanelForm::Docked, {} },
 			{ "foliage_editor",  EditorShell::PanelForm::Docked, {} },
@@ -261,6 +263,7 @@ std::string NewCppEmptyTemplateSource(const std::string& name);
 	{
 	}
 }
+
 
 
 

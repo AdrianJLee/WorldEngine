@@ -1190,6 +1190,7 @@ void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rec
 				case EditorAssetKind::Tilemap: slice.TypeLabel = Wui::Tr("asset.file.tilemap", "Tilemap"); break;
 				case EditorAssetKind::RuleTile: slice.TypeLabel = Wui::Tr("asset.file.rule_tile", "Rule Tile"); break;
 				case EditorAssetKind::Curve: slice.TypeLabel = Wui::Tr("asset.file.curve", "Curve"); break;
+				case EditorAssetKind::AnimGraph: slice.TypeLabel = Wui::Tr("asset.file.animgraph", "Animation Graph"); break;
 				case EditorAssetKind::PhysicsMaterial: slice.TypeLabel = Wui::Tr("asset.file.physics_material", "Physics Material"); break;
 				case EditorAssetKind::Shader:
 					// Slang-B1:唯一扩展名 `.slang` → 一个类型名。

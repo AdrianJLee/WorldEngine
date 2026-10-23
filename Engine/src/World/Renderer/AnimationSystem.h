@@ -50,6 +50,11 @@ namespace World
 		static float AdvanceTime(float time, float deltaSeconds, float speed, bool playing,
 			bool loop, float duration);
 
+		// AnimGraphSystem 每帧覆盖写入：GetPalette 优先返回外部调色板（同一个实体只保留一份）。
+		// 覆盖槽由 AnimGraphSystem 独占写；其它消费者只读。
+		static void SetExternalPalette(entt::entity entity, std::vector<glm::mat4> palette);
+		static void ClearExternalPalettes();
+
 		// 清空模型缓存、失败标记与调色板(重新导入/热重载后由调用方清)。
 		static void ClearCache();
 	};

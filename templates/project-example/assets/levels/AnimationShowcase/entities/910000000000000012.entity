@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 910000000000000012
+  World::TagComponent:
+    Tag: "Step Reference 2"
+  World::TransformComponent:
+    Location: [2.5, 0.15, 0.9]
+    Rotation: [0, 0, 0]
+    Scale: [0.6, 0.30, 0.8]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.36, 0.39, 0.43, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

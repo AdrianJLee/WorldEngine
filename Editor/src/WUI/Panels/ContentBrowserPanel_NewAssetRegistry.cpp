@@ -1,5 +1,6 @@
 
 #include "World/Math/Curve/CubicBezierCurve.h"
+#include "World/Animation/AnimGraph.h"
 #include "World/Physics/PhysicsMaterial.h"
 #include "World/Renderer/ParticleAsset.h"
 #include "World/Audio/SoundEvent.h"
@@ -122,6 +123,67 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				}
 				NotifyAssetWritten(target);
 				SelectCreated(target, "new-curve");
+				return true;
+			});
+		// M4:动画图(.wanimgraph)—— 状态机 + 1D/2D 混合空间;默认模板 = Idle + Locomotion。
+		// 与其它资产同一套向导:落点/名字在确认前可见,写出后选中新资产。
+		add("animgraph", "Animation Graph (动画图)", ".wanimgraph", 30, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "animation_graph", ".wanimgraph");
+
+				AnimGraph graph;
+				graph.SetGraphName(target.stem().string());
+				graph.SetModelHint("engine/models/characters/mannequin.wmodel");
+				graph.SetParameterDefault("Speed", 0.0f);
+				graph.SetParameterDefault("Direction", 0.0f);
+				graph.SetParameterDefault("IsFalling", 0.0f);
+				graph.SetParameterDefault("AimWeight", 0.0f);
+
+				AnimState idle;
+				idle.Name = "Idle";
+				idle.Kind = AnimStateKind::SingleClip;
+				idle.ClipName = "Idle";
+				idle.Loop = true;
+				{
+					AnimTransition toLocomotion;
+					toLocomotion.TargetState = "Locomotion";
+					toLocomotion.Duration = 0.20f;
+					toLocomotion.ConditionExpression = "Speed > 0.10";
+					idle.Transitions.push_back(toLocomotion);
+				}
+				graph.AddState(idle);
+
+				AnimState locomotion;
+				locomotion.Name = "Locomotion";
+				locomotion.Kind = AnimStateKind::BlendSpace2D;
+				locomotion.ParameterX = "Speed";
+				locomotion.ParameterY = "Direction";
+				locomotion.Blend2D.AddSample({ 0.0f, 0.0f }, "Idle");
+				locomotion.Blend2D.AddSample({ 1.6f, 0.0f }, "Walk");
+				locomotion.Blend2D.AddSample({ 4.5f, 0.0f }, "Run");
+				locomotion.Blend2D.AddSample({ 1.6f, 90.0f }, "StrafeRight");
+				locomotion.Blend2D.AddSample({ 1.6f, -90.0f }, "StrafeLeft");
+				{
+					AnimTransition toIdle;
+					toIdle.TargetState = "Idle";
+					toIdle.Duration = 0.18f;
+					toIdle.ConditionExpression = "Speed < 0.10 && IsFalling < 0.50";
+					locomotion.Transitions.push_back(toIdle);
+				}
+				graph.AddState(locomotion);
+				graph.SetInitialState("Idle");
+
+				std::string saveError;
+				if (!graph.SaveToFile(target.string(), &saveError))
+				{
+					if (error)
+						*error = "could not write " + target.string()
+							+ (saveError.empty() ? std::string() : (": " + saveError));
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-animgraph");
 				return true;
 			});
 		add("material", "Material", ".wmat", 10, false,

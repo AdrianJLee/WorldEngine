@@ -26,6 +26,9 @@ namespace World
 			if (assetType == "Tilemap" || assetType == "TileMap") return EditorAssetKind::Tilemap;
 			if (assetType == "RuleTile" || assetType == "Rule" || assetType == "AutoTile" || assetType == "Rule Tile") return EditorAssetKind::RuleTile;
 			if (assetType == "Curve" || assetType == "BezierCurve") return EditorAssetKind::Curve;
+			// M4:3D 动画图资产(.wanimgraph)。
+			if (assetType == "AnimGraph" || assetType == "AnimationGraph" || assetType == "Animation Graph")
+				return EditorAssetKind::AnimGraph;
 			if (assetType == "PhysicsMaterial" || assetType == "PhysMat" || assetType == "PhysicalMaterial") return EditorAssetKind::PhysicsMaterial;
 			// Slang-B1:表面函数(Material Shader)—— 唯一扩展名 `.slang`(Slang-B1se 起
 			// 旧扩展名不再进资产列表)。与 `.wmat` 实例分开的资产类型,供"Shader"字段/
@@ -87,6 +90,7 @@ namespace World
 				case EditorAssetKind::Tilemap: return LowerExtension(path) == ".wtilemap";
 				case EditorAssetKind::RuleTile: return LowerExtension(path) == ".wruletile";
 				case EditorAssetKind::Curve: return LowerExtension(path) == ".wcurve";
+				case EditorAssetKind::AnimGraph: return LowerExtension(path) == ".wanimgraph";
 				case EditorAssetKind::PhysicsMaterial: return LowerExtension(path) == ".wphysmat";
 				case EditorAssetKind::VFX: return LowerExtension(path) == ".wvfx" || LowerExtension(path) == ".wparticle";
 				default: return false;

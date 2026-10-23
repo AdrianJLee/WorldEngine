@@ -1,0 +1,12 @@
+# WorldEngine 材质资产。颜色为 sRGB 空间取值。
+FormatVersion: 3
+AssetId: 0x16DEB1C690C156E5
+Name: "Mannequin Body"
+BaseColor: [0.16104308, 0.17273185, 0.1968624, 1]
+Metallic: 0.22
+Roughness: 0.52
+Emissive: [0, 0, 0]
+AlbedoTexture: ""
+NormalTexture: ""
+BlendMode: Opaque
+DoubleSided: false

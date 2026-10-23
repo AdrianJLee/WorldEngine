@@ -1165,6 +1165,7 @@ namespace World
 		addCmd("asset.create_tilemap", "Create tilemap asset.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("asset.create_physmat", "Create a .wphysmat physical material asset.", CommandEffect::Write, CommandScope::Both);
 		addCmd("asset.open_material", "Open material in editor.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.open_animgraph", "Open an animation graph in the Anim Graph editor.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}");
 		addCmd("asset.open_physmat", "Open physics material in editor.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("asset.import_gltf", "Import glTF model into project.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("asset.create_prefab", "Create prefab asset from entity selection.", CommandEffect::Write, CommandScope::Both);
@@ -3404,6 +3405,18 @@ namespace World
 			result = "opened material editor for " + path;
 			return true;
 		}
+		if (cmd == "asset.open_animgraph")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			m_Shell.OpenAnimGraph(path);
+			result = "opened animation graph " + path;
+			return true;
+		}
 		if (cmd == "asset.import_gltf")
 		{
 			// P1b D5:与"内容浏览器双击 .gltf"同一条路径(只导入,不改场景),
@@ -4282,6 +4295,7 @@ namespace World
 		return false;
 	}
 }
+
 
 
 

@@ -41,6 +41,9 @@ namespace World
 		Curve,          // .wcurve (贝塞尔曲线资产)
 		PhysicsMaterial,// .wphysmat (物理材质资产:摩擦力/弹性/合并模式)
 		VFX,            // .wvfx / .wparticle (视觉特效资产)
+		// M4:3D 动画图(.wanimgraph)—— 状态机 + 1D/2D 混合空间 + 过渡 + 层遮罩。
+		// 双击 = 打开 Anim Graph 面板;面板读写一律走 AnimGraph::LoadFromFile/SaveToFile。
+		AnimGraph,
 		Folder,
 		// 兼容别名:P4 之前的代码把"贴图"叫 Texture(= 源图)。新代码请用上面两个名字。
 		// **必须放在最后**:枚举值按"上一个枚举项"自增,别名插在中间会把后面的项顶成重复值
@@ -131,6 +134,8 @@ namespace World
 			return { EditorAssetKind::Curve, "Curve", "asset.file.curve" };
 		if (extension == ".wphysmat")
 			return { EditorAssetKind::PhysicsMaterial, "Physics Material", "asset.file.physics_material" };
+		if (extension == ".wanimgraph")
+			return { EditorAssetKind::AnimGraph, "Animation Graph", "asset.file.animgraph" };
 		if (extension == ".wui")
 			return { EditorAssetKind::UiDocument, "UI Document" };
 		if (extension == ".wvfx" || extension == ".wparticle")

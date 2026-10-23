@@ -2713,6 +2713,29 @@ set_tests_properties(World.AnimGraph PROPERTIES
     TIMEOUT 90
 )
 
+
+# AnimGraph 运行时集成（.wanimgraph 缓存 / 参数推导 / Foot IK / Root Motion；headless）。
+add_executable(WorldAnimGraphRuntimeTests World/AnimGraphRuntimeTests.cpp)
+target_link_libraries(WorldAnimGraphRuntimeTests PRIVATE World)
+target_compile_features(WorldAnimGraphRuntimeTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldAnimGraphRuntimeTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldAnimGraphRuntimeTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldAnimGraphRuntimeTests PRIVATE /utf-8)
+endif()
+add_dependencies(WorldAnimGraphRuntimeTests WeCopyRuntimeDllForTests)
+
+add_test(NAME World.AnimGraphRuntime COMMAND WorldAnimGraphRuntimeTests)
+set_tests_properties(World.AnimGraphRuntime PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
+
 add_executable(WorldNavMeshTests World/NavMeshTests.cpp)
 target_link_libraries(WorldNavMeshTests PRIVATE World)
 target_compile_features(WorldNavMeshTests PRIVATE cxx_std_17)

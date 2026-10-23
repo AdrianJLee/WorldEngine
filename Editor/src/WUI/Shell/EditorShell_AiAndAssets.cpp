@@ -846,6 +846,11 @@ void EditorShell::OpenAsset(const std::string& rawPath)
 		OpenAtlasEditor(logical);
 		Notify("已在图集编辑器中打开: " + logical);
 	}
+	else if (ext == ".wanimgraph")
+	{
+		OpenAnimGraph(logical);
+		Notify("已在动画图编辑器中打开: " + logical);
+	}
 	else if (ext == ".wanim")
 	{
 		OpenAnimationEditor(logical);
@@ -1298,3 +1303,4 @@ void EditorShell::RenderImportDestinationModal(Wui::WuiContext& ctx){
 	}
 
 }
+

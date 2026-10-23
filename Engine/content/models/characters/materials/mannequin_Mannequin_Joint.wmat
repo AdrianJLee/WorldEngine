@@ -1,0 +1,12 @@
+# WorldEngine 材质资产。颜色为 sRGB 空间取值。
+FormatVersion: 3
+AssetId: 0x745BA0AA7B91F13D
+Name: "Mannequin Joint"
+BaseColor: [0.13393702, 0.13889977, 0.15264794, 1]
+Metallic: 0.12
+Roughness: 0.8
+Emissive: [0, 0, 0]
+AlbedoTexture: ""
+NormalTexture: ""
+BlendMode: Opaque
+DoubleSided: false

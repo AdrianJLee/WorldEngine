@@ -1,0 +1,7 @@
+Id: AnimationShowcase
+Name: Animation Showcase
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Base_World
+    DefaultActive: true

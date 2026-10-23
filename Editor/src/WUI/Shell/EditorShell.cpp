@@ -253,6 +253,7 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		m_PanelRegistry.emplace("audio_profiler", std::make_unique<AudioProfilerPanel>());
 		m_PanelRegistry.emplace("physics_material_editor", std::make_unique<PhysicsMaterialEditorPanel>());
 m_PanelRegistry.emplace("curve_editor", std::make_unique<CurveEditorPanel>());
+m_PanelRegistry.emplace("animgraph", std::make_unique<AnimGraphPanel>());
 		m_PanelRegistry.emplace("particle_editor", std::make_unique<ParticleEditorPanel>());
 m_PanelRegistry.emplace("terrain_editor", std::make_unique<TerrainPanel>());
 m_PanelRegistry.emplace("foliage_editor", std::make_unique<FoliagePanel>());
@@ -1399,6 +1400,7 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 			{ "audio_profiler",  { "panel.audio_profiler", "音频分析器 (Audio Profiler)" } },
 			{ "physics_material_editor", { "panel.physics_material_editor", "Physics Material Editor" } },
 			{ "curve_editor",    { "panel.curve_editor", "Curve Editor" } },
+			{ "animgraph",       { "panel.animgraph", "Animation Graph" } },
 			{ "terrain_editor",  { "panel.terrain_editor", "地貌" } },
 			{ "foliage_editor",  { "panel.foliage_editor", "植被" } },
 		};
@@ -1484,6 +1486,15 @@ void EditorShell::OpenCurveEditor(const std::string& logicalPath)
 	OpenOrFocusIndependentWindow("curve_editor");
 }
 
+
+void EditorShell::OpenAnimGraph(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	if (!path.empty())
+		AnimGraphPanel::RequestOpenPath(path);
+	OpenOrFocusIndependentWindow("animgraph");
+}
 void EditorShell::OpenAssetPicker(std::string_view title, AssetCategory category, std::function<void(const std::string&)> onSelect)
 {
 	m_AssetPickerModal.Open(title, category, std::move(onSelect));

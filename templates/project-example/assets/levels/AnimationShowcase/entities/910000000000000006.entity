@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 910000000000000006
+  World::TagComponent:
+    Tag: "Pillar Right"
+  World::TransformComponent:
+    Location: [3.4, 1.2, 1.6]
+    Rotation: [0, 0, 0]
+    Scale: [0.6, 2.4, 0.6]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [1, 0.55, 0.18, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

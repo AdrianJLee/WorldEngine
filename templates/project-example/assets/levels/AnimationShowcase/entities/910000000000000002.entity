@@ -1,0 +1,28 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 910000000000000002
+  World::TagComponent:
+    Tag: "Showcase Camera"
+  World::TransformComponent:
+    Location: [0, 2.2, -4.5]
+    Rotation: [-0.20943951, 3.14159274, 0]
+    Scale: [1, 1, 1]
+  World::CameraComponent:
+    Camera:
+      m_ProjectionType: 0
+      m_OrthographicZoom: 1
+      m_OrthographicNearClip: -1
+      m_OrthographicFarClip: 1
+      m_PerspectiveFOV: 45
+      m_PerspectiveNearClip: 0.1
+      m_PerspectiveFarClip: 200
+    Primary: true
+    FixedAspectRatio: false
+  World::AudioListenerComponent:
+    Active: true
+    VolumeScale: 1.0
+  World::LevelEntityComponent:
+    DataLayerMask: 1
+

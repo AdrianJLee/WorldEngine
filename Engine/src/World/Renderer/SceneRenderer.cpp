@@ -13,6 +13,7 @@
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/AnimationSystem.h"
+#include "World/Animation/AnimGraphSystem.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/Texture/TextureLibrary.h"
@@ -730,8 +731,11 @@ namespace World
 					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
 				else
 					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
-				// AnimationSystem::Update 当帧算好的调色板;nullptr = 本帧取不到(读失败/非蒙皮)。
-				const std::vector<glm::mat4>* palette = AnimationSystem::GetPalette(entity);
+				// AnimGraph 调色板优先（AnimGraphSystem 每帧覆盖 AnimationSystem 的槽）；
+				// 都没有 → nullptr（读失败/非蒙皮/无动画）。
+				const std::vector<glm::mat4>* palette = AnimGraphSystem::GetPalette(entity);
+				if (!palette)
+					palette = AnimationSystem::GetPalette(entity);
 
 				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
 

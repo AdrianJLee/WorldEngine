@@ -8,6 +8,9 @@ using namespace ContentBrowserPanelDetail;
 
 namespace ContentBrowserPanelDetail
 {
+	// M4:Anim Graph 资产的浏览器身份色(青绿)。与着色器"代码蓝"同一套做法:只在列表图标上染色,
+	// 控件/徽标仍用主题令牌 —— 一个常量集中在这里,不给面板散落魔法色值。
+	constexpr Wui::WuiColor kAnimGraphIconTint { 0.36f, 0.84f, 0.78f, 1.0f };
 		// PLUG-T3:插件清单文件名(`plugin.we.yaml`)—— 项目插件根下它是"插件清单"类型,
 		// 双击/右键走外部 Visual Studio(与 C++ 源码同一条路径)。
 bool IsPluginManifestPath(const std::filesystem::path& path){
@@ -278,6 +281,16 @@ void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiR
 					kShaderBadgeFill, kShaderBadgeText, theme, badgeSize);
 			}
 
+			// M4:动画图(.wanimgraph)—— 青绿色常驻徽标 + 列表图标染色,网格里一眼可辨。
+			if (slice.Kind == EditorAssetKind::AnimGraph)
+			{
+				const Wui::LocalizedLabel badge = Wui::TrLabel("asset.file.animgraph", "Animation Graph");
+				const float badgeSize = infoSize;
+				const float badgeW = ctx.MeasureTextWidth(badge.Text, badgeSize) + theme.PadSmall * 2.0f;
+				const float badgeH = badgeSize + 4.0f;
+				Wui::Badge(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH }, badge.Text,
+					kAnimGraphIconTint, theme.WindowBg, theme, badgeSize);
+			}
 			// P4-U13:prefab 是"可复用实体子树",不是普通文件 —— 给一枚常驻小标签,
 			// 让它在网格里一眼可辨(文件图标/名称都看不出它是资产还是随便一个文件)。
 			if (slice.Extension == ".wprefab")
@@ -455,8 +468,8 @@ void ContentBrowserPanel::RenderListSlices(Wui::WuiContext& ctx, const Wui::WuiR
 				Wui::Icon(ctx,
 					{ row.X + theme.PadSmall, row.Y + (row.H - kListIconSize) * 0.5f, kListIconSize, kListIconSize },
 					icon, { 0, 1, 1, -1 },
-					slice.Kind == EditorAssetKind::Shader
-						? kShaderIconTint : theme.TextBright, theme);
+					slice.Kind == EditorAssetKind::AnimGraph ? kAnimGraphIconTint
+						: (slice.Kind == EditorAssetKind::Shader ? kShaderIconTint : theme.TextBright), theme);
 
 			const float nameX = row.X + theme.PadSmall * 2.0f + kListIconSize;
 			const float nameBudget = std::max(0.0f, nameW - (nameX - row.X) - theme.PadSmall);

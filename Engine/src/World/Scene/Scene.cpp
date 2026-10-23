@@ -12,6 +12,7 @@
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Renderer/AnimationSystem.h"
+#include "World/Animation/AnimGraphSystem.h"
 #include "World/Renderer/FrameExtract.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Gameplay/Runtime/SystemRegistry.h"
@@ -2161,7 +2162,9 @@ namespace World
 		if (m_AnimationDone)
 			return;
 		m_AnimationDone = true;
+		// 顺序冻结：骨骼动画先算，AnimGraph 后算（同帧覆盖调色板 + Root Motion/Foot IK）。
 		AnimationSystem::Update(*this, dt.GetSeconds());
+		AnimGraphSystem::Update(*this, dt.GetSeconds());
 	}
 
 	void Scene::SetRenderExtractSink(IRenderExtractSink* sink)

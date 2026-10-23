@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 910000000000000004
+  World::TagComponent:
+    Tag: "Showcase Terrain"
+  World::TransformComponent:
+    Location: [-24, 0, -24]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::TerrainComponent:
+    TerrainAsset: "terrains/animation_showcase.wterrain"
+    CellSize: 1.0
+    HeightScale: 1.0
+    MinHeight: -1.0
+    MaxHeight: 8.0
+    ChunkResolution: 64
+    LodDistanceRatio: 1.5
+    LayerCount: 4
+    CastShadow: 0
+    ReceiveShadow: 1
+    HoleCutoutEnabled: 0
+    EnableCollision: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 1

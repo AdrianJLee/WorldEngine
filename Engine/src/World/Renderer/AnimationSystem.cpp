@@ -35,6 +35,13 @@ namespace World
 			return palettes;
 		}
 
+		// AnimGraphSystem 写入的覆盖调色板（按实体唯一；每帧由 AnimGraphSystem 先清后写）。
+		std::unordered_map<entt::entity, std::vector<glm::mat4>>& ExternalPalettes()
+		{
+			static std::unordered_map<entt::entity, std::vector<glm::mat4>> palettes;
+			return palettes;
+		}
+
 		// 读失败的路径不再逐帧重试(磁盘别再被刷屏);ClearCache 后可以重试。
 		std::unordered_set<PathId>& FailedModels()
 		{
@@ -211,8 +218,26 @@ namespace World
 				palettes.emplace(jobs[index].Entity, std::move(results[index]));
 	}
 
+	void AnimationSystem::SetExternalPalette(entt::entity entity, std::vector<glm::mat4> palette)
+	{
+		if (palette.empty())
+			ExternalPalettes().erase(entity);
+		else
+			ExternalPalettes()[entity] = std::move(palette);
+	}
+
+	void AnimationSystem::ClearExternalPalettes()
+	{
+		ExternalPalettes().clear();
+	}
+
 	const std::vector<glm::mat4>* AnimationSystem::GetPalette(entt::entity entity)
 	{
+		const auto& external = ExternalPalettes();
+		const auto externalFound = external.find(entity);
+		if (externalFound != external.end())
+			return &externalFound->second;
+
 		const auto& palettes = Palettes();
 		const auto found = palettes.find(entity);
 		return found == palettes.end() ? nullptr : &found->second;
@@ -346,5 +371,6 @@ namespace World
 		FailedModels().clear();
 		WarnedKeys().clear();
 		Palettes().clear();
+		ExternalPalettes().clear();
 	}
 }

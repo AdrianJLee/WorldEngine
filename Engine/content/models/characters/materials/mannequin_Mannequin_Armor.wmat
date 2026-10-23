@@ -1,0 +1,12 @@
+# WorldEngine 材质资产。颜色为 sRGB 空间取值。
+FormatVersion: 3
+AssetId: 0xF85931D1B4440A2C
+Name: "Mannequin Armor"
+BaseColor: [0.86129344, 0.86129344, 0.8392043, 1]
+Metallic: 0.08
+Roughness: 0.34
+Emissive: [0, 0, 0]
+AlbedoTexture: ""
+NormalTexture: ""
+BlendMode: Opaque
+DoubleSided: false
