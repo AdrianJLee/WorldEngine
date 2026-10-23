@@ -222,8 +222,40 @@ namespace World
 		const std::string& GetGraphName() const { return m_GraphName; }
 
 		// 资产默认参数（构造实例时灌入 m_Parameters）
+		// 图级参数定义（编辑器可增删）：参数名是脚本/条件里的标识符，保持英文；
+		// UI 只本地化说明与类型标签。Bool 在运行时仍是 0/1 float，便于条件解析器复用。
+		enum class AnimParameterType : uint8_t
+		{
+			Float = 0,
+			Bool = 1
+		};
+
+		struct WLD_API AnimParameterDefinition
+		{
+			std::string Name;
+			AnimParameterType Type { AnimParameterType::Float };
+			float DefaultValue { 0.0f };
+			float MinValue { 0.0f };
+			float MaxValue { 1.0f };
+			std::string Unit;
+		};
+
+		// 资产默认参数（构造实例时灌入 m_Parameters）
 		void SetParameterDefault(const std::string& name, float value);
 		const std::map<std::string, float>& GetParameterDefaults() const { return m_ParameterDefaults; }
+
+		// ---- 参数定义表（编辑器与运行时共用同一份事实源）----
+		// 与 SetParameterDefault 的区别：这里同时声明类型/范围/单位，供编辑器生成控件；
+		// SetParameterDefault 只改默认值，已存在时保留类型与范围。
+		void SetParameterDefinition(const AnimParameterDefinition& definition);
+		bool RemoveParameterDefinition(const std::string& name);
+		const AnimParameterDefinition* FindParameterDefinition(const std::string& name) const;
+		const std::map<std::string, AnimParameterDefinition>& GetParameterDefinitions() const
+		{
+			return m_ParameterDefinitions;
+		}
+		AnimParameterType GetParameterType(const std::string& name,
+			AnimParameterType fallback = AnimParameterType::Float) const;
 
 		// 持久化
 		bool SaveToFile(const std::string& path) const;
@@ -251,6 +283,7 @@ namespace World
 		std::string m_ModelHint;
 		std::string m_GraphName;
 		std::map<std::string, float> m_ParameterDefaults;
+		std::map<std::string, AnimParameterDefinition> m_ParameterDefinitions;
 		std::unordered_map<std::string, float> m_Parameters;
 
 		// 根运动按“上一帧绝对根 TRS”求增量；EvaluatePose 每帧更新。

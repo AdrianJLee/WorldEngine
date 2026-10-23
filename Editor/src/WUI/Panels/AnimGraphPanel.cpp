@@ -1,5 +1,6 @@
 #include "WUI/Panels/AnimGraphPanel.h"
 
+#include "World/Animation/AnimGraphCondition.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Components.h"
@@ -25,7 +26,9 @@
 #include <initializer_list>
 #include <string_view>
 #include <cstdlib>
+#include <functional>
 #include <iterator>
+#include <unordered_set>
 #include <system_error>
 #include <utility>
 
@@ -39,13 +42,13 @@ namespace World
 		constexpr float kRowH = 24.0f;
 		constexpr float kStateCardH = 176.0f;
 		constexpr float kBlendCardH = 356.0f;
-		constexpr float kLayerCardH = 520.0f;
+		constexpr float kLayerCardH = 620.0f;
 		// 姿态预览卡：放在中栏（可滚动），窄窗口/右栏折叠时也能看到。
 		constexpr float kPoseCardH = 196.0f;
-		constexpr float kStateGraphH = 180.0f;
 		constexpr float kGap = 8.0f;
 		constexpr float kSampleRowH = 28.0f;
-		constexpr float kTransitionRowH = 56.0f;
+		constexpr float kTransitionBaseH = 52.0f;
+		constexpr float kTransitionEditorRowH = 24.0f;
 		constexpr size_t kHistoryLimit = 64;
 
 		std::string NormalizeSlashes(std::string text)
@@ -164,16 +167,168 @@ namespace World
 			int Frames = 0;
 		};
 
-		std::string LowerAscii(std::string text)
+		std::string TrimAscii(std::string text)
 		{
-			for (char& ch : text)
-				ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-			return text;
+			const size_t first = text.find_first_not_of(" \t\r\n");
+			if (first == std::string::npos)
+				return {};
+			const size_t last = text.find_last_not_of(" \t\r\n");
+			return text.substr(first, last - first + 1);
 		}
 
-		bool ContainsTokenNoCase(const std::string& name, const char* token)
+		bool IsIdentifierStart(char ch)
 		{
-			return LowerAscii(name).find(LowerAscii(token)) != std::string::npos;
+			return std::isalpha(static_cast<unsigned char>(ch)) != 0 || ch == '_';
+		}
+
+		bool IsIdentifierChar(char ch)
+		{
+			return std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_';
+		}
+
+		bool IsReservedConditionWord(const std::string& token)
+		{
+			return token == "true" || token == "false" || token == "and" || token == "or";
+		}
+
+		std::vector<std::string> CollectConditionIdentifiers(const std::string& expression)
+		{
+			std::vector<std::string> names;
+			for (size_t i = 0; i < expression.size();)
+			{
+				if (!IsIdentifierStart(expression[i]))
+				{
+					++i;
+					continue;
+				}
+				const size_t begin = i++;
+				while (i < expression.size() && IsIdentifierChar(expression[i]))
+					++i;
+				const std::string token = expression.substr(begin, i - begin);
+				if (!IsReservedConditionWord(token)
+					&& std::find(names.begin(), names.end(), token) == names.end())
+					names.push_back(token);
+			}
+			return names;
+		}
+
+		struct SimpleConditionClause
+		{
+			std::string Name;
+			std::string Op;
+			float Value = 0.0f;
+		};
+
+		bool ParseSimpleConditionClause(std::string expression, SimpleConditionClause& out)
+		{
+			expression = TrimAscii(std::move(expression));
+			if (expression.empty() || expression.find("&&") != std::string::npos
+				|| expression.find("||") != std::string::npos)
+				return false;
+
+			static const char* kOperators[] = { ">=", "<=", "==", "!=", ">", "<" };
+			size_t opPos = std::string::npos;
+			std::string op;
+			for (const char* candidate : kOperators)
+			{
+				const size_t found = expression.find(candidate);
+				if (found != std::string::npos && (opPos == std::string::npos || found < opPos))
+				{
+					opPos = found;
+					op = candidate;
+				}
+			}
+			if (opPos == std::string::npos)
+				return false;
+
+			const std::string name = TrimAscii(expression.substr(0, opPos));
+			if (name.empty() || !IsIdentifierStart(name.front()))
+				return false;
+			for (char ch : name)
+				if (!IsIdentifierChar(ch))
+					return false;
+
+			const std::string value = TrimAscii(expression.substr(opPos + op.size()));
+			if (value.empty())
+				return false;
+			char* end = nullptr;
+			const float parsed = std::strtof(value.c_str(), &end);
+			if (end == value.c_str())
+				return false;
+			while (*end != '\0' && std::isspace(static_cast<unsigned char>(*end)) != 0)
+				++end;
+			if (*end != '\0')
+				return false;
+
+			out.Name = name;
+			out.Op = op;
+			out.Value = parsed;
+			return true;
+		}
+
+		// hasMultiNote = 展开态多出的一行"多条件"警告；高度必须与绘制时的 ey 推进一致，
+		// 否则下一行会压住高级表达式输入框（实机已复现）。
+		float TransitionRowHeight(bool expanded, bool advancedOpen, bool hasError, bool hasMultiNote = false)
+		{
+			float height = kTransitionBaseH;
+			if (expanded)
+			{
+				height += 4.0f;
+				if (hasMultiNote)
+					height += 18.0f;
+				height += kTransitionEditorRowH; // parameter + operator
+				height += 4.0f;
+				height += kTransitionEditorRowH; // float value (drag + text)
+				height += 4.0f;
+				height += kTransitionEditorRowH; // advanced header
+				if (advancedOpen)
+					height += 4.0f + kTransitionEditorRowH;
+			}
+			if (hasError)
+				height += 16.0f;
+			return height;
+		}
+
+		std::string TypeBadgeText(AnimGraph::AnimParameterType type)
+		{
+			return type == AnimGraph::AnimParameterType::Bool ? "bool" : "float";
+		}
+
+		std::string ParameterUnitSuffix(const AnimGraph::AnimParameterDefinition* definition)
+		{
+			if (definition == nullptr || definition->Unit.empty())
+				return {};
+			return " " + definition->Unit;
+		}
+
+		std::string FormatParameterValue(float value, AnimGraph::AnimParameterType type)
+		{
+			return type == AnimGraph::AnimParameterType::Bool
+				? (value != 0.0f ? std::string("true") : std::string("false"))
+				: FormatFloat(value, 2);
+		}
+
+		std::string TrimStateKeyIndex(const std::string& key, size_t& index)
+		{
+			const size_t separator = key.find('#');
+			if (separator == std::string::npos)
+				return {};
+			const std::string name = key.substr(0, separator);
+			const std::string number = key.substr(separator + 1);
+			if (name.empty() || number.empty())
+				return {};
+			char* end = nullptr;
+			const unsigned long long parsed = std::strtoull(number.c_str(), &end, 10);
+			if (end == number.c_str() || *end != '\0')
+				return {};
+			index = static_cast<size_t>(parsed);
+			return name;
+		}
+
+		void UniqueVectorPush(std::vector<std::string>& values, const std::string& value)
+		{
+			if (!value.empty() && std::find(values.begin(), values.end(), value) == values.end())
+				values.push_back(value);
 		}
 
 		ModelClipInfo FindModelClip(const Asset::WModelData& model, const std::string& clipName)
@@ -309,10 +464,22 @@ namespace World
 		m_Graph.Clear();
 		m_Graph.SetGraphName(AGTr("graph.default_name", "New Animation Graph"));
 		m_Graph.SetModelHint("engine/models/characters/mannequin.wmodel");
-		m_Graph.SetParameterDefault("Speed", 0.0f);
-		m_Graph.SetParameterDefault("Direction", 0.0f);
-		m_Graph.SetParameterDefault("IsFalling", 0.0f);
-		m_Graph.SetParameterDefault("AimWeight", 0.0f);
+		auto defineParameter = [this](const char* name, AnimGraph::AnimParameterType type, float defaultValue,
+			float minValue, float maxValue, const char* unit)
+		{
+			AnimGraph::AnimParameterDefinition definition;
+			definition.Name = name;
+			definition.Type = type;
+			definition.DefaultValue = defaultValue;
+			definition.MinValue = minValue;
+			definition.MaxValue = maxValue;
+			definition.Unit = unit;
+			m_Graph.SetParameterDefinition(definition);
+		};
+		defineParameter("Speed", AnimGraph::AnimParameterType::Float, 0.0f, 0.0f, 10.0f, "m/s");
+		defineParameter("Direction", AnimGraph::AnimParameterType::Float, 0.0f, -180.0f, 180.0f, "deg");
+		defineParameter("IsFalling", AnimGraph::AnimParameterType::Bool, 0.0f, 0.0f, 1.0f, "");
+		defineParameter("AimWeight", AnimGraph::AnimParameterType::Float, 0.0f, 0.0f, 1.0f, "");
 
 		AnimState idle;
 		idle.Name = "Idle";
@@ -367,7 +534,6 @@ namespace World
 		m_TrianglesDirty = true;
 		m_ParamsInitialized = false;
 		m_SimGraphReady = false;
-		m_SimCycleTime = 0.0f;
 		m_StateGraphPositions.clear();
 		m_StateGraphDragPending.clear();
 		m_StateGraphDragNode.clear();
@@ -377,6 +543,14 @@ namespace World
 		m_LayerMaskScroll = 0.0f;
 		m_LayerMaskTextKey.clear();
 		m_LayerMaskTextBuffer.clear();
+		m_MaskCollapsed.clear();
+		m_TransitionEditKey.clear();
+		m_TransitionExprBuffer.clear();
+		m_TransitionValueBuffer.clear();
+		m_TransitionError.clear();
+		m_ParameterEditorOpen = false;
+		m_ParameterError.clear();
+		m_ParamScroll = 0.0f;
 	}
 
 	std::filesystem::path AnimGraphPanel::ResolvePhysicalPath(const std::string& logicalPath) const
@@ -456,9 +630,7 @@ namespace World
 		m_TrianglesDirty = true;
 		m_ParamsInitialized = false;
 		m_NameBufferKey.clear();
-		m_ConditionKey.clear();
 		m_SimGraphReady = false;
-		m_SimCycleTime = 0.0f;
 		m_StateGraphPositions.clear();
 		m_StateGraphDragPending.clear();
 		m_StateGraphDragNode.clear();
@@ -468,11 +640,25 @@ namespace World
 		m_LayerMaskScroll = 0.0f;
 		m_LayerMaskTextKey.clear();
 		m_LayerMaskTextBuffer.clear();
+		m_MaskCollapsed.clear();
+		m_TransitionEditKey.clear();
+		m_TransitionExprBuffer.clear();
+		m_TransitionValueBuffer.clear();
+		m_TransitionError.clear();
+		m_ParameterEditorOpen = false;
+		m_ParameterError.clear();
+		m_ParamScroll = 0.0f;
 		SetStatus(AGTr("status.loaded", "Loaded ") + m_LoadedPath, false);
 	}
 
 	bool AnimGraphPanel::SaveAsset()
 	{
+		CommitPendingCondition();
+		if (!m_TransitionEditKey.empty() && !m_TransitionError.empty())
+		{
+			SetStatus(AGTr("transitions.commit_blocked", "Fix the transition condition before saving."), true);
+			return false;
+		}
 		if (m_LoadedPath.empty())
 			m_LoadedPath = "animation/new_graph.wanimgraph";
 
@@ -497,6 +683,7 @@ namespace World
 
 	bool AnimGraphPanel::ReloadAsset()
 	{
+		CommitPendingCondition();
 		if (m_LoadedPath.empty())
 		{
 			SetStatus(AGTr("status.nothing_to_reload", "Nothing to reload: this graph has not been saved yet"), true);
@@ -509,6 +696,12 @@ namespace World
 
 	bool AnimGraphPanel::ApplyToSelected(PanelHost& host)
 	{
+		CommitPendingCondition();
+		if (!m_TransitionEditKey.empty() && !m_TransitionError.empty())
+		{
+			SetStatus(AGTr("transitions.commit_blocked", "Fix the transition condition before applying."), true);
+			return false;
+		}
 		Entity entity = host.GetSelectedEntity();
 		const Ref<Scene> sceneRef = host.GetActiveScene();
 		Scene* scene = sceneRef.get();
@@ -578,6 +771,7 @@ namespace World
 	{
 		m_Dirty = true;
 		m_TrianglesDirty = true;
+		m_SimGraphReady = false;
 	}
 
 	void AnimGraphPanel::PushUndo()
@@ -641,9 +835,13 @@ namespace World
 		m_DeleteArmState.clear();
 		m_DeleteArmAge = 0.0f;
 		m_NameBufferKey.clear();
-		m_ConditionKey.clear();
 		m_NameFieldWasFocused = false;
-		m_ConditionFocusKey.clear();
+		m_TransitionEditKey.clear();
+		m_TransitionExprBuffer.clear();
+		m_TransitionValueBuffer.clear();
+		m_TransitionError.clear();
+		m_ParamsInitialized = false;
+		m_SimGraphReady = false;
 		m_EditTransactionKey.clear();
 		MarkDirty();
 	}
@@ -779,8 +977,13 @@ namespace World
 		state.ClipName = "Idle";
 		state.Loop = true;
 		state.Speed = 1.0f;
-		state.ParameterX = "Speed";
-		state.ParameterY = "Direction";
+		std::vector<std::string> floatParameters;
+		for (const auto& entry : m_Graph.GetParameterDefinitions())
+			if (entry.second.Type == AnimGraph::AnimParameterType::Float)
+				floatParameters.push_back(entry.first);
+		state.ParameterX = floatParameters.empty() ? "Speed" : floatParameters[0];
+		state.ParameterY = floatParameters.size() > 1 ? floatParameters[1]
+			: (!floatParameters.empty() ? floatParameters[0] : "Direction");
 
 		if (kind == AnimStateKind::BlendSpace1D)
 		{
@@ -803,6 +1006,7 @@ namespace World
 		m_SelectedState = state.Name;
 		m_SelectedSample = -1;
 		m_SelectedTransition = -1;
+		m_TransitionEditKey.clear();
 		m_TrianglesDirty = true;
 		MarkDirty();
 		SetStatus(AGFmt("status.state_added", "Added {kind} state '{name}'",
@@ -813,6 +1017,7 @@ namespace World
 	{
 		if (m_SelectedState.empty())
 			return;
+		CommitPendingCondition();
 		const std::string removed = m_SelectedState;
 		if (m_Graph.FindState(removed) == nullptr)
 			return;
@@ -845,6 +1050,7 @@ namespace World
 
 		m_SelectedSample = -1;
 		m_SelectedTransition = -1;
+		m_TransitionEditKey.clear();
 		m_DeleteArmState.clear();
 		m_TrianglesDirty = true;
 		MarkDirty();
@@ -935,42 +1141,106 @@ namespace World
 		RefreshModel(host);
 
 		if (!m_ParamsInitialized)
+			SyncParameterValues();
+	}
+
+	float AnimGraphPanel::ParamValue(const std::string& name) const
+	{
+		const auto found = m_ParamValues.find(name);
+		if (found != m_ParamValues.end())
+			return found->second;
+		const AnimGraph::AnimParameterDefinition* definition = m_Graph.FindParameterDefinition(name);
+		if (definition == nullptr)
+			return 0.0f;
+		return definition->Type == AnimGraph::AnimParameterType::Bool
+			? (definition->DefaultValue != 0.0f ? 1.0f : 0.0f)
+			: definition->DefaultValue;
+	}
+
+	void AnimGraphPanel::SetParamValue(const std::string& name, float value)
+	{
+		const AnimGraph::AnimParameterDefinition* definition = m_Graph.FindParameterDefinition(name);
+		if (definition != nullptr)
 		{
-			const auto& defaults = m_Graph.GetParameterDefaults();
-			const bool hasParameters = !defaults.empty();
-			auto readDefault = [&defaults](const char* name)
-			{
-				const auto found = defaults.find(name);
-				return found == defaults.end() ? 0.0f : found->second;
-			};
-			m_ParamSpeed = readDefault("Speed");
-			m_ParamDirection = readDefault("Direction");
-			m_ParamFalling = readDefault("IsFalling");
-			m_ParamAimWeight = readDefault("AimWeight");
-			m_ParamsInitialized = true;
+			if (definition->Type == AnimGraph::AnimParameterType::Bool)
+				value = value != 0.0f ? 1.0f : 0.0f;
+			else
+				value = std::clamp(value, definition->MinValue, definition->MaxValue);
 		}
+		const auto existing = m_ParamValues.find(name);
+		if (existing != m_ParamValues.end() && std::fabs(existing->second - value) <= 0.000001f)
+			return;
+		m_ParamValues[name] = value;
+		m_SimGraphReady = false;
+	}
+
+	void AnimGraphPanel::SyncParameterValues()
+	{
+		const auto& definitions = m_Graph.GetParameterDefinitions();
+		for (const auto& entry : definitions)
+		{
+			const AnimGraph::AnimParameterDefinition& definition = entry.second;
+			auto found = m_ParamValues.find(definition.Name);
+			if (found == m_ParamValues.end())
+			{
+				const float value = definition.Type == AnimGraph::AnimParameterType::Bool
+					? (definition.DefaultValue != 0.0f ? 1.0f : 0.0f)
+					: std::clamp(definition.DefaultValue, definition.MinValue, definition.MaxValue);
+				m_ParamValues.emplace(definition.Name, value);
+				continue;
+			}
+			if (definition.Type == AnimGraph::AnimParameterType::Bool)
+				found->second = found->second != 0.0f ? 1.0f : 0.0f;
+		}
+		for (auto it = m_ParamValues.begin(); it != m_ParamValues.end();)
+		{
+			if (definitions.find(it->first) == definitions.end())
+				it = m_ParamValues.erase(it);
+			else
+				++it;
+		}
+		m_ParamsInitialized = true;
+	}
+
+	std::vector<std::string> AnimGraphPanel::CollectReferencedParameters() const
+	{
+		std::vector<std::string> names;
+		for (const auto& stateEntry : m_Graph.GetStates())
+		{
+			const AnimState& state = stateEntry.second;
+			UniqueVectorPush(names, state.ParameterX);
+			UniqueVectorPush(names, state.ParameterY);
+			for (const AnimTransition& transition : state.Transitions)
+			{
+				const std::vector<std::string> conditionNames = CollectConditionIdentifiers(transition.ConditionExpression);
+				for (const std::string& name : conditionNames)
+					UniqueVectorPush(names, name);
+			}
+		}
+		for (const AnimLayer& layer : m_Graph.GetLayers())
+			UniqueVectorPush(names, layer.WeightParameter);
+		return names;
 	}
 
 	void AnimGraphPanel::PushParameters(PanelHost& host)
 	{
 		(void)host;
 #if WE_HAS_ANIMGRAPH_SYSTEM
+		// 模拟开着时也要推：参数面板就是"实时预览"，用户改 Speed 应该在场景里
+		// 看到角色走起来，而不只是内部副本的状态名变化。
 		if (m_BoundEntity == entt::null || m_BoundScene == nullptr)
 			return;
 		const auto& registry = static_cast<const Scene&>(*m_BoundScene).GetRegistry();
 		if (registry.try_get<AnimGraphComponent>(m_BoundEntity) == nullptr)
 			return;
-		AnimGraphSystem::SetParameter(m_BoundEntity, "Speed", m_ParamSpeed);
-		AnimGraphSystem::SetParameter(m_BoundEntity, "Direction", m_ParamDirection);
-		AnimGraphSystem::SetParameter(m_BoundEntity, "IsFalling", m_ParamFalling);
-		AnimGraphSystem::SetParameter(m_BoundEntity, "AimWeight", m_ParamAimWeight);
+		for (const auto& entry : m_Graph.GetParameterDefinitions())
+			AnimGraphSystem::SetParameter(m_BoundEntity, entry.first, ParamValue(entry.first));
 #endif
 	}
 
 	void AnimGraphPanel::ResetSimulation()
 	{
 		m_SimGraphReady = false;
-		m_SimCycleTime = 0.0f;
 	}
 
 	void AnimGraphPanel::EnsureSimulationGraph()
@@ -981,7 +1251,6 @@ namespace World
 		if (!m_InitialStateHint.empty() && m_SimGraph.FindState(m_InitialStateHint) != nullptr)
 			m_SimGraph.SetInitialState(m_InitialStateHint);
 		m_SimGraphReady = true;
-		m_SimCycleTime = 0.0f;
 	}
 
 	void AnimGraphPanel::UpdateSimulation(float dt)
@@ -989,43 +1258,15 @@ namespace World
 		if (!m_Simulate)
 			return;
 		EnsureSimulationGraph();
-
-		constexpr float stageSeconds = 2.5f;
-		constexpr int stageCount = 7;
-		m_SimCycleTime = std::fmod(m_SimCycleTime + std::max(0.0f, dt), stageSeconds * stageCount);
-		const int stage = static_cast<int>(m_SimCycleTime / stageSeconds) % stageCount;
-		const float stageTime = std::fmod(m_SimCycleTime, stageSeconds);
-
-		float speed = 0.0f;
-		float direction = 0.0f;
-		float falling = 0.0f;
-		float verticalSpeed = 0.0f;
-		switch (stage)
+		for (const auto& entry : m_Graph.GetParameterDefinitions())
 		{
-			case 1: speed = 1.6f; break;
-			case 2: speed = 4.5f; break;
-			case 3: speed = 1.6f; direction = 90.0f; break;
-			case 4: speed = 1.6f; direction = -90.0f; break;
-			case 5: speed = 1.6f; direction = 180.0f; break;
-			case 6:
-				falling = 1.0f;
-				verticalSpeed = stageTime < stageSeconds * 0.5f ? 4.5f : -7.0f;
-				break;
-			default: break;
+			const AnimGraph::AnimParameterDefinition& definition = entry.second;
+			float value = ParamValue(definition.Name);
+			if (definition.Type == AnimGraph::AnimParameterType::Bool)
+				value = value != 0.0f ? 1.0f : 0.0f;
+			m_SimGraph.SetFloat(definition.Name, value);
 		}
-
-		m_SimGraph.SetFloat("Speed", speed);
-		m_SimGraph.SetFloat("Direction", direction);
-		m_SimGraph.SetFloat("IsFalling", falling);
-		m_SimGraph.SetFloat("VerticalSpeed", verticalSpeed);
-		m_SimGraph.SetFloat("AimWeight", std::clamp(m_ParamAimWeight, 0.0f, 1.0f));
 		m_SimGraph.Update(dt);
-
-		// 模拟模式仍保持既有 Live Preview 语义：绑定实体时把循环参数继续推给运行时。
-		m_ParamSpeed = speed;
-		m_ParamDirection = direction;
-		m_ParamFalling = falling;
-		m_ParamsInitialized = true;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -1141,12 +1382,9 @@ namespace World
 
 		if (m_Narrow)
 		{
-			// 右栏折叠为底部条(派工 §3.4):中栏在上、实时区在下,互不重叠。
-			const float liveH = std::min(200.0f, std::max(140.0f, bodyH * 0.34f));
-			const Wui::WuiRect centerTop { centerArea.X, centerArea.Y, centerArea.W, std::max(0.0f, bodyH - liveH - kGap) };
-			RenderCenterColumn(ctx, centerTop, host, theme);
-			const Wui::WuiRect liveArea { centerArea.X, centerTop.Y + centerTop.H + kGap, centerArea.W, liveH };
-			RenderLivePanel(ctx, liveArea, host, theme);
+			// 窄形态：实时预览收进「预览」页签，中栏拿到整块高度。
+			// 以前的底部条只给中栏留 ~120–150px，状态图/遮罩/IK 都被压成一条缝。
+			RenderCenterColumn(ctx, centerArea, host, theme);
 		}
 		else
 		{
@@ -1428,13 +1666,18 @@ namespace World
 				const std::string& picked = stateNames[static_cast<size_t>(result.Clicked)];
 				if (picked != m_SelectedState)
 				{
-					m_SelectedState = picked;
-					m_SelectedSample = -1;
-					m_SelectedTransition = -1;
-					m_TrianglesDirty = true;
-					m_CenterScroll = 0.0f;
-					m_NameBufferKey.clear();
-					m_ConditionKey.clear();
+					CommitPendingCondition();
+					if (m_TransitionEditKey.empty() || m_TransitionError.empty())
+					{
+						m_SelectedState = picked;
+						m_SelectedSample = -1;
+						m_SelectedTransition = -1;
+						m_TransitionEditKey.clear();
+						m_TransitionError.clear();
+						m_TrianglesDirty = true;
+						m_CenterScroll = 0.0f;
+						m_NameBufferKey.clear();
+					}
 				}
 			}
 		}
@@ -1561,6 +1804,18 @@ namespace World
 	void AnimGraphPanel::RenderCenterColumn(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
 		const Wui::WuiTheme& theme)
 	{
+		if (!m_TransitionEditKey.empty())
+		{
+			size_t editIndex = 0;
+			const std::string editState = TrimStateKeyIndex(m_TransitionEditKey, editIndex);
+			(void)editIndex;
+			if (!editState.empty() && editState != m_SelectedState)
+			{
+				CommitPendingCondition();
+				if (!m_TransitionEditKey.empty() && !m_TransitionError.empty())
+					m_SelectedState = editState;
+			}
+		}
 		const AnimState* state = SelectedState();
 		const size_t transitionCount = state ? state->Transitions.size() : 0u;
 		const size_t sampleCount = state
@@ -1570,18 +1825,41 @@ namespace World
 
 		// 卡片高度与绘制时的行距使用同一组公式(含行间 4px),否则最后一行会被按钮压住。
 		const float samplesCardH = kRowH + 1.0f + kSampleRowH * static_cast<float>(sampleCount) + kRowH + 2.0f;
-		const float transitionsCardH = kRowH + 4.0f
-			+ (kTransitionRowH + theme.PadSmall) * static_cast<float>(transitionCount) + kRowH + theme.PadSmall;
+		// 状态图高度跟随可用高度：固定 320 下限在窄窗口/高 DPI 下会超出中栏可视区，
+		// 被滚动区裁掉一截（实机 1280×720 @150% 已复现）。窄形态多分一点高度给画布。
+		const float availableH = std::max(120.0f, area.H - kRowH - kGap * 0.5f);
+		const float graphH = std::min(
+			std::clamp(availableH * (m_Narrow ? 0.60f : 0.52f), 200.0f, 620.0f), availableH);
+		auto transitionRowHeight = [this, state](size_t index)
+		{
+			const bool expanded = m_TransitionEditKey == (m_SelectedState + "#" + std::to_string(index));
+			bool multiNote = false;
+			if (expanded && state && index < state->Transitions.size())
+			{
+				const std::string& expression = state->Transitions[index].ConditionExpression;
+				SimpleConditionClause probe;
+				multiNote = !TrimAscii(expression).empty()
+					&& !ParseSimpleConditionClause(expression, probe);
+			}
+			return TransitionRowHeight(expanded, expanded && m_TransitionAdvancedOpen,
+				expanded && !m_TransitionError.empty(), multiNote);
+		};
+		float transitionsBodyH = 0.0f;
+		for (size_t i = 0; i < transitionCount; ++i)
+			transitionsBodyH += transitionRowHeight(i) + theme.PadSmall;
+		const float transitionsCardH = kRowH + theme.PadSmall + transitionsBodyH + kRowH + theme.PadSmall;
 
-		// 顶部页签「状态 / 层」：窄窗口下中栏可视高度有限，层编辑（尤其是遮罩骨骼列表）
-		// 放在长滚动区底部会让用户找不到（2026-10-23 用户反馈「遮罩如何编辑呢」）。
+		// 顶部页签「状态 / 层 / 姿态 / IK」等宽；层编辑放在独立页，避免遮罩树被长滚动区压到看不见。
+		// 窄形态再加「预览」页：把实时预览从底部条挪进页签，否则每个页只剩一百多像素高。
+		const int tabCount = m_Narrow ? 5 : 4;
 		const Wui::WuiRect tabBar { area.X + theme.PadSmall, area.Y,
 			area.W - theme.PadSmall * 2.0f, kRowH };
-		const float tabW = (tabBar.W - theme.PadSmall * 2.0f) / 3.0f;
+		const float tabW = std::max(1.0f, (tabBar.W - theme.PadSmall * static_cast<float>(tabCount - 1))
+			/ static_cast<float>(tabCount));
 		const Wui::WuiRect stateTab { tabBar.X, tabBar.Y, tabW, kRowH };
 		const Wui::WuiRect layerTab { stateTab.X + tabW + theme.PadSmall, tabBar.Y, tabW, kRowH };
-		const Wui::WuiRect poseTab { layerTab.X + tabW + theme.PadSmall, tabBar.Y,
-			tabBar.W - tabW * 2.0f - theme.PadSmall * 2.0f, kRowH };
+		const Wui::WuiRect poseTab { layerTab.X + tabW + theme.PadSmall, tabBar.Y, tabW, kRowH };
+		const Wui::WuiRect ikTab { poseTab.X + tabW + theme.PadSmall, tabBar.Y, tabW, kRowH };
 		const std::string stateTabLabel = (m_CenterTab == 0 ? "● " : "")
 			+ AGTr("center.tab.state", "状态");
 		const std::string layerTabLabel = (m_CenterTab == 1 ? "● " : "")
@@ -1597,6 +1875,27 @@ namespace World
 		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.pose"), poseTab, poseTabLabel,
 			theme, true, AGTr("center.tab.pose.tooltip", "Pose preview: the current graph pose (enable 模拟 to play it)."), false))
 			m_CenterTab = 2;
+		const std::string ikTabLabel = (m_CenterTab == 3 ? "● " : "")
+			+ AGTr("center.tab.ik", "IK");
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.ik"), ikTab, ikTabLabel,
+			theme, true, AGTr("center.tab.ik.tooltip", "IK workspace: create two-bone chains and foot IK examples."), false))
+			m_CenterTab = 3;
+
+		if (m_Narrow)
+		{
+			const Wui::WuiRect liveTab { ikTab.X + tabW + theme.PadSmall, tabBar.Y,
+				std::max(1.0f, tabBar.X + tabBar.W - (ikTab.X + tabW + theme.PadSmall)), kRowH };
+			const std::string liveTabLabel = (m_CenterTab == 4 ? "● " : "")
+				+ AGTr("center.tab.live", "预览");
+			if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.live"), liveTab, liveTabLabel,
+				theme, true, AGTr("center.tab.live.tooltip", "Live preview: parameters, runtime state and simulation."), false))
+				m_CenterTab = 4;
+		}
+		else if (m_CenterTab > 3)
+		{
+			// 窗口变宽后页签变回 4 个：把"预览"页折回状态页，避免落到一个不存在的页。
+			m_CenterTab = 0;
+		}
 
 		const Wui::WuiRect contentArea { area.X, tabBar.Y + kRowH + kGap * 0.5f, area.W,
 			std::max(40.0f, area.H - kRowH - kGap * 0.5f) };
@@ -1614,25 +1913,47 @@ namespace World
 		{
 			const float layerH = std::max(kLayerCardH, contentArea.H - kGap * 2.0f);
 			const float contentH = layerH + kGap * 2.0f;
+			// 未选中层时不要把 EmptyState 放进 520px 的滚动卡片里 —— 视口只有一百多像素，
+			// 居中文案会被推到可视区之外，界面看起来像"整块空白"（实机 1280×720 复现）。
+			if (m_SelectedLayer.empty())
+			{
+				Wui::EmptyState(ctx, contentArea, "", AGTr("center.layer.empty.title", "No layer selected"),
+					AGTr("center.layer.empty.body", "Pick a layer in the left column, or add one with +."),
+					"", 0, theme);
+				return;
+			}
 			if (!Wui::BeginScrollArea(ctx, contentArea, contentH, m_LayerCardScroll, theme, 0))
 				return;
 			const Wui::WuiRect layerCard { contentArea.X + theme.PadSmall, contentArea.Y + kGap - m_LayerCardScroll,
 				contentArea.W - theme.PadSmall * 2.0f, layerH };
-			if (m_SelectedLayer.empty())
-			{
-				Wui::EmptyState(ctx, layerCard, "", AGTr("center.layer.empty.title", "No layer selected"),
-					AGTr("center.layer.empty.body", "Pick a layer in the left column, or add one with +."),
-					"", 0, theme);
-			}
-			else
-			{
-				RenderLayerCard(ctx, layerCard, host, theme);
-			}
+			RenderLayerCard(ctx, layerCard, host, theme);
 			Wui::EndScrollArea(ctx);
+			if (contentH > contentArea.H + 1.0f)
+			{
+				// 滚动区本身不画滚动条：长卡片（状态卡/过渡/层遮罩）在窄窗口里
+				// 完全在折叠线以下时，用户没有任何"还能往下滚"的线索。
+				const float barW = 6.0f;
+				Wui::ScrollBar(ctx, Wui::HashId("animgraph.center.layer.scrollbar"),
+					{ contentArea.X + contentArea.W - barW - 2.0f, contentArea.Y, barW, contentArea.H },
+					contentH, contentArea.H, m_LayerCardScroll, theme, false);
+			}
 			return;
 		}
 
-		float contentH = kGap + kStateGraphH + kGap;
+		if (m_CenterTab == 3)
+		{
+			RenderIkCard(ctx, contentArea, host, theme);
+			return;
+		}
+
+		if (m_CenterTab == 4)
+		{
+			// 窄形态的「预览」页：实时预览占满中栏，不再从底部抢走画布高度。
+			RenderLivePanel(ctx, contentArea, host, theme);
+			return;
+		}
+
+		float contentH = kGap + graphH + kGap;
 		contentH += kStateCardH + kGap;
 		if (state && state->Kind != AnimStateKind::SingleClip)
 		{
@@ -1642,13 +1963,36 @@ namespace World
 		contentH += transitionsCardH + kGap;
 		contentH += kGap;
 
+		// 画布缩放优先于父级滚动：BeginScrollArea 会先吃掉本帧滚轮，所以在这里
+		// 先把悬停在画布上的滚轮转存给 RenderStateGraph，再从输入里清零。
+		m_CanvasWheel = 0.0f;
+		{
+			const Wui::WuiRect predictedGraph { area.X + theme.PadSmall, contentArea.Y + kGap - m_CenterScroll,
+				area.W - theme.PadSmall * 2.0f, graphH };
+			if (ctx.IsHovered(predictedGraph) && std::fabs(ctx.Input().Wheel) > 0.001f)
+			{
+				m_CanvasWheel = ctx.Input().Wheel;
+				ctx.Input().Wheel = 0.0f;
+			}
+		}
+
+		// 状态图连线点击后会设置 reveal 标志：把过渡卡顶部滚到中栏可视区顶部，避免用户来回找。
+		if (m_RevealTransitionRow)
+		{
+			float transitionTop = kGap + graphH + kGap + kStateCardH + kGap;
+			if (state && state->Kind != AnimStateKind::SingleClip)
+				transitionTop += kBlendCardH + kGap + samplesCardH + kGap;
+			m_CenterScroll = std::max(0.0f, transitionTop - kGap);
+			m_RevealTransitionRow = false;
+		}
+
 		if (!Wui::BeginScrollArea(ctx, contentArea, contentH, m_CenterScroll, theme, 0))
 			return;
 
 		float y = contentArea.Y + kGap - m_CenterScroll;
-		const Wui::WuiRect stateGraph { area.X + theme.PadSmall, y, area.W - theme.PadSmall * 2.0f, kStateGraphH };
+		const Wui::WuiRect stateGraph { area.X + theme.PadSmall, y, area.W - theme.PadSmall * 2.0f, graphH };
 		RenderStateGraph(ctx, stateGraph, host, theme);
-		y += kStateGraphH + kGap;
+		y += graphH + kGap;
 
 		const Wui::WuiRect stateCard { area.X + theme.PadSmall, y, area.W - theme.PadSmall * 2.0f, kStateCardH };
 		RenderStateCard(ctx, stateCard, host, theme);
@@ -1675,13 +2019,22 @@ namespace World
 
 		state = SelectedState();
 		const size_t liveTransitions = state ? state->Transitions.size() : 0u;
-		const float transitionsH = kRowH + theme.PadSmall + (kTransitionRowH + theme.PadSmall) * static_cast<float>(liveTransitions)
-			+ kRowH + theme.PadSmall;
+		float liveTransitionsBodyH = 0.0f;
+		for (size_t i = 0; i < liveTransitions; ++i)
+			liveTransitionsBodyH += transitionRowHeight(i) + theme.PadSmall;
+		const float transitionsH = kRowH + theme.PadSmall + liveTransitionsBodyH + kRowH + theme.PadSmall;
 		const Wui::WuiRect transitionsCard { area.X + theme.PadSmall, y, area.W - theme.PadSmall * 2.0f, transitionsH };
 		RenderTransitionsCard(ctx, transitionsCard, host, theme);
 		y += transitionsH + kGap;
 
 		Wui::EndScrollArea(ctx);
+		if (contentH > contentArea.H + 1.0f)
+		{
+			const float barW = 6.0f;
+			Wui::ScrollBar(ctx, Wui::HashId("animgraph.center.state.scrollbar"),
+				{ contentArea.X + contentArea.W - barW - 2.0f, contentArea.Y, barW, contentArea.H },
+				contentH, contentArea.H, m_CenterScroll, theme, false);
+		}
 	}
 
 	void AnimGraphPanel::RenameSelectedState(const std::string& newName)
@@ -1697,25 +2050,74 @@ namespace World
 
 	void AnimGraphPanel::CommitPendingCondition()
 	{
-		if (m_ConditionFocusKey.empty())
+		if (m_TransitionEditKey.empty())
 			return;
-		const size_t separator = m_ConditionFocusKey.find('#');
-		const AnimState* live = separator == std::string::npos
-			? nullptr : m_Graph.FindState(m_ConditionFocusKey.substr(0, separator));
-		if (live == nullptr || separator == std::string::npos)
+		size_t index = 0;
+		const std::string stateName = TrimStateKeyIndex(m_TransitionEditKey, index);
+		const AnimState* live = stateName.empty() ? nullptr : m_Graph.FindState(stateName);
+		if (live == nullptr || index >= live->Transitions.size())
 		{
-			m_ConditionFocusKey.clear();
+			m_TransitionEditKey.clear();
+			m_TransitionError.clear();
 			return;
 		}
-		const size_t index = static_cast<size_t>(std::atoi(m_ConditionFocusKey.c_str() + separator + 1));
+
+		const AnimTransition& transition = live->Transitions[index];
+		std::string expression = transition.ConditionExpression;
+		if (m_TransitionAdvancedOpen)
+		{
+			expression = TrimAscii(m_TransitionExprBuffer);
+			if (!expression.empty())
+			{
+				std::string parseError;
+				if (!AnimGraphCondition::Parse(expression, &parseError))
+				{
+					m_TransitionError = parseError.empty()
+						? AGTr("transitions.invalid_expression", "Invalid condition expression.")
+						: AGTr("transitions.invalid_expression_detail", "Invalid condition: ") + parseError;
+					return;
+				}
+			}
+		}
+		else
+		{
+			SimpleConditionClause clause;
+			if (ParseSimpleConditionClause(transition.ConditionExpression, clause))
+			{
+				const AnimGraph::AnimParameterDefinition* definition = m_Graph.FindParameterDefinition(clause.Name);
+				if (definition != nullptr && definition->Type == AnimGraph::AnimParameterType::Float)
+				{
+					const std::string text = TrimAscii(m_TransitionValueBuffer);
+					char* end = nullptr;
+					const float parsed = std::strtof(text.c_str(), &end);
+					if (text.empty() || end == text.c_str() || *end != '\0')
+					{
+						m_TransitionError = AGTr("transitions.invalid_value", "The condition value must be a number.");
+						return;
+					}
+					const float value = std::clamp(parsed, definition->MinValue, definition->MaxValue);
+					expression = clause.Name + " " + clause.Op + " " + FormatFloat(value, 2);
+					m_TransitionValueBuffer = FormatFloat(value, 2);
+				}
+			}
+		}
+
+		m_TransitionError.clear();
+		m_TransitionExprBuffer = expression;
+		if (transition.ConditionExpression == expression)
+		{
+			m_TransitionEditKey.clear();
+			m_ConditionFieldRect = {};
+			return;
+		}
+
 		AnimState updated = *live;
-		if (index < updated.Transitions.size()
-			&& updated.Transitions[index].ConditionExpression != m_ConditionBuffer)
+		updated.Transitions[index].ConditionExpression = expression;
+		if (ReplaceState(updated.Name, updated))
 		{
-			updated.Transitions[index].ConditionExpression = m_ConditionBuffer;
-			ReplaceState(updated.Name, updated);
+			m_TransitionEditKey.clear();
+			m_ConditionFieldRect = {};
 		}
-		m_ConditionFocusKey.clear();
 	}
 	void AnimGraphPanel::RenderStateCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
 		const Wui::WuiTheme& theme)
@@ -1805,7 +2207,7 @@ namespace World
 			}
 		}
 		Wui::Tooltip(ctx, { controlX, y, controlW, kRowH },
-			AGTr("state.kind.tooltip", "Single Clip plays one clip; Blend 1D/2D blend samples by Speed / Direction."));
+			AGTr("state.kind.tooltip", "Single Clip plays one clip; Blend 1D/2D blend samples by the state's X/Y parameter definitions."));
 		y += kRowH + 4.0f;
 
 		// Clip
@@ -1929,7 +2331,7 @@ namespace World
 			return live ? *live : AnimState {};
 		};
 
-		float y = area.Y + kRowH + 4.0f;
+		float y = area.Y + kRowH + theme.PadSmall;
 		std::vector<std::string> targets;
 		for (const auto& entry : m_Graph.GetStates())
 			if (entry.first != stateName)
@@ -1937,17 +2339,140 @@ namespace World
 		if (targets.empty())
 			targets.push_back(AGTr("transitions.no_other", "(no other state)"));
 
+		const auto& definitions = m_Graph.GetParameterDefinitions();
+		std::vector<std::string> parameterLabels { AGTr("transitions.always", "(Always)") };
+		std::vector<std::string> parameterNames { std::string() };
+		for (const auto& entry : definitions)
+		{
+			parameterLabels.push_back(entry.first + "  [" + TypeBadgeText(entry.second.Type) + "]");
+			parameterNames.push_back(entry.first);
+		}
+
+		static const char* kFloatOperators[] = { ">", ">=", "<", "<=", "==", "!=" };
+		auto operatorLabels = [&](const AnimGraph::AnimParameterDefinition* definition)
+		{
+			if (definition != nullptr && definition->Type == AnimGraph::AnimParameterType::Bool)
+				return std::vector<std::string> { AGTr("transitions.bool.true", "True"),
+					AGTr("transitions.bool.false", "False") };
+			std::vector<std::string> labels;
+			for (const char* op : kFloatOperators)
+				labels.emplace_back(op);
+			return labels;
+		};
+
+		auto openEditor = [&](size_t index, const AnimTransition& transition)
+		{
+			m_TransitionEditKey = stateName + "#" + std::to_string(index);
+			m_TransitionAdvancedOpen = false;
+			m_TransitionError.clear();
+			m_TransitionExprBuffer = transition.ConditionExpression;
+			m_TransitionParamIndex = 0;
+			m_TransitionOpIndex = 0;
+			m_TransitionValueBuffer.clear();
+
+			SimpleConditionClause clause;
+			if (!ParseSimpleConditionClause(transition.ConditionExpression, clause))
+			{
+				// 多条件表达式（A && B）无法拆成一组"参数/运算符/值"控件。
+				// 直接展开高级表达式，而不是让结构化控件显示成"（始终）"——那会误导用户
+				// 以为这条过渡无条件（实机已复现）。
+				m_TransitionAdvancedOpen = !TrimAscii(transition.ConditionExpression).empty();
+				return;
+			}
+			const auto found = std::find(parameterNames.begin() + 1, parameterNames.end(), clause.Name);
+			if (found == parameterNames.end())
+				return;
+			m_TransitionParamIndex = static_cast<int>(std::distance(parameterNames.begin(), found));
+			const AnimGraph::AnimParameterDefinition* definition = m_Graph.FindParameterDefinition(clause.Name);
+			if (definition == nullptr)
+				return;
+			if (definition->Type == AnimGraph::AnimParameterType::Bool)
+			{
+				m_TransitionOpIndex = clause.Value != 0.0f ? 0 : 1;
+			}
+			else
+			{
+				const auto opIt = std::find_if(std::begin(kFloatOperators), std::end(kFloatOperators),
+					[&clause](const char* op) { return clause.Op == op; });
+				if (opIt != std::end(kFloatOperators))
+					m_TransitionOpIndex = static_cast<int>(std::distance(std::begin(kFloatOperators), opIt));
+			}
+			m_TransitionValueBuffer = FormatFloat(clause.Value, 2);
+		};
+
+		auto applyExpression = [&](size_t index, const std::string& expression, bool recordUndo) -> bool
+		{
+			AnimState updated = copyState();
+			if (index >= updated.Transitions.size())
+				return false;
+			if (updated.Transitions[index].ConditionExpression == expression)
+			{
+				m_TransitionExprBuffer = expression;
+				return true;
+			}
+			updated.Transitions[index].ConditionExpression = expression;
+			if (!ReplaceState(stateName, updated, recordUndo))
+				return false;
+			m_TransitionExprBuffer = expression;
+			m_TransitionError.clear();
+			return true;
+		};
+
+		auto structuredExpression = [&](int parameterIndex, int opIndex, float value, std::string& out) -> bool
+		{
+			out.clear();
+			if (parameterIndex <= 0 || static_cast<size_t>(parameterIndex) >= parameterNames.size())
+				return true;
+			const std::string& name = parameterNames[static_cast<size_t>(parameterIndex)];
+			const AnimGraph::AnimParameterDefinition* definition = m_Graph.FindParameterDefinition(name);
+			if (definition == nullptr)
+				return false;
+			if (definition->Type == AnimGraph::AnimParameterType::Bool)
+				out = name + (opIndex == 0 ? " == 1" : " == 0");
+			else
+			{
+				const int count = static_cast<int>(std::size(kFloatOperators));
+				const int clampedOp = std::clamp(opIndex, 0, count - 1);
+				const float clampedValue = std::clamp(value, definition->MinValue, definition->MaxValue);
+				out = name + " " + kFloatOperators[clampedOp] + " " + FormatFloat(clampedValue, 2);
+			}
+			return true;
+		};
+
+		if (m_TransitionEditKey.empty())
+			m_ConditionFieldRect = {};
+
 		for (size_t i = 0; i < transitions.size(); ++i)
 		{
 			const AnimTransition transition = transitions[i];
-			const Wui::WuiRect row { area.X + theme.Pad, y, area.W - theme.Pad * 2.0f, kTransitionRowH };
+			const std::string key = stateName + "#" + std::to_string(i);
+			const bool expanded = m_TransitionEditKey == key;
+			SimpleConditionClause multiProbe;
+			const bool multiNote = expanded && !TrimAscii(transition.ConditionExpression).empty()
+				&& !ParseSimpleConditionClause(transition.ConditionExpression, multiProbe);
+			const float rowH = TransitionRowHeight(expanded, expanded && m_TransitionAdvancedOpen,
+				expanded && !m_TransitionError.empty(), multiNote);
+			const Wui::WuiRect row { area.X + theme.Pad, y, area.W - theme.Pad * 2.0f, rowH };
+			const Wui::WuiRect headerRow { row.X, row.Y, row.W, kRowH };
+			Wui::HoverRow(ctx, headerRow, ctx.IsHovered(headerRow), static_cast<int>(i) == m_SelectedTransition,
+				theme, 3.0f);
+			const bool doubleClickedHeader = ctx.IsDoubleClicked(headerRow);
 
 			const float deleteW = kRowH;
-			const float durationW = 96.0f;
-			const float targetW = std::max(60.0f, row.W - deleteW - durationW - theme.Pad * 2.0f);
+			const float durationW = 88.0f;
+			const float editW = row.W >= 560.0f ? 96.0f : 30.0f;
+			const float targetW = std::max(60.0f, row.W - deleteW - durationW - editW - theme.PadSmall * 3.0f);
 			const Wui::WuiRect targetRect { row.X, row.Y, targetW, kRowH };
 			const Wui::WuiRect durationRect { targetRect.X + targetW + theme.PadSmall, row.Y, durationW, kRowH };
 			const Wui::WuiRect deleteRect { durationRect.X + durationW + theme.PadSmall, row.Y, deleteW, kRowH };
+			const Wui::WuiRect editRect { deleteRect.X + deleteW + theme.PadSmall, row.Y, editW, kRowH };
+
+			if (!expanded && doubleClickedHeader)
+			{
+				openEditor(i, transition);
+				y += rowH + theme.PadSmall;
+				continue;
+			}
 
 			int targetIndex = 0;
 			const auto found = std::find(targets.begin(), targets.end(), transition.TargetState);
@@ -1960,7 +2485,12 @@ namespace World
 				AnimState updated = copyState();
 				if (i < updated.Transitions.size())
 					updated.Transitions[i].TargetState = targets[static_cast<size_t>(targetIndex)];
-				ReplaceState(stateName, updated);
+				if (ReplaceState(stateName, updated))
+				{
+					m_TransitionEditKey.clear();
+					m_TransitionError.clear();
+					m_ConditionFieldRect = {};
+				}
 			}
 			Wui::Tooltip(ctx, targetRect, AGTr("transitions.target.tooltip", "Target state reached when the condition expression is true."));
 
@@ -1987,57 +2517,279 @@ namespace World
 				if (i < updated.Transitions.size())
 					updated.Transitions.erase(updated.Transitions.begin() + static_cast<std::ptrdiff_t>(i));
 				ReplaceState(stateName, updated);
+				m_TransitionEditKey.clear();
+				m_TransitionError.clear();
+				m_ConditionFieldRect = {};
 				break;
 			}
 
-			const std::string key = stateName + "#" + std::to_string(i);
-			if (m_ConditionKey != key)
+			bool openedThisFrame = false;
+			const std::string editLabel = editW >= 80.0f
+				? AGTr("transitions.edit", "▶ 编辑条件") : AGTr("transitions.edit.compact", "▶");
+			if (Wui::ActionButton(ctx, Wui::HashId(("animgraph.transition.edit." + std::to_string(i)).c_str()),
+				editRect, editLabel, theme, true,
+				AGTr("transitions.edit.tooltip", "Open this transition's condition editor."), false))
 			{
-				m_ConditionKey = key;
-				m_ConditionBuffer = transition.ConditionExpression;
+				openEditor(i, transition);
+				openedThisFrame = true;
 			}
-			const Wui::WuiRect conditionRect { row.X, row.Y + kRowH + 2.0f, row.W, kRowH };
-			m_ConditionFieldRect = conditionRect;
-			Wui::TextFieldA11y conditionA11y;
-			conditionA11y.Label = AGTr("transitions.condition.a11y", "Transition condition");
-			conditionA11y.Placeholder = "Speed > 0.10 && IsFalling < 0.50";
-			const Wui::WuiId conditionId =
-				Wui::HashId(("animgraph.transition.condition." + std::to_string(i)).c_str());
-			const bool wasFocused = m_ConditionFocusKey == key;
-			const bool submitted = Wui::TextField(ctx, conditionId, conditionRect, m_ConditionBuffer,
-				theme, nullptr, &conditionA11y);
-			const bool focused = ctx.Focus() == conditionId;
-			auto commitCondition = [this, &copyState, &stateName, i]()
-			{
-				AnimState updated = copyState();
-				if (i < updated.Transitions.size()
-					&& updated.Transitions[i].ConditionExpression != m_ConditionBuffer)
-					updated.Transitions[i].ConditionExpression = m_ConditionBuffer;
-				else
-					return;
-				ReplaceState(stateName, updated);
-			};
-			if (submitted)
-			{
-				commitCondition();
-				ctx.SetFocus(0);
-				m_ConditionFocusKey.clear();
-			}
-			else if (wasFocused && !focused)
-			{
-				commitCondition();
-				m_ConditionFocusKey.clear();
-			}
-			else if (focused)
-			{
-				m_ConditionFocusKey = key;
-			}
-			Wui::Tooltip(ctx, conditionRect,
-				AGTr("transitions.condition.tooltip",
-					"Condition expression: Param op number, combined with && / || (&& binds tighter). "
-					"Unknown parameters read as 0. Empty = always true."));
+			Wui::Tooltip(ctx, editRect, AGTr("transitions.edit.tooltip",
+				"Open this transition's condition editor."));
 
-			y += kTransitionRowH + theme.PadSmall;
+			if (ctx.IsHovered(headerRow) && ctx.Input().MouseClicked[0] && !ctx.IsPointerClickConsumed())
+				m_SelectedTransition = static_cast<int>(i);
+
+			const Wui::WuiRect summaryRect { row.X, row.Y + kRowH + 4.0f, row.W, kRowH };
+			const std::string summary = transition.ConditionExpression.empty()
+				? AGTr("transitions.always", "(Always)") : transition.ConditionExpression;
+			const std::string shownSummary = Wui::EllipsizeMiddleToWidth(ctx, summary,
+				std::max(20.0f, summaryRect.W - theme.Pad * 2.0f), theme.FontSizeSmall);
+			if (Wui::ActionButton(ctx, Wui::HashId(("animgraph.transition.condition.summary." + std::to_string(i)).c_str()),
+				summaryRect, shownSummary, theme, true,
+				transition.ConditionExpression.empty()
+					? AGTr("transitions.always.tooltip", "No expression: this transition always fires.")
+					: AGFmt("transitions.condition.summary.tooltip", "Condition: {expression}", { { "expression", summary } }),
+				false))
+			{
+				openEditor(i, transition);
+				openedThisFrame = true;
+			}
+			if (openedThisFrame && !expanded)
+			{
+				y += rowH + theme.PadSmall;
+				continue;
+			}
+
+			if (m_TransitionEditKey == key && !m_TransitionAdvancedOpen
+				&& m_TransitionExprBuffer != transition.ConditionExpression)
+			{
+				openEditor(i, transition);
+			}
+
+			if (m_TransitionEditKey == key)
+			{
+				const float editorTop = row.Y + kTransitionBaseH + 4.0f;
+				m_ConditionFieldRect = { row.X, editorTop, row.W, std::max(0.0f, rowH - kTransitionBaseH - 4.0f) };
+				const float labelW = 76.0f;
+				const float controlX = row.X + labelW;
+				const float controlW = std::max(80.0f, row.W - labelW);
+				float ey = editorTop;
+
+				const int maxParamIndex = static_cast<int>(parameterLabels.size()) - 1;
+				m_TransitionParamIndex = std::clamp(m_TransitionParamIndex, 0, maxParamIndex);
+				SimpleConditionClause structuredClause;
+				const bool multiCondition = !TrimAscii(transition.ConditionExpression).empty()
+					&& !ParseSimpleConditionClause(transition.ConditionExpression, structuredClause);
+				if (multiCondition)
+				{
+					const std::string note = AGTr("transitions.multi_only",
+						"This expression has several comparisons. Only one condition is shown below - editing it replaces the whole expression. Use Advanced expression for the full rule.");
+					Wui::Label(ctx, { controlX, ey + 2.0f },
+						Wui::EllipsizeMiddleToWidth(ctx, note, controlW, theme.FontSizeCaption),
+						theme.Warning, theme.FontSizeCaption);
+					Wui::Tooltip(ctx, { controlX, ey, controlW, kRowH }, note);
+					ey += 18.0f;
+				}
+				const float paramW = std::max(100.0f, (controlW - theme.PadSmall) * 0.62f);
+				const float opW = std::max(60.0f, controlW - paramW - theme.PadSmall);
+				const Wui::WuiRect paramRect { controlX, ey, paramW, kRowH };
+				const Wui::WuiRect opRect { controlX + paramW + theme.PadSmall, ey, opW, kRowH };
+				Wui::Label(ctx, { row.X, ey + 4.0f }, AGTr("transitions.parameter", "Parameter"), theme.TextMuted,
+					theme.FontSizeCaption);
+				if (Wui::Combo(ctx, Wui::HashId(("animgraph.transition.parameter." + std::to_string(i)).c_str()),
+					paramRect, "", parameterLabels, m_TransitionParamIndex, theme,
+					multiCondition && m_TransitionParamIndex == 0
+						? AGTr("transitions.multi", "(multiple conditions…)") : std::string()))
+				{
+					const AnimGraph::AnimParameterDefinition* definition = m_TransitionParamIndex > 0
+						? m_Graph.FindParameterDefinition(parameterNames[static_cast<size_t>(m_TransitionParamIndex)])
+						: nullptr;
+					std::string expression;
+					if (definition == nullptr)
+					{
+						m_TransitionOpIndex = 0;
+						m_TransitionValueBuffer.clear();
+					}
+					else if (definition->Type == AnimGraph::AnimParameterType::Bool)
+					{
+						const float current = ParamValue(definition->Name);
+						m_TransitionOpIndex = current != 0.0f ? 0 : 1;
+						m_TransitionValueBuffer = current != 0.0f ? "1" : "0";
+					}
+					else
+					{
+						m_TransitionOpIndex = 0;
+						const float current = std::clamp(ParamValue(definition->Name), definition->MinValue,
+							definition->MaxValue);
+						m_TransitionValueBuffer = FormatFloat(current, 2);
+					}
+					float value = 0.0f;
+					if (definition != nullptr)
+						value = static_cast<float>(std::atof(m_TransitionValueBuffer.c_str()));
+					if (structuredExpression(m_TransitionParamIndex, m_TransitionOpIndex, value, expression))
+						applyExpression(i, expression, true);
+				}
+				Wui::Tooltip(ctx, paramRect, AGTr("transitions.parameter.tooltip",
+					"Graph parameter used by this condition. (Always) means no expression."));
+
+				const AnimGraph::AnimParameterDefinition* selectedDefinition = m_TransitionParamIndex > 0
+					? m_Graph.FindParameterDefinition(parameterNames[static_cast<size_t>(m_TransitionParamIndex)])
+					: nullptr;
+				const std::vector<std::string> ops = operatorLabels(selectedDefinition);
+				m_TransitionOpIndex = std::clamp(m_TransitionOpIndex, 0, static_cast<int>(ops.size()) - 1);
+				if (selectedDefinition != nullptr
+					&& Wui::Combo(ctx, Wui::HashId(("animgraph.transition.operator." + std::to_string(i)).c_str()),
+						opRect, "", ops, m_TransitionOpIndex, theme))
+				{
+					const float value = static_cast<float>(std::atof(m_TransitionValueBuffer.c_str()));
+					std::string expression;
+					if (structuredExpression(m_TransitionParamIndex, m_TransitionOpIndex, value, expression))
+						applyExpression(i, expression, true);
+				}
+				else if (selectedDefinition == nullptr)
+				{
+					Wui::Label(ctx, { opRect.X, opRect.Y + 4.0f },
+						multiCondition ? AGTr("transitions.multi", "(multiple conditions…)")
+							: AGTr("transitions.no_comparison", "(always)"),
+						theme.TextDisabled, theme.FontSizeCaption);
+				}
+				Wui::Tooltip(ctx, opRect, AGTr("transitions.operator.tooltip",
+					"Comparison. Bool parameters use True / False; float parameters use numeric operators."));
+				ey += kTransitionEditorRowH + 4.0f;
+
+				if (selectedDefinition != nullptr && selectedDefinition->Type == AnimGraph::AnimParameterType::Float)
+				{
+					float value = std::clamp(ParamValue(selectedDefinition->Name), selectedDefinition->MinValue,
+						selectedDefinition->MaxValue);
+					char* parsedEnd = nullptr;
+					const float parsed = std::strtof(m_TransitionValueBuffer.c_str(), &parsedEnd);
+					if (parsedEnd != m_TransitionValueBuffer.c_str())
+						value = std::clamp(parsed, selectedDefinition->MinValue, selectedDefinition->MaxValue);
+					const float dragW = std::max(90.0f, controlW * 0.52f);
+					const Wui::WuiRect valueDrag { controlX, ey, dragW, kRowH };
+					const Wui::WuiRect valueText { controlX + dragW + theme.PadSmall, ey,
+						std::max(60.0f, controlW - dragW - theme.PadSmall), kRowH };
+					Wui::Label(ctx, { row.X, ey + 4.0f }, AGTr("transitions.value", "Value"), theme.TextMuted,
+						theme.FontSizeCaption);
+					float dragValue = value;
+					const Wui::WuiId dragId =
+						Wui::HashId(("animgraph.transition.value." + std::to_string(i)).c_str());
+					if (Wui::DragFloat(ctx, dragId, valueDrag, dragValue, 0.01f, selectedDefinition->MinValue,
+						selectedDefinition->MaxValue, theme))
+					{
+						m_TransitionValueBuffer = FormatFloat(dragValue, 2);
+						std::string expression;
+						if (structuredExpression(m_TransitionParamIndex, m_TransitionOpIndex, dragValue, expression))
+						{
+							const bool continuous = ctx.Input().MouseDown[0]
+								&& (ctx.IsHovered(valueDrag) || ctx.Focus() == dragId);
+							BeginContinuousEdit(key + ".condition.value", continuous);
+							applyExpression(i, expression, false);
+						}
+					}
+					Wui::Tooltip(ctx, valueDrag, AGFmt("transitions.value.tooltip",
+						"Numeric value, range {min}..{max}", { { "min", FormatFloat(selectedDefinition->MinValue, 2) },
+							{ "max", FormatFloat(selectedDefinition->MaxValue, 2) } }));
+
+					Wui::TextFieldA11y valueA11y;
+					valueA11y.Label = AGTr("transitions.value.a11y", "Condition value");
+					valueA11y.Placeholder = FormatFloat(selectedDefinition->DefaultValue, 2);
+					if (Wui::TextField(ctx, Wui::HashId(("animgraph.transition.value.text." + std::to_string(i)).c_str()),
+						valueText, m_TransitionValueBuffer, theme, nullptr, &valueA11y))
+					{
+						char* end = nullptr;
+						const float typed = std::strtof(m_TransitionValueBuffer.c_str(), &end);
+						if (end == m_TransitionValueBuffer.c_str() || *end != '\0')
+						{
+							m_TransitionError = AGTr("transitions.invalid_value",
+								"The condition value must be a number.");
+						}
+						else
+						{
+							const float clamped = std::clamp(typed, selectedDefinition->MinValue,
+								selectedDefinition->MaxValue);
+							m_TransitionValueBuffer = FormatFloat(clamped, 2);
+							std::string expression;
+							if (structuredExpression(m_TransitionParamIndex, m_TransitionOpIndex, clamped, expression))
+								applyExpression(i, expression, true);
+						}
+					}
+					Wui::Tooltip(ctx, valueText, AGTr("transitions.value.text.tooltip",
+						"Type a number and press Enter; values are clamped to the parameter range."));
+				}
+				else
+				{
+					Wui::Label(ctx, { controlX, ey + 4.0f },
+						selectedDefinition == nullptr
+							? (multiCondition
+								? AGTr("transitions.multi.note", "Multiple comparisons: edit the full rule in Advanced expression.")
+								: AGTr("transitions.always.note", "No expression: this transition always fires."))
+							: AGTr("transitions.bool.note", "Bool conditions use True / False; no numeric value is required."),
+						theme.TextMuted, theme.FontSizeCaption);
+				}
+				ey += kTransitionEditorRowH + 4.0f;
+
+				const bool wasAdvanced = m_TransitionAdvancedOpen;
+				const Wui::WuiRect advancedRect { row.X, ey, row.W, kTransitionEditorRowH };
+				Wui::CollapsibleHeader(ctx, Wui::HashId(("animgraph.transition.advanced." + std::to_string(i)).c_str()),
+					advancedRect, AGTr("transitions.advanced", "Advanced expression"), m_TransitionAdvancedOpen, theme,
+					std::string(), std::string(), AGTr("transitions.advanced.tooltip",
+						"Edit the full expression. It is validated before replacing the current condition."),
+					theme.FontSizeSmall);
+				if (wasAdvanced != m_TransitionAdvancedOpen)
+				{
+					if (m_TransitionAdvancedOpen)
+					{
+						const AnimState live = copyState();
+						m_TransitionExprBuffer = i < live.Transitions.size()
+							? live.Transitions[i].ConditionExpression : transition.ConditionExpression;
+						m_TransitionError.clear();
+					}
+					else
+					{
+						const std::string expression = TrimAscii(m_TransitionExprBuffer);
+						std::string parseError;
+						if (!expression.empty() && !AnimGraphCondition::Parse(expression, &parseError))
+						{
+							m_TransitionAdvancedOpen = true;
+							m_TransitionError = parseError.empty()
+								? AGTr("transitions.invalid_expression", "Invalid condition expression.")
+								: AGTr("transitions.invalid_expression_detail", "Invalid condition: ") + parseError;
+						}
+						else
+						{
+							applyExpression(i, expression, true);
+						}
+					}
+				}
+				ey += kTransitionEditorRowH;
+				if (m_TransitionAdvancedOpen)
+				{
+					ey += 4.0f;
+					Wui::TextFieldA11y exprA11y;
+					exprA11y.Label = AGTr("transitions.expression.a11y", "Advanced condition expression");
+					exprA11y.Placeholder = "Speed > 0.10 && IsFalling < 0.50";
+					const bool submitted = Wui::TextField(ctx,
+						Wui::HashId(("animgraph.transition.expression." + std::to_string(i)).c_str()),
+						{ row.X, ey, row.W, kTransitionEditorRowH }, m_TransitionExprBuffer, theme, nullptr, &exprA11y);
+					Wui::Tooltip(ctx, { row.X, ey, row.W, kTransitionEditorRowH },
+						AGTr("transitions.expression.tooltip", "Press Enter to validate and commit. Empty = always true."));
+					ey += kTransitionEditorRowH;
+					if (submitted)
+					{
+						CommitPendingCondition();
+						ctx.SetFocus(0);
+					}
+				}
+				if (!m_TransitionError.empty())
+				{
+					Wui::Label(ctx, { row.X, ey + 2.0f },
+						Wui::EllipsizeMiddleToWidth(ctx, m_TransitionError, row.W, theme.FontSizeCaption),
+						theme.Danger, theme.FontSizeCaption);
+				}
+			}
+
+			y += rowH + theme.PadSmall;
 		}
 
 		const Wui::WuiRect addRect { area.X + theme.Pad, area.Y + area.H - kRowH - theme.PadSmall,
@@ -2163,22 +2915,20 @@ namespace World
 			return;
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, AGTr("layer.weight", "Weight"), theme.TextMuted, theme.FontSizeSmall);
 		{
-			const auto& defaults = m_Graph.GetParameterDefaults();
+			const auto& definitions = m_Graph.GetParameterDefinitions();
 			std::vector<std::string> parameterNames;
-			parameterNames.reserve(defaults.size() + 1);
-			for (const auto& entry : defaults)
-				parameterNames.push_back(entry.first);
-			const bool weightDefined = defaults.find(layer->WeightParameter) != defaults.end();
+			parameterNames.reserve(definitions.size() + 1);
+			for (const auto& entry : definitions)
+				if (entry.second.Type == AnimGraph::AnimParameterType::Float)
+					parameterNames.push_back(entry.first);
+			const auto weightDefinition = definitions.find(layer->WeightParameter);
+			const bool weightDefined = weightDefinition != definitions.end()
+				&& weightDefinition->second.Type == AnimGraph::AnimParameterType::Float;
 			int weightIndex = 0;
 			const auto found = std::find(parameterNames.begin(), parameterNames.end(), layer->WeightParameter);
 			if (found != parameterNames.end())
 				weightIndex = static_cast<int>(std::distance(parameterNames.begin(), found));
-			else if (!layer->WeightParameter.empty())
-			{
-				parameterNames.insert(parameterNames.begin(), layer->WeightParameter);
-				weightIndex = 0;
-			}
-			const bool hasParameters = !defaults.empty() || !layer->WeightParameter.empty();
+			const bool hasParameters = !parameterNames.empty();
 			if (parameterNames.empty())
 				parameterNames.push_back(AGTr("layer.weight.no_parameters", "(no parameters)"));
 
@@ -2220,10 +2970,12 @@ namespace World
 
 			if (!weightDefined && !layer->WeightParameter.empty())
 			{
-				const std::string warning = AGTr("layer.weight.missing", "（未定义参数，运行时按 0 处理）");
+				const std::string warning = weightDefinition != definitions.end()
+					? AGTr("layer.weight.not_float", "（不是 float 参数；权重只接受 float）")
+					: AGTr("layer.weight.missing", "（未定义参数，运行时按 0 处理）");
 				Wui::Label(ctx, { controlX, y }, warning, theme.Warning, theme.FontSizeCaption);
 				Wui::Tooltip(ctx, { controlX, y, controlW, 14.0f }, AGTr("layer.weight.missing.tooltip",
-					"当前权重名不在图的参数表中；运行时会按 0 处理，这一层不会产生叠加效果。"));
+					"权重必须是 float 参数；未定义或 bool 参数在运行时按 0 处理，这一层不会产生叠加效果。"));
 				y += 16.0f;
 			}
 
@@ -2256,19 +3008,27 @@ namespace World
 					{
 						SetStatus(AGTr("layer.weight.new_empty", "参数名不能为空"), true);
 					}
-					else if (m_Graph.GetParameterDefaults().find(name) != m_Graph.GetParameterDefaults().end())
+					else if (m_Graph.GetParameterDefinitions().find(name) != m_Graph.GetParameterDefinitions().end())
 					{
 						SetStatus(AGFmt("layer.weight.new_exists", "参数“{name}”已存在", { { "name", name } }), true);
 					}
 					else
 					{
 						PushUndo();
-						m_Graph.SetParameterDefault(name, 0.0f);
+						AnimGraph::AnimParameterDefinition definition;
+						definition.Name = name;
+						definition.Type = AnimGraph::AnimParameterType::Float;
+						definition.DefaultValue = 0.0f;
+						definition.MinValue = 0.0f;
+						definition.MaxValue = 1.0f;
+						m_Graph.SetParameterDefinition(definition);
 						std::vector<AnimLayer> updated = m_Graph.GetLayers();
 						for (AnimLayer& candidate : updated)
 							if (candidate.Name == m_SelectedLayer)
 								candidate.WeightParameter = name;
 						m_Graph.SetLayers(std::move(updated));
+						m_ParamsInitialized = false;
+						m_SimGraphReady = false;
 						MarkDirty();
 						SetStatus(AGFmt("layer.weight.new_created", "已创建 float 参数“{name}”（默认值 0）",
 							{ { "name", name } }), false);
@@ -2294,24 +3054,87 @@ namespace World
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, AGTr("layer.mask", "Mask"), theme.TextMuted, theme.FontSizeSmall);
 		y += kRowH;
 
-		std::vector<std::string> boneNames;
-		std::vector<std::string> modelBones;
-		if (m_ModelValid)
+		struct MaskBone
 		{
-			// 只列骨骼节点：挂 mesh 的叶子节点（MannequinMesh 之类）不是骨骼，
-			// 出现在遮罩列表里只会让用户困惑。
-			for (const Asset::WModelNode& node : m_Model.Nodes)
-			{
-				if (node.Name.empty() || node.MeshIndex >= 0)
-					continue;
-				if (std::find(modelBones.begin(), modelBones.end(), node.Name) == modelBones.end())
-					modelBones.push_back(node.Name);
-			}
-			boneNames = modelBones;
+			int NodeIndex = -1;
+			std::string Name;
+			int Parent = -1;
+			std::vector<int> Children;
+		};
+		std::vector<MaskBone> maskBones;
+		std::unordered_map<int, int> nodeToMaskBone;
+		std::unordered_set<int> skinJointNodes;
+		const bool useSkinJoints = m_ModelValid && !m_Model.Skins.empty();
+		if (useSkinJoints)
+		{
+			for (const Asset::WModelSkin& skin : m_Model.Skins)
+				for (uint32_t nodeIndex : skin.JointNodes)
+					if (nodeIndex < m_Model.Nodes.size())
+						skinJointNodes.insert(static_cast<int>(nodeIndex));
 		}
+		auto addMaskBone = [&](int nodeIndex)
+		{
+			if (!m_ModelValid || nodeIndex < 0 || static_cast<size_t>(nodeIndex) >= m_Model.Nodes.size()
+				|| nodeToMaskBone.find(nodeIndex) != nodeToMaskBone.end())
+				return;
+			const Asset::WModelNode& node = m_Model.Nodes[static_cast<size_t>(nodeIndex)];
+			if (node.Name.empty())
+				return;
+			if (std::any_of(maskBones.begin(), maskBones.end(),
+				[&node](const MaskBone& bone) { return bone.Name == node.Name; }))
+				return;
+			const int maskIndex = static_cast<int>(maskBones.size());
+			nodeToMaskBone.emplace(nodeIndex, maskIndex);
+			MaskBone bone;
+			bone.NodeIndex = nodeIndex;
+			bone.Name = node.Name;
+			maskBones.push_back(std::move(bone));
+		};
+		for (int nodeIndex = 0; nodeIndex < static_cast<int>(m_Model.Nodes.size()); ++nodeIndex)
+		{
+			if (useSkinJoints)
+			{
+				if (skinJointNodes.find(nodeIndex) != skinJointNodes.end())
+					addMaskBone(nodeIndex);
+			}
+			else
+			{
+				const Asset::WModelNode& node = m_Model.Nodes[static_cast<size_t>(nodeIndex)];
+				if (node.MeshIndex < 0)
+					addMaskBone(nodeIndex);
+			}
+		}
+		for (size_t index = 0; index < maskBones.size(); ++index)
+		{
+			int parentNode = m_Model.Nodes[static_cast<size_t>(maskBones[index].NodeIndex)].Parent;
+			while (parentNode >= 0 && static_cast<size_t>(parentNode) < m_Model.Nodes.size())
+			{
+				const auto parent = nodeToMaskBone.find(parentNode);
+				if (parent != nodeToMaskBone.end())
+				{
+					maskBones[index].Parent = parent->second;
+					maskBones[static_cast<size_t>(parent->second)].Children.push_back(static_cast<int>(index));
+					break;
+				}
+				const int next = m_Model.Nodes[static_cast<size_t>(parentNode)].Parent;
+				if (next == parentNode)
+					break;
+				parentNode = next;
+			}
+		}
+		std::vector<int> maskRoots;
+		for (size_t index = 0; index < maskBones.size(); ++index)
+			if (maskBones[index].Parent < 0)
+				maskRoots.push_back(static_cast<int>(index));
+
+		std::vector<std::string> missingMaskBones;
 		for (const BoneMaskEntry& bone : layer->BoneMask)
-			if (std::find(boneNames.begin(), boneNames.end(), bone.BoneName) == boneNames.end())
-				boneNames.push_back(bone.BoneName);
+		{
+			const bool inTree = std::any_of(maskBones.begin(), maskBones.end(),
+				[&bone](const MaskBone& candidate) { return candidate.Name == bone.BoneName; });
+			if (!inTree && std::find(missingMaskBones.begin(), missingMaskBones.end(), bone.BoneName) == missingMaskBones.end())
+				missingMaskBones.push_back(bone.BoneName);
+		}
 
 		auto setMask = [this](std::vector<BoneMaskEntry> mask)
 		{
@@ -2325,110 +3148,152 @@ namespace World
 			m_LayerMaskTextKey.clear();
 		};
 
-		const float presetGap = theme.PadSmall;
-		const float presetW = std::max(50.0f, (controlW - presetGap * 2.0f) / 3.0f);
-		const Wui::WuiRect upperButton { controlX, y, presetW, kRowH };
-		const Wui::WuiRect fullButton { upperButton.X + upperButton.W + presetGap, y, presetW, kRowH };
-		const Wui::WuiRect clearButton { fullButton.X + fullButton.W + presetGap, y,
-			std::max(50.0f, controlX + controlW - (fullButton.X + fullButton.W + presetGap)), kRowH };
-		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.mask.upper"), upperButton,
-			AGTr("layer.mask.upper", "上半身"), theme, !modelBones.empty(),
-			AGTr("layer.mask.upper.tooltip", "勾选 Spine / Chest / Neck / Head / Shoulder / UpperArm / LowerArm / Hand 等上半身骨骼。"), false))
-		{
-			static const char* kUpperTokens[] = { "Spine", "Chest", "Neck", "Head", "Shoulder",
-				"UpperArm", "LowerArm", "Hand" };
-			std::vector<BoneMaskEntry> mask;
-			for (const std::string& bone : boneNames)
-			{
-				for (const char* token : kUpperTokens)
-				{
-					if (ContainsTokenNoCase(bone, token))
-					{
-						mask.push_back(BoneMaskEntry { bone, 1.0f });
-						break;
-					}
-				}
-			}
-			setMask(std::move(mask));
-		}
-		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.mask.full"), fullButton,
-			AGTr("layer.mask.full", "全身"), theme, !modelBones.empty(),
-			AGTr("layer.mask.full.tooltip", "把模型里的全部具名骨骼加入遮罩（权重 1）。"), false))
-		{
-			std::vector<BoneMaskEntry> mask;
-			for (const std::string& bone : modelBones)
-				mask.push_back(BoneMaskEntry { bone, 1.0f });
-			setMask(std::move(mask));
-		}
+		const float buttonGap = theme.PadSmall;
+		const float clearW = std::max(60.0f, controlW * 0.36f);
+		const float smallW = std::max(16.0f, (controlW - clearW - buttonGap * 2.0f) * 0.5f);
+		const Wui::WuiRect clearButton { controlX, y, clearW, kRowH };
+		const Wui::WuiRect expandButton { clearButton.X + clearButton.W + buttonGap, y, smallW, kRowH };
+		const Wui::WuiRect collapseButton { expandButton.X + expandButton.W + buttonGap, y,
+			std::max(16.0f, controlX + controlW - (expandButton.X + expandButton.W + buttonGap)), kRowH };
 		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.mask.clear"), clearButton,
-			AGTr("layer.mask.clear", "清空"), theme, true,
+			AGTr("layer.mask.clear", "清空遮罩"), theme, true,
 			AGTr("layer.mask.clear.tooltip", "清空遮罩；所有骨骼都不再参与这层叠加。"), true))
 		{
 			setMask({});
+		}
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.mask.expand_all"), expandButton,
+			AGTr("layer.mask.expand_all", "全部展开"), theme, !maskBones.empty(),
+			AGTr("layer.mask.expand_all.tooltip", "展开所有骨骼分支。"), false))
+		{
+			m_MaskCollapsed.clear();
+		}
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.mask.collapse_all"), collapseButton,
+			AGTr("layer.mask.collapse_all", "全部折叠"), theme, !maskBones.empty(),
+			AGTr("layer.mask.collapse_all.tooltip", "折叠所有有子骨骼的分支。"), false))
+		{
+			for (const MaskBone& bone : maskBones)
+				if (!bone.Children.empty())
+					m_MaskCollapsed.insert(bone.Name);
 		}
 		y += kRowH + 2.0f;
 
 		layer = findLayer();
 		if (layer == nullptr)
 			return;
-		{
-			std::vector<std::string> addOptions { AGTr("layer.mask.add", "＋ 添加骨骼") };
-			std::vector<std::string> unlisted;
-			for (const std::string& bone : boneNames)
-			{
-				const bool present = std::any_of(layer->BoneMask.begin(), layer->BoneMask.end(),
-					[&bone](const BoneMaskEntry& entry) { return entry.BoneName == bone; });
-				if (!present)
-				{
-					unlisted.push_back(bone);
-					addOptions.push_back(bone);
-				}
-			}
-			int addIndex = 0;
-			if (Wui::Combo(ctx, Wui::HashId("animgraph.layer.mask.add"), { controlX, y, controlW, kRowH }, "",
-				addOptions, addIndex, theme, AGTr("layer.mask.add", "＋ 添加骨骼")))
-			{
-				if (addIndex > 0 && static_cast<size_t>(addIndex - 1) < unlisted.size())
-				{
-					std::vector<BoneMaskEntry> mask = layer->BoneMask;
-					mask.push_back(BoneMaskEntry { unlisted[static_cast<size_t>(addIndex - 1)], 1.0f });
-					setMask(std::move(mask));
-				}
-			}
-			Wui::Tooltip(ctx, { controlX, y, controlW, kRowH },
-				AGTr("layer.mask.add.tooltip", "把尚未列出的骨骼加入遮罩（默认权重 1）。"));
-		}
-		y += kRowH + 2.0f;
 
-		const Wui::WuiRect maskList { controlX, y, controlW, 180.0f };
-		Wui::PanelBackground(ctx, maskList, theme.ContentBg, theme.Radius);
-		if (boneNames.size() == 0)
+		struct FlatMaskRow
 		{
-			Wui::EmptyState(ctx, maskList, "", AGTr("layer.mask.empty.title", "没有可用骨骼"),
-				AGTr("layer.mask.empty.body", "选择带模型的角色，或使用高级文本手动输入骨骼名。"), "", 0, theme);
+			int BoneIndex = -1;
+			int Depth = 0;
+			bool Missing = false;
+			std::vector<bool> Guides;
+			std::string Name;
+		};
+		std::vector<FlatMaskRow> flatRows;
+		std::function<void(int, int, const std::vector<bool>&)> appendBranch =
+			[&](int boneIndex, int depth, const std::vector<bool>& guides)
+		{
+			const MaskBone& bone = maskBones[static_cast<size_t>(boneIndex)];
+			FlatMaskRow row;
+			row.BoneIndex = boneIndex;
+			row.Depth = depth;
+			row.Guides = guides;
+			row.Name = bone.Name;
+			flatRows.push_back(std::move(row));
+			if (m_MaskCollapsed.find(bone.Name) != m_MaskCollapsed.end())
+				return;
+			for (size_t childIndex = 0; childIndex < bone.Children.size(); ++childIndex)
+			{
+				std::vector<bool> childGuides = guides;
+				childGuides.push_back(childIndex + 1 < bone.Children.size());
+				appendBranch(bone.Children[childIndex], depth + 1, childGuides);
+			}
+		};
+		for (int rootIndex : maskRoots)
+			appendBranch(rootIndex, 0, {});
+		for (const std::string& missing : missingMaskBones)
+		{
+			FlatMaskRow row;
+			row.Missing = true;
+			row.Name = missing;
+			flatRows.push_back(std::move(row));
+		}
+
+		const Wui::WuiRect maskList { controlX, y, controlW, 260.0f };
+		Wui::PanelBackground(ctx, maskList, theme.ContentBg, theme.Radius);
+		if (flatRows.empty())
+		{
+			Wui::EmptyState(ctx, maskList, "", AGTr("layer.mask.empty.title", "No bones available"),
+				AGTr("layer.mask.empty.body", "Select a character with a model, or use the advanced text editor."), "", 0, theme);
 		}
 		else
 		{
-			const float maskContentH = std::max(maskList.H, static_cast<float>(boneNames.size()) * 28.0f);
+			constexpr float kMaskRowH = 26.0f;
+			const float maskContentH = std::max(maskList.H,
+				static_cast<float>(flatRows.size()) * kMaskRowH + theme.PadSmall * 2.0f);
 			if (Wui::BeginScrollArea(ctx, maskList, maskContentH, m_LayerMaskScroll, theme,
 				Wui::HashId("animgraph.layer.mask.list")))
 			{
-				float rowY = maskList.Y + 2.0f - m_LayerMaskScroll;
-				for (const std::string& bone : boneNames)
+				float rowY = maskList.Y + theme.PadSmall - m_LayerMaskScroll;
+				for (const FlatMaskRow& flat : flatRows)
 				{
-					const Wui::WuiRect row { maskList.X + 2.0f, rowY, maskList.W - 10.0f, 24.0f };
+					const Wui::WuiRect row { maskList.X + 2.0f, rowY, maskList.W - 10.0f, kMaskRowH };
+					rowY += kMaskRowH;
+					if (!ctx.ClipAllows(row))
+						continue;
+
+					Wui::WuiAccessNode rowNode;
+					rowNode.Id = Wui::HashId(("animgraph.layer.mask.row." + flat.Name).c_str());
+					rowNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+					rowNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+					rowNode.Kind = "bone-mask-row";
+					rowNode.Label = flat.Name;
+					rowNode.Rect = row;
+					rowNode.Interactive = true;
+					Wui::WuiAccessibility::Get().Register(rowNode);
+
 					const AnimLayer* liveLayer = findLayer();
 					if (liveLayer == nullptr)
 						break;
 					const auto found = std::find_if(liveLayer->BoneMask.begin(), liveLayer->BoneMask.end(),
-						[&bone](const BoneMaskEntry& entry) { return entry.BoneName == bone; });
+						[&flat](const BoneMaskEntry& entry) { return entry.BoneName == flat.Name; });
 					bool participating = found != liveLayer->BoneMask.end();
-					const bool inModel = std::find(modelBones.begin(), modelBones.end(), bone) != modelBones.end();
-					const std::string label = inModel ? bone : (bone + "  " + AGTr("layer.mask.missing_bone", "（模型中没有此骨骼）"));
-					const float dragW = 88.0f;
-					const Wui::WuiRect checkRect { row.X + 2.0f, row.Y, std::max(80.0f, row.W - dragW - 6.0f), row.H };
-					if (Wui::Checkbox(ctx, Wui::HashId(("animgraph.layer.mask.check." + bone).c_str()),
-						checkRect, label, participating, theme))
+					if (flat.Missing)
+						Wui::PanelBackground(ctx, row, WithAlpha(theme.Warning, 0.10f), 2.0f);
+					Wui::HoverRow(ctx, row, ctx.IsHovered(row), m_MaskSelectedBone == flat.Name, theme, 2.0f);
+
+					const float indent = static_cast<float>(flat.Depth) * 14.0f;
+					for (size_t guide = 0; guide < flat.Guides.size(); ++guide)
+					{
+						if (!flat.Guides[guide])
+							continue;
+						const float x = row.X + 9.0f + static_cast<float>(guide) * 14.0f;
+						Wui::LineSegment(ctx, { x, row.Y }, { x, row.Y + row.H },
+							WithAlpha(theme.BorderStrong, 0.72f), 1.0f);
+					}
+
+					const bool hasChildren = flat.BoneIndex >= 0
+						&& !maskBones[static_cast<size_t>(flat.BoneIndex)].Children.empty();
+					const bool expanded = m_MaskCollapsed.find(flat.Name) == m_MaskCollapsed.end();
+					if (hasChildren)
+					{
+						const Wui::WuiRect chevron { row.X + 2.0f + indent, row.Y + 4.0f, 18.0f, 18.0f };
+						if (Wui::TreeChevron(ctx, Wui::HashId(("animgraph.layer.mask.chevron." + flat.Name).c_str()),
+							chevron, expanded, theme, AGTr("layer.mask.chevron.tooltip", "Expand or collapse this bone branch.")))
+						{
+							if (expanded)
+								m_MaskCollapsed.insert(flat.Name);
+							else
+								m_MaskCollapsed.erase(flat.Name);
+						}
+					}
+
+					const float dragW = 76.0f;
+					const float checkX = row.X + 22.0f + indent;
+					const Wui::WuiRect checkRect { checkX, row.Y, std::max(70.0f, row.X + row.W - dragW - 6.0f - checkX),
+						row.H };
+					if (Wui::Checkbox(ctx, Wui::HashId(("animgraph.layer.mask.check." + flat.Name).c_str()),
+						checkRect, flat.Name, participating, theme))
 					{
 						std::vector<AnimLayer> updated = m_Graph.GetLayers();
 						for (AnimLayer& candidate : updated)
@@ -2436,52 +3301,59 @@ namespace World
 							if (candidate.Name != m_SelectedLayer)
 								continue;
 							candidate.BoneMask.erase(std::remove_if(candidate.BoneMask.begin(), candidate.BoneMask.end(),
-								[&bone](const BoneMaskEntry& entry) { return entry.BoneName == bone; }), candidate.BoneMask.end());
+								[&flat](const BoneMaskEntry& entry) { return entry.BoneName == flat.Name; }),
+								candidate.BoneMask.end());
 							if (participating)
-								candidate.BoneMask.push_back(BoneMaskEntry { bone, 1.0f });
+								candidate.BoneMask.push_back(BoneMaskEntry { flat.Name, 1.0f });
 						}
 						PushUndo();
 						m_Graph.SetLayers(std::move(updated));
 						MarkDirty();
 						m_LayerMaskTextKey.clear();
+						continue;
 					}
-					Wui::Tooltip(ctx, checkRect, AGTr("layer.mask.check.tooltip",
-						"勾选表示这根骨骼参与本层叠加；取消勾选即从遮罩移除。"));
+					Wui::Tooltip(ctx, checkRect, flat.Missing
+						? AGTr("layer.mask.missing_bone.tooltip", "This bone is not present in the current model; it still stays in the mask.")
+						: AGTr("layer.mask.check.tooltip", "Checked bones participate in this layer's blend."));
 
 					const Wui::WuiRect weightRect { row.X + row.W - dragW, row.Y + 2.0f, dragW - 2.0f, 20.0f };
 					if (participating)
 					{
-						float weight = found != liveLayer->BoneMask.end() ? found->Weight : 1.0f;
+						float weight = found->Weight;
 						const float previous = weight;
-						const Wui::WuiId weightId = Wui::HashId(("animgraph.layer.mask.weight." + bone).c_str());
-						if (Wui::DragFloat(ctx, weightId, weightRect, weight, 0.01f, 0.0f, 1.0f, theme)
+						const Wui::WuiId weightId =
+							Wui::HashId(("animgraph.layer.mask.weight." + flat.Name).c_str());
+						if (Wui::DragFloat(ctx, weightId, weightRect, weight, 0.05f, 0.0f, 1.0f, theme)
 							&& std::fabs(weight - previous) > 0.0001f)
 						{
 							weight = std::clamp(std::round(weight / 0.05f) * 0.05f, 0.0f, 1.0f);
 							const bool continuous = ctx.Input().MouseDown[0]
 								&& (ctx.IsHovered(weightRect) || ctx.Focus() == weightId);
-							BeginContinuousEdit("layer.mask." + bone, continuous);
+							BeginContinuousEdit("layer.mask." + flat.Name, continuous);
 							std::vector<AnimLayer> updated = m_Graph.GetLayers();
 							for (AnimLayer& candidate : updated)
 								if (candidate.Name == m_SelectedLayer)
 									for (BoneMaskEntry& entry : candidate.BoneMask)
-										if (entry.BoneName == bone)
+										if (entry.BoneName == flat.Name)
 											entry.Weight = weight;
 							m_Graph.SetLayers(std::move(updated));
 							MarkDirty();
 							m_LayerMaskTextKey.clear();
 						}
 						Wui::Tooltip(ctx, weightRect, AGTr("layer.mask.weight.tooltip",
-							"本骨在本层的权重（0..1，步进 0.05）。0 = 不参与，1 = 完全叠加。"));
+							"Bone weight in this layer (0..1, step 0.05). 0 = skip, 1 = full additive blend."));
 					}
 					else
 					{
 						Wui::PanelBackground(ctx, weightRect, theme.TrackBg, 3.0f);
-						Wui::Label(ctx, { weightRect.X + 34.0f, weightRect.Y + 2.0f }, "—", theme.TextDisabled, theme.FontSizeCaption);
+						Wui::Label(ctx, { weightRect.X + 32.0f, weightRect.Y + 2.0f }, "—", theme.TextDisabled,
+							theme.FontSizeCaption);
 						Wui::Tooltip(ctx, weightRect, AGTr("layer.mask.weight.disabled.tooltip",
-							"先勾选这根骨骼，才能编辑它的遮罩权重。"));
+							"Check this bone first to edit its blend weight."));
 					}
-					rowY += 28.0f;
+
+					if (ctx.IsHovered(row) && ctx.Input().MouseClicked[0] && !ctx.IsPointerClickConsumed())
+						m_MaskSelectedBone = flat.Name;
 				}
 				Wui::EndScrollArea(ctx);
 			}
@@ -2523,7 +3395,7 @@ namespace World
 		}
 
 		const std::string maskExplain = AGTr("layer.explain.mask",
-			"Mask: only listed bones blend; unlisted bones get weight 0.");
+			"The mask lists the bones that participate in this layer's blend; unlisted bones get weight 0. No humanoid skeleton is assumed.");
 		Wui::Label(ctx, { controlX, y }, Wui::EllipsizeMiddleToWidth(ctx, maskExplain, controlW, theme.FontSizeCaption),
 			theme.TextMuted, theme.FontSizeCaption);
 		Wui::Tooltip(ctx, { controlX, y, controlW, 14.0f }, maskExplain);
@@ -2549,7 +3421,7 @@ namespace World
 		Wui::PanelBackground(ctx, helpRect, theme.ButtonBg, 8.0f);
 		Wui::Label(ctx, { helpRect.X + 5.0f, helpRect.Y + 1.0f }, "?", theme.TextMuted, theme.FontSizeCaption);
 		Wui::Tooltip(ctx, helpRect,
-			AGTr("live.help.tooltip", "State = the AnimGraph state currently playing.\nIdle (no transition) = no CrossFade is active.\nState time = seconds played in the current state.\nRuntime = Speed / Direction currently fed to the graph."));
+			AGTr("live.help.tooltip", "State = the AnimGraph state currently playing.\nIdle (no transition) = no CrossFade is active.\nState time = seconds played in the current state.\nRuntime = the graph parameters currently supplied by this panel."));
 
 		const Wui::WuiRect simulateRect { helpRect.X - 86.0f, area.Y + 2.0f, 78.0f, kRowH };
 		if (Wui::Checkbox(ctx, Wui::HashId("animgraph.live.simulate"), simulateRect,
@@ -2562,7 +3434,7 @@ namespace World
 			}
 		}
 		Wui::Tooltip(ctx, simulateRect, AGTr("live.simulate.tooltip",
-			"开启后用内部动画图副本自动循环待机、行走、奔跑、侧移、后退与跳跃/下落；绑定实体时仍同步推送参数。"));
+			"Drive an internal graph copy with the current parameter values; the preview no longer auto-cycles."));
 
 		const float innerX = area.X + theme.Pad;
 		const float innerW = area.W - theme.Pad * 2.0f;
@@ -2622,8 +3494,6 @@ namespace World
 				}
 			}
 			stateTime = m_SimGraph.GetStateTime();
-			runtimeParams = AGFmt("live.runtime", "Runtime: Speed {speed} m/s   Direction {direction} deg",
-				{ { "speed", FormatFloat(m_ParamSpeed, 2) }, { "direction", FormatFloat(m_ParamDirection, 0) } });
 		}
 		else
 		{
@@ -2643,8 +3513,6 @@ namespace World
 					}
 					stateTime = info.StateTime;
 					runtimeError = info.Error;
-					runtimeParams = AGFmt("live.runtime", "Runtime: Speed {speed} m/s   Direction {direction} deg",
-						{ { "speed", FormatFloat(info.Speed, 2) }, { "direction", FormatFloat(info.Direction, 0) } });
 				}
 				else
 				{
@@ -2656,6 +3524,56 @@ namespace World
 			runtimeError = AGTr("live.error.no_system", "AnimGraphSystem is not part of this build yet.");
 #endif
 		}
+
+		auto buildRuntimeLine = [&]()
+		{
+			const auto& definitions = m_Graph.GetParameterDefinitions();
+			std::string line = AGTr("live.runtime_prefix", "Runtime: ");
+			if (definitions.empty())
+				return line + AGTr("live.no_parameters", "(no parameters)");
+			int shown = 0;
+			for (const auto& entry : definitions)
+			{
+				if (shown == 3)
+					break;
+				if (shown++ > 0)
+					line += "   ";
+				line += entry.first + "=" + FormatParameterValue(ParamValue(entry.first), entry.second.Type)
+					+ ParameterUnitSuffix(&entry.second);
+			}
+			return line;
+		};
+		runtimeParams = buildRuntimeLine();
+
+		std::string errorText = runtimeError;
+		if (component != nullptr && !m_LoadedPath.empty() && component->AnimGraphAsset.HasPath())
+		{
+			const std::string boundPath = StringPool::Get().PathOf(component->AnimGraphAsset.Path);
+			if (boundPath != m_LoadedPath)
+				errorText += (errorText.empty() ? "" : "\n")
+					+ AGFmt("live.bound_differs", "Bound asset differs: {path} (press Apply)",
+						{ { "path", boundPath } });
+		}
+		std::vector<std::string> errorLines;
+		if (!errorText.empty())
+			errorLines = Wui::WrapTextLines(errorText, theme.FontSizeCaption, innerW, Wui::WuiFontFamily::Ui);
+		const size_t drawnErrorLines = std::min<size_t>(errorLines.size(), 3);
+		const float errorReserve = drawnErrorLines == 0
+			? 0.0f
+			: static_cast<float>(drawnErrorLines) * (theme.FontSizeCaption + 1.0f) + 2.0f;
+		const float bottomLimit = area.Y + area.H - errorReserve;
+		const bool compact = area.H < 380.0f;
+		auto drawErrorLines = [&]()
+		{
+			if (drawnErrorLines == 0)
+				return;
+			float lineY = bottomLimit + 2.0f;
+			for (size_t i = 0; i < drawnErrorLines; ++i)
+			{
+				Wui::Label(ctx, { innerX, lineY }, errorLines[i], theme.Danger, theme.FontSizeCaption);
+				lineY += theme.FontSizeCaption + 1.0f;
+			}
+		};
 
 		auto drawReadout = [&](const Wui::WuiRect& readout, bool compact)
 		{
@@ -2695,40 +3613,380 @@ namespace World
 				}
 			}
 			Wui::Tooltip(ctx, readout,
-				AGTr("live.readout.tooltip", "State: current AnimGraph state; an arrow shows the CrossFade target.\nIdle (no transition): no CrossFade is active.\nState time: seconds played in the current state.\nRuntime: Speed / Direction values fed to the graph."));
+				AGTr("live.readout.tooltip", "State: current AnimGraph state; an arrow shows the CrossFade target.\nIdle (no transition): no CrossFade is active.\nState time: seconds played in the current state.\nRuntime: graph parameters currently supplied by this panel."));
 		};
 
-		struct ParamRow
+		auto describeParameterReferences = [&](const std::string& parameterName)
 		{
-			std::string Label;
-			float* Value;
-			float Min;
-			float Max;
-			const char* Unit;
-			std::string Tooltip;
+			std::vector<std::string> locations;
+			for (const auto& stateEntry : m_Graph.GetStates())
+			{
+				const AnimState& state = stateEntry.second;
+				if (state.ParameterX == parameterName)
+					locations.push_back(AGFmt("live.ref.state_x", "State '{state}' (X)",
+						{ { "state", state.Name } }));
+				if (state.Kind == AnimStateKind::BlendSpace2D && state.ParameterY == parameterName)
+					locations.push_back(AGFmt("live.ref.state_y", "State '{state}' (Y)",
+						{ { "state", state.Name } }));
+				for (const AnimTransition& transition : state.Transitions)
+				{
+					const std::vector<std::string> conditionNames = CollectConditionIdentifiers(transition.ConditionExpression);
+					if (std::find(conditionNames.begin(), conditionNames.end(), parameterName) != conditionNames.end())
+						locations.push_back(AGFmt("live.ref.transition", "Transition '{from}' -> '{to}'",
+							{ { "from", state.Name }, { "to", transition.TargetState } }));
+				}
+			}
+			for (const AnimLayer& layer : m_Graph.GetLayers())
+				if (layer.WeightParameter == parameterName)
+					locations.push_back(AGFmt("live.ref.layer", "Layer '{layer}'",
+						{ { "layer", layer.Name } }));
+			std::string summary;
+			for (const std::string& location : locations)
+			{
+				if (!summary.empty())
+					summary += ", ";
+				summary += location;
+			}
+			return summary;
 		};
-		ParamRow params[] = {
-			{ AGTr("params.speed", "Speed"), &m_ParamSpeed, 0.0f, 10.0f, " m/s",
-				AGTr("params.speed.tooltip", "Horizontal speed in m/s. Drives the 1D/2D blend spaces.") },
-			{ AGTr("params.direction", "Direction"), &m_ParamDirection, -180.0f, 180.0f, " deg",
-				AGTr("params.direction.tooltip", "Facing relative to movement in degrees (-180..180).") },
-			{ AGTr("params.is_falling", "IsFalling"), &m_ParamFalling, 0.0f, 1.0f, "",
-				AGTr("params.is_falling.tooltip", "0 = grounded, 1 = airborne. Drives the Fall transition.") },
-			{ AGTr("params.aim_weight", "AimWeight"), &m_ParamAimWeight, 0.0f, 1.0f, "",
-				AGTr("params.aim_weight.tooltip", "Upper-body aim layer weight (0..1).") },
-		};
-		auto drawParam = [&](const ParamRow& param, const Wui::WuiRect& row, float labelW)
+
+		const auto& liveDefinitions = m_Graph.GetParameterDefinitions();
+		std::vector<std::string> undefinedParameters;
+		for (const std::string& referenced : CollectReferencedParameters())
+			if (liveDefinitions.find(referenced) == liveDefinitions.end())
+				undefinedParameters.push_back(referenced);
+
+		const float parameterLabelW = compact ? 58.0f : 72.0f;
+		const float parameterBadgeW = 36.0f;
+		const float parameterDeleteW = 24.0f;
+
+		if (m_ParameterEditorOpen)
 		{
-			Wui::Label(ctx, { row.X, row.Y + 4.0f }, param.Label, theme.TextMuted, theme.FontSizeCaption);
-			const Wui::WuiRect slider { row.X + labelW, row.Y, std::max(40.0f, row.W - labelW), kRowH };
-			Wui::WuiNumberStyle style;
-			style.Unit = param.Unit;
-			style.Decimals = 2;
-			style.ValueWidth = 58.0f;
-			Wui::DragBarFloat(ctx, Wui::HashId((std::string("animgraph.param.") + param.Label).c_str()),
-				slider, *param.Value, param.Min, param.Max, theme, style);
-			Wui::Tooltip(ctx, slider, param.Tooltip);
-		};
+			Wui::Label(ctx, { innerX, y + 3.0f }, AGTr("live.new_parameter", "New Parameter"),
+				theme.Text, theme.FontSizeSmall);
+			y += kRowH;
+			if (bottomLimit - y < 24.0f)
+			{
+				drawErrorLines();
+				return;
+			}
+			const Wui::WuiRect formArea { innerX, y, innerW, bottomLimit - y };
+			const float formLabelW = 64.0f;
+			const float formControlX = formArea.X + formLabelW;
+			const float formControlW = std::max(60.0f, formArea.W - formLabelW);
+			const float formContentH = (kRowH + 4.0f) * 7.0f + (m_ParameterError.empty() ? 0.0f : 16.0f);
+			const bool formOpen = Wui::BeginScrollArea(ctx, formArea, formContentH, m_ParamScroll, theme,
+				Wui::HashId("animgraph.live.parameter_form"));
+			if (formOpen)
+			{
+				float fy = formArea.Y + 2.0f - m_ParamScroll;
+				Wui::Label(ctx, { formArea.X, fy + 4.0f }, AGTr("live.param.name", "Name"), theme.TextMuted,
+					theme.FontSizeCaption);
+				Wui::TextFieldA11y nameA11y;
+				nameA11y.Label = AGTr("live.param.name.a11y", "New parameter name");
+				nameA11y.Placeholder = "Speed";
+				Wui::TextField(ctx, Wui::HashId("animgraph.live.param.name"),
+					{ formControlX, fy, formControlW, kRowH }, m_ParameterNameBuffer, theme, nullptr, &nameA11y);
+				Wui::Tooltip(ctx, { formControlX, fy, formControlW, kRowH },
+					AGTr("live.param.name.tooltip", "English identifier used by scripts, blend axes and conditions."));
+				fy += kRowH + 4.0f;
+
+				Wui::Label(ctx, { formArea.X, fy + 4.0f }, AGTr("live.param.type", "Type"), theme.TextMuted,
+					theme.FontSizeCaption);
+				const std::vector<std::string> typeLabels { "float", "bool" };
+				m_ParameterTypeIndex = std::clamp(m_ParameterTypeIndex, 0, 1);
+				if (Wui::Combo(ctx, Wui::HashId("animgraph.live.param.type"),
+					{ formControlX, fy, formControlW, kRowH }, "", typeLabels, m_ParameterTypeIndex, theme))
+				{
+					if (m_ParameterTypeIndex == 1)
+					{
+						m_ParameterDefaultBuffer = m_ParameterDefaultBuffer != 0.0f ? 1.0f : 0.0f;
+						m_ParameterMinBuffer = 0.0f;
+						m_ParameterMaxBuffer = 1.0f;
+					}
+				}
+				Wui::Tooltip(ctx, { formControlX, fy, formControlW, kRowH },
+					AGTr("live.param.type.tooltip", "float for continuous axes; bool for true/false switches."));
+				fy += kRowH + 4.0f;
+
+				const bool boolParameter = m_ParameterTypeIndex == 1;
+				Wui::Label(ctx, { formArea.X, fy + 4.0f }, AGTr("live.param.default", "Default"), theme.TextMuted,
+					theme.FontSizeCaption);
+				if (boolParameter)
+				{
+					bool defaultValue = m_ParameterDefaultBuffer != 0.0f;
+					if (Wui::Checkbox(ctx, Wui::HashId("animgraph.live.param.default.bool"),
+						{ formControlX, fy, formControlW, kRowH }, defaultValue ? "true" : "false", defaultValue, theme))
+						m_ParameterDefaultBuffer = defaultValue ? 1.0f : 0.0f;
+				}
+				else
+				{
+					const float minValue = std::min(m_ParameterMinBuffer, m_ParameterMaxBuffer);
+					const float maxValue = std::max(m_ParameterMinBuffer, m_ParameterMaxBuffer);
+					Wui::DragFloat(ctx, Wui::HashId("animgraph.live.param.default"),
+						{ formControlX, fy, formControlW, kRowH }, m_ParameterDefaultBuffer,
+						std::max(0.0001f, (maxValue - minValue) / 100.0f), minValue, maxValue, theme);
+				}
+				Wui::Tooltip(ctx, { formControlX, fy, formControlW, kRowH },
+					AGTr("live.param.default.tooltip", "Initial value used when this graph is bound."));
+				fy += kRowH + 4.0f;
+
+				Wui::Label(ctx, { formArea.X, fy + 4.0f }, AGTr("live.param.min", "Min"), theme.TextMuted,
+					theme.FontSizeCaption);
+				if (boolParameter)
+					Wui::Label(ctx, { formControlX, fy + 4.0f }, "0", theme.TextDisabled, theme.FontSizeSmall);
+				else
+					Wui::DragFloat(ctx, Wui::HashId("animgraph.live.param.min"),
+						{ formControlX, fy, formControlW, kRowH }, m_ParameterMinBuffer, 0.01f, -100000.0f,
+						100000.0f, theme);
+				Wui::Tooltip(ctx, { formControlX, fy, formControlW, kRowH },
+					AGTr("live.param.min.tooltip", "Lower bound for float values; bool is fixed to 0."));
+				fy += kRowH + 4.0f;
+
+				Wui::Label(ctx, { formArea.X, fy + 4.0f }, AGTr("live.param.max", "Max"), theme.TextMuted,
+					theme.FontSizeCaption);
+				if (boolParameter)
+					Wui::Label(ctx, { formControlX, fy + 4.0f }, "1", theme.TextDisabled, theme.FontSizeSmall);
+				else
+					Wui::DragFloat(ctx, Wui::HashId("animgraph.live.param.max"),
+						{ formControlX, fy, formControlW, kRowH }, m_ParameterMaxBuffer, 0.01f, -100000.0f,
+						100000.0f, theme);
+				Wui::Tooltip(ctx, { formControlX, fy, formControlW, kRowH },
+					AGTr("live.param.max.tooltip", "Upper bound for float values; bool is fixed to 1."));
+				fy += kRowH + 4.0f;
+
+				Wui::Label(ctx, { formArea.X, fy + 4.0f }, AGTr("live.param.unit", "Unit"), theme.TextMuted,
+					theme.FontSizeCaption);
+				Wui::TextFieldA11y unitA11y;
+				unitA11y.Label = AGTr("live.param.unit.a11y", "Display unit");
+				unitA11y.Placeholder = "m/s, deg, x";
+				Wui::TextField(ctx, Wui::HashId("animgraph.live.param.unit"),
+					{ formControlX, fy, formControlW, kRowH }, m_ParameterUnitBuffer, theme, nullptr, &unitA11y);
+				Wui::Tooltip(ctx, { formControlX, fy, formControlW, kRowH },
+					AGTr("live.param.unit.tooltip", "Optional suffix shown after values; identifiers stay English."));
+				fy += kRowH + 4.0f;
+
+				if (!m_ParameterError.empty())
+				{
+					Wui::Label(ctx, { formArea.X, fy }, Wui::EllipsizeMiddleToWidth(ctx, m_ParameterError,
+						formArea.W, theme.FontSizeCaption), theme.Danger, theme.FontSizeCaption);
+					fy += 16.0f;
+				}
+
+				const float actionW = std::max(64.0f, (formControlW - theme.PadSmall) * 0.5f);
+				const Wui::WuiRect createRect { formControlX, fy, actionW, kRowH };
+				const Wui::WuiRect cancelRect { createRect.X + createRect.W + theme.PadSmall, fy,
+					std::max(64.0f, formControlX + formControlW - (createRect.X + createRect.W + theme.PadSmall)), kRowH };
+				const bool createPressed = Wui::ActionButton(ctx, Wui::HashId("animgraph.live.param.create"),
+					createRect, AGTr("live.param.create", "Create"), theme, true,
+					AGTr("live.param.create.tooltip", "Create this graph parameter definition."), false);
+				const bool cancelPressed = Wui::ActionButton(ctx, Wui::HashId("animgraph.live.param.cancel"),
+					cancelRect, AGTr("live.param.cancel", "Cancel"), theme, true,
+					AGTr("live.param.cancel.tooltip", "Close without creating a parameter."), true);
+				if (createPressed)
+				{
+					const std::string name = TrimAscii(m_ParameterNameBuffer);
+					bool validIdentifier = !name.empty() && IsIdentifierStart(name.front());
+					for (char ch : name)
+						if (!IsIdentifierChar(ch))
+							validIdentifier = false;
+					if (!validIdentifier)
+						m_ParameterError = AGTr("live.param.error.name", "Name must be a non-empty identifier.");
+					else if (liveDefinitions.find(name) != liveDefinitions.end())
+						m_ParameterError = AGFmt("live.param.error.exists", "Parameter '{name}' already exists.",
+							{ { "name", name } });
+					else if (!boolParameter && m_ParameterMinBuffer > m_ParameterMaxBuffer)
+						m_ParameterError = AGTr("live.param.error.range", "Min must be less than or equal to Max.");
+					else if (boolParameter && (m_ParameterDefaultBuffer < 0.0f || m_ParameterDefaultBuffer > 1.0f
+						|| m_ParameterMinBuffer < 0.0f || m_ParameterMinBuffer > 1.0f
+						|| m_ParameterMaxBuffer < 0.0f || m_ParameterMaxBuffer > 1.0f))
+						m_ParameterError = AGTr("live.param.error.bool_range", "Bool default and range must stay within 0..1.");
+					else
+					{
+						AnimGraph::AnimParameterDefinition definition;
+						definition.Name = name;
+						definition.Type = boolParameter ? AnimGraph::AnimParameterType::Bool
+							: AnimGraph::AnimParameterType::Float;
+						definition.DefaultValue = boolParameter
+							? (m_ParameterDefaultBuffer != 0.0f ? 1.0f : 0.0f)
+							: std::clamp(m_ParameterDefaultBuffer, m_ParameterMinBuffer, m_ParameterMaxBuffer);
+						definition.MinValue = boolParameter ? 0.0f : m_ParameterMinBuffer;
+						definition.MaxValue = boolParameter ? 1.0f : m_ParameterMaxBuffer;
+						definition.Unit = TrimAscii(m_ParameterUnitBuffer);
+						PushUndo();
+						m_Graph.SetParameterDefinition(definition);
+						m_ParamsInitialized = false;
+						m_SimGraphReady = false;
+						MarkDirty();
+						m_ParameterEditorOpen = false;
+						m_ParameterError.clear();
+						ctx.SetFocus(0);
+						SetStatus(AGFmt("live.param.created", "Created parameter '{name}'.",
+							{ { "name", name } }), false);
+					}
+				}
+				else if (cancelPressed)
+				{
+					m_ParameterEditorOpen = false;
+					m_ParameterError.clear();
+					ctx.SetFocus(0);
+				}
+			}
+			if (formOpen)
+				Wui::EndScrollArea(ctx);
+			drawErrorLines();
+			return;
+		}
+
+		Wui::Label(ctx, { innerX, y + 4.0f }, AGFmt("live.parameters", "PARAMETERS ({count})",
+			{ { "count", std::to_string(liveDefinitions.size()) } }), theme.TextMuted, theme.FontSizeCaption);
+		y += 18.0f;
+		const float listReserve = kRowH + theme.PadSmall;
+		float parameterViewportH = compact
+			? std::clamp(bottomLimit - y - listReserve - 54.0f, 64.0f, 140.0f)
+			: std::clamp(area.H * 0.30f, 120.0f, 240.0f);
+		parameterViewportH = std::min(parameterViewportH, std::max(24.0f, bottomLimit - y - listReserve));
+		const Wui::WuiRect parameterViewport { innerX, y, innerW, std::max(24.0f, parameterViewportH) };
+		float listContentH = static_cast<float>(liveDefinitions.size()) * (kRowH + 4.0f);
+		if (!undefinedParameters.empty())
+			listContentH += 20.0f + static_cast<float>(undefinedParameters.size()) * (kRowH + 4.0f);
+		listContentH = std::max(parameterViewport.H, listContentH + 4.0f);
+		if (!Wui::BeginScrollArea(ctx, parameterViewport, listContentH, m_ParamScroll, theme,
+			Wui::HashId("animgraph.live.parameters.scroll")))
+			return;
+
+		float py = parameterViewport.Y + 2.0f - m_ParamScroll;
+		if (liveDefinitions.empty() && undefinedParameters.empty())
+		{
+			Wui::EmptyState(ctx, parameterViewport, "", AGTr("live.parameters.empty.title", "No parameters"),
+				AGTr("live.parameters.empty.body", "Use + Parameter to add a float or bool graph parameter."), "", 0, theme);
+		}
+		for (const auto& entry : liveDefinitions)
+		{
+			const AnimGraph::AnimParameterDefinition& definition = entry.second;
+			const Wui::WuiRect row { parameterViewport.X + 2.0f, py, parameterViewport.W - 10.0f, kRowH };
+			py += kRowH + 4.0f;
+			if (!ctx.ClipAllows(row))
+				continue;
+			Wui::HoverRow(ctx, row, ctx.IsHovered(row), false, theme, 2.0f);
+			const float controlX = row.X + parameterLabelW + theme.PadSmall + parameterBadgeW + theme.PadSmall;
+			const float controlW = std::max(50.0f, row.X + row.W - parameterDeleteW - theme.PadSmall - controlX);
+			Wui::Label(ctx, { row.X, row.Y + 4.0f }, Wui::EllipsizeMiddleToWidth(ctx, definition.Name,
+				parameterLabelW, theme.FontSizeCaption), theme.Text, theme.FontSizeCaption);
+			Wui::Badge(ctx, { row.X + parameterLabelW + theme.PadSmall, row.Y + 2.0f, parameterBadgeW, kRowH - 4.0f },
+				TypeBadgeText(definition.Type), WithAlpha(theme.Accent, 0.22f), theme.Accent, theme,
+				theme.FontSizeCaption);
+
+			const std::string unitTooltip = AGFmt("live.param.value.tooltip",
+				"{name}: {type}, range {min}..{max}{unit}. Changes drive the simulation copy and the bound entity.",
+				{ { "name", definition.Name }, { "type", TypeBadgeText(definition.Type) },
+					{ "min", FormatFloat(definition.MinValue, 2) }, { "max", FormatFloat(definition.MaxValue, 2) },
+					{ "unit", definition.Unit.empty() ? std::string() : " " + definition.Unit } });
+			if (definition.Type == AnimGraph::AnimParameterType::Bool)
+			{
+				bool value = ParamValue(definition.Name) != 0.0f;
+				if (Wui::Checkbox(ctx, Wui::HashId(("animgraph.param.bool." + definition.Name).c_str()),
+					{ controlX, row.Y, controlW, kRowH }, value ? "true" : "false", value, theme))
+					SetParamValue(definition.Name, value ? 1.0f : 0.0f);
+			}
+			else
+			{
+				float value = ParamValue(definition.Name);
+				Wui::WuiNumberStyle style;
+				style.Unit = definition.Unit.c_str();
+				style.Decimals = 2;
+				style.ValueWidth = 54.0f;
+				if (Wui::DragBarFloat(ctx, Wui::HashId(("animgraph.param.float." + definition.Name).c_str()),
+					{ controlX, row.Y, controlW, kRowH }, value, definition.MinValue, definition.MaxValue, theme, style))
+					SetParamValue(definition.Name, value);
+			}
+			Wui::Tooltip(ctx, { controlX, row.Y, controlW, kRowH }, unitTooltip);
+
+			const Wui::WuiRect deleteRect { row.X + row.W - parameterDeleteW, row.Y, parameterDeleteW, kRowH };
+			if (Wui::ActionButton(ctx, Wui::HashId(("animgraph.param.delete." + definition.Name).c_str()),
+				deleteRect, "×", theme, true, AGTr("live.param.delete.tooltip",
+					"Delete this definition. Existing references will be shown and will read as 0."), true))
+			{
+				const std::string deletedName = definition.Name;
+				const std::string references = describeParameterReferences(deletedName);
+				PushUndo();
+				if (m_Graph.RemoveParameterDefinition(deletedName))
+				{
+					m_ParamsInitialized = false;
+					m_SimGraphReady = false;
+					MarkDirty();
+					SetStatus(references.empty()
+						? AGFmt("live.param.deleted", "Deleted parameter '{name}'. No references found.",
+							{ { "name", deletedName } })
+						: AGFmt("live.param.deleted_refs",
+							"Deleted parameter '{name}'. References now read as 0: {refs}",
+							{ { "name", deletedName }, { "refs", references } }), false);
+				}
+				break;
+			}
+			Wui::Tooltip(ctx, deleteRect, AGTr("live.param.delete.tooltip",
+				"Delete this definition. Existing references will be shown and will read as 0."));
+		}
+
+		if (!undefinedParameters.empty())
+		{
+			Wui::Label(ctx, { parameterViewport.X + 4.0f, py + 3.0f },
+				AGFmt("live.param.undefined_header", "Referenced but undefined ({count})",
+					{ { "count", std::to_string(undefinedParameters.size()) } }), theme.Warning, theme.FontSizeCaption);
+			py += 20.0f;
+			for (const std::string& name : undefinedParameters)
+			{
+				const Wui::WuiRect row { parameterViewport.X + 2.0f, py, parameterViewport.W - 10.0f, kRowH };
+				py += kRowH + 4.0f;
+				if (!ctx.ClipAllows(row))
+					continue;
+				Wui::PanelBackground(ctx, row, WithAlpha(theme.Warning, 0.10f), 2.0f);
+				Wui::Label(ctx, { row.X, row.Y + 4.0f }, Wui::EllipsizeMiddleToWidth(ctx, name,
+					row.W - 78.0f, theme.FontSizeCaption), theme.Warning, theme.FontSizeCaption);
+				const Wui::WuiRect createRect { row.X + row.W - 70.0f, row.Y, 70.0f, kRowH };
+				if (Wui::ActionButton(ctx, Wui::HashId(("animgraph.param.create_missing." + name).c_str()),
+					createRect, AGTr("live.param.undefined_create", "Create"), theme, true,
+					AGTr("live.param.undefined_create.tooltip", "Create a float parameter 0..1 for this reference."), false))
+				{
+					AnimGraph::AnimParameterDefinition definition;
+					definition.Name = name;
+					definition.Type = AnimGraph::AnimParameterType::Float;
+					definition.DefaultValue = 0.0f;
+					definition.MinValue = 0.0f;
+					definition.MaxValue = 1.0f;
+					PushUndo();
+					m_Graph.SetParameterDefinition(definition);
+					m_ParamsInitialized = false;
+					m_SimGraphReady = false;
+					MarkDirty();
+					SetStatus(AGFmt("live.param.created", "Created parameter '{name}'.",
+						{ { "name", name } }), false);
+					break;
+				}
+				Wui::Tooltip(ctx, createRect, AGTr("live.param.undefined_create.tooltip",
+					"Create a float parameter 0..1 for this reference."));
+			}
+		}
+		Wui::EndScrollArea(ctx);
+		y = parameterViewport.Y + parameterViewport.H + theme.PadSmall;
+
+		const Wui::WuiRect addParameterRect { innerX, y, innerW, kRowH };
+		if (y + kRowH <= bottomLimit && Wui::ActionButton(ctx, Wui::HashId("animgraph.live.param.add"),
+			addParameterRect, AGTr("live.param.add", "+ Parameter"), theme, true,
+			AGTr("live.param.add.tooltip", "Create a graph parameter definition (float or bool)."), false))
+		{
+			m_ParameterEditorOpen = true;
+			m_ParamScroll = 0.0f;
+			m_ParameterNameBuffer.clear();
+			m_ParameterTypeIndex = 0;
+			m_ParameterDefaultBuffer = 0.0f;
+			m_ParameterMinBuffer = 0.0f;
+			m_ParameterMaxBuffer = 1.0f;
+			m_ParameterUnitBuffer.clear();
+			m_ParameterError.clear();
+			ctx.SetFocus(Wui::HashId("animgraph.live.param.name"));
+		}
+		y += kRowH + theme.PadSmall;
 
 		auto drawToggles = [&](float tx, float ty, float totalW, bool horizontal)
 		{
@@ -2763,42 +4021,9 @@ namespace World
 			writable->EnableUpperBodyLayer = upperBody ? 1 : 0;
 		};
 
-		// 错误信息先算出来:窄条布局要按"剩余高度"决定画到哪一行,错误本身必须占位,
-		// 这样任何高度下都不会出现文字压住控件。
-		std::string errorText = runtimeError;
-		if (component != nullptr && !m_LoadedPath.empty() && component->AnimGraphAsset.HasPath())
-		{
-			const std::string boundPath = StringPool::Get().PathOf(component->AnimGraphAsset.Path);
-			if (boundPath != m_LoadedPath)
-				errorText += (errorText.empty() ? "" : "\n")
-					+ AGFmt("live.bound_differs", "Bound asset differs: {path} (press Apply)",
-						{ { "path", boundPath } });
-		}
-		std::vector<std::string> errorLines;
-		if (!errorText.empty())
-			errorLines = Wui::WrapTextLines(errorText, theme.FontSizeCaption, innerW, Wui::WuiFontFamily::Ui);
-		const size_t drawnErrorLines = std::min<size_t>(errorLines.size(), 3);
-		const float errorReserve = drawnErrorLines == 0
-			? 0.0f
-			: static_cast<float>(drawnErrorLines) * (theme.FontSizeCaption + 1.0f) + 2.0f;
-		const float bottomLimit = area.Y + area.H - errorReserve;
-
-		const bool compact = area.H < 380.0f;
+		runtimeParams = buildRuntimeLine();
 		if (compact)
 		{
-			// 窄窗口底部条:2×2 滑杆 → 读数(有空间时)→ 单行开关;每一项都先检查
-			// bottomLimit,放不下就跳过,绝不让控件越出卡片。
-			const float colW = (innerW - theme.PadSmall) * 0.5f;
-			for (int i = 0; i < 4; ++i)
-			{
-				const Wui::WuiRect cell { innerX + (i % 2) * (colW + theme.PadSmall),
-					y + (i / 2) * (kRowH + 2.0f), colW, kRowH };
-				if (cell.Y + cell.H > bottomLimit)
-					break;
-				drawParam(params[i], cell, 62.0f);
-			}
-			y += (kRowH + 2.0f) * 2.0f + 2.0f;
-
 			if (y + 50.0f <= bottomLimit)
 			{
 				const Wui::WuiRect readout { innerX, y, innerW, 50.0f };
@@ -2813,7 +4038,7 @@ namespace World
 						innerW, theme.FontSizeCaption),
 					theme.TextMuted, theme.FontSizeCaption);
 				Wui::Tooltip(ctx, compactState,
-					AGTr("live.readout.tooltip", "State: current AnimGraph state; an arrow shows the CrossFade target.\nIdle (no transition): no CrossFade is active.\nState time: seconds played in the current state.\nRuntime: Speed / Direction values fed to the graph."));
+					AGTr("live.readout.tooltip", "State: current AnimGraph state; an arrow shows the CrossFade target.\nIdle (no transition): no CrossFade is active.\nState time: seconds played in the current state.\nRuntime: graph parameters currently supplied by this panel."));
 				y += 16.0f;
 			}
 
@@ -2825,32 +4050,19 @@ namespace World
 		}
 		else
 		{
-			for (const ParamRow& param : params)
+			if (y + 90.0f <= bottomLimit)
 			{
-				const Wui::WuiRect row { innerX, y, innerW, kRowH };
-				drawParam(param, row, 72.0f);
-				y += kRowH + 4.0f;
+				const Wui::WuiRect readout { innerX, y, innerW, 90.0f };
+				drawReadout(readout, false);
+				y += readout.H + kGap;
 			}
-			y += 2.0f;
-
-			const Wui::WuiRect readout { innerX, y, innerW, 90.0f };
-			drawReadout(readout, false);
-			y += readout.H + kGap;
-
-			drawToggles(innerX, y, innerW, false);
-			y += (kRowH + 2.0f) * 3.0f;
-		}
-
-		// 错误画在预留区里(红色多行,最多 3 行)。
-		if (drawnErrorLines > 0)
-		{
-			float lineY = bottomLimit + 2.0f;
-			for (size_t i = 0; i < drawnErrorLines; ++i)
+			if (y + (kRowH + 2.0f) * 3.0f <= bottomLimit)
 			{
-				Wui::Label(ctx, { innerX, lineY }, errorLines[i], theme.Danger, theme.FontSizeCaption);
-				lineY += theme.FontSizeCaption + 1.0f;
+				drawToggles(innerX, y, innerW, false);
+				y += (kRowH + 2.0f) * 3.0f;
 			}
 		}
+		drawErrorLines();
 	}
 	void AnimGraphPanel::RenderStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& bar, const Wui::WuiTheme& theme)
 	{

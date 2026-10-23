@@ -3,11 +3,11 @@ version: 1
 name: Mannequin Locomotion
 model: engine/models/characters/mannequin.wmodel
 initial: Idle
-parameter: Speed 0
-parameter: Direction 0
-parameter: IsFalling 0
-parameter: VerticalSpeed 0
-parameter: AimWeight 0
+parameter: Speed float 0 0 10 m/s
+parameter: Direction float 0 -180 180 deg
+parameter: IsFalling bool 0 0 1
+parameter: VerticalSpeed float 0 -20 20 m/s
+parameter: AimWeight float 0 0 1
 
 state Idle
   kind: clip

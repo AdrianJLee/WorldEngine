@@ -135,10 +135,15 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				AnimGraph graph;
 				graph.SetGraphName(target.stem().string());
 				graph.SetModelHint("engine/models/characters/mannequin.wmodel");
-				graph.SetParameterDefault("Speed", 0.0f);
-				graph.SetParameterDefault("Direction", 0.0f);
-				graph.SetParameterDefault("IsFalling", 0.0f);
-				graph.SetParameterDefault("AimWeight", 0.0f);
+				// 模板也声明类型/范围：新建图打开后实时预览直接得到滑杆/勾选框，而不是猜。
+				graph.SetParameterDefinition(AnimGraph::AnimParameterDefinition {
+					"Speed", AnimGraph::AnimParameterType::Float, 0.0f, 0.0f, 10.0f, "m/s" });
+				graph.SetParameterDefinition(AnimGraph::AnimParameterDefinition {
+					"Direction", AnimGraph::AnimParameterType::Float, 0.0f, -180.0f, 180.0f, "deg" });
+				graph.SetParameterDefinition(AnimGraph::AnimParameterDefinition {
+					"IsFalling", AnimGraph::AnimParameterType::Bool, 0.0f, 0.0f, 1.0f, "" });
+				graph.SetParameterDefinition(AnimGraph::AnimParameterDefinition {
+					"AimWeight", AnimGraph::AnimParameterType::Float, 0.0f, 0.0f, 1.0f, "" });
 
 				AnimState idle;
 				idle.Name = "Idle";

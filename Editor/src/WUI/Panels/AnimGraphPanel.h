@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace World
@@ -99,6 +100,8 @@ namespace World
 		void RenderStateGraph(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
 			const Wui::WuiTheme& theme);
 		void RenderPosePreview(Wui::WuiContext& ctx, const Wui::WuiRect& area, const Wui::WuiTheme& theme);
+		void RenderIkCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
 		void RenderStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& bar,
 			const Wui::WuiTheme& theme);
 
@@ -115,6 +118,13 @@ namespace World
 		void UpdateSimulation(float dt);
 		void ResetSimulation();
 		void EnsureSimulationGraph();
+
+		// ---- 图级参数（定义来自 AnimGraph::GetParameterDefinitions）----
+		// 面板只在名字与定义之间做值缓存；不再假设 Speed/Direction/IsFalling/AimWeight 一定存在。
+		float ParamValue(const std::string& name) const;
+		void SetParamValue(const std::string& name, float value);
+		void SyncParameterValues();
+		std::vector<std::string> CollectReferencedParameters() const;
 
 		// ---- 模型/Clip ----
 		void RefreshModel(PanelHost& host);
@@ -150,7 +160,7 @@ namespace World
 		float m_LayerScroll = 0.0f;
 		float m_CenterScroll = 0.0f;
 		float m_LayerCardScroll = 0.0f;
-		int m_CenterTab = 0;   // 0 = 状态, 1 = 层
+		int m_CenterTab = 0;   // 0 = 状态, 1 = 层, 2 = 姿态, 3 = IK
 		Wui::WuiRect m_CanvasRect { 0, 0, 0, 0 };
 		int m_HoverSample = -1;
 		int m_DragSample = -1;
@@ -187,20 +197,37 @@ namespace World
 		bool m_TrianglesDirty = true;
 
 		// Live Preview
-		float m_ParamSpeed = 0.0f;
-		float m_ParamDirection = 0.0f;
-		float m_ParamFalling = 0.0f;
-		float m_ParamAimWeight = 0.0f;
+		std::unordered_map<std::string, float> m_ParamValues;
+		float m_ParamScroll = 0.0f;
 		bool m_ParamsInitialized = false;
 		entt::entity m_BoundEntity = entt::null;
 		Scene* m_BoundScene = nullptr;
 		std::string m_BoundName;
 
+		// 参数管理器（新建参数行）。类型 0=float, 1=bool。
+		bool m_ParameterEditorOpen = false;
+		std::string m_ParameterNameBuffer;
+		int m_ParameterTypeIndex = 0;
+		float m_ParameterDefaultBuffer = 0.0f;
+		float m_ParameterMinBuffer = 0.0f;
+		float m_ParameterMaxBuffer = 1.0f;
+		std::string m_ParameterUnitBuffer;
+		std::string m_ParameterError;
+
 		// 内部模拟预览：独立的 AnimGraph 副本，不写回资产，也不依赖实体。
+		// 模拟 = 用参数面板当前值驱动副本，不存在脚本化循环。
 		bool m_Simulate = false;
 		bool m_SimGraphReady = false;
 		AnimGraph m_SimGraph;
-		float m_SimCycleTime = 0.0f;
+
+		// 过渡编辑器（每行独立；m_TransitionEditKey = "<state>#<index>"）。
+		std::string m_TransitionEditKey;
+		std::string m_TransitionExprBuffer;
+		std::string m_TransitionValueBuffer;
+		int m_TransitionParamIndex = 0;
+		int m_TransitionOpIndex = 0;
+		bool m_TransitionAdvancedOpen = false;
+		std::string m_TransitionError;
 
 		// 状态图画布视图态（只保存布局，不进资产）。
 		std::unordered_map<std::string, glm::vec2> m_StateGraphPositions;
@@ -208,6 +235,16 @@ namespace World
 		std::string m_StateGraphDragNode;
 		glm::vec2 m_StateGraphDragStart { 0.0f, 0.0f };
 		glm::vec2 m_StateGraphDragOffset { 0.0f, 0.0f };
+		glm::vec2 m_StateGraphPan { 0.0f, 0.0f };
+		float m_StateGraphZoom = 1.0f;
+		// 中栏滚动区在画布之前先吃滚轮：画布悬停时由 RenderCenterColumn 把这次滚轮
+		// 暂存到这里并从输入里清零，避免"缩放了、整页也跟着滚"。
+		float m_CanvasWheel = 0.0f;
+		bool m_StateGraphPanning = false;
+		glm::vec2 m_StateGraphPanStart { 0.0f, 0.0f };
+		glm::vec2 m_StateGraphPanOrigin { 0.0f, 0.0f };
+		bool m_StateGraphFitRequested = false;
+		bool m_RevealTransitionRow = false;
 
 		// 层卡片的编辑缓冲（TextField 需要跨帧稳定引用）。
 		bool m_NewParameterRowVisible = false;
@@ -216,6 +253,22 @@ namespace World
 		float m_LayerMaskScroll = 0.0f;
 		std::string m_LayerMaskTextKey;
 		std::string m_LayerMaskTextBuffer;
+		std::unordered_set<std::string> m_MaskCollapsed;   // 关键字 = 骨骼名
+		std::string m_MaskSelectedBone;
+
+		// IK 页签：新建链向导 + 当前选中链。
+		bool m_IkWizardOpen = false;
+		std::string m_IkChainName { "IK Chain" };
+		int m_IkRootIndex = 0;
+		int m_IkMidIndex = 0;
+		int m_IkEndIndex = 0;
+		int m_IkTargetMode = 0;      // 0 = 新建目标实体, 1 = 现有实体, 2 = 世界坐标
+		int m_IkTargetEntityIndex = 0;
+		std::string m_IkStatus;
+		bool m_IkStatusError = false;
+		std::string m_SelectedIkTag;
+		glm::vec3 m_IkManualTarget { 0.0f };
+		float m_IkScroll = 0.0f;
 
 		// 模型/Clip 缓存(选中实体或模型路径变化时才重读)
 		std::string m_ModelKey;

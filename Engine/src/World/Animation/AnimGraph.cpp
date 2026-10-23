@@ -49,6 +49,11 @@ namespace World
 				WLD_CORE_WARN("{0}", message);
 		}
 
+		bool AlwaysTrueTransitionCondition(const std::unordered_map<std::string, float>&)
+		{
+			return true;
+		}
+
 		const Asset::WModelAnimation* FindClip(const Asset::WModelData& model, const std::string& name)
 		{
 			for (const Asset::WModelAnimation& animation : model.Animations)
@@ -182,6 +187,13 @@ namespace World
 			while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1])))
 				--end;
 			return std::string(value.substr(begin, end - begin));
+		}
+
+		std::string LowerAscii(std::string value)
+		{
+			for (char& ch : value)
+				ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+			return value;
 		}
 
 		std::vector<std::string> SplitWhitespace(const std::string& value)
@@ -802,6 +814,7 @@ namespace World
 		m_ModelHint.clear();
 		m_GraphName.clear();
 		m_ParameterDefaults.clear();
+		m_ParameterDefinitions.clear();
 		m_Parameters.clear();
 		m_LastRootPos = glm::vec3(0.0f);
 		m_LastRootRot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
@@ -814,14 +827,22 @@ namespace World
 		{
 			for (AnimTransition& transition : entry.second.Transitions)
 			{
-				if (transition.Condition || transition.ConditionExpression.empty())
+				const std::string expression = Trim(transition.ConditionExpression);
+				if (expression.empty())
+				{
+					// 空条件在编辑器中表示“始终触发”，必须有可调用谓词才能参与状态切换。
+					if (!transition.Condition)
+						transition.Condition = AlwaysTrueTransitionCondition;
+					continue;
+				}
+				if (transition.Condition)
 					continue;
 				std::string error;
-				transition.Condition = AnimGraphCondition::Parse(transition.ConditionExpression, &error);
+				transition.Condition = AnimGraphCondition::Parse(expression, &error);
 				if (!transition.Condition)
 				{
-					WarnOnce("animgraph-condition:" + transition.ConditionExpression,
-						"AnimGraph 条件解析失败（转换永不触发）: '" + transition.ConditionExpression + "' — " + error);
+					WarnOnce("animgraph-condition:" + expression,
+						"AnimGraph 条件解析失败（转换永不触发）: '" + expression + "' — " + error);
 				}
 			}
 		}
@@ -896,9 +917,91 @@ namespace World
 
 	void AnimGraph::SetParameterDefault(const std::string& name, float value)
 	{
-		const float safe = std::isfinite(value) ? value : 0.0f;
-		m_ParameterDefaults[name] = safe;
-		m_Parameters[name] = safe;
+		const std::string trimmed = Trim(name);
+		if (trimmed.empty())
+			return;
+
+		AnimParameterDefinition definition;
+		const auto it = m_ParameterDefinitions.find(trimmed);
+		if (it != m_ParameterDefinitions.end())
+		{
+			definition = it->second;
+		}
+		else
+		{
+			definition.Name = trimmed;
+			definition.Type = AnimParameterType::Float;
+			definition.MinValue = 0.0f;
+			definition.MaxValue = 1.0f;
+		}
+		definition.DefaultValue = value;
+		SetParameterDefinition(definition);
+	}
+
+	void AnimGraph::SetParameterDefinition(const AnimParameterDefinition& definition)
+	{
+		const std::string name = Trim(definition.Name);
+		if (name.empty())
+			return;
+
+		AnimParameterDefinition normalized = definition;
+		normalized.Name = name;
+		normalized.Unit = Trim(normalized.Unit);
+		if (normalized.Type != AnimParameterType::Bool)
+			normalized.Type = AnimParameterType::Float;
+
+		if (normalized.Type == AnimParameterType::Bool)
+		{
+			normalized.DefaultValue = (std::isfinite(normalized.DefaultValue) && normalized.DefaultValue > 0.5f) ? 1.0f : 0.0f;
+			normalized.MinValue = 0.0f;
+			normalized.MaxValue = 1.0f;
+			normalized.Unit.clear();
+		}
+		else
+		{
+			if (!std::isfinite(normalized.MinValue) || !std::isfinite(normalized.MaxValue))
+			{
+				normalized.MinValue = 0.0f;
+				normalized.MaxValue = 1.0f;
+			}
+			else if (normalized.MinValue > normalized.MaxValue)
+			{
+				std::swap(normalized.MinValue, normalized.MaxValue);
+			}
+			if (!std::isfinite(normalized.DefaultValue))
+				normalized.DefaultValue = 0.0f;
+			normalized.DefaultValue = std::clamp(normalized.DefaultValue, normalized.MinValue, normalized.MaxValue);
+		}
+
+		m_ParameterDefinitions[name] = normalized;
+		m_ParameterDefaults[name] = normalized.DefaultValue;
+		m_Parameters[name] = normalized.DefaultValue;
+	}
+
+	bool AnimGraph::RemoveParameterDefinition(const std::string& name)
+	{
+		const std::string trimmed = Trim(name);
+		if (trimmed.empty())
+			return false;
+
+		const bool removed = m_ParameterDefinitions.erase(trimmed) > 0;
+		m_ParameterDefaults.erase(trimmed);
+		m_Parameters.erase(trimmed);
+		return removed;
+	}
+
+	const AnimGraph::AnimParameterDefinition* AnimGraph::FindParameterDefinition(const std::string& name) const
+	{
+		const std::string trimmed = Trim(name);
+		const auto it = m_ParameterDefinitions.find(trimmed);
+		return it == m_ParameterDefinitions.end() ? nullptr : &it->second;
+	}
+
+	AnimGraph::AnimParameterType AnimGraph::GetParameterType(const std::string& name,
+		AnimParameterType fallback) const
+	{
+		const AnimParameterDefinition* definition = FindParameterDefinition(name);
+		return definition ? definition->Type : fallback;
 	}
 
 	void AnimGraph::Update(float deltaSeconds)
@@ -1208,8 +1311,18 @@ namespace World
 		const std::string& initialState = m_InitialStateName.empty() ? m_CurrentStateName : m_InitialStateName;
 		if (!initialState.empty())
 			stream << "initial: " << initialState << "\n";
-		for (const auto& entry : m_ParameterDefaults)
-			stream << "parameter: " << entry.first << " " << FormatFloat(entry.second) << "\n";
+		for (const auto& entry : m_ParameterDefinitions)
+		{
+			const AnimParameterDefinition& definition = entry.second;
+			stream << "parameter: " << entry.first << " "
+				<< (definition.Type == AnimParameterType::Bool ? "bool" : "float") << " "
+				<< FormatFloat(definition.DefaultValue) << " "
+				<< FormatFloat(definition.MinValue) << " "
+				<< FormatFloat(definition.MaxValue);
+			if (!definition.Unit.empty())
+				stream << " " << definition.Unit;
+			stream << "\n";
+		}
 
 		for (const auto& stateEntry : m_States)
 		{
@@ -1242,10 +1355,9 @@ namespace World
 			}
 			for (const AnimTransition& transition : state.Transitions)
 			{
-				if (transition.ConditionExpression.empty())
-					continue;
+				const std::string expression = Trim(transition.ConditionExpression);
 				stream << "  transition: " << transition.TargetState << " " << FormatFloat(transition.Duration)
-					<< " " << transition.ConditionExpression << "\n";
+					<< (expression.empty() ? "\n" : " " + expression + "\n");
 			}
 		}
 
@@ -1508,11 +1620,89 @@ namespace World
 			else if (key == "parameter")
 			{
 				const std::vector<std::string> tokens = SplitWhitespace(value);
-				float defaultValue = 0.0f;
-				if (tokens.size() == 2 && ParseFloat(tokens[1], defaultValue))
-					SetParameterDefault(tokens[0], defaultValue);
-				else
+				if (tokens.size() < 2)
+				{
 					WarnOnce("animgraph-bad-parameter:" + value, "AnimGraph parameter 无效: " + value);
+					continue;
+				}
+
+				const std::string typeText = LowerAscii(tokens[1]);
+				const bool hasExplicitType = (typeText == "float" || typeText == "bool");
+				if (tokens.size() == 2 && !hasExplicitType)
+				{
+					float defaultValue = 0.0f;
+					if (!ParseFloat(tokens[1], defaultValue))
+					{
+						WarnOnce("animgraph-bad-parameter:" + value, "AnimGraph parameter 无效: " + value);
+						continue;
+					}
+					AnimParameterDefinition definition;
+					definition.Name = tokens[0];
+					definition.Type = AnimParameterType::Float;
+					definition.DefaultValue = defaultValue;
+					definition.MinValue = 0.0f;
+					definition.MaxValue = 1.0f;
+					SetParameterDefinition(definition);
+					continue;
+				}
+
+				AnimParameterDefinition definition;
+				definition.Name = tokens[0];
+				if (typeText == "bool")
+					definition.Type = AnimParameterType::Bool;
+				else
+				{
+					definition.Type = AnimParameterType::Float;
+					if (!hasExplicitType)
+					{
+						WarnOnce("animgraph-parameter-type:" + value,
+							"AnimGraph parameter 类型无效，按 float 处理: " + value);
+					}
+				}
+
+				float parsed = 0.0f;
+				if (tokens.size() > 2)
+				{
+					if (ParseFloat(tokens[2], parsed))
+						definition.DefaultValue = parsed;
+					else
+					{
+						WarnOnce("animgraph-parameter-default:" + value,
+							"AnimGraph parameter 默认值无效，按 0 处理: " + value);
+					}
+				}
+				if (tokens.size() > 3)
+				{
+					if (ParseFloat(tokens[3], parsed))
+						definition.MinValue = parsed;
+					else
+					{
+						WarnOnce("animgraph-parameter-min:" + value,
+							"AnimGraph parameter 最小值无效，按 0 处理: " + value);
+					}
+				}
+				if (tokens.size() > 4)
+				{
+					if (ParseFloat(tokens[4], parsed))
+						definition.MaxValue = parsed;
+					else
+					{
+						WarnOnce("animgraph-parameter-max:" + value,
+							"AnimGraph parameter 最大值无效，按 1 处理: " + value);
+					}
+				}
+				if (tokens.size() > 5)
+				{
+					std::ostringstream unit;
+					for (size_t i = 5; i < tokens.size(); ++i)
+					{
+						if (i > 5)
+							unit << ' ';
+						unit << tokens[i];
+					}
+					definition.Unit = unit.str();
+				}
+				SetParameterDefinition(definition);
 			}
 			else
 			{

@@ -32,6 +32,22 @@ namespace World
 				std::vector<std::pair<std::string_view, std::string_view>>(args));
 		}
 
+		std::string FormatFloat(float value, int decimals = 2)
+		{
+			char buffer[64] = {};
+			std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, static_cast<double>(value));
+			return buffer;
+		}
+
+		std::string TrimAscii(std::string text)
+		{
+			const size_t first = text.find_first_not_of(" \t\r\n");
+			if (first == std::string::npos)
+				return {};
+			const size_t last = text.find_last_not_of(" \t\r\n");
+			return text.substr(first, last - first + 1);
+		}
+
 		struct BlendMap
 		{
 			Wui::WuiRect Plot;
@@ -64,8 +80,31 @@ namespace World
 			return color;
 		}
 
+		std::string AxisTitle(const std::string& name, const AnimGraph::AnimParameterDefinition* definition)
+		{
+			if (definition == nullptr || definition->Unit.empty())
+				return name;
+			return name + " (" + definition->Unit + ")";
+		}
+
+		std::string AxisReadout(const std::string& name, const AnimGraph::AnimParameterDefinition* definition, float value)
+		{
+			std::string text = name + " " + FormatFloat(value, 2);
+			if (definition != nullptr && !definition->Unit.empty())
+				text += " " + definition->Unit;
+			return text;
+		}
+
+		float AxisDragSpeed(const AnimGraph::AnimParameterDefinition* definition)
+		{
+			if (definition == nullptr)
+				return 0.05f;
+			return std::max(0.01f, (definition->MaxValue - definition->MinValue) / 1000.0f);
+		}
+
 		BlendMap MakeBlendMap(const Wui::WuiRect& canvas, const AnimState& state, bool twoD,
-			float paramX, float paramY)
+			float paramX, float paramY, const AnimGraph::AnimParameterDefinition* defX,
+			const AnimGraph::AnimParameterDefinition* defY)
 		{
 			BlendMap map;
 			map.TwoD = twoD;
@@ -73,31 +112,49 @@ namespace World
 				std::max(40.0f, canvas.W - kCanvasPadLeft - 8.0f),
 				std::max(40.0f, canvas.H - kCanvasPadBottom - 8.0f) };
 
-			float maxX = twoD ? 6.0f : 4.0f;
-			float maxY = 180.0f;
-			float minX = 0.0f;
+			float minX = defX != nullptr ? defX->MinValue : 0.0f;
+			float maxX = defX != nullptr ? defX->MaxValue : (twoD ? 6.0f : 4.0f);
+			float minY = defY != nullptr ? defY->MinValue : -180.0f;
+			float maxY = defY != nullptr ? defY->MaxValue : 180.0f;
 			if (twoD)
 			{
 				for (const BlendSample2D& sample : state.Blend2D.GetSamples())
 				{
-					maxX = std::max(maxX, sample.Point.x * 1.15f);
+					maxX = std::max(maxX, sample.Point.x);
 					minX = std::min(minX, sample.Point.x);
-					maxY = std::max(maxY, std::abs(sample.Point.y));
+					maxY = std::max(maxY, sample.Point.y);
+					minY = std::min(minY, sample.Point.y);
 				}
-				maxX = std::max(maxX, paramX * 1.10f);
-				maxY = std::max(maxY, std::abs(paramY));
+				maxX = std::max(maxX, paramX);
+				minX = std::min(minX, paramX);
+				maxY = std::max(maxY, paramY);
+				minY = std::min(minY, paramY);
 			}
 			else
 			{
 				for (const BlendSample1D& sample : state.Blend1D.GetSamples())
-					maxX = std::max(maxX, sample.Value * 1.15f);
-				maxX = std::max(maxX, paramX * 1.10f);
+				{
+					maxX = std::max(maxX, sample.Value);
+					minX = std::min(minX, sample.Value);
+				}
+				maxX = std::max(maxX, paramX);
+				minX = std::min(minX, paramX);
 			}
 
-			map.MinX = std::min(0.0f, minX);
-			map.MaxX = std::max(map.MinX + 0.5f, maxX);
-			map.MinY = -std::max(45.0f, maxY);
-			map.MaxY = std::max(45.0f, maxY);
+			if (maxX - minX < 0.5f)
+			{
+				minX -= 0.25f;
+				maxX += 0.25f;
+			}
+			if (maxY - minY < 1.0f)
+			{
+				minY -= 0.5f;
+				maxY += 0.5f;
+			}
+			map.MinX = minX;
+			map.MaxX = maxX;
+			map.MinY = minY;
+			map.MaxY = maxY;
 			return map;
 		}
 
@@ -137,7 +194,11 @@ namespace World
 	{
 		(void)host;
 		Wui::PanelBackground(ctx, canvas, theme.ContentBg, theme.Radius);
-		BlendMap map = MakeBlendMap(canvas, state, blend2d, m_ParamSpeed, m_ParamDirection);
+		const AnimGraph::AnimParameterDefinition* defX = m_Graph.FindParameterDefinition(state.ParameterX);
+		const AnimGraph::AnimParameterDefinition* defY = m_Graph.FindParameterDefinition(state.ParameterY);
+		const float paramX = ParamValue(state.ParameterX);
+		const float paramY = ParamValue(state.ParameterY);
+		BlendMap map = MakeBlendMap(canvas, state, blend2d, paramX, paramY, defX, defY);
 		if (m_DragSample >= 0)
 		{
 			map.MinX = m_DragMinX;
@@ -184,11 +245,13 @@ namespace World
 		Wui::LineSegment(ctx, { map.Plot.X, map.Plot.Y }, { map.Plot.X, map.Plot.Y + map.Plot.H },
 			theme.BorderStrong, 1.0f);
 
-		Wui::Label(ctx, { map.Plot.X + map.Plot.W - 74.0f, map.Plot.Y - 1.0f }, AGTr("blend.axis.speed", "Speed (m/s)"),
+		const std::string axisX = AxisTitle(state.ParameterX, defX);
+		const float axisXW = ctx.MeasureTextWidth(axisX, theme.FontSizeCaption);
+		Wui::Label(ctx, { std::max(map.Plot.X, map.Plot.X + map.Plot.W - axisXW), map.Plot.Y - 1.0f }, axisX,
 			theme.TextMuted, theme.FontSizeCaption);
 		if (blend2d)
-			Wui::Label(ctx, { map.Plot.X + 4.0f, map.Plot.Y + 2.0f }, AGTr("blend.axis.direction", "Direction (deg)"), theme.TextMuted,
-				theme.FontSizeCaption);
+			Wui::Label(ctx, { map.Plot.X + 4.0f, map.Plot.Y + 2.0f }, AxisTitle(state.ParameterY, defY),
+				theme.TextMuted, theme.FontSizeCaption);
 
 		const std::vector<BlendSample2D>& samples2d = state.Blend2D.GetSamples();
 		const std::vector<BlendSample1D>& samples1d = state.Blend1D.GetSamples();
@@ -287,8 +350,8 @@ namespace World
 
 		// 当前参数十字准星(实时区滑杆驱动)
 		{
-			const float px = std::clamp(m_ParamSpeed, map.MinX, map.MaxX);
-			const float py = blend2d ? std::clamp(m_ParamDirection, map.MinY, map.MaxY) : 0.0f;
+			const float px = std::clamp(paramX, map.MinX, map.MaxX);
+			const float py = blend2d ? std::clamp(paramY, map.MinY, map.MaxY) : 0.0f;
 			const glm::vec2 cross = map.ToScreen(px, py);
 			const Wui::WuiColor crossColor = WithAlpha(theme.Info, 0.75f);
 			Wui::LineSegment(ctx, { cross.x, map.Plot.Y }, { cross.x, map.Plot.Y + map.Plot.H },
@@ -298,15 +361,16 @@ namespace World
 					crossColor, 1.0f);
 			Wui::PanelBackground(ctx, { cross.x - 3.0f, cross.y - 3.0f, 6.0f, 6.0f }, theme.Info, 3.0f);
 
-			char readout[96] = {};
+			std::string readout;
 			if (blend2d)
-				std::snprintf(readout, sizeof(readout),
-					AGTr("blend.readout.2d", "Speed %.2f m/s   Direction %.0f deg").c_str(),
-					static_cast<double>(m_ParamSpeed), static_cast<double>(m_ParamDirection));
+				readout = AGFmt("blend.readout.2d", "{x}   {y}",
+					{ { "x", AxisReadout(state.ParameterX, defX, paramX) },
+						{ "y", AxisReadout(state.ParameterY, defY, paramY) } });
 			else
-				std::snprintf(readout, sizeof(readout),
-					AGTr("blend.readout.1d", "Speed %.2f m/s").c_str(), static_cast<double>(m_ParamSpeed));
-			Wui::Label(ctx, { map.Plot.X + 6.0f, map.Plot.Y + map.Plot.H - 16.0f }, readout,
+				readout = AGFmt("blend.readout.1d", "{x}",
+					{ { "x", AxisReadout(state.ParameterX, defX, paramX) } });
+			Wui::Label(ctx, { map.Plot.X + 6.0f, map.Plot.Y + map.Plot.H - 16.0f },
+				Wui::EllipsizeMiddleToWidth(ctx, readout, map.Plot.W - 12.0f, theme.FontSizeCaption),
 				theme.TextMuted, theme.FontSizeCaption);
 		}
 
@@ -321,12 +385,12 @@ namespace World
 			node.Kind = "blend-sample";
 			node.Label = clip.empty()
 				? AGFmt("blend.sample.label", "Sample {index}", { { "index", std::to_string(i) } }) : clip;
-			char value[96] = {};
+			std::string value;
 			if (blend2d)
-				std::snprintf(value, sizeof(value), "x=%.2f y=%.1f", static_cast<double>(samples2d[i].Point.x),
-					static_cast<double>(samples2d[i].Point.y));
+				value = AxisReadout(state.ParameterX, defX, samples2d[i].Point.x) + "   "
+					+ AxisReadout(state.ParameterY, defY, samples2d[i].Point.y);
 			else
-				std::snprintf(value, sizeof(value), "x=%.2f", static_cast<double>(samples1d[i].Value));
+				value = AxisReadout(state.ParameterX, defX, samples1d[i].Value);
 			node.Value = value;
 			node.Rect = { map.Plot.X, map.Plot.Y, map.Plot.W, map.Plot.H };
 			node.Interactive = false;
@@ -344,7 +408,10 @@ namespace World
 		const AnimState* state = m_Graph.FindState(stateName);
 		if (state == nullptr)
 			return;
-		const BlendMap map = MakeBlendMap(canvas, *state, blend2d, m_ParamSpeed, m_ParamDirection);
+		const AnimGraph::AnimParameterDefinition* defX = m_Graph.FindParameterDefinition(state->ParameterX);
+		const AnimGraph::AnimParameterDefinition* defY = m_Graph.FindParameterDefinition(state->ParameterY);
+		const BlendMap map = MakeBlendMap(canvas, *state, blend2d, ParamValue(state->ParameterX),
+			ParamValue(state->ParameterY), defX, defY);
 
 		const std::vector<BlendSample2D>& samples2d = state->Blend2D.GetSamples();
 		const std::vector<BlendSample1D>& samples1d = state->Blend1D.GetSamples();
@@ -516,6 +583,20 @@ namespace World
 		// 参数名(X / Y)。先快照:TextField 提交会触发 ReplaceState,不能在其后继续解引用旧指针。
 		const std::string paramX = state->ParameterX;
 		const std::string paramY = state->ParameterY;
+		std::vector<std::string> axisParameterNames;
+		for (const auto& entry : m_Graph.GetParameterDefinitions())
+			if (entry.second.Type == AnimGraph::AnimParameterType::Float)
+				axisParameterNames.push_back(entry.first);
+		std::vector<std::string> axisOptions = axisParameterNames;
+		const std::string customLabel = AGTr("blend.param.custom", "Custom…");
+		axisOptions.push_back(customLabel);
+		auto axisIndex = [&](const std::string& name)
+		{
+			const auto found = std::find(axisParameterNames.begin(), axisParameterNames.end(), name);
+			return found == axisParameterNames.end()
+				? static_cast<int>(axisParameterNames.size())
+				: static_cast<int>(std::distance(axisParameterNames.begin(), found));
+		};
 		float y = canvas.Y + canvas.H + 4.0f;
 		const float labelW = 24.0f;
 		const float fieldW = std::max(60.0f, (area.W - theme.Pad * 2.0f - labelW - theme.PadSmall) * 0.5f);
@@ -523,38 +604,94 @@ namespace World
 		const Wui::WuiRect yField { xField.X + fieldW + theme.PadSmall, y, fieldW, kRowH };
 
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, "X", theme.TextMuted, theme.FontSizeCaption);
-		std::string xBuffer = paramX;
-		Wui::TextFieldA11y xA11y { AGTr("blend.param.x.a11y", "Blend X parameter"), "Speed" };
-		const Wui::WuiId xId = Wui::HashId("animgraph.blend.param.x");
-		if (Wui::TextField(ctx, xId, xField, xBuffer, theme, nullptr, &xA11y) && xBuffer != paramX)
+		int xIndex = axisIndex(paramX);
+		if (Wui::Combo(ctx, Wui::HashId("animgraph.blend.param.x"), xField, "",
+			axisOptions, xIndex, theme, paramX.empty() ? customLabel : paramX))
 		{
-			const AnimState* live = m_Graph.FindState(stateName);
-			if (live != nullptr)
-			{
-				AnimState updated = *live;
-				updated.ParameterX = xBuffer;
-				ReplaceState(stateName, updated);
-			}
+			AnimState updated = *state;
+			if (xIndex >= 0 && static_cast<size_t>(xIndex) < axisParameterNames.size())
+				updated.ParameterX = axisParameterNames[static_cast<size_t>(xIndex)];
+			else
+				updated.ParameterX.clear();
+			if (ReplaceState(stateName, updated))
+				m_LayerMaskTextKey.clear();
 		}
-		Wui::Tooltip(ctx, xField, AGTr("blend.param.x.tooltip", "Parameter driving the horizontal axis (default Speed)."));
+		Wui::Tooltip(ctx, xField, AGTr("blend.param.x.tooltip",
+			"Float parameter driving the horizontal axis. Choose Custom to type an identifier manually."));
 
 		if (blend2d)
 		{
 			Wui::Label(ctx, { yField.X - 14.0f, y + 4.0f }, "Y", theme.TextMuted, theme.FontSizeCaption);
-			std::string yBuffer = paramY;
-			Wui::TextFieldA11y yA11y { AGTr("blend.param.y.a11y", "Blend Y parameter"), "Direction" };
-			const Wui::WuiId yId = Wui::HashId("animgraph.blend.param.y");
-			if (Wui::TextField(ctx, yId, yField, yBuffer, theme, nullptr, &yA11y) && yBuffer != paramY)
+			int yIndex = axisIndex(paramY);
+			if (Wui::Combo(ctx, Wui::HashId("animgraph.blend.param.y"), yField, "",
+				axisOptions, yIndex, theme, paramY.empty() ? customLabel : paramY))
 			{
 				const AnimState* live = m_Graph.FindState(stateName);
 				if (live != nullptr)
 				{
 					AnimState updated = *live;
-					updated.ParameterY = yBuffer;
-					ReplaceState(stateName, updated);
+					if (yIndex >= 0 && static_cast<size_t>(yIndex) < axisParameterNames.size())
+						updated.ParameterY = axisParameterNames[static_cast<size_t>(yIndex)];
+					else
+						updated.ParameterY.clear();
+					if (ReplaceState(stateName, updated))
+						m_LayerMaskTextKey.clear();
 				}
 			}
-			Wui::Tooltip(ctx, yField, AGTr("blend.param.y.tooltip", "Parameter driving the vertical axis (default Direction, degrees)."));
+			Wui::Tooltip(ctx, yField, AGTr("blend.param.y.tooltip",
+				"Float parameter driving the vertical axis. Choose Custom to type an identifier manually."));
+		}
+
+		const bool xCustom = std::find(axisParameterNames.begin(), axisParameterNames.end(), paramX) == axisParameterNames.end();
+		const bool yCustom = blend2d
+			&& std::find(axisParameterNames.begin(), axisParameterNames.end(), paramY) == axisParameterNames.end();
+		if (xCustom || yCustom)
+		{
+			const std::string customKey = "blend|" + stateName + "|" + paramX + "|" + paramY;
+			if (m_LayerMaskTextKey != customKey)
+			{
+				m_LayerMaskTextKey = customKey;
+				m_LayerMaskTextBuffer = paramX;
+				m_NewParameterBuffer = paramY;
+			}
+			const float customY = y + kRowH + 4.0f;
+			const Wui::WuiRect xCustomField { xField.X, customY, xField.W, kRowH };
+			Wui::Label(ctx, { area.X + theme.Pad, customY + 4.0f }, "X", theme.TextMuted, theme.FontSizeCaption);
+			Wui::TextFieldA11y xA11y { AGTr("blend.param.x.a11y", "Blend X parameter"), "CustomX" };
+			if (Wui::TextField(ctx, Wui::HashId("animgraph.blend.param.x.custom"), xCustomField,
+				m_LayerMaskTextBuffer, theme, nullptr, &xA11y) && m_LayerMaskTextBuffer != paramX)
+			{
+				const AnimState* live = m_Graph.FindState(stateName);
+				if (live != nullptr)
+				{
+					AnimState updated = *live;
+					updated.ParameterX = TrimAscii(m_LayerMaskTextBuffer);
+					if (ReplaceState(stateName, updated))
+						m_LayerMaskTextKey.clear();
+				}
+			}
+			Wui::Tooltip(ctx, xCustomField, AGTr("blend.param.x.custom.tooltip",
+				"Custom identifier for the horizontal axis. Press Enter to apply."));
+			if (blend2d)
+			{
+				const Wui::WuiRect yCustomField { yField.X, customY, yField.W, kRowH };
+				Wui::Label(ctx, { yField.X - 14.0f, customY + 4.0f }, "Y", theme.TextMuted, theme.FontSizeCaption);
+				Wui::TextFieldA11y yA11y { AGTr("blend.param.y.a11y", "Blend Y parameter"), "CustomY" };
+				if (Wui::TextField(ctx, Wui::HashId("animgraph.blend.param.y.custom"), yCustomField,
+					m_NewParameterBuffer, theme, nullptr, &yA11y) && m_NewParameterBuffer != paramY)
+				{
+					const AnimState* live = m_Graph.FindState(stateName);
+					if (live != nullptr)
+					{
+						AnimState updated = *live;
+						updated.ParameterY = TrimAscii(m_NewParameterBuffer);
+						if (ReplaceState(stateName, updated))
+							m_LayerMaskTextKey.clear();
+					}
+				}
+				Wui::Tooltip(ctx, yCustomField, AGTr("blend.param.y.custom.tooltip",
+					"Custom identifier for the vertical axis. Press Enter to apply."));
+			}
 		}
 	}
 	// ---------------------------------------------------------------------------
@@ -572,6 +709,10 @@ namespace World
 
 		const bool blend2d = selected->Kind == AnimStateKind::BlendSpace2D;
 		const std::string stateName = selected->Name;
+		const std::string parameterX = selected->ParameterX;
+		const std::string parameterY = selected->ParameterY;
+		const AnimGraph::AnimParameterDefinition* defX = m_Graph.FindParameterDefinition(parameterX);
+		const AnimGraph::AnimParameterDefinition* defY = m_Graph.FindParameterDefinition(parameterY);
 		const std::vector<BlendSample2D> samples2d = selected->Blend2D.GetSamples();
 		const std::vector<BlendSample1D> samples1d = selected->Blend1D.GetSamples();
 		const size_t sampleCount = blend2d ? samples2d.size() : samples1d.size();
@@ -581,8 +722,13 @@ namespace World
 		Wui::Label(ctx, { area.X + theme.Pad, area.Y + 5.0f }, samplesHeader, theme.TextMuted,
 			theme.FontSizeCaption);
 		if (blend2d && area.W > 320.0f)
-			Wui::Label(ctx, { area.X + area.W - 150.0f, area.Y + 5.0f }, AGTr("blend.columns", "X (m/s)      Y (deg)"),
+		{
+			const std::string columns = AGFmt("blend.columns", "X: {x}    Y: {y}",
+				{ { "x", AxisTitle(parameterX, defX) }, { "y", AxisTitle(parameterY, defY) } });
+			Wui::Label(ctx, { area.X + area.W - 200.0f, area.Y + 5.0f },
+				Wui::EllipsizeMiddleToWidth(ctx, columns, 190.0f, theme.FontSizeCaption),
 				theme.TextDisabled, theme.FontSizeCaption);
+		}
 
 		auto copyState = [this, &stateName]() -> AnimState
 		{
@@ -615,8 +761,11 @@ namespace World
 			float x = blend2d ? samples2d[i].Point.x : samples1d[i].Value;
 			const float originalX = x;
 			const Wui::WuiId xId = Wui::HashId(("animgraph.sample.x." + std::to_string(i)).c_str());
-			bool xChanged = Wui::DragFloat(ctx, xId, xRect, x, 0.05f, -100.0f, 100.0f, theme);
-			Wui::Tooltip(ctx, xRect, AGTr("blend.sample.x.tooltip", "Sample X coordinate (Speed, m/s)."));
+			const float xMin = defX != nullptr ? defX->MinValue : -100.0f;
+			const float xMax = defX != nullptr ? defX->MaxValue : 100.0f;
+			bool xChanged = Wui::DragFloat(ctx, xId, xRect, x, AxisDragSpeed(defX), xMin, xMax, theme);
+			Wui::Tooltip(ctx, xRect, AGFmt("blend.sample.x.tooltip", "Sample coordinate on {axis}.",
+				{ { "axis", AxisTitle(parameterX, defX) } }));
 
 			float sampleY = blend2d ? samples2d[i].Point.y : 0.0f;
 			const float originalY = sampleY;
@@ -625,8 +774,11 @@ namespace World
 			if (blend2d)
 			{
 				yId = Wui::HashId(("animgraph.sample.y." + std::to_string(i)).c_str());
-				yChanged = Wui::DragFloat(ctx, yId, yRect, sampleY, 0.5f, -360.0f, 360.0f, theme);
-				Wui::Tooltip(ctx, yRect, AGTr("blend.sample.y.tooltip", "Sample Y coordinate (Direction, degrees)."));
+				const float yMin = defY != nullptr ? defY->MinValue : -360.0f;
+				const float yMax = defY != nullptr ? defY->MaxValue : 360.0f;
+				yChanged = Wui::DragFloat(ctx, yId, yRect, sampleY, AxisDragSpeed(defY), yMin, yMax, theme);
+				Wui::Tooltip(ctx, yRect, AGFmt("blend.sample.y.tooltip", "Sample coordinate on {axis}.",
+					{ { "axis", AxisTitle(parameterY, defY) } }));
 			}
 
 			const std::string currentClip = blend2d ? samples2d[i].ClipName : samples1d[i].ClipName;
@@ -729,10 +881,12 @@ namespace World
 		{
 			AnimState updated = copyState();
 			const std::string clip = updated.ClipName.empty() ? std::string("Idle") : updated.ClipName;
+			const float sampleX = ParamValue(updated.ParameterX);
+			const float sampleY = ParamValue(updated.ParameterY);
 			if (blend2d)
-				updated.Blend2D.AddSample({ std::max(0.0f, m_ParamSpeed), m_ParamDirection }, clip);
+				updated.Blend2D.AddSample({ sampleX, sampleY }, clip);
 			else
-				updated.Blend1D.AddSample(std::max(0.0f, m_ParamSpeed), clip);
+				updated.Blend1D.AddSample(sampleX, clip);
 			ReplaceState(stateName, updated);
 			m_SelectedSample = -1;
 			m_TrianglesDirty = true;

@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <iterator>
 #include <string>
@@ -515,6 +516,281 @@ static void TestAssetRoundTrip()
 	std::cout << "[PASS] TestAssetRoundTrip\n";
 }
 
+static void TestParameterDefinitionRoundTrip()
+{
+	namespace fs = std::filesystem;
+	const fs::path root = fs::temp_directory_path() / "we_animgraph_parameter_definitions";
+	std::error_code ec;
+	fs::create_directories(root, ec);
+	const fs::path first = root / "definitions_a.wanimgraph";
+	const fs::path second = root / "definitions_b.wanimgraph";
+
+	AnimGraph graph;
+	AnimGraph::AnimParameterDefinition speed;
+	speed.Name = " Speed ";
+	speed.Type = AnimGraph::AnimParameterType::Float;
+	speed.DefaultValue = 3.25f;
+	speed.MinValue = -2.5f;
+	speed.MaxValue = 12.75f;
+	speed.Unit = " m/s ";
+	graph.SetParameterDefinition(speed);
+
+	const AnimGraph::AnimParameterDefinition* savedSpeed = graph.FindParameterDefinition("Speed");
+	assert(savedSpeed);
+	assert(savedSpeed->Name == "Speed");
+	assert(savedSpeed->Unit == "m/s");
+	assert(graph.GetParameterType("Speed", AnimGraph::AnimParameterType::Bool) == AnimGraph::AnimParameterType::Float);
+	assert(std::abs(graph.GetFloat("Speed") - 3.25f) < 1e-6f);
+
+	// 改默认值必须保留类型、范围和单位，并把值夹到合法区间。
+	graph.SetParameterDefault("Speed", 99.0f);
+	savedSpeed = graph.FindParameterDefinition("Speed");
+	assert(savedSpeed);
+	assert(savedSpeed->Type == AnimGraph::AnimParameterType::Float);
+	assert(std::abs(savedSpeed->DefaultValue - 12.75f) < 1e-6f);
+	assert(std::abs(savedSpeed->MinValue + 2.5f) < 1e-6f);
+	assert(std::abs(savedSpeed->MaxValue - 12.75f) < 1e-6f);
+	assert(savedSpeed->Unit == "m/s");
+	graph.SetParameterDefault("Speed", 3.25f);
+
+	AnimGraph::AnimParameterDefinition falling;
+	falling.Name = "IsFalling";
+	falling.Type = AnimGraph::AnimParameterType::Bool;
+	falling.DefaultValue = 1.0f;
+	falling.MinValue = -10.0f;
+	falling.MaxValue = 10.0f;
+	falling.Unit = "ignored";
+	graph.SetParameterDefinition(falling);
+
+	const AnimGraph::AnimParameterDefinition* savedFalling = graph.FindParameterDefinition("IsFalling");
+	assert(savedFalling);
+	assert(savedFalling->Type == AnimGraph::AnimParameterType::Bool);
+	assert(std::abs(savedFalling->DefaultValue - 1.0f) < 1e-6f);
+	assert(std::abs(savedFalling->MinValue) < 1e-6f);
+	assert(std::abs(savedFalling->MaxValue - 1.0f) < 1e-6f);
+	assert(savedFalling->Unit.empty());
+	assert(graph.GetBool("IsFalling", false));
+
+	AnimGraph normalized;
+	AnimGraph::AnimParameterDefinition reversed;
+	reversed.Name = " Reverse ";
+	reversed.DefaultValue = 4.0f;
+	reversed.MinValue = 10.0f;
+	reversed.MaxValue = -10.0f;
+	reversed.Unit = " cm ";
+	normalized.SetParameterDefinition(reversed);
+	const AnimGraph::AnimParameterDefinition* normalizedReversed = normalized.FindParameterDefinition("Reverse");
+	assert(normalizedReversed);
+	assert(std::abs(normalizedReversed->MinValue + 10.0f) < 1e-6f);
+	assert(std::abs(normalizedReversed->MaxValue - 10.0f) < 1e-6f);
+	assert(std::abs(normalizedReversed->DefaultValue - 4.0f) < 1e-6f);
+	assert(normalizedReversed->Unit == "cm");
+
+	AnimGraph::AnimParameterDefinition nonFinite;
+	nonFinite.Name = "BadRange";
+	nonFinite.DefaultValue = std::numeric_limits<float>::quiet_NaN();
+	nonFinite.MinValue = std::numeric_limits<float>::infinity();
+	nonFinite.MaxValue = -std::numeric_limits<float>::infinity();
+	normalized.SetParameterDefinition(nonFinite);
+	const AnimGraph::AnimParameterDefinition* normalizedBadRange = normalized.FindParameterDefinition("BadRange");
+	assert(normalizedBadRange);
+	assert(std::abs(normalizedBadRange->DefaultValue) < 1e-6f);
+	assert(std::abs(normalizedBadRange->MinValue) < 1e-6f);
+	assert(std::abs(normalizedBadRange->MaxValue - 1.0f) < 1e-6f);
+
+	AnimGraph::AnimParameterDefinition emptyName;
+	emptyName.Name = "   ";
+	normalized.SetParameterDefinition(emptyName);
+	assert(normalized.GetParameterDefinitions().size() == 2);
+
+	AnimGraph defaultOnly;
+	defaultOnly.SetParameterDefault("Gait", 2.0f);
+	const AnimGraph::AnimParameterDefinition* gait = defaultOnly.FindParameterDefinition("Gait");
+	assert(gait);
+	assert(gait->Type == AnimGraph::AnimParameterType::Float);
+	assert(std::abs(gait->DefaultValue - 1.0f) < 1e-6f);
+	assert(std::abs(gait->MinValue) < 1e-6f);
+	assert(std::abs(gait->MaxValue - 1.0f) < 1e-6f);
+
+	std::string error;
+	assert(graph.SaveToFile(first.string(), &error));
+
+	AnimGraph loaded;
+	assert(loaded.LoadFromFile(first.string(), &error));
+	assert(error.empty());
+	assert(loaded.GetParameterDefinitions().size() == 2);
+	const AnimGraph::AnimParameterDefinition* loadedSpeed = loaded.FindParameterDefinition("Speed");
+	assert(loadedSpeed);
+	assert(loadedSpeed->Type == AnimGraph::AnimParameterType::Float);
+	assert(std::abs(loadedSpeed->DefaultValue - 3.25f) < 1e-6f);
+	assert(std::abs(loadedSpeed->MinValue + 2.5f) < 1e-6f);
+	assert(std::abs(loadedSpeed->MaxValue - 12.75f) < 1e-6f);
+	assert(loadedSpeed->Unit == "m/s");
+	const AnimGraph::AnimParameterDefinition* loadedFalling = loaded.FindParameterDefinition("IsFalling");
+	assert(loadedFalling);
+	assert(loadedFalling->Type == AnimGraph::AnimParameterType::Bool);
+	assert(std::abs(loadedFalling->DefaultValue - 1.0f) < 1e-6f);
+	assert(loaded.GetBool("IsFalling", false));
+
+	const auto readAll = [](const fs::path& path)
+	{
+		std::ifstream stream(path, std::ios::binary);
+		return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+	};
+	const std::string bytes = readAll(first);
+	assert(bytes.find("parameter: Speed float 3.25 -2.5 12.75 m/s\n") != std::string::npos);
+	assert(bytes.find("parameter: IsFalling bool 1 0 1\n") != std::string::npos);
+
+	assert(loaded.SaveToFile(second.string(), &error));
+	assert(bytes == readAll(second));
+	fs::remove(first, ec);
+	fs::remove(second, ec);
+
+	std::cout << "[PASS] TestParameterDefinitionRoundTrip\n";
+}
+
+static void TestLegacyParameterFormat()
+{
+	namespace fs = std::filesystem;
+	const fs::path root = fs::temp_directory_path() / "we_animgraph_legacy_parameters";
+	std::error_code ec;
+	fs::create_directories(root, ec);
+	const fs::path path = root / "legacy.wanimgraph";
+
+	std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+	assert(stream.is_open());
+	stream << "version: 1\n"
+		<< "parameter: Speed 0\n"
+		<< "parameter: AimWeight 0.5\n";
+	stream.close();
+
+	AnimGraph graph;
+	std::string error;
+	assert(graph.LoadFromFile(path.string(), &error));
+	assert(error.empty());
+	assert(graph.GetParameterDefinitions().size() == 2);
+
+	const AnimGraph::AnimParameterDefinition* speed = graph.FindParameterDefinition("Speed");
+	assert(speed);
+	assert(speed->Type == AnimGraph::AnimParameterType::Float);
+	assert(std::abs(speed->DefaultValue) < 1e-6f);
+	assert(std::abs(speed->MinValue) < 1e-6f);
+	assert(std::abs(speed->MaxValue - 1.0f) < 1e-6f);
+	assert(speed->Unit.empty());
+	assert(std::abs(graph.GetFloat("Speed", -1.0f)) < 1e-6f);
+	assert(std::abs(graph.GetFloat("AimWeight", 0.0f) - 0.5f) < 1e-6f);
+
+	fs::remove(path, ec);
+	std::cout << "[PASS] TestLegacyParameterFormat\n";
+}
+
+static void TestInvalidParameterLinesDoNotFailLoad()
+{
+	namespace fs = std::filesystem;
+	const fs::path root = fs::temp_directory_path() / "we_animgraph_invalid_parameters";
+	std::error_code ec;
+	fs::create_directories(root, ec);
+	const fs::path path = root / "invalid.wanimgraph";
+
+	std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+	assert(stream.is_open());
+	stream << "version: 1\n"
+		<< "parameter:\n"
+		<< "parameter: Missing\n"
+		<< "parameter: Broken nope\n"
+		<< "parameter: Odd bogus 1 -2 3 units are kept\n"
+		<< "parameter: Implicit float\n";
+	stream.close();
+
+	AnimGraph graph;
+	std::string error;
+	assert(graph.LoadFromFile(path.string(), &error));
+	assert(error.empty());
+	assert(!graph.FindParameterDefinition("Missing"));
+	assert(!graph.FindParameterDefinition("Broken"));
+
+	const AnimGraph::AnimParameterDefinition* odd = graph.FindParameterDefinition("Odd");
+	assert(odd);
+	assert(odd->Type == AnimGraph::AnimParameterType::Float);
+	assert(std::abs(odd->DefaultValue - 1.0f) < 1e-6f);
+	assert(std::abs(odd->MinValue + 2.0f) < 1e-6f);
+	assert(std::abs(odd->MaxValue - 3.0f) < 1e-6f);
+	assert(odd->Unit == "units are kept");
+
+	const AnimGraph::AnimParameterDefinition* implicit = graph.FindParameterDefinition("Implicit");
+	assert(implicit);
+	assert(implicit->Type == AnimGraph::AnimParameterType::Float);
+	assert(std::abs(implicit->DefaultValue) < 1e-6f);
+	assert(std::abs(implicit->MinValue) < 1e-6f);
+	assert(std::abs(implicit->MaxValue - 1.0f) < 1e-6f);
+
+	fs::remove(path, ec);
+	std::cout << "[PASS] TestInvalidParameterLinesDoNotFailLoad\n";
+}
+
+static void TestEmptyTransitionRoundTrip()
+{
+	namespace fs = std::filesystem;
+	const fs::path root = fs::temp_directory_path() / "we_animgraph_empty_transition";
+	std::error_code ec;
+	fs::create_directories(root, ec);
+	const fs::path first = root / "empty_a.wanimgraph";
+	const fs::path second = root / "empty_b.wanimgraph";
+
+	AnimGraph graph;
+	AnimState idle;
+	idle.Name = "Idle";
+	AnimTransition toNext;
+	toNext.TargetState = "Next";
+	toNext.Duration = 0.1f;
+	toNext.ConditionExpression = "   ";
+	idle.Transitions.push_back(toNext);
+	AnimState next;
+	next.Name = "Next";
+	graph.AddState(idle);
+	graph.AddState(next);
+	graph.SetInitialState("Idle");
+
+	const AnimState* addedIdle = graph.FindState("Idle");
+	assert(addedIdle);
+	assert(addedIdle->Transitions.size() == 1);
+	assert(static_cast<bool>(addedIdle->Transitions[0].Condition));
+
+	std::string error;
+	assert(graph.SaveToFile(first.string(), &error));
+	const auto readAll = [](const fs::path& path)
+	{
+		std::ifstream stream(path, std::ios::binary);
+		return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+	};
+	const std::string bytes = readAll(first);
+	assert(bytes.find("  transition: Next 0.1\n") != std::string::npos);
+	assert(bytes.find("  transition: Next 0.1 \n") == std::string::npos);
+
+	AnimGraph loaded;
+	assert(loaded.LoadFromFile(first.string(), &error));
+	assert(error.empty());
+	const AnimState* loadedIdle = loaded.FindState("Idle");
+	assert(loadedIdle);
+	assert(loadedIdle->Transitions.size() == 1);
+	assert(loadedIdle->Transitions[0].ConditionExpression.empty());
+	assert(static_cast<bool>(loadedIdle->Transitions[0].Condition));
+
+	loaded.Update(0.016f);
+	assert(loaded.IsInTransition());
+	assert(loaded.GetTransitionTargetState() == "Next");
+	loaded.Update(0.2f);
+	assert(!loaded.IsInTransition());
+	assert(loaded.GetCurrentStateName() == "Next");
+
+	assert(loaded.SaveToFile(second.string(), &error));
+	assert(bytes == readAll(second));
+	fs::remove(first, ec);
+	fs::remove(second, ec);
+
+	std::cout << "[PASS] TestEmptyTransitionRoundTrip\n";
+}
+
 static void TestShippedMannequinGraph()
 {
 	namespace fs = std::filesystem;
@@ -639,6 +915,10 @@ int main()
 	TestCrossFadeMonotonic();
 	TestLayeredUpperBodyMask();
 	TestAssetRoundTrip();
+	TestParameterDefinitionRoundTrip();
+	TestLegacyParameterFormat();
+	TestInvalidParameterLinesDoNotFailLoad();
+	TestEmptyTransitionRoundTrip();
 	std::cout << "All World.AnimGraph tests passed successfully!\n";
 	return 0;
 }
