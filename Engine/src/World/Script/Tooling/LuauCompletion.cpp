@@ -380,6 +380,7 @@ namespace World
 			{ "vec4", "引擎向量类型(Lua 侧是 userdata;vec4.new 构造,含 x/y/z/w 坐标)" },
 			{ "mat3", "引擎矩阵类型(Lua 侧是 userdata;mat3.new 构造)" },
 			{ "mat4", "引擎矩阵类型(Lua 侧是 userdata;mat4.new 构造)" },
+			{ "quat", "引擎四元数类型(Lua 侧是 userdata;quat.fromEuler / quat.fromAxisAngle 构造)" },
 			{ "Entity", "实体句柄(Lua 侧是 userdata;Entity 方法表的接收者)" },
 			{ "WorldScript", "脚本实例(注解形态的类;回调里的 self 就是它)" },
 		};

@@ -69,6 +69,9 @@ namespace World::Gameplay
 		snapshot.ButtonsById = source.DownById;
 		snapshot.AxesById = source.AxesById;
 		snapshot.MousePosition = mousePosition;
+		// 鼠标按键位掩码来自原始设备状态(高层 InputSnapshot 只含动作/轴)。
+		if (const Gameplay::RawInputState* raw = service.GetRawState())
+			snapshot.MouseButtons = raw->MouseButtons;
 		snapshot.MouseDelta = (firstSample || !state.HasPreviousMouse)
 			? glm::vec2(0.0f)
 			: (mousePosition - state.PreviousMouse);

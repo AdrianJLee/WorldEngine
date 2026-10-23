@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <glm/gtc/quaternion.hpp>
 #include <stdexcept>
 #include <string>
 
@@ -1200,7 +1201,62 @@ int main()
 
 
 		// =====================================================================
-		// 12. 2D 像素相机组件与 IVec2 脚本代理读写验证
+		// 12. Lua quat 类型、Quat 字段代理与 Input 快照绑定
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			Entity spinner = scene.CreateEntityShell("QuatSpinner");
+			auto& transform = spinner.AddComponent<TransformComponent>();
+
+			RUN_OK(R"LUA(
+				local query = ecs:Query({ Comp.Transform })
+				query:Each(function(entity, t)
+					t.Rotation = quat.fromEuler(0, 90, 0)
+				end)
+
+				-- glm::quat 约定:绕 +Y 正 90° 把前向 +Z 转到 +X;负 90° 转到 -X。
+				local plus = quat.fromEuler(0, 90, 0) * vec3.new(0, 0, 1)
+				assert(math.abs(plus.x - 1.0) < 0.001 and math.abs(plus.z) < 0.001, "fromEuler +90 must rotate +Z to +X")
+				local minus = quat.fromEuler(0, -90, 0) * vec3.new(0, 0, 1)
+				assert(math.abs(minus.x + 1.0) < 0.001 and math.abs(minus.z) < 0.001, "fromEuler -90 must rotate +Z to -X")
+
+				local axis = quat.fromAxisAngle(vec3.new(0, 1, 0), 90) * vec3.new(0, 0, 1)
+				assert(math.abs(axis.x - 1.0) < 0.001, "fromAxisAngle must match fromEuler")
+
+				local identity = quat.identity() * vec3.new(0, 0, 1)
+				assert(math.abs(identity.z - 1.0) < 0.001, "identity must not rotate")
+				local combined = (quat.fromEuler(0, 90, 0) * quat.fromEuler(0, 90, 0)) * vec3.new(0, 0, 1)
+				assert(math.abs(combined.z + 1.0) < 0.001, "quat * quat must compose rotations")
+
+				local custom = quat.new(0, 0, 0, 1)
+				assert(custom.w == 1 and custom.x == 0 and custom.y == 0 and custom.z == 0, "quat.new must map (x,y,z,w)")
+			)LUA", "TestQuatTypeAndTransformField");
+
+			const glm::vec3 forward = transform.Rotation * glm::vec3(0.0f, 0.0f, 1.0f);
+			CHECK(ApproxEqual(forward.x, 1.0f));
+			CHECK(ApproxEqual(forward.y, 0.0f));
+			CHECK(ApproxEqual(forward.z, 0.0f));
+
+			Scene::InputSnapshot snapshot;
+			snapshot.MouseDelta = glm::vec2(3.0f, -4.0f);
+			snapshot.MouseButtons = static_cast<uint16_t>(1u << 1);   // 右键
+			scene.SetInputSnapshot(snapshot);
+
+			RUN_OK(R"(
+				local delta = Input.MouseDelta()
+				assert(math.abs(delta.x - 3.0) < 0.001 and math.abs(delta.y + 4.0) < 0.001, "MouseDelta must read the scene snapshot")
+				assert(Input.MouseButton(1) == true, "right button must be held")
+				assert(Input.MouseButton(0) == false, "left button must be released")
+				assert(Input.MouseButton(99) == false, "unknown buttons must return false")
+			)", "TestInputMouseSnapshotBindings");
+
+			ScriptEngine::SetActiveScene(nullptr);
+		}
+
+		// =====================================================================
+		// 13. 2D 像素相机组件与 IVec2 脚本代理读写验证
 		// =====================================================================
 		{
 			Scene scene(context);

@@ -457,7 +457,7 @@ int main()
 				probe.Results.push_back(out);
 			};
 
-			// ① `---@field Speed ` 打完最后一个空格就该弹;前 13 条含 7 个引擎类型。
+			// ① `---@field Speed ` 打完最后一个空格就该弹;前 14 条含 8 个引擎类型(含 quat)。
 			WuiTextBuffer typeSlot;
 			SetTextAtEnd(typeSlot, "---@field Speed");
 			TypeChars(ctx, typeSlot, editorRect, options, { ' ' });
@@ -466,20 +466,20 @@ int main()
 			CHECK(probe.Prefixes.back() == "---@field Speed ");
 			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
 			const std::vector<World::LuauCompletionItem>& typeItems = probe.Results.back();
-			CHECK(typeItems.size() >= 13);
-			for (const char* name : { "vec2", "vec3", "vec4", "mat3", "mat4", "Entity", "WorldScript" })
+			CHECK(typeItems.size() >= 14);
+			for (const char* name : { "vec2", "vec3", "vec4", "mat3", "mat4", "quat", "Entity", "WorldScript" })
 			{
 				const int at = NameIndex(typeItems, name);
-				CHECK(at >= 0 && at < 13);
+				CHECK(at >= 0 && at < 14);
 			}
 			std::string firstNames;
-			for (std::size_t i = 0; i < typeItems.size() && i < 13; ++i)
+			for (std::size_t i = 0; i < typeItems.size() && i < 14; ++i)
 			{
 				if (!firstNames.empty())
 					firstNames += ", ";
 				firstNames += typeItems[i].Name;
 			}
-			std::printf("[wui] annotation '%s' -> %zu items; first13: %s\n",
+			std::printf("[wui] annotation '%s' -> %zu items; first14: %s\n",
 				probe.Prefixes.back().c_str(), typeItems.size(), firstNames.c_str());
 
 			// 自动弹出(Explicit=false)时 Enter 不能被候选吃掉:关浮层 + 正常换行。

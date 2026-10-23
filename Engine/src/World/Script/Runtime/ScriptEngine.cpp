@@ -2340,6 +2340,32 @@ namespace World
 		auto vec4 = VectorDescription("vec4", 4);
 		vec4.BindFunc = [](ScriptBindingContext& bindings) { RegisterBuiltinVec4Binding(bindings); };
 		LuaReflectionRegistry::Register(vec4);
+
+		auto quat = LuaTypeReflection{};
+		quat.ClassName = "quat";
+		quat.Properties = {
+			{ "x", "number", "Quaternion x component" },
+			{ "y", "number", "Quaternion y component" },
+			{ "z", "number", "Quaternion z component" },
+			{ "w", "number", "Quaternion w (scalar) component" }
+		};
+		quat.Constructors = {
+			{ "new", {{ "x", "number", "X component" }, { "y", "number", "Y component" },
+				{ "z", "number", "Z component" }, { "w", "number", "W (scalar) component" }},
+				"quat", "Create a quaternion from x, y, z and w", false }
+		};
+		quat.Methods = {
+			{ "identity", {}, "quat", "Return the identity rotation", false },
+			{ "fromEuler", {{ "xDeg", "number", "Rotation around X in degrees" },
+				{ "yDeg", "number", "Rotation around Y in degrees" }, { "zDeg", "number", "Rotation around Z in degrees" }},
+				"quat", "Create a quaternion from Euler angles in degrees (glm::quat order)", false },
+			{ "fromAxisAngle", {{ "axis", "vec3", "Rotation axis (normalized internally)" },
+				{ "degrees", "number", "Rotation angle in degrees" }},
+				"quat", "Create a quaternion from an axis and an angle in degrees", false }
+		};
+		quat.Operators = { { "mul", "vec3", "vec3" }, { "mul", "quat", "quat" } };
+		quat.BindFunc = [](ScriptBindingContext& bindings) { RegisterBuiltinQuatBinding(bindings); };
+		LuaReflectionRegistry::Register(quat);
 	}
 
 	void ScriptEngine::RegisterMathTypes()
@@ -2350,6 +2376,7 @@ namespace World
 		RegisterBuiltinEntityLuaType();
 		RegisterBuiltinMat3LuaType();
 		RegisterBuiltinMat4LuaType();
+		// quat 在 DefineMathType 中登记反射,下面的 BindFunc 循环统一绑定(vec2/vec3/vec4 同路径)。
 		for (const auto& type : LuaReflectionRegistry::GetTable())
 			if (type.BindFunc) type.BindFunc(*s_Bindings);
 	}

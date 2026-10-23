@@ -176,6 +176,40 @@ function mat4.new() end
 ---@return mat4
 function mat4:transpose() end
 
+---@class quat
+---@field w number Quaternion w (scalar) component
+---@field x number Quaternion x component
+---@field y number Quaternion y component
+---@field z number Quaternion z component
+---@operator mul(quat): quat
+---@operator mul(vec3): vec3
+quat = {}
+
+---Create a quaternion from an axis and an angle in degrees
+---@param axis vec3 Rotation axis (normalized internally)
+---@param degrees number Rotation angle in degrees
+---@return quat
+function quat.fromAxisAngle(axis, degrees) end
+
+---Create a quaternion from Euler angles in degrees (glm::quat order)
+---@param xDeg number Rotation around X in degrees
+---@param yDeg number Rotation around Y in degrees
+---@param zDeg number Rotation around Z in degrees
+---@return quat
+function quat.fromEuler(xDeg, yDeg, zDeg) end
+
+---Return the identity rotation
+---@return quat
+function quat.identity() end
+
+---Create a quaternion from x, y, z and w
+---@param x number X component
+---@param y number Y component
+---@param z number Z component
+---@param w number W (scalar) component
+---@return quat
+function quat.new(x, y, z, w) end
+
 ---@class vec2
 ---@field x number Vector coordinate
 ---@field y number Vector coordinate
@@ -332,6 +366,15 @@ function Input:HasContext(name) end
 ---@param key string|number Key name ('Space', 'F', 'A', 'D') or integer keycode.
 ---@return boolean
 function Input:IsKeyPressed(key) end
+
+---Mouse movement since the previous frame (scene input snapshot).
+---@return vec2
+function Input:MouseDelta() end
+
+---Whether a mouse button is held: 0 = left, 1 = right, 2 = middle; unknown buttons return false.
+---@param button integer Mouse button: 0 = left, 1 = right, 2 = middle.
+---@return boolean
+function Input:MouseButton(button) end
 
 -- Global service table 'Level': read-only; there is no runtime constructor.
 ---Read-only level/flow service table; scene handles and host callbacks are not exposed.
@@ -1518,7 +1561,7 @@ function ui:isOpen() end
 -- Component fields are exposed through Entity:GetComponent("TransformComponent"); there is no runtime global named TransformComponent.
 ---@class TransformComponent
 ---@field Scale vec3
----@field Rotation unknown no script mapping for schema kind 'Quat'
+---@field Rotation quat
 ---@field Location vec3
 
 -- Component fields are exposed through Entity:GetComponent("UUIDComponent"); there is no runtime global named UUIDComponent.

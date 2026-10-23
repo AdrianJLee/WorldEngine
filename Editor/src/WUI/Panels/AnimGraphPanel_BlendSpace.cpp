@@ -137,7 +137,14 @@ namespace World
 	{
 		(void)host;
 		Wui::PanelBackground(ctx, canvas, theme.ContentBg, theme.Radius);
-		const BlendMap map = MakeBlendMap(canvas, state, blend2d, m_ParamSpeed, m_ParamDirection);
+		BlendMap map = MakeBlendMap(canvas, state, blend2d, m_ParamSpeed, m_ParamDirection);
+		if (m_DragSample >= 0)
+		{
+			map.MinX = m_DragMinX;
+			map.MaxX = m_DragMaxX;
+			map.MinY = m_DragMinY;
+			map.MaxY = m_DragMaxY;
+		}
 
 		Wui::PanelBackground(ctx, map.Plot, theme.PanelBg, 2.0f);
 
@@ -356,33 +363,71 @@ namespace World
 			}
 		}
 
+		// 按下只选中并记录抓取点：移动超过 5 px 才进入拖拽，避免轻点即位移。
 		if (ctx.IsHovered(map.Plot) && ctx.ClipAllows(canvas))
 		{
-			if (m_HoverSample >= 0)
+			if (m_HoverSample >= 0 && m_DragSample < 0)
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 
 			if (ctx.Input().MouseClicked[0])
 			{
 				m_SelectedSample = m_HoverSample;
-				if (m_HoverSample >= 0)
+				m_DragSample = -1;
+				m_DragPending = m_HoverSample;
+				m_DragChanged = false;
+				m_DragStartPos = mouse;
+				m_DragGrabOffset = glm::vec2 { 0.0f, 0.0f };
+				if (m_HoverSample >= 0 && static_cast<size_t>(m_HoverSample) < sampleCount)
 				{
-					m_DragSample = m_HoverSample;
-					m_DragChanged = false;
+					const glm::vec2 sampleScreen = map.ToScreen(
+						blend2d ? samples2d[static_cast<size_t>(m_HoverSample)].Point.x : samples1d[static_cast<size_t>(m_HoverSample)].Value,
+						blend2d ? samples2d[static_cast<size_t>(m_HoverSample)].Point.y : 0.0f);
+					m_DragGrabOffset = sampleScreen - mouse;
 				}
 			}
 		}
 
-		if (m_DragSample >= 0 && ctx.Input().MouseDown[0])
+		if (m_DragPending >= 0 && m_DragSample < 0 && ctx.Input().MouseDown[0])
+		{
+			if (static_cast<size_t>(m_DragPending) < sampleCount
+				&& glm::length(mouse - m_DragStartPos) > 5.0f)
+			{
+				m_DragSample = m_DragPending;
+				m_DragMinX = map.MinX;
+				m_DragMaxX = map.MaxX;
+				m_DragMinY = map.MinY;
+				m_DragMaxY = map.MaxY;
+			}
+			else if (static_cast<size_t>(m_DragPending) < sampleCount || m_HoverSample >= 0)
+			{
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+			}
+		}
+
+		if (m_DragSample >= 0 && ctx.Input().MouseDown[0]
+			&& static_cast<size_t>(m_DragSample) < sampleCount)
 		{
 			ctx.SetCursor(Wui::WuiCursor::ResizeNWSE);
-			const glm::vec2 param = map.ToParam(mouse);
-			const float x = std::clamp(std::round(param.x / 0.05f) * 0.05f, map.MinX, map.MaxX);
-			const float y = std::clamp(std::round(param.y), map.MinY, map.MaxY);
+			// 用按下时的抓取偏移，节点跟手移动而不是在阈值处跳到光标。
+			BlendMap dragMap = map;
+			dragMap.MinX = m_DragMinX;
+			dragMap.MaxX = m_DragMaxX;
+			dragMap.MinY = m_DragMinY;
+			dragMap.MaxY = m_DragMaxY;
+			const glm::vec2 param = dragMap.ToParam(mouse + m_DragGrabOffset);
+			const float x = std::clamp(std::round(param.x / 0.05f) * 0.05f, dragMap.MinX, dragMap.MaxX);
+			const float y = std::clamp(std::round(param.y), dragMap.MinY, dragMap.MaxY);
+			const float originalX = blend2d ? samples2d[static_cast<size_t>(m_DragSample)].Point.x
+				: samples1d[static_cast<size_t>(m_DragSample)].Value;
+			const float originalY = blend2d ? samples2d[static_cast<size_t>(m_DragSample)].Point.y : 0.0f;
+			const bool moved = blend2d
+				? (std::fabs(x - originalX) > 0.0005f || std::fabs(y - originalY) > 0.0005f)
+				: (std::fabs(x - originalX) > 0.0005f);
 
-			AnimState updated = *state;
-			if (blend2d)
+			if (moved)
 			{
-				if (static_cast<size_t>(m_DragSample) < updated.Blend2D.GetSamples().size())
+				AnimState updated = *state;
+				if (blend2d)
 				{
 					const std::string clip = updated.Blend2D.GetSamples()[static_cast<size_t>(m_DragSample)].ClipName;
 					BlendSpace2D rebuilt;
@@ -396,34 +441,41 @@ namespace World
 					}
 					updated.Blend2D = rebuilt;
 				}
-			}
-			else if (static_cast<size_t>(m_DragSample) < updated.Blend1D.GetSamples().size())
-			{
-				const std::string clip = updated.Blend1D.GetSamples()[static_cast<size_t>(m_DragSample)].ClipName;
-				BlendSpace1D rebuilt;
-				const auto& current = updated.Blend1D.GetSamples();
-				for (size_t i = 0; i < current.size(); ++i)
+				else
 				{
-					if (static_cast<int>(i) == m_DragSample)
-						rebuilt.AddSample(x, clip);
-					else
-						rebuilt.AddSample(current[i].Value, current[i].ClipName);
+					const std::string clip = updated.Blend1D.GetSamples()[static_cast<size_t>(m_DragSample)].ClipName;
+					BlendSpace1D rebuilt;
+					const auto& current = updated.Blend1D.GetSamples();
+					for (size_t i = 0; i < current.size(); ++i)
+					{
+						if (static_cast<int>(i) == m_DragSample)
+							rebuilt.AddSample(x, clip);
+						else
+							rebuilt.AddSample(current[i].Value, current[i].ClipName);
+					}
+					updated.Blend1D = rebuilt;
 				}
-				updated.Blend1D = rebuilt;
-			}
 
-			ReplaceState(stateName, updated);
-			// 拖动期间保持旧三角剖分(不每帧重算,派工 §3.2),松手再置脏。
-			m_TrianglesDirty = false;
-			m_DragChanged = true;
+				// 一次按住拖动只入栈一次；后续帧只改内存模型。
+				if (!m_DragChanged)
+				{
+					PushUndo();
+					m_DragChanged = true;
+				}
+				ReplaceState(stateName, updated, false);
+				// 拖动期间保持旧三角剖分(不每帧重算),松手再置脏。
+				m_TrianglesDirty = false;
+			}
 		}
 
-		if (m_DragSample >= 0 && !ctx.Input().MouseDown[0])
+		if ((m_DragSample >= 0 || m_DragPending >= 0) && !ctx.Input().MouseDown[0])
 		{
-			m_DragSample = -1;
 			if (m_DragChanged)
 				m_TrianglesDirty = true;
+			m_DragSample = -1;
+			m_DragPending = -1;
 			m_DragChanged = false;
+			m_DragGrabOffset = glm::vec2 { 0.0f, 0.0f };
 		}
 	}
 
@@ -443,8 +495,12 @@ namespace World
 		Wui::SectionHeader(ctx, { area.X + theme.Pad, area.Y + 2.0f, area.W - theme.Pad * 2.0f, kRowH },
 			blend2d ? AGTr("blend.node.2d", "Blend Space 2D") : AGTr("blend.node.1d", "Blend Space 1D"), theme.Text, theme, theme.FontSizeTitle);
 		if (area.W > 430.0f)
-			Wui::Label(ctx, { area.X + area.W - 214.0f, area.Y + 7.0f },
-				AGTr("blend.hint", "Drag points - release to retriangulate"), theme.TextDisabled, theme.FontSizeCaption);
+		{
+			const std::string hint = AGTr("blend.hint", "Drag over 5 px to move - release to retriangulate");
+			Wui::Label(ctx, { area.X + area.W - 258.0f, area.Y + 7.0f },
+				Wui::EllipsizeMiddleToWidth(ctx, hint, 250.0f, theme.FontSizeCaption),
+				theme.TextDisabled, theme.FontSizeCaption);
+		}
 
 		const Wui::WuiRect canvas { area.X + theme.Pad, area.Y + kRowH + 2.0f,
 			area.W - theme.Pad * 2.0f, 260.0f };
@@ -558,17 +614,18 @@ namespace World
 
 			float x = blend2d ? samples2d[i].Point.x : samples1d[i].Value;
 			const float originalX = x;
-			bool xChanged = Wui::DragFloat(ctx, Wui::HashId(("animgraph.sample.x." + std::to_string(i)).c_str()),
-				xRect, x, 0.05f, -100.0f, 100.0f, theme);
+			const Wui::WuiId xId = Wui::HashId(("animgraph.sample.x." + std::to_string(i)).c_str());
+			bool xChanged = Wui::DragFloat(ctx, xId, xRect, x, 0.05f, -100.0f, 100.0f, theme);
 			Wui::Tooltip(ctx, xRect, AGTr("blend.sample.x.tooltip", "Sample X coordinate (Speed, m/s)."));
 
 			float sampleY = blend2d ? samples2d[i].Point.y : 0.0f;
 			const float originalY = sampleY;
 			bool yChanged = false;
+			Wui::WuiId yId = 0;
 			if (blend2d)
 			{
-				yChanged = Wui::DragFloat(ctx, Wui::HashId(("animgraph.sample.y." + std::to_string(i)).c_str()),
-					yRect, sampleY, 0.5f, -360.0f, 360.0f, theme);
+				yId = Wui::HashId(("animgraph.sample.y." + std::to_string(i)).c_str());
+				yChanged = Wui::DragFloat(ctx, yId, yRect, sampleY, 0.5f, -360.0f, 360.0f, theme);
 				Wui::Tooltip(ctx, yRect, AGTr("blend.sample.y.tooltip", "Sample Y coordinate (Direction, degrees)."));
 			}
 
@@ -612,8 +669,21 @@ namespace World
 				break;
 			}
 
-			if (xChanged || yChanged || clipChanged)
+			const bool positionChanged = (xChanged || yChanged)
+				&& (x != originalX || (blend2d && sampleY != originalY));
+			if (positionChanged || clipChanged)
 			{
+				if (positionChanged)
+				{
+					const bool continuous = ctx.Input().MouseDown[0]
+						&& (ctx.IsHovered(xRect) || (blend2d && ctx.IsHovered(yRect))
+							|| ctx.Focus() == xId || (blend2d && ctx.Focus() == yId));
+					BeginContinuousEdit(stateName + ".sample." + std::to_string(i), continuous);
+				}
+				else
+				{
+					PushUndo();
+				}
 				const std::string clip = (clipChanged && clipIndex >= 0 && static_cast<size_t>(clipIndex) < clips.size())
 					? clips[static_cast<size_t>(clipIndex)]
 					: currentClip;
@@ -644,7 +714,7 @@ namespace World
 					}
 					updated.Blend1D = rebuilt;
 				}
-				ReplaceState(stateName, updated);
+				ReplaceState(stateName, updated, false);
 				if (yChanged && m_DragSample < 0)
 					m_TrianglesDirty = true;
 			}

@@ -319,9 +319,15 @@ namespace
 		CHECK(Nearly(AnimGraphSystem::GetParameter(entity, "Direction"), 0.0f, 1e-3f));
 		CHECK(Nearly(AnimGraphSystem::GetParameter(entity, "Speed"), 2.0f, 1e-3f));
 
-		// 实体朝 -90°（前向 +Z 转向 -X）时，世界 +Z 就是实体本地 +X → +90°。
+		// 实体朝 -90°（前向 +Z 转向 -X）时，世界 +Z 就是实体本地 +X（角色左侧）→ -90°。
 		transform.Rotation = glm::angleAxis(glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-		controller.Velocity = glm::vec3(0.0f, 0.0f, 2.0f);       // 世界 +Z 在实体本地是 +X → +90°
+		controller.Velocity = glm::vec3(0.0f, 0.0f, 2.0f);       // 世界 +Z 在实体本地是 +X → -90°
+		AnimGraphSystem::Update(scene, 0.016f);
+		CHECK(Nearly(AnimGraphSystem::GetParameter(entity, "Direction"), -90.0f, 1e-3f));
+
+		// 面向 +Z、速度朝本地 -X（角色右侧）→ +90°。
+		transform.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+		controller.Velocity = glm::vec3(-2.0f, 0.0f, 0.0f);
 		AnimGraphSystem::Update(scene, 0.016f);
 		CHECK(Nearly(AnimGraphSystem::GetParameter(entity, "Direction"), 90.0f, 1e-3f));
 

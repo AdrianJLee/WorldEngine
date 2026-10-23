@@ -56,10 +56,16 @@ namespace World
 		void ConsumeOpenRequest();
 		void MarkDirty();
 		void SetStatus(const std::string& text, bool error);
+		void PushUndo();
+		bool Undo();
+		bool Redo();
+		void RestoreHistorySnapshot(AnimGraph snapshot, const std::string& initialStateHint);
+		// 连续拖动(滑杆/样本数值)只在第一次实际变化时入栈；鼠标松开后结束本次事务。
+		bool BeginContinuousEdit(const std::string& key, bool continuous);
 
 		// 状态编辑 = 复制 → 改 → ReplaceState(契约只给了 const GetStates,
 		// 因此没有可变访问时按 RemoveState + AddState 重建,见派工 §3.3)。
-		bool ReplaceState(const std::string& originalName, const AnimState& state);
+		bool ReplaceState(const std::string& originalName, const AnimState& state, bool recordUndo = true);
 		void AddStateOfKind(AnimStateKind kind);
 		void DeleteSelectedState();
 		void RenameSelectedState(const std::string& newName);
@@ -122,6 +128,11 @@ namespace World
 		float m_StatusAge = 0.0f;
 		bool m_OpenRowVisible = false;
 		std::string m_OpenPathBuffer;
+		// 整图快照历史：操作前入栈，上限 64。快照内的 CurrentState 被规范化为 initial hint，
+		// 因此每条记录都能独立恢复 initial:；m_UndoInitialState 跟踪撤销栈顶对应的 hint。
+		std::vector<AnimGraph> m_UndoStack;
+		std::vector<AnimGraph> m_RedoStack;
+		std::string m_UndoInitialState;
 
 		// 视图态
 		std::string m_SelectedState;
@@ -134,9 +145,18 @@ namespace World
 		Wui::WuiRect m_CanvasRect { 0, 0, 0, 0 };
 		int m_HoverSample = -1;
 		int m_DragSample = -1;
+		int m_DragPending = -1;
+		glm::vec2 m_DragStartPos { 0.0f, 0.0f };
+		glm::vec2 m_DragGrabOffset { 0.0f, 0.0f };
+		// 拖拽期间冻结参数映射范围，避免样本改变极值后坐标系反馈造成抖动。
+		float m_DragMinX = 0.0f;
+		float m_DragMaxX = 1.0f;
+		float m_DragMinY = -1.0f;
+		float m_DragMaxY = 1.0f;
 		bool m_DragChanged = false;
 		std::string m_DeleteArmState;
 		float m_DeleteArmAge = 0.0f;
+		std::string m_EditTransactionKey;
 
 		// 编辑缓冲(TextField 必须拿到跨帧稳定的引用)
 		std::string m_NameBuffer;

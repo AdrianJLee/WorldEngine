@@ -155,7 +155,7 @@ namespace
 			"---@field Label string\n"
 			"---@field Token string read-only\n"
 			"---@field Enabled boolean\n"
-			"---@field Spin unknown no script mapping for schema kind 'Quat'\n";
+			"---@field Spin quat\n";
 		CHECK(BlockOf(stub, "ProbeComponent") == expectedBlock);
 
 		// 单一映射来源:注解的 Lua 类型与 DescribeScriptField 一致(未映射 → unknown)。
@@ -255,7 +255,7 @@ namespace
 		}
 		CHECK(transform.find("---@field Location vec3") != std::string::npos);
 		CHECK(transform.find("---@field Scale vec3") != std::string::npos);
-		CHECK(transform.find("---@field Rotation unknown no script mapping for schema kind 'Quat'") != std::string::npos);
+		CHECK(transform.find("---@field Rotation quat") != std::string::npos);
 
 		// 身份字段(Object(UUID))与未映射嵌套结构(Object(CameraSettings))的真实形态。
 		CHECK(BlockOf(stub, "UUIDComponent") == "---@class UUIDComponent\n---@field ID string read-only\n");

@@ -571,8 +571,9 @@ namespace World
 
 		float DirectionDegrees(const glm::vec3& localVelocity)
 		{
-			// 面向 +Z 时为 0，右为 +90（atan2(x, z)）。
-			return glm::degrees(std::atan2(localVelocity.x, localVelocity.z));
+			// 面向 +Z 时为 0°，角色自身右侧为 +90°。本工程使用右手系：当角色面向 +Z 时，
+			// 其右方是 -X，因此 X 分量取负后才与「右 = +90°」的混合空间横轴语义一致。
+			return glm::degrees(std::atan2(-localVelocity.x, localVelocity.z));
 		}
 	}
 

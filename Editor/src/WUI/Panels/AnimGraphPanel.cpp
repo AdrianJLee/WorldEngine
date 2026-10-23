@@ -38,10 +38,11 @@ namespace World
 		constexpr float kRowH = 24.0f;
 		constexpr float kStateCardH = 176.0f;
 		constexpr float kBlendCardH = 356.0f;
-		constexpr float kLayerCardH = 128.0f;
+		constexpr float kLayerCardH = 168.0f;
 		constexpr float kGap = 8.0f;
 		constexpr float kSampleRowH = 28.0f;
 		constexpr float kTransitionRowH = 56.0f;
+		constexpr size_t kHistoryLimit = 64;
 
 		std::string NormalizeSlashes(std::string text)
 		{
@@ -131,6 +132,14 @@ namespace World
 			return base + " Copy";
 		}
 
+		AnimGraph HistorySnapshot(const AnimGraph& graph, const std::string& initialStateHint)
+		{
+			AnimGraph snapshot = graph;
+			if (!initialStateHint.empty() && snapshot.FindState(initialStateHint) != nullptr)
+				snapshot.SetInitialState(initialStateHint);
+			return snapshot;
+		}
+
 		std::string& PendingOpenPath()
 		{
 			static std::string pending;
@@ -194,6 +203,11 @@ namespace World
 
 	void AnimGraphPanel::MakeDefaultGraph()
 	{
+		m_UndoStack.clear();
+		m_RedoStack.clear();
+		m_UndoInitialState.clear();
+		m_EditTransactionKey.clear();
+
 		m_Graph.Clear();
 		m_Graph.SetGraphName(AGTr("graph.default_name", "New Animation Graph"));
 		m_Graph.SetModelHint("engine/models/characters/mannequin.wmodel");
@@ -243,6 +257,10 @@ namespace World
 
 		m_SelectedState = "Idle";
 		m_SelectedSample = -1;
+		m_DragSample = -1;
+		m_DragPending = -1;
+		m_DragChanged = false;
+		m_HoverSample = -1;
 		m_SelectedLayer.clear();
 		m_SelectedTransition = -1;
 		m_StateScroll = 0.0f;
@@ -307,12 +325,20 @@ namespace World
 		m_Graph = std::move(loaded);
 		// LoadFromFile 末尾 SetInitialState(initial:) ⇒ 此刻的 CurrentState 就是资产初始状态。
 		m_InitialStateHint = m_Graph.GetCurrentStateName();
+		m_UndoStack.clear();
+		m_RedoStack.clear();
+		m_UndoInitialState.clear();
+		m_EditTransactionKey.clear();
 		m_LoadedPath = ToLogicalPath(physical);
 		m_Dirty = false;
 		m_SelectedState.clear();
 		if (!m_Graph.GetStates().empty())
 			m_SelectedState = m_Graph.GetStates().begin()->first;
 		m_SelectedSample = -1;
+		m_DragSample = -1;
+		m_DragPending = -1;
+		m_DragChanged = false;
+		m_HoverSample = -1;
 		m_SelectedLayer.clear();
 		m_SelectedTransition = -1;
 		m_StateScroll = 0.0f;
@@ -412,6 +438,116 @@ namespace World
 		m_TrianglesDirty = true;
 	}
 
+	void AnimGraphPanel::PushUndo()
+	{
+		m_UndoStack.push_back(HistorySnapshot(m_Graph, m_InitialStateHint));
+		if (m_UndoStack.size() > kHistoryLimit)
+			m_UndoStack.erase(m_UndoStack.begin());
+		m_UndoInitialState = m_InitialStateHint;
+		m_RedoStack.clear();
+	}
+
+	bool AnimGraphPanel::BeginContinuousEdit(const std::string& key, bool continuous)
+	{
+		if (continuous && m_EditTransactionKey == key)
+			return false;
+		PushUndo();
+		if (continuous)
+			m_EditTransactionKey = key;
+		return true;
+	}
+
+	void AnimGraphPanel::RestoreHistorySnapshot(AnimGraph snapshot, const std::string& initialStateHint)
+	{
+		const std::string previousState = m_SelectedState;
+		const int previousSample = m_SelectedSample;
+		const std::string previousLayer = m_SelectedLayer;
+		const int previousTransition = m_SelectedTransition;
+
+		m_Graph = std::move(snapshot);
+		m_InitialStateHint = initialStateHint;
+		if (!m_InitialStateHint.empty() && m_Graph.FindState(m_InitialStateHint) != nullptr)
+			m_Graph.SetInitialState(m_InitialStateHint);
+
+		const auto& states = m_Graph.GetStates();
+		m_SelectedState = (!previousState.empty() && m_Graph.FindState(previousState) != nullptr)
+			? previousState
+			: (states.empty() ? std::string() : states.begin()->first);
+
+		const AnimState* state = SelectedState();
+		size_t sampleCount = 0;
+		if (state != nullptr)
+		{
+			sampleCount = state->Kind == AnimStateKind::BlendSpace1D ? state->Blend1D.GetSampleCount()
+				: (state->Kind == AnimStateKind::BlendSpace2D ? state->Blend2D.GetSampleCount() : 0u);
+		}
+		m_SelectedSample = (previousSample >= 0 && static_cast<size_t>(previousSample) < sampleCount)
+			? previousSample : -1;
+		m_SelectedTransition = (state != nullptr && previousTransition >= 0
+			&& static_cast<size_t>(previousTransition) < state->Transitions.size())
+			? previousTransition : -1;
+
+		const auto& layers = m_Graph.GetLayers();
+		m_SelectedLayer = std::any_of(layers.begin(), layers.end(),
+			[&previousLayer](const AnimLayer& layer) { return layer.Name == previousLayer; })
+			? previousLayer : std::string();
+
+		m_HoverSample = -1;
+		m_DragSample = -1;
+		m_DragPending = -1;
+		m_DragChanged = false;
+		m_DeleteArmState.clear();
+		m_DeleteArmAge = 0.0f;
+		m_NameBufferKey.clear();
+		m_ConditionKey.clear();
+		m_NameFieldWasFocused = false;
+		m_ConditionFocusKey.clear();
+		m_EditTransactionKey.clear();
+		MarkDirty();
+	}
+
+	bool AnimGraphPanel::Undo()
+	{
+		if (m_UndoStack.empty())
+		{
+			SetStatus(AGTr("status.nothing_to_undo", "Nothing to undo"), false);
+			return false;
+		}
+
+		m_RedoStack.push_back(HistorySnapshot(m_Graph, m_InitialStateHint));
+		if (m_RedoStack.size() > kHistoryLimit)
+			m_RedoStack.erase(m_RedoStack.begin());
+
+		const std::string restoreHint = m_UndoInitialState;
+		AnimGraph restored = std::move(m_UndoStack.back());
+		m_UndoStack.pop_back();
+		m_UndoInitialState = m_UndoStack.empty() ? std::string() : m_UndoStack.back().GetCurrentStateName();
+		RestoreHistorySnapshot(std::move(restored), restoreHint);
+		SetStatus(AGTr("status.undone", "Undone"), false);
+		return true;
+	}
+
+	bool AnimGraphPanel::Redo()
+	{
+		if (m_RedoStack.empty())
+		{
+			SetStatus(AGTr("status.nothing_to_redo", "Nothing to redo"), false);
+			return false;
+		}
+
+		m_UndoStack.push_back(HistorySnapshot(m_Graph, m_InitialStateHint));
+		if (m_UndoStack.size() > kHistoryLimit)
+			m_UndoStack.erase(m_UndoStack.begin());
+		m_UndoInitialState = m_InitialStateHint;
+
+		AnimGraph restored = std::move(m_RedoStack.back());
+		m_RedoStack.pop_back();
+		const std::string restoreHint = restored.GetCurrentStateName();
+		RestoreHistorySnapshot(std::move(restored), restoreHint);
+		SetStatus(AGTr("status.redone", "Redone"), false);
+		return true;
+	}
+
 	void AnimGraphPanel::SetStatus(const std::string& text, bool error)
 	{
 		m_Status = text;
@@ -430,13 +566,15 @@ namespace World
 		return m_Graph.FindState(m_SelectedState);
 	}
 
-	bool AnimGraphPanel::ReplaceState(const std::string& originalName, const AnimState& state)
+	bool AnimGraphPanel::ReplaceState(const std::string& originalName, const AnimState& state, bool recordUndo)
 	{
 		if (state.Name.empty())
 		{
 			SetStatus(AGTr("status.state_name_required", "A state needs a non-empty name"), true);
 			return false;
 		}
+		if (m_Graph.FindState(originalName) == nullptr)
+			return false;
 		if (originalName != state.Name)
 		{
 			if (m_Graph.FindState(state.Name) != nullptr)
@@ -445,6 +583,13 @@ namespace World
 				{ { "name", state.Name } }), true);
 				return false;
 			}
+		}
+
+		if (recordUndo)
+			PushUndo();
+
+		if (originalName != state.Name)
+		{
 			if (!m_Graph.RemoveState(originalName))
 				return false;
 
@@ -527,6 +672,9 @@ namespace World
 		if (m_SelectedState.empty())
 			return;
 		const std::string removed = m_SelectedState;
+		if (m_Graph.FindState(removed) == nullptr)
+			return;
+		PushUndo();
 		if (!m_Graph.RemoveState(removed))
 			return;
 
@@ -682,16 +830,32 @@ namespace World
 
 	bool AnimGraphPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
 	{
-		if (!ctrl || shift || alt)
+		if (!ctrl || alt)
 			return false;
-		if (keyCode == KeyCodes::S)
+		if (keyCode == KeyCodes::S && !shift)
 		{
 			SaveAsset();
 			return true;
 		}
-		if (keyCode == KeyCodes::R)
+		if (keyCode == KeyCodes::R && !shift)
 		{
 			ReloadAsset();
+			return true;
+		}
+		// 文本框持有焦点时 Ctrl+Z 属于文本自身的撤销，不能把整张图回退。
+		if (Wui::WuiTextFocus::Get().Active())
+			return false;
+		if (keyCode == KeyCodes::Z)
+		{
+			if (shift)
+				Redo();
+			else
+				Undo();
+			return true;
+		}
+		if (keyCode == KeyCodes::Y && !shift)
+		{
+			Redo();
 			return true;
 		}
 		return false;
@@ -817,6 +981,10 @@ namespace World
 				m_NewStateMenuOpen = false;
 			}
 		}
+
+		// 一次按住拖动 = 一次撤销记录：松开鼠标后结束连续编辑事务。
+		if (!ctx.Input().MouseDown[0])
+			m_EditTransactionKey.clear();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -849,6 +1017,16 @@ namespace World
 				AGTr("toolbar.save.tooltip", "Save the graph to its .wanimgraph file (Ctrl+S while the panel is focused).") },
 			{ Wui::HashId("animgraph.toolbar.reload"), AGTr("toolbar.reload", "Reload"), compactBar ? 56.0f : 66.0f,
 				!m_LoadedPath.empty(), AGTr("toolbar.reload.tooltip", "Discard unsaved edits and load the file again (Ctrl+R while the panel is focused).") },
+			{ Wui::HashId("animgraph.toolbar.undo"),
+				compactBar ? AGTr("toolbar.undo.compact", "Undo") : AGTr("toolbar.undo", "Undo"),
+				compactBar ? 48.0f : 58.0f, !m_UndoStack.empty(),
+				m_UndoStack.empty() ? AGTr("toolbar.undo.disabled", "Nothing to undo.")
+					: AGTr("toolbar.undo.tooltip", "Undo the last animation-graph edit (Ctrl+Z while the panel is focused).") },
+			{ Wui::HashId("animgraph.toolbar.redo"),
+				compactBar ? AGTr("toolbar.redo.compact", "Redo") : AGTr("toolbar.redo", "Redo"),
+				compactBar ? 48.0f : 58.0f, !m_RedoStack.empty(),
+				m_RedoStack.empty() ? AGTr("toolbar.redo.disabled", "Nothing to redo.")
+					: AGTr("toolbar.redo.tooltip", "Redo the last undone edit (Ctrl+Y or Ctrl+Shift+Z while the panel is focused).") },
 			{ Wui::HashId("animgraph.toolbar.apply"),
 				compactBar ? AGTr("toolbar.apply.compact", "Apply") : AGTr("toolbar.apply", "Apply to Selected Entity"), compactBar ? 56.0f : 176.0f, true,
 				AGTr("toolbar.apply.tooltip", "Bind this graph to the selected entity's AnimGraphComponent and reload the runtime.") },
@@ -909,6 +1087,14 @@ namespace World
 				else if (button.Id == Wui::HashId("animgraph.toolbar.reload"))
 				{
 					ReloadAsset();
+				}
+				else if (button.Id == Wui::HashId("animgraph.toolbar.undo"))
+				{
+					Undo();
+				}
+				else if (button.Id == Wui::HashId("animgraph.toolbar.redo"))
+				{
+					Redo();
 				}
 				else if (button.Id == Wui::HashId("animgraph.toolbar.apply"))
 				{
@@ -1078,6 +1264,7 @@ namespace World
 		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layers.add"), addLayer, "+", theme, true,
 			AGTr("layers.add.tooltip", "Add an additive upper-body layer (clip + weight parameter + bone mask)."), false))
 		{
+			PushUndo();
 			AnimLayer layer;
 			layer.Name = UniqueLayerName(m_Graph, "UpperBody");
 			layer.ClipName = "Aim";
@@ -1104,7 +1291,10 @@ namespace World
 			Wui::ListViewItem item;
 			item.Id = Wui::HashId(("animgraph.layer.row." + layer.Name).c_str());
 			item.Label = layer.Name;
-			item.SubLabel = layer.ClipName.empty() ? AGTr("layers.no_clip", "(no clip)") : layer.ClipName;
+			const std::string clipLabel = layer.ClipName.empty() ? AGTr("layers.no_clip", "(no clip)") : layer.ClipName;
+			const std::string weightLabel = layer.WeightParameter.empty()
+				? AGTr("layers.no_weight", "(no weight parameter)") : layer.WeightParameter;
+			item.SubLabel = clipLabel + "  ·  " + weightLabel;
 			item.Selected = layer.Name == m_SelectedLayer;
 			layerItems.push_back(std::move(item));
 		}
@@ -1132,6 +1322,7 @@ namespace World
 				AGTr("layers.delete", "Delete Layer"), theme, true,
 				AGTr("layers.delete.tooltip", "Remove the selected layer."), true))
 			{
+				PushUndo();
 				std::vector<AnimLayer> layers = m_Graph.GetLayers();
 				layers.erase(std::remove_if(layers.begin(), layers.end(),
 					[this](const AnimLayer& layer) { return layer.Name == m_SelectedLayer; }), layers.end());
@@ -1248,9 +1439,12 @@ namespace World
 		}
 		const size_t index = static_cast<size_t>(std::atoi(m_ConditionFocusKey.c_str() + separator + 1));
 		AnimState updated = *live;
-		if (index < updated.Transitions.size())
+		if (index < updated.Transitions.size()
+			&& updated.Transitions[index].ConditionExpression != m_ConditionBuffer)
+		{
 			updated.Transitions[index].ConditionExpression = m_ConditionBuffer;
-		ReplaceState(updated.Name, updated);
+			ReplaceState(updated.Name, updated);
+		}
 		m_ConditionFocusKey.clear();
 	}
 	void AnimGraphPanel::RenderStateCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
@@ -1414,14 +1608,19 @@ namespace World
 
 		const Wui::WuiRect speedRect { area.X + theme.Pad + 108.0f, y, 96.0f, kRowH };
 		float speed = speedValue;
-		if (Wui::DragFloat(ctx, Wui::HashId("animgraph.state.speed"), speedRect, speed, 0.01f, 0.0f, 10.0f, theme))
+		const Wui::WuiId speedId = Wui::HashId("animgraph.state.speed");
+		if (Wui::DragFloat(ctx, speedId, speedRect, speed, 0.01f, 0.0f, 10.0f, theme)
+			&& std::fabs(speed - speedValue) > 0.00001f)
 		{
+			const bool continuous = ctx.Input().MouseDown[0]
+				&& (ctx.IsHovered(speedRect) || ctx.Focus() == speedId);
+			BeginContinuousEdit("state.speed", continuous);
 			state = SelectedState();
 			if (state != nullptr)
 			{
 				AnimState updated = *state;
 				updated.Speed = speed;
-				ReplaceState(stateName, updated);
+				ReplaceState(stateName, updated, false);
 			}
 		}
 		Wui::Tooltip(ctx, speedRect, AGTr("state.speed.tooltip", "Clip playback speed multiplier (x), 0..10, default 1.0."));
@@ -1496,13 +1695,17 @@ namespace World
 			Wui::Tooltip(ctx, targetRect, AGTr("transitions.target.tooltip", "Target state reached when the condition expression is true."));
 
 			float duration = transition.Duration;
-			if (Wui::DragFloat(ctx, Wui::HashId(("animgraph.transition.duration." + std::to_string(i)).c_str()),
-				durationRect, duration, 0.005f, 0.0f, 2.0f, theme))
+			const Wui::WuiId durationId = Wui::HashId(("animgraph.transition.duration." + std::to_string(i)).c_str());
+			if (Wui::DragFloat(ctx, durationId, durationRect, duration, 0.005f, 0.0f, 2.0f, theme)
+				&& std::fabs(duration - transition.Duration) > 0.00001f)
 			{
+				const bool continuous = ctx.Input().MouseDown[0]
+					&& (ctx.IsHovered(durationRect) || ctx.Focus() == durationId);
+				BeginContinuousEdit(stateName + ".transition.duration." + std::to_string(i), continuous);
 				AnimState updated = copyState();
 				if (i < updated.Transitions.size())
 					updated.Transitions[i].Duration = duration;
-				ReplaceState(stateName, updated);
+				ReplaceState(stateName, updated, false);
 			}
 			Wui::Tooltip(ctx, durationRect, AGTr("transitions.duration.tooltip", "Cross-fade duration in seconds (0..2, default 0.20)."));
 
@@ -1537,8 +1740,11 @@ namespace World
 			auto commitCondition = [this, &copyState, &stateName, i]()
 			{
 				AnimState updated = copyState();
-				if (i < updated.Transitions.size())
+				if (i < updated.Transitions.size()
+					&& updated.Transitions[i].ConditionExpression != m_ConditionBuffer)
 					updated.Transitions[i].ConditionExpression = m_ConditionBuffer;
+				else
+					return;
 				ReplaceState(stateName, updated);
 			};
 			if (submitted)
@@ -1585,6 +1791,11 @@ namespace World
 		Wui::PanelBackground(ctx, area, theme.CardBg, theme.Radius);
 		Wui::SectionHeader(ctx, { area.X + theme.Pad, area.Y + 2.0f, area.W - theme.Pad * 2.0f, kRowH },
 			AGTr("layer.title", "Layer"), theme.Text, theme, theme.FontSizeTitle);
+		const Wui::WuiRect helpRect { area.X + area.W - theme.Pad - 18.0f, area.Y + 5.0f, 16.0f, 16.0f };
+		Wui::PanelBackground(ctx, helpRect, theme.ButtonBg, 8.0f);
+		Wui::Label(ctx, { helpRect.X + 5.0f, helpRect.Y + 1.0f }, "?", theme.TextMuted, theme.FontSizeCaption);
+		Wui::Tooltip(ctx, helpRect,
+			AGTr("layer.help.tooltip", "Layers are animations stacked on top of the base state machine; commonly used for upper-body aiming or reloads."));
 
 		auto findLayer = [this]() -> const AnimLayer*
 		{
@@ -1613,6 +1824,7 @@ namespace World
 			if (Wui::Combo(ctx, Wui::HashId("animgraph.layer.clip"), { controlX, y, controlW, kRowH }, "",
 				clips, clipIndex, theme, layer->ClipName))
 			{
+				PushUndo();
 				std::vector<AnimLayer> updated = m_Graph.GetLayers();
 				for (AnimLayer& candidate : updated)
 					if (candidate.Name == m_SelectedLayer)
@@ -1638,6 +1850,7 @@ namespace World
 			weightBuffer, theme, nullptr, &weightA11y);
 		if (weightSubmitted && weightBuffer != layer->WeightParameter)
 		{
+			PushUndo();
 			std::vector<AnimLayer> updated = m_Graph.GetLayers();
 			for (AnimLayer& candidate : updated)
 				if (candidate.Name == m_SelectedLayer)
@@ -1664,10 +1877,11 @@ namespace World
 		Wui::TextFieldA11y maskA11y;
 		maskA11y.Label = AGTr("layer.mask.a11y", "Bone mask");
 		maskA11y.Placeholder = "Spine 0.25, Chest 1.0, Head 1.0";
+		const std::string originalMaskBuffer = maskBuffer;
 		const Wui::WuiId maskId = Wui::HashId("animgraph.layer.mask");
 		const bool maskSubmitted = Wui::TextField(ctx, maskId, { controlX, y, controlW, kRowH }, maskBuffer,
 			theme, nullptr, &maskA11y);
-		if (maskSubmitted)
+		if (maskSubmitted && maskBuffer != originalMaskBuffer)
 		{
 			std::vector<BoneMaskEntry> mask;
 			size_t start = 0;
@@ -1691,6 +1905,7 @@ namespace World
 				}
 				start = comma + 1;
 			}
+			PushUndo();
 			std::vector<AnimLayer> updated = m_Graph.GetLayers();
 			for (AnimLayer& candidate : updated)
 				if (candidate.Name == m_SelectedLayer)
@@ -1700,6 +1915,24 @@ namespace World
 		}
 		Wui::Tooltip(ctx, { controlX, y, controlW, kRowH },
 			AGTr("layer.mask.tooltip", "Bone weights as 'Bone 0.0..1.0' separated by commas. Bones not listed get weight 0."));
+
+		// 三行术语说明：卡片底部常驻（窄栏逐行省略，完整文本在 Tooltip 里）。
+		const float explainTop = area.Y + area.H - 46.0f;
+		const Wui::WuiRect explainRect { area.X + theme.Pad, explainTop, area.W - theme.Pad * 2.0f, 40.0f };
+		const char* explainKeys[3] = { "layer.explain.clip", "layer.explain.weight", "layer.explain.mask" };
+		const char* explainFallbacks[3] = {
+			"Clip: the animation stacked over the base pose.",
+			"Weight: float parameter driving layer strength (0 = off, 1 = full).",
+			"Mask: only listed bones blend; unlisted bones get weight 0." };
+		for (int i = 0; i < 3; ++i)
+		{
+			const std::string line = AGTr(explainKeys[i], explainFallbacks[i]);
+			Wui::Label(ctx, { explainRect.X, explainTop + static_cast<float>(i) * 13.0f },
+				Wui::EllipsizeMiddleToWidth(ctx, line, explainRect.W, theme.FontSizeCaption),
+				theme.TextMuted, theme.FontSizeCaption);
+		}
+		Wui::Tooltip(ctx, explainRect,
+			AGTr("layer.explain.tooltip", "Clip: the animation stacked over the base pose.\nWeight: float parameter driving layer strength (0 = off, 1 = full).\nMask: only listed bones blend; unlisted bones get weight 0."));
 	}
 	// 右栏:Live Preview
 	// ---------------------------------------------------------------------------
@@ -1715,6 +1948,11 @@ namespace World
 
 		Wui::SectionHeader(ctx, { area.X + theme.Pad, area.Y + 2.0f, area.W - theme.Pad * 2.0f, kRowH },
 			AGTr("live.title", "Live Preview"), theme.Text, theme, theme.FontSizeTitle);
+		const Wui::WuiRect helpRect { area.X + area.W - theme.Pad - 18.0f, area.Y + 5.0f, 16.0f, 16.0f };
+		Wui::PanelBackground(ctx, helpRect, theme.ButtonBg, 8.0f);
+		Wui::Label(ctx, { helpRect.X + 5.0f, helpRect.Y + 1.0f }, "?", theme.TextMuted, theme.FontSizeCaption);
+		Wui::Tooltip(ctx, helpRect,
+			AGTr("live.help.tooltip", "State = the AnimGraph state currently playing.\nIdle (no transition) = no CrossFade is active.\nState time = seconds played in the current state.\nRuntime = Speed / Direction currently fed to the graph."));
 
 		const float innerX = area.X + theme.Pad;
 		const float innerW = area.W - theme.Pad * 2.0f;
@@ -1723,10 +1961,16 @@ namespace World
 		// ---- 绑定实体 ----
 		if (m_BoundEntity == entt::null)
 		{
-			Wui::Label(ctx, { innerX, y }, AGTr("live.select", "Select a character in the scene"), theme.TextMuted,
+			Wui::Label(ctx, { innerX, y }, AGTr("live.no_entity", "No entity selected"), theme.TextMuted,
 				theme.FontSizeSmall);
 			Wui::Tooltip(ctx, { innerX, y, innerW, 18.0f },
 				AGTr("live.bind.tooltip", "Binding follows the editor selection; it never overwrites the asset."));
+			y += 18.0f;
+			Wui::Label(ctx, { innerX, y }, AGTr("live.select_hint", "Select a character in the scene to drive these parameters live."),
+				theme.TextMuted, theme.FontSizeCaption);
+			Wui::Tooltip(ctx, { innerX, y, innerW, 16.0f },
+				AGTr("live.select_hint", "Select a character in the scene to drive these parameters live."));
+			y += 18.0f;
 		}
 		else
 		{
@@ -1737,11 +1981,13 @@ namespace World
 				component
 					? AGTr("live.params.tooltip", "Parameters below call AnimGraphSystem::SetParameter every frame for this entity.")
 					: AGTr("live.apply_first", "Apply this graph first: the entity has no AnimGraphComponent yet."));
+			y += 20.0f;
 		}
-		y += 20.0f;
 
 		// ---- 运行时读数(先取一次,布局与绘制共用) ----
-		std::string stateLine = AGTr("live.state.none", "State: -");
+		std::string stateLine = m_BoundEntity == entt::null
+			? AGTr("live.state.no_entity", "State: not selected")
+			: AGTr("live.state.none", "State: -");
 		std::string progressLabel = AGTr("live.idle", "Idle (no transition)");
 		std::string runtimeError;
 		std::string runtimeParams;
@@ -1813,6 +2059,8 @@ namespace World
 						theme.FontSizeCaption);
 				}
 			}
+			Wui::Tooltip(ctx, readout,
+				AGTr("live.readout.tooltip", "State: current AnimGraph state; an arrow shows the CrossFade target.\nIdle (no transition): no CrossFade is active.\nState time: seconds played in the current state.\nRuntime: Speed / Direction values fed to the graph."));
 		};
 
 		struct ParamRow
@@ -1895,7 +2143,7 @@ namespace World
 			: static_cast<float>(drawnErrorLines) * (theme.FontSizeCaption + 1.0f) + 2.0f;
 		const float bottomLimit = area.Y + area.H - errorReserve;
 
-		const bool compact = area.H < 360.0f;
+		const bool compact = area.H < 380.0f;
 		if (compact)
 		{
 			// 窄窗口底部条:2×2 滑杆 → 读数(有空间时)→ 单行开关;每一项都先检查
@@ -1919,10 +2167,13 @@ namespace World
 			}
 			else if (y + 16.0f <= bottomLimit)
 			{
+				const Wui::WuiRect compactState { innerX, y, innerW, 16.0f };
 				Wui::Label(ctx, { innerX, y },
 					Wui::EllipsizeMiddleToWidth(ctx, stateLine + "   " + FormatFloat(stateTime, 2) + " s",
 						innerW, theme.FontSizeCaption),
 					theme.TextMuted, theme.FontSizeCaption);
+				Wui::Tooltip(ctx, compactState,
+					AGTr("live.readout.tooltip", "State: current AnimGraph state; an arrow shows the CrossFade target.\nIdle (no transition): no CrossFade is active.\nState time: seconds played in the current state.\nRuntime: Speed / Direction values fed to the graph."));
 				y += 16.0f;
 			}
 

@@ -449,6 +449,9 @@ namespace World
 		case Schema::Kind::Mat4:
 			mapping.LuaTypeName = "mat4";
 			break;
+		case Schema::Kind::Quat:
+			mapping.LuaTypeName = "quat";
+			break;
 		case Schema::Kind::String:
 			mapping.LuaTypeName = "string";
 			break;
@@ -473,7 +476,7 @@ namespace World
 			break;   // 空嵌套结构(未注册类型)仍无脚本映射
 		}
 		default:
-			break;   // None / IVec* / UVec* / Quat:本包未映射(读写都会给出可读错误)
+			break;   // None:本包未映射(读写都会给出可读错误)
 		}
 		return mapping;
 	}
@@ -506,6 +509,8 @@ namespace World
 				return MakeMathUserdata(bindings, "mat3", payload);
 			else if constexpr (std::is_same_v<Payload, glm::mat4>)
 				return MakeMathUserdata(bindings, "mat4", payload);
+			else if constexpr (std::is_same_v<Payload, glm::quat>)
+				return MakeMathUserdata(bindings, "quat", payload);
 			else if constexpr (std::is_same_v<Payload, std::string>)
 				return ScriptValue::String(payload);
 			else
@@ -593,6 +598,8 @@ namespace World
 			return Schema::Value(RequireMathUserdata<glm::mat3>(bindings, field, value, "mat3"));
 		case Schema::Kind::Mat4:
 			return Schema::Value(RequireMathUserdata<glm::mat4>(bindings, field, value, "mat4"));
+		case Schema::Kind::Quat:
+			return Schema::Value(RequireMathUserdata<glm::quat>(bindings, field, value, "quat"));
 		case Schema::Kind::String:
 			return Schema::Value(RequireString(field, value, "a string"));
 		case Schema::Kind::Asset:

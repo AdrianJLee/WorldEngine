@@ -10,11 +10,13 @@
 #include "World/Gameplay/Framework/LevelService.h"
 #include "World/Gameplay/Framework/SaveService.h"
 #include "World/Script/Runtime/ScriptEngine.h"
+#include "World/Script/LuaType/LuaTypeHelpers.h"
 #include "World/Script/Vm/LuauVm.h"
 #include "World/Script/Vm/ScriptRef.h"
 #include "World/Script/Vm/ScriptValue.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <utility>
 #include <vector>
@@ -253,6 +255,29 @@ namespace World
 			if (Scene* scene = ScriptEngine::GetActiveScene())
 				scroll = scene->GetInputSnapshot().ScrollDelta;
 			return ScriptValue::Number(static_cast<double>(scroll));
+		}
+
+		ScriptValue InputMouseDeltaImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[11], count, 0);
+			glm::vec2 delta { 0.0f };
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				delta = scene->GetInputSnapshot().MouseDelta;
+			return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", delta);
+		}
+
+		// 0=左键、1=右键、2=中键(与 Gameplay::InputSnapshot::MouseButtons 的位序一致)。
+		// 未知按钮/无活动场景返回 false,不抛错 —— 脚本可以把它当作能力探测。
+		ScriptValue InputMouseButtonImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[12], count, 1);
+			double number = 0.0;
+			if (!args[0].AsNumber(&number) || !std::isfinite(number) || number != std::round(number) ||
+				number < 0.0 || number > 2.0)
+				return ScriptValue::Boolean(false);
+			const uint16_t mask = static_cast<uint16_t>(1U << static_cast<uint32_t>(number));
+			Scene* scene = ScriptEngine::GetActiveScene();
+			return ScriptValue::Boolean(scene ? (scene->GetInputSnapshot().MouseButtons & mask) != 0 : false);
 		}
 
 		// ---- R1:上下文开关。名字 -> 映射表里的 contexts;找不到返回 false(不抛,便于脚本探测) ----
@@ -870,6 +895,9 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 				static const ScriptServiceParam inputKeyParam[] = {
 			{ "key", "string|number", ScriptServiceArgType::String | ScriptServiceArgType::Number, true, "Key name ('Space', 'F', 'A', 'D') or integer keycode." },
 		};
+		static const ScriptServiceParam inputMouseButtonParam[] = {
+			{ "button", "integer", ScriptServiceArgType::Number, true, "Mouse button: 0 = left, 1 = right, 2 = middle." },
+		};
 		static const ScriptServiceMethod inputMethods[] = {
 			// 方法体先包装成 ScriptNativeFunction:描述表是静态的,函数指针需要显式构造。
 			{ "Down", [](const ScriptValue* args, std::size_t count) -> ScriptValue
@@ -932,6 +960,17 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 				return InputIsKeyPressedImpl(args, count);
 			}, inputKeyParam, 1, 1, "boolean",
 				"Direct hardware key poll (key name like 'Space', 'F' or keycode number). Returns true while key is held." },
+			// 追加在方法表末尾:既有 Methods[i] 下标(含上面的实现函数引用)保持不变。
+			{ "MouseDelta", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputMouseDeltaImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Mouse movement since the previous frame (scene input snapshot)." },
+			{ "MouseButton", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputMouseButtonImpl(args, count);
+			}, inputMouseButtonParam, 1, 1, "boolean",
+				"Whether a mouse button is held: 0 = left, 1 = right, 2 = middle; unknown buttons return false." },
 		};
 
 		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。

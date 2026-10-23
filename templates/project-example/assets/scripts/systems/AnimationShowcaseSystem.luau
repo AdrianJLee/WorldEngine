@@ -3,15 +3,18 @@
 -- =============================================================================
 -- 用户可操作的 AnimGraph 内容示例:
 --   WASD / 左摇杆 LX 移动, Shift 奔跑, Space 跳跃,
---   F 瞄准(上半身层), R 切换 Root Motion, Tab 切换跟随/自由视角.
+--   F 瞄准(上半身层), R 切换 Root Motion, Tab 切换跟随/自由视角,
+--   鼠标右键拖拽 / 方向键 旋转第三人称轨道镜头, 滚轮缩放, C 切换角色朝向模式.
 --
 -- 设计口径:
 --   * 脚本只写 CharacterControllerComponent.Velocity / Grounded;
 --     Speed / Direction / IsFalling 由 AnimGraphSystem 从 Velocity 推导.
 --     脚本绝不写 AnimGraphComponent.CurrentStateHash.
---   * Transform.Rotation 目前没有 Luau 映射(schema kind = Quat),所以角色保持
---     绑定朝向 +Z(mannequin.gltf 即 faces +Z). W=前进, S=后退, A/D=侧移,
---     这正好展示 Locomotion 2D 混合空间(Direction = 0 / ±90 / 180).
+--   * 角色朝向通过 Transform.Rotation 写入 quat.fromEuler(0, yaw, 0).
+--     移动相对镜头: W = 镜头前方, D = 屏幕右侧; Direction 由 AnimGraphSystem
+--     按角色局部速度推导(面向 +Z = 0°, 角色右侧 = +90°), 脚本不自行取反.
+--   * 角色朝向有三种模式: 跟随镜头 / 朝向移动方向 / 固定朝向(+Z).
+--     轨道镜头绕角色旋转; 位置指数平滑, 旋转直接跟手.
 --   * 地面高度优先取 Physics.Raycast(地形以后补上碰撞即自动生效);
 --     否则按 animation_showcase.wterrain 的生成公式解析求值(与
 --     Engine/generators/mannequin/generate_showcase_terrain.py 逐项一致).
@@ -28,11 +31,22 @@ local ACCELERATION = 12.0       -- 1/s, exponential approach
 local JUMP_SPEED = 5.2          -- m/s
 local GRAVITY = -18.0           -- m/s^2
 local GROUND_SNAP_RATE = 18.0   -- 1/s
-local CAMERA_OFFSET_X = 0.0
-local CAMERA_OFFSET_Y = 2.2
-local CAMERA_OFFSET_Z = -4.5
-local CAMERA_FOLLOW_RATE = 6.0  -- 1/s (dispatch: k ~= 6)
+local CAMERA_DEFAULT_DISTANCE = 4.5
+local CAMERA_MIN_DISTANCE = 2.6
+local CAMERA_MAX_DISTANCE = 7.0
+local CAMERA_INITIAL_PITCH_DEG = 12.0
+local CAMERA_MIN_PITCH_DEG = -60.0
+local CAMERA_MAX_PITCH_DEG = 70.0
+local CAMERA_TARGET_HEIGHT = 1.55 -- 角色脚底到镜头观察点(胸口附近)
+local CAMERA_FOLLOW_RATE = 6.0    -- 1/s (dispatch: k ~= 6)
+local CAMERA_DISTANCE_RATE = 10.0 -- 1/s, 滚轮距离平滑
+local CAMERA_MOUSE_SENSITIVITY = 0.12 -- 度/像素
+local CAMERA_KEY_YAW_RATE = 100.0     -- 度/秒
+local CAMERA_KEY_PITCH_RATE = 70.0    -- 度/秒
+local CAMERA_BUTTON_YAW_STEP = 15.0   -- 度/次
+local CAMERA_SCROLL_STEP = 0.45       -- m/滚轮刻度
 local CAMERA_MIN_CLEARANCE = 0.8
+local CHARACTER_TURN_RATE = 12.0      -- 1/s, 角色朝向最短角插值
 local MAX_STEP_UP = 0.45        -- m, higher than StepOffset blocks the move
 local WORLD_MIN_X = -22.0       -- keep the character on the 48 m showcase slab/terrain
 local WORLD_MAX_X = 38.0
@@ -54,6 +68,20 @@ local KEY_LEFT_SHIFT = 340
 local KEY_F = 70
 local KEY_R = 82
 local KEY_TAB = 258
+local KEY_C = 67
+local KEY_RIGHT = 262
+local KEY_LEFT = 263
+local KEY_DOWN = 264
+local KEY_UP = 265
+
+local ORIENTATION_FOLLOW_CAMERA = 1
+local ORIENTATION_MOVE_DIRECTION = 2
+local ORIENTATION_FIXED = 3
+local ORIENTATION_LABELS = {
+    "跟随镜头",
+    "朝向移动",
+    "固定朝向",
+}
 
 local character = nil
 local characterId = nil
@@ -73,20 +101,32 @@ local startupPrinted = false
 local speed = 0.0
 local dirX = 0.0
 local dirZ = 1.0
+local charYaw = 0.0             -- 弧度, 角色绕 Y 的朝向
+local charRotationApplied = nil -- 最近一次真正写入 Transform.Rotation 的 yaw
 local verticalVelocity = 0.0
 local grounded = true
 local aim = false
 local rootMotion = false
 local followCamera = true
-local camX = 0.0
+local camYaw = 0.0              -- 弧度, 镜头观察方向(角色前方 = 镜头前方)
+local camPitch = math.rad(CAMERA_INITIAL_PITCH_DEG) -- 弧度, 正值 = 镜头升高俯视
+local cameraDistance = CAMERA_DEFAULT_DISTANCE
+local cameraDistanceTarget = CAMERA_DEFAULT_DISTANCE
+local camX = 0.0               -- 平滑后的实际相机位置
 local camY = 0.0
 local camZ = 0.0
+local cameraSnapPending = true
+local orientationMode = ORIENTATION_FOLLOW_CAMERA
 local previousJumpHeld = false
 local previousAimHeld = false
 local previousRootMotionHeld = false
 local previousCameraHeld = false
+local previousOrientationHeld = false
 local lastEvent = "就绪"
 local lastEventTimer = 0.0
+local warnedQuat = false
+local warnedMouseDelta = false
+local warnedMouseButton = false
 
 -- 屏幕控制条(鼠标可玩):与键盘输入等价,同时给自动化一个可点击的用户入口。
 local demoMove = 0          -- 0 = 停止, 1 = 前进, -1 = 后退
@@ -95,6 +135,10 @@ local demoJump = false
 local demoAimToggle = false
 local demoRootToggle = false
 local demoCameraToggle = false
+local demoOrientationToggle = false
+local demoCameraLeft = false
+local demoCameraRight = false
+local demoCameraReset = false
 local demoTeleport = nil       -- "slope" | "origin"
 
 local function approach(current, target, rate, dt)
@@ -135,6 +179,83 @@ local function axisValue(name)
         return value
     end
     return 0.0
+end
+
+local function mouseButtonDown(button)
+    if type(Input.MouseButton) ~= "function" then
+        if not warnedMouseButton then
+            warnedMouseButton = true
+            print("[ANIM-SHOWCASE] Input.MouseButton unavailable: right-drag camera rotation is disabled until the engine binding lands.")
+        end
+        return false
+    end
+    local ok, value = pcall(Input.MouseButton, button)
+    return ok and value == true
+end
+
+local function mouseDelta()
+    if type(Input.MouseDelta) ~= "function" then
+        if not warnedMouseDelta then
+            warnedMouseDelta = true
+            print("[ANIM-SHOWCASE] Input.MouseDelta unavailable: right-drag camera rotation is disabled until the engine binding lands.")
+        end
+        return 0.0, 0.0
+    end
+    local ok, value = pcall(Input.MouseDelta)
+    if ok and value ~= nil then
+        local dx = value.x
+        local dy = value.y
+        if type(dx) == "number" and type(dy) == "number" then
+            -- 防止窗口重建/指针跳变把镜头甩飞。
+            return math.max(-200.0, math.min(200.0, dx)), math.max(-200.0, math.min(200.0, dy))
+        end
+    end
+    return 0.0, 0.0
+end
+
+local function scrollValue()
+    if type(Input.Scroll) ~= "function" then
+        return 0.0
+    end
+    local ok, value = pcall(Input.Scroll)
+    if ok and type(value) == "number" then
+        return value
+    end
+    return 0.0
+end
+
+local function setRotation(transform, xDeg, yDeg, zDeg)
+    if type(quat) == "nil" or type(quat.fromEuler) ~= "function" then
+        if not warnedQuat then
+            warnedQuat = true
+            print("[ANIM-SHOWCASE] quat.fromEuler unavailable: character/camera rotation writes are skipped until the engine binding lands.")
+        end
+        return false
+    end
+    local ok, errorText = pcall(function()
+        transform.Rotation = quat.fromEuler(xDeg, yDeg, zDeg)
+    end)
+    if not ok and not warnedQuat then
+        warnedQuat = true
+        print("[ANIM-SHOWCASE] Transform.Rotation write failed: " .. tostring(errorText))
+    end
+    return ok
+end
+
+local function wrapDegrees(degrees)
+    local wrapped = math.fmod(degrees + 180.0, 360.0)
+    if wrapped < 0.0 then
+        wrapped = wrapped + 360.0
+    end
+    return wrapped - 180.0
+end
+
+local function shortestAngle(delta)
+    return math.atan2(math.sin(delta), math.cos(delta))
+end
+
+local function clampCameraPitch(pitch)
+    return math.max(math.rad(CAMERA_MIN_PITCH_DEG), math.min(math.rad(CAMERA_MAX_PITCH_DEG), pitch))
 end
 
 local function firstNonZero(...)
@@ -206,16 +327,30 @@ local function stateLabel()
     if speed <= 0.12 then
         return "待机"
     end
-    if math.abs(dirX) > math.abs(dirZ) then
-        return dirX > 0.0 and "右平移" or "左平移"
+    -- 平移标签按角色自身左右判断: 先把世界方向转回角色局部坐标。
+    local cosYaw = math.cos(charYaw)
+    local sinYaw = math.sin(charYaw)
+    local localX = dirX * cosYaw - dirZ * sinYaw
+    local localZ = dirX * sinYaw + dirZ * cosYaw
+    local localRight = -localX -- Direction 语义: 面向 +Z 时角色右侧 = +90° = 局部 -X
+    if math.abs(localRight) > math.abs(localZ) then
+        return localRight > 0.0 and "右平移" or "左平移"
     end
-    if dirZ < -0.3 then
+    if localZ < -0.3 then
         return "后退"
     end
     if speed > (WALK_SPEED + 0.25) then
         return "奔跑"
     end
     return "行走"
+end
+
+local function orientationLabel()
+    return ORIENTATION_LABELS[orientationMode]
+end
+
+local function cameraModeLabel()
+    return followCamera and "跟随" or "自由（锁定）"
 end
 
 local function bind()
@@ -302,14 +437,16 @@ local function bind()
     end
 
     bound = true
+    charRotationApplied = nil
     if not startupPrinted then
         startupPrinted = true
         print("[ANIM-SHOWCASE] ============================================================")
-        print("[ANIM-SHOWCASE] 动画图示例已就绪 —— 人偶移动 + 脚部 IK + 根运动")
+        print("[ANIM-SHOWCASE] 动画图示例已就绪 —— 第三人称镜头 + 朝向体系 + 脚部 IK")
         print("[ANIM-SHOWCASE]   WASD / 左摇杆 : 移动        Shift : 奔跑")
         print("[ANIM-SHOWCASE]   Space         : 跳跃        F     : 上半身瞄准层")
-        print("[ANIM-SHOWCASE]   R             : 根运动      Tab   : 跟随 / 自由相机")
-        print("[ANIM-SHOWCASE]   鼠标          : 屏幕控制条（行走/奔跑/跳跃/瞄准/根运动）")
+        print("[ANIM-SHOWCASE]   R             : 根运动      Tab   : 跟随 / 自由镜头")
+        print("[ANIM-SHOWCASE]   右键拖拽/方向键: 旋转镜头    滚轮 : 缩放")
+        print("[ANIM-SHOWCASE]   C             : 朝向模式（跟随镜头 / 朝向移动 / 固定）")
         print("[ANIM-SHOWCASE]   提示：坡面朝世界 +X 升高（从起点按 D 即可上坡）。")
         print("[ANIM-SHOWCASE] ============================================================")
     end
@@ -332,8 +469,19 @@ ecs:AddStartupSystem("AnimationShowcaseStartup", function()
     unbind()
     foreignScene = false
     speed = 0.0
+    dirX = 0.0
+    dirZ = 1.0
+    charYaw = 0.0
+    charRotationApplied = nil
     verticalVelocity = 0.0
     grounded = true
+    camYaw = 0.0
+    camPitch = math.rad(CAMERA_INITIAL_PITCH_DEG)
+    cameraDistance = CAMERA_DEFAULT_DISTANCE
+    cameraDistanceTarget = CAMERA_DEFAULT_DISTANCE
+    cameraSnapPending = true
+    orientationMode = ORIENTATION_FOLLOW_CAMERA
+    followCamera = true
     bind()
 end)
 
@@ -396,9 +544,7 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         speed = 0.0
         dirX = 0.0
         dirZ = 1.0
-        camX = x
-        camY = y + CAMERA_OFFSET_Y
-        camZ = z + CAMERA_OFFSET_Z
+        cameraSnapPending = true
         demoTeleport = nil
     end
 
@@ -416,26 +562,91 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         inputZ = inputZ / inputLength
         inputLength = 1.0
     end
-    if inputLength > 0.05 then
-        -- 角色不能转身(Transform.Rotation 无 Luau 映射),所以平滑的是移动方向向量:
-        -- Direction 参数会随之连续变化,2D 混合空间的 Walk/Strafe/WalkBack 过渡没有硬切.
-        local targetX = inputX / inputLength
-        local targetZ = inputZ / inputLength
-        local turnBlend = 1.0 - math.exp(-14.0 * dt)
-        dirX = dirX + (targetX - dirX) * turnBlend
-        dirZ = dirZ + (targetZ - dirZ) * turnBlend
-        local dirLength = math.sqrt(dirX * dirX + dirZ * dirZ)
-        if dirLength > 0.0001 then
-            dirX = dirX / dirLength
-            dirZ = dirZ / dirLength
-        end
-    end
 
     -- 屏幕按钮:按住状态由回调翻转,这里叠加到同一套输入语义上。
     if demoMove ~= 0 then
         inputX = 0.0
         inputZ = demoMove
         inputLength = 1.0
+    end
+
+    -- ---- 1.5 Third-person orbit camera input -------------------------------
+    local yawDeltaDeg = 0.0
+    local pitchDeltaDeg = 0.0
+    if keyDown("Left", KEY_LEFT) then
+        yawDeltaDeg = yawDeltaDeg + CAMERA_KEY_YAW_RATE * dt
+    end
+    if keyDown("Right", KEY_RIGHT) then
+        yawDeltaDeg = yawDeltaDeg - CAMERA_KEY_YAW_RATE * dt
+    end
+    if keyDown("Up", KEY_UP) then
+        pitchDeltaDeg = pitchDeltaDeg + CAMERA_KEY_PITCH_RATE * dt
+    end
+    if keyDown("Down", KEY_DOWN) then
+        pitchDeltaDeg = pitchDeltaDeg - CAMERA_KEY_PITCH_RATE * dt
+    end
+
+    if mouseButtonDown(1) then
+        local dx, dy = mouseDelta()
+        -- 屏幕右移 = 镜头向右转(camYaw 减小);屏幕上推 = 镜头升高(俯仰增大)。
+        yawDeltaDeg = yawDeltaDeg - dx * CAMERA_MOUSE_SENSITIVITY
+        pitchDeltaDeg = pitchDeltaDeg - dy * CAMERA_MOUSE_SENSITIVITY
+    end
+    if demoCameraLeft then
+        demoCameraLeft = false
+        yawDeltaDeg = yawDeltaDeg + CAMERA_BUTTON_YAW_STEP
+    end
+    if demoCameraRight then
+        demoCameraRight = false
+        yawDeltaDeg = yawDeltaDeg - CAMERA_BUTTON_YAW_STEP
+    end
+
+    camYaw = camYaw + math.rad(yawDeltaDeg)
+    camPitch = clampCameraPitch(camPitch + math.rad(pitchDeltaDeg))
+
+    local wheel = scrollValue()
+    if wheel ~= 0.0 then
+        cameraDistanceTarget = math.max(CAMERA_MIN_DISTANCE, math.min(CAMERA_MAX_DISTANCE,
+            cameraDistanceTarget - wheel * CAMERA_SCROLL_STEP))
+    end
+    cameraDistance = approach(cameraDistance, cameraDistanceTarget, CAMERA_DISTANCE_RATE, dt)
+
+    if demoCameraReset then
+        demoCameraReset = false
+        camYaw = 0.0
+        camPitch = math.rad(CAMERA_INITIAL_PITCH_DEG)
+        cameraDistanceTarget = CAMERA_DEFAULT_DISTANCE
+        cameraDistance = CAMERA_DEFAULT_DISTANCE
+        followCamera = true
+        cameraSnapPending = true
+        lastEvent = "控制条：镜头复位"
+        lastEventTimer = 1.5
+    end
+
+    -- 相机观察前向 = (sin yaw, 0, cos yaw); 屏幕右 = cross(forward, up)
+    -- 本工程相机局部前向为 -Z, 所以右向是 (-cos yaw, 0, sin yaw), 与 Direction 的
+    -- “面向 +Z 时角色右侧 = -X”一致。
+    local forwardX = math.sin(camYaw)
+    local forwardZ = math.cos(camYaw)
+    local rightX = -math.cos(camYaw)
+    local rightZ = math.sin(camYaw)
+
+    if inputLength > 0.05 then
+        local targetX = forwardX * inputZ + rightX * inputX
+        local targetZ = forwardZ * inputZ + rightZ * inputX
+        local targetLength = math.sqrt(targetX * targetX + targetZ * targetZ)
+        if targetLength > 0.0001 then
+            targetX = targetX / targetLength
+            targetZ = targetZ / targetLength
+            local turnBlend = 1.0 - math.exp(-16.0 * dt)
+            dirX = dirX + (targetX - dirX) * turnBlend
+            dirZ = dirZ + (targetZ - dirZ) * turnBlend
+            local dirLength = math.sqrt(dirX * dirX + dirZ * dirZ)
+            if dirLength > 0.0001 then
+                dirX = dirX / dirLength
+                dirZ = dirZ / dirLength
+            end
+        end
     end
 
     local sprint = keyDown("LeftShift", KEY_LEFT_SHIFT) or actionDown("Sprint") or demoRun
@@ -511,9 +722,23 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
     end
     if cameraPressed then
         followCamera = not followCamera
-        lastEvent = followCamera and "相机：跟随" or "相机：自由"
+        lastEvent = followCamera and "镜头：跟随" or "镜头：自由（锁定）"
         lastEventTimer = 2.0
         print("[ANIM-SHOWCASE] Camera " .. (followCamera and "follow" or "free (locked)") .. " (Tab).")
+    end
+
+    local orientationHeld = keyDown("C", KEY_C)
+    local orientationPressed = orientationHeld and not previousOrientationHeld
+    previousOrientationHeld = orientationHeld
+    if demoOrientationToggle then
+        demoOrientationToggle = false
+        orientationPressed = true
+    end
+    if orientationPressed then
+        orientationMode = orientationMode % #ORIENTATION_LABELS + 1
+        lastEvent = "朝向：" .. orientationLabel()
+        lastEventTimer = 2.0
+        print("[ANIM-SHOWCASE] Orientation mode: " .. orientationLabel() .. " (C).")
     end
 
     -- ---- 3. Horizontal motion ----------------------------------------------
@@ -561,6 +786,27 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         lastEventTimer = 1.0
     end
 
+    -- ---- 4.5 Character facing modes ----------------------------------------
+    local targetCharYaw = charYaw
+    if orientationMode == ORIENTATION_FOLLOW_CAMERA then
+        targetCharYaw = camYaw
+    elseif orientationMode == ORIENTATION_MOVE_DIRECTION then
+        if inputLength > 0.05 then
+            targetCharYaw = math.atan2(dirX, dirZ)
+        end
+    else
+        targetCharYaw = 0.0
+    end
+
+    local yawBlend = 1.0 - math.exp(-CHARACTER_TURN_RATE * dt)
+    charYaw = charYaw + shortestAngle(targetCharYaw - charYaw) * yawBlend
+    if charRotationApplied == nil or
+        math.abs(shortestAngle(charYaw - charRotationApplied)) > 0.0001 then
+        if setRotation(charTransform, 0.0, math.deg(charYaw), 0.0) then
+            charRotationApplied = charYaw
+        end
+    end
+
     if charController ~= nil then
         charController.Velocity = vec3.new(dirX * speed, verticalVelocity, dirZ * speed)
         charController.Grounded = grounded
@@ -574,30 +820,44 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         pushAimWeight(1.0)
     end
 
-    -- ---- 5. Camera follow (position only; rotation is authored) ------------
-    if followCamera then
-        local desiredX = x + CAMERA_OFFSET_X
-        local desiredY = y + CAMERA_OFFSET_Y
-        local desiredZ = z + CAMERA_OFFSET_Z
-        local groundAtCamera = groundHeightAt(desiredX, desiredZ)
-        if desiredY < groundAtCamera + CAMERA_MIN_CLEARANCE then
-            desiredY = groundAtCamera + CAMERA_MIN_CLEARANCE
-        end
+    -- ---- 5. Third-person orbit camera --------------------------------------
+    local orbitHorizontal = cameraDistance * math.cos(camPitch)
+    local orbitVertical = cameraDistance * math.sin(camPitch)
+    local desiredX = x - math.sin(camYaw) * orbitHorizontal
+    local desiredY = y + CAMERA_TARGET_HEIGHT + orbitVertical
+    local desiredZ = z - math.cos(camYaw) * orbitHorizontal
 
-        local blend = 1.0 - math.exp(-CAMERA_FOLLOW_RATE * dt)
-        camX = camX + (desiredX - camX) * blend
-        camY = camY + (desiredY - camY) * blend
-        camZ = camZ + (desiredZ - camZ) * blend
+    local groundAtCamera = groundHeightAt(desiredX, desiredZ)
+    if desiredY < groundAtCamera + CAMERA_MIN_CLEARANCE then
+        desiredY = groundAtCamera + CAMERA_MIN_CLEARANCE
+    end
+
+    if followCamera then
+        if cameraSnapPending then
+            camX = desiredX
+            camY = desiredY
+            camZ = desiredZ
+            cameraSnapPending = false
+        else
+            local blend = 1.0 - math.exp(-CAMERA_FOLLOW_RATE * dt)
+            camX = camX + (desiredX - camX) * blend
+            camY = camY + (desiredY - camY) * blend
+            camZ = camZ + (desiredZ - camZ) * blend
+        end
 
         local cameraGround = groundHeightAt(camX, camZ)
         if camY < cameraGround + CAMERA_MIN_CLEARANCE then
             camY = cameraGround + CAMERA_MIN_CLEARANCE
         end
+
         -- 相机 Transform 也在查询回调里写:代理是查询对象内的享元,不能在回调外长期持有。
+        -- 本工程相机局部前向 = -Z: 观察 yaw 需要 +180°;camPitch 为正表示镜头升高俯视,
+        -- 因此欧拉 X 取 -camPitch(与场景原机位 [-12°, 180°] 一致)。
         local cameraQuery = ecs:Query({ "TagComponent", "TransformComponent" })
         cameraQuery:Each(function(entity, tag, transform)
             if tag.Tag == CAMERA_TAG then
                 transform.Location = vec3.new(camX, camY, camZ)
+                setRotation(transform, -math.deg(camPitch), math.deg(camYaw) + 180.0, 0.0)
             end
         end)
     end
@@ -615,69 +875,93 @@ ui.onDraw(function()
         return
     end
 
-    ui.panel(24, 24, 392, 408, "动画图内容示例")
+    ui.panel(24, 24, 392, 470, "动画图内容示例")
     ui.text(40, 62, "状态   " .. stateLabel(), 17)
     ui.text(40, 88, string.format("速度   %.2f m/s", speed), 14)
     ui.text(40, 106, "瞄准     " .. (aim and "开（上半身层）" or "关"), 14)
     ui.text(40, 124, "根运动   " .. (rootMotion and "动画根运动" or "脚本位移"), 14)
-    ui.text(40, 142, "相机     " .. (followCamera and "跟随" or "自由（锁定）"), 14)
-    ui.text(40, 168, "WASD 移动   Shift 奔跑   Space 跳跃", 12)
-    ui.text(40, 186, "F 瞄准   R 根运动   Tab 相机", 12)
-    ui.text(40, 212, "最近操作   " .. lastEvent, 12)
+    ui.text(40, 142, string.format("镜头   %s  偏航 %d°  俯仰 %d°  %.1f m",
+        cameraModeLabel(), math.floor(wrapDegrees(math.deg(camYaw)) + 0.5),
+        math.floor(math.deg(camPitch) + 0.5), cameraDistance), 12)
+    ui.text(40, 160, "朝向   " .. orientationLabel(), 14)
+    ui.text(40, 184, "WASD 移动   Shift 奔跑   Space 跳跃", 12)
+    ui.text(40, 202, "右键拖拽 / 方向键 转镜头   滚轮 缩放", 12)
+    ui.text(40, 220, "F 瞄准   R 根运动   Tab 跟随/自由   C 朝向", 12)
+    ui.text(40, 242, "最近操作   " .. lastEvent, 12)
 
     -- 鼠标可玩控制条(与键盘完全等价;也用于自动化点击验证)。
-    if ui.button("demo_walk", 40, 236, 104, 26, (demoMove == 1 and not demoRun) and "行走（开）" or "行走") then
+    if ui.button("demo_walk", 40, 264, 104, 26, (demoMove == 1 and not demoRun) and "行走（开）" or "行走") then
         demoMove = (demoMove == 1) and 0 or 1
         lastEvent = demoMove == 1 and "控制条：行走" or "控制条：停止"
         lastEventTimer = 1.4
     end
-    if ui.button("demo_run", 152, 236, 104, 26, demoRun and "奔跑（开）" or "奔跑") then
+    if ui.button("demo_run", 152, 264, 104, 26, demoRun and "奔跑（开）" or "奔跑") then
         demoRun = not demoRun
         if demoRun then demoMove = 1 end
         lastEvent = demoRun and "控制条：奔跑" or "控制条：恢复行走速度"
         lastEventTimer = 1.4
     end
-    if ui.button("demo_stop", 264, 236, 104, 26, "停止") then
+    if ui.button("demo_stop", 264, 264, 104, 26, "停止") then
         demoMove = 0
         demoRun = false
         lastEvent = "控制条：停止"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_jump", 40, 270, 120, 26, "跳跃") then
+    if ui.button("demo_jump", 40, 298, 120, 26, "跳跃") then
         demoJump = true
         lastEvent = "控制条：跳跃"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_aim", 168, 270, 120, 26, aim and "瞄准（开）" or "瞄准") then
+    if ui.button("demo_aim", 168, 298, 120, 26, aim and "瞄准（开）" or "瞄准") then
         demoAimToggle = true
         lastEvent = "控制条：瞄准"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_root", 40, 304, 156, 26, rootMotion and "根运动（开）" or "根运动") then
+    if ui.button("demo_root", 40, 332, 156, 26, rootMotion and "根运动（开）" or "根运动") then
         demoRootToggle = true
         lastEvent = "控制条：根运动"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_camera", 204, 304, 156, 26, followCamera and "相机 [跟随]" or "相机 [自由]") then
+    if ui.button("demo_camera", 204, 332, 156, 26, followCamera and "镜头 [跟随]" or "镜头 [自由]") then
         demoCameraToggle = true
-        lastEvent = "控制条：相机"
+        lastEvent = "控制条：镜头跟随/自由"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_slope", 40, 338, 156, 26, "坡面演示（脚部 IK）") then
+    if ui.button("demo_slope", 40, 366, 156, 26, "坡面演示（脚部 IK）") then
         demoTeleport = "slope"
         demoMove = 0
         demoRun = false
         lastEvent = "控制条：坡面脚部 IK 演示"
         lastEventTimer = 2.0
     end
-    if ui.button("demo_reset", 204, 338, 156, 26, "重置位置") then
+    if ui.button("demo_reset", 204, 366, 156, 26, "重置位置") then
         demoTeleport = "origin"
         demoMove = 0
         demoRun = false
         lastEvent = "控制条：重置到起点"
         lastEventTimer = 2.0
     end
-    ui.text(40, 378, "点击按钮，或使用上方键盘快捷键。", 11)
+    if ui.button("demo_cam_left", 40, 400, 104, 26, "镜头左转") then
+        demoCameraLeft = true
+        lastEvent = "控制条：镜头左转"
+        lastEventTimer = 1.0
+    end
+    if ui.button("demo_cam_right", 152, 400, 104, 26, "镜头右转") then
+        demoCameraRight = true
+        lastEvent = "控制条：镜头右转"
+        lastEventTimer = 1.0
+    end
+    if ui.button("demo_orientation", 264, 400, 104, 26, "朝向模式") then
+        demoOrientationToggle = true
+        lastEvent = "控制条：切换朝向模式"
+        lastEventTimer = 1.0
+    end
+    if ui.button("demo_cam_reset", 40, 434, 156, 26, "镜头复位") then
+        demoCameraReset = true
+        lastEvent = "控制条：镜头复位"
+        lastEventTimer = 1.0
+    end
+    ui.text(40, 470, "点击按钮，或使用上方键盘快捷键。", 11)
 end)
 
 

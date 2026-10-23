@@ -234,6 +234,10 @@ namespace Animation
 			std::unordered_map<uint32_t, float> AxesById;
 			glm::vec2 MousePosition { 0.0f };
 			glm::vec2 MouseDelta { 0.0f };
+			// 鼠标按键位掩码(bit0 = 左键, bit1 = 右键, bit2 = 中键):
+			// 与 InputSystem 的 Gameplay::InputSnapshot::MouseButtons 同口径。
+			// 第三人称镜头右键拖拽等脚本交互读这个字段(不看 UI 焦点)。
+			uint16_t MouseButtons = 0;
 			float ScrollDelta = 0.0f;
 			uint64_t SampledFrame = 0;
 			bool Valid = false;

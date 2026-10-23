@@ -88,6 +88,8 @@ namespace World
 	void RegisterBuiltinVec2Binding(ScriptBindingContext& bindings);
 	void RegisterBuiltinVec3Binding(ScriptBindingContext& bindings);
 	void RegisterBuiltinVec4Binding(ScriptBindingContext& bindings);
+	// quat 的绑定实现位于 LuaType/Quat.cpp(构造、欧拉/轴角与 q * vec3 / q * q)。
+	void RegisterBuiltinQuatBinding(ScriptBindingContext& bindings);
 	// W3a-A1:组件字段代理(Entity:GetComponent 的返回值;Kind → Lua 映射表见 Script/BindComponentAccess.h)。
 	WLD_API bool RegisterComponentProxyBinding(ScriptBindingContext& bindings, std::string* error);
 
