@@ -677,6 +677,31 @@ int main()
 				CHECK(touch.Phase == TouchPhase::Began);
 			}
 
+		// 12. 鼠标键必须按**设备状态**采样，而不是按输入映射的绑定表：
+		// 输入表只绑了左键时，右键（1）仍要能被脚本看到 —— 否则右键拖拽转镜头永远失效。
+		{
+			RawInputState state;
+			SampleRawMouseButtons(state, false, [](int button) { return button == 1; });
+			CHECK(state.IsMouseButton(0) == false);
+			CHECK(state.IsMouseButton(1) == true);
+			CHECK(state.IsMouseButton(2) == false);
+
+			// 释放右键后位必须清掉（不能只置位不清位）。
+			SampleRawMouseButtons(state, false, [](int) { return false; });
+			CHECK(state.IsMouseButton(1) == false);
+
+			// UI 吃掉指针的那一帧：所有鼠标键归零，即使物理键仍按着。
+			RawInputState captured;
+			SampleRawMouseButtons(captured, true, [](int) { return true; });
+			CHECK(captured.MouseButtons == 0);
+
+			// 第 3/4 号附加键也在采样范围内（脚本 MouseButton(3/4)）。
+			RawInputState extra;
+			SampleRawMouseButtons(extra, false, [](int button) { return button == 4; });
+			CHECK(extra.IsMouseButton(4) == true);
+			CHECK(extra.IsMouseButton(3) == false);
+		}
+
 			std::printf("World.Input: all checks passed (including M0 NameId enhancements)\n");
 		return 0;
 	}

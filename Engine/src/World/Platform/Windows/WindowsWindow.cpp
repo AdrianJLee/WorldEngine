@@ -757,6 +757,7 @@ namespace World
 
 		if (locked)
 		{
+			m_CursorVisible = false;
 			glfwGetCursorPos(m_Window, &m_SavedCursorX, &m_SavedCursorY);
 			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 			if (glfwRawMouseMotionSupported())
@@ -788,10 +789,21 @@ namespace World
 					::ReleaseCapture();
 			}
 
-			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+			// 解锁后按"可见性状态"恢复：游戏隐藏光标时解锁不应把光标硬弹回来。
+			glfwSetInputMode(m_Window, GLFW_CURSOR,
+				m_CursorVisible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
 			glfwSetCursorPos(m_Window, m_SavedCursorX, m_SavedCursorY);
 			m_CursorLocked = false;
 		}
+	}
+
+	void WindowsWindow::SetCursorVisible(bool visible)
+	{
+		m_CursorVisible = visible;
+		if (!m_Window || m_CursorLocked)
+			return;   // 锁定期间由 SetCursorLocked(false) 统一恢复。
+		glfwSetInputMode(m_Window, GLFW_CURSOR,
+			visible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
 	}
 
 }

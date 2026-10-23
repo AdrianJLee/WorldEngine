@@ -101,6 +101,10 @@ namespace World
 		virtual bool IsFocused() const { return false; }
 		virtual void SetCursorLocked(bool locked) { (void)locked; }
 		virtual bool IsCursorLocked() const { return false; }
+		// 仅隐藏/显示系统光标，不锁定指针（HUD 与鼠标视角共存时用）。
+		// 锁定期间 SetCursorVisible 只记状态，解锁后按这个状态恢复。
+		virtual void SetCursorVisible(bool visible) { (void)visible; }
+		virtual bool IsCursorVisible() const { return true; }
 
 		// ---- D10:OS 文件拖放(资源管理器 → 窗口)----
 		// 返回自上次调用以来拖入的文件绝对路径并清空队列;没有拖放时返回空 vector。

@@ -371,10 +371,32 @@ function Input:IsKeyPressed(key) end
 ---@return vec2
 function Input:MouseDelta() end
 
----Whether a mouse button is held: 0 = left, 1 = right, 2 = middle; unknown buttons return false.
+---Whether a mouse button is held: 0 = left, 1 = right, 2 = middle, 3/4 = extra; unknown buttons return false.
 ---@param button integer Mouse button: 0 = left, 1 = right, 2 = middle.
 ---@return boolean
 function Input:MouseButton(button) end
+
+---Pointer position in window client pixels (same snapshot as MouseDelta).
+---@return vec2
+function Input:MousePosition() end
+
+---Show or hide the system cursor; ignored while the cursor is locked.
+---@param enabled boolean true = visible / locked, false = hidden / unlocked.
+---@return boolean
+function Input:SetCursorVisible(enabled) end
+
+---Whether the system cursor is currently visible.
+---@return boolean
+function Input:CursorVisible() end
+
+---Lock and hide the cursor for mouse-look (raw motion). Unlocking restores the previous visibility.
+---@param enabled boolean true = visible / locked, false = hidden / unlocked.
+---@return boolean
+function Input:SetCursorLocked(enabled) end
+
+---Whether the cursor is locked for mouse-look.
+---@return boolean
+function Input:CursorLocked() end
 
 -- Global service table 'Level': read-only; there is no runtime constructor.
 ---Read-only level/flow service table; scene handles and host callbacks are not exposed.

@@ -4,11 +4,20 @@
 #include "World/Gameplay/Framework/InputTypes.h"
 #include <memory>
 #include <string>
+#include <functional>
 #include <unordered_map>
 #include <vector>
 
 namespace World::Gameplay
 {
+	// 鼠标键是**设备状态**，与输入映射表的绑定无关：脚本的
+	// `Input.MouseButton(1)` 必须能看到右键，即使输入表只绑了左键
+	// （这是"右键拖拽转镜头不响应"的真因）。
+	// 抽成纯函数是为了能在无窗口环境里验证：注入一个假的 isPressed 即可。
+	// 语义：pointerCaptured=true（UI 吃掉指针）时全部清零；只采样前 5 个物理键。
+	WLD_API void SampleRawMouseButtons(RawInputState& outState, bool pointerCaptured,
+		const std::function<bool(int)>& isPressed);
+
 	class WLD_API IInputSource
 	{
 	public:

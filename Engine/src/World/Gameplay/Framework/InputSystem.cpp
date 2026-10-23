@@ -72,9 +72,21 @@ namespace World::Gameplay
 		// 鼠标按键位掩码来自原始设备状态(高层 InputSnapshot 只含动作/轴)。
 		if (const Gameplay::RawInputState* raw = service.GetRawState())
 			snapshot.MouseButtons = raw->MouseButtons;
-		snapshot.MouseDelta = (firstSample || !state.HasPreviousMouse)
-			? glm::vec2(0.0f)
-			: (mousePosition - state.PreviousMouse);
+		// 鼠标视角优先用**原始设备增量**：指针锁定/隐藏时窗口坐标可能不再变化，
+		// 只靠位置差会让镜头在锁定时突然停住。没有原始增量时退回位置差。
+		glm::vec2 pointerDelta(0.0f);
+		bool haveDelta = false;
+		if (const Gameplay::RawInputState* raw = service.GetRawState())
+		{
+			if (raw->MouseDelta.x != 0.0f || raw->MouseDelta.y != 0.0f)
+			{
+				pointerDelta = raw->MouseDelta;
+				haveDelta = true;
+			}
+		}
+		if (!haveDelta && !firstSample && state.HasPreviousMouse)
+			pointerDelta = mousePosition - state.PreviousMouse;
+		snapshot.MouseDelta = (firstSample && !haveDelta) ? glm::vec2(0.0f) : pointerDelta;
 		snapshot.ScrollDelta = scrollDelta.y;
 		snapshot.SampledFrame = scene.GetTime().FrameCount;
 		snapshot.Valid = true;

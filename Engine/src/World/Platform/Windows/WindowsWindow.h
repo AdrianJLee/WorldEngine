@@ -52,6 +52,8 @@ namespace World
 		bool IsFocused() const override;
 		void SetCursorLocked(bool locked) override;
 		bool IsCursorLocked() const override { return m_CursorLocked; }
+		void SetCursorVisible(bool visible) override;
+		bool IsCursorVisible() const override { return m_CursorVisible; }
 
 		// ---- D10:OS 文件拖放(资源管理器 → 窗口)----
 		// 本窗口自己的队列:WndProc 收 WM_DROPFILES 时写入,这里取出并清空。
@@ -65,6 +67,7 @@ namespace World
 		double m_SavedCursorX = 0.0;
 		double m_SavedCursorY = 0.0;
 		bool m_CursorLocked = false;
+		bool m_CursorVisible = true;
 		// 必须初始化为空:Vulkan 附加窗口不创建 GL 上下文,
 		// 否则 Shutdown 里的 delete m_Context 会释放野指针(销毁窗口即崩)。
 		class GraphicsContext* m_Context = nullptr;

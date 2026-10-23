@@ -163,6 +163,33 @@ local demoCameraRight = false
 local demoCameraReset = false
 local demoTeleport = nil       -- "slope" | "origin"
 
+-- 光标策略：游戏进行中隐藏（第三人称视角不需要可见指针），右键拖拽期间
+-- 进一步锁定指针（原始鼠标增量，转镜头不会被窗口边缘挡住）。
+-- 停止移动/松开右键后恢复显示，避免 HUD 按钮点不到。
+local cursorLocked = false
+local cursorHidden = false
+local rightMouseHeld = false   -- 右键上一帧状态：按下那一帧的指针跳变要丢弃
+
+local function setCursorLocked(locked)
+    if cursorLocked == locked then
+        return
+    end
+    cursorLocked = locked
+    if type(Input.SetCursorLocked) == "function" then
+        pcall(Input.SetCursorLocked, locked)
+    end
+end
+
+local function setCursorHidden(hidden)
+    if cursorHidden == hidden then
+        return
+    end
+    cursorHidden = hidden
+    if type(Input.SetCursorVisible) == "function" then
+        pcall(Input.SetCursorVisible, not hidden)
+    end
+end
+
 local function approach(current, target, rate, dt)
     return current + (target - current) * (1.0 - math.exp(-rate * dt))
 end
@@ -496,7 +523,7 @@ local function bind()
         print("[ANIM-SHOWCASE]   WASD / 左摇杆 : 移动        Shift : 奔跑")
         print("[ANIM-SHOWCASE]   Space         : 跳跃        F     : 上半身瞄准层")
         print("[ANIM-SHOWCASE]   R             : 根运动      Tab   : 跟随 / 自由镜头")
-        print("[ANIM-SHOWCASE]   右键拖拽/方向键: 旋转镜头    滚轮 : 缩放")
+        print("[ANIM-SHOWCASE]   右键拖拽/方向键: 旋转镜头（拖拽时锁定并隐藏光标）  滚轮 : 缩放")
         print("[ANIM-SHOWCASE]   C             : 朝向模式（跟随镜头 / 朝向移动 / 固定）")
         print("[ANIM-SHOWCASE]   G             : 手部 IK 开 / 关（右手跟随青色目标）")
         print("[ANIM-SHOWCASE]   提示：坡面朝世界 +X 升高（从起点按 D 即可上坡）。")
@@ -508,6 +535,10 @@ end
 -- 代理是查询对象内的享元:进入 Play/换场景后必须重新查询,不能在旧场景上继续用。
 local function unbind()
     bound = false
+    rightMouseHeld = false
+    -- 停止 Play / 切场景时务必把系统光标还回去，否则编辑器里鼠标会一直消失。
+    setCursorLocked(false)
+    setCursorHidden(false)
     character = nil
     characterId = nil
     cameraEntity = nil
@@ -658,12 +689,27 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         pitchDeltaDeg = pitchDeltaDeg - CAMERA_KEY_PITCH_RATE * dt
     end
 
-    if mouseButtonDown(1) then
+    -- 右键 = 第三人称环绕：按住时锁定指针，鼠标增量直接驱动镜头。
+    local rightHeld = mouseButtonDown(1)
+    local rightJustPressed = rightHeld and not rightMouseHeld
+    rightMouseHeld = rightHeld
+    setCursorLocked(rightHeld)
+    -- 锁定指针的那一帧会产生一次"光标居中"跳变，不能把它当成用户拖动。
+    if rightHeld and not rightJustPressed then
         local dx, dy = mouseDelta()
         -- 屏幕右移 = 镜头向右转(camYaw 减小);屏幕上推 = 镜头升高(俯仰增大)。
         yawDeltaDeg = yawDeltaDeg - dx * CAMERA_MOUSE_SENSITIVITY
         pitchDeltaDeg = pitchDeltaDeg - dy * CAMERA_MOUSE_SENSITIVITY
     end
+
+    -- 移动时隐藏光标（控制角色时不需要看到指针）；停下即恢复，HUD 仍可点击。
+    -- 只看**物理输入**：控制条按钮驱动的 demoMove 不隐藏光标，否则点完"行走"
+    -- 光标立刻消失、找不到"停止"。
+    local physicalMove = horizontalKey ~= 0.0 or forwardKey ~= 0.0
+        or gamepadX ~= 0.0 or gamepadZ ~= 0.0
+    local controlling = physicalMove or rightHeld
+        or keyDown("Space", KEY_SPACE) or keyDown("LeftShift", KEY_LEFT_SHIFT)
+    setCursorHidden(controlling)
     if demoCameraLeft then
         demoCameraLeft = false
         yawDeltaDeg = yawDeltaDeg + CAMERA_BUTTON_YAW_STEP
@@ -1015,7 +1061,7 @@ ui.onDraw(function()
     ui.text(40, 178, string.format("IK   脚部[%s] 手部[%s]",
         footIkEnabled and "开" or "关", handIkEnabled and "开" or "关"), 14)
     ui.text(40, 200, "WASD 移动   Shift 奔跑   Space 跳跃", 12)
-    ui.text(40, 218, "右键拖拽 / 方向键 转镜头   滚轮 缩放", 12)
+    ui.text(40, 218, "右键拖拽 / 方向键 转镜头（自动隐藏光标）  滚轮 缩放", 12)
     ui.text(40, 236, "F 瞄准   G 手部 IK   R 根运动   Tab 镜头   C 朝向", 12)
     ui.text(40, 256, "最近操作   " .. lastEvent, 12)
 

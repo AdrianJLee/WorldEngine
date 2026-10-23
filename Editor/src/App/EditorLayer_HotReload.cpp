@@ -779,6 +779,14 @@ void EditorLayer::SetSceneState(SceneState state){
 		}
 		m_SceneState = SceneState::Edit;
 		m_ScenePaused = false;
+		// 玩法脚本可能隐藏/锁定了光标（第三人称视角）。退出 Play/Simulate 必须
+		// 无条件收回：否则编辑器鼠标消失、右键菜单也点不到。
+		if (Application::HasInstance())
+		{
+			auto& window = Application::Get().GetWindow();
+			window.SetCursorLocked(false);
+			window.SetCursorVisible(true);
+		}
 		UpdateSceneContext(m_Document.GetScene());
 		m_RuntimeScene.reset();
 		if (state == SceneState::Edit || !m_Document.GetScene())

@@ -273,11 +273,62 @@ namespace World
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[12], count, 1);
 			double number = 0.0;
 			if (!args[0].AsNumber(&number) || !std::isfinite(number) || number != std::round(number) ||
-				number < 0.0 || number > 2.0)
+				number < 0.0 || number > 4.0)
 				return ScriptValue::Boolean(false);
 			const uint16_t mask = static_cast<uint16_t>(1U << static_cast<uint32_t>(number));
 			Scene* scene = ScriptEngine::GetActiveScene();
 			return ScriptValue::Boolean(scene ? (scene->GetInputSnapshot().MouseButtons & mask) != 0 : false);
+		}
+
+		// 指针在**窗口客户区**中的位置（物理像素）。HUD 悬停判定/自绘准星都用它，
+		// 与 MouseDelta 同源（场景快照），因此在固定步里读到的也是同一份数据。
+		ScriptValue InputMousePositionImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[13], count, 0);
+			glm::vec2 position { 0.0f };
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				position = scene->GetInputSnapshot().MousePosition;
+			return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", position);
+		}
+
+		// 光标的显示与锁定是**玩家可感知的状态**，必须让玩法脚本能控制：
+		// 第三人称/第一人称需要"隐藏光标 + 指针锁定"，菜单/HUD 需要"显示光标"。
+		ScriptValue InputSetCursorVisibleImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[14], count, 1);
+			bool visible = true;
+			if (!args[0].AsBool(&visible))
+				return ScriptValue::Boolean(false);
+			if (!Application::HasInstance())
+				return ScriptValue::Boolean(false);
+			Application::Get().GetWindow().SetCursorVisible(visible);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue InputCursorVisibleImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[15], count, 0);
+			return ScriptValue::Boolean(Application::HasInstance()
+				&& Application::Get().GetWindow().IsCursorVisible());
+		}
+
+		ScriptValue InputSetCursorLockedImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[16], count, 1);
+			bool locked = true;
+			if (!args[0].AsBool(&locked))
+				return ScriptValue::Boolean(false);
+			if (!Application::HasInstance())
+				return ScriptValue::Boolean(false);
+			Application::Get().GetWindow().SetCursorLocked(locked);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue InputCursorLockedImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[17], count, 0);
+			return ScriptValue::Boolean(Application::HasInstance()
+				&& Application::Get().GetWindow().IsCursorLocked());
 		}
 
 		// ---- R1:上下文开关。名字 -> 映射表里的 contexts;找不到返回 false(不抛,便于脚本探测) ----
@@ -898,6 +949,11 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 		static const ScriptServiceParam inputMouseButtonParam[] = {
 			{ "button", "integer", ScriptServiceArgType::Number, true, "Mouse button: 0 = left, 1 = right, 2 = middle." },
 		};
+		// 带参数的方法必须给参数描述表：注册/存根渲染会按 MinimumArgs 读 params，
+		// 传 nullptr 会在脚本引擎初始化时空指针崩溃（实测 0xC0000005）。
+		static const ScriptServiceParam inputSetCursorParam[] = {
+			{ "enabled", "boolean", ScriptServiceArgType::Boolean, true, "true = visible / locked, false = hidden / unlocked." },
+		};
 		static const ScriptServiceMethod inputMethods[] = {
 			// 方法体先包装成 ScriptNativeFunction:描述表是静态的,函数指针需要显式构造。
 			{ "Down", [](const ScriptValue* args, std::size_t count) -> ScriptValue
@@ -970,7 +1026,32 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 			{
 				return InputMouseButtonImpl(args, count);
 			}, inputMouseButtonParam, 1, 1, "boolean",
-				"Whether a mouse button is held: 0 = left, 1 = right, 2 = middle; unknown buttons return false." },
+				"Whether a mouse button is held: 0 = left, 1 = right, 2 = middle, 3/4 = extra; unknown buttons return false." },
+			{ "MousePosition", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputMousePositionImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Pointer position in window client pixels (same snapshot as MouseDelta)." },
+			{ "SetCursorVisible", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputSetCursorVisibleImpl(args, count);
+			}, inputSetCursorParam, 1, 1, "boolean",
+				"Show or hide the system cursor; ignored while the cursor is locked." },
+			{ "CursorVisible", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputCursorVisibleImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the system cursor is currently visible." },
+			{ "SetCursorLocked", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputSetCursorLockedImpl(args, count);
+			}, inputSetCursorParam, 1, 1, "boolean",
+				"Lock and hide the cursor for mouse-look (raw motion). Unlocking restores the previous visibility." },
+			{ "CursorLocked", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputCursorLockedImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the cursor is locked for mouse-look." },
 		};
 
 		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。

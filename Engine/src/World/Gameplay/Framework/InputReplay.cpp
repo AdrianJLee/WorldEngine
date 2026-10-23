@@ -16,6 +16,13 @@
 
 namespace World::Gameplay
 {
+	void SampleRawMouseButtons(RawInputState& outState, bool pointerCaptured,
+		const std::function<bool(int)>& isPressed)
+	{
+		for (int button = 0; button < 5; ++button)
+			outState.SetMouseButton(button, !pointerCaptured && isPressed && isPressed(button));
+	}
+
 	void DeviceInputSource::Poll(uint32_t player, RawInputState& outState, float dt)
 	{
 		(void)dt;
@@ -29,6 +36,14 @@ namespace World::Gameplay
 		if (GameApp* app = GameApp::TryGet())
 		{
 			const InputMap& map = app->Input().GetMap();
+
+			// 鼠标键是**设备状态**，不是"映射表里有几条绑定"。过去只在遍历绑定的时候
+			// 写 MouseButtons ⇒ 工程输入表没绑右键时 `Input.MouseButton(1)` 永远为 false
+			// （实测：右键拖拽转镜头完全不响应）。这里固定采样前 5 个物理键，
+			// 让脚本的 MouseButton/Look 查询与绑定表解耦。
+			SampleRawMouseButtons(outState, m_PointerCaptured,
+				[](int button) { return Input::IsMouseButtonPressed(button); });
+
 			for (const InputAction& action : map.Actions())
 			{
 				const auto* overrides = InputRemapManager::Get().GetOverride(action.Id);
