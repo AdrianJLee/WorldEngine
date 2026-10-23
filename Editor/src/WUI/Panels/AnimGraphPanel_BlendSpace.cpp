@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
+#include <string_view>
 #include <utility>
 
 namespace World
@@ -17,6 +19,18 @@ namespace World
 		constexpr float kSampleRowH = 28.0f;
 		constexpr float kCanvasPadLeft = 46.0f;
 		constexpr float kCanvasPadBottom = 22.0f;
+
+		std::string AGTr(const char* key, const char* fallback)
+		{
+			return Wui::Tr(std::string("panel.animgraph.") + key, fallback);
+		}
+
+		std::string AGFmt(const char* key, const char* fallback,
+			std::initializer_list<std::pair<std::string_view, std::string_view>> args = {})
+		{
+			return Wui::TrFormat(std::string("panel.animgraph.") + key, fallback,
+				std::vector<std::pair<std::string_view, std::string_view>>(args));
+		}
 
 		struct BlendMap
 		{
@@ -163,10 +177,10 @@ namespace World
 		Wui::LineSegment(ctx, { map.Plot.X, map.Plot.Y }, { map.Plot.X, map.Plot.Y + map.Plot.H },
 			theme.BorderStrong, 1.0f);
 
-		Wui::Label(ctx, { map.Plot.X + map.Plot.W - 74.0f, map.Plot.Y - 1.0f }, "Speed (m/s)",
+		Wui::Label(ctx, { map.Plot.X + map.Plot.W - 74.0f, map.Plot.Y - 1.0f }, AGTr("blend.axis.speed", "Speed (m/s)"),
 			theme.TextMuted, theme.FontSizeCaption);
 		if (blend2d)
-			Wui::Label(ctx, { map.Plot.X + 4.0f, map.Plot.Y + 2.0f }, "Direction (deg)", theme.TextMuted,
+			Wui::Label(ctx, { map.Plot.X + 4.0f, map.Plot.Y + 2.0f }, AGTr("blend.axis.direction", "Direction (deg)"), theme.TextMuted,
 				theme.FontSizeCaption);
 
 		const std::vector<BlendSample2D>& samples2d = state.Blend2D.GetSamples();
@@ -180,7 +194,7 @@ namespace World
 			canvasNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
 			canvasNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 			canvasNode.Kind = "blend-space-canvas";
-			canvasNode.Label = blend2d ? "Blend Space 2D" : "Blend Space 1D";
+			canvasNode.Label = blend2d ? AGTr("blend.node.2d", "Blend Space 2D") : AGTr("blend.node.1d", "Blend Space 1D");
 			canvasNode.Value = "samples=" + std::to_string(sampleCount)
 				+ " triangles=" + std::to_string(blend2d ? m_Triangles.size() : 0)
 				+ " paramX=" + state.ParameterX + (blend2d ? (" paramY=" + state.ParameterY) : std::string());
@@ -192,7 +206,7 @@ namespace World
 		if (sampleCount == 0)
 		{
 			Wui::Label(ctx, { map.Plot.X + 12.0f, map.Plot.Y + map.Plot.H * 0.5f - 8.0f },
-				"No samples yet - use + Add Sample below.", theme.TextMuted, theme.FontSizeSmall);
+				AGTr("blend.empty", "No samples yet - use + Add Sample below."), theme.TextMuted, theme.FontSizeSmall);
 			return;
 		}
 		if (blend2d && m_TrianglesDirty)
@@ -202,9 +216,9 @@ namespace World
 		if (blend2d && !samples2d.empty() && m_Triangles.empty())
 		{
 			const std::string hint = samples2d.size() < 3
-				? ("Add at least 3 samples to form blend triangles (currently "
-					+ std::to_string(samples2d.size()) + ").")
-				: std::string("Samples are collinear - add a point off the line to form triangles.");
+				? AGFmt("blend.need_three", "Add at least 3 samples to form blend triangles (currently {count}).",
+					{ { "count", std::to_string(samples2d.size()) } })
+				: AGTr("blend.collinear", "Samples are collinear - add a point off the line to form triangles.");
 			Wui::Label(ctx, { map.Plot.X + 12.0f, map.Plot.Y + map.Plot.H * 0.5f - 8.0f }, hint,
 				theme.Warning, theme.FontSizeSmall);
 		}
@@ -279,10 +293,12 @@ namespace World
 
 			char readout[96] = {};
 			if (blend2d)
-				std::snprintf(readout, sizeof(readout), "Speed %.2f m/s   Direction %.0f deg",
+				std::snprintf(readout, sizeof(readout),
+					AGTr("blend.readout.2d", "Speed %.2f m/s   Direction %.0f deg").c_str(),
 					static_cast<double>(m_ParamSpeed), static_cast<double>(m_ParamDirection));
 			else
-				std::snprintf(readout, sizeof(readout), "Speed %.2f m/s", static_cast<double>(m_ParamSpeed));
+				std::snprintf(readout, sizeof(readout),
+					AGTr("blend.readout.1d", "Speed %.2f m/s").c_str(), static_cast<double>(m_ParamSpeed));
 			Wui::Label(ctx, { map.Plot.X + 6.0f, map.Plot.Y + map.Plot.H - 16.0f }, readout,
 				theme.TextMuted, theme.FontSizeCaption);
 		}
@@ -296,7 +312,8 @@ namespace World
 			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 			node.Kind = "blend-sample";
-			node.Label = clip.empty() ? ("Sample " + std::to_string(i)) : clip;
+			node.Label = clip.empty()
+				? AGFmt("blend.sample.label", "Sample {index}", { { "index", std::to_string(i) } }) : clip;
 			char value[96] = {};
 			if (blend2d)
 				std::snprintf(value, sizeof(value), "x=%.2f y=%.1f", static_cast<double>(samples2d[i].Point.x),
@@ -424,10 +441,10 @@ namespace World
 
 		const bool blend2d = state->Kind == AnimStateKind::BlendSpace2D;
 		Wui::SectionHeader(ctx, { area.X + theme.Pad, area.Y + 2.0f, area.W - theme.Pad * 2.0f, kRowH },
-			blend2d ? "Blend Space 2D" : "Blend Space 1D", theme.Text, theme, theme.FontSizeTitle);
+			blend2d ? AGTr("blend.node.2d", "Blend Space 2D") : AGTr("blend.node.1d", "Blend Space 1D"), theme.Text, theme, theme.FontSizeTitle);
 		if (area.W > 430.0f)
 			Wui::Label(ctx, { area.X + area.W - 214.0f, area.Y + 7.0f },
-				"Drag points - release to retriangulate", theme.TextDisabled, theme.FontSizeCaption);
+				AGTr("blend.hint", "Drag points - release to retriangulate"), theme.TextDisabled, theme.FontSizeCaption);
 
 		const Wui::WuiRect canvas { area.X + theme.Pad, area.Y + kRowH + 2.0f,
 			area.W - theme.Pad * 2.0f, 260.0f };
@@ -451,7 +468,7 @@ namespace World
 
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, "X", theme.TextMuted, theme.FontSizeCaption);
 		std::string xBuffer = paramX;
-		Wui::TextFieldA11y xA11y { "Blend X parameter", "Speed" };
+		Wui::TextFieldA11y xA11y { AGTr("blend.param.x.a11y", "Blend X parameter"), "Speed" };
 		const Wui::WuiId xId = Wui::HashId("animgraph.blend.param.x");
 		if (Wui::TextField(ctx, xId, xField, xBuffer, theme, nullptr, &xA11y) && xBuffer != paramX)
 		{
@@ -463,13 +480,13 @@ namespace World
 				ReplaceState(stateName, updated);
 			}
 		}
-		Wui::Tooltip(ctx, xField, "Parameter driving the horizontal axis (default Speed).");
+		Wui::Tooltip(ctx, xField, AGTr("blend.param.x.tooltip", "Parameter driving the horizontal axis (default Speed)."));
 
 		if (blend2d)
 		{
 			Wui::Label(ctx, { yField.X - 14.0f, y + 4.0f }, "Y", theme.TextMuted, theme.FontSizeCaption);
 			std::string yBuffer = paramY;
-			Wui::TextFieldA11y yA11y { "Blend Y parameter", "Direction" };
+			Wui::TextFieldA11y yA11y { AGTr("blend.param.y.a11y", "Blend Y parameter"), "Direction" };
 			const Wui::WuiId yId = Wui::HashId("animgraph.blend.param.y");
 			if (Wui::TextField(ctx, yId, yField, yBuffer, theme, nullptr, &yA11y) && yBuffer != paramY)
 			{
@@ -481,7 +498,7 @@ namespace World
 					ReplaceState(stateName, updated);
 				}
 			}
-			Wui::Tooltip(ctx, yField, "Parameter driving the vertical axis (default Direction, degrees).");
+			Wui::Tooltip(ctx, yField, AGTr("blend.param.y.tooltip", "Parameter driving the vertical axis (default Direction, degrees)."));
 		}
 	}
 	// ---------------------------------------------------------------------------
@@ -503,11 +520,12 @@ namespace World
 		const std::vector<BlendSample1D> samples1d = selected->Blend1D.GetSamples();
 		const size_t sampleCount = blend2d ? samples2d.size() : samples1d.size();
 
-		const std::string samplesHeader = "SAMPLES (" + std::to_string(sampleCount) + ")";
+		const std::string samplesHeader = AGFmt("blend.samples", "SAMPLES ({count})",
+			{ { "count", std::to_string(sampleCount) } });
 		Wui::Label(ctx, { area.X + theme.Pad, area.Y + 5.0f }, samplesHeader, theme.TextMuted,
 			theme.FontSizeCaption);
 		if (blend2d && area.W > 320.0f)
-			Wui::Label(ctx, { area.X + area.W - 150.0f, area.Y + 5.0f }, "X (m/s)      Y (deg)",
+			Wui::Label(ctx, { area.X + area.W - 150.0f, area.Y + 5.0f }, AGTr("blend.columns", "X (m/s)      Y (deg)"),
 				theme.TextDisabled, theme.FontSizeCaption);
 
 		auto copyState = [this, &stateName]() -> AnimState
@@ -542,7 +560,7 @@ namespace World
 			const float originalX = x;
 			bool xChanged = Wui::DragFloat(ctx, Wui::HashId(("animgraph.sample.x." + std::to_string(i)).c_str()),
 				xRect, x, 0.05f, -100.0f, 100.0f, theme);
-			Wui::Tooltip(ctx, xRect, "Sample X coordinate (Speed, m/s).");
+			Wui::Tooltip(ctx, xRect, AGTr("blend.sample.x.tooltip", "Sample X coordinate (Speed, m/s)."));
 
 			float sampleY = blend2d ? samples2d[i].Point.y : 0.0f;
 			const float originalY = sampleY;
@@ -551,7 +569,7 @@ namespace World
 			{
 				yChanged = Wui::DragFloat(ctx, Wui::HashId(("animgraph.sample.y." + std::to_string(i)).c_str()),
 					yRect, sampleY, 0.5f, -360.0f, 360.0f, theme);
-				Wui::Tooltip(ctx, yRect, "Sample Y coordinate (Direction, degrees).");
+				Wui::Tooltip(ctx, yRect, AGTr("blend.sample.y.tooltip", "Sample Y coordinate (Direction, degrees)."));
 			}
 
 			const std::string currentClip = blend2d ? samples2d[i].ClipName : samples1d[i].ClipName;
@@ -562,12 +580,12 @@ namespace World
 				clipIndex = static_cast<int>(std::distance(clips.begin(), found));
 			const bool clipChanged = Wui::Combo(ctx,
 				Wui::HashId(("animgraph.sample.clip." + std::to_string(i)).c_str()), clipRect, "", clips,
-				clipIndex, theme, currentClip.empty() ? "(pick a clip)" : currentClip);
-			Wui::Tooltip(ctx, clipRect, "Clip sampled at this point.");
+				clipIndex, theme, currentClip.empty() ? AGTr("state.pick_clip", "(pick a clip)") : currentClip);
+			Wui::Tooltip(ctx, clipRect, AGTr("blend.sample.clip.tooltip", "Clip sampled at this point."));
 
 			if (Wui::ActionButton(ctx,
 				Wui::HashId(("animgraph.sample.delete." + std::to_string(i)).c_str()), deleteRect, "-", theme,
-				true, "Remove this sample point.", true))
+				true, AGTr("blend.sample.delete.tooltip", "Remove this sample point."), true))
 			{
 				AnimState updated = copyState();
 				if (blend2d)
@@ -636,8 +654,8 @@ namespace World
 
 		const Wui::WuiRect addRect { area.X + theme.Pad, area.Y + area.H - kRowH - 2.0f,
 			area.W - theme.Pad * 2.0f, kRowH };
-		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.sample.add"), addRect, "+ Add Sample", theme, true,
-			"Add a sample at the current preview parameters.", false))
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.sample.add"), addRect, AGTr("blend.sample.add", "+ Add Sample"), theme, true,
+			AGTr("blend.sample.add.tooltip", "Add a sample at the current preview parameters."), false))
 		{
 			AnimState updated = copyState();
 			const std::string clip = updated.ClipName.empty() ? std::string("Idle") : updated.ClipName;

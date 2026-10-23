@@ -85,7 +85,7 @@ local previousJumpHeld = false
 local previousAimHeld = false
 local previousRootMotionHeld = false
 local previousCameraHeld = false
-local lastEvent = "Ready"
+local lastEvent = "就绪"
 local lastEventTimer = 0.0
 
 -- 屏幕控制条(鼠标可玩):与键盘输入等价,同时给自动化一个可点击的用户入口。
@@ -197,25 +197,25 @@ end
 local function stateLabel()
     if not grounded then
         if verticalVelocity > 0.05 then
-            return "JUMP"
+            return "跳跃"
         elseif verticalVelocity < -6.0 then
-            return "FALL (FAST)"
+            return "快速下落"
         end
-        return "FALL"
+        return "下落"
     end
     if speed <= 0.12 then
-        return "IDLE"
+        return "待机"
     end
     if math.abs(dirX) > math.abs(dirZ) then
-        return dirX > 0.0 and "STRAFE RIGHT" or "STRAFE LEFT"
+        return dirX > 0.0 and "右平移" or "左平移"
     end
     if dirZ < -0.3 then
-        return "WALK BACK"
+        return "后退"
     end
     if speed > (WALK_SPEED + 0.25) then
-        return "RUN"
+        return "奔跑"
     end
-    return "WALK"
+    return "行走"
 end
 
 local function bind()
@@ -305,12 +305,12 @@ local function bind()
     if not startupPrinted then
         startupPrinted = true
         print("[ANIM-SHOWCASE] ============================================================")
-        print("[ANIM-SHOWCASE] Animation Showcase ready — Mannequin Locomotion + Foot IK + Root Motion")
-        print("[ANIM-SHOWCASE]   WASD / left stick : move        Shift : run")
-        print("[ANIM-SHOWCASE]   Space             : jump        F     : aim upper-body layer")
-        print("[ANIM-SHOWCASE]   R                 : root motion Tab   : follow / free camera")
-        print("[ANIM-SHOWCASE]   Mouse             : on-screen control bar (Walk/Run/Jump/Aim/Root)")
-        print("[ANIM-SHOWCASE]   Tip: the ramp rises toward world +X (press D from the start).")
+        print("[ANIM-SHOWCASE] 动画图示例已就绪 —— 人偶移动 + 脚部 IK + 根运动")
+        print("[ANIM-SHOWCASE]   WASD / 左摇杆 : 移动        Shift : 奔跑")
+        print("[ANIM-SHOWCASE]   Space         : 跳跃        F     : 上半身瞄准层")
+        print("[ANIM-SHOWCASE]   R             : 根运动      Tab   : 跟随 / 自由相机")
+        print("[ANIM-SHOWCASE]   鼠标          : 屏幕控制条（行走/奔跑/跳跃/瞄准/根运动）")
+        print("[ANIM-SHOWCASE]   提示：坡面朝世界 +X 升高（从起点按 D 即可上坡）。")
         print("[ANIM-SHOWCASE] ============================================================")
     end
     return true
@@ -459,7 +459,7 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
     if jumpPressed and grounded then
         verticalVelocity = JUMP_SPEED
         grounded = false
-        lastEvent = "Jump"
+        lastEvent = "跳跃"
         lastEventTimer = 1.4
     end
 
@@ -476,7 +476,7 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
             charAnim.EnableUpperBodyLayer = aim and 1 or 0
         end
         pushAimWeight(aim and 1.0 or 0.0)
-        lastEvent = aim and "Aim layer ON" or "Aim layer OFF"
+        lastEvent = aim and "瞄准层 开" or "瞄准层 关"
         lastEventTimer = 2.0
         print("[ANIM-SHOWCASE] Upper-body aim layer " .. (aim and "ON" or "OFF") .. " (F).")
     end
@@ -493,7 +493,7 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         if charAnim ~= nil then
             charAnim.EnableRootMotion = rootMotion and 1 or 0
         end
-        lastEvent = rootMotion and "Root motion: ANIMATION" or "Root motion: SCRIPTED"
+        lastEvent = rootMotion and "根运动：动画" or "根运动：脚本"
         lastEventTimer = 2.0
         if rootMotion then
             print("[ANIM-SHOWCASE] Root Motion ON: translation now comes from the clip; if the clip has no root displacement the character stays put (expected).")
@@ -511,7 +511,7 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
     end
     if cameraPressed then
         followCamera = not followCamera
-        lastEvent = followCamera and "Camera: FOLLOW" or "Camera: FREE"
+        lastEvent = followCamera and "相机：跟随" or "相机：自由"
         lastEventTimer = 2.0
         print("[ANIM-SHOWCASE] Camera " .. (followCamera and "follow" or "free (locked)") .. " (Tab).")
     end
@@ -526,7 +526,7 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
             local nextZ = z + stepZ
             local aheadGround = groundHeightAt(nextX, nextZ)
             if grounded and (aheadGround - y) > MAX_STEP_UP then
-                lastEvent = "Step too high"
+                lastEvent = "台阶过高"
                 lastEventTimer = 0.9
             else
                 x = nextX
@@ -557,7 +557,7 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         y = groundY
         verticalVelocity = 0.0
         grounded = true
-        lastEvent = "Landed"
+        lastEvent = "落地"
         lastEventTimer = 1.0
     end
 
@@ -605,7 +605,7 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
     if lastEventTimer > 0.0 then
         lastEventTimer = math.max(0.0, lastEventTimer - dt)
         if lastEventTimer == 0.0 then
-            lastEvent = "Ready"
+            lastEvent = "就绪"
         end
     end
 end)
@@ -615,69 +615,69 @@ ui.onDraw(function()
         return
     end
 
-    ui.panel(24, 24, 392, 408, "ANIMATION SHOWCASE")
-    ui.text(40, 62, "STATE   " .. stateLabel(), 17)
-    ui.text(40, 88, string.format("SPEED   %.2f m/s", speed), 14)
-    ui.text(40, 106, "AIM     " .. (aim and "ON  (upper-body layer)" or "OFF"), 14)
-    ui.text(40, 124, "ROOT    " .. (rootMotion and "ANIMATION ROOT MOTION" or "SCRIPTED MOVE"), 14)
-    ui.text(40, 142, "CAMERA  " .. (followCamera and "FOLLOW" or "FREE (LOCKED)"), 14)
-    ui.text(40, 168, "WASD move   Shift run   Space jump", 12)
-    ui.text(40, 186, "F aim   R root motion   Tab camera", 12)
-    ui.text(40, 212, "LAST    " .. lastEvent, 12)
+    ui.panel(24, 24, 392, 408, "动画图内容示例")
+    ui.text(40, 62, "状态   " .. stateLabel(), 17)
+    ui.text(40, 88, string.format("速度   %.2f m/s", speed), 14)
+    ui.text(40, 106, "瞄准     " .. (aim and "开（上半身层）" or "关"), 14)
+    ui.text(40, 124, "根运动   " .. (rootMotion and "动画根运动" or "脚本位移"), 14)
+    ui.text(40, 142, "相机     " .. (followCamera and "跟随" or "自由（锁定）"), 14)
+    ui.text(40, 168, "WASD 移动   Shift 奔跑   Space 跳跃", 12)
+    ui.text(40, 186, "F 瞄准   R 根运动   Tab 相机", 12)
+    ui.text(40, 212, "最近操作   " .. lastEvent, 12)
 
     -- 鼠标可玩控制条(与键盘完全等价;也用于自动化点击验证)。
-    if ui.button("demo_walk", 40, 236, 104, 26, (demoMove == 1 and not demoRun) and "Walk  [ON]" or "Walk") then
+    if ui.button("demo_walk", 40, 236, 104, 26, (demoMove == 1 and not demoRun) and "行走（开）" or "行走") then
         demoMove = (demoMove == 1) and 0 or 1
-        lastEvent = demoMove == 1 and "Control bar: walk" or "Control bar: stop"
+        lastEvent = demoMove == 1 and "控制条：行走" or "控制条：停止"
         lastEventTimer = 1.4
     end
-    if ui.button("demo_run", 152, 236, 104, 26, demoRun and "Run  [ON]" or "Run") then
+    if ui.button("demo_run", 152, 236, 104, 26, demoRun and "奔跑（开）" or "奔跑") then
         demoRun = not demoRun
         if demoRun then demoMove = 1 end
-        lastEvent = demoRun and "Control bar: run" or "Control bar: walk speed"
+        lastEvent = demoRun and "控制条：奔跑" or "控制条：恢复行走速度"
         lastEventTimer = 1.4
     end
-    if ui.button("demo_stop", 264, 236, 104, 26, "Stop") then
+    if ui.button("demo_stop", 264, 236, 104, 26, "停止") then
         demoMove = 0
         demoRun = false
-        lastEvent = "Control bar: stop"
+        lastEvent = "控制条：停止"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_jump", 40, 270, 120, 26, "Jump") then
+    if ui.button("demo_jump", 40, 270, 120, 26, "跳跃") then
         demoJump = true
-        lastEvent = "Control bar: jump"
+        lastEvent = "控制条：跳跃"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_aim", 168, 270, 120, 26, aim and "Aim  [ON]" or "Aim") then
+    if ui.button("demo_aim", 168, 270, 120, 26, aim and "瞄准（开）" or "瞄准") then
         demoAimToggle = true
-        lastEvent = "Control bar: aim"
+        lastEvent = "控制条：瞄准"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_root", 40, 304, 156, 26, rootMotion and "Root Motion [ON]" or "Root Motion") then
+    if ui.button("demo_root", 40, 304, 156, 26, rootMotion and "根运动（开）" or "根运动") then
         demoRootToggle = true
-        lastEvent = "Control bar: root motion"
+        lastEvent = "控制条：根运动"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_camera", 204, 304, 156, 26, followCamera and "Camera [FOLLOW]" or "Camera [FREE]") then
+    if ui.button("demo_camera", 204, 304, 156, 26, followCamera and "相机 [跟随]" or "相机 [自由]") then
         demoCameraToggle = true
-        lastEvent = "Control bar: camera"
+        lastEvent = "控制条：相机"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_slope", 40, 338, 156, 26, "Slope Demo (Foot IK)") then
+    if ui.button("demo_slope", 40, 338, 156, 26, "坡面演示（脚部 IK）") then
         demoTeleport = "slope"
         demoMove = 0
         demoRun = false
-        lastEvent = "Control bar: slope Foot IK demo"
+        lastEvent = "控制条：坡面脚部 IK 演示"
         lastEventTimer = 2.0
     end
-    if ui.button("demo_reset", 204, 338, 156, 26, "Reset Position") then
+    if ui.button("demo_reset", 204, 338, 156, 26, "重置位置") then
         demoTeleport = "origin"
         demoMove = 0
         demoRun = false
-        lastEvent = "Control bar: reset to origin"
+        lastEvent = "控制条：重置到起点"
         lastEventTimer = 2.0
     end
-    ui.text(40, 378, "Click a control, or use the keyboard shortcuts above.", 11)
+    ui.text(40, 378, "点击按钮，或使用上方键盘快捷键。", 11)
 end)
 
 
