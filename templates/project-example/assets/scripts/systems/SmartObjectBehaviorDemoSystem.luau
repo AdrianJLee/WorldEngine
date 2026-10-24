@@ -375,3 +375,14 @@ ecs:AddSystem("SmartObjectBehaviorDemoSystem", "Update", function(dt: number)
             currentFsmState, hpStr, soStateStr))
     end
 end)
+
+ecs:AddTeardownSystem("SmartObjectBehaviorDemoTeardown", function()
+    aiAgentEntity = nil
+    aiAgentId = nil
+    healthStationEntity = nil
+    healthStationId = nil
+    restBenchEntity = nil
+    restBenchId = nil
+    initialized = false
+    behaviorTreeRoot = nil
+end)

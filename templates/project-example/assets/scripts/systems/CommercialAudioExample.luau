@@ -27,9 +27,12 @@
 
 -- 关卡归属守卫: 本演示只在含 "Audio Demo Stage" 标记的关卡里跑。
 -- 没有守卫时脚步声循环会在每个关卡里一直响(用户听到的"滋滋声")。
-local SceneScope = ecs:RequireLib("scene_scope")
-local inScope = SceneScope.owns("Audio Demo Stage")
-
+local SceneScope = nil
+local okScope, scopeLib = pcall(function() return ecs:RequireLib("scene_scope") end)
+if okScope and type(scopeLib) == "table" then
+    SceneScope = scopeLib
+end
+local inScope: boolean? = nil
 local initialized = false
 local comboTimer = 0.0
 local simulatedEnemyPos = { x = -8.0, y = 2.0, z = 5.0 }
@@ -38,6 +41,18 @@ local activeSfxVoice = 0
 local footstepTimer = 0.0
 
 ecs:AddSystem("CommercialAudioDemoSystem", "Update", function(dt: number)
+    if inScope == nil then
+        if SceneScope and type(SceneScope.owns) == "function" then
+            inScope = SceneScope.owns("Audio Demo Stage")
+        else
+            local found = false
+            local q = ecs:Query({ "TagComponent" })
+            q:Each(function(_e, tag)
+                if tag.Tag == "Audio Demo Stage" then found = true end
+            end)
+            inScope = found
+        end
+    end
     if not inScope then
         return
     end
@@ -136,12 +151,13 @@ end)
 
 -- 退出本关时收尾: 停掉仍在循环的演示声与背景音乐, 不把声音带进下一个关卡。
 ecs:AddTeardownSystem("CommercialAudioDemoTeardown", function()
-    if not inScope then
-        return
-    end
     if activeSfxVoice > 0 then
         Audio:Stop(activeSfxVoice, 0.15)
         activeSfxVoice = 0
     end
     Music:Stop(0.2)
+    inScope = nil
+    initialized = false
+    footstepTimer = 0.0
+    comboTimer = 0.0
 end)

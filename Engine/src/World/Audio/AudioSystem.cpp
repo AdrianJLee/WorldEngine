@@ -53,6 +53,7 @@ namespace World::Audio
 		{
 			return false;
 		}
+		m_BufferFrames = m_Backend->GetBufferFrames();
 
 		m_Backend->SetRenderCallback([this](float* outL, float* outR, uint32_t frames) {
 			this->AudioRenderCallback(outL, outR, frames);
@@ -282,9 +283,14 @@ namespace World::Audio
 		ProcessCommandQueue();
 		m_TotalRenderedFrames.fetch_add(frameCount, std::memory_order_relaxed);
 
-		// 1. Clear scratch bus buffers (zero-allocation: only std::fill, no assign/resize)
+		// 1. Clear scratch bus buffers (zero-allocation when capacity matches frameCount)
 		for (auto& [bid, bufPair] : m_BusMixBuffers)
 		{
+			if (bufPair.first.size() < frameCount)
+			{
+				bufPair.first.assign(frameCount, 0.0f);
+				bufPair.second.assign(frameCount, 0.0f);
+			}
 			uint32_t count = std::min(static_cast<uint32_t>(bufPair.first.size()), frameCount);
 			std::fill(bufPair.first.begin(), bufPair.first.begin() + count, 0.0f);
 			std::fill(bufPair.second.begin(), bufPair.second.begin() + count, 0.0f);

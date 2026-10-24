@@ -188,3 +188,13 @@ ecs:AddSystem("M5ShowcaseSystem", "Update", function(dt: number)
             is2DLocked and "2D 平面" or "3D 空间"))
     end
 end)
+
+ecs:AddTeardownSystem("M5ShowcaseTeardown", function()
+    fireEmitterEntity = nil
+    fireEmitterId = nil
+    sparkEmitterEntity = nil
+    sparkEmitterId = nil
+    bouncerEntity = nil
+    bouncerId = nil
+    initialized = false
+end)

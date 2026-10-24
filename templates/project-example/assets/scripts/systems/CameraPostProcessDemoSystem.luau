@@ -11,7 +11,11 @@
 
 -- 关卡归属守卫: 本演示只在含 "Hero Character" 的关卡里生效。
 -- 否则会在别的关卡里抢 空格(震屏)/F(闪白)/A、D 键, 干扰该关卡自己的操作。
-local SceneScope = ecs:RequireLib("scene_scope")
+local SceneScope = nil
+local okScope, scopeLib = pcall(function() return ecs:RequireLib("scene_scope") end)
+if okScope and type(scopeLib) == "table" then
+    SceneScope = scopeLib
+end
 
 local initialized = false
 local inScope: boolean? = nil
@@ -24,7 +28,16 @@ local lastLmb = false
 
 ecs:AddSystem("CameraPostProcessDemoSystem", "Update", function(dt: number)
     if inScope == nil then
-        inScope = SceneScope.owns("Hero Character")
+        if SceneScope and type(SceneScope.owns) == "function" then
+            inScope = SceneScope.owns("Hero Character")
+        else
+            local found = false
+            local q = ecs:Query({ "TagComponent" })
+            q:Each(function(_e, tag)
+                if tag.Tag == "Hero Character" then found = true end
+            end)
+            inScope = found
+        end
     end
     if not inScope then
         return
@@ -151,4 +164,10 @@ ecs:AddSystem("CameraPostProcessDemoSystem", "Update", function(dt: number)
         print(string.format("[M2-DEMO-TICK] 主相机坐标=(%.2f, %.2f, %.2f) | 运行时间=%.1fs",
             camPos.x, camPos.y, camPos.z, timer))
     end
+end)
+
+ecs:AddTeardownSystem("CameraPostProcessDemoTeardown", function()
+    inScope = nil
+    initialized = false
+    heroId = nil
 end)

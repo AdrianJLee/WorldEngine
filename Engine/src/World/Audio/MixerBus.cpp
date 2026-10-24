@@ -170,12 +170,18 @@ namespace World::Audio
 		auto itVoice = busBuffers.find(kBusVoice);
 		if (itVoice != busBuffers.end() && !itVoice->second.first.empty())
 		{
+			if (itVoice->second.first.size() < frameCount)
+			{
+				itVoice->second.first.assign(frameCount, 0.0f);
+				itVoice->second.second.assign(frameCount, 0.0f);
+			}
 			double sumSq = 0.0;
-			for (uint32_t i = 0; i < frameCount; ++i)
+			const uint32_t sampleCount = std::min(frameCount, static_cast<uint32_t>(itVoice->second.first.size()));
+			for (uint32_t i = 0; i < sampleCount; ++i)
 			{
 				sumSq += itVoice->second.first[i] * itVoice->second.first[i];
 			}
-			voiceRms = static_cast<float>(std::sqrt(sumSq / static_cast<double>(frameCount)));
+			voiceRms = static_cast<float>(std::sqrt(sumSq / static_cast<double>(sampleCount > 0 ? sampleCount : 1)));
 		}
 
 		// Smooth envelope follower for ducking

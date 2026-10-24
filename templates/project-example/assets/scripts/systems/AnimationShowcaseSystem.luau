@@ -947,7 +947,11 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
             if Physics and type(Physics.Raycast) == "function" and moveLen > 0.0001 then
                 local ok, hit = pcall(Physics.Raycast, x, y + 0.8, z, dirX, 0.0, dirZ, moveLen + 0.35, 4294967295)
                 if ok and hit and hit.Hit and (characterId == nil or hit.Entity ~= characterId) then
-                    blocked = true
+                    -- 仅当撞到陡峭立面(如柱子侧面/高台阶)时才阻挡；地形坡面/地面法线偏向上(y >= 0.6)是可行走坡面，不应阻挡前进
+                    local ny = hit.Normal and (hit.Normal.y or (hit.normal and hit.normal.y)) or 0.0
+                    if ny < 0.6 then
+                        blocked = true
+                    end
                 end
             end
             local aheadGround = groundHeightAt(nextX, nextZ)

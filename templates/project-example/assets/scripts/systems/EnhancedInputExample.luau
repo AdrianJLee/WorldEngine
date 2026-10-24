@@ -23,7 +23,13 @@
 --   两份脚本操作的是同一个 HUD 文档,方向不同,不重复。
 -- =============================================================================
 
--- 只在**方向变化**时打印轴(每帧打印会把日志刷没)
+local SceneScope = nil
+local okScope, scopeLib = pcall(function() return ecs:RequireLib("scene_scope") end)
+if okScope and type(scopeLib) == "table" then
+    SceneScope = scopeLib
+end
+
+local inScope: boolean? = nil
 local lastMoveSign = 0
 local registered = false
 
@@ -37,7 +43,18 @@ end
 
 ecs:AddSystem("PlayerInputSystem", "Update", function(dt: number)
     if inScope == nil then
-        inScope = SceneScope.owns("Input Demo Stage") or SceneScope.hasTag("Input Controlled Entity")
+        if SceneScope and type(SceneScope.owns) == "function" then
+            inScope = SceneScope.owns("Input Demo Stage") or SceneScope.hasTag("Input Controlled Entity")
+        else
+            local found = false
+            local q = ecs:Query({ "TagComponent" })
+            q:Each(function(_e, tag)
+                if tag.Tag == "Input Demo Stage" or tag.Tag == "Input Controlled Entity" or tag.Tag == "Input Demo Character" then
+                    found = true
+                end
+            end)
+            inScope = found
+        end
     end
     if not inScope then
         return
@@ -134,3 +151,8 @@ ecs:AddSystem("PlayerInputSystem", "Update", function(dt: number)
 end)
 
 print("[INPUT-DEMO] PlayerInputSystem 已注册(消费 assets/input.weinput 的 7 个动作 / 1 根轴 / 2 个上下文)")
+
+ecs:AddTeardownSystem("EnhancedInputTeardown", function()
+    inScope = nil
+    registered = false
+end)

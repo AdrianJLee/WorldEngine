@@ -170,3 +170,7 @@ local animEventHandle = ecs:OnAnimationEvent(function(event)
 end)
 
 print("[2D-DEMO] 动画关键帧事件监听器已注册 (Handle=" .. tostring(animEventHandle) .. ")")
+
+ecs:AddTeardownSystem("ParallaxCameraDemoTeardown", function()
+    initialized = false
+end)

@@ -271,6 +271,18 @@ namespace World
 				if (data.EventCallback) data.EventCallback(event);
 			});
 
+		glfwSetWindowFocusCallback(m_Window, [](GLFWwindow* window, int focused)
+			{
+				(void)focused;
+				if (const HWND hwnd = glfwGetWin32Window(window))
+				{
+					if (auto* self = reinterpret_cast<WindowsWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA)))
+					{
+						self->UpdateCursorClip();
+					}
+				}
+			});
+
 	}
 
 	void WindowsWindow::Shutdown()
@@ -349,6 +361,18 @@ namespace World
 		{
 			WLD_TRACE_SCOPE("Platform.PollEvents");
 			glfwPollEvents();
+		}
+
+		if (m_CursorLocked)
+		{
+			const HWND hwnd = glfwGetWin32Window(m_Window);
+			const bool isFg = hwnd && (::GetForegroundWindow() == hwnd) && IsFocused() && IsForegroundApp();
+			if (!isFg)
+			{
+				::ClipCursor(nullptr);
+				if (hwnd && ::GetCapture() == hwnd)
+					::ReleaseCapture();
+			}
 		}
 
 		// Vulkan 由交换链 Present 呈现;GL 保持 glfwSwapBuffers。
@@ -694,6 +718,15 @@ namespace World
 				Platform::WindowsIme::HandleMessage(hwnd, msg, wParam, lParam, state);
 			}
 #endif
+			if (msg == WM_ACTIVATE || msg == WM_KILLFOCUS || msg == WM_SETFOCUS)
+			{
+				self->UpdateCursorClip();
+			}
+			else if (msg == WM_WINDOWPOSCHANGED && self->m_CursorLocked)
+			{
+				self->UpdateCursorClip();
+			}
+
 			if (msg == WM_DROPFILES)
 				return self->HandleDroppedFiles(wParam);
 			// 只有无边框窗口接管命中测试;有系统标题栏的窗口必须让 GLFW/系统决定
@@ -761,24 +794,18 @@ namespace World
 	{
 		return m_Data.VSync;
 	}
-	void WindowsWindow::SetCursorLocked(bool locked)
+	void WindowsWindow::UpdateCursorClip()
 	{
 		if (!m_Window)
 			return;
-		// 解锁必须是幂等的空操作：宿主/脚本会在"停止 Play""退出视口"等路径上无条件调用
-		// SetCursorLocked(false)。旧实现即使从未锁定过也会执行下面的 glfwSetCursorPos，
-		// 把从未赋值的位置 (0,0) 写进窗口 → 进入 Play 时光标被扔到左上角。
-		if (m_CursorLocked == locked)
-			return;
 
 		const HWND hwnd = glfwGetWin32Window(m_Window);
+		const bool isForeground = hwnd && (::GetForegroundWindow() == hwnd) && IsFocused() && IsForegroundApp();
 
-		if (locked)
+		if (m_CursorLocked && isForeground)
 		{
-			// 位置记忆交给 GLFW：disableCursor() 记录 restoreCursorPos，enableCursor() 恢复。
-			// 引擎自己再存一份只会多出一个可能与 GLFW 不一致的来源（曾把光标弹到 0,0）。
 			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-			::SetCursor(nullptr);   // 立即生效，不等下一次 WM_SETCURSOR
+			::SetCursor(nullptr);
 			if (glfwRawMouseMotionSupported())
 				glfwSetInputMode(m_Window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
 
@@ -794,12 +821,9 @@ namespace World
 					RECT clipRect { ul.x, ul.y, lr.x, lr.y };
 					::ClipCursor(&clipRect);
 				}
-				::SetCapture(hwnd);
+				if (::GetCapture() != hwnd)
+					::SetCapture(hwnd);
 			}
-
-			m_CursorLocked = true;
-			// 捕获瞬间丢弃编辑态累积的原始位移：否则进入 Play 的第一帧会把
-			// "在编辑器里移动鼠标"的整段累计当成一次甩视角。
 			Platform::WindowsRawInput::ResetAccumulated();
 		}
 		else
@@ -811,17 +835,30 @@ namespace World
 					::ReleaseCapture();
 			}
 
-			// 解锁后按"可见性状态"恢复：游戏隐藏光标时解锁不应把光标硬弹回来。
-			// 位置恢复交给 GLFW（enableCursor 会回到 disableCursor 记录的位置），
-			// 这里再 glfwSetCursorPos 一次等于覆盖 GLFW 的记录，容易把光标弹到错误位置。
-			glfwSetInputMode(m_Window, GLFW_CURSOR,
-				m_CursorVisible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
-			m_CursorLocked = false;
-			Platform::WindowsRawInput::ResetAccumulated();
+			if (m_CursorLocked)
+			{
+				glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+			}
+			else
+			{
+				glfwSetInputMode(m_Window, GLFW_CURSOR,
+					m_CursorVisible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+			}
 		}
+	}
 
-		WLD_CORE_INFO("[cursor] locked={0} focused={1}",
-			m_CursorLocked ? 1 : 0, IsFocused() ? 1 : 0);
+	void WindowsWindow::SetCursorLocked(bool locked)
+	{
+		if (!m_Window)
+			return;
+		if (m_CursorLocked == locked)
+			return;
+
+		m_CursorLocked = locked;
+		UpdateCursorClip();
+
+		WLD_CORE_INFO("[cursor] locked={0} focused={1} fg={2}",
+			m_CursorLocked ? 1 : 0, IsFocused() ? 1 : 0, IsForegroundApp() ? 1 : 0);
 	}
 
 	void WindowsWindow::SetCursorVisible(bool visible)
@@ -831,24 +868,27 @@ namespace World
 		m_CursorVisible = visible;
 		WLD_CORE_INFO("[cursor] visible={0}", visible ? 1 : 0);
 		if (!m_Window || m_CursorLocked)
-			return;   // 锁定期间由 SetCursorLocked(false) 统一恢复。
+			return;
 		glfwSetInputMode(m_Window, GLFW_CURSOR,
 			visible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
-		// GLFW 的隐藏要等下一次 WM_SETCURSOR 才落到 SetCursor；显式置空保证点下
-		// Play 的同一帧光标就消失（旧表现：先看得见，动一下鼠标才消失）。
 		if (!visible)
 			::SetCursor(nullptr);
 	}
 
 	void WindowsWindow::SyncCursorState()
 	{
-		if (!m_Window || m_CursorVisible)
+		if (!m_Window)
 			return;
-		// 隐藏意图每帧落地一次。GLFW 的 GLFW_CURSOR_HIDDEN/DISABLED 只在
-		// "下一次 WM_SETCURSOR" 时才真正调用 SetCursor(NULL)，而编辑器 WUI 每帧
-		// 又会按悬停控件调 glfwSetCursor(...)；只写一次模式会出现"鼠标动一下才消失"，
-		// 或者被别的路径重新显示。这里直接对齐 OS 状态，不依赖事件时机。
-		::SetCursor(nullptr);
+		const HWND hwnd = glfwGetWin32Window(m_Window);
+		const bool isForeground = hwnd && (::GetForegroundWindow() == hwnd) && IsFocused();
+		if (!isForeground)
+			return;
+		if (m_CursorLocked || !m_CursorVisible)
+		{
+			::SetCursor(nullptr);
+		}
 	}
+
+
 
 }

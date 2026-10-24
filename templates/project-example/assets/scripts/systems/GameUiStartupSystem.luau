@@ -8,11 +8,26 @@
 --   原生单次执行，不占用 Update 帧管线，无需手动注销。
 -- =============================================================================
 
-local SceneScope = ecs:RequireLib("scene_scope")
+local SceneScope = nil
+local okScope, scopeLib = pcall(function() return ecs:RequireLib("scene_scope") end)
+if okScope and type(scopeLib) == "table" then
+    SceneScope = scopeLib
+end
 
 -- 1. 场景开始时执行一次的原生启动系统 (仅在拥有 HUD Demo 标记的关卡生效)
 ecs:AddStartupSystem("GameUiStartupSystem", function()
-    if not SceneScope.owns("HUD Demo Stage") and not SceneScope.owns("Input Demo Stage") then
+    local inScope = false
+    if SceneScope and type(SceneScope.owns) == "function" then
+        inScope = SceneScope.owns("HUD Demo Stage") or SceneScope.owns("Input Demo Stage")
+    else
+        local q = ecs:Query({ "TagComponent" })
+        q:Each(function(_e, tag)
+            if tag.Tag == "HUD Demo Stage" or tag.Tag == "Input Demo Stage" then
+                inScope = true
+            end
+        end)
+    end
+    if not inScope then
         return
     end
     local ok = ui.open("assets/ui/hud.wui")
