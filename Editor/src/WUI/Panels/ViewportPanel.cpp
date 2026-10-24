@@ -3432,71 +3432,117 @@ namespace World
 				{
 					const size_t polyCount = navMesh->GetPolygonCount();
 					const glm::vec3 cameraPos = debugCamera.Position;
-					constexpr float kMaxDrawDistSq = 350.0f * 350.0f; // 350m 充足视野覆盖整张大地图
-					size_t segmentBudget = 3500; // 3500 条线段预算，将每帧线框耗时锁定在 0.8ms 内，视口 100+ FPS 丝滑满帧
+					constexpr float kMaxDrawDistSq = 500.0f * 500.0f; // 500m 充裕大视野覆盖整张地图
 
-					for (size_t p = 0; p < polyCount && segmentBudget > 0; ++p)
+					for (size_t p = 0; p < polyCount; ++p)
 					{
 						const auto& poly = navMesh->GetPolygon(static_cast<uint32_t>(p));
 						const size_t vertCount = poly.VertexIndices.size();
 						if (vertCount < 3) continue;
 
-						// 1. 距离裁剪 (350m 以外的极远景不画)
+						// 1. 视距与视锥体粗裁 (超过 500m 或背向相机的多边形跳过)
 						const glm::vec3 toPoly = poly.Center - cameraPos;
 						const float distSq = glm::dot(toPoly, toPoly);
 						if (distSq > kMaxDrawDistSq)
 							continue;
 
-						// 2. 视锥体粗裁 (背向相机或视锥外的多边形直接跳过)
 						const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
 						if (clipPos.w < 0.1f)
 							continue;
 						const glm::vec2 ndc = glm::vec2(clipPos.x, clipPos.y) / clipPos.w;
-						if (std::abs(ndc.x) > 1.25f || std::abs(ndc.y) > 1.25f)
+						if (std::abs(ndc.x) > 1.35f || std::abs(ndc.y) > 1.35f)
 							continue;
 
+						// 2. 颜色解析 (基础可通行、区域代价、阻挡障碍)
 						Wui::WuiColor polyColor = poly.Blocked
-							? Wui::WuiColor{ 0.95f, 0.25f, 0.25f, 0.90f }
-							: Wui::WuiColor{ 0.15f, 0.85f, 0.55f, 0.80f };
+							? Wui::WuiColor{ 0.95f, 0.25f, 0.25f, 0.95f }
+							: Wui::WuiColor{ 0.15f, 0.92f, 0.50f, 0.90f };
+
+						Wui::WuiColor fillColor = poly.Blocked
+							? Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.40f }
+							: Wui::WuiColor{ 0.12f, 0.85f, 0.45f, 0.30f };
 
 						if (NavMeshPanel::ShowAreaCosts && !poly.Blocked)
 						{
 							if (poly.AreaType == 1)      // Road (道路亮绿)
-								polyColor = Wui::WuiColor{ 0.35f, 0.95f, 0.35f, 0.85f };
+							{
+								polyColor = Wui::WuiColor{ 0.35f, 0.95f, 0.35f, 0.90f };
+								fillColor = Wui::WuiColor{ 0.30f, 0.95f, 0.30f, 0.35f };
+							}
 							else if (poly.AreaType == 2) // Mud (泥潭蓝紫)
-								polyColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.85f };
+							{
+								polyColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.90f };
+								fillColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.35f };
+							}
 							else if (poly.AreaType == 3) // Hazard (危险红)
-								polyColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.85f };
+							{
+								polyColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.90f };
+								fillColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.40f };
+							}
 						}
 
-						// 工业级视口 LOD：近景（<35m）清晰呈现每一条内部体素线，远景（>35m）自适应间隔采样，彻底避免远距离糊成实心纯绿斑块
-						const int internalStride = (distSq > 35.0f * 35.0f) ? 3 : 1;
+						// 投影 4 个顶角到屏幕空间 (+0.08m 防地貌贴图穿插闪烁)
+						std::array<glm::vec2, 4> screenPts;
+						bool projectOk = true;
+						for (size_t i = 0; i < 4; ++i)
+						{
+							const size_t vIdx = (i < vertCount) ? poly.VertexIndices[i] : poly.VertexIndices[vertCount - 1];
+							const glm::vec3 worldPos = navMesh->GetVertex(vIdx) + glm::vec3(0.0f, 0.08f, 0.0f);
+							const glm::vec4 clip = viewProj * glm::vec4(worldPos, 1.0f);
+							if (clip.w <= 0.05f) { projectOk = false; break; }
+							const glm::vec3 n = glm::vec3(clip) / clip.w;
+							if (n.z < -1.0f || n.z > 1.0f) { projectOk = false; break; }
+							screenPts[i] = glm::vec2 {
+								sceneRect.X + (n.x + 1.0f) * 0.5f * sceneRect.W,
+								sceneRect.Y + (1.0f - n.y) * 0.5f * sceneRect.H
+							};
+						}
+						if (!projectOk) continue;
 
-						for (size_t i = 0; i < vertCount && segmentBudget > 0; ++i)
+						// 3. 【半透明全涂色填充 (对标 UE5 / Unity 工业级全覆盖涂色)】
+						if (NavMeshPanel::FillPolygons)
+						{
+							Wui::ConvexQuad(ctx, screenPts, fillColor);
+						}
+
+						// 4. 【外边界轮廓线 (100% 完整保留加粗) + 近细远大自适应网格线 (近距离细方格，远距离大方格)】
+						// 近处（<30m）：细方格每格都画 (stride = 1)
+						// 中距离（30m~70m）：大方格每 2 格画一条 (stride = 2)
+						// 远距离（70m~150m）：超大方格每 4 格画一条 (stride = 4)
+						// 极远（>150m）：完全依托半透明全涂色与外轮廓线 (stride = 0)
+						const int gridStride = (distSq < 30.0f * 30.0f) ? 1 :
+							((distSq < 70.0f * 70.0f) ? 2 : ((distSq < 150.0f * 150.0f) ? 4 : 0));
+
+						for (size_t i = 0; i < vertCount; ++i)
 						{
 							const int32_t nbr = (i < poly.Neighbors.size()) ? poly.Neighbors[i] : -1;
 							const bool isBoundary = (nbr == -1);
 
 							if (!isBoundary)
 							{
-								// 共享边只由较小索引多边形绘制一次
+								if (gridStride == 0)
+									continue;
+
+								// 共享内部边去重：只由较小索引多边形绘制一次
 								if (static_cast<int32_t>(p) > nbr)
 									continue;
 
-								// 内部线远景抽样降噪
-								if (internalStride > 1 && (p % internalStride != 0))
+								// 内部线按距离自适应大方格/细方格
+								if (gridStride > 1 && (p % gridStride != 0))
 									continue;
 							}
 
-							const glm::vec3 v0 = navMesh->GetVertex(poly.VertexIndices[i]) + glm::vec3(0.0f, 0.08f, 0.0f);
-							const glm::vec3 v1 = navMesh->GetVertex(poly.VertexIndices[(i + 1) % vertCount]) + glm::vec3(0.0f, 0.08f, 0.0f);
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(v0, 1.0f),
-								viewProj * glm::vec4(v1, 1.0f),
-								polyColor, isBoundary ? 2.0f : 1.2f);
-							--segmentBudget;
+							const glm::vec2& p0 = screenPts[i];
+							const glm::vec2& p1 = screenPts[(i + 1) % vertCount];
+							const float thickness = isBoundary ? 2.0f : 1.0f;
+							const Wui::WuiColor lineColor = isBoundary
+								? polyColor
+								: Wui::WuiColor{ polyColor.R, polyColor.G, polyColor.B, 0.40f };
+
+							Wui::LineSegment(ctx, p0, p1, lineColor, thickness);
 						}
 					}
+
 				}
 
 				const auto& registry = std::as_const(*navScene).GetRegistry();

@@ -327,6 +327,7 @@ void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& topLeft,
 void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& from, const WuiColor& to, bool vertical);
 
 void LineSegment(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, const WuiColor& color, float thickness);
+void ConvexQuad(WuiContext& ctx, const std::array<glm::vec2, 4>& vertices, const WuiColor& color);
 
 std::string EllipsizeMiddleToWidth(const WuiContext& ctx, std::string_view text, float width, float fontSize);
 

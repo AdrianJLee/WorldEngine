@@ -518,6 +518,7 @@ namespace World::Wui
 	// 需要裁剪(如视口外不越界)由调用方套 Wui::ClipScope。
 	WLD_API void LineSegment(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, const WuiColor& color,
 		float thickness = 1.0f);
+	WLD_API void ConvexQuad(WuiContext& ctx, const std::array<glm::vec2, 4>& vertices, const WuiColor& color);
 
 	// 带禁用态 + 理由的按钮(材质/内容浏览器面板里 ActionButton / ModalActionButton 的库化入口)。
 	// 与 Button 的差别只在"可选主按钮配色 + 明确的可用性":

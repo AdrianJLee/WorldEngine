@@ -28,6 +28,7 @@ namespace World
 
 		// 视口可视化全局控制标志
 		static bool ShowPolygons;
+		static bool FillPolygons;
 		static bool ShowPaths;
 		static bool ShowObstacles;
 		static bool ShowAreaCosts;

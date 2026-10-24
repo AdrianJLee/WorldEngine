@@ -678,6 +678,14 @@ void LineSegment(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, co
 		ctx.Commands().push_back(std::move(command));
 	}
 
+	void ConvexQuad(WuiContext& ctx, const std::array<glm::vec2, 4>& vertices, const WuiColor& color){
+		WuiDrawCommand command;
+		command.Kind = WuiDrawKind::Quad;
+		command.Color = color;
+		command.Vertices = vertices;
+		ctx.Commands().push_back(std::move(command));
+	}
+
 
 	// M4-TEX-P7:Combo / SearchableCombo 共用的**绘制期**中间省略(声明与口径见 WuiWidgets.h)。
 	// 背景(用户 2026-09-25「现在选择不如之前」):贴图下拉曾被面板提前截断成 `textures/Ico…g`,

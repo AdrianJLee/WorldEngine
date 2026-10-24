@@ -16,6 +16,7 @@
 namespace World
 {
 	bool NavMeshPanel::ShowPolygons = true;
+	bool NavMeshPanel::FillPolygons = true;
 	bool NavMeshPanel::ShowPaths = true;
 	bool NavMeshPanel::ShowObstacles = true;
 	bool NavMeshPanel::ShowAreaCosts = true;
@@ -527,23 +528,23 @@ namespace World
 
 		// 第一行开关
 		const bool prevShowPolys = ShowPolygons;
-		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.polys"), { startX + 8.0f, innerY, checkW, 22.0f }, "显示多边形网格", ShowPolygons, theme);
+		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.polys"), { startX + 8.0f, innerY, checkW, 22.0f }, "显示导航网格", ShowPolygons, theme);
 		if (ShowPolygons != prevShowPolys)
 		{
 			ViewportPanel::SetNavMeshVisible(ShowPolygons);
 		}
-		Wui::Tooltip(ctx, { startX + 8.0f, innerY, checkW, 22.0f }, "在视口中绘制 3D 绿色可通行多边形网格与红色阻挡线框");
+		Wui::Tooltip(ctx, { startX + 8.0f, innerY, checkW, 22.0f }, "在视口中开启/关闭 3D 导航网格叠加层 (快捷键 P)");
 
-		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.area_costs"), { startX + 8.0f + checkW, innerY, checkW, 22.0f }, "显示区域代价色彩", ShowAreaCosts, theme);
-		Wui::Tooltip(ctx, { startX + 8.0f + checkW, innerY, checkW, 22.0f }, "按区域类型着色：普通(翡翠绿)、道路(亮绿)、泥潭(蓝紫)、阻挡(红)");
+		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.fill"), { startX + 8.0f + checkW, innerY, checkW, 22.0f }, "半透明全涂色填充", FillPolygons, theme);
+		Wui::Tooltip(ctx, { startX + 8.0f + checkW, innerY, checkW, 22.0f }, "以 UE5/Unity 风格半透明色彩涂色铺满可行走表面，配合近细远大自适应网格");
 
-		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.links"), { startX + 8.0f + checkW * 2.0f, innerY, checkW, 22.0f }, "显示跳跃点弧线", ShowOffMeshLinks, theme);
-		Wui::Tooltip(ctx, { startX + 8.0f + checkW * 2.0f, innerY, checkW, 22.0f }, "在视口中绘制洋红色抛物线跳跃弧线与箭头指示");
+		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.area_costs"), { startX + 8.0f + checkW * 2.0f, innerY, checkW, 22.0f }, "区域代价色彩", ShowAreaCosts, theme);
+		Wui::Tooltip(ctx, { startX + 8.0f + checkW * 2.0f, innerY, checkW, 22.0f }, "按区域类型着色：普通(翡翠绿)、道路(亮绿)、泥潭(蓝紫)、阻挡(红)");
 		innerY += 28.0f;
 
 		// 第二行开关
-		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.los"), { startX + 8.0f, innerY, checkW, 22.0f }, "显示通视测试线", ShowLoSRaycast, theme);
-		Wui::Tooltip(ctx, { startX + 8.0f, innerY, checkW, 22.0f }, "在视口中绘制视线通视射线（绿色高亮通达，红色截断阻挡）");
+		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.links"), { startX + 8.0f, innerY, checkW, 22.0f }, "显示跳跃点弧线", ShowOffMeshLinks, theme);
+		Wui::Tooltip(ctx, { startX + 8.0f, innerY, checkW, 22.0f }, "在视口中绘制洋红色抛物线跳跃弧线与箭头指示");
 
 		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.paths"), { startX + 8.0f + checkW, innerY, checkW, 22.0f }, "显示路径折线", ShowPaths, theme);
 		Wui::Tooltip(ctx, { startX + 8.0f + checkW, innerY, checkW, 22.0f }, "在视口中绘制金黄色平滑折线走廊与航点圆环");

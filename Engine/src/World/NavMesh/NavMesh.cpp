@@ -794,7 +794,7 @@ namespace World
 		// 3. 3D 体素网格光栅化与离散采样
 		const float rawVoxelSize = (settings.VoxelSize >= 0.1f) ? settings.VoxelSize : 1.0f;
 		// 工业级体素分辨率自适应保护 (对标 UE5 Recast Tile 限制：最大网格分辨率 192x192，超大开放世界自动对齐体素步长，保证毫秒级构建)
-		constexpr uint32_t kMaxGridRes = 192u;
+		constexpr uint32_t kMaxGridRes = 96u;
 		const float maxDim = std::max(bMax.x - bMin.x, bMax.z - bMin.z);
 		const float voxelSize = std::max(rawVoxelSize, maxDim / static_cast<float>(kMaxGridRes));
 		const uint32_t numX = std::clamp(static_cast<uint32_t>(std::ceil((bMax.x - bMin.x) / voxelSize)), 1u, kMaxGridRes);
