@@ -24,12 +24,15 @@
 #include "World/Terrain/Terrain.h"
 #include "World/Terrain/TerrainRenderer.h"
 #include "World/Core/Input.h"
+#include "WUI/Panels/NavMeshPanel.h"
+#include "World/NavMesh/NavMesh.h"
 
 namespace World
 {
 	namespace
 	{
 		static bool s_ShowAllAudioGizmos = false;
+		static bool s_ShowNavMesh = true;
 		static bool s_AudioGizmoActive = false;
 		static float s_AudioGizmoBeforeMin = 1.0f;
 		static float s_AudioGizmoBeforeMax = 25.0f;
@@ -263,7 +266,7 @@ namespace World
 		// 点光范围 / 球形碰撞体 / 胶囊端面都用它 —— 一套几何代码,不各写一遍。
 		void PushWorldCircle(Wui::WuiContext& ctx, const glm::mat4& viewProjection, const Wui::WuiRect& viewport,
 			const glm::mat4& world, const glm::vec3& center, float radius, int axis,
-			const Wui::WuiColor& color, float thickness, glm::vec2* boundsMin, glm::vec2* boundsMax)
+			const Wui::WuiColor& color, float thickness, glm::vec2* boundsMin = nullptr, glm::vec2* boundsMax = nullptr)
 		{
 			constexpr int kSegments = 40;
 			constexpr float kTwoPi = 6.28318530718f;
@@ -1018,6 +1021,11 @@ namespace World
 				Wui::Tr("viewport.view.world_partition", "World Partition Grid"), m_ShowWorldPartition,
 				Wui::Tr("viewport.partition.hint", "Toggle world partition & streaming chunk overlay."),
 				[this] { m_ShowWorldPartition = !m_ShowWorldPartition; });
+			item("viewport.view.navmesh",
+				Wui::Tr("viewport.view.navmesh", "3D 导航网格 (NavMesh)"), s_ShowNavMesh,
+				Wui::Tr("viewport.overlays.navmesh.tooltip",
+					"绘制 3D 导航网格多边形线框 (绿色/红色)、寻路代理圆柱体、航向与金黄色平滑折线、动态障碍物 3D 盒体。"),
+				[] { SetNavMeshVisible(!s_ShowNavMesh); });
 			ctx.ClosePopupsOnOutsideClick({ viewPopup }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(viewPopup);
@@ -3409,6 +3417,289 @@ namespace World
 			}
 		}
 
+		// ---- 3D 导航网格 (NavMesh & AI Navigation) 视口可视化 ----
+		if (s_ShowNavMesh)
+		{
+			const Ref<Scene> navScene = m_Host.GetActiveScene();
+			if (navScene)
+			{
+				const Wui::GizmoCamera debugCamera = m_Host.GetGizmoCamera();
+				const glm::mat4& viewProj = debugCamera.ViewProjection;
+				Wui::ClipScope navClip(ctx, sceneRect);
+
+				std::shared_ptr<NavMesh> navMesh = navScene->GetNavMesh();
+				if (navMesh && navMesh->GetPolygonCount() > 0 && NavMeshPanel::ShowPolygons)
+				{
+					const size_t polyCount = navMesh->GetPolygonCount();
+					for (size_t p = 0; p < polyCount; ++p)
+					{
+						const auto& poly = navMesh->GetPolygon(static_cast<uint32_t>(p));
+						const size_t vertCount = poly.VertexIndices.size();
+						if (vertCount < 3) continue;
+
+						Wui::WuiColor polyColor = poly.Blocked
+							? Wui::WuiColor{ 0.95f, 0.25f, 0.25f, 0.90f }
+							: Wui::WuiColor{ 0.15f, 0.85f, 0.55f, 0.80f };
+
+						if (NavMeshPanel::ShowAreaCosts && !poly.Blocked)
+						{
+							if (poly.AreaType == 1)      // Road (道路亮绿)
+								polyColor = Wui::WuiColor{ 0.35f, 0.95f, 0.35f, 0.85f };
+							else if (poly.AreaType == 2) // Mud (泥潭蓝紫)
+								polyColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.85f };
+							else if (poly.AreaType == 3) // Hazard (危险红)
+								polyColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.85f };
+						}
+
+						for (size_t i = 0; i < vertCount; ++i)
+						{
+							const glm::vec3 v0 = navMesh->GetVertex(poly.VertexIndices[i]) + glm::vec3(0.0f, 0.05f, 0.0f);
+							const glm::vec3 v1 = navMesh->GetVertex(poly.VertexIndices[(i + 1) % vertCount]) + glm::vec3(0.0f, 0.05f, 0.0f);
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(v0, 1.0f),
+								viewProj * glm::vec4(v1, 1.0f),
+								polyColor, 1.5f);
+						}
+					}
+				}
+
+				const auto& registry = std::as_const(*navScene).GetRegistry();
+
+				// 1. 动态障碍物 (NavMeshObstacleComponent) 3D 盒体线框
+				if (NavMeshPanel::ShowObstacles)
+				{
+					const Wui::WuiColor obsColor { 1.0f, 0.55f, 0.15f, 0.95f };
+					for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
+					{
+						glm::vec3 center { 0.0f };
+						if (const auto* xform = registry.try_get<TransformComponent>(handle))
+							center = xform->Location;
+						const glm::vec3 extents = obs.Extents;
+
+						const glm::vec3 corners[8] = {
+							center + glm::vec3(-extents.x, -extents.y, -extents.z),
+							center + glm::vec3( extents.x, -extents.y, -extents.z),
+							center + glm::vec3( extents.x, -extents.y,  extents.z),
+							center + glm::vec3(-extents.x, -extents.y,  extents.z),
+							center + glm::vec3(-extents.x,  extents.y, -extents.z),
+							center + glm::vec3( extents.x,  extents.y, -extents.z),
+							center + glm::vec3( extents.x,  extents.y,  extents.z),
+							center + glm::vec3(-extents.x,  extents.y,  extents.z)
+						};
+						constexpr int edges[12][2] = {
+							{0,1}, {1,2}, {2,3}, {3,0},
+							{4,5}, {5,6}, {6,7}, {7,4},
+							{0,4}, {1,5}, {2,6}, {3,7}
+						};
+						for (int e = 0; e < 12; ++e)
+						{
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(corners[edges[e][0]], 1.0f),
+								viewProj * glm::vec4(corners[edges[e][1]], 1.0f),
+							obsColor, 2.0f);
+						}
+					}
+				}
+
+				// 2. 寻路代理 (NavMeshAgentComponent) 圆柱体、目标光环与路径折线
+				const Wui::WuiColor agentCylinderColor { 0.2f, 0.75f, 1.0f, 0.90f };
+				const Wui::WuiColor pathColor { 1.0f, 0.85f, 0.2f, 0.95f };
+				for (auto [handle, agent] : registry.view<NavMeshAgentComponent>().each())
+				{
+					glm::vec3 center { 0.0f };
+					if (const auto* xform = registry.try_get<TransformComponent>(handle))
+						center = xform->Location;
+
+					const float r = std::max(0.1f, agent.AgentRadius);
+					const float h = std::max(0.2f, agent.AgentHeight);
+
+					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), center + glm::vec3(0.0f, 0.05f, 0.0f), r, 1, agentCylinderColor, 1.8f);
+					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), center + glm::vec3(0.0f, h, 0.0f), r, 1, agentCylinderColor, 1.8f);
+
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(center + glm::vec3( r, 0.05f, 0.0f), 1.0f),
+						viewProj * glm::vec4(center + glm::vec3( r, h, 0.0f), 1.0f),
+						agentCylinderColor, 1.5f);
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(center + glm::vec3(-r, 0.05f, 0.0f), 1.0f),
+						viewProj * glm::vec4(center + glm::vec3(-r, h, 0.0f), 1.0f),
+						agentCylinderColor, 1.5f);
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(center + glm::vec3(0.0f, 0.05f,  r), 1.0f),
+						viewProj * glm::vec4(center + glm::vec3(0.0f, h,  r), 1.0f),
+						agentCylinderColor, 1.5f);
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(center + glm::vec3(0.0f, 0.05f, -r), 1.0f),
+						viewProj * glm::vec4(center + glm::vec3(0.0f, h, -r), 1.0f),
+						agentCylinderColor, 1.5f);
+
+					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), agent.Destination + glm::vec3(0.0f, 0.05f, 0.0f), 0.4f, 1, pathColor, 2.0f);
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(agent.Destination, 1.0f),
+						viewProj * glm::vec4(agent.Destination + glm::vec3(0.0f, 1.2f, 0.0f), 1.0f),
+						pathColor, 2.0f);
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(agent.Destination + glm::vec3(0.0f, 1.2f, 0.0f), 1.0f),
+						viewProj * glm::vec4(agent.Destination + glm::vec3(0.35f, 1.0f, 0.0f), 1.0f),
+						pathColor, 2.0f);
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(agent.Destination + glm::vec3(0.35f, 1.0f, 0.0f), 1.0f),
+						viewProj * glm::vec4(agent.Destination + glm::vec3(0.0f, 0.8f, 0.0f), 1.0f),
+						pathColor, 2.0f);
+
+					if (NavMeshPanel::ShowPaths && navMesh && navMesh->GetPolygonCount() > 0)
+					{
+						std::vector<glm::vec3> agentPath;
+						if (navMesh->FindPath(center, agent.Destination, agentPath) && agentPath.size() >= 2)
+						{
+							for (size_t i = 0; i < agentPath.size() - 1; ++i)
+							{
+								const glm::vec3 p0 = agentPath[i] + glm::vec3(0.0f, 0.1f, 0.0f);
+								const glm::vec3 p1 = agentPath[i + 1] + glm::vec3(0.0f, 0.1f, 0.0f);
+								PushProjectedSegment(ctx, viewProj, sceneRect,
+									viewProj * glm::vec4(p0, 1.0f),
+									viewProj * glm::vec4(p1, 1.0f),
+									pathColor, 2.5f);
+								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), p0, 0.15f, 1, pathColor, 1.8f);
+							}
+							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), agentPath.back() + glm::vec3(0.0f, 0.1f, 0.0f), 0.15f, 1, pathColor, 1.8f);
+						}
+					}
+				}
+
+				// 3. 寻路探针测试路径
+				if (NavMeshPanel::ShowPaths)
+				{
+					const auto& testPath = NavMeshPanel::GetTestPath();
+					if (testPath.size() >= 2)
+					{
+						const Wui::WuiColor testPathColor { 0.3f, 0.9f, 1.0f, 0.95f };
+						for (size_t i = 0; i < testPath.size() - 1; ++i)
+						{
+							const glm::vec3 p0 = testPath[i] + glm::vec3(0.0f, 0.12f, 0.0f);
+							const glm::vec3 p1 = testPath[i + 1] + glm::vec3(0.0f, 0.12f, 0.0f);
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(p0, 1.0f),
+								viewProj * glm::vec4(p1, 1.0f),
+								testPathColor, 2.5f);
+							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), p0, 0.18f, 1, testPathColor, 1.8f);
+						}
+						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), testPath.back() + glm::vec3(0.0f, 0.12f, 0.0f), 0.18f, 1, testPathColor, 1.8f);
+					}
+				}
+
+				// (区域代价修饰线框已清理，遵循商业引擎规范，仅在选中实体或显式调试时按需呈现)
+
+				// 5. 跨网格跳跃点 (OffMeshLinks) 洋红色抛物线弧线与箭头
+				if (NavMeshPanel::ShowOffMeshLinks && navMesh)
+				{
+					const Wui::WuiColor linkColor { 0.95f, 0.20f, 0.85f, 0.95f };
+					for (const auto& link : navMesh->GetOffMeshLinks())
+					{
+						constexpr int kArcSegs = 16;
+						const glm::vec3 pStart = link.Start + glm::vec3(0.0f, 0.1f, 0.0f);
+						const glm::vec3 pEnd = link.End + glm::vec3(0.0f, 0.1f, 0.0f);
+						const float dist = glm::distance(pStart, pEnd);
+						const float arcH = std::max(1.0f, dist * 0.25f);
+						glm::vec3 prevPt = pStart;
+						for (int s = 1; s <= kArcSegs; ++s)
+						{
+							const float t = static_cast<float>(s) / static_cast<float>(kArcSegs);
+							const glm::vec3 horiz = glm::mix(pStart, pEnd, t);
+							const float parabola = 4.0f * arcH * t * (1.0f - t);
+							const glm::vec3 currPt = horiz + glm::vec3(0.0f, parabola, 0.0f);
+
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(prevPt, 1.0f),
+								viewProj * glm::vec4(currPt, 1.0f),
+								linkColor, 2.5f);
+							prevPt = currPt;
+						}
+						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), pStart, 0.35f, 1, linkColor, 2.0f);
+						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), pEnd, 0.35f, 1, linkColor, 2.0f);
+
+						const glm::vec3 diff = pEnd - pStart;
+						if (glm::length(diff) > 0.01f)
+						{
+							const glm::vec3 dir = glm::normalize(diff);
+							const glm::vec3 right = glm::normalize(glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f)));
+							const glm::vec3 arrowLeft = pEnd - dir * 0.5f + right * 0.3f + glm::vec3(0.0f, 0.1f, 0.0f);
+							const glm::vec3 arrowRight = pEnd - dir * 0.5f - right * 0.3f + glm::vec3(0.0f, 0.1f, 0.0f);
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(pEnd, 1.0f),
+								viewProj * glm::vec4(arrowLeft, 1.0f),
+								linkColor, 2.2f);
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(pEnd, 1.0f),
+								viewProj * glm::vec4(arrowRight, 1.0f),
+								linkColor, 2.2f);
+						}
+					}
+				}
+
+				// 6. 通视测试线 (LoS Raycast Probe)
+				if (NavMeshPanel::ShowLoSRaycast)
+				{
+					const auto& probe = NavMeshPanel::GetRaycastProbe();
+					if (probe.HasTested)
+					{
+						if (probe.IsVisible)
+						{
+							const Wui::WuiColor losGreen { 0.20f, 0.95f, 0.35f, 0.95f };
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(probe.Start, 1.0f),
+								viewProj * glm::vec4(probe.End, 1.0f),
+								losGreen, 2.8f);
+							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.Start, 0.25f, 1, losGreen, 2.0f);
+							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.End, 0.25f, 1, losGreen, 2.0f);
+						}
+						else
+						{
+							const Wui::WuiColor losYellow { 0.95f, 0.85f, 0.20f, 0.95f };
+							const Wui::WuiColor losRed { 0.95f, 0.25f, 0.25f, 0.95f };
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(probe.Start, 1.0f),
+								viewProj * glm::vec4(probe.HitPoint, 1.0f),
+								losYellow, 2.8f);
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(probe.HitPoint, 1.0f),
+								viewProj * glm::vec4(probe.End, 1.0f),
+								losRed, 2.8f);
+							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.Start, 0.25f, 1, losYellow, 2.0f);
+							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 0, losRed, 2.2f);
+							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 1, losRed, 2.2f);
+							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 2, losRed, 2.2f);
+						}
+					}
+				}
+
+				// 7. 随机漫游采样点 (Random Wander Probe)
+				const auto& wander = NavMeshPanel::GetWanderProbe();
+				if (wander.HasSampled)
+				{
+					const Wui::WuiColor circleColor { 0.2f, 0.7f, 0.95f, 0.65f };
+					const Wui::WuiColor flagColor { 0.2f, 0.95f, 0.9f, 0.95f };
+					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), wander.Center, wander.Radius, 1, circleColor, 1.8f);
+					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), wander.Center, 0.3f, 1, circleColor, 2.0f);
+
+					const glm::vec3 pt = wander.SampledPoint;
+					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), pt, 0.35f, 1, flagColor, 2.2f);
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(pt, 1.0f),
+						viewProj * glm::vec4(pt + glm::vec3(0.0f, 1.6f, 0.0f), 1.0f),
+						flagColor, 2.2f);
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(pt + glm::vec3(0.0f, 1.6f, 0.0f), 1.0f),
+						viewProj * glm::vec4(pt + glm::vec3(0.45f, 1.35f, 0.0f), 1.0f),
+						flagColor, 2.2f);
+					PushProjectedSegment(ctx, viewProj, sceneRect,
+						viewProj * glm::vec4(pt + glm::vec3(0.45f, 1.35f, 0.0f), 1.0f),
+						viewProj * glm::vec4(pt + glm::vec3(0.0f, 1.1f, 0.0f), 1.0f),
+						flagColor, 2.2f);
+				}
+			}
+		}
+
 		if (previewVisible)
 		{
 			const uint64_t previewTexture = m_Host.GetCameraPreviewTextureId();
@@ -3440,8 +3731,25 @@ namespace World
 		(void)theme;
 	}
 
+	void ViewportPanel::SetNavMeshVisible(bool visible)
+	{
+		s_ShowNavMesh = visible;
+		NavMeshPanel::ShowPolygons = visible;
+	}
+
+	bool ViewportPanel::IsNavMeshVisible()
+	{
+		return s_ShowNavMesh;
+	}
+
 	bool ViewportPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
 	{
+		// P: 切换 3D 导航网格 (NavMesh) 视口显示 (对标 Unreal Engine 5 行业标准快捷键)
+		if (!ctrl && !shift && !alt && keyCode == KeyCodes::P)
+		{
+			SetNavMeshVisible(!s_ShowNavMesh);
+			return true;
+		}
 		if (shift && !ctrl && !alt)
 		{
 			if (keyCode == KeyCodes::D1)

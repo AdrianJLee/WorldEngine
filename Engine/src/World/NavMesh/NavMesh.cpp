@@ -1,13 +1,25 @@
 #include "wldpch.h"
 #include "World/NavMesh/NavMesh.h"
 #include "World/Scene/Scene.h"
+#include "World/Scene/Components.h"
+#include "World/Level/WhiteboxBuilder.h"
+#include "World/Terrain/Terrain.h"
+#include "World/Terrain/TerrainRenderer.h"
+#include "World/Asset/WModelIO.h"
+#include "World/Core/StringPool.h"
+
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <queue>
 #include <unordered_map>
+#include <vector>
+#include <future>
+#include <chrono>
 
 namespace World
 {
@@ -66,6 +78,9 @@ namespace World
 		NavMeshPolygon poly;
 		poly.VertexIndices = vertIndices;
 		poly.Neighbors.assign(vertIndices.size(), -1);
+		poly.AreaType = 0;
+		poly.Cost = 1.0f;
+		poly.Blocked = false;
 
 		glm::vec3 center(0.0f);
 		for (uint32_t idx : vertIndices)
@@ -89,20 +104,34 @@ namespace World
 		return static_cast<uint32_t>(m_Polygons.size() - 1);
 	}
 
-	void NavMesh::BuildAdjacency()
+	void NavMesh::BuildAdjacency(float stepHeight)
 	{
-		// 边映射: (min(v0, v1), max(v0, v1)) -> (polyIdx, edgeIdx)
-		std::map<std::pair<uint32_t, uint32_t>, std::pair<uint32_t, uint32_t>> edgeMap;
+		// Phase 1: 精确顶点索引共享匹配 (高效 64 位整数哈希映射，彻底杜绝 std::map RB-Tree 节点分配瓶颈)
+		struct EdgeKeyHash {
+			size_t operator()(uint64_t k) const noexcept {
+				k ^= k >> 33;
+				k *= 0xff51afd7ed558ccdULL;
+				k ^= k >> 33;
+				k *= 0xc4ceb9fe1a85ec53ULL;
+				k ^= k >> 33;
+				return static_cast<size_t>(k);
+			}
+		};
+		std::unordered_map<uint64_t, std::pair<uint32_t, uint32_t>, EdgeKeyHash> edgeMap;
+		edgeMap.reserve(m_Polygons.size() * 3);
 
 		for (uint32_t p = 0; p < m_Polygons.size(); ++p)
 		{
 			auto& poly = m_Polygons[p];
 			const size_t vCount = poly.VertexIndices.size();
+			if (poly.Neighbors.size() < vCount)
+				poly.Neighbors.assign(vCount, -1);
+
 			for (size_t e = 0; e < vCount; ++e)
 			{
 				const uint32_t i0 = poly.VertexIndices[e];
 				const uint32_t i1 = poly.VertexIndices[(e + 1) % vCount];
-				const auto key = std::make_pair(std::min(i0, i1), std::max(i0, i1));
+				const uint64_t key = (static_cast<uint64_t>(std::min(i0, i1)) << 32) | static_cast<uint64_t>(std::max(i0, i1));
 
 				auto it = edgeMap.find(key);
 				if (it != edgeMap.end())
@@ -119,6 +148,163 @@ namespace World
 				}
 			}
 		}
+
+		// Phase 2: 台阶/楼梯跨越拓扑邻接连接 (高度落差 <= stepHeight 且水平投影重合)
+		if (stepHeight > 0.0f)
+		{
+			struct OpenEdge
+			{
+				uint32_t PolyIdx;
+				uint32_t EdgeIdx;
+				glm::vec3 P0;
+				glm::vec3 P1;
+				glm::vec2 MidXZ;
+			};
+
+			std::vector<OpenEdge> openEdges;
+			openEdges.reserve(m_Polygons.size() * 2);
+
+			for (uint32_t p = 0; p < m_Polygons.size(); ++p)
+			{
+				const auto& poly = m_Polygons[p];
+				const size_t vCount = poly.VertexIndices.size();
+				for (size_t e = 0; e < vCount; ++e)
+				{
+					if (poly.Neighbors[e] == -1)
+					{
+						const glm::vec3& p0 = m_Vertices[poly.VertexIndices[e]];
+						const glm::vec3& p1 = m_Vertices[poly.VertexIndices[(e + 1) % vCount]];
+						openEdges.push_back({ p, static_cast<uint32_t>(e), p0, p1, glm::vec2((p0.x + p1.x) * 0.5f, (p0.z + p1.z) * 0.5f) });
+					}
+				}
+			}
+
+			// 空间网格分桶 (桶尺寸 1.0m)
+			const float bucketSize = 1.0f;
+			auto hashCell = [](int x, int z) -> uint64_t {
+				return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32) | static_cast<uint32_t>(z);
+			};
+			std::unordered_map<uint64_t, std::vector<size_t>> buckets;
+			for (size_t i = 0; i < openEdges.size(); ++i)
+			{
+				int bx = static_cast<int>(std::floor(openEdges[i].MidXZ.x / bucketSize));
+				int bz = static_cast<int>(std::floor(openEdges[i].MidXZ.y / bucketSize));
+				buckets[hashCell(bx, bz)].push_back(i);
+			}
+
+			for (size_t i = 0; i < openEdges.size(); ++i)
+			{
+				const auto& edgeA = openEdges[i];
+				if (m_Polygons[edgeA.PolyIdx].Neighbors[edgeA.EdgeIdx] != -1)
+					continue;
+
+				int bx = static_cast<int>(std::floor(edgeA.MidXZ.x / bucketSize));
+				int bz = static_cast<int>(std::floor(edgeA.MidXZ.y / bucketSize));
+
+				bool matched = false;
+				for (int dz = -1; dz <= 1 && !matched; ++dz)
+				{
+					for (int dx = -1; dx <= 1 && !matched; ++dx)
+					{
+						auto it = buckets.find(hashCell(bx + dx, bz + dz));
+						if (it == buckets.end())
+							continue;
+
+						for (size_t j : it->second)
+						{
+							if (i == j)
+								continue;
+							const auto& edgeB = openEdges[j];
+							if (edgeA.PolyIdx == edgeB.PolyIdx)
+								continue;
+							if (m_Polygons[edgeB.PolyIdx].Neighbors[edgeB.EdgeIdx] != -1)
+								continue;
+
+							// 判定水平方向重合与垂直高度差
+							float d01 = glm::distance(glm::vec2(edgeA.P0.x, edgeA.P0.z), glm::vec2(edgeB.P1.x, edgeB.P1.z));
+							float d10 = glm::distance(glm::vec2(edgeA.P1.x, edgeA.P1.z), glm::vec2(edgeB.P0.x, edgeB.P0.z));
+							float vDiff0 = std::abs(edgeA.P0.y - edgeB.P1.y);
+							float vDiff1 = std::abs(edgeA.P1.y - edgeB.P0.y);
+
+							if ((d01 < 0.25f && d10 < 0.25f && vDiff0 <= stepHeight + 0.05f && vDiff1 <= stepHeight + 0.05f) ||
+								(glm::distance(glm::vec2(edgeA.P0.x, edgeA.P0.z), glm::vec2(edgeB.P0.x, edgeB.P0.z)) < 0.25f &&
+								 glm::distance(glm::vec2(edgeA.P1.x, edgeA.P1.z), glm::vec2(edgeB.P1.x, edgeB.P1.z)) < 0.25f &&
+								 std::abs(edgeA.P0.y - edgeB.P0.y) <= stepHeight + 0.05f && std::abs(edgeA.P1.y - edgeB.P1.y) <= stepHeight + 0.05f))
+							{
+								m_Polygons[edgeA.PolyIdx].Neighbors[edgeA.EdgeIdx] = static_cast<int32_t>(edgeB.PolyIdx);
+								m_Polygons[edgeB.PolyIdx].Neighbors[edgeB.EdgeIdx] = static_cast<int32_t>(edgeA.PolyIdx);
+								matched = true;
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	void NavMesh::AddOffMeshLink(const NavMeshOffMeshLink& link)
+	{
+		m_OffMeshLinks.push_back(link);
+
+		if (!m_Polygons.empty())
+		{
+			glm::vec3 sPt, ePt;
+			uint32_t pStart = 0, pEnd = 0;
+			if (SamplePosition(link.Start, 5.0f, sPt, pStart) &&
+				SamplePosition(link.End, 5.0f, ePt, pEnd) &&
+				pStart != pEnd)
+			{
+				auto& nbrsS = m_Polygons[pStart].Neighbors;
+				if (std::find(nbrsS.begin(), nbrsS.end(), static_cast<int32_t>(pEnd)) == nbrsS.end())
+				{
+					nbrsS.push_back(static_cast<int32_t>(pEnd));
+				}
+				if (link.BiDirectional)
+				{
+					auto& nbrsE = m_Polygons[pEnd].Neighbors;
+					if (std::find(nbrsE.begin(), nbrsE.end(), static_cast<int32_t>(pStart)) == nbrsE.end())
+					{
+						nbrsE.push_back(static_cast<int32_t>(pStart));
+					}
+				}
+			}
+		}
+	}
+
+	void NavMesh::ClearOffMeshLinks()
+	{
+		m_OffMeshLinks.clear();
+	}
+
+	void NavMesh::AddAreaModifier(const NavMeshAreaModifier& modifier)
+	{
+		m_AreaModifiers.push_back(modifier);
+
+		if (!m_Polygons.empty())
+		{
+			const glm::vec3 bMin = modifier.Center - modifier.Extents;
+			const glm::vec3 bMax = modifier.Center + modifier.Extents;
+			for (auto& poly : m_Polygons)
+			{
+				if (poly.Center.x >= bMin.x && poly.Center.x <= bMax.x &&
+					poly.Center.y >= bMin.y && poly.Center.y <= bMax.y &&
+					poly.Center.z >= bMin.z && poly.Center.z <= bMax.z)
+				{
+					poly.AreaType = modifier.AreaType;
+					poly.Cost = modifier.CostMultiplier;
+					if (modifier.AreaType == 4 || modifier.CostMultiplier <= 0.0f)
+					{
+						poly.Blocked = true;
+					}
+				}
+			}
+		}
+	}
+
+	void NavMesh::ClearAreaModifiers()
+	{
+		m_AreaModifiers.clear();
 	}
 
 	bool NavMesh::SamplePosition(const glm::vec3& point, float maxDistance,
@@ -130,7 +316,7 @@ namespace World
 		for (uint32_t p = 0; p < m_Polygons.size(); ++p)
 		{
 			const auto& poly = m_Polygons[p];
-			if (poly.Blocked)
+			if (poly.Blocked || poly.Cost <= 0.0f)
 				continue;
 
 			std::vector<glm::vec3> polyVerts;
@@ -202,7 +388,7 @@ namespace World
 			return true;
 		}
 
-		// 3D A* 走廊搜索
+		// 3D A* 走廊搜索 (区域代价加权)
 		struct AStarNode
 		{
 			uint32_t PolyIdx;
@@ -215,7 +401,7 @@ namespace World
 		std::unordered_map<uint32_t, uint32_t> cameFrom;
 
 		gScore[polyStart] = 0.0f;
-		openSet.push({ polyStart, glm::distance(m_Polygons[polyStart].Center, navEnd) });
+		openSet.push({ polyStart, glm::distance(m_Polygons[polyStart].Center, navEnd) * 0.25f });
 
 		bool reached = false;
 
@@ -235,16 +421,20 @@ namespace World
 			{
 				if (neighbor < 0 || static_cast<size_t>(neighbor) >= m_Polygons.size())
 					continue;
-				if (m_Polygons[neighbor].Blocked)
+				if (m_Polygons[neighbor].Blocked || m_Polygons[neighbor].Cost <= 0.0f)
 					continue;
 
-				const float tentativeG = gScore[curr] + glm::distance(currPoly.Center, m_Polygons[neighbor].Center);
+				// 移动代价乘以目标多边形 Cost
+				const float edgeDist = glm::distance(currPoly.Center, m_Polygons[neighbor].Center);
+				const float edgeCost = edgeDist * m_Polygons[neighbor].Cost;
+				const float tentativeG = gScore[curr] + edgeCost;
+
 				auto itG = gScore.find(neighbor);
 				if (itG == gScore.end() || tentativeG < itG->second)
 				{
 					cameFrom[neighbor] = curr;
 					gScore[neighbor] = tentativeG;
-					const float h = glm::distance(m_Polygons[neighbor].Center, navEnd);
+					const float h = glm::distance(m_Polygons[neighbor].Center, navEnd) * 0.25f;
 					openSet.push({ static_cast<uint32_t>(neighbor), tentativeG + h });
 				}
 			}
@@ -264,39 +454,122 @@ namespace World
 		corridor.push_back(polyStart);
 		std::reverse(corridor.begin(), corridor.end());
 
-		// 提取相邻多边形间的公共边作为过境线门径 (Portals)
-		std::vector<NavMeshPortal> portals;
+		// 提取过境线门径 (Portals) 并处理跨网格跳跃 (Off-Mesh Links)
+		struct PathSegment
+		{
+			glm::vec3 SegStart;
+			glm::vec3 SegEnd;
+			std::vector<NavMeshPortal> Portals;
+			bool HasJumpAfter = false;
+			glm::vec3 JumpStart { 0.0f };
+			glm::vec3 JumpEnd { 0.0f };
+		};
+
+		std::vector<PathSegment> segments;
+		segments.push_back({ navStart, navEnd, {}, false, glm::vec3(0.0f), glm::vec3(0.0f) });
+
 		for (size_t i = 0; i + 1 < corridor.size(); ++i)
 		{
 			const auto& pA = m_Polygons[corridor[i]];
 			const auto& pB = m_Polygons[corridor[i + 1]];
 
 			// 寻找公共边端点
-			std::vector<uint32_t> sharedVerts;
+			std::vector<glm::vec3> sharedVerts;
 			for (uint32_t va : pA.VertexIndices)
 			{
 				for (uint32_t vb : pB.VertexIndices)
 				{
 					if (va == vb)
-						sharedVerts.push_back(va);
+					{
+						sharedVerts.push_back(m_Vertices[va]);
+					}
+				}
+			}
+
+			// 若顶点索引不同，检查是否为台阶边界 (水平贴合，垂直落差 <= StepHeight)
+			if (sharedVerts.size() < 2)
+			{
+				sharedVerts.clear();
+				for (uint32_t va : pA.VertexIndices)
+				{
+					for (uint32_t vb : pB.VertexIndices)
+					{
+						const glm::vec3& pa = m_Vertices[va];
+						const glm::vec3& pb = m_Vertices[vb];
+						if (glm::distance(glm::vec2(pa.x, pa.z), glm::vec2(pb.x, pb.z)) < 0.25f &&
+							std::abs(pa.y - pb.y) <= 0.65f)
+						{
+							sharedVerts.push_back((pa + pb) * 0.5f);
+						}
+					}
 				}
 			}
 
 			if (sharedVerts.size() >= 2)
 			{
 				NavMeshPortal portal;
-				portal.Left  = m_Vertices[sharedVerts[0]];
-				portal.Right = m_Vertices[sharedVerts[1]];
-				// 保证在前进方向上 Left 在左侧
-				const glm::vec3 forward = glm::normalize(pB.Center - pA.Center);
+				portal.Left = sharedVerts[0];
+				portal.Right = sharedVerts[1];
 				if (TriArea2D(pA.Center, portal.Left, portal.Right) < 0.0f)
 					std::swap(portal.Left, portal.Right);
-				portals.push_back(portal);
+				segments.back().Portals.push_back(portal);
+			}
+			else
+			{
+				// 跨网格跳跃链接 (Off-Mesh Link)
+				glm::vec3 jumpS = pA.Center;
+				glm::vec3 jumpE = pB.Center;
+				for (const auto& link : m_OffMeshLinks)
+				{
+					if (glm::distance(pA.Center, link.Start) < 5.0f && glm::distance(pB.Center, link.End) < 5.0f)
+					{
+						jumpS = link.Start;
+						jumpE = link.End;
+						break;
+					}
+					if (link.BiDirectional && glm::distance(pA.Center, link.End) < 5.0f && glm::distance(pB.Center, link.Start) < 5.0f)
+					{
+						jumpS = link.End;
+						jumpE = link.Start;
+						break;
+					}
+				}
+
+				segments.back().HasJumpAfter = true;
+				segments.back().SegEnd = jumpS;
+				segments.back().JumpStart = jumpS;
+				segments.back().JumpEnd = jumpE;
+
+				PathSegment nextSeg;
+				nextSeg.SegStart = jumpE;
+				nextSeg.SegEnd = navEnd;
+				segments.push_back(nextSeg);
 			}
 		}
 
-		// 漏斗平滑
-		FunnelSmooth(portals, navStart, navEnd, outPath);
+		outPath.clear();
+		for (size_t s = 0; s < segments.size(); ++s)
+		{
+			std::vector<glm::vec3> segPath;
+			FunnelSmooth(segments[s].Portals, segments[s].SegStart, segments[s].SegEnd, segPath);
+
+			for (size_t p = 0; p < segPath.size(); ++p)
+			{
+				if (outPath.empty() || glm::distance(outPath.back(), segPath[p]) > 1e-3f)
+				{
+					outPath.push_back(segPath[p]);
+				}
+			}
+
+			if (segments[s].HasJumpAfter)
+			{
+				if (outPath.empty() || glm::distance(outPath.back(), segments[s].JumpEnd) > 1e-3f)
+				{
+					outPath.push_back(segments[s].JumpEnd);
+				}
+			}
+		}
+
 		return !outPath.empty();
 	}
 
@@ -333,7 +606,6 @@ namespace World
 				}
 				else
 				{
-					// 右边跨过了左边，拐点落于 portalLeft
 					outPath.push_back(portalLeft);
 					portalApex = portalLeft;
 					apexIndex = leftIndex;
@@ -357,7 +629,6 @@ namespace World
 				}
 				else
 				{
-					// 左边跨过了右边，拐点落于 portalRight
 					outPath.push_back(portalRight);
 					portalApex = portalRight;
 					apexIndex = rightIndex;
@@ -427,7 +698,716 @@ namespace World
 			}
 		}
 
-		BuildAdjacency();
+		BuildAdjacency(stepSize);
+
+		// 应用 Area Modifiers 与 Off-Mesh Links
+		for (auto& poly : m_Polygons)
+		{
+			for (const auto& mod : m_AreaModifiers)
+			{
+				const glm::vec3 bModMin = mod.Center - mod.Extents;
+				const glm::vec3 bModMax = mod.Center + mod.Extents;
+				if (poly.Center.x >= bModMin.x && poly.Center.x <= bModMax.x &&
+					poly.Center.y >= bModMin.y && poly.Center.y <= bModMax.y &&
+					poly.Center.z >= bModMin.z && poly.Center.z <= bModMax.z)
+				{
+					poly.AreaType = mod.AreaType;
+					poly.Cost = mod.CostMultiplier;
+					if (mod.AreaType == 4 || mod.CostMultiplier <= 0.0f)
+						poly.Blocked = true;
+				}
+			}
+		}
+
+		for (const auto& link : m_OffMeshLinks)
+		{
+			glm::vec3 sPt, ePt;
+			uint32_t pStart = 0, pEnd = 0;
+			if (SamplePosition(link.Start, 5.0f, sPt, pStart) &&
+				SamplePosition(link.End, 5.0f, ePt, pEnd) &&
+				pStart != pEnd)
+			{
+				auto& nbrsS = m_Polygons[pStart].Neighbors;
+				if (std::find(nbrsS.begin(), nbrsS.end(), static_cast<int32_t>(pEnd)) == nbrsS.end())
+				{
+					nbrsS.push_back(static_cast<int32_t>(pEnd));
+				}
+				if (link.BiDirectional)
+				{
+					auto& nbrsE = m_Polygons[pEnd].Neighbors;
+					if (std::find(nbrsE.begin(), nbrsE.end(), static_cast<int32_t>(pStart)) == nbrsE.end())
+					{
+						nbrsE.push_back(static_cast<int32_t>(pStart));
+					}
+				}
+			}
+		}
+	}
+
+	void NavMesh::BakeFromTriangles(const std::vector<NavMeshTriangle>& triangles, const NavMeshBakeSettings& settings)
+	{
+		Clear();
+		if (triangles.empty())
+			return;
+
+		// 1. 坡度过滤 (法线 cos(theta) >= cos(MaxClimbSlopeDeg))
+		const float minCosSlope = std::cos(glm::radians(std::clamp(settings.MaxClimbSlopeDeg, 0.0f, 89.0f)));
+		std::vector<NavMeshTriangle> walkableTriangles;
+		walkableTriangles.reserve(triangles.size());
+
+		for (const auto& tri : triangles)
+		{
+			const glm::vec3 edge1 = tri.B - tri.A;
+			const glm::vec3 edge2 = tri.C - tri.A;
+			const glm::vec3 normal = glm::cross(edge1, edge2);
+			const float len = glm::length(normal);
+			if (len < 1e-5f)
+				continue;
+			const glm::vec3 unitNormal = normal / len;
+			if (unitNormal.y >= minCosSlope)
+			{
+				walkableTriangles.push_back(tri);
+			}
+		}
+
+		if (walkableTriangles.empty())
+			return;
+
+		// 2. 包围盒计算
+		glm::vec3 bMin = walkableTriangles[0].A;
+		glm::vec3 bMax = walkableTriangles[0].A;
+		for (const auto& tri : walkableTriangles)
+		{
+			bMin = glm::min(bMin, glm::min(tri.A, glm::min(tri.B, tri.C)));
+			bMax = glm::max(bMax, glm::max(tri.A, glm::max(tri.B, tri.C)));
+		}
+
+		if (settings.UseCustomBounds)
+		{
+			bMin = glm::max(bMin, settings.BoundsMin);
+			bMax = glm::min(bMax, settings.BoundsMax);
+		}
+
+		if (bMin.x >= bMax.x || bMin.z >= bMax.z)
+			return;
+
+		// 3. 3D 体素网格光栅化与离散采样
+		const float voxelSize = (settings.VoxelSize >= 0.1f) ? settings.VoxelSize : 1.0f;
+		const uint32_t numX = std::clamp(static_cast<uint32_t>(std::ceil((bMax.x - bMin.x) / voxelSize)), 1u, 512u);
+		const uint32_t numZ = std::clamp(static_cast<uint32_t>(std::ceil((bMax.z - bMin.z) / voxelSize)), 1u, 512u);
+
+		struct Span
+		{
+			float Height;
+			glm::vec3 Normal;
+		};
+		std::vector<std::vector<Span>> cellSpans(numX * numZ);
+
+		for (const auto& tri : walkableTriangles)
+		{
+			const glm::vec3 e1 = tri.B - tri.A;
+			const glm::vec3 e2 = tri.C - tri.A;
+			const glm::vec3 norm = glm::normalize(glm::cross(e1, e2));
+
+			const float triMinX = std::min({tri.A.x, tri.B.x, tri.C.x});
+			const float triMaxX = std::max({tri.A.x, tri.B.x, tri.C.x});
+			const float triMinZ = std::min({tri.A.z, tri.B.z, tri.C.z});
+			const float triMaxZ = std::max({tri.A.z, tri.B.z, tri.C.z});
+
+			int minGX = std::clamp(static_cast<int>(std::floor((triMinX - bMin.x) / voxelSize)), 0, static_cast<int>(numX - 1));
+			int maxGX = std::clamp(static_cast<int>(std::floor((triMaxX - bMin.x) / voxelSize)), 0, static_cast<int>(numX - 1));
+			int minGZ = std::clamp(static_cast<int>(std::floor((triMinZ - bMin.z) / voxelSize)), 0, static_cast<int>(numZ - 1));
+			int maxGZ = std::clamp(static_cast<int>(std::floor((triMaxZ - bMin.z) / voxelSize)), 0, static_cast<int>(numZ - 1));
+
+			for (int gz = minGZ; gz <= maxGZ; ++gz)
+			{
+				for (int gx = minGX; gx <= maxGX; ++gx)
+				{
+					const float cx = bMin.x + (static_cast<float>(gx) + 0.5f) * voxelSize;
+					const float cz = bMin.z + (static_cast<float>(gz) + 0.5f) * voxelSize;
+					const glm::vec3 pt(cx, 0.0f, cz);
+
+					// 2D XZ 三角形相交与包围测试
+					const float s1 = TriArea2D(pt, tri.A, tri.B);
+					const float s2 = TriArea2D(pt, tri.B, tri.C);
+					const float s3 = TriArea2D(pt, tri.C, tri.A);
+					const bool inside = !(((s1 < -1e-4f) || (s2 < -1e-4f) || (s3 < -1e-4f)) &&
+					                      ((s1 > 1e-4f) || (s2 > 1e-4f) || (s3 > 1e-4f)));
+
+					if (inside)
+					{
+						float cy = tri.A.y;
+						if (std::abs(norm.y) > 1e-4f)
+						{
+							cy = tri.A.y - (norm.x * (cx - tri.A.x) + norm.z * (cz - tri.A.z)) / norm.y;
+						}
+
+						auto& spans = cellSpans[gz * numX + gx];
+						bool merged = false;
+						for (auto& s : spans)
+						{
+							if (std::abs(s.Height - cy) <= settings.StepHeight)
+							{
+								s.Height = std::max(s.Height, cy);
+								s.Normal = norm;
+								merged = true;
+								break;
+							}
+						}
+						if (!merged)
+						{
+							spans.push_back({ cy, norm });
+						}
+					}
+				}
+			}
+		}
+
+		// 补齐微小三角面顶点所在的单元格
+		for (const auto& tri : walkableTriangles)
+		{
+			const glm::vec3 pts[3] = { tri.A, tri.B, tri.C };
+			const glm::vec3 e1 = tri.B - tri.A;
+			const glm::vec3 e2 = tri.C - tri.A;
+			const glm::vec3 norm = glm::normalize(glm::cross(e1, e2));
+
+			for (int k = 0; k < 3; ++k)
+			{
+				int gx = std::clamp(static_cast<int>(std::floor((pts[k].x - bMin.x) / voxelSize)), 0, static_cast<int>(numX - 1));
+				int gz = std::clamp(static_cast<int>(std::floor((pts[k].z - bMin.z) / voxelSize)), 0, static_cast<int>(numZ - 1));
+				auto& spans = cellSpans[gz * numX + gx];
+				if (spans.empty())
+				{
+					spans.push_back({ pts[k].y, norm });
+				}
+			}
+		}
+
+		// 4. 生成 3D 凸多边形 (Quad) 并焊合共面共享顶点 (64 位空间哈希，消除 std::tuple map 分配)
+		auto quantCoord = [](float v) -> int64_t {
+			return static_cast<int64_t>(std::round(v * 100.0f)); // 1cm 精度 (工业标准足以焊合多边形)
+		};
+		struct VertKeyHash {
+			size_t operator()(uint64_t k) const noexcept {
+				k ^= k >> 33;
+				k *= 0xff51afd7ed558ccdULL;
+				k ^= k >> 33;
+				k *= 0xc4ceb9fe1a85ec53ULL;
+				k ^= k >> 33;
+				return static_cast<size_t>(k);
+			}
+		};
+		auto hash3D = [](int64_t x, int64_t y, int64_t z) -> uint64_t {
+			return (static_cast<uint64_t>(x) * 73856093u) ^
+			       (static_cast<uint64_t>(y) * 19349663u) ^
+			       (static_cast<uint64_t>(z) * 83492791u);
+		};
+		std::unordered_map<uint64_t, uint32_t, VertKeyHash> vertMap;
+		vertMap.reserve(numX * numZ * 2);
+
+		auto getOrAddVertex = [&](const glm::vec3& pos) -> uint32_t {
+			const uint64_t key = hash3D(quantCoord(pos.x), quantCoord(pos.y), quantCoord(pos.z));
+			auto it = vertMap.find(key);
+			if (it != vertMap.end())
+				return it->second;
+			uint32_t idx = AddVertex(pos);
+			vertMap[key] = idx;
+			return idx;
+		};
+
+		for (uint32_t gz = 0; gz < numZ; ++gz)
+		{
+			for (uint32_t gx = 0; gx < numX; ++gx)
+			{
+				const auto& spans = cellSpans[gz * numX + gx];
+				const float x0 = bMin.x + static_cast<float>(gx) * voxelSize;
+				const float x1 = x0 + voxelSize;
+				const float z0 = bMin.z + static_cast<float>(gz) * voxelSize;
+				const float z1 = z0 + voxelSize;
+				const float cx = (x0 + x1) * 0.5f;
+				const float cz = (z0 + z1) * 0.5f;
+
+				for (const auto& span : spans)
+				{
+					auto calcY = [&](float px, float pz) -> float {
+						if (std::abs(span.Normal.y) < 1e-4f) return span.Height;
+						return span.Height - (span.Normal.x * (px - cx) + span.Normal.z * (pz - cz)) / span.Normal.y;
+					};
+
+					const glm::vec3 c0(x0, calcY(x0, z0), z0);
+					const glm::vec3 c1(x1, calcY(x1, z0), z0);
+					const glm::vec3 c2(x1, calcY(x1, z1), z1);
+					const glm::vec3 c3(x0, calcY(x0, z1), z1);
+
+					uint32_t v0 = getOrAddVertex(c0);
+					uint32_t v1 = getOrAddVertex(c1);
+					uint32_t v2 = getOrAddVertex(c2);
+					uint32_t v3 = getOrAddVertex(c3);
+
+					uint32_t pIdx = AddPolygon({ v0, v1, v2, v3 });
+					auto& poly = m_Polygons[pIdx];
+					poly.AreaType = 0;
+					poly.Cost = 1.0f;
+					poly.Blocked = false;
+				}
+			}
+		}
+
+		// 5. 建立拓扑邻接与台阶攀爬连接
+		BuildAdjacency(settings.StepHeight);
+
+		// 6. 应用区域代价修饰区 (Area Modifiers)
+		for (auto& poly : m_Polygons)
+		{
+			for (const auto& mod : m_AreaModifiers)
+			{
+				const glm::vec3 bModMin = mod.Center - mod.Extents;
+				const glm::vec3 bModMax = mod.Center + mod.Extents;
+				if (poly.Center.x >= bModMin.x && poly.Center.x <= bModMax.x &&
+					poly.Center.y >= bModMin.y && poly.Center.y <= bModMax.y &&
+					poly.Center.z >= bModMin.z && poly.Center.z <= bModMax.z)
+				{
+					poly.AreaType = mod.AreaType;
+					poly.Cost = mod.CostMultiplier;
+					if (mod.AreaType == 4 || mod.CostMultiplier <= 0.0f)
+					{
+						poly.Blocked = true;
+					}
+				}
+			}
+		}
+
+		// 7. 注入跨网格跳跃链接 (Off-Mesh Links)
+		for (const auto& link : m_OffMeshLinks)
+		{
+			glm::vec3 navS, navE;
+			uint32_t polyS = 0, polyE = 0;
+			if (SamplePosition(link.Start, 5.0f, navS, polyS) &&
+				SamplePosition(link.End, 5.0f, navE, polyE) &&
+				polyS != polyE)
+			{
+				auto& nbrsS = m_Polygons[polyS].Neighbors;
+				if (std::find(nbrsS.begin(), nbrsS.end(), static_cast<int32_t>(polyE)) == nbrsS.end())
+				{
+					nbrsS.push_back(static_cast<int32_t>(polyE));
+				}
+
+				if (link.BiDirectional)
+				{
+					auto& nbrsE = m_Polygons[polyE].Neighbors;
+					if (std::find(nbrsE.begin(), nbrsE.end(), static_cast<int32_t>(polyS)) == nbrsE.end())
+					{
+						nbrsE.push_back(static_cast<int32_t>(polyS));
+					}
+				}
+			}
+		}
+	}
+
+	void NavMesh::ExtractSceneGeometry(const Scene& scene, const NavMeshBakeSettings& settings,
+	                                   std::vector<NavMeshTriangle>& outTriangles)
+	{
+		outTriangles.clear();
+		outTriangles.reserve(4096);
+		auto& triangles = outTriangles;
+
+		const auto& registry = scene.GetRegistry();
+
+		// 1. WhiteboxComponent 原型几何体
+		if (settings.IncludeWhitebox)
+		{
+			for (auto entity : registry.view<WhiteboxComponent>())
+			{
+				const auto& wb = registry.get<WhiteboxComponent>(entity);
+				glm::mat4 worldMat(1.0f);
+				if (const auto* wt = registry.try_get<WorldTransformComponent>(entity))
+					worldMat = wt->Matrix;
+				else if (const auto* tr = registry.try_get<TransformComponent>(entity))
+					worldMat = tr->GetLocalMatrix();
+
+				WhiteboxMesh mesh;
+				switch (wb.Shape)
+				{
+				case WhiteboxComponent::ShapeType::Box:
+					WhiteboxBuilder::BuildBox(wb.Dimensions, wb.BevelSize, mesh);
+					break;
+				case WhiteboxComponent::ShapeType::Cylinder:
+					WhiteboxBuilder::BuildCylinder(wb.Dimensions.x * 0.5f, wb.Dimensions.y, std::max(6u, static_cast<uint32_t>(wb.Subdivisions * 8)), mesh);
+					break;
+				case WhiteboxComponent::ShapeType::Stairs:
+					WhiteboxBuilder::BuildStairs(wb.Dimensions, std::max(1u, static_cast<uint32_t>(wb.Steps)), mesh);
+					break;
+				case WhiteboxComponent::ShapeType::Wedge:
+					WhiteboxBuilder::BuildWedge(wb.Dimensions, mesh);
+					break;
+				case WhiteboxComponent::ShapeType::Arch:
+					WhiteboxBuilder::BuildArch(wb.Dimensions, wb.Dimensions.x * 0.25f, mesh);
+					break;
+				default:
+					WhiteboxBuilder::BuildBox(wb.Dimensions, wb.BevelSize, mesh);
+					break;
+				}
+
+				for (size_t i = 0; i + 2 < mesh.Indices.size(); i += 3)
+				{
+					glm::vec3 p0 = glm::vec3(worldMat * glm::vec4(mesh.Vertices[mesh.Indices[i]], 1.0f));
+					glm::vec3 p1 = glm::vec3(worldMat * glm::vec4(mesh.Vertices[mesh.Indices[i + 1]], 1.0f));
+					glm::vec3 p2 = glm::vec3(worldMat * glm::vec4(mesh.Vertices[mesh.Indices[i + 2]], 1.0f));
+					triangles.push_back({ p0, p1, p2 });
+				}
+			}
+		}
+
+		// 2. BoxCollider3DComponent 碰撞盒体
+		if (settings.IncludeColliders)
+		{
+			for (auto entity : registry.view<BoxCollider3DComponent>())
+			{
+				const auto& box = registry.get<BoxCollider3DComponent>(entity);
+				glm::mat4 worldMat(1.0f);
+				if (const auto* wt = registry.try_get<WorldTransformComponent>(entity))
+					worldMat = wt->Matrix;
+				else if (const auto* tr = registry.try_get<TransformComponent>(entity))
+					worldMat = tr->GetLocalMatrix();
+
+				const glm::vec3 c = box.Offset;
+				const glm::vec3 h = glm::abs(box.HalfExtents);
+				const glm::vec3 corners[8] = {
+					c + glm::vec3(-h.x, -h.y, -h.z),
+					c + glm::vec3( h.x, -h.y, -h.z),
+					c + glm::vec3( h.x,  h.y, -h.z),
+					c + glm::vec3(-h.x,  h.y, -h.z),
+					c + glm::vec3(-h.x, -h.y,  h.z),
+					c + glm::vec3( h.x, -h.y,  h.z),
+					c + glm::vec3( h.x,  h.y,  h.z),
+					c + glm::vec3(-h.x,  h.y,  h.z),
+				};
+				glm::vec3 wCorners[8];
+				for (int k = 0; k < 8; ++k)
+					wCorners[k] = glm::vec3(worldMat * glm::vec4(corners[k], 1.0f));
+
+				static const uint32_t boxIndices[36] = {
+					4, 5, 6,  4, 6, 7, // +Z
+					1, 0, 3,  1, 3, 2, // -Z
+					3, 7, 6,  3, 6, 2, // +Y (顶面 - CCW 正法线向上)
+					0, 1, 5,  0, 5, 4, // -Y (底面)
+					5, 1, 2,  5, 2, 6, // +X
+					0, 4, 7,  0, 7, 3  // -X
+				};
+				for (int i = 0; i < 36; i += 3)
+				{
+					triangles.push_back({ wCorners[boxIndices[i]], wCorners[boxIndices[i + 1]], wCorners[boxIndices[i + 2]] });
+				}
+			}
+		}
+
+		// 3. MeshCollider3DComponent 与静态网格 MeshRendererComponent
+		if (settings.IncludeColliders || settings.IncludeMeshes)
+		{
+			for (auto entity : registry.view<MeshCollider3DComponent>())
+			{
+				const auto& mc = registry.get<MeshCollider3DComponent>(entity);
+				glm::mat4 worldMat(1.0f);
+				if (const auto* wt = registry.try_get<WorldTransformComponent>(entity))
+					worldMat = wt->Matrix;
+				else if (const auto* tr = registry.try_get<TransformComponent>(entity))
+					worldMat = tr->GetLocalMatrix();
+
+				std::string meshPath;
+				if (mc.Mesh.HasPath())
+					meshPath = std::string(StringPool::Get().PathOf(mc.Mesh.Path));
+				else if (const auto* mr = registry.try_get<MeshRendererComponent>(entity))
+				{
+					if (mr->Mesh.HasPath())
+						meshPath = std::string(StringPool::Get().PathOf(mr->Mesh.Path));
+				}
+
+				if (!meshPath.empty())
+				{
+					Asset::WModelData model;
+					std::string err;
+					if (Asset::WModelIO::ReadFile(meshPath, model, &err))
+					{
+						for (size_t i = 0; i + 2 < model.Indices.size(); i += 3)
+						{
+							uint32_t i0 = model.Indices[i];
+							uint32_t i1 = model.Indices[i + 1];
+							uint32_t i2 = model.Indices[i + 2];
+							if (i0 < model.Vertices.size() && i1 < model.Vertices.size() && i2 < model.Vertices.size())
+							{
+								glm::vec3 p0 = glm::vec3(worldMat * glm::vec4(model.Vertices[i0].Position, 1.0f));
+								glm::vec3 p1 = glm::vec3(worldMat * glm::vec4(model.Vertices[i1].Position, 1.0f));
+								glm::vec3 p2 = glm::vec3(worldMat * glm::vec4(model.Vertices[i2].Position, 1.0f));
+								triangles.push_back({ p0, p1, p2 });
+							}
+						}
+					}
+				}
+			}
+
+			if (settings.IncludeMeshes)
+			{
+				for (auto entity : registry.view<MeshRendererComponent>())
+				{
+					if (registry.try_get<MeshCollider3DComponent>(entity))
+						continue;
+
+					const auto& mr = registry.get<MeshRendererComponent>(entity);
+					if (!mr.Mesh.HasPath())
+						continue;
+
+					glm::mat4 worldMat(1.0f);
+					if (const auto* wt = registry.try_get<WorldTransformComponent>(entity))
+						worldMat = wt->Matrix;
+					else if (const auto* tr = registry.try_get<TransformComponent>(entity))
+						worldMat = tr->GetLocalMatrix();
+
+					const std::string meshPath = std::string(StringPool::Get().PathOf(mr.Mesh.Path));
+					Asset::WModelData model;
+					std::string err;
+					if (Asset::WModelIO::ReadFile(meshPath, model, &err))
+					{
+						for (size_t i = 0; i + 2 < model.Indices.size(); i += 3)
+						{
+							uint32_t i0 = model.Indices[i];
+							uint32_t i1 = model.Indices[i + 1];
+							uint32_t i2 = model.Indices[i + 2];
+							if (i0 < model.Vertices.size() && i1 < model.Vertices.size() && i2 < model.Vertices.size())
+							{
+								glm::vec3 p0 = glm::vec3(worldMat * glm::vec4(model.Vertices[i0].Position, 1.0f));
+								glm::vec3 p1 = glm::vec3(worldMat * glm::vec4(model.Vertices[i1].Position, 1.0f));
+								glm::vec3 p2 = glm::vec3(worldMat * glm::vec4(model.Vertices[i2].Position, 1.0f));
+								triangles.push_back({ p0, p1, p2 });
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 4. TerrainComponent 高度场地貌 (工业级自适应采样步长 Nav LOD)
+		if (settings.IncludeTerrain)
+		{
+			for (auto entity : registry.view<TerrainComponent>())
+			{
+				const auto& tc = registry.get<TerrainComponent>(entity);
+				glm::mat4 worldMat(1.0f);
+				if (const auto* wt = registry.try_get<WorldTransformComponent>(entity))
+					worldMat = wt->Matrix;
+				else if (const auto* tr = registry.try_get<TransformComponent>(entity))
+					worldMat = tr->GetLocalMatrix();
+
+				auto terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
+				if (terrainData && terrainData->GetWidth() >= 2 && terrainData->GetHeight() >= 2)
+				{
+					const uint32_t w = terrainData->GetWidth();
+					const uint32_t h = terrainData->GetHeight();
+					const float cs = terrainData->GetCellSize();
+
+					// 工业级自适应地貌步长：当 VoxelSize > cs 时按 NavMesh 体素分辨率对齐步长提取，
+					// 三角形数量减少 4x~64x，彻底根治大世界地貌烘焙卡死
+					const uint32_t step = std::clamp(static_cast<uint32_t>(std::round(settings.VoxelSize / std::max(0.1f, cs))), 1u, 16u);
+
+					for (uint32_t z = 0; z + step <= h - 1; z += step)
+					{
+						const uint32_t zNext = std::min(z + step, h - 1);
+						for (uint32_t x = 0; x + step <= w - 1; x += step)
+						{
+							const uint32_t xNext = std::min(x + step, w - 1);
+
+							if (tc.HoleCutoutEnabled && (terrainData->IsHole(x, z) || terrainData->IsHole(xNext, z) ||
+							                             terrainData->IsHole(x, zNext) || terrainData->IsHole(xNext, zNext)))
+								continue;
+
+							const float wx0 = static_cast<float>(x) * cs;
+							const float wx1 = static_cast<float>(xNext) * cs;
+							const float wz0 = static_cast<float>(z) * cs;
+							const float wz1 = static_cast<float>(zNext) * cs;
+
+							const glm::vec3 p00(wx0, terrainData->SampleHeight(wx0, wz0), wz0);
+							const glm::vec3 p10(wx1, terrainData->SampleHeight(wx1, wz0), wz0);
+							const glm::vec3 p11(wx1, terrainData->SampleHeight(wx1, wz1), wz1);
+							const glm::vec3 p01(wx0, terrainData->SampleHeight(wx0, wz1), wz1);
+
+							const glm::vec3 wp00 = glm::vec3(worldMat * glm::vec4(p00, 1.0f));
+							const glm::vec3 wp10 = glm::vec3(worldMat * glm::vec4(p10, 1.0f));
+							const glm::vec3 wp11 = glm::vec3(worldMat * glm::vec4(p11, 1.0f));
+							const glm::vec3 wp01 = glm::vec3(worldMat * glm::vec4(p01, 1.0f));
+
+							triangles.push_back({ wp00, wp11, wp10 });
+							triangles.push_back({ wp00, wp01, wp11 });
+						}
+					}
+				}
+			}
+		}
+	}
+
+	void NavMesh::BakeFromScene(const Scene& scene, const NavMeshBakeSettings& settings)
+	{
+		std::vector<NavMeshTriangle> triangles;
+		ExtractSceneGeometry(scene, settings, triangles);
+		BakeFromTriangles(triangles, settings);
+	}
+
+	std::future<std::shared_ptr<NavMesh>> NavMesh::BakeSceneAsync(const Scene& scene, const NavMeshBakeSettings& settings)
+	{
+		std::vector<NavMeshTriangle> triangles;
+		ExtractSceneGeometry(scene, settings, triangles);
+
+		std::vector<NavMeshAreaModifier> areaMods;
+		std::vector<NavMeshOffMeshLink> links;
+		if (auto curNav = scene.GetNavMesh())
+		{
+			areaMods = curNav->GetAreaModifiers();
+			links = curNav->GetOffMeshLinks();
+		}
+
+		return std::async(std::launch::async, [triangles = std::move(triangles),
+		                                       areaMods = std::move(areaMods),
+		                                       links = std::move(links),
+		                                       settings]() mutable {
+			auto nav = std::make_shared<NavMesh>();
+			for (const auto& mod : areaMods) nav->AddAreaModifier(mod);
+			for (const auto& link : links) nav->AddOffMeshLink(link);
+			nav->BakeFromTriangles(triangles, settings);
+			return nav;
+		});
+	}
+
+	bool NavMesh::Raycast(const glm::vec3& start, const glm::vec3& end, glm::vec3* outHitPoint) const
+	{
+		if (m_Polygons.empty())
+		{
+			if (outHitPoint) *outHitPoint = start;
+			return false;
+		}
+
+		glm::vec3 navStart;
+		uint32_t polyStart = 0;
+		if (!SamplePosition(start, 5.0f, navStart, polyStart))
+		{
+			if (outHitPoint) *outHitPoint = start;
+			return false;
+		}
+
+		const float totalDist = glm::distance(navStart, end);
+		if (totalDist < 1e-4f)
+			return true;
+
+		const float stepSize = 0.25f;
+		const int steps = std::max(1, static_cast<int>(std::ceil(totalDist / stepSize)));
+		glm::vec3 prevValid = navStart;
+
+		for (int i = 1; i <= steps; ++i)
+		{
+			const float t = static_cast<float>(i) / static_cast<float>(steps);
+			const glm::vec3 probe = glm::mix(navStart, end, t);
+
+			glm::vec3 navPt;
+			uint32_t polyIdx = 0;
+			if (!SamplePosition(probe, 1.5f, navPt, polyIdx))
+			{
+				if (outHitPoint) *outHitPoint = prevValid;
+				return false;
+			}
+
+			if (m_Polygons[polyIdx].Blocked || m_Polygons[polyIdx].Cost <= 0.0f)
+			{
+				if (outHitPoint) *outHitPoint = prevValid;
+				return false;
+			}
+
+			if (std::abs(probe.y - navPt.y) > 1.8f)
+			{
+				if (outHitPoint) *outHitPoint = prevValid;
+				return false;
+			}
+
+			prevValid = navPt;
+		}
+
+		return true;
+	}
+
+	bool NavMesh::GetRandomPointAround(const glm::vec3& center, float radius, glm::vec3& outPoint) const
+	{
+		if (m_Polygons.empty() || radius <= 0.0f)
+			return false;
+
+		std::vector<uint32_t> candidates;
+		candidates.reserve(32);
+		const float maxDist2 = (radius + 10.0f) * (radius + 10.0f);
+
+		for (uint32_t p = 0; p < m_Polygons.size(); ++p)
+		{
+			const auto& poly = m_Polygons[p];
+			if (poly.Blocked || poly.Cost <= 0.0f)
+				continue;
+			const glm::vec3 diff = poly.Center - center;
+			if (diff.x * diff.x + diff.z * diff.z <= maxDist2)
+			{
+				candidates.push_back(p);
+			}
+		}
+
+		if (candidates.empty())
+		{
+			for (uint32_t p = 0; p < m_Polygons.size(); ++p)
+			{
+				if (!m_Polygons[p].Blocked && m_Polygons[p].Cost > 0.0f)
+				{
+					candidates.push_back(p);
+					break;
+				}
+			}
+		}
+
+		if (candidates.empty())
+			return false;
+
+		for (int attempt = 0; attempt < 16; ++attempt)
+		{
+			const float angle = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX)) * 6.2831853f;
+			const float r = radius * std::sqrt(static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX));
+			const glm::vec3 testPt = center + glm::vec3(r * std::cos(angle), 0.0f, r * std::sin(angle));
+
+			glm::vec3 navPt;
+			uint32_t polyIdx = 0;
+			if (SamplePosition(testPt, 4.0f, navPt, polyIdx))
+			{
+				if (polyIdx < m_Polygons.size() && !m_Polygons[polyIdx].Blocked && m_Polygons[polyIdx].Cost > 0.0f)
+				{
+					if (glm::distance(center, navPt) <= radius + 1.0f)
+					{
+						outPoint = navPt;
+						return true;
+					}
+				}
+			}
+		}
+
+		const uint32_t chosen = candidates[std::rand() % candidates.size()];
+		outPoint = m_Polygons[chosen].Center;
+		return true;
+	}
+
+	bool NavMesh::IsPointWalkable(const glm::vec3& point, float tolerance) const
+	{
+		glm::vec3 navPt;
+		uint32_t polyIdx = 0;
+		if (!SamplePosition(point, tolerance, navPt, polyIdx))
+			return false;
+		if (polyIdx >= m_Polygons.size())
+			return false;
+		const auto& poly = m_Polygons[polyIdx];
+		return !poly.Blocked && poly.Cost > 0.0f;
+	}
+
+	bool NavMesh::GetNearestPoint(const glm::vec3& point, float maxDist, glm::vec3& outPoint) const
+	{
+		uint32_t polyIdx = 0;
+		return SamplePosition(point, maxDist, outPoint, polyIdx);
 	}
 
 	void NavMesh::ApplyObstacle(const glm::vec3& boxCenter, const glm::vec3& boxExtents, bool carve)
@@ -448,7 +1428,9 @@ namespace World
 	void NavMesh::ClearObstacles()
 	{
 		for (auto& poly : m_Polygons)
-			poly.Blocked = false;
+		{
+			poly.Blocked = (poly.AreaType == 4 || poly.Cost <= 0.0f);
+		}
 	}
 
 	bool NavMesh::SaveToFile(const std::string& path) const
@@ -474,6 +1456,31 @@ namespace World
 			stream.write(reinterpret_cast<const char*>(&nbrCount), sizeof(nbrCount));
 			stream.write(reinterpret_cast<const char*>(poly.Neighbors.data()), nbrCount * sizeof(int32_t));
 		}
+
+		// v2 扩展区块：保存 AreaType、Cost、OffMeshLinks 与 AreaModifiers
+		const uint32_t extMagic = 0x4E415632; // "NAV2"
+		stream.write(reinterpret_cast<const char*>(&extMagic), sizeof(extMagic));
+
+		for (const auto& poly : m_Polygons)
+		{
+			stream.write(reinterpret_cast<const char*>(&poly.AreaType), sizeof(poly.AreaType));
+			stream.write(reinterpret_cast<const char*>(&poly.Cost), sizeof(poly.Cost));
+		}
+
+		const uint32_t linkCount = static_cast<uint32_t>(m_OffMeshLinks.size());
+		stream.write(reinterpret_cast<const char*>(&linkCount), sizeof(linkCount));
+		if (linkCount > 0)
+		{
+			stream.write(reinterpret_cast<const char*>(m_OffMeshLinks.data()), linkCount * sizeof(NavMeshOffMeshLink));
+		}
+
+		const uint32_t modCount = static_cast<uint32_t>(m_AreaModifiers.size());
+		stream.write(reinterpret_cast<const char*>(&modCount), sizeof(modCount));
+		if (modCount > 0)
+		{
+			stream.write(reinterpret_cast<const char*>(m_AreaModifiers.data()), modCount * sizeof(NavMeshAreaModifier));
+		}
+
 		return true;
 	}
 
@@ -506,7 +1513,10 @@ namespace World
 			poly.Neighbors.resize(nbrCount);
 			stream.read(reinterpret_cast<char*>(poly.Neighbors.data()), nbrCount * sizeof(int32_t));
 
-			// 重新推导中心与法线
+			poly.AreaType = 0;
+			poly.Cost = 1.0f;
+			poly.Blocked = false;
+
 			glm::vec3 center(0.0f);
 			for (uint32_t idx : poly.VertexIndices)
 				center += m_Vertices[idx];
@@ -522,6 +1532,32 @@ namespace World
 				poly.Normal = glm::normalize(glm::cross(v1 - v0, v2 - v0));
 			}
 		}
+
+		// 尝试读取 v2 扩展元数据
+		uint32_t extMagic = 0;
+		if (stream.read(reinterpret_cast<char*>(&extMagic), sizeof(extMagic)) && extMagic == 0x4E415632)
+		{
+			for (auto& poly : m_Polygons)
+			{
+				stream.read(reinterpret_cast<char*>(&poly.AreaType), sizeof(poly.AreaType));
+				stream.read(reinterpret_cast<char*>(&poly.Cost), sizeof(poly.Cost));
+			}
+
+			uint32_t linkCount = 0;
+			if (stream.read(reinterpret_cast<char*>(&linkCount), sizeof(linkCount)) && linkCount > 0)
+			{
+				m_OffMeshLinks.resize(linkCount);
+				stream.read(reinterpret_cast<char*>(m_OffMeshLinks.data()), linkCount * sizeof(NavMeshOffMeshLink));
+			}
+
+			uint32_t modCount = 0;
+			if (stream.read(reinterpret_cast<char*>(&modCount), sizeof(modCount)) && modCount > 0)
+			{
+				m_AreaModifiers.resize(modCount);
+				stream.read(reinterpret_cast<char*>(m_AreaModifiers.data()), modCount * sizeof(NavMeshAreaModifier));
+			}
+		}
+
 		return true;
 	}
 
@@ -530,21 +1566,25 @@ namespace World
 		if (dt <= 0.0f || navMesh.GetPolygonCount() == 0)
 			return;
 
-		// 收集动态障碍物
+		// 消除上一帧残留的动态阻挡标记
+		const_cast<NavMesh&>(navMesh).ClearObstacles();
+
+		// 遍历所有带 NavMeshObstacleComponent 且 CarveNavMesh == 1 的实体，调用 ApplyObstacle
 		for (auto entity : scene.GetRegistry().view<TransformComponent, NavMeshObstacleComponent>())
 		{
 			const auto& [xform, obs] = scene.GetRegistry().get<TransformComponent, NavMeshObstacleComponent>(entity);
-			if (obs.CarveNavMesh)
+			if (obs.CarveNavMesh == 1)
 			{
 				const_cast<NavMesh&>(navMesh).ApplyObstacle(xform.Location, obs.Extents, true);
 			}
 		}
 
-		// 推进各代理寻路与运动
+		// 遍历所有带 NavMeshAgentComponent 的实体
 		for (auto entity : scene.GetRegistry().view<TransformComponent, NavMeshAgentComponent>())
 		{
 			auto& [xform, agent] = scene.GetRegistry().get<TransformComponent, NavMeshAgentComponent>(entity);
 
+			// 计算到 agent.Destination 的水平/三维距离
 			const float distToDest = glm::distance(xform.Location, agent.Destination);
 			if (distToDest <= agent.StoppingDistance)
 			{
@@ -553,32 +1593,55 @@ namespace World
 				continue;
 			}
 
-			// 如果未规划路径或需要重新规划
+			// 若未到达，调用 navMesh.FindPath
 			std::vector<glm::vec3> path;
 			if (navMesh.FindPath(xform.Location, agent.Destination, path) && path.size() >= 2)
 			{
 				agent.HasPath = 1;
 				agent.ReachedDestination = 0;
 
-				// 沿路径第一航点移动
-				const glm::vec3 nextPoint = path[1];
-				const glm::vec3 toNext = nextPoint - xform.Location;
-				const float distNext = glm::length(toNext);
+				// 计算向下一个航点 path[1] 的方向
+				const glm::vec3 dir = path[1] - xform.Location;
+				const float distDir = glm::length(dir);
 
-				if (distNext > 0.001f)
+				if (distDir > 1e-4f)
 				{
-					const glm::vec3 dir = toNext / distNext;
-					const float moveDist = std::min(distNext, agent.Speed * dt);
-					xform.Location += dir * moveDist;
+					// 计算平面移动距离
+					const float moveDist = std::min(distDir, agent.Speed * dt);
+					xform.Location += (dir / distDir) * moveDist;
+
+					// 平滑偏航角插值旋转
+					if (dir.x * dir.x + dir.z * dir.z > 1e-4f)
+					{
+						const float targetYaw = std::atan2(dir.x, dir.z);
+						const glm::quat targetRot = glm::angleAxis(targetYaw, glm::vec3(0.0f, 1.0f, 0.0f));
+						xform.Rotation = glm::slerp(xform.Rotation, targetRot, std::min(1.0f, 10.0f * dt));
+					}
+
+					// 地貌/网格自适应贴地 (Grounding Clamp)
+					glm::vec3 navPt { 0.0f };
+					uint32_t polyIdx = 0;
+					if (navMesh.SamplePosition(xform.Location, 4.0f, navPt, polyIdx))
+					{
+						xform.Location.y = navPt.y;
+					}
+
+					xform.Flags |= (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
 				}
+
 				if (glm::distance(xform.Location, agent.Destination) <= agent.StoppingDistance)
 				{
 					agent.ReachedDestination = 1;
 					agent.HasPath = 0;
 				}
 			}
+			else
+			{
+				if (agent.AutoRepath == 1)
+				{
+					agent.HasPath = 0;
+				}
+			}
 		}
 	}
 }
-
-

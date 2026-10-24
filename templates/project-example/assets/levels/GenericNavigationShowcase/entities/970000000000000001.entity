@@ -1,0 +1,41 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000001
+  World::TagComponent:
+    Tag: "Mannequin Agent"
+  World::TransformComponent:
+    Location: [20.0, 0.0, 4.0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::SkinnedMeshRendererComponent:
+    Mesh: "engine/models/characters/mannequin.wmodel"
+    MeshIndex: 0
+    Material: ""
+    AnimationClip: ""
+    Speed: 1.0
+    Time: 0.0
+    Playing: true
+    Loop: true
+  World::AnimGraphComponent:
+    AnimGraphAsset: "engine/animation/mannequin_locomotion.wanimgraph"
+    PlaybackSpeed: 1.0
+    RootMotionWeight: 1.0
+    FootIkWeight: 1.0
+    CurrentStateHash: 0
+    EnableRootMotion: 0
+    EnableFootIk: 0
+    EnableUpperBodyLayer: 0
+  World::NavMeshAgentComponent:
+    Destination: [20.0, 3.0, 24.0]
+    Speed: 4.5
+    Acceleration: 8.0
+    StoppingDistance: 0.3
+    AgentRadius: 0.5
+    AgentHeight: 1.8
+    HasPath: 0
+    ReachedDestination: 0
+    AutoRepath: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 1

@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000017
+  World::TagComponent:
+    Tag: "Pillar SE"
+  World::TransformComponent:
+    Location: [29.0, 2.5, 11.0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 0
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [1.2, 5.0, 1.2]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.75, 0.77, 0.82, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

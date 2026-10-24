@@ -1,0 +1,23 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000002
+  World::TagComponent:
+    Tag: "Valley Barricade"
+  World::TransformComponent:
+    Location: [32, 1, 32]
+    Rotation: [0, 0, 0]
+    Scale: [6, 2, 2]
+  World::NavMeshObstacleComponent:
+    Extents: [3, 2, 1]
+    CarveNavMesh: 1
+    IsMoving: 0
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.85, 0.22, 0.15, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

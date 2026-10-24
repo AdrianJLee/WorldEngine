@@ -43,6 +43,7 @@ namespace Animation
 
 	class Entity;
 	class Physics3DWorld;
+	class NavMesh;
 	namespace Gameplay { class SystemRegistry; }
 	namespace Gameplay { class SaveService; }   // P2a W8:存档服务需要只读遍历 registry
 	enum class SceneState { Stopped, Starting, Running, Stopping };
@@ -138,6 +139,17 @@ namespace Animation
 		// 会话无效),且根与子实体可能分散在不同 `.entity` 文件/流送块里,读到一半无法反查
 		// 句柄;等该批实体全部导入后由 SceneSerializer::FinalizeEntityImport 统一解析。
 		void AddPendingPrefabInstance(Gameplay::PendingPrefabInstanceRecord record);
+
+		// NavMesh 场景级托管与关卡自动加载/持久化
+		const std::shared_ptr<NavMesh>& GetNavMesh() const { return m_NavMesh; }
+		void SetNavMesh(std::shared_ptr<NavMesh> navMesh) { m_NavMesh = std::move(navMesh); }
+		std::shared_ptr<NavMesh> GetOrCreateNavMesh();
+
+		const std::string& GetScenePath() const { return m_ScenePath; }
+		void SetScenePath(const std::string& path);
+		void TryAutoLoadNavMesh();
+		bool SaveNavMesh(const std::string& path = "") const;
+		bool LoadNavMesh(const std::string& path = "");
 
 		void OnUpdateEditor(Timestep ts, const EditorCamera& camera);
 		void OnUpdateRuntime(Timestep ts);
@@ -703,6 +715,8 @@ namespace Animation
 		};
 		std::vector<ComponentChangeObserverEntry> m_ComponentChangeObservers;
 
+		std::shared_ptr<NavMesh> m_NavMesh;
+		std::string m_ScenePath;
 	};
 
 

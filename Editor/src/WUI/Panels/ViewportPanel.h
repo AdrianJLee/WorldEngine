@@ -148,6 +148,9 @@ namespace World
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
 
+		static void SetNavMeshVisible(bool visible);
+		static bool IsNavMeshVisible();
+
 	private:
 		ViewportHost& m_Host;
 		std::shared_ptr<Wui::WuiBox> m_Root;

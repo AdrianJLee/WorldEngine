@@ -198,6 +198,164 @@ static void TestNavMeshAgentMovementAndArrival()
 	std::cout << "[PASS] TestNavMeshAgentMovementAndArrival\n";
 }
 
+
+static void TestNavMeshGenericTrianglesBaking()
+{
+	NavMesh nav;
+	std::vector<NavMeshTriangle> tris;
+
+	// Ground plane: 2 CCW triangles (0,0) to (10,10) at Y=0
+	tris.push_back({ {0.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 10.0f}, {10.0f, 0.0f, 0.0f} });
+	tris.push_back({ {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 10.0f}, {10.0f, 0.0f, 10.0f} });
+
+	// Raised platform: 2 CCW triangles (10,0) to (20,10) at Y=1.0
+	tris.push_back({ {10.0f, 1.0f, 0.0f}, {20.0f, 1.0f, 10.0f}, {20.0f, 1.0f, 0.0f} });
+	tris.push_back({ {10.0f, 1.0f, 0.0f}, {10.0f, 1.0f, 10.0f}, {20.0f, 1.0f, 10.0f} });
+
+	NavMeshBakeSettings settings;
+	settings.VoxelSize = 2.0f;
+	settings.StepHeight = 1.2f;
+	nav.BakeFromTriangles(tris, settings);
+
+	assert(nav.GetPolygonCount() > 0);
+	assert(nav.GetVertexCount() > 0);
+
+	// Test path across height step
+	std::vector<glm::vec3> path;
+	const bool found = nav.FindPath(glm::vec3(2.0f, 0.0f, 5.0f), glm::vec3(18.0f, 1.0f, 5.0f), path);
+	assert(found);
+	assert(path.size() >= 2);
+
+	std::cout << "[PASS] TestNavMeshGenericTrianglesBaking\n";
+}
+
+static void TestNavMeshAreaCostsAndPathfinding()
+{
+	NavMesh nav;
+	// Two parallel paths:
+	// Path A (Direct through Mud, Cost = 3.0)
+	// Path B (Detour on Road, Cost = 0.5)
+	const uint32_t v0 = nav.AddVertex(glm::vec3(0.0f, 0.0f, 0.0f));
+	const uint32_t v1 = nav.AddVertex(glm::vec3(10.0f, 0.0f, 0.0f));
+	const uint32_t v2 = nav.AddVertex(glm::vec3(10.0f, 0.0f, 4.0f));
+	const uint32_t v3 = nav.AddVertex(glm::vec3(0.0f, 0.0f, 4.0f));
+	const uint32_t pMud = nav.AddPolygon({ v0, v1, v2, v3 });
+
+	const uint32_t v4 = nav.AddVertex(glm::vec3(10.0f, 0.0f, 8.0f));
+	const uint32_t v5 = nav.AddVertex(glm::vec3(0.0f, 0.0f, 8.0f));
+	const uint32_t pRoad = nav.AddPolygon({ v3, v2, v4, v5 });
+
+	nav.BuildAdjacency();
+
+	nav.GetPolygonMut(pMud).AreaType = 2; // Mud
+	nav.GetPolygonMut(pMud).Cost = 3.0f;
+
+	nav.GetPolygonMut(pRoad).AreaType = 1; // Road
+	nav.GetPolygonMut(pRoad).Cost = 0.5f;
+
+	std::vector<glm::vec3> path;
+	const bool ok = nav.FindPath(glm::vec3(1.0f, 0.0f, 2.0f), glm::vec3(9.0f, 0.0f, 6.0f), path);
+	assert(ok);
+	assert(path.size() >= 2);
+
+	std::cout << "[PASS] TestNavMeshAreaCostsAndPathfinding\n";
+}
+
+static void TestNavMeshRaycastLineOfSight()
+{
+	NavMesh nav;
+	const uint32_t v0 = nav.AddVertex(glm::vec3(0.0f, 0.0f, 0.0f));
+	const uint32_t v1 = nav.AddVertex(glm::vec3(10.0f, 0.0f, 0.0f));
+	const uint32_t v2 = nav.AddVertex(glm::vec3(10.0f, 0.0f, 10.0f));
+	const uint32_t v3 = nav.AddVertex(glm::vec3(0.0f, 0.0f, 10.0f));
+	const uint32_t p0 = nav.AddPolygon({ v0, v1, v2, v3 });
+	(void)p0;
+	nav.BuildAdjacency();
+
+	glm::vec3 hitPoint { 0.0f };
+	// LoS within polygon bounds
+	const bool clear = nav.Raycast(glm::vec3(2.0f, 0.0f, 2.0f), glm::vec3(8.0f, 0.0f, 8.0f), &hitPoint);
+	assert(clear);
+
+	// LoS crossing out of polygon bounds
+	const bool blocked = nav.Raycast(glm::vec3(5.0f, 0.0f, 5.0f), glm::vec3(25.0f, 0.0f, 5.0f), &hitPoint);
+	assert(!blocked);
+
+	std::cout << "[PASS] TestNavMeshRaycastLineOfSight\n";
+}
+
+static void TestNavMeshRandomWanderSampling()
+{
+	NavMesh nav;
+	const uint32_t v0 = nav.AddVertex(glm::vec3(0.0f, 0.0f, 0.0f));
+	const uint32_t v1 = nav.AddVertex(glm::vec3(20.0f, 0.0f, 0.0f));
+	const uint32_t v2 = nav.AddVertex(glm::vec3(20.0f, 0.0f, 20.0f));
+	const uint32_t v3 = nav.AddVertex(glm::vec3(0.0f, 0.0f, 20.0f));
+	nav.AddPolygon({ v0, v1, v2, v3 });
+	nav.BuildAdjacency();
+
+	glm::vec3 sample { 0.0f };
+	const bool ok = nav.GetRandomPointAround(glm::vec3(10.0f, 0.0f, 10.0f), 5.0f, sample);
+	assert(ok);
+	assert(sample.x >= 0.0f && sample.x <= 20.0f);
+	assert(sample.z >= 0.0f && sample.z <= 20.0f);
+
+	std::cout << "[PASS] TestNavMeshRandomWanderSampling\n";
+}
+
+static void TestNavMeshBakeFromScene()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	const entt::entity ground = scene.GetRegistry().create();
+	auto& gt = scene.GetRegistry().emplace<TransformComponent>(ground);
+	gt.Location = glm::vec3(10.0f, 0.0f, 10.0f);
+	auto& box = scene.GetRegistry().emplace<BoxCollider3DComponent>(ground);
+	box.HalfExtents = glm::vec3(10.0f, 0.5f, 10.0f);
+
+	NavMesh nav;
+	NavMeshBakeSettings settings;
+	settings.VoxelSize = 2.0f;
+	settings.IncludeColliders = true;
+	nav.BakeFromScene(scene, settings);
+
+	assert(nav.GetPolygonCount() > 0);
+	assert(nav.GetVertexCount() > 0);
+
+	std::vector<glm::vec3> path;
+	const bool found = nav.FindPath(glm::vec3(2.0f, 0.5f, 2.0f), glm::vec3(18.0f, 0.5f, 18.0f), path);
+	assert(found);
+	assert(path.size() >= 2);
+
+	std::cout << "[PASS] TestNavMeshBakeFromScene\n";
+}
+
+static void TestNavMeshAsyncBaking()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	const entt::entity ground = scene.GetRegistry().create();
+	auto& gt = scene.GetRegistry().emplace<TransformComponent>(ground);
+	gt.Location = glm::vec3(10.0f, 0.0f, 10.0f);
+	auto& box = scene.GetRegistry().emplace<BoxCollider3DComponent>(ground);
+	box.HalfExtents = glm::vec3(10.0f, 0.5f, 10.0f);
+
+	NavMeshBakeSettings settings;
+	settings.VoxelSize = 2.0f;
+	settings.IncludeColliders = true;
+
+	auto fut = NavMesh::BakeSceneAsync(scene, settings);
+	assert(fut.valid());
+	fut.wait();
+	auto nav = fut.get();
+	assert(nav != nullptr);
+	assert(nav->GetPolygonCount() > 0);
+
+	std::cout << "[PASS] TestNavMeshAsyncBaking\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.NavMesh tests...\n";
@@ -207,7 +365,13 @@ int main()
 	TestNavMeshDynamicObstacleCarving();
 	TestNavMeshTerrainBaking();
 	TestNavMeshAgentMovementAndArrival();
-	std::cout << "All World.NavMesh tests passed successfully!\n";
+	TestNavMeshGenericTrianglesBaking();
+	TestNavMeshAreaCostsAndPathfinding();
+	TestNavMeshRaycastLineOfSight();
+	TestNavMeshRandomWanderSampling();
+	TestNavMeshBakeFromScene();
+	TestNavMeshAsyncBaking();
+	std::cout << "All 12 World.NavMesh tests passed successfully!\n";
 	return 0;
 }
 

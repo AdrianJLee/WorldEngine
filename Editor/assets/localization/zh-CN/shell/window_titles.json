@@ -47,5 +47,6 @@
   "panel.physics_material_editor": "物理材质编辑器",
   "panel.curve_editor": "曲线编辑器",
   "panel.animgraph": "动画图",
+  "panel.navmesh": "3D 导航寻路 (NavMesh)",
   "panel.audio_profiler": "音频分析器"
 }

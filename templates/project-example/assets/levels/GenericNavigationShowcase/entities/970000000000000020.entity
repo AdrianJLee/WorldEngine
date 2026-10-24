@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000020
+  World::TagComponent:
+    Tag: "North Partition West"
+  World::TransformComponent:
+    Location: [13.5, 2.0, 31.0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 0
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [11.0, 4.0, 0.5]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.60, 0.64, 0.70, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

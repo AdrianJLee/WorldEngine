@@ -1736,6 +1736,8 @@ void EditorLayer::DoOpenScene(const std::filesystem::path& path){
 		}
 		SetSceneState(SceneState::Edit);
 		UpdateSceneContext(m_Document.GetScene());
+		if (m_Document.GetScene())
+			m_Document.GetScene()->SetScenePath(path.string());
 		// T5c:打开即把场景要用的资产交给后台解析(状态栏显示进度)。
 		// 编辑器**不**因此停渲染:视口走同步解析路径,先到的资产先出现 —— 打开大场景时
 		// 主线程不再被"逐个读盘+解析"一次性占满。

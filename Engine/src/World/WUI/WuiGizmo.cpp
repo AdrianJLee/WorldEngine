@@ -271,6 +271,9 @@ namespace World::Wui
 		// 旋转方向符号:屏幕 Y 朝下(角度顺时针增长),而绕轴的正向是右手系 ——
 		// 轴指向相机时两者相反,必须取反,否则拖拽方向整体反着来(实测)。
 		static float rotateSign = 1.0f;
+		// 平移轴射线-平面精确求交锁存量 (彻底解决近景微移飞出宇宙的比例尺漂移问题)
+		static glm::vec3 translatePlaneNormal { 0.0f, 1.0f, 0.0f };
+		static glm::vec3 translateStartHit { 0.0f };
 
 		// 屏幕点 → 世界射线(用 gizmo 相机的 VP 反投影;GL 约定,深度 -1..1)。
 		const auto screenRay = [&](const glm::vec2& screen, glm::vec3* origin, glm::vec3* direction)
@@ -337,6 +340,26 @@ namespace World::Wui
 							rotatePlaneReference = glm::normalize(offset);
 					}
 				}
+				else if (operation == GizmoOperation::Translate && activeAxis >= 0 && activeAxis < 3)
+				{
+					glm::vec3 v = glm::cross(axisWorld[activeAxis], camera.Forward);
+					if (glm::dot(v, v) < 1e-5f)
+						v = glm::cross(axisWorld[activeAxis], camera.Up);
+					if (glm::dot(v, v) < 1e-5f)
+						v = glm::cross(axisWorld[activeAxis], camera.Right);
+					translatePlaneNormal = glm::normalize(glm::cross(v, axisWorld[activeAxis]));
+
+					glm::vec3 rayOrigin {}, rayDirection {}, hit {};
+					if (screenRay(mouse, &rayOrigin, &rayDirection)
+						&& intersectPlane(rayOrigin, rayDirection, startLocation, translatePlaneNormal, &hit))
+					{
+						translateStartHit = hit;
+					}
+					else
+					{
+						translateStartHit = startLocation;
+					}
+				}
 			}
 		}
 
@@ -348,8 +371,22 @@ namespace World::Wui
 
 			if (operation == GizmoOperation::Translate && activeAxis >= 0 && activeAxis < 3)
 			{
-				const float pixels = glm::dot(delta, startAxisScreen[activeAxis]);
-				transform.Location = startLocation + axisWorld[activeAxis] * (pixels * worldPerPixel);
+				glm::vec3 rayOrigin {}, rayDirection {}, currentHit {};
+				if (screenRay(mouse, &rayOrigin, &rayDirection)
+					&& intersectPlane(rayOrigin, rayDirection, startLocation, translatePlaneNormal, &currentHit))
+				{
+					const float axisOffset = glm::dot(currentHit - translateStartHit, axisWorld[activeAxis]);
+					transform.Location = startLocation + axisWorld[activeAxis] * axisOffset;
+				}
+				else
+				{
+					const float depth = camera.IsOrthographic
+						? std::max(0.0001f, camera.OrthographicSize)
+						: std::max(0.05f, glm::dot(startLocation - camera.Position, camera.Forward));
+					const float wpp = 2.0f * depth * std::tan(glm::radians(camera.FovDegrees) * 0.5f) / std::max(1.0f, viewport.H);
+					const float pixels = glm::dot(delta, startAxisScreen[activeAxis]);
+					transform.Location = startLocation + axisWorld[activeAxis] * (pixels * wpp);
+				}
 			}
 			else if (operation == GizmoOperation::Scale)
 			{

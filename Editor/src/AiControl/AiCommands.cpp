@@ -16,6 +16,8 @@
 #include "WUI/Panels/SpriteAnimationEditorPanel.h"
 #include "WUI/Panels/TilemapEditorPanel.h"
 #include "WUI/Panels/TerrainPanel.h"
+#include "World/NavMesh/NavMesh.h"
+#include "World/Terrain/TerrainRenderer.h"
 #include "World/Scene/Components.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/Runtime/ComponentPropertyModel.h"
@@ -1145,6 +1147,14 @@ namespace World
 		addCmd("terrain.set_tab", "Set terrain panel active tab (sculpt, paint, settings).", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("viewport.set_camera", "Set viewport 3D camera target, distance, yaw and pitch.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("ui.layout.get", "Get current WUI dock layout json.", CommandEffect::Read, CommandScope::EditorOnly);
+
+		// 导航网格族
+		addCmd("navmesh.bake", "Bake 3D navigation mesh from active terrain.", CommandEffect::Write, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"max_slope\":{\"type\":\"number\"},\"step_size\":{\"type\":\"number\"}}}");
+		addCmd("navmesh.stats", "Get 3D navigation mesh polygon count, vertex count, and area.", CommandEffect::Read, CommandScope::Both);
+		addCmd("navmesh.query_path", "Query 3D path between start and end coordinates.", CommandEffect::Read, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"start_x\":{\"type\":\"number\"},\"start_y\":{\"type\":\"number\"},\"start_z\":{\"type\":\"number\"},\"end_x\":{\"type\":\"number\"},\"end_y\":{\"type\":\"number\"},\"end_z\":{\"type\":\"number\"}}}");
+		addCmd("navmesh.bake_scene", "Bake 3D navigation mesh from all scene geometry (whitebox, colliders, terrain).", CommandEffect::Write, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"source\":{\"type\":\"string\"},\"agent_radius\":{\"type\":\"number\"},\"agent_height\":{\"type\":\"number\"},\"max_slope\":{\"type\":\"number\"},\"step_height\":{\"type\":\"number\"},\"voxel_size\":{\"type\":\"number\"}}}");
+		addCmd("navmesh.raycast", "Test line-of-sight raycast on 3D NavMesh topology.", CommandEffect::Read, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"start_x\":{\"type\":\"number\"},\"start_y\":{\"type\":\"number\"},\"start_z\":{\"type\":\"number\"},\"end_x\":{\"type\":\"number\"},\"end_y\":{\"type\":\"number\"},\"end_z\":{\"type\":\"number\"}}}");
+		addCmd("navmesh.random_point", "Sample random walkable destination point around center on 3D NavMesh.", CommandEffect::Read, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"center_x\":{\"type\":\"number\"},\"center_y\":{\"type\":\"number\"},\"center_z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"}}}");
 
 		// 场景与实体族
 		addCmd("scene.list", "List entities in current scene.", CommandEffect::Read, CommandScope::Both);
@@ -3336,6 +3346,280 @@ namespace World
 			ss << "{\"is2d\":" << (Is2DMode() ? "true" : "false")
 			   << ",\"editCollider\":" << (IsEditingCollider() ? "true" : "false")
 			   << ",\"gizmoOp\":" << static_cast<int>(GetGizmoOperation()) << "}";
+			result = ss.str();
+			return true;
+		}
+		if (cmd == "navmesh.bake_scene")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+
+			std::shared_ptr<NavMesh> navMesh = m_ActiveScene->GetOrCreateNavMesh();
+			if (!navMesh)
+			{
+				error = "failed to get or create NavMesh on active scene";
+				return false;
+			}
+
+			NavMeshBakeSettings settings;
+			if (!arg("agent_radius").empty()) settings.AgentRadius = std::stof(arg("agent_radius"));
+			if (!arg("agent_height").empty()) settings.AgentHeight = std::stof(arg("agent_height"));
+			if (!arg("max_slope").empty()) settings.MaxClimbSlopeDeg = std::stof(arg("max_slope"));
+			if (!arg("step_height").empty()) settings.StepHeight = std::stof(arg("step_height"));
+			if (!arg("voxel_size").empty()) settings.VoxelSize = std::stof(arg("voxel_size"));
+
+			const std::string source = arg("source");
+			if (source == "whitebox")
+			{
+				settings.IncludeMeshes = false;
+				settings.IncludeTerrain = false;
+				settings.IncludeWhitebox = true;
+				settings.IncludeColliders = true;
+			}
+			else if (source == "terrain")
+			{
+				settings.IncludeMeshes = false;
+				settings.IncludeTerrain = true;
+				settings.IncludeWhitebox = false;
+				settings.IncludeColliders = false;
+			}
+			else
+			{
+				settings.IncludeMeshes = true;
+				settings.IncludeTerrain = true;
+				settings.IncludeWhitebox = true;
+				settings.IncludeColliders = true;
+			}
+
+			navMesh->BakeFromScene(*m_ActiveScene, settings);
+			m_ActiveScene->SaveNavMesh();
+
+			const size_t polyCount = navMesh->GetPolygonCount();
+			const size_t vertCount = navMesh->GetVertexCount();
+			float walkableArea = 0.0f;
+			size_t blockedCount = 0;
+			for (size_t i = 0; i < polyCount; ++i)
+			{
+				const auto& p = navMesh->GetPolygon(static_cast<uint32_t>(i));
+				if (p.Blocked) ++blockedCount;
+				else walkableArea += p.Area;
+			}
+
+			std::ostringstream ss;
+			ss << "{\"baked\":true,\"polygons\":" << polyCount
+			   << ",\"vertices\":" << vertCount
+			   << ",\"area\":" << walkableArea
+			   << ",\"blocked\":" << blockedCount << "}";
+			result = ss.str();
+			return true;
+		}
+		if (cmd == "navmesh.raycast")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+
+			std::shared_ptr<NavMesh> navMesh = m_ActiveScene->GetNavMesh();
+			if (!navMesh || navMesh->GetPolygonCount() == 0)
+			{
+				error = "navmesh is empty or not baked";
+				return false;
+			}
+
+			if (arg("start_x").empty() || arg("end_x").empty())
+			{
+				error = "missing start_x or end_x coordinates";
+				return false;
+			}
+
+			const glm::vec3 start {
+				std::stof(arg("start_x")),
+				arg("start_y").empty() ? 0.0f : std::stof(arg("start_y")),
+				arg("start_z").empty() ? 0.0f : std::stof(arg("start_z"))
+			};
+			const glm::vec3 end {
+				std::stof(arg("end_x")),
+				arg("end_y").empty() ? 0.0f : std::stof(arg("end_y")),
+				arg("end_z").empty() ? 0.0f : std::stof(arg("end_z"))
+			};
+
+			glm::vec3 hitPoint { 0.0f };
+			const bool visible = navMesh->Raycast(start, end, &hitPoint);
+
+			std::ostringstream ss;
+			ss << "{\"visible\":" << (visible ? "true" : "false")
+			   << ",\"hit_x\":" << hitPoint.x
+			   << ",\"hit_y\":" << hitPoint.y
+			   << ",\"hit_z\":" << hitPoint.z << "}";
+			result = ss.str();
+			return true;
+		}
+		if (cmd == "navmesh.random_point")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+
+			std::shared_ptr<NavMesh> navMesh = m_ActiveScene->GetNavMesh();
+			if (!navMesh || navMesh->GetPolygonCount() == 0)
+			{
+				error = "navmesh is empty or not baked";
+				return false;
+			}
+
+			const glm::vec3 center {
+				arg("center_x").empty() ? 0.0f : std::stof(arg("center_x")),
+				arg("center_y").empty() ? 0.0f : std::stof(arg("center_y")),
+				arg("center_z").empty() ? 0.0f : std::stof(arg("center_z"))
+			};
+			const float radius = arg("radius").empty() ? 10.0f : std::stof(arg("radius"));
+
+			glm::vec3 outPoint { 0.0f };
+			const bool ok = navMesh->GetRandomPointAround(center, radius, outPoint);
+
+			std::ostringstream ss;
+			ss << "{\"success\":" << (ok ? "true" : "false")
+			   << ",\"point_x\":" << outPoint.x
+			   << ",\"point_y\":" << outPoint.y
+			   << ",\"point_z\":" << outPoint.z << "}";
+			result = ss.str();
+			return true;
+		}
+		if (cmd == "navmesh.bake")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+
+			const float maxSlope = arg("max_slope").empty() ? 45.0f : std::stof(arg("max_slope"));
+			const float stepSize = arg("step_size").empty() ? 2.0f : std::stof(arg("step_size"));
+
+			const TerrainData* terrainData = nullptr;
+			std::shared_ptr<TerrainData> loadedTerrain;
+			const auto& registry = std::as_const(*m_ActiveScene).GetRegistry();
+			for (auto [handle, comp] : registry.view<TerrainComponent>().each())
+			{
+				loadedTerrain = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+				if (loadedTerrain && loadedTerrain->GetWidth() > 0)
+				{
+					terrainData = loadedTerrain.get();
+					break;
+				}
+			}
+
+			if (!terrainData)
+			{
+				error = "no TerrainComponent found in active scene to bake from";
+				return false;
+			}
+
+			std::shared_ptr<NavMesh> navMesh = m_ActiveScene->GetOrCreateNavMesh();
+			if (!navMesh)
+			{
+				error = "failed to get or create NavMesh on active scene";
+				return false;
+			}
+
+			navMesh->BakeFromTerrain(*terrainData, maxSlope, stepSize);
+			std::ostringstream ss;
+			ss << "{\"baked\":true,\"polygons\":" << navMesh->GetPolygonCount()
+			   << ",\"vertices\":" << navMesh->GetVertexCount() << "}";
+			result = ss.str();
+			return true;
+		}
+		if (cmd == "navmesh.stats")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+
+			std::shared_ptr<NavMesh> navMesh = m_ActiveScene->GetNavMesh();
+			if (!navMesh || navMesh->GetPolygonCount() == 0)
+			{
+				result = "{\"baked\":false,\"polygons\":0,\"vertices\":0,\"area\":0.0,\"blocked\":0}";
+				return true;
+			}
+
+			const size_t polyCount = navMesh->GetPolygonCount();
+			const size_t vertCount = navMesh->GetVertexCount();
+			float walkableArea = 0.0f;
+			size_t blockedCount = 0;
+			for (size_t i = 0; i < polyCount; ++i)
+			{
+				const auto& p = navMesh->GetPolygon(static_cast<uint32_t>(i));
+				if (p.Blocked) ++blockedCount;
+				else walkableArea += p.Area;
+			}
+
+			std::ostringstream ss;
+			ss << "{\"baked\":true,\"polygons\":" << polyCount
+			   << ",\"vertices\":" << vertCount
+			   << ",\"area\":" << walkableArea
+			   << ",\"blocked\":" << blockedCount << "}";
+			result = ss.str();
+			return true;
+		}
+		if (cmd == "navmesh.query_path")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+
+			std::shared_ptr<NavMesh> navMesh = m_ActiveScene->GetNavMesh();
+			if (!navMesh || navMesh->GetPolygonCount() == 0)
+			{
+				error = "navmesh is empty or not baked";
+				return false;
+			}
+
+			if (arg("start_x").empty() || arg("end_x").empty())
+			{
+				error = "missing start_x or end_x coordinates";
+				return false;
+			}
+
+			const glm::vec3 start {
+				std::stof(arg("start_x")),
+				arg("start_y").empty() ? 0.0f : std::stof(arg("start_y")),
+				arg("start_z").empty() ? 0.0f : std::stof(arg("start_z"))
+			};
+			const glm::vec3 end {
+				std::stof(arg("end_x")),
+				arg("end_y").empty() ? 0.0f : std::stof(arg("end_y")),
+				arg("end_z").empty() ? 0.0f : std::stof(arg("end_z"))
+			};
+
+			std::vector<glm::vec3> path;
+			const bool found = navMesh->FindPath(start, end, path);
+
+			float totalDist = 0.0f;
+			for (size_t i = 0; i + 1 < path.size(); ++i)
+				totalDist += glm::length(path[i + 1] - path[i]);
+
+			std::ostringstream ss;
+			ss << "{\"found\":" << (found ? "true" : "false")
+			   << ",\"waypoints\":" << path.size()
+			   << ",\"distance\":" << totalDist
+			   << ",\"path\":[";
+			for (size_t i = 0; i < path.size(); ++i)
+			{
+				if (i > 0) ss << ",";
+				ss << "[" << path[i].x << "," << path[i].y << "," << path[i].z << "]";
+			}
+			ss << "]}";
 			result = ss.str();
 			return true;
 		}

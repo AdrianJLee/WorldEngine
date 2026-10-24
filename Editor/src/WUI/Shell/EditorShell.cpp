@@ -257,6 +257,7 @@ m_PanelRegistry.emplace("animgraph", std::make_unique<AnimGraphPanel>());
 		m_PanelRegistry.emplace("particle_editor", std::make_unique<ParticleEditorPanel>());
 m_PanelRegistry.emplace("terrain_editor", std::make_unique<TerrainPanel>());
 m_PanelRegistry.emplace("foliage_editor", std::make_unique<FoliagePanel>());
+		m_PanelRegistry.emplace("navmesh", std::make_unique<NavMeshPanel>(*this));
 		// PLUG-T3:插件管理器面板(数据/动作都走 EditorShell → EditorLayer;项目形态才注册)。
 		if (!m_LauncherMode)
 			m_PanelRegistry.emplace("plugins", std::make_unique<PluginsPanel>(*this));
@@ -633,7 +634,19 @@ Wui::GizmoCamera EditorShell::GetGizmoCamera() const{
 			camera.Up = source.GetUp();
 			camera.Forward = source.GetForward();
 			camera.Position = source.GetPosition();
-			camera.Distance = source.GetDistance();
+			Entity selected = m_Editor.GetSelectedEntity();
+			if (selected.IsValid() && selected.GetScene() && selected.HasComponent<TransformComponent>())
+			{
+				glm::mat4 selectedWorld = selected.GetComponent<TransformComponent>().GetLocalMatrix();
+				if (selected.HasComponent<WorldTransformComponent>())
+					selectedWorld = selected.GetComponent<WorldTransformComponent>().Matrix;
+				// 使用相机到选中实体的实际景深距离, 避免固定轨道距离在近景下导致位移爆炸
+				camera.Distance = std::max(0.05f, glm::length(camera.Position - glm::vec3(selectedWorld[3])));
+			}
+			else
+			{
+				camera.Distance = source.GetDistance();
+			}
 			camera.FovDegrees = source.GetFOV();
 			camera.IsOrthographic = source.IsOrthographic();
 			camera.OrthographicSize = source.GetOrthographicSize();

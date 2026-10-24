@@ -2,6 +2,8 @@
 #include "wldpch.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Scene.h"
+#include "World/NavMesh/NavMesh.h"
+#include <filesystem>
 #include "World/Scene/Components.h"
 #include "World/Scene/Systems/TransformSystem.h"
 #include "World/Scene/Systems/CameraSystem.h"
@@ -2690,6 +2692,10 @@ namespace World
 			Gameplay::SystemPhase::Fixed, {} });
 		RegisterFrameSystem({ "movement-system", false, [this](Timestep ts) { MovementSystem().Update(*this, ts); },
 			Gameplay::SystemPhase::Fixed, { "physics-2d", "physics-3d" } });
+		RegisterFrameSystem({ "navmesh-system", false, [this](Timestep ts) {
+			if (m_NavMesh && m_NavMesh->GetPolygonCount() > 0)
+				NavMeshSystem::Update(*this, ts.GetSeconds(), *m_NavMesh);
+		}, Gameplay::SystemPhase::Fixed, { "physics-3d" } });
 		// 可变阶段(每帧一次):世界矩阵传播/相机/动画/抽取 —— 表现层,看到的是本帧
 		// **最后一次**物理步之后的位姿(GameApp 的顺序是 Fixed(0..N) → Update → Late → PreRender)。
 		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
@@ -2781,6 +2787,7 @@ namespace World
 		for (const auto entity : m_Registry.view<CameraComponent>())
 			EnsureCameraView(entity);
 		EnsureDefaultFrameSystems();
+		TryAutoLoadNavMesh();
 		if (ScriptEngine::IsInitialized())
 		{
 			ScriptEngine::LoadSystemScripts(*this);
@@ -2945,6 +2952,8 @@ namespace World
 				record.Overrides[static_cast<uint32_t>(entityIt->second)] = fields;
 			}
 		}
+		newScene->m_NavMesh = other->m_NavMesh;
+		newScene->m_ScenePath = other->m_ScenePath;
 	}
 
 			// P7: Box2D v3 单向平台效应器 (PlatformEffector2D) 预解算碰撞门禁
@@ -3277,6 +3286,71 @@ namespace World
 		{
 			cb(entity);
 		}
+	}
+
+	std::shared_ptr<NavMesh> Scene::GetOrCreateNavMesh()
+	{
+		if (!m_NavMesh)
+			m_NavMesh = std::make_shared<NavMesh>();
+		return m_NavMesh;
+	}
+
+	void Scene::SetScenePath(const std::string& path)
+	{
+		m_ScenePath = path;
+		TryAutoLoadNavMesh();
+	}
+
+	void Scene::TryAutoLoadNavMesh()
+	{
+		if (m_NavMesh && m_NavMesh->GetPolygonCount() > 0)
+			return;
+
+		if (!m_ScenePath.empty())
+		{
+			std::filesystem::path p(m_ScenePath);
+			auto candidate1 = p;
+			candidate1.replace_extension(".wnavmesh");
+			std::error_code ec;
+			if (std::filesystem::exists(candidate1, ec) && !std::filesystem::is_directory(candidate1, ec))
+			{
+				if (GetOrCreateNavMesh()->LoadFromFile(candidate1.string()))
+					return;
+			}
+
+			auto candidate2 = p.parent_path() / (p.stem().string() + ".wnavmesh");
+			if (std::filesystem::exists(candidate2, ec) && !std::filesystem::is_directory(candidate2, ec))
+			{
+				if (GetOrCreateNavMesh()->LoadFromFile(candidate2.string()))
+					return;
+			}
+		}
+	}
+
+	bool Scene::SaveNavMesh(const std::string& path) const
+	{
+		if (!m_NavMesh)
+			return false;
+		std::string targetPath = path;
+		if (targetPath.empty())
+		{
+			if (m_ScenePath.empty())
+				return false;
+			std::filesystem::path p(m_ScenePath);
+			p.replace_extension(".wnavmesh");
+			targetPath = p.string();
+		}
+		return m_NavMesh->SaveToFile(targetPath);
+	}
+
+	bool Scene::LoadNavMesh(const std::string& path)
+	{
+		if (path.empty())
+		{
+			TryAutoLoadNavMesh();
+			return m_NavMesh && m_NavMesh->GetPolygonCount() > 0;
+		}
+		return GetOrCreateNavMesh()->LoadFromFile(path);
 	}
 }
 

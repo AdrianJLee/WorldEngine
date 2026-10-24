@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000009
+  World::TagComponent:
+    Tag: "Jump Drop Landing Pad"
+  World::TransformComponent:
+    Location: [20.0, 0.08, 14.0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 0
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [3.5, 0.16, 3.5]
+    BevelSize: 0.0
+    GenerateCollision: 0
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.95, 0.45, 0.15, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1
