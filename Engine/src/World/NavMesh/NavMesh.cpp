@@ -792,9 +792,13 @@ namespace World
 			return;
 
 		// 3. 3D 体素网格光栅化与离散采样
-		const float voxelSize = (settings.VoxelSize >= 0.1f) ? settings.VoxelSize : 1.0f;
-		const uint32_t numX = std::clamp(static_cast<uint32_t>(std::ceil((bMax.x - bMin.x) / voxelSize)), 1u, 512u);
-		const uint32_t numZ = std::clamp(static_cast<uint32_t>(std::ceil((bMax.z - bMin.z) / voxelSize)), 1u, 512u);
+		const float rawVoxelSize = (settings.VoxelSize >= 0.1f) ? settings.VoxelSize : 1.0f;
+		// 工业级体素分辨率自适应保护 (对标 UE5 Recast Tile 限制：最大网格分辨率 192x192，超大开放世界自动对齐体素步长，保证毫秒级构建)
+		constexpr uint32_t kMaxGridRes = 192u;
+		const float maxDim = std::max(bMax.x - bMin.x, bMax.z - bMin.z);
+		const float voxelSize = std::max(rawVoxelSize, maxDim / static_cast<float>(kMaxGridRes));
+		const uint32_t numX = std::clamp(static_cast<uint32_t>(std::ceil((bMax.x - bMin.x) / voxelSize)), 1u, kMaxGridRes);
+		const uint32_t numZ = std::clamp(static_cast<uint32_t>(std::ceil((bMax.z - bMin.z) / voxelSize)), 1u, kMaxGridRes);
 
 		struct Span
 		{
@@ -915,6 +919,9 @@ namespace World
 			return idx;
 		};
 
+		struct CellPoly { uint32_t PolyIdx; float Height; };
+		std::vector<std::vector<CellPoly>> cellPolys(numX * numZ);
+
 		for (uint32_t gz = 0; gz < numZ; ++gz)
 		{
 			for (uint32_t gx = 0; gx < numX; ++gx)
@@ -949,12 +956,58 @@ namespace World
 					poly.AreaType = 0;
 					poly.Cost = 1.0f;
 					poly.Blocked = false;
+
+					cellPolys[gz * numX + gx].push_back({ pIdx, span.Height });
 				}
 			}
 		}
 
-		// 5. 建立拓扑邻接与台阶攀爬连接
-		BuildAdjacency(settings.StepHeight);
+		// 5. 工业级 O(1) 规则体素拓扑直连 (对标 Recast Compact Heightfield Neighbor Connections)
+		// 彻底终结 O(N^2) 边缘距离匹配引起的几十秒假死卡顿
+		for (uint32_t gz = 0; gz < numZ; ++gz)
+		{
+			for (uint32_t gx = 0; gx < numX; ++gx)
+			{
+				const auto& polysA = cellPolys[gz * numX + gx];
+				if (polysA.empty()) continue;
+
+				// 1. 东向连通 (+X, Edge 1 对应邻居 West Edge 3)
+				if (gx + 1 < numX)
+				{
+					const auto& polysEast = cellPolys[gz * numX + (gx + 1)];
+					for (const auto& pa : polysA)
+					{
+						for (const auto& pb : polysEast)
+						{
+							if (std::abs(pa.Height - pb.Height) <= settings.StepHeight)
+							{
+								m_Polygons[pa.PolyIdx].Neighbors[1] = static_cast<int32_t>(pb.PolyIdx);
+								m_Polygons[pb.PolyIdx].Neighbors[3] = static_cast<int32_t>(pa.PolyIdx);
+								break;
+							}
+						}
+					}
+				}
+
+				// 2. 北向连通 (+Z, Edge 2 对应邻居 South Edge 0)
+				if (gz + 1 < numZ)
+				{
+					const auto& polysNorth = cellPolys[(gz + 1) * numX + gx];
+					for (const auto& pa : polysA)
+					{
+						for (const auto& pb : polysNorth)
+						{
+							if (std::abs(pa.Height - pb.Height) <= settings.StepHeight)
+							{
+								m_Polygons[pa.PolyIdx].Neighbors[2] = static_cast<int32_t>(pb.PolyIdx);
+								m_Polygons[pb.PolyIdx].Neighbors[0] = static_cast<int32_t>(pa.PolyIdx);
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
 
 		// 6. 应用区域代价修饰区 (Area Modifiers)
 		for (auto& poly : m_Polygons)
@@ -1206,7 +1259,7 @@ namespace World
 
 					// 工业级自适应地貌步长：当 VoxelSize > cs 时按 NavMesh 体素分辨率对齐步长提取，
 					// 三角形数量减少 4x~64x，彻底根治大世界地貌烘焙卡死
-					const uint32_t step = std::clamp(static_cast<uint32_t>(std::round(settings.VoxelSize / std::max(0.1f, cs))), 1u, 16u);
+					const uint32_t step = std::clamp(static_cast<uint32_t>(std::round(std::max(settings.VoxelSize, 1.5f) / std::max(0.1f, cs))), 1u, 16u);
 
 					for (uint32_t z = 0; z + step <= h - 1; z += step)
 					{

@@ -3,6 +3,7 @@
 #include "World/Terrain/Terrain.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
+#include "World/Level/Authoring/LevelPackage.h"
 
 #include <cassert>
 #include <cmath>
