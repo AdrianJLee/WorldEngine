@@ -891,31 +891,33 @@ namespace World
 		auto quantCoord = [](float v) -> int64_t {
 			return static_cast<int64_t>(std::round(v * 100.0f)); // 1cm 精度 (工业标准足以焊合多边形)
 		};
-		struct VertKeyHash {
-			size_t operator()(uint64_t k) const noexcept {
-				k ^= k >> 33;
-				k *= 0xff51afd7ed558ccdULL;
-				k ^= k >> 33;
-				k *= 0xc4ceb9fe1a85ec53ULL;
-				k ^= k >> 33;
-				return static_cast<size_t>(k);
+		struct VertCoord {
+			int64_t X, Y, Z;
+			bool operator==(const VertCoord& o) const noexcept {
+				return X == o.X && Y == o.Y && Z == o.Z;
 			}
 		};
-		auto hash3D = [](int64_t x, int64_t y, int64_t z) -> uint64_t {
-			return (static_cast<uint64_t>(x) * 73856093u) ^
-			       (static_cast<uint64_t>(y) * 19349663u) ^
-			       (static_cast<uint64_t>(z) * 83492791u);
+		struct VertCoordHash {
+			size_t operator()(const VertCoord& c) const noexcept {
+				uint64_t h = (static_cast<uint64_t>(c.X) * 73856093ULL) ^
+				             (static_cast<uint64_t>(c.Y) * 19349663ULL) ^
+				             (static_cast<uint64_t>(c.Z) * 83492791ULL);
+				h ^= h >> 33;
+				h *= 0xff51afd7ed558ccdULL;
+				h ^= h >> 33;
+				return static_cast<size_t>(h);
+			}
 		};
-		std::unordered_map<uint64_t, uint32_t, VertKeyHash> vertMap;
+		std::unordered_map<VertCoord, uint32_t, VertCoordHash> vertMap;
 		vertMap.reserve(numX * numZ * 2);
 
 		auto getOrAddVertex = [&](const glm::vec3& pos) -> uint32_t {
-			const uint64_t key = hash3D(quantCoord(pos.x), quantCoord(pos.y), quantCoord(pos.z));
-			auto it = vertMap.find(key);
+			const VertCoord coord { quantCoord(pos.x), quantCoord(pos.y), quantCoord(pos.z) };
+			auto it = vertMap.find(coord);
 			if (it != vertMap.end())
 				return it->second;
 			uint32_t idx = AddVertex(pos);
-			vertMap[key] = idx;
+			vertMap[coord] = idx;
 			return idx;
 		};
 
