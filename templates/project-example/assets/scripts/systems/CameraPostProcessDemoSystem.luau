@@ -9,7 +9,12 @@
 --   5. 发光辉光 (Bloom)、轮廓描边 (Outline) 与电影级暗角 (Vignette)
 -- =============================================================================
 
+-- 关卡归属守卫: 本演示只在含 "Hero Character" 的关卡里生效。
+-- 否则会在别的关卡里抢 空格(震屏)/F(闪白)/A、D 键, 干扰该关卡自己的操作。
+local SceneScope = ecs:RequireLib("scene_scope")
+
 local initialized = false
+local inScope: boolean? = nil
 local heroId = nil
 local timer = 0.0
 local logTimer = 0.0
@@ -18,6 +23,12 @@ local lastF = false
 local lastLmb = false
 
 ecs:AddSystem("CameraPostProcessDemoSystem", "Update", function(dt: number)
+    if inScope == nil then
+        inScope = SceneScope.owns("Hero Character")
+    end
+    if not inScope then
+        return
+    end
     timer = timer + dt
     logTimer = logTimer + dt
 

@@ -25,13 +25,22 @@
 --   6. 刚体物理碰撞冲量映射发声与滑动摩擦声系统
 -- =============================================================================
 
+-- 关卡归属守卫: 本演示只在含 "Audio Demo Stage" 标记的关卡里跑。
+-- 没有守卫时脚步声循环会在每个关卡里一直响(用户听到的"滋滋声")。
+local SceneScope = ecs:RequireLib("scene_scope")
+local inScope = SceneScope.owns("Audio Demo Stage")
+
 local initialized = false
 local comboTimer = 0.0
 local simulatedEnemyPos = { x = -8.0, y = 2.0, z = 5.0 }
 local simulatedEnemyVel = { vx = 15.0, vy = 0.0, vz = -5.0 } -- 快速飞驰接近的敌人
 local activeSfxVoice = 0
+local footstepTimer = 0.0
 
 ecs:AddSystem("CommercialAudioDemoSystem", "Update", function(dt: number)
+    if not inScope then
+        return
+    end
     if not initialized then
         initialized = true
         print("==================================================================")
@@ -74,8 +83,10 @@ ecs:AddSystem("CommercialAudioDemoSystem", "Update", function(dt: number)
         -- -------------------------------------------------------------
         -- M3: 3D 次世代空间声学 (近场展宽、多普勒频移、遮挡与 DSP 时钟)
         -- -------------------------------------------------------------
-        -- 场景一: 在 3D 空间中生成一个飞速掠过的声源
-        activeSfxVoice = Audio:PostEvent("footstep_player", simulatedEnemyPos.x, simulatedEnemyPos.y, simulatedEnemyPos.z, 1.0, 1.0, true)
+        -- 场景一: 在 3D 空间中生成一个飞速掠过的声源。
+        -- 刻意用一次性播放(loop=false)并由帧更新按脚步节奏重发: 循环播放一段
+        -- 脚步采样会变成持续底噪(用户反馈的"滋滋声"), 真正的脚步应当有间隔。
+        activeSfxVoice = Audio:PostEvent("footstep_player", simulatedEnemyPos.x, simulatedEnemyPos.y, simulatedEnemyPos.z, 1.0, 1.0, false)
         if activeSfxVoice > 0 then
             -- 启用近场立体声展宽 (Volumetric Radius = 6.0 米): 当靠近时平滑从单点展开为双耳包裹
             Audio:SetVoiceVolumetricRadius(activeSfxVoice, 6.0)
@@ -97,6 +108,22 @@ ecs:AddSystem("CommercialAudioDemoSystem", "Update", function(dt: number)
 
     -- 运行时帧更新: 模拟 3D 移动与连击超时监测
     comboTimer = comboTimer + dt
+    -- 按脚步节奏(约 0.55s 一步)重发一次性脚步, 而不是循环长鸣。
+    footstepTimer = footstepTimer - dt
+    if footstepTimer <= 0.0 then
+        footstepTimer = 0.55
+        simulatedEnemyPos.x = simulatedEnemyPos.x + simulatedEnemyVel.vx * 0.55
+        simulatedEnemyPos.z = simulatedEnemyPos.z + simulatedEnemyVel.vz * 0.55
+        if math.abs(simulatedEnemyPos.x) > 14.0 then
+            simulatedEnemyPos.x = -simulatedEnemyPos.x * 0.5
+        end
+        activeSfxVoice = Audio:PostEvent("footstep_player", simulatedEnemyPos.x, simulatedEnemyPos.y, simulatedEnemyPos.z, 1.0, 1.0, false)
+        if activeSfxVoice > 0 then
+            Audio:SetVoiceVolumetricRadius(activeSfxVoice, 6.0)
+            Audio:SetVoiceVelocity(activeSfxVoice, simulatedEnemyVel.vx, simulatedEnemyVel.vy, simulatedEnemyVel.vz)
+            Audio:SetVoiceOcclusion(activeSfxVoice, 0.4)
+        end
+    end
     if comboTimer > 3.0 and activeSfxVoice > 0 then
         comboTimer = 0.0
         -- 模拟敌人已飞掠而过并远离: 切换为远离速度
@@ -105,4 +132,16 @@ ecs:AddSystem("CommercialAudioDemoSystem", "Update", function(dt: number)
         -- 平滑过渡到洞穴混响快照
         Audio:TriggerSnapshot("Snapshot_CaveReverb", 0.8)
     end
+end)
+
+-- 退出本关时收尾: 停掉仍在循环的演示声与背景音乐, 不把声音带进下一个关卡。
+ecs:AddTeardownSystem("CommercialAudioDemoTeardown", function()
+    if not inScope then
+        return
+    end
+    if activeSfxVoice > 0 then
+        Audio:Stop(activeSfxVoice, 0.15)
+        activeSfxVoice = 0
+    end
+    Music:Stop(0.2)
 end)

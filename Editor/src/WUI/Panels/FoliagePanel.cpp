@@ -270,16 +270,10 @@ namespace World
 				}
 			}
 
-			if (!m_BoundEntity.IsValid() && !m_ReadOnly)
-			{
-				activeScene->DeferStructuralChange([](Scene& s) {
-					Entity fol = Entity::CreateEntity(&s, "Foliage (3D 植被)");
-					fol.AddComponent<TransformComponent>();
-					auto& comp = fol.AddComponent<FoliageComponent>();
-					comp.FoliageAsset.Path = StringPool::Get().InternPath("assets/foliage/default.wfoliage");
-				});
-			}
-			else
+			// 打开面板**不**替场景创建植被实体: 以前这里会自动塞一个 "Foliage (3D 植被)",
+			// 于是任何关卡只要被打开(面板常驻)就会多出一个实体并被标脏保存。
+			// 现在改由用户在面板里显式点"创建植被层"。
+			if (m_BoundEntity.IsValid())
 			{
 				auto& comp = m_BoundEntity.GetComponent<FoliageComponent>();
 				m_Foliage = FoliageRenderer::GetOrCreateFoliageData(comp.FoliageAsset);
@@ -298,6 +292,34 @@ namespace World
 				if (!m_ReadOnly)
 					comp.InstanceCount = m_Foliage ? static_cast<uint32_t>(m_Foliage->GetTotalInstanceCount()) : 0;
 			}
+		}
+
+		// 场景没有植被层: 给出说明 + 显式创建入口, 不静默替用户改场景。
+		if (activeScene && !m_BoundEntity.IsValid())
+		{
+			if (m_ReadOnly)
+			{
+				Wui::Label(ctx, { startX, curY + 2.0f }, "当前关卡没有植被层。", theme.TextMuted, theme.FontSizeBody);
+				return;
+			}
+			Wui::Label(ctx, { startX, curY + 2.0f }, "当前关卡没有植被层 (FoliageComponent)。",
+				theme.TextMuted, theme.FontSizeBody);
+			curY += 26.0f;
+			Wui::Label(ctx, { startX, curY }, "点击下面的按钮才会在当前关卡创建，打开面板本身不会修改场景。",
+				theme.TextMuted, theme.FontSizeSmall);
+			curY += 24.0f;
+			if (Wui::Button(ctx, Wui::HashId("foliage.btn.create_layer"), { startX, curY, 200.0f, 28.0f },
+				"创建植被层", theme))
+			{
+				activeScene->DeferStructuralChange([](Scene& s) {
+					Entity fol = Entity::CreateEntity(&s, "Foliage (3D 植被)");
+					fol.AddComponent<TransformComponent>();
+					auto& comp = fol.AddComponent<FoliageComponent>();
+					comp.FoliageAsset.Path = StringPool::Get().InternPath("assets/foliage/default.wfoliage");
+				});
+				host.MarkDocumentDirty();
+			}
+			return;
 		}
 
 		if (!m_Foliage)
