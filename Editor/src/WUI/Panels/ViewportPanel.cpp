@@ -32,7 +32,7 @@ namespace World
 	namespace
 	{
 		static bool s_ShowAllAudioGizmos = false;
-		static bool s_ShowNavMesh = true;
+		static bool s_ShowNavMesh = false;
 		static bool s_AudioGizmoActive = false;
 		static float s_AudioGizmoBeforeMin = 1.0f;
 		static float s_AudioGizmoBeforeMax = 25.0f;
@@ -3432,18 +3432,31 @@ namespace World
 				{
 					const size_t polyCount = navMesh->GetPolygonCount();
 					const glm::vec3 cameraPos = debugCamera.Position;
-					constexpr float kMaxDrawDistSq = 500.0f * 500.0f; // 500m 充裕大视野覆盖整张地图
+					const glm::vec3 cameraForward = debugCamera.Forward;
+					constexpr float kMaxDrawDist = 65.0f;
+					constexpr float kMaxDrawDistSq = kMaxDrawDist * kMaxDrawDist; // 65m 视距硬截断，超大开放世界绝不拉垮帧率
+
+					struct PolyCandidate
+					{
+						float DistSq;
+						uint32_t Index;
+					};
+					std::vector<PolyCandidate> candidates;
+					candidates.reserve(std::min<size_t>(polyCount, 512));
 
 					for (size_t p = 0; p < polyCount; ++p)
 					{
 						const auto& poly = navMesh->GetPolygon(static_cast<uint32_t>(p));
-						const size_t vertCount = poly.VertexIndices.size();
-						if (vertCount < 3) continue;
+						if (poly.VertexIndices.size() < 3) continue;
 
-						// 1. 视距与视锥体粗裁 (超过 500m 或背向相机的多边形跳过)
+						// 1. 视距硬截断：超过 65m 严格跳过
 						const glm::vec3 toPoly = poly.Center - cameraPos;
 						const float distSq = glm::dot(toPoly, toPoly);
 						if (distSq > kMaxDrawDistSq)
+							continue;
+
+						// 严格背面与视锥体粗裁 (相机后方或离视锥过远跳过)
+						if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < 0.1f)
 							continue;
 
 						const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
@@ -3451,6 +3464,54 @@ namespace World
 							continue;
 						const glm::vec2 ndc = glm::vec2(clipPos.x, clipPos.y) / clipPos.w;
 						if (std::abs(ndc.x) > 1.35f || std::abs(ndc.y) > 1.35f)
+							continue;
+
+						candidates.push_back({ distSq, static_cast<uint32_t>(p) });
+					}
+
+					// 按距离从近到远排序，确保近处高细节、优先享有 Quad 填充与精细网格线预算
+					std::sort(candidates.begin(), candidates.end(), [](const PolyCandidate& a, const PolyCandidate& b) {
+						return a.DistSq < b.DistSq;
+					});
+
+					size_t quadCount = 0;
+					size_t lineCount = 0;
+					constexpr size_t kMaxQuadBudget = 350;
+					constexpr size_t kMaxLineBudget = 450;
+
+					for (const auto& cand : candidates)
+					{
+						const auto& poly = navMesh->GetPolygon(cand.Index);
+						const size_t vertCount = poly.VertexIndices.size();
+						const float distSq = cand.DistSq;
+
+						// 投影 4 个顶角到屏幕空间 (+0.08m 防地貌贴图穿插闪烁)
+						std::array<glm::vec2, 4> screenPts;
+						bool projectOk = true;
+						float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
+						for (size_t i = 0; i < 4; ++i)
+						{
+							const size_t vIdx = (i < vertCount) ? poly.VertexIndices[i] : poly.VertexIndices[vertCount - 1];
+							const glm::vec3 worldPos = navMesh->GetVertex(vIdx) + glm::vec3(0.0f, 0.08f, 0.0f);
+							const glm::vec4 clip = viewProj * glm::vec4(worldPos, 1.0f);
+							if (clip.w <= 0.05f) { projectOk = false; break; }
+							const glm::vec3 n = glm::vec3(clip) / clip.w;
+							if (n.z < -1.0f || n.z > 1.0f) { projectOk = false; break; }
+							const glm::vec2 sp {
+								sceneRect.X + (n.x + 1.0f) * 0.5f * sceneRect.W,
+								sceneRect.Y + (1.0f - n.y) * 0.5f * sceneRect.H
+							};
+							screenPts[i] = sp;
+							minX = std::min(minX, sp.x);
+							maxX = std::max(maxX, sp.x);
+							minY = std::min(minY, sp.y);
+							maxY = std::max(maxY, sp.y);
+						}
+						if (!projectOk) continue;
+
+						// 严格视口外剪裁：4个顶点包围盒完全位于视口外的跳过
+						if (maxX < sceneRect.X || minX > sceneRect.X + sceneRect.W ||
+							maxY < sceneRect.Y || minY > sceneRect.Y + sceneRect.H)
 							continue;
 
 						// 2. 颜色解析 (基础可通行、区域代价、阻挡障碍)
@@ -3481,37 +3542,19 @@ namespace World
 							}
 						}
 
-						// 投影 4 个顶角到屏幕空间 (+0.08m 防地貌贴图穿插闪烁)
-						std::array<glm::vec2, 4> screenPts;
-						bool projectOk = true;
-						for (size_t i = 0; i < 4; ++i)
-						{
-							const size_t vIdx = (i < vertCount) ? poly.VertexIndices[i] : poly.VertexIndices[vertCount - 1];
-							const glm::vec3 worldPos = navMesh->GetVertex(vIdx) + glm::vec3(0.0f, 0.08f, 0.0f);
-							const glm::vec4 clip = viewProj * glm::vec4(worldPos, 1.0f);
-							if (clip.w <= 0.05f) { projectOk = false; break; }
-							const glm::vec3 n = glm::vec3(clip) / clip.w;
-							if (n.z < -1.0f || n.z > 1.0f) { projectOk = false; break; }
-							screenPts[i] = glm::vec2 {
-								sceneRect.X + (n.x + 1.0f) * 0.5f * sceneRect.W,
-								sceneRect.Y + (1.0f - n.y) * 0.5f * sceneRect.H
-							};
-						}
-						if (!projectOk) continue;
-
-						// 3. 【半透明全涂色填充 (对标 UE5 / Unity 工业级全覆盖涂色)】
-						if (NavMeshPanel::FillPolygons)
+						// 3. 【半透明全涂色填充 (Quad 预算安全削峰，最多 350 个)】
+						if (NavMeshPanel::FillPolygons && quadCount < kMaxQuadBudget)
 						{
 							Wui::ConvexQuad(ctx, screenPts, fillColor);
+							++quadCount;
 						}
 
-						// 4. 【外边界轮廓线 (100% 完整保留加粗) + 近细远大自适应网格线 (近距离细方格，远距离大方格)】
-						// 近处（<30m）：细方格每格都画 (stride = 1)
-						// 中距离（30m~70m）：大方格每 2 格画一条 (stride = 2)
-						// 远距离（70m~150m）：超大方格每 4 格画一条 (stride = 4)
-						// 极远（>150m）：完全依托半透明全涂色与外轮廓线 (stride = 0)
-						const int gridStride = (distSq < 30.0f * 30.0f) ? 1 :
-							((distSq < 70.0f * 70.0f) ? 2 : ((distSq < 150.0f * 150.0f) ? 4 : 0));
+						// 4. 【外边界轮廓线 + 自适应内部网格线】
+						// 近处（<20m）：细方格每格都画 (stride = 1)
+						// 中距离（20m~40m）：大方格每 2 格画一条 (stride = 2)
+						// 远距离（40m~65m）：超大方格每 4 格画一条 (stride = 4)
+						const int gridStride = (distSq < 20.0f * 20.0f) ? 1 :
+							((distSq < 40.0f * 40.0f) ? 2 : 4);
 
 						for (size_t i = 0; i < vertCount; ++i)
 						{
@@ -3520,15 +3563,22 @@ namespace World
 
 							if (!isBoundary)
 							{
-								if (gridStride == 0)
-									continue;
-
 								// 共享内部边去重：只由较小索引多边形绘制一次
-								if (static_cast<int32_t>(p) > nbr)
+								if (static_cast<int32_t>(cand.Index) > nbr)
 									continue;
 
 								// 内部线按距离自适应大方格/细方格
-								if (gridStride > 1 && (p % gridStride != 0))
+								if (gridStride > 1 && (cand.Index % gridStride != 0))
+									continue;
+
+								// 内部网格线数量削峰：受预算保护
+								if (lineCount >= kMaxLineBudget)
+									continue;
+							}
+							else
+							{
+								// 外部轮廓线优先绘制，但在极度密集场景也施加安全保护
+								if (lineCount >= kMaxLineBudget + 100)
 									continue;
 							}
 
@@ -3537,12 +3587,12 @@ namespace World
 							const float thickness = isBoundary ? 2.0f : 1.0f;
 							const Wui::WuiColor lineColor = isBoundary
 								? polyColor
-								: Wui::WuiColor{ polyColor.R, polyColor.G, polyColor.B, 0.40f };
+								: Wui::WuiColor{ polyColor.R, polyColor.G, polyColor.B, 0.35f };
 
 							Wui::LineSegment(ctx, p0, p1, lineColor, thickness);
+							++lineCount;
 						}
 					}
-
 				}
 
 				const auto& registry = std::as_const(*navScene).GetRegistry();

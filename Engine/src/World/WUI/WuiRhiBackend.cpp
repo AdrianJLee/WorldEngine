@@ -36,7 +36,7 @@ namespace World::Wui
 
 	namespace
 	{
-		constexpr uint32_t MaxQuads = 20000;
+		constexpr uint32_t MaxQuads = 65536;
 
 		void DecodeUtf8(std::string_view text, std::vector<uint32_t>& codepoints, std::vector<int>& byteOffsets)
 		{
@@ -783,11 +783,18 @@ namespace World::Wui
 		const uint64_t indexBytes = m_Indices.size() * sizeof(uint32_t);
 		const uint64_t vertexBase = SlotVertexBase();
 		const uint64_t indexBase = SlotIndexBase();
-		if (m_FrameVertexBytes + vertexBytes > vertexBase + MaxQuads * 4 * sizeof(Vertex) ||
+		if (m_FrameVertexBytes + vertexBytes > vertexBase + static_cast<uint64_t>(MaxQuads) * 4 * sizeof(Vertex) ||
 			m_FrameIndexBytes + indexBytes > indexBase + static_cast<uint64_t>(MaxQuads) * 6 * sizeof(uint32_t))
 		{
-			m_FrameVertexBytes = vertexBase;
-			m_FrameIndexBytes = indexBase;
+			static bool s_BufferOverflowLogged = false;
+			if (!s_BufferOverflowLogged)
+			{
+				s_BufferOverflowLogged = true;
+				WLD_CORE_WARN("[wui] UI vertex/index buffer capacity exceeded (MaxQuads={0}), truncating excess draw calls to protect frame buffer", MaxQuads);
+			}
+			m_Vertices.clear();
+			m_Indices.clear();
+			return;
 		}
 		const uint64_t vertexOffset = m_FrameVertexBytes;
 		const uint64_t indexOffset = m_FrameIndexBytes;

@@ -71,14 +71,15 @@ namespace World
 
 	private:
 		void RenderMetricsCard(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, NavMesh* navMesh);
-		void RenderBakeTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host, NavMesh* navMesh);
-		void RenderVisibilityTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme);
-		void RenderProbesTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host, NavMesh* navMesh);
+		void RenderBakeTab(Wui::WuiContext& ctx, float startX, float curY, float contentW, float cardH, const Wui::WuiTheme& theme, PanelHost& host, NavMesh* navMesh);
+		void RenderVisibilityTab(Wui::WuiContext& ctx, float startX, float curY, float contentW, float cardH, const Wui::WuiTheme& theme);
+		void RenderProbesTab(Wui::WuiContext& ctx, float startX, float curY, float contentW, float cardH, const Wui::WuiTheme& theme, PanelHost& host, NavMesh* navMesh);
 
 		void ApplyAgentProfile(int profileIdx);
 
 		// 选项卡索引: 0=烘焙配置, 1=视口显示, 2=空间探针
 		int m_ActiveTabIdx { 0 };
+		float m_ScrollY { 0.0f };
 
 		// 代理规格预设: 0=人形单位, 1=小型爬虫, 2=大型Boss/载具, 3=自定义
 		int m_AgentProfileIdx { 0 };
