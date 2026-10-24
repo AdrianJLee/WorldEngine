@@ -8,8 +8,13 @@
 --   原生单次执行，不占用 Update 帧管线，无需手动注销。
 -- =============================================================================
 
--- 1. 场景开始时执行一次的原生启动系统
+local SceneScope = ecs:RequireLib("scene_scope")
+
+-- 1. 场景开始时执行一次的原生启动系统 (仅在拥有 HUD Demo 标记的关卡生效)
 ecs:AddStartupSystem("GameUiStartupSystem", function()
+    if not SceneScope.owns("HUD Demo Stage") and not SceneScope.owns("Input Demo Stage") then
+        return
+    end
     local ok = ui.open("assets/ui/hud.wui")
     if ok then
         print("[GameUI] 原生场景启动系统 (StartupSystem): 已显式弹出游戏 HUD ('assets/ui/hud.wui')")

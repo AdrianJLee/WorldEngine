@@ -36,6 +36,12 @@ local function demo(tag: string, detail: string?)
 end
 
 ecs:AddSystem("PlayerInputSystem", "Update", function(dt: number)
+    if inScope == nil then
+        inScope = SceneScope.owns("Input Demo Stage") or SceneScope.hasTag("Input Controlled Entity")
+    end
+    if not inScope then
+        return
+    end
     if not registered then
         registered = true
         demo("consume assets/input.weinput", "(7 actions / 1 axis / 2 contexts)")
@@ -115,11 +121,14 @@ ecs:AddSystem("PlayerInputSystem", "Update", function(dt: number)
     end
 
     -- 7) 纯 ECS 查询:轴 + 疾跑状态驱动挂 TransformComponent 的实体。
-    local query = ecs:Query({ "TransformComponent" })
-    query:Each(function(e, t)
-        if math.abs(moveAxis) > 0.05 then
-            local speed = isSprinting and 8.0 or 4.0
-            t.Location = t.Location + vec3.new(moveAxis * speed * dt, 0.0, 0.0)
+    -- 7) 纯 ECS 查询: 仅驱动显式标记为受控的实体, 严禁盲目平移场景其它实体(如地形/柱子)
+    local query = ecs:Query({ "TagComponent", "TransformComponent" })
+    query:Each(function(e, tag, t)
+        if tag.Tag == "Input Controlled Entity" or tag.Tag == "Input Demo Character" then
+            if math.abs(moveAxis) > 0.05 then
+                local speed = isSprinting and 8.0 or 4.0
+                t.Location = t.Location + vec3.new(moveAxis * speed * dt, 0.0, 0.0)
+            end
         end
     end)
 end)

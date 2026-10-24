@@ -1513,6 +1513,10 @@ void EditorLayer::DrawPlayModeGameUi(Wui::WuiContext& ctx, const Wui::WuiInputSt
 		m_UiHost.PollDocumentChanges();
 		Wui::ClipScope clip(ctx, panelRect);
 		m_UiHost.DrawFrame(ctx, input);
+		if (m_ActiveScene)
+		{
+			ScriptEngine::DrawScriptUi(*m_ActiveScene, ctx);
+		}
 	}
 
 

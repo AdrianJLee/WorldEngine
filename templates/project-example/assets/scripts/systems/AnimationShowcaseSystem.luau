@@ -546,7 +546,7 @@ local function bind()
         print("[ANIM-SHOWCASE]   G             : 手部 IK 开 / 关（右手跟随青色目标）")
         print("[ANIM-SHOWCASE]   Esc / M       : 释放 / 重新捕获指针（释放后可点 HUD 按钮）")
         print("[ANIM-SHOWCASE] 指针归属: " .. (engineOwnsPointer and "编辑器 Play(引擎持有)" or "脚本持有"))
-        print("[ANIM-SHOWCASE]   提示：坡面朝世界 +X 升高（从起点按 D 即可上坡）。")
+        print("[ANIM-SHOWCASE]   提示：坡面朝世界 +X 升高（从起点按 A 即可上坡(向左)或转向推 W）。")
         print("[ANIM-SHOWCASE] ============================================================")
     end
     return true
@@ -942,8 +942,18 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         if stepX ~= 0.0 or stepZ ~= 0.0 then
             local nextX = x + stepX
             local nextZ = z + stepZ
+            local moveLen = math.sqrt(stepX * stepX + stepZ * stepZ)
+            local blocked = false
+            if Physics and type(Physics.Raycast) == "function" and moveLen > 0.0001 then
+                local ok, hit = pcall(Physics.Raycast, x, y + 0.8, z, dirX, 0.0, dirZ, moveLen + 0.35, 4294967295)
+                if ok and hit and hit.Hit and (characterId == nil or hit.Entity ~= characterId) then
+                    blocked = true
+                end
+            end
             local aheadGround = groundHeightAt(nextX, nextZ)
-            if grounded and (aheadGround - y) > MAX_STEP_UP then
+            if blocked then
+                -- 遇障碍物阻挡(如立柱/台阶侧面): 保持在原位
+            elseif grounded and (aheadGround - y) > MAX_STEP_UP then
                 lastEvent = "台阶过高"
                 lastEventTimer = 0.9
             else

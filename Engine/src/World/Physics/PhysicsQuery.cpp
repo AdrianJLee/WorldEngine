@@ -4,6 +4,8 @@
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Components.h"
+#include "World/Terrain/Terrain.h"
+#include "World/Terrain/TerrainRenderer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -385,6 +387,34 @@ namespace World::Physics
 
 		RaycastHit bestHit;
 		bestHit.Distance = maxDistance + 1.0f;
+
+		const auto& reg = scene.GetRegistry();
+		for (auto entity : reg.view<TransformComponent, TerrainComponent>())
+		{
+			uint32_t layer = GetEntityLayer(reg, entity);
+			if ((layer & layerMask) == 0) continue;
+			const auto& [transform, comp] = reg.get<TransformComponent, TerrainComponent>(entity);
+			if (comp.EnableCollision == 0) continue;
+			auto data = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+			if (!data || data->GetWidth() < 2 || data->GetHeight() < 2) continue;
+			glm::mat4 invTransform = glm::inverse(transform.GetLocalMatrix());
+			glm::vec3 localOrigin = glm::vec3(invTransform * glm::vec4(origin, 1.0f));
+			glm::vec3 localDir = glm::normalize(glm::vec3(invTransform * glm::vec4(normDir, 0.0f)));
+			TerrainRaycastHit terrainHit;
+			if (data->Raycast(localOrigin, localDir, maxDistance, terrainHit))
+			{
+				glm::vec3 worldHit = glm::vec3(transform.GetLocalMatrix() * glm::vec4(terrainHit.Point, 1.0f));
+				float dist = glm::distance(origin, worldHit);
+				if (dist < bestHit.Distance)
+				{
+					bestHit.Hit = true;
+					bestHit.Distance = dist;
+					bestHit.Point = worldHit;
+					bestHit.Normal = glm::normalize(glm::mat3(glm::transpose(invTransform)) * terrainHit.Normal);
+					bestHit.Entity = entity;
+				}
+			}
+		}
 
 		for (const auto& col : colliders)
 		{

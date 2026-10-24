@@ -11,7 +11,7 @@
 
 namespace World::Audio
 {
-	constexpr int kNumWaveBuffers = 4;
+	
 
 	MiniaudioBackend::MiniaudioBackend() = default;
 
@@ -23,7 +23,8 @@ namespace World::Audio
 	bool MiniaudioBackend::Initialize(uint32_t sampleRate, uint32_t bufferFrames)
 	{
 		m_SampleRate = (sampleRate > 0) ? sampleRate : kDefaultSampleRate;
-		m_BufferFrames = (bufferFrames > 0) ? bufferFrames : kDefaultMixBlockFrames;
+		// 8 个 1024 帧缓冲区(~170ms)防欠载，避免 Windows 线程调度抖动引起的滋滋声
+		m_BufferFrames = std::max((bufferFrames > 0) ? bufferFrames : kDefaultMixBlockFrames, 1024u);
 		m_BlockLeft.assign(m_BufferFrames, 0.0f);
 		m_BlockRight.assign(m_BufferFrames, 0.0f);
 		m_Initialized = true;
@@ -39,6 +40,7 @@ namespace World::Audio
 	bool MiniaudioBackend::Start()
 	{
 		if (!m_Initialized || m_Running) return false;
+		timeBeginPeriod(1);
 
 		// 1. Create synchronization event for buffer completion
 		HANDLE hEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -91,6 +93,7 @@ namespace World::Audio
 				m_AudioThread.join();
 			}
 		}
+		timeEndPeriod(1);
 
 		if (m_WaveOutHandle)
 		{
@@ -122,6 +125,7 @@ namespace World::Audio
 
 	void MiniaudioBackend::AudioThreadLoop()
 	{
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 		double blockDurationSec = static_cast<double>(m_BufferFrames) / static_cast<double>(m_SampleRate);
 		auto blockDuration = std::chrono::duration_cast<std::chrono::nanoseconds>(
 			std::chrono::duration<double>(blockDurationSec));

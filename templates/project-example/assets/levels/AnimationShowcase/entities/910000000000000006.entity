@@ -13,5 +13,8 @@ Entity:
     Primitive: 0
     Color: [1, 0.55, 0.18, 1]
     Mesh: ""
+  World::BoxCollider3DComponent:
+    HalfExtents: [0.5, 0.5, 0.5]
+    Offset: [0, 0, 0]
   World::LevelEntityComponent:
     DataLayerMask: 1

@@ -38,8 +38,9 @@ namespace World::Audio
 		// Windows multimedia waveOut streaming state
 		void* m_WaveOutHandle { nullptr }; // HWAVEOUT
 		void* m_WaveEvent { nullptr };     // HANDLE
-		void* m_WaveHeaders[4] { nullptr, nullptr, nullptr, nullptr }; // WAVEHDR*
-		std::vector<int16_t> m_WavePcmBuffers[4];
+		static constexpr int kNumWaveBuffers = 8;
+		void* m_WaveHeaders[kNumWaveBuffers] {};
+		std::vector<int16_t> m_WavePcmBuffers[kNumWaveBuffers];
 		std::vector<float> m_BlockLeft;
 		std::vector<float> m_BlockRight;
 	};
