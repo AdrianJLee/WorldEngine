@@ -11,6 +11,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -65,6 +66,7 @@ namespace World
 	{
 		m_Vertices.clear();
 		m_Polygons.clear();
+		m_MacroTiles.clear();
 	}
 
 	uint32_t NavMesh::AddVertex(const glm::vec3& pos)
@@ -742,6 +744,7 @@ namespace World
 				}
 			}
 		}
+		BuildMacroTiles(m_MacroTileSize);
 	}
 
 	void NavMesh::BakeFromTriangles(const std::vector<NavMeshTriangle>& triangles, const NavMeshBakeSettings& settings)
@@ -1057,6 +1060,7 @@ namespace World
 				}
 			}
 		}
+		BuildMacroTiles(m_MacroTileSize);
 	}
 
 	void NavMesh::ExtractSceneGeometry(const Scene& scene, const NavMeshBakeSettings& settings,
@@ -1478,6 +1482,7 @@ namespace World
 				poly.Blocked = carve;
 			}
 		}
+		BuildMacroTiles(m_MacroTileSize);
 	}
 
 	void NavMesh::ClearObstacles()
@@ -1485,6 +1490,131 @@ namespace World
 		for (auto& poly : m_Polygons)
 		{
 			poly.Blocked = (poly.AreaType == 4 || poly.Cost <= 0.0f);
+		}
+		BuildMacroTiles(m_MacroTileSize);
+	}
+
+	void NavMesh::BuildMacroTiles(float tileSize)
+	{
+		m_MacroTiles.clear();
+		if (m_Polygons.empty())
+			return;
+
+		if (tileSize <= 0.0f)
+			tileSize = (m_MacroTileSize > 0.0f) ? m_MacroTileSize : 24.0f;
+		m_MacroTileSize = tileSize;
+
+		struct TileCoord
+		{
+			int gx;
+			int gz;
+			bool operator<(const TileCoord& other) const noexcept
+			{
+				if (gx != other.gx) return gx < other.gx;
+				return gz < other.gz;
+			}
+		};
+
+		std::map<TileCoord, std::vector<uint32_t>> tileGroups;
+		for (uint32_t i = 0; i < static_cast<uint32_t>(m_Polygons.size()); ++i)
+		{
+			const auto& poly = m_Polygons[i];
+			const int gx = static_cast<int>(std::floor(poly.Center.x / tileSize));
+			const int gz = static_cast<int>(std::floor(poly.Center.z / tileSize));
+			tileGroups[{gx, gz}].push_back(i);
+		}
+
+		m_MacroTiles.reserve(tileGroups.size());
+		for (const auto& [coord, polyIndices] : tileGroups)
+		{
+			if (polyIndices.empty())
+				continue;
+
+			NavMeshMacroTile macroTile;
+			macroTile.PolyCount = static_cast<uint32_t>(polyIndices.size());
+
+			const float minX = static_cast<float>(coord.gx) * tileSize;
+			const float maxX = minX + tileSize;
+			const float minZ = static_cast<float>(coord.gz) * tileSize;
+			const float maxZ = minZ + tileSize;
+
+			float minY = std::numeric_limits<float>::max();
+			float maxY = -std::numeric_limits<float>::max();
+			double sumCenterY = 0.0;
+			bool hasVerts = false;
+
+			std::map<uint8_t, uint32_t> areaTypeCounts;
+			bool allBlocked = true;
+
+			for (uint32_t pIdx : polyIndices)
+			{
+				const auto& poly = m_Polygons[pIdx];
+				if (!poly.Blocked)
+					allBlocked = false;
+
+				areaTypeCounts[poly.AreaType]++;
+				sumCenterY += poly.Center.y;
+
+				if (poly.VertexIndices.empty())
+				{
+					minY = std::min(minY, poly.Center.y);
+					maxY = std::max(maxY, poly.Center.y);
+					hasVerts = true;
+				}
+				else
+				{
+					for (uint32_t vIdx : poly.VertexIndices)
+					{
+						if (vIdx < m_Vertices.size())
+						{
+							const float vy = m_Vertices[vIdx].y;
+							minY = std::min(minY, vy);
+							maxY = std::max(maxY, vy);
+							hasVerts = true;
+						}
+					}
+				}
+			}
+
+			if (hasVerts)
+			{
+				macroTile.MinY = minY;
+				macroTile.MaxY = maxY;
+			}
+			else
+			{
+				macroTile.MinY = 0.0f;
+				macroTile.MaxY = 0.0f;
+			}
+
+			const float avgY = !polyIndices.empty()
+				? static_cast<float>(sumCenterY / static_cast<double>(polyIndices.size()))
+				: 0.0f;
+
+			// 4 个世界空间外角顶点（按顺时针/逆时针排列，带平均高程）
+			macroTile.Corners[0] = glm::vec3(minX, avgY, minZ);
+			macroTile.Corners[1] = glm::vec3(maxX, avgY, minZ);
+			macroTile.Corners[2] = glm::vec3(maxX, avgY, maxZ);
+			macroTile.Corners[3] = glm::vec3(minX, avgY, maxZ);
+
+			// 区域中心点
+			macroTile.Center = glm::vec3(minX + tileSize * 0.5f, avgY, minZ + tileSize * 0.5f);
+
+			// 优势区域类型 (DominantAreaType)
+			uint8_t dominantArea = 0;
+			uint32_t maxCount = 0;
+			for (const auto& [area, count] : areaTypeCounts)
+			{
+				if (count > maxCount)
+				{
+					maxCount = count;
+					dominantArea = area;
+				}
+			}
+			macroTile.DominantAreaType = dominantArea;
+			macroTile.Blocked = allBlocked;
+
+			m_MacroTiles.push_back(macroTile);
 		}
 	}
 
@@ -1613,6 +1743,7 @@ namespace World
 			}
 		}
 
+		BuildMacroTiles(m_MacroTileSize);
 		return true;
 	}
 

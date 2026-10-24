@@ -357,6 +357,98 @@ static void TestNavMeshAsyncBaking()
 	std::cout << "[PASS] TestNavMeshAsyncBaking\n";
 }
 
+static void TestNavMeshMacroTilesLOD()
+{
+	NavMesh nav;
+
+	// 1. 空网格构建宏观瓦片验证
+	nav.BuildMacroTiles(20.0f);
+	assert(nav.GetMacroTiles().empty());
+
+	// 2. 构造跨两个宏观网格区域的多边形:
+	// 网格大小 tileSize = 20.0f
+	// Tile A: [0, 20] x [0, 20] (gx=0, gz=0), 包含两个多边形 (高度 Y=2.0f)
+	// Tile B: [20, 40] x [0, 20] (gx=1, gz=0), 包含一个多边形 (高度 Y=5.0f, AreaType=Road)
+	const uint32_t v0 = nav.AddVertex(glm::vec3(0.0f, 2.0f, 0.0f));
+	const uint32_t v1 = nav.AddVertex(glm::vec3(10.0f, 2.0f, 0.0f));
+	const uint32_t v2 = nav.AddVertex(glm::vec3(10.0f, 2.0f, 10.0f));
+	const uint32_t v3 = nav.AddVertex(glm::vec3(0.0f, 2.0f, 10.0f));
+
+	const uint32_t v4 = nav.AddVertex(glm::vec3(10.0f, 2.0f, 0.0f));
+	const uint32_t v5 = nav.AddVertex(glm::vec3(18.0f, 2.0f, 0.0f));
+	const uint32_t v6 = nav.AddVertex(glm::vec3(18.0f, 2.0f, 10.0f));
+	const uint32_t v7 = nav.AddVertex(glm::vec3(10.0f, 2.0f, 10.0f));
+
+	nav.AddPolygon({ v0, v1, v2, v3 });
+	nav.AddPolygon({ v4, v5, v6, v7 });
+
+	// Tile B 内的多边形
+	const uint32_t v8 = nav.AddVertex(glm::vec3(22.0f, 5.0f, 2.0f));
+	const uint32_t v9 = nav.AddVertex(glm::vec3(38.0f, 5.0f, 2.0f));
+	const uint32_t v10 = nav.AddVertex(glm::vec3(38.0f, 5.0f, 18.0f));
+	const uint32_t v11 = nav.AddVertex(glm::vec3(22.0f, 5.0f, 18.0f));
+
+	const uint32_t p2 = nav.AddPolygon({ v8, v9, v10, v11 });
+	nav.GetPolygonMut(p2).AreaType = 1; // Road
+
+	nav.BuildMacroTiles(20.0f);
+	const auto& macroTiles = nav.GetMacroTiles();
+	assert(macroTiles.size() == 2);
+
+	// 校验 Tile 0 (gx=0, gz=0)
+	const auto& tile0 = macroTiles[0];
+	assert(tile0.PolyCount == 2);
+	assert(tile0.DominantAreaType == 0);
+	assert(!tile0.Blocked);
+	assert(std::abs(tile0.MinY - 2.0f) < 1e-4f);
+	assert(std::abs(tile0.MaxY - 2.0f) < 1e-4f);
+	assert(std::abs(tile0.Center.x - 10.0f) < 1e-4f);
+	assert(std::abs(tile0.Center.y - 2.0f) < 1e-4f);
+	assert(std::abs(tile0.Center.z - 10.0f) < 1e-4f);
+	// 4 个外角坐标
+	assert(std::abs(tile0.Corners[0].x - 0.0f) < 1e-4f && std::abs(tile0.Corners[0].z - 0.0f) < 1e-4f);
+	assert(std::abs(tile0.Corners[1].x - 20.0f) < 1e-4f && std::abs(tile0.Corners[1].z - 0.0f) < 1e-4f);
+	assert(std::abs(tile0.Corners[2].x - 20.0f) < 1e-4f && std::abs(tile0.Corners[2].z - 20.0f) < 1e-4f);
+	assert(std::abs(tile0.Corners[3].x - 0.0f) < 1e-4f && std::abs(tile0.Corners[3].z - 20.0f) < 1e-4f);
+	for (int i = 0; i < 4; ++i)
+		assert(std::abs(tile0.Corners[i].y - 2.0f) < 1e-4f);
+
+	// 校验 Tile 1 (gx=1, gz=0)
+	const auto& tile1 = macroTiles[1];
+	assert(tile1.PolyCount == 1);
+	assert(tile1.DominantAreaType == 1);
+	assert(!tile1.Blocked);
+	assert(std::abs(tile1.MinY - 5.0f) < 1e-4f);
+	assert(std::abs(tile1.MaxY - 5.0f) < 1e-4f);
+	assert(std::abs(tile1.Center.x - 30.0f) < 1e-4f);
+	assert(std::abs(tile1.Center.y - 5.0f) < 1e-4f);
+	assert(std::abs(tile1.Center.z - 10.0f) < 1e-4f);
+	assert(std::abs(tile1.Corners[0].x - 20.0f) < 1e-4f && std::abs(tile1.Corners[0].z - 0.0f) < 1e-4f);
+	assert(std::abs(tile1.Corners[1].x - 40.0f) < 1e-4f && std::abs(tile1.Corners[1].z - 0.0f) < 1e-4f);
+	assert(std::abs(tile1.Corners[2].x - 40.0f) < 1e-4f && std::abs(tile1.Corners[2].z - 20.0f) < 1e-4f);
+	assert(std::abs(tile1.Corners[3].x - 20.0f) < 1e-4f && std::abs(tile1.Corners[3].z - 20.0f) < 1e-4f);
+
+	// 3. 动态阻挡触发与自动重建
+	nav.ApplyObstacle(glm::vec3(30.0f, 5.0f, 10.0f), glm::vec3(10.0f, 2.0f, 10.0f), true);
+	assert(nav.GetMacroTiles().size() == 2);
+	assert(nav.GetMacroTiles()[1].Blocked);
+	assert(!nav.GetMacroTiles()[0].Blocked);
+
+	// 清除阻挡
+	nav.ClearObstacles();
+	assert(nav.GetMacroTiles().size() == 2);
+	assert(!nav.GetMacroTiles()[1].Blocked);
+
+	// 4. 三角形烘焙自动构建宏观瓦片验证
+	NavMeshTriangle tri1 { {0.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 10.0f}, {10.0f, 0.0f, 0.0f} };
+	NavMeshTriangle tri2 { {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 10.0f}, {10.0f, 0.0f, 10.0f} };
+	nav.BakeFromTriangles({ tri1, tri2 });
+	assert(!nav.GetMacroTiles().empty());
+	assert(nav.GetMacroTiles()[0].PolyCount > 0);
+
+	std::cout << "[PASS] TestNavMeshMacroTilesLOD\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.NavMesh tests...\n";
@@ -372,7 +464,8 @@ int main()
 	TestNavMeshRandomWanderSampling();
 	TestNavMeshBakeFromScene();
 	TestNavMeshAsyncBaking();
-	std::cout << "All 12 World.NavMesh tests passed successfully!\n";
+	TestNavMeshMacroTilesLOD();
+	std::cout << "All 13 World.NavMesh tests passed successfully!\n";
 	return 0;
 }
 

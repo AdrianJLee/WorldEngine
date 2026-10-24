@@ -40,6 +40,17 @@ namespace World
 		uint8_t AreaType = 1; // 0=Walkable, 1=Road, 2=Mud, 3=Hazard, 4=Impassable
 	};
 
+	struct NavMeshMacroTile
+	{
+		glm::vec3 Corners[4] {};
+		glm::vec3 Center { 0.0f };
+		float MinY = 0.0f;
+		float MaxY = 0.0f;
+		uint32_t PolyCount = 0;
+		uint8_t DominantAreaType = 0;
+		bool Blocked = false;
+	};
+
 	struct NavMeshBakeSettings
 	{
 		float AgentRadius = 0.5f;
@@ -137,6 +148,10 @@ namespace World
 		void ApplyObstacle(const glm::vec3& boxCenter, const glm::vec3& boxExtents, bool carve);
 		void ClearObstacles();
 
+		// 层次化宏观大区域瓦片 (Macro Tiles for LOD Navigation Display)
+		const std::vector<NavMeshMacroTile>& GetMacroTiles() const { return m_MacroTiles; }
+		void BuildMacroTiles(float tileSize = 24.0f);
+
 		// 序列化
 		bool SaveToFile(const std::string& path) const;
 		bool LoadFromFile(const std::string& path);
@@ -146,6 +161,8 @@ namespace World
 		std::vector<NavMeshPolygon> m_Polygons;
 		std::vector<NavMeshOffMeshLink> m_OffMeshLinks;
 		std::vector<NavMeshAreaModifier> m_AreaModifiers;
+		std::vector<NavMeshMacroTile> m_MacroTiles;
+		float m_MacroTileSize = 24.0f;
 	};
 
 	class WLD_API NavMeshSystem

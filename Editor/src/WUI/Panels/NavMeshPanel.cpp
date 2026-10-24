@@ -15,7 +15,7 @@
 
 namespace World
 {
-	bool NavMeshPanel::ShowPolygons = false;
+	bool NavMeshPanel::ShowPolygons = true;
 	bool NavMeshPanel::FillPolygons = true;
 	bool NavMeshPanel::ShowPaths = true;
 	bool NavMeshPanel::ShowObstacles = true;

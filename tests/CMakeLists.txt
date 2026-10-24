@@ -2760,6 +2760,7 @@ set_tests_properties(World.IkSystem PROPERTIES
 
 add_executable(WorldNavMeshTests World/NavMeshTests.cpp)
 target_link_libraries(WorldNavMeshTests PRIVATE World)
+add_dependencies(WorldNavMeshTests WeCopyRuntimeDllForTests)
 target_compile_features(WorldNavMeshTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldNavMeshTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
