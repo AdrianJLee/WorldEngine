@@ -67,6 +67,13 @@ def terrain_height(x, z):
             z_factor = 1.0 - (z - 39.0) / 12.0
 
         west_plateau = 5.5 * x_factor * z_factor
+
+        # Carve flat ground pass for Low Ceiling Stone Arch Tunnel (Shortcut Pass)
+        # Flat dirt floor at Y = 0.0 for X in [25.5, 28.5], Z in [26.0, 38.0]
+        if 24.5 <= x <= 29.5 and 25.0 <= z <= 39.0:
+            cut_x = smoothstep(24.5, 26.0, x) * (1.0 - smoothstep(28.0, 29.5, x))
+            cut_z = smoothstep(25.0, 27.5, z) * (1.0 - smoothstep(36.5, 39.0, z))
+            west_plateau = west_plateau * (1.0 - cut_x * cut_z)
     else:
         west_plateau = 0.0
 
@@ -135,11 +142,12 @@ def generate_terrain():
             slope_norm = min(1.0, slope / 60.0)
             high_norm = smoothstep(1.5, 5.0, h)
 
-            # Corridor dirt path
+            # Corridor dirt path + Tunnel dirt path
             in_corridor = 1.0 if (29.0 <= x <= 35.0 and 8.0 <= z <= 56.0) else 0.0
+            in_tunnel = 1.0 if (25.5 <= x <= 28.5 and 26.0 <= z <= 38.0) else 0.0
 
             # Weights: 0=Grass, 1=Dirt, 2=Rock, 3=Sand
-            dirt = min(1.0, in_corridor * 0.85 + (0.2 if 14.0 <= z <= 50.0 and 42.0 <= x <= 52.0 else 0.0))
+            dirt = min(1.0, (in_corridor + in_tunnel) * 0.85 + (0.2 if 14.0 <= z <= 50.0 and 42.0 <= x <= 52.0 else 0.0))
             rock = min(1.0, slope_norm * 0.95 + high_norm * 0.4)
             sand = 0.15 if (h < 0.2 and not in_corridor) else 0.0
             grass = max(0.0, 1.0 - dirt - rock - sand)
@@ -303,6 +311,8 @@ def generate_navmesh():
                 abs(cz - mc[2]) <= me[2]):
                 poly["area_type"] = mod["area_type"]
                 poly["cost"] = mod["cost_multiplier"]
+                if "clearance_height" in mod and mod["clearance_height"] > 0.0:
+                    poly["clearance"] = mod["clearance_height"]
                 break
 
     # Write .wnavmesh binary with v2 NAV2 extended metadata

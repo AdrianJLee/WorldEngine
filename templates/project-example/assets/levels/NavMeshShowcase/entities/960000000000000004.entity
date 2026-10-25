@@ -6,8 +6,8 @@ Entity:
   World::TagComponent:
     Tag: "NavMesh Showcase Camera"
   World::TransformComponent:
-    Location: [32, 16, -2]
-    Rotation: [-0.48869219, 0, 0]
+    Location: [32, 22, -6]
+    Rotation: [-0.442374, 3.141593, 0]
     Scale: [1, 1, 1]
   World::CameraComponent:
     Camera:

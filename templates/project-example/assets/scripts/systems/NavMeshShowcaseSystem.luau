@@ -77,8 +77,15 @@ local inScope = nil
 
 local agentEntity = nil
 local agentId = nil
+local goblinEntity = nil
 local barricadeEntity = nil
 local barricadeId = nil
+local cameraEntity = nil
+
+-- 相机视角控制: 默认全景鸟瞰视角 (俯瞰全图)，支持切换为第三人称跟随视角
+local followCamera = false
+local lastKeyV = false
+local lastKey5 = false
 
 -- 代理控制参数
 local currentTargetIndex = 2 -- 默认目标: 峡谷远端
@@ -227,9 +234,13 @@ ecs:AddSystem("NavMeshShowcaseSystem", "Update", function(dt: number)
             if tag.Tag == AGENT_TAG then
                 agentEntity = e
                 agentId = e:GetID()
+            elseif tag.Tag == GOBLIN_TAG then
+                goblinEntity = e
             elseif tag.Tag == BARRICADE_TAG then
                 barricadeEntity = e
                 barricadeId = e:GetID()
+            elseif tag.Tag == CAMERA_TAG then
+                cameraEntity = e
             end
         end)
 
@@ -298,6 +309,23 @@ ecs:AddSystem("NavMeshShowcaseSystem", "Update", function(dt: number)
     end
     lastKey4 = k4
 
+    -- [5] 键: 穿行低矮石拱洞对比测试
+    local k5 = Input.IsKeyPressed and (Input.IsKeyPressed(53) or Input.IsKeyPressed("5")) or false
+    if k5 and not lastKey5 then
+        patrolActive = false
+        SetTarget(5)
+    end
+    lastKey5 = k5
+
+    -- [V] 键: 切换相机视角 (全景鸟瞰 / 第三人称跟随)
+    local kV = Input.IsKeyPressed and (Input.IsKeyPressed(86) or Input.IsKeyPressed("V")) or false
+    if kV and not lastKeyV then
+        followCamera = not followCamera
+        lastEventText = followCamera and "【相机视角】已切换为【第三人称跟随视角】" or "【相机视角】已切换为【全景宏观鸟瞰视角】"
+        lastEventTimer = 3.5
+    end
+    lastKeyV = kV
+
     -- [Space] 或 [O] 键切换路障
     local kSpace = Input.IsKeyPressed and (Input.IsKeyPressed(32) or Input.IsKeyPressed("Space")) or false
     local kO = Input.IsKeyPressed and (Input.IsKeyPressed(79) or Input.IsKeyPressed("O")) or false
@@ -342,40 +370,68 @@ ecs:AddSystem("NavMeshShowcaseSystem", "Update", function(dt: number)
     end
     lastKeyC = kC
 
-    -- 5. 寻路代理状态推进与朝向旋转
+    -- 5. 寻路代理状态推进与朝向旋转 (支持双角色多体型)
     local qAgent = ecs:Query({ "TagComponent", "TransformComponent", "NavMeshAgentComponent" })
     qAgent:Each(function(e, tag, tr, agent)
-        if tag.Tag == AGENT_TAG then
+        if tag.Tag == AGENT_TAG or tag.Tag == GOBLIN_TAG then
             local targetPos = BEACONS[currentTargetIndex].Pos
             local dx = targetPos.x - tr.Location.x
             local dz = targetPos.z - tr.Location.z
             local dist = math.sqrt(dx * dx + dz * dz)
 
-            -- 朝向平滑转向 (面对前进方向)
+            -- 面向移动方向平滑旋转朝向
             if dist > 0.35 then
                 local targetYawDeg = math.deg(math.atan2(dx, dz))
                 setRotation(tr, 0.0, targetYawDeg, 0.0)
             end
 
-            -- 判断是否到达
-            local arrived = (agent.ReachedDestination == 1) or (dist <= agent.StoppingDistance + 0.15)
-            if arrived then
-                agentStateText = "Arrived (已到达)"
-                if patrolActive then
-                    patrolTimer = patrolTimer + dt
-                    if patrolTimer >= 1.2 then
-                        patrolTimer = 0.0
-                        local nextIdx = (currentTargetIndex % #BEACONS) + 1
-                        SetTarget(nextIdx)
+            -- 仅对当前受控代理更新状态文本与巡逻推进
+            if tag.Tag == selectedAgentTag then
+                local arrived = (agent.ReachedDestination == 1) or (dist <= agent.StoppingDistance + 0.15)
+                if arrived then
+                    agentStateText = "Arrived (已到达)"
+                    if patrolActive then
+                        patrolTimer = patrolTimer + dt
+                        if patrolTimer >= 1.2 then
+                            patrolTimer = 0.0
+                            local nextIdx = (currentTargetIndex % #BEACONS) + 1
+                            SetTarget(nextIdx)
+                        end
                     end
+                elseif rerouteTimer > 0.0 then
+                    agentStateText = "Dynamic Rerouting (动态重规划绕行中)"
+                else
+                    agentStateText = "Navigating (导航寻路中)"
                 end
-            elseif rerouteTimer > 0.0 then
-                agentStateText = "Dynamic Rerouting (动态重规划绕行中)"
-            else
-                agentStateText = "Navigating (导航寻路中)"
             end
         end
     end)
+
+    -- 6. 实时驱动视口主相机位置与朝向，保证 Play 模式下画面完美呈现
+    if cameraEntity then
+        local qCam = ecs:Query({ "TagComponent", "TransformComponent", "CameraComponent" })
+        qCam:Each(function(e, tag, tr, cam)
+            if tag.Tag == CAMERA_TAG then
+                cam.Primary = true
+                if followCamera then
+                    -- 第三人称追随当前代理视角 (位于代理后上方 4m，紧跟运动轨迹)
+                    local curPos = vec3.new(32.0, 0.0, 12.0)
+                    local qAg = ecs:Query({ "TagComponent", "TransformComponent" })
+                    qAg:Each(function(ae, atag, atr)
+                        if atag.Tag == selectedAgentTag then
+                            curPos = atr.Location
+                        end
+                    end)
+                    tr.Location = curPos + vec3.new(0.0, 4.0, -7.0)
+                    setRotation(tr, -22.0, 180.0, 0.0)
+                else
+                    -- 全景宏观鸟瞰视角: 位于场地南侧上方 (32, 22, -6)，俯瞰大本营、石拱矮洞、峡谷与高台
+                    tr.Location = vec3.new(32.0, 22.0, -6.0)
+                    setRotation(tr, -25.35, 180.0, 0.0)
+                end
+            end
+        end)
+    end
 end)
 
 -- 6. 交互式 WUI HUD 实时卡片渲染
@@ -392,7 +448,7 @@ ui.onDraw(function()
 
     local qAgent = ecs:Query({ "TagComponent", "TransformComponent", "NavMeshAgentComponent" })
     qAgent:Each(function(e, tag, tr, agent)
-        if tag.Tag == AGENT_TAG then
+        if tag.Tag == selectedAgentTag then
             currentPos = tr.Location
             speed = agent.Speed
             local dx = targetPos.x - currentPos.x
@@ -403,7 +459,7 @@ ui.onDraw(function()
     end)
 
     -- 绘制主面板
-    ui.panel(24, 24, 400, 568, "3D NavMesh & AI Navigation Showcase")
+    ui.panel(24, 24, 400, 582, "3D NavMesh & AI Navigation Showcase")
 
     -- 状态标题与指标
     ui.text(40, 56, "状态       " .. agentStateText, 14)
@@ -428,26 +484,36 @@ ui.onDraw(function()
     ui.text(40, 148, "循环巡逻   " .. patrolStr, 12)
 
     -- 快捷按键提示
-    ui.text(40, 170, "快捷按键: [1..5] 目标   [C] 蹲伏   [Space] 升降路障   [P] 巡逻", 11)
+    ui.text(40, 168, "按键: [1..5] 目标   [C] 蹲伏   [V] 视角   [Space] 路障   [P] 巡逻", 11)
+
+    -- 相机视角切换按钮
+    local camBtnText = followCamera
+        and "当前视角: 【第三人称跟随】 -> 点击切换为 【全景鸟瞰视角】 (按 V 键)"
+        or "当前视角: 【全景宏观鸟瞰】 -> 点击切换为 【第三人称跟随】 (按 V 键)"
+    if ui.button("btn_toggle_cam", 40, 186, 355, 24, camBtnText) then
+        followCamera = not followCamera
+        lastEventText = followCamera and "【相机切换】已切换为【第三人称跟随视角】" or "【相机切换】已切换为【全景宏观鸟瞰视角】"
+        lastEventTimer = 3.0
+    end
 
     -- 地标按钮 (四点 + 石拱洞)
-    if ui.button("btn_target_1", 40, 190, 68, 24, "[1] 高台") then
+    if ui.button("btn_target_1", 40, 214, 68, 24, "[1] 高台") then
         patrolActive = false
         SetTarget(1)
     end
-    if ui.button("btn_target_2", 112, 190, 68, 24, "[2] 峡谷") then
+    if ui.button("btn_target_2", 112, 214, 68, 24, "[2] 峡谷") then
         patrolActive = false
         SetTarget(2)
     end
-    if ui.button("btn_target_3", 184, 190, 68, 24, "[3] 前哨") then
+    if ui.button("btn_target_3", 184, 214, 68, 24, "[3] 前哨") then
         patrolActive = false
         SetTarget(3)
     end
-    if ui.button("btn_target_4", 256, 190, 68, 24, "[4] 营地") then
+    if ui.button("btn_target_4", 256, 214, 68, 24, "[4] 营地") then
         patrolActive = false
         SetTarget(4)
     end
-    if ui.button("btn_target_5", 328, 190, 68, 24, "[5] 矮洞") then
+    if ui.button("btn_target_5", 328, 214, 68, 24, "[5] 矮洞") then
         patrolActive = false
         SetTarget(5)
     end
@@ -456,7 +522,7 @@ ui.onDraw(function()
     local toggleAgentBtnText = (selectedAgentTag == AGENT_TAG)
         and "切换受控代理: [当前: 标准人偶 1.8m] -> 点击切换为 地精 0.9m"
         or "切换受控代理: [当前: 矮小地精 0.9m] -> 点击切换为 人偶 1.8m"
-    if ui.button("btn_toggle_agent", 40, 220, 355, 26, toggleAgentBtnText) then
+    if ui.button("btn_toggle_agent", 40, 242, 355, 26, toggleAgentBtnText) then
         selectedAgentTag = (selectedAgentTag == AGENT_TAG) and GOBLIN_TAG or AGENT_TAG
         lastEventText = string.format("【切换代理】当前受控: %s", selectedAgentTag)
         lastEventTimer = 3.5
@@ -465,7 +531,7 @@ ui.onDraw(function()
     local crouchBtnText = (curCrouch == 1)
         and "恢复站立姿态 (按 C 键) -> 站立有效高度 1.8m (限高阻断)"
         or "进入蹲伏姿态 (按 C 键) -> 蹲伏有效高度 0.9m (钻入矮洞)"
-    if ui.button("btn_toggle_crouch", 40, 252, 355, 26, crouchBtnText) then
+    if ui.button("btn_toggle_crouch", 40, 272, 355, 26, crouchBtnText) then
         local q = ecs:Query({ "TagComponent", "NavMeshAgentComponent" })
         q:Each(function(e, tag, agent)
             if tag.Tag == selectedAgentTag then
@@ -478,31 +544,31 @@ ui.onDraw(function()
     end
 
     local barBtnText = barricadeClosed and "降下峡谷路障 (切换为畅通通行 OPEN)" or "升起峡谷路障 (切换为阻断雕刻 CLOSED)"
-    if ui.button("btn_toggle_barricade", 40, 284, 355, 26, barBtnText) then
+    if ui.button("btn_toggle_barricade", 40, 302, 355, 26, barBtnText) then
         SetBarricade(not barricadeClosed)
     end
 
     local patrolBtnText = patrolActive and "停止四点循环巡逻 (切换为单点停歇)" or "启动四点循环巡逻 (自动往复漫游)"
-    if ui.button("btn_toggle_patrol", 40, 316, 355, 26, patrolBtnText) then
+    if ui.button("btn_toggle_patrol", 40, 332, 355, 26, patrolBtnText) then
         patrolActive = not patrolActive
         lastEventText = patrolActive and "【已启动循环巡逻】" or "【已停止循环巡逻】"
         lastEventTimer = 3.0
     end
 
-    if ui.button("btn_reset_agent", 40, 348, 355, 26, "重置 AI 代理位置 (返回大本营营地)") then
+    if ui.button("btn_reset_agent", 40, 362, 355, 26, "重置 AI 代理位置 (返回大本营营地)") then
         patrolActive = false
         ResetAgentToBaseCamp()
     end
 
     -- 动态操作提示文字
-    ui.text(40, 384, "最近操作: " .. lastEventText, 11)
+    ui.text(40, 396, "最近操作: " .. lastEventText, 11)
 
     -- 底部签名与原理摘要
-    ui.text(40, 410, "3D 寻路与限高避障机制技术解析:", 12)
-    ui.text(40, 428, "- 连续物理净空: NavMeshAreaModifierComponent ClearanceHeight 精准过滤", 10)
-    ui.text(40, 444, "- 多体型自适应: 0.9m 地精天生穿过 1.3m 矮洞；1.8m 人偶蹲伏后方可通行", 10)
-    ui.text(40, 460, "- 动态雕刻: NavMeshObstacleComponent 实时打洞剔除重叠多边形", 10)
-    ui.text(40, 476, "- 实时重规划: 遇阻毫秒级感知，沿西侧高台缓坡智能绕行", 10)end)
+    ui.text(40, 420, "3D 寻路与限高避障机制技术解析:", 12)
+    ui.text(40, 438, "- 连续物理净空: NavMeshAreaModifierComponent ClearanceHeight 精准过滤", 10)
+    ui.text(40, 454, "- 多体型自适应: 0.9m 地精天生穿过 1.3m 矮洞；1.8m 人偶蹲伏后方可通行", 10)
+    ui.text(40, 470, "- 动态雕刻: NavMeshObstacleComponent 实时打洞剔除重叠多边形", 10)
+    ui.text(40, 486, "- 实时重规划: 遇阻毫秒级感知，沿西侧高台缓坡智能绕行", 10)end)
 
 -- 7. 场景卸载清理系统
 ecs:AddTeardownSystem("NavMeshShowcaseTeardown", function()
@@ -512,6 +578,8 @@ ecs:AddTeardownSystem("NavMeshShowcaseTeardown", function()
     agentId = nil
     barricadeEntity = nil
     barricadeId = nil
+    cameraEntity = nil
+    followCamera = false
     patrolActive = false
     print("[NAVMESH-SHOWCASE] 演示系统已安全执行收尾清理 (Teardown)")
 end)
