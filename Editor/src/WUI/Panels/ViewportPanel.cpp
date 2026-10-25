@@ -481,10 +481,27 @@ namespace World
 			const float leftBtnY = leftIslandRect.Y + 4.0f;
 			viewButton = { leftIslandRect.X + 4.0f, leftBtnY, viewButtonW, kBtnH };
 			const std::string viewHint = Wui::Tr("viewport.view.hint",
-				"View options: view mode (3D/2D), camera preview, light ranges, collider outlines.");
+				"View options: view mode (3D/2D), camera viewpoint, projection, overlays.");
 			Wui::Tooltip(ctx, viewButton, viewHint);
-			if (Wui::Button(ctx, Wui::HashId("viewport.view"), viewButton, viewLabel, theme))
-				ctx.OpenPopup(Wui::HashId("viewport.view.popup"));
+			auto viewBtnTheme = theme;
+			if (ctx.IsPopupOpen(Wui::HashId("viewport.view.popup")))
+			{
+				viewBtnTheme.ButtonBg = theme.ActiveBg;
+				viewBtnTheme.Border = theme.Accent;
+			}
+			if (Wui::Button(ctx, Wui::HashId("viewport.view"), viewButton, viewLabel, viewBtnTheme))
+			{
+				if (ctx.IsPopupOpen(Wui::HashId("viewport.view.popup")))
+				{
+					ctx.ClosePopup(Wui::HashId("viewport.view.popup"));
+					m_ActiveViewSubmenu.clear();
+				}
+				else
+				{
+					ctx.ClosePopup(Wui::HashId("viewport.show.popup"));
+					ctx.OpenPopup(Wui::HashId("viewport.view.popup"));
+				}
+			}
 			RegisterReadonlyNode(Wui::HashId("viewport.camera.mode"), "text", cameraText,
 				camera3D ? "3d" : "2d", viewButton,
 				Wui::Tr("viewport.camera.hint", "Viewport view mode — switch in the View menu (top-left)."));
@@ -499,8 +516,25 @@ namespace World
 				const std::string showHint = Wui::Tr("viewport.show.hint",
 					"辅助显示与图元选项: 基准网格、空间分区、碰撞体、音源、CSM 阴影、3D 导航网格。");
 				Wui::Tooltip(ctx, showButton, showHint);
-				if (Wui::Button(ctx, Wui::HashId("viewport.show"), showButton, showLabel, theme))
-					ctx.OpenPopup(Wui::HashId("viewport.show.popup"));
+				auto showBtnTheme = theme;
+				if (ctx.IsPopupOpen(Wui::HashId("viewport.show.popup")))
+				{
+					showBtnTheme.ButtonBg = theme.ActiveBg;
+					showBtnTheme.Border = theme.Accent;
+				}
+				if (Wui::Button(ctx, Wui::HashId("viewport.show"), showButton, showLabel, showBtnTheme))
+				{
+					if (ctx.IsPopupOpen(Wui::HashId("viewport.show.popup")))
+					{
+						ctx.ClosePopup(Wui::HashId("viewport.show.popup"));
+						m_ActiveViewSubmenu.clear();
+					}
+					else
+					{
+						ctx.ClosePopup(Wui::HashId("viewport.view.popup"));
+						ctx.OpenPopup(Wui::HashId("viewport.show.popup"));
+					}
+				}
 				ctx.RegisterOverlayRect(showButton);
 				leftCursor += showBtnW + 3.0f;
 			}
@@ -1180,10 +1214,14 @@ namespace World
 				}
 			}
 
-			// 外部点击与 Escape 关闭控制 (必须同时排除主菜单 parentPanel 与二级子菜单 subPanel)
+			// 外部点击与 Escape 关闭控制 (必须同时排除主菜单 parentPanel、二级子菜单 subPanel 与触发按钮，且在下拉展开时不误关)
 			const bool insideParent = parentPanel.W > 0.0f && ctx.HitTestRaw(parentPanel, ctx.Input().MousePos);
 			const bool insideSub = !m_ActiveViewSubmenu.empty() && subPanel.W > 0.0f && ctx.HitTestRaw(subPanel, ctx.Input().MousePos);
-			if ((ctx.Input().MouseClicked[0] || ctx.Input().MouseClicked[1]) && !insideParent && !insideSub)
+			const bool insideButton = (isViewPopupOpen && ctx.HitTestRaw(viewButton, ctx.Input().MousePos)) ||
+			                          (isShowPopupOpen && ctx.HitTestRaw(showButton, ctx.Input().MousePos));
+			const bool comboOpen = ctx.IsPopupOpen(Wui::HashId("viewport.combo.proj")) ||
+			                       ctx.IsPopupOpen(Wui::HashId("viewport.combo.vp"));
+			if (!comboOpen && (ctx.Input().MouseClicked[0] || ctx.Input().MouseClicked[1]) && !insideParent && !insideSub && !insideButton)
 			{
 				ctx.ClosePopup(viewPopup);
 				ctx.ClosePopup(showPopup);
