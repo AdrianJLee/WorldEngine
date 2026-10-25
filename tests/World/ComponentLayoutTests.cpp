@@ -106,6 +106,8 @@ namespace
 		{ "World::FootIkComponent",               16 },
 		{ "World::NavMeshAgentComponent",          48 },
 		{ "World::NavMeshObstacleComponent",       32 },
+		{ "World::NavMeshOffMeshLinkComponent",    32 },
+		{ "World::NavMeshAreaModifierComponent",   32 },
 		{ "World::MeshLODComponent",               64 },
 		{ "World::DecalComponent",                 48 },
 		{ "World::ConvexCollider3DComponent",       32 },

@@ -2430,6 +2430,62 @@ namespace World
 	static_assert(offsetof(NavMeshObstacleComponent, CarveNavMesh) == 12, "CarveNavMesh offset mismatch");
 	static_assert(offsetof(NavMeshObstacleComponent, IsMoving) == 13, "IsMoving offset mismatch");
 
+	struct NavMeshOffMeshLinkComponent
+	{
+		glm::vec3 TargetLocation { 0.0f, 0.0f, 0.0f };   // 12B (offset 0: World target position link ends at)
+		float Cost = 1.0f;                                // 4B  (offset 12: Traversal cost)
+		uint8_t LinkType = 0;                             // 1B  (offset 16: 0=Manual, 1=JumpDown, 2=ClimbUp)
+		uint8_t BiDirectional = 1;                        // 1B  (offset 17: Whether traversal is bidirectional)
+		uint8_t _Padding[14] { 0 };                       // 14B (offset 18)
+
+		NavMeshOffMeshLinkComponent() = default;
+
+		WE_SCHEMA_BODY(World, NavMeshOffMeshLinkComponent, Component)
+			WE_SCHEMA_META(Category("AI"),
+				Doc("Off-Mesh Link connecting discontinuous NavMesh areas (e.g. jumps, drops, ladders)."))
+			WE_FIELD(TargetLocation, Vec3,
+				Doc("Target world position where the jump/link lands. Start position is taken from TransformComponent."));
+			WE_FIELD(Cost, Float, Default(1.0f),
+				Doc("Pathfinding cost multiplier across this link."));
+			WE_FIELD(LinkType, UInt8, Default(0),
+				Doc("Link semantic type: 0=Manual, 1=JumpDown, 2=ClimbUp."));
+			WE_FIELD(BiDirectional, UInt8, Default(1),
+				Doc("Whether navigation agents can traverse in both directions."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(NavMeshOffMeshLinkComponent) == 32, "NavMeshOffMeshLinkComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<NavMeshOffMeshLinkComponent>, "NavMeshOffMeshLinkComponent must be trivially copyable");
+	static_assert(offsetof(NavMeshOffMeshLinkComponent, TargetLocation) == 0, "TargetLocation offset mismatch");
+	static_assert(offsetof(NavMeshOffMeshLinkComponent, Cost) == 12, "Cost offset mismatch");
+	static_assert(offsetof(NavMeshOffMeshLinkComponent, LinkType) == 16, "LinkType offset mismatch");
+	static_assert(offsetof(NavMeshOffMeshLinkComponent, BiDirectional) == 17, "BiDirectional offset mismatch");
+
+	struct NavMeshAreaModifierComponent
+	{
+		glm::vec3 Extents { 1.0f, 1.0f, 1.0f };           // 12B (offset 0: Local half-extents)
+		float CostMultiplier = 2.0f;                      // 4B  (offset 12: Cost multiplier)
+		uint8_t AreaType = 1;                             // 1B  (offset 16: 0=Walkable, 1=Road, 2=Mud, 3=Hazard, 4=Impassable)
+		uint8_t _Padding[15] { 0 };                       // 15B (offset 17)
+
+		NavMeshAreaModifierComponent() = default;
+
+		WE_SCHEMA_BODY(World, NavMeshAreaModifierComponent, Component)
+			WE_SCHEMA_META(Category("AI"),
+				Doc("Volume modifying NavMesh area type and movement cost (e.g. road, mud, hazard)."))
+			WE_FIELD(Extents, Vec3, Default(glm::vec3(1.0f)),
+				Doc("Half-extents of the area box. Multiplied by TransformComponent.Scale for world extents."));
+			WE_FIELD(CostMultiplier, Float, Default(2.0f),
+				Doc("Pathfinding cost multiplier inside this area volume."));
+			WE_FIELD(AreaType, UInt8, Default(1),
+				Doc("Area type: 0=Walkable(1x), 1=Road(0.5x), 2=Mud(3x), 3=Hazard(10x), 4=Impassable(Blocked)."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(NavMeshAreaModifierComponent) == 32, "NavMeshAreaModifierComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<NavMeshAreaModifierComponent>, "NavMeshAreaModifierComponent must be trivially copyable");
+	static_assert(offsetof(NavMeshAreaModifierComponent, Extents) == 0, "Extents offset mismatch");
+	static_assert(offsetof(NavMeshAreaModifierComponent, CostMultiplier) == 12, "CostMultiplier offset mismatch");
+	static_assert(offsetof(NavMeshAreaModifierComponent, AreaType) == 16, "AreaType offset mismatch");
+
 	struct MeshLODComponent
 	{
 		AssetRef LOD1Mesh;                                // 16B (offset 0)

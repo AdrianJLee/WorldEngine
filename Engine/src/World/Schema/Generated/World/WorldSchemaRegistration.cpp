@@ -69,6 +69,8 @@ const TypeSchema& WeSchemaOf_TwoBoneIkComponent();
 const TypeSchema& WeSchemaOf_FootIkComponent();
 const TypeSchema& WeSchemaOf_NavMeshAgentComponent();
 const TypeSchema& WeSchemaOf_NavMeshObstacleComponent();
+const TypeSchema& WeSchemaOf_NavMeshOffMeshLinkComponent();
+const TypeSchema& WeSchemaOf_NavMeshAreaModifierComponent();
 const TypeSchema& WeSchemaOf_MeshLODComponent();
 const TypeSchema& WeSchemaOf_DecalComponent();
 const TypeSchema& WeSchemaOf_ConvexCollider3DComponent();
@@ -13296,6 +13298,265 @@ struct GeneratedAccess<World::NavMeshObstacleComponent>
 };
 
 template <>
+struct GeneratedAccess<World::NavMeshOffMeshLinkComponent>
+{
+    static Value Get_TargetLocation(const void* instance)
+    {
+        const World::NavMeshOffMeshLinkComponent* self = static_cast<const World::NavMeshOffMeshLinkComponent*>(instance);
+        return Value(self->TargetLocation);
+    }
+    static void Set_TargetLocation(void* instance, const Value& value)
+    {
+        World::NavMeshOffMeshLinkComponent* self = static_cast<World::NavMeshOffMeshLinkComponent*>(instance);
+        self->TargetLocation = std::get<glm::vec3>(value);
+    }
+    static Value Get_Cost(const void* instance)
+    {
+        const World::NavMeshOffMeshLinkComponent* self = static_cast<const World::NavMeshOffMeshLinkComponent*>(instance);
+        return Value(self->Cost);
+    }
+    static void Set_Cost(void* instance, const Value& value)
+    {
+        World::NavMeshOffMeshLinkComponent* self = static_cast<World::NavMeshOffMeshLinkComponent*>(instance);
+        self->Cost = std::get<float>(value);
+    }
+    static Value Get_LinkType(const void* instance)
+    {
+        const World::NavMeshOffMeshLinkComponent* self = static_cast<const World::NavMeshOffMeshLinkComponent*>(instance);
+        return Value(self->LinkType);
+    }
+    static void Set_LinkType(void* instance, const Value& value)
+    {
+        World::NavMeshOffMeshLinkComponent* self = static_cast<World::NavMeshOffMeshLinkComponent*>(instance);
+        self->LinkType = std::get<uint8_t>(value);
+    }
+    static Value Get_BiDirectional(const void* instance)
+    {
+        const World::NavMeshOffMeshLinkComponent* self = static_cast<const World::NavMeshOffMeshLinkComponent*>(instance);
+        return Value(self->BiDirectional);
+    }
+    static void Set_BiDirectional(void* instance, const Value& value)
+    {
+        World::NavMeshOffMeshLinkComponent* self = static_cast<World::NavMeshOffMeshLinkComponent*>(instance);
+        self->BiDirectional = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_TargetLocation()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFDBBFEE98C5DFC82ull },
+            "TargetLocation",
+            Kind::Vec3,
+            &Get_TargetLocation,
+            &Set_TargetLocation,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target world position where the jump/link lands. Start position is taken from TransformComponent.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Cost()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7DCBF473D5D10765ull },
+            "Cost",
+            Kind::Float,
+            &Get_Cost,
+            &Set_Cost,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Pathfinding cost multiplier across this link.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LinkType()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFEC649EC4DA82A08ull },
+            "LinkType",
+            Kind::UInt8,
+            &Get_LinkType,
+            &Set_LinkType,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Link semantic type: 0=Manual, 1=JumpDown, 2=ClimbUp.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_BiDirectional()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD5372CE3B72F1A0Full },
+            "BiDirectional",
+            Kind::UInt8,
+            &Get_BiDirectional,
+            &Set_BiDirectional,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether navigation agents can traverse in both directions.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::NavMeshOffMeshLinkComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::NavMeshOffMeshLinkComponent" },
+            "NavMeshOffMeshLinkComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::NavMeshOffMeshLinkComponent),
+            TypeCategory::Component,
+            {
+                Field_TargetLocation(),
+                Field_Cost(),
+                Field_LinkType(),
+                Field_BiDirectional(),
+            },
+            &StorageBindingOf(),
+            "AI",
+            "Off-Mesh Link connecting discontinuous NavMesh areas (e.g. jumps, drops, ladders).",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::NavMeshAreaModifierComponent>
+{
+    static Value Get_Extents(const void* instance)
+    {
+        const World::NavMeshAreaModifierComponent* self = static_cast<const World::NavMeshAreaModifierComponent*>(instance);
+        return Value(self->Extents);
+    }
+    static void Set_Extents(void* instance, const Value& value)
+    {
+        World::NavMeshAreaModifierComponent* self = static_cast<World::NavMeshAreaModifierComponent*>(instance);
+        self->Extents = std::get<glm::vec3>(value);
+    }
+    static Value Get_CostMultiplier(const void* instance)
+    {
+        const World::NavMeshAreaModifierComponent* self = static_cast<const World::NavMeshAreaModifierComponent*>(instance);
+        return Value(self->CostMultiplier);
+    }
+    static void Set_CostMultiplier(void* instance, const Value& value)
+    {
+        World::NavMeshAreaModifierComponent* self = static_cast<World::NavMeshAreaModifierComponent*>(instance);
+        self->CostMultiplier = std::get<float>(value);
+    }
+    static Value Get_AreaType(const void* instance)
+    {
+        const World::NavMeshAreaModifierComponent* self = static_cast<const World::NavMeshAreaModifierComponent*>(instance);
+        return Value(self->AreaType);
+    }
+    static void Set_AreaType(void* instance, const Value& value)
+    {
+        World::NavMeshAreaModifierComponent* self = static_cast<World::NavMeshAreaModifierComponent*>(instance);
+        self->AreaType = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_Extents()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x887154FFF165627Bull },
+            "Extents",
+            Kind::Vec3,
+            &Get_Extents,
+            &Set_Extents,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Half-extents of the area box. Multiplied by TransformComponent.Scale for world extents.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(1.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CostMultiplier()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x58A22F7869CEB3BCull },
+            "CostMultiplier",
+            Kind::Float,
+            &Get_CostMultiplier,
+            &Set_CostMultiplier,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Pathfinding cost multiplier inside this area volume.", false, "", {  }, "", std::nullopt },
+            Value(2.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AreaType()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5F46FEBB27762F4Bull },
+            "AreaType",
+            Kind::UInt8,
+            &Get_AreaType,
+            &Set_AreaType,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Area type: 0=Walkable(1x), 1=Road(0.5x), 2=Mud(3x), 3=Hazard(10x), 4=Impassable(Blocked).", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::NavMeshAreaModifierComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::NavMeshAreaModifierComponent" },
+            "NavMeshAreaModifierComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::NavMeshAreaModifierComponent),
+            TypeCategory::Component,
+            {
+                Field_Extents(),
+                Field_CostMultiplier(),
+                Field_AreaType(),
+            },
+            &StorageBindingOf(),
+            "AI",
+            "Volume modifying NavMesh area type and movement cost (e.g. road, mud, hazard).",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::MeshLODComponent>
 {
     static Value Get_LOD1Mesh(const void* instance)
@@ -16598,6 +16859,8 @@ const TypeSchema& WeSchemaOf_TwoBoneIkComponent() { return GeneratedAccess<World
 const TypeSchema& WeSchemaOf_FootIkComponent() { return GeneratedAccess<World::FootIkComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_NavMeshAgentComponent() { return GeneratedAccess<World::NavMeshAgentComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_NavMeshObstacleComponent() { return GeneratedAccess<World::NavMeshObstacleComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_NavMeshOffMeshLinkComponent() { return GeneratedAccess<World::NavMeshOffMeshLinkComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_NavMeshAreaModifierComponent() { return GeneratedAccess<World::NavMeshAreaModifierComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshLODComponent() { return GeneratedAccess<World::MeshLODComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_DecalComponent() { return GeneratedAccess<World::DecalComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_ConvexCollider3DComponent() { return GeneratedAccess<World::ConvexCollider3DComponent>::WeSchema(); }
@@ -16705,6 +16968,8 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_FootIkComponent(),
 			WeSchemaOf_NavMeshAgentComponent(),
 			WeSchemaOf_NavMeshObstacleComponent(),
+			WeSchemaOf_NavMeshOffMeshLinkComponent(),
+			WeSchemaOf_NavMeshAreaModifierComponent(),
 			WeSchemaOf_MeshLODComponent(),
 			WeSchemaOf_DecalComponent(),
 			WeSchemaOf_ConvexCollider3DComponent(),

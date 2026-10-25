@@ -146,6 +146,7 @@ namespace World
 		virtual void SetViewportProjection(World::ViewportProjection proj) {}
 		virtual World::ViewportViewpoint GetViewportViewpoint() const { return World::ViewportViewpoint::Free; }
 		virtual void SetViewportViewpoint(World::ViewportViewpoint vp) {}
+		virtual void ResetViewportCamera() {}
 		// D7-1b:gizmo 用的相机摘要(按当前视口模式由宿主提供 2D 或 3D 相机)。
 		virtual Wui::GizmoCamera GetGizmoCamera() const { return Wui::GizmoCamera {}; }
 		// D3:在材质编辑器里打开指定 .wmat(内容浏览器双击/Window 菜单共用);

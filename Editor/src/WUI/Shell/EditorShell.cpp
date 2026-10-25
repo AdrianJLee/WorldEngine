@@ -546,6 +546,11 @@ void EditorShell::SetViewportViewpoint(World::ViewportViewpoint vp) {
 		m_Editor.SetViewportViewpoint(vp);
 	}
 
+void EditorShell::ResetViewportCamera() {
+		m_Editor.FocusOnSelectedEntity();
+		m_Editor.SetViewportViewpoint(World::ViewportViewpoint::Free);
+	}
+
 bool EditorShell::Is2DMode() const {
 	return m_Editor.Is2DMode();
 }

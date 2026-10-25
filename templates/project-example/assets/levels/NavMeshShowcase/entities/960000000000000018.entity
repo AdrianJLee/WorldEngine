@@ -1,0 +1,23 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000018
+  World::TagComponent:
+    Tag: "Area: Cobblestone Road (0.5x Cost)"
+  World::TransformComponent:
+    Location: [32, 0, 20]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::NavMeshAreaModifierComponent:
+    Extents: [3.5, 3.0, 8.0]
+    CostMultiplier: 0.5
+    AreaType: 1
+  World::MeshRendererComponent:
+    Primitive: 1
+    MeshIndex: 0
+    Color: [0.35, 0.95, 0.35, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

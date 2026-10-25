@@ -1,0 +1,23 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000021
+  World::TagComponent:
+    Tag: "Obstacle: Trail Boulder"
+  World::TransformComponent:
+    Location: [45, 1.8, 42]
+    Rotation: [0, 0, 0]
+    Scale: [3, 2.4, 3]
+  World::NavMeshObstacleComponent:
+    Extents: [0.5, 0.5, 0.5]
+    CarveNavMesh: 1
+    IsMoving: 0
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.90, 0.50, 0.18, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

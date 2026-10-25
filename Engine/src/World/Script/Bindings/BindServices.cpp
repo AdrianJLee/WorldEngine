@@ -3,6 +3,7 @@
 #include "World/Core/Input.h"
 #include "World/Core/Application.h"
 #include "World/Core/KeyCodes.h"
+#include "World/WUI/WuiContext.h"
 #include <cctype>
 
 #include "World/Gameplay/Runtime/GameApp.h"
@@ -881,6 +882,10 @@ namespace World
 			ScriptValue InputIsKeyPressedImpl(const ScriptValue* args, std::size_t count)
 		{
 			if (count == 0 || args[0].IsNil())
+				return ScriptValue::Boolean(false);
+
+			// 若当前正在输入控件中编辑（文本框/数值框持焦），静音屏蔽所有脚本按键轮询，防止误触
+			if (Wui::WuiTextFocus::Get().Active())
 				return ScriptValue::Boolean(false);
 
 			int keyCode = -1;

@@ -10,7 +10,7 @@ Entity:
     Rotation: [0, 0, 0]
     Scale: [6, 2, 2]
   World::NavMeshObstacleComponent:
-    Extents: [3, 2, 1]
+    Extents: [0.5, 0.5, 0.5]
     CarveNavMesh: 1
     IsMoving: 0
   World::MeshRendererComponent:

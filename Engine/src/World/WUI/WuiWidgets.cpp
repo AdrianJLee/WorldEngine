@@ -1157,6 +1157,7 @@ bool VecFieldCore(WuiContext& ctx, WuiId id, const WuiRect& rect, float* value, 
 		const bool activeHovered = ctx.IsHovered(slotRect(state.Axis));
 		if (state.Editing)
 		{
+			ctx.SetTextInputActive(true, /*releaseOnTab=*/true);
 			bool submitted = false, cancelled = false;
 			if (EditUpdate(ctx, state.Buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
 			{

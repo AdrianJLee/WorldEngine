@@ -59,6 +59,8 @@ struct World::TwoBoneIkComponent
 struct World::FootIkComponent
 struct World::NavMeshAgentComponent
 struct World::NavMeshObstacleComponent
+struct World::NavMeshOffMeshLinkComponent
+struct World::NavMeshAreaModifierComponent
 struct World::MeshLODComponent
 struct World::DecalComponent
 struct World::ConvexCollider3DComponent

@@ -315,6 +315,20 @@ static void TestNavMeshBakeFromScene()
 	auto& box = scene.GetRegistry().emplace<BoxCollider3DComponent>(ground);
 	box.HalfExtents = glm::vec3(10.0f, 0.5f, 10.0f);
 
+	const entt::entity linkEnt = scene.GetRegistry().create();
+	auto& lt = scene.GetRegistry().emplace<TransformComponent>(linkEnt);
+	lt.Location = glm::vec3(5.0f, 0.5f, 5.0f);
+	auto& linkComp = scene.GetRegistry().emplace<NavMeshOffMeshLinkComponent>(linkEnt);
+	linkComp.TargetLocation = glm::vec3(15.0f, 0.5f, 15.0f);
+
+	const entt::entity areaEnt = scene.GetRegistry().create();
+	auto& at = scene.GetRegistry().emplace<TransformComponent>(areaEnt);
+	at.Location = glm::vec3(10.0f, 0.5f, 10.0f);
+	auto& areaComp = scene.GetRegistry().emplace<NavMeshAreaModifierComponent>(areaEnt);
+	areaComp.Extents = glm::vec3(2.0f, 1.0f, 2.0f);
+	areaComp.AreaType = 1;
+	areaComp.CostMultiplier = 0.5f;
+
 	NavMesh nav;
 	NavMeshBakeSettings settings;
 	settings.VoxelSize = 2.0f;
@@ -323,6 +337,8 @@ static void TestNavMeshBakeFromScene()
 
 	assert(nav.GetPolygonCount() > 0);
 	assert(nav.GetVertexCount() > 0);
+	assert(nav.GetOffMeshLinks().size() == 1);
+	assert(nav.GetAreaModifiers().size() == 1);
 
 	std::vector<glm::vec3> path;
 	const bool found = nav.FindPath(glm::vec3(2.0f, 0.5f, 2.0f), glm::vec3(18.0f, 0.5f, 18.0f), path);

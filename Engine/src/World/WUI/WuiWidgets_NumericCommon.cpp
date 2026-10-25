@@ -115,6 +115,7 @@ bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, flo
 
 		if (state.Editing)
 		{
+			ctx.SetTextInputActive(true, /*releaseOnTab=*/true);
 			bool submitted = false, cancelled = false;
 			if (EditUpdate(ctx, state.Buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
 			{
@@ -239,6 +240,7 @@ bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int
 
 		if (state.Editing)
 		{
+			ctx.SetTextInputActive(true, /*releaseOnTab=*/true);
 			bool submitted = false, cancelled = false;
 			if (EditUpdate(ctx, state.Buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
 			{
@@ -397,6 +399,7 @@ bool DragBarFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, 
 		const bool hoverValue = !state.Editing && hoverValueRaw;
 		if (state.Editing)
 		{
+			ctx.SetTextInputActive(true, /*releaseOnTab=*/true);
 			bool submitted = false, cancelled = false;
 			if (EditUpdate(ctx, state.Buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
 			{

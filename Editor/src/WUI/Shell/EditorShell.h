@@ -364,6 +364,7 @@ namespace World
 		void SetViewportProjection(World::ViewportProjection proj) override;
 		World::ViewportViewpoint GetViewportViewpoint() const override;
 		void SetViewportViewpoint(World::ViewportViewpoint vp) override;
+		void ResetViewportCamera() override;
 		Wui::GizmoCamera GetGizmoCamera() const override;
 		void AttachIndependentWindowToSlot(const std::string& panel) override;
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;

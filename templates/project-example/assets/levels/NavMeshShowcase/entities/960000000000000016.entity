@@ -1,0 +1,24 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000016
+  World::TagComponent:
+    Tag: "Jump Link: Plateau Leap"
+  World::TransformComponent:
+    Location: [24, 5.2, 30]
+    Rotation: [0, 0, 0]
+    Scale: [0.8, 0.8, 0.8]
+  World::NavMeshOffMeshLinkComponent:
+    TargetLocation: [30, 0.1, 30]
+    Cost: 1.2
+    LinkType: 1
+    BiDirectional: 1
+  World::MeshRendererComponent:
+    Primitive: 1
+    MeshIndex: 0
+    Color: [0.95, 0.20, 0.85, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

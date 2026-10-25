@@ -268,7 +268,7 @@ namespace World
 			const glm::mat4& world, const glm::vec3& center, float radius, int axis,
 			const Wui::WuiColor& color, float thickness, glm::vec2* boundsMin = nullptr, glm::vec2* boundsMax = nullptr)
 		{
-			constexpr int kSegments = 40;
+			constexpr int kSegments = 16;
 			constexpr float kTwoPi = 6.28318530718f;
 			glm::vec4 previous {};
 			for (int i = 0; i <= kSegments; ++i)
@@ -401,10 +401,22 @@ namespace World
 		// 悬浮控件自己照常命中,而**它下面的视口拾取/gizmo 不会同时吃到这一下点击**。
 		ctx.PushOverlay();
 
-		// ① 顶部居中: 运行控制药丸 (播放 / 模拟 / 暂停) 作为中央绝对安全禁区
+				// ② 自适应视口顶栏布局 (3阶弹性自适应):
+		// 1) 宽屏 (W >= 880px): 单行豪华布局 [左岛] --- [中岛运行控制药丸] --- [右岛]
+		// 2) 中屏 (650px <= W < 880px): 顶行放两端岛屿 [左岛] --- [右岛]，运行药丸优雅浮动于第二行居中展示
+		// 3) 窄屏 (W < 650px): 顶行独享 [左岛]；第二行容纳 [运行药丸] 与 [右岛四大功能块]，全要素100%可见防挤压防遮挡
+		const bool isWideViewport = (sceneRect.W >= 880.0f);
+		const bool isNarrowViewport = (sceneRect.W < 650.0f);
+
 		const float pillW = 3 * 28.0f + 2 * 4.0f + 20.0f; // 112px
-		const Wui::WuiRect pillRect { sceneRect.X + (sceneRect.W - pillW) * 0.5f,
-			sceneRect.Y + kChromePad, pillW, kPillH };
+		const float pillY = isWideViewport
+			? (sceneRect.Y + kChromePad)
+			: (sceneRect.Y + kChromePad + kIslandH + 5.0f);
+		const float pillX = isNarrowViewport
+			? (sceneRect.X + kChromePad)
+			: (sceneRect.X + (sceneRect.W - pillW) * 0.5f);
+		const Wui::WuiRect pillRect { pillX, pillY, pillW, kPillH };
+
 		const bool pillHovered = ctx.IsHovered(pillRect);
 		Wui::Toolbar(ctx, pillRect, theme, kPillH * 0.5f,
 			pillHovered ? 0.95f : (play || simulate ? 0.85f : 0.65f));
@@ -412,11 +424,12 @@ namespace World
 		m_ToolPill->Paint(paint);
 		ctx.RegisterOverlayRect(pillRect);
 
-		// 药丸安全边界防护: 左右各预留 10px 空隙，严禁任何两侧岛屿穿透碰撞
-		const float pillLeftBound = pillRect.X - 10.0f;
-		const float pillRightBound = pillRect.X + pillRect.W + 10.0f;
+		// 药丸安全边界防护 (仅在药丸处于顶栏同一行时对两端施加截断)
+		const float pillLeftBound = isWideViewport ? (pillRect.X - 10.0f) : (sceneRect.X + sceneRect.W);
+		const float pillRightBound = isWideViewport ? (pillRect.X + pillRect.W + 10.0f) : (sceneRect.X);
 
-		// ② 左岛 (Left Island - 视图与变换工具组): [视图下拉] + [分割线] + [Q / W / E / R / T]
+		// ② 左岛 (Left Island - 四大折叠归纳标准工具组):
+		// [相机/方位下拉] + [辅助显示下拉] + [分割线] + [模式切换下拉] + [分割线] + [变换工具下拉]
 		const World::ViewportProjection currentProj = m_Host.GetViewportProjection();
 		const World::ViewportViewpoint currentVp = m_Host.GetViewportViewpoint();
 		const bool isOrtho = (currentProj == World::ViewportProjection::Orthographic);
@@ -437,51 +450,57 @@ namespace World
 		const std::string viewLabel = std::string(projName) + " · " + vpShort + " ▼";
 		const float viewButtonW = std::max(78.0f, ctx.MeasureTextWidth(viewLabel, 12.0f) + 14.0f);
 
-		// 视口模式切换器规格 ([选择] [地貌] [植被])
-		const EditorToolMode currentToolMode = m_Host.GetEditorToolMode();
-		const float modeBtnSelectW = 44.0f;
-		const float modeBtnLandscapeW = 46.0f;
-		const float modeBtnFoliageW = 46.0f;
-		const float modeSwitcherW = modeBtnSelectW + 2.0f + modeBtnLandscapeW + 2.0f + modeBtnFoliageW;
-
-		// Gizmo 工具组规格 (Q: 选 / W: 移 / E: 转 / R: 缩 / T: 2D 矩形手柄，22×22px)
-		const float gizmoBtnW = 22.0f;
-		const float gizmoBtnH = 22.0f;
-		struct GizmoBtnSpec { const char* id; const char* label; Wui::GizmoOperation op; const char* tip; };
-		const GizmoBtnSpec gizmoBtns[5] = {
-			{ "viewport.btn.gizmo_q", "Q", Wui::GizmoOperation::None, "选择模式 (None) [快捷键 Q]" },
-			{ "viewport.btn.gizmo_w", "W", Wui::GizmoOperation::Translate, "平移工具 (Move) [快捷键 W]" },
-			{ "viewport.btn.gizmo_e", "E", Wui::GizmoOperation::Rotate, "旋转工具 (Rotate) [快捷键 E]" },
-			{ "viewport.btn.gizmo_r", "R", Wui::GizmoOperation::Scale, "缩放工具 (Scale) [快捷键 R]" },
-			{ "viewport.btn.gizmo_t", "T", Wui::GizmoOperation::Rect, "2D 矩形变换手柄 (Rect Transform) [快捷键 T]" }
-		};
-		const Wui::GizmoOperation activeGizmo = m_Host.GetGizmoOperation();
-
-		// 左岛全宽: 内衬4 + viewButtonW + 间隙3 + 分割线8 + 间隙3 + modeSwitcherW + 间隙3 + 分割线8 + 间隙3 + 5*22 + 4*2 + 内衬4
-		Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
-		Wui::WuiRect showButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
+		// 显示菜单按钮规格 (纯辅助显示与图元专席)
 		const std::string showLabel = Wui::Tr("viewport.show.button", "显示") + " ▼";
 		const float showBtnW = std::max(56.0f, ctx.MeasureTextWidth(showLabel, 12.0f) + 16.0f);
+
+		// 视口工作模式折叠下拉规格 (选择 / 地貌 / 植被)
+		const EditorToolMode currentToolMode = m_Host.GetEditorToolMode();
+		std::string modeShort = Wui::Tr("viewport.mode.select_short", "选择");
+		if (currentToolMode == EditorToolMode::Landscape)
+			modeShort = Wui::Tr("viewport.mode.landscape_short", "地貌");
+		else if (currentToolMode == EditorToolMode::Foliage)
+			modeShort = Wui::Tr("viewport.mode.foliage_short", "植被");
+		const std::string modeLabel = (sceneRect.W >= 760.0f) ? (Wui::Tr("viewport.mode.dropdown", "模式") + ": " + modeShort + " ▼") : (modeShort + " ▼");
+		const float modeBtnW = std::max(54.0f, ctx.MeasureTextWidth(modeLabel, 12.0f) + 16.0f);
+
+		// Gizmo 变换工具折叠下拉规格 (Q: 选 / W: 移 / E: 转 / R: 缩 / T: 2D矩形)
+		const Wui::GizmoOperation activeGizmo = m_Host.GetGizmoOperation();
+		std::string gizmoShort = Wui::Tr("viewport.gizmo.q_short", "选择 (Q)");
+		switch (activeGizmo)
+		{
+		case Wui::GizmoOperation::None:      gizmoShort = Wui::Tr("viewport.gizmo.q_short", "选择 (Q)"); break;
+		case Wui::GizmoOperation::Translate: gizmoShort = Wui::Tr("viewport.gizmo.w_short", "平移 (W)"); break;
+		case Wui::GizmoOperation::Rotate:    gizmoShort = Wui::Tr("viewport.gizmo.e_short", "旋转 (E)"); break;
+		case Wui::GizmoOperation::Scale:     gizmoShort = Wui::Tr("viewport.gizmo.r_short", "缩放 (R)"); break;
+		case Wui::GizmoOperation::Rect:      gizmoShort = Wui::Tr("viewport.gizmo.t_short", "矩形 (T)"); break;
+		}
+		const std::string gizmoLabel = (sceneRect.W >= 760.0f) ? (Wui::Tr("viewport.gizmo.dropdown", "工具") + ": " + gizmoShort + " ▼") : (gizmoShort + " ▼");
+		const float gizmoBtnW = std::max(64.0f, ctx.MeasureTextWidth(gizmoLabel, 12.0f) + 16.0f);
+
+		// 左岛全宽计算
+		Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
+		Wui::WuiRect showButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
+		Wui::WuiRect modeButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
+		Wui::WuiRect gizmoButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
 		Wui::WuiRect leftIslandRect { sceneRect.X + kChromePad, sceneRect.Y + kChromePad, 0.0f, 0.0f };
 		if (!play)
 		{
-			const float fullLeftIslandW = 4.0f + viewButtonW + 3.0f + showBtnW + 3.0f + 8.0f + 3.0f + modeSwitcherW + 3.0f + 8.0f + 3.0f + (5 * gizmoBtnW + 4 * 2.0f) + 4.0f;
+			const float fullLeftIslandW = 4.0f + viewButtonW + 3.0f + showBtnW + 3.0f + 8.0f + 3.0f + modeBtnW + 3.0f + 8.0f + 3.0f + gizmoBtnW + 4.0f;
 			const float leftIslandX = sceneRect.X + kChromePad;
 			const float leftIslandY = sceneRect.Y + kChromePad;
-			// 受中岛左边界严格防护
-			const float minGuaranteedW = viewButtonW + 14.0f + modeSwitcherW + 12.0f;
-			const float maxLeftIslandW = std::max(minGuaranteedW, pillLeftBound - leftIslandX);
+			const float minGuaranteedW = viewButtonW + 14.0f + modeBtnW + 12.0f;
+			const float maxLeftIslandW = isWideViewport ? std::max(viewButtonW + 14.0f + modeBtnW + 12.0f, pillLeftBound - leftIslandX) : fullLeftIslandW;
 			const float leftIslandW = std::min(fullLeftIslandW, maxLeftIslandW);
 
 			leftIslandRect = { leftIslandX, leftIslandY, leftIslandW, kIslandH };
 			Wui::Toolbar(ctx, leftIslandRect, theme, 6.0f, 0.85f);
 			ctx.RegisterOverlayRect(leftIslandRect);
 
-			// 左岛内部内容填充
 			const float leftBtnY = leftIslandRect.Y + 4.0f;
 			viewButton = { leftIslandRect.X + 4.0f, leftBtnY, viewButtonW, kBtnH };
 			const std::string viewHint = Wui::Tr("viewport.view.hint",
-				"View options: view mode (3D/2D), camera viewpoint, projection, overlays.");
+				"相机视图设置: 投影方式(透视/正交)、方位、旋转锁定与视角复位。");
 			Wui::Tooltip(ctx, viewButton, viewHint);
 			auto viewBtnTheme = theme;
 			if (ctx.IsPopupOpen(Wui::HashId("viewport.view.popup")))
@@ -494,11 +513,12 @@ namespace World
 				if (ctx.IsPopupOpen(Wui::HashId("viewport.view.popup")))
 				{
 					ctx.ClosePopup(Wui::HashId("viewport.view.popup"));
-					m_ActiveViewSubmenu.clear();
 				}
 				else
 				{
 					ctx.ClosePopup(Wui::HashId("viewport.show.popup"));
+					ctx.ClosePopup(Wui::HashId("viewport.mode.popup"));
+					ctx.ClosePopup(Wui::HashId("viewport.gizmo.popup"));
 					ctx.OpenPopup(Wui::HashId("viewport.view.popup"));
 				}
 			}
@@ -509,7 +529,7 @@ namespace World
 
 			float leftCursor = viewButton.X + viewButton.W + 3.0f;
 
-			// 显示菜单按钮 (Show: 对标 UE5 / Unity 工业级辅助显示与图元菜单)
+			// 显示菜单按钮 (Show: 纯辅助显示与图元专席，对标 UE5 / Unity)
 			if (leftCursor + showBtnW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
 			{
 				showButton = { leftCursor, leftBtnY, showBtnW, kBtnH };
@@ -532,76 +552,54 @@ namespace World
 					else
 					{
 						ctx.ClosePopup(Wui::HashId("viewport.view.popup"));
+						ctx.ClosePopup(Wui::HashId("viewport.mode.popup"));
+						ctx.ClosePopup(Wui::HashId("viewport.gizmo.popup"));
 						ctx.OpenPopup(Wui::HashId("viewport.show.popup"));
 					}
 				}
 				ctx.RegisterOverlayRect(showButton);
 				leftCursor += showBtnW + 3.0f;
 			}
-			if (leftCursor + 8.0f + modeBtnSelectW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
+
+			// 分割线
+			if (leftCursor + 8.0f + modeBtnW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
 			{
 				const Wui::WuiRect sepRect { leftCursor, leftIslandRect.Y, 8.0f, kIslandH };
 				Wui::ToolbarSeparator(ctx, sepRect, theme);
 				leftCursor += 8.0f + 3.0f;
 			}
 
-			// 模式切换药丸组: [Select] [Landscape] [Foliage]
-			if (leftCursor + modeBtnSelectW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
+			// 模式切换折叠下拉按钮 (模式: 选择 / 地貌 / 植被)
+			if (leftCursor + modeBtnW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
 			{
-				const Wui::WuiRect selBtnRect { leftCursor, leftBtnY, modeBtnSelectW, kBtnH };
-				auto selTheme = theme;
-				if (currentToolMode == EditorToolMode::Select)
+				modeButton = { leftCursor, leftBtnY, modeBtnW, kBtnH };
+				auto modeTheme = theme;
+				if (ctx.IsPopupOpen(Wui::HashId("viewport.mode.popup")) || currentToolMode != EditorToolMode::Select)
 				{
-					selTheme.ButtonBg = theme.ActiveBg;
-					selTheme.Border = theme.Accent;
+					modeTheme.ButtonBg = theme.ActiveBg;
+					modeTheme.Border = theme.Accent;
 				}
-				Wui::Tooltip(ctx, selBtnRect, "选择与通用变换模式 (Select & Transform) [快捷键 Shift+1]");
-				if (Wui::Button(ctx, Wui::HashId("viewport.mode.select"), selBtnRect, "选择", selTheme))
+				Wui::Tooltip(ctx, modeButton, Wui::Tr("viewport.mode.hint",
+					"视口工作模式切换 (选择与通用变换 [Shift+1] / 地貌雕刻 [Shift+2] / 植被散布 [Shift+3])"));
+				if (Wui::Button(ctx, Wui::HashId("viewport.mode.dropdown_btn"), modeButton, modeLabel, modeTheme))
 				{
-					m_Host.SetEditorToolMode(EditorToolMode::Select);
+					if (ctx.IsPopupOpen(Wui::HashId("viewport.mode.popup")))
+					{
+						ctx.ClosePopup(Wui::HashId("viewport.mode.popup"));
+					}
+					else
+					{
+						ctx.ClosePopup(Wui::HashId("viewport.view.popup"));
+						ctx.ClosePopup(Wui::HashId("viewport.show.popup"));
+						ctx.ClosePopup(Wui::HashId("viewport.gizmo.popup"));
+						ctx.OpenPopup(Wui::HashId("viewport.mode.popup"));
+					}
 				}
-				ctx.RegisterOverlayRect(selBtnRect);
-				leftCursor += modeBtnSelectW + 2.0f;
+				ctx.RegisterOverlayRect(modeButton);
+				leftCursor += modeBtnW + 3.0f;
 			}
 
-			if (leftCursor + modeBtnLandscapeW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
-			{
-				const Wui::WuiRect landBtnRect { leftCursor, leftBtnY, modeBtnLandscapeW, kBtnH };
-				auto landTheme = theme;
-				if (currentToolMode == EditorToolMode::Landscape)
-				{
-					landTheme.ButtonBg = theme.ActiveBg;
-					landTheme.Border = theme.Accent;
-				}
-				Wui::Tooltip(ctx, landBtnRect, "3D 地貌雕刻与混绘模式 (Landscape Sculpt & Paint) [快捷键 Shift+2]");
-				if (Wui::Button(ctx, Wui::HashId("viewport.mode.landscape"), landBtnRect, "地貌", landTheme))
-				{
-					m_Host.SetEditorToolMode(EditorToolMode::Landscape);
-					m_Host.ActivatePanel("terrain_editor");
-				}
-				ctx.RegisterOverlayRect(landBtnRect);
-				leftCursor += modeBtnLandscapeW + 2.0f;
-			}
-
-			if (leftCursor + modeBtnFoliageW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
-			{
-				const Wui::WuiRect folBtnRect { leftCursor, leftBtnY, modeBtnFoliageW, kBtnH };
-				auto folTheme = theme;
-				if (currentToolMode == EditorToolMode::Foliage)
-				{
-					folTheme.ButtonBg = theme.ActiveBg;
-					folTheme.Border = theme.Accent;
-				}
-				Wui::Tooltip(ctx, folBtnRect, "3D 植被散布模式 (Foliage Scatter) [快捷键 Shift+3]");
-				if (Wui::Button(ctx, Wui::HashId("viewport.mode.foliage"), folBtnRect, "植被", folTheme))
-				{
-					m_Host.SetEditorToolMode(EditorToolMode::Foliage);
-					m_Host.ActivatePanel("foliage_editor");
-				}
-				ctx.RegisterOverlayRect(folBtnRect);
-				leftCursor += modeBtnFoliageW + 2.0f;
-			}
-
+			// 分割线
 			if (leftCursor + 8.0f + gizmoBtnW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
 			{
 				const Wui::WuiRect sepRect { leftCursor, leftIslandRect.Y, 8.0f, kIslandH };
@@ -609,31 +607,39 @@ namespace World
 				leftCursor += 8.0f + 3.0f;
 			}
 
-			for (int i = 0; i < 5; ++i)
+			// 变换工具折叠下拉按钮 (工具: 移动 (W) 等)
+			if (leftCursor + gizmoBtnW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
 			{
-				if (leftCursor + gizmoBtnW > leftIslandRect.X + leftIslandRect.W - 4.0f)
-					break;
-
-				const Wui::WuiRect gBtnRect { leftCursor, leftBtnY, gizmoBtnW, gizmoBtnH };
-				Wui::Tooltip(ctx, gBtnRect, gizmoBtns[i].tip);
-
-				auto gizmoTheme = theme;
-				if (activeGizmo == gizmoBtns[i].op)
+				gizmoButton = { leftCursor, leftBtnY, gizmoBtnW, kBtnH };
+				auto gTheme = theme;
+				if (ctx.IsPopupOpen(Wui::HashId("viewport.gizmo.popup")) || activeGizmo != Wui::GizmoOperation::None)
 				{
-					gizmoTheme.ButtonBg = theme.ActiveBg;
-					gizmoTheme.Border = theme.Accent;
+					gTheme.ButtonBg = theme.ActiveBg;
+					gTheme.Border = theme.Accent;
 				}
-				if (Wui::Button(ctx, Wui::HashId(gizmoBtns[i].id), gBtnRect, gizmoBtns[i].label, gizmoTheme))
+				Wui::Tooltip(ctx, gizmoButton, Wui::Tr("viewport.gizmo.hint",
+					"变换工具切换 (选择 [Q] / 平移 [W] / 旋转 [E] / 缩放 [R] / 2D矩形 [T])"));
+				if (Wui::Button(ctx, Wui::HashId("viewport.gizmo.dropdown_btn"), gizmoButton, gizmoLabel, gTheme))
 				{
-					m_Host.SetGizmoOperation(gizmoBtns[i].op);
+					if (ctx.IsPopupOpen(Wui::HashId("viewport.gizmo.popup")))
+					{
+						ctx.ClosePopup(Wui::HashId("viewport.gizmo.popup"));
+					}
+					else
+					{
+						ctx.ClosePopup(Wui::HashId("viewport.view.popup"));
+						ctx.ClosePopup(Wui::HashId("viewport.show.popup"));
+						ctx.ClosePopup(Wui::HashId("viewport.mode.popup"));
+						ctx.OpenPopup(Wui::HashId("viewport.gizmo.popup"));
+					}
 				}
-				ctx.RegisterOverlayRect(gBtnRect);
-				leftCursor += gizmoBtnW + 2.0f;
+				ctx.RegisterOverlayRect(gizmoButton);
+				leftCursor += gizmoBtnW + 3.0f;
 			}
 		}
 
-		// ③ 右岛 (Right Island - 覆盖层与状态徽章)
-		// 从左至右内含: [选择过滤] + [分割线] + [图层下拉] + [分割线] + [Grid] + [Part] + [Lock] + [分割线] + [状态徽章]
+		// ② 右岛 (Right Island - 四大归纳标准功能块):
+		// [块1: 过滤] + [分割线] + [块2: 图层] + [分割线] + [块3: 吸附与对齐] + [分割线] + [块4: 运行状态]
 		SelectionFilter& selFilter = m_Host.GetSelectionFilter();
 		size_t selectableLayersCount = 0;
 		size_t lockedLayersCount = 0;
@@ -650,10 +656,13 @@ namespace World
 				lockedLayersCount++;
 		}
 
+		// 块1: 过滤下拉规格
 		char filterBtnLabel[64] = {};
 		std::snprintf(filterBtnLabel, sizeof(filterBtnLabel), "%s: %zu/%zu ▼",
 			Wui::Tr("viewport.filter.dropdown", "过滤").c_str(), selectableLayersCount, kTotalFilterLayers);
-		const float filterBtnW = std::max(64.0f, ctx.MeasureTextWidth(filterBtnLabel, 12.0f) + 16.0f);
+		const float filterBtnW = std::max(68.0f, ctx.MeasureTextWidth(filterBtnLabel, 12.0f) + 16.0f);
+
+		// 块2: 图层下拉规格
 		const std::vector<Level::DataLayerDefinition>& dataLayers = m_Host.GetLevelDataLayers();
 		const uint32_t activeLayers = m_Host.GetActiveDataLayers();
 		const bool hasDataLayers = !dataLayers.empty();
@@ -667,22 +676,23 @@ namespace World
 			}
 		}
 		char layersLabel[64] = {};
-		std::snprintf(layersLabel, sizeof(layersLabel), "%s: %zu/%zu ▼",
-			Wui::Tr("viewport.layers.dropdown", "图层").c_str(), activeCount, dataLayers.size());
-		const float layersBtnW = hasDataLayers ? (ctx.MeasureTextWidth(layersLabel, 12.0f) + 16.0f) : 0.0f;
+		if (hasDataLayers)
+		{
+			std::snprintf(layersLabel, sizeof(layersLabel), "%s: %zu/%zu ▼",
+				Wui::Tr("viewport.layers.dropdown", "图层").c_str(), activeCount, dataLayers.size());
+		}
+		else
+		{
+			std::snprintf(layersLabel, sizeof(layersLabel), "%s ▼",
+				Wui::Tr("viewport.layers.dropdown", "图层").c_str());
+		}
+		const float layersBtnW = std::max(56.0f, ctx.MeasureTextWidth(layersLabel, 12.0f) + 16.0f);
 
-		const std::string gridLabel = Wui::Tr("viewport.grid.short", "Grid");
-		const float gridBtnW = std::max(42.0f, ctx.MeasureTextWidth(gridLabel, 12.0f) + 14.0f);
+		// 块3: 吸附与对齐归纳下拉规格 (合并 Grid, Part, Snap, CSM, Lock)
+		const std::string snapLabel = (sceneRect.W >= 760.0f) ? (Wui::Tr("viewport.snap.dropdown", "吸附与对齐") + " ▼") : (Wui::Tr("viewport.snap.short", "吸附") + " ▼");
+		const float snapBtnW = std::max(56.0f, ctx.MeasureTextWidth(snapLabel, 12.0f) + 16.0f);
 
-		const std::string partLabel = Wui::Tr("viewport.partition.short", "Part");
-		const float partBtnW = std::max(42.0f, ctx.MeasureTextWidth(partLabel, 12.0f) + 14.0f);
-
-		const std::string csmLabel = Wui::Tr("viewport.csm.short", "CSM");
-		const float csmBtnW = std::max(56.0f, ctx.MeasureTextWidth(csmLabel, 12.0f) + 16.0f);
-
-		const std::string lockLabel = Wui::Tr("viewport.2d.short", "Lock");
-		const float lockBtnW = std::max(42.0f, ctx.MeasureTextWidth(lockLabel, 12.0f) + 14.0f);
-
+		// 块4: 运行状态徽章规格
 		const char* const modeKey = simulate ? (paused ? "paused" : "simulate")
 			: (play ? (paused ? "paused" : "play") : "edit");
 		const std::string modeText = paused ? Wui::Tr("viewport.mode.paused", "Paused")
@@ -693,53 +703,48 @@ namespace World
 			: (simulate ? theme.Accent : (play ? theme.Success : theme.TextDisabled));
 		const float modeWidth = ctx.MeasureTextWidth(modeText, 11.5f) + 18.0f;
 
-		// 计算右岛理想总宽度
+		// 计算右岛理想总宽度 (4个功能块 + 3根分割线 + 边距)
 		float naturalRightIslandW = 4.0f;
-		naturalRightIslandW += filterBtnW + 3.0f + 8.0f + 3.0f; // 过滤按钮 + 分割线
-		if (hasDataLayers)
-		{
-			naturalRightIslandW += layersBtnW + 3.0f + 8.0f + 3.0f;
-		}
-		naturalRightIslandW += gridBtnW + 3.0f;
-		naturalRightIslandW += partBtnW + 3.0f;
-		naturalRightIslandW += csmBtnW + 3.0f;
-		naturalRightIslandW += lockBtnW + 3.0f;
-		const std::string snapLabel = Wui::Tr("viewport.snap.short", "Snap");
-		const float snapBtnW = std::max(42.0f, ctx.MeasureTextWidth(snapLabel, 12.0f) + 14.0f);
-		naturalRightIslandW += snapBtnW + 3.0f;
-		naturalRightIslandW += 8.0f + 3.0f; // 分割线
-		naturalRightIslandW += modeWidth;
-		naturalRightIslandW += 4.0f;
+		naturalRightIslandW += filterBtnW + 3.0f + 8.0f + 3.0f; // 块1: 过滤 + 分割线
+		naturalRightIslandW += layersBtnW + 3.0f + 8.0f + 3.0f; // 块2: 图层 + 分割线
+		naturalRightIslandW += snapBtnW + 3.0f + 8.0f + 3.0f;   // 块3: 吸附与对齐 + 分割线
+		naturalRightIslandW += modeWidth + 4.0f;                 // 块4: 运行状态徽章
 
 		float rightIslandW = naturalRightIslandW;
 		float rightIslandX = sceneRect.X + sceneRect.W - kChromePad - rightIslandW;
 
-		// 严格受中岛右边界 pillRightBound 防护
-		if (rightIslandX < pillRightBound)
+		if (isWideViewport && rightIslandX < pillRightBound)
 		{
 			rightIslandX = pillRightBound;
 			rightIslandW = std::max(0.0f, (sceneRect.X + sceneRect.W - kChromePad) - rightIslandX);
 		}
+		else if (isNarrowViewport && rightIslandX < pillRect.X + pillRect.W + 8.0f)
+		{
+			rightIslandX = pillRect.X + pillRect.W + 8.0f;
+			rightIslandW = std::max(0.0f, (sceneRect.X + sceneRect.W - kChromePad) - rightIslandX);
+		}
 
-		Wui::WuiRect rightIslandRect { rightIslandX, sceneRect.Y + kChromePad, rightIslandW, kIslandH };
+		const float rightIslandY = isNarrowViewport
+			? (sceneRect.Y + kChromePad + kIslandH + 5.0f)
+			: (sceneRect.Y + kChromePad);
+		Wui::WuiRect rightIslandRect { rightIslandX, rightIslandY, rightIslandW, kIslandH };
 		if (!play)
 		{
 			Wui::Toolbar(ctx, rightIslandRect, theme, 6.0f, 0.85f);
 			ctx.RegisterOverlayRect(rightIslandRect);
 		}
 
-		// 右岛内部控件由左向右整齐排布
 		float rightCursor = rightIslandRect.X + 4.0f;
 		const float rightBtnY = rightIslandRect.Y + 4.0f;
 		const float rightLimit = rightIslandRect.X + rightIslandRect.W - 4.0f;
 
-		// 0) 选择过滤器下拉按钮 (Selection Filter)
+		// 块1: 实体选择过滤器下拉 (Selection Filter)
 		Wui::WuiRect filterBtnRect {};
 		if (!play && rightCursor + filterBtnW <= rightLimit)
 		{
 			filterBtnRect = { rightCursor, rightBtnY, filterBtnW, kBtnH };
 			Wui::Tooltip(ctx, filterBtnRect, Wui::Tr("viewport.filter.hint",
-				"Selection Filter: control which entity layers can be picked/selected in the viewport."));
+				"选择过滤器: 控制视口内哪些图层的实体可以被鼠标点选。点击展开配置。"));
 			auto filterTheme = theme;
 			if (selectableLayersCount < kTotalFilterLayers || lockedLayersCount > 0)
 			{
@@ -748,7 +753,14 @@ namespace World
 			}
 			if (Wui::Button(ctx, Wui::HashId("viewport.filter_dropdown"), filterBtnRect, filterBtnLabel, filterTheme))
 			{
-				ctx.OpenPopup(Wui::HashId("viewport.filter.popup"));
+				if (ctx.IsPopupOpen(Wui::HashId("viewport.filter.popup")))
+					ctx.ClosePopup(Wui::HashId("viewport.filter.popup"));
+				else
+				{
+					ctx.ClosePopup(Wui::HashId("viewport.layers.popup"));
+					ctx.ClosePopup(Wui::HashId("viewport.snap.popup"));
+					ctx.OpenPopup(Wui::HashId("viewport.filter.popup"));
+				}
 			}
 			ctx.RegisterOverlayRect(filterBtnRect);
 			rightCursor += filterBtnW + 3.0f;
@@ -761,15 +773,28 @@ namespace World
 			}
 		}
 
-		// 1) 数据层多选下拉按钮
+		// 块2: 关卡数据层下拉 (Data Layers)
 		Wui::WuiRect layersBtnRect {};
-		if (!play && hasDataLayers && rightCursor + layersBtnW <= rightLimit)
+		if (!play && rightCursor + layersBtnW <= rightLimit)
 		{
 			layersBtnRect = { rightCursor, rightBtnY, layersBtnW, kBtnH };
-			Wui::Tooltip(ctx, layersBtnRect, Wui::Tr("viewport.layers.hint", "Manage data layer visibility."));
-			if (Wui::Button(ctx, Wui::HashId("viewport.layers_dropdown"), layersBtnRect, layersLabel, theme))
+			Wui::Tooltip(ctx, layersBtnRect, Wui::Tr("viewport.layers.hint", "管理关卡数据层流送与可见性。"));
+			auto layersTheme = theme;
+			if (ctx.IsPopupOpen(Wui::HashId("viewport.layers.popup")))
 			{
-				ctx.OpenPopup(Wui::HashId("viewport.layers.popup"));
+				layersTheme.ButtonBg = theme.ActiveBg;
+				layersTheme.Border = theme.Accent;
+			}
+			if (Wui::Button(ctx, Wui::HashId("viewport.layers_dropdown"), layersBtnRect, layersLabel, layersTheme))
+			{
+				if (ctx.IsPopupOpen(Wui::HashId("viewport.layers.popup")))
+					ctx.ClosePopup(Wui::HashId("viewport.layers.popup"));
+				else
+				{
+					ctx.ClosePopup(Wui::HashId("viewport.filter.popup"));
+					ctx.ClosePopup(Wui::HashId("viewport.snap.popup"));
+					ctx.OpenPopup(Wui::HashId("viewport.layers.popup"));
+				}
 			}
 			ctx.RegisterOverlayRect(layersBtnRect);
 			rightCursor += layersBtnW + 3.0f;
@@ -782,115 +807,45 @@ namespace World
 			}
 		}
 
-		// 2) 网格开关 (Grid) - 开启时背景变亮 (ActiveBg + Accent 边框)，严禁带有生硬的 : ON / : OFF
-		if (!play && rightCursor + gridBtnW <= rightLimit)
-		{
-			const Wui::WuiRect gridBtn { rightCursor, rightBtnY, gridBtnW, kBtnH };
-			const bool gridOn = m_Host.IsReferenceGridEnabled();
-			Wui::Tooltip(ctx, gridBtn, Wui::Tr("viewport.grid.hint", "Toggle ground reference grid (1m/10m)."));
-			auto gridTheme = theme;
-			if (gridOn)
-			{
-				gridTheme.ButtonBg = theme.ActiveBg;
-				gridTheme.Border = theme.Accent;
-			}
-			if (Wui::Button(ctx, Wui::HashId("viewport.stream_grid"), gridBtn, gridLabel, gridTheme))
-			{
-				m_Host.SetReferenceGridEnabled(!gridOn);
-			}
-			ctx.RegisterOverlayRect(gridBtn);
-			rightCursor += gridBtnW + 3.0f;
-		}
-
-		// 3) 分区开关 (Part) - 开启时高亮，严禁带有 : ON / : OFF
-		if (!play && rightCursor + partBtnW <= rightLimit)
-		{
-			const Wui::WuiRect partBtn { rightCursor, rightBtnY, partBtnW, kBtnH };
-			Wui::Tooltip(ctx, partBtn, Wui::Tr("viewport.partition.hint", "Toggle world partition & streaming chunk overlay."));
-			auto partTheme = theme;
-			if (m_ShowWorldPartition)
-			{
-				partTheme.ButtonBg = theme.ActiveBg;
-				partTheme.Border = theme.Accent;
-			}
-			if (Wui::Button(ctx, Wui::HashId("viewport.partition_grid"), partBtn, partLabel, partTheme))
-			{
-				m_ShowWorldPartition = !m_ShowWorldPartition;
-			}
-			ctx.RegisterOverlayRect(partBtn);
-			rightCursor += partBtnW + 3.0f;
-		}
-
-		// 3b) CSM 级联染色调试开关 (CSM) - 开启时高亮，严禁带有 : ON / : OFF
-		if (!play && rightCursor + csmBtnW <= rightLimit)
-		{
-			const Wui::WuiRect csmBtn { rightCursor, rightBtnY, csmBtnW, kBtnH };
-			const bool csmOn = World::Renderer3D::IsCascadeDebugVisualization();
-			Wui::Tooltip(ctx, csmBtn, Wui::Tr("viewport.csm.hint",
-				"Toggle Cascaded Shadow Map (CSM) 4-Cascade Color Debug: Red (C0), Green (C1), Blue (C2), Yellow (C3)."));
-			auto csmTheme = theme;
-			if (csmOn)
-			{
-				csmTheme.ButtonBg = theme.ActiveBg;
-				csmTheme.Border = theme.Accent;
-			}
-			if (Wui::Button(ctx, Wui::HashId("viewport.csm_debug"), csmBtn, csmLabel, csmTheme))
-			{
-				World::Renderer3D::SetCascadeDebugVisualization(!csmOn);
-			}
-			ctx.RegisterOverlayRect(csmBtn);
-			rightCursor += csmBtnW + 3.0f;
-		}
-
-		// 4) 视角旋转锁定 (Lock) - 开启时高亮，严禁带有 : ON / : OFF
-		if (!play && rightCursor + lockBtnW <= rightLimit)
-		{
-			const Wui::WuiRect mode2dBtn { rightCursor, rightBtnY, lockBtnW, kBtnH };
-			const bool is2D = m_Host.Is2DMode();
-			Wui::Tooltip(ctx, mode2dBtn, Wui::Tr("viewport.2d.hint", "锁定/解锁鼠标旋转视角 (锁定后禁止鼠标旋转、右键拖拽变为平移；左上角方位菜单仍可正常切换方向) (viewport.btn.toggle_2d)"));
-			auto lockTheme = theme;
-			if (is2D)
-			{
-				lockTheme.ButtonBg = theme.ActiveBg;
-				lockTheme.Border = theme.Accent;
-			}
-			if (Wui::Button(ctx, Wui::HashId("viewport.btn.toggle_2d"), mode2dBtn, lockLabel, lockTheme))
-			{
-				m_Host.Set2DMode(!is2D);
-			}
-			ctx.RegisterOverlayRect(mode2dBtn);
-			rightCursor += lockBtnW + 3.0f;
-		}
-
-		// 4b) 2D 像素网格吸附开关 (Snap)
+		// 块3: 吸附与对齐归纳下拉 (Snapping & Reference Alignment)
+		Wui::WuiRect snapBtnRect {};
 		if (!play && rightCursor + snapBtnW <= rightLimit)
 		{
-			const Wui::WuiRect snapBtn { rightCursor, rightBtnY, snapBtnW, kBtnH };
-			const bool isSnap = m_Host.IsPixelSnapEnabled();
-			Wui::Tooltip(ctx, snapBtn, Wui::Tr("viewport.snap.hint", "2D 像素网格吸附开关 (按 1/PPU 步长吸附坐标，杜绝亚像素插值撕裂与接缝抖动) (viewport.btn.toggle_snap)"));
+			snapBtnRect = { rightCursor, rightBtnY, snapBtnW, kBtnH };
+			Wui::Tooltip(ctx, snapBtnRect, Wui::Tr("viewport.snap.hint",
+				"空间吸附与参考对齐设置: 包含地面网格、世界分区网格、2D像素吸附、CSM级联调试与旋转锁定。"));
 			auto snapTheme = theme;
-			if (isSnap)
+			const bool isSnapActive = m_Host.IsPixelSnapEnabled() || m_ShowWorldPartition ||
+				m_Host.Is2DMode() || World::Renderer3D::IsCascadeDebugVisualization() ||
+				ctx.IsPopupOpen(Wui::HashId("viewport.snap.popup"));
+			if (isSnapActive)
 			{
 				snapTheme.ButtonBg = theme.ActiveBg;
 				snapTheme.Border = theme.Accent;
 			}
-			if (Wui::Button(ctx, Wui::HashId("viewport.btn.toggle_snap"), snapBtn, snapLabel, snapTheme))
+			if (Wui::Button(ctx, Wui::HashId("viewport.snap.dropdown_btn"), snapBtnRect, snapLabel, snapTheme))
 			{
-				m_Host.SetPixelSnapEnabled(!isSnap);
+				if (ctx.IsPopupOpen(Wui::HashId("viewport.snap.popup")))
+					ctx.ClosePopup(Wui::HashId("viewport.snap.popup"));
+				else
+				{
+					ctx.ClosePopup(Wui::HashId("viewport.filter.popup"));
+					ctx.ClosePopup(Wui::HashId("viewport.layers.popup"));
+					ctx.OpenPopup(Wui::HashId("viewport.snap.popup"));
+				}
 			}
-			ctx.RegisterOverlayRect(snapBtn);
+			ctx.RegisterOverlayRect(snapBtnRect);
 			rightCursor += snapBtnW + 3.0f;
+
+			if (rightCursor + 8.0f <= rightLimit)
+			{
+				const Wui::WuiRect sepRect { rightCursor, rightIslandRect.Y, 8.0f, kIslandH };
+				Wui::ToolbarSeparator(ctx, sepRect, theme);
+				rightCursor += 8.0f + 3.0f;
+			}
 		}
 
-		// 5) 分割线
-		if (!play && rightCursor + 8.0f <= rightLimit)
-		{
-			const Wui::WuiRect sepRect { rightCursor, rightIslandRect.Y, 8.0f, kIslandH };
-			Wui::ToolbarSeparator(ctx, sepRect, theme);
-			rightCursor += 8.0f + 3.0f;
-		}
-
-		// 6) 运行状态徽章 (viewport.mode)
+		// 块4: 运行状态徽章 (viewport.mode)
 		if (rightCursor + modeWidth <= rightIslandRect.X + rightIslandRect.W + 2.0f)
 		{
 			const Wui::WuiRect modeRect { rightCursor, rightBtnY, modeWidth, kBtnH };
@@ -901,58 +856,48 @@ namespace World
 			ctx.RegisterOverlayRect(modeRect);
 		}
 
-		// ④ 视图菜单弹层 (View / Show Popup: 视角设置与多级辅助显示二级子菜单)
+		// ③ 纯相机视角弹层 (View Popup: 仅相机投影、方位、旋转锁定与视角复位，零冗余)
 		const Wui::WuiId viewPopup = Wui::HashId("viewport.view.popup");
-		const Wui::WuiId showPopup = Wui::HashId("viewport.show.popup");
-		const bool isViewPopupOpen = ctx.IsPopupOpen(viewPopup);
-		const bool isShowPopupOpen = ctx.IsPopupOpen(showPopup);
-
-		if (isViewPopupOpen || isShowPopupOpen)
+		if (ctx.IsPopupOpen(viewPopup))
 		{
 			const float rowH = 22.0f;
 			const float comboH = 24.0f;
-			Wui::WuiRect parentPanel {};
-			Wui::WuiRect activeSubmenuRow {};
+			const float panelH = 6.0f + (comboH * 2.0f + 14.0f) + (rowH + 4.0f) + 7.0f + rowH + 6.0f;
+			const Wui::WuiRect parentPanel { viewButton.X, leftIslandRect.Y + leftIslandRect.H + 3.0f, 240.0f, panelH };
+			Wui::DrawPanelSurface(ctx, parentPanel, theme);
+			ctx.RegisterOverlayRect(parentPanel);
+			float rowY = parentPanel.Y + 6.0f;
 
-			if (isViewPopupOpen)
+			// ① 投影方式下拉选项 (Projection)
 			{
-				// 视角菜单：投影 Combo + 方位 Combo + 旋转锁定项 + 分割线 + 3个分类二级菜单项
-				const float panelH = 6.0f + (comboH * 2.0f + 14.0f) + (rowH + 4.0f) + 7.0f + rowH + (3.0f * rowH) + 6.0f;
-				parentPanel = { viewButton.X, leftIslandRect.Y + leftIslandRect.H + 3.0f, 246.0f, panelH };
-				Wui::DrawPanelSurface(ctx, parentPanel, theme);
-				ctx.RegisterOverlayRect(parentPanel);
-				float rowY = parentPanel.Y + 6.0f;
-
-				// ① 投影方式下拉选项 (Projection)
+				const Wui::WuiRect comboRect { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, comboH };
+				rowY += comboH + 6.0f;
+				const std::vector<std::string> projOptions = {
+					Wui::Tr("viewport.view.proj_persp", "透视 (Perspective)"),
+					Wui::Tr("viewport.view.proj_ortho", "正交 (Orthographic)")
+				};
+				int selectedProj = (currentProj == World::ViewportProjection::Orthographic) ? 1 : 0;
+				if (Wui::Combo(ctx, Wui::HashId("viewport.combo.proj"), comboRect,
+					Wui::Tr("viewport.view.proj_label", "投影"), projOptions, selectedProj, theme))
 				{
-					const Wui::WuiRect comboRect { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, comboH };
-					rowY += comboH + 6.0f;
-					const std::vector<std::string> projOptions = {
-						Wui::Tr("viewport.view.proj_persp", "透视 (Perspective)"),
-						Wui::Tr("viewport.view.proj_ortho", "正交 (Orthographic)")
-					};
-					int selectedProj = (currentProj == World::ViewportProjection::Orthographic) ? 1 : 0;
-					if (Wui::Combo(ctx, Wui::HashId("viewport.combo.proj"), comboRect,
-						Wui::Tr("viewport.view.proj_label", "投影"), projOptions, selectedProj, theme))
-					{
-						m_Host.SetViewportProjection(selectedProj == 1 ? World::ViewportProjection::Orthographic : World::ViewportProjection::Perspective);
-					}
-					ctx.RegisterOverlayRect(comboRect);
+					m_Host.SetViewportProjection(selectedProj == 1 ? World::ViewportProjection::Orthographic : World::ViewportProjection::Perspective);
 				}
+				ctx.RegisterOverlayRect(comboRect);
+			}
 
-				// ② 观察方位下拉选项 (Viewpoint)
-				{
-					const Wui::WuiRect comboRect { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, comboH };
-					rowY += comboH + 8.0f;
-					const std::vector<std::string> vpOptions = {
-						Wui::Tr("viewport.vp.free", "自由视角 (Free Orbit)"),
-						Wui::Tr("viewport.vp.top", "顶视图 Top (XZ [俯视])"),
-						Wui::Tr("viewport.vp.front", "前视图 Front (XY [立面])"),
-						Wui::Tr("viewport.vp.right", "右视图 Right (ZY [侧面])"),
-						Wui::Tr("viewport.vp.bottom", "底视图 Bottom (XZ [仰视])"),
-						Wui::Tr("viewport.vp.back", "后视图 Back (XY [背面])"),
-						Wui::Tr("viewport.vp.left", "左视图 Left (ZY [侧面])")
-					};
+			// ② 观察方位下拉选项 (Viewpoint)
+			{
+				const Wui::WuiRect comboRect { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, comboH };
+				rowY += comboH + 8.0f;
+				const std::vector<std::string> vpOptions = {
+					Wui::Tr("viewport.vp.free", "自由视角 (Free Orbit)"),
+					Wui::Tr("viewport.vp.top", "顶视图 Top (XZ [俯视])"),
+					Wui::Tr("viewport.vp.front", "前视图 Front (XY [立面])"),
+					Wui::Tr("viewport.vp.right", "右视图 Right (ZY [侧面])"),
+					Wui::Tr("viewport.vp.bottom", "底视图 Bottom (XZ [仰视])"),
+					Wui::Tr("viewport.vp.back", "后视图 Back (XY [背面])"),
+					Wui::Tr("viewport.vp.left", "左视图 Left (ZY [侧面])")
+				};
 				int selectedVp = 0;
 				switch (currentVp)
 				{
@@ -981,122 +926,119 @@ namespace World
 					m_Host.SetViewportViewpoint(newVp);
 				}
 				ctx.RegisterOverlayRect(comboRect);
-				}
-
-				// ③ 视角鼠标旋转锁定开关
-				{
-					const Wui::WuiRect lockRow { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
-					rowY += rowH + 4.0f;
-					const bool locked = m_Host.Is2DMode();
-					const std::string lockTip = Wui::Tr("viewport.view.lock_rotation.tooltip",
-						"锁定鼠标旋转视角 (右键拖拽改为平移画布); 左上角『方位』下拉菜单仍可正常切换方向。");
-					Wui::Tooltip(ctx, lockRow, lockTip);
-					if (Wui::MenuItem(ctx, Wui::HashId("viewport.view.lock_rotation"), lockRow,
-						Wui::Tr("viewport.view.lock_rotation", "锁定鼠标旋转 (Lock Rotation)"), locked, true, theme))
-					{
-						m_Host.Set2DMode(!locked);
-					}
-					ctx.RegisterOverlayRect(lockRow);
-				}
-
-				// 分割线
-				Wui::PanelBackground(ctx, { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
-				rowY += 6.0f;
-
-				// 辅助显示分类表头
-				Wui::Label(ctx, { parentPanel.X + 8.0f, rowY + 3.0f }, Wui::Tr("viewport.view.group.overlays", "辅助显示与图元"), theme.TextMuted, 11.5f);
-				rowY += rowH;
-
-				// 三大二级子菜单分类项 (带 ▶ 指示)
-				const auto catRow = [&](const char* catId, const std::string& label, const std::string& subKey)
-				{
-					const Wui::WuiRect row { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
-					rowY += rowH;
-					const bool active = (m_ActiveViewSubmenu == subKey);
-					const bool hov = ctx.IsHovered(row);
-					if (hov || active)
-					{
-						Wui::PanelBackground(ctx, row, theme.ButtonHover, 2.0f);
-					}
-					const bool clicked = Wui::MenuItem(ctx, Wui::HashId(catId), row, label, true, theme);
-					if (hov || clicked)
-					{
-						m_ActiveViewSubmenu = subKey;
-					}
-					const float arrowW = ctx.MeasureTextWidth("▶", 11.0f);
-					Wui::Label(ctx, { row.X + row.W - arrowW - 6.0f, row.Y + (rowH - 11.0f) * 0.5f }, "▶",
-						(active || hov) ? theme.Accent : theme.TextMuted, 11.0f);
-					ctx.RegisterOverlayRect(row);
-					if (m_ActiveViewSubmenu == subKey)
-					{
-						activeSubmenuRow = row;
-					}
-				};
-
-				catRow("viewport.cat.grids", Wui::Tr("viewport.menu.grids", "空间基准与网格"), "grids");
-				catRow("viewport.cat.gizmos", Wui::Tr("viewport.menu.gizmos", "辅助图元与范围"), "gizmos");
-				catRow("viewport.cat.navmesh", Wui::Tr("viewport.menu.navigation", "3D 导航与寻路"), "navmesh");
 			}
-			else if (isShowPopupOpen)
+
+			// ③ 视角鼠标旋转锁定开关
 			{
-				// 显示专属菜单：3个二级菜单项 + 分割线 + 2个常用速关项
-				const float panelH = 6.0f + rowH + (3.0f * rowH) + 7.0f + (2.0f * rowH) + 6.0f;
-				const float px = showButton.W > 0.0f ? showButton.X : (viewButton.X + viewButton.W + 3.0f);
-				parentPanel = { px, leftIslandRect.Y + leftIslandRect.H + 3.0f, 246.0f, panelH };
-				Wui::DrawPanelSurface(ctx, parentPanel, theme);
-				ctx.RegisterOverlayRect(parentPanel);
-				float rowY = parentPanel.Y + 6.0f;
-
-				Wui::Label(ctx, { parentPanel.X + 8.0f, rowY + 3.0f }, Wui::Tr("viewport.view.group.overlays", "辅助显示与图元"), theme.TextMuted, 11.5f);
-				rowY += rowH;
-
-				const auto catRow = [&](const char* catId, const std::string& label, const std::string& subKey)
+				const Wui::WuiRect lockRow { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
+				rowY += rowH + 4.0f;
+				const bool locked = m_Host.Is2DMode();
+				const std::string lockTip = Wui::Tr("viewport.view.lock_rotation.tooltip",
+					"锁定鼠标旋转视角 (右键拖拽改为平移画布); 左上角『方位』下拉菜单仍可正常切换方向。");
+				Wui::Tooltip(ctx, lockRow, lockTip);
+				if (Wui::MenuItem(ctx, Wui::HashId("viewport.view.lock_rotation"), lockRow,
+					Wui::Tr("viewport.view.lock_rotation", "锁定鼠标旋转 (Lock Rotation)"), locked, true, theme))
 				{
-					const Wui::WuiRect row { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
-					rowY += rowH;
-					const bool active = (m_ActiveViewSubmenu == subKey);
-					const bool hov = ctx.IsHovered(row);
-					if (hov || active)
-					{
-						Wui::PanelBackground(ctx, row, theme.ButtonHover, 2.0f);
-					}
-					const bool clicked = Wui::MenuItem(ctx, Wui::HashId(catId), row, label, true, theme);
-					if (hov || clicked)
-					{
-						m_ActiveViewSubmenu = subKey;
-					}
-					const float arrowW = ctx.MeasureTextWidth("▶", 11.0f);
-					Wui::Label(ctx, { row.X + row.W - arrowW - 6.0f, row.Y + (rowH - 11.0f) * 0.5f }, "▶",
-						(active || hov) ? theme.Accent : theme.TextMuted, 11.0f);
-					ctx.RegisterOverlayRect(row);
-					if (m_ActiveViewSubmenu == subKey)
-					{
-						activeSubmenuRow = row;
-					}
-				};
-
-				catRow("viewport.show.cat.grids", Wui::Tr("viewport.menu.grids", "空间基准与网格"), "grids");
-				catRow("viewport.show.cat.gizmos", Wui::Tr("viewport.menu.gizmos", "辅助图元与范围"), "gizmos");
-				catRow("viewport.show.cat.navmesh", Wui::Tr("viewport.menu.navigation", "3D 导航与寻路"), "navmesh");
-
-				// 分割线
-				Wui::PanelBackground(ctx, { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
-				rowY += 6.0f;
-
-				// 常用快速开关项
-				const auto quickItem = [&](const char* id, const std::string& label, bool checked, const std::function<void()>& action)
-				{
-					const Wui::WuiRect row { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
-					rowY += rowH;
-					if (Wui::MenuItem(ctx, Wui::HashId(id), row, label, checked, true, theme))
-						action();
-					ctx.RegisterOverlayRect(row);
-				};
-				quickItem("viewport.show.quick.grid", Wui::Tr("viewport.view.reference_grid", "地面参考网格 (Ground Grid)"),
-					m_Host.IsReferenceGridEnabled(), [this] { m_Host.SetReferenceGridEnabled(!m_Host.IsReferenceGridEnabled()); });
-				quickItem("viewport.show.quick.navmesh", Wui::Tr("viewport.view.navmesh", "3D 导航网格 (NavMesh) [P]"),
-					s_ShowNavMesh, [] { SetNavMeshVisible(!s_ShowNavMesh); });
+					m_Host.Set2DMode(!locked);
+				}
+				ctx.RegisterOverlayRect(lockRow);
 			}
+
+			// 分割线
+			Wui::PanelBackground(ctx, { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 6.0f;
+
+			// ④ 视角复位项
+			{
+				const Wui::WuiRect resetRow { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
+				rowY += rowH;
+				Wui::Tooltip(ctx, resetRow, Wui::Tr("viewport.view.reset.tooltip", "复位视角到选中目标或世界中心"));
+				if (Wui::MenuItem(ctx, Wui::HashId("viewport.view.reset"), resetRow,
+					Wui::Tr("viewport.view.reset", "复位视角到原点"), false, true, theme))
+				{
+					m_Host.ResetViewportCamera();
+					ctx.ClosePopup(viewPopup);
+				}
+				ctx.RegisterOverlayRect(resetRow);
+			}
+
+			const bool insideParent = parentPanel.W > 0.0f && ctx.HitTestRaw(parentPanel, ctx.Input().MousePos);
+			const bool insideButton = ctx.HitTestRaw(viewButton, ctx.Input().MousePos);
+			const bool comboOpen = ctx.IsPopupOpen(Wui::HashId("viewport.combo.proj")) ||
+			                       ctx.IsPopupOpen(Wui::HashId("viewport.combo.vp"));
+			if (!comboOpen && (ctx.Input().MouseClicked[0] || ctx.Input().MouseClicked[1]) && !insideParent && !insideButton)
+			{
+				ctx.ClosePopup(viewPopup);
+			}
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+			{
+				ctx.ClosePopup(viewPopup);
+			}
+		}
+
+		// ④ 纯辅助显示与图元专属弹层 (Show Popup: 基准网格、辅助图元、3D导航三大二级子菜单)
+		const Wui::WuiId showPopup = Wui::HashId("viewport.show.popup");
+		if (ctx.IsPopupOpen(showPopup))
+		{
+			const float rowH = 22.0f;
+			const float panelH = 6.0f + rowH + (3.0f * rowH) + 7.0f + (2.0f * rowH) + 6.0f;
+			const float px = showButton.W > 0.0f ? showButton.X : (viewButton.X + viewButton.W + 3.0f);
+			const Wui::WuiRect parentPanel { px, leftIslandRect.Y + leftIslandRect.H + 3.0f, 246.0f, panelH };
+			Wui::DrawPanelSurface(ctx, parentPanel, theme);
+			ctx.RegisterOverlayRect(parentPanel);
+			float rowY = parentPanel.Y + 6.0f;
+
+			Wui::Label(ctx, { parentPanel.X + 8.0f, rowY + 3.0f },
+				Wui::Tr("viewport.view.group.overlays", "辅助显示与图元"), theme.TextMuted, 11.5f);
+			rowY += rowH;
+
+			Wui::WuiRect activeSubmenuRow {};
+			const auto catRow = [&](const char* catId, const std::string& label, const std::string& subKey)
+			{
+				const Wui::WuiRect row { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
+				rowY += rowH;
+				const bool active = (m_ActiveViewSubmenu == subKey);
+				const bool hov = ctx.IsHovered(row);
+				if (hov || active)
+				{
+					Wui::PanelBackground(ctx, row, theme.ButtonHover, 2.0f);
+				}
+				const bool clicked = Wui::MenuItem(ctx, Wui::HashId(catId), row, label, true, theme);
+				if (hov || clicked)
+				{
+					m_ActiveViewSubmenu = subKey;
+				}
+				const float arrowW = ctx.MeasureTextWidth("▶", 11.0f);
+				Wui::Label(ctx, { row.X + row.W - arrowW - 6.0f, row.Y + (rowH - 11.0f) * 0.5f }, "▶",
+					(active || hov) ? theme.Accent : theme.TextMuted, 11.0f);
+				ctx.RegisterOverlayRect(row);
+				if (m_ActiveViewSubmenu == subKey)
+				{
+					activeSubmenuRow = row;
+				}
+			};
+
+			catRow("viewport.show.cat.grids", Wui::Tr("viewport.menu.grids", "空间基准与网格"), "grids");
+			catRow("viewport.show.cat.gizmos", Wui::Tr("viewport.menu.gizmos", "辅助图元与范围"), "gizmos");
+			catRow("viewport.show.cat.navmesh", Wui::Tr("viewport.menu.navigation", "3D 导航与寻路"), "navmesh");
+
+			// 分割线
+			Wui::PanelBackground(ctx, { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 6.0f;
+
+			// 常用快速开关项
+			const auto quickItem = [&](const char* id, const std::string& label, bool checked, const std::function<void()>& action)
+			{
+				const Wui::WuiRect row { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
+				rowY += rowH;
+				if (Wui::MenuItem(ctx, Wui::HashId(id), row, label, checked, true, theme))
+					action();
+				ctx.RegisterOverlayRect(row);
+			};
+			quickItem("viewport.show.quick.grid", Wui::Tr("viewport.view.reference_grid", "地面参考网格 (Ground Grid)"),
+				m_Host.IsReferenceGridEnabled(), [this] { m_Host.SetReferenceGridEnabled(!m_Host.IsReferenceGridEnabled()); });
+			quickItem("viewport.show.quick.navmesh", Wui::Tr("viewport.view.navmesh", "3D 导航网格 (NavMesh) [P]"),
+				s_ShowNavMesh, [] { SetNavMeshVisible(!s_ShowNavMesh); });
 
 			// 二级子菜单渲染体 (Submenus)
 			Wui::WuiRect subPanel {};
@@ -1156,19 +1098,19 @@ namespace World
 					subItem("viewport.view.world_partition", Wui::Tr("viewport.view.world_partition", "世界分区流送网格"),
 						m_ShowWorldPartition, Wui::Tr("viewport.partition.hint", "开关大世界空间分区与流送区块辅助网格。"),
 						[this] { m_ShowWorldPartition = !m_ShowWorldPartition; });
-					subItem("viewport.view.pixel_snap", Wui::Tr("viewport.snap.hint", "2D 像素网格吸附 (Snap)"),
-						m_Host.IsPixelSnapEnabled(), "按 1/PPU 步长对齐坐标，杜绝亚像素插值撕裂与接缝抖动",
+					subItem("viewport.view.pixel_snap", Wui::Tr("viewport.snap.pixel_snap", "2D 像素网格吸附"),
+						m_Host.IsPixelSnapEnabled(), Wui::Tr("viewport.snap.hint", "按 1/PPU 步长吸附坐标，杜绝亚像素插值撕裂与接缝抖动。"),
 						[this] { m_Host.SetPixelSnapEnabled(!m_Host.IsPixelSnapEnabled()); });
 				}
 				else if (m_ActiveViewSubmenu == "gizmos")
 				{
-					subItem("viewport.view.camera_preview", Wui::Tr("viewport.view.camera_preview", "相机实时预览小窗"),
-						m_Host.IsCameraPreviewEnabled(), Wui::Tr("viewport.view.camera_preview.tooltip", "画选中相机的预览小窗 (左下角)"),
+					subItem("viewport.view.camera_preview", Wui::Tr("viewport.view.camera_preview", "相机视锥与画中画"),
+						m_Host.IsCameraPreviewEnabled(), Wui::Tr("viewport.view.camera_preview.tooltip", "在视口角落显示场景活动主相机的 PiP 实时预览画面。"),
 						[this] { m_Host.ToggleCameraPreview(); });
 
 					const bool rangesAll = Editor::EditorPreferences::Get().Data().ViewportLightRangesAll;
 					subItem("viewport.view.light_ranges", Wui::Tr("viewport.view.light_ranges", "光源范围: 全部"),
-						rangesAll, Wui::Tr("viewport.overlays.light_ranges.tooltip", "画光源范围: 点光 = Range 球, 平行光 = Direction 箭头。关 = 仅选中实体。"),
+						rangesAll, Wui::Tr("viewport.overlays.light_ranges.tooltip", "画光源范围: 点光 = Range 球; 平行光 = Direction 箭头。关 = 仅选中实体。"),
 						[] {
 							Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
 							prefs.SetViewportLightRangesAll(!prefs.Data().ViewportLightRangesAll);
@@ -1182,14 +1124,14 @@ namespace World
 							prefs.SetViewportColliderOutlinesAll(!prefs.Data().ViewportColliderOutlinesAll);
 						});
 
-				subItem("viewport.view.audio_gizmos", Wui::Tr("viewport.view.audio_gizmos", "音频衰减球: 全部"),
-					s_ShowAllAudioGizmos, Wui::Tr("viewport.overlays.audio_gizmos.tooltip", "画 3D 音频衰减球与声学混响空间线框。关 = 仅选中实体。"),
-					[] { s_ShowAllAudioGizmos = !s_ShowAllAudioGizmos; });
+					subItem("viewport.view.audio_gizmos", Wui::Tr("viewport.view.audio_gizmos", "音频衰减球: 全部"),
+						s_ShowAllAudioGizmos, Wui::Tr("viewport.overlays.audio_gizmos.tooltip", "画 3D 音频衰减球与声学混响空间线框。关 = 仅选中实体。"),
+						[] { s_ShowAllAudioGizmos = !s_ShowAllAudioGizmos; });
 
-				const bool csmOn = World::Renderer3D::IsCascadeDebugVisualization();
-				subItem("viewport.view.csm_debug", Wui::Tr("viewport.csm.short", "CSM 阴影级联染色"),
-					csmOn, Wui::Tr("viewport.csm.hint", "CSM 4级级联阴影色彩调试 (红/绿/蓝/黄)"),
-					[csmOn] { World::Renderer3D::SetCascadeDebugVisualization(!csmOn); });
+					const bool csmOn = World::Renderer3D::IsCascadeDebugVisualization();
+					subItem("viewport.view.csm_debug", Wui::Tr("viewport.csm.short", "CSM 阴影级联染色"),
+						csmOn, Wui::Tr("viewport.csm.hint", "CSM 4级级联阴影色彩调试 (红/绿/蓝/黄)"),
+						[csmOn] { World::Renderer3D::SetCascadeDebugVisualization(!csmOn); });
 				}
 				else if (m_ActiveViewSubmenu == "navmesh")
 				{
@@ -1214,38 +1156,190 @@ namespace World
 				}
 			}
 
-			// 外部点击与 Escape 关闭控制 (必须同时排除主菜单 parentPanel、二级子菜单 subPanel 与触发按钮，且在下拉展开时不误关)
 			const bool insideParent = parentPanel.W > 0.0f && ctx.HitTestRaw(parentPanel, ctx.Input().MousePos);
 			const bool insideSub = !m_ActiveViewSubmenu.empty() && subPanel.W > 0.0f && ctx.HitTestRaw(subPanel, ctx.Input().MousePos);
-			const bool insideButton = (isViewPopupOpen && ctx.HitTestRaw(viewButton, ctx.Input().MousePos)) ||
-			                          (isShowPopupOpen && ctx.HitTestRaw(showButton, ctx.Input().MousePos));
-			const bool comboOpen = ctx.IsPopupOpen(Wui::HashId("viewport.combo.proj")) ||
-			                       ctx.IsPopupOpen(Wui::HashId("viewport.combo.vp"));
-			if (!comboOpen && (ctx.Input().MouseClicked[0] || ctx.Input().MouseClicked[1]) && !insideParent && !insideSub && !insideButton)
+			const bool insideButton = ctx.HitTestRaw(showButton, ctx.Input().MousePos);
+			if ((ctx.Input().MouseClicked[0] || ctx.Input().MouseClicked[1]) && !insideParent && !insideSub && !insideButton)
 			{
-				ctx.ClosePopup(viewPopup);
 				ctx.ClosePopup(showPopup);
 				m_ActiveViewSubmenu.clear();
 			}
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 			{
-				if (!m_ActiveViewSubmenu.empty())
-					m_ActiveViewSubmenu.clear();
-				else
-				{
-					ctx.ClosePopup(viewPopup);
-					ctx.ClosePopup(showPopup);
-				}
+				ctx.ClosePopup(showPopup);
+				m_ActiveViewSubmenu.clear();
 			}
 		}
 
-		// ⑤ 数据层多选弹层 (Layers Popup: 无论有多少数据层，绝不挤爆视口)
+		// ⑤ 视口工作模式弹层 (Mode Popup: 选择 / 地貌 / 植被)
+		const Wui::WuiId modePopup = Wui::HashId("viewport.mode.popup");
+		if (ctx.IsPopupOpen(modePopup))
+		{
+			const float rowH = 24.0f;
+			const float popupW = 240.0f;
+			const float popupH = 6.0f + 20.0f + 4.0f + 3.0f * rowH + 6.0f;
+			const float px = modeButton.W > 0.0f ? modeButton.X : (leftIslandRect.X + 100.0f);
+			const Wui::WuiRect panel { px, leftIslandRect.Y + leftIslandRect.H + 3.0f, popupW, popupH };
+			Wui::DrawPanelSurface(ctx, panel, theme);
+			ctx.RegisterOverlayRect(panel);
+			float rowY = panel.Y + 6.0f;
+
+			Wui::Label(ctx, { panel.X + 8.0f, rowY + 3.0f },
+				Wui::Tr("viewport.mode.title", "视口工作模式 (Workflow Modes)"), theme.TextMuted, 11.5f);
+			rowY += 20.0f;
+			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 4.0f;
+
+			const auto modeItem = [&](const char* id, const std::string& label, bool checked, const std::string& tip, const std::function<void()>& action)
+			{
+				const Wui::WuiRect row { panel.X + 4.0f, rowY, panel.W - 8.0f, rowH };
+				rowY += rowH;
+				Wui::Tooltip(ctx, row, tip);
+				if (Wui::MenuItem(ctx, Wui::HashId(id), row, label, checked, true, theme))
+				{
+					action();
+					ctx.ClosePopup(modePopup);
+				}
+				ctx.RegisterOverlayRect(row);
+			};
+
+			modeItem("viewport.mode.select", Wui::Tr("viewport.mode.select_name", "选择与通用变换") + " [Shift+1]",
+				currentToolMode == EditorToolMode::Select, "选择与通用变换模式 (Select & Transform) [快捷键 Shift+1]",
+				[this] { m_Host.SetEditorToolMode(EditorToolMode::Select); });
+
+			modeItem("viewport.mode.landscape", Wui::Tr("viewport.mode.landscape_name", "3D 地貌雕刻与混绘") + " [Shift+2]",
+				currentToolMode == EditorToolMode::Landscape, "3D 地貌雕刻与混绘模式 (Landscape Sculpt & Paint) [快捷键 Shift+2]",
+				[this] {
+					m_Host.SetEditorToolMode(EditorToolMode::Landscape);
+					m_Host.ActivatePanel("terrain_editor");
+				});
+
+			modeItem("viewport.mode.foliage", Wui::Tr("viewport.mode.foliage_name", "3D 植被散布模式") + " [Shift+3]",
+				currentToolMode == EditorToolMode::Foliage, "3D 植被散布模式 (Foliage Scatter) [快捷键 Shift+3]",
+				[this] {
+					m_Host.SetEditorToolMode(EditorToolMode::Foliage);
+					m_Host.ActivatePanel("foliage_editor");
+				});
+
+			ctx.ClosePopupsOnOutsideClick({ modePopup }, panel);
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+				ctx.ClosePopup(modePopup);
+		}
+
+		// ⑥ 变换工具弹层 (Gizmo Popup: Q 选 / W 移 / E 转 / R 缩 / T 矩形)
+		const Wui::WuiId gizmoPopup = Wui::HashId("viewport.gizmo.popup");
+		if (ctx.IsPopupOpen(gizmoPopup))
+		{
+			const float rowH = 24.0f;
+			const float popupW = 230.0f;
+			const float popupH = 6.0f + 20.0f + 4.0f + 5.0f * rowH + 6.0f;
+			const float px = gizmoButton.W > 0.0f ? gizmoButton.X : (leftIslandRect.X + 180.0f);
+			const Wui::WuiRect panel { px, leftIslandRect.Y + leftIslandRect.H + 3.0f, popupW, popupH };
+			Wui::DrawPanelSurface(ctx, panel, theme);
+			ctx.RegisterOverlayRect(panel);
+			float rowY = panel.Y + 6.0f;
+
+			Wui::Label(ctx, { panel.X + 8.0f, rowY + 3.0f },
+				Wui::Tr("viewport.gizmo.title", "变换工具 (Transform Tools)"), theme.TextMuted, 11.5f);
+			rowY += 20.0f;
+			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 4.0f;
+
+			const auto gizmoItem = [&](const char* id, const std::string& label, Wui::GizmoOperation op, const std::string& tip)
+			{
+				const Wui::WuiRect row { panel.X + 4.0f, rowY, panel.W - 8.0f, rowH };
+				rowY += rowH;
+				Wui::Tooltip(ctx, row, tip);
+				if (Wui::MenuItem(ctx, Wui::HashId(id), row, label, activeGizmo == op, true, theme))
+				{
+					m_Host.SetGizmoOperation(op);
+					ctx.ClosePopup(gizmoPopup);
+				}
+				ctx.RegisterOverlayRect(row);
+			};
+
+			gizmoItem("viewport.btn.gizmo_q", Wui::Tr("viewport.gizmo.none", "选择模式 (None) [Q]"),
+				Wui::GizmoOperation::None, "选择模式 (None) [快捷键 Q]");
+			gizmoItem("viewport.btn.gizmo_w", Wui::Tr("viewport.gizmo.translate", "平移工具 (Move) [W]"),
+				Wui::GizmoOperation::Translate, "平移工具 (Move) [快捷键 W]");
+			gizmoItem("viewport.btn.gizmo_e", Wui::Tr("viewport.gizmo.rotate", "旋转工具 (Rotate) [E]"),
+				Wui::GizmoOperation::Rotate, "旋转工具 (Rotate) [快捷键 E]");
+			gizmoItem("viewport.btn.gizmo_r", Wui::Tr("viewport.gizmo.scale", "缩放工具 (Scale) [R]"),
+				Wui::GizmoOperation::Scale, "缩放工具 (Scale) [快捷键 R]");
+			gizmoItem("viewport.btn.gizmo_t", Wui::Tr("viewport.gizmo.rect", "2D 矩形手柄 (Rect) [T]"),
+				Wui::GizmoOperation::Rect, "2D 矩形变换手柄 (Rect Transform) [快捷键 T]");
+
+			ctx.ClosePopupsOnOutsideClick({ gizmoPopup }, panel);
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+				ctx.ClosePopup(gizmoPopup);
+		}
+
+		// ⑦ 空间吸附与参考对齐弹层 (Snap Popup: 合并 Grid, Part, Snap, CSM, Lock)
+		const Wui::WuiId snapPopup = Wui::HashId("viewport.snap.popup");
+		if (ctx.IsPopupOpen(snapPopup))
+		{
+			const float rowH = 24.0f;
+			const float popupW = 250.0f;
+			const float popupH = 6.0f + 20.0f + 4.0f + 5.0f * rowH + 6.0f;
+			const float px = snapBtnRect.W > 0.0f
+				? std::min(snapBtnRect.X, sceneRect.X + sceneRect.W - popupW - kChromePad)
+				: (sceneRect.X + sceneRect.W - popupW - kChromePad);
+			const float popupY = rightIslandRect.Y + rightIslandRect.H + 3.0f;
+			const Wui::WuiRect panel { px, popupY, popupW, popupH };
+			Wui::DrawPanelSurface(ctx, panel, theme);
+			ctx.RegisterOverlayRect(panel);
+			float rowY = panel.Y + 6.0f;
+
+			Wui::Label(ctx, { panel.X + 8.0f, rowY + 3.0f },
+				Wui::Tr("viewport.snap.title", "空间吸附与参考对齐"), theme.TextMuted, 11.5f);
+			rowY += 20.0f;
+			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
+			rowY += 4.0f;
+
+			const auto snapItem = [&](const char* id, const std::string& label, bool checked, const std::string& tip, const std::function<void()>& action)
+			{
+				const Wui::WuiRect row { panel.X + 4.0f, rowY, panel.W - 8.0f, rowH };
+				rowY += rowH;
+				Wui::Tooltip(ctx, row, tip);
+				if (Wui::MenuItem(ctx, Wui::HashId(id), row, label, checked, true, theme))
+					action();
+				ctx.RegisterOverlayRect(row);
+			};
+
+			snapItem("viewport.stream_grid", Wui::Tr("viewport.snap.ground_grid", "地面参考网格 (1m/10m)"),
+				m_Host.IsReferenceGridEnabled(), Wui::Tr("viewport.grid.hint", "开关地面参考基准网格 (1m/10m)。"),
+				[this] { m_Host.SetReferenceGridEnabled(!m_Host.IsReferenceGridEnabled()); });
+
+			snapItem("viewport.partition_grid", Wui::Tr("viewport.snap.partition", "世界分区流送网格"),
+				m_ShowWorldPartition, Wui::Tr("viewport.partition.hint", "开关大世界空间分区与流送区块辅助网格。"),
+				[this] { m_ShowWorldPartition = !m_ShowWorldPartition; });
+
+			snapItem("viewport.btn.toggle_snap", Wui::Tr("viewport.snap.pixel_snap", "2D 像素网格吸附"),
+				m_Host.IsPixelSnapEnabled(), Wui::Tr("viewport.snap.hint", "2D 像素网格吸附开关 (按 1/PPU 步长吸附坐标，杜绝亚像素插值撕裂与接缝抖动)"),
+				[this] { m_Host.SetPixelSnapEnabled(!m_Host.IsPixelSnapEnabled()); });
+
+			const bool csmOn = World::Renderer3D::IsCascadeDebugVisualization();
+			snapItem("viewport.csm_debug", Wui::Tr("viewport.snap.csm_debug", "CSM 阴影级联调试染色"),
+				csmOn, Wui::Tr("viewport.csm.hint", "CSM 4级级联阴影色彩调试: 红(C0)、绿(C1)、蓝(C2)、黄(C3)。"),
+				[csmOn] { World::Renderer3D::SetCascadeDebugVisualization(!csmOn); });
+
+			const bool is2D = m_Host.Is2DMode();
+			snapItem("viewport.btn.toggle_2d", Wui::Tr("viewport.snap.lock_rotation", "锁定鼠标旋转"),
+				is2D, Wui::Tr("viewport.2d.hint", "锁定鼠标旋转视角 (锁定后禁止鼠标旋转、右键拖拽变为平移；左上角方位菜单仍可正常切换方向)"),
+				[this, is2D] { m_Host.Set2DMode(!is2D); });
+
+			ctx.ClosePopupsOnOutsideClick({ snapPopup }, panel);
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+				ctx.ClosePopup(snapPopup);
+		}
+
+		// ⑧ 数据层多选弹层 (Layers Popup: 管理关卡数据层流送与可见性)
 		const Wui::WuiId layersPopup = Wui::HashId("viewport.layers.popup");
-		if (ctx.IsPopupOpen(layersPopup) && !dataLayers.empty())
+		if (ctx.IsPopupOpen(layersPopup))
 		{
 			const float rowH = 22.0f;
-			const float popupW = 200.0f;
-			const float popupH = 30.0f + static_cast<float>(dataLayers.size()) * rowH + 34.0f;
+			const float popupW = 220.0f;
+			const float popupH = dataLayers.empty() ? 64.0f : (30.0f + static_cast<float>(dataLayers.size()) * rowH + 34.0f);
 			const float popupX = layersBtnRect.W > 0.0f
 				? std::min(layersBtnRect.X, sceneRect.X + sceneRect.W - popupW - kChromePad)
 				: (sceneRect.X + sceneRect.W - popupW - kChromePad);
@@ -1260,42 +1354,48 @@ namespace World
 			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
 			rowY += 4.0f;
 
-			for (const Level::DataLayerDefinition& layer : dataLayers)
+			if (dataLayers.empty())
 			{
-				if (layer.Name.empty())
-					continue;
-				const bool isOn = (layer.LayerMask & activeLayers) != 0;
-				const Wui::WuiRect row { panel.X + 4.0f, rowY, panel.W - 8.0f, rowH };
-				rowY += rowH;
-
-				const std::string layerHint = Wui::TrFormat("viewport.datalayer.hint",
-					"Toggle data layer '{0}' (mask {1}).", { { "name", layer.Name },
-						{ "mask", std::to_string(layer.LayerMask) } });
-				Wui::Tooltip(ctx, row, layerHint);
-
-				if (Wui::MenuItem(ctx, Wui::HashId(("viewport.layer." + layer.Name).c_str()), row, layer.Name, isOn, true, theme))
+				Wui::Label(ctx, { panel.X + 12.0f, rowY + 3.0f }, Wui::Tr("viewport.layers.empty", "当前关卡未定义数据层"), theme.TextDisabled, 11.5f);
+			}
+			else
+			{
+				for (const Level::DataLayerDefinition& layer : dataLayers)
 				{
-					const uint32_t next = isOn ? (activeLayers & ~layer.LayerMask) : (activeLayers | layer.LayerMask);
-					m_Host.SetActiveDataLayers(next);
-				}
-			}
+					if (layer.Name.empty())
+						continue;
+					const bool isOn = (layer.LayerMask & activeLayers) != 0;
+					const Wui::WuiRect row { panel.X + 4.0f, rowY, panel.W - 8.0f, rowH };
+					rowY += rowH;
 
-			// 底部快捷操作行: [全部开启] / [仅基础层]
-			rowY += 2.0f;
-			Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
-			rowY += 4.0f;
-			const float btnHalfW = (panel.W - 16.0f) * 0.5f;
-			const Wui::WuiRect allBtn { panel.X + 6.0f, rowY, btnHalfW, 20.0f };
-			const Wui::WuiRect baseBtn { panel.X + 10.0f + btnHalfW, rowY, btnHalfW, 20.0f };
-			if (Wui::Button(ctx, Wui::HashId("viewport.layers.all"), allBtn, "全部显示", theme))
-			{
-				uint32_t allMask = 0;
-				for (const auto& l : dataLayers) allMask |= l.LayerMask;
-				m_Host.SetActiveDataLayers(allMask);
-			}
-			if (Wui::Button(ctx, Wui::HashId("viewport.layers.base_only"), baseBtn, "仅Base", theme))
-			{
-				m_Host.SetActiveDataLayers(1u);
+					const std::string layerHint = Wui::TrFormat("viewport.datalayer.hint",
+						"Toggle data layer '{0}' (mask {1}).", { { "name", layer.Name },
+							{ "mask", std::to_string(layer.LayerMask) } });
+					Wui::Tooltip(ctx, row, layerHint);
+
+					if (Wui::MenuItem(ctx, Wui::HashId(("viewport.layer." + layer.Name).c_str()), row, layer.Name, isOn, true, theme))
+					{
+						const uint32_t next = isOn ? (activeLayers & ~layer.LayerMask) : (activeLayers | layer.LayerMask);
+						m_Host.SetActiveDataLayers(next);
+					}
+				}
+
+				rowY += 2.0f;
+				Wui::PanelBackground(ctx, { panel.X + 6.0f, rowY, panel.W - 12.0f, 1.0f }, theme.Border, 0.0f);
+				rowY += 4.0f;
+				const float btnHalfW = (panel.W - 16.0f) * 0.5f;
+				const Wui::WuiRect allBtn { panel.X + 6.0f, rowY, btnHalfW, 20.0f };
+				const Wui::WuiRect baseBtn { panel.X + 10.0f + btnHalfW, rowY, btnHalfW, 20.0f };
+				if (Wui::Button(ctx, Wui::HashId("viewport.layers.all"), allBtn, "全部显示", theme))
+				{
+					uint32_t allMask = 0;
+					for (const auto& l : dataLayers) allMask |= l.LayerMask;
+					m_Host.SetActiveDataLayers(allMask);
+				}
+				if (Wui::Button(ctx, Wui::HashId("viewport.layers.base_only"), baseBtn, "仅Base", theme))
+				{
+					m_Host.SetActiveDataLayers(1u);
+				}
 			}
 
 			ctx.ClosePopupsOnOutsideClick({ layersPopup }, panel);
@@ -1303,7 +1403,7 @@ namespace World
 				ctx.ClosePopup(layersPopup);
 		}
 
-		// ⑥ 选择过滤器弹层 (Selection Filter Popup: 视口防误选快速配置与图层锁定)
+		// ⑨ 选择过滤器弹层 (Selection Filter Popup: 视口防误选快速配置与图层锁定)
 		const Wui::WuiId filterPopup = Wui::HashId("viewport.filter.popup");
 		if (ctx.IsPopupOpen(filterPopup))
 		{
@@ -1407,12 +1507,11 @@ namespace World
 				rowY += popupRowH;
 			}
 
-
-
 			ctx.ClosePopupsOnOutsideClick({ filterPopup }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(filterPopup);
 		}
+
 		// U22(用户 §5.5「所有视口类窗口都要有坐标系来表明方向」):主视口右下角
 		// 半透明三轴指示(X 红 / Y 绿 / Z 蓝),朝向取**当前画面用的相机基** ——
 		// Play 下是场景主相机、2D 下是正交相机(此时 Z 投影为点,自然只剩 X/Y)。
@@ -3625,7 +3724,17 @@ namespace World
 			}
 		}
 
-		// ---- 3D 导航网格 (NavMesh & AI Navigation) 视口可视化 ----
+						// 代理路径缓存结构体与哈希表
+		struct CachedAgentPath
+		{
+			glm::vec3 LastStart { 1e9f };
+			glm::vec3 LastDest { 1e9f };
+			std::vector<glm::vec3> Path;
+			std::chrono::steady_clock::time_point LastTime {};
+		};
+		static std::unordered_map<uint32_t, CachedAgentPath> s_AgentPathCache;
+
+// ---- 3D 导航网格 (NavMesh & AI Navigation) 视口可视化 ----
 		if (s_ShowNavMesh)
 		{
 			const Ref<Scene> navScene = m_Host.GetActiveScene();
@@ -3635,21 +3744,75 @@ namespace World
 				const glm::mat4& viewProj = debugCamera.ViewProjection;
 				Wui::ClipScope navClip(ctx, sceneRect);
 
+				const auto& registry = std::as_const(*navScene).GetRegistry();
 				std::shared_ptr<NavMesh> navMesh = navScene->GetNavMesh();
+
+				// 动态障碍物实时同步：编辑期与运行期保持一致，确保：
+				// 1. 障碍物覆盖的多边形着色为红色 (Blocked)；
+				// 2. 路径折线自动避开障碍物产生绕行，杜绝穿透！
+				if (navMesh && navMesh->GetPolygonCount() > 0)
+				{
+					static const void* s_LastNavMesh = nullptr;
+					static uint64_t s_LastObsHash = 0;
+					uint64_t currentObsHash = 0x9e3779b9;
+					for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
+					{
+						if (obs.CarveNavMesh == 1)
+						{
+							glm::vec3 c { 0.0f };
+							glm::vec3 s { 1.0f };
+							if (const auto* xform = registry.try_get<TransformComponent>(handle))
+							{
+								c = xform->Location;
+								s = glm::abs(xform->Scale);
+							}
+							const glm::vec3 worldExtents = s * obs.Extents;
+							currentObsHash ^= std::hash<float>()(c.x) + 0x9e3779b9 + (currentObsHash << 6) + (currentObsHash >> 2);
+							currentObsHash ^= std::hash<float>()(c.y) + 0x9e3779b9 + (currentObsHash << 6) + (currentObsHash >> 2);
+							currentObsHash ^= std::hash<float>()(c.z) + 0x9e3779b9 + (currentObsHash << 6) + (currentObsHash >> 2);
+							currentObsHash ^= std::hash<float>()(worldExtents.x) + 0x9e3779b9 + (currentObsHash << 6) + (currentObsHash >> 2);
+							currentObsHash ^= std::hash<float>()(worldExtents.z) + 0x9e3779b9 + (currentObsHash << 6) + (currentObsHash >> 2);
+						}
+					}
+
+					if (navMesh.get() != s_LastNavMesh || currentObsHash != s_LastObsHash)
+					{
+						s_LastNavMesh = navMesh.get();
+						s_LastObsHash = currentObsHash;
+						navMesh->ClearObstacles();
+						for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
+						{
+							if (obs.CarveNavMesh == 1)
+							{
+								glm::vec3 c { 0.0f };
+								glm::vec3 s { 1.0f };
+								if (const auto* xform = registry.try_get<TransformComponent>(handle))
+								{
+									c = xform->Location;
+									s = glm::abs(xform->Scale);
+								}
+								const glm::vec3 worldExtents = s * obs.Extents;
+								navMesh->ApplyObstacle(c, worldExtents, true);
+							}
+						}
+						s_AgentPathCache.clear();
+					}
+				}
+
 				if (navMesh && (navMesh->GetPolygonCount() > 0 || !navMesh->GetMacroTiles().empty()) && NavMeshPanel::ShowPolygons)
 				{
+
 					const glm::vec3 cameraPos = debugCamera.Position;
 					const glm::vec3 cameraForward = debugCamera.Forward;
 
 					// =========================================================================
-					// 第一层：远距离宏观大区域 Pass（Distant Macro Regions Pass, 38m ~ 600m）
-					// 遍历宏观块聚合体，彻底消除远处“完全看不到导航区域”的痛点，全图连片规整呈现
+					// 第一层：远景宏观大区域 Pass（Distant Macro Regions Pass, 38m ~ 600m）
 					// =========================================================================
 					const auto& macroTiles = navMesh->GetMacroTiles();
 					if (!macroTiles.empty())
 					{
-						constexpr float kMinMacroDist = 38.0f;
-						constexpr float kMaxMacroDist = 600.0f;
+						constexpr float kMinMacroDist = 25.0f;
+						constexpr float kMaxMacroDist = 1200.0f;
 						constexpr float kMinMacroDistSq = kMinMacroDist * kMinMacroDist;
 						constexpr float kMaxMacroDistSq = kMaxMacroDist * kMaxMacroDist;
 
@@ -3666,13 +3829,11 @@ namespace World
 							const auto& tile = macroTiles[m];
 							if (tile.PolyCount == 0) continue;
 
-							// 1. 视距范围：38m 延伸至 600m
 							const glm::vec3 toMacro = tile.Center - cameraPos;
 							const float distSq = glm::dot(toMacro, toMacro);
 							if (distSq < kMinMacroDistSq || distSq > kMaxMacroDistSq)
 								continue;
 
-							// 相机背面与视锥体粗裁（相机后方或离视锥过远跳过）
 							if (!debugCamera.IsOrthographic && glm::dot(toMacro, cameraForward) < 0.1f)
 								continue;
 
@@ -3686,12 +3847,11 @@ namespace World
 							macroCandidates.push_back({ distSq, m });
 						}
 
-						// 按距离近到远排序，优先保障过渡带与中景宏观区域
 						std::sort(macroCandidates.begin(), macroCandidates.end(), [](const MacroCandidate& a, const MacroCandidate& b) {
 							return a.DistSq < b.DistSq;
 						});
 
-						constexpr size_t kMaxMacroBudget = 120;
+						constexpr size_t kMaxMacroBudget = 512;
 						size_t macroDrawn = 0;
 
 						for (const auto& mcand : macroCandidates)
@@ -3701,7 +3861,6 @@ namespace World
 
 							const auto& tile = macroTiles[mcand.Index];
 
-							// 投影 4 个外角 Corners[0..3] 到屏幕空间 (+0.15m 高度偏移避免地貌穿插闪烁)
 							std::array<glm::vec2, 4> screenCorners;
 							bool projectOk = true;
 							float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
@@ -3724,12 +3883,10 @@ namespace World
 							}
 							if (!projectOk) continue;
 
-							// 视口外剪裁：4个顶点包围盒完全位于视口外跳过
 							if (maxX < sceneRect.X || minX > sceneRect.X + sceneRect.W ||
 								maxY < sceneRect.Y || minY > sceneRect.Y + sceneRect.H)
 								continue;
 
-							// 按 DominantAreaType 和 Blocked 上色（普通通行：绿；道路：亮绿；泥潭：蓝紫；阻挡：红）
 							Wui::WuiColor macroOutlineColor = tile.Blocked
 								? Wui::WuiColor{ 0.95f, 0.25f, 0.25f, 0.95f }
 								: Wui::WuiColor{ 0.15f, 0.92f, 0.50f, 0.90f };
@@ -3740,30 +3897,28 @@ namespace World
 
 							if (NavMeshPanel::ShowAreaCosts && !tile.Blocked)
 							{
-								if (tile.DominantAreaType == 1)      // Road (道路亮绿)
+								if (tile.DominantAreaType == 1)
 								{
 									macroOutlineColor = Wui::WuiColor{ 0.35f, 0.95f, 0.35f, 0.90f };
 									macroFillColor = Wui::WuiColor{ 0.30f, 0.95f, 0.30f, 0.30f };
 								}
-								else if (tile.DominantAreaType == 2) // Mud (泥潭蓝紫)
+								else if (tile.DominantAreaType == 2)
 								{
 									macroOutlineColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.90f };
 									macroFillColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.30f };
 								}
-								else if (tile.DominantAreaType == 3) // Hazard (危险红)
+								else if (tile.DominantAreaType == 3)
 								{
 									macroOutlineColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.90f };
 									macroFillColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.35f };
 								}
 							}
 
-							// 绘制半透明填充块
 							if (NavMeshPanel::FillPolygons)
 							{
 								Wui::ConvexQuad(ctx, screenCorners, macroFillColor);
 							}
 
-							// 绘制 4 条外轮廓线框，使远景导航表面形成清晰、规整的连片大区域显示
 							for (size_t i = 0; i < 4; ++i)
 							{
 								Wui::LineSegment(ctx, screenCorners[i], screenCorners[(i + 1) % 4], macroOutlineColor, 1.5f);
@@ -3774,14 +3929,15 @@ namespace World
 					}
 
 					// =========================================================================
-					// 第二层：近距离高细节网格 Pass（Near High-Detail Polygon Pass, < 45m）
-					// 只处理相机周围 < 45.0m 的详细多边形，细腻展示多边形网格与代价
+					// 第二层：近景高细网格 Pass（Near High-Detail Polygon Pass, < 45m）
+					// 空间粗筛加速：优先利用 MacroTiles（24m 瓦片），只遍历距离相机 63m 以内的
+					// 极少数瓦片（~4-9块），将每帧多边形遍历次数从 50,000 次骤降至 ~800 次！
 					// =========================================================================
 					const size_t polyCount = navMesh->GetPolygonCount();
 					if (polyCount > 0)
 					{
-						constexpr float kNearPolyMaxDist = 45.0f;
-						constexpr float kNearPolyMaxDistSq = kNearPolyMaxDist * kNearPolyMaxDist; // 45m 视距硬截断
+						constexpr float kNearPolyMaxDist = 42.0f;
+						constexpr float kNearPolyMaxDistSq = kNearPolyMaxDist * kNearPolyMaxDist;
 
 						struct PolyCandidate
 						{
@@ -3789,50 +3945,88 @@ namespace World
 							uint32_t Index;
 						};
 						std::vector<PolyCandidate> candidates;
-						candidates.reserve(std::min<size_t>(polyCount, 512));
+						candidates.reserve(256);
 
-						for (size_t p = 0; p < polyCount; ++p)
+						bool usedMacroAccel = false;
+						if (!macroTiles.empty() && !macroTiles[0].PolygonIndices.empty())
 						{
-							const auto& poly = navMesh->GetPolygon(static_cast<uint32_t>(p));
-							if (poly.VertexIndices.size() < 3) continue;
+							constexpr float kNearTileDist = 42.0f + 24.0f * 0.75f;
+							constexpr float kNearTileDistSq = kNearTileDist * kNearTileDist;
 
-							// 1. 视距硬截断：超过 45m 严格跳过
-							const glm::vec3 toPoly = poly.Center - cameraPos;
-							const float distSq = glm::dot(toPoly, toPoly);
-							if (distSq > kNearPolyMaxDistSq)
-								continue;
+							for (const auto& tile : macroTiles)
+							{
+								if (tile.PolyCount == 0) continue;
+								const glm::vec3 toTile = tile.Center - cameraPos;
+								const float tDistSq = glm::dot(toTile, toTile);
+								if (tDistSq > kNearTileDistSq) continue;
 
-							// 严格背面与视锥体粗裁 (相机后方或离视锥过远跳过)
-							if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < 0.1f)
-								continue;
+								if (!debugCamera.IsOrthographic && glm::dot(toTile, cameraForward) < 0.05f)
+									continue;
 
-							const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
-							if (clipPos.w < 0.1f)
-								continue;
-							const glm::vec2 ndc = glm::vec2(clipPos.x, clipPos.y) / clipPos.w;
-							if (std::abs(ndc.x) > 1.35f || std::abs(ndc.y) > 1.35f)
-								continue;
+								for (uint32_t pIdx : tile.PolygonIndices)
+								{
+									const auto& poly = navMesh->GetPolygon(pIdx);
+									if (poly.VertexIndices.size() < 3) continue;
 
-							candidates.push_back({ distSq, static_cast<uint32_t>(p) });
+									const glm::vec3 toPoly = poly.Center - cameraPos;
+									const float distSq = glm::dot(toPoly, toPoly);
+									if (distSq > kNearPolyMaxDistSq) continue;
+
+									if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < 0.1f)
+										continue;
+
+									const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
+									if (clipPos.w < 0.1f) continue;
+									const glm::vec2 ndc = glm::vec2(clipPos.x, clipPos.y) / clipPos.w;
+									if (std::abs(ndc.x) > 1.35f || std::abs(ndc.y) > 1.35f) continue;
+
+									candidates.push_back({ distSq, pIdx });
+								}
+							}
+							usedMacroAccel = true;
 						}
 
-						// 按距离从近到远排序，确保近处高细节、优先享有 Quad 填充与精细网格线预算
+						if (!usedMacroAccel)
+						{
+							for (size_t p = 0; p < polyCount; ++p)
+							{
+								const auto& poly = navMesh->GetPolygon(static_cast<uint32_t>(p));
+								if (poly.VertexIndices.size() < 3) continue;
+
+								const glm::vec3 toPoly = poly.Center - cameraPos;
+								const float distSq = glm::dot(toPoly, toPoly);
+								if (distSq > kNearPolyMaxDistSq) continue;
+
+								if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < 0.1f)
+									continue;
+
+								const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
+								if (clipPos.w < 0.1f) continue;
+								const glm::vec2 ndc = glm::vec2(clipPos.x, clipPos.y) / clipPos.w;
+								if (std::abs(ndc.x) > 1.35f || std::abs(ndc.y) > 1.35f) continue;
+
+								candidates.push_back({ distSq, static_cast<uint32_t>(p) });
+							}
+						}
+
 						std::sort(candidates.begin(), candidates.end(), [](const PolyCandidate& a, const PolyCandidate& b) {
 							return a.DistSq < b.DistSq;
 						});
 
 						size_t quadCount = 0;
 						size_t lineCount = 0;
-						constexpr size_t kMaxQuadBudget = 350;
-						constexpr size_t kMaxLineBudget = 450;
+						constexpr size_t kMaxQuadBudget = 320;
+						constexpr size_t kMaxLineBudget = 360;
 
 						for (const auto& cand : candidates)
 						{
+							if (quadCount >= kMaxQuadBudget && lineCount >= kMaxLineBudget)
+								break;
+
 							const auto& poly = navMesh->GetPolygon(cand.Index);
 							const size_t vertCount = poly.VertexIndices.size();
 							const float distSq = cand.DistSq;
 
-							// 投影 4 个顶角到屏幕空间 (+0.08m 防地貌贴图穿插闪烁)
 							std::array<glm::vec2, 4> screenPts;
 							bool projectOk = true;
 							float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
@@ -3856,12 +4050,10 @@ namespace World
 							}
 							if (!projectOk) continue;
 
-							// 严格视口外剪裁：4个顶点包围盒完全位于视口外的跳过
 							if (maxX < sceneRect.X || minX > sceneRect.X + sceneRect.W ||
 								maxY < sceneRect.Y || minY > sceneRect.Y + sceneRect.H)
 								continue;
 
-							// 2. 颜色解析 (基础可通行、区域代价、阻挡障碍)
 							Wui::WuiColor polyColor = poly.Blocked
 								? Wui::WuiColor{ 0.95f, 0.25f, 0.25f, 0.95f }
 								: Wui::WuiColor{ 0.15f, 0.92f, 0.50f, 0.90f };
@@ -3872,33 +4064,29 @@ namespace World
 
 							if (NavMeshPanel::ShowAreaCosts && !poly.Blocked)
 							{
-								if (poly.AreaType == 1)      // Road (道路亮绿)
+								if (poly.AreaType == 1)
 								{
 									polyColor = Wui::WuiColor{ 0.35f, 0.95f, 0.35f, 0.90f };
 									fillColor = Wui::WuiColor{ 0.30f, 0.95f, 0.30f, 0.35f };
 								}
-								else if (poly.AreaType == 2) // Mud (泥潭蓝紫)
+								else if (poly.AreaType == 2)
 								{
 									polyColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.90f };
 									fillColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.35f };
 								}
-								else if (poly.AreaType == 3) // Hazard (危险红)
+								else if (poly.AreaType == 3)
 								{
 									polyColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.90f };
 									fillColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.40f };
 								}
 							}
 
-							// 3. 【半透明全涂色填充 (Quad 预算安全削峰，最多 350 个)】
 							if (NavMeshPanel::FillPolygons && quadCount < kMaxQuadBudget)
 							{
 								Wui::ConvexQuad(ctx, screenPts, fillColor);
 								++quadCount;
 							}
 
-							// 4. 【外边界轮廓线 + 自适应内部网格线】
-							// 近处（<20m）：细方格每格都画 (stride = 1)
-							// 中远距离（20m~45m）：大方格每 2 格画一条 (stride = 2)
 							const int gridStride = (distSq < 20.0f * 20.0f) ? 1 : 2;
 
 							for (size_t i = 0; i < vertCount; ++i)
@@ -3908,22 +4096,18 @@ namespace World
 
 								if (!isBoundary)
 								{
-									// 共享内部边去重：只由较小索引多边形绘制一次
 									if (static_cast<int32_t>(cand.Index) > nbr)
 										continue;
 
-									// 内部线按距离自适应大方格/细方格
 									if (gridStride > 1 && (cand.Index % gridStride != 0))
 										continue;
 
-									// 内部网格线数量削峰：受预算保护
 									if (lineCount >= kMaxLineBudget)
 										continue;
 								}
 								else
 								{
-									// 外部轮廓线优先绘制，但在极度密集场景也施加安全保护
-									if (lineCount >= kMaxLineBudget + 100)
+									if (lineCount >= kMaxLineBudget + 60)
 										continue;
 								}
 
@@ -3941,29 +4125,27 @@ namespace World
 					}
 				}
 
-				const auto& registry = std::as_const(*navScene).GetRegistry();
 
-				// 1. 动态障碍物 (NavMeshObstacleComponent) 3D 盒体线框
+				// 1. 动态障碍物 (NavMeshObstacleComponent) 3D 盒体线框 (与 TransformComponent 本地矩阵及选择框 100% 同步)
 				if (NavMeshPanel::ShowObstacles)
 				{
 					const Wui::WuiColor obsColor { 1.0f, 0.55f, 0.15f, 0.95f };
 					for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
 					{
-						glm::vec3 center { 0.0f };
+						glm::mat4 world(1.0f);
 						if (const auto* xform = registry.try_get<TransformComponent>(handle))
-							center = xform->Location;
-						const glm::vec3 extents = obs.Extents;
+							world = xform->GetLocalMatrix();
 
-						const glm::vec3 corners[8] = {
-							center + glm::vec3(-extents.x, -extents.y, -extents.z),
-							center + glm::vec3( extents.x, -extents.y, -extents.z),
-							center + glm::vec3( extents.x, -extents.y,  extents.z),
-							center + glm::vec3(-extents.x, -extents.y,  extents.z),
-							center + glm::vec3(-extents.x,  extents.y, -extents.z),
-							center + glm::vec3( extents.x,  extents.y, -extents.z),
-							center + glm::vec3( extents.x,  extents.y,  extents.z),
-							center + glm::vec3(-extents.x,  extents.y,  extents.z)
-						};
+						glm::vec4 clipCorners[8];
+						for (int i = 0; i < 8; ++i)
+						{
+							const glm::vec3 localCorner {
+								(i & 1) ? obs.Extents.x : -obs.Extents.x,
+								(i & 2) ? obs.Extents.y : -obs.Extents.y,
+								(i & 4) ? obs.Extents.z : -obs.Extents.z
+							};
+							clipCorners[i] = viewProj * (world * glm::vec4(localCorner, 1.0f));
+						}
 						constexpr int edges[12][2] = {
 							{0,1}, {1,2}, {2,3}, {3,0},
 							{4,5}, {5,6}, {6,7}, {7,4},
@@ -3972,16 +4154,19 @@ namespace World
 						for (int e = 0; e < 12; ++e)
 						{
 							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(corners[edges[e][0]], 1.0f),
-								viewProj * glm::vec4(corners[edges[e][1]], 1.0f),
-							obsColor, 2.0f);
+								clipCorners[edges[e][0]],
+								clipCorners[edges[e][1]],
+								obsColor, 2.0f);
 						}
 					}
 				}
 
-				// 2. 寻路代理 (NavMeshAgentComponent) 圆柱体、目标光环与路径折线
+				// 2. 寻路代理 (NavMeshAgentComponent) 圆柱体、目标光环与路径折线 (带位移阈值与节流缓存)
 				const Wui::WuiColor agentCylinderColor { 0.2f, 0.75f, 1.0f, 0.90f };
 				const Wui::WuiColor pathColor { 1.0f, 0.85f, 0.2f, 0.95f };
+
+
+
 				for (auto [handle, agent] : registry.view<NavMeshAgentComponent>().each())
 				{
 					glm::vec3 center { 0.0f };
@@ -3997,19 +4182,19 @@ namespace World
 					PushProjectedSegment(ctx, viewProj, sceneRect,
 						viewProj * glm::vec4(center + glm::vec3( r, 0.05f, 0.0f), 1.0f),
 						viewProj * glm::vec4(center + glm::vec3( r, h, 0.0f), 1.0f),
-						agentCylinderColor, 1.5f);
+					agentCylinderColor, 1.5f);
 					PushProjectedSegment(ctx, viewProj, sceneRect,
 						viewProj * glm::vec4(center + glm::vec3(-r, 0.05f, 0.0f), 1.0f),
 						viewProj * glm::vec4(center + glm::vec3(-r, h, 0.0f), 1.0f),
-						agentCylinderColor, 1.5f);
+					agentCylinderColor, 1.5f);
 					PushProjectedSegment(ctx, viewProj, sceneRect,
 						viewProj * glm::vec4(center + glm::vec3(0.0f, 0.05f,  r), 1.0f),
 						viewProj * glm::vec4(center + glm::vec3(0.0f, h,  r), 1.0f),
-						agentCylinderColor, 1.5f);
+					agentCylinderColor, 1.5f);
 					PushProjectedSegment(ctx, viewProj, sceneRect,
 						viewProj * glm::vec4(center + glm::vec3(0.0f, 0.05f, -r), 1.0f),
 						viewProj * glm::vec4(center + glm::vec3(0.0f, h, -r), 1.0f),
-						agentCylinderColor, 1.5f);
+					agentCylinderColor, 1.5f);
 
 					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), agent.Destination + glm::vec3(0.0f, 0.08f, 0.0f), 0.4f, 1, pathColor, 2.0f);
 					PushProjectedSegment(ctx, viewProj, sceneRect,
@@ -4027,8 +4212,27 @@ namespace World
 
 					if (NavMeshPanel::ShowPaths && navMesh && navMesh->GetPolygonCount() > 0)
 					{
-						std::vector<glm::vec3> agentPath;
-						if (navMesh->FindPath(center, agent.Destination, agentPath) && agentPath.size() >= 2)
+						const uint32_t agentKey = static_cast<uint32_t>(static_cast<entt::entity>(handle));
+						auto& cache = s_AgentPathCache[agentKey];
+
+						const auto now = std::chrono::steady_clock::now();
+						const glm::vec3 dStart = center - cache.LastStart;
+						const glm::vec3 dDest = agent.Destination - cache.LastDest;
+						const float dStartSq = glm::dot(dStart, dStart);
+						const float dDestSq = glm::dot(dDest, dDest);
+						const double elapsedSec = std::chrono::duration<double>(now - cache.LastTime).count();
+
+						if (cache.Path.empty() || dStartSq > 0.0625f || dDestSq > 0.0625f || elapsedSec > 0.4)
+						{
+							cache.LastStart = center;
+							cache.LastDest = agent.Destination;
+							cache.LastTime = now;
+							cache.Path.clear();
+							navMesh->FindPath(center, agent.Destination, cache.Path);
+						}
+
+						const auto& agentPath = cache.Path;
+						if (agentPath.size() >= 2)
 						{
 							for (size_t i = 0; i < agentPath.size() - 1; ++i)
 							{
@@ -4038,9 +4242,22 @@ namespace World
 									viewProj * glm::vec4(p0, 1.0f),
 									viewProj * glm::vec4(p1, 1.0f),
 									pathColor, 2.5f);
-								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), p0, 0.15f, 1, pathColor, 1.8f);
 							}
-							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), agentPath.back() + glm::vec3(0.0f, 0.1f, 0.0f), 0.15f, 1, pathColor, 1.8f);
+							constexpr int kWpSegments = 8;
+							constexpr float kTwoPi = 6.28318530718f;
+							for (size_t i = 0; i < agentPath.size(); ++i)
+							{
+								const glm::vec3 wp = agentPath[i] + glm::vec3(0.0f, 0.1f, 0.0f);
+								glm::vec4 prevPt = viewProj * glm::vec4(wp + glm::vec3(0.15f, 0.0f, 0.0f), 1.0f);
+								for (int s = 1; s <= kWpSegments; ++s)
+								{
+									const float a = kTwoPi * static_cast<float>(s) / static_cast<float>(kWpSegments);
+									const glm::vec3 w = wp + glm::vec3(std::cos(a) * 0.15f, 0.0f, std::sin(a) * 0.15f);
+									const glm::vec4 currPt = viewProj * glm::vec4(w, 1.0f);
+									PushProjectedSegment(ctx, viewProj, sceneRect, prevPt, currPt, pathColor, 1.6f);
+									prevPt = currPt;
+								}
+							}
 						}
 					}
 				}
@@ -4066,17 +4283,96 @@ namespace World
 					}
 				}
 
-				// (区域代价修饰线框已清理，遵循商业引擎规范，仅在选中实体或显式调试时按需呈现)
 
-				// 5. 跨网格跳跃点 (OffMeshLinks) 洋红色抛物线弧线与箭头
+				// 4. 区域代价修饰区 (NavMeshAreaModifierComponent 实体 & NavMesh 资产内修饰体)
+				if (NavMeshPanel::ShowAreaCosts && navMesh)
+				{
+					// A. 场景内实体挂载的 NavMeshAreaModifierComponent (数据驱动，显式第一类组件)
+					for (auto [handle, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
+					{
+						Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.85f };
+						if (areaComp.AreaType == 2)
+							areaColor = Wui::WuiColor{ 0.70f, 0.35f, 0.95f, 0.85f };
+						else if (areaComp.AreaType == 3)
+							areaColor = Wui::WuiColor{ 0.95f, 0.45f, 0.15f, 0.85f };
+						else if (areaComp.AreaType == 4)
+							areaColor = Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.85f };
+
+						glm::mat4 world(1.0f);
+						if (const auto* xform = registry.try_get<TransformComponent>(handle))
+							world = xform->GetLocalMatrix();
+
+						glm::vec4 clipCorners[8];
+						for (int i = 0; i < 8; ++i)
+						{
+							const glm::vec3 localCorner {
+								(i & 1) ? areaComp.Extents.x : -areaComp.Extents.x,
+								(i & 2) ? areaComp.Extents.y : -areaComp.Extents.y,
+								(i & 4) ? areaComp.Extents.z : -areaComp.Extents.z
+							};
+							clipCorners[i] = viewProj * (world * glm::vec4(localCorner, 1.0f));
+						}
+						constexpr int edges[12][2] = {
+							{0,1}, {1,2}, {2,3}, {3,0},
+							{4,5}, {5,6}, {6,7}, {7,4},
+							{0,4}, {1,5}, {2,6}, {3,7}
+						};
+						for (int e = 0; e < 12; ++e)
+						{
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								clipCorners[edges[e][0]],
+								clipCorners[edges[e][1]],
+								areaColor, 1.8f);
+						}
+					}
+
+					// B. 导航网格二进制资产内记录的修饰体
+					for (const auto& mod : navMesh->GetAreaModifiers())
+					{
+						Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.85f };
+						if (mod.AreaType == 2)
+							areaColor = Wui::WuiColor{ 0.70f, 0.35f, 0.95f, 0.85f };
+						else if (mod.AreaType == 3)
+							areaColor = Wui::WuiColor{ 0.95f, 0.45f, 0.15f, 0.85f };
+						else if (mod.AreaType == 4)
+							areaColor = Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.85f };
+
+						const glm::vec3 center = mod.Center;
+						const glm::vec3 extents = mod.Extents;
+						const glm::vec3 corners[8] = {
+							center + glm::vec3(-extents.x, -extents.y, -extents.z),
+							center + glm::vec3( extents.x, -extents.y, -extents.z),
+							center + glm::vec3( extents.x, -extents.y,  extents.z),
+							center + glm::vec3(-extents.x, -extents.y,  extents.z),
+							center + glm::vec3(-extents.x,  extents.y, -extents.z),
+							center + glm::vec3( extents.x,  extents.y, -extents.z),
+							center + glm::vec3( extents.x,  extents.y,  extents.z),
+							center + glm::vec3(-extents.x,  extents.y,  extents.z)
+						};
+						constexpr int edges[12][2] = {
+							{0,1}, {1,2}, {2,3}, {3,0},
+							{4,5}, {5,6}, {6,7}, {7,4},
+							{0,4}, {1,5}, {2,6}, {3,7}
+						};
+						for (int e = 0; e < 12; ++e)
+						{
+							PushProjectedSegment(ctx, viewProj, sceneRect,
+								viewProj * glm::vec4(corners[edges[e][0]], 1.0f),
+								viewProj * glm::vec4(corners[edges[e][1]], 1.0f),
+								areaColor, 1.8f);
+						}
+					}
+				}
+
+				// 5. 跨网格跳跃点 (NavMeshOffMeshLinkComponent 实体 & NavMesh 资产内跳跃点)
 				if (NavMeshPanel::ShowOffMeshLinks && navMesh)
 				{
 					const Wui::WuiColor linkColor { 0.95f, 0.20f, 0.85f, 0.95f };
-					for (const auto& link : navMesh->GetOffMeshLinks())
+					auto drawSingleLink = [&](const glm::vec3& start, const glm::vec3& end)
 					{
 						constexpr int kArcSegs = 16;
-						const glm::vec3 pStart = link.Start + glm::vec3(0.0f, 0.1f, 0.0f);
-						const glm::vec3 pEnd = link.End + glm::vec3(0.0f, 0.1f, 0.0f);
+						const glm::vec3 pStart = start + glm::vec3(0.0f, 0.1f, 0.0f);
+						const glm::vec3 pEnd = end + glm::vec3(0.0f, 0.1f, 0.0f);
 						const float dist = glm::distance(pStart, pEnd);
 						const float arcH = std::max(1.0f, dist * 0.25f);
 						glm::vec3 prevPt = pStart;
@@ -4112,6 +4408,21 @@ namespace World
 								viewProj * glm::vec4(arrowRight, 1.0f),
 								linkColor, 2.2f);
 						}
+					};
+
+					// A. 场景实体挂载的 NavMeshOffMeshLinkComponent (数据驱动，显式第一类组件)
+					for (auto [handle, linkComp] : registry.view<NavMeshOffMeshLinkComponent>().each())
+					{
+						glm::vec3 startPos { 0.0f };
+						if (const auto* xform = registry.try_get<TransformComponent>(handle))
+							startPos = xform->Location;
+						drawSingleLink(startPos, linkComp.TargetLocation);
+					}
+
+					// B. 导航网格资产内的跳跃点
+					for (const auto& link : navMesh->GetOffMeshLinks())
+					{
+						drawSingleLink(link.Start, link.End);
 					}
 				}
 

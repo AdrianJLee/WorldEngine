@@ -3,7 +3,9 @@
 WorldEngine — 3D NavMesh Showcase Asset Generator
 Generates:
   1. templates/project-example/assets/terrains/navmesh_showcase.wterrain (.wterrain v1 binary)
-  2. templates/project-example/assets/scenes/NavMeshShowcase.wnavmesh (.wnavmesh binary)
+  2. projects/assets/terrains/navmesh_showcase.wterrain
+  3. templates/project-example/assets/scenes/NavMeshShowcase.wnavmesh (.wnavmesh v2 binary with NAV2 metadata)
+  4. projects/assets/scenes/NavMeshShowcase.wnavmesh
 """
 
 import math
@@ -12,8 +14,16 @@ import struct
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
-OUT_TERRAIN = os.path.join(REPO, "templates", "project-example", "assets", "terrains", "navmesh_showcase.wterrain")
-OUT_NAVMESH = os.path.join(REPO, "templates", "project-example", "assets", "scenes", "NavMeshShowcase.wnavmesh")
+
+OUT_TERRAINS = [
+    os.path.join(REPO, "templates", "project-example", "assets", "terrains", "navmesh_showcase.wterrain"),
+    os.path.join(REPO, "projects", "assets", "terrains", "navmesh_showcase.wterrain")
+]
+
+OUT_NAVMESHES = [
+    os.path.join(REPO, "templates", "project-example", "assets", "scenes", "NavMeshShowcase.wnavmesh"),
+    os.path.join(REPO, "projects", "assets", "scenes", "NavMeshShowcase.wnavmesh")
+]
 
 W = H = 65
 CELL = 1.0
@@ -113,7 +123,6 @@ def sample_slope(x, z):
     return math.acos(ny) * 180.0 / math.pi
 
 def generate_terrain():
-    os.makedirs(os.path.dirname(OUT_TERRAIN), exist_ok=True)
     heights = []
     splat = []
 
@@ -156,26 +165,24 @@ def generate_terrain():
         f.write(struct.pack("<I", len(raw)))
         f.write(raw)
 
-    with open(OUT_TERRAIN, "wb") as f:
-        f.write(struct.pack("<IIIIff", 0x57544552, 1, W, H, CELL, HEIGHT_SCALE))
-        for name, alb, nor, rough, metal, tiling in layers:
-            wstr(f, name)
-            wstr(f, alb)
-            f.write(struct.pack("<Q", 0))
-            wstr(f, nor)
-            f.write(struct.pack("<Q", 0))
-            f.write(struct.pack("<fff", rough, metal, tiling[0]))
-            f.write(struct.pack("<f", tiling[1]))
-        f.write(struct.pack("<%df" % len(heights), *heights))
-        f.write(struct.pack("<%dI" % len(splat), *splat))
-        f.write(bytes(len(heights)))
-
-    print(f"[Terrain] Generated '{OUT_TERRAIN}' ({os.path.getsize(OUT_TERRAIN)} bytes)")
-    print(f"[Terrain] Elevation range: {min(heights):.2f}m .. {max(heights):.2f}m")
+    for out_t in OUT_TERRAINS:
+        os.makedirs(os.path.dirname(out_t), exist_ok=True)
+        with open(out_t, "wb") as f:
+            f.write(struct.pack("<IIIIff", 0x57544552, 1, W, H, CELL, HEIGHT_SCALE))
+            for name, alb, nor, rough, metal, tiling in layers:
+                wstr(f, name)
+                wstr(f, alb)
+                f.write(struct.pack("<Q", 0))
+                wstr(f, nor)
+                f.write(struct.pack("<Q", 0))
+                f.write(struct.pack("<fff", rough, metal, tiling[0]))
+                f.write(struct.pack("<f", tiling[1]))
+            f.write(struct.pack("<%df" % len(heights), *heights))
+            f.write(struct.pack("<%dI" % len(splat), *splat))
+            f.write(bytes(len(heights)))
+        print(f"[Terrain] Generated '{out_t}' ({os.path.getsize(out_t)} bytes)")
 
 def generate_navmesh():
-    os.makedirs(os.path.dirname(OUT_NAVMESH), exist_ok=True)
-
     world_w = float(W - 1) * CELL
     world_h = float(H - 1) * CELL
     num_steps_x = max(1, int(world_w / STEP_SIZE))
@@ -225,26 +232,111 @@ def generate_navmesh():
             else:
                 edge_map[key] = (p_idx, e)
 
-    # Write .wnavmesh binary
-    with open(OUT_NAVMESH, "wb") as f:
-        v_count = len(vertices)
-        f.write(struct.pack("<I", v_count))
-        for vx, vy, vz in vertices:
-            f.write(struct.pack("<fff", vx, vy, vz))
+    # Off-Mesh Links (洋红色抛物线跳跃点)
+    off_mesh_links = [
+        # 1. 西侧高台跳跃点 (Plateau Leap): 从高台顶部 (24, 5.2, 30) 纵身跃下至峡谷 (30, 0.1, 30)
+        {
+            "start": (24.0, 5.2, 30.0),
+            "end": (30.0, 0.1, 30.0),
+            "cost": 1.2,
+            "link_type": 1,
+            "bidi": True
+        },
+        # 2. 东侧岩石前哨跳跃点 (Rocky Outpost Leap): 峡谷步道 (34, 0.1, 34) 攀爬跳跃上岩石平台 (42, 2.4, 34)
+        {
+            "start": (34.0, 0.1, 34.0),
+            "end": (42.0, 2.4, 34.0),
+            "cost": 1.5,
+            "link_type": 2,
+            "bidi": True
+        }
+    ]
 
-        p_count = len(polygons)
-        f.write(struct.pack("<I", p_count))
-        for poly in polygons:
-            indices = poly["indices"]
-            f.write(struct.pack("<I", len(indices)))
-            f.write(struct.pack("<%dI" % len(indices), *indices))
+    # Area Modifiers (区域代价修饰区: 道路 0.5x, 泥泞 3.0x, 熔岩 10.0x)
+    area_modifiers = [
+        # 1. 石板古道 (Cobblestone Highway): 沿中央峡谷主干道，通行代价 0.5 (加速道路，浅绿/亮绿色)
+        {
+            "center": (32.0, 0.0, 20.0),
+            "extents": (3.5, 3.0, 8.0),
+            "cost_multiplier": 0.5,
+            "area_type": 1 # Road (Bright Green)
+        },
+        # 2. 毒沼烂泥 (Deep Mud Swamp): 西南低洼湿地盆地，通行代价 3.0 (高阻力泥泞，紫色)
+        {
+            "center": (20.0, 0.0, 44.0),
+            "extents": (6.0, 3.0, 6.0),
+            "cost_multiplier": 3.0,
+            "area_type": 2 # Mud (Purple)
+        },
+        # 3. 熔岩地裂 (Lava Fissure / Hazard): 东南岩石裂隙险境，通行代价 10.0 (危险避让区，橙红色)
+        {
+            "center": (46.0, 2.0, 20.0),
+            "extents": (5.0, 3.0, 4.0),
+            "cost_multiplier": 10.0,
+            "area_type": 3 # Hazard (Orange-Red)
+        }
+    ]
 
-            neighbors = poly["neighbors"]
-            f.write(struct.pack("<I", len(neighbors)))
-            f.write(struct.pack("<%di" % len(neighbors), *neighbors))
+    # Assign polygon AreaType and Cost
+    for poly in polygons:
+        cx = sum(vertices[vi][0] for vi in poly["indices"]) / len(poly["indices"])
+        cy = sum(vertices[vi][1] for vi in poly["indices"]) / len(poly["indices"])
+        cz = sum(vertices[vi][2] for vi in poly["indices"]) / len(poly["indices"])
+        poly["center"] = (cx, cy, cz)
+        poly["area_type"] = 0
+        poly["cost"] = 1.0
 
-    print(f"[NavMesh] Generated '{OUT_NAVMESH}' ({os.path.getsize(OUT_NAVMESH)} bytes)")
-    print(f"[NavMesh] Vertices: {len(vertices)}, Polygons: {len(polygons)}")
+        for mod in area_modifiers:
+            mc = mod["center"]
+            me = mod["extents"]
+            if (abs(cx - mc[0]) <= me[0] and
+                abs(cy - mc[1]) <= me[1] and
+                abs(cz - mc[2]) <= me[2]):
+                poly["area_type"] = mod["area_type"]
+                poly["cost"] = mod["cost_multiplier"]
+                break
+
+    # Write .wnavmesh binary with v2 NAV2 extended metadata
+    for out_path in OUT_NAVMESHES:
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "wb") as f:
+            v_count = len(vertices)
+            f.write(struct.pack("<I", v_count))
+            for vx, vy, vz in vertices:
+                f.write(struct.pack("<fff", vx, vy, vz))
+
+            p_count = len(polygons)
+            f.write(struct.pack("<I", p_count))
+            for poly in polygons:
+                indices = poly["indices"]
+                f.write(struct.pack("<I", len(indices)))
+                f.write(struct.pack("<%dI" % len(indices), *indices))
+
+                neighbors = poly["neighbors"]
+                f.write(struct.pack("<I", len(neighbors)))
+                f.write(struct.pack("<%di" % len(neighbors), *neighbors))
+
+            # NAV2 extended metadata: magic = 0x4E415632 (b'2VAN' in LE)
+            f.write(struct.pack("<I", 0x4E415632))
+
+            for poly in polygons:
+                f.write(struct.pack("B", poly["area_type"]))
+                f.write(struct.pack("<f", poly["cost"]))
+
+            f.write(struct.pack("<I", len(off_mesh_links)))
+            for link in off_mesh_links:
+                sx, sy, sz = link["start"]
+                ex, ey, ez = link["end"]
+                f.write(struct.pack("<fffffffBBxx", sx, sy, sz, ex, ey, ez, link["cost"], link["link_type"], 1 if link["bidi"] else 0))
+
+            f.write(struct.pack("<I", len(area_modifiers)))
+            for mod in area_modifiers:
+                cx, cy, cz = mod["center"]
+                ex, ey, ez = mod["extents"]
+                f.write(struct.pack("<fffffffBxxx", cx, cy, cz, ex, ey, ez, mod["cost_multiplier"], mod["area_type"]))
+
+        print(f"[NavMesh] Generated '{out_path}' ({os.path.getsize(out_path)} bytes)")
+    print(f"[NavMesh] Vertices: {len(vertices)}, Polygons: {len(polygons)}, Links: {len(off_mesh_links)}, Modifiers: {len(area_modifiers)}")
 
 if __name__ == "__main__":
     generate_terrain()

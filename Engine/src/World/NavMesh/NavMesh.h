@@ -40,6 +40,9 @@ namespace World
 		uint8_t AreaType = 1; // 0=Walkable, 1=Road, 2=Mud, 3=Hazard, 4=Impassable
 	};
 
+	static_assert(sizeof(NavMeshOffMeshLink) == 32, "NavMeshOffMeshLink must be 32 bytes");
+	static_assert(sizeof(NavMeshAreaModifier) == 32, "NavMeshAreaModifier must be 32 bytes");
+
 	struct NavMeshMacroTile
 	{
 		glm::vec3 Corners[4] {};
@@ -49,6 +52,7 @@ namespace World
 		uint32_t PolyCount = 0;
 		uint8_t DominantAreaType = 0;
 		bool Blocked = false;
+		std::vector<uint32_t> PolygonIndices;
 	};
 
 	struct NavMeshBakeSettings

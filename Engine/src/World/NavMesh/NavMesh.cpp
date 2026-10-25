@@ -315,23 +315,41 @@ namespace World
 		float bestDist2 = maxDistance * maxDistance;
 		bool found = false;
 
-		for (uint32_t p = 0; p < m_Polygons.size(); ++p)
+		for (uint32_t p = 0; p < static_cast<uint32_t>(m_Polygons.size()); ++p)
 		{
 			const auto& poly = m_Polygons[p];
 			if (poly.Blocked || poly.Cost <= 0.0f)
 				continue;
 
-			std::vector<glm::vec3> polyVerts;
-			polyVerts.reserve(poly.VertexIndices.size());
-			for (uint32_t vi : poly.VertexIndices)
-				polyVerts.push_back(m_Vertices[vi]);
-
-			// 投影到多边形表面
+			// 快速中心距离粗筛：多边形半径通常小于 4.0m，超出当前最优距离 + 半径裕量则直接跳过
 			const glm::vec3 toPt = point - poly.Center;
+			const float centerDist2 = glm::dot(toPt, toPt);
+			if (centerDist2 > bestDist2 + 16.0f)
+				continue;
+
+			const size_t vertCount = poly.VertexIndices.size();
+			if (vertCount < 3)
+				continue;
+
+			// 点到多边形平面的正交投影
 			const float distToPlane = glm::dot(toPt, poly.Normal);
 			const glm::vec3 projected = point - poly.Normal * distToPlane;
 
-			if (IsPointInConvexPolygon(projected, polyVerts))
+			// 零堆内存分配的凸多边形内部检测 (直接按索引访问 m_Vertices)
+			bool inside = true;
+			bool positive = false;
+			bool negative = false;
+			for (size_t i = 0; i < vertCount; ++i)
+			{
+				const glm::vec3& a = m_Vertices[poly.VertexIndices[i]];
+				const glm::vec3& b = m_Vertices[poly.VertexIndices[(i + 1) % vertCount]];
+				const float crossZ = (projected.x - a.x) * (b.z - a.z) - (projected.z - a.z) * (b.x - a.x);
+				if (crossZ > 0.001f) positive = true;
+				if (crossZ < -0.001f) negative = true;
+				if (positive && negative) { inside = false; break; }
+			}
+
+			if (inside)
 			{
 				const glm::vec3 diff1 = point - projected;
 				const float d2 = glm::dot(diff1, diff1);
@@ -345,11 +363,11 @@ namespace World
 			}
 			else
 			{
-				// 测试各边的最近点
-				for (size_t i = 0; i < polyVerts.size(); ++i)
+				// 多边形各边最近点求取 (直接从 m_Vertices 读取，杜绝 vector 拷贝)
+				for (size_t i = 0; i < vertCount; ++i)
 				{
-					const glm::vec3& a = polyVerts[i];
-					const glm::vec3& b = polyVerts[(i + 1) % polyVerts.size()];
+					const glm::vec3& a = m_Vertices[poly.VertexIndices[i]];
+					const glm::vec3& b = m_Vertices[poly.VertexIndices[(i + 1) % vertCount]];
 					const glm::vec3 ab = b - a;
 					const float t = std::clamp(glm::dot(point - a, ab) / std::max(glm::dot(ab, ab), 1e-4f), 0.0f, 1.0f);
 					const glm::vec3 edgePt = a + ab * t;
@@ -401,6 +419,8 @@ namespace World
 		std::priority_queue<AStarNode, std::vector<AStarNode>, std::greater<AStarNode>> openSet;
 		std::unordered_map<uint32_t, float> gScore;
 		std::unordered_map<uint32_t, uint32_t> cameFrom;
+		gScore.reserve(256);
+		cameFrom.reserve(256);
 
 		gScore[polyStart] = 0.0f;
 		openSet.push({ polyStart, glm::distance(m_Polygons[polyStart].Center, navEnd) * 0.25f });
@@ -1307,6 +1327,33 @@ namespace World
 		std::vector<NavMeshTriangle> triangles;
 		ExtractSceneGeometry(scene, settings, triangles);
 		BakeFromTriangles(triangles, settings);
+
+		const auto& registry = scene.GetRegistry();
+		for (auto [entity, linkComp] : registry.view<NavMeshOffMeshLinkComponent>().each())
+		{
+			NavMeshOffMeshLink link;
+			if (const auto* xform = registry.try_get<TransformComponent>(entity))
+				link.Start = xform->Location;
+			link.End = linkComp.TargetLocation;
+			link.Cost = linkComp.Cost;
+			link.LinkType = linkComp.LinkType;
+			link.BiDirectional = (linkComp.BiDirectional != 0);
+			AddOffMeshLink(link);
+		}
+		for (auto [entity, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
+		{
+			NavMeshAreaModifier mod;
+			glm::vec3 scale(1.0f);
+			if (const auto* xform = registry.try_get<TransformComponent>(entity))
+			{
+				mod.Center = xform->Location;
+				scale = glm::abs(xform->Scale);
+			}
+			mod.Extents = areaComp.Extents * scale;
+			mod.CostMultiplier = areaComp.CostMultiplier;
+			mod.AreaType = areaComp.AreaType;
+			AddAreaModifier(mod);
+		}
 	}
 
 	std::future<std::shared_ptr<NavMesh>> NavMesh::BakeSceneAsync(const Scene& scene, const NavMeshBakeSettings& settings)
@@ -1322,14 +1369,41 @@ namespace World
 			links = curNav->GetOffMeshLinks();
 		}
 
+		const auto& registry = scene.GetRegistry();
+		for (auto [entity, linkComp] : registry.view<NavMeshOffMeshLinkComponent>().each())
+		{
+			NavMeshOffMeshLink link;
+			if (const auto* xform = registry.try_get<TransformComponent>(entity))
+				link.Start = xform->Location;
+			link.End = linkComp.TargetLocation;
+			link.Cost = linkComp.Cost;
+			link.LinkType = linkComp.LinkType;
+			link.BiDirectional = (linkComp.BiDirectional != 0);
+			links.push_back(link);
+		}
+		for (auto [entity, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
+		{
+			NavMeshAreaModifier mod;
+			glm::vec3 scale(1.0f);
+			if (const auto* xform = registry.try_get<TransformComponent>(entity))
+			{
+				mod.Center = xform->Location;
+				scale = glm::abs(xform->Scale);
+			}
+			mod.Extents = areaComp.Extents * scale;
+			mod.CostMultiplier = areaComp.CostMultiplier;
+			mod.AreaType = areaComp.AreaType;
+			areaMods.push_back(mod);
+		}
+
 		return std::async(std::launch::async, [triangles = std::move(triangles),
 		                                       areaMods = std::move(areaMods),
 		                                       links = std::move(links),
 		                                       settings]() mutable {
 			auto nav = std::make_shared<NavMesh>();
+			nav->BakeFromTriangles(triangles, settings);
 			for (const auto& mod : areaMods) nav->AddAreaModifier(mod);
 			for (const auto& link : links) nav->AddOffMeshLink(link);
-			nav->BakeFromTriangles(triangles, settings);
 			return nav;
 		});
 	}
@@ -1476,8 +1550,24 @@ namespace World
 
 		for (auto& poly : m_Polygons)
 		{
-			if (poly.Center.x >= bMin.x && poly.Center.x <= bMax.x &&
-				poly.Center.z >= bMin.z && poly.Center.z <= bMax.z)
+			float pMinX = poly.Center.x, pMaxX = poly.Center.x;
+			float pMinZ = poly.Center.z, pMaxZ = poly.Center.z;
+			for (uint32_t vi : poly.VertexIndices)
+			{
+				if (vi < m_Vertices.size())
+				{
+					pMinX = std::min(pMinX, m_Vertices[vi].x);
+					pMaxX = std::max(pMaxX, m_Vertices[vi].x);
+					pMinZ = std::min(pMinZ, m_Vertices[vi].z);
+					pMaxZ = std::max(pMaxZ, m_Vertices[vi].z);
+				}
+			}
+
+			const bool overlapX = (pMinX <= bMax.x + 0.15f) && (pMaxX >= bMin.x - 0.15f);
+			const bool overlapZ = (pMinZ <= bMax.z + 0.15f) && (pMaxZ >= bMin.z - 0.15f);
+			const bool overlapY = (poly.Center.y >= bMin.y - 1.5f) && (poly.Center.y <= bMax.y + 1.5f);
+
+			if (overlapX && overlapZ && overlapY)
 			{
 				poly.Blocked = carve;
 			}
@@ -1591,11 +1681,40 @@ namespace World
 				? static_cast<float>(sumCenterY / static_cast<double>(polyIndices.size()))
 				: 0.0f;
 
-			// 4 个世界空间外角顶点（按顺时针/逆时针排列，带平均高程）
-			macroTile.Corners[0] = glm::vec3(minX, avgY, minZ);
-			macroTile.Corners[1] = glm::vec3(maxX, avgY, minZ);
-			macroTile.Corners[2] = glm::vec3(maxX, avgY, maxZ);
-			macroTile.Corners[3] = glm::vec3(minX, avgY, maxZ);
+			// 4 个角点高程自适应贴合（四角寻找最近多边形顶点高程，贴合地貌起伏与斜坡，消除悬空与切入）
+			float cornerY[4] = { avgY, avgY, avgY, avgY };
+			float cornerDistSq[4] = { 1e9f, 1e9f, 1e9f, 1e9f };
+			const glm::vec2 cornerXZ[4] = {
+				{ minX, minZ }, { maxX, minZ }, { maxX, maxZ }, { minX, maxZ }
+			};
+
+			for (uint32_t pIdx : polyIndices)
+			{
+				const auto& poly = m_Polygons[pIdx];
+				for (uint32_t vIdx : poly.VertexIndices)
+				{
+					if (vIdx < m_Vertices.size())
+					{
+						const auto& v = m_Vertices[vIdx];
+						for (int c = 0; c < 4; ++c)
+						{
+							const float dx = v.x - cornerXZ[c].x;
+							const float dz = v.z - cornerXZ[c].y;
+							const float d2 = dx * dx + dz * dz;
+							if (d2 < cornerDistSq[c])
+							{
+								cornerDistSq[c] = d2;
+								cornerY[c] = v.y;
+							}
+						}
+					}
+				}
+			}
+
+			macroTile.Corners[0] = glm::vec3(minX, cornerY[0], minZ);
+			macroTile.Corners[1] = glm::vec3(maxX, cornerY[1], minZ);
+			macroTile.Corners[2] = glm::vec3(maxX, cornerY[2], maxZ);
+			macroTile.Corners[3] = glm::vec3(minX, cornerY[3], maxZ);
 
 			// 区域中心点
 			macroTile.Center = glm::vec3(minX + tileSize * 0.5f, avgY, minZ + tileSize * 0.5f);
@@ -1603,6 +1722,8 @@ namespace World
 			// 优势区域类型 (DominantAreaType)
 			uint8_t dominantArea = 0;
 			uint32_t maxCount = 0;
+			uint8_t maxSpecialArea = 0;
+			uint32_t maxSpecialCount = 0;
 			for (const auto& [area, count] : areaTypeCounts)
 			{
 				if (count > maxCount)
@@ -1610,11 +1731,22 @@ namespace World
 					maxCount = count;
 					dominantArea = area;
 				}
+				if (area != 0 && count > maxSpecialCount)
+				{
+					maxSpecialCount = count;
+					maxSpecialArea = area;
+				}
+			}
+			// 若有特征区域（道路/沼泽/危险区）占比显著（>= 6 个多边形或 >= 15%），宏观瓦片优先呈现该特征色彩
+			if (maxSpecialCount >= 6 || (maxSpecialCount * 6 >= polyIndices.size() && maxSpecialCount > 0))
+			{
+				dominantArea = maxSpecialArea;
 			}
 			macroTile.DominantAreaType = dominantArea;
 			macroTile.Blocked = allBlocked;
+			macroTile.PolygonIndices = polyIndices;
 
-			m_MacroTiles.push_back(macroTile);
+			m_MacroTiles.push_back(std::move(macroTile));
 		}
 	}
 
@@ -1733,6 +1865,31 @@ namespace World
 			{
 				m_OffMeshLinks.resize(linkCount);
 				stream.read(reinterpret_cast<char*>(m_OffMeshLinks.data()), linkCount * sizeof(NavMeshOffMeshLink));
+
+				// 建立跳跃点起始与目标多边形的相邻连接，使得 A* 能够跨越跳跃点进行导航寻路
+				for (const auto& link : m_OffMeshLinks)
+				{
+					glm::vec3 sPt, ePt;
+					uint32_t pStart = 0, pEnd = 0;
+					if (SamplePosition(link.Start, 5.0f, sPt, pStart) &&
+						SamplePosition(link.End, 5.0f, ePt, pEnd) &&
+						pStart != pEnd)
+					{
+						auto& nbrsS = m_Polygons[pStart].Neighbors;
+						if (std::find(nbrsS.begin(), nbrsS.end(), static_cast<int32_t>(pEnd)) == nbrsS.end())
+						{
+							nbrsS.push_back(static_cast<int32_t>(pEnd));
+						}
+						if (link.BiDirectional)
+						{
+							auto& nbrsE = m_Polygons[pEnd].Neighbors;
+							if (std::find(nbrsE.begin(), nbrsE.end(), static_cast<int32_t>(pStart)) == nbrsE.end())
+							{
+								nbrsE.push_back(static_cast<int32_t>(pStart));
+							}
+						}
+					}
+				}
 			}
 
 			uint32_t modCount = 0;
@@ -1761,7 +1918,8 @@ namespace World
 			const auto& [xform, obs] = scene.GetRegistry().get<TransformComponent, NavMeshObstacleComponent>(entity);
 			if (obs.CarveNavMesh == 1)
 			{
-				const_cast<NavMesh&>(navMesh).ApplyObstacle(xform.Location, obs.Extents, true);
+				const glm::vec3 worldExtents = glm::abs(xform.Scale) * obs.Extents;
+				const_cast<NavMesh&>(navMesh).ApplyObstacle(xform.Location, worldExtents, true);
 			}
 		}
 
