@@ -69,6 +69,16 @@ local BEACONS = {
         Pos = vec3.new(27.0, 0.0, 48.0),
         Description = "低矮石拱通道，过梁净空 1.3m。矮小角色(0.9m)或蹲伏角色(0.9m)可通行；高角色站立(1.8m)阻断",
     },
+    {
+        Name = "Overhead Viaduct (高架天桥 4m)",
+        Pos = vec3.new(32.0, 4.2, 32.0),
+        Description = "位于峡谷上空的实机 3D 立体高架天桥，高 4.0m，横跨东西两侧高台与缓坡",
+    },
+    {
+        Name = "Underbridge Stream (桥底涵洞 0m)",
+        Pos = vec3.new(32.0, 0.1, 36.0),
+        Description = "位于高架天桥正下方穿行水道，与上方桥面立体分层并行，互不干扰",
+    },
 }
 
 -- 运行时状态
@@ -86,6 +96,8 @@ local cameraEntity = nil
 local followCamera = false
 local lastKeyV = false
 local lastKey5 = false
+local lastKey6 = false
+local lastKey7 = false
 
 -- 代理控制参数
 local currentTargetIndex = 2 -- 默认目标: 峡谷远端
@@ -257,7 +269,10 @@ ecs:AddSystem("NavMeshShowcaseSystem", "Update", function(dt: number)
             print("    [1] 键 -> 前往高台顶峰 (Plateau Hilltop) — 演示 25° 缓坡攀爬与高差寻路")
             print("    [2] 键 -> 前往峡谷远端 (Valley Exit)     — 演示直通峡谷与路障绕行")
             print("    [3] 键 -> 前往碎石前哨 (Rocky Outpost)   — 演示东侧阶梯台地巡航")
-            print("    [4] 键 -> 前往大本营 (Base Camp)         — 演示返回平原大本营")
+            print("    [4] 键 -> 前往大本营 (Base Camp)             — 演示返回平原大本营")
+            print("    [5] 键 -> 穿行低矮石拱洞 (Arch Tunnel 1.3m)  — 演示限高姿态对比")
+            print("    [6] 键 -> 前往高架天桥 (Overhead Viaduct 4m) — 演示 3D 立体多层上层桥面")
+            print("    [7] 键 -> 前往桥底水道 (Underbridge Stream)  — 演示 3D 立体多层下层水道")
             print("    [Space] 或 [O] 键 -> 动态切换峡谷升降路障 (升起阻断 / 降下畅通)")
             print("    [P] 键            -> 开启 / 关闭四大地标多点循环巡逻模式")
             print("================================================================================")
@@ -324,6 +339,22 @@ ecs:AddSystem("NavMeshShowcaseSystem", "Update", function(dt: number)
         SetTarget(5)
     end
     lastKey5 = k5
+
+    -- [6] 键: 前往 3D 高架天桥 (立体上层 4m)
+    local k6 = Input.IsKeyPressed and (Input.IsKeyPressed(54) or Input.IsKeyPressed("6")) or false
+    if k6 and not lastKey6 then
+        patrolActive = false
+        SetTarget(6)
+    end
+    lastKey6 = k6
+
+    -- [7] 键: 前往桥底涵洞水道 (立体下层 0m)
+    local k7 = Input.IsKeyPressed and (Input.IsKeyPressed(55) or Input.IsKeyPressed("7")) or false
+    if k7 and not lastKey7 then
+        patrolActive = false
+        SetTarget(7)
+    end
+    lastKey7 = k7
 
     -- [V] 键: 切换相机视角 (全景鸟瞰 / 第三人称跟随)
     local kV = Input.IsKeyPressed and (Input.IsKeyPressed(86) or Input.IsKeyPressed("V")) or false
@@ -467,7 +498,7 @@ ui.onDraw(function()
     end)
 
     -- 绘制主面板
-    ui.panel(24, 24, 400, 582, "3D NavMesh & AI Navigation Showcase")
+    ui.panel(24, 24, 400, 612, "3D NavMesh & AI Navigation Showcase")
 
     -- 状态标题与指标
     ui.text(40, 56, "状态       " .. agentStateText, 14)
@@ -484,15 +515,27 @@ ui.onDraw(function()
     ui.text(40, 94, string.format("当前目标   [%d] %s", currentTargetIndex, BEACONS[currentTargetIndex].Name), 12)
     ui.text(40, 112, string.format("剩余距离   %.2f m    巡航速度: %.1f m/s", distRemaining, speed), 12)
 
-    -- 路障与巡逻状态
-    local barricadeStatusStr = barricadeClosed and "【CLOSED 阻断】代理自动绕行高台" or "【OPEN 畅通】峡谷捷径直达"
-    ui.text(40, 130, "峡谷路障   " .. barricadeStatusStr, 12)
+    -- 3D 立体分层感知与路障状态
+    local multiLayerNote = ""
+    if currentPos.y >= 3.5 then
+        multiLayerNote = "【3D立体多层导航】当前位于高架大桥 (Y=4.2m)，桥下水道 (Y=0.1m) 独立并行，支持信仰之跃跨层降落！"
+    elseif currentTargetIndex == 6 then
+        multiLayerNote = "【3D立体多层导航】正在向 4m 高架天桥攀爬寻路，桥下水道并行不冲突"
+    elseif currentTargetIndex == 7 then
+        multiLayerNote = "【3D立体多层导航】正在前往桥下穿行水道 (Y=0.1m)，上方立体天桥净空畅通"
+    end
+    if multiLayerNote ~= "" then
+        ui.text(40, 130, multiLayerNote, 11)
+    else
+        local barricadeStatusStr = barricadeClosed and "【CLOSED 阻断】代理自动绕行高台" or "【OPEN 畅通】峡谷捷径直达"
+        ui.text(40, 130, "峡谷路障   " .. barricadeStatusStr, 12)
+    end
 
     local patrolStr = patrolActive and string.format("【开启】(目标 %d)", currentTargetIndex) or "【关闭】"
     ui.text(40, 148, "循环巡逻   " .. patrolStr, 12)
 
     -- 快捷按键提示
-    ui.text(40, 168, "按键: [1..5] 目标   [C] 蹲伏   [V] 视角   [Space] 路障   [P] 巡逻", 11)
+    ui.text(40, 168, "按键: [1..7] 目标   [C] 蹲伏   [V] 视角   [Space] 路障   [P] 巡逻", 11)
 
     -- 相机视角切换按钮
     local camBtnText = followCamera
@@ -504,33 +547,60 @@ ui.onDraw(function()
         lastEventTimer = 3.0
     end
 
-    -- 地标按钮 (四点 + 石拱洞)
-    if ui.button("btn_target_1", 40, 214, 68, 24, "[1] 高台") then
+    -- 地标按钮 (1..7 双行排布，整洁专业)
+    if ui.button("btn_target_1", 40, 214, 84, 24, "[1] 高台") then
         patrolActive = false
         SetTarget(1)
     end
-    if ui.button("btn_target_2", 112, 214, 68, 24, "[2] 峡谷") then
+    if ui.button("btn_target_2", 130, 214, 84, 24, "[2] 峡谷") then
         patrolActive = false
         SetTarget(2)
     end
-    if ui.button("btn_target_3", 184, 214, 68, 24, "[3] 前哨") then
+    if ui.button("btn_target_3", 220, 214, 84, 24, "[3] 前哨") then
         patrolActive = false
         SetTarget(3)
     end
-    if ui.button("btn_target_4", 256, 214, 68, 24, "[4] 营地") then
+    if ui.button("btn_target_4", 310, 214, 85, 24, "[4] 营地") then
         patrolActive = false
         SetTarget(4)
     end
-    if ui.button("btn_target_5", 328, 214, 68, 24, "[5] 矮洞") then
+
+    if ui.button("btn_target_5", 40, 242, 112, 24, "[5] 矮洞(1.3m)") then
         patrolActive = false
         SetTarget(5)
+    end
+    if ui.button("btn_target_6", 158, 242, 118, 24, "[6] 高架天桥") then
+        patrolActive = false
+        SetTarget(6)
+    end
+    if ui.button("btn_target_7", 282, 242, 113, 24, "[7] 桥底水道") then
+        patrolActive = false
+        SetTarget(7)
+    end
+
+    -- 3D 专属高桥信仰之跃测试按钮
+    if ui.button("btn_leap_of_faith", 40, 270, 355, 26, "[测试高桥信仰之跃 (Leap of Faith)]") then
+        patrolActive = false
+        local qAg = ecs:Query({ "TagComponent", "TransformComponent", "NavMeshAgentComponent" })
+        qAg:Each(function(e, tag, tr, agent)
+            if tag.Tag == selectedAgentTag or tag.Tag == AGENT_TAG then
+                tr.Location = vec3.new(32.0, 4.1, 33.0)
+                agent.Destination = vec3.new(32.0, 0.1, 35.5)
+                agent.ReachedDestination = 0
+                agent.AutoRepath = 1
+            end
+        end)
+        currentTargetIndex = 7
+        lastEventText = "【3D立体多层导航】受控代理已就位高架天桥 (Y=4.1m)，执行信仰之跃单向跳入桥底水道 (Y=0.1m)！"
+        lastEventTimer = 5.0
+        print("[NAVMESH-SHOWCASE] >>> 触发 3D 高架天桥信仰之跃 (Leap of Faith -> Y=0.1m)")
     end
 
     -- 多体型角色与低矮限高通道核心测试按钮
     local toggleAgentBtnText = (selectedAgentTag == AGENT_TAG)
         and "切换受控代理: [当前: 标准人偶 1.8m] -> 点击切换为 地精 0.9m"
         or "切换受控代理: [当前: 矮小地精 0.9m] -> 点击切换为 人偶 1.8m"
-    if ui.button("btn_toggle_agent", 40, 242, 355, 26, toggleAgentBtnText) then
+    if ui.button("btn_toggle_agent", 40, 300, 355, 24, toggleAgentBtnText) then
         selectedAgentTag = (selectedAgentTag == AGENT_TAG) and GOBLIN_TAG or AGENT_TAG
         lastEventText = string.format("【切换代理】当前受控: %s", selectedAgentTag)
         lastEventTimer = 3.5
@@ -539,7 +609,7 @@ ui.onDraw(function()
     local crouchBtnText = (curCrouch == 1)
         and "恢复站立姿态 (按 C 键) -> 站立有效高度 1.8m (限高阻断)"
         or "进入蹲伏姿态 (按 C 键) -> 蹲伏有效高度 0.9m (钻入矮洞)"
-    if ui.button("btn_toggle_crouch", 40, 272, 355, 26, crouchBtnText) then
+    if ui.button("btn_toggle_crouch", 40, 328, 355, 24, crouchBtnText) then
         local q = ecs:Query({ "TagComponent", "NavMeshAgentComponent" })
         q:Each(function(e, tag, agent)
             if tag.Tag == selectedAgentTag then
@@ -552,31 +622,32 @@ ui.onDraw(function()
     end
 
     local barBtnText = barricadeClosed and "降下峡谷路障 (切换为畅通通行 OPEN)" or "升起峡谷路障 (切换为阻断雕刻 CLOSED)"
-    if ui.button("btn_toggle_barricade", 40, 302, 355, 26, barBtnText) then
+    if ui.button("btn_toggle_barricade", 40, 356, 355, 24, barBtnText) then
         SetBarricade(not barricadeClosed)
     end
 
     local patrolBtnText = patrolActive and "停止四点循环巡逻 (切换为单点停歇)" or "启动四点循环巡逻 (自动往复漫游)"
-    if ui.button("btn_toggle_patrol", 40, 332, 355, 26, patrolBtnText) then
+    if ui.button("btn_toggle_patrol", 40, 384, 355, 24, patrolBtnText) then
         patrolActive = not patrolActive
         lastEventText = patrolActive and "【已启动循环巡逻】" or "【已停止循环巡逻】"
         lastEventTimer = 3.0
     end
 
-    if ui.button("btn_reset_agent", 40, 362, 355, 26, "重置 AI 代理位置 (返回大本营营地)") then
+    if ui.button("btn_reset_agent", 40, 412, 355, 24, "重置 AI 代理位置 (返回大本营营地)") then
         patrolActive = false
         ResetAgentToBaseCamp()
     end
 
     -- 动态操作提示文字
-    ui.text(40, 396, "最近操作: " .. lastEventText, 11)
+    ui.text(40, 444, "最近操作: " .. lastEventText, 11)
 
     -- 底部签名与原理摘要
-    ui.text(40, 420, "3D 寻路与限高避障机制技术解析:", 12)
-    ui.text(40, 438, "- 连续物理净空: NavMeshAreaModifierComponent ClearanceHeight 精准过滤", 10)
-    ui.text(40, 454, "- 多体型自适应: 0.9m 地精天生穿过 1.3m 矮洞；1.8m 人偶蹲伏后方可通行", 10)
-    ui.text(40, 470, "- 动态雕刻: NavMeshObstacleComponent 实时打洞剔除重叠多边形", 10)
-    ui.text(40, 486, "- 实时重规划: 遇阻毫秒级感知，沿西侧高台缓坡智能绕行", 10)end)
+    ui.text(40, 466, "3D 寻路与立体多层导航机制技术解析:", 12)
+    ui.text(40, 484, "- 立体多层分层: 4m 高架桥与 0m 水道完全解耦独立体素化，互不干扰", 10)
+    ui.text(40, 500, "- 信仰之跃跳跃: NavMeshOffMeshLinkComponent 单向跳跃点跨层连接", 10)
+    ui.text(40, 516, "- 连续物理净空: NavMeshAreaModifierComponent ClearanceHeight 精准过滤", 10)
+    ui.text(40, 532, "- 多体型自适应: 0.9m 地精直接通过 1.3m 矮洞；1.8m 人偶蹲伏后方可通行", 10)
+    ui.text(40, 548, "- 动态雕刻与重寻路: 遇阻毫秒级感知，动态打洞并智能重规划", 10)end)
 
 -- 7. 场景卸载清理系统
 ecs:AddTeardownSystem("NavMeshShowcaseTeardown", function()

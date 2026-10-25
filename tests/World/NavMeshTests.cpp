@@ -542,6 +542,110 @@ static void TestNavMeshLowCeilingAndAgentHeightFiltering()
 	std::cout << "[PASS] TestNavMeshLowCeilingAndAgentHeightFiltering\n";
 }
 
+
+static void TestNavMeshMultiLayeredOverlappingSurfaces()
+{
+	NavMesh nav;
+	std::vector<NavMeshTriangle> tris;
+
+	// 构造 3D 立体多层几何体：
+	// 1. 下层地面通道 (Ground Floor, Y = 0.0f):
+	//    覆盖 X in [0.0, 30.0], Z in [0.0, 10.0]，分为三段 (西引道 0-10, 涵洞区 10-20, 东引道 20-30)
+	auto addQuadTris = [&](float x0, float z0, float x1, float z1, float y) {
+		// Tri 1 (CCW with upward normal)
+		tris.push_back({ {x0, y, z0}, {x1, y, z1}, {x1, y, z0} });
+		// Tri 2 (CCW with upward normal)
+		tris.push_back({ {x0, y, z0}, {x0, y, z1}, {x1, y, z1} });
+	};
+
+	// 下层地面 3 段
+	addQuadTris(0.0f, 0.0f, 10.0f, 10.0f, 0.0f);
+	addQuadTris(10.0f, 0.0f, 20.0f, 10.0f, 0.0f);
+	addQuadTris(20.0f, 0.0f, 30.0f, 10.0f, 0.0f);
+
+	// 2. 上层立体大桥 (Overhead Bridge, Y = 4.0f):
+	//    横跨中间区域 X in [10.0, 20.0], Z in [0.0, 10.0]，与下层涵洞形成严格物理投影重叠
+	addQuadTris(10.0f, 0.0f, 20.0f, 10.0f, 4.0f);
+
+	NavMeshBakeSettings settings;
+	settings.VoxelSize = 2.0f;
+	settings.StepHeight = 0.5f;
+	nav.BakeFromTriangles(tris, settings);
+
+	assert(nav.GetPolygonCount() > 0);
+
+	// 验证 1: 投影重叠区域内 (X in [10, 20], Z in [0, 10])，上层大桥多边形与下层多边形独立并存
+	// 且下层多边形自动推导获得精确垂直物理净空 Clearance = 4.0f, 上层大桥为露天开放净空 (Clearance = 0.0f)
+	uint32_t overlapLowerCount = 0;
+	uint32_t overlapUpperCount = 0;
+	for (size_t i = 0; i < nav.GetPolygonCount(); ++i)
+	{
+		const auto& poly = nav.GetPolygon(static_cast<uint32_t>(i));
+		if (poly.Center.x >= 10.0f - 1e-3f && poly.Center.x <= 20.0f + 1e-3f)
+		{
+			if (std::abs(poly.Center.y - 0.0f) < 0.2f)
+			{
+				overlapLowerCount++;
+				assert(std::abs(poly.Clearance - 4.0f) < 1e-3f);
+				assert(std::abs(poly.BaseClearance - 4.0f) < 1e-3f);
+			}
+			else if (std::abs(poly.Center.y - 4.0f) < 0.2f)
+			{
+				overlapUpperCount++;
+				assert(std::abs(poly.Clearance - 0.0f) < 1e-3f);
+				assert(std::abs(poly.BaseClearance - 0.0f) < 1e-3f);
+			}
+		}
+	}
+	assert(overlapLowerCount > 0);
+	assert(overlapUpperCount > 0);
+	assert(overlapLowerCount == overlapUpperCount);
+
+	// 验证 2: 空间采样过滤 —— 在桥底涵洞中心采样
+	// 短代理 (身高 1.0m <= 4.0m 净空) 可以成功立足下层
+	NavQueryFilter shortFilter;
+	shortFilter.AgentHeight = 1.0f;
+	shortFilter.RequireClearance = true;
+
+	glm::vec3 sampledPt;
+	uint32_t sampledPoly = 0;
+	bool canSampleShort = nav.SamplePosition(glm::vec3(15.0f, 0.0f, 5.0f), 1.0f, sampledPt, sampledPoly, shortFilter);
+	assert(canSampleShort);
+	assert(std::abs(nav.GetPolygon(sampledPoly).Clearance - 4.0f) < 1e-3f);
+
+	// 超高代理 (身高 5.0m > 4.0m 净空) 在桥底局部采样被垂直净空物理拦截
+	NavQueryFilter tallFilter;
+	tallFilter.AgentHeight = 5.0f;
+	tallFilter.RequireClearance = true;
+	bool canSampleTallLower = nav.SamplePosition(glm::vec3(15.0f, 0.0f, 5.0f), 1.0f, sampledPt, sampledPoly, tallFilter);
+	assert(!canSampleTallLower);
+
+	// 验证 3: 下层端到端寻路 (从西引道 X=2.0 穿越桥底到东引道 X=28.0)
+	// 短代理畅通无阻穿越桥底涵洞
+	std::vector<glm::vec3> lowerShortPath;
+	bool foundShort = nav.FindPath(glm::vec3(2.0f, 0.0f, 5.0f), glm::vec3(28.0f, 0.0f, 5.0f), lowerShortPath, shortFilter);
+	assert(foundShort);
+	assert(lowerShortPath.size() >= 2);
+	assert(lowerShortPath.front().x <= 2.1f);
+	assert(lowerShortPath.back().x >= 27.9f);
+
+	// 超高代理受 4.0m 桥底垂直净空物理阻断，无法从下层涵洞穿行
+	std::vector<glm::vec3> lowerTallPath;
+	bool foundTallLower = nav.FindPath(glm::vec3(2.0f, 0.0f, 5.0f), glm::vec3(28.0f, 0.0f, 5.0f), lowerTallPath, tallFilter);
+	assert(!foundTallLower);
+
+	// 验证 4: 上层高架大桥寻路 (从大桥西端 X=12.0 到大桥东端 X=18.0)
+	// 超高代理与短代理在大桥桥面均可顺畅通行
+	std::vector<glm::vec3> upperTallPath;
+	bool foundTallUpper = nav.FindPath(glm::vec3(12.0f, 4.0f, 5.0f), glm::vec3(18.0f, 4.0f, 5.0f), upperTallPath, tallFilter);
+	assert(foundTallUpper);
+	assert(upperTallPath.size() >= 2);
+	assert(upperTallPath.front().x <= 12.1f);
+	assert(upperTallPath.back().x >= 17.9f);
+
+	std::cout << "[PASS] TestNavMeshMultiLayeredOverlappingSurfaces (Overlapped Quads: " << overlapLowerCount << "x2)\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.NavMesh tests...\n";
@@ -559,6 +663,7 @@ int main()
 	TestNavMeshAsyncBaking();
 	TestNavMeshMacroTilesLOD();
 	TestNavMeshLowCeilingAndAgentHeightFiltering();
-	std::cout << "All 14 World.NavMesh tests passed successfully!\n";
+	TestNavMeshMultiLayeredOverlappingSurfaces();
+	std::cout << "All 15 World.NavMesh tests passed successfully!\n";
 	return 0;
 }

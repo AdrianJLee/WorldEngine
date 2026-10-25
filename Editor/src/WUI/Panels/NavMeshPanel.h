@@ -35,6 +35,9 @@ namespace World
 		static bool ShowOffMeshLinks;
 		static bool ShowLoSRaycast;
 
+		// 后台自动实时动态重烘开关
+		inline static bool AutoDynamicBake = false;
+
 		// 探针数据结构与访问接口
 		struct RaycastProbeData
 		{
@@ -120,6 +123,10 @@ namespace World
 		};
 		AsyncBakeTask m_AsyncBake;
 		int m_BakeScopeIdx { 0 }; // 0=全场景, 1=视口关注区 (64m)
+
+		std::chrono::steady_clock::time_point m_LastSceneGeometryChange {};
+		uint64_t m_LastSceneGeoHash { 0 };
+		bool m_PendingAutoBake { false };
 
 		std::string m_StatusFeedback;
 		PanelHost* m_ShellHost { nullptr };

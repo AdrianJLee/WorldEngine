@@ -940,7 +940,16 @@ namespace World
 				int gx = std::clamp(static_cast<int>(std::floor((pts[k].x - bMin.x) / voxelSize)), 0, static_cast<int>(numX - 1));
 				int gz = std::clamp(static_cast<int>(std::floor((pts[k].z - bMin.z) / voxelSize)), 0, static_cast<int>(numZ - 1));
 				auto& spans = cellSpans[gz * numX + gx];
-				if (spans.empty())
+				bool found = false;
+				for (const auto& s : spans)
+				{
+					if (std::abs(s.Height - pts[k].y) <= settings.StepHeight)
+					{
+						found = true;
+						break;
+					}
+				}
+				if (!found)
 				{
 					spans.push_back({ pts[k].y, norm });
 				}
@@ -988,7 +997,15 @@ namespace World
 		{
 			for (uint32_t gx = 0; gx < numX; ++gx)
 			{
-				const auto& spans = cellSpans[gz * numX + gx];
+				auto& spans = cellSpans[gz * numX + gx];
+				if (spans.empty())
+					continue;
+
+				// 垂直体素列跨度按高度升序排序 (从下层地面到上层大桥/楼层)
+				std::sort(spans.begin(), spans.end(), [](const Span& a, const Span& b) {
+					return a.Height < b.Height;
+				});
+
 				const float x0 = bMin.x + static_cast<float>(gx) * voxelSize;
 				const float x1 = x0 + voxelSize;
 				const float z0 = bMin.z + static_cast<float>(gz) * voxelSize;
@@ -996,8 +1013,19 @@ namespace World
 				const float cx = (x0 + x1) * 0.5f;
 				const float cz = (z0 + z1) * 0.5f;
 
-				for (const auto& span : spans)
+				for (size_t k = 0; k < spans.size(); ++k)
 				{
+					const auto& span = spans[k];
+					float verticalClearance = 0.0f;
+					if (k + 1 < spans.size())
+					{
+						const float diff = spans[k + 1].Height - span.Height;
+						if (diff > settings.StepHeight)
+						{
+							verticalClearance = diff;
+						}
+					}
+
 					auto calcY = [&](float px, float pz) -> float {
 						if (std::abs(span.Normal.y) < 1e-4f) return span.Height;
 						return span.Height - (span.Normal.x * (px - cx) + span.Normal.z * (pz - cz)) / span.Normal.y;
@@ -1018,10 +1046,10 @@ namespace World
 					poly.AreaType = 0;
 					poly.Cost = 1.0f;
 					poly.Blocked = false;
-					poly.Clearance = 0.0f;
+					poly.Clearance = verticalClearance;
 					poly.BaseAreaType = 0;
 					poly.BaseCost = 1.0f;
-					poly.BaseClearance = 0.0f;
+					poly.BaseClearance = verticalClearance;
 
 					cellPolys[gz * numX + gx].push_back({ pIdx, span.Height });
 				}
@@ -1088,6 +1116,10 @@ namespace World
 				{
 					poly.AreaType = mod.AreaType;
 					poly.Cost = mod.CostMultiplier;
+					if (mod.ClearanceHeight > 0.0f)
+					{
+						poly.Clearance = mod.ClearanceHeight;
+					}
 					if (mod.AreaType == 4 || mod.CostMultiplier <= 0.0f)
 					{
 						poly.Blocked = true;
@@ -1447,6 +1479,7 @@ namespace World
 			nav->BakeFromTriangles(triangles, settings);
 			for (const auto& mod : areaMods) nav->AddAreaModifier(mod);
 			for (const auto& link : links) nav->AddOffMeshLink(link);
+			nav->BuildMacroTiles(24.0f);
 			return nav;
 		});
 	}

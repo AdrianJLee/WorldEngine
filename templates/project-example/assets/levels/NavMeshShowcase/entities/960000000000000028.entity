@@ -1,0 +1,22 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000028
+  World::TagComponent:
+    Tag: "Viaduct Left Approach Ramp"
+  World::TransformComponent:
+    Location: [21.5, 2.0, 32]
+    Rotation: [0, 0, -25]
+    Scale: [4.0, 0.3, 3.2]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.26, 0.28, 0.32, 1]
+    Mesh: ""
+    Material: ""
+  World::BoxCollider3DComponent:
+    HalfExtents: [2.0, 0.15, 1.6]
+    Offset: [0, 0, 0]
+  World::LevelEntityComponent:
+    DataLayerMask: 1

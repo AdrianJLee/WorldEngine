@@ -15,6 +15,80 @@
 
 namespace World
 {
+		static inline uint64_t Fnv1aUpdate(uint64_t h, const void* data, size_t size)
+	{
+		const uint8_t* p = static_cast<const uint8_t*>(data);
+		for (size_t i = 0; i < size; ++i)
+		{
+			h ^= static_cast<uint64_t>(p[i]);
+			h *= 1099511628211ULL;
+		}
+		return h;
+	}
+
+	static uint64_t ComputeSceneGeometryHash(Scene& scene)
+	{
+		const auto& reg = scene.GetRegistry();
+		uint64_t h = 14695981039346656037ULL;
+
+		// 1. Whitebox 原型几何
+		for (auto entity : reg.view<TransformComponent, WhiteboxComponent>())
+		{
+			const auto& tr = reg.get<TransformComponent>(entity);
+			const auto& wb = reg.get<WhiteboxComponent>(entity);
+			h = Fnv1aUpdate(h, &tr.Location, sizeof(tr.Location));
+			h = Fnv1aUpdate(h, &tr.Rotation, sizeof(tr.Rotation));
+			h = Fnv1aUpdate(h, &tr.Scale, sizeof(tr.Scale));
+			h = Fnv1aUpdate(h, &wb.Dimensions, sizeof(wb.Dimensions));
+			const int shape = static_cast<int>(wb.Shape);
+			h = Fnv1aUpdate(h, &shape, sizeof(shape));
+		}
+
+		// 2. BoxCollider 碰撞盒
+		for (auto entity : reg.view<TransformComponent, BoxCollider3DComponent>())
+		{
+			const auto& tr = reg.get<TransformComponent>(entity);
+			const auto& box = reg.get<BoxCollider3DComponent>(entity);
+			h = Fnv1aUpdate(h, &tr.Location, sizeof(tr.Location));
+			h = Fnv1aUpdate(h, &tr.Rotation, sizeof(tr.Rotation));
+			h = Fnv1aUpdate(h, &tr.Scale, sizeof(tr.Scale));
+			h = Fnv1aUpdate(h, &box.HalfExtents, sizeof(box.HalfExtents));
+			h = Fnv1aUpdate(h, &box.Offset, sizeof(box.Offset));
+		}
+
+		// 3. MeshRenderer 静态网格渲染器
+		for (auto entity : reg.view<TransformComponent, MeshRendererComponent>())
+		{
+			const auto& tr = reg.get<TransformComponent>(entity);
+			const auto& mr = reg.get<MeshRendererComponent>(entity);
+			h = Fnv1aUpdate(h, &tr.Location, sizeof(tr.Location));
+			h = Fnv1aUpdate(h, &tr.Rotation, sizeof(tr.Rotation));
+			h = Fnv1aUpdate(h, &tr.Scale, sizeof(tr.Scale));
+			const int prim = static_cast<int>(mr.Primitive);
+			h = Fnv1aUpdate(h, &prim, sizeof(prim));
+		}
+
+		// 4. Terrain 地貌高度场
+		for (auto entity : reg.view<TransformComponent, TerrainComponent>())
+		{
+			const auto& tr = reg.get<TransformComponent>(entity);
+			const auto& tc = reg.get<TerrainComponent>(entity);
+			h = Fnv1aUpdate(h, &tr.Location, sizeof(tr.Location));
+			h = Fnv1aUpdate(h, &tc.CellSize, sizeof(tc.CellSize));
+		}
+
+		// 5. NavMeshOffMeshLinkComponent 跳跃链接
+		for (auto entity : reg.view<TransformComponent, NavMeshOffMeshLinkComponent>())
+		{
+			const auto& tr = reg.get<TransformComponent>(entity);
+			const auto& link = reg.get<NavMeshOffMeshLinkComponent>(entity);
+			h = Fnv1aUpdate(h, &tr.Location, sizeof(tr.Location));
+			h = Fnv1aUpdate(h, &link.TargetLocation, sizeof(link.TargetLocation));
+		}
+
+		return h;
+	}
+
 	bool NavMeshPanel::ShowPolygons = true;
 	bool NavMeshPanel::FillPolygons = true;
 	bool NavMeshPanel::ShowPaths = true;
@@ -81,6 +155,8 @@ namespace World
 		const float contentW = std::max(100.0f, rect.W - pad * 2.0f);
 		float curY = rect.Y + pad;
 
+		Ref<Scene> activeScene = host.GetActiveScene();
+
 		// 轮询后台异步多线程烘焙状态 (UI 主线程 60+ FPS 流畅不卡顿)
 		if (m_AsyncBake.IsRunning && m_AsyncBake.Future.valid())
 		{
@@ -92,7 +168,7 @@ namespace World
 				const auto now = std::chrono::high_resolution_clock::now();
 				const double elapsed = std::chrono::duration<double>(now - m_AsyncBake.StartTime).count();
 
-				if (Ref<Scene> activeScene = host.GetActiveScene())
+				if (activeScene)
 				{
 					activeScene->SetNavMesh(newNav);
 					activeScene->SaveNavMesh();
@@ -117,7 +193,56 @@ namespace World
 			}
 		}
 
-		Ref<Scene> activeScene = host.GetActiveScene();
+		// 后台自动实时动态重烘调度 (Debounce 0.5s，非阻塞独立工作线程)
+		if (AutoDynamicBake && !host.IsReadOnlyMode() && activeScene)
+		{
+			const uint64_t currentGeoHash = ComputeSceneGeometryHash(*activeScene);
+			if (m_LastSceneGeoHash == 0)
+			{
+				m_LastSceneGeoHash = currentGeoHash;
+			}
+			else if (currentGeoHash != m_LastSceneGeoHash)
+			{
+				m_LastSceneGeoHash = currentGeoHash;
+				m_LastSceneGeometryChange = std::chrono::steady_clock::now();
+				m_PendingAutoBake = true;
+			}
+
+			if (m_PendingAutoBake && !m_AsyncBake.IsRunning)
+			{
+				const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+					std::chrono::steady_clock::now() - m_LastSceneGeometryChange).count();
+				if (elapsedMs >= 500)
+				{
+					m_PendingAutoBake = false;
+					NavMeshBakeSettings settings;
+					settings.AgentRadius = m_AgentRadius;
+					settings.AgentHeight = m_AgentHeight;
+					settings.MaxClimbSlopeDeg = m_MaxSlope;
+					settings.StepHeight = m_StepHeight;
+					settings.VoxelSize = m_VoxelSize;
+
+					settings.IncludeMeshes = true;
+					settings.IncludeTerrain = true;
+					settings.IncludeWhitebox = true;
+					settings.IncludeColliders = true;
+
+					if (m_BakeScopeIdx == 1) // 视口关注区 64m 瓦片
+					{
+						settings.UseCustomBounds = true;
+						const auto cam = host.GetGizmoCamera();
+						const glm::vec3 focusPt = cam.Position + cam.Forward * cam.Distance;
+						settings.BoundsMin = focusPt - glm::vec3(64.0f, 32.0f, 64.0f);
+						settings.BoundsMax = focusPt + glm::vec3(64.0f, 32.0f, 64.0f);
+					}
+
+					m_AsyncBake.Future = NavMesh::BakeSceneAsync(*activeScene, settings);
+					m_AsyncBake.StartTime = std::chrono::high_resolution_clock::now();
+					m_AsyncBake.IsRunning = true;
+					m_StatusFeedback = "[后台自动重烘] 检测到场景静态几何变化，正在后台异步重烘...";
+				}
+			}
+		}
 		std::shared_ptr<NavMesh> navMesh = activeScene ? activeScene->GetNavMesh() : nullptr;
 		if (!navMesh && activeScene)
 			navMesh = activeScene->GetOrCreateNavMesh();
@@ -137,7 +262,7 @@ namespace World
 		const float availH = std::max(40.0f, (rect.Y + rect.H) - curY - pad);
 		float contentNeededH = 280.0f;
 		if (m_ActiveTabIdx == 0)
-			contentNeededH = 280.0f + (m_StatusFeedback.empty() ? 0.0f : 24.0f);
+			contentNeededH = 310.0f + (m_StatusFeedback.empty() ? 0.0f : 24.0f);
 		else if (m_ActiveTabIdx == 1)
 			contentNeededH = (contentW < 340.0f ? 200.0f : 175.0f);
 		else if (m_ActiveTabIdx == 2)
@@ -180,9 +305,29 @@ namespace World
 		Wui::HighlightOutline(ctx, cardRect, theme.Border, theme.Radius, 1.0f);
 
 		const bool hasPolys = (navMesh && navMesh->GetPolygonCount() > 0);
-		const char* badgeText = hasPolys ? "[Ready] 导航网格已就绪 (Baked)" : "[Empty] 导航网格未烘焙 / 空 (Empty)";
-		const Wui::WuiColor badgeColor = hasPolys ? theme.Success : theme.TextMuted;
-		Wui::Label(ctx, { startX + 8.0f, curY + 6.0f }, badgeText, badgeColor, theme.FontSizeBody);
+		std::string badgeText;
+		Wui::WuiColor badgeColor = theme.Success;
+		if (m_AsyncBake.IsRunning)
+		{
+			badgeText = "[后台烘焙中...] 独立线程构建 3D 体素 (60+ FPS)";
+			badgeColor = theme.Warning;
+		}
+		else if (m_PendingAutoBake)
+		{
+			badgeText = "[变动防抖中...] 等待几何操作完成 (0.5s)";
+			badgeColor = theme.Accent;
+		}
+		else if (hasPolys)
+		{
+			badgeText = AutoDynamicBake ? "[Ready] 3D 导航就绪 (后台实时自动重烘已开启)" : "[Ready] 导航网格已就绪 (Baked)";
+			badgeColor = theme.Success;
+		}
+		else
+		{
+			badgeText = "[Empty] 导航网格未烘焙 / 空 (Empty)";
+			badgeColor = theme.TextMuted;
+		}
+		Wui::Label(ctx, { startX + 8.0f, curY + 6.0f }, badgeText.c_str(), badgeColor, theme.FontSizeBody);
 
 		size_t vertCount = navMesh ? navMesh->GetVertexCount() : 0;
 		size_t polyCount = navMesh ? navMesh->GetPolygonCount() : 0;
@@ -222,6 +367,13 @@ namespace World
 		float innerY = curY + 8.0f;
 		Wui::Label(ctx, { startX + 8.0f, innerY }, "[Bake] 全场景烘焙源与代理规格 (Bake Sources & Profiles)", theme.Accent, theme.FontSizeSmall);
 		innerY += 24.0f;
+
+		// 0. 后台自动实时动态重烘
+		Wui::Checkbox(ctx, Wui::HashId("navmesh.bake.auto_dynamic"), { startX + 8.0f, innerY, contentW - 16.0f, 22.0f },
+			"后台自动实时动态重烘 (Auto Dynamic Re-bake)", AutoDynamicBake, theme);
+		Wui::Tooltip(ctx, { startX + 8.0f, innerY, contentW - 16.0f, 22.0f },
+			"开启后，在场景中添加、删除或移动静态几何体（Whitebox/Collider/Mesh）时，后台独立工作线程自动异步重烘，主线程 60+ FPS 丝滑零掉帧，完成后自动热替换导航网格。");
+		innerY += 26.0f;
 
 		const float labelW = std::min(115.0f, contentW * 0.42f);
 		const float fieldW = std::max(60.0f, contentW - labelW - 16.0f);

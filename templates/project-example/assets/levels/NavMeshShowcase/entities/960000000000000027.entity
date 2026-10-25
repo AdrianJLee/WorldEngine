@@ -1,0 +1,22 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000027
+  World::TagComponent:
+    Tag: "Overhead Viaduct Bridge Deck"
+  World::TransformComponent:
+    Location: [32, 4.0, 32]
+    Rotation: [0, 0, 0]
+    Scale: [18.0, 0.4, 3.2]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.22, 0.24, 0.28, 1]
+    Mesh: ""
+    Material: ""
+  World::BoxCollider3DComponent:
+    HalfExtents: [9.0, 0.2, 1.6]
+    Offset: [0, 0, 0]
+  World::LevelEntityComponent:
+    DataLayerMask: 1

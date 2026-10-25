@@ -1,0 +1,24 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000030
+  World::TagComponent:
+    Tag: "Viaduct Leap of Faith Link"
+  World::TransformComponent:
+    Location: [32, 4.1, 33.5]
+    Rotation: [0, 0, 0]
+    Scale: [0.8, 0.8, 0.8]
+  World::NavMeshOffMeshLinkComponent:
+    TargetLocation: [32, 0.1, 35.5]
+    Cost: 1.0
+    LinkType: 1
+    BiDirectional: 0
+  World::MeshRendererComponent:
+    Primitive: 1
+    MeshIndex: 0
+    Color: [0.95, 0.20, 0.85, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1
