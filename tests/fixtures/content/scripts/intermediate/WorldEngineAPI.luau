@@ -1309,16 +1309,33 @@ function ui:isOpen() end
 ---@field Speed number
 ---@field AgentRadius number
 ---@field HasPath number
+---@field Crouching number
 ---@field Acceleration number
+---@field CrouchHeight number
 ---@field AgentHeight number
+---@field AreaMask number
 ---@field AutoRepath number
 ---@field Destination vec3
+
+-- Component fields are exposed through Entity:GetComponent("NavMeshAreaModifierComponent"); there is no runtime global named NavMeshAreaModifierComponent.
+---@class NavMeshAreaModifierComponent
+---@field CostMultiplier number
+---@field AreaType number
+---@field Extents vec3
+---@field ClearanceHeight number
 
 -- Component fields are exposed through Entity:GetComponent("NavMeshObstacleComponent"); there is no runtime global named NavMeshObstacleComponent.
 ---@class NavMeshObstacleComponent
 ---@field IsMoving number
 ---@field Extents vec3
 ---@field CarveNavMesh number
+
+-- Component fields are exposed through Entity:GetComponent("NavMeshOffMeshLinkComponent"); there is no runtime global named NavMeshOffMeshLinkComponent.
+---@class NavMeshOffMeshLinkComponent
+---@field Cost number
+---@field BiDirectional number
+---@field TargetLocation vec3
+---@field LinkType number
 
 -- Component fields are exposed through Entity:GetComponent("ParallaxLayerComponent"); there is no runtime global named ParallaxLayerComponent.
 ---@class ParallaxLayerComponent
@@ -1759,8 +1776,12 @@ function ui:isOpen() end
 ---@field MeshRenderer string Short alias for "MeshRendererComponent".
 ---@field NavMeshAgentComponent string Registered component type name "NavMeshAgentComponent".
 ---@field NavMeshAgent string Short alias for "NavMeshAgentComponent".
+---@field NavMeshAreaModifierComponent string Registered component type name "NavMeshAreaModifierComponent".
+---@field NavMeshAreaModifier string Short alias for "NavMeshAreaModifierComponent".
 ---@field NavMeshObstacleComponent string Registered component type name "NavMeshObstacleComponent".
 ---@field NavMeshObstacle string Short alias for "NavMeshObstacleComponent".
+---@field NavMeshOffMeshLinkComponent string Registered component type name "NavMeshOffMeshLinkComponent".
+---@field NavMeshOffMeshLink string Short alias for "NavMeshOffMeshLinkComponent".
 ---@field ParallaxLayerComponent string Registered component type name "ParallaxLayerComponent".
 ---@field ParallaxLayer string Short alias for "ParallaxLayerComponent".
 ---@field PartitionVolumeComponent string Registered component type name "PartitionVolumeComponent".

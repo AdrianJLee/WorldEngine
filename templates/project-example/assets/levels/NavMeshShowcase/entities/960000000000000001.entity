@@ -34,6 +34,9 @@ Entity:
     StoppingDistance: 0.3
     AgentRadius: 0.5
     AgentHeight: 1.8
+    CrouchHeight: 0.9
+    Crouching: 0
+    AreaMask: 4294967295
     HasPath: 0
     ReachedDestination: 0
     AutoRepath: 1

@@ -111,6 +111,9 @@ namespace World
 		uint8_t AreaType = 0;
 		float Cost = 1.0f;
 		float Clearance = 3.0f; // 净空高度上限（米），天花板/过梁距离地面高度，默认 3.0m
+		uint8_t BaseAreaType = 0;
+		float BaseCost = 1.0f;
+		float BaseClearance = 3.0f;
 	};
 
 	struct NavMeshPortal
@@ -172,6 +175,8 @@ namespace World
 		// 区域代价修饰区 (Area Modifiers)
 		void AddAreaModifier(const NavMeshAreaModifier& modifier);
 		void ClearAreaModifiers();
+		void ResetAreaModifiers();
+		void ReapplyAreaModifiers(const std::vector<NavMeshAreaModifier>& modifiers);
 		const std::vector<NavMeshAreaModifier>& GetAreaModifiers() const { return m_AreaModifiers; }
 
 		// 通用空间感知查询

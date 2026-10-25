@@ -38,7 +38,7 @@ using namespace PropertiesPanelDetail;
 		editTheme.ButtonBg = theme.ActiveBg;
 		editTheme.Border = theme.Accent;
 		if (Wui::Button(ctx, Wui::HashId("inspect.terrain.edit_mode"), editBtnRect,
-			"✦ 进入地貌编辑模式 (Edit Landscape)", editTheme))
+			"[Edit] 进入地貌编辑模式 (Edit Landscape)", editTheme))
 		{
 			host.SetEditorToolMode(EditorToolMode::Landscape);
 			host.ActivatePanel("terrain_editor");
@@ -48,7 +48,7 @@ using namespace PropertiesPanelDetail;
 		// 2) 视口聚焦地貌按钮
 		const Wui::WuiRect focusBtnRect { startX, curY, contentW, 24.0f };
 		if (Wui::Button(ctx, Wui::HashId("inspect.terrain.focus"), focusBtnRect,
-			"⌖ 视口聚焦地貌 (Focus In Viewport)", theme))
+			"[Focus] 视口聚焦地貌 (Focus In Viewport)", theme))
 		{
 			host.SetSelectedEntity(entity);
 			host.FocusIndependentWindow("view");
@@ -159,75 +159,16 @@ using namespace PropertiesPanelDetail;
 		const float contentW = rect.W - pad * 2.0f;
 		float curY = rect.Y + 4.0f;
 
-		// 1. 状态指示徽标
-		Wui::Label(ctx, { startX, curY + 2.0f }, "寻路状态 (Navigation Status):", theme.Accent, theme.FontSizeSmall);
-		curY += 20.0f;
+		// =========================================================================
+		// 1. 代理体型与运动属性 (Authoring Properties - 实体组件数据)
+		// =========================================================================
+		Wui::Label(ctx, { startX, curY + 2.0f }, "[配置] 代理体型与运动属性 (Agent Properties)", theme.Accent, theme.FontSizeSmall);
+		curY += 22.0f;
 
-		const char* statusDesc = "● 空闲 / 待命 (Idle)";
-		Wui::WuiColor statusColor = theme.TextMuted;
-		if (agent->ReachedDestination)
-		{
-			statusDesc = "✦ 已到达目标位置 (Reached Destination)";
-			statusColor = theme.Success;
-		}
-		else if (agent->HasPath)
-		{
-			statusDesc = "➤ 正在寻路导航 (Navigating)";
-			statusColor = theme.Info;
-		}
-		Wui::Label(ctx, { startX + 4.0f, curY + 2.0f }, statusDesc, statusColor, theme.FontSizeBody);
-		curY += 24.0f;
-
-		// 2. 目标坐标 Destination (X, Y, Z)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "目标坐标 (Destination m):", theme.Text, theme.FontSizeSmall);
-		curY += 20.0f;
-
-		const float coordLabelW = 16.0f;
-		const float coordFieldW = (contentW - coordLabelW * 3.0f - 12.0f) / 3.0f;
-
-		// X
-		Wui::Label(ctx, { startX, curY + 2.0f }, "X", theme.AxisX, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.dest_x"),
-			{ startX + coordLabelW, curY, coordFieldW, 22.0f }, agent->Destination.x, 0.2f, -2000.0f, 2000.0f, theme))
-		{
-			if (changedFields) changedFields->push_back("Destination");
-			host.MarkDocumentDirty();
-		}
-		// Y
-		Wui::Label(ctx, { startX + coordLabelW + coordFieldW + 6.0f, curY + 2.0f }, "Y", theme.AxisY, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.dest_y"),
-			{ startX + coordLabelW * 2.0f + coordFieldW + 6.0f, curY, coordFieldW, 22.0f }, agent->Destination.y, 0.2f, -500.0f, 500.0f, theme))
-		{
-			if (changedFields) changedFields->push_back("Destination");
-			host.MarkDocumentDirty();
-		}
-		// Z
-		Wui::Label(ctx, { startX + (coordLabelW + coordFieldW + 6.0f) * 2.0f, curY + 2.0f }, "Z", theme.AxisZ, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.dest_z"),
-			{ startX + (coordLabelW + coordFieldW + 6.0f) * 2.0f + coordLabelW, curY, coordFieldW, 22.0f }, agent->Destination.z, 0.2f, -2000.0f, 2000.0f, theme))
-		{
-			if (changedFields) changedFields->push_back("Destination");
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
-
-		// 快捷设定按钮: 设为视口相机目标点
-		const Wui::WuiRect pickBtnRect { startX, curY, contentW, 24.0f };
-		if (Wui::Button(ctx, Wui::HashId("inspect.nav_agent.btn_cam_dest"), pickBtnRect, "⌖ 设为当前视口相机焦点 (Set to Viewport Focus)", theme))
-		{
-			const auto cam = host.GetGizmoCamera();
-			agent->Destination = cam.Position + cam.Forward * cam.Distance;
-			if (changedFields) changedFields->push_back("Destination");
-			host.MarkDocumentDirty();
-		}
-		Wui::Tooltip(ctx, pickBtnRect, "直接提取视口 3D 相机的观察焦点作为寻路代理的新目标点");
-		curY += 30.0f;
-
-		// 3. 动力学与碰撞参数
 		const float paramLabelW = 120.0f;
 		const float paramFieldW = contentW - paramLabelW;
 
-		// 速度 Speed
+		// 移动速度 Speed
 		Wui::Label(ctx, { startX, curY + 2.0f }, "移动速度 (m/s):", theme.Text, theme.FontSizeSmall);
 		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.speed"),
 			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, agent->Speed, 0.1f, 0.1f, 50.0f, theme))
@@ -238,7 +179,7 @@ using namespace PropertiesPanelDetail;
 		curY += 26.0f;
 
 		// 加速度 Acceleration
-		Wui::Label(ctx, { startX, curY + 2.0f }, "加速度 (m/s²):", theme.Text, theme.FontSizeSmall);
+		Wui::Label(ctx, { startX, curY + 2.0f }, "加速度 (m/s2):", theme.Text, theme.FontSizeSmall);
 		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.accel"),
 			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, agent->Acceleration, 0.2f, 0.5f, 100.0f, theme))
 		{
@@ -267,8 +208,8 @@ using namespace PropertiesPanelDetail;
 		}
 		curY += 26.0f;
 
-		// 代理高度 AgentHeight
-		Wui::Label(ctx, { startX, curY + 2.0f }, "代理高度 (Height m):", theme.Text, theme.FontSizeSmall);
+		// 站立高度 AgentHeight
+		Wui::Label(ctx, { startX, curY + 2.0f }, "站立高度 (Height m):", theme.Text, theme.FontSizeSmall);
 		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.height"),
 			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, agent->AgentHeight, 0.05f, 0.1f, 10.0f, theme))
 		{
@@ -277,7 +218,29 @@ using namespace PropertiesPanelDetail;
 		}
 		curY += 26.0f;
 
-		// 4. 自动重新寻路 AutoRepath
+		// 蹲伏高度 CrouchHeight
+		Wui::Label(ctx, { startX, curY + 2.0f }, "蹲伏高度 (Crouch m):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.crouch_height"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, agent->CrouchHeight, 0.05f, 0.1f, 10.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("CrouchHeight");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 区域掩码 AreaMask
+		Wui::Label(ctx, { startX, curY + 2.0f }, "区域掩码 (AreaMask):", theme.Text, theme.FontSizeSmall);
+		int64_t maskVal = static_cast<int64_t>(agent->AreaMask);
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.nav_agent.area_mask"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, maskVal, 0, 0xFFFFFFFF, theme))
+		{
+			agent->AreaMask = static_cast<uint32_t>(maskVal);
+			if (changedFields) changedFields->push_back("AreaMask");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 自动重规划 AutoRepath
 		bool autoRepath = (agent->AutoRepath != 0);
 		if (Wui::Checkbox(ctx, Wui::HashId("inspect.nav_agent.auto_repath"),
 			{ startX, curY, contentW, 22.0f }, "目标变动或遇阻时自动重规划 (Auto Repath)", autoRepath, theme))
@@ -286,8 +249,95 @@ using namespace PropertiesPanelDetail;
 			if (changedFields) changedFields->push_back("AutoRepath");
 			host.MarkDocumentDirty();
 		}
-		curY += 26.0f;
+		curY += 32.0f;
 
+		// =========================================================================
+		// 2. 运行时调试与模拟 (Runtime Debug & Simulation - 区分开的独立调试面板)
+		// =========================================================================
+		const float dbgCardPad = 6.0f;
+		const float dbgCardH = 148.0f;
+		const Wui::WuiRect dbgRect { startX, curY, contentW, dbgCardH };
+		Wui::PanelBackground(ctx, dbgRect, theme.CardBg, theme.Radius);
+		Wui::HighlightOutline(ctx, dbgRect, theme.Border, theme.Radius, 1.0f);
+
+		float dbgY = curY + dbgCardPad;
+		Wui::Label(ctx, { startX + 8.0f, dbgY + 2.0f }, "[调试] 运行时寻路调试与模拟 (Runtime Debug)", theme.Warning, theme.FontSizeSmall);
+		dbgY += 22.0f;
+
+		// 状态指示徽标
+		const char* statusDesc = "[Idle] 空闲 / 待命 (Idle)";
+		Wui::WuiColor statusColor = theme.TextMuted;
+		if (agent->ReachedDestination)
+		{
+			statusDesc = "[Arrived] 已到达目标位置 (Reached Destination)";
+			statusColor = theme.Success;
+		}
+		else if (agent->HasPath)
+		{
+			statusDesc = "[Navigating] 正在寻路导航 (Navigating)";
+			statusColor = theme.Info;
+		}
+		Wui::Label(ctx, { startX + 8.0f, dbgY + 2.0f }, statusDesc, statusColor, theme.FontSizeBody);
+		dbgY += 24.0f;
+
+		// 蹲伏姿态测试切换开关
+		bool isCrouching = (agent->Crouching != 0);
+		char crouchLabel[64];
+		std::snprintf(crouchLabel, sizeof(crouchLabel), "测试姿态: %s (有效身高: %.2fm)",
+			isCrouching ? "蹲伏中 [Crouching]" : "站立中 [Standing]",
+			agent->GetEffectiveHeight());
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.nav_agent.dbg_crouch"),
+			{ startX + 8.0f, dbgY, contentW - 16.0f, 20.0f }, crouchLabel, isCrouching, theme))
+		{
+			agent->Crouching = isCrouching ? 1 : 0;
+			if (changedFields) changedFields->push_back("Crouching");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + 8.0f, dbgY, contentW - 16.0f, 20.0f },
+			"运行时测试切换蹲伏姿态：蹲伏时使用 CrouchHeight，站立时使用 AgentHeight，观察低矮通道通行能力");
+		dbgY += 24.0f;
+
+		// 目标坐标 Destination (X, Y, Z)
+		const float coordLabelW = 16.0f;
+		const float coordFieldW = (contentW - 16.0f - coordLabelW * 3.0f - 12.0f) / 3.0f;
+
+		Wui::Label(ctx, { startX + 8.0f, dbgY + 2.0f }, "X", theme.AxisX, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.dest_x"),
+			{ startX + 8.0f + coordLabelW, dbgY, coordFieldW, 20.0f }, agent->Destination.x, 0.2f, -2000.0f, 2000.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("Destination");
+			host.MarkDocumentDirty();
+		}
+
+		Wui::Label(ctx, { startX + 8.0f + coordLabelW + coordFieldW + 6.0f, dbgY + 2.0f }, "Y", theme.AxisY, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.dest_y"),
+			{ startX + 8.0f + coordLabelW * 2.0f + coordFieldW + 6.0f, dbgY, coordFieldW, 20.0f }, agent->Destination.y, 0.2f, -500.0f, 500.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("Destination");
+			host.MarkDocumentDirty();
+		}
+
+		Wui::Label(ctx, { startX + 8.0f + (coordLabelW + coordFieldW + 6.0f) * 2.0f, dbgY + 2.0f }, "Z", theme.AxisZ, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.nav_agent.dest_z"),
+			{ startX + 8.0f + (coordLabelW + coordFieldW + 6.0f) * 2.0f + coordLabelW, dbgY, coordFieldW, 20.0f }, agent->Destination.z, 0.2f, -2000.0f, 2000.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("Destination");
+			host.MarkDocumentDirty();
+		}
+		dbgY += 24.0f;
+
+		// 设为视口相机目标点
+		const Wui::WuiRect pickBtnRect { startX + 8.0f, dbgY, contentW - 16.0f, 22.0f };
+		if (Wui::Button(ctx, Wui::HashId("inspect.nav_agent.btn_cam_dest"), pickBtnRect, "[Focus] 设为当前视口相机焦点 (Set to Viewport Focus)", theme))
+		{
+			const auto cam = host.GetGizmoCamera();
+			agent->Destination = cam.Position + cam.Forward * cam.Distance;
+			if (changedFields) changedFields->push_back("Destination");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, pickBtnRect, "直接提取视口 3D 相机的观察焦点作为寻路代理的新目标点");
+
+		curY += dbgCardH + 8.0f;
 		return curY - rect.Y;
 	}
 
@@ -311,11 +361,11 @@ using namespace PropertiesPanelDetail;
 
 		if (obs->CarveNavMesh)
 		{
-			Wui::Label(ctx, { startX + 4.0f, curY + 2.0f }, "✦ 动态雕刻生效中 (Carving Active - 实时打洞)", theme.Warning, theme.FontSizeBody);
+			Wui::Label(ctx, { startX + 4.0f, curY + 2.0f }, "[Active] 动态雕刻生效中 (Carving Active - 实时打洞)", theme.Warning, theme.FontSizeBody);
 		}
 		else
 		{
-			Wui::Label(ctx, { startX + 4.0f, curY + 2.0f }, "○ 雕刻已关闭 (Pass-Through - 允许穿越)", theme.TextMuted, theme.FontSizeBody);
+			Wui::Label(ctx, { startX + 4.0f, curY + 2.0f }, "[Disabled] 雕刻已关闭 (Pass-Through - 允许穿越)", theme.TextMuted, theme.FontSizeBody);
 		}
 		curY += 24.0f;
 

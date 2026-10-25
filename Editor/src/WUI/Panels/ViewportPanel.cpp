@@ -3737,7 +3737,14 @@ namespace World
 		static std::unordered_map<uint32_t, CachedAgentPath> s_AgentPathCache;
 
 // ---- 3D 导航网格 (NavMesh & AI Navigation) 视口可视化 ----
-		if (s_ShowNavMesh)
+		const bool anyNavRequested = s_ShowNavMesh ||
+			NavMeshPanel::ShowPolygons ||
+			NavMeshPanel::ShowPaths ||
+			NavMeshPanel::ShowObstacles ||
+			NavMeshPanel::ShowOffMeshLinks ||
+			NavMeshPanel::ShowAreaCosts;
+
+		if (anyNavRequested)
 		{
 			const Ref<Scene> navScene = m_Host.GetActiveScene();
 			if (navScene)
@@ -3756,6 +3763,8 @@ namespace World
 				{
 					static const void* s_LastNavMesh = nullptr;
 					static uint64_t s_LastObsHash = 0;
+					static uint64_t s_LastAreaHash = 0;
+
 					uint64_t currentObsHash = 0x9e3779b9;
 					for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
 					{
@@ -3777,10 +3786,50 @@ namespace World
 						}
 					}
 
-					if (navMesh.get() != s_LastNavMesh || currentObsHash != s_LastObsHash)
+					uint64_t currentAreaHash = 0x9e3779b9;
+					std::vector<NavMeshAreaModifier> sceneAreaModifiers;
+					for (auto [handle, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
+					{
+						glm::vec3 c { 0.0f };
+						glm::vec3 s { 1.0f };
+						if (const auto* xform = registry.try_get<TransformComponent>(handle))
+						{
+							c = xform->Location;
+							s = glm::abs(xform->Scale);
+						}
+						const glm::vec3 worldExtents = s * areaComp.Extents;
+						currentAreaHash ^= std::hash<float>()(c.x) + 0x9e3779b9 + (currentAreaHash << 6) + (currentAreaHash >> 2);
+						currentAreaHash ^= std::hash<float>()(c.y) + 0x9e3779b9 + (currentAreaHash << 6) + (currentAreaHash >> 2);
+						currentAreaHash ^= std::hash<float>()(c.z) + 0x9e3779b9 + (currentAreaHash << 6) + (currentAreaHash >> 2);
+						currentAreaHash ^= std::hash<float>()(worldExtents.x) + 0x9e3779b9 + (currentAreaHash << 6) + (currentAreaHash >> 2);
+						currentAreaHash ^= std::hash<float>()(worldExtents.y) + 0x9e3779b9 + (currentAreaHash << 6) + (currentAreaHash >> 2);
+						currentAreaHash ^= std::hash<float>()(worldExtents.z) + 0x9e3779b9 + (currentAreaHash << 6) + (currentAreaHash >> 2);
+						currentAreaHash ^= std::hash<float>()(areaComp.CostMultiplier) + 0x9e3779b9 + (currentAreaHash << 6) + (currentAreaHash >> 2);
+						currentAreaHash ^= std::hash<float>()(areaComp.ClearanceHeight) + 0x9e3779b9 + (currentAreaHash << 6) + (currentAreaHash >> 2);
+						currentAreaHash ^= std::hash<uint8_t>()(areaComp.AreaType) + 0x9e3779b9 + (currentAreaHash << 6) + (currentAreaHash >> 2);
+
+						NavMeshAreaModifier mod;
+						mod.Center = c;
+						mod.Extents = worldExtents;
+						mod.CostMultiplier = areaComp.CostMultiplier;
+						mod.ClearanceHeight = areaComp.ClearanceHeight;
+						mod.AreaType = areaComp.AreaType;
+						sceneAreaModifiers.push_back(mod);
+					}
+
+					if (navMesh.get() != s_LastNavMesh || currentObsHash != s_LastObsHash || currentAreaHash != s_LastAreaHash)
 					{
 						s_LastNavMesh = navMesh.get();
 						s_LastObsHash = currentObsHash;
+						s_LastAreaHash = currentAreaHash;
+
+						// 1. 若场景中存在实体修饰区，重置并重新注入，消除残留的旧代价多边形
+						if (!sceneAreaModifiers.empty())
+						{
+							navMesh->ReapplyAreaModifiers(sceneAreaModifiers);
+						}
+
+						// 2. 清除并重新雕刻动态障碍物（保持障碍物在代价区之上的最高阻挡优先级）
 						navMesh->ClearObstacles();
 						for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
 						{
@@ -4310,9 +4359,11 @@ namespace World
 				// 4. 区域代价修饰区 (NavMeshAreaModifierComponent 实体 & NavMesh 资产内修饰体)
 				if (NavMeshPanel::ShowAreaCosts && navMesh)
 				{
+					size_t entityAreaModCount = 0;
 					// A. 场景内实体挂载的 NavMeshAreaModifierComponent (数据驱动，显式第一类组件)
 					for (auto [handle, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
 					{
+						++entityAreaModCount;
 						Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.85f };
 						if (areaComp.AreaType == 2)
 							areaColor = Wui::WuiColor{ 0.70f, 0.35f, 0.95f, 0.85f };
@@ -4351,8 +4402,10 @@ namespace World
 						}
 					}
 
-					// B. 导航网格二进制资产内记录的修饰体
-					for (const auto& mod : navMesh->GetAreaModifiers())
+					// B. 导航网格二进制资产内记录的修饰体（仅当场景无显式实体时作为后备，避免与实体重复绘制或绘制烘焙期残影）
+					if (entityAreaModCount == 0)
+					{
+						for (const auto& mod : navMesh->GetAreaModifiers())
 					{
 						Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.85f };
 						if (mod.AreaType == 2)
@@ -4386,6 +4439,7 @@ namespace World
 								viewProj * glm::vec4(corners[edges[e][1]], 1.0f),
 								areaColor, 1.8f);
 						}
+					}
 					}
 				}
 
@@ -4548,7 +4602,6 @@ namespace World
 	void ViewportPanel::SetNavMeshVisible(bool visible)
 	{
 		s_ShowNavMesh = visible;
-		NavMeshPanel::ShowPolygons = visible;
 	}
 
 	bool ViewportPanel::IsNavMeshVisible()

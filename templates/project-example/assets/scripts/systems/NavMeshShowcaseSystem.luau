@@ -17,9 +17,30 @@ end
 
 -- 实体标签常量
 local AGENT_TAG = "Mannequin Agent"
+local GOBLIN_TAG = "Goblin Scout (Short: 0.9m)"
 local BARRICADE_TAG = "Valley Barricade"
 local CAMERA_TAG = "NavMesh Showcase Camera"
 local TERRAIN_TAG = "Showcase Terrain"
+
+local selectedAgentTag = AGENT_TAG
+
+local inScope = false
+if SceneScope and type(SceneScope.owns) == "function" then
+    inScope = SceneScope.owns(AGENT_TAG) or SceneScope.owns(CAMERA_TAG) or SceneScope.owns(BARRICADE_TAG)
+else
+    local q = ecs:Query({ "TagComponent" })
+    if q and type(q.Each) == "function" then
+        q:Each(function(_e, tag)
+            if tag.Tag == AGENT_TAG or tag.Tag == CAMERA_TAG or tag.Tag == BARRICADE_TAG then
+                inScope = true
+            end
+        end)
+    end
+end
+
+if not inScope then
+    return
+end
 
 -- 四大地标坐标定义
 local BEACONS = {
@@ -42,6 +63,11 @@ local BEACONS = {
         Name = "Base Camp (大本营营地)",
         Pos = vec3.new(32.0, 0.0, 12.0),
         Description = "南侧平坦开阔地，也是寻路代理的初始出发基地",
+    },
+    {
+        Name = "Arch Tunnel (低矮石拱洞 净空:1.3m)",
+        Pos = vec3.new(27.0, 0.0, 48.0),
+        Description = "低矮石拱通道，过梁净空 1.3m。矮小角色(0.9m)或蹲伏角色(0.9m)可通行；高角色站立(1.8m)阻断",
     },
 }
 
@@ -138,16 +164,14 @@ local function SetTarget(targetIdx: number)
     currentTargetIndex = targetIdx
     local target = BEACONS[currentTargetIndex]
 
-    if agentEntity then
-        local q = ecs:Query({ "TagComponent", "NavMeshAgentComponent" })
-        q:Each(function(e, tag, agent)
-            if tag.Tag == AGENT_TAG then
-                agent.Destination = target.Pos
-                agent.ReachedDestination = 0
-                agent.AutoRepath = 1
-            end
-        end)
-    end
+    local q = ecs:Query({ "TagComponent", "NavMeshAgentComponent" })
+    q:Each(function(e, tag, agent)
+        if tag.Tag == selectedAgentTag or tag.Tag == AGENT_TAG then
+            agent.Destination = target.Pos
+            agent.ReachedDestination = 0
+            agent.AutoRepath = 1
+        end
+    end)
 
     lastEventText = string.format("【目标已指派】前往 [%d] %s", currentTargetIndex, target.Name)
     lastEventTimer = 3.5
@@ -304,14 +328,13 @@ ecs:AddSystem("NavMeshShowcaseSystem", "Update", function(dt: number)
     if kC and not lastKeyC then
         local q = ecs:Query({ "TagComponent", "NavMeshAgentComponent" })
         q:Each(function(e, tag, agent)
-            if tag.Tag == AGENT_TAG then
+            if tag.Tag == selectedAgentTag then
                 agent.Crouching = (agent.Crouching == 0) and 1 or 0
+                local effH = (agent.Crouching == 1) and (agent.CrouchHeight or 0.9) or (agent.AgentHeight or 1.8)
                 if agent.Crouching == 1 then
-                    lastEventText = "【高角色进入蹲伏潜行】有效高度 0.9m <= 1.3m 净空，可直接钻入半高石拱洞走捷径！"
-                    print("[NAVMESH-SHOWCASE] >>> Mannequin Agent 切换为蹲伏态 (0.9m)，允许穿行 1.3m 限高石拱洞")
+                    lastEventText = string.format("【%s 蹲伏潜行】有效高度 %.2fm <= 1.3m 净空，可通过半高石拱洞！", tag.Tag, effH)
                 else
-                    lastEventText = "【高角色恢复站立姿态】站立高度 1.8m > 1.3m 净空，无法通行半高石拱洞，自动绕行主路！"
-                    print("[NAVMESH-SHOWCASE] >>> Mannequin Agent 切换为站立态 (1.8m)，限高阻断，重新规划大路")
+                    lastEventText = string.format("【%s 站立姿态】有效高度 %.2fm > 1.3m 净空，受限高阻断！", tag.Tag, effH)
                 end
                 lastEventTimer = 4.0
             end
@@ -380,69 +403,106 @@ ui.onDraw(function()
     end)
 
     -- 绘制主面板
-    ui.panel(24, 24, 400, 492, "3D NavMesh & AI Navigation Showcase")
+    ui.panel(24, 24, 400, 568, "3D NavMesh & AI Navigation Showcase")
 
     -- 状态标题与指标
-    ui.text(40, 58, "状态       " .. agentStateText, 15)
-    ui.text(40, 80, string.format("代理坐标   (%.1f, %.1f, %.1f)", currentPos.x, currentPos.y, currentPos.z), 13)
-    ui.text(40, 100, string.format("当前目标   [%d] %s", currentTargetIndex, BEACONS[currentTargetIndex].Name), 13)
-    ui.text(40, 120, string.format("剩余距离   %.2f m    巡航速度: %.1f m/s", distRemaining, speed), 13)
+    ui.text(40, 56, "状态       " .. agentStateText, 14)
+    local curAgentH = 1.8
+    local curCrouch = 0
+    local qAgentInfo = ecs:Query({ "TagComponent", "NavMeshAgentComponent" })
+    qAgentInfo:Each(function(e, tag, agent)
+        if tag.Tag == selectedAgentTag then
+            curCrouch = agent.Crouching
+            curAgentH = (curCrouch == 1) and (agent.CrouchHeight or 0.9) or (agent.AgentHeight or 1.8)
+        end
+    end)
+    ui.text(40, 76, string.format("当前代理   [%s] 有效身高: %.2fm", (selectedAgentTag == AGENT_TAG and "人偶 1.8m" or "地精 0.9m"), curAgentH), 12)
+    ui.text(40, 94, string.format("当前目标   [%d] %s", currentTargetIndex, BEACONS[currentTargetIndex].Name), 12)
+    ui.text(40, 112, string.format("剩余距离   %.2f m    巡航速度: %.1f m/s", distRemaining, speed), 12)
 
     -- 路障与巡逻状态
-    local barricadeStatusStr = barricadeClosed and "【已升起阻断 CLOSED】(峡谷封死，代理绕行高台)" or "【已降下通行 OPEN】(峡谷畅通，直达捷径)"
-    ui.text(40, 142, "峡谷路障   " .. barricadeStatusStr, 13)
+    local barricadeStatusStr = barricadeClosed and "【CLOSED 阻断】代理自动绕行高台" or "【OPEN 畅通】峡谷捷径直达"
+    ui.text(40, 130, "峡谷路障   " .. barricadeStatusStr, 12)
 
-    local patrolStr = patrolActive and string.format("【开启】(自动推进至目标 %d)", currentTargetIndex) or "【关闭】(单点导航)"
-    ui.text(40, 164, "循环巡逻   " .. patrolStr, 13)
+    local patrolStr = patrolActive and string.format("【开启】(目标 %d)", currentTargetIndex) or "【关闭】"
+    ui.text(40, 148, "循环巡逻   " .. patrolStr, 12)
 
-    -- 提示与快捷操作指南
-    ui.text(40, 190, "快捷按键: [1..4] 目标点   [Space / O] 升降路障   [P] 巡逻", 12)
+    -- 快捷按键提示
+    ui.text(40, 170, "快捷按键: [1..5] 目标   [C] 蹲伏   [Space] 升降路障   [P] 巡逻", 11)
 
-    -- 交互式可点击操作按钮
-    if ui.button("btn_target_1", 40, 212, 85, 26, "[1] 高台") then
+    -- 地标按钮 (四点 + 石拱洞)
+    if ui.button("btn_target_1", 40, 190, 68, 24, "[1] 高台") then
         patrolActive = false
         SetTarget(1)
     end
-    if ui.button("btn_target_2", 130, 212, 85, 26, "[2] 峡谷") then
+    if ui.button("btn_target_2", 112, 190, 68, 24, "[2] 峡谷") then
         patrolActive = false
         SetTarget(2)
     end
-    if ui.button("btn_target_3", 220, 212, 85, 26, "[3] 前哨") then
+    if ui.button("btn_target_3", 184, 190, 68, 24, "[3] 前哨") then
         patrolActive = false
         SetTarget(3)
     end
-    if ui.button("btn_target_4", 310, 212, 85, 26, "[4] 营地") then
+    if ui.button("btn_target_4", 256, 190, 68, 24, "[4] 营地") then
         patrolActive = false
         SetTarget(4)
     end
+    if ui.button("btn_target_5", 328, 190, 68, 24, "[5] 矮洞") then
+        patrolActive = false
+        SetTarget(5)
+    end
+
+    -- 多体型角色与低矮限高通道核心测试按钮
+    local toggleAgentBtnText = (selectedAgentTag == AGENT_TAG)
+        and "切换受控代理: [当前: 标准人偶 1.8m] -> 点击切换为 地精 0.9m"
+        or "切换受控代理: [当前: 矮小地精 0.9m] -> 点击切换为 人偶 1.8m"
+    if ui.button("btn_toggle_agent", 40, 220, 355, 26, toggleAgentBtnText) then
+        selectedAgentTag = (selectedAgentTag == AGENT_TAG) and GOBLIN_TAG or AGENT_TAG
+        lastEventText = string.format("【切换代理】当前受控: %s", selectedAgentTag)
+        lastEventTimer = 3.5
+    end
+
+    local crouchBtnText = (curCrouch == 1)
+        and "恢复站立姿态 (按 C 键) -> 站立有效高度 1.8m (限高阻断)"
+        or "进入蹲伏姿态 (按 C 键) -> 蹲伏有效高度 0.9m (钻入矮洞)"
+    if ui.button("btn_toggle_crouch", 40, 252, 355, 26, crouchBtnText) then
+        local q = ecs:Query({ "TagComponent", "NavMeshAgentComponent" })
+        q:Each(function(e, tag, agent)
+            if tag.Tag == selectedAgentTag then
+                agent.Crouching = (agent.Crouching == 0) and 1 or 0
+                local effH = (agent.Crouching == 1) and (agent.CrouchHeight or 0.9) or (agent.AgentHeight or 1.8)
+                lastEventText = string.format("【姿态切换】%s 有效高度: %.2fm", tag.Tag, effH)
+                lastEventTimer = 3.5
+            end
+        end)
+    end
 
     local barBtnText = barricadeClosed and "降下峡谷路障 (切换为畅通通行 OPEN)" or "升起峡谷路障 (切换为阻断雕刻 CLOSED)"
-    if ui.button("btn_toggle_barricade", 40, 246, 355, 28, barBtnText) then
+    if ui.button("btn_toggle_barricade", 40, 284, 355, 26, barBtnText) then
         SetBarricade(not barricadeClosed)
     end
 
-    local patrolBtnText = patrolActive and "停止四点循环巡逻 (切换为单点停留)" or "启动四点循环巡逻 (自动往复漫游)"
-    if ui.button("btn_toggle_patrol", 40, 282, 355, 28, patrolBtnText) then
+    local patrolBtnText = patrolActive and "停止四点循环巡逻 (切换为单点停歇)" or "启动四点循环巡逻 (自动往复漫游)"
+    if ui.button("btn_toggle_patrol", 40, 316, 355, 26, patrolBtnText) then
         patrolActive = not patrolActive
         lastEventText = patrolActive and "【已启动循环巡逻】" or "【已停止循环巡逻】"
         lastEventTimer = 3.0
     end
 
-    if ui.button("btn_reset_agent", 40, 318, 355, 28, "重置 AI 代理位置 (返回大本营营地)") then
+    if ui.button("btn_reset_agent", 40, 348, 355, 26, "重置 AI 代理位置 (返回大本营营地)") then
         patrolActive = false
         ResetAgentToBaseCamp()
     end
 
     -- 动态操作提示文字
-    ui.text(40, 356, "最近操作: " .. lastEventText, 11)
+    ui.text(40, 384, "最近操作: " .. lastEventText, 11)
 
-    -- 底部署名与原理摘要
-    ui.text(40, 384, "3D 寻路与避障机制技术解析:", 12)
-    ui.text(40, 404, "- 算法核心: 3D A* 凸多边形走廊搜索 + Funnel 漏斗最短折线收紧", 10)
-    ui.text(40, 420, "- 斜率剔除: >45° 陡壁绝壁自动剔除，25° 平缓坡道无缝登高", 10)
-    ui.text(40, 436, "- 动态雕刻: NavMeshObstacleComponent 实时打洞剔除重叠多边形", 10)
-    ui.text(40, 452, "- 实时重规划: 峡谷受阻毫秒级感知，沿西侧高台缓坡智能绕行", 10)
-end)
+    -- 底部签名与原理摘要
+    ui.text(40, 410, "3D 寻路与限高避障机制技术解析:", 12)
+    ui.text(40, 428, "- 连续物理净空: NavMeshAreaModifierComponent ClearanceHeight 精准过滤", 10)
+    ui.text(40, 444, "- 多体型自适应: 0.9m 地精天生穿过 1.3m 矮洞；1.8m 人偶蹲伏后方可通行", 10)
+    ui.text(40, 460, "- 动态雕刻: NavMeshObstacleComponent 实时打洞剔除重叠多边形", 10)
+    ui.text(40, 476, "- 实时重规划: 遇阻毫秒级感知，沿西侧高台缓坡智能绕行", 10)end)
 
 -- 7. 场景卸载清理系统
 ecs:AddTeardownSystem("NavMeshShowcaseTeardown", function()

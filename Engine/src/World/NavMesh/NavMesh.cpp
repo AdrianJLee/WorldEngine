@@ -83,6 +83,10 @@ namespace World
 		poly.AreaType = 0;
 		poly.Cost = 1.0f;
 		poly.Blocked = false;
+		poly.Clearance = 3.0f;
+		poly.BaseAreaType = 0;
+		poly.BaseCost = 1.0f;
+		poly.BaseClearance = 3.0f;
 
 		glm::vec3 center(0.0f);
 		for (uint32_t idx : vertIndices)
@@ -311,6 +315,28 @@ namespace World
 	void NavMesh::ClearAreaModifiers()
 	{
 		m_AreaModifiers.clear();
+	}
+
+	void NavMesh::ResetAreaModifiers()
+	{
+		m_AreaModifiers.clear();
+		for (auto& poly : m_Polygons)
+		{
+			poly.AreaType = poly.BaseAreaType;
+			poly.Cost = poly.BaseCost;
+			poly.Clearance = poly.BaseClearance;
+			poly.Blocked = (poly.AreaType == 4 || poly.Cost <= 0.0f);
+		}
+	}
+
+	void NavMesh::ReapplyAreaModifiers(const std::vector<NavMeshAreaModifier>& modifiers)
+	{
+		ResetAreaModifiers();
+		for (const auto& mod : modifiers)
+		{
+			AddAreaModifier(mod);
+		}
+		BuildMacroTiles(m_MacroTileSize);
 	}
 
 	bool NavMesh::SamplePosition(const glm::vec3& point, float maxDistance,
@@ -992,6 +1018,10 @@ namespace World
 					poly.AreaType = 0;
 					poly.Cost = 1.0f;
 					poly.Blocked = false;
+					poly.Clearance = 3.0f;
+					poly.BaseAreaType = 0;
+					poly.BaseCost = 1.0f;
+					poly.BaseClearance = 3.0f;
 
 					cellPolys[gz * numX + gx].push_back({ pIdx, span.Height });
 				}
@@ -1847,6 +1877,9 @@ namespace World
 			poly.Cost = 1.0f;
 			poly.Blocked = false;
 			poly.Clearance = 3.0f;
+			poly.BaseAreaType = 0;
+			poly.BaseCost = 1.0f;
+			poly.BaseClearance = 3.0f;
 
 			glm::vec3 center(0.0f);
 			for (uint32_t idx : poly.VertexIndices)
@@ -1943,10 +1976,13 @@ namespace World
 		// 消除上一帧残留的动态阻挡标记
 		const_cast<NavMesh&>(navMesh).ClearObstacles();
 
+		// 非结构写操作（仅修改组件数据）：走 const Scene 访问注册表，避免命中运行期结构写保护断言
+		auto& registry = const_cast<entt::registry&>(std::as_const(scene).GetRegistry());
+
 		// 遍历所有带 NavMeshObstacleComponent 且 CarveNavMesh == 1 的实体，调用 ApplyObstacle
-		for (auto entity : scene.GetRegistry().view<TransformComponent, NavMeshObstacleComponent>())
+		for (auto entity : registry.view<TransformComponent, NavMeshObstacleComponent>())
 		{
-			const auto& [xform, obs] = scene.GetRegistry().get<TransformComponent, NavMeshObstacleComponent>(entity);
+			const auto& [xform, obs] = registry.get<TransformComponent, NavMeshObstacleComponent>(entity);
 			if (obs.CarveNavMesh == 1)
 			{
 				const glm::vec3 worldExtents = glm::abs(xform.Scale) * obs.Extents;
@@ -1955,9 +1991,9 @@ namespace World
 		}
 
 		// 遍历所有带 NavMeshAgentComponent 的实体
-		for (auto entity : scene.GetRegistry().view<TransformComponent, NavMeshAgentComponent>())
+		for (auto entity : registry.view<TransformComponent, NavMeshAgentComponent>())
 		{
-			auto& [xform, agent] = scene.GetRegistry().get<TransformComponent, NavMeshAgentComponent>(entity);
+			auto& [xform, agent] = registry.get<TransformComponent, NavMeshAgentComponent>(entity);
 
 			// 计算到 agent.Destination 的水平/三维距离
 			const float distToDest = glm::distance(xform.Location, agent.Destination);

@@ -104,7 +104,7 @@ namespace World
 					char msgBuf[256];
 					if (newNav->GetPolygonCount() > 0)
 					{
-						std::snprintf(msgBuf, sizeof(msgBuf), "✦ 3D 导航网格后台烘焙成功！耗时: %.2fs，多边形: %zu，顶点: %zu",
+						std::snprintf(msgBuf, sizeof(msgBuf), "[OK] 3D 导航网格后台烘焙成功！耗时: %.2fs，多边形: %zu，顶点: %zu",
 							elapsed, newNav->GetPolygonCount(), newNav->GetVertexCount());
 					}
 					else
@@ -180,7 +180,7 @@ namespace World
 		Wui::HighlightOutline(ctx, cardRect, theme.Border, theme.Radius, 1.0f);
 
 		const bool hasPolys = (navMesh && navMesh->GetPolygonCount() > 0);
-		const char* badgeText = hasPolys ? "● 导航网格已就绪 (Baked)" : "○ 导航网格未烘焙 / 空 (Empty)";
+		const char* badgeText = hasPolys ? "[Ready] 导航网格已就绪 (Baked)" : "[Empty] 导航网格未烘焙 / 空 (Empty)";
 		const Wui::WuiColor badgeColor = hasPolys ? theme.Success : theme.TextMuted;
 		Wui::Label(ctx, { startX + 8.0f, curY + 6.0f }, badgeText, badgeColor, theme.FontSizeBody);
 
@@ -201,7 +201,7 @@ namespace World
 		}
 
 		char statsBuf1[128] = {};
-		std::snprintf(statsBuf1, sizeof(statsBuf1), "多边形: %zu   顶点: %zu   面积: %.1f m²",
+		std::snprintf(statsBuf1, sizeof(statsBuf1), "多边形: %zu   顶点: %zu   面积: %.1f m2",
 			polyCount, vertCount, walkableArea);
 		Wui::Label(ctx, { startX + 8.0f, curY + 26.0f }, statsBuf1, theme.Text, theme.FontSizeSmall);
 
@@ -220,7 +220,7 @@ namespace World
 		Wui::HighlightOutline(ctx, cardRect, theme.Border, theme.Radius, 1.0f);
 
 		float innerY = curY + 8.0f;
-		Wui::Label(ctx, { startX + 8.0f, innerY }, "✦ 全场景烘焙源与代理规格 (Bake Sources & Profiles)", theme.Accent, theme.FontSizeSmall);
+		Wui::Label(ctx, { startX + 8.0f, innerY }, "[Bake] 全场景烘焙源与代理规格 (Bake Sources & Profiles)", theme.Accent, theme.FontSizeSmall);
 		innerY += 24.0f;
 
 		const float labelW = std::min(115.0f, contentW * 0.42f);
@@ -273,7 +273,7 @@ namespace World
 		innerY += 24.0f;
 
 		// 5. 最大坡度
-		Wui::Label(ctx, { startX + 8.0f, innerY + 2.0f }, "最大爬坡坡度 (°):", theme.Text, theme.FontSizeSmall);
+		Wui::Label(ctx, { startX + 8.0f, innerY + 2.0f }, "最大爬坡坡度 (度):", theme.Text, theme.FontSizeSmall);
 		const float prevSlope = m_MaxSlope;
 		Wui::DragFloat(ctx, Wui::HashId("navmesh.bake.max_slope"), { startX + labelW, innerY, fieldW, 22.0f },
 			m_MaxSlope, 1.0f, 5.0f, 85.0f, theme);
@@ -306,13 +306,13 @@ namespace World
 			char btnBuf[64];
 			const auto now = std::chrono::high_resolution_clock::now();
 			const double elapsed = std::chrono::duration<double>(now - m_AsyncBake.StartTime).count();
-			std::snprintf(btnBuf, sizeof(btnBuf), "⏳ 烘焙中... (%.1fs)", elapsed);
+			std::snprintf(btnBuf, sizeof(btnBuf), "[烘焙中]... (%.1fs)", elapsed);
 			Wui::Button(ctx, Wui::HashId("navmesh.btn.baking"), { startX + 8.0f, innerY, btnW, btnH }, btnBuf, theme);
 			Wui::Tooltip(ctx, { startX + 8.0f, innerY, btnW, btnH }, "导航网格正在后台独立工作线程中体素化与构建，UI 保持 60+ FPS 流畅，完成后将自动注入场景");
 		}
 		else
 		{
-			if (Wui::Button(ctx, Wui::HashId("navmesh.btn.bake_scene"), { startX + 8.0f, innerY, btnW, btnH }, "✦ 异步烘焙 (Bake)", theme))
+			if (Wui::Button(ctx, Wui::HashId("navmesh.btn.bake_scene"), { startX + 8.0f, innerY, btnW, btnH }, "[Bake] 异步烘焙 (Bake)", theme))
 			{
 				if (host.IsReadOnlyMode())
 				{
@@ -383,7 +383,7 @@ namespace World
 		Wui::HighlightOutline(ctx, cardRect, theme.Border, theme.Radius, 1.0f);
 
 		float innerY = curY + 8.0f;
-		Wui::Label(ctx, { startX + 8.0f, innerY }, "👁 视口 3D 调试可视化开关 (Viewport Overlays)", theme.Accent, theme.FontSizeSmall);
+		Wui::Label(ctx, { startX + 8.0f, innerY }, "[3D] 视口 3D 调试可视化开关 (Viewport Overlays)", theme.Accent, theme.FontSizeSmall);
 		innerY += 24.0f;
 
 		const bool narrow = contentW < 340.0f;
@@ -395,13 +395,8 @@ namespace World
 		const float col2X = col1X + checkW + 6.0f;
 
 		// 1. 显示导航网格 (P)
-		const bool prevShowPolys = ShowPolygons;
 		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.polys"), { col0X, innerY, checkW, 22.0f }, "显示导航网格 (P)", ShowPolygons, theme);
-		if (ShowPolygons != prevShowPolys)
-		{
-			ViewportPanel::SetNavMeshVisible(ShowPolygons);
-		}
-		Wui::Tooltip(ctx, { col0X, innerY, checkW, 22.0f }, "在视口中开启/关闭 3D 导航网格叠加层 (快捷键 P)");
+		Wui::Tooltip(ctx, { col0X, innerY, checkW, 22.0f }, "在视口中开启/关闭 3D 导航多边形着色网格 (快捷键 P)");
 
 		// 2. 半透明全涂色填充
 		Wui::Checkbox(ctx, Wui::HashId("navmesh.vis.fill"), { col1X, innerY, checkW, 22.0f }, "半透明填充", FillPolygons, theme);
@@ -454,9 +449,9 @@ namespace World
 		const Wui::WuiRect tipRect { startX + 8.0f, innerY, contentW - 16.0f, tipH };
 		Wui::PanelBackground(ctx, tipRect, theme.PanelHeader, theme.Radius);
 		Wui::HighlightOutline(ctx, tipRect, theme.Border, theme.Radius, 1.0f);
-		Wui::Label(ctx, { tipRect.X + 8.0f, tipRect.Y + 6.0f }, "✦ 视口性能削峰与工业级规范", theme.Accent, theme.FontSizeSmall);
-		Wui::Label(ctx, { tipRect.X + 8.0f, tipRect.Y + 23.0f }, "• 视距硬截断 65m，自适应距离粗细网格", theme.TextMuted, theme.FontSizeSmall);
-		Wui::Label(ctx, { tipRect.X + 8.0f, tipRect.Y + 39.0f }, "• 单帧 Quad 安全限额 350，确保 100+ FPS 流畅", theme.TextMuted, theme.FontSizeSmall);
+		Wui::Label(ctx, { tipRect.X + 8.0f, tipRect.Y + 6.0f }, "[*] 视口性能削峰与工业级规范", theme.Accent, theme.FontSizeSmall);
+		Wui::Label(ctx, { tipRect.X + 8.0f, tipRect.Y + 23.0f }, "- 视距硬截断 65m，自适应距离粗细网格", theme.TextMuted, theme.FontSizeSmall);
+		Wui::Label(ctx, { tipRect.X + 8.0f, tipRect.Y + 39.0f }, "- 单帧 Quad 安全限额 350，确保 100+ FPS 流畅", theme.TextMuted, theme.FontSizeSmall);
 	}
 
 	void NavMeshPanel::RenderProbesTab(Wui::WuiContext& ctx, float startX, float curY, float contentW, float cardH, const Wui::WuiTheme& theme, PanelHost& host, NavMesh* navMesh)
@@ -467,7 +462,7 @@ namespace World
 		Wui::HighlightOutline(ctx, cardRect, theme.Border, theme.Radius, 1.0f);
 
 		float innerY = curY + 8.0f;
-		Wui::Label(ctx, { startX + 8.0f, innerY }, "✦ 通用空间感知与探针测试 (Spatial Query Probes)", theme.Accent, theme.FontSizeSmall);
+		Wui::Label(ctx, { startX + 8.0f, innerY }, "[Query] 通用空间感知与探针测试 (Spatial Query Probes)", theme.Accent, theme.FontSizeSmall);
 		innerY += 24.0f;
 
 		const float colLabelW = 55.0f;
@@ -558,12 +553,12 @@ namespace World
 
 				if (visible)
 				{
-					m_LoSStatus = "✓ 视线通达 (Visible - 无几何与障碍阻隔)";
+					m_LoSStatus = "[OK] 视线通达 (Visible - 无几何与障碍阻隔)";
 				}
 				else
 				{
 					char buf[128] = {};
-					std::snprintf(buf, sizeof(buf), "✗ 视线阻断 (Blocked at X: %.2f, Y: %.2f, Z: %.2f)",
+					std::snprintf(buf, sizeof(buf), "[X] 视线阻断 (Blocked at X: %.2f, Y: %.2f, Z: %.2f)",
 						hitPoint.x, hitPoint.y, hitPoint.z);
 					m_LoSStatus = buf;
 				}
@@ -610,13 +605,13 @@ namespace World
 				if (ok)
 				{
 					char buf[128] = {};
-					std::snprintf(buf, sizeof(buf), "✓ 采样目标: (%.2f, %.2f, %.2f)",
+					std::snprintf(buf, sizeof(buf), "[OK] 采样目标: (%.2f, %.2f, %.2f)",
 						outPoint.x, outPoint.y, outPoint.z);
 					m_WanderStatus = buf;
 				}
 				else
 				{
-					m_WanderStatus = "✗ 采样失败 (无法在指定半径内找到可通行多边形)";
+					m_WanderStatus = "[X] 采样失败 (无法在指定半径内找到可通行多边形)";
 				}
 			}
 		}
