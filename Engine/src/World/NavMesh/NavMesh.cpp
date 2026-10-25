@@ -299,6 +299,10 @@ namespace World
 					{
 						poly.Blocked = true;
 					}
+					else if (modifier.AreaType == NavAreaType::LowCeiling)
+					{
+						poly.Clearance = 1.2f; // 半高通道，默认净空上限 1.2m
+					}
 				}
 			}
 		}
@@ -310,7 +314,8 @@ namespace World
 	}
 
 	bool NavMesh::SamplePosition(const glm::vec3& point, float maxDistance,
-		glm::vec3& outNavPoint, uint32_t& outPolyIdx) const
+		glm::vec3& outNavPoint, uint32_t& outPolyIdx,
+		const NavQueryFilter& filter) const
 	{
 		float bestDist2 = maxDistance * maxDistance;
 		bool found = false;
@@ -319,6 +324,8 @@ namespace World
 		{
 			const auto& poly = m_Polygons[p];
 			if (poly.Blocked || poly.Cost <= 0.0f)
+				continue;
+			if (!filter.CanTraverse(poly.AreaType, poly.Clearance))
 				continue;
 
 			// 快速中心距离粗筛：多边形半径通常小于 4.0m，超出当前最优距离 + 半径裕量则直接跳过
@@ -388,7 +395,8 @@ namespace World
 	}
 
 	bool NavMesh::FindPath(const glm::vec3& start, const glm::vec3& end,
-		std::vector<glm::vec3>& outPath) const
+		std::vector<glm::vec3>& outPath,
+		const NavQueryFilter& filter) const
 	{
 		outPath.clear();
 		if (m_Polygons.empty())
@@ -396,8 +404,8 @@ namespace World
 
 		glm::vec3 navStart, navEnd;
 		uint32_t polyStart = 0, polyEnd = 0;
-		if (!SamplePosition(start, 50.0f, navStart, polyStart) ||
-			!SamplePosition(end, 50.0f, navEnd, polyEnd))
+		if (!SamplePosition(start, 50.0f, navStart, polyStart, filter) ||
+			!SamplePosition(end, 50.0f, navEnd, polyEnd, filter))
 		{
 			return false;
 		}
@@ -408,7 +416,7 @@ namespace World
 			return true;
 		}
 
-		// 3D A* 走廊搜索 (区域代价加权)
+		// 3D A* 走廊搜索 (区域代价加权与净空/掩码过滤)
 		struct AStarNode
 		{
 			uint32_t PolyIdx;
@@ -443,7 +451,10 @@ namespace World
 			{
 				if (neighbor < 0 || static_cast<size_t>(neighbor) >= m_Polygons.size())
 					continue;
-				if (m_Polygons[neighbor].Blocked || m_Polygons[neighbor].Cost <= 0.0f)
+				const auto& nbrPoly = m_Polygons[neighbor];
+				if (nbrPoly.Blocked || nbrPoly.Cost <= 0.0f)
+					continue;
+				if (!filter.CanTraverse(nbrPoly.AreaType, nbrPoly.Clearance))
 					continue;
 
 				// 移动代价乘以目标多边形 Cost
@@ -1833,6 +1844,7 @@ namespace World
 			poly.AreaType = 0;
 			poly.Cost = 1.0f;
 			poly.Blocked = false;
+			poly.Clearance = 3.0f;
 
 			glm::vec3 center(0.0f);
 			for (uint32_t idx : poly.VertexIndices)
@@ -1937,9 +1949,14 @@ namespace World
 				continue;
 			}
 
-			// 若未到达，调用 navMesh.FindPath
+			// 若未到达，调用 navMesh.FindPath (传入当前代理体型高度与掩码)
+			NavQueryFilter filter;
+			filter.AgentHeight = agent.Crouching ? (agent.AgentHeight * 0.55f) : agent.AgentHeight;
+			filter.AgentRadius = agent.AgentRadius;
+			filter.AreaMask = agent.AreaMask;
+
 			std::vector<glm::vec3> path;
-			if (navMesh.FindPath(xform.Location, agent.Destination, path) && path.size() >= 2)
+			if (navMesh.FindPath(xform.Location, agent.Destination, path, filter) && path.size() >= 2)
 			{
 				agent.HasPath = 1;
 				agent.ReachedDestination = 0;

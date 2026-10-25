@@ -2365,7 +2365,9 @@ namespace World
 		uint8_t HasPath { 0 };                            // 1B  (offset 32)
 		uint8_t ReachedDestination { 0 };                 // 1B  (offset 33)
 		uint8_t AutoRepath { 1 };                         // 1B  (offset 34)
-		uint8_t _Padding[13] { 0 };                       // 13B (offset 35)
+		uint8_t Crouching { 0 };                          // 1B  (offset 35: 0=Standing, 1=Crouching/Low)
+		uint32_t AreaMask { 0xFFFFFFFF };                 // 4B  (offset 36: bitmask of allowed AreaTypes)
+		uint8_t _Padding[8] { 0 };                        // 8B  (offset 40)
 
 		NavMeshAgentComponent() = default;
 
@@ -2390,6 +2392,10 @@ namespace World
 				Doc("Whether the agent reached its target destination."));
 			WE_FIELD(AutoRepath, UInt8, Default(1),
 				Doc("Automatically recalculate path if target moves or obstacle blocks."));
+			WE_FIELD(Crouching, UInt8, Default(0),
+				Doc("Whether character is currently crouching/lowered (reduces effective height to pass low ceilings)."));
+			WE_FIELD(AreaMask, UInt32, Default(0xFFFFFFFF),
+				Doc("Bitmask of traversable area types (bit N corresponds to AreaType N)."));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(NavMeshAgentComponent) == 48, "NavMeshAgentComponent must be exactly 48 bytes");
@@ -2403,6 +2409,8 @@ namespace World
 	static_assert(offsetof(NavMeshAgentComponent, HasPath) == 32, "HasPath offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, ReachedDestination) == 33, "ReachedDestination offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, AutoRepath) == 34, "AutoRepath offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, Crouching) == 35, "Crouching offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, AreaMask) == 36, "AreaMask offset mismatch");
 
 	struct NavMeshObstacleComponent
 	{

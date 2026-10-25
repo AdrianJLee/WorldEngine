@@ -3912,6 +3912,11 @@ namespace World
 									macroOutlineColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.90f };
 									macroFillColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.35f };
 								}
+								else if (tile.DominantAreaType == 5)
+								{
+									macroOutlineColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.90f };
+									macroFillColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.35f };
+								}
 							}
 
 							if (NavMeshPanel::FillPolygons)
@@ -4079,6 +4084,11 @@ namespace World
 									polyColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.90f };
 									fillColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.40f };
 								}
+								else if (poly.AreaType == 5)
+								{
+									polyColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.90f };
+									fillColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.40f };
+								}
 							}
 
 							if (NavMeshPanel::FillPolygons && quadCount < kMaxQuadBudget)
@@ -4228,7 +4238,11 @@ namespace World
 							cache.LastDest = agent.Destination;
 							cache.LastTime = now;
 							cache.Path.clear();
-							navMesh->FindPath(center, agent.Destination, cache.Path);
+							NavQueryFilter filter;
+							filter.AgentHeight = agent.Crouching ? (agent.AgentHeight * 0.55f) : agent.AgentHeight;
+							filter.AgentRadius = agent.AgentRadius;
+							filter.AreaMask = agent.AreaMask;
+							navMesh->FindPath(center, agent.Destination, cache.Path, filter);
 						}
 
 						const auto& agentPath = cache.Path;
@@ -4297,6 +4311,8 @@ namespace World
 							areaColor = Wui::WuiColor{ 0.95f, 0.45f, 0.15f, 0.85f };
 						else if (areaComp.AreaType == 4)
 							areaColor = Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.85f };
+						else if (areaComp.AreaType == 5)
+							areaColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.85f };
 
 						glm::mat4 world(1.0f);
 						if (const auto* xform = registry.try_get<TransformComponent>(handle))

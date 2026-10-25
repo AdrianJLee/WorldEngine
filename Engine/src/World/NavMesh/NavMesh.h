@@ -32,12 +32,39 @@ namespace World
 		bool BiDirectional = true;
 	};
 
+	namespace NavAreaType
+	{
+		constexpr uint8_t Walkable = 0;   // 常规可行走区 (1.0x 代价，标准净空)
+		constexpr uint8_t Road = 1;       // 平坦道路 (0.5x 代价加速，明亮绿色)
+		constexpr uint8_t Mud = 2;        // 泥泞沼泽 (3.0x 代价减速，紫色)
+		constexpr uint8_t Hazard = 3;     // 危险熔岩 (10.0x 高危避让，橙红色)
+		constexpr uint8_t Impassable = 4; // 永久阻断 (无法通行，纯红色)
+		constexpr uint8_t LowCeiling = 5; // 半高限高通道 (净空 <= 1.2m，青蓝色；高角色 1.8m 阻断绕行，低角色/蹲伏 1.0m 畅行)
+	}
+
+	struct NavQueryFilter
+	{
+		uint32_t AreaMask = 0xFFFFFFFF; // 可通行区域位掩码 (bit N 对应 AreaType N)
+		float AgentHeight = 1.8f;       // 代理站立/蹲伏实际高度 (米)
+		float AgentRadius = 0.5f;       // 代理半径 (米)
+		bool RequireClearance = true;    // 是否开启天花板净空判定
+
+		bool CanTraverse(uint8_t areaType, float clearance) const
+		{
+			if ((AreaMask & (1u << areaType)) == 0)
+				return false;
+			if (RequireClearance && clearance > 0.0f && AgentHeight > clearance + 0.05f)
+				return false;
+			return true;
+		}
+	};
+
 	struct NavMeshAreaModifier
 	{
 		glm::vec3 Center { 0.0f };
 		glm::vec3 Extents { 1.0f };
 		float CostMultiplier = 2.0f;
-		uint8_t AreaType = 1; // 0=Walkable, 1=Road, 2=Mud, 3=Hazard, 4=Impassable
+		uint8_t AreaType = 1; // 0=Walkable, 1=Road, 2=Mud, 3=Hazard, 4=Impassable, 5=LowCeiling
 	};
 
 	static_assert(sizeof(NavMeshOffMeshLink) == 32, "NavMeshOffMeshLink must be 32 bytes");
@@ -81,6 +108,7 @@ namespace World
 		bool Blocked { false }; // 动态障碍物打洞标记
 		uint8_t AreaType = 0;
 		float Cost = 1.0f;
+		float Clearance = 3.0f; // 净空高度上限（米），天花板/过梁距离地面高度，默认 3.0m
 	};
 
 	struct NavMeshPortal
@@ -107,13 +135,15 @@ namespace World
 		const NavMeshPolygon& GetPolygon(uint32_t index) const { return m_Polygons[index]; }
 		NavMeshPolygon& GetPolygonMut(uint32_t index) { return m_Polygons[index]; }
 
-		// 空间点正交投影至最近多边形表面
+		// 空间点正交投影至最近多边形表面 (带查询过滤器：净空高度与区域掩码)
 		bool SamplePosition(const glm::vec3& point, float maxDistance,
-			glm::vec3& outNavPoint, uint32_t& outPolyIdx) const;
+			glm::vec3& outNavPoint, uint32_t& outPolyIdx,
+			const NavQueryFilter& filter = {}) const;
 
-		// 3D A* 走廊搜索 + Funnel 漏斗平滑路径规划
+		// 3D A* 走廊搜索 + Funnel 漏斗平滑路径规划 (带查询过滤器：净空高度与区域掩码)
 		bool FindPath(const glm::vec3& start, const glm::vec3& end,
-			std::vector<glm::vec3>& outPath) const;
+			std::vector<glm::vec3>& outPath,
+			const NavQueryFilter& filter = {}) const;
 
 		// 漏斗平滑算法 (String-Pulling): 将过境线门径收紧为最短折线
 		static void FunnelSmooth(const std::vector<NavMeshPortal>& portals,

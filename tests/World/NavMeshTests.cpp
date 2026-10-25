@@ -465,6 +465,78 @@ static void TestNavMeshMacroTilesLOD()
 	std::cout << "[PASS] TestNavMeshMacroTilesLOD\n";
 }
 
+static void TestNavMeshLowCeilingAndAgentHeightFiltering()
+{
+	NavMesh nav;
+	// 建立 3 个连续四边形通道: (0,0) -> (10,0) -> (20,0) -> (30,0)
+	uint32_t v[8];
+	v[0] = nav.AddVertex(glm::vec3(0.0f, 0.0f, 0.0f));
+	v[1] = nav.AddVertex(glm::vec3(10.0f, 0.0f, 0.0f));
+	v[2] = nav.AddVertex(glm::vec3(20.0f, 0.0f, 0.0f));
+	v[3] = nav.AddVertex(glm::vec3(30.0f, 0.0f, 0.0f));
+
+	v[4] = nav.AddVertex(glm::vec3(0.0f, 0.0f, 10.0f));
+	v[5] = nav.AddVertex(glm::vec3(10.0f, 0.0f, 10.0f));
+	v[6] = nav.AddVertex(glm::vec3(20.0f, 0.0f, 10.0f));
+	v[7] = nav.AddVertex(glm::vec3(30.0f, 0.0f, 10.0f));
+
+	nav.AddPolygon({ v[0], v[1], v[5], v[4] }); // 0
+	uint32_t pMid = nav.AddPolygon({ v[1], v[2], v[6], v[5] }); // 1 (中间限高半高通道)
+	nav.AddPolygon({ v[2], v[3], v[7], v[6] }); // 2
+	nav.BuildAdjacency();
+
+	// 将中间多边形配置为半高通道 (LowCeiling, 净空 1.2m)
+	nav.GetPolygonMut(pMid).AreaType = NavAreaType::LowCeiling;
+	nav.GetPolygonMut(pMid).Clearance = 1.2f;
+
+	const glm::vec3 startPt(2.0f, 0.0f, 5.0f);
+	const glm::vec3 endPt(28.0f, 0.0f, 5.0f);
+
+	// 1. 高角色 (Tall Agent: 身高 1.8m > 1.2m 净空) 站立态寻路 —— 无法通过半高通道！
+	{
+		NavQueryFilter tallFilter;
+		tallFilter.AgentHeight = 1.8f;
+		tallFilter.RequireClearance = true;
+		std::vector<glm::vec3> path;
+		bool found = nav.FindPath(startPt, endPt, path, tallFilter);
+		assert(!found); // 高角色无法穿过半高矮通道
+	}
+
+	// 2. 矮小角色 / 爬虫 (Short Agent: 身高 1.0m <= 1.2m 净空) —— 顺畅通过！
+	{
+		NavQueryFilter shortFilter;
+		shortFilter.AgentHeight = 1.0f;
+		shortFilter.RequireClearance = true;
+		std::vector<glm::vec3> path;
+		bool found = nav.FindPath(startPt, endPt, path, shortFilter);
+		assert(found);
+		assert(path.size() >= 2);
+	}
+
+	// 3. 高角色进入蹲伏潜行态 (Crouching: 身高折半为 0.99m <= 1.2m) —— 允许钻入并顺畅通过！
+	{
+		NavQueryFilter crouchFilter;
+		crouchFilter.AgentHeight = 1.8f * 0.55f; // 蹲伏有效高度 0.99m
+		crouchFilter.RequireClearance = true;
+		std::vector<glm::vec3> path;
+		bool found = nav.FindPath(startPt, endPt, path, crouchFilter);
+		assert(found);
+		assert(path.size() >= 2);
+	}
+
+	// 4. 掩码明确禁用 LowCeiling 区域 (AreaMask 过滤) —— 阻断无法通行
+	{
+		NavQueryFilter maskBlockedFilter;
+		maskBlockedFilter.AgentHeight = 1.0f;
+		maskBlockedFilter.AreaMask = ~(1u << NavAreaType::LowCeiling); // 显式禁用 LowCeiling
+		std::vector<glm::vec3> path;
+		bool found = nav.FindPath(startPt, endPt, path, maskBlockedFilter);
+		assert(!found);
+	}
+
+	std::cout << "[PASS] TestNavMeshLowCeilingAndAgentHeightFiltering\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.NavMesh tests...\n";
@@ -481,7 +553,7 @@ int main()
 	TestNavMeshBakeFromScene();
 	TestNavMeshAsyncBaking();
 	TestNavMeshMacroTilesLOD();
-	std::cout << "All 13 World.NavMesh tests passed successfully!\n";
+	TestNavMeshLowCeilingAndAgentHeightFiltering();
+	std::cout << "All 14 World.NavMesh tests passed successfully!\n";
 	return 0;
 }
-

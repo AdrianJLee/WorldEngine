@@ -12986,6 +12986,26 @@ struct GeneratedAccess<World::NavMeshAgentComponent>
         World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
         self->AutoRepath = std::get<uint8_t>(value);
     }
+    static Value Get_Crouching(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->Crouching);
+    }
+    static void Set_Crouching(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->Crouching = std::get<uint8_t>(value);
+    }
+    static Value Get_AreaMask(const void* instance)
+    {
+        const World::NavMeshAgentComponent* self = static_cast<const World::NavMeshAgentComponent*>(instance);
+        return Value(self->AreaMask);
+    }
+    static void Set_AreaMask(void* instance, const Value& value)
+    {
+        World::NavMeshAgentComponent* self = static_cast<World::NavMeshAgentComponent*>(instance);
+        self->AreaMask = std::get<uint32_t>(value);
+    }
     static const FieldSchema& Field_Destination()
     {
         static const FieldSchema schema = {
@@ -13148,6 +13168,42 @@ struct GeneratedAccess<World::NavMeshAgentComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_Crouching()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3A73256189EFD71Dull },
+            "Crouching",
+            Kind::UInt8,
+            &Get_Crouching,
+            &Set_Crouching,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether character is currently crouching/lowered (reduces effective height to pass low ceilings).", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AreaMask()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x83239A3F5053FBE4ull },
+            "AreaMask",
+            Kind::UInt32,
+            &Get_AreaMask,
+            &Set_AreaMask,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bitmask of traversable area types (bit N corresponds to AreaType N).", false, "", {  }, "", std::nullopt },
+            Value(0xFFFFFFFF),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::NavMeshAgentComponent>();
@@ -13171,6 +13227,8 @@ struct GeneratedAccess<World::NavMeshAgentComponent>
                 Field_HasPath(),
                 Field_ReachedDestination(),
                 Field_AutoRepath(),
+                Field_Crouching(),
+                Field_AreaMask(),
             },
             &StorageBindingOf(),
             "AI",
