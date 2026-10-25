@@ -459,10 +459,13 @@ namespace World
 
 		// 左岛全宽: 内衬4 + viewButtonW + 间隙3 + 分割线8 + 间隙3 + modeSwitcherW + 间隙3 + 分割线8 + 间隙3 + 5*22 + 4*2 + 内衬4
 		Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
+		Wui::WuiRect showButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad + 4.0f, 0.0f, 0.0f };
+		const std::string showLabel = Wui::Tr("viewport.show.button", "显示") + " ▼";
+		const float showBtnW = std::max(56.0f, ctx.MeasureTextWidth(showLabel, 12.0f) + 16.0f);
 		Wui::WuiRect leftIslandRect { sceneRect.X + kChromePad, sceneRect.Y + kChromePad, 0.0f, 0.0f };
 		if (!play)
 		{
-			const float fullLeftIslandW = 4.0f + viewButtonW + 3.0f + 8.0f + 3.0f + modeSwitcherW + 3.0f + 8.0f + 3.0f + (5 * gizmoBtnW + 4 * 2.0f) + 4.0f;
+			const float fullLeftIslandW = 4.0f + viewButtonW + 3.0f + showBtnW + 3.0f + 8.0f + 3.0f + modeSwitcherW + 3.0f + 8.0f + 3.0f + (5 * gizmoBtnW + 4 * 2.0f) + 4.0f;
 			const float leftIslandX = sceneRect.X + kChromePad;
 			const float leftIslandY = sceneRect.Y + kChromePad;
 			// 受中岛左边界严格防护
@@ -488,6 +491,19 @@ namespace World
 			ctx.RegisterOverlayRect(viewButton);
 
 			float leftCursor = viewButton.X + viewButton.W + 3.0f;
+
+			// 显示菜单按钮 (Show: 对标 UE5 / Unity 工业级辅助显示与图元菜单)
+			if (leftCursor + showBtnW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
+			{
+				showButton = { leftCursor, leftBtnY, showBtnW, kBtnH };
+				const std::string showHint = Wui::Tr("viewport.show.hint",
+					"辅助显示与图元选项: 基准网格、空间分区、碰撞体、音源、CSM 阴影、3D 导航网格。");
+				Wui::Tooltip(ctx, showButton, showHint);
+				if (Wui::Button(ctx, Wui::HashId("viewport.show"), showButton, showLabel, theme))
+					ctx.OpenPopup(Wui::HashId("viewport.show.popup"));
+				ctx.RegisterOverlayRect(showButton);
+				leftCursor += showBtnW + 3.0f;
+			}
 			if (leftCursor + 8.0f + modeBtnSelectW <= leftIslandRect.X + leftIslandRect.W - 4.0f)
 			{
 				const Wui::WuiRect sepRect { leftCursor, leftIslandRect.Y, 8.0f, kIslandH };
@@ -851,49 +867,58 @@ namespace World
 			ctx.RegisterOverlayRect(modeRect);
 		}
 
-		// ④ 视图菜单弹层(下拉选项: 视图模式 Combo + 视图方位 Combo + 覆盖层开关)。
+		// ④ 视图菜单弹层 (View / Show Popup: 视角设置与多级辅助显示二级子菜单)
 		const Wui::WuiId viewPopup = Wui::HashId("viewport.view.popup");
-		if (ctx.IsPopupOpen(viewPopup))
+		const Wui::WuiId showPopup = Wui::HashId("viewport.show.popup");
+		const bool isViewPopupOpen = ctx.IsPopupOpen(viewPopup);
+		const bool isShowPopupOpen = ctx.IsPopupOpen(showPopup);
+
+		if (isViewPopupOpen || isShowPopupOpen)
 		{
 			const float rowH = 22.0f;
 			const float comboH = 24.0f;
-			// 精确计算弹层高度: 顶部留白(6) + 2个Combo(2*comboH + 14) + 旋转锁定项(rowH + 4) + 分割线(7) + 标题(rowH) + 3个Overlays菜单项(3*rowH) + 底部留白(6)
-			const float panelH = 6.0f + (comboH * 2.0f + 14.0f) + (rowH + 4.0f) + 7.0f + rowH * 6.0f + 6.0f;
-			const Wui::WuiRect panel { viewButton.X, leftIslandRect.Y + leftIslandRect.H + 3.0f, 250.0f, panelH };
-			Wui::DrawPanelSurface(ctx, panel, theme);
-			ctx.RegisterOverlayRect(panel);
-			float rowY = panel.Y + 6.0f;
+			Wui::WuiRect parentPanel {};
+			Wui::WuiRect activeSubmenuRow {};
 
-			// ① 投影方式下拉选项 (Projection: 屏幕映射方式)
+			if (isViewPopupOpen)
 			{
-				const Wui::WuiRect comboRect { panel.X + 8.0f, rowY, panel.W - 16.0f, comboH };
-				rowY += comboH + 6.0f;
-				const std::vector<std::string> projOptions = {
-					Wui::Tr("viewport.view.proj_persp", "透视 (Perspective)"),
-					Wui::Tr("viewport.view.proj_ortho", "正交 (Orthographic)")
-				};
-				int selectedProj = (currentProj == World::ViewportProjection::Orthographic) ? 1 : 0;
-				if (Wui::Combo(ctx, Wui::HashId("viewport.combo.proj"), comboRect,
-					Wui::Tr("viewport.view.proj_label", "投影"), projOptions, selectedProj, theme))
+				// 视角菜单：投影 Combo + 方位 Combo + 旋转锁定项 + 分割线 + 3个分类二级菜单项
+				const float panelH = 6.0f + (comboH * 2.0f + 14.0f) + (rowH + 4.0f) + 7.0f + rowH + (3.0f * rowH) + 6.0f;
+				parentPanel = { viewButton.X, leftIslandRect.Y + leftIslandRect.H + 3.0f, 246.0f, panelH };
+				Wui::DrawPanelSurface(ctx, parentPanel, theme);
+				ctx.RegisterOverlayRect(parentPanel);
+				float rowY = parentPanel.Y + 6.0f;
+
+				// ① 投影方式下拉选项 (Projection)
 				{
-					m_Host.SetViewportProjection(selectedProj == 1 ? World::ViewportProjection::Orthographic : World::ViewportProjection::Perspective);
+					const Wui::WuiRect comboRect { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, comboH };
+					rowY += comboH + 6.0f;
+					const std::vector<std::string> projOptions = {
+						Wui::Tr("viewport.view.proj_persp", "透视 (Perspective)"),
+						Wui::Tr("viewport.view.proj_ortho", "正交 (Orthographic)")
+					};
+					int selectedProj = (currentProj == World::ViewportProjection::Orthographic) ? 1 : 0;
+					if (Wui::Combo(ctx, Wui::HashId("viewport.combo.proj"), comboRect,
+						Wui::Tr("viewport.view.proj_label", "投影"), projOptions, selectedProj, theme))
+					{
+						m_Host.SetViewportProjection(selectedProj == 1 ? World::ViewportProjection::Orthographic : World::ViewportProjection::Perspective);
+					}
+					ctx.RegisterOverlayRect(comboRect);
 				}
-				ctx.RegisterOverlayRect(comboRect);
-			}
 
-			// ② 观察方位下拉选项 (Viewpoint: 空间朝向，与投影方式完全解耦)
-			{
-				const Wui::WuiRect comboRect { panel.X + 8.0f, rowY, panel.W - 16.0f, comboH };
-				rowY += comboH + 8.0f;
-				const std::vector<std::string> vpOptions = {
-					Wui::Tr("viewport.vp.free", "自由视角 (Free Orbit)"),
-					Wui::Tr("viewport.vp.top", "顶视图 Top (XZ [俯视])"),
-					Wui::Tr("viewport.vp.front", "前视图 Front (XY [立面])"),
-					Wui::Tr("viewport.vp.right", "右视图 Right (ZY [侧面])"),
-					Wui::Tr("viewport.vp.bottom", "底视图 Bottom (XZ [仰视])"),
-					Wui::Tr("viewport.vp.back", "后视图 Back (XY [背面])"),
-					Wui::Tr("viewport.vp.left", "左视图 Left (ZY [侧面])")
-				};
+				// ② 观察方位下拉选项 (Viewpoint)
+				{
+					const Wui::WuiRect comboRect { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, comboH };
+					rowY += comboH + 8.0f;
+					const std::vector<std::string> vpOptions = {
+						Wui::Tr("viewport.vp.free", "自由视角 (Free Orbit)"),
+						Wui::Tr("viewport.vp.top", "顶视图 Top (XZ [俯视])"),
+						Wui::Tr("viewport.vp.front", "前视图 Front (XY [立面])"),
+						Wui::Tr("viewport.vp.right", "右视图 Right (ZY [侧面])"),
+						Wui::Tr("viewport.vp.bottom", "底视图 Bottom (XZ [仰视])"),
+						Wui::Tr("viewport.vp.back", "后视图 Back (XY [背面])"),
+						Wui::Tr("viewport.vp.left", "左视图 Left (ZY [侧面])")
+					};
 				int selectedVp = 0;
 				switch (currentVp)
 				{
@@ -922,113 +947,258 @@ namespace World
 					m_Host.SetViewportViewpoint(newVp);
 				}
 				ctx.RegisterOverlayRect(comboRect);
+				}
+
+				// ③ 视角鼠标旋转锁定开关
+				{
+					const Wui::WuiRect lockRow { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
+					rowY += rowH + 4.0f;
+					const bool locked = m_Host.Is2DMode();
+					const std::string lockTip = Wui::Tr("viewport.view.lock_rotation.tooltip",
+						"锁定鼠标旋转视角 (右键拖拽改为平移画布); 左上角『方位』下拉菜单仍可正常切换方向。");
+					Wui::Tooltip(ctx, lockRow, lockTip);
+					if (Wui::MenuItem(ctx, Wui::HashId("viewport.view.lock_rotation"), lockRow,
+						Wui::Tr("viewport.view.lock_rotation", "锁定鼠标旋转 (Lock Rotation)"), locked, true, theme))
+					{
+						m_Host.Set2DMode(!locked);
+					}
+					ctx.RegisterOverlayRect(lockRow);
+				}
+
+				// 分割线
+				Wui::PanelBackground(ctx, { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
+				rowY += 6.0f;
+
+				// 辅助显示分类表头
+				Wui::Label(ctx, { parentPanel.X + 8.0f, rowY + 3.0f }, Wui::Tr("viewport.view.group.overlays", "辅助显示与图元"), theme.TextMuted, 11.5f);
+				rowY += rowH;
+
+				// 三大二级子菜单分类项 (带 ▶ 指示)
+				const auto catRow = [&](const char* catId, const std::string& label, const std::string& subKey)
+				{
+					const Wui::WuiRect row { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
+					rowY += rowH;
+					const bool active = (m_ActiveViewSubmenu == subKey);
+					const bool hov = ctx.IsHovered(row);
+					if (hov || active)
+					{
+						Wui::PanelBackground(ctx, row, theme.ButtonHover, 2.0f);
+					}
+					const bool clicked = Wui::MenuItem(ctx, Wui::HashId(catId), row, label, true, theme);
+					if (hov || clicked)
+					{
+						m_ActiveViewSubmenu = subKey;
+					}
+					const float arrowW = ctx.MeasureTextWidth("▶", 11.0f);
+					Wui::Label(ctx, { row.X + row.W - arrowW - 6.0f, row.Y + (rowH - 11.0f) * 0.5f }, "▶",
+						(active || hov) ? theme.Accent : theme.TextMuted, 11.0f);
+					ctx.RegisterOverlayRect(row);
+					if (m_ActiveViewSubmenu == subKey)
+					{
+						activeSubmenuRow = row;
+					}
+				};
+
+				catRow("viewport.cat.grids", Wui::Tr("viewport.menu.grids", "空间基准与网格"), "grids");
+				catRow("viewport.cat.gizmos", Wui::Tr("viewport.menu.gizmos", "辅助图元与范围"), "gizmos");
+				catRow("viewport.cat.navmesh", Wui::Tr("viewport.menu.navigation", "3D 导航与寻路"), "navmesh");
+			}
+			else if (isShowPopupOpen)
+			{
+				// 显示专属菜单：3个二级菜单项 + 分割线 + 2个常用速关项
+				const float panelH = 6.0f + rowH + (3.0f * rowH) + 7.0f + (2.0f * rowH) + 6.0f;
+				const float px = showButton.W > 0.0f ? showButton.X : (viewButton.X + viewButton.W + 3.0f);
+				parentPanel = { px, leftIslandRect.Y + leftIslandRect.H + 3.0f, 246.0f, panelH };
+				Wui::DrawPanelSurface(ctx, parentPanel, theme);
+				ctx.RegisterOverlayRect(parentPanel);
+				float rowY = parentPanel.Y + 6.0f;
+
+				Wui::Label(ctx, { parentPanel.X + 8.0f, rowY + 3.0f }, Wui::Tr("viewport.view.group.overlays", "辅助显示与图元"), theme.TextMuted, 11.5f);
+				rowY += rowH;
+
+				const auto catRow = [&](const char* catId, const std::string& label, const std::string& subKey)
+				{
+					const Wui::WuiRect row { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
+					rowY += rowH;
+					const bool active = (m_ActiveViewSubmenu == subKey);
+					const bool hov = ctx.IsHovered(row);
+					if (hov || active)
+					{
+						Wui::PanelBackground(ctx, row, theme.ButtonHover, 2.0f);
+					}
+					const bool clicked = Wui::MenuItem(ctx, Wui::HashId(catId), row, label, true, theme);
+					if (hov || clicked)
+					{
+						m_ActiveViewSubmenu = subKey;
+					}
+					const float arrowW = ctx.MeasureTextWidth("▶", 11.0f);
+					Wui::Label(ctx, { row.X + row.W - arrowW - 6.0f, row.Y + (rowH - 11.0f) * 0.5f }, "▶",
+						(active || hov) ? theme.Accent : theme.TextMuted, 11.0f);
+					ctx.RegisterOverlayRect(row);
+					if (m_ActiveViewSubmenu == subKey)
+					{
+						activeSubmenuRow = row;
+					}
+				};
+
+				catRow("viewport.show.cat.grids", Wui::Tr("viewport.menu.grids", "空间基准与网格"), "grids");
+				catRow("viewport.show.cat.gizmos", Wui::Tr("viewport.menu.gizmos", "辅助图元与范围"), "gizmos");
+				catRow("viewport.show.cat.navmesh", Wui::Tr("viewport.menu.navigation", "3D 导航与寻路"), "navmesh");
+
+				// 分割线
+				Wui::PanelBackground(ctx, { parentPanel.X + 8.0f, rowY, parentPanel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
+				rowY += 6.0f;
+
+				// 常用快速开关项
+				const auto quickItem = [&](const char* id, const std::string& label, bool checked, const std::function<void()>& action)
+				{
+					const Wui::WuiRect row { parentPanel.X + 4.0f, rowY, parentPanel.W - 8.0f, rowH };
+					rowY += rowH;
+					if (Wui::MenuItem(ctx, Wui::HashId(id), row, label, checked, true, theme))
+						action();
+					ctx.RegisterOverlayRect(row);
+				};
+				quickItem("viewport.show.quick.grid", Wui::Tr("viewport.view.reference_grid", "地面参考网格 (Ground Grid)"),
+					m_Host.IsReferenceGridEnabled(), [this] { m_Host.SetReferenceGridEnabled(!m_Host.IsReferenceGridEnabled()); });
+				quickItem("viewport.show.quick.navmesh", Wui::Tr("viewport.view.navmesh", "3D 导航网格 (NavMesh) [P]"),
+					s_ShowNavMesh, [] { SetNavMeshVisible(!s_ShowNavMesh); });
 			}
 
-
-
-			// ③ 视角鼠标旋转锁定开关 (配合正交/透视与任意方位使用)
+			// 二级子菜单渲染体 (Submenus)
+			Wui::WuiRect subPanel {};
+			if (!m_ActiveViewSubmenu.empty() && activeSubmenuRow.W > 0.0f)
 			{
-				const Wui::WuiRect lockRow { panel.X + 4.0f, rowY, panel.W - 8.0f, rowH };
-				rowY += rowH + 4.0f;
-				const bool locked = m_Host.Is2DMode();
-				const std::string lockTip = Wui::Tr("viewport.view.lock_rotation.tooltip",
-					"锁定鼠标旋转视角 (右键拖拽改为平移画布); 左上角『方位』下拉菜单仍可正常切换方向。");
-				Wui::Tooltip(ctx, lockRow, lockTip);
-				if (Wui::MenuItem(ctx, Wui::HashId("viewport.view.lock_rotation"), lockRow,
-					Wui::Tr("viewport.view.lock_rotation", "锁定鼠标旋转 (Lock Rotation)"), locked, true, theme))
+				float subW = 246.0f;
+				float subH = 80.0f;
+				if (m_ActiveViewSubmenu == "grids")
+					subH = 6.0f + 3.0f * rowH + 6.0f;
+				else if (m_ActiveViewSubmenu == "gizmos")
+					subH = 6.0f + 5.0f * rowH + 6.0f;
+				else if (m_ActiveViewSubmenu == "navmesh")
+					subH = 6.0f + 6.0f * rowH + 6.0f;
+
+				const glm::vec2 winVp = ctx.ViewportSize();
+				float subX = parentPanel.X + parentPanel.W - 2.0f;
+				if (subX + subW > winVp.x - 6.0f)
+					subX = parentPanel.X - subW + 2.0f;
+				subX = std::max(6.0f, std::min(subX, winVp.x - subW - 6.0f));
+				float subY = std::max(6.0f, std::min(activeSubmenuRow.Y - 2.0f, winVp.y - subH - 6.0f));
+				subPanel = { subX, subY, subW, subH };
+
+				Wui::DrawPanelSurface(ctx, subPanel, theme);
+				ctx.RegisterOverlayRect(subPanel);
+				float subRowY = subPanel.Y + 6.0f;
+
+				const auto subItem = [&](const char* id, const std::string& label, bool checked,
+					const std::string& tooltip, const std::function<void()>& action)
 				{
-					m_Host.Set2DMode(!locked);
+					const Wui::WuiRect row { subPanel.X + 4.0f, subRowY, subPanel.W - 8.0f, rowH };
+					subRowY += rowH;
+					if (!tooltip.empty())
+						Wui::Tooltip(ctx, row, tooltip);
+					if (Wui::MenuItem(ctx, Wui::HashId(id), row, label, checked, true, theme))
+						action();
+					if (!tooltip.empty())
+					{
+						Wui::WuiAccessNode node;
+						node.Id = Wui::HashId(id);
+						node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+						node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+						node.Kind = "menu-item";
+						node.Label = label;
+						node.Value = checked ? "checked" : "unchecked";
+						node.Tooltip = tooltip;
+						node.Rect = row;
+						Wui::WuiAccessibility::Get().Register(node);
+					}
+					ctx.RegisterOverlayRect(row);
+				};
+
+				if (m_ActiveViewSubmenu == "grids")
+				{
+					subItem("viewport.view.reference_grid", Wui::Tr("viewport.view.reference_grid", "地面参考网格 (1m/10m)"),
+						m_Host.IsReferenceGridEnabled(), Wui::Tr("viewport.grid.hint", "开关地面参考基准网格 (1m/10m)。"),
+						[this] { m_Host.SetReferenceGridEnabled(!m_Host.IsReferenceGridEnabled()); });
+					subItem("viewport.view.world_partition", Wui::Tr("viewport.view.world_partition", "世界分区流送网格"),
+						m_ShowWorldPartition, Wui::Tr("viewport.partition.hint", "开关大世界空间分区与流送区块辅助网格。"),
+						[this] { m_ShowWorldPartition = !m_ShowWorldPartition; });
+					subItem("viewport.view.pixel_snap", Wui::Tr("viewport.snap.hint", "2D 像素网格吸附 (Snap)"),
+						m_Host.IsPixelSnapEnabled(), "按 1/PPU 步长对齐坐标，杜绝亚像素插值撕裂与接缝抖动",
+						[this] { m_Host.SetPixelSnapEnabled(!m_Host.IsPixelSnapEnabled()); });
 				}
-				ctx.RegisterOverlayRect(lockRow);
+				else if (m_ActiveViewSubmenu == "gizmos")
+				{
+					subItem("viewport.view.camera_preview", Wui::Tr("viewport.view.camera_preview", "相机实时预览小窗"),
+						m_Host.IsCameraPreviewEnabled(), Wui::Tr("viewport.view.camera_preview.tooltip", "画选中相机的预览小窗 (左下角)"),
+						[this] { m_Host.ToggleCameraPreview(); });
+
+					const bool rangesAll = Editor::EditorPreferences::Get().Data().ViewportLightRangesAll;
+					subItem("viewport.view.light_ranges", Wui::Tr("viewport.view.light_ranges", "光源范围: 全部"),
+						rangesAll, Wui::Tr("viewport.overlays.light_ranges.tooltip", "画光源范围: 点光 = Range 球, 平行光 = Direction 箭头。关 = 仅选中实体。"),
+						[] {
+							Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
+							prefs.SetViewportLightRangesAll(!prefs.Data().ViewportLightRangesAll);
+						});
+
+					const bool collidersAll = Editor::EditorPreferences::Get().Data().ViewportColliderOutlinesAll;
+					subItem("viewport.view.collider_outlines", Wui::Tr("viewport.view.collider_outlines", "碰撞体轮廓: 全部"),
+						collidersAll, Wui::Tr("viewport.overlays.collider_outlines.tooltip", "编辑期画碰撞体形状 (2D 矩形/圆、3D 盒/球/胶囊)。关 = 仅选中实体。"),
+						[] {
+							Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
+							prefs.SetViewportColliderOutlinesAll(!prefs.Data().ViewportColliderOutlinesAll);
+						});
+
+				subItem("viewport.view.audio_gizmos", Wui::Tr("viewport.view.audio_gizmos", "音频衰减球: 全部"),
+					s_ShowAllAudioGizmos, Wui::Tr("viewport.overlays.audio_gizmos.tooltip", "画 3D 音频衰减球与声学混响空间线框。关 = 仅选中实体。"),
+					[] { s_ShowAllAudioGizmos = !s_ShowAllAudioGizmos; });
+
+				const bool csmOn = World::Renderer3D::IsCascadeDebugVisualization();
+				subItem("viewport.view.csm_debug", Wui::Tr("viewport.csm.short", "CSM 阴影级联染色"),
+					csmOn, Wui::Tr("viewport.csm.hint", "CSM 4级级联阴影色彩调试 (红/绿/蓝/黄)"),
+					[csmOn] { World::Renderer3D::SetCascadeDebugVisualization(!csmOn); });
+				}
+				else if (m_ActiveViewSubmenu == "navmesh")
+				{
+					subItem("viewport.view.navmesh", Wui::Tr("viewport.view.navmesh", "3D 导航网格 (NavMesh) [P]"),
+						s_ShowNavMesh, Wui::Tr("viewport.overlays.navmesh.tooltip", "开启/关闭 3D 导航网格叠加层 (快捷键 P)"),
+						[] { SetNavMeshVisible(!s_ShowNavMesh); });
+					subItem("viewport.view.navmesh_fill", Wui::Tr("viewport.view.navmesh_fill", "半透明全涂色填充"),
+						NavMeshPanel::FillPolygons, "UE5 风格半透明色彩涂色铺满可行走表面，配合宏观大区域与近处自适应网格",
+						[] { NavMeshPanel::FillPolygons = !NavMeshPanel::FillPolygons; });
+					subItem("viewport.view.navmesh_obstacles", Wui::Tr("viewport.view.navmesh_obstacles", "动态障碍物盒体"),
+						NavMeshPanel::ShowObstacles, "在视口中绘制动态障碍物的橙色 3D 盒体包围线框",
+						[] { NavMeshPanel::ShowObstacles = !NavMeshPanel::ShowObstacles; });
+					subItem("viewport.view.navmesh_area_costs", Wui::Tr("viewport.view.navmesh_area_costs", "区域代价色彩"),
+						NavMeshPanel::ShowAreaCosts, "按区域着色: 普通(绿)、道路(亮绿)、泥潭(蓝紫)、阻挡(红)",
+						[] { NavMeshPanel::ShowAreaCosts = !NavMeshPanel::ShowAreaCosts; });
+					subItem("viewport.view.navmesh_links", Wui::Tr("viewport.view.navmesh_links", "跳跃点弧线指示"),
+						NavMeshPanel::ShowOffMeshLinks, "在视口中绘制洋红色抛物线跳跃弧线与箭头指示",
+						[] { NavMeshPanel::ShowOffMeshLinks = !NavMeshPanel::ShowOffMeshLinks; });
+					subItem("viewport.view.navmesh_paths", Wui::Tr("viewport.view.navmesh_paths", "寻路路径折线"),
+						NavMeshPanel::ShowPaths, "在视口中绘制金黄色平滑折线走廊与航点圆环",
+						[] { NavMeshPanel::ShowPaths = !NavMeshPanel::ShowPaths; });
+				}
 			}
 
-			// 分割线
-			Wui::PanelBackground(ctx, { panel.X + 8.0f, rowY, panel.W - 16.0f, 1.0f }, theme.Border, 0.0f);
-			rowY += 6.0f;
-
-			const auto header = [&](const std::string& text)
+			// 外部点击与 Escape 关闭控制 (必须同时排除主菜单 parentPanel 与二级子菜单 subPanel)
+			const bool insideParent = parentPanel.W > 0.0f && ctx.HitTestRaw(parentPanel, ctx.Input().MousePos);
+			const bool insideSub = !m_ActiveViewSubmenu.empty() && subPanel.W > 0.0f && ctx.HitTestRaw(subPanel, ctx.Input().MousePos);
+			if ((ctx.Input().MouseClicked[0] || ctx.Input().MouseClicked[1]) && !insideParent && !insideSub)
 			{
-				const Wui::WuiRect row { panel.X + 8.0f, rowY, panel.W - 16.0f, rowH };
-				rowY += rowH;
-				Wui::Label(ctx, { row.X, row.Y + 4.0f }, text, theme.TextMuted, 12.0f);
-				RegisterReadonlyNode(Wui::HashId(("viewport.view.group." + text).c_str()), "text",
-					text, std::string(), row);
-			};
-			const auto item = [&](const char* id, const std::string& label, bool checked,
-				const std::string& tooltip, const std::function<void()>& action)
-			{
-				const Wui::WuiRect row { panel.X + 4.0f, rowY, panel.W - 8.0f, rowH };
-				rowY += rowH;
-				if (!tooltip.empty())
-					Wui::Tooltip(ctx, row, tooltip);
-				if (Wui::MenuItem(ctx, Wui::HashId(id), row, label, checked, true, theme))
-					action();
-				if (!tooltip.empty())
-				{
-					Wui::WuiAccessNode node;
-					node.Id = Wui::HashId(id);
-					node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-					node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-					node.Kind = "menu-item";
-					node.Label = label;
-					node.Value = checked ? "checked" : "unchecked";
-					node.Tooltip = tooltip;
-					node.Rect = row;
-					Wui::WuiAccessibility::Get().Register(node);
-				}
-			};
-
-			header(Wui::Tr("viewport.view.group.overlays", "Overlays"));
-			item("viewport.view.camera_preview", Wui::Tr("viewport.view.camera_preview", "Camera Preview"),
-				m_Host.IsCameraPreviewEnabled(),
-				Wui::Tr("viewport.view.camera_preview.tooltip",
-					"Show a picture-in-picture preview of the selected camera entity (bottom-left)."),
-				[this] { m_Host.ToggleCameraPreview(); });
-
-			const bool rangesAll = Editor::EditorPreferences::Get().Data().ViewportLightRangesAll;
-			item("viewport.view.light_ranges",
-				Wui::Tr("viewport.view.light_ranges", "Light Ranges: All Lights"), rangesAll,
-				Wui::Tr("viewport.overlays.light_ranges.tooltip",
-					"Draw light extents: point light = Range sphere, directional light = Direction arrow.\n"
-					"Off = only the selected entity."),
-				[] {
-					Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
-					prefs.SetViewportLightRangesAll(!prefs.Data().ViewportLightRangesAll);
-				});
-			const bool collidersAll = Editor::EditorPreferences::Get().Data().ViewportColliderOutlinesAll;
-			item("viewport.view.collider_outlines",
-				Wui::Tr("viewport.view.collider_outlines", "Collider Outlines: All"), collidersAll,
-				Wui::Tr("viewport.overlays.collider_outlines.tooltip",
-					"Draw collider shapes in edit mode (2D box/circle, 3D box/sphere/capsule).\n"
-					"Off = only the selected entity. MeshCollider3D has no analytic shape."),
-				[] {
-					Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
-					prefs.SetViewportColliderOutlinesAll(!prefs.Data().ViewportColliderOutlinesAll);
-				});
-			item("viewport.view.audio_gizmos",
-				Wui::Tr("viewport.view.audio_gizmos", "Audio Gizmos: All"), s_ShowAllAudioGizmos,
-				Wui::Tr("viewport.overlays.audio_gizmos.tooltip",
-					"Draw 3D audio source spheres and acoustic zone wireframes.\n"
-					"Off = only the selected entity."),
-				[] {
-					s_ShowAllAudioGizmos = !s_ShowAllAudioGizmos;
-				});
-			item("viewport.view.reference_grid",
-				Wui::Tr("viewport.view.reference_grid", "Ground Grid (1m/10m)"), m_Host.IsReferenceGridEnabled(),
-				Wui::Tr("viewport.grid.hint", "Toggle ground reference grid (1m/10m)."),
-				[this] { m_Host.SetReferenceGridEnabled(!m_Host.IsReferenceGridEnabled()); });
-			item("viewport.view.world_partition",
-				Wui::Tr("viewport.view.world_partition", "World Partition Grid"), m_ShowWorldPartition,
-				Wui::Tr("viewport.partition.hint", "Toggle world partition & streaming chunk overlay."),
-				[this] { m_ShowWorldPartition = !m_ShowWorldPartition; });
-			item("viewport.view.navmesh",
-				Wui::Tr("viewport.view.navmesh", "3D 导航网格 (NavMesh)"), s_ShowNavMesh,
-				Wui::Tr("viewport.overlays.navmesh.tooltip",
-					"绘制 3D 导航网格多边形线框 (绿色/红色)、寻路代理圆柱体、航向与金黄色平滑折线、动态障碍物 3D 盒体。"),
-				[] { SetNavMeshVisible(!s_ShowNavMesh); });
-			ctx.ClosePopupsOnOutsideClick({ viewPopup }, panel);
-			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(viewPopup);
+				ctx.ClosePopup(showPopup);
+				m_ActiveViewSubmenu.clear();
+			}
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+			{
+				if (!m_ActiveViewSubmenu.empty())
+					m_ActiveViewSubmenu.clear();
+				else
+				{
+					ctx.ClosePopup(viewPopup);
+					ctx.ClosePopup(showPopup);
+				}
+			}
 		}
 
 		// ⑤ 数据层多选弹层 (Layers Popup: 无论有多少数据层，绝不挤爆视口)

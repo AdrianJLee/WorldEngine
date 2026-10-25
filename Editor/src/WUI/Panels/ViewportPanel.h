@@ -162,6 +162,7 @@ namespace World
 		TransformComponent m_GizmoBefore;
 		bool m_ShowReferenceGrid = true;
 		bool m_ShowWorldPartition = true;
+		std::string m_ActiveViewSubmenu;
 		bool& m_ShowSpatialGrid = m_ShowReferenceGrid;
 
 		// 地貌交互笔刷与撤销追踪状态

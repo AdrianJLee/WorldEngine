@@ -1147,6 +1147,7 @@ namespace World
 		addCmd("terrain.set_tab", "Set terrain panel active tab (sculpt, paint, settings).", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("viewport.set_camera", "Set viewport 3D camera target, distance, yaw and pitch.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("ui.layout.get", "Get current WUI dock layout json.", CommandEffect::Read, CommandScope::EditorOnly);
+		addCmd("ui.popup", "Open a popup by name (e.g. viewport.view.popup, viewport.show.popup).", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}");
 
 		// 导航网格族
 		addCmd("navmesh.bake", "Bake 3D navigation mesh from active terrain.", CommandEffect::Write, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"max_slope\":{\"type\":\"number\"},\"step_size\":{\"type\":\"number\"}}}");
@@ -1548,6 +1549,13 @@ namespace World
 		if (cmd == "ui.windows")
 		{
 			result = m_Shell.AiWindowRectsJson();
+			return true;
+		}
+		if (cmd == "ui.popup")
+		{
+			const std::string name = arg("name");
+			m_Shell.WuiContextRef().OpenPopup(Wui::HashId(name.c_str()));
+			result = "opened popup " + name;
 			return true;
 		}
 		if (cmd == "ui.invoke")

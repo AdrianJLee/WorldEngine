@@ -53,5 +53,15 @@
   "viewport.grid.short": "Grid",
   "viewport.partition.short": "Part",
   "viewport.2d.short": "Lock",
-  "viewport.snap.short": "Snap"
+  "viewport.snap.short": "Snap",
+  "viewport.show.button": "显示",
+  "viewport.show.hint": "辅助显示与图元选项: 基准网格、空间分区、碰撞体、音源、CSM 阴影、3D 导航网格。",
+  "viewport.menu.grids": "空间基准与网格",
+  "viewport.menu.gizmos": "辅助图元与范围",
+  "viewport.menu.navigation": "3D 导航与寻路",
+  "viewport.view.navmesh_fill": "半透明全涂色填充",
+  "viewport.view.navmesh_obstacles": "动态障碍物盒体",
+  "viewport.view.navmesh_area_costs": "区域代价色彩",
+  "viewport.view.navmesh_links": "跳跃点弧线指示",
+  "viewport.view.navmesh_paths": "寻路路径折线"
 }
