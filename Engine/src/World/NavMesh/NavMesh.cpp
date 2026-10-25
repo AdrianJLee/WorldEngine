@@ -294,18 +294,33 @@ namespace World
 			for (auto& poly : m_Polygons)
 			{
 				if (poly.Center.x >= bMin.x && poly.Center.x <= bMax.x &&
-					poly.Center.y >= bMin.y && poly.Center.y <= bMax.y &&
 					poly.Center.z >= bMin.z && poly.Center.z <= bMax.z)
 				{
-					poly.AreaType = modifier.AreaType;
-					poly.Cost = modifier.CostMultiplier;
-					if (modifier.ClearanceHeight > 0.0f)
+					// 垂直判定：包围盒直接相交，或抬高的天花板/过梁体（向下覆盖下方地面多边形）
+					if (poly.Center.y <= bMax.y && poly.Center.y >= bMin.y - 8.0f)
 					{
-						poly.Clearance = modifier.ClearanceHeight;
-					}
-					if (modifier.AreaType == 4 || modifier.CostMultiplier <= 0.0f)
-					{
-						poly.Blocked = true;
+						poly.AreaType = modifier.AreaType;
+						poly.Cost = modifier.CostMultiplier;
+
+						// 物理有效净空推导：
+						// 1. 若用户在视口中将限高实体抬高，顶面/底面落差 (bMax.y - poly.Center.y) 自动增加净空空间；
+						// 2. 取 modifier.ClearanceHeight 与实体实际对地物理高度的最大值。
+						const float physicalHeadroom = bMax.y - poly.Center.y;
+						float effClearance = modifier.ClearanceHeight;
+						if (effClearance > 0.0f)
+						{
+							effClearance = std::max(effClearance, physicalHeadroom);
+						}
+						else if (physicalHeadroom > 0.1f)
+						{
+							effClearance = physicalHeadroom;
+						}
+
+						poly.Clearance = effClearance;
+						if (modifier.AreaType == 4 || modifier.CostMultiplier <= 0.0f)
+						{
+							poly.Blocked = true;
+						}
 					}
 				}
 			}
@@ -1673,21 +1688,25 @@ namespace World
 		struct TileCoord
 		{
 			int gx;
+			int gy;
 			int gz;
 			bool operator<(const TileCoord& other) const noexcept
 			{
 				if (gx != other.gx) return gx < other.gx;
+				if (gy != other.gy) return gy < other.gy;
 				return gz < other.gz;
 			}
 		};
 
 		std::map<TileCoord, std::vector<uint32_t>> tileGroups;
+		constexpr float kLayerSpan = 3.5f; // 立体垂直分层跨度 (桥面与桥底分属不同层，杜绝扁平融合虚影)
 		for (uint32_t i = 0; i < static_cast<uint32_t>(m_Polygons.size()); ++i)
 		{
 			const auto& poly = m_Polygons[i];
 			const int gx = static_cast<int>(std::floor(poly.Center.x / tileSize));
+			const int gy = static_cast<int>(std::floor(poly.Center.y / kLayerSpan));
 			const int gz = static_cast<int>(std::floor(poly.Center.z / tileSize));
-			tileGroups[{gx, gz}].push_back(i);
+			tileGroups[{gx, gy, gz}].push_back(i);
 		}
 
 		m_MacroTiles.reserve(tileGroups.size());
@@ -1986,10 +2005,11 @@ namespace World
 						for (auto& poly : m_Polygons)
 						{
 							if (poly.Center.x >= bMin.x && poly.Center.x <= bMax.x &&
-								poly.Center.y >= bMin.y && poly.Center.y <= bMax.y &&
-								poly.Center.z >= bMin.z && poly.Center.z <= bMax.z)
+								poly.Center.z >= bMin.z && poly.Center.z <= bMax.z &&
+								poly.Center.y <= bMax.y && poly.Center.y >= bMin.y - 8.0f)
 							{
-								poly.Clearance = mod.ClearanceHeight;
+								const float physicalHeadroom = bMax.y - poly.Center.y;
+								poly.Clearance = std::max(mod.ClearanceHeight, physicalHeadroom);
 							}
 						}
 					}
@@ -2006,11 +2026,29 @@ namespace World
 		if (dt <= 0.0f || navMesh.GetPolygonCount() == 0)
 			return;
 
-		// 消除上一帧残留的动态阻挡标记
-		const_cast<NavMesh&>(navMesh).ClearObstacles();
-
 		// 非结构写操作（仅修改组件数据）：走 const Scene 访问注册表，避免命中运行期结构写保护断言
 		auto& registry = const_cast<entt::registry&>(std::as_const(scene).GetRegistry());
+
+		// 运行期动态代价修饰区与限高同步（支持运行时移动限高实体即刻改变通行净空）
+		std::vector<NavMeshAreaModifier> liveAreaModifiers;
+		for (auto entity : registry.view<TransformComponent, NavMeshAreaModifierComponent>())
+		{
+			const auto& [xform, areaComp] = registry.get<TransformComponent, NavMeshAreaModifierComponent>(entity);
+			NavMeshAreaModifier mod;
+			mod.Center = xform.Location;
+			mod.Extents = glm::abs(xform.Scale) * areaComp.Extents;
+			mod.CostMultiplier = areaComp.CostMultiplier;
+			mod.ClearanceHeight = areaComp.ClearanceHeight;
+			mod.AreaType = areaComp.AreaType;
+			liveAreaModifiers.push_back(mod);
+		}
+		if (!liveAreaModifiers.empty())
+		{
+			const_cast<NavMesh&>(navMesh).ReapplyAreaModifiers(liveAreaModifiers);
+		}
+
+		// 消除上一帧残留的动态阻挡标记并按当前障碍物雕刻
+		const_cast<NavMesh&>(navMesh).ClearObstacles();
 
 		// 遍历所有带 NavMeshObstacleComponent 且 CarveNavMesh == 1 的实体，调用 ApplyObstacle
 		for (auto entity : registry.view<TransformComponent, NavMeshObstacleComponent>())

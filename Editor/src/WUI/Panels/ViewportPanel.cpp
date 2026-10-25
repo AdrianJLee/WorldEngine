@@ -3898,8 +3898,9 @@ namespace World
 							macroCandidates.push_back({ distSq, m });
 						}
 
+						// 画家算法：由远及近 (Back-to-Front) 排序，近处上层实体与桥面自然覆盖远处地面，彻底消除层级穿透与透视混乱
 						std::sort(macroCandidates.begin(), macroCandidates.end(), [](const MacroCandidate& a, const MacroCandidate& b) {
-							return a.DistSq < b.DistSq;
+							return a.DistSq > b.DistSq;
 						});
 
 						constexpr size_t kMaxMacroBudget = 512;
@@ -4065,8 +4066,9 @@ namespace World
 							}
 						}
 
+						// 画家算法：由远及近 (Back-to-Front) 排序，近处高台与立体高架桥面自然遮蔽下方地面
 						std::sort(candidates.begin(), candidates.end(), [](const PolyCandidate& a, const PolyCandidate& b) {
-							return a.DistSq < b.DistSq;
+							return a.DistSq > b.DistSq;
 						});
 
 						size_t quadCount = 0;
@@ -4110,13 +4112,24 @@ namespace World
 								maxY < sceneRect.Y || minY > sceneRect.Y + sceneRect.H)
 								continue;
 
+							const bool isElevated = (poly.Center.y >= 2.5f);
+							const bool isCovered = (poly.Clearance > 0.0f);
+
 							Wui::WuiColor polyColor = poly.Blocked
 								? Wui::WuiColor{ 0.95f, 0.25f, 0.25f, 0.95f }
-								: Wui::WuiColor{ 0.15f, 0.92f, 0.50f, 0.90f };
+								: (isElevated
+									? Wui::WuiColor{ 0.30f, 1.00f, 0.65f, 0.98f }
+									: (isCovered
+										? Wui::WuiColor{ 0.20f, 0.75f, 1.00f, 0.95f }
+										: Wui::WuiColor{ 0.15f, 0.92f, 0.50f, 0.90f }));
 
 							Wui::WuiColor fillColor = poly.Blocked
 								? Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.40f }
-								: Wui::WuiColor{ 0.12f, 0.85f, 0.45f, 0.30f };
+								: (isElevated
+									? Wui::WuiColor{ 0.22f, 0.95f, 0.55f, 0.42f }
+									: (isCovered
+										? Wui::WuiColor{ 0.15f, 0.55f, 0.90f, 0.32f }
+										: Wui::WuiColor{ 0.12f, 0.85f, 0.45f, 0.30f }));
 
 							if (NavMeshPanel::ShowAreaCosts && !poly.Blocked)
 							{
@@ -4174,7 +4187,8 @@ namespace World
 
 								const glm::vec2& p0 = screenPts[i];
 								const glm::vec2& p1 = screenPts[(i + 1) % vertCount];
-								const float thickness = isBoundary ? 2.0f : 1.0f;
+								const float borderThick = isElevated ? 2.4f : (isCovered ? 1.8f : 2.0f);
+								const float thickness = isBoundary ? borderThick : 1.0f;
 								const Wui::WuiColor lineColor = isBoundary
 									? polyColor
 									: Wui::WuiColor{ polyColor.R, polyColor.G, polyColor.B, 0.35f };
