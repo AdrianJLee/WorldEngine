@@ -296,24 +296,26 @@ namespace World
 				if (poly.Center.x >= bMin.x && poly.Center.x <= bMax.x &&
 					poly.Center.z >= bMin.z && poly.Center.z <= bMax.z)
 				{
-					// 垂直判定：包围盒直接相交，或抬高的天花板/过梁体（向下覆盖下方地面多边形）
+					// 垂直判定：包围盒相交，或抬高的天花板/过梁体（向下投射覆盖至下方地面多边形）
 					if (poly.Center.y <= bMax.y && poly.Center.y >= bMin.y - 8.0f)
 					{
 						poly.AreaType = modifier.AreaType;
 						poly.Cost = modifier.CostMultiplier;
 
 						// 物理有效净空推导：
-						// 1. 若用户在视口中将限高实体抬高，顶面/底面落差 (bMax.y - poly.Center.y) 自动增加净空空间；
-						// 2. 取 modifier.ClearanceHeight 与实体实际对地物理高度的最大值。
-						const float physicalHeadroom = bMax.y - poly.Center.y;
+						// 1. 未移动实体时（Center.y <= 0.05m），净空严格严格遵照 modifier.ClearanceHeight (如 1.3m)，绝不穿透！
+						// 2. 当设计师在视口中向上抬高实体（Center.y > 0.05m）时，离地落差线性增加通过净空：ClearanceHeight + Center.y！
 						float effClearance = modifier.ClearanceHeight;
 						if (effClearance > 0.0f)
 						{
-							effClearance = std::max(effClearance, physicalHeadroom);
+							if (modifier.Center.y > 0.05f)
+							{
+								effClearance += modifier.Center.y;
+							}
 						}
-						else if (physicalHeadroom > 0.1f)
+						else
 						{
-							effClearance = physicalHeadroom;
+							effClearance = std::max(0.0f, bMax.y - poly.Center.y);
 						}
 
 						poly.Clearance = effClearance;
@@ -2008,8 +2010,12 @@ namespace World
 								poly.Center.z >= bMin.z && poly.Center.z <= bMax.z &&
 								poly.Center.y <= bMax.y && poly.Center.y >= bMin.y - 8.0f)
 							{
-								const float physicalHeadroom = bMax.y - poly.Center.y;
-								poly.Clearance = std::max(mod.ClearanceHeight, physicalHeadroom);
+								float effClearance = mod.ClearanceHeight;
+								if (effClearance > 0.0f && mod.Center.y > 0.05f)
+								{
+									effClearance += mod.Center.y;
+								}
+								poly.Clearance = effClearance;
 							}
 						}
 					}

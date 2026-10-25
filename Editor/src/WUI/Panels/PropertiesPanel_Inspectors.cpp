@@ -255,7 +255,7 @@ using namespace PropertiesPanelDetail;
 		// 2. 运行时调试与模拟 (Runtime Debug & Simulation - 区分开的独立调试面板)
 		// =========================================================================
 		const float dbgCardPad = 6.0f;
-		const float dbgCardH = 148.0f;
+		const float dbgCardH = 196.0f;
 		const Wui::WuiRect dbgRect { startX, curY, contentW, dbgCardH };
 		Wui::PanelBackground(ctx, dbgRect, theme.CardBg, theme.Radius);
 		Wui::HighlightOutline(ctx, dbgRect, theme.Border, theme.Radius, 1.0f);
@@ -336,6 +336,40 @@ using namespace PropertiesPanelDetail;
 			host.MarkDocumentDirty();
 		}
 		Wui::Tooltip(ctx, pickBtnRect, "直接提取视口 3D 相机的观察焦点作为寻路代理的新目标点");
+		dbgY += 26.0f;
+
+		// 代理标记与路径折线自定义色彩
+		Wui::Label(ctx, { startX + 8.0f, dbgY + 2.0f }, "代理标记与路径颜色 (Agent & Path Color):", theme.Text, theme.FontSizeSmall);
+		dbgY += 20.0f;
+
+		const float palBtnW = (contentW - 16.0f - 4.0f * 4.0f) / 5.0f;
+		float bX = startX + 8.0f;
+		const char* palIds[5] = { "inspect.nav_agent.pal_0", "inspect.nav_agent.pal_1", "inspect.nav_agent.pal_2", "inspect.nav_agent.pal_3", "inspect.nav_agent.pal_4" };
+		const struct { const char* label; glm::vec4 col; bool isDefault; } agentPalettes[5] = {
+			{ "默认预设", { 0.0f, 0.0f, 0.0f, 0.0f }, true },
+			{ "天蓝", { 0.20f, 0.75f, 1.00f, 0.95f }, false },
+			{ "金黄", { 1.00f, 0.85f, 0.20f, 0.95f }, false },
+			{ "青绿", { 0.15f, 0.95f, 0.65f, 0.95f }, false },
+			{ "洋红", { 0.95f, 0.25f, 0.85f, 0.95f }, false },
+		};
+		for (int i = 0; i < 5; ++i)
+		{
+			auto palTheme = theme;
+			if (!agentPalettes[i].isDefault)
+			{
+				palTheme.ButtonBg = Wui::WuiColor{ agentPalettes[i].col.r * 0.6f, agentPalettes[i].col.g * 0.6f, agentPalettes[i].col.b * 0.6f, 0.85f };
+				palTheme.Border = Wui::WuiColor{ agentPalettes[i].col.r, agentPalettes[i].col.g, agentPalettes[i].col.b, 1.0f };
+			}
+			if (Wui::Button(ctx, Wui::HashId(palIds[i]), { bX, dbgY, palBtnW, 22.0f }, agentPalettes[i].label, palTheme))
+			{
+				if (agentPalettes[i].isDefault)
+					agent->ClearCustomColor();
+				else
+					agent->SetCustomColor(agentPalettes[i].col);
+				host.MarkDocumentDirty();
+			}
+			bX += palBtnW + 4.0f;
+		}
 
 		curY += dbgCardH + 8.0f;
 		return curY - rect.Y;

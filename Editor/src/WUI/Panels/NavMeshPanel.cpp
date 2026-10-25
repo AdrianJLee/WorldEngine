@@ -596,6 +596,60 @@ namespace World
 			innerY += 32.0f;
 		}
 
+		// 7. 色彩定制 (路径折线与代理标记显示颜色)
+		innerY += 4.0f;
+		Wui::Label(ctx, { startX + 8.0f, innerY }, "[色彩定制] 路径折线与代理标记显示色彩", theme.Accent, theme.FontSizeSmall);
+		innerY += 22.0f;
+
+		// 路径折线色彩预设
+		Wui::Label(ctx, { startX + 8.0f, innerY + 2.0f }, "路径折线颜色:", theme.Text, theme.FontSizeSmall);
+		const float palBtnW = (contentW - 16.0f - 90.0f) / 5.0f;
+		float palX = startX + 95.0f;
+		const char* pathIds[5] = { "navmesh.pal.p0", "navmesh.pal.p1", "navmesh.pal.p2", "navmesh.pal.p3", "navmesh.pal.p4" };
+		const struct { const char* label; glm::vec4 col; } pathPalettes[5] = {
+			{ "金黄", { 1.00f, 0.85f, 0.20f, 0.95f } },
+			{ "天蓝", { 0.20f, 0.75f, 1.00f, 0.95f } },
+			{ "青绿", { 0.15f, 0.95f, 0.65f, 0.95f } },
+			{ "洋红", { 0.95f, 0.25f, 0.85f, 0.95f } },
+			{ "橙红", { 1.00f, 0.45f, 0.15f, 0.95f } },
+		};
+		for (int i = 0; i < 5; ++i)
+		{
+			auto btnTheme = theme;
+			btnTheme.ButtonBg = Wui::WuiColor{ pathPalettes[i].col.r * 0.7f, pathPalettes[i].col.g * 0.7f, pathPalettes[i].col.b * 0.7f, 0.85f };
+			btnTheme.Border = Wui::WuiColor{ pathPalettes[i].col.r, pathPalettes[i].col.g, pathPalettes[i].col.b, 1.0f };
+			if (Wui::Button(ctx, Wui::HashId(pathIds[i]), { palX, innerY, palBtnW - 3.0f, 22.0f }, pathPalettes[i].label, btnTheme))
+			{
+				CustomPathColor = pathPalettes[i].col;
+			}
+			palX += palBtnW;
+		}
+		innerY += 26.0f;
+
+		// 代理标记色彩预设
+		Wui::Label(ctx, { startX + 8.0f, innerY + 2.0f }, "代理圆柱标记:", theme.Text, theme.FontSizeSmall);
+		palX = startX + 95.0f;
+		const char* agentIds[5] = { "navmesh.pal.a0", "navmesh.pal.a1", "navmesh.pal.a2", "navmesh.pal.a3", "navmesh.pal.a4" };
+		const struct { const char* label; glm::vec4 col; } agentPalettes[5] = {
+			{ "天蓝", { 0.20f, 0.75f, 1.00f, 0.90f } },
+			{ "青绿", { 0.15f, 0.92f, 0.65f, 0.90f } },
+			{ "金黄", { 1.00f, 0.85f, 0.20f, 0.90f } },
+			{ "白银", { 0.90f, 0.92f, 0.95f, 0.90f } },
+			{ "洋红", { 0.95f, 0.25f, 0.85f, 0.90f } },
+		};
+		for (int i = 0; i < 5; ++i)
+		{
+			auto btnTheme = theme;
+			btnTheme.ButtonBg = Wui::WuiColor{ agentPalettes[i].col.r * 0.7f, agentPalettes[i].col.g * 0.7f, agentPalettes[i].col.b * 0.7f, 0.85f };
+			btnTheme.Border = Wui::WuiColor{ agentPalettes[i].col.r, agentPalettes[i].col.g, agentPalettes[i].col.b, 1.0f };
+			if (Wui::Button(ctx, Wui::HashId(agentIds[i]), { palX, innerY, palBtnW - 3.0f, 22.0f }, agentPalettes[i].label, btnTheme))
+			{
+				CustomAgentColor = agentPalettes[i].col;
+			}
+			palX += palBtnW;
+		}
+		innerY += 30.0f;
+
 		// 视口性能与快捷键说明卡片 (提升设计感与专业感)
 		const float tipH = 58.0f;
 		const Wui::WuiRect tipRect { startX + 8.0f, innerY, contentW - 16.0f, tipH };

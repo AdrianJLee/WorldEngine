@@ -3751,10 +3751,37 @@ namespace World
 			{
 				const Wui::GizmoCamera debugCamera = m_Host.GetGizmoCamera();
 				const glm::mat4& viewProj = debugCamera.ViewProjection;
+				const glm::vec3 cameraPos = debugCamera.Position;
+				const glm::vec3 cameraForward = debugCamera.Forward;
 				Wui::ClipScope navClip(ctx, sceneRect);
 
 				const auto& registry = std::as_const(*navScene).GetRegistry();
 				std::shared_ptr<NavMesh> navMesh = navScene->GetNavMesh();
+
+				std::shared_ptr<TerrainData> terrainData = nullptr;
+				if (navScene)
+				{
+					for (auto [th, tc] : registry.view<TerrainComponent>().each())
+					{
+						terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
+						break;
+					}
+				}
+
+				auto isOccludedByTerrain = [&](const glm::vec3& targetPt) -> bool
+				{
+					if (!terrainData) return false;
+					constexpr int kSteps = 6;
+					for (int s = 1; s < kSteps; ++s)
+					{
+						const float t = static_cast<float>(s) / static_cast<float>(kSteps);
+						const glm::vec3 rayPt = glm::mix(cameraPos, targetPt, t);
+						const float gndH = terrainData->SampleHeight(rayPt.x, rayPt.z);
+						if (gndH > rayPt.y + 0.35f)
+							return true;
+					}
+					return false;
+				};
 
 				// 动态障碍物实时同步：编辑期与运行期保持一致，确保：
 				// 1. 障碍物覆盖的多边形着色为红色 (Blocked)；
@@ -3852,9 +3879,10 @@ namespace World
 
 				if (navMesh && (navMesh->GetPolygonCount() > 0 || !navMesh->GetMacroTiles().empty()) && NavMeshPanel::ShowPolygons)
 				{
-
 					const glm::vec3 cameraPos = debugCamera.Position;
 					const glm::vec3 cameraForward = debugCamera.Forward;
+
+
 
 					// =========================================================================
 					// 第一层：远景宏观大区域 Pass（Distant Macro Regions Pass, 38m ~ 600m）
@@ -3863,7 +3891,7 @@ namespace World
 					if (!macroTiles.empty())
 					{
 						constexpr float kMinMacroDist = 25.0f;
-						constexpr float kMaxMacroDist = 1200.0f;
+						constexpr float kMaxMacroDist = 100.0f;
 						constexpr float kMinMacroDistSq = kMinMacroDist * kMinMacroDist;
 						constexpr float kMaxMacroDistSq = kMaxMacroDist * kMaxMacroDist;
 
@@ -3893,6 +3921,9 @@ namespace World
 								continue;
 							const glm::vec2 ndc = glm::vec2(clipPos.x, clipPos.y) / clipPos.w;
 							if (std::abs(ndc.x) > 1.35f || std::abs(ndc.y) > 1.35f)
+								continue;
+
+							if (isOccludedByTerrain(tile.Center))
 								continue;
 
 							macroCandidates.push_back({ distSq, m });
@@ -4029,7 +4060,12 @@ namespace World
 									const float distSq = glm::dot(toPoly, toPoly);
 									if (distSq > kNearPolyMaxDistSq) continue;
 
+									if (glm::dot(poly.Normal, -toPoly) <= 0.02f) continue;
+
 									if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < 0.1f)
+										continue;
+
+									if (isOccludedByTerrain(poly.Center))
 										continue;
 
 									const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
@@ -4054,7 +4090,12 @@ namespace World
 								const float distSq = glm::dot(toPoly, toPoly);
 								if (distSq > kNearPolyMaxDistSq) continue;
 
+								if (glm::dot(poly.Normal, -toPoly) <= 0.02f) continue;
+
 								if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < 0.1f)
+									continue;
+
+								if (isOccludedByTerrain(poly.Center))
 									continue;
 
 								const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
@@ -4248,12 +4289,17 @@ namespace World
 
 					// 差异化体型着色：矮身材/钻行态呈翡翠青绿；站立标准体型呈天蓝/金黄
 					const bool isSmallOrCrouch = (h <= 1.35f);
-					const Wui::WuiColor agentCylinderColor = isSmallOrCrouch
-						? Wui::WuiColor{ 0.15f, 0.92f, 0.65f, 0.90f }
-						: Wui::WuiColor{ 0.20f, 0.75f, 1.00f, 0.90f };
-					const Wui::WuiColor pathColor = isSmallOrCrouch
-						? Wui::WuiColor{ 0.15f, 0.95f, 0.75f, 0.95f }
-						: Wui::WuiColor{ 1.00f, 0.85f, 0.20f, 0.95f };
+					const Wui::WuiColor agentCylinderColor = agent.HasCustomColor()
+						? Wui::WuiColor{ agent.PathColorR / 255.0f, agent.PathColorG / 255.0f, agent.PathColorB / 255.0f, agent.PathColorA / 255.0f }
+						: (isSmallOrCrouch
+							? Wui::WuiColor{ 0.15f, 0.92f, 0.65f, 0.90f }
+							: Wui::WuiColor{ NavMeshPanel::CustomAgentColor.r, NavMeshPanel::CustomAgentColor.g, NavMeshPanel::CustomAgentColor.b, NavMeshPanel::CustomAgentColor.a });
+
+					const Wui::WuiColor pathColor = agent.HasCustomColor()
+						? agentCylinderColor
+						: (isSmallOrCrouch
+							? Wui::WuiColor{ 0.15f, 0.95f, 0.75f, 0.95f }
+							: Wui::WuiColor{ NavMeshPanel::CustomPathColor.r, NavMeshPanel::CustomPathColor.g, NavMeshPanel::CustomPathColor.b, NavMeshPanel::CustomPathColor.a });
 
 					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), center + glm::vec3(0.0f, 0.08f, 0.0f), r, 1, agentCylinderColor, 1.8f);
 					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), center + glm::vec3(0.0f, h, 0.0f), r, 1, agentCylinderColor, 1.8f);
@@ -4324,6 +4370,8 @@ namespace World
 							{
 								const glm::vec3 p0 = agentPath[i] + glm::vec3(0.0f, 0.1f, 0.0f);
 								const glm::vec3 p1 = agentPath[i + 1] + glm::vec3(0.0f, 0.1f, 0.0f);
+								if (isOccludedByTerrain(p0) && isOccludedByTerrain(p1))
+									continue;
 								PushProjectedSegment(ctx, viewProj, sceneRect,
 									viewProj * glm::vec4(p0, 1.0f),
 									viewProj * glm::vec4(p1, 1.0f),

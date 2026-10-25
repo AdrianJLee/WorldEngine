@@ -2368,11 +2368,26 @@ namespace World
 		uint8_t ReachedDestination { 0 };                 // 1B  (offset 41)
 		uint8_t AutoRepath { 1 };                         // 1B  (offset 42)
 		uint8_t Crouching { 0 };                          // 1B  (offset 43: 0=Standing, 1=Crouching)
-		uint8_t _Padding[4] { 0 };                        // 4B  (offset 44..47)
+		uint8_t PathColorR { 0 };                         // 1B  (offset 44: 自定义路径颜色 R，0 = 默认预设)
+		uint8_t PathColorG { 0 };                         // 1B  (offset 45: 自定义路径颜色 G)
+		uint8_t PathColorB { 0 };                         // 1B  (offset 46: 自定义路径颜色 B)
+		uint8_t PathColorA { 0 };                         // 1B  (offset 47: 自定义路径颜色 A，0 = 使用默认预设)
 
 		NavMeshAgentComponent() = default;
 
 		float GetEffectiveHeight() const { return Crouching ? CrouchHeight : AgentHeight; }
+
+		bool HasCustomColor() const { return PathColorA > 0; }
+		glm::vec4 GetCustomColor() const {
+			return glm::vec4(PathColorR / 255.0f, PathColorG / 255.0f, PathColorB / 255.0f, PathColorA / 255.0f);
+		}
+		void SetCustomColor(const glm::vec4& col) {
+			PathColorR = static_cast<uint8_t>(std::clamp(col.r * 255.0f, 0.0f, 255.0f));
+			PathColorG = static_cast<uint8_t>(std::clamp(col.g * 255.0f, 0.0f, 255.0f));
+			PathColorB = static_cast<uint8_t>(std::clamp(col.b * 255.0f, 0.0f, 255.0f));
+			PathColorA = static_cast<uint8_t>(std::clamp(col.a * 255.0f, 1.0f, 255.0f));
+		}
+		void ClearCustomColor() { PathColorR = PathColorG = PathColorB = PathColorA = 0; }
 
 		WE_SCHEMA_BODY(World, NavMeshAgentComponent, Component)
 			WE_SCHEMA_META(Category("AI"),
@@ -2417,6 +2432,8 @@ namespace World
 	static_assert(offsetof(NavMeshAgentComponent, ReachedDestination) == 41, "ReachedDestination offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, AutoRepath) == 42, "AutoRepath offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, Crouching) == 43, "Crouching offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, PathColorR) == 44, "PathColorR offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, PathColorA) == 47, "PathColorA offset mismatch");
 
 	struct NavMeshObstacleComponent
 	{
