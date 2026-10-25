@@ -1,0 +1,18 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000023
+  World::TagComponent:
+    Tag: "Area: Low Ceiling Tunnel (Clearance: 1.3m)"
+  World::TransformComponent:
+    Location: [27, 0, 32]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::NavMeshAreaModifierComponent:
+    Extents: [2.0, 2.0, 3.5]
+    CostMultiplier: 0.8
+    ClearanceHeight: 1.3
+    AreaType: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 1

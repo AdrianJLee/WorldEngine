@@ -74,6 +74,7 @@ local lastKey4 = false
 local lastKeySpace = false
 local lastKeyO = false
 local lastKeyP = false
+local lastKeyC = false
 
 -- 辅助安全设置旋转朝向
 local function setRotation(transform, xDeg, yDeg, zDeg)
@@ -297,6 +298,26 @@ ecs:AddSystem("NavMeshShowcaseSystem", "Update", function(dt: number)
         lastEventTimer = 3.5
     end
     lastKeyP = kP
+
+    -- [C] 键切换蹲伏/站立态 (动态改变有效身高以穿越限高矮洞)
+    local kC = Input.IsKeyPressed and (Input.IsKeyPressed(67) or Input.IsKeyPressed("C")) or false
+    if kC and not lastKeyC then
+        local q = ecs:Query({ "TagComponent", "NavMeshAgentComponent" })
+        q:Each(function(e, tag, agent)
+            if tag.Tag == AGENT_TAG then
+                agent.Crouching = (agent.Crouching == 0) and 1 or 0
+                if agent.Crouching == 1 then
+                    lastEventText = "【高角色进入蹲伏潜行】有效高度 0.9m <= 1.3m 净空，可直接钻入半高石拱洞走捷径！"
+                    print("[NAVMESH-SHOWCASE] >>> Mannequin Agent 切换为蹲伏态 (0.9m)，允许穿行 1.3m 限高石拱洞")
+                else
+                    lastEventText = "【高角色恢复站立姿态】站立高度 1.8m > 1.3m 净空，无法通行半高石拱洞，自动绕行主路！"
+                    print("[NAVMESH-SHOWCASE] >>> Mannequin Agent 切换为站立态 (1.8m)，限高阻断，重新规划大路")
+                end
+                lastEventTimer = 4.0
+            end
+        end)
+    end
+    lastKeyC = kC
 
     -- 5. 寻路代理状态推进与朝向旋转
     local qAgent = ecs:Query({ "TagComponent", "TransformComponent", "NavMeshAgentComponent" })

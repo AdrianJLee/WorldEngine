@@ -3731,6 +3731,8 @@ namespace World
 			glm::vec3 LastDest { 1e9f };
 			std::vector<glm::vec3> Path;
 			std::chrono::steady_clock::time_point LastTime {};
+			uint8_t LastCrouch = 0;
+			float LastHeight = 0.0f;
 		};
 		static std::unordered_map<uint32_t, CachedAgentPath> s_AgentPathCache;
 
@@ -4171,12 +4173,7 @@ namespace World
 					}
 				}
 
-				// 2. 寻路代理 (NavMeshAgentComponent) 圆柱体、目标光环与路径折线 (带位移阈值与节流缓存)
-				const Wui::WuiColor agentCylinderColor { 0.2f, 0.75f, 1.0f, 0.90f };
-				const Wui::WuiColor pathColor { 1.0f, 0.85f, 0.2f, 0.95f };
-
-
-
+				// 2. 寻路代理 (NavMeshAgentComponent) 圆柱体、目标光环与路径折线 (差异化体型与姿态感知)
 				for (auto [handle, agent] : registry.view<NavMeshAgentComponent>().each())
 				{
 					glm::vec3 center { 0.0f };
@@ -4184,7 +4181,16 @@ namespace World
 						center = xform->Location;
 
 					const float r = std::max(0.1f, agent.AgentRadius);
-					const float h = std::max(0.2f, agent.AgentHeight);
+					const float h = std::max(0.2f, agent.GetEffectiveHeight());
+
+					// 差异化体型着色：矮身材/钻行态呈翡翠青绿；站立标准体型呈天蓝/金黄
+					const bool isSmallOrCrouch = (h <= 1.35f);
+					const Wui::WuiColor agentCylinderColor = isSmallOrCrouch
+						? Wui::WuiColor{ 0.15f, 0.92f, 0.65f, 0.90f }
+						: Wui::WuiColor{ 0.20f, 0.75f, 1.00f, 0.90f };
+					const Wui::WuiColor pathColor = isSmallOrCrouch
+						? Wui::WuiColor{ 0.15f, 0.95f, 0.75f, 0.95f }
+						: Wui::WuiColor{ 1.00f, 0.85f, 0.20f, 0.95f };
 
 					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), center + glm::vec3(0.0f, 0.08f, 0.0f), r, 1, agentCylinderColor, 1.8f);
 					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), center + glm::vec3(0.0f, h, 0.0f), r, 1, agentCylinderColor, 1.8f);
@@ -4232,11 +4238,14 @@ namespace World
 						const float dDestSq = glm::dot(dDest, dDest);
 						const double elapsedSec = std::chrono::duration<double>(now - cache.LastTime).count();
 
-						if (cache.Path.empty() || dStartSq > 0.0625f || dDestSq > 0.0625f || elapsedSec > 0.4)
+						if (cache.Path.empty() || dStartSq > 0.0625f || dDestSq > 0.0625f || elapsedSec > 0.4 ||
+							cache.LastCrouch != agent.Crouching || std::abs(cache.LastHeight - agent.AgentHeight) > 0.05f)
 						{
 							cache.LastStart = center;
 							cache.LastDest = agent.Destination;
 							cache.LastTime = now;
+							cache.LastCrouch = agent.Crouching;
+							cache.LastHeight = agent.AgentHeight;
 							cache.Path.clear();
 							NavQueryFilter filter;
 							filter.AgentHeight = agent.GetEffectiveHeight();

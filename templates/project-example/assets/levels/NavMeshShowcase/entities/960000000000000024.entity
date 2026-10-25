@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000024
+  World::TagComponent:
+    Tag: "Tunnel Arch Top Beam"
+  World::TransformComponent:
+    Location: [27, 2.0, 32]
+    Rotation: [0, 0, 0]
+    Scale: [3.4, 0.6, 2.0]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.35, 0.38, 0.42, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

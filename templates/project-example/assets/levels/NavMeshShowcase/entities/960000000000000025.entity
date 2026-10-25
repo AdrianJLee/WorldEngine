@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000025
+  World::TagComponent:
+    Tag: "Tunnel Arch Left Pillar"
+  World::TransformComponent:
+    Location: [25.0, 0.85, 32]
+    Rotation: [0, 0, 0]
+    Scale: [0.6, 1.7, 1.8]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.42, 0.45, 0.48, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

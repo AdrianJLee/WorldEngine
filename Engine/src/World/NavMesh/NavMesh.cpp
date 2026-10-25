@@ -1911,6 +1911,23 @@ namespace World
 			{
 				m_AreaModifiers.resize(modCount);
 				stream.read(reinterpret_cast<char*>(m_AreaModifiers.data()), modCount * sizeof(NavMeshAreaModifier));
+				for (const auto& mod : m_AreaModifiers)
+				{
+					if (mod.ClearanceHeight > 0.0f)
+					{
+						const glm::vec3 bMin = mod.Center - mod.Extents;
+						const glm::vec3 bMax = mod.Center + mod.Extents;
+						for (auto& poly : m_Polygons)
+						{
+							if (poly.Center.x >= bMin.x && poly.Center.x <= bMax.x &&
+								poly.Center.y >= bMin.y && poly.Center.y <= bMax.y &&
+								poly.Center.z >= bMin.z && poly.Center.z <= bMax.z)
+							{
+								poly.Clearance = mod.ClearanceHeight;
+							}
+						}
+					}
+				}
 			}
 		}
 

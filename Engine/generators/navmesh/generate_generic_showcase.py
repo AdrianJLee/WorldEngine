@@ -159,7 +159,7 @@ def generate_generic_navmesh():
             for mod in area_modifiers:
                 cx, cy, cz = mod["center"]
                 ex, ey, ez = mod["extents"]
-                f.write(struct.pack("<fffffffBxxx", cx, cy, cz, ex, ey, ez, mod["cost_multiplier"], mod["area_type"]))
+                f.write(struct.pack("<ffffffffBxxxxxxx", cx, cy, cz, ex, ey, ez, mod["cost_multiplier"], mod.get("clearance_height", 0.0), mod["area_type"]))
 
         print(f"[NavMesh] Generated '{out_path}' ({os.path.getsize(out_path)} bytes)")
     print(f"[NavMesh] Vertices: {len(vertices)}, Polygons: {len(polygons)}, Links: {len(off_mesh_links)}, Modifiers: {len(area_modifiers)}")

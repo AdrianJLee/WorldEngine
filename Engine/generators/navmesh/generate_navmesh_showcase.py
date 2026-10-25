@@ -274,6 +274,14 @@ def generate_navmesh():
             "extents": (5.0, 3.0, 4.0),
             "cost_multiplier": 10.0,
             "area_type": 3 # Hazard (Orange-Red)
+        },
+        # 4. 矮石拱隧道 (Low Ceiling Arch Tunnel): 峡谷西侧半高捷径通道，限高 1.3m，通行代价 0.8 (捷径)
+        {
+            "center": (27.0, 0.0, 32.0),
+            "extents": (2.2, 2.0, 3.5),
+            "cost_multiplier": 0.8,
+            "clearance_height": 1.3,
+            "area_type": 1 # 道路捷径
         }
     ]
 
@@ -285,6 +293,7 @@ def generate_navmesh():
         poly["center"] = (cx, cy, cz)
         poly["area_type"] = 0
         poly["cost"] = 1.0
+        poly["clearance"] = 3.0
 
         for mod in area_modifiers:
             mc = mod["center"]
@@ -333,7 +342,7 @@ def generate_navmesh():
             for mod in area_modifiers:
                 cx, cy, cz = mod["center"]
                 ex, ey, ez = mod["extents"]
-                f.write(struct.pack("<fffffffBxxx", cx, cy, cz, ex, ey, ez, mod["cost_multiplier"], mod["area_type"]))
+                f.write(struct.pack("<ffffffffBxxxxxxx", cx, cy, cz, ex, ey, ez, mod["cost_multiplier"], mod.get("clearance_height", 0.0), mod["area_type"]))
 
         print(f"[NavMesh] Generated '{out_path}' ({os.path.getsize(out_path)} bytes)")
     print(f"[NavMesh] Vertices: {len(vertices)}, Polygons: {len(polygons)}, Links: {len(off_mesh_links)}, Modifiers: {len(area_modifiers)}")
