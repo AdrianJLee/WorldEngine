@@ -2361,19 +2361,22 @@ namespace World
 		float Acceleration { 8.0f };                      // 4B  (offset 16)
 		float StoppingDistance { 0.2f };                  // 4B  (offset 20)
 		float AgentRadius { 0.5f };                       // 4B  (offset 24)
-		float AgentHeight { 2.0f };                       // 4B  (offset 28)
-		uint8_t HasPath { 0 };                            // 1B  (offset 32)
-		uint8_t ReachedDestination { 0 };                 // 1B  (offset 33)
-		uint8_t AutoRepath { 1 };                         // 1B  (offset 34)
-		uint8_t Crouching { 0 };                          // 1B  (offset 35: 0=Standing, 1=Crouching/Low)
-		uint32_t AreaMask { 0xFFFFFFFF };                 // 4B  (offset 36: bitmask of allowed AreaTypes)
-		uint8_t _Padding[8] { 0 };                        // 8B  (offset 40)
+		float AgentHeight { 1.8f };                       // 4B  (offset 28: Standing physical height in meters)
+		float CrouchHeight { 1.0f };                      // 4B  (offset 32: Crouching/lowered physical height in meters)
+		uint32_t AreaMask { 0xFFFFFFFF };                 // 4B  (offset 36: Traversable area bitmask)
+		uint8_t HasPath { 0 };                            // 1B  (offset 40)
+		uint8_t ReachedDestination { 0 };                 // 1B  (offset 41)
+		uint8_t AutoRepath { 1 };                         // 1B  (offset 42)
+		uint8_t Crouching { 0 };                          // 1B  (offset 43: 0=Standing, 1=Crouching)
+		uint8_t _Padding[4] { 0 };                        // 4B  (offset 44..47)
 
 		NavMeshAgentComponent() = default;
 
+		float GetEffectiveHeight() const { return Crouching ? CrouchHeight : AgentHeight; }
+
 		WE_SCHEMA_BODY(World, NavMeshAgentComponent, Component)
 			WE_SCHEMA_META(Category("AI"),
-				Doc("3D AI NavMesh navigation agent with A* pathfinding and Funnel smoothing."))
+				Doc("3D AI NavMesh navigation agent with continuous geometric clearance and capability filtering."))
 			WE_FIELD(Destination, Vec3,
 				Doc("Target destination in world space."));
 			WE_FIELD(Speed, Float, Range(0.1f, 50.0f), Default(3.5f),
@@ -2383,19 +2386,21 @@ namespace World
 			WE_FIELD(StoppingDistance, Float, Range(0.01f, 10.0f), Default(0.2f),
 				Doc("Distance from target to consider arrival completed."));
 			WE_FIELD(AgentRadius, Float, Range(0.1f, 5.0f), Default(0.5f),
-				Doc("Cylindrical agent radius."));
-			WE_FIELD(AgentHeight, Float, Range(0.1f, 10.0f), Default(2.0f),
-				Doc("Agent height."));
+				Doc("Cylindrical agent body radius in meters."));
+			WE_FIELD(AgentHeight, Float, Range(0.1f, 10.0f), Default(1.8f),
+				Doc("Standing physical body height in meters."));
+			WE_FIELD(CrouchHeight, Float, Range(0.1f, 10.0f), Default(1.0f),
+				Doc("Crouching/lowered body height in meters when Crouching is active."));
+			WE_FIELD(Crouching, UInt8, Default(0),
+				Doc("Whether character is currently in crouching/lowered posture."));
+			WE_FIELD(AreaMask, UInt32, Default(0xFFFFFFFF),
+				Doc("Bitmask of traversable area types (bit N corresponds to AreaType N)."));
 			WE_FIELD(HasPath, UInt8, Default(0),
 				Doc("Whether the agent currently has a planned path."));
 			WE_FIELD(ReachedDestination, UInt8, Default(0),
 				Doc("Whether the agent reached its target destination."));
 			WE_FIELD(AutoRepath, UInt8, Default(1),
 				Doc("Automatically recalculate path if target moves or obstacle blocks."));
-			WE_FIELD(Crouching, UInt8, Default(0),
-				Doc("Whether character is currently crouching/lowered (reduces effective height to pass low ceilings)."));
-			WE_FIELD(AreaMask, UInt32, Default(0xFFFFFFFF),
-				Doc("Bitmask of traversable area types (bit N corresponds to AreaType N)."));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(NavMeshAgentComponent) == 48, "NavMeshAgentComponent must be exactly 48 bytes");
@@ -2406,11 +2411,12 @@ namespace World
 	static_assert(offsetof(NavMeshAgentComponent, StoppingDistance) == 20, "StoppingDistance offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, AgentRadius) == 24, "AgentRadius offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, AgentHeight) == 28, "AgentHeight offset mismatch");
-	static_assert(offsetof(NavMeshAgentComponent, HasPath) == 32, "HasPath offset mismatch");
-	static_assert(offsetof(NavMeshAgentComponent, ReachedDestination) == 33, "ReachedDestination offset mismatch");
-	static_assert(offsetof(NavMeshAgentComponent, AutoRepath) == 34, "AutoRepath offset mismatch");
-	static_assert(offsetof(NavMeshAgentComponent, Crouching) == 35, "Crouching offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, CrouchHeight) == 32, "CrouchHeight offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, AreaMask) == 36, "AreaMask offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, HasPath) == 40, "HasPath offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, ReachedDestination) == 41, "ReachedDestination offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, AutoRepath) == 42, "AutoRepath offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, Crouching) == 43, "Crouching offset mismatch");
 
 	struct NavMeshObstacleComponent
 	{
@@ -2471,28 +2477,32 @@ namespace World
 	struct NavMeshAreaModifierComponent
 	{
 		glm::vec3 Extents { 1.0f, 1.0f, 1.0f };           // 12B (offset 0: Local half-extents)
-		float CostMultiplier = 2.0f;                      // 4B  (offset 12: Cost multiplier)
-		uint8_t AreaType = 1;                             // 1B  (offset 16: 0=Walkable, 1=Road, 2=Mud, 3=Hazard, 4=Impassable)
-		uint8_t _Padding[15] { 0 };                       // 15B (offset 17)
+		float CostMultiplier = 1.0f;                      // 4B  (offset 12: Cost multiplier)
+		float ClearanceHeight = 0.0f;                     // 4B  (offset 16: Headroom clearance in meters; 0 = unconstrained/open air)
+		uint8_t AreaType = 0;                             // 1B  (offset 20: 0=Walkable, 1=Road, 2=Mud, 3=Hazard, 4=Impassable, etc.)
+		uint8_t _Padding[11] { 0 };                       // 11B (offset 21)
 
 		NavMeshAreaModifierComponent() = default;
 
 		WE_SCHEMA_BODY(World, NavMeshAreaModifierComponent, Component)
 			WE_SCHEMA_META(Category("AI"),
-				Doc("Volume modifying NavMesh area type and movement cost (e.g. road, mud, hazard)."))
+				Doc("Volume modifying NavMesh area surface type, cost multiplier, and continuous headroom clearance."))
 			WE_FIELD(Extents, Vec3, Default(glm::vec3(1.0f)),
 				Doc("Half-extents of the area box. Multiplied by TransformComponent.Scale for world extents."));
-			WE_FIELD(CostMultiplier, Float, Default(2.0f),
-				Doc("Pathfinding cost multiplier inside this area volume."));
-			WE_FIELD(AreaType, UInt8, Default(1),
-				Doc("Area type: 0=Walkable(1x), 1=Road(0.5x), 2=Mud(3x), 3=Hazard(10x), 4=Impassable(Blocked)."));
+			WE_FIELD(CostMultiplier, Float, Default(1.0f),
+				Doc("Pathfinding traversal cost multiplier inside this area volume."));
+			WE_FIELD(ClearanceHeight, Float, Default(0.0f),
+				Doc("Continuous headroom clearance in meters (0 = unconstrained/open air). Agents taller than this cannot pass."));
+			WE_FIELD(AreaType, UInt8, Default(0),
+				Doc("Surface area type (0=Walkable, 1=Road, 2=Mud, 3=Hazard, 4=Impassable, or project custom)."));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(NavMeshAreaModifierComponent) == 32, "NavMeshAreaModifierComponent must be exactly 32 bytes");
 	static_assert(std::is_trivially_copyable_v<NavMeshAreaModifierComponent>, "NavMeshAreaModifierComponent must be trivially copyable");
 	static_assert(offsetof(NavMeshAreaModifierComponent, Extents) == 0, "Extents offset mismatch");
 	static_assert(offsetof(NavMeshAreaModifierComponent, CostMultiplier) == 12, "CostMultiplier offset mismatch");
-	static_assert(offsetof(NavMeshAreaModifierComponent, AreaType) == 16, "AreaType offset mismatch");
+	static_assert(offsetof(NavMeshAreaModifierComponent, ClearanceHeight) == 16, "ClearanceHeight offset mismatch");
+	static_assert(offsetof(NavMeshAreaModifierComponent, AreaType) == 20, "AreaType offset mismatch");
 
 	struct MeshLODComponent
 	{

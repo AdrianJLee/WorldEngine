@@ -513,10 +513,15 @@ static void TestNavMeshLowCeilingAndAgentHeightFiltering()
 		assert(path.size() >= 2);
 	}
 
-	// 3. 高角色进入蹲伏潜行态 (Crouching: 身高折半为 0.99m <= 1.2m) —— 允许钻入并顺畅通过！
+	// 3. 高角色进入蹲伏潜行态 (CrouchHeight = 0.9m <= 1.2m 净空) —— 允许钻入并顺畅通过！
 	{
+		NavMeshAgentComponent agent;
+		agent.AgentHeight = 1.8f;
+		agent.CrouchHeight = 0.9f;
+		agent.Crouching = 1;
+
 		NavQueryFilter crouchFilter;
-		crouchFilter.AgentHeight = 1.8f * 0.55f; // 蹲伏有效高度 0.99m
+		crouchFilter.AgentHeight = agent.GetEffectiveHeight();
 		crouchFilter.RequireClearance = true;
 		std::vector<glm::vec3> path;
 		bool found = nav.FindPath(startPt, endPt, path, crouchFilter);

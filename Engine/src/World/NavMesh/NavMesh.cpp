@@ -295,13 +295,13 @@ namespace World
 				{
 					poly.AreaType = modifier.AreaType;
 					poly.Cost = modifier.CostMultiplier;
+					if (modifier.ClearanceHeight > 0.0f)
+					{
+						poly.Clearance = modifier.ClearanceHeight;
+					}
 					if (modifier.AreaType == 4 || modifier.CostMultiplier <= 0.0f)
 					{
 						poly.Blocked = true;
-					}
-					else if (modifier.AreaType == NavAreaType::LowCeiling)
-					{
-						poly.Clearance = 1.2f; // 半高通道，默认净空上限 1.2m
 					}
 				}
 			}
@@ -1363,6 +1363,7 @@ namespace World
 			mod.Extents = areaComp.Extents * scale;
 			mod.CostMultiplier = areaComp.CostMultiplier;
 			mod.AreaType = areaComp.AreaType;
+			mod.ClearanceHeight = areaComp.ClearanceHeight;
 			AddAreaModifier(mod);
 		}
 	}
@@ -1404,6 +1405,7 @@ namespace World
 			mod.Extents = areaComp.Extents * scale;
 			mod.CostMultiplier = areaComp.CostMultiplier;
 			mod.AreaType = areaComp.AreaType;
+			mod.ClearanceHeight = areaComp.ClearanceHeight;
 			areaMods.push_back(mod);
 		}
 
@@ -1951,7 +1953,7 @@ namespace World
 
 			// 若未到达，调用 navMesh.FindPath (传入当前代理体型高度与掩码)
 			NavQueryFilter filter;
-			filter.AgentHeight = agent.Crouching ? (agent.AgentHeight * 0.55f) : agent.AgentHeight;
+			filter.AgentHeight = agent.GetEffectiveHeight();
 			filter.AgentRadius = agent.AgentRadius;
 			filter.AreaMask = agent.AreaMask;
 

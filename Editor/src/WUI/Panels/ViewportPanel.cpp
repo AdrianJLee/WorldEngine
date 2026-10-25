@@ -4239,7 +4239,7 @@ namespace World
 							cache.LastTime = now;
 							cache.Path.clear();
 							NavQueryFilter filter;
-							filter.AgentHeight = agent.Crouching ? (agent.AgentHeight * 0.55f) : agent.AgentHeight;
+							filter.AgentHeight = agent.GetEffectiveHeight();
 							filter.AgentRadius = agent.AgentRadius;
 							filter.AreaMask = agent.AreaMask;
 							navMesh->FindPath(center, agent.Destination, cache.Path, filter);

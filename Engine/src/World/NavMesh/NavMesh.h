@@ -63,12 +63,14 @@ namespace World
 	{
 		glm::vec3 Center { 0.0f };
 		glm::vec3 Extents { 1.0f };
-		float CostMultiplier = 2.0f;
-		uint8_t AreaType = 1; // 0=Walkable, 1=Road, 2=Mud, 3=Hazard, 4=Impassable, 5=LowCeiling
+		float CostMultiplier = 1.0f;
+		float ClearanceHeight = 0.0f; // 连续净空高度上限（米，0 = 露天不受限，>0 = 任意自定义限高）
+		uint8_t AreaType = 0;         // 地表类型（与限高彻底解耦，道路/泥地/草地均可叠加限高）
+		uint8_t _Padding[7] { 0 };
 	};
 
 	static_assert(sizeof(NavMeshOffMeshLink) == 32, "NavMeshOffMeshLink must be 32 bytes");
-	static_assert(sizeof(NavMeshAreaModifier) == 32, "NavMeshAreaModifier must be 32 bytes");
+	static_assert(sizeof(NavMeshAreaModifier) == 40, "NavMeshAreaModifier must be 40 bytes");
 
 	struct NavMeshMacroTile
 	{
