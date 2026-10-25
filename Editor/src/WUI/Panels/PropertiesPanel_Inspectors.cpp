@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include "World/Core/StringPool.h"
 #include "PropertiesPanel_Internal.h"
+#include "NavMeshPanel.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -338,40 +339,32 @@ using namespace PropertiesPanelDetail;
 		Wui::Tooltip(ctx, pickBtnRect, "直接提取视口 3D 相机的观察焦点作为寻路代理的新目标点");
 		dbgY += 26.0f;
 
-		// 代理标记与路径折线自定义色彩
-		Wui::Label(ctx, { startX + 8.0f, dbgY + 2.0f }, "代理标记与路径颜色 (Agent & Path Color):", theme.Text, theme.FontSizeSmall);
+		// 代理标记与路径折线自定义色彩 (调色板 ColorField)
+		Wui::Label(ctx, { startX + 8.0f, dbgY + 2.0f }, "代理与路径颜色 (Color Picker):", theme.Text, theme.FontSizeSmall);
 		dbgY += 20.0f;
 
-		const float palBtnW = (contentW - 16.0f - 4.0f * 4.0f) / 5.0f;
-		float bX = startX + 8.0f;
-		const char* palIds[5] = { "inspect.nav_agent.pal_0", "inspect.nav_agent.pal_1", "inspect.nav_agent.pal_2", "inspect.nav_agent.pal_3", "inspect.nav_agent.pal_4" };
-		const struct { const char* label; glm::vec4 col; bool isDefault; } agentPalettes[5] = {
-			{ "默认预设", { 0.0f, 0.0f, 0.0f, 0.0f }, true },
-			{ "天蓝", { 0.20f, 0.75f, 1.00f, 0.95f }, false },
-			{ "金黄", { 1.00f, 0.85f, 0.20f, 0.95f }, false },
-			{ "青绿", { 0.15f, 0.95f, 0.65f, 0.95f }, false },
-			{ "洋红", { 0.95f, 0.25f, 0.85f, 0.95f }, false },
-		};
-		for (int i = 0; i < 5; ++i)
+		const float clrFieldW = contentW - 16.0f - 85.0f;
+		const Wui::WuiRect clrRect { startX + 8.0f, dbgY, clrFieldW, 20.0f };
+		glm::vec4 curCol = agent->HasCustomColor()
+			? agent->GetCustomColor()
+			: NavMeshPanel::CustomAgentColor;
+		if (Wui::ColorField(ctx, Wui::HashId("inspect.nav_agent.clr_field"), clrRect, curCol, theme))
 		{
-			auto palTheme = theme;
-			if (!agentPalettes[i].isDefault)
-			{
-				palTheme.ButtonBg = Wui::WuiColor{ agentPalettes[i].col.r * 0.6f, agentPalettes[i].col.g * 0.6f, agentPalettes[i].col.b * 0.6f, 0.85f };
-				palTheme.Border = Wui::WuiColor{ agentPalettes[i].col.r, agentPalettes[i].col.g, agentPalettes[i].col.b, 1.0f };
-			}
-			if (Wui::Button(ctx, Wui::HashId(palIds[i]), { bX, dbgY, palBtnW, 22.0f }, agentPalettes[i].label, palTheme))
-			{
-				if (agentPalettes[i].isDefault)
-					agent->ClearCustomColor();
-				else
-					agent->SetCustomColor(agentPalettes[i].col);
-				host.MarkDocumentDirty();
-			}
-			bX += palBtnW + 4.0f;
+			agent->SetCustomColor(curCol);
+			host.MarkDocumentDirty();
 		}
+		Wui::Tooltip(ctx, clrRect, "点击打开 2D 调色板面板，自由调节本代理在视口中的线框与路径颜色");
 
-		curY += dbgCardH + 8.0f;
+		const Wui::WuiRect resetClrBtn { startX + 8.0f + clrFieldW + 6.0f, dbgY, 78.0f, 20.0f };
+		if (Wui::Button(ctx, Wui::HashId("inspect.nav_agent.btn_reset_clr"), resetClrBtn, "重置默认", theme))
+		{
+			agent->ClearCustomColor();
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, resetClrBtn, "清除本代理的自定义颜色，恢复使用导航面板设置的全局默认颜色");
+		dbgY += 26.0f;
+
+				curY += dbgCardH + 8.0f;
 		return curY - rect.Y;
 	}
 

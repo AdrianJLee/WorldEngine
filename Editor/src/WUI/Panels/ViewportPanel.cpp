@@ -3768,17 +3768,68 @@ namespace World
 					}
 				}
 
-				auto isOccludedByTerrain = [&](const glm::vec3& targetPt) -> bool
+				// 收集场景静态遮挡物包围盒 (用于导航全要素遮挡剔除，杜绝穿透建筑物与山体)
+				struct StaticAABB { glm::vec3 Min; glm::vec3 Max; };
+				std::vector<StaticAABB> occluderBoxes;
+				for (auto [h, xf, box] : registry.view<TransformComponent, BoxCollider3DComponent>().each())
 				{
-					if (!terrainData) return false;
-					constexpr int kSteps = 6;
-					for (int s = 1; s < kSteps; ++s)
+					const glm::vec3 s = glm::abs(xf.Scale);
+					const glm::vec3 ext = s * box.HalfExtents;
+					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
 					{
-						const float t = static_cast<float>(s) / static_cast<float>(kSteps);
-						const glm::vec3 rayPt = glm::mix(cameraPos, targetPt, t);
-						const float gndH = terrainData->SampleHeight(rayPt.x, rayPt.z);
-						if (gndH > rayPt.y + 0.35f)
-							return true;
+						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext });
+					}
+				}
+
+				auto rayHitsAABB = [](const glm::vec3& orig, const glm::vec3& dir, float maxDist, const glm::vec3& bMin, const glm::vec3& bMax) -> bool
+				{
+					float tmin = 0.0f;
+					float tmax = maxDist;
+					for (int i = 0; i < 3; ++i)
+					{
+						if (std::abs(dir[i]) < 1e-6f)
+						{
+							if (orig[i] < bMin[i] || orig[i] > bMax[i]) return false;
+						}
+						else
+						{
+							const float ood = 1.0f / dir[i];
+							float t1 = (bMin[i] - orig[i]) * ood;
+							float t2 = (bMax[i] - orig[i]) * ood;
+							if (t1 > t2) std::swap(t1, t2);
+							tmin = std::max(tmin, t1);
+							tmax = std::min(tmax, t2);
+							if (tmin > tmax) return false;
+						}
+					}
+					return tmin > 0.1f && tmin < maxDist - 0.1f;
+				};
+
+				auto isOccluded = [&](const glm::vec3& targetPt) -> bool
+				{
+					if (terrainData)
+					{
+						constexpr int kSteps = 6;
+						for (int s = 1; s < kSteps; ++s)
+						{
+							const float t = static_cast<float>(s) / static_cast<float>(kSteps);
+							const glm::vec3 rayPt = glm::mix(cameraPos, targetPt, t);
+							const float gndH = terrainData->SampleHeight(rayPt.x, rayPt.z);
+							if (gndH > rayPt.y + 0.35f)
+								return true;
+						}
+					}
+
+					const glm::vec3 rayDir = targetPt - cameraPos;
+					const float rayLen = glm::length(rayDir);
+					if (rayLen > 0.2f)
+					{
+						const glm::vec3 normDir = rayDir / rayLen;
+						for (const auto& box : occluderBoxes)
+						{
+							if (rayHitsAABB(cameraPos, normDir, rayLen, box.Min, box.Max))
+								return true;
+						}
 					}
 					return false;
 				};
@@ -3923,7 +3974,7 @@ namespace World
 							if (std::abs(ndc.x) > 1.35f || std::abs(ndc.y) > 1.35f)
 								continue;
 
-							if (isOccludedByTerrain(tile.Center))
+							if (isOccluded(tile.Center))
 								continue;
 
 							macroCandidates.push_back({ distSq, m });
@@ -4065,7 +4116,7 @@ namespace World
 									if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < 0.1f)
 										continue;
 
-									if (isOccludedByTerrain(poly.Center))
+									if (isOccluded(poly.Center))
 										continue;
 
 									const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
@@ -4095,7 +4146,7 @@ namespace World
 								if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < 0.1f)
 									continue;
 
-								if (isOccludedByTerrain(poly.Center))
+								if (isOccluded(poly.Center))
 									continue;
 
 								const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
@@ -4249,8 +4300,16 @@ namespace World
 					for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
 					{
 						glm::mat4 world(1.0f);
+						glm::vec3 worldCenter { 0.0f };
 						if (const auto* xform = registry.try_get<TransformComponent>(handle))
+						{
 							world = xform->GetLocalMatrix();
+							worldCenter = xform->Location;
+						}
+
+						// 遮挡剔除：处于山体或建筑物遮挡后面的障碍物线框不予绘制
+						if (isOccluded(worldCenter))
+							continue;
 
 						glm::vec4 clipCorners[8];
 						for (int i = 0; i < 8; ++i)
@@ -4370,7 +4429,7 @@ namespace World
 							{
 								const glm::vec3 p0 = agentPath[i] + glm::vec3(0.0f, 0.1f, 0.0f);
 								const glm::vec3 p1 = agentPath[i + 1] + glm::vec3(0.0f, 0.1f, 0.0f);
-								if (isOccludedByTerrain(p0) && isOccludedByTerrain(p1))
+								if (isOccluded(p0) && isOccluded(p1))
 									continue;
 								PushProjectedSegment(ctx, viewProj, sceneRect,
 									viewProj * glm::vec4(p0, 1.0f),
@@ -4426,6 +4485,18 @@ namespace World
 					for (auto [handle, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
 					{
 						++entityAreaModCount;
+						glm::mat4 world(1.0f);
+						glm::vec3 modCenter { 0.0f };
+						if (const auto* xform = registry.try_get<TransformComponent>(handle))
+						{
+							world = xform->GetLocalMatrix();
+							modCenter = xform->Location;
+						}
+
+						// 遮挡剔除：处于山体或建筑物遮挡后面的代价区域线框不予绘制
+						if (isOccluded(modCenter))
+							continue;
+
 						Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.85f };
 						if (areaComp.AreaType == 2)
 							areaColor = Wui::WuiColor{ 0.70f, 0.35f, 0.95f, 0.85f };
@@ -4435,10 +4506,6 @@ namespace World
 							areaColor = Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.85f };
 						else if (areaComp.AreaType == 5)
 							areaColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.85f };
-
-						glm::mat4 world(1.0f);
-						if (const auto* xform = registry.try_get<TransformComponent>(handle))
-							world = xform->GetLocalMatrix();
 
 						glm::vec4 clipCorners[8];
 						for (int i = 0; i < 8; ++i)
@@ -4469,6 +4536,8 @@ namespace World
 					{
 						for (const auto& mod : navMesh->GetAreaModifiers())
 					{
+						if (isOccluded(mod.Center))
+							continue;
 						Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.85f };
 						if (mod.AreaType == 2)
 							areaColor = Wui::WuiColor{ 0.70f, 0.35f, 0.95f, 0.85f };
@@ -4511,6 +4580,8 @@ namespace World
 					const Wui::WuiColor linkColor { 0.95f, 0.20f, 0.85f, 0.95f };
 					auto drawSingleLink = [&](const glm::vec3& start, const glm::vec3& end)
 					{
+						if (isOccluded(start) && isOccluded(end))
+							return;
 						constexpr int kArcSegs = 16;
 						const glm::vec3 pStart = start + glm::vec3(0.0f, 0.1f, 0.0f);
 						const glm::vec3 pEnd = end + glm::vec3(0.0f, 0.1f, 0.0f);
