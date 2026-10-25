@@ -83,10 +83,10 @@ namespace World
 		poly.AreaType = 0;
 		poly.Cost = 1.0f;
 		poly.Blocked = false;
-		poly.Clearance = 3.0f;
+		poly.Clearance = 0.0f;
 		poly.BaseAreaType = 0;
 		poly.BaseCost = 1.0f;
-		poly.BaseClearance = 3.0f;
+		poly.BaseClearance = 0.0f;
 
 		glm::vec3 center(0.0f);
 		for (uint32_t idx : vertIndices)
@@ -1018,10 +1018,10 @@ namespace World
 					poly.AreaType = 0;
 					poly.Cost = 1.0f;
 					poly.Blocked = false;
-					poly.Clearance = 3.0f;
+					poly.Clearance = 0.0f;
 					poly.BaseAreaType = 0;
 					poly.BaseCost = 1.0f;
-					poly.BaseClearance = 3.0f;
+					poly.BaseClearance = 0.0f;
 
 					cellPolys[gz * numX + gx].push_back({ pIdx, span.Height });
 				}
@@ -1876,10 +1876,10 @@ namespace World
 			poly.AreaType = 0;
 			poly.Cost = 1.0f;
 			poly.Blocked = false;
-			poly.Clearance = 3.0f;
+			poly.Clearance = 0.0f;
 			poly.BaseAreaType = 0;
 			poly.BaseCost = 1.0f;
-			poly.BaseClearance = 3.0f;
+			poly.BaseClearance = 0.0f;
 
 			glm::vec3 center(0.0f);
 			for (uint32_t idx : poly.VertexIndices)

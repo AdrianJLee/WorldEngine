@@ -835,6 +835,12 @@ void EditorLayer::SetSceneState(SceneState state){
 					window.SetCursorVisible(false);
 					window.SetCursorLocked(true);
 				}
+				else if (state == SceneState::Simulate)
+				{
+					// 模拟模式 (Simulate) 保持编辑器光标自由，严禁隐藏或锁定光标
+					window.SetCursorLocked(false);
+					window.SetCursorVisible(true);
+				}
 				// 编辑器植被数据与播放副本共用同一份 FoliageData：运行期任何笔刷/
 				// 清空/贴地写入都会污染正在运行的画面并落回磁盘。这里统一上锁。
 				FoliageData::SetMutationLocked(true);

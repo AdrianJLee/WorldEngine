@@ -301,7 +301,7 @@ def generate_navmesh():
         poly["center"] = (cx, cy, cz)
         poly["area_type"] = 0
         poly["cost"] = 1.0
-        poly["clearance"] = 3.0
+        poly["clearance"] = 0.0
 
         for mod in area_modifiers:
             mc = mod["center"]

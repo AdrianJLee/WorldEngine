@@ -846,7 +846,7 @@ namespace World
 		}
 
 		// 块4: 运行状态徽章 (viewport.mode)
-		if (rightCursor + modeWidth <= rightIslandRect.X + rightIslandRect.W + 2.0f)
+		if (!play && rightCursor + modeWidth <= rightIslandRect.X + rightIslandRect.W + 2.0f)
 		{
 			const Wui::WuiRect modeRect { rightCursor, rightBtnY, modeWidth, kBtnH };
 			Wui::WuiColor modeFill = modeColor;
@@ -3143,7 +3143,7 @@ namespace World
 			}
 		}
 
-		if (selected.IsValid() && selected.HasComponent<MeshRendererComponent>() &&
+		if (!play && selected.IsValid() && selected.HasComponent<MeshRendererComponent>() &&
 			selected.HasComponent<TransformComponent>() && m_Host.HasRenderedScene())
 		{
 			const Wui::GizmoCamera gizmoCamera = m_Host.GetGizmoCamera();
@@ -3331,7 +3331,7 @@ namespace World
 		int32_t activeChunkY = 0;
 		int32_t activeChunkZ = 0;
 		size_t authoredChunkCount = 0;
-		if (m_ShowWorldPartition)
+		if (!play && m_ShowWorldPartition)
 		{
 			const Level::LevelPartitionSettings partSettings = m_Host.GetLevelPartitionSettings();
 			const float chunkSize = static_cast<float>(partSettings.GridCellSize > 0 ? partSettings.GridCellSize : 64);
@@ -3737,12 +3737,12 @@ namespace World
 		static std::unordered_map<uint32_t, CachedAgentPath> s_AgentPathCache;
 
 // ---- 3D 导航网格 (NavMesh & AI Navigation) 视口可视化 ----
-		const bool anyNavRequested = s_ShowNavMesh ||
+		const bool anyNavRequested = !play && (s_ShowNavMesh ||
 			NavMeshPanel::ShowPolygons ||
 			NavMeshPanel::ShowPaths ||
 			NavMeshPanel::ShowObstacles ||
 			NavMeshPanel::ShowOffMeshLinks ||
-			NavMeshPanel::ShowAreaCosts;
+			NavMeshPanel::ShowAreaCosts);
 
 		if (anyNavRequested)
 		{

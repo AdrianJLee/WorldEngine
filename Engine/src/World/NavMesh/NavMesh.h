@@ -110,10 +110,10 @@ namespace World
 		bool Blocked { false }; // 动态障碍物打洞标记
 		uint8_t AreaType = 0;
 		float Cost = 1.0f;
-		float Clearance = 3.0f; // 净空高度上限（米），天花板/过梁距离地面高度，默认 3.0m
+		float Clearance = 0.0f; // 连续净空高度上限（米），0 = 露天不受限，>0 = 净空限高
 		uint8_t BaseAreaType = 0;
 		float BaseCost = 1.0f;
-		float BaseClearance = 3.0f;
+		float BaseClearance = 0.0f;
 	};
 
 	struct NavMeshPortal

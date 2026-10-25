@@ -987,11 +987,12 @@ void EditorLayer::OnUpdate(Timestep ts){
 		const Camera* renderCamera = viewportCamera.CameraPtr;
 		const glm::mat4 renderCameraTransform = viewportCamera.Transform;
 
-		m_RendererOptions.ShowGrid = m_ShowReferenceGrid;
+		m_RendererOptions.ShowGrid = (m_SceneState != SceneState::Play) && m_ShowReferenceGrid;
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
 		// D5c-4a:骨骼动画步长(编辑态也推进,便于在视口里直接看动画;Play 时同一口径)。
 		m_SceneRenderer->SetDeltaSeconds(m_LastDeltaSeconds);
-		m_SceneRenderer->SubmitScene(*renderCamera, renderCameraTransform, selectedEntity);
+		const Entity outlineEntity = (m_SceneState != SceneState::Play) ? selectedEntity : Entity {};
+		m_SceneRenderer->SubmitScene(*renderCamera, renderCameraTransform, outlineEntity);
 		m_SceneRenderer->EndScene();
 		// 相机可视化:同一帧再给"场景相机"渲一份小图(PiP)。Edit/Simulate 才有意义 ——
 		// Play 时主视口本身就是这台相机。
@@ -1556,7 +1557,7 @@ void EditorLayer::OnEvent(Event& event){
 		WLD_TRACE_FUNCTION();
 
 		const bool isNavigating = (m_Viewport3DDragging != Viewport3DDrag::None);
-		if (m_SceneState != SceneState::Play && (isNavigating || (m_ViewportFocused && m_ViewportHovered)))
+		if (m_SceneState != SceneState::Play && (isNavigating || m_ViewportHovered))
 		{
 			EventDispatcher cameraDispatcher(event);
 			cameraDispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e)
@@ -1577,6 +1578,11 @@ void EditorLayer::OnEvent(Event& event){
 				{
 					m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键 orbit/fly*/ ? Viewport3DDrag::Orbit
 						: (e.GetMouseButton() == 2 /*中键 pan*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
+				}
+
+				if (m_Viewport3DDragging != Viewport3DDrag::None)
+				{
+					m_ViewportFocused = true;
 				}
 
 				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)

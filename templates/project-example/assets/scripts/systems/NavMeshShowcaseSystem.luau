@@ -265,6 +265,14 @@ ecs:AddSystem("NavMeshShowcaseSystem", "Update", function(dt: number)
             -- 初始设置路障状态与首发目标
             SetBarricade(true)
             SetTarget(2)
+
+            -- 示例展示包含交互式 WUI 按钮，通过游戏逻辑显式调出鼠标光标
+            if Input and type(Input.SetCursorVisible) == "function" then
+                Input.SetCursorVisible(true)
+            end
+            if Input and type(Input.SetCursorLocked) == "function" then
+                Input.SetCursorLocked(false)
+            end
         end
     end
 
