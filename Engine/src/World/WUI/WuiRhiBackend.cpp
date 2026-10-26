@@ -38,6 +38,11 @@ namespace World::Wui
 	{
 		constexpr uint32_t MaxQuads = 65536;
 
+		thread_local std::vector<uint32_t> tlsCodepoints;
+		thread_local std::vector<int> tlsOffsets;
+		thread_local std::vector<uint32_t> tlsMeasureCodepoints;
+		thread_local std::vector<int> tlsMeasureOffsets;
+
 		void DecodeUtf8(std::string_view text, std::vector<uint32_t>& codepoints, std::vector<int>& byteOffsets)
 		{
 			codepoints.clear();
@@ -412,8 +417,14 @@ namespace World::Wui
 				delete face.Info;
 				face.Info = nullptr;
 				face.Ttf.clear();
+				face.ScaleFor1Px = 0.0f;
+				face.GlyphIndexLut.clear();
+				face.RawAdvanceLut.clear();
 				continue;
 			}
+			face.ScaleFor1Px = stbtt_ScaleForPixelHeight(face.Info, 1.0f);
+			face.GlyphIndexLut.assign(65536, -2);
+			face.RawAdvanceLut.assign(65536, -1);
 			face.Index = static_cast<uint32_t>(i);
 			// 诊断/门禁开关:把图集压小来**故意**制造"图集满",验证回退与重建路径
 			// (`WLD_WUI_ATLAS=512`)。默认 2048²:桶数 × 面积都留足余量。
@@ -455,6 +466,24 @@ namespace World::Wui
 		return &m_Faces[bold ? 1 : 0];
 	}
 
+	int WuiRhiBackend::FindGlyphIndexFast(FontFace& face, uint32_t cp)
+	{
+		if (!face.Info)
+			return 0;
+		if (cp < 65536)
+		{
+			if (face.GlyphIndexLut.empty())
+				face.GlyphIndexLut.assign(65536, -2);
+			const int32_t cached = face.GlyphIndexLut[cp];
+			if (cached != -2)
+				return cached;
+			const int idx = stbtt_FindGlyphIndex(face.Info, static_cast<int>(cp));
+			face.GlyphIndexLut[cp] = idx;
+			return idx;
+		}
+		return stbtt_FindGlyphIndex(face.Info, static_cast<int>(cp));
+	}
+
 	WuiRhiBackend::FontFace* WuiRhiBackend::FaceForCodepoint(WuiFontFamily family, bool bold, uint32_t codepoint)
 	{
 		FontFace* primary = PrimaryFace(family, bold);
@@ -462,7 +491,7 @@ namespace World::Wui
 		if (codepoint == '\t' || codepoint == '\r' || codepoint == '\n' || codepoint == 0)
 			return primary;
 		// 主面缺该字形时回落 Noto(CJK、以及 JetBrains Mono 未覆盖的码位)。
-		if (primary && primary->Info && stbtt_FindGlyphIndex(primary->Info, static_cast<int>(codepoint)) != 0)
+		if (primary && primary->Info && FindGlyphIndexFast(*primary, codepoint) != 0)
 			return primary;
 		FontFace* fallback = m_Faces.size() > 2 ? &m_Faces[2] : nullptr;
 		if (fallback && fallback->Info)
@@ -514,7 +543,7 @@ namespace World::Wui
 
 		Glyph glyph;
 		glyph.PixelSize = static_cast<float>(quant) / 4.0f;
-		if (stbtt_FindGlyphIndex(face.Info, codepoint) == 0 && face.MissingGlyphLogs < 8)
+		if (FindGlyphIndexFast(face, codepoint) == 0 && face.MissingGlyphLogs < 8)
 		{
 			// 该字面没有这个码点 ⇒ 一定画成空白。**旧版这里是静默的**,于是用户看到"乱码"
 			// 却没有半条日志可查。限流 8 条:足够暴露"选错字面"这类系统性错误,又不会刷屏。
@@ -612,7 +641,23 @@ namespace World::Wui
 		glyph.OffsetX = static_cast<float>(x0);
 		glyph.OffsetY = static_cast<float>(y0);
 		int advance = 0;
-		stbtt_GetCodepointHMetrics(face.Info, codepoint, &advance, nullptr);
+		if (codepoint < 65536)
+		{
+			if (face.RawAdvanceLut.empty())
+				face.RawAdvanceLut.assign(65536, -1);
+			const int32_t cached = face.RawAdvanceLut[codepoint];
+			if (cached >= 0)
+				advance = cached;
+			else
+			{
+				stbtt_GetCodepointHMetrics(face.Info, static_cast<int>(codepoint), &advance, nullptr);
+				face.RawAdvanceLut[codepoint] = advance;
+			}
+		}
+		else
+		{
+			stbtt_GetCodepointHMetrics(face.Info, static_cast<int>(codepoint), &advance, nullptr);
+		}
 		glyph.Advance = advance * scale;
 		if (!placed && width > 0 && height > 0)
 		{
@@ -625,15 +670,32 @@ namespace World::Wui
 
 	float WuiRhiBackend::AdvanceOf(FontFace* face, uint32_t codepoint, float fontSize)
 	{
-		// CRLF 的 '\r' 原样保留在文本里,但不占宽度(渲染与列计算都视为不可见)。
 		if (codepoint == '\r' || codepoint == '\n')
 			return 0.0f;
 		if (!face || !face->Info)
 			return fontSize * (codepoint < 0x80 ? 0.6f : 1.0f);
+
+		const uint32_t queryCp = (codepoint == '\t') ? ' ' : codepoint;
 		int advance = 0;
-		// Tab 策略:文件里已有的 '\t' 原样保留,度量按 4 空格宽度。
-		stbtt_GetCodepointHMetrics(face->Info, codepoint == '\t' ? ' ' : static_cast<int>(codepoint), &advance, nullptr);
-		float width = advance * stbtt_ScaleForPixelHeight(face->Info, fontSize);
+		if (queryCp < 65536)
+		{
+			if (face->RawAdvanceLut.empty())
+				face->RawAdvanceLut.assign(65536, -1);
+			const int32_t cached = face->RawAdvanceLut[queryCp];
+			if (cached >= 0)
+				advance = cached;
+			else
+			{
+				stbtt_GetCodepointHMetrics(face->Info, static_cast<int>(queryCp), &advance, nullptr);
+				face->RawAdvanceLut[queryCp] = advance;
+			}
+		}
+		else
+		{
+			stbtt_GetCodepointHMetrics(face->Info, static_cast<int>(queryCp), &advance, nullptr);
+		}
+
+		float width = advance * (face->ScaleFor1Px * fontSize);
 		if (codepoint == '\t')
 			width *= 4.0f;
 		return width;
@@ -641,15 +703,13 @@ namespace World::Wui
 
 	float WuiRhiBackend::MeasureText(std::string_view text, float fontSize, WuiFontFamily family, bool bold, int byteOffset)
 	{
-		std::vector<uint32_t> codepoints;
-		std::vector<int> offsets;
-		DecodeUtf8(text, codepoints, offsets);
+		DecodeUtf8(text, tlsMeasureCodepoints, tlsMeasureOffsets);
 		float width = 0;
-		for (size_t i = 0; i < codepoints.size(); ++i)
+		for (size_t i = 0; i < tlsMeasureCodepoints.size(); ++i)
 		{
-			if (byteOffset >= 0 && offsets[i] >= byteOffset)
+			if (byteOffset >= 0 && tlsMeasureOffsets[i] >= byteOffset)
 				break;
-			width += AdvanceOf(FaceForCodepoint(family, bold, codepoints[i]), codepoints[i], fontSize);
+			width += AdvanceOf(FaceForCodepoint(family, bold, tlsMeasureCodepoints[i]), tlsMeasureCodepoints[i], fontSize);
 		}
 		return width;
 	}
@@ -869,11 +929,9 @@ namespace World::Wui
 				{ 0.3f, 0.5f, 0.9f, 0.45f });
 		}
 
-		std::vector<uint32_t> codepoints;
-		std::vector<int> offsets;
-		DecodeUtf8(command.Text, codepoints, offsets);
+		DecodeUtf8(command.Text, tlsCodepoints, tlsOffsets);
 		float pen = command.Rect.X;
-		for (uint32_t cp : codepoints)
+		for (uint32_t cp : tlsCodepoints)
 		{
 			FontFace* face = FaceForCodepoint(command.Family, command.Bold, cp);
 			const float advance = AdvanceOf(face, cp, pixelSize) / scale;
@@ -883,7 +941,7 @@ namespace World::Wui
 				// 该字面没有这个码点 ⇒ 画**可见的豆腐块**而不是空白:乱码/缺字必须能被一眼看见,
 				// 静默空白会让"字体缺字 / 数据坏字节 / 上游截碎字符"这三类问题都变成猜谜
 				// (实测:用户报"乱码",日志里一条线索都没有)。日志侧另有 FaceForCodepoint 的限流告警。
-				if (stbtt_FindGlyphIndex(face->Info, cp) == 0)
+				if (FindGlyphIndexFast(*face, cp) == 0)
 				{
 					const float boxW = std::max(2.0f, advance * scale * 0.82f);
 					const float boxH = std::max(2.0f, designSize * 0.62f);
@@ -1095,10 +1153,8 @@ namespace World::Wui
 			for (const WuiDrawCommand& command : list)
 				if (command.Kind == WuiDrawKind::Text)
 				{
-					std::vector<uint32_t> codepoints;
-					std::vector<int> offsets;
-					DecodeUtf8(command.Text, codepoints, offsets);
-					for (uint32_t cp : codepoints)
+					DecodeUtf8(command.Text, tlsCodepoints, tlsOffsets);
+					for (uint32_t cp : tlsCodepoints)
 					{
 						if (cp == '\t' || cp == '\r' || cp == '\n')
 							continue;
@@ -1107,7 +1163,7 @@ namespace World::Wui
 						{
 							// 缺码点时把**整条字符串**打出来:只说"U+XXXX 没字形"没法定位是哪条文案/哪个数据
 							// (实测踩过:两个幽灵码点 U+4BAE/U+6BAE 在仓库里翻遍了都搜不到)。限流 8 条。
-							if (stbtt_FindGlyphIndex(face->Info, cp) == 0 && s_FontMissLogs < 8)
+							if (FindGlyphIndexFast(*face, cp) == 0 && s_FontMissLogs < 8)
 							{
 								++s_FontMissLogs;
 								WLD_CORE_WARN("[wui-font] face#{0} missing U+{1:X}: text=\"{2}\"",

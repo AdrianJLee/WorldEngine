@@ -6,11 +6,11 @@ Entity:
   World::TagComponent:
     Tag: "Goblin Scout (Short: 0.9m)"
   World::TransformComponent:
-    Location: [27, 0, 16]
+    Location: [27.8, 0.0, 14.0]
     Rotation: [0, 0, 0]
     Scale: [0.6, 0.6, 0.6]
   World::NavMeshAgentComponent:
-    Destination: [27, 0, 48]
+    Destination: [27.8, 0.0, 52.0]
     Speed: 4.0
     Acceleration: 8.0
     StoppingDistance: 0.3
@@ -29,4 +29,4 @@ Entity:
     Mesh: ""
     Material: ""
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1

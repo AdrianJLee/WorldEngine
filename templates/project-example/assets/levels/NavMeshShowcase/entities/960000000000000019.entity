@@ -6,18 +6,12 @@ Entity:
   World::TagComponent:
     Tag: "Area: Deep Mud Swamp (3.0x Cost)"
   World::TransformComponent:
-    Location: [20, 0, 44]
+    Location: [30.5, 0.2, 48.0]
     Rotation: [0, 0, 0]
     Scale: [1, 1, 1]
   World::NavMeshAreaModifierComponent:
-    Extents: [6.0, 3.0, 6.0]
+    Extents: [3.2, 0.6, 3.2]
     CostMultiplier: 3.0
     AreaType: 2
-  World::MeshRendererComponent:
-    Primitive: 1
-    MeshIndex: 0
-    Color: [0.65, 0.35, 0.95, 1]
-    Mesh: ""
-    Material: ""
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1

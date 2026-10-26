@@ -77,6 +77,9 @@ namespace World::Wui
 			std::vector<unsigned char> Ttf;
 			stbtt_fontinfo* Info = nullptr;
 			float BaseSize = 16.0f;
+			float ScaleFor1Px = 0.0f;
+			std::vector<int32_t> GlyphIndexLut;   // 65536 项，初值 -2（未查询），0 表示无字形，>0 表示 glyphIndex
+			std::vector<int32_t> RawAdvanceLut;   // 65536 项，初值 -1（未查询），>=0 表示 unscaled advanceWidth
 			// 图集 2048² = 16MB(R8G8B8A8)/ 字面。桶粒度按相对误差定档(见 `BucketStep`)。
 			// **会满,而且满了必须能自愈**:满了标记 `NeedsReset`,下一帧帧首整面重建(见 `Render`)。
 			// 旧版满了会把空白按当前桶写进缓存 ⇒ 之后每个新码点永久空白(用户看到的"乱码")。
@@ -100,6 +103,8 @@ namespace World::Wui
 			// 否则大字号会复用基字号位图被放大成模糊(用户实测"放大字体后有点模糊")。
 			std::unordered_map<uint64_t, Glyph> Glyphs;
 		};
+
+		static int FindGlyphIndexFast(FontFace& face, uint32_t cp);
 
 		void EnsureResources();
 		// 整面重建字形图集:清缓存 + 清位图 + 归零游标(只在帧首调用,见 `Render`)。

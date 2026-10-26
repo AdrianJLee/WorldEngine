@@ -6,9 +6,9 @@ Entity:
   World::TagComponent:
     Tag: "Valley Barricade"
   World::TransformComponent:
-    Location: [32, 1, 32]
+    Location: [32.6, 1.0, 28.0]
     Rotation: [0, 0, 0]
-    Scale: [6, 2, 2]
+    Scale: [4.2, 2.0, 1.4]
   World::NavMeshObstacleComponent:
     Extents: [0.5, 0.5, 0.5]
     CarveNavMesh: 1
@@ -20,4 +20,4 @@ Entity:
     Mesh: ""
     Material: ""
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1

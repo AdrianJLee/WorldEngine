@@ -6,9 +6,9 @@ Entity:
   World::TagComponent:
     Tag: "Viaduct Left Approach Ramp"
   World::TransformComponent:
-    Location: [21.5, 2.0, 32]
-    Rotation: [0, 0, -25]
-    Scale: [4.0, 0.3, 3.2]
+    Location: [25.5, 4.4, 40.0]
+    Rotation: [0, 0, -15]
+    Scale: [3.2, 0.3, 3.0]
   World::MeshRendererComponent:
     Primitive: 0
     MeshIndex: 0
@@ -16,7 +16,7 @@ Entity:
     Mesh: ""
     Material: ""
   World::BoxCollider3DComponent:
-    HalfExtents: [2.0, 0.15, 1.6]
+    HalfExtents: [0.5, 0.5, 0.5]
     Offset: [0, 0, 0]
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1

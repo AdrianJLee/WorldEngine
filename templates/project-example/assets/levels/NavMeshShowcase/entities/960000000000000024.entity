@@ -6,9 +6,9 @@ Entity:
   World::TagComponent:
     Tag: "Tunnel Arch Top Beam"
   World::TransformComponent:
-    Location: [27, 2.0, 32]
+    Location: [27.8, 2.0, 28.0]
     Rotation: [0, 0, 0]
-    Scale: [3.4, 0.6, 2.0]
+    Scale: [3.0, 0.4, 2.0]
   World::MeshRendererComponent:
     Primitive: 0
     MeshIndex: 0
@@ -16,4 +16,4 @@ Entity:
     Mesh: ""
     Material: ""
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1

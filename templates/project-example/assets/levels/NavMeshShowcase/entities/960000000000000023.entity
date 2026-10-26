@@ -6,13 +6,13 @@ Entity:
   World::TagComponent:
     Tag: "Area: Low Ceiling Tunnel (Clearance: 1.3m)"
   World::TransformComponent:
-    Location: [27, 0, 32]
+    Location: [27.8, 0.6, 28.0]
     Rotation: [0, 0, 0]
     Scale: [1, 1, 1]
   World::NavMeshAreaModifierComponent:
-    Extents: [2.0, 2.0, 3.5]
+    Extents: [1.5, 0.8, 2.4]
     CostMultiplier: 0.8
     ClearanceHeight: 1.3
-    AreaType: 1
+    AreaType: 5
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1

@@ -6,11 +6,11 @@ Entity:
   World::TagComponent:
     Tag: "Viaduct Leap of Faith Link"
   World::TransformComponent:
-    Location: [32, 4.1, 33.5]
+    Location: [31.5, 4.2, 41.2]
     Rotation: [0, 0, 0]
-    Scale: [0.8, 0.8, 0.8]
+    Scale: [0.5, 0.5, 0.5]
   World::NavMeshOffMeshLinkComponent:
-    TargetLocation: [32, 0.1, 35.5]
+    TargetLocation: [31.5, 0.1, 44.5]
     Cost: 1.0
     LinkType: 1
     BiDirectional: 0
@@ -21,4 +21,4 @@ Entity:
     Mesh: ""
     Material: ""
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1

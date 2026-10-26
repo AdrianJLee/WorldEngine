@@ -66,17 +66,17 @@ local BEACONS = {
     },
     {
         Name = "Arch Tunnel (低矮石拱洞 净空:1.3m)",
-        Pos = vec3.new(27.0, 0.0, 48.0),
+        Pos = vec3.new(27.8, 0.1, 33.0),
         Description = "低矮石拱通道，过梁净空 1.3m。矮小角色(0.9m)或蹲伏角色(0.9m)可通行；高角色站立(1.8m)阻断",
     },
     {
         Name = "Overhead Viaduct (高架天桥 4m)",
-        Pos = vec3.new(32.0, 4.2, 32.0),
+        Pos = vec3.new(31.0, 4.2, 40.0),
         Description = "位于峡谷上空的实机 3D 立体高架天桥，高 4.0m，横跨东西两侧高台与缓坡",
     },
     {
         Name = "Underbridge Stream (桥底涵洞 0m)",
-        Pos = vec3.new(32.0, 0.1, 36.0),
+        Pos = vec3.new(32.0, 0.1, 45.5),
         Description = "位于高架天桥正下方穿行水道，与上方桥面立体分层并行，互不干扰",
     },
 }
@@ -144,10 +144,10 @@ local function SetBarricade(closed: boolean)
         if tag.Tag == BARRICADE_TAG then
             if barricadeClosed then
                 obs.CarveNavMesh = 1
-                tr.Location = vec3.new(32.0, 1.0, 32.0)
+                tr.Location = vec3.new(32.6, 1.0, 28.0)
             else
                 obs.CarveNavMesh = 0
-                tr.Location = vec3.new(32.0, -2.5, 32.0)
+                tr.Location = vec3.new(32.6, -5.0, 28.0)
             end
         end
     end)
@@ -584,14 +584,14 @@ ui.onDraw(function()
         local qAg = ecs:Query({ "TagComponent", "TransformComponent", "NavMeshAgentComponent" })
         qAg:Each(function(e, tag, tr, agent)
             if tag.Tag == selectedAgentTag or tag.Tag == AGENT_TAG then
-                tr.Location = vec3.new(32.0, 4.1, 33.0)
-                agent.Destination = vec3.new(32.0, 0.1, 35.5)
+                tr.Location = vec3.new(31.5, 4.2, 40.8)
+                agent.Destination = vec3.new(31.5, 0.1, 44.5)
                 agent.ReachedDestination = 0
                 agent.AutoRepath = 1
             end
         end)
         currentTargetIndex = 7
-        lastEventText = "【3D立体多层导航】受控代理已就位高架天桥 (Y=4.1m)，执行信仰之跃单向跳入桥底水道 (Y=0.1m)！"
+        lastEventText = "【3D立体多层导航】受控代理已就位高架天桥 (Y=4.2m)，执行信仰之跃单向跳入桥底水道 (Y=0.1m)！"
         lastEventTimer = 5.0
         print("[NAVMESH-SHOWCASE] >>> 触发 3D 高架天桥信仰之跃 (Leap of Faith -> Y=0.1m)")
     end

@@ -2750,22 +2750,29 @@ namespace World
 						}
 						if (const auto* box3d = registry.try_get<BoxCollider3DComponent>(handle))
 						{
-							// 12 条棱:两个角点索引按位异或一个轴位就得到一条棱。
-							glm::vec3 corners[8];
-							for (int i = 0; i < 8; ++i)
-								corners[i] = box3d->Offset + glm::vec3 {
-									(i & 1) ? box3d->HalfExtents.x : -box3d->HalfExtents.x,
-									(i & 2) ? box3d->HalfExtents.y : -box3d->HalfExtents.y,
-									(i & 4) ? box3d->HalfExtents.z : -box3d->HalfExtents.z };
-							for (int i = 0; i < 8; ++i)
-								for (int axis = 0; axis < 3; ++axis)
-								{
-									const int other = i ^ (1 << axis);
-									if (other > i)
-										PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-											corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
-								}
-							drew = true;
+							if (!isSelected && s_ShowNavMesh)
+							{
+								// 当导航网格开启时，未选中实体的静态 BoxCollider3D 绿色线框隐藏，避免与导航网格重合杂乱
+							}
+							else
+							{
+								// 12 条棱:两个角点索引按位异或一个轴位就得到一条棱。
+								glm::vec3 corners[8];
+								for (int i = 0; i < 8; ++i)
+									corners[i] = box3d->Offset + glm::vec3 {
+										(i & 1) ? box3d->HalfExtents.x : -box3d->HalfExtents.x,
+										(i & 2) ? box3d->HalfExtents.y : -box3d->HalfExtents.y,
+										(i & 4) ? box3d->HalfExtents.z : -box3d->HalfExtents.z };
+								for (int i = 0; i < 8; ++i)
+									for (int axis = 0; axis < 3; ++axis)
+									{
+										const int other = i ^ (1 << axis);
+										if (other > i)
+											PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+												corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+									}
+								drew = true;
+							}
 						}
 						if (const auto* sphere = registry.try_get<SphereCollider3DComponent>(handle))
 						{
@@ -4070,7 +4077,7 @@ namespace World
 					};
 					std::vector<PolyCandidate> candidates;
 					candidates.reserve(2048);
-					std::unordered_set<uint32_t> visitedPolys;
+					std::vector<uint8_t> visitedPolys(polyCount, 0);
 
 					const auto& macroTiles = navMesh->GetMacroTiles();
 					if (!macroTiles.empty() && !macroTiles[0].PolygonIndices.empty())
@@ -4090,8 +4097,10 @@ namespace World
 
 							for (uint32_t pIdx : tile.PolygonIndices)
 							{
-								if (!visitedPolys.insert(pIdx).second) continue;
+								if (pIdx >= polyCount || visitedPolys[pIdx]) continue;
+								visitedPolys[pIdx] = 1;
 								const auto& poly = navMesh->GetPolygon(pIdx);
+								if (poly.Blocked && NavMeshPanel::ShowObstacles) continue;
 								if (poly.VertexIndices.size() < 3) continue;
 
 								const glm::vec3 toPoly = poly.Center - cameraPos;
@@ -4119,8 +4128,10 @@ namespace World
 						for (size_t p = 0; p < polyCount; ++p)
 						{
 							const uint32_t pIdx = static_cast<uint32_t>(p);
-							if (!visitedPolys.insert(pIdx).second) continue;
+							if (visitedPolys[pIdx]) continue;
+							visitedPolys[pIdx] = 1;
 							const auto& poly = navMesh->GetPolygon(pIdx);
+							if (poly.Blocked && NavMeshPanel::ShowObstacles) continue;
 							if (poly.VertexIndices.size() < 3) continue;
 
 							const glm::vec3 toPoly = poly.Center - cameraPos;
@@ -4154,18 +4165,27 @@ namespace World
 					constexpr size_t kMaxLineBudget = 16000;
 					constexpr float kNearW = 0.05f;
 
+					std::vector<glm::vec4> inClips;
+					inClips.reserve(16);
+					std::vector<glm::vec4> clippedClips;
+					clippedClips.reserve(16);
+					std::vector<glm::vec2> screenPts;
+					screenPts.reserve(16);
+
 					for (const auto& cand : candidates)
 					{
 						if (quadCount >= kMaxQuadBudget && lineCount >= kMaxLineBudget)
 							break;
 
 						const auto& poly = navMesh->GetPolygon(cand.Index);
+						if (poly.Blocked && NavMeshPanel::ShowObstacles)
+							continue;
+
 						const size_t vertCount = poly.VertexIndices.size();
 
 						// 1. Sutherland-Hodgman 近裁剪面精确多边形裁剪 (w >= kNearW):
 						// 消除相机仰角拉起时下沿多边形截断消失或暴力 clamp(-5, 5) 造成的畸变拉花
-						std::vector<glm::vec4> inClips;
-						inClips.reserve(vertCount);
+						inClips.clear();
 						for (size_t i = 0; i < vertCount; ++i)
 						{
 							const size_t vIdx = poly.VertexIndices[i];
@@ -4173,8 +4193,7 @@ namespace World
 							inClips.push_back(viewProj * glm::vec4(worldPos, 1.0f));
 						}
 
-						std::vector<glm::vec4> clippedClips;
-						clippedClips.reserve(vertCount + 2);
+						clippedClips.clear();
 						for (size_t i = 0; i < inClips.size(); ++i)
 						{
 							const glm::vec4& p0 = inClips[i];
@@ -4193,8 +4212,7 @@ namespace World
 						if (clippedClips.size() < 3)
 							continue;
 
-						std::vector<glm::vec2> screenPts;
-						screenPts.reserve(clippedClips.size());
+						screenPts.clear();
 						float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
 						for (const auto& clip : clippedClips)
 						{
@@ -4215,7 +4233,7 @@ namespace World
 							maxY < sceneRect.Y || minY > sceneRect.Y + sceneRect.H)
 							continue;
 
-						const bool isCovered = (poly.Clearance > 0.0f);
+						const bool isCovered = (poly.Clearance > 0.0f && poly.Clearance <= 2.6f);
 
 						// 统一采用 UE5 标准导航翠绿色，杜绝将普通山坡强制高亮为刺眼薄荷绿；仅当限高通道 (Clearance > 0) 或特殊 AreaType 时区分
 						Wui::WuiColor polyColor = poly.Blocked
@@ -4284,24 +4302,19 @@ namespace World
 						float borderThickness = 1.4f;
 						float borderAlpha = polyColor.A;
 
-						if (dist < 35.0f)
+						if (dist < 22.0f)
 						{
-							gridStride = 1;
-							innerAlpha = 0.25f;
-							borderThickness = 1.8f;
-						}
-						else if (dist < 85.0f)
-						{
-							gridStride = 3;
-							innerAlpha = 0.15f;
-							borderThickness = 1.4f;
+							gridStride = 2;
+							innerAlpha = 0.18f;
+							borderThickness = 1.6f;
 						}
 						else
 						{
 							gridStride = 0;
 							innerAlpha = 0.0f;
-							borderThickness = 1.1f;
-							borderAlpha = 0.65f;
+							borderThickness = (dist < 70.0f) ? 1.4f : 1.1f;
+							if (dist >= 70.0f)
+								borderAlpha = 0.65f;
 						}
 
 						for (size_t i = 0; i < vertCount; ++i)
@@ -4328,10 +4341,8 @@ namespace World
 									continue;
 							}
 
-							const glm::vec3 w0 = navMesh->GetVertex(v0Idx) + glm::vec3(0.0f, 0.08f, 0.0f);
-							const glm::vec3 w1 = navMesh->GetVertex(v1Idx) + glm::vec3(0.0f, 0.08f, 0.0f);
-							glm::vec4 c0 = viewProj * glm::vec4(w0, 1.0f);
-							glm::vec4 c1 = viewProj * glm::vec4(w1, 1.0f);
+							glm::vec4 c0 = inClips[i];
+							glm::vec4 c1 = inClips[(i + 1) % vertCount];
 
 							if (c0.w < kNearW && c1.w < kNearW)
 								continue;

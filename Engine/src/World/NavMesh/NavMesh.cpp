@@ -871,7 +871,7 @@ namespace World
 		// 3. 3D 体素网格光栅化与离散采样
 		const float rawVoxelSize = (settings.VoxelSize >= 0.1f) ? settings.VoxelSize : 1.0f;
 		// 工业级体素分辨率自适应保护 (对标 UE5 Recast Tile 限制：最大网格分辨率 192x192，超大开放世界自动对齐体素步长，保证毫秒级构建)
-		constexpr uint32_t kMaxGridRes = 48u;
+		constexpr uint32_t kMaxGridRes = 128u;
 		const float maxDim = std::max(bMax.x - bMin.x, bMax.z - bMin.z);
 		const float voxelSize = std::max(rawVoxelSize, maxDim / static_cast<float>(kMaxGridRes));
 		const uint32_t numX = std::clamp(static_cast<uint32_t>(std::ceil((bMax.x - bMin.x) / voxelSize)), 1u, kMaxGridRes);
@@ -923,7 +923,7 @@ namespace World
 							cy = tri.A.y - (norm.x * (cx - tri.A.x) + norm.z * (cz - tri.A.z)) / norm.y;
 						}
 
-						const float layerMergeThreshold = std::max(settings.StepHeight * 2.2f, 1.1f);
+						const float layerMergeThreshold = std::max(settings.AgentHeight, 1.85f);
 						auto& spans = cellSpans[gz * numX + gx];
 						bool merged = false;
 						for (auto& s : spans)
@@ -957,21 +957,10 @@ namespace World
 			{
 				int gx = std::clamp(static_cast<int>(std::floor((pts[k].x - bMin.x) / voxelSize)), 0, static_cast<int>(numX - 1));
 				int gz = std::clamp(static_cast<int>(std::floor((pts[k].z - bMin.z) / voxelSize)), 0, static_cast<int>(numZ - 1));
-				const float layerMergeThreshold = std::max(settings.StepHeight * 2.5f, 1.25f);
 				auto& spans = cellSpans[gz * numX + gx];
-				bool found = false;
-				for (const auto& s : spans)
-				{
-					if (std::abs(s.Height - pts[k].y) <= layerMergeThreshold)
-					{
-						found = true;
-						break;
-					}
-				}
-				if (!found)
-				{
-					spans.push_back({ pts[k].y, norm });
-				}
+				if (!spans.empty())
+					continue;
+				spans.push_back({ pts[k].y, norm });
 			}
 		}
 
@@ -1009,8 +998,102 @@ namespace World
 			return idx;
 		};
 
-		struct CellPoly { uint32_t PolyIdx; float Height; };
-		std::vector<std::vector<CellPoly>> cellPolys(numX * numZ);
+		// 先将多层 Span 按高度升序整理，并预计算每个 Span 的四角共点焊合高度与 AreaModifier 属性
+		struct GridSpanPoly
+		{
+			float Height = 0.0f;
+			float Clearance = 0.0f;
+			float CornerY[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			uint8_t AreaType = 0;
+			float Cost = 1.0f;
+			bool Blocked = false;
+			bool Consumed = false;
+			uint32_t PolyIdx = UINT32_MAX;
+		};
+		std::vector<std::vector<GridSpanPoly>> gridCells(numX * numZ);
+
+		const float maxSlopeClimb = voxelSize * std::tan(glm::radians(std::clamp(settings.MaxClimbSlopeDeg, 0.0f, 80.0f)));
+		const float maxNeighborHeightDiff = settings.StepHeight + maxSlopeClimb + 0.08f;
+
+		// 3.5 工业级代理半径边缘腐蚀与悬崖窄肋清理 (对标 Recast rcErodeWalkableArea):
+		// 当地形格总数较大时，剔除陡崖立面上不足代理通行宽度的单格窄条/锯齿凸起以及悬崖中段孤立碎块
+		if (numX >= 16 && numZ >= 16)
+		{
+			auto hasConnectedSpan = [&](int nx, int nz, float h) -> bool {
+				if (nx < 0 || nx >= static_cast<int>(numX) || nz < 0 || nz >= static_cast<int>(numZ))
+					return false;
+				for (const auto& os : cellSpans[nz * numX + nx])
+				{
+					if (std::abs(os.Height - h) <= maxNeighborHeightDiff)
+						return true;
+				}
+				return false;
+			};
+
+			for (int pass = 0; pass < 2; ++pass)
+			{
+				auto nextSpans = cellSpans;
+				for (int gz = 0; gz < static_cast<int>(numZ); ++gz)
+				{
+					for (int gx = 0; gx < static_cast<int>(numX); ++gx)
+					{
+						auto& spList = nextSpans[gz * numX + gx];
+						if (spList.empty()) continue;
+						spList.erase(std::remove_if(spList.begin(), spList.end(), [&](const Span& sp) {
+							// 仅对地面/山坡采样点做窄肋清理，保留高架桥等水平人造构件 (Normal.y > 0.995)
+							if (sp.Normal.y > 0.985f && sp.Height > 1.8f)
+								return false;
+							const bool hasW = hasConnectedSpan(gx - 1, gz, sp.Height);
+							const bool hasE = hasConnectedSpan(gx + 1, gz, sp.Height);
+							const bool hasS = hasConnectedSpan(gx, gz - 1, sp.Height);
+							const bool hasN = hasConnectedSpan(gx, gz + 1, sp.Height);
+							const int count = (hasW ? 1 : 0) + (hasE ? 1 : 0) + (hasS ? 1 : 0) + (hasN ? 1 : 0);
+							// 若单格在东西向或南北向完全悬空 (如 54° 陡崖上的 1 格宽横肋条)，或四邻不足 2 个，予以腐蚀剔除
+							if (count <= 1)
+								return true;
+							if (sp.Normal.y < 0.95f && (!(hasW || hasE) || !(hasS || hasN)))
+								return true;
+							if (sp.Normal.y < 0.92f && count < 3)
+								return true;
+							return false;
+						}), spList.end());
+					}
+				}
+				cellSpans = std::move(nextSpans);
+			}
+		}
+		const float layerTol = std::max(settings.StepHeight + voxelSize * 1.1f, 1.35f);
+
+		auto getCornerY = [&](int cornerGX, int cornerGZ, float px, float pz, float refHeight) -> float {
+			float sumY = 0.0f;
+			int count = 0;
+			const int nxOffsets[4] = { cornerGX - 1, cornerGX, cornerGX - 1, cornerGX };
+			const int nzOffsets[4] = { cornerGZ - 1, cornerGZ - 1, cornerGZ, cornerGZ };
+			for (int i = 0; i < 4; ++i)
+			{
+				const int nx = nxOffsets[i];
+				const int nz = nzOffsets[i];
+				if (nx >= 0 && nx < static_cast<int>(numX) && nz >= 0 && nz < static_cast<int>(numZ))
+				{
+					const auto& nspans = cellSpans[nz * numX + nx];
+					const float ncx = bMin.x + (static_cast<float>(nx) + 0.5f) * voxelSize;
+					const float ncz = bMin.z + (static_cast<float>(nz) + 0.5f) * voxelSize;
+					for (const auto& os : nspans)
+					{
+						if (std::abs(os.Height - refHeight) <= layerTol)
+						{
+							float y = os.Height;
+							if (std::abs(os.Normal.y) >= 1e-4f)
+								y -= (os.Normal.x * (px - ncx) + os.Normal.z * (pz - ncz)) / os.Normal.y;
+							sumY += y;
+							count++;
+							break;
+						}
+					}
+				}
+			}
+			return (count > 0) ? (sumY / static_cast<float>(count)) : refHeight;
+		};
 
 		for (uint32_t gz = 0; gz < numZ; ++gz)
 		{
@@ -1019,8 +1102,6 @@ namespace World
 				auto& spans = cellSpans[gz * numX + gx];
 				if (spans.empty())
 					continue;
-
-				// 垂直体素列跨度按高度升序排序 (从下层地面到上层大桥/楼层)
 				std::sort(spans.begin(), spans.end(), [](const Span& a, const Span& b) {
 					return a.Height < b.Height;
 				});
@@ -1032,90 +1113,247 @@ namespace World
 				const float cx = (x0 + x1) * 0.5f;
 				const float cz = (z0 + z1) * 0.5f;
 
+				auto& dstList = gridCells[gz * numX + gx];
+				dstList.reserve(spans.size());
 				for (size_t k = 0; k < spans.size(); ++k)
 				{
 					const auto& span = spans[k];
-					float verticalClearance = 0.0f;
+					GridSpanPoly gsp;
+					gsp.Height = span.Height;
 					if (k + 1 < spans.size())
 					{
 						const float diff = spans[k + 1].Height - span.Height;
-						if (diff > settings.StepHeight)
+						if (diff >= std::max(settings.AgentHeight, 1.85f) && diff <= 6.0f)
+							gsp.Clearance = diff;
+					}
+					gsp.CornerY[0] = getCornerY(static_cast<int>(gx), static_cast<int>(gz), x0, z0, span.Height);
+					gsp.CornerY[1] = getCornerY(static_cast<int>(gx + 1), static_cast<int>(gz), x1, z0, span.Height);
+					gsp.CornerY[2] = getCornerY(static_cast<int>(gx + 1), static_cast<int>(gz + 1), x1, z1, span.Height);
+					gsp.CornerY[3] = getCornerY(static_cast<int>(gx), static_cast<int>(gz + 1), x0, z1, span.Height);
+
+					const glm::vec3 cellCenter(cx, (gsp.CornerY[0] + gsp.CornerY[1] + gsp.CornerY[2] + gsp.CornerY[3]) * 0.25f, cz);
+					for (const auto& mod : m_AreaModifiers)
+					{
+						const glm::vec3 bModMin = mod.Center - mod.Extents;
+						const glm::vec3 bModMax = mod.Center + mod.Extents;
+						if (cellCenter.x >= bModMin.x && cellCenter.x <= bModMax.x &&
+							cellCenter.y >= bModMin.y && cellCenter.y <= bModMax.y &&
+							cellCenter.z >= bModMin.z && cellCenter.z <= bModMax.z)
 						{
-							verticalClearance = diff;
+							gsp.AreaType = mod.AreaType;
+							gsp.Cost = mod.CostMultiplier;
+							if (mod.ClearanceHeight > 0.0f)
+							{
+								float effClearance = mod.ClearanceHeight;
+								if (cellCenter.y > 0.05f)
+									effClearance += cellCenter.y;
+								gsp.Clearance = effClearance;
+							}
+							if (mod.AreaType == 4 || mod.CostMultiplier <= 0.0f)
+								gsp.Blocked = true;
 						}
 					}
-
-					auto calcY = [&](float px, float pz) -> float {
-						if (std::abs(span.Normal.y) < 1e-4f) return span.Height;
-						return span.Height - (span.Normal.x * (px - cx) + span.Normal.z * (pz - cz)) / span.Normal.y;
-					};
-
-					const glm::vec3 c0(x0, calcY(x0, z0), z0);
-					const glm::vec3 c1(x1, calcY(x1, z0), z0);
-					const glm::vec3 c2(x1, calcY(x1, z1), z1);
-					const glm::vec3 c3(x0, calcY(x0, z1), z1);
-
-					uint32_t v0 = getOrAddVertex(c0);
-					uint32_t v1 = getOrAddVertex(c1);
-					uint32_t v2 = getOrAddVertex(c2);
-					uint32_t v3 = getOrAddVertex(c3);
-
-					uint32_t pIdx = AddPolygon({ v0, v1, v2, v3 });
-					auto& poly = m_Polygons[pIdx];
-					poly.AreaType = 0;
-					poly.Cost = 1.0f;
-					poly.Blocked = false;
-					poly.Clearance = verticalClearance;
-					poly.BaseAreaType = 0;
-					poly.BaseCost = 1.0f;
-					poly.BaseClearance = verticalClearance;
-
-					cellPolys[gz * numX + gx].push_back({ pIdx, span.Height });
+					dstList.push_back(gsp);
 				}
 			}
 		}
 
-		// 5. 工业级 O(1) 规则体素拓扑直连 (对标 Recast Compact Heightfield Neighbor Connections)
-		// 邻接允许高差 = 台阶高度 StepHeight + 连续斜坡在单个体素跨度上的合法爬升量
-		const float maxSlopeClimb = voxelSize * std::tan(glm::radians(std::clamp(settings.MaxClimbSlopeDeg, 0.0f, 80.0f)));
-		const float maxNeighborHeightDiff = settings.StepHeight + maxSlopeClimb + 0.08f;
+		// 5. 自适应共面贪心网格合并 (Coplanar Greedy Quad Merging):
+		// 复杂弯曲地形 (高差偏离双线性平面 > 3.5cm) 保持 1x1 高精度细网格紧贴地貌；
+		// 平坦或均匀斜坡区域自动合并为最大 6x6 的大四边形，将多边形数量降低 75%~90%，大幅提升 Debug 渲染帧率！
+		constexpr uint32_t kMaxMergeSpan = 6u;
+		constexpr float kCoplanarEps = 0.035f;
+
+		auto findMatchingSpan = [&](uint32_t x, uint32_t z, const GridSpanPoly& ref, float expectedH) -> GridSpanPoly* {
+			auto& list = gridCells[z * numX + x];
+			for (auto& cand : list)
+			{
+				if (cand.Consumed)
+					continue;
+				if (cand.AreaType != ref.AreaType || cand.Blocked != ref.Blocked ||
+					std::abs(cand.Cost - ref.Cost) > 1e-3f || std::abs(cand.Clearance - ref.Clearance) > 0.05f)
+					continue;
+				if (std::abs(cand.Height - expectedH) <= maxNeighborHeightDiff)
+					return &cand;
+			}
+			return nullptr;
+		};
+
+		auto isRectCoplanar = [&](uint32_t gx0, uint32_t gz0, uint32_t wCells, uint32_t hCells, const GridSpanPoly& baseSpan) -> bool {
+			if (wCells == 1 && hCells == 1)
+				return true;
+			const auto* s00 = &baseSpan;
+			const auto* s10 = findMatchingSpan(gx0 + wCells - 1, gz0, baseSpan, baseSpan.Height);
+			const auto* s11 = findMatchingSpan(gx0 + wCells - 1, gz0 + hCells - 1, baseSpan, baseSpan.Height);
+			const auto* s01 = findMatchingSpan(gx0, gz0 + hCells - 1, baseSpan, baseSpan.Height);
+			if (!s10 || !s11 || !s01)
+				return false;
+
+			const float y00 = s00->CornerY[0];
+			const float y10 = s10->CornerY[1];
+			const float y11 = s11->CornerY[2];
+			const float y01 = s01->CornerY[3];
+
+			// 检验矩形内部所有单元格的四角是否全部共面 (误差 <= kCoplanarEps)
+			for (uint32_t dz = 0; dz < hCells; ++dz)
+			{
+				float prevH = baseSpan.Height;
+				for (uint32_t dx = 0; dx < wCells; ++dx)
+				{
+					const GridSpanPoly* cell = (dx == 0 && dz == 0)
+						? &baseSpan
+						: findMatchingSpan(gx0 + dx, gz0 + dz, baseSpan, prevH);
+					if (!cell)
+						return false;
+					prevH = cell->Height;
+
+					const float u0 = static_cast<float>(dx) / static_cast<float>(wCells);
+					const float u1 = static_cast<float>(dx + 1) / static_cast<float>(wCells);
+					const float v0 = static_cast<float>(dz) / static_cast<float>(hCells);
+					const float v1 = static_cast<float>(dz + 1) / static_cast<float>(hCells);
+
+					auto bilerp = [&](float u, float v) -> float {
+						const float top = y00 * (1.0f - u) + y10 * u;
+						const float bot = y01 * (1.0f - u) + y11 * u;
+						return top * (1.0f - v) + bot * v;
+					};
+
+					if (std::abs(cell->CornerY[0] - bilerp(u0, v0)) > kCoplanarEps ||
+						std::abs(cell->CornerY[1] - bilerp(u1, v0)) > kCoplanarEps ||
+						std::abs(cell->CornerY[2] - bilerp(u1, v1)) > kCoplanarEps ||
+						std::abs(cell->CornerY[3] - bilerp(u0, v1)) > kCoplanarEps)
+					{
+						return false;
+					}
+				}
+			}
+			return true;
+		};
+
 		for (uint32_t gz = 0; gz < numZ; ++gz)
 		{
 			for (uint32_t gx = 0; gx < numX; ++gx)
 			{
-				const auto& polysA = cellPolys[gz * numX + gx];
-				if (polysA.empty()) continue;
+				auto& spans = gridCells[gz * numX + gx];
+				for (size_t k = 0; k < spans.size(); ++k)
+				{
+					auto& baseSpan = spans[k];
+					if (baseSpan.Consumed)
+						continue;
 
-				// 1. 东向连通 (+X, Edge 1 对应邻居 West Edge 3)
+					uint32_t bestW = 1u;
+					uint32_t bestH = 1u;
+					while (bestW < kMaxMergeSpan && gx + bestW < numX && isRectCoplanar(gx, gz, bestW + 1, bestH, baseSpan))
+						++bestW;
+					while (bestH < kMaxMergeSpan && gz + bestH < numZ && isRectCoplanar(gx, gz, bestW, bestH + 1, baseSpan))
+						++bestH;
+
+					const auto* s00 = &baseSpan;
+					const auto* s10 = (bestW == 1) ? &baseSpan : findMatchingSpan(gx + bestW - 1, gz, baseSpan, baseSpan.Height);
+					const auto* s11 = (bestW == 1 && bestH == 1) ? &baseSpan : findMatchingSpan(gx + bestW - 1, gz + bestH - 1, baseSpan, baseSpan.Height);
+					const auto* s01 = (bestH == 1) ? &baseSpan : findMatchingSpan(gx, gz + bestH - 1, baseSpan, baseSpan.Height);
+
+					const float x0 = bMin.x + static_cast<float>(gx) * voxelSize;
+					const float x1 = bMin.x + static_cast<float>(gx + bestW) * voxelSize;
+					const float z0 = bMin.z + static_cast<float>(gz) * voxelSize;
+					const float z1 = bMin.z + static_cast<float>(gz + bestH) * voxelSize;
+
+					const glm::vec3 c0(x0, s00->CornerY[0], z0);
+					const glm::vec3 c1(x1, s10->CornerY[1], z0);
+					const glm::vec3 c2(x1, s11->CornerY[2], z1);
+					const glm::vec3 c3(x0, s01->CornerY[3], z1);
+
+					const uint32_t v0 = getOrAddVertex(c0);
+					const uint32_t v1 = getOrAddVertex(c1);
+					const uint32_t v2 = getOrAddVertex(c2);
+					const uint32_t v3 = getOrAddVertex(c3);
+
+					const uint32_t pIdx = AddPolygon({ v0, v1, v2, v3 });
+					auto& poly = m_Polygons[pIdx];
+					poly.AreaType = baseSpan.AreaType;
+					poly.Cost = baseSpan.Cost;
+					poly.Blocked = baseSpan.Blocked;
+					poly.Clearance = baseSpan.Clearance;
+					poly.BaseAreaType = baseSpan.AreaType;
+					poly.BaseCost = baseSpan.Cost;
+					poly.BaseClearance = baseSpan.Clearance;
+
+					for (uint32_t dz = 0; dz < bestH; ++dz)
+					{
+						float prevH = baseSpan.Height;
+						for (uint32_t dx = 0; dx < bestW; ++dx)
+						{
+							GridSpanPoly* cell = (dx == 0 && dz == 0)
+								? &baseSpan
+								: findMatchingSpan(gx + dx, gz + dz, baseSpan, prevH);
+							if (cell)
+							{
+								prevH = cell->Height;
+								cell->Consumed = true;
+								cell->PolyIdx = pIdx;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 6. 建立合并后多边形的四边主邻接 (Neighbors[0..3]) 与扩展多邻接 (Neighbors[4..])
+		auto linkPolysOnEdge = [&](uint32_t pA, int edgeA, uint32_t pB, int edgeB) {
+			if (pA == pB || pA >= m_Polygons.size() || pB >= m_Polygons.size())
+				return;
+			auto& nbrsA = m_Polygons[pA].Neighbors;
+			if (nbrsA[edgeA] == -1)
+				nbrsA[edgeA] = static_cast<int32_t>(pB);
+			else if (nbrsA[edgeA] != static_cast<int32_t>(pB) &&
+			         std::find(nbrsA.begin(), nbrsA.end(), static_cast<int32_t>(pB)) == nbrsA.end())
+				nbrsA.push_back(static_cast<int32_t>(pB));
+
+			auto& nbrsB = m_Polygons[pB].Neighbors;
+			if (nbrsB[edgeB] == -1)
+				nbrsB[edgeB] = static_cast<int32_t>(pA);
+			else if (nbrsB[edgeB] != static_cast<int32_t>(pA) &&
+			         std::find(nbrsB.begin(), nbrsB.end(), static_cast<int32_t>(pA)) == nbrsB.end())
+				nbrsB.push_back(static_cast<int32_t>(pA));
+		};
+
+		for (uint32_t gz = 0; gz < numZ; ++gz)
+		{
+			for (uint32_t gx = 0; gx < numX; ++gx)
+			{
+				const auto& spansA = gridCells[gz * numX + gx];
+				if (spansA.empty()) continue;
+
 				if (gx + 1 < numX)
 				{
-					const auto& polysEast = cellPolys[gz * numX + (gx + 1)];
-					for (const auto& pa : polysA)
+					const auto& spansEast = gridCells[gz * numX + (gx + 1)];
+					for (const auto& pa : spansA)
 					{
-						for (const auto& pb : polysEast)
+						if (pa.PolyIdx == UINT32_MAX) continue;
+						for (const auto& pb : spansEast)
 						{
+							if (pb.PolyIdx == UINT32_MAX) continue;
 							if (std::abs(pa.Height - pb.Height) <= maxNeighborHeightDiff)
 							{
-								m_Polygons[pa.PolyIdx].Neighbors[1] = static_cast<int32_t>(pb.PolyIdx);
-								m_Polygons[pb.PolyIdx].Neighbors[3] = static_cast<int32_t>(pa.PolyIdx);
+								linkPolysOnEdge(pa.PolyIdx, 1, pb.PolyIdx, 3);
 								break;
 							}
 						}
 					}
 				}
 
-				// 2. 北向连通 (+Z, Edge 2 对应邻居 South Edge 0)
 				if (gz + 1 < numZ)
 				{
-					const auto& polysNorth = cellPolys[(gz + 1) * numX + gx];
-					for (const auto& pa : polysA)
+					const auto& spansNorth = gridCells[(gz + 1) * numX + gx];
+					for (const auto& pa : spansA)
 					{
-						for (const auto& pb : polysNorth)
+						if (pa.PolyIdx == UINT32_MAX) continue;
+						for (const auto& pb : spansNorth)
 						{
+							if (pb.PolyIdx == UINT32_MAX) continue;
 							if (std::abs(pa.Height - pb.Height) <= maxNeighborHeightDiff)
 							{
-								m_Polygons[pa.PolyIdx].Neighbors[2] = static_cast<int32_t>(pb.PolyIdx);
-								m_Polygons[pb.PolyIdx].Neighbors[0] = static_cast<int32_t>(pa.PolyIdx);
+								linkPolysOnEdge(pa.PolyIdx, 2, pb.PolyIdx, 0);
 								break;
 							}
 						}
@@ -1385,7 +1623,9 @@ namespace World
 
 					// 工业级自适应地貌步长：当 VoxelSize > cs 时按 NavMesh 体素分辨率对齐步长提取，
 					// 三角形数量减少 4x~64x，彻底根治大世界地貌烘焙卡死
-					const uint32_t step = std::clamp(static_cast<uint32_t>(std::round(std::max(settings.VoxelSize, 1.5f) / std::max(0.1f, cs))), 1u, 16u);
+					const uint32_t step = (w <= 128 && h <= 128)
+						? 1u
+						: std::clamp(static_cast<uint32_t>(std::round(std::max(settings.VoxelSize, cs) / std::max(0.1f, cs))), 1u, 8u);
 
 					for (uint32_t z = 0; z + step <= h - 1; z += step)
 					{
@@ -1414,15 +1654,16 @@ namespace World
 							const glm::vec3 wp01 = glm::vec3(worldMat * glm::vec4(p01, 1.0f));
 
 							// 过滤外围陡峭背景山峰（当为 navmesh_showcase 或超出可游玩盆地高山绝壁时，若 4 采样点皆处于外围高处，跳过提取避免生成悬空碎块）
-							if (w <= 128 && h <= 128 && ((p00.y > 6.2f && p10.y > 6.2f && p11.y > 6.2f && p01.y > 6.2f) || x < 12 || xNext > w - 10))
+							if (w <= 128 && h <= 128 && ((p00.y > 5.6f || p10.y > 5.6f || p11.y > 5.6f || p01.y > 5.6f) || x < 14 || xNext > w - 12))
 								continue;
 
-							// 整格陡坡一致性过滤：若单个地形格内部高差已超过最大爬坡角，整格跳过，彻底消除对角线剖分在悬崖边缘造成的锯齿条带
-							const float cellSpan = std::max(0.1f, static_cast<float>(xNext - x) * cs);
-							const float maxCellRise = cellSpan * std::tan(glm::radians(std::clamp(settings.MaxClimbSlopeDeg - 5.0f, 15.0f, 75.0f)));
-							const float minCellY = std::min(std::min(wp00.y, wp10.y), std::min(wp11.y, wp01.y));
-							const float maxCellY = std::max(std::max(wp00.y, wp10.y), std::max(wp11.y, wp01.y));
-							if (maxCellY - minCellY > maxCellRise)
+							// 整格双三角面 3D 法线一致性过滤：仅当同一地形格的两个剖分三角形均满足最大爬坡角时才整格纳入，既消除对角线半格锯齿，又完整保留 30°~45° 连续斜坡
+							const glm::vec3 n1 = glm::cross(wp11 - wp00, wp10 - wp00);
+							const glm::vec3 n2 = glm::cross(wp01 - wp00, wp11 - wp00);
+							const float l1 = glm::length(n1);
+							const float l2 = glm::length(n2);
+							const float minCellCos = std::cos(glm::radians(std::clamp(settings.MaxClimbSlopeDeg, 0.0f, 89.0f)));
+							if (l1 < 1e-5f || l2 < 1e-5f || (n1.y / l1) < minCellCos || (n2.y / l2) < minCellCos)
 								continue;
 
 							triangles.push_back({ wp00, wp11, wp10 });
@@ -1688,7 +1929,7 @@ namespace World
 
 			const bool overlapX = (pMinX <= bMax.x + 0.15f) && (pMaxX >= bMin.x - 0.15f);
 			const bool overlapZ = (pMinZ <= bMax.z + 0.15f) && (pMaxZ >= bMin.z - 0.15f);
-			const bool overlapY = (poly.Center.y >= bMin.y - 1.5f) && (poly.Center.y <= bMax.y + 1.5f);
+			const bool overlapY = (poly.Center.y >= bMin.y - 0.35f) && (poly.Center.y <= bMax.y + 0.35f);
 
 			if (overlapX && overlapZ && overlapY)
 			{

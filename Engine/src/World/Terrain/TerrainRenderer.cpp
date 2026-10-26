@@ -741,8 +741,6 @@ s_State.MaterialDescriptorSets[slot]->Update(writes);
 		{
 			for (uint32_t cx = 0; cx < numChunksX; ++cx)
 			{
-				const uint32_t chunkKey = (cx << 16) | cz;
-
 				// 计算 Chunk 世界空间中心
 				const float minX = static_cast<float>(cx * (chunkResolution - 1)) * data.GetCellSize();
 				const float minZ = static_cast<float>(cz * (chunkResolution - 1)) * data.GetCellSize();
@@ -760,6 +758,7 @@ s_State.MaterialDescriptorSets[slot]->Update(writes);
 				else if (distanceToCam > lodBaseDist)
 					targetLod = 1;
 
+				const uint32_t chunkKey = (targetLod << 28) | ((cx & 0x3FFFu) << 14) | (cz & 0x3FFFu);
 				auto& chunkMesh = s_State.ChunkCache[chunkKey];
 				if (!chunkMesh.VertexBuffer || !chunkMesh.IndexBuffer || chunkMesh.Lod != targetLod)
 				{
@@ -854,13 +853,17 @@ s_State.MaterialDescriptorSets[slot]->Update(writes);
 		{
 			for (uint32_t cx = 0; cx < numChunksX; ++cx)
 			{
-				const uint32_t chunkKey = (cx << 16) | cz;
-				auto it = s_State.ChunkCache.find(chunkKey);
-				if (it != s_State.ChunkCache.end() && it->second.VertexBuffer && it->second.IndexBuffer)
+				for (uint32_t lod = 0; lod < 4; ++lod)
 				{
-					cmd->BindVertexBuffer(0, it->second.VertexBuffer, 0);
-					cmd->BindIndexBuffer(it->second.IndexBuffer, 0, Rhi::IndexType::UInt32);
-					cmd->DrawIndexed(it->second.IndexCount, 1, 0, 0, 0);
+					const uint32_t chunkKey = (lod << 28) | ((cx & 0x3FFFu) << 14) | (cz & 0x3FFFu);
+					auto it = s_State.ChunkCache.find(chunkKey);
+					if (it != s_State.ChunkCache.end() && it->second.VertexBuffer && it->second.IndexBuffer)
+					{
+						cmd->BindVertexBuffer(0, it->second.VertexBuffer, 0);
+						cmd->BindIndexBuffer(it->second.IndexBuffer, 0, Rhi::IndexType::UInt32);
+						cmd->DrawIndexed(it->second.IndexCount, 1, 0, 0, 0);
+						break;
+					}
 				}
 			}
 		}

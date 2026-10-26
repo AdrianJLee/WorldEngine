@@ -6,9 +6,9 @@ Entity:
   World::TagComponent:
     Tag: "Viaduct Support Pillar"
   World::TransformComponent:
-    Location: [32, 2.0, 32]
+    Location: [28.5, 2.0, 40.0]
     Rotation: [0, 0, 0]
-    Scale: [0.8, 4.0, 0.8]
+    Scale: [0.7, 4.0, 0.7]
   World::MeshRendererComponent:
     Primitive: 0
     MeshIndex: 0
@@ -16,7 +16,7 @@ Entity:
     Mesh: ""
     Material: ""
   World::BoxCollider3DComponent:
-    HalfExtents: [0.4, 2.0, 0.4]
+    HalfExtents: [0.5, 0.5, 0.5]
     Offset: [0, 0, 0]
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1

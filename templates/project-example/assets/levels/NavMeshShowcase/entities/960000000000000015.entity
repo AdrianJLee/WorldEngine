@@ -6,9 +6,9 @@ Entity:
   World::TagComponent:
     Tag: "Valley Gate Pillar Right"
   World::TransformComponent:
-    Location: [35.5, 1.5, 32]
+    Location: [35.1, 1.5, 28.0]
     Rotation: [0, 0, 0]
-    Scale: [0.8, 3, 0.8]
+    Scale: [0.7, 3.0, 0.7]
   World::MeshRendererComponent:
     Primitive: 0
     MeshIndex: 0
@@ -16,4 +16,4 @@ Entity:
     Mesh: ""
     Material: ""
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1

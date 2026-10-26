@@ -6,9 +6,9 @@ Entity:
   World::TagComponent:
     Tag: "Obstacle: Trail Boulder"
   World::TransformComponent:
-    Location: [45, 1.8, 42]
+    Location: [43.0, 1.4, 44.0]
     Rotation: [0, 0, 0]
-    Scale: [3, 2.4, 3]
+    Scale: [2.4, 2.0, 2.4]
   World::NavMeshObstacleComponent:
     Extents: [0.5, 0.5, 0.5]
     CarveNavMesh: 1

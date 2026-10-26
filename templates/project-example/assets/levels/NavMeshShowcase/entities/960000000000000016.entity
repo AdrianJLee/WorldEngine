@@ -6,11 +6,11 @@ Entity:
   World::TagComponent:
     Tag: "Jump Link: Plateau Leap"
   World::TransformComponent:
-    Location: [24, 5.2, 30]
+    Location: [23.2, 5.1, 22.0]
     Rotation: [0, 0, 0]
-    Scale: [0.8, 0.8, 0.8]
+    Scale: [0.5, 0.5, 0.5]
   World::NavMeshOffMeshLinkComponent:
-    TargetLocation: [30, 0.1, 30]
+    TargetLocation: [28.2, 0.1, 22.0]
     Cost: 1.2
     LinkType: 1
     BiDirectional: 1
@@ -21,4 +21,4 @@ Entity:
     Mesh: ""
     Material: ""
   World::LevelEntityComponent:
-    DataLayerMask: 1
+    DataLayerMask: 1
