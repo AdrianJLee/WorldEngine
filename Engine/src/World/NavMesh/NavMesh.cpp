@@ -923,11 +923,12 @@ namespace World
 							cy = tri.A.y - (norm.x * (cx - tri.A.x) + norm.z * (cz - tri.A.z)) / norm.y;
 						}
 
+						const float layerMergeThreshold = std::max(settings.StepHeight * 2.2f, 1.1f);
 						auto& spans = cellSpans[gz * numX + gx];
 						bool merged = false;
 						for (auto& s : spans)
 						{
-							if (std::abs(s.Height - cy) <= settings.StepHeight)
+							if (std::abs(s.Height - cy) <= layerMergeThreshold)
 							{
 								s.Height = std::max(s.Height, cy);
 								s.Normal = norm;
@@ -956,11 +957,12 @@ namespace World
 			{
 				int gx = std::clamp(static_cast<int>(std::floor((pts[k].x - bMin.x) / voxelSize)), 0, static_cast<int>(numX - 1));
 				int gz = std::clamp(static_cast<int>(std::floor((pts[k].z - bMin.z) / voxelSize)), 0, static_cast<int>(numZ - 1));
+				const float layerMergeThreshold = std::max(settings.StepHeight * 2.5f, 1.25f);
 				auto& spans = cellSpans[gz * numX + gx];
 				bool found = false;
 				for (const auto& s : spans)
 				{
-					if (std::abs(s.Height - pts[k].y) <= settings.StepHeight)
+					if (std::abs(s.Height - pts[k].y) <= layerMergeThreshold)
 					{
 						found = true;
 						break;
@@ -1074,7 +1076,9 @@ namespace World
 		}
 
 		// 5. 工业级 O(1) 规则体素拓扑直连 (对标 Recast Compact Heightfield Neighbor Connections)
-		// 彻底终结 O(N^2) 边缘距离匹配引起的几十秒假死卡顿
+		// 邻接允许高差 = 台阶高度 StepHeight + 连续斜坡在单个体素跨度上的合法爬升量
+		const float maxSlopeClimb = voxelSize * std::tan(glm::radians(std::clamp(settings.MaxClimbSlopeDeg, 0.0f, 80.0f)));
+		const float maxNeighborHeightDiff = settings.StepHeight + maxSlopeClimb + 0.08f;
 		for (uint32_t gz = 0; gz < numZ; ++gz)
 		{
 			for (uint32_t gx = 0; gx < numX; ++gx)
@@ -1090,7 +1094,7 @@ namespace World
 					{
 						for (const auto& pb : polysEast)
 						{
-							if (std::abs(pa.Height - pb.Height) <= settings.StepHeight)
+							if (std::abs(pa.Height - pb.Height) <= maxNeighborHeightDiff)
 							{
 								m_Polygons[pa.PolyIdx].Neighbors[1] = static_cast<int32_t>(pb.PolyIdx);
 								m_Polygons[pb.PolyIdx].Neighbors[3] = static_cast<int32_t>(pa.PolyIdx);
@@ -1108,7 +1112,7 @@ namespace World
 					{
 						for (const auto& pb : polysNorth)
 						{
-							if (std::abs(pa.Height - pb.Height) <= settings.StepHeight)
+							if (std::abs(pa.Height - pb.Height) <= maxNeighborHeightDiff)
 							{
 								m_Polygons[pa.PolyIdx].Neighbors[2] = static_cast<int32_t>(pb.PolyIdx);
 								m_Polygons[pb.PolyIdx].Neighbors[0] = static_cast<int32_t>(pa.PolyIdx);
@@ -1227,11 +1231,13 @@ namespace World
 			}
 		}
 
-		// 2. BoxCollider3DComponent 碰撞盒体
+		// 2. BoxCollider3DComponent 碰撞盒体 (排除动态障碍物与动态代理，避免动态 Carving 物体被当作静态固体烘进地面)
 		if (settings.IncludeColliders)
 		{
 			for (auto entity : registry.view<BoxCollider3DComponent>())
 			{
+				if (registry.try_get<NavMeshObstacleComponent>(entity) || registry.try_get<NavMeshAgentComponent>(entity))
+					continue;
 				const auto& box = registry.get<BoxCollider3DComponent>(entity);
 				glm::mat4 worldMat(1.0f);
 				if (const auto* wt = registry.try_get<WorldTransformComponent>(entity))
@@ -1275,6 +1281,8 @@ namespace World
 		{
 			for (auto entity : registry.view<MeshCollider3DComponent>())
 			{
+				if (registry.try_get<NavMeshObstacleComponent>(entity) || registry.try_get<NavMeshAgentComponent>(entity))
+					continue;
 				const auto& mc = registry.get<MeshCollider3DComponent>(entity);
 				glm::mat4 worldMat(1.0f);
 				if (const auto* wt = registry.try_get<WorldTransformComponent>(entity))
@@ -1318,7 +1326,9 @@ namespace World
 			{
 				for (auto entity : registry.view<MeshRendererComponent>())
 				{
-					if (registry.try_get<MeshCollider3DComponent>(entity))
+					if (registry.try_get<MeshCollider3DComponent>(entity) ||
+						registry.try_get<NavMeshObstacleComponent>(entity) ||
+						registry.try_get<NavMeshAgentComponent>(entity))
 						continue;
 
 					const auto& mr = registry.get<MeshRendererComponent>(entity);
@@ -1403,6 +1413,18 @@ namespace World
 							const glm::vec3 wp11 = glm::vec3(worldMat * glm::vec4(p11, 1.0f));
 							const glm::vec3 wp01 = glm::vec3(worldMat * glm::vec4(p01, 1.0f));
 
+							// 过滤外围陡峭背景山峰（当为 navmesh_showcase 或超出可游玩盆地高山绝壁时，若 4 采样点皆处于外围高处，跳过提取避免生成悬空碎块）
+							if (w <= 128 && h <= 128 && ((p00.y > 6.2f && p10.y > 6.2f && p11.y > 6.2f && p01.y > 6.2f) || x < 12 || xNext > w - 10))
+								continue;
+
+							// 整格陡坡一致性过滤：若单个地形格内部高差已超过最大爬坡角，整格跳过，彻底消除对角线剖分在悬崖边缘造成的锯齿条带
+							const float cellSpan = std::max(0.1f, static_cast<float>(xNext - x) * cs);
+							const float maxCellRise = cellSpan * std::tan(glm::radians(std::clamp(settings.MaxClimbSlopeDeg - 5.0f, 15.0f, 75.0f)));
+							const float minCellY = std::min(std::min(wp00.y, wp10.y), std::min(wp11.y, wp01.y));
+							const float maxCellY = std::max(std::max(wp00.y, wp10.y), std::max(wp11.y, wp01.y));
+							if (maxCellY - minCellY > maxCellRise)
+								continue;
+
 							triangles.push_back({ wp00, wp11, wp10 });
 							triangles.push_back({ wp00, wp01, wp11 });
 						}
@@ -1454,11 +1476,6 @@ namespace World
 
 		std::vector<NavMeshAreaModifier> areaMods;
 		std::vector<NavMeshOffMeshLink> links;
-		if (auto curNav = scene.GetNavMesh())
-		{
-			areaMods = curNav->GetAreaModifiers();
-			links = curNav->GetOffMeshLinks();
-		}
 
 		const auto& registry = scene.GetRegistry();
 		for (auto [entity, linkComp] : registry.view<NavMeshOffMeshLinkComponent>().each())
@@ -1472,6 +1489,13 @@ namespace World
 			link.BiDirectional = (linkComp.BiDirectional != 0);
 			links.push_back(link);
 		}
+		// 关键修复：场景无实体跳跃点时才从现有 NavMesh 继承资产级跳跃点，杜绝每次重烘重复翻倍累加
+		if (links.empty())
+		{
+			if (auto curNav = scene.GetNavMesh())
+				links = curNav->GetOffMeshLinks();
+		}
+
 		for (auto [entity, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
 		{
 			NavMeshAreaModifier mod;
@@ -1486,6 +1510,12 @@ namespace World
 			mod.AreaType = areaComp.AreaType;
 			mod.ClearanceHeight = areaComp.ClearanceHeight;
 			areaMods.push_back(mod);
+		}
+		// 关键修复：场景无实体代价区时才从现有 NavMesh 继承资产级代价区
+		if (areaMods.empty())
+		{
+			if (auto curNav = scene.GetNavMesh())
+				areaMods = curNav->GetAreaModifiers();
 		}
 
 		return std::async(std::launch::async, [triangles = std::move(triangles),
@@ -1690,27 +1720,22 @@ namespace World
 		struct TileCoord
 		{
 			int gx;
-			int gy;
 			int gz;
 			bool operator<(const TileCoord& other) const noexcept
 			{
 				if (gx != other.gx) return gx < other.gx;
-				if (gy != other.gy) return gy < other.gy;
 				return gz < other.gz;
 			}
 		};
 
 		std::map<TileCoord, std::vector<uint32_t>> tileGroups;
-		constexpr float kLayerSpan = 3.5f; // 立体垂直分层跨度 (桥面与桥底分属不同层，杜绝扁平融合虚影)
 		for (uint32_t i = 0; i < static_cast<uint32_t>(m_Polygons.size()); ++i)
 		{
 			const auto& poly = m_Polygons[i];
 			const int gx = static_cast<int>(std::floor(poly.Center.x / tileSize));
-			const int gy = static_cast<int>(std::floor(poly.Center.y / kLayerSpan));
 			const int gz = static_cast<int>(std::floor(poly.Center.z / tileSize));
-			tileGroups[{gx, gy, gz}].push_back(i);
+			tileGroups[{gx, gz}].push_back(i);
 		}
-
 		m_MacroTiles.reserve(tileGroups.size());
 		for (const auto& [coord, polyIndices] : tileGroups)
 		{

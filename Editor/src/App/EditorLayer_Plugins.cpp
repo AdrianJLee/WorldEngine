@@ -2,6 +2,7 @@
 #include "World/Audio/AudioSystem.h"
 #include "World/Agent/WeAgentCore.h"
 #include "EditorLayer_Internal.h"
+#include "World/Terrain/TerrainRenderer.h"
 #include "World/Platform/Windows/WindowsIme.h"
 
 #include "World/Renderer/Texture/TextureLibrary.h"
@@ -1755,8 +1756,63 @@ void EditorLayer::DoOpenScene(const std::filesystem::path& path){
 		}
 		// W5-L1:重开/打开成功即用磁盘内容重建外部改动基线(并清掉提示)。
 		RebaselineExternalSceneWatch();
+		const bool wasPendingReopen = m_PendingSceneReopen.Pending;
 		// HOTR-P2-T5:自动重开这一条路径才恢复选择/相机(普通打开/新建/启动场景 = no-op)。
 		RestoreSceneReopenSnapshot();
+
+		// 新场景打开且非热重载重开时，视口自动对焦到关卡核心区域
+		if (!wasPendingReopen && m_ActiveScene)
+		{
+			const entt::registry& registry = m_ActiveScene->GetRegistry();
+			bool focused = false;
+			for (auto [h, tc] : registry.view<TerrainComponent>().each())
+			{
+				glm::vec3 terrainPos { 0.0f };
+				if (const auto* xf = registry.try_get<TransformComponent>(h))
+					terrainPos = xf->Location;
+				auto terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
+				const float widthWorld = terrainData && terrainData->GetWidth() > 1
+					? static_cast<float>(terrainData->GetWidth() - 1) * tc.CellSize
+					: static_cast<float>(std::max(16u, tc.ChunkResolution)) * tc.CellSize;
+				const float heightWorld = terrainData && terrainData->GetHeight() > 1
+					? static_cast<float>(terrainData->GetHeight() - 1) * tc.CellSize
+					: widthWorld;
+				const float extent = std::max(widthWorld, heightWorld);
+				const glm::vec3 targetPos = terrainPos + glm::vec3(widthWorld * 0.5f, std::min(12.0f, extent * 0.15f), heightWorld * 0.5f);
+				const float targetDist = std::clamp(extent * 0.72f, 18.0f, 180.0f);
+				m_Viewport3D = true;
+				m_EditorCamera3D.Set2DMode(false);
+				m_EditorCamera3D.FocusOn(targetPos, targetDist);
+				m_EditorCamera3D.SetYawPitch(0.0f, 26.0f);
+				m_EditorCamera.SetFocalPoint(targetPos);
+				m_EditorCamera.SetOrthographicSize(targetDist * 1.5f);
+				focused = true;
+				break;
+			}
+
+			if (!focused)
+			{
+				Entity primaryCam = m_ActiveScene->GetPrimaryCameraEntity();
+				if (primaryCam.IsValid() && primaryCam.HasComponent<CameraComponent>())
+				{
+					const auto& camComp = primaryCam.GetComponent<CameraComponent>();
+					if (camComp.Camera.m_ProjectionType == CameraSettings::ProjectionType::Perspective)
+					{
+						glm::vec3 camPos { 0.0f, 2.0f, 0.0f };
+						if (primaryCam.HasComponent<TransformComponent>())
+							camPos = primaryCam.GetComponent<TransformComponent>().Location;
+						const glm::vec3 targetPos = glm::vec3(20.0f, 2.0f, 20.0f);
+						const float targetDist = std::clamp(glm::distance(camPos, targetPos), 15.0f, 60.0f);
+						m_Viewport3D = true;
+						m_EditorCamera3D.Set2DMode(false);
+						m_EditorCamera3D.FocusOn(targetPos, targetDist);
+						m_EditorCamera3D.SetYawPitch(0.0f, 26.0f);
+						m_EditorCamera.SetFocalPoint(targetPos);
+						m_EditorCamera.SetOrthographicSize(targetDist * 1.5f);
+					}
+				}
+			}
+		}
 	}
 
 std::size_t EditorLayer::PendingAssetLoads() const{

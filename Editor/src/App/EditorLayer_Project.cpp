@@ -1,4 +1,5 @@
 #include "EditorLayer_Internal.h"
+#include "World/Terrain/TerrainRenderer.h"
 
 namespace World
 {
@@ -1106,10 +1107,17 @@ void EditorLayer::FocusOnSelectedEntity()
 		if (m_SelectedEntity.HasComponent<TerrainComponent>())
 		{
 			const auto& comp = m_SelectedEntity.GetComponent<TerrainComponent>();
-			float extent = 256.0f * comp.CellSize;
-			targetPos += glm::vec3(extent * 0.5f, 15.0f, extent * 0.5f);
-			targetDistance = extent * 0.75f;
-			m_EditorCamera3D.SetYawPitch(215.0f, 28.0f);
+			auto terrainData = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+			const float widthWorld = terrainData && terrainData->GetWidth() > 1
+				? static_cast<float>(terrainData->GetWidth() - 1) * comp.CellSize
+				: static_cast<float>(std::max(16u, comp.ChunkResolution)) * comp.CellSize;
+			const float heightWorld = terrainData && terrainData->GetHeight() > 1
+				? static_cast<float>(terrainData->GetHeight() - 1) * comp.CellSize
+				: widthWorld;
+			const float extent = std::max(widthWorld, heightWorld);
+			targetPos += glm::vec3(widthWorld * 0.5f, std::min(12.0f, extent * 0.15f), heightWorld * 0.5f);
+			targetDistance = std::clamp(extent * 0.72f, 18.0f, 180.0f);
+			m_EditorCamera3D.SetYawPitch(0.0f, 26.0f);
 		}
 		else if (m_SelectedEntity.HasComponent<MeshRendererComponent>())
 			targetDistance = 5.0f;

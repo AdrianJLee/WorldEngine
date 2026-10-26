@@ -44,9 +44,11 @@ namespace World
 			h = Fnv1aUpdate(h, &shape, sizeof(shape));
 		}
 
-		// 2. BoxCollider 碰撞盒
+		// 2. BoxCollider 碰撞盒 (排除动态障碍物与动态代理，避免动态 Carving 误触发全场景静态重烘)
 		for (auto entity : reg.view<TransformComponent, BoxCollider3DComponent>())
 		{
+			if (reg.try_get<NavMeshObstacleComponent>(entity) || reg.try_get<NavMeshAgentComponent>(entity))
+				continue;
 			const auto& tr = reg.get<TransformComponent>(entity);
 			const auto& box = reg.get<BoxCollider3DComponent>(entity);
 			h = Fnv1aUpdate(h, &tr.Location, sizeof(tr.Location));
@@ -56,9 +58,11 @@ namespace World
 			h = Fnv1aUpdate(h, &box.Offset, sizeof(box.Offset));
 		}
 
-		// 3. MeshRenderer 静态网格渲染器
+		// 3. MeshRenderer 静态网格渲染器 (排除动态障碍物与动态代理)
 		for (auto entity : reg.view<TransformComponent, MeshRendererComponent>())
 		{
+			if (reg.try_get<NavMeshObstacleComponent>(entity) || reg.try_get<NavMeshAgentComponent>(entity))
+				continue;
 			const auto& tr = reg.get<TransformComponent>(entity);
 			const auto& mr = reg.get<MeshRendererComponent>(entity);
 			h = Fnv1aUpdate(h, &tr.Location, sizeof(tr.Location));
@@ -174,9 +178,7 @@ namespace World
 					activeScene->SaveNavMesh();
 					host.MarkDocumentDirty();
 
-					ViewportPanel::SetNavMeshVisible(true);
-					ShowPolygons = true;
-
+					// 尊重用户的视口显示设置：严禁在后台自动重烘或异步轮询完成时强制篡改用户的导航网格显示开关
 					char msgBuf[256];
 					if (newNav->GetPolygonCount() > 0)
 					{
