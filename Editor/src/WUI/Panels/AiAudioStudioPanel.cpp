@@ -123,7 +123,7 @@ namespace World
 				Audio::TimbreProfile cloned;
 				if (studio.CloneTimbreFromWav(charId, refSample, cloned))
 				{
-					m_StatusFeedback = "已成功提取 256 维声学特征并持久化至 assets/audio/voices/" + charId + ".wvoice";
+					m_StatusFeedback = "已成功提取 256 维声学特征 (" + charId + ")";
 				}
 			}
 
@@ -232,7 +232,7 @@ namespace World
 				auto result = studio.SynthesizeLine(character, m_DialogueText, emo, m_EmotionIntensity);
 				Audio::AudioCurationPipeline::AutoCurate(result.audio, -16.0f);
 
-				std::filesystem::path genDir = "assets/audio/generated";
+				std::filesystem::path genDir = "projects/assets/audio/generated";
 				std::error_code ec;
 				std::filesystem::create_directories(genDir, ec);
 
@@ -375,7 +375,7 @@ namespace World
 					if (Wui::Button(ctx, Wui::HashId(("cand.bake." + std::to_string(c)).c_str()), btnPick, "✓ 选定入库", theme))
 					{
 						m_SelectedCandidateIndex = static_cast<int>(c);
-						std::filesystem::path genDir = "assets/audio/generated";
+						std::filesystem::path genDir = "projects/assets/audio/generated";
 						std::error_code ec;
 						std::filesystem::create_directories(genDir, ec);
 
@@ -523,8 +523,8 @@ namespace World
 
 			if (Wui::Button(ctx, Wui::HashId("dict.btn.save"), btnSaveDict, "💾 保存至 phoneme_dict.yaml", theme))
 			{
-				Audio::PhonemeDictionary::SaveDictionary("assets/audio/voices/phoneme_dict.yaml");
-				m_DictStatus = "已成功保存词典至 assets/audio/voices/phoneme_dict.yaml";
+				Audio::PhonemeDictionary::SaveDictionary("projects/assets/audio/voices/phoneme_dict.yaml");
+				m_DictStatus = "已成功保存词典至 projects/assets/audio/voices/phoneme_dict.yaml";
 			}
 			cY += 36.0f;
 

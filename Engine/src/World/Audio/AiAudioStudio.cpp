@@ -532,7 +532,7 @@ TtsSynthesisResult LocalEdgeOnnxProvider::SynthesizeDialogue(
 			return res;
 		}
 
-		std::string refPath = timbre.referenceAudioPath.empty() ? ("assets/audio/voices/" + timbre.characterId + "_ref.wav") : timbre.referenceAudioPath;
+		std::string refPath = timbre.referenceAudioPath;
 		if (std::filesystem::exists(refPath))
 		{
 			AudioCooker::LoadWavFile(refPath, res.audio);
@@ -1039,8 +1039,6 @@ TtsSynthesisResult LocalEdgeOnnxProvider::SynthesizeDialogue(
 		m_Provider = m_LocalProvider;
 		m_CurrentMode = AiStudioProviderMode::LocalProcedural;
 
-		PhonemeDictionary::LoadDictionary("assets/audio/voices/phoneme_dict.yaml");
-
 		auto reg = [this](const char* id, const char* name, float pitch, float rate, float warmth, float rough)
 		{
 			TimbreProfile t;
@@ -1050,20 +1048,11 @@ TtsSynthesisResult LocalEdgeOnnxProvider::SynthesizeDialogue(
 			t.rateScale = rate;
 			t.warmth = warmth;
 			t.roughness = rough;
-			t.referenceAudioPath = "assets/audio/voices/" + std::string(id) + "_ref.wav";
-			AudioBuffer refBuf;
-			if (AudioCooker::LoadWavFile(t.referenceAudioPath, refBuf))
-			{
-				TimbreProfile::ExtractAcousticFeatures(refBuf, t.latentEmbedding);
-			}
-			else
-			{
-				t.latentEmbedding.resize(256, 0.05f);
-			}
+			t.latentEmbedding.resize(256, 0.05f);
 			RegisterTimbre(t);
-			t.SaveToFile("assets/audio/voices/" + std::string(id) + ".wvoice");
 		};
 
+		reg("narrator", "Deep_Old_Male", -3.0f, 0.95f, 0.8f, 0.3f);
 		reg("Old_King", "Deep_Old_Male", -3.5f, 0.9f, 0.8f, 0.4f);
 		reg("Young_Knight", "Confident_Young_Male", 0.0f, 1.05f, 0.6f, 0.1f);
 		reg("Elf_Ranger", "Crisp_Ethereal_Female", 3.0f, 1.15f, 0.4f, 0.05f);
@@ -1172,7 +1161,6 @@ TtsSynthesisResult LocalEdgeOnnxProvider::SynthesizeDialogue(
 		bool ok = m_Provider->ExtractCloneEmbedding(wav, outProfile.latentEmbedding);
 		if (ok)
 		{
-			outProfile.SaveToFile("assets/audio/voices/" + characterId + ".wvoice");
 			RegisterTimbre(outProfile);
 		}
 		return ok;

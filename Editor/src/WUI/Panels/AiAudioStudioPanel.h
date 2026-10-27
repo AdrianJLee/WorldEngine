@@ -38,7 +38,7 @@ namespace World
 		std::string m_SfxStatus;
 
 		// Tab 2: BGM Loops & Stems (6.2.2)
-		std::string m_BgmAssetPath { "assets/audio/music/battle_theme.waudio" };
+		std::string m_BgmAssetPath { "projects/assets/audio/music/battle_theme.waudio" };
 		float m_BgmLoopStartSec { 2.0f };
 		float m_BgmLoopEndSec { 28.5f };
 		float m_BgmStemAmbientVol { 0.8f };

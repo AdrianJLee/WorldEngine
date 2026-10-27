@@ -1,5 +1,6 @@
 #include "WUI/Panels/NavMeshPanel.h"
 #include "WUI/Panels/ViewportPanel.h"
+#include "Core/EditorPreferences.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/Terrain/TerrainRenderer.h"
@@ -160,6 +161,13 @@ namespace World
 		float curY = rect.Y + pad;
 
 		Ref<Scene> activeScene = host.GetActiveScene();
+
+		static bool s_AutoBakePrefsLoaded = false;
+		if (!s_AutoBakePrefsLoaded)
+		{
+			AutoDynamicBake = Editor::EditorPreferences::Get().Data().NavMeshAutoDynamicBake;
+			s_AutoBakePrefsLoaded = true;
+		}
 
 		// 轮询后台异步多线程烘焙状态 (UI 主线程 60+ FPS 流畅不卡顿)
 		if (m_AsyncBake.IsRunning && m_AsyncBake.Future.valid())
@@ -371,8 +379,13 @@ namespace World
 		innerY += 24.0f;
 
 		// 0. 后台自动实时动态重烘
+		const bool prevAutoBake = AutoDynamicBake;
 		Wui::Checkbox(ctx, Wui::HashId("navmesh.bake.auto_dynamic"), { startX + 8.0f, innerY, contentW - 16.0f, 22.0f },
 			"后台自动实时动态重烘 (Auto Dynamic Re-bake)", AutoDynamicBake, theme);
+		if (AutoDynamicBake != prevAutoBake)
+		{
+			Editor::EditorPreferences::Get().SetNavMeshAutoDynamicBake(AutoDynamicBake);
+		}
 		Wui::Tooltip(ctx, { startX + 8.0f, innerY, contentW - 16.0f, 22.0f },
 			"开启后，在场景中添加、删除或移动静态几何体（Whitebox/Collider/Mesh）时，后台独立工作线程自动异步重烘，主线程 60+ FPS 丝滑零掉帧，完成后自动热替换导航网格。");
 		innerY += 26.0f;

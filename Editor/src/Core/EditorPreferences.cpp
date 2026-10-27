@@ -170,6 +170,8 @@ namespace World::Editor
 						m_Data.ViewportLightRangesAll = value.Bool;
 					else if (key == "viewport_collider_outlines_all" && isBool)
 						m_Data.ViewportColliderOutlinesAll = value.Bool;
+					else if (key == "navmesh_auto_dynamic_bake" && isBool)
+						m_Data.NavMeshAutoDynamicBake = value.Bool;
 				}
 		}
 		// 开发/自动化覆盖:环境变量优先于**偏好文件**(与渲染设置的"环境变量 > 清单"同口径);
@@ -264,7 +266,8 @@ namespace World::Editor
 			<< "  \"diag_asset_trace\": " << FormatBool(m_Data.DiagAssetTrace) << ",\n"
 			<< "  \"diag_vulkan_validation\": " << FormatBool(m_Data.DiagVulkanValidation) << ",\n"
 			<< "  \"viewport_light_ranges_all\": " << FormatBool(m_Data.ViewportLightRangesAll) << ",\n"
-			<< "  \"viewport_collider_outlines_all\": " << FormatBool(m_Data.ViewportColliderOutlinesAll) << "\n"
+			<< "  \"viewport_collider_outlines_all\": " << FormatBool(m_Data.ViewportColliderOutlinesAll) << ",\n"
+			<< "  \"navmesh_auto_dynamic_bake\": " << FormatBool(m_Data.NavMeshAutoDynamicBake) << "\n"
 			<< "}\n";
 		return static_cast<bool>(file);
 	}
@@ -421,6 +424,13 @@ namespace World::Editor
 	{
 		if (m_Data.ViewportColliderOutlinesAll == enabled) return;
 		m_Data.ViewportColliderOutlinesAll = enabled;
+		Commit();
+	}
+
+	void EditorPreferences::SetNavMeshAutoDynamicBake(bool enabled)
+	{
+		if (m_Data.NavMeshAutoDynamicBake == enabled) return;
+		m_Data.NavMeshAutoDynamicBake = enabled;
 		Commit();
 	}
 

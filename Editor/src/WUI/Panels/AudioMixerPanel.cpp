@@ -283,11 +283,7 @@ namespace World
 		// 2.5 Scan disk for .wmixer and .wvoice files
 		const char* metaDirs[] = {
 			"projects/assets/audio",
-			"projects/assets/audio/voices",
-			"assets/audio",
-			"assets/audio/voices",
-			"templates/project-example/assets/audio",
-			"templates/project-example/assets/audio/voices"
+			"templates/project-example/assets/audio"
 		};
 		for (const char* dir : metaDirs)
 		{
@@ -1293,7 +1289,7 @@ namespace World
 			auto result = studio.SynthesizeLine(m_SelectedTimbre.characterId, testLine, Audio::VoiceEmotion::Neutral, 0.7f);
 			if (result.success)
 			{
-				std::string previewPath = "assets/audio/voices/preview_" + m_SelectedTimbre.characterId + ".waudio";
+				std::string previewPath = "virtual/preview_" + m_SelectedTimbre.characterId + ".waudio";
 				audio.RegisterAudioBuffer(previewPath, std::make_shared<Audio::AudioBuffer>(result.audio));
 				Audio::SoundEvent previewEvt("preview_dialogue", Audio::kBusVoice);
 				previewEvt.GetRootContainer()->variations.push_back({ previewPath, 1.0f });

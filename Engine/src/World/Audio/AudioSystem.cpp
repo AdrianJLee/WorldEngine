@@ -131,22 +131,7 @@ namespace World::Audio
 			m_BusMixBuffers[bid].second.assign(allocFrames, 0.0f);
 		}
 
-		std::string voicePath = "projects/assets/audio/voices/narrator.wvoice";
-		if (!std::filesystem::exists(voicePath)) voicePath = "templates/project-example/assets/audio/voices/narrator.wvoice";
-		if (std::filesystem::exists(voicePath))
-		{
-			std::ifstream in(voicePath);
-			if (in.is_open())
-			{
-				std::stringstream ss;
-				ss << in.rdbuf();
-				TimbreProfile tp;
-				if (tp.DeserializeYaml(ss.str()))
-				{
-					m_AiStudio.RegisterTimbre(tp);
-				}
-			}
-		}
+
 
 		m_Backend->Start();
 		m_Initialized = true;

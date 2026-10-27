@@ -63,6 +63,7 @@ namespace World::Editor
 		// 如果这个选项没开应该只画选中」)。false = 只画选中实体,true = 画全场景。
 		bool ViewportLightRangesAll = false;
 		bool ViewportColliderOutlinesAll = false;
+		bool NavMeshAutoDynamicBake = false;
 	};
 
 	class EditorPreferences
@@ -96,6 +97,7 @@ namespace World::Editor
 		// P4-U6:视口"范围可视化"开关(立即生效,只影响绘制)。
 		void SetViewportLightRangesAll(bool enabled);
 		void SetViewportColliderOutlinesAll(bool enabled);
+		void SetNavMeshAutoDynamicBake(bool enabled);
 
 		// 把当前值应用到 WUI(主题/字号/语言/术语对照)与日志级别。
 		void Apply() const;
