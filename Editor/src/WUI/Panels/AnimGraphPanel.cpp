@@ -439,6 +439,9 @@ namespace World
 			const std::filesystem::path fromAsset = Paths::AssetRoot() / logical;
 			if (std::filesystem::exists(fromAsset, ec))
 				return fromAsset;
+			const std::filesystem::path fromEngine = Paths::EngineContentRoot() / logical;
+			if (std::filesystem::exists(fromEngine, ec))
+				return fromEngine;
 			const std::filesystem::path fromProject = Paths::ProjectDir() / logical;
 			if (std::filesystem::exists(fromProject, ec))
 				return fromProject;
@@ -472,8 +475,8 @@ namespace World
 
 		m_Graph.Clear();
 		m_Graph.SetGraphName(AGTr("graph.default_name", "New Animation Graph"));
-		m_Graph.SetModelHint("engine/models/characters/mannequin.wmodel");
-		m_TargetModelPath = m_Graph.GetModelHint();
+		m_TargetModelPath = "models/characters/mannequin.wmodel";
+		m_Graph.SetModelHint(m_TargetModelPath);
 		auto defineParameter = [this](const char* name, AnimGraph::AnimParameterType type, float defaultValue,
 			float minValue, float maxValue, const char* unit)
 		{
@@ -1094,7 +1097,7 @@ namespace World
 
 	void AnimGraphPanel::RefreshModel(PanelHost& host)
 	{
-		const std::string path = ModelLogicalPathForSelected(host);
+		std::string path = !m_TargetModelPath.empty() ? m_TargetModelPath : ModelLogicalPathForSelected(host);
 		if (path == m_ModelKey)
 			return;
 		m_ModelKey = path;

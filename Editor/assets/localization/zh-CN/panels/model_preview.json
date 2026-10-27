@@ -158,5 +158,12 @@
   "panel.model.overlay.cam_persp": "透视",
   "panel.model.overlay.cam_top": "顶视 (KP7)",
   "panel.model.overlay.cam_front": "前视 (KP1)",
-  "panel.model.overlay.cam_side": "侧视 (KP3)"
+  "panel.model.overlay.cam_side": "侧视 (KP3)",
+  "panel.model.anim.key_selected": "打关键帧 (K)",
+  "panel.model.anim.key_selected_tip": "在当前时间轴位置为所选骨骼记录关键帧 (快捷键 K)",
+  "panel.model.anim.key_all": "全关键帧 (Shift+K)",
+  "panel.model.anim.key_all_tip": "在当前时间轴位置为所有骨骼记录关键帧 (快捷键 Shift+K)",
+  "panel.model.anim.key_bone_btn": "记录关键帧 (K)",
+  "panel.model.clips.open_graph": "在动画图中打开",
+  "panel.model.clips.open_graph_tip": "切换至动画图编辑器"
 }

@@ -912,7 +912,7 @@ namespace World
 		}
 
 		// 动画播放推进 (面板独立时钟, 首帧 0, clamp [0, 0.25])
-		const bool showAnimControls = m_DataValid && HasSkinnedMesh() && !m_Data.Animations.empty();
+		const bool showAnimControls = m_DataValid && (HasSkinnedMesh() || !m_Data.Animations.empty());
 		float animDelta = 0.0f;
 		if (m_AnimClockValid)
 			animDelta = std::clamp(static_cast<float>(now - m_LastAnimClock), 0.0f, 0.25f);
@@ -1008,6 +1008,14 @@ namespace World
 
 			if (ctx.IsDoubleClicked(previewRect) || (hovered && ctx.WasKeyPressed(KeyCodes::F)))
 				FramePreview();
+
+			if (!ctx.IsTextInputActive() && ctx.WasKeyPressed(KeyCodes::K))
+			{
+				if (ctx.Input().Shift)
+					RecordKeyframeForAllNodes(m_AnimTime);
+				else if (m_SelectedNode >= 0)
+					RecordKeyframeForNode(static_cast<uint32_t>(m_SelectedNode), m_AnimTime);
+			}
 
 			if (hovered)
 				ctx.SetCursor(m_Orbiting ? Wui::WuiCursor::Hand : Wui::WuiCursor::Arrow);
@@ -1334,9 +1342,18 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			return true;
 		};
 
+		struct ScreenJoint
+		{
+			glm::vec2 Pos { 0.0f };
+			bool Valid = false;
+		};
+		std::vector<ScreenJoint> sc;
+		bool clickingOverlayUi = false;
+
 		// 3D 骨骼层级线框与关节点可视化 (m_ShowBones)
 		if (m_ShowBones && m_DataValid && !m_Data.Nodes.empty())
 		{
+			sc.resize(m_Data.Nodes.size());
 			const size_t nodeCount = m_Data.Nodes.size();
 			std::vector<glm::vec3> translations(nodeCount);
 			std::vector<glm::quat> rotations(nodeCount);
@@ -1418,6 +1435,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 				glm::vec2 screenPos;
 				if (!project(pos, screenPos))
 					continue;
+				sc[i] = { screenPos, true };
 
 				const int32_t p = m_Data.Nodes[i].Parent;
 				if (p >= 0 && static_cast<size_t>(p) < nodeCount)
@@ -1467,6 +1485,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		{
 			const float expandW = 60.0f;
 			const Wui::WuiRect miniPill { previewRect.X + 8.0f, previewRect.Y + 8.0f, expandW, btnH + 6.0f };
+			if (ctx.IsHovered(miniPill)) clickingOverlayUi = true;
 			Wui::PanelBackground(ctx, miniPill, Alpha(theme.PanelBg, 0.88f), 4.0f);
 			Wui::HighlightOutline(ctx, miniPill, Alpha(theme.BorderStrong, 0.70f), 4.0f, 1.0f);
 
@@ -1485,6 +1504,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			const float toolW = dispBtnW + camBtnW + frameBtnW + colBtnW + gap * 5.0f;
 			const float toolH = btnH + 6.0f;
 			const Wui::WuiRect pill { previewRect.X + 8.0f, previewRect.Y + 8.0f, toolW, toolH };
+			if (ctx.IsHovered(pill)) clickingOverlayUi = true;
 			Wui::PanelBackground(ctx, pill, Alpha(theme.PanelBg, 0.88f), 4.0f);
 			Wui::HighlightOutline(ctx, pill, Alpha(theme.BorderStrong, 0.70f), 4.0f, 1.0f);
 
@@ -1611,6 +1631,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			statsPill += "  " + FormatNumber(m_Mesh->GetVertexCount()) + " v";
 		const float pillWidth = ctx.MeasureTextWidth(statsPill, theme.FontSizeCaption) + 12.0f;
 		const Wui::WuiRect infoBadge { previewRect.X + 8.0f, previewRect.Y + previewRect.H - 22.0f, pillWidth, 18.0f };
+		if (ctx.IsHovered(infoBadge)) clickingOverlayUi = true;
 		Wui::PanelBackground(ctx, infoBadge, Alpha(theme.PanelBg, 0.75f), 3.0f);
 		Wui::Label(ctx, { infoBadge.X + 6.0f, infoBadge.Y + 3.0f }, statsPill, theme.TextDisabled, theme.FontSizeCaption);
 
@@ -1625,6 +1646,40 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 				Wui::Tr("panel.model.axis", "Preview axes"),
 				ViewChrome::AxisReadout(glm::degrees(m_OrbitYaw), glm::degrees(m_OrbitPitch), false),
 				Wui::Tr("panel.model.axis.tooltip", "World axes: X red, Y green, Z blue."));
+			if (ctx.IsHovered(axisRect)) clickingOverlayUi = true;
+		}
+
+		// 3D 视口关节点击选中 (Viewport Click to Select)
+		if (m_ShowBones && m_DataValid && !sc.empty() && ctx.Input().MouseClicked[0]
+			&& ctx.IsHovered(previewRect) && !clickingOverlayUi)
+		{
+			const glm::vec2 mousePos = ctx.Input().MousePos;
+			float minDistance = 14.0f;
+			int closestIndex = -1;
+			for (size_t i = 0; i < sc.size(); ++i)
+			{
+				if (!sc[i].Valid)
+					continue;
+				const float dist = glm::distance(mousePos, sc[i].Pos);
+				if (dist <= minDistance)
+				{
+					minDistance = dist;
+					closestIndex = static_cast<int>(i);
+				}
+			}
+			if (closestIndex >= 0)
+			{
+				m_SelectedNode = closestIndex;
+				if (static_cast<size_t>(closestIndex) < m_Data.Nodes.size())
+				{
+					const auto& node = m_Data.Nodes[static_cast<size_t>(closestIndex)];
+					m_SelectedNodeNameBuffer = node.Name;
+					m_SelectedNodeParent = node.Parent;
+					m_SelectedNodeTranslation = node.Translation;
+					m_SelectedNodeRotationEuler = glm::degrees(glm::eulerAngles(node.Rotation));
+					m_SelectedNodeScale = node.Scale;
+				}
+			}
 		}
 	}
 
@@ -1765,6 +1820,30 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			m_TimelineShowFrames = !m_TimelineShowFrames;
 		bx += timeTextW + 16.0f;
 
+		// 打关键帧按钮组: [Key Bone (K)] [Key All (Shift+K)]
+		const float keySelW = 90.0f;
+		const float keyAllW = 105.0f;
+		const bool canKeySel = m_SelectedNode >= 0 && static_cast<size_t>(m_SelectedNode) < m_Data.Nodes.size();
+
+		const Wui::WuiRect keySelRect { bx, curY, keySelW, btnH };
+		if (Wui::Button(ctx, Wui::HashId("model.anim.key_selected"), keySelRect,
+			Wui::Tr("panel.model.anim.key_selected", "Key Bone (K)"), theme))
+		{
+			if (canKeySel)
+				RecordKeyframeForNode(static_cast<uint32_t>(m_SelectedNode), m_AnimTime);
+		}
+		Wui::Tooltip(ctx, keySelRect, Wui::Tr("panel.model.anim.key_selected_tip", "Record keyframe for selected bone at current time (K)"));
+		bx += keySelW + 4.0f;
+
+		const Wui::WuiRect keyAllRect { bx, curY, keyAllW, btnH };
+		if (Wui::Button(ctx, Wui::HashId("model.anim.key_all"), keyAllRect,
+			Wui::Tr("panel.model.anim.key_all", "Key All (Shift+K)"), theme))
+		{
+			RecordKeyframeForAllNodes(m_AnimTime);
+		}
+		Wui::Tooltip(ctx, keyAllRect, Wui::Tr("panel.model.anim.key_all_tip", "Record keyframe for all skeleton nodes at current time (Shift+K)"));
+		bx += keyAllW + 12.0f;
+
 		// 播放速度调节 (右侧)
 		const float speedW = 72.0f;
 		const float speedX = x + width - trackPad - speedW;
@@ -1798,28 +1877,30 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		const float contentH = std::max(20.0f, rect.H - tabH - 6.0f);
 		const Wui::WuiRect contentRect { rect.X, contentY, rect.W, contentH };
 
-		float estimatedH = 400.0f;
-		if (m_ActiveTab == 0) estimatedH = 340.0f;
-		else if (m_ActiveTab == 1) estimatedH = 80.0f + static_cast<float>(m_Mesh ? m_Mesh->GetMaterialSlots().size() : 0) * 110.0f;
-		else if (m_ActiveTab == 2) estimatedH = 60.0f + static_cast<float>(m_Mesh ? m_Mesh->GetNodes().size() : 0) * 22.0f;
-		else if (m_ActiveTab == 3) estimatedH = 360.0f;
-		else if (m_ActiveTab == 4) estimatedH = 60.0f + static_cast<float>(m_DataValid ? m_Data.Animations.size() : 0) * 72.0f;
+		const float scrollContentH = m_TabContentHeight[m_ActiveTab];
 
-		Wui::BeginScrollArea(ctx, contentRect, estimatedH, m_TabScroll[m_ActiveTab], theme);
+		Wui::BeginScrollArea(ctx, contentRect, scrollContentH, m_TabScroll[m_ActiveTab], theme);
 
-		const Wui::WuiRect scrollSlice { rect.X, contentY, rect.W - 12.0f, contentH };
-		if (m_ActiveTab == 0)
-			DrawTabOverview(ctx, scrollSlice, host, theme);
-		else if (m_ActiveTab == 1)
-			DrawTabMaterials(ctx, scrollSlice, host, theme);
-		else if (m_ActiveTab == 2)
-			DrawTabSkeleton(ctx, scrollSlice, host, theme);
-		else if (m_ActiveTab == 3)
-			DrawTabImportSettings(ctx, scrollSlice, theme);
-		else if (m_ActiveTab == 4)
-			DrawTabClips(ctx, scrollSlice, host, theme);
+		const Wui::WuiRect scrollSlice { rect.X, contentY - m_TabScroll[m_ActiveTab], rect.W - 14.0f, contentH };
+		float actualH = 0.0f;
+		if (m_ActiveTab == 0) actualH = DrawTabOverview(ctx, scrollSlice, host, theme);
+		else if (m_ActiveTab == 1) actualH = DrawTabMaterials(ctx, scrollSlice, host, theme);
+		else if (m_ActiveTab == 2) actualH = DrawTabSkeleton(ctx, scrollSlice, host, theme);
+		else if (m_ActiveTab == 3) actualH = DrawTabImportSettings(ctx, scrollSlice, theme);
+		else if (m_ActiveTab == 4) actualH = DrawTabClips(ctx, scrollSlice, host, theme);
 
 		Wui::EndScrollArea(ctx);
+
+		m_TabContentHeight[m_ActiveTab] = actualH;
+
+		// 显式绘制滚动条
+		if (actualH > contentH + 1.0f)
+		{
+			const float barW = 6.0f;
+			const Wui::WuiRect barRect { rect.X + rect.W - barW - 2.0f, contentY, barW, contentH };
+			Wui::ScrollBar(ctx, Wui::HashId(("model.tab.scrollbar." + std::to_string(m_ActiveTab)).c_str()),
+				barRect, actualH, contentH, m_TabScroll[m_ActiveTab], theme, false);
+		}
 	}
 	float ModelPreviewPanel::DrawTabOverview(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
 		const Wui::WuiTheme& theme)
@@ -2177,11 +2258,13 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 		Wui::Label(ctx, { x + 10.0f, cy }, headerTitle, theme.Accent, theme.FontSizeSmall);
 
 		// Action buttons on top-right: Reset Bind / Save Hierarchy
-		const float saveBtnW = 120.0f;
-		const float resetBtnW = 100.0f;
+		// Action buttons on top-right: Key Bone / Reset Bind / Save Hierarchy
+		const float saveBtnW = 95.0f;
+		const float resetBtnW = 85.0f;
+		const float keyBtnW = 90.0f;
 		const Wui::WuiRect saveBtnRect { x + width - 10.0f - saveBtnW, cy - 2.0f, saveBtnW, 20.0f };
 		if (Wui::Button(ctx, Wui::HashId("model.node.save"), saveBtnRect,
-			Wui::Tr("panel.model.skeleton.save_hierarchy", "Save to Asset"), theme))
+			Wui::Tr("panel.model.skeleton.save_hierarchy", "Save Asset"), theme))
 		{
 			std::string err;
 			if (Asset::WModelIO::WriteFile(m_LogicalPath, m_Data, &err))
@@ -2221,6 +2304,14 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 			}
 		}
 		Wui::Tooltip(ctx, resetBtnRect, Wui::Tr("panel.model.skeleton.reset_bind_tip", "Reset translation/rotation/scale to bind pose"));
+
+		const Wui::WuiRect keyBtnRect { resetBtnRect.X - 6.0f - keyBtnW, cy - 2.0f, keyBtnW, 20.0f };
+		if (Wui::Button(ctx, Wui::HashId("model.node.key_bone"), keyBtnRect,
+			Wui::Tr("panel.model.anim.key_selected", "Key Bone (K)"), theme))
+		{
+			RecordKeyframeForNode(static_cast<uint32_t>(m_SelectedNode), m_AnimTime);
+		}
+		Wui::Tooltip(ctx, keyBtnRect, Wui::Tr("panel.model.anim.key_selected_tip", "Record keyframe for this bone at current timeline position (K)"));
 
 		cy += 24.0f;
 
@@ -2380,6 +2471,94 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 		y += cardH + 10.0f;
 	}
 
+	void ModelPreviewPanel::RecordKeyframeForNode(uint32_t nodeIndex, float time)
+	{
+		if (!m_DataValid || nodeIndex >= m_Data.Nodes.size())
+			return;
+
+		if (m_Data.Animations.empty())
+		{
+			Asset::WModelAnimation defaultClip;
+			defaultClip.Name = "DefaultClip";
+			defaultClip.Duration = std::max(1.0f, time);
+			m_Data.Animations.push_back(std::move(defaultClip));
+			m_AnimClipIndex = 0;
+		}
+
+		if (m_AnimClipIndex < 0 || m_AnimClipIndex >= static_cast<int>(m_Data.Animations.size()))
+			m_AnimClipIndex = 0;
+
+		Asset::WModelAnimation& clip = m_Data.Animations[static_cast<size_t>(m_AnimClipIndex)];
+		if (time > clip.Duration)
+			clip.Duration = time;
+
+		const Asset::WModelNode& node = m_Data.Nodes[nodeIndex];
+
+		auto recordChannel = [&](Asset::WModelIO::WModelAnimationPath path, const glm::vec4& value)
+		{
+			Asset::WModelAnimationChannel* targetChannel = nullptr;
+			for (auto& ch : clip.Channels)
+			{
+				if (ch.TargetNode == nodeIndex && ch.Path == path)
+				{
+					targetChannel = &ch;
+					break;
+				}
+			}
+			if (!targetChannel)
+			{
+				clip.Channels.push_back({ nodeIndex, path, {} });
+				targetChannel = &clip.Channels.back();
+			}
+
+			bool updated = false;
+			for (auto& key : targetChannel->Keys)
+			{
+				if (std::abs(key.Time - time) < 0.001f)
+				{
+					key.Value = value;
+					updated = true;
+					break;
+				}
+			}
+			if (!updated)
+			{
+				targetChannel->Keys.push_back({ time, value });
+				std::sort(targetChannel->Keys.begin(), targetChannel->Keys.end(),
+					[](const Asset::WModelAnimationKey& a, const Asset::WModelAnimationKey& b) {
+						return a.Time < b.Time;
+					});
+			}
+		};
+
+		recordChannel(Asset::WModelIO::WModelAnimationPath::Translation, glm::vec4(node.Translation, 0.0f));
+		recordChannel(Asset::WModelIO::WModelAnimationPath::Rotation,
+			glm::vec4(node.Rotation.x, node.Rotation.y, node.Rotation.z, node.Rotation.w));
+		recordChannel(Asset::WModelIO::WModelAnimationPath::Scale, glm::vec4(node.Scale, 0.0f));
+
+		const std::string nodeLabel = node.Name.empty() ? ("node_" + std::to_string(nodeIndex)) : node.Name;
+		char buf[128];
+		std::snprintf(buf, sizeof(buf), "Keyframe recorded for %s at t=%.2fs", nodeLabel.c_str(), time);
+		m_Status = buf;
+		m_StatusIsError = false;
+	}
+
+	void ModelPreviewPanel::RecordKeyframeForAllNodes(float time)
+	{
+		if (!m_DataValid || m_Data.Nodes.empty())
+			return;
+
+		for (uint32_t i = 0; i < static_cast<uint32_t>(m_Data.Nodes.size()); ++i)
+		{
+			RecordKeyframeForNode(i, time);
+		}
+
+		char buf[128];
+		std::snprintf(buf, sizeof(buf), "Keyframe recorded for all %zu nodes at t=%.2fs", m_Data.Nodes.size(), time);
+		m_Status = buf;
+		m_StatusIsError = false;
+	}
+
 	float ModelPreviewPanel::DrawTabSkeleton(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
 		const Wui::WuiTheme& theme)
 	{
@@ -2414,12 +2593,6 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 
 		y += searchH + 10.0f;
 
-		// 选中节点属性检视器
-		if (m_SelectedNode >= 0 && static_cast<size_t>(m_SelectedNode) < m_Data.Nodes.size())
-		{
-			DrawNodeInspector(ctx, x, y, width, theme);
-		}
-
 		// 统计标头
 		const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
 		size_t jointCount = 0;
@@ -2435,18 +2608,49 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 		Wui::SectionHeader(ctx, { x, y, width, 18.0f }, headerText, theme.Accent, theme);
 		y += 24.0f;
 
-		const std::string filterLower = ToLower(m_SkeletonFilter);
-
-		for (size_t index = 0; index < nodes.size(); ++index)
+		// 构建父子拓扑映射
+		std::vector<std::vector<size_t>> children(nodes.size());
+		std::vector<size_t> roots;
+		for (size_t i = 0; i < nodes.size(); ++i)
 		{
-			const MeshNode& node = nodes[index];
-			if (!filterLower.empty() && ToLower(node.Name).find(filterLower) == std::string::npos)
-				continue;
+			int32_t p = nodes[i].Parent;
+			if (p >= 0 && static_cast<size_t>(p) < nodes.size() && static_cast<size_t>(p) != i)
+				children[static_cast<size_t>(p)].push_back(i);
+			else
+				roots.push_back(i);
+		}
 
-			int depth = 0;
-			for (int32_t parent = node.Parent; parent >= 0 && depth < 16;
-				parent = nodes[static_cast<size_t>(parent)].Parent)
-				++depth;
+		const std::string filterLower = ToLower(m_SkeletonFilter);
+		std::vector<bool> subtreeMatches(nodes.size(), false);
+		if (!filterLower.empty())
+		{
+			for (size_t i = 0; i < nodes.size(); ++i)
+			{
+				if (ToLower(nodes[i].Name).find(filterLower) != std::string::npos)
+				{
+					int cur = static_cast<int>(i);
+					while (cur >= 0 && static_cast<size_t>(cur) < nodes.size())
+					{
+						subtreeMatches[static_cast<size_t>(cur)] = true;
+						cur = nodes[static_cast<size_t>(cur)].Parent;
+					}
+				}
+			}
+		}
+
+		std::vector<bool> visited(nodes.size(), false);
+		std::function<void(size_t, int)> drawNodeBranch = [&](size_t index, int depth)
+		{
+			if (index >= nodes.size() || visited[index])
+				return;
+			visited[index] = true;
+
+			if (!filterLower.empty() && !subtreeMatches[index])
+				return;
+
+			const MeshNode& node = nodes[index];
+			const bool hasChildren = !children[index].empty();
+			const bool isCollapsed = m_SkeletonCollapsedNodes.count(static_cast<int>(index)) > 0;
 
 			const float rowH = 22.0f;
 			const Wui::WuiRect rowRect { x, y, width, rowH };
@@ -2465,14 +2669,32 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 
 			// 缩进树形线条与指示
 			const float indent = static_cast<float>(depth) * 14.0f;
-			const float nodeX = x + indent;
+			float nodeX = x + indent;
+
+			// 折叠/展开切换按钮 [v] / [>]
+			if (hasChildren)
+			{
+				const Wui::WuiRect foldRect { nodeX, y + 2.0f, 16.0f, 18.0f };
+				const char* foldIcon = isCollapsed ? ">" : "v";
+				if (Wui::Button(ctx, Wui::HashId(("model.skel.fold." + std::to_string(index)).c_str()),
+					foldRect, foldIcon, theme))
+				{
+					if (isCollapsed)
+						m_SkeletonCollapsedNodes.erase(static_cast<int>(index));
+					else
+						m_SkeletonCollapsedNodes.insert(static_cast<int>(index));
+				}
+			}
+			nodeX += 18.0f;
 
 			// 节点类型指示 (Joint vs Mesh vs Group)
 			bool isJoint = false;
 			if (m_DataValid && !m_Data.Skins.empty())
 			{
 				for (uint32_t jn : m_Data.Skins[0].JointNodes)
+				{
 					if (jn == index) { isJoint = true; break; }
+				}
 			}
 
 			std::string tag = isJoint ? "[J]" : (node.MeshIndex >= 0 ? "[M]" : "[N]");
@@ -2496,6 +2718,29 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 			}
 
 			y += rowH;
+
+			// 递归子节点展开
+			if (hasChildren && (!isCollapsed || !filterLower.empty()))
+			{
+				for (size_t childIdx : children[index])
+					drawNodeBranch(childIdx, depth + 1);
+			}
+		};
+
+		for (size_t rootIdx : roots)
+			drawNodeBranch(rootIdx, 0);
+
+		for (size_t i = 0; i < nodes.size(); ++i)
+		{
+			if (!visited[i])
+				drawNodeBranch(i, 0);
+		}
+
+		// 选中节点属性检视器 (稳定停靠在骨骼树下方，不引起上方树形抖动)
+		if (m_SelectedNode >= 0 && static_cast<size_t>(m_SelectedNode) < m_Data.Nodes.size())
+		{
+			y += 12.0f;
+			DrawNodeInspector(ctx, x, y, width, theme);
 		}
 
 		return y - rect.Y;
@@ -2833,7 +3078,7 @@ float ModelPreviewPanel::DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& 
 			Asset::WModelAnimation& anim = m_Data.Animations[index];
 			const bool isActive = static_cast<int>(index) == m_AnimClipIndex;
 
-			const float cardH = 62.0f;
+			const float cardH = 68.0f;
 			const Wui::WuiRect clipCard { x, y, width, cardH };
 			Wui::PanelBackground(ctx, clipCard, theme.CardBg, 4.0f);
 			Wui::HighlightOutline(ctx, clipCard, isActive ? theme.Accent : Alpha(theme.Border, 0.6f), 4.0f,
@@ -2848,28 +3093,27 @@ float ModelPreviewPanel::DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& 
 
 			// 可编辑片段名称
 			const Wui::WuiId clipNameFieldId = Wui::HashId(("model.clip.name." + std::to_string(index)).c_str());
-			const float nameW = 160.0f;
+			const float nameW = 120.0f;
 			Wui::TextFieldA11y nameA11y;
 			nameA11y.Label = "Clip Name";
-			Wui::TextField(ctx, clipNameFieldId, { x + 68.0f, y + 6.0f, nameW, 22.0f }, anim.Name, theme, nullptr, &nameA11y);
+			Wui::TextField(ctx, clipNameFieldId, { x + 66.0f, y + 6.0f, nameW, 22.0f }, anim.Name, theme, nullptr, &nameA11y);
 			if (ctx.Focus() == clipNameFieldId)
 				ctx.SetTextInputActive(true);
 
-			// 时长与帧数
-			const int frames = static_cast<int>(std::round(anim.Duration * 30.0f));
-			char durStr[96];
-			std::snprintf(durStr, sizeof(durStr), "%.2fs  |  %d frames @ 30 FPS  |  %zu channels",
-				anim.Duration, frames, anim.Channels.size());
-			Wui::Label(ctx, { x + 8.0f, y + 36.0f }, durStr, theme.TextMuted, theme.FontSizeCaption);
+			// 可编辑时长 DragFloat
+			Wui::Label(ctx, { x + 66.0f + nameW + 8.0f, y + 8.0f }, "Dur:", theme.TextMuted, theme.FontSizeCaption);
+			const float durW = 60.0f;
+			Wui::DragFloat(ctx, Wui::HashId(("model.clip.dur." + std::to_string(index)).c_str()),
+				{ x + 66.0f + nameW + 36.0f, y + 6.0f, durW, 22.0f }, anim.Duration, 0.05f, 0.1f, 300.0f, theme);
 
 			// 操作按钮: Play / Open in Graph / Delete
 			const float playBtnW = 60.0f;
-			const float graphBtnW = 110.0f;
+			const float graphBtnW = 100.0f;
 			const float delBtnW = 26.0f;
 			const float bx = x + width - playBtnW - graphBtnW - delBtnW - 16.0f;
 
 			if (Wui::Button(ctx, Wui::HashId(("model.clip.play." + std::to_string(index)).c_str()),
-				{ bx, y + 18.0f, playBtnW, 24.0f }, isActive ? "Restart" : "Play", theme))
+				{ bx, y + 6.0f, playBtnW, 22.0f }, isActive ? "Restart" : "Play", theme))
 			{
 				m_AnimClipIndex = static_cast<int>(index);
 				m_AnimTime = 0.0f;
@@ -2877,24 +3121,33 @@ float ModelPreviewPanel::DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& 
 			}
 
 			if (Wui::Button(ctx, Wui::HashId(("model.clip.open_graph." + std::to_string(index)).c_str()),
-				{ bx + playBtnW + 6.0f, y + 18.0f, graphBtnW, 24.0f }, "Open in Graph", theme))
+				{ bx + playBtnW + 6.0f, y + 6.0f, graphBtnW, 22.0f }, "Open in Graph", theme))
 			{
-				host.FocusIndependentWindow("animgraph");
-				host.ActivatePanel("animgraph");
+				host.OpenAnimGraph("");
 			}
-			Wui::Tooltip(ctx, { bx + playBtnW + 6.0f, y + 18.0f, graphBtnW, 24.0f },
+			Wui::Tooltip(ctx, { bx + playBtnW + 6.0f, y + 6.0f, graphBtnW, 22.0f },
 				"Switch to Animation Graph editor.");
 
 			if (Wui::Button(ctx, Wui::HashId(("model.clip.delete." + std::to_string(index)).c_str()),
-				{ bx + playBtnW + graphBtnW + 12.0f, y + 18.0f, delBtnW, 24.0f }, "X", theme))
+				{ bx + playBtnW + graphBtnW + 12.0f, y + 6.0f, delBtnW, 22.0f }, "X", theme))
 			{
 				m_Data.Animations.erase(m_Data.Animations.begin() + index);
 				if (m_AnimClipIndex >= static_cast<int>(m_Data.Animations.size()))
 					m_AnimClipIndex = std::max(0, static_cast<int>(m_Data.Animations.size()) - 1);
 				break;
 			}
-			Wui::Tooltip(ctx, { bx + playBtnW + graphBtnW + 12.0f, y + 18.0f, delBtnW, 24.0f },
+			Wui::Tooltip(ctx, { bx + playBtnW + graphBtnW + 12.0f, y + 6.0f, delBtnW, 22.0f },
 				Wui::Tr("panel.model.clips.delete", "Delete Clip"));
+
+			// 时长、帧数、通道数与总关键帧
+			size_t totalKeys = 0;
+			for (const auto& ch : anim.Channels)
+				totalKeys += ch.Keys.size();
+			const int frames = static_cast<int>(std::round(anim.Duration * 30.0f));
+			char durStr[128];
+			std::snprintf(durStr, sizeof(durStr), "%.2fs  |  %d frames @ 30 FPS  |  %zu channels  |  %zu keys",
+				anim.Duration, frames, anim.Channels.size(), totalKeys);
+			Wui::Label(ctx, { x + 8.0f, y + 36.0f }, durStr, theme.TextMuted, theme.FontSizeCaption);
 
 			y += cardH + 8.0f;
 		}

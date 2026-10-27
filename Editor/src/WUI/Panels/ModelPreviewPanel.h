@@ -89,6 +89,8 @@ namespace World
 		void CreateAndAssignMaterial(size_t index);
 		void DrawNodeInspector(Wui::WuiContext& ctx, float x, float& y, float width,
 			const Wui::WuiTheme& theme);
+		void RecordKeyframeForNode(uint32_t nodeIndex, float time);
+		void RecordKeyframeForAllNodes(float time);
 
 		// 兼容旧接口(测试与外部引用点)
 		float DrawImportSettings(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
@@ -178,8 +180,10 @@ namespace World
 		// 0: Overview, 1: Materials, 2: Skeleton, 3: Import Settings, 4: Clips
 		int m_ActiveTab = 0;
 		float m_TabScroll[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		float m_TabContentHeight[5] = { 400.0f, 400.0f, 400.0f, 400.0f, 400.0f };
 		std::string m_SkeletonFilter;
 		std::unordered_set<std::string> m_SkeletonCollapsed;
+		std::unordered_set<int> m_SkeletonCollapsedNodes;
 
 		// ---- 材质编辑状态 ----
 		std::vector<std::string> m_MaterialSlotBuffers;
