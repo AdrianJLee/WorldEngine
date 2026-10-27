@@ -289,40 +289,33 @@ namespace World
 
 		if (!m_Polygons.empty())
 		{
-			const glm::vec3 bMin = modifier.Center - modifier.Extents;
-			const glm::vec3 bMax = modifier.Center + modifier.Extents;
 			for (auto& poly : m_Polygons)
 			{
-				if (poly.Center.x >= bMin.x && poly.Center.x <= bMax.x &&
-					poly.Center.z >= bMin.z && poly.Center.z <= bMax.z)
+				if (modifier.ContainsPoint(poly.Center))
 				{
-					// 垂直判定：包围盒相交，或抬高的天花板/过梁体（向下投射覆盖至下方地面多边形）
-					if (poly.Center.y <= bMax.y && poly.Center.y >= bMin.y - 8.0f)
+					poly.AreaType = modifier.AreaType;
+					poly.Cost = modifier.CostMultiplier;
+
+					// 物理有效净空推导：
+					// 1. 未移动实体时（Center.y <= 0.05m），净空严格遵照 modifier.ClearanceHeight (如 1.3m)，绝不穿透！
+					// 2. 当设计师在视口中向上抬高实体（Center.y > 0.05m）时，离地落差线性增加通过净空：ClearanceHeight + Center.y！
+					float effClearance = modifier.ClearanceHeight;
+					if (effClearance > 0.0f)
 					{
-						poly.AreaType = modifier.AreaType;
-						poly.Cost = modifier.CostMultiplier;
+						if (modifier.Center.y > 0.05f)
+						{
+							effClearance += modifier.Center.y;
+						}
+					}
+					else
+					{
+						effClearance = std::max(0.0f, (modifier.Center + modifier.Extents).y - poly.Center.y);
+					}
 
-						// 物理有效净空推导：
-						// 1. 未移动实体时（Center.y <= 0.05m），净空严格严格遵照 modifier.ClearanceHeight (如 1.3m)，绝不穿透！
-						// 2. 当设计师在视口中向上抬高实体（Center.y > 0.05m）时，离地落差线性增加通过净空：ClearanceHeight + Center.y！
-						float effClearance = modifier.ClearanceHeight;
-						if (effClearance > 0.0f)
-						{
-							if (modifier.Center.y > 0.05f)
-							{
-								effClearance += modifier.Center.y;
-							}
-						}
-						else
-						{
-							effClearance = std::max(0.0f, bMax.y - poly.Center.y);
-						}
-
-						poly.Clearance = effClearance;
-						if (modifier.AreaType == 4 || modifier.CostMultiplier <= 0.0f)
-						{
-							poly.Blocked = true;
-						}
+					poly.Clearance = effClearance;
+					if (modifier.AreaType == 4 || modifier.CostMultiplier <= 0.0f)
+					{
+						poly.Blocked = true;
 					}
 				}
 			}
@@ -781,11 +774,7 @@ namespace World
 		{
 			for (const auto& mod : m_AreaModifiers)
 			{
-				const glm::vec3 bModMin = mod.Center - mod.Extents;
-				const glm::vec3 bModMax = mod.Center + mod.Extents;
-				if (poly.Center.x >= bModMin.x && poly.Center.x <= bModMax.x &&
-					poly.Center.y >= bModMin.y && poly.Center.y <= bModMax.y &&
-					poly.Center.z >= bModMin.z && poly.Center.z <= bModMax.z)
+				if (mod.ContainsPoint(poly.Center))
 				{
 					poly.AreaType = mod.AreaType;
 					poly.Cost = mod.CostMultiplier;
@@ -1134,11 +1123,7 @@ namespace World
 					const glm::vec3 cellCenter(cx, (gsp.CornerY[0] + gsp.CornerY[1] + gsp.CornerY[2] + gsp.CornerY[3]) * 0.25f, cz);
 					for (const auto& mod : m_AreaModifiers)
 					{
-						const glm::vec3 bModMin = mod.Center - mod.Extents;
-						const glm::vec3 bModMax = mod.Center + mod.Extents;
-						if (cellCenter.x >= bModMin.x && cellCenter.x <= bModMax.x &&
-							cellCenter.y >= bModMin.y && cellCenter.y <= bModMax.y &&
-							cellCenter.z >= bModMin.z && cellCenter.z <= bModMax.z)
+						if (mod.ContainsPoint(cellCenter))
 						{
 							gsp.AreaType = mod.AreaType;
 							gsp.Cost = mod.CostMultiplier;
@@ -1367,11 +1352,7 @@ namespace World
 		{
 			for (const auto& mod : m_AreaModifiers)
 			{
-				const glm::vec3 bModMin = mod.Center - mod.Extents;
-				const glm::vec3 bModMax = mod.Center + mod.Extents;
-				if (poly.Center.x >= bModMin.x && poly.Center.x <= bModMax.x &&
-					poly.Center.y >= bModMin.y && poly.Center.y <= bModMax.y &&
-					poly.Center.z >= bModMin.z && poly.Center.z <= bModMax.z)
+				if (mod.ContainsPoint(poly.Center))
 				{
 					poly.AreaType = mod.AreaType;
 					poly.Cost = mod.CostMultiplier;
@@ -1653,9 +1634,6 @@ namespace World
 							const glm::vec3 wp11 = glm::vec3(worldMat * glm::vec4(p11, 1.0f));
 							const glm::vec3 wp01 = glm::vec3(worldMat * glm::vec4(p01, 1.0f));
 
-							// 过滤外围陡峭背景山峰（当为 navmesh_showcase 或超出可游玩盆地高山绝壁时，若 4 采样点皆处于外围高处，跳过提取避免生成悬空碎块）
-							if (w <= 128 && h <= 128 && ((p00.y > 5.6f || p10.y > 5.6f || p11.y > 5.6f || p01.y > 5.6f) || x < 14 || xNext > w - 12))
-								continue;
 
 							// 整格双三角面 3D 法线一致性过滤：仅当同一地形格的两个剖分三角形均满足最大爬坡角时才整格纳入，既消除对角线半格锯齿，又完整保留 30°~45° 连续斜坡
 							const glm::vec3 n1 = glm::cross(wp11 - wp00, wp10 - wp00);
@@ -1700,6 +1678,7 @@ namespace World
 			if (const auto* xform = registry.try_get<TransformComponent>(entity))
 			{
 				mod.Center = xform->Location;
+				mod.Rotation = xform->Rotation;
 				scale = glm::abs(xform->Scale);
 			}
 			mod.Extents = areaComp.Extents * scale;
@@ -1744,6 +1723,7 @@ namespace World
 			if (const auto* xform = registry.try_get<TransformComponent>(entity))
 			{
 				mod.Center = xform->Location;
+				mod.Rotation = xform->Rotation;
 				scale = glm::abs(xform->Scale);
 			}
 			mod.Extents = areaComp.Extents * scale;
@@ -2137,8 +2117,8 @@ namespace World
 			stream.write(reinterpret_cast<const char*>(poly.Neighbors.data()), nbrCount * sizeof(int32_t));
 		}
 
-		// v2 扩展区块：保存 AreaType、Cost、OffMeshLinks 与 AreaModifiers
-		const uint32_t extMagic = 0x4E415632; // "NAV2"
+		// v3 扩展区块：保存 AreaType、Cost、OffMeshLinks 与 AreaModifiers (支持 OBB 定向包围盒)
+		const uint32_t extMagic = 0x4E415633; // "NAV3"
 		stream.write(reinterpret_cast<const char*>(&extMagic), sizeof(extMagic));
 
 		for (const auto& poly : m_Polygons)
@@ -2217,9 +2197,10 @@ namespace World
 			}
 		}
 
-		// 尝试读取 v2 扩展元数据
+		// 尝试读取 v2 / v3 扩展元数据 (NAV2: 40B 无旋转兼容读取, NAV3: 56B 含 OBB Rotation)
 		uint32_t extMagic = 0;
-		if (stream.read(reinterpret_cast<char*>(&extMagic), sizeof(extMagic)) && extMagic == 0x4E415632)
+		if (stream.read(reinterpret_cast<char*>(&extMagic), sizeof(extMagic)) &&
+		    (extMagic == 0x4E415632 || extMagic == 0x4E415633))
 		{
 			for (auto& poly : m_Polygons)
 			{
@@ -2263,18 +2244,44 @@ namespace World
 			if (stream.read(reinterpret_cast<char*>(&modCount), sizeof(modCount)) && modCount > 0)
 			{
 				m_AreaModifiers.resize(modCount);
-				stream.read(reinterpret_cast<char*>(m_AreaModifiers.data()), modCount * sizeof(NavMeshAreaModifier));
+				if (extMagic == 0x4E415633)
+				{
+					stream.read(reinterpret_cast<char*>(m_AreaModifiers.data()), modCount * sizeof(NavMeshAreaModifier));
+				}
+				else // 0x4E415632 ("NAV2")
+				{
+					struct NavMeshAreaModifierV2
+					{
+						glm::vec3 Center { 0.0f };
+						glm::vec3 Extents { 1.0f };
+						float CostMultiplier = 1.0f;
+						float ClearanceHeight = 0.0f;
+						uint8_t AreaType = 0;
+						uint8_t _Padding[7] { 0 };
+					};
+					static_assert(sizeof(NavMeshAreaModifierV2) == 40, "NavMeshAreaModifierV2 must be 40 bytes");
+
+					for (uint32_t i = 0; i < modCount; ++i)
+					{
+						NavMeshAreaModifierV2 v2;
+						stream.read(reinterpret_cast<char*>(&v2), sizeof(NavMeshAreaModifierV2));
+						m_AreaModifiers[i].Center = v2.Center;
+						m_AreaModifiers[i].Extents = v2.Extents;
+						m_AreaModifiers[i].Rotation = glm::quat { 1.0f, 0.0f, 0.0f, 0.0f };
+						m_AreaModifiers[i].CostMultiplier = v2.CostMultiplier;
+						m_AreaModifiers[i].ClearanceHeight = v2.ClearanceHeight;
+						m_AreaModifiers[i].AreaType = v2.AreaType;
+						std::memset(m_AreaModifiers[i]._Padding, 0, sizeof(m_AreaModifiers[i]._Padding));
+					}
+				}
+
 				for (const auto& mod : m_AreaModifiers)
 				{
 					if (mod.ClearanceHeight > 0.0f)
 					{
-						const glm::vec3 bMin = mod.Center - mod.Extents;
-						const glm::vec3 bMax = mod.Center + mod.Extents;
 						for (auto& poly : m_Polygons)
 						{
-							if (poly.Center.x >= bMin.x && poly.Center.x <= bMax.x &&
-								poly.Center.z >= bMin.z && poly.Center.z <= bMax.z &&
-								poly.Center.y <= bMax.y && poly.Center.y >= bMin.y - 8.0f)
+							if (mod.ContainsPoint(poly.Center))
 							{
 								float effClearance = mod.ClearanceHeight;
 								if (effClearance > 0.0f && mod.Center.y > 0.05f)
@@ -2308,6 +2315,7 @@ namespace World
 			const auto& [xform, areaComp] = registry.get<TransformComponent, NavMeshAreaModifierComponent>(entity);
 			NavMeshAreaModifier mod;
 			mod.Center = xform.Location;
+			mod.Rotation = xform.Rotation;
 			mod.Extents = glm::abs(xform.Scale) * areaComp.Extents;
 			mod.CostMultiplier = areaComp.CostMultiplier;
 			mod.ClearanceHeight = areaComp.ClearanceHeight;

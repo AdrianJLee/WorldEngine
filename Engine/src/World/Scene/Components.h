@@ -2372,6 +2372,11 @@ namespace World
 		uint8_t PathColorG { 0 };                         // 1B  (offset 45: 自定义路径颜色 G)
 		uint8_t PathColorB { 0 };                         // 1B  (offset 46: 自定义路径颜色 B)
 		uint8_t PathColorA { 0 };                         // 1B  (offset 47: 自定义路径颜色 A，0 = 使用默认预设)
+		uint8_t AgentColorR { 0 };                        // 1B  (offset 48: 自定义代理圆柱标记颜色 R，0 = 默认预设)
+		uint8_t AgentColorG { 0 };                        // 1B  (offset 49: 自定义代理圆柱标记颜色 G)
+		uint8_t AgentColorB { 0 };                        // 1B  (offset 50: 自定义代理圆柱标记颜色 B)
+		uint8_t AgentColorA { 0 };                        // 1B  (offset 51: 自定义代理圆柱标记颜色 A，0 = 使用默认预设)
+		uint8_t _Padding[4] { 0 };                        // 4B  (offset 52: 保持 8 字节对齐与 C1 尺寸契约 <= 64B)
 
 		NavMeshAgentComponent() = default;
 
@@ -2388,6 +2393,23 @@ namespace World
 			PathColorA = static_cast<uint8_t>(std::clamp(col.a * 255.0f, 1.0f, 255.0f));
 		}
 		void ClearCustomColor() { PathColorR = PathColorG = PathColorB = PathColorA = 0; }
+
+		bool HasCustomPathColor() const { return PathColorA > 0; }
+		glm::vec4 GetCustomPathColor() const { return GetCustomColor(); }
+		void SetCustomPathColor(const glm::vec4& col) { SetCustomColor(col); }
+		void ClearCustomPathColor() { ClearCustomColor(); }
+
+		bool HasCustomAgentColor() const { return AgentColorA > 0; }
+		glm::vec4 GetCustomAgentColor() const {
+			return glm::vec4(AgentColorR / 255.0f, AgentColorG / 255.0f, AgentColorB / 255.0f, AgentColorA / 255.0f);
+		}
+		void SetCustomAgentColor(const glm::vec4& col) {
+			AgentColorR = static_cast<uint8_t>(std::clamp(col.r * 255.0f, 0.0f, 255.0f));
+			AgentColorG = static_cast<uint8_t>(std::clamp(col.g * 255.0f, 0.0f, 255.0f));
+			AgentColorB = static_cast<uint8_t>(std::clamp(col.b * 255.0f, 0.0f, 255.0f));
+			AgentColorA = static_cast<uint8_t>(std::clamp(col.a * 255.0f, 1.0f, 255.0f));
+		}
+		void ClearCustomAgentColor() { AgentColorR = AgentColorG = AgentColorB = AgentColorA = 0; }
 
 		WE_SCHEMA_BODY(World, NavMeshAgentComponent, Component)
 			WE_SCHEMA_META(Category("AI"),
@@ -2418,7 +2440,7 @@ namespace World
 				Doc("Automatically recalculate path if target moves or obstacle blocks."));
 		WE_SCHEMA_END
 	};
-	static_assert(sizeof(NavMeshAgentComponent) == 48, "NavMeshAgentComponent must be exactly 48 bytes");
+	static_assert(sizeof(NavMeshAgentComponent) == 56, "NavMeshAgentComponent must be exactly 56 bytes");
 	static_assert(std::is_trivially_copyable_v<NavMeshAgentComponent>, "NavMeshAgentComponent must be trivially copyable");
 	static_assert(offsetof(NavMeshAgentComponent, Destination) == 0, "Destination offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, Speed) == 12, "Speed offset mismatch");
@@ -2434,6 +2456,8 @@ namespace World
 	static_assert(offsetof(NavMeshAgentComponent, Crouching) == 43, "Crouching offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, PathColorR) == 44, "PathColorR offset mismatch");
 	static_assert(offsetof(NavMeshAgentComponent, PathColorA) == 47, "PathColorA offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, AgentColorR) == 48, "AgentColorR offset mismatch");
+	static_assert(offsetof(NavMeshAgentComponent, AgentColorA) == 51, "AgentColorA offset mismatch");
 
 	struct NavMeshObstacleComponent
 	{

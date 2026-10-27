@@ -38,10 +38,6 @@ namespace World
 		// 后台自动实时动态重烘开关
 		inline static bool AutoDynamicBake = false;
 
-		// 视口路径折线与代理标记显示色彩定制
-		inline static glm::vec4 CustomPathColor { 1.0f, 0.85f, 0.20f, 0.95f };
-		inline static glm::vec4 CustomAgentColor { 0.20f, 0.75f, 1.00f, 0.90f };
-
 		// 探针数据结构与访问接口
 		struct RaycastProbeData
 		{

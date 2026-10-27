@@ -474,6 +474,12 @@ namespace World::Wui
 	{
 		if (!World::Wui::HitTest(rect, point))
 			return false;
+		// 滚动裁剪栈校验: 若活动裁剪栈非空且点落在任一裁剪矩形外部，则视为被视口裁剪剔除
+		for (const WuiRect& clip : m_ClipStack)
+		{
+			if (!clip.Contains(point))
+				return false;
+		}
 		// P4-U7:上一帧的覆盖层矩形(弹出菜单/下拉/模态外框)= 本帧的"下层遮挡区"。
 		// P4-U28:改成按深度遮挡 —— 只挡**比它浅**的绘制层(depth 0 的常驻面板最浅,
 		// 模态内容 depth 1,叠在模态里的弹层 depth 2…),弹层自己与更深的子菜单照常命中。

@@ -463,6 +463,9 @@ namespace World::Wui
 	void WuiListRow::Paint(WuiPaintContext& context)
 	{
 		WuiContext& ctx = context.Context();
+		if (!ctx.ClipAllows(m_Rect))
+			return;
+
 		const bool hovered = ctx.IsHovered(m_Rect);
 		// P1c-E4:行也是键盘入口(与 Button/TreeNode 同一口径)。以前行只进 a11y 树、不进焦点表 ——
 		// "看得见、读得到、但键盘永远到不了"。SetId 过的行才参与(Id==0 的叶控件不受影响),
@@ -497,8 +500,13 @@ namespace World::Wui
 		// 这里不再加"有弹层就全禁"的局部补丁(那会连弹层外的行一起挡掉)。
 		const bool keyActivated = focused
 			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
-		if ((ctx.IsClicked(m_Rect) || keyActivated) && OnClick)
+		const bool clicked = ctx.IsClicked(m_Rect);
+		if ((clicked || keyActivated) && OnClick)
+		{
+			if (clicked)
+				ctx.ConsumePointerClick(0);
 			OnClick();
+		}
 	}
 
 	// ---- WuiImageButton ----

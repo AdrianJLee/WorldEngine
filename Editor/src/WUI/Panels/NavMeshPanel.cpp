@@ -598,25 +598,6 @@ namespace World
 			innerY += 32.0f;
 		}
 
-		// 7. 色彩定制 (调色板 ColorField 取色器，自由调节任意色彩)
-		innerY += 4.0f;
-		Wui::Label(ctx, { startX + 8.0f, innerY }, "[色彩调色板] 路径折线与代理标记显示色彩", theme.Accent, theme.FontSizeSmall);
-		innerY += 22.0f;
-
-		// 路径折线颜色调色板
-		Wui::Label(ctx, { startX + 8.0f, innerY + 2.0f }, "路径折线颜色:", theme.Text, theme.FontSizeSmall);
-		const float colorFieldW = contentW - 16.0f - 110.0f;
-		const Wui::WuiRect pathColorRect { startX + 115.0f, innerY, colorFieldW, 20.0f };
-		Wui::ColorField(ctx, Wui::HashId("navmesh.color.path_field"), pathColorRect, CustomPathColor, theme);
-		Wui::Tooltip(ctx, pathColorRect, "点击打开 2D 饱和度-明度调色板、色相滑条与 Hex 色值输入框，自由调节路径折线颜色");
-		innerY += 26.0f;
-
-		// 代理圆柱标记颜色调色板
-		Wui::Label(ctx, { startX + 8.0f, innerY + 2.0f }, "代理圆柱标记:", theme.Text, theme.FontSizeSmall);
-		const Wui::WuiRect agentColorRect { startX + 115.0f, innerY, colorFieldW, 20.0f };
-		Wui::ColorField(ctx, Wui::HashId("navmesh.color.agent_field"), agentColorRect, CustomAgentColor, theme);
-		Wui::Tooltip(ctx, agentColorRect, "点击打开 2D 饱和度-明度调色板、色相滑条与 Hex 色值输入框，自由调节代理圆柱体线框颜色");
-		innerY += 30.0f;
 
 				// 视口性能与快捷键说明卡片 (提升设计感与专业感)
 		const float tipH = 58.0f;

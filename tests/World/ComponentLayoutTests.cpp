@@ -104,7 +104,7 @@ namespace
 		{ "World::AnimGraphComponent",            48 },
 		{ "World::TwoBoneIkComponent",            56 },
 		{ "World::FootIkComponent",               16 },
-		{ "World::NavMeshAgentComponent",          48 },
+		{ "World::NavMeshAgentComponent",          56 },
 		{ "World::NavMeshObstacleComponent",       32 },
 		{ "World::NavMeshOffMeshLinkComponent",    32 },
 		{ "World::NavMeshAreaModifierComponent",   32 },

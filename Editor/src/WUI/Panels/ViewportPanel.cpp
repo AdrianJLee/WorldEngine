@@ -31,6 +31,7 @@ namespace World
 {
 	namespace
 	{
+
 		static bool s_ShowAllAudioGizmos = false;
 		static bool s_ShowNavMesh = true;
 		static bool s_AudioGizmoActive = false;
@@ -1711,7 +1712,105 @@ namespace World
 		if (!play && ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview && !overBanner && m_Host.GetEditorToolMode() == EditorToolMode::Select)
 		{
 			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
-			const Entity picked = m_Host.PickEntityAt(local);
+			Entity picked = m_Host.PickEntityAt(local);
+
+			// 视口代价区域中心标志与 3D 盒体直接拾取增强:
+			// 若 picked 为空或点击位置在代价区域中心标志半径 (约 18 屏幕像素) 内，或者光标射线命中了代价修饰区的 3D 盒体，
+			// 优先将 picked 判定为该代价区域实体，使用户能够轻松点击选中代价区域实体并在 Inspector 属性面板中编辑其属性。
+			const glm::vec2 mousePos = ctx.Input().MousePos;
+			const Wui::GizmoCamera pickCamera = m_Host.GetGizmoCamera();
+			const float ndcX = ((mousePos.x - sceneRect.X) / sceneRect.W) * 2.0f - 1.0f;
+			const float ndcY = 1.0f - ((mousePos.y - sceneRect.Y) / sceneRect.H) * 2.0f;
+			const glm::mat4 invVP = glm::inverse(pickCamera.ViewProjection);
+			glm::vec4 nearPointClip(ndcX, ndcY, -1.0f, 1.0f);
+			glm::vec4 farPointClip(ndcX, ndcY, 1.0f, 1.0f);
+			glm::vec4 nearPointWorld = invVP * nearPointClip;
+			glm::vec4 farPointWorld = invVP * farPointClip;
+			if (std::abs(nearPointWorld.w) > 1e-6f) nearPointWorld /= nearPointWorld.w;
+			if (std::abs(farPointWorld.w) > 1e-6f) farPointWorld /= farPointWorld.w;
+			glm::vec3 rayOrigin = pickCamera.Position;
+			glm::vec3 rayDir = glm::normalize(glm::vec3(farPointWorld) - rayOrigin);
+			if (pickCamera.IsOrthographic)
+			{
+				rayOrigin = glm::vec3(nearPointWorld);
+				rayDir = pickCamera.Forward;
+			}
+
+			Entity bestAreaEntity;
+			float bestDist = 1e9f;
+			bool hitBadge = false;
+
+			if (const Ref<Scene> activeScene = m_Host.GetActiveScene())
+			{
+				const auto& reg = std::as_const(*activeScene).GetRegistry();
+				for (auto [h, areaComp] : reg.view<NavMeshAreaModifierComponent>().each())
+				{
+					const auto* xform = reg.try_get<TransformComponent>(h);
+					if (!xform) continue;
+
+					const glm::vec3 modCenter = xform->Location;
+					const glm::vec4 clipPos = pickCamera.ViewProjection * glm::vec4(modCenter, 1.0f);
+					if (clipPos.w > 0.05f)
+					{
+						const glm::vec2 ndc { clipPos.x / clipPos.w, clipPos.y / clipPos.w };
+						const glm::vec2 sp {
+							sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
+							sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H
+						};
+						const float screenDist = glm::length(mousePos - sp);
+						if (screenDist <= 18.0f && screenDist < bestDist)
+						{
+							bestDist = screenDist;
+							bestAreaEntity = Entity(activeScene.get(), h);
+							hitBadge = true;
+						}
+					}
+
+					if (!hitBadge)
+					{
+						const glm::mat4 invWorld = glm::inverse(xform->GetLocalMatrix());
+						const glm::vec3 localOrig = glm::vec3(invWorld * glm::vec4(rayOrigin, 1.0f));
+						const glm::vec3 localDir = glm::normalize(glm::vec3(invWorld * glm::vec4(rayDir, 0.0f)));
+						const glm::vec3 bMin = -areaComp.Extents;
+						const glm::vec3 bMax = areaComp.Extents;
+						float tmin = 0.0f;
+						float tmax = 2000.0f;
+						bool hitBox = true;
+						for (int i = 0; i < 3; ++i)
+						{
+							if (std::abs(localDir[i]) < 1e-6f)
+							{
+								if (localOrig[i] < bMin[i] || localOrig[i] > bMax[i]) { hitBox = false; break; }
+							}
+							else
+							{
+								const float invD = 1.0f / localDir[i];
+								float t1 = (bMin[i] - localOrig[i]) * invD;
+								float t2 = (bMax[i] - localOrig[i]) * invD;
+								if (t1 > t2) std::swap(t1, t2);
+								tmin = std::max(tmin, t1);
+								tmax = std::min(tmax, t2);
+								if (tmin > tmax) { hitBox = false; break; }
+							}
+						}
+						if (hitBox && tmax > 0.0f)
+						{
+							const float hitT = (tmin > 0.0f) ? tmin : tmax;
+							if (hitT < bestDist)
+							{
+								bestDist = hitT;
+								bestAreaEntity = Entity(activeScene.get(), h);
+							}
+						}
+					}
+				}
+			}
+
+			if (bestAreaEntity.IsValid())
+			{
+				picked = bestAreaEntity;
+			}
+
 			if (std::getenv("WLD_TRACE_UI"))
 				WLD_CORE_INFO("[ui] viewport click local=({0},{1}) sceneRect=({2},{3},{4},{5}) -> handle={6} valid={7}",
 					local.x, local.y, sceneRect.X, sceneRect.Y, sceneRect.W, sceneRect.H,
@@ -4100,7 +4199,7 @@ namespace World
 								if (pIdx >= polyCount || visitedPolys[pIdx]) continue;
 								visitedPolys[pIdx] = 1;
 								const auto& poly = navMesh->GetPolygon(pIdx);
-								if (poly.Blocked && NavMeshPanel::ShowObstacles) continue;
+								if (poly.Blocked && !NavMeshPanel::ShowObstacles) continue;
 								if (poly.VertexIndices.size() < 3) continue;
 
 								const glm::vec3 toPoly = poly.Center - cameraPos;
@@ -4131,7 +4230,7 @@ namespace World
 							if (visitedPolys[pIdx]) continue;
 							visitedPolys[pIdx] = 1;
 							const auto& poly = navMesh->GetPolygon(pIdx);
-							if (poly.Blocked && NavMeshPanel::ShowObstacles) continue;
+							if (poly.Blocked && !NavMeshPanel::ShowObstacles) continue;
 							if (poly.VertexIndices.size() < 3) continue;
 
 							const glm::vec3 toPoly = poly.Center - cameraPos;
@@ -4178,7 +4277,7 @@ namespace World
 							break;
 
 						const auto& poly = navMesh->GetPolygon(cand.Index);
-						if (poly.Blocked && NavMeshPanel::ShowObstacles)
+						if (poly.Blocked && !NavMeshPanel::ShowObstacles)
 							continue;
 
 						const size_t vertCount = poly.VertexIndices.size();
@@ -4433,17 +4532,22 @@ namespace World
 					if (const auto* xform = registry.try_get<TransformComponent>(handle))
 						center = xform->Location;
 
-					// 工业级视口准则：未选中的代理若被山体遮挡则不予绘制；选中的代理保持穿透高亮
-					if (!isSelected && isOccluded(center))
-						continue;
-
 					const float r = std::max(0.1f, agent.AgentRadius);
 					const float h = std::max(0.2f, agent.GetEffectiveHeight());
 
-					// 姿态自适应色彩：下蹲采用沉稳蓝灰，站立采用明亮蓝绿
-					const Wui::WuiColor agentColor = agent.Crouching
-						? Wui::WuiColor{ 0.35f, 0.75f, 0.95f, 0.95f }
-						: Wui::WuiColor{ 0.15f, 0.90f, 0.85f, 0.95f };
+					Wui::WuiColor agentColor;
+					if (agent.HasCustomAgentColor())
+					{
+						const glm::vec4 c = agent.GetCustomAgentColor();
+						agentColor = Wui::WuiColor{ c.r, c.g, c.b, c.a };
+					}
+					else
+					{
+						// 姿态自适应色彩：下蹲采用沉稳蓝灰，站立采用明亮蓝绿
+						agentColor = agent.Crouching
+							? Wui::WuiColor{ 0.35f, 0.75f, 0.95f, 0.95f }
+							: Wui::WuiColor{ 0.15f, 0.90f, 0.85f, 0.95f };
+					}
 
 					constexpr int kSegments = 16;
 					constexpr float kTwoPi = 6.28318530718f;
@@ -4531,8 +4635,7 @@ namespace World
 							{
 								const glm::vec3 p0 = agentPath[i] + glm::vec3(0.0f, 0.1f, 0.0f);
 								const glm::vec3 p1 = agentPath[i + 1] + glm::vec3(0.0f, 0.1f, 0.0f);
-								if (!isSelected && isOccluded(p0, true) && isOccluded(p1, true))
-									continue;
+
 								PushProjectedSegment(ctx, viewProj, sceneRect,
 									viewProj * glm::vec4(p0, 1.0f),
 									viewProj * glm::vec4(p1, 1.0f),
@@ -4600,11 +4703,6 @@ namespace World
 							modCenter = xform->Location;
 						}
 
-						// 遮挡剔除：处于山体或建筑物遮挡后面的代价区域线框不予绘制
-						// 工业级视口准则：未选中的区域代价线框若被遮挡不予绘制；选中时保持穿透
-						if (!isSelected && isOccluded(modCenter))
-							continue;
-
 						Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.85f };
 						if (areaComp.AreaType == 2)
 							areaColor = Wui::WuiColor{ 0.70f, 0.35f, 0.95f, 0.85f };
@@ -4614,6 +4712,62 @@ namespace World
 							areaColor = Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.85f };
 						else if (areaComp.AreaType == 5)
 							areaColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.85f };
+
+						// 视口代价区域中心标志 (仅限非 Play 态，专属半透明底、区域颜色边框、居中 A 符号，悬停/选中发光)
+						if (!play)
+						{
+							const glm::vec4 clipCenter = viewProj * glm::vec4(modCenter, 1.0f);
+							if (clipCenter.w > 0.05f)
+							{
+								const glm::vec2 ndc { clipCenter.x / clipCenter.w, clipCenter.y / clipCenter.w };
+								const glm::vec2 badgeCenter {
+									sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
+									sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H
+								};
+								if (badgeCenter.x >= sceneRect.X - 24.0f && badgeCenter.x <= sceneRect.X + sceneRect.W + 24.0f &&
+									badgeCenter.y >= sceneRect.Y - 24.0f && badgeCenter.y <= sceneRect.Y + sceneRect.H + 24.0f)
+								{
+									const float distToMouse = glm::length(ctx.Input().MousePos - badgeCenter);
+									const bool isBadgeHovered = (distToMouse <= 18.0f);
+									const float badgeRadius = isSelected ? 12.0f : 10.0f;
+									const Wui::WuiRect badgeRect {
+										badgeCenter.x - badgeRadius,
+										badgeCenter.y - badgeRadius,
+										badgeRadius * 2.0f,
+										badgeRadius * 2.0f
+									};
+
+									// 半透明底色
+									Wui::PanelBackground(ctx, badgeRect, Wui::WuiColor{ 0.08f, 0.10f, 0.14f, 0.88f }, badgeRadius);
+
+									// 区域颜色边框
+									Wui::HighlightOutline(ctx, badgeRect, areaColor, badgeRadius, isSelected ? 2.2f : 1.4f);
+
+									// 悬停或选中时绘制明亮外圈
+									if (isBadgeHovered || isSelected)
+									{
+										const float glowRadius = badgeRadius + 3.0f;
+										const Wui::WuiRect glowRect {
+											badgeCenter.x - glowRadius,
+											badgeCenter.y - glowRadius,
+											glowRadius * 2.0f,
+											glowRadius * 2.0f
+										};
+										Wui::HighlightOutline(ctx, glowRect, Wui::WuiColor{ 1.0f, 1.0f, 1.0f, 0.85f }, glowRadius, 1.2f);
+									}
+
+									// 居中 "A" 符号 (Area Modifier)
+									const float fontSz = 11.0f;
+									const float textW = ctx.MeasureTextWidth("A", fontSz);
+									Wui::Label(ctx, { badgeCenter.x - textW * 0.5f, badgeCenter.y - fontSz * 0.55f },
+										"A", (isSelected || isBadgeHovered) ? Wui::WuiColor{ 1.0f, 1.0f, 1.0f, 1.0f } : areaColor, fontSz);
+								}
+							}
+						}
+
+						// 遮挡剔除：处于山体或建筑物遮挡后面的代价区域线框不予绘制 (未选中时剔除，选中时保持穿透)
+						if (!isSelected && isOccluded(modCenter))
+							continue;
 
 						const glm::vec3 localCorners[8] = {
 							glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
@@ -4646,6 +4800,72 @@ namespace World
 								clipCorners[edges[e][0]],
 								clipCorners[edges[e][1]],
 								areaColor, lineWidth);
+						}
+
+						// 限高区域 (ClearanceHeight > 0) 3D 净空高度标尺、顶部网格与文字标牌
+						if (areaComp.ClearanceHeight > 0.0f)
+						{
+							const float clearY = -areaComp.Extents.y + areaComp.ClearanceHeight;
+							const glm::vec3 localCeilCorners[4] = {
+								glm::vec3(-areaComp.Extents.x, clearY, -areaComp.Extents.z),
+								glm::vec3( areaComp.Extents.x, clearY, -areaComp.Extents.z),
+								glm::vec3( areaComp.Extents.x, clearY,  areaComp.Extents.z),
+								glm::vec3(-areaComp.Extents.x, clearY,  areaComp.Extents.z)
+							};
+							glm::vec4 clipCeil[4];
+							for (int i = 0; i < 4; ++i)
+								clipCeil[i] = viewProj * (world * glm::vec4(localCeilCorners[i], 1.0f));
+
+							const Wui::WuiColor clearCol{ 0.20f, 0.85f, 1.00f, 0.90f };
+							// 顶部网格框
+							for (int i = 0; i < 4; ++i)
+							{
+								PushProjectedSegment(ctx, viewProj, sceneRect,
+									clipCeil[i], clipCeil[(i + 1) % 4],
+									clearCol, 1.8f);
+							}
+							// 顶面对角交叉线
+							PushProjectedSegment(ctx, viewProj, sceneRect, clipCeil[0], clipCeil[2], clearCol, 1.0f);
+							PushProjectedSegment(ctx, viewProj, sceneRect, clipCeil[1], clipCeil[3], clearCol, 1.0f);
+
+							// 4 根垂直立柱高度标尺 (从底部升至限高顶部)
+							const glm::vec3 localBotCorners[4] = {
+								glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
+								glm::vec3( areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
+								glm::vec3( areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z),
+								glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z)
+							};
+							for (int i = 0; i < 4; ++i)
+							{
+								PushProjectedSegment(ctx, viewProj, sceneRect,
+									viewProj * (world * glm::vec4(localBotCorners[i], 1.0f)),
+									clipCeil[i],
+									clearCol, 1.4f);
+							}
+
+							// 3D 浮动文字标牌: "Clearance: 1.3m"
+							const glm::vec3 ceilCenterWorld = glm::vec3(world * glm::vec4(0.0f, clearY, 0.0f, 1.0f));
+							const glm::vec4 clipCeilCenter = viewProj * glm::vec4(ceilCenterWorld, 1.0f);
+							if (clipCeilCenter.w > 0.05f)
+							{
+								const glm::vec2 ndc { clipCeilCenter.x / clipCeilCenter.w, clipCeilCenter.y / clipCeilCenter.w };
+								const glm::vec2 badgePos {
+									sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
+									sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H
+								};
+								if (badgePos.x >= sceneRect.X && badgePos.x <= sceneRect.X + sceneRect.W &&
+									badgePos.y >= sceneRect.Y && badgePos.y <= sceneRect.Y + sceneRect.H)
+								{
+									char clearText[64];
+									std::snprintf(clearText, sizeof(clearText), "Clearance: %.1fm", areaComp.ClearanceHeight);
+									const float fontSz = 11.0f;
+									const float textW = ctx.MeasureTextWidth(clearText, fontSz);
+									const Wui::WuiRect tagRect { badgePos.x - textW * 0.5f - 6.0f, badgePos.y - 18.0f, textW + 12.0f, 18.0f };
+									Wui::PanelBackground(ctx, tagRect, Wui::WuiColor{ 0.05f, 0.12f, 0.20f, 0.88f }, 4.0f);
+									Wui::HighlightOutline(ctx, tagRect, clearCol, 4.0f, 1.2f);
+									Wui::Label(ctx, { tagRect.X + 6.0f, tagRect.Y + 2.5f }, clearText, clearCol, fontSz);
+								}
+							}
 						}
 					}
 

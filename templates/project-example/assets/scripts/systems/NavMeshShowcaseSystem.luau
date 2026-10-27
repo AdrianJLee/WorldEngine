@@ -185,7 +185,7 @@ local function SetTarget(targetIdx: number)
 
     local q = ecs:Query({ "TagComponent", "NavMeshAgentComponent" })
     q:Each(function(e, tag, agent)
-        if tag.Tag == selectedAgentTag or tag.Tag == AGENT_TAG then
+        if tag.Tag == selectedAgentTag then
             agent.Destination = target.Pos
             agent.ReachedDestination = 0
             agent.AutoRepath = 1
@@ -200,22 +200,19 @@ end
 
 -- 重置代理回大本营
 local function ResetAgentToBaseCamp()
-    if not agentEntity then
-        return
-    end
     local campPos = BEACONS[4].Pos
     local q = ecs:Query({ "TagComponent", "TransformComponent", "NavMeshAgentComponent" })
     q:Each(function(e, tag, tr, agent)
-        if tag.Tag == AGENT_TAG then
+        if tag.Tag == selectedAgentTag then
             tr.Location = campPos
             agent.Destination = BEACONS[2].Pos
             agent.ReachedDestination = 0
         end
     end)
     currentTargetIndex = 2
-    lastEventText = "【代理位置已重置】AI 代理已传回大本营营地，重设目标为 [2] 峡谷远端"
+    lastEventText = string.format("【代理位置已重置】[%s] 已传回大本营营地，重设目标为 [2] 峡谷远端", selectedAgentTag)
     lastEventTimer = 3.5
-    print("[NAVMESH-SHOWCASE] 代理位置已重置回大本营")
+    print(string.format("[NAVMESH-SHOWCASE] %s 位置已重置回大本营", selectedAgentTag))
 end
 
 -- 主逻辑帧系统
@@ -583,7 +580,7 @@ ui.onDraw(function()
         patrolActive = false
         local qAg = ecs:Query({ "TagComponent", "TransformComponent", "NavMeshAgentComponent" })
         qAg:Each(function(e, tag, tr, agent)
-            if tag.Tag == selectedAgentTag or tag.Tag == AGENT_TAG then
+            if tag.Tag == selectedAgentTag then
                 tr.Location = vec3.new(31.5, 4.2, 40.8)
                 agent.Destination = vec3.new(31.5, 0.1, 44.5)
                 agent.ReachedDestination = 0

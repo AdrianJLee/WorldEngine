@@ -5,6 +5,9 @@
 #include "World/Scene/Components.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+
+#include <cmath>
 
 #include <cstdint>
 #include <memory>
@@ -63,14 +66,23 @@ namespace World
 	{
 		glm::vec3 Center { 0.0f };
 		glm::vec3 Extents { 1.0f };
+		glm::quat Rotation { 1.0f, 0.0f, 0.0f, 0.0f };
 		float CostMultiplier = 1.0f;
 		float ClearanceHeight = 0.0f; // 连续净空高度上限（米，0 = 露天不受限，>0 = 任意自定义限高）
 		uint8_t AreaType = 0;         // 地表类型（与限高彻底解耦，道路/泥地/草地均可叠加限高）
 		uint8_t _Padding[7] { 0 };
+
+		bool ContainsPoint(const glm::vec3& pt) const
+		{
+			const glm::vec3 localPt = glm::inverse(Rotation) * (pt - Center);
+			return std::abs(localPt.x) <= Extents.x &&
+			       std::abs(localPt.y) <= Extents.y &&
+			       std::abs(localPt.z) <= Extents.z;
+		}
 	};
 
 	static_assert(sizeof(NavMeshOffMeshLink) == 32, "NavMeshOffMeshLink must be 32 bytes");
-	static_assert(sizeof(NavMeshAreaModifier) == 40, "NavMeshAreaModifier must be 40 bytes");
+	static_assert(sizeof(NavMeshAreaModifier) == 56, "NavMeshAreaModifier must be 56 bytes");
 
 	struct NavMeshMacroTile
 	{
