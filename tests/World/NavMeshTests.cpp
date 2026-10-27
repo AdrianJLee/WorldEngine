@@ -646,6 +646,171 @@ static void TestNavMeshMultiLayeredOverlappingSurfaces()
 	std::cout << "[PASS] TestNavMeshMultiLayeredOverlappingSurfaces (Overlapped Quads: " << overlapLowerCount << "x2)\n";
 }
 
+static void TestNavMeshAreaModifierCenterYOffsetClearance()
+{
+	NavMesh nav;
+	// 建立 3 个连续四边形通道: (0,0) -> (10,0) -> (20,0) -> (30,0)
+	uint32_t v[8];
+	v[0] = nav.AddVertex(glm::vec3(0.0f, 0.0f, 0.0f));
+	v[1] = nav.AddVertex(glm::vec3(10.0f, 0.0f, 0.0f));
+	v[2] = nav.AddVertex(glm::vec3(20.0f, 0.0f, 0.0f));
+	v[3] = nav.AddVertex(glm::vec3(30.0f, 0.0f, 0.0f));
+
+	v[4] = nav.AddVertex(glm::vec3(0.0f, 0.0f, 10.0f));
+	v[5] = nav.AddVertex(glm::vec3(10.0f, 0.0f, 10.0f));
+	v[6] = nav.AddVertex(glm::vec3(20.0f, 0.0f, 10.0f));
+	v[7] = nav.AddVertex(glm::vec3(30.0f, 0.0f, 10.0f));
+
+	nav.AddPolygon({ v[0], v[1], v[5], v[4] }); // 0
+	uint32_t pMid = nav.AddPolygon({ v[1], v[2], v[6], v[5] }); // 1 (中间通道，Center 为 (15.0, 0.0, 5.0))
+	nav.AddPolygon({ v[2], v[3], v[7], v[6] }); // 2
+	nav.BuildAdjacency();
+
+	// 添加带有 Y 轴位移 (Center.y = 0.6f > 0.05f) 的 AreaModifier，配置 ClearanceHeight = 1.3f
+	NavMeshAreaModifier mod;
+	mod.Center = glm::vec3(15.0f, 0.6f, 5.0f);
+	mod.Extents = glm::vec3(5.0f, 2.0f, 5.0f);
+	mod.AreaType = NavAreaType::LowCeiling;
+	mod.CostMultiplier = 1.0f;
+	mod.ClearanceHeight = 1.3f;
+	nav.AddAreaModifier(mod);
+
+	// 1. 验证受影响的多边形 Clearance 严格等于 1.3f，绝不膨胀为 1.9f (1.3 + 0.6)
+	const auto& midPoly = nav.GetPolygon(pMid);
+	assert(std::abs(midPoly.Clearance - 1.3f) < 1e-4f);
+
+	const glm::vec3 startPt(2.0f, 0.0f, 5.0f);
+	const glm::vec3 endPt(28.0f, 0.0f, 5.0f);
+
+	// 2. 验证身高 1.8m 的 tallFilter (站立人偶) 寻路失败 (受 1.3m 限高拦截)
+	{
+		NavQueryFilter tallFilter;
+		tallFilter.AgentHeight = 1.8f;
+		tallFilter.RequireClearance = true;
+		std::vector<glm::vec3> path;
+		bool found = nav.FindPath(startPt, endPt, path, tallFilter);
+		assert(!found);
+	}
+
+	// 3. 验证身高 1.0m 的 shortFilter 顺畅寻路成功
+	{
+		NavQueryFilter shortFilter;
+		shortFilter.AgentHeight = 1.0f;
+		shortFilter.RequireClearance = true;
+		std::vector<glm::vec3> path;
+		bool found = nav.FindPath(startPt, endPt, path, shortFilter);
+		assert(found);
+		assert(path.size() >= 2);
+	}
+
+	std::cout << "[PASS] TestNavMeshAreaModifierCenterYOffsetClearance\n";
+}
+
+static void TestNavMeshOffMeshLinkCostAndChokepoint()
+{
+	NavMesh nav;
+
+	// 构建 3 个连续平地四边形通道:
+	// Poly 0: [0, 10] x [0, 10], Center (5, 0, 5)
+	// Poly 1: [10, 20] x [0, 10], Center (15, 0, 5)
+	// Poly 2: [20, 30] x [0, 10], Center (25, 0, 5)
+	uint32_t v[8];
+	v[0] = nav.AddVertex(glm::vec3(0.0f, 0.0f, 0.0f));
+	v[1] = nav.AddVertex(glm::vec3(10.0f, 0.0f, 0.0f));
+	v[2] = nav.AddVertex(glm::vec3(20.0f, 0.0f, 0.0f));
+	v[3] = nav.AddVertex(glm::vec3(30.0f, 0.0f, 0.0f));
+
+	v[4] = nav.AddVertex(glm::vec3(0.0f, 0.0f, 10.0f));
+	v[5] = nav.AddVertex(glm::vec3(10.0f, 0.0f, 10.0f));
+	v[6] = nav.AddVertex(glm::vec3(20.0f, 0.0f, 10.0f));
+	v[7] = nav.AddVertex(glm::vec3(30.0f, 0.0f, 10.0f));
+
+	uint32_t p0 = nav.AddPolygon({ v[0], v[1], v[5], v[4] }); // 0
+	uint32_t p1 = nav.AddPolygon({ v[1], v[2], v[6], v[5] }); // 1
+	uint32_t p2 = nav.AddPolygon({ v[2], v[3], v[7], v[6] }); // 2
+
+	// 在侧方构建一个独立的平台多边形 3: [10, 20] x [20, 30], Center (15, 0, 25)
+	uint32_t vPlatform[4];
+	vPlatform[0] = nav.AddVertex(glm::vec3(10.0f, 0.0f, 20.0f));
+	vPlatform[1] = nav.AddVertex(glm::vec3(20.0f, 0.0f, 20.0f));
+	vPlatform[2] = nav.AddVertex(glm::vec3(20.0f, 0.0f, 30.0f));
+	vPlatform[3] = nav.AddVertex(glm::vec3(10.0f, 0.0f, 30.0f));
+	uint32_t pPlatform = nav.AddPolygon({ vPlatform[0], vPlatform[1], vPlatform[2], vPlatform[3] }); // 3
+
+	nav.BuildAdjacency();
+
+	// 验证 HasSharedBoundary 正确反映几何连通性
+	assert(nav.HasSharedBoundary(p0, p1));
+	assert(nav.HasSharedBoundary(p1, p2));
+	assert(!nav.HasSharedBoundary(p0, p2));
+	assert(!nav.HasSharedBoundary(p1, pPlatform));
+
+	// 在 p0 和侧方孤立平台 pPlatform 之间建立跳跃链接 Link1，在 pPlatform 和 p2 之间建立 Link2
+	NavMeshOffMeshLink linkSide1;
+	linkSide1.Start = glm::vec3(5.0f, 0.0f, 8.0f);
+	linkSide1.End = glm::vec3(15.0f, 0.0f, 22.0f);
+	linkSide1.Cost = 2.0f;
+	linkSide1.BiDirectional = false;
+	nav.AddOffMeshLink(linkSide1);
+
+	NavMeshOffMeshLink linkSide2;
+	linkSide2.Start = glm::vec3(15.0f, 0.0f, 28.0f);
+	linkSide2.End = glm::vec3(25.0f, 0.0f, 8.0f);
+	linkSide2.Cost = 2.0f;
+	linkSide2.BiDirectional = false;
+	nav.AddOffMeshLink(linkSide2);
+
+	const glm::vec3 startPt(2.0f, 0.0f, 5.0f);
+	const glm::vec3 endPt(28.0f, 0.0f, 5.0f);
+
+	// 1. 验证在平地通道完整时，A* 启发式与跳跃边代价机制会严格惩罚跳跃，优先走平坦直路，绝不偏航跳跃
+	{
+		std::vector<glm::vec3> path;
+		bool found = nav.FindPath(startPt, endPt, path);
+		assert(found);
+		// 平地直达只有 2 个点 (起点与终点直线贯通)
+		assert(path.size() == 2);
+		assert(std::abs(path[0].x - startPt.x) < 1e-3f && std::abs(path[0].z - startPt.z) < 1e-3f);
+		assert(std::abs(path.back().x - endPt.x) < 1e-3f && std::abs(path.back().z - endPt.z) < 1e-3f);
+		// 确保路径上没有任何路点进入侧方跳跃平台 (Z 坐标远小于 20.0f)
+		for (const auto& pt : path)
+		{
+			assert(pt.z < 15.0f);
+		}
+	}
+
+	// 2. 验证当平坦直路发生断裂/阻挡 (p1 阻塞) 时，跳跃通道成为唯一通路，能成功规划出跨跳跃点路径
+	{
+		nav.GetPolygonMut(p1).Blocked = true;
+		std::vector<glm::vec3> path;
+		bool found = nav.FindPath(startPt, endPt, path);
+		assert(found);
+		// 此时必须走跳跃点绕过阻塞的 p1 通道
+		bool visitedPlatform = false;
+		for (const auto& pt : path)
+		{
+			if (pt.z >= 20.0f)
+			{
+				visitedPlatform = true;
+				break;
+			}
+		}
+		assert(visitedPlatform);
+		nav.GetPolygonMut(p1).Blocked = false; // 恢复
+	}
+
+	// 3. 验证单向跳跃限制 (BiDirectional = false) 拦截逆向跨越
+	{
+		nav.GetPolygonMut(p1).Blocked = true;
+		std::vector<glm::vec3> reversePath;
+		bool reverseFound = nav.FindPath(endPt, startPt, reversePath);
+		assert(!reverseFound);
+		nav.GetPolygonMut(p1).Blocked = false;
+	}
+
+	std::cout << "[PASS] TestNavMeshOffMeshLinkCostAndChokepoint\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.NavMesh tests...\n";
@@ -664,6 +829,8 @@ int main()
 	TestNavMeshMacroTilesLOD();
 	TestNavMeshLowCeilingAndAgentHeightFiltering();
 	TestNavMeshMultiLayeredOverlappingSurfaces();
-	std::cout << "All 15 World.NavMesh tests passed successfully!\n";
+	TestNavMeshAreaModifierCenterYOffsetClearance();
+	TestNavMeshOffMeshLinkCostAndChokepoint();
+	std::cout << "All 17 World.NavMesh tests passed successfully!\n";
 	return 0;
 }

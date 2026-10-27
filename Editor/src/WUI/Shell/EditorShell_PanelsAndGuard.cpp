@@ -1241,11 +1241,10 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 					if (m_Ctx)
 						TogglePanel(*m_Ctx, "settings");
 				} });
-		fileEntries.push_back({ Wui::Tr("menu.file.editor_settings", "Editor Preferences"), false, [this, &ctx]
+		fileEntries.push_back({ Wui::Tr("menu.file.editor_settings", "Editor Preferences"), false, [this]
 				{
-					if (!FindFloatHost("prefs") && !m_Layout.Contains("prefs"))
-						OpenIndependentPanel("prefs");
-					TogglePanel(ctx, "prefs");
+					if (m_Ctx)
+						TogglePanel(*m_Ctx, "prefs");
 				} });
 		fileEntries.push_back({ Wui::Tr("menu.file.lua_stubs", "Generate Lua API Stubs"), false,
 			[this] { m_Editor.GenerateLuaStubsAction(); } });

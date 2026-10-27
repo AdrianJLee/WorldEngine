@@ -167,6 +167,9 @@ namespace World
 			const glm::vec3& start, const glm::vec3& end,
 			std::vector<glm::vec3>& outPath);
 
+		// 检查两个多边形是否共享几何边或台阶连续边界 (用于走廊连续性判定与折返剔除)
+		bool HasSharedBoundary(uint32_t polyA, uint32_t polyB) const;
+
 		// 从地貌高度场自动烘焙生成可通行多边形网格
 		void BakeFromTerrain(const TerrainData& terrain, float maxSlopeDeg = 45.0f, float stepSize = 4.0f);
 

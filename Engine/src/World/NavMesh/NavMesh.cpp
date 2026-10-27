@@ -296,22 +296,11 @@ namespace World
 					poly.AreaType = modifier.AreaType;
 					poly.Cost = modifier.CostMultiplier;
 
-					// 物理有效净空推导：
-					// 1. 未移动实体时（Center.y <= 0.05m），净空严格遵照 modifier.ClearanceHeight (如 1.3m)，绝不穿透！
-					// 2. 当设计师在视口中向上抬高实体（Center.y > 0.05m）时，离地落差线性增加通过净空：ClearanceHeight + Center.y！
 					float effClearance = modifier.ClearanceHeight;
-					if (effClearance > 0.0f)
-					{
-						if (modifier.Center.y > 0.05f)
-						{
-							effClearance += modifier.Center.y;
-						}
-					}
-					else
+					if (effClearance <= 0.0f)
 					{
 						effClearance = std::max(0.0f, (modifier.Center + modifier.Extents).y - poly.Center.y);
 					}
-
 					poly.Clearance = effClearance;
 					if (modifier.AreaType == 4 || modifier.CostMultiplier <= 0.0f)
 					{
@@ -430,6 +419,50 @@ namespace World
 		return found;
 	}
 
+	bool NavMesh::HasSharedBoundary(uint32_t polyA, uint32_t polyB) const
+	{
+		if (polyA >= m_Polygons.size() || polyB >= m_Polygons.size() || polyA == polyB)
+			return false;
+
+		const auto& pA = m_Polygons[polyA];
+		const auto& pB = m_Polygons[polyB];
+
+		// 1. 检查拓扑共享顶点
+		size_t sharedCount = 0;
+		for (uint32_t va : pA.VertexIndices)
+		{
+			for (uint32_t vb : pB.VertexIndices)
+			{
+				if (va == vb)
+				{
+					++sharedCount;
+					if (sharedCount >= 2)
+						return true;
+				}
+			}
+		}
+
+		// 2. 检查台阶连续边界 (水平贴合，垂直落差 <= 0.65m)
+		sharedCount = 0;
+		for (uint32_t va : pA.VertexIndices)
+		{
+			for (uint32_t vb : pB.VertexIndices)
+			{
+				const glm::vec3& pa = m_Vertices[va];
+				const glm::vec3& pb = m_Vertices[vb];
+				if (glm::distance(glm::vec2(pa.x, pa.z), glm::vec2(pb.x, pb.z)) < 0.25f &&
+					std::abs(pa.y - pb.y) <= 0.65f)
+				{
+					++sharedCount;
+					if (sharedCount >= 2)
+						return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
 	bool NavMesh::FindPath(const glm::vec3& start, const glm::vec3& end,
 		std::vector<glm::vec3>& outPath,
 		const NavQueryFilter& filter) const
@@ -452,7 +485,38 @@ namespace World
 			return true;
 		}
 
-		// 3D A* 走廊搜索 (区域代价加权与净空/掩码过滤)
+		// 预解析跨网格跳跃 (Off-Mesh Links) 的拓扑连接与代价映射
+		struct ResolvedLink
+		{
+			uint32_t FromPoly = 0;
+			uint32_t ToPoly = 0;
+			glm::vec3 StartPt { 0.0f };
+			glm::vec3 EndPt { 0.0f };
+			float Cost = 1.0f;
+		};
+
+		std::vector<ResolvedLink> resolvedLinks;
+		if (!m_OffMeshLinks.empty())
+		{
+			resolvedLinks.reserve(m_OffMeshLinks.size() * 2);
+			for (const auto& link : m_OffMeshLinks)
+			{
+				glm::vec3 sPt, ePt;
+				uint32_t pStart = 0, pEnd = 0;
+				if (SamplePosition(link.Start, 5.0f, sPt, pStart) &&
+					SamplePosition(link.End, 5.0f, ePt, pEnd) &&
+					pStart != pEnd)
+				{
+					resolvedLinks.push_back({ pStart, pEnd, link.Start, link.End, link.Cost });
+					if (link.BiDirectional)
+					{
+						resolvedLinks.push_back({ pEnd, pStart, link.End, link.Start, link.Cost });
+					}
+				}
+			}
+		}
+
+		// 3D A* 走廊搜索 (标准欧氏距离启发式 + 区域代价与跳跃代价加权)
 		struct AStarNode
 		{
 			uint32_t PolyIdx;
@@ -467,7 +531,8 @@ namespace World
 		cameFrom.reserve(256);
 
 		gScore[polyStart] = 0.0f;
-		openSet.push({ polyStart, glm::distance(m_Polygons[polyStart].Center, navEnd) * 0.25f });
+		// 启发式恢复标准欧氏距离：1.0f 权重保证目标牵引力
+		openSet.push({ polyStart, glm::distance(m_Polygons[polyStart].Center, navEnd) });
 
 		bool reached = false;
 
@@ -493,9 +558,30 @@ namespace World
 				if (!filter.CanTraverse(nbrPoly.AreaType, nbrPoly.Clearance))
 					continue;
 
-				// 移动代价乘以目标多边形 Cost
-				const float edgeDist = glm::distance(currPoly.Center, m_Polygons[neighbor].Center);
-				const float edgeCost = edgeDist * m_Polygons[neighbor].Cost;
+				// 检查是否为跨网格跳跃边
+				const ResolvedLink* pLink = nullptr;
+				for (const auto& rl : resolvedLinks)
+				{
+					if (rl.FromPoly == curr && rl.ToPoly == static_cast<uint32_t>(neighbor))
+					{
+						pLink = &rl;
+						break;
+					}
+				}
+
+				// 移动代价计算：若是跳跃边，将跳跃基础惩罚与 link.Cost 权重真实累加，避免平地直行误跳
+				float edgeCost = 0.0f;
+				if (pLink)
+				{
+					const float jumpDist = glm::distance(pLink->StartPt, pLink->EndPt);
+					edgeCost = jumpDist * nbrPoly.Cost + 5.0f + std::max(pLink->Cost, 1.0f) * 4.0f;
+				}
+				else
+				{
+					const float edgeDist = glm::distance(currPoly.Center, nbrPoly.Center);
+					edgeCost = edgeDist * nbrPoly.Cost;
+				}
+
 				const float tentativeG = gScore[curr] + edgeCost;
 
 				auto itG = gScore.find(neighbor);
@@ -503,7 +589,7 @@ namespace World
 				{
 					cameFrom[neighbor] = curr;
 					gScore[neighbor] = tentativeG;
-					const float h = glm::distance(m_Polygons[neighbor].Center, navEnd) * 0.25f;
+					const float h = glm::distance(m_Polygons[neighbor].Center, navEnd);
 					openSet.push({ static_cast<uint32_t>(neighbor), tentativeG + h });
 				}
 			}
@@ -522,6 +608,32 @@ namespace World
 		}
 		corridor.push_back(polyStart);
 		std::reverse(corridor.begin(), corridor.end());
+		for (size_t ci = 0; ci < corridor.size(); ++ci) {
+			const auto& cp = m_Polygons[corridor[ci]];
+			WLD_CORE_WARN("  [{0}] poly={1} center=({2:.2f},{3:.2f},{4:.2f})", ci, corridor[ci], cp.Center.x, cp.Center.y, cp.Center.z);
+		}
+
+		// 走廊跨跳跃点折返多边形剪枝：消除跳跃后紧接着折回跳跃前相邻区域的无效多边形
+		if (corridor.size() >= 3)
+		{
+			for (size_t i = 0; i + 2 < corridor.size();)
+			{
+				if (!HasSharedBoundary(corridor[i], corridor[i + 1]))
+				{
+					if (HasSharedBoundary(corridor[i], corridor[i + 2]))
+					{
+						corridor.erase(corridor.begin() + i + 1);
+						continue;
+					}
+					if (i + 3 < corridor.size() && HasSharedBoundary(corridor[i], corridor[i + 3]))
+					{
+						corridor.erase(corridor.begin() + i + 1, corridor.begin() + i + 3);
+						continue;
+					}
+				}
+				++i;
+			}
+		}
 
 		// 提取过境线门径 (Portals) 并处理跨网格跳跃 (Off-Mesh Links)
 		struct PathSegment
@@ -585,34 +697,55 @@ namespace World
 			}
 			else
 			{
-				// 跨网格跳跃链接 (Off-Mesh Link)
+				// 跨网格跳跃链接 (Off-Mesh Link) 检查
+				bool matched = false;
 				glm::vec3 jumpS = pA.Center;
 				glm::vec3 jumpE = pB.Center;
-				for (const auto& link : m_OffMeshLinks)
+
+				for (const auto& rl : resolvedLinks)
 				{
-					if (glm::distance(pA.Center, link.Start) < 5.0f && glm::distance(pB.Center, link.End) < 5.0f)
+					if (rl.FromPoly == corridor[i] && rl.ToPoly == corridor[i + 1])
 					{
-						jumpS = link.Start;
-						jumpE = link.End;
-						break;
-					}
-					if (link.BiDirectional && glm::distance(pA.Center, link.End) < 5.0f && glm::distance(pB.Center, link.Start) < 5.0f)
-					{
-						jumpS = link.End;
-						jumpE = link.Start;
+						jumpS = rl.StartPt;
+						jumpE = rl.EndPt;
+						matched = true;
 						break;
 					}
 				}
 
-				segments.back().HasJumpAfter = true;
-				segments.back().SegEnd = jumpS;
-				segments.back().JumpStart = jumpS;
-				segments.back().JumpEnd = jumpE;
+				if (matched)
+				{
+					segments.back().HasJumpAfter = true;
+					segments.back().SegEnd = jumpS;
+					segments.back().JumpStart = jumpS;
+					segments.back().JumpEnd = jumpE;
 
-				PathSegment nextSeg;
-				nextSeg.SegStart = jumpE;
-				nextSeg.SegEnd = navEnd;
-				segments.push_back(nextSeg);
+					PathSegment nextSeg;
+					nextSeg.SegStart = jumpE;
+					nextSeg.SegEnd = navEnd;
+					segments.push_back(nextSeg);
+				}
+				else
+				{
+					// 未焊合/T-Junction 等拓扑相邻但未提取出共享顶点的普通连续网格，生成虚拟门径平滑穿过，绝不插入跳跃点
+					glm::vec3 midPt = (pA.Center + pB.Center) * 0.5f;
+					glm::vec3 dir = pB.Center - pA.Center;
+					glm::vec3 perp(0.0f);
+					if (dir.x * dir.x + dir.z * dir.z > 1e-4f)
+					{
+						perp = glm::normalize(glm::vec3(-dir.z, 0.0f, dir.x));
+					}
+					else
+					{
+						perp = glm::vec3(1.0f, 0.0f, 0.0f);
+					}
+					NavMeshPortal portal;
+					portal.Left = midPt - perp * 0.5f;
+					portal.Right = midPt + perp * 0.5f;
+					if (TriArea2D(pA.Center, portal.Left, portal.Right) < 0.0f)
+						std::swap(portal.Left, portal.Right);
+					segments.back().Portals.push_back(portal);
+				}
 			}
 		}
 
@@ -637,6 +770,60 @@ namespace World
 					outPath.push_back(segments[s].JumpEnd);
 				}
 			}
+		}
+
+		// Funnel 跨跳跃点折返保护：消除跳跃后锐角折回跳跃前区域的无效三角形
+		if (outPath.size() >= 4)
+		{
+			bool pruned = false;
+			do
+			{
+				pruned = false;
+				for (size_t i = 1; i + 2 < outPath.size(); ++i)
+				{
+					bool isJump = false;
+					for (const auto& rl : resolvedLinks)
+					{
+						if (glm::distance(outPath[i], rl.StartPt) < 0.2f &&
+							glm::distance(outPath[i + 1], rl.EndPt) < 0.2f)
+						{
+							isJump = true;
+							break;
+						}
+					}
+
+					if (isJump)
+					{
+						const glm::vec3& pPrev = outPath[i - 1];
+						const glm::vec3& jStart = outPath[i];
+						const glm::vec3& jEnd = outPath[i + 1];
+
+						for (size_t j = i + 2; j < std::min(outPath.size(), i + 4); ++j)
+						{
+							const glm::vec3& pNext = outPath[j];
+							const glm::vec2 vJump(jEnd.x - jStart.x, jEnd.z - jStart.z);
+							const glm::vec2 vBack(pNext.x - jEnd.x, pNext.z - jEnd.z);
+							const float lenJump = glm::length(vJump);
+							const float lenBack = glm::length(vBack);
+
+							if (lenJump > 0.05f && lenBack > 0.05f)
+							{
+								const float cosTheta = glm::dot(vJump / lenJump, vBack / lenBack);
+								if (cosTheta < -0.1f && std::abs(pPrev.y - pNext.y) <= 0.8f)
+								{
+									if (Raycast(pPrev, pNext))
+									{
+										outPath.erase(outPath.begin() + i, outPath.begin() + j);
+										pruned = true;
+										break;
+									}
+								}
+							}
+						}
+					}
+					if (pruned) break;
+				}
+			} while (pruned && outPath.size() >= 4);
 		}
 
 		return !outPath.empty();
@@ -1129,10 +1316,7 @@ namespace World
 							gsp.Cost = mod.CostMultiplier;
 							if (mod.ClearanceHeight > 0.0f)
 							{
-								float effClearance = mod.ClearanceHeight;
-								if (cellCenter.y > 0.05f)
-									effClearance += cellCenter.y;
-								gsp.Clearance = effClearance;
+								gsp.Clearance = mod.ClearanceHeight;
 							}
 							if (mod.AreaType == 4 || mod.CostMultiplier <= 0.0f)
 								gsp.Blocked = true;
@@ -2283,12 +2467,7 @@ namespace World
 						{
 							if (mod.ContainsPoint(poly.Center))
 							{
-								float effClearance = mod.ClearanceHeight;
-								if (effClearance > 0.0f && mod.Center.y > 0.05f)
-								{
-									effClearance += mod.Center.y;
-								}
-								poly.Clearance = effClearance;
+								poly.Clearance = mod.ClearanceHeight;
 							}
 						}
 					}
