@@ -1,4 +1,5 @@
 #include "WUI/Panels/AnimGraphPanel.h"
+#include "WUI/Common/EditorAssetCatalog.h"
 
 #include "World/Animation/AnimGraphCondition.h"
 #include "World/Core/KeyCodes.h"
@@ -50,6 +51,14 @@ namespace World
 		constexpr float kTransitionBaseH = 52.0f;
 		constexpr float kTransitionEditorRowH = 24.0f;
 		constexpr size_t kHistoryLimit = 64;
+
+		std::string ShortenPath(const std::string& path)
+		{
+			if (path.empty())
+				return {};
+			const size_t slash = path.find_last_of("/\\");
+			return slash == std::string::npos ? path : path.substr(slash + 1);
+		}
 
 		std::string NormalizeSlashes(std::string text)
 		{
@@ -464,6 +473,7 @@ namespace World
 		m_Graph.Clear();
 		m_Graph.SetGraphName(AGTr("graph.default_name", "New Animation Graph"));
 		m_Graph.SetModelHint("engine/models/characters/mannequin.wmodel");
+		m_TargetModelPath = m_Graph.GetModelHint();
 		auto defineParameter = [this](const char* name, AnimGraph::AnimParameterType type, float defaultValue,
 			float minValue, float maxValue, const char* unit)
 		{
@@ -606,6 +616,7 @@ namespace World
 		}
 
 		m_Graph = std::move(loaded);
+		m_TargetModelPath = m_Graph.GetModelHint();
 		// LoadFromFile 末尾 SetInitialState(initial:) ⇒ 此刻的 CurrentState 就是资产初始状态。
 		m_InitialStateHint = m_Graph.GetCurrentStateName();
 		m_UndoStack.clear();
@@ -653,6 +664,7 @@ namespace World
 
 	bool AnimGraphPanel::SaveAsset()
 	{
+		m_Graph.SetModelHint(m_TargetModelPath);
 		CommitPendingCondition();
 		if (!m_TransitionEditKey.empty() && !m_TransitionError.empty())
 		{
@@ -1064,6 +1076,8 @@ namespace World
 
 	std::string AnimGraphPanel::ModelLogicalPathForSelected(PanelHost& host) const
 	{
+		if (!m_TargetModelPath.empty())
+			return m_TargetModelPath;
 		Entity entity = host.GetSelectedEntity();
 		const Ref<Scene> sceneRef = host.GetActiveScene();
 		Scene* scene = sceneRef.get();
@@ -1365,6 +1379,10 @@ namespace World
 			bodyTop += openRow.H + kGap * 0.5f;
 		}
 
+		const Wui::WuiRect modelRow { toolbar.X, bodyTop, toolbar.W, kRowH + 4.0f };
+		RenderModelPickerRow(ctx, modelRow, host, theme);
+		bodyTop += modelRow.H + kGap * 0.5f;
+
 		const float bodyBottom = rect.Y + rect.H - outer - kStatusH - kGap * 0.5f;
 		const float bodyH = std::max(0.0f, bodyBottom - bodyTop);
 		const float bodyW = rect.W - outer * 2.0f;
@@ -1613,6 +1631,96 @@ namespace World
 			ctx.SetFocus(0);
 		}
 	}
+
+	void AnimGraphPanel::RenderModelPickerRow(Wui::WuiContext& ctx, const Wui::WuiRect& row, PanelHost& host,
+		const Wui::WuiTheme& theme)
+	{
+		Wui::PanelBackground(ctx, row, theme.ContentBg, theme.Radius);
+
+		const float labelW = 90.0f;
+		Wui::Label(ctx, { row.X + theme.Pad, row.Y + 4.0f },
+			AGTr("target_model.label", "Target Model:"), theme.TextMuted, theme.FontSizeCaption);
+
+		const float clearW = 50.0f;
+		const float previewW = 70.0f;
+		const float pickComboW = 140.0f;
+		const float fieldW = std::max(60.0f, row.W - labelW - clearW - previewW - pickComboW - theme.Pad * 5.0f);
+
+		const Wui::WuiRect fieldRect { row.X + labelW + theme.Pad, row.Y + 2.0f, fieldW, kRowH };
+		const Wui::WuiId fieldId = Wui::HashId("animgraph.target_model.path");
+		Wui::TextFieldA11y a11y;
+		a11y.Label = AGTr("target_model.label", "Target Model");
+		a11y.Placeholder = "models/character.wmodel";
+		const bool submitted = Wui::TextField(ctx, fieldId, fieldRect, m_TargetModelPath, theme, nullptr, &a11y);
+		if (ctx.Focus() == fieldId)
+			ctx.SetTextInputActive(true);
+
+		if (submitted)
+		{
+			m_Graph.SetModelHint(m_TargetModelPath);
+			m_ModelKey.clear();
+			RefreshModel(host);
+			MarkDirty();
+		}
+		Wui::Tooltip(ctx, fieldRect, AGTr("target_model.tooltip",
+			"Specify a .wmodel directly in the AnimGraph to drive state previews and clip pickers without needing a scene entity selected."));
+
+		// Pick Combo
+		const auto& modelAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Model);
+		std::vector<std::string> comboOpts;
+		comboOpts.reserve(modelAssets.size() + 1);
+		comboOpts.push_back(AGTr("target_model.pick", "(Select .wmodel...)"));
+		for (const auto& m : modelAssets)
+			comboOpts.push_back(m);
+		int comboIdx = 0;
+		if (!m_TargetModelPath.empty())
+		{
+			const auto it = std::find(modelAssets.begin(), modelAssets.end(), m_TargetModelPath);
+			if (it != modelAssets.end())
+				comboIdx = static_cast<int>(std::distance(modelAssets.begin(), it)) + 1;
+		}
+
+		const Wui::WuiRect comboRect { fieldRect.X + fieldRect.W + theme.PadSmall, row.Y + 2.0f, pickComboW, kRowH };
+		if (Wui::Combo(ctx, Wui::HashId("animgraph.target_model.combo"), comboRect, "",
+			comboOpts, comboIdx, theme, m_TargetModelPath.empty() ? AGTr("target_model.pick", "Pick Model") : ShortenPath(m_TargetModelPath)))
+		{
+			if (comboIdx > 0 && static_cast<size_t>(comboIdx - 1) < modelAssets.size())
+			{
+				m_TargetModelPath = modelAssets[static_cast<size_t>(comboIdx - 1)];
+				m_Graph.SetModelHint(m_TargetModelPath);
+				m_ModelKey.clear();
+				RefreshModel(host);
+				MarkDirty();
+			}
+		}
+		Wui::Tooltip(ctx, comboRect, AGTr("target_model.pick_tooltip", "Select a .wmodel from project content"));
+
+		// Preview button
+		const Wui::WuiRect previewBtnRect { comboRect.X + comboRect.W + theme.PadSmall, row.Y + 2.0f, previewW, kRowH };
+		const bool hasValidModel = !m_TargetModelPath.empty() || m_ModelValid;
+		const std::string previewPath = !m_TargetModelPath.empty() ? m_TargetModelPath : m_ModelKey;
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.target_model.preview"), previewBtnRect,
+			AGTr("target_model.preview", "Preview"), theme, hasValidModel,
+			AGTr("target_model.preview_tip", "Open Model Preview panel for this model"), false))
+		{
+			if (!previewPath.empty())
+				host.OpenModelPreview(previewPath);
+		}
+
+		// Clear button
+		const Wui::WuiRect clearBtnRect { previewBtnRect.X + previewBtnRect.W + theme.PadSmall, row.Y + 2.0f, clearW, kRowH };
+		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.target_model.clear"), clearBtnRect,
+			AGTr("target_model.clear", "Clear"), theme, !m_TargetModelPath.empty(),
+			AGTr("target_model.clear_tip", "Unbind target model and revert to entity binding"), false))
+		{
+			m_TargetModelPath.clear();
+			m_Graph.SetModelHint("");
+			m_ModelKey.clear();
+			RefreshModel(host);
+			MarkDirty();
+		}
+	}
+
 
 	// ---------------------------------------------------------------------------
 	// 左栏:状态 / 层
@@ -2233,14 +2341,25 @@ namespace World
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, AGTr("state.clip", "Clip"), theme.TextMuted, theme.FontSizeSmall);
 		if (state->Kind == AnimStateKind::SingleClip)
 		{
+			if (m_ClipEditBufferKey != stateName)
+			{
+				m_ClipEditBufferKey = stateName;
+				m_ClipEditBuffer = state->ClipName;
+			}
+
 			if (m_ModelValid && !m_Model.Animations.empty())
 			{
+				const float comboW = std::max(60.0f, (controlW - 4.0f) * 0.5f);
+				const float textW = std::max(60.0f, controlW - comboW - 4.0f);
+				const Wui::WuiRect comboRect { controlX, y, comboW, kRowH };
+				const Wui::WuiRect textRect { controlX + comboW + 4.0f, y, textW, kRowH };
+
 				const std::vector<std::string> clips = ClipOptionsForCombo(state->ClipName);
 				int clipIndex = 0;
 				const auto found = std::find(clips.begin(), clips.end(), state->ClipName);
 				if (found != clips.end())
 					clipIndex = static_cast<int>(std::distance(clips.begin(), found));
-				if (Wui::Combo(ctx, Wui::HashId("animgraph.state.clip"), { controlX, y, controlW, kRowH }, "",
+				if (Wui::Combo(ctx, Wui::HashId("animgraph.state.clip.combo"), comboRect, "",
 					clips, clipIndex, theme,
 					state->ClipName.empty() ? AGTr("state.pick_clip", "(pick a clip)") : state->ClipName))
 				{
@@ -2248,24 +2367,47 @@ namespace World
 					{
 						AnimState updated = *state;
 						updated.ClipName = clips[static_cast<size_t>(clipIndex)];
+						m_ClipEditBuffer = updated.ClipName;
 						ReplaceState(stateName, updated);
 					}
 				}
-				Wui::Tooltip(ctx, { controlX, y, controlW, kRowH },
-					AGFmt("state.clip_tooltip", "Clip from the selected entity's model ({count} clips available).",
+				Wui::Tooltip(ctx, comboRect,
+					AGFmt("state.clip_tooltip", "Clip from target model ({count} clips available).",
 					{ { "count", std::to_string(m_Model.Animations.size()) } }));
+
+				const Wui::WuiId clipTextId = Wui::HashId("animgraph.state.clip.text");
+				Wui::TextFieldA11y clipA11y;
+				clipA11y.Label = "Clip Name";
+				clipA11y.Placeholder = "Clip Name";
+				const bool textSubmitted = Wui::TextField(ctx, clipTextId, textRect, m_ClipEditBuffer, theme, nullptr, &clipA11y);
+				if (ctx.Focus() == clipTextId)
+					ctx.SetTextInputActive(true);
+
+				if (textSubmitted || (ctx.Focus() != clipTextId && m_ClipEditBuffer != state->ClipName))
+				{
+					AnimState updated = *state;
+					updated.ClipName = m_ClipEditBuffer;
+					ReplaceState(stateName, updated);
+				}
+				Wui::Tooltip(ctx, textRect, AGTr("state.clip_custom_tip", "Directly edit clip name."));
 			}
 			else
 			{
-				const std::string hint = m_ModelKey.empty()
-					? AGTr("state.no_model", "No model bound: select a character with a SkinnedMeshRenderer.")
-					: (m_ModelError.empty()
-						? AGFmt("state.no_clips", "No animation clips in {path}", { { "path", m_ModelKey } })
-						: AGTr("state.model_load_failed", "Model failed to load: ") + m_ModelError);
-				Wui::Label(ctx, { controlX, y + 4.0f },
-					Wui::EllipsizeMiddleToWidth(ctx, hint, controlW, theme.FontSizeSmall), theme.TextMuted,
-					theme.FontSizeSmall);
-				Wui::Tooltip(ctx, { controlX, y, controlW, kRowH }, hint);
+				const Wui::WuiId clipTextId = Wui::HashId("animgraph.state.clip.text");
+				Wui::TextFieldA11y clipA11y;
+				clipA11y.Label = "Clip Name";
+				clipA11y.Placeholder = "Clip Name (e.g. Idle, Walk, Run)";
+				const bool textSubmitted = Wui::TextField(ctx, clipTextId, { controlX, y, controlW, kRowH }, m_ClipEditBuffer, theme, nullptr, &clipA11y);
+				if (ctx.Focus() == clipTextId)
+					ctx.SetTextInputActive(true);
+
+				if (textSubmitted || (ctx.Focus() != clipTextId && m_ClipEditBuffer != state->ClipName))
+				{
+					AnimState updated = *state;
+					updated.ClipName = m_ClipEditBuffer;
+					ReplaceState(stateName, updated);
+				}
+				Wui::Tooltip(ctx, { controlX, y, controlW, kRowH }, AGTr("state.clip_custom_tip", "Directly edit clip name without requiring a bound model."));
 			}
 		}
 		else

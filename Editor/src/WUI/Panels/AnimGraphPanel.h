@@ -79,6 +79,8 @@ namespace World
 			const Wui::WuiTheme& theme);
 		void RenderOpenRow(Wui::WuiContext& ctx, const Wui::WuiRect& row, PanelHost& host,
 			const Wui::WuiTheme& theme);
+		void RenderModelPickerRow(Wui::WuiContext& ctx, const Wui::WuiRect& row, PanelHost& host,
+			const Wui::WuiTheme& theme);
 		void RenderLeftColumn(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
 			const Wui::WuiTheme& theme);
 		void RenderCenterColumn(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
@@ -271,6 +273,9 @@ namespace World
 		float m_IkScroll = 0.0f;
 
 		// 模型/Clip 缓存(选中实体或模型路径变化时才重读)
+		std::string m_TargetModelPath;
+		std::string m_ClipEditBuffer;
+		std::string m_ClipEditBufferKey;
 		std::string m_ModelKey;
 		std::string m_ModelError;
 		bool m_ModelValid = false;

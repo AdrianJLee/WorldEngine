@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace World
@@ -137,6 +138,15 @@ namespace World
 		const std::vector<MeshNode>& GetNodes() const { return m_Nodes; }
 		// submesh.MaterialSlot 指向这里的下标;路径相对内容根(如 "materials/rock.wmat")。
 		const std::vector<std::string>& GetMaterialSlots() const { return m_MaterialSlots; }
+		void SetMaterialSlot(size_t index, const std::string& path)
+		{
+			if (index < m_MaterialSlots.size())
+				m_MaterialSlots[index] = path;
+		}
+		void SetMaterialSlots(std::vector<std::string> slots)
+		{
+			m_MaterialSlots = std::move(slots);
+		}
 
 		// **蒙皮模型的源 .wmodel 数据**(非蒙皮返回 nullptr)。
 		//

@@ -414,5 +414,14 @@
   "panel.animgraph.transitions.multi": "（多条件…）",
   "panel.animgraph.transitions.multi.note": "多条件表达式：请在「高级表达式」里编辑完整规则。",
   "panel.animgraph.toolbar.model": "模型预览",
-  "panel.animgraph.toolbar.model.tooltip": "打开当前绑定角色的 3D 模型预览工作区。"
+  "panel.animgraph.toolbar.model.tooltip": "打开当前绑定角色的 3D 模型预览工作区。",
+  "panel.animgraph.target_model.label": "目标模型:",
+  "panel.animgraph.target_model.pick": "(选择 .wmodel...)",
+  "panel.animgraph.target_model.pick_tooltip": "从项目资产中选择 .wmodel 模型",
+  "panel.animgraph.target_model.clear": "清除",
+  "panel.animgraph.target_model.clear_tip": "解除目标模型绑定并恢复实体联动",
+  "panel.animgraph.target_model.preview": "预览",
+  "panel.animgraph.target_model.preview_tip": "在独立模型预览面板中打开此模型",
+  "panel.animgraph.target_model.tooltip": "独立指定要驱动的目标 3D 模型 (.wmodel)，无需依赖场景选中实体",
+  "panel.animgraph.state.clip_custom_tip": "直接编辑动画片段英文标识符（无需绑定模型也可自由输入）"
 }

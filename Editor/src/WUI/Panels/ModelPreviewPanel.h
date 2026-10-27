@@ -17,7 +17,7 @@
 namespace World
 {
 	// P1b D5: 模型预览面板 —— 工业级 3D 资产检视、材质诊断、骨骼树与动画走带全要素工作台。
-	// 每个 `.wmodel` 一个独立窗口 (id = "model:<逻辑路径>")。
+	// 每个 .wmodel 一个独立窗口 (id = "model:<逻辑路径>")。
 	// 契约:
 	//   - 资产检视与离屏预览完全只读，不修改当前关卡与场景；
 	//   - 视口提供 3D 轨道漫游、透视参考网格 (Grid)、AABB 包围盒线框 (Bounds) 与坐标轴向指示器；
@@ -49,9 +49,9 @@ namespace World
 		uint64_t RenderPreview();
 		// 无障碍诊断: WLD_PREVIEW_TEX_CAPTURE=<目录> 把预览纹理连续写成 PPM。
 		void CapturePreviewTextureSequence();
-		// 节点树 × 各 mesh 局部包围盒 → 世界空间包围盒(相机取景用)。
+		// 节点树 × 各 mesh 局部包围盒 → 世界空间包围盒 (相机取景用)。
 		MeshBounds ComputeWorldBounds() const;
-		// 由 `.wmodel` 逻辑路径推源路径(同目录同名 `.gltf`/`.glb`; 引擎导入约定)。
+		// 用 .wmodel 逻辑路径推源路径(同目录同名 .gltf/.glb; 引擎导入约定)。
 		void ResolveSource();
 		// 刷新"需要重导"判断(源内容指纹 + 设置哈希 + 导入器版本)。
 		void RefreshSyncState();
@@ -84,6 +84,12 @@ namespace World
 		float DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
 			const Wui::WuiTheme& theme);
 
+		// ---- 材质与骨骼辅助操作 ----
+		void ApplySlotChange(size_t index, const std::string& newPath);
+		void CreateAndAssignMaterial(size_t index);
+		void DrawNodeInspector(Wui::WuiContext& ctx, float x, float& y, float width,
+			const Wui::WuiTheme& theme);
+
 		// 兼容旧接口(测试与外部引用点)
 		float DrawImportSettings(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
 		{
@@ -99,9 +105,9 @@ namespace World
 			return DrawTransportBar(ctx, x, y, width, theme);
 		}
 
-		// 相机取景到世界包围盒(双击预览 / `F` / 角落按钮都走它)。
+		// 相机取景到世界包围盒(双击预览 / F / 角落按钮都走它)。
 		void FramePreview();
-		// 当前预览播放的动画条(m_AnimClipIndex 越界时回退第 0 条); 空 = 没有动画。
+		// 当前预览播放的动画条(m_AnimClipIndex 越界时回退第 0 条; 空 = 没有动画)。
 		const Asset::WModelAnimation* ActiveClip() const;
 		// 资产里是否存在绑定到有效 skin 的 mesh。
 		bool HasSkinnedMesh() const;
@@ -174,6 +180,36 @@ namespace World
 		float m_TabScroll[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 		std::string m_SkeletonFilter;
 		std::unordered_set<std::string> m_SkeletonCollapsed;
+
+		// ---- 材质编辑状态 ----
+		std::vector<std::string> m_MaterialSlotBuffers;
+
+		// ---- 骨骼检视与编辑状态 ----
+		int m_SelectedNode = -1;
+		std::string m_SelectedNodeNameBuffer;
+		int32_t m_SelectedNodeParent = -1;
+		glm::vec3 m_SelectedNodeTranslation { 0.0f };
+		glm::vec3 m_SelectedNodeRotationEuler { 0.0f };
+		glm::vec3 m_SelectedNodeScale { 1.0f };
+
+		// ---- 视口富显示模式与折叠工具栏 ----
+		bool m_ShowBones = true;
+		bool m_ShowBoneNames = false;
+		bool m_ShowJointAxes = false;
+		bool m_OccludeBackBounds = true;
+		bool m_ToolbarCollapsed = false;
+		bool m_DisplayModesOpen = false;
+		bool m_CameraMenuOpen = false;
+
+		// ---- 动画片段编辑状态 ----
+		bool m_NewClipOpen = false;
+		std::string m_NewClipNameBuffer = "NewClip";
+		float m_NewClipDurationBuffer = 1.0f;
+		bool m_SplitClipOpen = false;
+		float m_SplitStart = 0.0f;
+		float m_SplitEnd = 1.0f;
+		std::string m_ClipRenameBuffer;
+		int m_ClipRenameIndex = -1;
 
 		// 蒙皮提交被拒的一次性 warn 去重
 		bool m_TransparentSkipWarned = false;
