@@ -1450,9 +1450,17 @@ namespace World
 		// 窄面板:按钮文字与宽度一起收短,保证工具栏在任何宽度下都不越出面板
 		// (极端窄时路径标签让位,只留按钮 + tooltip)。
 		const bool compactBar = bar.W < 760.0f;
+		const std::string modelPath = !m_ModelKey.empty() ? m_ModelKey : m_Graph.GetModelHint();
+		const bool hasModel = !modelPath.empty();
+
 		const ToolButton buttons[] = {
 			{ Wui::HashId("animgraph.toolbar.open"), AGTr("toolbar.open", "Open"), compactBar ? 52.0f : 58.0f, true,
 				AGTr("toolbar.open.tooltip", "Open a .wanimgraph by logical path (content-root relative, or engine/...).") },
+			{ Wui::HashId("animgraph.toolbar.model_preview"),
+				compactBar ? AGTr("toolbar.model.compact", "Model") : AGTr("toolbar.model", "Model Preview"),
+				compactBar ? 52.0f : 100.0f, hasModel,
+				hasModel ? AGFmt("toolbar.model.tooltip", "Open 3D Model Preview for {path}", { { "path", modelPath } })
+					: AGTr("toolbar.model.disabled", "No model bound to this animation graph.") },
 			{ Wui::HashId("animgraph.toolbar.locate"), compactBar ? AGTr("toolbar.locate", "Find") : AGTr("toolbar.locate", "Locate"),
 				compactBar ? 48.0f : 62.0f, !m_LoadedPath.empty(),
 				AGTr("toolbar.locate.tooltip", "Reveal the asset file in the OS file explorer.") },
@@ -1515,6 +1523,14 @@ namespace World
 					{
 						m_OpenPathBuffer = m_LoadedPath;
 						ctx.SetFocus(Wui::HashId("animgraph.open.path"));
+					}
+				}
+				else if (button.Id == Wui::HashId("animgraph.toolbar.model_preview"))
+				{
+					if (!modelPath.empty())
+					{
+						host.OpenModelPreview(modelPath);
+						host.FocusIndependentWindow("model:" + modelPath);
 					}
 				}
 				else if (button.Id == Wui::HashId("animgraph.toolbar.locate"))

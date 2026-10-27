@@ -209,6 +209,26 @@ namespace World
 
 		Wui::PanelBackground(ctx, map.Plot, theme.PanelBg, 2.0f);
 
+		// 画布右上角辅助按钮 (Fit View / Grid)
+		const float btnW = 38.0f;
+		const float btnH = 18.0f;
+		const float topBtnY = canvas.Y + 4.0f;
+		float topBtnX = canvas.X + canvas.W - btnW * 2.0f - 12.0f;
+
+		if (Wui::Button(ctx, Wui::HashId("animgraph.blend.fit"), { topBtnX, topBtnY, btnW, btnH }, "Fit", theme))
+		{
+			m_DragSample = -1;
+			m_DragPending = -1;
+		}
+		Wui::Tooltip(ctx, { topBtnX, topBtnY, btnW, btnH }, "Fit blend space view to sample bounds.");
+		topBtnX += btnW + 4.0f;
+
+		if (m_BlendShowGrid)
+			Wui::PanelBackground(ctx, { topBtnX, topBtnY, btnW, btnH }, WithAlpha(theme.Accent, 0.25f), 3.0f);
+		if (Wui::Button(ctx, Wui::HashId("animgraph.blend.grid"), { topBtnX, topBtnY, btnW, btnH }, "Grid", theme))
+			m_BlendShowGrid = !m_BlendShowGrid;
+		Wui::Tooltip(ctx, { topBtnX, topBtnY, btnW, btnH }, "Toggle reference grid lines.");
+
 		// 低饱和网格 + 刻度
 		const int xDivisions = 6;
 		const int yDivisions = blend2d ? 4 : 2;
@@ -348,19 +368,41 @@ namespace World
 			}
 		}
 
-		// 当前参数十字准星(实时区滑杆驱动)
+		// 当前参数十字准星与边缘投影指示 (实时区滑杆驱动)
 		{
 			const float px = std::clamp(paramX, map.MinX, map.MaxX);
 			const float py = blend2d ? std::clamp(paramY, map.MinY, map.MaxY) : 0.0f;
 			const glm::vec2 cross = map.ToScreen(px, py);
-			const Wui::WuiColor crossColor = WithAlpha(theme.Info, 0.75f);
+			const Wui::WuiColor crossColor = WithAlpha(theme.Info, 0.85f);
+
+			// 全域十字参考线
 			Wui::LineSegment(ctx, { cross.x, map.Plot.Y }, { cross.x, map.Plot.Y + map.Plot.H },
 				crossColor, 1.0f);
 			if (blend2d)
 				Wui::LineSegment(ctx, { map.Plot.X, cross.y }, { map.Plot.X + map.Plot.W, cross.y },
 					crossColor, 1.0f);
-			Wui::PanelBackground(ctx, { cross.x - 3.0f, cross.y - 3.0f, 6.0f, 6.0f }, theme.Info, 3.0f);
 
+			// 底部 X 轴投影刻度指示
+			const float markerSize = 5.0f;
+			Wui::PanelBackground(ctx, { cross.x - markerSize * 0.5f, map.Plot.Y + map.Plot.H - markerSize, markerSize, markerSize },
+				theme.Info, markerSize * 0.5f);
+
+			// 左侧 Y 轴投影刻度指示 (2D)
+			if (blend2d)
+			{
+				Wui::PanelBackground(ctx, { map.Plot.X, cross.y - markerSize * 0.5f, markerSize, markerSize },
+					theme.Info, markerSize * 0.5f);
+			}
+
+			// 中心发光评估点
+			Wui::PanelBackground(ctx, { cross.x - 5.0f, cross.y - 5.0f, 10.0f, 10.0f },
+				WithAlpha(theme.Info, 0.35f), 5.0f);
+			Wui::PanelBackground(ctx, { cross.x - 3.0f, cross.y - 3.0f, 6.0f, 6.0f },
+				theme.Info, 3.0f);
+			Wui::PanelBackground(ctx, { cross.x - 1.0f, cross.y - 1.0f, 2.0f, 2.0f },
+				theme.TextBright, 1.0f);
+
+			// 角落数值卡片
 			std::string readout;
 			if (blend2d)
 				readout = AGFmt("blend.readout.2d", "{x}   {y}",
@@ -369,9 +411,13 @@ namespace World
 			else
 				readout = AGFmt("blend.readout.1d", "{x}",
 					{ { "x", AxisReadout(state.ParameterX, defX, paramX) } });
-			Wui::Label(ctx, { map.Plot.X + 6.0f, map.Plot.Y + map.Plot.H - 16.0f },
-				Wui::EllipsizeMiddleToWidth(ctx, readout, map.Plot.W - 12.0f, theme.FontSizeCaption),
-				theme.TextMuted, theme.FontSizeCaption);
+
+			const float badgeW = std::min(map.Plot.W - 16.0f, ctx.MeasureTextWidth(readout, theme.FontSizeCaption) + 12.0f);
+			const Wui::WuiRect badgeRect { map.Plot.X + 6.0f, map.Plot.Y + map.Plot.H - 20.0f, badgeW, 16.0f };
+			Wui::PanelBackground(ctx, badgeRect, WithAlpha(theme.PanelBg, 0.85f), 3.0f);
+			Wui::Label(ctx, { badgeRect.X + 6.0f, badgeRect.Y + 2.0f },
+				Wui::EllipsizeMiddleToWidth(ctx, readout, badgeW - 12.0f, theme.FontSizeCaption),
+				theme.TextBright, theme.FontSizeCaption);
 		}
 
 		// 无障碍:每个样本点(画布节点已在函数开头登记)。

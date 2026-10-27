@@ -11,16 +11,18 @@
 #include <glm/glm.hpp>
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace World
 {
-	// P1b D5:模型预览面板 —— 每个 `.wmodel` 一个独立窗口(id = "model:<逻辑路径>")。
-	//
-	// 用户反馈"双击 .wmodel 每次都往场景里叠一份"之后的口径(draft → 2026-09-18):
-	//   - **双击 `.wmodel` 只打开本预览,不改场景**;要放进场景请在预览里点"放进当前场景";
-	//   - 预览用轨道相机(拖拽旋转 / 滚轮缩放),按 .wmodel 的节点树逐 submesh + 材质槽绘制;
-	//   - 统计行给出节点/mesh/submesh/顶点/索引/包围盒,便于排查导入结果。
+	// P1b D5: 模型预览面板 —— 工业级 3D 资产检视、材质诊断、骨骼树与动画走带全要素工作台。
+	// 每个 `.wmodel` 一个独立窗口 (id = "model:<逻辑路径>")。
+	// 契约:
+	//   - 资产检视与离屏预览完全只读，不修改当前关卡与场景；
+	//   - 视口提供 3D 轨道漫游、透视参考网格 (Grid)、AABB 包围盒线框 (Bounds) 与坐标轴向指示器；
+	//   - 选项卡覆盖 5 大模块 (Overview / Materials / Skeleton / Import Settings / Clips)；
+	//   - 动画提供专业走带控制器 (Transport Bar) 与交互式时间轴擦洗条 (Scrub Timeline Track)。
 	class ModelPreviewPanel final : public EditorPanel
 	{
 	public:
@@ -34,8 +36,7 @@ namespace World
 		const std::string& LogicalPath() const { return m_LogicalPath; }
 		// 重新从磁盘读模型(导入覆盖后手动刷新用)。
 		void Reload();
-		// P1b D5b-2 / P4-U11:用**面板当前的设置**重新导入并刷新 —— 设置随 .wmodel 存盘
-		// (资产自描述),不再写 `.wimport` 旁路文件。
+		// P1b D5b-2 / P4-U11: 用面板当前的设置重新导入并刷新 —— 设置随 .wmodel 存盘。
 		bool Reimport(std::string* message = nullptr);
 		const std::string& StatusText() const { return m_Status; }
 		void RequestPreviewCapture(const std::string& path) { m_PendingPreviewCapture = path; }
@@ -43,30 +44,68 @@ namespace World
 	private:
 		void EnsureGpuResources();
 		void ReleaseGpuResources();
-		// 渲染预览到离屏目标;返回可交给 WuiImage 的纹理 id(0 = 不可用)。
+		void UpdatePreviewTargetSize(const Wui::WuiRect& previewRect);
+		// 渲染预览到离屏目标; 返回可交给 WuiImage 的纹理 id (0 = 不可用)。
 		uint64_t RenderPreview();
-		// 无障碍诊断:WLD_PREVIEW_TEX_CAPTURE=<目录> 把预览纹理连续写成 PPM(后端无关 RHI 读回)。
+		// 无障碍诊断: WLD_PREVIEW_TEX_CAPTURE=<目录> 把预览纹理连续写成 PPM。
 		void CapturePreviewTextureSequence();
 		// 节点树 × 各 mesh 局部包围盒 → 世界空间包围盒(相机取景用)。
 		MeshBounds ComputeWorldBounds() const;
-		// 由 `.wmodel` 逻辑路径推源路径(同目录同名 `.gltf`/`.glb`;引擎导入约定)。
+		// 由 `.wmodel` 逻辑路径推源路径(同目录同名 `.gltf`/`.glb`; 引擎导入约定)。
 		void ResolveSource();
 		// 刷新"需要重导"判断(源内容指纹 + 设置哈希 + 导入器版本)。
 		void RefreshSyncState();
-		void DrawAssetView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
-		// P4-U11:资产视图的两个纵向区块(右列 / 窄窗口下单列),各自返回占用高度。
-		float DrawImportSettings(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
-		float DrawStatsAndDependencies(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+
+		// ---- 顶部与视口叠加层 ----
+		void DrawTopToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& bar, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void DrawViewportOverlay(Wui::WuiContext& ctx, const Wui::WuiRect& previewRect,
+			const Wui::WuiTheme& theme);
+		void DrawGroundGrid(Wui::WuiContext& ctx, const Wui::WuiRect& previewRect,
+			const Wui::WuiTheme& theme);
+		void DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::WuiRect& previewRect,
+			const Wui::WuiTheme& theme);
+
+		// ---- 动画走带与擦洗时间轴 ----
+		float DrawTransportBar(Wui::WuiContext& ctx, float x, float y, float width,
+			const Wui::WuiTheme& theme);
+
+		// ---- 5 大模块选项卡 ----
+		void DrawModuleTabs(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		float DrawTabOverview(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		float DrawTabMaterials(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		float DrawTabSkeleton(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		float DrawTabImportSettings(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+			const Wui::WuiTheme& theme);
+		float DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
+			const Wui::WuiTheme& theme);
+
+		// 兼容旧接口(测试与外部引用点)
+		float DrawImportSettings(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
+		{
+			return DrawTabImportSettings(ctx, rect, theme);
+		}
+		float DrawStatsAndDependencies(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+		{
+			return DrawTabOverview(ctx, rect, host, host.Theme());
+		}
+		float DrawAnimationControls(Wui::WuiContext& ctx, float x, float y, float width,
+			const Wui::WuiTheme& theme)
+		{
+			return DrawTransportBar(ctx, x, y, width, theme);
+		}
+
 		// 相机取景到世界包围盒(双击预览 / `F` / 角落按钮都走它)。
 		void FramePreview();
-		// 当前预览播放的动画条(m_AnimClipIndex 越界时回退第 0 条);空 = 没有动画。
+		// 当前预览播放的动画条(m_AnimClipIndex 越界时回退第 0 条); 空 = 没有动画。
 		const Asset::WModelAnimation* ActiveClip() const;
-		// D5c-4b:动画控制条(有 skin + ≥1 条动画时显示)。返回控制条之后的 y。
-		float DrawAnimationControls(Wui::WuiContext& ctx, float x, float y, float width,
-			const Wui::WuiTheme& theme);
-		// 资产里是否存在绑定到有效 skin 的 mesh(决定是否显示控制条)。
+		// 资产里是否存在绑定到有效 skin 的 mesh。
 		bool HasSkinnedMesh() const;
-		// 预览播放的是第 0 条 clip(与状态行/时间滑杆同一来源)。
+		// 当前 clip 时长(秒)。
 		float AnimationClipDuration() const;
 
 		std::string m_PendingPreviewCapture;
@@ -78,25 +117,24 @@ namespace World
 		Ref<Mesh> m_Mesh;
 		// 按 .wmodel 材质槽下标缓存材质(加载失败保持 null → 走常量色)。
 		std::vector<Ref<Material>> m_SlotMaterials;
-		// D5b-2:磁盘上的 .wmodel 数据(meta/节点/子网格/材质槽;与 m_Mesh 同源,取元信息用)。
+		// 磁盘上的 .wmodel 数据(meta/节点/子网格/材质槽; 与 m_Mesh 同源)。
 		Asset::WModelData m_Data;
 		bool m_DataValid = false;
 		// 源与设置状态。
-		std::string m_SourceLogical;                 // models/x.gltf(空 = 找不到源)
+		std::string m_SourceLogical;
 		bool m_SourceExists = false;
 		bool m_NeedsReimport = false;
-		std::string m_SyncDetail;                    // 需要重导的原因(给 UI/自动化看)
-		Asset::ModelImportSettings m_Settings;       // 当前生效的导入设置(可编辑 → 保存 → 重导)
+		std::string m_SyncDetail;
+		Asset::ModelImportSettings m_Settings;
 		bool m_SettingsLoaded = false;
-		// P4-U11:设置来源与"改过但还没重导"。设置存进 .wmodel 的 meta,所以面板里的编辑
-		// 只在"重新导入"时落地(Unreal 同款:改设置 → 应用/重导)。
 		bool m_SettingsFromAsset = false;
 		bool m_SettingsDirty = false;
-		// "需要重导"状态的轮询节流(秒;源文件很小,1s 读一次足够)。
 		double m_NextSyncCheck = 0.0;
 
-		// ---- 预览状态 ----
-		uint32_t m_PreviewSize = 384;
+		// ---- 视口与相机状态 ----
+		uint32_t m_PreviewWidth = 0;
+		uint32_t m_PreviewHeight = 0;
+		void* m_PreviewTextureHandle = nullptr;
 		uint64_t m_PreviewTextureId = 0;
 		uint32_t m_UiTextureGeneration = 0;
 		int m_PreviewCaptureFrame = 0;
@@ -111,35 +149,45 @@ namespace World
 		glm::vec3 m_Focus { 0.0f };
 		glm::vec2 m_LastMouse { 0.0f };
 
-		// ---- D5c-4b:动画播放状态(全部只在面板内,不改场景) ----
+		// 视口投影与辅助显示状态
+		bool m_ShowGrid = true;
+		bool m_ShowWireframe = false;
+		bool m_ShowGizmo = true;
+		bool m_ShowBounds = false;
+		glm::mat4 m_LastCameraView { 1.0f };
+		glm::mat4 m_LastCameraProj { 1.0f };
+
+		// ---- 动画播放与时间线状态 ----
 		bool m_AnimPlaying = false;
 		bool m_AnimLoop = true;
 		float m_AnimSpeed = 1.0f;
 		float m_AnimTime = 0.0f;
-		// 面板自己的帧间 dt:首帧 0,clamp [0,0.25](不动 EditorLayer/PanelHost 接口)。
 		double m_LastAnimClock = 0.0;
 		bool m_AnimClockValid = false;
-		// P4-U11:预览播放第几条动画(多条 clip 时可在动画条里切换)。
 		int m_AnimClipIndex = 0;
-		// P4-U11:右侧信息列的滚动偏移(设置/统计/材质/节点树)。
-		float m_InfoScroll = 0.0f;
-		// 蒙皮提交被拒的一次性 warn 去重(透明材质 / 调色板不可用)。
+		bool m_Scrubbing = false;
+		bool m_TimelineShowFrames = false;
+
+		// ---- 模块选项卡状态 ----
+		// 0: Overview, 1: Materials, 2: Skeleton, 3: Import Settings, 4: Clips
+		int m_ActiveTab = 0;
+		float m_TabScroll[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		std::string m_SkeletonFilter;
+		std::unordered_set<std::string> m_SkeletonCollapsed;
+
+		// 蒙皮提交被拒的一次性 warn 去重
 		bool m_TransparentSkipWarned = false;
 		bool m_SkinnedSubmitWarned = false;
 
-		// ---- GPU 资源(预览专用,惰性创建) ----
+		// ---- GPU 资源(预览专用, 惰性创建) ----
 		Rhi::Handle<Rhi::RenderPass> m_PreviewPass;
 		Rhi::Handle<Rhi::Framebuffer> m_PreviewFramebuffer;
 		Rhi::Handle<Rhi::Texture> m_PreviewColor;
 		Rhi::Handle<Rhi::Texture> m_PreviewEntityId;
 		Rhi::Handle<Rhi::Texture> m_PreviewDepth;
-		// P4-4b:rendering.msaa>1 时的多采样附件(颜色 / 实体 id / 深度)。上面三张单采样
-		// 纹理保持原角色:WUI 采样纹理、预览纹理抓图目标与 resolve 目标。
 		Rhi::Handle<Rhi::Texture> m_PreviewColorMsaa;
 		Rhi::Handle<Rhi::Texture> m_PreviewEntityMsaa;
 		Rhi::Handle<Rhi::Texture> m_PreviewDepthMsaa;
-		// P4-UX16b:预览命令缓冲按**帧槽位**各一份 —— 与材质预览同因同修(单缓冲会在上一帧
-		// 提交还没完成时 begin,触发 VUID-00049/00071 并最终 device lost)。
 		Rhi::Handle<Rhi::CommandBuffer> m_PreviewCommands[Renderer::FramesInFlight];
 		Rhi::Handle<Rhi::Buffer> m_PreviewCameraBuffer;
 		Rhi::Handle<Rhi::DescriptorSet> m_PreviewCameraSet;

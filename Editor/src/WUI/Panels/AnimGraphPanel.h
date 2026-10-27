@@ -276,6 +276,19 @@ namespace World
 		bool m_ModelValid = false;
 		Asset::WModelData m_Model;
 
+		// 姿态预览视图态
+		glm::vec2 m_PosePan { 0.0f, 0.0f };
+		float m_PoseZoom = 1.0f;
+		bool m_PoseShowGrid = true;
+		bool m_PoseShowBones = true;
+		bool m_PoseShowNames = false;
+		bool m_PosePanning = false;
+		glm::vec2 m_PosePanStart { 0.0f, 0.0f };
+
+		// 混合空间视图态
+		bool m_BlendShowGrid = true;
+		bool m_BlendCrosshairGuides = true;
+
 		// 窄窗口形态(<900 时右栏折到底部)
 		bool m_Narrow = false;
 	};

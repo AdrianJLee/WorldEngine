@@ -412,5 +412,7 @@
   "panel.animgraph.transitions.value.tooltip": "数值，范围 {min}..{max}",
   "panel.animgraph.transitions.multi_only": "这条表达式包含多个比较；下面只显示一个条件，直接修改会替换整条表达式。完整规则请用「高级表达式」编辑。",
   "panel.animgraph.transitions.multi": "（多条件…）",
-  "panel.animgraph.transitions.multi.note": "多条件表达式：请在「高级表达式」里编辑完整规则。"
+  "panel.animgraph.transitions.multi.note": "多条件表达式：请在「高级表达式」里编辑完整规则。",
+  "panel.animgraph.toolbar.model": "模型预览",
+  "panel.animgraph.toolbar.model.tooltip": "打开当前绑定角色的 3D 模型预览工作区。"
 }
