@@ -2561,6 +2561,32 @@ namespace World
 						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext });
 					}
 				}
+				for (auto [h, xf, wb] : registry.view<TransformComponent, WhiteboxComponent>().each())
+				{
+					if (h == selectedHandle)
+						continue;
+					const glm::vec3 s = glm::abs(xf.Scale);
+					const glm::vec3 ext = s * wb.Dimensions * 0.5f;
+					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
+						continue;
+					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
+					{
+						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext });
+					}
+				}
+				for (auto [h, xf, obs] : registry.view<TransformComponent, NavMeshObstacleComponent>().each())
+				{
+					if (h == selectedHandle)
+						continue;
+					const glm::vec3 s = glm::abs(xf.Scale);
+					const glm::vec3 ext = s * obs.Extents;
+					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
+						continue;
+					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
+					{
+						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext });
+					}
+				}
 
 				auto rayHitsAABB = [](const glm::vec3& orig, const glm::vec3& dir, float maxDist, const glm::vec3& bMin, const glm::vec3& bMax) -> bool
 				{
@@ -2606,7 +2632,7 @@ namespace World
 							float gndH = 0.0f;
 							if (sampleTerrainWorldHeight(rayPt.x, rayPt.z, gndH))
 							{
-								if (gndH > rayPt.y + 2.2f + extraThreshold && glm::distance(rayPt, targetPt) > 6.0f)
+								if (gndH > rayPt.y + 0.5f + extraThreshold && glm::distance(rayPt, targetPt) > 3.0f)
 									return true;
 							}
 						}
@@ -3214,7 +3240,7 @@ namespace World
 
 						const glm::mat4 world = WorldMatrixOf(registry, handle);
 						const glm::vec3 worldPos = glm::vec3(world[3]);
-						if (!isSelected && isOccluded(worldPos))
+						if ((obstacle || !isSelected) && isOccluded(worldPos))
 							continue;
 						const float alpha = isSelected ? 0.95f : 0.50f;
 						const float thickness = isSelected ? 1.8f : 1.1f;
@@ -4013,6 +4039,32 @@ namespace World
 						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext });
 					}
 				}
+				for (auto [h, xf, wb] : registry.view<TransformComponent, WhiteboxComponent>().each())
+				{
+					if (h == selectedHandle)
+						continue;
+					const glm::vec3 s = glm::abs(xf.Scale);
+					const glm::vec3 ext = s * wb.Dimensions * 0.5f;
+					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
+						continue;
+					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
+					{
+						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext });
+					}
+				}
+				for (auto [h, xf, obs] : registry.view<TransformComponent, NavMeshObstacleComponent>().each())
+				{
+					if (h == selectedHandle)
+						continue;
+					const glm::vec3 s = glm::abs(xf.Scale);
+					const glm::vec3 ext = s * obs.Extents;
+					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
+						continue;
+					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
+					{
+						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext });
+					}
+				}
 
 				auto rayHitsAABB = [](const glm::vec3& orig, const glm::vec3& dir, float maxDist, const glm::vec3& bMin, const glm::vec3& bMax) -> bool
 				{
@@ -4058,7 +4110,7 @@ namespace World
 							float gndH = 0.0f;
 							if (sampleTerrainWorldHeight(rayPt.x, rayPt.z, gndH))
 							{
-								if (gndH > rayPt.y + 2.2f + extraThreshold && glm::distance(rayPt, targetPt) > 6.0f)
+								if (gndH > rayPt.y + 0.5f + extraThreshold && glm::distance(rayPt, targetPt) > 3.0f)
 									return true;
 							}
 						}
@@ -4210,7 +4262,8 @@ namespace World
 									continue;
 
 								// 严禁对可行走多边形执行 isOccluded 遮挡剔除，确保远景与低视角下 100% 连续完整可见
-
+								if (isOccluded(poly.Center, true))
+									continue;
 								const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
 								if (clipPos.w > 0.05f)
 								{
@@ -4241,7 +4294,8 @@ namespace World
 								continue;
 
 							// 严禁对可行走多边形执行 isOccluded 遮挡剔除
-
+							if (isOccluded(poly.Center, true))
+								continue;
 							const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
 							if (clipPos.w > 0.05f)
 							{
@@ -4496,7 +4550,7 @@ namespace World
 
 						// 遮挡剔除：处于山体或建筑物遮挡后面的障碍物线框不予绘制
 						// 工业级视口准则：未选中的障碍物若被山体遮挡不予绘制；选中的障碍物保持穿透高亮 (X-ray)
-						if (!isSelected && isOccluded(worldCenter))
+						if (isOccluded(worldCenter))
 							continue;
 
 						glm::vec4 clipCorners[8];
@@ -4552,6 +4606,8 @@ namespace World
 					constexpr int kSegments = 16;
 					constexpr float kTwoPi = 6.28318530718f;
 
+					if (!isOccluded(center))
+					{
 					glm::vec3 prevBot = center + glm::vec3(r, 0.0f, 0.0f);
 					glm::vec3 prevTop = center + glm::vec3(r, h, 0.0f);
 
@@ -4581,9 +4637,12 @@ namespace World
 						prevBot = currBot;
 						prevTop = currTop;
 					}
+					}
 
 					// 目标点光环与指引虚线
 					const Wui::WuiColor pathColor { 1.0f, 0.85f, 0.2f, 0.90f };
+					if (!isOccluded(agent.Destination))
+					{
 					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), agent.Destination, r * 0.8f, 1, pathColor, 2.0f);
 
 					// 绘制地面旗帜
@@ -4599,6 +4658,7 @@ namespace World
 						viewProj * glm::vec4(agent.Destination + glm::vec3(0.35f, 1.0f, 0.0f), 1.0f),
 						viewProj * glm::vec4(agent.Destination + glm::vec3(0.0f, 0.8f, 0.0f), 1.0f),
 						pathColor, 2.0f);
+					}
 
 					if (NavMeshPanel::ShowPaths && navMesh && navMesh->GetPolygonCount() > 0)
 					{
@@ -4635,6 +4695,8 @@ namespace World
 							{
 								const glm::vec3 p0 = agentPath[i] + glm::vec3(0.0f, 0.1f, 0.0f);
 								const glm::vec3 p1 = agentPath[i + 1] + glm::vec3(0.0f, 0.1f, 0.0f);
+								if (isOccluded(p0) && isOccluded(p1))
+									continue;
 
 								PushProjectedSegment(ctx, viewProj, sceneRect,
 									viewProj * glm::vec4(p0, 1.0f),
@@ -4650,6 +4712,8 @@ namespace World
 								for (size_t i = 0; i < agentPath.size(); ++i)
 								{
 									const glm::vec3 wp = agentPath[i] + glm::vec3(0.0f, 0.1f, 0.0f);
+									if (isOccluded(wp))
+										continue;
 									glm::vec4 prevPt = viewProj * glm::vec4(wp + glm::vec3(0.12f, 0.0f, 0.0f), 1.0f);
 									for (int s = 1; s <= kWpSegments; ++s)
 									{
@@ -4676,13 +4740,18 @@ namespace World
 						{
 							const glm::vec3 p0 = testPath[i] + glm::vec3(0.0f, 0.12f, 0.0f);
 							const glm::vec3 p1 = testPath[i + 1] + glm::vec3(0.0f, 0.12f, 0.0f);
+							if (isOccluded(p0) && isOccluded(p1))
+								continue;
 							PushProjectedSegment(ctx, viewProj, sceneRect,
 								viewProj * glm::vec4(p0, 1.0f),
 								viewProj * glm::vec4(p1, 1.0f),
 								testPathColor, 2.5f);
-							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), p0, 0.18f, 1, testPathColor, 1.8f);
+							if (!isOccluded(p0))
+								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), p0, 0.18f, 1, testPathColor, 1.8f);
 						}
-						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), testPath.back() + glm::vec3(0.0f, 0.12f, 0.0f), 0.18f, 1, testPathColor, 1.8f);
+						const glm::vec3 lastPt = testPath.back() + glm::vec3(0.0f, 0.12f, 0.0f);
+						if (!isOccluded(lastPt))
+							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), lastPt, 0.18f, 1, testPathColor, 1.8f);
 					}
 				}
 
@@ -4702,6 +4771,8 @@ namespace World
 							world = xform->GetLocalMatrix();
 							modCenter = xform->Location;
 						}
+						if (isOccluded(modCenter))
+							continue;
 
 						Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.85f };
 						if (areaComp.AreaType == 2)
@@ -4765,9 +4836,7 @@ namespace World
 							}
 						}
 
-						// 遮挡剔除：处于山体或建筑物遮挡后面的代价区域线框不予绘制 (未选中时剔除，选中时保持穿透)
-						if (!isSelected && isOccluded(modCenter))
-							continue;
+						// 遮挡剔除：处于山体或建筑物遮挡后面的代价区域线框已在上方统一校验并剔除
 
 						const glm::vec3 localCorners[8] = {
 							glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
@@ -4918,13 +4987,17 @@ namespace World
 					const Wui::WuiColor linkColor { 0.95f, 0.20f, 0.85f, 0.95f };
 					auto drawSingleLink = [&](const glm::vec3& start, const glm::vec3& end, bool isSelected = false)
 					{
-						if (!isSelected && isOccluded(start) && isOccluded(end))
-							return;
-						constexpr int kArcSegs = 16;
 						const glm::vec3 pStart = start + glm::vec3(0.0f, 0.1f, 0.0f);
 						const glm::vec3 pEnd = end + glm::vec3(0.0f, 0.1f, 0.0f);
 						const float dist = glm::distance(pStart, pEnd);
 						const float arcH = std::clamp(dist * 0.20f, 0.6f, 2.2f);
+						const glm::vec3 mid = (pStart + pEnd) * 0.5f + glm::vec3(0.0f, arcH, 0.0f);
+						if ((isOccluded(start) && isOccluded(end)) ||
+							(isOccluded(mid) && (isOccluded(start) || isOccluded(end))))
+						{
+							return;
+						}
+						constexpr int kArcSegs = 16;
 						const float lineThick = isSelected ? 2.6f : 1.8f;
 						const float ringRadius = 0.24f;
 						const float ringThick = isSelected ? 2.0f : 1.4f;
@@ -4975,7 +5048,12 @@ namespace World
 						glm::vec3 startPos { 0.0f };
 						if (const auto* xform = registry.try_get<TransformComponent>(handle))
 							startPos = xform->Location;
-						if (!isSelected && isOccluded(startPos) && isOccluded(linkComp.TargetLocation))
+						const glm::vec3 endPos = linkComp.TargetLocation;
+						const float dist = glm::distance(startPos, endPos);
+						const float arcH = std::clamp(dist * 0.20f, 0.6f, 2.2f);
+						const glm::vec3 mid = (startPos + endPos) * 0.5f + glm::vec3(0.0f, arcH, 0.0f);
+						if ((isOccluded(startPos) && isOccluded(endPos)) ||
+							(isOccluded(mid) && (isOccluded(startPos) || isOccluded(endPos))))
 							continue;
 						drawSingleLink(startPos, linkComp.TargetLocation, isSelected);
 					}
@@ -4998,30 +5076,45 @@ namespace World
 					{
 						if (probe.IsVisible)
 						{
-							const Wui::WuiColor losGreen { 0.20f, 0.95f, 0.35f, 0.95f };
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(probe.Start, 1.0f),
-								viewProj * glm::vec4(probe.End, 1.0f),
-								losGreen, 2.8f);
-							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.Start, 0.25f, 1, losGreen, 2.0f);
-							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.End, 0.25f, 1, losGreen, 2.0f);
+							if (!isOccluded(probe.Start) || !isOccluded(probe.End))
+							{
+								const Wui::WuiColor losGreen { 0.20f, 0.95f, 0.35f, 0.95f };
+								PushProjectedSegment(ctx, viewProj, sceneRect,
+									viewProj * glm::vec4(probe.Start, 1.0f),
+									viewProj * glm::vec4(probe.End, 1.0f),
+									losGreen, 2.8f);
+								if (!isOccluded(probe.Start))
+									PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.Start, 0.25f, 1, losGreen, 2.0f);
+								if (!isOccluded(probe.End))
+									PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.End, 0.25f, 1, losGreen, 2.0f);
+							}
 						}
 						else
 						{
 							const Wui::WuiColor losYellow { 0.95f, 0.85f, 0.20f, 0.95f };
 							const Wui::WuiColor losRed { 0.95f, 0.25f, 0.25f, 0.95f };
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(probe.Start, 1.0f),
-								viewProj * glm::vec4(probe.HitPoint, 1.0f),
-								losYellow, 2.8f);
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(probe.HitPoint, 1.0f),
-								viewProj * glm::vec4(probe.End, 1.0f),
-								losRed, 2.8f);
-							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.Start, 0.25f, 1, losYellow, 2.0f);
-							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 0, losRed, 2.2f);
-							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 1, losRed, 2.2f);
-							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 2, losRed, 2.2f);
+							if (!isOccluded(probe.Start) || !isOccluded(probe.HitPoint))
+							{
+								PushProjectedSegment(ctx, viewProj, sceneRect,
+									viewProj * glm::vec4(probe.Start, 1.0f),
+									viewProj * glm::vec4(probe.HitPoint, 1.0f),
+									losYellow, 2.8f);
+							}
+							if (!isOccluded(probe.HitPoint) || !isOccluded(probe.End))
+							{
+								PushProjectedSegment(ctx, viewProj, sceneRect,
+									viewProj * glm::vec4(probe.HitPoint, 1.0f),
+									viewProj * glm::vec4(probe.End, 1.0f),
+									losRed, 2.8f);
+							}
+							if (!isOccluded(probe.Start))
+								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.Start, 0.25f, 1, losYellow, 2.0f);
+							if (!isOccluded(probe.HitPoint))
+							{
+								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 0, losRed, 2.2f);
+								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 1, losRed, 2.2f);
+								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 2, losRed, 2.2f);
+							}
 						}
 					}
 				}
@@ -5032,10 +5125,15 @@ namespace World
 				{
 					const Wui::WuiColor circleColor { 0.2f, 0.7f, 0.95f, 0.65f };
 					const Wui::WuiColor flagColor { 0.2f, 0.95f, 0.9f, 0.95f };
-					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), wander.Center, wander.Radius, 1, circleColor, 1.8f);
-					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), wander.Center, 0.3f, 1, circleColor, 2.0f);
+					if (!isOccluded(wander.Center))
+					{
+						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), wander.Center, wander.Radius, 1, circleColor, 1.8f);
+						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), wander.Center, 0.3f, 1, circleColor, 2.0f);
+					}
 
 					const glm::vec3 pt = wander.SampledPoint;
+					if (!isOccluded(pt))
+					{
 					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), pt, 0.35f, 1, flagColor, 2.2f);
 					PushProjectedSegment(ctx, viewProj, sceneRect,
 						viewProj * glm::vec4(pt, 1.0f),
@@ -5049,6 +5147,7 @@ namespace World
 						viewProj * glm::vec4(pt + glm::vec3(0.45f, 1.35f, 0.0f), 1.0f),
 						viewProj * glm::vec4(pt + glm::vec3(0.0f, 1.1f, 0.0f), 1.0f),
 						flagColor, 2.2f);
+					}
 				}
 			}
 		}
