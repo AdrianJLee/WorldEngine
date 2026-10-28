@@ -50,7 +50,7 @@ namespace World
 				}
 				else if (center[i] > bMax[i])
 				{
-					const float d = center[i] - bMax[i];
+					const float d = bMin[i] - center[i];
 					d2 += d * d;
 				}
 			}
@@ -63,6 +63,34 @@ namespace World
 			return (aMin.x <= bMax.x && aMax.x >= bMin.x) &&
 			       (aMin.y <= bMax.y && aMax.y >= bMin.y) &&
 			       (aMin.z <= bMax.z && aMax.z >= bMin.z);
+		}
+
+		bool RemoveFromNode(SceneOctree::Node* node, uint32_t entityId)
+		{
+			if (!node)
+				return false;
+
+			bool removed = false;
+			auto it = std::remove_if(node->Elements.begin(), node->Elements.end(),
+				[entityId](const OctreeElement& elem) { return elem.EntityId == entityId; });
+			if (it != node->Elements.end())
+			{
+				node->Elements.erase(it, node->Elements.end());
+				removed = true;
+			}
+
+			if (!node->IsLeaf())
+			{
+				for (int i = 0; i < 8; ++i)
+				{
+					if (node->Children[i])
+					{
+						if (RemoveFromNode(node->Children[i].get(), entityId))
+							removed = true;
+					}
+				}
+			}
+			return removed;
 		}
 	}
 
@@ -180,6 +208,60 @@ namespace World
 
 		InsertToNode(m_Root.get(), elem);
 		++m_TotalElements;
+	}
+
+	bool SceneOctree::Remove(uint32_t entityId)
+	{
+		if (!m_Root)
+			return false;
+
+		const bool removed = RemoveFromNode(m_Root.get(), entityId);
+		if (removed && m_TotalElements > 0)
+		{
+			--m_TotalElements;
+		}
+		return removed;
+	}
+
+	void SceneOctree::Update(const OctreeElement& elem)
+	{
+		Remove(elem.EntityId);
+		Insert(elem);
+	}
+
+	void SceneOctree::ForEachNode(const std::function<void(const Node&)>& fn) const
+	{
+		if (!m_Root || !fn)
+			return;
+
+		std::vector<const Node*> stack = { m_Root.get() };
+		while (!stack.empty())
+		{
+			const Node* curr = stack.back();
+			stack.pop_back();
+
+			fn(*curr);
+
+			if (!curr->IsLeaf())
+			{
+				for (int i = 0; i < 8; ++i)
+				{
+					if (curr->Children[i])
+						stack.push_back(curr->Children[i].get());
+				}
+			}
+		}
+	}
+
+	void SceneOctree::GetDebugBoxes(std::vector<std::pair<glm::vec3, glm::vec3>>& outBoxes) const
+	{
+		ForEachNode([&outBoxes](const Node& node)
+		{
+			if (!node.Elements.empty())
+			{
+				outBoxes.emplace_back(node.GetBoundsMin(), node.GetBoundsMax());
+			}
+		});
 	}
 
 	void SceneOctree::QueryFrustum(const FrustumPlanes& frustum, std::vector<uint32_t>& outEntities) const

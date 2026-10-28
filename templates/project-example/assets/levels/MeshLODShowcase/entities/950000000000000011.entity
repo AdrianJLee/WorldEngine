@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 950000000000000011
+  World::TagComponent:
+    Tag: "Octree Node (-X, -Z) Tower"
+  World::TransformComponent:
+    Location: [-18, 4, -22]
+    Rotation: [0, 0, 0]
+    Scale: [3, 8, 3]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.35, 0.65, 0.85, 1]
+    Mesh: ""
+  World::MeshLODComponent:
+    LOD1Mesh: ""
+    LOD2Mesh: ""
+    LOD1Distance: 25.0
+    LOD2Distance: 55.0
+    CullDistance: 95.0
+    Hysteresis: 2.0
+    CurrentLOD: 1
+    EnableCrossFade: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 4

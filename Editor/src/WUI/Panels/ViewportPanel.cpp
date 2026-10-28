@@ -26,6 +26,10 @@
 #include "World/Core/Input.h"
 #include "WUI/Panels/NavMeshPanel.h"
 #include "World/NavMesh/NavMesh.h"
+#include "World/Renderer/MeshLOD.h"
+#include <glm/gtc/matrix_inverse.hpp>
+#include "World/Scene/SceneOctree.h"
+#include "World/Scene/Scene.h"
 
 namespace World
 {
@@ -34,6 +38,8 @@ namespace World
 
 		static bool s_ShowAllAudioGizmos = false;
 		static bool s_ShowNavMesh = true;
+		static bool s_ShowOctreeBounds = false;
+		static bool s_ShowLODHud = true;
 		static bool s_AudioGizmoActive = false;
 		static float s_AudioGizmoBeforeMin = 1.0f;
 		static float s_AudioGizmoBeforeMax = 25.0f;
@@ -982,7 +988,7 @@ namespace World
 		if (ctx.IsPopupOpen(showPopup))
 		{
 			const float rowH = 22.0f;
-			const float panelH = 6.0f + rowH + (3.0f * rowH) + 7.0f + (2.0f * rowH) + 6.0f;
+			const float panelH = 6.0f + rowH + (4.0f * rowH) + 7.0f + (4.0f * rowH) + 6.0f;
 			const float px = showButton.W > 0.0f ? showButton.X : (viewButton.X + viewButton.W + 3.0f);
 			const Wui::WuiRect parentPanel { px, leftIslandRect.Y + leftIslandRect.H + 3.0f, 246.0f, panelH };
 			Wui::DrawPanelSurface(ctx, parentPanel, theme);
@@ -1021,6 +1027,7 @@ namespace World
 
 			catRow("viewport.show.cat.grids", Wui::Tr("viewport.menu.grids", "空间基准与网格"), "grids");
 			catRow("viewport.show.cat.gizmos", Wui::Tr("viewport.menu.gizmos", "辅助图元与范围"), "gizmos");
+			catRow("viewport.show.cat.lod", Wui::Tr("viewport.menu.lod_octree", "网格 LOD 与八叉树"), "lod");
 			catRow("viewport.show.cat.navmesh", Wui::Tr("viewport.menu.navigation", "3D 导航与寻路"), "navmesh");
 
 			// 分割线
@@ -1040,6 +1047,12 @@ namespace World
 				m_Host.IsReferenceGridEnabled(), [this] { m_Host.SetReferenceGridEnabled(!m_Host.IsReferenceGridEnabled()); });
 			quickItem("viewport.show.quick.navmesh", Wui::Tr("viewport.view.navmesh", "3D 导航网格 (NavMesh) [P]"),
 				s_ShowNavMesh, [] { SetNavMeshVisible(!s_ShowNavMesh); });
+			quickItem("viewport.show.quick.octree", Wui::Tr("viewport.view.octree_bounds", "空间八叉树包围盒 (Octree)"),
+				s_ShowOctreeBounds, [] { s_ShowOctreeBounds = !s_ShowOctreeBounds; });
+			quickItem("viewport.show.quick.lod_color", Wui::Tr("viewport.view.lod_coloration", "LOD 阶梯染色 (LOD Color)"),
+				MeshLODManager::Get().IsLODColorationEnabled(), [] {
+					MeshLODManager::Get().SetLODColorationEnabled(!MeshLODManager::Get().IsLODColorationEnabled());
+				});
 
 			// 二级子菜单渲染体 (Submenus)
 			Wui::WuiRect subPanel {};
@@ -1051,6 +1064,8 @@ namespace World
 					subH = 6.0f + 3.0f * rowH + 6.0f;
 				else if (m_ActiveViewSubmenu == "gizmos")
 					subH = 6.0f + 5.0f * rowH + 6.0f;
+				else if (m_ActiveViewSubmenu == "lod")
+					subH = 6.0f + 3.0f * rowH + 6.0f;
 				else if (m_ActiveViewSubmenu == "navmesh")
 					subH = 6.0f + 6.0f * rowH + 6.0f;
 
@@ -1133,6 +1148,18 @@ namespace World
 					subItem("viewport.view.csm_debug", Wui::Tr("viewport.csm.short", "CSM 阴影级联染色"),
 						csmOn, Wui::Tr("viewport.csm.hint", "CSM 4级级联阴影色彩调试 (红/绿/蓝/黄)"),
 						[csmOn] { World::Renderer3D::SetCascadeDebugVisualization(!csmOn); });
+				}
+				else if (m_ActiveViewSubmenu == "lod")
+				{
+					subItem("viewport.view.octree_bounds", Wui::Tr("viewport.view.octree_bounds", "空间八叉树包围盒 (Octree Bounds)"),
+						s_ShowOctreeBounds, "视口绘制当前场景 SceneOctree 的所有节点 AABB 线框",
+						[] { s_ShowOctreeBounds = !s_ShowOctreeBounds; });
+					subItem("viewport.view.lod_coloration", Wui::Tr("viewport.view.lod_coloration", "LOD 阶梯染色 (LOD Coloration)"),
+						MeshLODManager::Get().IsLODColorationEnabled(), "全场景 LOD 物体实时按绿/黄/橙/红着色",
+						[] { MeshLODManager::Get().SetLODColorationEnabled(!MeshLODManager::Get().IsLODColorationEnabled()); });
+					subItem("viewport.view.lod_hud", Wui::Tr("viewport.view.lod_hud", "LOD & 八叉树遥测浮层 (LOD & Octree HUD)"),
+						s_ShowLODHud, "视口浮动小药丸面板，显示当前 Octree 节点数/元素数与 LOD 档位分布",
+						[] { s_ShowLODHud = !s_ShowLODHud; });
 				}
 				else if (m_ActiveViewSubmenu == "navmesh")
 				{
@@ -1740,7 +1767,8 @@ namespace World
 			float bestDist = 1e9f;
 			bool hitBadge = false;
 
-			if (const Ref<Scene> activeScene = m_Host.GetActiveScene())
+			const Ref<Scene> activeScene = m_Host.GetActiveScene();
+			if (activeScene)
 			{
 				const auto& reg = std::as_const(*activeScene).GetRegistry();
 				for (auto [h, areaComp] : reg.view<NavMeshAreaModifierComponent>().each())
@@ -1768,7 +1796,8 @@ namespace World
 
 					if (!hitBadge)
 					{
-						const glm::mat4 invWorld = glm::inverse(xform->GetLocalMatrix());
+						const glm::mat4 localMat = xform->GetLocalMatrix();
+					const glm::mat4 invWorld = glm::inverse(localMat);
 						const glm::vec3 localOrig = glm::vec3(invWorld * glm::vec4(rayOrigin, 1.0f));
 						const glm::vec3 localDir = glm::normalize(glm::vec3(invWorld * glm::vec4(rayDir, 0.0f)));
 						const glm::vec3 bMin = -areaComp.Extents;
@@ -1809,6 +1838,69 @@ namespace World
 			if (bestAreaEntity.IsValid())
 			{
 				picked = bestAreaEntity;
+			}
+
+			// 空间八叉树快速相交剪枝拾取 (SceneOctree Ray Query Acceleration)
+			if (!picked.IsValid() && activeScene)
+			{
+				std::vector<uint32_t> octreeCandidates;
+				activeScene->GetOctree().QueryRay(rayOrigin, rayDir, 2000.0f, octreeCandidates);
+				float bestOctreeDist = 1e9f;
+				Entity bestOctreeEntity;
+				const auto& reg = std::as_const(*activeScene).GetRegistry();
+				for (uint32_t entId : octreeCandidates)
+				{
+					entt::entity h = static_cast<entt::entity>(entId);
+					if (!reg.valid(h)) continue;
+					const auto* xform = reg.try_get<TransformComponent>(h);
+					if (!xform) continue;
+
+					glm::vec3 bMin(-0.5f);
+					glm::vec3 bMax(0.5f);
+					if (const auto* boxCol = reg.try_get<BoxCollider3DComponent>(h))
+					{
+						bMin = boxCol->Offset - boxCol->HalfExtents;
+						bMax = boxCol->Offset + boxCol->HalfExtents;
+					}
+
+					const glm::mat4 localMat = xform->GetLocalMatrix();
+					const glm::mat4 invWorld = glm::inverse(localMat);
+					const glm::vec3 localOrig = glm::vec3(invWorld * glm::vec4(rayOrigin, 1.0f));
+					const glm::vec3 localDir = glm::normalize(glm::vec3(invWorld * glm::vec4(rayDir, 0.0f)));
+					float tmin = 0.0f;
+					float tmax = 2000.0f;
+					bool hitBox = true;
+					for (int i = 0; i < 3; ++i)
+					{
+						if (std::abs(localDir[i]) < 1e-6f)
+						{
+							if (localOrig[i] < bMin[i] || localOrig[i] > bMax[i]) { hitBox = false; break; }
+						}
+						else
+						{
+							const float invD = 1.0f / localDir[i];
+							float t1 = (bMin[i] - localOrig[i]) * invD;
+							float t2 = (bMax[i] - localOrig[i]) * invD;
+							if (t1 > t2) std::swap(t1, t2);
+							tmin = std::max(tmin, t1);
+							tmax = std::min(tmax, t2);
+							if (tmin > tmax) { hitBox = false; break; }
+						}
+					}
+					if (hitBox && tmax > 0.0f)
+					{
+						const float hitT = (tmin > 0.0f) ? tmin : tmax;
+						if (hitT < bestOctreeDist)
+						{
+							bestOctreeDist = hitT;
+							bestOctreeEntity = Entity(activeScene.get(), h);
+						}
+					}
+				}
+				if (bestOctreeEntity.IsValid() && bestOctreeDist < bestDist)
+				{
+					picked = bestOctreeEntity;
+				}
 			}
 
 			if (std::getenv("WLD_TRACE_UI"))
@@ -3611,6 +3703,112 @@ namespace World
 						}
 					}
 
+					// 选中实体 LOD 同心圆环与实时标签
+					if (selected.IsValid() && selected.HasComponent<MeshLODComponent>() && selected.HasComponent<TransformComponent>())
+					{
+						const auto& lod = selected.GetComponent<MeshLODComponent>();
+						const auto& xf = selected.GetComponent<TransformComponent>();
+						const glm::vec3 entCenter = xf.Location;
+						const float distToCam = glm::length(overlayCamera.Position - entCenter);
+
+						// 1. 三圈平滑同心距离圆环 (水平 XZ 平面)
+						if (lod.LOD1Distance > 0.0f)
+						{
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f),
+								entCenter, lod.LOD1Distance, 1, Wui::WuiColor{ 0.2f, 0.9f, 0.2f, 0.85f }, 1.8f, &overlayMin, &overlayMax);
+						}
+						if (lod.LOD2Distance > 0.0f)
+						{
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f),
+								entCenter, lod.LOD2Distance, 1, Wui::WuiColor{ 0.95f, 0.85f, 0.1f, 0.85f }, 1.8f, &overlayMin, &overlayMax);
+						}
+						if (lod.CullDistance > 0.0f)
+						{
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f),
+								entCenter, lod.CullDistance, 1, Wui::WuiColor{ 0.85f, 0.2f, 0.2f, 0.85f }, 1.8f, &overlayMin, &overlayMax);
+						}
+
+						// 2. 实体上方实时标签
+						const glm::vec4 clipPos = overlayCamera.ViewProjection * glm::vec4(entCenter + glm::vec3(0.0f, xf.Scale.y * 0.6f + 0.5f, 0.0f), 1.0f);
+						if (clipPos.w > 0.05f)
+						{
+							const glm::vec2 ndc { clipPos.x / clipPos.w, clipPos.y / clipPos.w };
+							const glm::vec2 badgePos {
+								sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
+								sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H
+							};
+							if (badgePos.x >= sceneRect.X && badgePos.x <= sceneRect.X + sceneRect.W &&
+								badgePos.y >= sceneRect.Y && badgePos.y <= sceneRect.Y + sceneRect.H)
+							{
+								char lodTagText[64];
+								Wui::WuiColor tagCol { 0.2f, 0.9f, 0.2f, 1.0f };
+								if (lod.CurrentLOD == 255)
+								{
+									std::snprintf(lodTagText, sizeof(lodTagText), "CULLED | Dist: %.1f m", distToCam);
+									tagCol = Wui::WuiColor{ 0.95f, 0.2f, 0.2f, 1.0f };
+								}
+								else if (lod.CurrentLOD == 2)
+								{
+									std::snprintf(lodTagText, sizeof(lodTagText), "LOD 2 | Dist: %.1f m", distToCam);
+									tagCol = Wui::WuiColor{ 0.95f, 0.5f, 0.1f, 1.0f };
+								}
+								else if (lod.CurrentLOD == 1)
+								{
+									std::snprintf(lodTagText, sizeof(lodTagText), "LOD 1 | Dist: %.1f m", distToCam);
+									tagCol = Wui::WuiColor{ 0.95f, 0.85f, 0.1f, 1.0f };
+								}
+								else
+								{
+									std::snprintf(lodTagText, sizeof(lodTagText), "LOD 0 | Dist: %.1f m", distToCam);
+									tagCol = Wui::WuiColor{ 0.2f, 0.9f, 0.2f, 1.0f };
+								}
+
+								const float fontSz = 11.5f;
+								const float textW = ctx.MeasureTextWidth(lodTagText, fontSz);
+								const Wui::WuiRect tagRect { badgePos.x - textW * 0.5f - 8.0f, badgePos.y - 20.0f, textW + 16.0f, 20.0f };
+								Wui::PanelBackground(ctx, tagRect, Wui::WuiColor{ 0.05f, 0.10f, 0.15f, 0.90f }, 4.0f);
+								Wui::HighlightOutline(ctx, tagRect, tagCol, 4.0f, 1.2f);
+								Wui::Label(ctx, { tagRect.X + 8.0f, tagRect.Y + 3.0f }, lodTagText, tagCol, fontSz);
+							}
+						}
+					}
+
+					// 空间八叉树包围盒线框 (Octree Bounds)
+					if (s_ShowOctreeBounds && overlayScene)
+					{
+						std::vector<std::pair<glm::vec3, glm::vec3>> debugBoxes;
+						overlayScene->GetOctree().GetDebugBoxes(debugBoxes);
+						const Wui::WuiColor octreeBoxColor { 0.25f, 0.75f, 0.95f, 0.40f };
+						const float thickness = 1.0f;
+						for (const auto& [bMin, bMax] : debugBoxes)
+						{
+							const glm::vec3 c000(bMin.x, bMin.y, bMin.z);
+							const glm::vec3 c100(bMax.x, bMin.y, bMin.z);
+							const glm::vec3 c110(bMax.x, bMax.y, bMin.z);
+							const glm::vec3 c010(bMin.x, bMax.y, bMin.z);
+
+							const glm::vec3 c001(bMin.x, bMin.y, bMax.z);
+							const glm::vec3 c101(bMax.x, bMin.y, bMax.z);
+							const glm::vec3 c111(bMax.x, bMax.y, bMax.z);
+							const glm::vec3 c011(bMin.x, bMax.y, bMax.z);
+
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c000, c100, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c100, c110, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c110, c010, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c010, c000, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c001, c101, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c101, c111, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c111, c011, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c011, c001, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c000, c001, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c100, c101, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c110, c111, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f), c010, c011, octreeBoxColor, thickness, &overlayMin, &overlayMax);
+						}
+					}
+
 				// 取证(与相机视锥同口径):脚本可断言"画了几个、覆盖到哪",不靠像素。
 				if ((lightCount > 0 || colliderCount > 0 || audioCount > 0) && std::getenv("WLD_TRACE_UI"))
 				{
@@ -3763,7 +3961,8 @@ namespace World
 			activeChunkZ = static_cast<int32_t>(std::floor(camPos.z / chunkSize));
 
 			// 统计当前关卡在各 Chunk 的实体分布热度
-			if (const Ref<Scene> activeScene = m_Host.GetActiveScene())
+			const Ref<Scene> activeScene = m_Host.GetActiveScene();
+			if (activeScene)
 			{
 				std::unordered_set<int64_t> chunkSet;
 				const entt::registry& reg = std::as_const(*activeScene).GetRegistry();
@@ -3902,7 +4101,8 @@ namespace World
 				}
 
 				// 2. 特定区域局部覆盖呈现 (PartitionVolumeComponent 3D包围盒与细网格)
-				if (const Ref<Scene> activeScene = m_Host.GetActiveScene())
+				const Ref<Scene> activeScene = m_Host.GetActiveScene();
+			if (activeScene)
 				{
 					const entt::registry& reg = std::as_const(*activeScene).GetRegistry();
 					auto volumeView = reg.view<PartitionVolumeComponent, TransformComponent>();
@@ -5458,6 +5658,51 @@ namespace World
 			ctx.RegisterOverlayRect(hudRect);
 		}
 
+		// ⑥ LOD 与空间八叉树性能遥测 HUD (LOD & Octree HUD)
+		const Ref<Scene> hudScene = m_Host.GetActiveScene();
+		if (!play && s_ShowLODHud && hudScene && m_Host.HasRenderedScene())
+		{
+			const auto& lodStats = MeshLODManager::Get().GetStats();
+			const size_t octreeNodes = hudScene->GetOctree().GetTotalNodeCount();
+			const size_t octreeElements = hudScene->GetOctree().GetTotalElementCount();
+
+			char line1[96];
+			std::snprintf(line1, sizeof(line1), "八叉树: %zu 节点 | %zu 元素", octreeNodes, octreeElements);
+
+			char line2[128];
+			std::snprintf(line2, sizeof(line2), "LOD 分布: LOD0: %u | LOD1: %u | LOD2: %u | 剔除: %u",
+				lodStats.LOD0Count, lodStats.LOD1Count, lodStats.LOD2Count, lodStats.CulledCount);
+
+			const float t1W = ctx.MeasureTextWidth(line1, 11.5f);
+			const float t2W = ctx.MeasureTextWidth(line2, 11.5f);
+			const float lodHudW = std::max(260.0f, std::max(t1W, t2W) + 24.0f);
+			const float lodHudH = 46.0f;
+			const float axisAvoid = (sceneRect.W >= 420.0f) ? 56.0f : 0.0f;
+
+			float lodHudY = sceneRect.Y + sceneRect.H - lodHudH - 12.0f;
+			if (hasHudData)
+			{
+				lodHudY -= (42.0f + 8.0f);
+			}
+
+			const Wui::WuiRect lodHudRect {
+				sceneRect.X + sceneRect.W - lodHudW - 12.0f - axisAvoid,
+				lodHudY,
+				lodHudW,
+				lodHudH
+			};
+
+			Wui::PanelBackground(ctx, lodHudRect, theme.CardBg, 6.0f);
+			Wui::HighlightOutline(ctx, lodHudRect, theme.Accent, 6.0f, 1.0f);
+
+			Wui::Label(ctx, { lodHudRect.X + 10.0f, lodHudRect.Y + 5.0f }, line1,
+				theme.Accent, 11.5f);
+			Wui::Label(ctx, { lodHudRect.X + 10.0f, lodHudRect.Y + 23.0f }, line2,
+				theme.Text, 11.5f);
+
+			ctx.RegisterOverlayRect(lodHudRect);
+		}
+
 		if (previewVisible)
 		{
 			const uint64_t previewTexture = m_Host.GetCameraPreviewTextureId();
@@ -5497,6 +5742,26 @@ namespace World
 	bool ViewportPanel::IsNavMeshVisible()
 	{
 		return s_ShowNavMesh;
+	}
+
+	void ViewportPanel::SetOctreeBoundsVisible(bool visible)
+	{
+		s_ShowOctreeBounds = visible;
+	}
+
+	bool ViewportPanel::IsOctreeBoundsVisible()
+	{
+		return s_ShowOctreeBounds;
+	}
+
+	void ViewportPanel::SetLODHudVisible(bool visible)
+	{
+		s_ShowLODHud = visible;
+	}
+
+	bool ViewportPanel::IsLODHudVisible()
+	{
+		return s_ShowLODHud;
 	}
 
 	bool ViewportPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
@@ -5579,4 +5844,5 @@ namespace World
 		return false;
 	}
 }
+
 

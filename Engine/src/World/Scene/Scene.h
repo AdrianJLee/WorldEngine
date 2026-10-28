@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "World/Core/Timestep.h"
 #include "World/Core/UUID.h"
 #include "World/Core/RuntimeContract.h"
@@ -9,6 +9,7 @@
 #include "World/Renderer/RenderExtract.h"
 #include "World/Scene/ISystem.h"
 #include "World/Scene/Query.h"
+#include "World/Scene/SceneOctree.h"
 #include <box2d/id.h>
 #include <cstddef>
 #include <entt.hpp>
@@ -310,6 +311,10 @@ namespace Animation
 		// 提交同一场景时看到的是同一份。
 		FrameExtract& RenderExtract();
 		const FrameExtract& RenderExtract() const;
+
+		const SceneOctree& GetOctree() const { return m_Octree; }
+		SceneOctree& GetOctree() { return m_Octree; }
+		void BuildOctree();
 
 		template<typename T, typename... Args>
 		T& RegisterSystem(Args&&... args)
@@ -717,6 +722,7 @@ namespace Animation
 
 		std::shared_ptr<NavMesh> m_NavMesh;
 		std::string m_ScenePath;
+		SceneOctree m_Octree;
 	};
 
 

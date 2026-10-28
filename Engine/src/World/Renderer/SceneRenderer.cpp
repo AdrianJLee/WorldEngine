@@ -28,6 +28,8 @@
 #include "World/Math/Simd/FrustumCullSimd.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/FrameExtract.h"
+#include "World/Renderer/MeshLOD.h"
+#include "World/Scene/SceneOctree.h"
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Terrain/TerrainRenderer.h"
 #include "World/Foliage/FoliageRenderer.h"
@@ -874,13 +876,77 @@ namespace World
 		// PURE-ECS:本帧要画什么来自 Extract 阶段(相机无关)。Play/Simulate 由 `render-extract`
 		// 帧系统填好;编辑态不跑帧系统,这里的 Ensure 兜底(同一份实现、幂等)。
 		m_ActiveScene->EnsureRenderExtract(m_DeltaSeconds);
-		const FrameExtract& extract = m_ActiveScene->RenderExtract();
-		const std::vector<FrameMeshDraw>& draws = extract.Draws;
-		// ---- D8a:相机视锥剔除 ----
-		// 主通道只提交视锥内的 draw;剔除掉的物体**不进阴影通道的判断**(见下:阴影用
-		// 光源自己的正交视锥,否则"相机看不见但影子投进画面"的投影者会丢)。
-		// D8a2:开关来自项目清单 `rendering.culling`(引擎用户可配置);
-		// WLD_NO_CULL=1 仍可强制关闭(压力场景 A/B 基线用)。
+		FrameExtract& extract = m_ActiveScene->RenderExtract();
+		std::vector<FrameMeshDraw>& draws = extract.Draws;
+
+		// 重置 MeshLODManager 统计并获取相机位置
+		MeshLODManager::Get().ResetStats();
+		const glm::vec3 cameraPos = glm::vec3(cameraTransform[3]);
+
+		auto& reg = m_ActiveScene->GetRegistry();
+		std::unordered_set<uint32_t> culledEntities;
+
+		// 对带有 MeshLODComponent 的实体计算相机距离，评估 LOD 并记录结果
+		auto lodView = reg.view<MeshLODComponent>();
+		for (auto entity : lodView)
+		{
+			if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+				continue;
+			auto& comp = lodView.get<MeshLODComponent>(entity);
+			glm::vec3 entityPos(0.0f);
+			if (const auto* wt = reg.try_get<WorldTransformComponent>(entity))
+				entityPos = glm::vec3(wt->Matrix[3]);
+			else if (const auto* tc = reg.try_get<TransformComponent>(entity))
+				entityPos = tc->Location;
+
+			const float dist = glm::distance(cameraPos, entityPos);
+			const uint8_t targetLOD = MeshLODManager::Get().EvaluateLOD(dist, comp, comp.CurrentLOD);
+			comp.CurrentLOD = targetLOD;
+			MeshLODManager::Get().RecordLODResult(targetLOD);
+
+			if (targetLOD == MeshLODEvaluator::kCulled)
+			{
+				culledEntities.insert(static_cast<uint32_t>(entity));
+			}
+		}
+
+		// 对 draws 应用 LOD 网格切换与着色
+		for (auto& draw : draws)
+		{
+			if (draw.Entity == entt::null || !reg.valid(draw.Entity))
+				continue;
+			if (const auto* lodComp = reg.try_get<MeshLODComponent>(draw.Entity))
+			{
+				const uint8_t currentLOD = lodComp->CurrentLOD;
+				if (currentLOD == 1 && lodComp->LOD1Mesh.HasPath())
+				{
+					std::string err;
+					if (auto lodMesh = ResolveMeshAsset(lodComp->LOD1Mesh, &err))
+					{
+						draw.MeshAsset = lodMesh;
+						if (draw.SubmeshIndex != UINT32_MAX && !lodMesh->HasSubmeshes())
+							draw.SubmeshIndex = UINT32_MAX;
+					}
+				}
+				else if (currentLOD == 2 && lodComp->LOD2Mesh.HasPath())
+				{
+					std::string err;
+					if (auto lodMesh = ResolveMeshAsset(lodComp->LOD2Mesh, &err))
+					{
+						draw.MeshAsset = lodMesh;
+						if (draw.SubmeshIndex != UINT32_MAX && !lodMesh->HasSubmeshes())
+							draw.SubmeshIndex = UINT32_MAX;
+					}
+				}
+
+				if (MeshLODManager::Get().IsLODColorationEnabled())
+				{
+					draw.Color = MeshLODManager::Get().GetLODColor(currentLOD);
+				}
+			}
+		}
+
+		// ---- D8a:相机视锥剔除与八叉树加速 ----
 		const bool cullingEnabled = RenderSettings::CullingEnabled();
 		std::vector<uint32_t> visibleDraws;
 		visibleDraws.reserve(draws.size());
@@ -889,47 +955,69 @@ namespace World
 			const auto cullStart = std::chrono::steady_clock::now();
 			const size_t drawCount = draws.size();
 			const FrustumPlanes cameraFrustum = ExtractFrustumPlanes(viewProjection);
-			// D8a 并行化 + B 轴 SIMD(标准 §6.5.0 / §6.5.7):逐 draw 判定是**纯函数**
-			// (只读 draws/相机、写自己那一格)。按掩码判定(大场景走 JobSystem,批处理 SIMD),
-			// 再按**原索引顺序**串行压缩 ⇒ visibleDraws 与逐对象标量版逐元素相同
-			// (绘制顺序/像素结果不变)。
-			// 帧内临时缓冲走 FrameArena:帧末统一回卷,不产生堆分配/不增加 GC 压力。
 			auto* visibleMask = static_cast<std::uint8_t*>(FrameArena::Get().Allocate(drawCount, alignof(std::uint8_t)));
 			if (!cullingEnabled)
 			{
 				for (uint32_t index = 0; index < drawCount; ++index)
-					visibleDraws.push_back(index);
+				{
+					if (culledEntities.find(static_cast<uint32_t>(draws[index].Entity)) == culledEntities.end())
+						visibleDraws.push_back(index);
+				}
 			}
 			else
 			{
-				// B 轴优化(标准 §6.5.0 / §6.5.7):把逐对象标量判定换成**跨对象批处理 SIMD**。
-				// 逐对象标量版对 6 个平面各可能早退 ⇒ 6 次/对象的分支预测压力(大多可见时从不早退);
-				// 4 对象/lane 按平面循环 ⇒ 指令数约 1/4 且无分支。
-				// 逐 lane 与标量同序 ⇒ **逐位一致**(同一相机/同一帧的可见集合与旧实现完全相同),
-				// 因此这里可以无条件替换,不需要门控。
-				// 分块 + 取样 + 判定是 `Math/Simd` 里的**同一份实现**(可被测试直接覆盖,
-				// 而不是在渲染器里另写一份)。这里只提供"怎么从 AoS 的绘制项取样"。
-				const auto getAabb = [&draws](std::size_t i, glm::vec3& outMin, glm::vec3& outMax)
+				// 八叉树视锥剔除查询加速
+				if (m_ActiveScene->GetOctree().GetTotalElementCount() > 0)
 				{
-					outMin = draws[i].WorldMin;
-					outMax = draws[i].WorldMax;
-				};
-				const std::size_t tileCount = Math::Simd::AabbCullTileCount(drawCount);
-				const auto cullTile = [&](std::size_t tile)
-				{
-					Math::Simd::AabbInFrustumTile(cameraFrustum.Planes, drawCount, tile, getAabb, visibleMask);
-				};
+					std::vector<uint32_t> octreeVisibleEntities;
+					m_ActiveScene->GetOctree().QueryFrustum(cameraFrustum, octreeVisibleEntities);
+					std::unordered_set<uint32_t> octreeVisibleSet(octreeVisibleEntities.begin(), octreeVisibleEntities.end());
 
-				if (drawCount >= kParallelCullThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
-				{
-					// batchSize = 4 tile = 64 draw/job —— 与改造前的并行粒度**一致**:
-					// 若按 1 tile/job,单 job 只有 16 draw(≈70ns 工作量),调度开销会吃掉批处理的收益。
-					JobSystem::ParallelFor(static_cast<uint32_t>(tileCount), 4, cullTile);
+					for (size_t index = 0; index < drawCount; ++index)
+					{
+						const uint32_t entId = static_cast<uint32_t>(draws[index].Entity);
+						if (culledEntities.find(entId) != culledEntities.end())
+						{
+							visibleMask[index] = 0;
+						}
+						else if (octreeVisibleSet.find(entId) != octreeVisibleSet.end())
+						{
+							visibleMask[index] = 1;
+						}
+						else
+						{
+							visibleMask[index] = 0;
+						}
+					}
 				}
 				else
 				{
-					for (std::size_t tile = 0; tile < tileCount; ++tile)
-						cullTile(tile);
+					const auto getAabb = [&draws](std::size_t i, glm::vec3& outMin, glm::vec3& outMax)
+					{
+						outMin = draws[i].WorldMin;
+						outMax = draws[i].WorldMax;
+					};
+					const std::size_t tileCount = Math::Simd::AabbCullTileCount(drawCount);
+					const auto cullTile = [&](std::size_t tile)
+					{
+						Math::Simd::AabbInFrustumTile(cameraFrustum.Planes, drawCount, tile, getAabb, visibleMask);
+					};
+
+					if (drawCount >= kParallelCullThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
+					{
+						JobSystem::ParallelFor(static_cast<uint32_t>(tileCount), 4, cullTile);
+					}
+					else
+					{
+						for (std::size_t tile = 0; tile < tileCount; ++tile)
+							cullTile(tile);
+					}
+
+					for (size_t index = 0; index < drawCount; ++index)
+					{
+						if (culledEntities.find(static_cast<uint32_t>(draws[index].Entity)) != culledEntities.end())
+							visibleMask[index] = 0;
+					}
 				}
 
 				// 按原索引顺序串行压缩 ⇒ visibleDraws 的顺序与旧实现逐元素相同(绘制顺序/像素不变)。
@@ -939,9 +1027,6 @@ namespace World
 			}
 			cullMilliseconds = std::chrono::duration<double, std::milli>(
 				std::chrono::steady_clock::now() - cullStart).count();
-			// 与 CullMilliseconds 同一区间:便于在 trace 里对齐"剔除占了提交的多少"。
-			// 剔除耗时:计数器是整型,用**微秒**存(cull 常 <1ms,存毫秒会截断成 0)。
-			// 与帧计数器同口径:名称就写单位。
 			WLD_TRACE_COUNTER("Scene.CullUs", static_cast<int64_t>(cullMilliseconds * 1000.0));
 		}
 		uint32_t shadowCasters = 0;
@@ -1044,6 +1129,8 @@ namespace World
 					for (uint32_t index = 0; index < draws.size(); ++index)
 					{
 						const FrameMeshDraw& draw = draws[index];
+						if (culledEntities.find(static_cast<uint32_t>(draw.Entity)) != culledEntities.end())
+							continue;
 						if (AabbInFrustum(cascadeFrustum, draw.WorldMin, draw.WorldMax))
 							shadowDraws.push_back(index);
 					}
@@ -1052,7 +1139,11 @@ namespace World
 				{
 					shadowDraws.reserve(draws.size());
 					for (uint32_t index = 0; index < draws.size(); ++index)
+					{
+						if (culledEntities.find(static_cast<uint32_t>(draws[index].Entity)) != culledEntities.end())
+							continue;
 						shadowDraws.push_back(index);
+					}
 				}
 				shadowCasters += static_cast<uint32_t>(shadowDraws.size());
 

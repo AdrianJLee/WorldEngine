@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 950000000000000014
+  World::TagComponent:
+    Tag: "Octree Gateway Pillar Right"
+  World::TransformComponent:
+    Location: [4.5, 2, -2]
+    Rotation: [0, 0, 0]
+    Scale: [1, 4, 1]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.55, 0.6, 0.7, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 4

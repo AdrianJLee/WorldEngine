@@ -1,4 +1,4 @@
-﻿#include "World/Physics/Physics2DUtils.h"
+#include "World/Physics/Physics2DUtils.h"
 #include "wldpch.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Scene.h"
@@ -2269,6 +2269,146 @@ namespace World
 			return;   // 无渲染宿主(纯逻辑测试/工具):抽取不是必需的
 		RenderExtract().Clear();
 		m_RenderExtractSink->ExtractScene(*this, deltaSeconds);
+		BuildOctree();
+	}
+
+	void Scene::BuildOctree()
+	{
+		std::vector<OctreeElement> elements;
+
+		if (m_RenderExtract && !m_RenderExtract->Draws.empty())
+		{
+			std::unordered_map<uint32_t, size_t> entityMap;
+			for (const auto& draw : m_RenderExtract->Draws)
+			{
+				const uint32_t entId = static_cast<uint32_t>(draw.Entity);
+				auto it = entityMap.find(entId);
+				if (it == entityMap.end())
+				{
+					entityMap[entId] = elements.size();
+					OctreeElement elem;
+					elem.EntityId = entId;
+					elem.BoundsMin = draw.WorldMin;
+					elem.BoundsMax = draw.WorldMax;
+					elements.push_back(elem);
+				}
+				else
+				{
+					elements[it->second].BoundsMin = glm::min(elements[it->second].BoundsMin, draw.WorldMin);
+					elements[it->second].BoundsMax = glm::max(elements[it->second].BoundsMax, draw.WorldMax);
+				}
+			}
+		}
+		else
+		{
+			auto meshView = m_Registry.view<TransformComponent, MeshRendererComponent>();
+			for (auto entity : meshView)
+			{
+				if (!IsEntityInActiveDataLayers(entity))
+					continue;
+				glm::mat4 modelMat(1.0f);
+				if (const auto* wt = m_Registry.try_get<WorldTransformComponent>(entity))
+					modelMat = wt->Matrix;
+				else
+					modelMat = meshView.get<TransformComponent>(entity).GetLocalMatrix();
+
+				OctreeElement elem;
+				elem.EntityId = static_cast<uint32_t>(entity);
+				glm::vec3 bMin, bMax;
+				TransformAabb(modelMat, glm::vec3(-0.5f), glm::vec3(0.5f), bMin, bMax);
+				elem.BoundsMin = bMin;
+				elem.BoundsMax = bMax;
+				elements.push_back(elem);
+			}
+		}
+
+		auto boxView = m_Registry.view<TransformComponent, BoxCollider3DComponent>();
+		for (auto entity : boxView)
+		{
+			const uint32_t entId = static_cast<uint32_t>(entity);
+			const auto& [tc, box] = boxView.get<TransformComponent, BoxCollider3DComponent>(entity);
+			glm::mat4 modelMat(1.0f);
+			if (const auto* wt = m_Registry.try_get<WorldTransformComponent>(entity))
+				modelMat = wt->Matrix;
+			else
+				modelMat = tc.GetLocalMatrix();
+
+			glm::vec3 bMin, bMax;
+			TransformAabb(modelMat, box.Offset - box.HalfExtents, box.Offset + box.HalfExtents, bMin, bMax);
+
+			bool found = false;
+			for (auto& existing : elements)
+			{
+				if (existing.EntityId == entId)
+				{
+					existing.BoundsMin = glm::min(existing.BoundsMin, bMin);
+					existing.BoundsMax = glm::max(existing.BoundsMax, bMax);
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				OctreeElement elem;
+				elem.EntityId = entId;
+				elem.BoundsMin = bMin;
+				elem.BoundsMax = bMax;
+				elements.push_back(elem);
+			}
+		}
+
+		auto sphereView = m_Registry.view<TransformComponent, SphereCollider3DComponent>();
+		for (auto entity : sphereView)
+		{
+			const uint32_t entId = static_cast<uint32_t>(entity);
+			const auto& [tc, sphere] = sphereView.get<TransformComponent, SphereCollider3DComponent>(entity);
+			glm::mat4 modelMat(1.0f);
+			if (const auto* wt = m_Registry.try_get<WorldTransformComponent>(entity))
+				modelMat = wt->Matrix;
+			else
+				modelMat = tc.GetLocalMatrix();
+
+			glm::vec3 bMin, bMax;
+			TransformAabb(modelMat, sphere.Offset - glm::vec3(sphere.Radius), sphere.Offset + glm::vec3(sphere.Radius), bMin, bMax);
+
+			bool found = false;
+			for (auto& existing : elements)
+			{
+				if (existing.EntityId == entId)
+				{
+					existing.BoundsMin = glm::min(existing.BoundsMin, bMin);
+					existing.BoundsMax = glm::max(existing.BoundsMax, bMax);
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				OctreeElement elem;
+				elem.EntityId = entId;
+				elem.BoundsMin = bMin;
+				elem.BoundsMax = bMax;
+				elements.push_back(elem);
+			}
+		}
+
+		if (elements.empty())
+		{
+			m_Octree.Clear();
+			return;
+		}
+
+		glm::vec3 worldMin(1e9f);
+		glm::vec3 worldMax(-1e9f);
+		for (const auto& elem : elements)
+		{
+			worldMin = glm::min(worldMin, elem.BoundsMin);
+			worldMax = glm::max(worldMax, elem.BoundsMax);
+		}
+		const glm::vec3 center = (worldMin + worldMax) * 0.5f;
+		const float maxDim = std::max({ worldMax.x - worldMin.x, worldMax.y - worldMin.y, worldMax.z - worldMin.z, 20.0f });
+		const float halfSize = std::max(maxDim * 0.5f * 1.1f, 10.0f);
+		m_Octree.Build(elements, center, halfSize, 6, 16);
 	}
 
 	static void SimulateSceneVfx(entt::registry& reg, float dt)

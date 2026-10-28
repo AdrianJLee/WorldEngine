@@ -151,6 +151,11 @@ namespace World
 		static void SetNavMeshVisible(bool visible);
 		static bool IsNavMeshVisible();
 
+		static void SetOctreeBoundsVisible(bool visible);
+		static bool IsOctreeBoundsVisible();
+		static void SetLODHudVisible(bool visible);
+		static bool IsLODHudVisible();
+
 	private:
 		ViewportHost& m_Host;
 		std::shared_ptr<Wui::WuiBox> m_Root;

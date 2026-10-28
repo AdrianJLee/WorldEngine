@@ -1,7 +1,8 @@
-﻿#include "World/Command/CommandHistory.h"
+#include "World/Command/CommandHistory.h"
 #include "World/Physics/PhysicsMaterial.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/Tilemap.h"
+#include "World/Renderer/MeshLOD.h"
 #include "World/Renderer/ParticleSystem.h"
 #include "World/Renderer/ParticleAsset.h"
 #include "World/Scene/Components.h"
@@ -512,6 +513,312 @@ using namespace PropertiesPanelDetail;
 		return curY - rect.Y;
 	}
 
+
+	static float DrawMeshLODComponentInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto* lod = static_cast<MeshLODComponent*>(instance);
+		if (!lod)
+			return 0.0f;
+
+		const float pad = theme.Pad;
+		const float startX = rect.X + pad;
+		const float contentW = rect.W - pad * 2.0f;
+		float curY = rect.Y + 4.0f;
+
+		// =========================================================================
+		// 1. 顶部当前相机距离与激活状态横幅
+		// =========================================================================
+		const glm::vec3 cameraPos = host.GetGizmoCamera().Position;
+		glm::vec3 entPos(0.0f);
+		if (entity.HasComponent<TransformComponent>())
+			entPos = entity.GetComponent<TransformComponent>().Location;
+		const float distance = glm::length(cameraPos - entPos);
+
+		const uint8_t activeLOD = lod->CurrentLOD;
+		const char* badgeText = "[LOD 0 (Base)]";
+		Wui::WuiColor badgeCol { 0.2f, 0.9f, 0.2f, 1.0f };
+		Wui::WuiColor bgCol { 0.05f, 0.22f, 0.08f, 0.90f };
+
+		if (activeLOD == 255)
+		{
+			badgeText = "[CULLED]";
+			badgeCol = Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 1.0f };
+			bgCol = Wui::WuiColor{ 0.25f, 0.05f, 0.05f, 0.90f };
+		}
+		else if (activeLOD == 2)
+		{
+			badgeText = "[LOD 2 (Low)]";
+			badgeCol = Wui::WuiColor{ 0.95f, 0.50f, 0.10f, 1.0f };
+			bgCol = Wui::WuiColor{ 0.25f, 0.12f, 0.03f, 0.90f };
+		}
+		else if (activeLOD == 1)
+		{
+			badgeText = "[LOD 1 (Mid)]";
+			badgeCol = Wui::WuiColor{ 0.95f, 0.85f, 0.10f, 1.0f };
+			bgCol = Wui::WuiColor{ 0.22f, 0.20f, 0.05f, 0.90f };
+		}
+
+		const Wui::WuiRect bannerRect { startX, curY, contentW, 28.0f };
+		Wui::PanelBackground(ctx, bannerRect, bgCol, 4.0f);
+		Wui::HighlightOutline(ctx, bannerRect, badgeCol, 4.0f, 1.2f);
+		Wui::Label(ctx, { bannerRect.X + 8.0f, bannerRect.Y + 6.0f }, badgeText, badgeCol, theme.FontSizeBody);
+
+		char distText[64];
+		std::snprintf(distText, sizeof(distText), "Distance: %.1f m (Hyst: %.1fm)", distance, lod->Hysteresis);
+		const float distW = ctx.MeasureTextWidth(distText, theme.FontSizeSmall);
+		Wui::Label(ctx, { bannerRect.X + bannerRect.W - distW - 8.0f, bannerRect.Y + 7.0f }, distText, theme.Text, theme.FontSizeSmall);
+		curY += 34.0f;
+
+		const float paramLabelW = 120.0f;
+		const float paramFieldW = contentW - paramLabelW;
+
+		// =========================================================================
+		// 2. 强制预览档位下拉框 (Force LOD Preview)
+		// =========================================================================
+		const std::vector<std::string> forceOptions = {
+			"Auto (自动距离评估)",
+			"Force LOD 0 (高精原模)",
+			"Force LOD 1 (中模减面)",
+			"Force LOD 2 (远景简模)"
+		};
+		const int8_t curForced = MeshLODManager::Get().GetForcedLOD();
+		int selectedForce = (curForced >= 0 && curForced <= 2) ? (curForced + 1) : 0;
+		const int beforeForce = selectedForce;
+		Wui::Label(ctx, { startX, curY + 2.0f }, "强制预览 (Force LOD):", theme.Text, theme.FontSizeSmall);
+		if (Wui::Combo(ctx, Wui::HashId("inspect.lod.force_combo"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, "", forceOptions, selectedForce, theme))
+		{
+			if (selectedForce != beforeForce)
+			{
+				const int8_t newForced = (selectedForce == 0) ? -1 : static_cast<int8_t>(selectedForce - 1);
+				MeshLODManager::Get().SetForcedLOD(newForced);
+			}
+		}
+		curY += 26.0f;
+
+		// =========================================================================
+		// 3. 距离阶梯滑块 (DragFloat)
+		// =========================================================================
+		// LOD1 距离 (m)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "LOD1 距离 (m):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.lod.dist1"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, lod->LOD1Distance, 0.5f, 1.0f, 1000.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("LOD1Distance");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// LOD2 距离 (m)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "LOD2 距离 (m):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.lod.dist2"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, lod->LOD2Distance, 1.0f, 5.0f, 2000.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("LOD2Distance");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 剔除距离 (m)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "剔除距离 (m):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.lod.cull_dist"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, lod->CullDistance, 2.0f, 10.0f, 5000.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("CullDistance");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 滞后防抖缓冲区 (m)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "滞后防抖缓冲区 (m):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.lod.hysteresis"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, lod->Hysteresis, 0.1f, 0.1f, 50.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("Hysteresis");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 平滑淡入淡出过渡开关
+		bool crossFade = (lod->EnableCrossFade != 0);
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.lod.cross_fade"),
+			{ startX, curY, contentW, 22.0f }, "平滑淡入淡出过渡 (Cross Fade)", crossFade, theme))
+		{
+			lod->EnableCrossFade = crossFade ? 1 : 0;
+			if (changedFields) changedFields->push_back("EnableCrossFade");
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
+		// =========================================================================
+		// 4. 资产槽位 (LOD0 只读原网格、LOD1Mesh 槽、LOD2Mesh 槽)
+		// =========================================================================
+		std::string lod0MeshName = "(无网格)";
+		if (entity.HasComponent<MeshRendererComponent>())
+		{
+			const auto& mr = entity.GetComponent<MeshRendererComponent>();
+			if (mr.Mesh.HasPath())
+				lod0MeshName = StringPool::Get().PathOf(mr.Mesh.Path);
+			else
+			{
+				switch (mr.Primitive)
+				{
+				case MeshRendererComponent::PrimitiveShape::Cube: lod0MeshName = "Cube (内置立方体)"; break;
+				case MeshRendererComponent::PrimitiveShape::Sphere: lod0MeshName = "Sphere (内置球体)"; break;
+				case MeshRendererComponent::PrimitiveShape::Plane: lod0MeshName = "Plane (内置平面)"; break;
+				}
+			}
+		}
+		Wui::Label(ctx, { startX, curY + 2.0f }, "LOD0 原网格 (Base):", theme.Text, theme.FontSizeSmall);
+		const Wui::WuiRect lod0Rect { startX + paramLabelW, curY, paramFieldW, 22.0f };
+		Wui::PanelBackground(ctx, lod0Rect, theme.CardBg, 3.0f);
+		Wui::HighlightOutline(ctx, lod0Rect, theme.Border, 3.0f, 1.0f);
+		Wui::Label(ctx, { lod0Rect.X + 6.0f, lod0Rect.Y + 3.0f }, lod0MeshName, theme.TextDisabled, theme.FontSizeSmall);
+		curY += 26.0f;
+
+		const std::vector<std::string>& meshPaths = Editor::AssetCatalog::PathsForName("Mesh");
+		const float pickBtnW = 26.0f;
+
+		// LOD1Mesh 槽
+		{
+			const std::string cur1 = lod->LOD1Mesh.HasPath() ? std::string(StringPool::Get().PathOf(lod->LOD1Mesh.Path)) : "";
+			std::vector<std::string> opts1;
+			opts1.push_back("(None / Fallback)");
+			opts1.insert(opts1.end(), meshPaths.begin(), meshPaths.end());
+			int sel1 = 0;
+			auto it1 = std::find(meshPaths.begin(), meshPaths.end(), cur1);
+			if (it1 != meshPaths.end())
+				sel1 = static_cast<int>(it1 - meshPaths.begin()) + 1;
+			else if (!cur1.empty())
+			{
+				opts1.push_back(cur1);
+				sel1 = static_cast<int>(opts1.size()) - 1;
+			}
+			const int before1 = sel1;
+			Wui::Label(ctx, { startX, curY + 2.0f }, "LOD1 资产槽 (Mid):", theme.Text, theme.FontSizeSmall);
+			const Wui::WuiRect comboRect1 { startX + paramLabelW, curY, paramFieldW - pickBtnW - 4.0f, 22.0f };
+			const Wui::WuiRect pickRect1 { startX + paramLabelW + paramFieldW - pickBtnW, curY, pickBtnW, 22.0f };
+			if (Wui::Combo(ctx, Wui::HashId("inspect.lod.mesh1_combo"), comboRect1, "", opts1, sel1, theme))
+			{
+				if (sel1 != before1)
+				{
+					if (sel1 == 0)
+						lod->LOD1Mesh = AssetRef{};
+					else
+						lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(opts1[sel1]), AssetId{} };
+					if (changedFields) changedFields->push_back("LOD1Mesh");
+					host.MarkDocumentDirty();
+				}
+			}
+			if (Wui::Button(ctx, Wui::HashId("inspect.lod.mesh1_btn"), pickRect1, "...", theme))
+			{
+				host.OpenAssetPicker("Select LOD1 Mesh", AssetCategory::Mesh, [lod, &host, changedFields](const std::string& picked) {
+					lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(picked), AssetId{} };
+					if (changedFields) changedFields->push_back("LOD1Mesh");
+					host.MarkDocumentDirty();
+				});
+			}
+			curY += 26.0f;
+		}
+
+		// LOD2Mesh 槽
+		{
+			const std::string cur2 = lod->LOD2Mesh.HasPath() ? std::string(StringPool::Get().PathOf(lod->LOD2Mesh.Path)) : "";
+			std::vector<std::string> opts2;
+			opts2.push_back("(None / Fallback)");
+			opts2.insert(opts2.end(), meshPaths.begin(), meshPaths.end());
+			int sel2 = 0;
+			auto it2 = std::find(meshPaths.begin(), meshPaths.end(), cur2);
+			if (it2 != meshPaths.end())
+				sel2 = static_cast<int>(it2 - meshPaths.begin()) + 1;
+			else if (!cur2.empty())
+			{
+				opts2.push_back(cur2);
+				sel2 = static_cast<int>(opts2.size()) - 1;
+			}
+			const int before2 = sel2;
+			Wui::Label(ctx, { startX, curY + 2.0f }, "LOD2 资产槽 (Low):", theme.Text, theme.FontSizeSmall);
+			const Wui::WuiRect comboRect2 { startX + paramLabelW, curY, paramFieldW - pickBtnW - 4.0f, 22.0f };
+			const Wui::WuiRect pickRect2 { startX + paramLabelW + paramFieldW - pickBtnW, curY, pickBtnW, 22.0f };
+			if (Wui::Combo(ctx, Wui::HashId("inspect.lod.mesh2_combo"), comboRect2, "", opts2, sel2, theme))
+			{
+				if (sel2 != before2)
+				{
+					if (sel2 == 0)
+						lod->LOD2Mesh = AssetRef{};
+					else
+						lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(opts2[sel2]), AssetId{} };
+					if (changedFields) changedFields->push_back("LOD2Mesh");
+					host.MarkDocumentDirty();
+				}
+			}
+			if (Wui::Button(ctx, Wui::HashId("inspect.lod.mesh2_btn"), pickRect2, "...", theme))
+			{
+				host.OpenAssetPicker("Select LOD2 Mesh", AssetCategory::Mesh, [lod, &host, changedFields](const std::string& picked) {
+					lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(picked), AssetId{} };
+					if (changedFields) changedFields->push_back("LOD2Mesh");
+					host.MarkDocumentDirty();
+				});
+			}
+			curY += 30.0f;
+		}
+
+		// =========================================================================
+		// 5. 快速测试辅助按钮与聚焦
+		// =========================================================================
+		const float btnHalfW = (contentW - 6.0f) * 0.5f;
+		const Wui::WuiRect quickSetRect { startX, curY, btnHalfW, 26.0f };
+		const Wui::WuiRect focusRect { startX + btnHalfW + 6.0f, curY, btnHalfW, 26.0f };
+
+		if (Wui::Button(ctx, Wui::HashId("inspect.lod.quick_set"), quickSetRect, "[Quick Set] 绑定内置测试几何体", theme))
+		{
+			lod->LOD1Distance = 15.0f;
+			lod->LOD2Distance = 35.0f;
+			lod->CullDistance = 70.0f;
+			lod->Hysteresis = 2.0f;
+
+			if (meshPaths.size() >= 2)
+			{
+				lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(meshPaths[0]), AssetId{} };
+				lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(meshPaths[1]), AssetId{} };
+			}
+			else if (meshPaths.size() == 1)
+			{
+				lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(meshPaths[0]), AssetId{} };
+				lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(meshPaths[0]), AssetId{} };
+			}
+			else
+			{
+				lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath("engine/meshes/sphere.wmodel"), AssetId{} };
+				lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath("engine/meshes/cube.wmodel"), AssetId{} };
+			}
+
+			if (changedFields)
+			{
+				changedFields->push_back("LOD1Distance");
+				changedFields->push_back("LOD2Distance");
+				changedFields->push_back("CullDistance");
+				changedFields->push_back("Hysteresis");
+				changedFields->push_back("LOD1Mesh");
+				changedFields->push_back("LOD2Mesh");
+			}
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, quickSetRect, "一键配置 15m/35m/70m 阶梯距离与测试几何体，方便立刻观察减面效果");
+
+		if (Wui::Button(ctx, Wui::HashId("inspect.lod.focus"), focusRect, "[Focus] 视口聚焦实体", theme))
+		{
+			host.ResetViewportCamera();
+		}
+		Wui::Tooltip(ctx, focusRect, "重置视口相机并平滑聚焦对齐该实体");
+
+		curY += 32.0f;
+		return curY - rect.Y;
+	}
+
 	// ---- 组件检视器 ----
 
 float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect){
@@ -604,6 +911,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawNavMeshAgentInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::NavMeshObstacleComponent")
 			height = DrawNavMeshObstacleInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::MeshLODComponent")
+			height = DrawMeshLODComponentInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
 
 		else
@@ -2931,3 +3240,5 @@ float PropertiesPanel::DrawVfxInspector(Wui::WuiContext& ctx, const Wui::WuiRect
 
 
 }
+
+

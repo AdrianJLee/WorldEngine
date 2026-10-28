@@ -78,6 +78,7 @@ int StepDecimals(bool hasStep, float step);
 
 void DrawScriptIntControl(Wui::WuiContext& ctx, Wui::WuiId id, const Wui::WuiRect& rect, int64_t& raw, int64_t lo, int64_t hi, const Schema::FieldMetadata& meta, const Wui::WuiTheme& theme);
 
+
 const std::filesystem::path& CachedContentRoot();
 
 bool PrefabSourceExists(const std::string& path);

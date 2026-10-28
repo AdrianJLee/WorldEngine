@@ -1,7 +1,15 @@
+#if defined(_WIN32) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 #include "World/Renderer/MeshLOD.h"
 #include "World/Scene/SceneOctree.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Scene.h"
+#include "World/Scene/Entity.h"
+#include "World/Core/WorldContext.h"
+#include "World/Renderer/FrustumCull.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <cassert>
 #include <iostream>
 
@@ -99,12 +107,226 @@ static void TestMeshLODComponentLayout()
 	std::cout << "[PASS] TestMeshLODComponentLayout\n";
 }
 
+static void TestMeshLODManager()
+{
+	MeshLODManager& mgr = MeshLODManager::Get();
+	mgr.ResetStats();
+	mgr.SetForcedLOD(-1);
+	mgr.SetGlobalDistanceScale(1.0f);
+	mgr.SetLODColorationEnabled(false);
+
+	assert(mgr.GetForcedLOD() == -1);
+	assert(mgr.GetGlobalDistanceScale() == 1.0f);
+	assert(!mgr.IsLODColorationEnabled());
+
+	MeshLODComponent comp;
+	comp.LOD1Distance = 30.0f;
+	comp.LOD2Distance = 80.0f;
+	comp.CullDistance = 180.0f;
+	comp.Hysteresis = 2.0f;
+
+	// 1. Evaluate with component hysteresis
+	uint8_t lod = mgr.EvaluateLOD(10.0f, comp, 0);
+	assert(lod == 0);
+	lod = mgr.EvaluateLOD(35.0f, comp, 0);
+	assert(lod == 1);
+	lod = mgr.EvaluateLOD(90.0f, comp, 1);
+	assert(lod == 2);
+	lod = mgr.EvaluateLOD(200.0f, comp, 2);
+	assert(lod == MeshLODEvaluator::kCulled);
+
+	// 2. 5% default hysteresis when comp.Hysteresis <= 0.0f
+	comp.Hysteresis = 0.0f; // triggers 5% default
+	// At 30m, 5% is 1.5m, so 30+1.5=31.5m threshold
+	lod = mgr.EvaluateLOD(31.0f, comp, 0);
+	assert(lod == 0); // within 5% band
+	lod = mgr.EvaluateLOD(32.0f, comp, 0);
+	assert(lod == 1); // exceeded 5% band
+
+	// 3. Global distance scale
+	comp.Hysteresis = 2.0f;
+	mgr.SetGlobalDistanceScale(2.0f);
+	assert(mgr.GetGlobalDistanceScale() == 2.0f);
+	// 16m * 2.0 = 32m > 30+2=32m -> switch to LOD1
+	lod = mgr.EvaluateLOD(17.0f, comp, 0);
+	assert(lod == 1);
+	mgr.SetGlobalDistanceScale(1.0f);
+
+	// 4. Forced LOD override
+	mgr.SetForcedLOD(2);
+	assert(mgr.GetForcedLOD() == 2);
+	assert(mgr.EvaluateLOD(5.0f, comp, 0) == 2);
+	mgr.SetForcedLOD(0);
+	assert(mgr.EvaluateLOD(500.0f, comp, 0) == 0);
+	mgr.SetForcedLOD(-1); // restore Auto
+
+	// 5. Statistics recording & reset
+	mgr.ResetStats();
+	assert(mgr.GetStats().TotalLODEntities == 0);
+	mgr.RecordLODResult(0);
+	mgr.RecordLODResult(1);
+	mgr.RecordLODResult(2);
+	mgr.RecordLODResult(MeshLODEvaluator::kCulled);
+
+	const auto& stats = mgr.GetStats();
+	assert(stats.TotalLODEntities == 4);
+	assert(stats.LOD0Count == 1);
+	assert(stats.LOD1Count == 1);
+	assert(stats.LOD2Count == 1);
+	assert(stats.CulledCount == 1);
+
+	mgr.ResetStats();
+	assert(mgr.GetStats().TotalLODEntities == 0);
+
+	// 6. LOD coloration & colors
+	mgr.SetLODColorationEnabled(true);
+	assert(mgr.IsLODColorationEnabled());
+
+	const glm::vec4 col0 = mgr.GetLODColor(0);
+	const glm::vec4 col1 = mgr.GetLODColor(1);
+	const glm::vec4 col2 = mgr.GetLODColor(2);
+	const glm::vec4 colCulled = mgr.GetLODColor(MeshLODEvaluator::kCulled);
+
+	assert(col0 == glm::vec4(0.2f, 0.9f, 0.2f, 1.0f));
+	assert(col1 == glm::vec4(0.95f, 0.85f, 0.1f, 1.0f));
+	assert(col2 == glm::vec4(0.95f, 0.45f, 0.1f, 1.0f));
+	assert(colCulled == glm::vec4(0.8f, 0.15f, 0.15f, 1.0f));
+
+	mgr.SetLODColorationEnabled(false);
+	assert(!mgr.IsLODColorationEnabled());
+
+	std::cout << "[PASS] TestMeshLODManager\n";
+}
+
+static void TestSceneOctreeExtensions()
+{
+	SceneOctree octree;
+
+	std::vector<OctreeElement> elements;
+	for (uint32_t i = 1; i <= 16; ++i)
+	{
+		OctreeElement elem;
+		elem.EntityId = i;
+		glm::vec3 pos(i * 10.0f, 0.0f, 0.0f);
+		elem.BoundsMin = pos - glm::vec3(2.0f);
+		elem.BoundsMax = pos + glm::vec3(2.0f);
+		elements.push_back(elem);
+	}
+
+	octree.Build(elements, glm::vec3(85.0f, 0.0f, 0.0f), 100.0f, 4, 4);
+	assert(octree.GetTotalElementCount() == 16);
+
+	// 1. ForEachNode
+	size_t nodeCount = 0;
+	octree.ForEachNode([&](const SceneOctree::Node& node)
+	{
+		++nodeCount;
+		assert(node.HalfSize > 0.0f);
+	});
+	assert(nodeCount == octree.GetTotalNodeCount());
+
+	// 2. GetDebugBoxes
+	std::vector<std::pair<glm::vec3, glm::vec3>> debugBoxes;
+	octree.GetDebugBoxes(debugBoxes);
+	assert(!debugBoxes.empty());
+	for (const auto& box : debugBoxes)
+	{
+		assert(box.first.x <= box.second.x);
+		assert(box.first.y <= box.second.y);
+		assert(box.first.z <= box.second.z);
+	}
+
+	// 3. Remove
+	bool removed = octree.Remove(5);
+	assert(removed);
+	assert(octree.GetTotalElementCount() == 15);
+
+	// Removing already removed entity returns false
+	assert(!octree.Remove(5));
+	assert(octree.GetTotalElementCount() == 15);
+
+	// Verify entity 5 is no longer hit by sphere query
+	std::vector<uint32_t> sphereHits;
+	octree.QuerySphere(glm::vec3(50.0f, 0.0f, 0.0f), 3.0f, sphereHits);
+	for (uint32_t id : sphereHits)
+	{
+		assert(id != 5);
+	}
+
+	// 4. Update
+	OctreeElement updatedElem;
+	updatedElem.EntityId = 10;
+	updatedElem.BoundsMin = glm::vec3(70.0f, 10.0f, 10.0f);
+	updatedElem.BoundsMax = glm::vec3(74.0f, 14.0f, 14.0f);
+	octree.Update(updatedElem);
+	assert(octree.GetTotalElementCount() == 15); // replace, count stays 15
+
+	sphereHits.clear();
+	octree.QuerySphere(glm::vec3(72.0f, 12.0f, 12.0f), 5.0f, sphereHits);
+	assert(!sphereHits.empty());
+	assert(sphereHits[0] == 10);
+
+	std::cout << "[PASS] TestSceneOctreeExtensions\n";
+}
+
+static void TestSceneOctreeIntegration()
+{
+	
+	WorldContext context;
+	Scene scene(context);
+
+	assert(scene.GetOctree().GetTotalElementCount() == 0);
+	scene.BuildOctree();
+	assert(scene.GetOctree().GetTotalElementCount() == 0);
+
+	Entity e1 = Entity::CreateEntity(&scene, "BoxActor");
+	auto& tc = e1.AddComponent<TransformComponent>();
+	tc.Location = glm::vec3(15.0f, 0.0f, 0.0f);
+	auto& box = e1.AddComponent<BoxCollider3DComponent>();
+	box.HalfExtents = glm::vec3(2.0f);
+
+	scene.BuildOctree();
+	assert(scene.GetOctree().GetTotalElementCount() == 1);
+
+	// Frustum query containing entity 1
+	glm::mat4 view = glm::lookAt(glm::vec3(15.0f, 0.0f, 50.0f), glm::vec3(15.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+	glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
+	FrustumPlanes frustum = ExtractFrustumPlanes(proj * view);
+
+	std::vector<uint32_t> visible;
+	scene.GetOctree().QueryFrustum(frustum, visible);
+	assert(visible.size() == 1);
+	assert(visible[0] == static_cast<uint32_t>(e1));
+
+	// Frustum query pointing away (in opposite direction)
+	glm::mat4 viewAway = glm::lookAt(glm::vec3(-100.0f, 0.0f, 0.0f), glm::vec3(-200.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+	FrustumPlanes frustumAway = ExtractFrustumPlanes(proj * viewAway);
+	visible.clear();
+	scene.GetOctree().QueryFrustum(frustumAway, visible);
+	assert(visible.empty());
+
+	std::cout << "[PASS] TestSceneOctreeIntegration\n";
+}
+
 int main()
 {
+#if defined(_WIN32) && defined(_DEBUG)
+	_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+	_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
 	std::cout << "Starting World.MeshLOD tests...\n";
 	TestMeshLODEvaluationAndHysteresis();
 	TestSceneOctreeBuildAndQuery();
 	TestMeshLODComponentLayout();
+	TestMeshLODManager();
+	TestSceneOctreeExtensions();
+	TestSceneOctreeIntegration();
 	std::cout << "All World.MeshLOD tests passed successfully!\n";
 	return 0;
 }
+
+
+
+

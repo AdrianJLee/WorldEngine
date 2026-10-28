@@ -13,5 +13,14 @@ Entity:
     Primitive: 0
     Color: [0.25, 0.850000024, 0.349999994, 1]
     Mesh: ""
+  World::MeshLODComponent:
+    LOD1Mesh: ""
+    LOD2Mesh: ""
+    LOD1Distance: 15.0
+    LOD2Distance: 35.0
+    CullDistance: 70.0
+    Hysteresis: 2.0
+    CurrentLOD: 0
+    EnableCrossFade: 1
   World::LevelEntityComponent:
     DataLayerMask: 2

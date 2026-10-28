@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 950000000000000005
+  World::TagComponent:
+    Tag: "LOD Pillar 02 (LOD 1 Mid)"
+  World::TransformComponent:
+    Location: [0, 1.2, 4]
+    Rotation: [0, 0, 0]
+    Scale: [1.8, 1.8, 1.8]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.92, 0.82, 0.22, 1]
+    Mesh: ""
+  World::MeshLODComponent:
+    LOD1Mesh: ""
+    LOD2Mesh: ""
+    LOD1Distance: 15.0
+    LOD2Distance: 35.0
+    CullDistance: 65.0
+    Hysteresis: 2.0
+    CurrentLOD: 1
+    EnableCrossFade: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 2

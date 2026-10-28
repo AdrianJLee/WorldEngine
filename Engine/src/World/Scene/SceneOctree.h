@@ -5,7 +5,9 @@
 
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace World
@@ -43,6 +45,11 @@ namespace World
 			uint32_t maxDepth = 6, uint32_t maxElementsPerNode = 16);
 
 		void Insert(const OctreeElement& elem);
+		bool Remove(uint32_t entityId);
+		void Update(const OctreeElement& elem);
+
+		void ForEachNode(const std::function<void(const Node&)>& fn) const;
+		void GetDebugBoxes(std::vector<std::pair<glm::vec3, glm::vec3>>& outBoxes) const;
 
 		// 层级视锥剔除查询 (O(log N) 快速剪枝)
 		void QueryFrustum(const FrustumPlanes& frustum, std::vector<uint32_t>& outEntities) const;
@@ -67,4 +74,3 @@ namespace World
 		size_t m_TotalElements { 0 };
 	};
 }
-
