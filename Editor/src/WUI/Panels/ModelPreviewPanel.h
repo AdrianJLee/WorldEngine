@@ -5,6 +5,7 @@
 #include "World/Asset/WModelIO.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/Mesh.h"
+#include "World/Renderer/MeshLODGenerator.h"
 #include "World/Renderer/Renderer.h"
 #include "World/RHI/Rhi.h"
 
@@ -82,6 +83,8 @@ namespace World
 		float DrawTabImportSettings(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
 			const Wui::WuiTheme& theme);
 		float DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		float DrawTabLOD(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
 			const Wui::WuiTheme& theme);
 
 		// ---- 材质与骨骼辅助操作 ----
@@ -182,13 +185,25 @@ namespace World
 		bool m_TimelineShowFrames = false;
 
 		// ---- 模块选项卡状态 ----
-		// 0: Overview, 1: Materials, 2: Skeleton, 3: Import Settings, 4: Clips
+		// 0: Overview, 1: Materials, 2: Skeleton, 3: Import Settings, 4: Clips, 5: LOD
 		int m_ActiveTab = 0;
-		float m_TabScroll[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-		float m_TabContentHeight[5] = { 400.0f, 400.0f, 400.0f, 400.0f, 400.0f };
+		float m_TabScroll[6] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		float m_TabContentHeight[6] = { 400.0f, 400.0f, 400.0f, 400.0f, 400.0f, 400.0f };
 		std::string m_SkeletonFilter;
 		std::unordered_set<std::string> m_SkeletonCollapsed;
 		std::unordered_set<int> m_SkeletonCollapsedNodes;
+
+		// ---- LOD 减面与自动生成状态 ----
+		float m_LOD1Ratio = 0.50f;
+		float m_LOD1Distance = 25.0f;
+		float m_LOD2Ratio = 0.25f;
+		float m_LOD2Distance = 60.0f;
+		bool m_LODPreserveBorders = true;
+		int m_PreviewLODIndex = 0; // 0 = Base (LOD0), 1 = LOD1, 2 = LOD2
+		std::vector<GeneratedLODAsset> m_GeneratedLODs;
+		Ref<Mesh> m_LODMeshes[3]; // [0]=unused, [1]=LOD1, [2]=LOD2
+		std::string m_LODStatusMessage;
+		bool m_LODStatusIsError = false;
 
 		// ---- 材质编辑状态 ----
 		std::vector<std::string> m_MaterialSlotBuffers;

@@ -456,6 +456,12 @@ namespace World
 			}
 		}
 
+		m_PreviewLODIndex = 0;
+		m_LODMeshes[1].reset();
+		m_LODMeshes[2].reset();
+		m_GeneratedLODs.clear();
+		m_LODStatusMessage.clear();
+
 		std::string error;
 		m_Mesh = Mesh::LoadWModel(m_LogicalPath, &error);
 		m_DataValid = Asset::WModelIO::ReadFile(m_LogicalPath, m_Data, &error);
@@ -901,7 +907,13 @@ namespace World
 
 	uint64_t ModelPreviewPanel::RenderPreview()
 	{
-		if (!m_Mesh && !(m_DataValid && !m_Data.Nodes.empty()))
+		Ref<Mesh> activeMesh = m_Mesh;
+		if (m_PreviewLODIndex == 1 && m_LODMeshes[1])
+			activeMesh = m_LODMeshes[1];
+		else if (m_PreviewLODIndex == 2 && m_LODMeshes[2])
+			activeMesh = m_LODMeshes[2];
+
+		if (!activeMesh && !(m_DataValid && !m_Data.Nodes.empty()))
 			return 0;
 		// 必须在取命令缓冲**之前**创建资源:命令缓冲是 EnsureGpuResources 建的,
 		// 先判断 !command 会永远早退(实测:模型预览一直显示"预览不可用")。
@@ -949,19 +961,19 @@ namespace World
 
 		// 按节点树逐 submesh 绘制:节点变换 × (该 mesh 的 submesh 范围),材质按 submesh 槽位。
 		// 槽位用面板身份固定的保留区,避免与主场景/其它预览争用对象 UBO(会逐帧闪)。
-		const uint32_t slotBase = m_Mesh ? Renderer3D::ReserveSlotBase(
+		const uint32_t slotBase = activeMesh ? Renderer3D::ReserveSlotBase(
 			static_cast<uint32_t>(Wui::HashId(m_PanelId.c_str()) ^ 0x5F17u),
-			static_cast<uint32_t>(std::max<size_t>(1, m_Mesh->GetSubmeshes().size()))) : 0;
-		if (m_Mesh && m_ShowMesh)
+			static_cast<uint32_t>(std::max<size_t>(1, activeMesh->GetSubmeshes().size()))) : 0;
+		if (activeMesh && m_ShowMesh)
 		{
 		uint32_t drawIndex = 0;
-		const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
-		const std::vector<MeshRange>& meshes = m_Mesh->GetMeshes();
-		const std::vector<MeshSubmesh>& submeshes = m_Mesh->GetSubmeshes();
+		const std::vector<MeshNode>& nodes = activeMesh->GetNodes();
+		const std::vector<MeshRange>& meshes = activeMesh->GetMeshes();
+		const std::vector<MeshSubmesh>& submeshes = activeMesh->GetSubmeshes();
 
 		// D5c-4b:布局 2(蒙皮)的 mesh 一律走蒙皮提交 —— 静态管线按 32B stride 读 64B 顶点会画乱几何。
 		// 调色板按当前 m_AnimTime 算(暂停/未播放时就是当前时间的姿态),按 mesh 下标缓存一份。
-		const bool skinnedLayout = m_Mesh->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned;
+		const bool skinnedLayout = activeMesh->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned;
 		std::vector<std::vector<glm::mat4>> skinPalettes;
 		if (skinnedLayout && m_DataValid)
 		{
@@ -979,10 +991,10 @@ namespace World
 			}
 		}
 
-		const std::vector<std::string>& materialSlots = m_Mesh->GetMaterialSlots();
+		const std::vector<std::string>& materialSlots = activeMesh->GetMaterialSlots();
 		const auto submitSubmesh = [&](int32_t meshIndex, uint32_t submeshIndex, const glm::mat4& transform)
 		{
-			const int32_t slot = submeshes[submeshIndex].MaterialSlot;
+			const int32_t slot = (submeshIndex < submeshes.size()) ? submeshes[submeshIndex].MaterialSlot : -1;
 			const Ref<Material> material =
 				(slot >= 0 && static_cast<size_t>(slot) < m_SlotMaterials.size())
 					? m_SlotMaterials[static_cast<size_t>(slot)] : nullptr;
@@ -1007,7 +1019,7 @@ namespace World
 					++drawIndex;
 					return;
 				}
-				const uint32_t result = Renderer3D::SubmitSkinnedAtSlot(slotBase + drawIndex, m_Mesh,
+				const uint32_t result = Renderer3D::SubmitSkinnedAtSlot(slotBase + drawIndex, activeMesh,
 					submeshIndex, material, transform, palette.data(),
 					static_cast<uint32_t>(palette.size()), -1);
 				if (result == UINT32_MAX && !m_SkinnedSubmitWarned)
@@ -1015,25 +1027,25 @@ namespace World
 					m_SkinnedSubmitWarned = true;
 					WLD_CORE_WARN("[model] preview skinned submit failed for '{0}' submesh {1} "
 						"(layout={2} joints={3});该 submesh 未绘制",
-						m_LogicalPath, submeshIndex, m_Mesh->GetVertexLayoutId(), palette.size());
+						m_LogicalPath, submeshIndex, activeMesh->GetVertexLayoutId(), palette.size());
 				}
 				++drawIndex;
 				return;
 			}
-			Renderer3D::SubmitSubmeshAtSlot(slotBase + drawIndex, m_Mesh, submeshIndex, material, transform, -1);
+			Renderer3D::SubmitSubmeshAtSlot(slotBase + drawIndex, activeMesh, submeshIndex, material, transform, -1);
 			++drawIndex;
 		};
 
 		if (nodes.empty())
 		{
 			// 没有节点树(理论上 v1 格式总有):退化为整体绘制。
-			if (!m_Mesh->HasSubmeshes())
+			if (!activeMesh->HasSubmeshes())
 			{
 				const bool skinned = skinnedLayout && !skinPalettes.empty() && !skinPalettes[0].empty();
 				if (skinned)
 				{
 					const std::vector<glm::mat4>& palette = skinPalettes[0];
-					const uint32_t result = Renderer3D::SubmitSkinnedAtSlot(slotBase, m_Mesh, UINT32_MAX,
+					const uint32_t result = Renderer3D::SubmitSkinnedAtSlot(slotBase, activeMesh, UINT32_MAX,
 						nullptr, glm::mat4(1.0f), palette.data(), static_cast<uint32_t>(palette.size()), -1);
 					if (result == UINT32_MAX && !m_SkinnedSubmitWarned)
 					{
@@ -1043,14 +1055,14 @@ namespace World
 				}
 				else if (!skinnedLayout)
 				{
-					Renderer3D::SubmitAtSlot(slotBase, m_Mesh, nullptr, glm::mat4(1.0f), -1);
+					Renderer3D::SubmitAtSlot(slotBase, activeMesh, nullptr, glm::mat4(1.0f), -1);
 				}
 				else if (!m_SkinnedSubmitWarned)
 				{
 					// 布局 2 但没有可用调色板(容器数据不完整):静态管线按 32B stride 读 64B 顶点会画乱,宁可跳过。
 					m_SkinnedSubmitWarned = true;
 					WLD_CORE_WARN("[model] preview skips skinned whole-mesh '{0}':调色板不可用(layout={1})",
-						m_LogicalPath, m_Mesh->GetVertexLayoutId());
+						m_LogicalPath, activeMesh->GetVertexLayoutId());
 				}
 			}
 			else
@@ -1799,9 +1811,10 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		{
 			const float dispBtnW = 104.0f;
 			const float camBtnW = 76.0f;
+			const float lodBtnW = 60.0f;
 			const float frameBtnW = 50.0f;
 			const float colBtnW = 24.0f;
-			const float toolW = dispBtnW + camBtnW + frameBtnW + colBtnW + gap * 5.0f;
+			const float toolW = dispBtnW + camBtnW + lodBtnW + frameBtnW + colBtnW + gap * 6.0f;
 			const float toolH = btnH + 6.0f;
 			const Wui::WuiRect pill { previewRect.X + 8.0f, previewRect.Y + 8.0f, toolW, toolH };
 			if (ctx.IsHovered(pill)) clickingOverlayUi = true;
@@ -1836,6 +1849,25 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			}
 			Wui::Tooltip(ctx, camRect, "Select camera perspective or view angles");
 			bx += camBtnW + gap;
+
+			// LOD 实时渲染档位快捷切换
+			std::string lodPillText = "LOD 0";
+			if (m_PreviewLODIndex == 1) lodPillText = "LOD 1";
+			else if (m_PreviewLODIndex == 2) lodPillText = "LOD 2";
+
+			const Wui::WuiRect lodPillRect { bx, by, lodBtnW, btnH };
+			auto lodPillTheme = theme;
+			if (m_PreviewLODIndex > 0)
+			{
+				lodPillTheme.ButtonBg = Alpha(theme.Accent, 0.28f);
+				lodPillTheme.Border = theme.Accent;
+			}
+			if (Wui::Button(ctx, Wui::HashId("model.overlay.lod_toggle"), lodPillRect, lodPillText, lodPillTheme))
+			{
+				m_PreviewLODIndex = (m_PreviewLODIndex + 1) % 3;
+			}
+			Wui::Tooltip(ctx, lodPillRect, "切换视口当前渲染的 LOD 档位 (LOD0 -> LOD1 -> LOD2)");
+			bx += lodBtnW + gap;
 
 			// Frame 按钮
 			const Wui::WuiRect frameRect { bx, by, frameBtnW, btnH };
@@ -1935,6 +1967,41 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		if (ctx.IsHovered(infoBadge)) clickingOverlayUi = true;
 		Wui::PanelBackground(ctx, infoBadge, Alpha(theme.PanelBg, 0.75f), 3.0f);
 		Wui::Label(ctx, { infoBadge.X + 6.0f, infoBadge.Y + 3.0f }, statsPill, theme.TextDisabled, theme.FontSizeCaption);
+
+		// 视口右下角实时 LOD 统计信息徽标 (档位 + 三角面数 + 顶点数)
+		Ref<Mesh> activeMeshForStats = m_Mesh;
+		std::string activeLODName = "Base (LOD 0)";
+		if (m_PreviewLODIndex == 1 && m_LODMeshes[1])
+		{
+			activeMeshForStats = m_LODMeshes[1];
+			char buf[64];
+			std::snprintf(buf, sizeof(buf), "LOD 1 (%.0f%%)", m_LOD1Ratio * 100.0f);
+			activeLODName = buf;
+		}
+		else if (m_PreviewLODIndex == 2 && m_LODMeshes[2])
+		{
+			activeMeshForStats = m_LODMeshes[2];
+			char buf[64];
+			std::snprintf(buf, sizeof(buf), "LOD 2 (%.0f%%)", m_LOD2Ratio * 100.0f);
+			activeLODName = buf;
+		}
+
+		if (activeMeshForStats)
+		{
+			const uint32_t triCount = activeMeshForStats->GetIndexCount() / 3;
+			const uint32_t vertCount = activeMeshForStats->GetVertexCount();
+			std::string lodBadgeText = "[" + activeLODName + ": " + FormatNumber(triCount) + " tris | " + FormatNumber(vertCount) + " v]";
+			const float lodBadgeW = ctx.MeasureTextWidth(lodBadgeText, theme.FontSizeCaption) + 14.0f;
+			const float badgeX = previewRect.X + previewRect.W - lodBadgeW - 8.0f;
+			const float badgeY = previewRect.Y + previewRect.H - 22.0f - (m_ShowGizmo ? 74.0f : 0.0f);
+			const Wui::WuiRect lodBadgeRect { badgeX, badgeY, lodBadgeW, 18.0f };
+			if (ctx.IsHovered(lodBadgeRect)) clickingOverlayUi = true;
+
+			Wui::WuiColor badgeBorder = (m_PreviewLODIndex == 0) ? theme.Accent : ((m_PreviewLODIndex == 1) ? Wui::WuiColor{ 0.95f, 0.85f, 0.10f, 1.0f } : Wui::WuiColor{ 0.95f, 0.50f, 0.10f, 1.0f });
+			Wui::PanelBackground(ctx, lodBadgeRect, Alpha(theme.PanelBg, 0.85f), 3.0f);
+			Wui::HighlightOutline(ctx, lodBadgeRect, Alpha(badgeBorder, 0.70f), 3.0f, 1.0f);
+			Wui::Label(ctx, { lodBadgeRect.X + 7.0f, lodBadgeRect.Y + 3.0f }, lodBadgeText, badgeBorder, theme.FontSizeCaption);
+		}
 
 		// 视口右下角坐标系指示器
 		if (m_ShowGizmo)
@@ -2169,7 +2236,8 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			Wui::Tr("panel.model.tab.materials", "Materials") + (m_Mesh ? " (" + std::to_string(m_Mesh->GetMaterialSlots().size()) + ")" : ""),
 			Wui::Tr("panel.model.tab.skeleton", "Skeleton") + (m_DataValid && !m_Data.Skins.empty() ? " (" + std::to_string(m_Data.Skins[0].JointNodes.size()) + ")" : ""),
 			Wui::Tr("panel.model.tab.settings", "Import Settings") + (m_SettingsDirty ? " *" : ""),
-			Wui::Tr("panel.model.tab.clips", "Clips") + (m_DataValid && !m_Data.Animations.empty() ? " (" + std::to_string(m_Data.Animations.size()) + ")" : "")
+			Wui::Tr("panel.model.tab.clips", "Clips") + (m_DataValid && !m_Data.Animations.empty() ? " (" + std::to_string(m_Data.Animations.size()) + ")" : ""),
+			"LOD" + (m_GeneratedLODs.empty() ? "" : " (" + std::to_string(m_GeneratedLODs.size()) + ")")
 		};
 
 		Wui::TabBar(ctx, Wui::HashId("model.tabs"), tabArea, tabLabels, m_ActiveTab, theme);
@@ -2189,6 +2257,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		else if (m_ActiveTab == 2) actualH = DrawTabSkeleton(ctx, scrollSlice, host, theme);
 		else if (m_ActiveTab == 3) actualH = DrawTabImportSettings(ctx, scrollSlice, theme);
 		else if (m_ActiveTab == 4) actualH = DrawTabClips(ctx, scrollSlice, host, theme);
+		else if (m_ActiveTab == 5) actualH = DrawTabLOD(ctx, scrollSlice, host, theme);
 
 		Wui::EndScrollArea(ctx);
 
@@ -2203,6 +2272,293 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 				barRect, actualH, contentH, m_TabScroll[m_ActiveTab], theme, false);
 		}
 	}
+	float ModelPreviewPanel::DrawTabLOD(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
+		const Wui::WuiTheme& theme)
+	{
+		const float x = rect.X;
+		const float width = rect.W;
+		float y = rect.Y + 4.0f;
+
+		if (!m_Mesh)
+		{
+			Wui::Label(ctx, { x, y }, "No mesh loaded.", theme.TextMuted, theme.FontSizeBody);
+			return 24.0f;
+		}
+
+		// 状态提示横幅
+		if (!m_LODStatusMessage.empty())
+		{
+			const Wui::WuiRect bannerRect { x, y, width, 26.0f };
+			const Wui::WuiColor bgCol = m_LODStatusIsError
+				? Wui::WuiColor{ 0.28f, 0.08f, 0.08f, 0.90f }
+				: Wui::WuiColor{ 0.08f, 0.25f, 0.12f, 0.90f };
+			const Wui::WuiColor borderCol = m_LODStatusIsError
+				? theme.Danger
+				: theme.Success;
+			Wui::PanelBackground(ctx, bannerRect, bgCol, 3.0f);
+			Wui::HighlightOutline(ctx, bannerRect, borderCol, 3.0f, 1.0f);
+			Wui::Label(ctx, { bannerRect.X + 8.0f, bannerRect.Y + 5.0f }, m_LODStatusMessage, borderCol, theme.FontSizeSmall);
+			y += 32.0f;
+		}
+
+		// 1. 基准模型几何状态 (Geometry Statistics)
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			Wui::Tr("panel.model.lod.metrics", "Base Model Geometry Statistics"), theme.Accent, theme);
+		y += 24.0f;
+
+		const float colGap = 8.0f;
+		const float colW = std::max(60.0f, (width - colGap * 3.0f) * 0.25f);
+		const float cardH = 48.0f;
+
+		auto drawStatCard = [&](float cx, const std::string& label, const std::string& val, const Wui::WuiColor& valCol)
+		{
+			const Wui::WuiRect cRect { cx, y, colW, cardH };
+			Wui::PanelBackground(ctx, cRect, theme.CardBg, 4.0f);
+			Wui::HighlightOutline(ctx, cRect, theme.Border, 4.0f, 1.0f);
+			Wui::Label(ctx, { cRect.X + 8.0f, cRect.Y + 6.0f }, label, theme.TextMuted, theme.FontSizeCaption);
+			Wui::Label(ctx, { cRect.X + 8.0f, cRect.Y + 22.0f }, val, valCol, theme.FontSizeHeading);
+		};
+
+		drawStatCard(x, "Submeshes", std::to_string(m_Mesh->GetSubmeshes().size()), theme.Text);
+		drawStatCard(x + (colW + colGap), "Base Vertices", FormatNumber(m_Mesh->GetVertexCount()), theme.Text);
+		drawStatCard(x + (colW + colGap) * 2.0f, "Base Triangles", FormatNumber(m_Mesh->GetIndexCount() / 3), theme.Text);
+
+		std::string previewName = "LOD 0 (Base)";
+		Wui::WuiColor previewCol = theme.Success;
+		if (m_PreviewLODIndex == 1) { previewName = "LOD 1 (Mid)"; previewCol = Wui::WuiColor{ 0.95f, 0.85f, 0.10f, 1.0f }; }
+		else if (m_PreviewLODIndex == 2) { previewName = "LOD 2 (Low)"; previewCol = Wui::WuiColor{ 0.95f, 0.50f, 0.10f, 1.0f }; }
+		drawStatCard(x + (colW + colGap) * 3.0f, "Active Preview", previewName, previewCol);
+
+		y += cardH + 14.0f;
+
+		// 2. 视口 3D 预览档位切换 (Preview LOD Mode)
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			Wui::Tr("panel.model.lod.preview_section", "Interactive 3D Viewport Preview Level"), theme.Accent, theme);
+		y += 24.0f;
+
+		Wui::Label(ctx, { x, y + 4.0f }, "视口实时渲染档位 (Preview LOD):", theme.Text, theme.FontSizeSmall);
+		y += 22.0f;
+
+		const float lodBtnGap = 6.0f;
+		const float lodBtnW = std::max(80.0f, (width - lodBtnGap * 2.0f) / 3.0f);
+		const float lodBtnH = 26.0f;
+
+		const char* lodBtnLabels[3] = {
+			"Base (LOD 0 - 100%)",
+			"LOD 1 (中模)",
+			"LOD 2 (远景简模)"
+		};
+
+		for (int i = 0; i < 3; ++i)
+		{
+			const Wui::WuiRect bRect { x + (lodBtnW + lodBtnGap) * i, y, lodBtnW, lodBtnH };
+			const bool selected = (m_PreviewLODIndex == i);
+
+			auto btnTheme = theme;
+			if (selected)
+			{
+				btnTheme.ButtonBg = theme.ActiveBg;
+				btnTheme.Border = theme.Accent;
+			}
+
+			std::string label = lodBtnLabels[i];
+			if (i > 0)
+			{
+				if (i == 1 && m_LODMeshes[1])
+					label += " [" + FormatNumber(m_LODMeshes[1]->GetIndexCount() / 3) + "t]";
+				else if (i == 2 && m_LODMeshes[2])
+					label += " [" + FormatNumber(m_LODMeshes[2]->GetIndexCount() / 3) + "t]";
+				else
+					label += " (未生成)";
+			}
+
+			if (Wui::Button(ctx, Wui::HashId(("model.lod.preview_sel." + std::to_string(i)).c_str()),
+				bRect, label, btnTheme))
+			{
+				m_PreviewLODIndex = i;
+			}
+
+			if (selected)
+				Wui::HighlightOutline(ctx, bRect, theme.Accent, 3.0f, 1.5f);
+
+			Wui::Tooltip(ctx, bRect, i == 0 ? "切换回高精度原始网格" : "在视口 3D 渲染中实时预览该档位减面网格与拓扑结构");
+		}
+		y += lodBtnH + 16.0f;
+
+		// 3. 多档减面参数配置 (LOD Parameters)
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			Wui::Tr("panel.model.lod.config_section", "LOD Generation Settings & Distance Ladders"), theme.Accent, theme);
+		y += 24.0f;
+
+		const float paramLabelW = 140.0f;
+		const float paramFieldW = std::max(120.0f, width - paramLabelW - 10.0f);
+
+		// LOD 1 设置行
+		Wui::Label(ctx, { x, y + 2.0f }, "LOD 1 保留比例 (Ratio):", theme.Text, theme.FontSizeSmall);
+		Wui::SliderFloat(ctx, Wui::HashId("model.lod.ratio1"),
+			{ x + paramLabelW, y, paramFieldW - 55.0f, 22.0f }, m_LOD1Ratio, 0.10f, 0.90f, theme);
+		char ratio1Str[32];
+		std::snprintf(ratio1Str, sizeof(ratio1Str), "%.0f%%", m_LOD1Ratio * 100.0f);
+		Wui::Label(ctx, { x + width - 45.0f, y + 2.0f }, ratio1Str, theme.Accent, theme.FontSizeSmall);
+		y += 26.0f;
+
+		Wui::Label(ctx, { x, y + 2.0f }, "LOD 1 切换视距 (m):", theme.Text, theme.FontSizeSmall);
+		Wui::DragFloat(ctx, Wui::HashId("model.lod.dist1"),
+			{ x + paramLabelW, y, paramFieldW, 22.0f }, m_LOD1Distance, 0.5f, 1.0f, 500.0f, theme);
+		y += 28.0f;
+
+		// LOD 2 设置行
+		Wui::Label(ctx, { x, y + 2.0f }, "LOD 2 保留比例 (Ratio):", theme.Text, theme.FontSizeSmall);
+		Wui::SliderFloat(ctx, Wui::HashId("model.lod.ratio2"),
+			{ x + paramLabelW, y, paramFieldW - 55.0f, 22.0f }, m_LOD2Ratio, 0.05f, 0.50f, theme);
+		char ratio2Str[32];
+		std::snprintf(ratio2Str, sizeof(ratio2Str), "%.0f%%", m_LOD2Ratio * 100.0f);
+		Wui::Label(ctx, { x + width - 45.0f, y + 2.0f }, ratio2Str, theme.Accent, theme.FontSizeSmall);
+		y += 26.0f;
+
+		Wui::Label(ctx, { x, y + 2.0f }, "LOD 2 切换视距 (m):", theme.Text, theme.FontSizeSmall);
+		Wui::DragFloat(ctx, Wui::HashId("model.lod.dist2"),
+			{ x + paramLabelW, y, paramFieldW, 22.0f }, m_LOD2Distance, 1.0f, 5.0f, 1000.0f, theme);
+		y += 28.0f;
+
+		// 边界保护开关 (Preserve Borders)
+		if (Wui::Checkbox(ctx, Wui::HashId("model.lod.preserve_borders"),
+			{ x, y, width, 22.0f }, "保护几何外轮廓边界与接缝 (Preserve Borders)", m_LODPreserveBorders, theme))
+		{
+		}
+		Wui::Tooltip(ctx, { x, y, width, 22.0f }, "对仅被单一三角形引用的开边界施加高代价惩罚，防止网格孔洞变形或边界穿透");
+		y += 32.0f;
+
+		// 4. 一键自动生成与存盘操作 (Action Buttons)
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			Wui::Tr("panel.model.lod.actions", "Actions & Asset Generation"), theme.Accent, theme);
+		y += 24.0f;
+
+		const float actionBtnW = std::max(120.0f, (width - 8.0f) * 0.5f);
+		const float actionBtnH = 28.0f;
+
+		// [Auto-Generate LODs / 自动生成多级 LOD]
+		const Wui::WuiRect genBtnRect { x, y, actionBtnW, actionBtnH };
+		auto genTheme = theme;
+		genTheme.ButtonBg = theme.ActiveBg;
+		genTheme.Border = theme.Accent;
+		if (Wui::Button(ctx, Wui::HashId("model.lod.autogen_btn"), genBtnRect,
+			"[Auto-Generate LODs] 自动生成多级 LOD", genTheme))
+		{
+			std::vector<LODLevelConfig> configs = {
+				{ 1, m_LOD1Ratio, m_LOD1Distance },
+				{ 2, m_LOD2Ratio, m_LOD2Distance }
+			};
+			std::string genError;
+			if (MeshLODGenerator::GenerateLODs(m_Data, configs, m_GeneratedLODs, &genError))
+			{
+				m_LODMeshes[1].reset();
+				m_LODMeshes[2].reset();
+
+				std::filesystem::path p(m_LogicalPath);
+				std::filesystem::path parentDir = p.parent_path();
+				std::string stem = p.stem().string();
+
+				for (auto& gen : m_GeneratedLODs)
+				{
+					std::string filename = stem + "_LOD" + std::to_string(gen.Level) + ".wmodel";
+					std::filesystem::path lodPath = parentDir.empty() ? std::filesystem::path(filename) : (parentDir / filename);
+					gen.RelativePath = lodPath.generic_string();
+
+					std::string buildErr;
+					Ref<Mesh> mesh = Mesh::BuildFromWModel(gen.ModelData, gen.RelativePath, &buildErr);
+					if (gen.Level == 1) m_LODMeshes[1] = mesh;
+					else if (gen.Level == 2) m_LODMeshes[2] = mesh;
+				}
+
+				const uint32_t t1 = !m_GeneratedLODs.empty() ? m_GeneratedLODs[0].TriangleCount : 0;
+				const float r1 = !m_GeneratedLODs.empty() ? m_GeneratedLODs[0].ActualRatio * 100.0f : 0.0f;
+				const uint32_t t2 = m_GeneratedLODs.size() > 1 ? m_GeneratedLODs[1].TriangleCount : 0;
+				const float r2 = m_GeneratedLODs.size() > 1 ? m_GeneratedLODs[1].ActualRatio * 100.0f : 0.0f;
+
+				char buf[256];
+				std::snprintf(buf, sizeof(buf), "LOD1: %u tris (%.1f%%), LOD2: %u tris (%.1f%%)",
+					t1, r1, t2, r2);
+				m_LODStatusMessage = buf;
+				m_LODStatusIsError = false;
+				m_Status = buf;
+				m_StatusIsError = false;
+				m_PreviewLODIndex = 1;
+				host.Notify("LOD 自动减面完成，已在视口切换至 LOD1 预览");
+			}
+			else
+			{
+				m_LODStatusMessage = "自动生成失败: " + genError;
+				m_LODStatusIsError = true;
+				m_Status = m_LODStatusMessage;
+				m_StatusIsError = true;
+				host.Notify(m_LODStatusMessage);
+			}
+		}
+		Wui::Tooltip(ctx, genBtnRect, "在内存中基于 QEM 算法执行各级减面并构建视口 3D 预览网格");
+
+		// [Save LOD Files / 保存 LOD 资产]
+		const Wui::WuiRect saveBtnRect { x + actionBtnW + 8.0f, y, actionBtnW, actionBtnH };
+		if (Wui::Button(ctx, Wui::HashId("model.lod.save_files_btn"), saveBtnRect,
+			"[Save LOD Files] 保存 LOD 资产", theme))
+		{
+			std::vector<LODLevelConfig> configs = {
+				{ 1, m_LOD1Ratio, m_LOD1Distance },
+				{ 2, m_LOD2Ratio, m_LOD2Distance }
+			};
+			std::vector<GeneratedLODAsset> savedAssets;
+			std::string saveError;
+			if (MeshLODGenerator::GenerateAndSaveLODFiles(m_LogicalPath, configs, savedAssets, &saveError))
+			{
+				std::string msg = "已成功保存 LOD 资产: ";
+				for (size_t i = 0; i < savedAssets.size(); ++i)
+				{
+					if (i > 0) msg += ", ";
+					msg += savedAssets[i].RelativePath;
+					host.RefreshAssetCatalog(savedAssets[i].RelativePath);
+				}
+				m_LODStatusMessage = msg;
+				m_LODStatusIsError = false;
+				m_Status = msg;
+				m_StatusIsError = false;
+				host.Notify(msg);
+			}
+			else
+			{
+				m_LODStatusMessage = "保存 LOD 资产失败: " + saveError;
+				m_LODStatusIsError = true;
+				m_Status = m_LODStatusMessage;
+				m_StatusIsError = true;
+				host.Notify(m_LODStatusMessage);
+			}
+		}
+		Wui::Tooltip(ctx, saveBtnRect, "在模型同目录下写出 <ModelStem>_LOD1.wmodel 与 <ModelStem>_LOD2.wmodel 资产文件");
+		y += actionBtnH + 16.0f;
+
+		// 5. 详细层级指标清单
+		if (!m_GeneratedLODs.empty())
+		{
+			Wui::SectionHeader(ctx, { x, y, width, 18.0f }, "Generated LOD Details", theme.Accent, theme);
+			y += 24.0f;
+
+			const float rowH = 22.0f;
+			for (const auto& gen : m_GeneratedLODs)
+			{
+				const Wui::WuiRect rowRect { x, y, width, rowH };
+				Wui::PanelBackground(ctx, rowRect, theme.CardBg, 3.0f);
+				char rowText[256];
+				std::snprintf(rowText, sizeof(rowText), "  LOD %u:  %u 三角面 (%.1f%%)  ->  %s",
+					gen.Level, gen.TriangleCount, gen.ActualRatio * 100.0f, gen.RelativePath.c_str());
+				Wui::Label(ctx, { rowRect.X + 4.0f, rowRect.Y + 3.0f }, rowText, theme.Text, theme.FontSizeSmall);
+				y += rowH + 4.0f;
+			}
+			y += 8.0f;
+		}
+
+		y += 24.0f;
+		return y - rect.Y;
+	}
+
 	float ModelPreviewPanel::DrawTabOverview(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
 		const Wui::WuiTheme& theme)
 	{

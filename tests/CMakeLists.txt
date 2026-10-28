@@ -2898,3 +2898,23 @@ set_tests_properties(World.PCGAndLivingAI PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldMeshSimplifierTests World/MeshSimplifierTests.cpp)
+target_link_libraries(WorldMeshSimplifierTests PRIVATE World)
+target_compile_features(WorldMeshSimplifierTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldMeshSimplifierTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldMeshSimplifierTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldMeshSimplifierTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.MeshSimplifier COMMAND WorldMeshSimplifierTests)
+set_tests_properties(World.MeshSimplifier PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)

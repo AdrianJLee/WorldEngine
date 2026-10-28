@@ -2,7 +2,9 @@
 #include "World/Physics/PhysicsMaterial.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/Tilemap.h"
+#include "World/Renderer/Mesh.h"
 #include "World/Renderer/MeshLOD.h"
+#include "World/Renderer/MeshLODGenerator.h"
 #include "World/Renderer/ParticleSystem.h"
 #include "World/Renderer/ParticleAsset.h"
 #include "World/Scene/Components.h"
@@ -19,6 +21,9 @@ namespace World
 {
 
 using namespace PropertiesPanelDetail;
+
+static std::string s_LODGenNotification;
+static uint32_t s_LODGenEntityId = 0;
 
 	static float DrawTerrainInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
 		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
@@ -570,6 +575,114 @@ using namespace PropertiesPanelDetail;
 		std::snprintf(distText, sizeof(distText), "Distance: %.1f m (Hyst: %.1fm)", distance, lod->Hysteresis);
 		const float distW = ctx.MeasureTextWidth(distText, theme.FontSizeSmall);
 		Wui::Label(ctx, { bannerRect.X + bannerRect.W - distW - 8.0f, bannerRect.Y + 7.0f }, distText, theme.Text, theme.FontSizeSmall);
+		curY += 34.0f;
+
+		// =========================================================================
+		// 1.5 智能一键生成并配置 LOD (Auto-Gen & Bind)
+		// =========================================================================
+		if (s_LODGenEntityId == static_cast<uint32_t>(entity) && !s_LODGenNotification.empty())
+		{
+			const Wui::WuiRect noteRect { startX, curY, contentW, 24.0f };
+			Wui::PanelBackground(ctx, noteRect, Wui::WuiColor{ 0.10f, 0.35f, 0.15f, 0.90f }, 3.0f);
+			Wui::HighlightOutline(ctx, noteRect, Wui::WuiColor{ 0.25f, 0.85f, 0.35f, 1.0f }, 3.0f, 1.0f);
+			Wui::Label(ctx, { noteRect.X + 8.0f, noteRect.Y + 4.0f }, s_LODGenNotification, Wui::WuiColor{ 0.40f, 0.98f, 0.50f, 1.0f }, theme.FontSizeSmall);
+			curY += 28.0f;
+		}
+
+		const Wui::WuiRect autoGenRect { startX, curY, contentW, 28.0f };
+		auto autoGenTheme = theme;
+		autoGenTheme.ButtonBg = theme.ActiveBg;
+		autoGenTheme.Border = theme.Accent;
+		if (Wui::Button(ctx, Wui::HashId("inspect.lod.autogen_bind"), autoGenRect,
+			"[智能一键生成并配置 LOD (Auto-Gen & Bind)]", autoGenTheme))
+		{
+			if (!entity.HasComponent<MeshRendererComponent>())
+			{
+				s_LODGenNotification = "错误: 实体未挂载 MeshRendererComponent";
+				s_LODGenEntityId = static_cast<uint32_t>(entity);
+				host.Notify(s_LODGenNotification);
+			}
+			else
+			{
+				const auto& mr = entity.GetComponent<MeshRendererComponent>();
+				std::string sourceMeshPath;
+				if (mr.Mesh.HasPath())
+					sourceMeshPath = StringPool::Get().PathOf(mr.Mesh.Path);
+
+				if (sourceMeshPath.empty())
+				{
+					s_LODGenNotification = "错误: 实体无有效 .wmodel 网格资产 (内置几何体请先保存为资产)";
+					s_LODGenEntityId = static_cast<uint32_t>(entity);
+					host.Notify(s_LODGenNotification);
+				}
+				else
+				{
+					glm::vec3 scale(1.0f);
+					if (entity.HasComponent<TransformComponent>())
+						scale = glm::abs(entity.GetComponent<TransformComponent>().Scale);
+					const float maxScale = std::max({ scale.x, scale.y, scale.z, 0.001f });
+
+					float maxExtent = 1.0f;
+					std::string loadErr;
+					Ref<Mesh> mesh = Mesh::LoadWModel(mr.Mesh.Path, &loadErr);
+					if (mesh)
+					{
+						const MeshBounds& bounds = mesh->GetBounds();
+						const glm::vec3 ext = bounds.Max - bounds.Min;
+						maxExtent = std::max({ ext.x, ext.y, ext.z, 0.1f });
+					}
+
+					const float S = maxScale * maxExtent;
+					const float dist1 = std::max(15.0f, S * 15.0f);
+					const float dist2 = std::max(35.0f, S * 35.0f);
+					const float cullDist = std::max(75.0f, S * 75.0f);
+
+					std::vector<LODLevelConfig> configs = {
+						{ 1, 0.50f, dist1 },
+						{ 2, 0.25f, dist2 }
+					};
+
+					std::vector<GeneratedLODAsset> generated;
+					std::string genErr;
+					if (MeshLODGenerator::GenerateAndSaveLODFiles(sourceMeshPath, configs, generated, &genErr))
+					{
+						for (const auto& gen : generated)
+						{
+							if (gen.Level == 1)
+								lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(gen.RelativePath), AssetId{} };
+							else if (gen.Level == 2)
+								lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(gen.RelativePath), AssetId{} };
+							host.RefreshAssetCatalog(gen.RelativePath);
+						}
+
+						lod->LOD1Distance = dist1;
+						lod->LOD2Distance = dist2;
+						lod->CullDistance = cullDist;
+
+						if (changedFields)
+						{
+							changedFields->push_back("LOD1Mesh");
+							changedFields->push_back("LOD2Mesh");
+							changedFields->push_back("LOD1Distance");
+							changedFields->push_back("LOD2Distance");
+							changedFields->push_back("CullDistance");
+						}
+						host.MarkDocumentDirty();
+
+						s_LODGenNotification = "LOD1 & LOD2 资产已自动生成并完成视距绑定";
+						s_LODGenEntityId = static_cast<uint32_t>(entity);
+						host.Notify(s_LODGenNotification);
+					}
+					else
+					{
+						s_LODGenNotification = "生成失败: " + genErr;
+						s_LODGenEntityId = static_cast<uint32_t>(entity);
+						host.Notify(s_LODGenNotification);
+					}
+				}
+			}
+		}
+		Wui::Tooltip(ctx, autoGenRect, "根据实体网格与尺度自动减面输出 LOD1/LOD2 资产并推导视距阶梯");
 		curY += 34.0f;
 
 		const float paramLabelW = 120.0f;

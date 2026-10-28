@@ -228,6 +228,14 @@ file(GLOB_RECURSE WORLD_SOURCES
 )
 
 # 添加源文件到 target
+# QEM 网格减面内核与多级 LOD 资产生成器
+list(APPEND WORLD_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/World/Renderer/MeshSimplifier.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/World/Renderer/MeshSimplifier.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/World/Renderer/MeshLODGenerator.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/World/Renderer/MeshLODGenerator.cpp"
+)
+
 target_sources(World PRIVATE ${WORLD_SOURCES} $<TARGET_OBJECTS:WorldBox2d>)
 
 
@@ -261,3 +269,4 @@ target_link_libraries(World PRIVATE
 # 生成物提交进仓库,产品构建不依赖本工具;它的用途是 --check 门禁(tests 里的
 # World.SchemaDrift)——字段注解改了但没重跑生成器时直接红灯。
 add_subdirectory(generators/schema-compiler)
+

@@ -948,6 +948,20 @@ namespace World::Asset::WModelIO
 			std::string stripped = path;
 			if (stripped.rfind("engine/", 0) == 0 || stripped.rfind("Engine/", 0) == 0)
 				stripped = stripped.substr(7);
+			std::error_code directEc;
+			if (std::filesystem::exists(path, directEc))
+			{
+				std::ifstream directFile(path, std::ios::binary);
+				if (directFile)
+				{
+					bytes.assign(std::istreambuf_iterator<char>(directFile), std::istreambuf_iterator<char>());
+					if (!bytes.empty())
+					{
+						if (error) error->clear();
+						return true;
+					}
+				}
+			}
 			const std::filesystem::path candidates[] = {
 				World::Paths::AssetRoot() / path,
 				World::Paths::EngineContentRoot() / path,
@@ -1301,3 +1315,4 @@ namespace World::Asset::WModelIO
 		return ParseMetaOnly(bytes.data(), bytes.size(), out, error);
 	}
 }
+
