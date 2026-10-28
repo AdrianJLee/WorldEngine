@@ -91,6 +91,9 @@ namespace World
 			const Wui::WuiTheme& theme);
 		void RecordKeyframeForNode(uint32_t nodeIndex, float time);
 		void RecordKeyframeForAllNodes(float time);
+		void SaveCurrentClipToFile();
+		void ExportActiveClipToWClip(PanelHost& host);
+		void CreateNewClipAsset(PanelHost& host);
 
 		// 兼容旧接口(测试与外部引用点)
 		float DrawImportSettings(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
@@ -160,6 +163,8 @@ namespace World
 		// 视口投影与辅助显示状态
 		bool m_ShowGrid = true;
 		bool m_ShowWireframe = false;
+		bool m_ShowMesh = true;
+		std::string m_PreviewMeshPath;
 		bool m_ShowGizmo = true;
 		bool m_ShowBounds = false;
 		glm::mat4 m_LastCameraView { 1.0f };

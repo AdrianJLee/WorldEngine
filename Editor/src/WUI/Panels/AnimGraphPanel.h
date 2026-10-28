@@ -130,6 +130,7 @@ namespace World
 		void RefreshModel(PanelHost& host);
 		std::string ModelLogicalPathForSelected(PanelHost& host) const;
 		std::vector<std::string> ClipOptionsForCombo(const std::string& current) const;
+		std::string ClipDisplayLabel(const std::string& pathOrName) const;
 
 
 	private:

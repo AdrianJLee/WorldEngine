@@ -726,6 +726,8 @@ namespace World::Wui
 				node.Kind = "list-row";
 				node.Label = item.Label;
 				node.Value = item.SubLabel;
+				if (!item.SubLabel.empty())
+					node.Tooltip = item.Label + "\n" + item.SubLabel;
 				node.Rect = row;
 				node.Enabled = !item.Disabled;
 				node.Interactive = !item.Disabled;
@@ -755,8 +757,30 @@ namespace World::Wui
 			PushText(ctx, { textX, row.Y + (row.H - 14.0f) * 0.5f }, item.Label,
 				item.Disabled ? theme.TextMuted : theme.Text, 14.0f, item.Selected);
 			if (!item.SubLabel.empty())
-				PushText(ctx, { row.X + row.W - 8.0f - 7.0f * static_cast<float>(item.SubLabel.size()),
-					row.Y + (row.H - 13.0f) * 0.5f }, item.SubLabel, theme.TextMuted, 13.0f);
+			{
+				const float labelW = ctx.MeasureTextWidth(item.Label, 14.0f);
+				const float subW = ctx.MeasureTextWidth(item.SubLabel, 13.0f);
+				const float idealSubX = row.X + row.W - 8.0f - subW;
+				const float minSubX = textX + labelW + 8.0f;
+				if (idealSubX >= minSubX)
+				{
+					PushText(ctx, { idealSubX, row.Y + (row.H - 13.0f) * 0.5f },
+						item.SubLabel, theme.TextMuted, 13.0f);
+				}
+				else
+				{
+					const float availableSubW = (row.X + row.W - 8.0f) - minSubX;
+					if (availableSubW >= 36.0f)
+					{
+						const std::string ellipsizedSub = Wui::EllipsizeMiddleToWidth(ctx, item.SubLabel, availableSubW, 13.0f);
+						PushText(ctx, { minSubX, row.Y + (row.H - 13.0f) * 0.5f },
+							ellipsizedSub, theme.TextMuted, 13.0f);
+					}
+				}
+			}
+
+			if (hovered && !item.SubLabel.empty())
+				Tooltip(ctx, row, item.Label + "\n" + item.SubLabel);
 
 			if (item.Disabled)
 				continue;

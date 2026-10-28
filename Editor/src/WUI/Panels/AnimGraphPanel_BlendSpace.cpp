@@ -829,13 +829,18 @@ namespace World
 
 			const std::string currentClip = blend2d ? samples2d[i].ClipName : samples1d[i].ClipName;
 			const std::vector<std::string> clips = ClipOptionsForCombo(currentClip);
+			std::vector<std::string> clipLabels;
+			clipLabels.reserve(clips.size());
+			for (const auto& c : clips)
+				clipLabels.push_back(ClipDisplayLabel(c));
+
 			int clipIndex = 0;
 			const auto found = std::find(clips.begin(), clips.end(), currentClip);
 			if (found != clips.end())
 				clipIndex = static_cast<int>(std::distance(clips.begin(), found));
 			const bool clipChanged = Wui::Combo(ctx,
-				Wui::HashId(("animgraph.sample.clip." + std::to_string(i)).c_str()), clipRect, "", clips,
-				clipIndex, theme, currentClip.empty() ? AGTr("state.pick_clip", "(pick a clip)") : currentClip);
+				Wui::HashId(("animgraph.sample.clip." + std::to_string(i)).c_str()), clipRect, "", clipLabels,
+				clipIndex, theme, currentClip.empty() ? AGTr("state.pick_clip", "(pick a clip)") : ClipDisplayLabel(currentClip));
 			Wui::Tooltip(ctx, clipRect, AGTr("blend.sample.clip.tooltip", "Clip sampled at this point."));
 
 			if (Wui::ActionButton(ctx,

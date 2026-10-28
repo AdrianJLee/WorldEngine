@@ -1,6 +1,8 @@
 
 #include "World/Math/Curve/CubicBezierCurve.h"
 #include "World/Animation/AnimGraph.h"
+#include "World/Asset/WAnimationClipIO.h"
+#include "World/Asset/WSkeletonIO.h"
 #include "World/Physics/PhysicsMaterial.h"
 #include "World/Renderer/ParticleAsset.h"
 #include "World/Audio/SoundEvent.h"
@@ -189,6 +191,72 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				}
 				NotifyAssetWritten(target);
 				SelectCreated(target, "new-animgraph");
+				return true;
+			});
+		// 动画片段(.wclip):工业级骨骼动画序列片段
+		add("animation_clip", "Animation Clip (动画片段)", ".wclip", 31, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_clip", ".wclip");
+				Asset::WAnimationClipData clip;
+				clip.Name = target.stem().string();
+				clip.Duration = 1.0f;
+				clip.SkeletonPath = "engine/models/characters/mannequin.wskeleton";
+
+				Asset::WSkeletonData skel;
+				if (Asset::WSkeletonIO::ReadFile(clip.SkeletonPath, skel))
+				{
+					clip.Channels.reserve(skel.Bones.size());
+					for (const auto& bone : skel.Bones)
+					{
+						Asset::AnimationChannel ch;
+						ch.BoneName = bone.Name;
+						ch.BoneNameStr = bone.NameStr;
+						ch.PositionKeys.push_back({ 0.0f, bone.BindPoseLocal.Translation });
+						ch.RotationKeys.push_back({ 0.0f, bone.BindPoseLocal.Rotation });
+						ch.ScaleKeys.push_back({ 0.0f, bone.BindPoseLocal.Scale });
+						clip.Channels.push_back(std::move(ch));
+					}
+				}
+
+				std::string saveErr;
+				if (!Asset::WAnimationClipIO::WriteFile(target.string(), clip, &saveErr))
+				{
+					if (error) *error = "could not write " + target.string() + ": " + saveErr;
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-clip");
+				m_Host.OpenModelPreview(target.string());
+				return true;
+			});
+		// 骨架资产(.wskeleton):3D骨骼层级与绑定姿态
+		add("skeleton", "Skeleton (骨架资产)", ".wskeleton", 32, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_skeleton", ".wskeleton");
+				Asset::WSkeletonData skel;
+				if (!Asset::WSkeletonIO::ReadFile("engine/models/characters/mannequin.wskeleton", skel))
+				{
+					Asset::SkeletonBone rootBone;
+					rootBone.Name = StringPool::Get().InternName("Root");
+					rootBone.NameStr = "Root";
+					rootBone.ParentIndex = -1;
+					rootBone.BindPoseLocal.Translation = glm::vec3(0.0f);
+					rootBone.BindPoseLocal.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+					rootBone.BindPoseLocal.Scale = glm::vec3(1.0f);
+					skel.Bones.push_back(rootBone);
+				}
+
+				std::string saveErr;
+				if (!Asset::WSkeletonIO::WriteFile(target.string(), skel, &saveErr))
+				{
+					if (error) *error = "could not write " + target.string() + ": " + saveErr;
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-skeleton");
+				m_Host.OpenModelPreview(target.string());
 				return true;
 			});
 		add("material", "Material", ".wmat", 10, false,

@@ -262,77 +262,39 @@ namespace World
 		{
 			m_PanelTitle = "Skeleton - " + (name.empty() ? m_LogicalPath : name);
 			std::string error;
-			Asset::WSkeletonData skeleton;
-			if (Asset::WSkeletonIO::ReadFile(m_LogicalPath, skeleton, &error))
+
+			std::string previewPath = m_PreviewMeshPath;
+			if (previewPath.empty())
 			{
-				m_Data.Nodes.clear();
-				m_Data.Nodes.resize(skeleton.Bones.size());
-				for (size_t i = 0; i < skeleton.Bones.size(); ++i)
-				{
-					const auto& bone = skeleton.Bones[i];
-					m_Data.Nodes[i].Name = bone.NameStr.empty() ? StringPool::Get().NameOf(bone.Name) : bone.NameStr;
-					m_Data.Nodes[i].Parent = bone.ParentIndex;
-					m_Data.Nodes[i].MeshIndex = -1;
-					m_Data.Nodes[i].Translation = bone.BindPoseLocal.Translation;
-					m_Data.Nodes[i].Rotation = bone.BindPoseLocal.Rotation;
-					m_Data.Nodes[i].Scale = bone.BindPoseLocal.Scale;
-				}
-				Asset::WModelSkin skin;
-				skin.Name = "Skeleton";
-				skin.JointNodes.resize(skeleton.Bones.size());
-				skin.JointNames.resize(skeleton.Bones.size());
-				for (size_t i = 0; i < skeleton.Bones.size(); ++i)
-				{
-					skin.JointNodes[i] = static_cast<uint32_t>(i);
-					skin.JointNames[i] = m_Data.Nodes[i].Name;
-				}
-				m_Data.Skins.push_back(std::move(skin));
+				std::filesystem::path skelP(m_LogicalPath);
+				std::string stem = skelP.stem().string();
+				std::filesystem::path candidate = skelP.parent_path() / (stem + ".wmodel");
+				if (std::filesystem::exists(candidate))
+					previewPath = candidate.generic_string();
+				else
+					previewPath = "engine/models/characters/mannequin.wmodel";
+			}
+			m_PreviewMeshPath = previewPath;
+
+			std::string meshError;
+			m_Mesh = Mesh::LoadWModel(previewPath, &meshError);
+			if (m_Mesh && Asset::WModelIO::ReadFile(previewPath, m_Data, &meshError))
+			{
 				m_DataValid = true;
-				m_ShowBones = true;
-				m_ActiveTab = 2;
-
-				const MeshBounds bounds = ComputeWorldBounds();
-				m_Focus = bounds.GetCenter();
-				const float radius = std::max(0.25f, glm::length(bounds.GetExtents()));
-				m_MinDistance = radius * 0.6f;
-				m_MaxDistance = radius * 40.0f;
-				m_CameraDistance = radius * 3.2f;
-
-				m_Status = "Loaded Skeleton " + m_LogicalPath + " | bones " + std::to_string(skeleton.Bones.size());
-				m_StatusIsError = false;
-				WLD_CORE_INFO("[skeleton] preview '{0}': bones={1}", m_LogicalPath, skeleton.Bones.size());
-				return;
+				m_SlotMaterials.resize(m_Mesh->GetMaterialSlots().size());
+				for (size_t idx = 0; idx < m_Mesh->GetMaterialSlots().size(); ++idx)
+				{
+					const std::string& slotPath = m_Mesh->GetMaterialSlots()[idx];
+					if (!slotPath.empty())
+						m_SlotMaterials[idx] = MaterialLibrary::Get().Load(slotPath);
+				}
 			}
 			else
 			{
-				m_Status = "Skeleton load failed: " + (error.empty() ? m_LogicalPath : error);
-				m_StatusIsError = true;
-				WLD_CORE_WARN("[skeleton] preview load failed '{0}': {1}", m_LogicalPath, error);
-				return;
-			}
-		}
-
-		if (ext == ".wclip")
-		{
-			m_PanelTitle = "Clip - " + (name.empty() ? m_LogicalPath : name);
-			std::string error;
-			Asset::WAnimationClipData clipData;
-			if (Asset::WAnimationClipIO::ReadFile(m_LogicalPath, clipData, &error))
-			{
-				m_Data.Nodes.clear();
-				m_Data.Animations.clear();
-
 				Asset::WSkeletonData skeleton;
-				std::string skelError;
-				std::string skelPath = clipData.SkeletonPath;
-				bool skelLoaded = false;
-				if (!skelPath.empty())
-					skelLoaded = Asset::WSkeletonIO::ReadFile(skelPath, skeleton, &skelError);
-				if (!skelLoaded)
-					skelLoaded = Asset::WSkeletonIO::ReadFile("engine/models/characters/mannequin.wskeleton", skeleton, &skelError);
-
-				if (skelLoaded)
+				if (Asset::WSkeletonIO::ReadFile(m_LogicalPath, skeleton, &error))
 				{
+					m_Data.Nodes.clear();
 					m_Data.Nodes.resize(skeleton.Bones.size());
 					for (size_t i = 0; i < skeleton.Bones.size(); ++i)
 					{
@@ -344,19 +306,66 @@ namespace World
 						m_Data.Nodes[i].Rotation = bone.BindPoseLocal.Rotation;
 						m_Data.Nodes[i].Scale = bone.BindPoseLocal.Scale;
 					}
-					Asset::WModelSkin skin;
-				skin.Name = "Skeleton";
-				skin.JointNodes.resize(skeleton.Bones.size());
-				skin.JointNames.resize(skeleton.Bones.size());
-				for (size_t i = 0; i < skeleton.Bones.size(); ++i)
-				{
-					skin.JointNodes[i] = static_cast<uint32_t>(i);
-					skin.JointNames[i] = m_Data.Nodes[i].Name;
+					m_DataValid = true;
 				}
-				m_Data.Skins.push_back(std::move(skin));
+			}
+
+			m_ShowBones = true;
+			m_ShowMesh = true;
+			m_ActiveTab = 2;
+
+			const MeshBounds bounds = ComputeWorldBounds();
+			m_Focus = bounds.GetCenter();
+			const float radius = std::max(0.25f, glm::length(bounds.GetExtents()));
+			m_MinDistance = radius * 0.6f;
+			m_MaxDistance = radius * 40.0f;
+			m_CameraDistance = radius * 3.2f;
+
+			m_Status = "Loaded Skeleton " + m_LogicalPath;
+			m_StatusIsError = false;
+			WLD_CORE_INFO("[skeleton] preview '{0}'", m_LogicalPath);
+			return;
+		}
+
+		if (ext == ".wclip")
+		{
+			m_PanelTitle = "Clip - " + (name.empty() ? m_LogicalPath : name);
+			std::string error;
+			Asset::WAnimationClipData clipData;
+			if (Asset::WAnimationClipIO::ReadFile(m_LogicalPath, clipData, &error))
+			{
+				std::string previewPath = m_PreviewMeshPath;
+				if (previewPath.empty())
+				{
+					std::string skelPath = clipData.SkeletonPath;
+					if (!skelPath.empty())
+					{
+						std::filesystem::path skP(skelPath);
+						std::filesystem::path cand = skP.parent_path() / (skP.stem().string() + ".wmodel");
+						if (std::filesystem::exists(cand))
+							previewPath = cand.generic_string();
+					}
+					if (previewPath.empty())
+						previewPath = "engine/models/characters/mannequin.wmodel";
+				}
+				m_PreviewMeshPath = previewPath;
+
+				std::string meshError;
+				m_Mesh = Mesh::LoadWModel(previewPath, &meshError);
+				if (m_Mesh && Asset::WModelIO::ReadFile(previewPath, m_Data, &meshError))
+				{
+					m_DataValid = true;
+					m_SlotMaterials.resize(m_Mesh->GetMaterialSlots().size());
+					for (size_t idx = 0; idx < m_Mesh->GetMaterialSlots().size(); ++idx)
+					{
+						const std::string& slotPath = m_Mesh->GetMaterialSlots()[idx];
+						if (!slotPath.empty())
+							m_SlotMaterials[idx] = MaterialLibrary::Get().Load(slotPath);
+					}
 				}
 				else
 				{
+					m_Data.Nodes.clear();
 					for (const auto& ch : clipData.Channels)
 					{
 						Asset::WModelNode node;
@@ -364,11 +373,14 @@ namespace World
 						node.Parent = m_Data.Nodes.empty() ? -1 : 0;
 						m_Data.Nodes.push_back(std::move(node));
 					}
+					m_DataValid = true;
 				}
 
+				m_Data.Animations.clear();
 				Asset::WModelAnimation anim;
 				anim.Name = clipData.Name.empty() ? std::filesystem::path(m_LogicalPath).stem().string() : clipData.Name;
-				anim.Duration = clipData.Duration;
+				anim.Duration = std::max(0.05f, clipData.Duration);
+
 				for (const auto& ch : clipData.Channels)
 				{
 					int32_t targetNode = -1;
@@ -416,9 +428,11 @@ namespace World
 					}
 				}
 				m_Data.Animations.push_back(std::move(anim));
-				m_DataValid = true;
-				m_ShowBones = true;
+
 				m_AnimPlaying = true;
+				m_AnimClipIndex = 0;
+				m_ShowMesh = true;
+				m_ShowBones = false;
 				m_ActiveTab = 4;
 
 				const MeshBounds bounds = ComputeWorldBounds();
@@ -938,7 +952,7 @@ namespace World
 		const uint32_t slotBase = m_Mesh ? Renderer3D::ReserveSlotBase(
 			static_cast<uint32_t>(Wui::HashId(m_PanelId.c_str()) ^ 0x5F17u),
 			static_cast<uint32_t>(std::max<size_t>(1, m_Mesh->GetSubmeshes().size()))) : 0;
-		if (m_Mesh)
+		if (m_Mesh && m_ShowMesh)
 		{
 		uint32_t drawIndex = 0;
 		const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
@@ -1338,6 +1352,40 @@ namespace World
 		Wui::Badge(ctx, { x, y + 2.0f, syncBadgeW, 20.0f }, syncBadgeText, syncBadgeFill, syncBadgeTextCol,
 			theme, theme.FontSizeCaption, true, 4.0f);
 		x += syncBadgeW + 10.0f;
+
+		// Preview Mesh 下拉选取 (仅 Skeleton 与 Clip 显示)
+		if (ext == ".wclip" || ext == ".wskeleton")
+		{
+			const std::vector<std::string>& modelAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Model);
+			int modelIdx = 0;
+			const auto foundModel = std::find(modelAssets.begin(), modelAssets.end(), m_PreviewMeshPath);
+			if (foundModel != modelAssets.end())
+				modelIdx = static_cast<int>(std::distance(modelAssets.begin(), foundModel));
+
+			Wui::Label(ctx, { x, y + 4.0f }, "Preview Mesh:", theme.TextMuted, theme.FontSizeCaption);
+			x += 76.0f;
+			const float comboMeshW = 140.0f;
+			std::string shownMeshName = std::filesystem::path(m_PreviewMeshPath).stem().string();
+			if (shownMeshName.empty()) shownMeshName = "(none)";
+			if (Wui::Combo(ctx, Wui::HashId("model.preview.mesh.combo"), { x, y, comboMeshW, 22.0f }, "",
+				modelAssets, modelIdx, theme, shownMeshName))
+			{
+				if (modelIdx >= 0 && static_cast<size_t>(modelIdx) < modelAssets.size())
+				{
+					m_PreviewMeshPath = modelAssets[static_cast<size_t>(modelIdx)];
+					Reload();
+				}
+			}
+			x += comboMeshW + 4.0f;
+			if (Wui::Button(ctx, Wui::HashId("model.preview.mesh.browse"), { x, y, 26.0f, 22.0f }, "...", theme))
+			{
+				host.OpenAssetPicker("选择预览网格模型 (Model)", AssetCategory::Unknown, [this](const std::string& picked) {
+					m_PreviewMeshPath = picked;
+					Reload();
+				});
+			}
+			x += 32.0f;
+		}
 
 		// 右侧动作按钮组 (自适应紧凑模式)
 		const float btnH = 24.0f;
@@ -1821,6 +1869,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 					Wui::Checkbox(ctx, id, { popRect.X + 8.0f, py, popW - 16.0f, itemH }, label, val, theme);
 					py += itemH;
 				};
+				drawCheck(Wui::HashId("model.disp.mesh"), Wui::Tr("panel.model.overlay.mesh", "Mesh"), m_ShowMesh);
 				drawCheck(Wui::HashId("model.disp.grid"), Wui::Tr("panel.model.overlay.grid", "Grid"), m_ShowGrid);
 				drawCheck(Wui::HashId("model.disp.axes"), Wui::Tr("panel.model.overlay.gizmo", "Axes"), m_ShowGizmo);
 				drawCheck(Wui::HashId("model.disp.bones"), Wui::Tr("panel.model.overlay.bones", "Bones"), m_ShowBones);
@@ -2518,17 +2567,53 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 		if (Wui::Button(ctx, Wui::HashId("model.node.save"), saveBtnRect,
 			Wui::Tr("panel.model.skeleton.save_hierarchy", "Save Asset"), theme))
 		{
-			std::string err;
-			if (Asset::WModelIO::WriteFile(m_LogicalPath, m_Data, &err))
+			const std::string curExt = LowerExtension(std::filesystem::path(m_LogicalPath));
+			if (curExt == ".wclip")
 			{
-				Reload();
-				m_Status = "Hierarchy saved to .wmodel";
-				m_StatusIsError = false;
+				SaveCurrentClipToFile();
+			}
+			else if (curExt == ".wskeleton")
+			{
+				Asset::WSkeletonData skeleton;
+				skeleton.Bones.reserve(m_Data.Nodes.size());
+				for (size_t i = 0; i < m_Data.Nodes.size(); ++i)
+				{
+					const auto& n = m_Data.Nodes[i];
+					Asset::SkeletonBone b;
+					b.Name = StringPool::Get().InternName(n.Name);
+					b.NameStr = n.Name;
+					b.ParentIndex = n.Parent;
+					b.BindPoseLocal.Translation = n.Translation;
+					b.BindPoseLocal.Rotation = n.Rotation;
+					b.BindPoseLocal.Scale = n.Scale;
+					skeleton.Bones.push_back(std::move(b));
+				}
+				std::string err;
+				if (Asset::WSkeletonIO::WriteFile(m_LogicalPath, skeleton, &err))
+				{
+					m_Status = "Skeleton saved to " + m_LogicalPath;
+					m_StatusIsError = false;
+				}
+				else
+				{
+					m_Status = "Failed saving skeleton: " + err;
+					m_StatusIsError = true;
+				}
 			}
 			else
 			{
-				m_Status = "Failed saving hierarchy: " + err;
-				m_StatusIsError = true;
+				std::string err;
+				if (Asset::WModelIO::WriteFile(m_LogicalPath, m_Data, &err))
+				{
+					Reload();
+					m_Status = "Hierarchy saved to .wmodel";
+					m_StatusIsError = false;
+				}
+				else
+				{
+					m_Status = "Failed saving hierarchy: " + err;
+					m_StatusIsError = true;
+				}
 			}
 		}
 		Wui::Tooltip(ctx, saveBtnRect, Wui::Tr("panel.model.skeleton.save_hierarchy_tip", "Save hierarchy changes into .wmodel"));
@@ -3156,89 +3241,115 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 float ModelPreviewPanel::DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
 		const Wui::WuiTheme& theme)
 	{
+		(void)host;
 		const float x = rect.X;
 		const float width = rect.W;
 		float y = rect.Y + 4.0f;
 
-		// 架构说明卡片
-		const float archCardH = 68.0f;
-		const Wui::WuiRect archCard { x, y, width, archCardH };
-		Wui::PanelBackground(ctx, archCard, theme.CardBg, 4.0f);
-		Wui::HighlightOutline(ctx, archCard, Alpha(theme.Accent, 0.40f), 4.0f, 1.0f);
+		const std::string currentExt = LowerExtension(std::filesystem::path(m_LogicalPath));
+		const bool isWClip = (currentExt == ".wclip");
 
-		Wui::Badge(ctx, { x + 10.0f, y + 8.0f, 96.0f, 18.0f },
-			Wui::Tr("panel.model.clips.arch_title", "ARCHITECTURE"), Alpha(theme.Accent, 0.20f),
-			theme.Accent, theme, theme.FontSizeCaption, true, 3.0f);
-
-		const std::string archDesc = Wui::Tr("panel.model.clips.arch_desc",
-			"Architecture: In WorldEngine, 3D animations are stored inside .wmodel assets alongside skeleton hierarchy. "
-			"AnimGraph (.wanimgraph) assets reference clips by name to drive runtime transitions and blending.");
-		Wui::Label(ctx, { x + 10.0f, y + 32.0f },
-			Wui::EllipsizeMiddleToWidth(ctx, archDesc, width - 20.0f, theme.FontSizeCaption),
-			theme.TextMuted, theme.FontSizeCaption);
-		Wui::Tooltip(ctx, archCard, archDesc);
-
-		y += archCardH + 10.0f;
-
-		// 片段工具栏
-		const float newClipW = 100.0f;
-		const float dupClipW = 90.0f;
-		const float splitClipW = 90.0f;
-		const float saveClipsW = 120.0f;
-
-		Wui::SectionHeader(ctx, { x, y, 140.0f, 22.0f },
-			Wui::Tr("panel.model.tab.clips", "Animation Clips") + " (" + std::to_string(m_Data.Animations.size()) + ")",
-			theme.Accent, theme);
-
-		float btnX = x + width - saveClipsW;
-		if (Wui::Button(ctx, Wui::HashId("model.clips.save_all"), { btnX, y, saveClipsW, 22.0f },
-			Wui::Tr("panel.model.clips.save_clips", "Save to .wmodel"), theme))
+		// 1. 顶部标题栏与模式自适应动作按钮 (绝不重叠、绝不产生重复按钮)
+		if (isWClip)
 		{
-			std::string err;
-			if (Asset::WModelIO::WriteFile(m_LogicalPath, m_Data, &err))
+			Wui::SectionHeader(ctx, { x, y, 160.0f, 22.0f },
+				Wui::Tr("panel.model.tab.clip_editor", "Clip Editor (.wclip)"), theme.Accent, theme);
+
+			const float saveW = 90.0f;
+			const float newW = 80.0f;
+			float bx = x + width - saveW;
+			if (Wui::Button(ctx, Wui::HashId("model.clips.save_wclip"), { bx, y, saveW, 22.0f },
+				Wui::Tr("panel.model.clips.save_clip", "Save .wclip"), theme))
 			{
-				AnimationSystem::ClearCache();
-				m_Status = "Clips saved to .wmodel";
-				m_StatusIsError = false;
+				SaveCurrentClipToFile();
 			}
-			else
+			Wui::Tooltip(ctx, { bx, y, saveW, 22.0f }, "Save all animation channels and keys back to .wclip file");
+
+			bx -= newW + 6.0f;
+			if (Wui::Button(ctx, Wui::HashId("model.clips.toggle_new"), { bx, y, newW, 22.0f },
+				Wui::Tr("panel.model.clips.new_clip", "New Clip"), theme))
 			{
-				m_Status = "Failed saving clips: " + err;
-				m_StatusIsError = true;
+				m_NewClipOpen = !m_NewClipOpen;
+				m_SplitClipOpen = false;
 			}
-		}
-		Wui::Tooltip(ctx, { btnX, y, saveClipsW, 22.0f }, Wui::Tr("panel.model.clips.save_clips_tip", "Save all animation clips into .wmodel"));
+			Wui::Tooltip(ctx, { bx, y, newW, 22.0f }, "Create a new .wclip asset");
 
-		btnX -= splitClipW + 6.0f;
-		if (Wui::Button(ctx, Wui::HashId("model.clips.toggle_split"), { btnX, y, splitClipW, 22.0f },
-			Wui::Tr("panel.model.clips.split_clip", "Split Clip"), theme))
-		{
-			m_SplitClipOpen = !m_SplitClipOpen;
-			m_NewClipOpen = false;
+			y += 28.0f;
 		}
-
-		btnX -= dupClipW + 6.0f;
-		if (Wui::Button(ctx, Wui::HashId("model.clips.duplicate"), { btnX, y, dupClipW, 22.0f },
-			Wui::Tr("panel.model.clips.duplicate_clip", "Duplicate"), theme))
+		else
 		{
+			Wui::SectionHeader(ctx, { x, y, width, 22.0f },
+				Wui::Tr("panel.model.tab.clips", "Animation Clips") + " (" + std::to_string(m_Data.Animations.size()) + ")",
+				theme.Accent, theme);
+			y += 26.0f;
+
+			// 模型动画专用动作工具栏行 (避免与标题挤在同一行)
+			float bx = x;
+			const float saveAllW = 96.0f;
+			const float exportW = 90.0f;
+			const float newW = 76.0f;
+			const float splitW = 70.0f;
+			const float dupW = 54.0f;
+
+			if (Wui::Button(ctx, Wui::HashId("model.clips.save_all"), { bx, y, saveAllW, 22.0f },
+				Wui::Tr("panel.model.clips.save_clips", "Save to .wmodel"), theme))
+			{
+				std::string err;
+				if (Asset::WModelIO::WriteFile(m_LogicalPath, m_Data, &err))
+				{
+					AnimationSystem::ClearCache();
+					m_Status = "Clips saved to .wmodel";
+					m_StatusIsError = false;
+				}
+				else
+				{
+					m_Status = "Failed saving clips: " + err;
+					m_StatusIsError = true;
+				}
+			}
+			Wui::Tooltip(ctx, { bx, y, saveAllW, 22.0f }, "Save all animation clips into .wmodel");
+			bx += saveAllW + 6.0f;
+
 			if (m_AnimClipIndex >= 0 && static_cast<size_t>(m_AnimClipIndex) < m_Data.Animations.size())
 			{
-				Asset::WModelAnimation copy = m_Data.Animations[static_cast<size_t>(m_AnimClipIndex)];
-				copy.Name = copy.Name + "_copy";
-				m_Data.Animations.push_back(copy);
-				m_AnimClipIndex = static_cast<int>(m_Data.Animations.size() - 1);
+				if (Wui::Button(ctx, Wui::HashId("model.clips.export_wclip"), { bx, y, exportW, 22.0f },
+					Wui::Tr("panel.model.clips.export_clip", "Export .wclip"), theme))
+				{
+					ExportActiveClipToWClip(host);
+				}
+				Wui::Tooltip(ctx, { bx, y, exportW, 22.0f }, "Export active clip into a standalone .wclip file");
+				bx += exportW + 6.0f;
 			}
-		}
 
-		btnX -= newClipW + 6.0f;
-		if (Wui::Button(ctx, Wui::HashId("model.clips.toggle_new"), { btnX, y, newClipW, 22.0f },
-			Wui::Tr("panel.model.clips.new_clip", "New Clip"), theme))
-		{
-			m_NewClipOpen = !m_NewClipOpen;
-			m_SplitClipOpen = false;
-		}
+			if (Wui::Button(ctx, Wui::HashId("model.clips.toggle_new"), { bx, y, newW, 22.0f },
+				Wui::Tr("panel.model.clips.new_clip", "New Clip"), theme))
+			{
+				m_NewClipOpen = !m_NewClipOpen;
+				m_SplitClipOpen = false;
+			}
+			bx += newW + 6.0f;
 
-		y += 28.0f;
+			if (m_AnimClipIndex >= 0 && static_cast<size_t>(m_AnimClipIndex) < m_Data.Animations.size())
+			{
+				if (Wui::Button(ctx, Wui::HashId("model.clips.toggle_split"), { bx, y, splitW, 22.0f },
+					Wui::Tr("panel.model.clips.split_clip", "Split Clip"), theme))
+				{
+					m_SplitClipOpen = !m_SplitClipOpen;
+					m_NewClipOpen = false;
+				}
+				bx += splitW + 6.0f;
+
+				if (Wui::Button(ctx, Wui::HashId("model.clips.duplicate"), { bx, y, dupW, 22.0f },
+					Wui::Tr("panel.model.clips.duplicate_clip", "Duplicate"), theme))
+				{
+					Asset::WModelAnimation copy = m_Data.Animations[static_cast<size_t>(m_AnimClipIndex)];
+					copy.Name = copy.Name + "_copy";
+					m_Data.Animations.push_back(copy);
+					m_AnimClipIndex = static_cast<int>(m_Data.Animations.size() - 1);
+				}
+			}
+			y += 28.0f;
+		}
 
 		// 新建片段内联表单
 		if (m_NewClipOpen)
@@ -3265,70 +3376,7 @@ float ModelPreviewPanel::DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& 
 			if (Wui::Button(ctx, Wui::HashId("model.clip.new_create_btn"), { x + 345.0f, y + 8.0f, createBtnW, 22.0f },
 				Wui::Tr("panel.model.clips.create", "Create"), theme))
 			{
-				Asset::WModelAnimation anim;
-				anim.Name = m_NewClipNameBuffer.empty() ? ("clip_" + std::to_string(m_Data.Animations.size())) : m_NewClipNameBuffer;
-				anim.Duration = std::max(0.1f, m_NewClipDurationBuffer);
-				m_Data.Animations.push_back(anim);
-				m_AnimClipIndex = static_cast<int>(m_Data.Animations.size() - 1);
-				m_AnimTime = 0.0f;
-				m_NewClipOpen = false;
-			}
-
-			y += formH + 8.0f;
-		}
-
-		// 切片内联表单
-		if (m_SplitClipOpen && m_AnimClipIndex >= 0 && static_cast<size_t>(m_AnimClipIndex) < m_Data.Animations.size())
-		{
-			const float formH = 40.0f;
-			const Wui::WuiRect formRect { x, y, width, formH };
-			Wui::PanelBackground(ctx, formRect, theme.CardBg, 4.0f);
-			Wui::HighlightOutline(ctx, formRect, Alpha(theme.BorderStrong, 0.7f), 4.0f, 1.0f);
-
-			const auto& src = m_Data.Animations[static_cast<size_t>(m_AnimClipIndex)];
-
-			Wui::Label(ctx, { x + 10.0f, y + 10.0f }, Wui::Tr("panel.model.clips.split_start", "Start:"), theme.TextMuted, theme.FontSizeCaption);
-			Wui::DragFloat(ctx, Wui::HashId("model.clip.split_start"), { x + 55.0f, y + 8.0f, 65.0f, 22.0f },
-				m_SplitStart, 0.05f, 0.0f, src.Duration, theme);
-
-			Wui::Label(ctx, { x + 130.0f, y + 10.0f }, Wui::Tr("panel.model.clips.split_end", "End:"), theme.TextMuted, theme.FontSizeCaption);
-			Wui::DragFloat(ctx, Wui::HashId("model.clip.split_end"), { x + 170.0f, y + 8.0f, 65.0f, 22.0f },
-				m_SplitEnd, 0.05f, 0.0f, src.Duration, theme);
-
-			const float applySplitW = 90.0f;
-			if (Wui::Button(ctx, Wui::HashId("model.clip.apply_split_btn"), { x + 245.0f, y + 8.0f, applySplitW, 22.0f },
-				Wui::Tr("panel.model.clips.split_apply", "Split & Add"), theme))
-			{
-				float t0 = std::clamp(m_SplitStart, 0.0f, src.Duration);
-				float t1 = std::clamp(m_SplitEnd, t0 + 0.01f, src.Duration);
-				Asset::WModelAnimation sub;
-				sub.Name = src.Name + "_sub";
-				sub.Duration = t1 - t0;
-				for (const auto& ch : src.Channels)
-				{
-					Asset::WModelAnimationChannel subCh;
-					subCh.TargetNode = ch.TargetNode;
-					subCh.Path = ch.Path;
-					for (const auto& k : ch.Keys)
-					{
-						if (k.Time >= t0 && k.Time <= t1)
-						{
-							Asset::WModelAnimationKey subK = k;
-							subK.Time -= t0;
-							subCh.Keys.push_back(subK);
-						}
-					}
-					if (subCh.Keys.empty() && !ch.Keys.empty())
-					{
-						Asset::WModelAnimationKey k0 = ch.Keys.front();
-						k0.Time = 0.0f;
-						subCh.Keys.push_back(k0);
-					}
-					sub.Channels.push_back(subCh);
-				}
-				m_Data.Animations.push_back(sub);
-				m_AnimClipIndex = static_cast<int>(m_Data.Animations.size() - 1);
-				m_SplitClipOpen = false;
+				CreateNewClipAsset(host);
 			}
 
 			y += formH + 8.0f;
@@ -3340,89 +3388,425 @@ float ModelPreviewPanel::DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& 
 				Wui::Tr("panel.model.clips.empty_title", "No Animation Clips"),
 				Wui::Tr("panel.model.clips.empty_desc", "This model contains no skeletal animation sequences. Click 'New Clip' to create one."),
 				"", 0, theme);
-			return y + 180.0f - rect.Y;
+			m_TabContentHeight[4] = y + 200.0f - rect.Y;
+			return y + 200.0f - rect.Y;
 		}
 
-		// 渲染片段列表
-		for (size_t index = 0; index < m_Data.Animations.size(); ++index)
+		// 2. 当前选中片段属性与动画编辑核心套件
+		if (m_AnimClipIndex >= 0 && static_cast<size_t>(m_AnimClipIndex) < m_Data.Animations.size())
 		{
-			Asset::WModelAnimation& anim = m_Data.Animations[index];
-			const bool isActive = static_cast<int>(index) == m_AnimClipIndex;
+			Asset::WModelAnimation& anim = m_Data.Animations[static_cast<size_t>(m_AnimClipIndex)];
 
-			const float cardH = 68.0f;
-			const Wui::WuiRect clipCard { x, y, width, cardH };
-			Wui::PanelBackground(ctx, clipCard, theme.CardBg, 4.0f);
-			Wui::HighlightOutline(ctx, clipCard, isActive ? theme.Accent : Alpha(theme.Border, 0.6f), 4.0f,
-				isActive ? 1.5f : 1.0f);
+			// ---- 片段属性卡片 ----
+			const float propCardH = 74.0f;
+			const Wui::WuiRect propCard { x, y, width, propCardH };
+			Wui::PanelBackground(ctx, propCard, theme.CardBg, 4.0f);
+			Wui::HighlightOutline(ctx, propCard, Alpha(theme.Accent, 0.45f), 4.0f, 1.0f);
 
-			if (isActive)
-				Wui::Badge(ctx, { x + 8.0f, y + 8.0f, 54.0f, 18.0f }, "PLAYING", Alpha(theme.Accent, 0.25f),
-					theme.Accent, theme, theme.FontSizeCaption, true, 3.0f);
-			else
-				Wui::Badge(ctx, { x + 8.0f, y + 8.0f, 42.0f, 18.0f }, "CLIP", Alpha(theme.TextDisabled, 0.20f),
-					theme.TextMuted, theme, theme.FontSizeCaption, true, 3.0f);
+			float py = y + 8.0f;
+			Wui::Label(ctx, { x + 8.0f, py + 3.0f }, "Clip:", theme.TextMuted, theme.FontSizeCaption);
+			const float nameFieldW = std::clamp(width * 0.32f, 100.0f, 180.0f);
+			const Wui::WuiId cNameId = Wui::HashId("model.active_clip.name");
+			Wui::TextFieldA11y ca11y;
+			ca11y.Label = "Active Clip Name";
+			Wui::TextField(ctx, cNameId, { x + 40.0f, py, nameFieldW, 22.0f }, anim.Name, theme, nullptr, &ca11y);
+			if (ctx.Focus() == cNameId) ctx.SetTextInputActive(true);
 
-			// 可编辑片段名称
-			const Wui::WuiId clipNameFieldId = Wui::HashId(("model.clip.name." + std::to_string(index)).c_str());
-			const float nameW = 120.0f;
-			Wui::TextFieldA11y nameA11y;
-			nameA11y.Label = "Clip Name";
-			Wui::TextField(ctx, clipNameFieldId, { x + 66.0f, y + 6.0f, nameW, 22.0f }, anim.Name, theme, nullptr, &nameA11y);
-			if (ctx.Focus() == clipNameFieldId)
-				ctx.SetTextInputActive(true);
+			float curPx = x + 40.0f + nameFieldW + 8.0f;
+			Wui::Label(ctx, { curPx, py + 3.0f }, "Duration:", theme.TextMuted, theme.FontSizeCaption);
+			curPx += 56.0f;
+			const float durW = 68.0f;
+			Wui::DragFloat(ctx, Wui::HashId("model.active_clip.dur"), { curPx, py, durW, 22.0f }, anim.Duration, 0.05f, 0.1f, 300.0f, theme);
+			curPx += durW + 8.0f;
 
-			// 可编辑时长 DragFloat
-			Wui::Label(ctx, { x + 66.0f + nameW + 8.0f, y + 8.0f }, "Dur:", theme.TextMuted, theme.FontSizeCaption);
-			const float durW = 60.0f;
-			Wui::DragFloat(ctx, Wui::HashId(("model.clip.dur." + std::to_string(index)).c_str()),
-				{ x + 66.0f + nameW + 36.0f, y + 6.0f, durW, 22.0f }, anim.Duration, 0.05f, 0.1f, 300.0f, theme);
+			Wui::Checkbox(ctx, Wui::HashId("model.active_clip.loop"), { curPx, py + 2.0f, 65.0f, 18.0f }, "Loop", m_AnimLoop, theme);
 
-			// 操作按钮: Play / Open in Graph / Delete
-			const float playBtnW = 60.0f;
-			const float graphBtnW = 100.0f;
-			const float delBtnW = 26.0f;
-			const float bx = x + width - playBtnW - graphBtnW - delBtnW - 16.0f;
+			py += 28.0f;
+			size_t totalKeys = 0;
+			for (const auto& ch : anim.Channels) totalKeys += ch.Keys.size();
+			const int totalFrames = static_cast<int>(std::round(anim.Duration * 30.0f));
+			char statBuf[128];
+			std::snprintf(statBuf, sizeof(statBuf), "%d frames @ 30 FPS  |  %zu channels  |  %zu total keys",
+				totalFrames, anim.Channels.size(), totalKeys);
+			Wui::Label(ctx, { x + 8.0f, py + 2.0f }, statBuf, theme.TextMuted, theme.FontSizeCaption);
 
-			if (Wui::Button(ctx, Wui::HashId(("model.clip.play." + std::to_string(index)).c_str()),
-				{ bx, y + 6.0f, playBtnW, 22.0f }, isActive ? "Restart" : "Play", theme))
+			y += propCardH + 10.0f;
+
+			// ---- 3. 骨骼姿态微调与关键帧录制 (Bone Pose Inspector) ----
+			const float poseCardH = 176.0f;
+			const Wui::WuiRect poseCard { x, y, width, poseCardH };
+			Wui::PanelBackground(ctx, poseCard, theme.CardBg, 4.0f);
+			Wui::HighlightOutline(ctx, poseCard, Alpha(theme.BorderStrong, 0.7f), 4.0f, 1.0f);
+
+			float cy = y + 8.0f;
+			Wui::Label(ctx, { x + 8.0f, cy }, "Bone Pose & Keyframes", theme.Accent, theme.FontSizeSmall);
+
+			// 骨骼选择下拉列表
+			std::vector<std::string> boneNames;
+			boneNames.reserve(m_Data.Nodes.size());
+			int boneComboIdx = 0;
+			for (size_t n = 0; n < m_Data.Nodes.size(); ++n)
 			{
-				m_AnimClipIndex = static_cast<int>(index);
-				m_AnimTime = 0.0f;
-				m_AnimPlaying = true;
+				std::string bname = m_Data.Nodes[n].Name.empty() ? ("node_" + std::to_string(n)) : m_Data.Nodes[n].Name;
+				if (static_cast<int>(n) == m_SelectedNode)
+					boneComboIdx = static_cast<int>(n);
+				boneNames.push_back(std::to_string(n) + ": " + bname);
+			}
+			if (m_SelectedNode < 0 && !m_Data.Nodes.empty())
+			{
+				m_SelectedNode = 0;
+				boneComboIdx = 0;
 			}
 
-			if (Wui::Button(ctx, Wui::HashId(("model.clip.open_graph." + std::to_string(index)).c_str()),
-				{ bx + playBtnW + 6.0f, y + 6.0f, graphBtnW, 22.0f }, "Open in Graph", theme))
+			const float bComboW = std::clamp(width * 0.40f, 120.0f, 200.0f);
+			const float bComboX = x + width - bComboW - 8.0f;
+			std::string selBoneLabel = (m_SelectedNode >= 0 && static_cast<size_t>(m_SelectedNode) < boneNames.size())
+				? boneNames[static_cast<size_t>(m_SelectedNode)] : "(select bone)";
+			if (Wui::Combo(ctx, Wui::HashId("model.clip.bone_sel"), { bComboX, cy - 2.0f, bComboW, 20.0f }, "",
+				boneNames, boneComboIdx, theme, selBoneLabel))
 			{
-				host.OpenAnimGraph("");
+				if (boneComboIdx >= 0 && static_cast<size_t>(boneComboIdx) < m_Data.Nodes.size())
+				{
+					m_SelectedNode = boneComboIdx;
+					const auto& snode = m_Data.Nodes[static_cast<size_t>(m_SelectedNode)];
+					m_SelectedNodeTranslation = snode.Translation;
+					m_SelectedNodeRotationEuler = glm::degrees(glm::eulerAngles(snode.Rotation));
+					m_SelectedNodeScale = snode.Scale;
+				}
 			}
-			Wui::Tooltip(ctx, { bx + playBtnW + 6.0f, y + 6.0f, graphBtnW, 22.0f },
-				"Switch to Animation Graph editor.");
 
-			if (Wui::Button(ctx, Wui::HashId(("model.clip.delete." + std::to_string(index)).c_str()),
-				{ bx + playBtnW + graphBtnW + 12.0f, y + 6.0f, delBtnW, 22.0f }, "X", theme))
+			cy += 24.0f;
+			if (m_SelectedNode >= 0 && static_cast<size_t>(m_SelectedNode) < m_Data.Nodes.size())
 			{
-				m_Data.Animations.erase(m_Data.Animations.begin() + index);
-				if (m_AnimClipIndex >= static_cast<int>(m_Data.Animations.size()))
-					m_AnimClipIndex = std::max(0, static_cast<int>(m_Data.Animations.size()) - 1);
+				Asset::WModelNode& snode = m_Data.Nodes[static_cast<size_t>(m_SelectedNode)];
+				const float labelW = 86.0f;
+				const float fieldW = width - labelW - 20.0f;
+				const float compW = (fieldW - 8.0f) / 3.0f;
+
+				// Translation
+				Wui::Label(ctx, { x + 8.0f, cy + 3.0f }, "Translation", theme.TextMuted, theme.FontSizeCaption);
+				if (Wui::DragFloat(ctx, Wui::HashId("model.cpose.tx"), { x + labelW, cy, compW, 20.0f }, snode.Translation.x, 0.01f, -100.0f, 100.0f, theme))
+					m_SelectedNodeTranslation.x = snode.Translation.x;
+				if (Wui::DragFloat(ctx, Wui::HashId("model.cpose.ty"), { x + labelW + compW + 4.0f, cy, compW, 20.0f }, snode.Translation.y, 0.01f, -100.0f, 100.0f, theme))
+					m_SelectedNodeTranslation.y = snode.Translation.y;
+				if (Wui::DragFloat(ctx, Wui::HashId("model.cpose.tz"), { x + labelW + (compW + 4.0f) * 2.0f, cy, compW, 20.0f }, snode.Translation.z, 0.01f, -100.0f, 100.0f, theme))
+					m_SelectedNodeTranslation.z = snode.Translation.z;
+				cy += 24.0f;
+
+				// Rotation
+				Wui::Label(ctx, { x + 8.0f, cy + 3.0f }, "Rotation (°)", theme.TextMuted, theme.FontSizeCaption);
+				bool rch = false;
+				rch |= Wui::DragFloat(ctx, Wui::HashId("model.cpose.ry"), { x + labelW, cy, compW, 20.0f }, m_SelectedNodeRotationEuler.x, 0.5f, -360.0f, 360.0f, theme);
+				rch |= Wui::DragFloat(ctx, Wui::HashId("model.cpose.rp"), { x + labelW + compW + 4.0f, cy, compW, 20.0f }, m_SelectedNodeRotationEuler.y, 0.5f, -360.0f, 360.0f, theme);
+				rch |= Wui::DragFloat(ctx, Wui::HashId("model.cpose.rr"), { x + labelW + (compW + 4.0f) * 2.0f, cy, compW, 20.0f }, m_SelectedNodeRotationEuler.z, 0.5f, -360.0f, 360.0f, theme);
+				if (rch) snode.Rotation = glm::quat(glm::radians(m_SelectedNodeRotationEuler));
+				cy += 24.0f;
+
+				// Scale
+				Wui::Label(ctx, { x + 8.0f, cy + 3.0f }, "Scale", theme.TextMuted, theme.FontSizeCaption);
+				Wui::DragFloat(ctx, Wui::HashId("model.cpose.sx"), { x + labelW, cy, compW, 20.0f }, snode.Scale.x, 0.01f, 0.001f, 100.0f, theme);
+				Wui::DragFloat(ctx, Wui::HashId("model.cpose.sy"), { x + labelW + compW + 4.0f, cy, compW, 20.0f }, snode.Scale.y, 0.01f, 0.001f, 100.0f, theme);
+				Wui::DragFloat(ctx, Wui::HashId("model.cpose.sz"), { x + labelW + (compW + 4.0f) * 2.0f, cy, compW, 20.0f }, snode.Scale.z, 0.01f, 0.001f, 100.0f, theme);
+				cy += 26.0f;
+
+				// 关键帧操作按钮
+				const float kbtnW = (width - 24.0f) / 3.0f;
+				if (Wui::Button(ctx, Wui::HashId("model.cpose.key_bone"), { x + 8.0f, cy, kbtnW, 22.0f }, "Key Bone (K)", theme))
+				{
+					RecordKeyframeForNode(static_cast<uint32_t>(m_SelectedNode), m_AnimTime);
+				}
+				Wui::Tooltip(ctx, { x + 8.0f, cy, kbtnW, 22.0f }, "Record keyframe for this bone at current timeline frame (K)");
+
+				if (Wui::Button(ctx, Wui::HashId("model.cpose.key_all"), { x + 8.0f + kbtnW + 4.0f, cy, kbtnW, 22.0f }, "Key All (Shift+K)", theme))
+				{
+					RecordKeyframeForAllNodes(m_AnimTime);
+				}
+				Wui::Tooltip(ctx, { x + 8.0f + kbtnW + 4.0f, cy, kbtnW, 22.0f }, "Record keyframe for all skeleton bones at current timeline frame (Shift+K)");
+
+				if (Wui::Button(ctx, Wui::HashId("model.cpose.reset_bind"), { x + 8.0f + (kbtnW + 4.0f) * 2.0f, cy, kbtnW, 22.0f }, "Reset Pose", theme))
+				{
+					if (!m_Data.Skins.empty())
+					{
+						const auto& skin = m_Data.Skins[0];
+						for (size_t j = 0; j < skin.JointNodes.size(); ++j)
+						{
+							if (skin.JointNodes[j] == static_cast<uint32_t>(m_SelectedNode))
+							{
+								if (j < skin.BindTranslations.size()) snode.Translation = skin.BindTranslations[j];
+								if (j < skin.BindRotations.size()) snode.Rotation = skin.BindRotations[j];
+								if (j < skin.BindScales.size()) snode.Scale = skin.BindScales[j];
+								m_SelectedNodeTranslation = snode.Translation;
+								m_SelectedNodeRotationEuler = glm::degrees(glm::eulerAngles(snode.Rotation));
+								m_SelectedNodeScale = snode.Scale;
+								break;
+							}
+						}
+					}
+				}
+			}
+			y += poseCardH + 10.0f;
+
+			// ---- 4. 关键帧通道列表 (Animated Channels) ----
+			Wui::SectionHeader(ctx, { x, y, width, 20.0f },
+				"Animated Channels (" + std::to_string(anim.Channels.size()) + ")", theme.Accent, theme);
+			y += 24.0f;
+
+			for (size_t ci = 0; ci < anim.Channels.size(); ++ci)
+			{
+				const auto& ch = anim.Channels[ci];
+				const std::string bname = (ch.TargetNode < m_Data.Nodes.size())
+					? m_Data.Nodes[ch.TargetNode].Name : ("node_" + std::to_string(ch.TargetNode));
+				const bool isSelectedBone = static_cast<int>(ch.TargetNode) == m_SelectedNode;
+
+				const float chRowH = 24.0f;
+				const Wui::WuiRect chRow { x, y, width, chRowH };
+				Wui::PanelBackground(ctx, chRow, isSelectedBone ? Alpha(theme.Accent, 0.22f) : theme.CardBg, 3.0f);
+
+				Wui::Label(ctx, { x + 8.0f, y + 4.0f }, bname, isSelectedBone ? theme.Accent : theme.TextBright, theme.FontSizeCaption);
+
+				char kcountBuf[64];
+				std::snprintf(kcountBuf, sizeof(kcountBuf), "%zu keys", ch.Keys.size());
+				Wui::Label(ctx, { x + width - 110.0f, y + 4.0f }, kcountBuf, theme.TextMuted, theme.FontSizeCaption);
+
+				if (Wui::Button(ctx, Wui::HashId(("model.ch.select." + std::to_string(ci)).c_str()),
+					{ x + width - 44.0f, y + 2.0f, 38.0f, 20.0f }, "Edit", theme))
+				{
+					m_SelectedNode = static_cast<int>(ch.TargetNode);
+					if (m_SelectedNode < static_cast<int>(m_Data.Nodes.size()))
+					{
+						const auto& snode = m_Data.Nodes[static_cast<size_t>(m_SelectedNode)];
+						m_SelectedNodeTranslation = snode.Translation;
+						m_SelectedNodeRotationEuler = glm::degrees(glm::eulerAngles(snode.Rotation));
+						m_SelectedNodeScale = snode.Scale;
+					}
+				}
+
+				y += chRowH + 4.0f;
+			}
+		}
+
+		// 5. 其他片段切换列表 (多片段模型下展示)
+		if (m_Data.Animations.size() > 1)
+		{
+			y += 10.0f;
+			Wui::SectionHeader(ctx, { x, y, width, 20.0f },
+				"Other Clips (" + std::to_string(m_Data.Animations.size()) + ")", theme.TextMuted, theme);
+			y += 24.0f;
+
+			for (size_t index = 0; index < m_Data.Animations.size(); ++index)
+			{
+				if (static_cast<int>(index) == m_AnimClipIndex) continue;
+				Asset::WModelAnimation& oanim = m_Data.Animations[index];
+
+				const float oCardH = 32.0f;
+				const Wui::WuiRect oCard { x, y, width, oCardH };
+				Wui::PanelBackground(ctx, oCard, theme.CardBg, 3.0f);
+
+				Wui::Label(ctx, { x + 8.0f, y + 8.0f }, oanim.Name, theme.Text, theme.FontSizeCaption);
+
+				char durBuf[64];
+				std::snprintf(durBuf, sizeof(durBuf), "%.2fs", oanim.Duration);
+				Wui::Label(ctx, { x + width - 130.0f, y + 8.0f }, durBuf, theme.TextMuted, theme.FontSizeCaption);
+
+				if (Wui::Button(ctx, Wui::HashId(("model.oclip.switch." + std::to_string(index)).c_str()),
+					{ x + width - 70.0f, y + 5.0f, 60.0f, 22.0f }, "Switch", theme))
+				{
+					m_AnimClipIndex = static_cast<int>(index);
+					m_AnimTime = 0.0f;
+				}
+
+				y += oCardH + 4.0f;
+			}
+		}
+
+		m_TabContentHeight[4] = std::max(500.0f, y - rect.Y + 60.0f);
+		return y - rect.Y;
+	}
+
+	void ModelPreviewPanel::SaveCurrentClipToFile()
+	{
+		if (m_AnimClipIndex < 0 || static_cast<size_t>(m_AnimClipIndex) >= m_Data.Animations.size())
+			return;
+
+		const auto& anim = m_Data.Animations[static_cast<size_t>(m_AnimClipIndex)];
+		Asset::WAnimationClipData clipData;
+		clipData.Name = anim.Name;
+		clipData.Duration = anim.Duration;
+		clipData.SkeletonPath = "engine/models/characters/mannequin.wskeleton";
+
+		Asset::WAnimationClipData existing;
+		if (Asset::WAnimationClipIO::ReadFile(m_LogicalPath, existing))
+		{
+			clipData.SkeletonPath = existing.SkeletonPath;
+			clipData.RootTranslation = existing.RootTranslation;
+			clipData.RootRotation = existing.RootRotation;
+			clipData.Events = existing.Events;
+		}
+
+		clipData.Channels.reserve(anim.Channels.size());
+		for (const auto& ch : anim.Channels)
+		{
+			if (ch.TargetNode >= m_Data.Nodes.size())
+				continue;
+			const std::string boneName = m_Data.Nodes[ch.TargetNode].Name;
+			if (boneName.empty())
+				continue;
+
+			Asset::AnimationChannel* targetCh = nullptr;
+			for (auto& candidate : clipData.Channels)
+			{
+				if (candidate.BoneNameStr == boneName)
+				{
+					targetCh = &candidate;
+					break;
+				}
+			}
+			if (!targetCh)
+			{
+				Asset::AnimationChannel newCh;
+				newCh.BoneName = StringPool::Get().InternName(boneName);
+				newCh.BoneNameStr = boneName;
+				clipData.Channels.push_back(std::move(newCh));
+				targetCh = &clipData.Channels.back();
+			}
+
+			if (ch.Path == Asset::WModelIO::WModelAnimationPath::Translation)
+			{
+				targetCh->PositionKeys.clear();
+				for (const auto& k : ch.Keys)
+					targetCh->PositionKeys.push_back({ k.Time, glm::vec3(k.Value) });
+			}
+			else if (ch.Path == Asset::WModelIO::WModelAnimationPath::Rotation)
+			{
+				targetCh->RotationKeys.clear();
+				for (const auto& k : ch.Keys)
+					targetCh->RotationKeys.push_back({ k.Time, glm::quat(k.Value.w, k.Value.x, k.Value.y, k.Value.z) });
+			}
+			else if (ch.Path == Asset::WModelIO::WModelAnimationPath::Scale)
+			{
+				targetCh->ScaleKeys.clear();
+				for (const auto& k : ch.Keys)
+					targetCh->ScaleKeys.push_back({ k.Time, glm::vec3(k.Value) });
+			}
+		}
+
+		std::string saveErr;
+		if (Asset::WAnimationClipIO::WriteFile(m_LogicalPath, clipData, &saveErr))
+		{
+			m_Status = "Saved animation clip to " + m_LogicalPath;
+			m_StatusIsError = false;
+		}
+		else
+		{
+			m_Status = "Save failed: " + saveErr;
+			m_StatusIsError = true;
+		}
+	}
+
+	void ModelPreviewPanel::ExportActiveClipToWClip(PanelHost& host)
+	{
+		if (m_AnimClipIndex < 0 || static_cast<size_t>(m_AnimClipIndex) >= m_Data.Animations.size())
+			return;
+
+		const auto& anim = m_Data.Animations[static_cast<size_t>(m_AnimClipIndex)];
+		std::string cleanName = anim.Name.empty() ? ("clip_" + std::to_string(m_AnimClipIndex)) : anim.Name;
+		for (char& c : cleanName)
+			if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
+
+		std::filesystem::path dir = "projects/default/assets/animation";
+		if (!std::filesystem::exists(dir))
+			std::filesystem::create_directories(dir);
+		std::filesystem::path target = dir / (cleanName + ".wclip");
+
+		Asset::WSkeletonData skeleton;
+		std::vector<Asset::WAnimationClipData> extractedClips;
+		Asset::WSkeletonIO::ExtractSkeletonAndClips(m_Data, skeleton, extractedClips);
+
+		std::string skelPath = (dir / (std::filesystem::path(m_LogicalPath).stem().string() + ".wskeleton")).generic_string();
+		if (!std::filesystem::exists(skelPath))
+		{
+			std::string skelErr;
+			Asset::WSkeletonIO::WriteFile(skelPath, skeleton, &skelErr);
+			host.RefreshAssetCatalog(skelPath);
+		}
+
+		Asset::WAnimationClipData toWrite;
+		bool found = false;
+		for (const auto& c : extractedClips)
+		{
+			if (c.Name == anim.Name)
+			{
+				toWrite = c;
+				toWrite.SkeletonPath = skelPath;
+				found = true;
 				break;
 			}
-			Wui::Tooltip(ctx, { bx + playBtnW + graphBtnW + 12.0f, y + 6.0f, delBtnW, 22.0f },
-				Wui::Tr("panel.model.clips.delete", "Delete Clip"));
-
-			// 时长、帧数、通道数与总关键帧
-			size_t totalKeys = 0;
-			for (const auto& ch : anim.Channels)
-				totalKeys += ch.Keys.size();
-			const int frames = static_cast<int>(std::round(anim.Duration * 30.0f));
-			char durStr[128];
-			std::snprintf(durStr, sizeof(durStr), "%.2fs  |  %d frames @ 30 FPS  |  %zu channels  |  %zu keys",
-				anim.Duration, frames, anim.Channels.size(), totalKeys);
-			Wui::Label(ctx, { x + 8.0f, y + 36.0f }, durStr, theme.TextMuted, theme.FontSizeCaption);
-
-			y += cardH + 8.0f;
+		}
+		if (!found && !extractedClips.empty())
+		{
+			toWrite = extractedClips[static_cast<size_t>(m_AnimClipIndex % extractedClips.size())];
+			toWrite.SkeletonPath = skelPath;
 		}
 
-		return y - rect.Y;
+		std::string err;
+		if (Asset::WAnimationClipIO::WriteFile(target.generic_string(), toWrite, &err))
+		{
+			m_Status = "Exported clip to " + target.generic_string();
+			m_StatusIsError = false;
+			host.RefreshAssetCatalog(target.generic_string());
+		}
+		else
+		{
+			m_Status = "Export failed: " + err;
+			m_StatusIsError = true;
+		}
+	}
+
+	void ModelPreviewPanel::CreateNewClipAsset(PanelHost& host)
+	{
+		std::string cleanName = m_NewClipNameBuffer.empty() ? "NewClip" : m_NewClipNameBuffer;
+		for (char& c : cleanName)
+			if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
+
+		std::filesystem::path dir = "projects/default/assets/animation";
+		if (!std::filesystem::exists(dir))
+			std::filesystem::create_directories(dir);
+		std::filesystem::path target = dir / (cleanName + ".wclip");
+
+		Asset::WAnimationClipData clip;
+		clip.Name = cleanName;
+		clip.Duration = std::max(0.1f, m_NewClipDurationBuffer);
+		clip.SkeletonPath = "engine/models/characters/mannequin.wskeleton";
+
+		if (m_DataValid && !m_Data.Nodes.empty())
+		{
+			clip.Channels.reserve(m_Data.Nodes.size());
+			for (const auto& node : m_Data.Nodes)
+			{
+				if (node.Name.empty()) continue;
+				Asset::AnimationChannel ch;
+				ch.BoneName = StringPool::Get().InternName(node.Name);
+				ch.BoneNameStr = node.Name;
+				ch.PositionKeys.push_back({ 0.0f, node.Translation });
+				ch.RotationKeys.push_back({ 0.0f, node.Rotation });
+				ch.ScaleKeys.push_back({ 0.0f, node.Scale });
+				clip.Channels.push_back(std::move(ch));
+			}
+		}
+
+		std::string err;
+		if (Asset::WAnimationClipIO::WriteFile(target.generic_string(), clip, &err))
+		{
+			m_Status = "Created animation clip: " + target.generic_string();
+			m_StatusIsError = false;
+			m_NewClipOpen = false;
+			host.RefreshAssetCatalog(target.generic_string());
+			host.OpenModelPreview(target.generic_string());
+		}
+		else
+		{
+			m_Status = "Creation failed: " + err;
+			m_StatusIsError = true;
+		}
 	}
 }

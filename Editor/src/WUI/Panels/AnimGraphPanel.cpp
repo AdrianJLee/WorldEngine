@@ -1118,15 +1118,40 @@ namespace World
 		m_ModelValid = true;
 	}
 
+	std::string AnimGraphPanel::ClipDisplayLabel(const std::string& pathOrName) const
+	{
+		if (pathOrName.empty() || pathOrName == "(no clips)")
+			return pathOrName;
+		if (pathOrName.find(".wclip") != std::string::npos)
+		{
+			std::filesystem::path p(pathOrName);
+			return p.stem().string() + " (.wclip)";
+		}
+		return pathOrName + " (Model)";
+	}
+
 	std::vector<std::string> AnimGraphPanel::ClipOptionsForCombo(const std::string& current) const
 	{
 		std::vector<std::string> options;
+
+		// 1. 全局 .wclip 资产
+		const auto& clipAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::AnimationClip);
+		for (const auto& path : clipAssets)
+		{
+			if (std::find(options.begin(), options.end(), path) == options.end())
+				options.push_back(path);
+		}
+
+		// 2. 当前模型内嵌片段
 		if (m_ModelValid)
 		{
-			options.reserve(m_Model.Animations.size() + 1);
 			for (const Asset::WModelAnimation& animation : m_Model.Animations)
-				options.push_back(animation.Name);
+			{
+				if (std::find(options.begin(), options.end(), animation.Name) == options.end())
+					options.push_back(animation.Name);
+			}
 		}
+
 		if (!current.empty() && std::find(options.begin(), options.end(), current) == options.end())
 			options.insert(options.begin(), current);
 		if (options.empty())
@@ -2317,73 +2342,71 @@ namespace World
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, AGTr("state.clip", "Clip"), theme.TextMuted, theme.FontSizeSmall);
 		if (state->Kind == AnimStateKind::SingleClip)
 		{
-			if (m_ClipEditBufferKey != stateName)
-			{
-				m_ClipEditBufferKey = stateName;
-				m_ClipEditBuffer = state->ClipName;
-			}
+			const std::vector<std::string> clips = ClipOptionsForCombo(state->ClipName);
+			std::vector<std::string> clipLabels;
+			clipLabels.reserve(clips.size());
+			for (const auto& c : clips)
+				clipLabels.push_back(ClipDisplayLabel(c));
 
-			if (m_ModelValid && !m_Model.Animations.empty())
-			{
-				const float comboW = std::max(60.0f, (controlW - 4.0f) * 0.5f);
-				const float textW = std::max(60.0f, controlW - comboW - 4.0f);
-				const Wui::WuiRect comboRect { controlX, y, comboW, kRowH };
-				const Wui::WuiRect textRect { controlX + comboW + 4.0f, y, textW, kRowH };
+			int clipIndex = 0;
+			const auto found = std::find(clips.begin(), clips.end(), state->ClipName);
+			if (found != clips.end())
+				clipIndex = static_cast<int>(std::distance(clips.begin(), found));
 
-				const std::vector<std::string> clips = ClipOptionsForCombo(state->ClipName);
-				int clipIndex = 0;
-				const auto found = std::find(clips.begin(), clips.end(), state->ClipName);
-				if (found != clips.end())
-					clipIndex = static_cast<int>(std::distance(clips.begin(), found));
-				if (Wui::Combo(ctx, Wui::HashId("animgraph.state.clip.combo"), comboRect, "",
-					clips, clipIndex, theme,
-					state->ClipName.empty() ? AGTr("state.pick_clip", "(pick a clip)") : state->ClipName))
+			const float browseBtnW = 28.0f;
+			const float comboW = std::max(60.0f, controlW - browseBtnW - 4.0f);
+			const Wui::WuiRect comboRect { controlX, y, comboW, kRowH };
+			const Wui::WuiRect browseRect { controlX + comboW + 4.0f, y, browseBtnW, kRowH };
+
+			const std::string currentLabel = state->ClipName.empty() ? AGTr("state.pick_clip", "(pick a clip)") : ClipDisplayLabel(state->ClipName);
+			if (Wui::Combo(ctx, Wui::HashId("animgraph.state.clip.combo"), comboRect, "",
+				clipLabels, clipIndex, theme, currentLabel))
+			{
+				if (clipIndex >= 0 && static_cast<size_t>(clipIndex) < clips.size())
 				{
-					if (clipIndex >= 0 && static_cast<size_t>(clipIndex) < clips.size())
+					AnimState updated = *state;
+					updated.ClipName = clips[static_cast<size_t>(clipIndex)];
+					ReplaceState(stateName, updated);
+				}
+			}
+			Wui::Tooltip(ctx, comboRect, AGTr("state.clip_tooltip", "Select an animation clip asset (.wclip) or embedded model clip."));
+
+			if (Wui::ActionButton(ctx, Wui::HashId("animgraph.state.clip.browse"), browseRect, "...", theme, true,
+				AGTr("state.clip_browse_tip", "Browse animation clip asset in project..."), false))
+			{
+				host.OpenAssetPicker("选择动画片段资产 (Animation Clip)", AssetCategory::Unknown,
+					[this, stateName](const std::string& picked)
 					{
-						AnimState updated = *state;
-						updated.ClipName = clips[static_cast<size_t>(clipIndex)];
-						m_ClipEditBuffer = updated.ClipName;
-						ReplaceState(stateName, updated);
-					}
-				}
-				Wui::Tooltip(ctx, comboRect,
-					AGFmt("state.clip_tooltip", "Clip from target model ({count} clips available).",
-					{ { "count", std::to_string(m_Model.Animations.size()) } }));
-
-				const Wui::WuiId clipTextId = Wui::HashId("animgraph.state.clip.text");
-				Wui::TextFieldA11y clipA11y;
-				clipA11y.Label = "Clip Name";
-				clipA11y.Placeholder = "Clip Name";
-				const bool textSubmitted = Wui::TextField(ctx, clipTextId, textRect, m_ClipEditBuffer, theme, nullptr, &clipA11y);
-				if (ctx.Focus() == clipTextId)
-					ctx.SetTextInputActive(true);
-
-				if (textSubmitted || (ctx.Focus() != clipTextId && m_ClipEditBuffer != state->ClipName))
-				{
-					AnimState updated = *state;
-					updated.ClipName = m_ClipEditBuffer;
-					ReplaceState(stateName, updated);
-				}
-				Wui::Tooltip(ctx, textRect, AGTr("state.clip_custom_tip", "Directly edit clip name."));
+						const AnimState* cur = m_Graph.FindState(stateName);
+						if (cur)
+						{
+							AnimState updated = *cur;
+							updated.ClipName = picked;
+							ReplaceState(stateName, updated);
+						}
+					});
 			}
-			else
-			{
-				const Wui::WuiId clipTextId = Wui::HashId("animgraph.state.clip.text");
-				Wui::TextFieldA11y clipA11y;
-				clipA11y.Label = "Clip Name";
-				clipA11y.Placeholder = "Clip Name (e.g. Idle, Walk, Run)";
-				const bool textSubmitted = Wui::TextField(ctx, clipTextId, { controlX, y, controlW, kRowH }, m_ClipEditBuffer, theme, nullptr, &clipA11y);
-				if (ctx.Focus() == clipTextId)
-					ctx.SetTextInputActive(true);
 
-				if (textSubmitted || (ctx.Focus() != clipTextId && m_ClipEditBuffer != state->ClipName))
+			y += kRowH + 2.0f;
+			if (!state->ClipName.empty())
+			{
+				std::string metaLine;
+				if (state->ClipName.find(".wclip") != std::string::npos)
 				{
-					AnimState updated = *state;
-					updated.ClipName = m_ClipEditBuffer;
-					ReplaceState(stateName, updated);
+					metaLine = "动画片段资产 · " + state->ClipName;
 				}
-				Wui::Tooltip(ctx, { controlX, y, controlW, kRowH }, AGTr("state.clip_custom_tip", "Directly edit clip name without requiring a bound model."));
+				else
+				{
+					const ModelClipInfo selectedClip = FindModelClip(m_Model, state->ClipName);
+					metaLine = selectedClip.Clip != nullptr
+						? AGFmt("state.clip.selected_meta", "模型内嵌片段 · {frames} 帧 / {seconds}s",
+							{ { "frames", std::to_string(selectedClip.Frames) }, { "seconds", FormatFloat(selectedClip.Duration, 2) } })
+						: ("片段：" + state->ClipName);
+				}
+				Wui::Label(ctx, { controlX, y }, Wui::EllipsizeMiddleToWidth(ctx, metaLine, controlW, theme.FontSizeCaption),
+					theme.TextMuted, theme.FontSizeCaption);
+				Wui::Tooltip(ctx, { controlX, y, controlW, 14.0f }, metaLine);
+				y += 14.0f;
 			}
 		}
 		else
@@ -2969,35 +2992,28 @@ namespace World
 		const float controlW = std::max(40.0f, area.W - theme.Pad * 2.0f - labelW);
 		float y = area.Y + kRowH + 6.0f;
 
-		// ---- Clip：名字 + 模型片段元数据 + 缺失提示 ----
+		// ---- Clip：名字 + 模型片段元数据 + 资产浏览 ----
 		Wui::Label(ctx, { area.X + theme.Pad, y + 4.0f }, AGTr("layer.clip", "Clip"), theme.TextMuted, theme.FontSizeSmall);
 		{
 			const std::vector<std::string> clips = ClipOptionsForCombo(layer->ClipName);
 			std::vector<std::string> clipLabels;
 			clipLabels.reserve(clips.size());
 			for (const std::string& name : clips)
-			{
-				const ModelClipInfo info = FindModelClip(m_Model, name);
-				if (info.Clip != nullptr)
-				{
-					clipLabels.push_back(name + "    ·  " + AGFmt("layer.clip.meta", "模型片段 · {frames} 帧 / {seconds}s",
-						{ { "frames", std::to_string(info.Frames) }, { "seconds", FormatFloat(info.Duration, 2) } }));
-				}
-				else
-				{
-					clipLabels.push_back(name);
-				}
-			}
+				clipLabels.push_back(ClipDisplayLabel(name));
+
 			int clipIndex = 0;
 			const auto found = std::find(clips.begin(), clips.end(), layer->ClipName);
 			if (found != clips.end())
 				clipIndex = static_cast<int>(std::distance(clips.begin(), found));
-			const bool clipMissing = m_ModelValid && !layer->ClipName.empty()
-				&& FindModelClip(m_Model, layer->ClipName).Clip == nullptr;
-			const float warningW = clipMissing ? 150.0f : 0.0f;
-			const float comboW = std::max(90.0f, controlW - warningW - (clipMissing ? theme.PadSmall : 0.0f));
-			if (Wui::Combo(ctx, Wui::HashId("animgraph.layer.clip"), { controlX, y, comboW, kRowH }, "",
-				clipLabels, clipIndex, theme, layer->ClipName))
+
+			const float browseBtnW = 28.0f;
+			const float comboW = std::max(90.0f, controlW - browseBtnW - 4.0f);
+			const Wui::WuiRect comboRect { controlX, y, comboW, kRowH };
+			const Wui::WuiRect browseRect { controlX + comboW + 4.0f, y, browseBtnW, kRowH };
+
+			const std::string currentLabel = layer->ClipName.empty() ? AGTr("layer.clip.pick", "(pick a clip)") : ClipDisplayLabel(layer->ClipName);
+			if (Wui::Combo(ctx, Wui::HashId("animgraph.layer.clip"), comboRect, "",
+				clipLabels, clipIndex, theme, currentLabel))
 			{
 				PushUndo();
 				std::vector<AnimLayer> updated = m_Graph.GetLayers();
@@ -3007,15 +3023,23 @@ namespace World
 				m_Graph.SetLayers(std::move(updated));
 				MarkDirty();
 			}
-			Wui::Tooltip(ctx, { controlX, y, comboW, kRowH }, AGTr("layer.clip.tooltip", "Clip sampled by this layer."));
-			if (clipMissing)
+			Wui::Tooltip(ctx, comboRect, AGTr("layer.clip.tooltip", "Clip sampled by this layer."));
+
+			if (Wui::ActionButton(ctx, Wui::HashId("animgraph.layer.clip.browse"), browseRect, "...", theme, true,
+				AGTr("layer.clip.browse_tooltip", "Browse animation clip asset in project..."), false))
 			{
-				const Wui::WuiRect warning { controlX + comboW + theme.PadSmall, y, warningW, kRowH };
-				Wui::Label(ctx, { warning.X, warning.Y + 4.0f },
-					Wui::EllipsizeMiddleToWidth(ctx, AGTr("layer.clip.missing", "（模型中没有此片段）"), warning.W,
-						theme.FontSizeCaption), theme.Danger, theme.FontSizeCaption);
-				Wui::Tooltip(ctx, warning, AGTr("layer.clip.missing.tooltip",
-					"该片段在当前模型中不存在，运行时会静默不播放。"));
+				const std::string layerName = m_SelectedLayer;
+				host.OpenAssetPicker("选择分层动画片段资产 (Animation Clip)", AssetCategory::Unknown,
+					[this, layerName](const std::string& picked)
+					{
+						PushUndo();
+						std::vector<AnimLayer> updated = m_Graph.GetLayers();
+						for (AnimLayer& candidate : updated)
+							if (candidate.Name == layerName)
+								candidate.ClipName = picked;
+						m_Graph.SetLayers(std::move(updated));
+						MarkDirty();
+					});
 			}
 		}
 		y += kRowH + 2.0f;
