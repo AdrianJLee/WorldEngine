@@ -83,6 +83,7 @@ const TypeSchema& WeSchemaOf_WaterBodyComponent();
 const TypeSchema& WeSchemaOf_WeatherSystemComponent();
 const TypeSchema& WeSchemaOf_BiomePCGComponent();
 const TypeSchema& WeSchemaOf_EQSComponent();
+const TypeSchema& WeSchemaOf_BehaviorTreeComponent();
 const TypeSchema& WeSchemaOf_FoliageInteractionComponent();
 const TypeSchema& WeSchemaOf_LocalWindComponent();
 const TypeSchema& WeSchemaOf_UUID();
@@ -95,6 +96,7 @@ const EnumSchema& WeEnumSchemaOf_MotionType();
 const EnumSchema& WeEnumSchemaOf_ColliderMode();
 const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode();
 const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState();
+const EnumSchema& WeEnumSchemaOf_BehaviorStatus();
 const EnumSchema& WeEnumSchemaOf_ParticleEmitterType();
 const EnumSchema& WeEnumSchemaOf_ParticleRenderMode();
 const EnumSchema& WeEnumSchemaOf_ParticleBlendMode();
@@ -16024,6 +16026,328 @@ struct GeneratedAccess<World::EQSComponent>
 };
 
 template <>
+struct GeneratedAccess<World::BehaviorTreeComponent>
+{
+    static Value Get_BlackboardTargetPos(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(self->BlackboardTargetPos);
+    }
+    static void Set_BlackboardTargetPos(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->BlackboardTargetPos = std::get<glm::vec3>(value);
+    }
+    static Value Get_ExecutionTimer(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(self->ExecutionTimer);
+    }
+    static void Set_ExecutionTimer(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->ExecutionTimer = std::get<float>(value);
+    }
+    static Value Get_BlackboardValue(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(self->BlackboardValue);
+    }
+    static void Set_BlackboardValue(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->BlackboardValue = std::get<float>(value);
+    }
+    static Value Get_TreeAssetId(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(self->TreeAssetId);
+    }
+    static void Set_TreeAssetId(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->TreeAssetId = std::get<uint32_t>(value);
+    }
+    static Value Get_TargetEntity(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(self->TargetEntity);
+    }
+    static void Set_TargetEntity(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->TargetEntity = std::get<uint32_t>(value);
+    }
+    static Value Get_BlackboardTag(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(self->BlackboardTag);
+    }
+    static void Set_BlackboardTag(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->BlackboardTag = std::get<uint32_t>(value);
+    }
+    static Value Get_CurrentNodeIndex(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(self->CurrentNodeIndex);
+    }
+    static void Set_CurrentNodeIndex(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->CurrentNodeIndex = std::get<uint32_t>(value);
+    }
+    static Value Get_Status(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->Status));
+    }
+    static void Set_Status(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->Status = static_cast<World::BehaviorStatus>(std::get<uint64_t>(value));
+    }
+    static const EnumSchema* GetEnum_Status()
+    {
+        return &WeEnumSchemaOf_BehaviorStatus();
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->Enabled = std::get<uint8_t>(value);
+    }
+    static Value Get_StateMachineState(const void* instance)
+    {
+        const World::BehaviorTreeComponent* self = static_cast<const World::BehaviorTreeComponent*>(instance);
+        return Value(self->StateMachineState);
+    }
+    static void Set_StateMachineState(void* instance, const Value& value)
+    {
+        World::BehaviorTreeComponent* self = static_cast<World::BehaviorTreeComponent*>(instance);
+        self->StateMachineState = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_BlackboardTargetPos()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC7338D5A7DB6E684ull },
+            "BlackboardTargetPos",
+            Kind::Vec3,
+            &Get_BlackboardTargetPos,
+            &Set_BlackboardTargetPos,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target world position in blackboard navigation context.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ExecutionTimer()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFD516E553A941BA9ull },
+            "ExecutionTimer",
+            Kind::Float,
+            &Get_ExecutionTimer,
+            &Set_ExecutionTimer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(3600.000000f), false, false, "Elapsed execution or delay timer in seconds for current active node.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_BlackboardValue()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9C128043CBD40758ull },
+            "BlackboardValue",
+            Kind::Float,
+            &Get_BlackboardValue,
+            &Set_BlackboardValue,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Generic numerical blackboard value.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_TreeAssetId()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5517086347DBAA4Full },
+            "TreeAssetId",
+            Kind::UInt32,
+            &Get_TreeAssetId,
+            &Set_TreeAssetId,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Stable identifier of assigned behavior tree asset.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_TargetEntity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6E202EACCBA5BB84ull },
+            "TargetEntity",
+            Kind::UInt32,
+            &Get_TargetEntity,
+            &Set_TargetEntity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Target entity handle in blackboard context.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_BlackboardTag()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x95A3A07A5E7B9469ull },
+            "BlackboardTag",
+            Kind::UInt32,
+            &Get_BlackboardTag,
+            &Set_BlackboardTag,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Context tag for semantic filtering or smart object activity.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CurrentNodeIndex()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3BE83463FBA76B81ull },
+            "CurrentNodeIndex",
+            Kind::UInt32,
+            &Get_CurrentNodeIndex,
+            &Set_CurrentNodeIndex,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Active running child node index in behavior sequence/selector.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Status()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC9B7A67CEFAEC3C4ull },
+            "Status",
+            Kind::Enum,
+            &Get_Status,
+            &Set_Status,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_Status,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current execution status of the behavior controller.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3EE8104B8A4F80D7ull },
+            "Enabled",
+            Kind::UInt8,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this behavior controller is actively ticking.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_StateMachineState()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7D34A930FADD1421ull },
+            "StateMachineState",
+            Kind::UInt8,
+            &Get_StateMachineState,
+            &Set_StateMachineState,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Finite State Machine active state index for hybrid FSM-BT behavior.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::BehaviorTreeComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::BehaviorTreeComponent" },
+            "BehaviorTreeComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::BehaviorTreeComponent),
+            TypeCategory::Component,
+            {
+                Field_BlackboardTargetPos(),
+                Field_ExecutionTimer(),
+                Field_BlackboardValue(),
+                Field_TreeAssetId(),
+                Field_TargetEntity(),
+                Field_BlackboardTag(),
+                Field_CurrentNodeIndex(),
+                Field_Status(),
+                Field_Enabled(),
+                Field_StateMachineState(),
+            },
+            &StorageBindingOf(),
+            "AI",
+            "AI Behavior Tree and State Machine controller: active node, execution timer, and compact blackboard data.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::FoliageInteractionComponent>
 {
     static Value Get_PushRadius(const void* instance)
@@ -16866,6 +17190,26 @@ struct GeneratedEnum<World::SmartObjectSlotState>
 };
 
 template <>
+struct GeneratedEnum<World::BehaviorStatus>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "BehaviorStatus",
+            false,
+            1,
+            {
+                { "Inactive", static_cast<int64_t>(World::BehaviorStatus::Inactive) },
+                { "Running", static_cast<int64_t>(World::BehaviorStatus::Running) },
+                { "Success", static_cast<int64_t>(World::BehaviorStatus::Success) },
+                { "Failure", static_cast<int64_t>(World::BehaviorStatus::Failure) },
+            },
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedEnum<World::ParticleEmitterType>
 {
     static const EnumSchema& WeEnumSchema()
@@ -17059,6 +17403,7 @@ const TypeSchema& WeSchemaOf_WaterBodyComponent() { return GeneratedAccess<World
 const TypeSchema& WeSchemaOf_WeatherSystemComponent() { return GeneratedAccess<World::WeatherSystemComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BiomePCGComponent() { return GeneratedAccess<World::BiomePCGComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_EQSComponent() { return GeneratedAccess<World::EQSComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_BehaviorTreeComponent() { return GeneratedAccess<World::BehaviorTreeComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_FoliageInteractionComponent() { return GeneratedAccess<World::FoliageInteractionComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_LocalWindComponent() { return GeneratedAccess<World::LocalWindComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
@@ -17071,6 +17416,7 @@ const EnumSchema& WeEnumSchemaOf_MotionType() { return GeneratedEnum<World::Rigi
 const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_PhysMatCombineMode() { return GeneratedEnum<World::PhysMatCombineMode>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_SmartObjectSlotState() { return GeneratedEnum<World::SmartObjectSlotState>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_BehaviorStatus() { return GeneratedEnum<World::BehaviorStatus>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ParticleEmitterType() { return GeneratedEnum<World::ParticleEmitterType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ParticleRenderMode() { return GeneratedEnum<World::ParticleRenderMode>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ParticleBlendMode() { return GeneratedEnum<World::ParticleBlendMode>::WeEnumSchema(); }
@@ -17089,6 +17435,7 @@ const EnumSchema& WeEnumSchemaOf_RootMotionMode() { return GeneratedEnum<World::
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ColliderMode()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_PhysMatCombineMode()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_SmartObjectSlotState()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_BehaviorStatus()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleEmitterType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleRenderMode()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleBlendMode()) != SchemaRegistry::Status::Ok) ok = false;
@@ -17171,6 +17518,7 @@ const EnumSchema& WeEnumSchemaOf_RootMotionMode() { return GeneratedEnum<World::
 			WeSchemaOf_WeatherSystemComponent(),
 			WeSchemaOf_BiomePCGComponent(),
 			WeSchemaOf_EQSComponent(),
+			WeSchemaOf_BehaviorTreeComponent(),
 			WeSchemaOf_FoliageInteractionComponent(),
 			WeSchemaOf_LocalWindComponent(),
 			WeSchemaOf_UUID(),

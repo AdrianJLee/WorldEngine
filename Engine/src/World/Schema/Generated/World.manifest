@@ -73,6 +73,7 @@ struct World::WaterBodyComponent
 struct World::WeatherSystemComponent
 struct World::BiomePCGComponent
 struct World::EQSComponent
+struct World::BehaviorTreeComponent
 struct World::FoliageInteractionComponent
 struct World::LocalWindComponent
 struct World::UUID
@@ -85,6 +86,7 @@ enum World::RigidBody3DComponent::MotionType
 enum World::MeshCollider3DComponent::ColliderMode
 enum World::PhysMatCombineMode
 enum World::SmartObjectSlotState
+enum World::BehaviorStatus
 enum World::ParticleEmitterType
 enum World::ParticleRenderMode
 enum World::ParticleBlendMode

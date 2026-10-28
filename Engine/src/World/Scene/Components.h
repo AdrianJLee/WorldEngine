@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "World/Core/StringPool.h"
 #include "World/Physics/Physics2DUtils.h"
@@ -2996,6 +2996,75 @@ namespace World
 	static_assert(offsetof(EQSComponent, QueryRadius) == 12, "QueryRadius offset mismatch");
 	static_assert(offsetof(EQSComponent, GridSpacing) == 16, "GridSpacing offset mismatch");
 	static_assert(offsetof(EQSComponent, BestCoverFound) == 20, "BestCoverFound offset mismatch");
+
+	enum class BehaviorStatus : uint8_t
+	{
+		Inactive = 0,
+		Running = 1,
+		Success = 2,
+		Failure = 3
+	};
+	WE_ENUM_SCHEMA(World, BehaviorStatus, UInt8)
+		WE_ENUM_VALUE(Inactive);
+		WE_ENUM_VALUE(Running);
+		WE_ENUM_VALUE(Success);
+		WE_ENUM_VALUE(Failure);
+	WE_ENUM_END
+
+	struct BehaviorTreeComponent
+	{
+		glm::vec3 BlackboardTargetPos { 0.0f };           // 12B (offset 0)
+		float ExecutionTimer { 0.0f };                    // 4B  (offset 12)
+		float BlackboardValue { 0.0f };                   // 4B  (offset 16)
+		uint32_t TreeAssetId { 0 };                       // 4B  (offset 20)
+		uint32_t TargetEntity { 0 };                      // 4B  (offset 24)
+		uint32_t BlackboardTag { 0 };                     // 4B  (offset 28)
+		uint32_t CurrentNodeIndex { 0 };                  // 4B  (offset 32)
+		BehaviorStatus Status { BehaviorStatus::Inactive }; // 1B (offset 36)
+		uint8_t Enabled { 1 };                            // 1B  (offset 37)
+		uint8_t StateMachineState { 0 };                  // 1B  (offset 38)
+		uint8_t _Padding { 0 };                           // 1B  (offset 39)
+		uint8_t _Reserved[24] { 0 };                      // 24B (offset 40..63)
+
+		BehaviorTreeComponent() = default;
+
+		WE_SCHEMA_BODY(World, BehaviorTreeComponent, Component)
+			WE_SCHEMA_META(Category("AI"),
+				Doc("AI Behavior Tree and State Machine controller: active node, execution timer, and compact blackboard data."))
+			WE_FIELD(BlackboardTargetPos, Vec3,
+				Doc("Target world position in blackboard navigation context."));
+			WE_FIELD(ExecutionTimer, Float, Range(0.0f, 3600.0f),
+				Doc("Elapsed execution or delay timer in seconds for current active node."));
+			WE_FIELD(BlackboardValue, Float,
+				Doc("Generic numerical blackboard value."));
+			WE_FIELD(TreeAssetId, UInt32,
+				Doc("Stable identifier of assigned behavior tree asset."));
+			WE_FIELD(TargetEntity, UInt32,
+				Doc("Target entity handle in blackboard context."));
+			WE_FIELD(BlackboardTag, UInt32,
+				Doc("Context tag for semantic filtering or smart object activity."));
+			WE_FIELD(CurrentNodeIndex, UInt32,
+				Doc("Active running child node index in behavior sequence/selector."));
+			WE_FIELD(Status, Enum, Of(BehaviorStatus),
+				Doc("Current execution status of the behavior controller."));
+			WE_FIELD(Enabled, UInt8, Default(1),
+				Doc("Whether this behavior controller is actively ticking."));
+			WE_FIELD(StateMachineState, UInt8, Default(0),
+				Doc("Finite State Machine active state index for hybrid FSM-BT behavior."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(BehaviorTreeComponent) == 64, "BehaviorTreeComponent must be exactly 64 bytes");
+	static_assert(std::is_trivially_copyable_v<BehaviorTreeComponent>, "BehaviorTreeComponent must be trivially copyable");
+	static_assert(offsetof(BehaviorTreeComponent, BlackboardTargetPos) == 0, "BlackboardTargetPos offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, ExecutionTimer) == 12, "ExecutionTimer offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, BlackboardValue) == 16, "BlackboardValue offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, TreeAssetId) == 20, "TreeAssetId offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, TargetEntity) == 24, "TargetEntity offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, BlackboardTag) == 28, "BlackboardTag offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, CurrentNodeIndex) == 32, "CurrentNodeIndex offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, Status) == 36, "Status offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, Enabled) == 37, "Enabled offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, StateMachineState) == 38, "StateMachineState offset mismatch");
 
 	struct FoliageInteractionComponent
 	{

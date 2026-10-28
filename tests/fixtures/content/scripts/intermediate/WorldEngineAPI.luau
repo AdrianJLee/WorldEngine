@@ -1039,6 +1039,19 @@ function ui:isOpen() end
 ---@field PlayOnAwake boolean
 ---@field Looping boolean
 
+-- Component fields are exposed through Entity:GetComponent("BehaviorTreeComponent"); there is no runtime global named BehaviorTreeComponent.
+---@class BehaviorTreeComponent
+---@field CurrentNodeIndex number
+---@field Enabled number
+---@field TreeAssetId number
+---@field TargetEntity number
+---@field StateMachineState number
+---@field BlackboardTag number
+---@field BlackboardValue number
+---@field BlackboardTargetPos vec3
+---@field Status number
+---@field ExecutionTimer number
+
 -- Component fields are exposed through Entity:GetComponent("BiomePCGComponent"); there is no runtime global named BiomePCGComponent.
 ---@class BiomePCGComponent
 ---@field MinElevation number
@@ -1717,6 +1730,8 @@ function ui:isOpen() end
 ---@field AudioListener string Short alias for "AudioListenerComponent".
 ---@field AudioSourceComponent string Registered component type name "AudioSourceComponent".
 ---@field AudioSource string Short alias for "AudioSourceComponent".
+---@field BehaviorTreeComponent string Registered component type name "BehaviorTreeComponent".
+---@field BehaviorTree string Short alias for "BehaviorTreeComponent".
 ---@field BiomePCGComponent string Registered component type name "BiomePCGComponent".
 ---@field BiomePCG string Short alias for "BiomePCGComponent".
 ---@field BoxCollider2DComponent string Registered component type name "BoxCollider2DComponent".

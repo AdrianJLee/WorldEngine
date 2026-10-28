@@ -92,6 +92,11 @@ namespace World
 
 	static_assert(std::is_trivially_copyable_v<SmartObjectComponent>,
 		"SmartObjectComponent must stay trivially copyable");
+	static_assert(std::is_trivially_copyable_v<BehaviorTreeComponent>,
+		"BehaviorTreeComponent must stay trivially copyable");
+	static_assert(sizeof(BehaviorTreeComponent) <= 64,
+		"BehaviorTreeComponent must stay within one cache line");
+
 	static_assert(sizeof(SmartObjectComponent) <= 64,
 		"SmartObjectComponent must stay within one cache line");
 
