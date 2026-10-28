@@ -358,14 +358,94 @@ static void TestMeshLODGenerator()
 	std::cout << "[PASS] TestMeshLODGenerator\n";
 }
 
+static Asset::WModelData BuildPrimitiveModelData(const std::vector<WModelVertex>& verts,
+                                                 const std::vector<uint32_t>& indices,
+                                                 const std::string& name)
+{
+	Asset::WModelData data;
+	data.Meta.Valid = true;
+	data.Meta.SourceFingerprint = 0x12345678ABCDULL;
+	data.Meta.ImporterVersion = 1;
+	data.Meta.Scale = 1.0f;
+	data.Vertices = verts;
+	data.Indices = indices;
+
+	glm::vec3 bMin(1e9f), bMax(-1e9f);
+	for (const auto& v : verts)
+	{
+		bMin = glm::min(bMin, v.Position);
+		bMax = glm::max(bMax, v.Position);
+	}
+	data.Bounds.Min = bMin;
+	data.Bounds.Max = bMax;
+
+	Asset::WModelSubmesh sub;
+	sub.IndexOffset = 0;
+	sub.IndexCount = static_cast<uint32_t>(indices.size());
+	sub.MaterialSlot = -1;
+	sub.Bounds.Min = bMin;
+	sub.Bounds.Max = bMax;
+	data.Submeshes.push_back(sub);
+
+	Asset::WModelMeshRange mr;
+	mr.FirstSubmesh = 0;
+	mr.SubmeshCount = 1;
+	data.Meshes.push_back(mr);
+
+	Asset::WModelNode node;
+	node.Parent = -1;
+	node.MeshIndex = 0;
+	node.Name = name;
+	data.Nodes.push_back(node);
+
+	return data;
+}
+
+static void CreatePlaneMesh(std::vector<WModelVertex>& outVerts, std::vector<uint32_t>& outIndices)
+{
+	outVerts = {
+		{ { -1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+		{ {  1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 0.0f } },
+		{ {  1.0f, 0.0f,  1.0f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f } },
+		{ { -1.0f, 0.0f,  1.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 1.0f } },
+	};
+	outIndices = { 0, 1, 2, 0, 2, 3 };
+}
+
 static void TestGenerateEngineShowcaseLODs()
 {
+	std::filesystem::create_directories("Engine/content/models/primitives");
+
+	// 1. 生成并持久化标准基础图元资产 (Cube, Sphere, Plane)
+	{
+		std::vector<WModelVertex> cubeVerts;
+		std::vector<uint32_t> cubeIdx;
+		CreateCubeMesh(cubeVerts, cubeIdx);
+		auto cubeModel = BuildPrimitiveModelData(cubeVerts, cubeIdx, "Cube");
+		std::string err;
+		Asset::WModelIO::WriteFile("Engine/content/models/primitives/cube.wmodel", cubeModel, &err);
+
+		std::vector<WModelVertex> sphereVerts;
+		std::vector<uint32_t> sphereIdx;
+		CreateSphereMesh(24, 24, sphereVerts, sphereIdx);
+		auto sphereModel = BuildPrimitiveModelData(sphereVerts, sphereIdx, "Sphere");
+		Asset::WModelIO::WriteFile("Engine/content/models/primitives/sphere.wmodel", sphereModel, &err);
+
+		std::vector<WModelVertex> planeVerts;
+		std::vector<uint32_t> planeIdx;
+		CreatePlaneMesh(planeVerts, planeIdx);
+		auto planeModel = BuildPrimitiveModelData(planeVerts, planeIdx, "Plane");
+		Asset::WModelIO::WriteFile("Engine/content/models/primitives/plane.wmodel", planeModel, &err);
+	}
+
 	std::vector<LODLevelConfig> configs = {
 		{ 1, 0.5f, 25.0f },
 		{ 2, 0.25f, 60.0f }
 	};
 
 	const std::vector<std::string> modelPaths = {
+		"Engine/content/models/primitives/sphere.wmodel",
+		"Engine/content/models/primitives/cube.wmodel",
 		"Engine/content/models/foliage/scatter_pebble.wmodel",
 		"Engine/content/models/foliage/bush_cluster.wmodel",
 		"Engine/content/models/debris_shard.wmodel",
@@ -408,6 +488,7 @@ int main()
 	std::cout << "All MeshSimplifier tests passed successfully!\n";
 	return 0;
 }
+
 
 
 
