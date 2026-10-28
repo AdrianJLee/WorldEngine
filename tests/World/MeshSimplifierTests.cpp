@@ -358,6 +358,39 @@ static void TestMeshLODGenerator()
 	std::cout << "[PASS] TestMeshLODGenerator\n";
 }
 
+static void TestGenerateEngineShowcaseLODs()
+{
+	std::vector<LODLevelConfig> configs = {
+		{ 1, 0.5f, 25.0f },
+		{ 2, 0.25f, 60.0f }
+	};
+
+	const std::vector<std::string> modelPaths = {
+		"Engine/content/models/foliage/scatter_pebble.wmodel",
+		"Engine/content/models/foliage/bush_cluster.wmodel",
+		"Engine/content/models/debris_shard.wmodel",
+		"templates/project-example/assets/models/tests/D5Fixture.wmodel"
+	};
+
+	for (const auto& path : modelPaths)
+	{
+		if (std::filesystem::exists(path))
+		{
+			std::vector<GeneratedLODAsset> generated;
+			std::string err;
+			bool ok = MeshLODGenerator::GenerateAndSaveLODFiles(path, configs, generated, &err);
+			if (ok)
+			{
+				std::cout << "[LOD-GEN] Successfully generated LODs for " << path << " (" << generated.size() << " levels)\n";
+			}
+			else
+			{
+				std::cerr << "[LOD-GEN] Warning: Failed to generate LODs for " << path << ": " << err << "\n";
+			}
+		}
+	}
+}
+
 int main()
 {
 #ifdef _WIN32
@@ -371,8 +404,10 @@ int main()
 	TestSphereSimplification();
 	TestDegenerateAndEdgeCases();
 	TestMeshLODGenerator();
+	TestGenerateEngineShowcaseLODs();
 	std::cout << "All MeshSimplifier tests passed successfully!\n";
 	return 0;
 }
+
 
 

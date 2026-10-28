@@ -13,6 +13,8 @@
 #include "World/Core/StringPool.h"
 #include "PropertiesPanel_Internal.h"
 #include "NavMeshPanel.h"
+#include <chrono>
+#include <future>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -3353,5 +3355,6 @@ float PropertiesPanel::DrawVfxInspector(Wui::WuiContext& ctx, const Wui::WuiRect
 
 
 }
+
 
 

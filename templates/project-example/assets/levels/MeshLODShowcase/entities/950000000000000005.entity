@@ -4,18 +4,18 @@ Entity:
     ID:
       m_UUID: 950000000000000005
   World::TagComponent:
-    Tag: "LOD Pillar 02 (LOD 1 Mid)"
+    Tag: "LOD Bush Cluster (LOD 1 Mid)"
   World::TransformComponent:
     Location: [0, 1.2, 4]
     Rotation: [0, 0, 0]
-    Scale: [1.8, 1.8, 1.8]
+    Scale: [3.0, 3.0, 3.0]
   World::MeshRendererComponent:
     Primitive: 0
     Color: [0.92, 0.82, 0.22, 1]
-    Mesh: ""
+    Mesh: "engine/models/foliage/bush_cluster.wmodel"
   World::MeshLODComponent:
-    LOD1Mesh: ""
-    LOD2Mesh: ""
+    LOD1Mesh: "engine/models/foliage/bush_cluster_LOD1.wmodel"
+    LOD2Mesh: "engine/models/foliage/bush_cluster_LOD2.wmodel"
     LOD1Distance: 15.0
     LOD2Distance: 35.0
     CullDistance: 65.0

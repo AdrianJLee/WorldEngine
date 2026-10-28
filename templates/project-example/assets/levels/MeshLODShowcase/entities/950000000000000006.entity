@@ -4,18 +4,18 @@ Entity:
     ID:
       m_UUID: 950000000000000006
   World::TagComponent:
-    Tag: "LOD Pillar 03 (LOD 2 Far)"
+    Tag: "LOD Debris Shard (LOD 2 Far)"
   World::TransformComponent:
     Location: [0, 1.2, -18]
     Rotation: [0, 0, 0]
-    Scale: [1.8, 1.8, 1.8]
+    Scale: [3.5, 3.5, 3.5]
   World::MeshRendererComponent:
     Primitive: 0
     Color: [0.95, 0.45, 0.12, 1]
-    Mesh: ""
+    Mesh: "engine/models/debris_shard.wmodel"
   World::MeshLODComponent:
-    LOD1Mesh: ""
-    LOD2Mesh: ""
+    LOD1Mesh: "engine/models/debris_shard_LOD1.wmodel"
+    LOD2Mesh: "engine/models/debris_shard_LOD2.wmodel"
     LOD1Distance: 15.0
     LOD2Distance: 35.0
     CullDistance: 65.0

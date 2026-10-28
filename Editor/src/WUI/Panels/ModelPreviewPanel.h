@@ -11,6 +11,8 @@
 
 #include <glm/glm.hpp>
 
+#include <chrono>
+#include <future>
 #include <string>
 #include <unordered_set>
 #include <vector>
