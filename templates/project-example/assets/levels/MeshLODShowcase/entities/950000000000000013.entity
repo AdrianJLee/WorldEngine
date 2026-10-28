@@ -4,14 +4,23 @@ Entity:
     ID:
       m_UUID: 950000000000000013
   World::TagComponent:
-    Tag: "Octree Gateway Pillar Left"
+    Tag: "Rock Debris Shard (Auto LOD)"
   World::TransformComponent:
-    Location: [-4.5, 2, -2]
-    Rotation: [0, 0, 0]
-    Scale: [1, 4, 1]
+    Location: [4.5, 1.8, -16]
+    Rotation: [0, -30, 0]
+    Scale: [3.5, 3.5, 3.5]
   World::MeshRendererComponent:
     Primitive: 0
-    Color: [0.55, 0.6, 0.7, 1]
-    Mesh: ""
+    Color: [0.92, 0.92, 0.92, 1]
+    Mesh: "engine/models/debris_shard.wmodel"
+  World::MeshLODComponent:
+    LOD1Mesh: ""
+    LOD2Mesh: ""
+    LOD1Distance: 15.0
+    LOD2Distance: 35.0
+    CullDistance: 65.0
+    Hysteresis: 2.0
+    CurrentLOD: 0
+    EnableCrossFade: 1
   World::LevelEntityComponent:
-    DataLayerMask: 4
+    DataLayerMask: 2

@@ -4,23 +4,23 @@ Entity:
     ID:
       m_UUID: 950000000000000005
   World::TagComponent:
-    Tag: "LOD Bush Cluster (LOD 1 Mid)"
+    Tag: "Foliage Pebble (Auto LOD)"
   World::TransformComponent:
-    Location: [0, 1.2, 4]
-    Rotation: [0, 0, 0]
-    Scale: [3.0, 3.0, 3.0]
+    Location: [-4.5, 1.8, 18]
+    Rotation: [0, 25, 0]
+    Scale: [3.8, 3.8, 3.8]
   World::MeshRendererComponent:
     Primitive: 0
-    Color: [0.92, 0.82, 0.22, 1]
-    Mesh: "engine/models/foliage/bush_cluster.wmodel"
+    Color: [0.92, 0.92, 0.92, 1]
+    Mesh: "engine/models/foliage/scatter_pebble.wmodel"
   World::MeshLODComponent:
-    LOD1Mesh: "engine/models/foliage/bush_cluster_LOD1.wmodel"
-    LOD2Mesh: "engine/models/foliage/bush_cluster_LOD2.wmodel"
+    LOD1Mesh: ""
+    LOD2Mesh: ""
     LOD1Distance: 15.0
     LOD2Distance: 35.0
     CullDistance: 65.0
     Hysteresis: 2.0
-    CurrentLOD: 1
+    CurrentLOD: 0
     EnableCrossFade: 1
   World::LevelEntityComponent:
     DataLayerMask: 2

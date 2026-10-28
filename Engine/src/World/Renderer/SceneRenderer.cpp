@@ -918,23 +918,89 @@ namespace World
 			if (const auto* lodComp = reg.try_get<MeshLODComponent>(draw.Entity))
 			{
 				const uint8_t currentLOD = lodComp->CurrentLOD;
-				if (currentLOD == 1 && lodComp->LOD1Mesh.HasPath())
+				if (currentLOD >= 1 && currentLOD != MeshLODEvaluator::kCulled)
 				{
+					Ref<Mesh> lodMesh;
 					std::string err;
-					if (auto lodMesh = ResolveMeshAsset(lodComp->LOD1Mesh, &err))
+
+					// 1. 优先检查组件上的显式槽位覆盖
+					if (currentLOD == 1 && lodComp->LOD1Mesh.HasPath())
 					{
-						draw.MeshAsset = lodMesh;
-						if (draw.SubmeshIndex != UINT32_MAX && !lodMesh->HasSubmeshes())
-							draw.SubmeshIndex = UINT32_MAX;
+						lodMesh = ResolveMeshAsset(lodComp->LOD1Mesh, &err);
 					}
-				}
-				else if (currentLOD == 2 && lodComp->LOD2Mesh.HasPath())
-				{
-					std::string err;
-					if (auto lodMesh = ResolveMeshAsset(lodComp->LOD2Mesh, &err))
+					else if (currentLOD == 2 && lodComp->LOD2Mesh.HasPath())
+					{
+						lodMesh = ResolveMeshAsset(lodComp->LOD2Mesh, &err);
+					}
+					else
+					{
+						// 2. 约定式自动解析 (Zero-Config Auto LOD Resolution: 槽位为空或 currentLOD >= 3)
+						std::string basePath;
+						if (const auto* mr = reg.try_get<MeshRendererComponent>(draw.Entity))
+						{
+							if (mr->Mesh.HasPath())
+								basePath = StringPool::Get().PathOf(mr->Mesh.Path);
+						}
+						if (basePath.empty())
+						{
+							if (const auto* sm = reg.try_get<SkinnedMeshRendererComponent>(draw.Entity))
+							{
+								if (sm->Mesh.HasPath())
+									basePath = StringPool::Get().PathOf(sm->Mesh.Path);
+							}
+						}
+						if (basePath.empty() && draw.MeshAsset)
+						{
+							const std::string& debugName = draw.MeshAsset->GetDesc().DebugName;
+							if (debugName.size() >= 7 && debugName.compare(debugName.size() - 7, 7, ".wmodel") == 0)
+								basePath = debugName;
+						}
+
+						if (!basePath.empty())
+						{
+							std::filesystem::path p(basePath);
+							std::string ext = p.extension().string();
+							for (char& c : ext)
+							{
+								if (c >= 'A' && c <= 'Z')
+									c += ('a' - 'A');
+							}
+
+							if (ext == ".wmodel")
+							{
+								std::filesystem::path parentDir = p.parent_path();
+								std::string stem = p.stem().string();
+								const size_t lodPos = stem.rfind("_LOD");
+								if (lodPos != std::string::npos && lodPos + 4 < stem.size())
+								{
+									bool allDigits = true;
+									for (size_t i = lodPos + 4; i < stem.size(); ++i)
+									{
+										const char c = stem[i];
+										if (c < '0' || c > '9')
+										{
+											allDigits = false;
+											break;
+										}
+									}
+									if (allDigits)
+										stem = stem.substr(0, lodPos);
+								}
+
+								const std::string lodFilename = stem + "_LOD" + std::to_string(currentLOD) + ".wmodel";
+								const std::filesystem::path lodPath = parentDir.empty() ? std::filesystem::path(lodFilename) : (parentDir / lodFilename);
+								const std::string lodPathStr = lodPath.generic_string();
+
+								const AssetRef autoLODRef = AssetRef::FromPath(lodPathStr);
+								lodMesh = ResolveMeshAsset(autoLODRef, &err);
+							}
+						}
+					}
+
+					if (lodMesh)
 					{
 						draw.MeshAsset = lodMesh;
-						if (draw.SubmeshIndex != UINT32_MAX && !lodMesh->HasSubmeshes())
+						if (draw.SubmeshIndex != UINT32_MAX && (!lodMesh->HasSubmeshes() || draw.SubmeshIndex >= lodMesh->GetSubmeshes().size()))
 							draw.SubmeshIndex = UINT32_MAX;
 					}
 				}

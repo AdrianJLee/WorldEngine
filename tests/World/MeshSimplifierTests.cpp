@@ -449,6 +449,7 @@ static void TestGenerateEngineShowcaseLODs()
 		"Engine/content/models/foliage/scatter_pebble.wmodel",
 		"Engine/content/models/foliage/bush_cluster.wmodel",
 		"Engine/content/models/debris_shard.wmodel",
+		"Engine/content/models/characters/mannequin.wmodel",
 		"templates/project-example/assets/models/tests/D5Fixture.wmodel"
 	};
 
@@ -488,6 +489,7 @@ int main()
 	std::cout << "All MeshSimplifier tests passed successfully!\n";
 	return 0;
 }
+
 
 
 

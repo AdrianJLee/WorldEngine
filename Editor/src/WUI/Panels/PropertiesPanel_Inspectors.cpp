@@ -11,6 +11,7 @@
 #include "World/Scene/Hierarchy.h"
 #include <unordered_set>
 #include "World/Core/StringPool.h"
+#include "World/Utils/Paths.h"
 #include "PropertiesPanel_Internal.h"
 #include "NavMeshPanel.h"
 #include <chrono>
@@ -772,11 +773,15 @@ static uint32_t s_LODGenEntityId = 0;
 		// 4. 资产槽位 (LOD0 只读原网格、LOD1Mesh 槽、LOD2Mesh 槽)
 		// =========================================================================
 		std::string lod0MeshName = "(无网格)";
+		std::string sourceMeshPath;
 		if (entity.HasComponent<MeshRendererComponent>())
 		{
 			const auto& mr = entity.GetComponent<MeshRendererComponent>();
 			if (mr.Mesh.HasPath())
+			{
 				lod0MeshName = StringPool::Get().PathOf(mr.Mesh.Path);
+				sourceMeshPath = lod0MeshName;
+			}
 			else
 			{
 				switch (mr.Primitive)
@@ -793,6 +798,40 @@ static uint32_t s_LODGenEntityId = 0;
 		Wui::HighlightOutline(ctx, lod0Rect, theme.Border, 3.0f, 1.0f);
 		Wui::Label(ctx, { lod0Rect.X + 6.0f, lod0Rect.Y + 3.0f }, lod0MeshName, theme.TextDisabled, theme.FontSizeSmall);
 		curY += 26.0f;
+
+		// 检查基础模型同目录下是否存在自动派生的 LOD 资产文件
+		std::string autoLod1Rel;
+		std::string autoLod2Rel;
+		bool autoLod1Exists = false;
+		bool autoLod2Exists = false;
+
+		if (!sourceMeshPath.empty())
+		{
+			std::filesystem::path srcP(sourceMeshPath);
+			std::filesystem::path srcParent = srcP.parent_path();
+			std::string srcStem = srcP.stem().string();
+
+			autoLod1Rel = (srcParent.empty() ? (srcStem + "_LOD1.wmodel") : (srcParent / (srcStem + "_LOD1.wmodel"))).generic_string();
+			autoLod2Rel = (srcParent.empty() ? (srcStem + "_LOD2.wmodel") : (srcParent / (srcStem + "_LOD2.wmodel"))).generic_string();
+
+			auto checkAutoFile = [](const std::string& rel) -> bool {
+				if (rel.empty()) return false;
+				std::error_code ec;
+				std::filesystem::path p(rel);
+				if (std::filesystem::exists(p, ec) && !std::filesystem::is_directory(p, ec)) return true;
+				if (std::filesystem::exists(World::Paths::AssetRoot() / p, ec) && !std::filesystem::is_directory(World::Paths::AssetRoot() / p, ec)) return true;
+				if (std::filesystem::exists(World::Paths::ProjectDir() / p, ec) && !std::filesystem::is_directory(World::Paths::ProjectDir() / p, ec)) return true;
+				const auto& catalog = Editor::AssetCatalog::PathsForName("Mesh");
+				return std::find(catalog.begin(), catalog.end(), rel) != catalog.end();
+			};
+
+			autoLod1Exists = checkAutoFile(autoLod1Rel);
+			autoLod2Exists = checkAutoFile(autoLod2Rel);
+		}
+
+		// 附带自动继承说明标签
+		Wui::Label(ctx, { startX, curY + 2.0f }, "（槽位留空已自动继承模型同名 LOD 资产，填入可强制覆盖）", theme.TextMuted, theme.FontSizeCaption);
+		curY += 20.0f;
 
 		const std::vector<std::string>& meshPaths = Editor::AssetCatalog::PathsForName("Mesh");
 		const float pickBtnW = 26.0f;
@@ -837,6 +876,18 @@ static uint32_t s_LODGenEntityId = 0;
 				});
 			}
 			curY += 26.0f;
+
+			// 若实体的 LOD1Mesh 为空，但检测到基础网格同目录下存在 <stem>_LOD1.wmodel：在插槽旁显示绿色自动继承徽标
+			if (!lod->LOD1Mesh.HasPath() && autoLod1Exists)
+			{
+				const Wui::WuiRect autoBadge1 { startX + paramLabelW, curY, paramFieldW, 20.0f };
+				Wui::PanelBackground(ctx, autoBadge1, Wui::WuiColor{ 0.08f, 0.25f, 0.12f, 0.90f }, 3.0f);
+				Wui::HighlightOutline(ctx, autoBadge1, theme.Success, 3.0f, 1.0f);
+				std::string badgeStr = "[已自动继承: " + autoLod1Rel + "]";
+				Wui::Label(ctx, { autoBadge1.X + 6.0f, autoBadge1.Y + 3.0f }, badgeStr, theme.Success, theme.FontSizeSmall);
+				Wui::Tooltip(ctx, autoBadge1, "实体当前槽位留空，渲染器已按命名约定自动解析并应用该同名减面资产");
+				curY += 24.0f;
+			}
 		}
 
 		// LOD2Mesh 槽
@@ -878,7 +929,20 @@ static uint32_t s_LODGenEntityId = 0;
 					host.MarkDocumentDirty();
 				});
 			}
-			curY += 30.0f;
+			curY += 26.0f;
+
+			// 若实体的 LOD2Mesh 为空，但检测到基础网格同目录下存在 <stem>_LOD2.wmodel：在插槽旁显示绿色自动继承徽标
+			if (!lod->LOD2Mesh.HasPath() && autoLod2Exists)
+			{
+				const Wui::WuiRect autoBadge2 { startX + paramLabelW, curY, paramFieldW, 20.0f };
+				Wui::PanelBackground(ctx, autoBadge2, Wui::WuiColor{ 0.08f, 0.25f, 0.12f, 0.90f }, 3.0f);
+				Wui::HighlightOutline(ctx, autoBadge2, theme.Success, 3.0f, 1.0f);
+				std::string badgeStr = "[已自动继承: " + autoLod2Rel + "]";
+				Wui::Label(ctx, { autoBadge2.X + 6.0f, autoBadge2.Y + 3.0f }, badgeStr, theme.Success, theme.FontSizeSmall);
+				Wui::Tooltip(ctx, autoBadge2, "实体当前槽位留空，渲染器已按命名约定自动解析并应用该同名减面资产");
+				curY += 24.0f;
+			}
+			curY += 4.0f;
 		}
 
 		// =========================================================================

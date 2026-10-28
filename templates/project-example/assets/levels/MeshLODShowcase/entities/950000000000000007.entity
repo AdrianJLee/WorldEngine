@@ -4,23 +4,23 @@ Entity:
     ID:
       m_UUID: 950000000000000007
   World::TagComponent:
-    Tag: "LOD D5 Fixture (Culled Beyond)"
+    Tag: "Foliage Bush Cluster (Auto LOD)"
   World::TransformComponent:
-    Location: [0, 1.2, -45]
+    Location: [4.5, 1.5, 18]
     Rotation: [0, 0, 0]
-    Scale: [2.5, 2.5, 2.5]
+    Scale: [3.2, 3.2, 3.2]
   World::MeshRendererComponent:
     Primitive: 0
-    Color: [0.85, 0.18, 0.18, 1]
-    Mesh: "models/tests/D5Fixture.wmodel"
+    Color: [0.92, 0.92, 0.92, 1]
+    Mesh: "engine/models/foliage/bush_cluster.wmodel"
   World::MeshLODComponent:
-    LOD1Mesh: "models/tests/D5Fixture_LOD1.wmodel"
-    LOD2Mesh: "models/tests/D5Fixture_LOD2.wmodel"
+    LOD1Mesh: ""
+    LOD2Mesh: ""
     LOD1Distance: 15.0
     LOD2Distance: 35.0
     CullDistance: 65.0
     Hysteresis: 2.0
-    CurrentLOD: 255
+    CurrentLOD: 0
     EnableCrossFade: 1
   World::LevelEntityComponent:
     DataLayerMask: 2

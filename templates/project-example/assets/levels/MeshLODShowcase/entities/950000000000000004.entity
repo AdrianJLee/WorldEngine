@@ -4,23 +4,14 @@ Entity:
     ID:
       m_UUID: 950000000000000004
   World::TagComponent:
-    Tag: "LOD Scatter Pebble (LOD 0 Near)"
+    Tag: "Zone A - Pebble Pedestal"
   World::TransformComponent:
-    Location: [0, 1.2, 16]
+    Location: [-4.5, 0.3, 18]
     Rotation: [0, 0, 0]
-    Scale: [4.0, 4.0, 4.0]
+    Scale: [3.2, 0.6, 3.2]
   World::MeshRendererComponent:
-    Primitive: 1
-    Color: [0.22, 0.85, 0.35, 1]
-    Mesh: "engine/models/foliage/scatter_pebble.wmodel"
-  World::MeshLODComponent:
-    LOD1Mesh: "engine/models/foliage/scatter_pebble_LOD1.wmodel"
-    LOD2Mesh: "engine/models/foliage/scatter_pebble_LOD2.wmodel"
-    LOD1Distance: 15.0
-    LOD2Distance: 35.0
-    CullDistance: 65.0
-    Hysteresis: 2.0
-    CurrentLOD: 0
-    EnableCrossFade: 1
+    Primitive: 0
+    Color: [0.18, 0.22, 0.28, 1]
+    Mesh: ""
   World::LevelEntityComponent:
     DataLayerMask: 2

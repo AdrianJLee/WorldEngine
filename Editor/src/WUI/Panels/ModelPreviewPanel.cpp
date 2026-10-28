@@ -457,8 +457,8 @@ namespace World
 		}
 
 		m_PreviewLODIndex = 0;
-		m_LODMeshes[1].reset();
-		m_LODMeshes[2].reset();
+		for (int i = 1; i <= 8; ++i)
+			m_LODMeshes[i].reset();
 		m_GeneratedLODs.clear();
 		m_LODStatusMessage.clear();
 
@@ -908,10 +908,8 @@ namespace World
 	uint64_t ModelPreviewPanel::RenderPreview()
 	{
 		Ref<Mesh> activeMesh = m_Mesh;
-		if (m_PreviewLODIndex == 1 && m_LODMeshes[1])
-			activeMesh = m_LODMeshes[1];
-		else if (m_PreviewLODIndex == 2 && m_LODMeshes[2])
-			activeMesh = m_LODMeshes[2];
+		if (m_PreviewLODIndex >= 1 && m_PreviewLODIndex <= 8 && m_LODMeshes[m_PreviewLODIndex])
+			activeMesh = m_LODMeshes[m_PreviewLODIndex];
 
 		if (!activeMesh && !(m_DataValid && !m_Data.Nodes.empty()))
 			return 0;
@@ -1172,6 +1170,8 @@ namespace World
 
 	void ModelPreviewPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
+		PollAsyncLODTasks(host);
+
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, theme.PanelBg);
 
@@ -1851,9 +1851,9 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			bx += camBtnW + gap;
 
 			// LOD 实时渲染档位快捷切换
-			std::string lodPillText = "LOD 0";
-			if (m_PreviewLODIndex == 1) lodPillText = "LOD 1";
-			else if (m_PreviewLODIndex == 2) lodPillText = "LOD 2";
+			std::string lodPillText = "Base (LOD 0)";
+			if (m_PreviewLODIndex >= 1 && m_PreviewLODIndex <= 8)
+				lodPillText = "LOD " + std::to_string(m_PreviewLODIndex);
 
 			const Wui::WuiRect lodPillRect { bx, by, lodBtnW, btnH };
 			auto lodPillTheme = theme;
@@ -1864,9 +1864,10 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			}
 			if (Wui::Button(ctx, Wui::HashId("model.overlay.lod_toggle"), lodPillRect, lodPillText, lodPillTheme))
 			{
-				m_PreviewLODIndex = (m_PreviewLODIndex + 1) % 3;
+				const int maxLOD = std::clamp(static_cast<int>(m_LODConfigs.size()), 1, 8);
+				m_PreviewLODIndex = (m_PreviewLODIndex + 1) % (maxLOD + 1);
 			}
-			Wui::Tooltip(ctx, lodPillRect, "切换视口当前渲染的 LOD 档位 (LOD0 -> LOD1 -> LOD2)");
+			Wui::Tooltip(ctx, lodPillRect, "切换视口当前渲染的 LOD 档位 (Base -> LOD 1 -> ...)");
 			bx += lodBtnW + gap;
 
 			// Frame 按钮
@@ -1971,18 +1972,13 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		// 视口右下角实时 LOD 统计信息徽标 (档位 + 三角面数 + 顶点数)
 		Ref<Mesh> activeMeshForStats = m_Mesh;
 		std::string activeLODName = "Base (LOD 0)";
-		if (m_PreviewLODIndex == 1 && m_LODMeshes[1])
+		if (m_PreviewLODIndex >= 1 && m_PreviewLODIndex <= 8 && m_LODMeshes[m_PreviewLODIndex])
 		{
-			activeMeshForStats = m_LODMeshes[1];
+			activeMeshForStats = m_LODMeshes[m_PreviewLODIndex];
 			char buf[64];
-			std::snprintf(buf, sizeof(buf), "LOD 1 (%.0f%%)", m_LOD1Ratio * 100.0f);
-			activeLODName = buf;
-		}
-		else if (m_PreviewLODIndex == 2 && m_LODMeshes[2])
-		{
-			activeMeshForStats = m_LODMeshes[2];
-			char buf[64];
-			std::snprintf(buf, sizeof(buf), "LOD 2 (%.0f%%)", m_LOD2Ratio * 100.0f);
+			const float ratio = (m_PreviewLODIndex - 1 < static_cast<int>(m_LODConfigs.size()))
+				? m_LODConfigs[m_PreviewLODIndex - 1].Ratio * 100.0f : 0.0f;
+			std::snprintf(buf, sizeof(buf), "LOD %d (%.0f%%)", m_PreviewLODIndex, ratio);
 			activeLODName = buf;
 		}
 
@@ -1997,7 +1993,9 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			const Wui::WuiRect lodBadgeRect { badgeX, badgeY, lodBadgeW, 18.0f };
 			if (ctx.IsHovered(lodBadgeRect)) clickingOverlayUi = true;
 
-			Wui::WuiColor badgeBorder = (m_PreviewLODIndex == 0) ? theme.Accent : ((m_PreviewLODIndex == 1) ? Wui::WuiColor{ 0.95f, 0.85f, 0.10f, 1.0f } : Wui::WuiColor{ 0.95f, 0.50f, 0.10f, 1.0f });
+			Wui::WuiColor badgeBorder = (m_PreviewLODIndex == 0)
+				? theme.Accent
+				: Wui::WuiColor{ 0.95f, std::max(0.2f, 0.85f - m_PreviewLODIndex * 0.08f), 0.10f + m_PreviewLODIndex * 0.08f, 1.0f };
 			Wui::PanelBackground(ctx, lodBadgeRect, Alpha(theme.PanelBg, 0.85f), 3.0f);
 			Wui::HighlightOutline(ctx, lodBadgeRect, Alpha(badgeBorder, 0.70f), 3.0f, 1.0f);
 			Wui::Label(ctx, { lodBadgeRect.X + 7.0f, lodBadgeRect.Y + 3.0f }, lodBadgeText, badgeBorder, theme.FontSizeCaption);
@@ -2272,9 +2270,95 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 				barRect, actualH, contentH, m_TabScroll[m_ActiveTab], theme, false);
 		}
 	}
+	void ModelPreviewPanel::PollAsyncLODTasks(PanelHost& host)
+	{
+		if (m_AsyncGenRunning && m_AsyncGenFuture.valid())
+		{
+			if (m_AsyncGenFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+			{
+				auto res = m_AsyncGenFuture.get();
+				m_AsyncGenRunning = false;
+				if (res.Success)
+				{
+					m_GeneratedLODs = std::move(res.Assets);
+					for (int i = 1; i <= 8; ++i)
+						m_LODMeshes[i].reset();
+
+					for (const auto& gen : m_GeneratedLODs)
+					{
+						if (gen.Level >= 1 && gen.Level <= 8)
+						{
+							std::string buildErr;
+							m_LODMeshes[gen.Level] = Mesh::BuildFromWModel(gen.ModelData, gen.RelativePath, &buildErr);
+						}
+					}
+
+					std::string summary;
+					for (size_t i = 0; i < m_GeneratedLODs.size(); ++i)
+					{
+						if (i > 0) summary += ", ";
+						char b[64];
+						std::snprintf(b, sizeof(b), "LOD%u: %u tris (%.1f%%)",
+							m_GeneratedLODs[i].Level, m_GeneratedLODs[i].TriangleCount, m_GeneratedLODs[i].ActualRatio * 100.0f);
+						summary += b;
+					}
+					m_LODStatusMessage = "自动生成完成: " + summary;
+					m_LODStatusIsError = false;
+					m_Status = m_LODStatusMessage;
+					m_StatusIsError = false;
+					if (!m_GeneratedLODs.empty())
+						m_PreviewLODIndex = 1;
+					host.Notify("LOD 自动减面完成，已在视口切换至 LOD1 预览");
+				}
+				else
+				{
+					m_LODStatusMessage = "自动生成失败: " + res.Error;
+					m_LODStatusIsError = true;
+					m_Status = m_LODStatusMessage;
+					m_StatusIsError = true;
+					host.Notify(m_LODStatusMessage);
+				}
+			}
+		}
+
+		if (m_AsyncSaveRunning && m_AsyncSaveFuture.valid())
+		{
+			if (m_AsyncSaveFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+			{
+				auto res = m_AsyncSaveFuture.get();
+				m_AsyncSaveRunning = false;
+				if (res.Success)
+				{
+					std::string msg = "已成功保存 LOD 资产: ";
+					for (size_t i = 0; i < res.SavedPaths.size(); ++i)
+					{
+						if (i > 0) msg += ", ";
+						msg += res.SavedPaths[i];
+						host.RefreshAssetCatalog(res.SavedPaths[i]);
+					}
+					m_LODStatusMessage = msg;
+					m_LODStatusIsError = false;
+					m_Status = msg;
+					m_StatusIsError = false;
+					host.Notify(msg);
+				}
+				else
+				{
+					m_LODStatusMessage = "保存 LOD 资产失败: " + res.Error;
+					m_LODStatusIsError = true;
+					m_Status = m_LODStatusMessage;
+					m_StatusIsError = true;
+					host.Notify(m_LODStatusMessage);
+				}
+			}
+		}
+	}
+
 	float ModelPreviewPanel::DrawTabLOD(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
 		const Wui::WuiTheme& theme)
 	{
+		PollAsyncLODTasks(host);
+
 		const float x = rect.X;
 		const float width = rect.W;
 		float y = rect.Y + 4.0f;
@@ -2285,8 +2369,32 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			return 24.0f;
 		}
 
-		// 状态提示横幅
-		if (!m_LODStatusMessage.empty())
+		// 异步进行中反馈横幅
+		if (m_AsyncGenRunning)
+		{
+			const Wui::WuiRect bannerRect { x, y, width, 26.0f };
+			Wui::PanelBackground(ctx, bannerRect, Wui::WuiColor{ 0.12f, 0.22f, 0.35f, 0.90f }, 3.0f);
+			Wui::HighlightOutline(ctx, bannerRect, theme.Accent, 3.0f, 1.0f);
+			const auto now = std::chrono::high_resolution_clock::now();
+			const double elapsed = std::chrono::duration<double>(now - m_AsyncGenStartTime).count();
+			char b[128];
+			std::snprintf(b, sizeof(b), "[后台减面中...] 正在基于 QEM 算法异步生成各级网格 (%.1fs，UI 60+ FPS)", elapsed);
+			Wui::Label(ctx, { bannerRect.X + 8.0f, bannerRect.Y + 5.0f }, b, theme.Accent, theme.FontSizeSmall);
+			y += 32.0f;
+		}
+		else if (m_AsyncSaveRunning)
+		{
+			const Wui::WuiRect bannerRect { x, y, width, 26.0f };
+			Wui::PanelBackground(ctx, bannerRect, Wui::WuiColor{ 0.12f, 0.22f, 0.35f, 0.90f }, 3.0f);
+			Wui::HighlightOutline(ctx, bannerRect, theme.Accent, 3.0f, 1.0f);
+			const auto now = std::chrono::high_resolution_clock::now();
+			const double elapsed = std::chrono::duration<double>(now - m_AsyncSaveStartTime).count();
+			char b[128];
+			std::snprintf(b, sizeof(b), "[后台保存中...] 正在异步写出全部 LOD 资产文件 (%.1fs，UI 60+ FPS)", elapsed);
+			Wui::Label(ctx, { bannerRect.X + 8.0f, bannerRect.Y + 5.0f }, b, theme.Accent, theme.FontSizeSmall);
+			y += 32.0f;
+		}
+		else if (!m_LODStatusMessage.empty())
 		{
 			const Wui::WuiRect bannerRect { x, y, width, 26.0f };
 			const Wui::WuiColor bgCol = m_LODStatusIsError
@@ -2325,8 +2433,11 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 
 		std::string previewName = "LOD 0 (Base)";
 		Wui::WuiColor previewCol = theme.Success;
-		if (m_PreviewLODIndex == 1) { previewName = "LOD 1 (Mid)"; previewCol = Wui::WuiColor{ 0.95f, 0.85f, 0.10f, 1.0f }; }
-		else if (m_PreviewLODIndex == 2) { previewName = "LOD 2 (Low)"; previewCol = Wui::WuiColor{ 0.95f, 0.50f, 0.10f, 1.0f }; }
+		if (m_PreviewLODIndex >= 1 && m_PreviewLODIndex <= 8)
+		{
+			previewName = "LOD " + std::to_string(m_PreviewLODIndex);
+			previewCol = Wui::WuiColor{ 0.95f, std::max(0.2f, 0.85f - m_PreviewLODIndex * 0.08f), 0.10f + m_PreviewLODIndex * 0.08f, 1.0f };
+		}
 		drawStatCard(x + (colW + colGap) * 3.0f, "Active Preview", previewName, previewCol);
 
 		y += cardH + 14.0f;
@@ -2339,19 +2450,17 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		Wui::Label(ctx, { x, y + 4.0f }, "视口实时渲染档位 (Preview LOD):", theme.Text, theme.FontSizeSmall);
 		y += 22.0f;
 
+		const int totalPreviewCount = 1 + static_cast<int>(m_LODConfigs.size());
+		const int cols = (totalPreviewCount <= 4) ? totalPreviewCount : ((totalPreviewCount <= 6) ? 3 : 4);
 		const float lodBtnGap = 6.0f;
-		const float lodBtnW = std::max(80.0f, (width - lodBtnGap * 2.0f) / 3.0f);
+		const float lodBtnW = std::max(70.0f, (width - lodBtnGap * (cols - 1)) / static_cast<float>(cols));
 		const float lodBtnH = 26.0f;
 
-		const char* lodBtnLabels[3] = {
-			"Base (LOD 0 - 100%)",
-			"LOD 1 (中模)",
-			"LOD 2 (远景简模)"
-		};
-
-		for (int i = 0; i < 3; ++i)
+		for (int i = 0; i < totalPreviewCount; ++i)
 		{
-			const Wui::WuiRect bRect { x + (lodBtnW + lodBtnGap) * i, y, lodBtnW, lodBtnH };
+			const int row = i / cols;
+			const int col = i % cols;
+			const Wui::WuiRect bRect { x + (lodBtnW + lodBtnGap) * col, y + (lodBtnH + 6.0f) * row, lodBtnW, lodBtnH };
 			const bool selected = (m_PreviewLODIndex == i);
 
 			auto btnTheme = theme;
@@ -2361,13 +2470,16 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 				btnTheme.Border = theme.Accent;
 			}
 
-			std::string label = lodBtnLabels[i];
-			if (i > 0)
+			std::string label;
+			if (i == 0)
 			{
-				if (i == 1 && m_LODMeshes[1])
-					label += " [" + FormatNumber(m_LODMeshes[1]->GetIndexCount() / 3) + "t]";
-				else if (i == 2 && m_LODMeshes[2])
-					label += " [" + FormatNumber(m_LODMeshes[2]->GetIndexCount() / 3) + "t]";
+				label = "Base (LOD 0)";
+			}
+			else
+			{
+				label = "LOD " + std::to_string(i);
+				if (i <= 8 && m_LODMeshes[i])
+					label += " [" + FormatNumber(m_LODMeshes[i]->GetIndexCount() / 3) + "t]";
 				else
 					label += " (未生成)";
 			}
@@ -2381,45 +2493,169 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			if (selected)
 				Wui::HighlightOutline(ctx, bRect, theme.Accent, 3.0f, 1.5f);
 
-			Wui::Tooltip(ctx, bRect, i == 0 ? "切换回高精度原始网格" : "在视口 3D 渲染中实时预览该档位减面网格与拓扑结构");
+			Wui::Tooltip(ctx, bRect, i == 0 ? "切换回高精度原始网格" : ("在视口 3D 渲染中实时预览 LOD " + std::to_string(i) + " 减面网格与拓扑结构"));
 		}
-		y += lodBtnH + 16.0f;
 
-		// 3. 多档减面参数配置 (LOD Parameters)
+		const int totalRows = (totalPreviewCount + cols - 1) / cols;
+		y += (lodBtnH + 6.0f) * totalRows + 10.0f;
+
+		// 3. 档位数量控制条与快捷预设模板 (Level Count & Presets)
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			"LOD 档位层级与预设配置 (LOD Level Count & Presets)", theme.Accent, theme);
+		y += 24.0f;
+
+		std::string countLabel = "当前配置生成档位数: " + std::to_string(m_LODConfigs.size()) +
+			" 档 (LOD 1 ~ LOD " + std::to_string(m_LODConfigs.size()) + "，含 Base 共 " +
+			std::to_string(m_LODConfigs.size() + 1) + " 档，上限 8 档)";
+		Wui::Label(ctx, { x, y + 2.0f }, countLabel, theme.Text, theme.FontSizeSmall);
+		y += 22.0f;
+
+		// 第一行: 增减档位按钮
+		const float rowBtnH = 24.0f;
+		const float gapSmall = 6.0f;
+		const float countBtnW = std::max(100.0f, (width - gapSmall) * 0.5f);
+
+		// [+ 添加档位]
+		const Wui::WuiRect addRect { x, y, countBtnW, rowBtnH };
+		const bool canAdd = (m_LODConfigs.size() < 8);
+		auto addTheme = theme;
+		if (!canAdd) addTheme.ButtonBg = Alpha(theme.ButtonBg, 0.4f);
+		if (Wui::Button(ctx, Wui::HashId("model.lod.add_level"), addRect, "[+ 添加档位]", addTheme))
+		{
+			if (canAdd)
+			{
+				float prevRatio = m_LODConfigs.empty() ? 0.5f : m_LODConfigs.back().Ratio;
+				float prevDist = m_LODConfigs.empty() ? 25.0f : m_LODConfigs.back().Distance;
+				float newRatio = std::max(0.05f, std::round(prevRatio * 0.5f * 100.0f) / 100.0f);
+				float newDist = std::min(2000.0f, std::round(prevDist * 1.6f));
+				m_LODConfigs.push_back({ newRatio, newDist });
+			}
+		}
+		Wui::Tooltip(ctx, addRect, canAdd ? "在末尾追加一级减面档位（上限 8 档）" : "已达到最大 8 档上限");
+
+		// [-] 移除末尾档位
+		const Wui::WuiRect removeRect { x + countBtnW + gapSmall, y, countBtnW, rowBtnH };
+		const bool canRemove = (m_LODConfigs.size() > 1);
+		auto remTheme = theme;
+		if (!canRemove) remTheme.ButtonBg = Alpha(theme.ButtonBg, 0.4f);
+		if (Wui::Button(ctx, Wui::HashId("model.lod.remove_level"), removeRect, "[-] 移除末尾档位", remTheme))
+		{
+			if (canRemove)
+			{
+				const int removedLvl = static_cast<int>(m_LODConfigs.size());
+				if (removedLvl <= 8)
+					m_LODMeshes[removedLvl].reset();
+				m_LODConfigs.pop_back();
+				if (m_PreviewLODIndex > static_cast<int>(m_LODConfigs.size()))
+					m_PreviewLODIndex = static_cast<int>(m_LODConfigs.size());
+			}
+		}
+		Wui::Tooltip(ctx, removeRect, canRemove ? "移除最后一级减面档位（下限 1 档）" : "至少保留 1 档");
+
+		y += rowBtnH + 8.0f;
+
+		// 第二行: 常用预设模板按钮组
+		Wui::Label(ctx, { x, y + 2.0f }, "常用预设模板 (Presets):", theme.TextMuted, theme.FontSizeCaption);
+		y += 18.0f;
+
+		const float pBtnW = std::max(90.0f, (width - gapSmall * 2.0f) / 3.0f);
+		const Wui::WuiRect p3Rect { x, y, pBtnW, rowBtnH };
+		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_3"), p3Rect, "[常用 3 档 (50%/25%)]", theme))
+		{
+			m_LODConfigs = { { 0.50f, 25.0f }, { 0.25f, 60.0f } };
+			for (int k = 3; k <= 8; ++k) m_LODMeshes[k].reset();
+			if (m_PreviewLODIndex > 2) m_PreviewLODIndex = 2;
+			m_LODStatusMessage = "已应用常用 3 档预设 (LOD1: 50%, LOD2: 25%)";
+			m_LODStatusIsError = false;
+		}
+		Wui::Tooltip(ctx, p3Rect, "应用常用 3 档配置：Base (100%), LOD1 (50% 25m), LOD2 (25% 60m)");
+
+		const Wui::WuiRect p4Rect { x + (pBtnW + gapSmall), y, pBtnW, rowBtnH };
+		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_4"), p4Rect, "[精细 4 档 (60%/35%/15%)]", theme))
+		{
+			m_LODConfigs = { { 0.60f, 20.0f }, { 0.35f, 45.0f }, { 0.15f, 80.0f } };
+			for (int k = 4; k <= 8; ++k) m_LODMeshes[k].reset();
+			if (m_PreviewLODIndex > 3) m_PreviewLODIndex = 3;
+			m_LODStatusMessage = "已应用精细 4 档预设 (60% / 35% / 15%)";
+			m_LODStatusIsError = false;
+		}
+		Wui::Tooltip(ctx, p4Rect, "应用精细 4 档配置：Base, LOD1 (60% 20m), LOD2 (35% 45m), LOD3 (15% 80m)");
+
+		const Wui::WuiRect p6Rect { x + (pBtnW + gapSmall) * 2.0f, y, pBtnW, rowBtnH };
+		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_6"), p6Rect, "[次时代 6 档 (75%/50%/30%/15%/5%)]", theme))
+		{
+			m_LODConfigs = {
+				{ 0.75f, 15.0f },
+				{ 0.50f, 30.0f },
+				{ 0.30f, 50.0f },
+				{ 0.15f, 80.0f },
+				{ 0.05f, 120.0f }
+			};
+			for (int k = 6; k <= 8; ++k) m_LODMeshes[k].reset();
+			if (m_PreviewLODIndex > 5) m_PreviewLODIndex = 5;
+			m_LODStatusMessage = "已应用次时代 6 档预设 (75% / 50% / 30% / 15% / 5%)";
+			m_LODStatusIsError = false;
+		}
+		Wui::Tooltip(ctx, p6Rect, "应用次时代 6 档配置：Base 到 LOD5 五级递减梯次");
+
+		y += rowBtnH + 16.0f;
+
+		// 4. 逐档渲染参数微调卡片 (Per-Level Settings & Ladders)
 		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
 			Wui::Tr("panel.model.lod.config_section", "LOD Generation Settings & Distance Ladders"), theme.Accent, theme);
 		y += 24.0f;
 
 		const float paramLabelW = 140.0f;
-		const float paramFieldW = std::max(120.0f, width - paramLabelW - 10.0f);
+		const float paramFieldW = std::max(100.0f, width - paramLabelW - 60.0f);
 
-		// LOD 1 设置行
-		Wui::Label(ctx, { x, y + 2.0f }, "LOD 1 保留比例 (Ratio):", theme.Text, theme.FontSizeSmall);
-		Wui::SliderFloat(ctx, Wui::HashId("model.lod.ratio1"),
-			{ x + paramLabelW, y, paramFieldW - 55.0f, 22.0f }, m_LOD1Ratio, 0.10f, 0.90f, theme);
-		char ratio1Str[32];
-		std::snprintf(ratio1Str, sizeof(ratio1Str), "%.0f%%", m_LOD1Ratio * 100.0f);
-		Wui::Label(ctx, { x + width - 45.0f, y + 2.0f }, ratio1Str, theme.Accent, theme.FontSizeSmall);
-		y += 26.0f;
+		for (size_t idx = 0; idx < m_LODConfigs.size(); ++idx)
+		{
+			const int lvl = static_cast<int>(idx + 1);
+			auto& item = m_LODConfigs[idx];
 
-		Wui::Label(ctx, { x, y + 2.0f }, "LOD 1 切换视距 (m):", theme.Text, theme.FontSizeSmall);
-		Wui::DragFloat(ctx, Wui::HashId("model.lod.dist1"),
-			{ x + paramLabelW, y, paramFieldW, 22.0f }, m_LOD1Distance, 0.5f, 1.0f, 500.0f, theme);
-		y += 28.0f;
+			const float cardHeight = 68.0f;
+			const Wui::WuiRect cRect { x, y, width, cardHeight };
+			Wui::PanelBackground(ctx, cRect, theme.CardBg, 4.0f);
+			Wui::HighlightOutline(ctx, cRect, Alpha(theme.Border, 0.75f), 4.0f, 1.0f);
 
-		// LOD 2 设置行
-		Wui::Label(ctx, { x, y + 2.0f }, "LOD 2 保留比例 (Ratio):", theme.Text, theme.FontSizeSmall);
-		Wui::SliderFloat(ctx, Wui::HashId("model.lod.ratio2"),
-			{ x + paramLabelW, y, paramFieldW - 55.0f, 22.0f }, m_LOD2Ratio, 0.05f, 0.50f, theme);
-		char ratio2Str[32];
-		std::snprintf(ratio2Str, sizeof(ratio2Str), "%.0f%%", m_LOD2Ratio * 100.0f);
-		Wui::Label(ctx, { x + width - 45.0f, y + 2.0f }, ratio2Str, theme.Accent, theme.FontSizeSmall);
-		y += 26.0f;
+			// 卡片头部: 左侧标题，右侧面数统计
+			std::string cardTitle = "LOD " + std::to_string(lvl);
+			Wui::Label(ctx, { cRect.X + 8.0f, cRect.Y + 6.0f }, cardTitle, theme.Accent, theme.FontSizeBody);
 
-		Wui::Label(ctx, { x, y + 2.0f }, "LOD 2 切换视距 (m):", theme.Text, theme.FontSizeSmall);
-		Wui::DragFloat(ctx, Wui::HashId("model.lod.dist2"),
-			{ x + paramLabelW, y, paramFieldW, 22.0f }, m_LOD2Distance, 1.0f, 5.0f, 1000.0f, theme);
-		y += 28.0f;
+			if (lvl <= 8 && m_LODMeshes[lvl])
+			{
+				const uint32_t tri = m_LODMeshes[lvl]->GetIndexCount() / 3;
+				const uint32_t baseTri = m_Mesh->GetIndexCount() / 3;
+				const float pct = (baseTri > 0) ? (static_cast<float>(tri) / static_cast<float>(baseTri) * 100.0f) : 0.0f;
+				char statBuf[128];
+				std::snprintf(statBuf, sizeof(statBuf), "实际生成: %s tris (%.1f%%)", FormatNumber(tri).c_str(), pct);
+				const float statW = ctx.MeasureTextWidth(statBuf, theme.FontSizeSmall);
+				Wui::Label(ctx, { cRect.X + cRect.W - statW - 10.0f, cRect.Y + 7.0f }, statBuf, theme.Success, theme.FontSizeSmall);
+			}
+			else
+			{
+				const char* notGen = "未生成";
+				const float statW = ctx.MeasureTextWidth(notGen, theme.FontSizeSmall);
+				Wui::Label(ctx, { cRect.X + cRect.W - statW - 10.0f, cRect.Y + 7.0f }, notGen, theme.TextDisabled, theme.FontSizeSmall);
+			}
+
+			// 滑块: 保留比例
+			const float innerY1 = cRect.Y + 24.0f;
+			Wui::Label(ctx, { cRect.X + 10.0f, innerY1 + 2.0f }, "保留比例 (Ratio):", theme.Text, theme.FontSizeSmall);
+			Wui::SliderFloat(ctx, Wui::HashId(("model.lod.ratio." + std::to_string(lvl)).c_str()),
+				{ cRect.X + paramLabelW, innerY1, paramFieldW, 18.0f }, item.Ratio, 0.05f, 0.95f, theme);
+			char ratioStr[32];
+			std::snprintf(ratioStr, sizeof(ratioStr), "%.0f%%", item.Ratio * 100.0f);
+			Wui::Label(ctx, { cRect.X + paramLabelW + paramFieldW + 8.0f, innerY1 + 2.0f }, ratioStr, theme.Accent, theme.FontSizeSmall);
+
+			// 视距微调
+			const float innerY2 = cRect.Y + 44.0f;
+			Wui::Label(ctx, { cRect.X + 10.0f, innerY2 + 2.0f }, "推荐视距 (m):", theme.Text, theme.FontSizeSmall);
+			Wui::DragFloat(ctx, Wui::HashId(("model.lod.dist." + std::to_string(lvl)).c_str()),
+				{ cRect.X + paramLabelW, innerY2, paramFieldW, 18.0f }, item.Distance, 0.5f, 1.0f, 2000.0f, theme);
+
+			y += cardHeight + 8.0f;
+		}
 
 		// 边界保护开关 (Preserve Borders)
 		if (Wui::Checkbox(ctx, Wui::HashId("model.lod.preserve_borders"),
@@ -2427,14 +2663,14 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		{
 		}
 		Wui::Tooltip(ctx, { x, y, width, 22.0f }, "对仅被单一三角形引用的开边界施加高代价惩罚，防止网格孔洞变形或边界穿透");
-		y += 32.0f;
+		y += 30.0f;
 
-		// 4. 一键自动生成与存盘操作 (Action Buttons)
+		// 5. 一键自动生成与存盘操作 (Action Buttons)
 		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
 			Wui::Tr("panel.model.lod.actions", "Actions & Asset Generation"), theme.Accent, theme);
 		y += 24.0f;
 
-		const float actionBtnW = std::max(120.0f, (width - 8.0f) * 0.5f);
+		const float actionBtnW = std::max(140.0f, (width - 8.0f) * 0.5f);
 		const float actionBtnH = 28.0f;
 
 		// [Auto-Generate LODs / 自动生成多级 LOD]
@@ -2442,100 +2678,124 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		auto genTheme = theme;
 		genTheme.ButtonBg = theme.ActiveBg;
 		genTheme.Border = theme.Accent;
-		if (Wui::Button(ctx, Wui::HashId("model.lod.autogen_btn"), genBtnRect,
-			"[Auto-Generate LODs] 自动生成多级 LOD", genTheme))
+
+		std::string genBtnText = "[Auto-Generate LODs] 自动生成 " + std::to_string(m_LODConfigs.size()) + " 档 LOD";
+		if (m_AsyncGenRunning)
 		{
-			std::vector<LODLevelConfig> configs = {
-				{ 1, m_LOD1Ratio, m_LOD1Distance },
-				{ 2, m_LOD2Ratio, m_LOD2Distance }
-			};
-			std::string genError;
-			if (MeshLODGenerator::GenerateLODs(m_Data, configs, m_GeneratedLODs, &genError))
+			const auto now = std::chrono::high_resolution_clock::now();
+			const double elapsed = std::chrono::duration<double>(now - m_AsyncGenStartTime).count();
+			char buf[64];
+			std::snprintf(buf, sizeof(buf), "[生成中...] (%.1fs)", elapsed);
+			genBtnText = buf;
+			genTheme.ButtonBg = Alpha(theme.ActiveBg, 0.5f);
+		}
+
+		if (Wui::Button(ctx, Wui::HashId("model.lod.autogen_btn"), genBtnRect, genBtnText, genTheme))
+		{
+			if (!m_AsyncGenRunning && !m_AsyncSaveRunning)
 			{
-				m_LODMeshes[1].reset();
-				m_LODMeshes[2].reset();
-
-				std::filesystem::path p(m_LogicalPath);
-				std::filesystem::path parentDir = p.parent_path();
-				std::string stem = p.stem().string();
-
-				for (auto& gen : m_GeneratedLODs)
+				if (!m_DataValid || m_Data.Vertices.empty())
 				{
-					std::string filename = stem + "_LOD" + std::to_string(gen.Level) + ".wmodel";
-					std::filesystem::path lodPath = parentDir.empty() ? std::filesystem::path(filename) : (parentDir / filename);
-					gen.RelativePath = lodPath.generic_string();
-
-					std::string buildErr;
-					Ref<Mesh> mesh = Mesh::BuildFromWModel(gen.ModelData, gen.RelativePath, &buildErr);
-					if (gen.Level == 1) m_LODMeshes[1] = mesh;
-					else if (gen.Level == 2) m_LODMeshes[2] = mesh;
+					m_LODStatusMessage = "错误: 当前模型数据未就绪或未包含有效顶点";
+					m_LODStatusIsError = true;
+					host.Notify(m_LODStatusMessage);
 				}
+				else
+				{
+					std::vector<LODLevelConfig> configs;
+					for (size_t i = 0; i < m_LODConfigs.size(); ++i)
+					{
+						LODLevelConfig cfg;
+						cfg.Level = static_cast<uint8_t>(i + 1);
+						cfg.TargetRatio = m_LODConfigs[i].Ratio;
+						cfg.Distance = m_LODConfigs[i].Distance;
+						configs.push_back(cfg);
+					}
 
-				const uint32_t t1 = !m_GeneratedLODs.empty() ? m_GeneratedLODs[0].TriangleCount : 0;
-				const float r1 = !m_GeneratedLODs.empty() ? m_GeneratedLODs[0].ActualRatio * 100.0f : 0.0f;
-				const uint32_t t2 = m_GeneratedLODs.size() > 1 ? m_GeneratedLODs[1].TriangleCount : 0;
-				const float r2 = m_GeneratedLODs.size() > 1 ? m_GeneratedLODs[1].ActualRatio * 100.0f : 0.0f;
-
-				char buf[256];
-				std::snprintf(buf, sizeof(buf), "LOD1: %u tris (%.1f%%), LOD2: %u tris (%.1f%%)",
-					t1, r1, t2, r2);
-				m_LODStatusMessage = buf;
-				m_LODStatusIsError = false;
-				m_Status = buf;
-				m_StatusIsError = false;
-				m_PreviewLODIndex = 1;
-				host.Notify("LOD 自动减面完成，已在视口切换至 LOD1 预览");
-			}
-			else
-			{
-				m_LODStatusMessage = "自动生成失败: " + genError;
-				m_LODStatusIsError = true;
-				m_Status = m_LODStatusMessage;
-				m_StatusIsError = true;
-				host.Notify(m_LODStatusMessage);
+					Asset::WModelData sourceCopy = m_Data;
+					std::string sourcePath = m_LogicalPath;
+					m_AsyncGenStartTime = std::chrono::high_resolution_clock::now();
+					m_AsyncGenRunning = true;
+					m_AsyncGenFuture = std::async(std::launch::async, [sourceCopy = std::move(sourceCopy), configs, sourcePath]() -> AsyncLODGenResult {
+						AsyncLODGenResult result;
+						std::string genError;
+						result.Success = MeshLODGenerator::GenerateLODs(sourceCopy, configs, result.Assets, &genError);
+						result.Error = genError;
+						if (result.Success)
+						{
+							std::filesystem::path p(sourcePath);
+							std::filesystem::path parentDir = p.parent_path();
+							std::string stem = p.stem().string();
+							for (auto& gen : result.Assets)
+							{
+								std::string filename = stem + "_LOD" + std::to_string(gen.Level) + ".wmodel";
+								std::filesystem::path lodPath = parentDir.empty() ? std::filesystem::path(filename) : (parentDir / filename);
+								gen.RelativePath = lodPath.generic_string();
+							}
+						}
+						return result;
+					});
+					m_LODStatusMessage = "后台异步工作线程正在计算 QEM 减面拓扑 (UI 保持 60+ FPS)...";
+					m_LODStatusIsError = false;
+					host.Notify("已启动全部 LOD 档位后台异步生成任务...");
+				}
 			}
 		}
-		Wui::Tooltip(ctx, genBtnRect, "在内存中基于 QEM 算法执行各级减面并构建视口 3D 预览网格");
+		Wui::Tooltip(ctx, genBtnRect, "在后台工作线程基于 QEM 算法执行 1~8 档减面，UI 保持 60+ FPS 流畅");
 
 		// [Save LOD Files / 保存 LOD 资产]
 		const Wui::WuiRect saveBtnRect { x + actionBtnW + 8.0f, y, actionBtnW, actionBtnH };
-		if (Wui::Button(ctx, Wui::HashId("model.lod.save_files_btn"), saveBtnRect,
-			"[Save LOD Files] 保存 LOD 资产", theme))
+		std::string saveBtnText = "[Save LOD Files] 保存 " + std::to_string(m_LODConfigs.size()) + " 档 LOD 资产";
+		auto saveTheme = theme;
+		if (m_AsyncSaveRunning)
 		{
-			std::vector<LODLevelConfig> configs = {
-				{ 1, m_LOD1Ratio, m_LOD1Distance },
-				{ 2, m_LOD2Ratio, m_LOD2Distance }
-			};
-			std::vector<GeneratedLODAsset> savedAssets;
-			std::string saveError;
-			if (MeshLODGenerator::GenerateAndSaveLODFiles(m_LogicalPath, configs, savedAssets, &saveError))
+			const auto now = std::chrono::high_resolution_clock::now();
+			const double elapsed = std::chrono::duration<double>(now - m_AsyncSaveStartTime).count();
+			char buf[64];
+			std::snprintf(buf, sizeof(buf), "[保存中...] (%.1fs)", elapsed);
+			saveBtnText = buf;
+			saveTheme.ButtonBg = Alpha(theme.ButtonBg, 0.5f);
+		}
+
+		if (Wui::Button(ctx, Wui::HashId("model.lod.save_files_btn"), saveBtnRect, saveBtnText, saveTheme))
+		{
+			if (!m_AsyncSaveRunning && !m_AsyncGenRunning)
 			{
-				std::string msg = "已成功保存 LOD 资产: ";
-				for (size_t i = 0; i < savedAssets.size(); ++i)
+				std::vector<LODLevelConfig> configs;
+				for (size_t i = 0; i < m_LODConfigs.size(); ++i)
 				{
-					if (i > 0) msg += ", ";
-					msg += savedAssets[i].RelativePath;
-					host.RefreshAssetCatalog(savedAssets[i].RelativePath);
+					LODLevelConfig cfg;
+					cfg.Level = static_cast<uint8_t>(i + 1);
+					cfg.TargetRatio = m_LODConfigs[i].Ratio;
+					cfg.Distance = m_LODConfigs[i].Distance;
+					configs.push_back(cfg);
 				}
-				m_LODStatusMessage = msg;
+
+				std::string logicalPath = m_LogicalPath;
+				m_AsyncSaveStartTime = std::chrono::high_resolution_clock::now();
+				m_AsyncSaveRunning = true;
+				m_AsyncSaveFuture = std::async(std::launch::async, [logicalPath, configs]() -> AsyncLODSaveResult {
+					AsyncLODSaveResult result;
+					std::vector<GeneratedLODAsset> savedAssets;
+					std::string saveErr;
+					result.Success = MeshLODGenerator::GenerateAndSaveLODFiles(logicalPath, configs, savedAssets, &saveErr);
+					result.Error = saveErr;
+					if (result.Success)
+					{
+						for (const auto& a : savedAssets)
+							result.SavedPaths.push_back(a.RelativePath);
+					}
+					return result;
+				});
+				m_LODStatusMessage = "正在后台异步写出全部 LOD 资产到磁盘...";
 				m_LODStatusIsError = false;
-				m_Status = msg;
-				m_StatusIsError = false;
-				host.Notify(msg);
-			}
-			else
-			{
-				m_LODStatusMessage = "保存 LOD 资产失败: " + saveError;
-				m_LODStatusIsError = true;
-				m_Status = m_LODStatusMessage;
-				m_StatusIsError = true;
-				host.Notify(m_LODStatusMessage);
+				host.Notify("已启动全部 LOD 资产后台异步写盘任务...");
 			}
 		}
-		Wui::Tooltip(ctx, saveBtnRect, "在模型同目录下写出 <ModelStem>_LOD1.wmodel 与 <ModelStem>_LOD2.wmodel 资产文件");
+		Wui::Tooltip(ctx, saveBtnRect, "在模型同目录下异步写出全部 <ModelStem>_LOD1.wmodel 到 <ModelStem>_LODN.wmodel 资产文件");
 		y += actionBtnH + 16.0f;
 
-		// 5. 详细层级指标清单
+		// 6. 详细层级指标清单
 		if (!m_GeneratedLODs.empty())
 		{
 			Wui::SectionHeader(ctx, { x, y, width, 18.0f }, "Generated LOD Details", theme.Accent, theme);

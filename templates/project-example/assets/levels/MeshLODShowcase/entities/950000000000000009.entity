@@ -4,23 +4,23 @@ Entity:
     ID:
       m_UUID: 950000000000000009
   World::TagComponent:
-    Tag: "Octree Node (-X, +Z) Shard Tower"
+    Tag: "Character Mannequin (Auto LOD)"
   World::TransformComponent:
-    Location: [-16, 3, 14]
-    Rotation: [0, 0, 0]
-    Scale: [3.5, 6, 3.5]
+    Location: [0, 0.6, 2]
+    Rotation: [0, 180, 0]
+    Scale: [1.8, 1.8, 1.8]
   World::MeshRendererComponent:
     Primitive: 0
-    Color: [0.28, 0.52, 0.92, 1]
-    Mesh: "engine/models/debris_shard.wmodel"
+    Color: [0.92, 0.92, 0.92, 1]
+    Mesh: "engine/models/characters/mannequin.wmodel"
   World::MeshLODComponent:
-    LOD1Mesh: "engine/models/debris_shard_LOD1.wmodel"
-    LOD2Mesh: "engine/models/debris_shard_LOD2.wmodel"
-    LOD1Distance: 20.0
-    LOD2Distance: 45.0
-    CullDistance: 85.0
+    LOD1Mesh: ""
+    LOD2Mesh: ""
+    LOD1Distance: 15.0
+    LOD2Distance: 35.0
+    CullDistance: 70.0
     Hysteresis: 2.0
     CurrentLOD: 0
     EnableCrossFade: 1
   World::LevelEntityComponent:
-    DataLayerMask: 4
+    DataLayerMask: 2

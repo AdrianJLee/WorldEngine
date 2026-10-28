@@ -4,14 +4,14 @@ Entity:
     ID:
       m_UUID: 950000000000000012
   World::TagComponent:
-    Tag: "Octree Center Gateway Arch"
+    Tag: "Zone C - Debris Pedestal"
   World::TransformComponent:
-    Location: [0, 4, -2]
+    Location: [4.5, 0.3, -16]
     Rotation: [0, 0, 0]
-    Scale: [10, 0.6, 2]
+    Scale: [3.2, 0.6, 3.2]
   World::MeshRendererComponent:
     Primitive: 0
-    Color: [0.6, 0.65, 0.75, 1]
+    Color: [0.18, 0.22, 0.28, 1]
     Mesh: ""
   World::LevelEntityComponent:
-    DataLayerMask: 4
+    DataLayerMask: 2

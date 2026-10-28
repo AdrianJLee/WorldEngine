@@ -195,17 +195,48 @@ namespace World
 		std::unordered_set<std::string> m_SkeletonCollapsed;
 		std::unordered_set<int> m_SkeletonCollapsedNodes;
 
+		struct LODConfigItem
+		{
+			float Ratio = 0.5f;
+			float Distance = 25.0f;
+		};
+
+		struct AsyncLODGenResult
+		{
+			bool Success = false;
+			std::string Error;
+			std::vector<GeneratedLODAsset> Assets;
+		};
+
+		struct AsyncLODSaveResult
+		{
+			bool Success = false;
+			std::string Error;
+			std::vector<std::string> SavedPaths;
+		};
+
 		// ---- LOD 减面与自动生成状态 ----
-		float m_LOD1Ratio = 0.50f;
-		float m_LOD1Distance = 25.0f;
-		float m_LOD2Ratio = 0.25f;
-		float m_LOD2Distance = 60.0f;
+		std::vector<LODConfigItem> m_LODConfigs {
+			{ 0.50f, 25.0f },
+			{ 0.25f, 60.0f }
+		};
 		bool m_LODPreserveBorders = true;
-		int m_PreviewLODIndex = 0; // 0 = Base (LOD0), 1 = LOD1, 2 = LOD2
+		int m_PreviewLODIndex = 0; // 0 = Base (LOD0), 1 ~ 8 = LOD 1 ~ 8
 		std::vector<GeneratedLODAsset> m_GeneratedLODs;
-		Ref<Mesh> m_LODMeshes[3]; // [0]=unused, [1]=LOD1, [2]=LOD2
+		Ref<Mesh> m_LODMeshes[9]; // [0]=unused, [1..8]=LOD1..8
 		std::string m_LODStatusMessage;
 		bool m_LODStatusIsError = false;
+
+		// 异步生成与存盘任务状态
+		std::future<AsyncLODGenResult> m_AsyncGenFuture;
+		bool m_AsyncGenRunning = false;
+		std::chrono::high_resolution_clock::time_point m_AsyncGenStartTime {};
+
+		std::future<AsyncLODSaveResult> m_AsyncSaveFuture;
+		bool m_AsyncSaveRunning = false;
+		std::chrono::high_resolution_clock::time_point m_AsyncSaveStartTime {};
+
+		void PollAsyncLODTasks(PanelHost& host);
 
 		// ---- 材质编辑状态 ----
 		std::vector<std::string> m_MaterialSlotBuffers;

@@ -4,14 +4,14 @@ Entity:
     ID:
       m_UUID: 950000000000000003
   World::TagComponent:
-    Tag: "Showcase Stage Floor"
+    Tag: "Gallery Main Floor"
   World::TransformComponent:
-    Location: [0, -0.25, 0]
+    Location: [0, -0.3, 0]
     Rotation: [0, 0, 0]
-    Scale: [70, 0.5, 110]
+    Scale: [80, 0.6, 140]
   World::MeshRendererComponent:
     Primitive: 0
-    Color: [0.14, 0.16, 0.20, 1]
+    Color: [0.10, 0.12, 0.15, 1]
     Mesh: ""
   World::LevelEntityComponent:
     DataLayerMask: 1

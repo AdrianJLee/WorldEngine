@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 950000000000000015
+  World::TagComponent:
+    Tag: "Standard Sphere (Auto LOD)"
+  World::TransformComponent:
+    Location: [-4.5, 1.6, -34]
+    Rotation: [0, 0, 0]
+    Scale: [2.0, 2.0, 2.0]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.92, 0.92, 0.92, 1]
+    Mesh: "engine/models/primitives/sphere.wmodel"
+  World::MeshLODComponent:
+    LOD1Mesh: ""
+    LOD2Mesh: ""
+    LOD1Distance: 15.0
+    LOD2Distance: 35.0
+    CullDistance: 60.0
+    Hysteresis: 2.0
+    CurrentLOD: 0
+    EnableCrossFade: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 2

@@ -6,7 +6,7 @@ Entity:
   World::TagComponent:
     Tag: "Showcase Camera"
   World::TransformComponent:
-    Location: [0, 4, 28]
+    Location: [0, 3.5, 30]
     Rotation: [-6, 0, 0]
     Scale: [1, 1, 1]
   World::CameraComponent:
