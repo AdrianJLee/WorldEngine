@@ -886,10 +886,15 @@ void EditorShell::OpenAsset(const std::string& rawPath)
 		OpenScriptEditor(logical);
 		Notify("已在脚本编辑器中打开: " + logical);
 	}
-	else if (ext == ".wmodel" || ext == ".obj" || ext == ".gltf" || ext == ".glb")
+	else if (ext == ".wmodel" || ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".wskeleton" || ext == ".wclip")
 	{
 		OpenModelPreview(logical);
-		Notify("已打开 3D 模型资产预览: " + logical);
+		if (ext == ".wskeleton")
+			Notify("已打开 3D 骨架资产预览: " + logical);
+		else if (ext == ".wclip")
+			Notify("已打开 3D 动画片段预览: " + logical);
+		else
+			Notify("已打开 3D 模型资产预览: " + logical);
 	}
 	else if (ext == ".wprefab")
 	{

@@ -228,13 +228,16 @@ namespace
 		const entt::entity entity = scene.GetRegistry().create();
 		SkinnedMeshRendererComponent component;
 		component.Mesh.Path = StringPool::Get().InternPath(modelFile.string());   // 绝对路径:ReadFile 的候选路径都会命中它
-		component.AnimationClip = StringPool::Get().InternName("Move");
-		component.Speed = 2.0f;
 		scene.GetRegistry().emplace<SkinnedMeshRendererComponent>(entity, component);
+
+		AnimationPlayerComponent player;
+		player.PlaybackSpeed = 2.0f;
+		player.Clip = AssetRef::FromPath("Move");
+		scene.GetRegistry().emplace<AnimationPlayerComponent>(entity, player);
 
 		// 0.25s × Speed 2 = +0.5s → Time=0.5,调色板 = t=0.5(关节 0 平移半程)。
 		AnimationSystem::Update(scene, 0.25f);
-		CHECK(Nearly(scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).Time, 0.5f));
+		CHECK(Nearly(scene.GetRegistry().get<AnimationPlayerComponent>(entity).CurrentTime, 0.5f));
 		const std::vector<glm::mat4>* palette = AnimationSystem::GetPalette(entity);
 		CHECK(palette != nullptr);
 		if (palette)
@@ -245,33 +248,35 @@ namespace
 
 		// 再 +0.5s(clip 时长 1s,Loop=true)→ 回绕到 0。
 		AnimationSystem::Update(scene, 0.25f);
-		CHECK(Nearly(scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).Time, 0.0f));
+		CHECK(Nearly(scene.GetRegistry().get<AnimationPlayerComponent>(entity).CurrentTime, 0.0f));
 		CHECK(AnimationSystem::GetPalette(entity) != nullptr);
 
 		// Playing=false:Time 不再推进;没有该组件的实体取不到调色板。
-		scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).Playing = false;
+		scene.GetRegistry().get<AnimationPlayerComponent>(entity).Playing = 0;
 		AnimationSystem::Update(scene, 1.0f);
-		CHECK(Nearly(scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).Time, 0.0f));
+		CHECK(Nearly(scene.GetRegistry().get<AnimationPlayerComponent>(entity).CurrentTime, 0.0f));
 		const entt::entity plain = scene.GetRegistry().create();
 		AnimationSystem::Update(scene, 0.1f);
 		CHECK(AnimationSystem::GetPalette(plain) == nullptr);
 
 		// 未知 clip:不推 Time、按绑定姿态出调色板(非空),不崩。
-		scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).Playing = true;
-		scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).AnimationClip = StringPool::Get().InternName("NoSuchClip");
+		scene.GetRegistry().get<AnimationPlayerComponent>(entity).Playing = 1;
+		scene.GetRegistry().get<AnimationPlayerComponent>(entity).Clip = AssetRef::FromPath("NoSuchClip");
 		AnimationSystem::Update(scene, 0.5f);
-		CHECK(Nearly(scene.GetRegistry().get<SkinnedMeshRendererComponent>(entity).Time, 0.0f));
+		CHECK(Nearly(scene.GetRegistry().get<AnimationPlayerComponent>(entity).CurrentTime, 0.0f));
 		CHECK(AnimationSystem::GetPalette(entity) != nullptr);
 
 		// 坏路径:读失败 → 跳过该实体(不崩、Time 不动、没有调色板);失败路径不逐帧重试。
 		const entt::entity broken = scene.GetRegistry().create();
 		SkinnedMeshRendererComponent brokenComponent;
 		brokenComponent.Mesh.Path = StringPool::Get().InternPath((root / "missing.wmodel").string());
-		brokenComponent.Time = 0.25f;
 		scene.GetRegistry().emplace<SkinnedMeshRendererComponent>(broken, brokenComponent);
+		AnimationPlayerComponent brokenPlayer;
+		brokenPlayer.CurrentTime = 0.25f;
+		scene.GetRegistry().emplace<AnimationPlayerComponent>(broken, brokenPlayer);
 		AnimationSystem::Update(scene, 0.5f);
 		CHECK(AnimationSystem::GetPalette(broken) == nullptr);
-		CHECK(Nearly(scene.GetRegistry().get<SkinnedMeshRendererComponent>(broken).Time, 0.25f));
+		CHECK(Nearly(scene.GetRegistry().get<AnimationPlayerComponent>(broken).CurrentTime, 0.25f));
 
 		AnimationSystem::ClearCache();
 		fs::remove_all(root);

@@ -13,20 +13,13 @@ Entity:
     Mesh: "engine/models/characters/mannequin.wmodel"
     MeshIndex: 0
     Material: ""
-    AnimationClip: ""
-    Speed: 1.0
-    Time: 0.0
-    Playing: true
-    Loop: true
+    CastShadow: true
   World::AnimGraphComponent:
     AnimGraphAsset: "engine/animation/mannequin_locomotion.wanimgraph"
     PlaybackSpeed: 1.0
-    RootMotionWeight: 1.0
-    FootIkWeight: 1.0
+    RootMotionMode: 0
+    RootMotionScale: 1.0
     CurrentStateHash: 0
-    EnableRootMotion: 0
-    EnableFootIk: 0
-    EnableUpperBodyLayer: 0
   World::FootIkComponent:
     Weight: 1.0
     FootOffset: 0.0

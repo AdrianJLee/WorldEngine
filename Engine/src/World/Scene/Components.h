@@ -10,6 +10,7 @@
 #include "World/Renderer/Camera.h"
 #include "World/Schema/Schema.h"
 #include "World/Schema/BuiltinAssetOps.h"
+#include "World/Animation/AnimGraph.h"
 
 #include <any>
 #include <box2d/id.h>
@@ -621,32 +622,53 @@ namespace World
 		AssetRef Mesh;
 		AssetRef Material;
 		int32_t MeshIndex = 0;
-		// clip 名 = 驻留名字(在模型的若干条 clip 里查名字,天然是有界集合)。
-		NameId AnimationClip;
-		float Speed = 1.0f;
-		float Time = 0.0f;
-		bool Playing = true;
-		bool Loop = true;
+		uint8_t CastShadow = 1;
+		uint8_t _Padding[11] { 0 };
 
 		WE_SCHEMA_BODY(World, SkinnedMeshRendererComponent, Component)
 			WE_SCHEMA_META(Category("Rendering"),
-				Doc("Skeleton-driven mesh: an empty AnimationClip plays the first clip and Time is written by the animation system (read-only under Play)."))
+				Doc("Dynamic skinned mesh renderer driven by skeletal bone palette."))
 			WE_FIELD(Mesh, Asset, Id(0x534B4D4553485041), Of("Model"),
 				Doc("Skinned model asset (.wmodel); required — this component draws nothing without it."));
 			WE_FIELD(MeshIndex, Int32, Id(0x534B4D4553484958), Default(0));
 			WE_FIELD(Material, Asset, Id(0x534B4D4154505448), Of("Material"),
 				Doc("Material asset (.wmat); empty = the model's own material slots."));
-			WE_FIELD(AnimationClip, Name, Id(0x534B414E494D434C),
-				Doc("Clip name inside the model; empty = play the first clip."));
-			WE_FIELD(Playing, Bool, Id(0x534B504C4159494E), Default(true),
-				Doc("Play the clip automatically."));
-			WE_FIELD(Speed, Float, Id(0x534B535045454430), Default(1.0f),
-				Doc("Playback speed multiplier (1 = the clip's authored speed)."));
-			WE_FIELD(Loop, Bool, Id(0x534B4C4F4F503030), Default(true),
-				Doc("Loop the clip when it reaches the end."));
-			WE_FIELD(Time, Float, Id(0x534B54494D453030), Default(0.0f));
+			WE_FIELD(CastShadow, UInt8, Id(0x534B435354534844), Default(1),
+				Doc("Whether this skinned mesh casts dynamic shadows."));
 		WE_SCHEMA_END
 	};
+
+	struct AnimationPlayerComponent
+	{
+		AssetRef Clip;
+		float PlaybackSpeed { 1.0f };
+		float CurrentTime { 0.0f };
+		uint8_t Playing { 1 };
+		uint8_t Loop { 1 };
+		uint8_t _Padding[6] { 0 };
+
+		WE_SCHEMA_BODY(World, AnimationPlayerComponent, Component)
+			WE_SCHEMA_META(Category("Animation"),
+				Doc("Simple single animation clip player component."))
+			WE_FIELD(Clip, Asset, Id(0x414E494D504C434C), Of("AnimationClip"),
+				Doc("Reference to the .wclip animation clip asset."));
+			WE_FIELD(PlaybackSpeed, Float, Id(0x414E494D50535044), Range(0.0f, 10.0f), Default(1.0f),
+				Doc("Playback speed multiplier."));
+			WE_FIELD(CurrentTime, Float, Id(0x414E494D5054494D), Default(0.0f),
+				Doc("Current playback time in seconds."));
+			WE_FIELD(Playing, UInt8, Id(0x414E494D50504C59), Default(1),
+				Doc("Whether the animation is playing."));
+			WE_FIELD(Loop, UInt8, Id(0x414E494D504C4F50), Default(1),
+				Doc("Whether the animation loops when reaching the end."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(AnimationPlayerComponent) == 32, "AnimationPlayerComponent must be 32 bytes");
+	static_assert(std::is_trivially_copyable_v<AnimationPlayerComponent>, "AnimationPlayerComponent must be trivially copyable");
+	static_assert(offsetof(AnimationPlayerComponent, Clip) == 0, "Clip offset mismatch");
+	static_assert(offsetof(AnimationPlayerComponent, PlaybackSpeed) == 16, "PlaybackSpeed offset mismatch");
+	static_assert(offsetof(AnimationPlayerComponent, CurrentTime) == 20, "CurrentTime offset mismatch");
+	static_assert(offsetof(AnimationPlayerComponent, Playing) == 24, "Playing offset mismatch");
+	static_assert(offsetof(AnimationPlayerComponent, Loop) == 25, "Loop offset mismatch");
 
 	struct CameraComponent
 	{
@@ -2216,39 +2238,42 @@ namespace World
 	static_assert(offsetof(FoliageComponent, AlignToNormal) == 38, "AlignToNormal offset mismatch");
 	static_assert(offsetof(FoliageComponent, EnableWind) == 39, "EnableWind offset mismatch");
 
+	WE_ENUM_SCHEMA(World, RootMotionMode, UInt8)
+		WE_ENUM_VALUE(None);
+		WE_ENUM_VALUE(Planar);
+		WE_ENUM_VALUE(Full);
+	WE_ENUM_END
+
 	struct AnimGraphComponent
 	{
 		AssetRef AnimGraphAsset;                          // 16B (offset 0)
 		float PlaybackSpeed { 1.0f };                     // 4B  (offset 16)
 		float RootMotionWeight { 1.0f };                  // 4B  (offset 20)
-		float FootIkWeight { 1.0f };                      // 4B  (offset 24)
+		float RootMotionScale { 1.0f };                   // 4B  (offset 24)
 		uint32_t CurrentStateHash { 0 };                  // 4B  (offset 28)
-		uint8_t EnableRootMotion { 1 };                   // 1B  (offset 32)
-		uint8_t EnableFootIk { 1 };                       // 1B  (offset 33)
-		uint8_t EnableUpperBodyLayer { 0 };               // 1B  (offset 34)
-		uint8_t _Padding[13] { 0 };                       // 13B (offset 35)
+		RootMotionMode RootMotion { RootMotionMode::Planar }; // 1B (offset 32)
+		uint8_t EnableRootMotion { 1 };                   // 1B  (offset 33)
+		uint8_t _Padding[14] { 0 };                       // 14B (offset 34)
 
 		AnimGraphComponent() = default;
 
 		WE_SCHEMA_BODY(World, AnimGraphComponent, Component)
 			WE_SCHEMA_META(Category("Animation"),
-				Doc("3D animation graph state machine with blend spaces, root motion and foot IK."))
-			WE_FIELD(AnimGraphAsset, Asset, Of("AnimGraph"),
+				Doc("3D animation graph state machine with blend spaces, root motion and state transitions."))
+			WE_FIELD(AnimGraphAsset, Asset, Id(0x414E494D47525048), Of("AnimGraph"),
 				Doc("Reference to the .wanimgraph asset."));
-			WE_FIELD(PlaybackSpeed, Float, Range(0.0f, 10.0f), Default(1.0f),
+			WE_FIELD(PlaybackSpeed, Float, Id(0x414E494D53504544), Range(0.0f, 10.0f), Default(1.0f),
 				Doc("Playback speed multiplier."));
-			WE_FIELD(RootMotionWeight, Float, Range(0.0f, 1.0f), Default(1.0f),
+			WE_FIELD(RootMotionWeight, Float, Id(0x414E494D52545754), Range(0.0f, 1.0f), Default(1.0f),
 				Doc("Blend weight of root motion displacement into character transform."));
-			WE_FIELD(FootIkWeight, Float, Range(0.0f, 1.0f), Default(1.0f),
-				Doc("Blend weight of foot ground-alignment inverse kinematics."));
-			WE_FIELD(CurrentStateHash, UInt32, Default(0),
+			WE_FIELD(RootMotionScale, Float, Id(0x414E494D52545343), Range(0.0f, 10.0f), Default(1.0f),
+				Doc("Scaling multiplier applied to root motion displacement."));
+			WE_FIELD(CurrentStateHash, UInt32, Id(0x414E494D53544853), Default(0),
 				Doc("Hash of current active state node (readback)."));
-			WE_FIELD(EnableRootMotion, UInt8, Default(1),
+			WE_FIELD(RootMotion, Enum, Id(0x414E494D52544D44), Of(RootMotionMode),
+				Doc("Root motion mode: None, Planar (horizontal XZ only), or Full (XYZ)."));
+			WE_FIELD(EnableRootMotion, UInt8, Id(0x414E494D454E524D), Default(1),
 				Doc("Whether root motion extraction is enabled."));
-			WE_FIELD(EnableFootIk, UInt8, Default(1),
-				Doc("Whether two-bone foot IK is enabled."));
-			WE_FIELD(EnableUpperBodyLayer, UInt8, Default(0),
-				Doc("Whether upper body bone masking layer is active."));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(AnimGraphComponent) == 48, "AnimGraphComponent must be exactly 48 bytes");
@@ -2256,11 +2281,10 @@ namespace World
 	static_assert(offsetof(AnimGraphComponent, AnimGraphAsset) == 0, "AnimGraphAsset offset mismatch");
 	static_assert(offsetof(AnimGraphComponent, PlaybackSpeed) == 16, "PlaybackSpeed offset mismatch");
 	static_assert(offsetof(AnimGraphComponent, RootMotionWeight) == 20, "RootMotionWeight offset mismatch");
-	static_assert(offsetof(AnimGraphComponent, FootIkWeight) == 24, "FootIkWeight offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, RootMotionScale) == 24, "RootMotionScale offset mismatch");
 	static_assert(offsetof(AnimGraphComponent, CurrentStateHash) == 28, "CurrentStateHash offset mismatch");
-	static_assert(offsetof(AnimGraphComponent, EnableRootMotion) == 32, "EnableRootMotion offset mismatch");
-	static_assert(offsetof(AnimGraphComponent, EnableFootIk) == 33, "EnableFootIk offset mismatch");
-	static_assert(offsetof(AnimGraphComponent, EnableUpperBodyLayer) == 34, "EnableUpperBodyLayer offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, RootMotion) == 32, "RootMotion offset mismatch");
+	static_assert(offsetof(AnimGraphComponent, EnableRootMotion) == 33, "EnableRootMotion offset mismatch");
 
 	// -----------------------------------------------------------------------
 	// 通用 IK（I1）：两骨链求解（髋→膝→踝 / 肩→肘→腕 …）。

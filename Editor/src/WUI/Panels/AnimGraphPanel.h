@@ -101,9 +101,7 @@ namespace World
 			const Wui::WuiTheme& theme);
 		void RenderStateGraph(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
 			const Wui::WuiTheme& theme);
-		void RenderPosePreview(Wui::WuiContext& ctx, const Wui::WuiRect& area, const Wui::WuiTheme& theme);
-		void RenderIkCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
-			const Wui::WuiTheme& theme);
+
 		void RenderStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& bar,
 			const Wui::WuiTheme& theme);
 
@@ -258,19 +256,7 @@ namespace World
 		std::unordered_set<std::string> m_MaskCollapsed;   // 关键字 = 骨骼名
 		std::string m_MaskSelectedBone;
 
-		// IK 页签：新建链向导 + 当前选中链。
-		bool m_IkWizardOpen = false;
-		std::string m_IkChainName { "IK Chain" };
-		int m_IkRootIndex = 0;
-		int m_IkMidIndex = 0;
-		int m_IkEndIndex = 0;
-		int m_IkTargetMode = 0;      // 0 = 新建目标实体, 1 = 现有实体, 2 = 世界坐标
-		int m_IkTargetEntityIndex = 0;
-		std::string m_IkStatus;
-		bool m_IkStatusError = false;
-		std::string m_SelectedIkTag;
-		glm::vec3 m_IkManualTarget { 0.0f };
-		float m_IkScroll = 0.0f;
+
 
 		// 模型/Clip 缓存(选中实体或模型路径变化时才重读)
 		std::string m_TargetModelPath;
@@ -281,14 +267,7 @@ namespace World
 		bool m_ModelValid = false;
 		Asset::WModelData m_Model;
 
-		// 姿态预览视图态
-		glm::vec2 m_PosePan { 0.0f, 0.0f };
-		float m_PoseZoom = 1.0f;
-		bool m_PoseShowGrid = true;
-		bool m_PoseShowBones = true;
-		bool m_PoseShowNames = false;
-		bool m_PosePanning = false;
-		glm::vec2 m_PosePanStart { 0.0f, 0.0f };
+
 
 		// 混合空间视图态
 		bool m_BlendShowGrid = true;

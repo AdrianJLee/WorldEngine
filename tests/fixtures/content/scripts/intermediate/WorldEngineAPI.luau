@@ -996,14 +996,21 @@ function ui:isOpen() end
 
 -- Component fields are exposed through Entity:GetComponent("AnimGraphComponent"); there is no runtime global named AnimGraphComponent.
 ---@class AnimGraphComponent
----@field PlaybackSpeed number
 ---@field EnableRootMotion number
----@field EnableFootIk number
----@field CurrentStateHash number
----@field EnableUpperBodyLayer number
 ---@field AnimGraphAsset string
+---@field RootMotion number
+---@field RootMotionScale number
 ---@field RootMotionWeight number
----@field FootIkWeight number
+---@field PlaybackSpeed number
+---@field CurrentStateHash number
+
+-- Component fields are exposed through Entity:GetComponent("AnimationPlayerComponent"); there is no runtime global named AnimationPlayerComponent.
+---@class AnimationPlayerComponent
+---@field Clip string
+---@field Loop number
+---@field Playing number
+---@field PlaybackSpeed number
+---@field CurrentTime number
 
 -- Component fields are exposed through Entity:GetComponent("AreaEffector2DComponent"); there is no runtime global named AreaEffector2DComponent.
 ---@class AreaEffector2DComponent
@@ -1501,14 +1508,10 @@ function ui:isOpen() end
 
 -- Component fields are exposed through Entity:GetComponent("SkinnedMeshRendererComponent"); there is no runtime global named SkinnedMeshRendererComponent.
 ---@class SkinnedMeshRendererComponent
----@field AnimationClip string
----@field Loop boolean
+---@field CastShadow number
 ---@field Material string
 ---@field MeshIndex number
 ---@field Mesh string
----@field Playing boolean
----@field Speed number
----@field Time number
 
 -- Component fields are exposed through Entity:GetComponent("SmartObjectComponent"); there is no runtime global named SmartObjectComponent.
 ---@class SmartObjectComponent
@@ -1706,6 +1709,8 @@ function ui:isOpen() end
 ---@field AmbientLight string Short alias for "AmbientLightComponent".
 ---@field AnimGraphComponent string Registered component type name "AnimGraphComponent".
 ---@field AnimGraph string Short alias for "AnimGraphComponent".
+---@field AnimationPlayerComponent string Registered component type name "AnimationPlayerComponent".
+---@field AnimationPlayer string Short alias for "AnimationPlayerComponent".
 ---@field AreaEffector2DComponent string Registered component type name "AreaEffector2DComponent".
 ---@field AreaEffector2D string Short alias for "AreaEffector2DComponent".
 ---@field AudioListenerComponent string Registered component type name "AudioListenerComponent".

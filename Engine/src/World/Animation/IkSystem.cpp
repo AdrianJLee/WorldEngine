@@ -454,29 +454,15 @@ namespace World
 				return;
 
 			const FootIkComponent* footComponent = registry.try_get<FootIkComponent>(owner);
-			const AnimGraphComponent* graphComponent = registry.try_get<AnimGraphComponent>(owner);
-			float weight = 0.0f;
-			float footOffset = 0.0f;
-			float maxPelvisDrop = std::numeric_limits<float>::max();
-
-			if (footComponent)
-			{
-				// 有 FootIkComponent 时以示例组件为准（即使它被禁用，也不回退到旧字段）。
-				if (footComponent->Enabled == 0 || !(footComponent->Weight > 0.0f))
-					return;
-				weight = std::clamp(footComponent->Weight, 0.0f, 1.0f);
-				footOffset = std::isfinite(footComponent->FootOffset) ? footComponent->FootOffset : 0.0f;
-				maxPelvisDrop = (std::isfinite(footComponent->MaxPelvisDrop) && footComponent->MaxPelvisDrop >= 0.0f)
-					? footComponent->MaxPelvisDrop
-					: std::numeric_limits<float>::max();
-			}
-			else
-			{
-				// 兼容路径：旧 AnimGraphComponent.EnableFootIk/FootIkWeight（行为与旧 ApplyFootIk 一致）。
-				if (!graphComponent || graphComponent->EnableFootIk == 0 || !(graphComponent->FootIkWeight > 0.0f))
-					return;
-				weight = std::clamp(graphComponent->FootIkWeight, 0.0f, 1.0f);
-			}
+			if (!footComponent)
+				return;
+			if (footComponent->Enabled == 0 || !(footComponent->Weight > 0.0f))
+				return;
+			const float weight = std::clamp(footComponent->Weight, 0.0f, 1.0f);
+			const float footOffset = std::isfinite(footComponent->FootOffset) ? footComponent->FootOffset : 0.0f;
+			const float maxPelvisDrop = (std::isfinite(footComponent->MaxPelvisDrop) && footComponent->MaxPelvisDrop >= 0.0f)
+				? footComponent->MaxPelvisDrop
+				: std::numeric_limits<float>::max();
 			if (weight <= 0.0f)
 				return;
 
@@ -602,15 +588,14 @@ namespace World
 
 		// 只有确实需要脚步 IK 的实体才去找地形（与旧 Update 的提前剪枝一致）。
 		bool needsTerrain = false;
-		for (const entt::entity entity : registry.view<AnimGraphComponent>())
+		for (const entt::entity entity : registry.view<FootIkComponent>())
 		{
-			const AnimGraphComponent* graph = registry.try_get<AnimGraphComponent>(entity);
-			if (!graph)
-				continue;
-			if (const FootIkComponent* foot = registry.try_get<FootIkComponent>(entity))
-				needsTerrain = needsTerrain || (foot->Enabled != 0 && foot->Weight > 0.0f);
-			else
-				needsTerrain = needsTerrain || (graph->EnableFootIk != 0 && graph->FootIkWeight > 0.0f);
+			const FootIkComponent* foot = registry.try_get<FootIkComponent>(entity);
+			if (foot && foot->Enabled != 0 && foot->Weight > 0.0f)
+			{
+				needsTerrain = true;
+				break;
+			}
 		}
 		if (needsTerrain)
 			state.Terrain = FindSceneTerrain(registry);

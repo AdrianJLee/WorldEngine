@@ -18,6 +18,7 @@ const TypeSchema& WeSchemaOf_TilemapComponent();
 const TypeSchema& WeSchemaOf_CircleRendererComponent();
 const TypeSchema& WeSchemaOf_MeshRendererComponent();
 const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent();
+const TypeSchema& WeSchemaOf_AnimationPlayerComponent();
 const TypeSchema& WeSchemaOf_HierarchyComponent();
 const TypeSchema& WeSchemaOf_CameraComponent();
 const TypeSchema& WeSchemaOf_PixelPerfectCameraComponent();
@@ -99,6 +100,7 @@ const EnumSchema& WeEnumSchemaOf_ParticleRenderMode();
 const EnumSchema& WeEnumSchemaOf_ParticleBlendMode();
 const EnumSchema& WeEnumSchemaOf_LocalWindType();
 const EnumSchema& WeEnumSchemaOf_VfxPlaybackState();
+const EnumSchema& WeEnumSchemaOf_RootMotionMode();
 
 	namespace
 	{
@@ -1748,55 +1750,15 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
         World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
         AssetOps<std::remove_reference_t<decltype(self->Material)>>::SetIdentity(self->Material, identity);
     }
-    static Value Get_AnimationClip(const void* instance)
+    static Value Get_CastShadow(const void* instance)
     {
         const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(NameOps<std::remove_reference_t<decltype(self->AnimationClip)>>::GetName(self->AnimationClip));
+        return Value(self->CastShadow);
     }
-    static void Set_AnimationClip(void* instance, const Value& value)
+    static void Set_CastShadow(void* instance, const Value& value)
     {
         World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        NameOps<std::remove_reference_t<decltype(self->AnimationClip)>>::SetName(self->AnimationClip, std::get<std::string>(value));
-    }
-    static Value Get_Playing(const void* instance)
-    {
-        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(static_cast<bool>(self->Playing));
-    }
-    static void Set_Playing(void* instance, const Value& value)
-    {
-        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        self->Playing = static_cast<decltype(self->Playing)>(std::get<bool>(value));
-    }
-    static Value Get_Speed(const void* instance)
-    {
-        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(self->Speed);
-    }
-    static void Set_Speed(void* instance, const Value& value)
-    {
-        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        self->Speed = std::get<float>(value);
-    }
-    static Value Get_Loop(const void* instance)
-    {
-        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(static_cast<bool>(self->Loop));
-    }
-    static void Set_Loop(void* instance, const Value& value)
-    {
-        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        self->Loop = static_cast<decltype(self->Loop)>(std::get<bool>(value));
-    }
-    static Value Get_Time(const void* instance)
-    {
-        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
-        return Value(self->Time);
-    }
-    static void Set_Time(void* instance, const Value& value)
-    {
-        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
-        self->Time = std::get<float>(value);
+        self->CastShadow = std::get<uint8_t>(value);
     }
     static const FieldSchema& Field_Mesh()
     {
@@ -1866,93 +1828,21 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
         };
         return schema;
     }
-    static const FieldSchema& Field_AnimationClip()
+    static const FieldSchema& Field_CastShadow()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x534B414E494D434Cull },
-            "AnimationClip",
-            Kind::Name,
-            &Get_AnimationClip,
-            &Set_AnimationClip,
+            FieldId{ 0x534B435354534844ull },
+            "CastShadow",
+            Kind::UInt8,
+            &Get_CastShadow,
+            &Set_CastShadow,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Clip name inside the model; empty = play the first clip.", false, "", {  }, "", std::nullopt },
-            Value(),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_Playing()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x534B504C4159494Eull },
-            "Playing",
-            Kind::Bool,
-            &Get_Playing,
-            &Set_Playing,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Play the clip automatically.", false, "", {  }, "", std::nullopt },
-            Value(true),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_Speed()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x534B535045454430ull },
-            "Speed",
-            Kind::Float,
-            &Get_Speed,
-            &Set_Speed,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Playback speed multiplier (1 = the clip's authored speed).", false, "", {  }, "", std::nullopt },
-            Value(1.0f),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_Loop()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x534B4C4F4F503030ull },
-            "Loop",
-            Kind::Bool,
-            &Get_Loop,
-            &Set_Loop,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Loop the clip when it reaches the end.", false, "", {  }, "", std::nullopt },
-            Value(true),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_Time()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x534B54494D453030ull },
-            "Time",
-            Kind::Float,
-            &Get_Time,
-            &Set_Time,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0f),
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this skinned mesh casts dynamic shadows.", false, "", {  }, "", std::nullopt },
+            Value(1),
         };
         return schema;
     }
@@ -1973,15 +1863,201 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
                 Field_Mesh(),
                 Field_MeshIndex(),
                 Field_Material(),
-                Field_AnimationClip(),
-                Field_Playing(),
-                Field_Speed(),
-                Field_Loop(),
-                Field_Time(),
+                Field_CastShadow(),
             },
             &StorageBindingOf(),
             "Rendering",
-            "Skeleton-driven mesh: an empty AnimationClip plays the first clip and Time is written by the animation system (read-only under Play).",
+            "Dynamic skinned mesh renderer driven by skeletal bone palette.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::AnimationPlayerComponent>
+{
+    static Value Get_Clip(const void* instance)
+    {
+        const World::AnimationPlayerComponent* self = static_cast<const World::AnimationPlayerComponent*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Clip)>>::GetPath(self->Clip));
+    }
+    static void Set_Clip(void* instance, const Value& value)
+    {
+        World::AnimationPlayerComponent* self = static_cast<World::AnimationPlayerComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Clip)>>::SetPath(self->Clip, std::get<std::string>(value));
+    }
+    static uint64_t GetAssetIdentity_Clip(const void* instance)
+    {
+        const World::AnimationPlayerComponent* self = static_cast<const World::AnimationPlayerComponent*>(instance);
+        return AssetOps<std::remove_reference_t<decltype(self->Clip)>>::GetIdentity(self->Clip);
+    }
+    static void SetAssetIdentity_Clip(void* instance, uint64_t identity)
+    {
+        World::AnimationPlayerComponent* self = static_cast<World::AnimationPlayerComponent*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Clip)>>::SetIdentity(self->Clip, identity);
+    }
+    static Value Get_PlaybackSpeed(const void* instance)
+    {
+        const World::AnimationPlayerComponent* self = static_cast<const World::AnimationPlayerComponent*>(instance);
+        return Value(self->PlaybackSpeed);
+    }
+    static void Set_PlaybackSpeed(void* instance, const Value& value)
+    {
+        World::AnimationPlayerComponent* self = static_cast<World::AnimationPlayerComponent*>(instance);
+        self->PlaybackSpeed = std::get<float>(value);
+    }
+    static Value Get_CurrentTime(const void* instance)
+    {
+        const World::AnimationPlayerComponent* self = static_cast<const World::AnimationPlayerComponent*>(instance);
+        return Value(self->CurrentTime);
+    }
+    static void Set_CurrentTime(void* instance, const Value& value)
+    {
+        World::AnimationPlayerComponent* self = static_cast<World::AnimationPlayerComponent*>(instance);
+        self->CurrentTime = std::get<float>(value);
+    }
+    static Value Get_Playing(const void* instance)
+    {
+        const World::AnimationPlayerComponent* self = static_cast<const World::AnimationPlayerComponent*>(instance);
+        return Value(self->Playing);
+    }
+    static void Set_Playing(void* instance, const Value& value)
+    {
+        World::AnimationPlayerComponent* self = static_cast<World::AnimationPlayerComponent*>(instance);
+        self->Playing = std::get<uint8_t>(value);
+    }
+    static Value Get_Loop(const void* instance)
+    {
+        const World::AnimationPlayerComponent* self = static_cast<const World::AnimationPlayerComponent*>(instance);
+        return Value(self->Loop);
+    }
+    static void Set_Loop(void* instance, const Value& value)
+    {
+        World::AnimationPlayerComponent* self = static_cast<World::AnimationPlayerComponent*>(instance);
+        self->Loop = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_Clip()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x414E494D504C434Cull },
+            "Clip",
+            Kind::Asset,
+            &Get_Clip,
+            &Set_Clip,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "AnimationClip",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Reference to the .wclip animation clip asset.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::None,
+            Kind::None,
+            Kind::String,
+            nullptr,
+            nullptr,
+            &GetAssetIdentity_Clip,
+            &SetAssetIdentity_Clip,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_PlaybackSpeed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x414E494D50535044ull },
+            "PlaybackSpeed",
+            Kind::Float,
+            &Get_PlaybackSpeed,
+            &Set_PlaybackSpeed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "Playback speed multiplier.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CurrentTime()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x414E494D5054494Dull },
+            "CurrentTime",
+            Kind::Float,
+            &Get_CurrentTime,
+            &Set_CurrentTime,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current playback time in seconds.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Playing()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x414E494D50504C59ull },
+            "Playing",
+            Kind::UInt8,
+            &Get_Playing,
+            &Set_Playing,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the animation is playing.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Loop()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x414E494D504C4F50ull },
+            "Loop",
+            Kind::UInt8,
+            &Get_Loop,
+            &Set_Loop,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether the animation loops when reaching the end.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::AnimationPlayerComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::AnimationPlayerComponent" },
+            "AnimationPlayerComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::AnimationPlayerComponent),
+            TypeCategory::Component,
+            {
+                Field_Clip(),
+                Field_PlaybackSpeed(),
+                Field_CurrentTime(),
+                Field_Playing(),
+                Field_Loop(),
+            },
+            &StorageBindingOf(),
+            "Animation",
+            "Simple single animation clip player component.",
             false,
             false,
         };
@@ -12226,15 +12302,15 @@ struct GeneratedAccess<World::AnimGraphComponent>
         World::AnimGraphComponent* self = static_cast<World::AnimGraphComponent*>(instance);
         self->RootMotionWeight = std::get<float>(value);
     }
-    static Value Get_FootIkWeight(const void* instance)
+    static Value Get_RootMotionScale(const void* instance)
     {
         const World::AnimGraphComponent* self = static_cast<const World::AnimGraphComponent*>(instance);
-        return Value(self->FootIkWeight);
+        return Value(self->RootMotionScale);
     }
-    static void Set_FootIkWeight(void* instance, const Value& value)
+    static void Set_RootMotionScale(void* instance, const Value& value)
     {
         World::AnimGraphComponent* self = static_cast<World::AnimGraphComponent*>(instance);
-        self->FootIkWeight = std::get<float>(value);
+        self->RootMotionScale = std::get<float>(value);
     }
     static Value Get_CurrentStateHash(const void* instance)
     {
@@ -12246,6 +12322,20 @@ struct GeneratedAccess<World::AnimGraphComponent>
         World::AnimGraphComponent* self = static_cast<World::AnimGraphComponent*>(instance);
         self->CurrentStateHash = std::get<uint32_t>(value);
     }
+    static Value Get_RootMotion(const void* instance)
+    {
+        const World::AnimGraphComponent* self = static_cast<const World::AnimGraphComponent*>(instance);
+        return Value(static_cast<uint64_t>(self->RootMotion));
+    }
+    static void Set_RootMotion(void* instance, const Value& value)
+    {
+        World::AnimGraphComponent* self = static_cast<World::AnimGraphComponent*>(instance);
+        self->RootMotion = static_cast<World::RootMotionMode>(std::get<uint64_t>(value));
+    }
+    static const EnumSchema* GetEnum_RootMotion()
+    {
+        return &WeEnumSchemaOf_RootMotionMode();
+    }
     static Value Get_EnableRootMotion(const void* instance)
     {
         const World::AnimGraphComponent* self = static_cast<const World::AnimGraphComponent*>(instance);
@@ -12256,30 +12346,10 @@ struct GeneratedAccess<World::AnimGraphComponent>
         World::AnimGraphComponent* self = static_cast<World::AnimGraphComponent*>(instance);
         self->EnableRootMotion = std::get<uint8_t>(value);
     }
-    static Value Get_EnableFootIk(const void* instance)
-    {
-        const World::AnimGraphComponent* self = static_cast<const World::AnimGraphComponent*>(instance);
-        return Value(self->EnableFootIk);
-    }
-    static void Set_EnableFootIk(void* instance, const Value& value)
-    {
-        World::AnimGraphComponent* self = static_cast<World::AnimGraphComponent*>(instance);
-        self->EnableFootIk = std::get<uint8_t>(value);
-    }
-    static Value Get_EnableUpperBodyLayer(const void* instance)
-    {
-        const World::AnimGraphComponent* self = static_cast<const World::AnimGraphComponent*>(instance);
-        return Value(self->EnableUpperBodyLayer);
-    }
-    static void Set_EnableUpperBodyLayer(void* instance, const Value& value)
-    {
-        World::AnimGraphComponent* self = static_cast<World::AnimGraphComponent*>(instance);
-        self->EnableUpperBodyLayer = std::get<uint8_t>(value);
-    }
     static const FieldSchema& Field_AnimGraphAsset()
     {
         static const FieldSchema schema = {
-            FieldId{ 0xB234C12883651114ull },
+            FieldId{ 0x414E494D47525048ull },
             "AnimGraphAsset",
             Kind::Asset,
             &Get_AnimGraphAsset,
@@ -12304,7 +12374,7 @@ struct GeneratedAccess<World::AnimGraphComponent>
     static const FieldSchema& Field_PlaybackSpeed()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x2BA7329028062A9Full },
+            FieldId{ 0x414E494D53504544ull },
             "PlaybackSpeed",
             Kind::Float,
             &Get_PlaybackSpeed,
@@ -12322,7 +12392,7 @@ struct GeneratedAccess<World::AnimGraphComponent>
     static const FieldSchema& Field_RootMotionWeight()
     {
         static const FieldSchema schema = {
-            FieldId{ 0xD72F3D97E343A72Bull },
+            FieldId{ 0x414E494D52545754ull },
             "RootMotionWeight",
             Kind::Float,
             &Get_RootMotionWeight,
@@ -12337,20 +12407,20 @@ struct GeneratedAccess<World::AnimGraphComponent>
         };
         return schema;
     }
-    static const FieldSchema& Field_FootIkWeight()
+    static const FieldSchema& Field_RootMotionScale()
     {
         static const FieldSchema schema = {
-            FieldId{ 0xE220E0472267FBCDull },
-            "FootIkWeight",
+            FieldId{ 0x414E494D52545343ull },
+            "RootMotionScale",
             Kind::Float,
-            &Get_FootIkWeight,
-            &Set_FootIkWeight,
+            &Get_RootMotionScale,
+            &Set_RootMotionScale,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Blend weight of foot ground-alignment inverse kinematics.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "Scaling multiplier applied to root motion displacement.", false, "", {  }, "", std::nullopt },
             Value(1.0f),
         };
         return schema;
@@ -12358,7 +12428,7 @@ struct GeneratedAccess<World::AnimGraphComponent>
     static const FieldSchema& Field_CurrentStateHash()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x856B7039C31AB427ull },
+            FieldId{ 0x414E494D53544853ull },
             "CurrentStateHash",
             Kind::UInt32,
             &Get_CurrentStateHash,
@@ -12373,10 +12443,28 @@ struct GeneratedAccess<World::AnimGraphComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_RootMotion()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x414E494D52544D44ull },
+            "RootMotion",
+            Kind::Enum,
+            &Get_RootMotion,
+            &Set_RootMotion,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_RootMotion,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Root motion mode: None, Planar (horizontal XZ only), or Full (XYZ).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint64_t>(0)),
+        };
+        return schema;
+    }
     static const FieldSchema& Field_EnableRootMotion()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x2E5AE6F08941A6B8ull },
+            FieldId{ 0x414E494D454E524Dull },
             "EnableRootMotion",
             Kind::UInt8,
             &Get_EnableRootMotion,
@@ -12388,42 +12476,6 @@ struct GeneratedAccess<World::AnimGraphComponent>
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether root motion extraction is enabled.", false, "", {  }, "", std::nullopt },
             Value(1),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_EnableFootIk()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x374A8E34B112ED02ull },
-            "EnableFootIk",
-            Kind::UInt8,
-            &Get_EnableFootIk,
-            &Set_EnableFootIk,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether two-bone foot IK is enabled.", false, "", {  }, "", std::nullopt },
-            Value(1),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_EnableUpperBodyLayer()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xAF374073D56BBC83ull },
-            "EnableUpperBodyLayer",
-            Kind::UInt8,
-            &Get_EnableUpperBodyLayer,
-            &Set_EnableUpperBodyLayer,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether upper body bone masking layer is active.", false, "", {  }, "", std::nullopt },
-            Value(0),
         };
         return schema;
     }
@@ -12444,15 +12496,14 @@ struct GeneratedAccess<World::AnimGraphComponent>
                 Field_AnimGraphAsset(),
                 Field_PlaybackSpeed(),
                 Field_RootMotionWeight(),
-                Field_FootIkWeight(),
+                Field_RootMotionScale(),
                 Field_CurrentStateHash(),
+                Field_RootMotion(),
                 Field_EnableRootMotion(),
-                Field_EnableFootIk(),
-                Field_EnableUpperBodyLayer(),
             },
             &StorageBindingOf(),
             "Animation",
-            "3D animation graph state machine with blend spaces, root motion and foot IK.",
+            "3D animation graph state machine with blend spaces, root motion and state transitions.",
             false,
             false,
         };
@@ -16914,6 +16965,25 @@ struct GeneratedEnum<World::VfxPlaybackState>
     }
 };
 
+template <>
+struct GeneratedEnum<World::RootMotionMode>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "RootMotionMode",
+            false,
+            1,
+            {
+                { "None", static_cast<int64_t>(World::RootMotionMode::None) },
+                { "Planar", static_cast<int64_t>(World::RootMotionMode::Planar) },
+                { "Full", static_cast<int64_t>(World::RootMotionMode::Full) },
+            },
+        };
+        return schema;
+    }
+};
+
 const TypeSchema& WeSchemaOf_UUIDComponent() { return GeneratedAccess<World::UUIDComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
@@ -16924,6 +16994,7 @@ const TypeSchema& WeSchemaOf_TilemapComponent() { return GeneratedAccess<World::
 const TypeSchema& WeSchemaOf_CircleRendererComponent() { return GeneratedAccess<World::CircleRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshRendererComponent() { return GeneratedAccess<World::MeshRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent() { return GeneratedAccess<World::SkinnedMeshRendererComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_AnimationPlayerComponent() { return GeneratedAccess<World::AnimationPlayerComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_HierarchyComponent() { return GeneratedAccess<World::HierarchyComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraComponent() { return GeneratedAccess<World::CameraComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_PixelPerfectCameraComponent() { return GeneratedAccess<World::PixelPerfectCameraComponent>::WeSchema(); }
@@ -17005,6 +17076,7 @@ const EnumSchema& WeEnumSchemaOf_ParticleRenderMode() { return GeneratedEnum<Wor
 const EnumSchema& WeEnumSchemaOf_ParticleBlendMode() { return GeneratedEnum<World::ParticleBlendMode>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_LocalWindType() { return GeneratedEnum<World::LocalWindType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World::VfxPlaybackState>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_RootMotionMode() { return GeneratedEnum<World::RootMotionMode>::WeEnumSchema(); }
 
 	bool RegisterWorldSchemaModule(SchemaRegistry& registry)
 	{
@@ -17022,6 +17094,7 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ParticleBlendMode()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_LocalWindType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_VfxPlaybackState()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_RootMotionMode()) != SchemaRegistry::Status::Ok) ok = false;
 		const std::vector<TypeSchema> schemas = {
 			WeSchemaOf_UUIDComponent(),
 			WeSchemaOf_TagComponent(),
@@ -17033,6 +17106,7 @@ const EnumSchema& WeEnumSchemaOf_VfxPlaybackState() { return GeneratedEnum<World
 			WeSchemaOf_CircleRendererComponent(),
 			WeSchemaOf_MeshRendererComponent(),
 			WeSchemaOf_SkinnedMeshRendererComponent(),
+			WeSchemaOf_AnimationPlayerComponent(),
 			WeSchemaOf_HierarchyComponent(),
 			WeSchemaOf_CameraComponent(),
 			WeSchemaOf_PixelPerfectCameraComponent(),

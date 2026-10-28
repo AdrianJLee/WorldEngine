@@ -230,7 +230,6 @@ namespace World
 		// 编辑态也会推进动画（视口预览），但 Root Motion 只能改运行态实体 ——
 		// 否则在 Edit 里只是看着角色就会把 Transform 挪走（并写进关卡）。
 		const bool gameplayActive = scene.IsRunning();
-		AnimationSystem::ClearExternalPalettes();
 
 		const auto view = registry.view<AnimGraphComponent, SkinnedMeshRendererComponent>();
 
@@ -365,17 +364,7 @@ namespace World
 			for (const auto& entry : instance.Overrides)
 				instance.Graph.SetFloat(entry.first, entry.second.Value);
 
-			// 上层遮罩总开关：EnableUpperBodyLayer 直接驱动每一层的权重参数
-			// （开启 = 1，关闭 = 0）。示例脚本只切这个标志位、不写 AimWeight，因此这里必须
-			// 兜底；显式 SetParameter 的同名 override 仍然优先（面板滑杆可做平滑过渡）。
-			for (const AnimLayer& layer : instance.Graph.GetLayers())
-			{
-				if (layer.WeightParameter.empty())
-					continue;
-				if (instance.Overrides.find(layer.WeightParameter) != instance.Overrides.end())
-					continue;
-				instance.Graph.SetFloat(layer.WeightParameter, component.EnableUpperBodyLayer != 0 ? 1.0f : 0.0f);
-			}
+			instance.Graph.SetRootMotionMode(component.RootMotion);
 
 			// ---- 模型与骨架 ----
 			if (!skinned.Mesh.HasPath())
@@ -423,7 +412,7 @@ namespace World
 				// Root Motion：本帧增量按实体朝向旋转后叠加（仅运行态写 Transform）。
 				if (gameplayActive && component.EnableRootMotion != 0 && component.RootMotionWeight > 0.0f)
 				{
-					const glm::vec3 worldDelta = transform.Rotation * (pose.RootMotionDelta * component.RootMotionWeight);
+					const glm::vec3 worldDelta = transform.Rotation * (pose.RootMotionDelta * (component.RootMotionWeight * component.RootMotionScale));
 					if (glm::length(worldDelta) > 1e-8f)
 						TransformSystem::SetLocation(transform, transform.Location + worldDelta);
 
@@ -432,7 +421,7 @@ namespace World
 					const float yaw = 2.0f * std::atan2(rotationDelta.y, rotationDelta.w);
 					if (std::isfinite(yaw) && std::fabs(yaw) > 1e-6f)
 					{
-						const glm::quat yawRotation = glm::angleAxis(yaw * component.RootMotionWeight, glm::vec3(0.0f, 1.0f, 0.0f));
+						const glm::quat yawRotation = glm::angleAxis(yaw * (component.RootMotionWeight * component.RootMotionScale), glm::vec3(0.0f, 1.0f, 0.0f));
 						TransformSystem::SetRotation(transform, SafeNormalize(yawRotation * transform.Rotation));
 					}
 				}
@@ -441,11 +430,12 @@ namespace World
 			if (!instance.Graph.BuildPalette(model, static_cast<uint32_t>(skinIndex), pose, instance.Palette))
 			{
 				instance.Palette.clear();
+				AnimationSystem::SetPalette(entity, {});
 				instance.Error = "调色板构建失败";
 				continue;
 			}
 
-			AnimationSystem::SetExternalPalette(entity, instance.Palette);
+			AnimationSystem::SetPalette(entity, instance.Palette);
 			component.CurrentStateHash = Fnv1a32(instance.Graph.GetCurrentStateName());
 			instance.Error.clear();
 		}
@@ -520,6 +510,5 @@ namespace World
 	void AnimGraphSystem::ClearCache()
 	{
 		Instances().clear();
-		AnimationSystem::ClearExternalPalettes();
 	}
 }

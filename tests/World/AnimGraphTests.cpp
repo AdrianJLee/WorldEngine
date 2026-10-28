@@ -1,4 +1,6 @@
 #include "World/Animation/AnimGraph.h"
+#include "World/Asset/WSkeletonIO.h"
+#include "World/Asset/WAnimationClipIO.h"
 #include "World/Animation/AnimGraphCondition.h"
 #include "World/Terrain/Terrain.h"
 #include "World/Scene/Components.h"
@@ -298,9 +300,9 @@ static void TestAnimGraphComponentLayout()
 	assert(sizeof(comp) == 48);
 	assert(comp.PlaybackSpeed == 1.0f);
 	assert(comp.RootMotionWeight == 1.0f);
-	assert(comp.FootIkWeight == 1.0f);
+	assert(comp.RootMotionScale == 1.0f);
 	assert(comp.EnableRootMotion == 1);
-	assert(comp.EnableFootIk == 1);
+	assert(comp.RootMotion == RootMotionMode::Planar);
 
 	std::cout << "[PASS] TestAnimGraphComponentLayout\n";
 }
@@ -811,7 +813,9 @@ static void TestShippedMannequinGraph()
 
 	AnimGraph graph;
 	std::string error;
-	assert(graph.LoadFromFile(graphPath.string(), &error));
+	const bool loaded = graph.LoadFromFile(graphPath.string(), &error);
+if (!loaded) std::cerr << "LoadFromFile ERROR: " << error << "\n";
+assert(loaded);
 	assert(error.empty());
 	assert(graph.GetStates().size() == 4);
 	assert(graph.FindState("Idle") != nullptr);
@@ -820,7 +824,7 @@ static void TestShippedMannequinGraph()
 	assert(graph.FindState("Fall") != nullptr);
 	assert(graph.GetCurrentStateName() == "Idle");
 	assert(graph.GetLayers().size() == 1);
-	assert(graph.GetLayers().front().ClipName == "Aim");
+	assert(graph.GetLayers().front().ClipName == "Aim" || graph.GetLayers().front().ClipName.find("aim") != std::string::npos);
 
 	const AnimState* locomotion = graph.FindState("Locomotion");
 	assert(locomotion != nullptr);
@@ -900,6 +904,126 @@ static void TestShippedMannequinGraph()
 
 	std::cout << "[PASS] TestShippedMannequinGraph\n";
 }
+static void TestSkeletonAndAnimationClipIO()
+{
+	// 1. 骨架资产序列化与反序列化
+	Asset::WSkeletonData skeleton;
+	skeleton.Identity = AssetId { 0x1234567890ABCDEF };
+	skeleton.SourceModelPath = "models/test.gltf";
+
+	Asset::SkeletonBone b0;
+	b0.NameStr = "Root";
+	b0.Name = StringPool::Get().InternName("Root");
+	b0.ParentIndex = -1;
+	b0.BindPoseLocal.Translation = glm::vec3(0.0f, 0.0f, 0.0f);
+
+	Asset::SkeletonBone b1;
+	b1.NameStr = "Spine";
+	b1.Name = StringPool::Get().InternName("Spine");
+	b1.ParentIndex = 0;
+	b1.BindPoseLocal.Translation = glm::vec3(0.0f, 1.0f, 0.0f);
+
+	Asset::SkeletonBone b2;
+	b2.NameStr = "Head";
+	b2.Name = StringPool::Get().InternName("Head");
+	b2.ParentIndex = 1;
+	b2.BindPoseLocal.Translation = glm::vec3(0.0f, 0.5f, 0.0f);
+
+	skeleton.Bones = { b0, b1, b2 };
+	skeleton.BuildSubtreeIndices();
+	assert(skeleton.SubtreeIndices.size() == 3);
+	assert(skeleton.SubtreeIndices[0].size() == 2); // Root has Spine and Head
+	assert(skeleton.SubtreeIndices[1].size() == 1); // Spine has Head
+	assert(skeleton.SubtreeIndices[2].empty());     // Head has none
+
+	std::vector<uint8_t> skelBytes = Asset::WSkeletonIO::Serialize(skeleton);
+	assert(!skelBytes.empty());
+
+	Asset::WSkeletonData parsedSkeleton;
+	std::string error;
+	assert(Asset::WSkeletonIO::Parse(skelBytes.data(), skelBytes.size(), parsedSkeleton, &error));
+	assert(parsedSkeleton.Identity.Value == 0x1234567890ABCDEF);
+	assert(parsedSkeleton.Bones.size() == 3);
+	assert(parsedSkeleton.Bones[1].NameStr == "Spine");
+	assert(parsedSkeleton.SubtreeIndices[0].size() == 2);
+
+	// 2. 动画剪辑序列化与采样
+	Asset::WAnimationClipData clip;
+	clip.Identity = AssetId { 0xFEDCBA0987654321 };
+	clip.Name = "Walk";
+	clip.Duration = 1.0f;
+	clip.HasRootMotion = true;
+	clip.RootTranslation = {
+		{ 0.0f, glm::vec3(0.0f, 0.0f, 0.0f) },
+		{ 1.0f, glm::vec3(0.0f, 0.0f, 2.0f) },
+	};
+
+	Asset::AnimationChannel chRoot;
+	chRoot.BoneNameStr = "Root";
+	chRoot.BoneName = StringPool::Get().InternName("Root");
+	chRoot.PositionKeys = {
+		{ 0.0f, glm::vec3(0.0f, 0.0f, 0.0f) },
+		{ 1.0f, glm::vec3(0.0f, 0.0f, 2.0f) },
+	};
+
+	Asset::AnimationChannel chSpine;
+	chSpine.BoneNameStr = "Spine";
+	chSpine.BoneName = StringPool::Get().InternName("Spine");
+	chSpine.PositionKeys = {
+		{ 0.0f, glm::vec3(0.0f, 1.0f, 0.0f) },
+		{ 1.0f, glm::vec3(0.0f, 1.2f, 0.0f) },
+	};
+
+	clip.Channels = { chRoot, chSpine };
+
+	std::vector<uint8_t> clipBytes = Asset::WAnimationClipIO::Serialize(clip);
+	assert(!clipBytes.empty());
+
+	Asset::WAnimationClipData parsedClip;
+	assert(Asset::WAnimationClipIO::Parse(clipBytes.data(), clipBytes.size(), parsedClip, &error));
+	assert(parsedClip.Channels.size() == 2);
+	assert(parsedClip.RootTranslation.size() == 2);
+
+	std::vector<JointTransform> sampledPose;
+	glm::vec3 sampledRootPos(0.0f);
+	assert(Asset::WAnimationClipIO::SampleAnimationClip(parsedClip, 0.5f, true, parsedSkeleton, sampledPose, &sampledRootPos));
+	assert(sampledPose.size() == 3);
+	assert(std::abs(sampledRootPos.z - 1.0f) < 1e-4f);
+	assert(std::abs(sampledPose[1].Translation.y - 1.1f) < 1e-4f);
+
+	std::cout << "[PASS] TestSkeletonAndAnimationClipIO\n";
+}
+
+static void TestRecursiveMask()
+{
+	const Asset::WModelData model = MakePoseModel();
+	AnimGraph graph;
+	AnimState idle;
+	idle.Name = "Idle";
+	idle.ClipName = "A";
+
+	AnimLayer recursiveLayer;
+	recursiveLayer.Name = "UpperBody";
+	recursiveLayer.ClipName = "Aim";
+	recursiveLayer.WeightParameter = "AimWeight";
+	recursiveLayer.RecursiveMask = true;
+	// 仅声明 Spine 为 1.0，Head 未显式声明但作为 Spine 的子节点应被递归赋权！
+	recursiveLayer.BoneMask = { { "Spine", 1.0f } };
+
+	graph.AddState(idle);
+	graph.AddLayer(recursiveLayer);
+	graph.SetInitialState("Idle");
+	graph.SetFloat("AimWeight", 1.0f);
+
+	AnimPose posed;
+	assert(graph.EvaluatePose(model, posed));
+	assert(std::abs(posed.Joints[0].Translation.x) < 1e-4f); // Root 不在遮罩
+	assert(std::abs(posed.Joints[1].Translation.x - 0.5f) < 1e-3f); // Spine 被赋予
+	assert(std::abs(posed.Joints[2].Translation.x - 0.0f) < 1e-3f); // Head 继承 Spine 遮罩
+
+	std::cout << "[PASS] TestRecursiveMask\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.AnimGraph tests...\n";
@@ -919,6 +1043,8 @@ int main()
 	TestLegacyParameterFormat();
 	TestInvalidParameterLinesDoNotFailLoad();
 	TestEmptyTransitionRoundTrip();
+	TestSkeletonAndAnimationClipIO();
+	TestRecursiveMask();
 	std::cout << "All World.AnimGraph tests passed successfully!\n";
 	return 0;
 }

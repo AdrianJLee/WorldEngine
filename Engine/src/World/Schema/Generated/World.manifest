@@ -8,6 +8,7 @@ struct World::TilemapComponent
 struct World::CircleRendererComponent
 struct World::MeshRendererComponent
 struct World::SkinnedMeshRendererComponent
+struct World::AnimationPlayerComponent
 struct World::HierarchyComponent
 struct World::CameraComponent
 struct World::PixelPerfectCameraComponent
@@ -89,6 +90,7 @@ enum World::ParticleRenderMode
 enum World::ParticleBlendMode
 enum World::LocalWindType
 enum World::VfxPlaybackState
+enum World::RootMotionMode
 
 
 

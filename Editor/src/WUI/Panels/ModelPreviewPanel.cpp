@@ -13,6 +13,8 @@
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/AssetHotReload.h"
 #include "World/Asset/GltfImporter.h"
+#include "World/Asset/WSkeletonIO.h"
+#include "World/Asset/WAnimationClipIO.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiLocalization.h"
@@ -116,7 +118,24 @@ namespace World
 		std::replace(m_LogicalPath.begin(), m_LogicalPath.end(), '\\', '/');
 		m_PanelId = "model:" + m_LogicalPath;
 		const std::string name = std::filesystem::path(m_LogicalPath).filename().string();
-		m_PanelTitle = "Model - " + (name.empty() ? m_LogicalPath : name);
+		const std::string ext = LowerExtension(std::filesystem::path(m_LogicalPath));
+		if (ext == ".wskeleton")
+		{
+			m_PanelTitle = "Skeleton - " + (name.empty() ? m_LogicalPath : name);
+			m_ActiveTab = 2;
+			m_ShowBones = true;
+		}
+		else if (ext == ".wclip")
+		{
+			m_PanelTitle = "Clip - " + (name.empty() ? m_LogicalPath : name);
+			m_ActiveTab = 4;
+			m_ShowBones = true;
+			m_AnimPlaying = true;
+		}
+		else
+		{
+			m_PanelTitle = "Model - " + (name.empty() ? m_LogicalPath : name);
+		}
 		Reload();
 	}
 
@@ -130,7 +149,44 @@ namespace World
 	{
 		MeshBounds result;
 		if (!m_Mesh)
+		{
+			if (m_DataValid && !m_Data.Nodes.empty())
+			{
+				bool any = false;
+				glm::vec3 boundsMin { 0.0f };
+				glm::vec3 boundsMax { 0.0f };
+				const size_t nodeCount = m_Data.Nodes.size();
+				std::vector<glm::mat4> world(nodeCount, glm::mat4(1.0f));
+				for (size_t index = 0; index < nodeCount; ++index)
+				{
+					const auto& node = m_Data.Nodes[index];
+					const glm::mat4 local = glm::translate(glm::mat4(1.0f), node.Translation)
+						* glm::mat4_cast(node.Rotation)
+						* glm::scale(glm::mat4(1.0f), node.Scale);
+					world[index] = (node.Parent >= 0 && static_cast<size_t>(node.Parent) < index)
+						? world[static_cast<size_t>(node.Parent)] * local : local;
+					const glm::vec3 pos = glm::vec3(world[index][3]);
+					if (!any)
+					{
+						boundsMin = boundsMax = pos;
+						any = true;
+					}
+					else
+					{
+						boundsMin = glm::min(boundsMin, pos);
+						boundsMax = glm::max(boundsMax, pos);
+					}
+				}
+				if (any)
+				{
+					boundsMin -= glm::vec3(0.25f);
+					boundsMax += glm::vec3(0.25f);
+					result.Min = boundsMin;
+					result.Max = boundsMax;
+				}
+			}
 			return result;
+		}
 		const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
 		const std::vector<MeshRange>& meshes = m_Mesh->GetMeshes();
 		const std::vector<MeshSubmesh>& submeshes = m_Mesh->GetSubmeshes();
@@ -195,6 +251,197 @@ namespace World
 		m_TransparentSkipWarned = false;
 		m_SkinnedSubmitWarned = false;
 		m_SlotMaterials.clear();
+		m_Mesh.reset();
+		m_Data = Asset::WModelData();
+		m_DataValid = false;
+
+		const std::string ext = LowerExtension(std::filesystem::path(m_LogicalPath));
+		const std::string name = std::filesystem::path(m_LogicalPath).filename().string();
+
+		if (ext == ".wskeleton")
+		{
+			m_PanelTitle = "Skeleton - " + (name.empty() ? m_LogicalPath : name);
+			std::string error;
+			Asset::WSkeletonData skeleton;
+			if (Asset::WSkeletonIO::ReadFile(m_LogicalPath, skeleton, &error))
+			{
+				m_Data.Nodes.clear();
+				m_Data.Nodes.resize(skeleton.Bones.size());
+				for (size_t i = 0; i < skeleton.Bones.size(); ++i)
+				{
+					const auto& bone = skeleton.Bones[i];
+					m_Data.Nodes[i].Name = bone.NameStr.empty() ? StringPool::Get().NameOf(bone.Name) : bone.NameStr;
+					m_Data.Nodes[i].Parent = bone.ParentIndex;
+					m_Data.Nodes[i].MeshIndex = -1;
+					m_Data.Nodes[i].Translation = bone.BindPoseLocal.Translation;
+					m_Data.Nodes[i].Rotation = bone.BindPoseLocal.Rotation;
+					m_Data.Nodes[i].Scale = bone.BindPoseLocal.Scale;
+				}
+				Asset::WModelSkin skin;
+				skin.Name = "Skeleton";
+				skin.JointNodes.resize(skeleton.Bones.size());
+				skin.JointNames.resize(skeleton.Bones.size());
+				for (size_t i = 0; i < skeleton.Bones.size(); ++i)
+				{
+					skin.JointNodes[i] = static_cast<uint32_t>(i);
+					skin.JointNames[i] = m_Data.Nodes[i].Name;
+				}
+				m_Data.Skins.push_back(std::move(skin));
+				m_DataValid = true;
+				m_ShowBones = true;
+				m_ActiveTab = 2;
+
+				const MeshBounds bounds = ComputeWorldBounds();
+				m_Focus = bounds.GetCenter();
+				const float radius = std::max(0.25f, glm::length(bounds.GetExtents()));
+				m_MinDistance = radius * 0.6f;
+				m_MaxDistance = radius * 40.0f;
+				m_CameraDistance = radius * 3.2f;
+
+				m_Status = "Loaded Skeleton " + m_LogicalPath + " | bones " + std::to_string(skeleton.Bones.size());
+				m_StatusIsError = false;
+				WLD_CORE_INFO("[skeleton] preview '{0}': bones={1}", m_LogicalPath, skeleton.Bones.size());
+				return;
+			}
+			else
+			{
+				m_Status = "Skeleton load failed: " + (error.empty() ? m_LogicalPath : error);
+				m_StatusIsError = true;
+				WLD_CORE_WARN("[skeleton] preview load failed '{0}': {1}", m_LogicalPath, error);
+				return;
+			}
+		}
+
+		if (ext == ".wclip")
+		{
+			m_PanelTitle = "Clip - " + (name.empty() ? m_LogicalPath : name);
+			std::string error;
+			Asset::WAnimationClipData clipData;
+			if (Asset::WAnimationClipIO::ReadFile(m_LogicalPath, clipData, &error))
+			{
+				m_Data.Nodes.clear();
+				m_Data.Animations.clear();
+
+				Asset::WSkeletonData skeleton;
+				std::string skelError;
+				std::string skelPath = clipData.SkeletonPath;
+				bool skelLoaded = false;
+				if (!skelPath.empty())
+					skelLoaded = Asset::WSkeletonIO::ReadFile(skelPath, skeleton, &skelError);
+				if (!skelLoaded)
+					skelLoaded = Asset::WSkeletonIO::ReadFile("engine/models/characters/mannequin.wskeleton", skeleton, &skelError);
+
+				if (skelLoaded)
+				{
+					m_Data.Nodes.resize(skeleton.Bones.size());
+					for (size_t i = 0; i < skeleton.Bones.size(); ++i)
+					{
+						const auto& bone = skeleton.Bones[i];
+						m_Data.Nodes[i].Name = bone.NameStr.empty() ? StringPool::Get().NameOf(bone.Name) : bone.NameStr;
+						m_Data.Nodes[i].Parent = bone.ParentIndex;
+						m_Data.Nodes[i].MeshIndex = -1;
+						m_Data.Nodes[i].Translation = bone.BindPoseLocal.Translation;
+						m_Data.Nodes[i].Rotation = bone.BindPoseLocal.Rotation;
+						m_Data.Nodes[i].Scale = bone.BindPoseLocal.Scale;
+					}
+					Asset::WModelSkin skin;
+				skin.Name = "Skeleton";
+				skin.JointNodes.resize(skeleton.Bones.size());
+				skin.JointNames.resize(skeleton.Bones.size());
+				for (size_t i = 0; i < skeleton.Bones.size(); ++i)
+				{
+					skin.JointNodes[i] = static_cast<uint32_t>(i);
+					skin.JointNames[i] = m_Data.Nodes[i].Name;
+				}
+				m_Data.Skins.push_back(std::move(skin));
+				}
+				else
+				{
+					for (const auto& ch : clipData.Channels)
+					{
+						Asset::WModelNode node;
+						node.Name = ch.BoneNameStr.empty() ? StringPool::Get().NameOf(ch.BoneName) : ch.BoneNameStr;
+						node.Parent = m_Data.Nodes.empty() ? -1 : 0;
+						m_Data.Nodes.push_back(std::move(node));
+					}
+				}
+
+				Asset::WModelAnimation anim;
+				anim.Name = clipData.Name.empty() ? std::filesystem::path(m_LogicalPath).stem().string() : clipData.Name;
+				anim.Duration = clipData.Duration;
+				for (const auto& ch : clipData.Channels)
+				{
+					int32_t targetNode = -1;
+					const std::string boneName = ch.BoneNameStr.empty() ? StringPool::Get().NameOf(ch.BoneName) : ch.BoneNameStr;
+					for (size_t n = 0; n < m_Data.Nodes.size(); ++n)
+					{
+						if (m_Data.Nodes[n].Name == boneName)
+						{
+							targetNode = static_cast<int32_t>(n);
+							break;
+						}
+					}
+					if (targetNode < 0)
+						continue;
+
+					if (!ch.PositionKeys.empty())
+					{
+						Asset::WModelAnimationChannel ac;
+						ac.TargetNode = static_cast<uint32_t>(targetNode);
+						ac.Path = Asset::WModelIO::WModelAnimationPath::Translation;
+						ac.Keys.reserve(ch.PositionKeys.size());
+						for (const auto& k : ch.PositionKeys)
+							ac.Keys.push_back({ k.Time, glm::vec4(k.Value, 0.0f) });
+						anim.Channels.push_back(std::move(ac));
+					}
+					if (!ch.RotationKeys.empty())
+					{
+						Asset::WModelAnimationChannel ac;
+						ac.TargetNode = static_cast<uint32_t>(targetNode);
+						ac.Path = Asset::WModelIO::WModelAnimationPath::Rotation;
+						ac.Keys.reserve(ch.RotationKeys.size());
+						for (const auto& k : ch.RotationKeys)
+							ac.Keys.push_back({ k.Time, glm::vec4(k.Value.x, k.Value.y, k.Value.z, k.Value.w) });
+						anim.Channels.push_back(std::move(ac));
+					}
+					if (!ch.ScaleKeys.empty())
+					{
+						Asset::WModelAnimationChannel ac;
+						ac.TargetNode = static_cast<uint32_t>(targetNode);
+						ac.Path = Asset::WModelIO::WModelAnimationPath::Scale;
+						ac.Keys.reserve(ch.ScaleKeys.size());
+						for (const auto& k : ch.ScaleKeys)
+							ac.Keys.push_back({ k.Time, glm::vec4(k.Value, 1.0f) });
+						anim.Channels.push_back(std::move(ac));
+					}
+				}
+				m_Data.Animations.push_back(std::move(anim));
+				m_DataValid = true;
+				m_ShowBones = true;
+				m_AnimPlaying = true;
+				m_ActiveTab = 4;
+
+				const MeshBounds bounds = ComputeWorldBounds();
+				m_Focus = bounds.GetCenter();
+				const float radius = std::max(0.25f, glm::length(bounds.GetExtents()));
+				m_MinDistance = radius * 0.6f;
+				m_MaxDistance = radius * 40.0f;
+				m_CameraDistance = radius * 3.2f;
+
+				m_Status = "Loaded Clip " + m_LogicalPath + " | duration " + std::to_string(clipData.Duration) + "s";
+				m_StatusIsError = false;
+				WLD_CORE_INFO("[clip] preview '{0}': duration={1} channels={2}", m_LogicalPath, clipData.Duration, clipData.Channels.size());
+				return;
+			}
+			else
+			{
+				m_Status = "Clip load failed: " + (error.empty() ? m_LogicalPath : error);
+				m_StatusIsError = true;
+				WLD_CORE_WARN("[clip] preview load failed '{0}': {1}", m_LogicalPath, error);
+				return;
+			}
+		}
+
 		std::string error;
 		m_Mesh = Mesh::LoadWModel(m_LogicalPath, &error);
 		m_DataValid = Asset::WModelIO::ReadFile(m_LogicalPath, m_Data, &error);
@@ -640,7 +887,7 @@ namespace World
 
 	uint64_t ModelPreviewPanel::RenderPreview()
 	{
-		if (!m_Mesh)
+		if (!m_Mesh && !(m_DataValid && !m_Data.Nodes.empty()))
 			return 0;
 		// 必须在取命令缓冲**之前**创建资源:命令缓冲是 EnsureGpuResources 建的,
 		// 先判断 !command 会永远早退(实测:模型预览一直显示"预览不可用")。
@@ -688,9 +935,11 @@ namespace World
 
 		// 按节点树逐 submesh 绘制:节点变换 × (该 mesh 的 submesh 范围),材质按 submesh 槽位。
 		// 槽位用面板身份固定的保留区,避免与主场景/其它预览争用对象 UBO(会逐帧闪)。
-		const uint32_t slotBase = Renderer3D::ReserveSlotBase(
+		const uint32_t slotBase = m_Mesh ? Renderer3D::ReserveSlotBase(
 			static_cast<uint32_t>(Wui::HashId(m_PanelId.c_str()) ^ 0x5F17u),
-			static_cast<uint32_t>(std::max<size_t>(1, m_Mesh->GetSubmeshes().size())));
+			static_cast<uint32_t>(std::max<size_t>(1, m_Mesh->GetSubmeshes().size()))) : 0;
+		if (m_Mesh)
+		{
 		uint32_t drawIndex = 0;
 		const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
 		const std::vector<MeshRange>& meshes = m_Mesh->GetMeshes();
@@ -821,6 +1070,7 @@ namespace World
 					submitSubmesh(meshIndex, submeshIndex, world[index]);
 				}
 			}
+		}
 		}
 		Renderer3D::EndScene();
 		command->EndRenderPass();
@@ -1055,8 +1305,10 @@ namespace World
 		const float y = bar.Y + (bar.H - 24.0f) * 0.5f;
 
 		// ① 资产类型徽标
-		const float badgeW = 46.0f;
-		Wui::Badge(ctx, { x, y + 2.0f, badgeW, 20.0f }, "MODEL", Alpha(theme.Accent, 0.22f), theme.Accent,
+		const std::string ext = LowerExtension(std::filesystem::path(m_LogicalPath));
+		const char* badgeText = (ext == ".wskeleton") ? "SKEL" : ((ext == ".wclip") ? "CLIP" : "MODEL");
+		const float badgeW = (ext == ".wclip") ? 38.0f : ((ext == ".wskeleton") ? 42.0f : 46.0f);
+		Wui::Badge(ctx, { x, y + 2.0f, badgeW, 20.0f }, badgeText, Alpha(theme.Accent, 0.22f), theme.Accent,
 			theme, theme.FontSizeCaption, true, 4.0f);
 		x += badgeW + 8.0f;
 
@@ -2567,7 +2819,8 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 		const float width = rect.W;
 		float y = rect.Y + 4.0f;
 
-		if (!m_Mesh || m_Mesh->GetNodes().empty())
+		const bool hasNodes = (m_Mesh && !m_Mesh->GetNodes().empty()) || (m_DataValid && !m_Data.Nodes.empty());
+		if (!hasNodes)
 		{
 			Wui::EmptyState(ctx, { x, y, width, 180.0f }, "SKEL",
 				Wui::Tr("panel.model.skeleton.empty_title", "No Skeleton Nodes"),
@@ -2594,7 +2847,25 @@ void ModelPreviewPanel::DrawNodeInspector(Wui::WuiContext& ctx, float x, float& 
 		y += searchH + 10.0f;
 
 		// 统计标头
-		const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
+		std::vector<MeshNode> tempNodes;
+		const std::vector<MeshNode>& nodes = (m_Mesh && !m_Mesh->GetNodes().empty())
+			? m_Mesh->GetNodes()
+			: (m_DataValid ? (tempNodes = [&]() {
+				std::vector<MeshNode> r;
+				r.reserve(m_Data.Nodes.size());
+				for (const auto& dn : m_Data.Nodes)
+				{
+					MeshNode mn;
+					mn.Name = dn.Name;
+					mn.Parent = dn.Parent;
+					mn.MeshIndex = dn.MeshIndex;
+					mn.Translation = dn.Translation;
+					mn.Rotation = dn.Rotation;
+					mn.Scale = dn.Scale;
+					r.push_back(mn);
+				}
+				return r;
+			}()) : tempNodes);
 		size_t jointCount = 0;
 		if (m_DataValid && !m_Data.Skins.empty())
 			jointCount = m_Data.Skins[0].JointNodes.size();

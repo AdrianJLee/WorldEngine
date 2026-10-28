@@ -1,7 +1,7 @@
-# WorldEngine AnimGraph v1 — generic mannequin locomotion showcase
-version: 1
+# WorldEngine AnimGraph v2 — generic mannequin locomotion showcase
+version: 2
 name: Mannequin Locomotion
-model: engine/models/characters/mannequin.wmodel
+skeleton: engine/models/characters/mannequin.wskeleton
 initial: Idle
 parameter: Speed float 0 0 10 m/s
 parameter: Direction float 0 -180 180 deg
@@ -11,7 +11,7 @@ parameter: AimWeight float 0 0 1
 
 state Idle
   kind: clip
-  clip: Idle
+  clip: engine/animation/mannequin_idle.wclip
   loop: true
   speed: 1.0
   transition: Locomotion 0.20 Speed > 0.10
@@ -20,24 +20,25 @@ state Idle
 
 state Locomotion
   kind: blend2d
+  sync_phase: true
   x: Speed
   y: Direction
-  sample: 0.0 0 Idle
-  sample: 1.6 0 Walk
-  sample: 1.6 90 StrafeRight
-  sample: 1.6 -90 StrafeLeft
-  sample: 1.6 180 WalkBack
-  sample: 4.5 0 Run
-  sample: 4.5 90 StrafeRight
-  sample: 4.5 -90 StrafeLeft
-  sample: 4.5 180 WalkBack
+  sample: 0.0 0 engine/animation/mannequin_idle.wclip
+  sample: 1.6 0 engine/animation/mannequin_walk.wclip
+  sample: 1.6 90 engine/animation/mannequin_straferight.wclip
+  sample: 1.6 -90 engine/animation/mannequin_strafeleft.wclip
+  sample: 1.6 180 engine/animation/mannequin_walkback.wclip
+  sample: 4.5 0 engine/animation/mannequin_run.wclip
+  sample: 4.5 90 engine/animation/mannequin_straferight.wclip
+  sample: 4.5 -90 engine/animation/mannequin_strafeleft.wclip
+  sample: 4.5 180 engine/animation/mannequin_walkback.wclip
   transition: Idle 0.18 Speed < 0.10 && IsFalling < 0.50
   transition: Jump 0.10 IsFalling > 0.50 && VerticalSpeed > 0.50
   transition: Fall 0.12 IsFalling > 0.50
 
 state Jump
   kind: clip
-  clip: Jump
+  clip: engine/animation/mannequin_jump.wclip
   loop: false
   speed: 1.0
   transition: Fall 0.10 VerticalSpeed < 0.50
@@ -45,13 +46,13 @@ state Jump
 
 state Fall
   kind: clip
-  clip: Fall
+  clip: engine/animation/mannequin_fall.wclip
   loop: true
   speed: 1.0
   transition: Locomotion 0.15 IsFalling < 0.50
   transition: Idle 0.20 Speed < 0.10 && IsFalling < 0.50
 
 layer UpperBody
-  clip: Aim
+  clip: engine/animation/mannequin_aim.wclip
   weight: AimWeight
-  mask: Spine 0.25, Chest 1.0, Neck 1.0, Head 1.0, Shoulder.L 1.0, UpperArm.L 1.0, LowerArm.L 1.0, Hand.L 1.0, Shoulder.R 1.0, UpperArm.R 1.0, LowerArm.R 1.0, Hand.R 1.0
+  mask_recursive: Spine1 1.0, Spine 1.0

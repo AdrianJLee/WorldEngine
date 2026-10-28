@@ -731,10 +731,10 @@ namespace World
 					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
 				else
 					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
-				// AnimGraph 调色板优先（AnimGraphSystem 每帧覆盖 AnimationSystem 的槽）；
-				// 都没有 → nullptr（读失败/非蒙皮/无动画）。
-				const std::vector<glm::mat4>* palette = AnimGraphSystem::GetPalette(entity);
-				if (!palette)
+				const std::vector<glm::mat4>* palette = nullptr;
+				if (const auto* graphPalette = AnimGraphSystem::GetPalette(entity))
+					palette = graphPalette;
+				else
 					palette = AnimationSystem::GetPalette(entity);
 
 				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);

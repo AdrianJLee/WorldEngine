@@ -28,6 +28,20 @@ local SHOWCASE_TAG = "Showcase Terrain"
 local RIGHT_HAND_TARGET_TAG = "Right Hand IK Target"
 local RIGHT_HAND_IK_TAG = "Right Hand IK"
 
+local inScope = false
+local q = ecs:Query({ "TagComponent" })
+if q and type(q.Each) == "function" then
+    q:Each(function(_e, tag)
+        if tag.Tag == CHARACTER_TAG or tag.Tag == CAMERA_TAG or tag.Tag == SHOWCASE_TAG then
+            inScope = true
+        end
+    end)
+end
+
+if not inScope then
+    return
+end
+
 local WALK_SPEED = 1.6          -- m/s
 local RUN_SPEED = 4.5           -- m/s
 local ACCELERATION = 12.0       -- 1/s, exponential approach
@@ -125,6 +139,7 @@ local charRotationApplied = nil -- 最近一次真正写入 Transform.Rotation �
 local verticalVelocity = 0.0
 local grounded = true
 local aim = false
+local effectiveAim = false
 local rootMotion = false
 local footIkEnabled = false
 local handIkEnabled = true
@@ -410,6 +425,19 @@ local function stateLabel()
         return "奔跑"
     end
     return "行走"
+end
+
+local function localDirectionAngleDeg()
+    if speed <= 0.05 then
+        return 0.0
+    end
+    local cosYaw = math.cos(charYaw)
+    local sinYaw = math.sin(charYaw)
+    local localX = dirX * cosYaw - dirZ * sinYaw
+    local localZ = dirX * sinYaw + dirZ * cosYaw
+    local localRight = -localX
+    local rad = math.atan2(localRight, localZ)
+    return wrapDegrees(math.deg(rad))
 end
 
 local function orientationLabel()
@@ -834,6 +862,14 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         lastEventTimer = 1.4
     end
 
+    local rmbDown = false
+    if type(Input.MouseButton) == "function" then
+        local ok, down = pcall(Input.MouseButton, 1) -- 1 = 右键
+        if ok and down == true then
+            rmbDown = true
+        end
+    end
+
     local aimHeld = keyDown("F", KEY_F) or actionPressed("Interact")
     local aimPressed = aimHeld and not previousAimHeld
     previousAimHeld = aimHeld
@@ -843,13 +879,22 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
     end
     if aimPressed then
         aim = not aim
-        if charAnim ~= nil then
-            charAnim.EnableUpperBodyLayer = aim and 1 or 0
-        end
-        pushAimWeight(aim and 1.0 or 0.0)
-        lastEvent = aim and "瞄准层 开" or "瞄准层 关"
+        lastEvent = aim and "瞄准层 开 (F)" or "瞄准层 关 (F)"
         lastEventTimer = 2.0
         print("[ANIM-SHOWCASE] Upper-body aim layer " .. (aim and "ON" or "OFF") .. " (F).")
+    end
+
+    local currentEffectiveAim = aim or rmbDown
+    if currentEffectiveAim ~= effectiveAim then
+        effectiveAim = currentEffectiveAim
+        if rmbDown and not aim then
+            lastEvent = "鼠标右键瞄准"
+            lastEventTimer = 1.0
+        end
+        if charAnim ~= nil then
+            pcall(function() charAnim.EnableUpperBodyLayer = effectiveAim and 1 or 0 end)
+        end
+        pushAimWeight(effectiveAim and 1.0 or 0.0)
     end
 
     local rootMotionHeld = keyDown("R", KEY_R)
@@ -1046,7 +1091,7 @@ ecs:AddSystem("AnimationShowcaseSystem", "Update", function(dt)
         end
     end)
 
-    if aim then
+    if effectiveAim then
         pushAimWeight(1.0)
     end
 
@@ -1105,21 +1150,22 @@ ui.onDraw(function()
         return
     end
 
-    ui.panel(24, 24, 392, 504, "动画图内容示例")
-    ui.text(40, 62, "状态   " .. stateLabel(), 17)
-    ui.text(40, 88, string.format("速度   %.2f m/s", speed), 14)
-    ui.text(40, 106, "瞄准     " .. (aim and "开（上半身层）" or "关"), 14)
-    ui.text(40, 124, "根运动   " .. (rootMotion and "动画根运动" or "脚本位移"), 14)
-    ui.text(40, 142, string.format("镜头   %s  偏航 %d°  俯仰 %d°  %.1f m",
+    ui.panel(24, 24, 436, 560, "动画图与轻量播放器示例 (Animation Showcase)")
+    ui.text(40, 58, "动画状态   " .. stateLabel() .. (effectiveAim and "  [上半身瞄准叠层]" or ""), 16)
+    ui.text(40, 82, string.format("混合空间   Speed: %.2f m/s (0..4.5)   Direction: %d° (-180..180°)", speed, math.floor(localDirectionAngleDeg() + 0.5)), 12)
+    ui.text(40, 102, "相位同步   [已开启] 归一化步态相位对齐 (消除滑步)", 12)
+    ui.text(40, 122, "简单播放   [示范实体: 910000000000000016] AnimationPlayerComponent", 12)
+    ui.text(40, 142, "瞄准姿态   " .. (effectiveAim and "开 (鼠标右键/F 触发 Spine1 递归遮罩)" or "关"), 13)
+    ui.text(40, 162, "根运动     " .. (rootMotion and "动画根位移 (循环回绕补偿与位移剥离)" or "脚本输入驱动"), 13)
+    ui.text(40, 182, string.format("第三人称镜头   %s  偏航 %d°  俯仰 %d°  距离 %.1f m",
         cameraModeLabel(), math.floor(wrapDegrees(math.deg(camYaw)) + 0.5),
         math.floor(math.deg(camPitch) + 0.5), cameraDistance), 12)
-    ui.text(40, 160, "朝向   " .. orientationLabel(), 14)
-    ui.text(40, 178, string.format("IK   脚部[%s] 手部[%s]",
-        footIkEnabled and "开" or "关", handIkEnabled and "开" or "关"), 14)
-    ui.text(40, 200, "WASD 移动   Shift 奔跑   Space 跳跃", 12)
-    ui.text(40, 218, "鼠标 / 方向键 转镜头   滚轮 缩放   Esc / M 释放指针", 12)
-    ui.text(40, 236, "F 瞄准   G 手部 IK   R 根运动   Tab 镜头   C 朝向", 12)
-    ui.text(40, 256, "最近操作   " .. lastEvent, 12)
+    ui.text(40, 202, "角色朝向模式   " .. orientationLabel(), 13)
+    ui.text(40, 222, string.format("IK 求解状态    脚部地面贴合[%s]   右手两骨IK[%s]",
+        footIkEnabled and "开" or "关", handIkEnabled and "开" or "关"), 13)
+    ui.text(40, 244, "控制提示: WASD 移动   Shift 奔跑   鼠标右键 / F 瞄准   Space 跳跃", 12)
+    ui.text(40, 264, "快捷键:   鼠标/方向键 旋转视角   滚轮 缩放   G 手部IK   R 根运动   C 朝向", 11)
+    ui.text(40, 284, "最近操作: " .. lastEvent, 12)
 
     -- 鼠标可玩控制条(与键盘完全等价;也用于自动化点击验证)。
     if ui.button("demo_walk", 40, 280, 104, 26, (demoMove == 1 and not demoRun) and "行走（开）" or "行走") then
@@ -1144,7 +1190,7 @@ ui.onDraw(function()
         lastEvent = "控制条：跳跃"
         lastEventTimer = 1.0
     end
-    if ui.button("demo_aim", 168, 314, 120, 26, aim and "瞄准（开）" or "瞄准") then
+    if ui.button("demo_aim", 168, 314, 120, 26, effectiveAim and "瞄准（开）" or "瞄准") then
         demoAimToggle = true
         lastEvent = "控制条：瞄准"
         lastEventTimer = 1.0

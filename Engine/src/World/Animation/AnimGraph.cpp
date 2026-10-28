@@ -3,6 +3,8 @@
 #include "World/Animation/AnimGraph.h"
 #include "World/Animation/AnimGraphCondition.h"
 #include "World/Renderer/Skinning.h"
+#include "World/Asset/WAnimationClipIO.h"
+#include "World/Asset/WSkeletonIO.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -115,11 +117,89 @@ namespace World
 			return std::clamp(time, 0.0f, duration);
 		}
 
+		const Asset::WAnimationClipData* ResolveClipAsset(const std::string& pathOrName)
+		{
+			static std::unordered_map<std::string, Asset::WAnimationClipData> s_ClipCache;
+			if (pathOrName.empty())
+				return nullptr;
+
+			auto it = s_ClipCache.find(pathOrName);
+			if (it != s_ClipCache.end())
+				return &it->second;
+
+			if (pathOrName.find(".wclip") != std::string::npos ||
+				pathOrName.rfind("animation/", 0) == 0 ||
+				pathOrName.rfind("engine/animation/", 0) == 0 ||
+				pathOrName.rfind("Engine/content/animation/", 0) == 0)
+			{
+				Asset::WAnimationClipData data;
+				if (Asset::WAnimationClipIO::ReadFile(pathOrName, data))
+				{
+					s_ClipCache[pathOrName] = std::move(data);
+					return &s_ClipCache[pathOrName];
+				}
+			}
+			return nullptr;
+		}
+
+		void ApplySkeletonPoseToModel(const Asset::WModelData& model,
+			const Asset::WSkeletonData& skeleton,
+			const std::vector<JointTransform>& localTransforms,
+			AnimPose& outPose)
+		{
+			const size_t nodeCount = model.Nodes.size();
+			if (outPose.Joints.size() < nodeCount)
+				outPose.Joints.resize(nodeCount);
+
+			for (size_t j = 0; j < skeleton.Bones.size() && j < localTransforms.size(); ++j)
+			{
+				int32_t nodeIdx = -1;
+				if (!model.Skins.empty())
+				{
+					const auto& skin = model.Skins[0];
+					if (j < skin.JointNodes.size())
+						nodeIdx = static_cast<int32_t>(skin.JointNodes[j]);
+				}
+				if (nodeIdx < 0)
+				{
+					for (size_t n = 0; n < nodeCount; ++n)
+					{
+						if (model.Nodes[n].Name == skeleton.Bones[j].NameStr)
+						{
+							nodeIdx = static_cast<int32_t>(n);
+							break;
+						}
+					}
+				}
+				if (nodeIdx >= 0 && static_cast<size_t>(nodeIdx) < nodeCount)
+				{
+					outPose.Joints[nodeIdx] = localTransforms[j];
+				}
+			}
+		}
+
 		void SampleClipStep(const Asset::WModelData& model, const std::string& clipName,
 			float time, bool loop, AnimPose& pose)
 		{
 			FillBindPose(model, pose);
+			if (const Asset::WAnimationClipData* wclip = ResolveClipAsset(clipName))
+			{
+				Asset::WSkeletonData skeleton;
+				if (!wclip->SkeletonPath.empty())
+					Asset::WSkeletonIO::ReadFile(wclip->SkeletonPath, skeleton);
+				if (skeleton.Bones.empty())
+				{
+					std::vector<Asset::WAnimationClipData> dummy;
+					Asset::WSkeletonIO::ExtractSkeletonAndClips(model, skeleton, dummy);
+				}
+				std::vector<JointTransform> localTransforms;
+				Asset::WAnimationClipIO::SampleAnimationClip(*wclip, time, loop, skeleton, localTransforms);
+				ApplySkeletonPoseToModel(model, skeleton, localTransforms, pose);
+				return;
+			}
 			const Asset::WModelAnimation* clip = FindClip(model, clipName);
+			if (!clip && !model.Animations.empty() && clipName.empty())
+				clip = &model.Animations.front();
 			if (!clip)
 				return;
 			ApplyClip(*clip, ClipSampleTime(*clip, time, loop), pose);
@@ -813,6 +893,11 @@ namespace World
 		m_Layers.clear();
 		m_ModelHint.clear();
 		m_GraphName.clear();
+		m_Skeleton = AssetRef{};
+		m_SkeletonPath.clear();
+		m_RootMotionMode = RootMotionMode::Planar;
+		m_TotalCycleDisplacement = glm::vec3(0.0f);
+		m_LoopWrappedThisFrame = false;
 		m_ParameterDefaults.clear();
 		m_ParameterDefinitions.clear();
 		m_Parameters.clear();
@@ -1017,7 +1102,22 @@ namespace World
 		if (itState == m_States.end())
 			return;
 
+		const float prevTime = m_StateTime;
 		m_StateTime += deltaSeconds * itState->second.Speed;
+		m_LoopWrappedThisFrame = false;
+
+		// 检测循环回绕并获取根运动总周期位移
+		const AnimState& curState = itState->second;
+		if (curState.Kind == AnimStateKind::SingleClip)
+		{
+			if (const Asset::WAnimationClipData* wclip = ResolveClipAsset(curState.ClipName))
+			{
+				if (wclip->Duration > 1e-4f && std::floor(m_StateTime / wclip->Duration) > std::floor(prevTime / wclip->Duration))
+					m_LoopWrappedThisFrame = true;
+				if (wclip->RootTranslation.size() >= 2)
+					m_TotalCycleDisplacement = wclip->RootTranslation.back().Value - wclip->RootTranslation.front().Value;
+			}
+		}
 
 		if (m_InTransition)
 		{
@@ -1065,11 +1165,7 @@ namespace World
 		const bool hasBlend2D = state.Blend2D.GetSampleCount() > 0;
 		if (state.Kind == AnimStateKind::SingleClip || (!hasBlend1D && !hasBlend2D))
 		{
-			const Asset::WModelAnimation* clip = FindClip(model, state.ClipName);
-			if (!clip && !model.Animations.empty() && state.ClipName.empty())
-				clip = &model.Animations.front();
-			if (clip)
-				ApplyClip(*clip, ClipSampleTime(*clip, time, state.Loop), outPose);
+			SampleClipStep(model, state.ClipName, time, state.Loop, outPose);
 			return;
 		}
 
@@ -1098,6 +1194,58 @@ namespace World
 
 		if (weights.empty())
 			return;
+
+		// 混合空间归一化步态相位同步（Phase Matching）：
+		// 计算加权平均时长 T_avg，统一相位采样，杜绝滑步与不同频步态撕裂
+		float weightedDuration = 0.0f;
+		float activeWeightSum = 0.0f;
+		for (const auto& entry : weights)
+		{
+			const size_t sampleIndex = entry.first;
+			const float weight = entry.second;
+			if (!(weight > 1e-6f))
+				continue;
+			const std::string* clipName = nullptr;
+			if (state.Kind == AnimStateKind::BlendSpace1D)
+			{
+				const auto& samples = state.Blend1D.GetSamples();
+				if (sampleIndex < samples.size())
+					clipName = &samples[sampleIndex].ClipName;
+			}
+			else
+			{
+				const auto& samples = state.Blend2D.GetSamples();
+				if (sampleIndex < samples.size())
+					clipName = &samples[sampleIndex].ClipName;
+			}
+			if (!clipName)
+				continue;
+
+			float dur = 0.0f;
+			if (const Asset::WAnimationClipData* wclip = ResolveClipAsset(*clipName))
+				dur = wclip->Duration;
+			else if (const Asset::WModelAnimation* clip = FindClip(model, *clipName))
+				dur = clip->Duration;
+
+			if (dur > 1e-4f)
+			{
+				weightedDuration += dur * weight;
+				activeWeightSum += weight;
+			}
+		}
+
+		if (activeWeightSum > 1e-6f)
+			weightedDuration /= activeWeightSum;
+		else
+			weightedDuration = 1.0f;
+
+		float normalizedPhase = 0.0f;
+		if (weightedDuration > 1e-4f)
+		{
+			normalizedPhase = std::fmod(time / weightedDuration, 1.0f);
+			if (normalizedPhase < 0.0f)
+				normalizedPhase += 1.0f;
+		}
 
 		const size_t nodeCount = model.Nodes.size();
 		std::vector<JointTransform> accumulator(nodeCount);
@@ -1131,16 +1279,35 @@ namespace World
 			}
 			if (!clipName)
 				continue;
-			const Asset::WModelAnimation* clip = FindClip(model, *clipName);
-			if (!clip)
+
+			AnimPose samplePose;
+			FillBindPose(model, samplePose);
+
+			if (const Asset::WAnimationClipData* wclip = ResolveClipAsset(*clipName))
+			{
+				const float sampleTime = normalizedPhase * wclip->Duration;
+				Asset::WSkeletonData skeleton;
+				if (!wclip->SkeletonPath.empty())
+					Asset::WSkeletonIO::ReadFile(wclip->SkeletonPath, skeleton);
+				if (skeleton.Bones.empty())
+				{
+					std::vector<Asset::WAnimationClipData> dummy;
+					Asset::WSkeletonIO::ExtractSkeletonAndClips(model, skeleton, dummy);
+				}
+				std::vector<JointTransform> localTransforms;
+				Asset::WAnimationClipIO::SampleAnimationClip(*wclip, sampleTime, state.Loop, skeleton, localTransforms);
+				ApplySkeletonPoseToModel(model, skeleton, localTransforms, samplePose);
+			}
+			else if (const Asset::WModelAnimation* clip = FindClip(model, *clipName))
+			{
+				const float sampleTime = (clip->Duration > 1e-4f) ? (normalizedPhase * clip->Duration) : time;
+				ApplyClip(*clip, ClipSampleTime(*clip, sampleTime, state.Loop), samplePose);
+			}
+			else
 			{
 				WarnOnce("animgraph-clip:" + *clipName, "AnimGraph 找不到动画片段 '" + *clipName + "'（按绑定姿态混合）");
 				continue;
 			}
-
-			AnimPose samplePose;
-			FillBindPose(model, samplePose);
-			ApplyClip(*clip, ClipSampleTime(*clip, time, state.Loop), samplePose);
 
 			const float denom = totalWeight + weight;
 			const float blendFactor = denom > 1e-8f ? weight / denom : 0.0f;
@@ -1209,7 +1376,38 @@ namespace World
 			{
 				const int32_t index = FindNodeIndex(model, { entry.BoneName });
 				if (index >= 0 && static_cast<size_t>(index) < mask.size())
+				{
 					mask[static_cast<size_t>(index)] = std::clamp(entry.Weight, 0.0f, 1.0f);
+					if (layer.RecursiveMask)
+					{
+						// 树形递归遮罩：沿骨骼树向下递归赋权（除非后代节点有显式单独声明）
+						std::vector<size_t> stack;
+						stack.push_back(static_cast<size_t>(index));
+						while (!stack.empty())
+						{
+							const size_t cur = stack.back();
+							stack.pop_back();
+							for (size_t child = 0; child < model.Nodes.size(); ++child)
+							{
+								if (model.Nodes[child].Parent == static_cast<int32_t>(cur) && child != cur)
+								{
+									bool explicitOverride = false;
+									for (const BoneMaskEntry& e : layer.BoneMask)
+									{
+										if (FindNodeIndex(model, { e.BoneName }) == static_cast<int32_t>(child))
+										{
+											explicitOverride = true;
+											break;
+										}
+									}
+									if (!explicitOverride)
+										mask[child] = std::clamp(entry.Weight, 0.0f, 1.0f);
+									stack.push_back(child);
+								}
+							}
+						}
+					}
+				}
 			}
 			finalPose = AnimPose::LayeredBlend(finalPose, layerPose, mask, weight);
 		}
@@ -1224,16 +1422,45 @@ namespace World
 			if (m_HaveRootSample)
 			{
 				glm::vec3 delta = currentPos - m_LastRootPos;
-				const bool verticalExempt =
-					(state->ClipName == "Jump" || state->ClipName == "Fall" || state->Name == "Jump" || state->Name == "Fall") ||
-					(m_InTransition && (m_TransitionTargetState == "Jump" || m_TransitionTargetState == "Fall"));
-				if (verticalExempt)
+
+				// 循环回绕补偿 (Loop Wrap Compensation)：消除循环交接瞬间后退瞬移
+				if (m_LoopWrappedThisFrame && glm::length(m_TotalCycleDisplacement) > 1e-4f)
+				{
+					delta += m_TotalCycleDisplacement;
+				}
+				else if (glm::length(m_TotalCycleDisplacement) > 1e-4f &&
+					glm::dot(delta, m_TotalCycleDisplacement) < -0.3f * glm::dot(m_TotalCycleDisplacement, m_TotalCycleDisplacement))
+				{
+					delta += m_TotalCycleDisplacement;
+				}
+
+				// 严格根据 RootMotionMode 剔除轴向，杜绝 Jump/Fall 等名称潜规则硬编码！
+				if (m_RootMotionMode == RootMotionMode::Planar)
+				{
 					delta.y = 0.0f;
-				if (!std::isfinite(delta.x) || !std::isfinite(delta.y) || !std::isfinite(delta.z))
+				}
+				else if (m_RootMotionMode == RootMotionMode::None)
+				{
 					delta = glm::vec3(0.0f);
-				outPose.RootMotionDelta = delta;
-				outPose.RootRotationDelta = SafeNormalize(currentRot * glm::conjugate(m_LastRootRot));
+				}
+
+			if (!std::isfinite(delta.x) || !std::isfinite(delta.y) || !std::isfinite(delta.z))
+				delta = glm::vec3(0.0f);
+			outPose.RootMotionDelta = delta;
+			outPose.RootRotationDelta = SafeNormalize(currentRot * glm::conjugate(m_LastRootRot));
 			}
+
+			// 姿态位移剥离 (Pose Stripping)：从骨骼局部姿态剥离已由根运动接管的位移分量，杜绝双重位移！
+			if (m_RootMotionMode == RootMotionMode::Planar)
+			{
+				outPose.Joints[static_cast<size_t>(rootIndex)].Translation.x = 0.0f;
+				outPose.Joints[static_cast<size_t>(rootIndex)].Translation.z = 0.0f;
+			}
+			else if (m_RootMotionMode == RootMotionMode::Full)
+			{
+				outPose.Joints[static_cast<size_t>(rootIndex)].Translation = glm::vec3(0.0f);
+			}
+
 			m_LastRootPos = currentPos;
 			m_LastRootRot = currentRot;
 			m_HaveRootSample = true;
@@ -1308,6 +1535,8 @@ namespace World
 			stream << "name: " << m_GraphName << "\n";
 		if (!m_ModelHint.empty())
 			stream << "model: " << m_ModelHint << "\n";
+		if (!m_SkeletonPath.empty())
+			stream << "skeleton: " << m_SkeletonPath << "\n";
 		const std::string& initialState = m_InitialStateName.empty() ? m_CurrentStateName : m_InitialStateName;
 		if (!initialState.empty())
 			stream << "initial: " << initialState << "\n";
@@ -1374,7 +1603,7 @@ namespace World
 			stream << "\nlayer " << layer.Name << "\n";
 			stream << "  clip: " << layer.ClipName << "\n";
 			stream << "  weight: " << layer.WeightParameter << "\n";
-			stream << "  mask:";
+			stream << "  " << (layer.RecursiveMask ? "mask_recursive:" : "mask:");
 			for (size_t i = 0; i < layer.BoneMask.size(); ++i)
 			{
 				if (i > 0)
@@ -1571,8 +1800,10 @@ namespace World
 					currentLayer->ClipName = value;
 				else if (key == "weight")
 					currentLayer->WeightParameter = value;
-				else if (key == "mask")
+				else if (key == "mask" || key == "mask_recursive")
 				{
+					if (key == "mask_recursive")
+						currentLayer->RecursiveMask = true;
 					std::istringstream maskStream(value);
 					std::string entry;
 					while (std::getline(maskStream, entry, ','))
@@ -1601,20 +1832,27 @@ namespace World
 			}
 
 			if (key == "version")
+		{
+			float version = 0.0f;
+			versionSeen = true;
+			if (!ParseFloat(value, version) || (std::fabs(version - 1.0f) >= 1e-6f && std::fabs(version - 2.0f) >= 1e-6f))
 			{
-				float version = 0.0f;
-				versionSeen = true;
-				if (!ParseFloat(value, version) || std::fabs(version - 1.0f) >= 1e-6f)
-				{
-					if (error)
-						*error = "不支持的 AnimGraph 版本 '" + value + "'（只接受 1）";
-					return false;
-				}
+				if (error)
+					*error = "不支持的 AnimGraph 版本: " + value;
+				return false;
 			}
-			else if (key == "name")
+			m_Version = static_cast<uint32_t>(std::round(version));
+			continue;
+		}
+		else if (key == "name")
 				SetGraphName(value);
 			else if (key == "model")
 				SetModelHint(value);
+			else if (key == "skeleton")
+			{
+				SetSkeletonPath(value);
+				SetSkeleton(AssetRef::FromPath(value));
+			}
 			else if (key == "initial")
 				SetInitialState(value);
 			else if (key == "parameter")

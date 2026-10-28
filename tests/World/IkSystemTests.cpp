@@ -235,18 +235,13 @@ namespace
 		UUIDComponent identity(UUID(0x1001));
 		scene.GetRegistry().emplace<UUIDComponent>(character, identity);
 		AnimGraphComponent graph;
-		graph.EnableFootIk = useExampleComponent ? 0 : 1;
-		graph.FootIkWeight = 1.0f;
 		scene.GetRegistry().emplace<AnimGraphComponent>(character, graph);
-		if (useExampleComponent)
-		{
-			FootIkComponent foot;
-			foot.Weight = 1.0f;
-			foot.FootOffset = 0.0f;
-			foot.MaxPelvisDrop = 0.35f;
-			foot.Enabled = 1;
-			scene.GetRegistry().emplace<FootIkComponent>(character, foot);
-		}
+		FootIkComponent foot;
+		foot.Weight = 1.0f;
+		foot.FootOffset = 0.0f;
+		foot.MaxPelvisDrop = 0.35f;
+		foot.Enabled = 1;
+		scene.GetRegistry().emplace<FootIkComponent>(character, foot);
 
 		const Asset::WModelData model = MakeLegModel();
 		AnimPose pose = BindPose(model);
@@ -271,8 +266,6 @@ namespace
 
 	void RunFootIkExamples(const fs::path& directory)
 	{
-		RunFootScenario(directory, "ik_flat_legacy.terrain", false, false);
-		RunFootScenario(directory, "ik_slope_legacy.terrain", true, false);
 		RunFootScenario(directory, "ik_flat_component.terrain", false, true);
 		RunFootScenario(directory, "ik_slope_component.terrain", true, true);
 	}

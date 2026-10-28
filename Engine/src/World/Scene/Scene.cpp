@@ -15,6 +15,7 @@
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Animation/AnimGraphSystem.h"
+#include "World/Scene/Systems/AnimationPlayerSystem.h"
 #include "World/Renderer/FrameExtract.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Gameplay/Runtime/SystemRegistry.h"
@@ -2164,9 +2165,9 @@ namespace World
 		if (m_AnimationDone)
 			return;
 		m_AnimationDone = true;
-		// 顺序冻结：骨骼动画先算，AnimGraph 后算（同帧覆盖调色板 + Root Motion/Foot IK）。
-		AnimationSystem::Update(*this, dt.GetSeconds());
+		// 互斥管线：AnimGraphSystem 驱动带 AnimGraphComponent 的实体；AnimationPlayerSystem 驱动简单播放器实体
 		AnimGraphSystem::Update(*this, dt.GetSeconds());
+		AnimationPlayerSystem::Update(*this, dt.GetSeconds());
 	}
 
 	void Scene::SetRenderExtractSink(IRenderExtractSink* sink)

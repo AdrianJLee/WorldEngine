@@ -35,12 +35,7 @@ namespace World
 			return palettes;
 		}
 
-		// AnimGraphSystem 写入的覆盖调色板（按实体唯一；每帧由 AnimGraphSystem 先清后写）。
-		std::unordered_map<entt::entity, std::vector<glm::mat4>>& ExternalPalettes()
-		{
-			static std::unordered_map<entt::entity, std::vector<glm::mat4>> palettes;
-			return palettes;
-		}
+
 
 		// 读失败的路径不再逐帧重试(磁盘别再被刷屏);ClearCache 后可以重试。
 		std::unordered_set<PathId>& FailedModels()
@@ -168,13 +163,31 @@ namespace World
 			if (skinIndex < 0 || static_cast<size_t>(skinIndex) >= model.Skins.size())
 				continue;   // 非蒙皮网格:SceneRenderer 按网格顶点布局回退静态路径(不产生调色板)
 
-			const Asset::WModelAnimation* clip = SelectClip(model, StringPool::Get().NameOf(component.AnimationClip), StringPool::Get().PathOf(key));
+			const AnimationPlayerComponent* playerProbe = registry.try_get<AnimationPlayerComponent>(entity);
+			float playerTime = 0.0f;
+			float playerSpeed = 1.0f;
+			bool playerPlaying = true;
+			bool playerLoop = true;
+			std::string clipNameStr;
+			if (playerProbe)
+			{
+				playerTime = playerProbe->CurrentTime;
+				playerSpeed = playerProbe->PlaybackSpeed;
+				playerPlaying = (playerProbe->Playing != 0);
+				playerLoop = (playerProbe->Loop != 0);
+				if (playerProbe->Clip.HasPath())
+					clipNameStr = StringPool::Get().PathOf(playerProbe->Clip.Path);
+			}
+
+			const Asset::WModelAnimation* clip = SelectClip(model, clipNameStr, StringPool::Get().PathOf(key));
 			static const Asset::WModelAnimation kNoAnimation;
 			const Asset::WModelAnimation& animation = clip ? *clip : kNoAnimation;
-			if (clip)
+			if (clip && playerProbe)
 			{
-				component.Time = AdvanceTime(component.Time, deltaSeconds, component.Speed,
-					component.Playing, component.Loop, animation.Duration);
+				AnimationPlayerComponent& player = const_cast<AnimationPlayerComponent&>(*playerProbe);
+				player.CurrentTime = AdvanceTime(playerTime, deltaSeconds, playerSpeed,
+					playerPlaying, playerLoop, animation.Duration);
+				playerTime = player.CurrentTime;
 			}
 
 			// 只登记工作项;真正的调色板计算留到阶段 2(纯函数,可并行)。
@@ -184,7 +197,7 @@ namespace World
 			job.Model = &model;
 			job.SkinIndex = static_cast<uint32_t>(skinIndex);
 			job.Animation = clip;
-			job.Time = component.Time;
+			job.Time = playerTime;
 			jobs.push_back(job);
 		}
 
@@ -212,32 +225,16 @@ namespace World
 			}
 		}
 
-		// ---- 阶段 3(串行):按阶段 1 的实体顺序插表,结果集与串行版一致 ----
+		// ---- 阶段 3(串行):按阶段 1 的实体顺序插表 ----
 		for (size_t index = 0; index < jobs.size(); ++index)
+		{
 			if (!results[index].empty())
 				palettes.emplace(jobs[index].Entity, std::move(results[index]));
-	}
-
-	void AnimationSystem::SetExternalPalette(entt::entity entity, std::vector<glm::mat4> palette)
-	{
-		if (palette.empty())
-			ExternalPalettes().erase(entity);
-		else
-			ExternalPalettes()[entity] = std::move(palette);
-	}
-
-	void AnimationSystem::ClearExternalPalettes()
-	{
-		ExternalPalettes().clear();
+		}
 	}
 
 	const std::vector<glm::mat4>* AnimationSystem::GetPalette(entt::entity entity)
 	{
-		const auto& external = ExternalPalettes();
-		const auto externalFound = external.find(entity);
-		if (externalFound != external.end())
-			return &externalFound->second;
-
 		const auto& palettes = Palettes();
 		const auto found = palettes.find(entity);
 		return found == palettes.end() ? nullptr : &found->second;
@@ -364,6 +361,11 @@ namespace World
 		return next;
 	}
 
+	void AnimationSystem::SetPalette(entt::entity entity, std::vector<glm::mat4> palette)
+	{
+		Palettes()[entity] = std::move(palette);
+	}
+
 	void AnimationSystem::ClearCache()
 	{
 		// 这里不再有"模型缓存"要清:.wmodel 的唯一驻留是 Mesh 的进程内缓存,由
@@ -371,6 +373,5 @@ namespace World
 		FailedModels().clear();
 		WarnedKeys().clear();
 		Palettes().clear();
-		ExternalPalettes().clear();
 	}
 }

@@ -3,6 +3,17 @@
 #include "World/Asset/WModelIO.h"
 #include "World/Core/Export.h"
 #include "World/Terrain/Terrain.h"
+#include "World/Core/AssetRef.h"
+
+namespace World
+{
+	enum class RootMotionMode : uint8_t
+	{
+		None = 0,
+		Planar = 1,
+		Full = 2
+	};
+}
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -143,6 +154,7 @@ namespace World
 		std::string Name;
 		std::string ClipName;
 		std::string WeightParameter;
+		bool RecursiveMask { false };
 		std::vector<BoneMaskEntry> BoneMask;
 	};
 
@@ -218,8 +230,18 @@ namespace World
 
 		void SetModelHint(const std::string& logicalPath) { m_ModelHint = logicalPath; }
 		const std::string& GetModelHint() const { return m_ModelHint; }
+
+		void SetSkeleton(const AssetRef& skeleton) { m_Skeleton = skeleton; }
+		const AssetRef& GetSkeleton() const { return m_Skeleton; }
+		void SetSkeletonPath(const std::string& path) { m_SkeletonPath = path; }
+		const std::string& GetSkeletonPath() const { return m_SkeletonPath; }
+
+		void SetRootMotionMode(RootMotionMode mode) { m_RootMotionMode = mode; }
+		RootMotionMode GetRootMotionMode() const { return m_RootMotionMode; }
 		void SetGraphName(const std::string& name) { m_GraphName = name; }
 		const std::string& GetGraphName() const { return m_GraphName; }
+		uint32_t GetVersion() const { return m_Version; }
+		void SetVersion(uint32_t v) { m_Version = v; }
 
 		// 资产默认参数（构造实例时灌入 m_Parameters）
 		// 图级参数定义（编辑器可增删）：参数名是脚本/条件里的标识符，保持英文；
@@ -282,9 +304,18 @@ namespace World
 		std::vector<AnimLayer> m_Layers;
 		std::string m_ModelHint;
 		std::string m_GraphName;
+		uint32_t m_Version { 1 };
 		std::map<std::string, float> m_ParameterDefaults;
 		std::map<std::string, AnimParameterDefinition> m_ParameterDefinitions;
 		std::unordered_map<std::string, float> m_Parameters;
+
+		AssetRef m_Skeleton;
+		std::string m_SkeletonPath;
+		RootMotionMode m_RootMotionMode { RootMotionMode::Planar };
+
+		// 循环回绕补偿与位移缓存
+		glm::vec3 m_TotalCycleDisplacement { 0.0f };
+		bool m_LoopWrappedThisFrame { false };
 
 		// 根运动按“上一帧绝对根 TRS”求增量；EvaluatePose 每帧更新。
 		glm::vec3 m_LastRootPos { 0.0f };

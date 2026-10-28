@@ -44,6 +44,8 @@ namespace World
 		// M4:3D 动画图(.wanimgraph)—— 状态机 + 1D/2D 混合空间 + 过渡 + 层遮罩。
 		// 双击 = 打开 Anim Graph 面板;面板读写一律走 AnimGraph::LoadFromFile/SaveToFile。
 		AnimGraph,
+		Skeleton,       // .wskeleton (3D 骨架资产)
+		AnimationClip,  // .wclip (3D 动画片段资产)
 		Folder,
 		// 兼容别名:P4 之前的代码把"贴图"叫 Texture(= 源图)。新代码请用上面两个名字。
 		// **必须放在最后**:枚举值按"上一个枚举项"自增,别名插在中间会把后面的项顶成重复值
@@ -136,6 +138,10 @@ namespace World
 			return { EditorAssetKind::PhysicsMaterial, "Physics Material", "asset.file.physics_material" };
 		if (extension == ".wanimgraph")
 			return { EditorAssetKind::AnimGraph, "Animation Graph", "asset.file.animgraph" };
+		if (extension == ".wskeleton")
+			return { EditorAssetKind::Skeleton, "Skeleton", "asset.file.skeleton" };
+		if (extension == ".wclip")
+			return { EditorAssetKind::AnimationClip, "Animation Clip", "asset.file.animation_clip" };
 		if (extension == ".wui")
 			return { EditorAssetKind::UiDocument, "UI Document" };
 		if (extension == ".wvfx" || extension == ".wparticle")

@@ -469,7 +469,7 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
 			m_Host.OpenScriptEditor(ec ? path.generic_string() : relative.generic_string());
 		}
-		else if (path.extension() == ".wmodel")
+		else if (path.extension() == ".wmodel" || path.extension() == ".wskeleton" || path.extension() == ".wclip" || LowerExtension(path) == ".wskeleton" || LowerExtension(path) == ".wclip")
 		{
 			// P1b D5:模型双击 → **打开只读预览**(不改场景);要放进场景在预览里点按钮。
 			// 用户反馈"多次打开会多次叠加":打开动作不应有场景副作用。

@@ -1976,65 +1976,44 @@ namespace World
 			transitionsBodyH += transitionRowHeight(i) + theme.PadSmall;
 		const float transitionsCardH = kRowH + theme.PadSmall + transitionsBodyH + kRowH + theme.PadSmall;
 
-		// 顶部页签「状态 / 层 / 姿态 / IK」等宽；层编辑放在独立页，避免遮罩树被长滚动区压到看不见。
+		// 顶部页签「状态 / 层」；层编辑放在独立页，避免遮罩树被长滚动区压到看不见。
 		// 窄形态再加「预览」页：把实时预览从底部条挪进页签，否则每个页只剩一百多像素高。
-		const int tabCount = m_Narrow ? 5 : 4;
+		const int tabCount = m_Narrow ? 3 : 2;
 		const Wui::WuiRect tabBar { area.X + theme.PadSmall, area.Y,
 			area.W - theme.PadSmall * 2.0f, kRowH };
 		const float tabW = std::max(1.0f, (tabBar.W - theme.PadSmall * static_cast<float>(tabCount - 1))
 			/ static_cast<float>(tabCount));
 		const Wui::WuiRect stateTab { tabBar.X, tabBar.Y, tabW, kRowH };
 		const Wui::WuiRect layerTab { stateTab.X + tabW + theme.PadSmall, tabBar.Y, tabW, kRowH };
-		const Wui::WuiRect poseTab { layerTab.X + tabW + theme.PadSmall, tabBar.Y, tabW, kRowH };
-		const Wui::WuiRect ikTab { poseTab.X + tabW + theme.PadSmall, tabBar.Y, tabW, kRowH };
 		const std::string stateTabLabel = (m_CenterTab == 0 ? "● " : "")
 			+ AGTr("center.tab.state", "状态");
 		const std::string layerTabLabel = (m_CenterTab == 1 ? "● " : "")
 			+ AGTr("center.tab.layer", "层");
 		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.state"), stateTab, stateTabLabel,
-			theme, true, AGTr("center.tab.state.tooltip", "State properties / blend space / transitions / pose preview."), false))
+			theme, true, AGTr("center.tab.state.tooltip", "State properties / blend space / transitions."), false))
 			m_CenterTab = 0;
 		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.layer"), layerTab, layerTabLabel,
 			theme, true, AGTr("center.tab.layer.tooltip", "Additive layers: clip / weight parameter / bone mask."), false))
 			m_CenterTab = 1;
-		const std::string poseTabLabel = (m_CenterTab == 2 ? "● " : "")
-			+ AGTr("center.tab.pose", "姿态");
-		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.pose"), poseTab, poseTabLabel,
-			theme, true, AGTr("center.tab.pose.tooltip", "Pose preview: the current graph pose (enable 模拟 to play it)."), false))
-			m_CenterTab = 2;
-		const std::string ikTabLabel = (m_CenterTab == 3 ? "● " : "")
-			+ AGTr("center.tab.ik", "IK");
-		if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.ik"), ikTab, ikTabLabel,
-			theme, true, AGTr("center.tab.ik.tooltip", "IK workspace: create two-bone chains and foot IK examples."), false))
-			m_CenterTab = 3;
 
 		if (m_Narrow)
 		{
-			const Wui::WuiRect liveTab { ikTab.X + tabW + theme.PadSmall, tabBar.Y,
-				std::max(1.0f, tabBar.X + tabBar.W - (ikTab.X + tabW + theme.PadSmall)), kRowH };
-			const std::string liveTabLabel = (m_CenterTab == 4 ? "● " : "")
+			const Wui::WuiRect liveTab { layerTab.X + tabW + theme.PadSmall, tabBar.Y,
+				std::max(1.0f, tabBar.X + tabBar.W - (layerTab.X + tabW + theme.PadSmall)), kRowH };
+			const std::string liveTabLabel = (m_CenterTab == 2 ? "● " : "")
 				+ AGTr("center.tab.live", "预览");
 			if (Wui::ActionButton(ctx, Wui::HashId("animgraph.center.tab.live"), liveTab, liveTabLabel,
 				theme, true, AGTr("center.tab.live.tooltip", "Live preview: parameters, runtime state and simulation."), false))
-				m_CenterTab = 4;
+				m_CenterTab = 2;
 		}
-		else if (m_CenterTab > 3)
+		else if (m_CenterTab > 1)
 		{
-			// 窗口变宽后页签变回 4 个：把"预览"页折回状态页，避免落到一个不存在的页。
+			// 窗口变宽后页签变回 2 个：把"预览"页折回状态页，避免落到一个不存在的页。
 			m_CenterTab = 0;
 		}
 
 		const Wui::WuiRect contentArea { area.X, tabBar.Y + kRowH + kGap * 0.5f, area.W,
 			std::max(40.0f, area.H - kRowH - kGap * 0.5f) };
-
-		if (m_CenterTab == 2)
-		{
-			// 姿态页：整块给预览，窄窗口也不用滚动。
-			const Wui::WuiRect poseCard { contentArea.X + theme.PadSmall, contentArea.Y + kGap,
-				contentArea.W - theme.PadSmall * 2.0f, std::max(120.0f, contentArea.H - kGap * 2.0f) };
-			RenderPosePreview(ctx, poseCard, theme);
-			return;
-		}
 
 		if (m_CenterTab == 1)
 		{
@@ -2067,13 +2046,7 @@ namespace World
 			return;
 		}
 
-		if (m_CenterTab == 3)
-		{
-			RenderIkCard(ctx, contentArea, host, theme);
-			return;
-		}
-
-		if (m_CenterTab == 4)
+		if (m_Narrow && m_CenterTab == 2)
 		{
 			// 窄形态的「预览」页：实时预览占满中栏，不再从底部抢走画布高度。
 			RenderLivePanel(ctx, contentArea, host, theme);
@@ -4159,11 +4132,13 @@ namespace World
 			if (writable == nullptr)
 				return;
 			bool rootMotion = component->EnableRootMotion != 0;
-			bool footIk = component->EnableFootIk != 0;
-			bool upperBody = component->EnableUpperBodyLayer != 0;
+			FootIkComponent* footComp = static_cast<FootIkComponent*>(
+				boundEntity.GetComponent(entt::type_id<FootIkComponent>().hash()));
+			bool footIk = (footComp != nullptr && footComp->Enabled != 0);
+			bool planar = (component->RootMotion == RootMotionMode::Planar);
 			const std::string labels[3] = { AGTr("toggle.root_motion", "Root Motion"), AGTr("toggle.foot_ik", "Foot IK"),
-				horizontal ? AGTr("toggle.upper_body", "Upper Body") : AGTr("toggle.upper_body_layer", "Upper Body Layer") };
-			bool* values[3] = { &rootMotion, &footIk, &upperBody };
+				AGTr("toggle.planar_root", "Planar Root (XZ)") };
+			bool* values[3] = { &rootMotion, &footIk, &planar };
 			const float itemW = horizontal ? (totalW - theme.PadSmall * 2.0f) / 3.0f : totalW;
 			for (int i = 0; i < 3; ++i)
 			{
@@ -4174,12 +4149,13 @@ namespace World
 					host.MarkDocumentDirty();
 				Wui::Tooltip(ctx, r, i == 0
 					? AGTr("toggle.root_motion.tooltip", "Write root motion into the entity transform (AnimGraphComponent.EnableRootMotion).")
-					: (i == 1 ? AGTr("toggle.foot_ik.tooltip", "Align both feet to the terrain surface (AnimGraphComponent.EnableFootIk).")
-						: AGTr("toggle.upper_body.tooltip", "Enable additive upper-body layers (AnimGraphComponent.EnableUpperBodyLayer).")));
+					: (i == 1 ? AGTr("toggle.foot_ik.tooltip", "Align both feet to the terrain surface (FootIkComponent.Enabled).")
+						: AGTr("toggle.planar_root.tooltip", "Extract horizontal root motion on the XZ plane only (RootMotionMode::Planar).")));
 			}
 			writable->EnableRootMotion = rootMotion ? 1 : 0;
-			writable->EnableFootIk = footIk ? 1 : 0;
-			writable->EnableUpperBodyLayer = upperBody ? 1 : 0;
+			if (footComp != nullptr)
+				footComp->Enabled = footIk ? 1 : 0;
+			writable->RootMotion = planar ? RootMotionMode::Planar : RootMotionMode::Full;
 		};
 
 		runtimeParams = buildRuntimeLine();

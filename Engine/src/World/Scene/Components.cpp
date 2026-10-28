@@ -49,16 +49,21 @@ namespace World
 	// 这两条断言把"无内部空洞"钉住:若有人插回 4B/1B 字段打断 8B 边界,sizeof 会回到 60/64 ⇒ 编译失败。
 	static_assert(sizeof(MeshRendererComponent) == 56,
 		"MeshRendererComponent must be 56B (hole-free per 4.8 R2); 60/64 here means an interior hole came back");
-	static_assert(sizeof(SkinnedMeshRendererComponent) == 56,
-		"SkinnedMeshRendererComponent must be 56B (hole-free per 4.8 R2); 60/64 here means an interior hole came back");
+	static_assert(sizeof(SkinnedMeshRendererComponent) == 48,
+		"SkinnedMeshRendererComponent must be 48B (two AssetRef + MeshIndex + CastShadow + padding)");
+	static_assert(std::is_trivially_copyable_v<SkinnedMeshRendererComponent>,
+		"SkinnedMeshRendererComponent must stay trivially copyable");
+	static_assert(sizeof(SkinnedMeshRendererComponent) <= 64,
+		"SkinnedMeshRendererComponent must fit one cache line");
+
+	static_assert(sizeof(AnimationPlayerComponent) == 32, "AnimationPlayerComponent must be 32 bytes");
+	static_assert(std::is_trivially_copyable_v<AnimationPlayerComponent>, "AnimationPlayerComponent must stay trivially copyable");
+	static_assert(sizeof(AnimationPlayerComponent) <= 64, "AnimationPlayerComponent must fit one cache line");
+
 	// T6b(2026-10-04):名字字段(NameId)也是驻留 POD ⇒ TagComponent 从此平凡可拷贝(4 字节)。
 	// 这是组件契约的最后一块:此前 Tag 的 std::string 让它无法参与 memcpy 级的复制/Prefab 实例化。
 	static_assert(sizeof(TagComponent) == 4, "TagComponent must be exactly one NameId (4 bytes)");
 	static_assert(std::is_trivially_copyable_v<TagComponent>, "TagComponent must stay trivially copyable");
-	static_assert(std::is_trivially_copyable_v<SkinnedMeshRendererComponent>,
-		"SkinnedMeshRendererComponent must stay trivially copyable (no heap members)");
-	static_assert(sizeof(SkinnedMeshRendererComponent) <= 64,
-		"SkinnedMeshRendererComponent must fit one cache line (two AssetRef + one NameId + scalars)");
 
 	static_assert(std::is_trivially_copyable_v<PhysicsMaterialComponent>,
 		"PhysicsMaterialComponent must stay trivially copyable");

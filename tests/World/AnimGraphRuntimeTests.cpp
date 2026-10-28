@@ -331,13 +331,13 @@ namespace
 		AnimGraphSystem::Update(scene, 0.016f);
 		CHECK(Nearly(AnimGraphSystem::GetParameter(entity, "Direction"), 90.0f, 1e-3f));
 
-		// 上层遮罩标志直接驱动层权重参数（示例脚本只切 flag，不写 AimWeight）。
+		// 验证层权重参数（AimWeight）控制上层遮罩
 		transform.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 		controller.Velocity = glm::vec3(0.0f);
-		scene.GetRegistry().get<AnimGraphComponent>(entity).EnableUpperBodyLayer = 0;
+		CHECK(AnimGraphSystem::SetParameter(entity, "AimWeight", 0.0f));
 		AnimGraphSystem::Update(scene, 0.016f);
 		CHECK(Nearly(AnimGraphSystem::GetParameter(entity, "AimWeight"), 0.0f, 1e-6f));
-		scene.GetRegistry().get<AnimGraphComponent>(entity).EnableUpperBodyLayer = 1;
+		CHECK(AnimGraphSystem::SetParameter(entity, "AimWeight", 1.0f));
 		AnimGraphSystem::Update(scene, 0.016f);
 		CHECK(Nearly(AnimGraphSystem::GetParameter(entity, "AimWeight"), 1.0f, 1e-6f));
 
@@ -367,6 +367,7 @@ namespace
 		AnimGraphSystem::ClearCache();
 
 		const entt::entity entity = AddCharacter(scene, modelPath.string(), graphPath.string(), false);
+		scene.GetRegistry().emplace<FootIkComponent>(entity);
 
 		// 地形实体**带平移**：SampleHeight/SampleNormal 吃的是地形本地坐标，不换算就会采样到
 		// 世界 x=10.1（高度 1.41）而不是本地 x=0.1（高度 0.41）—— 1 m 的判别性误差。
@@ -412,7 +413,7 @@ namespace
 		CHECK(std::isfinite(leftFoot.y) && std::isfinite(rightFoot.y));
 
 		// 关闭 Foot IK → 回到绑定姿态（脚踝 0.10，模型空间），证明 IK 真的生效过。
-		scene.GetRegistry().get<AnimGraphComponent>(entity).EnableFootIk = 0;
+		scene.GetRegistry().get<FootIkComponent>(entity).Enabled = 0;
 		AnimGraphSystem::Update(scene, 0.016f);
 		palette = AnimGraphSystem::GetPalette(entity);
 		CHECK(palette != nullptr);

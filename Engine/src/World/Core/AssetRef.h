@@ -26,6 +26,13 @@ namespace World
 		AssetId Identity;
 
 		constexpr bool HasPath() const { return Path.IsValid(); }
+
+		static AssetRef FromPath(std::string_view p)
+		{
+			AssetRef r{};
+			r.Path = StringPool::Get().InternPath(p);
+			return r;
+		}
 	};
 	static_assert(sizeof(AssetRef) == 16, "AssetRef must be exactly 16 bytes (PathId + AssetId)");
 	static_assert(std::is_trivially_copyable_v<AssetRef>, "AssetRef must be trivially copyable");
