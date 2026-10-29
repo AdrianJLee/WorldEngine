@@ -3450,47 +3450,50 @@ float PropertiesPanel::DrawBehaviorTreeInspector(Wui::WuiContext& ctx, const Wui
 	}
 	curY += 26.0f;
 
-	// 资产扫描与匹配
+	// 资产扫描与下拉选项
 	const std::vector<std::string>& btAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::BehaviorTree);
-	std::string currentPath = "assets/ai/SmartObjectDemo.wbt";
-	bool matched = false;
-	for (const auto& p : btAssets)
+	std::vector<std::string> assetOptions = btAssets;
+	if (assetOptions.empty())
 	{
-		uint32_t h = static_cast<uint32_t>(std::hash<std::string>{}(p));
+		assetOptions.push_back("assets/ai/SmartObjectDemo.wbt");
+	}
+
+	std::string currentPath = assetOptions[0];
+	int selectedAssetIdx = -1;
+	for (size_t i = 0; i < assetOptions.size(); ++i)
+	{
+		uint32_t h = static_cast<uint32_t>(std::hash<std::string>{}(assetOptions[i]));
 		if (h == bt->TreeAssetId)
 		{
-			currentPath = p;
-			matched = true;
+			currentPath = assetOptions[i];
+			selectedAssetIdx = static_cast<int>(i);
 			break;
 		}
 	}
-	if (!matched && bt->TreeAssetId != 0)
+	if (selectedAssetIdx < 0)
 	{
-		currentPath = "ID: 0x" + std::to_string(bt->TreeAssetId);
-	}
-	else if (!matched && !btAssets.empty())
-	{
-		currentPath = btAssets[0];
+		if (bt->TreeAssetId != 0)
+		{
+			std::string customEntry = "ID: 0x" + std::to_string(bt->TreeAssetId);
+			assetOptions.insert(assetOptions.begin(), customEntry);
+			selectedAssetIdx = 0;
+			currentPath = customEntry;
+		}
+		else
+		{
+			selectedAssetIdx = 0;
+			currentPath = assetOptions[0];
+		}
 	}
 
 	Wui::Label(ctx, { startX, curY + 2.0f }, "行为树资产 (.wbt):", theme.Text, theme.FontSizeSmall);
-	std::string assetBtnText = currentPath;
-	if (assetBtnText.empty()) assetBtnText = "[点击选择 .wbt 行为树资产]";
-	if (Wui::Button(ctx, Wui::HashId("inspect.bt.asset_btn"),
-		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, assetBtnText.c_str(), theme))
+	int chosenIdx = selectedAssetIdx;
+	if (Wui::Combo(ctx, Wui::HashId("inspect.bt.asset_combo"),
+		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, "行为树资产", assetOptions, chosenIdx, theme))
 	{
-		if (!btAssets.empty())
+		if (chosenIdx >= 0 && chosenIdx < static_cast<int>(assetOptions.size()))
 		{
-			int nextIdx = 0;
-			for (size_t i = 0; i < btAssets.size(); ++i)
-			{
-				if (btAssets[i] == currentPath)
-				{
-					nextIdx = static_cast<int>((i + 1) % btAssets.size());
-					break;
-				}
-			}
-			currentPath = btAssets[nextIdx];
+			currentPath = assetOptions[chosenIdx];
 			bt->TreeAssetId = static_cast<uint32_t>(std::hash<std::string>{}(currentPath));
 			if (changedFields) changedFields->push_back("TreeAssetId");
 			m_Host.MarkDocumentDirty();

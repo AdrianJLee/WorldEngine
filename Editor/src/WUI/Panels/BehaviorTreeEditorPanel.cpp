@@ -189,11 +189,14 @@ namespace World
 
 	void BehaviorTreeEditorPanel::NewAsset()
 	{
-		SetDefaultTemplate();
+		m_Nodes.clear();
+		m_BlackboardKeys.clear();
+		m_NextNodeId = 1;
+		m_SelectedNodeId = 0;
 		m_LogicalPath = "assets/ai/new_behavior_tree.wbt";
 		m_AssetName = "new_behavior_tree";
 		m_Dirty = true;
-		m_StatusFeedback = "新建行为树资产模板 (New Asset Created)";
+		m_StatusFeedback = "新建空白行为树资产 (New Empty Behavior Tree Created)";
 	}
 
 	bool BehaviorTreeEditorPanel::LoadAsset(const std::string& logicalPath)
@@ -316,7 +319,7 @@ namespace World
 	{
 		BTNodeDesc child;
 		child.Id = m_NextNodeId++;
-		child.ParentId = parentId;
+		child.ParentId = m_Nodes.empty() ? 0 : parentId;
 		child.Kind = kind;
 
 		switch (kind)
@@ -639,6 +642,27 @@ namespace World
 
 		float listY = rect.Y + 60.0f;
 
+		if (m_Nodes.empty())
+		{
+			float emptyY = rect.Y + 70.0f;
+			Wui::Label(ctx, { rect.X + 16.0f, emptyY }, "当前行为树为空 (Empty Tree)", theme.TextMuted, theme.FontSizeSmall);
+			emptyY += 26.0f;
+			Wui::WuiTheme addRootTheme = theme;
+			addRootTheme.ButtonBg = NodeKindToColor(BTNodeKind::Selector);
+			if (Wui::Button(ctx, Wui::HashId("bt.add_root_sel"), { rect.X + 16.0f, emptyY, rect.W - 32.0f, 26.0f }, "+ 创建根选择器 (Root Selector)", addRootTheme))
+			{
+				AddChildNode(0, BTNodeKind::Selector);
+			}
+			emptyY += 32.0f;
+			Wui::WuiTheme addRootSeqTheme = theme;
+			addRootSeqTheme.ButtonBg = NodeKindToColor(BTNodeKind::Sequence);
+			if (Wui::Button(ctx, Wui::HashId("bt.add_root_seq"), { rect.X + 16.0f, emptyY, rect.W - 32.0f, 26.0f }, "+ 创建根顺序器 (Root Sequence)", addRootSeqTheme))
+			{
+				AddChildNode(0, BTNodeKind::Sequence);
+			}
+			return;
+		}
+
 		std::vector<uint32_t> rootNodes = GetChildren(0);
 		if (rootNodes.empty() && !m_Nodes.empty())
 		{
@@ -782,6 +806,12 @@ namespace World
 		Wui::HighlightOutline(ctx, headRect, theme.Border, 0.0f, 1.0f);
 		Wui::Label(ctx, { rect.X + 8.0f, rect.Y + 6.0f }, "节点详细属性与参数卡片 (Node Details)", theme.Accent, theme.FontSizeSmall);
 
+		if (m_Nodes.empty())
+		{
+			Wui::Label(ctx, { rect.X + 16.0f, rect.Y + 48.0f }, "当前行为树无节点。请点击左侧 [+ 创建根节点] 或上方快捷按钮开始编排。", theme.TextMuted, theme.FontSizeSmall);
+			return;
+		}
+
 		BTNodeDesc* node = FindNode(m_SelectedNodeId);
 		if (!node)
 		{
@@ -907,14 +937,47 @@ namespace World
 			// 自适应参数配置
 			if (node->ConditionType == "ScriptCondition")
 			{
-				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "脚本路径 (Script):", theme.Text, theme.FontSizeSmall);
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "脚本选择 (Script):", theme.Text, theme.FontSizeSmall);
 				const float btnW = 100.0f;
 				const float scriptInputW = std::max(80.0f, inputW - 16.0f - btnW - 6.0f);
 
-				if (Wui::TextField(ctx, Wui::HashId((std::string("bt.cnd.script.") + std::to_string(node->Id)).c_str()),
-					{ startX + labelW, cardY, scriptInputW, 22.0f }, node->StringParam, theme))
+				std::vector<std::string> scriptOptions = Editor::AssetCatalog::PathsFor(EditorAssetKind::Script);
+				if (scriptOptions.empty())
 				{
-					m_Dirty = true;
+					scriptOptions.push_back("assets/scripts/ai/conditions/SampleCustomCondition.luau");
+				}
+				int selectedScriptIdx = -1;
+				for (size_t s = 0; s < scriptOptions.size(); ++s)
+				{
+					if (scriptOptions[s] == node->StringParam)
+					{
+						selectedScriptIdx = static_cast<int>(s);
+						break;
+					}
+				}
+				if (selectedScriptIdx < 0)
+				{
+					if (!node->StringParam.empty())
+					{
+						scriptOptions.insert(scriptOptions.begin(), node->StringParam);
+						selectedScriptIdx = 0;
+					}
+					else
+					{
+						selectedScriptIdx = 0;
+						node->StringParam = scriptOptions[0];
+					}
+				}
+
+				int chosenScript = selectedScriptIdx;
+				if (Wui::Combo(ctx, Wui::HashId((std::string("bt.cnd.script_combo.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, scriptInputW, 22.0f }, "脚本选择", scriptOptions, chosenScript, theme))
+				{
+					if (chosenScript >= 0 && chosenScript < static_cast<int>(scriptOptions.size()))
+					{
+						node->StringParam = scriptOptions[static_cast<size_t>(chosenScript)];
+						m_Dirty = true;
+					}
 				}
 
 				if (Wui::Button(ctx, Wui::HashId((std::string("bt.cnd.open_script.") + std::to_string(node->Id)).c_str()),
@@ -1070,14 +1133,47 @@ namespace World
 			// 自适应动作参数配置
 			if (node->ActionType == "ScriptAction")
 			{
-				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "脚本路径 (Script):", theme.Text, theme.FontSizeSmall);
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "脚本选择 (Script):", theme.Text, theme.FontSizeSmall);
 				const float btnW = 100.0f;
 				const float scriptInputW = std::max(80.0f, inputW - 16.0f - btnW - 6.0f);
 
-				if (Wui::TextField(ctx, Wui::HashId((std::string("bt.act.script.") + std::to_string(node->Id)).c_str()),
-					{ startX + labelW, cardY, scriptInputW, 22.0f }, node->StringParam, theme))
+				std::vector<std::string> scriptOptions = Editor::AssetCatalog::PathsFor(EditorAssetKind::Script);
+				if (scriptOptions.empty())
 				{
-					m_Dirty = true;
+					scriptOptions.push_back("assets/scripts/ai/actions/SampleCustomAction.luau");
+				}
+				int selectedScriptIdx = -1;
+				for (size_t s = 0; s < scriptOptions.size(); ++s)
+				{
+					if (scriptOptions[s] == node->StringParam)
+					{
+						selectedScriptIdx = static_cast<int>(s);
+						break;
+					}
+				}
+				if (selectedScriptIdx < 0)
+				{
+					if (!node->StringParam.empty())
+					{
+						scriptOptions.insert(scriptOptions.begin(), node->StringParam);
+						selectedScriptIdx = 0;
+					}
+					else
+					{
+						selectedScriptIdx = 0;
+						node->StringParam = scriptOptions[0];
+					}
+				}
+
+				int chosenScript = selectedScriptIdx;
+				if (Wui::Combo(ctx, Wui::HashId((std::string("bt.act.script_combo.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, scriptInputW, 22.0f }, "脚本选择", scriptOptions, chosenScript, theme))
+				{
+					if (chosenScript >= 0 && chosenScript < static_cast<int>(scriptOptions.size()))
+					{
+						node->StringParam = scriptOptions[static_cast<size_t>(chosenScript)];
+						m_Dirty = true;
+					}
 				}
 
 				if (Wui::Button(ctx, Wui::HashId((std::string("bt.act.open_script.") + std::to_string(node->Id)).c_str()),
