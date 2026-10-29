@@ -82,6 +82,7 @@ namespace World
 			const Wui::WuiTheme& theme);
 		void DrawCollisionWireframe(Wui::WuiContext& ctx, const Wui::WuiRect& previewRect,
 			const Wui::WuiTheme& theme);
+		void RebuildCollisionEdgeCache();
 
 		// ---- 动画走带与擦洗时间轴 ----
 		float DrawTransportBar(Wui::WuiContext& ctx, float x, float y, float width,
@@ -288,6 +289,11 @@ namespace World
 		bool m_TransparentSkipWarned = false;
 		bool m_SkinnedSubmitWarned = false;
 		// ---- 物理碰撞与凸包生成状态 (Collision Tab) ----
+		struct LineEdge
+		{
+			glm::vec3 p0 { 0.0f };
+			glm::vec3 p1 { 0.0f };
+		};
 		bool m_ShowCollisionWireframe = true;
 		uint32_t m_BakeHullCount = 4;
 		float m_BakeConcavityThreshold = 0.05f;
@@ -295,6 +301,8 @@ namespace World
 		uint8_t m_SelectedCollisionType = 1; // 0=None, 1=AutoConvex, 2=BoundingBox
 		std::string m_SelectedCollisionProfile = "Default";
 		std::vector<ConvexHull> m_CollisionHulls;
+		std::vector<LineEdge> m_CachedCollisionEdges;
+		std::vector<glm::vec3> m_CachedCollisionPoints;
 		double m_CollisionBakeTimeMs = 0.0;
 		std::string m_CollisionStatusMessage;
 		bool m_CollisionStatusIsError = false;

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include <chrono>
 
 using namespace World;
 
@@ -90,6 +91,19 @@ static void TestConvexQuickHull()
 	assert(hull.IsConvex());
 	assert(std::abs(hull.Volume - 1000.0f) < 1.0f);
 
+	// 验证凸包所有三角面法线严格背离质心朝外
+	for (size_t i = 0; i + 2 < hull.Indices.size(); i += 3)
+	{
+		const glm::vec3& a = hull.Vertices[hull.Indices[i]];
+		const glm::vec3& b = hull.Vertices[hull.Indices[i + 1]];
+		const glm::vec3& c = hull.Vertices[hull.Indices[i + 2]];
+		const glm::vec3 faceCenter = (a + b + c) / 3.0f;
+		const glm::vec3 faceNormal = glm::cross(b - a, c - a);
+		const float len = glm::length(faceNormal);
+		assert(len > 1e-6f);
+		assert(glm::dot(faceNormal / len, faceCenter - hull.Center) > 0.0f);
+	}
+
 	// 内部点与外部点严密判定
 	assert(hull.ContainsPoint(glm::vec3(0.0f, 0.0f, 0.0f)));
 	assert(hull.ContainsPoint(glm::vec3(4.99f, 4.99f, 4.99f)));
@@ -162,6 +176,120 @@ static void TestConcaveMeshDecomposition()
 
 	std::cout << "[PASS] TestConcaveMeshDecomposition (Subhulls: " << subHulls.size()
 		<< ", SingleVol: " << singleVolume << ", DecomposedTotalVol: " << totalSubVolume << ")\n";
+}
+
+static void TestConvexHullNormalConsistency()
+{
+	// 构造包含非轴对齐倾斜面与复杂凸角的点集
+	std::vector<glm::vec3> points = {
+		{ -2.0f, -1.0f, -3.0f }, {  3.0f, -2.0f, -1.0f },
+		{  2.0f,  4.0f, -2.0f }, { -1.0f,  3.0f,  4.0f },
+		{  0.0f, -3.0f,  2.0f }, {  4.0f,  1.0f,  3.0f },
+		{ -3.0f,  1.0f, -1.0f }, {  1.0f,  0.0f,  5.0f },
+		{  0.5f,  0.5f,  0.5f }, { -0.5f, -0.5f,  0.2f }
+	};
+
+	ConvexHull hull;
+	bool ok = ConvexDecomposer::ComputeHull(points, hull);
+	assert(ok);
+	assert(hull.IsConvex());
+	assert(hull.Vertices.size() >= 4);
+	assert(hull.Indices.size() >= 12);
+	assert(hull.Volume > 0.0f);
+
+	// 核心断言: 每一个缝合三角面法向绝对背离质心朝外，且所有顶点均在每个三角面的内侧
+	for (size_t i = 0; i + 2 < hull.Indices.size(); i += 3)
+	{
+		const glm::vec3& a = hull.Vertices[hull.Indices[i]];
+		const glm::vec3& b = hull.Vertices[hull.Indices[i + 1]];
+		const glm::vec3& c = hull.Vertices[hull.Indices[i + 2]];
+		const glm::vec3 faceCenter = (a + b + c) / 3.0f;
+		const glm::vec3 faceNormal = glm::cross(b - a, c - a);
+		const float len = glm::length(faceNormal);
+		assert(len > 1e-6f);
+		const glm::vec3 unitNormal = faceNormal / len;
+
+		// 法向量与 (faceCenter - hull.Center) 点积必须为正
+		assert(glm::dot(unitNormal, faceCenter - hull.Center) > 0.0f);
+
+		// 凸包内所有顶点在该面法向上的外凸投影必须非正 (容差 0.01f)
+		for (const auto& v : hull.Vertices)
+		{
+			assert(glm::dot(v - a, unitNormal) <= 0.01f);
+		}
+	}
+
+	std::cout << "[PASS] TestConvexHullNormalConsistency (Faces: " << (hull.Indices.size() / 3) << ")\n";
+}
+
+static void TestConvexLargePointCloudPerformance()
+{
+	// 构造 5000+ 顶点的海量高模点云 (带环面与球面螺旋波动，并注入 500 个重复顶点测试哈希去重)
+	std::vector<glm::vec3> densePoints;
+	densePoints.reserve(5500);
+	for (int i = 0; i < 5000; ++i)
+	{
+		const float u = static_cast<float>(i) / 5000.0f;
+		const float theta = u * 3.14159265f * 2.0f * 25.0f;
+		const float phi = std::acos(std::clamp(1.0f - 2.0f * u, -1.0f, 1.0f));
+		const float r = 10.0f * (0.8f + 0.2f * std::sin(theta * 3.0f));
+		densePoints.push_back({
+			r * std::sin(phi) * std::cos(theta),
+			r * std::sin(phi) * std::sin(theta),
+			r * std::cos(phi)
+		});
+	}
+	for (int i = 0; i < 500; ++i)
+		densePoints.push_back(densePoints[i]);
+
+	// 1. 基准测试: ComputeHull 在 5500 顶点大点云下的计算耗时
+	const auto startHull = std::chrono::high_resolution_clock::now();
+	ConvexHull hull;
+	const bool ok = ConvexDecomposer::ComputeHull(densePoints, hull);
+	const auto endHull = std::chrono::high_resolution_clock::now();
+	const auto hullMs = std::chrono::duration_cast<std::chrono::milliseconds>(endHull - startHull).count();
+
+	std::cout << "[PERF] ComputeHull on " << densePoints.size() << " points: " << hullMs
+		<< " ms (Vertices: " << hull.Vertices.size() << ", Faces: " << (hull.Indices.size() / 3)
+		<< ", Volume: " << hull.Volume << ")\n";
+
+	assert(ok);
+	assert(hull.IsConvex());
+	assert(hull.Volume > 0.0f);
+	assert(hullMs < 50); // 严格断言在 50ms 内完成 (实际通常 1~5ms)
+
+	// 验证大点云凸包所有面的法线一致性
+	for (size_t i = 0; i + 2 < hull.Indices.size(); i += 3)
+	{
+		const glm::vec3& a = hull.Vertices[hull.Indices[i]];
+		const glm::vec3& b = hull.Vertices[hull.Indices[i + 1]];
+		const glm::vec3& c = hull.Vertices[hull.Indices[i + 2]];
+		const glm::vec3 faceCenter = (a + b + c) / 3.0f;
+		const glm::vec3 faceNormal = glm::cross(b - a, c - a);
+		const float len = glm::length(faceNormal);
+		assert(len > 1e-6f);
+		assert(glm::dot(faceNormal / len, faceCenter - hull.Center) > 0.0f);
+	}
+
+	// 2. 基准测试: 多凸包拆解 Decompose 在 5500 顶点下的计算耗时
+	const auto startDecompose = std::chrono::high_resolution_clock::now();
+	std::vector<ConvexHull> subHulls;
+	ConvexDecomposer::Decompose(densePoints, {}, 4, 0.1f, subHulls);
+	const auto endDecompose = std::chrono::high_resolution_clock::now();
+	const auto decomposeMs = std::chrono::duration_cast<std::chrono::milliseconds>(endDecompose - startDecompose).count();
+
+	std::cout << "[PERF] Decompose on " << densePoints.size() << " points: " << decomposeMs
+		<< " ms (Subhulls: " << subHulls.size() << ")\n";
+
+	assert(!subHulls.empty());
+	assert(decomposeMs < 50); // 严格断言在 50ms 内完成
+	for (const auto& sub : subHulls)
+	{
+		assert(sub.IsConvex());
+		assert(sub.Volume > 0.0f);
+	}
+
+	std::cout << "[PASS] TestConvexLargePointCloudPerformance\n";
 }
 
 static void TestDecalAndConvexComponentLayout()

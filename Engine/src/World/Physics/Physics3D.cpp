@@ -321,7 +321,7 @@ namespace World
 					throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) +
 						" ConvexCollider3D mesh has no vertices ('" + path + "')");
 
-				const size_t maxPoints = static_cast<size_t>(JPH::ConvexHullShape::cMaxPointsInHull);
+				const size_t maxPoints = std::min(static_cast<size_t>(convex->MaxVerticesPerHull), static_cast<size_t>(JPH::ConvexHullShape::cMaxPointsInHull));
 
 				// 预烘焙直通加速:若模型资产已包含 AutoConvex(CollisionType == 1) 凸包数据,直接复用已烘焙凸包
 				if (model.Collision.CollisionType == 1 && !model.Collision.ConvexHulls.empty())

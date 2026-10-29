@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
+#include <unordered_map>
 #include <vector>
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -22,7 +24,7 @@ namespace World
 		struct QuickFace
 		{
 			uint32_t v[3];
-			glm::vec3 normal;
+			glm::vec3 normal { 0.0f };
 			float dist = 0.0f;
 			std::vector<uint32_t> outsidePoints;
 			float maxDist = 0.0f;
@@ -40,6 +42,227 @@ namespace World
 				return a == other.a && b == other.b;
 			}
 		};
+
+		// 空间包围盒量化网格坐标与哈希 (用于 O(N) 线性去重)
+		struct VoxelKey
+		{
+			int32_t x = 0;
+			int32_t y = 0;
+			int32_t z = 0;
+
+			bool operator==(const VoxelKey& o) const noexcept
+			{
+				return x == o.x && y == o.y && z == o.z;
+			}
+		};
+
+		struct VoxelKeyHash
+		{
+			size_t operator()(const VoxelKey& k) const noexcept
+			{
+				uint64_t h = (static_cast<uint64_t>(static_cast<uint32_t>(k.x)) * 73856093ULL) ^
+				             (static_cast<uint64_t>(static_cast<uint32_t>(k.y)) * 19349663ULL) ^
+				             (static_cast<uint64_t>(static_cast<uint32_t>(k.z)) * 83492791ULL);
+				h ^= (h >> 33);
+				h *= 0xff51afd7ed558ccdULL;
+				h ^= (h >> 33);
+				return static_cast<size_t>(h);
+			}
+		};
+
+		// 自适应外壳特征降采样: 当输入点云 > maxSamples 时，提取 6 轴极值、128 球面极值与 8x8x8 最外层轮廓特征点
+		std::vector<glm::vec3> SampleExtremeHullPoints(const std::vector<glm::vec3>& inPoints, size_t maxSamples = 512)
+		{
+			if (inPoints.size() <= maxSamples)
+				return inPoints;
+
+			glm::vec3 minP(std::numeric_limits<float>::max());
+			glm::vec3 maxP(std::numeric_limits<float>::lowest());
+			for (const auto& p : inPoints)
+			{
+				minP = glm::min(minP, p);
+				maxP = glm::max(maxP, p);
+			}
+			const glm::vec3 center = (minP + maxP) * 0.5f;
+
+			std::vector<bool> selected(inPoints.size(), false);
+			std::vector<size_t> chosenIndices;
+			chosenIndices.reserve(maxSamples);
+
+			auto markIndex = [&](size_t idx)
+			{
+				if (idx < inPoints.size() && !selected[idx])
+				{
+					selected[idx] = true;
+					chosenIndices.push_back(idx);
+				}
+			};
+
+			// 1. 提取 6 个轴向极值点
+			size_t minX = 0, maxX = 0, minY = 0, maxY = 0, minZ = 0, maxZ = 0;
+			for (size_t i = 1; i < inPoints.size(); ++i)
+			{
+				const auto& p = inPoints[i];
+				if (p.x < inPoints[minX].x) minX = i;
+				if (p.x > inPoints[maxX].x) maxX = i;
+				if (p.y < inPoints[minY].y) minY = i;
+				if (p.y > inPoints[maxY].y) maxY = i;
+				if (p.z < inPoints[minZ].z) minZ = i;
+				if (p.z > inPoints[maxZ].z) maxZ = i;
+			}
+			markIndex(minX); markIndex(maxX);
+			markIndex(minY); markIndex(maxY);
+			markIndex(minZ); markIndex(maxZ);
+
+			// 2. 球面均匀方向极值投射 (Fibonacci Sphere 128 方向)，锁定全角度凸包支撑极点
+			constexpr size_t kDirCount = 128;
+			for (size_t k = 0; k < kDirCount; ++k)
+			{
+				const float y = 1.0f - (static_cast<float>(k) / static_cast<float>(kDirCount - 1)) * 2.0f;
+				const float radius = std::sqrt(std::max(0.0f, 1.0f - y * y));
+				constexpr float goldenAngle = 2.3999632f; // pi * (3 - sqrt(5))
+				const float theta = goldenAngle * static_cast<float>(k);
+				const glm::vec3 dir(std::cos(theta) * radius, y, std::sin(theta) * radius);
+
+				float maxDot = std::numeric_limits<float>::lowest();
+				size_t bestIdx = 0;
+				for (size_t i = 0; i < inPoints.size(); ++i)
+				{
+					const float d = glm::dot(inPoints[i], dir);
+					if (d > maxDot)
+					{
+						maxDot = d;
+						bestIdx = i;
+					}
+				}
+				markIndex(bestIdx);
+			}
+
+			// 3. 空间 8x8x8 网格最外层采样: 筛选各空间扇区内距离质心最远的关键特征点
+			constexpr int kGridDim = 8;
+			const glm::vec3 extent = maxP - minP;
+			const glm::vec3 invExtent = glm::vec3(
+				extent.x > 1e-6f ? static_cast<float>(kGridDim) / extent.x : 0.0f,
+				extent.y > 1e-6f ? static_cast<float>(kGridDim) / extent.y : 0.0f,
+				extent.z > 1e-6f ? static_cast<float>(kGridDim) / extent.z : 0.0f
+			);
+
+			struct CellExtreme
+			{
+				size_t bestIdx = 0;
+				float maxDistSq = -1.0f;
+			};
+			std::vector<CellExtreme> gridExtremes(kGridDim * kGridDim * kGridDim);
+
+			for (size_t i = 0; i < inPoints.size(); ++i)
+			{
+				const auto& p = inPoints[i];
+				const int gx = std::clamp(static_cast<int>((p.x - minP.x) * invExtent.x), 0, kGridDim - 1);
+				const int gy = std::clamp(static_cast<int>((p.y - minP.y) * invExtent.y), 0, kGridDim - 1);
+				const int gz = std::clamp(static_cast<int>((p.z - minP.z) * invExtent.z), 0, kGridDim - 1);
+				const size_t cellIdx = static_cast<size_t>(gx + gy * kGridDim + gz * kGridDim * kGridDim);
+
+				const float distSq = glm::distance2(p, center);
+				if (distSq > gridExtremes[cellIdx].maxDistSq)
+				{
+					gridExtremes[cellIdx].maxDistSq = distSq;
+					gridExtremes[cellIdx].bestIdx = i;
+				}
+			}
+
+			for (const auto& cell : gridExtremes)
+			{
+				if (cell.maxDistSq >= 0.0f)
+					markIndex(cell.bestIdx);
+			}
+
+			// 4. 若特征点数未达上限，采用均匀步进补足
+			if (chosenIndices.size() < maxSamples)
+			{
+				const size_t stride = std::max<size_t>(1, inPoints.size() / (maxSamples - chosenIndices.size()));
+				for (size_t i = 0; i < inPoints.size() && chosenIndices.size() < maxSamples; i += stride)
+					markIndex(i);
+			}
+
+			std::vector<glm::vec3> result;
+			result.reserve(chosenIndices.size());
+			for (size_t idx : chosenIndices)
+				result.push_back(inPoints[idx]);
+
+			return result;
+		}
+
+		// 基于空间包围盒量化的哈希网格 O(N) 线性去重
+		std::vector<glm::vec3> DeduplicatePointsVoxelHash(const std::vector<glm::vec3>& inPoints)
+		{
+			std::vector<glm::vec3> uniquePoints;
+			uniquePoints.reserve(inPoints.size());
+
+			if (inPoints.empty())
+				return uniquePoints;
+
+			glm::vec3 minP = inPoints[0], maxP = inPoints[0];
+			for (const auto& p : inPoints)
+			{
+				minP = glm::min(minP, p);
+				maxP = glm::max(maxP, p);
+			}
+
+			const glm::vec3 extents = maxP - minP;
+			const float maxExtent = std::max({ extents.x, extents.y, extents.z });
+			if (maxExtent < 1e-6f)
+			{
+				uniquePoints.push_back(inPoints[0]);
+				return uniquePoints;
+			}
+
+			constexpr float kVoxelSize = 1e-4f;
+			constexpr float kInvVoxelSize = 1.0f / kVoxelSize;
+			constexpr float kDistSqThreshold = 1e-8f; // (1e-4f)^2
+
+			std::unordered_map<VoxelKey, std::vector<uint32_t>, VoxelKeyHash> grid;
+			grid.reserve(inPoints.size());
+
+			for (const auto& p : inPoints)
+			{
+				const int32_t vx = static_cast<int32_t>(std::floor((p.x - minP.x) * kInvVoxelSize));
+				const int32_t vy = static_cast<int32_t>(std::floor((p.y - minP.y) * kInvVoxelSize));
+				const int32_t vz = static_cast<int32_t>(std::floor((p.z - minP.z) * kInvVoxelSize));
+
+				bool duplicate = false;
+				for (int32_t dz = -1; dz <= 1 && !duplicate; ++dz)
+				{
+					for (int32_t dy = -1; dy <= 1 && !duplicate; ++dy)
+					{
+						for (int32_t dx = -1; dx <= 1 && !duplicate; ++dx)
+						{
+							const VoxelKey neighborKey { vx + dx, vy + dy, vz + dz };
+							auto it = grid.find(neighborKey);
+							if (it != grid.end())
+							{
+								for (uint32_t uIdx : it->second)
+								{
+									if (glm::distance2(p, uniquePoints[uIdx]) < kDistSqThreshold)
+									{
+										duplicate = true;
+										break;
+									}
+								}
+							}
+						}
+					}
+				}
+
+				if (!duplicate)
+				{
+					const uint32_t newIdx = static_cast<uint32_t>(uniquePoints.size());
+					uniquePoints.push_back(p);
+					grid[{ vx, vy, vz }].push_back(newIdx);
+				}
+			}
+
+			return uniquePoints;
+		}
 	}
 
 	bool ConvexHull::ContainsPoint(const glm::vec3& pt) const
@@ -53,7 +276,11 @@ namespace World
 			const glm::vec3& b = Vertices[Indices[i + 1]];
 			const glm::vec3& c = Vertices[Indices[i + 2]];
 
-			const glm::vec3 normal = glm::cross(b - a, c - a);
+			const glm::vec3 cross = glm::cross(b - a, c - a);
+			const float len = glm::length(cross);
+			if (len < 1e-6f)
+				continue;
+			const glm::vec3 normal = cross / len;
 			if (glm::dot(pt - a, normal) > 0.001f)
 				return false;
 		}
@@ -96,28 +323,15 @@ namespace World
 		if (inPoints.size() < 4)
 			return false;
 
-		// 1. 去重近距离点
-		std::vector<glm::vec3> uniquePoints;
-		uniquePoints.reserve(inPoints.size());
-		for (const auto& p : inPoints)
-		{
-			bool duplicate = false;
-			for (const auto& u : uniquePoints)
-			{
-				if (glm::distance2(p, u) < 1e-8f)
-				{
-					duplicate = true;
-					break;
-				}
-			}
-			if (!duplicate)
-				uniquePoints.push_back(p);
-		}
+		// 1. 自适应特征采样 (当顶点数 > 512 时提取前 512 个最外层关键顶点)
+		const std::vector<glm::vec3> candidatePoints = SampleExtremeHullPoints(inPoints, 512);
 
+		// 2. 基于空间哈希网格进行 O(N) 线性去重
+		const std::vector<glm::vec3> uniquePoints = DeduplicatePointsVoxelHash(candidatePoints);
 		if (uniquePoints.size() < 4)
 			return false;
 
-		// 2. 寻找 6 个轴向极值点构建初始非共面四面体
+		// 3. 寻找 6 个轴向极值点构建初始非共面四面体
 		size_t minX = 0, maxX = 0, minY = 0, maxY = 0, minZ = 0, maxZ = 0;
 		for (size_t i = 1; i < uniquePoints.size(); ++i)
 		{
@@ -202,7 +416,8 @@ namespace World
 		auto addFace = [&](uint32_t a, uint32_t b, uint32_t c)
 		{
 			glm::vec3 n = glm::cross(uniquePoints[b] - uniquePoints[a], uniquePoints[c] - uniquePoints[a]);
-			if (glm::dot(uniquePoints[a] - centroid, n) < 0.0f)
+			const glm::vec3 faceCenter = (uniquePoints[a] + uniquePoints[b] + uniquePoints[c]) / 3.0f;
+			if (glm::dot(faceCenter - centroid, n) < 0.0f)
 			{
 				std::swap(b, c);
 				n = -n;
@@ -230,7 +445,7 @@ namespace World
 		if (faces.size() < 4)
 			return false;
 
-		// 3. 将其余点分配到各初始面的外点集 (Outside Sets)
+		// 4. 将其余点分配到各初始面的外点集 (Outside Sets)
 		for (size_t i = 0; i < uniquePoints.size(); ++i)
 		{
 			if (i == v0 || i == v1 || i == v2 || i == v3)
@@ -261,7 +476,7 @@ namespace World
 			}
 		}
 
-		// 4. QuickHull 迭代：寻找拥有最远外点的面进行地平线边扩展
+		// 5. QuickHull 迭代：寻找拥有最远外点的面进行地平线边扩展
 		while (true)
 		{
 			int maxFaceIdx = -1;
@@ -307,32 +522,46 @@ namespace World
 				}
 			}
 
-			// 提取地平线边缘 (Horizon Edges)：可见面中有向边在可见面集合中不被反向共享的边缘
-			std::vector<DirectedEdge> visibleEdges;
-			visibleEdges.reserve(visibleFaces.size() * 3);
+			// 提取地平线边缘 (Horizon Edges)：统计可见面有向边频率，剔除退化退向边
+			struct EdgeKey
+			{
+				uint32_t a;
+				uint32_t b;
+
+				bool operator==(const EdgeKey& o) const noexcept
+				{
+					return a == o.a && b == o.b;
+				}
+			};
+
+			struct EdgeKeyHash
+			{
+				size_t operator()(const EdgeKey& k) const noexcept
+				{
+					return (static_cast<size_t>(k.a) << 16) ^ static_cast<size_t>(k.b);
+				}
+			};
+
+			std::unordered_map<EdgeKey, int, EdgeKeyHash> edgeCount;
 			for (uint32_t fIdx : visibleFaces)
 			{
 				const auto& f = faces[fIdx];
-				visibleEdges.push_back({ f.v[0], f.v[1] });
-				visibleEdges.push_back({ f.v[1], f.v[2] });
-				visibleEdges.push_back({ f.v[2], f.v[0] });
+				edgeCount[{ f.v[0], f.v[1] }]++;
+				edgeCount[{ f.v[1], f.v[2] }]++;
+				edgeCount[{ f.v[2], f.v[0] }]++;
 			}
 
 			std::vector<DirectedEdge> horizonEdges;
-			for (size_t i = 0; i < visibleEdges.size(); ++i)
+			for (const auto& [edge, count] : edgeCount)
 			{
-				const DirectedEdge& edge = visibleEdges[i];
-				bool sharedInsideVisible = false;
-				for (size_t j = 0; j < visibleEdges.size(); ++j)
+				if (count == 1 && edgeCount.find({ edge.b, edge.a }) == edgeCount.end())
 				{
-					if (i != j && visibleEdges[j].a == edge.b && visibleEdges[j].b == edge.a)
-					{
-						sharedInsideVisible = true;
-						break;
-					}
+					if (edge.a == edge.b)
+						continue;
+					if (glm::distance2(uniquePoints[edge.a], uniquePoints[edge.b]) < 1e-8f)
+						continue;
+					horizonEdges.push_back({ edge.a, edge.b });
 				}
-				if (!sharedInsideVisible)
-					horizonEdges.push_back(edge);
 			}
 
 			// 停用所有可见面
@@ -346,8 +575,15 @@ namespace World
 			std::vector<uint32_t> newFaceIndices;
 			for (const auto& edge : horizonEdges)
 			{
+				if (edge.a == eyePtIdx || edge.b == eyePtIdx)
+					continue;
+
 				const glm::vec3& pA = uniquePoints[edge.a];
 				const glm::vec3& pB = uniquePoints[edge.b];
+
+				if (glm::distance2(pA, eyePt) < 1e-8f || glm::distance2(pB, eyePt) < 1e-8f)
+					continue;
+
 				glm::vec3 n = glm::cross(pB - pA, eyePt - pA);
 				const float len = glm::length(n);
 				if (len < 1e-6f)
@@ -358,11 +594,20 @@ namespace World
 				newFace.v[0] = edge.a;
 				newFace.v[1] = edge.b;
 				newFace.v[2] = eyePtIdx;
+
+				// 严密的新面质心法向朝向校验: 以凸包质心 centroid 为基准强制校对法向
+				const glm::vec3 faceCenter = (pA + pB + eyePt) / 3.0f;
+				if (glm::dot(n, faceCenter - centroid) < 0.0f)
+				{
+					n = -n;
+					std::swap(newFace.v[0], newFace.v[1]);
+				}
+
 				newFace.normal = n;
 				newFace.dist = -glm::dot(n, pA);
 				newFace.active = true;
 
-				uint32_t newIdx = static_cast<uint32_t>(faces.size());
+				const uint32_t newIdx = static_cast<uint32_t>(faces.size());
 				faces.push_back(std::move(newFace));
 				newFaceIndices.push_back(newIdx);
 			}
@@ -394,7 +639,7 @@ namespace World
 			}
 		}
 
-		// 5. 组装最终凸包顶点与索引
+		// 6. 组装最终凸包顶点与索引
 		std::vector<int> remap(uniquePoints.size(), -1);
 		for (const auto& face : faces)
 		{
@@ -416,7 +661,7 @@ namespace World
 		if (outHull.Vertices.size() < 4 || outHull.Indices.size() < 12)
 			return false;
 
-		// 6. 计算凸包中心点与真实体积
+		// 7. 计算凸包中心点与真实体积
 		outHull.Center = glm::vec3(0.0f);
 		for (const auto& v : outHull.Vertices)
 			outHull.Center += v;
@@ -465,8 +710,10 @@ namespace World
 			if (!ComputeHull(pts, hull))
 				return;
 
-			// 评估网格凹度：测量外凸包各面中心到输入点云的最近欧氏距离
-			float maxConcavity = 0.0f;
+			// 评估网格凹度：测量外凸包各面中心到特征采样点云的最近距离
+			// 为消除每面全量双重循环的高额耗时，对点云按特征进行等间隔稀疏采样 (上限 256 点)
+			const size_t ptSampleStep = std::max<size_t>(1, pts.size() / 256);
+			float maxConcavitySq = 0.0f;
 			for (size_t i = 0; i + 2 < hull.Indices.size(); i += 3)
 			{
 				const glm::vec3& a = hull.Vertices[hull.Indices[i]];
@@ -474,12 +721,18 @@ namespace World
 				const glm::vec3& c = hull.Vertices[hull.Indices[i + 2]];
 				const glm::vec3 faceCenter = (a + b + c) / 3.0f;
 
-				float minDistToPts = std::numeric_limits<float>::max();
-				for (const auto& p : pts)
-					minDistToPts = std::min(minDistToPts, glm::distance(faceCenter, p));
+				float minDistSq = std::numeric_limits<float>::max();
+				for (size_t pIdx = 0; pIdx < pts.size(); pIdx += ptSampleStep)
+				{
+					const float d2 = glm::distance2(faceCenter, pts[pIdx]);
+					if (d2 < minDistSq)
+						minDistSq = d2;
+				}
 
-				maxConcavity = std::max(maxConcavity, minDistToPts);
+				if (minDistSq > maxConcavitySq)
+					maxConcavitySq = minDistSq;
 			}
+			const float maxConcavity = std::sqrt(maxConcavitySq);
 
 			// 若凹度在阈值内，或已达最大划分凸包上限，接受当前凸包
 			if (maxConcavity <= concavityThreshold || allowedHulls <= 1 || pts.size() <= 8)
@@ -502,20 +755,22 @@ namespace World
 			else if (extents.z > extents.x && extents.z > extents.y) splitAxis = 2;
 
 			const float splitVal = (minP[splitAxis] + maxP[splitAxis]) * 0.5f;
+			// 切面过渡重叠保护带 (5% 沿轴包围盒延伸)，防止两子凸包在切割接缝处塌缩留缝
+			const float overlapBand = extents[splitAxis] * 0.05f;
 
 			std::vector<glm::vec3> setA, setB;
 			setA.reserve(pts.size());
 			setB.reserve(pts.size());
 			for (const auto& p : pts)
 			{
-				if (p[splitAxis] <= splitVal)
+				if (p[splitAxis] <= splitVal + overlapBand)
 					setA.push_back(p);
-				else
+				if (p[splitAxis] >= splitVal - overlapBand)
 					setB.push_back(p);
 			}
 
-			// 保护子集点数 >= 4；若分流倾斜则按中位数切分
-			if (setA.size() < 4 || setB.size() < 4)
+			// 保护子集点数 >= 4；若分流倾斜则按中位数切分 (带中位数邻域平滑重叠)
+			if (setA.size() < 4 || setB.size() < 4 || setA.size() == pts.size() || setB.size() == pts.size())
 			{
 				std::vector<glm::vec3> sortedPts = pts;
 				std::sort(sortedPts.begin(), sortedPts.end(), [splitAxis](const glm::vec3& l, const glm::vec3& r)
@@ -523,11 +778,14 @@ namespace World
 					return l[splitAxis] < r[splitAxis];
 				});
 				const size_t mid = sortedPts.size() / 2;
-				setA.assign(sortedPts.begin(), sortedPts.begin() + mid);
-				setB.assign(sortedPts.begin() + mid, sortedPts.end());
+				const size_t overlap = std::max<size_t>(1, sortedPts.size() / 20); // 5% overlap
+				const size_t endA = std::min(sortedPts.size(), mid + overlap);
+				const size_t startB = (mid >= overlap) ? (mid - overlap) : 0;
+				setA.assign(sortedPts.begin(), sortedPts.begin() + endA);
+				setB.assign(sortedPts.begin() + startB, sortedPts.end());
 			}
 
-			if (setA.size() < 4 || setB.size() < 4)
+			if (setA.size() < 4 || setB.size() < 4 || (setA.size() == pts.size() && setB.size() == pts.size()))
 			{
 				outHulls.push_back(std::move(hull));
 				return;

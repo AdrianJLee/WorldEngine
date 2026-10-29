@@ -40,7 +40,6 @@ namespace
 		float Concavity = 0.05f;
 		uint32_t MaxVerts = 32;
 		std::string Profile = "Default";
-		std::chrono::steady_clock::time_point LastCheck {};
 	};
 	static CachedBakedCollision s_BakedCache;
 }
@@ -1217,12 +1216,9 @@ static uint32_t s_LODGenEntityId = 0;
 
 		if (!targetModelPath.empty())
 		{
-			const auto now = std::chrono::steady_clock::now();
-			if (s_BakedCache.Path != targetModelPath ||
-				std::chrono::duration_cast<std::chrono::seconds>(now - s_BakedCache.LastCheck).count() >= 1)
+			if (s_BakedCache.Path != targetModelPath)
 			{
 				s_BakedCache.Path = targetModelPath;
-				s_BakedCache.LastCheck = now;
 				s_BakedCache.HasBaked = false;
 
 				Asset::WModelData mdata;
@@ -1258,6 +1254,24 @@ static uint32_t s_LODGenEntityId = 0;
 				if (Wui::Button(ctx, Wui::HashId("inspect.convex.sync_asset"), syncBtnRect,
 					"Sync Parameters from Asset (从模型资产同步参数)", theme))
 				{
+					// 用户主动点击同步时，重新读取一次磁盘最新模型资产状态
+					Asset::WModelData mdata;
+					std::string loadErr;
+					if (Asset::WModelIO::ReadFile(targetModelPath, mdata, &loadErr))
+					{
+						if constexpr (HasCollisionMember<Asset::WModelData>::value)
+						{
+							if (mdata.Collision.CollisionType != 0 && !mdata.Collision.ConvexHulls.empty())
+							{
+								s_BakedCache.HasBaked = true;
+								s_BakedCache.HullCount = static_cast<uint32_t>(mdata.Collision.ConvexHulls.size());
+								s_BakedCache.Concavity = mdata.Collision.ConcavityThreshold;
+								s_BakedCache.MaxVerts = mdata.Collision.MaxVerticesPerHull;
+								s_BakedCache.Profile = mdata.Collision.DefaultCollisionProfile;
+							}
+						}
+					}
+
 					comp->HullCount = s_BakedCache.HullCount;
 					comp->ConcavityThreshold = s_BakedCache.Concavity;
 					comp->MaxVerticesPerHull = s_BakedCache.MaxVerts;
