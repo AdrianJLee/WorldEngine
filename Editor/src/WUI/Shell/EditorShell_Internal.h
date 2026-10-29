@@ -146,6 +146,8 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 			{ "curve_editor",    EditorShell::PanelForm::Independent, { 180.0f, 180.0f, 760.0f, 480.0f } },
 			// M4:Anim Graph 编辑器(单实例;内容浏览器双击 .wanimgraph / Window 菜单 / 文件选择器同一入口)。
 			{ "animgraph",       EditorShell::PanelForm::Independent, { 80.0f, 40.0f, 1120.0f, 680.0f } },
+			// 行为树专属工作台(单实例;内容浏览器双击 .wbt / Window 菜单 / 属性检查器同一入口)。
+			{ "behaviortree",    EditorShell::PanelForm::Independent, { 80.0f, 40.0f, 1120.0f, 680.0f } },
 			{ "particle_editor", EditorShell::PanelForm::Independent, { 160.0f, 140.0f, 840.0f, 580.0f } },
 			{ "terrain_editor",  EditorShell::PanelForm::Docked, {} },
 			{ "foliage_editor",  EditorShell::PanelForm::Docked, {} },

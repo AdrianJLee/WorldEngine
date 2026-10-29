@@ -99,16 +99,33 @@ namespace World
 
 	std::filesystem::path BehaviorTreeEditorPanel::ResolvePhysicalPath(const std::string& logicalPath) const
 	{
-		std::filesystem::path p(logicalPath);
-		if (std::filesystem::exists(p))
+		std::string logical = logicalPath;
+		std::replace(logical.begin(), logical.end(), '\\', '/');
+		if (logical.rfind("assets/", 0) == 0)
+			logical = logical.substr(7);
+
+		std::filesystem::path p(logical);
+		std::error_code ec;
+		if (std::filesystem::exists(p, ec) && std::filesystem::is_regular_file(p, ec))
 			return std::filesystem::absolute(p);
-		std::filesystem::path fromProj = Paths::ProjectDir() / p;
-		if (std::filesystem::exists(fromProj))
-			return std::filesystem::absolute(fromProj);
-		std::filesystem::path fromAssetRoot = Paths::AssetRoot() / p;
-		if (std::filesystem::exists(fromAssetRoot))
-			return std::filesystem::absolute(fromAssetRoot);
-		return std::filesystem::absolute(fromAssetRoot);
+
+		const auto& assetRoot = Paths::AssetRoot();
+		if (!assetRoot.empty())
+		{
+			std::filesystem::path fromAssetRoot = assetRoot / p;
+			if (std::filesystem::exists(fromAssetRoot, ec) && std::filesystem::is_regular_file(fromAssetRoot, ec))
+				return std::filesystem::absolute(fromAssetRoot);
+		}
+
+		const auto& projDir = Paths::ProjectDir();
+		if (!projDir.empty())
+		{
+			std::filesystem::path fromProj = projDir / "assets" / p;
+			if (std::filesystem::exists(fromProj, ec) && std::filesystem::is_regular_file(fromProj, ec))
+				return std::filesystem::absolute(fromProj);
+		}
+
+		return std::filesystem::absolute(assetRoot / p);
 	}
 
 	void BehaviorTreeEditorPanel::NewAsset()
@@ -126,235 +143,50 @@ namespace World
 		std::replace(normalized.begin(), normalized.end(), '\\', '/');
 		std::filesystem::path physical = ResolvePhysicalPath(normalized);
 
-		std::ifstream file(physical);
-		if (!file.is_open())
+		std::string error;
+		if (!m_Asset.LoadFromFile(physical.string(), &error))
 		{
-			m_StatusFeedback = "无法打开文件: " + physical.string();
-			return false;
+			// 如果磁盘尚无该文件，载入默认模板并提示
+			SetDefaultTemplate();
+			m_LogicalPath = normalized;
+			m_AssetName = physical.stem().string();
+			m_Dirty = true;
+			m_StatusFeedback = "资产未就绪或无法读取: " + normalized + " (已切换为默认模板)";
+			return true;
 		}
 
-		m_Nodes.clear();
-		m_BlackboardKeys.clear();
-		m_LogicalPath = normalized;
-		m_AssetName = physical.stem().string();
-
-		std::string line;
-		std::string currentSection;
-		BTNodeDesc currentNode;
-		bool inNode = false;
-
-		BTBlackboardKeyDesc currentBb;
-		bool inBb = false;
-
-		auto flushNode = [this, &currentNode, &inNode]()
-		{
-			if (inNode && currentNode.Id != 0)
-			{
-				m_Nodes.push_back(currentNode);
-				inNode = false;
-			}
-		};
-
-		auto flushBb = [this, &currentBb, &inBb]()
-		{
-			if (inBb && !currentBb.KeyName.empty())
-			{
-				m_BlackboardKeys.push_back(currentBb);
-				inBb = false;
-			}
-		};
-
-		uint32_t maxId = 0;
-
-		while (std::getline(file, line))
-		{
-			size_t start = line.find_first_not_of(" \t\r\n");
-			if (start == std::string::npos || line[start] == '#')
-				continue;
-
-			std::string trimmed = line.substr(start);
-
-			if (trimmed.rfind("Blackboard:", 0) == 0)
-			{
-				flushNode();
-				currentSection = "Blackboard";
-				continue;
-			}
-			if (trimmed.rfind("Nodes:", 0) == 0)
-			{
-				flushBb();
-				currentSection = "Nodes";
-				continue;
-			}
-
-			if (currentSection == "Blackboard")
-			{
-				if (trimmed.rfind("- Key:", 0) == 0)
-				{
-					flushBb();
-					inBb = true;
-					currentBb = {};
-					currentBb.KeyName = trimmed.substr(6);
-					size_t kStart = currentBb.KeyName.find_first_not_of(" \t\"");
-					size_t kEnd = currentBb.KeyName.find_last_not_of(" \t\"");
-					if (kStart != std::string::npos && kEnd != std::string::npos)
-						currentBb.KeyName = currentBb.KeyName.substr(kStart, kEnd - kStart + 1);
-				}
-				else if (inBb && trimmed.rfind("Type:", 0) == 0)
-				{
-					currentBb.TypeName = trimmed.substr(5);
-					size_t tStart = currentBb.TypeName.find_first_not_of(" \t\"");
-					size_t tEnd = currentBb.TypeName.find_last_not_of(" \t\"");
-					if (tStart != std::string::npos && tEnd != std::string::npos)
-						currentBb.TypeName = currentBb.TypeName.substr(tStart, tEnd - tStart + 1);
-				}
-				else if (inBb && trimmed.rfind("Default:", 0) == 0)
-				{
-					currentBb.DefaultValue = trimmed.substr(8);
-					size_t dStart = currentBb.DefaultValue.find_first_not_of(" \t\"");
-					size_t dEnd = currentBb.DefaultValue.find_last_not_of(" \t\"");
-					if (dStart != std::string::npos && dEnd != std::string::npos)
-						currentBb.DefaultValue = currentBb.DefaultValue.substr(dStart, dEnd - dStart + 1);
-				}
-			}
-			else if (currentSection == "Nodes")
-			{
-				if (trimmed.rfind("- Id:", 0) == 0)
-				{
-					flushNode();
-					inNode = true;
-					currentNode = {};
-					try { currentNode.Id = static_cast<uint32_t>(std::stoul(trimmed.substr(5))); }
-					catch (...) { currentNode.Id = 0; }
-					if (currentNode.Id > maxId) maxId = currentNode.Id;
-				}
-				else if (inNode && trimmed.rfind("ParentId:", 0) == 0)
-				{
-					try { currentNode.ParentId = static_cast<uint32_t>(std::stoul(trimmed.substr(9))); }
-					catch (...) { currentNode.ParentId = 0; }
-				}
-				else if (inNode && trimmed.rfind("Kind:", 0) == 0)
-				{
-					std::string kStr = trimmed.substr(5);
-					size_t kStart = kStr.find_first_not_of(" \t\"");
-					size_t kEnd = kStr.find_last_not_of(" \t\"");
-					if (kStart != std::string::npos && kEnd != std::string::npos)
-						kStr = kStr.substr(kStart, kEnd - kStart + 1);
-
-					if (kStr == "Sequence") currentNode.Kind = BTNodeKind::Sequence;
-					else if (kStr == "Condition") currentNode.Kind = BTNodeKind::Condition;
-					else if (kStr == "Action") currentNode.Kind = BTNodeKind::Action;
-					else currentNode.Kind = BTNodeKind::Selector;
-				}
-				else if (inNode && trimmed.rfind("Title:", 0) == 0)
-				{
-					currentNode.Title = trimmed.substr(6);
-					size_t tStart = currentNode.Title.find_first_not_of(" \t\"");
-					size_t tEnd = currentNode.Title.find_last_not_of(" \t\"");
-					if (tStart != std::string::npos && tEnd != std::string::npos)
-						currentNode.Title = currentNode.Title.substr(tStart, tEnd - tStart + 1);
-				}
-				else if (inNode && trimmed.rfind("Description:", 0) == 0)
-				{
-					currentNode.Description = trimmed.substr(12);
-					size_t dStart = currentNode.Description.find_first_not_of(" \t\"");
-					size_t dEnd = currentNode.Description.find_last_not_of(" \t\"");
-					if (dStart != std::string::npos && dEnd != std::string::npos)
-						currentNode.Description = currentNode.Description.substr(dStart, dEnd - dStart + 1);
-				}
-				else if (inNode && trimmed.rfind("ConditionType:", 0) == 0)
-				{
-					currentNode.ConditionType = trimmed.substr(14);
-					size_t cStart = currentNode.ConditionType.find_first_not_of(" \t\"");
-					size_t cEnd = currentNode.ConditionType.find_last_not_of(" \t\"");
-					if (cStart != std::string::npos && cEnd != std::string::npos)
-						currentNode.ConditionType = currentNode.ConditionType.substr(cStart, cEnd - cStart + 1);
-				}
-				else if (inNode && trimmed.rfind("ActionType:", 0) == 0)
-				{
-					currentNode.ActionType = trimmed.substr(11);
-					size_t aStart = currentNode.ActionType.find_first_not_of(" \t\"");
-					size_t aEnd = currentNode.ActionType.find_last_not_of(" \t\"");
-					if (aStart != std::string::npos && aEnd != std::string::npos)
-						currentNode.ActionType = currentNode.ActionType.substr(aStart, aEnd - aStart + 1);
-				}
-				else if (inNode && trimmed.rfind("FloatParam:", 0) == 0)
-				{
-					try { currentNode.FloatParam = std::stof(trimmed.substr(11)); }
-					catch (...) { currentNode.FloatParam = 0.0f; }
-				}
-				else if (inNode && trimmed.rfind("StringParam:", 0) == 0)
-				{
-					currentNode.StringParam = trimmed.substr(12);
-					size_t sStart = currentNode.StringParam.find_first_not_of(" \t\"");
-					size_t sEnd = currentNode.StringParam.find_last_not_of(" \t\"");
-					if (sStart != std::string::npos && sEnd != std::string::npos)
-						currentNode.StringParam = currentNode.StringParam.substr(sStart, sEnd - sStart + 1);
-				}
-			}
-		}
-
-		flushNode();
-		flushBb();
-
-		m_NextNodeId = maxId + 1;
-		if (m_NextNodeId < 2) m_NextNodeId = 2;
-		m_SelectedNodeId = m_Nodes.empty() ? 1 : m_Nodes[0].Id;
-		m_Dirty = false;
-		m_StatusFeedback = "载入成功: " + m_LogicalPath + " (" + std::to_string(m_Nodes.size()) + " 个节点)";
 		m_Nodes = m_Asset.Nodes();
 		m_BlackboardKeys = m_Asset.BlackboardKeys();
+		m_LogicalPath = normalized;
+		m_AssetName = physical.stem().string();
+		m_Dirty = false;
+		m_StatusFeedback = "已载入: " + m_LogicalPath;
+
+		m_NextNodeId = 1;
+		for (const auto& node : m_Nodes)
+		{
+			if (node.Id >= m_NextNodeId)
+				m_NextNodeId = node.Id + 1;
+		}
+		m_SelectedNodeId = m_Nodes.empty() ? 1 : m_Nodes[0].Id;
 		return true;
 	}
 
 	bool BehaviorTreeEditorPanel::SaveAsset()
 	{
+		std::filesystem::path physical = ResolvePhysicalPath(m_LogicalPath);
+		std::error_code ec;
+		if (physical.has_parent_path())
+			std::filesystem::create_directories(physical.parent_path(), ec);
+
 		m_Asset.Nodes() = m_Nodes;
 		m_Asset.BlackboardKeys() = m_BlackboardKeys;
-		std::filesystem::path physical = ResolvePhysicalPath(m_LogicalPath);
-		std::filesystem::create_directories(physical.parent_path());
-
-		std::ofstream out(physical, std::ios::binary | std::ios::trunc);
-		if (!out.is_open())
+		std::string error;
+		if (!m_Asset.SaveToFile(physical.string(), &error))
 		{
-			m_StatusFeedback = "保存失败，无法写入: " + physical.string();
+			m_StatusFeedback = "保存失败: " + error;
 			return false;
 		}
-
-		out << "FormatVersion: 1\n";
-		out << "Name: " << (m_AssetName.empty() ? physical.stem().string() : m_AssetName) << "\n";
-		out << "Blackboard:\n";
-		for (const auto& bb : m_BlackboardKeys)
-		{
-			out << "  - Key: " << bb.KeyName << "\n";
-			out << "    Type: " << bb.TypeName << "\n";
-			out << "    Default: " << bb.DefaultValue << "\n";
-		}
-
-		out << "Nodes:\n";
-		for (const auto& node : m_Nodes)
-		{
-			out << "  - Id: " << node.Id << "\n";
-			out << "    ParentId: " << node.ParentId << "\n";
-			const char* kStr = "Selector";
-			if (node.Kind == BTNodeKind::Sequence) kStr = "Sequence";
-			else if (node.Kind == BTNodeKind::Condition) kStr = "Condition";
-			else if (node.Kind == BTNodeKind::Action) kStr = "Action";
-
-			out << "    Kind: " << kStr << "\n";
-			out << "    Title: \"" << node.Title << "\"\n";
-			if (!node.Description.empty())
-				out << "    Description: \"" << node.Description << "\"\n";
-			if (!node.ConditionType.empty())
-				out << "    ConditionType: \"" << node.ConditionType << "\"\n";
-			if (!node.ActionType.empty())
-				out << "    ActionType: \"" << node.ActionType << "\"\n";
-			if (node.FloatParam != 0.0f)
-				out << "    FloatParam: " << node.FloatParam << "\n";
-			if (!node.StringParam.empty())
-				out << "    StringParam: \"" << node.StringParam << "\"\n";
-		}
-		out.close();
 
 		m_Dirty = false;
 		m_StatusFeedback = "保存成功: " + m_LogicalPath;

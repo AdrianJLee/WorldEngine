@@ -1,3 +1,4 @@
+#include "World/Gameplay/Framework/BehaviorTreeAsset.h"
 
 #include "World/Math/Curve/CubicBezierCurve.h"
 #include "World/Animation/AnimGraph.h"

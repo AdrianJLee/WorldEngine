@@ -162,7 +162,7 @@ namespace World
 		// M4:Anim Graph 面板(单实例,kPanelSpecs id = "animgraph")。
 		// 先把逻辑路径排进面板待办,再打开/前置窗口(与 OpenCurveEditor 同一条路径)。
 		void OpenAnimGraph(const std::string& logicalPath) override;
-		void OpenBehaviorTreeEditor(const std::string& logicalPath);
+		void OpenBehaviorTreeEditor(const std::string& logicalPath) override;
 		void OpenAssetPicker(std::string_view title, AssetCategory category, std::function<void(const std::string&)> onSelect) override;
 		void OpenAsset(const std::string& path) override;
 		bool RevealAssetInContentBrowser(const std::string& path) override { return RevealAsset(path); }

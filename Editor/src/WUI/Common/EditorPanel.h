@@ -410,6 +410,7 @@ namespace World
 		// 打开模型预览(独立窗口,只读;不改场景)。默认未接线 = 无操作。
 		virtual void OpenModelPreview(const std::string& logicalPath) { (void)logicalPath; }
 		virtual void OpenAnimGraph(const std::string& logicalPath) { (void)logicalPath; }
+		virtual void OpenBehaviorTreeEditor(const std::string& logicalPath) { (void)logicalPath; }
 		// D10(用户 2026-09-19):让**内容浏览器**打开"导入位置"选择器 —— 引擎内的树状选择,
 		// 范围限定在内容根内(不用原生文件夹对话框,避免选到工作区外)。
 		// sourcePath = 已选好的源文件;默认未接线 = 无操作(调用方应给出可读提示)。
