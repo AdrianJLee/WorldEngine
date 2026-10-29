@@ -3592,14 +3592,14 @@ namespace World
 						}
 
 						// 4. 智能对象交互距离与槽位范围 (SmartObjectComponent)
-						if (smartObj && smartObj->Enabled)
+						if (smartObj && (isSelected || smartObj->Enabled))
 						{
-							const Wui::WuiColor smartColor { 0.1f, 0.9f, 0.6f, alpha };
+							const Wui::WuiColor smartColor { 0.25f, 0.95f, 0.55f, alpha };
 							const float r = std::max(0.1f, smartObj->InteractionDistance);
 
 							// 实体原点水平面交互大圆环 (XZ 平面)
 							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								glm::vec3(0.0f), r, 1, smartColor, thickness * 1.3f, &overlayMin, &overlayMax);
+								glm::vec3(0.0f), r, 1, smartColor, thickness * 1.5f, &overlayMin, &overlayMax);
 
 							// 3 轴辅助立体圆环 (半透明)
 							const Wui::WuiColor dimSmartColor { smartColor.R, smartColor.G, smartColor.B, smartColor.A * 0.4f };
@@ -3610,7 +3610,7 @@ namespace World
 
 							// 从原点到槽位偏移的引导线
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								glm::vec3(0.0f), smartObj->SlotOffset, smartColor, thickness, &overlayMin, &overlayMax);
+								glm::vec3(0.0f), smartObj->SlotOffset, dimSmartColor, thickness, &overlayMin, &overlayMax);
 
 							// 槽位点朝向箭头 (FacingAngleDeg)
 							const float rad = glm::radians(smartObj->FacingAngleDeg);
@@ -3619,7 +3619,7 @@ namespace World
 							const float arrowLen = std::clamp(r * 0.4f, 0.3f, 1.2f);
 							const glm::vec3 slotTip = smartObj->SlotOffset + facingDir * arrowLen;
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								smartObj->SlotOffset, slotTip, smartColor, thickness * 1.5f, &overlayMin, &overlayMax);
+								smartObj->SlotOffset, slotTip, smartColor, thickness * 1.6f, &overlayMin, &overlayMax);
 
 							const float headLen = arrowLen * 0.25f;
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
@@ -3629,11 +3629,17 @@ namespace World
 								slotTip, slotTip - facingDir * headLen - sideDir * (headLen * 0.6f),
 								smartColor, thickness * 1.4f, &overlayMin, &overlayMax);
 
-							// 槽位微型定位十字
-							const float slotCross = 0.1f;
+							// 槽位世界坐标十字标记 (基于 SlotOffset 绘制 3D 完整十字)
+							const float slotCross = 0.2f;
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
 								smartObj->SlotOffset - sideDir * slotCross, smartObj->SlotOffset + sideDir * slotCross,
-								smartColor, 1.5f, &overlayMin, &overlayMax);
+								smartColor, 1.8f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								smartObj->SlotOffset - facingDir * slotCross, smartObj->SlotOffset + facingDir * slotCross,
+								smartColor, 1.8f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								smartObj->SlotOffset - glm::vec3(0.0f, slotCross, 0.0f), smartObj->SlotOffset + glm::vec3(0.0f, slotCross, 0.0f),
+								smartColor, 1.8f, &overlayMin, &overlayMax);
 						}
 					}
 				}

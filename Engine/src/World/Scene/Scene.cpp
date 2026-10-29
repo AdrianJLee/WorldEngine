@@ -21,6 +21,7 @@
 #include "World/Gameplay/Runtime/SystemRegistry.h"
 #include "World/Gameplay/Framework/TimerSystem.h"
 #include "World/Gameplay/Framework/BehaviorTreeSystem.h"
+#include "World/Gameplay/Framework/SmartObjectSystem.h"
 #include "World/Physics/Physics3D.h"
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/VirtualCameraSystem.h"
@@ -2834,9 +2835,12 @@ namespace World
 			Gameplay::SystemPhase::Fixed, {} });
 		RegisterFrameSystem({ "movement-system", false, [this](Timestep ts) { MovementSystem().Update(*this, ts); },
 			Gameplay::SystemPhase::Fixed, { "physics-2d", "physics-3d" } });
+		RegisterFrameSystem({ "smart-object-system", false, [this](Timestep ts) {
+			Gameplay::SmartObjectSystem::Update(*this, ts.GetSeconds());
+		}, Gameplay::SystemPhase::Fixed, {} });
 		RegisterFrameSystem({ "behavior-tree-system", false, [this](Timestep ts) {
 			Gameplay::BehaviorTreeSystem::Update(*this, ts.GetSeconds());
-		}, Gameplay::SystemPhase::Fixed, {} });
+		}, Gameplay::SystemPhase::Fixed, { "smart-object-system" } });
 		RegisterFrameSystem({ "navmesh-system", false, [this](Timestep ts) {
 			if (m_NavMesh && m_NavMesh->GetPolygonCount() > 0)
 				NavMeshSystem::Update(*this, ts.GetSeconds(), *m_NavMesh);

@@ -1305,13 +1305,21 @@ function ui:isOpen() end
 
 -- Component fields are exposed through Entity:GetComponent("MeshLODComponent"); there is no runtime global named MeshLODComponent.
 ---@class MeshLODComponent
+---@field LOD4Distance number
 ---@field Hysteresis number
----@field LOD1Mesh string
+---@field ForcedLOD number
+---@field LODBias number
+---@field LOD7Distance number
+---@field LOD6Distance number
+---@field LOD3Distance number
 ---@field LOD1Distance number
 ---@field CullDistance number
 ---@field EnableCrossFade number
----@field LOD2Mesh string
+---@field CurrentDistance number
+---@field CustomMeshOverride string
 ---@field LOD2Distance number
+---@field LOD5Distance number
+---@field MaxLODLevel number
 ---@field CurrentLOD number
 
 -- Component fields are exposed through Entity:GetComponent("MeshRendererComponent"); there is no runtime global named MeshRendererComponent.

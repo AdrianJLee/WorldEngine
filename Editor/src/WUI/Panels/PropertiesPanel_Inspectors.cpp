@@ -1085,6 +1085,10 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawNavMeshObstacleInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::MeshLODComponent")
 			height = DrawMeshLODComponentInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::BehaviorTreeComponent")
+			height = DrawBehaviorTreeInspector(ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::SmartObjectComponent")
+			height = DrawSmartObjectInspector(ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
 
 		else
@@ -2456,7 +2460,7 @@ float PropertiesPanel::DrawCompositeCollider2DInspector(Wui::WuiContext& ctx, co
 
 	if (entity.IsValid() && entity.GetScene())
 	{
-		const entt::registry& reg = entity.GetScene()->GetRegistry();
+		const entt::registry& reg = static_cast<const Scene*>(entity.GetScene())->GetRegistry();
 		std::unordered_set<entt::entity> visited;
 		std::vector<entt::entity> stack;
 		stack.push_back(static_cast<entt::entity>(entity));
@@ -3410,6 +3414,512 @@ float PropertiesPanel::DrawVfxInspector(Wui::WuiContext& ctx, const Wui::WuiRect
 	return (y - rect.Y);
 }
 
+
+float PropertiesPanel::DrawBehaviorTreeInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields)
+{
+	(void)schema;
+	(void)visibleRect;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+	auto* bt = static_cast<BehaviorTreeComponent*>(instance);
+	if (!bt)
+		return 0.0f;
+
+	const float pad = theme.Pad;
+	const float startX = rect.X + pad;
+	const float contentW = rect.W - pad * 2.0f;
+	float curY = rect.Y + 4.0f;
+	const float paramLabelW = 120.0f;
+	const float paramFieldW = contentW - paramLabelW;
+
+	// =========================================================================
+	// 1. 行为树配置与资产 (Configuration & Tree Asset)
+	// =========================================================================
+	Wui::Label(ctx, { startX, curY + 2.0f }, "[配置] 行为树参数 (Behavior Tree Configuration)", theme.Accent, theme.FontSizeSmall);
+	curY += 22.0f;
+
+	// 启用开关 Enabled
+	bool enabled = (bt->Enabled != 0);
+	if (Wui::Checkbox(ctx, Wui::HashId("inspect.bt.enabled"),
+		{ startX, curY, contentW, 22.0f }, "启用行为控制器 (Enabled)", enabled, theme))
+	{
+		bt->Enabled = enabled ? 1 : 0;
+		if (changedFields) changedFields->push_back("Enabled");
+		m_Host.MarkDocumentDirty();
+	}
+	curY += 26.0f;
+
+	// 行为树资产 ID TreeAssetId
+	Wui::Label(ctx, { startX, curY + 2.0f }, "行为树资产 ID:", theme.Text, theme.FontSizeSmall);
+	int64_t treeId = static_cast<int64_t>(bt->TreeAssetId);
+	if (Wui::DragInt(ctx, Wui::HashId("inspect.bt.tree_asset_id"),
+		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, treeId, 0, 999999, theme))
+	{
+		bt->TreeAssetId = static_cast<uint32_t>(treeId);
+		if (changedFields) changedFields->push_back("TreeAssetId");
+		m_Host.MarkDocumentDirty();
+	}
+	curY += 26.0f;
+
+	// 当前执行节点 CurrentNodeIndex
+	Wui::Label(ctx, { startX, curY + 2.0f }, "当前执行节点:", theme.Text, theme.FontSizeSmall);
+	int64_t nodeIdx = static_cast<int64_t>(bt->CurrentNodeIndex);
+	if (Wui::DragInt(ctx, Wui::HashId("inspect.bt.current_node_index"),
+		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, nodeIdx, 0, 999999, theme))
+	{
+		bt->CurrentNodeIndex = static_cast<uint32_t>(nodeIdx);
+		if (changedFields) changedFields->push_back("CurrentNodeIndex");
+		m_Host.MarkDocumentDirty();
+	}
+	curY += 30.0f;
+
+	// =========================================================================
+	// 2. 运行时状态卡片 (Runtime Status & FSM Badge)
+	// =========================================================================
+	const float cardH = 138.0f;
+	const Wui::WuiRect cardRect { startX, curY, contentW, cardH };
+	Wui::PanelBackground(ctx, cardRect, theme.CardBg, theme.Radius);
+	Wui::HighlightOutline(ctx, cardRect, theme.Border, theme.Radius, 1.0f);
+	float cardY = curY + 8.0f;
+
+	Wui::Label(ctx, { startX + 8.0f, cardY }, "[运行时] AI 执行状态与状态机 (Runtime State)", theme.Warning, theme.FontSizeSmall);
+	cardY += 22.0f;
+
+	// 状态徽章: Running [黄色] / Success [绿色] / Failure [红色] / Invalid [灰色]
+	const char* statusText = "[Inactive] 行为树休眠待机 (Inactive)";
+	Wui::WuiColor statusColor = theme.TextMuted; // 灰色
+	switch (bt->Status)
+	{
+	case BehaviorStatus::Running:
+		statusText = "[Running] 行为树正在运行推进 (Running)";
+		statusColor = theme.Warning; // 黄色
+		break;
+	case BehaviorStatus::Success:
+		statusText = "[Success] 行为执行成功完成 (Success)";
+		statusColor = theme.Success; // 绿色
+		break;
+	case BehaviorStatus::Failure:
+		statusText = "[Failure] 行为执行失败终止 (Failure)";
+		statusColor = theme.Danger; // 红色
+		break;
+	case BehaviorStatus::Inactive:
+	default:
+		statusText = "[Inactive] 行为树休眠待机 (Inactive)";
+		statusColor = theme.TextMuted; // 灰色
+		break;
+	}
+
+	const Wui::WuiRect badgeRect { startX + 8.0f, cardY, contentW - 16.0f, 24.0f };
+	Wui::PanelBackground(ctx, badgeRect, Wui::WuiColor { statusColor.R * 0.18f, statusColor.G * 0.18f, statusColor.B * 0.18f, 0.85f }, theme.Radius);
+	Wui::HighlightOutline(ctx, badgeRect, statusColor, theme.Radius, 1.0f);
+	Wui::Label(ctx, { startX + 16.0f, cardY + 4.0f }, statusText, statusColor, theme.FontSizeSmall);
+	cardY += 30.0f;
+
+	// 状态机状态展示 (0=Patrolling, 1=SeekingSmartObject, 2=Interacting, 3=CoolingDown)
+	const char* fsmNames[] = {
+		"0 - Patrolling (日常巡逻状态)",
+		"1 - SeekingSmartObject (急救求援：寻找并前往医疗站)",
+		"2 - Interacting (正在使用智能对象交互充能)",
+		"3 - CoolingDown (交互完毕：冷却与状态回退)"
+	};
+	const char* fsmDesc = (bt->StateMachineState < 4) ? fsmNames[bt->StateMachineState] : "未知状态 (Unknown)";
+
+	Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "状态机 FSM:", theme.Text, theme.FontSizeSmall);
+	int64_t fsmVal = static_cast<int64_t>(bt->StateMachineState);
+	if (Wui::DragInt(ctx, Wui::HashId("inspect.bt.fsm_state"),
+		{ startX + paramLabelW, cardY, paramFieldW - 8.0f, 22.0f }, fsmVal, 0, 3, theme))
+	{
+		bt->StateMachineState = static_cast<uint8_t>(fsmVal);
+		if (changedFields) changedFields->push_back("StateMachineState");
+		m_Host.MarkDocumentDirty();
+	}
+	cardY += 26.0f;
+	Wui::Label(ctx, { startX + 16.0f, cardY }, fsmDesc, theme.Accent, theme.FontSizeSmall);
+	cardY += 24.0f;
+
+	curY += cardH + 12.0f;
+
+	// =========================================================================
+	// 3. 黑板数据可折叠展示 (TargetPos, TargetEntity, Timer, Value)
+	// =========================================================================
+	static bool s_BtBlackboardOpen = true;
+	Wui::PropertyGroupHeaderDesc bbHead;
+	bbHead.Label = "黑板数据 (Blackboard Context)";
+	bbHead.Open = s_BtBlackboardOpen;
+	const Wui::PropertyGroupHeaderResult bbRes = Wui::PropertyGroupHeader(
+		ctx, Wui::HashId("inspect.bt.blackboard_head"),
+		{ startX, curY, contentW, 24.0f }, bbHead, theme);
+	if (bbRes.Toggled)
+		s_BtBlackboardOpen = !s_BtBlackboardOpen;
+	curY += 28.0f;
+
+	if (s_BtBlackboardOpen)
+	{
+		// 目标世界坐标 TargetPos (X, Y, Z)
+		Wui::Label(ctx, { startX + 8.0f, curY + 2.0f }, "目标坐标 TargetPos:", theme.Text, theme.FontSizeSmall);
+		curY += 22.0f;
+		const float coordLabelW = 16.0f;
+		const float coordFieldW = (contentW - 16.0f - coordLabelW * 3.0f - 12.0f) / 3.0f;
+
+		Wui::Label(ctx, { startX + 8.0f, curY + 2.0f }, "X", theme.AxisX, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.bt.bb_target_x"),
+			{ startX + 8.0f + coordLabelW, curY, coordFieldW, 20.0f }, bt->BlackboardTargetPos.x, 0.1f, -9999.0f, 9999.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("BlackboardTargetPos");
+			m_Host.MarkDocumentDirty();
+		}
+		Wui::Label(ctx, { startX + 8.0f + coordLabelW + coordFieldW + 6.0f, curY + 2.0f }, "Y", theme.AxisY, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.bt.bb_target_y"),
+			{ startX + 8.0f + coordLabelW * 2.0f + coordFieldW + 6.0f, curY, coordFieldW, 20.0f }, bt->BlackboardTargetPos.y, 0.1f, -9999.0f, 9999.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("BlackboardTargetPos");
+			m_Host.MarkDocumentDirty();
+		}
+		Wui::Label(ctx, { startX + 8.0f + (coordLabelW + coordFieldW + 6.0f) * 2.0f, curY + 2.0f }, "Z", theme.AxisZ, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.bt.bb_target_z"),
+			{ startX + 8.0f + (coordLabelW + coordFieldW + 6.0f) * 2.0f + coordLabelW, curY, coordFieldW, 20.0f }, bt->BlackboardTargetPos.z, 0.1f, -9999.0f, 9999.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("BlackboardTargetPos");
+			m_Host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 目标实体 ID TargetEntity
+		Wui::Label(ctx, { startX + 8.0f, curY + 2.0f }, "目标实体 TargetEntity:", theme.Text, theme.FontSizeSmall);
+		int64_t targetEnt = static_cast<int64_t>(bt->TargetEntity);
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.bt.bb_target_ent"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, targetEnt, 0, 0xFFFFFFFF, theme))
+		{
+			bt->TargetEntity = static_cast<uint32_t>(targetEnt);
+			if (changedFields) changedFields->push_back("TargetEntity");
+			m_Host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 执行计时 Timer
+		Wui::Label(ctx, { startX + 8.0f, curY + 2.0f }, "执行计时 ExecutionTimer:", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.bt.bb_timer"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, bt->ExecutionTimer, 0.1f, 0.0f, 3600.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("ExecutionTimer");
+			m_Host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 黑板数值 BlackboardValue
+		Wui::Label(ctx, { startX + 8.0f, curY + 2.0f }, "通用数值 BlackboardValue:", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.bt.bb_value"),
+			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, bt->BlackboardValue, 0.5f, -99999.0f, 99999.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("BlackboardValue");
+			m_Host.MarkDocumentDirty();
+		}
+		curY += 30.0f;
+	}
+
+	// =========================================================================
+	// 4. 调试操作交互按钮 (Interactive Debug Actions)
+	// =========================================================================
+	Wui::Label(ctx, { startX, curY + 2.0f }, "[调试操作] AI 与状态控制 (Debug Actions)", theme.Warning, theme.FontSizeSmall);
+	curY += 22.0f;
+
+	// 【施加 50 伤害 (Trigger Heal)】
+	const Wui::WuiRect dmgBtnRect { startX, curY, contentW, 24.0f };
+	Wui::WuiTheme dmgTheme = theme;
+	dmgTheme.ButtonBg = Wui::WuiColor { 0.45f, 0.15f, 0.15f, 0.9f };
+	dmgTheme.Border = Wui::WuiColor { 0.85f, 0.25f, 0.25f, 1.0f };
+	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_damage"), dmgBtnRect, "[伤害] 施加 50 伤害 (Trigger Heal)", dmgTheme))
+	{
+		if (entity.IsValid() && entity.HasComponent<HealthComponent>())
+		{
+			auto& hc = entity.GetComponent<HealthComponent>();
+			hc.CurrentHealth = std::max(0.0f, hc.CurrentHealth - 50.0f);
+			bt->BlackboardValue = hc.CurrentHealth;
+			m_Host.Notify("已施加 50 点伤害，当前生命: " + std::to_string(static_cast<int>(hc.CurrentHealth)) + "/" + std::to_string(static_cast<int>(hc.MaxHealth)));
+		}
+		else
+		{
+			bt->BlackboardValue = std::max(0.0f, bt->BlackboardValue - 50.0f);
+			m_Host.Notify("已扣减 BlackboardValue 50 点 (当前: " + std::to_string(static_cast<int>(bt->BlackboardValue)) + ")");
+		}
+		if (changedFields)
+		{
+			changedFields->push_back("BlackboardValue");
+			changedFields->push_back("CurrentHealth");
+		}
+		m_Host.MarkDocumentDirty();
+	}
+	Wui::Tooltip(ctx, dmgBtnRect, "向该实体施加 50 点伤害 (生命值 < 60 即刻触发急救医疗站寻路行为)");
+	curY += 28.0f;
+
+	// 【重置满血 (Reset Health)】
+	const Wui::WuiRect healBtnRect { startX, curY, contentW, 24.0f };
+	Wui::WuiTheme healTheme = theme;
+	healTheme.ButtonBg = Wui::WuiColor { 0.15f, 0.35f, 0.2f, 0.9f };
+	healTheme.Border = Wui::WuiColor { 0.25f, 0.8f, 0.4f, 1.0f };
+	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_reset_health"), healBtnRect, "[满血] 重置满血 (Reset Health)", healTheme))
+	{
+		if (entity.IsValid() && entity.HasComponent<HealthComponent>())
+		{
+			auto& hc = entity.GetComponent<HealthComponent>();
+			hc.CurrentHealth = hc.MaxHealth;
+			bt->BlackboardValue = hc.CurrentHealth;
+			m_Host.Notify("已恢复满血: " + std::to_string(static_cast<int>(hc.MaxHealth)));
+		}
+		else
+		{
+			bt->BlackboardValue = 100.0f;
+			m_Host.Notify("已重置 BlackboardValue = 100.0");
+		}
+		if (changedFields)
+		{
+			changedFields->push_back("BlackboardValue");
+			changedFields->push_back("CurrentHealth");
+		}
+		m_Host.MarkDocumentDirty();
+	}
+	Wui::Tooltip(ctx, healBtnRect, "恢复实体满血状态 (生命值 >= 60 恢复日常巡逻行为)");
+	curY += 28.0f;
+
+	// 【重置状态 (Reset FSM)】
+	const Wui::WuiRect resetFsmBtnRect { startX, curY, contentW, 24.0f };
+	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_reset_fsm"), resetFsmBtnRect, "[重置] 重置状态 (Reset FSM)", theme))
+	{
+		bt->StateMachineState = 0; // 0 = Patrolling
+		bt->Status = BehaviorStatus::Inactive;
+		bt->CurrentNodeIndex = 0;
+		bt->ExecutionTimer = 0.0f;
+		bt->TargetEntity = 0;
+		bt->BlackboardTargetPos = glm::vec3(0.0f);
+		if (changedFields)
+		{
+			changedFields->push_back("StateMachineState");
+			changedFields->push_back("Status");
+			changedFields->push_back("CurrentNodeIndex");
+			changedFields->push_back("ExecutionTimer");
+			changedFields->push_back("TargetEntity");
+			changedFields->push_back("BlackboardTargetPos");
+		}
+		m_Host.Notify("已重置行为树与 FSM 为初始状态 (0 - Patrolling)");
+		m_Host.MarkDocumentDirty();
+	}
+	Wui::Tooltip(ctx, resetFsmBtnRect, "重置 AI 状态机至 0 (Patrolling) 并清理黑板临时目标与计时");
+	curY += 32.0f;
+
+	return (curY - rect.Y);
+}
+
+float PropertiesPanel::DrawSmartObjectInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields)
+{
+	(void)schema;
+	(void)visibleRect;
+	const Wui::WuiTheme& theme = m_Host.Theme();
+	auto* so = static_cast<SmartObjectComponent*>(instance);
+	if (!so)
+		return 0.0f;
+
+	const float pad = theme.Pad;
+	const float startX = rect.X + pad;
+	const float contentW = rect.W - pad * 2.0f;
+	float curY = rect.Y + 4.0f;
+	const float paramLabelW = 120.0f;
+	const float paramFieldW = contentW - paramLabelW;
+
+	// =========================================================================
+	// 1. 配置与对齐参数 (Authoring & Alignment Properties)
+	// =========================================================================
+	Wui::Label(ctx, { startX, curY + 2.0f }, "[配置] 智能对象参数 (Smart Object Properties)", theme.Accent, theme.FontSizeSmall);
+	curY += 22.0f;
+
+	// 启用开关 Enabled
+	bool enabled = so->Enabled;
+	if (Wui::Checkbox(ctx, Wui::HashId("inspect.so.enabled"),
+		{ startX, curY, contentW, 22.0f }, "启用智能对象 (Enabled)", enabled, theme))
+	{
+		so->Enabled = enabled;
+		if (changedFields) changedFields->push_back("Enabled");
+		m_Host.MarkDocumentDirty();
+	}
+	curY += 26.0f;
+
+	// 交互距离 InteractionDistance
+	Wui::Label(ctx, { startX, curY + 2.0f }, "交互距离 (Distance m):", theme.Text, theme.FontSizeSmall);
+	if (Wui::DragFloat(ctx, Wui::HashId("inspect.so.interact_dist"),
+		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, so->InteractionDistance, 0.1f, 0.1f, 30.0f, theme))
+	{
+		if (changedFields) changedFields->push_back("InteractionDistance");
+		m_Host.MarkDocumentDirty();
+	}
+	curY += 26.0f;
+
+	// 冷却周期 CooldownDuration
+	Wui::Label(ctx, { startX, curY + 2.0f }, "冷却周期 (Cooldown s):", theme.Text, theme.FontSizeSmall);
+	if (Wui::DragFloat(ctx, Wui::HashId("inspect.so.cooldown_dur"),
+		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, so->CooldownDuration, 0.1f, 0.0f, 60.0f, theme))
+	{
+		if (changedFields) changedFields->push_back("CooldownDuration");
+		m_Host.MarkDocumentDirty();
+	}
+	curY += 26.0f;
+
+	// 朝向角度 FacingAngleDeg
+	Wui::Label(ctx, { startX, curY + 2.0f }, "交互朝向 (Facing Deg):", theme.Text, theme.FontSizeSmall);
+	if (Wui::DragFloat(ctx, Wui::HashId("inspect.so.facing_angle"),
+		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, so->FacingAngleDeg, 1.0f, 0.0f, 360.0f, theme))
+	{
+		if (changedFields) changedFields->push_back("FacingAngleDeg");
+		m_Host.MarkDocumentDirty();
+	}
+	curY += 26.0f;
+
+	// 相对偏移 SlotOffset (X, Y, Z)
+	Wui::Label(ctx, { startX, curY + 2.0f }, "插槽相对偏移 (SlotOffset):", theme.Text, theme.FontSizeSmall);
+	curY += 22.0f;
+	const float coordLabelW = 16.0f;
+	const float coordFieldW = (contentW - coordLabelW * 3.0f - 12.0f) / 3.0f;
+
+	Wui::Label(ctx, { startX, curY + 2.0f }, "X", theme.AxisX, theme.FontSizeSmall);
+	if (Wui::DragFloat(ctx, Wui::HashId("inspect.so.offset_x"),
+		{ startX + coordLabelW, curY, coordFieldW, 20.0f }, so->SlotOffset.x, 0.05f, -100.0f, 100.0f, theme))
+	{
+		if (changedFields) changedFields->push_back("SlotOffset");
+		m_Host.MarkDocumentDirty();
+	}
+	Wui::Label(ctx, { startX + coordLabelW + coordFieldW + 6.0f, curY + 2.0f }, "Y", theme.AxisY, theme.FontSizeSmall);
+	if (Wui::DragFloat(ctx, Wui::HashId("inspect.so.offset_y"),
+		{ startX + coordLabelW * 2.0f + coordFieldW + 6.0f, curY, coordFieldW, 20.0f }, so->SlotOffset.y, 0.05f, -100.0f, 100.0f, theme))
+	{
+		if (changedFields) changedFields->push_back("SlotOffset");
+		m_Host.MarkDocumentDirty();
+	}
+	Wui::Label(ctx, { startX + (coordLabelW + coordFieldW + 6.0f) * 2.0f, curY + 2.0f }, "Z", theme.AxisZ, theme.FontSizeSmall);
+	if (Wui::DragFloat(ctx, Wui::HashId("inspect.so.offset_z"),
+		{ startX + (coordLabelW + coordFieldW + 6.0f) * 2.0f + coordLabelW, curY, coordFieldW, 20.0f }, so->SlotOffset.z, 0.05f, -100.0f, 100.0f, theme))
+	{
+		if (changedFields) changedFields->push_back("SlotOffset");
+		m_Host.MarkDocumentDirty();
+	}
+	curY += 26.0f;
+
+	// 活动标签 ActivityTag
+	Wui::Label(ctx, { startX, curY + 2.0f }, "活动标签 (ActivityTag):", theme.Text, theme.FontSizeSmall);
+	int64_t actTag = static_cast<int64_t>(so->ActivityTag);
+	if (Wui::DragInt(ctx, Wui::HashId("inspect.so.activity_tag"),
+		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, actTag, 0, 0xFFFFFFFF, theme))
+	{
+		so->ActivityTag = static_cast<uint32_t>(actTag);
+		if (changedFields) changedFields->push_back("ActivityTag");
+		m_Host.MarkDocumentDirty();
+	}
+	curY += 32.0f;
+
+	// =========================================================================
+	// 2. 运行时状态与插槽仲裁卡片 (Runtime State & Slot Arbitration Card)
+	// =========================================================================
+	const float cardH = 196.0f;
+	const Wui::WuiRect cardRect { startX, curY, contentW, cardH };
+	Wui::PanelBackground(ctx, cardRect, theme.CardBg, theme.Radius);
+	Wui::HighlightOutline(ctx, cardRect, theme.Border, theme.Radius, 1.0f);
+	float cardY = curY + 8.0f;
+
+	Wui::Label(ctx, { startX + 8.0f, cardY }, "[运行时] 插槽实时状态与占用者 (Slot State)", theme.Warning, theme.FontSizeSmall);
+	cardY += 22.0f;
+
+	// 插槽状态实时徽章 (0=Available [绿], 1=Claimed [黄], 2=InUse [蓝], 3=Cooldown [橙])
+	const char* slotStateText = "[Available] 空闲可用 (0)";
+	Wui::WuiColor slotStateColor { 0.2f, 0.85f, 0.35f, 1.0f }; // Green
+	switch (so->SlotState)
+	{
+	case SmartObjectSlotState::Available:
+		slotStateText = "[Available] 空闲可用 (0=可预约/可交互)";
+		slotStateColor = Wui::WuiColor { 0.2f, 0.85f, 0.35f, 1.0f }; // Green
+		break;
+	case SmartObjectSlotState::Claimed:
+		slotStateText = "[Claimed] 已被预约锁定 (1=前往中)";
+		slotStateColor = Wui::WuiColor { 0.95f, 0.85f, 0.2f, 1.0f }; // Yellow
+		break;
+	case SmartObjectSlotState::InUse:
+		slotStateText = "[InUse] 正在交互使用中 (2=占用)";
+		slotStateColor = Wui::WuiColor { 0.25f, 0.65f, 0.95f, 1.0f }; // Blue
+		break;
+	case SmartObjectSlotState::Cooldown:
+		slotStateText = "[Cooldown] 冷却倒计时中 (3=等待可用)";
+		slotStateColor = Wui::WuiColor { 0.95f, 0.55f, 0.15f, 1.0f }; // Orange
+		break;
+	}
+
+	const Wui::WuiRect badgeRect { startX + 8.0f, cardY, contentW - 16.0f, 24.0f };
+	Wui::PanelBackground(ctx, badgeRect, Wui::WuiColor { slotStateColor.R * 0.18f, slotStateColor.G * 0.18f, slotStateColor.B * 0.18f, 0.85f }, theme.Radius);
+	Wui::HighlightOutline(ctx, badgeRect, slotStateColor, theme.Radius, 1.0f);
+	Wui::Label(ctx, { startX + 16.0f, cardY + 4.0f }, slotStateText, slotStateColor, theme.FontSizeSmall);
+	cardY += 30.0f;
+
+	// 冷却倒计时 (CooldownTimer / CooldownDuration)
+	char cdBuf[64];
+	std::snprintf(cdBuf, sizeof(cdBuf), "冷却倒计时: %.2f s / %.2f s", so->CooldownTimer, so->CooldownDuration);
+	Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, cdBuf, theme.Text, theme.FontSizeSmall);
+	cardY += 20.0f;
+
+	const Wui::WuiRect pbRect { startX + 8.0f, cardY, contentW - 16.0f, 10.0f };
+	Wui::PanelBackground(ctx, pbRect, theme.PanelBg, 3.0f);
+	const float ratio = (so->CooldownDuration > 0.0f) ? std::clamp(so->CooldownTimer / so->CooldownDuration, 0.0f, 1.0f) : 0.0f;
+	if (ratio > 0.0f)
+	{
+		Wui::WuiRect fillRect = pbRect;
+		fillRect.W = pbRect.W * ratio;
+		Wui::PanelBackground(ctx, fillRect, slotStateColor, 3.0f);
+	}
+	Wui::HighlightOutline(ctx, pbRect, theme.Border, 3.0f, 1.0f);
+	cardY += 18.0f;
+
+	// 占用者实体 ID
+	char claimantBuf[64];
+	if (so->ClaimedByEntity != 0)
+		std::snprintf(claimantBuf, sizeof(claimantBuf), "当前占用者实体 ID: %u", so->ClaimedByEntity);
+	else
+		std::snprintf(claimantBuf, sizeof(claimantBuf), "当前占用者实体 ID: 无 (None / 0)");
+	Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, claimantBuf, (so->ClaimedByEntity != 0) ? theme.Warning : theme.TextMuted, theme.FontSizeSmall);
+	cardY += 26.0f;
+
+	// 调试按钮: 【一键重置插槽 (Release Slot)】、【一键占用测试 (Force Claim)】
+	const float btnW = (contentW - 24.0f) * 0.5f;
+	const Wui::WuiRect releaseBtnRect { startX + 8.0f, cardY, btnW, 24.0f };
+	if (Wui::Button(ctx, Wui::HashId("inspect.so.btn_release"), releaseBtnRect, "[释放] 一键重置插槽", theme))
+	{
+		so->SlotState = SmartObjectSlotState::Available;
+		so->ClaimedByEntity = 0;
+		so->CooldownTimer = 0.0f;
+		if (changedFields)
+		{
+			changedFields->push_back("SlotState");
+			changedFields->push_back("ClaimedByEntity");
+			changedFields->push_back("CooldownTimer");
+		}
+		m_Host.Notify("已强制重置智能对象插槽为 Available 空闲可用");
+		m_Host.MarkDocumentDirty();
+	}
+	Wui::Tooltip(ctx, releaseBtnRect, "一键解除任何实体占用与冷却，恢复 Available 空闲状态");
+
+	const Wui::WuiRect claimBtnRect { startX + 8.0f + btnW + 8.0f, cardY, btnW, 24.0f };
+	if (Wui::Button(ctx, Wui::HashId("inspect.so.btn_force_claim"), claimBtnRect, "[占用] 一键占用测试", theme))
+	{
+		so->SlotState = SmartObjectSlotState::Claimed;
+		so->ClaimedByEntity = static_cast<uint32_t>(static_cast<entt::entity>(entity));
+		if (changedFields)
+		{
+			changedFields->push_back("SlotState");
+			changedFields->push_back("ClaimedByEntity");
+		}
+		m_Host.Notify("已模拟占用插槽 (Claimed)");
+		m_Host.MarkDocumentDirty();
+	}
+	Wui::Tooltip(ctx, claimBtnRect, "一键将插槽标记为 Claimed 预约占用状态以测试防抢占仲裁逻辑");
+	cardY += 32.0f;
+
+	curY += cardH + 12.0f;
+	return (curY - rect.Y);
+}
 
 }
 

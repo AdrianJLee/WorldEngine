@@ -1,5 +1,6 @@
 #include "World/Gameplay/Framework/SmartObjectSystem.h"
 #include "World/Gameplay/Framework/BehaviorTree.h"
+#include "World/Gameplay/Framework/BehaviorTreeSystem.h"
 #include "World/Gameplay/Framework/DamageSystem.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
@@ -202,6 +203,64 @@ static void TestSmartObjectWithBehaviorTreeAndFSM()
 	std::cout << "[PASS] TestSmartObjectWithBehaviorTreeAndFSM\n";
 }
 
+static void TestSmartObjectDefaultBehaviorTreeAndFrameSystem()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	// 1. 验证 GetTree(1) 自动注册 Demo 树
+	auto tree = BehaviorTreeSystem::GetTree(1);
+	assert(tree != nullptr);
+
+	// 2. 创建场景中的智能交互对象: 医疗充能站 (HealthStation)
+	Entity station = Entity::CreateEntity(&scene, "HealthStation");
+	auto& stationTr = station.AddComponent<TransformComponent>();
+	stationTr.Location = glm::vec3(0.0f, 0.0f, 0.0f);
+	auto& stationSo = station.AddComponent<SmartObjectComponent>();
+	stationSo.SlotOffset = glm::vec3(0.0f, 0.0f, 0.0f);
+	stationSo.CooldownDuration = 2.0f;
+	stationSo.ActivityTag = 1;
+
+	// 3. 创建场景中的 AI Agent
+	Entity agent = Entity::CreateEntity(&scene, "AIAgent");
+	auto& agentTr = agent.AddComponent<TransformComponent>();
+	agentTr.Location = glm::vec3(0.0f, 0.0f, 0.0f);
+	auto& agentHealth = agent.AddComponent<HealthComponent>();
+	agentHealth.CurrentHealth = 30.0f; // 低血量 (< 60)
+	agentHealth.MaxHealth = 100.0f;
+
+	auto& agentBt = agent.AddComponent<BehaviorTreeComponent>();
+	agentBt.TreeAssetId = 1;
+	agentBt.Enabled = 1;
+	agentBt.StateMachineState = 0;
+
+	// 4. 执行一帧 BehaviorTreeSystem::Update
+	BehaviorTreeSystem::Update(scene, 0.016f);
+
+	// 验证已自动预约 (Claim) 并进入使用/移动流程
+	
+assert(agentBt.StateMachineState >= 1);
+
+	assert(stationSo.SlotState == SmartObjectSlotState::Claimed || stationSo.SlotState == SmartObjectSlotState::InUse);
+
+	// 5. 持续步进直到治疗充能完成 (交互计时器 1.0s)
+	for (int i = 0; i < 70; ++i)
+	{
+		BehaviorTreeSystem::Update(scene, 0.016f);
+	}
+
+	// 验证血量已恢复 (30 + 60 = 90) 且插槽进入 Cooldown
+	assert(agentHealth.CurrentHealth >= 90.0f);
+	assert(stationSo.SlotState == SmartObjectSlotState::Cooldown);
+
+	// 6. 验证 smart-object-system 在 Scene 默认帧管线中正常推进倒计时解冻
+	scene.EnsureDefaultFrameSystems();
+	scene.OnFixedUpdate(2.1f);
+	assert(stationSo.SlotState == SmartObjectSlotState::Available);
+
+	std::cout << "[PASS] TestSmartObjectDefaultBehaviorTreeAndFrameSystem\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -209,6 +268,7 @@ int main()
 
 	TestSmartObjectClaimUseRelease();
 	TestSmartObjectWithBehaviorTreeAndFSM();
+	TestSmartObjectDefaultBehaviorTreeAndFrameSystem();
 
 	std::cout << "All WorldSmartObjectTests passed successfully.\n";
 	return 0;

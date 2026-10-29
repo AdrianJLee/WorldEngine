@@ -171,6 +171,12 @@ namespace World
 		float DrawScriptComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity,
 			void* instance, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
+		float DrawBehaviorTreeInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
+		float DrawSmartObjectInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, void* instance,
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
 
 		// ---- VEC-F2 / VEC-H6:两级复原(单项 / 整个集合)----
 		//

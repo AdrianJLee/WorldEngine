@@ -17,6 +17,17 @@ Entity:
     Armor: 0
     InvulnerableDuration: 0.2
     IsDead: false
+  World::BehaviorTreeComponent:
+    BlackboardTargetPos: [0, 0, 0]
+    ExecutionTimer: 0
+    BlackboardValue: 0
+    TreeAssetId: 1
+    TargetEntity: 0
+    BlackboardTag: 0
+    CurrentNodeIndex: 0
+    Status: 0
+    Enabled: 1
+    StateMachineState: 0
   World::MeshRendererComponent:
     Primitive: 0
     Color: [0.25, 0.6, 1, 1]

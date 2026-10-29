@@ -883,7 +883,7 @@ namespace World
 		MeshLODManager::Get().ResetStats();
 		const glm::vec3 cameraPos = glm::vec3(cameraTransform[3]);
 
-		auto& reg = m_ActiveScene->GetRegistry();
+		const auto& reg = static_cast<const Scene&>(*m_ActiveScene).GetRegistry();
 		std::unordered_set<uint32_t> culledEntities;
 
 		// 对带有 MeshLODComponent 的实体计算相机距离，评估 LOD 并记录结果
@@ -892,7 +892,6 @@ namespace World
 		{
 			if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
 				continue;
-			auto& comp = lodView.get<MeshLODComponent>(entity);
 			glm::vec3 entityPos(0.0f);
 			if (const auto* wt = reg.try_get<WorldTransformComponent>(entity))
 				entityPos = glm::vec3(wt->Matrix[3]);
@@ -900,6 +899,8 @@ namespace World
 				entityPos = tc->Location;
 
 			const float dist = glm::distance(cameraPos, entityPos);
+			auto& mutReg = const_cast<entt::registry&>(reg);
+			auto& comp = mutReg.get<MeshLODComponent>(entity);
 			const uint8_t targetLOD = MeshLODManager::Get().EvaluateLOD(dist, comp, comp.CurrentLOD);
 			comp.CurrentLOD = targetLOD;
 			MeshLODManager::Get().RecordLODResult(targetLOD);
