@@ -254,6 +254,7 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		m_PanelRegistry.emplace("physics_material_editor", std::make_unique<PhysicsMaterialEditorPanel>());
 m_PanelRegistry.emplace("curve_editor", std::make_unique<CurveEditorPanel>());
 m_PanelRegistry.emplace("animgraph", std::make_unique<AnimGraphPanel>());
+		m_PanelRegistry.emplace("behaviortree", std::make_unique<BehaviorTreeEditorPanel>());
 		m_PanelRegistry.emplace("particle_editor", std::make_unique<ParticleEditorPanel>());
 m_PanelRegistry.emplace("terrain_editor", std::make_unique<TerrainPanel>());
 m_PanelRegistry.emplace("foliage_editor", std::make_unique<FoliagePanel>());
@@ -350,6 +351,8 @@ EditorShell::PanelForm EditorShell::FormOf(const std::string& panel) const{
 		if (panel.compare(0, std::strlen(kAnimPanelPrefix), kAnimPanelPrefix) == 0)
 			return PanelForm::Independent;
 		if (panel.compare(0, std::strlen(kTilemapPanelPrefix), kTilemapPanelPrefix) == 0)
+			return PanelForm::Independent;
+		if (panel == "behaviortree")
 			return PanelForm::Independent;
 		if (panel.compare(0, std::strlen(kRuleTilePanelPrefix), kRuleTilePanelPrefix) == 0)
 			return PanelForm::Independent;
@@ -453,6 +456,7 @@ Wui::DockLayout EditorShell::LayoutForSave() const{
 Wui::WuiRect EditorShell::FloatRectFor(const std::string& panel) const{
 		if (const auto remembered = m_LastFloatRects.find(panel); remembered != m_LastFloatRects.end())
 			return remembered->second;
+		if (panel == "behaviortree") return Wui::WuiRect { 100.0f, 60.0f, 1120.0f, 680.0f };
 		Wui::WuiRect rect {};
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id && spec.Form == PanelForm::Independent)
@@ -1419,6 +1423,7 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 			{ "physics_material_editor", { "panel.physics_material_editor", "Physics Material Editor" } },
 			{ "curve_editor",    { "panel.curve_editor", "Curve Editor" } },
 			{ "animgraph",       { "panel.animgraph", "Animation Graph" } },
+			{ "behaviortree",    { "panel.behaviortree", "Behavior Tree" } },
 			{ "terrain_editor",  { "panel.terrain_editor", "地貌" } },
 			{ "foliage_editor",  { "panel.foliage_editor", "植被" } },
 		};
@@ -1505,6 +1510,14 @@ void EditorShell::OpenCurveEditor(const std::string& logicalPath)
 }
 
 
+void EditorShell::OpenBehaviorTreeEditor(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	if (!path.empty())
+		BehaviorTreeEditorPanel::RequestOpenPath(path);
+	OpenOrFocusIndependentWindow("behaviortree");
+}
 void EditorShell::OpenAnimGraph(const std::string& logicalPath)
 {
 	std::string path = logicalPath;
@@ -1519,6 +1532,9 @@ void EditorShell::OpenAssetPicker(std::string_view title, AssetCategory category
 }
 
 }
+
+
+
 
 
 

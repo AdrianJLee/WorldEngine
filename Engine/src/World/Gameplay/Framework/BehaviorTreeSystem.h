@@ -4,6 +4,7 @@
 #include "World/Gameplay/Framework/BehaviorTree.h"
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace World
 {
@@ -19,6 +20,8 @@ namespace World::Gameplay
 		static void UnregisterTree(uint32_t assetId);
 		static std::shared_ptr<BehaviorNode> GetTree(uint32_t assetId);
 		static void ClearTrees();
+
+		static std::shared_ptr<BehaviorNode> GetOrCreateTree(const std::string& assetPath);
 
 		static void Update(Scene& scene, float dt);
 	};

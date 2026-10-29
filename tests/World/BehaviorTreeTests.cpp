@@ -1,4 +1,5 @@
 #include "World/Gameplay/Framework/BehaviorTree.h"
+#include "World/Gameplay/Framework/BehaviorTreeAsset.h"
 #include "World/Gameplay/Framework/BehaviorTreeSystem.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Entity.h"
@@ -7,6 +8,7 @@
 #include "World/Core/WorldContext.h"
 
 #include <cassert>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 
@@ -255,6 +257,102 @@ static void TestBehaviorTreeSystemBatchExecution()
 	std::cout << "[PASS] TestBehaviorTreeSystemBatchExecution\n";
 }
 
+static void TestBehaviorTreeAssetSerializationAndInstantiation()
+{
+	// 1. 创建行为树资产并配置黑板与节点
+	BehaviorTreeAsset asset;
+	asset.BlackboardKeys().push_back({ "TargetPos", "Vector3", "0,0,0" });
+	asset.BlackboardKeys().push_back({ "ExecutionTimer", "Float", "0.0" });
+
+	BehaviorTreeNodeDesc seqNode;
+	seqNode.Id = 1;
+	seqNode.ParentId = 0;
+	seqNode.Kind = BehaviorTreeNodeKind::Sequence;
+	seqNode.Title = "Root Sequence";
+	seqNode.Description = "Execute timer check and value setters";
+
+	BehaviorTreeNodeDesc condNode;
+	condNode.Id = 2;
+	condNode.ParentId = 1;
+	condNode.Kind = BehaviorTreeNodeKind::Condition;
+	condNode.Title = "Check Timer";
+	condNode.ConditionType = "TimerElapsed";
+	condNode.FloatParam = 0.0f;
+
+	BehaviorTreeNodeDesc setValNode;
+	setValNode.Id = 3;
+	setValNode.ParentId = 1;
+	setValNode.Kind = BehaviorTreeNodeKind::Action;
+	setValNode.Title = "Set Blackboard";
+	setValNode.ActionType = "SetBlackboardValue";
+	setValNode.FloatParam = 88.0f;
+
+	BehaviorTreeNodeDesc incValNode;
+	incValNode.Id = 4;
+	incValNode.ParentId = 1;
+	incValNode.Kind = BehaviorTreeNodeKind::Action;
+	incValNode.Title = "Increment Blackboard";
+	incValNode.ActionType = "IncrementBlackboardValue";
+	incValNode.FloatParam = 12.0f;
+
+	asset.Nodes().push_back(seqNode);
+	asset.Nodes().push_back(condNode);
+	asset.Nodes().push_back(setValNode);
+	asset.Nodes().push_back(incValNode);
+
+	// 2. 序列化保存到磁盘
+	const std::string tempPath = "build_test_bt_asset.wbt";
+	std::string saveErr;
+	bool saved = asset.SaveToFile(tempPath, &saveErr);
+	assert(saved);
+
+	// 3. 反序列化从磁盘重新读取
+	BehaviorTreeAsset loadedAsset;
+	std::string loadErr;
+	bool loaded = loadedAsset.LoadFromFile(tempPath, &loadErr);
+	assert(loaded);
+	assert(loadedAsset.BlackboardKeys().size() == 2);
+	assert(loadedAsset.Nodes().size() == 4);
+	assert(loadedAsset.Nodes()[0].Kind == BehaviorTreeNodeKind::Sequence);
+	assert(loadedAsset.Nodes()[1].ConditionType == "TimerElapsed");
+
+	// 4. 资产实例化与 Tick 执行验证
+	auto root = loadedAsset.InstantiateTree();
+	assert(root != nullptr);
+
+	WorldContext context;
+	Scene scene(context);
+	Entity agent = Entity::CreateEntity(&scene, "AssetAgent");
+	agent.AddComponent<TransformComponent>();
+	auto& bt = agent.AddComponent<BehaviorTreeComponent>();
+	BehaviorContext ctx{ scene, agent, bt, 0.016f };
+
+	BehaviorTreeRunner runner(root);
+	NodeStatus status = runner.Tick(ctx);
+	assert(status == NodeStatus::Success);
+	assert(bt.Status == BehaviorStatus::Success);
+	assert(bt.BlackboardValue == 100.0f); // 88.0 + 12.0
+
+	// 5. 验证 BehaviorTreeSystem::GetOrCreateTree 缓存驱动接口
+	auto sysTree = BehaviorTreeSystem::GetOrCreateTree(tempPath);
+	assert(sysTree != nullptr);
+	auto cachedTree = BehaviorTreeSystem::GetOrCreateTree(tempPath);
+	assert(cachedTree == sysTree);
+
+	// 6. 验证默认模板 SetDefaultTemplate
+	BehaviorTreeAsset defaultAsset;
+	defaultAsset.SetDefaultTemplate();
+	assert(defaultAsset.Nodes().size() == 6);
+	assert(defaultAsset.BlackboardKeys().size() == 4);
+	auto defaultRoot = defaultAsset.InstantiateTree();
+	assert(defaultRoot != nullptr);
+
+	std::error_code ec;
+	std::filesystem::remove(tempPath, ec);
+
+	std::cout << "[PASS] TestBehaviorTreeAssetSerializationAndInstantiation\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -264,6 +362,7 @@ int main()
 	TestSequenceRunningAndResume();
 	TestSelectorRunningAndResume();
 	TestBehaviorTreeSystemBatchExecution();
+	TestBehaviorTreeAssetSerializationAndInstantiation();
 
 	std::cout << "All WorldBehaviorTreeTests passed successfully.\n";
 	return 0;

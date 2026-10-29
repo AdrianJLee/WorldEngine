@@ -41,6 +41,7 @@ namespace World
 		Curve,          // .wcurve (贝塞尔曲线资产)
 		PhysicsMaterial,// .wphysmat (物理材质资产:摩擦力/弹性/合并模式)
 		VFX,            // .wvfx / .wparticle (视觉特效资产)
+		BehaviorTree,   // .wbt / .wbehaviortree (行为树资产)
 		// M4:3D 动画图(.wanimgraph)—— 状态机 + 1D/2D 混合空间 + 过渡 + 层遮罩。
 		// 双击 = 打开 Anim Graph 面板;面板读写一律走 AnimGraph::LoadFromFile/SaveToFile。
 		AnimGraph,
@@ -146,6 +147,8 @@ namespace World
 			return { EditorAssetKind::UiDocument, "UI Document" };
 		if (extension == ".wvfx" || extension == ".wparticle")
 			return { EditorAssetKind::VFX, "VFX Effect", "asset.file.vfx" };
+		if (extension == ".wbt" || extension == ".wbehaviortree")
+			return { EditorAssetKind::BehaviorTree, "BehaviorTree", "asset.kind.behaviortree" };
 		// M4-TEX P4:内容根的图片是**源图**(材质引用它;产物 `<源图>.wtexc` 由它烘出来);
 		// `.wtex` 才是可编辑的纹理**资产**(设置 + `source:`)。
 		if (extension == ".wtex")
@@ -186,3 +189,4 @@ namespace World
 		return first == "generated";
 	}
 }
+

@@ -4,6 +4,7 @@
 #include "WUI/Panels/ParticleEditorPanel.h"
 #include "WUI/Panels/TextureSettingsPanel.h"
 #include "WUI/Panels/UiDesignerPanel.h"
+#include "WUI/Panels/BehaviorTreeEditorPanel.h"
 #include "WUI/Common/EditorAssetTypes.h"
 
 namespace World
@@ -846,6 +847,11 @@ void EditorShell::OpenAsset(const std::string& rawPath)
 		OpenAtlasEditor(logical);
 		Notify("已在图集编辑器中打开: " + logical);
 	}
+	else if (ext == ".wbt" || ext == ".wbehaviortree")
+	{
+		OpenBehaviorTreeEditor(logical);
+		Notify("已在行为树编辑器中打开: " + logical);
+	}
 	else if (ext == ".wanimgraph")
 	{
 		OpenAnimGraph(logical);
@@ -1308,4 +1314,5 @@ void EditorShell::RenderImportDestinationModal(Wui::WuiContext& ctx){
 	}
 
 }
+
 

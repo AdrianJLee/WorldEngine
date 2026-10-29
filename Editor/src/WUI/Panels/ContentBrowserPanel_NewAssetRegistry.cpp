@@ -352,6 +352,72 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				return true;
 			});
 
+		add("behaviortree", "Behavior Tree (行为树)", ".wbt", 35, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_behavior_tree", ".wbt");
+				std::ofstream out(target, std::ios::binary | std::ios::trunc);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << "FormatVersion: 1\n";
+				out << "Name: " << target.stem().string() << "\n";
+				out << "Blackboard:\n";
+				out << "  - Key: TargetPos\n";
+				out << "    Type: Vector3\n";
+				out << "    Default: [0, 0, 0]\n";
+				out << "  - Key: TargetEntity\n";
+				out << "    Type: Entity\n";
+				out << "    Default: 0\n";
+				out << "  - Key: Health\n";
+				out << "    Type: Float\n";
+				out << "    Default: 100.0\n";
+				out << "Nodes:\n";
+				out << "  - Id: 1\n";
+				out << "    ParentId: 0\n";
+				out << "    Kind: Selector\n";
+				out << "    Title: \"Root Selector\"\n";
+				out << "    Description: \"Root decision selector\"\n";
+				out << "  - Id: 2\n";
+				out << "    ParentId: 1\n";
+				out << "    Kind: Sequence\n";
+				out << "    Title: \"Heal Sequence\"\n";
+				out << "    Description: \"Low health emergency heal branch\"\n";
+				out << "  - Id: 3\n";
+				out << "    ParentId: 2\n";
+				out << "    Kind: Condition\n";
+				out << "    Title: \"Health Below 30%\"\n";
+				out << "    Description: \"Check if health is critically low\"\n";
+				out << "    ConditionType: \"HealthBelow\"\n";
+				out << "    FloatParam: 30.0\n";
+				out << "  - Id: 4\n";
+				out << "    ParentId: 2\n";
+				out << "    Kind: Action\n";
+				out << "    Title: \"Seek Medical Station\"\n";
+				out << "    Description: \"Find nearest medical station smart object\"\n";
+				out << "    ActionType: \"SeekSmartObject\"\n";
+				out << "    StringParam: \"MedicalStation\"\n";
+				out << "  - Id: 5\n";
+				out << "    ParentId: 2\n";
+				out << "    Kind: Action\n";
+				out << "    Title: \"Interact and Heal\"\n";
+				out << "    Description: \"Channel heal recharge interaction\"\n";
+				out << "    ActionType: \"UseSmartObject\"\n";
+				out << "  - Id: 6\n";
+				out << "    ParentId: 1\n";
+				out << "    Kind: Action\n";
+				out << "    Title: \"Patrol Area\"\n";
+				out << "    Description: \"Default patrol wandering\"\n";
+				out << "    ActionType: \"Patrol\"\n";
+				out << "    FloatParam: 10.0\n";
+				out.close();
+
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-behaviortree");
+				return true;
+			});
 		add("audio_mixer", "Audio Mixer", ".wmixer", 34, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{
@@ -491,7 +557,7 @@ void ContentBrowserPanel::UnregisterDefaultAssetTypes(){
 		m_AssetTypesRegistered = false;
 		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
 		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
-		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "audio_mixer", "voice_profile", "sprite_atlas", "sprite_animation", "tilemap", "vfx" })
+		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "audio_mixer", "voice_profile", "behaviortree", "sprite_atlas", "sprite_animation", "tilemap", "vfx" })
 			registry.Unregister(id);
 	}
 
@@ -668,7 +734,8 @@ bool ContentBrowserPanel::RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId row
 		{ "2d", "2D 精灵系统 (2D Sprites & Tiles)  ▶", { "sprite_atlas", "sprite_animation", "tilemap", "ruletile" } },
 		{ "audio", "音频系统 (Audio System)  ▶", { "sound_event", "audio_mixer", "voice_profile" } },
 		{ "physics", "物理与数学 (Physics & Math)  ▶", { "physics_material", "curve" } },
-		{ "script", "脚本与代码 (Scripts & Logic)  ▶", { "script" } },
+				{ "ai", "AI 与行为树 (AI & Behavior Tree)  ▶", { "behaviortree" } },
+		{ "script", "脚本与代码 (Scripts & Logic)  ▶", { "script", "behaviortree" } },
 		{ "ui", "用户界面 (User Interface)  ▶", { "ui" } }
 	};
 
@@ -1049,4 +1116,6 @@ void ContentBrowserPanel::RefreshContents(){
 	}
 
 }
+
+
 

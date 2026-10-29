@@ -1,3 +1,4 @@
+#include "WUI/Panels/BehaviorTreeEditorPanel.h"
 #include "WUI/Panels/AudioMixerPanel.h"
 #include "ContentBrowserPanel_Internal.h"
 
@@ -577,6 +578,21 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 			m_Host.OpenCurveEditor(logical);
 			WLD_CORE_INFO("[curve] editor opened: {0}", logical);
 		}
+		else if (LowerExtension(path) == ".wbt" || LowerExtension(path) == ".wbehaviortree")
+		{
+			// 行为树专属工作台 (.wbt) 双击
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			std::string logical = ec ? path.generic_string() : relative.generic_string();
+			if (m_Model.Scope == BrowserRootScope::EngineContent && logical.rfind("engine/", 0) != 0)
+				logical = "engine/" + logical;
+			BehaviorTreeEditorPanel::RequestOpenPath(logical);
+			m_Host.ActivatePanel("behaviortree");
+			if (m_Ctx)
+				m_Ctx->RecordOp("browser", "open-behavior-tree", path.filename().generic_string(), logical);
+			WLD_CORE_INFO("[behaviortree] editor opened: {0}", logical);
+		}
 		else if (LowerExtension(path) == ".wvfx" || LowerExtension(path) == ".wparticle")
 		{
 			// 粒子特效资产双击 → 打开粒子系统编辑器
@@ -746,3 +762,4 @@ std::filesystem::path ContentBrowserPanel::CreateFolderIn(Wui::WuiContext& ctx, 
 	}
 
 }
+

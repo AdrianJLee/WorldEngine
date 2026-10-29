@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // P4-U9:项目内容根(运行期 `World::Paths::AssetRoot()`)下的资产目录扫描 —— 属性面板的"资产路径"下拉、材质面板的
 // 贴图槽等共用一份结果。每帧都要列表,所以带 TTL 缓存(默认 2s),不每帧扫盘。
@@ -53,6 +53,8 @@ namespace World
 				return EditorAssetKind::UiDocument;
 			if (assetType == "VFX" || assetType == "Particle" || assetType == "VisualEffect" || assetType == "Effect")
 				return EditorAssetKind::VFX;
+			if (assetType == "BehaviorTree" || assetType == "BT" || assetType == "BehaviorTreeAsset")
+				return EditorAssetKind::BehaviorTree;
 			return EditorAssetKind::Unknown;
 		}
 
@@ -98,6 +100,7 @@ namespace World
 				case EditorAssetKind::AnimationClip: return LowerExtension(path) == ".wclip";
 				case EditorAssetKind::PhysicsMaterial: return LowerExtension(path) == ".wphysmat";
 				case EditorAssetKind::VFX: return LowerExtension(path) == ".wvfx" || LowerExtension(path) == ".wparticle";
+				case EditorAssetKind::BehaviorTree: return LowerExtension(path) == ".wbt" || LowerExtension(path) == ".wbehaviortree";
 				default: return false;
 			}
 		}
@@ -214,3 +217,4 @@ namespace World
 		}
 	}
 }
+
