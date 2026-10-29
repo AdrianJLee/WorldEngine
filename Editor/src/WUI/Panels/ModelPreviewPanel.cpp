@@ -1,4 +1,13 @@
 #include "wldpch.h"
+namespace
+{
+	template<typename T, typename = void>
+	struct HasCollisionMember : std::false_type {};
+
+	template<typename T>
+	struct HasCollisionMember<T, std::void_t<decltype(std::declval<T>().Collision)>> : std::true_type {};
+}
+
 #include "WUI/Panels/ModelPreviewPanel.h"
 #include "World/Asset/AssetThumbnailCache.h"
 #include "WUI/Panels/ViewportPanel.h"
@@ -461,10 +470,25 @@ namespace World
 			m_LODMeshes[i].reset();
 		m_GeneratedLODs.clear();
 		m_LODStatusMessage.clear();
+		m_CollisionHulls.clear();
+		m_CollisionStatusMessage.clear();
+		m_CollisionStatusIsError = false;
 
 		std::string error;
 		m_Mesh = Mesh::LoadWModel(m_LogicalPath, &error);
 		m_DataValid = Asset::WModelIO::ReadFile(m_LogicalPath, m_Data, &error);
+		if constexpr (HasCollisionMember<Asset::WModelData>::value)
+		{
+			if (m_DataValid && m_Data.Collision.CollisionType != 0)
+			{
+				m_SelectedCollisionType = m_Data.Collision.CollisionType;
+				m_BakeHullCount = m_Data.Collision.HullCount;
+				m_BakeConcavityThreshold = m_Data.Collision.ConcavityThreshold;
+				m_BakeMaxVerticesPerHull = m_Data.Collision.MaxVerticesPerHull;
+				m_SelectedCollisionProfile = m_Data.Collision.DefaultCollisionProfile;
+				m_CollisionHulls = m_Data.Collision.ConvexHulls;
+			}
+		}
 		// P4-U11:源与设置的解析**必须先于**"加载失败就返回"—— 旧版本(v4 及更早)资产读不出来时
 		// 面板仍然要能显示导入源并提供"重新导入"(否则用户的老资产没有任何恢复入口)。
 		ResolveSource();
@@ -1637,12 +1661,88 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 				Wui::LineSegment(ctx, sc[e0], sc[e1], backCol, 1.0f);
 		}
 	}
+	void ModelPreviewPanel::DrawCollisionWireframe(Wui::WuiContext& ctx, const Wui::WuiRect& previewRect,
+		const Wui::WuiTheme& theme)
+	{
+		if (!m_ShowCollisionWireframe && m_ActiveTab != static_cast<int>(Tab::Collision))
+			return;
+		if (m_CollisionHulls.empty())
+			return;
+
+		Wui::ClipScope clipScope(ctx, previewRect);
+		const glm::mat4 vp = m_LastCameraProj * m_LastCameraView;
+
+		auto project = [&](const glm::vec3& p, glm::vec2& out) -> bool
+		{
+			const glm::vec4 c = vp * glm::vec4(p, 1.0f);
+			if (c.w <= 0.02f)
+				return false;
+			const float nx = c.x / c.w;
+			const float ny = c.y / c.w;
+			out.x = previewRect.X + (nx * 0.5f + 0.5f) * previewRect.W;
+			out.y = previewRect.Y + (0.5f - ny * 0.5f) * previewRect.H;
+			return true;
+		};
+
+		const Wui::WuiColor wireCol { 0.20f, 0.95f, 0.35f, 0.90f };
+		const Wui::WuiColor pointCol { 0.90f, 1.0f, 0.40f, 1.0f };
+
+		for (const auto& hull : m_CollisionHulls)
+		{
+			if (hull.Vertices.empty())
+				continue;
+
+			if (hull.Indices.size() >= 3)
+			{
+				std::vector<std::pair<uint32_t, uint32_t>> edges;
+				edges.reserve(hull.Indices.size());
+				for (size_t i = 0; i + 2 < hull.Indices.size(); i += 3)
+				{
+					uint32_t idx[3] = { hull.Indices[i], hull.Indices[i + 1], hull.Indices[i + 2] };
+					for (int e = 0; e < 3; ++e)
+					{
+						uint32_t a = idx[e];
+						uint32_t b = idx[(e + 1) % 3];
+						if (a > b) std::swap(a, b);
+						edges.push_back({ a, b });
+					}
+				}
+				std::sort(edges.begin(), edges.end());
+				edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+
+				for (const auto& edge : edges)
+				{
+					if (edge.first >= hull.Vertices.size() || edge.second >= hull.Vertices.size())
+						continue;
+					glm::vec2 p0, p1;
+					if (project(hull.Vertices[edge.first], p0) && project(hull.Vertices[edge.second], p1))
+					{
+						Wui::LineSegment(ctx, p0, p1, wireCol, 1.5f);
+					}
+				}
+			}
+			else
+			{
+				for (const auto& v : hull.Vertices)
+				{
+					glm::vec2 pt;
+					if (project(v, pt))
+					{
+						Wui::WuiRect r { pt.x - 2.0f, pt.y - 2.0f, 4.0f, 4.0f };
+						Wui::PanelBackground(ctx, r, pointCol, 2.0f);
+					}
+				}
+			}
+		}
+	}
+
 
 	void ModelPreviewPanel::DrawViewportOverlay(Wui::WuiContext& ctx, const Wui::WuiRect& previewRect,
 		const Wui::WuiTheme& theme)
 	{
 		DrawGroundGrid(ctx, previewRect, theme);
 		DrawBoundsWireframe(ctx, previewRect, theme);
+		DrawCollisionWireframe(ctx, previewRect, theme);
 
 		const glm::mat4 vp = m_LastCameraProj * m_LastCameraView;
 		auto project = [&](const glm::vec3& p, glm::vec2& out) -> bool
@@ -1895,7 +1995,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			{
 				const float popW = 160.0f;
 				const float itemH = 22.0f;
-				const float popH = itemH * 7.0f + 12.0f;
+				const float popH = itemH * 9.0f + 12.0f;
 				const Wui::WuiRect popRect { pill.X, pill.Y + pill.H + 4.0f, popW, popH };
 				Wui::DrawPanelSurface(ctx, popRect, theme);
 
@@ -1913,6 +2013,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 				drawCheck(Wui::HashId("model.disp.joint_axes"), Wui::Tr("panel.model.overlay.joint_axes", "Joint Axes"), m_ShowJointAxes);
 				drawCheck(Wui::HashId("model.disp.bounds"), Wui::Tr("panel.model.overlay.wire", "Bounds"), m_ShowBounds);
 				drawCheck(Wui::HashId("model.disp.occlude"), Wui::Tr("panel.model.overlay.occlude_back", "Occlude Back"), m_OccludeBackBounds);
+				drawCheck(Wui::HashId("model.disp.collision"), "Collision Wireframe", m_ShowCollisionWireframe);
 
 				if (ctx.Input().MouseClicked[0] && !ctx.IsHovered(popRect) && !ctx.IsHovered(dispRect))
 					m_DisplayModesOpen = false;
@@ -2238,7 +2339,8 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			Wui::Tr("panel.model.tab.skeleton", "Skeleton") + (m_DataValid && !m_Data.Skins.empty() ? " (" + std::to_string(m_Data.Skins[0].JointNodes.size()) + ")" : ""),
 			Wui::Tr("panel.model.tab.settings", "Import Settings") + (m_SettingsDirty ? " *" : ""),
 			Wui::Tr("panel.model.tab.clips", "Clips") + (m_DataValid && !m_Data.Animations.empty() ? " (" + std::to_string(m_Data.Animations.size()) + ")" : ""),
-			"LOD" + (m_GeneratedLODs.empty() ? "" : " (" + std::to_string(m_GeneratedLODs.size()) + ")")
+			"LOD" + (m_GeneratedLODs.empty() ? "" : " (" + std::to_string(m_GeneratedLODs.size()) + ")"),
+			"Collision" + (m_CollisionHulls.empty() ? "" : " (" + std::to_string(m_CollisionHulls.size()) + ")")
 		};
 
 		Wui::TabBar(ctx, Wui::HashId("model.tabs"), tabArea, tabLabels, m_ActiveTab, theme);
@@ -2259,6 +2361,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		else if (m_ActiveTab == 3) actualH = DrawTabImportSettings(ctx, scrollSlice, theme);
 		else if (m_ActiveTab == 4) actualH = DrawTabClips(ctx, scrollSlice, host, theme);
 		else if (m_ActiveTab == 5) actualH = DrawTabLOD(ctx, scrollSlice, host, theme);
+		else if (m_ActiveTab == 6) actualH = DrawTabCollision(ctx, scrollSlice, host, theme);
 
 		Wui::EndScrollArea(ctx);
 
@@ -2837,6 +2940,330 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		}
 
 		y += 24.0f;
+		return y - rect.Y;
+	}
+
+	float ModelPreviewPanel::DrawTabCollision(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
+		const Wui::WuiTheme& theme)
+	{
+		const float x = rect.X;
+		const float width = rect.W;
+		float y = rect.Y + 4.0f;
+
+		if (!m_Mesh && !m_DataValid)
+		{
+			Wui::Label(ctx, { x, y }, "No model loaded.", theme.TextMuted, theme.FontSizeBody);
+			return 24.0f;
+		}
+
+		// 反馈横幅
+		if (!m_CollisionStatusMessage.empty())
+		{
+			const Wui::WuiRect bannerRect { x, y, width, 26.0f };
+			const Wui::WuiColor bgCol = m_CollisionStatusIsError
+				? Wui::WuiColor{ 0.28f, 0.08f, 0.08f, 0.90f }
+				: Wui::WuiColor{ 0.08f, 0.25f, 0.12f, 0.90f };
+			const Wui::WuiColor borderCol = m_CollisionStatusIsError
+				? theme.Danger
+				: theme.Success;
+			Wui::PanelBackground(ctx, bannerRect, bgCol, 3.0f);
+			Wui::HighlightOutline(ctx, bannerRect, borderCol, 3.0f, 1.0f);
+			Wui::Label(ctx, { bannerRect.X + 8.0f, bannerRect.Y + 5.0f }, m_CollisionStatusMessage, borderCol, theme.FontSizeSmall);
+			y += 32.0f;
+		}
+
+		// 1. 统计指示卡片
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			"物理碰撞与凸包统计 (Collision & Convex Telemetry)", theme.Accent, theme);
+		y += 24.0f;
+
+		const float colGap = 8.0f;
+		const float colW = std::max(60.0f, (width - colGap * 3.0f) * 0.25f);
+		const float cardH = 48.0f;
+
+		auto drawStatCard = [&](float cx, const std::string& label, const std::string& val, const Wui::WuiColor& valCol)
+		{
+			const Wui::WuiRect cRect { cx, y, colW, cardH };
+			Wui::PanelBackground(ctx, cRect, theme.CardBg, 4.0f);
+			Wui::HighlightOutline(ctx, cRect, theme.Border, 4.0f, 1.0f);
+			Wui::Label(ctx, { cRect.X + 8.0f, cRect.Y + 6.0f }, label, theme.TextMuted, theme.FontSizeCaption);
+			Wui::Label(ctx, { cRect.X + 8.0f, cRect.Y + 22.0f }, val, valCol, theme.FontSizeHeading);
+		};
+
+		uint32_t totalVertices = 0;
+		for (const auto& h : m_CollisionHulls)
+			totalVertices += static_cast<uint32_t>(h.Vertices.size());
+
+		drawStatCard(x, "Convex Hulls", std::to_string(m_CollisionHulls.size()),
+			m_CollisionHulls.empty() ? theme.Text : theme.Success);
+		drawStatCard(x + (colW + colGap), "Total Vertices", std::to_string(totalVertices), theme.Text);
+
+		char bakeTimeBuf[32];
+		std::snprintf(bakeTimeBuf, sizeof(bakeTimeBuf), "%.2f ms", m_CollisionBakeTimeMs);
+		drawStatCard(x + (colW + colGap) * 2.0f, "Bake Time", bakeTimeBuf, theme.Accent);
+		drawStatCard(x + (colW + colGap) * 3.0f, "Profile", m_SelectedCollisionProfile, theme.Text);
+
+		y += cardH + 16.0f;
+
+		// 2. 碰撞类型选择 (Collision Type)
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			"碰撞类型 (Collision Type)", theme.Accent, theme);
+		y += 24.0f;
+
+		const float tBtnGap = 4.0f;
+		const float tBtnW = (width - tBtnGap * 2.0f) / 3.0f;
+		auto drawTypeBtn = [&](uint8_t type, const char* label, const char* tip, float bx)
+		{
+			const Wui::WuiRect btnR { bx, y, tBtnW, 24.0f };
+			const bool isSel = (m_SelectedCollisionType == type);
+			if (isSel)
+				Wui::PanelBackground(ctx, btnR, Alpha(theme.Accent, 0.28f), 3.0f);
+			if (Wui::Button(ctx, Wui::HashId(("model.col.type_" + std::to_string(type)).c_str()), btnR, label, theme))
+			{
+				m_SelectedCollisionType = type;
+			}
+			if (isSel)
+				Wui::HighlightOutline(ctx, btnR, theme.Accent, 3.0f, 1.5f);
+			Wui::Tooltip(ctx, btnR, tip);
+		};
+		drawTypeBtn(0, "None (无碰撞)", "不为模型配置物理碰撞", x);
+		drawTypeBtn(1, "Auto Convex (复合凸包)", "基于 3D QuickHull 与主轴递归二分切分凹面复合凸包", x + tBtnW + tBtnGap);
+		drawTypeBtn(2, "Bounding Box (包围盒)", "生成轴对齐包围盒 (AABB) 简易凸包", x + (tBtnW + tBtnGap) * 2.0f);
+		y += 32.0f;
+
+		// 3. 凸包生成参数调节 (Convex Decomposition Parameters)
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			"凸包分解参数 (Decomposition Parameters)", theme.Accent, theme);
+		y += 24.0f;
+
+		const float paramLabelW = 160.0f;
+		const float paramFieldW = std::max(100.0f, width - paramLabelW - 8.0f);
+
+		// Hull Count
+		Wui::Label(ctx, { x, y + 2.0f }, "Hull Count (凸包数量 1~16):", theme.Text, theme.FontSizeSmall);
+		int64_t hc = static_cast<int64_t>(m_BakeHullCount);
+		if (Wui::DragInt(ctx, Wui::HashId("model.col.hull_count"), { x + paramLabelW, y, paramFieldW, 22.0f }, hc, 1, 16, theme))
+		{
+			m_BakeHullCount = static_cast<uint32_t>(std::clamp(hc, int64_t(1), int64_t(16)));
+		}
+		Wui::Tooltip(ctx, { x + paramLabelW, y, paramFieldW, 22.0f }, "复合凸包数量上限。1 为标准单极值凸包 (QuickHull)；≥2 时启用凹面自动切分");
+		y += 26.0f;
+
+		// Concavity Threshold
+		Wui::Label(ctx, { x, y + 2.0f }, "Concavity Threshold (凹度容差):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("model.col.concavity"), { x + paramLabelW, y, paramFieldW, 22.0f }, m_BakeConcavityThreshold, 0.005f, 0.01f, 0.5f, theme))
+		{
+			m_BakeConcavityThreshold = std::clamp(m_BakeConcavityThreshold, 0.01f, 0.5f);
+		}
+		Wui::Tooltip(ctx, { x + paramLabelW, y, paramFieldW, 22.0f }, "凹面切分容差阈值 (0.01 ~ 0.5，默认 0.05)。数值越小切分越严格精细，数值越大合并更积极");
+		y += 26.0f;
+
+		// Max Vertices Per Hull
+		Wui::Label(ctx, { x, y + 2.0f }, "Max Vertices / Hull (顶点上限):", theme.Text, theme.FontSizeSmall);
+		int64_t mv = static_cast<int64_t>(m_BakeMaxVerticesPerHull);
+		if (Wui::DragInt(ctx, Wui::HashId("model.col.max_verts"), { x + paramLabelW, y, paramFieldW, 22.0f }, mv, 8, 128, theme))
+		{
+			m_BakeMaxVerticesPerHull = static_cast<uint32_t>(std::clamp(mv, int64_t(8), int64_t(128)));
+		}
+		Wui::Tooltip(ctx, { x + paramLabelW, y, paramFieldW, 22.0f }, "每个子凸包最大允许顶点数 (8 ~ 128，推荐 32)。防止物理 Jolt 碰撞矩阵顶点爆炸");
+		y += 28.0f;
+
+		// 快捷预设按钮
+		const float pBtnGap = 4.0f;
+		const float pBtnW = (width - pBtnGap * 3.0f) / 4.0f;
+		auto drawPresetBtn = [&](const char* label, uint32_t hCount, float concav, uint32_t mVerts, float bx, const char* tip)
+		{
+			const Wui::WuiRect pbRect { bx, y, pBtnW, 22.0f };
+			if (Wui::Button(ctx, Wui::HashId(("model.col.preset_" + std::string(label)).c_str()), pbRect, label, theme))
+			{
+				m_BakeHullCount = hCount;
+				m_BakeConcavityThreshold = concav;
+				m_BakeMaxVerticesPerHull = mVerts;
+				m_SelectedCollisionType = 1;
+			}
+			Wui::Tooltip(ctx, pbRect, tip);
+		};
+		drawPresetBtn("单凸包 (1 Hull)", 1, 0.05f, 32, x, "快速预设: 1 个极值凸包 (QuickHull)");
+		drawPresetBtn("标准复合 (4 Hulls)", 4, 0.05f, 32, x + pBtnW + pBtnGap, "快速预设: 最多 4 个凸包复合体，适合一般道具与障碍物");
+		drawPresetBtn("高精切分 (8 Hulls)", 8, 0.02f, 48, x + (pBtnW + pBtnGap) * 2.0f, "快速预设: 最多 8 个凸包复合体，适合中等凹体、拱门或复杂建筑");
+		drawPresetBtn("极致多体 (16 Hulls)", 16, 0.01f, 64, x + (pBtnW + pBtnGap) * 3.0f, "快速预设: 最多 16 个凸包复合体，适合复杂凹形载具与机械");
+		y += 30.0f;
+
+		// 4. 通道预设与视口选项
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			"碰撞通道与视口设置 (Channels & Viewport Overlay)", theme.Accent, theme);
+		y += 24.0f;
+
+		const float prBtnGap = 4.0f;
+		const float prBtnW = (width - prBtnGap * 3.0f) / 4.0f;
+		const char* profiles[4] = { "Default", "BlockAll", "OverlapPawn", "WorldDynamic" };
+		for (int i = 0; i < 4; ++i)
+		{
+			const float bx = x + i * (prBtnW + prBtnGap);
+			const Wui::WuiRect prRect { bx, y, prBtnW, 22.0f };
+			const bool isSel = (m_SelectedCollisionProfile == profiles[i]);
+			if (isSel)
+				Wui::PanelBackground(ctx, prRect, Alpha(theme.Accent, 0.28f), 3.0f);
+			if (Wui::Button(ctx, Wui::HashId(("model.col.profile_" + std::string(profiles[i])).c_str()), prRect, profiles[i], theme))
+			{
+				m_SelectedCollisionProfile = profiles[i];
+			}
+			if (isSel)
+				Wui::HighlightOutline(ctx, prRect, theme.Accent, 3.0f, 1.5f);
+			Wui::Tooltip(ctx, prRect, "设置模型资产的默认物理通道预设 (Default Collision Profile)");
+		}
+		y += 28.0f;
+
+		Wui::Checkbox(ctx, Wui::HashId("model.col.wire_check"), { x, y, width, 22.0f },
+			"在 3D 视口中叠加显示亮绿色凸包线框 (Overlay Convex Wireframe)", m_ShowCollisionWireframe, theme);
+		Wui::Tooltip(ctx, { x, y, width, 22.0f }, "勾选后将在 3D 视口中以高亮亮绿色实时线框绘制已生成的凸包");
+		y += 32.0f;
+
+		// 5. 操作按钮条
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			"烘焙操作与模型存盘 (Bake & Save to Asset)", theme.Accent, theme);
+		y += 24.0f;
+
+		// 「Generate Convex Hulls」
+		const Wui::WuiRect genBtnRect { x, y, width, 26.0f };
+		Wui::PanelBackground(ctx, genBtnRect, Wui::WuiColor{ 0.12f, 0.24f, 0.38f, 0.90f }, 3.0f);
+		if (Wui::Button(ctx, Wui::HashId("model.col.act_generate"), genBtnRect,
+			"Generate Convex Hulls (生成复合凸包)", theme))
+		{
+			std::vector<glm::vec3> positions;
+			std::vector<uint32_t> indices;
+
+			if (m_DataValid && !m_Data.Vertices.empty())
+			{
+				positions.reserve(m_Data.Vertices.size());
+				for (const auto& v : m_Data.Vertices)
+					positions.push_back(v.Position);
+				indices = m_Data.Indices;
+			}
+
+			if (positions.empty())
+			{
+				m_CollisionStatusMessage = "错误: 当前模型未加载有效顶点数据";
+				m_CollisionStatusIsError = true;
+			}
+			else if (m_SelectedCollisionType == 0) // None
+			{
+				m_CollisionHulls.clear();
+				m_CollisionBakeTimeMs = 0.0;
+				m_CollisionStatusMessage = "碰撞类型设为 None，已清空凸包。";
+				m_CollisionStatusIsError = false;
+			}
+			else if (m_SelectedCollisionType == 2) // Bounding Box
+			{
+				auto t0 = std::chrono::high_resolution_clock::now();
+				glm::vec3 bmin = positions[0];
+				glm::vec3 bmax = positions[0];
+				for (const auto& p : positions)
+				{
+					bmin = glm::min(bmin, p);
+					bmax = glm::max(bmax, p);
+				}
+				ConvexHull boxHull;
+				boxHull.Center = (bmin + bmax) * 0.5f;
+				glm::vec3 sz = bmax - bmin;
+				boxHull.Volume = sz.x * sz.y * sz.z;
+				boxHull.Vertices = {
+					{ bmin.x, bmin.y, bmin.z },
+					{ bmax.x, bmin.y, bmin.z },
+					{ bmax.x, bmin.y, bmax.z },
+					{ bmin.x, bmin.y, bmax.z },
+					{ bmin.x, bmax.y, bmin.z },
+					{ bmax.x, bmax.y, bmin.z },
+					{ bmax.x, bmax.y, bmax.z },
+					{ bmin.x, bmax.y, bmax.z }
+				};
+				boxHull.Indices = {
+					0, 1, 2,  0, 2, 3, // Bottom
+					4, 6, 5,  4, 7, 6, // Top
+					0, 4, 5,  0, 5, 1, // Front
+					2, 6, 7,  2, 7, 3, // Back
+					0, 3, 7,  0, 7, 4, // Left
+					1, 5, 6,  1, 6, 2  // Right
+				};
+				m_CollisionHulls = { boxHull };
+				auto t1 = std::chrono::high_resolution_clock::now();
+				m_CollisionBakeTimeMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+				m_CollisionStatusMessage = "成功生成 Bounding Box 包围盒凸包 (耗时 " + std::to_string(m_CollisionBakeTimeMs) + " ms)";
+				m_CollisionStatusIsError = false;
+			}
+			else // Auto Convex (1)
+			{
+				auto t0 = std::chrono::high_resolution_clock::now();
+				ConvexDecomposer::Decompose(positions, indices, m_BakeHullCount, m_BakeConcavityThreshold, m_CollisionHulls);
+				auto t1 = std::chrono::high_resolution_clock::now();
+				m_CollisionBakeTimeMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+				char buf[128];
+				std::snprintf(buf, sizeof(buf), "成功生成 %zu 个复合凸包 (耗时 %.2f ms, 顶点上限=%u)",
+					m_CollisionHulls.size(), m_CollisionBakeTimeMs, m_BakeMaxVerticesPerHull);
+				m_CollisionStatusMessage = buf;
+				m_CollisionStatusIsError = false;
+			}
+		}
+		Wui::HighlightOutline(ctx, genBtnRect, theme.Accent, 3.0f, 1.0f);
+		Wui::Tooltip(ctx, genBtnRect, "基于当前参数实时计算多凸包几何体并在视口高亮预览");
+		y += 32.0f;
+
+		// 「Save Collision to .wmodel」
+		const Wui::WuiRect saveBtnRect { x, y, width, 26.0f };
+		Wui::PanelBackground(ctx, saveBtnRect, Wui::WuiColor{ 0.08f, 0.28f, 0.14f, 0.90f }, 3.0f);
+		if (Wui::Button(ctx, Wui::HashId("model.col.act_save"), saveBtnRect,
+			"Save Collision to .wmodel (保存碰撞到模型)", theme))
+		{
+			if constexpr (HasCollisionMember<Asset::WModelData>::value)
+			{
+				m_Data.Collision.CollisionType = m_SelectedCollisionType;
+				m_Data.Collision.HullCount = static_cast<uint32_t>(m_CollisionHulls.size());
+				m_Data.Collision.ConcavityThreshold = m_BakeConcavityThreshold;
+				m_Data.Collision.MaxVerticesPerHull = m_BakeMaxVerticesPerHull;
+				m_Data.Collision.DefaultCollisionProfile = m_SelectedCollisionProfile;
+				m_Data.Collision.ConvexHulls = m_CollisionHulls;
+			}
+
+			std::string saveErr;
+			if (Asset::WModelIO::WriteFile(m_LogicalPath, m_Data, &saveErr))
+			{
+				char buf[256];
+				std::snprintf(buf, sizeof(buf), "已将 %zu 个凸包碰撞体成功保存至 %s (预设: %s)",
+					m_CollisionHulls.size(), m_LogicalPath.c_str(), m_SelectedCollisionProfile.c_str());
+				m_CollisionStatusMessage = buf;
+				m_CollisionStatusIsError = false;
+				host.RefreshAssetCatalog(m_LogicalPath);
+			}
+			else
+			{
+				m_CollisionStatusMessage = "保存 .wmodel 失败: " + saveErr;
+				m_CollisionStatusIsError = true;
+			}
+		}
+		Wui::HighlightOutline(ctx, saveBtnRect, theme.Success, 3.0f, 1.0f);
+		Wui::Tooltip(ctx, saveBtnRect, "将当前凸包几何数据与物理预设持久化写入 .wmodel。关卡实体将 0 开销直通！");
+		y += 32.0f;
+
+		// 「Clear Collision」
+		const Wui::WuiRect clearBtnRect { x, y, width, 24.0f };
+		if (Wui::Button(ctx, Wui::HashId("model.col.act_clear"), clearBtnRect,
+			"Clear Collision (清空碰撞数据)", theme))
+		{
+			m_CollisionHulls.clear();
+			m_SelectedCollisionType = 0;
+			if constexpr (HasCollisionMember<Asset::WModelData>::value)
+			{
+				m_Data.Collision.CollisionType = 0;
+				m_Data.Collision.ConvexHulls.clear();
+			}
+			m_CollisionStatusMessage = "已清空碰撞数据。";
+			m_CollisionStatusIsError = false;
+		}
+		Wui::Tooltip(ctx, clearBtnRect, "清除当前碰撞凸包数据");
+		y += 30.0f;
+
+		y += 20.0f;
 		return y - rect.Y;
 	}
 

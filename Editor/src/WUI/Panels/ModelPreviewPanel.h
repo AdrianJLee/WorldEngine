@@ -3,6 +3,7 @@
 #include "WUI/Common/EditorPanel.h"
 #include "World/Asset/ModelImportSettings.h"
 #include "World/Asset/WModelIO.h"
+#include "World/Physics/ConvexDecomposition.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/MeshLODGenerator.h"
@@ -29,6 +30,17 @@ namespace World
 	class ModelPreviewPanel final : public EditorPanel
 	{
 	public:
+		enum class Tab : int
+		{
+			Overview = 0,
+			Materials = 1,
+			Skeleton = 2,
+			ImportSettings = 3,
+			Clips = 4,
+			LOD = 5,
+			Collision = 6,
+			Count = 7
+		};
 		explicit ModelPreviewPanel(std::string logicalPath);
 		~ModelPreviewPanel() override;
 
@@ -68,6 +80,8 @@ namespace World
 			const Wui::WuiTheme& theme);
 		void DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::WuiRect& previewRect,
 			const Wui::WuiTheme& theme);
+		void DrawCollisionWireframe(Wui::WuiContext& ctx, const Wui::WuiRect& previewRect,
+			const Wui::WuiTheme& theme);
 
 		// ---- 动画走带与擦洗时间轴 ----
 		float DrawTransportBar(Wui::WuiContext& ctx, float x, float y, float width,
@@ -87,6 +101,8 @@ namespace World
 		float DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
 			const Wui::WuiTheme& theme);
 		float DrawTabLOD(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		float DrawTabCollision(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host,
 			const Wui::WuiTheme& theme);
 
 		// ---- 材质与骨骼辅助操作 ----
@@ -187,10 +203,10 @@ namespace World
 		bool m_TimelineShowFrames = false;
 
 		// ---- 模块选项卡状态 ----
-		// 0: Overview, 1: Materials, 2: Skeleton, 3: Import Settings, 4: Clips, 5: LOD
+		// 0: Overview, 1: Materials, 2: Skeleton, 3: Import Settings, 4: Clips, 5: LOD, 6: Collision
 		int m_ActiveTab = 0;
-		float m_TabScroll[6] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-		float m_TabContentHeight[6] = { 400.0f, 400.0f, 400.0f, 400.0f, 400.0f, 400.0f };
+		float m_TabScroll[7] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		float m_TabContentHeight[7] = { 400.0f, 400.0f, 400.0f, 400.0f, 400.0f, 400.0f, 400.0f };
 		std::string m_SkeletonFilter;
 		std::unordered_set<std::string> m_SkeletonCollapsed;
 		std::unordered_set<int> m_SkeletonCollapsedNodes;
@@ -271,6 +287,18 @@ namespace World
 		// 蒙皮提交被拒的一次性 warn 去重
 		bool m_TransparentSkipWarned = false;
 		bool m_SkinnedSubmitWarned = false;
+		// ---- 物理碰撞与凸包生成状态 (Collision Tab) ----
+		bool m_ShowCollisionWireframe = true;
+		uint32_t m_BakeHullCount = 4;
+		float m_BakeConcavityThreshold = 0.05f;
+		uint32_t m_BakeMaxVerticesPerHull = 32;
+		uint8_t m_SelectedCollisionType = 1; // 0=None, 1=AutoConvex, 2=BoundingBox
+		std::string m_SelectedCollisionProfile = "Default";
+		std::vector<ConvexHull> m_CollisionHulls;
+		double m_CollisionBakeTimeMs = 0.0;
+		std::string m_CollisionStatusMessage;
+		bool m_CollisionStatusIsError = false;
+
 
 		// ---- GPU 资源(预览专用, 惰性创建) ----
 		Rhi::Handle<Rhi::RenderPass> m_PreviewPass;

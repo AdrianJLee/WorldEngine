@@ -33,6 +33,12 @@ namespace World::Asset
 		// 导入的目的地目录里找。填了就先在它里面找，找不到再落到目的地目录。
 		std::string SharedMaterialFolder;
 
+		// 碰撞导入选项
+		bool GenerateCollision = false;
+		uint8_t DefaultCollisionType = 1; // 1 = AutoConvex
+		uint32_t ConvexHullCount = 4;
+		float ConvexConcavityThreshold = 0.05f;
+
 		static ModelImportSettings Default() { return ModelImportSettings {}; }
 
 		// ---- P4-U4:项目级导入默认值(project.we.yaml 的 `imports:` 区块) ----

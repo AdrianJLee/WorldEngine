@@ -3,6 +3,7 @@
 #include "World/Audio/AudioSystem.h"
 #include "World/Renderer/Tilemap.h"
 #include "World/Renderer/Mesh.h"
+#include "World/Asset/WModelIO.h"
 #include "World/Renderer/MeshLOD.h"
 #include "World/Renderer/MeshLODGenerator.h"
 #include "World/Renderer/ParticleSystem.h"
@@ -23,6 +24,27 @@
 
 namespace World
 {
+namespace
+{
+	template<typename T, typename = void>
+	struct HasCollisionMember : std::false_type {};
+
+	template<typename T>
+	struct HasCollisionMember<T, std::void_t<decltype(std::declval<T>().Collision)>> : std::true_type {};
+
+	struct CachedBakedCollision
+	{
+		std::string Path;
+		bool HasBaked = false;
+		uint32_t HullCount = 0;
+		float Concavity = 0.05f;
+		uint32_t MaxVerts = 32;
+		std::string Profile = "Default";
+		std::chrono::steady_clock::time_point LastCheck {};
+	};
+	static CachedBakedCollision s_BakedCache;
+}
+
 
 using namespace PropertiesPanelDetail;
 
@@ -1179,6 +1201,92 @@ static uint32_t s_LODGenEntityId = 0;
 		const float startX = rect.X + pad;
 		const float contentW = rect.W - pad * 2.0f;
 		float curY = rect.Y + 4.0f;
+
+		// 0. 模型资产预烘焙碰撞状态检测与同步
+		std::string targetModelPath;
+		if (comp->MeshSource.HasPath())
+		{
+			targetModelPath = StringPool::Get().PathOf(comp->MeshSource.Path);
+		}
+		else if (entity.IsValid() && entity.HasComponent<MeshRendererComponent>())
+		{
+			const auto& mr = entity.GetComponent<MeshRendererComponent>();
+			if (mr.Mesh.HasPath())
+				targetModelPath = StringPool::Get().PathOf(mr.Mesh.Path);
+		}
+
+		if (!targetModelPath.empty())
+		{
+			const auto now = std::chrono::steady_clock::now();
+			if (s_BakedCache.Path != targetModelPath ||
+				std::chrono::duration_cast<std::chrono::seconds>(now - s_BakedCache.LastCheck).count() >= 1)
+			{
+				s_BakedCache.Path = targetModelPath;
+				s_BakedCache.LastCheck = now;
+				s_BakedCache.HasBaked = false;
+
+				Asset::WModelData mdata;
+				std::string loadErr;
+				if (Asset::WModelIO::ReadFile(targetModelPath, mdata, &loadErr))
+				{
+					if constexpr (HasCollisionMember<Asset::WModelData>::value)
+					{
+						if (mdata.Collision.CollisionType != 0 && !mdata.Collision.ConvexHulls.empty())
+						{
+							s_BakedCache.HasBaked = true;
+							s_BakedCache.HullCount = static_cast<uint32_t>(mdata.Collision.ConvexHulls.size());
+							s_BakedCache.Concavity = mdata.Collision.ConcavityThreshold;
+							s_BakedCache.MaxVerts = mdata.Collision.MaxVerticesPerHull;
+							s_BakedCache.Profile = mdata.Collision.DefaultCollisionProfile;
+						}
+					}
+				}
+			}
+
+			if (s_BakedCache.HasBaked)
+			{
+				const Wui::WuiRect badgeRect { startX, curY, contentW, 24.0f };
+				Wui::PanelBackground(ctx, badgeRect, Wui::WuiColor{ 0.08f, 0.28f, 0.12f, 0.90f }, 3.0f);
+				Wui::HighlightOutline(ctx, badgeRect, theme.Success, 3.0f, 1.0f);
+				char badgeText[128];
+				std::snprintf(badgeText, sizeof(badgeText), "[Pre-baked in Asset: %u Hulls | %s]",
+					s_BakedCache.HullCount, s_BakedCache.Profile.c_str());
+				Wui::Label(ctx, { badgeRect.X + 8.0f, badgeRect.Y + 4.0f }, badgeText, theme.Success, theme.FontSizeSmall);
+				curY += 28.0f;
+
+				const Wui::WuiRect syncBtnRect { startX, curY, contentW, 22.0f };
+				if (Wui::Button(ctx, Wui::HashId("inspect.convex.sync_asset"), syncBtnRect,
+					"Sync Parameters from Asset (从模型资产同步参数)", theme))
+				{
+					comp->HullCount = s_BakedCache.HullCount;
+					comp->ConcavityThreshold = s_BakedCache.Concavity;
+					comp->MaxVerticesPerHull = s_BakedCache.MaxVerts;
+					if (changedFields)
+					{
+						changedFields->push_back("HullCount");
+						changedFields->push_back("ConcavityThreshold");
+						changedFields->push_back("MaxVerticesPerHull");
+					}
+					host.MarkDocumentDirty();
+				}
+				Wui::Tooltip(ctx, syncBtnRect, "同步模型资产预烘焙时配置的凸包数量与凹度容差参数");
+				curY += 26.0f;
+			}
+			else
+			{
+				const Wui::WuiRect badgeRect { startX, curY, contentW, 24.0f };
+				Wui::PanelBackground(ctx, badgeRect, Wui::WuiColor{ 0.28f, 0.20f, 0.08f, 0.90f }, 3.0f);
+				Wui::HighlightOutline(ctx, badgeRect, theme.Warning, 3.0f, 1.0f);
+				Wui::Label(ctx, { badgeRect.X + 8.0f, badgeRect.Y + 4.0f },
+					"[Runtime Decomposed (CPU)]", theme.Warning, theme.FontSizeSmall);
+				curY += 26.0f;
+
+				Wui::Label(ctx, { startX, curY + 2.0f },
+					"Tip: Double-click model in Content Browser to pre-bake in Model Editor.",
+					theme.TextMuted, theme.FontSizeCaption);
+				curY += 20.0f;
+			}
+		}
 
 		// 1. 源模型网格选择 (MeshSource)
 		Wui::Label(ctx, { startX, curY + 2.0f }, "源网格模型 (Source Mesh Asset):", theme.Accent, theme.FontSizeSmall);

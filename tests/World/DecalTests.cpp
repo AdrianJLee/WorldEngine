@@ -1,6 +1,7 @@
 #include "World/Renderer/Decal.h"
 #include "World/Physics/ConvexDecomposition.h"
 #include "World/Scene/Components.h"
+#include "World/Asset/WModelIO.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <cassert>
@@ -182,6 +183,147 @@ static void TestDecalAndConvexComponentLayout()
 	std::cout << "[PASS] TestDecalAndConvexComponentLayout\n";
 }
 
+static void TestModelCollisionSerialization()
+{
+	Asset::WModelData model;
+	model.Meta.Valid = true;
+	model.Meta.SourceFingerprint = 0x123456789ABCDEF0ULL;
+	model.Meta.ImporterVersion = 1;
+	model.Meta.SettingsHash = 0xFEDCBA9876543210ULL;
+	model.Meta.SourcePath = "models/tests/test_collision.gltf";
+	model.Meta.Identity = AssetId{ 42 };
+
+	Asset::WModelVertex v0{ glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec3(0, 0, 1), glm::vec2(0, 0) };
+	Asset::WModelVertex v1{ glm::vec3( 1.0f, -1.0f, 0.0f), glm::vec3(0, 0, 1), glm::vec2(1, 0) };
+	Asset::WModelVertex v2{ glm::vec3( 0.0f,  1.0f, 0.0f), glm::vec3(0, 0, 1), glm::vec2(0.5f, 1) };
+	model.Vertices = { v0, v1, v2 };
+	model.Indices = { 0, 1, 2 };
+	model.Bounds.Min = glm::vec3(-1.0f);
+	model.Bounds.Max = glm::vec3(1.0f);
+
+	// 配置碰撞数据：多凸包复合体
+	model.Collision.CollisionType = 1; // 1 = AutoConvex
+	model.Collision.HullCount = 2;
+	model.Collision.ConcavityThreshold = 0.05f;
+	model.Collision.MaxVerticesPerHull = 32;
+	model.Collision.DefaultCollisionProfile = "BlockAll";
+
+	// 凸包 1: 四面体 (4 顶点, 12 索引, 体积 42.5)
+	ConvexHull hull1;
+	hull1.Center = glm::vec3(1.0f, 2.0f, 3.0f);
+	hull1.Volume = 42.5f;
+	hull1.Vertices = {
+		{ 0.0f, 0.0f, 0.0f },
+		{ 2.0f, 0.0f, 0.0f },
+		{ 0.0f, 2.0f, 0.0f },
+		{ 0.0f, 0.0f, 2.0f }
+	};
+	hull1.Indices = {
+		0, 1, 2,
+		0, 1, 3,
+		0, 2, 3,
+		1, 2, 3
+	};
+
+	// 凸包 2: 立方体 (8 顶点, 36 索引, 体积 1000)
+	ConvexHull hull2;
+	hull2.Center = glm::vec3(-5.0f, 0.0f, 2.0f);
+	hull2.Volume = 1000.0f;
+	hull2.Vertices = {
+		{ -5.0f, -5.0f, -5.0f }, {  5.0f, -5.0f, -5.0f },
+		{  5.0f,  5.0f, -5.0f }, { -5.0f,  5.0f, -5.0f },
+		{ -5.0f, -5.0f,  5.0f }, {  5.0f, -5.0f,  5.0f },
+		{  5.0f,  5.0f,  5.0f }, { -5.0f,  5.0f,  5.0f }
+	};
+	hull2.Indices = {
+		0, 1, 2, 0, 2, 3,
+		4, 5, 6, 4, 6, 7,
+		0, 1, 5, 0, 5, 4,
+		2, 3, 7, 2, 7, 6,
+		0, 3, 7, 0, 7, 4,
+		1, 2, 6, 1, 6, 5
+	};
+
+	model.Collision.ConvexHulls = { hull1, hull2 };
+
+	// 1. 序列化
+	std::vector<uint8_t> bytes = Asset::WModelIO::Serialize(model);
+	assert(!bytes.empty());
+
+	// 2. 反序列化
+	Asset::WModelData loaded;
+	std::string error;
+	bool ok = Asset::WModelIO::Parse(bytes.data(), bytes.size(), loaded, &error);
+	assert(ok);
+	assert(error.empty());
+
+	// 3. 断言元数据及基础碰撞配置 100% 还原
+	assert(loaded.Collision.CollisionType == 1);
+	assert(loaded.Collision.HullCount == 2);
+	assert(std::abs(loaded.Collision.ConcavityThreshold - 0.05f) < 1e-5f);
+	assert(loaded.Collision.MaxVerticesPerHull == 32);
+	assert(loaded.Collision.DefaultCollisionProfile == "BlockAll");
+	assert(loaded.Collision.ConvexHulls.size() == 2);
+
+	// 4. 断言凸包 1: 顶点数、索引面数、体积、中心点 100% 完整无损
+	const auto& loadedHull1 = loaded.Collision.ConvexHulls[0];
+	assert(loadedHull1.Vertices.size() == 4);
+	assert(loadedHull1.Indices.size() == 12);
+	assert(std::abs(loadedHull1.Volume - 42.5f) < 1e-4f);
+	assert(std::abs(loadedHull1.Center.x - 1.0f) < 1e-4f);
+	assert(std::abs(loadedHull1.Center.y - 2.0f) < 1e-4f);
+	assert(std::abs(loadedHull1.Center.z - 3.0f) < 1e-4f);
+	for (size_t i = 0; i < loadedHull1.Vertices.size(); ++i)
+	{
+		assert(glm::distance(loadedHull1.Vertices[i], hull1.Vertices[i]) < 1e-5f);
+	}
+	for (size_t i = 0; i < loadedHull1.Indices.size(); ++i)
+	{
+		assert(loadedHull1.Indices[i] == hull1.Indices[i]);
+	}
+
+	// 5. 断言凸包 2: 顶点数、索引面数、体积、中心点 100% 完整无损
+	const auto& loadedHull2 = loaded.Collision.ConvexHulls[1];
+	assert(loadedHull2.Vertices.size() == 8);
+	assert(loadedHull2.Indices.size() == 36);
+	assert(std::abs(loadedHull2.Volume - 1000.0f) < 1e-4f);
+	assert(std::abs(loadedHull2.Center.x - (-5.0f)) < 1e-4f);
+	assert(std::abs(loadedHull2.Center.y - 0.0f) < 1e-4f);
+	assert(std::abs(loadedHull2.Center.z - 2.0f) < 1e-4f);
+	for (size_t i = 0; i < loadedHull2.Vertices.size(); ++i)
+	{
+		assert(glm::distance(loadedHull2.Vertices[i], hull2.Vertices[i]) < 1e-5f);
+	}
+	for (size_t i = 0; i < loadedHull2.Indices.size(); ++i)
+	{
+		assert(loadedHull2.Indices[i] == hull2.Indices[i]);
+	}
+
+	// 6. 向后兼容测试：截除碰撞区块后，旧版无碰撞区块文件能平稳加载，Collision 保持默认且不崩溃
+	const char kMagic[4] = { 'C', 'O', 'L', 'L' };
+	size_t legacySize = 0;
+	for (size_t i = 0; i + 4 <= bytes.size(); ++i)
+	{
+		if (std::memcmp(&bytes[i], kMagic, 4) == 0)
+		{
+			legacySize = i;
+			break;
+		}
+	}
+	assert(legacySize > 0);
+
+	Asset::WModelData legacyLoaded;
+	std::string legacyError;
+	bool legacyOk = Asset::WModelIO::Parse(bytes.data(), legacySize, legacyLoaded, &legacyError);
+	assert(legacyOk);
+	assert(legacyError.empty());
+	assert(legacyLoaded.Collision.CollisionType == 0);
+	assert(legacyLoaded.Collision.ConvexHulls.empty());
+	assert(legacyLoaded.Collision.DefaultCollisionProfile == "Default");
+
+	std::cout << "[PASS] TestModelCollisionSerialization\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.Decal tests...\n";
@@ -189,6 +331,7 @@ int main()
 	TestConvexQuickHull();
 	TestConcaveMeshDecomposition();
 	TestDecalAndConvexComponentLayout();
+	TestModelCollisionSerialization();
 	std::cout << "All World.Decal tests passed successfully!\n";
 	return 0;
 }

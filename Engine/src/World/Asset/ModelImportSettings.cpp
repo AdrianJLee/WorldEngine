@@ -170,6 +170,15 @@ namespace World::Asset
 			| (settings.ReuseTextures ? 2u : 0u);
 		hash = HashBytes(hash, &reuseFlags, sizeof(reuseFlags));
 		hash = HashBytes(hash, settings.SharedMaterialFolder.data(), settings.SharedMaterialFolder.size());
+
+		// 碰撞导入选项哈希
+		const uint8_t collisionFlags = settings.GenerateCollision ? 1u : 0u;
+		hash = HashBytes(hash, &collisionFlags, sizeof(collisionFlags));
+		hash = HashBytes(hash, &settings.DefaultCollisionType, sizeof(settings.DefaultCollisionType));
+		const uint32_t hullCount = settings.ConvexHullCount;
+		hash = HashBytes(hash, &hullCount, sizeof(hullCount));
+		hash = HashF32(hash, settings.ConvexConcavityThreshold);
+
 		return hash;
 	}
 }

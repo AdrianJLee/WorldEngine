@@ -3,6 +3,7 @@
 #include "World/Core/AssetId.h"
 #include "World/Core/Export.h"
 #include "World/Asset/ModelImportSettings.h"
+#include "World/Physics/ConvexDecomposition.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -144,6 +145,16 @@ namespace World::Asset
 		std::vector<WModelAnimationChannel> Channels;
 	};
 
+	struct ModelCollisionData
+	{
+		uint8_t CollisionType = 0; // 0=None, 1=AutoConvex, 2=BoundingBox, 3=StaticMesh
+		uint32_t HullCount = 1;
+		float ConcavityThreshold = 0.05f;
+		uint32_t MaxVerticesPerHull = 32;
+		std::string DefaultCollisionProfile = "Default";
+		std::vector<ConvexHull> ConvexHulls;
+	};
+
 	struct WModelData
 	{
 		// `meta` 区块。Valid 只在解析成功时置位;WriteFile 要求 Valid(导入器必须写)。
@@ -184,6 +195,8 @@ namespace World::Asset
 		// v4:骨架与动画(可空)。空 = 静态资产,零额外开销。
 		std::vector<WModelSkin> Skins;
 		std::vector<WModelAnimation> Animations;
+		using ModelCollisionData = World::Asset::ModelCollisionData;
+		ModelCollisionData Collision;
 	};
 
 	// .wmodel v6 读写。格式是小端、版本化且**严格**的:

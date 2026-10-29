@@ -304,6 +304,79 @@ namespace World
 					outShapes.emplace_back(glm::vec3(0.0f), JPH::RefConst<JPH::ShapeSettings>(new JPH::MeshShapeSettings(vertices, triangles)));
 				}
 			}
+			if (const auto* convex = registry.try_get<ConvexCollider3DComponent>(entity))
+			{
+				const std::string path = StringPool::Get().PathOf(ResolveConvexColliderMesh(registry, entity, *convex));
+				if (path.empty())
+					throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) +
+						" ConvexCollider3D has no mesh: set MeshSource or add a MeshRendererComponent with a .wmodel asset");
+
+				Asset::WModelData model;
+				std::string error;
+				if (!Asset::WModelIO::ReadFile(path, model, &error))
+					throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) +
+						" ConvexCollider3D failed to read '" + path + "': " + error);
+
+				if (model.Vertices.empty())
+					throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) +
+						" ConvexCollider3D mesh has no vertices ('" + path + "')");
+
+				const size_t maxPoints = static_cast<size_t>(JPH::ConvexHullShape::cMaxPointsInHull);
+
+				// 预烘焙直通加速:若模型资产已包含 AutoConvex(CollisionType == 1) 凸包数据,直接复用已烘焙凸包
+				if (model.Collision.CollisionType == 1 && !model.Collision.ConvexHulls.empty())
+				{
+					for (const ConvexHull& hull : model.Collision.ConvexHulls)
+					{
+						if (hull.Vertices.size() < 3) continue;
+						std::vector<JPH::Vec3> points;
+						const size_t stride = std::max<size_t>(1u, (hull.Vertices.size() + maxPoints - 1) / maxPoints);
+						points.reserve(hull.Vertices.size() / stride + 1);
+						for (size_t index = 0; index < hull.Vertices.size(); index += stride)
+							points.push_back(ToJoltVec3(hull.Vertices[index] * scale));
+
+						if (!points.empty())
+						{
+							outShapes.emplace_back(glm::vec3(0.0f),
+								JPH::RefConst<JPH::ShapeSettings>(new JPH::ConvexHullShapeSettings(points.data(), static_cast<int>(points.size()))));
+						}
+					}
+				}
+				else
+				{
+					// 回退路径:未预烘焙碰撞时,实时调用 ConvexDecomposer::Decompose 拆解
+					std::vector<glm::vec3> positions;
+					positions.reserve(model.Vertices.size());
+					for (const Asset::WModelVertex& vertex : model.Vertices)
+						positions.push_back(vertex.Position);
+
+					std::vector<ConvexHull> computedHulls;
+					ConvexDecomposer::Decompose(positions, model.Indices, convex->HullCount, convex->ConcavityThreshold, computedHulls);
+
+					if (computedHulls.empty())
+					{
+						ConvexHull singleHull;
+						if (ConvexDecomposer::ComputeHull(positions, singleHull))
+							computedHulls.push_back(std::move(singleHull));
+					}
+
+					for (const ConvexHull& hull : computedHulls)
+					{
+						if (hull.Vertices.size() < 3) continue;
+						std::vector<JPH::Vec3> points;
+						const size_t stride = std::max<size_t>(1u, (hull.Vertices.size() + maxPoints - 1) / maxPoints);
+						points.reserve(hull.Vertices.size() / stride + 1);
+						for (size_t index = 0; index < hull.Vertices.size(); index += stride)
+							points.push_back(ToJoltVec3(hull.Vertices[index] * scale));
+
+						if (!points.empty())
+						{
+							outShapes.emplace_back(glm::vec3(0.0f),
+								JPH::RefConst<JPH::ShapeSettings>(new JPH::ConvexHullShapeSettings(points.data(), static_cast<int>(points.size()))));
+						}
+					}
+				}
+			}
 		}
 
 		JPH::ShapeSettings::ShapeResult CreateBodyShape(const entt::registry& registry, entt::entity entity,
@@ -1284,6 +1357,7 @@ namespace World
 				ValidateBoxCollider(registry, entity);
 				ValidateSphereCollider(registry, entity);
 				ValidateCapsuleCollider(registry, entity);
+				ValidateConvexCollider(registry, entity);
 			}
 		}
 		catch (const std::exception& exception)

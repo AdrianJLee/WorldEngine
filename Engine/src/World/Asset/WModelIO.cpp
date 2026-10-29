@@ -17,6 +17,7 @@ namespace World::Asset::WModelIO
 	namespace
 	{
 		constexpr char kMagic[4] = { 'W', 'M', 'D', 'L' };
+		constexpr char kCollisionMagic[4] = { 'C', 'O', 'L', 'L' };
 		// magic(4) + version/flags/vertexLayoutId/reserved + 8 个计数(顶点/索引/mesh/submesh/node/
 		// materialSlot/jointCount(= Skins[] 数组长度)/animation)。
 		constexpr uint64_t kHeaderSize = 4u + 12u * 4u;
@@ -874,6 +875,111 @@ namespace World::Asset::WModelIO
 				return false;
 			}
 
+			// Collision 区块 (可选;向后兼容旧版无碰撞区块文件)
+			out.Collision = ModelCollisionData{};
+			if (reader.Remaining() >= sizeof(kCollisionMagic))
+			{
+				char collMagic[4] = { 0, 0, 0, 0 };
+				if (!reader.ReadRaw(collMagic, sizeof(collMagic), "collision magic"))
+				{
+					error = reader.Error;
+					return false;
+				}
+				if (std::memcmp(collMagic, kCollisionMagic, sizeof(kCollisionMagic)) == 0)
+				{
+					if (!reader.ReadU8(out.Collision.CollisionType, "collision.type")
+						|| !reader.ReadU32(out.Collision.HullCount, "collision.hullCount")
+						|| !reader.ReadF32(out.Collision.ConcavityThreshold, "collision.concavityThreshold")
+						|| !reader.ReadU32(out.Collision.MaxVerticesPerHull, "collision.maxVerticesPerHull"))
+					{
+						error = reader.Error;
+						return false;
+					}
+					uint32_t profileLength = 0;
+					if (!reader.ReadU32(profileLength, "collision.profileLength")
+						|| !reader.ReadString(out.Collision.DefaultCollisionProfile, profileLength, "collision.defaultProfile"))
+					{
+						error = reader.Error;
+						return false;
+					}
+					uint32_t hullCount = 0;
+					if (!reader.ReadU32(hullCount, "collision.hullsCount"))
+					{
+						error = reader.Error;
+						return false;
+					}
+					if (static_cast<uint64_t>(hullCount) * 16u > reader.Remaining())
+					{
+						error = "collision declares hullCount " + std::to_string(hullCount)
+							+ ": larger than remaining file";
+						return false;
+					}
+					out.Collision.ConvexHulls.resize(hullCount);
+					for (uint32_t h = 0; h < hullCount; ++h)
+					{
+						ConvexHull& hull = out.Collision.ConvexHulls[h];
+						if (!reader.ReadVec3(hull.Center, "collision.hull.center")
+							|| !reader.ReadF32(hull.Volume, "collision.hull.volume"))
+						{
+							error = reader.Error;
+							return false;
+						}
+						uint32_t vertexCount = 0;
+						if (!reader.ReadU32(vertexCount, "collision.hull.vertexCount"))
+						{
+							error = reader.Error;
+							return false;
+						}
+						if (static_cast<uint64_t>(vertexCount) * 12u > reader.Remaining())
+						{
+							error = "collision hull declares vertexCount " + std::to_string(vertexCount)
+								+ ": larger than remaining file";
+							return false;
+						}
+						hull.Vertices.resize(vertexCount);
+						for (uint32_t v = 0; v < vertexCount; ++v)
+						{
+							if (!reader.ReadVec3(hull.Vertices[v], "collision.hull.vertex"))
+							{
+								error = reader.Error;
+								return false;
+							}
+						}
+						uint32_t hullIndexCount = 0;
+						if (!reader.ReadU32(hullIndexCount, "collision.hull.indexCount"))
+						{
+							error = reader.Error;
+							return false;
+						}
+						if (static_cast<uint64_t>(hullIndexCount) * sizeof(uint32_t) > reader.Remaining())
+						{
+							error = "collision hull declares indexCount " + std::to_string(hullIndexCount)
+								+ ": larger than remaining file";
+							return false;
+						}
+						hull.Indices.resize(hullIndexCount);
+						if (hullIndexCount > 0
+							&& !reader.ReadRaw(hull.Indices.data(), static_cast<uint64_t>(hullIndexCount) * sizeof(uint32_t),
+								"collision.hull.indices"))
+						{
+							error = reader.Error;
+							return false;
+						}
+					}
+				}
+				else
+				{
+					error = "unknown trailing block or invalid collision magic";
+					return false;
+				}
+			}
+			else if (reader.Remaining() > 0)
+			{
+				error = "trailing bytes after .wmodel payload (" + std::to_string(reader.Remaining())
+					+ " unexpected byte(s))";
+				return false;
+			}
+
 			if (reader.Offset != reader.Size)
 			{
 				error = "trailing bytes after .wmodel payload (" + std::to_string(reader.Size - reader.Offset)
@@ -1146,6 +1252,31 @@ namespace World::Asset::WModelIO
 			const auto* raw = reinterpret_cast<const uint8_t*>(data.Indices.data());
 			out.insert(out.end(), raw, raw + data.Indices.size() * sizeof(uint32_t));
 		}
+
+		// Collision 区块 (写入凸包数量、每个凸包的顶点集与面索引集、碰撞类型及默认预设名称)
+		out.insert(out.end(), kCollisionMagic, kCollisionMagic + sizeof(kCollisionMagic));
+		AppendU8(out, data.Collision.CollisionType);
+		AppendU32(out, data.Collision.HullCount);
+		AppendF32(out, data.Collision.ConcavityThreshold);
+		AppendU32(out, data.Collision.MaxVerticesPerHull);
+		AppendString(out, data.Collision.DefaultCollisionProfile);
+		AppendU32(out, static_cast<uint32_t>(data.Collision.ConvexHulls.size()));
+		for (const ConvexHull& hull : data.Collision.ConvexHulls)
+		{
+			AppendVec3(out, hull.Center);
+			AppendF32(out, hull.Volume);
+			AppendU32(out, static_cast<uint32_t>(hull.Vertices.size()));
+			for (const glm::vec3& vertex : hull.Vertices)
+			{
+				AppendVec3(out, vertex);
+			}
+			AppendU32(out, static_cast<uint32_t>(hull.Indices.size()));
+			for (uint32_t index : hull.Indices)
+			{
+				AppendU32(out, index);
+			}
+		}
+
 		return out;
 	}
 
