@@ -996,12 +996,15 @@ namespace World
 			const Ref<Material> material =
 				(slot >= 0 && static_cast<size_t>(slot) < m_SlotMaterials.size())
 					? m_SlotMaterials[static_cast<size_t>(slot)] : nullptr;
-			const bool skinned = skinnedLayout && meshIndex >= 0
-				&& static_cast<size_t>(meshIndex) < skinPalettes.size()
-				&& !skinPalettes[static_cast<size_t>(meshIndex)].empty();
-			if (skinned)
+			const bool isSkinnedLayout = activeMesh && (activeMesh->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned);
+			if (isSkinnedLayout)
 			{
-				const std::vector<glm::mat4>& palette = skinPalettes[static_cast<size_t>(meshIndex)];
+				static const std::vector<glm::mat4> s_PreviewIdentityPalette(128, glm::mat4(1.0f));
+				const bool hasPalette = meshIndex >= 0 && static_cast<size_t>(meshIndex) < skinPalettes.size()
+					&& !skinPalettes[static_cast<size_t>(meshIndex)].empty();
+				const std::vector<glm::mat4>& palette = hasPalette
+					? skinPalettes[static_cast<size_t>(meshIndex)] : s_PreviewIdentityPalette;
+
 				// 蒙皮管线本阶段只支持不透明材质:透明 submesh 跳过(引擎只拒绝不 warn,面板一次性 warn)。
 				if (material && material->GetDesc().BlendMode == MaterialBlendMode::Transparent)
 				{

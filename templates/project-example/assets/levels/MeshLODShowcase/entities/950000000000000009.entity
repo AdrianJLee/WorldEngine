@@ -9,10 +9,17 @@ Entity:
     Location: [0, 0.6, 2]
     Rotation: [0, 180, 0]
     Scale: [1.8, 1.8, 1.8]
-  World::MeshRendererComponent:
-    Primitive: 0
-    Color: [0.92, 0.92, 0.92, 1]
+  World::SkinnedMeshRendererComponent:
     Mesh: "engine/models/characters/mannequin.wmodel"
+    MeshIndex: 0
+    Material: ""
+    CastShadow: true
+  World::AnimationPlayerComponent:
+    Clip: "engine/animation/mannequin_idle.wclip"
+    PlaybackSpeed: 1.0
+    CurrentTime: 0.0
+    Playing: 1
+    Loop: 1
   World::MeshLODComponent:
     LOD1Distance: 15.0
     LOD2Distance: 35.0

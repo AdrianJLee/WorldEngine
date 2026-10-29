@@ -1225,19 +1225,15 @@ namespace World
 				for (const uint32_t drawIndex : shadowDraws)
 				{
 					const FrameMeshDraw& draw = draws[drawIndex];
-					// D5c-4a:蒙皮投影者走蒙皮入口(否则影子留在绑定姿态)。调色板本帧取不到时:
-					// 布局 1(模型没有 skin 数据)回退静态入口;布局 2 只跳过 —— 静态管线的顶点
-					// 布局是 stride 32,读布局 2 的顶点缓冲会画出垃圾。
-					if (draw.Skinned)
+					// D5c-4a:蒙皮投影者走蒙皮入口。无论是否挂载动画系统，布局 2 (64B) 绝不能进入 32B 静态阴影管线
+					const bool isSkinnedMeshShadow = draw.MeshAsset && (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned);
+					if (draw.Skinned || isSkinnedMeshShadow)
 					{
-						if (draw.Palette && !draw.Palette->empty())
-						{
-							Renderer3D::SubmitShadowSkinned(draw.MeshAsset, draw.SubmeshIndex, *draw.Model,
-								draw.Palette->data(), static_cast<uint32_t>(draw.Palette->size()));
-							continue;
-						}
-						if (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned)
-							continue;
+						static const std::vector<glm::mat4> s_IdentityPalette(128, glm::mat4(1.0f));
+						const glm::mat4* palData = (draw.Palette && !draw.Palette->empty()) ? draw.Palette->data() : s_IdentityPalette.data();
+						const uint32_t palCount = (draw.Palette && !draw.Palette->empty()) ? static_cast<uint32_t>(draw.Palette->size()) : static_cast<uint32_t>(s_IdentityPalette.size());
+						Renderer3D::SubmitShadowSkinned(draw.MeshAsset, draw.SubmeshIndex, *draw.Model, palData, palCount);
+						continue;
 					}
 					const auto found = shadowBuckets.find({ draw.MeshAsset.get(), draw.SubmeshIndex });
 					if (found != shadowBuckets.end() && found->second.size() >= 4)
@@ -1421,25 +1417,30 @@ namespace World
 						// D7-1c:把实体 id 一起提交,写进 entity-id 附件供视口点选读回。
 						const int32_t entityId = static_cast<int32_t>(static_cast<uint32_t>(draw.Entity));
 						// D5c-4a:蒙皮实体走蒙皮管线(透明材质本阶段被 SubmitSkinned 拒绝)。
-						// 调色板/提交不可用时:布局 1(模型没有 skin 数据)回退静态路径,不丢物体;
-						// 布局 2 的顶点 stride 是 64,不能进静态管线,只跳过并 warn 一次。
-						if (draw.Skinned)
+						// 防御性安全隔离: 凡是布局 2 (SkinnedVertex, stride 64B) 的网格，不论是否配置动画调色板，
+						// 绝对不可进入 32B 静态管线(否则奇数顶点读骨骼权重导致大面积撕裂爆碎)！
+						const bool isSkinnedMeshMain = draw.MeshAsset && (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned);
+						if (draw.Skinned || isSkinnedMeshMain)
 						{
 							uint32_t submitted = UINT32_MAX;
-							const uint32_t paletteCount = draw.Palette
-								? static_cast<uint32_t>(draw.Palette->size()) : 0;
-							if (paletteCount > 0)
+							static const std::vector<glm::mat4> s_IdentityPalette(128, glm::mat4(1.0f));
+							const glm::mat4* palData = (draw.Palette && !draw.Palette->empty()) ? draw.Palette->data() : s_IdentityPalette.data();
+							const uint32_t palCount = (draw.Palette && !draw.Palette->empty()) ? static_cast<uint32_t>(draw.Palette->size()) : static_cast<uint32_t>(s_IdentityPalette.size());
+
+							if (draw.MaterialAsset)
 							{
-								if (draw.MaterialAsset)
-									submitted = Renderer3D::SubmitSkinned(draw.MeshAsset, draw.SubmeshIndex,
-										draw.MaterialAsset, *draw.Model, draw.Palette->data(), paletteCount, entityId);
-								else
-									submitted = Renderer3D::SubmitSkinned(draw.MeshAsset, draw.SubmeshIndex,
-										draw.Color, *draw.Model, draw.Palette->data(), paletteCount, entityId);
+								submitted = Renderer3D::SubmitSkinned(draw.MeshAsset, draw.SubmeshIndex,
+									draw.MaterialAsset, *draw.Model, palData, palCount, entityId);
+							}
+							else
+							{
+								submitted = Renderer3D::SubmitSkinned(draw.MeshAsset, draw.SubmeshIndex,
+									draw.Color, *draw.Model, palData, palCount, entityId);
 							}
 							if (submitted != UINT32_MAX)
 								continue;
-							if (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned)
+
+							if (isSkinnedMeshMain)
 							{
 								const std::string meshName = draw.MeshAsset->GetDesc().DebugName;
 								WarnOnce("skinned-draw:" + meshName, draw.Transparent
