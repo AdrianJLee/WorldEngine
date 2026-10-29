@@ -14,12 +14,18 @@ Entity:
     Color: [0.92, 0.92, 0.92, 1]
     Mesh: "engine/models/primitives/cube.wmodel"
   World::MeshLODComponent:
-    LOD1Mesh: ""
-    LOD2Mesh: ""
     LOD1Distance: 15.0
     LOD2Distance: 35.0
+    LOD3Distance: 40.0
+    LOD4Distance: 45.0
+    LOD5Distance: 50.0
+    LOD6Distance: 55.0
+    LOD7Distance: 58.8
     CullDistance: 60.0
     Hysteresis: 2.0
+    LODBias: 1.0
+    ForcedLOD: -1
+    MaxLODLevel: 7
     CurrentLOD: 0
     EnableCrossFade: 1
   World::LevelEntityComponent:

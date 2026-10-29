@@ -923,14 +923,10 @@ namespace World
 					Ref<Mesh> lodMesh;
 					std::string err;
 
-					// 1. 优先检查组件上的显式槽位覆盖
-					if (currentLOD == 1 && lodComp->LOD1Mesh.HasPath())
+					// 1. 优先检查组件上的特殊替代体覆盖 (CustomMeshOverride)
+					if (lodComp->CustomMeshOverride.HasPath())
 					{
-						lodMesh = ResolveMeshAsset(lodComp->LOD1Mesh, &err);
-					}
-					else if (currentLOD == 2 && lodComp->LOD2Mesh.HasPath())
-					{
-						lodMesh = ResolveMeshAsset(lodComp->LOD2Mesh, &err);
+						lodMesh = ResolveMeshAsset(lodComp->CustomMeshOverride, &err);
 					}
 					else
 					{

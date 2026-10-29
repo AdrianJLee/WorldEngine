@@ -522,6 +522,19 @@ static uint32_t s_LODGenEntityId = 0;
 	}
 
 
+	struct AsyncInspectLODResult
+	{
+		bool Success = false;
+		std::string Error;
+		std::vector<GeneratedLODAsset> Generated;
+		float Distances[7] = { 15.0f, 30.0f, 50.0f, 75.0f, 105.0f, 140.0f, 180.0f };
+		float CullDist = 240.0f;
+	};
+	static std::future<AsyncInspectLODResult> s_AsyncInspectLODFuture;
+	static bool s_AsyncInspectLODRunning = false;
+	static std::chrono::time_point<std::chrono::high_resolution_clock> s_AsyncInspectLODStartTime;
+	static uint32_t s_AsyncInspectEntityId = 0;
+
 	static float DrawMeshLODComponentInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
 		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
 		std::vector<std::string>* changedFields)
@@ -531,13 +544,62 @@ static uint32_t s_LODGenEntityId = 0;
 		if (!lod)
 			return 0.0f;
 
+		// 异步生成任务非阻塞轮询 (UI 保持 60+ FPS)
+		if (s_AsyncInspectLODRunning)
+		{
+			if (s_AsyncInspectLODFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+			{
+				s_AsyncInspectLODRunning = false;
+				auto res = s_AsyncInspectLODFuture.get();
+				if (res.Success)
+				{
+					if (entity.IsValid() && static_cast<uint32_t>(entity) == s_AsyncInspectEntityId)
+					{
+						lod->LOD1Distance = res.Distances[0];
+						lod->LOD2Distance = res.Distances[1];
+						lod->LOD3Distance = res.Distances[2];
+						lod->LOD4Distance = res.Distances[3];
+						lod->LOD5Distance = res.Distances[4];
+						lod->LOD6Distance = res.Distances[5];
+						lod->LOD7Distance = res.Distances[6];
+						lod->CullDistance = res.CullDist;
+						if (changedFields)
+						{
+							changedFields->push_back("LOD1Distance");
+							changedFields->push_back("LOD2Distance");
+							changedFields->push_back("LOD3Distance");
+							changedFields->push_back("LOD4Distance");
+							changedFields->push_back("LOD5Distance");
+							changedFields->push_back("LOD6Distance");
+							changedFields->push_back("LOD7Distance");
+							changedFields->push_back("CullDistance");
+						}
+						host.MarkDocumentDirty();
+					}
+					for (const auto& gen : res.Generated)
+					{
+						host.RefreshAssetCatalog(gen.RelativePath);
+					}
+					s_LODGenNotification = "已异步生成 " + std::to_string(res.Generated.size()) + " 级 LOD 资产并完成零配置自动绑定！";
+					s_LODGenEntityId = s_AsyncInspectEntityId;
+					host.Notify(s_LODGenNotification);
+				}
+				else
+				{
+					s_LODGenNotification = "生成失败: " + res.Error;
+					s_LODGenEntityId = s_AsyncInspectEntityId;
+					host.Notify(s_LODGenNotification);
+				}
+			}
+		}
+
 		const float pad = theme.Pad;
 		const float startX = rect.X + pad;
 		const float contentW = rect.W - pad * 2.0f;
 		float curY = rect.Y + 4.0f;
 
 		// =========================================================================
-		// 1. 顶部当前相机距离与激活状态横幅
+		// 1. 顶部当前相机距离与激活状态横幅 (8 级光谱色支持)
 		// =========================================================================
 		const glm::vec3 cameraPos = host.GetGizmoCamera().Position;
 		glm::vec3 entPos(0.0f);
@@ -546,27 +608,26 @@ static uint32_t s_LODGenEntityId = 0;
 		const float distance = glm::length(cameraPos - entPos);
 
 		const uint8_t activeLOD = lod->CurrentLOD;
-		const char* badgeText = "[LOD 0 (Base)]";
-		Wui::WuiColor badgeCol { 0.2f, 0.9f, 0.2f, 1.0f };
+		std::string badgeText = "[LOD 0 (Base 原模)]";
+		Wui::WuiColor badgeCol { 0.20f, 0.90f, 0.20f, 1.0f };
 		Wui::WuiColor bgCol { 0.05f, 0.22f, 0.08f, 0.90f };
 
 		if (activeLOD == 255)
 		{
-			badgeText = "[CULLED]";
+			badgeText = "[CULLED 视距剔除]";
 			badgeCol = Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 1.0f };
 			bgCol = Wui::WuiColor{ 0.25f, 0.05f, 0.05f, 0.90f };
 		}
-		else if (activeLOD == 2)
+		else if (activeLOD >= 1 && activeLOD <= 7)
 		{
-			badgeText = "[LOD 2 (Low)]";
-			badgeCol = Wui::WuiColor{ 0.95f, 0.50f, 0.10f, 1.0f };
-			bgCol = Wui::WuiColor{ 0.25f, 0.12f, 0.03f, 0.90f };
-		}
-		else if (activeLOD == 1)
-		{
-			badgeText = "[LOD 1 (Mid)]";
-			badgeCol = Wui::WuiColor{ 0.95f, 0.85f, 0.10f, 1.0f };
-			bgCol = Wui::WuiColor{ 0.22f, 0.20f, 0.05f, 0.90f };
+			static const char* s_LodNames[8] = {
+				"[LOD 0 (Base)]", "[LOD 1 (高精)]", "[LOD 2 (中模)]", "[LOD 3 (过渡)]",
+				"[LOD 4 (简模)]", "[LOD 5 (极简)]", "[LOD 6 (剪影)]", "[LOD 7 (微模)]"
+			};
+			badgeText = s_LodNames[activeLOD];
+			const glm::vec4 col = MeshLODManager::Get().GetLODColor(activeLOD);
+			badgeCol = Wui::WuiColor{ col.r, col.g, col.b, 1.0f };
+			bgCol = Wui::WuiColor{ col.r * 0.25f, col.g * 0.25f, col.b * 0.25f, 0.90f };
 		}
 
 		const Wui::WuiRect bannerRect { startX, curY, contentW, 28.0f };
@@ -574,16 +635,29 @@ static uint32_t s_LODGenEntityId = 0;
 		Wui::HighlightOutline(ctx, bannerRect, badgeCol, 4.0f, 1.2f);
 		Wui::Label(ctx, { bannerRect.X + 8.0f, bannerRect.Y + 6.0f }, badgeText, badgeCol, theme.FontSizeBody);
 
-		char distText[64];
-		std::snprintf(distText, sizeof(distText), "Distance: %.1f m (Hyst: %.1fm)", distance, lod->Hysteresis);
+		char distText[96];
+		std::snprintf(distText, sizeof(distText), "Dist: %.1fm | Bias: %.2f | Hyst: %.1fm",
+			distance, lod->LODBias, lod->Hysteresis);
 		const float distW = ctx.MeasureTextWidth(distText, theme.FontSizeSmall);
 		Wui::Label(ctx, { bannerRect.X + bannerRect.W - distW - 8.0f, bannerRect.Y + 7.0f }, distText, theme.Text, theme.FontSizeSmall);
 		curY += 34.0f;
 
 		// =========================================================================
-		// 1.5 智能一键生成并配置 LOD (Auto-Gen & Bind)
+		// 1.5 智能一键生成并配置 LOD (异步多线程并发，0 卡顿)
 		// =========================================================================
-		if (s_LODGenEntityId == static_cast<uint32_t>(entity) && !s_LODGenNotification.empty())
+		if (s_AsyncInspectLODRunning)
+		{
+			const Wui::WuiRect runningRect { startX, curY, contentW, 26.0f };
+			Wui::PanelBackground(ctx, runningRect, Wui::WuiColor{ 0.12f, 0.22f, 0.35f, 0.90f }, 3.0f);
+			Wui::HighlightOutline(ctx, runningRect, theme.Accent, 3.0f, 1.0f);
+			const auto now = std::chrono::high_resolution_clock::now();
+			const double elapsed = std::chrono::duration<double>(now - s_AsyncInspectLODStartTime).count();
+			char b[128];
+			std::snprintf(b, sizeof(b), "[后台生成中...] 正在异步减面生成 LOD 资产 (%.1fs，UI 60+ FPS)", elapsed);
+			Wui::Label(ctx, { runningRect.X + 8.0f, runningRect.Y + 5.0f }, b, theme.Accent, theme.FontSizeSmall);
+			curY += 32.0f;
+		}
+		else if (s_LODGenEntityId == static_cast<uint32_t>(entity) && !s_LODGenNotification.empty())
 		{
 			const Wui::WuiRect noteRect { startX, curY, contentW, 24.0f };
 			Wui::PanelBackground(ctx, noteRect, Wui::WuiColor{ 0.10f, 0.35f, 0.15f, 0.90f }, 3.0f);
@@ -597,95 +671,93 @@ static uint32_t s_LODGenEntityId = 0;
 		autoGenTheme.ButtonBg = theme.ActiveBg;
 		autoGenTheme.Border = theme.Accent;
 		if (Wui::Button(ctx, Wui::HashId("inspect.lod.autogen_bind"), autoGenRect,
-			"[智能一键生成并配置 LOD (Auto-Gen & Bind)]", autoGenTheme))
+			s_AsyncInspectLODRunning ? "[后台生成中，请稍候...]" : "[智能一键生成并配置 LOD (后台异步 60+ FPS)]", autoGenTheme))
 		{
-			if (!entity.HasComponent<MeshRendererComponent>())
+			if (!s_AsyncInspectLODRunning)
 			{
-				s_LODGenNotification = "错误: 实体未挂载 MeshRendererComponent";
-				s_LODGenEntityId = static_cast<uint32_t>(entity);
-				host.Notify(s_LODGenNotification);
-			}
-			else
-			{
-				const auto& mr = entity.GetComponent<MeshRendererComponent>();
-				std::string sourceMeshPath;
-				if (mr.Mesh.HasPath())
-					sourceMeshPath = StringPool::Get().PathOf(mr.Mesh.Path);
-
-				if (sourceMeshPath.empty())
+				if (!entity.HasComponent<MeshRendererComponent>())
 				{
-					s_LODGenNotification = "错误: 实体无有效 .wmodel 网格资产 (内置几何体请先保存为资产)";
+					s_LODGenNotification = "错误: 实体未挂载 MeshRendererComponent";
 					s_LODGenEntityId = static_cast<uint32_t>(entity);
 					host.Notify(s_LODGenNotification);
 				}
 				else
 				{
-					glm::vec3 scale(1.0f);
-					if (entity.HasComponent<TransformComponent>())
-						scale = glm::abs(entity.GetComponent<TransformComponent>().Scale);
-					const float maxScale = std::max({ scale.x, scale.y, scale.z, 0.001f });
+					const auto& mr = entity.GetComponent<MeshRendererComponent>();
+					std::string sourceMeshPath;
+					if (mr.Mesh.HasPath())
+						sourceMeshPath = StringPool::Get().PathOf(mr.Mesh.Path);
 
-					float maxExtent = 1.0f;
-					std::string loadErr;
-					Ref<Mesh> mesh = Mesh::LoadWModel(mr.Mesh.Path, &loadErr);
-					if (mesh)
+					if (sourceMeshPath.empty())
 					{
-						const MeshBounds& bounds = mesh->GetBounds();
-						const glm::vec3 ext = bounds.Max - bounds.Min;
-						maxExtent = std::max({ ext.x, ext.y, ext.z, 0.1f });
-					}
-
-					const float S = maxScale * maxExtent;
-					const float dist1 = std::max(15.0f, S * 15.0f);
-					const float dist2 = std::max(35.0f, S * 35.0f);
-					const float cullDist = std::max(75.0f, S * 75.0f);
-
-					std::vector<LODLevelConfig> configs = {
-						{ 1, 0.50f, dist1 },
-						{ 2, 0.25f, dist2 }
-					};
-
-					std::vector<GeneratedLODAsset> generated;
-					std::string genErr;
-					if (MeshLODGenerator::GenerateAndSaveLODFiles(sourceMeshPath, configs, generated, &genErr))
-					{
-						for (const auto& gen : generated)
-						{
-							if (gen.Level == 1)
-								lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(gen.RelativePath), AssetId{} };
-							else if (gen.Level == 2)
-								lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(gen.RelativePath), AssetId{} };
-							host.RefreshAssetCatalog(gen.RelativePath);
-						}
-
-						lod->LOD1Distance = dist1;
-						lod->LOD2Distance = dist2;
-						lod->CullDistance = cullDist;
-
-						if (changedFields)
-						{
-							changedFields->push_back("LOD1Mesh");
-							changedFields->push_back("LOD2Mesh");
-							changedFields->push_back("LOD1Distance");
-							changedFields->push_back("LOD2Distance");
-							changedFields->push_back("CullDistance");
-						}
-						host.MarkDocumentDirty();
-
-						s_LODGenNotification = "LOD1 & LOD2 资产已自动生成并完成视距绑定";
+						s_LODGenNotification = "错误: 实体无有效 .wmodel 网格资产 (内置几何体请先保存为资产)";
 						s_LODGenEntityId = static_cast<uint32_t>(entity);
 						host.Notify(s_LODGenNotification);
 					}
 					else
 					{
-						s_LODGenNotification = "生成失败: " + genErr;
-						s_LODGenEntityId = static_cast<uint32_t>(entity);
-						host.Notify(s_LODGenNotification);
+						glm::vec3 scale(1.0f);
+						if (entity.HasComponent<TransformComponent>())
+							scale = glm::abs(entity.GetComponent<TransformComponent>().Scale);
+						const float maxScale = std::max({ scale.x, scale.y, scale.z, 0.001f });
+
+						float maxExtent = 1.0f;
+						std::string loadErr;
+						Ref<Mesh> mesh = Mesh::LoadWModel(mr.Mesh.Path, &loadErr);
+						if (mesh)
+						{
+							const MeshBounds& bounds = mesh->GetBounds();
+							const glm::vec3 ext = bounds.Max - bounds.Min;
+							maxExtent = std::max({ ext.x, ext.y, ext.z, 0.1f });
+						}
+
+						const float S = maxScale * maxExtent;
+						float d[7] = {
+							std::max(12.0f, S * 12.0f),
+							std::max(24.0f, S * 24.0f),
+							std::max(40.0f, S * 40.0f),
+							std::max(60.0f, S * 60.0f),
+							std::max(85.0f, S * 85.0f),
+							std::max(115.0f, S * 115.0f),
+							std::max(150.0f, S * 150.0f)
+						};
+						float cullD = std::max(200.0f, S * 200.0f);
+
+						std::vector<LODLevelConfig> configs = {
+							{ 1, 0.70f, d[0] },
+							{ 2, 0.45f, d[1] },
+							{ 3, 0.28f, d[2] },
+							{ 4, 0.16f, d[3] },
+							{ 5, 0.09f, d[4] },
+							{ 6, 0.05f, d[5] },
+							{ 7, 0.025f, d[6] }
+						};
+
+						s_AsyncInspectEntityId = static_cast<uint32_t>(entity);
+						s_AsyncInspectLODStartTime = std::chrono::high_resolution_clock::now();
+						s_AsyncInspectLODRunning = true;
+
+						s_AsyncInspectLODFuture = std::async(std::launch::async, [sourceMeshPath, configs, d, cullD]() -> AsyncInspectLODResult {
+							AsyncInspectLODResult res;
+							std::string genErr;
+							if (MeshLODGenerator::GenerateAndSaveLODFiles(sourceMeshPath, configs, res.Generated, &genErr))
+							{
+								res.Success = true;
+								for (int i = 0; i < 7; ++i) res.Distances[i] = d[i];
+								res.CullDist = cullD;
+							}
+							else
+							{
+								res.Success = false;
+								res.Error = genErr;
+							}
+							return res;
+						});
 					}
 				}
 			}
 		}
-		Wui::Tooltip(ctx, autoGenRect, "根据实体网格与尺度自动减面输出 LOD1/LOD2 资产并推导视距阶梯");
+		Wui::Tooltip(ctx, autoGenRect, "根据实体网格与尺度在后台异步减面输出多级 LOD 资产并推导视距阶梯 (0 卡顿)");
 		curY += 34.0f;
 
 		const float paramLabelW = 120.0f;
@@ -696,12 +768,17 @@ static uint32_t s_LODGenEntityId = 0;
 		// =========================================================================
 		const std::vector<std::string> forceOptions = {
 			"Auto (自动距离评估)",
-			"Force LOD 0 (高精原模)",
-			"Force LOD 1 (中模减面)",
-			"Force LOD 2 (远景简模)"
+			"Force LOD 0 (原模)",
+			"Force LOD 1 (高精)",
+			"Force LOD 2 (中模)",
+			"Force LOD 3 (过渡)",
+			"Force LOD 4 (简模)",
+			"Force LOD 5 (极简)",
+			"Force LOD 6 (剪影)",
+			"Force LOD 7 (微模)"
 		};
-		const int8_t curForced = MeshLODManager::Get().GetForcedLOD();
-		int selectedForce = (curForced >= 0 && curForced <= 2) ? (curForced + 1) : 0;
+		const int8_t curForced = (lod->ForcedLOD >= 0) ? lod->ForcedLOD : MeshLODManager::Get().GetForcedLOD();
+		int selectedForce = (curForced >= 0 && curForced <= 7) ? (curForced + 1) : 0;
 		const int beforeForce = selectedForce;
 		Wui::Label(ctx, { startX, curY + 2.0f }, "强制预览 (Force LOD):", theme.Text, theme.FontSizeSmall);
 		if (Wui::Combo(ctx, Wui::HashId("inspect.lod.force_combo"),
@@ -710,53 +787,38 @@ static uint32_t s_LODGenEntityId = 0;
 			if (selectedForce != beforeForce)
 			{
 				const int8_t newForced = (selectedForce == 0) ? -1 : static_cast<int8_t>(selectedForce - 1);
-				MeshLODManager::Get().SetForcedLOD(newForced);
+				lod->ForcedLOD = newForced;
+				if (changedFields) changedFields->push_back("ForcedLOD");
+				host.MarkDocumentDirty();
 			}
 		}
 		curY += 26.0f;
 
 		// =========================================================================
-		// 3. 距离阶梯滑块 (DragFloat)
+		// 3. 距离阶梯与调优滑块 (8 级完整阶梯)
 		// =========================================================================
-		// LOD1 距离 (m)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "LOD1 距离 (m):", theme.Text, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.lod.dist1"),
-			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, lod->LOD1Distance, 0.5f, 1.0f, 1000.0f, theme))
+		auto drawDistField = [&](const char* label, const char* fieldName, float& val, float minV, float maxV, uint32_t idHash)
 		{
-			if (changedFields) changedFields->push_back("LOD1Distance");
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
+			Wui::Label(ctx, { startX, curY + 2.0f }, label, theme.Text, theme.FontSizeSmall);
+			if (Wui::DragFloat(ctx, idHash,
+				{ startX + paramLabelW, curY, paramFieldW, 22.0f }, val, 0.5f, minV, maxV, theme))
+			{
+				if (changedFields) changedFields->push_back(fieldName);
+				host.MarkDocumentDirty();
+			}
+			curY += 26.0f;
+		};
 
-		// LOD2 距离 (m)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "LOD2 距离 (m):", theme.Text, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.lod.dist2"),
-			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, lod->LOD2Distance, 1.0f, 5.0f, 2000.0f, theme))
-		{
-			if (changedFields) changedFields->push_back("LOD2Distance");
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
-
-		// 剔除距离 (m)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "剔除距离 (m):", theme.Text, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.lod.cull_dist"),
-			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, lod->CullDistance, 2.0f, 10.0f, 5000.0f, theme))
-		{
-			if (changedFields) changedFields->push_back("CullDistance");
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
-
-		// 滞后防抖缓冲区 (m)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "滞后防抖缓冲区 (m):", theme.Text, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.lod.hysteresis"),
-			{ startX + paramLabelW, curY, paramFieldW, 22.0f }, lod->Hysteresis, 0.1f, 0.1f, 50.0f, theme))
-		{
-			if (changedFields) changedFields->push_back("Hysteresis");
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
+		drawDistField("LOD1 距离 (m):", "LOD1Distance", lod->LOD1Distance, 1.0f, 1000.0f, Wui::HashId("inspect.lod.dist1"));
+		drawDistField("LOD2 距离 (m):", "LOD2Distance", lod->LOD2Distance, 2.0f, 1500.0f, Wui::HashId("inspect.lod.dist2"));
+		drawDistField("LOD3 距离 (m):", "LOD3Distance", lod->LOD3Distance, 3.0f, 2000.0f, Wui::HashId("inspect.lod.dist3"));
+		drawDistField("LOD4 距离 (m):", "LOD4Distance", lod->LOD4Distance, 4.0f, 2500.0f, Wui::HashId("inspect.lod.dist4"));
+		drawDistField("LOD5 距离 (m):", "LOD5Distance", lod->LOD5Distance, 5.0f, 3000.0f, Wui::HashId("inspect.lod.dist5"));
+		drawDistField("LOD6 距离 (m):", "LOD6Distance", lod->LOD6Distance, 6.0f, 3500.0f, Wui::HashId("inspect.lod.dist6"));
+		drawDistField("LOD7 距离 (m):", "LOD7Distance", lod->LOD7Distance, 7.0f, 4000.0f, Wui::HashId("inspect.lod.dist7"));
+		drawDistField("超距剔除 (m):", "CullDistance", lod->CullDistance, 10.0f, 5000.0f, Wui::HashId("inspect.lod.cull_dist"));
+		drawDistField("防抖缓冲 (m):", "Hysteresis", lod->Hysteresis, 0.1f, 50.0f, Wui::HashId("inspect.lod.hysteresis"));
+		drawDistField("视距偏置 (Bias):", "LODBias", lod->LODBias, 0.1f, 10.0f, Wui::HashId("inspect.lod.bias"));
 
 		// 平滑淡入淡出过渡开关
 		bool crossFade = (lod->EnableCrossFade != 0);
@@ -770,7 +832,7 @@ static uint32_t s_LODGenEntityId = 0;
 		curY += 28.0f;
 
 		// =========================================================================
-		// 4. 资产槽位 (LOD0 只读原网格、LOD1Mesh 槽、LOD2Mesh 槽)
+		// 4. 资产槽位与零配置自动继承 (Zero-Config LOD Binding)
 		// =========================================================================
 		std::string lod0MeshName = "(无网格)";
 		std::string sourceMeshPath;
@@ -792,27 +854,20 @@ static uint32_t s_LODGenEntityId = 0;
 				}
 			}
 		}
-		Wui::Label(ctx, { startX, curY + 2.0f }, "LOD0 原网格 (Base):", theme.Text, theme.FontSizeSmall);
+		Wui::Label(ctx, { startX, curY + 2.0f }, "LOD0 基准网格:", theme.Text, theme.FontSizeSmall);
 		const Wui::WuiRect lod0Rect { startX + paramLabelW, curY, paramFieldW, 22.0f };
 		Wui::PanelBackground(ctx, lod0Rect, theme.CardBg, 3.0f);
 		Wui::HighlightOutline(ctx, lod0Rect, theme.Border, 3.0f, 1.0f);
 		Wui::Label(ctx, { lod0Rect.X + 6.0f, lod0Rect.Y + 3.0f }, lod0MeshName, theme.TextDisabled, theme.FontSizeSmall);
 		curY += 26.0f;
 
-		// 检查基础模型同目录下是否存在自动派生的 LOD 资产文件
-		std::string autoLod1Rel;
-		std::string autoLod2Rel;
-		bool autoLod1Exists = false;
-		bool autoLod2Exists = false;
-
+		// 检查基础模型同目录下是否存在自动派生的 LOD 资产文件 (LOD1 到 LOD8)
+		int discoveredLODCount = 0;
 		if (!sourceMeshPath.empty())
 		{
 			std::filesystem::path srcP(sourceMeshPath);
 			std::filesystem::path srcParent = srcP.parent_path();
 			std::string srcStem = srcP.stem().string();
-
-			autoLod1Rel = (srcParent.empty() ? (srcStem + "_LOD1.wmodel") : (srcParent / (srcStem + "_LOD1.wmodel"))).generic_string();
-			autoLod2Rel = (srcParent.empty() ? (srcStem + "_LOD2.wmodel") : (srcParent / (srcStem + "_LOD2.wmodel"))).generic_string();
 
 			auto checkAutoFile = [](const std::string& rel) -> bool {
 				if (rel.empty()) return false;
@@ -820,173 +875,111 @@ static uint32_t s_LODGenEntityId = 0;
 				std::filesystem::path p(rel);
 				if (std::filesystem::exists(p, ec) && !std::filesystem::is_directory(p, ec)) return true;
 				if (std::filesystem::exists(World::Paths::AssetRoot() / p, ec) && !std::filesystem::is_directory(World::Paths::AssetRoot() / p, ec)) return true;
+				if (std::filesystem::exists(World::Paths::EngineContentRoot() / p, ec) && !std::filesystem::is_directory(World::Paths::EngineContentRoot() / p, ec)) return true;
 				if (std::filesystem::exists(World::Paths::ProjectDir() / p, ec) && !std::filesystem::is_directory(World::Paths::ProjectDir() / p, ec)) return true;
 				const auto& catalog = Editor::AssetCatalog::PathsForName("Mesh");
 				return std::find(catalog.begin(), catalog.end(), rel) != catalog.end();
 			};
 
-			autoLod1Exists = checkAutoFile(autoLod1Rel);
-			autoLod2Exists = checkAutoFile(autoLod2Rel);
+			for (int lvl = 1; lvl <= 8; ++lvl)
+			{
+				std::string rel = (srcParent.empty() ? (srcStem + "_LOD" + std::to_string(lvl) + ".wmodel") : (srcParent / (srcStem + "_LOD" + std::to_string(lvl) + ".wmodel"))).generic_string();
+				if (checkAutoFile(rel))
+					++discoveredLODCount;
+			}
 		}
 
-		// 附带自动继承说明标签
-		Wui::Label(ctx, { startX, curY + 2.0f }, "（槽位留空已自动继承模型同名 LOD 资产，填入可强制覆盖）", theme.TextMuted, theme.FontSizeCaption);
-		curY += 20.0f;
-
-		const std::vector<std::string>& meshPaths = Editor::AssetCatalog::PathsForName("Mesh");
-		const float pickBtnW = 26.0f;
-
-		// LOD1Mesh 槽
+		if (discoveredLODCount > 0)
 		{
-			const std::string cur1 = lod->LOD1Mesh.HasPath() ? std::string(StringPool::Get().PathOf(lod->LOD1Mesh.Path)) : "";
-			std::vector<std::string> opts1;
-			opts1.push_back("(None / Fallback)");
-			opts1.insert(opts1.end(), meshPaths.begin(), meshPaths.end());
-			int sel1 = 0;
-			auto it1 = std::find(meshPaths.begin(), meshPaths.end(), cur1);
-			if (it1 != meshPaths.end())
-				sel1 = static_cast<int>(it1 - meshPaths.begin()) + 1;
-			else if (!cur1.empty())
+			const Wui::WuiRect autoBadge { startX, curY, contentW, 24.0f };
+			Wui::PanelBackground(ctx, autoBadge, Wui::WuiColor{ 0.08f, 0.25f, 0.12f, 0.90f }, 3.0f);
+			Wui::HighlightOutline(ctx, autoBadge, theme.Success, 3.0f, 1.0f);
+			std::string badgeStr = "[✓ 零配置自动继承就绪: 已发现 " + std::to_string(discoveredLODCount) + " 级同名减面资产，渲染器全自动挂接]";
+			Wui::Label(ctx, { autoBadge.X + 8.0f, autoBadge.Y + 5.0f }, badgeStr, theme.Success, theme.FontSizeSmall);
+			Wui::Tooltip(ctx, autoBadge, "现代 AAA 约定式资产驱动体系: 实体无需手动配置槽位，渲染器自动匹配同名 LOD 资产");
+			curY += 28.0f;
+		}
+
+		// 自定义替代网格 (可选覆盖，默认留空自动继承)
+		{
+			const std::vector<std::string>& meshPaths = Editor::AssetCatalog::PathsForName("Mesh");
+			const float pickBtnW = 26.0f;
+			const std::string curCustom = lod->CustomMeshOverride.HasPath() ? std::string(StringPool::Get().PathOf(lod->CustomMeshOverride.Path)) : "";
+			std::vector<std::string> opts;
+			opts.push_back("(None / 零配置自动继承)");
+			opts.insert(opts.end(), meshPaths.begin(), meshPaths.end());
+			int sel = 0;
+			auto it = std::find(meshPaths.begin(), meshPaths.end(), curCustom);
+			if (it != meshPaths.end())
+				sel = static_cast<int>(it - meshPaths.begin()) + 1;
+			else if (!curCustom.empty())
 			{
-				opts1.push_back(cur1);
-				sel1 = static_cast<int>(opts1.size()) - 1;
+				opts.push_back(curCustom);
+				sel = static_cast<int>(opts.size()) - 1;
 			}
-			const int before1 = sel1;
-			Wui::Label(ctx, { startX, curY + 2.0f }, "LOD1 资产槽 (Mid):", theme.Text, theme.FontSizeSmall);
-			const Wui::WuiRect comboRect1 { startX + paramLabelW, curY, paramFieldW - pickBtnW - 4.0f, 22.0f };
-			const Wui::WuiRect pickRect1 { startX + paramLabelW + paramFieldW - pickBtnW, curY, pickBtnW, 22.0f };
-			if (Wui::Combo(ctx, Wui::HashId("inspect.lod.mesh1_combo"), comboRect1, "", opts1, sel1, theme))
+			const int beforeSel = sel;
+			Wui::Label(ctx, { startX, curY + 2.0f }, "特殊网格覆盖 (可选):", theme.Text, theme.FontSizeSmall);
+			const Wui::WuiRect comboRect { startX + paramLabelW, curY, paramFieldW - pickBtnW - 4.0f, 22.0f };
+			const Wui::WuiRect pickRect { startX + paramLabelW + paramFieldW - pickBtnW, curY, pickBtnW, 22.0f };
+			if (Wui::Combo(ctx, Wui::HashId("inspect.lod.custom_combo"), comboRect, "", opts, sel, theme))
 			{
-				if (sel1 != before1)
+				if (sel != beforeSel)
 				{
-					if (sel1 == 0)
-						lod->LOD1Mesh = AssetRef{};
+					if (sel == 0)
+						lod->CustomMeshOverride = AssetRef{};
 					else
-						lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(opts1[sel1]), AssetId{} };
-					if (changedFields) changedFields->push_back("LOD1Mesh");
+						lod->CustomMeshOverride = AssetRef{ StringPool::Get().InternPath(opts[sel]), AssetId{} };
+					if (changedFields) changedFields->push_back("CustomMeshOverride");
 					host.MarkDocumentDirty();
 				}
 			}
-			if (Wui::Button(ctx, Wui::HashId("inspect.lod.mesh1_btn"), pickRect1, "...", theme))
+			if (Wui::Button(ctx, Wui::HashId("inspect.lod.custom_btn"), pickRect, "...", theme))
 			{
-				host.OpenAssetPicker("Select LOD1 Mesh", AssetCategory::Mesh, [lod, &host, changedFields](const std::string& picked) {
-					lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(picked), AssetId{} };
-					if (changedFields) changedFields->push_back("LOD1Mesh");
+				host.OpenAssetPicker("Select Custom Override Mesh", AssetCategory::Mesh, [lod, &host, changedFields](const std::string& picked) {
+					lod->CustomMeshOverride = AssetRef{ StringPool::Get().InternPath(picked), AssetId{} };
+					if (changedFields) changedFields->push_back("CustomMeshOverride");
 					host.MarkDocumentDirty();
 				});
 			}
 			curY += 26.0f;
-
-			// 若实体的 LOD1Mesh 为空，但检测到基础网格同目录下存在 <stem>_LOD1.wmodel：在插槽旁显示绿色自动继承徽标
-			if (!lod->LOD1Mesh.HasPath() && autoLod1Exists)
-			{
-				const Wui::WuiRect autoBadge1 { startX + paramLabelW, curY, paramFieldW, 20.0f };
-				Wui::PanelBackground(ctx, autoBadge1, Wui::WuiColor{ 0.08f, 0.25f, 0.12f, 0.90f }, 3.0f);
-				Wui::HighlightOutline(ctx, autoBadge1, theme.Success, 3.0f, 1.0f);
-				std::string badgeStr = "[已自动继承: " + autoLod1Rel + "]";
-				Wui::Label(ctx, { autoBadge1.X + 6.0f, autoBadge1.Y + 3.0f }, badgeStr, theme.Success, theme.FontSizeSmall);
-				Wui::Tooltip(ctx, autoBadge1, "实体当前槽位留空，渲染器已按命名约定自动解析并应用该同名减面资产");
-				curY += 24.0f;
-			}
 		}
 
-		// LOD2Mesh 槽
-		{
-			const std::string cur2 = lod->LOD2Mesh.HasPath() ? std::string(StringPool::Get().PathOf(lod->LOD2Mesh.Path)) : "";
-			std::vector<std::string> opts2;
-			opts2.push_back("(None / Fallback)");
-			opts2.insert(opts2.end(), meshPaths.begin(), meshPaths.end());
-			int sel2 = 0;
-			auto it2 = std::find(meshPaths.begin(), meshPaths.end(), cur2);
-			if (it2 != meshPaths.end())
-				sel2 = static_cast<int>(it2 - meshPaths.begin()) + 1;
-			else if (!cur2.empty())
-			{
-				opts2.push_back(cur2);
-				sel2 = static_cast<int>(opts2.size()) - 1;
-			}
-			const int before2 = sel2;
-			Wui::Label(ctx, { startX, curY + 2.0f }, "LOD2 资产槽 (Low):", theme.Text, theme.FontSizeSmall);
-			const Wui::WuiRect comboRect2 { startX + paramLabelW, curY, paramFieldW - pickBtnW - 4.0f, 22.0f };
-			const Wui::WuiRect pickRect2 { startX + paramLabelW + paramFieldW - pickBtnW, curY, pickBtnW, 22.0f };
-			if (Wui::Combo(ctx, Wui::HashId("inspect.lod.mesh2_combo"), comboRect2, "", opts2, sel2, theme))
-			{
-				if (sel2 != before2)
-				{
-					if (sel2 == 0)
-						lod->LOD2Mesh = AssetRef{};
-					else
-						lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(opts2[sel2]), AssetId{} };
-					if (changedFields) changedFields->push_back("LOD2Mesh");
-					host.MarkDocumentDirty();
-				}
-			}
-			if (Wui::Button(ctx, Wui::HashId("inspect.lod.mesh2_btn"), pickRect2, "...", theme))
-			{
-				host.OpenAssetPicker("Select LOD2 Mesh", AssetCategory::Mesh, [lod, &host, changedFields](const std::string& picked) {
-					lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(picked), AssetId{} };
-					if (changedFields) changedFields->push_back("LOD2Mesh");
-					host.MarkDocumentDirty();
-				});
-			}
-			curY += 26.0f;
-
-			// 若实体的 LOD2Mesh 为空，但检测到基础网格同目录下存在 <stem>_LOD2.wmodel：在插槽旁显示绿色自动继承徽标
-			if (!lod->LOD2Mesh.HasPath() && autoLod2Exists)
-			{
-				const Wui::WuiRect autoBadge2 { startX + paramLabelW, curY, paramFieldW, 20.0f };
-				Wui::PanelBackground(ctx, autoBadge2, Wui::WuiColor{ 0.08f, 0.25f, 0.12f, 0.90f }, 3.0f);
-				Wui::HighlightOutline(ctx, autoBadge2, theme.Success, 3.0f, 1.0f);
-				std::string badgeStr = "[已自动继承: " + autoLod2Rel + "]";
-				Wui::Label(ctx, { autoBadge2.X + 6.0f, autoBadge2.Y + 3.0f }, badgeStr, theme.Success, theme.FontSizeSmall);
-				Wui::Tooltip(ctx, autoBadge2, "实体当前槽位留空，渲染器已按命名约定自动解析并应用该同名减面资产");
-				curY += 24.0f;
-			}
-			curY += 4.0f;
-		}
-
-		// =========================================================================
-		// 5. 快速测试辅助按钮与聚焦
-		// =========================================================================
+		// 快速测试辅助按钮与聚焦
 		const float btnHalfW = (contentW - 6.0f) * 0.5f;
 		const Wui::WuiRect quickSetRect { startX, curY, btnHalfW, 26.0f };
 		const Wui::WuiRect focusRect { startX + btnHalfW + 6.0f, curY, btnHalfW, 26.0f };
 
-		if (Wui::Button(ctx, Wui::HashId("inspect.lod.quick_set"), quickSetRect, "[Quick Set] 绑定内置测试几何体", theme))
+		if (Wui::Button(ctx, Wui::HashId("inspect.lod.quick_set"), quickSetRect, "[Quick Set] 8级标准阶梯", theme))
 		{
 			lod->LOD1Distance = 15.0f;
-			lod->LOD2Distance = 35.0f;
-			lod->CullDistance = 70.0f;
+			lod->LOD2Distance = 30.0f;
+			lod->LOD3Distance = 50.0f;
+			lod->LOD4Distance = 75.0f;
+			lod->LOD5Distance = 105.0f;
+			lod->LOD6Distance = 140.0f;
+			lod->LOD7Distance = 180.0f;
+			lod->CullDistance = 240.0f;
 			lod->Hysteresis = 2.0f;
-
-			if (meshPaths.size() >= 2)
-			{
-				lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(meshPaths[0]), AssetId{} };
-				lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(meshPaths[1]), AssetId{} };
-			}
-			else if (meshPaths.size() == 1)
-			{
-				lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath(meshPaths[0]), AssetId{} };
-				lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath(meshPaths[0]), AssetId{} };
-			}
-			else
-			{
-				lod->LOD1Mesh = AssetRef{ StringPool::Get().InternPath("engine/meshes/sphere.wmodel"), AssetId{} };
-				lod->LOD2Mesh = AssetRef{ StringPool::Get().InternPath("engine/meshes/cube.wmodel"), AssetId{} };
-			}
+			lod->LODBias = 1.0f;
+			lod->ForcedLOD = -1;
+			lod->MaxLODLevel = 7;
 
 			if (changedFields)
 			{
 				changedFields->push_back("LOD1Distance");
 				changedFields->push_back("LOD2Distance");
+				changedFields->push_back("LOD3Distance");
+				changedFields->push_back("LOD4Distance");
+				changedFields->push_back("LOD5Distance");
+				changedFields->push_back("LOD6Distance");
+				changedFields->push_back("LOD7Distance");
 				changedFields->push_back("CullDistance");
 				changedFields->push_back("Hysteresis");
-				changedFields->push_back("LOD1Mesh");
-				changedFields->push_back("LOD2Mesh");
+				changedFields->push_back("LODBias");
 			}
 			host.MarkDocumentDirty();
 		}
-		Wui::Tooltip(ctx, quickSetRect, "一键配置 15m/35m/70m 阶梯距离与测试几何体，方便立刻观察减面效果");
+		Wui::Tooltip(ctx, quickSetRect, "一键应用标准 8 级视距阶梯 (15m~180m)，零配置自动继承同名 LOD 资产");
 
 		if (Wui::Button(ctx, Wui::HashId("inspect.lod.focus"), focusRect, "[Focus] 视口聚焦实体", theme))
 		{

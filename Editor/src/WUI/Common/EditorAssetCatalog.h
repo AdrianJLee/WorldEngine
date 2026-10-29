@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // P4-U9:项目内容根(运行期 `World::Paths::AssetRoot()`)下的资产目录扫描 —— 属性面板的"资产路径"下拉、材质面板的
 // 贴图槽等共用一份结果。每帧都要列表,所以带 TTL 缓存(默认 2s),不每帧扫盘。
@@ -40,7 +40,7 @@ namespace World
 				return EditorAssetKind::Shader;
 			// P4-U10:Model = **引擎原生** .wmodel(场景/字段只引用它);glTF/GLB 是导入源,
 			// 单独一个 kind —— 网格选取里绝不该出现 .gltf(用户 2026-09-21 报的歧义)。
-			if (assetType == "Model") return EditorAssetKind::Model;
+			if (assetType == "Model" || assetType == "Mesh" || assetType == "StaticMesh" || assetType == "WModel") return EditorAssetKind::Model;
 			if (assetType == "ModelSource" || assetType == "glTF" || assetType == "GLTF")
 				return EditorAssetKind::ModelSource;
 			if (assetType == "Texture" || assetType == "Texture2D") return EditorAssetKind::Texture;

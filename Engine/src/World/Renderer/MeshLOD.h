@@ -13,11 +13,20 @@ namespace World
 	public:
 		constexpr static uint8_t kCulled = 255;
 
-		// 带有滞后防抖带的 LOD 级别计算 (0=LOD0, 1=LOD1, 2=LOD2, 255=裁剪剔除)
+		// 带有滞后防抖带的三级兼容计算 (0=LOD0, 1=LOD1, 2=LOD2, 255=裁剪剔除)
 		static uint8_t EvaluateLOD(
 			float distanceToCamera,
 			float lod1Distance,
 			float lod2Distance,
+			float cullDistance,
+			uint8_t currentLOD,
+			float hysteresis = 2.0f);
+
+		// 工业级 1~8 档多级动态距离评估算法
+		static uint8_t EvaluateDynamicLOD(
+			float distanceToCamera,
+			const float* lodDistances,
+			uint8_t numLevels,
 			float cullDistance,
 			uint8_t currentLOD,
 			float hysteresis = 2.0f);
@@ -30,6 +39,7 @@ namespace World
 		uint32_t LOD1Count = 0;
 		uint32_t LOD2Count = 0;
 		uint32_t CulledCount = 0;
+		uint32_t LODLevelCounts[8] = { 0 };
 	};
 
 	class WLD_API MeshLODManager
@@ -37,13 +47,13 @@ namespace World
 	public:
 		static MeshLODManager& Get();
 
-		uint8_t EvaluateLOD(float distance, const MeshLODComponent& comp, uint8_t currentLOD);
+		uint8_t EvaluateLOD(float distance, MeshLODComponent& comp, uint8_t currentLOD);
 
 		const MeshLODStats& GetStats() const { return m_Stats; }
 		void ResetStats() { m_Stats = MeshLODStats{}; }
 		void RecordLODResult(uint8_t lod);
 
-		void SetForcedLOD(int8_t level) { m_ForcedLOD = level; } // -1 = Auto, 0=LOD0, 1=LOD1, 2=LOD2
+		void SetForcedLOD(int8_t level) { m_ForcedLOD = level; } // -1 = Auto, 0..7 = LOD0..7
 		int8_t GetForcedLOD() const { return m_ForcedLOD; }
 
 		void SetLODColorationEnabled(bool enable) { m_ColorationEnabled = enable; }
@@ -52,6 +62,7 @@ namespace World
 		void SetGlobalDistanceScale(float scale) { m_GlobalDistanceScale = scale; }
 		float GetGlobalDistanceScale() const { return m_GlobalDistanceScale; }
 
+		// 0~7 级光谱色与剔除灰度着色调试 (LOD Coloration Debug Mode)
 		glm::vec4 GetLODColor(uint8_t lod) const;
 
 	private:

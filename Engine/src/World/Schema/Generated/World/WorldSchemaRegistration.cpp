@@ -13728,45 +13728,25 @@ struct GeneratedAccess<World::NavMeshAreaModifierComponent>
 template <>
 struct GeneratedAccess<World::MeshLODComponent>
 {
-    static Value Get_LOD1Mesh(const void* instance)
+    static Value Get_CustomMeshOverride(const void* instance)
     {
         const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
-        return Value(AssetOps<std::remove_reference_t<decltype(self->LOD1Mesh)>>::GetPath(self->LOD1Mesh));
+        return Value(AssetOps<std::remove_reference_t<decltype(self->CustomMeshOverride)>>::GetPath(self->CustomMeshOverride));
     }
-    static void Set_LOD1Mesh(void* instance, const Value& value)
+    static void Set_CustomMeshOverride(void* instance, const Value& value)
     {
         World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
-        AssetOps<std::remove_reference_t<decltype(self->LOD1Mesh)>>::SetPath(self->LOD1Mesh, std::get<std::string>(value));
+        AssetOps<std::remove_reference_t<decltype(self->CustomMeshOverride)>>::SetPath(self->CustomMeshOverride, std::get<std::string>(value));
     }
-    static uint64_t GetAssetIdentity_LOD1Mesh(const void* instance)
+    static uint64_t GetAssetIdentity_CustomMeshOverride(const void* instance)
     {
         const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
-        return AssetOps<std::remove_reference_t<decltype(self->LOD1Mesh)>>::GetIdentity(self->LOD1Mesh);
+        return AssetOps<std::remove_reference_t<decltype(self->CustomMeshOverride)>>::GetIdentity(self->CustomMeshOverride);
     }
-    static void SetAssetIdentity_LOD1Mesh(void* instance, uint64_t identity)
+    static void SetAssetIdentity_CustomMeshOverride(void* instance, uint64_t identity)
     {
         World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
-        AssetOps<std::remove_reference_t<decltype(self->LOD1Mesh)>>::SetIdentity(self->LOD1Mesh, identity);
-    }
-    static Value Get_LOD2Mesh(const void* instance)
-    {
-        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
-        return Value(AssetOps<std::remove_reference_t<decltype(self->LOD2Mesh)>>::GetPath(self->LOD2Mesh));
-    }
-    static void Set_LOD2Mesh(void* instance, const Value& value)
-    {
-        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
-        AssetOps<std::remove_reference_t<decltype(self->LOD2Mesh)>>::SetPath(self->LOD2Mesh, std::get<std::string>(value));
-    }
-    static uint64_t GetAssetIdentity_LOD2Mesh(const void* instance)
-    {
-        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
-        return AssetOps<std::remove_reference_t<decltype(self->LOD2Mesh)>>::GetIdentity(self->LOD2Mesh);
-    }
-    static void SetAssetIdentity_LOD2Mesh(void* instance, uint64_t identity)
-    {
-        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
-        AssetOps<std::remove_reference_t<decltype(self->LOD2Mesh)>>::SetIdentity(self->LOD2Mesh, identity);
+        AssetOps<std::remove_reference_t<decltype(self->CustomMeshOverride)>>::SetIdentity(self->CustomMeshOverride, identity);
     }
     static Value Get_LOD1Distance(const void* instance)
     {
@@ -13788,6 +13768,56 @@ struct GeneratedAccess<World::MeshLODComponent>
         World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
         self->LOD2Distance = std::get<float>(value);
     }
+    static Value Get_LOD3Distance(const void* instance)
+    {
+        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
+        return Value(self->LOD3Distance);
+    }
+    static void Set_LOD3Distance(void* instance, const Value& value)
+    {
+        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
+        self->LOD3Distance = std::get<float>(value);
+    }
+    static Value Get_LOD4Distance(const void* instance)
+    {
+        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
+        return Value(self->LOD4Distance);
+    }
+    static void Set_LOD4Distance(void* instance, const Value& value)
+    {
+        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
+        self->LOD4Distance = std::get<float>(value);
+    }
+    static Value Get_LOD5Distance(const void* instance)
+    {
+        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
+        return Value(self->LOD5Distance);
+    }
+    static void Set_LOD5Distance(void* instance, const Value& value)
+    {
+        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
+        self->LOD5Distance = std::get<float>(value);
+    }
+    static Value Get_LOD6Distance(const void* instance)
+    {
+        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
+        return Value(self->LOD6Distance);
+    }
+    static void Set_LOD6Distance(void* instance, const Value& value)
+    {
+        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
+        self->LOD6Distance = std::get<float>(value);
+    }
+    static Value Get_LOD7Distance(const void* instance)
+    {
+        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
+        return Value(self->LOD7Distance);
+    }
+    static void Set_LOD7Distance(void* instance, const Value& value)
+    {
+        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
+        self->LOD7Distance = std::get<float>(value);
+    }
     static Value Get_CullDistance(const void* instance)
     {
         const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
@@ -13807,6 +13837,46 @@ struct GeneratedAccess<World::MeshLODComponent>
     {
         World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
         self->Hysteresis = std::get<float>(value);
+    }
+    static Value Get_LODBias(const void* instance)
+    {
+        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
+        return Value(self->LODBias);
+    }
+    static void Set_LODBias(void* instance, const Value& value)
+    {
+        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
+        self->LODBias = std::get<float>(value);
+    }
+    static Value Get_CurrentDistance(const void* instance)
+    {
+        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
+        return Value(self->CurrentDistance);
+    }
+    static void Set_CurrentDistance(void* instance, const Value& value)
+    {
+        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
+        self->CurrentDistance = std::get<float>(value);
+    }
+    static Value Get_ForcedLOD(const void* instance)
+    {
+        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
+        return Value(self->ForcedLOD);
+    }
+    static void Set_ForcedLOD(void* instance, const Value& value)
+    {
+        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
+        self->ForcedLOD = std::get<int8_t>(value);
+    }
+    static Value Get_MaxLODLevel(const void* instance)
+    {
+        const World::MeshLODComponent* self = static_cast<const World::MeshLODComponent*>(instance);
+        return Value(self->MaxLODLevel);
+    }
+    static void Set_MaxLODLevel(void* instance, const Value& value)
+    {
+        World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
+        self->MaxLODLevel = std::get<uint8_t>(value);
     }
     static Value Get_CurrentLOD(const void* instance)
     {
@@ -13828,53 +13898,28 @@ struct GeneratedAccess<World::MeshLODComponent>
         World::MeshLODComponent* self = static_cast<World::MeshLODComponent*>(instance);
         self->EnableCrossFade = std::get<uint8_t>(value);
     }
-    static const FieldSchema& Field_LOD1Mesh()
+    static const FieldSchema& Field_CustomMeshOverride()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x42545A63EADA2CADull },
-            "LOD1Mesh",
+            FieldId{ 0x97AC5F604831EAD8ull },
+            "CustomMeshOverride",
             Kind::Asset,
-            &Get_LOD1Mesh,
-            &Set_LOD1Mesh,
+            &Get_CustomMeshOverride,
+            &Set_CustomMeshOverride,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             "Mesh",
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Intermediate level of detail mesh asset (LOD 1).", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Optional custom replacement mesh overriding automatic LOD convention.", false, "", {  }, "", std::nullopt },
             Value(),
             CollectionKind::None,
             Kind::None,
             Kind::String,
             nullptr,
             nullptr,
-            &GetAssetIdentity_LOD1Mesh,
-            &SetAssetIdentity_LOD1Mesh,
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_LOD2Mesh()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x92EA122F7E726628ull },
-            "LOD2Mesh",
-            Kind::Asset,
-            &Get_LOD2Mesh,
-            &Set_LOD2Mesh,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            "Mesh",
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Distant simplified level of detail mesh asset (LOD 2).", false, "", {  }, "", std::nullopt },
-            Value(),
-            CollectionKind::None,
-            Kind::None,
-            Kind::String,
-            nullptr,
-            nullptr,
-            &GetAssetIdentity_LOD2Mesh,
-            &SetAssetIdentity_LOD2Mesh,
+            &GetAssetIdentity_CustomMeshOverride,
+            &SetAssetIdentity_CustomMeshOverride,
         };
         return schema;
     }
@@ -13892,7 +13937,7 @@ struct GeneratedAccess<World::MeshLODComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(1000.000000f), false, false, "Distance in meters to transition from LOD0 to LOD1.", false, "", {  }, "", std::nullopt },
-            Value(30.0f),
+            Value(15.0f),
         };
         return schema;
     }
@@ -13909,8 +13954,98 @@ struct GeneratedAccess<World::MeshLODComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(5.000000f), std::optional<float>(2000.000000f), false, false, "Distance in meters to transition from LOD1 to LOD2.", false, "", {  }, "", std::nullopt },
-            Value(80.0f),
+            FieldMetadata{ "", "", std::optional<float>(2.000000f), std::optional<float>(1500.000000f), false, false, "Distance in meters to transition from LOD1 to LOD2.", false, "", {  }, "", std::nullopt },
+            Value(30.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LOD3Distance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8453AE9E6EDF71A5ull },
+            "LOD3Distance",
+            Kind::Float,
+            &Get_LOD3Distance,
+            &Set_LOD3Distance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(3.000000f), std::optional<float>(2000.000000f), false, false, "Distance in meters to transition from LOD2 to LOD3.", false, "", {  }, "", std::nullopt },
+            Value(50.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LOD4Distance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x493963FF629C910ull },
+            "LOD4Distance",
+            Kind::Float,
+            &Get_LOD4Distance,
+            &Set_LOD4Distance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(4.000000f), std::optional<float>(2500.000000f), false, false, "Distance in meters to transition from LOD3 to LOD4.", false, "", {  }, "", std::nullopt },
+            Value(75.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LOD5Distance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xC72BC54398E6022Full },
+            "LOD5Distance",
+            Kind::Float,
+            &Get_LOD5Distance,
+            &Set_LOD5Distance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(5.000000f), std::optional<float>(3000.000000f), false, false, "Distance in meters to transition from LOD4 to LOD5.", false, "", {  }, "", std::nullopt },
+            Value(105.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LOD6Distance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7F0A81A81392C3DAull },
+            "LOD6Distance",
+            Kind::Float,
+            &Get_LOD6Distance,
+            &Set_LOD6Distance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(6.000000f), std::optional<float>(3500.000000f), false, false, "Distance in meters to transition from LOD5 to LOD6.", false, "", {  }, "", std::nullopt },
+            Value(140.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LOD7Distance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x723DF16F6EE30031ull },
+            "LOD7Distance",
+            Kind::Float,
+            &Get_LOD7Distance,
+            &Set_LOD7Distance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(7.000000f), std::optional<float>(4000.000000f), false, false, "Distance in meters to transition from LOD6 to LOD7.", false, "", {  }, "", std::nullopt },
+            Value(180.0f),
         };
         return schema;
     }
@@ -13927,8 +14062,8 @@ struct GeneratedAccess<World::MeshLODComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(10.000000f), std::optional<float>(5000.000000f), false, false, "Maximum distance beyond which all LOD meshes are culled.", false, "", {  }, "", std::nullopt },
-            Value(180.0f),
+            FieldMetadata{ "", "", std::optional<float>(10.000000f), std::optional<float>(5000.000000f), false, false, "Maximum distance beyond which mesh is culled.", false, "", {  }, "", std::nullopt },
+            Value(240.0f),
         };
         return schema;
     }
@@ -13950,6 +14085,78 @@ struct GeneratedAccess<World::MeshLODComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_LODBias()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x523FB82A377CF638ull },
+            "LODBias",
+            Kind::Float,
+            &Get_LODBias,
+            &Set_LODBias,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(10.000000f), false, false, "Instance distance scaling bias (<1.0 switches earlier, >1.0 stays high detail longer).", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CurrentDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x96BB48CBEEDC9304ull },
+            "CurrentDistance",
+            Kind::Float,
+            &Get_CurrentDistance,
+            &Set_CurrentDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Live distance to camera in meters.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ForcedLOD()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x29486BBAC98B7032ull },
+            "ForcedLOD",
+            Kind::Int8,
+            &Get_ForcedLOD,
+            &Set_ForcedLOD,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Forced LOD override level (-1 for automatic evaluation, 0..7 for forced LOD).", false, "", {  }, "", std::nullopt },
+            Value(-1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxLODLevel()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD1D4A32C8350F9CBull },
+            "MaxLODLevel",
+            Kind::UInt8,
+            &Get_MaxLODLevel,
+            &Set_MaxLODLevel,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Maximum LOD level allowed for decimation degradation.", false, "", {  }, "", std::nullopt },
+            Value(7),
+        };
+        return schema;
+    }
     static const FieldSchema& Field_CurrentLOD()
     {
         static const FieldSchema schema = {
@@ -13963,7 +14170,7 @@ struct GeneratedAccess<World::MeshLODComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current active LOD level index (0, 1, or 2).", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Current active LOD level index (0 to 7, or 255 if culled).", false, "", {  }, "", std::nullopt },
             Value(0),
         };
         return schema;
@@ -14000,18 +14207,26 @@ struct GeneratedAccess<World::MeshLODComponent>
             sizeof(World::MeshLODComponent),
             TypeCategory::Component,
             {
-                Field_LOD1Mesh(),
-                Field_LOD2Mesh(),
+                Field_CustomMeshOverride(),
                 Field_LOD1Distance(),
                 Field_LOD2Distance(),
+                Field_LOD3Distance(),
+                Field_LOD4Distance(),
+                Field_LOD5Distance(),
+                Field_LOD6Distance(),
+                Field_LOD7Distance(),
                 Field_CullDistance(),
                 Field_Hysteresis(),
+                Field_LODBias(),
+                Field_CurrentDistance(),
+                Field_ForcedLOD(),
+                Field_MaxLODLevel(),
                 Field_CurrentLOD(),
                 Field_EnableCrossFade(),
             },
             &StorageBindingOf(),
             "Rendering",
-            "Multi-level of detail (LOD) mesh switching with distance culling and hysteresis.",
+            "Multi-level of detail (LOD) dynamic mesh switching with distance culling, bias, and hysteresis.",
             false,
             false,
         };

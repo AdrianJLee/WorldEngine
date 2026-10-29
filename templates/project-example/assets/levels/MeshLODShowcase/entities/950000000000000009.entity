@@ -14,12 +14,18 @@ Entity:
     Color: [0.92, 0.92, 0.92, 1]
     Mesh: "engine/models/characters/mannequin.wmodel"
   World::MeshLODComponent:
-    LOD1Mesh: ""
-    LOD2Mesh: ""
     LOD1Distance: 15.0
     LOD2Distance: 35.0
+    LOD3Distance: 42.0
+    LOD4Distance: 49.0
+    LOD5Distance: 56.0
+    LOD6Distance: 63.0
+    LOD7Distance: 68.2
     CullDistance: 70.0
     Hysteresis: 2.0
+    LODBias: 1.0
+    ForcedLOD: -1
+    MaxLODLevel: 7
     CurrentLOD: 0
     EnableCrossFade: 1
   World::LevelEntityComponent:

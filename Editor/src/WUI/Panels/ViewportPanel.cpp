@@ -3741,26 +3741,20 @@ namespace World
 								badgePos.y >= sceneRect.Y && badgePos.y <= sceneRect.Y + sceneRect.H)
 							{
 								char lodTagText[64];
-								Wui::WuiColor tagCol { 0.2f, 0.9f, 0.2f, 1.0f };
+								const glm::vec4 glmCol = MeshLODManager::Get().GetLODColor(lod.CurrentLOD);
+								Wui::WuiColor tagCol { glmCol.r, glmCol.g, glmCol.b, 1.0f };
 								if (lod.CurrentLOD == 255)
 								{
 									std::snprintf(lodTagText, sizeof(lodTagText), "CULLED | Dist: %.1f m", distToCam);
-									tagCol = Wui::WuiColor{ 0.95f, 0.2f, 0.2f, 1.0f };
 								}
-								else if (lod.CurrentLOD == 2)
+								else if (lod.CurrentLOD < 8)
 								{
-									std::snprintf(lodTagText, sizeof(lodTagText), "LOD 2 | Dist: %.1f m", distToCam);
-									tagCol = Wui::WuiColor{ 0.95f, 0.5f, 0.1f, 1.0f };
-								}
-								else if (lod.CurrentLOD == 1)
-								{
-									std::snprintf(lodTagText, sizeof(lodTagText), "LOD 1 | Dist: %.1f m", distToCam);
-									tagCol = Wui::WuiColor{ 0.95f, 0.85f, 0.1f, 1.0f };
+									std::snprintf(lodTagText, sizeof(lodTagText), "LOD %u | Dist: %.1f m",
+										static_cast<unsigned>(lod.CurrentLOD), distToCam);
 								}
 								else
 								{
-									std::snprintf(lodTagText, sizeof(lodTagText), "LOD 0 | Dist: %.1f m", distToCam);
-									tagCol = Wui::WuiColor{ 0.2f, 0.9f, 0.2f, 1.0f };
+									std::snprintf(lodTagText, sizeof(lodTagText), "LOD ? | Dist: %.1f m", distToCam);
 								}
 
 								const float fontSz = 11.5f;

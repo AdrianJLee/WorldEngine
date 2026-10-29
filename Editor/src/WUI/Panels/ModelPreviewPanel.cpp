@@ -2558,9 +2558,9 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		Wui::Label(ctx, { x, y + 2.0f }, "常用预设模板 (Presets):", theme.TextMuted, theme.FontSizeCaption);
 		y += 18.0f;
 
-		const float pBtnW = std::max(90.0f, (width - gapSmall * 2.0f) / 3.0f);
+		const float pBtnW = std::max(70.0f, (width - gapSmall * 3.0f) * 0.25f);
 		const Wui::WuiRect p3Rect { x, y, pBtnW, rowBtnH };
-		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_3"), p3Rect, "[常用 3 档 (50%/25%)]", theme))
+		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_3"), p3Rect, "[常用 3 档]", theme))
 		{
 			m_LODConfigs = { { 0.50f, 25.0f }, { 0.25f, 60.0f } };
 			for (int k = 3; k <= 8; ++k) m_LODMeshes[k].reset();
@@ -2571,7 +2571,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		Wui::Tooltip(ctx, p3Rect, "应用常用 3 档配置：Base (100%), LOD1 (50% 25m), LOD2 (25% 60m)");
 
 		const Wui::WuiRect p4Rect { x + (pBtnW + gapSmall), y, pBtnW, rowBtnH };
-		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_4"), p4Rect, "[精细 4 档 (60%/35%/15%)]", theme))
+		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_4"), p4Rect, "[精细 4 档]", theme))
 		{
 			m_LODConfigs = { { 0.60f, 20.0f }, { 0.35f, 45.0f }, { 0.15f, 80.0f } };
 			for (int k = 4; k <= 8; ++k) m_LODMeshes[k].reset();
@@ -2582,7 +2582,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		Wui::Tooltip(ctx, p4Rect, "应用精细 4 档配置：Base, LOD1 (60% 20m), LOD2 (35% 45m), LOD3 (15% 80m)");
 
 		const Wui::WuiRect p6Rect { x + (pBtnW + gapSmall) * 2.0f, y, pBtnW, rowBtnH };
-		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_6"), p6Rect, "[次时代 6 档 (75%/50%/30%/15%/5%)]", theme))
+		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_6"), p6Rect, "[次时代 6 档]", theme))
 		{
 			m_LODConfigs = {
 				{ 0.75f, 15.0f },
@@ -2597,6 +2597,24 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			m_LODStatusIsError = false;
 		}
 		Wui::Tooltip(ctx, p6Rect, "应用次时代 6 档配置：Base 到 LOD5 五级递减梯次");
+
+		const Wui::WuiRect p8Rect { x + (pBtnW + gapSmall) * 3.0f, y, pBtnW, rowBtnH };
+		if (Wui::Button(ctx, Wui::HashId("model.lod.preset_8"), p8Rect, "[全量 8 档 (Full)]", theme))
+		{
+			m_LODConfigs = {
+				{ 0.75f, 15.0f },
+				{ 0.55f, 30.0f },
+				{ 0.38f, 50.0f },
+				{ 0.24f, 75.0f },
+				{ 0.14f, 105.0f },
+				{ 0.08f, 140.0f },
+				{ 0.04f, 180.0f },
+				{ 0.02f, 220.0f }
+			};
+			m_LODStatusMessage = "已应用全量 8 级 LOD 极限梯度预设 (Base + LOD1~LOD8 共 9 档)";
+			m_LODStatusIsError = false;
+		}
+		Wui::Tooltip(ctx, p8Rect, "应用全量 8 级 LOD 梯次配置：覆盖 Base 到 LOD8 完整 8 级动态自动减面与视距阶梯");
 
 		y += rowBtnH + 16.0f;
 

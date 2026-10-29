@@ -14,13 +14,19 @@ Entity:
     Color: [0.92, 0.92, 0.92, 1]
     Mesh: "engine/models/primitives/sphere.wmodel"
   World::MeshLODComponent:
-    LOD1Mesh: ""
-    LOD2Mesh: ""
     LOD1Distance: 15.0
     LOD2Distance: 35.0
+    LOD3Distance: 38.0
+    LOD4Distance: 41.0
+    LOD5Distance: 44.0
+    LOD6Distance: 47.0
+    LOD7Distance: 49.2
     CullDistance: 50.0
     Hysteresis: 2.0
-    CurrentLOD: 255
+    LODBias: 1.0
+    ForcedLOD: -1
+    MaxLODLevel: 7
+    CurrentLOD: 0
     EnableCrossFade: 1
   World::LevelEntityComponent:
     DataLayerMask: 2

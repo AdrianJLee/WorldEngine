@@ -2571,49 +2571,104 @@ namespace World
 
 	struct MeshLODComponent
 	{
-		AssetRef LOD1Mesh;                                // 16B (offset 0)
-		AssetRef LOD2Mesh;                                // 16B (offset 16)
-		float LOD1Distance { 30.0f };                     // 4B  (offset 32)
-		float LOD2Distance { 80.0f };                     // 4B  (offset 36)
-		float CullDistance { 180.0f };                    // 4B  (offset 40)
-		float Hysteresis { 2.0f };                        // 4B  (offset 44)
-		uint8_t CurrentLOD { 0 };                         // 1B  (offset 48)
-		uint8_t EnableCrossFade { 1 };                    // 1B  (offset 49)
-		uint8_t _Padding[14] { 0 };                       // 14B (offset 50)
+		AssetRef CustomMeshOverride;                      // 16B (offset 0)
+		float LOD1Distance { 15.0f };                     // 4B  (offset 16)
+		float LOD2Distance { 30.0f };                     // 4B  (offset 20)
+		float LOD3Distance { 50.0f };                     // 4B  (offset 24)
+		float LOD4Distance { 75.0f };                     // 4B  (offset 28)
+		float LOD5Distance { 105.0f };                    // 4B  (offset 32)
+		float LOD6Distance { 140.0f };                    // 4B  (offset 36)
+		float LOD7Distance { 180.0f };                    // 4B  (offset 40)
+		float CullDistance { 240.0f };                    // 4B  (offset 44)
+		float Hysteresis { 2.0f };                        // 4B  (offset 48)
+		float LODBias { 1.0f };                           // 4B  (offset 52)
+		float CurrentDistance { 0.0f };                   // 4B  (offset 56)
+		int8_t ForcedLOD { -1 };                          // 1B  (offset 60)
+		uint8_t MaxLODLevel { 7 };                        // 1B  (offset 61)
+		uint8_t CurrentLOD { 0 };                         // 1B  (offset 62)
+		uint8_t EnableCrossFade { 1 };                    // 1B  (offset 63)
+
+		float GetLODDistance(int level) const
+		{
+			if (level <= 0) return 0.0f;
+			if (level == 1) return LOD1Distance;
+			if (level == 2) return LOD2Distance;
+			if (level == 3) return LOD3Distance;
+			if (level == 4) return LOD4Distance;
+			if (level == 5) return LOD5Distance;
+			if (level == 6) return LOD6Distance;
+			if (level >= 7) return LOD7Distance;
+			return 0.0f;
+		}
+
+		void SetLODDistance(int level, float dist)
+		{
+			if (level == 1) LOD1Distance = dist;
+			else if (level == 2) LOD2Distance = dist;
+			else if (level == 3) LOD3Distance = dist;
+			else if (level == 4) LOD4Distance = dist;
+			else if (level == 5) LOD5Distance = dist;
+			else if (level == 6) LOD6Distance = dist;
+			else if (level >= 7) LOD7Distance = dist;
+		}
 
 		MeshLODComponent() = default;
 
 		WE_SCHEMA_BODY(World, MeshLODComponent, Component)
 			WE_SCHEMA_META(Category("Rendering"),
-				Doc("Multi-level of detail (LOD) mesh switching with distance culling and hysteresis."))
-			WE_FIELD(LOD1Mesh, Asset, Of("Mesh"),
-				Doc("Intermediate level of detail mesh asset (LOD 1)."));
-			WE_FIELD(LOD2Mesh, Asset, Of("Mesh"),
-				Doc("Distant simplified level of detail mesh asset (LOD 2)."));
-			WE_FIELD(LOD1Distance, Float, Range(1.0f, 1000.0f), Default(30.0f),
+				Doc("Multi-level of detail (LOD) dynamic mesh switching with distance culling, bias, and hysteresis."))
+			WE_FIELD(CustomMeshOverride, Asset, Of("Mesh"),
+				Doc("Optional custom replacement mesh overriding automatic LOD convention."));
+			WE_FIELD(LOD1Distance, Float, Range(1.0f, 1000.0f), Default(15.0f),
 				Doc("Distance in meters to transition from LOD0 to LOD1."));
-			WE_FIELD(LOD2Distance, Float, Range(5.0f, 2000.0f), Default(80.0f),
+			WE_FIELD(LOD2Distance, Float, Range(2.0f, 1500.0f), Default(30.0f),
 				Doc("Distance in meters to transition from LOD1 to LOD2."));
-			WE_FIELD(CullDistance, Float, Range(10.0f, 5000.0f), Default(180.0f),
-				Doc("Maximum distance beyond which all LOD meshes are culled."));
+			WE_FIELD(LOD3Distance, Float, Range(3.0f, 2000.0f), Default(50.0f),
+				Doc("Distance in meters to transition from LOD2 to LOD3."));
+			WE_FIELD(LOD4Distance, Float, Range(4.0f, 2500.0f), Default(75.0f),
+				Doc("Distance in meters to transition from LOD3 to LOD4."));
+			WE_FIELD(LOD5Distance, Float, Range(5.0f, 3000.0f), Default(105.0f),
+				Doc("Distance in meters to transition from LOD4 to LOD5."));
+			WE_FIELD(LOD6Distance, Float, Range(6.0f, 3500.0f), Default(140.0f),
+				Doc("Distance in meters to transition from LOD5 to LOD6."));
+			WE_FIELD(LOD7Distance, Float, Range(7.0f, 4000.0f), Default(180.0f),
+				Doc("Distance in meters to transition from LOD6 to LOD7."));
+			WE_FIELD(CullDistance, Float, Range(10.0f, 5000.0f), Default(240.0f),
+				Doc("Maximum distance beyond which mesh is culled."));
 			WE_FIELD(Hysteresis, Float, Range(0.0f, 20.0f), Default(2.0f),
 				Doc("Distance margin buffer to prevent rapid LOD toggling."));
+			WE_FIELD(LODBias, Float, Range(0.1f, 10.0f), Default(1.0f),
+				Doc("Instance distance scaling bias (<1.0 switches earlier, >1.0 stays high detail longer)."));
+			WE_FIELD(CurrentDistance, Float, Default(0.0f),
+				Doc("Live distance to camera in meters."));
+			WE_FIELD(ForcedLOD, Int8, Default(-1),
+				Doc("Forced LOD override level (-1 for automatic evaluation, 0..7 for forced LOD)."));
+			WE_FIELD(MaxLODLevel, UInt8, Default(7),
+				Doc("Maximum LOD level allowed for decimation degradation."));
 			WE_FIELD(CurrentLOD, UInt8, Default(0),
-				Doc("Current active LOD level index (0, 1, or 2)."));
+				Doc("Current active LOD level index (0 to 7, or 255 if culled)."));
 			WE_FIELD(EnableCrossFade, UInt8, Default(1),
 				Doc("Whether smooth cross-fade transition is enabled."));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(MeshLODComponent) == 64, "MeshLODComponent must be exactly 64 bytes");
 	static_assert(std::is_trivially_copyable_v<MeshLODComponent>, "MeshLODComponent must be trivially copyable");
-	static_assert(offsetof(MeshLODComponent, LOD1Mesh) == 0, "LOD1Mesh offset mismatch");
-	static_assert(offsetof(MeshLODComponent, LOD2Mesh) == 16, "LOD2Mesh offset mismatch");
-	static_assert(offsetof(MeshLODComponent, LOD1Distance) == 32, "LOD1Distance offset mismatch");
-	static_assert(offsetof(MeshLODComponent, LOD2Distance) == 36, "LOD2Distance offset mismatch");
-	static_assert(offsetof(MeshLODComponent, CullDistance) == 40, "CullDistance offset mismatch");
-	static_assert(offsetof(MeshLODComponent, Hysteresis) == 44, "Hysteresis offset mismatch");
-	static_assert(offsetof(MeshLODComponent, CurrentLOD) == 48, "CurrentLOD offset mismatch");
-	static_assert(offsetof(MeshLODComponent, EnableCrossFade) == 49, "EnableCrossFade offset mismatch");
+	static_assert(offsetof(MeshLODComponent, CustomMeshOverride) == 0, "CustomMeshOverride offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD1Distance) == 16, "LOD1Distance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD2Distance) == 20, "LOD2Distance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD3Distance) == 24, "LOD3Distance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD4Distance) == 28, "LOD4Distance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD5Distance) == 32, "LOD5Distance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD6Distance) == 36, "LOD6Distance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LOD7Distance) == 40, "LOD7Distance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, CullDistance) == 44, "CullDistance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, Hysteresis) == 48, "Hysteresis offset mismatch");
+	static_assert(offsetof(MeshLODComponent, LODBias) == 52, "LODBias offset mismatch");
+	static_assert(offsetof(MeshLODComponent, CurrentDistance) == 56, "CurrentDistance offset mismatch");
+	static_assert(offsetof(MeshLODComponent, ForcedLOD) == 60, "ForcedLOD offset mismatch");
+	static_assert(offsetof(MeshLODComponent, MaxLODLevel) == 61, "MaxLODLevel offset mismatch");
+	static_assert(offsetof(MeshLODComponent, CurrentLOD) == 62, "CurrentLOD offset mismatch");
+	static_assert(offsetof(MeshLODComponent, EnableCrossFade) == 63, "EnableCrossFade offset mismatch");
 
 	struct DecalComponent
 	{

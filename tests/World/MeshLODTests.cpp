@@ -2,6 +2,7 @@
 #include <crtdbg.h>
 #endif
 #include "World/Renderer/MeshLOD.h"
+#include "World/Renderer/MeshLODGenerator.h"
 #include "World/Scene/SceneOctree.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
@@ -99,12 +100,33 @@ static void TestMeshLODComponentLayout()
 {
 	MeshLODComponent comp;
 	assert(sizeof(comp) == 64);
-	assert(comp.LOD1Distance == 30.0f);
-	assert(comp.LOD2Distance == 80.0f);
-	assert(comp.CullDistance == 180.0f);
+	assert(comp.LOD1Distance == 15.0f);
+	assert(comp.LOD2Distance == 30.0f);
+	assert(comp.LOD3Distance == 50.0f);
+	assert(comp.LOD4Distance == 75.0f);
+	assert(comp.LOD5Distance == 105.0f);
+	assert(comp.LOD6Distance == 140.0f);
+	assert(comp.LOD7Distance == 180.0f);
+	assert(comp.CullDistance == 240.0f);
 	assert(comp.Hysteresis == 2.0f);
+	assert(comp.LODBias == 1.0f);
+	assert(comp.ForcedLOD == -1);
+	assert(comp.MaxLODLevel == 7);
+	assert(comp.CurrentLOD == 0);
+	assert(comp.EnableCrossFade == 1);
 
-	std::cout << "[PASS] TestMeshLODComponentLayout\n";
+	// 8 级动态阶梯测试
+	const float dists[7] = { 10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f, 70.0f };
+	uint8_t dLOD = MeshLODEvaluator::EvaluateDynamicLOD(5.0f, dists, 7, 100.0f, 0, 1.0f);
+	assert(dLOD == 0);
+	dLOD = MeshLODEvaluator::EvaluateDynamicLOD(25.0f, dists, 7, 100.0f, 0, 1.0f);
+	assert(dLOD == 2);
+	dLOD = MeshLODEvaluator::EvaluateDynamicLOD(75.0f, dists, 7, 100.0f, 0, 1.0f);
+	assert(dLOD == 7);
+	dLOD = MeshLODEvaluator::EvaluateDynamicLOD(120.0f, dists, 7, 100.0f, 7, 1.0f);
+	assert(dLOD == MeshLODEvaluator::kCulled);
+
+	std::cout << "[PASS] TestMeshLODComponentLayout & Dynamic 8 Levels\n";
 }
 
 static void TestMeshLODManager()
@@ -124,6 +146,7 @@ static void TestMeshLODManager()
 	comp.LOD2Distance = 80.0f;
 	comp.CullDistance = 180.0f;
 	comp.Hysteresis = 2.0f;
+	comp.MaxLODLevel = 2;
 
 	// 1. Evaluate with component hysteresis
 	uint8_t lod = mgr.EvaluateLOD(10.0f, comp, 0);
@@ -323,6 +346,49 @@ int main()
 	TestMeshLODManager();
 	TestSceneOctreeExtensions();
 	TestSceneOctreeIntegration();
+
+	// 验证 8 级 LOD 资产批量生成与单调递减
+	{
+		const std::string spherePath = "Engine/content/models/primitives/sphere.wmodel";
+		std::vector<LODLevelConfig> configs = {
+			{ 1, 0.70f, 15.0f },
+			{ 2, 0.45f, 30.0f },
+			{ 3, 0.28f, 50.0f },
+			{ 4, 0.16f, 75.0f },
+			{ 5, 0.09f, 105.0f },
+			{ 6, 0.05f, 140.0f },
+			{ 7, 0.025f, 180.0f }
+		};
+		std::vector<GeneratedLODAsset> generated;
+		std::string err;
+		bool ok = MeshLODGenerator::GenerateAndSaveLODFiles(spherePath, configs, generated, &err);
+		assert(ok);
+		assert(generated.size() == 7);
+		for (size_t i = 1; i < generated.size(); ++i)
+		{
+			assert(generated[i].TriangleCount <= generated[i - 1].TriangleCount);
+		}
+		std::cout << "[PASS] TestGenerate8LevelLODAssets (Sphere LOD1..LOD7 generated and verified)\n";
+	}
+
+	// 为角色 mannequin 与植被 pebble 生成多级 LOD 资产
+	{
+		const std::string mannequinPath = "Engine/content/models/characters/mannequin.wmodel";
+		std::vector<LODLevelConfig> configs = {
+			{ 1, 0.60f, 20.0f },
+			{ 2, 0.35f, 40.0f },
+			{ 3, 0.20f, 65.0f },
+			{ 4, 0.12f, 95.0f },
+			{ 5, 0.07f, 130.0f }
+		};
+		std::vector<GeneratedLODAsset> genMannequin;
+		std::string err;
+		MeshLODGenerator::GenerateAndSaveLODFiles(mannequinPath, configs, genMannequin, &err);
+
+		const std::string pebblePath = "Engine/content/models/foliage/scatter_pebble.wmodel";
+		std::vector<GeneratedLODAsset> genPebble;
+		MeshLODGenerator::GenerateAndSaveLODFiles(pebblePath, configs, genPebble, &err);
+	}
 	std::cout << "All World.MeshLOD tests passed successfully!\n";
 	return 0;
 }
