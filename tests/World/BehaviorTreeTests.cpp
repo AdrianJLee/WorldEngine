@@ -7,7 +7,9 @@
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
 
+#include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -353,6 +355,198 @@ static void TestBehaviorTreeAssetSerializationAndInstantiation()
 	std::cout << "[PASS] TestBehaviorTreeAssetSerializationAndInstantiation\n";
 }
 
+static void TestGenericActionsAndConditions()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	Entity agent = Entity::CreateEntity(&scene, "GenericAgent");
+	agent.AddComponent<TransformComponent>(glm::vec3(0.0f, 0.0f, 0.0f));
+	agent.AddComponent<HealthComponent>(75.0f, 100.0f);
+	auto& bt = agent.AddComponent<BehaviorTreeComponent>();
+
+	BehaviorContext ctx{ scene, agent, bt, 0.016f };
+
+	// 1. MoveToTarget Action 测试
+	{
+		bt.BlackboardTargetPos = glm::vec3(0.0f, 0.0f, 10.0f);
+		BehaviorTreeNodeDesc moveDesc;
+		moveDesc.Id = 1;
+		moveDesc.ParentId = 0;
+		moveDesc.Kind = BehaviorTreeNodeKind::Action;
+		moveDesc.ActionType = "MoveToTarget";
+		moveDesc.FloatParam = 4.0f; // 速度 4 m/s
+
+		BehaviorTreeAsset asset;
+		asset.Nodes().push_back(moveDesc);
+
+		auto moveNode = asset.InstantiateTree();
+		assert(moveNode != nullptr);
+
+		// 第 1 步：Dt = 1.0s, step = 4.0m < 10.0m -> Running
+		ctx.Dt = 1.0f;
+		NodeStatus s1 = moveNode->Tick(ctx);
+		assert(s1 == NodeStatus::Running);
+		assert(bt.StateMachineState == 1);
+		assert(std::abs(agent.GetComponent<TransformComponent>().Location.z - 4.0f) < 0.001f);
+
+		// 第 2 步：Dt = 2.0s, step = 8.0m >= remaining 6.0m -> Success
+		ctx.Dt = 2.0f;
+		NodeStatus s2 = moveNode->Tick(ctx);
+		assert(s2 == NodeStatus::Success);
+		assert(std::abs(agent.GetComponent<TransformComponent>().Location.z - 10.0f) < 0.001f);
+	}
+
+	// 2. TargetInRange Condition 测试 (坐标与 TargetEntity 双支持)
+	{
+		BehaviorTreeNodeDesc condDesc;
+		condDesc.Id = 1;
+		condDesc.ParentId = 0;
+		condDesc.Kind = BehaviorTreeNodeKind::Condition;
+		condDesc.ConditionType = "TargetInRange";
+		condDesc.FloatParam = 5.0f; // 范围 5m
+
+		BehaviorTreeAsset asset;
+		asset.Nodes().push_back(condDesc);
+		auto condNode = asset.InstantiateTree();
+		assert(condNode != nullptr);
+
+		// 当前 Agent 位于 (0, 0, 10)
+		// 目标点位于 (0, 0, 20) -> 距离 10m > 5m -> Failure
+		bt.BlackboardTargetPos = glm::vec3(0.0f, 0.0f, 20.0f);
+		bt.TargetEntity = 0;
+		NodeStatus sFar = condNode->Tick(ctx);
+		assert(sFar == NodeStatus::Failure);
+
+		// 目标点位于 (0, 0, 12) -> 距离 2m <= 5m -> Success
+		bt.BlackboardTargetPos = glm::vec3(0.0f, 0.0f, 12.0f);
+		NodeStatus sNear = condNode->Tick(ctx);
+		assert(sNear == NodeStatus::Success);
+
+		// 通过 TargetEntity 检查
+		Entity targetEnt = Entity::CreateEntity(&scene, "TargetDummy");
+		targetEnt.AddComponent<TransformComponent>(glm::vec3(0.0f, 0.0f, 13.0f)); // 距离 3m
+		bt.TargetEntity = static_cast<uint32_t>((entt::entity)targetEnt);
+
+		NodeStatus sEntityNear = condNode->Tick(ctx);
+		assert(sEntityNear == NodeStatus::Success);
+
+		// 移动 TargetEntity 到远离处 (0, 0, 50) -> 距离 40m > 5m -> Failure
+		targetEnt.GetComponent<TransformComponent>().Location = glm::vec3(0.0f, 0.0f, 50.0f);
+		NodeStatus sEntityFar = condNode->Tick(ctx);
+		assert(sEntityFar == NodeStatus::Failure);
+	}
+
+	// 3. SetBlackboardTag 与 BlackboardTagEquals 测试
+	{
+		BehaviorTreeAsset asset;
+		BehaviorTreeNodeDesc seqDesc;
+		seqDesc.Id = 1;
+		seqDesc.ParentId = 0;
+		seqDesc.Kind = BehaviorTreeNodeKind::Sequence;
+
+		BehaviorTreeNodeDesc setTagDesc;
+		setTagDesc.Id = 2;
+		setTagDesc.ParentId = 1;
+		setTagDesc.Kind = BehaviorTreeNodeKind::Action;
+		setTagDesc.ActionType = "SetBlackboardTag";
+		setTagDesc.FloatParam = 99.0f;
+
+		BehaviorTreeNodeDesc checkTagDesc;
+		checkTagDesc.Id = 3;
+		checkTagDesc.ParentId = 1;
+		checkTagDesc.Kind = BehaviorTreeNodeKind::Condition;
+		checkTagDesc.ConditionType = "BlackboardTagEquals";
+		checkTagDesc.FloatParam = 99.0f;
+
+		asset.Nodes().push_back(seqDesc);
+		asset.Nodes().push_back(setTagDesc);
+		asset.Nodes().push_back(checkTagDesc);
+
+		auto tree = asset.InstantiateTree();
+		assert(tree != nullptr);
+
+		bt.BlackboardTag = 0;
+		NodeStatus s = tree->Tick(ctx);
+		assert(s == NodeStatus::Success);
+		assert(bt.BlackboardTag == 99);
+	}
+
+	// 4. HealthAbove 与 HealthBelow 测试
+	{
+		BehaviorTreeAsset asset;
+		BehaviorTreeNodeDesc healthAboveDesc;
+		healthAboveDesc.Id = 1;
+		healthAboveDesc.ParentId = 0;
+		healthAboveDesc.Kind = BehaviorTreeNodeKind::Condition;
+		healthAboveDesc.ConditionType = "HealthAbove";
+		healthAboveDesc.FloatParam = 70.0f; // Agent HP = 75.0 > 70.0 -> Success
+		asset.Nodes().push_back(healthAboveDesc);
+
+		auto tree = asset.InstantiateTree();
+		assert(tree != nullptr);
+		assert(tree->Tick(ctx) == NodeStatus::Success);
+
+		// 阈值设为 80.0 -> 75.0 < 80.0 -> Failure
+		asset.Nodes()[0].FloatParam = 80.0f;
+		auto treeFail = asset.InstantiateTree();
+		assert(treeFail->Tick(ctx) == NodeStatus::Failure);
+	}
+
+	// 5. ScriptAction 与 ScriptCondition 插槽测试
+	{
+		BehaviorTreeAsset asset;
+		BehaviorTreeNodeDesc seqDesc;
+		seqDesc.Id = 1;
+		seqDesc.ParentId = 0;
+		seqDesc.Kind = BehaviorTreeNodeKind::Sequence;
+
+		BehaviorTreeNodeDesc scriptCondDesc;
+		scriptCondDesc.Id = 2;
+		scriptCondDesc.ParentId = 1;
+		scriptCondDesc.Kind = BehaviorTreeNodeKind::Condition;
+		scriptCondDesc.ConditionType = "ScriptCondition";
+		scriptCondDesc.StringParam = "assets/scripts/ai/conditions/CustomCheck.luau";
+
+		BehaviorTreeNodeDesc scriptActDesc;
+		scriptActDesc.Id = 3;
+		scriptActDesc.ParentId = 1;
+		scriptActDesc.Kind = BehaviorTreeNodeKind::Action;
+		scriptActDesc.ActionType = "ScriptAction";
+		scriptActDesc.StringParam = "assets/scripts/ai/actions/CustomAction.luau";
+
+		asset.Nodes().push_back(seqDesc);
+		asset.Nodes().push_back(scriptCondDesc);
+		asset.Nodes().push_back(scriptActDesc);
+
+		auto tree = asset.InstantiateTree();
+		assert(tree != nullptr);
+		assert(tree->Tick(ctx) == NodeStatus::Success);
+	}
+
+	// 6. 标准类型字典查询静态方法测试
+	{
+		const auto& condTypes = BehaviorTreeAsset::GetStandardConditionTypes();
+		assert(!condTypes.empty());
+		assert(std::find(condTypes.begin(), condTypes.end(), "MoveToTarget") == condTypes.end());
+		assert(std::find(condTypes.begin(), condTypes.end(), "TargetInRange") != condTypes.end());
+		assert(std::find(condTypes.begin(), condTypes.end(), "ScriptCondition") != condTypes.end());
+
+		const auto& actTypes = BehaviorTreeAsset::GetStandardActionTypes();
+		assert(!actTypes.empty());
+		assert(std::find(actTypes.begin(), actTypes.end(), "MoveToTarget") != actTypes.end());
+		assert(std::find(actTypes.begin(), actTypes.end(), "SetBlackboardTag") != actTypes.end());
+		assert(std::find(actTypes.begin(), actTypes.end(), "ScriptAction") != actTypes.end());
+
+		const auto& bbTypes = BehaviorTreeAsset::GetStandardBlackboardTypes();
+		assert(!bbTypes.empty());
+		assert(std::find(bbTypes.begin(), bbTypes.end(), "Float") != bbTypes.end());
+		assert(std::find(bbTypes.begin(), bbTypes.end(), "Vector3") != bbTypes.end());
+	}
+
+	std::cout << "[PASS] TestGenericActionsAndConditions\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -363,6 +557,7 @@ int main()
 	TestSelectorRunningAndResume();
 	TestBehaviorTreeSystemBatchExecution();
 	TestBehaviorTreeAssetSerializationAndInstantiation();
+	TestGenericActionsAndConditions();
 
 	std::cout << "All WorldBehaviorTreeTests passed successfully.\n";
 	return 0;

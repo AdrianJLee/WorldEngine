@@ -44,8 +44,15 @@ namespace World
 			Blackboard
 		};
 
+		enum class ScriptTemplateKind
+		{
+			Action,
+			Condition
+		};
+
 		void SetDefaultTemplate();
 		std::filesystem::path ResolvePhysicalPath(const std::string& logicalPath) const;
+		void EnsureScriptFileExists(const std::string& logicalPath, ScriptTemplateKind kind);
 
 		// 树结构操作辅助
 		void AddChildNode(uint32_t parentId, BTNodeKind kind);
@@ -75,6 +82,7 @@ namespace World
 		std::vector<BTBlackboardKeyDesc> m_BlackboardKeys;
 		uint32_t m_NextNodeId = 1;
 		uint32_t m_SelectedNodeId = 1;
+		int m_SelectedBbTemplateIndex = 0;
 
 		ViewTab m_ActiveTab = ViewTab::TreeOutline;
 		std::string m_StatusFeedback;

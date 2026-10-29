@@ -51,6 +51,10 @@ namespace World::Gameplay
 
 		std::shared_ptr<BehaviorNode> InstantiateTree() const;
 
+		static const std::vector<std::string>& GetStandardConditionTypes();
+		static const std::vector<std::string>& GetStandardActionTypes();
+		static const std::vector<std::string>& GetStandardBlackboardTypes();
+
 		std::vector<BehaviorTreeNodeDesc>& Nodes() { return m_Nodes; }
 		const std::vector<BehaviorTreeNodeDesc>& Nodes() const { return m_Nodes; }
 

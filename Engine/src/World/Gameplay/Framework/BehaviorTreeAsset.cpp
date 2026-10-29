@@ -95,6 +95,30 @@ namespace World::Gameplay
 					return ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null);
 				});
 			}
+			else if (type == "TargetInRange" || type == "IsEnemyInRange")
+			{
+				return std::make_shared<ConditionNode>([param](BehaviorContext& ctx) {
+					if (!ctx.Self.HasComponent<TransformComponent>())
+						return false;
+
+					const auto& tr = ctx.Self.GetComponent<TransformComponent>();
+					glm::vec3 selfPos = tr.Location;
+					glm::vec3 targetPos = ctx.Component.BlackboardTargetPos;
+
+					if (ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null))
+					{
+						Entity targetEntity(&ctx.CurrentScene, static_cast<entt::entity>(ctx.Component.TargetEntity));
+						if (targetEntity.IsValid() && targetEntity.HasComponent<TransformComponent>())
+						{
+							targetPos = targetEntity.GetComponent<TransformComponent>().Location;
+						}
+					}
+
+					float range = param > 0.0f ? param : 5.0f;
+					float dist = glm::length(targetPos - selfPos);
+					return dist <= range;
+				});
+			}
 			else if (type == "TimerElapsed" || type == "TimerExceeded")
 			{
 				return std::make_shared<ConditionNode>([param](BehaviorContext& ctx) {
@@ -118,6 +142,13 @@ namespace World::Gameplay
 			{
 				return std::make_shared<ConditionNode>([param](BehaviorContext& ctx) {
 					return ctx.Component.BlackboardValue < param;
+				});
+			}
+			else if (type == "ScriptCondition")
+			{
+				std::string scriptPath = desc.StringParam;
+				return std::make_shared<ConditionNode>([scriptPath](BehaviorContext& /*ctx*/) {
+					return true;
 				});
 			}
 			else if (type == "AlwaysFalse")
@@ -253,6 +284,42 @@ namespace World::Gameplay
 					return NodeStatus::Success;
 				});
 			}
+			else if (type == "MoveToTarget")
+			{
+				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
+					if (!ctx.Self.HasComponent<TransformComponent>())
+						return NodeStatus::Failure;
+
+					auto& tr = ctx.Self.GetComponent<TransformComponent>();
+					glm::vec3 targetPos = ctx.Component.BlackboardTargetPos;
+					if (ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null))
+					{
+						Entity targetEntity(&ctx.CurrentScene, static_cast<entt::entity>(ctx.Component.TargetEntity));
+						if (targetEntity.IsValid() && targetEntity.HasComponent<TransformComponent>())
+						{
+							targetPos = targetEntity.GetComponent<TransformComponent>().Location;
+							ctx.Component.BlackboardTargetPos = targetPos;
+						}
+					}
+
+					glm::vec3 diff = targetPos - tr.Location;
+					float dist = glm::length(diff);
+					float speed = param > 0.0f ? param : 3.0f;
+					float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
+					float step = speed * dt;
+
+					ctx.Component.StateMachineState = 1; // 1 = Moving/Seek
+
+					if (dist <= 0.05f || step >= dist)
+					{
+						tr.Location = targetPos;
+						return NodeStatus::Success;
+					}
+
+					tr.Location += (diff / dist) * step;
+					return NodeStatus::Running;
+				});
+			}
 			else if (type == "Wait")
 			{
 				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
@@ -280,10 +347,25 @@ namespace World::Gameplay
 					return NodeStatus::Success;
 				});
 			}
+			else if (type == "SetBlackboardTag")
+			{
+				uint32_t tag = static_cast<uint32_t>(param);
+				return std::make_shared<ActionNode>([tag](BehaviorContext& ctx) {
+					ctx.Component.BlackboardTag = tag;
+					return NodeStatus::Success;
+				});
+			}
 			else if (type == "ResetTimer")
 			{
 				return std::make_shared<ActionNode>([](BehaviorContext& ctx) {
 					ctx.Component.ExecutionTimer = 0.0f;
+					return NodeStatus::Success;
+				});
+			}
+			else if (type == "ScriptAction")
+			{
+				std::string scriptPath = desc.StringParam;
+				return std::make_shared<ActionNode>([scriptPath](BehaviorContext& /*ctx*/) {
 					return NodeStatus::Success;
 				});
 			}
@@ -587,5 +669,55 @@ namespace World::Gameplay
 
 		std::unordered_set<uint32_t> visited;
 		return BuildSubtree(rootId, m_Nodes, visited);
+	}
+
+	const std::vector<std::string>& BehaviorTreeAsset::GetStandardConditionTypes()
+	{
+		static const std::vector<std::string> s_Types = {
+			"HasTarget",
+			"TargetInRange",
+			"HealthBelow",
+			"HealthAbove",
+			"TimerElapsed",
+			"BlackboardTagEquals",
+			"BlackboardValueGreater",
+			"BlackboardValueLess",
+			"ScriptCondition",
+			"AlwaysTrue",
+			"AlwaysFalse",
+			"Custom"
+		};
+		return s_Types;
+	}
+
+	const std::vector<std::string>& BehaviorTreeAsset::GetStandardActionTypes()
+	{
+		static const std::vector<std::string> s_Types = {
+			"Wait",
+			"Patrol",
+			"MoveToTarget",
+			"SeekSmartObject",
+			"UseSmartObject",
+			"SetBlackboardValue",
+			"IncrementBlackboardValue",
+			"SetBlackboardTag",
+			"ResetTimer",
+			"ScriptAction",
+			"Custom"
+		};
+		return s_Types;
+	}
+
+	const std::vector<std::string>& BehaviorTreeAsset::GetStandardBlackboardTypes()
+	{
+		static const std::vector<std::string> s_Types = {
+			"Float",
+			"Vector3",
+			"Entity",
+			"Bool",
+			"String",
+			"Int"
+		};
+		return s_Types;
 	}
 }
