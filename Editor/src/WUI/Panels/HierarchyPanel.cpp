@@ -575,9 +575,9 @@ namespace World
 			const Gameplay::PrefabInstanceRecord* contextRecord = OwningRecord(*scene, contextHandle);
 			// 菜单高度 = 条目数 × 22 + 8:实例子树多出"来源说明 + 3 个动作"四行,
 			// 旧实现把这几行画在声明高度之外(面板底图盖不住)。
-			const size_t itemCount = 6u + (contextRecord ? 4u : 0u);
+			const size_t itemCount = 8u + (contextRecord ? 4u : 0u);
 			Wui::WuiRect panel;
-			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 190.0f, itemCount, &panel, theme))
+			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 230.0f, itemCount, &panel, theme))
 			{
 				float itemY = panel.Y + 4.0f;
 				const auto nextItem = [&itemY, &panel]()
@@ -656,6 +656,57 @@ namespace World
 						host.SetSelectedEntity(created);
 						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Landscape"));
 						host.SetEditorToolMode(EditorToolMode::Landscape);
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createdecal_ent"),
+					nextItem(), "Create Decal Projector (贴花)", theme))
+				{
+					const auto gizmoCam = host.GetGizmoCamera();
+					const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+					const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+					Entity created;
+					if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "Decal Projector");
+							auto& xf = created.AddComponent<TransformComponent>();
+							xf.SetLocation(spawnPos);
+							auto& decal = created.AddComponent<DecalComponent>();
+							decal.Extents = { 0.5f, 0.25f, 0.5f };
+							decal.FadeFactor = 1.0f;
+							decal.NormalAngleCutoff = 60.0f;
+							decal.AffectTerrain = 1;
+							decal.AffectMeshes = 1;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Decal Projector"));
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createconvex_ent"),
+					nextItem(), "Create Convex Collider 3D (凸包)", theme))
+				{
+					const auto gizmoCam = host.GetGizmoCamera();
+					const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+					const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+					Entity created;
+					if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "Convex Collider 3D");
+							auto& xf = created.AddComponent<TransformComponent>();
+							xf.SetLocation(spawnPos);
+							auto& convex = created.AddComponent<ConvexCollider3DComponent>();
+							convex.HullCount = 1;
+							convex.MaxVerticesPerHull = 32;
+							convex.ConcavityThreshold = 0.05f;
+							convex.IsTrigger = 0;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Convex Collider 3D"));
 						host.MarkDocumentDirty();
 					}
 					ctx.CloseAllPopups();
@@ -764,10 +815,22 @@ namespace World
 		if (ctx.IsPopupOpen(blankPopup))
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect panel { m_BlankMenuPos.x, m_BlankMenuPos.y, 220, 6 * 22 + 8 };
+			constexpr size_t blankItemCount = 8;
+			const Wui::WuiRect panel { m_BlankMenuPos.x, m_BlankMenuPos.y, 230, blankItemCount * 22 + 8 };
 			DrawPanelSurface(ctx, panel, theme);
+			float itemY = panel.Y + 4.0f;
+			const auto nextBlankItem = [&itemY, &panel]()
+			{
+				const Wui::WuiRect item { panel.X + 4.0f, itemY, panel.W - 8.0f, 22.0f };
+				itemY += 22.0f;
+				return item;
+			};
 			const bool hasSelection = host.GetSelectedEntity().IsValid() && host.GetSelectedEntity().GetScene() == scene.get();
-			if (MenuItem(ctx, Wui::HashId("hierarchy.create"), { panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Create Empty Entity", true, theme))
+			const auto gizmoCam = host.GetGizmoCamera();
+			const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+			const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+
+			if (MenuItem(ctx, Wui::HashId("hierarchy.create"), nextBlankItem(), "Create Empty Entity", true, theme))
 			{
 				Entity created;
 				if (scene->DeferStructuralChange([&created](Scene& s) { created = Entity::CreateEntity(&s, "Empty Entity"); }) && created.IsValid())
@@ -778,7 +841,7 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.createcamera"), { panel.X + 4, panel.Y + 26, panel.W - 8, 22 }, "Create Camera", true, theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createcamera"), nextBlankItem(), "Create Camera", true, theme))
 			{
 				Entity created;
 				if (scene->DeferStructuralChange([&created](Scene& s)
@@ -795,7 +858,7 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.createvfx"), { panel.X + 4, panel.Y + 48, panel.W - 8, 22 }, "Create VFX Entity", true, theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createvfx"), nextBlankItem(), "Create VFX Entity", true, theme))
 			{
 				Entity created;
 				if (scene->DeferStructuralChange([&created](Scene& s)
@@ -811,7 +874,7 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.createterrain"), { panel.X + 4, panel.Y + 70, panel.W - 8, 22 }, "Create 3D Landscape (3D 地貌)", true, theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createterrain"), nextBlankItem(), "Create 3D Landscape (3D 地貌)", true, theme))
 			{
 				Entity created;
 				if (scene->DeferStructuralChange([&created](Scene& s)
@@ -831,7 +894,50 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), { panel.X + 4, panel.Y + 92, panel.W - 8, 22 }, "Duplicate Selected", hasSelection, theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createdecal"), nextBlankItem(), "Create Decal Projector (贴花)", true, theme))
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Decal Projector");
+						auto& xf = created.AddComponent<TransformComponent>();
+						xf.SetLocation(spawnPos);
+						auto& decal = created.AddComponent<DecalComponent>();
+						decal.Extents = { 0.5f, 0.25f, 0.5f };
+						decal.FadeFactor = 1.0f;
+						decal.NormalAngleCutoff = 60.0f;
+						decal.AffectTerrain = 1;
+						decal.AffectMeshes = 1;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Decal Projector"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createconvex"), nextBlankItem(), "Create Convex Collider 3D (凸包)", true, theme))
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Convex Collider 3D");
+						auto& xf = created.AddComponent<TransformComponent>();
+						xf.SetLocation(spawnPos);
+						auto& convex = created.AddComponent<ConvexCollider3DComponent>();
+						convex.HullCount = 1;
+						convex.MaxVerticesPerHull = 32;
+						convex.ConcavityThreshold = 0.05f;
+						convex.IsTrigger = 0;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Convex Collider 3D"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), nextBlankItem(), "Duplicate Selected", hasSelection, theme))
 			{
 				if (hasSelection)
 				{
@@ -840,7 +946,7 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.deletesel"), { panel.X + 4, panel.Y + 114, panel.W - 8, 22 }, "Delete Selected", hasSelection, theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.deletesel"), nextBlankItem(), "Delete Selected", hasSelection, theme))
 			{
 				if (hasSelection)
 				{

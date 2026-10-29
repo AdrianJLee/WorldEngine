@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <vector>
 
 using namespace World;
 
@@ -38,12 +39,38 @@ static void TestDecalProjectionAndClipping()
 	bool okGrazing = DecalProjector::ProjectWorldPoint(invDecal, glm::vec3(10.0f, 5.0f, 10.0f), wallNorm, decalDir, 60.0f, uv, fade);
 	assert(!okGrazing);
 
+	// 4. ProjectToPlane 平面投射测试：地面在 Y = 4.0 (在局部盒体 Y in [3, 7] 范围内)
+	glm::vec3 quadPositions[4];
+	glm::vec2 quadUVs[4];
+	float planeFade = 0.0f;
+	const glm::vec3 planePt(10.0f, 4.0f, 10.0f);
+	bool okPlane = DecalProjector::ProjectToPlane(
+		decalXform, invDecal, planePt, groundNorm, decalDir, 60.0f,
+		quadPositions, quadUVs, planeFade);
+	assert(okPlane);
+	assert(planeFade > 0.4f);
+	for (int i = 0; i < 4; ++i)
+	{
+		// 顶点带有 0.002f 深度偏移
+		assert(std::abs(quadPositions[i].y - 4.002f) < 1e-4f);
+		assert(quadUVs[i].x >= 0.0f && quadUVs[i].x <= 1.0f);
+		assert(quadUVs[i].y >= 0.0f && quadUVs[i].y <= 1.0f);
+	}
+
+	// 5. 反向平面法线与掠射角截断测试
+	const glm::vec3 invertedNorm(0.0f, -1.0f, 0.0f);
+	bool okBackPlane = DecalProjector::ProjectToPlane(
+		decalXform, invDecal, planePt, invertedNorm, decalDir, 60.0f,
+		quadPositions, quadUVs, planeFade);
+	assert(!okBackPlane);
+
 	std::cout << "[PASS] TestDecalProjectionAndClipping\n";
 }
 
-static void TestConvexDecomposition()
+static void TestConvexQuickHull()
 {
-	std::vector<glm::vec3> points = {
+	// 8 个立方体角点 (尺寸 10x10x10，理论体积 1000)
+	std::vector<glm::vec3> boxPoints = {
 		{ -5.0f, -5.0f, -5.0f },
 		{  5.0f, -5.0f, -5.0f },
 		{  5.0f,  5.0f, -5.0f },
@@ -55,23 +82,85 @@ static void TestConvexDecomposition()
 	};
 
 	ConvexHull hull;
-	bool ok = ConvexDecomposer::ComputeHull(points, hull);
+	bool ok = ConvexDecomposer::ComputeHull(boxPoints, hull);
 	assert(ok);
-	assert(!hull.Vertices.empty());
-	assert(!hull.Indices.empty());
-	assert(hull.Volume > 0.0f);
+	assert(hull.Vertices.size() == 8);
+	assert(hull.Indices.size() == 36); // 12 个三角面
+	assert(hull.IsConvex());
+	assert(std::abs(hull.Volume - 1000.0f) < 1.0f);
 
-	// 内部点判定
+	// 内部点与外部点严密判定
 	assert(hull.ContainsPoint(glm::vec3(0.0f, 0.0f, 0.0f)));
-	// 外部点判定
+	assert(hull.ContainsPoint(glm::vec3(4.99f, 4.99f, 4.99f)));
+	assert(!hull.ContainsPoint(glm::vec3(5.1f, 0.0f, 0.0f)));
 	assert(!hull.ContainsPoint(glm::vec3(20.0f, 0.0f, 0.0f)));
 
-	// 网格分解
-	std::vector<ConvexHull> subHulls;
-	ConvexDecomposer::Decompose(points, hull.Indices, 2, 0.05f, subHulls);
-	assert(subHulls.size() >= 1);
+	// 在点云内部注入 10 个内点，验证 QuickHull 算法能自动剔除内点，保持凸包顶点数不变
+	std::vector<glm::vec3> pointsWithInternals = boxPoints;
+	pointsWithInternals.push_back({ 0.0f, 0.0f, 0.0f });
+	pointsWithInternals.push_back({ 1.0f, 2.0f, -1.0f });
+	pointsWithInternals.push_back({ -2.0f, 1.0f, 3.0f });
+	pointsWithInternals.push_back({ 3.0f, -3.0f, 2.0f });
 
-	std::cout << "[PASS] TestConvexDecomposition (Subhulls: " << subHulls.size() << ")\n";
+	ConvexHull prunedHull;
+	bool okPruned = ConvexDecomposer::ComputeHull(pointsWithInternals, prunedHull);
+	assert(okPruned);
+	assert(prunedHull.Vertices.size() == 8);
+	assert(prunedHull.Indices.size() == 36);
+	assert(prunedHull.IsConvex());
+	assert(std::abs(prunedHull.Volume - 1000.0f) < 1.0f);
+
+	std::cout << "[PASS] TestConvexQuickHull (Vertices: " << hull.Vertices.size() << ", Volume: " << hull.Volume << ")\n";
+}
+
+static void TestConcaveMeshDecomposition()
+{
+	// 构造典型 3D 凹体：U 型槽 (16 个顶点，两根立柱与底槽，中间顶部有空槽)
+	// 左立柱: X in [-3, -1], Y in [0, 4], Z in [-2, 2]
+	// 右立柱: X in [ 1,  3], Y in [0, 4], Z in [-2, 2]
+	// 中间顶部 (X in [-1, 1], Y in [1, 4]) 为凹陷区域
+	std::vector<glm::vec3> uMeshPoints = {
+		// 左立柱 8 顶点
+		{ -3.0f, 0.0f, -2.0f }, { -1.0f, 0.0f, -2.0f },
+		{ -1.0f, 4.0f, -2.0f }, { -3.0f, 4.0f, -2.0f },
+		{ -3.0f, 0.0f,  2.0f }, { -1.0f, 0.0f,  2.0f },
+		{ -1.0f, 4.0f,  2.0f }, { -3.0f, 4.0f,  2.0f },
+
+		// 右立柱 8 顶点
+		{  1.0f, 0.0f, -2.0f }, {  3.0f, 0.0f, -2.0f },
+		{  3.0f, 4.0f, -2.0f }, {  1.0f, 4.0f, -2.0f },
+		{  1.0f, 0.0f,  2.0f }, {  3.0f, 0.0f,  2.0f },
+		{  3.0f, 4.0f,  2.0f }, {  1.0f, 4.0f,  2.0f }
+	};
+
+	// 1. 验证单一凸包算法会将空槽连桥包裹，整体凸包体积较大
+	ConvexHull singleHull;
+	bool okSingle = ConvexDecomposer::ComputeHull(uMeshPoints, singleHull);
+	assert(okSingle);
+	assert(singleHull.IsConvex());
+	const float singleVolume = singleHull.Volume;
+	assert(singleVolume > 0.0f);
+
+	// 2. 凹体分解：分解为 2 个子凸包 (左臂与右臂)
+	std::vector<ConvexHull> subHulls;
+	ConvexDecomposer::Decompose(uMeshPoints, {}, 2, 0.05f, subHulls);
+	assert(subHulls.size() >= 2);
+
+	float totalSubVolume = 0.0f;
+	for (const auto& sub : subHulls)
+	{
+		assert(sub.IsConvex());
+		assert(sub.Volume > 0.0f);
+		assert(sub.Vertices.size() >= 4);
+		assert(sub.Indices.size() >= 12);
+		totalSubVolume += sub.Volume;
+	}
+
+	// 凹体分解后去除了 U 型槽凹陷空隙，总子凸包体积严格小于单外包体积
+	assert(totalSubVolume < singleVolume);
+
+	std::cout << "[PASS] TestConcaveMeshDecomposition (Subhulls: " << subHulls.size()
+		<< ", SingleVol: " << singleVolume << ", DecomposedTotalVol: " << totalSubVolume << ")\n";
 }
 
 static void TestDecalAndConvexComponentLayout()
@@ -80,11 +169,15 @@ static void TestDecalAndConvexComponentLayout()
 	assert(sizeof(decal) == 48);
 	assert(decal.FadeFactor == 1.0f);
 	assert(decal.NormalAngleCutoff == 60.0f);
+	assert(decal.AffectTerrain == 1);
+	assert(decal.AffectMeshes == 1);
 
 	ConvexCollider3DComponent convex;
 	assert(sizeof(convex) == 32);
 	assert(convex.HullCount == 1);
 	assert(convex.MaxVerticesPerHull == 32);
+	assert(convex.ConcavityThreshold == 0.05f);
+	assert(convex.IsTrigger == 0);
 
 	std::cout << "[PASS] TestDecalAndConvexComponentLayout\n";
 }
@@ -93,7 +186,8 @@ int main()
 {
 	std::cout << "Starting World.Decal tests...\n";
 	TestDecalProjectionAndClipping();
-	TestConvexDecomposition();
+	TestConvexQuickHull();
+	TestConcaveMeshDecomposition();
 	TestDecalAndConvexComponentLayout();
 	std::cout << "All World.Decal tests passed successfully!\n";
 	return 0;

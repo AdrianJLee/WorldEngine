@@ -1,0 +1,28 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000012
+  World::TagComponent:
+    Tag: "Dynamic Debris Shard"
+  World::TransformComponent:
+    Location: [8.0, 8.0, 1.5]
+    Rotation: [40, 15, 55]
+    Scale: [1.5, 1.5, 1.5]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.25, 0.75, 0.95, 1.0]
+    Mesh: "engine/models/debris_shard.wmodel"
+  World::RigidBody3DComponent:
+    BodyType: 0
+    Mass: 6.0
+    Restitution: 0.35
+    Friction: 0.5
+  World::ConvexCollider3DComponent:
+    MeshSource: "engine/models/debris_shard.wmodel"
+    HullCount: 4
+    MaxVerticesPerHull: 32
+    ConcavityThreshold: 0.05
+    IsTrigger: 0
+  World::LevelEntityComponent:
+    DataLayerMask: 4

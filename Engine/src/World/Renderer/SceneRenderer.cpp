@@ -33,6 +33,7 @@
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Terrain/TerrainRenderer.h"
 #include "World/Foliage/FoliageRenderer.h"
+#include "World/Renderer/Decal.h"
 #include "World/Renderer/CSM.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
@@ -1590,6 +1591,7 @@ namespace World
 		RenderFoliage(camera, cameraTransform);
 		Render2DLighting(camera, cameraTransform);
 		RenderGeometry(camera, cameraTransform);
+		RenderDecals(camera, cameraTransform);
 		RenderParticles(camera, cameraTransform);
 
 		// M2: Fullscreen Post-Processing Passes (Flash White Overlay)
@@ -3193,6 +3195,128 @@ namespace World
 	}
 
 
+
+	void SceneRenderer::RenderDecals(const Camera&, const glm::mat4&)
+	{
+		WLD_TRACE_FUNCTION();
+		if (!m_ActiveScene)
+			return;
+
+		auto decalView = m_ActiveScene->m_Registry.view<TransformComponent, DecalComponent>();
+		for (auto entity : decalView)
+		{
+			if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+				continue;
+
+			const auto& [transform, decal] = decalView.get<TransformComponent, DecalComponent>(entity);
+			if (decal.FadeFactor <= 0.001f)
+				continue;
+
+			// 计算层级世界矩阵
+			const glm::mat4 localMat = transform.GetLocalMatrix();
+			const glm::mat4* worldMatPtr = ResolveSpriteRenderMatrix(*m_ActiveScene, entity, localMat);
+			const glm::mat4 worldMat = worldMatPtr ? *worldMatPtr : localMat;
+
+			// 贴花投影局部盒体按 Extents 缩放
+			const glm::mat4 decalModel = glm::scale(worldMat, glm::max(glm::vec3(0.01f), decal.Extents));
+			const glm::mat4 invDecalModel = glm::inverse(decalModel);
+
+			// 贴花投射方向 (局部 -Y 轴朝向世界空间投影)
+			const glm::vec3 decalDir = glm::normalize(glm::vec3(decalModel * glm::vec4(0.0f, -1.0f, 0.0f, 0.0f)));
+
+			// 获取贴花纹理 (无资产时自动优雅回退为内置高对比度贴花纹理)
+			Rhi::Handle<Rhi::Texture> texture;
+			if (decal.DecalMaterial.HasPath())
+				texture = ResolveTextureAsset(decal.DecalMaterial);
+			if (!texture)
+				texture = DecalRenderer::GetDefaultDecalTexture();
+			if (!texture)
+				continue;
+
+			// 1. 投射到地形/地面表面 (AffectTerrain)
+			if (decal.AffectTerrain)
+			{
+				glm::vec3 groundPoint(decalModel[3].x, 0.0f, decalModel[3].z);
+				glm::vec3 groundNormal(0.0f, 1.0f, 0.0f);
+
+				// 若场景中存在地形，采样地形实际高度
+				if constexpr (Detail::IsCompleteType<TerrainComponent>::value)
+				{
+				auto terrainView = m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>();
+				for (auto tEntity : terrainView)
+				{
+					const auto& [tXform, tComp] = terrainView.get<TransformComponent, TerrainComponent>(tEntity);
+					auto tData = TerrainRenderer::GetOrCreateTerrainData(tComp.TerrainAsset, tComp.CellSize, tComp.HeightScale);
+					if (tData)
+					{
+						groundPoint.y = tXform.Location.y;
+					}
+					break;
+				}
+				}
+
+				glm::vec3 quadPositions[4];
+				glm::vec2 quadUVs[4];
+				float fade = 1.0f;
+
+				if (DecalProjector::ProjectToPlane(
+						decalModel, invDecalModel,
+						groundPoint, groundNormal, decalDir,
+						decal.NormalAngleCutoff,
+						quadPositions, quadUVs, fade))
+				{
+					const float totalAlpha = std::clamp(fade * decal.FadeFactor, 0.0f, 1.0f);
+					if (totalAlpha > 0.01f)
+					{
+						const glm::vec4 tintColor(1.0f, 1.0f, 1.0f, totalAlpha);
+						Renderer2D::DrawQuadPositions(
+							quadPositions, texture, tintColor, quadUVs, 1.0f,
+							static_cast<int>(entity));
+					}
+				}
+			}
+
+			// 2. 投射到静态网格表面 (AffectMeshes)
+			if (decal.AffectMeshes)
+			{
+				auto meshView = m_ActiveScene->m_Registry.view<TransformComponent, MeshRendererComponent>();
+				for (auto mEntity : meshView)
+				{
+					if (mEntity == entity)
+						continue;
+
+					const auto& [mTransform, mMesh] = meshView.get<TransformComponent, MeshRendererComponent>(mEntity);
+					const glm::vec3 meshPos = mTransform.Location;
+
+					// 检查网格与贴花局部空间的包围盒相交性
+					const glm::vec4 localMeshPos4 = invDecalModel * glm::vec4(meshPos, 1.0f);
+					const glm::vec3 localMeshPos = glm::vec3(localMeshPos4);
+					if (std::abs(localMeshPos.x) > 1.2f || std::abs(localMeshPos.y) > 1.2f || std::abs(localMeshPos.z) > 1.2f)
+						continue;
+
+					const glm::vec3 surfaceNormal = -decalDir;
+					glm::vec3 quadPositions[4];
+					glm::vec2 quadUVs[4];
+					float fade = 1.0f;
+
+					if (DecalProjector::ProjectToPlane(
+							decalModel, invDecalModel,
+							meshPos, surfaceNormal, decalDir,
+							decal.NormalAngleCutoff,
+							quadPositions, quadUVs, fade))
+					{
+						const float totalAlpha = std::clamp(fade * decal.FadeFactor, 0.0f, 1.0f);
+						if (totalAlpha > 0.01f)
+						{
+							const glm::vec4 tintColor(1.0f, 1.0f, 1.0f, totalAlpha);
+							Renderer2D::DrawQuadPositions(
+								quadPositions, texture, tintColor, quadUVs, 1.0f,
+								static_cast<int>(entity));
+						}
+					}
+				}
+			}
+		}
+	}
+
 }
-
-

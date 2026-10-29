@@ -3242,6 +3242,83 @@ namespace World
 								drew = true;
 							}
 						}
+						if (const auto* convex = registry.try_get<ConvexCollider3DComponent>(handle))
+						{
+							glm::vec3 localMin { -0.5f, -0.5f, -0.5f };
+							glm::vec3 localMax {  0.5f,  0.5f,  0.5f };
+							if (const auto* mr = registry.try_get<MeshRendererComponent>(handle))
+							{
+								if (mr->Primitive == MeshRendererComponent::PrimitiveShape::Plane)
+								{
+									localMin.y = 0.0f;
+									localMax.y = 0.0f;
+								}
+							}
+							const uint32_t hullCount = std::clamp(convex->HullCount, 1u, 16u);
+							if (hullCount <= 1)
+							{
+								glm::vec3 corners[8];
+								for (int i = 0; i < 8; ++i)
+								{
+									corners[i] = glm::vec3 {
+										(i & 1) ? localMax.x : localMin.x,
+										(i & 2) ? localMax.y : localMin.y,
+										(i & 4) ? localMax.z : localMin.z
+									};
+								}
+								for (int i = 0; i < 8; ++i)
+								{
+									for (int axis = 0; axis < 3; ++axis)
+									{
+										const int other = i ^ (1 << axis);
+										if (other > i)
+											PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+												corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+									}
+								}
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									corners[0], corners[7], color, thickness * 0.7f, &overlayMin, &overlayMax);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									corners[1], corners[6], color, thickness * 0.7f, &overlayMin, &overlayMax);
+							}
+							else
+							{
+								const glm::vec3 ext = localMax - localMin;
+								int splitAxis = 0;
+								if (ext.y >= ext.x && ext.y >= ext.z) splitAxis = 1;
+								else if (ext.z >= ext.x && ext.z >= ext.y) splitAxis = 2;
+
+								const float step = ext[splitAxis] / static_cast<float>(hullCount);
+								for (uint32_t k = 0; k < hullCount; ++k)
+								{
+									glm::vec3 subMin = localMin;
+									glm::vec3 subMax = localMax;
+									subMin[splitAxis] = localMin[splitAxis] + step * static_cast<float>(k);
+									subMax[splitAxis] = localMin[splitAxis] + step * static_cast<float>(k + 1);
+
+									glm::vec3 corners[8];
+									for (int i = 0; i < 8; ++i)
+									{
+										corners[i] = glm::vec3 {
+											(i & 1) ? subMax.x : subMin.x,
+											(i & 2) ? subMax.y : subMin.y,
+											(i & 4) ? subMax.z : subMin.z
+										};
+									}
+									for (int i = 0; i < 8; ++i)
+									{
+										for (int axis = 0; axis < 3; ++axis)
+										{
+											const int other = i ^ (1 << axis);
+											if (other > i)
+												PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+													corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+										}
+									}
+								}
+							}
+							drew = true;
+						}
 						if (drew)
 							++colliderCount;
 					}
@@ -3455,7 +3532,10 @@ namespace World
 						// 1. 贴花投影立体线框盒 (DecalComponent)
 						if (decal)
 						{
-							const Wui::WuiColor decalColor { 1.0f, 0.6f, 0.1f, alpha };
+							const Wui::WuiColor decalColor = isSelected
+								? Wui::WuiColor { 1.0f, 0.55f, 0.05f, 0.98f }
+								: Wui::WuiColor { 1.0f, 0.65f, 0.15f, alpha };
+							const float decalThickness = isSelected ? 2.2f : 1.2f;
 							const glm::vec3 h = decal->Extents;
 							glm::vec3 corners[8];
 							for (int i = 0; i < 8; ++i)
@@ -3473,23 +3553,42 @@ namespace World
 									const int other = i ^ (1 << axis);
 									if (other > i)
 										PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-											corners[i], corners[other], decalColor, thickness, &overlayMin, &overlayMax);
+											corners[i], corners[other], decalColor, decalThickness, &overlayMin, &overlayMax);
 								}
 							}
-							// 沿前向 -Z 投影导向箭头
-							const float forwardLen = std::max(0.2f, h.z * 1.3f);
-							const glm::vec3 arrowTip { 0.0f, 0.0f, -forwardLen };
+							// 沿投影轴 -Y（垂直指向投影面/地表法向）绘制中心朝向线与箭头
+							const float forwardLen = std::max(0.15f, h.y * 1.35f);
+							const glm::vec3 arrowBase { 0.0f, h.y, 0.0f };
+							const glm::vec3 arrowTip { 0.0f, -forwardLen, 0.0f };
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								glm::vec3(0.0f), arrowTip, decalColor, thickness * 1.5f, &overlayMin, &overlayMax);
-							const float headSize = std::clamp(forwardLen * 0.15f, 0.05f, 0.5f);
+								arrowBase, arrowTip, decalColor, decalThickness * 1.5f, &overlayMin, &overlayMax);
+							const float headSize = std::clamp(forwardLen * 0.15f, 0.04f, 0.4f);
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								arrowTip, arrowTip + glm::vec3(headSize, 0.0f, headSize), decalColor, thickness * 1.4f, &overlayMin, &overlayMax);
+								arrowTip, arrowTip + glm::vec3(headSize, headSize, 0.0f), decalColor, decalThickness * 1.4f, &overlayMin, &overlayMax);
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								arrowTip, arrowTip + glm::vec3(-headSize, 0.0f, headSize), decalColor, thickness * 1.4f, &overlayMin, &overlayMax);
+								arrowTip, arrowTip + glm::vec3(-headSize, headSize, 0.0f), decalColor, decalThickness * 1.4f, &overlayMin, &overlayMax);
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								arrowTip, arrowTip + glm::vec3(0.0f, headSize, headSize), decalColor, thickness * 1.4f, &overlayMin, &overlayMax);
+								arrowTip, arrowTip + glm::vec3(0.0f, headSize, headSize), decalColor, decalThickness * 1.4f, &overlayMin, &overlayMax);
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								arrowTip, arrowTip + glm::vec3(0.0f, -headSize, headSize), decalColor, thickness * 1.4f, &overlayMin, &overlayMax);
+								arrowTip, arrowTip + glm::vec3(0.0f, headSize, -headSize), decalColor, decalThickness * 1.4f, &overlayMin, &overlayMax);
+
+							// 投影盒正中心投影范围指示四边形 (X-Z 平面，高对比度高亮，带十字分划与选中高亮)
+							const Wui::WuiColor quadColor = isSelected
+								? Wui::WuiColor { 1.0f, 0.90f, 0.20f, 0.95f }
+								: Wui::WuiColor { 1.0f, 0.70f, 0.15f, 0.75f };
+							const glm::vec3 q0 { -h.x, 0.0f, -h.z };
+							const glm::vec3 q1 {  h.x, 0.0f, -h.z };
+							const glm::vec3 q2 {  h.x, 0.0f,  h.z };
+							const glm::vec3 q3 { -h.x, 0.0f,  h.z };
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, q0, q1, quadColor, decalThickness * 1.3f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, q1, q2, quadColor, decalThickness * 1.3f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, q2, q3, quadColor, decalThickness * 1.3f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, q3, q0, quadColor, decalThickness * 1.3f, &overlayMin, &overlayMax);
+
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								glm::vec3(-h.x, 0.0f, 0.0f), glm::vec3(h.x, 0.0f, 0.0f), quadColor, decalThickness * 0.9f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								glm::vec3(0.0f, 0.0f, -h.z), glm::vec3(0.0f, 0.0f, h.z), quadColor, decalThickness * 0.9f, &overlayMin, &overlayMax);
 						}
 
 						// 2. 大世界流送分区盒 (PartitionVolumeComponent)

@@ -992,6 +992,319 @@ static uint32_t s_LODGenEntityId = 0;
 		return curY - rect.Y;
 	}
 
+	static float DrawDecalInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto* comp = static_cast<DecalComponent*>(instance);
+		if (!comp)
+			return 0.0f;
+
+		const float pad = theme.Pad;
+		const float startX = rect.X + pad;
+		const float contentW = rect.W - pad * 2.0f;
+		float curY = rect.Y + 4.0f;
+
+		// 1. 材质与贴图槽位 (DecalMaterial)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "投影材质/贴图 (Decal Material / Texture):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		const std::string curMat = comp->DecalMaterial.HasPath()
+			? std::string(StringPool::Get().PathOf(comp->DecalMaterial.Path)) : "";
+		const float pickBtnW = 26.0f;
+		const float clearBtnW = 24.0f;
+		const float matFieldW = contentW - pickBtnW - clearBtnW - 8.0f;
+
+		const Wui::WuiRect matTextRect { startX, curY, matFieldW, 22.0f };
+		const Wui::WuiRect pickBtnRect { startX + matFieldW + 4.0f, curY, pickBtnW, 22.0f };
+		const Wui::WuiRect clearBtnRect { startX + matFieldW + pickBtnW + 8.0f, curY, clearBtnW, 22.0f };
+
+		const std::string displayMat = curMat.empty() ? "(Default Decal / 内置默认贴图)" : curMat;
+		Wui::Label(ctx, { startX + 4.0f, curY + 3.0f }, displayMat, curMat.empty() ? theme.TextMuted : theme.Text, theme.FontSizeSmall);
+		Wui::Tooltip(ctx, matTextRect, curMat.empty()
+			? "当前使用引擎内置高精度默认弹孔/污渍贴花纹理；点击右侧按钮可选择自定义材质或纹理"
+			: ("当前引用资产: " + curMat));
+
+		if (Wui::Button(ctx, Wui::HashId("inspect.decal.mat_pick"), pickBtnRect, "...", theme))
+		{
+			host.OpenAssetPicker("Select Decal Material or Texture", AssetCategory::Material,
+				[comp, &host, changedFields](const std::string& picked)
+				{
+					comp->DecalMaterial = AssetRef{ StringPool::Get().InternPath(picked), AssetId{} };
+					if (changedFields) changedFields->push_back("DecalMaterial");
+					host.MarkDocumentDirty();
+				});
+		}
+		Wui::Tooltip(ctx, pickBtnRect, "打开资产选择器挑选贴花材质 (.wmat) 或纹理 (.png/.jpg)");
+
+		if (Wui::Button(ctx, Wui::HashId("inspect.decal.mat_clear"), clearBtnRect, "x", theme))
+		{
+			comp->DecalMaterial = AssetRef{};
+			if (changedFields) changedFields->push_back("DecalMaterial");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, clearBtnRect, "清空自定义材质，恢复引擎内置默认贴图");
+		curY += 26.0f;
+
+		// 2. 投影半尺寸 Extents (Half Size in meters)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "投影尺寸 Extents (X/Z 面宽, Y 深度 m):", theme.Text, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		const float coordLabelW = 16.0f;
+		const float coordFieldW = (contentW - coordLabelW * 3.0f - 12.0f) / 3.0f;
+
+		// X: 半宽
+		Wui::Label(ctx, { startX, curY + 2.0f }, "X", theme.AxisX, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.decal.ext_x"),
+			{ startX + coordLabelW, curY, coordFieldW, 22.0f }, comp->Extents.x, 0.02f, 0.01f, 100.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + coordLabelW, curY, coordFieldW, 22.0f }, "X 轴半尺寸 (米)：投影面局部水平半宽度");
+
+		// Y: 半深度（投影方向）
+		Wui::Label(ctx, { startX + coordLabelW + coordFieldW + 6.0f, curY + 2.0f }, "Y", theme.AxisY, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.decal.ext_y"),
+			{ startX + coordLabelW * 2.0f + coordFieldW + 6.0f, curY, coordFieldW, 22.0f }, comp->Extents.y, 0.02f, 0.01f, 100.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + coordLabelW * 2.0f + coordFieldW + 6.0f, curY, coordFieldW, 22.0f }, "Y 轴半尺寸 (米)：沿投影法向穿透地表与网格的半深度");
+
+		// Z: 半高
+		Wui::Label(ctx, { startX + (coordLabelW + coordFieldW + 6.0f) * 2.0f, curY + 2.0f }, "Z", theme.AxisZ, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.decal.ext_z"),
+			{ startX + (coordLabelW + coordFieldW + 6.0f) * 2.0f + coordLabelW, curY, coordFieldW, 22.0f }, comp->Extents.z, 0.02f, 0.01f, 100.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + (coordLabelW + coordFieldW + 6.0f) * 2.0f + coordLabelW, curY, coordFieldW, 22.0f }, "Z 轴半尺寸 (米)：投影面局部垂直半长度");
+		curY += 26.0f;
+
+		// 尺寸快捷预设
+		const float pBtnGap = 4.0f;
+		const float pBtnW = (contentW - pBtnGap * 3.0f) / 4.0f;
+		if (Wui::Button(ctx, Wui::HashId("inspect.decal.preset_bullet"), { startX, curY, pBtnW, 22.0f }, "弹孔 (0.1m)", theme))
+		{
+			comp->Extents = glm::vec3(0.1f, 0.05f, 0.1f);
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		if (Wui::Button(ctx, Wui::HashId("inspect.decal.preset_foot"), { startX + (pBtnW + pBtnGap), curY, pBtnW, 22.0f }, "脚印 (0.25m)", theme))
+		{
+			comp->Extents = glm::vec3(0.25f, 0.1f, 0.25f);
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		if (Wui::Button(ctx, Wui::HashId("inspect.decal.preset_stain"), { startX + (pBtnW + pBtnGap) * 2.0f, curY, pBtnW, 22.0f }, "污渍 (0.5m)", theme))
+		{
+			comp->Extents = glm::vec3(0.5f, 0.25f, 0.5f);
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		if (Wui::Button(ctx, Wui::HashId("inspect.decal.preset_large"), { startX + (pBtnW + pBtnGap) * 3.0f, curY, pBtnW, 22.0f }, "巨型 (2.0m)", theme))
+		{
+			comp->Extents = glm::vec3(2.0f, 0.5f, 2.0f);
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 3. 透明衰减 FadeFactor (0.0 ~ 1.0)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "透明衰减 (Fade Factor):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.decal.fade_factor"),
+			{ startX + 130.0f, curY, contentW - 130.0f, 22.0f }, comp->FadeFactor, 0.01f, 0.0f, 1.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("FadeFactor");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + 130.0f, curY, contentW - 130.0f, 22.0f }, "贴花整体不透明度倍率 (0.0 = 完全透明，1.0 = 完全不透明)");
+		curY += 26.0f;
+
+		// 4. 掠射角法线消隐 NormalAngleCutoff (0° ~ 89°)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "掠射角消隐 (Normal Cutoff °):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.decal.angle_cutoff"),
+			{ startX + 160.0f, curY, contentW - 160.0f, 22.0f }, comp->NormalAngleCutoff, 0.5f, 0.0f, 89.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("NormalAngleCutoff");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + 160.0f, curY, contentW - 160.0f, 22.0f },
+			"表面法线与投影方向的最大夹角阈值 (推荐 60°)。当受体表面过度倾斜时平滑消隐，杜绝侧面拉伸走样失真");
+		curY += 26.0f;
+
+		// 5. 投影受影响目标 (AffectTerrain / AffectMeshes)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "投影目标受体掩码 (Target Mask):", theme.Text, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		const float chkHalfW = (contentW - 6.0f) * 0.5f;
+		bool affectTerrain = comp->AffectTerrain != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.decal.chk_terrain"),
+			{ startX, curY, chkHalfW, 22.0f }, "影响地形 (Terrain)", affectTerrain, theme))
+		{
+			comp->AffectTerrain = affectTerrain ? 1 : 0;
+			if (changedFields) changedFields->push_back("AffectTerrain");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, chkHalfW, 22.0f }, "是否投射到 Landscape 3D 地貌表面");
+
+		bool affectMeshes = comp->AffectMeshes != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.decal.chk_meshes"),
+			{ startX + chkHalfW + 6.0f, curY, chkHalfW, 22.0f }, "影响网格 (Meshes)", affectMeshes, theme))
+		{
+			comp->AffectMeshes = affectMeshes ? 1 : 0;
+			if (changedFields) changedFields->push_back("AffectMeshes");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + chkHalfW + 6.0f, curY, chkHalfW, 22.0f }, "是否投射到静态与动态 3D 网格表面");
+		curY += 28.0f;
+
+		return curY - rect.Y;
+	}
+
+	static float DrawConvexCollider3DInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto* comp = static_cast<ConvexCollider3DComponent*>(instance);
+		if (!comp)
+			return 0.0f;
+
+		const float pad = theme.Pad;
+		const float startX = rect.X + pad;
+		const float contentW = rect.W - pad * 2.0f;
+		float curY = rect.Y + 4.0f;
+
+		// 1. 源模型网格选择 (MeshSource)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "源网格模型 (Source Mesh Asset):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		const std::string curMesh = comp->MeshSource.HasPath()
+			? std::string(StringPool::Get().PathOf(comp->MeshSource.Path)) : "";
+		const float pickBtnW = 26.0f;
+		const float clearBtnW = 24.0f;
+		const float meshFieldW = contentW - pickBtnW - clearBtnW - 8.0f;
+
+		const Wui::WuiRect meshTextRect { startX, curY, meshFieldW, 22.0f };
+		const Wui::WuiRect pickBtnRect { startX + meshFieldW + 4.0f, curY, pickBtnW, 22.0f };
+		const Wui::WuiRect clearBtnRect { startX + meshFieldW + pickBtnW + 8.0f, curY, clearBtnW, 22.0f };
+
+		const std::string displayMesh = curMesh.empty() ? "(Use Entity Mesh / 使用实体网格)" : curMesh;
+		Wui::Label(ctx, { startX + 4.0f, curY + 3.0f }, displayMesh, curMesh.empty() ? theme.TextMuted : theme.Text, theme.FontSizeSmall);
+		Wui::Tooltip(ctx, meshTextRect, curMesh.empty()
+			? "当前未特化网格源，自动采用该实体上 MeshRendererComponent 的网格几何进行凸包分解"
+			: ("指定凸包分解几何源: " + curMesh));
+
+		if (Wui::Button(ctx, Wui::HashId("inspect.convex.mesh_pick"), pickBtnRect, "...", theme))
+		{
+			host.OpenAssetPicker("Select Source Mesh for Convex Decomposition", AssetCategory::Mesh,
+				[comp, &host, changedFields](const std::string& picked)
+				{
+					comp->MeshSource = AssetRef{ StringPool::Get().InternPath(picked), AssetId{} };
+					if (changedFields) changedFields->push_back("MeshSource");
+					host.MarkDocumentDirty();
+				});
+		}
+		Wui::Tooltip(ctx, pickBtnRect, "挑选用于凸包多面体分解的网格资产 (.wmodel / .gltf)");
+
+		if (Wui::Button(ctx, Wui::HashId("inspect.convex.mesh_clear"), clearBtnRect, "x", theme))
+		{
+			comp->MeshSource = AssetRef{};
+			if (changedFields) changedFields->push_back("MeshSource");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, clearBtnRect, "清空特化网格，回退至实体自身网格");
+		curY += 26.0f;
+
+		// 2. 复合凸包数量 (HullCount 1 ~ 16)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "子凸包数量 (Hull Count 1~16):", theme.Text, theme.FontSizeSmall);
+		int64_t hullCount = static_cast<int64_t>(comp->HullCount);
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.convex.hull_count"),
+			{ startX + 160.0f, curY, contentW - 160.0f, 22.0f }, hullCount, 1, 16, theme))
+		{
+			comp->HullCount = static_cast<uint32_t>(std::clamp(hullCount, int64_t(1), int64_t(16)));
+			if (changedFields) changedFields->push_back("HullCount");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + 160.0f, curY, contentW - 160.0f, 22.0f },
+			"复合凸包数量上限。1 为标准单极值凸包 (QuickHull)；≥2 时启用凹面自动切分，构建复合刚体");
+		curY += 26.0f;
+
+		// 3. 凹陷容差阈值 (ConcavityThreshold)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "凹陷容差阈值 (Concavity Error):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.convex.concavity"),
+			{ startX + 160.0f, curY, contentW - 160.0f, 22.0f }, comp->ConcavityThreshold, 0.005f, 0.001f, 1.0f, theme))
+		{
+			if (changedFields) changedFields->push_back("ConcavityThreshold");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + 160.0f, curY, contentW - 160.0f, 22.0f },
+			"切分容差阈值 (默认 0.05)。值越小切分越严格精细，值越大合并更激进，减小物理开销");
+		curY += 26.0f;
+
+		// 4. 每个凸包最大顶点数 (MaxVerticesPerHull)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "单凸包顶点上限 (Max Vertices):", theme.Text, theme.FontSizeSmall);
+		int64_t maxVerts = static_cast<int64_t>(comp->MaxVerticesPerHull);
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.convex.max_verts"),
+			{ startX + 160.0f, curY, contentW - 160.0f, 22.0f }, maxVerts, 8, 128, theme))
+		{
+			comp->MaxVerticesPerHull = static_cast<uint32_t>(std::clamp(maxVerts, int64_t(8), int64_t(128)));
+			if (changedFields) changedFields->push_back("MaxVerticesPerHull");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + 160.0f, curY, contentW - 160.0f, 22.0f },
+			"单个子凸包允许的最大顶点数 (8 ~ 128，推荐 32)。防止物理 Jolt 碰撞矩阵顶点爆炸");
+		curY += 26.0f;
+
+		// 5. 触发器属性 (IsTrigger)
+		bool isTrigger = comp->IsTrigger != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.convex.is_trigger"),
+			{ startX, curY, contentW, 22.0f }, "作为触发体积 (Is Trigger Volume)", isTrigger, theme))
+		{
+			comp->IsTrigger = isTrigger ? 1 : 0;
+			if (changedFields) changedFields->push_back("IsTrigger");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "仅触发物理接触感知事件 (OnTriggerEnter/Exit)，不产生刚体推力阻挡");
+		curY += 26.0f;
+
+		// 快捷规格预设
+		const float pBtnGap = 4.0f;
+		const float pBtnW = (contentW - pBtnGap * 2.0f) / 3.0f;
+		if (Wui::Button(ctx, Wui::HashId("inspect.convex.preset_single"), { startX, curY, pBtnW, 22.0f }, "单凸包极值 (1 Hull)", theme))
+		{
+			comp->HullCount = 1;
+			comp->ConcavityThreshold = 0.05f;
+			comp->MaxVerticesPerHull = 32;
+			if (changedFields) { changedFields->push_back("HullCount"); changedFields->push_back("ConcavityThreshold"); }
+			host.MarkDocumentDirty();
+		}
+		if (Wui::Button(ctx, Wui::HashId("inspect.convex.preset_standard"), { startX + (pBtnW + pBtnGap), curY, pBtnW, 22.0f }, "标准复合 (4 Hulls)", theme))
+		{
+			comp->HullCount = 4;
+			comp->ConcavityThreshold = 0.03f;
+			comp->MaxVerticesPerHull = 32;
+			if (changedFields) { changedFields->push_back("HullCount"); changedFields->push_back("ConcavityThreshold"); }
+			host.MarkDocumentDirty();
+		}
+		if (Wui::Button(ctx, Wui::HashId("inspect.convex.preset_precise"), { startX + (pBtnW + pBtnGap) * 2.0f, curY, pBtnW, 22.0f }, "高精切分 (8 Hulls)", theme))
+		{
+			comp->HullCount = 8;
+			comp->ConcavityThreshold = 0.01f;
+			comp->MaxVerticesPerHull = 48;
+			if (changedFields) { changedFields->push_back("HullCount"); changedFields->push_back("ConcavityThreshold"); }
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
+		return curY - rect.Y;
+	}
+
 	// ---- 组件检视器 ----
 
 float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect){
@@ -1090,6 +1403,10 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawBehaviorTreeInspector(ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::SmartObjectComponent")
 			height = DrawSmartObjectInspector(ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::DecalComponent")
+			height = DrawDecalInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::ConvexCollider3DComponent")
+			height = DrawConvexCollider3DInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
 
 		else

@@ -1,0 +1,13 @@
+Id: DecalConvexShowcase
+Name: 3D Decal & Convex Decomposition Showcase
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Base_World
+    DefaultActive: true
+  - Mask: 2
+    Name: Decal_Exhibits
+    DefaultActive: true
+  - Mask: 4
+    Name: Convex_Physics
+    DefaultActive: true

@@ -1,6 +1,7 @@
 #include "wldpch.h"
 #include "World/Core/StringPool.h"
 #include "World/Physics/Physics3D.h"
+#include "World/Physics/ConvexDecomposition.h"
 
 #include "World/Asset/WModelIO.h"
 #include "World/Physics/PhysicsJobSystem.h"
@@ -197,6 +198,29 @@ namespace World
 			if (!std::isfinite(capsule->HalfHeight) || capsule->HalfHeight < 0.0f)
 				throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) +
 					" CapsuleCollider3D HalfHeight must be non-negative and finite");
+		}
+
+		void ValidateConvexCollider(const entt::registry& registry, entt::entity entity)
+		{
+			const auto* convex = registry.try_get<ConvexCollider3DComponent>(entity);
+			if (!convex) return;
+			if (convex->HullCount == 0 || convex->HullCount > 64)
+				throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) +
+					" ConvexCollider3D HullCount must be between 1 and 64");
+			if (convex->MaxVerticesPerHull < 8 || convex->MaxVerticesPerHull > 256)
+				throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) +
+					" ConvexCollider3D MaxVerticesPerHull must be between 8 and 256");
+			if (!std::isfinite(convex->ConcavityThreshold) || convex->ConcavityThreshold < 0.001f || convex->ConcavityThreshold > 10.0f)
+				throw std::logic_error("[Physics3D] entity " + EntityLabel(entity) +
+					" ConvexCollider3D ConcavityThreshold must be positive and finite");
+		}
+
+		PathId ResolveConvexColliderMesh(const entt::registry& registry, entt::entity entity, const ConvexCollider3DComponent& collider)
+		{
+			if (collider.MeshSource.HasPath()) return collider.MeshSource.Path;
+			if (const auto* renderer = registry.try_get<MeshRendererComponent>(entity))
+				if (renderer->Mesh.HasPath()) return renderer->Mesh.Path;
+			return {};
 		}
 
 		PathId ResolveMeshColliderMesh(const entt::registry& registry, entt::entity entity, const MeshCollider3DComponent& collider)
@@ -496,7 +520,8 @@ namespace World
 					ToJoltQuat(transform->Rotation), ToJoltMotionType(rigidBody.Type),
 					RegisterPair(rigidBody.Layer, rigidBody.Mask));
 				settings.mUserData = static_cast<JPH::uint64>(static_cast<uint32_t>(entity));
-				settings.mIsSensor = rigidBody.IsSensor;
+				const auto* convexComp = registry.try_get<ConvexCollider3DComponent>(entity);
+				settings.mIsSensor = rigidBody.IsSensor || (convexComp && convexComp->IsTrigger != 0);
 				// P7 CCD:RigidBody3DComponent::Ccd ⇒ Jolt 运动质量档(Discrete / LinearCast)。
 				settings.mMotionQuality = rigidBody.Ccd ? JPH::EMotionQuality::LinearCast : JPH::EMotionQuality::Discrete;
 				if (const auto* physMat = registry.try_get<PhysicsMaterialComponent>(entity))
@@ -1221,7 +1246,7 @@ namespace World
 		if (conflicting != entt::null)
 			return reject("entity " + EntityLabel(conflicting) +
 				" mixes 2D and 3D physics components (RigidBody2D/BoxCollider2D/CircleCollider2D vs "
-				"RigidBody3D/BoxCollider3D/SphereCollider3D/CapsuleCollider3D/MeshCollider3D); "
+				"RigidBody3D/BoxCollider3D/SphereCollider3D/CapsuleCollider3D/MeshCollider3D/ConvexCollider3D); "
 				"remove one side before starting the scene");
 
 		const auto meshColliders = registry.view<MeshCollider3DComponent>();
