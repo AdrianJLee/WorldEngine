@@ -1,0 +1,30 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000017
+  World::TagComponent:
+    Tag: "Spline Perimeter Highway (Partition Boundary)"
+  World::TransformComponent:
+    Location: [0.0, 0.1, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::SplineComponent:
+    ClosedLoop: 1
+    Mode: 0
+    RoadWidth: 6.0
+    MeshSpacing: 2.5
+    GenerateMesh: 1
+    Points:
+      - [-50.0, 0.0, -50.0]
+      - [ 50.0, 0.0, -50.0]
+      - [ 50.0, 0.0,  50.0]
+      - [-50.0, 0.0,  50.0]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.28, 0.30, 0.34, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 4

@@ -1,0 +1,34 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000010
+  World::TagComponent:
+    Tag: "Mid-Field Scatter Pebble Cluster (Mesh LOD)"
+  World::TransformComponent:
+    Location: [-25.0, 1.5, -20.0]
+    Rotation: [0.0, 15.0, 0.0]
+    Scale: [3.5, 3.5, 3.5]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.82, 0.82, 0.85, 1.0]
+    Mesh: "engine/models/foliage/scatter_pebble.wmodel"
+    Material: ""
+  World::MeshLODComponent:
+    LOD1Distance: 20.0
+    LOD2Distance: 45.0
+    LOD3Distance: 70.0
+    LOD4Distance: 95.0
+    LOD5Distance: 120.0
+    LOD6Distance: 145.0
+    LOD7Distance: 155.0
+    CullDistance: 160.0
+    Hysteresis: 2.0
+    LODBias: 1.0
+    ForcedLOD: -1
+    MaxLODLevel: 7
+    CurrentLOD: 0
+    EnableCrossFade: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 2

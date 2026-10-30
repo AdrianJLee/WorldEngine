@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000015
+  World::TagComponent:
+    Tag: "RVT Landscape Virtual Texture Volume (2048m Extent)"
+  World::TransformComponent:
+    Location: [0.0, 0.0, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::RVTComponent:
+    VirtualTexture: "assets/textures/terrain/rvt_heightfield.wrvt"
+    TileSize: 128.0
+    Extent: 2048.0
+    SoftBlendRadius: 0.5
+    IsActive: true
+  World::LevelEntityComponent:
+    DataLayerMask: 4

@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000016
+  World::TagComponent:
+    Tag: "RVT Road Surface Blend Zone (512m Extent)"
+  World::TransformComponent:
+    Location: [0.0, 0.2, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::RVTComponent:
+    VirtualTexture: "assets/textures/roads/rvt_asphalt.wrvt"
+    TileSize: 64.0
+    Extent: 512.0
+    SoftBlendRadius: 0.8
+    IsActive: true
+  World::LevelEntityComponent:
+    DataLayerMask: 4

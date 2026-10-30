@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000014
+  World::TagComponent:
+    Tag: "HLOD Cluster Gamma - Distant Watchtower (500m Switch)"
+  World::TransformComponent:
+    Location: [260.0, 50.0, -420.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [20.0, 95.0, 20.0]
+  World::HLODComponent:
+    ProxyMesh: "engine/models/primitives/cube.wmodel"
+    TransitionDistance: 500.0
+    CullDistance: 1800.0
+    ChildEntityCount: 18
+    IsActive: true
+    CastShadow: true
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.48, 0.45, 0.40, 1.0]
+    Mesh: "engine/models/primitives/cube.wmodel"
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 8

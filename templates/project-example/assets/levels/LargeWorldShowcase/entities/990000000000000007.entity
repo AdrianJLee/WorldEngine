@@ -1,0 +1,41 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000007
+  World::TagComponent:
+    Tag: "Near-Field Detailed Structure (LOD0 Grand Pavilion)"
+  World::TransformComponent:
+    Location: [-15.0, 4.0, 8.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 0
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [8.0, 8.0, 8.0]
+    BevelSize: 0.1
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.65, 0.68, 0.72, 1.0]
+    Mesh: ""
+    Material: ""
+  World::MeshLODComponent:
+    LOD1Distance: 25.0
+    LOD2Distance: 50.0
+    LOD3Distance: 80.0
+    LOD4Distance: 110.0
+    LOD5Distance: 140.0
+    LOD6Distance: 170.0
+    LOD7Distance: 195.0
+    CullDistance: 200.0
+    Hysteresis: 2.0
+    LODBias: 1.0
+    ForcedLOD: -1
+    MaxLODLevel: 7
+    CurrentLOD: 0
+    EnableCrossFade: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 2

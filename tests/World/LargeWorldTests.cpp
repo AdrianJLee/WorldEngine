@@ -5,6 +5,8 @@
 
 #include <cassert>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 
 using namespace World;
@@ -95,6 +97,51 @@ static void TestLargeWorldComponentLayout()
 	std::cout << "[PASS] TestLargeWorldComponentLayout\n";
 }
 
+static void TestLargeWorldShowcaseLevelFiles()
+{
+	const std::filesystem::path levelEntry = "templates/project-example/assets/scenes/LargeWorldShowcase.wlevel";
+	assert(std::filesystem::is_regular_file(levelEntry));
+
+	const std::filesystem::path entityDir = "templates/project-example/assets/levels/LargeWorldShowcase/entities";
+	assert(std::filesystem::is_directory(entityDir));
+
+	size_t entityCount = 0;
+	bool hasCamera = false;
+	bool hasPartitionVolume = false;
+	bool hasHLOD = false;
+	bool hasRVT = false;
+	bool hasLWCWaymarker = false;
+
+	for (const auto& entry : std::filesystem::directory_iterator(entityDir))
+	{
+		if (entry.path().extension() == ".entity")
+		{
+			++entityCount;
+			std::ifstream fin(entry.path());
+			std::string content((std::istreambuf_iterator<char>(fin)), std::istreambuf_iterator<char>());
+			if (content.find("World::CameraComponent") != std::string::npos)
+				hasCamera = true;
+			if (content.find("World::PartitionVolumeComponent") != std::string::npos)
+				hasPartitionVolume = true;
+			if (content.find("World::HLODComponent") != std::string::npos)
+				hasHLOD = true;
+			if (content.find("World::RVTComponent") != std::string::npos)
+				hasRVT = true;
+			if (content.find("LWC 100km Waymarker Beacon") != std::string::npos)
+				hasLWCWaymarker = true;
+		}
+	}
+
+	assert(entityCount == 19);
+	assert(hasCamera);
+	assert(hasPartitionVolume);
+	assert(hasHLOD);
+	assert(hasRVT);
+	assert(hasLWCWaymarker);
+
+	std::cout << "[PASS] TestLargeWorldShowcaseLevelFiles (19 Entities: LWC, PartitionVolume, HLOD, RVT verified)\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.LargeWorld tests...\n";
@@ -102,6 +149,7 @@ int main()
 	TestWorldPartition3DStreaming();
 	TestHLODEvaluation();
 	TestLargeWorldComponentLayout();
+	TestLargeWorldShowcaseLevelFiles();
 	std::cout << "All World.LargeWorld tests passed successfully!\n";
 	return 0;
 }
