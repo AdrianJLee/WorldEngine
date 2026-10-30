@@ -170,6 +170,8 @@ namespace World::Editor
 						m_Data.ViewportLightRangesAll = value.Bool;
 					else if (key == "viewport_collider_outlines_all" && isBool)
 						m_Data.ViewportColliderOutlinesAll = value.Bool;
+					else if (key == "viewport_collider_outlines_enabled" && isBool)
+						m_Data.ViewportColliderOutlinesEnabled = value.Bool;
 					else if (key == "navmesh_auto_dynamic_bake" && isBool)
 						m_Data.NavMeshAutoDynamicBake = value.Bool;
 				}
@@ -267,6 +269,7 @@ namespace World::Editor
 			<< "  \"diag_vulkan_validation\": " << FormatBool(m_Data.DiagVulkanValidation) << ",\n"
 			<< "  \"viewport_light_ranges_all\": " << FormatBool(m_Data.ViewportLightRangesAll) << ",\n"
 			<< "  \"viewport_collider_outlines_all\": " << FormatBool(m_Data.ViewportColliderOutlinesAll) << ",\n"
+			<< "  \"viewport_collider_outlines_enabled\": " << FormatBool(m_Data.ViewportColliderOutlinesEnabled) << ",\n"
 			<< "  \"navmesh_auto_dynamic_bake\": " << FormatBool(m_Data.NavMeshAutoDynamicBake) << "\n"
 			<< "}\n";
 		return static_cast<bool>(file);
@@ -424,6 +427,13 @@ namespace World::Editor
 	{
 		if (m_Data.ViewportColliderOutlinesAll == enabled) return;
 		m_Data.ViewportColliderOutlinesAll = enabled;
+		Commit();
+	}
+
+	void EditorPreferences::SetViewportColliderOutlinesEnabled(bool enabled)
+	{
+		if (m_Data.ViewportColliderOutlinesEnabled == enabled) return;
+		m_Data.ViewportColliderOutlinesEnabled = enabled;
 		Commit();
 	}
 

@@ -22,7 +22,8 @@ namespace World
 	{
 		Select = 0,     // 实体选择与通用变换模式 (Q/W/E/R/T) [Shift+1]
 		Landscape = 1,  // 3D 地貌雕刻与材质混绘模式 [Shift+2]
-		Foliage = 2     // 3D 植被散布模式 [Shift+3]
+		Foliage = 2,    // 3D 植被散布模式 [Shift+3]
+		PhysicsPainter = 3 // 3D 物理画笔散布模式 [Shift+4]
 	};
 
 	class EditorLayer;

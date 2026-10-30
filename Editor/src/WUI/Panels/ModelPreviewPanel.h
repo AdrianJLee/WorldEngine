@@ -293,8 +293,11 @@ namespace World
 		{
 			glm::vec3 p0 { 0.0f };
 			glm::vec3 p1 { 0.0f };
+			int32_t JointIndex = -1; // 关联骨骼关节下标(-1 = 静态/全局)
 		};
 		bool m_ShowCollisionWireframe = true;
+		bool m_PreviewRestPose = true; // 蒙皮姿态模式: true = Rest Pose (T-Pose 绑定姿态); false = 动态动画姿态
+		uint8_t m_SelectedCollisionChannel = 0; // 物体碰撞通道 (0..47，与项目设置完全对齐)
 		uint32_t m_BakeHullCount = 4;
 		float m_BakeConcavityThreshold = 0.05f;
 		uint32_t m_BakeMaxVerticesPerHull = 32;
@@ -302,7 +305,7 @@ namespace World
 		std::string m_SelectedCollisionProfile = "Default";
 		std::vector<ConvexHull> m_CollisionHulls;
 		std::vector<LineEdge> m_CachedCollisionEdges;
-		std::vector<glm::vec3> m_CachedCollisionPoints;
+		std::vector<std::pair<glm::vec3, int32_t>> m_CachedCollisionPoints;
 		double m_CollisionBakeTimeMs = 0.0;
 		std::string m_CollisionStatusMessage;
 		bool m_CollisionStatusIsError = false;

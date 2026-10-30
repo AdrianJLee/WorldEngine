@@ -852,6 +852,7 @@ namespace World
 		std::string m_PanelModalOwner;
 		Wui::WuiId m_OpenMenu = 0;
 		Wui::WuiRect m_MenuHeaderRect;
+		std::string m_ActiveMenuSubmenu;
 		// M4-S2:`菜单栏下拉`的延后绘制批次(与 U29 的 WuiDeferredPopupScope 同一口径:
 		// 绘制搬到帧末,命中/遮挡登记留在原地)。帧末由 FlushDeferredMenuDraws 追加到 overlay。
 		std::vector<Wui::WuiDrawCommand> m_DeferredMenuCommands;

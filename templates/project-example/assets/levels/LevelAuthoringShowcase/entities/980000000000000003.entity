@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000003
+  World::TagComponent:
+    Tag: "Whitebox Courtyard Foundation"
+  World::TransformComponent:
+    Location: [0.0, -0.2, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 0
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [24.0, 0.4, 24.0]
+    BevelSize: 0.02
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.24, 0.26, 0.29, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

@@ -1,0 +1,16 @@
+Id: LevelAuthoringShowcase
+Name: 3D Spline Road, Whitebox & Physics Painter Showcase
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Base_World
+    DefaultActive: true
+  - Mask: 2
+    Name: Whitebox_Prototyping
+    DefaultActive: true
+  - Mask: 4
+    Name: Spline_Roads
+    DefaultActive: true
+  - Mask: 8
+    Name: Physics_Painter
+    DefaultActive: true

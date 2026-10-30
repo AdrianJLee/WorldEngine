@@ -25,6 +25,10 @@
 #include "World/Terrain/TerrainRenderer.h"
 #include "World/Core/Input.h"
 #include "WUI/Panels/NavMeshPanel.h"
+#include "WUI/Panels/PhysicsPainterPanel.h"
+#include "World/Level/Spline3D.h"
+#include "World/Level/WhiteboxBuilder.h"
+#include "World/Scene/Hierarchy.h"
 #include "World/NavMesh/NavMesh.h"
 #include "World/Renderer/MeshLOD.h"
 #include <glm/gtc/matrix_inverse.hpp>
@@ -573,6 +577,8 @@ namespace World
 			modeShort = Wui::Tr("viewport.mode.landscape_short", "地貌");
 		else if (currentToolMode == EditorToolMode::Foliage)
 			modeShort = Wui::Tr("viewport.mode.foliage_short", "植被");
+		else if (currentToolMode == EditorToolMode::PhysicsPainter)
+			modeShort = Wui::Tr("viewport.mode.painter_short", "画笔");
 		const std::string modeLabel = (sceneRect.W >= 760.0f) ? (Wui::Tr("viewport.mode.dropdown", "模式") + ": " + modeShort + " ▼") : (modeShort + " ▼");
 		const float modeBtnW = std::max(54.0f, ctx.MeasureTextWidth(modeLabel, 12.0f) + 16.0f);
 
@@ -1237,8 +1243,16 @@ namespace World
 							prefs.SetViewportLightRangesAll(!prefs.Data().ViewportLightRangesAll);
 						});
 
+					const bool collidersEnabled = Editor::EditorPreferences::Get().Data().ViewportColliderOutlinesEnabled;
+					subItem("viewport.view.collider_outlines_enabled", Wui::Tr("viewport.view.collider_outlines_enabled", "碰撞体轮廓显示 (Show Colliders)"),
+						collidersEnabled, Wui::Tr("viewport.overlays.collider_outlines_enabled.tooltip", "视口中是否绘制物理碰撞体线框。关闭后哪怕选中实体也彻底隐藏。"),
+						[] {
+							Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
+							prefs.SetViewportColliderOutlinesEnabled(!prefs.Data().ViewportColliderOutlinesEnabled);
+						});
+
 					const bool collidersAll = Editor::EditorPreferences::Get().Data().ViewportColliderOutlinesAll;
-					subItem("viewport.view.collider_outlines", Wui::Tr("viewport.view.collider_outlines", "碰撞体轮廓: 全部"),
+					subItem("viewport.view.collider_outlines", Wui::Tr("viewport.view.collider_outlines", "碰撞体轮廓: 全部 (All Colliders)"),
 						collidersAll, Wui::Tr("viewport.overlays.collider_outlines.tooltip", "编辑期画碰撞体形状 (2D 矩形/圆、3D 盒/球/胶囊)。关 = 仅选中实体。"),
 						[] {
 							Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
@@ -1309,8 +1323,9 @@ namespace World
 		if (ctx.IsPopupOpen(modePopup))
 		{
 			const float rowH = 24.0f;
-			const float popupW = 240.0f;
-			const float popupH = 6.0f + 20.0f + 4.0f + 3.0f * rowH + 6.0f;
+			const float popupW = 265.0f;
+			constexpr int kWorkflowModeCount = 4;
+			const float popupH = 6.0f + 20.0f + 4.0f + static_cast<float>(kWorkflowModeCount) * rowH + 6.0f;
 			const float px = modeButton.W > 0.0f ? modeButton.X : (leftIslandRect.X + 100.0f);
 			const Wui::WuiRect panel { px, leftIslandRect.Y + leftIslandRect.H + 3.0f, popupW, popupH };
 			Wui::DrawPanelSurface(ctx, panel, theme);
@@ -1352,6 +1367,13 @@ namespace World
 				[this] {
 					m_Host.SetEditorToolMode(EditorToolMode::Foliage);
 					m_Host.ActivatePanel("foliage_editor");
+				});
+
+			modeItem("viewport.mode.painter", Wui::Tr("viewport.mode.painter_name", "3D 物理画笔模式") + " [Shift+4]",
+				currentToolMode == EditorToolMode::PhysicsPainter, "3D 物理画笔与地表散布模式 (Physics Painter) [快捷键 Shift+4]",
+				[this] {
+					m_Host.SetEditorToolMode(EditorToolMode::PhysicsPainter);
+					m_Host.ActivatePanel("physicspainter");
 				});
 
 			ctx.ClosePopupsOnOutsideClick({ modePopup }, panel);
@@ -1841,7 +1863,68 @@ namespace World
 			m_Host.GetCameraPreviewTextureId() != 0 && !previewLabel.empty();
 		// 相机预览小窗挡住的位置不参与拾取(避免"点预览把背后物体选走")。
 		const bool overPreview = previewVisible && ctx.IsHovered(previewRect);
-		if (!play && ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview && !overBanner && m_Host.GetEditorToolMode() == EditorToolMode::Select)
+		const bool isPainterMode = (m_Host.GetEditorToolMode() == EditorToolMode::PhysicsPainter);
+		if (!play && ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview && !overBanner && isPainterMode && PhysicsPainterPanel::IsActive())
+		{
+			const glm::vec2 mousePos = ctx.Input().MousePos;
+			const Wui::GizmoCamera pickCam = m_Host.GetGizmoCamera();
+			const float ndcX = ((mousePos.x - sceneRect.X) / sceneRect.W) * 2.0f - 1.0f;
+			const float ndcY = 1.0f - ((mousePos.y - sceneRect.Y) / sceneRect.H) * 2.0f;
+			const glm::mat4 invVP = glm::inverse(pickCam.ViewProjection);
+			glm::vec4 nearPointClip(ndcX, ndcY, -1.0f, 1.0f);
+			glm::vec4 farPointClip(ndcX, ndcY, 1.0f, 1.0f);
+			glm::vec4 nearPointWorld = invVP * nearPointClip;
+			glm::vec4 farPointWorld = invVP * farPointClip;
+			if (std::abs(nearPointWorld.w) > 1e-6f) nearPointWorld /= nearPointWorld.w;
+			if (std::abs(farPointWorld.w) > 1e-6f) farPointWorld /= farPointWorld.w;
+			glm::vec3 rayOrigin = pickCam.Position;
+			glm::vec3 rayDir = glm::normalize(glm::vec3(farPointWorld) - rayOrigin);
+
+			glm::vec3 hitPoint { 0.0f };
+			glm::vec3 hitNormal { 0.0f, 1.0f, 0.0f };
+			bool hasHit = false;
+
+			Ref<Scene> activeScene = m_Host.GetActiveScene();
+			if (activeScene)
+			{
+				std::shared_ptr<TerrainData> terrain = nullptr;
+				glm::mat4 terrainWorld { 1.0f };
+				for (auto [h, tc, xf] : activeScene->GetRegistry().view<TerrainComponent, TransformComponent>().each())
+				{
+					terrain = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
+					terrainWorld = xf.GetLocalMatrix();
+					break;
+				}
+				if (terrain)
+				{
+					const glm::mat4 invTW = glm::inverse(terrainWorld);
+					const glm::vec3 localOrigin = glm::vec3(invTW * glm::vec4(rayOrigin, 1.0f));
+					const glm::vec3 localDir = glm::normalize(glm::vec3(invTW * glm::vec4(rayDir, 0.0f)));
+					TerrainRaycastHit thit;
+					if (terrain->Raycast(localOrigin, localDir, 2000.0f, thit))
+					{
+						hitPoint = glm::vec3(terrainWorld * glm::vec4(thit.Point, 1.0f));
+						hitNormal = glm::normalize(glm::vec3(terrainWorld * glm::vec4(thit.Normal, 0.0f)));
+						hasHit = true;
+					}
+				}
+				if (!hasHit && std::abs(rayDir.y) > 1e-4f)
+				{
+					const float t = -rayOrigin.y / rayDir.y;
+					if (t > 0.0f && t < 2000.0f)
+					{
+						hitPoint = rayOrigin + rayDir * t;
+						hitNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+						hasHit = true;
+					}
+				}
+				if (hasHit)
+				{
+					PhysicsPainterPanel::PaintAt(*activeScene, hitPoint, hitNormal, m_Host);
+				}
+			}
+		}
+		else if (!play && ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview && !overBanner && m_Host.GetEditorToolMode() == EditorToolMode::Select)
 		{
 			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
 			Entity picked = m_Host.PickEntityAt(local);
@@ -2057,6 +2140,11 @@ namespace World
 				{
 					m_Host.SetEditorToolMode(EditorToolMode::Foliage);
 					m_Host.ActivatePanel("foliage_editor");
+				}
+				else if (ctx.IsKeyPressed(KeyCodes::D4))
+				{
+					m_Host.SetEditorToolMode(EditorToolMode::PhysicsPainter);
+					m_Host.ActivatePanel("physicspainter");
 				}
 			}
 		}
@@ -2568,7 +2656,148 @@ namespace World
 			}
 		}
 
-		// 3D 网格实体的选中框:投影单位网格包围盒的 12 条棱(真 3D 线框盒),画在场景图之上。
+		// ---- 3D 物理画笔模式 (Physics Painter Mode) 视口直接拾取、笔刷圈与实时散布 ----
+		if (!play && !m_Host.IsReadOnlyMode() && isPainterMode && (focused || hovered))
+		{
+			// 快捷键调整笔刷半径: [ 缩小 / ] 放大
+			if (ctx.IsKeyPressed(KeyCodes::LeftBracket))
+			{
+				PhysicsPainterPanel::SetBrushRadius(std::clamp(PhysicsPainterPanel::GetBrushRadius() - 0.5f, 0.5f, 50.0f));
+			}
+			else if (ctx.IsKeyPressed(KeyCodes::RightBracket))
+			{
+				PhysicsPainterPanel::SetBrushRadius(std::clamp(PhysicsPainterPanel::GetBrushRadius() + 0.5f, 0.5f, 50.0f));
+			}
+
+			const glm::vec2 mousePos = ctx.Input().MousePos;
+			const bool mouseInViewport = (mousePos.x >= sceneRect.X && mousePos.x <= sceneRect.X + sceneRect.W &&
+				mousePos.y >= sceneRect.Y && mousePos.y <= sceneRect.Y + sceneRect.H);
+
+			if (mouseInViewport && !m_Host.IsFlyNavigating())
+			{
+				const Wui::GizmoCamera gizmoCamera = m_Host.GetGizmoCamera();
+				const float ndcX = ((mousePos.x - sceneRect.X) / sceneRect.W) * 2.0f - 1.0f;
+				const float ndcY = 1.0f - ((mousePos.y - sceneRect.Y) / sceneRect.H) * 2.0f;
+
+				const glm::mat4 invVP = glm::inverse(gizmoCamera.ViewProjection);
+				glm::vec4 nearPointClip(ndcX, ndcY, -1.0f, 1.0f);
+				glm::vec4 farPointClip(ndcX, ndcY, 1.0f, 1.0f);
+				glm::vec4 nearPointWorld = invVP * nearPointClip;
+				glm::vec4 farPointWorld = invVP * farPointClip;
+				if (std::abs(nearPointWorld.w) > 1e-6f) nearPointWorld /= nearPointWorld.w;
+				if (std::abs(farPointWorld.w) > 1e-6f) farPointWorld /= farPointWorld.w;
+
+				glm::vec3 rayOrigin = gizmoCamera.Position;
+				glm::vec3 rayDir = glm::normalize(glm::vec3(farPointWorld) - rayOrigin);
+				if (gizmoCamera.IsOrthographic)
+				{
+					rayOrigin = glm::vec3(nearPointWorld);
+					rayDir = gizmoCamera.Forward;
+				}
+
+				Ref<Scene> activeScene = m_Host.GetActiveScene();
+				glm::vec3 worldHitPoint { 0.0f };
+				glm::vec3 worldHitNormal { 0.0f, 1.0f, 0.0f };
+				bool hasHit = false;
+
+				if (activeScene)
+				{
+					for (auto [handle, comp] : std::as_const(*activeScene).GetRegistry().view<TerrainComponent>().each())
+					{
+						Entity e(activeScene.get(), handle);
+						glm::mat4 tWorld { 1.0f };
+						if (e.HasComponent<TransformComponent>())
+						{
+							tWorld = e.GetComponent<TransformComponent>().GetLocalMatrix();
+							if (e.HasComponent<WorldTransformComponent>())
+								tWorld = e.GetComponent<WorldTransformComponent>().Matrix;
+						}
+						std::shared_ptr<TerrainData> tData = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+						if (tData)
+						{
+							const glm::mat4 invTW = glm::inverse(tWorld);
+							const glm::vec3 localOrig = glm::vec3(invTW * glm::vec4(rayOrigin, 1.0f));
+							const glm::vec3 localD = glm::normalize(glm::vec3(invTW * glm::vec4(rayDir, 0.0f)));
+							TerrainRaycastHit tHit;
+							if (tData->Raycast(localOrig, localD, 2000.0f, tHit))
+							{
+								worldHitPoint = glm::vec3(tWorld * glm::vec4(tHit.Point, 1.0f));
+								worldHitNormal = glm::normalize(glm::vec3(glm::transpose(invTW) * glm::vec4(tHit.Normal, 0.0f)));
+								hasHit = true;
+								break;
+							}
+						}
+					}
+				}
+
+				if (!hasHit && std::abs(rayDir.y) > 1e-4f)
+				{
+					const float t = (0.0f - rayOrigin.y) / rayDir.y;
+					if (t > 0.0f)
+					{
+						worldHitPoint = rayOrigin + rayDir * t;
+						worldHitNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+						hasHit = true;
+					}
+				}
+
+				if (hasHit)
+				{
+					const float R = PhysicsPainterPanel::GetBrushRadius();
+					constexpr int kSegments = 32;
+					glm::vec4 clips[kSegments];
+					for (int i = 0; i < kSegments; ++i)
+					{
+						const float angle = static_cast<float>(i) / static_cast<float>(kSegments) * 6.2831853f;
+						const glm::vec3 offset(R * std::cos(angle), 0.0f, R * std::sin(angle));
+						const glm::vec3 pt = worldHitPoint + offset + worldHitNormal * 0.03f;
+						clips[i] = gizmoCamera.ViewProjection * glm::vec4(pt, 1.0f);
+					}
+
+					const Wui::WuiColor ringColor { 1.0f, 0.65f, 0.15f, 0.95f };
+					for (int i = 0; i < kSegments; ++i)
+					{
+						PushProjectedSegment(ctx, gizmoCamera.ViewProjection, sceneRect,
+							clips[i], clips[(i + 1) % kSegments], ringColor, 2.4f);
+					}
+
+					// 绘制中心十字准星
+					const glm::vec4 cX0 = gizmoCamera.ViewProjection * glm::vec4(worldHitPoint + glm::vec3(-0.3f, 0.03f, 0.0f), 1.0f);
+					const glm::vec4 cX1 = gizmoCamera.ViewProjection * glm::vec4(worldHitPoint + glm::vec3( 0.3f, 0.03f, 0.0f), 1.0f);
+					const glm::vec4 cZ0 = gizmoCamera.ViewProjection * glm::vec4(worldHitPoint + glm::vec3(0.0f, 0.03f, -0.3f), 1.0f);
+					const glm::vec4 cZ1 = gizmoCamera.ViewProjection * glm::vec4(worldHitPoint + glm::vec3(0.0f, 0.03f,  0.3f), 1.0f);
+					PushProjectedSegment(ctx, gizmoCamera.ViewProjection, sceneRect, cX0, cX1, ringColor, 1.8f);
+					PushProjectedSegment(ctx, gizmoCamera.ViewProjection, sceneRect, cZ0, cZ1, ringColor, 1.8f);
+
+					// 浮动 HUD 提示
+					char hudText[160] = {};
+					std::snprintf(hudText, sizeof(hudText), "Physics Painter: [物理画笔] R: %.1fm | D: %d/笔 | [ / ] 调半径",
+						R, PhysicsPainterPanel::GetBrushDensity());
+					const float hudW = ctx.MeasureTextWidth(hudText, 12.0f);
+					const Wui::WuiRect hudRect { sceneRect.X + (sceneRect.W - hudW) * 0.5f - 8.0f, sceneRect.Y + sceneRect.H - 32.0f, hudW + 16.0f, 22.0f };
+					Wui::PanelBackground(ctx, hudRect, Wui::WuiColor{ 0.08f, 0.08f, 0.10f, 0.88f }, 4.0f);
+					Wui::HighlightOutline(ctx, hudRect, ringColor, 4.0f, 1.0f);
+					Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 4.0f }, hudText, ringColor, 12.0f);
+
+					// 点击或按住拖拽散布物体
+					if (ctx.Input().MouseDown[0] && !m_GizmoActive)
+					{
+						static uint64_t s_LastPaintFrame = 0;
+						if (ctx.Frame() - s_LastPaintFrame >= 6)
+						{
+							s_LastPaintFrame = ctx.Frame();
+							if (activeScene)
+							{
+								PhysicsPainterPanel::PaintAt(*activeScene, worldHitPoint, worldHitNormal, m_Host);
+								m_Host.MarkDocumentDirty();
+							}
+						}
+					}
+				}
+			}
+		}
+
+				// 3D 网格实体的选中框:投影单位网格包围盒的 12 条棱(真 3D 线框盒),画在场景图之上。
 		// 近的棱更实、远的棱更淡,按相机深度排序(远的先画);整体用 ClipPush 夹在场景图区域内。
 		// 旧实现是 SceneRenderer 里用 Renderer2D 按实体 Transform 画的一个 2D 方块 ——
 		// 在 3D 视口里看着就是"一个跟方块无关的方形,位置还不对"(用户 2026-09-16 反馈)。
@@ -3145,10 +3374,13 @@ namespace World
 					}
 
 					// ---- 碰撞体轮廓(编辑期;MeshCollider3D 无解析形状,按设计不画) ----
+					const bool collidersEnabled = Editor::EditorPreferences::Get().Data().ViewportColliderOutlinesEnabled;
 					const Wui::WuiColor colliderColor { theme.Success.R, theme.Success.G, theme.Success.B, 0.55f };
 					const Wui::WuiColor colliderSelected { theme.Success.R, theme.Success.G, theme.Success.B, 0.95f };
 					for (const entt::entity handle : registry.view<TransformComponent>())
 					{
+						if (!collidersEnabled)
+							continue;
 						const bool isSelected = handle == selectedHandle;
 						if (!isSelected && !showAllColliders)
 							continue;
@@ -3192,21 +3424,51 @@ namespace World
 							}
 							else
 							{
-								// 12 条棱:两个角点索引按位异或一个轴位就得到一条棱。
+								// 12 条棱:结合面法线朝向与静态遮挡剔除，彻底杜绝穿透
 								glm::vec3 corners[8];
+								glm::vec3 worldCorners[8];
 								for (int i = 0; i < 8; ++i)
+								{
 									corners[i] = box3d->Offset + glm::vec3 {
 										(i & 1) ? box3d->HalfExtents.x : -box3d->HalfExtents.x,
 										(i & 2) ? box3d->HalfExtents.y : -box3d->HalfExtents.y,
 										(i & 4) ? box3d->HalfExtents.z : -box3d->HalfExtents.z };
-								for (int i = 0; i < 8; ++i)
-									for (int axis = 0; axis < 3; ++axis)
+									worldCorners[i] = glm::vec3(world * glm::vec4(corners[i], 1.0f));
+								}
+								const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(world)));
+								const glm::vec3 faceNormals[6] = {
+									{  1,  0,  0 }, { -1,  0,  0 },
+									{  0,  1,  0 }, {  0, -1,  0 },
+									{  0,  0,  1 }, {  0,  0, -1 }
+								};
+								const glm::vec3 faceCenters[6] = {
+									box3d->Offset + glm::vec3( box3d->HalfExtents.x, 0, 0),
+									box3d->Offset + glm::vec3(-box3d->HalfExtents.x, 0, 0),
+									box3d->Offset + glm::vec3(0,  box3d->HalfExtents.y, 0),
+									box3d->Offset + glm::vec3(0, -box3d->HalfExtents.y, 0),
+									box3d->Offset + glm::vec3(0, 0,  box3d->HalfExtents.z),
+									box3d->Offset + glm::vec3(0, 0, -box3d->HalfExtents.z)
+								};
+								bool faceVisible[6] = {};
+								for (int f = 0; f < 6; ++f)
+								{
+									const glm::vec3 centerWorld = glm::vec3(world * glm::vec4(faceCenters[f], 1.0f));
+									const glm::vec3 normalWorld = glm::normalize(normalMatrix * faceNormals[f]);
+									faceVisible[f] = glm::dot(normalWorld, overlayCamera.Position - centerWorld) > 0.0f;
+								}
+								const int cubeEdges[12][4] = {
+									{ 0, 1, 3, 5 }, { 2, 3, 2, 5 }, { 4, 5, 3, 4 }, { 6, 7, 2, 4 },
+									{ 0, 2, 1, 5 }, { 1, 3, 0, 5 }, { 4, 6, 1, 4 }, { 5, 7, 0, 4 },
+									{ 0, 4, 1, 3 }, { 1, 5, 0, 3 }, { 2, 6, 1, 2 }, { 3, 7, 0, 2 },
+								};
+								for (const auto& edge : cubeEdges)
+								{
+									if (faceVisible[edge[2]] || faceVisible[edge[3]])
 									{
-										const int other = i ^ (1 << axis);
-										if (other > i)
-											PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-												corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+										PushOccludedWorldSegment(worldCorners[edge[0]], worldCorners[edge[1]],
+											color, thickness, handle);
 									}
+								}
 								drew = true;
 							}
 						}
@@ -4008,6 +4270,392 @@ namespace World
 						}
 					}
 
+					// ---- 选中白盒原型线框 (WhiteboxComponent) ----
+					// 严格遵循面法线朝向与静态遮挡剔除，彻底杜绝线条穿透遮挡物与自身
+					if (selected.IsValid() && selected.HasComponent<WhiteboxComponent>() &&
+						selected.HasComponent<TransformComponent>())
+					{
+						const auto& wb = selected.GetComponent<WhiteboxComponent>();
+						glm::mat4 world = selected.GetComponent<TransformComponent>().GetLocalMatrix();
+						if (selected.HasComponent<WorldTransformComponent>())
+							world = selected.GetComponent<WorldTransformComponent>().Matrix;
+
+						const Wui::WuiColor wbOutlineColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, 0.95f };
+						const float wbThickness = 1.8f;
+						const entt::entity selHandle = static_cast<entt::entity>(selected);
+
+						if (wb.Shape == WhiteboxComponent::ShapeType::Box)
+						{
+							const glm::vec3 h = wb.Dimensions * 0.5f;
+							const glm::vec3 corners[8] = {
+								{ -h.x, -h.y, -h.z }, {  h.x, -h.y, -h.z },
+								{  h.x,  h.y, -h.z }, { -h.x,  h.y, -h.z },
+								{ -h.x, -h.y,  h.z }, {  h.x, -h.y,  h.z },
+								{  h.x,  h.y,  h.z }, { -h.x,  h.y,  h.z },
+							};
+							glm::vec3 worldCorners[8];
+							for (int i = 0; i < 8; ++i)
+								worldCorners[i] = glm::vec3(world * glm::vec4(corners[i], 1.0f));
+
+							const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(world)));
+							const glm::vec3 faceNormals[6] = {
+								{  1,  0,  0 }, { -1,  0,  0 },
+								{  0,  1,  0 }, {  0, -1,  0 },
+								{  0,  0,  1 }, {  0,  0, -1 }
+							};
+							const glm::vec3 faceCenters[6] = {
+								{  h.x, 0, 0 }, { -h.x, 0, 0 },
+								{ 0,  h.y, 0 }, { 0, -h.y, 0 },
+								{ 0, 0,  h.z }, { 0, 0, -h.z }
+							};
+							bool faceVisible[6] = {};
+							for (int f = 0; f < 6; ++f)
+							{
+								const glm::vec3 centerWorld = glm::vec3(world * glm::vec4(faceCenters[f], 1.0f));
+								const glm::vec3 normalWorld = glm::normalize(normalMatrix * faceNormals[f]);
+								faceVisible[f] = glm::dot(normalWorld, overlayCamera.Position - centerWorld) > 0.0f;
+							}
+							const int boxEdges[12][4] = {
+								{ 0, 1, 3, 5 }, { 2, 3, 2, 5 }, { 4, 5, 3, 4 }, { 6, 7, 2, 4 },
+								{ 0, 2, 1, 5 }, { 1, 3, 0, 5 }, { 4, 6, 1, 4 }, { 5, 7, 0, 4 },
+								{ 0, 4, 1, 3 }, { 1, 5, 0, 3 }, { 2, 6, 1, 2 }, { 3, 7, 0, 2 },
+							};
+							for (const auto& edge : boxEdges)
+							{
+								if (faceVisible[edge[2]] || faceVisible[edge[3]])
+								{
+									PushOccludedWorldSegment(worldCorners[edge[0]], worldCorners[edge[1]],
+										wbOutlineColor, wbThickness, selHandle);
+								}
+							}
+						}
+						else if (wb.Shape == WhiteboxComponent::ShapeType::Cylinder)
+						{
+							const float r = wb.Dimensions.x * 0.5f;
+							const float halfH = wb.Dimensions.y * 0.5f;
+							constexpr int kSegs = 24;
+							constexpr float k2Pi = 6.2831853f;
+							for (int i = 0; i < kSegs; ++i)
+							{
+								const float a0 = static_cast<float>(i) * k2Pi / static_cast<float>(kSegs);
+								const float a1 = static_cast<float>(i + 1) * k2Pi / static_cast<float>(kSegs);
+
+								const glm::vec3 pTop0 = glm::vec3(world * glm::vec4(std::cos(a0) * r,  halfH, std::sin(a0) * r, 1.0f));
+								const glm::vec3 pTop1 = glm::vec3(world * glm::vec4(std::cos(a1) * r,  halfH, std::sin(a1) * r, 1.0f));
+								PushOccludedWorldSegment(pTop0, pTop1, wbOutlineColor, wbThickness, selHandle);
+
+								const glm::vec3 pBot0 = glm::vec3(world * glm::vec4(std::cos(a0) * r, -halfH, std::sin(a0) * r, 1.0f));
+								const glm::vec3 pBot1 = glm::vec3(world * glm::vec4(std::cos(a1) * r, -halfH, std::sin(a1) * r, 1.0f));
+								PushOccludedWorldSegment(pBot0, pBot1, wbOutlineColor, wbThickness, selHandle);
+
+								if (i % (kSegs / 4) == 0)
+								{
+									PushOccludedWorldSegment(pBot0, pTop0, wbOutlineColor, wbThickness, selHandle);
+								}
+							}
+						}
+						else if (wb.Shape == WhiteboxComponent::ShapeType::Wedge)
+						{
+							const glm::vec3 h = wb.Dimensions * 0.5f;
+							const glm::vec3 w[6] = {
+								{ -h.x, -h.y, -h.z }, {  h.x, -h.y, -h.z },
+								{  h.x, -h.y,  h.z }, { -h.x, -h.y,  h.z },
+								{ -h.x,  h.y,  h.z }, {  h.x,  h.y,  h.z }
+							};
+							glm::vec3 worldW[6];
+							for (int i = 0; i < 6; ++i)
+								worldW[i] = glm::vec3(world * glm::vec4(w[i], 1.0f));
+
+							const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(world)));
+							const glm::vec3 slopeNormalLocal = glm::normalize(glm::vec3(0.0f, h.z, -h.y));
+							const glm::vec3 faceNormals[5] = {
+								{ 0, -1, 0 }, { 0, 0, 1 }, slopeNormalLocal, { -1, 0, 0 }, { 1, 0, 0 }
+							};
+							const glm::vec3 faceCenters[5] = {
+								{ 0, -h.y, 0 }, { 0, 0, h.z }, { 0, 0, 0 }, { -h.x, 0, 0 }, { h.x, 0, 0 }
+							};
+							bool faceVisible[5] = {};
+							for (int f = 0; f < 5; ++f)
+							{
+								const glm::vec3 centerWorld = glm::vec3(world * glm::vec4(faceCenters[f], 1.0f));
+								const glm::vec3 normalWorld = glm::normalize(normalMatrix * faceNormals[f]);
+								faceVisible[f] = glm::dot(normalWorld, overlayCamera.Position - centerWorld) > 0.0f;
+							}
+							const int wedgeEdges[9][4] = {
+								{ 0, 1, 0, 2 }, { 1, 2, 0, 4 }, { 2, 3, 0, 1 }, { 3, 0, 0, 3 },
+								{ 4, 5, 1, 2 }, { 3, 4, 1, 3 }, { 2, 5, 1, 4 },
+								{ 0, 4, 2, 3 }, { 1, 5, 2, 4 }
+							};
+							for (const auto& edge : wedgeEdges)
+							{
+								if (faceVisible[edge[2]] || faceVisible[edge[3]])
+								{
+									PushOccludedWorldSegment(worldW[edge[0]], worldW[edge[1]], wbOutlineColor, wbThickness, selHandle);
+								}
+							}
+						}
+						else if (wb.Shape == WhiteboxComponent::ShapeType::Stairs)
+						{
+							const uint32_t nSteps = std::max(1u, static_cast<uint32_t>(wb.Steps));
+							const float stepH = wb.Dimensions.y / static_cast<float>(nSteps);
+							const float stepD = wb.Dimensions.z / static_cast<float>(nSteps);
+							const float halfW = wb.Dimensions.x * 0.5f;
+
+							for (uint32_t i = 0; i < nSteps; ++i)
+							{
+								const float y0 = static_cast<float>(i) * stepH;
+								const float y1 = y0 + stepH;
+								const float z0 = static_cast<float>(i) * stepD;
+								const float z1 = z0 + stepD;
+
+								const glm::vec3 t0 = glm::vec3(world * glm::vec4(-halfW, y1, z1, 1.0f));
+								const glm::vec3 t1 = glm::vec3(world * glm::vec4( halfW, y1, z1, 1.0f));
+								const glm::vec3 t2 = glm::vec3(world * glm::vec4(-halfW, y1, z0, 1.0f));
+								const glm::vec3 t3 = glm::vec3(world * glm::vec4( halfW, y1, z0, 1.0f));
+
+								PushOccludedWorldSegment(t0, t1, wbOutlineColor, wbThickness, selHandle);
+								PushOccludedWorldSegment(t2, t0, wbOutlineColor, wbThickness, selHandle);
+								PushOccludedWorldSegment(t3, t1, wbOutlineColor, wbThickness, selHandle);
+
+								const glm::vec3 r0 = glm::vec3(world * glm::vec4(-halfW, y0, z0, 1.0f));
+								const glm::vec3 r1 = glm::vec3(world * glm::vec4( halfW, y0, z0, 1.0f));
+								PushOccludedWorldSegment(r0, r1, wbOutlineColor, wbThickness, selHandle);
+								PushOccludedWorldSegment(r0, t2, wbOutlineColor, wbThickness, selHandle);
+								PushOccludedWorldSegment(r1, t3, wbOutlineColor, wbThickness, selHandle);
+							}
+						}
+						else // Sphere / Arch
+						{
+							const float r = wb.Dimensions.x * 0.5f;
+							constexpr int kSegs = 24;
+							constexpr float k2Pi = 6.2831853f;
+							for (int i = 0; i < kSegs; ++i)
+							{
+								const float a0 = static_cast<float>(i) * k2Pi / static_cast<float>(kSegs);
+								const float a1 = static_cast<float>(i + 1) * k2Pi / static_cast<float>(kSegs);
+
+								const glm::vec3 p0 = glm::vec3(world * glm::vec4(std::cos(a0) * r, 0.0f, std::sin(a0) * r, 1.0f));
+								const glm::vec3 p1 = glm::vec3(world * glm::vec4(std::cos(a1) * r, 0.0f, std::sin(a1) * r, 1.0f));
+								PushOccludedWorldSegment(p0, p1, wbOutlineColor, wbThickness, selHandle);
+
+								const glm::vec3 q0 = glm::vec3(world * glm::vec4(std::cos(a0) * r, std::sin(a0) * r, 0.0f, 1.0f));
+								const glm::vec3 q1 = glm::vec3(world * glm::vec4(std::cos(a1) * r, std::sin(a1) * r, 0.0f, 1.0f));
+								PushOccludedWorldSegment(q0, q1, wbOutlineColor, wbThickness, selHandle);
+							}
+						}
+					}
+
+					// ---- 选中样条线与控制点 3D 曲线 (SplineComponent) ----
+					Entity splineEntity;
+					if (selected.IsValid())
+					{
+						if (selected.HasComponent<SplineComponent>())
+						{
+							splineEntity = selected;
+						}
+						else
+						{
+							const auto* hc = registry.try_get<HierarchyComponent>(selectedHandle);
+							const entt::entity parentHandle = hc ? hc->Parent : entt::null;
+							if (parentHandle != entt::null && registry.valid(parentHandle) && registry.all_of<SplineComponent>(parentHandle))
+							{
+								splineEntity = Entity(overlayScene.get(), parentHandle);
+							}
+						}
+					}
+
+					if (splineEntity.IsValid() && splineEntity.HasComponent<SplineComponent>())
+					{
+						const auto& sc = splineEntity.GetComponent<SplineComponent>();
+						std::vector<Entity> knots;
+						const auto& children = Hierarchy::ChildrenOf(registry, static_cast<entt::entity>(splineEntity));
+						for (const entt::entity h : children)
+						{
+							knots.push_back(Entity(overlayScene.get(), h));
+						}
+
+						if (knots.size() >= 2)
+						{
+							Spline3D spline;
+							std::vector<glm::vec3> knotWorldPositions;
+							knotWorldPositions.reserve(knots.size());
+							for (auto& k : knots)
+							{
+								glm::vec3 wp = k.GetComponent<TransformComponent>().Location;
+								if (k.HasComponent<WorldTransformComponent>())
+									wp = glm::vec3(k.GetComponent<WorldTransformComponent>().Matrix[3]);
+								spline.AddPoint(wp);
+								knotWorldPositions.push_back(wp);
+							}
+
+							const Wui::WuiColor splineGold { 1.0f, 0.82f, 0.18f, 0.95f };
+							const Wui::WuiColor roadEdgeColor { 0.95f, 0.72f, 0.15f, 0.55f };
+							const Wui::WuiColor roadRungColor { 0.85f, 0.65f, 0.10f, 0.35f };
+
+							constexpr int kSplineSamples = 80;
+							glm::vec3 prevCenter { 0.0f };
+							glm::vec3 prevLeft { 0.0f };
+							glm::vec3 prevRight { 0.0f };
+
+							const float halfRoadW = sc.RoadWidth * 0.5f;
+
+							for (int i = 0; i <= kSplineSamples; ++i)
+							{
+								const float t = static_cast<float>(i) / static_cast<float>(kSplineSamples);
+								glm::vec3 curPos { 0.0f };
+								glm::vec3 curTan { 0.0f, 0.0f, 1.0f };
+								spline.SamplePoint(t, curPos, curTan);
+
+								glm::vec3 side = glm::normalize(glm::cross(curTan, glm::vec3(0.0f, 1.0f, 0.0f)));
+								if (glm::length(side) < 1e-4f)
+									side = glm::vec3(1.0f, 0.0f, 0.0f);
+								side *= halfRoadW;
+
+								const glm::vec3 curLeft = curPos - side;
+								const glm::vec3 curRight = curPos + side;
+
+								if (i > 0)
+								{
+									PushOccludedWorldSegment(prevCenter, curPos, splineGold, 2.4f, static_cast<entt::entity>(splineEntity));
+
+									if (sc.ExtrudeRoad)
+									{
+										PushOccludedWorldSegment(prevLeft, curLeft, roadEdgeColor, 1.4f, static_cast<entt::entity>(splineEntity));
+										PushOccludedWorldSegment(prevRight, curRight, roadEdgeColor, 1.4f, static_cast<entt::entity>(splineEntity));
+
+										if (i % 4 == 0)
+										{
+											PushOccludedWorldSegment(curLeft, curRight, roadRungColor, 1.0f, static_cast<entt::entity>(splineEntity));
+										}
+									}
+								}
+
+								prevCenter = curPos;
+								prevLeft = curLeft;
+								prevRight = curRight;
+							}
+
+							for (size_t k = 0; k < knotWorldPositions.size(); ++k)
+							{
+								const glm::vec3 kp = knotWorldPositions[k];
+								const bool isKnotSelected = (static_cast<entt::entity>(knots[k]) == selectedHandle);
+								const Wui::WuiColor knotColor = isKnotSelected
+									? Wui::WuiColor { 1.0f, 1.0f, 1.0f, 0.95f }
+									: Wui::WuiColor { 0.20f, 0.90f, 0.40f, 0.85f };
+
+								const float kd = isKnotSelected ? 0.45f : 0.30f;
+								const glm::vec3 dX0 = kp + glm::vec3(-kd, 0.0f, 0.0f);
+								const glm::vec3 dX1 = kp + glm::vec3( kd, 0.0f, 0.0f);
+								const glm::vec3 dZ0 = kp + glm::vec3(0.0f, 0.0f, -kd);
+								const glm::vec3 dZ1 = kp + glm::vec3(0.0f, 0.0f,  kd);
+								const glm::vec3 dY0 = kp + glm::vec3(0.0f, -kd, 0.0f);
+								const glm::vec3 dY1 = kp + glm::vec3(0.0f,  kd, 0.0f);
+
+								const float knotThick = isKnotSelected ? 2.2f : 1.5f;
+								PushOccludedWorldSegment(dX0, dZ0, knotColor, knotThick, static_cast<entt::entity>(knots[k]));
+								PushOccludedWorldSegment(dZ0, dX1, knotColor, knotThick, static_cast<entt::entity>(knots[k]));
+								PushOccludedWorldSegment(dX1, dZ1, knotColor, knotThick, static_cast<entt::entity>(knots[k]));
+								PushOccludedWorldSegment(dZ1, dX0, knotColor, knotThick, static_cast<entt::entity>(knots[k]));
+								PushOccludedWorldSegment(dY0, dY1, knotColor, knotThick, static_cast<entt::entity>(knots[k]));
+
+								const glm::vec4 clip = overlayCamera.ViewProjection * glm::vec4(kp, 1.0f);
+								if (clip.w > 0.01f)
+								{
+									const float scrX = sceneRect.X + (clip.x / clip.w * 0.5f + 0.5f) * sceneRect.W;
+									const float scrY = sceneRect.Y + (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * sceneRect.H;
+									if (scrX >= sceneRect.X && scrX <= sceneRect.X + sceneRect.W &&
+										scrY >= sceneRect.Y && scrY <= sceneRect.Y + sceneRect.H)
+									{
+										char kTag[32];
+										std::snprintf(kTag, sizeof(kTag), "K%zu", k);
+										Wui::Label(ctx, { scrX + 6.0f, scrY - 8.0f }, kTag,
+											isKnotSelected ? theme.Warning : theme.Text, 11.0f);
+									}
+								}
+							}
+						}
+					}
+
+					// ---- 物理画笔视口贴地光圈与 HUD (PhysicsPainterPanel) ----
+					if (isPainterMode && PhysicsPainterPanel::IsActive() && !play && (focused || hovered))
+					{
+						const glm::vec2 mousePos = ctx.Input().MousePos;
+						if (mousePos.x >= sceneRect.X && mousePos.x <= sceneRect.X + sceneRect.W &&
+							mousePos.y >= sceneRect.Y && mousePos.y <= sceneRect.Y + sceneRect.H &&
+							!m_Host.IsFlyNavigating())
+						{
+							const float ndcX = ((mousePos.x - sceneRect.X) / sceneRect.W) * 2.0f - 1.0f;
+							const float ndcY = 1.0f - ((mousePos.y - sceneRect.Y) / sceneRect.H) * 2.0f;
+							const glm::mat4 invVP = glm::inverse(overlayCamera.ViewProjection);
+							glm::vec4 nearPointClip(ndcX, ndcY, -1.0f, 1.0f);
+							glm::vec4 farPointClip(ndcX, ndcY, 1.0f, 1.0f);
+							glm::vec4 nearPointWorld = invVP * nearPointClip;
+							glm::vec4 farPointWorld = invVP * farPointClip;
+							if (std::abs(nearPointWorld.w) > 1e-6f) nearPointWorld /= nearPointWorld.w;
+							if (std::abs(farPointWorld.w) > 1e-6f) farPointWorld /= farPointWorld.w;
+							glm::vec3 rayOrigin = overlayCamera.Position;
+							glm::vec3 rayDir = glm::normalize(glm::vec3(farPointWorld) - rayOrigin);
+
+							glm::vec3 hitPoint { 0.0f };
+							glm::vec3 hitNormal { 0.0f, 1.0f, 0.0f };
+							bool hasHit = false;
+
+							glm::mat4 tWorld { 1.0f };
+							for (auto [h, tc, xf] : registry.view<TerrainComponent, TransformComponent>().each())
+							{
+								tWorld = xf.GetLocalMatrix();
+								break;
+							}
+							if (terrainData)
+							{
+								const glm::mat4 invTW = glm::inverse(tWorld);
+								const glm::vec3 localOrigin = glm::vec3(invTW * glm::vec4(rayOrigin, 1.0f));
+								const glm::vec3 localDir = glm::normalize(glm::vec3(invTW * glm::vec4(rayDir, 0.0f)));
+								TerrainRaycastHit thit;
+								if (terrainData->Raycast(localOrigin, localDir, 2000.0f, thit))
+								{
+									hitPoint = glm::vec3(tWorld * glm::vec4(thit.Point, 1.0f));
+									hitNormal = glm::normalize(glm::vec3(tWorld * glm::vec4(thit.Normal, 0.0f)));
+									hasHit = true;
+								}
+							}
+							if (!hasHit && std::abs(rayDir.y) > 1e-4f)
+							{
+								const float t = -rayOrigin.y / rayDir.y;
+								if (t > 0.0f && t < 2000.0f)
+								{
+									hitPoint = rayOrigin + rayDir * t;
+									hitNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+									hasHit = true;
+								}
+							}
+
+							if (hasHit)
+							{
+								const float pRadius = PhysicsPainterPanel::GetBrushRadius();
+								const Wui::WuiColor brushColor { 1.0f, 0.55f, 0.10f, 0.90f };
+
+								constexpr int kBrushSegs = 32;
+								for (int s = 0; s < kBrushSegs; ++s)
+								{
+									const float a0 = static_cast<float>(s) / static_cast<float>(kBrushSegs) * 6.2831853f;
+									const float a1 = static_cast<float>(s + 1) / static_cast<float>(kBrushSegs) * 6.2831853f;
+									const glm::vec3 p0 = hitPoint + glm::vec3(pRadius * std::cos(a0), 0.05f, pRadius * std::sin(a0));
+									const glm::vec3 p1 = hitPoint + glm::vec3(pRadius * std::cos(a1), 0.05f, pRadius * std::sin(a1));
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, glm::mat4(1.0f),
+										p0, p1, brushColor, 2.2f, &overlayMin, &overlayMax);
+								}
+
+								char hudBuf[128];
+								std::snprintf(hudBuf, sizeof(hudBuf), "Physics Painter: R: %.1fm | 密度: %d | [点击视口散布]",
+									pRadius, PhysicsPainterPanel::GetBrushDensity());
+								const Wui::WuiRect hudRect { sceneRect.X + 16.0f, sceneRect.Y + sceneRect.H - 42.0f, 320.0f, 26.0f };
+								Wui::PanelBackground(ctx, hudRect, Wui::WuiColor { 0.12f, 0.14f, 0.18f, 0.92f }, 4.0f);
+								Wui::HighlightOutline(ctx, hudRect, brushColor, 4.0f, 1.0f);
+								Wui::Label(ctx, { hudRect.X + 8.0f, hudRect.Y + 6.0f }, hudBuf, brushColor, 12.0f);
+							}
+						}
+					}
 					// 空间八叉树包围盒线框 (Octree Bounds)
 					if (s_ShowOctreeBounds && overlayScene)
 					{

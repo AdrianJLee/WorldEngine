@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000004
+  World::TagComponent:
+    Tag: "Whitebox Grand Stairs (10 Steps)"
+  World::TransformComponent:
+    Location: [-5.0, 0.0, 2.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 3
+    Subdivisions: 1
+    Steps: 10
+    Dimensions: [3.5, 3.0, 6.0]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.52, 0.48, 0.42, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

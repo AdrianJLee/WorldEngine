@@ -7,6 +7,8 @@
 
 namespace World
 {
+	struct WhiteboxComponent;
+
 	struct WhiteboxMesh
 	{
 		std::vector<glm::vec3> Vertices;
@@ -20,8 +22,11 @@ namespace World
 	public:
 		static void BuildBox(const glm::vec3& dimensions, float bevelSize, WhiteboxMesh& outMesh);
 		static void BuildCylinder(float radius, float height, uint32_t segments, WhiteboxMesh& outMesh);
+		static void BuildSphere(float radius, uint32_t segments, uint32_t rings, WhiteboxMesh& outMesh);
 		static void BuildStairs(const glm::vec3& dimensions, uint32_t steps, WhiteboxMesh& outMesh);
 		static void BuildWedge(const glm::vec3& dimensions, WhiteboxMesh& outMesh);
 		static void BuildArch(const glm::vec3& dimensions, float innerRadius, WhiteboxMesh& outMesh);
+
+		static void BuildMesh(const WhiteboxComponent& comp, WhiteboxMesh& outMesh);
 	};
 }

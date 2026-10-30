@@ -30,6 +30,7 @@
 #include "WUI/Panels/TerrainPanel.h"
 #include "WUI/Panels/FoliagePanel.h"
 #include "WUI/Panels/NavMeshPanel.h"
+#include "WUI/Panels/PhysicsPainterPanel.h"
 #include "World/WUI/WuiLocalization.h"
 
 #include <algorithm>
@@ -152,6 +153,7 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 			{ "terrain_editor",  EditorShell::PanelForm::Docked, {} },
 			{ "foliage_editor",  EditorShell::PanelForm::Docked, {} },
 			{ "navmesh",         EditorShell::PanelForm::Docked, {} },
+			{ "physicspainter",  EditorShell::PanelForm::Docked, {} },
 			// 注:D3 材质编辑器是**动态面板**(每个材质一个 "material:<path>" 实例),
 			// 不在这张静态声明表里,由 IsMaterialPanel/EditorShell::OpenMaterialEditor 处理。
 		};

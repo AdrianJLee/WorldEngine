@@ -15,7 +15,10 @@
 #include "World/Utils/Paths.h"
 #include "PropertiesPanel_Internal.h"
 #include "WUI/Panels/BehaviorTreeEditorPanel.h"
+#include "WUI/Common/AssetThumbnailRenderer.h"
 #include "NavMeshPanel.h"
+#include "World/Level/WhiteboxBuilder.h"
+#include "World/Level/Spline3D.h"
 #include <chrono>
 #include <future>
 #include <filesystem>
@@ -1027,26 +1030,82 @@ static uint32_t s_LODGenEntityId = 0;
 		const float contentW = rect.W - pad * 2.0f;
 		float curY = rect.Y + 4.0f;
 
-		// 1. 材质与贴图槽位 (DecalMaterial)
+		// 1. 材质与贴图资产下拉选择器 (DecalMaterial - 通用资产下拉)
 		Wui::Label(ctx, { startX, curY + 2.0f }, "投影材质/贴图 (Decal Material / Texture):", theme.Accent, theme.FontSizeSmall);
 		curY += 20.0f;
 
+		// 收集工程中的所有可用材质 (.wmat) 与纹理 (.png/.jpg/.wtex)
+		const std::vector<std::string>& matPaths = Editor::AssetCatalog::PathsForName("Material");
+		const std::vector<std::string>& texPaths = Editor::AssetCatalog::PathsForName("Texture");
+		std::vector<std::string> decalOptions;
+		decalOptions.reserve(matPaths.size() + texPaths.size() + 2);
+		decalOptions.push_back("(Default Decal / 引擎默认贴花)");
+		for (const auto& p : matPaths)
+			decalOptions.push_back(p);
+		for (const auto& p : texPaths)
+			decalOptions.push_back(p);
+
 		const std::string curMat = comp->DecalMaterial.HasPath()
 			? std::string(StringPool::Get().PathOf(comp->DecalMaterial.Path)) : "";
+
+		int selectedMatIdx = 0;
+		if (!curMat.empty())
+		{
+			const auto found = std::find(decalOptions.begin() + 1, decalOptions.end(), curMat);
+			if (found != decalOptions.end())
+			{
+				selectedMatIdx = static_cast<int>(found - decalOptions.begin());
+			}
+			else
+			{
+				decalOptions.push_back(curMat);
+				selectedMatIdx = static_cast<int>(decalOptions.size()) - 1;
+			}
+		}
+
+		const float thumbSize = 22.0f;
 		const float pickBtnW = 26.0f;
-		const float clearBtnW = 24.0f;
-		const float matFieldW = contentW - pickBtnW - clearBtnW - 8.0f;
+		const float clearBtnW = 22.0f;
+		const float comboW = contentW - thumbSize - pickBtnW - clearBtnW - 12.0f;
 
-		const Wui::WuiRect matTextRect { startX, curY, matFieldW, 22.0f };
-		const Wui::WuiRect pickBtnRect { startX + matFieldW + 4.0f, curY, pickBtnW, 22.0f };
-		const Wui::WuiRect clearBtnRect { startX + matFieldW + pickBtnW + 8.0f, curY, clearBtnW, 22.0f };
+		// 资产缩略图小方块
+		const Wui::WuiRect thumbRect { startX, curY, thumbSize, thumbSize };
+		if (!curMat.empty())
+		{
+			const bool isWmat = curMat.size() >= 5 && curMat.compare(curMat.size() - 5, 5, ".wmat") == 0;
+			Editor::AssetThumbnailRenderer::DrawThumbnail(ctx, thumbRect, curMat,
+				isWmat ? AssetCategory::Material : AssetCategory::Texture, theme);
+			Wui::HighlightOutline(ctx, thumbRect, theme.BorderStrong, 3.0f, 1.0f);
+		}
+		else
+		{
+			Wui::PanelBackground(ctx, thumbRect, theme.ContentBg, 3.0f);
+			Wui::HighlightOutline(ctx, thumbRect, theme.Border, 3.0f, 1.0f);
+			Wui::Label(ctx, { thumbRect.X + 7.0f, thumbRect.Y + 4.0f }, "*", theme.Accent, 12.0f);
+		}
+		Wui::Tooltip(ctx, thumbRect, curMat.empty() ? "当前使用引擎内置默认贴花" : curMat);
 
-		const std::string displayMat = curMat.empty() ? "(Default Decal / 内置默认贴图)" : curMat;
-		Wui::Label(ctx, { startX + 4.0f, curY + 3.0f }, displayMat, curMat.empty() ? theme.TextMuted : theme.Text, theme.FontSizeSmall);
-		Wui::Tooltip(ctx, matTextRect, curMat.empty()
-			? "当前使用引擎内置高精度默认弹孔/污渍贴花纹理；点击右侧按钮可选择自定义材质或纹理"
-			: ("当前引用资产: " + curMat));
+		// 通用资产下拉框 (SearchableCombo)
+		const Wui::WuiRect comboRect { startX + thumbSize + 4.0f, curY, comboW, 22.0f };
+		Wui::Tooltip(ctx, comboRect, "选择贴花投射的材质 (.wmat) 或贴图资产");
+		const int beforeMatIdx = selectedMatIdx;
+		if (Wui::SearchableCombo(ctx, Wui::HashId("inspect.decal.mat_combo"), comboRect, "",
+			decalOptions, selectedMatIdx, theme, "", true) && selectedMatIdx != beforeMatIdx)
+		{
+			if (selectedMatIdx <= 0)
+			{
+				comp->DecalMaterial = AssetRef{};
+			}
+			else if (static_cast<size_t>(selectedMatIdx) < decalOptions.size())
+			{
+				comp->DecalMaterial = AssetRef{ StringPool::Get().InternPath(decalOptions[selectedMatIdx]), AssetId{} };
+			}
+			if (changedFields) changedFields->push_back("DecalMaterial");
+			host.MarkDocumentDirty();
+		}
 
+		// 资产选择器浏览按钮 (...)
+		const Wui::WuiRect pickBtnRect { startX + thumbSize + 4.0f + comboW + 4.0f, curY, pickBtnW, 22.0f };
 		if (Wui::Button(ctx, Wui::HashId("inspect.decal.mat_pick"), pickBtnRect, "...", theme))
 		{
 			host.OpenAssetPicker("Select Decal Material or Texture", AssetCategory::Material,
@@ -1059,16 +1118,18 @@ static uint32_t s_LODGenEntityId = 0;
 		}
 		Wui::Tooltip(ctx, pickBtnRect, "打开资产选择器挑选贴花材质 (.wmat) 或纹理 (.png/.jpg)");
 
+		// 清除按钮 (x)
+		const Wui::WuiRect clearBtnRect { startX + thumbSize + 4.0f + comboW + 4.0f + pickBtnW + 4.0f, curY, clearBtnW, 22.0f };
 		if (Wui::Button(ctx, Wui::HashId("inspect.decal.mat_clear"), clearBtnRect, "x", theme))
 		{
 			comp->DecalMaterial = AssetRef{};
 			if (changedFields) changedFields->push_back("DecalMaterial");
 			host.MarkDocumentDirty();
 		}
-		Wui::Tooltip(ctx, clearBtnRect, "清空自定义材质，恢复引擎内置默认贴图");
-		curY += 26.0f;
+		Wui::Tooltip(ctx, clearBtnRect, "清空自定义资产，恢复引擎内置默认贴花");
+		curY += 28.0f;
 
-		// 2. 投影半尺寸 Extents (Half Size in meters)
+		// 2. 投影半尺寸 Extents (Half Size in meters) - 通用三轴几何输入
 		Wui::Label(ctx, { startX, curY + 2.0f }, "投影尺寸 Extents (X/Z 面宽, Y 深度 m):", theme.Text, theme.FontSizeSmall);
 		curY += 20.0f;
 
@@ -1104,36 +1165,7 @@ static uint32_t s_LODGenEntityId = 0;
 			host.MarkDocumentDirty();
 		}
 		Wui::Tooltip(ctx, { startX + (coordLabelW + coordFieldW + 6.0f) * 2.0f + coordLabelW, curY, coordFieldW, 22.0f }, "Z 轴半尺寸 (米)：投影面局部垂直半长度");
-		curY += 26.0f;
-
-		// 尺寸快捷预设
-		const float pBtnGap = 4.0f;
-		const float pBtnW = (contentW - pBtnGap * 3.0f) / 4.0f;
-		if (Wui::Button(ctx, Wui::HashId("inspect.decal.preset_bullet"), { startX, curY, pBtnW, 22.0f }, "弹孔 (0.1m)", theme))
-		{
-			comp->Extents = glm::vec3(0.1f, 0.05f, 0.1f);
-			if (changedFields) changedFields->push_back("Extents");
-			host.MarkDocumentDirty();
-		}
-		if (Wui::Button(ctx, Wui::HashId("inspect.decal.preset_foot"), { startX + (pBtnW + pBtnGap), curY, pBtnW, 22.0f }, "脚印 (0.25m)", theme))
-		{
-			comp->Extents = glm::vec3(0.25f, 0.1f, 0.25f);
-			if (changedFields) changedFields->push_back("Extents");
-			host.MarkDocumentDirty();
-		}
-		if (Wui::Button(ctx, Wui::HashId("inspect.decal.preset_stain"), { startX + (pBtnW + pBtnGap) * 2.0f, curY, pBtnW, 22.0f }, "污渍 (0.5m)", theme))
-		{
-			comp->Extents = glm::vec3(0.5f, 0.25f, 0.5f);
-			if (changedFields) changedFields->push_back("Extents");
-			host.MarkDocumentDirty();
-		}
-		if (Wui::Button(ctx, Wui::HashId("inspect.decal.preset_large"), { startX + (pBtnW + pBtnGap) * 3.0f, curY, pBtnW, 22.0f }, "巨型 (2.0m)", theme))
-		{
-			comp->Extents = glm::vec3(2.0f, 0.5f, 2.0f);
-			if (changedFields) changedFields->push_back("Extents");
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
+		curY += 28.0f;
 
 		// 3. 透明衰减 FadeFactor (0.0 ~ 1.0)
 		Wui::Label(ctx, { startX, curY + 2.0f }, "透明衰减 (Fade Factor):", theme.Text, theme.FontSizeSmall);
@@ -1427,6 +1459,478 @@ static uint32_t s_LODGenEntityId = 0;
 		return curY - rect.Y;
 	}
 
+	// ---- 白盒几何体专属检视器 (DrawWhiteboxInspector) ----
+	static float DrawWhiteboxInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto* comp = static_cast<WhiteboxComponent*>(instance);
+		if (!comp)
+			return 0.0f;
+
+		const float pad = theme.Pad;
+		const float startX = rect.X + pad;
+		const float contentW = rect.W - pad * 2.0f;
+		float curY = rect.Y + 4.0f;
+
+		// 1. 形状类型 (Shape Type) 下拉框
+		Wui::Label(ctx, { startX, curY + 2.0f }, "白盒几何形状 (Whitebox Shape):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		const std::vector<std::string> shapeOptions = {
+			"Box (立方体 / 盒体)",
+			"Cylinder (圆柱体)",
+			"Stairs (楼梯 / 台阶)",
+			"Wedge (斜坡 / 楔体)",
+			"Arch (拱门 / 弧形廊道)"
+		};
+		int currentShapeIdx = static_cast<int>(comp->Shape);
+		if (currentShapeIdx < 0 || currentShapeIdx >= static_cast<int>(shapeOptions.size()))
+			currentShapeIdx = 0;
+
+		const Wui::WuiRect shapeRect { startX, curY, contentW, 22.0f };
+		Wui::Tooltip(ctx, shapeRect, "选择参数化程序几何体原型形状");
+		const int beforeShape = currentShapeIdx;
+		if (Wui::SearchableCombo(ctx, Wui::HashId("inspect.whitebox.shape_combo"), shapeRect, "",
+			shapeOptions, currentShapeIdx, theme, "", false) && currentShapeIdx != beforeShape)
+		{
+			comp->Shape = static_cast<WhiteboxComponent::ShapeType>(currentShapeIdx);
+			if (changedFields) changedFields->push_back("Shape");
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
+		// 2. 尺寸 Dimensions (X, Y, Z)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "尺寸 Dimensions (X 宽, Y 高, Z 长 m):", theme.Text, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		const float coordLabelW = 14.0f;
+		const float coordFieldW = (contentW - (coordLabelW + 6.0f) * 3.0f) / 3.0f;
+
+		// X
+		Wui::Label(ctx, { startX, curY + 3.0f }, "X", theme.TextMuted, theme.FontSizeSmall);
+		float dimX = comp->Dimensions.x;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.whitebox.dim_x"),
+			{ startX + coordLabelW + 2.0f, curY, coordFieldW, 22.0f }, dimX, 0.1f, 0.1f, 500.0f, theme))
+		{
+			comp->Dimensions.x = std::max(0.1f, dimX);
+			if (changedFields) changedFields->push_back("Dimensions");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + coordLabelW + 2.0f, curY, coordFieldW, 22.0f }, "宽度 X (米)");
+
+		// Y
+		const float col1X = startX + coordLabelW + coordFieldW + 6.0f;
+		Wui::Label(ctx, { col1X, curY + 3.0f }, "Y", theme.TextMuted, theme.FontSizeSmall);
+		float dimY = comp->Dimensions.y;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.whitebox.dim_y"),
+			{ col1X + coordLabelW + 2.0f, curY, coordFieldW, 22.0f }, dimY, 0.1f, 0.1f, 500.0f, theme))
+		{
+			comp->Dimensions.y = std::max(0.1f, dimY);
+			if (changedFields) changedFields->push_back("Dimensions");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { col1X + coordLabelW + 2.0f, curY, coordFieldW, 22.0f }, "高度 Y (米)");
+
+		// Z
+		const float col2X = col1X + coordLabelW + coordFieldW + 6.0f;
+		Wui::Label(ctx, { col2X, curY + 3.0f }, "Z", theme.TextMuted, theme.FontSizeSmall);
+		float dimZ = comp->Dimensions.z;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.whitebox.dim_z"),
+			{ col2X + coordLabelW + 2.0f, curY, coordFieldW, 22.0f }, dimZ, 0.1f, 0.1f, 500.0f, theme))
+		{
+			comp->Dimensions.z = std::max(0.1f, dimZ);
+			if (changedFields) changedFields->push_back("Dimensions");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { col2X + coordLabelW + 2.0f, curY, coordFieldW, 22.0f }, "长度/深度 Z (米)");
+		curY += 28.0f;
+
+		// 3. 智能字段展示 (根据形状展现不同参数)
+		if (comp->Shape == WhiteboxComponent::ShapeType::Stairs)
+		{
+			Wui::Label(ctx, { startX, curY + 2.0f }, "台阶阶数 (Steps):", theme.Text, theme.FontSizeSmall);
+			curY += 20.0f;
+			int64_t stepsVal = comp->Steps;
+			if (Wui::DragInt(ctx, Wui::HashId("inspect.whitebox.steps"),
+				{ startX, curY, contentW, 22.0f }, stepsVal, 1, 64, theme))
+			{
+				comp->Steps = static_cast<uint8_t>(std::clamp(stepsVal, int64_t(1), int64_t(64)));
+				if (changedFields) changedFields->push_back("Steps");
+				host.MarkDocumentDirty();
+			}
+			Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "楼梯台阶划分数量 (1 ~ 64 阶)");
+			curY += 28.0f;
+		}
+		else if (comp->Shape == WhiteboxComponent::ShapeType::Cylinder || comp->Shape == WhiteboxComponent::ShapeType::Arch)
+		{
+			Wui::Label(ctx, { startX, curY + 2.0f }, "圆周分段数 (Subdivisions):", theme.Text, theme.FontSizeSmall);
+			curY += 20.0f;
+			int64_t subVal = comp->Subdivisions;
+			if (Wui::DragInt(ctx, Wui::HashId("inspect.whitebox.subdivs"),
+				{ startX, curY, contentW, 22.0f }, subVal, 3, 64, theme))
+			{
+				comp->Subdivisions = static_cast<uint8_t>(std::clamp(subVal, int64_t(3), int64_t(64)));
+				if (changedFields) changedFields->push_back("Subdivisions");
+				host.MarkDocumentDirty();
+			}
+			Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "圆柱/弧面多边形细分段数 (3 ~ 64)");
+			curY += 28.0f;
+		}
+		else if (comp->Shape == WhiteboxComponent::ShapeType::Box)
+		{
+			Wui::Label(ctx, { startX, curY + 2.0f }, "边缘倒角大小 (Bevel Size):", theme.Text, theme.FontSizeSmall);
+			curY += 20.0f;
+			float bevel = comp->BevelSize;
+			if (Wui::DragFloat(ctx, Wui::HashId("inspect.whitebox.bevel"),
+				{ startX, curY, contentW, 22.0f }, bevel, 0.01f, 0.0f, 0.5f, theme))
+			{
+				comp->BevelSize = std::clamp(bevel, 0.0f, 0.5f);
+				if (changedFields) changedFields->push_back("BevelSize");
+				host.MarkDocumentDirty();
+			}
+			Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "盒体边缘斜切倒角半径 (0.0 ~ 0.5 米)");
+			curY += 28.0f;
+		}
+
+		// 4. 碰撞体生成开关 GenerateCollision
+		bool genCol = comp->GenerateCollision != 0;
+		const Wui::WuiRect colRect { startX, curY, contentW, 22.0f };
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.whitebox.gencol"), colRect, "自动生成物理碰撞体 (Generate Collision)", genCol, theme))
+		{
+			comp->GenerateCollision = genCol ? 1 : 0;
+			if (changedFields) changedFields->push_back("GenerateCollision");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, colRect, "是否为该白盒实体同步生成静态物理碰撞体");
+		curY += 28.0f;
+
+		// 5. 烘焙按钮 Bake to Mesh
+		const Wui::WuiRect bakeBtnRect { startX, curY, contentW, 26.0f };
+		if (Wui::Button(ctx, Wui::HashId("inspect.whitebox.bake_btn"), bakeBtnRect, "Bake to Static Mesh (烘焙为静态网格)", theme))
+		{
+			WhiteboxMesh mesh;
+			switch (comp->Shape)
+			{
+			case WhiteboxComponent::ShapeType::Box:
+				WhiteboxBuilder::BuildBox(comp->Dimensions, comp->BevelSize, mesh);
+				break;
+			case WhiteboxComponent::ShapeType::Cylinder:
+				WhiteboxBuilder::BuildCylinder(comp->Dimensions.x * 0.5f, comp->Dimensions.y, comp->Subdivisions, mesh);
+				break;
+			case WhiteboxComponent::ShapeType::Stairs:
+				WhiteboxBuilder::BuildStairs(comp->Dimensions, comp->Steps, mesh);
+				break;
+			case WhiteboxComponent::ShapeType::Wedge:
+				WhiteboxBuilder::BuildWedge(comp->Dimensions, mesh);
+				break;
+			case WhiteboxComponent::ShapeType::Arch:
+				WhiteboxBuilder::BuildArch(comp->Dimensions, comp->Dimensions.x * 0.25f, mesh);
+				break;
+			}
+
+			if (!mesh.Vertices.empty())
+			{
+				std::filesystem::create_directories("assets/models");
+				std::string modelRelPath = "assets/models/whitebox_" + std::to_string(static_cast<uint32_t>(entity)) + ".wmodel";
+
+				Asset::WModelData mdata;
+				mdata.Meta.Valid = true;
+				mdata.VertexLayoutId = Asset::WModelIO::kVertexLayoutStandard;
+				mdata.Vertices.resize(mesh.Vertices.size());
+				for (size_t i = 0; i < mesh.Vertices.size(); ++i)
+				{
+					mdata.Vertices[i].Position = mesh.Vertices[i];
+					mdata.Vertices[i].Normal = i < mesh.Normals.size() ? mesh.Normals[i] : glm::vec3(0, 1, 0);
+					mdata.Vertices[i].TexCoord = i < mesh.UVs.size() ? mesh.UVs[i] : glm::vec2(0, 0);
+				}
+				mdata.Indices = mesh.Indices;
+
+				Asset::WModelSubmesh submesh;
+				submesh.IndexOffset = 0;
+				submesh.IndexCount = static_cast<uint32_t>(mesh.Indices.size());
+				submesh.MaterialSlot = -1;
+				mdata.Submeshes.push_back(submesh);
+
+				Asset::WModelMeshRange mrange;
+				mrange.FirstSubmesh = 0;
+				mrange.SubmeshCount = 1;
+				mdata.Meshes.push_back(mrange);
+
+				Asset::WModelNode rootNode;
+				rootNode.Parent = -1;
+				rootNode.MeshIndex = 0;
+				mdata.Nodes.push_back(rootNode);
+
+				std::string writeErr;
+				if (Asset::WModelIO::WriteFile(modelRelPath, mdata, &writeErr))
+				{
+					if (!entity.HasComponent<MeshRendererComponent>())
+						entity.AddComponent<MeshRendererComponent>();
+					auto& mr = entity.GetComponent<MeshRendererComponent>();
+					mr.Mesh = AssetRef{ StringPool::Get().InternPath(modelRelPath), AssetId{} };
+					host.Notify("成功烘焙白盒网格: " + modelRelPath);
+					host.MarkDocumentDirty();
+				}
+				else
+				{
+					host.Notify("烘焙失败: " + writeErr);
+				}
+			}
+		}
+		Wui::Tooltip(ctx, bakeBtnRect, "将当前参数化白盒几何体固定并导出为独立的 .wmodel 静态模型资产");
+		curY += 32.0f;
+
+		return curY - rect.Y;
+	}
+
+	// ---- 3D 样条线道路专属检视器 (DrawSplineInspector) ----
+	static float DrawSplineInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto* comp = static_cast<SplineComponent*>(instance);
+		if (!comp)
+			return 0.0f;
+
+		const float pad = theme.Pad;
+		const float startX = rect.X + pad;
+		const float contentW = rect.W - pad * 2.0f;
+		float curY = rect.Y + 4.0f;
+
+		Wui::Label(ctx, { startX, curY + 2.0f }, "3D 样条线道路参数 (Spline Road Settings):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		// 1. 路面宽度 RoadWidth
+		Wui::Label(ctx, { startX, curY + 2.0f }, "路面宽度 (Road Width):", theme.Text, theme.FontSizeSmall);
+		curY += 20.0f;
+		float roadW = comp->RoadWidth;
+		const Wui::WuiRect widthRect { startX, curY, contentW, 22.0f };
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.spline.road_width"), widthRect, roadW, 0.1f, 0.5f, 50.0f, theme))
+		{
+			comp->RoadWidth = std::clamp(roadW, 0.5f, 50.0f);
+			if (changedFields) changedFields->push_back("RoadWidth");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, widthRect, "样条挤出路面截面双侧总宽度 (米)");
+		curY += 28.0f;
+
+		// 2. 采样步长 MeshSpacing
+		Wui::Label(ctx, { startX, curY + 2.0f }, "采样步长 (Mesh Spacing):", theme.Text, theme.FontSizeSmall);
+		curY += 20.0f;
+		float spacing = comp->MeshSpacing;
+		const Wui::WuiRect spaceRect { startX, curY, contentW, 22.0f };
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.spline.mesh_spacing"), spaceRect, spacing, 0.1f, 0.2f, 20.0f, theme))
+		{
+			comp->MeshSpacing = std::clamp(spacing, 0.2f, 20.0f);
+			if (changedFields) changedFields->push_back("MeshSpacing");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, spaceRect, "沿样条线弧长离散放样的多边形分段步长 (米)");
+		curY += 28.0f;
+
+		// 3. 闭合环路 ClosedLoop & 自动挤出 ExtrudeRoad & 碰撞体 GenerateCollision
+		bool closed = comp->ClosedLoop != 0;
+		const Wui::WuiRect closedRect { startX, curY, contentW, 22.0f };
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.spline.closed"), closedRect, "闭合首尾环路 (Closed Loop)", closed, theme))
+		{
+			comp->ClosedLoop = closed ? 1 : 0;
+			if (changedFields) changedFields->push_back("ClosedLoop");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, closedRect, "是否将样条曲线首尾控制点闭合相连");
+		curY += 26.0f;
+
+		bool extrude = comp->ExtrudeRoad != 0;
+		const Wui::WuiRect extrudeRect { startX, curY, contentW, 22.0f };
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.spline.extrude"), extrudeRect, "自动挤出道路带状网格 (Extrude Road)", extrude, theme))
+		{
+			comp->ExtrudeRoad = extrude ? 1 : 0;
+			if (changedFields) changedFields->push_back("ExtrudeRoad");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, extrudeRect, "是否自动沿曲线生成连续的双侧放样路面几何体");
+		curY += 26.0f;
+
+		bool genCol = comp->GenerateCollision != 0;
+		const Wui::WuiRect colRect { startX, curY, contentW, 22.0f };
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.spline.gencol"), colRect, "生成路面物理碰撞体 (Generate Collision)", genCol, theme))
+		{
+			comp->GenerateCollision = genCol ? 1 : 0;
+			if (changedFields) changedFields->push_back("GenerateCollision");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, colRect, "是否为挤出路面生成物理碰撞网格");
+		curY += 28.0f;
+
+		// 4. 控制点拓扑列表 (Knots List)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "控制点拓扑列表 (Control Knots):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		Ref<Scene> scene = host.GetActiveScene();
+		std::vector<Entity> knots;
+		if (scene && entity.IsValid())
+		{
+			const auto& children = Hierarchy::ChildrenOf(scene->GetRegistry(), static_cast<entt::entity>(entity));
+			for (const entt::entity h : children)
+			{
+				knots.push_back(Entity(scene.get(), h));
+			}
+		}
+
+		const float knotsBoxH = std::max(60.0f, static_cast<float>(knots.size() * 26.0f + 36.0f));
+		const Wui::WuiRect knotsBoxRect { startX, curY, contentW, knotsBoxH };
+		Wui::PanelBackground(ctx, knotsBoxRect, theme.ContentBg, 4.0f);
+		Wui::HighlightOutline(ctx, knotsBoxRect, theme.Border, 4.0f, 1.0f);
+
+		float innerY = knotsBoxRect.Y + 6.0f;
+		for (size_t i = 0; i < knots.size(); ++i)
+		{
+			Entity knot = knots[i];
+			std::string knotName = "Knot_" + std::to_string(i);
+			if (knot.HasComponent<TagComponent>())
+				knotName = StringPool::Get().NameOf(knot.GetComponent<TagComponent>().Tag);
+
+			glm::vec3 pos = knot.GetComponent<TransformComponent>().Location;
+			char posBuf[64];
+			std::snprintf(posBuf, sizeof(posBuf), "(%.1f, %.1f, %.1f)", pos.x, pos.y, pos.z);
+
+			const Wui::WuiRect rowRect { knotsBoxRect.X + 4.0f, innerY, knotsBoxRect.W - 8.0f, 22.0f };
+			Wui::HoverRow(ctx, rowRect, ctx.IsHovered(rowRect), false, theme);
+
+			Wui::Label(ctx, { rowRect.X + 6.0f, rowRect.Y + 3.0f }, knotName, theme.Text, theme.FontSizeSmall);
+			Wui::Label(ctx, { rowRect.X + 75.0f, rowRect.Y + 3.0f }, posBuf, theme.TextMuted, theme.FontSizeSmall);
+
+			// 选中按钮
+			const Wui::WuiRect selBtn { rowRect.X + rowRect.W - 54.0f, rowRect.Y + 1.0f, 24.0f, 20.0f };
+			if (Wui::Button(ctx, Wui::HashId(("spline.knot.sel." + std::to_string(i)).c_str()), selBtn, "Q", theme))
+			{
+				host.SetSelectedEntity(knot);
+			}
+			Wui::Tooltip(ctx, selBtn, "在视口中选中并定位该控制点");
+
+			// 删除按钮
+			const Wui::WuiRect delBtn { rowRect.X + rowRect.W - 26.0f, rowRect.Y + 1.0f, 24.0f, 20.0f };
+			if (Wui::Button(ctx, Wui::HashId(("spline.knot.del." + std::to_string(i)).c_str()), delBtn, "x", theme))
+			{
+				scene->DeferStructuralChange([knot](Scene& s) {
+					Entity k = knot;
+					s.DestroyEntity(k);
+				});
+				host.MarkDocumentDirty();
+			}
+			Wui::Tooltip(ctx, delBtn, "删除此控制点");
+
+			innerY += 24.0f;
+		}
+
+		// 「+ 添加控制点」按钮
+		const Wui::WuiRect addKnotBtn { knotsBoxRect.X + 4.0f, innerY + 2.0f, knotsBoxRect.W - 8.0f, 22.0f };
+		if (Wui::Button(ctx, Wui::HashId("inspect.spline.add_knot"), addKnotBtn, "+ 添加控制点 (Add Knot)", theme))
+		{
+			glm::vec3 newPos { 0.0f };
+			if (!knots.empty())
+			{
+				glm::vec3 lastPos = knots.back().GetComponent<TransformComponent>().Location;
+				newPos = lastPos + glm::vec3(10.0f, 0.0f, 0.0f);
+			}
+			else if (entity.HasComponent<TransformComponent>())
+			{
+				newPos = entity.GetComponent<TransformComponent>().Location;
+			}
+
+			scene->DeferStructuralChange([entity, newPos, knotCount = knots.size()](Scene& s) {
+				Entity newKnot = Entity::CreateEntity(&s, "Knot_" + std::to_string(knotCount));
+				auto& xf = newKnot.AddComponent<TransformComponent>();
+				xf.SetLocation(newPos);
+				Hierarchy::SetParent(s.GetRegistry(), static_cast<entt::entity>(newKnot), static_cast<entt::entity>(entity));
+			});
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, addKnotBtn, "在样条末尾延伸添加一个新的控制节点");
+
+		curY += knotsBoxH + 8.0f;
+
+		// 5. 一键生成与烘焙道路网格按钮
+		const Wui::WuiRect bakeRoadBtn { startX, curY, contentW, 26.0f };
+		if (Wui::Button(ctx, Wui::HashId("inspect.spline.bake_road"), bakeRoadBtn, "Bake Road to Static Mesh (烘焙道路网格)", theme))
+		{
+			if (knots.size() >= 2)
+			{
+				Spline3D spline;
+				for (Entity k : knots)
+				{
+					spline.AddPoint(k.GetComponent<TransformComponent>().Location);
+				}
+
+				std::vector<glm::vec3> verts;
+				std::vector<glm::vec3> norms;
+				std::vector<glm::vec2> uvs;
+				std::vector<uint32_t> indices;
+				spline.GenerateRoadMesh(comp->RoadWidth, comp->MeshSpacing, verts, norms, uvs, indices);
+
+				if (!verts.empty())
+				{
+					std::filesystem::create_directories("assets/models");
+					std::string modelRelPath = "assets/models/road_" + std::to_string(static_cast<uint32_t>(entity)) + ".wmodel";
+
+					Asset::WModelData mdata;
+					mdata.Meta.Valid = true;
+					mdata.VertexLayoutId = Asset::WModelIO::kVertexLayoutStandard;
+					mdata.Vertices.resize(verts.size());
+					for (size_t i = 0; i < verts.size(); ++i)
+					{
+						mdata.Vertices[i].Position = verts[i];
+						mdata.Vertices[i].Normal = i < norms.size() ? norms[i] : glm::vec3(0, 1, 0);
+						mdata.Vertices[i].TexCoord = i < uvs.size() ? uvs[i] : glm::vec2(0, 0);
+					}
+					mdata.Indices = indices;
+
+					Asset::WModelSubmesh submesh;
+					submesh.IndexOffset = 0;
+					submesh.IndexCount = static_cast<uint32_t>(indices.size());
+					submesh.MaterialSlot = -1;
+					mdata.Submeshes.push_back(submesh);
+
+					Asset::WModelMeshRange mrange;
+					mrange.FirstSubmesh = 0;
+					mrange.SubmeshCount = 1;
+					mdata.Meshes.push_back(mrange);
+
+					Asset::WModelNode rootNode;
+					rootNode.Parent = -1;
+					rootNode.MeshIndex = 0;
+					mdata.Nodes.push_back(rootNode);
+
+					std::string writeErr;
+					if (Asset::WModelIO::WriteFile(modelRelPath, mdata, &writeErr))
+					{
+						if (!entity.HasComponent<MeshRendererComponent>())
+							entity.AddComponent<MeshRendererComponent>();
+						auto& mr = entity.GetComponent<MeshRendererComponent>();
+						mr.Mesh = AssetRef{ StringPool::Get().InternPath(modelRelPath), AssetId{} };
+						host.Notify("成功烘焙样条道路网格: " + modelRelPath);
+						host.MarkDocumentDirty();
+					}
+					else
+					{
+						host.Notify("烘焙失败: " + writeErr);
+					}
+				}
+			}
+			else
+			{
+				host.Notify("样条道路需要至少 2 个控制点方可生成路面！");
+			}
+		}
+		Wui::Tooltip(ctx, bakeRoadBtn, "沿样条曲线放样生成高精度带状网格并写入 .wmodel 资产");
+		curY += 32.0f;
+
+		return curY - rect.Y;
+	}
+
 	// ---- 组件检视器 ----
 
 float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect){
@@ -1529,6 +2033,10 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawDecalInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::ConvexCollider3DComponent")
 			height = DrawConvexCollider3DInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::WhiteboxComponent")
+			height = DrawWhiteboxInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::SplineComponent")
+			height = DrawSplineInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
 
 		else

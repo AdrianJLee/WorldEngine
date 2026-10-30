@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000009
+  World::TagComponent:
+    Tag: "Whitebox Centerpiece Dome"
+  World::TransformComponent:
+    Location: [0.0, 4.5, -6.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 2
+    Subdivisions: 3
+    Steps: 8
+    Dimensions: [3.5, 3.5, 3.5]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.72, 0.42, 0.24, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

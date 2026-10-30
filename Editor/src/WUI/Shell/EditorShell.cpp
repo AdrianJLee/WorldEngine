@@ -259,6 +259,7 @@ m_PanelRegistry.emplace("animgraph", std::make_unique<AnimGraphPanel>());
 m_PanelRegistry.emplace("terrain_editor", std::make_unique<TerrainPanel>());
 m_PanelRegistry.emplace("foliage_editor", std::make_unique<FoliagePanel>());
 		m_PanelRegistry.emplace("navmesh", std::make_unique<NavMeshPanel>(*this));
+		m_PanelRegistry.emplace("physicspainter", std::make_unique<PhysicsPainterPanel>(*this));
 		// PLUG-T3:插件管理器面板(数据/动作都走 EditorShell → EditorLayer;项目形态才注册)。
 		if (!m_LauncherMode)
 			m_PanelRegistry.emplace("plugins", std::make_unique<PluginsPanel>(*this));

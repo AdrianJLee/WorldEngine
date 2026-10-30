@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "World/Core/StringPool.h"
 #include "World/Physics/Physics2DUtils.h"
@@ -2750,7 +2750,8 @@ namespace World
 		uint8_t ClosedLoop { 0 };                         // 1B  (offset 24)
 		uint8_t GenerateCollision { 1 };                  // 1B  (offset 25)
 		uint8_t ExtrudeRoad { 1 };                        // 1B  (offset 26)
-		uint8_t _Padding[21] { 0 };                       // 21B (offset 27)
+		uint8_t Mode { 0 };                               // 1B  (offset 27) (0: CatmullRom, 1: Bezier)
+		uint8_t _Padding[4] { 0 };                        // 4B  (offset 28)
 
 		SplineComponent() = default;
 
@@ -2771,7 +2772,7 @@ namespace World
 				Doc("Whether to automatically generate an extruded ribbon mesh."));
 		WE_SCHEMA_END
 	};
-	static_assert(sizeof(SplineComponent) == 48, "SplineComponent must be exactly 48 bytes");
+	static_assert(sizeof(SplineComponent) == 32, "SplineComponent must be exactly 32 bytes");
 	static_assert(std::is_trivially_copyable_v<SplineComponent>, "SplineComponent must be trivially copyable");
 	static_assert(offsetof(SplineComponent, SplineMeshAsset) == 0, "SplineMeshAsset offset mismatch");
 	static_assert(offsetof(SplineComponent, MeshSpacing) == 16, "MeshSpacing offset mismatch");
@@ -2779,10 +2780,11 @@ namespace World
 	static_assert(offsetof(SplineComponent, ClosedLoop) == 24, "ClosedLoop offset mismatch");
 	static_assert(offsetof(SplineComponent, GenerateCollision) == 25, "GenerateCollision offset mismatch");
 	static_assert(offsetof(SplineComponent, ExtrudeRoad) == 26, "ExtrudeRoad offset mismatch");
+	static_assert(offsetof(SplineComponent, Mode) == 27, "Mode offset mismatch");
 
 	struct WhiteboxComponent
 	{
-		enum class ShapeType : uint8_t { Box = 0, Cylinder = 1, Stairs = 2, Wedge = 3, Arch = 4 };
+		enum class ShapeType : uint8_t { Box = 0, Cylinder = 1, Sphere = 2, Stairs = 3, Wedge = 4, Arch = 5 };
 		ShapeType Shape { ShapeType::Box };               // 1B  (offset 0)
 		uint8_t Subdivisions { 1 };                       // 1B  (offset 1)
 		uint8_t Steps { 8 };                              // 1B  (offset 2)

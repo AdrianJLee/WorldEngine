@@ -575,9 +575,9 @@ namespace World
 			const Gameplay::PrefabInstanceRecord* contextRecord = OwningRecord(*scene, contextHandle);
 			// 菜单高度 = 条目数 × 22 + 8:实例子树多出"来源说明 + 3 个动作"四行,
 			// 旧实现把这几行画在声明高度之外(面板底图盖不住)。
-			const size_t itemCount = 8u + (contextRecord ? 4u : 0u);
+			const size_t itemCount = 14u + (contextRecord ? 4u : 0u);
 			Wui::WuiRect panel;
-			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 230.0f, itemCount, &panel, theme))
+			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 260.0f, itemCount, &panel, theme))
 			{
 				float itemY = panel.Y + 4.0f;
 				const auto nextItem = [&itemY, &panel]()
@@ -711,6 +711,82 @@ namespace World
 					}
 					ctx.CloseAllPopups();
 				}
+				auto createWhiteboxEnt = [&](WhiteboxComponent::ShapeType shape, const std::string& name, const glm::vec3& dim, uint8_t steps = 8, uint8_t subdivs = 16)
+				{
+					const auto gizmoCam = host.GetGizmoCamera();
+					const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+					const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+					Entity created;
+					if (scene->DeferStructuralChange([&created, spawnPos, shape, name, dim, steps, subdivs](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, name);
+							auto& xf = created.AddComponent<TransformComponent>();
+							xf.SetLocation(spawnPos);
+							auto& wb = created.AddComponent<WhiteboxComponent>();
+							wb.Shape = shape;
+							wb.Dimensions = dim;
+							wb.Steps = steps;
+							wb.Subdivisions = subdivs;
+							wb.GenerateCollision = 1;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create " + name));
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				};
+				auto createSplineRoadEnt = [&]()
+				{
+					const auto gizmoCam = host.GetGizmoCamera();
+					const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+					const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+					Entity created;
+					if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "Spline Road");
+							auto& xf = created.AddComponent<TransformComponent>();
+							xf.SetLocation(spawnPos);
+							auto& sp = created.AddComponent<SplineComponent>();
+							sp.MeshSpacing = 2.0f;
+							sp.RoadWidth = 4.0f;
+							sp.ClosedLoop = 0;
+							sp.ExtrudeRoad = 1;
+							sp.GenerateCollision = 1;
+
+							const glm::vec3 knotOffsets[4] = {
+								{  0.0f, 0.0f,  0.0f },
+								{ 10.0f, 0.0f,  5.0f },
+								{ 20.0f, 0.0f, 15.0f },
+								{ 30.0f, 0.0f, 10.0f }
+							};
+							for (int i = 0; i < 4; ++i)
+							{
+								Entity knot = Entity::CreateEntity(&s, "Knot_" + std::to_string(i));
+								auto& kxf = knot.AddComponent<TransformComponent>();
+								kxf.SetLocation(knotOffsets[i]);
+								Hierarchy::SetParent(s.GetRegistry(), static_cast<entt::entity>(knot), static_cast<entt::entity>(created));
+							}
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create 3D Spline Road"));
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				};
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createwb_cube_ent"), nextItem(), "Create Whitebox > Cube (白盒立方体)", theme))
+					createWhiteboxEnt(WhiteboxComponent::ShapeType::Box, "Whitebox Cube", glm::vec3(2.0f));
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createwb_cyl_ent"), nextItem(), "Create Whitebox > Cylinder (白盒圆柱)", theme))
+					createWhiteboxEnt(WhiteboxComponent::ShapeType::Cylinder, "Whitebox Cylinder", glm::vec3(2.0f), 8, 16);
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createwb_sph_ent"), nextItem(), "Create Whitebox > Sphere (白盒球体)", theme))
+					createWhiteboxEnt(WhiteboxComponent::ShapeType::Arch, "Whitebox Sphere", glm::vec3(2.0f), 8, 16);
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createwb_stairs_ent"), nextItem(), "Create Whitebox > Stairs (白盒台阶)", theme))
+					createWhiteboxEnt(WhiteboxComponent::ShapeType::Stairs, "Whitebox Stairs", glm::vec3(2.0f, 2.0f, 3.0f), 8);
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createwb_wedge_ent"), nextItem(), "Create Whitebox > Wedge (白盒斜坡)", theme))
+					createWhiteboxEnt(WhiteboxComponent::ShapeType::Wedge, "Whitebox Wedge", glm::vec3(2.0f, 2.0f, 4.0f));
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createspline_ent"), nextItem(), "Create 3D Spline Road (3D 样条道路)", theme))
+					createSplineRoadEnt();
 				// P4-U13d:把"做成 prefab"变成一次有回显、可撤销意图的操作 —— 打开居中模态
 				// (名称 / 目录 / 实时落点 / 覆盖与非法名校验),确认后才写盘。
 				// 旧行为(固定 prefabs/<Tag>.wprefab、同名静默覆盖、导出后无回显)已删除。
@@ -815,8 +891,8 @@ namespace World
 		if (ctx.IsPopupOpen(blankPopup))
 		{
 			ctx.PushOverlay();
-			constexpr size_t blankItemCount = 8;
-			const Wui::WuiRect panel { m_BlankMenuPos.x, m_BlankMenuPos.y, 230, blankItemCount * 22 + 8 };
+			constexpr size_t blankItemCount = 14;
+			const Wui::WuiRect panel { m_BlankMenuPos.x, m_BlankMenuPos.y, 260, blankItemCount * 22 + 8 };
 			DrawPanelSurface(ctx, panel, theme);
 			float itemY = panel.Y + 4.0f;
 			const auto nextBlankItem = [&itemY, &panel]()
@@ -937,6 +1013,76 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
+			auto createWhiteboxBlank = [&](WhiteboxComponent::ShapeType shape, const std::string& name, const glm::vec3& dim, uint8_t steps = 8, uint8_t subdivs = 16)
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created, spawnPos, shape, name, dim, steps, subdivs](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, name);
+						auto& xf = created.AddComponent<TransformComponent>();
+						xf.SetLocation(spawnPos);
+						auto& wb = created.AddComponent<WhiteboxComponent>();
+						wb.Shape = shape;
+						wb.Dimensions = dim;
+						wb.Steps = steps;
+						wb.Subdivisions = subdivs;
+						wb.GenerateCollision = 1;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create " + name));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			};
+			auto createSplineRoadBlank = [&]()
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Spline Road");
+						auto& xf = created.AddComponent<TransformComponent>();
+						xf.SetLocation(spawnPos);
+						auto& sp = created.AddComponent<SplineComponent>();
+						sp.MeshSpacing = 2.0f;
+						sp.RoadWidth = 4.0f;
+						sp.ClosedLoop = 0;
+						sp.ExtrudeRoad = 1;
+						sp.GenerateCollision = 1;
+
+						const glm::vec3 knotOffsets[4] = {
+							{  0.0f, 0.0f,  0.0f },
+							{ 10.0f, 0.0f,  5.0f },
+							{ 20.0f, 0.0f, 15.0f },
+							{ 30.0f, 0.0f, 10.0f }
+						};
+						for (int i = 0; i < 4; ++i)
+						{
+							Entity knot = Entity::CreateEntity(&s, "Knot_" + std::to_string(i));
+							auto& kxf = knot.AddComponent<TransformComponent>();
+							kxf.SetLocation(knotOffsets[i]);
+							Hierarchy::SetParent(s.GetRegistry(), static_cast<entt::entity>(knot), static_cast<entt::entity>(created));
+						}
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create 3D Spline Road"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			};
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createwb_cube"), nextBlankItem(), "Create Whitebox > Cube (白盒立方体)", true, theme))
+				createWhiteboxBlank(WhiteboxComponent::ShapeType::Box, "Whitebox Cube", glm::vec3(2.0f));
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createwb_cyl"), nextBlankItem(), "Create Whitebox > Cylinder (白盒圆柱)", true, theme))
+				createWhiteboxBlank(WhiteboxComponent::ShapeType::Cylinder, "Whitebox Cylinder", glm::vec3(2.0f), 8, 16);
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createwb_sph"), nextBlankItem(), "Create Whitebox > Sphere (白盒球体)", true, theme))
+				createWhiteboxBlank(WhiteboxComponent::ShapeType::Arch, "Whitebox Sphere", glm::vec3(2.0f), 8, 16);
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createwb_stairs"), nextBlankItem(), "Create Whitebox > Stairs (白盒台阶)", true, theme))
+				createWhiteboxBlank(WhiteboxComponent::ShapeType::Stairs, "Whitebox Stairs", glm::vec3(2.0f, 2.0f, 3.0f), 8);
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createwb_wedge"), nextBlankItem(), "Create Whitebox > Wedge (白盒斜坡)", true, theme))
+				createWhiteboxBlank(WhiteboxComponent::ShapeType::Wedge, "Whitebox Wedge", glm::vec3(2.0f, 2.0f, 4.0f));
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createspline"), nextBlankItem(), "Create 3D Spline Road (3D 样条道路)", true, theme))
+				createSplineRoadBlank();
 			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), nextBlankItem(), "Duplicate Selected", hasSelection, theme))
 			{
 				if (hasSelection)

@@ -1,4 +1,5 @@
 #include "EditorLayer_Internal.h"
+#include "WUI/Panels/PhysicsPainterPanel.h"
 
 namespace World
 {
@@ -264,6 +265,7 @@ EditorLayer::EditorLayer(bool projectExplicit, bool launcherMode) : Layer("Edito
 		m_Commands.Register({ Wui::HashId("cmd.mode_select"), "Mode Select (Shift+1)", KeyCodes::D1, false, true, [this] { SetEditorToolMode(EditorToolMode::Select); } });
 		m_Commands.Register({ Wui::HashId("cmd.mode_landscape"), "Mode Landscape (Shift+2)", KeyCodes::D2, false, true, [this] { SetEditorToolMode(EditorToolMode::Landscape); } });
 		m_Commands.Register({ Wui::HashId("cmd.mode_foliage"), "Mode Foliage (Shift+3)", KeyCodes::D3, false, true, [this] { SetEditorToolMode(EditorToolMode::Foliage); } });
+		m_Commands.Register({ Wui::HashId("cmd.mode_painter"), "Mode Physics Painter (Shift+4)", KeyCodes::D4, false, true, [this] { SetEditorToolMode(EditorToolMode::PhysicsPainter); } });
 		m_Commands.Register({ Wui::HashId("cmd.toggle_2d_mode"), "Toggle 2D Mode", KeyCodes::D8, false, true, [this] { Set2DMode(!Is2DMode()); } });
 		m_Commands.Register({ Wui::HashId("cmd.focus"), "Focus", KeyCodes::F, false, false, [this] { FocusOnSelectedEntity(); } });
 		m_Commands.Register({ Wui::HashId("cmd.view_top"), "View Top", KeyCodes::D7, true, false, [this] { SetViewportViewpoint(World::ViewportViewpoint::Top); } });
@@ -521,6 +523,7 @@ void EditorLayer::SetEditorToolMode(EditorToolMode mode)
 	m_EditorToolMode = mode;
 	if (mode == EditorToolMode::Landscape)
 	{
+		PhysicsPainterPanel::SetActive(false);
 		if (m_EditorCamera3D.Is2DMode())
 		{
 			m_EditorCamera3D.Set2DMode(false);
@@ -540,6 +543,7 @@ void EditorLayer::SetEditorToolMode(EditorToolMode mode)
 	}
 	else if (mode == EditorToolMode::Foliage)
 	{
+		PhysicsPainterPanel::SetActive(false);
 		if (m_EditorCamera3D.Is2DMode())
 		{
 			m_EditorCamera3D.Set2DMode(false);
@@ -548,8 +552,20 @@ void EditorLayer::SetEditorToolMode(EditorToolMode mode)
 		m_Viewport3D = true;
 		m_Shell.AiActivatePanel("foliage_editor", nullptr);
 	}
+	else if (mode == EditorToolMode::PhysicsPainter)
+	{
+		if (m_EditorCamera3D.Is2DMode())
+		{
+			m_EditorCamera3D.Set2DMode(false);
+			m_EditorCamera.SetOrthographic(false);
+		}
+		m_Viewport3D = true;
+		PhysicsPainterPanel::SetActive(true);
+		m_Shell.AiActivatePanel("physicspainter", nullptr);
+	}
 	else if (mode == EditorToolMode::Select)
 	{
+		PhysicsPainterPanel::SetActive(false);
 		m_Shell.AiActivatePanel("hierarchy", nullptr);
 	}
 }

@@ -58,3 +58,7 @@ templates/*/assets/scripts/intermediate/
 # 构建残留(MSVC 在仓库根生成的程序数据库),不入库
 /vc140.pdb
 tmp
+
+# Verification artifacts
+/artifacts/
+

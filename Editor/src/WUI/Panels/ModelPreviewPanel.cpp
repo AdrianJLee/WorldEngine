@@ -489,6 +489,11 @@ namespace World
 				m_BakeConcavityThreshold = m_Data.Collision.ConcavityThreshold > 0.0f ? m_Data.Collision.ConcavityThreshold : 0.05f;
 				m_BakeMaxVerticesPerHull = m_Data.Collision.MaxVerticesPerHull > 0 ? m_Data.Collision.MaxVerticesPerHull : 32;
 				m_SelectedCollisionProfile = m_Data.Collision.DefaultCollisionProfile.empty() ? "Default" : m_Data.Collision.DefaultCollisionProfile;
+				const auto* prof = World::PhysicsSettings::FindProfile(m_SelectedCollisionProfile);
+				if (prof)
+					m_SelectedCollisionChannel = prof->ObjectType;
+				else
+					m_SelectedCollisionChannel = 0;
 				m_CollisionHulls = m_Data.Collision.ConvexHulls;
 				RebuildCollisionEdgeCache();
 			}
@@ -1012,8 +1017,15 @@ namespace World
 				const int32_t skinIndex = m_Data.Meshes[meshIndex].SkinIndex;
 				if (skinIndex < 0 || static_cast<size_t>(skinIndex) >= m_Data.Skins.size())
 					continue;
-				skinPalettes[meshIndex] = AnimationSystem::ComputePalette(m_Data,
-					static_cast<uint32_t>(skinIndex), clip, m_AnimTime);
+				if (m_PreviewRestPose)
+				{
+					skinPalettes[meshIndex].assign(m_Data.Skins[static_cast<size_t>(skinIndex)].JointNodes.size(), glm::mat4(1.0f));
+				}
+				else
+				{
+					skinPalettes[meshIndex] = AnimationSystem::ComputePalette(m_Data,
+						static_cast<uint32_t>(skinIndex), clip, m_AnimTime);
+				}
 			}
 		}
 
@@ -1670,10 +1682,33 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		m_CachedCollisionEdges.clear();
 		m_CachedCollisionPoints.clear();
 
+		const bool hasSkin = m_DataValid && !m_Data.Skins.empty() && !m_Data.Skins[0].JointNodes.empty();
+
 		for (const auto& hull : m_CollisionHulls)
 		{
 			if (hull.Vertices.empty())
 				continue;
+
+			int32_t dominantJoint = -1;
+			if (hasSkin)
+			{
+				const auto& skin = m_Data.Skins[0];
+				float bestDistSq = 1e9f;
+				for (size_t j = 0; j < skin.JointNodes.size(); ++j)
+				{
+					if (j < skin.BindTranslations.size())
+					{
+						const glm::vec3 jointBindPos = skin.BindTranslations[j];
+						const glm::vec3 diff = hull.Center - jointBindPos;
+						const float d2 = glm::dot(diff, diff);
+						if (d2 < bestDistSq)
+						{
+							bestDistSq = d2;
+							dominantJoint = static_cast<int32_t>(j);
+						}
+					}
+				}
+			}
 
 			if (hull.Indices.size() >= 3)
 			{
@@ -1698,7 +1733,11 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 				{
 					if (edge.first < hull.Vertices.size() && edge.second < hull.Vertices.size())
 					{
-						m_CachedCollisionEdges.push_back(LineEdge{ hull.Vertices[edge.first], hull.Vertices[edge.second] });
+						m_CachedCollisionEdges.push_back(LineEdge{
+							hull.Vertices[edge.first],
+							hull.Vertices[edge.second],
+							dominantJoint
+						});
 					}
 				}
 			}
@@ -1706,7 +1745,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			{
 				for (const auto& v : hull.Vertices)
 				{
-					m_CachedCollisionPoints.push_back(v);
+					m_CachedCollisionPoints.push_back({ v, dominantJoint });
 				}
 			}
 		}
@@ -1739,19 +1778,47 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		const Wui::WuiColor wireCol { 0.20f, 0.95f, 0.35f, 0.90f };
 		const Wui::WuiColor pointCol { 0.90f, 1.0f, 0.40f, 1.0f };
 
+		// 非 RestPose 动画播放状态下动态获取骨骼调色板，驱动凸包线段随身体动画运动
+		const bool isSkinned = m_Mesh && (m_Mesh->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned);
+		std::vector<glm::mat4> currentJointPalette;
+		if (isSkinned && !m_PreviewRestPose && m_DataValid && !m_Data.Skins.empty())
+		{
+			const Asset::WModelAnimation* active = ActiveClip();
+			static const Asset::WModelAnimation kEmptyClip;
+			const Asset::WModelAnimation& clip = active ? *active : kEmptyClip;
+			currentJointPalette = AnimationSystem::ComputePalette(m_Data, 0, clip, m_AnimTime);
+		}
+
 		for (const auto& edge : m_CachedCollisionEdges)
 		{
+			glm::vec3 ep0 = edge.p0;
+			glm::vec3 ep1 = edge.p1;
+			if (edge.JointIndex >= 0 && !currentJointPalette.empty()
+				&& static_cast<size_t>(edge.JointIndex) < currentJointPalette.size())
+			{
+				const glm::mat4& jmat = currentJointPalette[static_cast<size_t>(edge.JointIndex)];
+				ep0 = glm::vec3(jmat * glm::vec4(ep0, 1.0f));
+				ep1 = glm::vec3(jmat * glm::vec4(ep1, 1.0f));
+			}
+
 			glm::vec2 p0, p1;
-			if (project(edge.p0, p0) && project(edge.p1, p1))
+			if (project(ep0, p0) && project(ep1, p1))
 			{
 				Wui::LineSegment(ctx, p0, p1, wireCol, 1.5f);
 			}
 		}
 
-		for (const auto& pt3d : m_CachedCollisionPoints)
+		for (const auto& ptPair : m_CachedCollisionPoints)
 		{
+			glm::vec3 p = ptPair.first;
+			if (ptPair.second >= 0 && !currentJointPalette.empty()
+				&& static_cast<size_t>(ptPair.second) < currentJointPalette.size())
+			{
+				const glm::mat4& jmat = currentJointPalette[static_cast<size_t>(ptPair.second)];
+				p = glm::vec3(jmat * glm::vec4(p, 1.0f));
+			}
 			glm::vec2 pt;
-			if (project(pt3d, pt))
+			if (project(p, pt))
 			{
 				Wui::WuiRect r { pt.x - 2.0f, pt.y - 2.0f, 4.0f, 4.0f };
 				Wui::PanelBackground(ctx, r, pointCol, 2.0f);
@@ -1804,7 +1871,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			}
 
 			const Asset::WModelAnimation* clip = ActiveClip();
-			if (clip != nullptr && !clip->Channels.empty())
+			if (!m_PreviewRestPose && clip != nullptr && !clip->Channels.empty())
 			{
 				const float t = m_AnimTime;
 				for (const auto& ch : clip->Channels)
@@ -3059,9 +3126,9 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		drawTypeSegment(2, "Bounding Box 包围盒", "Bounding Box: 生成轴对齐包围盒 (AABB) 简易凸包", x + (segBtnW + segGap) * 2.0f);
 		y += 32.0f;
 
-		// 3. 物理碰撞预设 (Collision Presets / Profile) - 动态读取项目设置
+		// 3. 物理碰撞通道与预设 (Collision Channels & Presets - 100% 动态对齐项目设置)
 		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
-			"Collision Presets (物理碰撞预设与项目设置对齐)", theme.Accent, theme);
+			"碰撞通道与预设 (Channels & Presets - 项目设置动态对齐)", theme.Accent, theme);
 		y += 24.0f;
 
 		const auto& channelConfig = World::PhysicsSettings::GetChannels();
@@ -3069,16 +3136,74 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			? World::Asset::CollisionChannelConfig::Default().Profiles
 			: channelConfig.Profiles;
 
+		// 收集项目设置中所有激活的 Object Channels (0..47)
+		std::vector<std::string> objectChannelLabels;
+		std::vector<uint8_t> objectChannelIndices;
+		for (uint8_t ch = 0; ch < World::Asset::CollisionChannelConfig::kTraceChannelStart; ++ch)
+		{
+			const std::string_view chName = channelConfig.GetChannelName(ch);
+			if (!chName.empty())
+			{
+				objectChannelIndices.push_back(ch);
+				objectChannelLabels.push_back("#" + std::to_string(ch) + " " + std::string(chName));
+			}
+		}
+		if (objectChannelLabels.empty())
+		{
+			objectChannelIndices.push_back(0);
+			objectChannelLabels.push_back("#0 Default");
+		}
+
+		int curChannelIdx = 0;
+		for (size_t i = 0; i < objectChannelIndices.size(); ++i)
+		{
+			if (objectChannelIndices[i] == m_SelectedCollisionChannel)
+			{
+				curChannelIdx = static_cast<int>(i);
+				break;
+			}
+		}
+
+		// 3a. 物体通道选择器 (Object Channel)
+		const float labelW = 96.0f;
+		const float fieldW = width - labelW;
+		Wui::Label(ctx, { x, y + 3.0f }, "Object Channel:", theme.Text, theme.FontSizeSmall);
+
+		if (Wui::Combo(ctx, Wui::HashId("model.col.channel_combo"), { x + labelW, y, fieldW, 24.0f },
+			"", objectChannelLabels, curChannelIdx, theme))
+		{
+			if (curChannelIdx >= 0 && curChannelIdx < static_cast<int>(objectChannelIndices.size()))
+			{
+				m_SelectedCollisionChannel = objectChannelIndices[curChannelIdx];
+				const auto* p = World::PhysicsSettings::FindProfile(m_SelectedCollisionProfile);
+				if (!p || p->ObjectType != m_SelectedCollisionChannel)
+				{
+					bool found = false;
+					for (const auto& prof : registeredProfiles)
+					{
+						if (prof.ObjectType == m_SelectedCollisionChannel)
+						{
+							m_SelectedCollisionProfile = prof.Name;
+							found = true;
+							break;
+						}
+					}
+					if (!found)
+						m_SelectedCollisionProfile = "Default";
+				}
+			}
+		}
+		Wui::Tooltip(ctx, { x + labelW, y, fieldW, 24.0f },
+			"选择模型资产所属的物理碰撞通道类别 (对应 Project Settings ▶ Collision 的 Object Channels)");
+		y += 28.0f;
+
+		// 3b. 碰撞预设选择器 (Collision Profile)
 		std::vector<std::string> profileNames;
 		profileNames.reserve(registeredProfiles.size() + 1);
 		for (const auto& p : registeredProfiles)
-		{
 			profileNames.push_back(p.Name);
-		}
 		if (std::find(profileNames.begin(), profileNames.end(), "Default") == profileNames.end())
-		{
 			profileNames.insert(profileNames.begin(), "Default");
-		}
 
 		int curProfileIdx = 0;
 		for (size_t i = 0; i < profileNames.size(); ++i)
@@ -3090,95 +3215,102 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			}
 		}
 
-		const float profileLabelW = 80.0f;
-		const float profileComboW = width - profileLabelW;
-		Wui::Label(ctx, { x, y + 3.0f }, "Profile:", theme.Text, theme.FontSizeSmall);
+		Wui::Label(ctx, { x, y + 3.0f }, "Preset Profile:", theme.Text, theme.FontSizeSmall);
 
-		if (Wui::Combo(ctx, Wui::HashId("model.col.profile_combo"), { x + profileLabelW, y, profileComboW, 24.0f },
+		if (Wui::Combo(ctx, Wui::HashId("model.col.profile_combo"), { x + labelW, y, fieldW, 24.0f },
 			"", profileNames, curProfileIdx, theme))
 		{
 			if (curProfileIdx >= 0 && curProfileIdx < static_cast<int>(profileNames.size()))
 			{
 				m_SelectedCollisionProfile = profileNames[curProfileIdx];
+				const auto* p = World::PhysicsSettings::FindProfile(m_SelectedCollisionProfile);
+				if (p)
+					m_SelectedCollisionChannel = p->ObjectType;
 			}
 		}
-		Wui::Tooltip(ctx, { x + profileLabelW, y, profileComboW, 24.0f },
-			"选择模型资产的默认物理通道预设 (与 Project Settings 注册的 Profiles 动态保持一致)");
+		Wui::Tooltip(ctx, { x + labelW, y, fieldW, 24.0f },
+			"选择模型资产的物理通道响应预设 (与 Project Settings 注册的 Profiles 动态保持一致)");
 		y += 28.0f;
 
-		// 契约一致性展示: 选中预设的 ObjectType 与响应规则汇总卡片
-		const World::Asset::CollisionProfile* selectedProf = nullptr;
-		for (const auto& p : registeredProfiles)
-		{
-			if (p.Name == m_SelectedCollisionProfile)
-			{
-				selectedProf = &p;
-				break;
-			}
-		}
+		// 3c. 契约一致性展示: 物体通道与项目设置 64 碰撞矩阵交互规则卡片
+		const World::Asset::CollisionProfile* selectedProf = World::PhysicsSettings::FindProfile(m_SelectedCollisionProfile);
 
-		const float descCardH = 46.0f;
+		const float descCardH = 68.0f;
 		const Wui::WuiRect descRect { x, y, width, descCardH };
 		Wui::PanelBackground(ctx, descRect, Alpha(theme.Border, 0.20f), 4.0f);
 		Wui::HighlightOutline(ctx, descRect, Alpha(theme.Accent, 0.35f), 4.0f, 1.0f);
 
-		if (selectedProf)
+		const std::string selChName = std::string(channelConfig.GetChannelName(m_SelectedCollisionChannel));
+		char line1Buf[192];
+		std::snprintf(line1Buf, sizeof(line1Buf), "Object Channel: #%u %s  |  Preset: %s",
+			static_cast<unsigned>(m_SelectedCollisionChannel),
+			selChName.empty() ? "Default" : selChName.c_str(),
+			m_SelectedCollisionProfile.c_str());
+		Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 6.0f }, line1Buf, theme.Accent, theme.FontSizeSmall);
+
+		// 矩阵交互规则摘要 (对标图四)
+		std::string matrixPreview = "项目设置矩阵交互: ";
+		int shownTags = 0;
+		for (size_t c = 0; c < objectChannelIndices.size() && shownTags < 6; ++c)
 		{
-			const uint8_t objTypeIdx = selectedProf->ObjectType;
-			const std::string objTypeName = (objTypeIdx < World::Asset::CollisionChannelConfig::kMaxChannels && !channelConfig.ChannelNames[objTypeIdx].empty())
-				? std::string(channelConfig.ChannelNames[objTypeIdx])
-				: "Channel #" + std::to_string(objTypeIdx);
-
-			uint32_t blockCount = 0;
-			uint32_t overlapCount = 0;
-			uint32_t ignoreCount = 0;
-			for (size_t ch = 0; ch < World::Asset::CollisionChannelConfig::kMaxChannels; ++ch)
-			{
-				const std::string_view chName = channelConfig.GetChannelName(static_cast<uint8_t>(ch));
-				if (chName.empty())
-					continue;
-				const auto resp = selectedProf->Responses.GetResponse(static_cast<uint8_t>(ch));
-				if (resp == World::Asset::CollisionResponse::Block)
-					++blockCount;
-				else if (resp == World::Asset::CollisionResponse::Overlap)
-					++overlapCount;
-				else
-					++ignoreCount;
-			}
-
-			char line1Buf[192];
-			std::snprintf(line1Buf, sizeof(line1Buf), "Object Type: #%u (%s)  |  Responses: %u Block, %u Overlap, %u Ignore",
-				static_cast<unsigned>(objTypeIdx), objTypeName.c_str(), blockCount, overlapCount, ignoreCount);
-			Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 5.0f }, line1Buf, theme.Accent, theme.FontSizeSmall);
-
-			std::string ruleSummary;
-			if (m_SelectedCollisionProfile == "BlockAll" || (overlapCount == 0 && ignoreCount == 0))
-				ruleSummary = "Blocks all channels (硬阻挡所有物理碰撞与视线投射)";
-			else if (m_SelectedCollisionProfile == "OverlapAll" || (blockCount == 0 && ignoreCount == 0))
-				ruleSummary = "Overlaps all channels (仅触发重叠感知事件，不产生物理推挤)";
-			else if (m_SelectedCollisionProfile == "NoCollision" || (blockCount == 0 && overlapCount == 0))
-				ruleSummary = "Ignores all channels (完全穿透忽略，无碰撞无重叠)";
-			else if (m_SelectedCollisionProfile == "Pawn")
-				ruleSummary = "Blocks world & objects; Overlaps TriggerZone & Foliage; Ignores Camera";
-			else if (m_SelectedCollisionProfile == "Glass")
-				ruleSummary = "Blocks objects; Ignores Camera and Visibility trace";
-			else if (m_SelectedCollisionProfile == "InvisibleWall")
-				ruleSummary = "Blocks Pawn & Vehicle; Ignores all other channels";
-			else if (m_SelectedCollisionProfile == "TriggerOnly")
-				ruleSummary = "Ignores all channels except Overlap with Pawn & Vehicle";
-			else
-				ruleSummary = "Custom Profile: " + std::to_string(blockCount) + " Block, " + std::to_string(overlapCount) + " Overlap, " + std::to_string(ignoreCount) + " Ignore";
-
-			Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 24.0f }, ruleSummary, theme.TextMuted, theme.FontSizeCaption);
+			const uint8_t otherCh = objectChannelIndices[c];
+			if (otherCh == m_SelectedCollisionChannel) continue;
+			const auto resp = selectedProf
+				? selectedProf->Responses.GetResponse(otherCh)
+				: channelConfig.EvaluateInteraction(m_SelectedCollisionChannel, otherCh);
+			const char* tag = (resp == World::Asset::CollisionResponse::Block) ? "[B]"
+				: (resp == World::Asset::CollisionResponse::Overlap ? "[O]" : "[-]");
+			const std::string_view otherName = channelConfig.GetChannelName(otherCh);
+			matrixPreview += std::string(tag) + " " + std::string(otherName) + "  ";
+			++shownTags;
 		}
+		Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 26.0f }, matrixPreview, theme.Text, theme.FontSizeCaption);
+
+		std::string ruleSummary;
+		if (m_SelectedCollisionProfile == "BlockAll")
+			ruleSummary = "硬阻挡所有物理碰撞通道与视线射线检测 (BlockAll)";
+		else if (m_SelectedCollisionProfile == "OverlapAll")
+			ruleSummary = "仅触发重叠感知事件，不产生物理反弹推挤 (OverlapAll)";
+		else if (m_SelectedCollisionProfile == "NoCollision")
+			ruleSummary = "完全穿透忽略，无碰撞无重叠事件 (NoCollision)";
+		else if (m_SelectedCollisionProfile == "Pawn")
+			ruleSummary = "角色预设: 阻挡世界与实体，重叠触发区与植被，忽略相机";
+		else if (m_SelectedCollisionProfile == "Glass")
+			ruleSummary = "玻璃预设: 阻挡实体，穿透相机视线与 Visibility 探测";
+		else if (m_SelectedCollisionProfile == "InvisibleWall")
+			ruleSummary = "空气墙预设: 仅硬阻挡 Pawn 与 Vehicle，穿透其他通道";
+		else if (m_SelectedCollisionProfile == "TriggerOnly")
+			ruleSummary = "仅触发区: 仅与 Pawn/Vehicle 重叠触发，忽略其他通道";
 		else
+			ruleSummary = "依据项目设置碰撞矩阵针对各物体通道执行专属物理响应";
+
+		Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 46.0f }, ruleSummary, theme.TextMuted, theme.FontSizeCaption);
+		y += descCardH + 10.0f;
+
+		// 3.5 骨骼蒙皮姿态控制 (若资产包含骨骼动画，支持 T-Pose 与动画姿态动态跟随切换)
+		if (m_DataValid && !m_Data.Skins.empty())
 		{
-			Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 5.0f },
-				"Object Type: Default (Inherited)  |  Responses: Project Default", theme.Accent, theme.FontSizeSmall);
-			Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 24.0f },
-				"Default: 采用关卡或实体全局默认碰撞过滤规则与物理响应", theme.TextMuted, theme.FontSizeCaption);
+			Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+				"骨骼姿态与碰撞联动 (Skinned Pose & Joint Follow)", theme.Accent, theme);
+			y += 24.0f;
+
+			const Wui::WuiRect restRect { x, y, width, 22.0f };
+			Wui::Checkbox(ctx, Wui::HashId("model.col.rest_pose_chk"), restRect,
+				"Rest Pose / 默认绑定姿态 (T-Pose 像素级对齐)", m_PreviewRestPose, theme);
+			Wui::Tooltip(ctx, restRect, "开启后网格与骨骼强制以标准的 T-Pose 绑定姿态呈现，复合凸包碰撞体与网格完全对齐。关闭后视口播放骨骼动画，复合凸包四肢将随骨骼关节动态联动跟随。");
+			y += 28.0f;
+
+			const float skinCardH = 44.0f;
+			const Wui::WuiRect skinCard { x, y, width, skinCardH };
+			Wui::PanelBackground(ctx, skinCard, Alpha(theme.Accent, 0.12f), 4.0f);
+			Wui::HighlightOutline(ctx, skinCard, Alpha(theme.Accent, 0.30f), 4.0f, 1.0f);
+			Wui::Label(ctx, { skinCard.X + 8.0f, skinCard.Y + 5.0f },
+				"ℹ️ 骨骼模型物理碰撞机制说明:", theme.Accent, theme.FontSizeSmall);
+			Wui::Label(ctx, { skinCard.X + 8.0f, skinCard.Y + 22.0f },
+				"复合凸包为静态绑定姿态刚性外壳; 角色运行时形变受击框与物理驱动请使用胶囊体或骨骼物理资产(Ragdoll)",
+				theme.TextMuted, theme.FontSizeCaption);
+			y += skinCardH + 10.0f;
 		}
-		y += descCardH + 8.0f;
 
 		// 4. 分解参数调节 (Decomposition Settings) - 双列排版 + 4 极简预设胶囊按钮
 		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
@@ -3291,12 +3423,74 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 			std::vector<glm::vec3> positions;
 			std::vector<uint32_t> indices;
 
-			if (m_DataValid && !m_Data.Vertices.empty())
+			if (m_DataValid)
 			{
-				positions.reserve(m_Data.Vertices.size());
-				for (const auto& v : m_Data.Vertices)
-					positions.push_back(v.Position);
-				indices = m_Data.Indices;
+				const bool isSkinned = !m_Data.Skins.empty();
+				if (!m_Data.Nodes.empty() && !isSkinned)
+				{
+					// 静态网格节点树层级装配：自顶向下计算各节点在模型根空间下的全局变换矩阵
+					std::vector<glm::mat4> nodeWorld(m_Data.Nodes.size(), glm::mat4(1.0f));
+					for (size_t i = 0; i < m_Data.Nodes.size(); ++i)
+					{
+						const auto& node = m_Data.Nodes[i];
+						const glm::mat4 local = glm::translate(glm::mat4(1.0f), node.Translation)
+							* glm::mat4_cast(node.Rotation)
+							* glm::scale(glm::mat4(1.0f), node.Scale);
+						nodeWorld[i] = (node.Parent >= 0 && static_cast<size_t>(node.Parent) < i)
+							? nodeWorld[static_cast<size_t>(node.Parent)] * local : local;
+					}
+
+					std::unordered_map<uint64_t, uint32_t> vertexRemap;
+					for (size_t nodeIdx = 0; nodeIdx < m_Data.Nodes.size(); ++nodeIdx)
+					{
+						const int32_t meshIdx = m_Data.Nodes[nodeIdx].MeshIndex;
+						if (meshIdx < 0 || static_cast<size_t>(meshIdx) >= m_Data.Meshes.size())
+							continue;
+
+						const auto& range = m_Data.Meshes[static_cast<size_t>(meshIdx)];
+						const glm::mat4& xform = nodeWorld[nodeIdx];
+
+						for (uint32_t sub = 0; sub < range.SubmeshCount; ++sub)
+						{
+							const uint32_t submeshIdx = range.FirstSubmesh + sub;
+							if (submeshIdx >= m_Data.Submeshes.size())
+								break;
+
+							const auto& submesh = m_Data.Submeshes[submeshIdx];
+							for (uint32_t k = 0; k < submesh.IndexCount; ++k)
+							{
+								if (submesh.IndexOffset + k >= m_Data.Indices.size())
+									break;
+								const uint32_t origIdx = m_Data.Indices[submesh.IndexOffset + k];
+								if (origIdx >= m_Data.Vertices.size())
+									continue;
+
+								const uint64_t key = (static_cast<uint64_t>(nodeIdx) << 32) | static_cast<uint64_t>(origIdx);
+								auto it = vertexRemap.find(key);
+								if (it == vertexRemap.end())
+								{
+									const uint32_t newIdx = static_cast<uint32_t>(positions.size());
+									const glm::vec3 worldPos = glm::vec3(xform * glm::vec4(m_Data.Vertices[origIdx].Position, 1.0f));
+									positions.push_back(worldPos);
+									vertexRemap[key] = newIdx;
+									indices.push_back(newIdx);
+								}
+								else
+								{
+									indices.push_back(it->second);
+								}
+							}
+						}
+					}
+				}
+
+				if (positions.empty() && !m_Data.Vertices.empty())
+				{
+					positions.reserve(m_Data.Vertices.size());
+					for (const auto& v : m_Data.Vertices)
+						positions.push_back(v.Position);
+					indices = m_Data.Indices;
+				}
 			}
 
 			if (positions.empty())

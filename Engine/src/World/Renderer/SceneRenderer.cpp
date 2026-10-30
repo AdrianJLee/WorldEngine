@@ -28,6 +28,8 @@
 #include "World/Math/Simd/FrustumCullSimd.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/FrameExtract.h"
+#include "World/Level/WhiteboxBuilder.h"
+#include "World/Level/Spline3D.h"
 #include "World/Renderer/MeshLOD.h"
 #include "World/Scene/SceneOctree.h"
 #include "World/Renderer/TransformInterpolation.h"
@@ -52,6 +54,36 @@
 
 namespace World
 {
+	namespace
+	{
+		struct WhiteboxRenderVertex
+		{
+			glm::vec3 Position;
+			glm::vec3 Normal;
+			glm::vec2 TexCoord;
+		};
+
+		Ref<Mesh> CreateMeshFromWhitebox(const WhiteboxMesh& wbMesh, const std::string& name)
+		{
+			if (wbMesh.Vertices.empty() || wbMesh.Indices.empty())
+				return nullptr;
+
+			MeshDesc desc;
+			desc.DebugName = name;
+			desc.Layout = Mesh::MakeStandardLayout();
+			desc.VertexLayoutId = Mesh::kVertexLayoutStandard;
+			desc.Indices = wbMesh.Indices;
+			desc.VertexData.resize(wbMesh.Vertices.size() * sizeof(WhiteboxRenderVertex));
+			auto* verts = reinterpret_cast<WhiteboxRenderVertex*>(desc.VertexData.data());
+			for (size_t i = 0; i < wbMesh.Vertices.size(); ++i)
+			{
+				verts[i].Position = wbMesh.Vertices[i];
+				verts[i].Normal = wbMesh.Normals[i];
+				verts[i].TexCoord = wbMesh.UVs[i];
+			}
+			return Mesh::Create(desc);
+		}
+	}
 	namespace Detail
 	{
 		template <typename T, typename = void>
@@ -335,6 +367,8 @@ namespace World
 			m_ExtractSinkScene->SetRenderExtractSink(nullptr);
 			m_ExtractSinkScene = nullptr;
 		}
+		m_WhiteboxMeshCache.clear();
+		m_SplineMeshCache.clear();
 		m_ActiveScene = nullptr;
 		m_Framebuffer = nullptr;
 		m_FramebufferView = nullptr;
@@ -575,7 +609,9 @@ namespace World
 			{
 				// D5c-4a:同时挂 SkinnedMeshRendererComponent 的实体交给下面的蒙皮收集块,
 				// 这里跳过以免同一个实体画两遍(只挂 MeshRendererComponent 的实体逐字节不变)。
-				if (scene.m_Registry.all_of<SkinnedMeshRendererComponent>(entity))
+				if (scene.m_Registry.all_of<SkinnedMeshRendererComponent>(entity) ||
+					scene.m_Registry.all_of<WhiteboxComponent>(entity) ||
+					scene.m_Registry.all_of<SplineComponent>(entity))
 					continue;
 				// Level 2.0 数据层:不在当前激活层的实体不参与本帧收集(昼夜/战损切换的真实剔除点)。
 				if (!scene.IsEntityInActiveDataLayers(entity))
@@ -798,6 +834,121 @@ namespace World
 				{
 					makeSkinnedDraw(UINT32_MAX, overrideMaterial);
 				}
+			}
+		}
+
+		// ---- 3D 白盒原型几何体收集 (WhiteboxComponent) ----
+		{
+			auto whiteboxView = scene.m_Registry.view<TransformComponent, WhiteboxComponent>();
+			for (auto entity : whiteboxView)
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				if (scene.m_Registry.all_of<MeshRendererComponent>(entity))
+				{
+					const auto& mr = scene.m_Registry.get<MeshRendererComponent>(entity);
+					if (mr.Mesh.HasPath() || mr.Mesh.Identity.IsValid())
+						continue;
+				}
+
+				const auto& [transform, wb] =
+					whiteboxView.get<TransformComponent, WhiteboxComponent>(entity);
+
+				Ref<Mesh> mesh = GetOrCreateWhiteboxMesh(wb);
+				if (!mesh)
+					continue;
+
+				Ref<Material> material;
+				glm::vec4 color(0.40f, 0.42f, 0.45f, 1.0f);
+				if (scene.m_Registry.all_of<MeshRendererComponent>(entity))
+				{
+					const auto& mr = scene.m_Registry.get<MeshRendererComponent>(entity);
+					color = mr.Color;
+					if (mr.Material.HasPath() || mr.Material.Identity.IsValid())
+					{
+						std::string error;
+						material = ResolveMaterialAsset(mr.Material, &error);
+					}
+				}
+
+				const glm::mat4* modelMatrix = nullptr;
+				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				else
+					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
+
+				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
+
+				FrameMeshDraw draw;
+				draw.Entity = entity;
+				draw.Model = renderMatrix;
+				draw.MeshAsset = mesh;
+				draw.SubmeshIndex = UINT32_MAX;
+				draw.MaterialAsset = material;
+				draw.Color = color;
+				draw.Transparent = material
+					&& material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+				const MeshBounds& localBounds = mesh->GetBounds();
+				TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max, draw.WorldMin, draw.WorldMax);
+				extract.Draws.push_back(std::move(draw));
+			}
+		}
+
+		// ---- 3D 样条线道路带状网格收集 (SplineComponent) ----
+		{
+			auto splineView = scene.m_Registry.view<TransformComponent, SplineComponent>();
+			for (auto entity : splineView)
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& [transform, splineComp] =
+					splineView.get<TransformComponent, SplineComponent>(entity);
+
+				if (!splineComp.ExtrudeRoad)
+					continue;
+
+				Ref<Mesh> mesh = GetOrCreateSplineMesh(scene, entity, splineComp);
+				if (!mesh)
+					continue;
+
+				Ref<Material> material;
+				glm::vec4 color(0.28f, 0.29f, 0.32f, 1.0f);
+				if (splineComp.SplineMeshAsset.HasPath() || splineComp.SplineMeshAsset.Identity.IsValid())
+				{
+					std::string error;
+					material = ResolveMaterialAsset(splineComp.SplineMeshAsset, &error);
+				}
+				if (!material && scene.m_Registry.all_of<MeshRendererComponent>(entity))
+				{
+					const auto& mr = scene.m_Registry.get<MeshRendererComponent>(entity);
+					color = mr.Color;
+					if (mr.Material.HasPath() || mr.Material.Identity.IsValid())
+					{
+						std::string error;
+						material = ResolveMaterialAsset(mr.Material, &error);
+					}
+				}
+
+				const glm::mat4* modelMatrix = nullptr;
+				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				else
+					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
+
+				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
+
+				FrameMeshDraw draw;
+				draw.Entity = entity;
+				draw.Model = renderMatrix;
+				draw.MeshAsset = mesh;
+				draw.SubmeshIndex = UINT32_MAX;
+				draw.MaterialAsset = material;
+				draw.Color = color;
+				draw.Transparent = material
+					&& material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+				const MeshBounds& localBounds = mesh->GetBounds();
+				TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max, draw.WorldMin, draw.WorldMax);
+				extract.Draws.push_back(std::move(draw));
 			}
 		}
 
@@ -3319,4 +3470,77 @@ namespace World
 		}
 	}
 
+
+	Ref<Mesh> SceneRenderer::GetOrCreateWhiteboxMesh(const WhiteboxComponent& comp)
+	{
+		WhiteboxCacheKey key;
+		key.Shape = static_cast<uint8_t>(comp.Shape);
+		key.Subdivisions = comp.Subdivisions;
+		key.Steps = comp.Steps;
+		key.Dimensions[0] = comp.Dimensions.x;
+		key.Dimensions[1] = comp.Dimensions.y;
+		key.Dimensions[2] = comp.Dimensions.z;
+		key.BevelSize = comp.BevelSize;
+
+		auto it = m_WhiteboxMeshCache.find(key);
+		if (it != m_WhiteboxMeshCache.end() && it->second)
+			return it->second;
+
+		WhiteboxMesh wbMesh;
+		switch (comp.Shape)
+		{
+		case WhiteboxComponent::ShapeType::Box:
+			WhiteboxBuilder::BuildBox(comp.Dimensions, comp.BevelSize, wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Cylinder:
+			WhiteboxBuilder::BuildCylinder(comp.Dimensions.x * 0.5f, comp.Dimensions.y, comp.Subdivisions, wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Stairs:
+			WhiteboxBuilder::BuildStairs(comp.Dimensions, comp.Steps, wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Wedge:
+			WhiteboxBuilder::BuildWedge(comp.Dimensions, wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Arch:
+			WhiteboxBuilder::BuildArch(comp.Dimensions, comp.Dimensions.x * 0.25f, wbMesh);
+			break;
+		}
+
+		Ref<Mesh> mesh = CreateMeshFromWhitebox(wbMesh, "WhiteboxMesh");
+		if (mesh)
+			m_WhiteboxMeshCache[key] = mesh;
+		return mesh;
+	}
+
+	Ref<Mesh> SceneRenderer::GetOrCreateSplineMesh(Scene& scene, entt::entity entity, const SplineComponent& comp)
+	{
+		std::vector<glm::vec3> knots;
+		const auto& children = Hierarchy::ChildrenOf(scene.m_Registry, entity);
+		for (const auto h : children)
+		{
+			if (scene.m_Registry.all_of<TransformComponent>(h))
+				knots.push_back(scene.m_Registry.get<TransformComponent>(h).Location);
+		}
+		// 若暂无显式子节点控制点，自动提供 4 局部平滑控制点，确保样条线道路实体开箱即见、真实可见
+		if (knots.size() < 2)
+		{
+			knots.push_back({ -15.0f, 0.05f, -6.0f });
+			knots.push_back({  -5.0f, 0.25f,  4.0f });
+			knots.push_back({   5.0f, 0.35f, -3.0f });
+			knots.push_back({  15.0f, 0.10f,  6.0f });
+		}
+
+		Spline3D spline;
+		spline.SetMode(comp.Mode == 1 ? SplineMode::Bezier : SplineMode::CatmullRom);
+		spline.SetClosedLoop(comp.ClosedLoop == 1);
+		for (const auto& pt : knots)
+			spline.AddPoint(pt);
+
+		WhiteboxMesh wbMesh;
+		const float step = (comp.MeshSpacing > 0.05f) ? comp.MeshSpacing : 1.0f;
+		const float width = (comp.RoadWidth > 0.1f) ? comp.RoadWidth : 3.0f;
+		spline.GenerateRoadMesh(width, step, wbMesh.Vertices, wbMesh.Normals, wbMesh.UVs, wbMesh.Indices);
+		return CreateMeshFromWhitebox(wbMesh, "SplineRoadMesh");
+	}
 }
+

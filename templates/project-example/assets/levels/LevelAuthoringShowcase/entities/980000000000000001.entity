@@ -1,0 +1,24 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000001
+  World::TagComponent:
+    Tag: "Level Authoring Camera"
+  World::TransformComponent:
+    Location: [0.0, 8.0, 20.0]
+    Rotation: [-18.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::CameraComponent:
+    Camera:
+      m_ProjectionType: 0
+      m_OrthographicZoom: 1
+      m_OrthographicNearClip: -1
+      m_OrthographicFarClip: 1
+      m_PerspectiveFOV: 55
+      m_PerspectiveNearClip: 0.1
+      m_PerspectiveFarClip: 500
+    Primary: true
+    FixedAspectRatio: false
+  World::LevelEntityComponent:
+    DataLayerMask: 1

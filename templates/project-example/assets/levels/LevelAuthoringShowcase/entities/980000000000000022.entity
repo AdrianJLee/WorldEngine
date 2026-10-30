@@ -1,0 +1,16 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000022
+  World::TagComponent:
+    Tag: "Spline Knot 1"
+  World::TransformComponent:
+    Location: [-4.0, 0.25, 3.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::HierarchyComponent:
+    Parent: 980000000000000010
+    InheritTransform: true
+  World::LevelEntityComponent:
+    DataLayerMask: 1

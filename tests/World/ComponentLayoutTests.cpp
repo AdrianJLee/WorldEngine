@@ -112,7 +112,7 @@ namespace
 		{ "World::MeshLODComponent",               64 },
 		{ "World::DecalComponent",                 48 },
 		{ "World::ConvexCollider3DComponent",       32 },
-		{ "World::SplineComponent",                 48 },
+		{ "World::SplineComponent",                 32 },
 		{ "World::WhiteboxComponent",               32 },
 		{ "World::HLODComponent",                   48 },
 		{ "World::RVTComponent",                    32 },

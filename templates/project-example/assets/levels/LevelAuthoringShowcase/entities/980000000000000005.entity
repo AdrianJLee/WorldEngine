@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 980000000000000005
+  World::TagComponent:
+    Tag: "Whitebox Access Wedge Ramp"
+  World::TransformComponent:
+    Location: [5.0, 0.0, 2.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 4
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [3.5, 3.0, 8.0]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.32, 0.42, 0.48, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

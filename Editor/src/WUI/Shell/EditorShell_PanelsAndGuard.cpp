@@ -854,7 +854,7 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		struct MenuEntry
 		{
 			std::string Label;
-			bool Checked;
+			bool Checked = false;
 			std::function<void()> Action;
 			bool Header = false;
 			std::string Tooltip;
@@ -863,6 +863,7 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 			Wui::WuiId ExplicitId = 0;
 			// PROJ-2/T1:失效的"最近项目"行灰显(可读不可点);其余菜单项默认可用。
 			bool Enabled = true;
+			std::vector<MenuEntry> SubEntries = {};
 		};
 
 		const Wui::WuiId menuFile = Wui::HashId("menu.file");
@@ -988,50 +989,118 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 			if (ctx.IsPopupOpen(menuId))
 			{
 				ctx.PushOverlay();
-				// M4-S2 遗留②:菜单栏下拉的**绘制命令**延后到帧末(模态画完之后),与 U29 给
-				// Combo/SearchableCombo 的 `WuiDeferredPopupScope` 同一口径 —— 菜单栏在模态之前
-				// 绘制,否则模态一开就把下拉盖住(同类 z-order 风险)。命中测试、Tooltip、
-				// RegisterOverlayRect 与关闭判定全部留在原地当场生效(命令只是搬走像素)。
 				std::vector<Wui::WuiDrawCommand>& menuOverlay = ctx.Commands();
 				const size_t menuCommandMark = menuOverlay.size();
-				const Wui::WuiRect panel { m_MenuHeaderRect.X, m_MenuHeaderRect.Y + m_MenuHeaderRect.H + 2, 240, static_cast<float>(entries.size() * 22 + 8) };
+
+				// 检测是否包含二级子菜单
+				bool hasAnySubmenu = false;
+				for (const auto& e : entries)
+				{
+					if (!e.SubEntries.empty())
+					{
+						hasAnySubmenu = true;
+						break;
+					}
+				}
+
+				// 尺寸排版：包含二级菜单时单列规整排布，杜绝垂直溢出
+				constexpr size_t kMaxRowsPerCol = 18;
+				const size_t colCount = (!hasAnySubmenu && entries.size() > kMaxRowsPerCol) ? 2 : 1;
+				const size_t rowCount = (colCount == 1) ? entries.size() : ((entries.size() + 1) / 2);
+				const float colWidth = 270.0f;
+				const float totalW = static_cast<float>(colCount) * colWidth + 8.0f;
+				const float totalH = static_cast<float>(rowCount * 22 + 8);
+
+				float panelX = m_MenuHeaderRect.X;
+				float panelY = m_MenuHeaderRect.Y + m_MenuHeaderRect.H + 2.0f;
+				const glm::vec2 vSize = ctx.ViewportSize();
+				if (panelX + totalW > vSize.x - 8.0f)
+					panelX = std::max(4.0f, vSize.x - totalW - 8.0f);
+				if (panelY + totalH > vSize.y - 8.0f)
+					panelY = std::max(4.0f, vSize.y - totalH - 8.0f);
+
+				const Wui::WuiRect panel { panelX, panelY, totalW, totalH };
 				DrawPanelSurface(ctx, panel, m_Theme);
-				// P4-U7:菜单矩形登记为覆盖层 —— 下一帧面板内容不会吃掉落在菜单上的点击
-				// (实测:菜单项那一下会同时穿透到下面的面板控件)。
 				ctx.RegisterOverlayRect(panel);
+
+				Wui::WuiRect activeSubmenuParentRow {};
+				const std::vector<MenuEntry>* activeSubEntries = nullptr;
+				std::string activeSubmenuKey;
+				const glm::vec2 mousePos = ctx.Input().MousePos;
+
 				for (size_t i = 0; i < entries.size(); ++i)
 				{
-					const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };
+					const size_t c = (colCount == 1) ? 0 : (i / rowCount);
+					const size_t r = (colCount == 1) ? i : (i % rowCount);
+					const Wui::WuiRect item { panel.X + 4.0f + static_cast<float>(c) * colWidth,
+						panel.Y + 4.0f + static_cast<float>(r) * 22.0f, colWidth - 8.0f, 22.0f };
+
 					if (entries[i].Header)
 					{
-						// 分组标题:淡色小字,不可点击。
-						Label(ctx, { item.X + 4.0f, item.Y + 4.0f }, entries[i].Label, m_Theme.TextMuted, 12.0f);
-						// 分组标题也要进无障碍树 —— 可见但读不到,读屏/脚本就看不出菜单的分组结构。
-						Wui::WuiAccessNode header;
-						header.Id = Wui::HashId((menuIdName + ".group." + std::to_string(i)).c_str());
-						header.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-						header.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-						header.Kind = "text";
-						header.Label = entries[i].Label;
-						header.Rect = item;
-						header.Interactive = false;
-						Wui::WuiAccessibility::Get().Register(header);
+						if (entries[i].Label == "---")
+						{
+							Wui::PanelBackground(ctx, { item.X + 4.0f, item.Y + 10.0f, item.W - 8.0f, 1.0f }, m_Theme.Border, 0.0f);
+						}
+						else
+						{
+							Label(ctx, { item.X + 4.0f, item.Y + 4.0f }, entries[i].Label, m_Theme.TextMuted, 12.0f);
+						}
 						continue;
 					}
+
+					const bool hasSub = !entries[i].SubEntries.empty();
+					const std::string entryKey = std::to_string(i);
+
+					if (hasSub)
+					{
+						const Wui::WuiId catItemId = Wui::HashId((menuIdName + ".cat." + entryKey).c_str());
+						const bool isCurrentActive = (m_ActiveMenuSubmenu == entryKey);
+
+						// 使用 MenuItem 标准交互：悬停高亮、按压消费与焦点管理，阻止穿透到下层视口
+						const bool clicked = MenuItem(ctx, catItemId, item, entries[i].Label, true, m_Theme);
+						const bool hovered = ctx.IsHovered(item);
+
+						if (isCurrentActive)
+						{
+							Wui::PanelBackground(ctx, item, m_Theme.ButtonHover, 2.0f);
+						}
+						if (clicked || hovered)
+						{
+							m_ActiveMenuSubmenu = entryKey;
+						}
+						if (m_ActiveMenuSubmenu == entryKey)
+						{
+							activeSubmenuParentRow = item;
+							activeSubEntries = &entries[i].SubEntries;
+							activeSubmenuKey = entryKey;
+						}
+
+						// 右侧绘制二级展开箭头
+						const float arrowW = ctx.MeasureTextWidth("▶", 11.0f);
+						Label(ctx, { item.X + item.W - arrowW - 6.0f, item.Y + 4.0f }, "▶",
+							(hovered || isCurrentActive) ? m_Theme.Accent : m_Theme.TextMuted, 11.0f);
+
+						ctx.RegisterOverlayRect(item);
+						continue;
+					}
+
 					const Wui::WuiId itemId = entries[i].ExplicitId != 0
 						? entries[i].ExplicitId
 						: Wui::HashId((menuIdName + "." + entries[i].Label).c_str());
-					// P4-U8:悬停解释(勾选项的"关掉是什么效果"这类信息读不出来,只能靠提示)。
+
 					if (!entries[i].Tooltip.empty())
 						Wui::Tooltip(ctx, item, entries[i].Tooltip);
+
 					if (MenuItem(ctx, itemId, item, entries[i].Label, entries[i].Checked, entries[i].Enabled, m_Theme))
 					{
-						entries[i].Action();
+						if (entries[i].Action)
+							entries[i].Action();
 						ctx.RecordOp("menu", "item", entries[i].Label, menuIdName);
 						ctx.CloseAllPopups();
 						m_OpenMenu = 0;
+						m_ActiveMenuSubmenu.clear();
 					}
-					// 无障碍:MENU 项说明必须同时进节点 —— 读屏/脚本看不到悬停提示。
+
 					if (!entries[i].Tooltip.empty())
 					{
 						Wui::WuiAccessNode node;
@@ -1048,20 +1117,90 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 						Wui::WuiAccessibility::Get().Register(node);
 					}
 				}
-				ctx.ClosePopupsOnOutsideClick({ menuId }, panel);
-				// M4-S2 遗留①:点外面关闭后必须**同步清零 m_OpenMenu** —— 否则下一次按同一个
-				// 菜单按钮时 `opening = (m_OpenMenu != menuFile)` 判成"已经开着" → 只发关闭、
-				// 菜单不出现,用户得按两次(实测)。这里按**弹层真实状态**收口(不看返回值:
-				// ClosePopupsOnOutsideClick 在"弹层是本帧刚打开"时会跳过关闭但同样返回 true)。
+
+				// 渲染二级子菜单 (Submenu Floating Surface)
+				Wui::WuiRect subPanel {};
+				if (activeSubEntries && !activeSubEntries->empty())
+				{
+					const float subW = 285.0f;
+					const float subH = static_cast<float>(activeSubEntries->size() * 22 + 8);
+					float subX = panel.X + panel.W - 2.0f;
+					if (subX + subW > vSize.x - 8.0f)
+						subX = std::max(4.0f, panel.X - subW + 2.0f);
+					float subY = std::max(4.0f, std::min(activeSubmenuParentRow.Y - 2.0f, vSize.y - subH - 8.0f));
+					subPanel = { subX, subY, subW, subH };
+
+					DrawPanelSurface(ctx, subPanel, m_Theme);
+					ctx.RegisterOverlayRect(subPanel);
+
+					for (size_t sIdx = 0; sIdx < activeSubEntries->size(); ++sIdx)
+					{
+						const auto& subItem = (*activeSubEntries)[sIdx];
+						const Wui::WuiRect sRect { subPanel.X + 4.0f, subPanel.Y + 4.0f + static_cast<float>(sIdx) * 22.0f, subPanel.W - 8.0f, 22.0f };
+
+						if (subItem.Header)
+						{
+							if (subItem.Label == "---")
+								Wui::PanelBackground(ctx, { sRect.X + 4.0f, sRect.Y + 10.0f, sRect.W - 8.0f, 1.0f }, m_Theme.Border, 0.0f);
+							else
+								Label(ctx, { sRect.X + 4.0f, sRect.Y + 4.0f }, subItem.Label, m_Theme.TextMuted, 12.0f);
+							continue;
+						}
+
+						const Wui::WuiId sItemId = subItem.ExplicitId != 0
+							? subItem.ExplicitId
+							: Wui::HashId((menuIdName + ".sub." + activeSubmenuKey + "." + subItem.Label).c_str());
+
+						if (!subItem.Tooltip.empty())
+							Wui::Tooltip(ctx, sRect, subItem.Tooltip);
+
+						if (MenuItem(ctx, sItemId, sRect, subItem.Label, subItem.Checked, subItem.Enabled, m_Theme))
+						{
+							if (subItem.Action)
+								subItem.Action();
+							ctx.RecordOp("menu", "subitem", subItem.Label, menuIdName);
+							ctx.CloseAllPopups();
+							m_OpenMenu = 0;
+							m_ActiveMenuSubmenu.clear();
+						}
+
+						if (!subItem.Tooltip.empty())
+						{
+							Wui::WuiAccessNode node;
+							node.Id = sItemId;
+							node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+							node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+							node.Kind = "menu-item";
+							node.Label = subItem.Label;
+							node.Value = subItem.Checked ? "checked" : "unchecked";
+							node.Tooltip = subItem.Tooltip;
+							node.Rect = sRect;
+							node.Enabled = subItem.Enabled;
+							node.Interactive = subItem.Enabled;
+							Wui::WuiAccessibility::Get().Register(node);
+						}
+					}
+				}
+
+				// 点击检测：鼠标在二级菜单内时不触发外部关闭
+				const bool inSubmenu = (subPanel.W > 0.0f && ctx.HitTestRaw(subPanel, mousePos));
+				if (!inSubmenu)
+				{
+					ctx.ClosePopupsOnOutsideClick({ menuId }, panel);
+				}
+
 				if (m_OpenMenu == menuId && !ctx.IsPopupOpen(menuId))
+				{
 					m_OpenMenu = 0;
+					m_ActiveMenuSubmenu.clear();
+				}
 				if (ctx.IsKeyPressed(KeyCodes::Escape))
 				{
 					ctx.ClosePopup(menuId);
 					m_OpenMenu = 0;
+					m_ActiveMenuSubmenu.clear();
 				}
-				// 只搬"这一帧仍然开着"的菜单:菜单项动作(打开模态等)会在本帧调 CloseAllPopups,
-				// 那一帧的命令必须丢弃 —— 否则刚弹出的模态会被上一帧的下拉盖一帧。
+
 				if (ctx.IsPopupOpen(menuId))
 				{
 					m_DeferredMenuCommands.insert(m_DeferredMenuCommands.end(),
@@ -1353,46 +1492,131 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		// 菜单分组:独立窗口(自带 OS 窗口)与停靠面板分开列,并给出不可点击的分组标题 ——
 		// 之前两类平铺在一起,用户看不出"Gallery/Input Map 是独立窗口,其余是停靠标签"。
 		std::vector<MenuEntry> windowEntries;
-		windowEntries.push_back({ Wui::Tr("menu.window.modes", "Workspace Modes (工作区模式)"), false, {}, true });
-		windowEntries.push_back({ Wui::Tr("menu.window.mode_select", "✦ 选择模式 (Select) [Shift+1]"),
-			GetEditorToolMode() == EditorToolMode::Select,
-			[this] { SetEditorToolMode(EditorToolMode::Select); } });
-		windowEntries.push_back({ Wui::Tr("menu.window.mode_landscape", "✦ 地貌编辑模式 (Landscape) [Shift+2]"),
-			GetEditorToolMode() == EditorToolMode::Landscape,
-			[this] { SetEditorToolMode(EditorToolMode::Landscape); } });
-		windowEntries.push_back({ Wui::Tr("menu.window.mode_foliage", "✦ 植被散布模式 (Foliage) [Shift+3]"),
-			GetEditorToolMode() == EditorToolMode::Foliage,
-			[this] { SetEditorToolMode(EditorToolMode::Foliage); } });
-		// U25-M2:写材质的入口 —— "从零新建一份材质"(模板 + 名称 + 目录 + 实时落点),
-		// 与内容浏览器空白右键的 New ▸ Material… 共用同一个向导(实现全在内容浏览器面板)。
-		windowEntries.push_back({ Wui::Tr("menu.window.new_material", "New Material…"), false,
+
+		std::unordered_set<std::string> categorizedPanels;
+		auto makePanelEntry = [&](const std::string& panelId, const std::string& customTip = "") -> MenuEntry
+		{
+			categorizedPanels.insert(panelId);
+			const bool visible = m_Layout.Contains(panelId) || m_Layout.IsFloating(panelId) ||
+				std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panelId) != m_AttachedPanels.end();
+			std::string tip = customTip.empty() ? ("打开/关闭 " + PanelTitle(panelId)) : customTip;
+			return { PanelTitle(panelId), visible, [this, panelId, &ctx] { TogglePanel(ctx, panelId); }, false, tip };
+		};
+
+		// 1. 工作区通用视图 (General Views)
+		const std::vector<std::string> kGeneralPanels = {
+			"view", "hierarchy", "properties", "content_browser", "levels", "data_layers", "operations"
+		};
+		std::vector<MenuEntry> generalSubs;
+		for (const auto& pid : kGeneralPanels)
+			if (std::find(m_Panels.begin(), m_Panels.end(), pid) != m_Panels.end())
+				generalSubs.push_back(makePanelEntry(pid));
+
+		// 2. 世界与关卡构建 (World Building)
+		const std::vector<std::string> kWorldPanels = {
+			"terrain_editor", "foliage_editor", "physicspainter", "navmesh"
+		};
+		std::vector<MenuEntry> worldSubs;
+		for (const auto& pid : kWorldPanels)
+			if (std::find(m_Panels.begin(), m_Panels.end(), pid) != m_Panels.end())
+				worldSubs.push_back(makePanelEntry(pid));
+
+		// 3. 动画与交互逻辑 (Animation & Logic)
+		const std::vector<std::string> kLogicPanels = {
+			"animgraph", "behaviortree", "curve_editor", "scripts", "input"
+		};
+		std::vector<MenuEntry> logicSubs;
+		for (const auto& pid : kLogicPanels)
+			if (std::find(m_Panels.begin(), m_Panels.end(), pid) != m_Panels.end())
+				logicSubs.push_back(makePanelEntry(pid));
+
+		// 4. 渲染与图形设计 (Rendering & VFX)
+		const std::vector<std::string> kRenderPanels = {
+			"particle_editor", "texture_settings", "physics_material_editor", "ui_designer"
+		};
+		std::vector<MenuEntry> renderSubs;
+		for (const auto& pid : kRenderPanels)
+			if (std::find(m_Panels.begin(), m_Panels.end(), pid) != m_Panels.end())
+				renderSubs.push_back(makePanelEntry(pid));
+		renderSubs.push_back({ Wui::Tr("menu.window.new_material", "New Material…"), false,
 			[this] {
 				std::string message;
 				if (!OpenNewMaterialWizard(false, &message))
 					Notify(message.empty() ? std::string("could not open the new-material wizard") : message);
 			}, false,
-			Wui::Tr("menu.window.new_material.tooltip",
-				"New Material…: pick a template, name it, choose a folder — then it opens in the "
-				"material editor.") });
-		const auto appendPanels = [this, &windowEntries, &ctx](bool independent)
-		{
-			for (const std::string& panel : m_Panels)
-			{
-				if (IsIndependentPanel(panel) != independent)
-					continue;
-				const bool visible = m_Layout.Contains(panel) || m_Layout.IsFloating(panel) ||
-					std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) != m_AttachedPanels.end();
-				windowEntries.push_back({ PanelTitle(panel), visible, [this, panel, &ctx] { TogglePanel(ctx, panel); } });
-			}
+			Wui::Tr("menu.window.new_material.tooltip", "新建材质向导 (New Material Wizard)") });
+
+		// 5. 音频系统工坊 (Audio Studio)
+		const std::vector<std::string> kAudioPanels = {
+			"audio_mixer", "ai_audio_studio", "audio_profiler"
 		};
-		windowEntries.push_back({ Wui::Tr("menu.window.independent", "Independent Windows"), false, {}, true });
-		appendPanels(/*independent=*/true);
-		windowEntries.push_back({ Wui::Tr("menu.window.docked", "Docked Panels"), false, {}, true });
-		appendPanels(/*independent=*/false);
-		windowEntries.push_back({ Wui::Tr("menu.window.asset_picker", "资产选择器 (Asset Picker)…"), false,
+		std::vector<MenuEntry> audioSubs;
+		for (const auto& pid : kAudioPanels)
+			if (std::find(m_Panels.begin(), m_Panels.end(), pid) != m_Panels.end())
+				audioSubs.push_back(makePanelEntry(pid));
+
+		// 6. 性能剖析与系统 (Profiling & System)
+		const std::vector<std::string> kSystemPanels = {
+			"profiler", "memory", "systems", "save"
+		};
+		std::vector<MenuEntry> systemSubs;
+		for (const auto& pid : kSystemPanels)
+			if (std::find(m_Panels.begin(), m_Panels.end(), pid) != m_Panels.end())
+				systemSubs.push_back(makePanelEntry(pid));
+
+		// 7. 配置、插件与工具 (Settings & Tools)
+		const std::vector<std::string> kToolPanels = {
+			"settings", "prefs", "plugins", "gallery"
+		};
+		std::vector<MenuEntry> toolSubs;
+		for (const auto& pid : kToolPanels)
+			if (std::find(m_Panels.begin(), m_Panels.end(), pid) != m_Panels.end())
+				toolSubs.push_back(makePanelEntry(pid));
+		toolSubs.push_back({ Wui::Tr("menu.window.asset_picker", "资产选择器 (Asset Picker)…"), false,
 			[this] { OpenAssetPicker("Asset Picker", AssetCategory::Unknown, [this](const std::string& path) { OpenAsset(path); }); }, false,
 			Wui::Tr("menu.window.asset_picker.tooltip", "打开资产选择器: 浏览、搜索并检视工程中的所有资产与实时缩略图") });
-		windowEntries.push_back({ Wui::Tr("menu.window.reset_layout", "Reset Layout"), false, [this, &ctx] { ResetLayout(ctx); } });
+
+		// 8. 视口工作模式 (Workflow Modes)
+		std::vector<MenuEntry> modeSubs;
+		modeSubs.push_back({ Wui::Tr("menu.window.mode_select", "选择与通用变换 [Shift+1]"),
+			GetEditorToolMode() == EditorToolMode::Select,
+			[this] { SetEditorToolMode(EditorToolMode::Select); } });
+		modeSubs.push_back({ Wui::Tr("menu.window.mode_landscape", "3D 地貌雕刻与混绘 [Shift+2]"),
+			GetEditorToolMode() == EditorToolMode::Landscape,
+			[this] { SetEditorToolMode(EditorToolMode::Landscape); } });
+		modeSubs.push_back({ Wui::Tr("menu.window.mode_foliage", "3D 植被散布模式 [Shift+3]"),
+			GetEditorToolMode() == EditorToolMode::Foliage,
+			[this] { SetEditorToolMode(EditorToolMode::Foliage); } });
+		modeSubs.push_back({ Wui::Tr("menu.window.mode_painter", "3D 物理画笔模式 [Shift+4]"),
+			GetEditorToolMode() == EditorToolMode::PhysicsPainter,
+			[this] { SetEditorToolMode(EditorToolMode::PhysicsPainter); } });
+
+		// 9. 扩展与动态面板 (Other Panels)
+		std::vector<MenuEntry> otherSubs;
+		for (const std::string& panel : m_Panels)
+		{
+			if (categorizedPanels.find(panel) == categorizedPanels.end())
+			{
+				otherSubs.push_back(makePanelEntry(panel));
+			}
+		}
+
+		// 组装 Window 顶级二级菜单
+		windowEntries.push_back({ Wui::Tr("menu.window.cat.general", "工作区通用视图 (General Views)"), false, {}, false, "", 0, true, std::move(generalSubs) });
+		windowEntries.push_back({ Wui::Tr("menu.window.cat.world", "世界与关卡构建 (World Building)"), false, {}, false, "", 0, true, std::move(worldSubs) });
+		windowEntries.push_back({ Wui::Tr("menu.window.cat.logic", "动画与交互逻辑 (Animation & Logic)"), false, {}, false, "", 0, true, std::move(logicSubs) });
+		windowEntries.push_back({ Wui::Tr("menu.window.cat.render", "渲染与图形设计 (Rendering & VFX)"), false, {}, false, "", 0, true, std::move(renderSubs) });
+		windowEntries.push_back({ Wui::Tr("menu.window.cat.audio", "音频系统工坊 (Audio Studio)"), false, {}, false, "", 0, true, std::move(audioSubs) });
+		windowEntries.push_back({ Wui::Tr("menu.window.cat.system", "性能剖析与系统 (Profiling & System)"), false, {}, false, "", 0, true, std::move(systemSubs) });
+		windowEntries.push_back({ Wui::Tr("menu.window.cat.tools", "配置、插件与工具 (Settings & Tools)"), false, {}, false, "", 0, true, std::move(toolSubs) });
+		windowEntries.push_back({ Wui::Tr("menu.window.cat.modes", "视口工作模式 (Workflow Modes)"), false, {}, false, "", 0, true, std::move(modeSubs) });
+		if (!otherSubs.empty())
+		{
+			windowEntries.push_back({ Wui::Tr("menu.window.cat.other", "其他与扩展面板 (Other Panels)"), false, {}, false, "", 0, true, std::move(otherSubs) });
+		}
+		windowEntries.push_back({ "---", false, {}, true });
+		windowEntries.push_back({ Wui::Tr("menu.window.reset_layout", "重置默认停靠布局 (Reset Layout)"), false, [this, &ctx] { ResetLayout(ctx); } });
+
 		drawMenu(menuWindow, "menu.window", windowEntries);
 
 		const Wui::WuiId menuAudio = Wui::HashId("menu.audio");

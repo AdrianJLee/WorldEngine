@@ -11,6 +11,7 @@
 #include <glm/glm.hpp>
 
 #include <unordered_set>
+#include <unordered_map>
 
 namespace World
 {
@@ -159,6 +160,52 @@ namespace World
 		// L2 资产驻留层(WorldContext::Resources() 里的世界级服务;BeginScene 惰性登记并缓存指针)。
 		AssetRegistry* m_AssetRegistry = nullptr;
 		std::unordered_set<std::string> m_WarnedPaths;
+
+		// 白盒原型与样条线网格缓存
+		Ref<Mesh> GetOrCreateWhiteboxMesh(const struct WhiteboxComponent& comp);
+		Ref<Mesh> GetOrCreateSplineMesh(Scene& scene, entt::entity entity, const struct SplineComponent& comp);
+
+		struct WhiteboxCacheKey
+		{
+			uint8_t Shape = 0;
+			uint8_t Subdivisions = 0;
+			uint8_t Steps = 0;
+			uint8_t _pad = 0;
+			float Dimensions[3] = { 0.0f, 0.0f, 0.0f };
+			float BevelSize = 0.0f;
+
+			bool operator==(const WhiteboxCacheKey& o) const
+			{
+				return Shape == o.Shape && Subdivisions == o.Subdivisions && Steps == o.Steps &&
+					Dimensions[0] == o.Dimensions[0] && Dimensions[1] == o.Dimensions[1] &&
+					Dimensions[2] == o.Dimensions[2] && BevelSize == o.BevelSize;
+			}
+		};
+
+		struct WhiteboxKeyHash
+		{
+			size_t operator()(const WhiteboxCacheKey& k) const noexcept
+			{
+				size_t h = 17;
+				h = h * 31 + k.Shape;
+				h = h * 31 + k.Subdivisions;
+				h = h * 31 + k.Steps;
+				h = h * 31 + std::hash<float>()(k.Dimensions[0]);
+				h = h * 31 + std::hash<float>()(k.Dimensions[1]);
+				h = h * 31 + std::hash<float>()(k.Dimensions[2]);
+				h = h * 31 + std::hash<float>()(k.BevelSize);
+				return h;
+			}
+		};
+
+		struct SplineCacheEntry
+		{
+			uint64_t Hash = 0;
+			Ref<Mesh> MeshAsset;
+		};
+
+		std::unordered_map<WhiteboxCacheKey, Ref<Mesh>, WhiteboxKeyHash> m_WhiteboxMeshCache;
+		std::unordered_map<uint32_t, SplineCacheEntry> m_SplineMeshCache;
 	};
 }
 
