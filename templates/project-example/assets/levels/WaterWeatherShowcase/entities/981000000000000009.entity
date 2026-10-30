@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 981000000000000009
+  World::TagComponent:
+    Tag: "Meshlet Inspection Polyhedron"
+  World::TransformComponent:
+    Location: [0.0, 1.8, 20.0]
+    Rotation: [0.0, 30.0, 0.0]
+    Scale: [2.5, 2.5, 2.5]
+  World::WhiteboxComponent:
+    Shape: 1
+    Dimensions: [2.5, 2.5, 2.5]
+    BevelSize: 0.05
+    Subdivisions: 32
+    Steps: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 16

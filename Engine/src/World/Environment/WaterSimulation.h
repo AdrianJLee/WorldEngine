@@ -4,9 +4,18 @@
 #include "World/Scene/Components.h"
 
 #include <glm/glm.hpp>
+#include <cstdint>
+#include <vector>
 
 namespace World
 {
+	struct WaterMeshVertex
+	{
+		glm::vec3 Position;
+		glm::vec3 Normal;
+		glm::vec2 TexCoord;
+	};
+
 	class WLD_API WaterSimulation
 	{
 	public:
@@ -33,5 +42,14 @@ namespace World
 			const WaterBodyComponent& comp,
 			glm::vec3& outBuoyancyForce,
 			glm::vec3& outTorque);
+
+		// 生成水面顶点与索引网格
+		static void GenerateWaterSurfaceMesh(
+			const WaterBodyComponent& comp,
+			const glm::vec2& extents,
+			uint32_t subdivisions,
+			float time,
+			std::vector<WaterMeshVertex>& outVertices,
+			std::vector<uint32_t>& outIndices);
 	};
 }

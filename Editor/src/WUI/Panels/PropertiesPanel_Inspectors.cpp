@@ -1931,7 +1931,482 @@ static uint32_t s_LODGenEntityId = 0;
 		return curY - rect.Y;
 	}
 
-	// ---- 组件检视器 ----
+
+
+
+
+
+		// ---- 组件检视器 ----
+
+
+	// ---- 物理海洋水体专属检视器 (DrawWaterBodyInspector) ----
+	static float DrawWaterBodyInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto* comp = static_cast<WaterBodyComponent*>(instance);
+		if (!comp)
+			return 0.0f;
+
+		const float pad = theme.Pad;
+		const float startX = rect.X + pad;
+		const float contentW = rect.W - pad * 2.0f;
+		float curY = rect.Y + 4.0f;
+
+		// 1. 头部徽章与概要
+		const Wui::WuiRect badgeRect { startX, curY, 144.0f, 18.0f };
+		const Wui::WuiColor badgeBg { 0.05f, 0.40f, 0.65f, 0.28f };
+		const Wui::WuiColor badgeBorder { 0.15f, 0.70f, 0.95f, 0.90f };
+		Wui::Badge(ctx, badgeRect, "PHYSICAL WATER BODY", badgeBg, badgeBorder, theme, 10.5f, true, 3.0f);
+
+		char subTitle[64];
+		std::snprintf(subTitle, sizeof(subTitle), "阶数: %d 谐波 | 细分: %dx%d",
+			static_cast<int>(comp->WaveOctaves),
+			static_cast<int>(comp->GridResolution),
+			static_cast<int>(comp->GridResolution));
+		Wui::Label(ctx, { startX + 152.0f, curY + 2.0f }, subTitle, theme.TextMuted, theme.FontSizeSmall);
+		curY += 26.0f;
+
+		const float fieldLabelW = 150.0f;
+		const float fieldControlW = contentW - fieldLabelW;
+
+		// 2. 几何网格与细分域 (Geometry Domain & Mesh Tessellation)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "几何网格与细分域 (Domain & Mesh):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		// Grid Resolution
+		Wui::Label(ctx, { startX, curY + 3.0f }, "网格细分密度 (Tessellation):", theme.Text, theme.FontSizeSmall);
+		int64_t gridRes = comp->GridResolution;
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.water.grid_res"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, gridRes, 8, 64, theme))
+		{
+			comp->GridResolution = static_cast<uint8_t>(std::clamp<int64_t>(gridRes, 8, 64));
+			if (changedFields) changedFields->push_back("GridResolution");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "水面网格单轴细分数量 [8, 64]，数值越大水面微浪越细腻真实");
+		curY += 26.0f;
+
+		// 3. Gerstner 多阶物理波动动力学 (Multi-Octave Wave Dynamics)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "Gerstner 物理波动动力学 (Wave Dynamics):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		// Wave Direction Angle
+		Wui::Label(ctx, { startX, curY + 3.0f }, "主传播向角 (Heading deg):", theme.Text, theme.FontSizeSmall);
+		float waveHeading = comp->WaveDirectionAngle;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.water.heading"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, waveHeading, 1.0f, 0.0f, 360.0f, theme))
+		{
+			comp->WaveDirectionAngle = std::fmod(waveHeading + 360.0f, 360.0f);
+			if (changedFields) changedFields->push_back("WaveDirectionAngle");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "海浪主传播航向角 [0, 360] 度");
+		curY += 26.0f;
+
+		// Wave Coupling to Atmospheric Wind
+		bool coupleWind = comp->WaveCouplingWind != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.water.chk_couple_wind"),
+			{ startX, curY, contentW, 20.0f }, "风浪动态耦合 (Couple Wave Heading to Atmospheric Wind)", coupleWind, theme))
+		{
+			comp->WaveCouplingWind = coupleWind ? 1 : 0;
+			if (changedFields) changedFields->push_back("WaveCouplingWind");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 20.0f }, "开启后海浪传播方向与波峰陡度将由场景天气系统的风场矢量实时动态驱动");
+		curY += 24.0f;
+
+		// Wave Steepness
+		Wui::Label(ctx, { startX, curY + 3.0f }, "波峰陡峭度 (Steepness Q):", theme.Text, theme.FontSizeSmall);
+		float steepness = comp->WaveSteepness;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.water.steepness"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, steepness, 0.01f, 0.01f, 1.0f, theme))
+		{
+			comp->WaveSteepness = std::clamp(steepness, 0.01f, 1.0f);
+			if (changedFields) changedFields->push_back("WaveSteepness");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "Gerstner 波浪波峰尖锐聚拢系数 [0.01, 1.0]");
+		curY += 26.0f;
+
+		// Wave Length
+		Wui::Label(ctx, { startX, curY + 3.0f }, "主波长 (Wavelength m):", theme.Text, theme.FontSizeSmall);
+		float waveLen = comp->WaveLength;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.water.wavelength"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, waveLen, 0.5f, 1.0f, 300.0f, theme))
+		{
+			comp->WaveLength = std::clamp(waveLen, 1.0f, 500.0f);
+			if (changedFields) changedFields->push_back("WaveLength");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "基础波浪波峰间距 [1.0, 300.0] 米");
+		curY += 26.0f;
+
+		// Wave Speed
+		Wui::Label(ctx, { startX, curY + 3.0f }, "波速 (Wave Speed m/s):", theme.Text, theme.FontSizeSmall);
+		float speed = comp->WaveSpeed;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.water.wavespeed"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, speed, 0.1f, 0.1f, 30.0f, theme))
+		{
+			comp->WaveSpeed = std::clamp(speed, 0.1f, 50.0f);
+			if (changedFields) changedFields->push_back("WaveSpeed");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "主波前行速度 [0.1, 30.0] 米/秒");
+		curY += 26.0f;
+
+		// Wave Octaves
+		Wui::Label(ctx, { startX, curY + 3.0f }, "谐波阶数 (Wave Octaves):", theme.Text, theme.FontSizeSmall);
+		int64_t octaves = comp->WaveOctaves;
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.water.octaves"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, octaves, 1, 8, theme))
+		{
+			comp->WaveOctaves = static_cast<uint8_t>(std::clamp<int64_t>(octaves, 1, 8));
+			if (changedFields) changedFields->push_back("WaveOctaves");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "叠加的 Gerstner 谐波层数 [1, 8]，层数越多海浪微表面越自然丰富");
+		curY += 30.0f;
+
+		// 4. 光学吸收与水面着色 (Optics & PBR Shading)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "光学吸收与水体着色 (Optics & Material):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		// Water Color
+		Wui::Label(ctx, { startX, curY + 3.0f }, "深层吸收水色 (Absorption Tint):", theme.Text, theme.FontSizeSmall);
+		const Wui::WuiRect clrRect { startX + fieldLabelW, curY, fieldControlW, 22.0f };
+		glm::vec4 curCol(comp->WaterColor.r, comp->WaterColor.g, comp->WaterColor.b, 1.0f);
+		if (Wui::ColorField(ctx, Wui::HashId("inspect.water.color"), clrRect, curCol, theme))
+		{
+			comp->WaterColor = glm::vec3(curCol.r, curCol.g, curCol.b);
+			if (changedFields) changedFields->push_back("WaterColor");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, clrRect, "水体光学深层 Beer-Lambert 吸收底色");
+		curY += 26.0f;
+
+		// Water Clarity
+		Wui::Label(ctx, { startX, curY + 3.0f }, "光学透光深度 (Clarity Depth m):", theme.Text, theme.FontSizeSmall);
+		float clarity = comp->WaterClarity;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.water.clarity"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, clarity, 0.2f, 0.1f, 100.0f, theme))
+		{
+			comp->WaterClarity = std::max(0.1f, clarity);
+			if (changedFields) changedFields->push_back("WaterClarity");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "水体透光消亡深度距离 [0.1, 100.0] 米");
+		curY += 26.0f;
+
+		// Enable Foam & Caustics
+		bool foam = comp->EnableFoam != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.water.chk_foam"),
+			{ startX, curY, contentW, 20.0f }, "启用波尖碎浪与海岸泡沫 (Wave Crest Foam)", foam, theme))
+		{
+			comp->EnableFoam = foam ? 1 : 0;
+			if (changedFields) changedFields->push_back("EnableFoam");
+			host.MarkDocumentDirty();
+		}
+		curY += 22.0f;
+
+		bool caustics = comp->EnableCaustics != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.water.chk_caustics"),
+			{ startX, curY, contentW, 20.0f }, "启用浅水动态焦散投射 (Caustics Projection)", caustics, theme))
+		{
+			comp->EnableCaustics = caustics ? 1 : 0;
+			if (changedFields) changedFields->push_back("EnableCaustics");
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
+		// 5. 流体物理与浮力系统 (Hydrodynamics & Buoyancy)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "流体物理与浮力模拟 (Hydrodynamics & Buoyancy):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		bool buoyancy = comp->EnableBuoyancy != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.water.chk_buoyancy"),
+			{ startX, curY, contentW, 20.0f }, "启用阿基米德物理浮力解算 (Enable Physics Buoyancy)", buoyancy, theme))
+		{
+			comp->EnableBuoyancy = buoyancy ? 1 : 0;
+			if (changedFields) changedFields->push_back("EnableBuoyancy");
+			host.MarkDocumentDirty();
+		}
+		curY += 24.0f;
+
+		// Fluid Density
+		Wui::Label(ctx, { startX, curY + 3.0f }, "流体密度 (Density kg/m³):", theme.Text, theme.FontSizeSmall);
+		float density = comp->FluidDensity;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.water.density"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, density, 5.0f, 500.0f, 2000.0f, theme))
+		{
+			comp->FluidDensity = std::clamp(density, 500.0f, 2500.0f);
+			if (changedFields) changedFields->push_back("FluidDensity");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "流体介质质量密度 (淡水 1000, 海水 1025, 重油 900)");
+		curY += 26.0f;
+
+		// Fluid Damping
+		Wui::Label(ctx, { startX, curY + 3.0f }, "流体阻尼系数 (Viscous Drag):", theme.Text, theme.FontSizeSmall);
+		float damping = comp->FluidDamping;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.water.damping"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, damping, 0.02f, 0.05f, 1.0f, theme))
+		{
+			comp->FluidDamping = std::clamp(damping, 0.05f, 1.0f);
+			if (changedFields) changedFields->push_back("FluidDamping");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "物体在流体中运动所受粘滞阻尼系数 [0.05, 1.0]");
+		curY += 30.0f;
+
+		// 6. 实时水动力学遥测卡片 (Telemetry Card)
+		const float cardH = 58.0f;
+		const Wui::WuiRect cardRect { startX, curY, contentW, cardH };
+		Wui::PanelBackground(ctx, cardRect, theme.CardBg, 4.0f);
+		Wui::HighlightOutline(ctx, cardRect, theme.Accent, 4.0f, 1.0f);
+
+		const float theoreticalAmp = comp->WaveLength * 0.04f * comp->WaveSteepness;
+		const float wavePeriod = comp->WaveSpeed > 0.01f ? (comp->WaveLength / comp->WaveSpeed) : 0.0f;
+
+		char teleLine1[96];
+		std::snprintf(teleLine1, sizeof(teleLine1), "理论波幅: %.2fm  |  主波周期: %.2fs", theoreticalAmp, wavePeriod);
+
+		char teleLine2[96];
+		std::snprintf(teleLine2, sizeof(teleLine2), "介质密度: %.0f kg/m³ | 浮力状态: %s",
+			comp->FluidDensity,
+			comp->EnableBuoyancy ? "Active (实时物理力矩)" : "Disabled (未启用)");
+
+		Wui::Label(ctx, { cardRect.X + 8.0f, cardRect.Y + 6.0f }, teleLine1, theme.Accent, 11.5f);
+		Wui::Label(ctx, { cardRect.X + 8.0f, cardRect.Y + 28.0f }, teleLine2,
+			comp->EnableBuoyancy ? theme.Info : theme.TextMuted, 11.5f);
+
+		curY += cardH + 12.0f;
+		return curY - rect.Y;
+	}
+
+	// ---- 全动态天气控制中枢专属检视器 (DrawWeatherSystemInspector) ----
+	static float DrawWeatherSystemInspector(PanelHost& host, Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		Entity entity, void* instance, const Schema::TypeSchema&, const Wui::WuiRect&,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto* comp = static_cast<WeatherSystemComponent*>(instance);
+		if (!comp)
+			return 0.0f;
+
+		const float pad = theme.Pad;
+		const float startX = rect.X + pad;
+		const float contentW = rect.W - pad * 2.0f;
+		float curY = rect.Y + 4.0f;
+
+		// 1. 头部徽章
+		const Wui::WuiRect badgeRect { startX, curY, 170.0f, 18.0f };
+		const Wui::WuiColor badgeBg { 0.55f, 0.40f, 0.10f, 0.28f };
+		const Wui::WuiColor badgeBorder { 0.95f, 0.75f, 0.20f, 0.90f };
+		Wui::Badge(ctx, badgeRect, "ATMOSPHERIC WEATHER", badgeBg, badgeBorder, theme, 10.5f, true, 3.0f);
+
+		// 时辰显示
+		int hour = static_cast<int>(comp->TimeOfDay);
+		int minute = static_cast<int>((comp->TimeOfDay - static_cast<float>(hour)) * 60.0f);
+		const char* periodStr = (hour >= 5 && hour < 8) ? "Sunrise (金色破晓)" :
+			((hour >= 8 && hour < 17) ? "Daytime (正午骄阳)" :
+			((hour >= 17 && hour < 20) ? "Sunset (瑰红落日)" : "Night (静谧银月)"));
+
+		char todClock[64];
+		std::snprintf(todClock, sizeof(todClock), "%02d:%02d  %s", hour, minute, periodStr);
+		Wui::Label(ctx, { startX + 178.0f, curY + 2.0f }, todClock, theme.Accent, theme.FontSizeSmall);
+		curY += 26.0f;
+
+		const float fieldLabelW = 150.0f;
+		const float fieldControlW = contentW - fieldLabelW;
+
+		// 2. 天球太阳与昼夜时辰 (Celestial Sun & 24h Solar Cycle)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "天球太阳与昼夜时辰 (Celestial Sun & Cycle):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		// Time of Day Slider
+		Wui::Label(ctx, { startX, curY + 3.0f }, "24h 连续时辰 (Time of Day):", theme.Text, theme.FontSizeSmall);
+		float tod = comp->TimeOfDay;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.time_of_day"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, tod, 0.05f, 0.0f, 24.0f, theme))
+		{
+			comp->TimeOfDay = std::clamp(tod, 0.0f, 24.0f);
+			if (changedFields) changedFields->push_back("TimeOfDay");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "连续 24 小时太阳时辰 [0.0, 24.0]，太阳仰角与黑体色温连续精确解算");
+		curY += 26.0f;
+
+		// Auto Day/Night Cycle
+		bool autoCycle = comp->AutoCycleTime != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.weather.chk_auto_cycle"),
+			{ startX, curY, 180.0f, 20.0f }, "自动推进昼夜循环 (Auto Cycle)", autoCycle, theme))
+		{
+			comp->AutoCycleTime = autoCycle ? 1 : 0;
+			if (changedFields) changedFields->push_back("AutoCycleTime");
+			host.MarkDocumentDirty();
+		}
+
+		// Cycle Speed
+		float cycleSpeed = comp->DayCycleSpeed;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.cycle_speed"),
+			{ startX + 190.0f, curY - 1.0f, contentW - 190.0f, 22.0f }, cycleSpeed, 0.01f, 0.001f, 5.0f, theme))
+		{
+			comp->DayCycleSpeed = std::clamp(cycleSpeed, 0.001f, 10.0f);
+			if (changedFields) changedFields->push_back("DayCycleSpeed");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX + 190.0f, curY - 1.0f, contentW - 190.0f, 22.0f }, "昼夜推进速度 (小时/真实秒)");
+		curY += 28.0f;
+
+		// 3. 大气云层与连续降水 (Clouds & Continuous Precipitation)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "大气云层与连续降水 (Atmosphere & Precipitation):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		// Cloud Coverage
+		Wui::Label(ctx, { startX, curY + 3.0f }, "云层天空覆盖率 (Cloud Cover):", theme.Text, theme.FontSizeSmall);
+		float cloudCover = comp->CloudCoverage;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.cloud_cov"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, cloudCover, 0.01f, 0.0f, 1.0f, theme))
+		{
+			comp->CloudCoverage = std::clamp(cloudCover, 0.0f, 1.0f);
+			if (changedFields) changedFields->push_back("CloudCoverage");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "云层天空覆盖比例 [0.0, 1.0]，直接连续衰减直射光并增强散射环境光");
+		curY += 26.0f;
+
+		// Cloud Density
+		Wui::Label(ctx, { startX, curY + 3.0f }, "云层光学密度 (Cloud Density):", theme.Text, theme.FontSizeSmall);
+		float cloudDensity = comp->CloudDensity;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.cloud_dense"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, cloudDensity, 0.05f, 0.1f, 10.0f, theme))
+		{
+			comp->CloudDensity = std::clamp(cloudDensity, 0.1f, 10.0f);
+			if (changedFields) changedFields->push_back("CloudDensity");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// Precipitation Intensity
+		Wui::Label(ctx, { startX, curY + 3.0f }, "连续降水强度 (Precipitation):", theme.Text, theme.FontSizeSmall);
+		float precip = comp->PrecipitationIntensity;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.precip"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, precip, 0.01f, 0.0f, 1.0f, theme))
+		{
+			comp->PrecipitationIntensity = std::clamp(precip, 0.0f, 1.0f);
+			if (changedFields) changedFields->push_back("PrecipitationIntensity");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "雨雪降水连续强度 [0.0, 1.0]，实时驱动地面积水积蓄与环境湿度微积分");
+		curY += 26.0f;
+
+		// Ground Wetness
+		Wui::Label(ctx, { startX, curY + 3.0f }, "地面积水潮湿度 (Ground Wetness):", theme.Text, theme.FontSizeSmall);
+		float wetness = comp->Wetness;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.wetness"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, wetness, 0.01f, 0.0f, 1.0f, theme))
+		{
+			comp->Wetness = std::clamp(wetness, 0.0f, 1.0f);
+			if (changedFields) changedFields->push_back("Wetness");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "地表积水湿度，降雨时自动积累，无雨时随风速与阳光自然风干蒸发");
+		curY += 28.0f;
+
+		// 4. 大气指数雾效 (Atmospheric Exponential Fog)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "大气指数雾效 (Atmospheric Fog):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		Wui::Label(ctx, { startX, curY + 3.0f }, "指数雾浓度 (Fog Density):", theme.Text, theme.FontSizeSmall);
+		float fogDensity = comp->FogDensity;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.fog_density"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, fogDensity, 0.0002f, 0.0001f, 0.05f, theme))
+		{
+			comp->FogDensity = std::clamp(fogDensity, 0.0001f, 0.05f);
+			if (changedFields) changedFields->push_back("FogDensity");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "大气高度指数雾基准浓度 [0.0001, 0.05]");
+		curY += 28.0f;
+
+		// 5. 全局风场矢量 (Global Atmospheric Wind Field)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "全局大气风场 (Global Wind Field):", theme.Accent, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		// Wind Speed
+		Wui::Label(ctx, { startX, curY + 3.0f }, "风速 (Wind Speed m/s):", theme.Text, theme.FontSizeSmall);
+		float windSpeed = comp->WindSpeed;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.wind_speed"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, windSpeed, 0.2f, 0.0f, 50.0f, theme))
+		{
+			comp->WindSpeed = std::clamp(windSpeed, 0.0f, 50.0f);
+			if (changedFields) changedFields->push_back("WindSpeed");
+			host.MarkDocumentDirty();
+		}
+
+		const char* beaufortDesc = (comp->WindSpeed < 0.3f) ? "0级 无风 (Calm)" :
+			((comp->WindSpeed < 3.4f) ? "2级 轻风 (Light Breeze)" :
+			((comp->WindSpeed < 7.9f) ? "4级 和风 (Moderate Breeze)" :
+			((comp->WindSpeed < 13.8f) ? "6级 强风 (Strong Breeze)" :
+			((comp->WindSpeed < 20.7f) ? "8级 大风 (Gale)" : "10级 暴风 (Violent Storm)"))));
+		curY += 24.0f;
+		Wui::Label(ctx, { startX + fieldLabelW, curY }, beaufortDesc, theme.Info, 11.5f);
+		curY += 20.0f;
+
+		// Wind Direction X / Z
+		Wui::Label(ctx, { startX, curY + 3.0f }, "风向矢量 (Dir X / Z):", theme.Text, theme.FontSizeSmall);
+		const float halfControlW = (fieldControlW - 4.0f) * 0.5f;
+		float dirX = comp->WindDirection.x;
+		float dirZ = comp->WindDirection.z;
+		bool dirChanged = false;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.wind_dir_x"),
+			{ startX + fieldLabelW, curY, halfControlW, 22.0f }, dirX, 0.05f, -1.0f, 1.0f, theme))
+		{
+			comp->WindDirection.x = dirX;
+			dirChanged = true;
+		}
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weather.wind_dir_z"),
+			{ startX + fieldLabelW + halfControlW + 4.0f, curY, halfControlW, 22.0f }, dirZ, 0.05f, -1.0f, 1.0f, theme))
+		{
+			comp->WindDirection.z = dirZ;
+			dirChanged = true;
+		}
+		if (dirChanged)
+		{
+			if (glm::length(comp->WindDirection) > 1e-4f)
+				comp->WindDirection = glm::normalize(comp->WindDirection);
+			if (changedFields) changedFields->push_back("WindDirection");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "大气水平风向矢量 (X / Z 轴)，直接连续引导海浪传播航向");
+		curY += 28.0f;
+
+		// 6. 体积云与积水特性开关
+		bool volCloud = comp->EnableVolumetricCloud != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.weather.chk_vol_cloud"),
+			{ startX, curY, contentW, 20.0f }, "启用体积云光线追踪渲染 (Volumetric Clouds)", volCloud, theme))
+		{
+			comp->EnableVolumetricCloud = volCloud ? 1 : 0;
+			if (changedFields) changedFields->push_back("EnableVolumetricCloud");
+			host.MarkDocumentDirty();
+		}
+		curY += 22.0f;
+
+		bool puddles = comp->EnablePuddles != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.weather.chk_puddles"),
+			{ startX, curY, contentW, 20.0f }, "启用地面材质积水与潮湿反光联动 (Puddles Reflection)", puddles, theme))
+		{
+			comp->EnablePuddles = puddles ? 1 : 0;
+			if (changedFields) changedFields->push_back("EnablePuddles");
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
+		return curY - rect.Y;
+	}
+
 
 float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect){
 		const Wui::WuiTheme& theme = m_Host.Theme();
@@ -2037,6 +2512,10 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawWhiteboxInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::SplineComponent")
 			height = DrawSplineInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::WaterBodyComponent")
+			height = DrawWaterBodyInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::WeatherSystemComponent")
+			height = DrawWeatherSystemInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
 
 		else
@@ -4758,6 +5237,9 @@ float PropertiesPanel::DrawSmartObjectInspector(Wui::WuiContext& ctx, const Wui:
 }
 
 }
+
+
+
 
 
 

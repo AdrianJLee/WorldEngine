@@ -43,6 +43,10 @@ namespace World
 		std::string m_ManifestContentRoot;
 		std::string m_StartScene;
 
+		// 滚动与搜索过滤
+		float m_ScrollY = 0.0f;
+		std::string m_SearchFilter;
+
 		// 新建表单
 		std::string m_NewLevelName = "NewLevel";
 		std::string m_NewLevelError;
@@ -54,3 +58,4 @@ namespace World
 
 	};
 }
+

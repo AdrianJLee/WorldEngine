@@ -3,12 +3,72 @@
 #include "World/Core/Export.h"
 #include "World/Scene/Components.h"
 
+#include <glm/glm.hpp>
+#include <string>
+
 namespace World
 {
+	// ¾ßÏó»¯ÌìÆøÅäÖÃÃèÊö·û (Weather Profile: ÓÃÓÚÌìÆø»ìºÏÑİ½øÓëÓÎÏ·Íæ·¨»úÖÆÀ©Õ¹)
+	struct WeatherProfile
+	{
+		std::string Name { "Clear Sky" };
+		float CloudCoverage { 0.15f };
+		float CloudDensity { 1.0f };
+		float PrecipitationIntensity { 0.0f };
+		float FogDensity { 0.0008f };
+		float WindSpeed { 5.0f };
+		glm::vec3 WindDirection { 1.0f, 0.0f, 0.2f };
+		glm::vec3 AmbientColor { 0.25f, 0.30f, 0.40f };
+		glm::vec4 SkyClearColor { 0.35f, 0.55f, 0.85f, 1.0f };
+	};
+
+	// ÍêÕûÌìÇòÎïÀíÓë¹âÕÕ´óÆøÊä³ö (Full Celestial & Atmospheric Parameters)
+	struct WeatherAtmosphereParams
+	{
+		// 1. Ì«ÑôÓëÖ±ÉäÈÕÕÕ (Solar Trajectory & Direct Sunlight)
+		glm::vec3 SunLightColor { 1.0f, 0.96f, 0.88f };
+		float SunLightIntensity { 1.25f };
+		glm::vec3 SunDirection { 0.45f, -0.75f, 0.45f }; // ÈëÉäÏòµØÃæ (-Y)
+		float SunElevation { 45.0f };                     // ¸©Ñö½Ç (degrees)
+		float SunAzimuth { 135.0f };                      // ·½Î»½Ç (degrees)
+
+		// 2. ÔÂÇòÓë¾²Ú×ÔÂÒ¹ (Lunar Trajectory & Moonlight)
+		glm::vec3 MoonLightColor { 0.70f, 0.82f, 1.0f };
+		float MoonLightIntensity { 0.08f };
+		glm::vec3 MoonDirection { -0.45f, 0.75f, -0.45f };
+		float MoonElevation { -45.0f };
+
+		// 3. ·±ĞÇÒ¹¿Õ (Celestial Starfield)
+		float StarVisibility { 0.0f };                    // ĞÇ¿Õ¿É¼û¶È [0..1]£¬ÈÕÂäºóÌìºÚÇÒÎŞÔÆÊ±´ïµ½ 1.0
+
+		// 4. ´óÆøÉ«ÎÂÓëÌì¿Õ±³¾° (Atmospheric Rayleigh/Mie Scattering & Sky)
+		glm::vec3 AmbientColor { 0.25f, 0.30f, 0.40f };
+		glm::vec4 SkyClearColor { 0.35f, 0.55f, 0.85f, 1.0f };
+		glm::vec4 SkyZenithColor { 0.18f, 0.35f, 0.75f, 1.0f };
+		glm::vec4 SkyHorizonColor { 0.55f, 0.65f, 0.85f, 1.0f };
+		float FogDensity { 0.0005f };
+		glm::vec3 FogColor { 0.6f, 0.7f, 0.85f };
+
+		// 5. ´óÆøÔÆ²ãÓë¶¯Ì¬·çÆ¯ (Volumetric Cloud Layer & Wind Drift)
+		float CloudCoverage { 0.2f };
+		float CloudDensity { 1.0f };
+		glm::vec4 CloudColor { 1.0f, 1.0f, 1.0f, 0.6f };
+		glm::vec2 CloudDriftOffset { 0.0f, 0.0f };
+
+		// 6. È«¾Ö·ç³¡Ê¸Á¿ (Global Atmospheric Wind Field)
+		glm::vec3 WindVelocity { 5.0f, 0.0f, 0.0f };
+	};
+
 	class WLD_API WeatherSimulation
 	{
 	public:
-		// æ¨è¿›åŠ¨æ€å¤©æ°”é™æ°´ç§¯åˆ†ä¸åœ°è¡¨è‡ªç„¶è’¸å‘å¾®ç§¯åˆ†
+		// Í¨ÓÃÎïÀíÌìÆøÖ÷Ñ­»·Î¢»ı·Ö (Á¬ĞøÖçÒ¹Ê±³½ÓëµØ±íÊªÈó¶ÈÎ¢»ı·Ö)
 		static void Update(WeatherSystemComponent& comp, float dt);
+
+		// ÏòÖ¸¶¨ÌìÆøÅäÖÃÆ½»¬²åÖµÑİ½ø (¿ò¼ÜÇı¶¯½Ó¿Ú)
+		static void BlendTowards(WeatherSystemComponent& comp, const WeatherProfile& targetProfile, float blendAlpha);
+
+		// Í¨ÓÃÌìÇòÈÕ¹â¡¢É«ÎÂÓë´óÆø¹âÕÕ²ÎÊıÁ¬Ğø½âÎö½â
+		static WeatherAtmosphereParams ComputeAtmosphereParams(const WeatherSystemComponent& comp, float sceneTime = 0.0f);
 	};
 }

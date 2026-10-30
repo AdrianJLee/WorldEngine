@@ -29,6 +29,9 @@
 #include "World/Renderer/ParticleSystem.h"
 #include "World/Renderer/ParticleAsset.h"
 #include "World/Script/Bindings/BindParticle.h"
+#include "World/Environment/WaterSimulation.h"
+#include "World/Environment/WeatherSimulation.h"
+#include "World/Scene/Systems/WeatherSystem.h"
 #include <box2d/box2d.h>
 #include <algorithm>
 #include <chrono>
@@ -2811,11 +2814,93 @@ namespace World
 		}
 	}
 
+
+	static void SimulateSceneWeather(entt::registry& reg, float dt)
+	{
+		for (auto entity : reg.view<WeatherSystemComponent>())
+		{
+			auto& comp = reg.get<WeatherSystemComponent>(entity);
+			WeatherSimulation::Update(comp, dt);
+		}
+	}
+
+	static void SimulateSceneWaterBuoyancy(entt::registry& reg, float dt, float time)
+	{
+		auto waterView = reg.view<TransformComponent, WaterBodyComponent>();
+		for (auto waterEntity : waterView)
+		{
+			const auto& [waterTrans, waterComp] = waterView.get<TransformComponent, WaterBodyComponent>(waterEntity);
+			if (!waterComp.EnableBuoyancy)
+				continue;
+
+			const float halfExtentX = (waterTrans.Scale.x > 1.0f) ? waterTrans.Scale.x * 0.5f : 50.0f;
+			const float halfExtentZ = (waterTrans.Scale.z > 1.0f) ? waterTrans.Scale.z * 0.5f : 50.0f;
+
+			for (auto candidate : reg.view<TransformComponent>())
+			{
+				if (candidate == waterEntity)
+					continue;
+				if (reg.all_of<WaterBodyComponent>(candidate))
+					continue;
+
+				// Entity-Component Parity: only RigidBody3D entities float
+				const bool isFloating = reg.all_of<RigidBody3DComponent>(candidate);
+				if (!isFloating)
+					continue;
+
+				auto& objTrans = reg.get<TransformComponent>(candidate);
+				const float relX = objTrans.Location.x - waterTrans.Location.x;
+				const float relZ = objTrans.Location.z - waterTrans.Location.z;
+
+				if (std::abs(relX) > halfExtentX || std::abs(relZ) > halfExtentZ)
+					continue;
+
+				glm::vec3 halfExtents(0.5f);
+				if (reg.all_of<BoxCollider3DComponent>(candidate))
+					halfExtents = reg.get<BoxCollider3DComponent>(candidate).HalfExtents;
+				else
+					halfExtents = glm::max(glm::abs(objTrans.Scale) * 0.5f, glm::vec3(0.1f));
+
+				float mass = 10.0f;
+				if (reg.all_of<RigidBody3DComponent>(candidate))
+					mass = reg.get<RigidBody3DComponent>(candidate).Mass;
+
+				glm::vec3 localCenter = objTrans.Location - glm::vec3(0.0f, waterTrans.Location.y, 0.0f);
+				glm::vec3 buoyancyForce(0.0f);
+				glm::vec3 torque(0.0f);
+				WaterSimulation::ComputeBuoyancy(localCenter, halfExtents, mass, time, waterComp, buoyancyForce, torque);
+
+				const float waveH = WaterSimulation::SampleWaveHeight(objTrans.Location.x, objTrans.Location.z, time, waterComp);
+				const float targetY = waterTrans.Location.y + waveH;
+				const glm::vec3 normal = WaterSimulation::SampleWaveNormal(objTrans.Location.x, objTrans.Location.z, time, waterComp);
+
+				const float smoothT = std::clamp(dt * 5.0f, 0.0f, 1.0f);
+				glm::vec3 newLoc = objTrans.Location;
+				newLoc.y = glm::mix(newLoc.y, targetY, smoothT);
+				TransformSystem::SetLocation(objTrans, newLoc);
+
+				const glm::vec3 up(0.0f, 1.0f, 0.0f);
+				const glm::vec3 norm = glm::normalize(normal);
+				const glm::vec3 rotAxis = glm::cross(up, norm);
+				const float dotVal = glm::clamp(glm::dot(up, norm), -1.0f, 1.0f);
+				glm::quat waveRot(1.0f, 0.0f, 0.0f, 0.0f);
+				if (glm::length(rotAxis) > 1e-4f)
+				{
+					const float rotAngle = std::acos(dotVal);
+					waveRot = glm::angleAxis(rotAngle, glm::normalize(rotAxis));
+				}
+				const glm::quat blendedRot = glm::slerp(objTrans.Rotation, waveRot, smoothT);
+				TransformSystem::SetRotation(objTrans, blendedRot);
+			}
+		}
+	}
+
 	void Scene::OnUpdateEditor(Timestep ts, const EditorCamera&)
 	{
 		AssertOwnerThread();
 		BeginFrame();
 		SimulateSceneVfx(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
+		SimulateSceneWeather(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
 	}
 
 	void Scene::EnsureDefaultFrameSystems()
@@ -2835,6 +2920,12 @@ namespace World
 			Gameplay::SystemPhase::Fixed, {} });
 		RegisterFrameSystem({ "movement-system", false, [this](Timestep ts) { MovementSystem().Update(*this, ts); },
 			Gameplay::SystemPhase::Fixed, { "physics-2d", "physics-3d" } });
+		RegisterFrameSystem({ "water-buoyancy-system", false, [this](Timestep ts) {
+			SimulateSceneWaterBuoyancy(m_Registry, ts.GetSeconds(), static_cast<float>(m_TimeService.ElapsedSeconds));
+		}, Gameplay::SystemPhase::Fixed, { "physics-3d" } });
+		RegisterFrameSystem({ "weather-system", false, [this](Timestep ts) {
+			WeatherSystem().Update(*this, ts);
+		}, Gameplay::SystemPhase::Update, {} });
 		RegisterFrameSystem({ "smart-object-system", false, [this](Timestep ts) {
 			Gameplay::SmartObjectSystem::Update(*this, ts.GetSeconds());
 		}, Gameplay::SystemPhase::Fixed, {} });
@@ -2889,6 +2980,7 @@ namespace World
 		EnsureDefaultFrameSystems();
 		RunFrameSystems(ts);
 		SimulateSceneVfx(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
+		SimulateSceneWaterBuoyancy(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds(), static_cast<float>(m_TimeService.ElapsedSeconds));
 	}
 
 	void Scene::OnRuntimeStart()
@@ -3502,5 +3594,6 @@ namespace World
 		return GetOrCreateNavMesh()->LoadFromFile(path);
 	}
 }
+
 
 

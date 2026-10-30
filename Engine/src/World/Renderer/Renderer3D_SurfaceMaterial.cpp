@@ -502,6 +502,7 @@ uint32_t SubmitObject(State& state, const Ref<Mesh>& mesh, const Ref<Material>& 
 						? SurfacePipelineVariant::Transparent : SurfacePipelineVariant::Solid, slot);
 			}
 
+			const Rhi::Handle<Rhi::Pipeline>* pipeline = &state.Pipeline;
 			ObjectUniforms uniforms;
 			uniforms.Model = transform;
 			uniforms.EntityId = { entityId, 0, 0, 0 };
@@ -519,16 +520,17 @@ uint32_t SubmitObject(State& state, const Ref<Mesh>& mesh, const Ref<Material>& 
 			else
 			{
 				uniforms.BaseColor = baseColor;
-				uniforms.MetallicRoughness = { 0.0f, 0.5f, 0.0f, 0.0f };
+				uniforms.MetallicRoughness = { 0.0f, 0.25f, 0.0f, 0.0f };
 				uniforms.Emissive = { 0.0f, 0.0f, 0.0f, 0.0f };
-				uniforms.Flags = { 0.0f, 0.0f, 0.0f, 0.0f };
+				uniforms.Flags = { 0.0f, 0.0f, 1.0f, 0.0f }; // DoubleSided=1
+				if (baseColor.a < 0.999f)
+					pipeline = &state.TransparentPipeline;
 			}
 			WriteObjectUniforms(state, slot, index, uniforms,
 				state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index],
 				state.DefaultPaletteBuffer, surface.ParamBuffer);
 
 			Rhi::Handle<Rhi::DescriptorSet> materialSet;
-			const Rhi::Handle<Rhi::Pipeline>* pipeline = &state.Pipeline;
 			if (desc)
 			{
 				if (surface.Active)

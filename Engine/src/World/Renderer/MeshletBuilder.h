@@ -35,5 +35,8 @@ namespace World
 			std::vector<uint8_t>& outMeshletTriangles,
 			uint32_t maxVertices = kMaxMeshletVertices,
 			uint32_t maxTriangles = kMaxMeshletTriangles);
+
+		// 基于黄金分割比 HSV 循环生成高辨识度伪彩
+		static glm::vec4 GetMeshletDebugColor(uint32_t meshletIndex);
 	};
 }

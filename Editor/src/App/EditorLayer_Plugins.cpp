@@ -1798,15 +1798,20 @@ void EditorLayer::DoOpenScene(const std::filesystem::path& path){
 					const auto& camComp = primaryCam.GetComponent<CameraComponent>();
 					if (camComp.Camera.m_ProjectionType == CameraSettings::ProjectionType::Perspective)
 					{
-						glm::vec3 camPos { 0.0f, 2.0f, 0.0f };
+						glm::vec3 camPos { 0.0f, 5.0f, 15.0f };
+						glm::vec3 targetPos { 0.0f, 1.5f, 0.0f };
 						if (primaryCam.HasComponent<TransformComponent>())
-							camPos = primaryCam.GetComponent<TransformComponent>().Location;
-						const glm::vec3 targetPos = glm::vec3(20.0f, 2.0f, 20.0f);
+						{
+							const auto& trans = primaryCam.GetComponent<TransformComponent>();
+							camPos = trans.Location;
+							const glm::vec3 fwd = trans.Rotation * glm::vec3(0.0f, 0.0f, -1.0f);
+							targetPos = trans.Location + fwd * 25.0f;
+						}
 						const float targetDist = std::clamp(glm::distance(camPos, targetPos), 15.0f, 60.0f);
 						m_Viewport3D = true;
 						m_EditorCamera3D.Set2DMode(false);
 						m_EditorCamera3D.FocusOn(targetPos, targetDist);
-						m_EditorCamera3D.SetYawPitch(0.0f, 26.0f);
+						m_EditorCamera3D.SetYawPitch(0.0f, 22.0f);
 						m_EditorCamera.SetFocalPoint(targetPos);
 						m_EditorCamera.SetOrthographicSize(targetDist * 1.5f);
 					}

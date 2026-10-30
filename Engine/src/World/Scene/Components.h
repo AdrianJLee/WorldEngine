@@ -2887,17 +2887,23 @@ namespace World
 
 	struct WaterBodyComponent
 	{
-		enum class WaterType : uint8_t { Ocean = 0, Lake = 1, River = 2 };
+		enum class WaterType : uint8_t { Ocean = 0, Lake = 1, River = 2, Custom = 3 };
 		WaterType Type { WaterType::Ocean };              // 1B  (offset 0)
-		uint8_t EnableFoam { 1 };                         // 1B  (offset 1)
-		uint8_t EnableCaustics { 1 };                     // 1B  (offset 2)
-		uint8_t EnableBuoyancy { 1 };                     // 1B  (offset 3)
-		float WaveSteepness { 0.5f };                     // 4B  (offset 4)
-		float WaveLength { 20.0f };                       // 4B  (offset 8)
-		float WaveSpeed { 2.0f };                         // 4B  (offset 12)
-		float WaterClarity { 15.0f };                     // 4B  (offset 16)
-		glm::vec3 WaterColor { 0.05f, 0.25f, 0.35f };     // 12B (offset 20)
-		uint8_t _Padding[16] { 0 };                       // 16B (offset 32..47)
+		uint8_t EnableFoam { 1 };                         // 1B  (offset 1: Shoreline and crest foam)
+		uint8_t EnableCaustics { 1 };                     // 1B  (offset 2: Underwater optical caustics)
+		uint8_t EnableBuoyancy { 1 };                     // 1B  (offset 3: Archimedes physics buoyancy query)
+		float WaveSteepness { 0.5f };                     // 4B  (offset 4: Gerstner wave choppiness [0.0..1.0])
+		float WaveLength { 20.0f };                       // 4B  (offset 8: Primary wave wavelength in meters [1.0..500.0])
+		float WaveSpeed { 2.0f };                         // 4B  (offset 12: Wave propagation velocity in m/s [0.0..50.0])
+		float WaterClarity { 15.0f };                     // 4B  (offset 16: Optical Beer-Lambert extinction depth [0.1..100.0])
+		glm::vec3 WaterColor { 0.05f, 0.25f, 0.35f };     // 12B (offset 20: Deep water absorption tint)
+		float WaveDirectionAngle { 0.0f };                // 4B  (offset 32: Primary wave heading in degrees [0..360])
+		float FluidDensity { 1000.0f };                   // 4B  (offset 36: Fluid mass density in kg/m³, 1000 freshwater / 1025 seawater)
+		float FluidDamping { 0.5f };                      // 4B  (offset 40: Hydrodynamic drag and damping resistance [0.0..1.0])
+		uint8_t WaveOctaves { 4 };                        // 1B  (offset 44: Harmonic wave octave layers [1..8])
+		uint8_t GridResolution { 32 };                    // 1B  (offset 45: Surface mesh tessellation density [16..128])
+		uint8_t WaveCouplingWind { 1 };                   // 1B  (offset 46: 1=Dynamically couple wave direction/steepness to wind)
+		uint8_t _Padding { 0 };                           // 1B  (offset 47)
 
 		WaterBodyComponent() = default;
 
@@ -2914,6 +2920,18 @@ namespace World
 				Doc("Depth attenuation distance in meters for optical water absorption."));
 			WE_FIELD(WaterColor, Vec3, Color(),
 				Doc("Deep water absorption tint color."));
+			WE_FIELD(WaveDirectionAngle, Float, Range(0.0f, 360.0f), Default(0.0f),
+				Doc("Primary wave propagation direction angle in degrees [0, 360]."));
+			WE_FIELD(FluidDensity, Float, Range(100.0f, 3000.0f), Default(1000.0f),
+				Doc("Fluid mass density in kg/m³ for buoyancy force calculations."));
+			WE_FIELD(FluidDamping, Float, Range(0.0f, 1.0f), Default(0.5f),
+				Doc("Fluid hydrodynamic drag and damping resistance factor."));
+			WE_FIELD(WaveOctaves, UInt8, Range(1, 8), Default(4),
+				Doc("Number of harmonic Gerstner wave octave layers."));
+			WE_FIELD(GridResolution, UInt8, Range(16, 128), Default(32),
+				Doc("Water surface mesh tessellation resolution per axis."));
+			WE_FIELD(WaveCouplingWind, UInt8, Default(1),
+				Doc("Whether ocean wave direction and choppiness couple to atmospheric wind."));
 			WE_FIELD(EnableFoam, UInt8, Default(1),
 				Doc("Enable shoreline foam and wave-tip crest foam."));
 			WE_FIELD(EnableBuoyancy, UInt8, Default(1),
@@ -2931,21 +2949,29 @@ namespace World
 	static_assert(offsetof(WaterBodyComponent, WaveSpeed) == 12, "WaveSpeed offset mismatch");
 	static_assert(offsetof(WaterBodyComponent, WaterClarity) == 16, "WaterClarity offset mismatch");
 	static_assert(offsetof(WaterBodyComponent, WaterColor) == 20, "WaterColor offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, WaveDirectionAngle) == 32, "WaveDirectionAngle offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, FluidDensity) == 36, "FluidDensity offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, FluidDamping) == 40, "FluidDamping offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, WaveOctaves) == 44, "WaveOctaves offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, GridResolution) == 45, "GridResolution offset mismatch");
+	static_assert(offsetof(WaterBodyComponent, WaveCouplingWind) == 46, "WaveCouplingWind offset mismatch");
 
 	struct WeatherSystemComponent
 	{
-		enum class WeatherType : uint8_t { Clear = 0, Overcast = 1, Rain = 2, Storm = 3, Snow = 4 };
+		enum class WeatherType : uint8_t { Clear = 0, Overcast = 1, Rain = 2, Storm = 3, Snow = 4, Custom = 5 };
 		WeatherType CurrentWeather { WeatherType::Clear }; // 1B  (offset 0)
-		uint8_t EnableVolumetricCloud { 1 };               // 1B  (offset 1)
-		uint8_t EnablePuddles { 1 };                       // 1B  (offset 2)
-		uint8_t _Padding0 { 0 };                           // 1B  (offset 3)
-		float PrecipitationIntensity { 0.0f };             // 4B  (offset 4)
-		float CloudCoverage { 0.3f };                      // 4B  (offset 8)
-		float CloudDensity { 1.0f };                       // 4B  (offset 12)
-		float Wetness { 0.0f };                            // 4B  (offset 16)
-		float WindSpeed { 5.0f };                          // 4B  (offset 20)
-		glm::vec3 WindDirection { 1.0f, 0.0f, 0.0f };     // 12B (offset 24)
-		uint8_t _Padding[12] { 0 };                        // 12B (offset 36..47)
+		uint8_t EnableVolumetricCloud { 1 };               // 1B  (offset 1: Volumetric cloud rendering)
+		uint8_t EnablePuddles { 1 };                       // 1B  (offset 2: Ground moisture and puddle accumulation)
+		uint8_t AutoCycleTime { 0 };                       // 1B  (offset 3: 1=Auto-progress 24h celestial day/night cycle)
+		float PrecipitationIntensity { 0.0f };             // 4B  (offset 4: Rain/snow precipitation intensity [0.0..1.0])
+		float CloudCoverage { 0.3f };                      // 4B  (offset 8: Sky cloud coverage ratio [0.0..1.0])
+		float CloudDensity { 1.0f };                       // 4B  (offset 12: Optical cloud density [0.1..10.0])
+		float Wetness { 0.0f };                            // 4B  (offset 16: Accumulated ground wetness [0.0..1.0])
+		float WindSpeed { 5.0f };                          // 4B  (offset 20: Atmospheric wind speed in m/s [0.0..50.0])
+		glm::vec3 WindDirection { 1.0f, 0.0f, 0.0f };     // 12B (offset 24: Global wind direction vector)
+		float TimeOfDay { 12.0f };                         // 4B  (offset 36: Continuous celestial solar time in hours [0.0..24.0])
+		float FogDensity { 0.001f };                       // 4B  (offset 40: Atmospheric exponential height fog density [0.0001..0.05])
+		float DayCycleSpeed { 0.1f };                      // 4B  (offset 44: Day progression rate in hours per real second)
 
 		WeatherSystemComponent() = default;
 
@@ -2964,6 +2990,14 @@ namespace World
 				Doc("Atmospheric wind velocity in meters/second."));
 			WE_FIELD(WindDirection, Vec3,
 				Doc("Global wind direction vector."));
+			WE_FIELD(TimeOfDay, Float, Range(0.0f, 24.0f), Default(12.0f),
+				Doc("Continuous celestial solar time in hours [0.0, 24.0]."));
+			WE_FIELD(FogDensity, Float, Range(0.0001f, 0.05f), Default(0.001f),
+				Doc("Atmospheric exponential height fog density parameter."));
+			WE_FIELD(DayCycleSpeed, Float, Range(0.001f, 10.0f), Default(0.1f),
+				Doc("Day progression rate in simulated hours per real-time second."));
+			WE_FIELD(AutoCycleTime, UInt8, Default(0),
+				Doc("Whether the 24-hour solar day/night cycle automatically progresses over time."));
 			WE_FIELD(EnableVolumetricCloud, UInt8, Default(1),
 				Doc("Enable raymarched volumetric cloud rendering."));
 			WE_FIELD(EnablePuddles, UInt8, Default(1),
@@ -2975,9 +3009,16 @@ namespace World
 	static_assert(offsetof(WeatherSystemComponent, CurrentWeather) == 0, "CurrentWeather offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, EnableVolumetricCloud) == 1, "EnableVolumetricCloud offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, EnablePuddles) == 2, "EnablePuddles offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, AutoCycleTime) == 3, "AutoCycleTime offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, PrecipitationIntensity) == 4, "PrecipitationIntensity offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, CloudCoverage) == 8, "CloudCoverage offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, CloudDensity) == 12, "CloudDensity offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, Wetness) == 16, "Wetness offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, WindSpeed) == 20, "WindSpeed offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, WindDirection) == 24, "WindDirection offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, TimeOfDay) == 36, "TimeOfDay offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, FogDensity) == 40, "FogDensity offset mismatch");
+	static_assert(offsetof(WeatherSystemComponent, DayCycleSpeed) == 44, "DayCycleSpeed offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, Wetness) == 16, "Wetness offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, WindSpeed) == 20, "WindSpeed offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, WindDirection) == 24, "WindDirection offset mismatch");
@@ -3208,5 +3249,6 @@ namespace World
 	static_assert(offsetof(LocalWindComponent, ImpulseActive) == 29, "ImpulseActive offset mismatch");
 
 }
+
 
 

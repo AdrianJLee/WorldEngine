@@ -149,6 +149,7 @@ namespace World
 		static bool s_ShowNavMesh = true;
 		static bool s_ShowOctreeBounds = false;
 		static bool s_ShowLODHud = true;
+		static bool s_ShowMeshletClusters = false;
 		static bool s_AudioGizmoActive = false;
 		static float s_AudioGizmoBeforeMin = 1.0f;
 		static float s_AudioGizmoBeforeMax = 25.0f;
@@ -935,6 +936,7 @@ namespace World
 			auto snapTheme = theme;
 			const bool isSnapActive = m_Host.IsPixelSnapEnabled() || m_ShowWorldPartition ||
 				m_Host.Is2DMode() || World::Renderer3D::IsCascadeDebugVisualization() ||
+				IsMeshletClustersVisible() ||
 				ctx.IsPopupOpen(Wui::HashId("viewport.snap.popup"));
 			if (isSnapActive)
 			{
@@ -1138,7 +1140,7 @@ namespace World
 
 			catRow("viewport.show.cat.grids", Wui::Tr("viewport.menu.grids", "空间基准与网格"), "grids");
 			catRow("viewport.show.cat.gizmos", Wui::Tr("viewport.menu.gizmos", "辅助图元与范围"), "gizmos");
-			catRow("viewport.show.cat.lod", Wui::Tr("viewport.menu.lod_octree", "网格 LOD 与八叉树"), "lod");
+			catRow("viewport.show.cat.lod", Wui::Tr("viewport.menu.lod_octree", "网格 LOD 与 Meshlet 簇"), "lod");
 			catRow("viewport.show.cat.navmesh", Wui::Tr("viewport.menu.navigation", "3D 导航与寻路"), "navmesh");
 
 			// 分割线
@@ -1164,6 +1166,8 @@ namespace World
 				MeshLODManager::Get().IsLODColorationEnabled(), [] {
 					MeshLODManager::Get().SetLODColorationEnabled(!MeshLODManager::Get().IsLODColorationEnabled());
 				});
+			quickItem("viewport.show.quick.meshlet_clusters", Wui::Tr("viewport.view.meshlet_clusters", "Meshlet 集群视图 (Meshlet Clusters)"),
+				IsMeshletClustersVisible(), [] { SetMeshletClustersVisible(!IsMeshletClustersVisible()); });
 
 			// 二级子菜单渲染体 (Submenus)
 			Wui::WuiRect subPanel {};
@@ -1176,7 +1180,7 @@ namespace World
 				else if (m_ActiveViewSubmenu == "gizmos")
 					subH = 6.0f + 5.0f * rowH + 6.0f;
 				else if (m_ActiveViewSubmenu == "lod")
-					subH = 6.0f + 3.0f * rowH + 6.0f;
+					subH = 6.0f + 4.0f * rowH + 6.0f;
 				else if (m_ActiveViewSubmenu == "navmesh")
 					subH = 6.0f + 6.0f * rowH + 6.0f;
 
@@ -1276,6 +1280,9 @@ namespace World
 					subItem("viewport.view.lod_coloration", Wui::Tr("viewport.view.lod_coloration", "LOD 阶梯染色 (LOD Coloration)"),
 						MeshLODManager::Get().IsLODColorationEnabled(), "全场景 LOD 物体实时按绿/黄/橙/红着色",
 						[] { MeshLODManager::Get().SetLODColorationEnabled(!MeshLODManager::Get().IsLODColorationEnabled()); });
+					subItem("viewport.view.meshlet_clusters", Wui::Tr("viewport.view.meshlet_clusters", "Meshlet 集群视图 (Meshlet Clusters)"),
+						IsMeshletClustersVisible(), "按 ≤64 顶点/126 三角形划分网格微型簇，使用独立色彩可视化 GPU-Driven Meshlet 结构",
+						[] { SetMeshletClustersVisible(!IsMeshletClustersVisible()); });
 					subItem("viewport.view.lod_hud", Wui::Tr("viewport.view.lod_hud", "LOD & 八叉树遥测浮层 (LOD & Octree HUD)"),
 						s_ShowLODHud, "视口浮动小药丸面板，显示当前 Octree 节点数/元素数与 LOD 档位分布",
 						[] { s_ShowLODHud = !s_ShowLODHud; });
@@ -1477,6 +1484,10 @@ namespace World
 			snapItem("viewport.csm_debug", Wui::Tr("viewport.snap.csm_debug", "CSM 阴影级联调试染色"),
 				csmOn, Wui::Tr("viewport.csm.hint", "CSM 4级级联阴影色彩调试: 红(C0)、绿(C1)、蓝(C2)、黄(C3)。"),
 				[csmOn] { World::Renderer3D::SetCascadeDebugVisualization(!csmOn); });
+
+			snapItem("viewport.meshlet_clusters", Wui::Tr("viewport.snap.meshlet_clusters", "Meshlet 簇化调试 (Meshlets)"),
+				IsMeshletClustersVisible(), Wui::Tr("viewport.meshlet.hint", "按 ≤64 顶点/126 三角形划分微型簇，在几何体表面进行真彩簇染色检视。"),
+				[] { SetMeshletClustersVisible(!IsMeshletClustersVisible()); });
 
 			const bool is2D = m_Host.Is2DMode();
 			snapItem("viewport.btn.toggle_2d", Wui::Tr("viewport.snap.lock_rotation", "锁定鼠标旋转"),
@@ -3912,8 +3923,9 @@ namespace World
 						const auto* obstacle = registry.try_get<NavMeshObstacleComponent>(handle);
 						const auto* areaMod = registry.try_get<NavMeshAreaModifierComponent>(handle);
 						const auto* smartObj = registry.try_get<SmartObjectComponent>(handle);
+						const auto* water = registry.try_get<WaterBodyComponent>(handle);
 
-						if (!decal && !partVol && !obstacle && !areaMod && !smartObj)
+						if (!decal && !partVol && !obstacle && !areaMod && !smartObj && !water)
 							continue;
 
 						// 选中时始终绘制；或者在全局功能开关开启时绘制
@@ -4137,6 +4149,76 @@ namespace World
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
 								smartObj->SlotOffset - glm::vec3(0.0f, slotCross, 0.0f), smartObj->SlotOffset + glm::vec3(0.0f, slotCross, 0.0f),
 								smartColor, 1.8f, &overlayMin, &overlayMax);
+						}
+
+						// 5. 物理水体表面覆盖范围与波浪传播向 Gizmo (WaterBodyComponent)
+						if (water && isSelected)
+						{
+							// 金青色（Cyan/Azure）水体边框与波浪指引色
+							const Wui::WuiColor waterColor { 0.05f, 0.85f, 0.95f, 0.95f };
+							const Wui::WuiColor gridColor { 0.10f, 0.70f, 0.90f, 0.45f };
+							const Wui::WuiColor waveArrowColor { 0.95f, 0.85f, 0.20f, 1.0f }; // 金黄与青色高对比度
+							const float waterThickness = 2.0f;
+
+							// ① 水面覆盖 3D 边界盒 (遵循 TransformComponent.Scale 局部 [-0.5, 0.5])
+							const glm::vec3 corners[8] = {
+								{ -0.5f, -0.05f, -0.5f },
+								{  0.5f, -0.05f, -0.5f },
+								{  0.5f,  0.05f, -0.5f },
+								{ -0.5f,  0.05f, -0.5f },
+								{ -0.5f, -0.05f,  0.5f },
+								{  0.5f, -0.05f,  0.5f },
+								{  0.5f,  0.05f,  0.5f },
+								{ -0.5f,  0.05f,  0.5f }
+							};
+							// 底面 4 条边
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[0], corners[1], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[1], corners[2], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[2], corners[3], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[3], corners[0], waterColor, waterThickness, &overlayMin, &overlayMax);
+							// 顶面 4 条边
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[4], corners[5], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[5], corners[6], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[6], corners[7], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[7], corners[4], waterColor, waterThickness, &overlayMin, &overlayMax);
+							// 4 条垂直边
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[0], corners[4], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[1], corners[5], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[2], corners[6], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[3], corners[7], waterColor, waterThickness, &overlayMin, &overlayMax);
+
+							// 水面顶层 XZ 分割十字线
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								{ -0.5f, 0.05f, 0.0f }, { 0.5f, 0.05f, 0.0f }, gridColor, 1.2f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								{ 0.0f, 0.05f, -0.5f }, { 0.0f, 0.05f, 0.5f }, gridColor, 1.2f, &overlayMin, &overlayMax);
+
+							// ② 波浪主传播向矢量箭头 (Primary Wave Propagation Vector Arrow)
+							const glm::vec3 waveDir = glm::normalize(glm::vec3(1.0f, 0.0f, 0.2f));
+							const glm::vec3 waveSide = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), waveDir));
+							const glm::vec3 arrowStart = glm::vec3(0.0f, 0.08f, 0.0f) - waveDir * 0.22f;
+							const glm::vec3 arrowEnd   = glm::vec3(0.0f, 0.08f, 0.0f) + waveDir * 0.22f;
+
+							// 箭头主轴
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								arrowStart, arrowEnd, waveArrowColor, 2.6f, &overlayMin, &overlayMax);
+							// 箭头双翼
+							const glm::vec3 wing0 = arrowEnd - waveDir * 0.06f + waveSide * 0.035f;
+							const glm::vec3 wing1 = arrowEnd - waveDir * 0.06f - waveSide * 0.035f;
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								arrowEnd, wing0, waveArrowColor, 2.6f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								arrowEnd, wing1, waveArrowColor, 2.6f, &overlayMin, &overlayMax);
+
+							// 波峰波前波纹线条 (Wavefront Crest Ripples)
+							for (float offset : { -0.12f, 0.0f, 0.10f })
+							{
+								const glm::vec3 rippleCenter = glm::vec3(0.0f, 0.08f, 0.0f) + waveDir * offset;
+								const float crestSpan = 0.08f * (1.0f - std::abs(offset) * 2.0f);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									rippleCenter - waveSide * crestSpan, rippleCenter + waveSide * crestSpan,
+									waveArrowColor, 1.6f, &overlayMin, &overlayMax);
+							}
 						}
 					}
 				}
@@ -6508,33 +6590,32 @@ namespace World
 		const bool hasHudData = (!play && (hudLine1[0] != '\0' || entityCount > 0 || !m_Host.GetLevelDataLayers().empty()));
 		if (hasHudData)
 		{
+			const float axisAvoid = (sceneRect.W >= 420.0f) ? 56.0f : 0.0f;
+			const float maxHudW = std::max(120.0f, sceneRect.W - axisAvoid - 24.0f);
+
 			const float text1W = ctx.MeasureTextWidth(hudLine1, 11.5f);
 			const float text2W = ctx.MeasureTextWidth(hudLine2, 11.5f);
-			const float hudW = std::max(220.0f, std::max(text1W, text2W) + 20.0f);
+			const float hudW = std::clamp(std::max(text1W, text2W) + 20.0f, 180.0f, maxHudW);
 			const float hudH = 42.0f;
 
-			// 避让右下角 48px 坐标轴指示器 (AxisGizmo), 视口宽裕时留出 56px 避让空间
-			const float axisAvoid = (sceneRect.W >= 420.0f) ? 56.0f : 0.0f;
-			const Wui::WuiRect hudRect {
-				sceneRect.X + sceneRect.W - hudW - 12.0f - axisAvoid,
-				sceneRect.Y + sceneRect.H - hudH - 12.0f,
-				hudW,
-				hudH
-			};
+			const float hudX = std::max(sceneRect.X + 8.0f, sceneRect.X + sceneRect.W - hudW - 12.0f - axisAvoid);
+			const Wui::WuiRect hudRect { hudX, sceneRect.Y + sceneRect.H - hudH - 12.0f, hudW, hudH };
 
 			Wui::PanelBackground(ctx, hudRect, theme.CardBg, 6.0f);
 			Wui::HighlightOutline(ctx, hudRect, theme.BorderStrong, 6.0f, 1.0f);
 
+			const std::string shownLine2 = Wui::EllipsizeMiddleToWidth(ctx, hudLine2, hudW - 20.0f, 11.5f);
 			if (hudLine1[0] != '\0')
 			{
-				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 4.0f }, hudLine1,
+				const std::string shownLine1 = Wui::EllipsizeMiddleToWidth(ctx, hudLine1, hudW - 20.0f, 11.5f);
+				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 4.0f }, shownLine1,
 					theme.Info, 11.5f);
-				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 22.0f }, hudLine2,
+				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 22.0f }, shownLine2,
 					theme.Text, 11.5f);
 			}
 			else
 			{
-				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 12.0f }, hudLine2,
+				Wui::Label(ctx, { hudRect.X + 10.0f, hudRect.Y + 12.0f }, shownLine2,
 					theme.Text, 11.5f);
 			}
 
@@ -6553,8 +6634,15 @@ namespace World
 			std::snprintf(line1, sizeof(line1), "八叉树: %zu 节点 | %zu 元素", octreeNodes, octreeElements);
 
 			char line2[128];
-			std::snprintf(line2, sizeof(line2), "LOD 分布: LOD0: %u | LOD1: %u | LOD2: %u | 剔除: %u",
-				lodStats.LOD0Count, lodStats.LOD1Count, lodStats.LOD2Count, lodStats.CulledCount);
+			if (IsMeshletClustersVisible())
+			{
+				std::snprintf(line2, sizeof(line2), "Meshlets: GPU 集群真彩染色激活 (≤64V/126T) | 剔除: %u", lodStats.CulledCount);
+			}
+			else
+			{
+				std::snprintf(line2, sizeof(line2), "LOD 分布: LOD0: %u | LOD1: %u | LOD2: %u | 剔除: %u",
+					lodStats.LOD0Count, lodStats.LOD1Count, lodStats.LOD2Count, lodStats.CulledCount);
+			}
 
 			const float t1W = ctx.MeasureTextWidth(line1, 11.5f);
 			const float t2W = ctx.MeasureTextWidth(line2, 11.5f);
@@ -6647,6 +6735,20 @@ namespace World
 		return s_ShowLODHud;
 	}
 
+	void ViewportPanel::SetMeshletClustersVisible(bool visible)
+	{
+		s_ShowMeshletClusters = visible;
+#if defined(_WIN32)
+		_putenv_s("WLD_MESHLET_CLUSTERS_DEBUG", visible ? "1" : "0");
+#endif
+	}
+
+	bool ViewportPanel::IsMeshletClustersVisible()
+	{
+		const char* env = std::getenv("WLD_MESHLET_CLUSTERS_DEBUG");
+		return s_ShowMeshletClusters || (env != nullptr && std::strcmp(env, "0") != 0);
+	}
+
 	bool ViewportPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
 	{
 		// P: 切换 3D 导航网格 (NavMesh) 视口显示 (对标 Unreal Engine 5 行业标准快捷键)
@@ -6727,5 +6829,6 @@ namespace World
 		return false;
 	}
 }
+
 
 

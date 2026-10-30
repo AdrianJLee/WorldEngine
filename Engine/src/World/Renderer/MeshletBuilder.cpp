@@ -142,4 +142,41 @@ namespace World
 
 		FlushMeshlet();
 	}
+
+	glm::vec4 MeshletBuilder::GetMeshletDebugColor(uint32_t meshletIndex)
+	{
+		constexpr float kGoldenRatioConjugate = 0.618033988749895f;
+		float h = std::fmod(static_cast<float>(meshletIndex) * kGoldenRatioConjugate, 1.0f);
+		if (h < 0.0f)
+			h += 1.0f;
+
+		// 饱和度与明度做轻微周期微调，确保各集群鲜明易分辨
+		float s = 0.85f + 0.10f * std::sin(static_cast<float>(meshletIndex) * 0.7f);
+		s = std::clamp(s, 0.7f, 1.0f);
+		float v = 0.90f + 0.08f * std::cos(static_cast<float>(meshletIndex) * 1.3f);
+		v = std::clamp(v, 0.75f, 1.0f);
+
+		float c = v * s;
+		float hPrime = h * 6.0f;
+		float x = c * (1.0f - std::abs(std::fmod(hPrime, 2.0f) - 1.0f));
+		float m = v - c;
+
+		float r = 0.0f, g = 0.0f, b = 0.0f;
+		int sector = static_cast<int>(hPrime) % 6;
+		switch (sector)
+		{
+		case 0: r = c; g = x; b = 0.0f; break;
+		case 1: r = x; g = c; b = 0.0f; break;
+		case 2: r = 0.0f; g = c; b = x; break;
+		case 3: r = 0.0f; g = x; b = c; break;
+		case 4: r = x; g = 0.0f; b = c; break;
+		case 5: default: r = c; g = 0.0f; b = x; break;
+		}
+
+		return glm::vec4(
+			std::clamp(r + m, 0.0f, 1.0f),
+			std::clamp(g + m, 0.0f, 1.0f),
+			std::clamp(b + m, 0.0f, 1.0f),
+			1.0f);
+	}
 }

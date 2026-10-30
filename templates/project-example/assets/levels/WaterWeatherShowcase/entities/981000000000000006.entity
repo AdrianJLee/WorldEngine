@@ -1,0 +1,24 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 981000000000000006
+  World::TagComponent:
+    Tag: "Floating Cargo Crate Beta"
+  World::TransformComponent:
+    Location: [4.5, 0.2, 11.0]
+    Rotation: [0.0, -40.0, 0.0]
+    Scale: [1.4, 1.4, 1.4]
+  World::WhiteboxComponent:
+    Shape: 0
+    Dimensions: [1.4, 1.4, 1.4]
+    BevelSize: 0.06
+    Subdivisions: 1
+    Steps: 1
+  World::RigidBody3DComponent:
+    Mass: 45.0
+    LinearDamping: 0.2
+    AngularDamping: 0.3
+    UseGravity: true
+  World::LevelEntityComponent:
+    DataLayerMask: 8

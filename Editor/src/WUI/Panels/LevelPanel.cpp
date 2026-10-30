@@ -9,6 +9,7 @@
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include <algorithm>
+#include <cctype>
 
 namespace World
 {
@@ -144,6 +145,7 @@ namespace World
 		if (!openLogical.empty() && std::filesystem::path(openLogical).stem().string() == oldId)
 			host.OpenScene(newEntry);
 
+		m_RenameId.clear();
 		Reload();
 		return true;
 	}
@@ -166,8 +168,6 @@ namespace World
 		const std::filesystem::path entry = Level::LevelCatalog::EntryPathFor(m_ContentRoot, id);
 		const std::filesystem::path content = m_ContentRoot / Level::LevelPackage::LevelsDirName / id;
 
-		// 先删内容、后删入口:入口还在而内容没了 ⇒ 成对校验会把该关卡跳过(可读告警);
-		// 反过来则会留下一个入口指向已消失内容目录的悬空关卡。
 		std::error_code ec;
 		if (std::filesystem::is_directory(content, ec))
 		{
@@ -197,13 +197,7 @@ namespace World
 		const Wui::WuiTheme& theme = host.Theme();
 		EnsureLoaded();
 
-		// 行级动作**先记账、循环后执行**。
-		//
-		// 为什么不能边画边做:新建/改名/删除之后都要 Reload() 重建 m_Levels,而循环里的
-		// `const Level::LevelInfo& level = m_Levels[index]` 是**指向容器元素的引用** ——
-		// 在循环内清空重填会让它当场悬垂,后续读 DisplayName/Id 就是读已释放内存
-		// (2026-10-10 实测:面板内改名 ⇒ 进程 `std::terminate: bad allocation`)。
-		// 记账后循环结束再执行,既避开悬垂,也让一帧内只做一件事。
+		// 行级动作先记账、循环后执行。
 		enum class RowAction { None, Open, Delete, RenameCommit };
 		RowAction pendingAction = RowAction::None;
 		std::string pendingId;
@@ -221,7 +215,7 @@ namespace World
 			return;
 		}
 
-		// ---- 新建:名称 + Create。成功即出现在下面的列表里,可直接 Open。----
+		// ---- 新建关卡输入栏 ----
 		{
 			const float rowY = y;
 			const Wui::WuiRect nameRect { rect.X + 8.0f, rowY, rect.W - 16.0f - 76.0f, 22.0f };
@@ -243,17 +237,13 @@ namespace World
 				}
 				else
 				{
-					// 入口与内容目录一次成型(`scenes/<Id>.wlevel` + `levels/<Id>/`),
-					// 起手实体走同一个"场景 → 包"捕获路径 ⇒ 新关卡打开就有相机/灯/方块,
-					// 而不是一片黑让人怀疑没加载上。上下文取应用级(编辑器总有一个),
-					// 不依赖"当前是否已打开场景"。
 					const std::filesystem::path entryPath = Level::LevelCatalog::EntryPathFor(m_ContentRoot, name);
 					std::string createError;
 					WorldContext* context = Application::HasInstance()
 						? &Application::Get().GetContext() : nullptr;
 					if (context && Level::LevelPackage::CreateEmpty(*context, entryPath, name, &createError))
 					{
-						Reload();   // 在行循环**之前**:此刻没有指向 m_Levels 的引用在用
+						Reload();
 					}
 					else
 					{
@@ -270,6 +260,46 @@ namespace World
 			}
 		}
 
+		// ---- 关卡下拉快捷切换选择器 (Quick Level Dropdown Selector) ----
+		{
+			std::vector<std::string> comboItems;
+			comboItems.reserve(m_Levels.size());
+			const std::string openDocNow = host.GetOpenDocumentPath();
+			const std::string openDocIdNow = openDocNow.empty() ? std::string() : std::filesystem::path(openDocNow).stem().string();
+			int currentIdx = -1;
+			for (size_t i = 0; i < m_Levels.size(); ++i)
+			{
+				const std::string name = m_Levels[i].DisplayName.empty() ? m_Levels[i].Id : (m_Levels[i].DisplayName + "  (" + m_Levels[i].Id + ")");
+				comboItems.push_back(name);
+				if (m_Levels[i].Id == openDocIdNow)
+					currentIdx = static_cast<int>(i);
+			}
+
+			const Wui::WuiRect comboRect { rect.X + 8.0f, y, rect.W - 16.0f, 22.0f };
+			const std::string comboDisplayText = currentIdx >= 0 ? ("Current: " + m_Levels[currentIdx].Id) : "Select Level to open...";
+			int selectedIdx = currentIdx;
+			if (Wui::Combo(ctx, Wui::HashId("level.quick.combo"), comboRect, "", comboItems, selectedIdx, theme, comboDisplayText))
+			{
+				if (selectedIdx >= 0 && selectedIdx < static_cast<int>(m_Levels.size()))
+				{
+					pendingAction = RowAction::Open;
+					pendingId = m_Levels[selectedIdx].Id;
+				}
+			}
+			Wui::Tooltip(ctx, comboRect, "下拉快速切换打开关卡 (Quick switch level dropdown)");
+			y += 26.0f;
+		}
+
+		// ---- 搜索过滤栏 ----
+		{
+			const Wui::WuiRect searchRect { rect.X + 8.0f, y, rect.W - 16.0f, 22.0f };
+			Wui::TextFieldA11y searchA11y;
+			searchA11y.Label = "Filter levels";
+			searchA11y.Placeholder = "Search levels...";
+			Wui::TextField(ctx, Wui::HashId("level.search.filter"), searchRect, m_SearchFilter, theme, nullptr, &searchA11y);
+			y += 26.0f;
+		}
+
 		if (m_Levels.empty())
 		{
 			Label(ctx, { rect.X + 10.0f, y },
@@ -279,69 +309,163 @@ namespace World
 			return;
 		}
 
-		constexpr float rowH = 46.0f;
-		for (size_t index = 0; index < m_Levels.size(); ++index)
+		// 过滤候选关卡
+		std::vector<const Level::LevelInfo*> filteredLevels;
+		std::string lowerFilter = m_SearchFilter;
+		std::transform(lowerFilter.begin(), lowerFilter.end(), lowerFilter.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+		for (const auto& lvl : m_Levels)
 		{
-			const Level::LevelInfo& level = m_Levels[index];
-			const Wui::WuiRect row { rect.X + 8.0f, y, rect.W - 16.0f, rowH };
-			Wui::PanelBackground(ctx, row, theme.PanelHeader, 1.0f);
-
-			Label(ctx, { row.X + 6.0f, row.Y + 4.0f },
-				level.DisplayName + "  (" + level.Id + ")", theme.Text, 13.0f);
-			Label(ctx, { row.X + 6.0f, row.Y + 22.0f },
-				std::string(Level::LevelPackage::ScenesDirName) + "/" + level.Id
-					+ Level::LevelPackage::EntryExtension, theme.TextMuted, 11.0f);
-
-			const float right = row.X + row.W - 8.0f;
-			if (m_RenameId == level.Id)
+			if (lowerFilter.empty())
 			{
-				// 改名条**从左往右**排版,不按面板右缘反推:Levels 面板常常只有 ~200 宽
-				// (左侧停靠位的默认宽度),按 `right - 264` 摆输入框会把它推到**客户区外**
-				// ——用户点不到 = 改名功能实际不可用(2026-10-10 实测:ui.invoke 报
-				// "off-screen")。宽度按剩余空间夹取,保证输入框 + OK + Cancel 永远在行内。
-				const float fieldWidth = std::clamp(row.W - 130.0f, 60.0f, 150.0f);
-				const Wui::WuiRect field { row.X + 6.0f, row.Y + row.H - 28.0f, fieldWidth, 22.0f };
-				Wui::TextFieldA11y renameA11y;
-				renameA11y.Label = "Rename level to";   // 与新建框区分:a11y/脚本定位要能分清两个输入框
-				Wui::TextField(ctx, Wui::HashId(("level.rename.field." + level.Id).c_str()), field,
-					m_RenameText, theme, nullptr, &renameA11y);
-				if (Button(ctx, Wui::HashId(("level.rename.ok." + level.Id).c_str()),
-					{ field.X + field.W + 4.0f, field.Y, 46.0f, 22.0f }, "OK", theme))
-				{
-					pendingAction = RowAction::RenameCommit;
-					pendingId = level.Id;
-					pendingNewId = m_RenameText;
-				}
-				if (Button(ctx, Wui::HashId(("level.rename.cancel." + level.Id).c_str()),
-					{ field.X + field.W + 54.0f, field.Y, 60.0f, 22.0f }, "Cancel", theme))
-					m_RenameId.clear();
+				filteredLevels.push_back(&lvl);
+				continue;
 			}
-			else
+			std::string lowerId = lvl.Id;
+			std::transform(lowerId.begin(), lowerId.end(), lowerId.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			std::string lowerName = lvl.DisplayName;
+			std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			if (lowerId.find(lowerFilter) != std::string::npos || lowerName.find(lowerFilter) != std::string::npos)
 			{
-				if (Button(ctx, Wui::HashId(("level.open." + level.Id).c_str()),
-					{ right - 62.0f, row.Y + 2.0f, 62.0f, 20.0f }, "Open", theme))
+				filteredLevels.push_back(&lvl);
+			}
+		}
+
+		const std::string openDoc = host.GetOpenDocumentPath();
+		const std::string openDocId = openDoc.empty() ? std::string() : std::filesystem::path(openDoc).stem().string();
+
+		const float footerH = 22.0f;
+		const float listTopY = y;
+		const float listBottomY = rect.Y + rect.H - footerH - 4.0f;
+		const float listH = std::max(40.0f, listBottomY - listTopY);
+		const Wui::WuiRect listRect { rect.X + 4.0f, listTopY, rect.W - 8.0f, listH };
+
+		constexpr float rowH = 46.0f;
+		constexpr float rowGap = 4.0f;
+		const float totalContentHeight = static_cast<float>(filteredLevels.size()) * (rowH + rowGap) + 40.0f;
+		const bool hasScrollbar = totalContentHeight > listH;
+		constexpr float scrollbarWidth = 10.0f;
+		const float rowWidth = hasScrollbar ? (listRect.W - scrollbarWidth - 4.0f) : (listRect.W - 4.0f);
+
+		if (filteredLevels.empty() && !m_SearchFilter.empty())
+		{
+			Label(ctx, { rect.X + 10.0f, y + 8.0f },
+				"No matching levels found.", theme.TextMuted, 13.0f);
+		}
+		else
+		{
+			Wui::BeginScrollArea(ctx, listRect, totalContentHeight, m_ScrollY, theme, Wui::HashId("level.scrollarea"));
+
+			for (size_t index = 0; index < filteredLevels.size(); ++index)
+			{
+				const Level::LevelInfo& level = *filteredLevels[index];
+				const float rowY = listRect.Y + 2.0f + static_cast<float>(index) * (rowH + rowGap) - m_ScrollY;
+				const Wui::WuiRect row { listRect.X + 2.0f, rowY, rowWidth, rowH };
+
+				// 视口视野外几何裁剪:避免不可见的深层行产生多余绘制与误交互
+				if (row.Y + row.H < listRect.Y || row.Y > listRect.Y + listRect.H)
+					continue;
+
+				const bool isHovered = ctx.IsHovered(row);
+				const bool isCurrentOpen = (level.Id == openDocId) || IsCurrentStartScene(level.Id);
+
+				const Wui::WuiColor rowBg = isCurrentOpen
+					? (isHovered ? theme.PanelBg : theme.PanelHeader)
+					: (isHovered ? theme.ButtonHover : theme.PanelHeader);
+				Wui::PanelBackground(ctx, row, rowBg, 2.0f);
+				if (isCurrentOpen)
+				{
+					Wui::PanelBackground(ctx, { row.X, row.Y, 3.0f, row.H }, theme.Accent, 1.0f);
+				}
+
+				// 双击行直接打开对应关卡
+				if (ctx.IsDoubleClicked(row) && m_RenameId != level.Id)
 				{
 					pendingAction = RowAction::Open;
 					pendingId = level.Id;
 				}
-				if (Button(ctx, Wui::HashId(("level.rename." + level.Id).c_str()),
-					{ right - 128.0f, row.Y + 2.0f, 62.0f, 20.0f }, "Rename", theme))
+
+				const float right = row.X + row.W - 6.0f;
+				// 右侧按钮区占用 132px 空间,文字区域严格限宽,彻底根除长文本穿透重叠按钮的问题
+				const float buttonZoneW = 132.0f;
+				const float maxTextWidth = std::max(30.0f, row.W - buttonZoneW - 14.0f);
+
+				// 关卡主标题 (末尾限宽省略)
+				std::string fullTitle = level.DisplayName.empty() ? level.Id : (level.DisplayName + "  (" + level.Id + ")");
+				std::string shownTitle = Wui::EllipsizeMiddleToWidth(ctx, fullTitle, maxTextWidth, 13.0f);
+				Label(ctx, { row.X + 8.0f, row.Y + 4.0f },
+					shownTitle, isCurrentOpen ? theme.TextBright : theme.Text, 13.0f);
+
+				// 关卡相对路径 (中间限宽省略)
+				std::string fullPath = std::string(Level::LevelPackage::ScenesDirName) + "/" + level.Id
+					+ Level::LevelPackage::EntryExtension;
+				std::string shownPath = Wui::EllipsizeMiddleToWidth(ctx, fullPath, maxTextWidth, 11.0f);
+				Label(ctx, { row.X + 8.0f, row.Y + 22.0f },
+					shownPath, theme.TextMuted, 11.0f);
+
+				// 悬停气泡提示完整标题与路径
+				if (isHovered && m_RenameId != level.Id)
 				{
-					m_RenameId = level.Id;
-					m_RenameText = level.Id;
-					m_RowError.clear();
+					Wui::Tooltip(ctx, row, fullTitle + "\n" + fullPath + "\n(Double-click to open)");
 				}
-				if (Button(ctx, Wui::HashId(("level.delete." + level.Id).c_str()),
-					{ right - 128.0f, row.Y + 24.0f, 62.0f, 20.0f }, "Delete", theme))
+
+				if (m_RenameId == level.Id)
 				{
-					pendingAction = RowAction::Delete;
-					pendingId = level.Id;
+					const float fieldWidth = std::clamp(row.W - 120.0f, 60.0f, 160.0f);
+					const Wui::WuiRect field { row.X + 6.0f, row.Y + row.H - 26.0f, fieldWidth, 22.0f };
+					Wui::TextFieldA11y renameA11y;
+					renameA11y.Label = "Rename level to";
+					Wui::TextField(ctx, Wui::HashId(("level.rename.field." + level.Id).c_str()), field,
+						m_RenameText, theme, nullptr, &renameA11y);
+					if (Button(ctx, Wui::HashId(("level.rename.ok." + level.Id).c_str()),
+						{ field.X + field.W + 4.0f, field.Y, 44.0f, 22.0f }, "OK", theme))
+					{
+						pendingAction = RowAction::RenameCommit;
+						pendingId = level.Id;
+						pendingNewId = m_RenameText;
+					}
+					if (Button(ctx, Wui::HashId(("level.rename.cancel." + level.Id).c_str()),
+						{ field.X + field.W + 52.0f, field.Y, 56.0f, 22.0f }, "Cancel", theme))
+						m_RenameId.clear();
+				}
+				else
+				{
+					if (Button(ctx, Wui::HashId(("level.open." + level.Id).c_str()),
+						{ right - 60.0f, row.Y + 2.0f, 60.0f, 20.0f }, "Open", theme))
+					{
+						pendingAction = RowAction::Open;
+						pendingId = level.Id;
+					}
+					if (Button(ctx, Wui::HashId(("level.rename." + level.Id).c_str()),
+						{ right - 126.0f, row.Y + 2.0f, 62.0f, 20.0f }, "Rename", theme))
+					{
+						m_RenameId = level.Id;
+						m_RenameText = level.Id;
+						m_RowError.clear();
+					}
+					if (Button(ctx, Wui::HashId(("level.delete." + level.Id).c_str()),
+						{ right - 126.0f, row.Y + 24.0f, 62.0f, 20.0f }, "Delete", theme))
+					{
+						pendingAction = RowAction::Delete;
+						pendingId = level.Id;
+					}
 				}
 			}
-			y += rowH + 4.0f;
+
+			Wui::EndScrollArea(ctx);
+
+			// 纵向交互滚动条
+			if (hasScrollbar)
+			{
+				const Wui::WuiRect scrollbarRect { listRect.X + listRect.W - scrollbarWidth, listRect.Y, scrollbarWidth, listRect.H };
+				Wui::ScrollBar(ctx, Wui::HashId("level.scrollbar"), scrollbarRect, totalContentHeight, listRect.H, m_ScrollY, theme, false);
+			}
 		}
 
-		// ---- 行级动作:此刻已不持有 m_Levels 的引用,Reload()/打开文档都安全 ----
+		// ---- 行级动作延迟处理 ----
 		if (pendingAction != RowAction::None)
 		{
 			m_RowError.clear();
@@ -350,8 +474,6 @@ namespace World
 			switch (pendingAction)
 			{
 			case RowAction::Open:
-				// 打开关卡入口:EditorDocument 按 `.wlevel` 后缀走 Level 2.0 读路径;
-				// 宿主把"换文档"排到帧边界执行(面板渲染中途换文档会重入)。
 				if (const Level::LevelInfo* info = Level::LevelCatalog::Find(m_Levels, pendingId))
 					host.OpenScene(info->EntryPath);
 				break;
@@ -370,11 +492,14 @@ namespace World
 
 		if (!m_RowError.empty())
 		{
-			Label(ctx, { rect.X + 10.0f, y + 2.0f }, m_RowError, theme.Danger, 12.0f);
-			y += 18.0f;
+			Label(ctx, { rect.X + 10.0f, rect.Y + rect.H - footerH - 18.0f }, m_RowError, theme.Danger, 12.0f);
 		}
 
-		Label(ctx, { rect.X + 10.0f, rect.Y + rect.H - 20.0f },
+		// 底部显示内容目录物理路径
+		Label(ctx, { rect.X + 10.0f, rect.Y + rect.H - 18.0f },
 			(m_ContentRoot / Level::LevelPackage::ScenesDirName).string(), theme.TextMuted, 11.0f);
 	}
 }
+
+
+

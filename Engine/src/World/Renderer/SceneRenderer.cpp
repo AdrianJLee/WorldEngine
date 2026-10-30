@@ -27,6 +27,8 @@
 #include "World/Renderer/FrustumCull.h"
 #include "World/Math/Simd/FrustumCullSimd.h"
 #include "World/Renderer/RenderSettings.h"
+#include "World/Environment/WaterSimulation.h"
+#include "World/Environment/WeatherSimulation.h"
 #include "World/Renderer/FrameExtract.h"
 #include "World/Level/WhiteboxBuilder.h"
 #include "World/Level/Spline3D.h"
@@ -369,6 +371,13 @@ namespace World
 		}
 		m_WhiteboxMeshCache.clear();
 		m_SplineMeshCache.clear();
+		for (auto& [e, m] : m_WaterMeshCache)
+		{
+			if (m)
+				Renderer3D::PurgeMeshGpu(m.get());
+		}
+		m_WaterMeshCache.clear();
+		m_WaterModelMatrices.clear();
 		m_ActiveScene = nullptr;
 		m_Framebuffer = nullptr;
 		m_FramebufferView = nullptr;
@@ -952,6 +961,74 @@ namespace World
 			}
 		}
 
+		// ---- 3D 物理水面网格收集 (WaterBodyComponent) ----
+		{
+			auto waterView = scene.m_Registry.view<TransformComponent, WaterBodyComponent>();
+			for (auto entity : waterView)
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& [transform, waterComp] =
+					waterView.get<TransformComponent, WaterBodyComponent>(entity);
+
+				glm::vec2 extents(
+					transform.Scale.x > 1.01f ? transform.Scale.x : 100.0f,
+					transform.Scale.z > 1.01f ? transform.Scale.z : 100.0f);
+
+				float sceneTime = static_cast<float>(scene.GetTime().ElapsedSeconds);
+				if (sceneTime <= 0.0001f)
+				{
+					m_WaterAccumulatedTime += (deltaSeconds > 0.0f && deltaSeconds < 1.0f) ? deltaSeconds : 0.016f;
+					sceneTime = m_WaterAccumulatedTime;
+				}
+
+				std::vector<WaterMeshVertex> vertices;
+				std::vector<uint32_t> indices;
+				const uint32_t subs = std::clamp(static_cast<uint32_t>(waterComp.GridResolution), 8u, 64u);
+				WaterSimulation::GenerateWaterSurfaceMesh(waterComp, extents, subs, sceneTime, vertices, indices);
+
+				MeshDesc desc;
+				desc.DebugName = "WaterSurfaceMesh";
+				desc.Layout = Mesh::MakeStandardLayout();
+				desc.VertexLayoutId = Mesh::kVertexLayoutStandard;
+				desc.Indices = std::move(indices);
+				desc.VertexData.resize(vertices.size() * sizeof(WaterMeshVertex));
+				std::memcpy(desc.VertexData.data(), vertices.data(), desc.VertexData.size());
+
+				Ref<Mesh> mesh = Mesh::Create(desc);
+				if (!mesh)
+					continue;
+
+				const uint32_t entityId = static_cast<uint32_t>(entity);
+				auto it = m_WaterMeshCache.find(entityId);
+				if (it != m_WaterMeshCache.end() && it->second)
+				{
+					Renderer3D::PurgeMeshGpu(it->second.get());
+				}
+				m_WaterMeshCache[entityId] = mesh;
+
+				glm::mat4 waterModel = glm::translate(glm::mat4(1.0f), transform.Location);
+				waterModel = glm::rotate(waterModel, transform.Rotation.z, glm::vec3(0, 0, 1));
+				waterModel = glm::rotate(waterModel, transform.Rotation.y, glm::vec3(0, 1, 0));
+				waterModel = glm::rotate(waterModel, transform.Rotation.x, glm::vec3(1, 0, 0));
+				m_WaterModelMatrices[entityId] = waterModel;
+
+				FrameMeshDraw draw;
+				draw.Entity = entity;
+				draw.Model = &m_WaterModelMatrices[entityId];
+				draw.MeshAsset = mesh;
+				draw.SubmeshIndex = UINT32_MAX;
+				draw.MaterialAsset = nullptr;
+				const float alpha = std::clamp(1.0f - waterComp.WaterClarity * 0.02f, 0.6f, 0.95f);
+				draw.Color = glm::vec4(waterComp.WaterColor, alpha);
+				draw.Transparent = true;
+
+				const MeshBounds& localBounds = mesh->GetBounds();
+				TransformAabb(waterModel, localBounds.Min, localBounds.Max, draw.WorldMin, draw.WorldMax);
+				extract.Draws.push_back(std::move(draw));
+			}
+		}
+
 		// ---- D4:灯光收集(registry 遍历顺序 = 截断顺序)+ 方向光阴影矩阵 + 灯光 UBO ----
 		LightRig lightRig;
 		{
@@ -987,6 +1064,50 @@ namespace World
 				hasAmbient = true;
 				break;
 			}
+			// 天气大气光照联动
+			bool hasWeather = false;
+			WeatherAtmosphereParams weatherParams;
+			for (auto entity : scene.m_Registry.view<WeatherSystemComponent>())
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& wc = scene.m_Registry.get<WeatherSystemComponent>(entity);
+				weatherParams = WeatherSimulation::ComputeAtmosphereParams(wc);
+				hasWeather = true;
+				break;
+			}
+
+			if (hasWeather)
+			{
+				const glm::vec3 activeLightDir = (weatherParams.SunElevation > 0.0f) ? weatherParams.SunDirection : weatherParams.MoonDirection;
+				const glm::vec3 activeLightColor = (weatherParams.SunElevation > 0.0f) ? weatherParams.SunLightColor : weatherParams.MoonLightColor;
+				const float activeLightIntensity = (weatherParams.SunElevation > 0.0f) ? weatherParams.SunLightIntensity : weatherParams.MoonLightIntensity;
+
+				if (directionalLights.empty())
+				{
+					directionalLights.push_back({ activeLightColor, activeLightIntensity, activeLightDir, false });
+				}
+				else
+				{
+					for (auto& dirLight : directionalLights)
+					{
+						dirLight.Color = activeLightColor;
+						dirLight.Intensity = activeLightIntensity;
+						dirLight.Direction = activeLightDir;
+					}
+				}
+
+				if (!hasAmbient)
+				{
+					ambientLight = { weatherParams.AmbientColor, 1.0f };
+					hasAmbient = true;
+				}
+				else
+				{
+					ambientLight.Color = weatherParams.AmbientColor;
+				}
+			}
+
 			const bool glDepthConvention = Renderer::GetBackendName() != "vulkan";
 			extract.Lights = Renderer3D::BuildLightRig(directionalLights, pointLights,
 				hasAmbient ? &ambientLight : nullptr, glDepthConvention);
@@ -1199,6 +1320,13 @@ namespace World
 						{
 							visibleMask[index] = 1;
 						}
+						else if (!m_ActiveScene->m_Registry.valid(draws[index].Entity)
+							|| m_ActiveScene->m_Registry.all_of<WaterBodyComponent>(draws[index].Entity)
+							|| m_ActiveScene->m_Registry.all_of<WhiteboxComponent>(draws[index].Entity)
+							|| m_ActiveScene->m_Registry.all_of<SplineComponent>(draws[index].Entity))
+						{
+							visibleMask[index] = AabbInFrustum(cameraFrustum, draws[index].WorldMin, draws[index].WorldMax) ? 1 : 0;
+						}
 						else
 						{
 							visibleMask[index] = 0;
@@ -1322,6 +1450,7 @@ namespace World
 			// set0(相机 + 灯光 UBO):binding 2 提供 u_ShadowViewProjections;
 			// 阴影管线不用 set2(材质),调用方只绑 0/1。
 			m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
+
 			Renderer3D::BeginShadowPass(m_CommandBuffers[slot]);
 
 			const float fullSize = static_cast<float>(Renderer3D::GetShadowMapSize());
@@ -1456,8 +1585,20 @@ namespace World
 		WLD_TRACE_COUNTER("Scene.ShadowCasters", static_cast<int64_t>(shadowCasters));
 		Renderer3D::ReportLighting(lightRig, shadowPassMilliseconds);
 
+		glm::vec4 clearColor(0.1f, 0.1f, 0.1f, 1.0f);
+		if (m_ActiveScene)
+		{
+			for (auto entity : m_ActiveScene->m_Registry.view<WeatherSystemComponent>())
+			{
+				const auto& wc = m_ActiveScene->m_Registry.get<WeatherSystemComponent>(entity);
+				const auto params = WeatherSimulation::ComputeAtmosphereParams(wc);
+				clearColor = params.SkyClearColor;
+				break;
+			}
+		}
+
 		std::vector<Rhi::ClearValue> clears(3);
-		clears[0].Color = { 0.1f, 0.1f, 0.1f, 1.0f };
+		clears[0].Color = { clearColor.r, clearColor.g, clearColor.b, clearColor.a };
 		const int minusOne = -1;
 		std::memcpy(&clears[1].Color, &minusOne, sizeof(int));
 		clears[2].IsDepthStencil = true;
@@ -1469,6 +1610,55 @@ namespace World
 		// (VUID-vkCmdDrawIndexed-None-07832:动态裁剪未设置时状态未定义)。
 		m_CommandBuffers[slot]->SetScissor({ 0, 0, m_Width, m_Height });
 		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
+
+		// 全动态全天候天球天体通道 (Celestial Atmosphere Pass: 太阳、月球、星空与动态云层)
+		if (m_ActiveScene)
+		{
+			for (auto entity : m_ActiveScene->m_Registry.view<WeatherSystemComponent>())
+			{
+				const auto& wc = m_ActiveScene->m_Registry.get<WeatherSystemComponent>(entity);
+				const auto weatherParams = WeatherSimulation::ComputeAtmosphereParams(wc, m_WaterAccumulatedTime);
+				EnsureCelestialMeshes();
+
+				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
+				const glm::vec3 cameraPos = glm::vec3(cameraTransform[3]);
+
+				// 1. 太阳天体实体 (Sun Disc Sphere: 昼间发光天球)
+				if (weatherParams.SunElevation > -10.0f && m_SunMesh)
+				{
+					const glm::vec3 sunPos = cameraPos - weatherParams.SunDirection * 500.0f;
+					const glm::mat4 sunModel = glm::translate(glm::mat4(1.0f), sunPos) * glm::scale(glm::mat4(1.0f), glm::vec3(22.0f));
+					Renderer3D::Submit(m_SunMesh, sunModel, glm::vec4(weatherParams.SunLightColor * (1.2f + weatherParams.SunLightIntensity), 1.0f));
+				}
+
+				// 2. 月球天体实体 (Moon Disc Sphere: 夜间发光天球)
+				if (weatherParams.SunElevation < 18.0f && m_MoonMesh)
+				{
+					const glm::vec3 moonPos = cameraPos - weatherParams.MoonDirection * 500.0f;
+					const glm::mat4 moonModel = glm::translate(glm::mat4(1.0f), moonPos) * glm::scale(glm::mat4(1.0f), glm::vec3(16.0f));
+					Renderer3D::Submit(m_MoonMesh, moonModel, glm::vec4(weatherParams.MoonLightColor * 1.5f, 0.95f));
+				}
+
+				// 3. 繁星夜空 (Celestial Starfield: 夜幕闪烁星群)
+				if (weatherParams.StarVisibility > 0.02f && m_StarfieldMesh)
+				{
+					const glm::mat4 starModel = glm::translate(glm::mat4(1.0f), cameraPos) * glm::scale(glm::mat4(1.0f), glm::vec3(550.0f));
+					Renderer3D::Submit(m_StarfieldMesh, starModel, glm::vec4(1.0f, 1.0f, 1.0f, weatherParams.StarVisibility));
+				}
+
+				// 4. 大气高空云层 (Dynamic Cloud Layer)
+				if (weatherParams.CloudCoverage > 0.02f && m_CloudMesh)
+				{
+					const glm::vec3 cloudCenter = glm::vec3(cameraPos.x, cameraPos.y + 120.0f, cameraPos.z);
+					const glm::mat4 cloudModel = glm::translate(glm::mat4(1.0f), cloudCenter) * glm::scale(glm::mat4(1.0f), glm::vec3(800.0f, 1.0f, 800.0f));
+					Renderer3D::Submit(m_CloudMesh, cloudModel, weatherParams.CloudColor);
+				}
+
+				Renderer3D::EndScene();
+				break;
+			}
+		}
+
 
 		// 开发钩子:WLD_DEBUG_CUBE=1 时在同一渲染通道里提交一个 3D 立方体,
 		// 作为 3D 通道(Pipeline/深度/网格缓冲)在双后端下的冒烟基线(D2b)。
@@ -3542,5 +3732,83 @@ namespace World
 		spline.GenerateRoadMesh(width, step, wbMesh.Vertices, wbMesh.Normals, wbMesh.UVs, wbMesh.Indices);
 		return CreateMeshFromWhitebox(wbMesh, "SplineRoadMesh");
 	}
+	void SceneRenderer::EnsureCelestialMeshes()
+	{
+		if (!m_SunMesh)
+			m_SunMesh = Mesh::CreateUnitSphere(1.0f, 24, 12);
+		if (!m_MoonMesh)
+			m_MoonMesh = Mesh::CreateUnitSphere(1.0f, 24, 12);
+		if (!m_CloudMesh)
+			m_CloudMesh = Mesh::CreateUnitPlane(1.0f);
+
+		if (!m_StarfieldMesh)
+		{
+			struct StarVertex
+			{
+				glm::vec3 Position;
+				glm::vec3 Normal;
+				glm::vec2 TexCoord;
+			};
+			std::vector<StarVertex> starVertices;
+			std::vector<uint32_t> starIndices;
+			starVertices.reserve(320 * 3);
+			starIndices.reserve(320 * 3);
+
+			uint32_t seed = 1337;
+			const auto rnd = [&seed]() {
+				seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+				return static_cast<float>(seed) / static_cast<float>(0x7fffffff);
+			};
+
+			for (uint32_t i = 0; i < 320; ++i)
+			{
+				const float theta = rnd() * 2.0f * 3.14159265f;
+				const float phi = rnd() * 1.45f;
+				const float y = std::cos(phi);
+				const float r = std::sin(phi);
+				const float x = r * std::cos(theta);
+				const float z = r * std::sin(theta);
+				const glm::vec3 starDir = glm::normalize(glm::vec3(x, y, z));
+
+				const float starSize = 0.005f + rnd() * 0.006f;
+				const glm::vec3 up(0, 1, 0);
+				const glm::vec3 right = glm::normalize(glm::cross(up, starDir));
+				const glm::vec3 starUp = glm::cross(starDir, right);
+
+				const uint32_t baseIdx = static_cast<uint32_t>(starVertices.size());
+				StarVertex v0, v1, v2;
+				v0.Position = starDir + (-right * 0.5f - starUp * 0.3f) * starSize;
+				v0.Normal = -starDir;
+				v0.TexCoord = glm::vec2(0.0f, 0.0f);
+
+				v1.Position = starDir + (right * 0.5f - starUp * 0.3f) * starSize;
+				v1.Normal = -starDir;
+				v1.TexCoord = glm::vec2(1.0f, 0.0f);
+
+				v2.Position = starDir + (starUp * 0.7f) * starSize;
+				v2.Normal = -starDir;
+				v2.TexCoord = glm::vec2(0.5f, 1.0f);
+
+				starVertices.push_back(v0);
+				starVertices.push_back(v1);
+				starVertices.push_back(v2);
+
+				starIndices.push_back(baseIdx);
+				starIndices.push_back(baseIdx + 1);
+				starIndices.push_back(baseIdx + 2);
+			}
+
+			MeshDesc desc;
+			desc.DebugName = "CelestialStarfield";
+			desc.Layout = Mesh::MakeStandardLayout();
+			desc.VertexLayoutId = Mesh::kVertexLayoutStandard;
+			desc.Indices = std::move(starIndices);
+			desc.VertexData.resize(starVertices.size() * sizeof(StarVertex));
+			std::memcpy(desc.VertexData.data(), starVertices.data(), desc.VertexData.size());
+			m_StarfieldMesh = Mesh::Create(desc);
+		}
+	}
 }
+
+
 

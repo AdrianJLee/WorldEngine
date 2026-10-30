@@ -575,7 +575,7 @@ namespace World
 			const Gameplay::PrefabInstanceRecord* contextRecord = OwningRecord(*scene, contextHandle);
 			// 菜单高度 = 条目数 × 22 + 8:实例子树多出"来源说明 + 3 个动作"四行,
 			// 旧实现把这几行画在声明高度之外(面板底图盖不住)。
-			const size_t itemCount = 14u + (contextRecord ? 4u : 0u);
+			const size_t itemCount = 16u + (contextRecord ? 4u : 0u);
 			Wui::WuiRect panel;
 			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 260.0f, itemCount, &panel, theme))
 			{
@@ -787,6 +787,48 @@ namespace World
 					createWhiteboxEnt(WhiteboxComponent::ShapeType::Wedge, "Whitebox Wedge", glm::vec3(2.0f, 2.0f, 4.0f));
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createspline_ent"), nextItem(), "Create 3D Spline Road (3D 样条道路)", theme))
 					createSplineRoadEnt();
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createwater_ent"), nextItem(), "Create Environment > Ocean Water Surface (物理水体表面)", theme))
+				{
+					Entity created;
+					if (scene->DeferStructuralChange([&created](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "Ocean Water");
+							auto& xf = created.AddComponent<TransformComponent>();
+							xf.SetLocation({ 0.0f, 0.0f, 0.0f });
+							xf.SetScale({ 100.0f, 1.0f, 100.0f });
+							auto& water = created.AddComponent<WaterBodyComponent>();
+							water.Type = WaterBodyComponent::WaterType::Ocean;
+							water.WaveSteepness = 0.5f;
+							water.WaveLength = 25.0f;
+							water.WaveSpeed = 3.0f;
+							water.WaterColor = glm::vec3(0.1f, 0.35f, 0.65f);
+							water.EnableBuoyancy = 1;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Ocean Water"));
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createweather_ent"), nextItem(), "Create Environment > Weather Controller (动态天气控制中枢)", theme))
+				{
+					Entity created;
+					if (scene->DeferStructuralChange([&created](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "Weather Controller");
+							created.AddComponent<TransformComponent>();
+							auto& weather = created.AddComponent<WeatherSystemComponent>();
+							weather.CurrentWeather = WeatherSystemComponent::WeatherType::Clear;
+							weather.WindSpeed = 8.0f;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Weather Controller"));
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				}
 				// P4-U13d:把"做成 prefab"变成一次有回显、可撤销意图的操作 —— 打开居中模态
 				// (名称 / 目录 / 实时落点 / 覆盖与非法名校验),确认后才写盘。
 				// 旧行为(固定 prefabs/<Tag>.wprefab、同名静默覆盖、导出后无回显)已删除。
@@ -891,7 +933,7 @@ namespace World
 		if (ctx.IsPopupOpen(blankPopup))
 		{
 			ctx.PushOverlay();
-			constexpr size_t blankItemCount = 14;
+			constexpr size_t blankItemCount = 16;
 			const Wui::WuiRect panel { m_BlankMenuPos.x, m_BlankMenuPos.y, 260, blankItemCount * 22 + 8 };
 			DrawPanelSurface(ctx, panel, theme);
 			float itemY = panel.Y + 4.0f;
@@ -1083,6 +1125,48 @@ namespace World
 				createWhiteboxBlank(WhiteboxComponent::ShapeType::Wedge, "Whitebox Wedge", glm::vec3(2.0f, 2.0f, 4.0f));
 			if (MenuItem(ctx, Wui::HashId("hierarchy.createspline"), nextBlankItem(), "Create 3D Spline Road (3D 样条道路)", true, theme))
 				createSplineRoadBlank();
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createwater"), nextBlankItem(), "Create Environment > Ocean Water Surface (物理水体表面)", true, theme))
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Ocean Water");
+						auto& xf = created.AddComponent<TransformComponent>();
+						xf.SetLocation({ 0.0f, 0.0f, 0.0f });
+						xf.SetScale({ 100.0f, 1.0f, 100.0f });
+						auto& water = created.AddComponent<WaterBodyComponent>();
+						water.Type = WaterBodyComponent::WaterType::Ocean;
+						water.WaveSteepness = 0.5f;
+						water.WaveLength = 25.0f;
+						water.WaveSpeed = 3.0f;
+						water.WaterColor = glm::vec3(0.1f, 0.35f, 0.65f);
+						water.EnableBuoyancy = 1;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Ocean Water"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createweather"), nextBlankItem(), "Create Environment > Weather Controller (动态天气控制中枢)", true, theme))
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Weather Controller");
+						created.AddComponent<TransformComponent>();
+						auto& weather = created.AddComponent<WeatherSystemComponent>();
+						weather.CurrentWeather = WeatherSystemComponent::WeatherType::Clear;
+						weather.WindSpeed = 8.0f;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Weather Controller"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
 			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), nextBlankItem(), "Duplicate Selected", hasSelection, theme))
 			{
 				if (hasSelection)

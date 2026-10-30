@@ -156,6 +156,9 @@ namespace World
 		static void SetLODHudVisible(bool visible);
 		static bool IsLODHudVisible();
 
+		static void SetMeshletClustersVisible(bool visible);
+		static bool IsMeshletClustersVisible();
+
 	private:
 		ViewportHost& m_Host;
 		std::shared_ptr<Wui::WuiBox> m_Root;
