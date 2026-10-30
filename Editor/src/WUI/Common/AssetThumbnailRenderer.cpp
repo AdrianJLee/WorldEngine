@@ -29,8 +29,14 @@ namespace World::Editor
 
 	{
 
-				std::filesystem::path ResolveAssetDiskPath(const std::string& logicalPath)
+				static std::unordered_map<std::string, std::filesystem::path> s_ResolvedDiskPathCache;
+
+		std::filesystem::path ResolveAssetDiskPath(const std::string& logicalPath)
 		{
+			auto it = s_ResolvedDiskPathCache.find(logicalPath);
+			if (it != s_ResolvedDiskPathCache.end())
+				return it->second;
+
 			std::string p = logicalPath;
 			std::replace(p.begin(), p.end(), '\\', '/');
 			std::error_code ec;
@@ -57,8 +63,12 @@ namespace World::Editor
 				return engineCand;
 
 			if (std::filesystem::path(p).is_absolute() && std::filesystem::exists(p, ec))
+			{
+				s_ResolvedDiskPathCache[logicalPath] = std::filesystem::path(p);
 				return std::filesystem::path(p);
+			}
 
+			s_ResolvedDiskPathCache[logicalPath] = projectCand;
 			return projectCand;
 		}
 
@@ -94,11 +104,22 @@ namespace World::Editor
 			bool IsTransparent = false;
 		};
 
+		static std::unordered_map<std::string, MatProps> s_MaterialPropsCache;
+
 		MatProps ParseMaterialProps(const std::string& logicalPath)
 		{
+			auto it = s_MaterialPropsCache.find(logicalPath);
+			if (it != s_MaterialPropsCache.end())
+				return it->second;
+
 			MatProps props;
 			std::filesystem::path fullPath = ResolveAssetDiskPath(logicalPath);
 			std::ifstream file(fullPath);
+			if (!file.is_open())
+			{
+				s_MaterialPropsCache[logicalPath] = props;
+				return props;
+			}
 			if (!file.is_open())
 				return props;
 
@@ -167,6 +188,7 @@ namespace World::Editor
 					props.IsTransparent = true;
 				}
 			}
+			s_MaterialPropsCache[logicalPath] = props;
 			return props;
 		}
 
@@ -492,6 +514,16 @@ namespace World::Editor
 
 
 
+		struct CachedMeshWireframe
+		{
+			bool Loaded = false;
+			glm::vec3 Center { 0.0f };
+			glm::vec3 Extents { 1.0f };
+			std::vector<glm::vec3> SampleVertices;
+		};
+
+		static std::unordered_map<std::string, CachedMeshWireframe> s_MeshWireframeCache;
+
 		void DrawMeshWireframe(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
 			const std::string& logicalPath, const Wui::WuiTheme& theme)
 		{
@@ -505,18 +537,35 @@ namespace World::Editor
 			Wui::PanelBackground(ctx, { cx - r * 0.85f, cy + r * 0.55f, r * 1.70f, r * 0.35f },
 				theme.ModalBackdrop, r * 0.35f);
 
-			const std::filesystem::path fullPath = ResolveAssetDiskPath(logicalPath);
-			Asset::WModelData modelData;
-			std::string err;
-			bool loaded = Asset::WModelIO::ReadFile(fullPath.string(), modelData, &err);
-
-			glm::vec3 center(0.0f);
-			glm::vec3 extents(1.0f);
-			if (loaded)
+			auto it = s_MeshWireframeCache.find(logicalPath);
+			if (it == s_MeshWireframeCache.end())
 			{
-				center = (modelData.Bounds.Min + modelData.Bounds.Max) * 0.5f;
-				extents = glm::max(glm::vec3(0.01f), (modelData.Bounds.Max - modelData.Bounds.Min) * 0.5f);
+				CachedMeshWireframe cached;
+				const std::filesystem::path fullPath = ResolveAssetDiskPath(logicalPath);
+				Asset::WModelData modelData;
+				std::string err;
+				cached.Loaded = Asset::WModelIO::ReadFile(fullPath.string(), modelData, &err);
+				if (cached.Loaded)
+				{
+					cached.Center = (modelData.Bounds.Min + modelData.Bounds.Max) * 0.5f;
+					cached.Extents = glm::max(glm::vec3(0.01f), (modelData.Bounds.Max - modelData.Bounds.Min) * 0.5f);
+					if (!modelData.Vertices.empty())
+					{
+						const size_t vCount = modelData.Vertices.size();
+						const size_t step = std::max<size_t>(1, vCount / 12);
+						for (size_t i = 0; i + step < vCount && i < step * 10; i += step)
+						{
+							cached.SampleVertices.push_back(modelData.Vertices[i].Position);
+							cached.SampleVertices.push_back(modelData.Vertices[i + step].Position);
+						}
+					}
+				}
+				it = s_MeshWireframeCache.emplace(logicalPath, std::move(cached)).first;
 			}
+
+			const auto& cached = it->second;
+			const glm::vec3& center = cached.Center;
+			const glm::vec3& extents = cached.Extents;
 
 			constexpr float cosYaw = 0.8253356f;
 			constexpr float sinYaw = 0.5646425f;
@@ -559,14 +608,12 @@ namespace World::Editor
 			Wui::LineSegment(ctx, p001, p101, theme.Warning, 1.5f);
 			Wui::LineSegment(ctx, p101, p100, theme.Warning, 1.5f);
 
-			if (loaded && !modelData.Vertices.empty())
+			if (cached.Loaded && !cached.SampleVertices.empty())
 			{
-				const size_t vCount = modelData.Vertices.size();
-				const size_t step = std::max<size_t>(1, vCount / 12);
-				for (size_t i = 0; i + step < vCount && i < step * 10; i += step)
+				for (size_t i = 0; i + 1 < cached.SampleVertices.size(); i += 2)
 				{
-					const glm::vec2 va = project(modelData.Vertices[i].Position);
-					const glm::vec2 vb = project(modelData.Vertices[i + step].Position);
+					const glm::vec2 va = project(cached.SampleVertices[i]);
+					const glm::vec2 vb = project(cached.SampleVertices[i + 1]);
 					Wui::LineSegment(ctx, va, vb, theme.AxisZ, 1.0f);
 				}
 			}
