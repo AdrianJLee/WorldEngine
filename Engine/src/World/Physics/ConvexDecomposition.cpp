@@ -667,6 +667,20 @@ namespace World
 			outHull.Center += v;
 		outHull.Center /= static_cast<float>(outHull.Vertices.size());
 
+		// 确保所有三角面的法向量严格背离质心朝外 (统一顶点绕序)
+		for (size_t i = 0; i + 2 < outHull.Indices.size(); i += 3)
+		{
+			const glm::vec3& a = outHull.Vertices[outHull.Indices[i]];
+			const glm::vec3& b = outHull.Vertices[outHull.Indices[i + 1]];
+			const glm::vec3& c = outHull.Vertices[outHull.Indices[i + 2]];
+			const glm::vec3 faceCenter = (a + b + c) / 3.0f;
+			const glm::vec3 faceNormal = glm::cross(b - a, c - a);
+			if (glm::dot(faceNormal, faceCenter - outHull.Center) < 0.0f)
+			{
+				std::swap(outHull.Indices[i + 1], outHull.Indices[i + 2]);
+			}
+		}
+
 		outHull.Volume = 0.0f;
 		for (size_t i = 0; i + 2 < outHull.Indices.size(); i += 3)
 		{
@@ -699,32 +713,33 @@ namespace World
 			return;
 		}
 
-		// 递归剖分辅助函数
-		std::function<void(const std::vector<glm::vec3>&, uint32_t)> decomposeSubmesh;
-		decomposeSubmesh = [&](const std::vector<glm::vec3>& pts, uint32_t allowedHulls)
-		{
-			if (pts.size() < 4)
-				return;
+		// 1. 先尝试构建全局外包凸包，评估网格整体凹度
+		ConvexHull singleHull;
+		const bool hasSingleHull = ComputeHull(vertices, singleHull);
 
-			ConvexHull hull;
-			if (!ComputeHull(pts, hull))
+		if (hasSingleHull && concavityThreshold > 0.0f)
+		{
+			// 若全部顶点都位于凸包表面，则输入网格自身为严格凸体，无需拆解
+			if (singleHull.Vertices.size() == vertices.size())
+			{
+				outHulls.push_back(std::move(singleHull));
 				return;
+			}
 
 			// 评估网格凹度：测量外凸包各面中心到特征采样点云的最近距离
-			// 为消除每面全量双重循环的高额耗时，对点云按特征进行等间隔稀疏采样 (上限 256 点)
-			const size_t ptSampleStep = std::max<size_t>(1, pts.size() / 256);
+			const size_t ptSampleStep = std::max<size_t>(1, vertices.size() / 256);
 			float maxConcavitySq = 0.0f;
-			for (size_t i = 0; i + 2 < hull.Indices.size(); i += 3)
+			for (size_t i = 0; i + 2 < singleHull.Indices.size(); i += 3)
 			{
-				const glm::vec3& a = hull.Vertices[hull.Indices[i]];
-				const glm::vec3& b = hull.Vertices[hull.Indices[i + 1]];
-				const glm::vec3& c = hull.Vertices[hull.Indices[i + 2]];
+				const glm::vec3& a = singleHull.Vertices[singleHull.Indices[i]];
+				const glm::vec3& b = singleHull.Vertices[singleHull.Indices[i + 1]];
+				const glm::vec3& c = singleHull.Vertices[singleHull.Indices[i + 2]];
 				const glm::vec3 faceCenter = (a + b + c) / 3.0f;
 
 				float minDistSq = std::numeric_limits<float>::max();
-				for (size_t pIdx = 0; pIdx < pts.size(); pIdx += ptSampleStep)
+				for (size_t pIdx = 0; pIdx < vertices.size(); pIdx += ptSampleStep)
 				{
-					const float d2 = glm::distance2(faceCenter, pts[pIdx]);
+					const float d2 = glm::distance2(faceCenter, vertices[pIdx]);
 					if (d2 < minDistSq)
 						minDistSq = d2;
 				}
@@ -734,76 +749,200 @@ namespace World
 			}
 			const float maxConcavity = std::sqrt(maxConcavitySq);
 
-			// 若凹度在阈值内，或已达最大划分凸包上限，接受当前凸包
-			if (maxConcavity <= concavityThreshold || allowedHulls <= 1 || pts.size() <= 8)
+			if (maxConcavity <= concavityThreshold)
 			{
-				outHulls.push_back(std::move(hull));
+				outHulls.push_back(std::move(singleHull));
 				return;
 			}
+		}
 
-			// 沿包围盒最大延展主轴切分点云
-			glm::vec3 minP = pts[0], maxP = pts[0];
-			for (const auto& p : pts)
+		// 2. 空间 K-Means 几何聚类切分 (废除粗暴 AABB 轴向切分，彻底杜绝手腕连到头部、跨肢体蜘蛛网拉扯)
+		uint32_t K = maxHulls;
+		if (K > vertices.size() / 4)
+			K = static_cast<uint32_t>(vertices.size() / 4);
+
+		if (K <= 1)
+		{
+			if (hasSingleHull)
+				outHulls.push_back(std::move(singleHull));
+			return;
+		}
+
+		// (1) 使用最远点采样 (Farthest Point Sampling, FPS) 确定 K 个天然空间几何拓扑种子点
+		glm::vec3 centroid(0.0f);
+		for (const auto& p : vertices)
+			centroid += p;
+		centroid /= static_cast<float>(vertices.size());
+
+		std::vector<glm::vec3> seeds;
+		seeds.reserve(K);
+
+		// 第 1 个种子点：距离整体几何质心最远的点 (肢体末梢极值特征点)
+		size_t seed0Idx = 0;
+		float maxDistSq = -1.0f;
+		for (size_t i = 0; i < vertices.size(); ++i)
+		{
+			const float d2 = glm::distance2(vertices[i], centroid);
+			if (d2 > maxDistSq)
 			{
-				minP = glm::min(minP, p);
-				maxP = glm::max(maxP, p);
+				maxDistSq = d2;
+				seed0Idx = i;
 			}
+		}
+		seeds.push_back(vertices[seed0Idx]);
 
-			const glm::vec3 extents = maxP - minP;
-			int splitAxis = 0;
-			if (extents.y > extents.x && extents.y > extents.z) splitAxis = 1;
-			else if (extents.z > extents.x && extents.z > extents.y) splitAxis = 2;
+		// 维护各点到已选种子集合的最近距离平方
+		std::vector<float> minDistanceToSeeds(vertices.size());
+		for (size_t i = 0; i < vertices.size(); ++i)
+			minDistanceToSeeds[i] = glm::distance2(vertices[i], seeds[0]);
 
-			const float splitVal = (minP[splitAxis] + maxP[splitAxis]) * 0.5f;
-			// 切面过渡重叠保护带 (5% 沿轴包围盒延伸)，防止两子凸包在切割接缝处塌缩留缝
-			const float overlapBand = extents[splitAxis] * 0.05f;
-
-			std::vector<glm::vec3> setA, setB;
-			setA.reserve(pts.size());
-			setB.reserve(pts.size());
-			for (const auto& p : pts)
+		for (uint32_t k = 1; k < K; ++k)
+		{
+			size_t nextSeedIdx = 0;
+			float maxMinDistSq = -1.0f;
+			for (size_t i = 0; i < vertices.size(); ++i)
 			{
-				if (p[splitAxis] <= splitVal + overlapBand)
-					setA.push_back(p);
-				if (p[splitAxis] >= splitVal - overlapBand)
-					setB.push_back(p);
-			}
-
-			// 保护子集点数 >= 4；若分流倾斜则按中位数切分 (带中位数邻域平滑重叠)
-			if (setA.size() < 4 || setB.size() < 4 || setA.size() == pts.size() || setB.size() == pts.size())
-			{
-				std::vector<glm::vec3> sortedPts = pts;
-				std::sort(sortedPts.begin(), sortedPts.end(), [splitAxis](const glm::vec3& l, const glm::vec3& r)
+				if (minDistanceToSeeds[i] > maxMinDistSq)
 				{
-					return l[splitAxis] < r[splitAxis];
-				});
-				const size_t mid = sortedPts.size() / 2;
-				const size_t overlap = std::max<size_t>(1, sortedPts.size() / 20); // 5% overlap
-				const size_t endA = std::min(sortedPts.size(), mid + overlap);
-				const size_t startB = (mid >= overlap) ? (mid - overlap) : 0;
-				setA.assign(sortedPts.begin(), sortedPts.begin() + endA);
-				setB.assign(sortedPts.begin() + startB, sortedPts.end());
+					maxMinDistSq = minDistanceToSeeds[i];
+					nextSeedIdx = i;
+				}
 			}
+			seeds.push_back(vertices[nextSeedIdx]);
 
-			if (setA.size() < 4 || setB.size() < 4 || (setA.size() == pts.size() && setB.size() == pts.size()))
+			for (size_t i = 0; i < vertices.size(); ++i)
 			{
-				outHulls.push_back(std::move(hull));
-				return;
+				const float d2 = glm::distance2(vertices[i], seeds.back());
+				if (d2 < minDistanceToSeeds[i])
+					minDistanceToSeeds[i] = d2;
+			}
+		}
+
+		// (2) K-Means 迭代优化收敛 (迭代 4 ~ 6 次，保证各肢体与拓扑簇质心收敛稳定)
+		constexpr int kMaxIterations = 6;
+		std::vector<uint32_t> assignments(vertices.size(), 0);
+		std::vector<glm::vec3> clusterCenters = seeds;
+
+		for (int iter = 0; iter < kMaxIterations; ++iter)
+		{
+			// E-step: 分配每个顶点到最近的种子簇 (3D 欧氏距离最近)
+			for (size_t i = 0; i < vertices.size(); ++i)
+			{
+				uint32_t bestCluster = 0;
+				float bestDistSq = glm::distance2(vertices[i], clusterCenters[0]);
+				for (uint32_t k = 1; k < K; ++k)
+				{
+					const float d2 = glm::distance2(vertices[i], clusterCenters[k]);
+					if (d2 < bestDistSq)
+					{
+						bestDistSq = d2;
+						bestCluster = k;
+					}
+				}
+				assignments[i] = bestCluster;
 			}
 
-			const uint32_t hullsA = allowedHulls / 2;
-			const uint32_t hullsB = allowedHulls - hullsA;
-			decomposeSubmesh(setA, hullsA);
-			decomposeSubmesh(setB, hullsB);
-		};
+			// M-step: 重新计算各簇质心
+			std::vector<glm::vec3> newCenters(K, glm::vec3(0.0f));
+			std::vector<uint32_t> clusterCounts(K, 0);
 
-		decomposeSubmesh(vertices, maxHulls);
+			for (size_t i = 0; i < vertices.size(); ++i)
+			{
+				newCenters[assignments[i]] += vertices[i];
+				clusterCounts[assignments[i]]++;
+			}
 
+			for (uint32_t k = 0; k < K; ++k)
+			{
+				if (clusterCounts[k] > 0)
+				{
+					clusterCenters[k] = newCenters[k] / static_cast<float>(clusterCounts[k]);
+				}
+				else
+				{
+					// 空簇逃逸保护: 寻找离当前所有质心最远的顶点重新激活该簇
+					size_t furthestIdx = 0;
+					float maxD = -1.0f;
+					for (size_t i = 0; i < vertices.size(); ++i)
+					{
+						float minDist = std::numeric_limits<float>::max();
+						for (uint32_t j = 0; j < K; ++j)
+						{
+							if (clusterCounts[j] > 0)
+								minDist = std::min(minDist, glm::distance2(vertices[i], clusterCenters[j]));
+						}
+						if (minDist > maxD)
+						{
+							maxD = minDist;
+							furthestIdx = i;
+						}
+					}
+					clusterCenters[k] = vertices[furthestIdx];
+				}
+			}
+		}
+
+		// (3) 收集各簇顶点并进行退化保护
+		std::vector<std::vector<glm::vec3>> clusters(K);
+		for (size_t i = 0; i < vertices.size(); ++i)
+		{
+			clusters[assignments[i]].push_back(vertices[i]);
+		}
+
+		// 保护: 若有簇点数 < 4，合并至欧氏距离最近的有效簇中
+		for (uint32_t k = 0; k < K; ++k)
+		{
+			if (clusters[k].size() < 4 && !clusters[k].empty())
+			{
+				uint32_t nearestCluster = K;
+				float minDist = std::numeric_limits<float>::max();
+				for (uint32_t j = 0; j < K; ++j)
+				{
+					if (j != k && clusters[j].size() >= 4)
+					{
+						const float d2 = glm::distance2(clusterCenters[k], clusterCenters[j]);
+						if (d2 < minDist)
+						{
+							minDist = d2;
+							nearestCluster = j;
+						}
+					}
+				}
+				if (nearestCluster < K)
+				{
+					clusters[nearestCluster].insert(clusters[nearestCluster].end(), clusters[k].begin(), clusters[k].end());
+					clusters[k].clear();
+				}
+			}
+		}
+
+		// (4) 对每个局部几何簇独立计算紧致局部凸包
+		for (uint32_t k = 0; k < K; ++k)
+		{
+			if (clusters[k].size() < 4)
+				continue;
+
+			ConvexHull hull;
+			if (ComputeHull(clusters[k], hull))
+			{
+				if (hull.IsConvex() && hull.Volume > 0.0f)
+				{
+					outHulls.push_back(std::move(hull));
+				}
+			}
+		}
+
+		// 若聚类未能形成任何有效凸包，使用全局外凸包保底
 		if (outHulls.empty())
 		{
-			ConvexHull fallback;
-			if (ComputeHull(vertices, fallback))
-				outHulls.push_back(std::move(fallback));
+			if (hasSingleHull)
+				outHulls.push_back(std::move(singleHull));
+			else
+			{
+				ConvexHull fallback;
+				if (ComputeHull(vertices, fallback))
+					outHulls.push_back(std::move(fallback));
+			}
 		}
 	}
 }

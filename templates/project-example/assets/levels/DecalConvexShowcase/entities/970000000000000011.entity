@@ -4,7 +4,7 @@ Entity:
     ID:
       m_UUID: 970000000000000011
   World::TagComponent:
-    Tag: "Dynamic Concave Body (D5Fixture)"
+    Tag: "Dynamic Concave Rock (Debris Shard)"
   World::TransformComponent:
     Location: [8.0, 4.5, -1.0]
     Rotation: [20, 35, 15]
@@ -12,14 +12,14 @@ Entity:
   World::MeshRendererComponent:
     Primitive: 0
     Color: [0.95, 0.55, 0.15, 1.0]
-    Mesh: "engine/models/fixtures/D5Fixture.wmodel"
+    Mesh: "engine/models/debris_shard.wmodel"
   World::RigidBody3DComponent:
     BodyType: 0
     Mass: 12.0
     Restitution: 0.2
     Friction: 0.6
   World::ConvexCollider3DComponent:
-    MeshSource: "engine/models/fixtures/D5Fixture.wmodel"
+    MeshSource: "engine/models/debris_shard.wmodel"
     HullCount: 4
     MaxVerticesPerHull: 32
     ConcavityThreshold: 0.05

@@ -24,7 +24,7 @@ namespace World
 		// 从点云构建最小包围凸包 (3D 极值包络)
 		static bool ComputeHull(const std::vector<glm::vec3>& inPoints, ConvexHull& outHull);
 
-		// 将凹面网格拆解为多凸包复合体
+		// 将凹面网格拆解为多凸包复合体 (基于空间 K-Means 几何拓扑聚类，杜绝跨肢体蜘蛛网拉扯)
 		static void Decompose(
 			const std::vector<glm::vec3>& vertices,
 			const std::vector<uint32_t>& indices,

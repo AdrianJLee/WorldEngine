@@ -30,11 +30,116 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include "World/Scene/SceneOctree.h"
 #include "World/Scene/Scene.h"
+#include "World/Asset/WModelIO.h"
+#include "World/Utils/Paths.h"
+#include <unordered_map>
 
 namespace World
 {
 	namespace
 	{
+		struct CachedConvexHullEdges
+		{
+			std::vector<std::pair<glm::vec3, glm::vec3>> Edges;
+		};
+
+		struct CachedModelConvex
+		{
+			std::string Path;
+			std::filesystem::file_time_type LastWriteTime {};
+			glm::vec3 BoundsMin { -0.5f, -0.5f, -0.5f };
+			glm::vec3 BoundsMax {  0.5f,  0.5f,  0.5f };
+			bool HasBounds = false;
+			bool HasHulls = false;
+			std::vector<CachedConvexHullEdges> Hulls;
+		};
+
+		static const CachedModelConvex* GetCachedModelConvex(const std::string& modelPath)
+		{
+			if (modelPath.empty())
+				return nullptr;
+
+			static std::unordered_map<std::string, CachedModelConvex> s_ConvexWireframeCache;
+
+			std::filesystem::path physicalPath;
+			if (modelPath.rfind("engine/", 0) == 0)
+				physicalPath = Paths::EngineContentRoot() / modelPath.substr(7);
+			else
+				physicalPath = Paths::AssetRoot() / modelPath;
+
+			std::error_code ec;
+			const auto writeTime = std::filesystem::last_write_time(physicalPath, ec);
+
+			auto it = s_ConvexWireframeCache.find(modelPath);
+			if (it != s_ConvexWireframeCache.end() && !ec && it->second.LastWriteTime == writeTime)
+			{
+				return &it->second;
+			}
+
+			CachedModelConvex entry;
+			entry.Path = modelPath;
+			entry.LastWriteTime = ec ? std::filesystem::file_time_type{} : writeTime;
+
+			Asset::WModelData model;
+			std::string err;
+			if (Asset::WModelIO::ReadFile(modelPath, model, &err))
+			{
+				entry.BoundsMin = model.Bounds.Min;
+				entry.BoundsMax = model.Bounds.Max;
+				entry.HasBounds = true;
+
+				if (model.Collision.CollisionType != 0 && !model.Collision.ConvexHulls.empty())
+				{
+					entry.HasHulls = true;
+					entry.Hulls.reserve(model.Collision.ConvexHulls.size());
+					for (const auto& hull : model.Collision.ConvexHulls)
+					{
+						CachedConvexHullEdges hullEdges;
+						if (hull.Indices.size() >= 3)
+						{
+							std::vector<std::pair<uint32_t, uint32_t>> edgePairs;
+							edgePairs.reserve(hull.Indices.size());
+							for (size_t i = 0; i + 2 < hull.Indices.size(); i += 3)
+							{
+								uint32_t a = hull.Indices[i];
+								uint32_t b = hull.Indices[i + 1];
+								uint32_t c = hull.Indices[i + 2];
+								auto addEdge = [&](uint32_t u, uint32_t v)
+								{
+									if (u > v) std::swap(u, v);
+									edgePairs.push_back({ u, v });
+								};
+								addEdge(a, b);
+								addEdge(b, c);
+								addEdge(c, a);
+							}
+							std::sort(edgePairs.begin(), edgePairs.end());
+							edgePairs.erase(std::unique(edgePairs.begin(), edgePairs.end()), edgePairs.end());
+
+							hullEdges.Edges.reserve(edgePairs.size());
+							for (const auto& ep : edgePairs)
+							{
+								if (ep.first < hull.Vertices.size() && ep.second < hull.Vertices.size())
+								{
+									hullEdges.Edges.push_back({ hull.Vertices[ep.first], hull.Vertices[ep.second] });
+								}
+							}
+						}
+						else if (hull.Vertices.size() >= 2)
+						{
+							for (size_t i = 0; i + 1 < hull.Vertices.size(); ++i)
+							{
+								hullEdges.Edges.push_back({ hull.Vertices[i], hull.Vertices[i + 1] });
+							}
+						}
+						entry.Hulls.push_back(std::move(hullEdges));
+					}
+				}
+			}
+
+			auto [insertedIt, _] = s_ConvexWireframeCache.insert_or_assign(modelPath, std::move(entry));
+			return &insertedIt->second;
+		}
 
 		static bool s_ShowAllAudioGizmos = false;
 		static bool s_ShowNavMesh = true;
@@ -3244,65 +3349,56 @@ namespace World
 						}
 						if (const auto* convex = registry.try_get<ConvexCollider3DComponent>(handle))
 						{
-							glm::vec3 localMin { -0.5f, -0.5f, -0.5f };
-							glm::vec3 localMax {  0.5f,  0.5f,  0.5f };
-							if (const auto* mr = registry.try_get<MeshRendererComponent>(handle))
+							std::string modelPath;
+							if (convex->MeshSource.HasPath())
 							{
-								if (mr->Primitive == MeshRendererComponent::PrimitiveShape::Plane)
+								modelPath = std::string(StringPool::Get().PathOf(convex->MeshSource.Path));
+							}
+							else if (const auto* mr = registry.try_get<MeshRendererComponent>(handle))
+							{
+								if (mr->Mesh.HasPath())
 								{
-									localMin.y = 0.0f;
-									localMax.y = 0.0f;
+									modelPath = std::string(StringPool::Get().PathOf(mr->Mesh.Path));
 								}
 							}
-							const uint32_t hullCount = std::clamp(convex->HullCount, 1u, 16u);
-							if (hullCount <= 1)
+
+							const CachedModelConvex* cached = GetCachedModelConvex(modelPath);
+							if (cached && cached->HasHulls && !cached->Hulls.empty())
 							{
-								glm::vec3 corners[8];
-								for (int i = 0; i < 8; ++i)
+								// 预烘焙复合凸包: 直接绘制子凸包真实顶点与线段，与实机模型 100% 几何对齐吻合
+								for (const auto& hull : cached->Hulls)
 								{
-									corners[i] = glm::vec3 {
-										(i & 1) ? localMax.x : localMin.x,
-										(i & 2) ? localMax.y : localMin.y,
-										(i & 4) ? localMax.z : localMin.z
-									};
-								}
-								for (int i = 0; i < 8; ++i)
-								{
-									for (int axis = 0; axis < 3; ++axis)
+									for (const auto& edge : hull.Edges)
 									{
-										const int other = i ^ (1 << axis);
-										if (other > i)
-											PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-												corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+										PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+											edge.first, edge.second, color, thickness, &overlayMin, &overlayMax);
 									}
 								}
-								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-									corners[0], corners[7], color, thickness * 0.7f, &overlayMin, &overlayMax);
-								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-									corners[1], corners[6], color, thickness * 0.7f, &overlayMin, &overlayMax);
+								drew = true;
 							}
 							else
 							{
-								const glm::vec3 ext = localMax - localMin;
-								int splitAxis = 0;
-								if (ext.y >= ext.x && ext.y >= ext.z) splitAxis = 1;
-								else if (ext.z >= ext.x && ext.z >= ext.y) splitAxis = 2;
-
-								const float step = ext[splitAxis] / static_cast<float>(hullCount);
-								for (uint32_t k = 0; k < hullCount; ++k)
+								// 未预烘焙: 采用关联网格真实几何包围盒 (MeshBounds)，杜绝手写 [-0.5, 0.5] 假长方体错位
+								glm::vec3 localMin = (cached && cached->HasBounds) ? cached->BoundsMin : glm::vec3(-0.5f, -0.5f, -0.5f);
+								glm::vec3 localMax = (cached && cached->HasBounds) ? cached->BoundsMax : glm::vec3( 0.5f,  0.5f,  0.5f);
+								if (const auto* mr = registry.try_get<MeshRendererComponent>(handle))
 								{
-									glm::vec3 subMin = localMin;
-									glm::vec3 subMax = localMax;
-									subMin[splitAxis] = localMin[splitAxis] + step * static_cast<float>(k);
-									subMax[splitAxis] = localMin[splitAxis] + step * static_cast<float>(k + 1);
-
+									if (mr->Primitive == MeshRendererComponent::PrimitiveShape::Plane)
+									{
+										localMin.y = 0.0f;
+										localMax.y = 0.0f;
+									}
+								}
+								const uint32_t hullCount = std::clamp(convex->HullCount, 1u, 16u);
+								if (hullCount <= 1)
+								{
 									glm::vec3 corners[8];
 									for (int i = 0; i < 8; ++i)
 									{
 										corners[i] = glm::vec3 {
-											(i & 1) ? subMax.x : subMin.x,
-											(i & 2) ? subMax.y : subMin.y,
-											(i & 4) ? subMax.z : subMin.z
+											(i & 1) ? localMax.x : localMin.x,
+											(i & 2) ? localMax.y : localMin.y,
+											(i & 4) ? localMax.z : localMin.z
 										};
 									}
 									for (int i = 0; i < 8; ++i)
@@ -3315,9 +3411,49 @@ namespace World
 													corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
 										}
 									}
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										corners[0], corners[7], color, thickness * 0.7f, &overlayMin, &overlayMax);
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										corners[1], corners[6], color, thickness * 0.7f, &overlayMin, &overlayMax);
 								}
+								else
+								{
+									const glm::vec3 ext = localMax - localMin;
+									int splitAxis = 0;
+									if (ext.y >= ext.x && ext.y >= ext.z) splitAxis = 1;
+									else if (ext.z >= ext.x && ext.z >= ext.y) splitAxis = 2;
+
+									const float step = ext[splitAxis] / static_cast<float>(hullCount);
+									for (uint32_t k = 0; k < hullCount; ++k)
+									{
+										glm::vec3 subMin = localMin;
+										glm::vec3 subMax = localMax;
+										subMin[splitAxis] = localMin[splitAxis] + step * static_cast<float>(k);
+										subMax[splitAxis] = localMin[splitAxis] + step * static_cast<float>(k + 1);
+
+										glm::vec3 corners[8];
+										for (int i = 0; i < 8; ++i)
+										{
+											corners[i] = glm::vec3 {
+												(i & 1) ? subMax.x : subMin.x,
+												(i & 2) ? subMax.y : subMin.y,
+												(i & 4) ? subMax.z : subMin.z
+											};
+										}
+										for (int i = 0; i < 8; ++i)
+										{
+											for (int axis = 0; axis < 3; ++axis)
+											{
+												const int other = i ^ (1 << axis);
+												if (other > i)
+													PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+														corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+											}
+										}
+									}
+								}
+								drew = true;
 							}
-							drew = true;
 						}
 						if (drew)
 							++colliderCount;

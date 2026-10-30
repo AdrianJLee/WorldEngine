@@ -26,6 +26,7 @@ namespace
 #include "World/Asset/WAnimationClipIO.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Utils/Paths.h"
+#include "World/Physics/PhysicsSettings.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/WuiAccessibility.h"
@@ -1715,7 +1716,7 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		const Wui::WuiTheme& theme)
 	{
 		(void)theme;
-		if (!m_ShowCollisionWireframe && m_ActiveTab != static_cast<int>(Tab::Collision))
+		if (!m_ShowCollisionWireframe)
 			return;
 		if (m_CachedCollisionEdges.empty() && m_CachedCollisionPoints.empty())
 			return;
@@ -3058,53 +3059,126 @@ void ModelPreviewPanel::DrawBoundsWireframe(Wui::WuiContext& ctx, const Wui::Wui
 		drawTypeSegment(2, "Bounding Box 包围盒", "Bounding Box: 生成轴对齐包围盒 (AABB) 简易凸包", x + (segBtnW + segGap) * 2.0f);
 		y += 32.0f;
 
-		// 3. 物理碰撞预设 (Collision Presets / Profile) - 独立章节 & ComboBox
+		// 3. 物理碰撞预设 (Collision Presets / Profile) - 动态读取项目设置
 		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
-			"Collision Presets (物理碰撞预设)", theme.Accent, theme);
+			"Collision Presets (物理碰撞预设与项目设置对齐)", theme.Accent, theme);
 		y += 24.0f;
 
-		const float profileLabelW = 80.0f;
-		const float profileComboW = width - profileLabelW;
-		Wui::Label(ctx, { x, y + 3.0f }, "Profile:", theme.Text, theme.FontSizeSmall);
+		const auto& channelConfig = World::PhysicsSettings::GetChannels();
+		const auto& registeredProfiles = channelConfig.Profiles.empty()
+			? World::Asset::CollisionChannelConfig::Default().Profiles
+			: channelConfig.Profiles;
 
-		static const std::vector<std::string> s_ProfileOptions = { "Default", "BlockAll", "OverlapPawn", "WorldDynamic" };
-		int curProfileIdx = 0;
-		for (size_t i = 0; i < s_ProfileOptions.size(); ++i)
+		std::vector<std::string> profileNames;
+		profileNames.reserve(registeredProfiles.size() + 1);
+		for (const auto& p : registeredProfiles)
 		{
-			if (s_ProfileOptions[i] == m_SelectedCollisionProfile)
+			profileNames.push_back(p.Name);
+		}
+		if (std::find(profileNames.begin(), profileNames.end(), "Default") == profileNames.end())
+		{
+			profileNames.insert(profileNames.begin(), "Default");
+		}
+
+		int curProfileIdx = 0;
+		for (size_t i = 0; i < profileNames.size(); ++i)
+		{
+			if (profileNames[i] == m_SelectedCollisionProfile)
 			{
 				curProfileIdx = static_cast<int>(i);
 				break;
 			}
 		}
 
+		const float profileLabelW = 80.0f;
+		const float profileComboW = width - profileLabelW;
+		Wui::Label(ctx, { x, y + 3.0f }, "Profile:", theme.Text, theme.FontSizeSmall);
+
 		if (Wui::Combo(ctx, Wui::HashId("model.col.profile_combo"), { x + profileLabelW, y, profileComboW, 24.0f },
-			"", s_ProfileOptions, curProfileIdx, theme))
+			"", profileNames, curProfileIdx, theme))
 		{
-			if (curProfileIdx >= 0 && curProfileIdx < static_cast<int>(s_ProfileOptions.size()))
+			if (curProfileIdx >= 0 && curProfileIdx < static_cast<int>(profileNames.size()))
 			{
-				m_SelectedCollisionProfile = s_ProfileOptions[curProfileIdx];
+				m_SelectedCollisionProfile = profileNames[curProfileIdx];
 			}
 		}
 		Wui::Tooltip(ctx, { x + profileLabelW, y, profileComboW, 24.0f },
-			"选择模型资产的默认物理通道预设 (Default Collision Profile)");
+			"选择模型资产的默认物理通道预设 (与 Project Settings 注册的 Profiles 动态保持一致)");
 		y += 28.0f;
 
-		// 下方显示当前选中预设的专业释义提示
-		std::string profileDesc;
-		if (m_SelectedCollisionProfile == "BlockAll")
-			profileDesc = "BlockAll: 阻挡所有物理刚体碰撞与视线投射 (Trace)";
-		else if (m_SelectedCollisionProfile == "OverlapPawn")
-			profileDesc = "OverlapPawn: 仅与玩家/角色 Pawn 产生重叠感知事件，忽略射线检测与刚体推挤";
-		else if (m_SelectedCollisionProfile == "WorldDynamic")
-			profileDesc = "WorldDynamic: 动态环境刚体物体，与静态世界和各类动态物理实体互撞";
-		else
-			profileDesc = "Default: 采用关卡或实体全局默认碰撞过滤规则与物理响应";
+		// 契约一致性展示: 选中预设的 ObjectType 与响应规则汇总卡片
+		const World::Asset::CollisionProfile* selectedProf = nullptr;
+		for (const auto& p : registeredProfiles)
+		{
+			if (p.Name == m_SelectedCollisionProfile)
+			{
+				selectedProf = &p;
+				break;
+			}
+		}
 
-		const Wui::WuiRect descRect { x, y, width, 24.0f };
+		const float descCardH = 46.0f;
+		const Wui::WuiRect descRect { x, y, width, descCardH };
 		Wui::PanelBackground(ctx, descRect, Alpha(theme.Border, 0.20f), 4.0f);
-		Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 4.0f }, profileDesc, theme.TextMuted, theme.FontSizeCaption);
-		y += 32.0f;
+		Wui::HighlightOutline(ctx, descRect, Alpha(theme.Accent, 0.35f), 4.0f, 1.0f);
+
+		if (selectedProf)
+		{
+			const uint8_t objTypeIdx = selectedProf->ObjectType;
+			const std::string objTypeName = (objTypeIdx < World::Asset::CollisionChannelConfig::kMaxChannels && !channelConfig.ChannelNames[objTypeIdx].empty())
+				? std::string(channelConfig.ChannelNames[objTypeIdx])
+				: "Channel #" + std::to_string(objTypeIdx);
+
+			uint32_t blockCount = 0;
+			uint32_t overlapCount = 0;
+			uint32_t ignoreCount = 0;
+			for (size_t ch = 0; ch < World::Asset::CollisionChannelConfig::kMaxChannels; ++ch)
+			{
+				const std::string_view chName = channelConfig.GetChannelName(static_cast<uint8_t>(ch));
+				if (chName.empty())
+					continue;
+				const auto resp = selectedProf->Responses.GetResponse(static_cast<uint8_t>(ch));
+				if (resp == World::Asset::CollisionResponse::Block)
+					++blockCount;
+				else if (resp == World::Asset::CollisionResponse::Overlap)
+					++overlapCount;
+				else
+					++ignoreCount;
+			}
+
+			char line1Buf[192];
+			std::snprintf(line1Buf, sizeof(line1Buf), "Object Type: #%u (%s)  |  Responses: %u Block, %u Overlap, %u Ignore",
+				static_cast<unsigned>(objTypeIdx), objTypeName.c_str(), blockCount, overlapCount, ignoreCount);
+			Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 5.0f }, line1Buf, theme.Accent, theme.FontSizeSmall);
+
+			std::string ruleSummary;
+			if (m_SelectedCollisionProfile == "BlockAll" || (overlapCount == 0 && ignoreCount == 0))
+				ruleSummary = "Blocks all channels (硬阻挡所有物理碰撞与视线投射)";
+			else if (m_SelectedCollisionProfile == "OverlapAll" || (blockCount == 0 && ignoreCount == 0))
+				ruleSummary = "Overlaps all channels (仅触发重叠感知事件，不产生物理推挤)";
+			else if (m_SelectedCollisionProfile == "NoCollision" || (blockCount == 0 && overlapCount == 0))
+				ruleSummary = "Ignores all channels (完全穿透忽略，无碰撞无重叠)";
+			else if (m_SelectedCollisionProfile == "Pawn")
+				ruleSummary = "Blocks world & objects; Overlaps TriggerZone & Foliage; Ignores Camera";
+			else if (m_SelectedCollisionProfile == "Glass")
+				ruleSummary = "Blocks objects; Ignores Camera and Visibility trace";
+			else if (m_SelectedCollisionProfile == "InvisibleWall")
+				ruleSummary = "Blocks Pawn & Vehicle; Ignores all other channels";
+			else if (m_SelectedCollisionProfile == "TriggerOnly")
+				ruleSummary = "Ignores all channels except Overlap with Pawn & Vehicle";
+			else
+				ruleSummary = "Custom Profile: " + std::to_string(blockCount) + " Block, " + std::to_string(overlapCount) + " Overlap, " + std::to_string(ignoreCount) + " Ignore";
+
+			Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 24.0f }, ruleSummary, theme.TextMuted, theme.FontSizeCaption);
+		}
+		else
+		{
+			Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 5.0f },
+				"Object Type: Default (Inherited)  |  Responses: Project Default", theme.Accent, theme.FontSizeSmall);
+			Wui::Label(ctx, { descRect.X + 8.0f, descRect.Y + 24.0f },
+				"Default: 采用关卡或实体全局默认碰撞过滤规则与物理响应", theme.TextMuted, theme.FontSizeCaption);
+		}
+		y += descCardH + 8.0f;
 
 		// 4. 分解参数调节 (Decomposition Settings) - 双列排版 + 4 极简预设胶囊按钮
 		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
