@@ -1,0 +1,28 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 982000000000000008
+  World::TagComponent:
+    Tag: "Tactical Cover Concrete Barrier A"
+  World::TransformComponent:
+    Location: [0.0, 1.25, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 0
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [2.5, 2.5, 12.0]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::NavMeshObstacleComponent:
+    Extents: [1.25, 1.25, 6.0]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.45, 0.48, 0.52, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 2

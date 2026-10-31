@@ -1,0 +1,18 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 982000000000000006
+  World::TagComponent:
+    Tag: "AI Tactical Cover Querier"
+  World::TransformComponent:
+    Location: [15.0, 0.5, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::EQSComponent:
+    QueryCenter: [15.0, 0.5, 0.0]
+    QueryRadius: 20.0
+    GridSpacing: 1.5
+    BestCoverFound: 0
+  World::LevelEntityComponent:
+    DataLayerMask: 2

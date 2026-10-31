@@ -1727,7 +1727,7 @@ void PropertiesPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, P
 			m_Sections.clear();
 			for (const Schema::TypeSchema* schema : componentSchemas)
 			{
-				const bool defaultOpen = false;
+				const bool defaultOpen = (schema->DisplayName == "BiomePCGComponent" || schema->DisplayName == "EQSComponent" || schema->DisplayName == "FoliageInteractionComponent");
 				m_Sections.push_back({ schema->DisplayName, defaultOpen, 0.0f });
 			}
 		}
@@ -1744,7 +1744,7 @@ void PropertiesPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, P
 			if (i >= componentSchemas.size())
 				break;
 			const Schema::TypeSchema* schema = componentSchemas[i];
-			const bool defaultOpen = false;
+			const bool defaultOpen = (schema->DisplayName == "BiomePCGComponent" || schema->DisplayName == "EQSComponent" || schema->DisplayName == "FoliageInteractionComponent");
 			bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), defaultOpen);
 			m_Sections[i].Open = open;
 			if (!m_RevealSection.empty() && m_Sections[i].Title == m_RevealSection)
@@ -1815,7 +1815,7 @@ void PropertiesPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, P
 				// 分区顺序可能因 schema 列表变化而与 m_Sections 错位:名字不同则本帧跳过绘制。
 				if (section.Title != schema->DisplayName)
 					break;
-				const bool defaultOpen = false;
+				const bool defaultOpen = (schema->DisplayName == "BiomePCGComponent" || schema->DisplayName == "EQSComponent" || schema->DisplayName == "FoliageInteractionComponent");
 				bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), defaultOpen);
 
 				// 标题行:与 WuiSection 相同的底色/文字与展开行为;同时登记为可点节点
@@ -1948,3 +1948,4 @@ void PropertiesPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, P
 	}
 
 }
+

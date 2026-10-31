@@ -38,9 +38,55 @@
 #include "World/Asset/WModelIO.h"
 #include "World/Utils/Paths.h"
 #include <unordered_map>
+#include "World/Environment/PCGBiome.h"
+#include "World/Level/AI/EQSCoverSystem.h"
+#include "World/Foliage/FoliageInteraction.h"
+
 
 namespace World
 {
+	struct PCGPreviewState
+	{
+		bool Active = false;
+		entt::entity TargetEntity = entt::null;
+		std::vector<PCGSpawnPoint> Points;
+		size_t DominantBiomeCounts[5] = { 0 };
+		std::string DominantBiomeName = "None";
+		float Density = 0.0f;
+	};
+
+	struct EQSCandidatePreview
+	{
+		glm::vec3 Position { 0.0f };
+		float TotalScore { 0.0f };
+		bool Occluded { false };
+	};
+
+	struct EQSPreviewState
+	{
+		bool Evaluated = false;
+		entt::entity TargetEntity = entt::null;
+		glm::vec3 QuerierPos { 0.0f };
+		glm::vec3 ThreatPos { 15.0f, 2.0f, 15.0f };
+		glm::vec3 BestCoverPos { 0.0f };
+		float BestScore { 0.0f };
+		std::vector<EQSCandidatePreview> Candidates;
+	};
+
+	struct FoliagePreviewState
+	{
+		bool Active = false;
+		entt::entity TargetEntity = entt::null;
+		glm::vec3 Displacement { 0.0f };
+		glm::vec3 PushDirection { 1.0f, 0.0f, 0.0f };
+		float PushMagnitude { 0.0f };
+		float LastImpulseTime { 0.0f };
+	};
+
+	extern PCGPreviewState g_PCGPreviewState;
+	extern EQSPreviewState g_EQSPreviewState;
+	extern FoliagePreviewState g_FoliagePreviewState;
+
 	namespace
 	{
 		struct CachedConvexHullEdges
@@ -4838,6 +4884,287 @@ namespace World
 									}
 								}
 							}
+						}
+					}
+
+					
+					// ---- 辅助遮挡圆环绘制 (逐段遮挡测试，杜绝穿透) ----
+					auto drawOccludedCircle = [&](const glm::vec3& center, float radius, int planeAxis,
+						const Wui::WuiColor& col, float th, entt::entity ign)
+					{
+						constexpr int kSegments = 32;
+						constexpr float kTwoPi = 6.28318530718f;
+						glm::vec3 prevPoint;
+						for (int i = 0; i <= kSegments; ++i)
+						{
+							const float angle = static_cast<float>(i) * (kTwoPi / static_cast<float>(kSegments));
+							const float ca = std::cos(angle) * radius;
+							const float sa = std::sin(angle) * radius;
+							glm::vec3 curPoint = center;
+							if (planeAxis == 0) // YZ
+								curPoint += glm::vec3(0.0f, ca, sa);
+							else if (planeAxis == 1) // XZ (水平)
+								curPoint += glm::vec3(ca, 0.0f, sa);
+							else // XY
+								curPoint += glm::vec3(ca, sa, 0.0f);
+							if (i > 0)
+								PushOccludedWorldSegment(prevPoint, curPoint, col, th, ign);
+							prevPoint = curPoint;
+						}
+					};
+
+					// ---- 1. PCG 生态群落程序化散布视口可视化 (BiomePCGComponent) ----
+					if (selected.IsValid() && selected.HasComponent<BiomePCGComponent>() &&
+						selected.HasComponent<TransformComponent>())
+					{
+						const auto& pcg = selected.GetComponent<BiomePCGComponent>();
+						const auto& xf = selected.GetComponent<TransformComponent>();
+						const glm::vec3 entCenter = xf.Location;
+
+						// 1. 绘制 PCG 生成范围圆环（金黄色 0.95f, 0.8f, 0.2f, 0.9f）
+						const Wui::WuiColor pcgGold { 0.95f, 0.80f, 0.20f, 0.90f };
+						const float pcgRadius = 30.0f;
+						drawOccludedCircle(entCenter, pcgRadius, 1, pcgGold, 2.0f, selectedHandle);
+						drawOccludedCircle(entCenter, pcgRadius * 0.5f, 1, Wui::WuiColor{ 0.95f, 0.80f, 0.20f, 0.40f }, 1.2f, selectedHandle);
+
+						// 2. 在地形地表绘制不同生态群落的分类采样预览点（森林绿、草甸青、岩山灰、荒漠黄、雪山白）
+						if (g_PCGPreviewState.Active && g_PCGPreviewState.TargetEntity == selectedHandle &&
+							!g_PCGPreviewState.Points.empty())
+						{
+							for (const auto& pt : g_PCGPreviewState.Points)
+							{
+								if (glm::distance(pt.Position, entCenter) > pcgRadius * 1.5f)
+									continue;
+								Wui::WuiColor col;
+								switch (pt.Biome)
+								{
+									case BiomeType::Forest:        col = { 0.15f, 0.85f, 0.25f, 0.90f }; break; // 森林绿
+									case BiomeType::Meadow:        col = { 0.25f, 0.90f, 0.70f, 0.90f }; break; // 草甸青
+									case BiomeType::RockyMountain: col = { 0.75f, 0.75f, 0.80f, 0.85f }; break; // 岩山灰
+									case BiomeType::Desert:        col = { 0.95f, 0.80f, 0.20f, 0.90f }; break; // 荒漠黄
+									case BiomeType::SnowPeak:      col = { 0.95f, 0.98f, 1.00f, 0.95f }; break; // 雪山白
+									default:                       col = { 0.50f, 0.80f, 0.50f, 0.80f }; break;
+								}
+								const float crossSz = 0.25f;
+								PushOccludedWorldSegment(pt.Position - glm::vec3(crossSz, 0.0f, 0.0f),
+									pt.Position + glm::vec3(crossSz, 0.0f, 0.0f), col, 1.6f, selectedHandle);
+								PushOccludedWorldSegment(pt.Position - glm::vec3(0.0f, 0.0f, crossSz),
+									pt.Position + glm::vec3(0.0f, 0.0f, crossSz), col, 1.6f, selectedHandle);
+							}
+						}
+						else
+						{
+							// 动态快速采样预览网格 (10x10)
+							constexpr int kGrid = 10;
+							constexpr float kStep = 5.0f;
+							for (int z = -kGrid / 2; z <= kGrid / 2; ++z)
+							{
+								for (int x = -kGrid / 2; x <= kGrid / 2; ++x)
+								{
+									const glm::vec3 samplePos = entCenter + glm::vec3(x * kStep, 0.0f, z * kStep);
+									if (glm::distance(samplePos, entCenter) > pcgRadius) continue;
+									const float moisture = 0.5f + 0.5f * std::sin(samplePos.x * 0.02f + static_cast<float>(pcg.Seed)) * std::cos(samplePos.z * 0.02f);
+									if (moisture < pcg.MoistureThreshold) continue;
+									const BiomeType b = PCGBiomeGenerator::ClassifyBiome(samplePos.y, 10.0f, moisture);
+									Wui::WuiColor col;
+									switch (b)
+									{
+										case BiomeType::Forest:        col = { 0.15f, 0.85f, 0.25f, 0.90f }; break;
+										case BiomeType::Meadow:        col = { 0.25f, 0.90f, 0.70f, 0.90f }; break;
+										case BiomeType::RockyMountain: col = { 0.75f, 0.75f, 0.80f, 0.85f }; break;
+										case BiomeType::Desert:        col = { 0.95f, 0.80f, 0.20f, 0.90f }; break;
+										case BiomeType::SnowPeak:      col = { 0.95f, 0.98f, 1.00f, 0.95f }; break;
+										default:                       col = { 0.50f, 0.80f, 0.50f, 0.80f }; break;
+									}
+									const float cs = 0.25f;
+									PushOccludedWorldSegment(samplePos - glm::vec3(cs, 0.0f, 0.0f), samplePos + glm::vec3(cs, 0.0f, 0.0f), col, 1.4f, selectedHandle);
+									PushOccludedWorldSegment(samplePos - glm::vec3(0.0f, 0.0f, cs), samplePos + glm::vec3(0.0f, 0.0f, cs), col, 1.4f, selectedHandle);
+								}
+							}
+						}
+
+						// 3. 若开启样条道路自动平整，绘制道路双侧过渡放坡边界线
+						if (pcg.AutoDeformTerrain != 0)
+						{
+							const Wui::WuiColor roadSlopeCol { 0.90f, 0.75f, 0.30f, 0.80f };
+							for (auto [sh, splineComp] : registry.view<SplineComponent>().each())
+							{
+								Spline3D spline;
+								std::vector<glm::vec3> knots;
+								const auto& children = Hierarchy::ChildrenOf(registry, sh);
+								for (entt::entity ch : children)
+								{
+									if (const auto* kxf = registry.try_get<TransformComponent>(ch))
+										knots.push_back(kxf->Location);
+								}
+								if (knots.size() >= 2)
+								{
+									for (const auto& k : knots)
+										spline.AddPoint(k);
+									spline.SetClosedLoop(splineComp.ClosedLoop != 0);
+									spline.UpdateTangents();
+									const float totalLen = spline.GetTotalLength();
+									if (totalLen > 1.0f)
+									{
+										const float halfW = splineComp.RoadWidth * 0.5f;
+										const float slopeMargin = 3.0f; // 过渡放坡宽度
+										const float step = 1.0f;
+										const int numSamples = static_cast<int>(totalLen / step);
+										glm::vec3 prevLeftSlope, prevRightSlope;
+										for (int i = 0; i <= numSamples; ++i)
+										{
+											const float d = std::min(static_cast<float>(i) * step, totalLen);
+											glm::vec3 pos, tan;
+											spline.SampleAtDistance(d, pos, tan);
+											const glm::vec3 side = glm::normalize(glm::cross(tan, glm::vec3(0, 1, 0)));
+											const glm::vec3 curLeftSlope = pos - side * (halfW + slopeMargin);
+											const glm::vec3 curRightSlope = pos + side * (halfW + slopeMargin);
+											if (i > 0)
+											{
+												PushOccludedWorldSegment(prevLeftSlope, curLeftSlope, roadSlopeCol, 1.5f, selectedHandle);
+												PushOccludedWorldSegment(prevRightSlope, curRightSlope, roadSlopeCol, 1.5f, selectedHandle);
+											}
+											prevLeftSlope = curLeftSlope;
+											prevRightSlope = curRightSlope;
+										}
+									}
+								}
+							}
+						}
+					}
+
+					// ---- 2. EQS 战术掩体查询可视化 (EQSComponent) ----
+					if (selected.IsValid() && selected.HasComponent<EQSComponent>() &&
+						selected.HasComponent<TransformComponent>())
+					{
+						const auto& eqs = selected.GetComponent<EQSComponent>();
+						const auto& xf = selected.GetComponent<TransformComponent>();
+						const glm::vec3 querierPos = xf.Location;
+
+						// 1. 绘制查询范围圆环（青色 0.2f, 0.8f, 0.95f, 0.85f）
+						const Wui::WuiColor eqsCyan { 0.20f, 0.80f, 0.95f, 0.85f };
+						const float queryR = std::max(2.0f, eqs.QueryRadius);
+						drawOccludedCircle(querierPos, queryR, 1, eqsCyan, 2.0f, selectedHandle);
+						drawOccludedCircle(querierPos, queryR * 0.5f, 1, Wui::WuiColor{ 0.20f, 0.80f, 0.95f, 0.40f }, 1.2f, selectedHandle);
+
+						// 2. 威胁源位置标记（红色十字球）与射击视线射线
+						const glm::vec3 threatPos = (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated)
+							? g_EQSPreviewState.ThreatPos
+							: (querierPos + glm::vec3(15.0f, 2.0f, 15.0f));
+						const Wui::WuiColor threatColor { 0.95f, 0.15f, 0.15f, 0.95f };
+						const float tCross = 0.5f;
+						PushOccludedWorldSegment(threatPos - glm::vec3(tCross, 0, 0), threatPos + glm::vec3(tCross, 0, 0), threatColor, 2.2f, selectedHandle);
+						PushOccludedWorldSegment(threatPos - glm::vec3(0, tCross, 0), threatPos + glm::vec3(0, tCross, 0), threatColor, 2.2f, selectedHandle);
+						PushOccludedWorldSegment(threatPos - glm::vec3(0, 0, tCross), threatPos + glm::vec3(0, 0, tCross), threatColor, 2.2f, selectedHandle);
+						drawOccludedCircle(threatPos, 0.35f, 1, threatColor, 1.8f, selectedHandle);
+						// 射击视线射线 (Threat -> Querier)
+						PushOccludedWorldSegment(threatPos, querierPos, Wui::WuiColor{ 0.95f, 0.25f, 0.15f, 0.65f }, 1.4f, selectedHandle);
+
+						// 3. 绘制三维探测候选网格点阵
+						if (g_EQSPreviewState.TargetEntity == selectedHandle && !g_EQSPreviewState.Candidates.empty())
+						{
+							for (const auto& cand : g_EQSPreviewState.Candidates)
+							{
+								const bool good = (cand.TotalScore > 0.5f || cand.Occluded);
+								const Wui::WuiColor cCol = good
+									? Wui::WuiColor { 0.10f, 0.95f, 0.25f, 0.95f } // 遮蔽良好点：荧光高亮绿
+									: Wui::WuiColor { 0.95f, 0.25f, 0.15f, 0.75f }; // 暴露枪线下：警戒橙红
+								const float cs = 0.20f;
+								PushOccludedWorldSegment(cand.Position - glm::vec3(cs, 0, 0), cand.Position + glm::vec3(cs, 0, 0), cCol, 1.5f, selectedHandle);
+								PushOccludedWorldSegment(cand.Position - glm::vec3(0, 0, cs), cand.Position + glm::vec3(0, 0, cs), cCol, 1.5f, selectedHandle);
+							}
+						}
+						else
+						{
+							// 动态候选网格预览
+							const float sp = std::clamp(eqs.GridSpacing, 1.0f, 5.0f);
+							const int steps = static_cast<int>(queryR / sp);
+							for (int z = -steps; z <= steps; ++z)
+							{
+								for (int x = -steps; x <= steps; ++x)
+								{
+									const glm::vec3 pt = querierPos + glm::vec3(x * sp, 0.0f, z * sp);
+									if (glm::distance(pt, querierPos) > queryR) continue;
+									const float cs = 0.15f;
+									PushOccludedWorldSegment(pt - glm::vec3(cs, 0, 0), pt + glm::vec3(cs, 0, 0), Wui::WuiColor{ 0.20f, 0.70f, 0.90f, 0.60f }, 1.1f, selectedHandle);
+									PushOccludedWorldSegment(pt - glm::vec3(0, 0, cs), pt + glm::vec3(0, 0, cs), Wui::WuiColor{ 0.20f, 0.70f, 0.90f, 0.60f }, 1.1f, selectedHandle);
+								}
+							}
+						}
+
+						// 4. 绘制最优战术掩体位置：金黄菱形/星形 Marker（0.98f, 0.85f, 0.15f, 1.0f）与垂直地面引导光柱
+						if (eqs.BestCoverFound != 0 || (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated))
+						{
+							const glm::vec3 bestCover = (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated)
+								? g_EQSPreviewState.BestCoverPos : (querierPos + glm::vec3(5.0f, 0.0f, 5.0f));
+							const Wui::WuiColor goldMarker { 0.98f, 0.85f, 0.15f, 1.0f };
+							// 垂直引导光柱
+							PushOccludedWorldSegment(bestCover, bestCover + glm::vec3(0.0f, 3.5f, 0.0f), goldMarker, 2.6f, selectedHandle);
+							// 金黄菱形 (Diamond Marker)
+							const float dSz = 0.45f;
+							const glm::vec3 pN = bestCover + glm::vec3(0, 1.5f, dSz);
+							const glm::vec3 pS = bestCover + glm::vec3(0, 1.5f, -dSz);
+							const glm::vec3 pE = bestCover + glm::vec3(dSz, 1.5f, 0);
+							const glm::vec3 pW = bestCover + glm::vec3(-dSz, 1.5f, 0);
+							const glm::vec3 pTop = bestCover + glm::vec3(0, 1.5f + dSz, 0);
+							const glm::vec3 pBot = bestCover + glm::vec3(0, 1.5f - dSz, 0);
+
+							PushOccludedWorldSegment(pN, pE, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pE, pS, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pS, pW, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pW, pN, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pN, pTop, goldMarker, 1.8f, selectedHandle);
+							PushOccludedWorldSegment(pE, pTop, goldMarker, 1.8f, selectedHandle);
+							PushOccludedWorldSegment(pS, pTop, goldMarker, 1.8f, selectedHandle);
+							PushOccludedWorldSegment(pW, pTop, goldMarker, 1.8f, selectedHandle);
+							PushOccludedWorldSegment(pN, pBot, goldMarker, 1.8f, selectedHandle);
+							PushOccludedWorldSegment(pE, pBot, goldMarker, 1.8f, selectedHandle);
+							PushOccludedWorldSegment(pS, pBot, goldMarker, 1.8f, selectedHandle);
+							PushOccludedWorldSegment(pW, pBot, goldMarker, 1.8f, selectedHandle);
+						}
+					}
+
+					// ---- 3. 植被物理推挤 Gizmo (FoliageInteractionComponent) ----
+					if (selected.IsValid() && selected.HasComponent<FoliageInteractionComponent>() &&
+						selected.HasComponent<TransformComponent>())
+					{
+						const auto& fol = selected.GetComponent<FoliageInteractionComponent>();
+						const auto& xf = selected.GetComponent<TransformComponent>();
+						const glm::vec3 entCenter = xf.Location;
+
+						// 1. 绘制推挤半径球体线框（赤道水平圆 + 两条垂直经线圆，水蓝色 0.2f, 0.9f, 0.85f, 0.9f）
+						const Wui::WuiColor aquaColor { 0.20f, 0.90f, 0.85f, 0.90f };
+						const float radius = std::max(0.2f, fol.PushRadius);
+						drawOccludedCircle(entCenter, radius, 1, aquaColor, 2.0f, selectedHandle); // 赤道水平圆 (XZ)
+						drawOccludedCircle(entCenter, radius, 0, Wui::WuiColor{ 0.20f, 0.90f, 0.85f, 0.65f }, 1.5f, selectedHandle); // 经线圆 (YZ)
+						drawOccludedCircle(entCenter, radius, 2, Wui::WuiColor{ 0.20f, 0.90f, 0.85f, 0.65f }, 1.5f, selectedHandle); // 经线圆 (XY)
+
+						// 2. 绘制推挤倒伏向量箭头
+						glm::vec3 disp(fol.PushStrength, 0.0f, fol.PushStrength * 0.5f);
+						if (g_FoliagePreviewState.TargetEntity == selectedHandle && g_FoliagePreviewState.Active)
+							disp = g_FoliagePreviewState.Displacement;
+						if (glm::length(disp) < 0.01f)
+							disp = glm::vec3(fol.PushStrength, 0.0f, 0.0f);
+
+						const glm::vec3 arrowStart = entCenter;
+						const glm::vec3 arrowEnd = entCenter + glm::normalize(disp) * std::min(radius * 1.2f, glm::length(disp) * 1.5f);
+						const Wui::WuiColor arrowCol { 0.15f, 0.95f, 0.50f, 0.95f };
+						PushOccludedWorldSegment(arrowStart, arrowEnd, arrowCol, 2.6f, selectedHandle);
+
+						const glm::vec3 arrowDir = glm::normalize(arrowEnd - arrowStart);
+						const glm::vec3 arrowSide = glm::cross(arrowDir, glm::vec3(0, 1, 0)) * 0.25f;
+						PushOccludedWorldSegment(arrowEnd, arrowEnd - arrowDir * 0.35f + arrowSide, arrowCol, 2.2f, selectedHandle);
+						PushOccludedWorldSegment(arrowEnd, arrowEnd - arrowDir * 0.35f - arrowSide, arrowCol, 2.2f, selectedHandle);
+
+						// 3. 地表接触圆形印记 (LeaveTracks)
+						if (fol.LeaveTracks != 0)
+						{
+							const Wui::WuiColor trackCol { 0.10f, 0.80f, 0.60f, 0.80f };
+							const glm::vec3 groundCenter { entCenter.x, entCenter.y - 0.05f, entCenter.z };
+							drawOccludedCircle(groundCenter, radius * 0.85f, 1, trackCol, 1.8f, selectedHandle);
+							const float tRad = radius * 0.85f;
+							PushOccludedWorldSegment(groundCenter - glm::vec3(tRad, 0, 0), groundCenter + glm::vec3(tRad, 0, 0), trackCol, 1.2f, selectedHandle);
+							PushOccludedWorldSegment(groundCenter - glm::vec3(0, 0, tRad), groundCenter + glm::vec3(0, 0, tRad), trackCol, 1.2f, selectedHandle);
 						}
 					}
 

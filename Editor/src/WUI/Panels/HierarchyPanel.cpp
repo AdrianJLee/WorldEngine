@@ -849,6 +849,79 @@ namespace World
 					}
 					ctx.CloseAllPopups();
 				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createpcg_ent"), nextItem(), "Create PCG Biome Entity (生态程序化生成器)", theme))
+				{
+					const auto gizmoCam = host.GetGizmoCamera();
+					const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+					const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+					Entity created;
+					if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "PCG Biome Generator");
+							auto& tc = created.AddComponent<TransformComponent>();
+							tc.Location = spawnPos;
+							auto& pcg = created.AddComponent<BiomePCGComponent>();
+							pcg.MinElevation = 0.0f;
+							pcg.MaxElevation = 1000.0f;
+							pcg.MaxSlope = 35.0f;
+							pcg.MoistureThreshold = 0.3f;
+							pcg.Seed = 1337;
+							pcg.AutoDeformTerrain = 1;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create PCG Biome Entity"));
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createeqs_ent"), nextItem(), "Create Tactical EQS Query (战术掩体查询器)", theme))
+				{
+					const auto gizmoCam = host.GetGizmoCamera();
+					const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+					const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+					Entity created;
+					if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "Tactical EQS Query");
+							auto& tc = created.AddComponent<TransformComponent>();
+							tc.Location = spawnPos;
+							auto& eqs = created.AddComponent<EQSComponent>();
+							eqs.QueryCenter = spawnPos;
+							eqs.QueryRadius = 20.0f;
+							eqs.GridSpacing = 2.0f;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Tactical EQS Query"));
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createfoliage_ent"), nextItem(), "Create Foliage Interaction Entity (植被动态推挤实体)", theme))
+				{
+					const auto gizmoCam = host.GetGizmoCamera();
+					const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+					const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+					Entity created;
+					if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "Foliage Interaction Entity");
+							auto& tc = created.AddComponent<TransformComponent>();
+							tc.Location = spawnPos;
+							auto& fol = created.AddComponent<FoliageInteractionComponent>();
+							fol.PushRadius = 1.5f;
+							fol.PushStrength = 1.0f;
+							fol.RecoverySpeed = 3.0f;
+							fol.LeaveTracks = 1;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Foliage Interaction Entity"));
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				}
 				// P4-U13d:把"做成 prefab"变成一次有回显、可撤销意图的操作 —— 打开居中模态
 				// (名称 / 目录 / 实时落点 / 覆盖与非法名校验),确认后才写盘。
 				// 旧行为(固定 prefabs/<Tag>.wprefab、同名静默覆盖、导出后无回显)已删除。
@@ -1203,6 +1276,79 @@ namespace World
 				{
 					host.SetSelectedEntity(created);
 					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Weather Volume"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createpcg"), nextBlankItem(), "Create PCG Biome Entity (生态程序化生成器)", true, theme))
+			{
+				const auto gizmoCam = host.GetGizmoCamera();
+				const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+				const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+				Entity created;
+				if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "PCG Biome Generator");
+						auto& tc = created.AddComponent<TransformComponent>();
+						tc.Location = spawnPos;
+						auto& pcg = created.AddComponent<BiomePCGComponent>();
+						pcg.MinElevation = 0.0f;
+						pcg.MaxElevation = 1000.0f;
+						pcg.MaxSlope = 35.0f;
+						pcg.MoistureThreshold = 0.3f;
+						pcg.Seed = 1337;
+						pcg.AutoDeformTerrain = 1;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create PCG Biome Entity"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createeqs"), nextBlankItem(), "Create Tactical EQS Query (战术掩体查询器)", true, theme))
+			{
+				const auto gizmoCam = host.GetGizmoCamera();
+				const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+				const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+				Entity created;
+				if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Tactical EQS Query");
+						auto& tc = created.AddComponent<TransformComponent>();
+						tc.Location = spawnPos;
+						auto& eqs = created.AddComponent<EQSComponent>();
+						eqs.QueryCenter = spawnPos;
+						eqs.QueryRadius = 20.0f;
+						eqs.GridSpacing = 2.0f;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Tactical EQS Query"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createfoliage"), nextBlankItem(), "Create Foliage Interaction Entity (植被动态推挤实体)", true, theme))
+			{
+				const auto gizmoCam = host.GetGizmoCamera();
+				const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
+				const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
+				Entity created;
+				if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Foliage Interaction Entity");
+						auto& tc = created.AddComponent<TransformComponent>();
+						tc.Location = spawnPos;
+						auto& fol = created.AddComponent<FoliageInteractionComponent>();
+						fol.PushRadius = 1.5f;
+						fol.PushStrength = 1.0f;
+						fol.RecoverySpeed = 3.0f;
+						fol.LeaveTracks = 1;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Foliage Interaction Entity"));
 					host.MarkDocumentDirty();
 				}
 				ctx.CloseAllPopups();

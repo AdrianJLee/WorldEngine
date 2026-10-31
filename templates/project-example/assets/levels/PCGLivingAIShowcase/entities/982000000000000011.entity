@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 982000000000000011
+  World::TagComponent:
+    Tag: "Interactive Bush & Shrub Zone"
+  World::TransformComponent:
+    Location: [-8.0, 0.5, 16.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 2
+    Subdivisions: 1
+    Steps: 12
+    Dimensions: [4.0, 1.8, 4.0]
+    BevelSize: 0.0
+    GenerateCollision: 0
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.25, 0.75, 0.35, 0.85]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 4

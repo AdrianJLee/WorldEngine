@@ -1,0 +1,20 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 982000000000000004
+  World::TagComponent:
+    Tag: "PCG Biome Ecosystem Generator"
+  World::TransformComponent:
+    Location: [0.0, 0.0, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::BiomePCGComponent:
+    MinElevation: 0.0
+    MaxElevation: 100.0
+    MaxSlope: 35.0
+    MoistureThreshold: 0.35
+    Seed: 1337
+    AutoDeformTerrain: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 1
