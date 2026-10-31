@@ -1081,6 +1081,7 @@ namespace World
 				"MoveToTarget",          // 移动向目标点 (Move To Target Position)
 				"SeekSmartObject",       // 寻找智能对象 (Seek Smart Object)
 				"UseSmartObject",        // 交互使用智能对象 (Use Smart Object)
+				"FindTacticalCover",     // 战术掩体查询 (Find Tactical Cover)
 				"SetBlackboardValue",    // 写入黑板数值 (Set Blackboard Value)
 				"IncrementBlackboardValue", // 累加黑板数值 (Increment Blackboard Value)
 				"SetBlackboardTag",      // 写入黑板标签 (Set Blackboard Tag)

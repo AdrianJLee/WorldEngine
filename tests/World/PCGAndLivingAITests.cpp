@@ -1,3 +1,4 @@
+#include "World/Foliage/Foliage.h"
 #include "World/Environment/PCGBiome.h"
 #include "World/Level/AI/EQSCoverSystem.h"
 #include "World/Foliage/FoliageInteraction.h"
@@ -92,6 +93,23 @@ static void TestFoliageInteractionPhysics()
 	std::cout << "[PASS] TestFoliageInteractionPhysics\n";
 }
 
+static void TestPCGFoliageBaking()
+{
+	FoliageData foliage;
+	std::vector<PCGSpawnPoint> pts = {
+		{ glm::vec3(10.0f, 0.0f, 10.0f), glm::vec3(0.0f, 1.0f, 0.0f), BiomeType::Forest, 0.8f },
+		{ glm::vec3(20.0f, 0.0f, 20.0f), glm::vec3(0.0f, 1.0f, 0.0f), BiomeType::Meadow, 0.6f },
+		{ glm::vec3(30.0f, 0.0f, 30.0f), glm::vec3(0.0f, 1.0f, 0.0f), BiomeType::RockyMountain, 0.4f },
+	};
+
+	uint32_t count = PCGBiomeGenerator::PopulateFoliageFromBiomePoints(pts, foliage, 1.0f);
+	assert(count == 3);
+	assert(foliage.GetTotalInstanceCount() == 3);
+	assert(!foliage.GetChunks().empty());
+
+	std::cout << "[PASS] TestPCGFoliageBaking\n";
+}
+
 static void TestPCGAndLivingAIComponentLayout()
 {
 	BiomePCGComponent pcg;
@@ -117,6 +135,7 @@ int main()
 	TestEQSCoverSystem();
 	TestFoliageInteractionPhysics();
 	TestPCGAndLivingAIComponentLayout();
+	TestPCGFoliageBaking();
 	std::cout << "All World.PCGAndLivingAI tests passed successfully!\n";
 	return 0;
 }

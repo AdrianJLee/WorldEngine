@@ -1,3 +1,4 @@
+#include "World/Environment/PCGBiome.h"
 #include "WUI/Panels/FoliagePanel.h"
 #include "WUI/Common/EditorAssetCatalog.h"
 #include "WUI/Common/AssetThumbnailRenderer.h"

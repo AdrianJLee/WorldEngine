@@ -11,6 +11,7 @@
 
 namespace World
 {
+	class FoliageData;
 	enum class BiomeType : uint8_t
 	{
 		Forest = 0,
@@ -47,5 +48,11 @@ namespace World
 			float roadWidth,
 			float cutDepth,
 			float slopeTransition);
+
+		// 将生态散布点按物种规则程序化填充到 FoliageData 实例层中
+		static uint32_t PopulateFoliageFromBiomePoints(
+			const std::vector<PCGSpawnPoint>& points,
+			FoliageData& foliageData,
+			float scale = 1.0f);
 	};
 }

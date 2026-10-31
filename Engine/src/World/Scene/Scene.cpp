@@ -1,3 +1,4 @@
+#include "World/Foliage/FoliageRenderer.h"
 #include "World/Physics/Physics2DUtils.h"
 #include "wldpch.h"
 #include "World/Core/StringPool.h"
@@ -2957,6 +2958,18 @@ namespace World
 		// PURE-ECS:渲染抽取也进管线(PreRender,**排在 animation-system 之后** ——
 		// 蒙皮绘制要拿本帧的调色板)。相机无关,所以这里做;剔除/阴影矩阵/pass 留在提交侧。
 		// 编辑态不跑帧系统 ⇒ SceneRenderer::SubmitScene 里兜底跑同一个 EnsureRenderExtract。
+		RegisterFrameSystem({ "foliage-interaction-system", false,
+			[this](Timestep ts) {
+				(void)ts;
+				auto view = m_Registry.view<TransformComponent, FoliageInteractionComponent>();
+				for (auto entity : view)
+				{
+					auto& [tc, fic] = view.get<TransformComponent, FoliageInteractionComponent>(entity);
+					FoliageRenderer::AddLocalWind(tc.Location, fic.PushRadius, fic.PushStrength * 2.0f,
+						fic.RecoverySpeed * 0.5f, 1.5f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
+				}
+			},
+			Gameplay::SystemPhase::PreRender, { "transform-system" } });
 		RegisterFrameSystem({ "render-extract", false,
 			[this](Timestep ts) { EnsureRenderExtract(ts.GetSeconds()); },
 			Gameplay::SystemPhase::PreRender, { "animation-system" } });

@@ -1,3 +1,5 @@
+#include "World/Foliage/FoliageRenderer.h"
+#include "World/Foliage/Foliage.h"
 #include "World/Command/CommandHistory.h"
 #include "World/Physics/PhysicsMaterial.h"
 #include "World/Audio/AudioSystem.h"
@@ -2798,11 +2800,9 @@ static uint32_t s_LODGenEntityId = 0;
 			if (scene)
 			{
 				std::shared_ptr<TerrainData> terrainData;
-				TerrainComponent* pTerrainComp = nullptr;
 				for (auto [h, tc] : scene->GetRegistry().view<TerrainComponent>().each())
 				{
 					terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
-					pTerrainComp = &tc;
 					if (terrainData) break;
 				}
 
@@ -2828,6 +2828,58 @@ static uint32_t s_LODGenEntityId = 0;
 								*terrainData, spline, splineComp.RoadWidth, 0.5f, 4.0f);
 						}
 					}
+					TerrainRenderer::ClearCache();
+				}
+			}
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
+		// 按钮 C: 一键烘焙散布到植被系统 (Bake to Foliage Data)
+		if (Wui::Button(ctx, Wui::HashId("inspect.pcg.btn_bake_foliage"),
+			{ startX, curY, contentW, 24.0f }, "✦ 烘焙散布到场景植被 (Bake Scatter to Foliage System)", theme))
+		{
+			Scene* scene = entity.GetScene();
+			if (scene)
+			{
+				std::shared_ptr<TerrainData> terrainData;
+				for (auto [h, tc] : scene->GetRegistry().view<TerrainComponent>().each())
+				{
+					terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
+					if (terrainData) break;
+				}
+				if (!terrainData)
+				{
+					terrainData = std::make_shared<TerrainData>(128, 128, 2.0f, 30.0f);
+				}
+
+				if (g_PCGPreviewState.Points.empty())
+				{
+					g_PCGPreviewState.TargetEntity = static_cast<entt::entity>(entity);
+					PCGBiomeGenerator::GenerateBiomePoints(*terrainData, *comp, g_PCGPreviewState.Points);
+					g_PCGPreviewState.Active = true;
+				}
+
+				std::shared_ptr<FoliageData> foliageData;
+				for (auto [h, folComp] : scene->GetRegistry().view<FoliageComponent>().each())
+				{
+					foliageData = FoliageRenderer::GetOrCreateFoliageData(folComp.FoliageAsset);
+					if (foliageData) break;
+				}
+
+				if (!foliageData)
+				{
+					// If no FoliageComponent, add to current entity or ground
+					auto& folComp = entity.HasComponent<FoliageComponent>() ? entity.GetComponent<FoliageComponent>() : entity.AddComponent<FoliageComponent>();
+					folComp.FoliageAsset = AssetRef::FromPath("foliage/default.wfoliage");
+					folComp.EnableWind = 1;
+					foliageData = FoliageRenderer::GetOrCreateFoliageData(folComp.FoliageAsset);
+				}
+
+				if (foliageData)
+				{
+					const uint32_t count = PCGBiomeGenerator::PopulateFoliageFromBiomePoints(g_PCGPreviewState.Points, *foliageData);
+					(void)count;
 				}
 			}
 			host.MarkDocumentDirty();
@@ -3039,6 +3091,25 @@ static uint32_t s_LODGenEntityId = 0;
 		Wui::PanelBackground(ctx, cardRect, Wui::WuiColor{ 0.08f, 0.12f, 0.16f, 0.85f }, 4.0f);
 		Wui::HighlightOutline(ctx, cardRect, Wui::WuiColor{ 0.20f, 0.80f, 0.95f, 0.50f }, 4.0f, 1.0f);
 
+		// 按钮 B: 命令实体移动到最佳掩体
+		if (Wui::Button(ctx, Wui::HashId("inspect.eqs.btn_move_cover"),
+			{ startX, curY, contentW, 24.0f }, "▶ 命令实体移动至最佳掩体 (Move Entity to Cover)", theme))
+		{
+			if (g_EQSPreviewState.Evaluated)
+			{
+				if (entity.HasComponent<TransformComponent>())
+				{
+					entity.GetComponent<TransformComponent>().Location = g_EQSPreviewState.BestCoverPos;
+				}
+				if (entity.HasComponent<BehaviorTreeComponent>())
+				{
+					entity.GetComponent<BehaviorTreeComponent>().BlackboardTargetPos = g_EQSPreviewState.BestCoverPos;
+				}
+			}
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
 		char line1[128], line2[128];
 		if (comp->BestCoverFound != 0 || (g_EQSPreviewState.Evaluated && g_EQSPreviewState.TargetEntity == static_cast<entt::entity>(entity)))
 		{
@@ -3154,6 +3225,18 @@ static uint32_t s_LODGenEntityId = 0;
 			g_FoliagePreviewState.PushMagnitude = glm::length(disp);
 			g_FoliagePreviewState.PushDirection = (g_FoliagePreviewState.PushMagnitude > 0.001f)
 				? glm::normalize(disp) : glm::vec3(1.0f, 0.0f, 0.0f);
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
+		// 按钮 B: 向场景视口植被注入物理受力风场
+		if (Wui::Button(ctx, Wui::HashId("inspect.foliage.btn_inject_wind"),
+			{ startX, curY, contentW, 24.0f }, "⚡ 向视口植被注入物理冲击 (Inject Impulse to Foliage)", theme))
+		{
+			const glm::vec3 entPos = entity.HasComponent<TransformComponent>()
+				? entity.GetComponent<TransformComponent>().Location : glm::vec3(0.0f);
+			FoliageRenderer::AddLocalWind(entPos, comp->PushRadius, comp->PushStrength * 3.0f,
+				comp->RecoverySpeed * 0.5f, 1.5f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
 			host.MarkDocumentDirty();
 		}
 		curY += 28.0f;

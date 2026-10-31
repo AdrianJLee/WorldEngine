@@ -3635,6 +3635,18 @@ namespace World
 			FoliageRenderer::AddLocalWind(worldPos, wind.Radius, wind.Strength, wind.Speed, wind.Decay, wind.Type, worldDir);
 		}
 
+		auto interactView = m_ActiveScene->m_Registry.view<TransformComponent, FoliageInteractionComponent>();
+		for (auto entity : interactView)
+		{
+			const auto& [xform, interact] = interactView.get<TransformComponent, FoliageInteractionComponent>(entity);
+			glm::mat4 modelMat = xform.GetLocalMatrix();
+			if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
+				modelMat = world->Matrix;
+			const glm::vec3 worldPos = glm::vec3(modelMat[3]);
+			FoliageRenderer::AddLocalWind(worldPos, interact.PushRadius, interact.PushStrength * 2.0f,
+				interact.RecoverySpeed * 0.5f, 1.5f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
+		}
+
 		auto foliageView = m_ActiveScene->m_Registry.view<TransformComponent, FoliageComponent>();
 		static float s_FoliageTime = 0.0f;
 		s_FoliageTime += 0.016f;

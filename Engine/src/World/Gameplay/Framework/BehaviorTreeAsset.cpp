@@ -1,3 +1,4 @@
+#include "World/Level/AI/EQSCoverSystem.h"
 #include "wldpch.h"
 #include "World/Gameplay/Framework/BehaviorTreeAsset.h"
 #include "World/Gameplay/Framework/SmartObjectSystem.h"
@@ -282,6 +283,70 @@ namespace World::Gameplay
 						}
 					}
 					return NodeStatus::Success;
+				});
+			}
+			else if (type == "FindTacticalCover")
+			{
+				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
+					if (!ctx.Self.HasComponent<TransformComponent>())
+						return NodeStatus::Failure;
+
+					auto& tr = ctx.Self.GetComponent<TransformComponent>();
+					const float radius = param > 0.0f ? param : 25.0f;
+					const float spacing = 1.5f;
+
+					std::vector<CoverBox> obstacles;
+					auto& reg = ctx.CurrentScene.GetRegistry();
+					for (auto [h, box3d, tc] : reg.view<BoxCollider3DComponent, TransformComponent>().each())
+					{
+						if (h == (entt::entity)ctx.Self) continue;
+						CoverBox b;
+						const glm::vec3 pos = tc.Location + box3d.Offset;
+						b.Min = pos - box3d.HalfExtents;
+						b.Max = pos + box3d.HalfExtents;
+						obstacles.push_back(b);
+					}
+					for (auto [h, wb, tc] : reg.view<WhiteboxComponent, TransformComponent>().each())
+					{
+						if (h == (entt::entity)ctx.Self) continue;
+						CoverBox b;
+						const glm::vec3 halfDim = wb.Dimensions * 0.5f;
+						b.Min = tc.Location - halfDim;
+						b.Max = tc.Location + halfDim;
+						obstacles.push_back(b);
+					}
+					for (auto [h, obs, tc] : reg.view<NavMeshObstacleComponent, TransformComponent>().each())
+					{
+						if (h == (entt::entity)ctx.Self) continue;
+						CoverBox b;
+						b.Min = tc.Location - obs.Extents;
+						b.Max = tc.Location + obs.Extents;
+						obstacles.push_back(b);
+					}
+
+					glm::vec3 threatPos(-16.0f, 0.5f, 0.0f);
+					if (ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null))
+					{
+						entt::entity te = static_cast<entt::entity>(ctx.Component.TargetEntity);
+						if (reg.valid(te) && reg.try_get<TransformComponent>(te))
+							threatPos = reg.get<TransformComponent>(te).Location;
+					}
+
+					glm::vec3 bestCover(0.0f);
+					float bestScore = -1.0f;
+					if (EQSCoverSystem::FindBestCover(tr.Location, threatPos, radius, spacing, obstacles, bestCover, bestScore))
+					{
+						ctx.Component.BlackboardTargetPos = bestCover;
+						ctx.Component.BlackboardValue = bestScore;
+						if (ctx.Self.HasComponent<EQSComponent>())
+						{
+							auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
+							eqsc.QueryCenter = tr.Location;
+							eqsc.BestCoverFound = 1;
+						}
+						return NodeStatus::Success;
+					}
+					return NodeStatus::Failure;
 				});
 			}
 			else if (type == "MoveToTarget")
@@ -698,6 +763,7 @@ namespace World::Gameplay
 			"MoveToTarget",
 			"SeekSmartObject",
 			"UseSmartObject",
+			"FindTacticalCover",
 			"SetBlackboardValue",
 			"IncrementBlackboardValue",
 			"SetBlackboardTag",

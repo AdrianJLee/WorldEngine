@@ -1,3 +1,5 @@
+#include "World/Environment/PCGBiome.h"
+#include "World/Scene/Hierarchy.h"
 #include "WUI/Panels/TerrainPanel.h"
 #include "WUI/Common/EditorAssetCatalog.h"
 #include "WUI/Common/AssetThumbnailRenderer.h"

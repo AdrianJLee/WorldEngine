@@ -87,6 +87,13 @@ namespace World
 		std::string m_EditMeshPath;
 		std::string m_EditMatPath;
 
+		// PCG 生态群落散布参数
+		float m_PcgMinElev { 0.0f };
+		float m_PcgMaxElev { 1000.0f };
+		float m_PcgMaxSlope { 35.0f };
+		float m_PcgMoisture { 0.3f };
+		int32_t m_PcgSeed { 1337 };
+
 		Entity m_BoundEntity;
 		std::shared_ptr<FoliageData> m_Foliage;
 		std::string m_LoadedPath;

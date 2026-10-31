@@ -9,6 +9,30 @@ Entity:
     Location: [0.0, -0.25, 0.0]
     Rotation: [0.0, 0.0, 0.0]
     Scale: [1, 1, 1]
+  World::TerrainComponent:
+    TerrainAsset: "terrains/default.wterrain"
+    CellSize: 1.0
+    HeightScale: 1.0
+    MinHeight: 0.0
+    MaxHeight: 256.0
+    ChunkResolution: 64
+    LodDistanceRatio: 1.5
+    LayerCount: 4
+    CastShadow: 1
+    ReceiveShadow: 1
+    HoleCutoutEnabled: 1
+    EnableCollision: 1
+  World::FoliageComponent:
+    FoliageAsset: "foliage/default.wfoliage"
+    MaxCullDistance: 150.0
+    FadeRange: 20.0
+    WindStrength: 1.2
+    WindFrequency: 1.0
+    InstanceCount: 0
+    CastShadow: 1
+    ReceiveShadow: 1
+    AlignToNormal: 1
+    EnableWind: 1
   World::WhiteboxComponent:
     Shape: 0
     Subdivisions: 1

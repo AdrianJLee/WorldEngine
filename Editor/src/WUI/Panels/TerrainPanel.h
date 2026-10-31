@@ -101,6 +101,11 @@ namespace World
 		float m_WizardCellSize { 1.0f };
 		float m_WizardHeightScale { 50.0f };
 
+		// 样条道路地形平整参数
+		float m_RoadWidth { 6.0f };
+		float m_RoadCutDepth { 0.5f };
+		float m_RoadSlopeTransition { 4.0f };
+
 		Entity m_BoundEntity;
 		std::shared_ptr<TerrainData> m_Terrain;
 		std::string m_LoadedPath;
