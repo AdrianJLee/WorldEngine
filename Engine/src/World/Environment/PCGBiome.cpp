@@ -233,4 +233,28 @@ namespace World
 
 		return spawnedCount;
 	}
+
+	uint32_t PCGBiomeGenerator::ClearFoliageAlongSpline(
+		FoliageData& foliageData,
+		const Spline3D& spline,
+		float clearWidth)
+	{
+		const float totalLen = spline.GetTotalLength();
+		if (totalLen <= 1.0f || clearWidth <= 0.5f)
+			return 0;
+
+		const float step = clearWidth * 0.5f;
+		const uint32_t numSamples = static_cast<uint32_t>(totalLen / step);
+		uint32_t totalErased = 0;
+
+		for (uint32_t i = 0; i <= numSamples; ++i)
+		{
+			const float d = std::min(static_cast<float>(i) * step, totalLen);
+			glm::vec3 splinePos, tangent;
+			spline.SampleAtDistance(d, splinePos, tangent);
+			totalErased += foliageData.EraseFoliage(splinePos, clearWidth * 0.5f, -1);
+		}
+
+		return totalErased;
+	}
 }

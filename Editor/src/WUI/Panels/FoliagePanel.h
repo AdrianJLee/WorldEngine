@@ -16,7 +16,8 @@ namespace World
 	{
 		Paint = 0,
 		Erase = 1,
-		Settings = 2
+		Interact = 2,
+		Settings = 3
 	};
 
 	enum class FoliageEraseTarget : uint8_t
@@ -43,6 +44,10 @@ namespace World
 		void SetBrushRadius(float r) { m_BrushRadius = std::clamp(r, 0.5f, 100.0f); }
 		float GetBrushDensity() const { return m_BrushDensity; }
 		void SetBrushDensity(float d) { m_BrushDensity = std::clamp(d, 0.1f, 10.0f); }
+		float GetInteractRadius() const { return m_InteractRadius; }
+		void SetInteractRadius(float r) { m_InteractRadius = std::clamp(r, 0.5f, 50.0f); }
+		float GetInteractStrength() const { return m_InteractStrength; }
+		void SetInteractStrength(float s) { m_InteractStrength = std::clamp(s, 0.1f, 10.0f); }
 		size_t GetActiveTypeIndex() const { return static_cast<size_t>(std::max(0, m_ActiveTypeIdx)); }
 		void SetActiveTypeIndex(size_t idx) { m_ActiveTypeIdx = static_cast<int>(idx); }
 
@@ -69,6 +74,7 @@ namespace World
 		bool m_ReadOnly = false;
 		void RenderPaintTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host);
 		void RenderEraseTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host);
+		void RenderInteractTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host);
 		void RenderSettingsTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host);
 
 		FoliageBrushTool m_Tool { FoliageBrushTool::Paint };
@@ -78,6 +84,8 @@ namespace World
 		// 笔刷参数
 		float m_BrushRadius { 15.0f };
 		float m_BrushDensity { 2.0f };
+		float m_InteractRadius { 4.5f };
+		float m_InteractStrength { 2.5f };
 		int m_ActiveTypeIdx { 0 };
 		int m_ExpandedTypeIdx { 0 }; // 内联折叠展开的植物项 (-1 为全部折叠)
 

@@ -377,6 +377,7 @@ namespace World
 		void SetEditorToolMode(EditorToolMode mode) override;
 		TerrainPanel* GetTerrainPanel() override;
 		FoliagePanel* GetFoliagePanel() override;
+		PCGEditorPanel* GetPcgEditorPanel() override;
 		bool Is2DMode() const override;
 		void Set2DMode(bool enabled) override;
 		bool IsPixelSnapEnabled() const override;

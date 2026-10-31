@@ -1,3 +1,4 @@
+#include "WUI/Panels/PCGEditorPanel.h"
 #include "EditorShell_Internal.h"
 #include "World/Asset/AssetCatalog.h"
 
@@ -258,6 +259,7 @@ m_PanelRegistry.emplace("animgraph", std::make_unique<AnimGraphPanel>());
 		m_PanelRegistry.emplace("particle_editor", std::make_unique<ParticleEditorPanel>());
 m_PanelRegistry.emplace("terrain_editor", std::make_unique<TerrainPanel>());
 m_PanelRegistry.emplace("foliage_editor", std::make_unique<FoliagePanel>());
+		m_PanelRegistry.emplace("pcg_editor", std::make_unique<PCGEditorPanel>());
 		m_PanelRegistry.emplace("navmesh", std::make_unique<NavMeshPanel>(*this));
 		m_PanelRegistry.emplace("physicspainter", std::make_unique<PhysicsPainterPanel>(*this));
 		// PLUG-T3:插件管理器面板(数据/动作都走 EditorShell → EditorLayer;项目形态才注册)。
@@ -1320,6 +1322,13 @@ FoliagePanel* EditorShell::GetFoliagePanel() {
 		return nullptr;
 	}
 
+PCGEditorPanel* EditorShell::GetPcgEditorPanel() {
+	auto it = m_PanelRegistry.find("pcg_editor");
+	if (it != m_PanelRegistry.end())
+		return dynamic_cast<PCGEditorPanel*>(it->second.get());
+	return nullptr;
+}
+
 
 const std::vector<Level::DataLayerDefinition>& EditorShell::GetLevelDataLayers() const{
 		// 当前文档是关卡包时用包 manifest 声明的层;否则视口不显示层开关
@@ -1427,6 +1436,7 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 			{ "behaviortree",    { "panel.behaviortree", "Behavior Tree" } },
 			{ "terrain_editor",  { "panel.terrain_editor", "地貌" } },
 			{ "foliage_editor",  { "panel.foliage_editor", "植被" } },
+			{ "pcg_editor",      { "panel.pcg_editor", "PCG 生态" } },
 		};
 		(void)kTitles;
 		// PLUG-T3b:插件面板标题来自插件注册(不受本地化表约束;卸载后注册表为空,回退到 id)。

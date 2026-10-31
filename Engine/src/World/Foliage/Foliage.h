@@ -26,6 +26,9 @@ namespace World
 		glm::vec2 HeightLimit { -1000.0f, 1000.0f }; // 高度限制
 		float CullDistance { 150.0f };        // 独立视距裁剪
 		float WindMultiplier { 1.0f };        // 风力乘数
+		float BendingStiffness { 1.0f };      // 物理弯折刚度 (0.1 极软, 3.0 坚硬)
+		float BendingRecovery { 5.0f };       // 阻尼回弹速率 (/秒)
+		bool EnablePhysicalInteraction { true }; // 响应实体推挤弯折动力学 (草木为 true，石块为 false)
 		bool AlignToNormal { true };          // 是否对齐地表法线
 		bool PaintingActive { true };         // 参与笔刷混刷开关
 		uint32_t LayerMask { 0xFFFFFFFF };    // 地表材质图层掩码过滤：Bit 0=Layer0/Grass, Bit 1=Layer1/Dirt, Bit 2=Layer2/Rock, Bit 3=Layer3/Sand

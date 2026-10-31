@@ -2602,8 +2602,9 @@ namespace World
 					const bool hasHit = terrain->Raycast(localOrigin, localDir, 2000.0f, hit);
 					if (hasHit)
 					{
-						const float R = foliagePanel->GetBrushRadius();
-						const bool eraseMode = shift || (foliagePanel->GetTool() == FoliageBrushTool::Erase);
+						const bool interactMode = (foliagePanel->GetTool() == FoliageBrushTool::Interact);
+						const bool eraseMode = !interactMode && (shift || (foliagePanel->GetTool() == FoliageBrushTool::Erase));
+						const float R = interactMode ? foliagePanel->GetInteractRadius() : foliagePanel->GetBrushRadius();
 
 						// 32 段贴地光圈
 						constexpr int kSegments = 32;
@@ -2617,7 +2618,7 @@ namespace World
 							clips[i] = gizmoCamera.ViewProjection * (terrainWorld * glm::vec4(px, py, pz, 1.0f));
 						}
 
-						const Wui::WuiColor ringColor = eraseMode ? theme.Danger : theme.Success;
+						const Wui::WuiColor ringColor = interactMode ? Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.95f } : (eraseMode ? theme.Danger : theme.Success);
 
 						for (int i = 0; i < kSegments; ++i)
 						{
@@ -2630,7 +2631,12 @@ namespace World
 
 						// 浮动 HUD 提示
 						char hudText[160] = {};
-						if (eraseMode)
+						if (interactMode)
+						{
+							std::snprintf(hudText, sizeof(hudText), "Foliage: [受力推挤 Interact] 拖拽测试倒伏 | 半径: %.1fm | 强度: %.1f",
+								R, foliagePanel->GetInteractStrength());
+						}
+						else if (eraseMode)
 						{
 							const bool eraseAll = (foliagePanel->GetEraseTarget() == FoliageEraseTarget::AllSpecies) || ctx.Input().Alt;
 							std::snprintf(hudText, sizeof(hudText), "Foliage: [擦除 Erase] %s | R: %.1fm | Shift: 擦除",
@@ -2673,7 +2679,12 @@ namespace World
 							const float distMoved = glm::distance(glm::vec2(worldHitPoint.x, worldHitPoint.z),
 								glm::vec2(s_LastFoliageHit.x, s_LastFoliageHit.z));
 
-							if (distMoved >= R * 0.25f || s_FoliagePaintCooldown >= 0.10f)
+							if (interactMode)
+							{
+								FoliageRenderer::AddLocalWind(worldHitPoint, R, foliagePanel->GetInteractStrength() * 2.5f,
+									4.0f, 1.5f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
+							}
+							else if (distMoved >= R * 0.25f || s_FoliagePaintCooldown >= 0.10f)
 							{
 								if (eraseMode)
 								{

@@ -29,6 +29,7 @@ namespace World
 	class EditorLayer;
 	class TerrainPanel;
 	class FoliagePanel;
+	class PCGEditorPanel;
 	namespace Gameplay { class SaveService; }
 
 	// ---- U25-M2:跨窗口资产拖放桥(编辑器侧;不碰核心 WUI)----
@@ -141,6 +142,7 @@ namespace World
 		virtual void SetEditorToolMode(EditorToolMode mode) { (void)mode; }
 		virtual TerrainPanel* GetTerrainPanel() { return nullptr; }
 		virtual FoliagePanel* GetFoliagePanel() { return nullptr; }
+		virtual PCGEditorPanel* GetPcgEditorPanel() { return nullptr; }
 		virtual bool IsReferenceGridEnabled() const { return true; }
 		virtual void SetReferenceGridEnabled(bool enabled) {}
 		virtual World::ViewportProjection GetViewportProjection() const { return World::ViewportProjection::Perspective; }

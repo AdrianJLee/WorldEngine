@@ -285,15 +285,20 @@ namespace World::Gameplay
 					return NodeStatus::Success;
 				});
 			}
-			else if (type == "FindTacticalCover")
+			else if (type == "FindTacticalCover" || type == "RunEQSQuery")
 			{
-				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
+				const std::string modeStr = desc.StringParam;
+				return std::make_shared<ActionNode>([param, modeStr](BehaviorContext& ctx) {
 					if (!ctx.Self.HasComponent<TransformComponent>())
 						return NodeStatus::Failure;
 
 					auto& tr = ctx.Self.GetComponent<TransformComponent>();
 					const float radius = param > 0.0f ? param : 25.0f;
 					const float spacing = 1.5f;
+
+					EQSQueryMode queryMode = EQSQueryMode::Cover;
+					if (modeStr == "Flank") queryMode = EQSQueryMode::Flank;
+					else if (modeStr == "Retreat") queryMode = EQSQueryMode::Retreat;
 
 					std::vector<CoverBox> obstacles;
 					auto& reg = ctx.CurrentScene.GetRegistry();
@@ -332,11 +337,11 @@ namespace World::Gameplay
 							threatPos = reg.get<TransformComponent>(te).Location;
 					}
 
-					glm::vec3 bestCover(0.0f);
+					glm::vec3 bestPos(0.0f);
 					float bestScore = -1.0f;
-					if (EQSCoverSystem::FindBestCover(tr.Location, threatPos, radius, spacing, obstacles, bestCover, bestScore))
+					if (EQSCoverSystem::ExecuteQuery(queryMode, tr.Location, threatPos, radius, spacing, obstacles, bestPos, bestScore))
 					{
-						ctx.Component.BlackboardTargetPos = bestCover;
+						ctx.Component.BlackboardTargetPos = bestPos;
 						ctx.Component.BlackboardValue = bestScore;
 						if (ctx.Self.HasComponent<EQSComponent>())
 						{

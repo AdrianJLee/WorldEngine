@@ -70,6 +70,31 @@ static void TestEQSCoverSystem()
 		<< bestCover.x << ", " << bestCover.y << ", " << bestCover.z << ", Score: " << bestScore << ")\n";
 }
 
+static void TestEQSMultiModes()
+{
+	const glm::vec3 threatPos(0.0f, 0.0f, 0.0f);
+	const glm::vec3 querierPos(20.0f, 0.0f, 0.0f);
+	std::vector<CoverBox> obstacles = {
+		{ { 8.0f, 0.0f, -5.0f }, { 12.0f, 4.0f, 5.0f } }
+	};
+
+	glm::vec3 bestFlank;
+	float flankScore = 0.0f;
+	bool foundFlank = EQSCoverSystem::ExecuteQuery(
+		EQSQueryMode::Flank, querierPos, threatPos, 15.0f, 1.0f, obstacles, bestFlank, flankScore);
+	assert(foundFlank);
+	assert(std::abs(bestFlank.z) > 1.0f);
+
+	glm::vec3 bestRetreat;
+	float retreatScore = 0.0f;
+	bool foundRetreat = EQSCoverSystem::ExecuteQuery(
+		EQSQueryMode::Retreat, querierPos, threatPos, 15.0f, 1.0f, obstacles, bestRetreat, retreatScore);
+	assert(foundRetreat);
+	assert(glm::distance(bestRetreat, threatPos) >= glm::distance(querierPos, threatPos) - 1.0f);
+
+	std::cout << "[PASS] TestEQSMultiModes\n";
+}
+
 static void TestFoliageInteractionPhysics()
 {
 	const glm::vec3 foliagePos(10.0f, 0.0f, 10.0f);
@@ -107,6 +132,13 @@ static void TestPCGFoliageBaking()
 	assert(foliage.GetTotalInstanceCount() == 3);
 	assert(!foliage.GetChunks().empty());
 
+	Spline3D roadSpline;
+	roadSpline.AddPoint(glm::vec3(5.0f, 0.0f, 10.0f));
+	roadSpline.AddPoint(glm::vec3(15.0f, 0.0f, 10.0f));
+	roadSpline.UpdateTangents();
+	uint32_t erased = PCGBiomeGenerator::ClearFoliageAlongSpline(foliage, roadSpline, 6.0f);
+	assert(erased >= 1);
+
 	std::cout << "[PASS] TestPCGFoliageBaking\n";
 }
 
@@ -133,6 +165,7 @@ int main()
 	TestPCGBiomeClassification();
 	TestSplineTerrainDeformation();
 	TestEQSCoverSystem();
+	TestEQSMultiModes();
 	TestFoliageInteractionPhysics();
 	TestPCGAndLivingAIComponentLayout();
 	TestPCGFoliageBaking();

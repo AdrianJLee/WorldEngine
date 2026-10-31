@@ -54,5 +54,11 @@ namespace World
 			const std::vector<PCGSpawnPoint>& points,
 			FoliageData& foliageData,
 			float scale = 1.0f);
+
+		// 沿样条道路清除指定宽度内的植被实例，形成净空道路通道
+		static uint32_t ClearFoliageAlongSpline(
+			FoliageData& foliageData,
+			const Spline3D& spline,
+			float clearWidth);
 	};
 }

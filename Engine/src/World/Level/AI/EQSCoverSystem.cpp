@@ -46,6 +46,19 @@ namespace World
 		glm::vec3& outBestCover,
 		float& outBestScore)
 	{
+		return ExecuteQuery(EQSQueryMode::Cover, querierPos, threatPos, queryRadius, gridSpacing, obstacles, outBestCover, outBestScore);
+	}
+
+	bool EQSCoverSystem::ExecuteQuery(
+		EQSQueryMode mode,
+		const glm::vec3& querierPos,
+		const glm::vec3& threatPos,
+		float queryRadius,
+		float gridSpacing,
+		const std::vector<CoverBox>& obstacles,
+		glm::vec3& outBestPos,
+		float& outBestScore)
+	{
 		outBestScore = -1.0f;
 		if (queryRadius <= 0.0f || gridSpacing <= 0.1f)
 			return false;
@@ -53,7 +66,11 @@ namespace World
 		const int steps = static_cast<int>(queryRadius / gridSpacing);
 		std::vector<EQSCoverCandidate> candidates;
 
-		// 生成空间网格候选点
+		const float querierDistToThreat = glm::distance(querierPos, threatPos);
+		glm::vec3 threatToQuerier = (querierDistToThreat > 1e-4f)
+			? glm::normalize(querierPos - threatPos) : glm::vec3(0.0f, 0.0f, 1.0f);
+
+		// 生成空间探测网格候选点
 		for (int z = -steps; z <= steps; ++z)
 		{
 			for (int x = -steps; x <= steps; ++x)
@@ -63,7 +80,7 @@ namespace World
 				if (distToQuerier > queryRadius)
 					continue;
 
-				// 检查该点是否在障碍物内部 (不可站立)
+				// 检查该点是否在障碍物内部 (不可站立穿模)
 				bool insideObstacle = false;
 				for (const auto& box : obstacles)
 				{
@@ -78,7 +95,7 @@ namespace World
 				if (insideObstacle)
 					continue;
 
-				// 测试从威胁点 (Threat) 到该候选点 (Candidate) 是否被掩体视线阻断
+				// 视线遮蔽射线检测
 				const glm::vec3 rayDir = pt - threatPos;
 				const float rayLen = glm::length(rayDir);
 				if (rayLen < 0.001f)
@@ -97,9 +114,28 @@ namespace World
 				EQSCoverCandidate cand;
 				cand.Position = pt;
 				cand.LineOfSightOcclusion = occluded ? 1.0f : 0.0f;
-				// 偏好距离自己近的掩体
 				cand.DistanceScore = 1.0f - (distToQuerier / queryRadius);
-				cand.TotalScore = cand.LineOfSightOcclusion * 2.0f + cand.DistanceScore;
+
+				if (mode == EQSQueryMode::Cover)
+				{
+					// 防守掩体：视线完全遮蔽为第一优先，同时偏好靠近查询者
+					cand.TotalScore = cand.LineOfSightOcclusion * 2.5f + cand.DistanceScore;
+				}
+				else if (mode == EQSQueryMode::Flank)
+				{
+					// 侧翼包抄：与威胁形成侧向 60~90 度夹角，需要具备对威胁的直视射击线 (Occlusion == 0)
+					glm::vec3 threatToCand = glm::normalize(pt - threatPos);
+					float cosAngle = glm::dot(threatToQuerier, threatToCand);
+					cand.AngleScore = 1.0f - std::abs(cosAngle); // 90度时最大 (cosAngle = 0)
+					cand.TotalScore = cand.AngleScore * 2.0f + (1.0f - cand.LineOfSightOcclusion) * 1.5f + cand.DistanceScore * 0.5f;
+				}
+				else if (mode == EQSQueryMode::Retreat)
+				{
+					// 安全撤退：点位到威胁的距离大于查询者自身到威胁的距离，且视线处于遮蔽状态
+					const float candDistToThreat = rayLen;
+					float retreatGain = (candDistToThreat - querierDistToThreat) / queryRadius;
+					cand.TotalScore = cand.LineOfSightOcclusion * 2.0f + retreatGain * 2.0f + cand.DistanceScore;
+				}
 
 				candidates.push_back(cand);
 			}
@@ -113,7 +149,7 @@ namespace World
 				return a.TotalScore > b.TotalScore;
 			});
 
-		outBestCover = candidates.front().Position;
+		outBestPos = candidates.front().Position;
 		outBestScore = candidates.front().TotalScore;
 		return true;
 	}

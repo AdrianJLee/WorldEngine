@@ -152,6 +152,7 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 			{ "particle_editor", EditorShell::PanelForm::Independent, { 160.0f, 140.0f, 840.0f, 580.0f } },
 			{ "terrain_editor",  EditorShell::PanelForm::Docked, {} },
 			{ "foliage_editor",  EditorShell::PanelForm::Docked, {} },
+			{ "pcg_editor",      EditorShell::PanelForm::Docked, {} },
 			{ "navmesh",         EditorShell::PanelForm::Docked, {} },
 			{ "physicspainter",  EditorShell::PanelForm::Docked, {} },
 			// 注:D3 材质编辑器是**动态面板**(每个材质一个 "material:<path>" 实例),

@@ -1090,8 +1090,8 @@ namespace World
 				"Custom"                 // 自定义动作名 (Custom Named Action)
 			};
 
-			const bool hasExtraRow = (node->ActionType == "SeekSmartObject" || node->ActionType == "Custom");
-			const float cardH = hasExtraRow ? 165.0f : 125.0f;
+			const bool hasExtraRow = (node->ActionType == "SeekSmartObject" || node->ActionType == "FindTacticalCover" || node->ActionType == "Custom");
+			const float cardH = hasExtraRow ? 175.0f : 125.0f;
 			const Wui::WuiRect actCard { startX, curY, fieldW, cardH };
 			Wui::PanelBackground(ctx, actCard, Wui::WuiColor { 0.28f, 0.18f, 0.10f, 0.85f }, theme.Radius);
 			Wui::HighlightOutline(ctx, actCard, Wui::WuiColor { 0.85f, 0.50f, 0.15f, 1.0f }, theme.Radius, 1.0f);
@@ -1186,6 +1186,34 @@ namespace World
 				}
 				cardY += 26.0f;
 				Wui::Label(ctx, { startX + labelW, cardY }, "提示: 在 Luau 脚本的 OnEnter/OnTick(ctx,dt)/OnExit 中实现具体行为", theme.TextMuted, theme.FontSizeSmall);
+			}
+			else if (node->ActionType == "FindTacticalCover")
+			{
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "查询搜索半径 (m):", theme.Text, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.float.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, node->FloatParam, 1.0f, 1.0f, 200.0f, theme))
+				{
+					m_Dirty = true;
+				}
+				cardY += 28.0f;
+
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "EQS 查询模式:", theme.Text, theme.FontSizeSmall);
+				if (node->StringParam.empty()) node->StringParam = "Cover";
+				const char* modes[3] = { "Cover (掩体)", "Flank (包抄)", "Retreat (撤退)" };
+				const char* rawModes[3] = { "Cover", "Flank", "Retreat" };
+				int modeIdx = 0;
+				if (node->StringParam == "Flank") modeIdx = 1;
+				else if (node->StringParam == "Retreat") modeIdx = 2;
+
+				const std::vector<std::string> eqOptions = { "Cover (掩体)", "Flank (包抄)", "Retreat (撤退)" };
+				if (Wui::Segmented(ctx, Wui::HashId((std::string("bt.act.eqs_mode.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, eqOptions, modeIdx, theme))
+				{
+					node->StringParam = rawModes[modeIdx];
+					m_Dirty = true;
+				}
+				cardY += 26.0f;
+				Wui::Label(ctx, { startX + labelW, cardY }, "提示: 综合视线遮蔽、距离与威胁方位解算最优战术站位并写入黑板", theme.TextMuted, theme.FontSizeSmall);
 			}
 			else if (node->ActionType == "SeekSmartObject")
 			{

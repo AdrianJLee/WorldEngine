@@ -352,7 +352,7 @@ namespace World
 		}
 
 		// 3. 工具模式选项卡: [散布 (Scatter)] [擦除 (Erase)] [环境与优化 (Settings)]
-		const std::vector<std::string> tools = { "生态散布", "擦除管理", "全局风场" };
+		const std::vector<std::string> tools = { "生态散布", "擦除管理", "受力推挤", "全局风场" };
 		if (Wui::TabBar(ctx, Wui::HashId("foliage.tool.tabs"), { startX, curY, contentW, 28.0f }, tools, m_ToolIdx, theme))
 		{
 			m_Tool = static_cast<FoliageBrushTool>(m_ToolIdx);
@@ -367,6 +367,9 @@ namespace World
 			break;
 		case FoliageBrushTool::Erase:
 			RenderEraseTab(ctx, startX, curY, contentW, theme, host);
+			break;
+		case FoliageBrushTool::Interact:
+			RenderInteractTab(ctx, startX, curY, contentW, theme, host);
 			break;
 		case FoliageBrushTool::Settings:
 			RenderSettingsTab(ctx, startX, curY, contentW, theme, host);
@@ -800,6 +803,26 @@ namespace World
 				}
 				curY += 28.0f;
 
+				// 物理受力刚度与回弹
+				Wui::Label(ctx, { inspX, curY + 4.0f }, "刚度/回弹:", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId(("foliage.insp.stiff." + std::to_string(i)).c_str()), { inspX + 65.0f, curY, halfFieldW, 22.0f }, type.BendingStiffness, 0.1f, 0.0f, 5.0f, theme))
+				{
+					host.MarkDocumentDirty();
+				}
+				if (Wui::DragFloat(ctx, Wui::HashId(("foliage.insp.recov." + std::to_string(i)).c_str()), { inspX + 65.0f + halfFieldW + theme.PadSmall, curY, halfFieldW, 22.0f }, type.BendingRecovery, 0.2f, 0.5f, 20.0f, theme))
+				{
+					host.MarkDocumentDirty();
+				}
+				curY += 26.0f;
+
+				bool enablePhys = type.EnablePhysicalInteraction;
+				if (Wui::Checkbox(ctx, Wui::HashId(("foliage.insp.phys." + std::to_string(i)).c_str()), { inspX + 65.0f, curY, contentW - 65.0f, 20.0f }, "启用实体推挤弯折 (草木生效/石块关闭)", enablePhys, theme))
+				{
+					type.EnablePhysicalInteraction = enablePhys;
+					host.MarkDocumentDirty();
+				}
+				curY += 26.0f;
+
 				// 9. 单项清空与删除
 				if (Wui::Button(ctx, Wui::HashId(("foliage.insp.clear_inst." + std::to_string(i)).c_str()), { inspX, curY, halfFieldW, 24.0f }, "清空此物种", theme))
 				{
@@ -968,6 +991,77 @@ namespace World
 			m_StatusFeedback = "已清空所有局部风源";
 		}
 		curY += 32.0f;
+	}
+
+
+	void FoliagePanel::RenderInteractTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host)
+	{
+		Wui::Label(ctx, { startX, curY + 4.0f }, "植被受力弯折与动力学测试 (Physical Bending & Push Test)", theme.Accent, theme.FontSizeBody);
+		curY += 26.0f;
+
+		Wui::Label(ctx, { startX, curY + 4.0f }, "交互推挤半径 (m):", theme.Text, theme.FontSizeSmall);
+		Wui::DragFloat(ctx, Wui::HashId("foliage.interact.radius"), { startX + 130.0f, curY, contentW - 130.0f, 22.0f }, m_InteractRadius, 0.5f, 0.5f, 50.0f, theme);
+		curY += 28.0f;
+
+		Wui::Label(ctx, { startX, curY + 4.0f }, "交互推挤强度:", theme.Text, theme.FontSizeSmall);
+		Wui::DragFloat(ctx, Wui::HashId("foliage.interact.strength"), { startX + 130.0f, curY, contentW - 130.0f, 22.0f }, m_InteractStrength, 0.1f, 0.1f, 10.0f, theme);
+		curY += 28.0f;
+
+		const float halfW = (contentW - theme.PadSmall) * 0.5f;
+		if (Wui::Button(ctx, Wui::HashId("foliage.interact.btn_radial"), { startX, curY, halfW, 26.0f }, "💥 触发径向冲击 (Radial)", theme))
+		{
+			FoliageRenderer::AddLocalWind(glm::vec3(0.0f, 0.0f, 0.0f), m_InteractRadius * 3.0f, m_InteractStrength * 2.0f, 3.5f, 1.2f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
+			m_StatusFeedback = "已触发受力推挤径向冲击波";
+		}
+		if (Wui::Button(ctx, Wui::HashId("foliage.interact.btn_vortex"), { startX + halfW + theme.PadSmall, curY, halfW, 26.0f }, "🌀 触发气旋回旋 (Vortex)", theme))
+		{
+			FoliageRenderer::AddLocalWind(glm::vec3(0.0f, 0.0f, 0.0f), m_InteractRadius * 2.5f, m_InteractStrength * 1.8f, 5.0f, 1.5f, LocalWindType::Vortex, glm::vec3(0.0f, 1.0f, 0.0f));
+			m_StatusFeedback = "已触发受力推挤气旋扭曲";
+		}
+		curY += 32.0f;
+
+		if (Wui::Button(ctx, Wui::HashId("foliage.interact.btn_clear"), { startX, curY, contentW, 24.0f }, "清空测试风场", theme))
+		{
+			FoliageRenderer::ClearLocalWinds();
+			m_StatusFeedback = "已清空所有局部风场。";
+		}
+		curY += 32.0f;
+
+		// 场景推挤实体监控卡片
+		Wui::Label(ctx, { startX, curY + 4.0f }, "场景动力学推挤实体列表 (Dynamic Pusher Entities):", theme.Accent, theme.FontSizeSmall);
+		curY += 24.0f;
+
+		auto activeScene = host.GetActiveScene();
+		if (activeScene)
+		{
+			auto view = activeScene->GetRegistry().view<TransformComponent, FoliageInteractionComponent>();
+			if (view.begin() == view.end())
+			{
+				Wui::Label(ctx, { startX + 8.0f, curY }, "当前场景中无挂载 FoliageInteractionComponent 的实体。", theme.TextMuted, theme.FontSizeSmall);
+				curY += 22.0f;
+			}
+			else
+			{
+				for (auto entity : view)
+				{
+					auto& [tc, fic] = view.get<TransformComponent, FoliageInteractionComponent>(entity);
+					std::string tag = "Entity";
+					if (const auto* tagComp = activeScene->GetRegistry().try_get<TagComponent>(entity))
+						tag = StringPool::Get().NameOf(tagComp->Tag);
+
+					const Wui::WuiRect itemRect { startX, curY, contentW, 46.0f };
+					Wui::PanelBackground(ctx, itemRect, Wui::WuiColor { 0.12f, 0.16f, 0.20f, 0.85f }, 4.0f);
+					Wui::HighlightOutline(ctx, itemRect, Wui::WuiColor { 0.20f, 0.80f, 0.70f, 0.40f }, 4.0f, 1.0f);
+
+					char l1[128], l2[128];
+					std::snprintf(l1, sizeof(l1), "实体: %s", tag.c_str());
+					std::snprintf(l2, sizeof(l2), "推挤半径: %.1fm | 强度: %.1f | 回弹率: %.1f/s", fic.PushRadius, fic.PushStrength, fic.RecoverySpeed);
+					Wui::Label(ctx, { startX + 8.0f, curY + 4.0f }, l1, theme.Text, theme.FontSizeSmall);
+					Wui::Label(ctx, { startX + 8.0f, curY + 24.0f }, l2, theme.TextMuted, theme.FontSizeSmall);
+					curY += 52.0f;
+				}
+			}
+		}
 	}
 
 	void FoliagePanel::RenderEraseTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host)

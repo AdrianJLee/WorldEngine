@@ -1514,7 +1514,7 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 
 		// 2. 世界与关卡构建 (World Building)
 		const std::vector<std::string> kWorldPanels = {
-			"terrain_editor", "foliage_editor", "physicspainter", "navmesh"
+			"terrain_editor", "foliage_editor", "pcg_editor", "physicspainter", "navmesh"
 		};
 		std::vector<MenuEntry> worldSubs;
 		for (const auto& pid : kWorldPanels)
