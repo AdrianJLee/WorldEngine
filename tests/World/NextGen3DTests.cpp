@@ -1,4 +1,5 @@
 #include "World/Renderer/MeshletBuilder.h"
+#include "World/Level/WhiteboxBuilder.h"
 #include "World/Environment/WaterSimulation.h"
 #include "World/Environment/WeatherSimulation.h"
 #include "World/Scene/Components.h"
@@ -50,6 +51,18 @@ static void TestMeshletClustering()
 		assert(m.ConeCutoff >= -1.0f && m.ConeCutoff <= 1.0f);
 	}
 
+	WhiteboxComponent wb;
+	wb.Shape = WhiteboxComponent::ShapeType::Sphere;
+	wb.Dimensions = glm::vec3(3.0f);
+	wb.Subdivisions = 4;
+	WhiteboxMesh wbMesh;
+	WhiteboxBuilder::BuildMesh(wb, wbMesh);
+	std::vector<Meshlet> sphereMeshlets;
+	std::vector<uint32_t> sVerts;
+	std::vector<uint8_t> sTris;
+	MeshletBuilder::BuildMeshlets(wbMesh.Vertices, wbMesh.Indices, sphereMeshlets, sVerts, sTris, 64, 126);
+	std::cout << "[INFO] Sphere meshlets produced: " << sphereMeshlets.size() << " (Vertices: " << wbMesh.Vertices.size() << ", Tris: " << wbMesh.Indices.size()/3 << ")\n";
+	assert(sphereMeshlets.size() >= 10);
 	std::cout << "[PASS] TestMeshletClustering (Meshlets: " << meshlets.size() << ")\n";
 }
 

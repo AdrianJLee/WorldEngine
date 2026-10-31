@@ -31,6 +31,7 @@
 #include "World/Scene/Hierarchy.h"
 #include "World/NavMesh/NavMesh.h"
 #include "World/Renderer/MeshLOD.h"
+#include "World/Renderer/MeshletBuilder.h"
 #include <glm/gtc/matrix_inverse.hpp>
 #include "World/Scene/SceneOctree.h"
 #include "World/Scene/Scene.h"
@@ -4400,21 +4401,162 @@ namespace World
 						}
 					}
 
+					// ---- GPU Meshlet 集群真彩染色与硬件簇调试覆盖层 (Meshlet Clusters Overlay) ----
+					const bool showAllMeshlets = IsMeshletClustersVisible();
+					std::unordered_set<entt::entity> renderedMeshletEntities;
+					for (const entt::entity handle : registry.view<TransformComponent>())
+					{
+						const bool isSelected = (handle == selectedHandle);
+						bool isMeshletEntity = false;
+						if (const auto* layerComp = registry.try_get<LevelEntityComponent>(handle))
+						{
+							if (layerComp->DataLayerMask & 16) // Meshlet_Cluster_Models (Layer 5)
+								isMeshletEntity = true;
+						}
+						if (!isMeshletEntity)
+						{
+							if (const auto* tagComp = registry.try_get<TagComponent>(handle))
+							{
+								const std::string name = StringPool::Get().NameOf(tagComp->Tag);
+								if (name.find("Meshlet") != std::string::npos)
+									isMeshletEntity = true;
+							}
+						}
+
+						if (!showAllMeshlets && !isMeshletEntity)
+							continue;
+
+						const auto& xf = registry.get<TransformComponent>(handle);
+						const glm::mat4 world = WorldMatrixOf(registry, handle);
+
+						std::vector<glm::vec3> vertices;
+						std::vector<uint32_t> indices;
+
+						if (const auto* wb = registry.try_get<WhiteboxComponent>(handle))
+						{
+							WhiteboxMesh wbMesh;
+							WhiteboxBuilder::BuildMesh(*wb, wbMesh);
+							vertices = std::move(wbMesh.Vertices);
+							indices = std::move(wbMesh.Indices);
+						}
+						else if (const auto* mr = registry.try_get<MeshRendererComponent>(handle))
+						{
+							WhiteboxComponent dummyWb;
+							dummyWb.Dimensions = glm::vec3(1.0f);
+							dummyWb.Subdivisions = 4;
+						if (mr->Primitive == MeshRendererComponent::PrimitiveShape::Sphere)
+							dummyWb.Shape = static_cast<uint8_t>(WhiteboxComponent::ShapeType::Sphere);
+						else
+							dummyWb.Shape = static_cast<uint8_t>(WhiteboxComponent::ShapeType::Box);
+							WhiteboxMesh wbMesh;
+							WhiteboxBuilder::BuildMesh(dummyWb, wbMesh);
+							vertices = std::move(wbMesh.Vertices);
+							indices = std::move(wbMesh.Indices);
+						}
+
+						if (vertices.empty() || indices.empty())
+							continue;
+
+						std::vector<Meshlet> meshlets;
+						std::vector<uint32_t> meshletVerts;
+						std::vector<uint8_t> meshletTris;
+						MeshletBuilder::BuildMeshlets(vertices, indices, meshlets, meshletVerts, meshletTris, 64, 126);
+
+						if (meshlets.empty())
+							continue;
+
+						renderedMeshletEntities.insert(handle);
+						const glm::mat3 normalMatrix = glm::mat3(world);
+
+						// 逐集群着色绘制微型簇三角形与包络轴锥
+						for (size_t mIdx = 0; mIdx < meshlets.size(); ++mIdx)
+						{
+							const auto& m = meshlets[mIdx];
+							const glm::vec4 debugCol = MeshletBuilder::GetMeshletDebugColor(static_cast<uint32_t>(mIdx));
+							const Wui::WuiColor clusterCol { debugCol.r, debugCol.g, debugCol.b, 0.95f };
+							const Wui::WuiColor coneCol { debugCol.r, debugCol.g, debugCol.b, 0.65f };
+
+							// 1. 簇内三角形线框 (以独立色彩呈现簇划分边缘与拓扑)
+							const uint32_t triBase = m.TriangleOffset;
+							for (uint32_t t = 0; t < m.TriangleCount; ++t)
+							{
+								const uint32_t i0 = triBase + t * 3;
+								const uint32_t i1 = triBase + t * 3 + 1;
+								const uint32_t i2 = triBase + t * 3 + 2;
+								if (i2 >= meshletTris.size()) break;
+
+								const uint32_t v0Idx = m.VertexOffset + meshletTris[i0];
+								const uint32_t v1Idx = m.VertexOffset + meshletTris[i1];
+								const uint32_t v2Idx = m.VertexOffset + meshletTris[i2];
+								if (v2Idx >= meshletVerts.size()) break;
+
+								const uint32_t g0 = meshletVerts[v0Idx];
+								const uint32_t g1 = meshletVerts[v1Idx];
+								const uint32_t g2 = meshletVerts[v2Idx];
+								if (g0 >= vertices.size() || g1 >= vertices.size() || g2 >= vertices.size()) break;
+
+								const glm::vec3 w0 = glm::vec3(world * glm::vec4(vertices[g0], 1.0f));
+								const glm::vec3 w1 = glm::vec3(world * glm::vec4(vertices[g1], 1.0f));
+								const glm::vec3 w2 = glm::vec3(world * glm::vec4(vertices[g2], 1.0f));
+
+								PushOccludedWorldSegment(w0, w1, clusterCol, 1.6f, handle);
+								PushOccludedWorldSegment(w1, w2, clusterCol, 1.6f, handle);
+								PushOccludedWorldSegment(w2, w0, clusterCol, 1.6f, handle);
+							}
+
+							// 2. 集群背面剔除法线轴锥 (Normal Cone Axis)
+							const glm::vec3 sphereCenterWorld = glm::vec3(world * glm::vec4(m.BoundingCenter, 1.0f));
+							const glm::vec3 coneDirWorld = glm::normalize(normalMatrix * m.ConeAxis);
+							const float coneLen = std::max(0.15f, m.BoundingRadius * 0.40f);
+							PushOccludedWorldSegment(sphereCenterWorld, sphereCenterWorld + coneDirWorld * coneLen, coneCol, 2.0f, handle);
+						}
+
+						// 3. 实体头顶 3D 悬浮标牌 (Meshlet Telemetry Badge)
+						const glm::vec3 entCenter = glm::vec3(world[3]);
+						const glm::vec4 clipPos = overlayCamera.ViewProjection * glm::vec4(entCenter + glm::vec3(0.0f, xf.Scale.y * 0.55f + 0.35f, 0.0f), 1.0f);
+						if (clipPos.w > 0.05f)
+						{
+							const glm::vec2 ndc { clipPos.x / clipPos.w, clipPos.y / clipPos.w };
+							const glm::vec2 badgePos {
+								sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
+								sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H
+							};
+							if (badgePos.x >= sceneRect.X && badgePos.x <= sceneRect.X + sceneRect.W &&
+								badgePos.y >= sceneRect.Y && badgePos.y <= sceneRect.Y + sceneRect.H)
+							{
+								char badgeText[128];
+								std::snprintf(badgeText, sizeof(badgeText), "Meshlets: %zu 簇 (≤64V/126T)", meshlets.size());
+								const float fontSz = 11.5f;
+								const float textW = ctx.MeasureTextWidth(badgeText, fontSz);
+								const Wui::WuiRect badgeRect { badgePos.x - textW * 0.5f - 8.0f, badgePos.y - 20.0f, textW + 16.0f, 20.0f };
+								const Wui::WuiColor badgeBg { 0.06f, 0.10f, 0.18f, 0.90f };
+								const Wui::WuiColor badgeBorder { 0.35f, 0.85f, 1.0f, 0.95f };
+								const Wui::WuiColor textCol { 0.85f, 0.95f, 1.0f, 1.0f };
+								Wui::PanelBackground(ctx, badgeRect, badgeBg, 4.0f);
+								Wui::HighlightOutline(ctx, badgeRect, badgeBorder, 4.0f, 1.2f);
+								Wui::Label(ctx, { badgeRect.X + 8.0f, badgeRect.Y + 3.0f }, badgeText, textCol, fontSz);
+							}
+						}
+					}
+
 					// ---- 选中白盒原型线框 (WhiteboxComponent) ----
 					// 严格遵循面法线朝向与静态遮挡剔除，彻底杜绝线条穿透遮挡物与自身
 					if (selected.IsValid() && selected.HasComponent<WhiteboxComponent>() &&
 						selected.HasComponent<TransformComponent>())
 					{
 						const auto& wb = selected.GetComponent<WhiteboxComponent>();
-						glm::mat4 world = selected.GetComponent<TransformComponent>().GetLocalMatrix();
-						if (selected.HasComponent<WorldTransformComponent>())
-							world = selected.GetComponent<WorldTransformComponent>().Matrix;
+						const bool alreadyDrewMeshlets = (renderedMeshletEntities.count(static_cast<entt::entity>(selected)) > 0);
+						if (!alreadyDrewMeshlets)
+						{
+							glm::mat4 world = selected.GetComponent<TransformComponent>().GetLocalMatrix();
+							if (selected.HasComponent<WorldTransformComponent>())
+								world = selected.GetComponent<WorldTransformComponent>().Matrix;
 
-						const Wui::WuiColor wbOutlineColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, 0.95f };
-						const float wbThickness = 1.8f;
-						const entt::entity selHandle = static_cast<entt::entity>(selected);
+							const Wui::WuiColor wbOutlineColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, 0.95f };
+							const float wbThickness = 1.8f;
+							const entt::entity selHandle = static_cast<entt::entity>(selected);
 
-						if (wb.Shape == WhiteboxComponent::ShapeType::Box)
+						if (wb.GetShapeType() == WhiteboxComponent::ShapeType::Box)
 						{
 							const glm::vec3 h = wb.Dimensions * 0.5f;
 							const glm::vec3 corners[8] = {
@@ -4459,7 +4601,7 @@ namespace World
 								}
 							}
 						}
-						else if (wb.Shape == WhiteboxComponent::ShapeType::Cylinder)
+						else if (wb.GetShapeType() == WhiteboxComponent::ShapeType::Cylinder)
 						{
 							const float r = wb.Dimensions.x * 0.5f;
 							const float halfH = wb.Dimensions.y * 0.5f;
@@ -4484,7 +4626,7 @@ namespace World
 								}
 							}
 						}
-						else if (wb.Shape == WhiteboxComponent::ShapeType::Wedge)
+						else if (wb.GetShapeType() == WhiteboxComponent::ShapeType::Wedge)
 						{
 							const glm::vec3 h = wb.Dimensions * 0.5f;
 							const glm::vec3 w[6] = {
@@ -4524,7 +4666,7 @@ namespace World
 								}
 							}
 						}
-						else if (wb.Shape == WhiteboxComponent::ShapeType::Stairs)
+						else if (wb.GetShapeType() == WhiteboxComponent::ShapeType::Stairs)
 						{
 							const uint32_t nSteps = std::max(1u, static_cast<uint32_t>(wb.Steps));
 							const float stepH = wb.Dimensions.y / static_cast<float>(nSteps);
@@ -4572,6 +4714,7 @@ namespace World
 								const glm::vec3 q1 = glm::vec3(world * glm::vec4(std::cos(a1) * r, std::sin(a1) * r, 0.0f, 1.0f));
 								PushOccludedWorldSegment(q0, q1, wbOutlineColor, wbThickness, selHandle);
 							}
+						}
 						}
 					}
 

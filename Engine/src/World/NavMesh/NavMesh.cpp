@@ -1602,7 +1602,7 @@ namespace World
 					worldMat = tr->GetLocalMatrix();
 
 				WhiteboxMesh mesh;
-				switch (wb.Shape)
+				switch (static_cast<WhiteboxComponent::ShapeType>(wb.Shape))
 				{
 				case WhiteboxComponent::ShapeType::Box:
 					WhiteboxBuilder::BuildBox(wb.Dimensions, wb.BevelSize, mesh);

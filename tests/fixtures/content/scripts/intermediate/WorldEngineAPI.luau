@@ -1743,7 +1743,9 @@ function ui:isOpen() end
 ---@class WhiteboxComponent
 ---@field Steps number
 ---@field BevelSize number
+---@field Shape number
 ---@field Dimensions vec3
+---@field Subdivisions number
 ---@field GenerateCollision number
 
 ---Pure-ECS component name lookup table; provides autocomplete for ecs:Query / entity:GetComponent.

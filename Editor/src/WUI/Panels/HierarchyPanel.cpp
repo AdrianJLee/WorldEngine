@@ -723,7 +723,7 @@ namespace World
 							auto& xf = created.AddComponent<TransformComponent>();
 							xf.SetLocation(spawnPos);
 							auto& wb = created.AddComponent<WhiteboxComponent>();
-							wb.Shape = shape;
+							wb.Shape = static_cast<uint8_t>(shape);
 							wb.Dimensions = dim;
 							wb.Steps = steps;
 							wb.Subdivisions = subdivs;
@@ -1084,7 +1084,7 @@ namespace World
 						auto& xf = created.AddComponent<TransformComponent>();
 						xf.SetLocation(spawnPos);
 						auto& wb = created.AddComponent<WhiteboxComponent>();
-						wb.Shape = shape;
+						wb.Shape = static_cast<uint8_t>(shape);
 						wb.Dimensions = dim;
 						wb.Steps = steps;
 						wb.Subdivisions = subdivs;

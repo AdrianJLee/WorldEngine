@@ -3798,13 +3798,16 @@ namespace World
 			return it->second;
 
 		WhiteboxMesh wbMesh;
-		switch (comp.Shape)
+		switch (static_cast<WhiteboxComponent::ShapeType>(comp.Shape))
 		{
 		case WhiteboxComponent::ShapeType::Box:
 			WhiteboxBuilder::BuildBox(comp.Dimensions, comp.BevelSize, wbMesh);
 			break;
 		case WhiteboxComponent::ShapeType::Cylinder:
-			WhiteboxBuilder::BuildCylinder(comp.Dimensions.x * 0.5f, comp.Dimensions.y, comp.Subdivisions, wbMesh);
+			WhiteboxBuilder::BuildCylinder(comp.Dimensions.x * 0.5f, comp.Dimensions.y, std::max(6u, static_cast<uint32_t>(comp.Subdivisions * 8)), wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Sphere:
+			WhiteboxBuilder::BuildSphere(comp.Dimensions.x * 0.5f, std::max(6u, static_cast<uint32_t>(comp.Subdivisions * 8)), std::max(4u, static_cast<uint32_t>(comp.Subdivisions * 4)), wbMesh);
 			break;
 		case WhiteboxComponent::ShapeType::Stairs:
 			WhiteboxBuilder::BuildStairs(comp.Dimensions, comp.Steps, wbMesh);

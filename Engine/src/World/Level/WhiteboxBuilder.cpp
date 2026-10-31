@@ -419,7 +419,7 @@ namespace World
 
 	void WhiteboxBuilder::BuildMesh(const WhiteboxComponent& comp, WhiteboxMesh& outMesh)
 	{
-		switch (comp.Shape)
+		switch (static_cast<WhiteboxComponent::ShapeType>(comp.Shape))
 		{
 		case WhiteboxComponent::ShapeType::Box:
 			BuildBox(comp.Dimensions, comp.BevelSize, outMesh);

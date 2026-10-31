@@ -267,7 +267,7 @@ namespace World
 				case 0:
 					{
 						auto& wb = spawned.AddComponent<WhiteboxComponent>();
-						wb.Shape = WhiteboxComponent::ShapeType::Wedge;
+						wb.Shape = static_cast<uint8_t>(WhiteboxComponent::ShapeType::Wedge);
 						wb.Dimensions = glm::vec3(1.2f, 0.8f, 1.4f);
 						wb.GenerateCollision = 1;
 						auto& col = spawned.AddComponent<BoxCollider3DComponent>();
@@ -277,7 +277,7 @@ namespace World
 				case 1:
 					{
 						auto& wb = spawned.AddComponent<WhiteboxComponent>();
-						wb.Shape = WhiteboxComponent::ShapeType::Box;
+						wb.Shape = static_cast<uint8_t>(WhiteboxComponent::ShapeType::Box);
 						wb.Dimensions = glm::vec3(1.0f, 1.0f, 1.0f);
 						wb.BevelSize = 0.05f;
 						wb.GenerateCollision = 1;
@@ -288,7 +288,7 @@ namespace World
 				case 2:
 					{
 						auto& wb = spawned.AddComponent<WhiteboxComponent>();
-						wb.Shape = WhiteboxComponent::ShapeType::Cylinder;
+						wb.Shape = static_cast<uint8_t>(WhiteboxComponent::ShapeType::Cylinder);
 						wb.Dimensions = glm::vec3(0.8f, 2.5f, 0.8f);
 						wb.Subdivisions = 12;
 						wb.GenerateCollision = 1;
@@ -306,7 +306,7 @@ namespace World
 						else
 						{
 							auto& wb = spawned.AddComponent<WhiteboxComponent>();
-							wb.Shape = WhiteboxComponent::ShapeType::Box;
+							wb.Shape = static_cast<uint8_t>(WhiteboxComponent::ShapeType::Box);
 							wb.Dimensions = glm::vec3(1.0f);
 						}
 					}

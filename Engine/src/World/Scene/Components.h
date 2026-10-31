@@ -2785,7 +2785,7 @@ namespace World
 	struct WhiteboxComponent
 	{
 		enum class ShapeType : uint8_t { Box = 0, Cylinder = 1, Sphere = 2, Stairs = 3, Wedge = 4, Arch = 5 };
-		ShapeType Shape { ShapeType::Box };               // 1B  (offset 0)
+		uint8_t Shape { 0 };                              // 1B  (offset 0)
 		uint8_t Subdivisions { 1 };                       // 1B  (offset 1)
 		uint8_t Steps { 8 };                              // 1B  (offset 2)
 		uint8_t _Padding0 { 0 };                          // 1B  (offset 3)
@@ -2796,9 +2796,16 @@ namespace World
 
 		WhiteboxComponent() = default;
 
+		ShapeType GetShapeType() const { return static_cast<ShapeType>(Shape); }
+		void SetShapeType(ShapeType type) { Shape = static_cast<uint8_t>(type); }
+
 		WE_SCHEMA_BODY(World, WhiteboxComponent, Component)
 			WE_SCHEMA_META(Category("Rendering"),
-				Doc("Procedural geometric prototyping brush (Box, Cylinder, Stairs, Wedge, Arch)."))
+				Doc("Procedural geometric prototyping brush (Box, Cylinder, Sphere, Stairs, Wedge, Arch)."))
+			WE_FIELD(Shape, UInt8, Default(0),
+				Doc("Prototype brush shape (0=Box, 1=Cylinder, 2=Sphere, 3=Stairs, 4=Wedge, 5=Arch)."));
+			WE_FIELD(Subdivisions, UInt8, Range(1, 64), Default(1),
+				Doc("Radial/latitudinal subdivision density."));
 			WE_FIELD(Dimensions, Vec3,
 				Doc("Prototyping brush dimensions in meters (X, Y, Z)."));
 			WE_FIELD(BevelSize, Float, Range(0.0f, 1.0f), Default(0.0f),

@@ -1495,7 +1495,7 @@ static uint32_t s_LODGenEntityId = 0;
 		if (Wui::SearchableCombo(ctx, Wui::HashId("inspect.whitebox.shape_combo"), shapeRect, "",
 			shapeOptions, currentShapeIdx, theme, "", false) && currentShapeIdx != beforeShape)
 		{
-			comp->Shape = static_cast<WhiteboxComponent::ShapeType>(currentShapeIdx);
+			comp->Shape = static_cast<uint8_t>(currentShapeIdx);
 			if (changedFields) changedFields->push_back("Shape");
 			host.MarkDocumentDirty();
 		}
@@ -1548,7 +1548,7 @@ static uint32_t s_LODGenEntityId = 0;
 		curY += 28.0f;
 
 		// 3. 智能字段展示 (根据形状展现不同参数)
-		if (comp->Shape == WhiteboxComponent::ShapeType::Stairs)
+		if (comp->GetShapeType() == WhiteboxComponent::ShapeType::Stairs)
 		{
 			Wui::Label(ctx, { startX, curY + 2.0f }, "台阶阶数 (Steps):", theme.Text, theme.FontSizeSmall);
 			curY += 20.0f;
@@ -1563,7 +1563,7 @@ static uint32_t s_LODGenEntityId = 0;
 			Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "楼梯台阶划分数量 (1 ~ 64 阶)");
 			curY += 28.0f;
 		}
-		else if (comp->Shape == WhiteboxComponent::ShapeType::Cylinder || comp->Shape == WhiteboxComponent::ShapeType::Arch)
+		else if (comp->GetShapeType() == WhiteboxComponent::ShapeType::Cylinder || comp->GetShapeType() == WhiteboxComponent::ShapeType::Arch)
 		{
 			Wui::Label(ctx, { startX, curY + 2.0f }, "圆周分段数 (Subdivisions):", theme.Text, theme.FontSizeSmall);
 			curY += 20.0f;
@@ -1578,7 +1578,7 @@ static uint32_t s_LODGenEntityId = 0;
 			Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "圆柱/弧面多边形细分段数 (3 ~ 64)");
 			curY += 28.0f;
 		}
-		else if (comp->Shape == WhiteboxComponent::ShapeType::Box)
+		else if (comp->GetShapeType() == WhiteboxComponent::ShapeType::Box)
 		{
 			Wui::Label(ctx, { startX, curY + 2.0f }, "边缘倒角大小 (Bevel Size):", theme.Text, theme.FontSizeSmall);
 			curY += 20.0f;
@@ -1611,7 +1611,7 @@ static uint32_t s_LODGenEntityId = 0;
 		if (Wui::Button(ctx, Wui::HashId("inspect.whitebox.bake_btn"), bakeBtnRect, "Bake to Static Mesh (烘焙为静态网格)", theme))
 		{
 			WhiteboxMesh mesh;
-			switch (comp->Shape)
+			switch (comp->GetShapeType())
 			{
 			case WhiteboxComponent::ShapeType::Box:
 				WhiteboxBuilder::BuildBox(comp->Dimensions, comp->BevelSize, mesh);

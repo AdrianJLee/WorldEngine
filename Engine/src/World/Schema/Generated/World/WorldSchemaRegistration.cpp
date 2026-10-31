@@ -14866,6 +14866,26 @@ struct GeneratedAccess<World::SplineComponent>
 template <>
 struct GeneratedAccess<World::WhiteboxComponent>
 {
+    static Value Get_Shape(const void* instance)
+    {
+        const World::WhiteboxComponent* self = static_cast<const World::WhiteboxComponent*>(instance);
+        return Value(self->Shape);
+    }
+    static void Set_Shape(void* instance, const Value& value)
+    {
+        World::WhiteboxComponent* self = static_cast<World::WhiteboxComponent*>(instance);
+        self->Shape = std::get<uint8_t>(value);
+    }
+    static Value Get_Subdivisions(const void* instance)
+    {
+        const World::WhiteboxComponent* self = static_cast<const World::WhiteboxComponent*>(instance);
+        return Value(self->Subdivisions);
+    }
+    static void Set_Subdivisions(void* instance, const Value& value)
+    {
+        World::WhiteboxComponent* self = static_cast<World::WhiteboxComponent*>(instance);
+        self->Subdivisions = std::get<uint8_t>(value);
+    }
     static Value Get_Dimensions(const void* instance)
     {
         const World::WhiteboxComponent* self = static_cast<const World::WhiteboxComponent*>(instance);
@@ -14905,6 +14925,42 @@ struct GeneratedAccess<World::WhiteboxComponent>
     {
         World::WhiteboxComponent* self = static_cast<World::WhiteboxComponent*>(instance);
         self->GenerateCollision = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_Shape()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1EDE2A6D3F63BE7ull },
+            "Shape",
+            Kind::UInt8,
+            &Get_Shape,
+            &Set_Shape,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Prototype brush shape (0=Box, 1=Cylinder, 2=Sphere, 3=Stairs, 4=Wedge, 5=Arch).", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Subdivisions()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xB9C4AD0B4D3013A0ull },
+            "Subdivisions",
+            Kind::UInt8,
+            &Get_Subdivisions,
+            &Set_Subdivisions,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(64.000000f), false, false, "Radial/latitudinal subdivision density.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
     }
     static const FieldSchema& Field_Dimensions()
     {
@@ -14992,6 +15048,8 @@ struct GeneratedAccess<World::WhiteboxComponent>
             sizeof(World::WhiteboxComponent),
             TypeCategory::Component,
             {
+                Field_Shape(),
+                Field_Subdivisions(),
                 Field_Dimensions(),
                 Field_BevelSize(),
                 Field_Steps(),
@@ -14999,7 +15057,7 @@ struct GeneratedAccess<World::WhiteboxComponent>
             },
             &StorageBindingOf(),
             "Rendering",
-            "Procedural geometric prototyping brush (Box, Cylinder, Stairs, Wedge, Arch).",
+            "Procedural geometric prototyping brush (Box, Cylinder, Sphere, Stairs, Wedge, Arch).",
             false,
             false,
         };
