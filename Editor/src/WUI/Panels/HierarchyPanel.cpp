@@ -829,6 +829,26 @@ namespace World
 					}
 					ctx.CloseAllPopups();
 				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createweathervol_ent"), nextItem(), "Create Environment > Weather Volume (局部生物群系天气体积)", theme))
+				{
+					Entity created;
+					if (scene->DeferStructuralChange([&created](Scene& s)
+						{
+							created = Entity::CreateEntity(&s, "Weather Volume (Rain)");
+							auto& tc = created.AddComponent<TransformComponent>();
+							tc.Location = glm::vec3(0.0f, 10.0f, 0.0f);
+							auto& vol = created.AddComponent<WeatherVolumeComponent>();
+							vol.Extents = glm::vec3(120.0f, 60.0f, 120.0f);
+							vol.BlendDistance = 30.0f;
+							vol.TargetWeather = WeatherSystemComponent::WeatherType::Rain;
+						}) && created.IsValid())
+					{
+						host.SetSelectedEntity(created);
+						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Weather Volume"));
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				}
 				// P4-U13d:把"做成 prefab"变成一次有回显、可撤销意图的操作 —— 打开居中模态
 				// (名称 / 目录 / 实时落点 / 覆盖与非法名校验),确认后才写盘。
 				// 旧行为(固定 prefabs/<Tag>.wprefab、同名静默覆盖、导出后无回显)已删除。
@@ -1163,6 +1183,26 @@ namespace World
 				{
 					host.SetSelectedEntity(created);
 					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Weather Controller"));
+					host.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createweathervol"), nextBlankItem(), "Create Environment > Weather Volume (局部生物群系天气体积)", true, theme))
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Weather Volume (Rain)");
+						auto& tc = created.AddComponent<TransformComponent>();
+						tc.Location = glm::vec3(0.0f, 10.0f, 0.0f);
+						auto& vol = created.AddComponent<WeatherVolumeComponent>();
+						vol.Extents = glm::vec3(120.0f, 60.0f, 120.0f);
+						vol.BlendDistance = 30.0f;
+						vol.TargetWeather = WeatherSystemComponent::WeatherType::Rain;
+					}) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Weather Volume"));
 					host.MarkDocumentDirty();
 				}
 				ctx.CloseAllPopups();

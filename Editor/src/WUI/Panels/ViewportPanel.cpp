@@ -2990,8 +2990,7 @@ namespace World
 						continue;
 					const glm::vec3 s = glm::abs(xf.Scale);
 					const glm::vec3 ext = s * box.HalfExtents;
-					// 跳过薄板/桥面/地面层（例如 ext.y < 0.6f 的水平薄板或 ext.x > 12.0f || ext.z > 12.0f 的大跨度地板/高架桥面），避免高架桥面把桥下的导航代理、路径和路障错误剔除
-					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
+					if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
 						continue;
 					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
 					{
@@ -3004,7 +3003,7 @@ namespace World
 						continue;
 					const glm::vec3 s = glm::abs(xf.Scale);
 					const glm::vec3 ext = s * wb.Dimensions * 0.5f;
-					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
+					if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
 						continue;
 					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
 					{
@@ -3017,11 +3016,11 @@ namespace World
 						continue;
 					if (registry.try_get<NavMeshObstacleComponent>(h) || registry.try_get<NavMeshAreaModifierComponent>(h))
 						continue;
-					if (mr.Primitive != MeshRendererComponent::PrimitiveShape::Cube)
+					if (mr.Primitive == MeshRendererComponent::PrimitiveShape::Plane)
 						continue;
 					const glm::vec3 s = glm::abs(xf.Scale);
 					const glm::vec3 ext = s * 0.5f;
-					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
+					if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
 						continue;
 					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
 					{
@@ -3728,6 +3727,47 @@ namespace World
 								drew = true;
 							}
 						}
+						if (const auto* weatherVol = registry.try_get<WeatherVolumeComponent>(handle))
+						{
+							const Wui::WuiColor innerColor { 0.20f, 0.70f, 1.0f, 0.95f };
+							const Wui::WuiColor outerColor { 0.35f, 0.85f, 1.0f, 0.35f };
+							const float innerThick = thickness * 1.5f;
+
+							auto drawBoxEdges = [&](const glm::vec3& extents, const Wui::WuiColor& c, float th)
+							{
+								glm::vec3 corners[8];
+								glm::vec3 worldCorners[8];
+								for (int i = 0; i < 8; ++i)
+								{
+									corners[i] = glm::vec3 {
+										(i & 1) ? extents.x : -extents.x,
+										(i & 2) ? extents.y : -extents.y,
+										(i & 4) ? extents.z : -extents.z
+									};
+									worldCorners[i] = glm::vec3(world * glm::vec4(corners[i], 1.0f));
+								}
+								const int cubeEdges[12][2] = {
+									{ 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 },
+									{ 0, 2 }, { 1, 3 }, { 4, 6 }, { 5, 7 },
+									{ 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }
+								};
+								for (const auto& edge : cubeEdges)
+								{
+									PushOccludedWorldSegment(worldCorners[edge[0]], worldCorners[edge[1]],
+										c, th, handle);
+								}
+							};
+
+							// 1. 核心触发盒体 (Inner Box: 严格逐段遮挡，杜绝穿透山体与建筑)
+							drawBoxEdges(weatherVol->Extents, innerColor, innerThick);
+
+							// 2. 外部平滑过渡缓冲范围 (Outer Blend Margin)
+							if (weatherVol->BlendDistance > 0.1f)
+							{
+								drawBoxEdges(weatherVol->Extents + glm::vec3(weatherVol->BlendDistance), outerColor, thickness);
+							}
+							drew = true;
+						}
 						if (drew)
 							++colliderCount;
 					}
@@ -3804,23 +3844,27 @@ namespace World
 							};
 
 							const float thickness = isSelected ? 1.8f : 1.1f;
-							// 底面 4 条棱边
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[0], corners[1], zoneColor, thickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[1], corners[2], zoneColor, thickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[2], corners[3], zoneColor, thickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[3], corners[0], zoneColor, thickness, &overlayMin, &overlayMax);
+							glm::vec3 worldCorners[8];
+							for (int i = 0; i < 8; ++i)
+								worldCorners[i] = glm::vec3(world * glm::vec4(corners[i], 1.0f));
+
+							// 底面 4 条棱边 (逐段遮挡)
+							PushOccludedWorldSegment(worldCorners[0], worldCorners[1], zoneColor, thickness, handle);
+							PushOccludedWorldSegment(worldCorners[1], worldCorners[2], zoneColor, thickness, handle);
+							PushOccludedWorldSegment(worldCorners[2], worldCorners[3], zoneColor, thickness, handle);
+							PushOccludedWorldSegment(worldCorners[3], worldCorners[0], zoneColor, thickness, handle);
 
 							// 顶面 4 条棱边
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[4], corners[5], zoneColor, thickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[5], corners[6], zoneColor, thickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[6], corners[7], zoneColor, thickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[7], corners[4], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushOccludedWorldSegment(worldCorners[4], worldCorners[5], zoneColor, thickness, handle);
+							PushOccludedWorldSegment(worldCorners[5], worldCorners[6], zoneColor, thickness, handle);
+							PushOccludedWorldSegment(worldCorners[6], worldCorners[7], zoneColor, thickness, handle);
+							PushOccludedWorldSegment(worldCorners[7], worldCorners[4], zoneColor, thickness, handle);
 
 							// 4 条垂直柱棱边
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[0], corners[4], zoneColor, thickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[1], corners[5], zoneColor, thickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[2], corners[6], zoneColor, thickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[3], corners[7], zoneColor, thickness, &overlayMin, &overlayMax);
+							PushOccludedWorldSegment(worldCorners[0], worldCorners[4], zoneColor, thickness, handle);
+							PushOccludedWorldSegment(worldCorners[1], worldCorners[5], zoneColor, thickness, handle);
+							PushOccludedWorldSegment(worldCorners[2], worldCorners[6], zoneColor, thickness, handle);
+							PushOccludedWorldSegment(worldCorners[3], worldCorners[7], zoneColor, thickness, handle);
 
 							drewAudio = true;
 						}
@@ -4171,27 +4215,31 @@ namespace World
 								{  0.5f,  0.05f,  0.5f },
 								{ -0.5f,  0.05f,  0.5f }
 							};
-							// 底面 4 条边
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[0], corners[1], waterColor, waterThickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[1], corners[2], waterColor, waterThickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[2], corners[3], waterColor, waterThickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[3], corners[0], waterColor, waterThickness, &overlayMin, &overlayMax);
+							glm::vec3 worldCorners[8];
+							for (int i = 0; i < 8; ++i)
+								worldCorners[i] = glm::vec3(world * glm::vec4(corners[i], 1.0f));
+
+							// 底面 4 条边 (逐段遮挡)
+							PushOccludedWorldSegment(worldCorners[0], worldCorners[1], waterColor, waterThickness, handle);
+							PushOccludedWorldSegment(worldCorners[1], worldCorners[2], waterColor, waterThickness, handle);
+							PushOccludedWorldSegment(worldCorners[2], worldCorners[3], waterColor, waterThickness, handle);
+							PushOccludedWorldSegment(worldCorners[3], worldCorners[0], waterColor, waterThickness, handle);
 							// 顶面 4 条边
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[4], corners[5], waterColor, waterThickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[5], corners[6], waterColor, waterThickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[6], corners[7], waterColor, waterThickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[7], corners[4], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushOccludedWorldSegment(worldCorners[4], worldCorners[5], waterColor, waterThickness, handle);
+							PushOccludedWorldSegment(worldCorners[5], worldCorners[6], waterColor, waterThickness, handle);
+							PushOccludedWorldSegment(worldCorners[6], worldCorners[7], waterColor, waterThickness, handle);
+							PushOccludedWorldSegment(worldCorners[7], worldCorners[4], waterColor, waterThickness, handle);
 							// 4 条垂直边
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[0], corners[4], waterColor, waterThickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[1], corners[5], waterColor, waterThickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[2], corners[6], waterColor, waterThickness, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, corners[3], corners[7], waterColor, waterThickness, &overlayMin, &overlayMax);
+							PushOccludedWorldSegment(worldCorners[0], worldCorners[4], waterColor, waterThickness, handle);
+							PushOccludedWorldSegment(worldCorners[1], worldCorners[5], waterColor, waterThickness, handle);
+							PushOccludedWorldSegment(worldCorners[2], worldCorners[6], waterColor, waterThickness, handle);
+							PushOccludedWorldSegment(worldCorners[3], worldCorners[7], waterColor, waterThickness, handle);
 
 							// 水面顶层 XZ 分割十字线
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								{ -0.5f, 0.05f, 0.0f }, { 0.5f, 0.05f, 0.0f }, gridColor, 1.2f, &overlayMin, &overlayMax);
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								{ 0.0f, 0.05f, -0.5f }, { 0.0f, 0.05f, 0.5f }, gridColor, 1.2f, &overlayMin, &overlayMax);
+							PushOccludedWorldSegment(glm::vec3(world * glm::vec4(-0.5f, 0.05f, 0.0f, 1.0f)),
+								glm::vec3(world * glm::vec4(0.5f, 0.05f, 0.0f, 1.0f)), gridColor, 1.2f, handle);
+							PushOccludedWorldSegment(glm::vec3(world * glm::vec4(0.0f, 0.05f, -0.5f, 1.0f)),
+								glm::vec3(world * glm::vec4(0.0f, 0.05f, 0.5f, 1.0f)), gridColor, 1.2f, handle);
 
 							// ② 波浪主传播向矢量箭头 (Primary Wave Propagation Vector Arrow)
 							const glm::vec3 waveDir = glm::normalize(glm::vec3(1.0f, 0.0f, 0.2f));

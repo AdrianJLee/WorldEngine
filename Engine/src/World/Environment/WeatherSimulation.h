@@ -62,6 +62,10 @@ namespace World
 
 		// 6. 全局风场矢量 (Global Atmospheric Wind Field)
 		glm::vec3 WindVelocity { 5.0f, 0.0f, 0.0f };
+
+		// 7. 降水与生物群系视效 (Precipitation & Biome Visual FX)
+		float PrecipitationIntensity { 0.0f };            // 降水强度 [0..1]
+		int PrecipitationType { 0 };                       // 0 = None, 1 = Rain, 2 = Snow, 3 = Storm
 	};
 
 	class WLD_API WeatherSimulation
@@ -75,5 +79,18 @@ namespace World
 
 		// 通用天球日光、色温与大气光照参数连续解析解
 		static WeatherAtmosphereParams ComputeAtmosphereParams(const WeatherSystemComponent& comp, float sceneTime = 0.0f);
+
+		// 采样地表点处的动态流云投影衰减 (0.0 = 完全被厚云遮蔽暗部, 1.0 = 无遮蔽日光)
+		static float SampleCloudShadow(
+			const glm::vec3& worldPos,
+			const WeatherAtmosphereParams& weather,
+			float sceneTime);
+
+		// 计算空间位置受场景中所有局部天气体积 (WeatherVolumeComponent) 影响后的合成天气参数
+		static WeatherAtmosphereParams EvaluateLocalWeather(
+			const WeatherSystemComponent& globalWeather,
+			const glm::vec3& queryPosition,
+			const std::vector<std::pair<glm::mat4, WeatherVolumeComponent>>& activeVolumes,
+			float sceneTime);
 	};
 }

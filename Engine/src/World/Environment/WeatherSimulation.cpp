@@ -228,6 +228,168 @@ namespace World
 
 		params.WindVelocity = windNorm * comp.WindSpeed;
 
+		// 7. 降水参数输出
+		params.PrecipitationIntensity = precip;
+		if (comp.CurrentWeather == WeatherSystemComponent::WeatherType::Rain)
+			params.PrecipitationType = 1;
+		else if (comp.CurrentWeather == WeatherSystemComponent::WeatherType::Snow)
+			params.PrecipitationType = 2;
+		else if (comp.CurrentWeather == WeatherSystemComponent::WeatherType::Storm)
+			params.PrecipitationType = 3;
+		else if (precip > 0.01f)
+			params.PrecipitationType = 1;
+		else
+			params.PrecipitationType = 0;
+
 		return params;
+	}
+
+namespace
+{
+	inline float Hash21(glm::vec2 p)
+	{
+		p = glm::fract(p * glm::vec2(123.34f, 456.21f));
+		p += glm::dot(p, p + 45.32f);
+		return glm::fract(p.x * p.y);
+	}
+
+	inline float ValueNoise2D(glm::vec2 p)
+	{
+		const glm::vec2 i = glm::floor(p);
+		const glm::vec2 f = glm::fract(p);
+		const glm::vec2 u = f * f * (3.0f - 2.0f * f);
+		return glm::mix(
+			glm::mix(Hash21(i + glm::vec2(0.0f, 0.0f)), Hash21(i + glm::vec2(1.0f, 0.0f)), u.x),
+			glm::mix(Hash21(i + glm::vec2(0.0f, 1.0f)), Hash21(i + glm::vec2(1.0f, 1.0f)), u.x),
+			u.y);
+	}
+
+	inline float FbmCloud2D(glm::vec2 uv)
+	{
+		float v = 0.0f;
+		float a = 0.5f;
+		glm::vec2 shift(100.0f);
+		glm::mat2 rot(std::cos(0.5f), std::sin(0.5f), -std::sin(0.5f), std::cos(0.5f));
+		for (int i = 0; i < 4; ++i)
+		{
+			v += a * ValueNoise2D(uv);
+			uv = rot * uv * 2.0f + shift;
+			a *= 0.5f;
+		}
+		return v;
+	}
+}
+
+	float WeatherSimulation::SampleCloudShadow(
+		const glm::vec3& worldPos,
+		const WeatherAtmosphereParams& weather,
+		float sceneTime)
+	{
+		if (weather.CloudCoverage <= 0.01f || weather.SunDirection.y >= -0.05f)
+			return 1.0f; // 无云或太阳在地平线以下
+
+		// 假设云底高度约 900 米，将地表点沿太阳光线入射方向逆向投射到云底平面
+		const float cloudBaseHeight = 900.0f;
+		const float rayDist = (cloudBaseHeight - worldPos.y) / (-weather.SunDirection.y);
+		if (rayDist <= 0.0f)
+			return 1.0f;
+
+		const glm::vec2 cloudPlanePos = glm::vec2(worldPos.x, worldPos.z) + glm::vec2(weather.SunDirection.x, weather.SunDirection.z) * rayDist;
+
+		// 加上风场位移
+		const glm::vec2 drift = weather.CloudDriftOffset * 50.0f;
+		const glm::vec2 sampleUv = (cloudPlanePos * 0.0008f * weather.CloudScale) + drift;
+
+		const float n = FbmCloud2D(sampleUv);
+		const float threshold = 1.0f - weather.CloudCoverage;
+		const float cloudDensity = glm::smoothstep(threshold, threshold + 0.35f * weather.CloudSoftness, n) * weather.CloudDensity;
+
+		// 阴影遮挡：云密度越高，地表接收到的直射日光衰减越大 (最大暗度约 65% 遮蔽)
+		const float shadowFactor = 1.0f - std::clamp(cloudDensity * 0.65f, 0.0f, 0.65f);
+		return shadowFactor;
+	}
+
+	WeatherAtmosphereParams WeatherSimulation::EvaluateLocalWeather(
+		const WeatherSystemComponent& globalWeather,
+		const glm::vec3& queryPosition,
+		const std::vector<std::pair<glm::mat4, WeatherVolumeComponent>>& activeVolumes,
+		float sceneTime)
+	{
+		WeatherAtmosphereParams finalParams = ComputeAtmosphereParams(globalWeather, sceneTime);
+		if (activeVolumes.empty())
+			return finalParams;
+
+		// 寻找最高优先级且权重最大的局部体积
+		const WeatherVolumeComponent* dominantVol = nullptr;
+		float maxWeight = 0.0f;
+		int highestPriority = -1000;
+
+		for (const auto& [mat, vol] : activeVolumes)
+		{
+			if (!vol.Enabled || vol.Weight <= 0.0f)
+				continue;
+
+			// 转换到体积局部坐标系
+			const glm::mat4 invMat = glm::inverse(mat);
+			const glm::vec3 localPos = glm::vec3(invMat * glm::vec4(queryPosition, 1.0f));
+
+			float dist = 0.0f;
+			if (vol.ShapeType == 1) // Sphere
+			{
+				const float radius = vol.Extents.x;
+				dist = std::max(0.0f, glm::length(localPos) - radius);
+			}
+			else // Box
+			{
+				const glm::vec3 delta = glm::max(glm::abs(localPos) - vol.Extents, glm::vec3(0.0f));
+				dist = glm::length(delta);
+			}
+
+			if (dist <= vol.BlendDistance)
+			{
+				const float margin = std::max(0.001f, vol.BlendDistance);
+				const float alpha = (1.0f - dist / margin) * vol.Weight;
+				const float smoothAlpha = glm::smoothstep(0.0f, 1.0f, alpha);
+
+				if (vol.Priority > highestPriority || (vol.Priority == highestPriority && smoothAlpha > maxWeight))
+				{
+					highestPriority = vol.Priority;
+					maxWeight = smoothAlpha;
+					dominantVol = &vol;
+				}
+			}
+		}
+
+		if (dominantVol && maxWeight > 0.0f)
+		{
+			WeatherSystemComponent targetComp = globalWeather;
+			targetComp.CurrentWeather = dominantVol->TargetWeather;
+			if (dominantVol->CustomCloudCoverage >= 0.0f)
+				targetComp.CloudCoverage = dominantVol->CustomCloudCoverage;
+			if (dominantVol->CustomFogDensity >= 0.0f)
+				targetComp.FogDensity = dominantVol->CustomFogDensity;
+			if (dominantVol->CustomPrecipitation >= 0.0f)
+				targetComp.PrecipitationIntensity = dominantVol->CustomPrecipitation;
+
+			const WeatherAtmosphereParams targetParams = ComputeAtmosphereParams(targetComp, sceneTime);
+
+			// 平滑插值全局与局部体积
+			finalParams.SunLightColor       = glm::mix(finalParams.SunLightColor, targetParams.SunLightColor, maxWeight);
+			finalParams.SunLightIntensity   = glm::mix(finalParams.SunLightIntensity, targetParams.SunLightIntensity, maxWeight);
+			finalParams.AmbientColor        = glm::mix(finalParams.AmbientColor, targetParams.AmbientColor, maxWeight);
+			finalParams.SkyClearColor       = glm::mix(finalParams.SkyClearColor, targetParams.SkyClearColor, maxWeight);
+			finalParams.SkyZenithColor      = glm::mix(finalParams.SkyZenithColor, targetParams.SkyZenithColor, maxWeight);
+			finalParams.SkyHorizonColor     = glm::mix(finalParams.SkyHorizonColor, targetParams.SkyHorizonColor, maxWeight);
+			finalParams.FogDensity          = glm::mix(finalParams.FogDensity, targetParams.FogDensity, maxWeight);
+			finalParams.FogColor            = glm::mix(finalParams.FogColor, targetParams.FogColor, maxWeight);
+			finalParams.CloudCoverage       = glm::mix(finalParams.CloudCoverage, targetParams.CloudCoverage, maxWeight);
+			finalParams.CloudDensity        = glm::mix(finalParams.CloudDensity, targetParams.CloudDensity, maxWeight);
+			finalParams.CloudColor          = glm::mix(finalParams.CloudColor, targetParams.CloudColor, maxWeight);
+			finalParams.PrecipitationIntensity = glm::mix(finalParams.PrecipitationIntensity, targetParams.PrecipitationIntensity, maxWeight);
+			if (maxWeight > 0.35f)
+				finalParams.PrecipitationType = targetParams.PrecipitationType;
+		}
+
+		return finalParams;
 	}
 }

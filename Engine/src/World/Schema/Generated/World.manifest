@@ -71,6 +71,7 @@ struct World::HLODComponent
 struct World::RVTComponent
 struct World::WaterBodyComponent
 struct World::WeatherSystemComponent
+struct World::WeatherVolumeComponent
 struct World::BiomePCGComponent
 struct World::EQSComponent
 struct World::BehaviorTreeComponent

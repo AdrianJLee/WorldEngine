@@ -3023,6 +3023,58 @@ namespace World
 	static_assert(offsetof(WeatherSystemComponent, WindSpeed) == 20, "WindSpeed offset mismatch");
 	static_assert(offsetof(WeatherSystemComponent, WindDirection) == 24, "WindDirection offset mismatch");
 
+	struct WeatherVolumeComponent
+	{
+		glm::vec3 Extents { 50.0f, 50.0f, 50.0f };       // 12B (offset 0: Box half-extents in meters)
+		float BlendDistance { 15.0f };                    // 4B  (offset 12: Margin for smooth boundary fade-in)
+		WeatherSystemComponent::WeatherType TargetWeather { WeatherSystemComponent::WeatherType::Rain }; // 1B (offset 16: Local biome weather type)
+		uint8_t Priority { 0 };                           // 1B  (offset 17: Higher priority volume overrides lower)
+		uint8_t Enabled { 1 };                            // 1B  (offset 18: 1 = Active)
+		uint8_t ShapeType { 0 };                          // 1B  (offset 19: 0 = Box, 1 = Sphere)
+		float Weight { 1.0f };                            // 4B  (offset 20: Influence strength [0..1])
+		float CustomCloudCoverage { -1.0f };              // 4B  (offset 24: < 0 uses TargetWeather default)
+		float CustomFogDensity { -1.0f };                 // 4B  (offset 28: < 0 uses TargetWeather default)
+		float CustomPrecipitation { -1.0f };              // 4B  (offset 32: < 0 uses TargetWeather default)
+		uint8_t _Padding[12] { 0 };                       // 12B (offset 36: Alignment padding to exactly 48 bytes)
+
+		WeatherVolumeComponent() = default;
+
+		WE_SCHEMA_BODY(World, WeatherVolumeComponent, Component)
+			WE_SCHEMA_META(Category("Environment"),
+				Doc("Local biome weather trigger volume with boundary distance blending."))
+			WE_FIELD(Extents, Vec3,
+				Doc("Half-extents of the weather volume bounds in local meters."));
+			WE_FIELD(BlendDistance, Float, Range(0.1f, 200.0f), Default(15.0f),
+				Doc("Boundary distance over which weather transitions smoothly."));
+			WE_FIELD(Weight, Float, Range(0.0f, 1.0f), Default(1.0f),
+				Doc("Influence weight of this weather volume."));
+			WE_FIELD(Priority, UInt8, Default(0),
+				Doc("Priority of volume (higher overrides lower)."));
+			WE_FIELD(Enabled, UInt8, Default(1),
+				Doc("Whether this volume is currently active."));
+			WE_FIELD(ShapeType, UInt8, Default(0),
+				Doc("Shape of volume: 0=Box, 1=Sphere."));
+			WE_FIELD(CustomCloudCoverage, Float, Range(0.0f, 1.0f), Default(0.0f),
+				Doc("Custom cloud coverage ratio override."));
+			WE_FIELD(CustomFogDensity, Float, Range(0.0f, 0.05f), Default(0.0f),
+				Doc("Custom fog density parameter override."));
+			WE_FIELD(CustomPrecipitation, Float, Range(0.0f, 1.0f), Default(0.0f),
+				Doc("Custom precipitation intensity override."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(WeatherVolumeComponent) == 48, "WeatherVolumeComponent must be exactly 48 bytes");
+	static_assert(std::is_trivially_copyable_v<WeatherVolumeComponent>, "WeatherVolumeComponent must be trivially copyable");
+	static_assert(offsetof(WeatherVolumeComponent, Extents) == 0, "Extents offset mismatch");
+	static_assert(offsetof(WeatherVolumeComponent, BlendDistance) == 12, "BlendDistance offset mismatch");
+	static_assert(offsetof(WeatherVolumeComponent, TargetWeather) == 16, "TargetWeather offset mismatch");
+	static_assert(offsetof(WeatherVolumeComponent, Priority) == 17, "Priority offset mismatch");
+	static_assert(offsetof(WeatherVolumeComponent, Enabled) == 18, "Enabled offset mismatch");
+	static_assert(offsetof(WeatherVolumeComponent, ShapeType) == 19, "ShapeType offset mismatch");
+	static_assert(offsetof(WeatherVolumeComponent, Weight) == 20, "Weight offset mismatch");
+	static_assert(offsetof(WeatherVolumeComponent, CustomCloudCoverage) == 24, "CustomCloudCoverage offset mismatch");
+	static_assert(offsetof(WeatherVolumeComponent, CustomFogDensity) == 28, "CustomFogDensity offset mismatch");
+	static_assert(offsetof(WeatherVolumeComponent, CustomPrecipitation) == 32, "CustomPrecipitation offset mismatch");
+
 	struct BiomePCGComponent
 	{
 		AssetRef RuleAsset;                               // 16B (offset 0)

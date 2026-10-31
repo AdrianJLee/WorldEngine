@@ -22,6 +22,7 @@ namespace World
 
 		// 静态框架查询与控制接口 (供 Gameplay/Script/Sequencer 统一驱动)
 		static WeatherAtmosphereParams GetAtmosphere(const Scene& scene);
+		static WeatherAtmosphereParams GetAtmosphereAt(const Scene& scene, const glm::vec3& worldPos);
 		static void SetTimeOfDay(Scene& scene, float hours);
 		static void TransitionTo(Scene& scene, const WeatherProfile& targetProfile, float durationSeconds);
 	};

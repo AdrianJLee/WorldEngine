@@ -305,6 +305,87 @@ static void TestMeshletDebugColor()
 	std::cout << "[PASS] TestMeshletDebugColor\n";
 }
 
+static void TestInfiniteOceanCameraSnap()
+{
+	WaterBodyComponent water;
+	water.Type = WaterBodyComponent::WaterType::Ocean;
+	water.WaveLength = 30.0f;
+	water.WaveSteepness = 0.6f;
+
+	std::vector<WaterMeshVertex> verts0, verts1;
+	std::vector<uint32_t> idx0, idx1;
+
+	// 相机在原点 (0, 0, 0)
+	WaterSimulation::GenerateOceanCameraCenteredMesh(water, glm::vec3(0.0f), 2.0f, 100.0f, 2000.0f, 16, 8, 32, 1.0f, verts0, idx0);
+	assert(!verts0.empty());
+	assert(!idx0.empty());
+
+	// 相机轻微移动 (0.8m) 在栅格 2.0m 吸附步长内，顶点网格中心吸附一致
+	WaterSimulation::GenerateOceanCameraCenteredMesh(water, glm::vec3(0.8f, 0.0f, 0.4f), 2.0f, 100.0f, 2000.0f, 16, 8, 32, 1.0f, verts1, idx1);
+	assert(verts0.size() == verts1.size());
+	assert(std::abs(verts0[0].Position.x - verts1[0].Position.x) < 1e-4f);
+
+	// 验证最外圈顶点跨越数千米延伸至地平线
+	float maxRadius = 0.0f;
+	for (const auto& v : verts0)
+	{
+		float r = std::hypot(v.Position.x, v.Position.z);
+		maxRadius = std::max(maxRadius, r);
+	}
+	assert(maxRadius > 1800.0f); // 覆盖至极远地平线
+
+	// 验证浪尖白沫计算 [0..1]
+	float foam = WaterSimulation::SampleWaveFoam(0.0f, 0.0f, 1.0f, water);
+	assert(foam >= 0.0f && foam <= 1.0f);
+
+	std::cout << "[PASS] TestInfiniteOceanCameraSnap\n";
+}
+
+static void TestWeatherVolumeBiomeBlending()
+{
+	WeatherSystemComponent globalWeather;
+	globalWeather.CurrentWeather = WeatherSystemComponent::WeatherType::Clear;
+	globalWeather.CloudCoverage = 0.1f;
+	globalWeather.FogDensity = 0.0005f;
+
+	std::vector<std::pair<glm::mat4, WeatherVolumeComponent>> volumes;
+	WeatherVolumeComponent rainVol;
+	rainVol.TargetWeather = WeatherSystemComponent::WeatherType::Rain;
+	rainVol.Extents = glm::vec3(100.0f, 50.0f, 100.0f);
+	rainVol.BlendDistance = 25.0f;
+	rainVol.Weight = 1.0f;
+	volumes.push_back({ glm::mat4(1.0f), rainVol });
+
+	// 1. 在体积外部远离边界处 (300m)，100% 保持晴空全局天气
+	auto outside = WeatherSimulation::EvaluateLocalWeather(globalWeather, glm::vec3(300.0f, 0.0f, 0.0f), volumes, 0.0f);
+	assert(outside.CloudCoverage < 0.2f);
+	assert(outside.FogDensity < 0.001f);
+
+	// 2. 在体积中心内部 (0m)，100% 呈现局部雨天生物群系
+	auto inside = WeatherSimulation::EvaluateLocalWeather(globalWeather, glm::vec3(0.0f, 0.0f, 0.0f), volumes, 0.0f);
+	assert(inside.CloudCoverage > 0.6f);
+	assert(inside.FogDensity > 0.003f);
+
+	// 3. 在过渡边缘距离处 (115m)，平滑渐变介入
+	auto margin = WeatherSimulation::EvaluateLocalWeather(globalWeather, glm::vec3(115.0f, 0.0f, 0.0f), volumes, 0.0f);
+	assert(margin.FogDensity > outside.FogDensity && margin.FogDensity < inside.FogDensity);
+
+	// 降水视效参数闭环验证 (触发明确要求)
+	assert(outside.PrecipitationIntensity < 0.05f);
+	assert(outside.PrecipitationType == 0);
+	assert(inside.PrecipitationIntensity > 0.5f);
+	assert(inside.PrecipitationType == 1);
+	assert(margin.PrecipitationIntensity > outside.PrecipitationIntensity && margin.PrecipitationIntensity < inside.PrecipitationIntensity);
+
+	// 4. 动态流云阴影采样
+	float shadowClear = WeatherSimulation::SampleCloudShadow(glm::vec3(0.0f), outside, 0.0f);
+	float shadowRain = WeatherSimulation::SampleCloudShadow(glm::vec3(0.0f), inside, 0.0f);
+	assert(shadowClear >= 0.95f); // 晴朗无阴影
+	assert(shadowRain < shadowClear); // 阴雨厚云产生显著阴影衰减
+
+	std::cout << "[PASS] TestWeatherVolumeBiomeBlending\n";
+}
+
 static void TestNextGenComponentLayout()
 {
 	WaterBodyComponent water;
@@ -316,6 +397,11 @@ static void TestNextGenComponentLayout()
 	assert(sizeof(weather) == 48);
 	assert(weather.CurrentWeather == WeatherSystemComponent::WeatherType::Clear);
 	assert(weather.WindSpeed == 5.0f);
+
+	WeatherVolumeComponent volume;
+	assert(sizeof(volume) == 48);
+	assert(volume.BlendDistance == 15.0f);
+	assert(volume.TargetWeather == WeatherSystemComponent::WeatherType::Rain);
 
 	std::cout << "[PASS] TestNextGenComponentLayout\n";
 }
@@ -331,6 +417,8 @@ int main()
 	TestGenericContinuousSolarArc();
 	TestGenericMultiOctaveWater();
 	TestMeshletDebugColor();
+	TestInfiniteOceanCameraSnap();
+	TestWeatherVolumeBiomeBlending();
 	TestNextGenComponentLayout();
 	std::cout << "All World.NextGen3D tests passed successfully!\n";
 	return 0;

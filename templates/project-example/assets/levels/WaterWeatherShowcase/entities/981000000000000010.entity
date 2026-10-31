@@ -1,0 +1,21 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 981000000000000010
+  World::TagComponent:
+    Tag: "Rain Biome Weather Volume"
+  World::TransformComponent:
+    Location: [60.0, 10.0, 40.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1.0, 1.0, 1.0]
+  World::WeatherVolumeComponent:
+    Extents: [80.0, 40.0, 80.0]
+    BlendDistance: 20.0
+    TargetWeather: 2
+    Priority: 1
+    Enabled: 1
+    ShapeType: 0
+    Weight: 1.0
+  World::LevelEntityComponent:
+    DataLayerMask: 4

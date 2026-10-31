@@ -81,6 +81,7 @@ const TypeSchema& WeSchemaOf_HLODComponent();
 const TypeSchema& WeSchemaOf_RVTComponent();
 const TypeSchema& WeSchemaOf_WaterBodyComponent();
 const TypeSchema& WeSchemaOf_WeatherSystemComponent();
+const TypeSchema& WeSchemaOf_WeatherVolumeComponent();
 const TypeSchema& WeSchemaOf_BiomePCGComponent();
 const TypeSchema& WeSchemaOf_EQSComponent();
 const TypeSchema& WeSchemaOf_BehaviorTreeComponent();
@@ -16139,6 +16140,295 @@ struct GeneratedAccess<World::WeatherSystemComponent>
 };
 
 template <>
+struct GeneratedAccess<World::WeatherVolumeComponent>
+{
+    static Value Get_Extents(const void* instance)
+    {
+        const World::WeatherVolumeComponent* self = static_cast<const World::WeatherVolumeComponent*>(instance);
+        return Value(self->Extents);
+    }
+    static void Set_Extents(void* instance, const Value& value)
+    {
+        World::WeatherVolumeComponent* self = static_cast<World::WeatherVolumeComponent*>(instance);
+        self->Extents = std::get<glm::vec3>(value);
+    }
+    static Value Get_BlendDistance(const void* instance)
+    {
+        const World::WeatherVolumeComponent* self = static_cast<const World::WeatherVolumeComponent*>(instance);
+        return Value(self->BlendDistance);
+    }
+    static void Set_BlendDistance(void* instance, const Value& value)
+    {
+        World::WeatherVolumeComponent* self = static_cast<World::WeatherVolumeComponent*>(instance);
+        self->BlendDistance = std::get<float>(value);
+    }
+    static Value Get_Weight(const void* instance)
+    {
+        const World::WeatherVolumeComponent* self = static_cast<const World::WeatherVolumeComponent*>(instance);
+        return Value(self->Weight);
+    }
+    static void Set_Weight(void* instance, const Value& value)
+    {
+        World::WeatherVolumeComponent* self = static_cast<World::WeatherVolumeComponent*>(instance);
+        self->Weight = std::get<float>(value);
+    }
+    static Value Get_Priority(const void* instance)
+    {
+        const World::WeatherVolumeComponent* self = static_cast<const World::WeatherVolumeComponent*>(instance);
+        return Value(self->Priority);
+    }
+    static void Set_Priority(void* instance, const Value& value)
+    {
+        World::WeatherVolumeComponent* self = static_cast<World::WeatherVolumeComponent*>(instance);
+        self->Priority = std::get<uint8_t>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::WeatherVolumeComponent* self = static_cast<const World::WeatherVolumeComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::WeatherVolumeComponent* self = static_cast<World::WeatherVolumeComponent*>(instance);
+        self->Enabled = std::get<uint8_t>(value);
+    }
+    static Value Get_ShapeType(const void* instance)
+    {
+        const World::WeatherVolumeComponent* self = static_cast<const World::WeatherVolumeComponent*>(instance);
+        return Value(self->ShapeType);
+    }
+    static void Set_ShapeType(void* instance, const Value& value)
+    {
+        World::WeatherVolumeComponent* self = static_cast<World::WeatherVolumeComponent*>(instance);
+        self->ShapeType = std::get<uint8_t>(value);
+    }
+    static Value Get_CustomCloudCoverage(const void* instance)
+    {
+        const World::WeatherVolumeComponent* self = static_cast<const World::WeatherVolumeComponent*>(instance);
+        return Value(self->CustomCloudCoverage);
+    }
+    static void Set_CustomCloudCoverage(void* instance, const Value& value)
+    {
+        World::WeatherVolumeComponent* self = static_cast<World::WeatherVolumeComponent*>(instance);
+        self->CustomCloudCoverage = std::get<float>(value);
+    }
+    static Value Get_CustomFogDensity(const void* instance)
+    {
+        const World::WeatherVolumeComponent* self = static_cast<const World::WeatherVolumeComponent*>(instance);
+        return Value(self->CustomFogDensity);
+    }
+    static void Set_CustomFogDensity(void* instance, const Value& value)
+    {
+        World::WeatherVolumeComponent* self = static_cast<World::WeatherVolumeComponent*>(instance);
+        self->CustomFogDensity = std::get<float>(value);
+    }
+    static Value Get_CustomPrecipitation(const void* instance)
+    {
+        const World::WeatherVolumeComponent* self = static_cast<const World::WeatherVolumeComponent*>(instance);
+        return Value(self->CustomPrecipitation);
+    }
+    static void Set_CustomPrecipitation(void* instance, const Value& value)
+    {
+        World::WeatherVolumeComponent* self = static_cast<World::WeatherVolumeComponent*>(instance);
+        self->CustomPrecipitation = std::get<float>(value);
+    }
+    static const FieldSchema& Field_Extents()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA4D41EA69B518015ull },
+            "Extents",
+            Kind::Vec3,
+            &Get_Extents,
+            &Set_Extents,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Half-extents of the weather volume bounds in local meters.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_BlendDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x348490C1CA7F1D98ull },
+            "BlendDistance",
+            Kind::Float,
+            &Get_BlendDistance,
+            &Set_BlendDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.100000f), std::optional<float>(200.000000f), false, false, "Boundary distance over which weather transitions smoothly.", false, "", {  }, "", std::nullopt },
+            Value(15.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Weight()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA97F60F86D78BB1Cull },
+            "Weight",
+            Kind::Float,
+            &Get_Weight,
+            &Set_Weight,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Influence weight of this weather volume.", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Priority()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1F31C5474DCC6834ull },
+            "Priority",
+            Kind::UInt8,
+            &Get_Priority,
+            &Set_Priority,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Priority of volume (higher overrides lower).", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8D534E8213081B3Dull },
+            "Enabled",
+            Kind::UInt8,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether this volume is currently active.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShapeType()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF785B1DD6E3C989ull },
+            "ShapeType",
+            Kind::UInt8,
+            &Get_ShapeType,
+            &Set_ShapeType,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Shape of volume: 0=Box, 1=Sphere.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CustomCloudCoverage()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA411B5FB6DCF0926ull },
+            "CustomCloudCoverage",
+            Kind::Float,
+            &Get_CustomCloudCoverage,
+            &Set_CustomCloudCoverage,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Custom cloud coverage ratio override.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CustomFogDensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA6316A75E89EF887ull },
+            "CustomFogDensity",
+            Kind::Float,
+            &Get_CustomFogDensity,
+            &Set_CustomFogDensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(0.050000f), false, false, "Custom fog density parameter override.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CustomPrecipitation()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF88DEBB287A753D6ull },
+            "CustomPrecipitation",
+            Kind::Float,
+            &Get_CustomPrecipitation,
+            &Set_CustomPrecipitation,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Custom precipitation intensity override.", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::WeatherVolumeComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::WeatherVolumeComponent" },
+            "WeatherVolumeComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::WeatherVolumeComponent),
+            TypeCategory::Component,
+            {
+                Field_Extents(),
+                Field_BlendDistance(),
+                Field_Weight(),
+                Field_Priority(),
+                Field_Enabled(),
+                Field_ShapeType(),
+                Field_CustomCloudCoverage(),
+                Field_CustomFogDensity(),
+                Field_CustomPrecipitation(),
+            },
+            &StorageBindingOf(),
+            "Environment",
+            "Local biome weather trigger volume with boundary distance blending.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::BiomePCGComponent>
 {
     static Value Get_RuleAsset(const void* instance)
@@ -17906,6 +18196,7 @@ const TypeSchema& WeSchemaOf_HLODComponent() { return GeneratedAccess<World::HLO
 const TypeSchema& WeSchemaOf_RVTComponent() { return GeneratedAccess<World::RVTComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_WaterBodyComponent() { return GeneratedAccess<World::WaterBodyComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_WeatherSystemComponent() { return GeneratedAccess<World::WeatherSystemComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_WeatherVolumeComponent() { return GeneratedAccess<World::WeatherVolumeComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BiomePCGComponent() { return GeneratedAccess<World::BiomePCGComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_EQSComponent() { return GeneratedAccess<World::EQSComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BehaviorTreeComponent() { return GeneratedAccess<World::BehaviorTreeComponent>::WeSchema(); }
@@ -18021,6 +18312,7 @@ const EnumSchema& WeEnumSchemaOf_RootMotionMode() { return GeneratedEnum<World::
 			WeSchemaOf_RVTComponent(),
 			WeSchemaOf_WaterBodyComponent(),
 			WeSchemaOf_WeatherSystemComponent(),
+			WeSchemaOf_WeatherVolumeComponent(),
 			WeSchemaOf_BiomePCGComponent(),
 			WeSchemaOf_EQSComponent(),
 			WeSchemaOf_BehaviorTreeComponent(),

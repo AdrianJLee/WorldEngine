@@ -1711,6 +1711,18 @@ function ui:isOpen() end
 ---@field WindDirection vec3
 ---@field EnableVolumetricCloud number
 
+-- Component fields are exposed through Entity:GetComponent("WeatherVolumeComponent"); there is no runtime global named WeatherVolumeComponent.
+---@class WeatherVolumeComponent
+---@field ShapeType number
+---@field Priority number
+---@field BlendDistance number
+---@field Enabled number
+---@field CustomCloudCoverage number
+---@field Extents vec3
+---@field CustomFogDensity number
+---@field Weight number
+---@field CustomPrecipitation number
+
 -- Component fields are exposed through Entity:GetComponent("WheelJoint2DComponent"); there is no runtime global named WheelJoint2DComponent.
 ---@class WheelJoint2DComponent
 ---@field Hertz number
@@ -1890,6 +1902,8 @@ function ui:isOpen() end
 ---@field WaterBody string Short alias for "WaterBodyComponent".
 ---@field WeatherSystemComponent string Registered component type name "WeatherSystemComponent".
 ---@field WeatherSystem string Short alias for "WeatherSystemComponent".
+---@field WeatherVolumeComponent string Registered component type name "WeatherVolumeComponent".
+---@field WeatherVolume string Short alias for "WeatherVolumeComponent".
 ---@field WheelJoint2DComponent string Registered component type name "WheelJoint2DComponent".
 ---@field WheelJoint2D string Short alias for "WheelJoint2DComponent".
 ---@field WhiteboxComponent string Registered component type name "WhiteboxComponent".

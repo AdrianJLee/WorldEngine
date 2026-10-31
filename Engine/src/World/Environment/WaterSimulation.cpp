@@ -178,4 +178,136 @@ namespace World
 			}
 		}
 	}
+
+	float WaterSimulation::SampleWaveFoam(
+		float worldX,
+		float worldZ,
+		float time,
+		const WaterBodyComponent& comp)
+	{
+		if (!comp.EnableFoam)
+			return 0.0f;
+
+		const float h = SampleWaveHeight(worldX, worldZ, time, comp);
+		const glm::vec3 n = SampleWaveNormal(worldX, worldZ, time, comp);
+
+		// 浪尖尖锐度与物理坡度：当水面高度接近波幅且法线偏离垂直方向较大时，波峰产生翻滚白浪
+		const float maxAmp = comp.WaveLength * comp.WaveSteepness * 0.12f + 1e-4f;
+		const float heightFactor = std::clamp((h - maxAmp * 0.25f) / (maxAmp * 0.75f + 1e-4f), 0.0f, 1.0f);
+		const float slopeFactor = std::clamp(1.0f - n.y, 0.0f, 1.0f);
+
+		const float foam = std::clamp(heightFactor * 0.7f + slopeFactor * 1.5f, 0.0f, 1.0f);
+		return foam;
+	}
+
+	void WaterSimulation::GenerateOceanCameraCenteredMesh(
+		const WaterBodyComponent& comp,
+		const glm::vec3& cameraPosition,
+		float snapGridStep,
+		float innerRadius,
+		float outerRadius,
+		uint32_t innerGridRes,
+		uint32_t outerRings,
+		uint32_t sectors,
+		float time,
+		std::vector<WaterMeshVertex>& outVertices,
+		std::vector<uint32_t>& outIndices)
+	{
+		outVertices.clear();
+		outIndices.clear();
+
+		const float step = std::max(0.5f, snapGridStep);
+		const float snappedX = std::floor(cameraPosition.x / step) * step;
+		const float snappedZ = std::floor(cameraPosition.z / step) * step;
+
+		const uint32_t innerN = std::clamp(innerGridRes, 8u, 96u);
+		const float innerHalf = std::max(50.0f, innerRadius);
+		const float innerStep = (innerHalf * 2.0f) / static_cast<float>(innerN);
+
+		// 1. 相机近处密集正方形网格 (Near-Camera Dense Grid)
+		for (uint32_t z = 0; z <= innerN; ++z)
+		{
+			const float lz = -innerHalf + static_cast<float>(z) * innerStep;
+			const float wz = snappedZ + lz;
+
+			for (uint32_t x = 0; x <= innerN; ++x)
+			{
+				const float lx = -innerHalf + static_cast<float>(x) * innerStep;
+				const float wx = snappedX + lx;
+
+				WaterMeshVertex vert;
+				vert.Position = glm::vec3(wx, SampleWaveHeight(wx, wz, time, comp), wz);
+				vert.Normal   = SampleWaveNormal(wx, wz, time, comp);
+				vert.TexCoord = glm::vec2(wx, wz) * 0.05f;
+				outVertices.push_back(vert);
+			}
+		}
+
+		// 近处网格双面索引
+		for (uint32_t z = 0; z < innerN; ++z)
+		{
+			for (uint32_t x = 0; x < innerN; ++x)
+			{
+				const uint32_t v0 = z * (innerN + 1) + x;
+				const uint32_t v1 = v0 + 1;
+				const uint32_t v2 = (z + 1) * (innerN + 1) + (x + 1);
+				const uint32_t v3 = (z + 1) * (innerN + 1) + x;
+
+				// 上表面 (+Y 朝向)
+				outIndices.push_back(v0); outIndices.push_back(v2); outIndices.push_back(v1);
+				outIndices.push_back(v0); outIndices.push_back(v3); outIndices.push_back(v2);
+				// 下表面 (-Y 水下视角)
+				outIndices.push_back(v0); outIndices.push_back(v1); outIndices.push_back(v2);
+				outIndices.push_back(v0); outIndices.push_back(v2); outIndices.push_back(v3);
+			}
+		}
+
+		// 2. 远处同心几何递增级联大洋圈 (Far Ocean Radial Expansion to Horizon)
+		const uint32_t ringCount = std::clamp(outerRings, 4u, 48u);
+		const uint32_t sectorCount = std::clamp(sectors, 16u, 128u);
+		const float maxR = std::max(innerHalf * 2.0f, outerRadius);
+		const uint32_t ringStartVertex = static_cast<uint32_t>(outVertices.size());
+
+		for (uint32_t r = 0; r <= ringCount; ++r)
+		{
+			const float t = static_cast<float>(r) / static_cast<float>(ringCount);
+			// 几何级数递增半径：近处密集过渡，远处扩展至数公里地平线
+			const float radius = innerHalf + (maxR - innerHalf) * (t * t);
+
+			for (uint32_t s = 0; s < sectorCount; ++s)
+			{
+				const float angle = (static_cast<float>(s) / static_cast<float>(sectorCount)) * (2.0f * kPi);
+				const float wx = snappedX + radius * std::cos(angle);
+				const float wz = snappedZ + radius * std::sin(angle);
+
+				WaterMeshVertex vert;
+				// 极远处波高平滑衰减至海平面，保证与天空球地平线绝对贴合
+				const float waveFade = std::clamp((maxR - radius) / (maxR * 0.4f + 1e-4f), 0.0f, 1.0f);
+				const float h = SampleWaveHeight(wx, wz, time, comp) * waveFade;
+				vert.Position = glm::vec3(wx, h, wz);
+				vert.Normal   = glm::normalize(glm::mix(glm::vec3(0, 1, 0), SampleWaveNormal(wx, wz, time, comp), waveFade));
+				vert.TexCoord = glm::vec2(wx, wz) * 0.02f;
+				outVertices.push_back(vert);
+			}
+		}
+
+		for (uint32_t r = 0; r < ringCount; ++r)
+		{
+			for (uint32_t s = 0; s < sectorCount; ++s)
+			{
+				const uint32_t nextS = (s + 1) % sectorCount;
+				const uint32_t v0 = ringStartVertex + r * sectorCount + s;
+				const uint32_t v1 = ringStartVertex + r * sectorCount + nextS;
+				const uint32_t v2 = ringStartVertex + (r + 1) * sectorCount + nextS;
+				const uint32_t v3 = ringStartVertex + (r + 1) * sectorCount + s;
+
+				// 上表面
+				outIndices.push_back(v0); outIndices.push_back(v2); outIndices.push_back(v1);
+				outIndices.push_back(v0); outIndices.push_back(v3); outIndices.push_back(v2);
+				// 下表面
+				outIndices.push_back(v0); outIndices.push_back(v1); outIndices.push_back(v2);
+				outIndices.push_back(v0); outIndices.push_back(v2); outIndices.push_back(v3);
+			}
+		}
+	}
 }

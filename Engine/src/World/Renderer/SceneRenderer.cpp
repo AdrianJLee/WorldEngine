@@ -1,3 +1,4 @@
+#include "World/Scene/Systems/WeatherSystem.h"
 #include "wldpch.h"
 #include "World/Profiling/ProfilingMacros.h"
 #include "World/Renderer/SceneRenderer.h"
@@ -995,7 +996,32 @@ namespace World
 				std::vector<WaterMeshVertex> vertices;
 				std::vector<uint32_t> indices;
 				const uint32_t subs = std::clamp(static_cast<uint32_t>(waterComp.GridResolution), 8u, 64u);
-				WaterSimulation::GenerateWaterSurfaceMesh(waterComp, extents, subs, sceneTime, vertices, indices);
+
+				glm::mat4 waterModel(1.0f);
+				if (waterComp.Type == WaterBodyComponent::WaterType::Ocean)
+				{
+					glm::vec3 camPos(0.0f);
+					for (auto camEnt : scene.m_Registry.view<CameraComponent, TransformComponent>())
+					{
+						const auto& c = scene.m_Registry.get<CameraComponent>(camEnt);
+						if (c.Primary)
+						{
+							camPos = scene.m_Registry.get<TransformComponent>(camEnt).Location;
+							break;
+						}
+					}
+					WaterSimulation::GenerateOceanCameraCenteredMesh(
+						waterComp, camPos, 2.0f, 150.0f, 3500.0f, 48, 24, 64, sceneTime, vertices, indices);
+					waterModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, transform.Location.y, 0.0f));
+				}
+				else
+				{
+					WaterSimulation::GenerateWaterSurfaceMesh(waterComp, extents, subs, sceneTime, vertices, indices);
+					waterModel = glm::translate(glm::mat4(1.0f), transform.Location);
+					waterModel = glm::rotate(waterModel, transform.Rotation.z, glm::vec3(0, 0, 1));
+					waterModel = glm::rotate(waterModel, transform.Rotation.y, glm::vec3(0, 1, 0));
+					waterModel = glm::rotate(waterModel, transform.Rotation.x, glm::vec3(1, 0, 0));
+				}
 
 				MeshDesc desc;
 				desc.DebugName = "WaterSurfaceMesh";
@@ -1016,11 +1042,6 @@ namespace World
 					Renderer3D::PurgeMeshGpu(it->second.get());
 				}
 				m_WaterMeshCache[entityId] = mesh;
-
-				glm::mat4 waterModel = glm::translate(glm::mat4(1.0f), transform.Location);
-				waterModel = glm::rotate(waterModel, transform.Rotation.z, glm::vec3(0, 0, 1));
-				waterModel = glm::rotate(waterModel, transform.Rotation.y, glm::vec3(0, 1, 0));
-				waterModel = glm::rotate(waterModel, transform.Rotation.x, glm::vec3(1, 0, 0));
 				m_WaterModelMatrices[entityId] = waterModel;
 
 				FrameMeshDraw draw;
@@ -1074,17 +1095,13 @@ namespace World
 				hasAmbient = true;
 				break;
 			}
-			// 天气大气光照联动
+			// 天气大气与生物群系光照联动
 			bool hasWeather = false;
 			WeatherAtmosphereParams weatherParams;
-			for (auto entity : scene.m_Registry.view<WeatherSystemComponent>())
+			if (!scene.m_Registry.view<WeatherSystemComponent>().empty())
 			{
-				if (!scene.IsEntityInActiveDataLayers(entity))
-					continue;
-				const auto& wc = scene.m_Registry.get<WeatherSystemComponent>(entity);
-				weatherParams = WeatherSimulation::ComputeAtmosphereParams(wc);
+				weatherParams = WeatherSystem::GetAtmosphere(scene);
 				hasWeather = true;
-				break;
 			}
 
 			if (hasWeather)
@@ -1092,7 +1109,21 @@ namespace World
 				const float dayWeight = glm::smoothstep(-1.0f, 1.0f, weatherParams.SunElevation);
 				const glm::vec3 activeLightDir = (dayWeight > 0.5f) ? weatherParams.SunDirection : weatherParams.MoonDirection;
 				const glm::vec3 activeLightColor = glm::mix(weatherParams.MoonLightColor, weatherParams.SunLightColor, dayWeight);
-				const float activeLightIntensity = glm::mix(weatherParams.MoonLightIntensity, weatherParams.SunLightIntensity, dayWeight);
+				float activeLightIntensity = glm::mix(weatherParams.MoonLightIntensity, weatherParams.SunLightIntensity, dayWeight);
+
+				// 采样相机/焦点位置动态流云投影衰减 (Cloud Shadows)
+				glm::vec3 camPos(0.0f);
+				for (auto camEnt : scene.m_Registry.view<CameraComponent, TransformComponent>())
+				{
+					const auto& c = scene.m_Registry.get<CameraComponent>(camEnt);
+					if (c.Primary)
+					{
+						camPos = scene.m_Registry.get<TransformComponent>(camEnt).Location;
+						break;
+					}
+				}
+				const float cloudShadow = WeatherSimulation::SampleCloudShadow(camPos, weatherParams, static_cast<float>(scene.GetTime().ElapsedSeconds));
+				activeLightIntensity *= cloudShadow;
 
 				if (directionalLights.empty())
 				{
@@ -1627,9 +1658,8 @@ namespace World
 		{
 			for (auto entity : m_ActiveScene->m_Registry.view<WeatherSystemComponent>())
 			{
-				const auto& wc = m_ActiveScene->m_Registry.get<WeatherSystemComponent>(entity);
-				const auto weatherParams = WeatherSimulation::ComputeAtmosphereParams(wc, m_WaterAccumulatedTime);
 				const glm::vec3 cameraPos = glm::vec3(cameraTransform[3]);
+				const auto weatherParams = WeatherSystem::GetAtmosphereAt(*m_ActiveScene, cameraPos);
 				RenderSkyDome(slot, viewProjection, cameraPos, weatherParams);
 				break;
 			}
@@ -1910,6 +1940,17 @@ namespace World
 		RenderGeometry(camera, cameraTransform);
 		RenderDecals(camera, cameraTransform);
 		RenderParticles(camera, cameraTransform);
+
+		// 全动态降水视效通道 (Precipitation Pass: 遵循触发明确要求，实装雨雪物理视效)
+		if (m_ActiveScene && !m_ActiveScene->m_Registry.view<WeatherSystemComponent>().empty())
+		{
+			const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+			const auto localWeather = WeatherSystem::GetAtmosphereAt(*m_ActiveScene, camPos);
+			float sceneTime = static_cast<float>(m_ActiveScene->GetTime().ElapsedSeconds);
+			if (sceneTime <= 0.0001f)
+				sceneTime = m_WaterAccumulatedTime;
+			RenderPrecipitation(camera, cameraTransform, localWeather, sceneTime);
+		}
 
 		// M2: Fullscreen Post-Processing Passes (Flash White Overlay)
 		if (m_ActiveScene)
@@ -3074,6 +3115,110 @@ namespace World
 		}
 	}
 
+
+	void SceneRenderer::RenderPrecipitation(
+		const Camera& camera,
+		const glm::mat4& cameraTransform,
+		const WeatherAtmosphereParams& weather,
+		float sceneTime)
+	{
+		if (weather.PrecipitationIntensity <= 0.01f || weather.PrecipitationType == 0)
+			return;
+
+		WLD_TRACE_FUNCTION();
+		const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+
+		// 降水局部环绕盒：以相机为中心 [24m x 16m x 24m]
+		const float boxExtentXZ = 24.0f;
+		const float boxExtentY = 16.0f;
+
+		const int baseCount = (weather.PrecipitationType == 2) ? 400 : 700;
+		const int count = std::clamp(static_cast<int>(baseCount * weather.PrecipitationIntensity), 10, 1500);
+
+		auto hash = [](uint32_t x) -> float {
+			x = ((x >> 16) ^ x) * 0x45d9f3b;
+			x = ((x >> 16) ^ x) * 0x45d9f3b;
+			x = (x >> 16) ^ x;
+			return static_cast<float>(x & 0x00FFFFFF) / 16777216.0f;
+		};
+
+		if (weather.PrecipitationType == 1 || weather.PrecipitationType == 3) // Rain / Storm
+		{
+			const float fallSpeed = (weather.PrecipitationType == 3) ? 28.0f : 22.0f;
+			const glm::vec3 windDrift = weather.WindVelocity * 0.45f;
+			const glm::vec3 fallVelocity = glm::vec3(windDrift.x, -fallSpeed, windDrift.z);
+			const glm::vec3 fallDir = glm::normalize(fallVelocity);
+			const float streakLen = (weather.PrecipitationType == 3 ? 0.65f : 0.45f);
+
+			const float alpha = std::clamp(weather.PrecipitationIntensity * 0.45f, 0.08f, 0.85f);
+			const glm::vec4 rainColor(0.72f, 0.82f, 0.95f, alpha);
+
+			for (int i = 0; i < count; ++i)
+			{
+				const float hx = hash(static_cast<uint32_t>(i * 3 + 1));
+				const float hy = hash(static_cast<uint32_t>(i * 3 + 2));
+				const float hz = hash(static_cast<uint32_t>(i * 3 + 3));
+
+				const float t = sceneTime + hx * 50.0f;
+				float rx = std::fmod(hx * boxExtentXZ + fallVelocity.x * t, boxExtentXZ);
+			if (rx < 0.0f) rx += boxExtentXZ;
+			rx -= boxExtentXZ * 0.5f;
+
+				float ry = std::fmod(hy * boxExtentY + fallVelocity.y * t, boxExtentY);
+			if (ry < 0.0f) ry += boxExtentY;
+			ry -= boxExtentY * 0.5f;
+
+				float rz = std::fmod(hz * boxExtentXZ + fallVelocity.z * t, boxExtentXZ);
+			if (rz < 0.0f) rz += boxExtentXZ;
+			rz -= boxExtentXZ * 0.5f;
+
+				const glm::vec3 p0 = camPos + glm::vec3(rx, ry, rz);
+				const glm::vec3 p1 = p0 - fallDir * (streakLen * (0.8f + 0.4f * hz));
+
+				Renderer2D::DrawLineCore(p0, p1, rainColor);
+			}
+		}
+		else if (weather.PrecipitationType == 2) // Snow
+		{
+			const float alpha = std::clamp(weather.PrecipitationIntensity * 0.80f, 0.15f, 0.95f);
+			const glm::vec4 snowColor(0.95f, 0.97f, 1.0f, alpha);
+
+			for (int i = 0; i < count; ++i)
+			{
+				const float hx = hash(static_cast<uint32_t>(i * 3 + 1));
+				const float hy = hash(static_cast<uint32_t>(i * 3 + 2));
+				const float hz = hash(static_cast<uint32_t>(i * 3 + 3));
+
+				const float t = sceneTime * 1.5f + hx * 20.0f;
+				const float flutterX = std::sin(t * 2.2f + hy * 6.28f) * 0.5f;
+				const float flutterZ = std::cos(t * 1.8f + hz * 6.28f) * 0.5f;
+
+				const glm::vec3 fallVelocity = glm::vec3(
+					weather.WindVelocity.x * 0.15f + flutterX,
+					-2.4f,
+					weather.WindVelocity.z * 0.15f + flutterZ);
+
+				float rx = std::fmod(hx * boxExtentXZ + fallVelocity.x * t, boxExtentXZ);
+			if (rx < 0.0f) rx += boxExtentXZ;
+			rx -= boxExtentXZ * 0.5f;
+
+				float ry = std::fmod(hy * boxExtentY + fallVelocity.y * t, boxExtentY);
+			if (ry < 0.0f) ry += boxExtentY;
+			ry -= boxExtentY * 0.5f;
+
+				float rz = std::fmod(hz * boxExtentXZ + fallVelocity.z * t, boxExtentXZ);
+			if (rz < 0.0f) rz += boxExtentXZ;
+			rz -= boxExtentXZ * 0.5f;
+
+				const glm::vec3 flakePos = camPos + glm::vec3(rx, ry, rz);
+				const float sz = 0.045f + 0.035f * hy;
+
+				Renderer2D::DrawLineCore(flakePos - glm::vec3(sz, 0, 0), flakePos + glm::vec3(sz, 0, 0), snowColor);
+				Renderer2D::DrawLineCore(flakePos - glm::vec3(0, sz, 0), flakePos + glm::vec3(0, sz, 0), snowColor);
+				Renderer2D::DrawLineCore(flakePos - glm::vec3(0, 0, sz), flakePos + glm::vec3(0, 0, sz), snowColor);
+			}
+		}
+	}
 
 	void SceneRenderer::OnResize(uint32_t width, uint32_t height)
 	{

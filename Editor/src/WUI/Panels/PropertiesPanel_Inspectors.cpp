@@ -2408,6 +2408,109 @@ static uint32_t s_LODGenEntityId = 0;
 	}
 
 
+	static float DrawWeatherVolumeInspector(
+		PanelHost& host,
+		Wui::WuiContext& ctx,
+		const Wui::WuiRect& rect,
+		Entity entity,
+		void* instance,
+		const Schema::TypeSchema& schema,
+		const Wui::WuiRect& visibleRect,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		auto* comp = static_cast<WeatherVolumeComponent*>(instance);
+		if (!comp)
+			return 0.0f;
+
+		const float pad = theme.Pad;
+		const float startX = rect.X + pad;
+		const float contentW = rect.W - pad * 2.0f;
+		float curY = rect.Y + 4.0f;
+
+		// 1. 头部徽章
+		const Wui::WuiRect badgeRect { startX, curY, 190.0f, 18.0f };
+		const Wui::WuiColor badgeBg { 0.20f, 0.45f, 0.65f, 0.28f };
+		const Wui::WuiColor badgeBorder { 0.40f, 0.75f, 0.95f, 0.90f };
+		Wui::Badge(ctx, badgeRect, "BIOME WEATHER VOLUME", badgeBg, badgeBorder, theme, 10.5f, true, 3.0f);
+		curY += 26.0f;
+
+		const float fieldLabelW = 140.0f;
+		const float fieldControlW = contentW - fieldLabelW;
+
+		// 2. 启用开关
+		bool enabled = comp->Enabled != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.weathervol.enabled"),
+			{ startX, curY, contentW, 20.0f }, "启用局部生物群系天气 (Enable Volume)", enabled, theme))
+		{
+			comp->Enabled = enabled ? 1 : 0;
+			if (changedFields) changedFields->push_back("Enabled");
+			host.MarkDocumentDirty();
+		}
+		curY += 24.0f;
+
+		// 3. 目标天气预设 (Target Weather)
+		const char* weatherNames[] = { "Clear (晴朗)", "Overcast (多云)", "Rain (阴雨)", "Storm (暴风雨)", "Snow (降雪)", "Custom" };
+		int weatherIdx = std::clamp(static_cast<int>(comp->TargetWeather), 0, 5);
+		Wui::Label(ctx, { startX, curY + 3.0f }, "目标生物群系天气:", theme.Text, theme.FontSizeSmall);
+		if (Wui::Button(ctx, Wui::HashId("inspect.weathervol.target_btn"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, weatherNames[weatherIdx], theme))
+		{
+			comp->TargetWeather = static_cast<WeatherSystemComponent::WeatherType>((weatherIdx + 1) % 5);
+			if (changedFields) changedFields->push_back("TargetWeather");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 4. 半尺寸 (Extents X / Y / Z)
+		Wui::Label(ctx, { startX, curY + 3.0f }, "包围盒半尺寸 (Extents):", theme.Text, theme.FontSizeSmall);
+		curY += 20.0f;
+		const float subW = (contentW - 8.0f) / 3.0f;
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weathervol.ext_x"), { startX, curY, subW, 22.0f }, comp->Extents.x, 1.0f, 1.0f, 5000.0f, theme))
+		{
+			comp->Extents.x = std::max(1.0f, comp->Extents.x);
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weathervol.ext_y"), { startX + subW + 4.0f, curY, subW, 22.0f }, comp->Extents.y, 1.0f, 1.0f, 5000.0f, theme))
+		{
+			comp->Extents.y = std::max(1.0f, comp->Extents.y);
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weathervol.ext_z"), { startX + (subW + 4.0f) * 2.0f, curY, subW, 22.0f }, comp->Extents.z, 1.0f, 1.0f, 5000.0f, theme))
+		{
+			comp->Extents.z = std::max(1.0f, comp->Extents.z);
+			if (changedFields) changedFields->push_back("Extents");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 5. 过渡边缘距离 (Blend Distance)
+		Wui::Label(ctx, { startX, curY + 3.0f }, "边缘平滑过渡距离:", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weathervol.blend_dist"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->BlendDistance, 0.5f, 0.1f, 500.0f, theme))
+		{
+			comp->BlendDistance = std::max(0.1f, comp->BlendDistance);
+			if (changedFields) changedFields->push_back("BlendDistance");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 6. 权重 (Weight)
+		Wui::Label(ctx, { startX, curY + 3.0f }, "影响权重 (Weight):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.weathervol.weight"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->Weight, 0.05f, 0.0f, 1.0f, theme))
+		{
+			comp->Weight = std::clamp(comp->Weight, 0.0f, 1.0f);
+			if (changedFields) changedFields->push_back("Weight");
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		return curY - rect.Y;
+	}
+
 float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect){
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		void* instance = entity.GetComponent(schema.Storage->ComponentId);
@@ -2516,6 +2619,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawWaterBodyInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::WeatherSystemComponent")
 			height = DrawWeatherSystemInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::WeatherVolumeComponent")
+			height = DrawWeatherVolumeInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
 
 		else

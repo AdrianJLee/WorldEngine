@@ -15,6 +15,8 @@
 
 namespace World
 {
+	struct WeatherAtmosphereParams;
+
 	struct SceneRendererOptions
 	{
 		bool ShowGrid = true;
@@ -83,6 +85,7 @@ namespace World
 		void RenderGeometry(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderDecals(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderParticles(const Camera& camera, const glm::mat4& cameraTransform);
+		void RenderPrecipitation(const Camera& camera, const glm::mat4& cameraTransform, const WeatherAtmosphereParams& weather, float sceneTime);
 		void Render2DLighting(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderDebug(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderGroundGrid(const Camera& camera, const glm::mat4& cameraTransform);
