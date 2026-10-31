@@ -52,7 +52,7 @@ static void TestMeshletClustering()
 	}
 
 	WhiteboxComponent wb;
-	wb.Shape = WhiteboxComponent::ShapeType::Sphere;
+	wb.Shape = static_cast<uint8_t>(WhiteboxComponent::ShapeType::Sphere);
 	wb.Dimensions = glm::vec3(3.0f);
 	wb.Subdivisions = 4;
 	WhiteboxMesh wbMesh;

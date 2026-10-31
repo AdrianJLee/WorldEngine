@@ -63,6 +63,7 @@ struct World::NavMeshObstacleComponent
 struct World::NavMeshOffMeshLinkComponent
 struct World::NavMeshAreaModifierComponent
 struct World::MeshLODComponent
+struct World::MeshletComponent
 struct World::DecalComponent
 struct World::ConvexCollider3DComponent
 struct World::SplineComponent

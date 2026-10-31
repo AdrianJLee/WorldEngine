@@ -2670,6 +2670,59 @@ namespace World
 	static_assert(offsetof(MeshLODComponent, CurrentLOD) == 62, "CurrentLOD offset mismatch");
 	static_assert(offsetof(MeshLODComponent, EnableCrossFade) == 63, "EnableCrossFade offset mismatch");
 
+	struct MeshletComponent
+	{
+		uint8_t MaxVertices { 64 };                       // 1B  (offset 0)
+		uint8_t MaxTriangles { 126 };                     // 1B  (offset 1)
+		uint8_t ShowClusters { 1 };                       // 1B  (offset 2)
+		uint8_t ShowNormalCones { 1 };                    // 1B  (offset 3)
+		uint8_t ShowBoundingSpheres { 0 };                // 1B  (offset 4)
+		uint8_t Enabled { 1 };                            // 1B  (offset 5)
+		uint8_t _Padding0[2] { 0, 0 };                    // 2B  (offset 6)
+		uint32_t ClusterCount { 0 };                      // 4B  (offset 8)
+		uint32_t TriangleCount { 0 };                     // 4B  (offset 12)
+		uint32_t VertexCount { 0 };                       // 4B  (offset 16)
+		float ConeAngleCutoff { 0.0f };                   // 4B  (offset 20)
+		uint8_t _Padding1[8] { 0 };                       // 8B  (offset 24)
+
+		MeshletComponent() = default;
+
+		WE_SCHEMA_BODY(World, MeshletComponent, Component)
+			WE_SCHEMA_META(Category("Rendering"),
+				Doc("GPU-Driven Meshlet hardware cluster partitioning and culling component."))
+			WE_FIELD(MaxVertices, UInt8, Range(8, 64), Default(64),
+				Doc("Maximum vertex budget per Meshlet cluster (hardware spec limit 64)."));
+			WE_FIELD(MaxTriangles, UInt8, Range(4, 126), Default(126),
+				Doc("Maximum triangle budget per Meshlet cluster (hardware spec limit 126)."));
+			WE_FIELD(ShowClusters, UInt8, Default(1),
+				Doc("Whether to render distinct pseudo-colors for each hardware Meshlet cluster."));
+			WE_FIELD(ShowNormalCones, UInt8, Default(1),
+				Doc("Whether to render backface culling normal cones for each Meshlet cluster."));
+			WE_FIELD(ShowBoundingSpheres, UInt8, Default(0),
+				Doc("Whether to render hardware culling bounding spheres for each cluster."));
+			WE_FIELD(Enabled, UInt8, Default(1),
+				Doc("Whether GPU Meshlet cluster subdivision is active."));
+			WE_FIELD(ClusterCount, UInt32, ReadOnly,
+				Doc("Telemetry: total number of compiled Meshlet clusters."));
+			WE_FIELD(TriangleCount, UInt32, ReadOnly,
+				Doc("Telemetry: total geometric triangle count."));
+			WE_FIELD(VertexCount, UInt32, ReadOnly,
+				Doc("Telemetry: total geometric vertex count."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(MeshletComponent) == 32, "MeshletComponent must be exactly 32 bytes");
+	static_assert(std::is_trivially_copyable_v<MeshletComponent>, "MeshletComponent must be trivially copyable");
+	static_assert(offsetof(MeshletComponent, MaxVertices) == 0, "MaxVertices offset mismatch");
+	static_assert(offsetof(MeshletComponent, MaxTriangles) == 1, "MaxTriangles offset mismatch");
+	static_assert(offsetof(MeshletComponent, ShowClusters) == 2, "ShowClusters offset mismatch");
+	static_assert(offsetof(MeshletComponent, ShowNormalCones) == 3, "ShowNormalCones offset mismatch");
+	static_assert(offsetof(MeshletComponent, ShowBoundingSpheres) == 4, "ShowBoundingSpheres offset mismatch");
+	static_assert(offsetof(MeshletComponent, Enabled) == 5, "Enabled offset mismatch");
+	static_assert(offsetof(MeshletComponent, ClusterCount) == 8, "ClusterCount offset mismatch");
+	static_assert(offsetof(MeshletComponent, TriangleCount) == 12, "TriangleCount offset mismatch");
+	static_assert(offsetof(MeshletComponent, VertexCount) == 16, "VertexCount offset mismatch");
+	static_assert(offsetof(MeshletComponent, ConeAngleCutoff) == 20, "ConeAngleCutoff offset mismatch");
+
 	struct DecalComponent
 	{
 		AssetRef DecalMaterial;                           // 16B (offset 0)

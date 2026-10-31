@@ -2511,6 +2511,90 @@ static uint32_t s_LODGenEntityId = 0;
 		return curY - rect.Y;
 	}
 
+	static float DrawMeshletInspector(
+		PanelHost& host,
+		Wui::WuiContext& ctx,
+		const Wui::WuiRect& rect,
+		Entity entity,
+		void* instance,
+		const Schema::TypeSchema& schema,
+		const Wui::WuiRect& visibleRect,
+		std::vector<std::string>* changedFields)
+	{
+		auto* comp = static_cast<MeshletComponent*>(instance);
+		if (!comp) return 0.0f;
+
+		const Wui::WuiTheme& theme = host.Theme();
+		const float startX = rect.X + 8.0f;
+		const float contentW = rect.W - 16.0f;
+		float curY = rect.Y + 4.0f;
+
+		// 1. 硬件集群配置 (Hardware Limits)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "GPU 簇硬件预算 (Hardware Budget):", theme.Text, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		int64_t maxV = comp->MaxVertices;
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.meshlet.max_v"),
+			{ startX, curY, contentW, 22.0f }, maxV, 8, 64, theme))
+		{
+			comp->MaxVertices = static_cast<uint8_t>(std::clamp(maxV, int64_t(8), int64_t(64)));
+			if (changedFields) changedFields->push_back("MaxVertices");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "单个 Meshlet 最大顶点预算 (NVidia/AMD 硬件上限 64)");
+		curY += 26.0f;
+
+		int64_t maxT = comp->MaxTriangles;
+		if (Wui::DragInt(ctx, Wui::HashId("inspect.meshlet.max_t"),
+			{ startX, curY, contentW, 22.0f }, maxT, 4, 126, theme))
+		{
+			comp->MaxTriangles = static_cast<uint8_t>(std::clamp(maxT, int64_t(4), int64_t(126)));
+			if (changedFields) changedFields->push_back("MaxTriangles");
+			host.MarkDocumentDirty();
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 22.0f }, "单个 Meshlet 最大三角形预算 (NVidia/AMD 硬件上限 126)");
+		curY += 28.0f;
+
+		// 2. 调试可视化开关 (Debug Visualization)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "视口调试渲染 (Viewport Overlay):", theme.Text, theme.FontSizeSmall);
+		curY += 20.0f;
+
+		bool showClusters = (comp->ShowClusters != 0);
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.meshlet.show_clusters"),
+			{ startX, curY, contentW, 22.0f }, "真彩微型簇 (Cluster Pseudocolors)", showClusters, theme))
+		{
+			comp->ShowClusters = showClusters ? 1 : 0;
+			if (changedFields) changedFields->push_back("ShowClusters");
+			host.MarkDocumentDirty();
+		}
+		curY += 24.0f;
+
+		bool showCones = (comp->ShowNormalCones != 0);
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.meshlet.show_cones"),
+			{ startX, curY, contentW, 22.0f }, "法向背面剔除锥 (Normal Cones)", showCones, theme))
+		{
+			comp->ShowNormalCones = showCones ? 1 : 0;
+			if (changedFields) changedFields->push_back("ShowNormalCones");
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
+		// 3. 实时遥测卡片 (Realtime Cluster Telemetry Card)
+		const Wui::WuiRect cardRect { startX, curY, contentW, 64.0f };
+		Wui::PanelBackground(ctx, cardRect, Wui::WuiColor{ 0.08f, 0.12f, 0.18f, 0.85f }, 4.0f);
+		Wui::HighlightOutline(ctx, cardRect, Wui::WuiColor{ 0.25f, 0.65f, 0.95f, 0.50f }, 4.0f, 1.0f);
+
+		char line1[64], line2[64];
+		std::snprintf(line1, sizeof(line1), "编译集群数: %u 簇", comp->ClusterCount);
+		std::snprintf(line2, sizeof(line2), "顶点数: %u  |  三角形数: %u", comp->VertexCount, comp->TriangleCount);
+
+		Wui::Label(ctx, { startX + 8.0f, curY + 8.0f }, line1, theme.Accent, theme.FontSizeBody);
+		Wui::Label(ctx, { startX + 8.0f, curY + 34.0f }, line2, theme.TextMuted, theme.FontSizeSmall);
+		curY += 72.0f;
+
+		return curY - rect.Y;
+	}
+
 float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect){
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		void* instance = entity.GetComponent(schema.Storage->ComponentId);
@@ -2621,6 +2705,8 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawWeatherSystemInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::WeatherVolumeComponent")
 			height = DrawWeatherVolumeInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::MeshletComponent")
+			height = DrawMeshletInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
 
 		else

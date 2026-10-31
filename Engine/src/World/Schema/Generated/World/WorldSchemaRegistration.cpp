@@ -73,6 +73,7 @@ const TypeSchema& WeSchemaOf_NavMeshObstacleComponent();
 const TypeSchema& WeSchemaOf_NavMeshOffMeshLinkComponent();
 const TypeSchema& WeSchemaOf_NavMeshAreaModifierComponent();
 const TypeSchema& WeSchemaOf_MeshLODComponent();
+const TypeSchema& WeSchemaOf_MeshletComponent();
 const TypeSchema& WeSchemaOf_DecalComponent();
 const TypeSchema& WeSchemaOf_ConvexCollider3DComponent();
 const TypeSchema& WeSchemaOf_SplineComponent();
@@ -14236,6 +14237,295 @@ struct GeneratedAccess<World::MeshLODComponent>
 };
 
 template <>
+struct GeneratedAccess<World::MeshletComponent>
+{
+    static Value Get_MaxVertices(const void* instance)
+    {
+        const World::MeshletComponent* self = static_cast<const World::MeshletComponent*>(instance);
+        return Value(self->MaxVertices);
+    }
+    static void Set_MaxVertices(void* instance, const Value& value)
+    {
+        World::MeshletComponent* self = static_cast<World::MeshletComponent*>(instance);
+        self->MaxVertices = std::get<uint8_t>(value);
+    }
+    static Value Get_MaxTriangles(const void* instance)
+    {
+        const World::MeshletComponent* self = static_cast<const World::MeshletComponent*>(instance);
+        return Value(self->MaxTriangles);
+    }
+    static void Set_MaxTriangles(void* instance, const Value& value)
+    {
+        World::MeshletComponent* self = static_cast<World::MeshletComponent*>(instance);
+        self->MaxTriangles = std::get<uint8_t>(value);
+    }
+    static Value Get_ShowClusters(const void* instance)
+    {
+        const World::MeshletComponent* self = static_cast<const World::MeshletComponent*>(instance);
+        return Value(self->ShowClusters);
+    }
+    static void Set_ShowClusters(void* instance, const Value& value)
+    {
+        World::MeshletComponent* self = static_cast<World::MeshletComponent*>(instance);
+        self->ShowClusters = std::get<uint8_t>(value);
+    }
+    static Value Get_ShowNormalCones(const void* instance)
+    {
+        const World::MeshletComponent* self = static_cast<const World::MeshletComponent*>(instance);
+        return Value(self->ShowNormalCones);
+    }
+    static void Set_ShowNormalCones(void* instance, const Value& value)
+    {
+        World::MeshletComponent* self = static_cast<World::MeshletComponent*>(instance);
+        self->ShowNormalCones = std::get<uint8_t>(value);
+    }
+    static Value Get_ShowBoundingSpheres(const void* instance)
+    {
+        const World::MeshletComponent* self = static_cast<const World::MeshletComponent*>(instance);
+        return Value(self->ShowBoundingSpheres);
+    }
+    static void Set_ShowBoundingSpheres(void* instance, const Value& value)
+    {
+        World::MeshletComponent* self = static_cast<World::MeshletComponent*>(instance);
+        self->ShowBoundingSpheres = std::get<uint8_t>(value);
+    }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::MeshletComponent* self = static_cast<const World::MeshletComponent*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::MeshletComponent* self = static_cast<World::MeshletComponent*>(instance);
+        self->Enabled = std::get<uint8_t>(value);
+    }
+    static Value Get_ClusterCount(const void* instance)
+    {
+        const World::MeshletComponent* self = static_cast<const World::MeshletComponent*>(instance);
+        return Value(self->ClusterCount);
+    }
+    static void Set_ClusterCount(void* instance, const Value& value)
+    {
+        World::MeshletComponent* self = static_cast<World::MeshletComponent*>(instance);
+        self->ClusterCount = std::get<uint32_t>(value);
+    }
+    static Value Get_TriangleCount(const void* instance)
+    {
+        const World::MeshletComponent* self = static_cast<const World::MeshletComponent*>(instance);
+        return Value(self->TriangleCount);
+    }
+    static void Set_TriangleCount(void* instance, const Value& value)
+    {
+        World::MeshletComponent* self = static_cast<World::MeshletComponent*>(instance);
+        self->TriangleCount = std::get<uint32_t>(value);
+    }
+    static Value Get_VertexCount(const void* instance)
+    {
+        const World::MeshletComponent* self = static_cast<const World::MeshletComponent*>(instance);
+        return Value(self->VertexCount);
+    }
+    static void Set_VertexCount(void* instance, const Value& value)
+    {
+        World::MeshletComponent* self = static_cast<World::MeshletComponent*>(instance);
+        self->VertexCount = std::get<uint32_t>(value);
+    }
+    static const FieldSchema& Field_MaxVertices()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8A3DB6457A5E0219ull },
+            "MaxVertices",
+            Kind::UInt8,
+            &Get_MaxVertices,
+            &Set_MaxVertices,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(8.000000f), std::optional<float>(64.000000f), false, false, "Maximum vertex budget per Meshlet cluster (hardware spec limit 64).", false, "", {  }, "", std::nullopt },
+            Value(64),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaxTriangles()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4564F0AA6337DAE3ull },
+            "MaxTriangles",
+            Kind::UInt8,
+            &Get_MaxTriangles,
+            &Set_MaxTriangles,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(4.000000f), std::optional<float>(126.000000f), false, false, "Maximum triangle budget per Meshlet cluster (hardware spec limit 126).", false, "", {  }, "", std::nullopt },
+            Value(126),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShowClusters()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x8EA34C1CD4058D1Aull },
+            "ShowClusters",
+            Kind::UInt8,
+            &Get_ShowClusters,
+            &Set_ShowClusters,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to render distinct pseudo-colors for each hardware Meshlet cluster.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShowNormalCones()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xABFC447E27F39A36ull },
+            "ShowNormalCones",
+            Kind::UInt8,
+            &Get_ShowNormalCones,
+            &Set_ShowNormalCones,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to render backface culling normal cones for each Meshlet cluster.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ShowBoundingSpheres()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF1F712E0DAD2B199ull },
+            "ShowBoundingSpheres",
+            Kind::UInt8,
+            &Get_ShowBoundingSpheres,
+            &Set_ShowBoundingSpheres,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether to render hardware culling bounding spheres for each cluster.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2A0FDE0579CE2ADDull },
+            "Enabled",
+            Kind::UInt8,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether GPU Meshlet cluster subdivision is active.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ClusterCount()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3B09CFF9C75E4F75ull },
+            "ClusterCount",
+            Kind::UInt32,
+            &Get_ClusterCount,
+            &Set_ClusterCount,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, true, false, "Telemetry: total number of compiled Meshlet clusters.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_TriangleCount()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF4C13786B6269237ull },
+            "TriangleCount",
+            Kind::UInt32,
+            &Get_TriangleCount,
+            &Set_TriangleCount,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, true, false, "Telemetry: total geometric triangle count.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_VertexCount()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE6751FD76A10F6A1ull },
+            "VertexCount",
+            Kind::UInt32,
+            &Get_VertexCount,
+            &Set_VertexCount,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, true, false, "Telemetry: total geometric vertex count.", false, "", {  }, "", std::nullopt },
+            Value(static_cast<uint32_t>(0)),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::MeshletComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::MeshletComponent" },
+            "MeshletComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::MeshletComponent),
+            TypeCategory::Component,
+            {
+                Field_MaxVertices(),
+                Field_MaxTriangles(),
+                Field_ShowClusters(),
+                Field_ShowNormalCones(),
+                Field_ShowBoundingSpheres(),
+                Field_Enabled(),
+                Field_ClusterCount(),
+                Field_TriangleCount(),
+                Field_VertexCount(),
+            },
+            &StorageBindingOf(),
+            "Rendering",
+            "GPU-Driven Meshlet hardware cluster partitioning and culling component.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::DecalComponent>
 {
     static Value Get_DecalMaterial(const void* instance)
@@ -18246,6 +18536,7 @@ const TypeSchema& WeSchemaOf_NavMeshObstacleComponent() { return GeneratedAccess
 const TypeSchema& WeSchemaOf_NavMeshOffMeshLinkComponent() { return GeneratedAccess<World::NavMeshOffMeshLinkComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_NavMeshAreaModifierComponent() { return GeneratedAccess<World::NavMeshAreaModifierComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshLODComponent() { return GeneratedAccess<World::MeshLODComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_MeshletComponent() { return GeneratedAccess<World::MeshletComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_DecalComponent() { return GeneratedAccess<World::DecalComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_ConvexCollider3DComponent() { return GeneratedAccess<World::ConvexCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SplineComponent() { return GeneratedAccess<World::SplineComponent>::WeSchema(); }
@@ -18362,6 +18653,7 @@ const EnumSchema& WeEnumSchemaOf_RootMotionMode() { return GeneratedEnum<World::
 			WeSchemaOf_NavMeshOffMeshLinkComponent(),
 			WeSchemaOf_NavMeshAreaModifierComponent(),
 			WeSchemaOf_MeshLODComponent(),
+			WeSchemaOf_MeshletComponent(),
 			WeSchemaOf_DecalComponent(),
 			WeSchemaOf_ConvexCollider3DComponent(),
 			WeSchemaOf_SplineComponent(),

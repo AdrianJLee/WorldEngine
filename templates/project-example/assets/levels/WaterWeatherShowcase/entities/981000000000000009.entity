@@ -15,5 +15,12 @@ Entity:
     BevelSize: 0.05
     Subdivisions: 4
     Steps: 1
+  World::MeshletComponent:
+    MaxVertices: 64
+    MaxTriangles: 126
+    ShowClusters: 1
+    ShowNormalCones: 1
+    ShowBoundingSpheres: 0
+    Enabled: 1
   World::LevelEntityComponent:
     DataLayerMask: 16

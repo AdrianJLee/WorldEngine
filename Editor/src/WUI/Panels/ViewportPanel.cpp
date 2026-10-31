@@ -4401,29 +4401,18 @@ namespace World
 						}
 					}
 
-					// ---- GPU Meshlet 集群真彩染色与硬件簇调试覆盖层 (Meshlet Clusters Overlay) ----
+					// ---- GPU Meshlet 集群真彩染色与硬件簇调试覆盖层 (MeshletComponent) ----
+					// 严格遵循实体组件对等律 (Entity-Component Parity)，杜绝名称字符串或数据层隐式特化
 					const bool showAllMeshlets = IsMeshletClustersVisible();
 					std::unordered_set<entt::entity> renderedMeshletEntities;
-					for (const entt::entity handle : registry.view<TransformComponent>())
+					for (const entt::entity handle : registry.view<TransformComponent, MeshletComponent>())
 					{
-						const bool isSelected = (handle == selectedHandle);
-						bool isMeshletEntity = false;
-						if (const auto* layerComp = registry.try_get<LevelEntityComponent>(handle))
-						{
-							if (layerComp->DataLayerMask & 16) // Meshlet_Cluster_Models (Layer 5)
-								isMeshletEntity = true;
-						}
-						if (!isMeshletEntity)
-						{
-							if (const auto* tagComp = registry.try_get<TagComponent>(handle))
-							{
-								const std::string name = StringPool::Get().NameOf(tagComp->Tag);
-								if (name.find("Meshlet") != std::string::npos)
-									isMeshletEntity = true;
-							}
-						}
+						auto& meshletComp = registry.get<MeshletComponent>(handle);
+						if (!meshletComp.Enabled)
+							continue;
 
-						if (!showAllMeshlets && !isMeshletEntity)
+						const bool isSelected = (handle == selectedHandle);
+						if (!showAllMeshlets && !isSelected && !meshletComp.ShowClusters)
 							continue;
 
 						const auto& xf = registry.get<TransformComponent>(handle);
@@ -4460,10 +4449,13 @@ namespace World
 						std::vector<Meshlet> meshlets;
 						std::vector<uint32_t> meshletVerts;
 						std::vector<uint8_t> meshletTris;
-						MeshletBuilder::BuildMeshlets(vertices, indices, meshlets, meshletVerts, meshletTris, 64, 126);
+						const uint32_t maxV = std::clamp(static_cast<uint32_t>(meshletComp.MaxVertices), 8u, 64u);
+						const uint32_t maxT = std::clamp(static_cast<uint32_t>(meshletComp.MaxTriangles), 4u, 126u);
+						MeshletBuilder::BuildMeshlets(vertices, indices, meshlets, meshletVerts, meshletTris, maxV, maxT);
 
 						if (meshlets.empty())
 							continue;
+
 
 						renderedMeshletEntities.insert(handle);
 						const glm::mat3 normalMatrix = glm::mat3(world);

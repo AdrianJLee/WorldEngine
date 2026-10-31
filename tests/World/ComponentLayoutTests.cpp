@@ -110,6 +110,7 @@ namespace
 		{ "World::NavMeshOffMeshLinkComponent",    32 },
 		{ "World::NavMeshAreaModifierComponent",   32 },
 		{ "World::MeshLODComponent",               64 },
+		{ "World::MeshletComponent",               32 },
 		{ "World::DecalComponent",                 48 },
 		{ "World::ConvexCollider3DComponent",       32 },
 		{ "World::SplineComponent",                 32 },
