@@ -12,7 +12,7 @@ using namespace World;
 
 static void TestMeshletClustering()
 {
-	// 构造一�?16x16 的大网格 (289 个顶点，512 个三角形)
+	// 构造一个 16x16 的大网格 (289 个顶点，512 个三角形)
 	std::vector<glm::vec3> verts;
 	std::vector<uint32_t> indices;
 
@@ -77,7 +77,7 @@ static void TestWaterSimulationAndBuoyancy()
 	WaterSimulation::ComputeBuoyancy(glm::vec3(0.0f, -2.0f, 0.0f), glm::vec3(1.0f), 50.0f, 0.0f, water, force, torque);
 	assert(force.y > 0.0f); // 产生向上浮力
 
-	// 刚体在水面高�?(50m)，无浮力
+	// 刚体在水面高空 (50m)，无浮力
 	WaterSimulation::ComputeBuoyancy(glm::vec3(0.0f, 50.0f, 0.0f), glm::vec3(1.0f), 50.0f, 0.0f, water, force, torque);
 	assert(force.y == 0.0f);
 
@@ -94,7 +94,7 @@ static void TestWaterSurfaceMeshGeneration()
 	std::vector<WaterMeshVertex> vertices;
 	std::vector<uint32_t> indices;
 
-	// 生成 16x16 细分的水面网�?(extents = 50 x 50)
+	// 生成 16x16 细分的水面网格 (extents = 50 x 50)
 	WaterSimulation::GenerateWaterSurfaceMesh(water, glm::vec2(50.0f, 50.0f), 16, 1.0f, vertices, indices);
 
 	// 顶点数量必须严格等于 (16 + 1) * (16 + 1) = 289
@@ -109,7 +109,7 @@ static void TestWaterSurfaceMeshGeneration()
 	const glm::vec3 topTriNormal = glm::cross(p1 - p0, p2 - p0);
 	assert(topTriNormal.y > 0.0f);
 
-	// 校验顶点空间范围与波高、法�?
+	// 校验顶点空间范围与波高、法线
 	float minX = 1e9f, maxX = -1e9f;
 	float minZ = 1e9f, maxZ = -1e9f;
 	for (const auto& v : vertices)
@@ -131,7 +131,7 @@ static void TestWaterSurfaceMeshGeneration()
 	assert(std::abs(minZ - (-25.0f)) < 1e-3f);
 	assert(std::abs(maxZ - 25.0f) < 1e-3f);
 
-	// 校验索引都在合法范围�?
+	// 校验索引都在合法范围内
 	for (uint32_t idx : indices)
 	{
 		assert(idx < vertices.size());
@@ -145,7 +145,7 @@ static void TestWeatherSimulation()
 	WeatherSystemComponent weather;
 	weather.CurrentWeather = WeatherSystemComponent::WeatherType::Storm;
 
-	// 1. 暴风雨天气：降水与积水累�?
+	// 1. 暴风雨天气：降水与积水累加
 	for (int i = 0; i < 10; ++i)
 		WeatherSimulation::Update(weather, 0.5f);
 
@@ -186,22 +186,28 @@ static void TestWeatherAtmosphereMapping()
 	snowWeather.CurrentWeather = WeatherSystemComponent::WeatherType::Snow;
 	auto snowParams = WeatherSimulation::ComputeAtmosphereParams(snowWeather);
 
-	// 1. 日光强度递变：晴�?> 雪天 > 多云 > 阴雨 > 风暴
+	// 1. 日光强度递变：晴天 > 雪天 > 多云 > 阴雨 > 风暴
 	assert(clearParams.SunLightIntensity > snowParams.SunLightIntensity);
 	assert(snowParams.SunLightIntensity > overcastParams.SunLightIntensity);
 	assert(overcastParams.SunLightIntensity > rainParams.SunLightIntensity);
 	assert(rainParams.SunLightIntensity > stormParams.SunLightIntensity);
 
-	// 2. 雾浓度递变：晴�?< 多云 < 雪天 < 阴雨 < 风暴
+	// 2. 雾浓度递变：晴天 < 多云 < 雪天 < 阴雨 < 风暴
 	assert(clearParams.FogDensity < overcastParams.FogDensity);
 	assert(overcastParams.FogDensity < snowParams.FogDensity);
 	assert(snowParams.FogDensity < rainParams.FogDensity);
 	assert(rainParams.FogDensity < stormParams.FogDensity);
 
-	// 3. 天空清屏颜色合法�?
+	// 3. 天空清屏颜色合法性
 	for (const auto& p : { clearParams, overcastParams, rainParams, stormParams, snowParams })
 	{
 		assert(p.SkyClearColor.a == 1.0f);
+		assert(p.SkyZenithColor.a == 1.0f);
+		assert(p.SkyHorizonColor.a == 1.0f);
+		assert(p.SkyGroundColor.a == 1.0f);
+		assert(p.SunDiscSize > 0.01f);
+		assert(p.MoonDiscSize > 0.01f);
+		assert(p.CloudScale > 0.1f);
 		assert(p.SkyClearColor.r >= 0.0f && p.SkyClearColor.r <= 1.0f);
 		assert(p.SkyClearColor.g >= 0.0f && p.SkyClearColor.g <= 1.0f);
 		assert(p.SkyClearColor.b >= 0.0f && p.SkyClearColor.b <= 1.0f);
@@ -228,7 +234,7 @@ static void TestGenericContinuousSolarArc()
 	comp.TimeOfDay = 6.0f;
 	auto sunrise = WeatherSimulation::ComputeAtmosphereParams(comp);
 	assert(std::abs(sunrise.SunElevation) < 5.0f);
-	assert(sunrise.SunLightColor.r > sunrise.SunLightColor.b); // 偏暖�?�?
+	assert(sunrise.SunLightColor.r > sunrise.SunLightColor.b); // 偏暖色
 
 	// 3. 静谧子夜 (00:00 / 24:00) 银蓝月光
 	comp.TimeOfDay = 0.0f;
@@ -253,16 +259,16 @@ static void TestGenericMultiOctaveWater()
 	water.WaveSpeed = 3.0f;
 	water.WaveSteepness = 0.6f;
 	water.WaveOctaves = 4;
-	water.WaveDirectionAngle = 45.0f; // 45度朝�?
+	water.WaveDirectionAngle = 45.0f; // 45度朝向
 	water.FluidDensity = 1000.0f;
 
-	// 1. 验证 45 度浪�?0 度浪的波高在非对称点不同
+	// 1. 验证 45 度浪与 0 度浪的波高在非对称点不同
 	float h45 = WaterSimulation::SampleWaveHeight(10.0f, 0.0f, 1.0f, water);
 	water.WaveDirectionAngle = 135.0f;
 	float h135 = WaterSimulation::SampleWaveHeight(10.0f, 0.0f, 1.0f, water);
 	assert(std::isfinite(h45) && std::isfinite(h135));
 
-	// 2. 验证流体密度对阿基米德浮力的线性缩�?(淡水 1000 vs 海水 1025)
+	// 2. 验证流体密度对阿基米德浮力的线性缩放 (淡水 1000 vs 海水 1025)
 	glm::vec3 forceFresh, torqueFresh;
 	water.FluidDensity = 1000.0f;
 	WaterSimulation::ComputeBuoyancy(glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(1.0f), 100.0f, 0.0f, water, forceFresh, torqueFresh);
@@ -271,7 +277,7 @@ static void TestGenericMultiOctaveWater()
 	water.FluidDensity = 1025.0f;
 	WaterSimulation::ComputeBuoyancy(glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(1.0f), 100.0f, 0.0f, water, forceSea, torqueSea);
 
-	assert(forceSea.y > forceFresh.y); // 高密度海水产生更大浮�?
+	assert(forceSea.y > forceFresh.y); // 高密度海水产生更大浮力
 	assert(std::abs((forceSea.y / forceFresh.y) - 1.025f) < 1e-2f);
 
 	std::cout << "[PASS] TestGenericMultiOctaveWater\n";
@@ -287,7 +293,7 @@ static void TestMeshletDebugColor()
 		assert(c.b >= 0.0f && c.b <= 1.0f);
 		assert(c.a == 1.0f);
 
-		// 不应当出现全黑或不可见颜�?
+		// 不应当出现全黑或不可见颜色
 		assert(glm::length(glm::vec3(c)) > 0.5f);
 
 		// 相邻集群伪彩颜色必须具有良好的区分度 (Euclidean distance > 0.3)

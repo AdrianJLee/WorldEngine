@@ -8,7 +8,7 @@
 
 namespace World
 {
-	// ¾ßÏó»¯ÌìÆøÅäÖÃÃèÊö·û (Weather Profile: ÓÃÓÚÌìÆø»ìºÏÑİ½øÓëÓÎÏ·Íæ·¨»úÖÆÀ©Õ¹)
+	// å…·è±¡åŒ–å¤©æ°”é…ç½®æè¿°ç¬¦ (Weather Profile: ç”¨äºå¤©æ°”æ··åˆæ¼”è¿›ä¸æ¸¸æˆç©æ³•æœºåˆ¶æ‰©å±•)
 	struct WeatherProfile
 	{
 		std::string Name { "Clear Sky" };
@@ -22,53 +22,58 @@ namespace World
 		glm::vec4 SkyClearColor { 0.35f, 0.55f, 0.85f, 1.0f };
 	};
 
-	// ÍêÕûÌìÇòÎïÀíÓë¹âÕÕ´óÆøÊä³ö (Full Celestial & Atmospheric Parameters)
+	// å®Œæ•´å¤©çƒç‰©ç†ä¸å…‰ç…§å¤§æ°”è¾“å‡º (Full Celestial & Atmospheric Parameters)
 	struct WeatherAtmosphereParams
 	{
-		// 1. Ì«ÑôÓëÖ±ÉäÈÕÕÕ (Solar Trajectory & Direct Sunlight)
+		// 1. å¤ªé˜³ä¸ç›´å°„æ—¥ç…§ (Solar Trajectory & Direct Sunlight)
 		glm::vec3 SunLightColor { 1.0f, 0.96f, 0.88f };
 		float SunLightIntensity { 1.25f };
-		glm::vec3 SunDirection { 0.45f, -0.75f, 0.45f }; // ÈëÉäÏòµØÃæ (-Y)
-		float SunElevation { 45.0f };                     // ¸©Ñö½Ç (degrees)
-		float SunAzimuth { 135.0f };                      // ·½Î»½Ç (degrees)
+		glm::vec3 SunDirection { 0.45f, -0.75f, 0.45f }; // å…¥å°„å‘åœ°é¢ (-Y)
+		float SunElevation { 45.0f };                     // ä¿¯ä»°è§’ (degrees)
+		float SunAzimuth { 135.0f };                      // æ–¹ä½è§’ (degrees)
 
-		// 2. ÔÂÇòÓë¾²Ú×ÔÂÒ¹ (Lunar Trajectory & Moonlight)
+		// 2. æœˆçƒä¸é™è°§æœˆå¤œ (Lunar Trajectory & Moonlight)
 		glm::vec3 MoonLightColor { 0.70f, 0.82f, 1.0f };
 		float MoonLightIntensity { 0.08f };
 		glm::vec3 MoonDirection { -0.45f, 0.75f, -0.45f };
 		float MoonElevation { -45.0f };
 
-		// 3. ·±ĞÇÒ¹¿Õ (Celestial Starfield)
-		float StarVisibility { 0.0f };                    // ĞÇ¿Õ¿É¼û¶È [0..1]£¬ÈÕÂäºóÌìºÚÇÒÎŞÔÆÊ±´ïµ½ 1.0
+		// 3. ç¹æ˜Ÿå¤œç©º (Celestial Starfield)
+		float StarVisibility { 0.0f };                    // æ˜Ÿç©ºå¯è§åº¦ [0..1]ï¼Œæ—¥è½åå¤©é»‘ä¸”æ— äº‘æ—¶è¾¾åˆ° 1.0
 
-		// 4. ´óÆøÉ«ÎÂÓëÌì¿Õ±³¾° (Atmospheric Rayleigh/Mie Scattering & Sky)
+		// 4. å¤§æ°”è‰²æ¸©ä¸å¤©ç©ºèƒŒæ™¯ (Atmospheric Rayleigh/Mie Scattering & Sky)
 		glm::vec3 AmbientColor { 0.25f, 0.30f, 0.40f };
 		glm::vec4 SkyClearColor { 0.35f, 0.55f, 0.85f, 1.0f };
 		glm::vec4 SkyZenithColor { 0.18f, 0.35f, 0.75f, 1.0f };
 		glm::vec4 SkyHorizonColor { 0.55f, 0.65f, 0.85f, 1.0f };
+		glm::vec4 SkyGroundColor { 0.12f, 0.15f, 0.20f, 1.0f };
+		float SunDiscSize { 0.045f };
+		float MoonDiscSize { 0.038f };
+		float CloudScale { 1.25f };
+		float CloudSoftness { 0.5f };
 		float FogDensity { 0.0005f };
 		glm::vec3 FogColor { 0.6f, 0.7f, 0.85f };
 
-		// 5. ´óÆøÔÆ²ãÓë¶¯Ì¬·çÆ¯ (Volumetric Cloud Layer & Wind Drift)
+		// 5. å¤§æ°”äº‘å±‚ä¸åŠ¨æ€é£æ¼‚ (Volumetric Cloud Layer & Wind Drift)
 		float CloudCoverage { 0.2f };
 		float CloudDensity { 1.0f };
 		glm::vec4 CloudColor { 1.0f, 1.0f, 1.0f, 0.6f };
 		glm::vec2 CloudDriftOffset { 0.0f, 0.0f };
 
-		// 6. È«¾Ö·ç³¡Ê¸Á¿ (Global Atmospheric Wind Field)
+		// 6. å…¨å±€é£åœºçŸ¢é‡ (Global Atmospheric Wind Field)
 		glm::vec3 WindVelocity { 5.0f, 0.0f, 0.0f };
 	};
 
 	class WLD_API WeatherSimulation
 	{
 	public:
-		// Í¨ÓÃÎïÀíÌìÆøÖ÷Ñ­»·Î¢»ı·Ö (Á¬ĞøÖçÒ¹Ê±³½ÓëµØ±íÊªÈó¶ÈÎ¢»ı·Ö)
+		// é€šç”¨ç‰©ç†å¤©æ°”ä¸»å¾ªç¯å¾®ç§¯åˆ† (è¿ç»­æ˜¼å¤œæ—¶è¾°ä¸åœ°è¡¨æ¹¿æ¶¦åº¦å¾®ç§¯åˆ†)
 		static void Update(WeatherSystemComponent& comp, float dt);
 
-		// ÏòÖ¸¶¨ÌìÆøÅäÖÃÆ½»¬²åÖµÑİ½ø (¿ò¼ÜÇı¶¯½Ó¿Ú)
+		// å‘æŒ‡å®šå¤©æ°”é…ç½®å¹³æ»‘æ’å€¼æ¼”è¿› (æ¡†æ¶é©±åŠ¨æ¥å£)
 		static void BlendTowards(WeatherSystemComponent& comp, const WeatherProfile& targetProfile, float blendAlpha);
 
-		// Í¨ÓÃÌìÇòÈÕ¹â¡¢É«ÎÂÓë´óÆø¹âÕÕ²ÎÊıÁ¬Ğø½âÎö½â
+		// é€šç”¨å¤©çƒæ—¥å…‰ã€è‰²æ¸©ä¸å¤§æ°”å…‰ç…§å‚æ•°è¿ç»­è§£æè§£
 		static WeatherAtmosphereParams ComputeAtmosphereParams(const WeatherSystemComponent& comp, float sceneTime = 0.0f);
 	};
 }

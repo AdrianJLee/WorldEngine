@@ -117,49 +117,38 @@ namespace World
 		));
 		params.MoonDirection = moonDir;
 
-		glm::vec3 baseSunColor;
-		float baseIntensity = 0.0f;
-		glm::vec4 baseSkyColor;
+		// 1. 全域连续平滑昼夜与霞光微积分分析解 (消灭任何时间点分段突变)
+		const float sinElev = std::sin(elevRad);
+		const float daySmooth = glm::smoothstep(0.0f, 0.20f, sinElev); // -6°..+6° 晨昏平滑过渡
+		const float twilightFactor = std::exp(-(sinElev * sinElev) / (2.0f * 0.08f * 0.08f)); // 高斯晚霞因子
+		const float noonFactor = glm::smoothstep(0.20f, 0.85f, sinElev);
 
-		if (sunElevDeg > 35.0f)
-		{
-			const float t = std::clamp((sunElevDeg - 35.0f) / 30.0f, 0.0f, 1.0f);
-			baseSunColor = glm::mix(glm::vec3(1.0f, 0.88f, 0.70f), glm::vec3(1.0f, 0.98f, 0.92f), t);
-			baseIntensity = glm::mix(1.0f, 1.35f, t);
-			baseSkyColor = glm::mix(glm::vec4(0.35f, 0.55f, 0.82f, 1.0f), glm::vec4(0.25f, 0.50f, 0.85f, 1.0f), t);
-		}
-		else if (sunElevDeg > 8.0f)
-		{
-			const float t = std::clamp((sunElevDeg - 8.0f) / 27.0f, 0.0f, 1.0f);
-			baseSunColor = glm::mix(glm::vec3(1.0f, 0.65f, 0.35f), glm::vec3(1.0f, 0.88f, 0.70f), t);
-			baseIntensity = glm::mix(0.65f, 1.0f, t);
-			baseSkyColor = glm::mix(glm::vec4(0.55f, 0.45f, 0.55f, 1.0f), glm::vec4(0.35f, 0.55f, 0.82f, 1.0f), t);
-		}
-		else if (sunElevDeg > -2.0f)
-		{
-			const float t = std::clamp((sunElevDeg - (-2.0f)) / 10.0f, 0.0f, 1.0f);
-			baseSunColor = glm::mix(glm::vec3(0.95f, 0.35f, 0.15f), glm::vec3(1.0f, 0.65f, 0.35f), t);
-			baseIntensity = glm::mix(0.20f, 0.65f, t);
-			baseSkyColor = glm::mix(glm::vec4(0.68f, 0.32f, 0.22f, 1.0f), glm::vec4(0.55f, 0.45f, 0.55f, 1.0f), t);
-		}
-		else
-		{
-			const float t = std::clamp((-sunElevDeg - 2.0f) / 20.0f, 0.0f, 1.0f);
-			baseSunColor = glm::vec3(0.38f, 0.48f, 0.68f);
-			baseIntensity = glm::mix(0.15f, 0.06f, t);
-			baseSkyColor = glm::mix(glm::vec4(0.12f, 0.15f, 0.25f, 1.0f), glm::vec4(0.04f, 0.06f, 0.12f, 1.0f), t);
-		}
+		// 2. 连续太阳光谱色温与光照强度
+		const glm::vec3 sunNoonColor(1.0f, 0.98f, 0.92f);
+		const glm::vec3 sunMidColor(1.0f, 0.85f, 0.65f);
+		const glm::vec3 sunSunsetColor(1.0f, 0.48f, 0.18f);
+		const glm::vec3 sunNightColor(0.25f, 0.35f, 0.55f);
 
-		if (sunElevDeg < 5.0f && moonElevDeg > 0.0f)
-		{
-			const float moonFactor = std::clamp(moonElevDeg / 40.0f, 0.0f, 1.0f);
-			params.MoonLightColor = glm::vec3(0.65f, 0.78f, 1.0f);
-			params.MoonLightIntensity = 0.08f * moonFactor;
-		}
-		else
-		{
-			params.MoonLightIntensity = 0.0f;
-		}
+		glm::vec3 baseSunColor = glm::mix(sunMidColor, sunNoonColor, noonFactor);
+		baseSunColor = glm::mix(baseSunColor, sunSunsetColor, twilightFactor);
+		baseSunColor = glm::mix(sunNightColor, baseSunColor, glm::smoothstep(-0.12f, -0.01f, sinElev));
+		const float baseIntensity = glm::mix(0.0f, 1.35f, daySmooth);
+
+		// 3. 连续天幕背景颜色
+		const glm::vec4 skyNoonColor(0.22f, 0.48f, 0.85f, 1.0f);
+		const glm::vec4 skyMidColor(0.35f, 0.55f, 0.82f, 1.0f);
+		const glm::vec4 skySunsetColor(0.68f, 0.38f, 0.25f, 1.0f);
+		const glm::vec4 skyNightColor(0.03f, 0.05f, 0.10f, 1.0f);
+
+		glm::vec4 baseSkyColor = glm::mix(skyMidColor, skyNoonColor, noonFactor);
+		baseSkyColor = glm::mix(baseSkyColor, skySunsetColor, twilightFactor * 0.85f);
+		baseSkyColor = glm::mix(skyNightColor, baseSkyColor, daySmooth);
+
+		// 4. 连续月光平滑过渡 (太阳落下后平滑升起，绝对无断崖跳闪)
+		const float moonSinElev = std::sin(moonElevRad);
+		const float moonSmooth = glm::smoothstep(0.0f, 0.20f, moonSinElev);
+		params.MoonLightColor = glm::vec3(0.65f, 0.78f, 1.0f);
+		params.MoonLightIntensity = 0.08f * moonSmooth;
 
 		float cloudCoverage = std::clamp(comp.CloudCoverage, 0.0f, 1.0f);
 		float precip = std::clamp(comp.PrecipitationIntensity, 0.0f, 1.0f);
@@ -202,25 +191,19 @@ namespace World
 		params.SunLightColor = baseSunColor;
 		params.SunLightIntensity = baseIntensity * sunAttenuation;
 
-		glm::vec4 cloudShadeColor;
-		if (sunElevDeg > 15.0f)
-		{
-			const glm::vec4 dayCloud = glm::vec4(1.0f, 1.0f, 1.0f, 0.85f);
-			const glm::vec4 stormCloud = glm::vec4(0.25f, 0.27f, 0.32f, 0.95f);
-			cloudShadeColor = glm::mix(dayCloud, stormCloud, std::max(precip, cloudCoverage > 0.8f ? 0.6f : 0.0f));
-		}
-		else if (sunElevDeg > -5.0f)
-		{
-			cloudShadeColor = glm::vec4(1.0f, 0.60f, 0.38f, 0.90f);
-		}
-		else
-		{
-			cloudShadeColor = glm::vec4(0.20f, 0.24f, 0.35f, 0.75f);
-		}
+		// 5. 连续云层光照色调
+		const glm::vec4 dayCloudColor(1.0f, 1.0f, 1.0f, 0.88f);
+		const glm::vec4 sunsetCloudColor(1.0f, 0.58f, 0.32f, 0.92f);
+		const glm::vec4 nightCloudColor(0.18f, 0.22f, 0.32f, 0.78f);
+		const glm::vec4 stormCloudColor(0.25f, 0.27f, 0.32f, 0.95f);
+
+		glm::vec4 cloudShadeColor = glm::mix(dayCloudColor, sunsetCloudColor, twilightFactor);
+		cloudShadeColor = glm::mix(nightCloudColor, cloudShadeColor, daySmooth);
+		const float stormBlend = std::max(precip, cloudCoverage > 0.8f ? 0.65f : 0.0f);
+		cloudShadeColor = glm::mix(cloudShadeColor, stormCloudColor, stormBlend);
 		params.CloudCoverage = cloudCoverage;
 		params.CloudDensity = std::clamp(comp.CloudDensity, 0.1f, 10.0f);
 		params.CloudColor = cloudShadeColor;
-
 		const glm::vec3 windNorm = glm::length(comp.WindDirection) > 1e-3f ? glm::normalize(comp.WindDirection) : glm::vec3(1, 0, 0);
 		params.CloudDriftOffset = glm::vec2(windNorm.x, windNorm.z) * (comp.WindSpeed * sceneTime * 0.005f);
 
@@ -228,8 +211,13 @@ namespace World
 		const float cloudSkyBlend = std::clamp(cloudCoverage * 0.75f + precip * 0.25f, 0.0f, 1.0f);
 		params.SkyClearColor = glm::mix(baseSkyColor, overcastSkyColor, cloudSkyBlend);
 
-		params.SkyZenithColor = params.SkyClearColor * 0.85f;
-		params.SkyHorizonColor = glm::mix(params.SkyClearColor, glm::vec4(0.6f, 0.65f, 0.75f, 1.0f), 0.35f);
+		params.SkyZenithColor = glm::vec4(glm::vec3(params.SkyClearColor) * 0.85f, 1.0f);
+		params.SkyHorizonColor = glm::vec4(glm::mix(glm::vec3(params.SkyClearColor), glm::vec3(0.6f, 0.65f, 0.75f), 0.35f), 1.0f);
+		params.SkyGroundColor = glm::vec4(glm::vec3(0.12f, 0.15f, 0.20f) * (daySmooth * 0.7f + 0.3f), 1.0f);
+		params.SunDiscSize = 0.045f;
+		params.MoonDiscSize = 0.038f;
+		params.CloudScale = 1.25f;
+		params.CloudSoftness = 0.5f;
 
 		const glm::vec3 baseAmbient = glm::vec3(params.SkyClearColor) * 0.45f;
 		params.AmbientColor = baseAmbient;

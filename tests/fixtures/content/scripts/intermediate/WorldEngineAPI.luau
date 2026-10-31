@@ -1685,19 +1685,29 @@ function ui:isOpen() end
 ---@field WaveSteepness number
 ---@field WaterColor vec3
 ---@field WaterClarity number
+---@field FluidDensity number
+---@field FluidDamping number
 ---@field WaveSpeed number
 ---@field EnableBuoyancy number
 ---@field EnableFoam number
+---@field WaveOctaves number
+---@field GridResolution number
 ---@field WaveLength number
+---@field WaveDirectionAngle number
+---@field WaveCouplingWind number
 
 -- Component fields are exposed through Entity:GetComponent("WeatherSystemComponent"); there is no runtime global named WeatherSystemComponent.
 ---@class WeatherSystemComponent
+---@field DayCycleSpeed number
 ---@field PrecipitationIntensity number
 ---@field WindSpeed number
+---@field AutoCycleTime number
 ---@field EnablePuddles number
 ---@field Wetness number
 ---@field CloudCoverage number
+---@field TimeOfDay number
 ---@field CloudDensity number
+---@field FogDensity number
 ---@field WindDirection vec3
 ---@field EnableVolumetricCloud number
 

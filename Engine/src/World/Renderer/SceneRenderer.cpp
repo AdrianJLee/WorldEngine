@@ -23,6 +23,7 @@
 #include "World/Asset/AsyncLoader.h"
 #include "World/Utils/Paths.h"
 #include "World/Renderer/AssetRegistry.h"
+#include "World/Renderer/ShaderUtils.h"
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/FrustumCull.h"
 #include "World/Math/Simd/FrustumCullSimd.h"
@@ -378,6 +379,15 @@ namespace World
 		}
 		m_WaterMeshCache.clear();
 		m_WaterModelMatrices.clear();
+		m_SkyDomePipeline = nullptr;
+		m_SkyVertexBuffer = nullptr;
+		m_SkyIndexBuffer = nullptr;
+		m_SkyDescriptorSetLayout = nullptr;
+		for (uint32_t i = 0; i < kFramesInFlight; ++i)
+		{
+			m_SkyDescriptorSets[i] = nullptr;
+			m_SkyUniformBuffers[i] = nullptr;
+		}
 		m_ActiveScene = nullptr;
 		m_Framebuffer = nullptr;
 		m_FramebufferView = nullptr;
@@ -1079,9 +1089,10 @@ namespace World
 
 			if (hasWeather)
 			{
-				const glm::vec3 activeLightDir = (weatherParams.SunElevation > 0.0f) ? weatherParams.SunDirection : weatherParams.MoonDirection;
-				const glm::vec3 activeLightColor = (weatherParams.SunElevation > 0.0f) ? weatherParams.SunLightColor : weatherParams.MoonLightColor;
-				const float activeLightIntensity = (weatherParams.SunElevation > 0.0f) ? weatherParams.SunLightIntensity : weatherParams.MoonLightIntensity;
+				const float dayWeight = glm::smoothstep(-1.0f, 1.0f, weatherParams.SunElevation);
+				const glm::vec3 activeLightDir = (dayWeight > 0.5f) ? weatherParams.SunDirection : weatherParams.MoonDirection;
+				const glm::vec3 activeLightColor = glm::mix(weatherParams.MoonLightColor, weatherParams.SunLightColor, dayWeight);
+				const float activeLightIntensity = glm::mix(weatherParams.MoonLightIntensity, weatherParams.SunLightIntensity, dayWeight);
 
 				if (directionalLights.empty())
 				{
@@ -1618,43 +1629,8 @@ namespace World
 			{
 				const auto& wc = m_ActiveScene->m_Registry.get<WeatherSystemComponent>(entity);
 				const auto weatherParams = WeatherSimulation::ComputeAtmosphereParams(wc, m_WaterAccumulatedTime);
-				EnsureCelestialMeshes();
-
-				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
 				const glm::vec3 cameraPos = glm::vec3(cameraTransform[3]);
-
-				// 1. 太阳天体实体 (Sun Disc Sphere: 昼间发光天球)
-				if (weatherParams.SunElevation > -10.0f && m_SunMesh)
-				{
-					const glm::vec3 sunPos = cameraPos - weatherParams.SunDirection * 500.0f;
-					const glm::mat4 sunModel = glm::translate(glm::mat4(1.0f), sunPos) * glm::scale(glm::mat4(1.0f), glm::vec3(22.0f));
-					Renderer3D::Submit(m_SunMesh, sunModel, glm::vec4(weatherParams.SunLightColor * (1.2f + weatherParams.SunLightIntensity), 1.0f));
-				}
-
-				// 2. 月球天体实体 (Moon Disc Sphere: 夜间发光天球)
-				if (weatherParams.SunElevation < 18.0f && m_MoonMesh)
-				{
-					const glm::vec3 moonPos = cameraPos - weatherParams.MoonDirection * 500.0f;
-					const glm::mat4 moonModel = glm::translate(glm::mat4(1.0f), moonPos) * glm::scale(glm::mat4(1.0f), glm::vec3(16.0f));
-					Renderer3D::Submit(m_MoonMesh, moonModel, glm::vec4(weatherParams.MoonLightColor * 1.5f, 0.95f));
-				}
-
-				// 3. 繁星夜空 (Celestial Starfield: 夜幕闪烁星群)
-				if (weatherParams.StarVisibility > 0.02f && m_StarfieldMesh)
-				{
-					const glm::mat4 starModel = glm::translate(glm::mat4(1.0f), cameraPos) * glm::scale(glm::mat4(1.0f), glm::vec3(550.0f));
-					Renderer3D::Submit(m_StarfieldMesh, starModel, glm::vec4(1.0f, 1.0f, 1.0f, weatherParams.StarVisibility));
-				}
-
-				// 4. 大气高空云层 (Dynamic Cloud Layer)
-				if (weatherParams.CloudCoverage > 0.02f && m_CloudMesh)
-				{
-					const glm::vec3 cloudCenter = glm::vec3(cameraPos.x, cameraPos.y + 120.0f, cameraPos.z);
-					const glm::mat4 cloudModel = glm::translate(glm::mat4(1.0f), cloudCenter) * glm::scale(glm::mat4(1.0f), glm::vec3(800.0f, 1.0f, 800.0f));
-					Renderer3D::Submit(m_CloudMesh, cloudModel, weatherParams.CloudColor);
-				}
-
-				Renderer3D::EndScene();
+				RenderSkyDome(slot, viewProjection, cameraPos, weatherParams);
 				break;
 			}
 		}
@@ -3732,82 +3708,131 @@ namespace World
 		spline.GenerateRoadMesh(width, step, wbMesh.Vertices, wbMesh.Normals, wbMesh.UVs, wbMesh.Indices);
 		return CreateMeshFromWhitebox(wbMesh, "SplineRoadMesh");
 	}
-	void SceneRenderer::EnsureCelestialMeshes()
+	void SceneRenderer::EnsureSkyDomeResources()
 	{
-		if (!m_SunMesh)
-			m_SunMesh = Mesh::CreateUnitSphere(1.0f, 24, 12);
-		if (!m_MoonMesh)
-			m_MoonMesh = Mesh::CreateUnitSphere(1.0f, 24, 12);
-		if (!m_CloudMesh)
-			m_CloudMesh = Mesh::CreateUnitPlane(1.0f);
+		if (m_SkyDomePipeline && m_SkyDescriptorSetLayout && m_SkyVertexBuffer && m_SkyIndexBuffer)
+			return;
 
-		if (!m_StarfieldMesh)
+		if (!m_SkyVertexBuffer || !m_SkyIndexBuffer)
 		{
-			struct StarVertex
+			struct QuadVertex
 			{
 				glm::vec3 Position;
 				glm::vec3 Normal;
 				glm::vec2 TexCoord;
 			};
-			std::vector<StarVertex> starVertices;
-			std::vector<uint32_t> starIndices;
-			starVertices.reserve(320 * 3);
-			starIndices.reserve(320 * 3);
-
-			uint32_t seed = 1337;
-			const auto rnd = [&seed]() {
-				seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-				return static_cast<float>(seed) / static_cast<float>(0x7fffffff);
+			const QuadVertex vertices[4] = {
+				{ { -1.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f } },
+				{ {  1.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f } },
+				{ {  1.0f,  1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 1.0f, 1.0f } },
+				{ { -1.0f,  1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } }
 			};
+			const uint32_t indices[6] = { 0, 1, 2, 2, 3, 0 };
 
-			for (uint32_t i = 0; i < 320; ++i)
+			Rhi::BufferDesc vbDesc;
+			vbDesc.Size = sizeof(vertices);
+			vbDesc.Usage = Rhi::BufferUsageVertex;
+			vbDesc.InitialData = vertices;
+			vbDesc.DebugName = "SkyDome.VB";
+			m_SkyVertexBuffer = m_Device->CreateBuffer(vbDesc);
+
+			Rhi::BufferDesc ibDesc;
+			ibDesc.Size = sizeof(indices);
+			ibDesc.Usage = Rhi::BufferUsageIndex;
+			ibDesc.InitialData = indices;
+			ibDesc.DebugName = "SkyDome.IB";
+			m_SkyIndexBuffer = m_Device->CreateBuffer(ibDesc);
+		}
+
+		if (!m_SkyDescriptorSetLayout)
+		{
+			Rhi::DescriptorSetLayoutDesc skyLayoutDesc;
+			skyLayoutDesc.Bindings.push_back({ 0, Rhi::DescriptorType::UniformBuffer,
+				Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex) | Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+			skyLayoutDesc.DebugName = "SceneRenderer.SkyDomeLayout";
+			m_SkyDescriptorSetLayout = m_Device->CreateDescriptorSetLayout(skyLayoutDesc);
+
+			Rhi::BufferDesc uboDesc;
+			uboDesc.Size = sizeof(SkyDomeUniforms);
+			uboDesc.Usage = Rhi::BufferUsageUniform;
+			uboDesc.Memory = Rhi::MemoryHint::HostVisible;
+			uboDesc.DebugName = "SceneRenderer.SkyUBO";
+
+			for (uint32_t s = 0; s < kFramesInFlight; ++s)
 			{
-				const float theta = rnd() * 2.0f * 3.14159265f;
-				const float phi = rnd() * 1.45f;
-				const float y = std::cos(phi);
-				const float r = std::sin(phi);
-				const float x = r * std::cos(theta);
-				const float z = r * std::sin(theta);
-				const glm::vec3 starDir = glm::normalize(glm::vec3(x, y, z));
+				m_SkyUniformBuffers[s] = m_Device->CreateBuffer(uboDesc);
+				m_SkyDescriptorSets[s] = m_Device->CreateDescriptorSet(m_SkyDescriptorSetLayout);
 
-				const float starSize = 0.005f + rnd() * 0.006f;
-				const glm::vec3 up(0, 1, 0);
-				const glm::vec3 right = glm::normalize(glm::cross(up, starDir));
-				const glm::vec3 starUp = glm::cross(starDir, right);
-
-				const uint32_t baseIdx = static_cast<uint32_t>(starVertices.size());
-				StarVertex v0, v1, v2;
-				v0.Position = starDir + (-right * 0.5f - starUp * 0.3f) * starSize;
-				v0.Normal = -starDir;
-				v0.TexCoord = glm::vec2(0.0f, 0.0f);
-
-				v1.Position = starDir + (right * 0.5f - starUp * 0.3f) * starSize;
-				v1.Normal = -starDir;
-				v1.TexCoord = glm::vec2(1.0f, 0.0f);
-
-				v2.Position = starDir + (starUp * 0.7f) * starSize;
-				v2.Normal = -starDir;
-				v2.TexCoord = glm::vec2(0.5f, 1.0f);
-
-				starVertices.push_back(v0);
-				starVertices.push_back(v1);
-				starVertices.push_back(v2);
-
-				starIndices.push_back(baseIdx);
-				starIndices.push_back(baseIdx + 1);
-				starIndices.push_back(baseIdx + 2);
+				Rhi::DescriptorWrite write;
+				write.Binding = 0;
+				write.Type = Rhi::DescriptorType::UniformBuffer;
+				write.Buffer = m_SkyUniformBuffers[s];
+				m_SkyDescriptorSets[s]->Update({ write });
 			}
+		}
 
-			MeshDesc desc;
-			desc.DebugName = "CelestialStarfield";
-			desc.Layout = Mesh::MakeStandardLayout();
-			desc.VertexLayoutId = Mesh::kVertexLayoutStandard;
-			desc.Indices = std::move(starIndices);
-			desc.VertexData.resize(starVertices.size() * sizeof(StarVertex));
-			std::memcpy(desc.VertexData.data(), starVertices.data(), desc.VertexData.size());
-			m_StarfieldMesh = Mesh::Create(desc);
+		if (!m_SkyDomePipeline)
+		{
+			const MeshVertexLayout meshLayout = Mesh::MakeStandardLayout();
+			Rhi::PipelineDesc pipeDesc;
+			pipeDesc.DebugName = "SceneRenderer.SkyDomePipeline";
+			pipeDesc.RenderPass = m_RenderPass;
+			pipeDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), m_SkyDescriptorSetLayout };
+			pipeDesc.VertexBindings = meshLayout.Bindings;
+			pipeDesc.VertexAttributes = meshLayout.Attributes;
+			pipeDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
+			pipeDesc.Cull = Rhi::CullMode::None;
+			pipeDesc.DepthStencil.DepthTest = true;
+			pipeDesc.DepthStencil.DepthWrite = false;
+			pipeDesc.DepthStencil.DepthCompare = Rhi::CompareOp::LessOrEqual;
+			pipeDesc.Samples = static_cast<Rhi::SampleCount>(RenderSettings::Msaa());
+
+			Rhi::ShaderDesc shaderDesc;
+			shaderDesc.DebugName = "SkyDome-Shader";
+			shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Vertex, "assets/shaders/SkyDome.slang", "VSMain", "vs_6_0"));
+			shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Fragment, "assets/shaders/SkyDome.slang", "PSMain", "ps_6_0"));
+			pipeDesc.Shader = m_Device->CreateShader(shaderDesc);
+
+			Rhi::BlendAttachmentState colorBlend;
+			colorBlend.BlendEnable = false;
+			Rhi::BlendAttachmentState idBlend;
+			idBlend.BlendEnable = false;
+			pipeDesc.Blends = { colorBlend, idBlend };
+
+			m_SkyDomePipeline = m_Device->CreatePipeline(pipeDesc);
 		}
 	}
+
+	void SceneRenderer::RenderSkyDome(uint32_t slot, const glm::mat4& viewProjection, const glm::vec3& cameraPos, const WeatherAtmosphereParams& weather)
+	{
+		EnsureSkyDomeResources();
+		if (!m_SkyDomePipeline || !m_SkyVertexBuffer || !m_SkyIndexBuffer)
+			return;
+
+		SkyDomeUniforms uniforms;
+		uniforms.InvViewProjection = glm::inverse(viewProjection);
+		uniforms.SkyZenithColor = weather.SkyZenithColor;
+		uniforms.SkyHorizonColor = weather.SkyHorizonColor;
+		uniforms.SkyGroundColor = weather.SkyGroundColor;
+		uniforms.SunDirectionIntensity = glm::vec4(weather.SunDirection, weather.SunLightIntensity);
+		uniforms.SunColorDisc = glm::vec4(weather.SunLightColor, weather.SunDiscSize);
+		uniforms.MoonDirectionIntensity = glm::vec4(weather.MoonDirection, weather.MoonLightIntensity);
+		uniforms.MoonColorDisc = glm::vec4(weather.MoonLightColor, weather.MoonDiscSize);
+		uniforms.CloudParams = glm::vec4(weather.CloudCoverage, weather.CloudDensity, weather.CloudScale, weather.CloudSoftness);
+		uniforms.CloudColor = weather.CloudColor;
+		uniforms.WindDriftTime = glm::vec4(weather.CloudDriftOffset, m_WaterAccumulatedTime, weather.StarVisibility);
+		uniforms.CameraPosition = glm::vec4(cameraPos, 1.0f);
+
+		m_SkyUniformBuffers[slot]->SetData(&uniforms, sizeof(SkyDomeUniforms));
+
+		m_CommandBuffers[slot]->BindPipeline(m_SkyDomePipeline);
+		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
+		m_CommandBuffers[slot]->BindDescriptorSet(m_SkyDescriptorSets[slot], 1);
+		m_CommandBuffers[slot]->BindVertexBuffer(0, m_SkyVertexBuffer);
+		m_CommandBuffers[slot]->BindIndexBuffer(m_SkyIndexBuffer);
+		m_CommandBuffers[slot]->DrawIndexed(6, 1, 0);
+	}
+
 }
 
 

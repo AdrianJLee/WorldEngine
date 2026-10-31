@@ -9,8 +9,8 @@ namespace World
 {
 	class Scene;
 
-	// ¶¯Ì¬ÌìÆøÓëÈ«Ììºò»·¾³¿ò¼ÜÏµÍ³ (WeatherSystem Framework)
-	// ×ñÑ­ PECS ´¿Êı¾İÇı¶¯¼Ü¹¹£¬ÎªÓÎÏ·Ìá¹©¿É²å°ÎµÄÌìÆøÔËĞĞ»úÖÆÓëÌìÇòÎïÀíÑİ½ø
+	// åŠ¨æ€å¤©æ°”ä¸å…¨å¤©å€™ç¯å¢ƒæ¡†æ¶ç³»ç»Ÿ (WeatherSystem Framework)
+	// éµå¾ª PECS çº¯æ•°æ®é©±åŠ¨æ¶æ„ï¼Œä¸ºæ¸¸æˆæä¾›å¯æ’æ‹”çš„å¤©æ°”è¿è¡Œæœºåˆ¶ä¸å¤©çƒç‰©ç†æ¼”è¿›
 	class WLD_API WeatherSystem : public ISystem
 	{
 	public:
@@ -20,7 +20,7 @@ namespace World
 		void DeclareAccess(SystemAccess& access) override;
 		void Update(Scene& scene, Timestep dt) override;
 
-		// ¾²Ì¬¿ò¼Ü²éÑ¯Óë¿ØÖÆ½Ó¿Ú (¹© Gameplay/Script/Sequencer Í³Ò»Çı¶¯)
+		// é™æ€æ¡†æ¶æŸ¥è¯¢ä¸æ§åˆ¶æ¥å£ (ä¾› Gameplay/Script/Sequencer ç»Ÿä¸€é©±åŠ¨)
 		static WeatherAtmosphereParams GetAtmosphere(const Scene& scene);
 		static void SetTimeOfDay(Scene& scene, float hours);
 		static void TransitionTo(Scene& scene, const WeatherProfile& targetProfile, float durationSeconds);

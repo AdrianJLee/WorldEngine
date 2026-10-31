@@ -29,18 +29,18 @@ namespace World
 		void BeginScene(Scene* scene, const SceneRendererOptions& options);
 		void EndScene();
 
-		// ---- PURE-ECS:Extract 阶段(相机无关的收�?接口契约�?Renderer/RenderExtract.h)----
-		// �?本帧要画什�?填进 `scene.RenderExtract()`。Play/Simulate �?`render-extract`
-		// 帧系统调�?PreRender 阶段,排在 animation-system 之后);编辑态不跑帧系统,
-		// �?`SubmitScene` 兜底调同一份实�?幂等)�?
+		// ---- PURE-ECS:Extract 阶段(相机无关的收集;接口契约见 Renderer/RenderExtract.h)----
+		// 把"本帧要画什么"填进 `scene.RenderExtract()`。Play/Simulate 由 `render-extract`
+		// 帧系统调用(PreRender 阶段,排在 animation-system 之后);编辑态不跑帧系统,
+		// 由 `SubmitScene` 兜底调同一份实现(幂等)。
 		void ExtractScene(Scene& scene, float deltaSeconds) override;
-		// 场景析构时清�?sink 装在哪个场景�?的记�?�?Renderer/RenderExtract.h)�?
+		// 场景析构时清掉"sink 装在哪个场景上"的记录(见 Renderer/RenderExtract.h)。
 		void OnExtractSceneDestroyed(Scene& scene) override;
 
-		// D5c-4a:骨骼动画的时间推进步�?�?。宿主每帧在 SubmitScene 之前设置;
-		// SceneRenderer 在收�?3D 绘制前调�?AnimationSystem::Update 推进
-		// SkinnedMeshRendererComponent �?Time 并刷新调色板。默�?0 = 不推�?
-		// (相机预览�?同一场景的第二个 SceneRenderer"保持 0,否则同帧会推进两�?�?
+		// D5c-4a:骨骼动画的时间推进步长(秒)。宿主每帧在 SubmitScene 之前设置;
+		// SceneRenderer 在收集 3D 绘制前调用 AnimationSystem::Update 推进
+		// SkinnedMeshRendererComponent 的 Time 并刷新调色板。默认 0 = 不推进
+		// (相机预览等"同一场景的第二个 SceneRenderer"保持 0,否则同帧会推进两次)。
 		void SetDeltaSeconds(float deltaSeconds) { m_DeltaSeconds = deltaSeconds; }
 
 		void SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity entity);
@@ -52,32 +52,32 @@ namespace World
 		Rhi::Handle<Rhi::Texture> GetColorTexture() const { return m_ColorTexture; }
 		Rhi::Handle<Rhi::Framebuffer> GetRhiTarget() const { return m_Framebuffer; }
 		// P4-3:GetWidth/GetHeight 返回**渲染目标**尺寸(请求尺寸 × rendering.render_scale),
-		// 拾取/读回/抓图都按它换�?需�?宿主请求的显示尺�?的调用方(例如按窗口尺寸做
-		// 节流判断�?Runtime)用下面两个请求尺寸读�?否则倍率�?1 时会误判尺寸一直变化�?
+		// 拾取/读回/抓图都按它换算;需要"宿主请求的显示尺寸"的调用方(例如按窗口尺寸做
+		// 节流判断的 Runtime)用下面两个请求尺寸读法,否则倍率非 1 时会误判尺寸一直变化。
 		uint32_t GetRequestedWidth() const { return m_RequestedWidth; }
 		uint32_t GetRequestedHeight() const { return m_RequestedHeight; }
 		uint32_t GetWidth() const { return m_Width; }
 		uint32_t GetHeight() const { return m_Height; }
-		// D7-1c:后端无关地读�?entity-id 附件的一个像�?视口点选用)�?
-		// 坐标�?*左上角为原点**(�?WUI 视口一�?,越界返回 -1;
-		// 返回 -1 也表示该像素没有实体(附件清屏值就�?-1)�?
+		// D7-1c:后端无关地读回 entity-id 附件的一个像素(视口点选用)。
+		// 坐标以**左上角为原点**(与 WUI 视口一致),越界返回 -1;
+		// 返回 -1 也表示该像素没有实体(附件清屏值就是 -1)。
 		int32_t ReadEntityIdAt(int32_t x, int32_t y);
-		// 读回整张 entity-id 附件(显示朝向,行优�?:自动化自检�?扫描可见实体再逐点验证)�?
+		// 读回整张 entity-id 附件(显示朝向,行优先):自动化自检用(扫描可见实体再逐点验证)。
 		bool ReadEntityIdBuffer(std::vector<int32_t>& outIds);
-		// 开发验�?把颜色附件读回写 PPM�?
+		// 开发验证:把颜色附件读回写 PPM。
 		void CaptureFrame(const std::filesystem::path& path) const;
 
-		// P6:解析 2D 精灵/圆形的渲染世界矩阵。插值开启且该实�?或其祖先)被插值时返回
-		// Scene::EnsureInterpolatedWorldTransforms 算好的插值矩�?否则返回权威
-		// WorldTransformComponent(缺失时用 localMatrix 兜底)。提成公开静态入口是为了�?
-		// "2D 是否吃插�?能被�?GPU 的单元测试直接验证�?
+		// P6:解析 2D 精灵/圆形的渲染世界矩阵。插值开启且该实体(或其祖先)被插值时返回
+		// Scene::EnsureInterpolatedWorldTransforms 算好的插值矩阵;否则返回权威
+		// WorldTransformComponent(缺失时用 localMatrix 兜底)。提成公开静态入口是为了让
+		// "2D 是否吃插值"能被无 GPU 的单元测试直接验证。
 		static const glm::mat4* ResolveSpriteRenderMatrix(const Scene& scene, entt::entity entity,
 			const glm::mat4& localMatrix);
 
 	private:
 		void RecreateTargets(uint32_t width, uint32_t height);
-		// P4-3:�?请求尺寸"按当�?render_scale 换算成渲染目标尺�?尺寸/倍率变化时才重建;
-		// 默认倍率 1.0 且尺寸未变时直接返回,不产生任何资源操�?基线逐字节不�?�?
+		// P4-3:把"请求尺寸"按当前 render_scale 换算成渲染目标尺寸,尺寸/倍率变化时才重建;
+		// 默认倍率 1.0 且尺寸未变时直接返回,不产生任何资源操作(基线逐字节不变)。
 		void ApplyRenderScale();
 		void RecordSubmit(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity);
 		void RenderGeometry(const Camera& camera, const glm::mat4& cameraTransform);
@@ -88,18 +88,18 @@ namespace World
 		void RenderGroundGrid(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderTerrain(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderFoliage(const Camera& camera, const glm::mat4& cameraTransform);
-		// D5:网格/材质资产加载失败只警告一�?按路径去�?,避免逐帧刷屏�?
+		// D5:网格/材质资产加载失败只警告一次(按路径去重),避免逐帧刷屏。
 		void WarnOnce(const std::string& key, const std::string& message);
-		// L2 驻留层入口。世界资源表存在时经 AssetRegistry 解析(记账 + 可回�?;
-		// 没有(无宿主的单元测试、BeginScene 之前的调�?则退回直连加载函数�?
+		// L2 驻留层入口。世界资源表存在时经 AssetRegistry 解析(记账 + 可回收);
+		// 没有(无宿主的单元测试、BeginScene 之前的调用)则退回直连加载函数。
 		Ref<Mesh> ResolveMeshAsset(const AssetRef& asset, std::string* error);
 		Ref<Material> ResolveMaterialAsset(const AssetRef& asset, std::string* error);
 		Rhi::Handle<Rhi::Texture> ResolveTextureAsset(const AssetRef& asset);
 
 	private:
 		Rhi::Handle<Rhi::Device> m_Device;
-		// 帧深 2:命令缓冲/相机 UBO/描述符集按帧槽位环形,允许 CPU 录制�?GPU 执行重叠�?
-		// �?Renderer::FramesInFlight 同源(�?Renderer.h 的说�?�?
+		// 帧深 2:命令缓冲/相机 UBO/描述符集按帧槽位环形,允许 CPU 录制与 GPU 执行重叠。
+		// 与 Renderer::FramesInFlight 同源(见 Renderer.h 的说明)。
 		static constexpr uint32_t kFramesInFlight = Renderer::FramesInFlight;
 		Rhi::Handle<Rhi::CommandBuffer> m_CommandBuffers[kFramesInFlight];
 		Rhi::Handle<Rhi::RenderPass> m_RenderPass;
@@ -107,27 +107,27 @@ namespace World
 		Rhi::Handle<Rhi::Texture> m_ColorTexture;
 		Rhi::Handle<Rhi::Texture> m_EntityTexture;
 		Rhi::Handle<Rhi::Texture> m_DepthTexture;
-		// ---- P4-4b:MSAA(rendering.msaa;启动期参�?----
-		// Init 时从 RenderSettings::Msaa() 记录一�?设备上限已折�?�?=1 时上面三�?
-		// 单采样纹理就是全部附�?与旧结构逐字节一�?;>1 时颜�?/ 实体 id / 深度三类
-		// 附件按生效采样数创建在下面三个句柄里,并把结果 resolve 到单采样�?
-		// m_ColorTexture / m_EntityTexture(渲染通道附件下标 3/4)�?
+		// ---- P4-4b:MSAA(rendering.msaa;启动期参数)----
+		// Init 时从 RenderSettings::Msaa() 记录一次(设备上限已折算)。==1 时上面三张
+		// 单采样纹理就是全部附件(与旧结构逐字节一致);>1 时颜色 / 实体 id / 深度三类
+		// 附件按生效采样数创建在下面三个句柄里,并把结果 resolve 到单采样的
+		// m_ColorTexture / m_EntityTexture(渲染通道附件下标 3/4)。
 		uint32_t m_Samples = 1;
 		Rhi::Handle<Rhi::Texture> m_ColorMsaaTexture;
 		Rhi::Handle<Rhi::Texture> m_EntityMsaaTexture;
 		Rhi::Handle<Rhi::Texture> m_DepthMsaaTexture;
 		Rhi::Handle<Rhi::Buffer> m_CameraBuffers[kFramesInFlight];
-		// D4:每帧槽位的灯�?UBO(方向�?点光/环境�?阴影矩阵,std140;�?Renderer3D.h)�?
+		// D4:每帧槽位的灯光 UBO(方向光/点光/环境光/阴影矩阵,std140;见 Renderer3D.h)。
 		Rhi::Handle<Rhi::Buffer> m_LightBuffers[kFramesInFlight];
 		Rhi::Handle<Rhi::DescriptorSet> m_GlobalDescriptorSets[kFramesInFlight];
 
 		uint32_t FrameSlot() const;
 
-		// ---- P1b D8b:GPU 时间�?rendering.gpu_timing,默认�?----
-		// 每帧槽位一套查询池 + host-visible 读回缓冲。时间戳写在本槽位的命令缓冲�?
-		// 结果**异步**读回 —�?拷贝命令每帧重发,后端只在结果可用时才拷贝(不可用则跳过,
-		// 下一帧再�?,绝不阻塞主线�?读回缓冲在该槽位 kFramesInFlight 帧后被复用时
-		// 才由 ReadGpuTiming 取走(代价只有一�?16B 拷贝与一�?Map)�?
+		// ---- P1b D8b:GPU 时间戳(rendering.gpu_timing,默认关)----
+		// 每帧槽位一套查询池 + host-visible 读回缓冲。时间戳写在本槽位的命令缓冲里;
+		// 结果**异步**读回 —— 拷贝命令每帧重发,后端只在结果可用时才拷贝(不可用则跳过,
+		// 下一帧再试),绝不阻塞主线程;读回缓冲在该槽位 kFramesInFlight 帧后被复用时
+		// 才由 ReadGpuTiming 取走(代价只有一次 16B 拷贝与一次 Map)。
 		void InitGpuTiming();
 		void BeginGpuTiming(uint32_t slot);
 		void EndGpuTiming(uint32_t slot);
@@ -135,29 +135,29 @@ namespace World
 		bool m_GpuTiming = false;
 		Rhi::Handle<Rhi::QueryPool> m_TimestampPools[kFramesInFlight];
 		Rhi::Handle<Rhi::Buffer> m_TimestampBuffers[kFramesInFlight];
-		bool m_TimestampPending[kFramesInFlight] = {};   // true = 池里已有完整两点时间�?尚未成功读回
+		bool m_TimestampPending[kFramesInFlight] = {};   // true = 池里已有完整两点时间戳,尚未成功读回
 		double m_LastGpuMilliseconds = 0.0;
 
-		// m_Width/m_Height = 渲染目标尺寸(实际创建的附�?视口尺寸)�?
+		// m_Width/m_Height = 渲染目标尺寸(实际创建的附件/视口尺寸)。
 		uint32_t m_Width = 1280;
 		uint32_t m_Height = 720;
-		// P4-3:宿主请求的显示尺�?OnResize 记录;编辑器视�?运行时窗�?与已套用的倍率
-		// (哨兵初�?0 不在合法范围;Init 第一次是否创建由"目标还不存在"本身决定)�?
+		// P4-3:宿主请求的显示尺寸(OnResize 记录;编辑器视口/运行时窗口)与已套用的倍率
+		// (哨兵初值 0 不在合法范围;Init 第一次是否创建由"目标还不存在"本身决定)。
 		uint32_t m_RequestedWidth = 1280;
 		uint32_t m_RequestedHeight = 720;
 		float m_AppliedRenderScale = 0.0f;
-		// D5c-4a:骨骼动画步长(SetDeltaSeconds;默认 0 = 不推�?�?
+		// D5c-4a:骨骼动画步长(SetDeltaSeconds;默认 0 = 不推进)。
 		float m_DeltaSeconds = 0.0f;
-		// 抽取 sink 装在哪个场景�?跨帧保持;EndScene 不摘,否则下一帧帧系统拿不�?�?
+		// 抽取 sink 装在哪个场景上(跨帧保持;EndScene 不摘,否则下一帧帧系统拿不到)。
 		Scene* m_ExtractSinkScene = nullptr;
 		Scene* m_ActiveScene = nullptr;
 		SceneRendererOptions m_Options;
 		Ref<Framebuffer> m_FramebufferView;
-		// WLD_DEBUG_CUBE 用的调试网格(D2b:3D 通道双后端冒烟基�?�?
+		// WLD_DEBUG_CUBE 用的调试网格(D2b:3D 通道双后端冒烟基线)。
 		Ref<Mesh> m_DebugCube;
 		Ref<Mesh> m_DebugPlane;
-		Ref<Mesh> m_DebugSphere;   // D3:sphere 原语的共享网�?材质预览/半球体实�?
-		// L2 资产驻留�?WorldContext::Resources() 里的世界级服�?BeginScene 惰性登记并缓存指针)�?
+		Ref<Mesh> m_DebugSphere;   // D3:sphere 原语的共享网格(材质预览/半球体实体)
+		// L2 资产驻留层(WorldContext::Resources() 里的世界级服务;BeginScene 惰性登记并缓存指针)。
 		AssetRegistry* m_AssetRegistry = nullptr;
 		std::unordered_set<std::string> m_WarnedPaths;
 
@@ -211,15 +211,31 @@ namespace World
 		std::unordered_map<uint32_t, Ref<Mesh>> m_WaterMeshCache;
 		std::unordered_map<uint32_t, glm::mat4> m_WaterModelMatrices;
 
-		void EnsureCelestialMeshes();
-		Ref<Mesh> m_SunMesh;
-		Ref<Mesh> m_MoonMesh;
-		Ref<Mesh> m_StarfieldMesh;
-		Ref<Mesh> m_CloudMesh;
-		glm::mat4 m_SunModel { 1.0f };
-		glm::mat4 m_MoonModel { 1.0f };
-		glm::mat4 m_StarfieldModel { 1.0f };
-		glm::mat4 m_CloudModel { 1.0f };
+		struct SkyDomeUniforms
+		{
+			glm::mat4 InvViewProjection;
+			glm::vec4 SkyZenithColor;
+			glm::vec4 SkyHorizonColor;
+			glm::vec4 SkyGroundColor;
+			glm::vec4 SunDirectionIntensity;
+			glm::vec4 SunColorDisc;
+			glm::vec4 MoonDirectionIntensity;
+			glm::vec4 MoonColorDisc;
+			glm::vec4 CloudParams;
+			glm::vec4 CloudColor;
+			glm::vec4 WindDriftTime;
+			glm::vec4 CameraPosition;
+		};
+
+		void EnsureSkyDomeResources();
+		void RenderSkyDome(uint32_t slot, const glm::mat4& viewProjection, const glm::vec3& cameraPos, const struct WeatherAtmosphereParams& weather);
+
+		Rhi::Handle<Rhi::Pipeline> m_SkyDomePipeline;
+		Rhi::Handle<Rhi::DescriptorSetLayout> m_SkyDescriptorSetLayout;
+		Rhi::Handle<Rhi::DescriptorSet> m_SkyDescriptorSets[kFramesInFlight];
+		Rhi::Handle<Rhi::Buffer> m_SkyUniformBuffers[kFramesInFlight];
+		Rhi::Handle<Rhi::Buffer> m_SkyVertexBuffer;
+		Rhi::Handle<Rhi::Buffer> m_SkyIndexBuffer;
 	};
 }
 
