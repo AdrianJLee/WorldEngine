@@ -153,8 +153,14 @@ namespace World
 			if (activeScene)
 			{
 				std::shared_ptr<TerrainData> terrain;
+				glm::mat4 terrainWorld(1.0f);
 				for (auto [h, comp] : activeScene->GetRegistry().view<TerrainComponent>().each())
 				{
+					Entity e(activeScene.get(), h);
+					if (e.HasComponent<TransformComponent>())
+						terrainWorld = e.GetComponent<TransformComponent>().GetLocalMatrix();
+					if (e.HasComponent<WorldTransformComponent>())
+						terrainWorld = e.GetComponent<WorldTransformComponent>().Matrix;
 					terrain = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
 					if (terrain) break;
 				}
@@ -167,7 +173,7 @@ namespace World
 				pcgComp.MoistureThreshold = m_MoistureThreshold;
 				pcgComp.Seed = static_cast<uint32_t>(m_Seed);
 
-				PCGBiomeGenerator::GenerateBiomePoints(*terrain, pcgComp, m_CachedPoints);
+				PCGBiomeGenerator::GenerateBiomePoints(*terrain, pcgComp, m_CachedPoints, terrainWorld);
 				for (int b = 0; b < 5; ++b) m_DominantCounts[b] = 0;
 				for (const auto& pt : m_CachedPoints)
 				{
@@ -290,8 +296,14 @@ namespace World
 			if (activeScene)
 			{
 				std::shared_ptr<TerrainData> terrain;
+				glm::mat4 terrainWorld(1.0f);
 				for (auto [h, comp] : activeScene->GetRegistry().view<TerrainComponent>().each())
 				{
+					Entity e(activeScene.get(), h);
+					if (e.HasComponent<TransformComponent>())
+						terrainWorld = e.GetComponent<TransformComponent>().GetLocalMatrix();
+					if (e.HasComponent<WorldTransformComponent>())
+						terrainWorld = e.GetComponent<WorldTransformComponent>().Matrix;
 					terrain = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
 					if (terrain) break;
 				}
@@ -324,7 +336,7 @@ namespace World
 						if (terrain)
 						{
 							PCGBiomeGenerator::DeformTerrainAlongSpline(
-								*terrain, spline, m_RoadWidth, m_RoadCutDepth, m_RoadSlopeTransition);
+								*terrain, spline, m_RoadWidth, m_RoadCutDepth, m_RoadSlopeTransition, terrainWorld);
 						}
 						if (folData && m_ClearFoliageOnRoad)
 						{

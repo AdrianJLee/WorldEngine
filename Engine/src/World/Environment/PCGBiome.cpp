@@ -34,13 +34,15 @@ namespace World
 	void PCGBiomeGenerator::GenerateBiomePoints(
 		const TerrainData& terrain,
 		const BiomePCGComponent& comp,
-		std::vector<PCGSpawnPoint>& outPoints)
+		std::vector<PCGSpawnPoint>& outPoints,
+		const glm::mat4& terrainWorld)
 	{
 		outPoints.clear();
 		const float w = terrain.GetWorldWidth();
 		const float h = terrain.GetWorldHeight();
 
-		const float spacing = 8.0f;
+		// 自然步长 (2.5m 形成细腻繁茂覆盖，杜绝 8m 巨大方格阵)
+		const float spacing = 2.5f;
 		const uint32_t stepsX = static_cast<uint32_t>(w / spacing);
 		const uint32_t stepsZ = static_cast<uint32_t>(h / spacing);
 
@@ -48,26 +50,37 @@ namespace World
 		{
 			for (uint32_t x = 0; x < stepsX; ++x)
 			{
-				const float wx = static_cast<float>(x) * spacing;
-				const float wz = static_cast<float>(z) * spacing;
+				// 伪随机空间抖动 (Jittered Poisson-like Sampling)，彻底打破机械棋盘格
+				float hash1 = std::sin(static_cast<float>(x) * 12.9898f + static_cast<float>(z) * 78.233f + static_cast<float>(comp.Seed)) * 43758.5453f;
+				hash1 = hash1 - std::floor(hash1);
+				float hash2 = std::sin(static_cast<float>(x) * 39.346f + static_cast<float>(z) * 11.135f + static_cast<float>(comp.Seed)) * 43758.5453f;
+				hash2 = hash2 - std::floor(hash2);
 
-				const float elev = terrain.SampleHeight(wx, wz);
+				const float jitterX = (hash1 - 0.5f) * spacing * 0.85f;
+				const float jitterZ = (hash2 - 0.5f) * spacing * 0.85f;
+
+				const float lx = std::clamp(static_cast<float>(x) * spacing + jitterX, 0.0f, w);
+				const float lz = std::clamp(static_cast<float>(z) * spacing + jitterZ, 0.0f, h);
+
+				const float elev = terrain.SampleHeight(lx, lz);
 				if (elev < comp.MinElevation || elev > comp.MaxElevation)
 					continue;
 
-				const glm::vec3 normal = terrain.SampleNormal(wx, wz);
-				const float slopeDeg = std::acos(std::clamp(normal.y, 0.0f, 1.0f)) * (180.0f / kPi);
+				const glm::vec3 localNormal = terrain.SampleNormal(lx, lz);
+				const float slopeDeg = std::acos(std::clamp(localNormal.y, 0.0f, 1.0f)) * (180.0f / kPi);
 				if (slopeDeg > comp.MaxSlope)
 					continue;
 
-				// 过程式伪随机湿度计算
-				const float moisture = 0.5f + 0.5f * std::sin(wx * 0.02f + static_cast<float>(comp.Seed)) * std::cos(wz * 0.02f);
+				// 多八度分形湿度计算 (Fractal Moisture Noise)
+				const float n1 = std::sin(lx * 0.035f + static_cast<float>(comp.Seed)) * std::cos(lz * 0.035f);
+				const float n2 = std::sin(lx * 0.085f + static_cast<float>(comp.Seed * 3)) * std::cos(lz * 0.085f) * 0.4f;
+				const float moisture = std::clamp(0.5f + 0.5f * (n1 + n2) / 1.4f, 0.0f, 1.0f);
 				if (moisture < comp.MoistureThreshold)
 					continue;
 
 				PCGSpawnPoint pt;
-				pt.Position = glm::vec3(wx, elev, wz);
-				pt.Normal = normal;
+				pt.Position = glm::vec3(terrainWorld * glm::vec4(lx, elev, lz, 1.0f));
+				pt.Normal = glm::normalize(glm::mat3(terrainWorld) * localNormal);
 				pt.Biome = ClassifyBiome(elev, slopeDeg, moisture);
 				pt.Weight = moisture;
 
@@ -81,16 +94,18 @@ namespace World
 		const Spline3D& spline,
 		float roadWidth,
 		float cutDepth,
-		float slopeTransition)
+		float slopeTransition,
+		const glm::mat4& terrainWorld)
 	{
 		const float totalLen = spline.GetTotalLength();
 		if (totalLen <= 1.0f || roadWidth <= 0.5f)
 			return;
 
-		const float step = roadWidth * 0.5f;
+		const float step = roadWidth * 0.35f;
 		const uint32_t numSamples = static_cast<uint32_t>(totalLen / step);
-
 		const float totalInfluenceRadius = roadWidth * 0.5f + slopeTransition;
+
+		glm::mat4 invTerrain = glm::inverse(terrainWorld);
 
 		for (uint32_t i = 0; i <= numSamples; ++i)
 		{
@@ -98,8 +113,9 @@ namespace World
 			glm::vec3 splinePos, tangent;
 			spline.SampleAtDistance(d, splinePos, tangent);
 
-			const float targetY = splinePos.y - cutDepth;
-			terrain.SculptFlatten(splinePos.x, splinePos.z, totalInfluenceRadius, targetY, 0.8f, TerrainBrushFalloff::Smooth);
+			glm::vec3 localPos = glm::vec3(invTerrain * glm::vec4(splinePos, 1.0f));
+			const float targetY = localPos.y - cutDepth;
+			terrain.SculptFlatten(localPos.x, localPos.z, totalInfluenceRadius, targetY, 0.9f, TerrainBrushFalloff::Smooth);
 		}
 	}
 
@@ -184,14 +200,16 @@ namespace World
 			const float s = scale * scaleDist(rng);
 			const float yaw = angleDist(rng);
 
+			// 向光性：植物主干主要垂直向上生长，仅带 30% 坡度法线倾角，杜绝悬崖侧壁横向生硬穿刺
+			glm::vec3 plantNormal = glm::normalize(glm::mix(glm::vec3(0.0f, 1.0f, 0.0f), pt.Normal, 0.30f));
 			glm::mat4 model(1.0f);
 			model = glm::translate(model, pt.Position);
-			model = glm::rotate(model, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+			model = glm::rotate(model, yaw, plantNormal);
 			glm::vec3 up(0.0f, 1.0f, 0.0f);
-			if (glm::length(pt.Normal - up) > 1e-4f && glm::length(pt.Normal + up) > 1e-4f)
+			if (glm::length(plantNormal - up) > 1e-4f && glm::length(plantNormal + up) > 1e-4f)
 			{
-				glm::vec3 axis = glm::normalize(glm::cross(up, pt.Normal));
-				float angle = std::acos(std::clamp(glm::dot(up, pt.Normal), -1.0f, 1.0f));
+				glm::vec3 axis = glm::normalize(glm::cross(up, plantNormal));
+				float angle = std::acos(std::clamp(glm::dot(up, plantNormal), -1.0f, 1.0f));
 				model = glm::rotate(model, angle, axis);
 			}
 			model = glm::scale(model, glm::vec3(s));
