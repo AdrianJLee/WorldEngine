@@ -6142,6 +6142,50 @@ float PropertiesPanel::DrawBehaviorTreeInspector(Wui::WuiContext& ctx, const Wui
 		if (changedFields) changedFields->push_back("TreeAssetId");
 		m_Host.MarkDocumentDirty();
 	}
+	curY += 28.0f;
+
+	// 黑板资产 (.wbb) 槽位与选择
+	const std::vector<std::string>& bbAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Blackboard);
+	std::vector<std::string> bbOptions = bbAssets;
+	if (bbOptions.empty())
+	{
+		bbOptions.push_back("assets/ai/DefaultEnemyBlackboard.wbb");
+	}
+	int selectedBbIdx = -1;
+	for (size_t i = 0; i < bbOptions.size(); ++i)
+	{
+		uint32_t h = static_cast<uint32_t>(std::hash<std::string>{}(bbOptions[i]));
+		if (h == bt->BlackboardAssetId)
+		{
+			selectedBbIdx = static_cast<int>(i);
+			break;
+		}
+	}
+	if (selectedBbIdx < 0)
+	{
+		if (bt->BlackboardAssetId != 0)
+		{
+			std::string customEntry = "ID: 0x" + std::to_string(bt->BlackboardAssetId);
+			bbOptions.insert(bbOptions.begin(), customEntry);
+			selectedBbIdx = 0;
+		}
+		else
+		{
+			selectedBbIdx = 0;
+		}
+	}
+	Wui::Label(ctx, { startX, curY + 2.0f }, "黑板资产 (.wbb):", theme.Text, theme.FontSizeSmall);
+	int chosenBbIdx = selectedBbIdx;
+	if (Wui::Combo(ctx, Wui::HashId("inspect.bt.bb_asset_combo"),
+		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, "黑板资产", bbOptions, chosenBbIdx, theme))
+	{
+		if (chosenBbIdx >= 0 && chosenBbIdx < static_cast<int>(bbOptions.size()))
+		{
+			bt->BlackboardAssetId = static_cast<uint32_t>(std::hash<std::string>{}(bbOptions[chosenBbIdx]));
+			if (changedFields) changedFields->push_back("BlackboardAssetId");
+			m_Host.MarkDocumentDirty();
+		}
+	}
 	curY += 30.0f;
 
 	// =========================================================================

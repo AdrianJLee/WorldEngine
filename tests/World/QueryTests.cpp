@@ -1,4 +1,4 @@
-// Pure ECS M2: 现代 Query DSL 与系统管线统一测试
+﻿// Pure ECS M2: 现代 Query DSL 与系统管线统一测试
 #include "World/Core/WorldContext.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Components.h"
@@ -266,7 +266,7 @@ int main()
 			const auto& timings = pipeScene.GetFrameSystemTimings();
 			// 顺序 = 固定阶段(Fixed)在前 → 可变阶段(Update→Late→PreRender)。
 			// WP5:固定阶段现在以 PreFixed 的 `timer-system` 开头(时间服务推进)。
-			CHECK(timings.size() == 16);
+			CHECK(timings.size() == 18);
 			CHECK(timings[0].Name == "timer-system");       // PreFixed
 			CHECK(timings[1].Name == "physics-2d");
 			CHECK(timings[2].Name == "physics-3d");
@@ -277,12 +277,14 @@ int main()
 			CHECK(timings[7].Name == "navmesh-system");
 			CHECK(timings[8].Name == "weather-system");
 			CHECK(timings[9].Name == "transform-system");
-			CHECK(timings[10].Name == "virtual-camera-system");
-			CHECK(timings[11].Name == "camera-system");
-			CHECK(timings[12].Name == "post-process-system");
-			CHECK(timings[13].Name == "sprite-animation-system");
-			CHECK(timings[14].Name == "animation-system");
-			CHECK(timings[15].Name == "render-extract");
+			CHECK(timings[10].Name == "eqs-tactical-system");
+			CHECK(timings[11].Name == "virtual-camera-system");
+			CHECK(timings[12].Name == "camera-system");
+			CHECK(timings[13].Name == "post-process-system");
+			CHECK(timings[14].Name == "sprite-animation-system");
+			CHECK(timings[15].Name == "animation-system");
+			CHECK(timings[16].Name == "foliage-interaction-system");
+			CHECK(timings[17].Name == "render-extract");
 		}
 
 		// ========================================================
@@ -342,8 +344,9 @@ int main()
 			const auto& timings = systemScene.GetFrameSystemTimings();
 			// 7 个内置 + 自定义;CustomTestSystem 在 Update 阶段 ⇒ 排在内置的表现层之前
 			// WP5:内置 8 个(含 PreFixed 的 timer-system)+ 自定义。
-			CHECK(timings.size() == 17);
-			CHECK(timings[10].Name == "CustomTestSystem");
+			CHECK(timings.size() == 19);
+			CHECK(timings[10].Name == "eqs-tactical-system");
+			CHECK(timings[11].Name == "CustomTestSystem");
 		}
 
 		// ========================================================
@@ -380,7 +383,7 @@ int main()
 
 			// 每个阶段都进耗时表(读面板按它列系统)。
 			const auto& phaseTimings = phaseScene.GetFrameSystemTimings();
-			CHECK(phaseTimings.size() == 4 + 16);   // 4 个探针 + 10 个引擎内置(含 sprite-animation-system)
+			CHECK(phaseTimings.size() == 4 + 18);   // 4 个探针 + 18 个引擎内置
 			bool sawLate = false;
 			for (const auto& timing : phaseTimings)
 				sawLate = sawLate || timing.Name == "LateSystem";

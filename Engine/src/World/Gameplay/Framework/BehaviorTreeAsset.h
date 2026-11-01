@@ -2,6 +2,7 @@
 
 #include "World/Core/Export.h"
 #include "World/Gameplay/Framework/BehaviorTree.h"
+#include "World/Gameplay/Framework/Blackboard.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -14,7 +15,9 @@ namespace World::Gameplay
 		Selector = 0,
 		Sequence = 1,
 		Condition = 2,
-		Action = 3
+		Action = 3,
+		Decorator = 4,
+		Parallel = 5
 	};
 
 	struct BehaviorTreeNodeDesc
@@ -24,16 +27,18 @@ namespace World::Gameplay
 		BehaviorTreeNodeKind Kind = BehaviorTreeNodeKind::Selector;
 		std::string Title;
 		std::string Description;
-		std::string ConditionType; // 如 "HealthBelow", "HasTarget"
-		std::string ActionType;    // 如 "SeekSmartObject", "UseSmartObject", "Patrol", "Wait"
+		std::string ConditionType; // 如 "HealthBelow", "HasTarget", "BlackboardCondition"
+		std::string ActionType;    // 如 "SeekSmartObject", "UseSmartObject", "Patrol", "Wait", "MoveToTarget"
 		float FloatParam = 0.0f;
 		std::string StringParam;
+		FlowAbortMode AbortMode = FlowAbortMode::None;
+		ConditionOperator CompOp = ConditionOperator::IsSet;
 	};
 
 	struct BehaviorBlackboardKeyDesc
 	{
 		std::string KeyName;
-		std::string TypeName; // "Vector3", "Float", "Entity", "Bool"
+		std::string TypeName; // "Vector3", "Float", "Entity", "Bool", "Int", "String"
 		std::string DefaultValue;
 	};
 
@@ -44,12 +49,13 @@ namespace World::Gameplay
 		~BehaviorTreeAsset() = default;
 
 		void Clear();
-		void SetDefaultTemplate(); // 初始化一套默认 Root Selector -> Sequence(Heal) / Action(Patrol)
+		void SetDefaultTemplate();
 
 		bool LoadFromFile(const std::string& path, std::string* error = nullptr);
 		bool SaveToFile(const std::string& path, std::string* error = nullptr) const;
 
 		std::shared_ptr<BehaviorNode> InstantiateTree() const;
+		std::shared_ptr<Blackboard> InstantiateBlackboard() const;
 
 		static const std::vector<std::string>& GetStandardConditionTypes();
 		static const std::vector<std::string>& GetStandardActionTypes();

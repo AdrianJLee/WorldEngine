@@ -38,6 +38,8 @@ namespace World
 		case BTNodeKind::Sequence: return "Sequence (顺序器)";
 		case BTNodeKind::Condition: return "Condition (条件谓词)";
 		case BTNodeKind::Action: return "Action (动作节点)";
+		case BTNodeKind::Decorator: return "Decorator (装饰器)";
+		case BTNodeKind::Parallel: return "Parallel (并行器)";
 		default: return "Unknown";
 		}
 	}
@@ -50,6 +52,8 @@ namespace World
 		case BTNodeKind::Sequence: return "SEQ";
 		case BTNodeKind::Condition: return "CND";
 		case BTNodeKind::Action: return "ACT";
+		case BTNodeKind::Decorator: return "DEC";
+		case BTNodeKind::Parallel: return "PAR";
 		default: return "???";
 		}
 	}
@@ -66,6 +70,10 @@ namespace World
 			return Wui::WuiColor { 0.15f, 0.55f, 0.28f, 0.95f }; // 翡翠绿
 		case BTNodeKind::Action:
 			return Wui::WuiColor { 0.70f, 0.42f, 0.10f, 0.95f }; // 琥珀橙
+		case BTNodeKind::Decorator:
+			return Wui::WuiColor { 0.18f, 0.55f, 0.65f, 0.95f }; // 青碧色
+		case BTNodeKind::Parallel:
+			return Wui::WuiColor { 0.65f, 0.20f, 0.45f, 0.95f }; // 玫瑰紫
 		default:
 			return Wui::WuiColor { 0.4f, 0.4f, 0.4f, 1.0f };
 		}
@@ -1729,6 +1737,12 @@ void BehaviorTreeEditorPanel::RenderLiveDebugger(Wui::WuiContext& ctx, const Wui
 		char stateBuf[32];
 		snprintf(stateBuf, sizeof(stateBuf), "State ID: #%u", static_cast<unsigned int>(bt.StateMachineState));
 		Wui::Label(ctx, { startX + 640.0f, curY + 2.0f }, stateBuf, theme.Accent, theme.FontSizeSmall);
+
+		std::string stackStr = "调用栈深度 [" + std::to_string(bt.ActiveDepth) + "]: ";
+		for (uint8_t d = 0; d < bt.ActiveDepth && d < 8; ++d) {
+			stackStr += "-> #" + std::to_string(bt.ActivePath[d]);
+		}
+		Wui::Label(ctx, { startX + 750.0f, curY + 2.0f }, stackStr.c_str(), theme.TextMuted, theme.FontSizeSmall);
 
 		curY += 26.0f;
 

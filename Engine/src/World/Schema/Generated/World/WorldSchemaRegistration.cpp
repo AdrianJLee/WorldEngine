@@ -17067,6 +17067,56 @@ struct GeneratedAccess<World::EQSComponent>
         World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
         self->BestCoverFound = std::get<uint8_t>(value);
     }
+    static Value Get_QueryMode(const void* instance)
+    {
+        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
+        return Value(self->QueryMode);
+    }
+    static void Set_QueryMode(void* instance, const Value& value)
+    {
+        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
+        self->QueryMode = std::get<uint8_t>(value);
+    }
+    static Value Get_GeneratorMode(const void* instance)
+    {
+        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
+        return Value(self->GeneratorMode);
+    }
+    static void Set_GeneratorMode(void* instance, const Value& value)
+    {
+        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
+        self->GeneratorMode = std::get<uint8_t>(value);
+    }
+    static Value Get_IncludeCrouchCover(const void* instance)
+    {
+        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
+        return Value(self->IncludeCrouchCover);
+    }
+    static void Set_IncludeCrouchCover(void* instance, const Value& value)
+    {
+        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
+        self->IncludeCrouchCover = std::get<uint8_t>(value);
+    }
+    static Value Get_ThreatEntityHint(const void* instance)
+    {
+        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
+        return Value(self->ThreatEntityHint);
+    }
+    static void Set_ThreatEntityHint(void* instance, const Value& value)
+    {
+        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
+        self->ThreatEntityHint = std::get<uint32_t>(value);
+    }
+    static Value Get_OptimalDistance(const void* instance)
+    {
+        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
+        return Value(self->OptimalDistance);
+    }
+    static void Set_OptimalDistance(void* instance, const Value& value)
+    {
+        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
+        self->OptimalDistance = std::get<float>(value);
+    }
     static const FieldSchema& Field_QueryCenter()
     {
         static const FieldSchema schema = {
@@ -17139,6 +17189,96 @@ struct GeneratedAccess<World::EQSComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_QueryMode()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x533A0D7F7DC0E248ull },
+            "QueryMode",
+            Kind::UInt8,
+            &Get_QueryMode,
+            &Set_QueryMode,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(2.000000f), false, false, "Tactical query mode: 0=Cover, 1=Flank, 2=Retreat.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_GeneratorMode()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x531FF0A065B0C785ull },
+            "GeneratorMode",
+            Kind::UInt8,
+            &Get_GeneratorMode,
+            &Set_GeneratorMode,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(2.000000f), false, false, "Candidate generator mode: 0=ProjectedGrid, 1=ConcentricRings, 2=HybridObstacleEdge.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_IncludeCrouchCover()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x649AF7E6FB7ED9DCull },
+            "IncludeCrouchCover",
+            Kind::UInt8,
+            &Get_IncludeCrouchCover,
+            &Set_IncludeCrouchCover,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Whether half-height crouch cover points are evaluated.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ThreatEntityHint()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3A8DE94FD3A8042Full },
+            "ThreatEntityHint",
+            Kind::UInt32,
+            &Get_ThreatEntityHint,
+            &Set_ThreatEntityHint,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Optional target threat entity low ID.", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_OptimalDistance()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3988DFFD54E22BDAull },
+            "OptimalDistance",
+            Kind::Float,
+            &Get_OptimalDistance,
+            &Set_OptimalDistance,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(100.000000f), false, false, "Preferred tactical distance in meters.", false, "", {  }, "", std::nullopt },
+            Value(8.0f),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::EQSComponent>();
@@ -17157,6 +17297,11 @@ struct GeneratedAccess<World::EQSComponent>
                 Field_QueryRadius(),
                 Field_GridSpacing(),
                 Field_BestCoverFound(),
+                Field_QueryMode(),
+                Field_GeneratorMode(),
+                Field_IncludeCrouchCover(),
+                Field_ThreatEntityHint(),
+                Field_OptimalDistance(),
             },
             &StorageBindingOf(),
             "AI",

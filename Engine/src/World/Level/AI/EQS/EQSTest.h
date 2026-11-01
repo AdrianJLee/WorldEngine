@@ -59,7 +59,7 @@ namespace World::EQS
 		void RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems) override;
 	};
 
-	// 2. EQSTest_Trace (视线遮蔽射线检测，双眼高，结合 CoverBox OBB)
+	// 2. EQSTest_Trace (视线遮蔽射线检测，双眼高，结合地形起伏与 CoverBox OBB)
 	class WLD_API EQSTest_Trace : public IEQSTest
 	{
 	public:
@@ -105,6 +105,26 @@ namespace World::EQS
 		bool RequireOcclusion { true }; // 仅在被遮挡状态下给贴墙分
 		EQSTest_WallProximity();
 		std::string GetName() const override { return "Test_WallProximity"; }
+		void RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems) override;
+	};
+
+	// 7. EQSTest_FriendlyPenalty (友军排斥测试，扣减距离友军过近的点位，杜绝扎堆)
+	class WLD_API EQSTest_FriendlyPenalty : public IEQSTest
+	{
+	public:
+		float AvoidanceRadius { 3.0f };
+		EQSTest_FriendlyPenalty();
+		std::string GetName() const override { return "Test_FriendlyPenalty"; }
+		void RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems) override;
+	};
+
+	// 8. EQSTest_CoverReservation (掩体预定过滤测试，已占用点位直接淘汰或归零)
+	class WLD_API EQSTest_CoverReservation : public IEQSTest
+	{
+	public:
+		float ReservationRadius { 1.5f };
+		EQSTest_CoverReservation();
+		std::string GetName() const override { return "Test_CoverReservation"; }
 		void RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems) override;
 	};
 }

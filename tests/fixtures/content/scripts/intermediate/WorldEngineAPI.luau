@@ -1335,6 +1335,18 @@ function ui:isOpen() end
 ---@field Mesh string
 ---@field Primitive number
 
+-- Component fields are exposed through Entity:GetComponent("MeshletComponent"); there is no runtime global named MeshletComponent.
+---@class MeshletComponent
+---@field Enabled number
+---@field ClusterCount number read-only
+---@field MaxTriangles number
+---@field MaxVertices number
+---@field ShowClusters number
+---@field ShowNormalCones number
+---@field VertexCount number read-only
+---@field ShowBoundingSpheres number
+---@field TriangleCount number read-only
+
 -- Component fields are exposed through Entity:GetComponent("NavMeshAgentComponent"); there is no runtime global named NavMeshAgentComponent.
 ---@class NavMeshAgentComponent
 ---@field StoppingDistance number
@@ -1746,12 +1758,12 @@ function ui:isOpen() end
 
 -- Component fields are exposed through Entity:GetComponent("WhiteboxComponent"); there is no runtime global named WhiteboxComponent.
 ---@class WhiteboxComponent
+---@field Shape number
 ---@field Steps number
 ---@field BevelSize number
----@field Shape number
 ---@field Dimensions vec3
----@field Subdivisions number
 ---@field GenerateCollision number
+---@field Subdivisions number
 
 ---Pure-ECS component name lookup table; provides autocomplete for ecs:Query / entity:GetComponent.
 ---@class Comp
@@ -1831,6 +1843,8 @@ function ui:isOpen() end
 ---@field MeshLOD string Short alias for "MeshLODComponent".
 ---@field MeshRendererComponent string Registered component type name "MeshRendererComponent".
 ---@field MeshRenderer string Short alias for "MeshRendererComponent".
+---@field MeshletComponent string Registered component type name "MeshletComponent".
+---@field Meshlet string Short alias for "MeshletComponent".
 ---@field NavMeshAgentComponent string Registered component type name "NavMeshAgentComponent".
 ---@field NavMeshAgent string Short alias for "NavMeshAgentComponent".
 ---@field NavMeshAreaModifierComponent string Registered component type name "NavMeshAreaModifierComponent".

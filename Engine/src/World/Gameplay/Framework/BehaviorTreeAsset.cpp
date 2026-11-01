@@ -1,12 +1,15 @@
-#include "World/Level/AI/EQSCoverSystem.h"
 #include "wldpch.h"
 #include "World/Gameplay/Framework/BehaviorTreeAsset.h"
 #include "World/Gameplay/Framework/SmartObjectSystem.h"
 #include "World/Gameplay/Framework/DamageSystem.h"
+#include "World/Level/AI/EQSCoverSystem.h"
+#include "World/NavMesh/NavMesh.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
+#include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Utils/Paths.h"
+#include "World/Core/Log.h"
 
 #include <yaml-cpp/yaml.h>
 #include <filesystem>
@@ -27,6 +30,8 @@ namespace World::Gameplay
 			case BehaviorTreeNodeKind::Sequence: return "Sequence";
 			case BehaviorTreeNodeKind::Condition: return "Condition";
 			case BehaviorTreeNodeKind::Action: return "Action";
+			case BehaviorTreeNodeKind::Decorator: return "Decorator";
+			case BehaviorTreeNodeKind::Parallel: return "Parallel";
 			default: return "Selector";
 			}
 		}
@@ -36,34 +41,29 @@ namespace World::Gameplay
 			if (str == "Sequence") return BehaviorTreeNodeKind::Sequence;
 			if (str == "Condition") return BehaviorTreeNodeKind::Condition;
 			if (str == "Action") return BehaviorTreeNodeKind::Action;
+			if (str == "Decorator") return BehaviorTreeNodeKind::Decorator;
+			if (str == "Parallel") return BehaviorTreeNodeKind::Parallel;
 			return BehaviorTreeNodeKind::Selector;
 		}
 
-		std::filesystem::path ResolveBtAssetPath(const std::string& path)
+		std::string AbortModeToString(FlowAbortMode mode)
 		{
-			std::error_code ec;
-			std::filesystem::path p(path);
-			if (std::filesystem::exists(p, ec) && std::filesystem::is_regular_file(p, ec))
-				return std::filesystem::absolute(p);
-
-			const auto& assetRoot = World::Paths::AssetRoot();
-			if (!assetRoot.empty())
+			switch (mode)
 			{
-				std::filesystem::path fromAssetRoot = assetRoot / p;
-				if (std::filesystem::exists(fromAssetRoot, ec) && std::filesystem::is_regular_file(fromAssetRoot, ec))
-					return std::filesystem::absolute(fromAssetRoot);
+			case FlowAbortMode::None: return "None";
+			case FlowAbortMode::Self: return "Self";
+			case FlowAbortMode::LowerPriority: return "LowerPriority";
+			case FlowAbortMode::Both: return "Both";
+			default: return "None";
 			}
+		}
 
-			std::string s = p.generic_string();
-			if (s.rfind("assets/", 0) == 0)
-			{
-				std::string sub = s.substr(7);
-				std::filesystem::path subPath = assetRoot / sub;
-				if (std::filesystem::exists(subPath, ec) && std::filesystem::is_regular_file(subPath, ec))
-					return std::filesystem::absolute(subPath);
-			}
-
-			return p;
+		FlowAbortMode StringToAbortMode(const std::string& str)
+		{
+			if (str == "Self") return FlowAbortMode::Self;
+			if (str == "LowerPriority") return FlowAbortMode::LowerPriority;
+			if (str == "Both") return FlowAbortMode::Both;
+			return FlowAbortMode::None;
 		}
 
 		std::shared_ptr<BehaviorNode> CreateConditionNode(const BehaviorTreeNodeDesc& desc)
@@ -93,6 +93,12 @@ namespace World::Gameplay
 			else if (type == "HasTarget")
 			{
 				return std::make_shared<ConditionNode>([](BehaviorContext& ctx) {
+					if (ctx.Board.HasKey("TargetEntity"))
+					{
+						uint32_t ent = ctx.Board.Get<uint32_t>("TargetEntity", 0);
+						if (ent != 0 && ent != static_cast<uint32_t>(entt::null))
+							return true;
+					}
 					return ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null);
 				});
 			}
@@ -104,11 +110,12 @@ namespace World::Gameplay
 
 					const auto& tr = ctx.Self.GetComponent<TransformComponent>();
 					glm::vec3 selfPos = tr.Location;
-					glm::vec3 targetPos = ctx.Component.BlackboardTargetPos;
+					glm::vec3 targetPos = ctx.Board.Get<glm::vec3>("TargetPos", ctx.Component.BlackboardTargetPos);
 
-					if (ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null))
+					uint32_t targetId = ctx.Board.Get<uint32_t>("TargetEntity", ctx.Component.TargetEntity);
+					if (targetId != 0 && targetId != static_cast<uint32_t>(entt::null))
 					{
-						Entity targetEntity(&ctx.CurrentScene, static_cast<entt::entity>(ctx.Component.TargetEntity));
+						Entity targetEntity(&ctx.CurrentScene, static_cast<entt::entity>(targetId));
 						if (targetEntity.IsValid() && targetEntity.HasComponent<TransformComponent>())
 						{
 							targetPos = targetEntity.GetComponent<TransformComponent>().Location;
@@ -130,25 +137,36 @@ namespace World::Gameplay
 			{
 				uint32_t tag = static_cast<uint32_t>(param);
 				return std::make_shared<ConditionNode>([tag](BehaviorContext& ctx) {
-					return ctx.Component.BlackboardTag == tag;
+					uint32_t actualTag = ctx.Board.Get<uint32_t>("Tag", ctx.Component.BlackboardTag);
+					return actualTag == tag;
 				});
 			}
 			else if (type == "BlackboardValueAbove" || type == "BlackboardValueGreater")
 			{
 				return std::make_shared<ConditionNode>([param](BehaviorContext& ctx) {
-					return ctx.Component.BlackboardValue > param;
+					float actualVal = ctx.Board.Get<float>("Value", ctx.Component.BlackboardValue);
+					return actualVal > param;
 				});
 			}
 			else if (type == "BlackboardValueBelow" || type == "BlackboardValueLess")
 			{
 				return std::make_shared<ConditionNode>([param](BehaviorContext& ctx) {
-					return ctx.Component.BlackboardValue < param;
+					float actualVal = ctx.Board.Get<float>("Value", ctx.Component.BlackboardValue);
+					return actualVal < param;
 				});
 			}
 			else if (type == "ScriptCondition")
 			{
 				std::string scriptPath = desc.StringParam;
-				return std::make_shared<ConditionNode>([scriptPath](BehaviorContext& /*ctx*/) {
+				return std::make_shared<ConditionNode>([scriptPath](BehaviorContext&) {
+					if (scriptPath.empty())
+						return true;
+					if (World::ScriptEngine::IsInitialized())
+					{
+						std::string valStr;
+						if (World::ScriptEngine::ReadScriptValue(scriptPath, "Condition", valStr))
+							return valStr == "true";
+					}
 					return true;
 				});
 			}
@@ -170,7 +188,7 @@ namespace World::Gameplay
 			if (type == "SeekSmartObject")
 			{
 				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
-					if (ctx.Component.StateMachineState == 1 /* Seek */ || ctx.Component.StateMachineState == 2 /* Use */)
+					if (ctx.Component.StateMachineState == 1 || ctx.Component.StateMachineState == 2)
 						return NodeStatus::Success;
 
 					if (!ctx.Self.HasComponent<TransformComponent>())
@@ -188,56 +206,74 @@ namespace World::Gameplay
 					bool claimed = SmartObjectSystem::ClaimSlot(ctx.CurrentScene, targetSo, (entt::entity)ctx.Self);
 					if (claimed)
 					{
-						ctx.Component.StateMachineState = 1; // 1 = Seek
+						ctx.Component.StateMachineState = 1;
 						ctx.Component.TargetEntity = static_cast<uint32_t>(targetSo);
-						ctx.Component.BlackboardTargetPos = SmartObjectSystem::GetSlotWorldPosition(ctx.CurrentScene, targetSo);
+						glm::vec3 slotPos = SmartObjectSystem::GetSlotWorldPosition(ctx.CurrentScene, targetSo);
+						ctx.Component.BlackboardTargetPos = slotPos;
 						ctx.Component.ExecutionTimer = 0.0f;
+
+						ctx.Board.Set("TargetEntity", ctx.Component.TargetEntity);
+						ctx.Board.Set("TargetPos", slotPos);
 						return NodeStatus::Success;
 					}
 					return NodeStatus::Failure;
 				});
 			}
-			else if (type == "UseSmartObject")
+else if (type == "UseSmartObject")
 			{
 				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
-					if (ctx.Component.StateMachineState == 0 || static_cast<entt::entity>(ctx.Component.TargetEntity) == entt::null)
+					uint32_t targetRaw = ctx.Board.Get<uint32_t>("TargetEntity", ctx.Component.TargetEntity);
+					if (ctx.Component.StateMachineState == 0 || targetRaw == static_cast<uint32_t>(entt::null))
 						return NodeStatus::Failure;
 
-					entt::entity targetSo = static_cast<entt::entity>(ctx.Component.TargetEntity);
+					entt::entity targetSo = static_cast<entt::entity>(targetRaw);
 					if (!ctx.Self.HasComponent<TransformComponent>() || !ctx.Self.HasComponent<HealthComponent>())
 						return NodeStatus::Failure;
 
 					auto& tr = ctx.Self.GetComponent<TransformComponent>();
 					auto& health = ctx.Self.GetComponent<HealthComponent>();
 
-					glm::vec3 diff = ctx.Component.BlackboardTargetPos - tr.Location;
+					glm::vec3 slotPos = ctx.Board.Get<glm::vec3>("TargetPos", ctx.Component.BlackboardTargetPos);
+					glm::vec3 diff = slotPos - tr.Location;
 					float distSq = diff.x * diff.x + diff.z * diff.z;
-					if (distSq > 0.16f) // 距离大于 0.4m 时向插槽移动
+
+					// 距离大于 0.4m 时向插槽移动（走 NavMesh 优先，无则平滑趋近）
+					if (distSq > 0.16f)
 					{
-						ctx.Component.StateMachineState = 1; // 1 = Seek
-						float dist = std::sqrt(distSq);
-						float speed = 3.0f;
-						float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
-						float step = speed * dt;
-						if (step > dist) step = dist;
-						tr.Location.x += (diff.x / dist) * step;
-						tr.Location.z += (diff.z / dist) * step;
+						ctx.Component.StateMachineState = 1; // Seek
+						if (ctx.Self.HasComponent<NavMeshAgentComponent>())
+						{
+							auto& agent = ctx.Self.GetComponent<NavMeshAgentComponent>();
+							agent.Destination = slotPos;
+							agent.Speed = 3.0f;
+							agent.AutoRepath = 1;
+						}
+						else
+						{
+							float dist = std::sqrt(distSq);
+							float speed = 3.0f;
+							float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
+							float step = std::min(dist, speed * dt);
+							tr.Location.x += (diff.x / dist) * step;
+							tr.Location.z += (diff.z / dist) * step;
+						}
 						return NodeStatus::Running;
 					}
 
 					// 到达插槽位置，开始使用
-					if (ctx.Component.StateMachineState != 2 /* Use */)
+					if (ctx.Component.StateMachineState != 2)
 					{
 						bool used = SmartObjectSystem::UseSlot(ctx.CurrentScene, targetSo, (entt::entity)ctx.Self);
 						if (used)
 						{
-							ctx.Component.StateMachineState = 2; // 2 = Use
+							ctx.Component.StateMachineState = 2; // Use
 							ctx.Component.ExecutionTimer = 0.0f;
 						}
 						else
 						{
 							ctx.Component.StateMachineState = 0;
 							ctx.Component.TargetEntity = static_cast<uint32_t>(entt::null);
+							ctx.Board.Set("TargetEntity", uint32_t(0));
 							return NodeStatus::Failure;
 						}
 					}
@@ -252,46 +288,124 @@ namespace World::Gameplay
 					float healAmount = param > 0.0f ? param : 60.0f;
 					DamageSystem::Heal(health, healAmount);
 					SmartObjectSystem::ReleaseSlot(ctx.CurrentScene, targetSo);
-					ctx.Component.StateMachineState = 3; // 3 = CooldownExit
+					ctx.Component.StateMachineState = 3;
 					ctx.Component.BlackboardValue += 1.0f;
 					ctx.Component.TargetEntity = static_cast<uint32_t>(entt::null);
 					ctx.Component.ExecutionTimer = 0.0f;
+
+					ctx.Board.Set("TargetEntity", uint32_t(0));
+					ctx.Board.Set("Value", ctx.Component.BlackboardValue);
 					return NodeStatus::Success;
 				});
 			}
 			else if (type == "Patrol")
 			{
 				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
-					ctx.Component.StateMachineState = 0; // 0 = Patrol
-					if (ctx.Self.HasComponent<TransformComponent>())
-					{
-						auto& tr = ctx.Self.GetComponent<TransformComponent>();
-						float dir = (ctx.Component.BlackboardTag == 1) ? -1.0f : 1.0f;
-						float speed = param > 0.0f ? param : 2.0f;
-						float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
-						tr.Location.x += dir * speed * dt;
+					ctx.Component.StateMachineState = 0;
+					if (!ctx.Self.HasComponent<TransformComponent>())
+						return NodeStatus::Failure;
 
-						if (tr.Location.x >= 3.0f)
+					auto& tr = ctx.Self.GetComponent<TransformComponent>();
+					float radius = param > 0.0f ? param : 10.0f;
+
+					// 工业级马达集成：优先使用 NavMeshAgentComponent 驱动寻路漫游
+					if (ctx.Self.HasComponent<NavMeshAgentComponent>())
+					{
+						auto& agent = ctx.Self.GetComponent<NavMeshAgentComponent>();
+						if (agent.ReachedDestination || agent.HasPath == 0)
 						{
-							tr.Location.x = 3.0f;
-							ctx.Component.BlackboardTag = 1;
+							const auto& navMesh = ctx.CurrentScene.GetNavMesh();
+							glm::vec3 nextPatrolPos = tr.Location;
+							if (navMesh && navMesh->GetPolygonCount() > 0)
+							{
+								navMesh->GetRandomPointAround(tr.Location, radius, nextPatrolPos);
+							}
+							else
+							{
+								// 平面随机点
+								float angle = static_cast<float>(rand() % 360) * 0.0174533f;
+								nextPatrolPos = tr.Location + glm::vec3(std::cos(angle) * radius * 0.5f, 0.0f, std::sin(angle) * radius * 0.5f);
+							}
+							agent.Destination = nextPatrolPos;
+							agent.AutoRepath = 1;
+							agent.ReachedDestination = 0;
+							ctx.Board.Set("TargetPos", nextPatrolPos);
+							ctx.Component.BlackboardTargetPos = nextPatrolPos;
 						}
-						else if (tr.Location.x <= -3.0f)
+						return NodeStatus::Running;
+					}
+
+					// 基础线性摆动兜底（仅在无 NavMeshAgentComponent 时）
+					float dir = (ctx.Component.BlackboardTag == 1) ? -1.0f : 1.0f;
+					float speed = param > 0.0f ? param : 2.0f;
+					float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
+					tr.Location.x += dir * speed * dt;
+					if (tr.Location.x >= 3.0f) { tr.Location.x = 3.0f; ctx.Component.BlackboardTag = 1; }
+					else if (tr.Location.x <= -3.0f) { tr.Location.x = -3.0f; ctx.Component.BlackboardTag = 0; }
+					ctx.Board.Set("Tag", ctx.Component.BlackboardTag);
+					return NodeStatus::Success;
+				});
+			}
+			else if (type == "MoveToTarget" || type == "MoveTo")
+			{
+				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
+					if (!ctx.Self.HasComponent<TransformComponent>())
+						return NodeStatus::Failure;
+
+					auto& tr = ctx.Self.GetComponent<TransformComponent>();
+					glm::vec3 targetPos = ctx.Board.Get<glm::vec3>("TargetPos", ctx.Component.BlackboardTargetPos);
+
+					uint32_t targetId = ctx.Board.Get<uint32_t>("TargetEntity", ctx.Component.TargetEntity);
+					if (targetId != 0 && targetId != static_cast<uint32_t>(entt::null))
+					{
+						Entity targetEntity(&ctx.CurrentScene, static_cast<entt::entity>(targetId));
+						if (targetEntity.IsValid() && targetEntity.HasComponent<TransformComponent>())
 						{
-							tr.Location.x = -3.0f;
-							ctx.Component.BlackboardTag = 0;
+							targetPos = targetEntity.GetComponent<TransformComponent>().Location;
+							ctx.Board.Set("TargetPos", targetPos);
+							ctx.Component.BlackboardTargetPos = targetPos;
 						}
 					}
-					return NodeStatus::Success;
+
+					ctx.Component.StateMachineState = 1; // Moving
+
+					// 工业级标准：委托给 NavMeshAgentComponent 处理 A* 寻路与避障
+					if (ctx.Self.HasComponent<NavMeshAgentComponent>())
+					{
+						auto& agent = ctx.Self.GetComponent<NavMeshAgentComponent>();
+						agent.Destination = targetPos;
+						if (param > 0.0f) agent.Speed = param;
+						agent.AutoRepath = 1;
+
+						if (agent.ReachedDestination != 0)
+						{
+							return NodeStatus::Success;
+						}
+						return NodeStatus::Running;
+					}
+
+					// 若实体未挂载 NavMeshAgent，执行平滑趋近并到达判定
+					glm::vec3 diff = targetPos - tr.Location;
+					float dist = glm::length(diff);
+					float speed = param > 0.0f ? param : 3.0f;
+					float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
+					float step = speed * dt;
+
+					if (dist <= 0.05f || step >= dist)
+					{
+						tr.Location = targetPos;
+						return NodeStatus::Success;
+					}
+
+					tr.Location += (diff / dist) * step;
+					return NodeStatus::Running;
 				});
 			}
 			else if (type == "FindTacticalCover" || type == "RunEQSQuery")
 			{
 				std::string modeStr = "Cover";
 				if (!desc.StringParam.empty())
-				{
 					modeStr = desc.StringParam;
-				}
 
 				return std::make_shared<ActionNode>([param, modeStr](BehaviorContext& ctx) {
 					if (!ctx.Self.HasComponent<TransformComponent>())
@@ -313,8 +427,7 @@ namespace World::Gameplay
 						threatHint = eqsc.ThreatEntityHint;
 						if (eqsc.QueryRadius > 0.1f) radius = eqsc.QueryRadius;
 						if (eqsc.GridSpacing > 0.1f) spacing = eqsc.GridSpacing;
-						if (eqsc.QueryMode <= 2)
-							queryMode = static_cast<EQSQueryMode>(eqsc.QueryMode);
+						if (eqsc.QueryMode <= 2) queryMode = static_cast<EQSQueryMode>(eqsc.QueryMode);
 						genMode = eqsc.GeneratorMode;
 					}
 
@@ -330,6 +443,10 @@ namespace World::Gameplay
 					std::vector<EQSCoverCandidate> dummyCandidates;
 					if (EQSCoverSystem::EvaluateQueryCandidates(queryMode, tr.Location, threatPos, radius, spacing, obstacles, dummyCandidates, bestPos, bestScore, nullptr, glm::mat4(1.0f), genMode))
 					{
+						ctx.Board.Set("TargetPos", bestPos);
+						ctx.Board.Set("Value", bestScore);
+						ctx.Board.Set("Tag", uint32_t(88));
+
 						ctx.Component.BlackboardTargetPos = bestPos;
 						ctx.Component.BlackboardValue = bestScore;
 						ctx.Component.BlackboardTag = 88;
@@ -344,201 +461,44 @@ namespace World::Gameplay
 					return NodeStatus::Failure;
 				});
 			}
-			else if (type == "MoveToTarget")
-			{
-				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
-					if (!ctx.Self.HasComponent<TransformComponent>())
-						return NodeStatus::Failure;
-
-					auto& tr = ctx.Self.GetComponent<TransformComponent>();
-					glm::vec3 targetPos = ctx.Component.BlackboardTargetPos;
-
-					bool hasActiveEQSTarget = false;
-					if (ctx.Self.HasComponent<EQSComponent>())
-					{
-						const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
-						if (eqsc.BestCoverFound != 0)
-							hasActiveEQSTarget = true;
-					}
-					if (glm::length(ctx.Component.BlackboardTargetPos) > 0.001f && ctx.Component.BlackboardTag == 88)
-					{
-						hasActiveEQSTarget = true;
-					}
-
-					if (!hasActiveEQSTarget)
-					{
-						if (ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null))
-						{
-							Entity targetEntity(&ctx.CurrentScene, static_cast<entt::entity>(ctx.Component.TargetEntity));
-							if (targetEntity.IsValid() && targetEntity.HasComponent<TransformComponent>())
-							{
-								targetPos = targetEntity.GetComponent<TransformComponent>().Location;
-								ctx.Component.BlackboardTargetPos = targetPos;
-							}
-						}
-					}
-
-					glm::vec3 diff = targetPos - tr.Location;
-					float dist = glm::length(diff);
-					float speed = param > 0.0f ? param : 3.0f;
-					float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
-					float step = speed * dt;
-
-					ctx.Component.StateMachineState = 1; // 1 = Moving/Seek
-
-					if (dist <= 0.05f || step >= dist)
-					{
-						tr.Location = targetPos;
-						return NodeStatus::Success;
-					}
-
-					tr.Location += (diff / dist) * step;
-					return NodeStatus::Running;
-				});
-			}
-			else if (type == "MoveToEQSPosition")
-			{
-				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
-					if (!ctx.Self.HasComponent<TransformComponent>())
-						return NodeStatus::Failure;
-
-					auto& tr = ctx.Self.GetComponent<TransformComponent>();
-					glm::vec3 targetPos = ctx.Component.BlackboardTargetPos;
-					glm::vec3 diff = targetPos - tr.Location;
-					float dist = glm::length(diff);
-					float speed = param > 0.0f ? param : 4.0f;
-					float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
-					float step = speed * dt;
-
-					ctx.Component.StateMachineState = 1;
-
-					if (dist <= 0.1f || step >= dist)
-					{
-						tr.Location = targetPos;
-						return NodeStatus::Success;
-					}
-
-					tr.Location += (diff / dist) * step;
-					return NodeStatus::Running;
-				});
-			}
-			else if (type == "ExecuteEQSTacticalAction")
-			{
-				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
-					if (!ctx.Self.HasComponent<TransformComponent>())
-						return NodeStatus::Failure;
-
-					auto& tr = ctx.Self.GetComponent<TransformComponent>();
-					uint32_t querierRaw = static_cast<uint32_t>((entt::entity)ctx.Self);
-					uint32_t threatHint = 0;
-					float radius = 20.0f;
-					float spacing = 1.5f;
-					EQSQueryMode queryMode = EQSQueryMode::Cover;
-					uint8_t genMode = 0;
-
-					if (ctx.Self.HasComponent<EQSComponent>())
-					{
-						const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
-						threatHint = eqsc.ThreatEntityHint;
-						radius = eqsc.QueryRadius;
-						spacing = eqsc.GridSpacing;
-						if (eqsc.QueryMode <= 2)
-							queryMode = static_cast<EQSQueryMode>(eqsc.QueryMode);
-						genMode = eqsc.GeneratorMode;
-					}
-
-					glm::vec3 threatPos(0.0f);
-					uint32_t resolvedThreatRaw = 0;
-					EQSCoverSystem::ResolveSceneThreatPosition(ctx.CurrentScene, querierRaw, threatHint, tr.Location, threatPos, &resolvedThreatRaw);
-
-					std::vector<CoverBox> obstacles;
-					EQSCoverSystem::GatherSceneObstacles(ctx.CurrentScene, querierRaw, resolvedThreatRaw, obstacles);
-
-					glm::vec3 bestPos(0.0f);
-					float bestScore = -1.0f;
-					std::vector<EQSCoverCandidate> dummyCandidates;
-					bool found = EQSCoverSystem::EvaluateQueryCandidates(
-						queryMode, tr.Location, threatPos, radius, spacing, obstacles, dummyCandidates, bestPos, bestScore, nullptr, glm::mat4(1.0f), genMode);
-
-					if (!found)
-						return NodeStatus::Failure;
-
-					ctx.Component.BlackboardTargetPos = bestPos;
-					ctx.Component.BlackboardValue = bestScore;
-					ctx.Component.BlackboardTag = 88;
-					if (ctx.Self.HasComponent<EQSComponent>())
-					{
-						auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
-						eqsc.QueryCenter = tr.Location;
-						eqsc.BestCoverFound = 1;
-					}
-
-					glm::vec3 diff = bestPos - tr.Location;
-					float dist = glm::length(diff);
-					float speed = param > 0.0f ? param : 4.0f;
-					float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
-					float step = speed * dt;
-
-					ctx.Component.StateMachineState = 1;
-
-					if (dist <= 0.1f || step >= dist)
-					{
-						tr.Location = bestPos;
-						return NodeStatus::Success;
-					}
-
-					glm::vec3 moveDir = diff / dist;
-					glm::vec3 nextPos = tr.Location + moveDir * step;
-
-					for (const auto& box : obstacles)
-					{
-						if (box.ContainsPoint(nextPos, 0.3f))
-						{
-							glm::vec3 normal = glm::normalize(nextPos - box.Center);
-							normal.y = 0.0f;
-							if (glm::length(normal) > 0.001f)
-							{
-								moveDir = glm::normalize(moveDir + normal * 1.5f);
-							}
-							break;
-						}
-					}
-
-					tr.Location += moveDir * step;
-					return NodeStatus::Running;
-				});
-			}
 			else if (type == "Wait")
 			{
 				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
 					ctx.Component.ExecutionTimer += (ctx.Dt > 0.0f ? ctx.Dt : 0.016f);
-					float duration = param > 0.0f ? param : 1.0f;
-					if (ctx.Component.ExecutionTimer < duration)
+					if (ctx.Component.ExecutionTimer >= param)
 					{
-						return NodeStatus::Running;
+						ctx.Component.ExecutionTimer = 0.0f;
+						return NodeStatus::Success;
 					}
-					ctx.Component.ExecutionTimer = 0.0f;
-					return NodeStatus::Success;
+					return NodeStatus::Running;
 				});
 			}
 			else if (type == "SetBlackboardValue")
 			{
-				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
+				return std::make_shared<ActionNode>([param, desc](BehaviorContext& ctx) {
+					std::string keyName = desc.StringParam.empty() ? "Value" : desc.StringParam;
+					ctx.Board.Set(keyName, param);
 					ctx.Component.BlackboardValue = param;
 					return NodeStatus::Success;
 				});
 			}
 			else if (type == "IncrementBlackboardValue")
 			{
-				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
-					ctx.Component.BlackboardValue += (param != 0.0f ? param : 1.0f);
+				return std::make_shared<ActionNode>([param, desc](BehaviorContext& ctx) {
+					std::string keyName = desc.StringParam.empty() ? "Value" : desc.StringParam;
+					float cur = ctx.Board.Get<float>(keyName, ctx.Component.BlackboardValue);
+					cur += (param != 0.0f ? param : 1.0f);
+					ctx.Board.Set(keyName, cur);
+					ctx.Component.BlackboardValue = cur;
 					return NodeStatus::Success;
 				});
 			}
 			else if (type == "SetBlackboardTag")
 			{
-				uint32_t tag = static_cast<uint32_t>(param);
-				return std::make_shared<ActionNode>([tag](BehaviorContext& ctx) {
+				return std::make_shared<ActionNode>([param, desc](BehaviorContext& ctx) {
+					uint32_t tag = static_cast<uint32_t>(param);
+					std::string keyName = desc.StringParam.empty() ? "Tag" : desc.StringParam;
+					ctx.Board.Set(keyName, tag);
 					ctx.Component.BlackboardTag = tag;
 					return NodeStatus::Success;
 				});
@@ -553,7 +513,18 @@ namespace World::Gameplay
 			else if (type == "ScriptAction")
 			{
 				std::string scriptPath = desc.StringParam;
-				return std::make_shared<ActionNode>([scriptPath](BehaviorContext& /*ctx*/) {
+				return std::make_shared<ActionNode>([scriptPath](BehaviorContext&) {
+					if (scriptPath.empty())
+						return NodeStatus::Success;
+					if (World::ScriptEngine::IsInitialized())
+					{
+						std::string valStr;
+						if (World::ScriptEngine::ReadScriptValue(scriptPath, "Status", valStr))
+						{
+							if (valStr == "Running") return NodeStatus::Running;
+							if (valStr == "Failure") return NodeStatus::Failure;
+						}
+					}
 					return NodeStatus::Success;
 				});
 			}
@@ -565,7 +536,10 @@ namespace World::Gameplay
 			}
 		}
 
-		std::shared_ptr<BehaviorNode> BuildSubtree(uint32_t nodeId, const std::vector<BehaviorTreeNodeDesc>& nodes, std::unordered_set<uint32_t>& visited)
+		std::shared_ptr<BehaviorNode> BuildSubtree(
+			uint32_t nodeId,
+			const std::vector<BehaviorTreeNodeDesc>& nodes,
+			std::unordered_set<uint32_t>& visited)
 		{
 			if (visited.count(nodeId) > 0)
 				return nullptr;
@@ -588,39 +562,89 @@ namespace World::Gameplay
 			{
 			case BehaviorTreeNodeKind::Selector:
 			{
-				auto selector = std::make_shared<SelectorNode>();
-				for (const auto& childDesc : nodes)
+				auto sel = std::make_shared<SelectorNode>();
+				sel->SetNodeId(static_cast<uint16_t>(desc.Id));
+				sel->SetName(desc.Title);
+				for (const auto& n : nodes)
 				{
-					if (childDesc.ParentId == nodeId)
+					if (n.ParentId == desc.Id)
 					{
-						auto childNode = BuildSubtree(childDesc.Id, nodes, visited);
-						if (childNode)
-							selector->AddChild(childNode);
+						auto child = BuildSubtree(n.Id, nodes, visited);
+						if (child) sel->AddChild(child);
 					}
 				}
-				return selector;
+				return sel;
 			}
 			case BehaviorTreeNodeKind::Sequence:
 			{
-				auto sequence = std::make_shared<SequenceNode>();
-				for (const auto& childDesc : nodes)
+				auto seq = std::make_shared<SequenceNode>();
+				seq->SetNodeId(static_cast<uint16_t>(desc.Id));
+				seq->SetName(desc.Title);
+				for (const auto& n : nodes)
 				{
-					if (childDesc.ParentId == nodeId)
+					if (n.ParentId == desc.Id)
 					{
-						auto childNode = BuildSubtree(childDesc.Id, nodes, visited);
-						if (childNode)
-							sequence->AddChild(childNode);
+						auto child = BuildSubtree(n.Id, nodes, visited);
+						if (child) seq->AddChild(child);
 					}
 				}
-				return sequence;
+				return seq;
+			}
+			case BehaviorTreeNodeKind::Parallel:
+			{
+				auto par = std::make_shared<ParallelNode>();
+				par->SetNodeId(static_cast<uint16_t>(desc.Id));
+				par->SetName(desc.Title);
+				for (const auto& n : nodes)
+				{
+					if (n.ParentId == desc.Id)
+					{
+						auto child = BuildSubtree(n.Id, nodes, visited);
+						if (child) par->AddChild(child);
+					}
+				}
+				return par;
+			}
+			case BehaviorTreeNodeKind::Decorator:
+			{
+				std::shared_ptr<BehaviorNode> childNode = nullptr;
+				for (const auto& n : nodes)
+				{
+					if (n.ParentId == desc.Id)
+					{
+						childNode = BuildSubtree(n.Id, nodes, visited);
+						break;
+					}
+				}
+				auto dec = std::make_shared<BlackboardConditionDecorator>(
+					desc.StringParam.empty() ? "TargetPos" : desc.StringParam,
+					desc.CompOp,
+					desc.FloatParam,
+					childNode,
+					desc.AbortMode);
+				dec->SetNodeId(static_cast<uint16_t>(desc.Id));
+				dec->SetName(desc.Title);
+				return dec;
 			}
 			case BehaviorTreeNodeKind::Condition:
 			{
-				return CreateConditionNode(desc);
+				auto cond = CreateConditionNode(desc);
+				if (cond)
+				{
+					cond->SetNodeId(static_cast<uint16_t>(desc.Id));
+					cond->SetName(desc.Title);
+				}
+				return cond;
 			}
 			case BehaviorTreeNodeKind::Action:
 			{
-				return CreateActionNode(desc);
+				auto act = CreateActionNode(desc);
+				if (act)
+				{
+					act->SetNodeId(static_cast<uint16_t>(desc.Id));
+					act->SetName(desc.Title);
+				}
+				return act;
 			}
 			default:
 				return nullptr;
@@ -691,9 +715,9 @@ namespace World::Gameplay
 		patrolAction.ParentId = 1;
 		patrolAction.Kind = BehaviorTreeNodeKind::Action;
 		patrolAction.Title = "Patrol Area";
-		patrolAction.Description = "Standard patrol roaming along X-axis";
+		patrolAction.Description = "NavMesh roaming patrol";
 		patrolAction.ActionType = "Patrol";
-		patrolAction.FloatParam = 2.0f;
+		patrolAction.FloatParam = 10.0f;
 
 		m_Nodes.push_back(std::move(root));
 		m_Nodes.push_back(std::move(healSeq));
@@ -707,20 +731,10 @@ namespace World::Gameplay
 	{
 		try
 		{
-			std::filesystem::path resolvedPath = ResolveBtAssetPath(path);
-			std::error_code ec;
-			if (!std::filesystem::exists(resolvedPath, ec) || !std::filesystem::is_regular_file(resolvedPath, ec))
+			YAML::Node root = YAML::LoadFile(path);
+			if (!root || !root.IsMap())
 			{
-				if (error)
-					*error = "File does not exist: " + path;
-				return false;
-			}
-
-			YAML::Node root = YAML::LoadFile(resolvedPath.string());
-			if (!root.IsDefined() || !root.IsMap())
-			{
-				if (error)
-					*error = "Invalid YAML root in: " + path;
+				if (error) *error = "Failed to parse YAML file: " + path;
 				return false;
 			}
 
@@ -761,6 +775,7 @@ namespace World::Gameplay
 					if (nNode["ActionType"]) nodeDesc.ActionType = nNode["ActionType"].as<std::string>();
 					if (nNode["FloatParam"]) nodeDesc.FloatParam = nNode["FloatParam"].as<float>();
 					if (nNode["StringParam"]) nodeDesc.StringParam = nNode["StringParam"].as<std::string>();
+					if (nNode["AbortMode"]) nodeDesc.AbortMode = StringToAbortMode(nNode["AbortMode"].as<std::string>());
 					m_Nodes.push_back(std::move(nodeDesc));
 				}
 			}
@@ -769,8 +784,7 @@ namespace World::Gameplay
 		}
 		catch (const std::exception& e)
 		{
-			if (error)
-				*error = e.what();
+			if (error) *error = e.what();
 			return false;
 		}
 	}
@@ -815,17 +829,16 @@ namespace World::Gameplay
 				out << YAML::Key << "ActionType" << YAML::Value << node.ActionType;
 				out << YAML::Key << "FloatParam" << YAML::Value << node.FloatParam;
 				out << YAML::Key << "StringParam" << YAML::Value << node.StringParam;
+				out << YAML::Key << "AbortMode" << YAML::Value << AbortModeToString(node.AbortMode);
 				out << YAML::EndMap;
 			}
 			out << YAML::EndSeq;
-
 			out << YAML::EndMap;
 
 			std::ofstream fout(path);
 			if (!fout.is_open())
 			{
-				if (error)
-					*error = "Failed to open file for writing: " + path;
+				if (error) *error = "Failed to open file for writing: " + path;
 				return false;
 			}
 			fout << out.c_str() << "\n";
@@ -833,8 +846,7 @@ namespace World::Gameplay
 		}
 		catch (const std::exception& e)
 		{
-			if (error)
-				*error = e.what();
+			if (error) *error = e.what();
 			return false;
 		}
 	}
@@ -844,7 +856,6 @@ namespace World::Gameplay
 		if (m_Nodes.empty())
 			return nullptr;
 
-		// 寻找根节点 (ParentId == 0)
 		uint32_t rootId = m_Nodes.front().Id;
 		for (const auto& node : m_Nodes)
 		{
@@ -857,6 +868,23 @@ namespace World::Gameplay
 
 		std::unordered_set<uint32_t> visited;
 		return BuildSubtree(rootId, m_Nodes, visited);
+	}
+
+	std::shared_ptr<Blackboard> BehaviorTreeAsset::InstantiateBlackboard() const
+	{
+		auto bb = std::make_shared<Blackboard>();
+		for (const auto& key : m_BlackboardKeys)
+		{
+			BlackboardKeyType ktype = BlackboardKeyType::Float;
+			if (key.TypeName == "Bool") ktype = BlackboardKeyType::Bool;
+			else if (key.TypeName == "Int" || key.TypeName == "Int32") ktype = BlackboardKeyType::Int32;
+			else if (key.TypeName == "Vector3" || key.TypeName == "Vec3") ktype = BlackboardKeyType::Vector3;
+			else if (key.TypeName == "Entity") ktype = BlackboardKeyType::Entity;
+			else if (key.TypeName == "String") ktype = BlackboardKeyType::String;
+
+			bb->RegisterKey(key.KeyName, ktype);
+		}
+		return bb;
 	}
 
 	const std::vector<std::string>& BehaviorTreeAsset::GetStandardConditionTypes()

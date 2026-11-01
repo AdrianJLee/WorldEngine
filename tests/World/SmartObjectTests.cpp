@@ -266,10 +266,9 @@ int main()
 	Log::Init();
 	std::cout << "Running WorldSmartObjectTests...\n";
 
-	TestSmartObjectClaimUseRelease();
-	TestSmartObjectWithBehaviorTreeAndFSM();
-	TestSmartObjectDefaultBehaviorTreeAndFrameSystem();
-
-	std::cout << "All WorldSmartObjectTests passed successfully.\n";
+	std::cout << "--- Running SO 1 ---" << std::endl; TestSmartObjectClaimUseRelease();
+	std::cout << "--- Running SO 2 ---" << std::endl; TestSmartObjectWithBehaviorTreeAndFSM();
+	std::cout << "--- Running SO 3 ---" << std::endl; TestSmartObjectDefaultBehaviorTreeAndFrameSystem();
+	std::cout << "All SO passed!" << std::endl;
 	return 0;
 }

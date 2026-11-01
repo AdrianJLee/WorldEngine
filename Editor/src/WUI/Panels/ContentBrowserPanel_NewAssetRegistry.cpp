@@ -373,6 +373,25 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				SelectCreated(target, "new-behaviortree");
 				return true;
 			});
+		add("blackboard", "Blackboard (AI 黑板)", ".wbb", 36, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_blackboard", ".wbb");
+				Gameplay::BlackboardAsset asset;
+				asset.AddKey({ "TargetPos", Gameplay::BlackboardKeyType::Vector3, glm::vec3(0.0f) });
+				asset.AddKey({ "CoverPos", Gameplay::BlackboardKeyType::Vector3, glm::vec3(0.0f) });
+				asset.AddKey({ "HasThreat", Gameplay::BlackboardKeyType::Bool, false });
+				asset.AddKey({ "Value", Gameplay::BlackboardKeyType::Float, 0.0f });
+				asset.AddKey({ "Tag", Gameplay::BlackboardKeyType::Int32, int32_t(0) });
+				if (!asset.SaveToFile(target.string(), error))
+				{
+					return false;
+				}
+
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-blackboard");
+				return true;
+			});
 		add("audio_mixer", "Audio Mixer", ".wmixer", 34, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{
@@ -689,7 +708,7 @@ bool ContentBrowserPanel::RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId row
 		{ "2d", "2D 精灵系统 (2D Sprites & Tiles)  ▶", { "sprite_atlas", "sprite_animation", "tilemap", "ruletile" } },
 		{ "audio", "音频系统 (Audio System)  ▶", { "sound_event", "audio_mixer", "voice_profile" } },
 		{ "physics", "物理与数学 (Physics & Math)  ▶", { "physics_material", "curve" } },
-				{ "ai", "AI 与行为树 (AI & Behavior Tree)  ▶", { "behaviortree" } },
+				{ "ai", "AI 与行为树 (AI & Behavior Tree)  ▶", { "behaviortree", "blackboard" } },
 		{ "script", "脚本与代码 (Scripts & Logic)  ▶", { "script", "behaviortree" } },
 		{ "ui", "用户界面 (User Interface)  ▶", { "ui" } }
 	};

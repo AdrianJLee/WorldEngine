@@ -1,6 +1,11 @@
 #include "wldpch.h"
 #include "World/Level/AI/EQS/EQSTest.h"
 #include "World/Level/AI/EQSCoverSystem.h"
+#include "World/Level/AI/EQS/EnvQueryManager.h"
+#include "World/Scene/Scene.h"
+#include "World/Scene/Components.h"
+#include "World/Terrain/Terrain.h"
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -177,6 +182,26 @@ namespace World::EQS
 					if (box.IntersectRay(threatEye, rayDirStand / rayLenStand, rayLenStand, hitDist))
 					{
 						occludedStand = true;
+						break;
+					}
+				}
+			}
+
+			// 地形高度场遮蔽采样测试
+			if (!occludedStand && ctx.Terrain)
+			{
+				const glm::mat4 invTerrain = glm::inverse(ctx.TerrainWorldTransform);
+				for (int step = 1; step <= 3; ++step)
+				{
+					float t = static_cast<float>(step) / 4.0f;
+					glm::vec3 samplePt = threatEye + rayDirStand * t;
+					glm::vec3 localPt = glm::vec3(invTerrain * glm::vec4(samplePt, 1.0f));
+					float th = ctx.Terrain->SampleHeight(localPt.x, localPt.z);
+					if (th > localPt.y + 0.1f)
+					{
+						occludedStand = true;
+						occludedCrouch = true;
+						occludedGround = true;
 						break;
 					}
 				}
@@ -439,6 +464,83 @@ namespace World::EQS
 		}
 	}
 
+	EQSTest_FriendlyPenalty::EQSTest_FriendlyPenalty()
+	{
+		Purpose = TestPurpose::ScoreOnly;
+		Curve = ScoringCurve::Linear;
+		Weight = 1.0f;
+		AvoidanceRadius = 3.0f;
+	}
+
+	void EQSTest_FriendlyPenalty::RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems)
+	{
+		std::vector<glm::vec3> friendPositions;
+		if (ctx.ScenePtr)
+		{
+			auto& reg = ctx.ScenePtr->GetRegistry();
+			for (auto entity : reg.view<TransformComponent, BehaviorTreeComponent>())
+			{
+				if (static_cast<uint32_t>(entity) == ctx.QuerierEntityRaw || static_cast<uint32_t>(entity) == ctx.ThreatEntityHint)
+					continue;
+				const auto& tc = reg.get<TransformComponent>(entity);
+				friendPositions.push_back(tc.Location);
+			}
+		}
+
+		for (auto& item : inOutItems)
+		{
+			if (item.FilteredOut)
+			{
+				item.TestScores.push_back(0.0f);
+				continue;
+			}
+
+			float penalty = 0.0f;
+			for (const auto& friendPos : friendPositions)
+			{
+				float dist = glm::distance(glm::vec2(item.Position.x, item.Position.z), glm::vec2(friendPos.x, friendPos.z));
+				if (dist < AvoidanceRadius && dist > 0.01f)
+				{
+					penalty += (1.0f - (dist / AvoidanceRadius));
+				}
+			}
+
+			float penaltyScore = -std::min(penalty, 2.0f) * Weight;
+			item.TotalScore += penaltyScore;
+			item.TestScores.push_back(penaltyScore);
+		}
+	}
+
+	EQSTest_CoverReservation::EQSTest_CoverReservation()
+	{
+		Purpose = TestPurpose::FilterOnly;
+		Weight = 1.0f;
+		ReservationRadius = 1.5f;
+	}
+
+	void EQSTest_CoverReservation::RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems)
+	{
+		const auto& pool = EnvQueryManager::Get().GetReservationPool();
+		for (auto& item : inOutItems)
+		{
+			if (item.FilteredOut)
+			{
+				item.TestScores.push_back(0.0f);
+				continue;
+			}
+
+			if (pool.IsCoverReserved(item.Position, ctx.QuerierEntityRaw, ReservationRadius))
+			{
+				item.FilteredOut = true;
+				item.TestScores.push_back(0.0f);
+			}
+			else
+			{
+				item.TestScores.push_back(Weight);
+			}
+		}
+	}
+
 	EQSTestRegistry::EQSTestRegistry()
 	{
 		Register("Distance", std::make_shared<EQSTest_Distance>());
@@ -447,6 +549,8 @@ namespace World::EQS
 		Register("Overlap", std::make_shared<EQSTest_Overlap>());
 		Register("Height", std::make_shared<EQSTest_Height>());
 		Register("WallProximity", std::make_shared<EQSTest_WallProximity>());
+		Register("FriendlyPenalty", std::make_shared<EQSTest_FriendlyPenalty>());
+		Register("CoverReservation", std::make_shared<EQSTest_CoverReservation>());
 	}
 
 	EQSTestRegistry& EQSTestRegistry::Get()

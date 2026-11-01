@@ -23,7 +23,9 @@
 #include "World/Gameplay/Runtime/SystemRegistry.h"
 #include "World/Gameplay/Framework/TimerSystem.h"
 #include "World/Gameplay/Framework/BehaviorTreeSystem.h"
+#include "World/Gameplay/Framework/Blackboard.h"
 #include "World/Level/AI/EQSCoverSystem.h"
+#include "World/Level/AI/EQS/EnvQueryManager.h"
 #include "World/Gameplay/Framework/SmartObjectSystem.h"
 #include "World/Physics/Physics3D.h"
 #include "World/Audio/AudioSystem.h"
@@ -2945,6 +2947,8 @@ namespace World
 		RegisterFrameSystem({ "eqs-tactical-system", false,
 			[this](Timestep ts) {
 				const float dt = std::clamp(ts.GetSeconds(), 1.0f / 120.0f, 1.0f / 15.0f);
+				EQS::EnvQueryManager::Get().Update(dt, 0.5f);
+
 				auto view = m_Registry.view<TransformComponent, EQSComponent>();
 				for (auto entity : view)
 				{
@@ -2980,36 +2984,33 @@ namespace World
 							bt.BlackboardValue = bestScore;
 							bt.BlackboardTag = 88;
 
-							// 若未绑定外部 .wbt 资产 (TreeAssetId == 0)，直接平滑机动驱动到位
+							auto board = Gameplay::BlackboardRegistry::Get().GetBlackboard(querierRaw);
+							if (board)
+							{
+								board->Set("TargetPos", bestPos);
+								board->Set("Value", bestScore);
+								board->Set("Tag", static_cast<int32_t>(88));
+							}
+
+							// 若未绑定外部 .wbt 资产，委托给 NavMeshAgentComponent 驱动移动（绝不直接穿墙修改 tc.Location）
 							if (bt.TreeAssetId == 0)
 							{
-								glm::vec3 diff = bestPos - tc.Location;
-								float dist = glm::length(diff);
-								if (dist > 0.05f)
+								if (m_Registry.all_of<NavMeshAgentComponent>(entity))
 								{
-									float speed = 4.0f;
-									float step = speed * dt;
-									glm::vec3 moveDir = diff / dist;
-									glm::vec3 nextPos = tc.Location + moveDir * step;
-
-									for (const auto& box : obstacles)
+									auto& agent = m_Registry.get<NavMeshAgentComponent>(entity);
+									agent.Destination = bestPos;
+									agent.AutoRepath = 1;
+								}
+								else
+								{
+									glm::vec3 diff = bestPos - tc.Location;
+									float dist = glm::length(diff);
+									if (dist > 0.05f)
 									{
-										if (box.ContainsPoint(nextPos, 0.25f))
-										{
-											glm::vec3 normal = glm::normalize(nextPos - box.Center);
-											normal.y = 0.0f;
-											if (glm::length(normal) > 0.001f)
-											{
-												moveDir = glm::normalize(moveDir + normal * 1.5f);
-											}
-											break;
-										}
+										float speed = 4.0f;
+										float step = std::min(dist, speed * dt);
+										tc.Location += (diff / dist) * step;
 									}
-
-									if (step >= dist)
-										tc.Location = bestPos;
-									else
-										tc.Location += moveDir * step;
 								}
 							}
 						}

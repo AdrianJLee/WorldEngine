@@ -3252,8 +3252,27 @@ namespace World
 		BehaviorStatus Status { BehaviorStatus::Inactive }; // 1B (offset 36)
 		uint8_t Enabled { 1 };                            // 1B  (offset 37)
 		uint8_t StateMachineState { 0 };                  // 1B  (offset 38)
-		uint8_t _Padding { 0 };                           // 1B  (offset 39)
-		uint8_t _Reserved[24] { 0 };                      // 24B (offset 40..63)
+		uint8_t ActiveDepth { 0 };                        // 1B  (offset 39: 活跃执行栈深度 0..8)
+		uint16_t ActivePath[8] { 0 };                     // 16B (offset 40..55: 活跃执行节点栈路径)
+		uint32_t BlackboardAssetId { 0 };                 // 4B  (offset 56..59: 关联的黑板资产 ID)
+		uint8_t AbortRequested { 0 };                     // 1B  (offset 60: 响应式打断请求标志)
+		uint8_t _Reserved[3] { 0 };                       // 3B  (offset 61..63)
+
+		uint16_t GetPath(uint8_t depth) const { return (depth < 8) ? ActivePath[depth] : 0; }
+		void SetPath(uint8_t depth, uint16_t childIndex)
+		{
+			if (depth < 8)
+			{
+				ActivePath[depth] = childIndex;
+				if (depth >= ActiveDepth)
+					ActiveDepth = depth + 1;
+			}
+		}
+		void ClearPath()
+		{
+			ActiveDepth = 0;
+			for (int i = 0; i < 8; ++i) ActivePath[i] = 0;
+		}
 
 		BehaviorTreeComponent() = default;
 
@@ -3294,6 +3313,10 @@ namespace World
 	static_assert(offsetof(BehaviorTreeComponent, Status) == 36, "Status offset mismatch");
 	static_assert(offsetof(BehaviorTreeComponent, Enabled) == 37, "Enabled offset mismatch");
 	static_assert(offsetof(BehaviorTreeComponent, StateMachineState) == 38, "StateMachineState offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, ActiveDepth) == 39, "ActiveDepth offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, ActivePath) == 40, "ActivePath offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, BlackboardAssetId) == 56, "BlackboardAssetId offset mismatch");
+	static_assert(offsetof(BehaviorTreeComponent, AbortRequested) == 60, "AbortRequested offset mismatch");
 
 	struct FoliageInteractionComponent
 	{

@@ -55,6 +55,8 @@ namespace World
 				return EditorAssetKind::VFX;
 			if (assetType == "BehaviorTree" || assetType == "BT" || assetType == "BehaviorTreeAsset")
 				return EditorAssetKind::BehaviorTree;
+			if (assetType == "Blackboard" || assetType == "BB" || assetType == "BlackboardAsset")
+				return EditorAssetKind::Blackboard;
 			return EditorAssetKind::Unknown;
 		}
 
@@ -101,6 +103,7 @@ namespace World
 				case EditorAssetKind::PhysicsMaterial: return LowerExtension(path) == ".wphysmat";
 				case EditorAssetKind::VFX: return LowerExtension(path) == ".wvfx" || LowerExtension(path) == ".wparticle";
 				case EditorAssetKind::BehaviorTree: return LowerExtension(path) == ".wbt" || LowerExtension(path) == ".wbehaviortree";
+				case EditorAssetKind::Blackboard: return LowerExtension(path) == ".wbb" || LowerExtension(path) == ".wblackboard";
 				default: return false;
 			}
 		}
