@@ -37,7 +37,7 @@ namespace World
 	struct FoliageInstanceData
 	{
 		glm::mat4 Transform { 1.0f };
-		glm::vec4 Params { 0.0f }; // x = windPhase (0..2*pi), y = ditherOffset (0..1), z = scale, w = typeIndex
+		glm::vec4 Params { 0.0f }; // x = windPhase (0..2*pi), y = instance source (< 0.5f: Hand-Painted, >= 0.5f: PCG), z = scale, w = typeIndex
 	};
 
 	struct FoliageChunk
@@ -66,6 +66,9 @@ namespace World
 		// 实例查询与访问
 		size_t GetTotalInstanceCount() const;
 		size_t GetInstanceCountByType(size_t typeIndex) const;
+		uint32_t ClearPCGInstances();          // 仅清除 Params.y >= 0.5f 的 PCG 实例，100% 保留手绘实例！
+		size_t GetPCGInstanceCount() const;    // 统计 Params.y >= 0.5f 的实例数
+		size_t GetHandPaintedInstanceCount() const; // 统计 Params.y < 0.5f 的实例数
 		const std::vector<FoliageChunk>& GetChunks() const { return m_Chunks; }
 		std::vector<FoliageChunk>& GetChunksMut() { return m_Chunks; }
 

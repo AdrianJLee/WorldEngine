@@ -1,4 +1,5 @@
 #include "World/Foliage/FoliageRenderer.h"
+#include "World/Foliage/FoliageInteraction.h"
 #include "World/Physics/Physics2DUtils.h"
 #include "wldpch.h"
 #include "World/Core/StringPool.h"
@@ -22,6 +23,7 @@
 #include "World/Gameplay/Runtime/SystemRegistry.h"
 #include "World/Gameplay/Framework/TimerSystem.h"
 #include "World/Gameplay/Framework/BehaviorTreeSystem.h"
+#include "World/Level/AI/EQSCoverSystem.h"
 #include "World/Gameplay/Framework/SmartObjectSystem.h"
 #include "World/Physics/Physics3D.h"
 #include "World/Audio/AudioSystem.h"
@@ -2940,6 +2942,81 @@ namespace World
 		// 可变阶段(每帧一次):世界矩阵传播/相机/动画/抽取 —— 表现层,看到的是本帧
 		// **最后一次**物理步之后的位姿(GameApp 的顺序是 Fixed(0..N) → Update → Late → PreRender)。
 		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
+		RegisterFrameSystem({ "eqs-tactical-system", false,
+			[this](Timestep ts) {
+				const float dt = std::clamp(ts.GetSeconds(), 1.0f / 120.0f, 1.0f / 15.0f);
+				auto view = m_Registry.view<TransformComponent, EQSComponent>();
+				for (auto entity : view)
+				{
+					auto& tc = view.get<TransformComponent>(entity);
+					auto& eqsc = view.get<EQSComponent>(entity);
+					uint32_t querierRaw = static_cast<uint32_t>(entity);
+
+					glm::vec3 threatPos(0.0f);
+					uint32_t resolvedThreatRaw = 0;
+					EQSCoverSystem::ResolveSceneThreatPosition(*this, querierRaw, eqsc.ThreatEntityHint, tc.Location, threatPos, &resolvedThreatRaw);
+
+					std::vector<CoverBox> obstacles;
+					EQSCoverSystem::GatherSceneObstacles(*this, querierRaw, resolvedThreatRaw, obstacles);
+
+					eqsc.QueryCenter = tc.Location;
+					EQSQueryMode mode = (eqsc.QueryMode <= 2) ? static_cast<EQSQueryMode>(eqsc.QueryMode) : EQSQueryMode::Cover;
+
+					glm::vec3 bestPos(0.0f);
+					float bestScore = -1.0f;
+					std::vector<EQSCoverCandidate> candidates;
+					bool found = EQSCoverSystem::EvaluateQueryCandidates(
+						mode, tc.Location, threatPos, eqsc.QueryRadius, eqsc.GridSpacing,
+						obstacles, candidates, bestPos, bestScore, nullptr, glm::mat4(1.0f), eqsc.GeneratorMode);
+
+					eqsc.BestCoverFound = found ? 1 : 0;
+
+					if (found && m_Registry.all_of<BehaviorTreeComponent>(entity))
+					{
+						auto& bt = m_Registry.get<BehaviorTreeComponent>(entity);
+						if (bt.Enabled != 0)
+						{
+							bt.BlackboardTargetPos = bestPos;
+							bt.BlackboardValue = bestScore;
+							bt.BlackboardTag = 88;
+
+							// 若未绑定外部 .wbt 资产 (TreeAssetId == 0)，直接平滑机动驱动到位
+							if (bt.TreeAssetId == 0)
+							{
+								glm::vec3 diff = bestPos - tc.Location;
+								float dist = glm::length(diff);
+								if (dist > 0.05f)
+								{
+									float speed = 4.0f;
+									float step = speed * dt;
+									glm::vec3 moveDir = diff / dist;
+									glm::vec3 nextPos = tc.Location + moveDir * step;
+
+									for (const auto& box : obstacles)
+									{
+										if (box.ContainsPoint(nextPos, 0.25f))
+										{
+											glm::vec3 normal = glm::normalize(nextPos - box.Center);
+											normal.y = 0.0f;
+											if (glm::length(normal) > 0.001f)
+											{
+												moveDir = glm::normalize(moveDir + normal * 1.5f);
+											}
+											break;
+										}
+									}
+
+									if (step >= dist)
+										tc.Location = bestPos;
+									else
+										tc.Location += moveDir * step;
+								}
+							}
+						}
+					}
+				}
+			},
+			Gameplay::SystemPhase::Update, { "transform-system" } });
 		RegisterFrameSystem({ "virtual-camera-system", false, [this](Timestep ts) { VirtualCameraSystem::Update(*this, ts.GetSeconds()); },
 			Gameplay::SystemPhase::Late, { "transform-system" } });
 		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); },
@@ -2960,14 +3037,22 @@ namespace World
 		// 编辑态不跑帧系统 ⇒ SceneRenderer::SubmitScene 里兜底跑同一个 EnsureRenderExtract。
 		RegisterFrameSystem({ "foliage-interaction-system", false,
 			[this](Timestep ts) {
-				(void)ts;
+				const float dt = std::clamp(ts.GetSeconds(), 1.0f / 120.0f, 1.0f / 30.0f);
+				FoliageInteractionSystem::BeginFrame(dt);
 				auto view = m_Registry.view<TransformComponent, FoliageInteractionComponent>();
 				for (auto entity : view)
 				{
 					auto& [tc, fic] = view.get<TransformComponent, FoliageInteractionComponent>(entity);
-					FoliageRenderer::AddLocalWind(tc.Location, fic.PushRadius, fic.PushStrength * 2.0f,
-						fic.RecoverySpeed * 0.5f, 1.5f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
+					FoliageInteractorSource src;
+					src.SourceId = static_cast<uint64_t>(static_cast<uint32_t>(entity));
+					src.Position = tc.Location;
+					src.PushRadius = fic.PushRadius * std::max(tc.Scale.x, tc.Scale.z);
+					src.PushStrength = fic.PushStrength;
+					src.RecoverySpeed = fic.RecoverySpeed;
+					src.LeaveTracks = (fic.LeaveTracks != 0);
+					FoliageInteractionSystem::SubmitInteractor(src);
 				}
+				FoliageInteractionSystem::StepSimulation(dt);
 			},
 			Gameplay::SystemPhase::PreRender, { "transform-system" } });
 		RegisterFrameSystem({ "render-extract", false,

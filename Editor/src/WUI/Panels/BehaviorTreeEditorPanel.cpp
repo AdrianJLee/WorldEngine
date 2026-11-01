@@ -1090,7 +1090,8 @@ namespace World
 				"Custom"                 // 自定义动作名 (Custom Named Action)
 			};
 
-			const bool hasExtraRow = (node->ActionType == "SeekSmartObject" || node->ActionType == "FindTacticalCover" || node->ActionType == "Custom");
+			const bool isEqsAction = (node->ActionType == "MoveToEQSPosition" || node->ActionType == "ExecuteEQSTacticalAction");
+			const bool hasExtraRow = (node->ActionType == "SeekSmartObject" || node->ActionType == "FindTacticalCover" || node->ActionType == "Custom" || isEqsAction);
 			const float cardH = hasExtraRow ? 175.0f : 125.0f;
 			const Wui::WuiRect actCard { startX, curY, fieldW, cardH };
 			Wui::PanelBackground(ctx, actCard, Wui::WuiColor { 0.28f, 0.18f, 0.10f, 0.85f }, theme.Radius);
@@ -1186,6 +1187,34 @@ namespace World
 				}
 				cardY += 26.0f;
 				Wui::Label(ctx, { startX + labelW, cardY }, "提示: 在 Luau 脚本的 OnEnter/OnTick(ctx,dt)/OnExit 中实现具体行为", theme.TextMuted, theme.FontSizeSmall);
+			}
+			else if (node->ActionType == "MoveToEQSPosition")
+			{
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "机动速度 (m/s):", theme.Text, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.float.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, node->FloatParam, 0.2f, 0.5f, 50.0f, theme))
+				{
+					m_Dirty = true;
+				}
+				cardY += 28.0f;
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "EQS 协同说明:", theme.Text, theme.FontSizeSmall);
+				Wui::Label(ctx, { startX + labelW, cardY }, "读取实体 EQSComponent 算出的最佳掩体坐标并在黑板同步", theme.Accent, theme.FontSizeSmall);
+				cardY += 26.0f;
+				Wui::Label(ctx, { startX + labelW, cardY }, "提示: 自动绕开掩体几何障碍向掩体背弹面推进，避免冲向敌人", theme.TextMuted, theme.FontSizeSmall);
+			}
+			else if (node->ActionType == "ExecuteEQSTacticalAction")
+			{
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "反应时延 (s):", theme.Text, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.float.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, node->FloatParam, 0.1f, 0.0f, 10.0f, theme))
+				{
+					m_Dirty = true;
+				}
+				cardY += 28.0f;
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "EQS 协同说明:", theme.Text, theme.FontSizeSmall);
+				Wui::Label(ctx, { startX + labelW, cardY }, "一站式触发场景威胁源定位与贴墙掩体解算并驱动实体机动", theme.Accent, theme.FontSizeSmall);
+				cardY += 26.0f;
+				Wui::Label(ctx, { startX + labelW, cardY }, "提示: 挂载 EQSComponent 与 BehaviorTreeComponent 点击 Play 即可直接运转", theme.TextMuted, theme.FontSizeSmall);
 			}
 			else if (node->ActionType == "FindTacticalCover")
 			{

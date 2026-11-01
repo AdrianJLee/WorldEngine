@@ -1,20 +1,20 @@
-ChunkID: 0
+﻿ChunkID: 0
 Entity:
   World::UUIDComponent:
     ID:
-      m_UUID: 982000000000000003
+      m_UUID: 983000000000000002
   World::TagComponent:
-    Tag: "Showcase Ground Base"
+    Tag: "Alpine Valley Terrain & PCG Hub"
   World::TransformComponent:
-    Location: [0.0, -0.25, 0.0]
+    Location: [0.0, 0.0, 0.0]
     Rotation: [0.0, 0.0, 0.0]
     Scale: [1, 1, 1]
   World::TerrainComponent:
     TerrainAsset: "terrains/default.wterrain"
-    CellSize: 1.0
-    HeightScale: 1.0
+    CellSize: 2.0
+    HeightScale: 35.0
     MinHeight: 0.0
-    MaxHeight: 256.0
+    MaxHeight: 500.0
     ChunkResolution: 64
     LodDistanceRatio: 1.5
     LayerCount: 4
@@ -22,12 +22,19 @@ Entity:
     ReceiveShadow: 1
     HoleCutoutEnabled: 1
     EnableCollision: 1
+  World::BiomePCGComponent:
+    MinElevation: 0.0
+    MaxElevation: 500.0
+    MaxSlope: 38.0
+    MoistureThreshold: 0.28
+    Seed: 2026
+    AutoDeformTerrain: 1
   World::FoliageComponent:
     FoliageAsset: "foliage/default.wfoliage"
-    MaxCullDistance: 150.0
-    FadeRange: 20.0
-    WindStrength: 1.2
-    WindFrequency: 1.0
+    MaxCullDistance: 250.0
+    FadeRange: 30.0
+    WindStrength: 0.45
+    WindFrequency: 1.6
     InstanceCount: 0
     CastShadow: 1
     ReceiveShadow: 1
@@ -37,13 +44,13 @@ Entity:
     Shape: 0
     Subdivisions: 1
     Steps: 8
-    Dimensions: [100.0, 0.5, 100.0]
+    Dimensions: [120.0, 0.5, 120.0]
     BevelSize: 0.0
     GenerateCollision: 1
   World::MeshRendererComponent:
     Primitive: 0
     MeshIndex: 0
-    Color: [0.55, 0.58, 0.52, 1.0]
+    Color: [0.35, 0.55, 0.30, 1.0]
     Mesh: ""
     Material: ""
   World::LevelEntityComponent:

@@ -39,6 +39,7 @@
 #include "World/Renderer/TransformInterpolation.h"
 #include "World/Terrain/TerrainRenderer.h"
 #include "World/Foliage/FoliageRenderer.h"
+#include "World/Foliage/FoliageInteraction.h"
 #include "World/Renderer/Decal.h"
 #include "World/Renderer/CSM.h"
 #include "World/Scene/Components.h"
@@ -3636,6 +3637,7 @@ namespace World
 		}
 
 		auto interactView = m_ActiveScene->m_Registry.view<TransformComponent, FoliageInteractionComponent>();
+		FoliageInteractionSystem::BeginFrame(0.016f);
 		for (auto entity : interactView)
 		{
 			const auto& [xform, interact] = interactView.get<TransformComponent, FoliageInteractionComponent>(entity);
@@ -3643,9 +3645,18 @@ namespace World
 			if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
 				modelMat = world->Matrix;
 			const glm::vec3 worldPos = glm::vec3(modelMat[3]);
-			FoliageRenderer::AddLocalWind(worldPos, interact.PushRadius, interact.PushStrength * 2.0f,
-				interact.RecoverySpeed * 0.5f, 1.5f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
+			const float scaleXZ = std::max(glm::length(glm::vec3(modelMat[0])), glm::length(glm::vec3(modelMat[2])));
+
+			FoliageInteractorSource src;
+			src.SourceId = static_cast<uint64_t>(static_cast<uint32_t>(entity));
+			src.Position = worldPos;
+			src.PushRadius = interact.PushRadius * std::max(1.0f, scaleXZ);
+			src.PushStrength = interact.PushStrength;
+			src.RecoverySpeed = interact.RecoverySpeed;
+			src.LeaveTracks = (interact.LeaveTracks != 0);
+			FoliageInteractionSystem::SubmitInteractor(src);
 		}
+		FoliageInteractionSystem::StepSimulation(0.016f);
 
 		auto foliageView = m_ActiveScene->m_Registry.view<TransformComponent, FoliageComponent>();
 		static float s_FoliageTime = 0.0f;

@@ -1,0 +1,31 @@
+﻿ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 983000000000000012
+  World::TagComponent:
+    Tag: "Recon Offroad Vehicle (Foliage Pusher)"
+  World::TransformComponent:
+    Location: [-8.0, 0.8, 16.0]
+    Rotation: [0.0, 35.0, 0.0]
+    Scale: [1, 1, 1]
+  World::FoliageInteractionComponent:
+    PushRadius: 3.0
+    PushStrength: 1.8
+    RecoverySpeed: 3.5
+    LeaveTracks: 1
+  World::WhiteboxComponent:
+    Shape: 0
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [2.2, 1.4, 4.2]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.95, 0.55, 0.15, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 4

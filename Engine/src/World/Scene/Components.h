@@ -3183,7 +3183,11 @@ namespace World
 		float QueryRadius { 20.0f };                      // 4B  (offset 12)
 		float GridSpacing { 2.0f };                       // 4B  (offset 16)
 		uint8_t BestCoverFound { 0 };                     // 1B  (offset 20)
-		uint8_t _Padding[11] { 0 };                       // 11B (offset 21..31)
+		uint8_t QueryMode { 0 };                          // 1B  (offset 21): 0=Cover, 1=Flank, 2=Retreat
+		uint8_t GeneratorMode { 0 };                      // 1B  (offset 22): 0=ProjectedGrid, 1=ConcentricRings, 2=HybridObstacleEdge
+		uint8_t IncludeCrouchCover { 1 };                 // 1B  (offset 23): 1=Enable half-cover crouch evaluation
+		uint32_t ThreatEntityHint { 0 };                  // 4B  (offset 24): Optional target threat entity low ID
+		float OptimalDistance { 8.0f };                   // 4B  (offset 28): Preferred tactical distance in meters
 
 		EQSComponent() = default;
 
@@ -3198,6 +3202,16 @@ namespace World
 				Doc("Spacing distance between candidate sample points in meters."));
 			WE_FIELD(BestCoverFound, UInt8, Default(0),
 				Doc("Whether an optimal tactical cover point was found."));
+			WE_FIELD(QueryMode, UInt8, Range(0, 2), Default(0),
+				Doc("Tactical query mode: 0=Cover, 1=Flank, 2=Retreat."));
+			WE_FIELD(GeneratorMode, UInt8, Range(0, 2), Default(0),
+				Doc("Candidate generator mode: 0=ProjectedGrid, 1=ConcentricRings, 2=HybridObstacleEdge."));
+			WE_FIELD(IncludeCrouchCover, UInt8, Range(0, 1), Default(1),
+				Doc("Whether half-height crouch cover points are evaluated."));
+			WE_FIELD(ThreatEntityHint, UInt32, Default(0),
+				Doc("Optional target threat entity low ID."));
+			WE_FIELD(OptimalDistance, Float, Range(1.0f, 100.0f), Default(8.0f),
+				Doc("Preferred tactical distance in meters."));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(EQSComponent) == 32, "EQSComponent must be exactly 32 bytes");
@@ -3206,6 +3220,11 @@ namespace World
 	static_assert(offsetof(EQSComponent, QueryRadius) == 12, "QueryRadius offset mismatch");
 	static_assert(offsetof(EQSComponent, GridSpacing) == 16, "GridSpacing offset mismatch");
 	static_assert(offsetof(EQSComponent, BestCoverFound) == 20, "BestCoverFound offset mismatch");
+	static_assert(offsetof(EQSComponent, QueryMode) == 21, "QueryMode offset mismatch");
+	static_assert(offsetof(EQSComponent, GeneratorMode) == 22, "GeneratorMode offset mismatch");
+	static_assert(offsetof(EQSComponent, IncludeCrouchCover) == 23, "IncludeCrouchCover offset mismatch");
+	static_assert(offsetof(EQSComponent, ThreatEntityHint) == 24, "ThreatEntityHint offset mismatch");
+	static_assert(offsetof(EQSComponent, OptimalDistance) == 28, "OptimalDistance offset mismatch");
 
 	enum class BehaviorStatus : uint8_t
 	{

@@ -38,16 +38,24 @@ namespace World
 		PCGEditorTab m_ActiveTab { PCGEditorTab::BiomeRules };
 		int m_ActiveTabIdx { 0 };
 
+		// 场景双向绑定实体
+		entt::entity m_BoundEntity { entt::null };
+
 		// 生态规则参数
 		float m_MinElevation { 0.0f };
-		float m_MaxElevation { 1000.0f };
-		float m_MaxSlope { 35.0f };
-		float m_MoistureThreshold { 0.35f };
-		int32_t m_Seed { 1337 };
+		float m_MaxElevation { 500.0f };
+		float m_MaxSlope { 38.0f };
+		float m_MoistureThreshold { 0.28f };
+		int32_t m_Seed { 2026 };
+		uint8_t m_AutoDeformTerrain { 1 };
+
+		// 动态规则图层折叠索引
+		int m_ExpandedLayerIdx { 0 };
 
 		// 散布流水线参数
 		float m_Density { 1.0f };
 		float m_ScaleMultiplier { 1.0f };
+		bool m_PreserveHandPainted { true };
 
 		// 样条道路平整参数
 		float m_RoadWidth { 6.0f };

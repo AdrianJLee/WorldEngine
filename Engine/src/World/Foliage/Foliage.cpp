@@ -124,6 +124,58 @@ namespace World
 		return count;
 	}
 
+	uint32_t FoliageData::ClearPCGInstances()
+	{
+		if (BlockedByPlayLock("ClearPCGInstances"))
+			return 0;
+		uint32_t removed = 0;
+		for (auto& chunk : m_Chunks)
+		{
+			size_t before = chunk.Instances.size();
+			chunk.Instances.erase(
+				std::remove_if(chunk.Instances.begin(), chunk.Instances.end(),
+					[](const FoliageInstanceData& inst) {
+						return inst.Params.y >= 0.5f;
+					}),
+				chunk.Instances.end());
+			size_t after = chunk.Instances.size();
+			if (before != after)
+			{
+				removed += static_cast<uint32_t>(before - after);
+				chunk.DirtyBuffer = true;
+			}
+		}
+		return removed;
+	}
+
+	size_t FoliageData::GetPCGInstanceCount() const
+	{
+		size_t count = 0;
+		for (const auto& chunk : m_Chunks)
+		{
+			for (const auto& inst : chunk.Instances)
+			{
+				if (inst.Params.y >= 0.5f)
+					++count;
+			}
+		}
+		return count;
+	}
+
+	size_t FoliageData::GetHandPaintedInstanceCount() const
+	{
+		size_t count = 0;
+		for (const auto& chunk : m_Chunks)
+		{
+			for (const auto& inst : chunk.Instances)
+			{
+				if (inst.Params.y < 0.5f)
+					++count;
+			}
+		}
+		return count;
+	}
+
 	FoliageChunk& FoliageData::GetOrCreateChunk(int32_t cx, int32_t cz)
 	{
 		for (auto& chunk : m_Chunks)
@@ -258,7 +310,7 @@ namespace World
 			inst.Transform = xform;
 			inst.Params = glm::vec4(
 				dist01(rng) * 2.0f * kPi,     // windPhase
-				dist01(rng),                  // ditherOffset
+				0.0f,                         // hand-painted indicator (< 0.5f)
 				scale,                        // scale
 				static_cast<float>(typeIndex) // typeIndex
 			);

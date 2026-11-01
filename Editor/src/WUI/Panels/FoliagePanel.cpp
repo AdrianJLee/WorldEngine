@@ -1,4 +1,5 @@
 #include "World/Environment/PCGBiome.h"
+#include "World/Foliage/FoliageInteraction.h"
 #include "WUI/Panels/FoliagePanel.h"
 #include "WUI/Common/EditorAssetCatalog.h"
 #include "WUI/Common/AssetThumbnailRenderer.h"
@@ -330,11 +331,13 @@ namespace World
 
 		// 2. 顶部概览信息
 		const size_t totalInstances = m_Foliage->GetTotalInstanceCount();
+		const size_t handInstances = m_Foliage->GetHandPaintedInstanceCount();
+		const size_t pcgInstances = m_Foliage->GetPCGInstanceCount();
 		const size_t typeCount = m_Foliage->GetTypeCount();
-		char headerBuf[128] = {};
-		std::snprintf(headerBuf, sizeof(headerBuf), "资产: %s | 种类: %zu | 实例总数: %zu 颗",
+		char headerBuf[256] = {};
+		std::snprintf(headerBuf, sizeof(headerBuf), "资产: %s | 种类: %zu | 手绘实例: %zu 颗 | PCG 实例: %zu 颗 | 总计: %zu 颗",
 			m_LoadedPath.empty() ? "default.wfoliage" : std::filesystem::path(m_LoadedPath).filename().string().c_str(),
-			typeCount, totalInstances);
+			typeCount, handInstances, pcgInstances, totalInstances);
 		Wui::Label(ctx, { startX, curY }, headerBuf, theme.TextMuted, theme.FontSizeSmall);
 		curY += 22.0f;
 
@@ -459,6 +462,19 @@ namespace World
 		}
 		Wui::Tooltip(ctx, { startX + halfBtnW + theme.PadSmall, curY, halfBtnW, btnH }, "仅保留当前选中的植物参与笔刷散布，取消其他所有植物的混刷勾选");
 
+		curY += btnH + 8.0f;
+
+		// Row 3: [仅清除 PCG 实例 (保留手绘)]
+		if (Wui::Button(ctx, Wui::HashId("foliage.btn.clear_pcg"), { startX, curY, contentW, btnH }, "仅清除 PCG 实例 (保留手绘)", theme))
+		{
+			if (m_Foliage)
+			{
+				const uint32_t cleared = m_Foliage->ClearPCGInstances();
+				m_StatusFeedback = "已清除 " + std::to_string(cleared) + " 处 PCG 生成实例，手绘植被已完好保留。";
+				host.MarkDocumentDirty();
+			}
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, btnH }, "仅移除由 PCG 程序化生成的植被实例，100% 保留所有笔刷手绘植物");
 		curY += btnH + 8.0f;
 
 		// 2. 动态植物生态列表 (直接内联折叠展开参数检视器)
@@ -972,6 +988,7 @@ namespace World
 
 		if (Wui::Button(ctx, Wui::HashId("foliage.btn.test_impulse"), { startX, curY, halfW, 28.0f }, "💥 触发径向冲击 (Radial)", theme))
 		{
+			FoliageInteractionSystem::TriggerImpulse(glm::vec3(0.0f, 0.0f, 0.0f), 18.0f, 4.5f, 3.5f);
 			FoliageRenderer::AddLocalWind(glm::vec3(0.0f, 0.0f, 0.0f), 18.0f, 4.5f, 3.5f, 1.2f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
 			m_StatusFeedback = "已触发局部径向冲击波 (半径 18m, 强度 4.5)";
 		}
@@ -1010,13 +1027,15 @@ namespace World
 		const float halfW = (contentW - theme.PadSmall) * 0.5f;
 		if (Wui::Button(ctx, Wui::HashId("foliage.interact.btn_radial"), { startX, curY, halfW, 26.0f }, "💥 触发径向冲击 (Radial)", theme))
 		{
+			FoliageInteractionSystem::TriggerImpulse(glm::vec3(0.0f, 0.0f, 0.0f), m_InteractRadius * 3.0f, m_InteractStrength * 2.0f, 3.5f);
 			FoliageRenderer::AddLocalWind(glm::vec3(0.0f, 0.0f, 0.0f), m_InteractRadius * 3.0f, m_InteractStrength * 2.0f, 3.5f, 1.2f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
-			m_StatusFeedback = "已触发受力推挤径向冲击波";
+			m_StatusFeedback = "已触发受力推挤径向冲击波 (注入 FoliageInteractionSystem)";
 		}
 		if (Wui::Button(ctx, Wui::HashId("foliage.interact.btn_vortex"), { startX + halfW + theme.PadSmall, curY, halfW, 26.0f }, "🌀 触发气旋回旋 (Vortex)", theme))
 		{
+			FoliageInteractionSystem::TriggerImpulse(glm::vec3(0.0f, 0.0f, 0.0f), m_InteractRadius * 2.5f, m_InteractStrength * 1.8f, 5.0f);
 			FoliageRenderer::AddLocalWind(glm::vec3(0.0f, 0.0f, 0.0f), m_InteractRadius * 2.5f, m_InteractStrength * 1.8f, 5.0f, 1.5f, LocalWindType::Vortex, glm::vec3(0.0f, 1.0f, 0.0f));
-			m_StatusFeedback = "已触发受力推挤气旋扭曲";
+			m_StatusFeedback = "已触发受力推挤气旋扭曲 (注入 FoliageInteractionSystem)";
 		}
 		curY += 32.0f;
 
@@ -1123,6 +1142,18 @@ namespace World
 			}
 		}
 		curY += 34.0f;
+
+		if (Wui::Button(ctx, Wui::HashId("foliage.erase.btn_clear_pcg"), { startX, curY, contentW, 28.0f }, "仅清除 PCG 实例 (保留手绘)", theme))
+		{
+			if (m_Foliage)
+			{
+				const uint32_t cleared = m_Foliage->ClearPCGInstances();
+				m_StatusFeedback = "已清除 " + std::to_string(cleared) + " 处 PCG 实例，手绘植物完好保留。";
+				host.MarkDocumentDirty();
+			}
+		}
+		Wui::Tooltip(ctx, { startX, curY, contentW, 28.0f }, "一键剥离 PCG 程序化生成的植被实例，不伤及任何一颗手绘植物");
+		curY += 34.0f;
 	}
 
 	void FoliagePanel::RenderSettingsTab(Wui::WuiContext& ctx, float startX, float& curY, float contentW, const Wui::WuiTheme& theme, PanelHost& host)
@@ -1205,9 +1236,11 @@ namespace World
 
 		// 实例与 Chunk 拓扑统计
 		const size_t totalInst = m_Foliage ? m_Foliage->GetTotalInstanceCount() : 0;
+		const size_t handInst = m_Foliage ? m_Foliage->GetHandPaintedInstanceCount() : 0;
+		const size_t pcgInst = m_Foliage ? m_Foliage->GetPCGInstanceCount() : 0;
 		const size_t chunkCount = m_Foliage ? m_Foliage->GetChunks().size() : 0;
-		char statBuf[128] = {};
-		std::snprintf(statBuf, sizeof(statBuf), "场景当前活跃实例: %zu 颗 | 空间分块: %zu Chunks", totalInst, chunkCount);
+		char statBuf[256] = {};
+		std::snprintf(statBuf, sizeof(statBuf), "手绘实例: %zu 颗 | PCG 实例: %zu 颗 | 总计: %zu 颗 | 空间分块: %zu Chunks", handInst, pcgInst, totalInst, chunkCount);
 		Wui::Label(ctx, { startX, curY }, statBuf, theme.TextMuted, theme.FontSizeSmall);
 		curY += 24.0f;
 	}

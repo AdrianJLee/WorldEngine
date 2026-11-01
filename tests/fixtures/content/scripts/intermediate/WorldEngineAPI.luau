@@ -1197,7 +1197,12 @@ function ui:isOpen() end
 
 -- Component fields are exposed through Entity:GetComponent("EQSComponent"); there is no runtime global named EQSComponent.
 ---@class EQSComponent
+---@field OptimalDistance number
+---@field ThreatEntityHint number
+---@field GeneratorMode number
+---@field QueryMode number
 ---@field QueryCenter vec3
+---@field IncludeCrouchCover number
 ---@field BestCoverFound number
 ---@field GridSpacing number
 ---@field QueryRadius number

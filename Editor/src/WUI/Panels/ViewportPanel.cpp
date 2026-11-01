@@ -2681,6 +2681,7 @@ namespace World
 
 							if (interactMode)
 							{
+								FoliageInteractionSystem::TriggerImpulse(worldHitPoint, R, foliagePanel->GetInteractStrength(), 3.5f);
 								FoliageRenderer::AddLocalWind(worldHitPoint, R, foliagePanel->GetInteractStrength() * 2.5f,
 									4.0f, 1.5f, LocalWindType::Radial, glm::vec3(0.0f, 1.0f, 0.0f));
 							}
@@ -4939,30 +4940,31 @@ namespace World
 						drawOccludedCircle(entCenter, pcgRadius * 0.5f, 1, Wui::WuiColor{ 0.95f, 0.80f, 0.20f, 0.40f }, 1.2f, selectedHandle);
 
 						// 2. 在地形地表绘制不同生态群落的分类采样预览点（森林绿、草甸青、岩山灰、荒漠黄、雪山白）
-						if (g_PCGPreviewState.Active && g_PCGPreviewState.TargetEntity == selectedHandle &&
-							!g_PCGPreviewState.Points.empty())
+				const bool hasSharedPoints = PCGBiomeGenerator::IsSharedPreviewActive() && !PCGBiomeGenerator::GetSharedPreviewPoints().empty();
+				const auto& previewPoints = hasSharedPoints ? PCGBiomeGenerator::GetSharedPreviewPoints() : g_PCGPreviewState.Points;
+				const bool previewActive = hasSharedPoints || (g_PCGPreviewState.Active && g_PCGPreviewState.TargetEntity == selectedHandle && !g_PCGPreviewState.Points.empty());
+
+				if (previewActive && !previewPoints.empty())
+				{
+					for (const auto& pt : previewPoints)
+					{
+						Wui::WuiColor col;
+						switch (pt.Biome)
 						{
-							for (const auto& pt : g_PCGPreviewState.Points)
-							{
-								if (glm::distance(pt.Position, entCenter) > pcgRadius * 1.5f)
-									continue;
-								Wui::WuiColor col;
-								switch (pt.Biome)
-								{
-									case BiomeType::Forest:        col = { 0.15f, 0.85f, 0.25f, 0.90f }; break; // 森林绿
-									case BiomeType::Meadow:        col = { 0.25f, 0.90f, 0.70f, 0.90f }; break; // 草甸青
-									case BiomeType::RockyMountain: col = { 0.75f, 0.75f, 0.80f, 0.85f }; break; // 岩山灰
-									case BiomeType::Desert:        col = { 0.95f, 0.80f, 0.20f, 0.90f }; break; // 荒漠黄
-									case BiomeType::SnowPeak:      col = { 0.95f, 0.98f, 1.00f, 0.95f }; break; // 雪山白
-									default:                       col = { 0.50f, 0.80f, 0.50f, 0.80f }; break;
-								}
-								const float crossSz = 0.25f;
-								PushOccludedWorldSegment(pt.Position - glm::vec3(crossSz, 0.0f, 0.0f),
-									pt.Position + glm::vec3(crossSz, 0.0f, 0.0f), col, 1.6f, selectedHandle);
-								PushOccludedWorldSegment(pt.Position - glm::vec3(0.0f, 0.0f, crossSz),
-									pt.Position + glm::vec3(0.0f, 0.0f, crossSz), col, 1.6f, selectedHandle);
-							}
+							case BiomeType::Forest:        col = { 0.15f, 0.85f, 0.25f, 0.90f }; break; // 森林绿
+							case BiomeType::Meadow:        col = { 0.25f, 0.90f, 0.70f, 0.90f }; break; // 草甸青
+							case BiomeType::RockyMountain: col = { 0.75f, 0.75f, 0.80f, 0.85f }; break; // 岩山灰
+							case BiomeType::Desert:        col = { 0.95f, 0.80f, 0.20f, 0.90f }; break; // 荒漠黄
+							case BiomeType::SnowPeak:      col = { 0.95f, 0.98f, 1.00f, 0.95f }; break; // 雪山白
+							default:                       col = { 0.50f, 0.80f, 0.50f, 0.80f }; break;
 						}
+						const float crossSz = 0.25f;
+						PushOccludedWorldSegment(pt.Position - glm::vec3(crossSz, 0.0f, 0.0f),
+							pt.Position + glm::vec3(crossSz, 0.0f, 0.0f), col, 1.6f, selectedHandle);
+						PushOccludedWorldSegment(pt.Position - glm::vec3(0.0f, 0.0f, crossSz),
+							pt.Position + glm::vec3(0.0f, 0.0f, crossSz), col, 1.6f, selectedHandle);
+					}
+				}
 						else
 						{
 							// 动态快速采样预览网格 (10x10)
@@ -5052,6 +5054,74 @@ namespace World
 						const auto& xf = selected.GetComponent<TransformComponent>();
 						const glm::vec3 querierPos = xf.Location;
 
+						// 响应式自动触发更新：实体选中变更、位置移动或威胁源位置移动时实时评估
+						static glm::vec3 s_LastEqsQuerierPos(1e9f);
+						static glm::vec3 s_LastEqsThreatPos(1e9f);
+						static entt::entity s_LastEqsTarget = entt::null;
+						static float s_EqsRefreshCooldown = 0.0f;
+						s_EqsRefreshCooldown += 0.016f;
+
+				uint32_t resolvedThreatRaw = 0;
+				glm::vec3 threatPos(0.0f);
+				if (!overlayScene || !EQSCoverSystem::ResolveSceneThreatPosition(*overlayScene, static_cast<uint32_t>(selectedHandle), eqs.ThreatEntityHint, querierPos, threatPos, &resolvedThreatRaw))
+				{
+					threatPos = (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated)
+						? g_EQSPreviewState.ThreatPos
+						: (querierPos + glm::vec3(15.0f, 2.0f, 15.0f));
+				}
+
+				const bool targetChanged = (g_EQSPreviewState.TargetEntity != selectedHandle);
+				const bool posChanged = (glm::distance(s_LastEqsQuerierPos, querierPos) > 0.05f);
+				const bool threatChanged = (glm::distance(s_LastEqsThreatPos, threatPos) > 0.05f);
+
+				if (targetChanged || posChanged || threatChanged || !g_EQSPreviewState.Evaluated || s_EqsRefreshCooldown > 0.35f)
+				{
+					std::vector<CoverBox> obstacles;
+					if (overlayScene)
+					{
+						EQSCoverSystem::GatherSceneObstacles(*overlayScene, static_cast<uint32_t>(selectedHandle), resolvedThreatRaw, obstacles);
+					}
+							glm::mat4 terrainWorldMat(1.0f);
+							if (terrainData)
+							{
+								terrainWorldMat = glm::translate(glm::mat4(1.0f), terrainOrigin) * glm::scale(glm::mat4(1.0f), terrainScale);
+							}
+
+							glm::vec3 bestCover(0.0f);
+							float bestScore = -1.0f;
+							std::vector<EQSCoverCandidate> candidates;
+
+							const bool found = EQSCoverSystem::EvaluateQueryCandidates(
+								static_cast<EQSQueryMode>(eqs.QueryMode),
+								querierPos,
+								threatPos,
+								eqs.QueryRadius,
+								eqs.GridSpacing,
+								obstacles,
+								candidates,
+								bestCover,
+								bestScore,
+								terrainData.get(),
+								terrainWorldMat,
+								eqs.GeneratorMode);
+
+							g_EQSPreviewState.Candidates.clear();
+							for (const auto& cand : candidates)
+							{
+								g_EQSPreviewState.Candidates.push_back({ cand.Position, cand.TotalScore, cand.LineOfSightOcclusion > 0.5f });
+							}
+							g_EQSPreviewState.TargetEntity = selectedHandle;
+							g_EQSPreviewState.QuerierPos = querierPos;
+							g_EQSPreviewState.ThreatPos = threatPos;
+							g_EQSPreviewState.BestCoverPos = bestCover;
+							g_EQSPreviewState.BestScore = bestScore;
+							g_EQSPreviewState.Evaluated = found;
+							s_LastEqsQuerierPos = querierPos;
+							s_LastEqsThreatPos = threatPos;
+							s_LastEqsTarget = selectedHandle;
+							s_EqsRefreshCooldown = 0.0f;
+						}
+
 						// 1. 绘制查询范围圆环（青色 0.2f, 0.8f, 0.95f, 0.85f）
 						const Wui::WuiColor eqsCyan { 0.20f, 0.80f, 0.95f, 0.85f };
 						const float queryR = std::max(2.0f, eqs.QueryRadius);
@@ -5059,7 +5129,7 @@ namespace World
 						drawOccludedCircle(querierPos, queryR * 0.5f, 1, Wui::WuiColor{ 0.20f, 0.80f, 0.95f, 0.40f }, 1.2f, selectedHandle);
 
 						// 2. 威胁源位置标记（红色十字球）与射击视线射线
-						const glm::vec3 threatPos = (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated)
+						threatPos = (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated)
 							? g_EQSPreviewState.ThreatPos
 							: (querierPos + glm::vec3(15.0f, 2.0f, 15.0f));
 						const Wui::WuiColor threatColor { 0.95f, 0.15f, 0.15f, 0.95f };

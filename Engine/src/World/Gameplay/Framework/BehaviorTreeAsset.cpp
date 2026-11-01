@@ -287,62 +287,52 @@ namespace World::Gameplay
 			}
 			else if (type == "FindTacticalCover" || type == "RunEQSQuery")
 			{
-				const std::string modeStr = desc.StringParam;
+				std::string modeStr = "Cover";
+				if (!desc.StringParam.empty())
+				{
+					modeStr = desc.StringParam;
+				}
+
 				return std::make_shared<ActionNode>([param, modeStr](BehaviorContext& ctx) {
 					if (!ctx.Self.HasComponent<TransformComponent>())
 						return NodeStatus::Failure;
 
 					auto& tr = ctx.Self.GetComponent<TransformComponent>();
-					const float radius = param > 0.0f ? param : 25.0f;
-					const float spacing = 1.5f;
-
+					uint32_t querierRaw = static_cast<uint32_t>((entt::entity)ctx.Self);
+					uint32_t threatHint = 0;
+					float radius = param > 0.0f ? param : 25.0f;
+					float spacing = 1.5f;
 					EQSQueryMode queryMode = EQSQueryMode::Cover;
 					if (modeStr == "Flank") queryMode = EQSQueryMode::Flank;
 					else if (modeStr == "Retreat") queryMode = EQSQueryMode::Retreat;
 
-					std::vector<CoverBox> obstacles;
-					auto& reg = ctx.CurrentScene.GetRegistry();
-					for (auto [h, box3d, tc] : reg.view<BoxCollider3DComponent, TransformComponent>().each())
+					uint8_t genMode = 0;
+					if (ctx.Self.HasComponent<EQSComponent>())
 					{
-						if (h == (entt::entity)ctx.Self) continue;
-						CoverBox b;
-						const glm::vec3 pos = tc.Location + box3d.Offset;
-						b.Min = pos - box3d.HalfExtents;
-						b.Max = pos + box3d.HalfExtents;
-						obstacles.push_back(b);
-					}
-					for (auto [h, wb, tc] : reg.view<WhiteboxComponent, TransformComponent>().each())
-					{
-						if (h == (entt::entity)ctx.Self) continue;
-						CoverBox b;
-						const glm::vec3 halfDim = wb.Dimensions * 0.5f;
-						b.Min = tc.Location - halfDim;
-						b.Max = tc.Location + halfDim;
-						obstacles.push_back(b);
-					}
-					for (auto [h, obs, tc] : reg.view<NavMeshObstacleComponent, TransformComponent>().each())
-					{
-						if (h == (entt::entity)ctx.Self) continue;
-						CoverBox b;
-						b.Min = tc.Location - obs.Extents;
-						b.Max = tc.Location + obs.Extents;
-						obstacles.push_back(b);
+						const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
+						threatHint = eqsc.ThreatEntityHint;
+						if (eqsc.QueryRadius > 0.1f) radius = eqsc.QueryRadius;
+						if (eqsc.GridSpacing > 0.1f) spacing = eqsc.GridSpacing;
+						if (eqsc.QueryMode <= 2)
+							queryMode = static_cast<EQSQueryMode>(eqsc.QueryMode);
+						genMode = eqsc.GeneratorMode;
 					}
 
-					glm::vec3 threatPos(-16.0f, 0.5f, 0.0f);
-					if (ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null))
-					{
-						entt::entity te = static_cast<entt::entity>(ctx.Component.TargetEntity);
-						if (reg.valid(te) && reg.try_get<TransformComponent>(te))
-							threatPos = reg.get<TransformComponent>(te).Location;
-					}
+					glm::vec3 threatPos(0.0f);
+					uint32_t resolvedThreatRaw = 0;
+					EQSCoverSystem::ResolveSceneThreatPosition(ctx.CurrentScene, querierRaw, threatHint, tr.Location, threatPos, &resolvedThreatRaw);
+
+					std::vector<CoverBox> obstacles;
+					EQSCoverSystem::GatherSceneObstacles(ctx.CurrentScene, querierRaw, resolvedThreatRaw, obstacles);
 
 					glm::vec3 bestPos(0.0f);
 					float bestScore = -1.0f;
-					if (EQSCoverSystem::ExecuteQuery(queryMode, tr.Location, threatPos, radius, spacing, obstacles, bestPos, bestScore))
+					std::vector<EQSCoverCandidate> dummyCandidates;
+					if (EQSCoverSystem::EvaluateQueryCandidates(queryMode, tr.Location, threatPos, radius, spacing, obstacles, dummyCandidates, bestPos, bestScore, nullptr, glm::mat4(1.0f), genMode))
 					{
 						ctx.Component.BlackboardTargetPos = bestPos;
 						ctx.Component.BlackboardValue = bestScore;
+						ctx.Component.BlackboardTag = 88;
 						if (ctx.Self.HasComponent<EQSComponent>())
 						{
 							auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
@@ -362,13 +352,29 @@ namespace World::Gameplay
 
 					auto& tr = ctx.Self.GetComponent<TransformComponent>();
 					glm::vec3 targetPos = ctx.Component.BlackboardTargetPos;
-					if (ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null))
+
+					bool hasActiveEQSTarget = false;
+					if (ctx.Self.HasComponent<EQSComponent>())
 					{
-						Entity targetEntity(&ctx.CurrentScene, static_cast<entt::entity>(ctx.Component.TargetEntity));
-						if (targetEntity.IsValid() && targetEntity.HasComponent<TransformComponent>())
+						const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
+						if (eqsc.BestCoverFound != 0)
+							hasActiveEQSTarget = true;
+					}
+					if (glm::length(ctx.Component.BlackboardTargetPos) > 0.001f && ctx.Component.BlackboardTag == 88)
+					{
+						hasActiveEQSTarget = true;
+					}
+
+					if (!hasActiveEQSTarget)
+					{
+						if (ctx.Component.TargetEntity != 0 && ctx.Component.TargetEntity != static_cast<uint32_t>(entt::null))
 						{
-							targetPos = targetEntity.GetComponent<TransformComponent>().Location;
-							ctx.Component.BlackboardTargetPos = targetPos;
+							Entity targetEntity(&ctx.CurrentScene, static_cast<entt::entity>(ctx.Component.TargetEntity));
+							if (targetEntity.IsValid() && targetEntity.HasComponent<TransformComponent>())
+							{
+								targetPos = targetEntity.GetComponent<TransformComponent>().Location;
+								ctx.Component.BlackboardTargetPos = targetPos;
+							}
 						}
 					}
 
@@ -387,6 +393,118 @@ namespace World::Gameplay
 					}
 
 					tr.Location += (diff / dist) * step;
+					return NodeStatus::Running;
+				});
+			}
+			else if (type == "MoveToEQSPosition")
+			{
+				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
+					if (!ctx.Self.HasComponent<TransformComponent>())
+						return NodeStatus::Failure;
+
+					auto& tr = ctx.Self.GetComponent<TransformComponent>();
+					glm::vec3 targetPos = ctx.Component.BlackboardTargetPos;
+					glm::vec3 diff = targetPos - tr.Location;
+					float dist = glm::length(diff);
+					float speed = param > 0.0f ? param : 4.0f;
+					float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
+					float step = speed * dt;
+
+					ctx.Component.StateMachineState = 1;
+
+					if (dist <= 0.1f || step >= dist)
+					{
+						tr.Location = targetPos;
+						return NodeStatus::Success;
+					}
+
+					tr.Location += (diff / dist) * step;
+					return NodeStatus::Running;
+				});
+			}
+			else if (type == "ExecuteEQSTacticalAction")
+			{
+				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
+					if (!ctx.Self.HasComponent<TransformComponent>())
+						return NodeStatus::Failure;
+
+					auto& tr = ctx.Self.GetComponent<TransformComponent>();
+					uint32_t querierRaw = static_cast<uint32_t>((entt::entity)ctx.Self);
+					uint32_t threatHint = 0;
+					float radius = 20.0f;
+					float spacing = 1.5f;
+					EQSQueryMode queryMode = EQSQueryMode::Cover;
+					uint8_t genMode = 0;
+
+					if (ctx.Self.HasComponent<EQSComponent>())
+					{
+						const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
+						threatHint = eqsc.ThreatEntityHint;
+						radius = eqsc.QueryRadius;
+						spacing = eqsc.GridSpacing;
+						if (eqsc.QueryMode <= 2)
+							queryMode = static_cast<EQSQueryMode>(eqsc.QueryMode);
+						genMode = eqsc.GeneratorMode;
+					}
+
+					glm::vec3 threatPos(0.0f);
+					uint32_t resolvedThreatRaw = 0;
+					EQSCoverSystem::ResolveSceneThreatPosition(ctx.CurrentScene, querierRaw, threatHint, tr.Location, threatPos, &resolvedThreatRaw);
+
+					std::vector<CoverBox> obstacles;
+					EQSCoverSystem::GatherSceneObstacles(ctx.CurrentScene, querierRaw, resolvedThreatRaw, obstacles);
+
+					glm::vec3 bestPos(0.0f);
+					float bestScore = -1.0f;
+					std::vector<EQSCoverCandidate> dummyCandidates;
+					bool found = EQSCoverSystem::EvaluateQueryCandidates(
+						queryMode, tr.Location, threatPos, radius, spacing, obstacles, dummyCandidates, bestPos, bestScore, nullptr, glm::mat4(1.0f), genMode);
+
+					if (!found)
+						return NodeStatus::Failure;
+
+					ctx.Component.BlackboardTargetPos = bestPos;
+					ctx.Component.BlackboardValue = bestScore;
+					ctx.Component.BlackboardTag = 88;
+					if (ctx.Self.HasComponent<EQSComponent>())
+					{
+						auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
+						eqsc.QueryCenter = tr.Location;
+						eqsc.BestCoverFound = 1;
+					}
+
+					glm::vec3 diff = bestPos - tr.Location;
+					float dist = glm::length(diff);
+					float speed = param > 0.0f ? param : 4.0f;
+					float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
+					float step = speed * dt;
+
+					ctx.Component.StateMachineState = 1;
+
+					if (dist <= 0.1f || step >= dist)
+					{
+						tr.Location = bestPos;
+						return NodeStatus::Success;
+					}
+
+					glm::vec3 moveDir = diff / dist;
+					glm::vec3 nextPos = tr.Location + moveDir * step;
+
+					for (const auto& box : obstacles)
+					{
+						if (box.ContainsPoint(nextPos, 0.3f))
+						{
+							glm::vec3 normal = glm::normalize(nextPos - box.Center);
+							normal.y = 0.0f;
+							if (glm::length(normal) > 0.001f)
+							{
+								moveDir = glm::normalize(moveDir + normal * 1.5f);
+							}
+							break;
+						}
+					}
+
+					tr.Location += moveDir * step;
 					return NodeStatus::Running;
 				});
 			}

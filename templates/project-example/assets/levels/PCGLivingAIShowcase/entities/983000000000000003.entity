@@ -1,25 +1,28 @@
-ChunkID: 0
+﻿ChunkID: 0
 Entity:
   World::UUIDComponent:
     ID:
-      m_UUID: 982000000000000005
+      m_UUID: 983000000000000003
   World::TagComponent:
-    Tag: "Spline Mountain Pass Road"
+    Tag: "Mountain Pass Spline Road"
   World::TransformComponent:
-    Location: [0.0, 0.05, 0.0]
+    Location: [0.0, 0.1, 0.0]
     Rotation: [0.0, 0.0, 0.0]
     Scale: [1, 1, 1]
   World::SplineComponent:
-    RoadWidth: 4.5
+    RoadWidth: 6.0
     MeshSpacing: 1.5
     ClosedLoop: 0
     GenerateCollision: 1
     ExtrudeRoad: 1
     Mode: 0
+  World::RelationshipComponent:
+    FirstChild: 983000000000000004
+    ChildrenCount: 3
   World::MeshRendererComponent:
     Primitive: 0
     MeshIndex: 0
-    Color: [0.38, 0.36, 0.34, 1.0]
+    Color: [0.42, 0.40, 0.38, 1.0]
     Mesh: ""
     Material: ""
   World::LevelEntityComponent:

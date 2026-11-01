@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Foliage/FoliageRenderer.h"
+#include "World/Foliage/FoliageInteraction.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/RenderSettings.h"
@@ -753,6 +754,18 @@ namespace World
 				for (auto& inst : b.Instances)
 				{
 					inst.Params.w = 3.0f; // 明确标记为岩石类型 (驱动 Shader 无风力与实体兰伯特光照)
+				}
+			}
+			else if (curType.EnablePhysicalInteraction)
+			{
+				for (auto& inst : b.Instances)
+				{
+					const glm::vec3 rootPos = glm::vec3(inst.Transform[3]);
+					const glm::vec3 bendDisp = FoliageInteractionSystem::SampleFieldDisplacement(rootPos);
+					if (glm::dot(bendDisp, bendDisp) > 1e-6f)
+					{
+						inst.Transform = FoliageInteractionSystem::ApplyPivotBendTransform(inst.Transform, bendDisp, curType.BendingStiffness);
+					}
 				}
 			}
 
