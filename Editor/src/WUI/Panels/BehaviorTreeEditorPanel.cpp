@@ -9,6 +9,7 @@
 #include "World/Scene/Scene.h"
 #include "WUI/Common/EditorAssetCatalog.h"
 #include "WUI/Shell/EditorShell.h"
+#include "WUI/Common/EQSPreviewState.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1076,29 +1077,42 @@ namespace World
 		else if (node->Kind == BTNodeKind::Action)
 		{
 			static const std::vector<std::string> kActionTypes = {
-				"Wait",                  // 等待延时 (Wait Delay)
-				"Patrol",                // 区域巡逻 (Patrol Area)
-				"MoveToTarget",          // 移动向目标点 (Move To Target Position)
-				"SeekSmartObject",       // 寻找智能对象 (Seek Smart Object)
-				"UseSmartObject",        // 交互使用智能对象 (Use Smart Object)
-				"FindTacticalCover",     // 战术掩体查询 (Find Tactical Cover)
-				"SetBlackboardValue",    // 写入黑板数值 (Set Blackboard Value)
+				"Wait",                     // 等待延时 (Wait Delay)
+				"Patrol",                   // 区域巡逻 (Patrol Area)
+				"MoveToTarget",             // 移动向目标点 (Move To Target Position)
+				"SeekSmartObject",          // 寻找智能对象 (Seek Smart Object)
+				"UseSmartObject",           // 交互使用智能对象 (Use Smart Object)
+				"RunEQSQuery",              // 执行空间查询 (Run EQS Query)
+				"FindTacticalCover",        // 寻找战术掩体 (Find Tactical Cover)
+				"MoveToEQSPosition",        // 移动至战术点 (Move To EQS Position)
+				"ExecuteEQSTacticalAction", // 一站式战术机动 (Execute EQS Tactical Action)
+				"SetBlackboardValue",       // 写入黑板数值 (Set Blackboard Value)
 				"IncrementBlackboardValue", // 累加黑板数值 (Increment Blackboard Value)
-				"SetBlackboardTag",      // 写入黑板标签 (Set Blackboard Tag)
-				"ResetTimer",            // 重置计时器 (Reset Timer)
-				"ScriptAction",          // 执行自定义脚本动作 (Execute Luau Script Action)
-				"Custom"                 // 自定义动作名 (Custom Named Action)
+				"SetBlackboardTag",         // 写入黑板标签 (Set Blackboard Tag)
+				"ResetTimer",               // 重置计时器 (Reset Timer)
+				"ScriptAction",             // 执行自定义脚本动作 (Execute Luau Script Action)
+				"Custom"                    // 自定义动作名 (Custom Named Action)
 			};
 
-			const bool isEqsAction = (node->ActionType == "MoveToEQSPosition" || node->ActionType == "ExecuteEQSTacticalAction");
-			const bool hasExtraRow = (node->ActionType == "SeekSmartObject" || node->ActionType == "FindTacticalCover" || node->ActionType == "Custom" || isEqsAction);
-			const float cardH = hasExtraRow ? 175.0f : 125.0f;
+			const bool isEqsAction = (node->ActionType == "RunEQSQuery" ||
+			                          node->ActionType == "FindTacticalCover" ||
+			                          node->ActionType == "MoveToEQSPosition" ||
+			                          node->ActionType == "ExecuteEQSTacticalAction");
+			const bool hasExtraRow = (node->ActionType == "SeekSmartObject" || node->ActionType == "Custom");
+			const float cardH = isEqsAction ? 335.0f : (hasExtraRow ? 175.0f : 125.0f);
 			const Wui::WuiRect actCard { startX, curY, fieldW, cardH };
 			Wui::PanelBackground(ctx, actCard, Wui::WuiColor { 0.28f, 0.18f, 0.10f, 0.85f }, theme.Radius);
 			Wui::HighlightOutline(ctx, actCard, Wui::WuiColor { 0.85f, 0.50f, 0.15f, 1.0f }, theme.Radius, 1.0f);
 
 			float cardY = curY + 8.0f;
-			Wui::Label(ctx, { startX + 8.0f, cardY }, "[执行动作参数设置] (Action Execution)", theme.Warning, theme.FontSizeSmall);
+			if (isEqsAction)
+			{
+				Wui::Label(ctx, { startX + 8.0f, cardY }, "[EQS 空间决策工作台] (EQS Spatial Decision)", theme.Warning, theme.FontSizeSmall);
+			}
+			else
+			{
+				Wui::Label(ctx, { startX + 8.0f, cardY }, "[执行动作参数设置] (Action Execution)", theme.Warning, theme.FontSizeSmall);
+			}
 			cardY += 24.0f;
 
 			// 动作类型下拉选择
@@ -1133,7 +1147,176 @@ namespace World
 			cardY += 28.0f;
 
 			// 自适应动作参数配置
-			if (node->ActionType == "ScriptAction")
+			if (isEqsAction)
+			{
+				// ① 战术决策预设 (Tactical Preset)
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "战术预设 (Preset):", theme.Accent, theme.FontSizeSmall);
+				int presetIdx = 0;
+				if (node->StringParam == "Flank") presetIdx = 1;
+				else if (node->StringParam == "Retreat") presetIdx = 2;
+				else if (node->StringParam == "Sniper") presetIdx = 3;
+
+				const std::vector<std::string> presetOptions = {
+					"🛡 掩体 (Cover)", "⚔ 包抄 (Flank)", "🏃 撤退 (Retreat)", "🎯 狙击 (Sniper)"
+				};
+				if (Wui::Segmented(ctx, Wui::HashId((std::string("bt.act.eqs_preset.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, presetOptions, presetIdx, theme))
+				{
+					const char* presetNames[] = { "Cover", "Flank", "Retreat", "Sniper" };
+					node->StringParam = presetNames[presetIdx];
+					LoadEQSPreset(static_cast<uint8_t>(presetIdx), nullptr, g_EQSPreviewState);
+					m_Dirty = true;
+				}
+				cardY += 26.0f;
+
+				// ② 空间搜索生成器与范围 (Spatial Generator)
+				const std::vector<std::string> genOptions = {
+					"贴地网格 (Projected Grid)",
+					"同心圆环 (Concentric Circle)",
+					"掩体边缘贴靠 (Around Obstacles)"
+				};
+				int genIdx = std::clamp(static_cast<int>(g_EQSPreviewState.GeneratorMode), 0, 2);
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "生成模式 (Gen):", theme.Text, theme.FontSizeSmall);
+				if (Wui::Combo(ctx, Wui::HashId((std::string("bt.act.eqs_gen.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, "", genOptions, genIdx, theme))
+				{
+					g_EQSPreviewState.GeneratorMode = static_cast<uint8_t>(genIdx);
+					m_Dirty = true;
+				}
+				cardY += 26.0f;
+
+				const char* paramLabel = (node->ActionType == "MoveToEQSPosition") ? "机动速度 (m/s):" : "搜索半径 (Radius m):";
+				if (node->FloatParam <= 0.0f)
+				{
+					node->FloatParam = (node->ActionType == "MoveToEQSPosition") ? 3.5f : 20.0f;
+				}
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, paramLabel, theme.Text, theme.FontSizeSmall);
+				const float maxRange = (node->ActionType == "MoveToEQSPosition") ? 50.0f : 100.0f;
+				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.eqs_radius.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, node->FloatParam, 0.5f, 0.5f, maxRange, theme))
+				{
+					node->FloatParam = std::clamp(node->FloatParam, 0.5f, maxRange);
+					if (node->ActionType != "MoveToEQSPosition")
+					{
+						g_EQSPreviewState.QueryRadius = node->FloatParam;
+					}
+					m_Dirty = true;
+				}
+				cardY += 26.0f;
+
+				// ③ 战术权重微调 (Scoring Weights)
+				const float halfW = (inputW - 16.0f - 8.0f) * 0.5f;
+
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "遮蔽/贴墙权重:", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.eqs_occ_wt.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, halfW, 22.0f }, g_EQSPreviewState.OcclusionWeight, 0.05f, 0.0f, 3.0f, theme))
+				{
+					g_EQSPreviewState.OcclusionWeight = std::clamp(g_EQSPreviewState.OcclusionWeight, 0.0f, 3.0f);
+					m_Dirty = true;
+				}
+				Wui::Tooltip(ctx, { startX + labelW, cardY, halfW, 22.0f }, "视线遮蔽评分权重 (0.0~3.0)：值越高越偏好躲入敌方枪线死角");
+
+				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.eqs_wall_wt.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW + halfW + 8.0f, cardY, halfW, 22.0f }, g_EQSPreviewState.WallProximityWeight, 0.05f, 0.0f, 3.0f, theme))
+				{
+					g_EQSPreviewState.WallProximityWeight = std::clamp(g_EQSPreviewState.WallProximityWeight, 0.0f, 3.0f);
+					m_Dirty = true;
+				}
+				Wui::Tooltip(ctx, { startX + labelW + halfW + 8.0f, cardY, halfW, 22.0f }, "掩体贴墙度权重 (0.0~3.0)：值越高越偏好紧贴障碍物边缘");
+				cardY += 26.0f;
+
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "理想距/制高权重:", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.eqs_dist_val.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW, cardY, halfW, 22.0f }, g_EQSPreviewState.OptimalDistance, 0.5f, 1.0f, 50.0f, theme))
+				{
+					g_EQSPreviewState.OptimalDistance = std::clamp(g_EQSPreviewState.OptimalDistance, 1.0f, 50.0f);
+					m_Dirty = true;
+				}
+				Wui::Tooltip(ctx, { startX + labelW, cardY, halfW, 22.0f }, "理想战术交战/掩蔽距离 (米)");
+
+				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.eqs_elev_wt.") + std::to_string(node->Id)).c_str()),
+					{ startX + labelW + halfW + 8.0f, cardY, halfW, 22.0f }, g_EQSPreviewState.ElevationWeight, 0.05f, 0.0f, 2.0f, theme))
+				{
+					g_EQSPreviewState.ElevationWeight = std::clamp(g_EQSPreviewState.ElevationWeight, 0.0f, 2.0f);
+					m_Dirty = true;
+				}
+				Wui::Tooltip(ctx, { startX + labelW + halfW + 8.0f, cardY, halfW, 22.0f }, "制高点高差权重 (0.0~2.0)：值越高越偏好高坡地势");
+				cardY += 26.0f;
+
+				// ④ 黑板目标槽位绑定 (Blackboard Output Binding)
+				Entity selEnt = host.GetSelectedEntity();
+				std::string threatDesc = "未锁定";
+				if (selEnt.IsValid() && selEnt.HasComponent<BehaviorTreeComponent>())
+				{
+					const auto& bt = selEnt.GetComponent<BehaviorTreeComponent>();
+					if (bt.TargetEntity != 0)
+					{
+						threatDesc = "威胁: #" + std::to_string(bt.TargetEntity);
+					}
+					else
+					{
+						threatDesc = "威胁: 自动最近敌人";
+					}
+				}
+				char bbBindStr[160];
+				std::snprintf(bbBindStr, sizeof(bbBindStr), "输出: TargetPos | 得分: BBValue | 标签: BBTag(88)  [%s]", threatDesc.c_str());
+				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "黑板目标槽位:", theme.Accent, theme.FontSizeSmall);
+				Wui::Label(ctx, { startX + labelW, cardY + 2.0f }, bbBindStr, theme.TextMuted, theme.FontSizeSmall);
+				cardY += 26.0f;
+
+				// ⑤ 行为树内直接模拟测试与视口热力图联动
+				if (Wui::Button(ctx, Wui::HashId((std::string("bt.act.eqs_sim.") + std::to_string(node->Id)).c_str()),
+					{ startX + 8.0f, cardY, fieldW - 16.0f, 26.0f }, "✦ 模拟此节点空间推理 (Simulate Node EQS)", theme))
+				{
+					if (node->ActionType != "MoveToEQSPosition" && node->FloatParam > 0.0f)
+					{
+						g_EQSPreviewState.QueryRadius = node->FloatParam;
+					}
+					if (g_EQSPreviewState.PipelineTests.empty())
+					{
+						LoadEQSPreset(static_cast<uint8_t>(presetIdx), nullptr, g_EQSPreviewState);
+					}
+					for (auto& t : g_EQSPreviewState.PipelineTests)
+					{
+						if (t.Type == 1) t.Weight = g_EQSPreviewState.OcclusionWeight;
+						else if (t.Type == 3) t.Weight = g_EQSPreviewState.WallProximityWeight;
+						else if (t.Type == 0) t.IdealValue = g_EQSPreviewState.OptimalDistance;
+						else if (t.Type == 4) t.Weight = g_EQSPreviewState.ElevationWeight;
+					}
+
+					Scene* scenePtr = host.GetActiveScene().get();
+					Entity simEnt = host.GetSelectedEntity();
+					EQSComponent* compPtr = (simEnt.IsValid() && simEnt.HasComponent<EQSComponent>())
+						? &simEnt.GetComponent<EQSComponent>() : nullptr;
+
+					ExecuteEQSPipeline(scenePtr, simEnt, compPtr, g_EQSPreviewState);
+
+					if (simEnt.IsValid() && simEnt.HasComponent<BehaviorTreeComponent>())
+					{
+						auto& bt = simEnt.GetComponent<BehaviorTreeComponent>();
+						bt.BlackboardTargetPos = g_EQSPreviewState.BestCoverPos;
+						bt.BlackboardValue = g_EQSPreviewState.BestScore;
+						bt.BlackboardTag = 88;
+					}
+
+					m_StatusFeedback = g_EQSPreviewState.LastStatus;
+					host.MarkDocumentDirty();
+				}
+				cardY += 30.0f;
+
+				// 结果反馈卡片
+				const Wui::WuiRect resRect { startX + 8.0f, cardY, fieldW - 16.0f, 30.0f };
+				Wui::PanelBackground(ctx, resRect, Wui::WuiColor{ 0.08f, 0.14f, 0.18f, 0.95f }, 3.0f);
+				Wui::HighlightOutline(ctx, resRect, Wui::WuiColor{ 0.20f, 0.85f, 0.95f, 0.65f }, 3.0f, 1.0f);
+
+				std::string resStr = g_EQSPreviewState.Evaluated
+					? g_EQSPreviewState.LastStatus
+					: "待模拟 (点击上方按钮在视口实时投射 3D 热力图与金标)";
+				Wui::Label(ctx, { resRect.X + 6.0f, resRect.Y + 7.0f }, resStr.c_str(),
+					g_EQSPreviewState.Evaluated ? theme.Success : theme.TextMuted, theme.FontSizeSmall);
+				cardY += 36.0f;
+			}
+			else if (node->ActionType == "ScriptAction")
 			{
 				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "脚本选择 (Script):", theme.Text, theme.FontSizeSmall);
 				const float btnW = 100.0f;
@@ -1187,62 +1370,6 @@ namespace World
 				}
 				cardY += 26.0f;
 				Wui::Label(ctx, { startX + labelW, cardY }, "提示: 在 Luau 脚本的 OnEnter/OnTick(ctx,dt)/OnExit 中实现具体行为", theme.TextMuted, theme.FontSizeSmall);
-			}
-			else if (node->ActionType == "MoveToEQSPosition")
-			{
-				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "机动速度 (m/s):", theme.Text, theme.FontSizeSmall);
-				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.float.") + std::to_string(node->Id)).c_str()),
-					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, node->FloatParam, 0.2f, 0.5f, 50.0f, theme))
-				{
-					m_Dirty = true;
-				}
-				cardY += 28.0f;
-				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "EQS 协同说明:", theme.Text, theme.FontSizeSmall);
-				Wui::Label(ctx, { startX + labelW, cardY }, "读取实体 EQSComponent 算出的最佳掩体坐标并在黑板同步", theme.Accent, theme.FontSizeSmall);
-				cardY += 26.0f;
-				Wui::Label(ctx, { startX + labelW, cardY }, "提示: 自动绕开掩体几何障碍向掩体背弹面推进，避免冲向敌人", theme.TextMuted, theme.FontSizeSmall);
-			}
-			else if (node->ActionType == "ExecuteEQSTacticalAction")
-			{
-				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "反应时延 (s):", theme.Text, theme.FontSizeSmall);
-				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.float.") + std::to_string(node->Id)).c_str()),
-					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, node->FloatParam, 0.1f, 0.0f, 10.0f, theme))
-				{
-					m_Dirty = true;
-				}
-				cardY += 28.0f;
-				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "EQS 协同说明:", theme.Text, theme.FontSizeSmall);
-				Wui::Label(ctx, { startX + labelW, cardY }, "一站式触发场景威胁源定位与贴墙掩体解算并驱动实体机动", theme.Accent, theme.FontSizeSmall);
-				cardY += 26.0f;
-				Wui::Label(ctx, { startX + labelW, cardY }, "提示: 挂载 EQSComponent 与 BehaviorTreeComponent 点击 Play 即可直接运转", theme.TextMuted, theme.FontSizeSmall);
-			}
-			else if (node->ActionType == "FindTacticalCover")
-			{
-				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "查询搜索半径 (m):", theme.Text, theme.FontSizeSmall);
-				if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.act.float.") + std::to_string(node->Id)).c_str()),
-					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, node->FloatParam, 1.0f, 1.0f, 200.0f, theme))
-				{
-					m_Dirty = true;
-				}
-				cardY += 28.0f;
-
-				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "EQS 查询模式:", theme.Text, theme.FontSizeSmall);
-				if (node->StringParam.empty()) node->StringParam = "Cover";
-				const char* modes[3] = { "Cover (掩体)", "Flank (包抄)", "Retreat (撤退)" };
-				const char* rawModes[3] = { "Cover", "Flank", "Retreat" };
-				int modeIdx = 0;
-				if (node->StringParam == "Flank") modeIdx = 1;
-				else if (node->StringParam == "Retreat") modeIdx = 2;
-
-				const std::vector<std::string> eqOptions = { "Cover (掩体)", "Flank (包抄)", "Retreat (撤退)" };
-				if (Wui::Segmented(ctx, Wui::HashId((std::string("bt.act.eqs_mode.") + std::to_string(node->Id)).c_str()),
-					{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, eqOptions, modeIdx, theme))
-				{
-					node->StringParam = rawModes[modeIdx];
-					m_Dirty = true;
-				}
-				cardY += 26.0f;
-				Wui::Label(ctx, { startX + labelW, cardY }, "提示: 综合视线遮蔽、距离与威胁方位解算最优战术站位并写入黑板", theme.TextMuted, theme.FontSizeSmall);
 			}
 			else if (node->ActionType == "SeekSmartObject")
 			{

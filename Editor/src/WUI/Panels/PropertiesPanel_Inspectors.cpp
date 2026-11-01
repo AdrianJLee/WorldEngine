@@ -1,4 +1,4 @@
-﻿#include "World/Foliage/FoliageRenderer.h"
+#include "World/Foliage/FoliageRenderer.h"
 #include "World/Foliage/Foliage.h"
 #include "World/Command/CommandHistory.h"
 #include "World/Physics/PhysicsMaterial.h"
@@ -35,6 +35,7 @@
 #include "World/Foliage/FoliageInteraction.h"
 #include "World/Terrain/Terrain.h"
 #include "World/Terrain/TerrainRenderer.h"
+#include "WUI/Common/EQSPreviewState.h"
 
 
 namespace World
@@ -49,45 +50,7 @@ namespace World
 		float Density = 0.0f;
 	};
 
-	struct EQSTestItem
-	{
-		uint8_t Type = 0;        // 0: Distance, 1: Trace, 2: Dot, 3: WallProximity, 4: Height, 5: Overlap
-		uint8_t Context = 0;     // 0: Querier, 1: Target, 2: AllThreats, 3: Custom
-		uint8_t Curve = 0;       // 0: Linear, 1: Inverse, 2: Gaussian
-		float Weight = 1.0f;
-		float IdealValue = 8.0f;
-		std::string Name;
-	};
 
-	struct EQSCandidatePreview
-	{
-		glm::vec3 Position { 0.0f };
-		float TotalScore { 0.0f };
-		bool Occluded { false };
-		bool FilteredOut { false };
-	};
-
-	struct EQSPreviewState
-	{
-		bool Evaluated = false;
-		entt::entity TargetEntity = entt::null;
-		glm::vec3 QuerierPos { 0.0f };
-		glm::vec3 ThreatPos { 15.0f, 2.0f, 15.0f };
-		glm::vec3 BestCoverPos { 0.0f };
-		float BestScore { 0.0f };
-		std::vector<EQSCandidatePreview> Candidates;
-
-		// 诊断指标
-		size_t TotalSampleCount = 0;
-		size_t QualifiedCount = 0;
-		size_t HardFilteredCount = 0;
-
-		// 流水线测试项栈
-		std::vector<EQSTestItem> PipelineTests;
-		uint8_t GeneratorMode = 0; // 0: Projected Grid, 1: Concentric Circle, 2: Around Obstacles
-		float RingCount = 5.0f;
-		float WallOffset = 0.75f;
-	};
 
 	struct FoliagePreviewState
 	{
@@ -2984,11 +2947,16 @@ static uint32_t s_LODGenEntityId = 0;
 
 	void LoadEQSPreset(uint8_t mode, EQSComponent* comp, EQSPreviewState& state)
 	{
+		state.QueryMode = mode;
 		state.PipelineTests.clear();
 		if (mode == 1) // Flank
 		{
 			if (comp) { comp->QueryMode = 1; comp->GeneratorMode = 1; }
 			state.GeneratorMode = 1;
+			state.OcclusionWeight = 1.5f;
+			state.WallProximityWeight = 0.5f;
+			state.OptimalDistance = 8.0f;
+			state.ElevationWeight = 0.3f;
 			state.PipelineTests.push_back({ 1, 1, 1, 1.5f, 0.0f, "Trace LOS (直瞄枪线)" });
 			state.PipelineTests.push_back({ 2, 1, 2, 2.0f, 90.0f, "Dot Angle (90°侧翼角)" });
 			state.PipelineTests.push_back({ 0, 1, 2, 0.8f, 8.0f, "Distance (8m理想交战距)" });
@@ -2997,13 +2965,34 @@ static uint32_t s_LODGenEntityId = 0;
 		{
 			if (comp) { comp->QueryMode = 2; comp->GeneratorMode = 0; }
 			state.GeneratorMode = 0;
+			state.OcclusionWeight = 2.0f;
+			state.WallProximityWeight = 0.2f;
+			state.OptimalDistance = 25.0f;
+			state.ElevationWeight = 0.2f;
 			state.PipelineTests.push_back({ 1, 1, 0, 2.0f, 1.0f, "Trace LOS (视线遮蔽)" });
 			state.PipelineTests.push_back({ 0, 1, 1, 1.5f, 0.0f, "Distance (反比拉开撤退)" });
+		}
+		else if (mode == 3) // Sniper
+		{
+			if (comp) { comp->QueryMode = 0; comp->GeneratorMode = 0; }
+			state.GeneratorMode = 0;
+			state.OcclusionWeight = 2.0f;
+			state.WallProximityWeight = 0.8f;
+			state.OptimalDistance = 25.0f;
+			state.ElevationWeight = 2.0f;
+			state.PipelineTests.push_back({ 4, 1, 0, 2.0f, 5.0f, "Height (制高点优势)" });
+			state.PipelineTests.push_back({ 1, 1, 1, 2.0f, 0.0f, "Trace LOS (开阔直瞄枪线)" });
+			state.PipelineTests.push_back({ 0, 1, 0, 1.2f, 25.0f, "Distance (25m狙击安全交战距)" });
+			state.PipelineTests.push_back({ 3, 0, 2, 0.8f, 0.85f, "Wall Proximity (依托掩体)" });
 		}
 		else // 0: Cover
 		{
 			if (comp) { comp->QueryMode = 0; comp->GeneratorMode = 0; }
 			state.GeneratorMode = 0;
+			state.OcclusionWeight = 1.8f;
+			state.WallProximityWeight = 1.2f;
+			state.OptimalDistance = 8.0f;
+			state.ElevationWeight = 0.3f;
 			state.PipelineTests.push_back({ 5, 3, 0, 1.0f, 0.0f, "Overlap Filter (硬防穿模)" });
 			state.PipelineTests.push_back({ 1, 1, 0, 1.8f, 1.0f, "Trace LOS (视线完全遮蔽)" });
 			state.PipelineTests.push_back({ 3, 0, 2, 1.2f, 0.85f, "Wall Proximity (0.85m贴墙度)" });
@@ -3018,11 +3007,25 @@ static uint32_t s_LODGenEntityId = 0;
 		EQSComponent* comp,
 		EQSPreviewState& state)
 	{
+		EQSComponent localComp;
 		if (!comp)
-			return false;
+		{
+			localComp.QueryRadius = state.QueryRadius > 0.0f ? state.QueryRadius : 20.0f;
+			localComp.GridSpacing = state.GridSpacing > 0.0f ? state.GridSpacing : 2.0f;
+			localComp.GeneratorMode = state.GeneratorMode;
+			localComp.ThreatEntityHint = state.ThreatEntityHint;
+			comp = &localComp;
+		}
+		else
+		{
+			state.QueryRadius = comp->QueryRadius;
+			state.GridSpacing = comp->GridSpacing;
+			state.ThreatEntityHint = comp->ThreatEntityHint;
+		}
 
-		const glm::vec3 querierPos = entity.HasComponent<TransformComponent>()
-			? entity.GetComponent<TransformComponent>().Location : comp->QueryCenter;
+		const glm::vec3 querierPos = entity.IsValid() && entity.HasComponent<TransformComponent>()
+			? entity.GetComponent<TransformComponent>().Location
+			: (glm::length(state.QuerierPos) > 0.001f ? state.QuerierPos : comp->QueryCenter);
 		comp->QueryCenter = querierPos;
 
 		uint32_t resolvedThreatRaw = 0;
@@ -3059,6 +3062,15 @@ static uint32_t s_LODGenEntityId = 0;
 		if (state.PipelineTests.empty())
 		{
 			LoadEQSPreset(comp->QueryMode, comp, state);
+		}
+
+		// 同步战术权重
+		for (auto& t : state.PipelineTests)
+		{
+			if (t.Type == 1) t.Weight = state.OcclusionWeight;
+			else if (t.Type == 3) t.Weight = state.WallProximityWeight;
+			else if (t.Type == 0) t.IdealValue = state.OptimalDistance;
+			else if (t.Type == 4) t.Weight = state.ElevationWeight;
 		}
 
 		// 构建通用 EQSQueryContext
@@ -3184,7 +3196,7 @@ static uint32_t s_LODGenEntityId = 0;
 			});
 
 		// 同步行为树黑板
-		if (found && entity.HasComponent<BehaviorTreeComponent>())
+		if (found && entity.IsValid() && entity.HasComponent<BehaviorTreeComponent>())
 		{
 			auto& bt = entity.GetComponent<BehaviorTreeComponent>();
 			bt.BlackboardTargetPos = bestPos;
@@ -3201,6 +3213,19 @@ static uint32_t s_LODGenEntityId = 0;
 			else if (t.Type == 2) EQSCoverSystem::GetMutableCustomWeights().AngleWeight = t.Weight;
 			else if (t.Type == 4) EQSCoverSystem::GetMutableCustomWeights().ElevationWeight = t.Weight;
 		}
+
+		char statusBuf[256];
+		if (found)
+		{
+			std::snprintf(statusBuf, sizeof(statusBuf),
+				"✓ 空间推理完成：候选点 %zu 处 | 最优目标 (%.1f, %.1f, %.1f) | 得分 %.2f",
+				state.TotalSampleCount, bestPos.x, bestPos.y, bestPos.z, bestScore);
+		}
+		else
+		{
+			std::snprintf(statusBuf, sizeof(statusBuf), "未找到有效候选掩体点 (采样: %zu 处)", state.TotalSampleCount);
+		}
+		state.LastStatus = statusBuf;
 
 		return found;
 	}
@@ -3227,165 +3252,42 @@ static uint32_t s_LODGenEntityId = 0;
 		const float contentW = rect.W - pad * 2.0f;
 		float curY = rect.Y + 4.0f;
 
-		if (g_EQSPreviewState.PipelineTests.empty())
-		{
-			LoadEQSPreset(comp->QueryMode, comp, g_EQSPreviewState);
-		}
-
 		// 1. 头部徽章
-		const Wui::WuiRect badgeRect { startX, curY, 260.0f, 18.0f };
+		const Wui::WuiRect badgeRect { startX, curY, 220.0f, 18.0f };
 		const Wui::WuiColor badgeBg { 0.12f, 0.35f, 0.45f, 0.35f };
 		const Wui::WuiColor badgeBorder { 0.20f, 0.80f, 0.95f, 0.90f };
-		Wui::Badge(ctx, badgeRect, "TACTICAL EQS PIPELINE ASSEMBLER", badgeBg, badgeBorder, theme, 10.5f, true, 3.0f);
-		curY += 26.0f;
-
-		// 2. 预设快速装配行 (Quick Presets)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "快速预设装配 (Quick Presets):", theme.Accent, theme.FontSizeSmall);
-		curY += 20.0f;
-		const float presetBtnW = (contentW - 8.0f) / 3.0f;
-		if (Wui::Button(ctx, Wui::HashId("inspect.eqs.preset_cover"), { startX, curY, presetBtnW, 24.0f }, "🛡 防守掩体 (Cover)", theme))
-		{
-			LoadEQSPreset(0, comp, g_EQSPreviewState);
-			if (changedFields) { changedFields->push_back("QueryMode"); changedFields->push_back("GeneratorMode"); }
-			host.MarkDocumentDirty();
-		}
-		Wui::Tooltip(ctx, { startX, curY, presetBtnW, 24.0f }, "一键装配防守掩体流水线：ProjectedGrid + OverlapTest + TraceTest + WallProximityTest + DistanceTest + HeightTest");
-
-		if (Wui::Button(ctx, Wui::HashId("inspect.eqs.preset_flank"), { startX + presetBtnW + 4.0f, curY, presetBtnW, 24.0f }, "⚔ 侧翼包抄 (Flank)", theme))
-		{
-			LoadEQSPreset(1, comp, g_EQSPreviewState);
-			if (changedFields) { changedFields->push_back("QueryMode"); changedFields->push_back("GeneratorMode"); }
-			host.MarkDocumentDirty();
-		}
-		Wui::Tooltip(ctx, { startX + presetBtnW + 4.0f, curY, presetBtnW, 24.0f }, "一键装配侧翼包抄流水线：CircleGenerator + TraceTest + DotTest(90°) + DistanceTest");
-
-		if (Wui::Button(ctx, Wui::HashId("inspect.eqs.preset_retreat"), { startX + (presetBtnW + 4.0f) * 2.0f, curY, presetBtnW, 24.0f }, "🏃 战术撤退 (Retreat)", theme))
-		{
-			LoadEQSPreset(2, comp, g_EQSPreviewState);
-			if (changedFields) { changedFields->push_back("QueryMode"); changedFields->push_back("GeneratorMode"); }
-			host.MarkDocumentDirty();
-		}
-		Wui::Tooltip(ctx, { startX + (presetBtnW + 4.0f) * 2.0f, curY, presetBtnW, 24.0f }, "一键装配战术撤退流水线：ProjectedGrid + TraceTest + DistanceTest(反比拉开)");
-		curY += 28.0f;
+		Wui::Badge(ctx, badgeRect, "EQS TACTICAL COMPONENT", badgeBg, badgeBorder, theme, 10.0f, true, 3.0f);
+		curY += 24.0f;
 
 		const float fieldLabelW = 120.0f;
 		const float fieldControlW = contentW - fieldLabelW;
 
-		// 3. 生成器卡片 (Generator Card)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "生成器卡片 (Generator Card):", theme.Accent, theme.FontSizeSmall);
-		curY += 20.0f;
-
-		const std::vector<std::string> generatorOptions = {
-			"贴地网格 (Projected Grid)",
-			"同心圆环 (Concentric Circle)",
-			"掩体边缘混合 (Around Obstacles)"
-		};
-		int selectedGenMode = std::clamp(static_cast<int>(comp->GeneratorMode), 0, 2);
-		const int beforeGenMode = selectedGenMode;
-		Wui::Label(ctx, { startX, curY + 2.0f }, "生成器模式 (Generator):", theme.Text, theme.FontSizeSmall);
-		if (Wui::Combo(ctx, Wui::HashId("inspect.eqs.gen_mode"),
-			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, "", generatorOptions, selectedGenMode, theme))
+		// 2. 查询搜索半径 (QueryRadius) (DragFloat, 1.0 ~ 100.0)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "查询搜索半径 (Radius):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.radius"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->QueryRadius, 0.5f, 1.0f, 100.0f, theme))
 		{
-			if (selectedGenMode != beforeGenMode)
-			{
-				comp->GeneratorMode = static_cast<uint8_t>(selectedGenMode);
-				g_EQSPreviewState.GeneratorMode = comp->GeneratorMode;
-				if (changedFields) changedFields->push_back("GeneratorMode");
-				host.MarkDocumentDirty();
-			}
+			comp->QueryRadius = std::clamp(comp->QueryRadius, 1.0f, 100.0f);
+			g_EQSPreviewState.QueryRadius = comp->QueryRadius;
+			if (changedFields) changedFields->push_back("QueryRadius");
+			host.MarkDocumentDirty();
 		}
-		Wui::Tooltip(ctx, { startX + fieldLabelW, curY, fieldControlW, 22.0f }, "空间候选点采样模式：贴地网格 / 同心圆环 / 掩体边缘混合");
 		curY += 26.0f;
 
-		// 根据生成器模式展开对应参数
-		if (comp->GeneratorMode == 1) // Concentric Circle
+		// 3. 候选网格格距 (GridSpacing) (DragFloat, 0.5 ~ 10.0)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "候选网格格距 (Spacing):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.spacing"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->GridSpacing, 0.1f, 0.5f, 10.0f, theme))
 		{
-			Wui::Label(ctx, { startX, curY + 2.0f }, "查询搜索半径 (Radius):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.radius"),
-				{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->QueryRadius, 0.5f, 1.0f, 100.0f, theme))
-			{
-				comp->QueryRadius = std::clamp(comp->QueryRadius, 1.0f, 100.0f);
-				if (changedFields) changedFields->push_back("QueryRadius");
-				host.MarkDocumentDirty();
-			}
-			curY += 26.0f;
-
-			Wui::Label(ctx, { startX, curY + 2.0f }, "采样弧步 (Spacing):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.spacing"),
-				{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->GridSpacing, 0.1f, 0.5f, 10.0f, theme))
-			{
-				comp->GridSpacing = std::clamp(comp->GridSpacing, 0.5f, 10.0f);
-				if (changedFields) changedFields->push_back("GridSpacing");
-				host.MarkDocumentDirty();
-			}
-			curY += 26.0f;
-
-			Wui::Label(ctx, { startX, curY + 2.0f }, "采样环数 (Rings):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.rings"),
-				{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, g_EQSPreviewState.RingCount, 0.2f, 1.0f, 30.0f, theme))
-			{
-				g_EQSPreviewState.RingCount = std::clamp(g_EQSPreviewState.RingCount, 1.0f, 30.0f);
-				host.MarkDocumentDirty();
-			}
-			curY += 26.0f;
+			comp->GridSpacing = std::clamp(comp->GridSpacing, 0.5f, 10.0f);
+			g_EQSPreviewState.GridSpacing = comp->GridSpacing;
+			if (changedFields) changedFields->push_back("GridSpacing");
+			host.MarkDocumentDirty();
 		}
-		else if (comp->GeneratorMode == 2) // Around Obstacles
-		{
-			Wui::Label(ctx, { startX, curY + 2.0f }, "查询搜索半径 (Radius):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.radius"),
-				{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->QueryRadius, 0.5f, 1.0f, 100.0f, theme))
-			{
-				comp->QueryRadius = std::clamp(comp->QueryRadius, 1.0f, 100.0f);
-				if (changedFields) changedFields->push_back("QueryRadius");
-				host.MarkDocumentDirty();
-			}
-			curY += 26.0f;
+		curY += 26.0f;
 
-			Wui::Label(ctx, { startX, curY + 2.0f }, "基础格距 (Spacing):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.spacing"),
-				{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->GridSpacing, 0.1f, 0.5f, 10.0f, theme))
-			{
-				comp->GridSpacing = std::clamp(comp->GridSpacing, 0.5f, 10.0f);
-				if (changedFields) changedFields->push_back("GridSpacing");
-				host.MarkDocumentDirty();
-			}
-			curY += 26.0f;
-
-			Wui::Label(ctx, { startX, curY + 2.0f }, "贴墙外扩 (Wall Offset):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.wall_off"),
-				{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, g_EQSPreviewState.WallOffset, 0.05f, 0.2f, 3.0f, theme))
-			{
-				g_EQSPreviewState.WallOffset = std::clamp(g_EQSPreviewState.WallOffset, 0.2f, 3.0f);
-				host.MarkDocumentDirty();
-			}
-			curY += 26.0f;
-		}
-		else // 0: Projected Grid
-		{
-			Wui::Label(ctx, { startX, curY + 2.0f }, "查询搜索半径 (Radius):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.radius"),
-				{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->QueryRadius, 0.5f, 1.0f, 100.0f, theme))
-			{
-				comp->QueryRadius = std::clamp(comp->QueryRadius, 1.0f, 100.0f);
-				if (changedFields) changedFields->push_back("QueryRadius");
-				host.MarkDocumentDirty();
-			}
-			curY += 26.0f;
-
-			Wui::Label(ctx, { startX, curY + 2.0f }, "候选网格格距 (Spacing):", theme.Text, theme.FontSizeSmall);
-			if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.spacing"),
-				{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->GridSpacing, 0.1f, 0.5f, 10.0f, theme))
-			{
-				comp->GridSpacing = std::clamp(comp->GridSpacing, 0.5f, 10.0f);
-				if (changedFields) changedFields->push_back("GridSpacing");
-				host.MarkDocumentDirty();
-			}
-			curY += 26.0f;
-		}
-
-		// 4. AI 威胁源锁定与行为树协同 (Threat Target & BT Synergy)
+		// 4. 锁定威胁目标 (Threat Target) (默认智能优先锁定场景敌人如 #7 Hostile Sniper Threat)
 		Scene* scene = entity.GetScene();
-
 		auto isThreatTargetName = [](const std::string& name) -> bool {
 			if (name.empty()) return false;
 			std::string lower = name;
@@ -3426,6 +3328,7 @@ static uint32_t s_LODGenEntityId = 0;
 			if (bestThreatEnt != entt::null)
 			{
 				comp->ThreatEntityHint = static_cast<uint32_t>(bestThreatEnt);
+				g_EQSPreviewState.ThreatEntityHint = comp->ThreatEntityHint;
 				if (entity.HasComponent<BehaviorTreeComponent>())
 				{
 					entity.GetComponent<BehaviorTreeComponent>().TargetEntity = comp->ThreatEntityHint;
@@ -3435,11 +3338,7 @@ static uint32_t s_LODGenEntityId = 0;
 			}
 		}
 
-		struct ThreatCandidate
-		{
-			std::string Label;
-			uint32_t RawId;
-		};
+		struct ThreatCandidate { std::string Label; uint32_t RawId; };
 		std::vector<ThreatCandidate> hostileCandidates;
 		std::vector<ThreatCandidate> otherCandidates;
 
@@ -3454,7 +3353,7 @@ static uint32_t s_LODGenEntityId = 0;
 				{
 					tagStr = std::string(StringPool::Get().NameOf(tag->Tag));
 				}
-				std::string name = tagStr.empty() ? ("实体 " + std::to_string(rawId)) : (tagStr + " [" + std::to_string(rawId) + "]");
+				std::string name = tagStr.empty() ? ("实体 " + std::to_string(rawId)) : (tagStr + " [#" + std::to_string(rawId) + "]");
 
 				if (isThreatTargetName(tagStr))
 				{
@@ -3469,7 +3368,6 @@ static uint32_t s_LODGenEntityId = 0;
 
 		std::vector<std::string> threatEntityLabels;
 		std::vector<uint32_t> threatEntityRaws;
-
 		threatEntityLabels.push_back("0: 自动检索最近敌对威胁 (Auto Nearest)");
 		threatEntityRaws.push_back(0);
 
@@ -3505,6 +3403,7 @@ static uint32_t s_LODGenEntityId = 0;
 			if (selectedThreatIdx >= 0 && selectedThreatIdx < static_cast<int>(threatEntityRaws.size()))
 			{
 				comp->ThreatEntityHint = threatEntityRaws[selectedThreatIdx];
+				g_EQSPreviewState.ThreatEntityHint = comp->ThreatEntityHint;
 				if (entity.HasComponent<BehaviorTreeComponent>())
 				{
 					entity.GetComponent<BehaviorTreeComponent>().TargetEntity = comp->ThreatEntityHint;
@@ -3515,234 +3414,52 @@ static uint32_t s_LODGenEntityId = 0;
 		}
 		curY += 26.0f;
 
-		// 行为树协同卡片
-		const Wui::WuiRect synergyCard { startX, curY, contentW, 44.0f };
-		if (entity.HasComponent<BehaviorTreeComponent>())
+		// 5. 战术模式 (Query Mode) (Cover 掩体 / Flank 包抄 / Retreat 撤退，Segmented 选择)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "战术模式 (Query Mode):", theme.Text, theme.FontSizeSmall);
+		int currentMode = std::clamp(static_cast<int>(comp->QueryMode), 0, 2);
+		const std::vector<std::string> modeOptions = { "Cover 掩体", "Flank 包抄", "Retreat 撤退" };
+		if (Wui::Segmented(ctx, Wui::HashId("inspect.eqs.mode_seg"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, modeOptions, currentMode, theme))
 		{
-			auto& bt = entity.GetComponent<BehaviorTreeComponent>();
-			Wui::PanelBackground(ctx, synergyCard, Wui::WuiColor{ 0.08f, 0.20f, 0.15f, 0.85f }, 4.0f);
-			Wui::HighlightOutline(ctx, synergyCard, Wui::WuiColor{ 0.20f, 0.85f, 0.40f, 0.85f }, 4.0f, 1.0f);
-			char synBuf[160];
-			std::snprintf(synBuf, sizeof(synBuf), "✓ 已与 BehaviorTreeComponent 协同绑定 (黑板目标: %.1f, %.1f, %.1f | Tag: %u)",
-				bt.BlackboardTargetPos.x, bt.BlackboardTargetPos.y, bt.BlackboardTargetPos.z, bt.BlackboardTag);
-			Wui::Label(ctx, { startX + 8.0f, curY + 4.0f }, synBuf, theme.Success, theme.FontSizeSmall);
-			Wui::Label(ctx, { startX + 8.0f, curY + 22.0f }, "战术查询将自动向行为树黑板实时输出掩体最优站位与评分", theme.TextMuted, theme.FontSizeSmall);
-		}
-		else
-		{
-			Wui::PanelBackground(ctx, synergyCard, Wui::WuiColor{ 0.22f, 0.16f, 0.08f, 0.85f }, 4.0f);
-			Wui::HighlightOutline(ctx, synergyCard, Wui::WuiColor{ 0.95f, 0.70f, 0.20f, 0.85f }, 4.0f, 1.0f);
-			Wui::Label(ctx, { startX + 8.0f, curY + 4.0f }, "当前实体尚未挂载 AI 行为树协同组件", theme.Warning, theme.FontSizeSmall);
-			if (Wui::Button(ctx, Wui::HashId("inspect.eqs.btn_add_bt"), { startX + contentW - 170.0f, curY + 20.0f, 160.0f, 20.0f }, "+ 挂载行为树协同组件", theme))
-			{
-				auto& bt = entity.AddComponent<BehaviorTreeComponent>();
-				bt.TargetEntity = comp->ThreatEntityHint;
-				bt.Status = BehaviorStatus::Running;
-				bt.Enabled = 1;
-				bt.BlackboardTag = 88;
-				host.MarkDocumentDirty();
-			}
-		}
-		curY += 50.0f;
-
-		// 5. 测试项流水线列表 (Tests Pipeline Stack)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "测试项流水线 (Tests Pipeline Stack):", theme.Accent, theme.FontSizeSmall);
-		curY += 22.0f;
-
-		static int s_SelectedTestToAdd = 0;
-		const std::vector<std::string> addTestOptions = {
-			"Distance Test (距离评估)",
-			"Trace Test (视线枪线遮蔽)",
-			"Dot Test (夹角/侧翼攻击角)",
-			"Wall Proximity (掩体贴墙度)",
-			"Height Test (制高点高程差)"
-		};
-		const float addBtnW = 120.0f;
-		const float addComboW = contentW - addBtnW - 6.0f;
-		Wui::Combo(ctx, Wui::HashId("inspect.eqs.add_combo"),
-			{ startX, curY, addComboW, 22.0f }, "", addTestOptions, s_SelectedTestToAdd, theme);
-
-		if (Wui::Button(ctx, Wui::HashId("inspect.eqs.btn_add_test"),
-			{ startX + addComboW + 6.0f, curY, addBtnW, 22.0f }, "+ 添加测试项", theme))
-		{
-			switch (s_SelectedTestToAdd)
-			{
-			case 0:
-				g_EQSPreviewState.PipelineTests.push_back({ 0, 0, 0, 1.0f, 5.0f, "Distance Test" });
-				break;
-			case 1:
-				g_EQSPreviewState.PipelineTests.push_back({ 1, 1, 0, 1.5f, 1.0f, "Trace Test" });
-				break;
-			case 2:
-				g_EQSPreviewState.PipelineTests.push_back({ 2, 1, 2, 1.5f, 90.0f, "Dot Test (90°)" });
-				break;
-			case 3:
-				g_EQSPreviewState.PipelineTests.push_back({ 3, 0, 2, 1.2f, 0.85f, "Wall Proximity" });
-				break;
-			case 4:
-				g_EQSPreviewState.PipelineTests.push_back({ 4, 1, 0, 0.5f, 2.0f, "Height Test" });
-				break;
-			default:
-				break;
-			}
+			comp->QueryMode = static_cast<uint8_t>(currentMode);
+			LoadEQSPreset(comp->QueryMode, comp, g_EQSPreviewState);
+			if (changedFields) { changedFields->push_back("QueryMode"); }
 			host.MarkDocumentDirty();
 		}
 		curY += 28.0f;
 
-		// 列表展示已启用的测试项卡片
-		int testToRemove = -1;
-		for (size_t i = 0; i < g_EQSPreviewState.PipelineTests.size(); ++i)
-		{
-			auto& item = g_EQSPreviewState.PipelineTests[i];
-			const bool isGaussianOrDot = (item.Curve == 2 || item.Type == 2);
-			const float cardHeight = isGaussianOrDot ? 88.0f : 66.0f;
-			const Wui::WuiRect itemCardRect { startX, curY, contentW, cardHeight };
-
-			Wui::PanelBackground(ctx, itemCardRect, Wui::WuiColor{ 0.10f, 0.14f, 0.18f, 0.85f }, 4.0f);
-			Wui::HighlightOutline(ctx, itemCardRect, Wui::WuiColor{ 0.22f, 0.35f, 0.48f, 0.70f }, 4.0f, 1.0f);
-
-			// 行 1: 徽章与移除按钮
-			const char* badgeLabels[] = { "📏 DISTANCE", "👁 TRACE LOS", "📐 DOT ANGLE", "🧱 WALL PROX", "⛰ HEIGHT", "🚫 OVERLAP" };
-			const char* bLabel = (item.Type <= 5) ? badgeLabels[item.Type] : "TEST";
-			Wui::WuiColor bBg { 0.15f, 0.28f, 0.38f, 0.5f };
-			Wui::WuiColor bBorder { 0.30f, 0.85f, 0.95f, 0.9f };
-			if (item.Type == 1) { bBorder = Wui::WuiColor{ 0.85f, 0.35f, 0.95f, 0.9f }; }
-			else if (item.Type == 2) { bBorder = Wui::WuiColor{ 0.95f, 0.65f, 0.20f, 0.9f }; }
-			else if (item.Type == 3) { bBorder = Wui::WuiColor{ 0.20f, 0.90f, 0.55f, 0.9f }; }
-			else if (item.Type == 4) { bBorder = Wui::WuiColor{ 0.35f, 0.65f, 0.95f, 0.9f }; }
-			else if (item.Type == 5) { bBorder = Wui::WuiColor{ 0.95f, 0.25f, 0.25f, 0.9f }; }
-
-			Wui::Badge(ctx, { startX + 6.0f, curY + 4.0f, 110.0f, 18.0f }, bLabel, bBg, bBorder, theme, 9.5f, true, 3.0f);
-			Wui::Label(ctx, { startX + 122.0f, curY + 5.0f }, item.Name.c_str(), theme.Accent, theme.FontSizeSmall);
-
-			const uint64_t rmId = Wui::HashId(("inspect.eqs.rm_" + std::to_string(i)).c_str());
-			if (Wui::Button(ctx, rmId, { startX + contentW - 68.0f, curY + 4.0f, 62.0f, 18.0f }, "✖ 移除", theme))
-			{
-				testToRemove = static_cast<int>(i);
-			}
-			Wui::Tooltip(ctx, { startX + contentW - 68.0f, curY + 4.0f, 62.0f, 18.0f }, "从流水线中移除当前测试项");
-
-			// 行 2: 目标上下文 (Target Context) 与 评分曲线 (Scoring Curve)
-			const float halfW = (contentW - 20.0f) * 0.5f;
-			Wui::Label(ctx, { startX + 6.0f, curY + 28.0f }, "上下文:", theme.TextMuted, theme.FontSizeSmall);
-			const std::vector<std::string> ctxOptions = {
-				"Querier 自身", "Target 敌人", "AllThreats 威胁群", "Custom 自定义"
-			};
-			int selectedCtx = std::clamp(static_cast<int>(item.Context), 0, 3);
-			const uint64_t ctxId = Wui::HashId(("inspect.eqs.ctx_" + std::to_string(i)).c_str());
-			if (Wui::Combo(ctx, ctxId, { startX + 54.0f, curY + 26.0f, halfW - 48.0f, 20.0f }, "", ctxOptions, selectedCtx, theme))
-			{
-				item.Context = static_cast<uint8_t>(selectedCtx);
-				host.MarkDocumentDirty();
-			}
-
-			Wui::Label(ctx, { startX + halfW + 12.0f, curY + 28.0f }, "曲线:", theme.TextMuted, theme.FontSizeSmall);
-			const std::vector<std::string> curveOptions = {
-				"Linear 线性", "Inverse 反比", "Gaussian 钟形"
-			};
-			int selectedCurve = std::clamp(static_cast<int>(item.Curve), 0, 2);
-			const uint64_t curveId = Wui::HashId(("inspect.eqs.crv_" + std::to_string(i)).c_str());
-			if (Wui::Combo(ctx, curveId, { startX + halfW + 50.0f, curY + 26.0f, halfW - 44.0f, 20.0f }, "", curveOptions, selectedCurve, theme))
-			{
-				item.Curve = static_cast<uint8_t>(selectedCurve);
-				host.MarkDocumentDirty();
-			}
-
-			// 行 3: 加权权重 (Weight) 与 理想中心值 (Ideal Value)
-			const uint64_t weightId = Wui::HashId(("inspect.eqs.wt_" + std::to_string(i)).c_str());
-			if (isGaussianOrDot)
-			{
-				Wui::Label(ctx, { startX + 6.0f, curY + 52.0f }, "权重:", theme.TextMuted, theme.FontSizeSmall);
-				if (Wui::DragFloat(ctx, weightId, { startX + 54.0f, curY + 50.0f, halfW - 48.0f, 20.0f }, item.Weight, 0.05f, 0.0f, 5.0f, theme))
-				{
-					item.Weight = std::clamp(item.Weight, 0.0f, 5.0f);
-					host.MarkDocumentDirty();
-				}
-
-				const uint64_t idealId = Wui::HashId(("inspect.eqs.ideal_" + std::to_string(i)).c_str());
-				Wui::Label(ctx, { startX + halfW + 12.0f, curY + 52.0f }, "理想值:", theme.TextMuted, theme.FontSizeSmall);
-				if (Wui::DragFloat(ctx, idealId, { startX + halfW + 50.0f, curY + 50.0f, halfW - 44.0f, 20.0f }, item.IdealValue, 0.5f, -180.0f, 180.0f, theme))
-				{
-					host.MarkDocumentDirty();
-				}
-			}
-			else
-			{
-				Wui::Label(ctx, { startX + 6.0f, curY + 52.0f }, "加权权重:", theme.TextMuted, theme.FontSizeSmall);
-				if (Wui::DragFloat(ctx, weightId, { startX + 66.0f, curY + 50.0f, contentW - 74.0f, 20.0f }, item.Weight, 0.05f, 0.0f, 5.0f, theme))
-				{
-					item.Weight = std::clamp(item.Weight, 0.0f, 5.0f);
-					host.MarkDocumentDirty();
-				}
-			}
-
-			curY += cardHeight + 6.0f;
-		}
-
-		if (testToRemove >= 0 && testToRemove < static_cast<int>(g_EQSPreviewState.PipelineTests.size()))
-		{
-			g_EQSPreviewState.PipelineTests.erase(g_EQSPreviewState.PipelineTests.begin() + testToRemove);
-			host.MarkDocumentDirty();
-		}
-		curY += 6.0f;
-
-		// 6. 执行与诊断输出 (Execution & Diagnostic Results)
-		if (Wui::Button(ctx, Wui::HashId("inspect.eqs.btn_evaluate"),
-			{ startX, curY, contentW, 26.0f }, "✦ 执行战术空间查询 (Run Pipeline Query)", theme))
+		// 6. [执行战术查询] 简洁按钮
+		if (Wui::Button(ctx, Wui::HashId("inspect.eqs.btn_run_query"),
+			{ startX, curY, contentW, 24.0f }, "✦ 执行战术查询 (Run Tactical Query)", theme))
 		{
 			ExecuteEQSPipeline(scene, entity, comp, g_EQSPreviewState);
 			host.MarkDocumentDirty();
 		}
-		curY += 30.0f;
-
-		if (Wui::Button(ctx, Wui::HashId("inspect.eqs.btn_move_to_cover"),
-			{ startX, curY, contentW, 24.0f }, "🏃 移动查询者至最佳掩体 (Move Querier to Cover)", theme))
-		{
-			if (g_EQSPreviewState.Evaluated)
-			{
-				if (entity.HasComponent<TransformComponent>())
-				{
-					entity.GetComponent<TransformComponent>().Location = g_EQSPreviewState.BestCoverPos;
-				}
-				if (entity.HasComponent<BehaviorTreeComponent>())
-				{
-					entity.GetComponent<BehaviorTreeComponent>().BlackboardTargetPos = g_EQSPreviewState.BestCoverPos;
-				}
-				host.MarkDocumentDirty();
-			}
-		}
 		curY += 28.0f;
 
-		// 诊断结果卡片
-		const Wui::WuiRect cardRect { startX, curY, contentW, 76.0f };
+		// 7. 简洁紧凑的状态反馈卡片：显示最优目标坐标与得分，以及一行说明
+		const Wui::WuiRect cardRect { startX, curY, contentW, 58.0f };
 		Wui::PanelBackground(ctx, cardRect, Wui::WuiColor{ 0.08f, 0.12f, 0.16f, 0.90f }, 4.0f);
 		Wui::HighlightOutline(ctx, cardRect, Wui::WuiColor{ 0.20f, 0.80f, 0.95f, 0.60f }, 4.0f, 1.0f);
 
-		char lineDiag1[160], lineDiag2[160], lineDiag3[160];
+		char statusLine[160];
 		if (comp->BestCoverFound != 0 || (g_EQSPreviewState.Evaluated && g_EQSPreviewState.TargetEntity == static_cast<entt::entity>(entity)))
 		{
 			const glm::vec3 bpos = g_EQSPreviewState.BestCoverPos;
-			const char* coverQuality = (g_EQSPreviewState.BestScore >= 2.0f)
-				? "Optimal / 优良掩蔽"
-				: (g_EQSPreviewState.BestScore >= 1.0f ? "Partial Cover / 部分遮挡" : "Low Cover / 暴露风险");
-			std::snprintf(lineDiag1, sizeof(lineDiag1), "✦ 采样总数: %zu 点 | 合格: %zu 点 | 硬过滤淘汰: %zu 点",
-				g_EQSPreviewState.TotalSampleCount, g_EQSPreviewState.QualifiedCount, g_EQSPreviewState.HardFilteredCount);
-			std::snprintf(lineDiag2, sizeof(lineDiag2), "最优站位: (%.2f, %.2f, %.2f) | 综合得分: %.2f",
-				bpos.x, bpos.y, bpos.z, g_EQSPreviewState.BestScore);
-			std::snprintf(lineDiag3, sizeof(lineDiag3), "战术评级: %s | 当前流水线: %zu 项测试",
-				coverQuality, g_EQSPreviewState.PipelineTests.size());
+			std::snprintf(statusLine, sizeof(statusLine), "最优目标: (%.2f, %.2f, %.2f) | 综合得分: %.2f (采样: %zu)",
+				bpos.x, bpos.y, bpos.z, g_EQSPreviewState.BestScore, g_EQSPreviewState.TotalSampleCount);
+			Wui::Label(ctx, { startX + 8.0f, curY + 6.0f }, statusLine, theme.Success, theme.FontSizeSmall);
 		}
 		else
 		{
-			std::snprintf(lineDiag1, sizeof(lineDiag1), "战术状态: 待评估 (点击上方按钮驱动通用流水线解算)");
-			std::snprintf(lineDiag2, sizeof(lineDiag2), "搜索半径: %.1fm | 采样间距: %.1fm", comp->QueryRadius, comp->GridSpacing);
-			std::snprintf(lineDiag3, sizeof(lineDiag3), "已装配测试项: %zu 项", g_EQSPreviewState.PipelineTests.size());
+			std::snprintf(statusLine, sizeof(statusLine), "状态: 待评估 (点击上方按钮执行空间推理)");
+			Wui::Label(ctx, { startX + 8.0f, curY + 6.0f }, statusLine, theme.TextMuted, theme.FontSizeSmall);
 		}
 
-		Wui::Label(ctx, { startX + 8.0f, curY + 6.0f }, lineDiag1, theme.Accent, theme.FontSizeSmall);
-		Wui::Label(ctx, { startX + 8.0f, curY + 28.0f }, lineDiag2, theme.Success, theme.FontSizeSmall);
-		Wui::Label(ctx, { startX + 8.0f, curY + 50.0f }, lineDiag3, theme.TextMuted, theme.FontSizeSmall);
-		curY += 84.0f;
+		Wui::Label(ctx, { startX + 8.0f, curY + 30.0f },
+			"提示: 深度空间推理流水线与权重请在行为树编辑器 (Behavior Tree) 中配置",
+			theme.Accent, theme.FontSizeSmall);
+		curY += 66.0f;
 
 		return curY - rect.Y;
 	}
