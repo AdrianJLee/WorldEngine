@@ -355,6 +355,7 @@ static void TestBehaviorTreeAssetSerializationAndInstantiation()
 	std::error_code ec;
 	std::filesystem::remove(tempPath, ec);
 
+	std::remove(tempPath.c_str());
 	std::cout << "[PASS] TestBehaviorTreeAssetSerializationAndInstantiation\n";
 }
 
@@ -1018,6 +1019,422 @@ static void TestLatentAsyncEQSAndLocomotion()
 	std::cout << "[PASS] TestLatentAsyncEQSAndLocomotion\n";
 }
 
+static void TestMultiEntityIsolationAndReactiveAborts()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	Entity agentA = Entity::CreateEntity(&scene, "AgentA");
+	agentA.AddComponent<TransformComponent>(glm::vec3(0.0f, 0.0f, 0.0f));
+	auto& btA = agentA.AddComponent<BehaviorTreeComponent>();
+	btA.TreeAssetId = 99;
+	btA.Enabled = 1;
+
+	Entity agentB = Entity::CreateEntity(&scene, "AgentB");
+	agentB.AddComponent<TransformComponent>(glm::vec3(10.0f, 0.0f, 0.0f));
+	auto& btB = agentB.AddComponent<BehaviorTreeComponent>();
+	btB.TreeAssetId = 99;
+	btB.Enabled = 1;
+
+	auto combatAction = std::make_shared<ActionNode>([](BehaviorContext& c) {
+		c.Component.BlackboardValue = 100.0f;
+		return NodeStatus::Running;
+	});
+	auto patrolAction = std::make_shared<ActionNode>([](BehaviorContext& c) {
+		c.Component.BlackboardValue = 10.0f;
+		return NodeStatus::Running;
+	});
+
+	auto combatDecorator = std::make_shared<BlackboardConditionDecorator>(
+		"HasThreat",
+		ConditionOperator::Equal,
+		true,
+		combatAction,
+		FlowAbortMode::LowerPriority
+	);
+
+	auto rootSelector = std::make_shared<SelectorNode>();
+	rootSelector->AddChild(combatDecorator); // Index 0 (High Priority: Combat)
+	rootSelector->AddChild(patrolAction);   // Index 1 (Low Priority: Patrol)
+
+	BehaviorTreeSystem::ClearTrees();
+	BehaviorTreeSystem::ClearEntityRunners();
+	BehaviorTreeSystem::RegisterTree(99, rootSelector);
+
+	auto boardA = BlackboardRegistry::Get().GetOrCreateBlackboard(static_cast<uint32_t>((entt::entity)agentA));
+	auto boardB = BlackboardRegistry::Get().GetOrCreateBlackboard(static_cast<uint32_t>((entt::entity)agentB));
+	boardA->Set("HasThreat", false);
+	boardB->Set("HasThreat", false);
+
+	// Frame 1: 两者都应运行 Patrol (值 = 10.0f, 路径 = 1)
+	BehaviorTreeSystem::Update(scene, 0.016f);
+	assert(btA.Status == BehaviorStatus::Running);
+	assert(btB.Status == BehaviorStatus::Running);
+	assert(btA.GetPath(0) == 1);
+	assert(btB.GetPath(0) == 1);
+	assert(btA.BlackboardValue == 10.0f);
+	assert(btB.BlackboardValue == 10.0f);
+
+	// 外部突变：仅实体 A 遭遇威胁！
+	boardA->Set("HasThreat", true);
+	// 验证：仅实体 A 请求了打断，实体 B 毫发无损！
+	assert(btA.AbortRequested == 1);
+	assert(btB.AbortRequested == 0);
+
+	// Frame 2: 实体 A 打断切入 Combat (值 = 100.0f, 路径 = 0)，实体 B 继续保持 Patrol！
+	BehaviorTreeSystem::Update(scene, 0.016f);
+	assert(btA.GetPath(0) == 0);
+	assert(btA.BlackboardValue == 100.0f);
+	assert(btB.GetPath(0) == 1);
+	assert(btB.BlackboardValue == 10.0f);
+
+	// 外部突变：实体 B 遭遇威胁！
+	boardB->Set("HasThreat", true);
+	assert(btB.AbortRequested == 1);
+
+	// Frame 3: 实体 B 也切入 Combat，两者互不干扰！
+	BehaviorTreeSystem::Update(scene, 0.016f);
+	assert(btA.GetPath(0) == 0);
+	assert(btB.GetPath(0) == 0);
+	assert(btA.BlackboardValue == 100.0f);
+	assert(btB.BlackboardValue == 100.0f);
+
+	BehaviorTreeSystem::ClearTrees();
+	BehaviorTreeSystem::ClearEntityRunners();
+	std::cout << "[PASS] TestMultiEntityIsolationAndReactiveAborts\n";
+}
+
+static void TestConditionOperatorSerializationRoundTrip()
+{
+	BehaviorTreeAsset asset;
+	asset.BlackboardKeys().push_back({ "ThreatCount", "Int", "0" });
+
+	BehaviorTreeNodeDesc decNode;
+	decNode.Id = 1;
+	decNode.ParentId = 0;
+	decNode.Kind = BehaviorTreeNodeKind::Decorator;
+	decNode.Title = "Threat Greater Check";
+	decNode.StringParam = "ThreatCount";
+	decNode.CompOp = ConditionOperator::Greater;
+	decNode.FloatParam = 3.0f;
+	decNode.AbortMode = FlowAbortMode::LowerPriority;
+
+	BehaviorTreeNodeDesc actNode;
+	actNode.Id = 2;
+	actNode.ParentId = 1;
+	actNode.Kind = BehaviorTreeNodeKind::Action;
+	actNode.Title = "Fallback Action";
+	actNode.ActionType = "Wait";
+	actNode.FloatParam = 1.0f;
+
+	asset.Nodes().push_back(decNode);
+	asset.Nodes().push_back(actNode);
+
+	const std::string testFile = "build_test_comp_op.wbt";
+	std::string err;
+	bool saved = asset.SaveToFile(testFile, &err);
+	assert(saved);
+
+	BehaviorTreeAsset loaded;
+	bool loadedOk = loaded.LoadFromFile(testFile, &err);
+	assert(loadedOk);
+	assert(loaded.Nodes().size() == 2);
+	assert(loaded.Nodes()[0].CompOp == ConditionOperator::Greater);
+	assert(loaded.Nodes()[0].AbortMode == FlowAbortMode::LowerPriority);
+	assert(loaded.Nodes()[0].StringParam == "ThreatCount");
+
+	std::remove(testFile.c_str());
+	std::cout << "[PASS] TestConditionOperatorSerializationRoundTrip\n";
+}
+
+static void TestTypeAgnosticBlackboardConditionComparisons()
+{
+	Blackboard board;
+	board.RegisterKey("IntKey", BlackboardKeyType::Int32, int32_t(10));
+	board.RegisterKey("BoolKey", BlackboardKeyType::Bool, true);
+	board.RegisterKey("FloatKey", BlackboardKeyType::Float, 5.5f);
+
+	// 1. Equal 对比：int32(10) vs float(10.0f)
+	BlackboardConditionDecorator decIntVsFloat("IntKey", ConditionOperator::Equal, 10.0f);
+	assert(decIntVsFloat.EvaluateConditionOnBoard(board) == true);
+
+	// 2. Greater 对比：int32(10) > float(5.0f)
+	BlackboardConditionDecorator decGreater("IntKey", ConditionOperator::Greater, 5.0f);
+	assert(decGreater.EvaluateConditionOnBoard(board) == true);
+
+	// 3. Less 对比：int32(10) < float(20.0f)
+	BlackboardConditionDecorator decLess("IntKey", ConditionOperator::Less, 20.0f);
+	assert(decLess.EvaluateConditionOnBoard(board) == true);
+
+	// 4. Bool 对比：bool(true) vs float(1.0f)
+	BlackboardConditionDecorator decBool("BoolKey", ConditionOperator::Equal, 1.0f);
+	assert(decBool.EvaluateConditionOnBoard(board) == true);
+
+	// 5. NotEqual 对比：bool(true) != float(0.0f)
+	BlackboardConditionDecorator decBoolNotEq("BoolKey", ConditionOperator::NotEqual, 0.0f);
+	assert(decBoolNotEq.EvaluateConditionOnBoard(board) == true);
+
+	std::cout << "[PASS] TestTypeAgnosticBlackboardConditionComparisons\n";
+}
+
+static void TestCoverReservationPoolNoTheft()
+{
+	using namespace World::EQS;
+	auto& pool = EnvQueryManager::Get().GetReservationPool();
+	pool.Clear();
+
+	const glm::vec3 coverSpot(15.0f, 0.0f, 15.0f);
+	uint32_t agentA = 101;
+	uint32_t agentB = 102;
+
+	// Agent A 成功预定掩体
+	bool okA = pool.ReserveCover(coverSpot, agentA, 5.0f);
+	assert(okA == true);
+	assert(pool.IsCoverReserved(coverSpot, agentA) == false); // 对 A 自身不排斥
+	assert(pool.IsCoverReserved(coverSpot, agentB) == true);  // 对 B 产生遮蔽排斥！
+
+	// Agent B 试图抢占同一个掩体点位（距离 0.5m 内）-> 必须被拒绝（防抢占机制生效）！
+	const glm::vec3 adjacentSpot(15.3f, 0.0f, 15.2f);
+	bool okB = pool.ReserveCover(adjacentSpot, agentB, 5.0f);
+	assert(okB == false);
+
+	// Agent A 可以正常刷新自己的租约
+	bool okA2 = pool.ReserveCover(coverSpot, agentA, 8.0f);
+	assert(okA2 == true);
+
+	// Agent B 可以在相距 3.0m 以外的合法位置预定自己的掩体
+	const glm::vec3 distinctSpot(18.5f, 0.0f, 15.0f);
+	bool okB2 = pool.ReserveCover(distinctSpot, agentB, 5.0f);
+	assert(okB2 == true);
+
+	pool.Clear();
+	std::cout << "[PASS] TestCoverReservationPoolNoTheft\n";
+}
+
+static void TestAsyncRunEQSQueryAndTacticalActions()
+{
+	using namespace World::EQS;
+	WorldContext context;
+	Scene scene(context);
+
+	Entity wall = Entity::CreateEntity(&scene, "CoverWall");
+	auto& wTr = wall.AddComponent<TransformComponent>(glm::vec3(10.0f, 0.0f, 0.0f));
+	auto& col = wall.AddComponent<BoxCollider3DComponent>();
+	col.HalfExtents = glm::vec3(1.0f, 2.0f, 3.0f);
+
+	Entity threat = Entity::CreateEntity(&scene, "Threat");
+	threat.AddComponent<TransformComponent>(glm::vec3(0.0f, 0.0f, 0.0f));
+
+	Entity agent = Entity::CreateEntity(&scene, "TacticalAgent");
+	agent.AddComponent<TransformComponent>(glm::vec3(20.0f, 0.0f, 0.0f));
+	auto& nav = agent.AddComponent<NavMeshAgentComponent>();
+	nav.Speed = 4.0f;
+	auto& bt = agent.AddComponent<BehaviorTreeComponent>();
+
+	auto board = BlackboardRegistry::Get().GetOrCreateBlackboard(static_cast<uint32_t>((entt::entity)agent));
+	BehaviorContext ctx{ scene, agent, bt, *board, 0.016f };
+
+	BehaviorTreeAsset asset;
+	BehaviorTreeNodeDesc rootSeq;
+	rootSeq.Id = 1; rootSeq.ParentId = 0; rootSeq.Kind = BehaviorTreeNodeKind::Sequence; rootSeq.Title = "Tactical Sequence";
+
+	BehaviorTreeNodeDesc eqsAct;
+	eqsAct.Id = 2; eqsAct.ParentId = 1; eqsAct.Kind = BehaviorTreeNodeKind::Action; eqsAct.Title = "Query Cover";
+	eqsAct.ActionType = "RunEQSQuery"; eqsAct.StringParam = "Cover"; eqsAct.FloatParam = 20.0f;
+
+	BehaviorTreeNodeDesc moveAct;
+	moveAct.Id = 3; moveAct.ParentId = 1; moveAct.Kind = BehaviorTreeNodeKind::Action; moveAct.Title = "Move Cover";
+	moveAct.ActionType = "MoveToEQSPosition"; moveAct.FloatParam = 4.0f;
+
+	asset.Nodes().push_back(rootSeq);
+	asset.Nodes().push_back(eqsAct);
+	asset.Nodes().push_back(moveAct);
+
+	auto tree = asset.InstantiateTree();
+	assert(tree != nullptr);
+
+	BehaviorTreeRunner runner(tree);
+
+	// Frame 1: 发起异步 EQS 查询，动作挂起返回 Running
+	NodeStatus s1 = runner.Tick(ctx);
+	assert(s1 == NodeStatus::Running);
+	assert(board->Get<bool>("EQSQueryPending") == true);
+	assert(bt.GetPath(0) == 0);
+
+	// 推进异步调度器时间片
+	EnvQueryManager::Get().Update(0.016f, 5.0f);
+	assert(board->Get<bool>("EQSQueryPending") == false);
+	assert(board->Get<bool>("EQSQueryCompleted") == true);
+
+	// Frame 2: EQS 查询完成并返回 Success，Sequence 推进至节点 1 (MoveToEQSPosition)
+	NodeStatus s2 = runner.Tick(ctx);
+	assert(s2 == NodeStatus::Running);
+	assert(bt.GetPath(0) == 1);
+	assert(board->HasKey("CoverPos") == true);
+	glm::vec3 coverPos = board->Get<glm::vec3>("CoverPos");
+	assert(coverPos.x >= 10.0f);
+	assert(glm::distance(nav.Destination, coverPos) < 0.001f);
+
+	std::cout << "[PASS] TestAsyncRunEQSQueryAndTacticalActions\n";
+}
+
+static void TestDecoupledBlackboardAssetLinkage()
+{
+	// 1. 创建独立黑板资产 (.wbb)
+	BlackboardAsset bbAsset;
+	bbAsset.AddKey({ "SharedAmmo", BlackboardKeyType::Int32, int32_t(30) });
+	bbAsset.AddKey({ "CombatAlert", BlackboardKeyType::Bool, true });
+
+	const std::string bbPath = "build_test_shared.wbb";
+	std::string err;
+	bool savedBb = bbAsset.SaveToFile(bbPath, &err);
+	assert(savedBb);
+
+	// 2. 创建行为树资产 (.wbt) 并引用该独立黑板
+	BehaviorTreeAsset btAsset;
+	btAsset.SetBlackboardAssetPath(bbPath);
+
+	BehaviorTreeNodeDesc rootNode;
+	rootNode.Id = 1; rootNode.ParentId = 0; rootNode.Kind = BehaviorTreeNodeKind::Selector; rootNode.Title = "Root";
+	btAsset.Nodes().push_back(rootNode);
+
+	const std::string btPath = "build_test_linked.wbt";
+	bool savedBt = btAsset.SaveToFile(btPath, &err);
+	assert(savedBt);
+
+	// 3. 反序列化行为树资产并验证黑板引用与动态实例化
+	BehaviorTreeAsset loadedBt;
+	bool loaded = loadedBt.LoadFromFile(btPath, &err);
+	assert(loaded);
+	assert(loadedBt.GetBlackboardAssetPath() == bbPath);
+
+	auto boardInstance = loadedBt.InstantiateBlackboard();
+	assert(boardInstance != nullptr);
+	assert(boardInstance->HasKey("SharedAmmo") == true);
+	assert(boardInstance->Get<int32_t>("SharedAmmo") == 30);
+	assert(boardInstance->HasKey("CombatAlert") == true);
+	assert(boardInstance->Get<bool>("CombatAlert") == true);
+
+	std::remove(bbPath.c_str());
+	std::remove(btPath.c_str());
+	std::cout << "[PASS] TestDecoupledBlackboardAssetLinkage\n";
+}
+
+static void TestBlackboardExtendedTypesAndArrays()
+{
+	Blackboard board;
+
+	// 1. 测试扩展标量类型 (Double, Vector2, Vector4)
+	board.RegisterKey("PrecisionTime", BlackboardKeyType::Double, 123456.789012);
+	board.RegisterKey("ScreenCoord", BlackboardKeyType::Vector2, glm::vec2(1920.0f, 1080.0f));
+	board.RegisterKey("FacingQuat", BlackboardKeyType::Vector4, glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
+
+	assert(std::abs(board.Get<double>("PrecisionTime") - 123456.789012) < 1e-5);
+	assert(board.Get<glm::vec2>("ScreenCoord") == glm::vec2(1920.0f, 1080.0f));
+	assert(board.Get<glm::vec4>("FacingQuat") == glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
+
+	// 2. 测试 5 种核心数组类型 (ArrayVector3, ArrayEntity, ArrayFloat, ArrayInt32, ArrayString)
+	board.RegisterKey("Waypoints", BlackboardKeyType::ArrayVector3, std::vector<glm::vec3>{ { 1.0f, 0.0f, 1.0f }, { 5.0f, 0.0f, 5.0f } });
+	board.RegisterKey("PerceivedThreats", BlackboardKeyType::ArrayEntity, std::vector<uint32_t>{ 101, 102, 103 });
+	board.RegisterKey("DamageHistory", BlackboardKeyType::ArrayFloat, std::vector<float>{ 12.5f, 25.0f });
+	board.RegisterKey("ItemIds", BlackboardKeyType::ArrayInt32, std::vector<int32_t>{ 7, 8, 9 });
+	board.RegisterKey("Tags", BlackboardKeyType::ArrayString, std::vector<std::string>{ "Patrol", "Alert" });
+
+	assert(board.IsArrayKey("Waypoints") == true);
+	assert(board.IsArrayKey("PerceivedThreats") == true);
+	assert(board.IsArrayKey("PrecisionTime") == false);
+
+	assert(board.GetArraySize("Waypoints") == 2);
+	assert(board.GetArraySize("PerceivedThreats") == 3);
+	assert(board.GetArraySize("DamageHistory") == 2);
+	assert(board.GetArraySize("ItemIds") == 3);
+	assert(board.GetArraySize("Tags") == 2);
+
+	// 3. 测试数组追加元素 (PushArrayElement) 与观察者通知
+	int observerCalls = 0;
+	uint32_t wpKeyId = board.GetKeyId("Waypoints");
+	board.AddObserver(wpKeyId, [&](uint32_t, const BlackboardValue&) {
+		++observerCalls;
+	});
+
+	bool pushed = board.PushArrayElement<glm::vec3>("Waypoints", glm::vec3(10.0f, 0.0f, 10.0f));
+	assert(pushed == true);
+	assert(board.GetArraySize("Waypoints") == 3);
+	assert(observerCalls == 1);
+	auto wpVec = board.Get<std::vector<glm::vec3>>("Waypoints");
+	assert(wpVec.size() == 3);
+	assert(wpVec[2] == glm::vec3(10.0f, 0.0f, 10.0f));
+
+	// 4. 测试清空数组 (ClearArray)
+	bool cleared = board.ClearArray("Waypoints");
+	assert(cleared == true);
+	assert(board.GetArraySize("Waypoints") == 0);
+	assert(observerCalls == 2);
+
+	// 5. 测试 BlackboardAsset 资产序列化与反序列化完整往返
+	BlackboardAsset asset;
+	asset.AddKey({ "PrecisionTime", BlackboardKeyType::Double, 999.888 });
+	asset.AddKey({ "ScreenPos", BlackboardKeyType::Vector2, glm::vec2(256.0f, 512.0f) });
+	asset.AddKey({ "Quat", BlackboardKeyType::Vector4, glm::vec4(0.0f, 0.707f, 0.0f, 0.707f) });
+	asset.AddKey({ "Waypoints", BlackboardKeyType::ArrayVector3, std::vector<glm::vec3>{ { 2.0f, 0.0f, 2.0f }, { 4.0f, 0.0f, 4.0f } } });
+	asset.AddKey({ "Threats", BlackboardKeyType::ArrayEntity, std::vector<uint32_t>{ 888, 999 } });
+	asset.AddKey({ "Dialogues", BlackboardKeyType::ArrayString, std::vector<std::string>{ "Stop!", "Freeze!" } });
+
+	const std::string bbTestFile = "build_test_arrays.wbb";
+	std::string err;
+	bool saved = asset.SaveToFile(bbTestFile, &err);
+	assert(saved);
+
+	BlackboardAsset loadedAsset;
+	bool loaded = loadedAsset.LoadFromFile(bbTestFile, &err);
+	assert(loaded);
+	assert(loadedAsset.GetKeys().size() == 6);
+
+	auto instantiatedBoard = loadedAsset.Instantiate();
+	assert(instantiatedBoard != nullptr);
+	assert(instantiatedBoard->GetArraySize("Waypoints") == 2);
+	assert(instantiatedBoard->GetArraySize("Threats") == 2);
+	assert(instantiatedBoard->GetArraySize("Dialogues") == 2);
+	assert(instantiatedBoard->Get<glm::vec2>("ScreenPos") == glm::vec2(256.0f, 512.0f));
+
+	std::remove(bbTestFile.c_str());
+	std::cout << "[PASS] TestBlackboardExtendedTypesAndArrays\n";
+}
+
+static void TestBehaviorTreeConditionOnArrays()
+{
+	Blackboard board;
+	board.RegisterKey("PerceivedThreats", BlackboardKeyType::ArrayEntity, std::vector<uint32_t>{});
+
+	// 1. 当数组为空时，IsNotSet 判定成立，IsSet 判定失败
+	BlackboardConditionDecorator decEmptyIsNotSet("PerceivedThreats", ConditionOperator::IsNotSet);
+	assert(decEmptyIsNotSet.EvaluateConditionOnBoard(board) == true);
+
+	BlackboardConditionDecorator decEmptyIsSet("PerceivedThreats", ConditionOperator::IsSet);
+	assert(decEmptyIsSet.EvaluateConditionOnBoard(board) == false);
+
+	// 2. 注入 3 个威胁实体
+	board.Set("PerceivedThreats", std::vector<uint32_t>{ 1001, 1002, 1003 });
+
+	// 3. 数组非空判定成立
+	BlackboardConditionDecorator decThreatsIsSet("PerceivedThreats", ConditionOperator::IsSet);
+	assert(decThreatsIsSet.EvaluateConditionOnBoard(board) == true);
+
+	// 4. 数组元素个数对比：Greater 2 (3 > 2 判定成立)
+	BlackboardConditionDecorator decThreatsGreater("PerceivedThreats", ConditionOperator::Greater, 2.0f);
+	assert(decThreatsGreater.EvaluateConditionOnBoard(board) == true);
+
+	// 5. 数组元素个数对比：Equal 3 (3 == 3 判定成立)
+	BlackboardConditionDecorator decThreatsEqual("PerceivedThreats", ConditionOperator::Equal, 3.0f);
+	assert(decThreatsEqual.EvaluateConditionOnBoard(board) == true);
+
+	// 6. 数组元素个数对比：Less 2 (3 < 2 判定失败)
+	BlackboardConditionDecorator decThreatsLess("PerceivedThreats", ConditionOperator::Less, 2.0f);
+	assert(decThreatsLess.EvaluateConditionOnBoard(board) == false);
+
+	std::cout << "[PASS] TestBehaviorTreeConditionOnArrays\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -1036,6 +1453,14 @@ int main()
 	std::cout << "--- Running 11 ---" << std::endl; TestLatentAsyncEQSAndLocomotion();
 	std::cout << "--- Running 12 ---" << std::endl; TestParallelNodeExecution();
 	std::cout << "--- Running 13 ---" << std::endl; TestAsyncEnvQueryManagerAndReservation();
+	std::cout << "--- Running 14 ---" << std::endl; TestMultiEntityIsolationAndReactiveAborts();
+	std::cout << "--- Running 15 ---" << std::endl; TestConditionOperatorSerializationRoundTrip();
+	std::cout << "--- Running 16 ---" << std::endl; TestTypeAgnosticBlackboardConditionComparisons();
+	std::cout << "--- Running 17 ---" << std::endl; TestCoverReservationPoolNoTheft();
+	std::cout << "--- Running 18 ---" << std::endl; TestAsyncRunEQSQueryAndTacticalActions();
+	std::cout << "--- Running 19 ---" << std::endl; TestDecoupledBlackboardAssetLinkage();
+	std::cout << "--- Running 20 ---" << std::endl; TestBlackboardExtendedTypesAndArrays();
+	std::cout << "--- Running 21 ---" << std::endl; TestBehaviorTreeConditionOnArrays();
 	std::cout << "All passed!" << std::endl;
 	return 0;
 }

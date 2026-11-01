@@ -67,8 +67,12 @@ namespace World::Gameplay
 		std::vector<BehaviorBlackboardKeyDesc>& BlackboardKeys() { return m_BlackboardKeys; }
 		const std::vector<BehaviorBlackboardKeyDesc>& BlackboardKeys() const { return m_BlackboardKeys; }
 
+		const std::string& GetBlackboardAssetPath() const { return m_BlackboardAssetPath; }
+		void SetBlackboardAssetPath(const std::string& path) { m_BlackboardAssetPath = path; }
+
 	private:
 		std::vector<BehaviorTreeNodeDesc> m_Nodes;
 		std::vector<BehaviorBlackboardKeyDesc> m_BlackboardKeys;
+		std::string m_BlackboardAssetPath;
 	};
 }

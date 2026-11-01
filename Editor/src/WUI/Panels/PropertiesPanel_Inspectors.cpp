@@ -3426,6 +3426,43 @@ static uint32_t s_LODGenEntityId = 0;
 			if (changedFields) { changedFields->push_back("QueryMode"); }
 			host.MarkDocumentDirty();
 		}
+		curY += 26.0f;
+
+		// 5b. 候选生成模式 (Generator Mode)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "候选生成器 (Generator):", theme.Text, theme.FontSizeSmall);
+		const std::vector<std::string> genOptions = { "0: 投影网格 (Projected Grid)", "1: 同心圆环 (Concentric Rings)", "2: 障碍物边缘 (Around Obstacles)" };
+		int currentGen = std::clamp(static_cast<int>(comp->GeneratorMode), 0, 2);
+		if (Wui::Combo(ctx, Wui::HashId("inspect.eqs.gen_combo"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, "生成模式", genOptions, currentGen, theme))
+		{
+			comp->GeneratorMode = static_cast<uint8_t>(currentGen);
+			g_EQSPreviewState.GeneratorMode = comp->GeneratorMode;
+			if (changedFields) { changedFields->push_back("GeneratorMode"); }
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 5c. 理想战术交战距离 (OptimalDistance)
+		Wui::Label(ctx, { startX, curY + 2.0f }, "理想距离 (Optimal m):", theme.Text, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.optimal_dist"),
+			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->OptimalDistance, 0.5f, 1.0f, 50.0f, theme))
+		{
+			comp->OptimalDistance = std::clamp(comp->OptimalDistance, 1.0f, 50.0f);
+			g_EQSPreviewState.OptimalDistance = comp->OptimalDistance;
+			if (changedFields) { changedFields->push_back("OptimalDistance"); }
+			host.MarkDocumentDirty();
+		}
+		curY += 26.0f;
+
+		// 5d. 半高掩体下蹲评估 (IncludeCrouchCover)
+		bool crouchCover = (comp->IncludeCrouchCover != 0);
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.eqs.crouch_cover"),
+			{ startX, curY, contentW, 22.0f }, "启用半高掩体下蹲评估 (Include Crouch Cover)", crouchCover, theme))
+		{
+			comp->IncludeCrouchCover = crouchCover ? 1 : 0;
+			if (changedFields) { changedFields->push_back("IncludeCrouchCover"); }
+			host.MarkDocumentDirty();
+		}
 		curY += 28.0f;
 
 		// 6. [执行战术查询] 简洁按钮
@@ -6176,8 +6213,9 @@ float PropertiesPanel::DrawBehaviorTreeInspector(Wui::WuiContext& ctx, const Wui
 	}
 	Wui::Label(ctx, { startX, curY + 2.0f }, "黑板资产 (.wbb):", theme.Text, theme.FontSizeSmall);
 	int chosenBbIdx = selectedBbIdx;
+	const float bbComboW = paramFieldW - 86.0f;
 	if (Wui::Combo(ctx, Wui::HashId("inspect.bt.bb_asset_combo"),
-		{ startX + paramLabelW, curY, paramFieldW, 22.0f }, "黑板资产", bbOptions, chosenBbIdx, theme))
+		{ startX + paramLabelW, curY, bbComboW, 22.0f }, "黑板资产", bbOptions, chosenBbIdx, theme))
 	{
 		if (chosenBbIdx >= 0 && chosenBbIdx < static_cast<int>(bbOptions.size()))
 		{
@@ -6186,6 +6224,18 @@ float PropertiesPanel::DrawBehaviorTreeInspector(Wui::WuiContext& ctx, const Wui
 			m_Host.MarkDocumentDirty();
 		}
 	}
+	Wui::WuiTheme bbBtnTheme = theme;
+	bbBtnTheme.ButtonBg = Wui::WuiColor { 0.15f, 0.40f, 0.50f, 0.90f };
+	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_open_bb"),
+		{ startX + paramLabelW + bbComboW + 6.0f, curY, 80.0f, 22.0f }, "[黑板编辑]", bbBtnTheme))
+	{
+		std::string targetBbPath = (chosenBbIdx >= 0 && chosenBbIdx < static_cast<int>(bbOptions.size()))
+			? bbOptions[chosenBbIdx] : "assets/ai/DefaultEnemyBlackboard.wbb";
+		BehaviorTreeEditorPanel::RequestOpenPath(targetBbPath);
+		m_Host.ActivatePanel("behaviortree");
+		m_Host.Notify("已在专属黑板编辑器中打开: " + targetBbPath);
+	}
+	Wui::Tooltip(ctx, { startX + paramLabelW + bbComboW + 6.0f, curY, 80.0f, 22.0f }, "在独立黑板编辑器中打开并配置该 .wbb 资产的变量与默认值");
 	curY += 30.0f;
 
 	// =========================================================================
@@ -6207,7 +6257,30 @@ float PropertiesPanel::DrawBehaviorTreeInspector(Wui::WuiContext& ctx, const Wui
 		m_Host.Notify("已在专属行为树编辑器中载入: " + targetPath);
 	}
 	Wui::Tooltip(ctx, openBtnRect, "打开专属行为树工作台面板，可视化编排树结构大纲、属性参数与黑板变量");
-	curY += 38.0f;
+	curY += 34.0f;
+
+	// 快速交互测试按钮
+	const float halfBtnW = (contentW - 6.0f) * 0.5f;
+	Wui::WuiTheme abortTheme = theme;
+	abortTheme.ButtonBg = Wui::WuiColor { 0.55f, 0.20f, 0.15f, 0.90f };
+	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_abort_test"), { startX, curY, halfBtnW, 24.0f }, "✦ 触发打断 (Abort)", abortTheme))
+	{
+		bt->AbortRequested = 1;
+		m_Host.Notify("已向 AI 实体下发响应式打断信号 (AbortRequested = 1)");
+	}
+	Wui::Tooltip(ctx, { startX, curY, halfBtnW, 24.0f }, "向正在运行的行为树下发打断信号，测试 Decorator 抢占与分支重评估");
+
+	Wui::WuiTheme resetTheme = theme;
+	resetTheme.ButtonBg = Wui::WuiColor { 0.25f, 0.35f, 0.45f, 0.90f };
+	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_reset_test"), { startX + halfBtnW + 6.0f, curY, halfBtnW, 24.0f }, "✦ 重置状态 (Reset)", resetTheme))
+	{
+		bt->ClearPath();
+		bt->Status = BehaviorStatus::Inactive;
+		bt->ExecutionTimer = 0.0f;
+		m_Host.Notify("已重置 AI 实体行为树执行栈与状态");
+	}
+	Wui::Tooltip(ctx, { startX + halfBtnW + 6.0f, curY, halfBtnW, 24.0f }, "清空当前执行栈路径并将状态重置为休眠待机 (Inactive)");
+	curY += 32.0f;
 
 	// =========================================================================
 	// 3. 运行期只读监控卡片 (Runtime Read-Only Monitor)

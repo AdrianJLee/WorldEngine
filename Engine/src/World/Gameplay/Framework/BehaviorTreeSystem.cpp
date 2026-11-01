@@ -19,6 +19,13 @@ namespace World::Gameplay
 		std::unordered_map<uint32_t, std::shared_ptr<BehaviorNode>> s_TreeRegistry;
 		std::unordered_map<std::string, std::shared_ptr<BehaviorNode>> s_PathTreeRegistry;
 
+		struct EntityRunnerRecord
+		{
+			uint32_t TreeAssetId = 0;
+			std::shared_ptr<BehaviorTreeRunner> Runner;
+		};
+		std::unordered_map<uint32_t, EntityRunnerRecord> s_EntityRunners;
+
 		std::shared_ptr<BehaviorNode> BuildDefaultDemoTree()
 		{
 			BehaviorTreeAsset asset;
@@ -61,6 +68,13 @@ namespace World::Gameplay
 		std::lock_guard<std::mutex> lock(s_TreeRegistryMutex);
 		s_TreeRegistry.clear();
 		s_PathTreeRegistry.clear();
+		s_EntityRunners.clear();
+	}
+
+	void BehaviorTreeSystem::ClearEntityRunners()
+	{
+		std::lock_guard<std::mutex> lock(s_TreeRegistryMutex);
+		s_EntityRunners.clear();
 	}
 
 	std::shared_ptr<BehaviorNode> BehaviorTreeSystem::GetOrCreateTree(const std::string& assetPath)
@@ -115,10 +129,6 @@ namespace World::Gameplay
 			if (!bt.Enabled)
 				continue;
 
-			auto root = GetTree(bt.TreeAssetId);
-			if (!root)
-				continue;
-
 			Entity entity(&scene, entityHandle);
 			uint32_t entityRaw = static_cast<uint32_t>((entt::entity)entityHandle);
 
@@ -135,38 +145,56 @@ namespace World::Gameplay
 					board->RegisterKey("Tag", BlackboardKeyType::Int32, static_cast<int32_t>(bt.BlackboardTag));
 			}
 
+			// 获取或创建实体专属的 BehaviorTreeRunner 实例（彻底隔离多实体运行期状态与观察者绑定）
+			std::shared_ptr<BehaviorTreeRunner> runner;
+			{
+				std::lock_guard<std::mutex> lock(s_TreeRegistryMutex);
+				auto it = s_EntityRunners.find(entityRaw);
+				if (it == s_EntityRunners.end() || it->second.TreeAssetId != bt.TreeAssetId || !it->second.Runner)
+				{
+					if (it != s_EntityRunners.end() && it->second.Runner)
+					{
+						BehaviorContext oldCtx{ scene, entity, bt, *board, dt, 0 };
+						it->second.Runner->Shutdown(oldCtx);
+					}
+
+					std::shared_ptr<BehaviorNode> rootNode;
+					if (bt.TreeAssetId == 1)
+					{
+						rootNode = BuildDefaultDemoTree();
+					}
+					else
+					{
+						auto itTree = s_TreeRegistry.find(bt.TreeAssetId);
+						if (itTree != s_TreeRegistry.end())
+							rootNode = itTree->second;
+					}
+
+					if (rootNode)
+					{
+						runner = std::make_shared<BehaviorTreeRunner>(rootNode);
+						s_EntityRunners[entityRaw] = { bt.TreeAssetId, runner };
+						BehaviorContext initCtx{ scene, entity, bt, *board, dt, 0 };
+						runner->Init(initCtx);
+					}
+				}
+				else
+				{
+					runner = it->second.Runner;
+				}
+			}
+
+			if (!runner)
+				continue;
+
 			float prevVal = bt.BlackboardValue;
 			glm::vec3 prevPos = bt.BlackboardTargetPos;
 			uint32_t prevTag = bt.BlackboardTag;
 
 			BehaviorContext ctx{ scene, entity, bt, *board, dt, 0 };
+			runner->Tick(ctx);
 
-			// 响应式打断处理
-			if (bt.AbortRequested != 0)
-			{
-				bt.AbortRequested = 0;
-				root->OnAbort(ctx);
-				bt.ClearPath();
-				bt.Status = BehaviorStatus::Inactive;
-			}
-
-			NodeStatus status = root->Tick(ctx);
-			if (status == NodeStatus::Running)
-			{
-				bt.Status = BehaviorStatus::Running;
-			}
-			else if (status == NodeStatus::Success)
-			{
-				bt.Status = BehaviorStatus::Success;
-				bt.ClearPath();
-			}
-			else if (status == NodeStatus::Failure)
-			{
-				bt.Status = BehaviorStatus::Failure;
-				bt.ClearPath();
-			}
-
-			// 将黑板标准状态反向镜像回组件缓存（若在动作内直接修改了组件字段，则优先同步至黑板）
+			// 将黑板标准状态反向镜像回组件缓存
 			if (bt.BlackboardValue != prevVal)
 				board->Set("Value", bt.BlackboardValue);
 			else if (board->HasKey("Value"))

@@ -18,6 +18,120 @@
 
 namespace World
 {
+	namespace
+	{
+		Gameplay::BlackboardKeyType ParseKeyType(const std::string& typeStr)
+		{
+			if (typeStr == "Bool") return Gameplay::BlackboardKeyType::Bool;
+			if (typeStr == "Int" || typeStr == "Int32") return Gameplay::BlackboardKeyType::Int32;
+			if (typeStr == "Float") return Gameplay::BlackboardKeyType::Float;
+			if (typeStr == "Double") return Gameplay::BlackboardKeyType::Double;
+			if (typeStr == "Vector2" || typeStr == "Vec2") return Gameplay::BlackboardKeyType::Vector2;
+			if (typeStr == "Vector3" || typeStr == "Vec3") return Gameplay::BlackboardKeyType::Vector3;
+			if (typeStr == "Vector4" || typeStr == "Vec4" || typeStr == "Color" || typeStr == "Quat") return Gameplay::BlackboardKeyType::Vector4;
+			if (typeStr == "Entity") return Gameplay::BlackboardKeyType::Entity;
+			if (typeStr == "String") return Gameplay::BlackboardKeyType::String;
+			if (typeStr.rfind("ArrayFloat", 0) == 0 || typeStr == "FloatArray" || typeStr == "Float[]") return Gameplay::BlackboardKeyType::ArrayFloat;
+			if (typeStr.rfind("ArrayInt", 0) == 0 || typeStr == "IntArray" || typeStr == "Int[]") return Gameplay::BlackboardKeyType::ArrayInt32;
+			if (typeStr.rfind("ArrayVector3", 0) == 0 || typeStr == "Vector3Array" || typeStr == "Vec3[]" || typeStr == "Waypoints") return Gameplay::BlackboardKeyType::ArrayVector3;
+			if (typeStr.rfind("ArrayEntity", 0) == 0 || typeStr == "EntityArray" || typeStr == "Entity[]" || typeStr == "PerceivedThreats") return Gameplay::BlackboardKeyType::ArrayEntity;
+			if (typeStr.rfind("ArrayString", 0) == 0 || typeStr == "StringArray" || typeStr == "String[]") return Gameplay::BlackboardKeyType::ArrayString;
+			return Gameplay::BlackboardKeyType::Float;
+		}
+
+		Gameplay::BlackboardValue ParseKeyValue(Gameplay::BlackboardKeyType type, const std::string& valStr)
+		{
+			switch (type)
+			{
+			case Gameplay::BlackboardKeyType::Bool:
+				return (valStr == "true" || valStr == "1");
+			case Gameplay::BlackboardKeyType::Int32:
+				try { return static_cast<int32_t>(std::stoi(valStr)); } catch (...) { return int32_t(0); }
+			case Gameplay::BlackboardKeyType::Float:
+				try { return std::stof(valStr); } catch (...) { return 0.0f; }
+			case Gameplay::BlackboardKeyType::Double:
+				try { return std::stod(valStr); } catch (...) { return 0.0; }
+			case Gameplay::BlackboardKeyType::Vector2:
+			{
+				float x = 0.0f, y = 0.0f;
+				if (std::sscanf(valStr.c_str(), "[%f, %f]", &x, &y) == 2 ||
+				    std::sscanf(valStr.c_str(), "%f,%f", &x, &y) == 2)
+					return glm::vec2(x, y);
+				return glm::vec2(0.0f);
+			}
+			case Gameplay::BlackboardKeyType::Vector3:
+			{
+				float x = 0.0f, y = 0.0f, z = 0.0f;
+				if (std::sscanf(valStr.c_str(), "[%f, %f, %f]", &x, &y, &z) == 3 ||
+				    std::sscanf(valStr.c_str(), "%f,%f,%f", &x, &y, &z) == 3 ||
+				    std::sscanf(valStr.c_str(), "%f %f %f", &x, &y, &z) == 3)
+				{
+					return glm::vec3(x, y, z);
+				}
+				return glm::vec3(0.0f);
+			}
+			case Gameplay::BlackboardKeyType::Vector4:
+			{
+				float x = 0.0f, y = 0.0f, z = 0.0f, w = 0.0f;
+				if (std::sscanf(valStr.c_str(), "[%f, %f, %f, %f]", &x, &y, &z, &w) == 4 ||
+				    std::sscanf(valStr.c_str(), "%f,%f,%f,%f", &x, &y, &z, &w) == 4)
+					return glm::vec4(x, y, z, w);
+				return glm::vec4(0.0f);
+			}
+			case Gameplay::BlackboardKeyType::Entity:
+				try { return static_cast<uint32_t>(std::stoul(valStr)); } catch (...) { return uint32_t(0); }
+			case Gameplay::BlackboardKeyType::String:
+				return valStr;
+			case Gameplay::BlackboardKeyType::ArrayFloat:
+			{
+				std::vector<float> vec;
+				std::stringstream ss(valStr);
+				float f;
+				while (ss >> f) { vec.push_back(f); if (ss.peek() == ',' || ss.peek() == ' ') ss.ignore(); }
+				return vec;
+			}
+			case Gameplay::BlackboardKeyType::ArrayInt32:
+			{
+				std::vector<int32_t> vec;
+				std::stringstream ss(valStr);
+				int32_t i;
+				while (ss >> i) { vec.push_back(i); if (ss.peek() == ',' || ss.peek() == ' ') ss.ignore(); }
+				return vec;
+			}
+			case Gameplay::BlackboardKeyType::ArrayEntity:
+			{
+				std::vector<uint32_t> vec;
+				std::stringstream ss(valStr);
+				uint32_t e;
+				while (ss >> e) { vec.push_back(e); if (ss.peek() == ',' || ss.peek() == ' ') ss.ignore(); }
+				return vec;
+			}
+			case Gameplay::BlackboardKeyType::ArrayString:
+			{
+				std::vector<std::string> vec;
+				std::stringstream ss(valStr);
+				std::string s;
+				while (std::getline(ss, s, ',')) { if (!s.empty()) vec.push_back(s); }
+				return vec;
+			}
+			case Gameplay::BlackboardKeyType::ArrayVector3:
+			{
+				std::vector<glm::vec3> vec;
+				const char* p = valStr.c_str();
+				float x, y, z;
+				while ((p = std::strchr(p, '[')) != nullptr)
+				{
+					if (std::sscanf(p, "[%f, %f, %f]", &x, &y, &z) == 3)
+						vec.push_back(glm::vec3(x, y, z));
+					p++;
+				}
+				return vec;
+			}
+			default:
+				return 0.0f;
+			}
+		}
+	}
 	std::string BehaviorTreeEditorPanel::s_PendingOpenPath;
 
 	BehaviorTreeEditorPanel::BehaviorTreeEditorPanel()
@@ -198,8 +312,25 @@ namespace World
 
 	void BehaviorTreeEditorPanel::NewAsset()
 	{
+		if (m_Mode == EditorMode::Blackboard)
+		{
+			m_BlackboardAsset.Clear();
+			m_BlackboardKeys = {
+				{ "TargetPos", "Vector3", "[0.0, 0.0, 0.0]" },
+				{ "TargetEntity", "Entity", "0" },
+				{ "HasThreat", "Bool", "false" },
+				{ "Value", "Float", "0.0" }
+			};
+			m_LogicalPath = "assets/ai/new_blackboard.wbb";
+			m_AssetName = "new_blackboard";
+			m_Dirty = true;
+			m_StatusFeedback = "新建独立黑板资产 (New Blackboard Asset Created)";
+			return;
+		}
+
 		m_Nodes.clear();
 		m_BlackboardKeys.clear();
+		m_BoundBlackboardPath.clear();
 		m_NextNodeId = 1;
 		m_SelectedNodeId = 0;
 		m_LogicalPath = "assets/ai/new_behavior_tree.wbt";
@@ -214,10 +345,70 @@ namespace World
 		std::replace(normalized.begin(), normalized.end(), '\\', '/');
 		std::filesystem::path physical = ResolvePhysicalPath(normalized);
 
+		const bool isWbb = (normalized.rfind(".wbb") != std::string::npos || normalized.rfind(".wblackboard") != std::string::npos);
+
+		if (isWbb)
+		{
+			m_Mode = EditorMode::Blackboard;
+			m_ActiveTab = ViewTab::Blackboard;
+			m_LogicalPath = normalized;
+			m_AssetName = physical.stem().string();
+
+			std::string error;
+			if (!m_BlackboardAsset.LoadFromFile(physical.string(), &error))
+			{
+				m_BlackboardAsset.Clear();
+				m_BlackboardKeys = {
+					{ "TargetPos", "Vector3", "[0.0, 0.0, 0.0]" },
+					{ "TargetEntity", "Entity", "0" },
+					{ "HasThreat", "Bool", "false" },
+					{ "Value", "Float", "0.0" }
+				};
+				m_Dirty = true;
+				m_StatusFeedback = "新建独立黑板资产: " + normalized;
+				return true;
+			}
+
+			m_BlackboardKeys.clear();
+			for (const auto& k : m_BlackboardAsset.GetKeys())
+			{
+				std::string valStr = "0.0";
+				if (std::holds_alternative<bool>(k.DefaultValue)) valStr = std::get<bool>(k.DefaultValue) ? "true" : "false";
+				else if (std::holds_alternative<int32_t>(k.DefaultValue)) valStr = std::to_string(std::get<int32_t>(k.DefaultValue));
+				else if (std::holds_alternative<float>(k.DefaultValue)) valStr = std::to_string(std::get<float>(k.DefaultValue));
+				else if (std::holds_alternative<glm::vec3>(k.DefaultValue))
+				{
+					const auto& v = std::get<glm::vec3>(k.DefaultValue);
+					valStr = "[" + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " + std::to_string(v.z) + "]";
+				}
+				else if (std::holds_alternative<uint32_t>(k.DefaultValue)) valStr = std::to_string(std::get<uint32_t>(k.DefaultValue));
+				else if (std::holds_alternative<std::string>(k.DefaultValue)) valStr = std::get<std::string>(k.DefaultValue);
+
+				std::string typeStr = "Float";
+				switch (k.Type)
+				{
+				case Gameplay::BlackboardKeyType::Bool: typeStr = "Bool"; break;
+				case Gameplay::BlackboardKeyType::Int32: typeStr = "Int"; break;
+				case Gameplay::BlackboardKeyType::Float: typeStr = "Float"; break;
+				case Gameplay::BlackboardKeyType::Vector3: typeStr = "Vector3"; break;
+				case Gameplay::BlackboardKeyType::Entity: typeStr = "Entity"; break;
+				case Gameplay::BlackboardKeyType::String: typeStr = "String"; break;
+				}
+				m_BlackboardKeys.push_back({ k.Name, typeStr, valStr });
+			}
+
+			m_Dirty = false;
+			m_StatusFeedback = "已载入独立黑板资产 (.wbb): " + m_LogicalPath;
+			return true;
+		}
+
+		// 行为树资产 (.wbt) 载入流程
+		m_Mode = EditorMode::BehaviorTree;
+		m_ActiveTab = ViewTab::TreeOutline;
+
 		std::string error;
 		if (!m_Asset.LoadFromFile(physical.string(), &error))
 		{
-			// 如果磁盘尚无该文件，载入默认模板并提示
 			SetDefaultTemplate();
 			m_LogicalPath = normalized;
 			m_AssetName = physical.stem().string();
@@ -227,11 +418,57 @@ namespace World
 		}
 
 		m_Nodes = m_Asset.Nodes();
-		m_BlackboardKeys = m_Asset.BlackboardKeys();
+		m_BoundBlackboardPath = m_Asset.GetBlackboardAssetPath();
 		m_LogicalPath = normalized;
 		m_AssetName = physical.stem().string();
+
+		// 若行为树关联了外部独立 .wbb 黑板资产，优先从该资产同步变量定义
+		if (!m_BoundBlackboardPath.empty())
+		{
+			std::filesystem::path bbPhys = ResolvePhysicalPath(m_BoundBlackboardPath);
+			std::string bbErr;
+			if (m_BlackboardAsset.LoadFromFile(bbPhys.string(), &bbErr))
+			{
+				m_BlackboardKeys.clear();
+				for (const auto& k : m_BlackboardAsset.GetKeys())
+				{
+					std::string valStr = "0.0";
+					if (std::holds_alternative<bool>(k.DefaultValue)) valStr = std::get<bool>(k.DefaultValue) ? "true" : "false";
+					else if (std::holds_alternative<int32_t>(k.DefaultValue)) valStr = std::to_string(std::get<int32_t>(k.DefaultValue));
+					else if (std::holds_alternative<float>(k.DefaultValue)) valStr = std::to_string(std::get<float>(k.DefaultValue));
+					else if (std::holds_alternative<glm::vec3>(k.DefaultValue))
+					{
+						const auto& v = std::get<glm::vec3>(k.DefaultValue);
+						valStr = "[" + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " + std::to_string(v.z) + "]";
+					}
+					else if (std::holds_alternative<uint32_t>(k.DefaultValue)) valStr = std::to_string(std::get<uint32_t>(k.DefaultValue));
+					else if (std::holds_alternative<std::string>(k.DefaultValue)) valStr = std::get<std::string>(k.DefaultValue);
+
+					std::string typeStr = "Float";
+					switch (k.Type)
+					{
+					case Gameplay::BlackboardKeyType::Bool: typeStr = "Bool"; break;
+					case Gameplay::BlackboardKeyType::Int32: typeStr = "Int"; break;
+					case Gameplay::BlackboardKeyType::Float: typeStr = "Float"; break;
+					case Gameplay::BlackboardKeyType::Vector3: typeStr = "Vector3"; break;
+					case Gameplay::BlackboardKeyType::Entity: typeStr = "Entity"; break;
+					case Gameplay::BlackboardKeyType::String: typeStr = "String"; break;
+					}
+					m_BlackboardKeys.push_back({ k.Name, typeStr, valStr });
+				}
+			}
+			else
+			{
+				m_BlackboardKeys = m_Asset.BlackboardKeys();
+			}
+		}
+		else
+		{
+			m_BlackboardKeys = m_Asset.BlackboardKeys();
+		}
+
 		m_Dirty = false;
-		m_StatusFeedback = "已载入: " + m_LogicalPath;
+		m_StatusFeedback = "已载入行为树资产 (.wbt): " + m_LogicalPath;
 
 		m_NextNodeId = 1;
 		for (const auto& node : m_Nodes)
@@ -250,17 +487,46 @@ namespace World
 		if (physical.has_parent_path())
 			std::filesystem::create_directories(physical.parent_path(), ec);
 
+		if (m_Mode == EditorMode::Blackboard)
+		{
+			m_BlackboardAsset.Clear();
+			for (const auto& k : m_BlackboardKeys)
+			{
+				Gameplay::BlackboardKeyDesc desc;
+				desc.Name = k.KeyName;
+				desc.Type = ParseKeyType(k.TypeName);
+				desc.DefaultValue = ParseKeyValue(desc.Type, k.DefaultValue);
+				m_BlackboardAsset.AddKey(desc);
+			}
+
+			std::string error;
+			if (!m_BlackboardAsset.SaveToFile(physical.string(), &error))
+			{
+				m_StatusFeedback = "保存黑板资产失败: " + error;
+				return false;
+			}
+			m_Dirty = false;
+			m_StatusFeedback = "黑板资产保存成功 (.wbb): " + m_LogicalPath;
+			return true;
+		}
+
+		// 行为树保存
 		m_Asset.Nodes() = m_Nodes;
-		m_Asset.BlackboardKeys() = m_BlackboardKeys;
+		m_Asset.SetBlackboardAssetPath(m_BoundBlackboardPath);
+		if (m_BoundBlackboardPath.empty())
+		{
+			m_Asset.BlackboardKeys() = m_BlackboardKeys;
+		}
+
 		std::string error;
 		if (!m_Asset.SaveToFile(physical.string(), &error))
 		{
-			m_StatusFeedback = "保存失败: " + error;
+			m_StatusFeedback = "保存行为树失败: " + error;
 			return false;
 		}
 
 		m_Dirty = false;
-		m_StatusFeedback = "保存成功: " + m_LogicalPath;
+		m_StatusFeedback = "行为树保存成功 (.wbt): " + m_LogicalPath;
 		return true;
 	}
 
@@ -512,25 +778,44 @@ namespace World
 		const float curY = rect.Y + 6.0f;
 		const float btnH = 26.0f;
 
-		if (Wui::Button(ctx, Wui::HashId("bt.tb.new"), { curX, curY, 56.0f, btnH }, "新建", theme))
+		if (m_Mode == EditorMode::Blackboard)
 		{
-			NewAsset();
-		}
-		curX += 62.0f;
+			if (Wui::Button(ctx, Wui::HashId("bt.tb.new_bb"), { curX, curY, 66.0f, btnH }, "新建黑板", theme))
+			{
+				NewAsset();
+			}
+			curX += 72.0f;
 
-		if (Wui::Button(ctx, Wui::HashId("bt.tb.open"), { curX, curY, 56.0f, btnH }, "打开", theme))
-		{
-			std::vector<std::string> bts = Editor::AssetCatalog::PathsFor(EditorAssetKind::BehaviorTree);
-			if (!bts.empty())
+			if (Wui::Button(ctx, Wui::HashId("bt.tb.open_bb"), { curX, curY, 66.0f, btnH }, "打开黑板", theme))
 			{
-				LoadAsset(bts[0]);
+				std::vector<std::string> bbs = Editor::AssetCatalog::PathsFor(EditorAssetKind::Blackboard);
+				if (!bbs.empty())
+					LoadAsset(bbs[0]);
 			}
-			else
-			{
-				m_StatusFeedback = "工程内未检测到其他 .wbt 资产，已打开默认模板";
-			}
+			curX += 72.0f;
 		}
-		curX += 62.0f;
+		else
+		{
+			if (Wui::Button(ctx, Wui::HashId("bt.tb.new"), { curX, curY, 56.0f, btnH }, "新建", theme))
+			{
+				NewAsset();
+			}
+			curX += 62.0f;
+
+			if (Wui::Button(ctx, Wui::HashId("bt.tb.open"), { curX, curY, 56.0f, btnH }, "打开", theme))
+			{
+				std::vector<std::string> bts = Editor::AssetCatalog::PathsFor(EditorAssetKind::BehaviorTree);
+				if (!bts.empty())
+				{
+					LoadAsset(bts[0]);
+				}
+				else
+				{
+					m_StatusFeedback = "工程内未检测到其他 .wbt 资产，已打开默认模板";
+				}
+			}
+			curX += 62.0f;
+		}
 
 		Wui::WuiTheme saveTheme = theme;
 		if (m_Dirty)
@@ -559,30 +844,80 @@ namespace World
 		}
 		curX += 138.0f;
 
-		const float tabW = 86.0f;
-		Wui::WuiTheme tab1Theme = theme;
-		if (m_ActiveTab == ViewTab::TreeOutline)
+		if (m_Mode == EditorMode::Blackboard)
 		{
-			tab1Theme.ButtonBg = theme.Accent;
-			tab1Theme.Border = theme.Accent;
-		}
-		if (Wui::Button(ctx, Wui::HashId("bt.tb.tab_tree"), { curX, curY, tabW, btnH }, "节点大纲", tab1Theme))
-		{
-			m_ActiveTab = ViewTab::TreeOutline;
-		}
-		curX += tabW + 4.0f;
+			// 独立黑板模式徽章
+			const Wui::WuiRect modeBadge { curX, curY, 200.0f, btnH };
+			Wui::Badge(ctx, modeBadge, "BLACKBOARD ASSET (.WBB)", Wui::WuiColor { 0.12f, 0.35f, 0.45f, 0.4f }, Wui::WuiColor { 0.20f, 0.80f, 0.95f, 0.95f }, theme);
+			curX += 208.0f;
 
-		Wui::WuiTheme tab2Theme = theme;
-		if (m_ActiveTab == ViewTab::Blackboard)
-		{
-			tab2Theme.ButtonBg = theme.Accent;
-			tab2Theme.Border = theme.Accent;
+			if (Wui::Button(ctx, Wui::HashId("bt.tb.switch_to_bt"), { curX, curY, 130.0f, btnH }, "[切换至行为树]", theme))
+			{
+				m_Mode = EditorMode::BehaviorTree;
+				m_ActiveTab = ViewTab::TreeOutline;
+				LoadAsset("assets/ai/SmartObjectDemo.wbt");
+			}
+			curX += 138.0f;
 		}
-		if (Wui::Button(ctx, Wui::HashId("bt.tb.tab_bb"), { curX, curY, tabW, btnH }, "黑板变量", tab2Theme))
+		else
 		{
-			m_ActiveTab = ViewTab::Blackboard;
+			const float tabW = 86.0f;
+			Wui::WuiTheme tab1Theme = theme;
+			if (m_ActiveTab == ViewTab::TreeOutline)
+			{
+				tab1Theme.ButtonBg = theme.Accent;
+				tab1Theme.Border = theme.Accent;
+			}
+			if (Wui::Button(ctx, Wui::HashId("bt.tb.tab_tree"), { curX, curY, tabW, btnH }, "节点大纲", tab1Theme))
+			{
+				m_ActiveTab = ViewTab::TreeOutline;
+			}
+			curX += tabW + 4.0f;
+
+			Wui::WuiTheme tab2Theme = theme;
+			if (m_ActiveTab == ViewTab::Blackboard)
+			{
+				tab2Theme.ButtonBg = theme.Accent;
+				tab2Theme.Border = theme.Accent;
+			}
+			if (Wui::Button(ctx, Wui::HashId("bt.tb.tab_bb"), { curX, curY, tabW, btnH }, "黑板变量", tab2Theme))
+			{
+				m_ActiveTab = ViewTab::Blackboard;
+			}
+			curX += tabW + 12.0f;
+
+			// 关联独立黑板资产快捷选择
+			Wui::Label(ctx, { curX, curY + 4.0f }, "关联黑板 (.wbb):", theme.TextMuted, theme.FontSizeSmall);
+			curX += 95.0f;
+			std::vector<std::string> bbAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::Blackboard);
+			if (bbAssets.empty())
+				bbAssets.push_back("assets/ai/DefaultEnemyBlackboard.wbb");
+			bbAssets.insert(bbAssets.begin(), "(无 / 内嵌保底黑板)");
+
+			int currentBbIdx = 0;
+			for (size_t b = 1; b < bbAssets.size(); ++b)
+			{
+				if (bbAssets[b] == m_BoundBlackboardPath) { currentBbIdx = static_cast<int>(b); break; }
+			}
+
+			if (Wui::Combo(ctx, Wui::HashId("bt.tb.bound_bb_combo"), { curX, curY, 180.0f, btnH }, "黑板资产", bbAssets, currentBbIdx, theme))
+			{
+				if (currentBbIdx == 0)
+				{
+					m_BoundBlackboardPath.clear();
+					m_Dirty = true;
+				}
+				else if (currentBbIdx < static_cast<int>(bbAssets.size()))
+				{
+					m_BoundBlackboardPath = bbAssets[currentBbIdx];
+					m_Dirty = true;
+					// 立即从该独立黑板同步数据
+					std::filesystem::path bbPhys = ResolvePhysicalPath(m_BoundBlackboardPath);
+					m_BlackboardAsset.LoadFromFile(bbPhys.string());
+				}
+			}
+			curX += 186.0f;
 		}
-		curX += tabW + 12.0f;
 
 		std::string pathText = m_LogicalPath;
 		if (m_Dirty) pathText += " * (未保存)";
@@ -614,13 +949,14 @@ namespace World
 		std::string countStr = std::to_string(m_Nodes.size()) + " Nodes";
 		Wui::Label(ctx, { rect.X + rect.W - 70.0f, rect.Y + 6.0f }, countStr.c_str(), theme.TextMuted, theme.FontSizeSmall);
 
-		float toolY = rect.Y + 32.0f;
+		const float toolBtnW = (rect.W - 22.0f) / 3.0f;
+		// 第一排：组合节点 (Selector, Sequence, Parallel)
+		float toolY = rect.Y + 30.0f;
 		float toolX = rect.X + 8.0f;
-		const float toolBtnW = (rect.W - 24.0f) / 4.0f;
 
 		Wui::WuiTheme selTheme = theme;
 		selTheme.ButtonBg = NodeKindToColor(BTNodeKind::Selector);
-		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.sel"), { toolX, toolY, toolBtnW, 22.0f }, "+ 选择器", selTheme))
+		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.sel"), { toolX, toolY, toolBtnW, 22.0f }, "+ 选择器 (Selector)", selTheme))
 		{
 			AddChildNode(m_SelectedNodeId != 0 ? m_SelectedNodeId : 1, BTNodeKind::Selector);
 		}
@@ -628,15 +964,34 @@ namespace World
 
 		Wui::WuiTheme seqTheme = theme;
 		seqTheme.ButtonBg = NodeKindToColor(BTNodeKind::Sequence);
-		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.seq"), { toolX, toolY, toolBtnW, 22.0f }, "+ 顺序组", seqTheme))
+		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.seq"), { toolX, toolY, toolBtnW, 22.0f }, "+ 顺序器 (Sequence)", seqTheme))
 		{
 			AddChildNode(m_SelectedNodeId != 0 ? m_SelectedNodeId : 1, BTNodeKind::Sequence);
 		}
 		toolX += toolBtnW + 3.0f;
 
+		Wui::WuiTheme parTheme = theme;
+		parTheme.ButtonBg = NodeKindToColor(BTNodeKind::Parallel);
+		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.par"), { toolX, toolY, toolBtnW, 22.0f }, "+ 并行器 (Parallel)", parTheme))
+		{
+			AddChildNode(m_SelectedNodeId != 0 ? m_SelectedNodeId : 1, BTNodeKind::Parallel);
+		}
+
+		// 第二排：控制与叶子节点 (Decorator, Condition, Action)
+		toolY += 26.0f;
+		toolX = rect.X + 8.0f;
+
+		Wui::WuiTheme decTheme = theme;
+		decTheme.ButtonBg = NodeKindToColor(BTNodeKind::Decorator);
+		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.dec"), { toolX, toolY, toolBtnW, 22.0f }, "+ 装饰器 (Decorator)", decTheme))
+		{
+			AddChildNode(m_SelectedNodeId != 0 ? m_SelectedNodeId : 1, BTNodeKind::Decorator);
+		}
+		toolX += toolBtnW + 3.0f;
+
 		Wui::WuiTheme cndTheme = theme;
 		cndTheme.ButtonBg = NodeKindToColor(BTNodeKind::Condition);
-		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.cnd"), { toolX, toolY, toolBtnW, 22.0f }, "+ 条件谓词", cndTheme))
+		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.cnd"), { toolX, toolY, toolBtnW, 22.0f }, "+ 条件谓词 (Condition)", cndTheme))
 		{
 			AddChildNode(m_SelectedNodeId != 0 ? m_SelectedNodeId : 1, BTNodeKind::Condition);
 		}
@@ -644,12 +999,12 @@ namespace World
 
 		Wui::WuiTheme actTheme = theme;
 		actTheme.ButtonBg = NodeKindToColor(BTNodeKind::Action);
-		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.act"), { toolX, toolY, toolBtnW, 22.0f }, "+ 执行动作", actTheme))
+		if (Wui::Button(ctx, Wui::HashId("bt.add_quick.act"), { toolX, toolY, toolBtnW, 22.0f }, "+ 执行动作 (Action)", actTheme))
 		{
 			AddChildNode(m_SelectedNodeId != 0 ? m_SelectedNodeId : 1, BTNodeKind::Action);
 		}
 
-		float listY = rect.Y + 60.0f;
+		float listY = rect.Y + 84.0f;
 
 		if (m_Nodes.empty())
 		{
@@ -1498,6 +1853,131 @@ namespace World
 
 			curY += cardH + 12.0f;
 		}
+		else if (node->Kind == BTNodeKind::Decorator)
+		{
+			const float cardH = 220.0f;
+			const Wui::WuiRect decCard { startX, curY, fieldW, cardH };
+			Wui::PanelBackground(ctx, decCard, Wui::WuiColor { 0.10f, 0.24f, 0.28f, 0.85f }, theme.Radius);
+			Wui::HighlightOutline(ctx, decCard, Wui::WuiColor { 0.25f, 0.65f, 0.85f, 1.0f }, theme.Radius, 1.0f);
+
+			float cardY = curY + 8.0f;
+			Wui::Label(ctx, { startX + 8.0f, cardY }, "[黑板条件装饰器] (Blackboard Observer & Flow Aborts)", theme.Accent, theme.FontSizeSmall);
+			cardY += 24.0f;
+
+			// 1. 观察黑板键 KeyName
+			Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "观察黑板键 (Key):", theme.Text, theme.FontSizeSmall);
+			std::vector<std::string> bbKeyOptions;
+			for (const auto& k : m_BlackboardKeys)
+				bbKeyOptions.push_back(k.KeyName);
+			if (bbKeyOptions.empty())
+				bbKeyOptions = { "HasThreat", "TargetPos", "TargetEntity", "Value", "Tag" };
+
+			int chosenKeyIdx = -1;
+			for (size_t k = 0; k < bbKeyOptions.size(); ++k)
+			{
+				if (bbKeyOptions[k] == node->StringParam) { chosenKeyIdx = static_cast<int>(k); break; }
+			}
+			if (chosenKeyIdx < 0)
+			{
+				if (!node->StringParam.empty())
+				{
+					bbKeyOptions.insert(bbKeyOptions.begin(), node->StringParam);
+					chosenKeyIdx = 0;
+				}
+				else
+				{
+					chosenKeyIdx = 0;
+					node->StringParam = bbKeyOptions[0];
+				}
+			}
+
+			if (Wui::Combo(ctx, Wui::HashId((std::string("bt.dec.key_combo.") + std::to_string(node->Id)).c_str()),
+				{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, "黑板键", bbKeyOptions, chosenKeyIdx, theme))
+			{
+				if (chosenKeyIdx >= 0 && chosenKeyIdx < static_cast<int>(bbKeyOptions.size()))
+				{
+					node->StringParam = bbKeyOptions[chosenKeyIdx];
+					m_Dirty = true;
+				}
+			}
+			cardY += 28.0f;
+
+			// 2. 比较操作符 CompOp
+			Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "比较条件 (Op):", theme.Text, theme.FontSizeSmall);
+			const std::vector<std::string> opOptions = {
+				"0: IsSet (有效/非零/非空)",
+				"1: IsNotSet (无效/为零/为空)",
+				"2: Equal (== 等于目标值)",
+				"3: NotEqual (!= 不等于目标值)",
+				"4: Greater (> 大于目标值)",
+				"5: Less (< 小于目标值)"
+			};
+			int chosenOp = std::clamp(static_cast<int>(node->CompOp), 0, 5);
+			if (Wui::Combo(ctx, Wui::HashId((std::string("bt.dec.op_combo.") + std::to_string(node->Id)).c_str()),
+				{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, "比较符", opOptions, chosenOp, theme))
+			{
+				node->CompOp = static_cast<Gameplay::ConditionOperator>(chosenOp);
+				m_Dirty = true;
+			}
+			cardY += 28.0f;
+
+			// 3. 目标比较数值 TargetValue (FloatParam)
+			Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "目标值 (Target):", theme.Text, theme.FontSizeSmall);
+			if (Wui::DragFloat(ctx, Wui::HashId((std::string("bt.dec.val_drag.") + std::to_string(node->Id)).c_str()),
+				{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, node->FloatParam, 1.0f, -99999.0f, 99999.0f, theme))
+			{
+				m_Dirty = true;
+			}
+			cardY += 28.0f;
+
+			// 4. 响应式打断模式 AbortMode
+			Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "打断模式 (Abort):", theme.Text, theme.FontSizeSmall);
+			const std::vector<std::string> abortOptions = {
+				"0: None (不主动打断)",
+				"1: Self (条件失效打断自身运行中子树)",
+				"2: LowerPriority (条件成立抢占打断低优先级分支)",
+				"3: Both (同时具备 Self 与 LowerPriority 响应式打断)"
+			};
+			int chosenAbort = std::clamp(static_cast<int>(node->AbortMode), 0, 3);
+			if (Wui::Combo(ctx, Wui::HashId((std::string("bt.dec.abort_combo.") + std::to_string(node->Id)).c_str()),
+				{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, "打断策略", abortOptions, chosenAbort, theme))
+			{
+				node->AbortMode = static_cast<Gameplay::FlowAbortMode>(chosenAbort);
+				m_Dirty = true;
+			}
+			cardY += 26.0f;
+			Wui::Label(ctx, { startX + labelW, cardY }, "提示: LowerPriority 用于当高优先级条件满足时立刻中止并抢占低优先级漫游/巡逻分支", theme.Warning, theme.FontSizeSmall);
+
+			curY += cardH + 12.0f;
+		}
+		else if (node->Kind == BTNodeKind::Parallel)
+		{
+			const float cardH = 95.0f;
+			const Wui::WuiRect parCard { startX, curY, fieldW, cardH };
+			Wui::PanelBackground(ctx, parCard, Wui::WuiColor { 0.24f, 0.12f, 0.22f, 0.85f }, theme.Radius);
+			Wui::HighlightOutline(ctx, parCard, Wui::WuiColor { 0.75f, 0.25f, 0.65f, 1.0f }, theme.Radius, 1.0f);
+
+			float cardY = curY + 8.0f;
+			Wui::Label(ctx, { startX + 8.0f, cardY }, "[并行执行器策略] (Parallel Policy)", theme.Accent, theme.FontSizeSmall);
+			cardY += 26.0f;
+
+			Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "成功条件 (Policy):", theme.Text, theme.FontSizeSmall);
+			const std::vector<std::string> parPolicies = {
+				"0: RequireOneSuccess (任一子节点成功即成功)",
+				"1: RequireAllSuccess (全部子节点成功才算成功)"
+			};
+			int chosenPol = (node->FloatParam > 0.5f) ? 1 : 0;
+			if (Wui::Combo(ctx, Wui::HashId((std::string("bt.par.pol_combo.") + std::to_string(node->Id)).c_str()),
+				{ startX + labelW, cardY, inputW - 16.0f, 22.0f }, "完成策略", parPolicies, chosenPol, theme))
+			{
+				node->FloatParam = static_cast<float>(chosenPol);
+				m_Dirty = true;
+			}
+			cardY += 26.0f;
+			Wui::Label(ctx, { startX + labelW, cardY }, "提示: 并行执行器会同时 Tick 所有子节点，适用于边移动边观察或边攻击边播放语音", theme.TextMuted, theme.FontSizeSmall);
+
+			curY += cardH + 12.0f;
+		}
 
 		Wui::Label(ctx, { startX, curY + 2.0f }, "节点拓扑控制 (Topology Actions):", theme.TextMuted, theme.FontSizeSmall);
 		curY += 24.0f;
@@ -1529,14 +2009,64 @@ void BehaviorTreeEditorPanel::RenderBlackboard(Wui::WuiContext& ctx, const Wui::
 		const Wui::WuiRect headRect { rect.X, rect.Y, rect.W, 28.0f };
 		Wui::PanelBackground(ctx, headRect, theme.CardBg, 0.0f);
 		Wui::HighlightOutline(ctx, headRect, theme.Border, 0.0f, 1.0f);
-		Wui::Label(ctx, { rect.X + 8.0f, rect.Y + 6.0f }, "黑板数据键值定义 (Blackboard Keys Registry)", theme.Accent, theme.FontSizeSmall);
+
+		if (m_Mode == EditorMode::Blackboard)
+		{
+			Wui::Label(ctx, { rect.X + 8.0f, rect.Y + 6.0f }, ("[独立黑板资产] " + m_LogicalPath + " (独立数据契约，可供多个行为树共享)").c_str(), theme.Warning, theme.FontSizeSmall);
+			if (Wui::Button(ctx, Wui::HashId("bt.bb.btn_create_bt"), { rect.X + rect.W - 190.0f, rect.Y + 3.0f, 180.0f, 22.0f }, "+ 创建使用此黑板的行为树", theme))
+			{
+				m_Mode = EditorMode::BehaviorTree;
+				m_ActiveTab = ViewTab::TreeOutline;
+				m_BoundBlackboardPath = m_LogicalPath;
+				m_LogicalPath = "assets/ai/new_tree_using_" + m_AssetName + ".wbt";
+				m_AssetName = "new_tree_using_" + m_AssetName;
+				m_Dirty = true;
+			}
+		}
+		else
+		{
+			if (!m_BoundBlackboardPath.empty())
+			{
+				Wui::Label(ctx, { rect.X + 8.0f, rect.Y + 6.0f }, ("[关联独立黑板资产: " + m_BoundBlackboardPath + "]").c_str(), theme.Success, theme.FontSizeSmall);
+				if (Wui::Button(ctx, Wui::HashId("bt.bb.btn_open_indep"), { rect.X + rect.W - 190.0f, rect.Y + 3.0f, 180.0f, 22.0f }, "在黑板编辑器中独立打开", theme))
+				{
+					LoadAsset(m_BoundBlackboardPath);
+				}
+			}
+			else
+			{
+				Wui::Label(ctx, { rect.X + 8.0f, rect.Y + 6.0f }, "行为树内嵌保底黑板 (Standalone) —— 建议导出为独立 .wbb 资产以复用", theme.TextMuted, theme.FontSizeSmall);
+				if (Wui::Button(ctx, Wui::HashId("bt.bb.btn_export_wbb"), { rect.X + rect.W - 180.0f, rect.Y + 3.0f, 170.0f, 22.0f }, "导出为独立 .wbb 资产", theme))
+				{
+					std::string newWbbPath = "assets/ai/" + m_AssetName + "_Blackboard.wbb";
+					std::filesystem::path phys = ResolvePhysicalPath(newWbbPath);
+					Gameplay::BlackboardAsset exportAsset;
+					for (const auto& k : m_BlackboardKeys)
+					{
+						Gameplay::BlackboardKeyDesc desc;
+						desc.Name = k.KeyName;
+						desc.Type = ParseKeyType(k.TypeName);
+						desc.DefaultValue = ParseKeyValue(desc.Type, k.DefaultValue);
+						exportAsset.AddKey(desc);
+					}
+					exportAsset.SaveToFile(phys.string());
+					m_BoundBlackboardPath = newWbbPath;
+					m_Dirty = true;
+					m_StatusFeedback = "已成功导出独立黑板资产: " + newWbbPath;
+				}
+			}
+		}
 
 		static const std::vector<std::string> kBlackboardTemplates = {
 			"TargetPos (Vector3)",
 			"TargetEntity (Entity)",
+			"Waypoints (ArrayVector3 路径点数组)",
+			"PerceivedThreats (ArrayEntity 敌对目标数组)",
 			"Health (Float)",
 			"MoveSpeed (Float)",
 			"PatrolRadius (Float)",
+			"HasThreat (Bool)",
+			"CombatAlert (Double)",
 			"Custom (自由新建)"
 		};
 
@@ -1554,13 +2084,25 @@ void BehaviorTreeEditorPanel::RenderBlackboard(Wui::WuiContext& ctx, const Wui::
 				m_BlackboardKeys.push_back({ "TargetEntity", "Entity", "0" });
 				break;
 			case 2:
-				m_BlackboardKeys.push_back({ "Health", "Float", "100.0" });
+				m_BlackboardKeys.push_back({ "Waypoints", "ArrayVector3", "[[10.0, 0.0, 10.0], [20.0, 0.0, 15.0]]" });
 				break;
 			case 3:
-				m_BlackboardKeys.push_back({ "MoveSpeed", "Float", "3.5" });
+				m_BlackboardKeys.push_back({ "PerceivedThreats", "ArrayEntity", "[]" });
 				break;
 			case 4:
+				m_BlackboardKeys.push_back({ "Health", "Float", "100.0" });
+				break;
+			case 5:
+				m_BlackboardKeys.push_back({ "MoveSpeed", "Float", "3.5" });
+				break;
+			case 6:
 				m_BlackboardKeys.push_back({ "PatrolRadius", "Float", "15.0" });
+				break;
+			case 7:
+				m_BlackboardKeys.push_back({ "HasThreat", "Bool", "false" });
+				break;
+			case 8:
+				m_BlackboardKeys.push_back({ "CombatAlert", "Double", "0.0" });
 				break;
 			default:
 				m_BlackboardKeys.push_back({ "NewKey_" + std::to_string(m_BlackboardKeys.size()), "Float", "0.0" });
@@ -1606,11 +2148,19 @@ void BehaviorTreeEditorPanel::RenderBlackboard(Wui::WuiContext& ctx, const Wui::
 
 		static const std::vector<std::string> kBlackboardTypes = {
 			"Float",
-			"Vector3",
-			"Entity",
+			"Int",
 			"Bool",
 			"String",
-			"Int"
+			"Vector3",
+			"Vector2",
+			"Vector4",
+			"Entity",
+			"Double",
+			"ArrayVector3",
+			"ArrayEntity",
+			"ArrayFloat",
+			"ArrayInt",
+			"ArrayString"
 		};
 
 		int toDeleteIdx = -1;

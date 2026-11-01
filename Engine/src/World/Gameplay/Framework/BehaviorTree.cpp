@@ -303,10 +303,7 @@ namespace World::Gameplay
 
 	void BlackboardConditionDecorator::Init(BehaviorContext& ctx)
 	{
-		m_BoundComponent = &ctx.Component;
-		m_ObservedBoard = &ctx.Board;
 		SetDepth(ctx.CurrentDepth);
-
 		BehaviorDecorator::Init(ctx);
 
 		if (m_AbortMode == FlowAbortMode::None || KeyName.empty())
@@ -318,40 +315,45 @@ namespace World::Gameplay
 			keyId = ctx.Board.RegisterKey(KeyName, BlackboardKeyType::Float);
 		}
 
-		if (m_ObserverId != 0)
-		{
-			ctx.Board.RemoveObserver(keyId, m_ObserverId);
-			m_ObserverId = 0;
-		}
-
+		uint32_t entityRaw = static_cast<uint32_t>((entt::entity)ctx.Self);
+		Scene* scenePtr = &ctx.CurrentScene;
+		Blackboard* boardPtr = &ctx.Board;
 		uint16_t myChildIdx = GetChildIndexInParent();
 		uint8_t parentDepth = (GetDepth() > 0) ? static_cast<uint8_t>(GetDepth() - 1) : 0;
 		FlowAbortMode abortMode = m_AbortMode;
 
-		m_ObserverId = ctx.Board.AddObserver(keyId, [this, myChildIdx, parentDepth, abortMode](uint32_t, const BlackboardValue&) {
-			if (!m_ObservedBoard || !m_BoundComponent)
+		m_ObserverId = ctx.Board.AddObserver(keyId, [this, myChildIdx, parentDepth, abortMode, entityRaw, scenePtr, boardPtr](uint32_t, const BlackboardValue&) {
+			if (!boardPtr || !scenePtr)
 				return;
 
-			bool condPassed = EvaluateConditionOnBoard(*m_ObservedBoard);
+			auto entHandle = static_cast<entt::entity>(entityRaw);
+			if (!scenePtr->GetRegistry().valid(entHandle))
+				return;
+
+			auto* comp = scenePtr->GetRegistry().try_get<BehaviorTreeComponent>(entHandle);
+			if (!comp)
+				return;
+
+			bool condPassed = EvaluateConditionOnBoard(*boardPtr);
 
 			if (abortMode == FlowAbortMode::Self || abortMode == FlowAbortMode::Both)
 			{
-				if (!condPassed && m_BoundComponent->Status == BehaviorStatus::Running)
+				if (!condPassed && comp->Status == BehaviorStatus::Running)
 				{
-					if (parentDepth < 8 && m_BoundComponent->GetPath(parentDepth) == myChildIdx)
+					if (parentDepth < 8 && comp->GetPath(parentDepth) == myChildIdx)
 					{
-						m_BoundComponent->AbortRequested = 1;
+						comp->AbortRequested = 1;
 					}
 				}
 			}
 
 			if (abortMode == FlowAbortMode::LowerPriority || abortMode == FlowAbortMode::Both)
 			{
-				if (condPassed && m_BoundComponent->Status == BehaviorStatus::Running)
+				if (condPassed && comp->Status == BehaviorStatus::Running)
 				{
-					if (parentDepth < 8 && m_BoundComponent->GetPath(parentDepth) > myChildIdx)
+					if (parentDepth < 8 && comp->GetPath(parentDepth) > myChildIdx)
 					{
-						m_BoundComponent->AbortRequested = 1;
+						comp->AbortRequested = 1;
 					}
 				}
 			}
@@ -378,54 +380,107 @@ namespace World::Gameplay
 		return EvaluateConditionOnBoard(ctx.Board);
 	}
 
+	static bool TryGetNumeric(const BlackboardValue& val, float& out)
+	{
+		if (std::holds_alternative<float>(val)) { out = std::get<float>(val); return true; }
+		if (std::holds_alternative<double>(val)) { out = static_cast<float>(std::get<double>(val)); return true; }
+		if (std::holds_alternative<int32_t>(val)) { out = static_cast<float>(std::get<int32_t>(val)); return true; }
+		if (std::holds_alternative<uint32_t>(val)) { out = static_cast<float>(std::get<uint32_t>(val)); return true; }
+		if (std::holds_alternative<bool>(val)) { out = std::get<bool>(val) ? 1.0f : 0.0f; return true; }
+		return false;
+	}
+
+	static bool TryGetArraySize(const BlackboardValue& val, size_t& outSize)
+	{
+		if (std::holds_alternative<std::vector<float>>(val)) { outSize = std::get<std::vector<float>>(val).size(); return true; }
+		if (std::holds_alternative<std::vector<int32_t>>(val)) { outSize = std::get<std::vector<int32_t>>(val).size(); return true; }
+		if (std::holds_alternative<std::vector<glm::vec3>>(val)) { outSize = std::get<std::vector<glm::vec3>>(val).size(); return true; }
+		if (std::holds_alternative<std::vector<uint32_t>>(val)) { outSize = std::get<std::vector<uint32_t>>(val).size(); return true; }
+		if (std::holds_alternative<std::vector<std::string>>(val)) { outSize = std::get<std::vector<std::string>>(val).size(); return true; }
+		return false;
+	}
+
 	bool BlackboardConditionDecorator::EvaluateConditionOnBoard(const Blackboard& board) const
 	{
 		const BlackboardValue* valPtr = board.GetValue(KeyName);
+		if (!valPtr)
+		{
+			return (Op == ConditionOperator::IsNotSet);
+		}
+
+		const BlackboardValue& actual = *valPtr;
+
+		// 1. 数组类型特殊判定 (IsSet 非空 / IsNotSet 为空 / 元素个数与阈值对比)
+		size_t arrSize = 0;
+		if (TryGetArraySize(actual, arrSize))
+		{
+			if (Op == ConditionOperator::IsSet) return arrSize > 0;
+			if (Op == ConditionOperator::IsNotSet) return arrSize == 0;
+
+			float numTarget = 0.0f;
+			if (TryGetNumeric(TargetValue, numTarget))
+			{
+				size_t targetCount = (numTarget >= 0.0f) ? static_cast<size_t>(numTarget) : 0;
+				if (Op == ConditionOperator::Equal) return arrSize == targetCount;
+				if (Op == ConditionOperator::NotEqual) return arrSize != targetCount;
+				if (Op == ConditionOperator::Greater) return arrSize > targetCount;
+				if (Op == ConditionOperator::Less) return arrSize < targetCount;
+			}
+			return (Op == ConditionOperator::Equal) ? (actual == TargetValue) : (actual != TargetValue);
+		}
+
+		// 2. 标量类型存在性判定 (IsSet / IsNotSet)
 		if (Op == ConditionOperator::IsSet)
 		{
-			if (!valPtr) return false;
-			if (std::holds_alternative<bool>(*valPtr)) return std::get<bool>(*valPtr);
-			if (std::holds_alternative<uint32_t>(*valPtr)) return std::get<uint32_t>(*valPtr) != 0;
-			if (std::holds_alternative<float>(*valPtr)) return std::abs(std::get<float>(*valPtr)) > 1e-4f;
-			if (std::holds_alternative<std::string>(*valPtr)) return !std::get<std::string>(*valPtr).empty();
+			if (std::holds_alternative<bool>(actual)) return std::get<bool>(actual);
+			if (std::holds_alternative<uint32_t>(actual)) return std::get<uint32_t>(actual) != 0;
+			if (std::holds_alternative<int32_t>(actual)) return std::get<int32_t>(actual) != 0;
+			if (std::holds_alternative<float>(actual)) return std::abs(std::get<float>(actual)) > 1e-4f;
+			if (std::holds_alternative<double>(actual)) return std::abs(std::get<double>(actual)) > 1e-6;
+			if (std::holds_alternative<std::string>(actual)) return !std::get<std::string>(actual).empty();
 			return true;
 		}
 		if (Op == ConditionOperator::IsNotSet)
 		{
-			if (!valPtr) return true;
-			if (std::holds_alternative<bool>(*valPtr)) return !std::get<bool>(*valPtr);
-			if (std::holds_alternative<uint32_t>(*valPtr)) return std::get<uint32_t>(*valPtr) == 0;
+			if (std::holds_alternative<bool>(actual)) return !std::get<bool>(actual);
+			if (std::holds_alternative<uint32_t>(actual)) return std::get<uint32_t>(actual) == 0;
+			if (std::holds_alternative<int32_t>(actual)) return std::get<int32_t>(actual) == 0;
+			if (std::holds_alternative<float>(actual)) return std::abs(std::get<float>(actual)) <= 1e-4f;
+			if (std::holds_alternative<double>(actual)) return std::abs(std::get<double>(actual)) <= 1e-6;
+			if (std::holds_alternative<std::string>(actual)) return std::get<std::string>(actual).empty();
 			return false;
 		}
 
-		if (!valPtr)
-			return false;
+		// 跨数值类型的通用宽松对比 (bool / int32 / uint32 / float / double)
+		float numActual = 0.0f;
+		float numTarget = 0.0f;
+		const bool isNumActual = TryGetNumeric(actual, numActual);
+		const bool isNumTarget = TryGetNumeric(TargetValue, numTarget);
 
-		const BlackboardValue& actual = *valPtr;
 		if (Op == ConditionOperator::Equal)
 		{
+			if (isNumActual && isNumTarget)
+				return std::abs(numActual - numTarget) < 1e-4f;
 			return actual == TargetValue;
 		}
 		if (Op == ConditionOperator::NotEqual)
 		{
+			if (isNumActual && isNumTarget)
+				return std::abs(numActual - numTarget) >= 1e-4f;
 			return actual != TargetValue;
 		}
-
-		// 数值比较
-		float aVal = 0.0f;
-		float bVal = 0.0f;
-		if (std::holds_alternative<float>(actual)) aVal = std::get<float>(actual);
-		else if (std::holds_alternative<int32_t>(actual)) aVal = static_cast<float>(std::get<int32_t>(actual));
-		else if (std::holds_alternative<uint32_t>(actual)) aVal = static_cast<float>(std::get<uint32_t>(actual));
-
-		if (std::holds_alternative<float>(TargetValue)) bVal = std::get<float>(TargetValue);
-		else if (std::holds_alternative<int32_t>(TargetValue)) bVal = static_cast<float>(std::get<int32_t>(TargetValue));
-		else if (std::holds_alternative<uint32_t>(TargetValue)) bVal = static_cast<float>(std::get<uint32_t>(TargetValue));
-
 		if (Op == ConditionOperator::Greater)
-			return aVal > bVal;
+		{
+			if (isNumActual && isNumTarget)
+				return numActual > numTarget;
+			return false;
+		}
 		if (Op == ConditionOperator::Less)
-			return aVal < bVal;
+		{
+			if (isNumActual && isNumTarget)
+				return numActual < numTarget;
+			return false;
+		}
 
 		return false;
 	}

@@ -2978,7 +2978,9 @@ namespace World
 					if (found && m_Registry.all_of<BehaviorTreeComponent>(entity))
 					{
 						auto& bt = m_Registry.get<BehaviorTreeComponent>(entity);
-						if (bt.Enabled != 0)
+						// 仅在实体未绑定行为树（TreeAssetId == 0）时，作为轻量独立 EQS 驱动
+						// 若已挂载行为树，则由行为树内部节点（如 RunEQSQuery / MoveToEQSPosition）全权控制目标点与机动
+						if (bt.Enabled != 0 && bt.TreeAssetId == 0)
 						{
 							bt.BlackboardTargetPos = bestPos;
 							bt.BlackboardValue = bestScore;
@@ -2992,26 +2994,12 @@ namespace World
 								board->Set("Tag", static_cast<int32_t>(88));
 							}
 
-							// 若未绑定外部 .wbt 资产，委托给 NavMeshAgentComponent 驱动移动（绝不直接穿墙修改 tc.Location）
-							if (bt.TreeAssetId == 0)
+							// 工业级标准：委托给 NavMeshAgentComponent 驱动 A* 寻路避障
+							if (m_Registry.all_of<NavMeshAgentComponent>(entity))
 							{
-								if (m_Registry.all_of<NavMeshAgentComponent>(entity))
-								{
-									auto& agent = m_Registry.get<NavMeshAgentComponent>(entity);
-									agent.Destination = bestPos;
-									agent.AutoRepath = 1;
-								}
-								else
-								{
-									glm::vec3 diff = bestPos - tc.Location;
-									float dist = glm::length(diff);
-									if (dist > 0.05f)
-									{
-										float speed = 4.0f;
-										float step = std::min(dist, speed * dt);
-										tc.Location += (diff / dist) * step;
-									}
-								}
+								auto& agent = m_Registry.get<NavMeshAgentComponent>(entity);
+								agent.Destination = bestPos;
+								agent.AutoRepath = 1;
 							}
 						}
 					}

@@ -847,10 +847,15 @@ void EditorShell::OpenAsset(const std::string& rawPath)
 		OpenAtlasEditor(logical);
 		Notify("已在图集编辑器中打开: " + logical);
 	}
-	else if (ext == ".wbt" || ext == ".wbehaviortree" || ext == ".wbb" || ext == ".wblackboard")
+	else if (ext == ".wbt" || ext == ".wbehaviortree")
 	{
 		OpenBehaviorTreeEditor(logical);
 		Notify("已在行为树编辑器中打开: " + logical);
+	}
+	else if (ext == ".wbb" || ext == ".wblackboard")
+	{
+		OpenBehaviorTreeEditor(logical);
+		Notify("已在黑板数据编辑器中打开: " + logical);
 	}
 	else if (ext == ".wanimgraph")
 	{

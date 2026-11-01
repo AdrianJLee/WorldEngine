@@ -208,10 +208,12 @@ namespace World::EQS
 			}
 
 			float losOcclusion = 0.0f;
-			if (occludedGround || (occludedCrouch && occludedStand))
+			if (occludedCrouch && occludedStand)
 				losOcclusion = 1.0f;
 			else if (occludedCrouch)
 				losOcclusion = 0.65f;
+			else if (occludedGround && !occludedCrouch)
+				losOcclusion = 0.15f; // 地表低矮障碍仅微弱遮蔽足部，头胸躯干完全暴露在枪线下
 
 			const float rawVal = InvertOcclusion ? (1.0f - losOcclusion) : losOcclusion;
 
@@ -445,7 +447,7 @@ namespace World::EQS
 
 				if (minWallDist < 1e8f)
 				{
-					const float deltaD = std::max(0.0f, minWallDist - IdealValue);
+					const float deltaD = minWallDist - IdealValue;
 					const float sigma = (GaussianSigma > 0.001f) ? GaussianSigma : 1.25f;
 					wallScore = std::exp(-(deltaD * deltaD) / (2.0f * sigma * sigma));
 				}

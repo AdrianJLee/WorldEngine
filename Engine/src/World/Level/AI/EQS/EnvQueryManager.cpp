@@ -8,17 +8,27 @@ namespace World::EQS
 	bool CoverReservationPool::ReserveCover(const glm::vec3& pos, uint32_t ownerEntity, float leaseTime)
 	{
 		std::lock_guard<std::mutex> lock(m_Mutex);
+		// 1. 检查是否有其他实体已经预定了此掩体点位（1.0m 半径内），杜绝抢占
+		for (const auto& r : m_Reservations)
+		{
+			if (r.OwnerEntity != ownerEntity && glm::distance(r.Position, pos) < 1.0f)
+			{
+				return false; // 已被其他友军预定，拒绝抢占
+			}
+		}
+
+		// 2. 若自身已持有预定，更新位置与租约
 		for (auto& r : m_Reservations)
 		{
-			if (r.OwnerEntity == ownerEntity || glm::distance(r.Position, pos) < 1.0f)
+			if (r.OwnerEntity == ownerEntity)
 			{
 				r.Position = pos;
-				r.OwnerEntity = ownerEntity;
 				r.RemainingTime = leaseTime;
 				return true;
 			}
 		}
 
+		// 3. 全新预定加入池中
 		CoverReservation res;
 		res.Position = pos;
 		res.OwnerEntity = ownerEntity;

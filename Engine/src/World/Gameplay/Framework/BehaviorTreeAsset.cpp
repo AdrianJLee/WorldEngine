@@ -3,6 +3,7 @@
 #include "World/Gameplay/Framework/SmartObjectSystem.h"
 #include "World/Gameplay/Framework/DamageSystem.h"
 #include "World/Level/AI/EQSCoverSystem.h"
+#include "World/Level/AI/EQS/EnvQueryManager.h"
 #include "World/NavMesh/NavMesh.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Entity.h"
@@ -64,6 +65,30 @@ namespace World::Gameplay
 			if (str == "LowerPriority") return FlowAbortMode::LowerPriority;
 			if (str == "Both") return FlowAbortMode::Both;
 			return FlowAbortMode::None;
+		}
+
+		std::string ConditionOpToString(ConditionOperator op)
+		{
+			switch (op)
+			{
+			case ConditionOperator::IsSet: return "IsSet";
+			case ConditionOperator::IsNotSet: return "IsNotSet";
+			case ConditionOperator::Equal: return "Equal";
+			case ConditionOperator::NotEqual: return "NotEqual";
+			case ConditionOperator::Greater: return "Greater";
+			case ConditionOperator::Less: return "Less";
+			default: return "IsSet";
+			}
+		}
+
+		ConditionOperator StringToConditionOp(const std::string& str)
+		{
+			if (str == "IsNotSet") return ConditionOperator::IsNotSet;
+			if (str == "Equal") return ConditionOperator::Equal;
+			if (str == "NotEqual") return ConditionOperator::NotEqual;
+			if (str == "Greater") return ConditionOperator::Greater;
+			if (str == "Less") return ConditionOperator::Less;
+			return ConditionOperator::IsSet;
 		}
 
 		std::shared_ptr<BehaviorNode> CreateConditionNode(const BehaviorTreeNodeDesc& desc)
@@ -312,7 +337,13 @@ else if (type == "UseSmartObject")
 					if (ctx.Self.HasComponent<NavMeshAgentComponent>())
 					{
 						auto& agent = ctx.Self.GetComponent<NavMeshAgentComponent>();
-						if (agent.ReachedDestination || agent.HasPath == 0)
+						if (agent.ReachedDestination != 0)
+						{
+							agent.ReachedDestination = 0;
+							agent.HasPath = 0;
+							return NodeStatus::Success; // 到达单段巡逻点，放行后续序列动作（如短暂观察停顿）
+						}
+						if (agent.HasPath == 0)
 						{
 							const auto& navMesh = ctx.CurrentScene.GetNavMesh();
 							glm::vec3 nextPatrolPos = tr.Location;
@@ -407,71 +438,336 @@ else if (type == "UseSmartObject")
 				if (!desc.StringParam.empty())
 					modeStr = desc.StringParam;
 
-				return std::make_shared<ActionNode>([param, modeStr](BehaviorContext& ctx) {
-					if (!ctx.Self.HasComponent<TransformComponent>())
-						return NodeStatus::Failure;
+				return std::make_shared<ActionNode>(
+					[param, modeStr](BehaviorContext& ctx) -> NodeStatus {
+						if (!ctx.Self.HasComponent<TransformComponent>())
+							return NodeStatus::Failure;
 
-					auto& tr = ctx.Self.GetComponent<TransformComponent>();
-					uint32_t querierRaw = static_cast<uint32_t>((entt::entity)ctx.Self);
-					uint32_t threatHint = 0;
-					float radius = param > 0.0f ? param : 25.0f;
-					float spacing = 1.5f;
-					EQSQueryMode queryMode = EQSQueryMode::Cover;
-					if (modeStr == "Flank") queryMode = EQSQueryMode::Flank;
-					else if (modeStr == "Retreat") queryMode = EQSQueryMode::Retreat;
+						// 若已在异步等待中，保持挂起
+						if (ctx.Board.Get<bool>("EQSQueryPending", false))
+						{
+							return NodeStatus::Running;
+						}
 
-					uint8_t genMode = 0;
-					if (ctx.Self.HasComponent<EQSComponent>())
-					{
-						const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
-						threatHint = eqsc.ThreatEntityHint;
-						if (eqsc.QueryRadius > 0.1f) radius = eqsc.QueryRadius;
-						if (eqsc.GridSpacing > 0.1f) spacing = eqsc.GridSpacing;
-						if (eqsc.QueryMode <= 2) queryMode = static_cast<EQSQueryMode>(eqsc.QueryMode);
-						genMode = eqsc.GeneratorMode;
-					}
+						// 若异步任务已完成，评估成败
+						if (ctx.Board.HasKey("EQSQueryCompleted") && ctx.Board.Get<bool>("EQSQueryCompleted", false))
+						{
+							ctx.Board.Set("EQSQueryCompleted", false);
+							bool success = ctx.Board.Get<bool>("EQSQuerySuccess", false);
+							if (success)
+							{
+								ctx.Component.BlackboardTargetPos = ctx.Board.Get<glm::vec3>("TargetPos", ctx.Component.BlackboardTargetPos);
+								ctx.Component.BlackboardValue = ctx.Board.Get<float>("Value", ctx.Component.BlackboardValue);
+								ctx.Component.BlackboardTag = static_cast<uint32_t>(ctx.Board.Get<int32_t>("Tag", 88));
+								if (ctx.Self.HasComponent<EQSComponent>())
+								{
+									auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
+									eqsc.QueryCenter = ctx.Self.GetComponent<TransformComponent>().Location;
+									eqsc.BestCoverFound = 1;
+								}
+								return NodeStatus::Success;
+							}
+							return NodeStatus::Failure;
+						}
 
-					glm::vec3 threatPos(0.0f);
-					uint32_t resolvedThreatRaw = 0;
-					EQSCoverSystem::ResolveSceneThreatPosition(ctx.CurrentScene, querierRaw, threatHint, tr.Location, threatPos, &resolvedThreatRaw);
+						// 发起新的异步潜伏 EQS 查询
+						auto& tr = ctx.Self.GetComponent<TransformComponent>();
+						uint32_t querierRaw = static_cast<uint32_t>((entt::entity)ctx.Self);
+						uint32_t threatHint = 0;
+						float radius = param > 0.0f ? param : 25.0f;
+						float spacing = 1.5f;
+						EQSQueryMode queryMode = EQSQueryMode::Cover;
+						if (modeStr == "Flank") queryMode = EQSQueryMode::Flank;
+						else if (modeStr == "Retreat") queryMode = EQSQueryMode::Retreat;
 
-					std::vector<CoverBox> obstacles;
-					EQSCoverSystem::GatherSceneObstacles(ctx.CurrentScene, querierRaw, resolvedThreatRaw, obstacles);
-
-					glm::vec3 bestPos(0.0f);
-					float bestScore = -1.0f;
-					std::vector<EQSCoverCandidate> dummyCandidates;
-					if (EQSCoverSystem::EvaluateQueryCandidates(queryMode, tr.Location, threatPos, radius, spacing, obstacles, dummyCandidates, bestPos, bestScore, nullptr, glm::mat4(1.0f), genMode))
-					{
-						ctx.Board.Set("TargetPos", bestPos);
-						ctx.Board.Set("Value", bestScore);
-						ctx.Board.Set("Tag", uint32_t(88));
-
-						ctx.Component.BlackboardTargetPos = bestPos;
-						ctx.Component.BlackboardValue = bestScore;
-						ctx.Component.BlackboardTag = 88;
+						uint8_t genMode = 0;
 						if (ctx.Self.HasComponent<EQSComponent>())
 						{
-							auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
-							eqsc.QueryCenter = tr.Location;
-							eqsc.BestCoverFound = 1;
+							const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
+							threatHint = eqsc.ThreatEntityHint;
+							if (eqsc.QueryRadius > 0.1f) radius = eqsc.QueryRadius;
+							if (eqsc.GridSpacing > 0.1f) spacing = eqsc.GridSpacing;
+							if (eqsc.QueryMode <= 2) queryMode = static_cast<EQSQueryMode>(eqsc.QueryMode);
+							genMode = eqsc.GeneratorMode;
 						}
-						return NodeStatus::Success;
+
+						glm::vec3 threatPos(0.0f);
+						uint32_t resolvedThreatRaw = 0;
+						EQSCoverSystem::ResolveSceneThreatPosition(ctx.CurrentScene, querierRaw, threatHint, tr.Location, threatPos, &resolvedThreatRaw);
+
+						std::vector<CoverBox> obstacles;
+						EQSCoverSystem::GatherSceneObstacles(ctx.CurrentScene, querierRaw, resolvedThreatRaw, obstacles);
+
+						std::shared_ptr<EQS::EQSQuery> query;
+						if (queryMode == EQSQueryMode::Flank)
+							query = EQSCoverSystem::BuildPresetFlankQuery(genMode);
+						else if (queryMode == EQSQueryMode::Retreat)
+							query = EQSCoverSystem::BuildPresetRetreatQuery(genMode);
+						else
+							query = EQSCoverSystem::BuildPresetCoverQuery(genMode);
+
+						EQS::EQSQueryContext queryCtx;
+						queryCtx.ScenePtr = &ctx.CurrentScene;
+						queryCtx.QuerierPos = tr.Location;
+						queryCtx.QuerierEntityRaw = querierRaw;
+						queryCtx.ThreatPos = threatPos;
+						queryCtx.ThreatEntityHint = resolvedThreatRaw;
+						queryCtx.QueryRadius = radius;
+						queryCtx.GridSpacing = spacing;
+						queryCtx.Obstacles = std::move(obstacles);
+
+						uint32_t reqId = EQS::EnvQueryManager::Get().RequestQuery(
+							query, queryCtx,
+							[querierRaw](const EQS::EQSQueryResult& res) {
+								auto board = BlackboardRegistry::Get().GetBlackboard(querierRaw);
+								if (board)
+								{
+									if (res.Success)
+									{
+										board->Set("TargetPos", res.BestPosition);
+										board->Set("CoverPos", res.BestPosition);
+										board->Set("Value", res.BestScore);
+										board->Set("Tag", static_cast<int32_t>(88));
+										board->Set("EQSQuerySuccess", true);
+									}
+									else
+									{
+										board->Set("EQSQuerySuccess", false);
+									}
+									board->Set("EQSQueryPending", false);
+									board->Set("EQSQueryCompleted", true);
+								}
+							}
+						);
+
+						ctx.Board.Set("EQSQueryPending", true);
+						ctx.Board.Set("EQSQueryCompleted", false);
+						ctx.Board.Set("EQSQuerySuccess", false);
+						ctx.Board.Set("EQSActiveReqId", static_cast<int32_t>(reqId));
+						return NodeStatus::Running;
+					},
+					[](BehaviorContext& ctx) {
+						if (ctx.Board.Get<bool>("EQSQueryPending", false))
+						{
+							uint32_t reqId = static_cast<uint32_t>(ctx.Board.Get<int32_t>("EQSActiveReqId", 0));
+							if (reqId != 0)
+								EQS::EnvQueryManager::Get().CancelRequest(reqId);
+							ctx.Board.Set("EQSQueryPending", false);
+							ctx.Board.Set("EQSQueryCompleted", false);
+						}
 					}
-					return NodeStatus::Failure;
-				});
+				);
+			}
+			else if (type == "MoveToEQSPosition")
+			{
+				return std::make_shared<ActionNode>(
+					[param](BehaviorContext& ctx) -> NodeStatus {
+						if (!ctx.Self.HasComponent<TransformComponent>())
+							return NodeStatus::Failure;
+
+						auto& tr = ctx.Self.GetComponent<TransformComponent>();
+						glm::vec3 targetPos = ctx.Board.Get<glm::vec3>("CoverPos", ctx.Board.Get<glm::vec3>("TargetPos", ctx.Component.BlackboardTargetPos));
+
+						if (ctx.Self.HasComponent<NavMeshAgentComponent>())
+						{
+							auto& agent = ctx.Self.GetComponent<NavMeshAgentComponent>();
+							agent.Destination = targetPos;
+							if (param > 0.0f) agent.Speed = param;
+							agent.AutoRepath = 1;
+
+							if (agent.ReachedDestination != 0)
+							{
+								return NodeStatus::Success;
+							}
+							return NodeStatus::Running;
+						}
+
+						glm::vec3 diff = targetPos - tr.Location;
+						float dist = glm::length(diff);
+						float speed = param > 0.0f ? param : 3.5f;
+						float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
+						float step = speed * dt;
+
+						if (dist <= 0.05f || step >= dist)
+						{
+							tr.Location = targetPos;
+							return NodeStatus::Success;
+						}
+
+						tr.Location += (diff / dist) * step;
+						return NodeStatus::Running;
+					},
+					[](BehaviorContext& ctx) {
+						if (ctx.Self.HasComponent<NavMeshAgentComponent>())
+						{
+							auto& agent = ctx.Self.GetComponent<NavMeshAgentComponent>();
+							agent.HasPath = 0;
+						}
+					}
+				);
+			}
+			else if (type == "ExecuteEQSTacticalAction")
+			{
+				std::string modeStr = desc.StringParam.empty() ? "Cover" : desc.StringParam;
+				return std::make_shared<ActionNode>(
+					[param, modeStr](BehaviorContext& ctx) -> NodeStatus {
+						if (!ctx.Self.HasComponent<TransformComponent>())
+							return NodeStatus::Failure;
+
+						// 阶段 1: 等待异步 EQS 计算
+						if (ctx.Board.Get<bool>("EQSQueryPending", false))
+						{
+							return NodeStatus::Running;
+						}
+
+						// 阶段 2: 检查是否已有计算好的掩体点
+						if (!ctx.Board.HasKey("CoverPos") && !ctx.Board.Get<bool>("EQSQueryCompleted", false))
+						{
+							auto& tr = ctx.Self.GetComponent<TransformComponent>();
+							uint32_t querierRaw = static_cast<uint32_t>((entt::entity)ctx.Self);
+							uint32_t threatHint = 0;
+							float radius = 25.0f;
+							float spacing = 1.5f;
+							EQSQueryMode queryMode = (modeStr == "Flank") ? EQSQueryMode::Flank
+								: ((modeStr == "Retreat") ? EQSQueryMode::Retreat : EQSQueryMode::Cover);
+
+							if (ctx.Self.HasComponent<EQSComponent>())
+							{
+								const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
+								threatHint = eqsc.ThreatEntityHint;
+								if (eqsc.QueryRadius > 0.1f) radius = eqsc.QueryRadius;
+								if (eqsc.GridSpacing > 0.1f) spacing = eqsc.GridSpacing;
+							}
+
+							glm::vec3 threatPos(0.0f);
+							uint32_t resolvedThreatRaw = 0;
+							EQSCoverSystem::ResolveSceneThreatPosition(ctx.CurrentScene, querierRaw, threatHint, tr.Location, threatPos, &resolvedThreatRaw);
+
+							std::vector<CoverBox> obstacles;
+							EQSCoverSystem::GatherSceneObstacles(ctx.CurrentScene, querierRaw, resolvedThreatRaw, obstacles);
+
+							auto query = (queryMode == EQSQueryMode::Flank)
+								? EQSCoverSystem::BuildPresetFlankQuery(0)
+								: ((queryMode == EQSQueryMode::Retreat)
+									? EQSCoverSystem::BuildPresetRetreatQuery(0)
+									: EQSCoverSystem::BuildPresetCoverQuery(0));
+
+							EQS::EQSQueryContext queryCtx;
+							queryCtx.ScenePtr = &ctx.CurrentScene;
+							queryCtx.QuerierPos = tr.Location;
+							queryCtx.QuerierEntityRaw = querierRaw;
+							queryCtx.ThreatPos = threatPos;
+							queryCtx.ThreatEntityHint = resolvedThreatRaw;
+							queryCtx.QueryRadius = radius;
+							queryCtx.GridSpacing = spacing;
+							queryCtx.Obstacles = std::move(obstacles);
+
+							uint32_t reqId = EQS::EnvQueryManager::Get().RequestQuery(
+								query, queryCtx,
+								[querierRaw](const EQS::EQSQueryResult& res) {
+									auto board = BlackboardRegistry::Get().GetBlackboard(querierRaw);
+									if (board)
+									{
+										if (res.Success)
+										{
+											board->Set("TargetPos", res.BestPosition);
+											board->Set("CoverPos", res.BestPosition);
+											board->Set("Value", res.BestScore);
+											board->Set("Tag", static_cast<int32_t>(88));
+											board->Set("EQSQuerySuccess", true);
+										}
+										else
+										{
+											board->Set("EQSQuerySuccess", false);
+										}
+										board->Set("EQSQueryPending", false);
+										board->Set("EQSQueryCompleted", true);
+									}
+								}
+							);
+
+							ctx.Board.Set("EQSQueryPending", true);
+							ctx.Board.Set("EQSQueryCompleted", false);
+							ctx.Board.Set("EQSActiveReqId", static_cast<int32_t>(reqId));
+							return NodeStatus::Running;
+						}
+
+						if (ctx.Board.Get<bool>("EQSQueryCompleted", false))
+						{
+							if (!ctx.Board.Get<bool>("EQSQuerySuccess", false))
+							{
+								ctx.Board.Set("EQSQueryCompleted", false);
+								return NodeStatus::Failure;
+							}
+						}
+
+						// 阶段 3: 移动至战术点位
+						glm::vec3 coverPos = ctx.Board.Get<glm::vec3>("CoverPos", ctx.Component.BlackboardTargetPos);
+						if (ctx.Self.HasComponent<NavMeshAgentComponent>())
+						{
+							auto& agent = ctx.Self.GetComponent<NavMeshAgentComponent>();
+							agent.Destination = coverPos;
+							if (param > 0.0f) agent.Speed = param;
+							agent.AutoRepath = 1;
+
+							if (agent.ReachedDestination != 0)
+							{
+								ctx.Board.Set("EQSQueryCompleted", false);
+								return NodeStatus::Success;
+							}
+							return NodeStatus::Running;
+						}
+
+						auto& tr = ctx.Self.GetComponent<TransformComponent>();
+						glm::vec3 diff = coverPos - tr.Location;
+						float dist = glm::length(diff);
+						float speed = param > 0.0f ? param : 3.5f;
+						float dt = ctx.Dt > 0.0f ? ctx.Dt : 0.016f;
+						float step = speed * dt;
+
+						if (dist <= 0.05f || step >= dist)
+						{
+							tr.Location = coverPos;
+							ctx.Board.Set("EQSQueryCompleted", false);
+							return NodeStatus::Success;
+						}
+
+						tr.Location += (diff / dist) * step;
+						return NodeStatus::Running;
+					},
+					[](BehaviorContext& ctx) {
+						if (ctx.Board.Get<bool>("EQSQueryPending", false))
+						{
+							uint32_t reqId = static_cast<uint32_t>(ctx.Board.Get<int32_t>("EQSActiveReqId", 0));
+							if (reqId != 0)
+								EQS::EnvQueryManager::Get().CancelRequest(reqId);
+							ctx.Board.Set("EQSQueryPending", false);
+							ctx.Board.Set("EQSQueryCompleted", false);
+						}
+						if (ctx.Self.HasComponent<NavMeshAgentComponent>())
+						{
+							auto& agent = ctx.Self.GetComponent<NavMeshAgentComponent>();
+							agent.HasPath = 0;
+						}
+					}
+				);
 			}
 			else if (type == "Wait")
 			{
-				return std::make_shared<ActionNode>([param](BehaviorContext& ctx) {
-					ctx.Component.ExecutionTimer += (ctx.Dt > 0.0f ? ctx.Dt : 0.016f);
-					if (ctx.Component.ExecutionTimer >= param)
-					{
+				return std::make_shared<ActionNode>(
+					[param](BehaviorContext& ctx) {
+						ctx.Component.ExecutionTimer += (ctx.Dt > 0.0f ? ctx.Dt : 0.016f);
+						if (ctx.Component.ExecutionTimer >= param)
+						{
+							ctx.Component.ExecutionTimer = 0.0f;
+							return NodeStatus::Success;
+						}
+						return NodeStatus::Running;
+					},
+					[](BehaviorContext& ctx) {
 						ctx.Component.ExecutionTimer = 0.0f;
-						return NodeStatus::Success;
 					}
-					return NodeStatus::Running;
-				});
+				);
 			}
 			else if (type == "SetBlackboardValue")
 			{
@@ -656,6 +952,7 @@ else if (type == "UseSmartObject")
 	{
 		m_Nodes.clear();
 		m_BlackboardKeys.clear();
+		m_BlackboardAssetPath.clear();
 	}
 
 	void BehaviorTreeAsset::SetDefaultTemplate()
@@ -740,6 +1037,11 @@ else if (type == "UseSmartObject")
 
 			Clear();
 
+			if (root["BlackboardAsset"])
+			{
+				m_BlackboardAssetPath = root["BlackboardAsset"].as<std::string>();
+			}
+
 			if (root["Blackboard"] && root["Blackboard"].IsSequence())
 			{
 				for (const auto& bbNode : root["Blackboard"])
@@ -776,6 +1078,7 @@ else if (type == "UseSmartObject")
 					if (nNode["FloatParam"]) nodeDesc.FloatParam = nNode["FloatParam"].as<float>();
 					if (nNode["StringParam"]) nodeDesc.StringParam = nNode["StringParam"].as<std::string>();
 					if (nNode["AbortMode"]) nodeDesc.AbortMode = StringToAbortMode(nNode["AbortMode"].as<std::string>());
+					if (nNode["CompOp"]) nodeDesc.CompOp = StringToConditionOp(nNode["CompOp"].as<std::string>());
 					m_Nodes.push_back(std::move(nodeDesc));
 				}
 			}
@@ -804,6 +1107,10 @@ else if (type == "UseSmartObject")
 			out << YAML::BeginMap;
 			out << YAML::Key << "FormatVersion" << YAML::Value << 1;
 			out << YAML::Key << "AssetType" << YAML::Value << "BehaviorTree";
+			if (!m_BlackboardAssetPath.empty())
+			{
+				out << YAML::Key << "BlackboardAsset" << YAML::Value << m_BlackboardAssetPath;
+			}
 
 			out << YAML::Key << "Blackboard" << YAML::Value << YAML::BeginSeq;
 			for (const auto& key : m_BlackboardKeys)
@@ -830,6 +1137,7 @@ else if (type == "UseSmartObject")
 				out << YAML::Key << "FloatParam" << YAML::Value << node.FloatParam;
 				out << YAML::Key << "StringParam" << YAML::Value << node.StringParam;
 				out << YAML::Key << "AbortMode" << YAML::Value << AbortModeToString(node.AbortMode);
+				out << YAML::Key << "CompOp" << YAML::Value << ConditionOpToString(node.CompOp);
 				out << YAML::EndMap;
 			}
 			out << YAML::EndSeq;
@@ -872,15 +1180,39 @@ else if (type == "UseSmartObject")
 
 	std::shared_ptr<Blackboard> BehaviorTreeAsset::InstantiateBlackboard() const
 	{
+		if (!m_BlackboardAssetPath.empty())
+		{
+			BlackboardAsset bbAsset;
+			std::string err;
+			std::filesystem::path resolvedPath = m_BlackboardAssetPath;
+			if (!std::filesystem::exists(resolvedPath) && resolvedPath.is_relative())
+			{
+				resolvedPath = Paths::AssetRoot() / resolvedPath;
+			}
+			if (bbAsset.LoadFromFile(resolvedPath.string(), &err))
+			{
+				return bbAsset.Instantiate();
+			}
+		}
+
 		auto bb = std::make_shared<Blackboard>();
 		for (const auto& key : m_BlackboardKeys)
 		{
 			BlackboardKeyType ktype = BlackboardKeyType::Float;
 			if (key.TypeName == "Bool") ktype = BlackboardKeyType::Bool;
 			else if (key.TypeName == "Int" || key.TypeName == "Int32") ktype = BlackboardKeyType::Int32;
+			else if (key.TypeName == "Float") ktype = BlackboardKeyType::Float;
+			else if (key.TypeName == "Double") ktype = BlackboardKeyType::Double;
+			else if (key.TypeName == "Vector2" || key.TypeName == "Vec2") ktype = BlackboardKeyType::Vector2;
 			else if (key.TypeName == "Vector3" || key.TypeName == "Vec3") ktype = BlackboardKeyType::Vector3;
+			else if (key.TypeName == "Vector4" || key.TypeName == "Vec4" || key.TypeName == "Color" || key.TypeName == "Quat") ktype = BlackboardKeyType::Vector4;
 			else if (key.TypeName == "Entity") ktype = BlackboardKeyType::Entity;
 			else if (key.TypeName == "String") ktype = BlackboardKeyType::String;
+			else if (key.TypeName == "ArrayFloat" || key.TypeName == "FloatArray" || key.TypeName == "Float[]") ktype = BlackboardKeyType::ArrayFloat;
+			else if (key.TypeName == "ArrayInt" || key.TypeName == "ArrayInt32" || key.TypeName == "IntArray" || key.TypeName == "Int[]") ktype = BlackboardKeyType::ArrayInt32;
+			else if (key.TypeName == "ArrayVector3" || key.TypeName == "Vector3Array" || key.TypeName == "Vec3[]" || key.TypeName == "Waypoints") ktype = BlackboardKeyType::ArrayVector3;
+			else if (key.TypeName == "ArrayEntity" || key.TypeName == "EntityArray" || key.TypeName == "Entity[]" || key.TypeName == "PerceivedThreats") ktype = BlackboardKeyType::ArrayEntity;
+			else if (key.TypeName == "ArrayString" || key.TypeName == "StringArray" || key.TypeName == "String[]") ktype = BlackboardKeyType::ArrayString;
 
 			bb->RegisterKey(key.KeyName, ktype);
 		}
@@ -914,7 +1246,10 @@ else if (type == "UseSmartObject")
 			"MoveToTarget",
 			"SeekSmartObject",
 			"UseSmartObject",
+			"RunEQSQuery",
 			"FindTacticalCover",
+			"MoveToEQSPosition",
+			"ExecuteEQSTacticalAction",
 			"SetBlackboardValue",
 			"IncrementBlackboardValue",
 			"SetBlackboardTag",
@@ -929,11 +1264,19 @@ else if (type == "UseSmartObject")
 	{
 		static const std::vector<std::string> s_Types = {
 			"Float",
-			"Vector3",
-			"Entity",
+			"Int",
 			"Bool",
 			"String",
-			"Int"
+			"Vector3",
+			"Vector2",
+			"Vector4",
+			"Entity",
+			"Double",
+			"ArrayVector3",
+			"ArrayEntity",
+			"ArrayFloat",
+			"ArrayInt",
+			"ArrayString"
 		};
 		return s_Types;
 	}

@@ -148,7 +148,9 @@ namespace World::EQS
 			for (const auto& lOff : localOffsets)
 			{
 				glm::vec3 worldPt = box.Center + box.Rotation * lOff;
-				worldPt.y = ctx.QuerierPos.y;
+				worldPt.y = box.Center.y - box.HalfExtents.y;
+				if (std::abs(ctx.QuerierPos.y - worldPt.y) < box.HalfExtents.y * 2.0f)
+					worldPt.y = ctx.QuerierPos.y;
 				const float dist = glm::distance(glm::vec2(worldPt.x, worldPt.z), glm::vec2(ctx.QuerierPos.x, ctx.QuerierPos.z));
 				if (dist <= r)
 				{

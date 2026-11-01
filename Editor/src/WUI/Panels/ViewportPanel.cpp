@@ -6783,6 +6783,102 @@ namespace World
 					}
 				}
 
+				// 2b. 行为树智能体 (BehaviorTreeComponent) 实时决策导航线、威胁连线与状态信标
+				for (auto [handle, bt] : registry.view<BehaviorTreeComponent>().each())
+				{
+					if (!bt.Enabled)
+						continue;
+
+					const bool isSelected = (handle == selectedHandle);
+					glm::vec3 center { 0.0f };
+					if (const auto* xform = registry.try_get<TransformComponent>(handle))
+						center = xform->Location;
+
+					// 1. 状态信标菱形 (Diamond Beacon above agent head)
+					const glm::vec3 headTop = center + glm::vec3(0.0f, 2.1f, 0.0f);
+					if (!isOccluded(headTop))
+					{
+						Wui::WuiColor beaconColor { 0.5f, 0.5f, 0.5f, 0.7f };
+						if (bt.Status == BehaviorStatus::Running)
+							beaconColor = Wui::WuiColor { 0.98f, 0.65f, 0.15f, 0.95f }; // 琥珀金 Running
+						else if (bt.Status == BehaviorStatus::Success)
+							beaconColor = Wui::WuiColor { 0.15f, 0.90f, 0.35f, 0.95f }; // 翡翠绿 Success
+						else if (bt.Status == BehaviorStatus::Failure)
+							beaconColor = Wui::WuiColor { 0.95f, 0.20f, 0.20f, 0.95f }; // 绯红 Failure
+
+						const float ds = isSelected ? 0.22f : 0.14f;
+						const glm::vec3 dTop = headTop + glm::vec3(0.0f, ds, 0.0f);
+						const glm::vec3 dBot = headTop - glm::vec3(0.0f, ds, 0.0f);
+						const glm::vec3 dLeft = headTop + glm::vec3(-ds, 0.0f, 0.0f);
+						const glm::vec3 dRight = headTop + glm::vec3(ds, 0.0f, 0.0f);
+						const glm::vec3 dFront = headTop + glm::vec3(0.0f, 0.0f, ds);
+						const glm::vec3 dBack = headTop + glm::vec3(0.0f, 0.0f, -ds);
+
+						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dTop, 1.0f), viewProj * glm::vec4(dLeft, 1.0f), beaconColor, 1.8f);
+						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dTop, 1.0f), viewProj * glm::vec4(dRight, 1.0f), beaconColor, 1.8f);
+						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dTop, 1.0f), viewProj * glm::vec4(dFront, 1.0f), beaconColor, 1.8f);
+						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dTop, 1.0f), viewProj * glm::vec4(dBack, 1.0f), beaconColor, 1.8f);
+
+						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dBot, 1.0f), viewProj * glm::vec4(dLeft, 1.0f), beaconColor, 1.8f);
+						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dBot, 1.0f), viewProj * glm::vec4(dRight, 1.0f), beaconColor, 1.8f);
+						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dBot, 1.0f), viewProj * glm::vec4(dFront, 1.0f), beaconColor, 1.8f);
+						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dBot, 1.0f), viewProj * glm::vec4(dBack, 1.0f), beaconColor, 1.8f);
+					}
+
+					// 仅在被选中或视距 45m 内绘制导航与威胁连线
+					const float camDist = glm::distance(center, cameraPos);
+					if (isSelected || camDist < 45.0f)
+					{
+						// 2. 黑板目标点连线与靶标 (BlackboardTargetPos)
+						if (glm::length(bt.BlackboardTargetPos) > 0.01f && glm::distance(center, bt.BlackboardTargetPos) > 0.3f)
+						{
+							const Wui::WuiColor btTargetColor { 0.20f, 0.85f, 0.95f, isSelected ? 0.90f : 0.60f };
+							const glm::vec3 startPt = center + glm::vec3(0.0f, 0.5f, 0.0f);
+							const glm::vec3 destPt = bt.BlackboardTargetPos + glm::vec3(0.0f, 0.1f, 0.0f);
+
+							if (!isOccluded(startPt) || !isOccluded(destPt))
+							{
+								PushProjectedSegment(ctx, viewProj, sceneRect,
+									viewProj * glm::vec4(startPt, 1.0f),
+									viewProj * glm::vec4(destPt, 1.0f),
+									btTargetColor, isSelected ? 2.2f : 1.4f);
+							}
+
+							if (!isOccluded(destPt))
+							{
+								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), destPt, 0.45f, 1, btTargetColor, 1.8f);
+								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), destPt, 0.20f, 1, btTargetColor, 1.4f);
+							}
+						}
+
+						// 3. 锁定威胁连线 (TargetEntity / Threat Line)
+						if (bt.TargetEntity != 0 && bt.TargetEntity != static_cast<uint32_t>(entt::null))
+						{
+							entt::entity threatHandle = static_cast<entt::entity>(bt.TargetEntity);
+							if (registry.valid(threatHandle) && registry.all_of<TransformComponent>(threatHandle))
+							{
+								const glm::vec3 threatPos = registry.get<TransformComponent>(threatHandle).Location;
+								const Wui::WuiColor threatLineColor { 0.95f, 0.20f, 0.20f, isSelected ? 0.85f : 0.50f };
+								const glm::vec3 tStart = center + glm::vec3(0.0f, 1.2f, 0.0f);
+								const glm::vec3 tEnd = threatPos + glm::vec3(0.0f, 1.2f, 0.0f);
+
+								if (!isOccluded(tStart) || !isOccluded(tEnd))
+								{
+									PushProjectedSegment(ctx, viewProj, sceneRect,
+										viewProj * glm::vec4(tStart, 1.0f),
+										viewProj * glm::vec4(tEnd, 1.0f),
+										threatLineColor, 1.8f);
+								}
+
+								if (!isOccluded(threatPos))
+								{
+									PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), threatPos, 0.40f, 1, threatLineColor, 2.0f);
+								}
+							}
+						}
+					}
+				}
+
 				// 3. 寻路探针测试路径
 				if (NavMeshPanel::ShowPaths)
 				{

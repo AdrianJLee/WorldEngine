@@ -16,11 +16,22 @@ namespace World
 	class BehaviorTreeEditorPanel final : public EditorPanel
 	{
 	public:
+		enum class EditorMode
+		{
+			BehaviorTree,
+			Blackboard
+		};
+
 		BehaviorTreeEditorPanel();
 		~BehaviorTreeEditorPanel() override = default;
 
 		const char* Id() const override { return "behaviortree"; }
-		const char* Title() const override { return m_Dirty ? "Behavior Tree *" : "Behavior Tree"; }
+		const char* Title() const override
+		{
+			if (m_Mode == EditorMode::Blackboard)
+				return m_Dirty ? "Blackboard Editor *" : "Blackboard Editor";
+			return m_Dirty ? "Behavior Tree *" : "Behavior Tree";
+		}
 
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
@@ -77,7 +88,11 @@ namespace World
 		std::string m_AssetName;
 		bool m_Dirty = false;
 
+		EditorMode m_Mode = EditorMode::BehaviorTree;
 		Gameplay::BehaviorTreeAsset m_Asset;
+		Gameplay::BlackboardAsset m_BlackboardAsset;
+		std::string m_BoundBlackboardPath;
+
 		std::vector<BTNodeDesc> m_Nodes;
 		std::vector<BTBlackboardKeyDesc> m_BlackboardKeys;
 		uint32_t m_NextNodeId = 1;

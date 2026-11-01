@@ -20,10 +20,33 @@ namespace World::Gameplay
 		Float = 2,
 		Vector3 = 3,
 		Entity = 4,
-		String = 5
+		String = 5,
+		Double = 6,
+		Vector2 = 7,
+		Vector4 = 8,
+		ArrayFloat = 9,
+		ArrayInt32 = 10,
+		ArrayVector3 = 11,
+		ArrayEntity = 12,
+		ArrayString = 13
 	};
 
-	using BlackboardValue = std::variant<bool, int32_t, float, glm::vec3, uint32_t, std::string>;
+	using BlackboardValue = std::variant<
+		bool,
+		int32_t,
+		float,
+		double,
+		glm::vec2,
+		glm::vec3,
+		glm::vec4,
+		uint32_t,
+		std::string,
+		std::vector<float>,
+		std::vector<int32_t>,
+		std::vector<glm::vec3>,
+		std::vector<uint32_t>,
+		std::vector<std::string>
+	>;
 
 	struct BlackboardKeyDesc
 	{
@@ -82,6 +105,27 @@ namespace World::Gameplay
 			if (v && std::holds_alternative<T>(*v))
 				return std::get<T>(*v);
 			return defaultVal;
+		}
+
+		// 数组操作辅助与诊断接口
+		bool IsArrayKey(uint32_t keyId) const;
+		bool IsArrayKey(const std::string& name) const;
+		size_t GetArraySize(uint32_t keyId) const;
+		size_t GetArraySize(const std::string& name) const;
+		bool ClearArray(uint32_t keyId);
+		bool ClearArray(const std::string& name);
+
+		template<typename T>
+		bool PushArrayElement(const std::string& name, const T& elem)
+		{
+			std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+			uint32_t keyId = GetKeyId(name);
+			if (keyId >= m_Values.size()) return false;
+			auto& val = m_Values[keyId];
+			if (!std::holds_alternative<std::vector<T>>(val)) return false;
+			auto vec = std::get<std::vector<T>>(val);
+			vec.push_back(elem);
+			return SetValue(keyId, BlackboardValue(vec));
 		}
 
 		// 观察者机制供 Decorator Observer Aborts 即时打断

@@ -197,7 +197,8 @@ namespace World::Gameplay
 	private:
 		uint32_t m_ObserverId = 0;
 		Blackboard* m_ObservedBoard = nullptr;
-		BehaviorTreeComponent* m_BoundComponent = nullptr;
+		Scene* m_BoundScene = nullptr;
+		uint32_t m_EntityRaw = 0;
 	};
 
 	class WLD_API ConditionNode : public BehaviorNode

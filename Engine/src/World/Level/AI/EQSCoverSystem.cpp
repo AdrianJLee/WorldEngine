@@ -197,14 +197,19 @@ namespace World
 		auto heightTest = std::make_shared<EQSTest_Height>();
 		heightTest->Weight = weights.ElevationWeight;
 
+		auto resTest = std::make_shared<EQSTest_CoverReservation>();
+		auto friendlyTest = std::make_shared<EQSTest_FriendlyPenalty>();
+
 		return EQSQuery::Builder()
 			.Named("Preset_CoverQuery")
 			.UsingGenerator(gen)
 			.AddTest(overlapTest)
+			.AddTest(resTest)
 			.AddTest(traceTest)
 			.AddTest(wallTest)
 			.AddTest(distTest)
 			.AddTest(heightTest)
+			.AddTest(friendlyTest)
 			.Build();
 	}
 
@@ -337,6 +342,24 @@ namespace World
 		if (!ok || result.Items.empty())
 			return false;
 
+		int traceIdx = -1, wallIdx = -1, distIdx = -1, heightIdx = -1, angleIdx = -1;
+		for (size_t t = 0; t < query->Tests.size(); ++t)
+		{
+			if (!query->Tests[t]) continue;
+			const std::string& name = query->Tests[t]->GetName();
+			if (name == "Test_Trace") traceIdx = static_cast<int>(t);
+			else if (name == "Test_WallProximity") wallIdx = static_cast<int>(t);
+			else if (name == "Test_Distance") distIdx = static_cast<int>(t);
+			else if (name == "Test_Height") heightIdx = static_cast<int>(t);
+			else if (name == "Test_Dot") angleIdx = static_cast<int>(t);
+		}
+
+		auto getScore = [&](const EQS::EQSCandidateItem& item, int idx, float weight) -> float {
+			if (idx >= 0 && idx < static_cast<int>(item.TestScores.size()) && weight > 0.0001f)
+				return item.TestScores[idx] / weight;
+			return 0.0f;
+		};
+
 		for (const auto& item : result.Items)
 		{
 			if (item.FilteredOut)
@@ -348,34 +371,24 @@ namespace World
 
 			if (mode == EQSQueryMode::Cover)
 			{
-				cand.LineOfSightOcclusion = (item.TestScores.size() > 1 && weights.OcclusionWeight > 0.0f)
-					? (item.TestScores[1] / weights.OcclusionWeight) : 0.0f;
-				cand.WallProximityScore = (item.TestScores.size() > 2 && weights.WallProximityWeight > 0.0f)
-					? (item.TestScores[2] / weights.WallProximityWeight) : 0.0f;
-				cand.DistanceScore = (item.TestScores.size() > 3 && weights.DistanceWeight > 0.0f)
-					? (item.TestScores[3] / weights.DistanceWeight) : 0.0f;
-				cand.ElevationScore = (item.TestScores.size() > 4 && weights.ElevationWeight > 0.0f)
-					? (item.TestScores[4] / weights.ElevationWeight) : 0.0f;
+				cand.LineOfSightOcclusion = getScore(item, traceIdx, weights.OcclusionWeight);
+				cand.WallProximityScore = getScore(item, wallIdx, weights.WallProximityWeight);
+				cand.DistanceScore = getScore(item, distIdx, weights.DistanceWeight);
+				cand.ElevationScore = getScore(item, heightIdx, weights.ElevationWeight);
 			}
 			else if (mode == EQSQueryMode::Flank)
 			{
-				cand.LineOfSightOcclusion = (item.TestScores.size() > 1 && std::abs(weights.OcclusionWeight) > 0.0f)
-					? (1.0f - (item.TestScores[1] / std::abs(weights.OcclusionWeight))) : 0.0f;
-				cand.AngleScore = (item.TestScores.size() > 2 && weights.AngleWeight > 0.0f)
-					? (item.TestScores[2] / weights.AngleWeight) : 0.0f;
-				cand.DistanceScore = (item.TestScores.size() > 3 && weights.DistanceWeight > 0.0f)
-					? (item.TestScores[3] / weights.DistanceWeight) : 0.0f;
-				cand.ElevationScore = (item.TestScores.size() > 4 && weights.ElevationWeight > 0.0f)
-					? (item.TestScores[4] / weights.ElevationWeight) : 0.0f;
+				float traceNorm = getScore(item, traceIdx, std::abs(weights.OcclusionWeight));
+				cand.LineOfSightOcclusion = (std::abs(weights.OcclusionWeight) > 0.0f) ? (1.0f - traceNorm) : 0.0f;
+				cand.AngleScore = getScore(item, angleIdx, weights.AngleWeight);
+				cand.DistanceScore = getScore(item, distIdx, weights.DistanceWeight);
+				cand.ElevationScore = getScore(item, heightIdx, weights.ElevationWeight);
 			}
 			else if (mode == EQSQueryMode::Retreat)
 			{
-				cand.LineOfSightOcclusion = (item.TestScores.size() > 1 && weights.OcclusionWeight > 0.0f)
-					? (item.TestScores[1] / weights.OcclusionWeight) : 0.0f;
-				cand.DistanceScore = (item.TestScores.size() > 3 && weights.DistanceWeight > 0.0f)
-					? (item.TestScores[3] / weights.DistanceWeight) : 0.0f;
-				cand.ElevationScore = (item.TestScores.size() > 4 && weights.ElevationWeight > 0.0f)
-					? (item.TestScores[4] / weights.ElevationWeight) : 0.0f;
+				cand.LineOfSightOcclusion = getScore(item, traceIdx, weights.OcclusionWeight);
+				cand.DistanceScore = getScore(item, distIdx, weights.DistanceWeight);
+				cand.ElevationScore = getScore(item, heightIdx, weights.ElevationWeight);
 			}
 
 			outCandidates.push_back(cand);
@@ -592,6 +605,42 @@ namespace World
 			const auto& obs = obsView.get<NavMeshObstacleComponent>(entity);
 			glm::vec3 halfExtents = glm::max(glm::vec3(0.01f), glm::abs(obs.Extents * tc.Scale));
 			outObstacles.push_back(CoverBox::FromOBB(tc.Location, halfExtents, tc.Rotation));
+		}
+
+		// 4. SphereCollider3DComponent (圆球立柱/圆形掩体)
+		auto sphereView = reg.view<TransformComponent, SphereCollider3DComponent>();
+		for (auto entity : sphereView)
+		{
+			uint32_t raw = static_cast<uint32_t>(entity);
+			if (raw == ignoreEntityRaw1 || raw == ignoreEntityRaw2)
+				continue;
+			if (reg.all_of<BoxCollider3DComponent>(entity) || reg.all_of<WhiteboxComponent>(entity))
+				continue;
+			const auto& tc = sphereView.get<TransformComponent>(entity);
+			const auto& col = sphereView.get<SphereCollider3DComponent>(entity);
+			float maxScale = std::max({ tc.Scale.x, tc.Scale.y, tc.Scale.z });
+			glm::vec3 halfExtents = glm::max(glm::vec3(0.01f), glm::vec3(col.Radius * maxScale));
+			glm::vec3 center = tc.Location + tc.Rotation * (col.Offset * tc.Scale);
+			outObstacles.push_back(CoverBox::FromOBB(center, halfExtents, tc.Rotation));
+		}
+
+		// 5. CapsuleCollider3DComponent (胶囊体掩体/石柱)
+		auto capView = reg.view<TransformComponent, CapsuleCollider3DComponent>();
+		for (auto entity : capView)
+		{
+			uint32_t raw = static_cast<uint32_t>(entity);
+			if (raw == ignoreEntityRaw1 || raw == ignoreEntityRaw2)
+				continue;
+			if (reg.all_of<BoxCollider3DComponent>(entity) || reg.all_of<WhiteboxComponent>(entity))
+				continue;
+			const auto& tc = capView.get<TransformComponent>(entity);
+			const auto& col = capView.get<CapsuleCollider3DComponent>(entity);
+			float maxScaleXZ = std::max(tc.Scale.x, tc.Scale.z);
+			float r = col.Radius * maxScaleXZ;
+			float halfH = (col.HalfHeight + col.Radius) * tc.Scale.y;
+			glm::vec3 halfExtents = glm::max(glm::vec3(0.01f), glm::vec3(r, halfH, r));
+			glm::vec3 center = tc.Location + tc.Rotation * (col.Offset * tc.Scale);
+			outObstacles.push_back(CoverBox::FromOBB(center, halfExtents, tc.Rotation));
 		}
 	}
 }

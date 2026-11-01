@@ -20,6 +20,7 @@ namespace World::Gameplay
 		static void UnregisterTree(uint32_t assetId);
 		static std::shared_ptr<BehaviorNode> GetTree(uint32_t assetId);
 		static void ClearTrees();
+		static void ClearEntityRunners();
 
 		static std::shared_ptr<BehaviorNode> GetOrCreateTree(const std::string& assetPath);
 
