@@ -15,6 +15,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 #include <yaml-cpp/yaml.h>
 
@@ -493,6 +494,60 @@ namespace World
 			}
 			return applied;
 		}
+		// 层级反向索引重建与 Parent 句柄解析:
+		// 反序列化关卡实体时,盘上记录的 Parent 字段是 64 位大整数 UUID(或低 32 位句柄值)。
+		// 这里建立 UUID -> entt::entity 映射表,将尚未解析为合法实体句柄的 Parent 修复为对应的场景实体句柄,
+		// 并重建 HierarchyChildrenComponent 反向索引及递归求解世界矩阵缓存。
+		void RebuildHierarchyIndex(entt::registry& registry)
+		{
+			for (const entt::entity handle : registry.view<HierarchyComponent>())
+				registry.remove<HierarchyChildrenComponent>(handle);
+
+			std::unordered_map<uint64_t, entt::entity> handlesByUuid;
+			std::unordered_map<uint32_t, entt::entity> handlesByLow32;
+			for (const entt::entity handle : registry.view<UUIDComponent>())
+			{
+				const uint64_t uuid = static_cast<uint64_t>(registry.get<UUIDComponent>(handle).ID);
+				handlesByUuid.emplace(uuid, handle);
+				handlesByLow32.emplace(static_cast<uint32_t>(uuid & 0xFFFFFFFFULL), handle);
+			}
+
+			for (const entt::entity handle : registry.view<HierarchyComponent>())
+			{
+				auto& hierarchy = registry.get<HierarchyComponent>(handle);
+				if (hierarchy.Parent != entt::null && !registry.valid(hierarchy.Parent))
+				{
+					const uint64_t key64 = static_cast<uint64_t>(hierarchy.Parent);
+					if (const auto it = handlesByUuid.find(key64); it != handlesByUuid.end() && registry.valid(it->second))
+					{
+						hierarchy.Parent = it->second;
+					}
+					else
+					{
+						const uint32_t low32 = static_cast<uint32_t>(hierarchy.Parent);
+						if (const auto itLow = handlesByLow32.find(low32); itLow != handlesByLow32.end() && registry.valid(itLow->second))
+						{
+							hierarchy.Parent = itLow->second;
+						}
+					}
+				}
+			}
+
+			std::vector<entt::entity> childrenToLink;
+			for (const entt::entity handle : registry.view<HierarchyComponent>())
+			{
+				const auto& hierarchy = registry.get<HierarchyComponent>(handle);
+				if (hierarchy.Parent != entt::null && registry.valid(hierarchy.Parent))
+					childrenToLink.push_back(handle);
+			}
+			for (const entt::entity child : childrenToLink)
+			{
+				const entt::entity parent = registry.get<HierarchyComponent>(child).Parent;
+				(void)registry.get_or_emplace<HierarchyComponent>(parent);
+				Hierarchy::MutableChildren(registry, parent).push_back(child);
+			}
+			Hierarchy::UpdateWorldTransforms(registry);
+		}
 	}
 
 	SceneSerializer::SceneSerializer(const Ref<Scene>& scene)
@@ -732,24 +787,9 @@ namespace World
 		for (const auto entity : registry.view<TransformComponent>())
 			registry.get<TransformComponent>(entity).RecalculateTransform();
 
-		// 层级:Parent 已随字段读入,Children 不入库,这里按 Parent 重建反向索引;
-		// 之后求解一次世界矩阵(P2a W3b)。
-		for (const auto entity : registry.view<HierarchyComponent>())
-			registry.remove<HierarchyChildrenComponent>(entity);
-		std::vector<entt::entity> childrenToLink;
-		for (const auto entity : registry.view<HierarchyComponent>())
-		{
-			const auto& hierarchy = registry.get<HierarchyComponent>(entity);
-			if (hierarchy.Parent != entt::null && registry.valid(hierarchy.Parent))
-				childrenToLink.push_back(entity);
-		}
-		for (const entt::entity child : childrenToLink)
-		{
-			const entt::entity parent = registry.get<HierarchyComponent>(child).Parent;
-			(void)registry.get_or_emplace<HierarchyComponent>(parent);
-			Hierarchy::MutableChildren(registry, parent).push_back(child);
-		}
-		Hierarchy::UpdateWorldTransforms(registry);
+		// 层级:Parent 已随字段读入(若为 UUID 会自动重绑定为合法实体句柄),
+		// Children 不入库,这里按 Parent 重建反向索引并求解世界矩阵(P2a W3b)。
+		RebuildHierarchyIndex(registry);
 
 		// P4-U13b:Prefab 实例注册表。必须等实体全部建完、层级重建之后再做:盘上只有 UUID,
 		// 这里反查句柄重建 record.Root 与 Overrides 的键。UUID 找不到的记录/条目丢弃并警告
@@ -964,23 +1004,9 @@ namespace World
 		for (const entt::entity handle : registry.view<TransformComponent>())
 			registry.get<TransformComponent>(handle).RecalculateTransform();
 
-		// 层级:Parent 已随字段读入,Children 不入库,这里按 Parent 重建反向索引。
-		for (const entt::entity handle : registry.view<HierarchyComponent>())
-			registry.remove<HierarchyChildrenComponent>(handle);
-		std::vector<entt::entity> childrenToLink;
-		for (const entt::entity handle : registry.view<HierarchyComponent>())
-		{
-			const auto& hierarchy = registry.get<HierarchyComponent>(handle);
-			if (hierarchy.Parent != entt::null && registry.valid(hierarchy.Parent))
-				childrenToLink.push_back(handle);
-		}
-		for (const entt::entity child : childrenToLink)
-		{
-			const entt::entity parent = registry.get<HierarchyComponent>(child).Parent;
-			(void)registry.get_or_emplace<HierarchyComponent>(parent);
-			Hierarchy::MutableChildren(registry, parent).push_back(child);
-		}
-		Hierarchy::UpdateWorldTransforms(registry);
+		// 层级:Parent 已随字段读入(若为 UUID 会自动重绑定为合法实体句柄),
+		// Children 不入库,这里按 Parent 重建反向索引并求解世界矩阵。
+		RebuildHierarchyIndex(registry);
 
 		// Level 2.0:实体级 `.entity` 里记的 `Prefab:` 实例块(按 UUID 记账)—— 全部实体
 		// 就位后反查句柄登记成实例记录。找不到的记录/条目丢弃并警告(与 `.wd` 的

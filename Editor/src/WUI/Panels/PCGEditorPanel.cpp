@@ -585,9 +585,43 @@ namespace World
 			for (auto [sh, sc] : activeScene->GetRegistry().view<SplineComponent>().each())
 			{
 				detectedSplines++;
+				std::vector<entt::entity> knots;
 				const auto& children = Hierarchy::ChildrenOf(activeScene->GetRegistry(), sh);
-				totalKnots += children.size();
-				if (children.empty())
+				for (entt::entity ch : children) knots.push_back(ch);
+
+				// 多级容错：如果 ChildrenOf 为空，主动在场景中扫描 HierarchyComponent::Parent == sh 或 Tag 为 Road Knot 的实体
+				if (knots.empty())
+				{
+					for (auto [h, hc] : activeScene->GetRegistry().view<HierarchyComponent>().each())
+					{
+						if (hc.Parent == sh && activeScene->GetRegistry().valid(h))
+						{
+							knots.push_back(h);
+							Hierarchy::MutableChildren(activeScene->GetRegistry(), sh).push_back(h);
+						}
+					}
+				}
+				if (knots.empty())
+				{
+					for (auto [h, tc] : activeScene->GetRegistry().view<TagComponent>().each())
+					{
+						std::string tagName = std::string(StringPool::Get().NameOf(tc.Tag));
+						if (tagName.find("Road Knot") != std::string::npos || tagName.find("Knot") != std::string::npos)
+						{
+							knots.push_back(h);
+							auto& hc = activeScene->GetRegistry().get_or_emplace<HierarchyComponent>(h);
+							hc.Parent = sh;
+							Hierarchy::MutableChildren(activeScene->GetRegistry(), sh).push_back(h);
+						}
+					}
+				}
+
+				totalKnots += knots.size();
+				if (knots.size() >= 2)
+				{
+					splineLacksKnots = false;
+				}
+				else
 				{
 					splineLacksKnots = true;
 					emptySplineEntity = sh;
@@ -618,7 +652,9 @@ namespace World
 						auto& hc = knot.AddComponent<HierarchyComponent>();
 						hc.Parent = emptySplineEntity;
 						hc.InheritTransform = true;
+						Hierarchy::MutableChildren(activeScene->GetRegistry(), emptySplineEntity).push_back(knot);
 					}
+					Hierarchy::UpdateWorldTransforms(activeScene->GetRegistry());
 					m_StatusFeedback = "已为样条道路自动生成 3 个默认控制点实体！";
 					host.MarkDocumentDirty();
 				}
@@ -667,8 +703,35 @@ namespace World
 					if (const auto* parentWxf = activeScene->GetRegistry().try_get<WorldTransformComponent>(sh))
 						splineWorldMat = parentWxf->Matrix;
 
-					const auto& children = Hierarchy::ChildrenOf(activeScene->GetRegistry(), sh);
-					for (entt::entity ch : children)
+					std::vector<entt::entity> knotEntities;
+					for (entt::entity ch : Hierarchy::ChildrenOf(activeScene->GetRegistry(), sh))
+						knotEntities.push_back(ch);
+					if (knotEntities.empty())
+					{
+						for (auto [h, hc] : activeScene->GetRegistry().view<HierarchyComponent>().each())
+						{
+							if (hc.Parent == sh && activeScene->GetRegistry().valid(h))
+							{
+								knotEntities.push_back(h);
+								Hierarchy::MutableChildren(activeScene->GetRegistry(), sh).push_back(h);
+							}
+						}
+					}
+					if (knotEntities.empty())
+					{
+						for (auto [h, tc] : activeScene->GetRegistry().view<TagComponent>().each())
+						{
+							std::string tagName = std::string(StringPool::Get().NameOf(tc.Tag));
+							if (tagName.find("Road Knot") != std::string::npos || tagName.find("Knot") != std::string::npos)
+							{
+								knotEntities.push_back(h);
+								auto& hc = activeScene->GetRegistry().get_or_emplace<HierarchyComponent>(h);
+								hc.Parent = sh;
+								Hierarchy::MutableChildren(activeScene->GetRegistry(), sh).push_back(h);
+							}
+						}
+					}
+					for (entt::entity ch : knotEntities)
 					{
 						if (const auto* xf = activeScene->GetRegistry().try_get<TransformComponent>(ch))
 							knots.push_back(glm::vec3(splineWorldMat * glm::vec4(xf->Location, 1.0f)));
@@ -693,7 +756,7 @@ namespace World
 				}
 
 				if (terrain) TerrainRenderer::ClearCache();
-				m_StatusFeedback = "道路平整完成：处理了 " + std::to_string(roadCount) + " 条样条道路，净空清除 " + std::to_string(foliageCleared) + " 处路面阻挡植被！";
+				m_StatusFeedback = "道路平整完成：成功平整 " + std::to_string(roadCount) + " 条样条道路，净空清除 " + std::to_string(foliageCleared) + " 处路面阻挡植被！";
 				host.MarkDocumentDirty();
 			}
 		}

@@ -3054,27 +3054,118 @@ static uint32_t s_LODGenEntityId = 0;
 
 		// 3. AI 行为协同与威胁源绑定 (AI Behavior Synergy)
 		Scene* scene = entity.GetScene();
-		std::vector<std::string> threatEntityLabels = { "0: 自动检索最近敌对威胁 (Auto Nearest)" };
-		std::vector<uint32_t> threatEntityRaws = { 0 };
-		int selectedThreatIdx = 0;
+
+		auto isThreatTargetName = [](const std::string& name) -> bool {
+			if (name.empty()) return false;
+			std::string lower = name;
+			std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			return lower.find("threat") != std::string::npos ||
+			       lower.find("sniper") != std::string::npos ||
+			       lower.find("enemy") != std::string::npos ||
+			       lower.find("hostile") != std::string::npos;
+		};
+
+		// 1. 若 comp->ThreatEntityHint == 0：自动检索最近敌对威胁实体并锁定为默认威胁源
+		if (scene && comp->ThreatEntityHint == 0)
+		{
+			const glm::vec3 querierPos = entity.HasComponent<TransformComponent>() ?
+				entity.GetComponent<TransformComponent>().Location : glm::vec3(0.0f);
+			float closestDistSq = 1e18f;
+			entt::entity bestThreatEnt = entt::null;
+
+			for (auto [h, tc] : scene->GetRegistry().view<TransformComponent>().each())
+			{
+				if (h == static_cast<entt::entity>(entity)) continue;
+				std::string tagStr;
+				if (const auto* tag = scene->GetRegistry().try_get<TagComponent>(h))
+				{
+					tagStr = std::string(StringPool::Get().NameOf(tag->Tag));
+				}
+				if (isThreatTargetName(tagStr))
+				{
+					const glm::vec3 diff = tc.Location - querierPos;
+					const float dSq = glm::dot(diff, diff);
+					if (dSq < closestDistSq)
+					{
+						closestDistSq = dSq;
+						bestThreatEnt = h;
+					}
+				}
+			}
+
+			if (bestThreatEnt != entt::null)
+			{
+				comp->ThreatEntityHint = static_cast<uint32_t>(bestThreatEnt);
+				if (entity.HasComponent<BehaviorTreeComponent>())
+				{
+					entity.GetComponent<BehaviorTreeComponent>().TargetEntity = comp->ThreatEntityHint;
+				}
+				if (changedFields) changedFields->push_back("ThreatEntityHint");
+				host.MarkDocumentDirty();
+			}
+		}
+
+		// 2. 下拉框选项：优先将场景中检测到的敌对目标排在最前面并标注 [敌对威胁]，天空盒等环境实体排在后面
+		struct ThreatCandidate
+		{
+			std::string Label;
+			uint32_t RawId;
+		};
+		std::vector<ThreatCandidate> hostileCandidates;
+		std::vector<ThreatCandidate> otherCandidates;
+
 		if (scene)
 		{
 			for (auto [h, tc] : scene->GetRegistry().view<TransformComponent>().each())
 			{
 				if (h == static_cast<entt::entity>(entity)) continue;
 				const uint32_t rawId = static_cast<uint32_t>(h);
-				std::string name = "实体 " + std::to_string(rawId);
+				std::string tagStr;
 				if (const auto* tag = scene->GetRegistry().try_get<TagComponent>(h))
 				{
-					std::string tagStr = std::string(StringPool::Get().NameOf(tag->Tag));
-					if (!tagStr.empty()) name = tagStr + " [" + std::to_string(rawId) + "]";
+					tagStr = std::string(StringPool::Get().NameOf(tag->Tag));
 				}
-				if (comp->ThreatEntityHint == rawId || (comp->ThreatEntityHint != 0 && (rawId % 1000) == (comp->ThreatEntityHint % 1000)))
+				std::string name = tagStr.empty() ? ("实体 " + std::to_string(rawId)) : (tagStr + " [" + std::to_string(rawId) + "]");
+
+				if (isThreatTargetName(tagStr))
 				{
-					selectedThreatIdx = static_cast<int>(threatEntityLabels.size());
+					hostileCandidates.push_back({ "[敌对威胁] " + name, rawId });
 				}
-				threatEntityLabels.push_back(name);
-				threatEntityRaws.push_back(rawId);
+				else
+				{
+					otherCandidates.push_back({ name, rawId });
+				}
+			}
+		}
+
+		std::vector<std::string> threatEntityLabels;
+		std::vector<uint32_t> threatEntityRaws;
+
+		threatEntityLabels.push_back("0: 自动检索最近敌对威胁 (Auto Nearest)");
+		threatEntityRaws.push_back(0);
+
+		for (const auto& cand : hostileCandidates)
+		{
+			threatEntityLabels.push_back(cand.Label);
+			threatEntityRaws.push_back(cand.RawId);
+		}
+		for (const auto& cand : otherCandidates)
+		{
+			threatEntityLabels.push_back(cand.Label);
+			threatEntityRaws.push_back(cand.RawId);
+		}
+
+		int selectedThreatIdx = 0;
+		if (comp->ThreatEntityHint != 0)
+		{
+			for (size_t i = 1; i < threatEntityRaws.size(); ++i)
+			{
+				const uint32_t rawId = threatEntityRaws[i];
+				if (comp->ThreatEntityHint == rawId || (rawId % 1000) == (comp->ThreatEntityHint % 1000))
+				{
+					selectedThreatIdx = static_cast<int>(i);
+					break;
+				}
 			}
 		}
 
