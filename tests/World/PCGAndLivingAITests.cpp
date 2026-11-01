@@ -1,5 +1,10 @@
 #include "World/Foliage/Foliage.h"
 #include "World/Environment/PCGBiome.h"
+#include "World/Level/AI/EQS/EQSTypes.h"
+#include "World/Level/AI/EQS/EQSContext.h"
+#include "World/Level/AI/EQS/EQSGenerator.h"
+#include "World/Level/AI/EQS/EQSTest.h"
+#include "World/Level/AI/EQS/EQSQuery.h"
 #include "World/Level/AI/EQSCoverSystem.h"
 #include "World/Foliage/FoliageInteraction.h"
 #include "World/Terrain/Terrain.h"
@@ -436,6 +441,89 @@ static void TestEQSAndBehaviorTreeSynergy()
 		<< ", Score: " << bt.BlackboardValue << ")\n";
 }
 
+static void TestEQSFrameworkExtensibility()
+{
+	using namespace World::EQS;
+
+	// 1. 自定义生成器：在 X 轴上生成等距候选点 (CustomLineGenerator)
+	class CustomLineGenerator : public IEQSGenerator
+	{
+	public:
+		std::string GetName() const override { return "CustomLineGenerator"; }
+		void GenerateItems(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& outItems) override
+		{
+			for (int i = 0; i < 10; ++i)
+			{
+				EQSCandidateItem item;
+				item.Position = ctx.QuerierPos + glm::vec3(static_cast<float>(i) * 2.0f, 0.0f, 0.0f);
+				item.TotalScore = 0.0f;
+				item.FilteredOut = false;
+				outItems.push_back(item);
+			}
+		}
+	};
+
+	// 2. 自定义测试项：偏好靠近 X = 8.0 的位置 (CustomTargetXTest)
+	class CustomTargetXTest : public IEQSTest
+	{
+	public:
+		float TargetX { 8.0f };
+		std::string GetName() const override { return "CustomTargetXTest"; }
+		void RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems) override
+		{
+			for (auto& item : inOutItems)
+			{
+				if (item.FilteredOut)
+				{
+					item.TestScores.push_back(0.0f);
+					continue;
+				}
+				float diff = std::abs(item.Position.x - TargetX);
+				float score = std::max(0.0f, 10.0f - diff);
+				item.TotalScore += score * Weight;
+				item.TestScores.push_back(score);
+			}
+		}
+	};
+
+	// 3. 注册到全局工厂单例中，证明工厂扩展性
+	EQSGeneratorRegistry::Get().RegisterGenerator<CustomLineGenerator>("CustomLine");
+	EQSTestRegistry::Get().RegisterTest<CustomTargetXTest>("CustomTargetX");
+
+	assert(EQSGeneratorRegistry::Get().Find("CustomLine") != nullptr);
+	assert(EQSTestRegistry::Get().Find("CustomTargetX") != nullptr);
+
+	// 4. 使用 Builder 装配通用 EQSQuery
+	auto customGen = EQSGeneratorRegistry::Get().Find("CustomLine");
+	auto customTest = std::dynamic_pointer_cast<CustomTargetXTest>(EQSTestRegistry::Get().Find("CustomTargetX"));
+	assert(customTest != nullptr);
+	customTest->TargetX = 8.0f;
+	customTest->Weight = 2.0f;
+
+	auto query = EQSQuery::Builder()
+		.Named("ExtensibilityTestQuery")
+		.UsingGenerator(customGen)
+		.AddTest(customTest)
+		.Build();
+
+	assert(query != nullptr);
+
+	EQSQueryContext ctx;
+	ctx.QuerierPos = glm::vec3(0.0f, 0.0f, 0.0f);
+
+	EQSQueryResult result;
+	bool success = query->Execute(ctx, result);
+
+	assert(success);
+	assert(result.Items.size() == 10);
+	assert(std::abs(result.BestPosition.x - 8.0f) < 0.001f);
+	assert(result.BestScore == 20.0f);
+
+	std::cout << "[PASS] TestEQSFrameworkExtensibility (Best Pos: "
+		<< result.BestPosition.x << ", " << result.BestPosition.y << ", " << result.BestPosition.z
+		<< ", Score: " << result.BestScore << ")\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.PCGAndLivingAI tests...\n";
@@ -452,6 +540,7 @@ int main()
 	TestStatefulFoliageInteractionField();
 	TestPCGPreservesHandPaintedFoliage();
 	TestEQSAndBehaviorTreeSynergy();
+	TestEQSFrameworkExtensibility();
 	std::cout << "All World.PCGAndLivingAI tests passed successfully!\n";
 	return 0;
 }

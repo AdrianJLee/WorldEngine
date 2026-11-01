@@ -1,4 +1,4 @@
-#include "WUI/Panels/ViewportPanel_ToolGizmos.h"
+﻿#include "WUI/Panels/ViewportPanel_ToolGizmos.h"
 #include "World/Command/CommandHistory.h"
 #include "World/Scene/SelectionFilter.h"
 #include "wldpch.h"
@@ -55,11 +55,22 @@ namespace World
 		float Density = 0.0f;
 	};
 
+	struct EQSTestItem
+	{
+		uint8_t Type = 0;        // 0: Distance, 1: Trace, 2: Dot, 3: WallProximity, 4: Height, 5: Overlap
+		uint8_t Context = 0;     // 0: Querier, 1: Target, 2: AllThreats, 3: Custom
+		uint8_t Curve = 0;       // 0: Linear, 1: Inverse, 2: Gaussian
+		float Weight = 1.0f;
+		float IdealValue = 8.0f;
+		std::string Name;
+	};
+
 	struct EQSCandidatePreview
 	{
 		glm::vec3 Position { 0.0f };
 		float TotalScore { 0.0f };
 		bool Occluded { false };
+		bool FilteredOut { false };
 	};
 
 	struct EQSPreviewState
@@ -71,6 +82,17 @@ namespace World
 		glm::vec3 BestCoverPos { 0.0f };
 		float BestScore { 0.0f };
 		std::vector<EQSCandidatePreview> Candidates;
+
+		// 诊断指标
+		size_t TotalSampleCount = 0;
+		size_t QualifiedCount = 0;
+		size_t HardFilteredCount = 0;
+
+		// 流水线测试项栈
+		std::vector<EQSTestItem> PipelineTests;
+		uint8_t GeneratorMode = 0; // 0: Projected Grid, 1: Concentric Circle, 2: Around Obstacles
+		float RingCount = 5.0f;
+		float WallOffset = 0.75f;
 	};
 
 	struct FoliagePreviewState
@@ -86,6 +108,7 @@ namespace World
 	extern PCGPreviewState g_PCGPreviewState;
 	extern EQSPreviewState g_EQSPreviewState;
 	extern FoliagePreviewState g_FoliagePreviewState;
+	bool ExecuteEQSPipeline(Scene* scene, Entity entity, EQSComponent* comp, EQSPreviewState& state);
 
 	namespace
 	{
@@ -5046,6 +5069,7 @@ namespace World
 						}
 					}
 
+
 					// ---- 2. EQS 战术掩体查询可视化 (EQSComponent) ----
 					if (selected.IsValid() && selected.HasComponent<EQSComponent>() &&
 						selected.HasComponent<TransformComponent>())
@@ -5061,61 +5085,22 @@ namespace World
 						static float s_EqsRefreshCooldown = 0.0f;
 						s_EqsRefreshCooldown += 0.016f;
 
-				uint32_t resolvedThreatRaw = 0;
-				glm::vec3 threatPos(0.0f);
-				if (!overlayScene || !EQSCoverSystem::ResolveSceneThreatPosition(*overlayScene, static_cast<uint32_t>(selectedHandle), eqs.ThreatEntityHint, querierPos, threatPos, &resolvedThreatRaw))
-				{
-					threatPos = (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated)
-						? g_EQSPreviewState.ThreatPos
-						: (querierPos + glm::vec3(15.0f, 2.0f, 15.0f));
-				}
+						uint32_t resolvedThreatRaw = 0;
+						glm::vec3 threatPos(0.0f);
+						if (!overlayScene || !EQSCoverSystem::ResolveSceneThreatPosition(*overlayScene, static_cast<uint32_t>(selectedHandle), eqs.ThreatEntityHint, querierPos, threatPos, &resolvedThreatRaw))
+						{
+							threatPos = (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated)
+								? g_EQSPreviewState.ThreatPos
+								: (querierPos + glm::vec3(15.0f, 2.0f, 15.0f));
+						}
 
-				const bool targetChanged = (g_EQSPreviewState.TargetEntity != selectedHandle);
-				const bool posChanged = (glm::distance(s_LastEqsQuerierPos, querierPos) > 0.05f);
-				const bool threatChanged = (glm::distance(s_LastEqsThreatPos, threatPos) > 0.05f);
+						const bool targetChanged = (g_EQSPreviewState.TargetEntity != selectedHandle);
+						const bool posChanged = (glm::distance(s_LastEqsQuerierPos, querierPos) > 0.05f);
+						const bool threatChanged = (glm::distance(s_LastEqsThreatPos, threatPos) > 0.05f);
 
-				if (targetChanged || posChanged || threatChanged || !g_EQSPreviewState.Evaluated || s_EqsRefreshCooldown > 0.35f)
-				{
-					std::vector<CoverBox> obstacles;
-					if (overlayScene)
-					{
-						EQSCoverSystem::GatherSceneObstacles(*overlayScene, static_cast<uint32_t>(selectedHandle), resolvedThreatRaw, obstacles);
-					}
-							glm::mat4 terrainWorldMat(1.0f);
-							if (terrainData)
-							{
-								terrainWorldMat = glm::translate(glm::mat4(1.0f), terrainOrigin) * glm::scale(glm::mat4(1.0f), terrainScale);
-							}
-
-							glm::vec3 bestCover(0.0f);
-							float bestScore = -1.0f;
-							std::vector<EQSCoverCandidate> candidates;
-
-							const bool found = EQSCoverSystem::EvaluateQueryCandidates(
-								static_cast<EQSQueryMode>(eqs.QueryMode),
-								querierPos,
-								threatPos,
-								eqs.QueryRadius,
-								eqs.GridSpacing,
-								obstacles,
-								candidates,
-								bestCover,
-								bestScore,
-								terrainData.get(),
-								terrainWorldMat,
-								eqs.GeneratorMode);
-
-							g_EQSPreviewState.Candidates.clear();
-							for (const auto& cand : candidates)
-							{
-								g_EQSPreviewState.Candidates.push_back({ cand.Position, cand.TotalScore, cand.LineOfSightOcclusion > 0.5f });
-							}
-							g_EQSPreviewState.TargetEntity = selectedHandle;
-							g_EQSPreviewState.QuerierPos = querierPos;
-							g_EQSPreviewState.ThreatPos = threatPos;
-							g_EQSPreviewState.BestCoverPos = bestCover;
-							g_EQSPreviewState.BestScore = bestScore;
-							g_EQSPreviewState.Evaluated = found;
+						if (targetChanged || posChanged || threatChanged || !g_EQSPreviewState.Evaluated || s_EqsRefreshCooldown > 0.35f)
+						{
+							ExecuteEQSPipeline(overlayScene.get(), selected, const_cast<EQSComponent*>(&eqs), g_EQSPreviewState);
 							s_LastEqsQuerierPos = querierPos;
 							s_LastEqsThreatPos = threatPos;
 							s_LastEqsTarget = selectedHandle;
@@ -5141,18 +5126,68 @@ namespace World
 						// 射击视线射线 (Threat -> Querier)
 						PushOccludedWorldSegment(threatPos, querierPos, Wui::WuiColor{ 0.95f, 0.25f, 0.15f, 0.65f }, 1.4f, selectedHandle);
 
-						// 3. 绘制三维探测候选网格点阵
+						// 3. 绘制三维多维热力候选网格点阵 (深红(淘汰/暴露) -> 橙黄(及格) -> 荧光翠绿(最优))
 						if (g_EQSPreviewState.TargetEntity == selectedHandle && !g_EQSPreviewState.Candidates.empty())
 						{
+							float minScore = 1e9f;
+							float maxScore = -1e9f;
 							for (const auto& cand : g_EQSPreviewState.Candidates)
 							{
-								const bool good = (cand.TotalScore > 0.5f || cand.Occluded);
-								const Wui::WuiColor cCol = good
-									? Wui::WuiColor { 0.10f, 0.95f, 0.25f, 0.95f } // 遮蔽良好点：荧光高亮绿
-									: Wui::WuiColor { 0.95f, 0.25f, 0.15f, 0.75f }; // 暴露枪线下：警戒橙红
-								const float cs = 0.20f;
-								PushOccludedWorldSegment(cand.Position - glm::vec3(cs, 0, 0), cand.Position + glm::vec3(cs, 0, 0), cCol, 1.5f, selectedHandle);
-								PushOccludedWorldSegment(cand.Position - glm::vec3(0, 0, cs), cand.Position + glm::vec3(0, 0, cs), cCol, 1.5f, selectedHandle);
+								if (!cand.FilteredOut)
+								{
+									minScore = std::min(minScore, cand.TotalScore);
+									maxScore = std::max(maxScore, cand.TotalScore);
+								}
+							}
+							if (maxScore <= minScore)
+							{
+								minScore = 0.0f;
+								maxScore = 1.0f;
+							}
+
+							for (const auto& cand : g_EQSPreviewState.Candidates)
+							{
+								if (cand.FilteredOut)
+								{
+									// 硬过滤淘汰点：深暗红微缩十字标记
+									const Wui::WuiColor cCol { 0.55f, 0.06f, 0.08f, 0.45f };
+									const float cs = 0.10f;
+									PushOccludedWorldSegment(cand.Position - glm::vec3(cs, 0, 0), cand.Position + glm::vec3(cs, 0, 0), cCol, 1.0f, selectedHandle);
+									PushOccludedWorldSegment(cand.Position - glm::vec3(0, 0, cs), cand.Position + glm::vec3(0, 0, cs), cCol, 1.0f, selectedHandle);
+									continue;
+								}
+
+								// 根据 TotalScore 计算平滑多维热力渐变颜色:
+								// 深红(淘汰/暴露) -> 橙黄(及格) -> 荧光翠绿(最优)
+								const float t = std::clamp((cand.TotalScore - minScore) / (maxScore - minScore), 0.0f, 1.0f);
+								Wui::WuiColor cCol;
+								if (t < 0.5f)
+								{
+									const float u = t / 0.5f;
+									cCol.R = glm::mix(0.85f, 0.98f, u);
+									cCol.G = glm::mix(0.10f, 0.72f, u);
+									cCol.B = glm::mix(0.15f, 0.10f, u);
+									cCol.A = glm::mix(0.75f, 0.90f, u);
+								}
+								else
+								{
+									const float u = (t - 0.5f) / 0.5f;
+									cCol.R = glm::mix(0.98f, 0.10f, u);
+									cCol.G = glm::mix(0.72f, 0.98f, u);
+									cCol.B = glm::mix(0.10f, 0.35f, u);
+									cCol.A = glm::mix(0.90f, 0.98f, u);
+								}
+
+								const float cs = 0.16f + t * 0.12f;
+								const float thickness = 1.5f + t * 1.0f;
+								PushOccludedWorldSegment(cand.Position - glm::vec3(cs, 0, 0), cand.Position + glm::vec3(cs, 0, 0), cCol, thickness, selectedHandle);
+								PushOccludedWorldSegment(cand.Position - glm::vec3(0, 0, cs), cand.Position + glm::vec3(0, 0, cs), cCol, thickness, selectedHandle);
+
+								// 优秀高分点位增设纵向战术光标
+								if (t > 0.85f)
+								{
+									PushOccludedWorldSegment(cand.Position, cand.Position + glm::vec3(0.0f, 0.40f, 0.0f), cCol, thickness, selectedHandle);
+								}
 							}
 						}
 						else
@@ -5173,37 +5208,50 @@ namespace World
 							}
 						}
 
-						// 4. 绘制最优战术掩体位置：金黄菱形/星形 Marker（0.98f, 0.85f, 0.15f, 1.0f）与垂直地面引导光柱
+						// 4. 绘制最优战术站位：金黄战术菱形 Marker（0.98f, 0.85f, 0.15f, 1.0f）与垂直地面引导光柱
 						if (eqs.BestCoverFound != 0 || (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated))
 						{
 							const glm::vec3 bestCover = (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated)
 								? g_EQSPreviewState.BestCoverPos : (querierPos + glm::vec3(5.0f, 0.0f, 5.0f));
 							const Wui::WuiColor goldMarker { 0.98f, 0.85f, 0.15f, 1.0f };
-							// 垂直引导光柱
-							PushOccludedWorldSegment(bestCover, bestCover + glm::vec3(0.0f, 3.5f, 0.0f), goldMarker, 2.6f, selectedHandle);
-							// 金黄菱形 (Diamond Marker)
-							const float dSz = 0.45f;
-							const glm::vec3 pN = bestCover + glm::vec3(0, 1.5f, dSz);
-							const glm::vec3 pS = bestCover + glm::vec3(0, 1.5f, -dSz);
-							const glm::vec3 pE = bestCover + glm::vec3(dSz, 1.5f, 0);
-							const glm::vec3 pW = bestCover + glm::vec3(-dSz, 1.5f, 0);
-							const glm::vec3 pTop = bestCover + glm::vec3(0, 1.5f + dSz, 0);
-							const glm::vec3 pBot = bestCover + glm::vec3(0, 1.5f - dSz, 0);
 
-							PushOccludedWorldSegment(pN, pE, goldMarker, 2.0f, selectedHandle);
-							PushOccludedWorldSegment(pE, pS, goldMarker, 2.0f, selectedHandle);
-							PushOccludedWorldSegment(pS, pW, goldMarker, 2.0f, selectedHandle);
-							PushOccludedWorldSegment(pW, pN, goldMarker, 2.0f, selectedHandle);
-							PushOccludedWorldSegment(pN, pTop, goldMarker, 1.8f, selectedHandle);
-							PushOccludedWorldSegment(pE, pTop, goldMarker, 1.8f, selectedHandle);
-							PushOccludedWorldSegment(pS, pTop, goldMarker, 1.8f, selectedHandle);
-							PushOccludedWorldSegment(pW, pTop, goldMarker, 1.8f, selectedHandle);
-							PushOccludedWorldSegment(pN, pBot, goldMarker, 1.8f, selectedHandle);
-							PushOccludedWorldSegment(pE, pBot, goldMarker, 1.8f, selectedHandle);
-							PushOccludedWorldSegment(pS, pBot, goldMarker, 1.8f, selectedHandle);
-							PushOccludedWorldSegment(pW, pBot, goldMarker, 1.8f, selectedHandle);
+							// 垂直引导光柱 (3.8m 高度)
+							PushOccludedWorldSegment(bestCover, bestCover + glm::vec3(0.0f, 3.8f, 0.0f), goldMarker, 2.8f, selectedHandle);
+
+							// 地面同心战术目标圆环
+							drawOccludedCircle(bestCover, 0.50f, 1, goldMarker, 2.2f, selectedHandle);
+							drawOccludedCircle(bestCover, 1.00f, 1, Wui::WuiColor{ 0.98f, 0.85f, 0.15f, 0.45f }, 1.5f, selectedHandle);
+
+							// 金黄战术菱形 (八面体 Diamond Marker, 悬浮在 1.6m 战术瞄准线高度)
+							const float dSz = 0.45f;
+							const float dH = 1.6f;
+							const glm::vec3 pN = bestCover + glm::vec3(0, dH, dSz);
+							const glm::vec3 pS = bestCover + glm::vec3(0, dH, -dSz);
+							const glm::vec3 pE = bestCover + glm::vec3(dSz, dH, 0);
+							const glm::vec3 pW = bestCover + glm::vec3(-dSz, dH, 0);
+							const glm::vec3 pTop = bestCover + glm::vec3(0, dH + dSz, 0);
+							const glm::vec3 pBot = bestCover + glm::vec3(0, dH - dSz, 0);
+
+							// 水平腰线
+							PushOccludedWorldSegment(pN, pE, goldMarker, 2.2f, selectedHandle);
+							PushOccludedWorldSegment(pE, pS, goldMarker, 2.2f, selectedHandle);
+							PushOccludedWorldSegment(pS, pW, goldMarker, 2.2f, selectedHandle);
+							PushOccludedWorldSegment(pW, pN, goldMarker, 2.2f, selectedHandle);
+
+							// 上锥体棱线
+							PushOccludedWorldSegment(pN, pTop, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pE, pTop, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pS, pTop, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pW, pTop, goldMarker, 2.0f, selectedHandle);
+
+							// 下锥体棱线
+							PushOccludedWorldSegment(pN, pBot, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pE, pBot, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pS, pBot, goldMarker, 2.0f, selectedHandle);
+							PushOccludedWorldSegment(pW, pBot, goldMarker, 2.0f, selectedHandle);
 						}
 					}
+
 
 					// ---- 3. 植被物理推挤 Gizmo (FoliageInteractionComponent) ----
 					if (selected.IsValid() && selected.HasComponent<FoliageInteractionComponent>() &&

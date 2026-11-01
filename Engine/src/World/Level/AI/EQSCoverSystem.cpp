@@ -1,5 +1,10 @@
 #include "wldpch.h"
 #include "World/Level/AI/EQSCoverSystem.h"
+#include "World/Level/AI/EQS/EQSTypes.h"
+#include "World/Level/AI/EQS/EQSContext.h"
+#include "World/Level/AI/EQS/EQSGenerator.h"
+#include "World/Level/AI/EQS/EQSTest.h"
+#include "World/Level/AI/EQS/EQSQuery.h"
 #include "World/Terrain/Terrain.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
@@ -7,6 +12,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <cctype>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -162,6 +169,124 @@ namespace World
 		return EvaluateQueryCandidates(mode, querierPos, threatPos, queryRadius, gridSpacing, obstacles, dummy, outBestPos, outBestScore, nullptr, glm::mat4(1.0f), 0);
 	}
 
+	std::shared_ptr<EQS::EQSQuery> EQSCoverSystem::BuildPresetCoverQuery(uint8_t generatorMode, const EQSScoringWeights& weights)
+	{
+		using namespace World::EQS;
+		std::shared_ptr<IEQSGenerator> gen;
+		if (generatorMode == 1)
+			gen = std::make_shared<EQSGenerator_Circle>();
+		else if (generatorMode == 2)
+			gen = std::make_shared<EQSGenerator_AroundObstacles>();
+		else
+			gen = std::make_shared<EQSGenerator_ProjectedGrid>();
+
+		auto overlapTest = std::make_shared<EQSTest_Overlap>();
+
+		auto traceTest = std::make_shared<EQSTest_Trace>();
+		traceTest->InvertOcclusion = false;
+		traceTest->Weight = weights.OcclusionWeight;
+
+		auto wallTest = std::make_shared<EQSTest_WallProximity>();
+		wallTest->RequireOcclusion = true;
+		wallTest->Weight = weights.WallProximityWeight;
+
+		auto distTest = std::make_shared<EQSTest_Distance>();
+		distTest->Curve = ScoringCurve::Inverse;
+		distTest->Weight = weights.DistanceWeight;
+
+		auto heightTest = std::make_shared<EQSTest_Height>();
+		heightTest->Weight = weights.ElevationWeight;
+
+		return EQSQuery::Builder()
+			.Named("Preset_CoverQuery")
+			.UsingGenerator(gen)
+			.AddTest(overlapTest)
+			.AddTest(traceTest)
+			.AddTest(wallTest)
+			.AddTest(distTest)
+			.AddTest(heightTest)
+			.Build();
+	}
+
+	std::shared_ptr<EQS::EQSQuery> EQSCoverSystem::BuildPresetFlankQuery(uint8_t generatorMode, const EQSScoringWeights& weights)
+	{
+		using namespace World::EQS;
+		std::shared_ptr<IEQSGenerator> gen;
+		if (generatorMode == 1)
+			gen = std::make_shared<EQSGenerator_Circle>();
+		else if (generatorMode == 2)
+			gen = std::make_shared<EQSGenerator_AroundObstacles>();
+		else
+			gen = std::make_shared<EQSGenerator_ProjectedGrid>();
+
+		auto overlapTest = std::make_shared<EQSTest_Overlap>();
+
+		auto traceTest = std::make_shared<EQSTest_Trace>();
+		traceTest->InvertOcclusion = true; // 直瞄开火线
+		traceTest->Weight = std::abs(weights.OcclusionWeight);
+
+		auto dotTest = std::make_shared<EQSTest_Dot>();
+		dotTest->PeakAtPerpendicular = true; // 90° 侧翼夹角
+		dotTest->Weight = weights.AngleWeight;
+
+		auto distTest = std::make_shared<EQSTest_Distance>();
+		distTest->Curve = ScoringCurve::Inverse;
+		distTest->Weight = weights.DistanceWeight;
+
+		auto heightTest = std::make_shared<EQSTest_Height>();
+		heightTest->Weight = weights.ElevationWeight;
+
+		return EQSQuery::Builder()
+			.Named("Preset_FlankQuery")
+			.UsingGenerator(gen)
+			.AddTest(overlapTest)
+			.AddTest(traceTest)
+			.AddTest(dotTest)
+			.AddTest(distTest)
+			.AddTest(heightTest)
+			.Build();
+	}
+
+	std::shared_ptr<EQS::EQSQuery> EQSCoverSystem::BuildPresetRetreatQuery(uint8_t generatorMode, const EQSScoringWeights& weights)
+	{
+		using namespace World::EQS;
+		std::shared_ptr<IEQSGenerator> gen;
+		if (generatorMode == 1)
+			gen = std::make_shared<EQSGenerator_Circle>();
+		else if (generatorMode == 2)
+			gen = std::make_shared<EQSGenerator_AroundObstacles>();
+		else
+			gen = std::make_shared<EQSGenerator_ProjectedGrid>();
+
+		auto overlapTest = std::make_shared<EQSTest_Overlap>();
+
+		auto traceTest = std::make_shared<EQSTest_Trace>();
+		traceTest->InvertOcclusion = false;
+		traceTest->Weight = weights.OcclusionWeight;
+
+		auto retreatDistTest = std::make_shared<EQSTest_Distance>();
+		retreatDistTest->Context = std::make_shared<EQSContext_CustomLocation>();
+		retreatDistTest->Curve = ScoringCurve::Linear;
+		retreatDistTest->Weight = weights.AngleWeight;
+
+		auto querierDistTest = std::make_shared<EQSTest_Distance>();
+		querierDistTest->Curve = ScoringCurve::Inverse;
+		querierDistTest->Weight = weights.DistanceWeight;
+
+		auto heightTest = std::make_shared<EQSTest_Height>();
+		heightTest->Weight = weights.ElevationWeight;
+
+		return EQSQuery::Builder()
+			.Named("Preset_RetreatQuery")
+			.UsingGenerator(gen)
+			.AddTest(overlapTest)
+			.AddTest(traceTest)
+			.AddTest(retreatDistTest)
+			.AddTest(querierDistTest)
+			.AddTest(heightTest)
+			.Build();
+	}
+
 	bool EQSCoverSystem::EvaluateQueryCandidates(
 		EQSQueryMode mode,
 		const glm::vec3& querierPos,
@@ -181,234 +306,76 @@ namespace World
 		if (queryRadius <= 0.0f || gridSpacing <= 0.05f)
 			return false;
 
-		std::vector<glm::vec3> samplePoints;
-		const glm::mat4 invTerrain = terrain ? glm::inverse(terrainWorld) : glm::mat4(1.0f);
+		const EQSScoringWeights& weights = (mode == EQSQueryMode::Cover)
+			? GetMutableCustomWeights()
+			: EQSScoringWeights::ForMode(mode);
 
-		if (generatorMode == 1) // Concentric Rings
+		std::shared_ptr<EQS::EQSQuery> query;
+		if (mode == EQSQueryMode::Cover)
+			query = BuildPresetCoverQuery(generatorMode, weights);
+		else if (mode == EQSQueryMode::Flank)
+			query = BuildPresetFlankQuery(generatorMode, weights);
+		else
+			query = BuildPresetRetreatQuery(generatorMode, weights);
+
+		EQS::EQSQueryContext ctx;
+		ctx.QuerierPos = querierPos;
+		ctx.ThreatPos = threatPos;
+		ctx.QueryRadius = queryRadius;
+		ctx.GridSpacing = gridSpacing;
+		ctx.Obstacles = obstacles;
+		ctx.Terrain = terrain;
+		ctx.TerrainWorldTransform = terrainWorld;
+
+		if (mode == EQSQueryMode::Retreat && query->Tests.size() > 2)
 		{
-			samplePoints.push_back(querierPos);
-			const float ringStep = gridSpacing;
-			const int ringCount = static_cast<int>(queryRadius / ringStep);
-			for (int r = 1; r <= ringCount; ++r)
-			{
-				const float radius = r * ringStep;
-				const float circumference = 2.0f * 3.14159265f * radius;
-				const int pointCount = std::max(6, static_cast<int>(circumference / gridSpacing));
-				for (int i = 0; i < pointCount; ++i)
-				{
-					const float angle = (static_cast<float>(i) / static_cast<float>(pointCount)) * 2.0f * 3.14159265f;
-					glm::vec3 pt = querierPos + glm::vec3(std::cos(angle) * radius, 0.0f, std::sin(angle) * radius);
-					samplePoints.push_back(pt);
-				}
-			}
-		}
-		else if (generatorMode == 2) // Hybrid Obstacle Edge
-		{
-			// 基础网格
-			const int steps = static_cast<int>(queryRadius / gridSpacing);
-			for (int z = -steps; z <= steps; ++z)
-			{
-				for (int x = -steps; x <= steps; ++x)
-				{
-					const glm::vec3 pt = querierPos + glm::vec3(x * gridSpacing, 0.0f, z * gridSpacing);
-					const float distToQuerier = glm::distance(glm::vec2(pt.x, pt.z), glm::vec2(querierPos.x, querierPos.z));
-					if (distToQuerier <= queryRadius)
-						samplePoints.push_back(pt);
-				}
-			}
-
-			// 障碍物四周紧贴外扩战术点 (0.75m 贴墙掩护位)
-			for (const auto& box : obstacles)
-			{
-				const float offset = 0.75f;
-				const float ex = box.HalfExtents.x + offset;
-				const float ez = box.HalfExtents.z + offset;
-
-				const std::vector<glm::vec3> localOffsets = {
-					{ +ex, 0.0f,  0.0f },
-					{ -ex, 0.0f,  0.0f },
-					{  0.0f, 0.0f, +ez },
-					{  0.0f, 0.0f, -ez },
-					{ +ex, 0.0f, +ez * 0.5f },
-					{ +ex, 0.0f, -ez * 0.5f },
-					{ -ex, 0.0f, +ez * 0.5f },
-					{ -ex, 0.0f, -ez * 0.5f },
-					{ +ex * 0.5f, 0.0f, +ez },
-					{ -ex * 0.5f, 0.0f, +ez },
-					{ +ex * 0.5f, 0.0f, -ez },
-					{ -ex * 0.5f, 0.0f, -ez }
-				};
-
-				for (const auto& lOff : localOffsets)
-				{
-					glm::vec3 worldPt = box.Center + box.Rotation * lOff;
-					worldPt.y = querierPos.y;
-					const float dist = glm::distance(glm::vec2(worldPt.x, worldPt.z), glm::vec2(querierPos.x, querierPos.z));
-					if (dist <= queryRadius)
-						samplePoints.push_back(worldPt);
-				}
-			}
-		}
-		else // 0: ProjectedGrid
-		{
-			const int steps = static_cast<int>(queryRadius / gridSpacing);
-			for (int z = -steps; z <= steps; ++z)
-			{
-				for (int x = -steps; x <= steps; ++x)
-				{
-					const glm::vec3 pt = querierPos + glm::vec3(x * gridSpacing, 0.0f, z * gridSpacing);
-					const float distToQuerier = glm::distance(glm::vec2(pt.x, pt.z), glm::vec2(querierPos.x, querierPos.z));
-					if (distToQuerier <= queryRadius)
-						samplePoints.push_back(pt);
-				}
-			}
+			query->Tests[2]->Context = std::make_shared<EQS::EQSContext_CustomLocation>(threatPos);
 		}
 
-		// 贴合地形高程
-		if (terrain)
+		EQS::EQSQueryResult result;
+		bool ok = query->Execute(ctx, result);
+		if (!ok || result.Items.empty())
+			return false;
+
+		for (const auto& item : result.Items)
 		{
-			for (auto& pt : samplePoints)
-			{
-				glm::vec3 localPt = glm::vec3(invTerrain * glm::vec4(pt, 1.0f));
-				float h = terrain->SampleHeight(localPt.x, localPt.z);
-				glm::vec3 worldGround = glm::vec3(terrainWorld * glm::vec4(localPt.x, h, localPt.z, 1.0f));
-				pt.y = worldGround.y;
-			}
-		}
-
-		const float querierDistToThreat = glm::distance(querierPos, threatPos);
-		const glm::vec3 threatToQuerier = (querierDistToThreat > 1e-4f)
-			? glm::normalize(querierPos - threatPos) : glm::vec3(0.0f, 0.0f, 1.0f);
-
-		const glm::vec3 threatEye = threatPos + glm::vec3(0.0f, 1.6f, 0.0f);
-
-		for (const auto& pt : samplePoints)
-		{
-			const float distToQuerier = glm::distance(glm::vec2(pt.x, pt.z), glm::vec2(querierPos.x, querierPos.z));
-			if (distToQuerier > queryRadius)
+			if (item.FilteredOut)
 				continue;
-
-			// 检查点是否在障碍物内部 (不可站立穿模)
-			bool insideObstacle = false;
-			for (const auto& box : obstacles)
-			{
-				if (box.ContainsPoint(pt, 0.15f))
-				{
-					insideObstacle = true;
-					break;
-				}
-			}
-			if (insideObstacle)
-				continue;
-
-			// 视线遮蔽射线检测 (兼顾地表枪线与人眼高度视线)
-			const glm::vec3 rayDirGround = pt - threatPos;
-			const float rayLenGround = glm::length(rayDirGround);
-			if (rayLenGround < 0.001f)
-				continue;
-
-			bool occludedGround = false;
-			float hitDist = 0.0f;
-			for (const auto& box : obstacles)
-			{
-				if (box.IntersectRay(threatPos, rayDirGround / rayLenGround, rayLenGround, hitDist))
-				{
-					occludedGround = true;
-					break;
-				}
-			}
-
-			// 蹲伏眼高 (0.9m) 与站立眼高 (1.6m) 检测
-			const glm::vec3 candEyeCrouch = pt + glm::vec3(0.0f, 0.9f, 0.0f);
-			const glm::vec3 rayDirCrouch = candEyeCrouch - threatEye;
-			const float rayLenCrouch = glm::length(rayDirCrouch);
-			bool occludedCrouch = false;
-			if (rayLenCrouch > 0.001f)
-			{
-				for (const auto& box : obstacles)
-				{
-					if (box.IntersectRay(threatEye, rayDirCrouch / rayLenCrouch, rayLenCrouch, hitDist))
-					{
-						occludedCrouch = true;
-						break;
-					}
-				}
-			}
-
-			const glm::vec3 candEyeStand = pt + glm::vec3(0.0f, 1.6f, 0.0f);
-			const glm::vec3 rayDirStand = candEyeStand - threatEye;
-			const float rayLenStand = glm::length(rayDirStand);
-			bool occludedStand = false;
-			if (rayLenStand > 0.001f)
-			{
-				for (const auto& box : obstacles)
-				{
-					if (box.IntersectRay(threatEye, rayDirStand / rayLenStand, rayLenStand, hitDist))
-					{
-						occludedStand = true;
-						break;
-					}
-				}
-			}
-
-			float losOcclusion = 0.0f;
-			if (occludedGround || (occludedCrouch && occludedStand))
-				losOcclusion = 1.0f;
-			else if (occludedCrouch)
-				losOcclusion = 0.65f;
-
-			// 计算掩体最近表面水平距离
-			float minWallDist = 1e9f;
-			for (const auto& box : obstacles)
-			{
-				minWallDist = std::min(minWallDist, box.DistanceToSurfaceXZ(pt));
-			}
-
-			// 掩体贴靠评分 WallProximityScore: 贴靠在掩体背面 (0.3m ~ 1.5m) 达到 1.0 满分
-			float wallScore = 0.0f;
-			if (losOcclusion > 0.0f && minWallDist < 1e8f)
-			{
-				const float deltaD = std::max(0.0f, minWallDist - 0.85f);
-				wallScore = std::exp(-(deltaD * deltaD) / (2.0f * 1.25f * 1.25f));
-			}
-
-			// 地形高差优势评分 ElevationScore
-			float elevScore = std::clamp((pt.y - threatPos.y) / 10.0f, 0.0f, 1.0f);
 
 			EQSCoverCandidate cand;
-			cand.Position = pt;
-			cand.LineOfSightOcclusion = losOcclusion;
-			cand.DistanceScore = 1.0f - (distToQuerier / queryRadius);
-			cand.WallProximityScore = wallScore;
-			cand.ElevationScore = elevScore;
-
-			const EQSScoringWeights& w = (mode == EQSQueryMode::Cover) ? GetMutableCustomWeights() : EQSScoringWeights::ForMode(mode);
+			cand.Position = item.Position;
+			cand.TotalScore = item.TotalScore;
 
 			if (mode == EQSQueryMode::Cover)
 			{
-				// 防守掩体：视线完全遮蔽为第一优先，贴靠掩体墙面加分显著，彻底消除原地停留缺陷
-				cand.TotalScore = cand.LineOfSightOcclusion * (w.OcclusionWeight + w.WallProximityWeight * cand.WallProximityScore)
-					+ cand.DistanceScore * w.DistanceWeight + cand.ElevationScore * w.ElevationWeight;
-
+				cand.LineOfSightOcclusion = (item.TestScores.size() > 1 && weights.OcclusionWeight > 0.0f)
+					? (item.TestScores[1] / weights.OcclusionWeight) : 0.0f;
+				cand.WallProximityScore = (item.TestScores.size() > 2 && weights.WallProximityWeight > 0.0f)
+					? (item.TestScores[2] / weights.WallProximityWeight) : 0.0f;
+				cand.DistanceScore = (item.TestScores.size() > 3 && weights.DistanceWeight > 0.0f)
+					? (item.TestScores[3] / weights.DistanceWeight) : 0.0f;
+				cand.ElevationScore = (item.TestScores.size() > 4 && weights.ElevationWeight > 0.0f)
+					? (item.TestScores[4] / weights.ElevationWeight) : 0.0f;
 			}
 			else if (mode == EQSQueryMode::Flank)
 			{
-				// 侧翼包抄：与威胁形成侧向 60~90 度夹角，需要具备对威胁的直视射击线 (Occlusion == 0)
-				glm::vec3 threatToCand = glm::normalize(pt - threatPos);
-				float cosAngle = glm::dot(threatToQuerier, threatToCand);
-				cand.AngleScore = 1.0f - std::abs(cosAngle);
-				cand.TotalScore = cand.AngleScore * w.AngleWeight + (1.0f - cand.LineOfSightOcclusion) * std::abs(w.OcclusionWeight)
-					+ cand.DistanceScore * w.DistanceWeight + cand.ElevationScore * w.ElevationWeight;
-
+				cand.LineOfSightOcclusion = (item.TestScores.size() > 1 && std::abs(weights.OcclusionWeight) > 0.0f)
+					? (1.0f - (item.TestScores[1] / std::abs(weights.OcclusionWeight))) : 0.0f;
+				cand.AngleScore = (item.TestScores.size() > 2 && weights.AngleWeight > 0.0f)
+					? (item.TestScores[2] / weights.AngleWeight) : 0.0f;
+				cand.DistanceScore = (item.TestScores.size() > 3 && weights.DistanceWeight > 0.0f)
+					? (item.TestScores[3] / weights.DistanceWeight) : 0.0f;
+				cand.ElevationScore = (item.TestScores.size() > 4 && weights.ElevationWeight > 0.0f)
+					? (item.TestScores[4] / weights.ElevationWeight) : 0.0f;
 			}
 			else if (mode == EQSQueryMode::Retreat)
 			{
-				// 安全撤退：点位到威胁的距离大于查询者自身到威胁的距离，且视线处于遮蔽状态
-				const float candDistToThreat = rayLenGround;
-				float retreatGain = (candDistToThreat - querierDistToThreat) / queryRadius;
-				cand.TotalScore = cand.LineOfSightOcclusion * w.OcclusionWeight + retreatGain * w.AngleWeight
-					+ cand.DistanceScore * w.DistanceWeight + cand.ElevationScore * w.ElevationWeight;
-
+				cand.LineOfSightOcclusion = (item.TestScores.size() > 1 && weights.OcclusionWeight > 0.0f)
+					? (item.TestScores[1] / weights.OcclusionWeight) : 0.0f;
+				cand.DistanceScore = (item.TestScores.size() > 3 && weights.DistanceWeight > 0.0f)
+					? (item.TestScores[3] / weights.DistanceWeight) : 0.0f;
+				cand.ElevationScore = (item.TestScores.size() > 4 && weights.ElevationWeight > 0.0f)
+					? (item.TestScores[4] / weights.ElevationWeight) : 0.0f;
 			}
 
 			outCandidates.push_back(cand);
@@ -482,16 +449,14 @@ namespace World
 			if (static_cast<uint32_t>(e) == hint) return true;
 			if (reg.all_of<UUIDComponent>(e))
 			{
-				uint64_t uuidVal = static_cast<uint64_t>(reg.get<UUIDComponent>(e).ID);
-				if (static_cast<uint32_t>(uuidVal & 0xFFFFFFFFULL) == hint)
-					return true;
-				if (static_cast<uint32_t>(uuidVal % 1000000000ULL) == hint)
+				uint64_t fullId = static_cast<uint64_t>(reg.get<UUIDComponent>(e).ID);
+				if (static_cast<uint32_t>(fullId & 0xFFFFFFFF) == hint)
 					return true;
 			}
 			return false;
 		};
 
-		// 1. 若 threatEntityHint != 0：遍历场景 TransformComponent 实体匹配
+		// 1. 若提供了显式威胁实体提示 (ThreatEntityHint)
 		if (threatEntityHint != 0)
 		{
 			auto view = reg.view<TransformComponent>();
@@ -532,7 +497,7 @@ namespace World
 			}
 		}
 
-		// 3. 若仍未匹配到，自动在场景中检索带有 TagComponent 且名称包含 Threat / Sniper / Enemy / Hostile 的实体
+		// 3. 自动在场景中检索带有 TagComponent 且名称包含 Threat / Sniper / Enemy / Hostile 的实体
 		float closestDistSq = 1e18f;
 		entt::entity bestThreatEnt = entt::null;
 		glm::vec3 bestThreatPos(0.0f);

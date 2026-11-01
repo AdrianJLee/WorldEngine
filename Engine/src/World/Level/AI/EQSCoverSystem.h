@@ -5,12 +5,18 @@
 #include <glm/gtc/quaternion.hpp>
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace World
 {
 	class TerrainData;
 	class Scene;
+
+	namespace EQS
+	{
+		class EQSQuery;
+	}
 
 	enum class EQSQueryMode : uint8_t
 	{
@@ -76,6 +82,7 @@ namespace World
 
 		static EQSScoringWeights ForMode(EQSQueryMode mode, float optimalDist = 8.0f);
 	};
+
 	class WLD_API EQSCoverSystem
 	{
 	public:
@@ -94,6 +101,7 @@ namespace World
 			uint32_t ignoreEntityRaw1,
 			uint32_t ignoreEntityRaw2,
 			std::vector<CoverBox>& outObstacles);
+
 		static bool FindBestCover(
 			const glm::vec3& querierPos,
 			const glm::vec3& threatPos,
@@ -126,5 +134,18 @@ namespace World
 			const TerrainData* terrain = nullptr,
 			const glm::mat4& terrainWorld = glm::mat4(1.0f),
 			uint8_t generatorMode = 0);
+
+		// 通用 EQSQuery 标准开箱即用预设工厂
+		static std::shared_ptr<EQS::EQSQuery> BuildPresetCoverQuery(
+			uint8_t generatorMode = 0,
+			const EQSScoringWeights& weights = GetMutableCustomWeights());
+
+		static std::shared_ptr<EQS::EQSQuery> BuildPresetFlankQuery(
+			uint8_t generatorMode = 1,
+			const EQSScoringWeights& weights = EQSScoringWeights::ForMode(EQSQueryMode::Flank));
+
+		static std::shared_ptr<EQS::EQSQuery> BuildPresetRetreatQuery(
+			uint8_t generatorMode = 0,
+			const EQSScoringWeights& weights = EQSScoringWeights::ForMode(EQSQueryMode::Retreat));
 	};
 }
