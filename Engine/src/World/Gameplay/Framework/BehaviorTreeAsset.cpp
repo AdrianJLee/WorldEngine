@@ -3,6 +3,7 @@
 #include "World/Gameplay/Framework/SmartObjectSystem.h"
 #include "World/Gameplay/Framework/DamageSystem.h"
 #include "World/Level/AI/EQSCoverSystem.h"
+#include "World/Level/AI/EQS/EQSAsset.h"
 #include "World/Level/AI/EQS/EnvQueryManager.h"
 #include "World/NavMesh/NavMesh.h"
 #include "World/Scene/Scene.h"
@@ -499,12 +500,21 @@ else if (type == "UseSmartObject")
 						EQSCoverSystem::GatherSceneObstacles(ctx.CurrentScene, querierRaw, resolvedThreatRaw, obstacles);
 
 						std::shared_ptr<EQS::EQSQuery> query;
-						if (queryMode == EQSQueryMode::Flank)
-							query = EQSCoverSystem::BuildPresetFlankQuery(genMode);
-						else if (queryMode == EQSQueryMode::Retreat)
-							query = EQSCoverSystem::BuildPresetRetreatQuery(genMode);
-						else
-							query = EQSCoverSystem::BuildPresetCoverQuery(genMode);
+						if (modeStr.rfind(".weqs") != std::string::npos)
+						{
+							auto eqAsset = EQS::EQSAsset::GetOrLoad(modeStr);
+							if (eqAsset)
+								query = eqAsset->BuildQuery(resolvedThreatRaw);
+						}
+						if (!query)
+						{
+							if (queryMode == EQSQueryMode::Flank)
+								query = EQSCoverSystem::BuildPresetFlankQuery(genMode);
+							else if (queryMode == EQSQueryMode::Retreat)
+								query = EQSCoverSystem::BuildPresetRetreatQuery(genMode);
+							else
+								query = EQSCoverSystem::BuildPresetCoverQuery(genMode);
+						}
 
 						EQS::EQSQueryContext queryCtx;
 						queryCtx.ScenePtr = &ctx.CurrentScene;
@@ -646,11 +656,21 @@ else if (type == "UseSmartObject")
 							std::vector<CoverBox> obstacles;
 							EQSCoverSystem::GatherSceneObstacles(ctx.CurrentScene, querierRaw, resolvedThreatRaw, obstacles);
 
-							auto query = (queryMode == EQSQueryMode::Flank)
-								? EQSCoverSystem::BuildPresetFlankQuery(0)
-								: ((queryMode == EQSQueryMode::Retreat)
-									? EQSCoverSystem::BuildPresetRetreatQuery(0)
-									: EQSCoverSystem::BuildPresetCoverQuery(0));
+							std::shared_ptr<EQS::EQSQuery> query;
+							if (modeStr.rfind(".weqs") != std::string::npos)
+							{
+								auto eqAsset = EQS::EQSAsset::GetOrLoad(modeStr);
+								if (eqAsset)
+									query = eqAsset->BuildQuery(resolvedThreatRaw);
+							}
+							if (!query)
+							{
+								query = (queryMode == EQSQueryMode::Flank)
+									? EQSCoverSystem::BuildPresetFlankQuery(0)
+									: ((queryMode == EQSQueryMode::Retreat)
+										? EQSCoverSystem::BuildPresetRetreatQuery(0)
+										: EQSCoverSystem::BuildPresetCoverQuery(0));
+							}
 
 							EQS::EQSQueryContext queryCtx;
 							queryCtx.ScenePtr = &ctx.CurrentScene;
@@ -1074,7 +1094,14 @@ else if (type == "UseSmartObject")
 					if (nNode["Title"]) nodeDesc.Title = nNode["Title"].as<std::string>();
 					if (nNode["Description"]) nodeDesc.Description = nNode["Description"].as<std::string>();
 					if (nNode["ConditionType"]) nodeDesc.ConditionType = nNode["ConditionType"].as<std::string>();
-					if (nNode["ActionType"]) nodeDesc.ActionType = nNode["ActionType"].as<std::string>();
+					if (nNode["ActionType"])
+					{
+						nodeDesc.ActionType = nNode["ActionType"].as<std::string>();
+						if (nodeDesc.ActionType == "FindTacticalCover")
+						{
+							nodeDesc.ActionType = "RunEQSQuery";
+						}
+					}
 					if (nNode["FloatParam"]) nodeDesc.FloatParam = nNode["FloatParam"].as<float>();
 					if (nNode["StringParam"]) nodeDesc.StringParam = nNode["StringParam"].as<std::string>();
 					if (nNode["AbortMode"]) nodeDesc.AbortMode = StringToAbortMode(nNode["AbortMode"].as<std::string>());
@@ -1247,7 +1274,6 @@ else if (type == "UseSmartObject")
 			"SeekSmartObject",
 			"UseSmartObject",
 			"RunEQSQuery",
-			"FindTacticalCover",
 			"MoveToEQSPosition",
 			"ExecuteEQSTacticalAction",
 			"SetBlackboardValue",

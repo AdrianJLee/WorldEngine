@@ -2,6 +2,7 @@
 
 #include "WUI/Common/EditorPanel.h"
 #include "World/Gameplay/Framework/BehaviorTreeAsset.h"
+#include "World/Level/AI/EQS/EQSAsset.h"
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -19,7 +20,8 @@ namespace World
 		enum class EditorMode
 		{
 			BehaviorTree,
-			Blackboard
+			Blackboard,
+			EQSQuery
 		};
 
 		BehaviorTreeEditorPanel();
@@ -30,6 +32,8 @@ namespace World
 		{
 			if (m_Mode == EditorMode::Blackboard)
 				return m_Dirty ? "Blackboard Editor *" : "Blackboard Editor";
+			if (m_Mode == EditorMode::EQSQuery)
+				return m_Dirty ? "EQS Query Editor *" : "EQS Query Editor";
 			return m_Dirty ? "Behavior Tree *" : "Behavior Tree";
 		}
 
@@ -80,6 +84,7 @@ namespace World
 		void RenderNodeCard(Wui::WuiContext& ctx, uint32_t nodeId, int depth, float& curY, const Wui::WuiRect& rect, PanelHost& host);
 		void RenderNodeDetails(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void RenderBlackboard(Wui::WuiContext& ctx, const Wui::WuiRect& rect);
+		void RenderEQSQueryEditor(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void RenderLiveDebugger(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 
 		static std::string s_PendingOpenPath;
@@ -91,12 +96,14 @@ namespace World
 		EditorMode m_Mode = EditorMode::BehaviorTree;
 		Gameplay::BehaviorTreeAsset m_Asset;
 		Gameplay::BlackboardAsset m_BlackboardAsset;
+		EQS::EQSAsset m_EQSAsset;
 		std::string m_BoundBlackboardPath;
 
 		std::vector<BTNodeDesc> m_Nodes;
 		std::vector<BTBlackboardKeyDesc> m_BlackboardKeys;
 		uint32_t m_NextNodeId = 1;
 		uint32_t m_SelectedNodeId = 1;
+		int m_SelectedRuleIdx = 0;
 		int m_SelectedBbTemplateIndex = 0;
 
 		ViewTab m_ActiveTab = ViewTab::TreeOutline;

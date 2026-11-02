@@ -2952,6 +2952,16 @@ namespace World
 				auto view = m_Registry.view<TransformComponent, EQSComponent>();
 				for (auto entity : view)
 				{
+					// 若实体已挂载活跃行为树，由行为树内部全权异步调度 EQS，跳过 Scene 层的冗余每帧重算
+					if (m_Registry.all_of<BehaviorTreeComponent>(entity))
+					{
+						const auto& bt = m_Registry.get<BehaviorTreeComponent>(entity);
+						if (bt.Enabled != 0 && bt.TreeAssetId != 0)
+						{
+							continue;
+						}
+					}
+
 					auto& tc = view.get<TransformComponent>(entity);
 					auto& eqsc = view.get<EQSComponent>(entity);
 					uint32_t querierRaw = static_cast<uint32_t>(entity);

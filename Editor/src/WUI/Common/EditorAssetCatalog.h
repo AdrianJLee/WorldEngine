@@ -57,6 +57,8 @@ namespace World
 				return EditorAssetKind::BehaviorTree;
 			if (assetType == "Blackboard" || assetType == "BB" || assetType == "BlackboardAsset")
 				return EditorAssetKind::Blackboard;
+			if (assetType == "EQSQuery" || assetType == "EQS" || assetType == "EnvQuery" || assetType == "EQSAsset")
+				return EditorAssetKind::EQSQuery;
 			return EditorAssetKind::Unknown;
 		}
 
@@ -104,6 +106,7 @@ namespace World
 				case EditorAssetKind::VFX: return LowerExtension(path) == ".wvfx" || LowerExtension(path) == ".wparticle";
 				case EditorAssetKind::BehaviorTree: return LowerExtension(path) == ".wbt" || LowerExtension(path) == ".wbehaviortree";
 				case EditorAssetKind::Blackboard: return LowerExtension(path) == ".wbb" || LowerExtension(path) == ".wblackboard";
+				case EditorAssetKind::EQSQuery: return LowerExtension(path) == ".weqs" || LowerExtension(path) == ".weqsquery";
 				default: return false;
 			}
 		}

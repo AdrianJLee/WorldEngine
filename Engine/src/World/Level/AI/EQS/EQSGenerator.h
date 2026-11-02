@@ -86,4 +86,22 @@ namespace World::EQS
 		std::string GetName() const override { return "Generator_AroundObstacles"; }
 		void GenerateItems(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& outItems) override;
 	};
+	// 4. EQSGenerator_Cone (扇形视锥/朝向锥体采样)
+	class WLD_API EQSGenerator_Cone : public IEQSGenerator
+	{
+	public:
+		float ConeAngleDegrees { 90.0f };
+		float ConeRadius { 20.0f };
+		float InnerRadius { 2.0f };
+		float StepDistance { 1.5f };
+		float AngleStepDegrees { 15.0f };
+		bool ProjectToTerrain { true };
+
+		EQSGenerator_Cone() = default;
+		EQSGenerator_Cone(float angleDeg, float radius, float innerR = 2.0f, float stepDist = 1.5f, float angleStep = 15.0f, bool projectTerrain = true)
+			: ConeAngleDegrees(angleDeg), ConeRadius(radius), InnerRadius(innerR), StepDistance(stepDist), AngleStepDegrees(angleStep), ProjectToTerrain(projectTerrain) {}
+
+		std::string GetName() const override { return "Generator_Cone"; }
+		void GenerateItems(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& outItems) override;
+	};
 }

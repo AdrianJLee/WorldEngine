@@ -543,6 +543,216 @@ namespace World::EQS
 		}
 	}
 
+	
+	EQSTest_Scripted::EQSTest_Scripted()
+	{
+		Purpose = TestPurpose::FilterAndScore;
+		Curve = ScoringCurve::Linear;
+		Weight = 1.0f;
+		FilterMin = 0.0f;
+		FilterMax = 1.0f;
+	}
+
+	EQSTest_Scripted::EQSTest_Scripted(const std::string& scriptPath)
+		: ScriptPath(scriptPath)
+	{
+		Purpose = TestPurpose::FilterAndScore;
+		Curve = ScoringCurve::Linear;
+		Weight = 1.0f;
+		FilterMin = 0.0f;
+		FilterMax = 1.0f;
+	}
+
+	EQSTest_Scripted::EQSTest_Scripted(std::function<std::pair<float, bool>(const glm::vec3&, const EQSQueryContext&)> evaluator)
+		: CustomEvaluator(std::move(evaluator))
+	{
+		Purpose = TestPurpose::FilterAndScore;
+		Curve = ScoringCurve::Linear;
+		Weight = 1.0f;
+		FilterMin = 0.0f;
+		FilterMax = 1.0f;
+	}
+
+	void EQSTest_Scripted::RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems)
+	{
+		for (auto& item : inOutItems)
+		{
+			if (item.FilteredOut)
+			{
+				item.TestScores.push_back(0.0f);
+				continue;
+			}
+
+			float rawScore = 1.0f;
+			bool pass = true;
+
+			if (CustomEvaluator)
+			{
+				auto res = CustomEvaluator(item.Position, ctx);
+				rawScore = res.first;
+				pass = res.second;
+			}
+
+			if (Purpose == TestPurpose::FilterOnly || Purpose == TestPurpose::FilterAndScore)
+			{
+				if (!pass || rawScore < FilterMin || rawScore > FilterMax)
+				{
+					item.FilteredOut = true;
+					item.TestScores.push_back(0.0f);
+					continue;
+				}
+			}
+
+			if (Purpose != TestPurpose::FilterOnly)
+			{
+				const float norm = NormalizeScore(rawScore);
+				const float score = norm * Weight;
+				item.TotalScore += score;
+				item.TestScores.push_back(score);
+			}
+			else
+			{
+				item.TestScores.push_back(Weight);
+			}
+		}
+	}
+
+	
+	EQSTest_Pathfinding::EQSTest_Pathfinding()
+	{
+		Purpose = TestPurpose::FilterAndScore;
+		Curve = ScoringCurve::Inverse;
+		Weight = 1.0f;
+		FilterMin = 0.5f;
+		FilterMax = 50.0f;
+	}
+
+	void EQSTest_Pathfinding::RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems)
+	{
+		const glm::vec3 startPos = ctx.QuerierPos;
+		for (size_t idx = 0; idx < inOutItems.size(); ++idx)
+		{
+			auto& item = inOutItems[idx];
+			if (item.FilteredOut)
+			{
+				item.TestScores.push_back(0.0f);
+				item.TestRawValues.push_back(0.0f);
+				continue;
+			}
+
+			float dist = glm::distance(item.Position, startPos);
+			bool reachable = true;
+
+			for (const auto& box : ctx.Obstacles)
+			{
+				float hitDist = 0.0f;
+				glm::vec3 rayDir = item.Position - startPos;
+				float rayLen = glm::length(rayDir);
+				if (rayLen > 0.001f)
+				{
+					if (box.IntersectRay(startPos, rayDir / rayLen, rayLen, hitDist))
+					{
+						dist += 4.0f; // 障碍物绕行阻断成本惩罚
+					}
+				}
+			}
+
+			item.TestRawValues.push_back(dist);
+
+			if (Purpose == TestPurpose::FilterOnly || Purpose == TestPurpose::FilterAndScore)
+			{
+				if (!reachable || dist > FilterMax || dist < FilterMin)
+				{
+					item.FilteredOut = true;
+					item.FilteredByTest = 9;
+					item.TestScores.push_back(0.0f);
+					continue;
+				}
+			}
+
+			if (Purpose != TestPurpose::FilterOnly)
+			{
+				float norm = NormalizeScore(dist);
+				float score = norm * Weight;
+				item.TotalScore += score;
+				item.TestScores.push_back(score);
+			}
+			else
+			{
+				item.TestScores.push_back(Weight);
+			}
+		}
+	}
+
+	EQSTest_FieldOfView::EQSTest_FieldOfView()
+	{
+		Purpose = TestPurpose::ScoreOnly;
+		Curve = ScoringCurve::Linear;
+		Weight = 1.5f;
+		IdealValue = 90.0f;
+		FilterMin = 0.0f;
+		FilterMax = 180.0f;
+	}
+
+	void EQSTest_FieldOfView::RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems)
+	{
+		glm::vec3 threatPos = ctx.ThreatPos;
+		glm::vec3 threatFwd = ctx.ThreatForward;
+		if (glm::length(glm::vec2(threatFwd.x, threatFwd.z)) < 0.001f)
+		{
+			threatFwd = glm::vec3(0.0f, 0.0f, -1.0f);
+		}
+		threatFwd = glm::normalize(glm::vec3(threatFwd.x, 0.0f, threatFwd.z));
+
+		for (size_t idx = 0; idx < inOutItems.size(); ++idx)
+		{
+			auto& item = inOutItems[idx];
+			if (item.FilteredOut)
+			{
+				item.TestScores.push_back(0.0f);
+				item.TestRawValues.push_back(0.0f);
+				continue;
+			}
+
+			glm::vec3 toItem = item.Position - threatPos;
+			toItem.y = 0.0f;
+			float len = glm::length(toItem);
+			float angleDeg = 180.0f;
+			if (len > 0.001f)
+			{
+				float dotVal = glm::clamp(glm::dot(threatFwd, toItem / len), -1.0f, 1.0f);
+				angleDeg = glm::degrees(std::acos(dotVal));
+			}
+
+			item.TestRawValues.push_back(angleDeg);
+
+			float evalAngle = InvertFOV ? angleDeg : (180.0f - angleDeg);
+
+			if (Purpose == TestPurpose::FilterOnly || Purpose == TestPurpose::FilterAndScore)
+			{
+				if (angleDeg < FovAngleDegrees * 0.5f && InvertFOV)
+				{
+					item.FilteredOut = true;
+					item.FilteredByTest = 10;
+					item.TestScores.push_back(0.0f);
+					continue;
+				}
+			}
+
+			if (Purpose != TestPurpose::FilterOnly)
+			{
+				float norm = std::clamp(evalAngle / 180.0f, 0.0f, 1.0f);
+				float score = norm * Weight;
+				item.TotalScore += score;
+				item.TestScores.push_back(score);
+			}
+			else
+			{
+				item.TestScores.push_back(Weight);
+			}
+		}
+	}
+
 	EQSTestRegistry::EQSTestRegistry()
 	{
 		Register("Distance", std::make_shared<EQSTest_Distance>());
@@ -553,6 +763,9 @@ namespace World::EQS
 		Register("WallProximity", std::make_shared<EQSTest_WallProximity>());
 		Register("FriendlyPenalty", std::make_shared<EQSTest_FriendlyPenalty>());
 		Register("CoverReservation", std::make_shared<EQSTest_CoverReservation>());
+		Register("Scripted", std::make_shared<EQSTest_Scripted>());
+		Register("Pathfinding", std::make_shared<EQSTest_Pathfinding>());
+		Register("FieldOfView", std::make_shared<EQSTest_FieldOfView>());
 	}
 
 	EQSTestRegistry& EQSTestRegistry::Get()

@@ -1,0 +1,58 @@
+FormatVersion: 1
+AssetType: EQSQuery
+Name: DefaultSniper
+Generator:
+  Type: Circle
+  Radius: 40
+  Spacing: 2.5
+  InnerRadius: 15
+  OuterRadius: 40
+  StepDistance: 2
+  WallOffset: 0.75
+  IncludeGrid: true
+  ProjectToTerrain: true
+Tests:
+  - Name: Height Advantage
+    Type: Height
+    Context: Threat
+    Purpose: ScoreOnly
+    Curve: Linear
+    Weight: 2
+    FilterMin: 0
+    FilterMax: 15
+    IdealValue: 8
+    GaussianSigma: 2
+    Enabled: true
+  - Name: Trace Clear View
+    Type: Trace
+    Context: Threat
+    Purpose: FilterAndScore
+    Curve: Inverse
+    Weight: 2
+    FilterMin: 0
+    FilterMax: 1
+    IdealValue: 0
+    GaussianSigma: 1
+    Enabled: true
+  - Name: Long Distance
+    Type: Distance
+    Context: Threat
+    Purpose: ScoreOnly
+    Curve: ClampedGaussian
+    Weight: 1.5
+    FilterMin: 15
+    FilterMax: 50
+    IdealValue: 30
+    GaussianSigma: 5
+    Enabled: true
+  - Name: Wall Proximity
+    Type: WallProximity
+    Context: Querier
+    Purpose: ScoreOnly
+    Curve: ClampedGaussian
+    Weight: 0.8
+    FilterMin: 0
+    FilterMax: 2
+    IdealValue: 0.85
+    GaussianSigma: 0.4
+    Enabled: true

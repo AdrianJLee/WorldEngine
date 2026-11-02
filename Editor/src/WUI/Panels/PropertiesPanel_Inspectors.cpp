@@ -29,6 +29,7 @@
 #include "World/Environment/PCGBiome.h"
 #include "World/Level/AI/EQSCoverSystem.h"
 #include "World/Level/AI/EQS/EQSQuery.h"
+#include "World/Level/AI/EQS/EQSAsset.h"
 #include "World/Level/AI/EQS/EQSGenerator.h"
 #include "World/Level/AI/EQS/EQSTest.h"
 #include "World/Level/AI/EQS/EQSContext.h"
@@ -3097,6 +3098,10 @@ static uint32_t s_LODGenEntityId = 0;
 			const float wallOff = (state.WallOffset > 0.05f) ? state.WallOffset : 0.75f;
 			generator = std::make_shared<EQS::EQSGenerator_AroundObstacles>(wallOff, true, true);
 		}
+		else if (comp->GeneratorMode == 3)
+		{
+			generator = std::make_shared<EQS::EQSGenerator_Cone>(state.ConeAngle, ctx.QueryRadius, 2.0f, ctx.GridSpacing, 15.0f, true);
+		}
 		else
 		{
 			generator = std::make_shared<EQS::EQSGenerator_ProjectedGrid>(ctx.QueryRadius, ctx.GridSpacing, true);
@@ -3108,6 +3113,9 @@ static uint32_t s_LODGenEntityId = 0;
 
 		for (const auto& t : state.PipelineTests)
 		{
+			if (!t.Enabled)
+				continue;
+
 			std::shared_ptr<EQS::IEQSTest> test;
 			switch (t.Type)
 			{
@@ -3133,15 +3141,34 @@ static uint32_t s_LODGenEntityId = 0;
 			case 5: // Overlap
 				test = std::make_shared<EQS::EQSTest_Overlap>();
 				break;
+			case 6: // FriendlyPenalty
+				test = std::make_shared<EQS::EQSTest_FriendlyPenalty>();
+				break;
+			case 7: // CoverReservation
+				test = std::make_shared<EQS::EQSTest_CoverReservation>();
+				break;
+			case 8: // Scripted
+				test = std::make_shared<EQS::EQSTest_Scripted>(t.ScriptPath);
+				break;
+			case 9: // Pathfinding
+				test = std::make_shared<EQS::EQSTest_Pathfinding>();
+				break;
+			case 10: // FieldOfView
+				test = std::make_shared<EQS::EQSTest_FieldOfView>();
+				break;
 			default:
 				break;
 			}
 
 			if (test)
 			{
+				test->Purpose = static_cast<EQS::TestPurpose>(t.Purpose);
 				test->Curve = static_cast<EQS::ScoringCurve>(t.Curve);
 				test->Weight = t.Weight;
 				test->IdealValue = t.IdealValue;
+				test->FilterMin = t.FilterMin;
+				test->FilterMax = t.FilterMax;
+				test->GaussianSigma = t.GaussianSigma;
 
 				if (t.Context == 1)
 					test->Context = std::make_shared<EQS::EQSContext_Target>(comp->ThreatEntityHint, threatPos);
@@ -3149,6 +3176,8 @@ static uint32_t s_LODGenEntityId = 0;
 					test->Context = std::make_shared<EQS::EQSContext_AllThreats>(threatPos);
 				else if (t.Context == 3)
 					test->Context = std::make_shared<EQS::EQSContext_CustomLocation>(threatPos);
+				else if (t.Context == 4)
+					test->Context = std::make_shared<EQS::EQSContext_AllAllies>();
 				else
 					test->Context = std::make_shared<EQS::EQSContext_Querier>();
 
@@ -3158,7 +3187,10 @@ static uint32_t s_LODGenEntityId = 0;
 
 		auto query = builder.Build();
 		EQS::EQSQueryResult result;
+		auto t0 = std::chrono::high_resolution_clock::now();
 		const bool found = query ? query->Execute(ctx, result) : false;
+		auto t1 = std::chrono::high_resolution_clock::now();
+		state.ExecutionTimeMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
 		state.TotalSampleCount = result.Items.size();
 		state.HardFilteredCount = 0;
@@ -3170,13 +3202,13 @@ static uint32_t s_LODGenEntityId = 0;
 			if (item.FilteredOut)
 			{
 				state.HardFilteredCount++;
-				state.Candidates.push_back({ item.Position, item.TotalScore, false, true });
+				state.Candidates.push_back({ item.Position, item.TotalScore, false, true, item.TestScores, item.TestRawValues });
 			}
 			else
 			{
 				if (item.TotalScore > 0.0f)
 					state.QualifiedCount++;
-				state.Candidates.push_back({ item.Position, item.TotalScore, true, false });
+				state.Candidates.push_back({ item.Position, item.TotalScore, true, false, item.TestScores, item.TestRawValues });
 			}
 		}
 
@@ -6236,7 +6268,49 @@ float PropertiesPanel::DrawBehaviorTreeInspector(Wui::WuiContext& ctx, const Wui
 		m_Host.Notify("已在专属黑板编辑器中打开: " + targetBbPath);
 	}
 	Wui::Tooltip(ctx, { startX + paramLabelW + bbComboW + 6.0f, curY, 80.0f, 22.0f }, "在独立黑板编辑器中打开并配置该 .wbb 资产的变量与默认值");
+		// EQS 决策资产 (.weqs) 槽位与选择
+	const std::vector<std::string>& eqsAssets = Editor::AssetCatalog::PathsFor(EditorAssetKind::EQSQuery);
+	std::vector<std::string> eqsOptions = eqsAssets;
+	if (eqsOptions.empty())
+	{
+		eqsOptions.push_back("assets/ai/DefaultTacticalCover.weqs");
+	}
+	int selectedEqsIdx = 0;
+	for (size_t i = 0; i < eqsOptions.size(); ++i)
+	{
+		if (eqsOptions[i] == g_EQSPreviewState.BoundAssetPath)
+		{
+			selectedEqsIdx = static_cast<int>(i);
+			break;
+		}
+	}
+	Wui::Label(ctx, { startX, curY + 2.0f }, "EQS资产 (.weqs):", theme.Text, theme.FontSizeSmall);
+	int chosenEqsIdx = selectedEqsIdx;
+	const float eqsComboW = paramFieldW - 86.0f;
+	if (Wui::Combo(ctx, Wui::HashId("inspect.bt.eqs_asset_combo"),
+		{ startX + paramLabelW, curY, eqsComboW, 22.0f }, "EQS资产", eqsOptions, chosenEqsIdx, theme))
+	{
+		if (chosenEqsIdx >= 0 && chosenEqsIdx < static_cast<int>(eqsOptions.size()))
+		{
+			g_EQSPreviewState.BoundAssetPath = eqsOptions[chosenEqsIdx];
+			m_Host.MarkDocumentDirty();
+		}
+	}
+	Wui::WuiTheme eqsBtnTheme = theme;
+	eqsBtnTheme.ButtonBg = Wui::WuiColor { 0.50f, 0.30f, 0.15f, 0.90f };
+	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_open_eqs"),
+		{ startX + paramLabelW + eqsComboW + 6.0f, curY, 80.0f, 22.0f }, "[EQS编辑]", eqsBtnTheme))
+	{
+		std::string targetEqsPath = (chosenEqsIdx >= 0 && chosenEqsIdx < static_cast<int>(eqsOptions.size()))
+			? eqsOptions[chosenEqsIdx] : "assets/ai/DefaultTacticalCover.weqs";
+		BehaviorTreeEditorPanel::RequestOpenPath(targetEqsPath);
+		m_Host.ActivatePanel("behaviortree");
+		m_Host.Notify("已在专属 EQS 决策编辑器中打开: " + targetEqsPath);
+	}
+	Wui::Tooltip(ctx, { startX + paramLabelW + eqsComboW + 6.0f, curY, 80.0f, 22.0f }, "在独立 EQS 工作台中编辑该 .weqs 空间推理资产");
 	curY += 30.0f;
+
+curY += 30.0f;
 
 	// =========================================================================
 	// 2. 醒目大按钮: 【在专属编辑器中打开 (Open in BT Editor)】

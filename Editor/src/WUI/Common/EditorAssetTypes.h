@@ -43,6 +43,7 @@ namespace World
 		VFX,            // .wvfx / .wparticle (视觉特效资产)
 		BehaviorTree,   // .wbt / .wbehaviortree (行为树资产)
 		Blackboard,     // .wbb / .wblackboard (AI黑板数据资产)
+		EQSQuery,       // .weqs / .weqsquery (EQS空间决策查询资产)
 		// M4:3D 动画图(.wanimgraph)—— 状态机 + 1D/2D 混合空间 + 过渡 + 层遮罩。
 		// 双击 = 打开 Anim Graph 面板;面板读写一律走 AnimGraph::LoadFromFile/SaveToFile。
 		AnimGraph,
@@ -152,6 +153,8 @@ namespace World
 			return { EditorAssetKind::BehaviorTree, "BehaviorTree", "asset.kind.behaviortree" };
 		if (extension == ".wbb" || extension == ".wblackboard")
 			return { EditorAssetKind::Blackboard, "Blackboard", "asset.kind.blackboard" };
+		if (extension == ".weqs" || extension == ".weqsquery")
+			return { EditorAssetKind::EQSQuery, "EQS Query", "asset.kind.eqsquery" };
 		// M4-TEX P4:内容根的图片是**源图**(材质引用它;产物 `<源图>.wtexc` 由它烘出来);
 		// `.wtex` 才是可编辑的纹理**资产**(设置 + `source:`)。
 		if (extension == ".wtex")

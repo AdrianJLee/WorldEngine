@@ -579,7 +579,8 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 			WLD_CORE_INFO("[curve] editor opened: {0}", logical);
 		}
 		else if (LowerExtension(path) == ".wbt" || LowerExtension(path) == ".wbehaviortree"
-			|| LowerExtension(path) == ".wbb" || LowerExtension(path) == ".wblackboard")
+			|| LowerExtension(path) == ".wbb" || LowerExtension(path) == ".wblackboard"
+			|| LowerExtension(path) == ".weqs" || LowerExtension(path) == ".weqsquery")
 		{
 			// 行为树专属工作台 (.wbt) 双击
 			const std::filesystem::path contentRoot = m_Model.Root;

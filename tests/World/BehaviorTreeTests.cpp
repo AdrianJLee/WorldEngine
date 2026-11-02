@@ -4,6 +4,7 @@
 #include "World/Gameplay/Framework/Blackboard.h"
 #include "World/Level/AI/EQS/EnvQueryManager.h"
 #include "World/Level/AI/EQSCoverSystem.h"
+#include "World/Level/AI/EQS/EQSAsset.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
@@ -1435,6 +1436,357 @@ static void TestBehaviorTreeConditionOnArrays()
 	std::cout << "[PASS] TestBehaviorTreeConditionOnArrays\n";
 }
 
+
+static void TestEQSAssetSerializationRoundTrip()
+{
+	EQS::EQSAsset asset;
+	asset.Name = "FlankAssaultQuery";
+	asset.Version = 1;
+	asset.GeneratorDesc.Type = "Circle";
+	asset.GeneratorDesc.Radius = 25.0f;
+	asset.GeneratorDesc.Spacing = 2.0f;
+	asset.GeneratorDesc.InnerRadius = 6.0f;
+	asset.GeneratorDesc.OuterRadius = 25.0f;
+	asset.GeneratorDesc.StepDistance = 1.5f;
+
+	EQS::EQSTestDesc t1;
+	t1.Name = "Overlap Filter";
+	t1.TestType = "Overlap";
+	t1.ContextType = "Querier";
+	t1.Purpose = EQS::TestPurpose::FilterOnly;
+	t1.Curve = EQS::ScoringCurve::Linear;
+	t1.Weight = 0.0f;
+	t1.Enabled = true;
+	asset.Tests.push_back(t1);
+
+	EQS::EQSTestDesc t2;
+	t2.Name = "Trace LOS";
+	t2.TestType = "Trace";
+	t2.ContextType = "Threat";
+	t2.Purpose = EQS::TestPurpose::FilterAndScore;
+	t2.Curve = EQS::ScoringCurve::Inverse;
+	t2.Weight = 1.5f;
+	t2.FilterMin = 0.0f;
+	t2.FilterMax = 1.0f;
+	t2.Enabled = true;
+	asset.Tests.push_back(t2);
+
+	EQS::EQSTestDesc t3;
+	t3.Name = "Dot Flank";
+	t3.TestType = "Dot";
+	t3.ContextType = "Threat";
+	t3.Purpose = EQS::TestPurpose::ScoreOnly;
+	t3.Curve = EQS::ScoringCurve::ClampedGaussian;
+	t3.Weight = 2.0f;
+	t3.IdealValue = 90.0f;
+	t3.GaussianSigma = 25.0f;
+	t3.Enabled = true;
+	asset.Tests.push_back(t3);
+
+	EQS::EQSTestDesc t4;
+	t4.Name = "Custom Script Test";
+	t4.TestType = "Scripted";
+	t4.ContextType = "Threat";
+	t4.Purpose = EQS::TestPurpose::ScoreOnly;
+	t4.Weight = 1.2f;
+	t4.ScriptPath = "assets/scripts/ai/eqs/CustomTacticalScore.luau";
+	t4.Enabled = true;
+	asset.Tests.push_back(t4);
+
+	std::string testPath = "build/test_flank.weqs";
+	assert(asset.SaveToFile(testPath) == true);
+
+	EQS::EQSAsset loaded;
+	assert(loaded.LoadFromFile(testPath) == true);
+	assert(loaded.Name == "FlankAssaultQuery");
+	assert(loaded.GeneratorDesc.Type == "Circle");
+	assert(std::abs(loaded.GeneratorDesc.InnerRadius - 6.0f) < 0.001f);
+	assert(std::abs(loaded.GeneratorDesc.OuterRadius - 25.0f) < 0.001f);
+	assert(loaded.Tests.size() == 4);
+	assert(loaded.Tests[0].TestType == "Overlap");
+	assert(loaded.Tests[0].Purpose == EQS::TestPurpose::FilterOnly);
+	assert(loaded.Tests[1].TestType == "Trace");
+	assert(loaded.Tests[1].Curve == EQS::ScoringCurve::Inverse);
+	assert(loaded.Tests[2].TestType == "Dot");
+	assert(loaded.Tests[2].IdealValue == 90.0f);
+	assert(loaded.Tests[3].TestType == "Scripted");
+	assert(loaded.Tests[3].ScriptPath == "assets/scripts/ai/eqs/CustomTacticalScore.luau");
+
+	std::filesystem::remove(testPath);
+	std::cout << "[PASS] TestEQSAssetSerializationRoundTrip\n";
+}
+
+static void TestEQSAssetDynamicPipelineExecution()
+{
+	EQS::EQSAsset asset;
+	asset.Name = "TacticalCoverQuery";
+	asset.GeneratorDesc.Type = "ProjectedGrid";
+	asset.GeneratorDesc.Radius = 15.0f;
+	asset.GeneratorDesc.Spacing = 1.5f;
+
+	EQS::EQSTestDesc tOverlap;
+	tOverlap.Name = "Overlap";
+	tOverlap.TestType = "Overlap";
+	tOverlap.Purpose = EQS::TestPurpose::FilterOnly;
+	asset.Tests.push_back(tOverlap);
+
+	EQS::EQSTestDesc tDist;
+	tDist.Name = "Distance";
+	tDist.TestType = "Distance";
+	tDist.ContextType = "Querier";
+	tDist.Purpose = EQS::TestPurpose::ScoreOnly;
+	tDist.Curve = EQS::ScoringCurve::Inverse;
+	tDist.Weight = 1.0f;
+	asset.Tests.push_back(tDist);
+
+	auto query = asset.BuildQuery(0);
+	assert(query != nullptr);
+
+	EQS::EQSQueryContext ctx;
+	ctx.QuerierPos = glm::vec3(0.0f, 0.0f, 0.0f);
+	ctx.ThreatPos = glm::vec3(20.0f, 0.0f, 0.0f);
+	ctx.QueryRadius = 15.0f;
+	ctx.GridSpacing = 1.5f;
+
+	CoverBox obstacle(glm::vec3(2.0f, 0.0f, -1.0f), glm::vec3(4.0f, 2.0f, 1.0f));
+	ctx.Obstacles.push_back(obstacle);
+
+	EQS::EQSQueryResult result;
+	bool success = query->Execute(ctx, result);
+	assert(success == true);
+	assert(result.Items.size() > 0);
+	assert(result.BestScore > 0.0f);
+
+	for (const auto& item : result.Items)
+	{
+		if (obstacle.ContainsPoint(item.Position, 0.1f))
+		{
+			assert(item.FilteredOut == true);
+		}
+	}
+
+	std::cout << "[PASS] TestEQSAssetDynamicPipelineExecution\n";
+}
+
+static void TestEQSTestScriptedCustomEvaluator()
+{
+	EQS::EQSQuery::Builder builder;
+	builder.Named("ScriptedQuery");
+	builder.UsingGenerator(std::make_shared<EQS::EQSGenerator_ProjectedGrid>(10.0f, 2.0f, false));
+
+	auto scripted = std::make_shared<EQS::EQSTest_Scripted>(
+		[](const glm::vec3& candPos, const EQS::EQSQueryContext& ctx) -> std::pair<float, bool> {
+			if (candPos.x < 0.0f)
+			{
+				return { 0.0f, false };
+			}
+			float distToDesired = glm::distance(candPos, glm::vec3(5.0f, 0.0f, 5.0f));
+			float score = 1.0f / (1.0f + distToDesired);
+			return { score, true };
+		}
+	);
+	scripted->Purpose = EQS::TestPurpose::FilterAndScore;
+	scripted->Weight = 2.0f;
+	builder.AddTest(scripted);
+
+	auto query = builder.Build();
+	EQS::EQSQueryContext ctx;
+	ctx.QuerierPos = glm::vec3(0.0f);
+	ctx.QueryRadius = 10.0f;
+	ctx.GridSpacing = 2.0f;
+
+	EQS::EQSQueryResult result;
+	bool success = query->Execute(ctx, result);
+	assert(success == true);
+	assert(result.BestPosition.x >= 0.0f);
+
+	for (const auto& item : result.Items)
+	{
+		if (item.Position.x < -0.01f)
+		{
+			assert(item.FilteredOut == true);
+		}
+	}
+
+	std::cout << "[PASS] TestEQSTestScriptedCustomEvaluator\n";
+}
+
+static void TestBehaviorTreeReferencingEQSAsset()
+{
+	WorldContext context;
+	Scene scene(context);
+
+	std::string weqsPath = "build_test_agent_query.weqs";
+	EQS::EQSAsset asset;
+	asset.Name = "AgentTacticalQuery";
+	asset.GeneratorDesc.Type = "ProjectedGrid";
+	asset.GeneratorDesc.Radius = 12.0f;
+	asset.GeneratorDesc.Spacing = 2.0f;
+
+	EQS::EQSTestDesc tDist;
+	tDist.Name = "Distance";
+	tDist.TestType = "Distance";
+	tDist.ContextType = "Querier";
+	tDist.Purpose = EQS::TestPurpose::ScoreOnly;
+	tDist.Curve = EQS::ScoringCurve::Inverse;
+	tDist.Weight = 1.0f;
+	asset.Tests.push_back(tDist);
+	asset.SaveToFile(weqsPath);
+
+	Entity agent = Entity::CreateEntity(&scene, "Agent");
+	agent.AddComponent<TransformComponent>(glm::vec3(0.0f));
+	auto& btComp = agent.AddComponent<BehaviorTreeComponent>();
+	btComp.TreeAssetId = 999;
+	btComp.Enabled = 1;
+
+	BehaviorTreeAsset btAsset;
+	BehaviorTreeNodeDesc rootDesc;
+	rootDesc.Id = 1;
+	rootDesc.ParentId = 0;
+	rootDesc.Kind = BehaviorTreeNodeKind::Sequence;
+	rootDesc.Title = "RootSeq";
+	btAsset.Nodes().push_back(rootDesc);
+
+	BehaviorTreeNodeDesc actionDesc;
+	actionDesc.Id = 2;
+	actionDesc.ParentId = 1;
+	actionDesc.Kind = BehaviorTreeNodeKind::Action;
+	actionDesc.ActionType = "RunEQSQuery";
+	actionDesc.StringParam = weqsPath;
+	actionDesc.FloatParam = 12.0f;
+	btAsset.Nodes().push_back(actionDesc);
+
+	std::string btPath = "build_test_bt_eqs.wbt";
+	btAsset.SaveToFile(btPath);
+
+	BehaviorTreeSystem::RegisterTree(999, btAsset.InstantiateTree());
+
+	BehaviorTreeSystem btSystem;
+	// Step 1: initiate async query
+	btSystem.Update(scene, 0.016f);
+
+	// Pump EnvQueryManager
+	EQS::EnvQueryManager::Get().Update(0.016f, 10.0f);
+
+	// Step 2: complete query
+	btSystem.Update(scene, 0.016f);
+
+	auto board = BlackboardRegistry::Get().GetBlackboard(static_cast<uint32_t>((entt::entity)agent));
+	assert(board != nullptr);
+	assert(board->HasKey("TargetPos") == true);
+	assert(board->Get<bool>("EQSQuerySuccess", false) == true);
+
+	std::filesystem::remove(weqsPath);
+	std::filesystem::remove(btPath);
+	std::cout << "[PASS] TestBehaviorTreeReferencingEQSAsset\n";
+}
+
+static void TestFindTacticalCoverDeprecationAndAlias()
+{
+	std::string legacyPath = "build_test_legacy_cover.wbt";
+	{
+		std::ofstream ofs(legacyPath);
+		ofs << "FormatVersion: 1\n"
+		       "AssetType: BehaviorTree\n"
+		       "Nodes:\n"
+		       "  - Id: 1\n"
+		       "    Kind: Action\n"
+		       "    Title: LegacyCoverAction\n"
+		       "    ActionType: FindTacticalCover\n"
+		       "    FloatParam: 15.0\n"
+		       "    StringParam: Cover\n";
+	}
+
+	BehaviorTreeAsset loadedAsset;
+	std::string error;
+	assert(loadedAsset.LoadFromFile(legacyPath, &error) == true);
+	assert(loadedAsset.Nodes().size() == 1);
+	assert(loadedAsset.Nodes()[0].ActionType == "RunEQSQuery");
+
+	std::filesystem::remove(legacyPath);
+	std::cout << "[PASS] TestFindTacticalCoverDeprecationAndAlias\n";
+}
+
+
+static void TestEQSGeneratorConeExecution()
+{
+	EQS::EQSGenerator_Cone coneGen(90.0f, 20.0f, 2.0f, 2.0f, 15.0f, false);
+	EQS::EQSQueryContext ctx;
+	ctx.QuerierPos = glm::vec3(0.0f, 0.0f, 0.0f);
+	ctx.QuerierForward = glm::vec3(0.0f, 0.0f, 1.0f);
+
+	std::vector<EQS::EQSCandidateItem> items;
+	coneGen.GenerateItems(ctx, items);
+
+	assert(!items.empty());
+	for (const auto& it : items)
+	{
+		float dist = glm::distance(it.Position, ctx.QuerierPos);
+		assert(dist >= 1.99f && dist <= 20.05f);
+		assert(it.Position.z >= -0.01f); // 位于正向半球
+	}
+
+	std::cout << "[PASS] TestEQSGeneratorConeExecution\n";
+}
+
+static void TestEQSTestPathfindingObstacleDetour()
+{
+	EQS::EQSTest_Pathfinding pathTest;
+	pathTest.Purpose = EQS::TestPurpose::ScoreOnly;
+	pathTest.Curve = EQS::ScoringCurve::Inverse;
+	pathTest.FilterMin = 0.0f;
+	pathTest.FilterMax = 30.0f;
+
+	EQS::EQSQueryContext ctx;
+	ctx.QuerierPos = glm::vec3(0.0f);
+	// Place an obstacle right in front from z=3 to z=7
+	CoverBox obs(glm::vec3(-2.0f, 0.0f, 3.0f), glm::vec3(2.0f, 3.0f, 7.0f));
+	ctx.Obstacles.push_back(obs);
+
+	std::vector<EQS::EQSCandidateItem> items;
+	EQS::EQSCandidateItem directPt; directPt.Position = glm::vec3(10.0f, 0.0f, 0.0f); // no obstacle
+	EQS::EQSCandidateItem blockedPt; blockedPt.Position = glm::vec3(0.0f, 0.0f, 10.0f); // blocked by obstacle
+	items.push_back(directPt);
+	items.push_back(blockedPt);
+
+	pathTest.RunTest(ctx, items);
+
+	assert(items.size() == 2);
+	assert(items[0].TestRawValues.size() == 1);
+	assert(items[1].TestRawValues.size() == 1);
+	// Blocked path should have higher raw detour distance
+	assert(items[1].TestRawValues[0] > items[0].TestRawValues[0]);
+	// Direct path should have higher score (Inverse curve)
+	assert(items[0].TotalScore > items[1].TotalScore);
+
+	std::cout << "[PASS] TestEQSTestPathfindingObstacleDetour\n";
+}
+
+static void TestEQSTestFieldOfViewStealthEvaluation()
+{
+	EQS::EQSTest_FieldOfView fovTest;
+	fovTest.FovAngleDegrees = 90.0f;
+	fovTest.InvertFOV = true; // true = 位于视锥外拿高分
+
+	EQS::EQSQueryContext ctx;
+	ctx.ThreatPos = glm::vec3(0.0f);
+	ctx.ThreatForward = glm::vec3(0.0f, 0.0f, 1.0f); // 敌人面朝 +Z
+
+	std::vector<EQS::EQSCandidateItem> items;
+	EQS::EQSCandidateItem inFront; inFront.Position = glm::vec3(0.0f, 0.0f, 15.0f); // 正前方 0° 视锥内
+	EQS::EQSCandidateItem behindBack; behindBack.Position = glm::vec3(0.0f, 0.0f, -15.0f); // 正后方 180° 视锥外
+	items.push_back(inFront);
+	items.push_back(behindBack);
+
+	fovTest.RunTest(ctx, items);
+
+	assert(items.size() == 2);
+	// 正后方绕背得分必须高于正前方暴露点
+	assert(items[1].TotalScore > items[0].TotalScore);
+
+	std::cout << "[PASS] TestEQSTestFieldOfViewStealthEvaluation\n";
+}
+
 int main()
 {
 	Log::Init();
@@ -1461,6 +1813,14 @@ int main()
 	std::cout << "--- Running 19 ---" << std::endl; TestDecoupledBlackboardAssetLinkage();
 	std::cout << "--- Running 20 ---" << std::endl; TestBlackboardExtendedTypesAndArrays();
 	std::cout << "--- Running 21 ---" << std::endl; TestBehaviorTreeConditionOnArrays();
+	std::cout << "--- Running 22 ---" << std::endl; TestEQSAssetSerializationRoundTrip();
+	std::cout << "--- Running 23 ---" << std::endl; TestEQSAssetDynamicPipelineExecution();
+	std::cout << "--- Running 24 ---" << std::endl; TestEQSTestScriptedCustomEvaluator();
+	std::cout << "--- Running 25 ---" << std::endl; TestBehaviorTreeReferencingEQSAsset();
+	std::cout << "--- Running 26 ---" << std::endl; TestFindTacticalCoverDeprecationAndAlias();
+	std::cout << "--- Running 27 ---" << std::endl; TestEQSGeneratorConeExecution();
+	std::cout << "--- Running 28 ---" << std::endl; TestEQSTestPathfindingObstacleDetour();
+	std::cout << "--- Running 29 ---" << std::endl; TestEQSTestFieldOfViewStealthEvaluation();
 	std::cout << "All passed!" << std::endl;
 	return 0;
 }

@@ -36,14 +36,18 @@ namespace World::EQS
 		glm::vec3 Position { 0.0f };
 		float TotalScore { 0.0f };
 		bool FilteredOut { false };
-		std::vector<float> TestScores; // 保留每个 Test 的单项得分，专供视口诊断与雷达卡片
+		int FilteredByTest { -1 }; // 被哪个准则淘汰 (-1 = 未淘汰)
+		std::vector<float> TestScores; // 每个准则的加权得分
+		std::vector<float> TestRawValues; // 每个准则的测量原始物理读数 (距离m, 角度°, 遮挡率等)
 	};
 
 	struct WLD_API EQSQueryContext
 	{
 		glm::vec3 QuerierPos { 0.0f };
+		glm::vec3 QuerierForward { 0.0f, 0.0f, 1.0f };
 		uint32_t QuerierEntityRaw { 0 };
 		glm::vec3 ThreatPos { 0.0f };
+		glm::vec3 ThreatForward { 0.0f, 0.0f, 1.0f };
 		uint32_t ThreatEntityHint { 0 };
 		float QueryRadius { 20.0f };
 		float GridSpacing { 2.0f };

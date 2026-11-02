@@ -392,6 +392,57 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				SelectCreated(target, "new-blackboard");
 				return true;
 			});
+		add("eqsquery", "EQS Query (AI 空间查询)", ".weqs", 37, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_eqs_query", ".weqs");
+				EQS::EQSAsset asset;
+				asset.Name = target.stem().string();
+				asset.GeneratorDesc.Type = "ProjectedGrid";
+				asset.GeneratorDesc.Radius = 20.0f;
+				asset.GeneratorDesc.Spacing = 2.0f;
+
+				EQS::EQSTestDesc tOverlap;
+				tOverlap.Name = "Overlap Filter";
+				tOverlap.TestType = "Overlap";
+				tOverlap.Purpose = EQS::TestPurpose::FilterOnly;
+				asset.Tests.push_back(tOverlap);
+
+				EQS::EQSTestDesc tTrace;
+				tTrace.Name = "Trace LOS";
+				tTrace.TestType = "Trace";
+				tTrace.Purpose = EQS::TestPurpose::FilterAndScore;
+				tTrace.Curve = EQS::ScoringCurve::Linear;
+				tTrace.Weight = 1.8f;
+				asset.Tests.push_back(tTrace);
+
+				EQS::EQSTestDesc tWall;
+				tWall.Name = "Wall Proximity";
+				tWall.TestType = "WallProximity";
+				tWall.Purpose = EQS::TestPurpose::ScoreOnly;
+				tWall.Curve = EQS::ScoringCurve::ClampedGaussian;
+				tWall.Weight = 1.2f;
+				tWall.IdealValue = 0.85f;
+				asset.Tests.push_back(tWall);
+
+				EQS::EQSTestDesc tDist;
+				tDist.Name = "Distance";
+				tDist.TestType = "Distance";
+				tDist.ContextType = "Querier";
+				tDist.Purpose = EQS::TestPurpose::ScoreOnly;
+				tDist.Curve = EQS::ScoringCurve::Inverse;
+				tDist.Weight = 0.7f;
+				asset.Tests.push_back(tDist);
+
+				if (!asset.SaveToFile(target.string(), error))
+				{
+					return false;
+				}
+
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-eqsquery");
+				return true;
+			});
 		add("audio_mixer", "Audio Mixer", ".wmixer", 34, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{
@@ -708,7 +759,7 @@ bool ContentBrowserPanel::RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId row
 		{ "2d", "2D 精灵系统 (2D Sprites & Tiles)  ▶", { "sprite_atlas", "sprite_animation", "tilemap", "ruletile" } },
 		{ "audio", "音频系统 (Audio System)  ▶", { "sound_event", "audio_mixer", "voice_profile" } },
 		{ "physics", "物理与数学 (Physics & Math)  ▶", { "physics_material", "curve" } },
-				{ "ai", "AI 与行为树 (AI & Behavior Tree)  ▶", { "behaviortree", "blackboard" } },
+				{ "ai", "AI 与行为树 (AI & Behavior Tree)  ▶", { "behaviortree", "blackboard", "eqsquery" } },
 		{ "script", "脚本与代码 (Scripts & Logic)  ▶", { "script", "behaviortree" } },
 		{ "ui", "用户界面 (User Interface)  ▶", { "ui" } }
 	};

@@ -1,0 +1,36 @@
+FormatVersion: 1
+AssetType: EQSQuery
+Name: DefaultRetreat
+Generator:
+  Type: ProjectedGrid
+  Radius: 30
+  Spacing: 2
+  InnerRadius: 5
+  OuterRadius: 30
+  StepDistance: 2
+  WallOffset: 0.75
+  IncludeGrid: true
+  ProjectToTerrain: true
+Tests:
+  - Name: Trace Occlusion
+    Type: Trace
+    Context: Threat
+    Purpose: FilterAndScore
+    Curve: Linear
+    Weight: 2
+    FilterMin: 0
+    FilterMax: 1
+    IdealValue: 1
+    GaussianSigma: 1.25
+    Enabled: true
+  - Name: Distance Away
+    Type: Distance
+    Context: Threat
+    Purpose: ScoreOnly
+    Curve: Linear
+    Weight: 1.5
+    FilterMin: 5
+    FilterMax: 35
+    IdealValue: 30
+    GaussianSigma: 5
+    Enabled: true

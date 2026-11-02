@@ -1,3 +1,4 @@
+#include <functional>
 #pragma once
 
 #include "World/Core/Export.h"
@@ -125,6 +126,43 @@ namespace World::EQS
 		float ReservationRadius { 1.5f };
 		EQSTest_CoverReservation();
 		std::string GetName() const override { return "Test_CoverReservation"; }
+		void RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems) override;
+	};
+
+	// 9. EQSTest_Scripted (Luau 脚本与用户自定义打分函数测试)
+	class WLD_API EQSTest_Scripted : public IEQSTest
+	{
+	public:
+		std::string ScriptPath;
+		std::function<std::pair<float, bool>(const glm::vec3& candPos, const EQSQueryContext& ctx)> CustomEvaluator;
+
+		EQSTest_Scripted();
+		explicit EQSTest_Scripted(const std::string& scriptPath);
+		explicit EQSTest_Scripted(std::function<std::pair<float, bool>(const glm::vec3&, const EQSQueryContext&)> evaluator);
+
+		std::string GetName() const override { return "Test_Scripted"; }
+		void RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems) override;
+	};
+
+	// 10. EQSTest_Pathfinding (路径可达性与寻路代价测试)
+	class WLD_API EQSTest_Pathfinding : public IEQSTest
+	{
+	public:
+		float MaxPathLength { 50.0f };
+		bool RequireReachable { true };
+		EQSTest_Pathfinding();
+		std::string GetName() const override { return "Test_Pathfinding"; }
+		void RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems) override;
+	};
+
+	// 11. EQSTest_FieldOfView (目标视野锥体夹角规避测试)
+	class WLD_API EQSTest_FieldOfView : public IEQSTest
+	{
+	public:
+		float FovAngleDegrees { 90.0f };
+		bool InvertFOV { true }; // true = 位于目标视野外拿高分 (绕背潜行)
+		EQSTest_FieldOfView();
+		std::string GetName() const override { return "Test_FieldOfView"; }
 		void RunTest(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& inOutItems) override;
 	};
 }

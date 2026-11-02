@@ -176,11 +176,65 @@ namespace World::EQS
 		}
 	}
 
+	
+	void EQSGenerator_Cone::GenerateItems(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& outItems)
+	{
+		const float radius = (ConeRadius > 0.1f) ? ConeRadius : ((ctx.QueryRadius > 0.0f) ? ctx.QueryRadius : 20.0f);
+		const float innerR = std::max(0.0f, InnerRadius);
+		const float stepDist = (StepDistance > 0.1f) ? StepDistance : ((ctx.GridSpacing > 0.0f) ? ctx.GridSpacing : 1.5f);
+		const float angleStepDeg = (AngleStepDegrees > 1.0f) ? AngleStepDegrees : 15.0f;
+		const float halfAngleRad = glm::radians(std::clamp(ConeAngleDegrees * 0.5f, 5.0f, 180.0f));
+
+		glm::vec3 forward = ctx.QuerierForward;
+		if (glm::length(glm::vec2(forward.x, forward.z)) < 0.001f)
+		{
+			forward = glm::vec3(0.0f, 0.0f, 1.0f);
+		}
+		forward = glm::normalize(glm::vec3(forward.x, 0.0f, forward.z));
+
+		const float baseAngle = std::atan2(forward.z, forward.x);
+		const glm::vec3 center = ctx.QuerierPos;
+
+		for (float r = innerR; r <= radius + 0.01f; r += stepDist)
+		{
+			if (r < 0.01f)
+			{
+				EQSCandidateItem item;
+				item.Position = center;
+				outItems.push_back(item);
+				continue;
+			}
+
+			for (float a = -halfAngleRad; a <= halfAngleRad + 0.001f; a += glm::radians(angleStepDeg))
+			{
+				const float curAngle = baseAngle + a;
+				glm::vec3 pt = center + glm::vec3(r * std::cos(curAngle), 0.0f, r * std::sin(curAngle));
+
+				EQSCandidateItem item;
+				item.Position = pt;
+				outItems.push_back(item);
+			}
+		}
+
+		if (ProjectToTerrain && ctx.Terrain)
+		{
+			const glm::mat4 invTerrain = glm::inverse(ctx.TerrainWorldTransform);
+			for (auto& item : outItems)
+			{
+				glm::vec3 localPt = glm::vec3(invTerrain * glm::vec4(item.Position, 1.0f));
+				float h = ctx.Terrain->SampleHeight(localPt.x, localPt.z);
+				glm::vec3 worldGround = glm::vec3(ctx.TerrainWorldTransform * glm::vec4(localPt.x, h, localPt.z, 1.0f));
+				item.Position.y = worldGround.y;
+			}
+		}
+	}
+
 	EQSGeneratorRegistry::EQSGeneratorRegistry()
 	{
 		Register("ProjectedGrid", std::make_shared<EQSGenerator_ProjectedGrid>());
 		Register("Circle", std::make_shared<EQSGenerator_Circle>());
 		Register("AroundObstacles", std::make_shared<EQSGenerator_AroundObstacles>());
+		Register("Cone", std::make_shared<EQSGenerator_Cone>());
 	}
 
 	EQSGeneratorRegistry& EQSGeneratorRegistry::Get()
